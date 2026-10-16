@@ -137,6 +137,7 @@ The first release.
 
 ### Fixed
 
+- The release workflow could not find pnpm for the docs site: it installed Node and pnpm in the same step that used them, before they were on the `PATH`. They now install in a step of their own.
 - `go.mod` lists `pflag` as a direct dependency again, so the release build's `go mod tidy -diff` passes; `just lint` now runs the same check.
 - The reference showed "detach with Ctrl+)" for `attach`: Markdown read the backslash in `Ctrl+\` as an escape. The generator now escapes backslashes, angle brackets and stars in help text outside code.
 - `scripts/setup.sh` threw away the test output, so a failed check said nothing about which test failed; it now prints the failures.

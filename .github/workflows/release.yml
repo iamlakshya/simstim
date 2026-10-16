@@ -63,6 +63,10 @@ jobs:
           ssh-keygen -q -Y sign -n file -f "$key" dist/checksums.txt
           ssh-keygen -Y verify -f .github/release-signers -I release -n file -s dist/checksums.txt.sig < dist/checksums.txt
           gh release upload "$TAG" dist/checksums.txt.sig
+      - name: Docs tools (pinned in scripts/tools.lock)
+        # A step of its own: setup.sh adds .tools/bin to GITHUB_PATH, which
+        # only the steps after it see.
+        run: scripts/setup.sh --only node,pnpm
       - name: The docs site for this version, attached to the release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -70,7 +74,6 @@ jobs:
           OWNER: ${{ github.repository_owner }}
           REPO: ${{ github.event.repository.name }}
         run: |
-          scripts/setup.sh --only node,pnpm
           minor=$(echo "$TAG" | sed -E 's/^(v[0-9]+\.[0-9]+).*/\1/')
           # The Pages address: the custom domain when there is one.
           site=$(gh api "repos/$OWNER/$REPO/pages" --jq .html_url 2>/dev/null || echo "https://$OWNER.github.io/$REPO/")
