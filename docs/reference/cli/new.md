@@ -14,6 +14,7 @@ simstim new <host> [-- command…] [flags]
 
 ```sh
 simstim new my-vps --agent claude --dir ~/src/app
+simstim new my-vps --agent claude --dir ~/src/new-app --mkdir
 simstim new my-vps --agent claude --secret ANTHROPIC_API_KEY
 simstim new my-vps --detach -- htop
 ```
@@ -27,6 +28,7 @@ simstim new my-vps --detach -- htop
 | `--detach` | start it without attaching |
 | `-d`, `--dir <string>` | the folder on the host (default: `~`) |
 | `--inline` | start the agent in its inline mode, so your terminal keeps its scrollback (see agents.inline in config.toml) |
+| `--mkdir` | make the folder on the host if it does not exist, without asking |
 | `-n`, `--name <string>` | a name for the session (default: the folder name) |
 | `--no-setup` | do not run the repository's setup script this time |
 | `--secret <stringArray>` | pass a secret from config.toml's [secrets] into the session's environment (repeatable) |

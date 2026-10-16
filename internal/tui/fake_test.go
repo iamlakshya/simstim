@@ -36,6 +36,9 @@ type fakeHost struct {
 	// setupRepo is a repository with a setup script: a start there asks,
 	// unless it is answered.
 	setupRepo string
+	// missing is a folder that does not exist: a start there asks, unless
+	// it says to make the folder.
+	missing string
 	// checks are the host's agent checks (guide_fake_test.go).
 	checks []client.AgentCheck
 }
@@ -238,11 +241,18 @@ func (c *fakeConn) NewSession(_ context.Context, a client.NewArgs) (*client.Sess
 	if a.Setup != "" {
 		c.be.record("new %s setup=%s", c.name, a.Setup)
 	}
+	if a.MakeFolder {
+		c.be.record("new %s mkdir %s", c.name, a.Cwd)
+	}
 	c.be.mu.Lock()
 	defer c.be.mu.Unlock()
 	h := c.host()
 	if h.newErr != nil {
 		return nil, h.newErr
+	}
+	if h.missing != "" && a.Cwd == h.missing && !a.MakeFolder {
+		data, _ := json.Marshal(client.FolderQuestion{Folder: "/home/dev/" + strings.TrimPrefix(h.missing, "~/")})
+		return nil, &client.UserError{Msg: "the folder does not exist", Code: api.CodeNoFolder, Data: data}
 	}
 	if _, known := a.SetupTrust[h.setupRepo]; h.setupRepo != "" && a.Setup == "" && !known {
 		data, _ := json.Marshal(client.SetupQuestion{Repo: h.setupRepo, Script: h.setupRepo + "/.setup"})

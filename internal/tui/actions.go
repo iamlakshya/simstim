@@ -93,6 +93,9 @@ func (m *Model) startSession(h *hostConn, a client.NewArgs, attach bool) tea.Cmd
 }
 
 func (m *Model) onStarted(msg startedMsg) tea.Cmd {
+	if q, ok := client.FolderQuestionOf(msg.err); ok && !msg.args.MakeFolder {
+		return m.askFolder(msg, q)
+	}
 	if q, ok := client.SetupQuestionOf(msg.err); ok {
 		return m.askSetup(msg, q)
 	}

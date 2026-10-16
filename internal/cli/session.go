@@ -31,12 +31,13 @@ func termSize() (int, int) {
 
 func newCmd() *cobra.Command {
 	var agent, dir, name, base string
-	var detach, worktree, inline, setup, noSetup bool
+	var detach, worktree, inline, setup, noSetup, mkdir bool
 	var secrets []string
 	cmd := &cobra.Command{
 		Use:   "new <host> [-- command…]",
 		Short: "Start a session on a host, and attach to it",
 		Example: "  " + brand.Name + " new my-vps --agent claude --dir ~/src/app\n" +
+			"  " + brand.Name + " new my-vps --agent claude --dir ~/src/new-app --mkdir\n" +
 			"  " + brand.Name + " new my-vps --agent claude --secret ANTHROPIC_API_KEY\n" +
 			"  " + brand.Name + " new my-vps --detach -- htop",
 		Args: cobra.MinimumNArgs(1),
@@ -61,7 +62,7 @@ func newCmd() *cobra.Command {
 				return err
 			}
 			cols, rows := termSize()
-			a := client.TerminalArgs(client.NewArgs{Agent: agent, Cwd: client.RemotePath(dir), Name: name, Worktree: worktree, Base: base, Inline: inline, Secrets: values}, cols, rows)
+			a := client.TerminalArgs(client.NewArgs{Agent: agent, Cwd: client.RemotePath(dir), MakeFolder: mkdir, Name: name, Worktree: worktree, Base: base, Inline: inline, Secrets: values}, cols, rows)
 			if dash := cmd.ArgsLenAtDash(); dash >= 0 {
 				a.Argv = args[dash:]
 			}
@@ -83,6 +84,7 @@ func newCmd() *cobra.Command {
 	}
 	cmd.Flags().StringVarP(&agent, "agent", "a", "shell", "the agent: "+agentKinds())
 	cmd.Flags().StringVarP(&dir, "dir", "d", "~", "the folder on the host")
+	cmd.Flags().BoolVar(&mkdir, "mkdir", false, "make the folder on the host if it does not exist, without asking")
 	cmd.Flags().StringVarP(&name, "name", "n", "", "a name for the session (default: the folder name)")
 	cmd.Flags().BoolVar(&detach, "detach", false, "start it without attaching")
 	cmd.Flags().BoolVarP(&worktree, "worktree", "w", false, "give the session its own git worktree and branch")

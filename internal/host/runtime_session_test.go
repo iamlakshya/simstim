@@ -89,7 +89,9 @@ func TestNewChecksItsArguments(t *testing.T) {
 		code string
 	}{
 		{host.NewArgs{Agent: "no-such-agent"}, "unknown_agent"},
-		{host.NewArgs{Argv: []string{"true"}, Cwd: "~/missing"}, "bad_folder"},
+		{host.NewArgs{Argv: []string{"true"}, Cwd: "~/missing"}, api.CodeNoFolder},
+		{host.NewArgs{Argv: []string{"true"}, Cwd: "~/missing", Worktree: true, MakeFolder: true}, "bad_folder"},
+		{host.NewArgs{Argv: []string{"no-such-program-here"}, Cwd: "~/missing", MakeFolder: true}, "agent_missing"},
 		{host.NewArgs{Argv: []string{"no-such-program-here"}}, "agent_missing"},
 		{host.NewArgs{Argv: []string{"true"}, Cwd: "~", Worktree: true}, "not_a_repo"},
 	} {
@@ -98,6 +100,9 @@ func TestNewChecksItsArguments(t *testing.T) {
 		if !errors.As(err, &pe) || pe.Code != c.code || pe.Hint == "" {
 			t.Errorf("new %+v = %v, want a %s error with a hint", c.args, err, c.code)
 		}
+	}
+	if _, err := os.Stat(filepath.Join(h.Home, "missing")); !os.IsNotExist(err) {
+		t.Errorf("a start that failed left its folder behind: %v", err)
 	}
 	// A program that cannot run: the holder reports why, and New says so.
 	// With a secret, the holder answers on its socket and takes the secret

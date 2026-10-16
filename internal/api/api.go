@@ -17,17 +17,20 @@ const (
 
 // NewArgs describes a session to start.
 type NewArgs struct {
-	Name               string   `json:"name,omitempty"`
-	Agent              string   `json:"agent,omitempty"`
-	Argv               []string `json:"argv,omitempty"`
-	Cwd                string   `json:"cwd,omitempty"`
-	Cols               int      `json:"cols,omitempty"`
-	Rows               int      `json:"rows,omitempty"`
-	Term               string   `json:"term,omitempty"`
-	ColorTerm          string   `json:"colorterm,omitempty"`
-	TermProgram        string   `json:"term_program,omitempty"`
-	TermProgramVersion string   `json:"term_program_version,omitempty"`
-	MemoryMax          int64    `json:"memory_max,omitempty"`
+	Name  string   `json:"name,omitempty"`
+	Agent string   `json:"agent,omitempty"`
+	Argv  []string `json:"argv,omitempty"`
+	Cwd   string   `json:"cwd,omitempty"`
+	// MakeFolder makes Cwd, and any missing folders above it, when it does
+	// not exist. Without it, a missing Cwd is a CodeNoFolder error.
+	MakeFolder         bool   `json:"make_folder,omitempty"`
+	Cols               int    `json:"cols,omitempty"`
+	Rows               int    `json:"rows,omitempty"`
+	Term               string `json:"term,omitempty"`
+	ColorTerm          string `json:"colorterm,omitempty"`
+	TermProgram        string `json:"term_program,omitempty"`
+	TermProgramVersion string `json:"term_program_version,omitempty"`
+	MemoryMax          int64  `json:"memory_max,omitempty"`
 	// Worktree gives the session its own git worktree and branch, from Base (default HEAD).
 	Worktree bool   `json:"worktree,omitempty"`
 	Base     string `json:"base,omitempty"`

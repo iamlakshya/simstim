@@ -1,6 +1,10 @@
 package host
 
 import (
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -9,6 +13,7 @@ import (
 
 	"github.com/iamlakshya/simstim/internal/api"
 	"github.com/iamlakshya/simstim/internal/paths"
+	"github.com/iamlakshya/simstim/internal/proto"
 )
 
 // FoldersResult is what the new-session dialog completes folders from.
@@ -123,4 +128,29 @@ func gitRepos(out []string, home string, limit int, tilde func(string) string) [
 	}
 	walk(home, 0)
 	return out
+}
+
+// checkFolder checks a new session's folder, and reports whether it is missing
+// and may be made. New makes it only after its other checks pass, so a start
+// that fails leaves no folder behind. A missing folder without
+// NewArgs.MakeFolder is a question for the user (api.CodeNoFolder).
+func checkFolder(cwd string, a NewArgs) (missing bool, err error) {
+	st, err := os.Stat(cwd)
+	switch {
+	case err == nil && st.IsDir():
+		return false, nil
+	case err == nil:
+		return false, UserError("bad_folder", cwd+" on this host is a file, not a folder", "Pick a folder.")
+	case !errors.Is(err, fs.ErrNotExist):
+		return false, UserError("bad_folder", fmt.Sprintf("cannot open the folder %s on this host: %v", cwd, err), "Check its permissions, or pick another folder.")
+	case a.Worktree:
+		return false, UserError("bad_folder", fmt.Sprintf("the folder %s does not exist on this host, and a new worktree needs a git repository", cwd), "Pick the folder of a repository, or start without a worktree.")
+	case !a.MakeFolder:
+		data, _ := json.Marshal(api.FolderQuestion{Folder: cwd})
+		return false, &proto.Error{Code: api.CodeNoFolder,
+			Message: fmt.Sprintf("the folder %s does not exist on this host", cwd),
+			Hint:    "Pass --mkdir to make it, or pick an existing folder. The launcher asks.",
+			Data:    data}
+	}
+	return true, nil
 }

@@ -77,8 +77,9 @@ func New(a NewArgs) (*SessionInfo, error) {
 		return nil, err
 	}
 	cwd := expandHome(a.Cwd)
-	if st, err := os.Stat(cwd); err != nil || !st.IsDir() {
-		return nil, UserError("bad_folder", fmt.Sprintf("the folder %s does not exist on this host", cwd), "Pick an existing folder.")
+	makeFolder, err := checkFolder(cwd, a)
+	if err != nil {
+		return nil, err
 	}
 	secrets, err := checkSecrets(a.Secrets)
 	if err != nil {
@@ -96,6 +97,11 @@ func New(a NewArgs) (*SessionInfo, error) {
 	argv, hooks, sessionUUID := agentArgv(argv, a, agent, known, inline)
 	if _, err := lookPath(argv[0], envValue(env, "PATH")); err != nil {
 		return nil, UserError("agent_missing", argv[0]+" is not installed on this host", "Install it on the host, then try again.")
+	}
+	if makeFolder {
+		if err := os.MkdirAll(cwd, 0o750); err != nil {
+			return nil, UserError("bad_folder", fmt.Sprintf("could not make the folder %s: %v", cwd, err), "Check that you may write to the folder above it, or pick another folder.")
+		}
 	}
 	var gi *GitInfo
 	if a.Worktree {

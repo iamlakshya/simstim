@@ -488,7 +488,7 @@ The launcher is the home, and every action also has a command, for scripts and t
 | `simstim host ls`, `test`, `doctor`, `rm` | Host management |
 | `simstim host restore <name> [--all]` | Starts again the sessions that a host restart stopped (or, with `--all`, a crash) |
 | `simstim host start\|stop\|status <name>` | Runs the host's provider script |
-| `simstim new <host> [--agent claude] [--dir ~/src/app] [--name x] [--worktree [--base ref]] [--detach] [-- cmd…]` | Starts a session, and attaches unless `--detach` |
+| `simstim new <host> [--agent claude] [--dir ~/src/app [--mkdir]] [--name x] [--worktree [--base ref]] [--detach] [-- cmd…]` | Starts a session, and attaches unless `--detach` |
 | `simstim ls [--host h] [--json]` | Lists sessions, with their state and where the state came from |
 | `simstim attach <host>/<session>`, `attach -` | Attaches directly; `-` is the last session. Good for a Ghostty keybinding. |
 | `simstim flip [<host>/<session>]` | A quick switch: the sessions of every host in one list, then attach |

@@ -35,23 +35,12 @@ func (s *setupAsk) key(m *Model, k tea.KeyPressMsg) tea.Cmd {
 	case "n":
 		run = false
 	case "esc", "q":
-		m.modal = nil
-		if s.back != nil {
-			s.back.starting = false
-			m.modal = s.back
-		}
-		if p := m.prompt; p != nil {
-			p.starting = false
-		}
+		m.cancelStart(s.back)
 		return nil
 	default:
 		return nil
 	}
-	h := m.hostByName(s.host)
-	m.modal = nil
-	if s.back != nil {
-		m.modal = s.back // still starting: the start's answer closes it
-	}
+	h := m.answered(s.host, s.back)
 	if h == nil {
 		return nil
 	}
@@ -68,6 +57,29 @@ func (s *setupAsk) key(m *Model, k tea.KeyPressMsg) tea.Cmd {
 		return nil
 	}
 	return tea.Batch(remember, m.startSession(h, a, s.attach))
+}
+
+// cancelStart closes a question about a start, and brings back what started
+// it: the new-session form, or the quick-start line, ready to start again.
+func (m *Model) cancelStart(back *newSession) {
+	m.modal = nil
+	if back != nil {
+		back.starting = false
+		m.modal = back
+	}
+	if p := m.prompt; p != nil {
+		p.starting = false
+	}
+}
+
+// answered closes a question about a start that will run again, and returns
+// its host, or nil if the host is gone.
+func (m *Model) answered(host string, back *newSession) *hostConn {
+	m.modal = nil
+	if back != nil {
+		m.modal = back // still starting: the start's answer closes it
+	}
+	return m.hostByName(host)
 }
 
 func (s *setupAsk) view(m *Model) string {
