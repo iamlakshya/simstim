@@ -90,7 +90,7 @@ type activityMsg struct {
 // on screen; the activity tick calls it now and then.
 func (m *Model) readActivity() tea.Cmd {
 	h, s := m.selectedPair()
-	if s == nil || h == nil || !h.online() || !s.Alive || m.modal != nil {
+	if s == nil || h == nil || !h.online() || ended(*s) || m.modal != nil {
 		return nil
 	}
 	key, c, ctx := sessKey{h.name(), s.ID}, h.conn, m.ctx
@@ -120,7 +120,9 @@ type activity struct {
 }
 
 // chrome is text an agent always shows, which says nothing about its work.
-var chrome = regexp.MustCompile(`(?i)for shortcuts|bypass permissions|auto-accept|shift\+tab|^\s*[>❯›$#%]\s*$|^\s*\? `)
+// Tips count too: "⎿ Tip: …" under Claude Code's spinner, "Tip: …" in
+// Codex. A tool's result under "⎿" says what the agent did, so it stays.
+var chrome = regexp.MustCompile(`(?i)for shortcuts|bypass permissions|auto-accept|shift\+tab|^\s*[>❯›$#%]\s*$|^\s*\? |^\W*tip: `)
 
 // activityLine is the line of a screen that best says what the agent is
 // doing: the lowest line with words that is not a border, a prompt or a

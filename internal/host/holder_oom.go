@@ -5,12 +5,14 @@ import (
 	"os/exec"
 	"syscall"
 
+	"github.com/iamlakshya/simstim/internal/api"
 	"github.com/iamlakshya/simstim/internal/proto"
 )
 
 // oomChildReason is the session's reason after the memory cap stopped a
-// process that the agent started, not the agent itself.
-const oomChildReason = "a process in this session ran out of memory and was stopped"
+// process that the agent started, not the agent itself. The client reads
+// it too, so it lives in api.
+const oomChildReason = api.ReasonChildOOM
 
 // The memory cap's kills come from the oom_kill counter of the session's
 // unit (readOOMKills). The kernel counts a kill before it sends the SIGKILL

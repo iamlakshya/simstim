@@ -8,7 +8,6 @@ import (
 
 	"charm.land/lipgloss/v2"
 	"github.com/iamlakshya/simstim/internal/brand"
-	"github.com/iamlakshya/simstim/internal/client"
 )
 
 // The launcher (docs/contributing/ux-spec.md 2.2 and 2.3) is one list in one column, with no
@@ -71,9 +70,7 @@ func (m *Model) viewLauncher() string {
 	switch {
 	case m.rename != nil:
 		v.hints = []hint{{"enter", "rename"}, {"esc", "cancel"}}
-	case m.prompt != nil && m.prompt.mode == promptSearch:
-		v.hints = []hint{{"enter", "attach"}, {"↑↓", "move"}, {"esc", "close"}}
-	case m.prompt != nil:
+	case m.prompt != nil && m.prompt.mode != promptSearch: // searchView sets its own keys
 		v.hints = []hint{{"enter", "start"}, {"tab", "complete"}, {"ctrl+enter", "detached"}, {"ctrl+f", "form"}, {"esc", "cancel"}}
 	}
 	lines := make([]string, m.height)
@@ -238,13 +235,17 @@ func (m *Model) sessionsView(cw int) listView {
 	}
 	if hc, s := m.selectedPair(); s != nil {
 		v.detail = "  " + m.sessionDetail(hc, *s, cw-2, false)
+		if ended(*s) {
+			v.hints = endedHints(hc, *s)
+		}
 	}
 	return v
 }
 
 // searchView lists the sessions of every host that match the search.
 func (m *Model) searchView(cw int) listView {
-	v := listView{crumb: sFaint.Render("› ") + sBold.Render("search"), facts: sFaint.Render("every host")}
+	v := listView{crumb: sFaint.Render("› ") + sBold.Render("search"), facts: sFaint.Render("every host"),
+		hints: []hint{{"enter", "attach"}, {"↑↓", "move"}, {"esc", "close"}}}
 	rs := m.results()
 	p := m.prompt
 	p.sel = min(p.sel, max(len(rs)-1, 0))
@@ -261,6 +262,12 @@ func (m *Model) searchView(cw int) listView {
 	}
 	if r := rs[p.sel]; true {
 		v.detail = "  " + m.sessionDetail(r.h, r.s, cw-2, cols.folder == 0)
+		switch {
+		case ended(r.s) && r.s.Alive:
+			v.hints[0] = hint{"enter", "peek"} // the agent's last screen
+		case ended(r.s):
+			v.hints = v.hints[1:] // nothing to attach to, or to show
+		}
 	}
 	return v
 }
@@ -290,10 +297,11 @@ func (m *Model) hostState(h *hostConn) string {
 	return facts
 }
 
-// Column widths of a session row.
+// Column widths of a session row. The state column fits the longest label,
+// "out of memory".
 const (
 	colAgent = 8
-	colState = 12
+	colState = 13
 	colAge   = 4
 )
 
@@ -333,7 +341,7 @@ func (m *Model) sessRowView(r sessRow, n int, c sessColumns, selected, withHost 
 	}
 	s := r.s
 	glyph, label := m.look(s)
-	traceSt := label.st
+	traceSt := traceStyle(s)
 	if !r.h.loaded {
 		// Remembered from the last run: shown at once, quiet until the host
 		// answers.
@@ -362,41 +370,6 @@ func (m *Model) sessRowView(r sessRow, n int, c sessColumns, selected, withHost 
 		seg{fitRight(fmtAge(m.now().Sub(since(s))), colAge), sFaint}, seg{"  ", sPlain},
 		seg{m.trace(r.key(), traceSt), sPlain})
 	return listRow(selected, segs...)
-}
-
-// sessionDetail is the line under the sessions: what the selected one is
-// doing now, read from its screen, or what it waits for; then where it runs
-// and its memory.
-func (m *Model) sessionDetail(h *hostConn, s client.Session, cw int, withHost bool) string {
-	var now string
-	switch a := m.activity[sessKey{h.name(), s.ID}]; {
-	case s.State == "needs_input" && s.Reason != "":
-		now = sWarning.Render("● " + s.Reason)
-	case len(s.MissingSecrets) > 0 && s.Alive:
-		// After a host restart the agent runs without the secrets it had.
-		now = sWarning.Render("● started without its secrets: " + strings.Join(s.MissingSecrets, ", "))
-	case a.text != "" && s.Alive:
-		now = sAccent.Render("▸ ") + m.decode(a.text, a.at)
-	}
-	where := homePath(h, s.Cwd)
-	if withHost {
-		where = h.name() + ":" + where
-	}
-	var facts []string
-	for _, p := range []string{where, fmtMemory(s.MemoryCurrent, s.MemoryMax), s.ID} {
-		if p != "" {
-			facts = append(facts, p)
-		}
-	}
-	if !h.loaded {
-		facts = append(facts, "last seen before this run")
-	}
-	if now == "" {
-		return sFaint.Render(trunc(strings.Join(facts, dot), cw))
-	}
-	right := sFaint.Render(trunc(strings.Join(facts, dot), cw/2))
-	room := cw - cells(right) - 3
-	return trunc(now, room) + strings.Repeat(" ", max(room-cells(trunc(now, room)), 0)+3) + right
 }
 
 // emptyState explains an empty sessions list, and what to do next.

@@ -61,6 +61,10 @@ func newDemoBackend(empty bool) *demoBackend {
 	b.sessions["gcp-dev"] = []client.Session{
 		{ID: "t3f8a1zk", Name: "data-pipeline", Agent: "gemini", Cwd: "/home/me/pipeline", State: "working", Source: "hook",
 			CreatedAt: ago(26 * time.Minute), Since: ago(3 * time.Second), Alive: true, MemoryCurrent: 290 << 20, MemoryMax: 6 << 30, Cols: 120, Rows: 34},
+		// The memory cap stopped this agent. Its holder still answers.
+		{ID: "m8d2c6vx", Name: "big-import", Agent: "claude", Cwd: "/home/me/data", State: "errored", Source: "process", Reason: "oom",
+			OOM: true, Signal: "killed", ExitCode: new(137), CreatedAt: ago(50 * time.Minute), Since: ago(12 * time.Minute), Alive: true,
+			MemoryCurrent: 1 << 30, MemoryMax: 6 << 30, Cols: 120, Rows: 34},
 	}
 	return b
 }
@@ -337,6 +341,16 @@ func demoScreen(s client.Session, cols, rows int) string {
 			"  fixing handlers/users.go: the nullable email column",
 			"",
 			cyan + "∴ Working (14s · esc to interrupt)" + reset,
+		}
+	case "errored":
+		// The last screen before the memory cap stopped the agent.
+		talk = []string{
+			bold + "> " + reset + "Import the full data set, then check the totals.",
+			"",
+			mag + "● " + reset + "Loading all 40 files at once to compare the totals.",
+			dim + "  ⎿ Read 31 of 40 files (2.1 GB)" + reset,
+			"",
+			cyan + "∴ Working (3m 12s · esc to interrupt)" + reset,
 		}
 	default:
 		talk = []string{dim + "  (idle)" + reset}

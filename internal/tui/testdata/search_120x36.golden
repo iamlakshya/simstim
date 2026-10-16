@@ -2,10 +2,10 @@
   ⢄⡠⠊ simstim  › search                                                                                     every host
   ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
-  ▍ 1 ● auth-refactor                 claude    atlas-dev:~/src/app                       needs input     2m  ⣀⣀⣀⣀⣀⣀⣀⣀
-    2 ⠶ api-tests                     codex     atlas-dev:~/src/api                       working        14s  ⣀⣀⣀⣀⣀⣀⣀⣼
-    3 ○ notes                         shell     atlas-dev:~                               idle            1h  ⣀⣀⣀⣀⣀⣀⣀⣀
-    4 ✓ docs-pass                     opencode  atlas-dev:~/src/docs                      exited 0        3h  ⣀⣀⣀⣀⣀⣀⣀⣀
+  ▍ 1 ● auth-refactor                 claude    atlas-dev:~/src/app                      needs input      2m  ⣀⣀⣀⣀⣀⣀⣀⣀
+    2 ⠶ api-tests                     codex     atlas-dev:~/src/api                      working         14s  ⣀⣀⣀⣀⣀⣀⣀⣼
+    3 ○ notes                         shell     atlas-dev:~                              idle             1h  ⣀⣀⣀⣀⣀⣀⣀⣀
+    4 ✓ docs-pass                     opencode  atlas-dev:~/src/docs                     exited 0         3h  ⣀⣀⣀⣀⣀⣀⣀⣀
 
     ~/src/app · 6.1 of 8 GiB · s4
 

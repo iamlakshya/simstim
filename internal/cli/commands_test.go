@@ -179,7 +179,7 @@ func TestAttachNeedsATerminal(t *testing.T) {
 	if err := hosttest.Reap(pid, 5*time.Second); err != nil {
 		t.Fatal(err)
 	}
-	failsWithHint(t, "lost on box is lost", "kill box/"+lost, "attach", "box/lost")
+	failsWithHint(t, "the session lost on box ended (the session's holder stopped)", "host restore box --all", "attach", "box/lost")
 }
 
 func TestVersionAndConfig(t *testing.T) {

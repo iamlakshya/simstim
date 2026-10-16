@@ -223,8 +223,8 @@ func attachCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if !s.Alive {
-				return &client.UserError{Msg: fmt.Sprintf("%s on %s is %s", s.Name, h.Name, s.State), Hint: fmt.Sprintf("%s kill %s/%s, then start a new one", brand.Name, h.Name, s.ID)}
+			if client.Ended(*s) {
+				return endedError(h, *s)
 			}
 			return attach(cmd.Context(), h, s.ID, s.Name)
 		},
@@ -305,9 +305,17 @@ func listAll(ctx context.Context, hosts []client.Host) []hostSessions {
 	return results
 }
 
-// printSessions prints one line for each session, by host.
+// printSessions prints one line for each session, by host. The state column
+// is as wide as its longest state, so a cause such as "(out of memory)"
+// keeps the columns after it in line.
 func printSessions(results []hostSessions) {
 	sort.Slice(results, func(i, j int) bool { return results[i].Host < results[j].Host })
+	stateW := 12
+	for _, r := range results {
+		for _, s := range r.Sessions {
+			stateW = max(stateW, len([]rune(stateLabel(s))))
+		}
+	}
 	for _, r := range results {
 		if r.Error != "" {
 			fmt.Printf("%s  ◌ %s\n", r.Host, r.Error)
@@ -318,7 +326,7 @@ func printSessions(results []hostSessions) {
 			continue
 		}
 		for _, s := range r.Sessions {
-			fmt.Printf("%-14s %-10s %-20s %-9s %-12s %6s  %s\n", r.Host, s.ID, trunc(s.Name, 20), s.Agent, stateLabel(s.State), age(s.CreatedAt), s.Cwd)
+			fmt.Printf("%-14s %-10s %-20s %-9s %-*s %6s  %s\n", r.Host, s.ID, trunc(s.Name, 20), s.Agent, stateW, stateLabel(s), age(s.CreatedAt), s.Cwd)
 		}
 	}
 }
@@ -357,8 +365,6 @@ func lsCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&asJSON, "json", false, "print JSON")
 	return cmd
 }
-
-func stateLabel(s string) string { return strings.ReplaceAll(s, "_", " ") }
 
 func trunc(s string, n int) string {
 	r := []rune(s)

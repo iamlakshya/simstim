@@ -159,11 +159,8 @@ func (m *Model) attachSelected() tea.Cmd {
 		}
 		return nil
 	}
-	if !s.Alive {
-		return m.toastErr(&client.UserError{
-			Msg:  fmt.Sprintf("%s on %s has ended", s.Name, h.name()),
-			Hint: "Press d to remove it, or n to start a new one.",
-		})
+	if ended(*s) {
+		return m.openEnded(h, *s)
 	}
 	return m.jack(h, s.ID, s.Name)
 }

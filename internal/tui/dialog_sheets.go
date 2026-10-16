@@ -53,7 +53,8 @@ func deleteDialog(h *hostConn, s client.Session) *confirm {
 		fmt.Sprintf("This stops %s on %s and removes the session.", s.Agent, host),
 		fmt.Sprintf("The folder %s stays. Unsaved work in the agent is lost.", homePath(h, s.Cwd)),
 	}
-	if !s.Alive {
+	if ended(s) {
+		// Nothing runs that could lose work: say only what goes.
 		lines = []string{
 			fmt.Sprintf("This removes the session from %s.", host),
 			fmt.Sprintf("The folder %s stays.", homePath(h, s.Cwd)),

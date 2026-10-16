@@ -81,6 +81,7 @@ func TestGolden(t *testing.T) {
 			hs.key("down")
 			return hs.m
 		}},
+		{"ended", func(t *testing.T, w, h int) *Model { return endedLab(t, w, h).m }},
 		{"all_sessions", func(t *testing.T, w, h int) *Model {
 			hs := home(t, w, h)
 			hs.m.openHost(nil)

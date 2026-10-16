@@ -2,8 +2,8 @@
   ⢄⡠⠊ simstim  › atlas-dev                      9ms · 4 sessions · 1 needs you
   ────────────────────────────────────────────────────────────────────────────
 
-  ▍ 1 ● auth-refact…  claude    ~/src/app         needs input     2m  ⣀⣀⣀⣀⣀⣀⣀⣀
-    2 ⠶ api-tests     codex     ~/src/api         working        14s  ⣀⣀⣀⣀⣀⣀⣀⣼
+  ▍ 1 ● auth-refact…  claude    ~/src/app        needs input      2m  ⣀⣀⣀⣀⣀⣀⣀⣀
+    2 ⠶ api-tests     codex     ~/src/api        working         14s  ⣀⣀⣀⣀⣀⣀⣀⣼
   ── Commands ────────────────────────────────────────────────────────────────
 
     ❯ ses

@@ -3,14 +3,14 @@
   ────────────────────────────────────────────────────────
 
     atlas-dev  9ms · 4 sessions · 1 needs you
-  ▍ 1 ● auth-refa…  claude    needs input     2m  ⣀⣀⣀⣀⣀⣀⣀⣀
-    2 ⠶ api-tests   codex     working        14s  ⣀⣀⣀⣀⣀⣀⣀⣼
-    3 ○ notes       shell     idle            1h  ⣀⣀⣀⣀⣀⣀⣀⣀
-    4 ✓ docs-pass   opencode  exited 0        3h  ⣀⣀⣀⣀⣀⣀⣀⣀
+  ▍ 1 ● auth-ref…  claude    needs input      2m  ⣀⣀⣀⣀⣀⣀⣀⣀
+    2 ⠶ api-tests  codex     working         14s  ⣀⣀⣀⣀⣀⣀⣀⣼
+    3 ○ notes      shell     idle             1h  ⣀⣀⣀⣀⣀⣀⣀⣀
+    4 ✓ docs-pass  opencode  exited 0         3h  ⣀⣀⣀⣀⣀⣀⣀⣀
     aws-gpu  offline
     gcp-dev  41ms · 2 sessions
-    5 ⠶ bench       gemini    working         5m  ⣀⣀⣀⣀⣀⣀⣀⣼
-    6 ✕ scratch     shell     exited 1        2d  ⣀⣀⣀⣀⣀⣀⣀⣀
+    5 ⠶ bench      gemini    working          5m  ⣀⣀⣀⣀⣀⣀⣀⣼
+    6 ✕ scratch    shell     exited 1         2d  ⣀⣀⣀⣀⣀⣀⣀⣀
 
     ~/src/app · 6.1 of 8 GiB · s4
 

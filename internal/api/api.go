@@ -15,6 +15,11 @@ const (
 	StateLost       = "lost" // the holder is gone, for example after a reboot
 )
 
+// ReasonChildOOM is a session's reason after the memory cap stopped a
+// process that the agent started, not the agent itself. The client reads
+// it to tell that kill from how the agent ended.
+const ReasonChildOOM = "a process in this session ran out of memory and was stopped"
+
 // NewArgs describes a session to start.
 type NewArgs struct {
 	Name  string   `json:"name,omitempty"`

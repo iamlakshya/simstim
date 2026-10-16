@@ -88,7 +88,7 @@ While attached, the agent owns your terminal. **Ctrl+\\** detaches (press it twi
 
 The launcher does one thing: it starts or joins a session in a few keys, then gets out of the way. It is one list in one column. Enter goes forward, Esc goes back, a number opens a row, `/` searches every host, and `n` starts a session from one line. It opens where you left off and draws at once, so `simstim` then Enter takes you back into your last session. The look is its own: a cyan accent, a live trace of each session's output, and sheets that rise from the bottom, with smooth motion in your terminal's own colours ([UX](docs/contributing/ux-spec.md)). `simstim demo` opens these screens with sample data.
 
-**Sessions.** Each session's state, agent, folder and a trace of its recent output. The line under the list says what the selected one is doing now, or what it is waiting for.
+**Sessions.** Each session's state, agent, folder and a trace of its recent output. The line under the list says what the selected one is doing now, what it is waiting for, or why its agent ended.
 
 ![The sessions on one host: a cyan marker on the selected row, a braille trace of output on each row, and the question the session waits for under the list](docs/images/sessions.svg)
 

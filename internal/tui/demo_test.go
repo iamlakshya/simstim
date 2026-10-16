@@ -55,7 +55,7 @@ func TestDemoBackend(t *testing.T) {
 // The demo's agent screen fills every row and column, like a real session.
 func TestDemoScreenFillsTheTerminal(t *testing.T) {
 	be := newDemoBackend(false)
-	for _, s := range be.sessions["homelab"] {
+	for _, s := range append(be.sessions["homelab"], be.sessions["gcp-dev"]...) {
 		shot := renderScreen([]byte(demoScreen(s, 90, 30)), 90, 30)
 		top, bottom := shot.lines[26].String(), shot.lines[29].String()
 		if !strings.HasPrefix(top, "╭") || !strings.HasSuffix(top, "╮") || ansi.StringWidth(top) != 90 {

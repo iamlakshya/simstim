@@ -1,0 +1,36 @@
+
+  ⢄⡠⠊ simstim  › gcp-dev                                                                             41ms · 5 sessions
+  ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+    1 ⠶ bench                         gemini    /srv/bench                               working          5m  ⣀⣀⣀⣀⣀⣀⣀⣼
+  ▍ 2 ✕ importer                      claude    /srv/app                                 out of memory    1h  ⣀⣀⣀⣀⣀⣀⣀⣀
+    3 ✕ fuzz                          shell     /srv/fuzz                                killed          20m  ⣀⣀⣀⣀⣀⣀⣀⣀
+    4 ◌ pairing                       codex     /srv/pair                                lost             2h  ⣀⣀⣀⣀⣀⣀⣀⣀
+    5 ✕ scratch                       shell     /tmp                                     exited 1         2d  ⣀⣀⣀⣀⣀⣀⣀⣀
+
+    ✕ stopped at its memory cap of 1.5 GiB   d delete                                                    /srv/app · g3
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+    ❯ / search every host   n start a session
+    d delete   enter peek   r rename   esc hosts   ctrl+o commands   ? keys

@@ -55,6 +55,9 @@ func (p *previewModal) key(m *Model, k tea.KeyPressMsg) tea.Cmd {
 	case "esc", "space", "q":
 		m.modal = nil
 	case "enter":
+		if s := m.selected(); s != nil && ended(*s) {
+			return nil // the agent's last screen is what Enter opens
+		}
 		m.modal = nil
 		return m.attachSelected()
 	case "up", "k":
@@ -73,8 +76,15 @@ func (p *previewModal) view(m *Model) string {
 	w := m.dialogWidth()
 	cw := w - 4
 	_, label := m.look(*s)
+	hints := []hint{{"enter", "attach"}, {"↑↓", "next"}, {"esc", "close"}}
+	mem := fmtMemory(s.MemoryCurrent, s.MemoryMax)
+	if ended(*s) {
+		// The last screen of an agent that has ended: nothing to attach to,
+		// and the memory is no longer the agent's.
+		hints, mem = hints[1:], ""
+	}
 	var facts []string
-	for _, f := range []string{s.Agent, truncPath(homePath(hc, s.Cwd), max(cw/3, 16)), fmtMemory(s.MemoryCurrent, s.MemoryMax)} {
+	for _, f := range []string{s.Agent, truncPath(homePath(hc, s.Cwd), max(cw/3, 16)), mem} {
 		if f != "" {
 			facts = append(facts, f)
 		}
@@ -83,7 +93,6 @@ func (p *previewModal) view(m *Model) string {
 	body := make([]string, 0, 2+len(preview))
 	body = append(body, sFaint.Render(trunc(strings.Join(facts, dot), cw)), "")
 	body = append(body, preview...)
-	hints := []hint{{"enter", "attach"}, {"↑↓", "next"}, {"esc", "close"}}
 	return sheet(w, "Peek · "+s.Name, label.st.Render(label.s), hints, body, toneNormal)
 }
 

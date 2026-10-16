@@ -1,0 +1,20 @@
+
+  ⢄⡠⠊ simstim  › gcp-dev                 41ms · 5 sessions
+  ────────────────────────────────────────────────────────
+
+    1 ⠶ bench      gemini    working          5m  ⣀⣀⣀⣀⣀⣀⣀⣼
+  ▍ 2 ✕ importer   claude    out of memory    1h  ⣀⣀⣀⣀⣀⣀⣀⣀
+    3 ✕ fuzz       shell     killed          20m  ⣀⣀⣀⣀⣀⣀⣀⣀
+    4 ◌ pairing    codex     lost             2h  ⣀⣀⣀⣀⣀⣀⣀⣀
+    5 ✕ scratch    shell     exited 1         2d  ⣀⣀⣀⣀⣀⣀⣀⣀
+
+    ✕ stopped at its memory cap of 1.5 GiB   /srv/app · g3
+
+
+
+
+
+
+  ────────────────────────────────────────────────────────
+    ❯ / search every host   n start a session
+    d delete   enter peek   r rename   esc hosts   ? keys

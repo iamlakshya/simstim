@@ -146,7 +146,7 @@ func (m *Model) onRefreshTick() tea.Cmd {
 	for _, h := range m.hosts {
 		cmds = append(cmds, m.listSessions(h))
 	}
-	if s := m.selected(); s != nil && s.Alive && m.previewOpen() {
+	if s := m.selected(); s != nil && !ended(*s) && m.previewOpen() { // an ended agent's screen stays as it is
 		cmds = append(cmds, m.peek())
 	}
 	return tea.Batch(cmds...)

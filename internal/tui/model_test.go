@@ -282,7 +282,8 @@ func TestAttachEndedSession(t *testing.T) {
 	if len(hs.be.attached) != 0 {
 		t.Fatal("attached to an ended session")
 	}
-	hasToast(t, hs.m, "Not available: the session has ended.")
+	// Its holder has stopped too, so there is no last screen to go to.
+	hasToast(t, hs.m, "docs-pass on atlas-dev ended (exit 0), and its holder has stopped.")
 }
 
 func TestDeleteConfirm(t *testing.T) {

@@ -63,10 +63,10 @@ Every list screen has the same parts, top to bottom:
   ⢄⡠⠊ simstim  › atlas-dev                      9ms · 4 sessions · 1 needs you   ← header
   ────────────────────────────────────────────────────────────────────────────   ← rule
 
-  ▍ 1 ● auth-refact…  claude    ~/src/app         needs input     2m  ⣀⣀⣠⣴⣶⣦⣄⣀   ← the list
-    2 ⢼ api-tests     codex     ~/src/api         working        14s  ⣀⣴⣶⣦⣴⣶⣶⣼
-    3 ○ notes         shell     ~                 idle            1h  ⣀⣀⣀⣀⣀⣀⣀⣀
-    4 ✓ docs-pass     opencode  ~/src/docs        exited 0        3h  ⣀⣀⣀⣀⣀⣀⣀⣀
+  ▍ 1 ● auth-refact…  claude    ~/src/app        needs input      2m  ⣀⣀⣠⣴⣶⣦⣄⣀   ← the list
+    2 ⢼ api-tests     codex     ~/src/api        working         14s  ⣀⣴⣶⣦⣴⣶⣶⣼
+    3 ○ notes         shell     ~                idle             1h  ⣀⣀⣀⣀⣀⣀⣀⣀
+    4 ✓ docs-pass     opencode  ~/src/docs       exited 0         3h  ⣀⣀⣀⣀⣀⣀⣀⣀
 
     ● Do you want to proceed?              ~/src/app · 6.1 of 8 GiB · s4          ← the line under the list
 
@@ -116,10 +116,10 @@ Every list screen has the same parts, top to bottom:
   ⢄⡠⠊ simstim  › atlas-dev                      9ms · 4 sessions · 1 needs you
   ────────────────────────────────────────────────────────────────────────────
 
-    1 ● auth-refact…  claude    ~/src/app         needs input     2m  ⣀⣀⣀⣀⣀⣀⣀⣀
-  ▍ 2 ⢼ api-tests     codex     ~/src/api         working        14s  ⣀⣀⣀⣀⣀⣀⣀⣼
-    3 ○ notes         shell     ~                 idle            1h  ⣀⣀⣀⣀⣀⣀⣀⣀
-    4 ✓ docs-pass     opencode  ~/src/docs        exited 0        3h  ⣀⣀⣀⣀⣀⣀⣀⣀
+    1 ● auth-refact…  claude    ~/src/app        needs input      2m  ⣀⣀⣀⣀⣀⣀⣀⣀
+  ▍ 2 ⢼ api-tests     codex     ~/src/api        working         14s  ⣀⣀⣀⣀⣀⣀⣀⣼
+    3 ○ notes         shell     ~                idle             1h  ⣀⣀⣀⣀⣀⣀⣀⣀
+    4 ✓ docs-pass     opencode  ~/src/docs       exited 0         3h  ⣀⣀⣀⣀⣀⣀⣀⣀
 
     ▸ ∴ Working (14s · esc to interrupt)                      ~/src/api · s3
 ```
@@ -127,16 +127,44 @@ Every list screen has the same parts, top to bottom:
 - **Each row:** the number, the state glyph, the name, the agent and folder (faint), the state in its colour, the time in that state, and the trace.
   - A working session's glyph is a tiny Game of Life in one braille cell.
   - The dot of a session that needs you breathes.
+  - The state column fits the longest label, `out of memory`.
 - **Order:** needs input, working, idle, then ended.
 - **The live activity line** says what the selected session is doing now:
   - If it waits for you, its question, in yellow.
-  - Otherwise, the most telling line of its screen, after a cyan `▸`. That line is read from the session about every 1.5 s, and borders, prompts and the hints an agent always shows are skipped. It decodes in when it changes.
+  - Otherwise, the most telling line of its screen, after a cyan `▸`. That line is read from the session about every 1.5 s, and borders, prompts, tips and the hints an agent always shows are skipped. A tool's result under `⎿` stays, because it says what the agent did. The line decodes in when it changes.
   - Its folder, memory and ID sit at the right.
+  - If the memory cap stopped another process in the session, "a process hit the cap" follows the memory, in yellow. The agent runs on, and the row keeps its live state. The note shows only when the left still fits whole, so it never cuts a question or an activity. When there is no room, the note goes before the folder is cut.
 - **Keys:**
   - Enter, or the row's number, attaches. On an empty list, Enter opens the quick start.
   - `n` opens the quick start, `space` peeks at the screen, and `r` renames in place.
   - `d` deletes after a confirm, `y` copies the attach command, and `alt+e` (`opt+e` on a Mac) hides or shows ended sessions.
   - Esc (or `h`, `←`) goes back to the hosts, on the same host.
+- **An agent that has ended:** a session's holder outlives its agent, so the launcher reads the agent's state, not only whether the holder answers.
+
+  ```text
+      1 ⠶ bench         gemini    /srv/bench       working          5m  ⣀⣀⣀⣀⣀⣀⣀⣼
+    ▍ 2 ✕ importer      claude    /srv/app         out of memory    1h  ⣀⣀⣀⣀⣀⣀⣀⣀
+      3 ✕ fuzz          shell     /srv/fuzz        killed          20m  ⣀⣀⣀⣀⣀⣀⣀⣀
+      4 ◌ pairing       codex     /srv/pair        lost             2h  ⣀⣀⣀⣀⣀⣀⣀⣀
+
+      ✕ stopped at its memory cap of 1.5 GiB   d delete            /srv/app · g3
+  ```
+
+  - The state says how the agent ended:
+    - `out of memory`: the memory cap stopped it. The out-of-memory mark counts only with SIGKILL, the signal that the kernel's out-of-memory killer sends. An older holder sets the mark again after its agent exits.
+    - `killed`, `terminated`, `interrupted`, `hung up` or `crashed`: a signal stopped it. `stopped` stands for any other signal.
+    - `exited` and the code: it exited.
+    - `lost`: its holder is gone, for example after a host restart.
+  - The state is red, except `exited 0` and `lost`, which are faint.
+  - The line under the list says why the agent ended, in the state's colour, such as "stopped by signal 9 (killed)" or "exited with code 2". Then it shows the next steps.
+  - The next steps come in order, and each one shows only when it fits whole. A step that does not fit is left out, and a later one may still show. A key takes room from the folder and the ID, which keep a few cells. A command may take all of their room, because the line is the one place that shows it with the reason. The steps do not show in search, where a key types a letter.
+  - For a lost agent, the first step is `→ simstim host restore <host> --all`, which starts the agent again with its resume command. A delete would remove the ID that the resume needs, so it comes second.
+  - If the memory cap stopped another process before the agent ended, "a process hit the cap" follows the folder, in yellow, as for a running session.
+  - The line shows no memory. What the session still holds is not the agent's: it is the holder, and any process that the agent left.
+  - Enter and the row's number go forward to the agent's last screen, in the peek, while the holder answers. Without a holder, a warning says why the agent ended, with the step to try (2.8).
+  - That warning reads like the notice at the end of an attach, such as "importer on gcp-dev ended (out of memory).". After the memory cap, it has the same step.
+  - The keys start with `enter how to restore` for a lost agent, then the next steps that are keys, then `enter peek` while the holder answers. The palette offers neither attach nor the attach command, and offers the peek only while the holder answers.
+  - The delete sheet says only what it removes, because no work can be lost.
 - **Before the host answers:**
   - The launcher shows the sessions it remembers from the last run at once, quiet (faint), while the rule's scan says it is connecting.
   - Enter attaches straight away.
@@ -160,14 +188,14 @@ Every list screen has the same parts, top to bottom:
   ⢄⡠⠊ simstim  › search                                             every host
   ────────────────────────────────────────────────────────────────────────────
 
-  ▍ 1 ● auth-refact…  claude    atlas-dev:~/sr…  needs input     2m  ⣀⣀⣀⣀⣀⣀⣀⣀
-    2 ⢼ api-tests     codex     atlas-dev:~/sr…  working        14s  ⣀⣀⣀⣀⣀⣀⣀⣼
+  ▍ 1 ● auth-refact…  claude    atlas-dev:~/sr…  needs input      2m  ⣀⣀⣀⣀⣀⣀⣀⣀
+    2 ⢼ api-tests     codex     atlas-dev:~/sr…  working         14s  ⣀⣀⣀⣀⣀⣀⣀⣼
   …
     search ❯ te
     enter attach   ↑↓ move   esc close
 ```
 
-Enter attaches the selected result, and Esc closes the search.
+Enter attaches the selected result, and Esc closes the search. On a result whose agent has ended, Enter opens its last screen while the holder answers, as in 2.4.
 
 ### 2.6 Quick start
 
@@ -206,8 +234,8 @@ Every dialog is a sheet. It rises from the bottom of the screen over the dimmed 
 | Sheet | Opens on | What it holds |
 | --- | --- | --- |
 | New session | `ctrl+f` in the quick start, or the palette | Agent (the chosen one lit while the row has focus), folder with completion from the host, name, and worktree. "other…" runs any command you type. |
-| Delete | `d` | Red rule and title: "Delete api-tests?", what stops and what stays |
-| Peek | `space` | The session's last screen, refreshed while open; ↑↓ move to the next session, Enter attaches |
+| Delete | `d` | Red rule and title: "Delete api-tests?", what stops and what stays. For an agent that has ended, only what it removes. |
+| Peek | `space` | The session's last screen, refreshed while the agent runs. ↑↓ move to the next session, and Enter attaches. For an agent that has ended, it shows no memory, and Enter keeps it open. |
 | Commands | `ctrl+o` | The palette: a filter, then every command as plain words ("New session", "Peek at the screen") with its key in cyan. A command that cannot run says why, faint. |
 | Keys | `?` | Every key that works here, in two columns, built from the live registry |
 | Host details | `i` | Route, system, helper, agents, limits; `t` test, `s` shell, `r` reconnect, `x` remove |
@@ -329,7 +357,7 @@ These keys work in the launcher. You can rebind any key in `config.toml`, and `s
 | Click, wheel | Lists, palette | Select, open the selected row, move; run a palette command |
 | `enter`, `l`, `→` | Hosts | Open the host's sessions |
 | `esc`, `h`, `←` | Sessions | Back to the hosts |
-| `enter` | Sessions | Attach, or open the quick start on an empty list |
+| `enter` | Sessions | Attach, or open the quick start on an empty list. On a session whose agent has ended, open its last screen. |
 | `n` | Anywhere | Quick start on the host in play |
 | `/` | Anywhere | Search every host |
 | `space` | Sessions | Peek at the screen |
@@ -492,8 +520,8 @@ The launcher is the home, and every action also has a command, for scripts and t
 | `simstim host restore <name> [--all]` | Starts again the sessions that a host restart stopped (or, with `--all`, a crash) |
 | `simstim host start\|stop\|status <name>` | Runs the host's provider script |
 | `simstim new <host> [--agent claude] [--dir ~/src/app [--mkdir]] [--name x] [--worktree [--base ref]] [--memory-max 4G] [--detach] [-- cmd…]` | Starts a session, and attaches unless `--detach` |
-| `simstim ls [--host h] [--json]` | Lists sessions, with their state and where the state came from |
-| `simstim attach <host>/<session>`, `attach -` | Attaches directly; `-` is the last session. Good for a Ghostty keybinding. |
+| `simstim ls [--host h] [--json]` | Lists sessions, with their state and where the state came from, and why an agent ended: `errored (out of memory)` |
+| `simstim attach <host>/<session>`, `attach -` | Attaches directly; `-` is the last session. Good for a Ghostty keybinding. To a session whose agent has ended, it says why and what to try, as at the end of an attach. |
 | `simstim flip [<host>/<session>]` | A quick switch: the sessions of every host in one list, then attach |
 | `simstim send <host>/<session> <text> [--no-enter]` | Types text into a session without attaching |
 | `simstim rename <host>/<session> <name>`, `kill <host>/<session>` | Renames; stops and removes (keeping a worktree that has work) |
