@@ -117,7 +117,7 @@ func alertsSetCmd() *cobra.Command {
 	fl.StringVar(&f.format, "format", "", "the webhook's body: json (the event), slack or discord")
 	fl.StringVar(&f.command, "command", "", "run this command line on the host, with the event on stdin and in the environment")
 	fl.StringVar(&f.tokenCmd, "token-cmd", "", "run this here and use its output as the ntfy token (it is never printed)")
-	fl.StringSliceVar(&f.events, "events", nil, "the events to send: needs_input, turn_done, exited, failed, oom, started, restored")
+	fl.StringSliceVar(&f.events, "events", nil, "the events to send: needs_input, turn_done, exited, failed, oom, memory, started, restored")
 	fl.DurationVar(&f.delay, "delay", 0, "how long needs_input waits before it is sent (default 10s)")
 	fl.DurationVar(&f.minTurn, "min-turn", 0, "the shortest turn that sends turn_done (default 1m)")
 	fl.BoolVar(&f.detail, "detail", false, "add the agent's question to needs_input (it can hold code)")

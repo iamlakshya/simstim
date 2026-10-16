@@ -25,16 +25,17 @@ const (
 	Exited     = "exited"      // the program ended with code 0
 	Failed     = "failed"      // the program ended with another code or a signal
 	OOM        = "oom"         // the memory cap stopped a process
+	Memory     = "memory"      // the session is close to its memory cap
 	Started    = "started"     // the session started
 	Restored   = "restored"    // the session started again after a host restart
 	Test       = "test"        // sent by the test command only
 )
 
 // Kinds lists the events a config may name.
-var Kinds = []string{NeedsInput, TurnDone, Exited, Failed, OOM, Started, Restored}
+var Kinds = []string{NeedsInput, TurnDone, Exited, Failed, OOM, Memory, Started, Restored}
 
 // DefaultEvents are sent when a config names none.
-var DefaultEvents = []string{NeedsInput, TurnDone, Failed, OOM}
+var DefaultEvents = []string{NeedsInput, TurnDone, Failed, OOM, Memory}
 
 // Version is the version of the event's JSON. It changes only when a field
 // changes meaning or goes away; new fields may appear at any time.
@@ -64,6 +65,9 @@ type Event struct {
 
 	// Turn is how long the agent worked, for turn_done. It is not sent.
 	Turn time.Duration `json:"-"`
+	// Usage is how much of its memory cap the session uses, such as "2.7 of
+	// 2.9 GiB", for memory. It goes into the summary.
+	Usage string `json:"-"`
 
 	at   time.Time // when the holder raised it
 	gen  uint64    // the session's state generation when it was raised
@@ -111,6 +115,11 @@ func summary(ev Event) string {
 		s = on + " failed (" + exitText(ev) + ")"
 	case OOM:
 		s = on + " ran out of memory, and a process was stopped"
+	case Memory:
+		s = on + " is close to its memory cap"
+		if ev.Usage != "" {
+			s += " (" + ev.Usage + ")"
+		}
 	case Started:
 		s = name + " started on " + ev.Host
 	case Restored:
@@ -205,6 +214,8 @@ func TestEvent(kind, dir string) (Event, error) {
 		ev.Turn = 4*time.Minute + 12*time.Second
 	case NeedsInput:
 		ev.Detail = "Do you want to proceed? (a test question)"
+	case Memory:
+		ev.Usage = "2.7 of 2.9 GiB"
 	}
 	return ev, nil
 }

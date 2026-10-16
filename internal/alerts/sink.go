@@ -181,7 +181,8 @@ type ntfySink struct {
 
 var ntfyTags = map[string]string{
 	NeedsInput: "bell", TurnDone: "white_check_mark", Exited: "checkered_flag", Failed: "x",
-	OOM: "warning", Started: "arrow_forward", Restored: "arrows_counterclockwise", Test: "test_tube",
+	OOM: "warning", Memory: "chart_with_upwards_trend", Started: "arrow_forward", Restored: "arrows_counterclockwise",
+	Test: "test_tube",
 }
 
 func (n *ntfySink) send(ctx context.Context, ev Event) (string, error) {
@@ -212,7 +213,7 @@ func (n *ntfySink) priority(kind string) string {
 		return strings.ToLower(n.d.Priority)
 	}
 	switch kind {
-	case NeedsInput, Failed, OOM:
+	case NeedsInput, Failed, OOM, Memory:
 		return "high"
 	}
 	return "default"

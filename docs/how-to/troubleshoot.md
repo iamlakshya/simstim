@@ -49,6 +49,7 @@ The doctor never uses sudo. When a fix needs root, for example linger on some ho
 | Sessions stop when you log out | Linger is off: `host doctor` says so, and `host doctor --fix` turns it on. |
 | The screen looks wrong after attaching | Detach and attach again. If it stays wrong, open an issue with your terminal's name and version. |
 | A session `ended (out of memory)` | The session's memory cap stopped the agent. Start a new session in the same folder: `simstim new my-server --agent claude --dir ~/src/app`, or `n` in the launcher. An agent with a resume command can then pick up its conversation, for example with `/resume` in Claude Code. |
+| A session needs you: "close to its memory cap (2.7 of 2.9 GiB)" | The session's memory cap can soon stop a process, often the agent. Save your work first, then see [when a session comes close to its cap](memory.md#when-a-session-comes-close-to-its-cap). |
 | "A process in this session ran out of memory and was stopped" | The cap stopped a process that the agent started, such as a build. The agent runs on, and usually reports the failed step itself. |
 
 ## Logs

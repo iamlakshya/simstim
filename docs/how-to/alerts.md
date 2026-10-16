@@ -13,7 +13,7 @@ simstim host alerts set my-vps --ntfy https://ntfy.sh/<your-topic>
 simstim host alerts test my-vps
 ```
 
-Your phone shows "Test alert from my-vps". From now on, every session on `my-vps` sends an alert when it needs you, finishes a turn of more than a minute, fails, or runs out of memory. Running sessions pick up the change at their next event. A session started before your helper had alerts keeps its old helper, and sends nothing: start it again to get alerts from it.
+Your phone shows "Test alert from my-vps". From now on, every session on `my-vps` sends an alert when it needs you, finishes a turn of more than a minute, or fails. It also sends one when it comes close to its memory cap, and when it runs out of memory. Running sessions pick up the change at their next event. A session started before your helper had alerts keeps its old helper, and sends nothing: start it again to get alerts from it.
 
 `simstim host alerts my-vps` shows the settings and the last deliveries.
 
@@ -35,7 +35,7 @@ simstim host alerts set my-vps --ntfy https://ntfy.example.com/agents \
 
 The token is stored only on the host, in the alerts file, which only you can read. To keep it in a file of its own instead, edit the alerts file by hand and set `token_file` (see [the alerts file](#the-alerts-file)). The token file must be mode 0600 too.
 
-The alert's title names the host, and its text is the summary, such as "auth-fix on my-vps needs you". `needs_input`, `failed` and `oom` have high priority; the others have the default. Set `priority` in the file to change that.
+The alert's title names the host, and its text is the summary, such as "auth-fix on my-vps needs you". `needs_input`, `failed`, `oom` and `memory` have high priority. The others have the default. Set `priority` in the file to change that.
 
 ## Set up a webhook
 
@@ -88,7 +88,7 @@ A command has 10 seconds. After that it is stopped, with any children it started
 `host alerts set` writes `~/.config/simstim/alerts.toml` on the host, mode 0600. You may also edit it by hand. A file that other users can read is not used: `chmod 600` it. An unknown key is an error, so a typo never turns alerts off without a word.
 
 ```toml
-events = ["needs_input", "turn_done", "failed", "oom"]  # the default
+events = ["needs_input", "turn_done", "failed", "oom", "memory"]  # the default
 delay = "10s"               # how long needs_input waits before it is sent
 min_turn = "60s"            # the shortest turn that sends turn_done
 detail = false              # add the agent's question to needs_input
@@ -137,6 +137,7 @@ A destination flag without `--add` replaces the whole file. With no destination 
 | `exited` | The program ended with code 0 |
 | `failed` | The program ended with another code, or a signal |
 | `oom` | A process in the session hit its memory cap and was stopped. When that process was the program itself, `oom` is the session's end, in place of `failed`, and has `exit_code` and `signal`. A program that runs on does not also send `needs_input`. [Memory](memory.md) says how to raise the cap |
+| `memory` | The session is close to its memory cap, before the cap stops a process |
 | `started` | The session started |
 | `restored` | The session was started again after a host restart |
 | `test` | `host alerts test` |
@@ -144,6 +145,8 @@ A destination flag without `--add` replaces the whole file. With no destination 
 No event is sent when you kill a session, or when the host shuts down.
 
 A session's end is `exited`, `failed`, or the `oom` that stopped the program itself. The limit of one event of a kind a minute never holds an end back ([keep the noise down](#keep-the-noise-down)). So if the cap stops a process that the program started, and then the program itself within a minute, both `oom` alerts go out. Only the second has `exit_code` and `signal`. For processes that the program started, a session sends one `oom` a minute at most.
+
+A session that comes close to its memory cap sends one `memory` alert, such as "api-tests on my-vps is close to its memory cap (2.7 of 2.9 GiB)". The session then needs you, but sends no `needs_input` for that. The next `memory` alert comes only after the session's memory falls well below the cap. It goes out at once, also while you type, and its limit of one a minute is its own. If you list `events` in the file, add `memory` to get it. [Memory](memory.md#when-a-session-comes-close-to-its-cap) says what the warning means and what to do. [Decision 0026](../contributing/decisions/0026-end-and-memory-alerts.md) explains why it has its own kind.
 
 An event looks like this:
 

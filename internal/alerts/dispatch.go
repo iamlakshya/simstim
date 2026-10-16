@@ -167,6 +167,15 @@ func (d *Dispatcher) StateChanged() { d.gen.Add(1) }
 // Typed tells the dispatcher that a person typed into the session.
 func (d *Dispatcher) Typed() { d.typed.Store(d.o.Clock.Now().UnixNano()) }
 
+// TypedAt returns when a person last typed into the session, or the zero
+// time if nobody has.
+func (d *Dispatcher) TypedAt() time.Time {
+	if n := d.typed.Load(); n != 0 {
+		return time.Unix(0, n)
+	}
+	return time.Time{}
+}
+
 // Close drops every new event, and waits up to wait for deliveries under way.
 func (d *Dispatcher) Close(wait time.Duration) {
 	if d.muted.Swap(true) {

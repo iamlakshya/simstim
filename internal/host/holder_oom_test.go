@@ -82,8 +82,8 @@ func newOOMRigAt(t *testing.T, clock alerts.Clock) *oomRig {
 		}
 	}))
 	t.Cleanup(srv.Close)
-	cfg := fmt.Sprintf("events = [%q, %q, %q, %q, %q]\ndelay = \"0s\"\n[[destination]]\ntype = \"webhook\"\nurl = %q\n",
-		alerts.Started, alerts.NeedsInput, alerts.Failed, alerts.OOM, alerts.Exited, srv.URL)
+	cfg := fmt.Sprintf("events = [%q, %q, %q, %q, %q, %q, %q]\ndelay = \"0s\"\n[[destination]]\ntype = \"webhook\"\nurl = %q\n",
+		alerts.Started, alerts.NeedsInput, alerts.TurnDone, alerts.Failed, alerts.OOM, alerts.Memory, alerts.Exited, srv.URL)
 	writeTestFile(t, paths.AlertsConfig(), cfg)
 
 	id := NewID()
@@ -186,21 +186,31 @@ func (r *oomRig) status() Status {
 	return r.h.m.Status
 }
 
-// sent returns the kinds of the alerts sent since the last call. A started
-// event goes last as a marker: the dispatcher sends in order.
+// sent returns the kinds of the alerts sent since the last call.
 func (r *oomRig) sent() []string {
 	r.t.Helper()
-	r.h.al.d.Notify(alerts.Event{Event: alerts.Started, Session: alerts.Session{ID: r.h.id}})
 	var kinds []string
+	for _, ev := range r.sentEvents() {
+		kinds = append(kinds, ev.Event)
+	}
+	return kinds
+}
+
+// sentEvents returns the alerts sent since the last call. A started event
+// goes last as a marker: the dispatcher sends in order.
+func (r *oomRig) sentEvents() []alerts.Event {
+	r.t.Helper()
+	r.h.al.d.Notify(alerts.Event{Event: alerts.Started, Session: alerts.Session{ID: r.h.id}})
+	var got []alerts.Event
 	for {
 		select {
 		case ev := <-r.got:
 			if ev.Event == alerts.Started {
-				return kinds
+				return got
 			}
-			kinds = append(kinds, ev.Event)
+			got = append(got, ev)
 		case <-time.After(5 * time.Second):
-			r.t.Fatalf("the alerts did not arrive; have %q", kinds)
+			r.t.Fatalf("the alerts did not arrive, after %d of them", len(got))
 			return nil
 		}
 	}

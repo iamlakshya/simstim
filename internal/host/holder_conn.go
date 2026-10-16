@@ -96,6 +96,7 @@ func (h *Holder) attach(c *hclient, a proto.Attach) {
 	exited := h.exited
 	ended := h.ended
 	h.m.LastAttachedAt = time.Now().UTC()
+	h.noteAttach(a)
 	h.dirty = true
 	h.mu.Unlock()
 

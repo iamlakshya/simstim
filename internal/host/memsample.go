@@ -41,8 +41,10 @@ func readMemory(dir string) *diag.Memory {
 		OOM:      events["oom"],
 		OOMKill:  events["oom_kill"],
 	}
-	m.MemSome, m.MemFull = readPressure(filepath.Join(dir, "memory.pressure"))
-	m.CPUSome, m.CPUFull = readPressure(filepath.Join(dir, "cpu.pressure"))
+	mem := readPressure(filepath.Join(dir, "memory.pressure"))
+	cpu := readPressure(filepath.Join(dir, "cpu.pressure"))
+	m.MemSome, m.MemFull = mem.some.ns(), mem.full.ns()
+	m.CPUSome, m.CPUFull = cpu.some.ns(), cpu.full.ns()
 	return m
 }
 
@@ -73,30 +75,50 @@ func readKeyed(path string) map[string]int64 {
 	return out
 }
 
-// readPressure reads the "total" stall times of a pressure file, which the
-// kernel counts in µs, as ns:
+// pressure is what a pressure file says (Linux PSI) about the time in
+// which some of the tasks, or all of them ("full"), stalled.
+type pressure struct {
+	some, full stall
+}
+
+// stall is one line of a pressure file.
+type stall struct {
+	avg10 float64 // the share of the last 10 s, in %
+	total int64   // all the stall time so far, which the kernel counts in µs
+}
+
+// ns is all the stall time so far, in ns.
+func (s stall) ns() int64 { return s.total * 1000 }
+
+// readPressure reads a pressure file. A file that is missing reads as no
+// stall.
 //
 //	some avg10=0.00 avg60=0.00 avg300=0.00 total=12345
 //	full avg10=0.00 avg60=0.00 avg300=0.00 total=6789
-func readPressure(path string) (some, full int64) {
+func readPressure(path string) pressure {
+	var p pressure
 	b, err := os.ReadFile(path)
 	if err != nil {
-		return 0, 0
+		return p
 	}
 	for _, line := range strings.Split(string(b), "\n") {
 		kind, rest, _ := strings.Cut(line, " ")
-		var total int64
+		var s stall
 		for _, f := range strings.Fields(rest) {
-			if v, ok := strings.CutPrefix(f, "total="); ok {
-				total, _ = strconv.ParseInt(v, 10, 64)
+			k, v, _ := strings.Cut(f, "=")
+			switch k {
+			case "avg10":
+				s.avg10, _ = strconv.ParseFloat(v, 64)
+			case "total":
+				s.total, _ = strconv.ParseInt(v, 10, 64)
 			}
 		}
 		switch kind {
 		case "some":
-			some = total * 1000
+			p.some = s
 		case "full":
-			full = total * 1000
+			p.full = s
 		}
 	}
-	return some, full
+	return p
 }

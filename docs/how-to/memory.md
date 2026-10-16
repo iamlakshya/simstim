@@ -46,6 +46,27 @@ A running session keeps the cap it started with. A new cap applies to the sessio
 
 The first start after an update also puts the host's limit on all sessions together. If the running sessions already use more than that limit, the helper waits, so that it stops no session. A later start sets the limit once they use less, and until then `host doctor` says that it waits. Once the limit is in place, the running sessions share it too.
 
+## When a session comes close to its cap
+
+Before the cap stops a process, the host warns. The session then needs you, with a reason such as "close to its memory cap (2.7 of 2.9 GiB)". The launcher shows the reason under the list, and the session sends one `memory` [alert](alerts.md#what-is-sent).
+
+The warning comes when two things hold:
+
+- The memory that the kernel cannot free reaches 90 % of the session's cap. Without swap, that is the memory of the session's processes and its files in a tmpfs, such as `/tmp` on Debian 13. The kernel's own memory for the session counts too, such as page tables and stacks.
+- The kernel has started to work to keep the session under its cap.
+
+The page cache does not count. The kernel fills it up to the cap in normal work. It frees the cache when a process needs the room.
+
+The cap can then stop a process at any time, often the agent. So:
+
+1. Save your work, for example commit what the agent changed.
+2. Stop what the session does not need, such as a dev server or a watcher, and delete large files that it wrote in a tmpfs. Or end the session.
+3. If the session's cap is below what the host gives sessions, start the next session with a larger one ([for one session](#for-one-session)). Otherwise give the host more memory ([swap](#swap) says how).
+
+The mark stays until that memory falls below 80 % of the cap. Only then can the host warn again. To clear the mark before that, attach to the session and type. While you are attached, the session's screen is the agent's own, so it never shows the warning. So keys that you type while you stay attached keep the mark, also across a reconnect after a laptop sleep or a dropped link. [The architecture](../explanation/architecture.md#37-a-session-ends) explains the levels and their sources.
+
+The warning watches each session's own cap. When sessions share the host's limit, they can reach it before any one of them comes close to its own cap. Then no warning comes.
+
 ## When sessions share the memory
 
 When all sessions together reach the host's limit, the kernel stops the biggest process of any agent, normally the one that grew. Before that, every session slows down, as the kernel takes back the memory they cache. To keep each session in its own share, give each one a `memory_max`, so that together they stay below the limit.

@@ -81,6 +81,8 @@ type Holder struct {
 	oomSeen  int64
 	oomNoted int64
 	reaped   bool
+	// The warning before the memory cap (holder_mem.go).
+	mem memWatch
 	// stopping is true while the system stops the session (for example at shutdown).
 	stopping bool
 	// saveMu orders the manifest's saves; closed is set by the last one.
@@ -234,6 +236,7 @@ func (h *Holder) start() error {
 	_ = os.WriteFile(fmt.Sprintf("/proc/%d/oom_score_adj", cmd.Process.Pid), []byte("500"), 0)
 	h.oomSeen = readOOMKills(h.id)
 	h.oomNoted = h.oomSeen
+	h.startMemory()
 
 	h.mu.Lock()
 	now := time.Now().UTC()
@@ -385,14 +388,18 @@ func (h *Holder) tick() {
 	}
 }
 
-// step is one tick: it updates the status, and saves the manifest when it
-// changed.
+// step is one tick: it reads the unit's memory files, updates the status,
+// and saves the manifest when it changed.
 func (h *Holder) step() {
+	mem := h.readMem()
 	lt := h.lockTimed()
+	h.checkMemory(mem)
+	// Before updateStatus: a kill that it claims clears the memory warning's
+	// mark, and the status shows that in the same tick.
+	h.checkOOM(mem.kills)
 	if !h.exited {
 		h.updateStatus()
 	}
-	h.checkOOM()
 	dirty := h.dirty
 	h.dirty = false
 	var snapshot Manifest
@@ -409,7 +416,8 @@ func (h *Holder) step() {
 }
 
 // updateStatus sets the session's state from the screen rules, the agent's
-// hooks and notifications, and its output. The caller holds h.mu.
+// hooks and notifications, the memory warning, and its output. The caller
+// holds h.mu.
 func (h *Holder) updateStatus() {
 	if h.scr != nil && h.scr.dirty {
 		h.scr.dirty = false
@@ -419,8 +427,42 @@ func (h *Holder) updateStatus() {
 			h.dirty = true
 		}
 	}
-	state := StateIdle
-	src := "quiet"
+	state, src := h.agentState()
+	agentPrev := h.al.agent
+	h.al.agent = state
+	if h.mem.mark && state != StateNeedsInput {
+		// Close to the memory cap (holder_mem.go), after the agent's own wait.
+		state, src = StateNeedsInput, srcMemory
+	}
+	// The wait can also pass between the agent and the memory warning.
+	handover := state == StateNeedsInput && (src == srcMemory) != (h.m.Status.Source == srcMemory)
+	if state != h.m.Status.State || handover {
+		oom := h.m.Status.OOM
+		h.m.Status = Status{State: state, Since: time.Now().UTC(), Source: src, FullScreen: h.m.Status.FullScreen, OOM: oom}
+		switch {
+		case src == srcMemory:
+			h.m.Status.Reason = h.mem.reason()
+			h.mem.shown = time.Now()
+		case state == StateNeedsInput:
+			// The agent's question, if its hook gave one.
+			h.m.Status.Reason = h.notifyMsg
+		case oom:
+			// The memory cap stopped a process that the agent started.
+			h.m.Status.Reason = oomChildReason
+		}
+		h.dirty = true
+	}
+	if h.al.agent != agentPrev {
+		// Alerts follow the agent's own state, so its turns and questions
+		// count while the memory warning shows too.
+		h.alertState(agentPrev, h.al.agent)
+	}
+}
+
+// agentState is the session's state from the agent's own signals, without
+// the memory warning. The caller holds h.mu.
+func (h *Holder) agentState() (state, src string) {
+	state, src = StateIdle, "quiet"
 	switch {
 	case h.ruleState == StateNeedsInput:
 		state, src = StateNeedsInput, "screen:"+h.ruleID
@@ -437,19 +479,5 @@ func (h *Holder) updateStatus() {
 	case time.Since(h.lastOut) < 3*time.Second:
 		state, src = StateWorking, "output"
 	}
-	if state != h.m.Status.State {
-		prev := h.m.Status.State
-		oom := h.m.Status.OOM
-		h.m.Status = Status{State: state, Since: time.Now().UTC(), Source: src, FullScreen: h.m.Status.FullScreen, OOM: oom}
-		switch {
-		case state == StateNeedsInput:
-			// The agent's question, if its hook gave one.
-			h.m.Status.Reason = h.notifyMsg
-		case oom:
-			// The memory cap stopped a process that the agent started.
-			h.m.Status.Reason = oomChildReason
-		}
-		h.dirty = true
-		h.alertState(prev, state)
-	}
+	return state, src
 }

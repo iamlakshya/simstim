@@ -131,6 +131,7 @@ Every list screen has the same parts, top to bottom:
 - **Order:** needs input, working, idle, then ended.
 - **The live activity line** says what the selected session is doing now:
   - If it waits for you, its question, in yellow.
+  - Near its memory cap, the host's warning, such as "close to its memory cap (2.7 of 2.9 GiB)". The agent's question comes first.
   - Otherwise, the most telling line of its screen, after a cyan `▸`. That line is read from the session about every 1.5 s, and borders, prompts, tips and the hints an agent always shows are skipped. A tool's result under `⎿` stays, because it says what the agent did. The line decodes in when it changes.
   - Its folder, memory and ID sit at the right.
   - If the memory cap stopped another process in the session, "a process hit the cap" follows the memory, in yellow. The agent runs on, and the row keeps its live state. The note shows only when the left still fits whole, so it never cuts a question or an activity. When there is no room, the note goes before the folder is cut.

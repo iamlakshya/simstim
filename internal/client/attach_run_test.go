@@ -304,6 +304,11 @@ func TestAttachReconnectsWithoutAGap(t *testing.T) {
 	if !bytes.Contains(out, []byte("reconnecting · box/"+id)) {
 		t.Error("the title did not say it was reconnecting")
 	}
+	// The holder knows the second attach is the same person after a dropped
+	// link, so it keeps a memory warning that they never saw.
+	if log := r.h.HolderLog(id); strings.Count(log, "client attached again after a dropped link") != 1 {
+		t.Errorf("the holder did not see one reconnect:\n%s", log)
+	}
 }
 
 func TestAttachWaitsForAHostThatIsDown(t *testing.T) {

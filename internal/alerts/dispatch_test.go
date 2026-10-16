@@ -209,6 +209,19 @@ func TestDelayDroppedWhenStateChanges(t *testing.T) {
 	r.none()
 }
 
+// The holder reads when a person last typed, for its memory warning.
+func TestTypedAt(t *testing.T) {
+	r := newRig(t, hookCfg, nil)
+	if at := r.d.TypedAt(); !at.IsZero() {
+		t.Fatalf("TypedAt before any typing = %v", at)
+	}
+	r.clock.Advance(time.Second)
+	r.d.Typed()
+	if at, want := r.d.TypedAt(), r.clock.Now(); !at.Equal(want) {
+		t.Errorf("TypedAt = %v, want %v", at, want)
+	}
+}
+
 func TestDelayDroppedWhenTyping(t *testing.T) {
 	r := newRig(t, hookCfg, nil)
 	r.d.Typed() // typing before the question does not count
@@ -357,6 +370,25 @@ func TestHostLimitHoldsForEnds(t *testing.T) {
 	r.skipped("the host sent")
 	r.none()
 	r.notHeld()
+}
+
+// The memory warning goes out at once, also while a person types, and its
+// limit is its own: a needs_input in the same minute still goes out.
+func TestMemoryNotHeldBack(t *testing.T) {
+	r := newRig(t, "events = [\"needs_input\", \"memory\"]\ndelay = \"0s\"\n[[destination]]\ntype = \"webhook\"\nurl = \"URL\"\n", nil)
+	r.d.Typed()
+	ev := r.event(Memory)
+	ev.Usage = "2.7 of 2.9 GiB"
+	r.d.Notify(ev)
+	if got := r.expect(Memory); got.Summary != "auth-fix on box is close to its memory cap (2.7 of 2.9 GiB)" {
+		t.Errorf("summary = %q", got.Summary)
+	}
+	r.d.Notify(r.event(NeedsInput))
+	r.expect(NeedsInput)
+	r.clock.Advance(30 * time.Second)
+	r.d.Notify(r.event(Memory))
+	r.skipped("one memory in the last minute")
+	r.none()
 }
 
 func TestHostLimit(t *testing.T) {

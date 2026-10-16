@@ -15,7 +15,8 @@ import (
 const oomChildReason = api.ReasonChildOOM
 
 // The memory cap's kills come from the oom_kill counter of the session's
-// unit (readOOMKills). The kernel counts a kill before it sends the SIGKILL
+// unit (readOOMKills, and each tick's readMem, which reads it before
+// the tick takes h.mu). The kernel counts a kill before it sends the SIGKILL
 // ("Raise event before sending signal", __oom_kill_process in
 // mm/oom_kill.c). So a new count can be the agent's own kill, which a tick
 // sees before the agent is reaped. The holder accounts for each kill once:
@@ -37,24 +38,29 @@ const oomChildReason = api.ReasonChildOOM
 //     plain SIGKILL.
 
 // checkOOM marks the session when the memory cap stopped a process that the
-// agent started, and sends one oom alert for it. The agent runs on and
-// usually reports the failed tool itself, so the session does not start to
-// need input. It does nothing once the agent is reaped. The caller holds
-// h.mu.
-func (h *Holder) checkOOM() {
+// agent started, and sends one oom alert for it. kills is the count that
+// this tick read. The agent runs on and usually reports the failed tool
+// itself, so the session does not start to need input. It does nothing once
+// the agent is reaped: reap reads the count again. The caller holds h.mu.
+func (h *Holder) checkOOM(kills int64) {
 	if h.reaped {
 		return
 	}
 	noted := h.oomNoted
-	h.oomNoted = readOOMKills(h.id)
+	h.oomNoted = kills
 	if noted <= h.oomSeen {
 		return
 	}
 	// The agent outlived these kills by a tick: they were other processes'.
 	h.oomSeen = noted
 	h.m.Status.OOM = true
+	// The oom mark and its alert say more than the memory warning.
+	h.mem.mark = false
 	if h.m.Status.State != StateNeedsInput {
 		// While the agent waits, the reason is its question (updateStatus).
+		// While the memory warning shows, the state is needs_input too, and
+		// the reason stays here. That is right: updateStatus runs next in
+		// this tick, finds the mark cleared, and sets the oom reason.
 		h.m.Status.Reason = oomChildReason
 	}
 	h.dirty = true

@@ -119,7 +119,7 @@ func Attach(ctx context.Context, o AttachOptions) (AttachResult, error) {
 	a.conn = conn
 	defer func() { a.conn.Close() }()
 	cols, rows, xpx, ypx := a.size()
-	att, err := a.handshake(last, cols, rows, xpx, ypx)
+	att, err := a.handshake(last, cols, rows, xpx, ypx, false)
 	if err != nil {
 		return AttachResult{}, err
 	}
@@ -192,10 +192,11 @@ func (a *attacher) write(b []byte) {
 
 func (a *attacher) size() (cols, rows, xpx, ypx int) { return termSize(a.o.Out) }
 
-// handshake sends the attach request and waits for the answer.
-func (a *attacher) handshake(last int64, cols, rows, xpx, ypx int) (proto.Attached, error) {
+// handshake sends the attach request and waits for the answer. reconnect is
+// true when the attach resumes after a dropped link.
+func (a *attacher) handshake(last int64, cols, rows, xpx, ypx int, reconnect bool) (proto.Attached, error) {
 	req := proto.Attach{Session: a.o.Session, Cols: cols, Rows: rows, XPx: xpx, YPx: ypx, Client: brand.Name, LastOffset: last,
-		Trace: a.conn.startTrace()}
+		Trace: a.conn.startTrace(), Reconnect: reconnect}
 	if err := a.conn.SendJSON(proto.TAttach, req); err != nil {
 		return proto.Attached{}, ErrClosed
 	}

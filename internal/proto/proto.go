@@ -265,6 +265,10 @@ type Attach struct {
 	// Trace, when set, asks the host to trace this attach: the bridge and the
 	// holder write debug records that carry this ID. An older host ignores it.
 	Trace string `json:"trace,omitempty"`
+	// Reconnect is true when the client attaches again after its link
+	// dropped, as after a laptop sleep: the same person still sees the
+	// session. An older host ignores it.
+	Reconnect bool `json:"reconnect,omitempty"`
 }
 
 // Attached confirms an attach.

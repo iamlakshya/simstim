@@ -14,6 +14,7 @@ import (
 // keeps the time the agent worked in the current turn, for turn_done.
 type holderAlerts struct {
 	d         *alerts.Dispatcher
+	agent     string        // the state from the agent's own signals (agentState)
 	workSince time.Time     // when the current working spell began
 	worked    time.Duration // working time in this turn so far
 }
@@ -31,7 +32,7 @@ func (h *Holder) startAlerts(restored bool) {
 		Dir:    home,
 		Logger: h.log,
 	})
-	h.al.workSince = time.Now() // a session starts out working
+	h.al.agent, h.al.workSince = StateWorking, time.Now() // a session starts out working
 	kind := alerts.Started
 	if restored {
 		kind = alerts.Restored
@@ -51,8 +52,9 @@ func (h *Holder) alertEvent(kind string) alerts.Event {
 	return alerts.Event{Event: kind, Session: alerts.Session{ID: h.id, Name: h.m.Name, Agent: h.m.Agent.Kind, Dir: h.m.Cwd}}
 }
 
-// alertState tells the dispatcher that the state changed from prev to next,
-// and raises needs_input or turn_done. The caller holds h.mu.
+// alertState tells the dispatcher that the agent's own state changed from
+// prev to next, and raises needs_input or turn_done. The memory warning does
+// not come here: it sends its own alert (alertMemory). The caller holds h.mu.
 func (h *Holder) alertState(prev, next string) {
 	a := &h.al
 	if a.d == nil {
