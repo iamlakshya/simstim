@@ -58,6 +58,9 @@ type Manifest struct {
 	// ones this run of the agent started without.
 	Secrets        []string `json:"secrets,omitempty"`
 	MissingSecrets []string `json:"missing_secrets,omitempty"`
+	// DebugUntil is when the session's debug stops by itself, while
+	// `debug start` has it on (holder_debug.go).
+	DebugUntil *time.Time `json:"debug_until,omitempty"`
 
 	extra map[string]json.RawMessage
 }
@@ -148,7 +151,7 @@ func (m *Manifest) UnmarshalJSON(b []byte) error {
 		"last_activity_at": true, "last_attached_at": true, "host_version": true, "holder_binary": true,
 		"agent": true, "cwd": true, "env": true, "term": true, "limits": true, "runtime": true, "status": true,
 		"labels": true, "restart": true, "git": true, "setup_hook": true, "resume_hook": true, "run_hook": true,
-		"secrets": true, "missing_secrets": true}
+		"secrets": true, "missing_secrets": true, "debug_until": true}
 	for k := range all {
 		if known[k] {
 			delete(all, k)

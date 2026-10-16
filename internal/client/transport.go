@@ -68,6 +68,10 @@ func CommandProc(cmd *exec.Cmd, unreachable func(code int, stderr string) bool) 
 	}
 	p := &cmdProc{cmd: cmd, stdin: stdin, stdout: stdout, unreachable: unreachable}
 	cmd.Stderr = &p.stderr
+	if w := stderrLines(); w != nil {
+		// With the net category on, the debug file gets all of it.
+		cmd.Stderr = io.MultiWriter(&p.stderr, w)
+	}
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("start %s: %w", cmd.Path, err)
 	}

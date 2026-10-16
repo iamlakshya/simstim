@@ -296,7 +296,16 @@ func infoFrom(m *Manifest, alive bool) SessionInfo {
 		Alive: alive, Unit: m.Run.Unit, MemoryMax: m.Limits.MemoryMax, MemoryCurrent: memoryCurrent(m.Run.Unit),
 		HostVersion: m.HostVersion, Cols: m.Term.Cols, Rows: m.Term.Rows, MissingSecrets: m.MissingSecrets,
 		Secrets: m.Secrets, FullScreen: st.FullScreen && alive,
+		DebugUntil: debugUntil(m, alive),
 	}
+}
+
+// debugUntil is when the session's debug stops by itself, while it is on.
+func debugUntil(m *Manifest, alive bool) *time.Time {
+	if !alive || m.DebugUntil == nil || !m.DebugUntil.After(time.Now()) {
+		return nil
+	}
+	return m.DebugUntil
 }
 
 func memoryCurrent(unit string) int64 {

@@ -13,6 +13,7 @@ import (
 	xterm "golang.org/x/term"
 
 	"github.com/iamlakshya/simstim/internal/brand"
+	"github.com/iamlakshya/simstim/internal/diag"
 	"github.com/iamlakshya/simstim/internal/keys"
 	"github.com/iamlakshya/simstim/internal/proto"
 	"github.com/iamlakshya/simstim/internal/term"
@@ -77,6 +78,9 @@ type attacher struct {
 	// seen is the last known state of each session on this host, for notifications.
 	seen map[string]string
 	tr   *attachTrace // the debug trace (trace.go), or nil
+	// dropped says why the attach dropped its connection, for the debug
+	// mode: "" when the connection closed by itself.
+	dropped string
 }
 
 // Attach connects to a session and runs it in this terminal until the user
@@ -99,11 +103,7 @@ func Attach(ctx context.Context, o AttachOptions) (AttachResult, error) {
 	if err != nil {
 		return AttachResult{}, &UserError{Msg: "bad image paste key: " + err.Error(), Hint: "Fix attach.image_paste_key in the config."}
 	}
-	tr, err := openAttachTrace(o.Session)
-	if err != nil {
-		return AttachResult{}, err
-	}
-	defer tr.close(os.Stderr) // after the terminal is put back
+	tr := openAttachTrace(o.Session)
 	ctx = withTrace(ctx, tr)
 	a := &attacher{o: o, ssh: &SSH{Host: o.Host}, fd: int(o.In.Fd()), filter: keys.New(dk, pk),
 		key: o.Host.Name + "/" + o.Session, swallow: map[int]bool{}, tr: tr}
@@ -118,11 +118,13 @@ func Attach(ctx context.Context, o AttachOptions) (AttachResult, error) {
 	}
 	a.conn = conn
 	defer func() { a.conn.Close() }()
+	go a.ssh.masterState(ctx, "attach")
 	cols, rows, xpx, ypx := a.size()
 	att, err := a.handshake(last, cols, rows, xpx, ypx, false)
 	if err != nil {
 		return AttachResult{}, err
 	}
+	DebugLog().Debug("attached", diag.CatKey, diag.CatAttach, "mode", att.Mode, "from", att.From, "live", att.Live)
 
 	old, err := xterm.MakeRaw(a.fd)
 	if err != nil {
@@ -195,8 +197,9 @@ func (a *attacher) size() (cols, rows, xpx, ypx int) { return termSize(a.o.Out) 
 // handshake sends the attach request and waits for the answer. reconnect is
 // true when the attach resumes after a dropped link.
 func (a *attacher) handshake(last int64, cols, rows, xpx, ypx int, reconnect bool) (proto.Attached, error) {
+	trace, cats := a.conn.startTrace()
 	req := proto.Attach{Session: a.o.Session, Cols: cols, Rows: rows, XPx: xpx, YPx: ypx, Client: brand.Name, LastOffset: last,
-		Trace: a.conn.startTrace(), Reconnect: reconnect}
+		Trace: trace, Categories: cats, Reconnect: reconnect}
 	if err := a.conn.SendJSON(proto.TAttach, req); err != nil {
 		return proto.Attached{}, ErrClosed
 	}
@@ -279,6 +282,7 @@ func (a *attacher) loop(ctx context.Context) error {
 			gap := now.Sub(lastTick)
 			lastTick = now
 			if gap > wakeGap {
+				a.dropped = "the laptop slept"
 				a.conn.kill()
 			}
 		case <-watch.C:
@@ -355,6 +359,7 @@ func (a *attacher) onKeys(ctx context.Context, b []byte, ok bool, detachTimer, f
 func (a *attacher) heartbeat() {
 	_ = a.conn.Ping()
 	if time.Since(a.conn.LastRecv()) > deadAfter {
+		a.dropped = "no answer from the host"
 		a.conn.kill()
 	}
 }

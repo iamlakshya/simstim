@@ -172,6 +172,56 @@ ok(t.wait_for(rb" END", 30), "escape test output arrived")
 ok(seq in t.buf, "OSC 8, truecolor, styled underline, OSC 777, OSC 52 and sync output are byte-identical")
 t.send(b"\x1c"); t.exit_code(10)
 
+# C2. With --debug and every category on, the same bytes pass unchanged
+#     (decision 0025). debug start, save, profile and stop work on the
+#     running session, and no debug file holds the session's bytes.
+dbg_file = os.path.join(HERE, ".e2e-debug.jsonl")
+# The debug folders on each side, to remove afterwards what this check made.
+laptop_dbg = os.path.join(os.environ.get("XDG_STATE_HOME", "") if os.path.isabs(os.environ.get("XDG_STATE_HOME", ""))
+                          else os.path.expanduser("~/.local/state"), NAME, "debug")
+host_dbg_dir = ".local/state/%s/debug" % NAME
+def listing(path):
+    return set(os.listdir(path)) if os.path.isdir(path) else set()
+def host_listing():
+    return set(host_ssh("ls -1 %s 2>/dev/null; true" % host_dbg_dir).stdout.decode().split())
+laptop_before, host_before = listing(laptop_dbg), host_listing()
+outside = os.path.join(laptop_dbg, "outside.txt")
+outside_before = open(outside).read() if os.path.exists(outside) else None
+sid3d = start("e2e-bytes-debug", "/bin/bash", "-c", "sleep 3; cat ~/e2e-seq.bin; sleep 600")
+created.append(sid3d)
+t = Term([cli, "--debug", "--debug-file", dbg_file, "attach", HOST + "/" + sid3d], env=env)
+ok(t.wait_for(rb" END", 30), "escape test output arrived with debug on")
+ok(seq in t.buf, "with every debug category on, the attached bytes are byte-identical")
+t.send(b"\x1c"); t.exit_code(10)
+for args, what in ((["start", "--for", "5m"], "debug start"), (["save"], "debug save"),
+                   (["profile", "--for", "2s"], "debug profile"), (["stop"], "debug stop")):
+    argv = [cli, "debug", args[0], HOST + "/" + sid3d] + (["cpu"] if args[0] == "profile" else []) + args[1:]
+    r = subprocess.run(argv, capture_output=True, text=True)
+    ok(r.returncode == 0, "%s works on a running session (%s)" % (what, (r.stdout + r.stderr).strip()[:120]))
+dbg = open(dbg_file, "rb").read() if os.path.exists(dbg_file) else b""
+for p in (dbg_file, dbg_file + ".1"):
+    if os.path.exists(p):
+        os.remove(p)
+ok(b'"ev":"key"' in dbg or b'"ev":"ping"' in dbg, "the client's debug file has records")
+ok(b"truecolor" not in dbg and b"aGVsbG8" not in dbg, "the client's debug file holds none of the session's bytes")
+host_dbg = host_ssh("cat ~/.local/state/%s/sessions/%s/debug.jsonl" % (NAME, sid3d)).stdout
+ok(b'"ev":"start"' in host_dbg and b"truecolor" not in host_dbg, "the host's debug file has records, and none of the session's bytes")
+# Remove what the check made: the client's profiles and its list of files
+# outside the folder on the laptop, and the bridges' files on the host. The
+# session's own files go with the session.
+for f in listing(laptop_dbg) - laptop_before - {"outside.txt"}:
+    os.remove(os.path.join(laptop_dbg, f))
+if outside_before is None:
+    if os.path.exists(outside):
+        os.remove(outside)
+else:
+    open(outside, "w").write(outside_before)
+if not laptop_before and os.path.isdir(laptop_dbg) and not os.listdir(laptop_dbg):
+    os.rmdir(laptop_dbg)
+for f in host_listing() - host_before:
+    if re.fullmatch(r"bridge-[0-9][a-z0-9.-]*", f):
+        host_rc("rm -f %s/%s" % (host_dbg_dir, f))
+
 # D. A dropped local file is uploaded and its remote path pasted.
 local = os.path.join(HERE, ".drop-test.txt")
 open(local, "w").write("dropped file content\n")

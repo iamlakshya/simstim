@@ -20,7 +20,8 @@ const queueLen = 4096
 
 // File writes records to a file, one JSON object a line, from a goroutine of
 // its own. It turns the file over to the same name with ".1" added at its
-// size limit. A nil *File writes nothing.
+// size limit. It writes only the records of its categories, every one at
+// first. A nil *File writes nothing.
 type File struct {
 	path    string
 	max     int64
@@ -28,6 +29,7 @@ type File struct {
 	stop    chan struct{}
 	done    chan struct{}
 	once    sync.Once
+	cats    atomic.Uint32
 	dropped atomic.Int64
 	err     error // the first write error, read after done is closed
 }
@@ -43,8 +45,25 @@ func Open(path string, max int64) (*File, error) {
 		return nil, err
 	}
 	t := &File{path: path, max: max, q: make(chan Record, queueLen), stop: make(chan struct{}), done: make(chan struct{})}
+	t.cats.Store(uint32(AllCats))
 	go t.run(f, size)
 	return t, nil
+}
+
+// SetCats sets the categories whose records the file writes. A record
+// about debug itself, or with no category, always goes in.
+func (t *File) SetCats(c Cats) {
+	if t != nil {
+		t.cats.Store(uint32(c))
+	}
+}
+
+// Cats are the categories whose records the file writes.
+func (t *File) Cats() Cats {
+	if t == nil {
+		return 0
+	}
+	return Cats(t.cats.Load()) //nolint:gosec // G115: SetCats stores a Cats, which fits in 8 bits
 }
 
 func openAppend(path string) (*os.File, int64, error) {
@@ -57,6 +76,16 @@ func openAppend(path string) (*os.File, int64, error) {
 		f.Close()
 		return nil, 0, fmt.Errorf("make the trace file private: %w", err)
 	}
+	// While it is open, the turnover of its folder leaves it alone. One
+	// between the open and the lock may have removed it: open it again.
+	markInUse(f)
+	if !samePath(f, path) {
+		f.Close()
+		if f, err = os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600); err != nil {
+			return nil, 0, fmt.Errorf("open the trace file: %w", err)
+		}
+		markInUse(f)
+	}
 	st, err := f.Stat()
 	if err != nil {
 		f.Close()
@@ -68,7 +97,7 @@ func openAppend(path string) (*os.File, int64, error) {
 // Add queues r for writing. It never blocks: when the queue is full, it
 // drops r and counts it, and a "dropped" record says how many were lost.
 func (t *File) Add(r Record) {
-	if t == nil {
+	if t == nil || !Cats(t.cats.Load()).keeps(&r) { //nolint:gosec // G115: as in Cats
 		return
 	}
 	select {
@@ -122,7 +151,7 @@ func (t *File) drain(w *writer) {
 			w.add(r)
 		default:
 			if n := t.dropped.Swap(0); n > 0 {
-				w.add(Record{T: Now(), Cat: CatAttach, Ev: "dropped", Dropped: n})
+				w.add(Record{T: Now(), Cat: CatAttach, Ev: EvDropped, Dropped: n})
 			}
 			w.flush()
 			return

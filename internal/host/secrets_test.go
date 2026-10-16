@@ -51,7 +51,7 @@ func secretHolder(t *testing.T, argv ...string) *Holder {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { lf.Close() })
-	h := &Holder{id: id, m: m, log: newHolderLog(lf), ring: ring.New(1 << 16), clients: map[*hclient]struct{}{}}
+	h := &Holder{id: id, m: m, log: newHolderLog(lf, nil), ring: ring.New(1 << 16), clients: map[*hclient]struct{}{}}
 	if err := h.listen(); err != nil {
 		t.Fatal(err)
 	}

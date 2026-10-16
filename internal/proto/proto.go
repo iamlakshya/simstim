@@ -269,6 +269,10 @@ type Attach struct {
 	// dropped, as after a laptop sleep: the same person still sees the
 	// session. An older host ignores it.
 	Reconnect bool `json:"reconnect,omitempty"`
+	// Categories are the host's categories that a traced attach records
+	// (attach, memory and runtime). A holder from before them ignores the
+	// field, and records attach and memory.
+	Categories []string `json:"categories,omitempty"`
 }
 
 // Attached confirms an attach.

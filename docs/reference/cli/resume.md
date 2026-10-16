@@ -28,4 +28,11 @@ simstim resume my-vps/app --secret GITHUB_TOKEN
 | `--memory-max <size>` | cap the session's memory from now on: auto, or a size such as 4G (default: the size it had) |
 | `--secret <stringArray>` | pass again a secret that the session started with and that hosts.toml does not give its host (repeatable) |
 
+## Flags from the parent command
+
+| Flag | What it does |
+| --- | --- |
+| `--debug[=<categories>]` | turn on the debug mode, with every category, or with the categories listed: attach, net, memory, launcher, runtime. A list binds only in the = form, such as `--debug=net` |
+| `--debug-file <file>` | write the client's debug records to this file. On its own, it turns on every category (SIMSTIM_DEBUG_FILE does the same) |
+
 See [all commands](_index.md).

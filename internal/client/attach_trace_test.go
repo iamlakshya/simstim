@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/iamlakshya/simstim/internal/client"
 	"github.com/iamlakshya/simstim/internal/diag"
 	"github.com/iamlakshya/simstim/internal/host/hosttest"
 	"github.com/iamlakshya/simstim/internal/paths"
@@ -23,7 +24,7 @@ import (
 func TestAttachIsByteExactWithTheTraceOn(t *testing.T) {
 	r := newAttachRun(t)
 	file := filepath.Join(t.TempDir(), "client.jsonl")
-	t.Setenv(diag.EnvFile, file)
+	startDebug(t, diag.CatsOf([]string{diag.CatAttach, diag.CatNet, diag.CatMemory}), file)
 	var id string
 	checkByteExact(t, r, func(session string) {
 		id = session
@@ -33,14 +34,18 @@ func TestAttachIsByteExactWithTheTraceOn(t *testing.T) {
 	hosttest.WaitFor(t, 10*time.Second, "the host's trace to stop", func() bool {
 		return strings.Contains(r.h.HolderLog(id), "debug trace off")
 	})
+	stopDebug(t)
 	client, host := traceFile(t, file), traceFile(t, paths.DebugTrace(id))
 
-	start, conn := client.one(t, "start"), client.one(t, "conn")
+	start, conn := client.find(func(r diag.Record) bool { return r.Ev == "start" && r.Session != "" }), client.one(t, "conn")
+	if start == nil {
+		t.Fatal("no start record for the attach")
+	}
 	if start.Side != "client" || start.Session != id || conn.Trace == "" || !conn.HostTrace {
 		t.Fatalf("start = %+v, conn = %+v", start, conn)
 	}
-	if hs := host.one(t, "start"); hs.Side != "host" || hs.Trace != conn.Trace {
-		t.Fatalf("the host's start = %+v, want trace %s", hs, conn.Trace)
+	if hs := host.find(func(r diag.Record) bool { return r.Ev == "start" && r.Trace != "" }); hs == nil || hs.Side != "host" || hs.Trace != conn.Trace || hs.Cats != "attach,memory" {
+		t.Fatalf("the host's start = %+v, want trace %s with attach and memory", hs, conn.Trace)
 	}
 	keys, hostKeys := client.all("key"), host.all("key")
 	if len(client.all("stdin")) < 2 || len(keys) < 2 || len(hostKeys) != len(keys) {
@@ -64,6 +69,26 @@ func TestAttachIsByteExactWithTheTraceOn(t *testing.T) {
 	ping := client.one(t, "ping")
 	if ping.Cat != diag.CatNet || ping.Trace != conn.Trace || ping.Host == 0 || ping.RTT <= 0 || 2*abs(ping.Offset) > ping.RTT {
 		t.Errorf("ping = %+v", ping)
+	}
+}
+
+// startDebug turns on the client's debug, with cats, into file, until
+// stopDebug or the end of the test.
+func startDebug(t *testing.T, cats diag.Cats, file string) {
+	t.Helper()
+	if _, err := client.StartDebug(client.DebugOptions{Cats: cats, File: file}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { client.StopDebug(os.Stderr) })
+}
+
+// stopDebug ends the client's debug, which must have written everything.
+func stopDebug(t *testing.T) {
+	t.Helper()
+	var warn bytes.Buffer
+	client.StopDebug(&warn)
+	if warn.Len() > 0 {
+		t.Fatalf("the debug file is not complete: %s", warn.Bytes())
 	}
 }
 

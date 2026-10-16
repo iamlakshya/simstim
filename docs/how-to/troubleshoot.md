@@ -62,7 +62,9 @@ On the host, each session keeps a log at `~/.local/state/simstim/sessions/<id>/h
 time=2026-10-15T09:12:03.512+00:00 level=WARN msg="snapshot failed, replaying the ring" err="the shadow terminal did not answer within 3s. Try: attach again"
 ```
 
-The log never holds what the agent prints, or the value of a secret.
+The log never holds what the agent prints, or the value of a secret. It turns over at 1 MiB to `holder.log.1`. At an out-of-memory kill, it lists the session's largest processes by memory.
+
+For more, turn on the debug mode: `--debug` on any command, or `simstim debug start` in a running session ([debug a session](debug-a-session.md)).
 
 ## Still stuck
 

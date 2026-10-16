@@ -206,7 +206,7 @@ func warnSession(id, msg string, err error) {
 		return
 	}
 	defer f.Close()
-	newHolderLog(f).Warn(msg, "err", err)
+	newHolderLog(f, nil).Warn(msg, "err", err)
 }
 
 // sessionsMemoryCheck is the host doctor's line about the memory of all

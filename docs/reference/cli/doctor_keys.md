@@ -12,4 +12,11 @@ simstim doctor keys
 
 Turns on the kitty keyboard protocol, then prints each key press as bytes. To check the path to a host, start a session that runs the same tester there: simstim new &lt;host&gt; -- simstim-host keytest
 
+## Flags from the parent command
+
+| Flag | What it does |
+| --- | --- |
+| `--debug[=<categories>]` | turn on the debug mode, with every category, or with the categories listed: attach, net, memory, launcher, runtime. A list binds only in the = form, such as `--debug=net` |
+| `--debug-file <file>` | write the client's debug records to this file. On its own, it turns on every category (SIMSTIM_DEBUG_FILE does the same) |
+
 Part of [`doctor`](doctor.md): check this machine and its terminal.

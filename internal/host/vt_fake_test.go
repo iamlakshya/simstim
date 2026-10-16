@@ -248,7 +248,7 @@ func (l *lineLog) Write(p []byte) (int, error) {
 }
 
 // logger returns a logger that writes its lines to l, as the holder's does.
-func (l *lineLog) logger() *slog.Logger { return newHolderLog(l) }
+func (l *lineLog) logger() *slog.Logger { return newHolderLog(l, nil) }
 
 func (l *lineLog) get() []string {
 	l.mu.Lock()

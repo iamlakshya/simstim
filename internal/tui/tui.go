@@ -38,7 +38,7 @@ func runWith(ctx context.Context, be Backend, o Options) error {
 	o.Motion = motionOn(be.Settings().UI.Motion, os.Getenv)
 	m := New(ctx, be, o)
 	defer m.Close()
-	_, err := tea.NewProgram(m, tea.WithContext(ctx)).Run()
+	_, err := tea.NewProgram(timeFrames(m), tea.WithContext(ctx)).Run()
 	if err != nil && ctx.Err() != nil {
 		return nil // stopped by a signal; sessions keep running
 	}

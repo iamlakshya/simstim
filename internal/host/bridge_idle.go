@@ -16,7 +16,11 @@ func BridgeInput(in io.Reader, args []string) io.Reader {
 	for i := 0; i+1 < len(args); i++ {
 		if args[i] == "--idle-exit" {
 			if n, err := strconv.Atoi(args[i+1]); err == nil && n > 0 {
-				return WatchInput(in, time.Duration(n)*time.Second, func() { os.Exit(0) })
+				return WatchInput(in, time.Duration(n)*time.Second, func() {
+					// Exit skips the bridge's own defers: end its debug first.
+					stopBridgesDebug("idle")
+					os.Exit(0)
+				})
 			}
 		}
 	}

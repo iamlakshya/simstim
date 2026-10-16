@@ -148,6 +148,7 @@ func dial(ctx context.Context, h Host, rt route) (*Conn, error) {
 	}
 	c.lastRecv.Store(time.Now().UnixNano())
 	go c.readLoop(r)
+	c.startBridgeDebug(ctx)
 	go func() {
 		_ = proc.Wait()
 		c.fail(ErrClosed)

@@ -37,4 +37,11 @@ simstim host alerts set my-vps --delay 30s --min-turn 5m
 | `--token-cmd <string>` | run this here and use its output as the ntfy token (it is never printed) |
 | `--webhook <string>` | POST to this web address |
 
+## Flags from the parent command
+
+| Flag | What it does |
+| --- | --- |
+| `--debug[=<categories>]` | turn on the debug mode, with every category, or with the categories listed: attach, net, memory, launcher, runtime. A list binds only in the = form, such as `--debug=net` |
+| `--debug-file <file>` | write the client's debug records to this file. On its own, it turns on every category (SIMSTIM_DEBUG_FILE does the same) |
+
 Part of [`host alerts`](host_alerts.md): show where a host sends alerts about its sessions, and the last deliveries.

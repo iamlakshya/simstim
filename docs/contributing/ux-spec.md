@@ -565,6 +565,11 @@ The launcher is the home, and every action also has a command, for scripts and t
 | `simstim demo [--empty]` | The launcher on sample data; nothing connects anywhere |
 | `simstim doctor keys` | Prints each key event as the terminal sends it, and marks the client's own keys |
 | `simstim doctor terminal` | Asks the terminal what it supports: kitty keys, synchronized output, colours, and more |
+| `simstim --debug[=<categories>] <command>` | Turns on the debug mode for one command, or the launcher: every category, or those listed (`attach`, `net`, `memory`, `launcher`, `runtime`). Prints the debug file's path on stderr first |
+| `simstim --debug-file <file> <command>` | Names the client's debug file, and turns on every category. `SIMSTIM_DEBUG_FILE` does the same |
+| `simstim debug start <host>/<session> [--for 30m] [--only <categories>]`, `debug stop <host>/<session>` | Turns the debug of a running session on, until `debug stop` or the time limit, or off at once |
+| `simstim debug save <host>/<session>` | Saves the last seconds of the session's flight recorder on the host |
+| `simstim debug profile <host>/<session> cpu\|heap\|goroutine [--for 30s]` | Writes a profile of the session's holder on the host. `--for` is for `cpu` only |
 | `simstim version`, `completion zsh\|bash\|fish` | Housekeeping |
 
 **Exit codes:** 0 for success, 1 for a user error, 2 for a host or network error, 3 for a session or host that is not found.

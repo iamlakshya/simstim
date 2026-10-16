@@ -32,4 +32,11 @@ simstim host create e2b cloud --template simstim
 | `--template <string>` | e2b: the template, which sets CPUs and memory (default: `simstim`) |
 | `--token-command <string>` | e2b: a command that prints the API key, if E2B_API_KEY is not set and the E2B CLI is not logged in |
 
+## Flags from the parent command
+
+| Flag | What it does |
+| --- | --- |
+| `--debug[=<categories>]` | turn on the debug mode, with every category, or with the categories listed: attach, net, memory, launcher, runtime. A list binds only in the = form, such as `--debug=net` |
+| `--debug-file <file>` | write the client's debug records to this file. On its own, it turns on every category (SIMSTIM_DEBUG_FILE does the same) |
+
 Part of [`host`](host.md): add, create, list, test and remove hosts.

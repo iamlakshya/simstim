@@ -30,7 +30,13 @@ const (
 func Main() int {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM)
 	defer stop()
-	if err := Root().ExecuteContext(ctx); err != nil {
+	err := Root().ExecuteContext(ctx)
+	if err != nil {
+		client.DebugLog().Warn("the command failed", "err", err)
+	}
+	// The debug files are complete before the process ends.
+	client.StopDebug(os.Stderr)
+	if err != nil {
 		return printError(err)
 	}
 	return 0
@@ -50,7 +56,8 @@ func Root() *cobra.Command {
 			return runHome(cmd.Context())
 		},
 	}
-	root.AddCommand(setupCmd(), hostCmd(), newCmd(), lsCmd(), agentsCmd(), attachCmd(), resumeCmd(), flipCmd(), sendCmd(), killCmd(), renameCmd(), portsCmd(), forwardCmd(), pullCmd(), doctorCmd(), configCmd(), demoCmd(), versionCmd())
+	root.AddCommand(setupCmd(), hostCmd(), newCmd(), lsCmd(), agentsCmd(), attachCmd(), resumeCmd(), flipCmd(), sendCmd(), killCmd(), renameCmd(), portsCmd(), forwardCmd(), pullCmd(), doctorCmd(), debugCmd(), configCmd(), demoCmd(), versionCmd())
+	addDebugFlags(root)
 	return root
 }
 

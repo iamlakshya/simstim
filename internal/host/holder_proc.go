@@ -45,6 +45,7 @@ func (h *Holder) stop(reason string, system bool) {
 		_ = h.vt.Close()
 	}
 	h.log.Info("holder exiting", "reason", reason)
+	h.endAllDebug()
 	h.mu.Lock()
 	switch {
 	case system:

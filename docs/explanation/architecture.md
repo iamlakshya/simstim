@@ -254,13 +254,15 @@ The contract has its own page: [the fidelity contract](fidelity.md).
 | `~/.cache/simstim/cm/%C` | ControlMaster sockets. The path is kept under 86 bytes because of macOS. |
 | `~/.cache/simstim/helpers/<version>/` | Host helpers fetched from the release, for a client built with `go install` |
 | `~/.local/state/simstim/` | Logs, and each session's last byte offset |
+| `~/.local/state/simstim/debug/` | The client's debug files, while `--debug` is on (0700; [debug a session](../how-to/debug-a-session.md)) |
 
 **Host:**
 
 | Path | Contents |
 | --- | --- |
 | `~/.local/share/simstim/bin/<version>/` and `current` | `simstim-host` and `simstim-vt` |
-| `~/.local/state/simstim/sessions/<id>/` | `manifest.json`, `paste/` (0700), screen snapshot, logs, and the debug trace while a client traces its attach ([tracing typing lag](../contributing/debug-trace.md)) |
+| `~/.local/state/simstim/sessions/<id>/` | `manifest.json`, `paste/` (0700), screen snapshot, `holder.log` (turned over at 1 MiB), and while debug is on, `debug.jsonl` and `debug/` (0700) with profiles and saved windows ([debug a session](../how-to/debug-a-session.md)) |
+| `~/.local/state/simstim/debug/` | The bridges' debug files, while a client with debug on is connected (0700) |
 | `$XDG_RUNTIME_DIR/simstim/s/<id>.sock` | Holder sockets, 0600. Falls back to `/tmp/simstim-<uid>` (0700, owner checked) without linger. |
 | `~/.local/share/simstim/worktrees/<repo>/<slug>-<id>` (v2) | Worktrees per task |
 | `~/.config/simstim/alerts.toml` | Where alerts go: commands, ntfy topics, webhooks (0600; [alerts](../how-to/alerts.md)) |

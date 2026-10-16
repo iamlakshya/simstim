@@ -19,6 +19,13 @@ Checks this computer: ssh, the config files and the secrets' commands. With `--f
 | `--fix` | offer to fix the problems found, one by one |
 | `-y`, `--yes` | with `--fix`, apply every fix without asking |
 
+## Flags from the parent command
+
+| Flag | What it does |
+| --- | --- |
+| `--debug[=<categories>]` | turn on the debug mode, with every category, or with the categories listed: attach, net, memory, launcher, runtime. A list binds only in the = form, such as `--debug=net` |
+| `--debug-file <file>` | write the client's debug records to this file. On its own, it turns on every category (SIMSTIM_DEBUG_FILE does the same) |
+
 ## Commands
 
 | Command | What it does |

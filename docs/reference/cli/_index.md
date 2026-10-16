@@ -24,6 +24,11 @@ simstim runs coding agents in sessions on hosts you reach with SSH. Sessions kee
 | [`config`](config.md) | Show the configuration |
 | [`config keymap`](config_keymap.md) | Print every home-screen command and its keys (rebind them under [keymap] in config.toml) |
 | [`config path`](config_path.md) | Print where the configuration lives |
+| [`debug`](debug.md) | Record why a session goes wrong: debug in a running session, profiles and the flight recorder |
+| [`debug profile`](debug_profile.md) | Write a profile of the session's holder on the host, for go tool pprof |
+| [`debug save`](debug_save.md) | Save the last seconds of the session's flight recorder, just after a lag |
+| [`debug start`](debug_start.md) | Turn on the debug of a running session, for 30 minutes or the time that `--for` gives |
+| [`debug stop`](debug_stop.md) | Turn off the debug of a session at once, and the host side of each traced attach |
 | [`demo`](demo.md) | Try the launcher with sample hosts and sessions (nothing connects anywhere) |
 | [`doctor`](doctor.md) | Check this machine and its terminal |
 | [`doctor keys`](doctor_keys.md) | Show every key as the terminal sends it, and which keys simstim keeps |
@@ -58,3 +63,10 @@ simstim runs coding agents in sessions on hosts you reach with SSH. Sessions kee
 | [`send`](send.md) | Type text into a session without attaching, then press Enter |
 | [`setup`](setup.md) | Set up step by step: a host, its agents, and their logins |
 | [`version`](version.md) | Print the version |
+
+## Flags
+
+| Flag | What it does |
+| --- | --- |
+| `--debug[=<categories>]` | turn on the debug mode, with every category, or with the categories listed: attach, net, memory, launcher, runtime. A list binds only in the = form, such as `--debug=net` |
+| `--debug-file <file>` | write the client's debug records to this file. On its own, it turns on every category (SIMSTIM_DEBUG_FILE does the same) |

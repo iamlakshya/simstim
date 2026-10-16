@@ -26,4 +26,11 @@ simstim pull my-vps/auth-fix --into review/auth-fix
 | `--force` | move the local branch even when the fetch is not a fast-forward |
 | `--into <string>` | the local branch to fetch into (default: the session's branch name) |
 
+## Flags from the parent command
+
+| Flag | What it does |
+| --- | --- |
+| `--debug[=<categories>]` | turn on the debug mode, with every category, or with the categories listed: attach, net, memory, launcher, runtime. A list binds only in the = form, such as `--debug=net` |
+| `--debug-file <file>` | write the client's debug records to this file. On its own, it turns on every category (SIMSTIM_DEBUG_FILE does the same) |
+
 See [all commands](_index.md).

@@ -37,4 +37,11 @@ simstim new my-vps --detach -- htop
 | `--setup` | run the repository's setup script this time, whatever your answer for it |
 | `-w`, `--worktree` | give the session its own git worktree and branch |
 
+## Flags from the parent command
+
+| Flag | What it does |
+| --- | --- |
+| `--debug[=<categories>]` | turn on the debug mode, with every category, or with the categories listed: attach, net, memory, launcher, runtime. A list binds only in the = form, such as `--debug=net` |
+| `--debug-file <file>` | write the client's debug records to this file. On its own, it turns on every category (SIMSTIM_DEBUG_FILE does the same) |
+
 See [all commands](_index.md).

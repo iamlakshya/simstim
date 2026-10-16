@@ -41,5 +41,11 @@ One task per page. New here? Start with [getting started](../tutorials/getting-s
 | Guide | Task |
 | --- | --- |
 | [Install](install.md) | Install, update or build the client |
-| [Troubleshoot](troubleshoot.md) | Find out what is wrong, and fix it |
 | [Uninstall](uninstall.md) | Remove the client, and the helper from your hosts |
+
+## When something goes wrong
+
+| Guide | Task |
+| --- | --- |
+| [Troubleshoot](troubleshoot.md) | Find out what is wrong, and fix it |
+| [Debug a session](debug-a-session.md) | Record why a session goes wrong: debug files, profiles and the flight recorder |

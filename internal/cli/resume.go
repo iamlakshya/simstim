@@ -43,6 +43,11 @@ func resumeCmd() *cobra.Command {
 				return err
 			}
 			s := res.Session
+			if res.DebugStopped {
+				// Before an attach takes the terminal.
+				fmt.Fprintf(os.Stderr, "Debug was on in %s, and stopped with the agent's old run. To record again: %s debug start %s/%s\n",
+					s.Name, brand.Name, h.Name, s.Name)
+			}
 			if detach {
 				fmt.Printf("Resumed %s/%s (%s, %s): %s.\n", h.Name, s.ID, s.Name, s.Agent, res.Why)
 				return nil

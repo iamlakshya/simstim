@@ -1,10 +1,11 @@
-// Package diag writes debug traces: records of when keys, output, pings and
-// memory samples happen, as JSON lines in a file, so that a slow session can
-// be measured (docs/contributing/debug-trace.md).
+// Package diag is the debug mode's common part: records of when keys,
+// output, pings and memory samples happen, as JSON lines in a file, debug
+// lines, Go's runtime metrics, profiles and the flight recorder
+// (docs/contributing/debug-trace.md, decision 0025).
 //
-// A record holds a monotonic time, a category, an event, and sizes and times
-// only. It never holds key bytes, output bytes, screen text, secrets or the
-// environment.
+// A record holds a monotonic time, a category, an event, and sizes, times
+// and names only. It never holds key bytes, output bytes, screen text,
+// secrets, the environment or a command line.
 package diag
 
 import (
@@ -17,11 +18,14 @@ import (
 // value is the path of the file to write.
 var EnvFile = brand.Env("DEBUG_FILE")
 
-// The categories of records.
+// Events that every file may hold, whatever its categories: they are about
+// debug itself.
 const (
-	CatAttach = "attach" // keys, output, and the holder's lock
-	CatNet    = "net"    // pings
-	CatMemory = "memory" // samples of the session's memory and pressure
+	EvStart   = "start"   // debug started
+	EvStop    = "stop"    // debug stopped, with its reason
+	EvSave    = "save"    // a profile or a window of the flight recorder was written
+	EvDropped = "dropped" // records were lost
+	EvLog     = "log"     // a debug line
 )
 
 // Record is one line of a trace file. Times are monotonic times from Now,
@@ -74,6 +78,60 @@ type Record struct {
 
 	// Dropped counts the records lost because the queue was full.
 	Dropped int64 `json:"dropped,omitempty"`
+
+	// Cats are the categories on, on a start record.
+	Cats string `json:"cats,omitempty"`
+	// Level and Text are a debug line's: its level, and the line as slog's
+	// text handler writes it, without the time and the level.
+	Level string `json:"level,omitempty"`
+	Text  string `json:"text,omitempty"`
+	// Reason says why: a stop, a save, or a reconnect.
+	Reason string `json:"reason,omitempty"`
+	// Op is a request's name, and Dur how long it took.
+	Op  string `json:"op,omitempty"`
+	Dur int64  `json:"dur,omitempty"`
+	// File is the name of a file that a save wrote, in its folder.
+	File string `json:"file,omitempty"`
+	// Running and PID are the state of the shared SSH connection's master.
+	Running *bool `json:"running,omitempty"`
+	PID     int   `json:"pid,omitempty"`
+	// Msg is the Go type of a launcher's message, and Update and View the
+	// time a frame spent in each.
+	Msg    string `json:"msg,omitempty"`
+	Update int64  `json:"update,omitempty"`
+	View   int64  `json:"view,omitempty"`
+	// Procs are the largest processes left in a session's unit after an
+	// out-of-memory kill. Before are the largest at the start of the memory
+	// warning before it, taken at BeforeT, which name the process killed.
+	Procs   []Proc `json:"procs,omitempty"`
+	Before  []Proc `json:"before,omitempty"`
+	BeforeT int64  `json:"before_t,omitempty"`
+	// RT is one second of Go's runtime metrics.
+	RT *Metrics `json:"rt,omitempty"`
+}
+
+// Proc is one process of a session's unit: its name from /proc/<pid>/comm,
+// never its command line, and its memory, in bytes.
+type Proc struct {
+	PID  int    `json:"pid"`
+	Comm string `json:"comm"`
+	RSS  int64  `json:"rss"`
+	PSS  int64  `json:"pss"`
+}
+
+// Metrics is one second of Go's runtime metrics in one process. Times are
+// in ns, and each is the upper bound of a bucket of the runtime's histogram.
+type Metrics struct {
+	// HeapObjects is the memory of the heap's objects, in bytes.
+	HeapObjects int64 `json:"heap_objects"`
+	// GCPauses counts the pauses for garbage collection in the second, and
+	// GCPauseMax is the longest.
+	GCPauses   int64 `json:"gc_pauses"`
+	GCPauseMax int64 `json:"gc_pause_max,omitempty"`
+	// SchedP99 and SchedMax are how long goroutines waited for a CPU in
+	// the second: the 99th percentile and the longest.
+	SchedP99 int64 `json:"sched_p99,omitempty"`
+	SchedMax int64 `json:"sched_max,omitempty"`
 }
 
 // Memory is one sample of a session unit's cgroup files. Sizes are in
@@ -107,4 +165,9 @@ var (
 // Now is the monotonic time in ns. On Linux and macOS it is the system's
 // CLOCK_MONOTONIC, so the bridge and the holder on one host share it. Go's
 // own monotonic clock counts from the start of each process.
-func Now() int64 { return startSys + int64(time.Since(start)) }
+func Now() int64 {
+	if perCallMono {
+		return sysMono()
+	}
+	return startSys + int64(time.Since(start))
+}

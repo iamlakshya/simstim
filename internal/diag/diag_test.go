@@ -124,6 +124,7 @@ func TestFileDropsRecordsWhenTheQueueIsFull(t *testing.T) {
 	}
 	// No writer runs yet, so the queue fills.
 	f := &File{path: path, max: DefaultMax, q: make(chan Record, 2), stop: make(chan struct{}), done: make(chan struct{})}
+	f.SetCats(AllCats)
 	for i := range 5 {
 		f.Add(Record{T: int64(i + 1), Cat: CatAttach, Ev: "key"})
 	}

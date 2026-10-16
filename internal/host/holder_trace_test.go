@@ -237,29 +237,37 @@ func TestTraceRunsWhileATracedClientIsAttached(t *testing.T) {
 		t.Fatal(err)
 	}
 	a, b, plain := &hclient{}, &hclient{}, &hclient{}
-	h.traceAttach(plain, "")
+	h.traceAttach(plain, "", nil)
 	if h.dbg.tr.Load() != nil {
 		t.Fatal("an attach without a trace ID started the trace")
 	}
-	h.traceAttach(a, "a.1")
-	h.traceAttach(a, "a.2") // again, on the same connection
-	h.traceAttach(b, "b.1")
-	if h.dbg.n != 2 || h.dbg.tr.Load() == nil || a.tr.id != "a.2" {
-		t.Fatalf("%d traced clients, trace %v, client a traces %q", h.dbg.n, h.dbg.tr.Load(), a.tr.id)
+	h.traceAttach(a, "a.1", nil)
+	h.traceAttach(a, "a.2", nil) // again, on the same connection
+	h.traceAttach(b, "b.1", []string{diag.CatAttach, diag.CatNet})
+	if len(h.dbg.traced) != 2 || h.dbg.tr.Load() == nil || a.tr.id != "a.2" {
+		t.Fatalf("%d traced clients, trace %v, client a traces %q", len(h.dbg.traced), h.dbg.tr.Load(), a.tr.id)
+	}
+	// A client from part 1 names no categories: it gets attach and memory.
+	// The host has no net category.
+	if got := h.dbg.tr.Load().f.Cats(); got != partOneCats {
+		t.Errorf("the trace records %s, want %s", got, partOneCats)
 	}
 	h.traceOff(a)
 	h.traceOff(a) // a second detach changes nothing
 	if h.dbg.tr.Load() == nil {
 		t.Fatal("the trace stopped while client b is attached")
 	}
+	if got := h.dbg.tr.Load().f.Cats(); got.String() != diag.CatAttach {
+		t.Errorf("with client b alone, the trace records %s", got)
+	}
 	h.traceOff(b)
 	h.traceOff(plain)
-	if h.dbg.n != 0 || h.dbg.tr.Load() != nil {
-		t.Fatalf("after the last detach: %d traced clients, trace %v", h.dbg.n, h.dbg.tr.Load())
+	if len(h.dbg.traced) != 0 || h.dbg.tr.Load() != nil {
+		t.Fatalf("after the last detach: %d traced clients, trace %v", len(h.dbg.traced), h.dbg.tr.Load())
 	}
 	var starts []string
 	for _, r := range readTrace(t, paths.DebugTrace(h.id)) {
-		if r.Ev == "start" {
+		if r.Ev == "start" && r.Trace != "" {
 			starts = append(starts, r.Trace)
 		}
 	}

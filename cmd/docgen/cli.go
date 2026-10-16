@@ -130,7 +130,12 @@ func flagTable(fs *pflag.FlagSet) string {
 		}
 		name, usage := pflag.UnquoteUsage(f)
 		flag := "`--" + f.Name
-		if name != "" && name != "bool" {
+		switch {
+		case name == "" || name == "bool":
+		case f.NoOptDefVal != "":
+			// The value is optional, and binds only in the = form.
+			flag += "[=<" + name + ">]"
+		default:
 			flag += " <" + name + ">"
 		}
 		flag += "`"

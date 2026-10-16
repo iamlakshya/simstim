@@ -41,15 +41,18 @@ const oomChildReason = api.ReasonChildOOM
 // agent started, and sends one oom alert for it. kills is the count that
 // this tick read. The agent runs on and usually reports the failed tool
 // itself, so the session does not start to need input. It does nothing once
-// the agent is reaped: reap reads the count again. The caller holds h.mu.
-func (h *Holder) checkOOM(kills int64) {
+// the agent is reaped: reap reads the count again. It returns the kill
+// count when a new kill needs a snapshot of the unit's processes, or 0. The
+// caller holds h.mu.
+func (h *Holder) checkOOM(kills int64) (snap int64) {
 	if h.reaped {
-		return
+		return 0
 	}
 	noted := h.oomNoted
 	h.oomNoted = kills
+	snap = h.newSnapshot(kills)
 	if noted <= h.oomSeen {
-		return
+		return snap
 	}
 	// The agent outlived these kills by a tick: they were other processes'.
 	h.oomSeen = noted
@@ -65,22 +68,35 @@ func (h *Holder) checkOOM(kills int64) {
 	}
 	h.dirty = true
 	h.alertOOM()
+	return snap
+}
+
+// newSnapshot returns n when the kill count n is past the last snapshot's,
+// and accounts for it, or 0. The caller holds h.mu.
+func (h *Holder) newSnapshot(n int64) int64 {
+	if n <= h.oomSnapped {
+		return 0
+	}
+	h.oomSnapped = n
+	return n
 }
 
 // reap records that cmd.Wait has returned, so checkOOM stops. It reports
 // whether the kill count has grown past the kills that checkOOM claimed,
 // and accounts for the new count. It reads the count at once: a process
 // that the agent left behind can be stopped later, after the agent's end.
-func (h *Holder) reap() (newKills bool) {
+// snap is the kill count when a new kill needs a snapshot, or 0.
+func (h *Holder) reap() (newKills bool, snap int64) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.reaped = true
 	n := readOOMKills(h.id)
+	snap = h.newSnapshot(n)
 	if n <= h.oomSeen {
-		return false
+		return false, snap
 	}
 	h.oomSeen = n
-	return true
+	return true, snap
 }
 
 // endOf is how the agent ended, from the error of cmd.Wait, and whether a

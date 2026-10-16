@@ -87,6 +87,9 @@ type SessionInfo struct {
 	// Secrets names the secrets the session asked for at its start, never
 	// their values. A resume fetches them again.
 	Secrets []string `json:"secrets,omitempty"`
+	// DebugUntil is when the session's debug stops by itself, while
+	// `debug start` has it on.
+	DebugUntil *time.Time `json:"debug_until,omitempty"`
 }
 
 // ResumeArgs asks a host to start the agent of a session again, in the same
@@ -108,6 +111,9 @@ type ResumeArgs struct {
 type ResumeResult struct {
 	Session SessionInfo `json:"session"`
 	Why     string      `json:"why"`
+	// DebugStopped is true when `debug start` had the session's debug on.
+	// It stopped with the old holder: a new holder starts with debug off.
+	DebugStopped bool `json:"debug_stopped,omitempty"`
 }
 
 // Check is one line of the host doctor.

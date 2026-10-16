@@ -66,6 +66,8 @@ func Resume(a api.ResumeArgs) (*ResumeResult, error) {
 	if err != nil {
 		return nil, err
 	}
+	// The session's debug stops with its old holder (holder_debug.go).
+	debugOn := debugUntil(m, alive(id)) != nil
 	stopHolder(id, m)
 	// The old holder saves the manifest a last time as it stops.
 	if m, err = LoadManifest(id); err != nil {
@@ -85,7 +87,7 @@ func Resume(a api.ResumeArgs) (*ResumeResult, error) {
 	if mm := waitStarted(id, time.Second); mm != nil {
 		m = mm
 	}
-	return &ResumeResult{Session: infoFrom(m, alive(id)), Why: why}, nil
+	return &ResumeResult{Session: infoFrom(m, alive(id)), Why: why, DebugStopped: debugOn}, nil
 }
 
 // resumeSecrets checks the secrets that a resume brings, and returns those

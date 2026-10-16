@@ -20,6 +20,7 @@ import (
 
 	"github.com/iamlakshya/simstim/internal/agents"
 	"github.com/iamlakshya/simstim/internal/brand"
+	"github.com/iamlakshya/simstim/internal/diag"
 	"github.com/iamlakshya/simstim/internal/paths"
 	"github.com/iamlakshya/simstim/internal/proto"
 	"github.com/iamlakshya/simstim/internal/ring"
@@ -83,6 +84,9 @@ type Holder struct {
 	reaped   bool
 	// The warning before the memory cap (holder_mem.go).
 	mem memWatch
+	// oomSnapped is the kill count of the last snapshot of the unit's
+	// processes (holder_oomsnap.go).
+	oomSnapped int64
 	// stopping is true while the system stops the session (for example at shutdown).
 	stopping bool
 	// saveMu orders the manifest's saves; closed is set by the last one.
@@ -118,19 +122,23 @@ func RunHolder(id string) error {
 	if err != nil {
 		return fmt.Errorf("load manifest: %w", err)
 	}
-	lf, err := os.OpenFile(paths.HolderLog(id), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	lf, err := openHolderLog(paths.HolderLog(id), holderLogMax)
 	if err != nil {
-		return fmt.Errorf("open the holder log: %w", err)
+		return err
 	}
 	defer lf.Close()
+	lines := diag.NewLines()
 	h := &Holder{
 		id:       id,
 		m:        m,
-		log:      newHolderLog(lf),
+		log:      newHolderLog(lf, lines),
 		ring:     ring.New(RingSize),
 		clients:  map[*hclient]struct{}{},
 		readDone: make(chan struct{}),
 	}
+	h.dbg.lines = lines
+	// A holder that starts again, as after a reboot, starts with debug off.
+	m.DebugUntil = nil
 	h.log.Info("holder starting", "session", id, "helper", brand.HostBinary, "version", version.Version)
 	restored := wasRestored(m)
 	if err := h.listen(); err != nil {
@@ -165,13 +173,6 @@ func RunHolder(id string) error {
 	// session stays eligible for restore after the restart.
 	h.stop("stopped with the host", true)
 	return nil
-}
-
-// newHolderLog returns the logger of a holder's log file: one line for each
-// event, with a short message and its details as key=value text. It never
-// gets a secret's value or the agent's output.
-func newHolderLog(w io.Writer) *slog.Logger {
-	return slog.New(slog.NewTextHandler(w, nil))
 }
 
 func (h *Holder) listen() error {
@@ -236,7 +237,7 @@ func (h *Holder) start() error {
 	// Make the agent, not the holder, the first choice of the OOM killer.
 	_ = os.WriteFile(fmt.Sprintf("/proc/%d/oom_score_adj", cmd.Process.Pid), []byte("500"), 0)
 	h.oomSeen = readOOMKills(h.id)
-	h.oomNoted = h.oomSeen
+	h.oomNoted, h.oomSnapped = h.oomSeen, h.oomSeen
 	h.startMemory()
 
 	h.mu.Lock()
@@ -259,7 +260,9 @@ func (h *Holder) start() error {
 	if err := m.Save(); err != nil {
 		h.log.Warn("manifest not saved", "err", err)
 	}
-	h.log.Info("agent started", "argv", m.Agent.Argv, "pid", cmd.Process.Pid)
+	// The program and the count of its arguments only: an argument can hold
+	// a prompt's text or a key, and the log goes into a debug bundle.
+	h.log.Info("agent started", "program", m.Agent.Argv[0], "args", len(m.Agent.Argv)-1, "pid", cmd.Process.Pid)
 	return nil
 }
 
@@ -326,7 +329,10 @@ func (h *Holder) output(data []byte) {
 
 func (h *Holder) waitLoop() {
 	err := h.cmd.Wait()
-	newKills := h.reap()
+	newKills, snap := h.reap()
+	if snap > 0 {
+		h.goSnapshot(snap)
+	}
 	// The agent's last output may still be in the PTY. Let the reader take
 	// it first, so that clients see it before they hear of the end. A
 	// process the agent left behind can keep the PTY open: wait a moment only.
@@ -384,7 +390,9 @@ func (h *Holder) waitLoop() {
 func (h *Holder) tick() {
 	t := time.NewTicker(time.Second)
 	defer t.Stop()
+	last := time.Now()
 	for range t.C {
+		last = h.noteTick(last)
 		h.step()
 	}
 }
@@ -394,10 +402,14 @@ func (h *Holder) tick() {
 func (h *Holder) step() {
 	mem := h.readMem()
 	lt := h.lockTimed()
+	on := h.mem.on
 	h.checkMemory(mem)
+	h.snapshotBefore(on)
 	// Before updateStatus: a kill that it claims clears the memory warning's
 	// mark, and the status shows that in the same tick.
-	h.checkOOM(mem.kills)
+	if kills := h.checkOOM(mem.kills); kills > 0 {
+		h.goSnapshot(kills) // in a goroutine: it reads no file under the lock
+	}
 	if !h.exited {
 		h.updateStatus()
 	}

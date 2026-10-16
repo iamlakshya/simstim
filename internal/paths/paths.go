@@ -62,6 +62,14 @@ func HolderLog(id string) string { return filepath.Join(SessionDir(id), "holder.
 // line. It turns over to the same name with ".1" added.
 func DebugTrace(id string) string { return filepath.Join(SessionDir(id), "debug.jsonl") }
 
+// SessionDebugDir holds one session's profiles and the saved windows of its
+// holder's flight recorder.
+func SessionDebugDir(id string) string { return filepath.Join(SessionDir(id), "debug") }
+
+// DebugDir is the debug folder: on a host, the bridges' debug files, and on
+// the laptop, the client's.
+func DebugDir() string { return filepath.Join(StateDir(), "debug") }
+
 // RuntimeDir holds the sockets. It is $XDG_RUNTIME_DIR/<name> when that exists,
 // or /tmp/<name>-<uid>.
 func RuntimeDir() string {

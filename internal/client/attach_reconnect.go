@@ -5,6 +5,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/iamlakshya/simstim/internal/diag"
 	"github.com/iamlakshya/simstim/internal/keys"
 )
 
@@ -12,6 +13,14 @@ import (
 // if the user pressed the detach key meanwhile.
 func (a *attacher) reconnect(ctx context.Context) (detached bool, err error) {
 	a.res.Reconnects++
+	reason := a.dropped
+	if reason == "" {
+		reason = "the connection closed"
+	}
+	a.dropped = ""
+	since := diag.Now()
+	DebugLog().Debug("connection lost", diag.CatKey, diag.CatNet, "reason", reason)
+	go a.ssh.masterState(context.WithoutCancel(ctx), "drop")
 	// The title says so too, pushed so that it can be put back as it was.
 	a.write([]byte("\x1b]9;4;3\x1b\\\x1b[22;0t\x1b]2;⧗ reconnecting · " + a.key + "\x1b\\"))
 	defer func() {
@@ -26,9 +35,15 @@ func (a *attacher) reconnect(ctx context.Context) (detached bool, err error) {
 		if a.waitToRetry(ctx, banner, time.After(delay)) {
 			return true, nil
 		}
-		if done, err := a.tryReconnect(ctx); done {
+		missed := a.res.Missed
+		done, err := a.tryReconnect(ctx)
+		if done && err == nil {
+			a.noteReconnect(ctx, reason, since, a.res.Missed-missed)
+		}
+		if done {
 			return false, err
 		}
+		DebugLog().Debug("reconnect failed", diag.CatKey, diag.CatNet, "err", err)
 		delay = nextRetry(delay)
 	}
 }
@@ -89,6 +104,19 @@ func (a *attacher) tryReconnect(ctx context.Context) (done bool, err error) {
 	}
 	a.res.Missed += att.Live - before
 	return true, nil
+}
+
+// noteReconnect records a reconnect, with the net category on: why the
+// connection dropped, how long the attach waited, and how many bytes of
+// output the host replayed.
+func (a *attacher) noteReconnect(ctx context.Context, reason string, since, replayed int64) {
+	f := DebugFile()
+	if f == nil {
+		return
+	}
+	now := diag.Now()
+	f.Add(diag.Record{T: now, Cat: diag.CatNet, Ev: "reconnect", Reason: reason, Wait: now - since, N: int(max(replayed, 0))})
+	go a.ssh.masterState(context.WithoutCancel(ctx), "reconnect")
 }
 
 // nextRetry is the wait before the next try: now, then 1 s, doubling up to 30 s.

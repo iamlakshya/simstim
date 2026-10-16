@@ -25,4 +25,11 @@ simstim agents install claude --host my-vps
 | `--force` | run the installer even when the agent is installed, for example to update it |
 | `--host <string>` | the host (needed when you have more than one) |
 
+## Flags from the parent command
+
+| Flag | What it does |
+| --- | --- |
+| `--debug[=<categories>]` | turn on the debug mode, with every category, or with the categories listed: attach, net, memory, launcher, runtime. A list binds only in the = form, such as `--debug=net` |
+| `--debug-file <file>` | write the client's debug records to this file. On its own, it turns on every category (SIMSTIM_DEBUG_FILE does the same) |
+
 Part of [`agents`](agents.md): list the agents, and install one on a host.

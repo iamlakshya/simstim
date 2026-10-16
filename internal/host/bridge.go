@@ -9,9 +9,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -38,9 +40,13 @@ type upload struct {
 
 type bridge struct {
 	w *proto.Writer
+	// log takes the bridge's debug lines, while its debug is on
+	// (bridge_debug.go).
+	log *slog.Logger
+	dbg bridgeDebug
 
-	// traced is true while the attach asked for a debug trace. Only the
-	// loop in RunBridge uses it.
+	// traced is true while the attach asked for a debug trace of its keys.
+	// Only the loop in RunBridge uses it.
 	traced bool
 
 	mu      sync.Mutex
@@ -75,10 +81,14 @@ func RunBridge(in io.Reader, out io.Writer) error {
 	if err := w.WriteJSON(proto.THello, proto.Hello{Magic: proto.Magic, Protocol: version.Protocol, Version: version.Version, Role: "bridge", Features: Features}); err != nil {
 		return err
 	}
-	b := &bridge{w: w, uploads: map[uint64]*upload{}, hashes: map[uint64]interface {
+	lines := diag.NewLines()
+	b := &bridge{w: w, log: slog.New(lines), dbg: bridgeDebug{lines: lines}, uploads: map[uint64]*upload{}, hashes: map[uint64]interface {
 		Write([]byte) (int, error)
 		Sum([]byte) []byte
 	}{}}
+	liveBridges.Store(b, true)
+	defer liveBridges.Delete(b)
+	defer b.stopDebug("end")
 	defer b.closeHolder()
 	for {
 		f, err := proto.Read(r)
@@ -94,11 +104,12 @@ func RunBridge(in io.Reader, out io.Writer) error {
 		case proto.TRequest:
 			var req proto.Request
 			if json.Unmarshal(f.Payload, &req) == nil {
-				go b.handle(req)
+				go b.serve(req)
 			}
 		case proto.TAttach:
 			var a proto.Attach
 			if json.Unmarshal(f.Payload, &a) == nil {
+				b.note("attach", 0)
 				if err := b.attach(a); err != nil {
 					_ = w.WriteJSON(proto.TError, proto.Error{Code: "attach_failed", Message: err.Error(), Hint: "List sessions; it may have been deleted."})
 				}
@@ -112,6 +123,7 @@ func RunBridge(in io.Reader, out io.Writer) error {
 		case proto.TResize:
 			b.forward(f)
 		case proto.TDetach:
+			b.note("detach", 0)
 			b.forward(f)
 			b.closeHolder()
 		case proto.TUploadBegin:
@@ -127,6 +139,7 @@ func RunBridge(in io.Reader, out io.Writer) error {
 }
 
 func (b *bridge) reply(id uint64, v any, err error) {
+	b.noteReply(id)
 	resp := proto.Response{ID: id, OK: err == nil}
 	if err != nil {
 		var pe *proto.Error
@@ -239,7 +252,7 @@ func (b *bridge) handle(req proto.Request) {
 		v, err := alertsRequest(req.Op, req.Args)
 		b.reply(req.ID, v, err)
 	default:
-		if !b.handleMore(req) {
+		if !b.handleMore(req) && !b.handleDebug(req) {
 			b.reply(req.ID, nil, UserError("unknown_op", "unknown request "+req.Op, "Update the host helper."))
 		}
 	}
@@ -247,7 +260,7 @@ func (b *bridge) handle(req proto.Request) {
 
 func (b *bridge) attach(a proto.Attach) error {
 	b.closeHolder()
-	b.traced = a.Trace != ""
+	b.traced = a.Trace != "" && (len(a.Categories) == 0 || slices.Contains(a.Categories, diag.CatAttach))
 	if !validID(a.Session) {
 		return fmt.Errorf("no session %s", a.Session)
 	}
@@ -423,6 +436,7 @@ func (b *bridge) uploadEnd(p []byte) {
 		return
 	}
 	_ = os.Chmod(final, 0o600)
+	b.note("upload", int(u.n))
 	b.reply(e.ID, proto.UploadResult{Path: final}, nil)
 }
 
