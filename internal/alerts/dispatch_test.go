@@ -281,6 +281,37 @@ func TestHostLimit(t *testing.T) {
 	r.none()
 }
 
+// refuseFirst is a host at its limit for the first event only.
+type refuseFirst struct {
+	mu   sync.Mutex
+	seen bool
+}
+
+func (l *refuseFirst) Allow(time.Time) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	was := l.seen
+	l.seen = true
+	return was
+}
+
+// An event that the host's limit drops was not sent, so it starts no
+// minute for the session: the next event of its kind goes out.
+func TestHostLimitStartsNoMinute(t *testing.T) {
+	r := newRig(t, hookCfg, &refuseFirst{})
+	r.d.Notify(r.event(Failed))
+	r.skipped("the host sent")
+	r.clock.Advance(10 * time.Second)
+	r.d.Notify(r.event(Failed))
+	r.expect(Failed)
+	entries, _ := r.log.Tail(100)
+	for _, e := range entries {
+		if strings.Contains(e.Skipped, "this session sent one") {
+			t.Errorf("the log says %q, but no failed went out before", e.Skipped)
+		}
+	}
+}
+
 func TestEventsAndMinTurn(t *testing.T) {
 	r := newRig(t, "events = [\"turn_done\"]\nmin_turn = \"60s\"\n[[destination]]\ntype = \"webhook\"\nurl = \"URL\"\n", nil)
 	r.d.Notify(r.event(Failed)) // not in events

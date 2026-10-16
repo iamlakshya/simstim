@@ -228,33 +228,36 @@ func (d *Dispatcher) fire(ev Event, set *Settings, sinks []sink) {
 		d.skip(ev, why)
 		return
 	}
+	if why := d.queue(ev, set, sinks); why != "" {
+		d.skip(ev, why)
+	}
+}
+
+// queue applies the limits, then queues ev for delivery. It says why ev
+// did not go out, or nothing when it went out or the dispatcher is closed.
+// The session's minute for a kind starts only when an event of the kind
+// goes out, so an event that the host's limit or a full queue drops does
+// not hold back the next one. It holds d.mu throughout, so two events of
+// one kind cannot both pass the check.
+func (d *Dispatcher) queue(ev Event, set *Settings, sinks []sink) string {
 	now := d.o.Clock.Now()
 	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.closed {
+		return ""
+	}
 	if last, ok := d.sent[ev.Event]; ok && now.Sub(last) < sessionGap {
-		d.mu.Unlock()
-		d.skip(ev, "this session sent one "+ev.Event+" in the last minute")
-		return
+		return "this session sent one " + ev.Event + " in the last minute"
 	}
-	d.sent[ev.Event] = now
-	d.mu.Unlock()
 	if !d.o.Limiter.Allow(now) {
-		d.skip(ev, fmt.Sprintf("the host sent %d alerts in the last minute", HostLimit))
-		return
+		return fmt.Sprintf("the host sent %d alerts in the last minute", HostLimit)
 	}
-	ev = prepare(ev, d.o.Host, set)
-	d.mu.Lock()
-	queued := false
-	if !d.closed {
-		select {
-		case d.work <- job{ev: ev, set: set, sinks: sinks}:
-			queued = true
-		default:
-		}
-	}
-	closed := d.closed
-	d.mu.Unlock()
-	if !queued && !closed {
-		d.skip(ev, "too many alerts are waiting to go out")
+	select {
+	case d.work <- job{ev: prepare(ev, d.o.Host, set), set: set, sinks: sinks}:
+		d.sent[ev.Event] = now
+		return ""
+	default:
+		return "too many alerts are waiting to go out"
 	}
 }
 

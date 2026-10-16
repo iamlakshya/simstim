@@ -31,6 +31,7 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 - `new` asked about a setup script when stdin was a terminal, even with its output in a pipe. It then waited for an answer to a question that nobody saw. It now asks only when stdin and stdout are both terminals.
 - The benchmark check on pull requests failed now and then on a noisy runner, also for changes that did not touch the attach pump. A slow benchmark now runs again, alone, for 12 more rounds, and the check fails only if it is still slow.
 - A release's notes on GitHub came out empty: the provenance job's upload replaced the draft's body. A last job now writes the notes from the CHANGELOG, with links made absolute (`LINK_BASE` in `scripts/release-notes.sh`) so they work on the release's page.
+- An alert that the host's limit of 20 a minute dropped still started the session's minute for its kind. So the next alert of that kind within the minute was dropped too, and the log said that the session had sent one. Now the minute starts only when an alert goes out.
 
 ## [0.1.0] - 2026-10-16
 
