@@ -28,22 +28,39 @@ import (
 // "memory.stat" and "Memory Ownership" in the kernel's
 // admin-guide/cgroup-v2.rst.)
 //
-// The holder warns when both of these hold:
+// The holder warns when that memory reaches memHigh of the cap, and one of
+// these shows that the session heads for the cap. 90 % is the level
+// that decision 0008 named.
 //
-//   - That memory reaches memHigh of the cap. 90 % is the level that
-//     decision 0008 named.
 //   - The kernel works to keep the session under the cap. Either the "max"
 //     count in memory.events rose since the last tick: a process asked for
 //     memory at the cap, and the kernel had to reclaim at once. Or the
 //     session's tasks stalled on memory for memStall of the last 10 s
 //     ("some avg10" in memory.pressure, accounting/psi.rst).
+//   - The pinned memory still grows: it rose by memGrowth of the cap over
+//     the last memGrowTicks ticks.
+//
+// The holder also warns when that memory reaches memAlone of the cap, with
+// no other sign. Decision 0027 adds the growth and memAlone to the kernel's
+// signs of decision 0026.
 //
 // 10 % is the stall at which systemd asks a service to free memory. Its
 // default is 200 ms of "some" stall in each 2 s (MemoryPressureThresholdSec=).
 //
+// The kernel's signs are not enough on their own. On a test host (Debian 13,
+// a cap of 256 MiB), a program's anonymous memory grew steadily, with no
+// page cache in the unit. The pinned memory stayed at 90 % or more for 12 s
+// before the kill. But the kernel had no cache to reclaim, so "max" stayed
+// at 0 until the very end, and no stall showed. The memory grew by about
+// 0.8 % of the cap each second, so 4 % in 5 s. memGrowth over memGrowTicks
+// is 0.2 % a second: it catches a leak four times slower than that one. At
+// that rate the last 10 % of the cap lasts 50 s. With page cache in the
+// unit, the kernel's signs came 11 s before the kill, as designed.
+//
 // A full page cache raises "max" and a little stall too. But the cache is
 // not pinned, so it does not warn. A large session that does not grow
-// raises neither, so it does not warn either.
+// raises none of these signs, so it does not warn below memAlone. At 95 %,
+// at most 5 % of the cap is left, which one tool call can take.
 //
 // The warning comes once an episode. The episode ends when the pinned
 // memory falls below memLow of the cap. Only then can a new warning come. A
@@ -64,11 +81,15 @@ import (
 // cap stops a process, checkOOM clears the mark as it claims the kill.
 
 // Levels of the memory warning: the pinned memory as shares of the cap,
-// and the stall as a share of the last 10 s, in %.
+// the stall as a share of the last 10 s, in %, and the growth as a share of
+// the cap over memGrowTicks ticks of 1 s.
 const (
-	memHigh  = 0.90
-	memLow   = 0.80
-	memStall = 10.0
+	memHigh      = 0.90
+	memAlone     = 0.95
+	memLow       = 0.80
+	memStall     = 10.0
+	memGrowth    = 0.01
+	memGrowTicks = 5
 )
 
 // srcMemory is the status's source while the memory warning marks it.
@@ -90,6 +111,11 @@ type memWatch struct {
 	// as the holder saw that attach (lastTyped).
 	attach time.Time
 	typed  time.Time
+	// past is the pinned memory of the last memGrowTicks ticks, as a ring:
+	// next is the oldest, and seen how many of them there are (growth).
+	past [memGrowTicks]int64
+	next int
+	seen int
 }
 
 // memRead is what one tick reads of the unit's memory files. Sizes are in
@@ -160,6 +186,34 @@ func pinned(current int64, stat map[string]int64) int64 {
 // share is n as a share of limit.
 func share(n, limit int64) float64 { return float64(n) / float64(limit) }
 
+// near reports whether one tick's read starts a warning. rose is whether
+// the "max" count rose since the last tick, and grew how much the pinned
+// memory rose over the last memGrowTicks ticks, as a share of the cap.
+func near(r memRead, rose bool, grew float64) bool {
+	s := share(r.pinned, r.limit)
+	return s >= memAlone || (s >= memHigh && (rose || r.stall >= memStall || grew >= memGrowth))
+}
+
+// growth keeps the pinned memory of this tick, and returns how much it rose
+// over the last memGrowTicks ticks, as a share of the cap. It is 0 until
+// there are that many ticks, and it starts again without a cap. Below memLow
+// of the cap, the pinned memory read is memory.current, which holds it. So
+// a growth from there is never more than the real one.
+func (w *memWatch) growth(r memRead) float64 {
+	if r.limit <= 0 {
+		w.seen = 0
+		return 0
+	}
+	old, full := w.past[w.next], w.seen == memGrowTicks
+	w.past[w.next] = r.pinned
+	w.next = (w.next + 1) % memGrowTicks
+	if !full {
+		w.seen++
+		return 0
+	}
+	return share(r.pinned-old, r.limit)
+}
+
 // checkMemory starts and ends the warning's episodes from one tick's read,
 // and sends the memory alert when a warning starts. The caller holds h.mu.
 func (h *Holder) checkMemory(r memRead) {
@@ -170,6 +224,7 @@ func (h *Holder) checkMemory(r memRead) {
 	w := &h.mem
 	rose := r.hits > w.hits
 	w.hits = r.hits
+	grew := w.growth(r)
 	switch {
 	case r.limit <= 0:
 		w.on, w.mark = false, false
@@ -182,11 +237,11 @@ func (h *Holder) checkMemory(r memRead) {
 	case w.on && share(r.pinned, r.limit) < memLow:
 		w.on, w.mark = false, false
 		return
-	case !w.on && share(r.pinned, r.limit) >= memHigh && (rose || r.stall >= memStall):
+	case !w.on && near(r, rose, grew):
 		w.on, w.mark = true, true
 		w.shown, w.attach, w.typed = time.Time{}, time.Time{}, time.Time{}
 		w.usage = memUsage(r.pinned, r.limit)
-		h.log.Info("close to the memory cap", "pinned", r.pinned, "limit", r.limit, "max_rose", rose, "stall", r.stall)
+		h.log.Info("close to the memory cap", "pinned", r.pinned, "limit", r.limit, "max_rose", rose, "stall", r.stall, "grew", grew)
 		h.alertMemory()
 	case !w.on:
 		return

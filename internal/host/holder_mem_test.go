@@ -188,6 +188,60 @@ func TestMemoryCountsKernelMemory(t *testing.T) {
 	r.wantSent()
 }
 
+// anonOnly sets the unit's memory to anon bytes of anonymous memory, with
+// no page cache.
+func (r *memRig) anonOnly(anon int64) {
+	r.file("memory.current", strconv.FormatInt(anon, 10))
+	r.file("memory.stat", fmt.Sprintf("anon %d\nfile 0\nkernel 0\nshmem 0\nslab_reclaimable 0", anon))
+}
+
+// The case that a test host showed: a program's anonymous memory grows by
+// 2 MiB a second under a cap of 256 MiB, with no page cache in the unit.
+// The kernel has nothing to reclaim, so "max" stays at 0 and nothing
+// stalls until the kill. The growth alone warns, at the first tick at 90 %.
+func TestMemoryWarnsOnGrowth(t *testing.T) {
+	r := newMemRig(t)
+	const limit = 256 << 20
+	r.file("memory.max", strconv.Itoa(limit))
+	for anon := int64(180 << 20); ; anon += 2 << 20 {
+		if anon >= limit {
+			t.Fatal("no warning before the cap")
+		}
+		r.anonOnly(anon)
+		r.ticks(1)
+		if st := r.status(); st.Source == srcMemory {
+			if share(anon, limit) >= memHigh+0.01 {
+				t.Fatalf("the warning came late, at %d MiB", anon>>20)
+			}
+			break
+		}
+	}
+	got := r.sentEvents()
+	if len(got) != 1 || got[0].Event != alerts.Memory || !strings.HasSuffix(got[0].Summary, " is close to its memory cap (232 of 256 MiB)") {
+		t.Fatalf("alerts %+v, want one memory alert at 232 MiB", got)
+	}
+}
+
+// A large session that has stopped growing does not warn below 95 %, also
+// when its memory moves a little each second. At 95 % it warns on its own.
+func TestMemorySteadyBelowAlone(t *testing.T) {
+	r := newMemRig(t)
+	for _, s := range []float64{0.930, 0.934, 0.928, 0.933, 0.931, 0.936, 0.929, 0.935, 0.932, 0.937} {
+		r.anonOnly(int64(s * float64(memCap)))
+		r.ticks(1)
+	}
+	r.wantClear()
+	r.wantSent()
+
+	r = newMemRig(t)
+	r.anonOnly(int64(0.955 * float64(memCap)))
+	r.ticks(1)
+	if st := r.status(); st.Source != srcMemory {
+		t.Fatalf("at 95 %% of the cap: %+v", st)
+	}
+	r.wantSent(alerts.Memory)
+}
+
 // A session near the cap that does not grow is no reason to warn. A stall
 // on memory is, as a charge at the cap is.
 func TestMemoryWarnsOnStall(t *testing.T) {

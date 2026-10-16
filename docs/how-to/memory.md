@@ -68,7 +68,9 @@ Before the cap stops a process, the host warns. The session then needs you, with
 The warning comes when two things hold:
 
 - The memory that the kernel cannot free reaches 90 % of the session's cap. Without swap, that is the memory of the session's processes and its files in a tmpfs, such as `/tmp` on Debian 13. The kernel's own memory for the session counts too, such as page tables and stacks.
-- The kernel has started to work to keep the session under its cap.
+- That memory still grows, or the kernel has started to work to keep the session under its cap.
+
+At 95 % of the cap, the warning comes on its own. [Decision 0027](../contributing/decisions/0027-memory-warning-growth.md) explains these levels.
 
 The page cache does not count. The kernel fills it up to the cap in normal work. It frees the cache when a process needs the room.
 
