@@ -11,20 +11,8 @@ import (
 // meets a repository the user has not answered for on this host. The answer
 // is kept, and the start runs again with it.
 type setupAsk struct {
-	host   string
-	q      client.SetupQuestion
-	args   client.NewArgs
-	attach bool
-	// back is the new-session form that started this, if any; it comes back
-	// while the start runs again, or when the user cancels.
-	back *newSession
-}
-
-// askSetup opens the question, in place of the form that started it.
-func (m *Model) askSetup(msg startedMsg, q client.SetupQuestion) tea.Cmd {
-	back, _ := m.modal.(*newSession)
-	m.modal = &setupAsk{host: msg.host, q: q, args: msg.args, attach: msg.attach, back: back}
-	return nil
+	startReq
+	q client.SetupQuestion
 }
 
 func (s *setupAsk) key(m *Model, k tea.KeyPressMsg) tea.Cmd {
@@ -35,19 +23,15 @@ func (s *setupAsk) key(m *Model, k tea.KeyPressMsg) tea.Cmd {
 	case "n":
 		run = false
 	case "esc", "q":
-		m.cancelStart(s.back)
+		m.cancelStart(s.startReq)
 		return nil
 	default:
 		return nil
 	}
-	h := m.answered(s.host, s.back)
-	if h == nil {
-		return nil
-	}
-	a := s.args
-	a.Setup = api.SetupSkip
+	r := s.startReq
+	r.args.Setup = api.SetupSkip
 	if run {
-		a.Setup = api.SetupRun
+		r.args.Setup = api.SetupRun
 	}
 	be, host, repo := m.be, s.host, s.q.Repo
 	remember := func() tea.Msg {
@@ -56,30 +40,7 @@ func (s *setupAsk) key(m *Model, k tea.KeyPressMsg) tea.Cmd {
 		}
 		return nil
 	}
-	return tea.Batch(remember, m.startSession(h, a, s.attach))
-}
-
-// cancelStart closes a question about a start, and brings back what started
-// it: the new-session form, or the quick-start line, ready to start again.
-func (m *Model) cancelStart(back *newSession) {
-	m.modal = nil
-	if back != nil {
-		back.starting = false
-		m.modal = back
-	}
-	if p := m.prompt; p != nil {
-		p.starting = false
-	}
-}
-
-// answered closes a question about a start that will run again, and returns
-// its host, or nil if the host is gone.
-func (m *Model) answered(host string, back *newSession) *hostConn {
-	m.modal = nil
-	if back != nil {
-		m.modal = back // still starting: the start's answer closes it
-	}
-	return m.hostByName(host)
+	return tea.Batch(remember, m.startAgain(r))
 }
 
 func (s *setupAsk) view(m *Model) string {

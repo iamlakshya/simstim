@@ -12,6 +12,8 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ### Fixed
 
+- Esc on a start that is still running now stops the launcher's wait for it. The launcher no longer asks about the start later, or attaches to its session. If the session starts anyway, a toast says so.
+- A question about a start no longer leaves the form or the quick-start line stuck in "Starting…" when the host goes away. After an answer, the launcher sends the secrets that it fetched for the first try, and does not fetch them again.
 - `new` asked about a setup script when stdin was a terminal, even with its output in a pipe. It then waited for an answer to a question that nobody saw. It now asks only when stdin and stdout are both terminals.
 - A release's notes on GitHub came out empty: the provenance job's upload replaced the draft's body. A last job now writes the notes from the CHANGELOG, with links made absolute (`LINK_BASE` in `scripts/release-notes.sh`) so they work on the release's page.
 

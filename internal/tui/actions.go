@@ -68,44 +68,59 @@ func (m *Model) openSelectedHost() tea.Cmd {
 	return nil
 }
 
-// startSession sends "new" to the host.
-func (m *Model) startSession(h *hostConn, a client.NewArgs, attach bool) tea.Cmd {
+// startSession sends "new" to the host h, for the start r.
+func (m *Model) startSession(h *hostConn, r startReq) tea.Cmd {
+	r.host = h.name()
 	if !h.online() {
-		return func() tea.Msg { return startedMsg{host: h.name(), err: offlineErr(h)} }
+		err := offlineErr(h)
+		return func() tea.Msg { return startedMsg{startReq: r, err: err} }
 	}
-	a = client.TerminalArgs(a, m.width, m.height)
-	name, c, ctx, be, host := h.name(), h.conn, m.ctx, m.be, h.host
+	r.args = client.TerminalArgs(r.args, m.width, m.height)
+	c, ctx, be, host := h.conn, m.ctx, m.be, h.host
 	return func() tea.Msg {
 		cctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 		defer cancel()
-		if a.Setup == "" {
-			a.SetupTrust = be.SetupTrust(name)
+		if r.args.Setup == "" {
+			r.args.SetupTrust = be.SetupTrust(r.host)
 		}
-		secrets, err := be.Secrets(cctx, host)
-		if err != nil {
-			return startedMsg{host: name, err: err, attach: attach, args: a}
+		// One fetch of the secrets for each start. A question about the
+		// start keeps them for the start after the answer.
+		if r.args.Secrets == nil {
+			secrets, err := be.Secrets(cctx, host)
+			if err != nil {
+				return startedMsg{startReq: r, err: err}
+			}
+			r.args.Secrets = secrets
 		}
-		a.Secrets = secrets
-		s, err := c.NewSession(cctx, a)
-		a.Secrets = nil // fetched again for a new start; never kept
-		return startedMsg{host: name, s: s, err: err, attach: attach, args: a}
+		s, err := c.NewSession(cctx, r.args)
+		return startedMsg{startReq: r, s: s, err: err}
 	}
 }
 
+// onStarted shows how a start went, in the form or the quick-start line that
+// waits for it, or opens the host's question about it. After esc, nothing
+// waits: the launcher asks nothing, and does not attach to the session.
 func (m *Model) onStarted(msg startedMsg) tea.Cmd {
+	d, p := m.waiting(msg.startReq)
+	waited := d != nil || p != nil
 	if q, ok := client.FolderQuestionOf(msg.err); ok && !msg.args.MakeFolder {
-		return m.askFolder(msg, q)
+		if waited {
+			m.modal = &makeFolderAsk{startReq: msg.startReq, q: q}
+		}
+		return nil
 	}
 	if q, ok := client.SetupQuestionOf(msg.err); ok {
-		return m.askSetup(msg, q)
+		if waited {
+			m.modal = &setupAsk{startReq: msg.startReq, q: q}
+		}
+		return nil
 	}
-	d, _ := m.modal.(*newSession)
 	if msg.err != nil {
 		if d != nil {
 			d.starting, d.err = false, msg.err
 			return nil
 		}
-		if p := m.prompt; p != nil && p.starting {
+		if p != nil {
 			p.starting, p.err = false, msg.err
 		}
 		return m.toastErr(msg.err)
@@ -114,22 +129,24 @@ func (m *Model) onStarted(msg startedMsg) tea.Cmd {
 		m.lastAgent[msg.host] = d.agent()
 		m.modal = nil
 	}
+	if p != nil {
+		m.prompt = nil
+	}
 	h := m.hostByName(msg.host)
 	if h == nil || msg.s == nil {
 		return nil
 	}
 	h.sessions = append(h.sessions, *msg.s)
 	h.changes++
-	if m.screen != scrSessions || m.cur != "" && m.cur != h.name() {
-		m.openHost(h)
-	}
-	m.sel, m.autoSel = sessKey{h.name(), msg.s.ID}, false
-	m.syncSel()
-	if p := m.prompt; p != nil && p.starting {
-		m.prompt = nil
-	}
-	if msg.attach {
-		return m.jack(h, msg.s.ID, msg.s.Name)
+	if waited {
+		if m.screen != scrSessions || m.cur != "" && m.cur != h.name() {
+			m.openHost(h)
+		}
+		m.sel, m.autoSel = sessKey{h.name(), msg.s.ID}, false
+		m.syncSel()
+		if msg.attach {
+			return m.jack(h, msg.s.ID, msg.s.Name)
+		}
 	}
 	return tea.Batch(m.toast(toastSuccess, fmt.Sprintf("Started %s on %s.", msg.s.Name, h.name())), m.listSessions(h))
 }

@@ -186,6 +186,7 @@ Enter attaches the selected result, and Esc closes the search.
   - Enter starts the session and attaches, and `ctrl+enter` starts it detached.
   - `ctrl+f` opens the full form (2.7) with the line filled in.
   - While the session starts, the line shimmers "Starting claude on atlas-dev…". An error appears above the rule.
+  - Esc while it starts stops the wait, here and in the form. The session can still start. A toast then says so, and the launcher neither attaches to it nor asks about it.
 
 ### 2.7 Sheets
 

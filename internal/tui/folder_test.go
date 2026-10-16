@@ -20,7 +20,7 @@ func TestQuickStartAsksToMakeAFolder(t *testing.T) {
 	hs.key("n")
 	hs.typeText("claude ~/src/new-app")
 	hs.key("enter")
-	ask, ok := hs.m.modal.(*folderAsk)
+	ask, ok := hs.m.modal.(*makeFolderAsk)
 	if !ok {
 		t.Fatalf("no question; modal %T, calls %q", hs.m.modal, hs.be.callList())
 	}
@@ -49,7 +49,7 @@ func TestFormFolderQuestionCancel(t *testing.T) {
 	}
 	d.folder.set("~/src/new-app")
 	hs.key("enter")
-	if _, ok := hs.m.modal.(*folderAsk); !ok {
+	if _, ok := hs.m.modal.(*makeFolderAsk); !ok {
 		t.Fatalf("the form did not ask: %T", hs.m.modal)
 	}
 	// No cancels: the form comes back with its folder, ready to start again.

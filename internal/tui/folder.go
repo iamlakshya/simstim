@@ -6,44 +6,27 @@ import (
 	"github.com/iamlakshya/simstim/internal/client"
 )
 
-// folderAsk asks whether a new session's folder may be made, when it does not
-// exist on the host. A yes starts the session again, and the host makes it.
-type folderAsk struct {
-	host   string
-	q      client.FolderQuestion
-	args   client.NewArgs
-	attach bool
-	// back is the new-session form that started this, if any; it comes back
-	// while the start runs again, or when the user cancels.
-	back *newSession
+// makeFolderAsk asks whether a new session's folder may be made, when it does
+// not exist on the host. A yes starts the session again, and the host makes
+// the folder.
+type makeFolderAsk struct {
+	startReq
+	q client.FolderQuestion
 }
 
-// askFolder opens the question, in place of the form that started it.
-func (m *Model) askFolder(msg startedMsg, q client.FolderQuestion) tea.Cmd {
-	back, _ := m.modal.(*newSession)
-	m.modal = &folderAsk{host: msg.host, q: q, args: msg.args, attach: msg.attach, back: back}
+func (f *makeFolderAsk) key(m *Model, k tea.KeyPressMsg) tea.Cmd {
+	switch k.String() {
+	case "y":
+		r := f.startReq
+		r.args.MakeFolder = true
+		return m.startAgain(r)
+	case "n", "esc", "q":
+		m.cancelStart(f.startReq)
+	}
 	return nil
 }
 
-func (f *folderAsk) key(m *Model, k tea.KeyPressMsg) tea.Cmd {
-	switch k.String() {
-	case "y":
-	case "n", "esc", "q":
-		m.cancelStart(f.back)
-		return nil
-	default:
-		return nil
-	}
-	h := m.answered(f.host, f.back)
-	if h == nil {
-		return nil
-	}
-	a := f.args
-	a.MakeFolder = true
-	return m.startSession(h, a, f.attach)
-}
-
-func (f *folderAsk) view(m *Model) string {
+func (f *makeFolderAsk) view(m *Model) string {
 	w := m.dialogWidth()
 	folder := f.q.Folder
 	if h := m.hostByName(f.host); h != nil {

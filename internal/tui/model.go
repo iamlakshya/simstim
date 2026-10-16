@@ -214,11 +214,9 @@ type (
 	}
 	activityTickMsg struct{}
 	startedMsg      struct {
-		host   string
-		s      *client.Session
-		err    error
-		attach bool
-		args   client.NewArgs // what started, without secrets, to start again
+		startReq // what started: a question about it sends it again
+		s        *client.Session
+		err      error
 	}
 	attachDoneMsg struct {
 		host, id, name string
