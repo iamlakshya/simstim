@@ -18,6 +18,7 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 - The uninstall guide also removes the memory limit of the sessions' slice, with `systemctl --user revert`.
 - The docs no longer ask for swap on a host: a session's memory never goes to swap, so swap gives sessions no more room.
 - The end-to-end check of the memory cap gives its session a cap of 256 MiB. That keeps the check quick and safe on a host of any size.
+- The limit of one alert of a kind a minute no longer holds back a session's end (decision 0026). An end is `exited`, `failed`, or the `oom` of the program itself. So when the memory cap stops a process that the program started, and then the program within a minute, both `oom` alerts go out. Before, the limit dropped the second. The host's limit of 20 alerts a minute still counts an end.
 
 ### Fixed
 

@@ -40,6 +40,15 @@ func (c *stepClock) AfterFunc(d time.Duration, f func()) func() bool {
 	return time.AfterFunc(d, f).Stop
 }
 
+// stillClock never moves, so the per-session limit's minute never passes.
+type stillClock struct{ at time.Time }
+
+func (c stillClock) Now() time.Time { return c.at }
+
+func (stillClock) AfterFunc(d time.Duration, f func()) func() bool {
+	return time.AfterFunc(d, f).Stop
+}
+
 type allowAll struct{}
 
 func (allowAll) Allow(time.Time) bool { return true }
@@ -56,6 +65,12 @@ type oomRig struct {
 }
 
 func newOOMRig(t *testing.T) *oomRig {
+	t.Helper()
+	return newOOMRigAt(t, &stepClock{now: time.Now()})
+}
+
+// newOOMRigAt is newOOMRig with the alert dispatcher's clock.
+func newOOMRigAt(t *testing.T, clock alerts.Clock) *oomRig {
 	t.Helper()
 	alertHome(t)
 	r := &oomRig{t: t, done: filepath.Join(t.TempDir(), "done"), got: make(chan alerts.Event, 64)}
@@ -89,7 +104,7 @@ func newOOMRig(t *testing.T) *oomRig {
 	h := &Holder{id: id, m: m, log: slog.New(slog.DiscardHandler), ring: ring.New(1 << 16),
 		clients: map[*hclient]struct{}{}, readDone: make(chan struct{})}
 	close(h.readDone) // nothing reads the PTY here
-	h.al.d = alerts.New(alerts.Options{Clock: &stepClock{now: time.Now()}, Limiter: allowAll{}, Env: m.Env, Dir: m.Cwd})
+	h.al.d = alerts.New(alerts.Options{Clock: clock, Limiter: allowAll{}, Env: m.Env, Dir: m.Cwd})
 	t.Cleanup(func() { h.al.d.Close(time.Second) })
 	if err := h.start(); err != nil {
 		t.Fatal(err)
@@ -268,6 +283,28 @@ func TestOOMChildKillThenAgentOOM(t *testing.T) {
 		t.Fatalf("the agent's kill after a child's: %+v", st)
 	}
 	r.wantSent(alerts.OOM, alerts.OOM)
+}
+
+// A child's kill, then the agent's own, with a clock that never moves: the
+// minute between them never passes. The agent's oom is the session's end,
+// so the per-session limit does not hold it back (decision 0026).
+func TestOOMChildKillThenAgentOOMWithinAMinute(t *testing.T) {
+	r := newOOMRigAt(t, stillClock{at: time.Now()})
+	r.kills(1)
+	r.ticks(2)
+	r.kills(2)
+	r.kill()
+	// No marker here: the limit would hold back a second started.
+	for i := range 2 {
+		select {
+		case ev := <-r.got:
+			if ev.Event != alerts.OOM || (ev.ExitCode != nil) != (i == 1) {
+				t.Fatalf("alert %d: %s, exit code %v", i+1, ev.Event, ev.ExitCode)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatalf("%d oom alerts arrived, want 2", i)
+		}
+	}
 }
 
 // After a child's kill, the agent exits by itself, and the session has

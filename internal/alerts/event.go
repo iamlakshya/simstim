@@ -70,6 +70,10 @@ type Event struct {
 	test bool      // raised by the test command
 }
 
+// ends reports whether the event is the session's end: exited, failed, or an
+// oom that stopped the program itself. Only an end carries an exit code.
+func (ev Event) ends() bool { return ev.ExitCode != nil }
+
 // JSON returns the event as destinations get it.
 func (ev Event) JSON() []byte {
 	b, _ := json.Marshal(ev)

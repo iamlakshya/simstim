@@ -116,7 +116,8 @@ func (h *Holder) alertOOM() {
 }
 
 // alertEnded raises exited, failed or oom when the program ends by itself.
-// The caller holds h.mu.
+// Its exit code marks the session's end, which the per-session limit never
+// holds back (decision 0026). The caller holds h.mu.
 func (h *Holder) alertEnded(ended proto.Ended) {
 	if h.al.d == nil {
 		return

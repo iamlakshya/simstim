@@ -94,7 +94,7 @@ func (o *Options) sinks(set *Settings) []sink {
 const (
 	inQueue    = 64          // events waiting to be looked at
 	workQueue  = 16          // events waiting to go out
-	sessionGap = time.Minute // one event of a kind per session in this time
+	sessionGap = time.Minute // one event of a kind per session in this time, except an end
 )
 
 // Dispatcher sends one session's events to the destinations in the alerts
@@ -239,6 +239,11 @@ func (d *Dispatcher) fire(ev Event, set *Settings, sinks []sink) {
 // goes out, so an event that the host's limit or a full queue drops does
 // not hold back the next one. It holds d.mu throughout, so two events of
 // one kind cannot both pass the check.
+//
+// A session's end is outside the session's minute (decision 0026): the
+// minute never holds an end back, and an end does not start it. Each run
+// ends once, and restore and resume start a new run in a new holder, so
+// each end is new. The host's limit still counts an end.
 func (d *Dispatcher) queue(ev Event, set *Settings, sinks []sink) string {
 	now := d.o.Clock.Now()
 	d.mu.Lock()
@@ -246,7 +251,8 @@ func (d *Dispatcher) queue(ev Event, set *Settings, sinks []sink) string {
 	if d.closed {
 		return ""
 	}
-	if last, ok := d.sent[ev.Event]; ok && now.Sub(last) < sessionGap {
+	end := ev.ends()
+	if last, ok := d.sent[ev.Event]; ok && !end && now.Sub(last) < sessionGap {
 		return "this session sent one " + ev.Event + " in the last minute"
 	}
 	if !d.o.Limiter.Allow(now) {
@@ -254,7 +260,9 @@ func (d *Dispatcher) queue(ev Event, set *Settings, sinks []sink) string {
 	}
 	select {
 	case d.work <- job{ev: prepare(ev, d.o.Host, set), set: set, sinks: sinks}:
-		d.sent[ev.Event] = now
+		if !end {
+			d.sent[ev.Event] = now
+		}
 		return ""
 	default:
 		return "too many alerts are waiting to go out"

@@ -136,14 +136,14 @@ A destination flag without `--add` replaces the whole file. With no destination 
 | `turn_done` | The agent finished a turn in which it worked for longer than `min_turn` |
 | `exited` | The program ended with code 0 |
 | `failed` | The program ended with another code, or a signal |
-| `oom` | A process in the session hit its memory cap and was stopped (also when that process was the program itself). A program that runs on does not also send `needs_input`. [Memory](memory.md) says how to raise the cap |
+| `oom` | A process in the session hit its memory cap and was stopped. When that process was the program itself, `oom` is the session's end, in place of `failed`, and has `exit_code` and `signal`. A program that runs on does not also send `needs_input`. [Memory](memory.md) says how to raise the cap |
 | `started` | The session started |
 | `restored` | The session was started again after a host restart |
 | `test` | `host alerts test` |
 
 No event is sent when you kill a session, or when the host shuts down.
 
-A session sends one `oom` a minute at most, like any event ([keep the noise down](#keep-the-noise-down)). If the cap stops a process that the program started, and then the program itself within a minute, only the first `oom` goes out. The launcher and `ls` still show that the session ended.
+A session's end is `exited`, `failed`, or the `oom` that stopped the program itself. The limit of one event of a kind a minute never holds an end back ([keep the noise down](#keep-the-noise-down)). So if the cap stops a process that the program started, and then the program itself within a minute, both `oom` alerts go out. Only the second has `exit_code` and `signal`. For processes that the program started, a session sends one `oom` a minute at most.
 
 An event looks like this:
 
@@ -171,8 +171,8 @@ An event looks like this:
 ## Keep the noise down
 
 - `needs_input` waits `delay` (10 seconds). If the session moves on, or you type into it, in that time, nothing is sent. So you get no alert while you are at the keyboard. Set `quiet_when_typing = false` to change that.
-- Each session sends one event of a kind a minute at most.
-- A host sends 20 events a minute at most, across all its sessions.
+- Each session sends one event of a kind a minute at most. This limit never holds back the session's end: `exited`, `failed`, or the `oom` that stopped the program.
+- A host sends 20 events a minute at most, across all its sessions. This limit counts a session's end too.
 - `turn_done` comes only after turns longer than `min_turn` (a minute).
 - List only the events you want in `events`, or give one destination its own `events`.
 

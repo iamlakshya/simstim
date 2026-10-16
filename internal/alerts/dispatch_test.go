@@ -254,18 +254,109 @@ func (r *rig) read() string {
 	return string(b)
 }
 
+// end is a session's end, as the holder raises it: with the program's exit
+// code, and the signal that stopped it, if any.
+func (r *rig) end(kind string, code int, signal string) Event {
+	ev := r.event(kind)
+	ev.ExitCode, ev.Signal = &code, signal
+	return ev
+}
+
+// notHeld checks that the per-session limit held nothing back.
+func (r *rig) notHeld() {
+	r.t.Helper()
+	entries, _ := r.log.Tail(100)
+	for _, e := range entries {
+		if strings.Contains(e.Skipped, "this session sent one") {
+			r.t.Errorf("the log says %q", e.Skipped)
+		}
+	}
+}
+
+// A session sends one event of a kind a minute. The oom of a process that
+// the program started is not the session's end, so a second one waits.
 func TestPerSessionLimit(t *testing.T) {
 	r := newRig(t, hookCfg, nil)
-	r.d.Notify(r.event(Failed))
-	r.expect(Failed)
-	r.clock.Advance(30 * time.Second)
-	r.d.Notify(r.event(Failed))
-	r.skipped("in the last minute")
-	r.d.Notify(r.event(OOM)) // another kind is not limited
+	r.d.Notify(r.event(OOM))
 	r.expect(OOM)
+	r.clock.Advance(30 * time.Second)
+	r.d.Notify(r.event(OOM))
+	r.skipped("this session sent one oom in the last minute")
+	long := r.event(TurnDone)
+	long.Turn = 2 * time.Minute
+	r.d.Notify(long) // another kind is not limited
+	r.expect(TurnDone)
 	r.clock.Advance(31 * time.Second)
-	r.d.Notify(r.event(Failed))
+	r.d.Notify(r.event(OOM))
+	r.expect(OOM)
+}
+
+// The cap stops a process that the program started, then the program
+// itself within the minute. The second oom is the session's end, which the
+// per-session limit never holds back (decision 0026).
+func TestEndNotHeldBack(t *testing.T) {
+	r := newRig(t, hookCfg, nil)
+	r.d.Notify(r.event(OOM))
+	if ev := r.expect(OOM); ev.ExitCode != nil {
+		t.Errorf("a child's oom has exit code %d", *ev.ExitCode)
+	}
+	r.clock.Advance(10 * time.Second)
+	r.d.Notify(r.end(OOM, 137, "killed"))
+	if ev := r.expect(OOM); ev.ExitCode == nil || *ev.ExitCode != 137 || ev.Signal != "killed" {
+		t.Errorf("the program's oom = %+v", ev)
+	}
+	r.notHeld()
+}
+
+// Each run of a session ends once, but two runs can end within a minute.
+// Today a restore or a resume starts a new holder, whose dispatcher has no
+// minute yet. Both ends go out under one dispatcher too, also with code 0.
+func TestEndsOfTwoRuns(t *testing.T) {
+	r := newRig(t, hookCfg, nil)
+	r.d.Notify(r.end(Failed, 1, ""))
 	r.expect(Failed)
+	r.clock.Advance(20 * time.Second)
+	r.d.Notify(r.end(Failed, 2, ""))
+	if ev := r.expect(Failed); ev.ExitCode == nil || *ev.ExitCode != 2 {
+		t.Errorf("the second run's end = %+v", ev)
+	}
+	r.d.Notify(r.end(Exited, 0, ""))
+	r.expect(Exited)
+	r.clock.Advance(20 * time.Second)
+	r.d.Notify(r.end(Exited, 0, ""))
+	r.expect(Exited)
+	r.notHeld()
+}
+
+// An end does not start the minute: a child's oom in a later run still goes
+// out within a minute of the last run's oom. That child's oom starts the
+// minute, so a second one within it is dropped.
+func TestEndStartsNoMinute(t *testing.T) {
+	r := newRig(t, hookCfg, nil)
+	r.d.Notify(r.end(OOM, 137, "killed"))
+	r.expect(OOM)
+	r.clock.Advance(10 * time.Second)
+	r.d.Notify(r.event(OOM))
+	if ev := r.expect(OOM); ev.ExitCode != nil {
+		t.Errorf("a child's oom = %+v", ev)
+	}
+	r.notHeld()
+	r.clock.Advance(10 * time.Second)
+	r.d.Notify(r.event(OOM))
+	r.skipped("this session sent one oom in the last minute")
+	r.none()
+}
+
+// The host's limit counts a session's end like any other event.
+func TestHostLimitHoldsForEnds(t *testing.T) {
+	lim := &FileLimiter{Path: filepath.Join(t.TempDir(), "rate"), Max: 1, Window: time.Minute}
+	r := newRig(t, hookCfg, lim)
+	r.d.Notify(r.event(OOM))
+	r.expect(OOM)
+	r.d.Notify(r.end(OOM, 137, "killed"))
+	r.skipped("the host sent")
+	r.none()
+	r.notHeld()
 }
 
 func TestHostLimit(t *testing.T) {
