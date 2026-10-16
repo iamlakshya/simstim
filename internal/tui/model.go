@@ -91,6 +91,10 @@ type Model struct {
 	jacking  *jackIn
 	ticking  bool
 
+	// logoClock is how far the logo's wave has run. Only a frame tick moves
+	// it, so the logo stays still while nothing else moves.
+	logoClock time.Duration
+
 	traces     map[sessKey][]time.Time // moments of output, for each row's trace
 	activity   map[sessKey]activity    // what each session is doing, from its screen
 	activityAt time.Time               // when an activity line last changed
@@ -290,6 +294,7 @@ func (m *Model) update(msg tea.Msg) tea.Cmd {
 		return nil
 	case animTickMsg:
 		m.ticking = false
+		m.logoClock += msg.d
 		return nil
 	case jackMsg:
 		return m.onJack()

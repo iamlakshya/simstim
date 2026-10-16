@@ -19,6 +19,10 @@ import (
 // any moment can be drawn and tests can stop time. One tick runs while
 // something moves, fast or slow as the moving thing needs, and stops when
 // nothing does. With motion off, each animation draws one still frame.
+//
+// The logo is the one exception. It runs on its own clock, which moves only
+// with a frame tick. So it moves with the rest of the motion, and a screen
+// that draws again while nothing moves shows it where it was.
 
 const (
 	fastFrame = 33 * time.Millisecond  // 30 fps: the welcome mark, glows, fades
@@ -37,7 +41,9 @@ const (
 	shimmerHalf = 3.0 // cells either side of the shimmer's band
 )
 
-type animTickMsg struct{}
+// animTickMsg is one frame tick. d is how long it waited, which is how far
+// the logo's clock moves.
+type animTickMsg struct{ d time.Duration }
 
 // Terminal colours. To blend smoothly the launcher needs the real colours of
 // the theme, so it asks the terminal for its default colours (OSC 10 and 11)
@@ -190,7 +196,7 @@ func (m *Model) startTimers() tea.Cmd {
 		return nil
 	}
 	m.ticking = true
-	return m.after(d, animTickMsg{})
+	return m.after(d, animTickMsg{d})
 }
 
 // Canvas effects. They run on the drawn canvas, cell by cell, so they work on

@@ -128,11 +128,12 @@ func (m *Model) footer(hs []hint, w int) string {
 }
 
 // logo is the brand's signal: three braille cells of a small wave in the
-// brand gradient, moving with motion on.
+// brand gradient. With motion on, the wave runs on the logo's clock, so it
+// moves one step with each frame tick and stays still between them.
 func (m *Model) logo() string {
 	t := 0.0
 	if m.motion {
-		t = m.since(m.epoch).Seconds()
+		t = m.logoClock.Seconds()
 	}
 	cols := m.gradient(3)
 	var b strings.Builder

@@ -184,6 +184,105 @@ func TestScanRuns(t *testing.T) {
 	}
 }
 
+// The logo moves only with a frame tick (docs/contributing/ux-spec.md 4.5).
+// On a still list, the refresh, the activity read, the latency probe and
+// their replies draw the screen again with the logo where it was. With frame
+// ticks it goes on from there, and each column moves one row at most with
+// each frame.
+func TestLogoMovesOnlyWithFrames(t *testing.T) {
+	be := labBackend()
+	for _, h := range be.state {
+		for i := range h.sessions {
+			h.sessions[i].State = api.StateIdle
+		}
+	}
+	hs := newHarness(t, be, 80, 24)
+	hs.m.motion = true
+	hs.key("enter") // atlas-dev's sessions slide in
+	logo := func() string {
+		line := strings.TrimSpace(strings.Split(plainScreen(hs.m), "\n")[headerY])
+		return string([]rune(line)[:3])
+	}
+	isFrame := func(msg tea.Msg) bool { _, ok := msg.(animTickMsg); return ok }
+	// frame delivers the pending frame tick when it is due, if there is one.
+	frame := func() bool {
+		for _, tm := range hs.timers {
+			if isFrame(tm.msg) {
+				hs.clock = hs.clock.Add(tm.d)
+				return hs.fire(isFrame) == 1
+			}
+		}
+		return false
+	}
+	isTimer := func(msg tea.Msg) bool {
+		switch msg.(type) {
+		case refreshTickMsg, activityTickMsg, latencyTickMsg:
+			return true
+		}
+		return false
+	}
+	settle := func() { // lets every sequence end
+		for i := 0; frame(); i++ {
+			if i > 1000 {
+				t.Fatal("the frame ticks never stop")
+			}
+		}
+	}
+	hs.clock = hs.clock.Add(time.Minute)
+	hs.fire(isTimer) // the first activity line decodes in
+	settle()
+
+	still := logo()
+	for range 3 {
+		hs.clock = hs.clock.Add(latencyEvery)
+		if n := hs.fire(isTimer); n != 3 {
+			t.Fatalf("fired %d timers, want the refresh, the activity read and the latency probe", n)
+		}
+		if frame() {
+			t.Fatal("a frame ticks on a still list")
+		}
+		if got := logo(); got != still {
+			t.Fatalf("with no frame tick the logo moved from %q to %q", still, got)
+		}
+	}
+
+	// A session starts to work: the frames tick, and the logo moves with them.
+	rows := func(s string) (out [6]int) {
+		for c, r := range []rune(s) {
+			for dx := range 2 {
+				for y := range 4 {
+					if (r-0x2800)&(1<<brailleBit[y][dx]) != 0 {
+						out[c*2+dx] = y
+					}
+				}
+			}
+		}
+		return out
+	}
+	be.mu.Lock()
+	be.state["atlas-dev"].sessions[2].State = api.StateWorking
+	be.mu.Unlock()
+	hs.fire(func(msg tea.Msg) bool { _, ok := msg.(refreshTickMsg); return ok })
+	last, moved := still, false
+	for range 20 {
+		if !frame() {
+			t.Fatal("a working session does not tick")
+		}
+		got := logo()
+		a, b := rows(last), rows(got)
+		for i := range a {
+			if a[i]-b[i] > 1 || b[i]-a[i] > 1 {
+				t.Fatalf("one frame took the logo from %q to %q, more than one dot", last, got)
+			}
+		}
+		moved = moved || got != still
+		last = got
+	}
+	if !moved {
+		t.Fatalf("the logo stayed at %q through 20 frames", still)
+	}
+}
+
 func TestLifeFrames(t *testing.T) {
 	seen := map[string]bool{}
 	for _, f := range lifeFrames {

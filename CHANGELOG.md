@@ -12,6 +12,7 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ### Fixed
 
+- With motion on, the logo in the launcher's header jumped now and then when the list was still. It now moves one step with each frame while something else moves, and stays still otherwise.
 - Esc on a start that is still running now stops the launcher's wait for it. The launcher no longer asks about the start later, or attaches to its session. If the session starts anyway, a toast says so.
 - A question about a start no longer leaves the form or the quick-start line stuck in "Starting…" when the host goes away. After an answer, the launcher sends the secrets that it fetched for the first try, and does not fetch them again.
 - `new` asked about a setup script when stdin was a terminal, even with its output in a pipe. It then waited for an answer to a question that nobody saw. It now asks only when stdin and stdout are both terminals.

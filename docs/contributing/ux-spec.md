@@ -428,11 +428,12 @@ Motion is there to show change, work in progress and things that need you. Keys 
 | Breath | A session needs you | Its dot breathes, once every 1.6 s |
 | Life | A session works | Its braille glyph runs a tiny Game of Life |
 | Trace | Output | Each row's trace scrolls with time |
+| Logo | While anything else moves | The wave in the header moves one step with each frame. When nothing else moves, it stops where it is, and later goes on from there |
 | Welcome | The first-run screen | The ribbon opens out, flows and pulses (30 fps); the name decodes; the tagline and keys arrive |
 
 **Colour.** To blend smoothly, the launcher asks the terminal for its real colours: the default foreground and background (OSC 10 and 11) and the 16 palette slots (OSC 4). Fades, the tint and the scan then mix those colours in truecolour, so they match your theme. Without truecolour, or before the terminal answers, the same motion uses steps of faint, normal and bold, and the marker alone shows the selection.
 
-**Cost.** One frame tick runs only while something moves: 30 fps for sequences, the scan and the welcome, and 10 fps for spinners, breathing dots, working glyphs and scrolling traces. When nothing moves, nothing repaints.
+**Cost.** One frame tick runs only while something moves: 30 fps for sequences, the scan and the welcome, and 10 fps for spinners, breathing dots, working glyphs and scrolling traces. When nothing moves, nothing repaints. The logo never starts a frame tick. It moves only with one, so a refresh on a still list draws it where it was.
 
 **One switch.** `ui.motion = auto | on | off`. `auto` turns motion off inside SSH sessions, in Emacs and JetBrains terminals, and when `NO_COLOR` or `TERM=dumb` is set. With motion off, every sequence is its last frame. Traces still show what happened, but they move only when the list refreshes.
 
