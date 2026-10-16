@@ -69,7 +69,7 @@ simstim new my-server --agent claude --dir ~/src/app --worktree --setup
 simstim new my-server --agent claude --dir ~/src/app --no-setup
 ```
 
-Without a terminal to ask on, for example in a script, `new` skips a script you have not answered for, and says so.
+Without a terminal to ask on, for example in a script or with its output in a pipe, `new` skips a script you have not answered for, and says so.
 
 ## Your own setup on a host
 

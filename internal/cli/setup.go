@@ -14,19 +14,21 @@ import (
 
 // startSession starts a session, and asks on this terminal what the host
 // needs to know first: whether a missing folder may be made, and whether a
-// repository's setup script may run on h. Each answer starts it again.
-// Without a terminal, a missing folder stays an error (--mkdir answers it),
-// and a setup script with no answer is skipped this time, with a note.
+// repository's setup script may run on h. Each answer starts it again. It
+// asks only when stdin and stdout are both terminals, so that a person sees
+// the question. Otherwise a missing folder stays an error (--mkdir answers
+// it), and a setup script with no answer is skipped this time, with a note.
 func startSession(ctx context.Context, conn *client.Conn, h client.Host, a client.NewArgs) (*client.Session, error) {
 	if a.Setup == "" {
 		a.SetupTrust = client.SetupTrust(h.Name)
 	}
+	interactive := isTerminal(os.Stdin) && isTerminal(os.Stdout)
 	for {
 		cctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 		s, err := conn.NewSession(cctx, a)
 		cancel()
 		if q, ok := client.FolderQuestionOf(err); ok && !a.MakeFolder {
-			if !isTerminal(os.Stdin) || !askFolder(os.Stdin, os.Stdout, h.Name, q) {
+			if !interactive || !askMakeFolder(os.Stdin, os.Stdout, h.Name, q) {
 				return nil, err
 			}
 			a.MakeFolder = true
@@ -36,7 +38,7 @@ func startSession(ctx context.Context, conn *client.Conn, h client.Host, a clien
 		if !ok || a.Setup != "" {
 			return s, err
 		}
-		if isTerminal(os.Stdin) {
+		if interactive {
 			run := askSetup(os.Stdin, os.Stdout, h.Name, q)
 			if err := client.RememberSetup(h.Name, q.Repo, run); err != nil {
 				return nil, err
@@ -63,8 +65,8 @@ func askSetup(in io.Reader, w io.Writer, host string, q client.SetupQuestion) bo
 	return ask(bufio.NewReader(in), w, "Run it?")
 }
 
-// askFolder asks whether a new session's missing folder may be made on host.
-func askFolder(in io.Reader, w io.Writer, host string, q client.FolderQuestion) bool {
+// askMakeFolder asks whether a new session's missing folder may be made on host.
+func askMakeFolder(in io.Reader, w io.Writer, host string, q client.FolderQuestion) bool {
 	fmt.Fprintf(w, "The folder %s does not exist on %s.\n", q.Folder, host)
 	return ask(bufio.NewReader(in), w, "Make it?")
 }
