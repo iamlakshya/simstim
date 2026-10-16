@@ -45,6 +45,7 @@ type hclient struct {
 	attached bool
 	once     sync.Once
 	done     chan struct{}
+	tr       clientTrace // the debug trace of this attach (holder_trace.go)
 }
 
 func (c *hclient) close() {
@@ -105,6 +106,8 @@ type Holder struct {
 	// its terminal first (start.go).
 	secretEnv []string
 	notes     []string
+	// The debug trace (holder_trace.go), on while a traced client is attached.
+	dbg holderDebug
 }
 
 // RunHolder runs the holder for session id until the session is killed.
@@ -274,8 +277,7 @@ func (h *Holder) readLoop() {
 }
 
 func (h *Holder) output(data []byte) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
+	lt := h.lockTimed()
 	off := h.ring.End()
 	h.ring.Write(data)
 	if h.vt != nil {
@@ -295,7 +297,9 @@ func (h *Holder) output(data []byte) {
 	}
 	h.lastOut = time.Now()
 	h.m.LastActivityAt = time.Now().UTC()
+	fed := lt.now()
 	h.scr.feed(data)
+	feed := lt.since(fed)
 	h.scan.feed(data, func(s outSignal) {
 		switch s {
 		case sigTitle:
@@ -312,6 +316,8 @@ func (h *Holder) output(data []byte) {
 		}
 	})
 	h.dirty = true
+	h.mu.Unlock()
+	lt.read(len(data), feed)
 }
 
 func (h *Holder) waitLoop() {
@@ -382,7 +388,7 @@ func (h *Holder) tick() {
 // step is one tick: it updates the status, and saves the manifest when it
 // changed.
 func (h *Holder) step() {
-	h.mu.Lock()
+	lt := h.lockTimed()
 	if !h.exited {
 		h.updateStatus()
 	}
@@ -394,6 +400,7 @@ func (h *Holder) step() {
 		snapshot = *h.m
 	}
 	h.mu.Unlock()
+	lt.tick()
 	if dirty {
 		if err := h.save(&snapshot, false); err != nil {
 			h.log.Warn("manifest not saved", "err", err)

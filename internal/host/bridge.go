@@ -16,13 +16,14 @@ import (
 	"sync"
 	"time"
 
+	"github.com/iamlakshya/simstim/internal/diag"
 	"github.com/iamlakshya/simstim/internal/paths"
 	"github.com/iamlakshya/simstim/internal/proto"
 	"github.com/iamlakshya/simstim/internal/version"
 )
 
 // Features this host helper offers. Clients check them before using a feature.
-var Features = []string{"attach.replay", "upload", "peek", "setup", "rename", "send", "hooks", "restore", "ports", "worktree", "folders", "alerts"}
+var Features = []string{"attach.replay", "upload", "peek", "setup", "rename", "send", "hooks", "restore", "ports", "worktree", "folders", "alerts", "trace"}
 
 // MaxUpload is the largest file a client may upload.
 const MaxUpload = 16 << 20
@@ -37,6 +38,10 @@ type upload struct {
 
 type bridge struct {
 	w *proto.Writer
+
+	// traced is true while the attach asked for a debug trace. Only the
+	// loop in RunBridge uses it.
+	traced bool
 
 	mu      sync.Mutex
 	holder  net.Conn
@@ -85,7 +90,7 @@ func RunBridge(in io.Reader, out io.Writer) error {
 		}
 		switch f.Type {
 		case proto.TPing:
-			_ = w.Write(proto.TPong, f.Payload)
+			_ = w.Write(proto.TPong, proto.Pong(f.Payload, diag.Now()))
 		case proto.TRequest:
 			var req proto.Request
 			if json.Unmarshal(f.Payload, &req) == nil {
@@ -98,7 +103,13 @@ func RunBridge(in io.Reader, out io.Writer) error {
 					_ = w.WriteJSON(proto.TError, proto.Error{Code: "attach_failed", Message: err.Error(), Hint: "List sessions; it may have been deleted."})
 				}
 			}
-		case proto.TInput, proto.TResize:
+		case proto.TInput:
+			if b.traced {
+				// When the bridge read the key, for the holder's trace.
+				b.forward(proto.Frame{Type: proto.TTrace, Payload: proto.EncodeTime(diag.Now())})
+			}
+			b.forward(f)
+		case proto.TResize:
 			b.forward(f)
 		case proto.TDetach:
 			b.forward(f)
@@ -236,6 +247,7 @@ func (b *bridge) handle(req proto.Request) {
 
 func (b *bridge) attach(a proto.Attach) error {
 	b.closeHolder()
+	b.traced = a.Trace != ""
 	if !validID(a.Session) {
 		return fmt.Errorf("no session %s", a.Session)
 	}

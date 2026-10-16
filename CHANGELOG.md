@@ -10,6 +10,7 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 - The Setup workflow (`scripts/setup.sh` on bare runners and in the devcontainer's image) can be started by hand, and runs when the workflow itself changes.
 - The README shows the OpenSSF Scorecard badge: 8.1 of 10 after the first release.
 - A session's memory cap can be changed: `[sessions] memory_max` in `config.toml` for every session, and `new --memory-max <size>` for one. Each takes `auto` or a size such as `4G`, from `256M`. The launcher's starts use the key too, and the helper's own `new` takes `--memory-max`. A size above what the host gives all its sessions is lowered to that. See [docs/how-to/memory.md](docs/how-to/memory.md).
+- A debug trace of typing lag, off by default. With `SIMSTIM_DEBUG_FILE=<file>` set, `attach` and the launcher record when each key is read, sent and echoed. They also time a ping every second. The host helper then records the same keys in the bridge and the holder, with the holder's lock and screen model. It also samples the session's memory and pressure each second. It writes all this to `debug.jsonl` in the session's folder. Records hold sizes and times only, and each file turns over at 8 MiB. `go run ./test/keytrace` joins the two files and prints percentiles for each step ([tracing typing lag](docs/contributing/debug-trace.md)). An older host helper writes no trace.
 
 ### Changed
 

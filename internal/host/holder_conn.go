@@ -53,6 +53,8 @@ func (h *Holder) serve(conn net.Conn) {
 			if json.Unmarshal(f.Payload, &a) == nil {
 				h.attach(c, a)
 			}
+		case proto.TTrace:
+			c.bridgeRead(f.Payload)
 		case proto.TInput:
 			h.input(c, f.Payload)
 		case proto.TResize:
@@ -76,6 +78,7 @@ func (h *Holder) serve(conn net.Conn) {
 }
 
 func (h *Holder) attach(c *hclient, a proto.Attach) {
+	h.traceAttach(c, a.Trace)
 	snap, snapAt := h.snapshotFor(a)
 	h.mu.Lock()
 	mode, from := "full", h.ring.Start()
@@ -181,7 +184,7 @@ func (c *hclient) writeLoop() {
 }
 
 func (h *Holder) input(c *hclient, p []byte) {
-	h.mu.Lock()
+	lt := h.lockTimed()
 	if h.exited || !c.attached {
 		h.mu.Unlock()
 		return
@@ -195,6 +198,7 @@ func (h *Holder) input(c *hclient, p []byte) {
 	if _, err := h.ptmx.Write(p); err != nil {
 		h.log.Warn("pty write failed", "err", err)
 	}
+	lt.key(c, len(p))
 }
 
 func (h *Holder) resize(c *hclient, rz proto.Resize, force bool) {
@@ -226,6 +230,7 @@ func (h *Holder) resize(c *hclient, rz proto.Resize, force bool) {
 }
 
 func (h *Holder) drop(c *hclient) {
+	h.traceOff(c)
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	delete(h.clients, c)

@@ -42,6 +42,8 @@ type Conn struct {
 
 	lastRecv atomic.Int64
 	done     chan struct{}
+
+	tr *connTrace // the debug trace (trace.go), or nil
 }
 
 // ErrNotInstalled means the host has no helper of this client's version.
@@ -101,7 +103,8 @@ func dial(ctx context.Context, h Host, rt route) (*Conn, error) {
 	}
 	stdin := proc.Stdin()
 	c := &Conn{Host: h, proc: proc, hint: rt.t.ReachHint(), stdin: stdin, w: proto.NewWriter(stdin),
-		pending: map[uint64]chan proto.Response{}, stream: make(chan proto.Frame, 4096), done: make(chan struct{})}
+		pending: map[uint64]chan proto.Response{}, stream: make(chan proto.Frame, 4096), done: make(chan struct{}),
+		tr: newConnTrace(ctx)}
 	r := bufio.NewReaderSize(proc.Stdout(), 256<<10)
 	if err := c.w.WriteJSON(proto.THello, proto.Hello{Magic: proto.Magic, Protocol: version.Protocol, Version: version.Version, Role: "client"}); err != nil {
 		c.kill()
@@ -191,7 +194,13 @@ func (c *Conn) readLoop(r *bufio.Reader) {
 				}
 			}
 		case proto.TPong:
+			if c.tr != nil {
+				c.tr.t.pong(c.tr.id, f.Payload)
+			}
 		case proto.TAttached, proto.TOutput, proto.TSnapshot, proto.TEnded, proto.TError:
+			if c.tr != nil && f.Type == proto.TOutput {
+				c.tr.arrived(f.Payload)
+			}
 			select {
 			case c.stream <- f:
 			case <-c.done:
@@ -236,8 +245,13 @@ func (c *Conn) Done() <-chan struct{} { return c.done }
 // LastRecv is when the last frame arrived.
 func (c *Conn) LastRecv() time.Time { return time.Unix(0, c.lastRecv.Load()) }
 
-// Ping sends a heartbeat.
-func (c *Conn) Ping() error { return c.w.Write(proto.TPing, nil) }
+// Ping sends a heartbeat. With the debug trace on, it is a timed ping.
+func (c *Conn) Ping() error {
+	if c.tr != nil {
+		return c.w.Write(proto.TPing, c.tr.t.ping())
+	}
+	return c.w.Write(proto.TPing, nil)
+}
 
 // Call sends a request and decodes the result into out.
 func (c *Conn) Call(ctx context.Context, op string, args any, out any) error {
@@ -289,8 +303,13 @@ func (c *Conn) Call(ctx context.Context, op string, args any, out any) error {
 // Stream returns attach frames.
 func (c *Conn) Stream() <-chan proto.Frame { return c.stream }
 
-// Send writes a raw frame.
-func (c *Conn) Send(t proto.Type, p []byte) error { return c.w.Write(t, p) }
+// Send writes a raw frame. With the debug trace on, it records each key.
+func (c *Conn) Send(t proto.Type, p []byte) error {
+	if c.tr != nil && t == proto.TInput {
+		return c.tr.sendKey(c.w, p)
+	}
+	return c.w.Write(t, p)
+}
 
 // SendJSON writes a JSON frame.
 func (c *Conn) SendJSON(t proto.Type, v any) error { return c.w.WriteJSON(t, v) }

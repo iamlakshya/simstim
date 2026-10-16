@@ -76,6 +76,7 @@ type attacher struct {
 	swallow map[int]bool
 	// seen is the last known state of each session on this host, for notifications.
 	seen map[string]string
+	tr   *attachTrace // the debug trace (trace.go), or nil
 }
 
 // Attach connects to a session and runs it in this terminal until the user
@@ -98,8 +99,14 @@ func Attach(ctx context.Context, o AttachOptions) (AttachResult, error) {
 	if err != nil {
 		return AttachResult{}, &UserError{Msg: "bad image paste key: " + err.Error(), Hint: "Fix attach.image_paste_key in the config."}
 	}
+	tr, err := openAttachTrace(o.Session)
+	if err != nil {
+		return AttachResult{}, err
+	}
+	defer tr.close(os.Stderr) // after the terminal is put back
+	ctx = withTrace(ctx, tr)
 	a := &attacher{o: o, ssh: &SSH{Host: o.Host}, fd: int(o.In.Fd()), filter: keys.New(dk, pk),
-		key: o.Host.Name + "/" + o.Session, swallow: map[int]bool{}}
+		key: o.Host.Name + "/" + o.Session, swallow: map[int]bool{}, tr: tr}
 
 	last := int64(-1)
 	if o.State.Valid && o.State.Key == a.key {
@@ -134,6 +141,7 @@ func Attach(ctx context.Context, o AttachOptions) (AttachResult, error) {
 		for {
 			n, err := cr.Read(buf)
 			if n > 0 {
+				a.tr.stdin(n)
 				select {
 				case a.inCh <- append([]byte(nil), buf[:n]...):
 				case <-stop:
@@ -186,7 +194,8 @@ func (a *attacher) size() (cols, rows, xpx, ypx int) { return termSize(a.o.Out) 
 
 // handshake sends the attach request and waits for the answer.
 func (a *attacher) handshake(last int64, cols, rows, xpx, ypx int) (proto.Attached, error) {
-	req := proto.Attach{Session: a.o.Session, Cols: cols, Rows: rows, XPx: xpx, YPx: ypx, Client: brand.Name, LastOffset: last}
+	req := proto.Attach{Session: a.o.Session, Cols: cols, Rows: rows, XPx: xpx, YPx: ypx, Client: brand.Name, LastOffset: last,
+		Trace: a.conn.startTrace()}
 	if err := a.conn.SendJSON(proto.TAttach, req); err != nil {
 		return proto.Attached{}, ErrClosed
 	}
@@ -251,7 +260,7 @@ func (a *attacher) output(off int64, data []byte) {
 func (a *attacher) loop(ctx context.Context) error {
 	winch, stopWinch := watchResize(a.o.Out)
 	defer stopWinch()
-	heart := time.NewTicker(pingEvery)
+	heart := time.NewTicker(a.tr.pingEvery())
 	defer heart.Stop()
 	watch := time.NewTicker(watchEvery)
 	defer watch.Stop()
@@ -331,6 +340,7 @@ func (a *attacher) onKeys(ctx context.Context, b []byte, ok bool, detachTimer, f
 		a.res.Detached = true
 		return true
 	}
+	a.tr.took()
 	if a.input(ctx, b, detachTimer) {
 		return true
 	}
@@ -355,6 +365,9 @@ func (a *attacher) frame(f proto.Frame) (done bool, err error) {
 		off, data, err := proto.DecodeOutput(f.Payload)
 		if err == nil {
 			a.output(off, data)
+			if a.tr != nil {
+				a.tr.drawn(off, len(data))
+			}
 		}
 	case proto.TSnapshot:
 		// A redraw of the current screen, made by the host's terminal emulator.

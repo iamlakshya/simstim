@@ -45,7 +45,11 @@ const (
 	// TSnapshot carries VT bytes that redraw the session's current screen on a
 	// blank terminal. Live output from Attached.Live follows it.
 	TSnapshot Type = 0x27
-	TEvent    Type = 0x30
+	// TTrace goes from the bridge to a holder, only in a traced attach, just
+	// before each TInput frame. Its payload is EncodeTime of when the bridge
+	// read that frame. A holder that does not know it ignores it.
+	TTrace Type = 0x28
+	TEvent Type = 0x30
 
 	TUploadBegin Type = 0x40
 	TUploadChunk Type = 0x41
@@ -139,6 +143,50 @@ func DecodeOutput(p []byte) (int64, []byte, error) {
 	return int64(binary.LittleEndian.Uint64(p)), p[8:], nil //nolint:gosec // G115: a peer's offsets stay far below 2^63
 }
 
+// A timed ping carries an 8-byte ID. The bridge answers it with a pong of
+// the same ID, then its monotonic time in ns, so that the client can line
+// up the two clocks. An older bridge echoes the ID alone. Any other ping is
+// echoed as it is.
+
+// EncodePing builds the payload of a timed ping.
+func EncodePing(id uint64) []byte {
+	return binary.LittleEndian.AppendUint64(nil, id)
+}
+
+// Pong builds the payload that answers a ping, at the host's time now.
+func Pong(ping []byte, now int64) []byte {
+	if len(ping) != 8 {
+		return ping
+	}
+	return append(append([]byte(nil), ping...), EncodeTime(now)...)
+}
+
+// DecodePong splits the answer to a timed ping. host is 0 when the bridge
+// sent no time. ok is false when p does not answer a timed ping.
+func DecodePong(p []byte) (id uint64, host int64, ok bool) {
+	switch len(p) {
+	case 8:
+		return binary.LittleEndian.Uint64(p), 0, true
+	case 16:
+		return binary.LittleEndian.Uint64(p), DecodeTime(p[8:]), true
+	default:
+		return 0, 0, false
+	}
+}
+
+// EncodeTime encodes a monotonic time in ns as 8 bytes, little-endian.
+func EncodeTime(t int64) []byte {
+	return binary.LittleEndian.AppendUint64(nil, uint64(t)) //nolint:gosec // G115: a monotonic time is never negative
+}
+
+// DecodeTime reads a time that EncodeTime made, or 0 from a short payload.
+func DecodeTime(p []byte) int64 {
+	if len(p) < 8 {
+		return 0
+	}
+	return int64(binary.LittleEndian.Uint64(p)) //nolint:gosec // G115: a monotonic time stays far below 2^63
+}
+
 // Upload chunks carry the upload ID first.
 
 // EncodeChunk builds an upload chunk payload.
@@ -214,6 +262,9 @@ type Attach struct {
 	// LastOffset is the offset after the last byte this client's terminal shows,
 	// or -1 when the terminal has none of this session's output.
 	LastOffset int64 `json:"last_offset"`
+	// Trace, when set, asks the host to trace this attach: the bridge and the
+	// holder write debug records that carry this ID. An older host ignores it.
+	Trace string `json:"trace,omitempty"`
 }
 
 // Attached confirms an attach.

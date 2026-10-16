@@ -101,8 +101,13 @@ func waitFile(t *testing.T, path, want string) []byte {
 	return b
 }
 
-func TestAttachIsByteExact(t *testing.T) {
-	r := newAttachRun(t)
+func TestAttachIsByteExact(t *testing.T) { checkByteExact(t, newAttachRun(t), nil) }
+
+// checkByteExact attaches to a session that prints every byte value and
+// records every key, and checks that both reach the other end unchanged.
+// While attached, it calls during, when it is not nil.
+func checkByteExact(t *testing.T, r *attachRun, during func(id string)) {
+	t.Helper()
 	// Every byte value, and the sequences terminals care most about.
 	data := append(clienttest.EveryByte(4096), []byte("\x1b]8;;https://example.com\x1b\\link\x1b]8;;\x1b\\ \x1b[38;2;255;100;0mtruecolor\x1b[0m "+
 		"\x1b[4:3mcurly\x1b[0m \x1b]777;notify;Title;Body\x1b\\\x1b]52;c;aGVsbG8=\x1b\\\x1b[?2026h\x1b[?2026l END")...)
@@ -122,6 +127,9 @@ func TestAttachIsByteExact(t *testing.T) {
 	r.term.Type(typed)
 	if got := waitFile(t, keys, "\x00"); string(got) != typed {
 		t.Fatalf("the agent got %q, want %q", got, typed)
+	}
+	if during != nil {
+		during(id)
 	}
 	r.term.Type(detach)
 	e := r.end(done)

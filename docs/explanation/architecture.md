@@ -212,11 +212,11 @@ Triggers: the detach key, closing the tab, `simstim kill` from elsewhere, or SIG
 - **Hello first, both ways:** `{magic, protocol: "1.0", features: […], version}`.
 - **Compatibility:** message types are append-only. A peer ignores unknown types. A missing feature degrades with a clear message.
 - **Bridge to client:**
-  - `hello`, `ping`/`pong`;
+  - `hello`, `ping`/`pong` (the pong to a timed ping carries the host's monotonic clock);
   - `hosts.info`, `ls`, `watch`/`event`, `new`, `kill`, `rename`;
   - `upload.begin`/`upload.chunk`/`upload.end`;
   - `attach`, `detach`, `take_size`, `input`, `resize`, `output{offset}`, `snapshot` (VT bytes that redraw the screen; output from `Attached.From` follows).
-- **Holder socket:** the same `attach` family, plus `info`, `subscribe`, `hook`, `set_meta` and `kill`.
+- **Holder socket:** the same `attach` family, plus `info`, `subscribe`, `hook`, `set_meta` and `kill`. While a client traces its attach, a `trace` frame goes before each key.
 - **Back-pressure:**
   - Each client's buffer is capped at 4 MiB.
   - A client that falls behind is dropped to a fresh snapshot.
@@ -245,7 +245,7 @@ The contract has its own page: [the fidelity contract](fidelity.md).
 | Path | Contents |
 | --- | --- |
 | `~/.local/share/simstim/bin/<version>/` and `current` | `simstim-host` and `simstim-vt` |
-| `~/.local/state/simstim/sessions/<id>/` | `manifest.json`, `paste/` (0700), screen snapshot, logs |
+| `~/.local/state/simstim/sessions/<id>/` | `manifest.json`, `paste/` (0700), screen snapshot, logs, and the debug trace while a client traces its attach ([tracing typing lag](../contributing/debug-trace.md)) |
 | `$XDG_RUNTIME_DIR/simstim/s/<id>.sock` | Holder sockets, 0600. Falls back to `/tmp/simstim-<uid>` (0700, owner checked) without linger. |
 | `~/.local/share/simstim/worktrees/<repo>/<slug>-<id>` (v2) | Worktrees per task |
 | `~/.config/simstim/alerts.toml` | Where alerts go: commands, ntfy topics, webhooks (0600; [alerts](../how-to/alerts.md)) |

@@ -45,6 +45,7 @@ func (a *attacher) waitToRetry(ctx context.Context, banner, retry <-chan time.Ti
 			if !ok {
 				return true
 			}
+			a.tr.took()
 			for _, p := range a.filter.Feed(b) {
 				if p.Kind == keys.Match && p.Index == 0 && !p.Release && !p.Repeat {
 					return true
