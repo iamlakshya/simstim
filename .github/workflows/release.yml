@@ -102,3 +102,23 @@ jobs:
       base64-subjects: ${{ needs.release.outputs.hashes }}
       upload-assets: true
       draft-release: true
+
+  notes:
+    # The release's notes, from the CHANGELOG, written last: the provenance
+    # job's upload replaces the body of the draft it adds its file to.
+    needs: [release, provenance]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Write the notes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+          LINK_BASE: ${{ github.server_url }}/${{ github.repository }}/blob/${{ github.ref_name }}/
+        run: |
+          scripts/release-notes.sh "$TAG" > "$RUNNER_TEMP/notes.md"
+          gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --notes-file "$RUNNER_TEMP/notes.md"
