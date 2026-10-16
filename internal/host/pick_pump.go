@@ -16,7 +16,8 @@ import (
 	"github.com/iamlakshya/simstim/internal/version"
 )
 
-// pickEscFlush is how long a lone ESC waits for the rest of a key sequence.
+// pickEscFlush is how long the input filter may hold an unfinished key
+// sequence before it goes to the session as it is. A lone ESC never waits.
 const pickEscFlush = 15 * time.Millisecond
 
 // pickDetach is the key that detaches. Phones send it as the legacy byte.

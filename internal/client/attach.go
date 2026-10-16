@@ -55,8 +55,11 @@ const (
 	doubleTap   = 400 * time.Millisecond
 	watchEvery  = 5 * time.Second
 	wakeGap     = 4 * time.Second
-	escFlush    = 15 * time.Millisecond
 )
+
+// escFlush is how long the input filter may hold an unfinished key sequence
+// before it goes to the agent as it is. A lone Esc never waits. Tests change it.
+var escFlush = 15 * time.Millisecond
 
 type attacher struct {
 	o       AttachOptions
