@@ -16,6 +16,7 @@ import (
 	"github.com/iamlakshya/simstim/internal/brand"
 	"github.com/iamlakshya/simstim/internal/client"
 	"github.com/iamlakshya/simstim/internal/onboard"
+	"github.com/iamlakshya/simstim/internal/proto"
 	"github.com/iamlakshya/simstim/internal/tui"
 )
 
@@ -115,21 +116,31 @@ func attachEnded(ctx context.Context, h client.Host, id, name string) (bool, err
 	if err != nil {
 		return false, err
 	}
-	switch {
-	case res.Ended != nil && res.Ended.ExitCode == -1:
-		fmt.Printf("\r\nThe session %s on %s stopped.\n", name, h.Name)
-	case res.Ended != nil:
-		why := fmt.Sprintf("exit code %d", res.Ended.ExitCode)
-		if res.Ended.OOM {
-			why = "out of memory"
-		} else if res.Ended.Signal != "" {
-			why = res.Ended.Signal
-		}
-		fmt.Printf("\r\nThe session %s on %s ended (%s).\n", name, h.Name, why)
-	default:
+	if res.Ended != nil {
+		fmt.Print(endMessage(name, h.Name, res.Ended))
+	} else {
 		fmt.Printf("\r\nDetached. %s keeps running on %s.\n", name, h.Name)
 	}
 	return res.Ended != nil, nil
+}
+
+// endMessage is what attach prints when the session's agent ended, with the
+// step to try next when there is one.
+func endMessage(name, host string, e *proto.Ended) string {
+	if e.ExitCode == -1 {
+		return fmt.Sprintf("\r\nThe session %s on %s stopped.\n", name, host)
+	}
+	why := fmt.Sprintf("exit code %d", e.ExitCode)
+	if e.OOM {
+		why = "out of memory"
+	} else if e.Signal != "" {
+		why = e.Signal
+	}
+	s := fmt.Sprintf("\r\nThe session %s on %s ended (%s).\n", name, host, why)
+	if hint := client.EndHint(e); hint != "" {
+		s += "\nTry: " + hint + "\n"
+	}
+	return s
 }
 
 // resolve finds a session by ID or by unique name.

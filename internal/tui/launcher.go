@@ -465,13 +465,7 @@ func errorBlock(msg, hint string, w int) []string {
 		out = append(out, lead+l)
 	}
 	if hint != "" {
-		for i, l := range wrap(hint, w-2) {
-			lead := sAccent.Render(glyphNext) + " "
-			if i > 0 {
-				lead = "  "
-			}
-			out = append(out, lead+sLink.Render(l))
-		}
+		out = append(out, nextLines(hint, w)...)
 	}
 	return out
 }

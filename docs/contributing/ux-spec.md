@@ -219,11 +219,12 @@ A click outside the palette, the peek, the host details or a confirm closes it.
 ### 2.8 Notices and quitting
 
 - **Notices** are short lines that slide in from the left above the bottom rule, and fade:
-  - success is a green `✓` and the text;
-  - information is a cyan `•`;
-  - an error is a red `✕`, then a cyan `→` and the step to try.
+  - Success is a green `✓` and the text.
+  - Information is a cyan `•`.
+  - A warning is a yellow `●`. When there is a step to try, as after an agent ran out of memory, a cyan `→` and the step follow.
+  - An error is a red `✕`, then a cyan `→` and the step to try.
 
-  They last 4 s, or 8 s for an error, and two lines show at once.
+  They last 4 s, or 8 s for an error or a step to try, and two lines show at once.
 - **Quitting:** `ctrl+c` turns the keys line into "ctrl+c again to quit, sessions keep running   esc stay". A second `ctrl+c` quits, and any other key stays. `q` quits at once. Quitting never stops a session.
 
 ### 2.9 Attached

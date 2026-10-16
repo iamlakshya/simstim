@@ -40,9 +40,13 @@ func lifeOf(k toastKind) time.Duration {
 	return toastLife
 }
 
-// push adds a toast. A repeat of a visible one extends it instead.
+// push adds a toast. A repeat of a visible one extends it instead. A toast
+// with a step to try lasts as long as an error, so there is time to read it.
 func (t *toastStack) push(now time.Time, kind toastKind, text, hint string) {
 	life := lifeOf(kind)
+	if hint != "" {
+		life = toastErrorLife
+	}
 	for i := range t.shown {
 		if t.shown[i].text == text {
 			t.shown[i].until = now.Add(life)
@@ -107,6 +111,26 @@ func (m *Model) toastErr(err error) tea.Cmd {
 	return m.after(toastErrorLife, toastTickMsg{})
 }
 
+// toastNext shows a notice with the step to try next under it.
+func (m *Model) toastNext(kind toastKind, text, hint string) tea.Cmd {
+	m.toasts.push(m.now(), kind, text, hint)
+	return m.after(toastErrorLife, toastTickMsg{})
+}
+
+// nextLines draws the step to try next: a cyan arrow, then the step.
+func nextLines(hint string, w int) []string {
+	lines := wrap(hint, w-2)
+	out := make([]string, 0, len(lines))
+	for i, l := range lines {
+		lead := sAccent.Render(glyphNext) + " "
+		if i > 0 {
+			lead = "  "
+		}
+		out = append(out, lead+sLink.Render(l))
+	}
+	return out
+}
+
 // noticeLine is one line of a notice, how visible it is as it fades, and
 // when it came, for its slide.
 type noticeLine struct {
@@ -141,6 +165,9 @@ func (m *Model) noticeLines(w int) []noticeLine {
 					lead = st.Render(glyph) + " "
 				}
 				lines = append(lines, lead+text.Render(l))
+			}
+			if t.hint != "" {
+				lines = append(lines, nextLines(t.hint, w)...)
 			}
 		}
 		a := m.noticeAlpha(t)

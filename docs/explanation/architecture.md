@@ -177,7 +177,7 @@ Triggers: the detach key, closing the tab, `simstim kill` from elsewhere, or SIG
 ### 3.7 A session ends
 
 - **The agent exits:** the holder records the exit code and signal, keeps the final screen, and marks the session `exited`. The session stays in the list until the user removes it, or respawns it in v2.
-- **Out of memory:** the cgroup's `memory.events` shows the kill, and the session is marked `errored: oom` with its last screen. The host and the other sessions are unharmed.
+- **Out of memory:** the cgroup's `memory.events` counts each kill at the cap. If the kill stopped the agent, the holder marks the session `errored: oom` with its last screen. If it stopped a process that the agent started, such as a build, the session keeps its state. It gets the out-of-memory mark, a reason and one `oom` alert. If the agent ends within about two seconds of that kill, its ended session gets the reason and the alert, but not the mark. The host and the other sessions are unharmed.
 
 ### 3.8 Upgrade
 

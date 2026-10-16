@@ -261,6 +261,21 @@ func TestAttachKeepsStateAndReportsEnd(t *testing.T) {
 	hasToast(t, hs.m, "Cannot reach atlas-dev: timed out.")
 }
 
+// An end out of memory says what to try next (AGENTS.md rule 7), and the
+// end and its step both show at every size.
+func TestAttachOOMSaysWhatToTry(t *testing.T) {
+	end := &proto.Ended{ExitCode: 137, Signal: "killed", OOM: true}
+	for _, sz := range sizes {
+		hs := sessions(t, sz.w, sz.h)
+		hs.be.attach = client.AttachResult{Ended: end}
+		hs.key("enter")
+		out := plainScreen(hs.m)
+		if !strings.Contains(out, "● auth-refactor on atlas-dev ended (out of memory).") || !strings.Contains(out, "→ "+client.EndHint(end)) {
+			t.Fatalf("at %dx%d the end or its next step is missing:\n%s", sz.w, sz.h, out)
+		}
+	}
+}
+
 func TestAttachEndedSession(t *testing.T) {
 	hs := sessions(t, 80, 24)
 	hs.key("end", "enter")

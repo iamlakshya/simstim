@@ -136,12 +136,14 @@ A destination flag without `--add` replaces the whole file. With no destination 
 | `turn_done` | The agent finished a turn in which it worked for longer than `min_turn` |
 | `exited` | The program ended with code 0 |
 | `failed` | The program ended with another code, or a signal |
-| `oom` | A process in the session hit its memory cap and was stopped (also when that process was the program itself) |
+| `oom` | A process in the session hit its memory cap and was stopped (also when that process was the program itself). A program that runs on does not also send `needs_input` |
 | `started` | The session started |
 | `restored` | The session was started again after a host restart |
 | `test` | `host alerts test` |
 
 No event is sent when you kill a session, or when the host shuts down.
+
+A session sends one `oom` a minute at most, like any event ([keep the noise down](#keep-the-noise-down)). If the cap stops a process that the program started, and then the program itself within a minute, only the first `oom` goes out. The launcher and `ls` still show that the session ended.
 
 An event looks like this:
 

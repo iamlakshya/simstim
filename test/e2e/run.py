@@ -178,22 +178,42 @@ time.sleep(1)
 ls = subprocess.run([cli, "ls", "--json"], capture_output=True, text=True).stdout
 ok('"id": "%s"' % sid4 in ls and '"alive": true' in ls, "session survives a killed client")
 
-# F. Memory cap: a hog is OOM-killed and marked; another session is unaffected.
+# F. Memory cap: a hog that the agent started is OOM-killed and the session
+#    marked, while the agent runs on. Another session is unaffected. Then a
+#    hog that is the agent itself ends its session out of memory.
 #    A container has no systemd, so no memory caps: there the hog would only
 #    fill the container, and the check is skipped.
+def session_rows():
+    ls = subprocess.run([cli, "ls", "--json"], capture_output=True, text=True).stdout
+    return {s["id"]: s for h in json.loads(ls) for s in (h["sessions"] or [])}
+
 if host_machine().get("provider") == "docker":
     print("SKIP memory cap: a container has no systemd user manager, so sessions have no memory caps")
     created += [sid, sid2, sid3, sid4]
 else:
     sid5 = start("e2e-oom", "/bin/bash", "-c", "head -c 3G /dev/zero | tail > /dev/null; sleep 600")
     time.sleep(40)
-    ls = subprocess.run([cli, "ls", "--json"], capture_output=True, text=True).stdout
-    rows = {s["id"]: s for h in json.loads(ls) for s in (h["sessions"] or [])}
+    rows = session_rows()
     r5 = rows.get(sid5, {})
     ok(rows.get(sid4, {}).get("alive"), "other sessions keep running")
     print("oom session:", {k: r5.get(k) for k in ("state", "reason", "memory_current", "memory_max")})
     ok(r5.get("oom_killed") is True, "the over-the-cap process was stopped and the session marked (reason: %s)" % r5.get("reason"))
+    ok(r5.get("state") in ("working", "idle"), "the agent runs on after its child's kill, and does not need input (state: %s)" % r5.get("state"))
     created += [sid, sid2, sid3, sid4, sid5]
+    # tail keeps its last line, and /dev/zero has no newline: it grows until the cap stops it.
+    # Without a cap it would fill the host's memory, so it runs only under one.
+    if not r5.get("memory_max"):
+        print("SKIP memory cap on the agent itself: the session has no memory cap")
+    else:
+        sid_oom = start("e2e-oom-agent", "/bin/sh", "-c", "exec tail /dev/zero")
+        created.append(sid_oom)
+        r_oom, end = {}, time.time() + 60
+        while time.time() < end and r_oom.get("state") not in ("exited", "errored"):
+            time.sleep(2)
+            r_oom = session_rows().get(sid_oom, {})
+        print("oom agent session:", {k: r_oom.get(k) for k in ("state", "reason", "signal", "oom_killed")})
+        ok(r_oom.get("oom_killed") is True and r_oom.get("state") == "errored" and r_oom.get("reason") == "oom",
+           "the cap stopped the agent itself, and its session ended out of memory (state: %s, reason: %s)" % (r_oom.get("state"), r_oom.get("reason")))
 
 # G. Laptop sleep: freeze the client and cut its network path; on wake it must
 #    be back to live output within 5 s, with what it missed replayed.

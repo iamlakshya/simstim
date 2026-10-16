@@ -12,6 +12,7 @@ import (
 
 	"github.com/iamlakshya/simstim/internal/client"
 	"github.com/iamlakshya/simstim/internal/host/hosttest"
+	"github.com/iamlakshya/simstim/internal/proto"
 )
 
 // inTerminal runs the command line with a terminal as its stdin and stdout,
@@ -81,6 +82,27 @@ func TestAttachReportsTheEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 	term.WaitFor("The session killed on box ended (terminated).")
+}
+
+// An end with a known next step says it, as an error does (AGENTS.md rule 7).
+func TestEndMessage(t *testing.T) {
+	for _, c := range []struct {
+		e    proto.Ended
+		want string
+	}{
+		{proto.Ended{ExitCode: 9}, "\r\nThe session app on box ended (exit code 9).\n"},
+		{proto.Ended{ExitCode: 137, Signal: "killed"}, "\r\nThe session app on box ended (killed).\n"},
+		{proto.Ended{ExitCode: -1}, "\r\nThe session app on box stopped.\n"},
+		{proto.Ended{ExitCode: 137, Signal: "killed", OOM: true},
+			"\r\nThe session app on box ended (out of memory).\n\nTry: " + client.EndHint(&proto.Ended{OOM: true}) + "\n"},
+	} {
+		if got := endMessage("app", "box", &c.e); got != c.want {
+			t.Errorf("%+v: %q, want %q", c.e, got, c.want)
+		}
+	}
+	if client.EndHint(&proto.Ended{OOM: true}) == "" || client.EndHint(&proto.Ended{ExitCode: 1}) != "" || client.EndHint(nil) != "" {
+		t.Error("only an end out of memory has a next step")
+	}
 }
 
 func TestKeyTester(t *testing.T) {
