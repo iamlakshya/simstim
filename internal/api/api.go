@@ -23,7 +23,7 @@ type NewArgs struct {
 	Cwd   string   `json:"cwd,omitempty"`
 	// MakeFolder makes Cwd, and any missing folders above it, when Cwd does
 	// not exist and is a full path. Without it, a missing Cwd is a
-	// CodeNoFolder error.
+	// CodeNoFolder error. A helper that can do it offers the feature "mkdir".
 	MakeFolder         bool   `json:"make_folder,omitempty"`
 	Cols               int    `json:"cols,omitempty"`
 	Rows               int    `json:"rows,omitempty"`

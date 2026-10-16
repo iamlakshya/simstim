@@ -6,7 +6,7 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ### Added
 
-- `new` and the launcher offer to make a session's folder when it does not exist on the host, instead of failing. The host asks only after it finds the agent. It makes the folder, and any missing folders above it, only after a yes, and removes them again if the start then fails. `new --mkdir` makes it without asking. Without a terminal, a missing folder is still an error. The host makes only a full path, such as `~/src/app`, and a new worktree still needs an existing repository.
+- `new` and the launcher offer to make a session's folder when it does not exist on the host, instead of failing. The host asks only after it finds the agent. It makes the folder, and any missing folders above it, only after a yes, and removes them again if the start then fails. `new --mkdir` makes it without asking. Without a terminal, a missing folder is still an error. The host makes only a full path, such as `~/src/app`, and a new worktree still needs an existing repository. With an older host helper, `new --mkdir` says that the helper is too old. The helper's own `new` command takes `--mkdir` too, and its errors now show their hints.
 - The Setup workflow (`scripts/setup.sh` on bare runners and in the devcontainer's image) can be started by hand, and runs when the workflow itself changes.
 - The README shows the OpenSSF Scorecard badge: 8.1 of 10 after the first release.
 

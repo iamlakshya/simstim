@@ -276,6 +276,9 @@ func TestTransportStartEndsWithItsContext(t *testing.T) {
 func TestBridgeMissingFolder(t *testing.T) {
 	h := hosttest.New(t)
 	c := dial(t, h)
+	if !c.HasFeature("mkdir") {
+		t.Fatalf("features %q, want mkdir", c.Features)
+	}
 	ctx := context.Background()
 	dir := filepath.Join(h.Home, "src", "new-app")
 	a := client.NewArgs{Argv: []string{"true"}, Cwd: "~/src/new-app"}

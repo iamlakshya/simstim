@@ -4,6 +4,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"slices"
@@ -13,6 +14,7 @@ import (
 	"github.com/iamlakshya/simstim/internal/api"
 	"github.com/iamlakshya/simstim/internal/brand"
 	"github.com/iamlakshya/simstim/internal/host"
+	"github.com/iamlakshya/simstim/internal/proto"
 	"github.com/iamlakshya/simstim/internal/version"
 )
 
@@ -21,7 +23,7 @@ const usage = `%[1]s keeps agent sessions alive on this host. The client runs it
 Usage:
   %[1]s bridge              serve one client on stdin and stdout
   %[1]s ls [--json]         list sessions
-  %[1]s new [--agent a] [--dir d] [--name n] [--setup|--no-setup] [-- argv…]
+  %[1]s new [--agent a] [--dir d [--mkdir]] [--name n] [--setup|--no-setup] [-- argv…]
   %[1]s rm <id>             stop a session and remove it
   %[1]s doctor [--json]     check this host
   %[1]s keytest             print every key the terminal sends
@@ -68,6 +70,10 @@ func main() {
 	}
 	if err := run(os.Args[2:]); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		var pe *proto.Error
+		if errors.As(err, &pe) && pe.Hint != "" {
+			fmt.Fprintf(os.Stderr, "\nTry: %s\n", pe.Hint)
+		}
 		os.Exit(1)
 	}
 }
@@ -113,6 +119,8 @@ func runNew(args []string) error {
 		case "--dir":
 			i++
 			a.Cwd = arg(args, i)
+		case "--mkdir":
+			a.MakeFolder = true
 		case "--name":
 			i++
 			a.Name = arg(args, i)

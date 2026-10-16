@@ -8,9 +8,9 @@ import (
 )
 
 // moreFeatures are the features that set hosts and sessions up: the requests
-// in this file, a new session's secrets (secrets.go), and trust in a
-// repository's setup script (setup.go).
-var moreFeatures = []string{"agents.check", "doctor.fix", "secrets", "setup.trust"}
+// in this file, a new session's secrets (secrets.go), its missing folder
+// (folders.go), and trust in a repository's setup script (setup.go).
+var moreFeatures = []string{"agents.check", "doctor.fix", "secrets", "mkdir", "setup.trust"}
 
 func init() { Features = append(Features, moreFeatures...) }
 

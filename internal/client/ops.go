@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/iamlakshya/simstim/internal/api"
+	"github.com/iamlakshya/simstim/internal/brand"
 )
 
 // Session is a session row, as the host reports it.
@@ -42,11 +43,23 @@ func (c *Conn) NewSession(ctx context.Context, a NewArgs) (*Session, error) {
 	if err := c.RequireSecrets(a); err != nil {
 		return nil, err
 	}
+	if err := c.needMakeFolder(a); err != nil {
+		return nil, err
+	}
 	var s Session
 	if err := c.Call(ctx, "new", a, &s); err != nil {
 		return nil, err
 	}
 	return &s, nil
+}
+
+// needMakeFolder fails when a start asks the host's helper to make its folder,
+// and the helper is too old to do that. An older helper ignores the request.
+func (c *Conn) needMakeFolder(a NewArgs) error {
+	if !a.MakeFolder || c.HasFeature("mkdir") {
+		return nil
+	}
+	return &UserError{Msg: "the helper on " + c.Host.Name + " is too old to make folders", Hint: brand.Name + " host add " + c.Host.Name + "   (updates the helper)"}
 }
 
 // DeleteResult says what deleting a session did.
