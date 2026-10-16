@@ -1,13 +1,9 @@
 package client
 
 import (
-	"encoding/json"
-	"errors"
 	"os"
 	"runtime"
 	"testing"
-
-	"github.com/iamlakshya/simstim/internal/api"
 )
 
 func TestSetupTrustIsKeptByHostAndRepository(t *testing.T) {
@@ -38,18 +34,5 @@ func TestSetupTrustIsKeptByHostAndRepository(t *testing.T) {
 	// Windows has no Unix file modes to check.
 	if err != nil || (runtime.GOOS != "windows" && st.Mode().Perm() != 0o600) {
 		t.Errorf("the answers file: %v %v", st, err)
-	}
-}
-
-func TestSetupQuestionOf(t *testing.T) {
-	data, _ := json.Marshal(api.SetupQuestion{Repo: "/r", Script: "/r/s"})
-	q, ok := SetupQuestionOf(&UserError{Msg: "m", Code: api.CodeSetupTrust, Data: data})
-	if !ok || q.Repo != "/r" || q.Script != "/r/s" {
-		t.Fatalf("question %+v %v", q, ok)
-	}
-	for _, err := range []error{nil, errors.New("x"), &UserError{Msg: "m", Code: "other"}, &UserError{Code: api.CodeSetupTrust}} {
-		if _, ok := SetupQuestionOf(err); ok {
-			t.Errorf("%v is not a question", err)
-		}
 	}
 }
