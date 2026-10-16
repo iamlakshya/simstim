@@ -4,6 +4,10 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-10-17
+
+Sessions now fit a 4 GB host. A session warns before its memory cap stops it, and `resume` starts its agent again after a stop. The launcher shows why an agent ended, and the spread of each round trip. A debug mode records what a bug report needs, in one local bundle.
+
 ### Added
 
 - `new` and the launcher offer to make a session's folder when it does not exist on the host, instead of failing. The host asks only after it finds the agent. It makes the folder, and any missing folders above it, only after a yes, and removes them again if the start then fails. `new --mkdir` makes it without asking. Without a terminal, a missing folder is still an error. The host makes only a full path, such as `~/src/app`, and a new worktree still needs an existing repository. With an older host helper, `new --mkdir` says that the helper is too old. The helper's own `new` command takes `--mkdir` too, and its errors now show their hints.

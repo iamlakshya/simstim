@@ -10,7 +10,7 @@ simstim runs Claude Code, Codex, opencode, Antigravity CLI or any other terminal
 
 [![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/iamlakshya/simstim/badge)](https://scorecard.dev/viewer/?uri=github.com/iamlakshya/simstim)
 
-> **Status:** early. The first release, 0.1.0, came out on 16 October 2026. Every feature passes 92 end-to-end checks on a Linux test host, and sessions have survived real reboots there. Before 1.0, a minor version may still break the CLI or the config ([versions](docs/contributing/releasing.md#versioning)).
+> **Status:** early. The latest release, 0.1.1, came out on 17 October 2026. Every feature passes 116 end-to-end checks on a Linux test host, and sessions have survived real reboots there. Before 1.0, a minor version may still break the CLI or the config ([versions](docs/contributing/releasing.md#versioning)).
 
 ## Why
 
