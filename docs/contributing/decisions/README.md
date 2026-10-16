@@ -29,6 +29,7 @@ Each record explains one choice: the context, the options and the outcome. Recor
 | [0023](0023-protect-main.md) | Changes reach main only through a pull request that passes CI | Accepted |
 | [0024](0024-memory-cap.md) | A session's memory cap is the host's memory minus a reserve, with the same limit on all sessions together, and a setting to change it (replaces the cap in 0006, and part of 0008) | Accepted |
 | [0025](0025-debug-mode.md) | A debug mode: `--debug` and `debug start` turn it on, profiles and a flight recorder go over the existing channel, and `debug bundle` writes one local archive with names replaced | Proposed |
-| [0026](0026-end-and-memory-alerts.md) | The once-a-minute rule never holds back a session's end, and a warning near the memory cap has its own event, `memory` (replaces one rule of the noise control in 0019, and adds an event to it) | Accepted |
+| [0026](0026-end-and-memory-alerts.md) | The once-a-minute rule never holds back a session's end, and a warning near the memory cap has its own event, `memory` (replaces one rule of the noise control in 0019, and adds an event to it, warning trigger replaced by 0027) | Accepted |
+| [0027](0027-memory-warning-growth.md) | The memory warning also comes when the memory still grows near the cap, and on its own at 95 % (replaces 0026's rule for what starts a warning) | Accepted |
 
 Write a new record from [the template](template.md).
