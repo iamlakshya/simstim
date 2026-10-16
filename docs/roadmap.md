@@ -18,7 +18,7 @@ Every candidate feature is scored from the evidence in the research notes:
 | **Impact** | 3: it changes who can use the tool, or keeps its core promise. 2: a clear gain for current users. 1: a polish. |
 | **Effort** | S (days) = 1, M (a week or two) = 2, L (a month or more) = 3. |
 
-**Horizons.** **Now** is built in the current goal: every item the goal requires, plus every other feature that scores 4 or more. **Next** scores 2 to 4. **Later** scores under 2. Next and later items are GitHub issues with the labels `horizon: next` or `horizon: later`.
+**Horizons.** **Now** is built in the current goal: every item the goal requires, plus every other feature that scores 4 or more. **Next** scores 2 to 4. **Later** scores under 2. The owner can also put an item in Now whatever its score: it goes under [Asked for by the owner](#asked-for-by-the-owner), with its score. Next and later items are GitHub issues with the labels `horizon: next` or `horizon: later`.
 
 ## Now
 
@@ -48,9 +48,17 @@ R6 scores low: few developers ask for it, and simstim stores no secrets by desig
 | N6 | **Repo setup hooks:** a repo's own setup script runs when a session or worktree starts, with its output in the session | setup-time 12 / 389; prebuilt environments are sold by Cursor, Coder, Devin, Codex | 3 | 2 | S | 6.0 |
 | N7 | **`pull <session>`:** bring a session's branch back to the laptop over the same SSH | worktrees 10 / 216; sold as Claude `--teleport`, `codex apply`, Terragon `terry pull` | 3 | 2 | S | 6.0 |
 
+### Asked for by the owner
+
+| # | Feature | Need (sources / reactions) | D | I | E | Score |
+| --- | --- | --- | --- | --- | --- | --- |
+| O1 | **A debug mode** ([#44](https://github.com/iamlakshya/simstim/issues/44)): off by default. A user turns it on with a flag or in a running session, and shares one local bundle. The owner asked on 16 October 2026 for it to be built now. [0025](contributing/decisions/0025-debug-mode.md) proposes its design. | No source asks for it. Claude Code and Consul ship one. | 1 | 2 | L | 0.7 |
+
+O1 scores 0.7, so by its score it would be in Later. It is in Now only because the owner asked for it. No source in the sample asks for a debug mode. It gets a demand of 1, as L1 and L2 do, because other tools have one. It collects the data to find the causes of two open bugs: a session stopped at its memory cap ([#40](https://github.com/iamlakshya/simstim/issues/40)), and typing lag ([#43](https://github.com/iamlakshya/simstim/issues/43)).
+
 ### Status
 
-On 15 October 2026 every item above is built, with docs, tests and end-to-end checks: R1 to R7, and N1 to N3 and N5 to N7. N4, the phone path, is scaffolded and hidden until its launch.
+On 15 October 2026 every item then in Now was built, with docs, tests and end-to-end checks: R1 to R7, and N1 to N3 and N5 to N7. N4, the phone path, is scaffolded and hidden until its launch. The owner asked for O1 on 16 October 2026. Its first part, a trace of typing lag, is built ([#50](https://github.com/iamlakshya/simstim/pull/50)), and [0025](contributing/decisions/0025-debug-mode.md) proposes the rest.
 
 ## Next
 
