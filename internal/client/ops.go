@@ -38,8 +38,13 @@ func (c *Conn) Sessions(ctx context.Context) ([]Session, error) {
 	return out, err
 }
 
-// NewSession starts a session.
+// NewSession starts a session. Unless a names a memory cap, the session gets
+// the one in config.toml.
 func (c *Conn) NewSession(ctx context.Context, a NewArgs) (*Session, error) {
+	a, err := withMemoryMax(a)
+	if err != nil {
+		return nil, err
+	}
 	if err := c.RequireSecrets(a); err != nil {
 		return nil, err
 	}

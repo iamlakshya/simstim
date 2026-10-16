@@ -113,13 +113,16 @@ The full resume table for eight agents is in [the host runtime note](../research
    - `COLORTERM=truecolor`;
    - the client's `TERM_PROGRAM` and its version;
    - `SIMSTIM_SESSION`.
-4. It writes the manifest and starts the holder:
+4. It writes the manifest. It gives `simstim.slice` the limit of all sessions together: the host's memory minus a reserve for the system. It does that only when the slice lacks the limit, and the running sessions use less than it. Then it starts the holder:
 
    ```text
+   systemctl --user set-property simstim.slice MemoryMax=…
    systemd-run --user --unit=simstim-s-<id> --slice=simstim.slice \
-     -p MemoryHigh=… -p MemoryMax=… -p MemorySwapMax=0 -p OOMPolicy=continue \
+     -p MemoryMax=… -p MemorySwapMax=0 -p OOMPolicy=continue \
      simstim-host holder <id>
    ```
+
+   The session's `MemoryMax` is the same limit, or the session's own `memory_max` when that is smaller ([0024](../contributing/decisions/0024-memory-cap.md)).
 
 5. The holder forks the PTY at the client's size and runs the agent's `launch_argv`. It starts the vt child, and opens its socket.
 6. The client attaches at once (3.3).
@@ -177,7 +180,7 @@ Triggers: the detach key, closing the tab, `simstim kill` from elsewhere, or SIG
 ### 3.7 A session ends
 
 - **The agent exits:** the holder records the exit code and signal, keeps the final screen, and marks the session `exited`. The session stays in the list until the user removes it, or respawns it in v2.
-- **Out of memory:** the cgroup's `memory.events` counts each kill at the cap. If the kill stopped the agent, the holder marks the session `errored: oom` with its last screen. If it stopped a process that the agent started, such as a build, the session keeps its state. It gets the out-of-memory mark, a reason and one `oom` alert. If the agent ends within about two seconds of that kill, its ended session gets the reason and the alert, but not the mark. The host and the other sessions are unharmed.
+- **Out of memory:** the cgroup's `memory.events` counts each kill at the cap. If the kill stopped the agent, the holder marks the session `errored: oom` with its last screen. If it stopped a process that the agent started, such as a build, the session keeps its state. It gets the out-of-memory mark, a reason and one `oom` alert. If the agent ends within about two seconds of that kill, its ended session gets the reason and the alert, but not the mark. The host is unharmed. A session's own cap stops only that session. When all sessions together reach the slice's limit, the kernel stops the biggest process of any agent in the slice, normally the one that grew.
 
 ### 3.8 Upgrade
 
@@ -292,7 +295,7 @@ For a host you add yourself, if OpenSSH can reach it, simstim can. [The connecti
 | AWS SSM, EC2 Instance Connect Endpoint | SSM is slow (about 0.6 MB/s). EICE ends every connection at 1 hour, and simstim reconnects. |
 | Azure Bastion, Cloudflare Access | Weak fits. Bastion has no ProxyCommand mode, and Cloudflare does not reconnect. |
 
-**Host size:** at least 2 vCPU and 4 GB plus swap. Comfortable: 4 vCPU, 8 GB and 80 GB of disk. One VM with many sessions beats one VM per session: about 5–6 busy Claude sessions fit in 6.5 GiB, against about 4 with a VM each.
+**Host size:** at least 2 vCPU and 4 GB. Comfortable: 4 vCPU, 8 GB and 80 GB of disk. The host keeps a reserve for the system, and its sessions share the rest. That is 2.9 GiB of 4 GiB, and 6.1 GiB of 8 GiB ([0024](../contributing/decisions/0024-memory-cap.md)). Swap does not add to that, because a session's memory never goes to swap. It helps only the system and the programs outside the sessions. One VM with many sessions beats one VM per session. About 5 busy Claude sessions fit in the 6.1 GiB of an 8 GB host, against about 4 with a VM each.
 
 ## 9. What we borrow, and from where
 

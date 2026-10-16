@@ -31,7 +31,10 @@ type NewArgs struct {
 	ColorTerm          string `json:"colorterm,omitempty"`
 	TermProgram        string `json:"term_program,omitempty"`
 	TermProgramVersion string `json:"term_program_version,omitempty"`
-	MemoryMax          int64  `json:"memory_max,omitempty"`
+	// MemoryMax caps the session's memory, in bytes. 0 asks for the host's
+	// default. A helper refuses less than MinMemoryMax, and lowers more than
+	// its limit for all sessions together to that limit (decision 0024).
+	MemoryMax int64 `json:"memory_max,omitempty"`
 	// Worktree gives the session its own git worktree and branch, from Base (default HEAD).
 	Worktree bool   `json:"worktree,omitempty"`
 	Base     string `json:"base,omitempty"`

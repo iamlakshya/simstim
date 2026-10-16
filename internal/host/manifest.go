@@ -95,7 +95,13 @@ type TermInfo struct {
 // Limits are the resource caps of the session.
 type Limits struct {
 	MemoryHigh int64 `json:"memory_high,omitempty"`
-	MemoryMax  int64 `json:"memory_max,omitempty"`
+	// MemoryMax is the memory cap that the session's unit got at its last
+	// start, in bytes.
+	MemoryMax int64 `json:"memory_max,omitempty"`
+	// MemoryAsked is the cap that the user asked for, or 0 for the host's
+	// default. Each start works MemoryMax out from it again, so a session
+	// that restore starts after a reboot gets the default of that time.
+	MemoryAsked int64 `json:"memory_asked,omitempty"`
 }
 
 // Runtime is live process information.

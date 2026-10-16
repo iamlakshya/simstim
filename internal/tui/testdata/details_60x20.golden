@@ -15,6 +15,6 @@
     System     Debian 13 · amd64 · 4 CPUs · 8 GiB · 61 …
     Helper     simstim-host 0.1.0
     Agents     claude · codex · opencode · shell
-    Limits     3.2 GiB per session · 4 sessions
+    Limits     6.1 GiB for sessions · 4 sessions
 
     t test   s shell   r reconnect   x remove   esc back

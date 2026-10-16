@@ -38,7 +38,7 @@ simstim new my-server --agent claude
 
 One process on the host keeps each session alive: its holder. The holder owns the agent's terminal, keeps the last 8 MiB of what the agent wrote, and works out what the agent is doing.
 
-Each holder runs as a systemd user service with a memory cap, so one agent cannot starve the others. When the host restarts, it starts each holder again, and the agent picks up its conversation with its own resume command ([restore after a reboot](../how-to/restore-after-reboot.md)).
+Each holder runs as a systemd user service with a memory cap. All sessions together leave a reserve free for the system, so agents cannot take down the host ([memory](../how-to/memory.md)). When the host restarts, it starts each holder again, and the agent picks up its conversation with its own resume command ([restore after a reboot](../how-to/restore-after-reboot.md)).
 
 ## Attach and detach
 

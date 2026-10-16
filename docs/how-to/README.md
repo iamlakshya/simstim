@@ -27,6 +27,7 @@ One task per page. New here? Start with [getting started](../tutorials/getting-s
 | [Ports](ports.md) | Open a web server that runs in a session |
 | [Paste images](image-paste.md) | Paste a screenshot into a remote agent |
 | [Keep your scrollback](scrollback.md) | Start agents inline, so your terminal keeps the conversation |
+| [Memory](memory.md) | Give a session more memory, and see what a host gives its sessions |
 | [Get alerts](alerts.md) | Hear from a session that needs you, with the laptop shut: ntfy, webhooks, commands |
 
 ## Your setup

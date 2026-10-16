@@ -8,8 +8,11 @@ Stop your sessions first (`simstim ls`, then `simstim kill <host>/<session>`). T
 ```sh
 systemctl --user disable --now simstim-restore.service
 rm -f ~/.config/systemd/user/simstim-restore.service
+systemctl --user revert simstim.slice
 rm -rf ~/.local/share/simstim ~/.local/state/simstim
 ```
+
+`systemctl --user revert` removes the memory limit that the helper put on the sessions' slice ([memory](memory.md)). It undoes what `systemctl --user set-property` stored.
 
 Linger, which `host add` turned on, stays on; `loginctl disable-linger` turns it off if nothing else needs it.
 

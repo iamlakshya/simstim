@@ -23,7 +23,7 @@ const usage = `%[1]s keeps agent sessions alive on this host. The client runs it
 Usage:
   %[1]s bridge              serve one client on stdin and stdout
   %[1]s ls [--json]         list sessions
-  %[1]s new [--agent a] [--dir d [--mkdir]] [--name n] [--setup|--no-setup] [-- argv…]
+  %[1]s new [--agent a] [--dir d [--mkdir]] [--name n] [--memory-max size] [--setup|--no-setup] [-- argv…]
   %[1]s rm <id>             stop a session and remove it
   %[1]s doctor [--json]     check this host
   %[1]s keytest             print every key the terminal sends
@@ -109,6 +109,20 @@ func runLs(args []string) error {
 }
 
 func runNew(args []string) error {
+	a, err := newArgs(args)
+	if err != nil {
+		return err
+	}
+	info, err := host.New(a)
+	if err != nil {
+		return err
+	}
+	return printJSON(info)
+}
+
+// newArgs reads the arguments of `new`, with the terminal from this
+// process's environment.
+func newArgs(args []string) (host.NewArgs, error) {
 	a := host.NewArgs{Term: os.Getenv("TERM"), ColorTerm: os.Getenv("COLORTERM"),
 		TermProgram: os.Getenv("TERM_PROGRAM"), TermProgramVersion: os.Getenv("TERM_PROGRAM_VERSION")}
 	for i := 0; i < len(args); i++ {
@@ -128,16 +142,19 @@ func runNew(args []string) error {
 			a.Setup = api.SetupRun
 		case "--no-setup":
 			a.Setup = api.SetupSkip
+		case "--memory-max":
+			i++
+			n, err := api.ParseMemoryMax(arg(args, i))
+			if err != nil {
+				return a, host.UserError("memory_max", "--memory-max: "+err.Error(), "Pass auto, or a size of 256M or more: "+api.MemorySizes+".")
+			}
+			a.MemoryMax = n
 		case "--":
 			a.Argv = args[i+1:]
 			i = len(args)
 		}
 	}
-	info, err := host.New(a)
-	if err != nil {
-		return err
-	}
-	return printJSON(info)
+	return a, nil
 }
 
 func runRm(args []string) error {

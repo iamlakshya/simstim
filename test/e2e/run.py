@@ -49,8 +49,8 @@ def host_rc(cmd, data=None):
     """Runs cmd on the host and returns its exit code; data goes to its stdin."""
     return subprocess.run(host_argv(cmd), input=data, capture_output=True).returncode
 
-def start(name, *argv):
-    t = Term([cli, "new", HOST, "--name", name, "--detach", "--"] + list(argv), env=env)
+def start(name, *argv, flags=()):
+    t = Term([cli, "new", HOST, "--name", name, "--detach", *flags, "--"] + list(argv), env=env)
     t.exit_code(60); m = re.search(rb"Started [^/]+/(\w+)", t.buf)
     if not m: print(t.buf.decode(errors="replace"))
     return m.group(1).decode() if m else None
@@ -191,21 +191,31 @@ if host_machine().get("provider") == "docker":
     print("SKIP memory cap: a container has no systemd user manager, so sessions have no memory caps")
     created += [sid, sid2, sid3, sid4]
 else:
-    sid5 = start("e2e-oom", "/bin/bash", "-c", "head -c 3G /dev/zero | tail > /dev/null; sleep 600")
-    time.sleep(40)
-    rows = session_rows()
-    r5 = rows.get(sid5, {})
+    # A cap of its own, the smallest there is, makes the check quick, and
+    # keeps the hog far below the host's memory, whatever its size.
+    sid5 = start("e2e-oom", "/bin/bash", "-c", "head -c 1G /dev/zero | tail > /dev/null; sleep 600", flags=("--memory-max", "256M"))
+    deadline = time.time() + 40
+    while True:
+        rows = session_rows()
+        r5 = rows.get(sid5, {})
+        if r5.get("oom_killed") or time.time() > deadline:
+            break
+        time.sleep(2)
     ok(rows.get(sid4, {}).get("alive"), "other sessions keep running")
     print("oom session:", {k: r5.get(k) for k in ("state", "reason", "memory_current", "memory_max")})
+    ok(r5.get("memory_max") == 256 << 20, "the session got the cap it asked for (%s)" % r5.get("memory_max"))
     ok(r5.get("oom_killed") is True, "the over-the-cap process was stopped and the session marked (reason: %s)" % r5.get("reason"))
     ok(r5.get("state") in ("working", "idle"), "the agent runs on after its child's kill, and does not need input (state: %s)" % r5.get("state"))
+    # All sessions together have a limit too: the host's memory minus a reserve.
+    limit = host_ssh("systemctl --user show %s.slice -p MemoryMax --value" % NAME).stdout.decode().strip()
+    ok(limit.isdigit() and int(limit) > 256 << 20, "the sessions' slice has a memory limit (%s)" % limit)
     created += [sid, sid2, sid3, sid4, sid5]
     # tail keeps its last line, and /dev/zero has no newline: it grows until the cap stops it.
     # Without a cap it would fill the host's memory, so it runs only under one.
     if not r5.get("memory_max"):
         print("SKIP memory cap on the agent itself: the session has no memory cap")
     else:
-        sid_oom = start("e2e-oom-agent", "/bin/sh", "-c", "exec tail /dev/zero")
+        sid_oom = start("e2e-oom-agent", "/bin/sh", "-c", "exec tail /dev/zero", flags=("--memory-max", "256M"))
         created.append(sid_oom)
         r_oom, end = {}, time.time() + 60
         while time.time() < end and r_oom.get("state") not in ("exited", "errored"):

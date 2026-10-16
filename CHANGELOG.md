@@ -9,6 +9,14 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 - `new` and the launcher offer to make a session's folder when it does not exist on the host, instead of failing. The host asks only after it finds the agent. It makes the folder, and any missing folders above it, only after a yes, and removes them again if the start then fails. `new --mkdir` makes it without asking. Without a terminal, a missing folder is still an error. The host makes only a full path, such as `~/src/app`, and a new worktree still needs an existing repository. With an older host helper, `new --mkdir` says that the helper is too old. The helper's own `new` command takes `--mkdir` too, and its errors now show their hints.
 - The Setup workflow (`scripts/setup.sh` on bare runners and in the devcontainer's image) can be started by hand, and runs when the workflow itself changes.
 - The README shows the OpenSSF Scorecard badge: 8.1 of 10 after the first release.
+- A session's memory cap can be changed: `[sessions] memory_max` in `config.toml` for every session, and `new --memory-max <size>` for one. Each takes `auto` or a size such as `4G`, from `256M`. The launcher's starts use the key too, and the helper's own `new` takes `--memory-max`. A size above what the host gives all its sessions is lowered to that. See [docs/how-to/memory.md](docs/how-to/memory.md).
+
+### Changed
+
+- A session's default memory cap is now the host's memory minus a reserve for the system (decision 0024). It was 8 GiB or 40 % of the memory. The reserve follows GKE's. A 4 GiB host now gives sessions 2.9 GiB, not 1.6 GiB, and a 16 GiB host 13.3 GiB, not 6.4 GiB. All sessions together share the same limit, on their systemd slice, so the reserve holds however many sessions run. A running session keeps its own cap until it starts again. The first start after the update also sets the slice's limit, unless the running sessions already use more than that together. Then a later start sets it, once they use less. `host add`, `host doctor` and the launcher say what a host gives its sessions. A host where systemd cannot cap memory, such as one with cgroup v1, is left alone.
+- The uninstall guide also removes the memory limit of the sessions' slice, with `systemctl --user revert`.
+- The docs no longer ask for swap on a host: a session's memory never goes to swap, so swap gives sessions no more room.
+- The end-to-end check of the memory cap gives its session a cap of 256 MiB. That keeps the check quick and safe on a host of any size.
 
 ### Fixed
 

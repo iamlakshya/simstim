@@ -56,6 +56,7 @@ func Restore(all bool) []RestoreResult {
 			m.Run.BootID = boot
 			// The old processes are gone; the new holder records its own.
 			m.Run.HolderPID, m.Run.AgentPID, m.Run.Unit = 0, 0, ""
+			m.Limits.MemoryMax = sessionMemoryMax(m.Limits.MemoryAsked)
 			// To the nanosecond: wasRestored compares it with the last start, which
 			// can be in the same second.
 			m.Labels = withLabel(m.Labels, "restored_at", time.Now().UTC().Format(time.RFC3339Nano))

@@ -81,6 +81,10 @@ func expandHome(p string) string {
 
 // New starts a session and returns its row.
 func New(a NewArgs) (_ *SessionInfo, err error) {
+	if a.MemoryMax > 0 && a.MemoryMax < api.MinMemoryMax {
+		return nil, UserError("memory_max", fmt.Sprintf("a memory cap of %d MiB is below the smallest, 256 MiB", a.MemoryMax/mib),
+			"Ask for 256M or more, or for auto.")
+	}
 	argv, kind, agent, known, err := pickAgent(a)
 	if err != nil {
 		return nil, err
@@ -141,17 +145,14 @@ func New(a NewArgs) (_ *SessionInfo, err error) {
 	if name == "" {
 		name = filepath.Base(cwd)
 	}
-	memMax := a.MemoryMax
-	if memMax <= 0 {
-		memMax = DefaultMemoryMax()
-	}
+	asked := max(a.MemoryMax, 0)
 	now := time.Now().UTC()
 	m := &Manifest{
 		Schema: 1, ID: id, Name: name, CreatedAt: now, HostVersion: version.Version,
 		Agent: AgentInfo{Kind: kind, Argv: argv},
 		Cwd:   cwd, Env: env,
 		Term:    TermInfo{Term: term, Cols: a.Cols, Rows: a.Rows},
-		Limits:  Limits{MemoryMax: memMax},
+		Limits:  Limits{MemoryMax: sessionMemoryMax(asked), MemoryAsked: asked},
 		Run:     Runtime{Socket: paths.Socket(id), BootID: BootID()},
 		Status:  Status{State: StateStarting, Since: now},
 		Restart: Restart{Policy: "resume", MaxAttempts: 3},

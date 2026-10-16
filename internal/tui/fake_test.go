@@ -153,7 +153,7 @@ func (b *fakeBackend) Install(_ context.Context, h client.Host, _ client.Platfor
 	b.installed = true
 	if b.state[h.Name] == nil {
 		b.state[h.Name] = &fakeHost{info: client.HostInfo{Distro: "Ubuntu 24.04", Arch: "arm64", CPUs: 2, MemTotal: 4 << 30,
-			MemoryMax: 1610612736, Agents: map[string]string{"claude": "/usr/bin/claude", "shell": "/bin/bash"}}}
+			MemoryMax: 3116367872, Agents: map[string]string{"claude": "/usr/bin/claude", "shell": "/bin/bash"}}}
 	}
 	b.mu.Unlock()
 	return nil
@@ -528,7 +528,7 @@ func labBackend() *fakeBackend {
 	be.state["atlas-dev"] = &fakeHost{
 		latency: 9 * time.Millisecond,
 		info: client.HostInfo{User: "dev", Distro: "Debian 13", Arch: "amd64", CPUs: 4, MemTotal: 8 << 30, DiskFree: 61 << 30,
-			Version: "0.1.0", MemoryMax: 3435973837,
+			Version: "0.1.0", MemoryMax: 6551502848,
 			Agents: map[string]string{"claude": "/usr/local/bin/claude", "codex": "/usr/local/bin/codex", "opencode": "/usr/bin/opencode", "shell": "/usr/bin/zsh"}},
 		sessions: []client.Session{
 			{ID: "s1", Name: "docs-pass", Agent: "opencode", Cwd: "/home/dev/src/docs", State: api.StateExited, ExitCode: code(0), Since: ago(3 * time.Hour), CreatedAt: ago(5 * time.Hour)},
@@ -551,7 +551,7 @@ func labBackend() *fakeBackend {
 	}
 	be.state["gcp-dev"] = &fakeHost{
 		latency: 41 * time.Millisecond,
-		info:    client.HostInfo{Distro: "Ubuntu 24.04", Arch: "amd64", CPUs: 8, MemTotal: 32 << 30, MemoryMax: 8 << 30, Agents: map[string]string{"gemini": "/usr/bin/gemini", "shell": "/bin/bash"}},
+		info:    client.HostInfo{Distro: "Ubuntu 24.04", Arch: "amd64", CPUs: 8, MemTotal: 32 << 30, MemoryMax: 30431772672, Agents: map[string]string{"gemini": "/usr/bin/gemini", "shell": "/bin/bash"}},
 		sessions: []client.Session{
 			{ID: "g1", Name: "bench", Agent: "gemini", Cwd: "/srv/bench", State: api.StateWorking, Since: ago(5 * time.Minute), CreatedAt: ago(2 * time.Hour), Alive: true},
 			{ID: "g2", Name: "scratch", Agent: "shell", Cwd: "/tmp", State: api.StateExited, ExitCode: code(1), Since: ago(50 * time.Hour), CreatedAt: ago(60 * time.Hour)},

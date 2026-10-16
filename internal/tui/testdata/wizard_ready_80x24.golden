@@ -19,6 +19,6 @@
 
       Agents  claude · shell
       System  Ubuntu 24.04 · arm64 · 2 CPUs · 4 GiB
-      Limits  1.5 GiB per session
+      Limits  2.9 GiB for sessions
 
     enter choose agents   esc close

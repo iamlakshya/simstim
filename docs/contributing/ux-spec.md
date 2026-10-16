@@ -248,7 +248,7 @@ The agent owns the whole terminal: every row and every column. There is no borde
 1. **Where.** A target from `~/.ssh/config` (↑↓ pick, and typing filters), a name, and an optional extra SSH config file.
 2. **Test.** Each check shows the spinner, then `✓` or `✕` with the time it took. A failure shows the error and its next step.
 3. **Install the helper.** This is the consent screen. It says what is installed and where, what else changes (linger, terminfo), and that nothing listens on the network.
-4. **Ready.** The agents found, the system, and the memory cap per session. The host's sessions are now open behind the sheet. When a first-class or supported agent is missing or not logged in, Enter goes on to the agents; otherwise it starts a session.
+4. **Ready.** The agents found, the system, and the memory for sessions. The host's sessions are now open behind the sheet. When a first-class or supported agent is missing or not logged in, Enter goes on to the agents. Otherwise it starts a session.
 5. **Agents.** The checklist: every agent with an installer, first-class and supported ones first. An installed agent has a green `✓`, a ticked one a cyan `●`, the rest a faint `○`, each with its state. The best-effort agents wait under a fold, `▸ 5 more agents, best effort`, which Enter or Space opens. Space ticks, and Enter installs what is ticked.
 
    ```text
@@ -491,7 +491,7 @@ The launcher is the home, and every action also has a command, for scripts and t
 | `simstim host ls`, `test`, `doctor`, `rm` | Host management |
 | `simstim host restore <name> [--all]` | Starts again the sessions that a host restart stopped (or, with `--all`, a crash) |
 | `simstim host start\|stop\|status <name>` | Runs the host's provider script |
-| `simstim new <host> [--agent claude] [--dir ~/src/app [--mkdir]] [--name x] [--worktree [--base ref]] [--detach] [-- cmd…]` | Starts a session, and attaches unless `--detach` |
+| `simstim new <host> [--agent claude] [--dir ~/src/app [--mkdir]] [--name x] [--worktree [--base ref]] [--memory-max 4G] [--detach] [-- cmd…]` | Starts a session, and attaches unless `--detach` |
 | `simstim ls [--host h] [--json]` | Lists sessions, with their state and where the state came from |
 | `simstim attach <host>/<session>`, `attach -` | Attaches directly; `-` is the last session. Good for a Ghostty keybinding. |
 | `simstim flip [<host>/<session>]` | A quick switch: the sessions of every host in one list, then attach |
@@ -518,7 +518,7 @@ image_paste_key = "ctrl+v"
 scrollback = "keep"      # keep | clear: what to do with local scrollback on a fresh attach
 
 [sessions]
-memory_max = "auto"      # auto = min(8 GiB, 40 % of host RAM)
+memory_max = "auto"      # auto = the host's memory minus a reserve (0024), or a size such as "4G"
 
 [keymap]
 "session: delete" = "d"

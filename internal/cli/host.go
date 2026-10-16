@@ -165,7 +165,7 @@ func connectHost(ctx context.Context, w io.Writer, h client.Host, consent func(q
 	if err != nil {
 		return nil, err
 	}
-	step("✓ %s, %d CPUs, %.1f GiB; %.1f GiB per session", d.Distro, d.CPUs, float64(d.MemTotal)/(1<<30), float64(d.MemoryMax)/(1<<30))
+	step("✓ %s, %d CPUs, %.1f GiB, %.1f GiB of it for sessions", d.Distro, d.CPUs, float64(d.MemTotal)/(1<<30), float64(d.MemoryMax)/(1<<30))
 	checks, _ := conn.AgentChecks(dctx)
 	if err := client.SaveHost(h); err != nil {
 		return nil, err

@@ -132,7 +132,7 @@ func (d *details) view(m *Model) string {
 			field("System", strings.Join(sys, dot)),
 			field("Helper", brand.HostBinary+" "+i.Version),
 			field("Agents", strings.Join(names, dot)),
-			field("Limits", fmtSize(i.MemoryMax)+" per session"+dot+plural(len(h.sessions), "session", "sessions")))
+			field("Limits", fmtSize(i.MemoryMax)+" for sessions"+dot+plural(len(h.sessions), "session", "sessions")))
 	} else {
 		msg, _ := errText(h.err)
 		if msg == "" {

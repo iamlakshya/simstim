@@ -49,7 +49,7 @@ Most of the host helper runs in the unit tests, on the machine that runs them, w
 - **A terminal for the client.** `NewTerminal` opens a pseudo-terminal that stands in for the user's: the test types into it, and reads what the client draws, byte for byte.
 - **Races in holders count.** The race detector writes a holder's report to a file, and the test fails.
 
-Some parts need Linux: ports and idle stop read `/proc`, and memory caps need systemd. Their tests read a fake `/proc` instead (`procRoot`). Tests that need the shadow terminal skip when it is not built; its Go side is also tested with a fake child, a shell script that echoes every frame.
+Some parts need Linux: ports and idle stop read `/proc`, and memory caps need systemd. Their tests read a fake `/proc` instead (`procRoot`). The memory cap's tests use a fake `/proc/meminfo`, cgroup tree (`cgroupRoot`) and `systemctl`. Tests that need the shadow terminal skip when it is not built. Its Go side is also tested with a fake child, a shell script that echoes every frame.
 
 ## Coverage
 
@@ -75,7 +75,7 @@ The bar is a floor, not the goal. A test checks what the code does, not just tha
 
 `test/e2e/run.py` drives the real client in a pseudo-terminal, as a person in Ghostty would, against a real Linux host.
 
-1. Use a disposable Linux VM with systemd. The suite starts and deletes sessions named `e2e-*`, installs the helper, and briefly fills memory to test the cap. Do not point it at a machine you care about.
+1. Use a disposable Linux VM with systemd. The suite starts and deletes sessions named `e2e-*`, and installs the helper. To test the cap, it fills one session's memory to its cap of 256 MiB. It also checks that the sessions' slice has a limit. That limit stays on the host after the suite, in a drop-in under `~/.config/systemd/user.control/`. `systemctl --user revert simstim.slice` removes it. Do not point it at a machine you care about.
 2. Make one with `simstim host create lima e2e` ([how to](../how-to/create-a-host.md)), or add one you reach with `ssh`: `simstim host add <name> <ssh-target>`.
 3. Run `E2E_HOST=<name> just e2e`. It prints `PASS` or `FAIL` for each check and a total.
 4. Delete a created host afterwards with `simstim host destroy e2e`.

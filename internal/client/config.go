@@ -74,6 +74,16 @@ type Settings struct {
 		// defaults say. `new --inline` does it for one session.
 		Inline bool `toml:"inline"`
 	} `toml:"agents"`
+	// Sessions holds what new sessions get.
+	Sessions struct {
+		// MemoryMax caps the memory of each new session, with everything it
+		// starts. "auto" gives the host's default: its memory minus a reserve
+		// for the system. A size is a number and a unit in powers of 1024,
+		// such as "512M", "4G", "4GiB" or "1.5G", from 256M. A host lowers a
+		// size above its limit for all sessions together to that limit.
+		// `new --memory-max` sets it for one session.
+		MemoryMax string `toml:"memory_max"`
+	} `toml:"sessions"`
 	// Keymap rebinds launcher commands by name ("session: delete"). A value is
 	// a key, a list of keys, or "" to unbind. `config keymap` lists the names.
 	Keymap map[string]any `toml:"keymap"`
@@ -96,6 +106,7 @@ func DefaultSettings() Settings {
 		s.Attach.ImagePasteKey = "alt+v"
 	}
 	s.Attach.Scrollback = "keep"
+	s.Sessions.MemoryMax = "auto"
 	return s
 }
 
@@ -220,6 +231,9 @@ func LoadSettings() Settings {
 	}
 	if s.Attach.Scrollback == "" {
 		s.Attach.Scrollback = d.Attach.Scrollback
+	}
+	if s.Sessions.MemoryMax == "" {
+		s.Sessions.MemoryMax = d.Sessions.MemoryMax
 	}
 	return s
 }

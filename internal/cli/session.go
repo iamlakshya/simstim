@@ -31,7 +31,7 @@ func termSize() (int, int) {
 }
 
 func newCmd() *cobra.Command {
-	var agent, dir, name, base string
+	var agent, dir, name, base, memoryMax string
 	var detach, worktree, inline, setup, noSetup, mkdir bool
 	var secrets []string
 	cmd := &cobra.Command{
@@ -40,6 +40,7 @@ func newCmd() *cobra.Command {
 		Example: "  " + brand.Name + " new my-vps --agent claude --dir ~/src/app\n" +
 			"  " + brand.Name + " new my-vps --agent claude --dir ~/src/new-app --mkdir\n" +
 			"  " + brand.Name + " new my-vps --agent claude --secret ANTHROPIC_API_KEY\n" +
+			"  " + brand.Name + " new my-vps --agent claude --memory-max 6G\n" +
 			"  " + brand.Name + " new my-vps --detach -- htop",
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -49,6 +50,12 @@ func newCmd() *cobra.Command {
 			}
 			if setup && noSetup {
 				return &client.UserError{Msg: "--setup and --no-setup cannot go together", Hint: "Pass one of them."}
+			}
+			var memMax int64
+			if cmd.Flags().Changed("memory-max") {
+				if memMax, err = client.ParseMemoryFlag(memoryMax); err != nil {
+					return err
+				}
 			}
 			// Fetch the secrets first: a password manager may want a touch,
 			// and a failing command should not cost a connection.
@@ -63,7 +70,7 @@ func newCmd() *cobra.Command {
 				return err
 			}
 			cols, rows := termSize()
-			a := client.TerminalArgs(client.NewArgs{Agent: agent, Cwd: client.RemotePath(dir), MakeFolder: mkdir, Name: name, Worktree: worktree, Base: base, Inline: inline, Secrets: values}, cols, rows)
+			a := client.TerminalArgs(client.NewArgs{Agent: agent, Cwd: client.RemotePath(dir), MakeFolder: mkdir, Name: name, Worktree: worktree, Base: base, Inline: inline, MemoryMax: memMax, Secrets: values}, cols, rows)
 			if dash := cmd.ArgsLenAtDash(); dash >= 0 {
 				a.Argv = args[dash:]
 			}
@@ -91,6 +98,7 @@ func newCmd() *cobra.Command {
 	cmd.Flags().BoolVarP(&worktree, "worktree", "w", false, "give the session its own git worktree and branch")
 	cmd.Flags().BoolVar(&inline, "inline", false, "start the agent in its inline mode, so your terminal keeps its scrollback (see agents.inline in config.toml)")
 	cmd.Flags().StringVar(&base, "base", "", "the commit or branch the worktree starts from (default: HEAD)")
+	cmd.Flags().StringVar(&memoryMax, "memory-max", "", "cap the session's memory: auto, or a `size` such as 4G (default: sessions.memory_max in config.toml)")
 	cmd.Flags().StringArrayVar(&secrets, "secret", nil, "pass a secret from config.toml's [secrets] into the session's environment (repeatable)")
 	cmd.Flags().BoolVar(&setup, "setup", false, "run the repository's setup script this time, whatever your answer for it")
 	cmd.Flags().BoolVar(&noSetup, "no-setup", false, "do not run the repository's setup script this time")

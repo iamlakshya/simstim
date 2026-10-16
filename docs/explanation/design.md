@@ -46,7 +46,7 @@ Added along the way:
 10. Ctrl+V pastes a screenshot from the laptop's clipboard into a remote agent.
 11. The session list shows which sessions are working, which need input and which have finished.
 12. One command attaches straight to a session, for scripts and terminal keybindings.
-13. One agent cannot take down the host: each session has a memory cap.
+13. One agent cannot take down the host: each session has a memory cap, and all sessions together leave a reserve free for the system.
 14. simstim's own screens feel as good as the Amp CLI: calm, fast, keyboard first.
 
 ## Non-goals

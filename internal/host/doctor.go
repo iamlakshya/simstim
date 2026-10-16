@@ -73,6 +73,9 @@ func Doctor() HostInfo {
 		mem := memoryDelegated()
 		info.Checks = append(info.Checks, Check{Name: "memory caps", OK: mem,
 			Detail: map[bool]string{true: "cgroup v2 memory controller is delegated", false: "the memory controller is not delegated to the user manager"}[mem]})
+		if mem {
+			info.Checks = append(info.Checks, sessionsMemoryCheck())
+		}
 	}
 	gt := HasTerminfo("xterm-ghostty")
 	info.Checks = append(info.Checks, Check{Name: "Ghostty terminfo", OK: gt,
@@ -90,12 +93,6 @@ func lingerOn() bool {
 	}
 	out, err := exec.CommandContext(context.Background(), "loginctl", "show-user", u.Username, "-p", "Linger", "--value").Output()
 	return err == nil && strings.TrimSpace(string(out)) == "yes"
-}
-
-func memoryDelegated() bool {
-	uid := os.Getuid()
-	b, err := os.ReadFile(fmt.Sprintf("/sys/fs/cgroup/user.slice/user-%d.slice/user@%d.service/cgroup.controllers", uid, uid))
-	return err == nil && strings.Contains(string(b), "memory")
 }
 
 // SetupArgs asks the host to prepare itself: linger and terminfo entries.
