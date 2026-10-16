@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: accepted (its once-a-minute rule for a session's end replaced by 0026, which also extends its events with memory)
 date: 2026-10-15
 ---
 
