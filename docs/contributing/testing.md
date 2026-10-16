@@ -116,6 +116,7 @@ The screen model is the slowest step. It is a Go terminal emulator used only to 
 | Date | Client | Host | install | host add | agent running | Total |
 | --- | --- | --- | --- | --- | --- | --- |
 | 2026-10-15 | macOS, Apple silicon | Debian 13 VM, over a jump host on WiFi | 0.1 s | 1.8 s | 0.2 s (Claude Code) | 2.2 s |
+| 2026-10-16 | macOS, Apple silicon (0.1.0 at 42c42d1) | Debian 13 VM, over a jump host on WiFi | 0.2 s | 2.1 s | 0.2 s (Claude Code) | 2.6 s |
 
 The release is served locally, so the download is not in the time: a client archive is about 11 MB, a few seconds on a home connection. The rest of the five minutes is typing three commands, and the agent's own login.
 
