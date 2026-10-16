@@ -27,5 +27,6 @@ Each record explains one choice: the context, the options and the outcome. Recor
 | [0021](0021-site-design.md) | The site: a landing page in the launcher's look, docs kept on Hextra, and a three.js field that loads last (its toolchain, landing sections, field, look and motion setting replaced by 0022) | Accepted |
 | [0022](0022-site-rebuild.md) | The site: Starlight for the docs, three tabs, and a landing page that tells its story in a drawing (replaces the toolchain in 0015, parts of 0021, and 0012's hold on the website) | Accepted |
 | [0023](0023-protect-main.md) | Changes reach main only through a pull request that passes CI | Accepted |
+| [0024](0024-memory-cap.md) | A session's memory cap is the host's memory minus a reserve, with the same limit on all sessions together, and a setting to change it (replaces the cap in 0006, and part of 0008) | Proposed |
 
 Write a new record from [the template](template.md).
