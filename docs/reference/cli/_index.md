@@ -54,6 +54,7 @@ simstim runs coding agents in sessions on hosts you reach with SSH. Sessions kee
 | [`ports`](ports.md) | List the TCP ports a session's processes listen on |
 | [`pull`](pull.md) | Bring a session's branch into the git repository you are in |
 | [`rename`](rename.md) | Rename a session |
+| [`resume`](resume.md) | Start a session's agent again after it ended, and attach to it |
 | [`send`](send.md) | Type text into a session without attaching, then press Enter |
 | [`setup`](setup.md) | Set up step by step: a host, its agents, and their logins |
 | [`version`](version.md) | Print the version |

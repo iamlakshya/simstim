@@ -9,6 +9,7 @@ import (
 	"github.com/iamlakshya/simstim/internal/api"
 	"github.com/iamlakshya/simstim/internal/brand"
 	"github.com/iamlakshya/simstim/internal/client"
+	"github.com/iamlakshya/simstim/internal/proto"
 )
 
 // Ended sessions (docs/contributing/ux-spec.md 2.4). A session's holder
@@ -111,19 +112,45 @@ func endWhy(s client.Session) string {
 	}
 }
 
+// endHint is the step to try after an agent ended as e says, as the
+// launcher shows it, or "". After the memory cap stopped the agent, it is
+// the key that resumes it, and the command for a bigger cap. Only the
+// command line can give one. It says what client.EndHint says on the
+// command line. It fits one line of the notices at 60 columns, so the end
+// and its step both show.
+func endHint(e *proto.Ended) string {
+	if e == nil || !e.OOM {
+		return ""
+	}
+	return resumeKey + " resumes it, or run " + brand.Name + " resume --memory-max."
+}
+
+// resumeKey is the key that resumes a session whose agent has ended: a
+// letter of "resume". r renames and s opens the guided setup, and e would
+// sit too close to alt+e, which shows ended sessions. So it is u.
+const resumeKey = "u"
+
 // endedSteps are the next steps for a session whose agent has ended, the
 // most useful first. They show in the line under the list, and the ones
 // that are keys start the keys at the bottom. A step that the launcher has
-// no key for is a command, after a cyan arrow. A step that brings the
-// agent back, such as a resume after the memory cap stopped it, goes first
-// here, with a key of its own: r renames.
+// no key for is a command, after a cyan arrow. The resume brings the agent
+// back in the same session. It goes first, except after a clean exit, as
+// when the user quit the agent, where a delete is more likely.
 func endedSteps(h *hostConn, s client.Session) []hint {
-	if s.State == api.StateLost {
-		// Restore starts the agent again with its resume command. A delete
-		// would remove the session's ID, which the resume needs.
-		return []hint{{glyphNext, restoreCommand(h)}, {"d", "delete"}}
+	resume, del := hint{resumeKey, "resume"}, hint{"d", "delete"}
+	switch {
+	case s.State == api.StateLost:
+		// The resume acts on this session, with one key. It also fetches
+		// the session's secrets again, which a restore cannot, and it works
+		// after restore has used its tries. The restore command brings back
+		// every session that a host restart stopped, so it follows. A
+		// delete would remove the session's ID, which both need.
+		return []hint{resume, {glyphNext, restoreCommand(h)}, del}
+	case client.CleanExit(s):
+		return []hint{del, resume}
+	default:
+		return []hint{resume, del}
 	}
-	return []hint{{"d", "delete"}}
 }
 
 // restoreCommand brings back the sessions on h that lost their holder.
@@ -143,21 +170,24 @@ func stepText(st hint) string {
 // endedHints are the keys of the sessions list while an ended session is
 // selected: its next steps that are keys, then what still works. Enter
 // goes forward to the agent's last screen, which needs the holder. For a
-// lost agent, Enter shows the restore command whole, in a notice.
+// lost agent, Enter shows the restore command whole, in a notice, so its
+// key takes the command's place among the steps.
 func endedHints(h *hostConn, s client.Session) []hint {
 	var hs []hint
-	if s.State == api.StateLost {
-		hs = append(hs, hint{"enter", "how to restore"})
-	}
 	for _, st := range endedSteps(h, s) {
-		if st.key != glyphNext {
+		switch {
+		case st.key != glyphNext:
 			hs = append(hs, st)
+		case s.State == api.StateLost:
+			hs = append(hs, hint{"enter", "how to restore"})
 		}
 	}
 	if s.Alive {
 		hs = append(hs, hint{"enter", "peek"})
 	}
-	return append(hs, hint{"r", "rename"}, hint{"esc", "hosts"}, hint{"ctrl+o", "commands"}, hint{"?", "keys"})
+	// Rename still works, but it is rare on an agent that has ended, so it
+	// gives its place to the commands.
+	return append(hs, hint{"esc", "hosts"}, hint{"ctrl+o", "commands"}, hint{"?", "keys"})
 }
 
 // enterEnded is the Enter key on a session whose agent has ended, where
@@ -174,7 +204,7 @@ func (m *Model) enterEnded() (tea.Cmd, bool) {
 // answers, Enter goes forward to the agent's last screen. Otherwise a
 // notice says why there is none, and the step to try. The notice reads like
 // the one at the end of an attach (onAttachDone), with the same step after
-// the memory cap (client.EndHint).
+// the memory cap (endHint).
 func (m *Model) openEnded(h *hostConn, s client.Session) tea.Cmd {
 	if s.Alive {
 		return m.openPreview()
@@ -183,13 +213,15 @@ func (m *Model) openEnded(h *hostConn, s client.Session) tea.Cmd {
 	if c := endCause(s); c != "" {
 		text += " (" + c + ")"
 	}
-	hint := client.SessionEndHint(s)
+	hint := endHint(&proto.Ended{OOM: client.CapStopped(s)})
 	switch {
+	case hint != "":
 	case s.State == api.StateLost:
+		// The command whole, which the line under the list may cut.
 		hint = restoreCommand(h)
-	case hint == "":
+	default:
 		text += ", and its holder has stopped"
-		hint = "Press d to delete it, or n to start a new one."
+		hint = "Press " + resumeKey + " to resume it, or d to delete it."
 	}
 	return m.toastNext(toastWarning, text+".", hint)
 }

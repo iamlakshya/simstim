@@ -4,8 +4,8 @@ import "github.com/iamlakshya/simstim/internal/api"
 
 // MemoryAuto is a NewArgs.MemoryMax that asks for the host's default even
 // when config.toml names a size, as `new --memory-max auto` does. NewSession
-// sends it as 0.
-const MemoryAuto = -1
+// sends it as 0. A resume sends it as it is (api.MemoryAuto).
+const MemoryAuto = api.MemoryAuto
 
 // ParseMemoryFlag reads the size of `new --memory-max`: "auto" for the host's
 // default (MemoryAuto), or a size such as "4G".

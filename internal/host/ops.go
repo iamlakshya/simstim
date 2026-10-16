@@ -9,13 +9,11 @@ import (
 	"fmt"
 	"net"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/iamlakshya/simstim/internal/agents"
@@ -81,9 +79,8 @@ func expandHome(p string) string {
 
 // New starts a session and returns its row.
 func New(a NewArgs) (_ *SessionInfo, err error) {
-	if a.MemoryMax > 0 && a.MemoryMax < api.MinMemoryMax {
-		return nil, UserError("memory_max", fmt.Sprintf("a memory cap of %d MiB is below the smallest, 256 MiB", a.MemoryMax/mib),
-			"Ask for 256M or more, or for auto.")
+	if err := checkMemoryMax(a.MemoryMax); err != nil {
+		return nil, err
 	}
 	argv, kind, agent, known, err := pickAgent(a)
 	if err != nil {
@@ -298,7 +295,7 @@ func infoFrom(m *Manifest, alive bool) SessionInfo {
 		CreatedAt: m.CreatedAt, LastActivityAt: m.LastActivityAt, LastAttachedAt: m.LastAttachedAt,
 		Alive: alive, Unit: m.Run.Unit, MemoryMax: m.Limits.MemoryMax, MemoryCurrent: memoryCurrent(m.Run.Unit),
 		HostVersion: m.HostVersion, Cols: m.Term.Cols, Rows: m.Term.Rows, MissingSecrets: m.MissingSecrets,
-		FullScreen: st.FullScreen && alive,
+		Secrets: m.Secrets, FullScreen: st.FullScreen && alive,
 	}
 }
 
@@ -424,20 +421,14 @@ func deleteSession(id string, res *DeleteResult) error {
 	if _, err := os.Stat(paths.SessionDir(id)); err != nil {
 		return UserError("not_found", "no session "+id, "List sessions to find its ID.")
 	}
+	unlock, err := lockSession(id)
+	if err != nil {
+		return err
+	}
+	// The folder goes, with the lock's file in it, while the lock holds.
+	defer unlock()
 	m, _ := LoadManifest(id)
-	if alive(id) {
-		_, _ = HolderRequest(id, "kill", nil, 2*time.Second)
-		deadline := time.Now().Add(5 * time.Second)
-		for alive(id) && time.Now().Before(deadline) {
-			time.Sleep(100 * time.Millisecond)
-		}
-	}
-	if m != nil && m.Run.Unit != "" {
-		_ = exec.CommandContext(context.Background(), "systemctl", "--user", "stop", m.Run.Unit).Run()
-	} else if m != nil && m.Run.HolderPID > 0 && alive(id) {
-		_ = syscall.Kill(m.Run.HolderPID, syscall.SIGTERM)
-	}
-	os.Remove(paths.Socket(id))
+	stopHolder(id, m)
 	if m != nil {
 		res.Worktree = removeWorktree(m.Git)
 	}

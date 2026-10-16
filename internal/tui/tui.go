@@ -252,7 +252,7 @@ func (m *Model) onAttachDone(msg attachDoneMsg) tea.Cmd {
 			kind = toastWarning
 		}
 	}
-	if hint := client.EndHint(r.Ended); hint != "" {
+	if hint := endHint(r.Ended); hint != "" {
 		return tea.Batch(append(cmds, m.toastNext(kind, text, hint))...)
 	}
 	return tea.Batch(append(cmds, m.toast(kind, text))...)

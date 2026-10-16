@@ -2,6 +2,7 @@ package host
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -30,57 +31,106 @@ func Restore(all bool) []RestoreResult {
 		if !e.IsDir() {
 			continue
 		}
-		id := e.Name()
-		m, err := LoadManifest(id)
-		if err != nil {
-			continue
+		if r, ok := restoreOne(e.Name(), boot, all); ok {
+			out = append(out, r)
 		}
-		r := RestoreResult{ID: id, Name: m.Name}
-		switch {
-		case alive(id):
-			continue
-		case m.Status.State == StateExited || m.Status.State == StateErrored:
-			r.Action, r.Why = "skipped", "the agent had ended"
-		case m.Restart.Policy != "resume":
-			r.Action, r.Why = "skipped", "restart policy is "+m.Restart.Policy
-		case !all && m.Run.BootID == boot:
-			r.Action, r.Why = "skipped", "no restart since it stopped (use --all)"
-		case m.Restart.MaxAttempts > 0 && m.Run.RespawnCount >= m.Restart.MaxAttempts:
-			r.Action, r.Why = "skipped", fmt.Sprintf("already restored %d times", m.Run.RespawnCount)
-		default:
-			argv, why := resumeArgv(m)
-			r.Argv = argv
-			m.Agent.Argv = argv
-			m.RunHook = m.ResumeHook
-			m.Run.RespawnCount++
-			m.Run.BootID = boot
-			// The old processes are gone; the new holder records its own.
-			m.Run.HolderPID, m.Run.AgentPID, m.Run.Unit = 0, 0, ""
-			m.Limits.MemoryMax = sessionMemoryMax(m.Limits.MemoryAsked)
-			// To the nanosecond: wasRestored compares it with the last start, which
-			// can be in the same second.
-			m.Labels = withLabel(m.Labels, "restored_at", time.Now().UTC().Format(time.RFC3339Nano))
-			m.Status = Status{State: StateStarting, Since: time.Now().UTC(), Reason: "restored after a host restart: " + why}
-			if err := m.Save(); err != nil {
-				r.Action, r.Why = "failed", err.Error()
-				break
-			}
-			if err := launchHolder(m); err != nil {
-				r.Action, r.Why = "failed", err.Error()
-				break
-			}
-			// The holder answers on its socket before it starts the agent, as
-			// New knows too: wait for the start before saying it worked.
-			if mm := waitStarted(id, 5*time.Second); mm != nil && mm.Status.State == StateErrored && mm.Run.AgentPID == 0 {
-				r.Action, r.Why = "failed", mm.Status.Reason
-				break
-			}
-			r.Action, r.Why = "restored", why
-		}
-		out = append(out, r)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out
+}
+
+// restoreOne looks at one session for Restore, under the session's lock.
+// It reports false for a session to leave out of the results: one whose
+// holder runs, or one without a manifest.
+func restoreOne(id, boot string, all bool) (RestoreResult, bool) {
+	m, err := LoadManifest(id)
+	if err != nil {
+		return RestoreResult{}, false
+	}
+	r := RestoreResult{ID: id, Name: m.Name}
+	unlock, err := lockSession(id)
+	if err != nil {
+		r.Action, r.Why = "skipped", "a resume, a restore or a delete of it runs"
+		return r, true
+	}
+	defer unlock()
+	// Read it again under the lock: a resume may have changed it.
+	if m, err = LoadManifest(id); err != nil {
+		return RestoreResult{}, false
+	}
+	switch {
+	case alive(id):
+		return r, false
+	case m.Status.State == StateExited || m.Status.State == StateErrored:
+		r.Action, r.Why = "skipped", "the agent had ended"
+	case m.Restart.Policy != "resume":
+		r.Action, r.Why = "skipped", "restart policy is "+m.Restart.Policy
+	case !all && m.Run.BootID == boot:
+		r.Action, r.Why = "skipped", "no restart since it stopped (use --all)"
+	case m.Restart.MaxAttempts > 0 && m.Run.RespawnCount >= m.Restart.MaxAttempts:
+		r.Action, r.Why = "skipped", fmt.Sprintf("already restored %d times", m.Run.RespawnCount)
+	default:
+		m.Run.RespawnCount++
+		argv, why, err := startAgain(m, again{label: restoredLabel, reason: "restored after a host restart"})
+		r.Argv = argv
+		if err != nil {
+			r.Action, r.Why = "failed", err.Error()
+			break
+		}
+		r.Action, r.Why = "restored", why
+	}
+	return r, true
+}
+
+// again says why a session's agent starts again: restore after a host
+// restart, or the user's resume (resume.go).
+type again struct {
+	// label records when, so that the new holder can tell which:
+	// restoredLabel or resumedLabel.
+	label string
+	// reason starts the reason of the session's state until the agent runs.
+	reason string
+	// secrets go to the new holder before it starts the agent.
+	secrets map[string]api.Secret
+}
+
+// startAgain starts the agent of session m again, in a new holder. It runs
+// the agent's resume command and the session's resume hook, under the cap
+// that m asks for. The old holder must be gone. It keeps the session's ID,
+// name, folder and worktree. It waits for the start, as New does. It
+// returns the command and what it does, such as "continued the latest
+// conversation in its folder".
+func startAgain(m *Manifest, a again) (argv []string, why string, err error) {
+	argv, why = resumeArgv(m)
+	m.Agent.Argv = argv
+	m.RunHook = m.ResumeHook
+	m.Run.BootID = BootID()
+	// The old processes are gone. The new holder records its own.
+	m.Run.HolderPID, m.Run.AgentPID, m.Run.Unit = 0, 0, ""
+	m.Limits.MemoryMax = sessionMemoryMax(m.Limits.MemoryAsked)
+	// To the nanosecond: the holder compares it with the last start, which
+	// can be in the same second. The other label goes: after a restore
+	// that failed to start the agent, a resume must not look like one.
+	now := time.Now().UTC()
+	delete(m.Labels, restoredLabel)
+	delete(m.Labels, resumedLabel)
+	m.Labels = withLabel(m.Labels, a.label, now.Format(time.RFC3339Nano))
+	m.Status = Status{State: StateStarting, Since: now, Reason: a.reason + ": " + why}
+	if err := m.Save(); err != nil {
+		return argv, why, err
+	}
+	if err := launchHolder(m); err != nil {
+		return argv, why, err
+	}
+	if err := deliverSecrets(m.ID, a.secrets); err != nil {
+		return argv, why, err
+	}
+	// The holder answers on its socket before it starts the agent, as New
+	// knows too: wait for the start before saying it worked.
+	if mm := waitStarted(m.ID, 5*time.Second); mm != nil && mm.Status.State == StateErrored && mm.Run.AgentPID == 0 {
+		return argv, why, errors.New(mm.Status.Reason)
+	}
+	return argv, why, nil
 }
 
 // resumeArgv picks how to bring an agent back: its own session ID if known,

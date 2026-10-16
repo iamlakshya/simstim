@@ -94,13 +94,13 @@ func TestEndMessage(t *testing.T) {
 		{proto.Ended{ExitCode: 137, Signal: "killed"}, "\r\nThe session app on box ended (killed).\n"},
 		{proto.Ended{ExitCode: -1}, "\r\nThe session app on box stopped.\n"},
 		{proto.Ended{ExitCode: 137, Signal: "killed", OOM: true},
-			"\r\nThe session app on box ended (out of memory).\n\nTry: " + client.EndHint(&proto.Ended{OOM: true}) + "\n"},
+			"\r\nThe session app on box ended (out of memory).\n\nTry: " + client.EndHint(&proto.Ended{OOM: true}, "box/a1") + "\n"},
 	} {
-		if got := endMessage("app", "box", &c.e); got != c.want {
+		if got := endMessage("app", "box", "a1", &c.e); got != c.want {
 			t.Errorf("%+v: %q, want %q", c.e, got, c.want)
 		}
 	}
-	if client.EndHint(&proto.Ended{OOM: true}) == "" || client.EndHint(&proto.Ended{ExitCode: 1}) != "" || client.EndHint(nil) != "" {
+	if client.EndHint(&proto.Ended{OOM: true}, "") == "" || client.EndHint(&proto.Ended{ExitCode: 1}, "box/a1") != "" || client.EndHint(nil, "") != "" {
 		t.Error("only an end out of memory has a next step")
 	}
 }

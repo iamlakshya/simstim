@@ -12,6 +12,7 @@
       Attach session                                                   enter
       Rename session                                                       r
       Delete session                                                       d
+      Resume session · the agent still runs                                u
       Peek at the screen                                               space
       All sessions
       Next waiting session                                                 w
@@ -19,6 +20,5 @@
       Copy attach command                                                  y
       Test host
       Settings
-      Host details                                                         i
 
     enter run   ↑↓ move   esc close

@@ -40,10 +40,26 @@ func (h *Holder) startAlerts(restored bool) {
 	h.al.d.Notify(h.alertEvent(kind))
 }
 
-// wasRestored reports whether restore started this holder: restore labels a
-// session after the start before.
-func wasRestored(m *Manifest) bool {
-	at, err := time.Parse(time.RFC3339, m.Labels["restored_at"])
+// The labels that say why a session's agent starts again (startAgain).
+const (
+	restoredLabel = "restored_at" // restore, after a host restart
+	resumedLabel  = "resumed_at"  // the user's resume
+)
+
+// wasRestored reports whether restore started this holder, after a host
+// restart. Only then does the session send a restored alert, and start
+// without waiting for secrets that nothing can send.
+func wasRestored(m *Manifest) bool { return labelSinceStart(m, restoredLabel) }
+
+// wasResumed reports whether the user's resume started this holder. The
+// agent then starts again, as after a restore. But the session sends a
+// started alert and gets its secrets from the client, as at a new start.
+func wasResumed(m *Manifest) bool { return labelSinceStart(m, resumedLabel) }
+
+// labelSinceStart reports whether the time in the label k comes after the
+// session's last start: startAgain labels a session after the start before.
+func labelSinceStart(m *Manifest, k string) bool {
+	at, err := time.Parse(time.RFC3339, m.Labels[k])
 	return err == nil && at.After(m.Run.StartedAt)
 }
 

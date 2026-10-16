@@ -25,7 +25,7 @@ The script gets the session's environment, including any [secrets](secrets.md), 
 
 | Variable | Value |
 | --- | --- |
-| `SIMSTIM_HOOK` | `setup` for a new session, `resume` after a host restart |
+| `SIMSTIM_HOOK` | `setup` for a new session, `resume` after a host restart or a `resume` |
 | `SIMSTIM_SESSION` | The session's ID |
 | `SIMSTIM_SESSION_NAME` | The session's name |
 | `SIMSTIM_SESSION_DIR` | The session's folder |
@@ -41,7 +41,7 @@ npm ERR! ...
 [simstim: /home/me/src/app/.simstim/setup exited with 1; the agent starts anyway]
 ```
 
-An executable `.simstim/resume` runs the same way before an agent comes back after a host restart.
+An executable `.simstim/resume` runs the same way before an agent comes back: after a host restart, or after a [`resume`](restore-after-reboot.md#bring-back-one-session).
 
 ## Trust a repository first
 
@@ -73,7 +73,7 @@ Without a terminal to ask on, for example in a script or with its output in a pi
 
 ## Your own setup on a host
 
-An executable `~/.config/simstim/hooks/setup` on the host runs for every session in a repository with no script of its own, or one whose script you did not trust. It is yours, so nothing asks first. `~/.config/simstim/hooks/resume` does the same after a restart.
+An executable `~/.config/simstim/hooks/setup` on the host runs for every session in a repository with no script of its own, or one whose script you did not trust. It is yours, so nothing asks first. `~/.config/simstim/hooks/resume` does the same after a restart or a resume.
 
 ## With .worktreeinclude
 

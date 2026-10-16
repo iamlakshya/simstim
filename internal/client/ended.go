@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/iamlakshya/simstim/internal/api"
+	"github.com/iamlakshya/simstim/internal/brand"
 	"github.com/iamlakshya/simstim/internal/proto"
 )
 
@@ -11,23 +12,22 @@ import (
 // launcher, ls and attach all use these, so they agree.
 
 // EndHint is the step to try after a session's agent ended as e says, or ""
-// when there is none. The command line and the launcher both show it. Keep
-// it short. The launcher shows two lines of notices. So the end and its step
-// both show only when the step fits on one line of a 60-column terminal.
-func EndHint(e *proto.Ended) string {
-	if e != nil && e.OOM {
-		// The memory cap stopped the agent. A new session in the same folder
-		// starts it again, and an agent with a resume command can then pick
-		// up its conversation.
-		return "Run new in its folder. Resume if the agent can."
+// when there is none. After the memory cap stopped the agent, the step is
+// a resume of ref, the session as host/session. The resume starts the agent
+// again in the same session, where it can pick up its conversation, and
+// can give it a bigger cap. The launcher says the same with its own key
+// (endHint in internal/tui).
+func EndHint(e *proto.Ended, ref string) string {
+	if e == nil || !e.OOM {
+		return ""
 	}
-	return ""
+	return brand.Name + " resume " + ref + "   (--memory-max <size> gives it a bigger cap)"
 }
 
 // SessionEndHint is EndHint for a listed session whose agent has ended: the
 // same step after the memory cap stopped it, or "".
-func SessionEndHint(s Session) string {
-	return EndHint(&proto.Ended{OOM: CapStopped(s)})
+func SessionEndHint(s Session, ref string) string {
+	return EndHint(&proto.Ended{OOM: CapStopped(s)}, ref)
 }
 
 // Ended reports whether a session's agent has ended: it exited, it failed,
@@ -40,6 +40,12 @@ func Ended(s Session) bool {
 	default:
 		return false
 	}
+}
+
+// CleanExit reports whether a session's agent exited by itself with code 0,
+// as when the user quits it.
+func CleanExit(s Session) bool {
+	return s.State == api.StateExited && s.Signal == "" && (s.ExitCode == nil || *s.ExitCode == 0)
 }
 
 // CapStopped reports whether the memory cap stopped the session's agent

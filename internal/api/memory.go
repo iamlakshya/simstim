@@ -11,6 +11,12 @@ import (
 // The session's holder and shadow terminal share the cap with the agent.
 const MinMemoryMax = 256 << 20
 
+// MemoryAuto is a memory cap that asks for the host's default, where a size
+// would apply otherwise. For a new session, it wins over config.toml, as
+// `--memory-max auto` does. For a resume, it wins over the size that the
+// session asked for at its start.
+const MemoryAuto = -1
+
 // MemorySizes lists the forms of a size that ParseMemoryMax takes, for hints.
 const MemorySizes = "512M, 4G, 4Gi, 4GiB, 4GB or 1.5G"
 

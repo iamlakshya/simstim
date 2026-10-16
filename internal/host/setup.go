@@ -119,12 +119,13 @@ func discardWorktree(g *GitInfo) {
 
 // hookVars tell a hook about its session: its name and folder, whether its
 // worktree is new, the main repository of a worktree, and which hook runs.
-func hookVars(m *Manifest, restored bool) []string {
+// resuming is true when the agent starts again, after a restore or a resume.
+func hookVars(m *Manifest, resuming bool) []string {
 	kind, fresh := "setup", "0"
-	if restored {
+	if resuming {
 		kind = "resume"
 	}
-	if m.Git != nil && m.Git.CreatedBy && !restored {
+	if m.Git != nil && m.Git.CreatedBy && !resuming {
 		fresh = "1"
 	}
 	vars := []string{

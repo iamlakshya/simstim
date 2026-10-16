@@ -149,6 +149,12 @@ func registry() []*command {
 		}
 		return needSession(m)
 	}
+	needEnded := func(m *Model) string {
+		if s := m.selected(); s != nil && !ended(*s) {
+			return "the agent still runs"
+		}
+		return needSession(m)
+	}
 	needScreen := func(m *Model) string {
 		if s := m.selected(); s != nil && !s.Alive {
 			return "the session's holder has stopped"
@@ -185,6 +191,7 @@ func registry() []*command {
 		{noun: "session", verb: "preview", short: "peek at the screen", keys: []binding{{"space", onSessions}}, why: needScreen, run: (*Model).openPreview},
 		{noun: "session", verb: "rename", keys: []binding{{"r", onSessions}, {"f2", onSessions}}, why: needSession, run: (*Model).startRename},
 		{noun: "session", verb: "delete", keys: []binding{{"d", onSessions}}, why: needSession, run: (*Model).confirmDelete},
+		{noun: "session", verb: "resume", keys: []binding{{resumeKey, onSessions}}, why: needEnded, run: (*Model).resumeSelected},
 		{noun: "session", verb: "copy attach command", short: "copy attach command", keys: []binding{{"y", onSessions}}, why: needAgent, run: (*Model).copyAttach},
 		{noun: "session", verb: "next waiting", short: "next waiting session", keys: []binding{{"w", anywhere}}, run: (*Model).nextWaiting},
 
@@ -354,7 +361,8 @@ func (m *Model) helpItems() [][2]string {
 		}
 	}
 	for _, c := range commands {
-		if c.hidden || len(m.hosts) == 0 && !c.firstRun {
+		// The sheet leaves out its own key: it is open already.
+		if c.hidden || len(m.hosts) == 0 && !c.firstRun || c.name() == "view: shortcuts" {
 			continue
 		}
 		var keys []string
@@ -436,62 +444,4 @@ func (m *Model) openSettings() tea.Cmd {
 		}
 		return editorDoneMsg{err: err}
 	})
-}
-
-// withKeymap applies the user's [keymap] settings to the registry. A command's
-// new keys keep the scope of its first default key.
-func withKeymap(cmds []*command, km map[string]any) []*command {
-	for _, c := range cmds {
-		v, ok := km[c.name()]
-		if !ok {
-			continue
-		}
-		var keys []string
-		switch x := v.(type) {
-		case string:
-			if x != "" {
-				keys = []string{x}
-			}
-		case []any:
-			for _, k := range x {
-				if s, ok := k.(string); ok && s != "" {
-					keys = append(keys, s)
-				}
-			}
-		case bool:
-			// false unbinds; true keeps the defaults
-			if x {
-				continue
-			}
-		}
-		where := anywhere
-		if len(c.keys) > 0 {
-			where = c.keys[0].where
-		}
-		c.keys = nil
-		for _, k := range keys {
-			c.keys = append(c.keys, binding{key: strings.ToLower(k), where: where})
-		}
-	}
-	return cmds
-}
-
-// KeyEntry is one line of the effective keymap.
-type KeyEntry struct {
-	Command string   `json:"command"`
-	Keys    []string `json:"keys"`
-}
-
-// Keymap returns the effective keymap for the given settings.
-func Keymap(s client.Settings) []KeyEntry {
-	cmds := withKeymap(registry(), s.Keymap)
-	out := make([]KeyEntry, 0, len(cmds))
-	for _, c := range cmds {
-		e := KeyEntry{Command: c.name()}
-		for _, b := range c.keys {
-			e.Keys = append(e.Keys, b.key)
-		}
-		out = append(out, e)
-	}
-	return out
 }

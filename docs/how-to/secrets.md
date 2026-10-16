@@ -55,6 +55,17 @@ The value is never written to a file on either side: not the session's record, a
 
 The agent, and the programs it starts, can read the value, as they can read any variable in their environment. So can anything running as your user on the host, in `/proc`. Pass a secret only to a host you trust with it.
 
+## After a resume
+
+A [resume](restore-after-reboot.md#bring-back-one-session) fetches the session's secrets again, on your laptop. The host's record names the secrets, so a host could ask for any secret in your `config.toml`. So a resume fetches without asking only the ones that the host's `secrets` in `hosts.toml` lists. Pass any other secret that the session started with again:
+
+<!-- test: help (needs a host and a secret) -->
+```sh
+simstim resume my-server/app --secret GITHUB_TOKEN
+```
+
+Without it, `resume` fetches nothing, and says which secrets the host asks for. The launcher cannot pass them, so `u` says the same.
+
 ## After a host restart
 
 When the host restarts, the session comes back without its secrets: nothing on the host has them, and your laptop may be closed. The agent starts anyway. Its terminal says which secrets it lacks, and the launcher shows "started without its secrets" on the session. To get them back, start a new session.

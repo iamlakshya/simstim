@@ -159,8 +159,8 @@ func TestEndedSessionSaysWhyAndWhatNext(t *testing.T) {
 	for _, want := range []string{
 		"2 ✕ importer",
 		"out of memory  ",
-		"✕ stopped at its memory cap of 1.5 GiB   d delete",
-		"d delete   enter peek   r rename",
+		"✕ stopped at its memory cap of 1.5 GiB   u resume",
+		"u resume   d delete   enter peek   esc hosts   ctrl+o commands",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("no %q on the screen:\n%s", want, out)
@@ -211,21 +211,22 @@ func TestEndedSessionSaysWhyAndWhatNext(t *testing.T) {
 		t.Errorf("the delete sheet warns about work in an agent that has ended: %q", text)
 	}
 	hs.key("esc", "down")
-	if out := plainScreen(hs.m); !strings.Contains(out, "killed  ") || !strings.Contains(out, "✕ stopped by signal 9 (killed)   d delete") {
+	if out := plainScreen(hs.m); !strings.Contains(out, "killed  ") || !strings.Contains(out, "✕ stopped by signal 9 (killed)   u resume   d delete") {
 		t.Errorf("the killed session does not say why it ended:\n%s", out)
 	}
 }
 
-// A lost agent can come back with a restore, which needs its ID: the line
-// offers the restore first, and Enter says what to try, since there is no
-// screen to show. The command may take the room of the folder and the ID,
-// and a later step shows when it fits. The keys and the palette agree that
-// there is no peek.
-func TestLostSessionOffersRestore(t *testing.T) {
+// A lost agent can come back with a resume, or with the restore of every
+// lost session, which both need its ID: the line offers the resume, then
+// the restore, and Enter shows the restore command whole, since there is
+// no screen to show. The command may take the room of the folder and the
+// ID, and a later step shows when it fits. The keys follow the steps, and
+// they and the palette agree that there is no peek.
+func TestLostSessionOffersResumeAndRestore(t *testing.T) {
 	for _, c := range []struct {
 		w     int
 		after string // what follows the command on the line
-	}{{80, "   /srv/pair"}, {120, "   d delete"}} {
+	}{{80, ""}, {120, "   d delete"}} {
 		hs := endedLab(t, c.w, 36)
 		hs.key("down", "down")
 		if s := hs.m.selected(); s == nil || s.ID != "g5" {
@@ -234,10 +235,10 @@ func TestLostSessionOffersRestore(t *testing.T) {
 		restore := restoreCommand(hs.m.hostByName("gcp-dev"))
 		out := plainScreen(hs.m)
 		line := strings.Split(out, "\n")[hs.m.geo.detailY]
-		if !strings.Contains(line, "◌ the host restarted   → "+restore+c.after) || cells(line) > c.w {
+		if !strings.Contains(line, "◌ the host restarted   u resume   → "+restore+c.after) || cells(line) > c.w {
 			t.Errorf("at %d columns the line is %q", c.w, line)
 		}
-		if !strings.Contains(out, "lost  ") || !strings.Contains(out, "enter how to restore   d delete   r rename") {
+		if !strings.Contains(out, "lost  ") || !strings.Contains(out, "u resume   enter how to restore   d delete   esc hosts") {
 			t.Errorf("at %d columns the keys do not offer the restore:\n%s", c.w, out)
 		}
 		if strings.Contains(out, "peek") {
@@ -281,26 +282,27 @@ func TestEnterWithoutAHolder(t *testing.T) {
 		return ts[len(ts)-1]
 	}
 	hs.key("enter")
-	if n := last(); hs.m.modal != nil || n.text != "importer on gcp-dev ended (out of memory)." || n.hint != client.EndHint(&proto.Ended{OOM: true}) {
+	if n := last(); hs.m.modal != nil || n.text != "importer on gcp-dev ended (out of memory)." || n.hint != endHint(&proto.Ended{OOM: true}) {
 		t.Errorf("Enter gave %T and %+v", hs.m.modal, n)
 	}
 	hs.key("down", "enter")
-	if n := last(); n.text != "fuzz on gcp-dev ended, and its holder has stopped." || !strings.Contains(n.hint, "Press d") {
+	if n := last(); n.text != "fuzz on gcp-dev ended, and its holder has stopped." || n.hint != "Press u to resume it, or d to delete it." {
 		t.Errorf("Enter gave %+v", n)
 	}
 }
 
 // When the cap stopped another process just before the agent exited, the
 // line keeps that at the right: a newer holder gives the reason, and an
-// older one the mark without the agent's own SIGKILL.
+// older one the mark without the agent's own SIGKILL. The keys among the
+// next steps leave the note room, since they show at the bottom too.
 func TestEndedSessionNotesAStoppedProcess(t *testing.T) {
 	for _, c := range []struct {
 		name string
 		s    client.Session
 		why  string
 	}{
-		{"newer holder", client.Session{State: api.StateErrored, Source: "process", ExitCode: code(1), Reason: api.ReasonChildOOM}, "✕ exited with code 1   d delete"},
-		{"older holder", client.Session{State: api.StateExited, Source: "process", ExitCode: code(0), OOM: true, Reason: staleMark}, "✓ exited with code 0   d delete"},
+		{"newer holder", client.Session{State: api.StateErrored, Source: "process", ExitCode: code(1), Reason: api.ReasonChildOOM}, "✕ exited with code 1   u resume   "},
+		{"older holder", client.Session{State: api.StateExited, Source: "process", ExitCode: code(0), OOM: true, Reason: staleMark}, "✓ exited with code 0   d delete   "},
 	} {
 		hs := endedLab(t, 80, 24)
 		h := hs.m.hostByName("gcp-dev")
@@ -316,6 +318,26 @@ func TestEndedSessionNotesAStoppedProcess(t *testing.T) {
 		if !strings.Contains(line, c.why) || !strings.Contains(line, "/srv/app · "+capNote+" · g3") || strings.Contains(line, "ran out of memory") {
 			t.Errorf("%s: the line is %q", c.name, line)
 		}
+	}
+}
+
+// With a long folder, the folder and the note do not fit beside the
+// reason: the keys then keep their place, and the note gives way, as it
+// does on a running session.
+func TestLongFolderKeepsTheKeys(t *testing.T) {
+	hs := endedLab(t, 80, 24)
+	h := hs.m.hostByName("gcp-dev")
+	for i := range h.sessions {
+		if h.sessions[i].ID == "g3" {
+			s := client.Session{State: api.StateErrored, Source: "process", ExitCode: code(1), Reason: api.ReasonChildOOM}
+			s.ID, s.Name, s.Agent, s.Cwd, s.Alive, s.Since, s.CreatedAt = "g3", "importer", "claude", "/srv/clients/acme/payments-service", true, ago(time.Hour), ago(90*time.Minute)
+			h.sessions[i] = s
+		}
+	}
+	hs.m.syncSel()
+	line := strings.Split(plainScreen(hs.m), "\n")[hs.m.geo.detailY]
+	if !strings.Contains(line, "✕ exited with code 1   u resume") || strings.Contains(line, capNote) || cells(line) > 80 {
+		t.Errorf("the line is %q", line)
 	}
 }
 

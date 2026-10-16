@@ -85,3 +85,25 @@ func (b *fakeBackend) Secrets(_ context.Context, h client.Host) (map[string]api.
 	defer b.mu.Unlock()
 	return b.secrets, b.secretErr
 }
+
+// SessionSecrets fetches the named secrets from the same pretend config.
+func (b *fakeBackend) SessionSecrets(_ context.Context, names []string) (map[string]api.Secret, error) {
+	if len(names) == 0 {
+		return nil, nil
+	}
+	b.record("secrets %v", names)
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.secretErr != nil {
+		return nil, b.secretErr
+	}
+	out := map[string]api.Secret{}
+	for _, n := range names {
+		v, ok := b.secrets[n]
+		if !ok {
+			return nil, &client.UserError{Msg: "no secret named " + n + " in config.toml", Hint: "Add it under [secrets]."}
+		}
+		out[n] = v
+	}
+	return out, nil
+}

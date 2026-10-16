@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/iamlakshya/simstim/internal/api"
 	"github.com/iamlakshya/simstim/internal/brand"
 	"github.com/iamlakshya/simstim/internal/paths"
 )
@@ -96,6 +97,17 @@ func sessionMemoryMax(asked int64) int64 {
 		return limit
 	}
 	return asked
+}
+
+// checkMemoryMax refuses a cap that a session asks for below the smallest,
+// MinMemoryMax. 0 asks for the host's default, and less than 0 (MemoryAuto)
+// too, where a size would apply otherwise.
+func checkMemoryMax(asked int64) error {
+	if asked > 0 && asked < api.MinMemoryMax {
+		return UserError("memory_max", fmt.Sprintf("a memory cap of %d MiB is below the smallest, 256 MiB", asked/mib),
+			"Ask for 256M or more, or for auto.")
+	}
+	return nil
 }
 
 // systemctl runs `systemctl --user` with args. Tests replace it.

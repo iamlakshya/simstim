@@ -202,8 +202,9 @@ func (h *Holder) start() error {
 		return errors.New("no command to run")
 	}
 	// The setup (or resume) hook and any notes show in the session's
-	// terminal before the agent (start.go).
-	argv := startArgv(m.Agent.Argv, m.RunHook, hookVars(m, wasRestored(m)), h.notes)
+	// terminal before the agent (start.go). After a restore or a resume, the
+	// hook is the resume hook.
+	argv := startArgv(m.Agent.Argv, m.RunHook, hookVars(m, wasRestored(m) || wasResumed(m)), h.notes)
 	m.RunHook = ""
 	bin, err := lookPath(argv[0], envValue(m.Env, "PATH"))
 	if err != nil {

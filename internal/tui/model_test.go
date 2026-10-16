@@ -270,7 +270,7 @@ func TestAttachOOMSaysWhatToTry(t *testing.T) {
 		hs.be.attach = client.AttachResult{Ended: end}
 		hs.key("enter")
 		out := plainScreen(hs.m)
-		if !strings.Contains(out, "● auth-refactor on atlas-dev ended (out of memory).") || !strings.Contains(out, "→ "+client.EndHint(end)) {
+		if !strings.Contains(out, "● auth-refactor on atlas-dev ended (out of memory).") || !strings.Contains(out, "→ "+endHint(end)) {
 			t.Fatalf("at %dx%d the end or its next step is missing:\n%s", sz.w, sz.h, out)
 		}
 	}
@@ -423,7 +423,8 @@ func TestHelpComesFromTheRegistry(t *testing.T) {
 		out := plainScreen(hs.m)
 		for _, c := range commands {
 			for _, b := range c.keys {
-				if !c.hidden && c.applies(hs.m, b) && !strings.Contains(out, keyName(b.key)) {
+				// The sheet leaves out its own key: it is open already.
+				if !c.hidden && c.applies(hs.m, b) && c.name() != "view: shortcuts" && !strings.Contains(out, keyName(b.key)) {
 					t.Errorf("screen %v: the keys miss %s for %s", hs.m.screen, keyName(b.key), c.name())
 				}
 			}

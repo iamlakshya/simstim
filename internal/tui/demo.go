@@ -99,6 +99,10 @@ func (b *demoBackend) Secrets(context.Context, client.Host) (map[string]api.Secr
 	return nil, nil
 }
 
+func (b *demoBackend) SessionSecrets(context.Context, []string) (map[string]api.Secret, error) {
+	return nil, nil
+}
+
 func (b *demoBackend) Dial(_ context.Context, h client.Host) (Conn, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -232,6 +236,22 @@ func (c *demoConn) NewSession(_ context.Context, a client.NewArgs) (*client.Sess
 		CreatedAt: time.Now(), Since: time.Now(), Alive: true, Cols: a.Cols, Rows: a.Rows}
 	c.be.sessions[c.host] = append(c.be.sessions[c.host], s)
 	return &s, nil
+}
+
+// Resume starts a demo agent again: it works once more, with nothing of
+// how it ended.
+func (c *demoConn) Resume(_ context.Context, a client.ResumeArgs) (*client.ResumeResult, error) {
+	c.be.mu.Lock()
+	defer c.be.mu.Unlock()
+	for i, s := range c.be.sessions[c.host] {
+		if s.ID == a.ID {
+			s.State, s.Since, s.Alive = "working", time.Now(), true
+			s.Reason, s.Signal, s.ExitCode, s.OOM = "", "", nil, false
+			c.be.sessions[c.host][i] = s
+			return &client.ResumeResult{Session: s, Why: "resumed its own session"}, nil
+		}
+	}
+	return nil, errors.New("no such session")
 }
 
 func (c *demoConn) Delete(_ context.Context, id string) (client.DeleteResult, error) {

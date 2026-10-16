@@ -8,7 +8,7 @@
     4 ◌ pairing       codex     /srv/pair        lost             2h  ⣀⣀⣀⣀⣀⣀⣀⣀
     5 ✕ scratch       shell     /tmp             exited 1         2d  ⣀⣀⣀⣀⣀⣀⣀⣀
 
-    ✕ stopped at its memory cap of 1.5 GiB   d delete            /srv/app · g3
+    ✕ stopped at its memory cap of 1.5 GiB   u resume            /srv/app · g3
 
 
 
@@ -21,4 +21,4 @@
 
   ────────────────────────────────────────────────────────────────────────────
     ❯ / search every host   n start a session
-    d delete   enter peek   r rename   esc hosts   ctrl+o commands   ? keys
+    u resume   d delete   enter peek   esc hosts   ctrl+o commands   ? keys

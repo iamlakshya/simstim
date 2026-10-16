@@ -138,7 +138,7 @@ A destination flag without `--add` replaces the whole file. With no destination 
 | `failed` | The program ended with another code, or a signal |
 | `oom` | A process in the session hit its memory cap and was stopped. When that process was the program itself, `oom` is the session's end, in place of `failed`, and has `exit_code` and `signal`. A program that runs on does not also send `needs_input`. [Memory](memory.md) says how to raise the cap |
 | `memory` | The session is close to its memory cap, before the cap stops a process |
-| `started` | The session started |
+| `started` | The session started, or `resume` started its agent again |
 | `restored` | The session was started again after a host restart |
 | `test` | `host alerts test` |
 

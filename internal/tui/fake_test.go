@@ -41,6 +41,8 @@ type fakeHost struct {
 	missing string
 	// checks are the host's agent checks (guide_fake_test.go).
 	checks []client.AgentCheck
+	// resumeErr is what a resume says, if it fails.
+	resumeErr error
 }
 
 // fakeBackend pretends to be SSH, the hosts and the terminal.
@@ -266,6 +268,27 @@ func (c *fakeConn) NewSession(_ context.Context, a client.NewArgs) (*client.Sess
 		State: api.StateStarting, Since: now, CreatedAt: now, Alive: true}
 	h.sessions = append(h.sessions, s)
 	return &s, nil
+}
+
+// Resume starts a session's agent again: it works once more, with nothing
+// of how it ended.
+func (c *fakeConn) Resume(_ context.Context, a client.ResumeArgs) (*client.ResumeResult, error) {
+	c.be.record("resume %s %s memory=%d secrets=%v", c.name, a.ID, a.MemoryMax, a.Secrets)
+	c.be.mu.Lock()
+	defer c.be.mu.Unlock()
+	h := c.host()
+	if h.resumeErr != nil {
+		return nil, h.resumeErr
+	}
+	for i, s := range h.sessions {
+		if s.ID == a.ID {
+			s.State, s.Source, s.Since, s.Alive = api.StateWorking, "start", now, true
+			s.Reason, s.Signal, s.ExitCode, s.OOM = "", "", nil, false
+			h.sessions[i] = s
+			return &client.ResumeResult{Session: s, Why: "resumed its own session"}, nil
+		}
+	}
+	return nil, &client.UserError{Msg: "no session " + a.ID, Hint: "List sessions to find its ID."}
 }
 
 func (c *fakeConn) Delete(_ context.Context, id string) (client.DeleteResult, error) {

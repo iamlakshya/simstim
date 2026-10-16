@@ -170,7 +170,8 @@ func TestAttachNeedsATerminal(t *testing.T) {
 	fails(t, "attach needs a terminal", "attach", "box/"+id)
 	fails(t, "attach needs a terminal", "new", "box", "--", "sleep", "60")
 	fails(t, "no session has been attached yet", "attach", "-")
-	// A session whose holder is gone cannot be attached to.
+	// A session whose holder is gone cannot be attached to: a resume brings
+	// it back first.
 	lost := newSession(t, "lost", "sleep", "60")
 	pid := hosttest.HolderPID(t, lost)
 	if err := syscall.Kill(pid, syscall.SIGKILL); err != nil {
@@ -179,7 +180,7 @@ func TestAttachNeedsATerminal(t *testing.T) {
 	if err := hosttest.Reap(pid, 5*time.Second); err != nil {
 		t.Fatal(err)
 	}
-	failsWithHint(t, "the session lost on box ended (the session's holder stopped)", "host restore box --all", "attach", "box/lost")
+	failsWithHint(t, "the session lost on box ended (the session's holder stopped)", "resume box/"+lost, "attach", "box/lost")
 }
 
 func TestVersionAndConfig(t *testing.T) {

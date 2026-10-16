@@ -36,6 +36,9 @@ type Backend interface {
 	// Secrets fetches the values of a host's own secrets for a new
 	// session. It never prompts.
 	Secrets(ctx context.Context, h client.Host) (map[string]api.Secret, error)
+	// SessionSecrets fetches the values of the named secrets again, for a
+	// resume of a session that started with them. It never prompts.
+	SessionSecrets(ctx context.Context, names []string) (map[string]api.Secret, error)
 	// SetupTrust and RememberSetup read and keep the user's answers about
 	// repositories' setup scripts on a host.
 	SetupTrust(host string) map[string]bool
@@ -49,6 +52,7 @@ type Backend interface {
 type Conn interface {
 	Sessions(ctx context.Context) ([]client.Session, error)
 	NewSession(ctx context.Context, a client.NewArgs) (*client.Session, error)
+	Resume(ctx context.Context, a client.ResumeArgs) (*client.ResumeResult, error)
 	Delete(ctx context.Context, id string) (client.DeleteResult, error)
 	RenameSession(ctx context.Context, id, name string) error
 	Doctor(ctx context.Context) (client.HostInfo, error)
@@ -89,6 +93,10 @@ func (realBackend) RememberSetup(host, repo string, run bool) error {
 
 func (realBackend) Secrets(ctx context.Context, h client.Host) (map[string]api.Secret, error) {
 	return client.FetchSecrets(ctx, client.LoadSettings(), client.SecretNames(h, nil), false)
+}
+
+func (realBackend) SessionSecrets(ctx context.Context, names []string) (map[string]api.Secret, error) {
+	return client.FetchSecrets(ctx, client.LoadSettings(), names, false)
 }
 
 func (realBackend) Dial(ctx context.Context, h client.Host) (Conn, error) {

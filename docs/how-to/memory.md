@@ -1,6 +1,6 @@
 # Give a session more memory
 
-Each session has a memory cap. It covers everything the session runs: the agent, its tools, its MCP servers and language servers, and your builds. When a session reaches its cap, the kernel stops its biggest process, normally the agent, and the session shows "out of memory".
+Each session has a memory cap. It covers everything the session runs: the agent, its tools, its MCP servers and language servers, and your builds. When a session reaches its cap, the kernel stops its biggest process, normally the agent, and the session shows "out of memory". A [resume](#when-the-cap-stops-an-agent) starts the agent again.
 
 ## What a host gives sessions
 
@@ -41,6 +41,21 @@ memory_max = "2G"
 A size is a number and a unit, in powers of 1024: `512M`, `4G`, `4GiB` or `1.5G`. The smallest is `256M`. `auto` gives the host's default, and `--memory-max auto` gives it to one session whatever the config says. A size above what the host gives all its sessions is lowered to that. `max` and `infinity` are not sizes here: `auto` already lets a session use all that the host gives its sessions.
 
 A running session keeps the cap it started with. A new cap applies to the sessions that start after the change, and to the sessions that `host restore` starts again.
+
+## When the cap stops an agent
+
+The launcher shows the session as `out of memory`, and `ls` shows `errored (out of memory)`. To start the agent again in the same session, with a bigger cap:
+
+<!-- test: help (resumes a session) -->
+```sh
+simstim resume my-server/app --memory-max 4G
+```
+
+In the launcher, select the session and press `u`. The launcher then attaches to it, as after a start. `u` gives the agent the same cap again, and its notice says which: only the command line gives another.
+
+A resume first stops what is left of the session: its old holder, and any process that the agent started, with the memory they hold. Then it starts the agent in the same folder, with its own resume command. Claude Code and Codex pick up the same conversation, but not a turn that was running. The session keeps its ID, name and worktree.
+
+Without `--memory-max`, the session gets the cap it asked for before, and `--memory-max auto` gives it the host's default. The size you give stays with the session for later resumes and restores. A size above what the host gives all its sessions is lowered to that. So when a session already had the default, `--memory-max` cannot give it more: give the host more memory ([Swap](#swap)), or stop other sessions.
 
 ## After an update of the helper
 

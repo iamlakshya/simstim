@@ -84,6 +84,30 @@ type SessionInfo struct {
 	// MissingSecrets names the secrets the session asked for but started
 	// without, for example after a host restart.
 	MissingSecrets []string `json:"missing_secrets,omitempty"`
+	// Secrets names the secrets the session asked for at its start, never
+	// their values. A resume fetches them again.
+	Secrets []string `json:"secrets,omitempty"`
+}
+
+// ResumeArgs asks a host to start the agent of a session again, in the same
+// session, after the agent ended: the "resume" request. A helper that can
+// do it offers the feature "resume".
+type ResumeArgs struct {
+	ID string `json:"id"`
+	// MemoryMax is the session's memory cap from now on, in bytes. 0 keeps
+	// the size that the session asked for before, and MemoryAuto asks for
+	// the host's default.
+	MemoryMax int64 `json:"memory_max,omitempty"`
+	// Secrets are the values of the session's secrets, which the client
+	// fetches again. The host writes none of them down (host/secrets.go).
+	Secrets map[string]Secret `json:"secrets,omitempty"`
+}
+
+// ResumeResult is what a resume did: the session's new row, and how its
+// agent came back, such as "resumed its own session …".
+type ResumeResult struct {
+	Session SessionInfo `json:"session"`
+	Why     string      `json:"why"`
 }
 
 // Check is one line of the host doctor.

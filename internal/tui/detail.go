@@ -53,6 +53,12 @@ func (m *Model) sessionDetail(h *hostConn, s client.Session, cw int, withHost bo
 		// The next steps include keys, so they show only while keys reach
 		// the list. They come before the facts.
 		keep := min(cells(strings.Join(slices.Concat(head, tail), dot)), minFacts)
+		// A key also shows in the keys at the bottom, and the note does not.
+		// So when the folder and the note fit beside the reason, the keys
+		// leave them room. Otherwise the keys show, and the note does not.
+		if noteW := cells(strings.Join(slices.Concat(head, []string{note}), dot)); note != "" && cells(now)+3+noteW <= cw {
+			keep = max(keep, noteW)
+		}
 		if left, ok := withSteps(now, steps, cw-3, keep); ok {
 			now, rightW = left, cw-3-cells(left)
 		}

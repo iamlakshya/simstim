@@ -225,6 +225,40 @@ else:
         ok(r_oom.get("oom_killed") is True and r_oom.get("state") == "errored" and r_oom.get("reason") == "oom",
            "the cap stopped the agent itself, and its session ended out of memory (state: %s, reason: %s)" % (r_oom.get("state"), r_oom.get("reason")))
 
+        # After the cap stops the agent, resume starts it again in the same
+        # session, with a bigger cap. Its first run leaves a process behind,
+        # and fills its cap. The mark makes the second run quiet. --agent ""
+        # keeps the command: the shell agent would continue with a login shell.
+        # setsid keeps the process that the agent leaves out of the terminal's
+        # session, so the end of the agent sends it no SIGHUP.
+        mark = "$HOME/.cache/e2e-resume-%d" % os.getpid()
+        sid_res = start("e2e-resume", "/bin/sh", "-c",
+                        'if [ -e "%s" ]; then exec sleep 600; fi; mkdir -p "$HOME/.cache"; touch "%s"; setsid sleep 913 & exec tail /dev/zero' % (mark, mark),
+                        flags=("--agent", "", "--memory-max", "256M"))
+        created.append(sid_res)
+        r_res, end = {}, time.time() + 60
+        while time.time() < end and r_res.get("state") not in ("exited", "errored"):
+            time.sleep(2)
+            r_res = session_rows().get(sid_res, {})
+        ok(r_res.get("oom_killed") is True, "the cap stopped the agent that resume brings back (state: %s)" % r_res.get("state"))
+        ok(host_rc("pgrep -u \"$(id -u)\" -f 'sleep 91[3]'") == 0, "the stopped agent left a process in its session")
+        t = Term([cli, "resume", HOST + "/" + sid_res, "--memory-max", "300M", "--detach"], env=env)
+        code = t.exit_code(90)
+        ok(code == 0 and b"Resumed" in t.buf, "resume starts the agent again (exit %s): %s" % (code, t.buf.decode(errors="replace").strip()))
+        r_res = session_rows().get(sid_res, {})
+        print("resumed session:", {k: r_res.get(k) for k in ("state", "alive", "memory_max", "oom_killed")})
+        ok(r_res.get("alive") and r_res.get("state") not in ("exited", "errored", "lost") and not r_res.get("oom_killed"),
+           "the resumed agent runs, in the same session (state: %s)" % r_res.get("state"))
+        ok(r_res.get("memory_max") == 300 << 20, "the resumed session got the bigger cap (%s)" % r_res.get("memory_max"))
+        unit = r_res.get("unit") or ""
+        unit_max = host_ssh("systemctl --user show %s -p MemoryMax --value" % unit).stdout.decode().strip() if unit else ""
+        ok(unit_max == str(300 << 20), "the new unit %s has the bigger cap (MemoryMax=%s)" % (unit, unit_max))
+        ok(host_rc("pgrep -u \"$(id -u)\" -f 'sleep 91[3]'") == 1, "resume stopped what the old agent left in its session")
+        t = Term([cli, "resume", HOST + "/" + sid_res, "--detach"], env=env)
+        code = t.exit_code(60)
+        ok(code not in (0, None) and b"still runs" in t.buf, "a resume of an agent that runs is refused (exit %s)" % code)
+        host_rc('rm -f "%s"' % mark)
+
 # G. Laptop sleep: freeze the client and cut its network path; on wake it must
 #    be back to live output within 5 s, with what it missed replayed.
 import signal

@@ -22,6 +22,7 @@ The launcher's commands and their default keys. Every command is also in the com
 | session: preview | `space` |
 | session: rename | `r`, `f2` |
 | session: delete | `d` |
+| session: resume | `u` |
 | session: copy attach command | `y` |
 | session: next waiting | `w` |
 | host: open | `enter` |

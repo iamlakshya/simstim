@@ -105,6 +105,7 @@ type Model struct {
 	// again continues from the byte the terminal already shows.
 	attach    *client.AttachState
 	lastAgent map[string]string
+	resuming  map[sessKey]bool // the sessions whose resume runs (resume.go)
 	conns     *connSet
 
 	// exec hands the terminal to a blocking command; after delivers msg
@@ -334,6 +335,8 @@ func (m *Model) update(msg tea.Msg) tea.Cmd {
 		return m.onFolders(msg)
 	case startedMsg:
 		return m.onStarted(msg)
+	case resumedMsg:
+		return m.onResumed(msg)
 	case attachDoneMsg:
 		return m.onAttachEnded(msg)
 	case hostSavedMsg:

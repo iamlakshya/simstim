@@ -138,6 +138,7 @@ Every list screen has the same parts, top to bottom:
 - **Keys:**
   - Enter, or the row's number, attaches. On an empty list, Enter opens the quick start.
   - `n` opens the quick start, `space` peeks at the screen, and `r` renames in place.
+  - `u` resumes an agent that has ended (2.4.1).
   - `d` deletes after a confirm, `y` copies the attach command, and `alt+e` (`opt+e` on a Mac) hides or shows ended sessions.
   - Esc (or `h`, `←`) goes back to the hosts, on the same host.
 - **An agent that has ended:** a session's holder outlives its agent, so the launcher reads the agent's state, not only whether the holder answers.
@@ -148,7 +149,7 @@ Every list screen has the same parts, top to bottom:
       3 ✕ fuzz          shell     /srv/fuzz        killed          20m  ⣀⣀⣀⣀⣀⣀⣀⣀
       4 ◌ pairing       codex     /srv/pair        lost             2h  ⣀⣀⣀⣀⣀⣀⣀⣀
 
-      ✕ stopped at its memory cap of 1.5 GiB   d delete            /srv/app · g3
+      ✕ stopped at its memory cap of 1.5 GiB   u resume            /srv/app · g3
   ```
 
   - The state says how the agent ended:
@@ -159,12 +160,14 @@ Every list screen has the same parts, top to bottom:
   - The state is red, except `exited 0` and `lost`, which are faint.
   - The line under the list says why the agent ended, in the state's colour, such as "stopped by signal 9 (killed)" or "exited with code 2". Then it shows the next steps.
   - The next steps come in order, and each one shows only when it fits whole. A step that does not fit is left out, and a later one may still show. A key takes room from the folder and the ID, which keep a few cells. A command may take all of their room, because the line is the one place that shows it with the reason. The steps do not show in search, where a key types a letter.
-  - For a lost agent, the first step is `→ simstim host restore <host> --all`, which starts the agent again with its resume command. A delete would remove the ID that the resume needs, so it comes second.
-  - If the memory cap stopped another process before the agent ended, "a process hit the cap" follows the folder, in yellow, as for a running session.
+  - The first step is `u resume`. It starts the agent again in the same session, with its resume command (2.4.1).
+  - After a clean exit, `exited 0`, the user most likely quit the agent, so `d delete` comes first and `u resume` second.
+  - For a lost agent, `u resume` comes first, then `→ simstim host restore <host> --all`, then `d delete`. The resume acts on this session at once, with one key. It also fetches the session's secrets again, which a restore cannot, and it works after restore has used its tries. The restore command brings back every session that a host restart stopped, so it follows. A delete would remove the ID that both need, so it comes last.
+  - If the memory cap stopped another process before the agent ended, "a process hit the cap" follows the folder, in yellow, as for a running session. The keys among the next steps leave it room, because they also show at the bottom, and the note does not.
   - The line shows no memory. What the session still holds is not the agent's: it is the holder, and any process that the agent left.
   - Enter and the row's number go forward to the agent's last screen, in the peek, while the holder answers. Without a holder, a warning says why the agent ended, with the step to try (2.8).
-  - That warning reads like the notice at the end of an attach, such as "importer on gcp-dev ended (out of memory).". After the memory cap, it has the same step.
-  - The keys start with `enter how to restore` for a lost agent, then the next steps that are keys, then `enter peek` while the holder answers. The palette offers neither attach nor the attach command, and offers the peek only while the holder answers.
+  - That warning reads like the notice at the end of an attach, such as "importer on gcp-dev ended (out of memory).". After the memory cap, it has the same step, with the command for a bigger cap: "u resumes it, or run simstim resume --memory-max." For a lost agent, the step is the restore command, whole. After any other end, it is "Press u to resume it, or d to delete it."
+  - The keys follow the next steps: `u resume`, then `enter how to restore` for a lost agent in the place of its command, then `d delete`. Then come `enter peek` while the holder answers, `esc hosts`, `ctrl+o commands` and `? keys`. `r` still renames, but it is rare on an agent that has ended, so it leaves the keys to `ctrl+o`. The palette offers neither attach nor the attach command, and offers the peek only while the holder answers.
   - The delete sheet says only what it removes, because no work can be lost.
 - **Before the host answers:**
   - The launcher shows the sessions it remembers from the last run at once, quiet (faint), while the rule's scan says it is connecting.
@@ -180,6 +183,19 @@ Every list screen has the same parts, top to bottom:
   ```
 
 - **Every host:** `simstim flip`, or "All sessions" in the palette, lists every host's sessions in one list, under each host's name.
+
+#### 2.4.1 Resume
+
+`u` on a session whose agent has ended starts the agent again, in the same session. "Resume session" in the palette does the same.
+
+- **The key** is a letter of the word "resume". `r` renames and `s` opens the guided setup. `e` would sit too close to `alt+e`, which shows ended sessions. So the resume takes `u`.
+- **What the host does.** It stops the old holder, and its unit with any process that the agent left there. Then it starts a new holder with the agent's resume command, and the session's resume hook first. The session keeps its ID, name, folder and worktree. The cap is the one the session asked for, or the host's default.
+- **Secrets.** The launcher fetches the session's secrets again, as for a start, without a prompt. The host's record names them, so it fetches only those that `hosts.toml` gives the host. When the host asks for another, `u` fetches nothing, and an error names the secret, with `simstim resume <host>/<session> --secret <name>` as the step.
+- **While it starts:** a notice says "Resuming importer on gcp-dev…". After the memory cap, it also says which cap the agent gets again: "Resuming importer on gcp-dev, with its cap of 1.5 GiB…". While it runs, `u` on the same session does nothing.
+- **One at a time.** The host holds a lock on the session while a resume, a restore or a delete of it runs. Another one says that the session is busy, with a hint to wait.
+- **Then** the launcher attaches, as after a start, while the session is still the one selected and no sheet or prompt is open. Otherwise a notice says "Resumed importer on gcp-dev.". An error shows with its step, such as a helper that is too old.
+- **On an agent that runs,** `u` says "Not available: the agent still runs.", and the palette says the same.
+- **A bigger cap** needs the command line: `simstim resume <host>/<session> --memory-max 4G`.
 
 ### 2.5 Search every host
 
@@ -238,7 +254,7 @@ Every dialog is a sheet. It rises from the bottom of the screen over the dimmed 
 | Delete | `d` | Red rule and title: "Delete api-tests?", what stops and what stays. For an agent that has ended, only what it removes. |
 | Peek | `space` | The session's last screen, refreshed while the agent runs. ↑↓ move to the next session, and Enter attaches. For an agent that has ended, it shows no memory, and Enter keeps it open. |
 | Commands | `ctrl+o` | The palette: a filter, then every command as plain words ("New session", "Peek at the screen") with its key in cyan. A command that cannot run says why, faint. |
-| Keys | `?` | Every key that works here, in two columns, built from the live registry |
+| Keys | `?` | Every key that works here, in two columns, built from the live registry. It leaves out `?` itself. |
 | Host details | `i` | Route, system, helper, agents, limits; `t` test, `s` shell, `r` reconnect, `x` remove |
 | Add a host | `a` | The wizard (2.10) |
 | Set up | Enter on the first-run screen, `s` | The guided setup (2.12) |
@@ -364,6 +380,7 @@ These keys work in the launcher. You can rebind any key in `config.toml`, and `s
 | `space` | Sessions | Peek at the screen |
 | `r`, `f2` | Sessions | Rename |
 | `d` | Sessions | Delete, with a confirm |
+| `u` | Sessions | Resume an agent that has ended, in the same session (2.4.1) |
 | `y` | Sessions | Copy the attach command |
 | `w` | Anywhere | Go to the next session that needs you, on any host; press again for the one after |
 | `alt+e` (`opt+e`) | Sessions | Hide or show ended sessions |
@@ -523,6 +540,7 @@ The launcher is the home, and every action also has a command, for scripts and t
 | `simstim new <host> [--agent claude] [--dir ~/src/app [--mkdir]] [--name x] [--worktree [--base ref]] [--memory-max 4G] [--detach] [-- cmd…]` | Starts a session, and attaches unless `--detach` |
 | `simstim ls [--host h] [--json]` | Lists sessions, with their state and where the state came from, and why an agent ended: `errored (out of memory)` |
 | `simstim attach <host>/<session>`, `attach -` | Attaches directly; `-` is the last session. Good for a Ghostty keybinding. To a session whose agent has ended, it says why and what to try, as at the end of an attach. |
+| `simstim resume <host>/<session> [--memory-max 4G] [--secret NAME] [--detach]` | Starts an ended agent again in its session, with its resume command, and attaches unless `--detach`. Without `--memory-max`, the cap is the one the session asked for. |
 | `simstim flip [<host>/<session>]` | A quick switch: the sessions of every host in one list, then attach |
 | `simstim send <host>/<session> <text> [--no-enter]` | Types text into a session without attaching |
 | `simstim rename <host>/<session> <name>`, `kill <host>/<session>` | Renames; stops and removes (keeping a worktree that has work) |

@@ -86,25 +86,34 @@ func TestLsSaysWhyAnAgentEnded(t *testing.T) {
 		out := ok(t, "ls")
 		return want[0].MatchString(out) && want[1].MatchString(out)
 	})
-	failsWithHint(t, "the session crash on box ended (exit code 3)", "kill box/"+crash, "attach", "box/crash")
+	failsWithHint(t, "the session crash on box ended (exit code 3)", "resume box/"+crash, "attach", "box/crash")
 }
 
 // attach to an agent that has ended reads like the message at the end of an
-// attach, with the same step after the memory cap.
+// attach, with the same step after the memory cap: a resume, which can give
+// it a bigger cap. After a clean exit, the step also offers to remove it,
+// and for a lost agent, the restore of every lost session.
 func TestEndedErrorSaysWhatToTry(t *testing.T) {
 	h := client.Host{Name: "box"}
 	capped := client.Session{ID: "a1", Name: "app", State: api.StateErrored, OOM: true, Signal: "killed", ExitCode: new(137)}
 	var ue *client.UserError
 	if err := endedError(h, capped); !errors.As(err, &ue) || ue.Msg != "the session app on box ended (out of memory)" ||
-		ue.Hint != client.EndHint(&proto.Ended{OOM: true}) {
+		ue.Hint != client.EndHint(&proto.Ended{OOM: true}, "box/a1") || !strings.Contains(ue.Hint, "resume box/a1") ||
+		!strings.Contains(ue.Hint, "--memory-max") {
 		t.Fatalf("endedError = %+v", err)
 	}
-	if got := endMessage("app", "box", &proto.Ended{OOM: true, Signal: "killed", ExitCode: 137}); !strings.Contains(got, "ended (out of memory)") ||
+	if got := endMessage("app", "box", "a1", &proto.Ended{OOM: true, Signal: "killed", ExitCode: 137}); !strings.Contains(got, "ended (out of memory)") ||
 		!strings.Contains(got, "Try: "+ue.Hint) {
 		t.Fatalf("endMessage = %q", got)
 	}
 	done := client.Session{ID: "b2", Name: "docs", State: api.StateExited, ExitCode: new(0)}
-	if err := endedError(h, done); !errors.As(err, &ue) || ue.Msg != "the session docs on box ended (exit code 0)" || !strings.Contains(ue.Hint, "kill box/b2") {
+	if err := endedError(h, done); !errors.As(err, &ue) || ue.Msg != "the session docs on box ended (exit code 0)" ||
+		!strings.Contains(ue.Hint, "resume box/b2") || !strings.Contains(ue.Hint, "kill box/b2") {
+		t.Fatalf("endedError = %+v", err)
+	}
+	lost := client.Session{ID: "c3", Name: "pair", State: api.StateLost, Reason: "the host restarted"}
+	if err := endedError(h, lost); !errors.As(err, &ue) || ue.Msg != "the session pair on box ended (the host restarted)" ||
+		!strings.Contains(ue.Hint, " resume box/c3   (") || !strings.Contains(ue.Hint, "host restore box --all") {
 		t.Fatalf("endedError = %+v", err)
 	}
 }
