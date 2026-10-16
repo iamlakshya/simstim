@@ -19,7 +19,7 @@ If a report is not a vulnerability, we say why and close it.
 
 ## Supported versions
 
-The project has no release yet. Once it does, only the latest minor release gets security fixes.
+Only the latest minor release gets security fixes. The first release is 0.1.0.
 
 ## Design rules that limit risk
 

@@ -68,7 +68,7 @@ simstim is young, and some things are missing on purpose or not yet built:
 - **No sharing.** A session belongs to one user's account on the host.
 - **You bring the host.** `host create` can make a local VM, a test container or an E2B sandbox ([create a host](../how-to/create-a-host.md)); for anything else you need a Linux host with SSH.
 - **Isolation is per worktree, not per machine.** Each task can have its own branch and folder ([worktrees](../how-to/worktrees.md)), but tasks on one host share it.
-- **Not released yet.**
+- **Young.** The first release, 0.1.0, came out in October 2026.
 
 ## Summary
 

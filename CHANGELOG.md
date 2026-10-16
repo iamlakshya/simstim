@@ -4,6 +4,10 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-10-16
+
+The first release.
+
 ### Added
 
 - `just cover` prints the unit tests' coverage of `internal/` without the launcher, counted across packages, and CI fails below 70 %. The new tests took it from 43 % to 83 % ([testing](docs/contributing/testing.md#coverage)).
@@ -80,6 +84,7 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ### Changed
 
+- Changes reach `main` only through a pull request that passes CI; a review is required, and the owner, as the one maintainer, may skip it ([decision 0023](docs/contributing/decisions/0023-protect-main.md)).
 - The docs site is rebuilt on Starlight (decision 0022), on the same addresses. Three tabs, each with its own sidebar: Docs (get started, guides by task, concepts, help), Reference (the commands as a tree) and Project (changelog, roadmap, contributing, decisions, research). Breadcrumbs, previous and next inside a tab, search on `/` and Ctrl/Cmd+K, and a version menu. The site has a look of its own: an off-white ruled sheet with one orange, in light and dark, following the reader's system theme. The landing page is about 200 words. Its hero is a line drawing that plays its story once while in view: the laptop's lid shuts, the agents on the host keep working through the night, the lid opens and the missed output is replayed. Below it, each section is one line and one figure: the live launcher (in its own colours), Shift+Enter's bytes through the client and through tmux 3.8, a laptop linked to three hosts, three commands, and the agents. With reduced motion the hero stands still on its middle frame. The site has no motion switch or pause, so the hero does not meet WCAG 2.2.2, as the decision says. The site needs Node 24 and pnpm to build, pinned in `scripts/tools.lock`; Hugo and three.js are gone.
 - Two new pages: [how it works](docs/explanation/how-it-works.md), the ideas in plain words, and [common questions](docs/faq.md). The guides index is grouped by task: hosts, agents, daily work, your setup.
 - The command reference (`docs/reference/cli/`) is our own Markdown, not cobra's: each page says what the command does, its usage, its help, examples, a table of its flags (without `--help`, with defaults), its subcommands and its parent. The commands' index lists every command and subcommand in one table.

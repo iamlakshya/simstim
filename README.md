@@ -8,7 +8,7 @@ simstim runs Claude Code, Codex, opencode, Antigravity CLI or any other terminal
 
 **Docs:** [simstim.astrel.sh](https://simstim.astrel.sh)
 
-> **Status:** pre-release. Everything in v1 and v2 of [the first plan](docs/contributing/history.md) is built and passes 41 end-to-end checks on a Linux test host, including two real reboots. Nothing is released yet.
+> **Status:** early. The first release, 0.1.0, came out on 16 October 2026. Every feature passes 92 end-to-end checks on a Linux test host, and sessions have survived real reboots there. Before 1.0, a minor version may still break the CLI or the config ([versions](docs/contributing/releasing.md#versioning)).
 
 ## Why
 

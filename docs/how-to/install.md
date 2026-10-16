@@ -25,7 +25,7 @@ A client built this way has no host helpers inside it. The first time it connect
 
 ## With Homebrew
 
-The tap opens with the first public release.
+Each release builds a Homebrew cask, but the tap is not published yet. Until it is, use the installer or Go.
 
 ## From source
 
