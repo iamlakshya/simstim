@@ -22,10 +22,10 @@
 <text x="57.6" y="125.0" textLength="8.4" fill="#656565">1</text>
 <text x="74.4" y="125.0" textLength="8.4" fill="#7FD962">●</text>
 <text x="91.2" y="125.0" textLength="58.8" fill="#BFBDB6" font-weight="bold">gcp-dev</text>
-<text x="200.4" y="125.0" textLength="75.6" fill="#656565">1 session</text>
-<text x="796.8" y="125.0" textLength="50.4" fill="#656565">  38ms</text>
+<text x="200.4" y="125.0" textLength="84.0" fill="#656565">2 sessions</text>
+<text x="813.6" y="125.0" textLength="33.6" fill="#656565">38ms</text>
 <text x="864.0" y="125.0" textLength="8.4" fill="#90E1C6">⣰</text>
-<text x="872.4" y="125.0" textLength="8.4" fill="#90E1C6">⣿</text>
+<text x="872.4" y="125.0" textLength="8.4" fill="#90E1C6">⣾</text>
 <text x="880.8" y="125.0" textLength="8.4" fill="#90E1C6">⣿</text>
 <text x="889.2" y="125.0" textLength="8.4" fill="#90E1C6">⣧</text>
 <text x="897.6" y="125.0" textLength="8.4" fill="#90E1C6">⣠</text>
@@ -53,7 +53,7 @@
 <text x="309.6" y="159.0" textLength="92.4" fill="#F9AF4F">1 needs you</text>
 <text x="402.0" y="159.0" textLength="462.0" fill="#BFBDB6">                                                  4ms  </text>
 <text x="864.0" y="159.0" textLength="8.4" fill="#90E1C6">⣶</text>
-<text x="872.4" y="159.0" textLength="8.4" fill="#90E1C6">⣿</text>
+<text x="872.4" y="159.0" textLength="8.4" fill="#90E1C6">⣾</text>
 <text x="880.8" y="159.0" textLength="8.4" fill="#90E1C6">⣿</text>
 <text x="889.2" y="159.0" textLength="8.4" fill="#90E1C6">⣧</text>
 <text x="897.6" y="159.0" textLength="8.4" fill="#90E1C6">⣠</text>

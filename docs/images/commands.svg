@@ -26,12 +26,12 @@
 <text x="57.6" y="125.0" textLength="8.4" fill="#656565">1</text>
 <text x="74.4" y="125.0" textLength="8.4" fill="#825E31">●</text>
 <text x="91.2" y="125.0" textLength="109.2" fill="#656565">auth-refactor</text>
-<text x="326.4" y="125.0" textLength="50.4" fill="#656565">claude</text>
-<text x="410.4" y="125.0" textLength="75.6" fill="#656565">~/src/app</text>
-<text x="696.0" y="125.0" textLength="100.8" fill="#825E31">needs input </text>
+<text x="318.0" y="125.0" textLength="50.4" fill="#656565">claude</text>
+<text x="402.0" y="125.0" textLength="75.6" fill="#656565">~/src/app</text>
+<text x="687.6" y="125.0" textLength="109.2" fill="#825E31">needs input  </text>
 <text x="822.0" y="125.0" textLength="25.2" fill="#656565">43s</text>
 <text x="864.0" y="125.0" textLength="8.4" fill="#825E31">⣶</text>
-<text x="872.4" y="125.0" textLength="8.4" fill="#825E31">⣿</text>
+<text x="872.4" y="125.0" textLength="8.4" fill="#825E31">⣾</text>
 <text x="880.8" y="125.0" textLength="8.4" fill="#825E31">⣿</text>
 <text x="889.2" y="125.0" textLength="8.4" fill="#825E31">⣄</text>
 <text x="897.6" y="125.0" textLength="8.4" fill="#825E31">⣀</text>
@@ -41,12 +41,12 @@
 <text x="57.6" y="142.0" textLength="8.4" fill="#656565">2</text>
 <text x="74.4" y="142.0" textLength="8.4" fill="#4D776D">⠶</text>
 <text x="91.2" y="142.0" textLength="75.6" fill="#656565">api-tests</text>
-<text x="326.4" y="142.0" textLength="67.2" fill="#656565">codex   </text>
-<text x="410.4" y="142.0" textLength="75.6" fill="#656565">~/src/api</text>
-<text x="696.0" y="142.0" textLength="100.8" fill="#4D776D">working     </text>
+<text x="318.0" y="142.0" textLength="67.2" fill="#656565">codex   </text>
+<text x="402.0" y="142.0" textLength="75.6" fill="#656565">~/src/api</text>
+<text x="687.6" y="142.0" textLength="109.2" fill="#4D776D">working      </text>
 <text x="813.6" y="142.0" textLength="33.6" fill="#656565">  8s</text>
 <text x="864.0" y="142.0" textLength="8.4" fill="#4D776D">⣶</text>
-<text x="872.4" y="142.0" textLength="8.4" fill="#4D776D">⣿</text>
+<text x="872.4" y="142.0" textLength="8.4" fill="#4D776D">⣾</text>
 <text x="880.8" y="142.0" textLength="8.4" fill="#4D776D">⣿</text>
 <text x="889.2" y="142.0" textLength="8.4" fill="#4D776D">⣄</text>
 <text x="897.6" y="142.0" textLength="8.4" fill="#4D776D">⣼</text>
@@ -70,27 +70,29 @@
 <text x="906.0" y="295.0" textLength="8.4" fill="#90E1C6" font-weight="bold">r</text>
 <text x="74.4" y="312.0" textLength="117.6" fill="#BFBDB6" font-weight="bold">Delete session</text>
 <text x="906.0" y="312.0" textLength="8.4" fill="#90E1C6" font-weight="bold">d</text>
-<text x="74.4" y="329.0" textLength="193.2" fill="#BFBDB6" font-weight="bold">Copy the attach command</text>
-<text x="906.0" y="329.0" textLength="8.4" fill="#90E1C6" font-weight="bold">y</text>
-<text x="74.4" y="346.0" textLength="84.0" fill="#656565">Open host </text>
-<text x="158.4" y="346.0" textLength="8.4" fill="#656565">·</text>
-<text x="166.8" y="346.0" textLength="184.8" fill="#656565"> the sessions are open</text>
-<text x="872.4" y="346.0" textLength="42.0" fill="#90E1C6" font-weight="bold">enter</text>
-<text x="74.4" y="363.0" textLength="67.2" fill="#BFBDB6" font-weight="bold">Add host</text>
-<text x="906.0" y="363.0" textLength="8.4" fill="#90E1C6" font-weight="bold">a</text>
-<text x="74.4" y="380.0" textLength="100.8" fill="#BFBDB6" font-weight="bold">Host details</text>
-<text x="906.0" y="380.0" textLength="8.4" fill="#90E1C6" font-weight="bold">i</text>
-<text x="74.4" y="397.0" textLength="75.6" fill="#BFBDB6" font-weight="bold">Test host</text>
-<text x="74.4" y="414.0" textLength="117.6" fill="#BFBDB6" font-weight="bold">Reconnect host</text>
-<text x="74.4" y="431.0" textLength="92.4" fill="#BFBDB6" font-weight="bold">Remove host</text>
-<text x="74.4" y="448.0" textLength="142.8" fill="#BFBDB6" font-weight="bold">Back to the hosts</text>
-<text x="74.4" y="465.0" textLength="100.8" fill="#BFBDB6" font-weight="bold">All sessions</text>
-<text x="74.4" y="482.0" textLength="142.8" fill="#BFBDB6" font-weight="bold">Search every host</text>
-<text x="906.0" y="482.0" textLength="8.4" fill="#90E1C6" font-weight="bold">/</text>
-<text x="74.4" y="499.0" textLength="84.0" fill="#BFBDB6" font-weight="bold">Show ended</text>
-<text x="872.4" y="499.0" textLength="42.0" fill="#90E1C6" font-weight="bold">opt+e</text>
-<text x="74.4" y="516.0" textLength="33.6" fill="#BFBDB6" font-weight="bold">Keys</text>
-<text x="906.0" y="516.0" textLength="8.4" fill="#90E1C6" font-weight="bold">?</text>
+<text x="74.4" y="329.0" textLength="126.0" fill="#656565">Resume session </text>
+<text x="200.4" y="329.0" textLength="8.4" fill="#656565">·</text>
+<text x="208.8" y="329.0" textLength="176.4" fill="#656565"> the agent still runs</text>
+<text x="906.0" y="329.0" textLength="8.4" fill="#90E1C6" font-weight="bold">u</text>
+<text x="74.4" y="346.0" textLength="159.6" fill="#BFBDB6" font-weight="bold">Copy attach command</text>
+<text x="906.0" y="346.0" textLength="8.4" fill="#90E1C6" font-weight="bold">y</text>
+<text x="74.4" y="363.0" textLength="168.0" fill="#BFBDB6" font-weight="bold">Next waiting session</text>
+<text x="906.0" y="363.0" textLength="8.4" fill="#90E1C6" font-weight="bold">w</text>
+<text x="74.4" y="380.0" textLength="84.0" fill="#656565">Open host </text>
+<text x="158.4" y="380.0" textLength="8.4" fill="#656565">·</text>
+<text x="166.8" y="380.0" textLength="184.8" fill="#656565"> the sessions are open</text>
+<text x="872.4" y="380.0" textLength="42.0" fill="#90E1C6" font-weight="bold">enter</text>
+<text x="74.4" y="397.0" textLength="67.2" fill="#BFBDB6" font-weight="bold">Add host</text>
+<text x="906.0" y="397.0" textLength="8.4" fill="#90E1C6" font-weight="bold">a</text>
+<text x="74.4" y="414.0" textLength="100.8" fill="#BFBDB6" font-weight="bold">Guided setup</text>
+<text x="906.0" y="414.0" textLength="8.4" fill="#90E1C6" font-weight="bold">s</text>
+<text x="74.4" y="431.0" textLength="100.8" fill="#BFBDB6" font-weight="bold">Host details</text>
+<text x="906.0" y="431.0" textLength="8.4" fill="#90E1C6" font-weight="bold">i</text>
+<text x="74.4" y="448.0" textLength="75.6" fill="#BFBDB6" font-weight="bold">Test host</text>
+<text x="74.4" y="465.0" textLength="117.6" fill="#BFBDB6" font-weight="bold">Reconnect host</text>
+<text x="74.4" y="482.0" textLength="92.4" fill="#BFBDB6" font-weight="bold">Remove host</text>
+<text x="74.4" y="499.0" textLength="142.8" fill="#BFBDB6" font-weight="bold">Back to the hosts</text>
+<text x="74.4" y="516.0" textLength="100.8" fill="#BFBDB6" font-weight="bold">All sessions</text>
 <text x="57.6" y="550.0" textLength="42.0" fill="#90E1C6">enter</text>
 <text x="99.6" y="550.0" textLength="33.6" fill="#656565"> run</text>
 <text x="158.4" y="550.0" textLength="8.4" fill="#90E1C6">↑</text>
