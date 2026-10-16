@@ -6,6 +6,7 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ### Added
 
+- The Setup workflow (`scripts/setup.sh` on bare runners and in the devcontainer's image) can be started by hand, and runs when the workflow itself changes.
 - The README shows the OpenSSF Scorecard badge: 8.1 of 10 after the first release.
 
 ### Fixed

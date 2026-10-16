@@ -5,11 +5,12 @@ name: Setup
 on:
   push:
     branches: [main]
-    paths: [scripts/setup.sh, scripts/tools.lock, .devcontainer/**, justfile, go.mod]
+    paths: [scripts/setup.sh, scripts/tools.lock, .devcontainer/**, justfile, go.mod, .github/workflows/setup.yml]
   pull_request:
-    paths: [scripts/setup.sh, scripts/tools.lock, .devcontainer/**, justfile, go.mod]
+    paths: [scripts/setup.sh, scripts/tools.lock, .devcontainer/**, justfile, go.mod, .github/workflows/setup.yml]
   schedule:
     - cron: "23 6 * * 3"
+  workflow_dispatch: # check any commit by hand, before a release for one
 
 permissions: {}
 
