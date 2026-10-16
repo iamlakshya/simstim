@@ -271,8 +271,8 @@ func TestTransportStartEndsWithItsContext(t *testing.T) {
 	}
 }
 
-// A missing folder comes back to the client as a question; the start made
-// again with MakeFolder makes it.
+// A missing folder comes back to the client as a question. The start that
+// comes again with MakeFolder makes the folder.
 func TestBridgeMissingFolder(t *testing.T) {
 	h := hosttest.New(t)
 	c := dial(t, h)

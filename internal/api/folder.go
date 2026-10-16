@@ -7,6 +7,6 @@ const CodeNoFolder = "no_folder"
 
 // FolderQuestion asks the user whether a new session's folder may be made.
 type FolderQuestion struct {
-	// Folder is the missing folder on the host, with ~ expanded.
+	// Folder is the missing folder on the host: a full path, with ~ expanded.
 	Folder string `json:"folder"`
 }

@@ -1,7 +1,6 @@
 package host
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -9,11 +8,11 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/iamlakshya/simstim/internal/api"
 	"github.com/iamlakshya/simstim/internal/paths"
-	"github.com/iamlakshya/simstim/internal/proto"
 )
 
 // FoldersResult is what the new-session dialog completes folders from.
@@ -130,27 +129,60 @@ func gitRepos(out []string, home string, limit int, tilde func(string) string) [
 	return out
 }
 
-// checkFolder checks a new session's folder, and reports whether it is missing
-// and may be made. New makes it only after its other checks pass, so a start
-// that fails leaves no folder behind. A missing folder without
-// NewArgs.MakeFolder is a question for the user (api.CodeNoFolder).
-func checkFolder(cwd string, a NewArgs) (missing bool, err error) {
-	st, err := os.Stat(cwd)
-	switch {
-	case err == nil && st.IsDir():
-		return false, nil
-	case err == nil:
-		return false, UserError("bad_folder", cwd+" on this host is a file, not a folder", "Pick a folder.")
-	case !errors.Is(err, fs.ErrNotExist):
-		return false, UserError("bad_folder", fmt.Sprintf("cannot open the folder %s on this host: %v", cwd, err), "Check its permissions, or pick another folder.")
-	case a.Worktree:
-		return false, UserError("bad_folder", fmt.Sprintf("the folder %s does not exist on this host, and a new worktree needs a git repository", cwd), "Pick the folder of a repository, or start without a worktree.")
-	case !a.MakeFolder:
-		data, _ := json.Marshal(api.FolderQuestion{Folder: cwd})
-		return false, &proto.Error{Code: api.CodeNoFolder,
-			Message: fmt.Sprintf("the folder %s does not exist on this host", cwd),
-			Hint:    "Pass --mkdir to make it, or pick an existing folder. The launcher asks.",
-			Data:    data}
+// checkFolder checks a new session's folder, cwd, with ~ expanded. It returns
+// the folders that New must make for it, the deepest first. The list is empty
+// when cwd exists. New can make only a full path. A missing ~bob/x or src/app
+// stays an error, so New never makes a folder named ~bob, or one under the
+// folder that the helper runs in. A new worktree needs an existing repository.
+func checkFolder(cwd string, worktree bool) ([]string, error) {
+	var missing []string
+	for p := cwd; p != filepath.Dir(p); p = filepath.Dir(p) {
+		st, err := os.Stat(p)
+		if err == nil && st.IsDir() {
+			break
+		}
+		switch {
+		case err == nil:
+			return nil, UserError("bad_folder", p+" on this host is a file, not a folder", "Pick another folder.")
+		case !errors.Is(err, fs.ErrNotExist) && !errors.Is(err, syscall.ENOTDIR):
+			return nil, UserError("bad_folder", fmt.Sprintf("cannot open the folder %s on this host: %v", p, err), "Check its permissions, or pick another folder.")
+		}
+		missing = append(missing, p)
 	}
-	return true, nil
+	switch {
+	case len(missing) == 0:
+		return nil, nil
+	case !filepath.IsAbs(cwd):
+		return nil, UserError("bad_folder", fmt.Sprintf("the folder %s does not exist on this host", cwd), "Pick an existing folder. To make a new one, give its full path, such as ~/src/app.")
+	case worktree:
+		return nil, UserError("bad_folder", fmt.Sprintf("the folder %s does not exist on this host, and a new worktree needs a git repository", cwd), "Pick the folder of a repository, or start without a worktree.")
+	}
+	return missing, nil
+}
+
+// folderQuestion asks the user whether New may make the missing folder cwd.
+func folderQuestion(cwd string) error {
+	return questionError(api.CodeNoFolder, fmt.Sprintf("the folder %s does not exist on this host", cwd),
+		"Pass --mkdir to make it, or pick an existing folder. The launcher asks.", api.FolderQuestion{Folder: cwd})
+}
+
+// makeFolders makes a new session's folder, cwd, and the missing folders
+// above it. The umask sets their mode, as it does for mkdir -p.
+func makeFolders(cwd string) error {
+	//nolint:gosec // G301: a folder that the user asked for gets the mode that mkdir -p gives it
+	if err := os.MkdirAll(cwd, 0o777); err != nil {
+		return UserError("bad_folder", fmt.Sprintf("could not make the folder %s: %v", cwd, err), "Check that you may write to the folder above it, or pick another folder.")
+	}
+	return nil
+}
+
+// removeFolders removes the folders that New made for a start that then
+// failed, the deepest first. It removes only empty folders, so it never
+// removes a file that the start, or anything else, put in them.
+func removeFolders(made []string) {
+	for _, d := range made {
+		if os.Remove(d) != nil {
+			return
+		}
+	}
 }

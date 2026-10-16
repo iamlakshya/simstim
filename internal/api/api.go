@@ -21,8 +21,9 @@ type NewArgs struct {
 	Agent string   `json:"agent,omitempty"`
 	Argv  []string `json:"argv,omitempty"`
 	Cwd   string   `json:"cwd,omitempty"`
-	// MakeFolder makes Cwd, and any missing folders above it, when it does
-	// not exist. Without it, a missing Cwd is a CodeNoFolder error.
+	// MakeFolder makes Cwd, and any missing folders above it, when Cwd does
+	// not exist and is a full path. Without it, a missing Cwd is a
+	// CodeNoFolder error.
 	MakeFolder         bool   `json:"make_folder,omitempty"`
 	Cols               int    `json:"cols,omitempty"`
 	Rows               int    `json:"rows,omitempty"`

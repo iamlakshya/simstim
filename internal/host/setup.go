@@ -1,7 +1,6 @@
 package host
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -10,7 +9,6 @@ import (
 	"github.com/iamlakshya/simstim/internal/api"
 	"github.com/iamlakshya/simstim/internal/brand"
 	"github.com/iamlakshya/simstim/internal/paths"
-	"github.com/iamlakshya/simstim/internal/proto"
 )
 
 // Repository setup hooks (roadmap N6). A repository can keep an executable
@@ -70,12 +68,10 @@ func setupDecision(a NewArgs, repo string) (run, decided bool) {
 	return run, decided
 }
 
+// setupQuestion asks the user whether the setup script of repo may run.
 func setupQuestion(repo, script string) error {
-	data, _ := json.Marshal(api.SetupQuestion{Repo: repo, Script: script})
-	return &proto.Error{Code: api.CodeSetupTrust,
-		Message: fmt.Sprintf("%s has a setup script, %s, and you have not said whether it may run on this host", repo, script),
-		Hint:    "Pass --setup to run it, or --no-setup to start without it. The launcher asks.",
-		Data:    data}
+	return questionError(api.CodeSetupTrust, fmt.Sprintf("%s has a setup script, %s, and you have not said whether it may run on this host", repo, script),
+		"Pass --setup to run it, or --no-setup to start without it. The launcher asks.", api.SetupQuestion{Repo: repo, Script: script})
 }
 
 // repoOf finds the repository of dir: its main folder, which every worktree

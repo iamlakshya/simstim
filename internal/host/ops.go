@@ -31,6 +31,15 @@ func UserError(code, msg, hint string) *proto.Error {
 	return &proto.Error{Code: code, Message: msg, Hint: hint}
 }
 
+// questionError is a UserError that asks the user something before a start
+// can go on. Its data is the question, q. The client asks the user, and
+// starts again with the answer.
+func questionError(code, msg, hint string, q any) *proto.Error {
+	e := UserError(code, msg, hint)
+	e.Data, _ = json.Marshal(q)
+	return e
+}
+
 // NewArgs describes a session to start.
 type NewArgs = api.NewArgs
 
@@ -71,13 +80,13 @@ func expandHome(p string) string {
 }
 
 // New starts a session and returns its row.
-func New(a NewArgs) (*SessionInfo, error) {
+func New(a NewArgs) (_ *SessionInfo, err error) {
 	argv, kind, agent, known, err := pickAgent(a)
 	if err != nil {
 		return nil, err
 	}
 	cwd := expandHome(a.Cwd)
-	makeFolder, err := checkFolder(cwd, a)
+	missing, err := checkFolder(cwd, a.Worktree)
 	if err != nil {
 		return nil, err
 	}
@@ -90,18 +99,27 @@ func New(a NewArgs) (*SessionInfo, error) {
 		login = os.Environ()
 	}
 	id := NewID()
-	// Find the agent before anything is made: a missing one leaves nothing
-	// behind, no worktree and no branch.
+	// Find the agent before anything is asked or made. A missing agent
+	// leaves nothing behind: no folder, no worktree and no branch.
 	inline := a.Inline && known && len(a.Argv) == 0 && agent.Inline.Has()
 	env, term := sessionEnv(a, id, login, agent, inline)
 	argv, hooks, sessionUUID := agentArgv(argv, a, agent, known, inline)
 	if _, err := lookPath(argv[0], envValue(env, "PATH")); err != nil {
 		return nil, UserError("agent_missing", argv[0]+" is not installed on this host", "Install it on the host, then try again.")
 	}
-	if makeFolder {
-		if err := os.MkdirAll(cwd, 0o750); err != nil {
-			return nil, UserError("bad_folder", fmt.Sprintf("could not make the folder %s: %v", cwd, err), "Check that you may write to the folder above it, or pick another folder.")
+	if len(missing) > 0 {
+		if !a.MakeFolder {
+			return nil, folderQuestion(cwd)
 		}
+		if err := makeFolders(cwd); err != nil {
+			return nil, err
+		}
+		// A start that fails after this point removes the new folders again.
+		defer func() {
+			if err != nil {
+				removeFolders(missing)
+			}
+		}()
 	}
 	var gi *GitInfo
 	if a.Worktree {
