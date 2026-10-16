@@ -29,6 +29,6 @@ The repository went public on 15 October 2026.
 | Ask GitHub Support to purge the old commits by SHA (the request with the SHAs is in `private/`) | The owner |
 | Publish the Homebrew tap: create `homebrew-tap`, and add a token that can write to it as the Actions secret `HOMEBREW_TAP_TOKEN` | The owner |
 | Cut the first release, with the steps in [releasing](releasing.md) | Done: 0.1.0, 16 October 2026 |
-| Add the Scorecard badge to the README once the score is 8 or more | Next |
+| Add the Scorecard badge to the README once the score is 8 or more | Done: 8.1 on 16 October 2026, after the first release and decision 0023 |
 | Apply for the OpenSSF Best Practices badge at <https://www.bestpractices.dev> (it needs an account) | The owner |
 | Announce it | The owner |

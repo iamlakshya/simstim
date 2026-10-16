@@ -4,6 +4,10 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ## [Unreleased]
 
+### Added
+
+- The README shows the OpenSSF Scorecard badge: 8.1 of 10 after the first release.
+
 ### Fixed
 
 - A release's notes on GitHub came out empty: the provenance job's upload replaced the draft's body. A last job now writes the notes from the CHANGELOG, with links made absolute (`LINK_BASE` in `scripts/release-notes.sh`) so they work on the release's page.
