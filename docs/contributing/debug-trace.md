@@ -34,7 +34,9 @@ Both sides stop when you detach. To trace the host's side of a session that is a
 
 ## Copy the host's file
 
-Copy the file with the SSH target that you gave to `host add`. Copy the old file too, if it exists:
+`simstim debug bundle my-vps/auth-fix` collects the files of both sides into one archive, over any kind of host ([the bundle](../how-to/debug-a-session.md#collect-the-files-in-a-bundle)). `keytrace` reads the files in it as they are.
+
+Or copy the file with the SSH target that you gave to `host add`. Copy the old file too, if it exists:
 
 ```sh
 scp 'my-vps:.local/state/simstim/sessions/<id>/debug.jsonl*' .

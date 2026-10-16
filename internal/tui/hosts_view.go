@@ -171,13 +171,12 @@ func (m *Model) hostState(h *hostConn, w int) string {
 	if h.rtt.n > 0 {
 		short = sFaint.Render(fmtLatency(h.rtt.mid))
 	}
-	var facts string
-	for _, f := range [][]string{{rtt, count, need}, {rtt, need}, {short, need}} {
-		if facts = joinFacts(f...); cells(facts) <= w {
-			break
+	for _, f := range [][]string{{rtt, count, need}, {rtt, need}, {short, need}, {need}} {
+		if facts := joinFacts(f...); cells(facts) <= w {
+			return facts
 		}
 	}
-	return facts
+	return ""
 }
 
 // joinFacts joins the facts that are not empty with faint dots.

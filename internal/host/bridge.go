@@ -44,6 +44,7 @@ type bridge struct {
 	// (bridge_debug.go).
 	log *slog.Logger
 	dbg bridgeDebug
+	bun bundleFiles // what debug.collect listed (bridge_collect.go)
 
 	// traced is true while the attach asked for a debug trace of its keys.
 	// Only the loop in RunBridge uses it.

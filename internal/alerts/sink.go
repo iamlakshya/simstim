@@ -54,8 +54,9 @@ func newSink(d api.AlertDestination, e sinkEnv) sink {
 	}
 }
 
-// target describes a destination for logs and results, with its secrets hidden.
-func target(d api.AlertDestination) string {
+// Target describes a destination for logs and results, with the secret parts of an
+// address hidden. For a command, it is the start of the command line.
+func Target(d api.AlertDestination) string {
 	if d.Type == "command" {
 		run := strings.Join(strings.Fields(d.Run), " ")
 		if len(run) > 60 {

@@ -45,6 +45,8 @@ type fakeHost struct {
 	checks []client.AgentCheck
 	// resumeErr is what a resume says, if it fails.
 	resumeErr error
+	// debugErr is what a debug start says, if it fails (debug_test.go).
+	debugErr error
 }
 
 // fakeBackend pretends to be SSH, the hosts and the terminal.
@@ -73,6 +75,11 @@ type fakeBackend struct {
 	// attachHook runs during each attach, with the lock held: what the
 	// user does in the session.
 	attachHook func(client.AttachOptions)
+	// debugFile is the launcher's own debug file while its debug is on
+	// (debug_test.go).
+	debugFile string
+	// bundleGate, when set, holds a bundle until it closes.
+	bundleGate chan struct{}
 }
 
 func newFakeBackend() *fakeBackend {

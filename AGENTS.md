@@ -15,6 +15,7 @@ A client and a host helper that run AI coding agents in sessions on hosts the us
 | `internal/client` | Config, SSH, bootstrap, the attach pump, the clipboard |
 | `internal/host` | Holder, bridge, session operations, doctor |
 | `internal/alerts` | Alerts and event hooks on the host: events, destinations, noise control |
+| `internal/bundle` | The debug bundle: what it gathers, its replacements and its last check, the archive |
 | `internal/agents` | The agent table, as data |
 | `internal/tui` | The launcher (Bubble Tea v2) |
 | `internal/proto`, `ring`, `term`, `keys` | Wire protocol, output ring, terminal modes, input filter |

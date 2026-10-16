@@ -50,8 +50,9 @@ func completeCats(cats diag.Cats) cobra.CompletionFunc {
 
 // startDebug turns on the client's debug when --debug, --debug-file or
 // the variable asks for it, and says so on stderr, before an attach can
-// take the terminal. --debug-file wins over the variable.
-func startDebug(cmd *cobra.Command, _ []string) error {
+// take the terminal. The launcher says so in its header instead. --debug-file
+// wins over the variable.
+func startDebug(cmd *cobra.Command, args []string) error {
 	if cmd.Name() == cobra.ShellCompRequestCmd || cmd.Name() == cobra.ShellCompNoDescRequestCmd {
 		return nil // the shell's completion of a word: nothing to record, and nothing to print
 	}
@@ -78,7 +79,10 @@ func startDebug(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(os.Stderr, "debug on: %s\n", tildeHome(path))
+	launcher := !cmd.HasParent() || cmd.Name() == "flip" && len(args) == 0
+	if !launcher {
+		fmt.Fprintf(os.Stderr, "debug on: %s\n", tildeHome(path))
+	}
 	return nil
 }
 
@@ -101,7 +105,7 @@ func debugCmd() *cobra.Command {
 			"on a running session, from any terminal, with no restart. See docs/how-to/debug-a-session.md.",
 		Args: cobra.NoArgs,
 	}
-	cmd.AddCommand(debugStartCmd(), debugStopCmd(), debugSaveCmd(), debugProfileCmd())
+	cmd.AddCommand(debugStartCmd(), debugStopCmd(), debugSaveCmd(), debugProfileCmd(), debugBundleCmd())
 	return cmd
 }
 

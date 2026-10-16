@@ -107,6 +107,7 @@ type Model struct {
 	lastAgent map[string]string
 	resuming  map[sessKey]bool // the sessions whose resume runs (resume.go)
 	conns     *connSet
+	dbg       launcherDebug // what the debug commands turned on (debug.go)
 
 	// exec hands the terminal to a blocking command; after delivers msg
 	// after d. Tests replace both.
@@ -176,6 +177,7 @@ func (m *Model) Close() {
 	if g, ok := m.modal.(*guide); ok {
 		g.halt() // a half-made machine is deleted before the launcher goes
 	}
+	m.stopBundle() // a bundle that stops leaves no file
 	m.remember()()
 	m.conns.closeAll()
 }
@@ -191,6 +193,7 @@ func (m *Model) Init() tea.Cmd {
 		m.after(refreshEvery, refreshTickMsg{}),
 		m.after(latencyEvery, latencyTickMsg{}),
 		m.after(activityEvery, activityTickMsg{}),
+		m.debugOnStart(),
 	}
 	for _, h := range m.hosts {
 		cmds = append(cmds, m.dial(h))
@@ -314,6 +317,8 @@ func (m *Model) update(msg tea.Msg) tea.Cmd {
 		return m.onPaste(msg.Content)
 	case toastTickMsg:
 		return m.onToastTick()
+	case debugTickMsg, debugDoneMsg:
+		return m.onDebugMsg(msg)
 	case dialledMsg, connDoneMsg, redialMsg, sessionsMsg, latencyMsg, doctorMsg, refreshTickMsg, latencyTickMsg:
 		return m.onConn(msg)
 	case previewTickMsg:

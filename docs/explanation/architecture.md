@@ -234,6 +234,7 @@ Triggers: the detach key, closing the tab, `simstim kill` from elsewhere, or SIG
   - `upload.begin`/`upload.chunk`/`upload.end`;
   - `attach`, `detach`, `take_size`, `input`, `resize`, `output{offset}`, `snapshot` (VT bytes that redraw the screen; output from `Attached.From` follows).
 - **Holder socket:** the same `attach` family, plus `info`, `subscribe`, `hook`, `set_meta` and `kill`. While a client traces its attach, a `trace` frame goes before each key.
+- **Debug** ([0025](../contributing/decisions/0025-debug-mode.md)), behind the feature `debug`: `debug.start`, `debug.stop`, `debug.profile` and `debug.save`. For the bundle, `debug.collect` lists the host's files. `debug.read` sends 1 MiB of one listed file at a time, by its name in the list, never by a path.
 - **Back-pressure:**
   - Each client's buffer is capped at 4 MiB.
   - A client that falls behind is dropped to a fresh snapshot.
@@ -257,6 +258,7 @@ The contract has its own page: [the fidelity contract](fidelity.md).
 | `~/.cache/simstim/helpers/<version>/` | Host helpers fetched from the release, for a client built with `go install` |
 | `~/.local/state/simstim/` | Logs, and each session's last byte offset |
 | `~/.local/state/simstim/debug/` | The client's debug files, while `--debug` is on (0700; [debug a session](../how-to/debug-a-session.md)) |
+| `./simstim-debug-<time>.tar.gz` | The archive that `debug bundle` writes in the current folder, with private values replaced (0600) |
 
 **Host:**
 

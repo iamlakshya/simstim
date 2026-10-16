@@ -365,7 +365,7 @@ func deliverAll(o *Options, ev Event, set *Settings, sinks []sink, all bool) []a
 			ctx, cancel := context.WithTimeout(context.Background(), deliverTimeout)
 			out, err := deliver(ctx, sinks[i], ev, o.RetryWait)
 			cancel()
-			r := &api.AlertResult{Type: dst.Type, Target: target(dst), OK: err == nil, MS: time.Since(start).Milliseconds()}
+			r := &api.AlertResult{Type: dst.Type, Target: Target(dst), OK: err == nil, MS: time.Since(start).Milliseconds()}
 			if err != nil {
 				r.Error = err.Error()
 				o.Logger.Warn("alert not delivered", "event", ev.Event, "type", r.Type, "target", r.Target, "error", r.Error)

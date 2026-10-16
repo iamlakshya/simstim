@@ -23,6 +23,7 @@ The debug mode records what the client and the host helper do, into files on eac
 
 | Command | What it does |
 | --- | --- |
+| [`debug bundle`](debug_bundle.md) | Write one local archive of the debug files, with private values replaced, to attach to an issue |
 | [`debug profile`](debug_profile.md) | Write a profile of the session's holder on the host, for go tool pprof |
 | [`debug save`](debug_save.md) | Save the last seconds of the session's flight recorder, just after a lag |
 | [`debug start`](debug_start.md) | Turn on the debug of a running session, for 30 minutes or the time that `--for` gives |

@@ -412,6 +412,9 @@ func (m *Model) glowing() bool {
 	if m.modal != nil || len(m.hosts) == 0 {
 		return false
 	}
+	if m.dbg.bundling != nil {
+		return true // a bundle is being written (debug_bundle.go)
+	}
 	if m.screen == scrSessions {
 		if h := m.selectedHost(); h != nil {
 			return h.status == stConnecting

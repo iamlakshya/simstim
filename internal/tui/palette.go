@@ -161,7 +161,7 @@ func registry() []*command {
 		}
 		return needSession(m)
 	}
-	return []*command{
+	return append([]*command{
 		{noun: "session", verb: "new", short: "new session", keys: []binding{{"n", anywhere}},
 			why: func(m *Model) string {
 				h := m.newSessionHost()
@@ -234,7 +234,7 @@ func registry() []*command {
 			}},
 		{noun: brand.Name, verb: "quit", keys: []binding{{"q", anywhere}}, firstRun: true,
 			run: func(*Model) tea.Cmd { return tea.Quit }},
-	}
+	}, debugCommands()...)
 }
 
 // Palette (docs/contributing/ux-spec.md 2.7): Ctrl+O, a filter line, then "noun  verb" rows

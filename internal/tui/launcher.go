@@ -7,6 +7,8 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
+
 	"github.com/iamlakshya/simstim/internal/brand"
 )
 
@@ -79,9 +81,17 @@ func (m *Model) viewLauncher() string {
 			lines[y] = strings.Repeat(" ", x) + s
 		}
 	}
-	// The header: the logo, the name, where you are; facts on the right.
+	// The header: the logo, the name, where you are; facts on the right,
+	// two cells away at least. The debug mark loses its minutes, then the
+	// facts are cut, when they do not fit.
 	left := m.headLeft(v.crumb)
-	put(headerY, left+strings.Repeat(" ", max(cw-cells(left)-cells(v.facts), 1))+v.facts)
+	if cells(left)+2+cells(v.facts) > cw {
+		left = m.logo() + " " + m.brandName() + "  " + v.crumb + m.debugMark(false)
+	}
+	if room := cw - cells(left) - 2; cells(v.facts) > room {
+		v.facts = ansi.Truncate(v.facts, max(room, 0), "…")
+	}
+	put(headerY, left+strings.Repeat(" ", max(cw-cells(left)-cells(v.facts), 2))+v.facts)
 	put(ruleY, sFaint.Render(strings.Repeat("─", m.ruleLen(cw))))
 
 	m.geo = boxGeo{x: x, y: listTop, w: cw, listY: listTop, top: v.top, sel: -1, from: -1}
@@ -116,8 +126,11 @@ func (m *Model) viewLauncher() string {
 	return strings.Join(lines, "\n")
 }
 
-// headLeft is the left of the header: the logo, the name, and where you are.
-func (m *Model) headLeft(crumb string) string { return m.logo() + " " + m.brandName() + "  " + crumb }
+// headLeft is the left of the header: the logo, the name, where you are,
+// and the mark while the launcher's own debug is on.
+func (m *Model) headLeft(crumb string) string {
+	return m.logo() + " " + m.brandName() + "  " + crumb + m.debugMark(true)
+}
 
 // footer is the keys, or what the quit chord does next.
 func (m *Model) footer(hs []hint, w int) string {
@@ -208,7 +221,7 @@ func (m *Model) sessionsView(cw int) listView {
 		v.crumb, v.facts = sFaint.Render("all sessions"), m.needFacts(sFaint.Render(plural(len(m.hosts), "host", "hosts")))
 	} else {
 		v.crumb = sFaint.Render("› ") + sBold.Render(m.decode(h.name(), m.revealAt))
-		v.facts = m.hostState(h, cw-cells(m.headLeft(v.crumb))-1)
+		v.facts = m.hostState(h, cw-cells(m.headLeft(v.crumb))-2)
 	}
 	rows := m.rows()
 	if sessionRows(rows) == 0 {

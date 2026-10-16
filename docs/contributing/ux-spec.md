@@ -77,6 +77,7 @@ Every list screen has the same parts, top to bottom:
 ```
 
 - **The header** has three parts on the left: the logo (a three-cell braille wave), the name in the brand gradient, and where you are (`hosts`, `› atlas-dev`, `› search`). The facts sit on the right. A host's name decodes in when you open it.
+- **The debug mark:** while the launcher's own debug is on, `debug` and the minutes left follow where you are, in cyan. An example is `debug 24m` (decision 0025). With `--debug`, the debug lasts as long as the launcher, and the mark shows no minutes. While a bundle is being written, the mark says `bundling…`. When the facts do not fit, the mark loses its minutes first.
 - **The rule** draws itself from the left when the launcher starts. While something is busy, such as a host connecting, a cyan band sweeps along it.
 - **Each row** has these columns:
   - the marker: a cyan `▍` and a soft cyan tint on the selected row;
@@ -412,6 +413,8 @@ These keys work in the launcher. You can rebind any key in `config.toml`, and `s
 | `ctrl+\` | Attached | Detach. Press it twice to send it to the agent. |
 | `ctrl+v` | Attached | Paste an image if the clipboard holds one; otherwise the key passes through |
 
+The palette's debug commands, `debug: start`, `debug: stop`, `debug: save` and `debug: bundle`, have no default key. A user can bind one under `[keymap]`. No key turns debug on while attached.
+
 ## 4. Visual language
 
 ### 4.1 Palette
@@ -423,7 +426,7 @@ Every token is a terminal palette slot, the terminal's default colour, or the fa
 | text | default foreground | `#BFBDB6` | default | default | default | Names, body text |
 | background | default background | `#0B0E14` | default | default | default | Never painted, except the tint |
 | faint | SGR 2 on the text | `#656565` (half way to the background) | SGR 2 | SGR 2 | SGR 2 | Details, words in the keys, rules, the dimmed backdrop |
-| accent | slot 6 | `#90E1C6` | 6 | cyan | default | Keys, sheet titles, the marker, working, the prompt, links, the scan |
+| accent | slot 6 | `#90E1C6` | 6 | cyan | default | Keys, sheet titles, the marker, working, the prompt, links, the scan, the debug mark |
 | tint | the accent mixed 13 % into the background | `#1C292B` | none | none | none | The selected row (truecolour only: elsewhere the marker shows it) |
 | success | slot 2 | `#7FD962` | 2 | green | default | `✓`, an online host |
 | warning | slot 3 | `#F9AF4F` | 3 | yellow | default | Needs input, its question, its trace, an uneven round trip |
@@ -497,7 +500,7 @@ Motion is there to show change, work in progress and things that need you. Keys 
 
 **Colour.** To blend smoothly, the launcher asks the terminal for its real colours: the default foreground and background (OSC 10 and 11) and the 16 palette slots (OSC 4). Fades, the tint and the scan then mix those colours in truecolour, so they match your theme. Without truecolour, or before the terminal answers, the same motion uses steps of faint, normal and bold, and the marker alone shows the selection.
 
-**Cost.** One frame tick runs only while something moves: 30 fps for sequences, the scan and the welcome, and 10 fps for spinners, breathing dots, working glyphs and scrolling traces. When nothing moves, nothing repaints. A ping to a host repaints nothing by itself, because the round trip's numbers change at most once every 10 s (2.3). The logo never starts a frame tick. It moves only with one, so a refresh on a still list draws it where it was.
+**Cost.** One frame tick runs only while something moves: 30 fps for sequences, the scan and the welcome, and 10 fps for spinners, breathing dots, working glyphs and scrolling traces. When nothing moves, nothing repaints. A ping to a host repaints nothing by itself, because the round trip's numbers change at most once every 10 s (2.3). The logo never starts a frame tick. It moves only with one, so a refresh on a still list draws it where it was. The debug mark repaints only when its minutes change, once a minute.
 
 **One switch.** `ui.motion = auto | on | off`. `auto` turns motion off inside SSH sessions, in Emacs and JetBrains terminals, and when `NO_COLOR` or `TERM=dumb` is set. With motion off, every sequence is its last frame. Traces still show what happened, but they move only when the list refreshes.
 
@@ -565,11 +568,12 @@ The launcher is the home, and every action also has a command, for scripts and t
 | `simstim demo [--empty]` | The launcher on sample data; nothing connects anywhere |
 | `simstim doctor keys` | Prints each key event as the terminal sends it, and marks the client's own keys |
 | `simstim doctor terminal` | Asks the terminal what it supports: kitty keys, synchronized output, colours, and more |
-| `simstim --debug[=<categories>] <command>` | Turns on the debug mode for one command, or the launcher: every category, or those listed (`attach`, `net`, `memory`, `launcher`, `runtime`). Prints the debug file's path on stderr first |
+| `simstim --debug[=<categories>] <command>` | Turns on the debug mode for one command, or the launcher: every category, or those listed (`attach`, `net`, `memory`, `launcher`, `runtime`). A command prints the debug file's path on stderr first. The launcher shows its debug mark (2.2), and a notice with the path |
 | `simstim --debug-file <file> <command>` | Names the client's debug file, and turns on every category. `SIMSTIM_DEBUG_FILE` does the same |
 | `simstim debug start <host>/<session> [--for 30m] [--only <categories>]`, `debug stop <host>/<session>` | Turns the debug of a running session on, until `debug stop` or the time limit, or off at once |
 | `simstim debug save <host>/<session>` | Saves the last seconds of the session's flight recorder on the host |
 | `simstim debug profile <host>/<session> cpu\|heap\|goroutine [--for 30s]` | Writes a profile of the session's holder on the host. `--for` is for `cpu` only |
+| `simstim debug bundle [<host> \| <host>/<session>] [--ssh]` | Writes one archive of the debug files in the current folder, with private values replaced. Nothing is uploaded |
 | `simstim version`, `completion zsh\|bash\|fish` | Housekeeping |
 
 **Exit codes:** 0 for success, 1 for a user error, 2 for a host or network error, 3 for a session or host that is not found.

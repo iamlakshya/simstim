@@ -25,6 +25,7 @@ simstim runs coding agents in sessions on hosts you reach with SSH. Sessions kee
 | [`config keymap`](config_keymap.md) | Print every home-screen command and its keys (rebind them under [keymap] in config.toml) |
 | [`config path`](config_path.md) | Print where the configuration lives |
 | [`debug`](debug.md) | Record why a session goes wrong: debug in a running session, profiles and the flight recorder |
+| [`debug bundle`](debug_bundle.md) | Write one local archive of the debug files, with private values replaced, to attach to an issue |
 | [`debug profile`](debug_profile.md) | Write a profile of the session's holder on the host, for go tool pprof |
 | [`debug save`](debug_save.md) | Save the last seconds of the session's flight recorder, just after a lag |
 | [`debug start`](debug_start.md) | Turn on the debug of a running session, for 30 minutes or the time that `--for` gives |

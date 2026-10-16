@@ -201,6 +201,8 @@ func TestRoundTripFacts(t *testing.T) {
 		80: "31/100ms · 4 sessions · 1 needs you",
 		25: "31/100ms · 1 needs you",
 		20: "31ms · 1 needs you",
+		12: "1 needs you",
+		5:  "",
 	} {
 		if got := ansi.Strip(hs.m.hostState(h, w)); got != want {
 			t.Errorf("in %d cells: %q, want %q", w, got, want)

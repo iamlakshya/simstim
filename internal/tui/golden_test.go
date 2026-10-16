@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/charmbracelet/x/ansi"
 
@@ -79,6 +80,12 @@ func TestGolden(t *testing.T) {
 		{"sessions", func(t *testing.T, w, h int) *Model {
 			hs := sessions(t, w, h)
 			hs.key("down")
+			return hs.m
+		}},
+		{"debug_mark", func(t *testing.T, w, h int) *Model {
+			hs := sessions(t, w, h)
+			hs.be.debugFile = "/state/debug/client-1.jsonl"
+			hs.m.dbg.own, hs.m.dbg.until = true, hs.clock.Add(24*time.Minute)
 			return hs.m
 		}},
 		{"ended", func(t *testing.T, w, h int) *Model { return endedLab(t, w, h).m }},

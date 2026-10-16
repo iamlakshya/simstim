@@ -18,7 +18,8 @@ import (
 )
 
 // The bridge's part of the debug mode (decision 0025). The feature "debug"
-// adds the requests debug.start, debug.stop, debug.profile and debug.save.
+// adds the requests debug.start, debug.stop, debug.profile and debug.save,
+// and debug.collect and debug.read for the bundle (bridge_collect.go).
 // A client whose debug is on sends debug.start with no session on each of
 // its connections: the bridge then records each request it serves, each
 // attach and detach, and the size of each upload, until debug.stop or the
@@ -93,6 +94,9 @@ func (b *bridge) note(op string, n int) {
 // request.
 func (b *bridge) handleDebug(req proto.Request) bool {
 	switch req.Op {
+	case api.OpDebugCollect, api.OpDebugRead:
+		b.handleBundle(req)
+		return true
 	case api.OpDebugStart, api.OpDebugStop, api.OpDebugProfile, api.OpDebugSave:
 	default:
 		return false
