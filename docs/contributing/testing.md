@@ -75,7 +75,7 @@ The bar is a floor, not the goal. A test checks what the code does, not just tha
 
 `test/e2e/run.py` drives the real client in a pseudo-terminal, as a person in Ghostty would, against a real Linux host.
 
-1. Use a disposable Linux VM with systemd. The suite starts and deletes sessions named `e2e-*`, and installs the helper. To test the cap, it fills one session's memory to its cap of 256 MiB. It also checks that the sessions' slice has a limit. That limit stays on the host after the suite, in a drop-in under `~/.config/systemd/user.control/`. `systemctl --user revert simstim.slice` removes it. Do not point it at a machine you care about.
+1. Use a disposable Linux VM with systemd. The suite starts and deletes sessions named `e2e-*`, and installs the helper. To test the cap, it fills one session's memory to its cap of 256 MiB. It also checks that the sessions' slice has a limit. That limit stays on the host after the suite, in a drop-in under `~/.config/systemd/user.control/`. `systemctl --user revert simstim.slice` removes it. It leaves no shell history on the host: the shells it types into save none. Do not point it at a machine you care about.
 2. Make one with `simstim host create lima e2e` ([how to](../how-to/create-a-host.md)), or add one you reach with `ssh`: `simstim host add <name> <ssh-target>`.
 3. Run `E2E_HOST=<name> just e2e`. It prints `PASS` or `FAIL` for each check and a total.
 4. Delete a created host afterwards with `simstim host destroy e2e`.

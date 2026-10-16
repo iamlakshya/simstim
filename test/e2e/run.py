@@ -55,6 +55,12 @@ def start(name, *argv, flags=()):
     if not m: print(t.buf.decode(errors="replace"))
     return m.group(1).decode() if m else None
 
+# An interactive bash for the tests to type into. Its HISTFILE is empty, so
+# it adds nothing to the host user's history: bash saves history only to a
+# named HISTFILE. `bash +o history -i` would not do, as bash before 5.1
+# turns history back on for an interactive shell.
+BASH_I = ("/usr/bin/env", "HISTFILE=", "/bin/bash", "--norc", "-i")
+
 created = []
 
 # Setting up hosts and sessions (agent_setup.py). E2E_ONLY=agent-setup runs only these.
@@ -89,6 +95,13 @@ t = Term([cli, "attach", HOST + "/" + sid], env=env)
 # when it arrives in the screen snapshot, which drops trailing spaces.
 if not ok(t.wait_for(rb"\$( |\x1b)", 30), "attach shows the shell prompt"):
     print("  the screen ended with: %r" % t.buf[-300:])
+# This is the host user's own login shell, so the first line turns its
+# history off. bash and zsh save history at exit only to $HISTFILE. bash
+# also stops and clears its list, as with no HISTFILE a PROMPT_COMMAND that
+# runs `history -a` writes to ~/.history. Other shells fail those quietly.
+# A line that starts with a space stays out of history where the rc says so.
+# MARK has its own line, as dash drops the rest of a line after a set error.
+t.send(b" unset HISTFILE; { set +o history; history -c; } 2>/dev/null\r")
 t.send(b"echo MARK-$((40+2))\r")
 ok(t.wait_for(rb"MARK-42", 10), "typed command runs on the host and its output comes back")
 # 3. Detach with Ctrl+\ (legacy byte), wait for the double-tap window.
@@ -162,7 +175,7 @@ t.send(b"\x1c"); t.exit_code(10)
 # D. A dropped local file is uploaded and its remote path pasted.
 local = os.path.join(HERE, ".drop-test.txt")
 open(local, "w").write("dropped file content\n")
-sid4 = start("e2e-drop", "/bin/bash", "--norc", "-i")
+sid4 = start("e2e-drop", *BASH_I)
 t = Term([cli, "attach", HOST + "/" + sid4], env=env)
 time.sleep(2); t.read(1)
 t.send(b"bind 'set enable-bracketed-paste on' 2>/dev/null; printf '\\033[?2004h'; read -r P; cat $P\r"); time.sleep(1)
@@ -316,7 +329,7 @@ import base64
 png = base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==")
 img = os.path.join(HERE, ".clip-test.png")
 open(img, "wb").write(png)
-sid9 = start("e2e-clip", "/bin/bash", "--norc", "-i")
+sid9 = start("e2e-clip", *BASH_I)
 created.append(sid9)
 env_clip = dict(env); env_clip[NAME.upper() + "_TEST_CLIPBOARD_IMAGE"] = img
 t = Term([cli, "attach", HOST + "/" + sid9], env=env_clip)
@@ -336,7 +349,7 @@ os.remove(img)
 
 # K. The session owns the whole terminal: its PTY is the terminal's size and
 #    follows a resize, and the client draws nothing of its own while attached.
-sid10 = start("e2e-size", "/bin/bash", "--norc", "-i")
+sid10 = start("e2e-size", *BASH_I)
 created.append(sid10)
 t = Term([cli, "attach", HOST + "/" + sid10], cols=101, rows=37, env=env)
 time.sleep(2); t.read(1)
