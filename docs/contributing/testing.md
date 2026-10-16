@@ -90,7 +90,7 @@ It covers start, attach and detach, resize, byte-exact output, replay after a dr
 
 ## Benchmarks
 
-The attach pump has benchmarks at each step a byte takes: the host's output ring and screen model (`internal/ring`, `internal/host`), the frames (`internal/proto`), the client's catch-up and mode tracker (`internal/term`), the output frames through the client's attach (`internal/client`), and the input filter (`internal/keys`). `internal/term/termtest` makes the output they use: redraws shaped like a coding agent's.
+The attach pump has benchmarks at each step a byte takes: the host's output ring and screen model (`internal/ring`, `internal/host`), the frames (`internal/proto`), the client's catch-up and mode tracker (`internal/term`), the output frames through the client's attach (`internal/client`), and the input filter (`internal/keys`). `internal/term/termtest` makes the output they use: redraws shaped like a coding agent's, and a transcript that scrolls the screen.
 
 `just bench` (or `scripts/bench.sh <base>`) builds the benchmarks at a base commit and in the working tree, runs them in turns on this machine, and compares them with benchstat. A benchmark is slow when it is more than 10 % slower with p below 0.05. A slow benchmark runs again, alone, for 12 more rounds, and the check fails only if it is still slow. One noisy round then does not fail the check, but a real slowdown does. CI runs it on every pull request against the base branch, with a 15 % limit for the noisier runners.
 
@@ -100,10 +100,11 @@ Numbers on an Apple silicon laptop, 15 October 2026, per 32 KiB of agent output:
 | --- | --- | --- |
 | Ring write (host) | 0.4 µs | 75 GB/s |
 | Screen model (host, for status rules) | 1.3 ms | 26 MB/s |
+| Screen model, a transcript that scrolls (host, 16 October) | 4.3 ms | 7.7 MB/s |
 | Output frame write (host) | 12 µs | 2.8 GB/s |
 | Output frame through the client's attach | 63 µs | 520 MB/s |
 
-The screen model is the slowest step. It is a Go terminal emulator used only to read the screen for status rules, and 26 MB/s is far more than an agent prints.
+The screen model is the slowest step, and it is slower when the output scrolls. It is a Go terminal emulator used only to read the screen for status rules. Even 7.7 MB/s is far more than an agent prints. `BenchmarkScreenModelScroll` also reports the heap that the model keeps (`MiB-kept`).
 
 ## Vulnerabilities and dead code
 

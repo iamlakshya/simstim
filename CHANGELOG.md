@@ -35,6 +35,7 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 - The benchmark check on pull requests failed now and then on a noisy runner, also for changes that did not touch the attach pump. A slow benchmark now runs again, alone, for 12 more rounds, and the check fails only if it is still slow.
 - A release's notes on GitHub came out empty: the provenance job's upload replaced the draft's body. A last job now writes the notes from the CHANGELOG, with links made absolute (`LINK_BASE` in `scripts/release-notes.sh`) so they work on the release's page.
 - An alert that the host's limit of 20 a minute dropped still started the session's minute for its kind. So the next alert of that kind within the minute was dropped too, and the log said that the session had sent one. Now the minute starts only when an alert goes out.
+- Each holder kept up to 10,000 lines of the agent's output that nothing read. They were in the screen model that the holder uses for status rules. So the holder used up to about 70 MiB more of a session's memory cap than it needed. In one run, that led the cap to stop a process. The model now keeps one line. In a test, a holder that received a transcript of 30,000 lines used 44 MiB, not 160 MiB. The alternate screen, which full-screen agents use, can still keep 10,000 lines when the agent scrolls it.
 
 ## [0.1.0] - 2026-10-16
 
