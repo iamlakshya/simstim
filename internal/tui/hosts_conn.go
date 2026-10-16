@@ -67,7 +67,7 @@ func (m *Model) onConnDone(msg connDoneMsg) tea.Cmd {
 		return nil
 	}
 	old := h.conn
-	h.conn, h.status, h.latency = nil, stOffline, 0
+	h.conn, h.status, h.rtts, h.rtt = nil, stOffline, nil, rttSpread{}
 	h.err = &client.UserError{
 		Msg:  "lost the connection to " + h.name(),
 		Hint: fmt.Sprintf("%s host test %s", brand.Name, h.name()),
@@ -112,7 +112,8 @@ func (m *Model) onSessions(msg sessionsMsg) tea.Cmd {
 	return cmd
 }
 
-// onLatency takes a ping's round trip.
+// onLatency keeps a ping's round trip. The first one of a connection shows
+// at once. After that, the numbers change only with the latency tick.
 func (m *Model) onLatency(msg latencyMsg) tea.Cmd {
 	h := m.hostByName(msg.name)
 	if h == nil || h.gen != msg.gen {
@@ -120,7 +121,10 @@ func (m *Model) onLatency(msg latencyMsg) tea.Cmd {
 	}
 	h.pinging = false
 	if msg.d > 0 {
-		h.latency = msg.d
+		h.rtts.add(m.now(), msg.d)
+		if h.rtt.n == 0 {
+			h.rtt = h.rtts.spread(m.now())
+		}
 	}
 	return nil
 }
@@ -139,12 +143,13 @@ func (m *Model) onDoctor(msg doctorMsg) tea.Cmd {
 	return nil
 }
 
-// onRefreshTick lists every host's sessions again, and refreshes a peek.
+// onRefreshTick lists every host's sessions again, times a round trip to
+// each, and refreshes a peek.
 func (m *Model) onRefreshTick() tea.Cmd {
-	cmds := make([]tea.Cmd, 0, 2+len(m.hosts))
+	cmds := make([]tea.Cmd, 0, 2+2*len(m.hosts))
 	cmds = append(cmds, m.after(refreshEvery, refreshTickMsg{}))
 	for _, h := range m.hosts {
-		cmds = append(cmds, m.listSessions(h))
+		cmds = append(cmds, m.listSessions(h), m.ping(h))
 	}
 	if s := m.selected(); s != nil && !ended(*s) && m.previewOpen() { // an ended agent's screen stays as it is
 		cmds = append(cmds, m.peek())
@@ -152,12 +157,13 @@ func (m *Model) onRefreshTick() tea.Cmd {
 	return tea.Batch(cmds...)
 }
 
-// onLatencyTick pings every host.
+// onLatencyTick shows the newest spread of every host's round trips. A
+// host with no round trip in the last minute keeps the last one it showed.
 func (m *Model) onLatencyTick() tea.Cmd {
-	cmds := make([]tea.Cmd, 0, 2+len(m.hosts))
-	cmds = append(cmds, m.after(latencyEvery, latencyTickMsg{}))
 	for _, h := range m.hosts {
-		cmds = append(cmds, m.ping(h))
+		if s := h.rtts.spread(m.now()); s.n > 0 {
+			h.rtt = s
+		}
 	}
-	return tea.Batch(cmds...)
+	return m.after(latencyEvery, latencyTickMsg{})
 }

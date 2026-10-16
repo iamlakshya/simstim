@@ -5,7 +5,6 @@ import (
 	"os"
 	"os/exec"
 	"strings"
-	"time"
 
 	"github.com/iamlakshya/simstim/internal/api"
 	"github.com/iamlakshya/simstim/internal/brand"
@@ -132,16 +131,6 @@ func (c *Conn) Setup(ctx context.Context) (SetupResult, error) {
 	var r SetupResult
 	err := c.Call(ctx, "setup", args, &r)
 	return r, err
-}
-
-// RoundTrip measures the round trip through the bridge.
-func (c *Conn) RoundTrip(ctx context.Context) (time.Duration, error) {
-	start := time.Now()
-	var out []Session
-	if err := c.Call(ctx, "ls", nil, &out); err != nil {
-		return 0, err
-	}
-	return time.Since(start), nil
 }
 
 // SendText types text into a session without attaching.

@@ -55,8 +55,8 @@ func TestSessionOrder(t *testing.T) {
 func TestConnectsAndShowsHosts(t *testing.T) {
 	hs := home(t, 80, 24)
 	dev, aws := hs.m.hostByName("atlas-dev"), hs.m.hostByName("aws-gpu")
-	if !dev.online() || dev.latency != 9*time.Millisecond || dev.info == nil {
-		t.Fatalf("atlas-dev: status %v, latency %v, info %v", dev.status, dev.latency, dev.info)
+	if !dev.online() || dev.rtt.mid != 9*time.Millisecond || dev.info == nil {
+		t.Fatalf("atlas-dev: status %v, round trip %+v, info %v", dev.status, dev.rtt, dev.info)
 	}
 	if aws.status != stOffline {
 		t.Fatalf("aws-gpu status %v, want offline", aws.status)

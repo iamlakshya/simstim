@@ -143,5 +143,5 @@ func (d *details) view(m *Model) string {
 	}
 	body = append(body, "")
 	hints := []hint{{"t", "test"}, {"s", "shell"}, {"r", "reconnect"}, {"x", "remove"}, {"esc", "back"}}
-	return sheet(w, h.name(), m.hostState(h), hints, trimBlank(body), toneNormal)
+	return sheet(w, h.name(), m.hostState(h, w-8-cells(h.name())), hints, trimBlank(body), toneNormal)
 }

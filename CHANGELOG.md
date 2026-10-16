@@ -22,6 +22,9 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 - The docs no longer ask for swap on a host: a session's memory never goes to swap, so swap gives sessions no more room.
 - The end-to-end check of the memory cap gives its session a cap of 256 MiB. That keeps the check quick and safe on a host of any size.
 - The limit of one alert of a kind a minute no longer holds back a session's end (decision 0026). An end is `exited`, `failed`, or the `oom` of the program itself. So when the memory cap stops a process that the program started, and then the program within a minute, both `oom` alerts go out. Before, the limit dropped the second. The host's limit of 20 alerts a minute still counts an end.
+- The launcher shows the spread of the round trip to each host, not one sample. It pings each host every 2 s and keeps the last minute. It shows the median and the 90th percentile, such as `31/100ms`. The second number is yellow when it is 50 ms or more above the median. Such an uneven link points to the network, and [the debug trace](docs/contributing/debug-trace.md) shows where a key waits. The numbers still change at most once every 10 s.
+- The round trip is now a ping on the existing connection, so it leaves out the host's work for a list of sessions. `host test`, and `t` in the host details, time a ping too. A helper that does not answer the ping is timed with a list, as before.
+- In a narrow hosts list, the session count now goes before the count that needs you is cut. The wider round-trip column would otherwise cut it further.
 
 ### Fixed
 
@@ -35,6 +38,7 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 - `new` asked about a setup script when stdin was a terminal, even with its output in a pipe. It then waited for an answer to a question that nobody saw. It now asks only when stdin and stdout are both terminals.
 - The benchmark check on pull requests failed now and then on a noisy runner, also for changes that did not touch the attach pump. A slow benchmark now runs again, alone, for 12 more rounds, and the check fails only if it is still slow.
 - A release's notes on GitHub came out empty: the provenance job's upload replaced the draft's body. A last job now writes the notes from the CHANGELOG, with links made absolute (`LINK_BASE` in `scripts/release-notes.sh`) so they work on the release's page.
+- Before the first round trip to a host, the facts in the launcher's header began with a stray dot, as in `· 1 session`.
 - An alert that the host's limit of 20 a minute dropped still started the session's minute for its kind. So the next alert of that kind within the minute was dropped too, and the log said that the session had sent one. Now the minute starts only when an alert goes out.
 - Each holder kept up to 10,000 lines of the agent's output that nothing read. They were in the screen model that the holder uses for status rules. So the holder used up to about 70 MiB more of a session's memory cap than it needed. In one run, that led the cap to stop a process. The model now keeps one line. In a test, a holder that received a transcript of 30,000 lines used 44 MiB, not 160 MiB. The alternate screen, which full-screen agents use, can still keep 10,000 lines when the agent scrolls it.
 

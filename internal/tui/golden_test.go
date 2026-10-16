@@ -162,6 +162,17 @@ func TestGolden(t *testing.T) {
 			hs.key("i")
 			return hs.m
 		}},
+		{"uneven_hosts", func(t *testing.T, w, h int) *Model { return unevenLab(t, w, h).m }},
+		{"uneven_sessions", func(t *testing.T, w, h int) *Model {
+			hs := unevenLab(t, w, h)
+			hs.key("enter")
+			return hs.m
+		}},
+		{"uneven_details", func(t *testing.T, w, h int) *Model {
+			hs := unevenLab(t, w, h)
+			hs.key("i")
+			return hs.m
+		}},
 		{"notices", func(t *testing.T, w, h int) *Model {
 			hs := sessions(t, w, h)
 			hs.key("y")

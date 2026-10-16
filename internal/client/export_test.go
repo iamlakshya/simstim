@@ -17,3 +17,6 @@ func SetEscFlush(d time.Duration) func() {
 	escFlush = d
 	return func() { escFlush = old }
 }
+
+// AnswersPings reports whether RoundTrip times c's host with pings.
+func AnswersPings(c *Conn) bool { return !c.noPong.Load() }

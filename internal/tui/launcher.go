@@ -80,7 +80,7 @@ func (m *Model) viewLauncher() string {
 		}
 	}
 	// The header: the logo, the name, where you are; facts on the right.
-	left := m.logo() + " " + m.brandName() + "  " + v.crumb
+	left := m.headLeft(v.crumb)
 	put(headerY, left+strings.Repeat(" ", max(cw-cells(left)-cells(v.facts), 1))+v.facts)
 	put(ruleY, sFaint.Render(strings.Repeat("─", m.ruleLen(cw))))
 
@@ -115,6 +115,9 @@ func (m *Model) viewLauncher() string {
 	m.geo.h = m.height - listTop
 	return strings.Join(lines, "\n")
 }
+
+// headLeft is the left of the header: the logo, the name, and where you are.
+func (m *Model) headLeft(crumb string) string { return m.logo() + " " + m.brandName() + "  " + crumb }
 
 // footer is the keys, or what the quit chord does next.
 func (m *Model) footer(hs []hint, w int) string {
@@ -205,7 +208,7 @@ func (m *Model) sessionsView(cw int) listView {
 		v.crumb, v.facts = sFaint.Render("all sessions"), m.needFacts(sFaint.Render(plural(len(m.hosts), "host", "hosts")))
 	} else {
 		v.crumb = sFaint.Render("› ") + sBold.Render(m.decode(h.name(), m.revealAt))
-		v.facts = m.hostState(h)
+		v.facts = m.hostState(h, cw-cells(m.headLeft(v.crumb))-1)
 	}
 	rows := m.rows()
 	if sessionRows(rows) == 0 {
@@ -272,31 +275,6 @@ func (m *Model) searchView(cw int) listView {
 	return v
 }
 
-// hostState is the fact at the right of a host's sessions.
-func (m *Model) hostState(h *hostConn) string {
-	switch h.status {
-	case stConnecting:
-		return sAccent.Render(m.spinner()) + " " + m.shimmer("connecting")
-	case stOffline:
-		return sFaint.Render("offline")
-	case stFailed:
-		return sDanger.Render("not ready")
-	default:
-		// Online: the latency, the sessions and who needs you, below.
-	}
-	facts := sFaint.Render(fmtLatency(h.latency) + dot + plural(len(h.sessions), "session", "sessions"))
-	need := 0
-	for _, s := range h.sessions {
-		if s.State == "needs_input" {
-			need++
-		}
-	}
-	if need > 0 {
-		facts += sFaint.Render(dot) + sWarning.Render(fmt.Sprintf("%d needs you", need))
-	}
-	return facts
-}
-
 // Column widths of a session row. The state column fits the longest label,
 // "out of memory".
 const (
@@ -309,19 +287,19 @@ const (
 // column goes, and the line under the list still shows the folder.
 const minFolder = 8
 
-// sessColumns is the width of the columns that share the free space. A
-// folder of 0 means the column is hidden.
+// sessColumns is the width of the columns that share the free space, and
+// of the whole row. A folder of 0 means the column is hidden.
 type sessColumns struct {
-	name, folder int
+	name, folder, row int
 }
 
 func sessCols(cw int) sessColumns {
 	fixed := 4 + 2 + colAgent + 2 + colState + 2 + colAge + 2 + traceCells // all but the folder
 	rest := cw - fixed - 2                                                 // name and folder, after the folder's gap
-	c := sessColumns{name: min(max(rest*45/100, 10), 28)}
+	c := sessColumns{name: min(max(rest*45/100, 10), 28), row: cw}
 	c.folder = rest - c.name
 	if c.folder < minFolder {
-		c = sessColumns{name: max(cw-fixed, 6)}
+		c = sessColumns{name: max(cw-fixed, 6), row: cw}
 	}
 	return c
 }
@@ -329,7 +307,7 @@ func sessCols(cw int) sessColumns {
 func (m *Model) sessRowView(r sessRow, n int, c sessColumns, selected, withHost bool) string {
 	switch r.kind {
 	case rowHeader:
-		return sBold.Render(r.h.name()) + "  " + m.hostState(r.h)
+		return sBold.Render(r.h.name()) + "  " + m.hostState(r.h, c.row-cells(r.h.name())-2)
 	case rowNote:
 		msg, _ := errText(r.h.err)
 		if msg == "" {

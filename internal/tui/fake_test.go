@@ -31,6 +31,8 @@ type fakeHost struct {
 	info     client.HostInfo
 	screens  map[string][]byte
 	latency  time.Duration
+	rtts     []time.Duration // when set, the round trips RoundTrip gives in turn
+	pings    int             // calls to RoundTrip
 	dialErr  error
 	newErr   error
 	// setupRepo is a repository with a setup script: a start there asks,
@@ -347,7 +349,12 @@ func (c *fakeConn) Setup(context.Context) (client.SetupResult, error) {
 func (c *fakeConn) RoundTrip(context.Context) (time.Duration, error) {
 	c.be.mu.Lock()
 	defer c.be.mu.Unlock()
-	return c.host().latency, nil
+	h := c.host()
+	h.pings++
+	if len(h.rtts) > 0 {
+		return h.rtts[(h.pings-1)%len(h.rtts)], nil
+	}
+	return h.latency, nil
 }
 
 // Done counts its callers as blocked, so the harness knows they wait.

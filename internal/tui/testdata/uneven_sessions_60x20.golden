@@ -1,0 +1,20 @@
+
+  ⢄⡠⠊ simstim  › atlas-dev          31/100ms · 1 needs you
+  ────────────────────────────────────────────────────────
+
+  ▍ 1 ● auth-ref…  claude    needs input      3m  ⣀⣀⣀⣀⣀⣀⣀⣀
+    2 ⠶ api-tests  codex     working          1m  ⣿⣿⣿⣶⣶⣿⣿⣿
+    3 ○ notes      shell     idle             1h  ⣀⣀⣀⣀⣀⣀⣀⣀
+    4 ✓ docs-pass  opencode  exited 0         3h  ⣀⣀⣀⣀⣀⣀⣀⣀
+
+    ~/src/app · 6.1 of 8 GiB · s4
+
+
+
+
+
+
+
+  ────────────────────────────────────────────────────────
+    ❯ / search every host   n start a session
+    enter attach   space peek   r rename   ? keys

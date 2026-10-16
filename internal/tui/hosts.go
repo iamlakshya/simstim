@@ -35,7 +35,8 @@ type hostConn struct {
 	err      error
 	sessions []client.Session
 	loaded   bool
-	latency  time.Duration
+	rtts     rttWindow // the round trips of the last minute (rtt.go)
+	rtt      rttSpread // their spread, as the launcher shows it
 	info     *client.HostInfo
 	backoff  time.Duration
 	listing  bool
@@ -101,6 +102,7 @@ func (m *Model) dial(h *hostConn) tea.Cmd {
 	h.gen++
 	h.status = stConnecting
 	h.listing, h.pinging = false, false
+	h.rtts, h.rtt = nil, rttSpread{} // a new connection starts its own round trips
 	gen, host, be, ctx, set := h.gen, h.host, m.be, m.ctx, m.conns
 	return func() tea.Msg {
 		dctx, cancel := context.WithTimeout(ctx, 30*time.Second)
@@ -143,6 +145,7 @@ func (m *Model) listSessions(h *hostConn) tea.Cmd {
 	}
 }
 
+// ping times one round trip to h, unless one is on its way.
 func (m *Model) ping(h *hostConn) tea.Cmd {
 	if !h.online() || h.pinging {
 		return nil
@@ -222,6 +225,7 @@ func (m *Model) addHost(host client.Host, conn Conn, info *client.HostInfo) tea.
 	h.gen++
 	h.conn, h.status, h.err, h.backoff, h.info = conn, stOnline, nil, 0, info
 	h.listing, h.pinging = false, false
+	h.rtts, h.rtt = nil, rttSpread{} // the host may be reached another way now
 	return tea.Batch(append(cmds, m.listSessions(h), m.ping(h), waitDone(h.name(), h.gen, conn))...)
 }
 

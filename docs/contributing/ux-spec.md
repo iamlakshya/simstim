@@ -105,10 +105,27 @@ Every list screen has the same parts, top to bottom:
 
 - **Each row:**
   - The state: `●` green online, the spinner while connecting, `◌` faint offline, `✕` red not ready.
-  - The name, then a faint summary, in which the count that needs you is yellow.
-  - The round trip, then the trace of all the host's sessions together.
+  - The name, then a faint summary, in which the count that needs you is yellow. When the summary does not fit, the session count goes, so that the count that needs you stays whole.
+  - The round trip, then the trace of all the host's sessions together. The round trip's column is as wide as its widest value, and at least six cells.
 - **The line under the list:** how the host is reached, and what it runs.
 - **Keys:** Enter (or `l`, `→`, or its number) opens the host's sessions. `n` starts a session there, `a` adds a host and `i` shows its details. With exactly one host, the launcher opens on its sessions.
+
+**The round trip** shows in the list, in the header of a host's sessions, and in the host's details. It tells you whether the network is why keys feel slow. Here the link to atlas-dev is uneven, and the one to gcp-dev is steady:
+
+```text
+  ⢄⡠⠊ simstim  › atlas-dev                 31/100ms · 4 sessions · 1 needs you
+
+  ▍ 1 ● atlas-dev  4 sessions · 1 needs you                 31/100ms  ⣿⣿⣿⣶⣶⣿⣿⣿
+    3 ● gcp-dev    2 sessions                                42/47ms  ⣿⣿⣿⣶⣶⣿⣿⣿
+```
+
+- **What it times:** a ping on the launcher's own connection to the host. The host's helper answers it at once, so the time is the network and the helper, without the host's work. A helper that does not answer pings is timed with a list of its sessions, as before.
+- **How often:** one ping to each host with each refresh of the lists, every 2 s. The launcher keeps the round trips of the last minute. It sends no ping while you are attached, and none to a host that it no longer shows.
+- **What it shows:** the median, then the 90th percentile after a slash, with one unit: `31/100ms`. With two units, each number keeps its own: `310ms/1.2s`. Until there are ten round trips, or when the two numbers are the same, the median shows alone: `9ms`. With fewer than ten, the 90th percentile would be the slowest ping.
+- **An uneven link:** when the 90th percentile is 50 ms or more above the median, it is yellow. One ping in ten then takes at least 50 ms longer than the median, which a typist can feel. Without colour, it still stands out from the faint text round it. The 90th percentile decides, not the slowest ping, so one late ping does not mark a link.
+- **What to do about it:** an uneven link points to the network, such as Wi-Fi or a VPN. [Tracing typing lag](debug-trace.md) shows where a key waits.
+- **When it changes:** the numbers change at most once every 10 s, as the single ping did before. So a ping never repaints the screen by itself. The first round trip of a connection shows at once.
+- **Narrow terminals:** when a host's facts do not fit in the header or the details, the session count goes first, then the 90th percentile.
 
 ### 2.4 Sessions
 
@@ -409,7 +426,7 @@ Every token is a terminal palette slot, the terminal's default colour, or the fa
 | accent | slot 6 | `#90E1C6` | 6 | cyan | default | Keys, sheet titles, the marker, working, the prompt, links, the scan |
 | tint | the accent mixed 13 % into the background | `#1C292B` | none | none | none | The selected row (truecolour only: elsewhere the marker shows it) |
 | success | slot 2 | `#7FD962` | 2 | green | default | `✓`, an online host |
-| warning | slot 3 | `#F9AF4F` | 3 | yellow | default | Needs input, its question, its trace |
+| warning | slot 3 | `#F9AF4F` | 3 | yellow | default | Needs input, its question, its trace, an uneven round trip |
 | danger | slot 1 | `#EA6C73` | 1 | red | default | `✕`, failed states, the delete sheet |
 | cursor | reverse video | `#BFBDB6` block | reverse | reverse | reverse | Text fields |
 
@@ -480,7 +497,7 @@ Motion is there to show change, work in progress and things that need you. Keys 
 
 **Colour.** To blend smoothly, the launcher asks the terminal for its real colours: the default foreground and background (OSC 10 and 11) and the 16 palette slots (OSC 4). Fades, the tint and the scan then mix those colours in truecolour, so they match your theme. Without truecolour, or before the terminal answers, the same motion uses steps of faint, normal and bold, and the marker alone shows the selection.
 
-**Cost.** One frame tick runs only while something moves: 30 fps for sequences, the scan and the welcome, and 10 fps for spinners, breathing dots, working glyphs and scrolling traces. When nothing moves, nothing repaints. The logo never starts a frame tick. It moves only with one, so a refresh on a still list draws it where it was.
+**Cost.** One frame tick runs only while something moves: 30 fps for sequences, the scan and the welcome, and 10 fps for spinners, breathing dots, working glyphs and scrolling traces. When nothing moves, nothing repaints. A ping to a host repaints nothing by itself, because the round trip's numbers change at most once every 10 s (2.3). The logo never starts a frame tick. It moves only with one, so a refresh on a still list draws it where it was.
 
 **One switch.** `ui.motion = auto | on | off`. `auto` turns motion off inside SSH sessions, in Emacs and JetBrains terminals, and when `NO_COLOR` or `TERM=dumb` is set. With motion off, every sequence is its last frame. Traces still show what happened, but they move only when the list refreshes.
 

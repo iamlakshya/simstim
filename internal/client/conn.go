@@ -43,6 +43,12 @@ type Conn struct {
 	lastRecv atomic.Int64
 	done     chan struct{}
 
+	// RoundTrip's pings (roundtrip.go): those waiting for their pong, under
+	// mu, and whether the bridge answers pings at all.
+	timedPings    map[uint64]chan time.Time
+	nextTimedPing atomic.Uint64
+	noPong        atomic.Bool
+
 	tr *connTrace // the debug trace (trace.go), or nil
 }
 
@@ -194,9 +200,7 @@ func (c *Conn) readLoop(r *bufio.Reader) {
 				}
 			}
 		case proto.TPong:
-			if c.tr != nil {
-				c.tr.t.pong(c.tr.id, f.Payload)
-			}
+			c.pong(f.Payload)
 		case proto.TAttached, proto.TOutput, proto.TSnapshot, proto.TEnded, proto.TError:
 			if c.tr != nil && f.Type == proto.TOutput {
 				c.tr.arrived(f.Payload)

@@ -80,8 +80,8 @@ var optKey = func() string {
 // Timings.
 const (
 	spinEvery      = 90 * time.Millisecond
-	refreshEvery   = 2 * time.Second
-	latencyEvery   = 10 * time.Second
+	refreshEvery   = 2 * time.Second  // the lists, and a ping to each host
+	latencyEvery   = 10 * time.Second // the round trips' numbers change
 	previewDelay   = 120 * time.Millisecond
 	activityEvery  = 1500 * time.Millisecond
 	toastLife      = 4 * time.Second
