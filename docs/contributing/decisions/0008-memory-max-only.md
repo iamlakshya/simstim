@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: accepted (the sentence "Other sessions are untouched" replaced by 0024)
 date: 2026-10-15
 ---
 

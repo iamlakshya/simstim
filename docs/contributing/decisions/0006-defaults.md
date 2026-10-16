@@ -1,5 +1,5 @@
 ---
-status: accepted (MemoryHigh part replaced by 0008)
+status: accepted (MemoryHigh part replaced by 0008, memory cap replaced by 0024)
 date: 2026-10-15
 ---
 

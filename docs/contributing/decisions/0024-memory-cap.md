@@ -1,11 +1,11 @@
 ---
-status: proposed
+status: accepted
 date: 2026-10-16
 ---
 
 # 0024 A session's memory cap is the host's memory minus a reserve
 
-**Status:** Proposed, for the owner's review. The owner chose the direction for [#40](https://github.com/iamlakshya/simstim/issues/40) on 16 October 2026. Once accepted, this record replaces two parts of earlier records:
+**Status:** Accepted. The owner chose the direction for [#40](https://github.com/iamlakshya/simstim/issues/40) on 16 October 2026, and accepted the record the same day. It replaces two parts of earlier records:
 
 - from [0006](0006-defaults.md), the memory cap of a session: "8 GiB or 40 % of the host's memory, whichever is smaller". The rest of 0006 stays: the detach key and the image key.
 - from [0008](0008-memory-max-only.md), the sentence "Other sessions are untouched". A stop at the limit of all sessions together can reach another session (see Consequences). The rest of 0008 stays: `MemoryMax` only, swap off for sessions, and the agent as the first choice of the out-of-memory killer.
