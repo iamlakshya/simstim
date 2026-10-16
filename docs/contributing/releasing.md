@@ -31,11 +31,12 @@ The builds are reproducible: `just repro` builds every binary twice from empty c
 
 1. Make sure `main` is green in CI and the end-to-end tests pass (`just e2e`).
 2. In `CHANGELOG.md`, rename `## [Unreleased]` to `## [X.Y.Z] - YYYY-MM-DD`, and add a new empty `## [Unreleased]` above it. The release notes are taken from this section (`scripts/release-notes.sh`), so write them for users.
-3. Commit ("Release X.Y.Z"), then tag and push:
+3. Commit ("Release X.Y.Z") on a branch, open a pull request, and merge it when CI passes: `main` takes changes only through a pull request ([decision 0023](decisions/0023-protect-main.md)). Then tag the merged commit and push the tag:
 
    ```sh
+   git switch main && git pull --ff-only
    git tag -s vX.Y.Z -m "X.Y.Z"   # or -a if you do not sign tags
-   git push origin main vX.Y.Z
+   git push origin vX.Y.Z
    ```
 
 4. The release workflow builds, signs and uploads a **draft** release. Check its files and notes, then publish it.

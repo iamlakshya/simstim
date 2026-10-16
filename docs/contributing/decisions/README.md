@@ -26,5 +26,6 @@ Each record explains one choice: the context, the options and the outcome. Recor
 | [0020](0020-guided-setup.md) | A guided setup: one command and one sheet, over one engine | Accepted |
 | [0021](0021-site-design.md) | The site: a landing page in the launcher's look, docs kept on Hextra, and a three.js field that loads last (its toolchain, landing sections, field, look and motion setting replaced by 0022) | Accepted |
 | [0022](0022-site-rebuild.md) | The site: Starlight for the docs, three tabs, and a landing page that tells its story in a drawing (replaces the toolchain in 0015, parts of 0021, and 0012's hold on the website) | Accepted |
+| [0023](0023-protect-main.md) | Changes reach main only through a pull request that passes CI | Accepted |
 
 Write a new record from [the template](template.md).
