@@ -4,7 +4,7 @@ Needs: a built client, and a host already added with `host add`.
   E2E_HOST        the host's name in the client (required)
 The product name is read from internal/brand, so nothing here spells it.
 """
-import collections, json, os, re, subprocess, sys, time
+import collections, json, os, re, signal, subprocess, sys, time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))
@@ -48,6 +48,39 @@ def host_ssh(cmd, data=None):
 def host_rc(cmd, data=None):
     """Runs cmd on the host and returns its exit code; data goes to its stdin."""
     return subprocess.run(host_argv(cmd), input=data, capture_output=True).returncode
+
+def control_dir():
+    """The folder of the client's shared SSH connections, as internal/client works it out."""
+    cache = os.environ.get("XDG_CACHE_HOME", "")
+    d = os.path.join(cache if os.path.isabs(cache) else os.path.expanduser("~/.cache"), NAME, "cm")
+    return d if len(d) + 1 + 40 <= 103 else "/tmp/%s-%d" % (NAME, os.getuid())
+
+def drop_link():
+    """Ends the client's bridges to HOST, as a network drop would. Over SSH,
+    it then ends the shared connection under them. The client's connections
+    to other hosts stay up: only a connection to HOST has HOST's own SSH
+    config, or its container, on its command line. Returns the bridges' PIDs."""
+    machine = host_machine()
+    if machine.get("provider") == "docker":
+        mark = " -u %s %s sh -c " % (machine.get("user") or "root", machine["id"])
+    else:
+        mark = " -F %s " % WRAPPER
+    bridge = re.compile(re.escape(NAME) + r'-host"? bridge')  # the path may be quoted
+    ps = subprocess.run(["ps", "-A", "-ww", "-o", "pid=", "-o", "args="], capture_output=True, text=True).stdout
+    pids = [int(f[0]) for f in (l.split(None, 1) for l in ps.splitlines())
+            if len(f) == 2 and mark in f[1] and bridge.search(f[1])]
+    for pid in pids:
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+    if machine.get("provider") != "docker":
+        try:
+            subprocess.run(["ssh", "-F", WRAPPER, "-o", "ControlPath=" + os.path.join(control_dir(), "%C"),
+                            "-O", "exit", host_entry()["ssh"]], capture_output=True, timeout=10)
+        except subprocess.TimeoutExpired:
+            pass
+    return pids
 
 def start(name, *argv, flags=()):
     t = Term([cli, "new", HOST, "--name", name, "--detach", *flags, "--"] + list(argv), env=env)
@@ -133,9 +166,9 @@ ok(code == 0, "single Ctrl+\\ then detaches")
 sid = start("e2e-counter", "/bin/bash", "-c", "sleep 3; for i in $(seq 1 400); do echo N$i; sleep 0.05; done; sleep 600")
 t = Term([cli, "attach", HOST + "/" + sid], env=env)
 ok(t.wait_for(rb"N20\r", 30), "counter running")
-# Kill the client's bridge ssh (as a network drop would), and the shared master.
-subprocess.run(["pkill", "-f", NAME + "-host\"? bridge"], check=False)  # the path may be quoted
-subprocess.run(["pkill", "-f", "ControlPath=.*" + NAME + "/cm"], check=False)
+# Kill the client's bridge to the host (as a network drop would), and the shared master.
+pids = drop_link()
+ok(pids, "the client's bridge to the test host was found and ended (PIDs %s)" % pids)
 t0 = time.time()
 ok(t.wait_for(rb"N400\r", 60), "client reconnected by itself and kept receiving (%.1fs)" % (time.time() - t0))
 nums = [int(x) for x in re.findall(rb"N(\d+)\r", t.buf)]
@@ -324,14 +357,13 @@ else:
 
 # G. Laptop sleep: freeze the client and cut its network path; on wake it must
 #    be back to live output within 5 s, with what it missed replayed.
-import signal
 sid6 = start("e2e-wake", "/bin/bash", "-c", "while :; do date +T%s.%N; sleep 0.1; done")
 created.append(sid6)
 t = Term([cli, "attach", HOST + "/" + sid6], env=env)
 t.wait_for(rb"T\d+", 20); time.sleep(1)
 os.kill(t.pid, signal.SIGSTOP)
-subprocess.run(["pkill", "-f", NAME + "-host\"? bridge"], check=False)  # the path may be quoted
-subprocess.run(["pkill", "-f", "ControlPath=.*" + NAME + "/cm"], check=False)
+pids = drop_link()
+ok(pids, "sleep: the client's bridge to the test host was found and ended (PIDs %s)" % pids)
 time.sleep(15)
 t.buf = b""
 woke = time.time()
@@ -363,8 +395,25 @@ t.send(b"\x1c"); t.exit_code(10)
 sid8 = start("e2e-vtcrash", "/bin/bash", "-c", 'printf "\\033[>1u"; i=0; while :; do i=$((i+1)); printf "TICK-%d\\n" $i; sleep 0.2; done')
 created.append(sid8)
 time.sleep(3)
-# Through /proc, not pkill: a slim container image has no procps.
-host_ssh("for p in /proc/[0-9]*; do [ \"$(cat $p/comm 2>/dev/null)\" = '%s' ] && kill -9 \"${p#/proc/}\"; done; sleep 3" % (NAME + "-vt")[:15])
+# Kill this session's shadow terminal and nothing else: the host may run
+# sessions that are not the suite's. The holder runs as `<helper> holder <id>`,
+# and the shadow terminal is its child. With no holder, nothing is killed and
+# the check fails. Through /proc, not pkill: a slim container image has no procps.
+VT_KILL = r"""sid=%s vt=%s holder=
+for p in /proc/[0-9]*; do
+  [ "$(tr '\0' '\n' 2>/dev/null < "$p/cmdline" | tail -n 2 | tr '\n' ' ')" = "holder $sid " ] && holder=${p#/proc/}
+done
+if [ -z "$holder" ]; then echo "found no holder of session $sid"; else
+  for p in /proc/[0-9]*; do
+    [ "$(cat "$p/comm" 2>/dev/null)" = "$vt" ] || continue
+    [ "$(sed -n 's/^PPid:[[:space:]]*//p' "$p/status" 2>/dev/null)" = "$holder" ] || continue
+    kill -9 "${p#/proc/}" && echo "killed $vt ${p#/proc/}, the child of holder $holder"
+  done
+fi
+sleep 3"""
+out = host_ssh(VT_KILL % (sid8, (NAME + "-vt")[:15])).stdout.decode(errors="replace").strip()
+print("  " + out.replace("\n", "\n  "))
+ok("killed " in out, "shadow terminal: the session's own was found and killed")
 t = Term([cli, "attach", HOST + "/" + sid8], env=env)
 t.read(4)
 ticks = [int(x) for x in re.findall(rb"TICK-(\d+)", t.buf)]

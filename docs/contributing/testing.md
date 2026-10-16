@@ -75,12 +75,14 @@ The bar is a floor, not the goal. A test checks what the code does, not just tha
 
 `test/e2e/run.py` drives the real client in a pseudo-terminal, as a person in Ghostty would, against a real Linux host.
 
-1. Use a disposable Linux VM with systemd. The suite starts and deletes sessions named `e2e-*`, and installs the helper. To test the cap, it fills one session's memory to its cap of 256 MiB. It also checks that the sessions' slice has a limit. That limit stays on the host after the suite, in a drop-in under `~/.config/systemd/user.control/`. `systemctl --user revert simstim.slice` removes it. It leaves no shell history on the host: the shells it types into save none. Do not point it at a machine you care about.
+1. Use a disposable Linux VM with systemd. The suite starts and deletes sessions named `e2e-*`, and installs the helper. On the host, it touches only its own `e2e-*` sessions: it kills no process of another session. To test the cap, it fills one session's memory to its cap of 256 MiB. It also checks that the sessions' slice has a limit. That limit stays on the host after the suite, in a drop-in under `~/.config/systemd/user.control/`. `systemctl --user revert simstim.slice` removes it. It leaves no shell history on the host: the shells it types into save none. Do not point it at a machine you care about.
 2. Make one with `simstim host create lima e2e` ([how to](../how-to/create-a-host.md)), or add one you reach with `ssh`: `simstim host add <name> <ssh-target>`.
 3. Run `E2E_HOST=<name> just e2e`. It prints `PASS` or `FAIL` for each check and a total.
 4. Delete a created host afterwards with `simstim host destroy e2e`.
 
 A container made with `host create docker` runs the suite too, over `docker exec` instead of SSH. It has no systemd, so the memory cap check is skipped. CI runs the suite this way on every change (the `docker-host` job).
+
+On your laptop, the suite ends the client's connections to the test host, to check that the client reconnects. Your connections to other hosts stay up.
 
 It covers start, attach and detach, resize, byte-exact output, replay after a dropped link, a simulated laptop sleep, the memory cap, snapshots after the ring wraps, a crashed shadow terminal, image paste and file drops, worktrees, ports, rename and delete. Host reboots are tested by hand, with the host owner's agreement.
 
