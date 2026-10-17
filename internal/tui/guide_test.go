@@ -325,7 +325,7 @@ func agentsHarness(t *testing.T, w, h int) *harness {
 	be := newFakeBackend()
 	be.probe = client.Platform{OS: "linux", Arch: "arm64"}
 	be.installed = true
-	be.state["pi"] = &fakeHost{info: client.HostInfo{Distro: "Debian 13", Arch: "arm64", CPUs: 4, MemTotal: 8 << 30, MemoryMax: 3 << 30,
+	be.state["pi"] = &fakeHost{info: client.HostInfo{Distro: "Debian 13", Arch: "arm64", CPUs: 4, MemTotal: 8 << 30, MemoryMax: 6551502848,
 		Agents: map[string]string{"claude": "/home/dev/.local/bin/claude", "shell": "/bin/bash"}},
 		checks: []client.AgentCheck{agentReady("claude", "Claude Code", api.LoginYes)}}
 	installs(be)

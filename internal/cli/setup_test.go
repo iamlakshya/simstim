@@ -26,3 +26,16 @@ func TestAskSetup(t *testing.T) {
 		t.Fatal("setupValue")
 	}
 }
+
+func TestAskMakeFolder(t *testing.T) {
+	q := client.FolderQuestion{Folder: "/home/me/src/new-app"}
+	for in, want := range map[string]bool{"y\n": true, "yes\n": true, "\n": false, "n\n": false, "": false} {
+		var out bytes.Buffer
+		if got := askMakeFolder(strings.NewReader(in), &out, "box", q); got != want {
+			t.Errorf("%q: %v, want %v", in, got, want)
+		}
+		if s := out.String(); s != "The folder /home/me/src/new-app does not exist on box.\nMake it? [y/N] " {
+			t.Fatalf("prompt:\n%s", s)
+		}
+	}
+}

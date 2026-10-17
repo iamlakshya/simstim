@@ -49,7 +49,7 @@ Most of the host helper runs in the unit tests, on the machine that runs them, w
 - **A terminal for the client.** `NewTerminal` opens a pseudo-terminal that stands in for the user's: the test types into it, and reads what the client draws, byte for byte.
 - **Races in holders count.** The race detector writes a holder's report to a file, and the test fails.
 
-Some parts need Linux: ports and idle stop read `/proc`, and memory caps need systemd. Their tests read a fake `/proc` instead (`procRoot`). Tests that need the shadow terminal skip when it is not built; its Go side is also tested with a fake child, a shell script that echoes every frame.
+Some parts need Linux: ports and idle stop read `/proc`, and memory caps need systemd. Their tests read a fake `/proc` instead (`procRoot`). The memory cap's tests use a fake `/proc/meminfo`, cgroup tree (`cgroupRoot`) and `systemctl`. Tests that need the shadow terminal skip when it is not built. Its Go side is also tested with a fake child, a shell script that echoes every frame.
 
 ## Coverage
 
@@ -75,12 +75,14 @@ The bar is a floor, not the goal. A test checks what the code does, not just tha
 
 `test/e2e/run.py` drives the real client in a pseudo-terminal, as a person in Ghostty would, against a real Linux host.
 
-1. Use a disposable Linux VM with systemd. The suite starts and deletes sessions named `e2e-*`, installs the helper, and briefly fills memory to test the cap. Do not point it at a machine you care about.
+1. Use a disposable Linux VM with systemd. The suite starts and deletes sessions named `e2e-*`, and installs the helper. On the host, it touches only its own `e2e-*` sessions: it kills no process of another session. To test the cap, it fills one session's memory to its cap of 256 MiB. It also checks that the sessions' slice has a limit. That limit stays on the host after the suite, in a drop-in under `~/.config/systemd/user.control/`. `systemctl --user revert simstim.slice` removes it. It leaves no shell history on the host: the shells it types into save none. Do not point it at a machine you care about.
 2. Make one with `simstim host create lima e2e` ([how to](../how-to/create-a-host.md)), or add one you reach with `ssh`: `simstim host add <name> <ssh-target>`.
 3. Run `E2E_HOST=<name> just e2e`. It prints `PASS` or `FAIL` for each check and a total.
 4. Delete a created host afterwards with `simstim host destroy e2e`.
 
 A container made with `host create docker` runs the suite too, over `docker exec` instead of SSH. It has no systemd, so the memory cap check is skipped. CI runs the suite this way on every change (the `docker-host` job).
+
+On your laptop, the suite ends the client's connections to the test host, to check that the client reconnects. Your connections to other hosts stay up.
 
 It covers start, attach and detach, resize, byte-exact output, replay after a dropped link, a simulated laptop sleep, the memory cap, snapshots after the ring wraps, a crashed shadow terminal, image paste and file drops, worktrees, ports, rename and delete. Host reboots are tested by hand, with the host owner's agreement.
 
@@ -90,9 +92,9 @@ It covers start, attach and detach, resize, byte-exact output, replay after a dr
 
 ## Benchmarks
 
-The attach pump has benchmarks at each step a byte takes: the host's output ring and screen model (`internal/ring`, `internal/host`), the frames (`internal/proto`), the client's catch-up and mode tracker (`internal/term`), the output frames through the client's attach (`internal/client`), and the input filter (`internal/keys`). `internal/term/termtest` makes the output they use: redraws shaped like a coding agent's.
+The attach pump has benchmarks at each step a byte takes: the host's output ring and screen model (`internal/ring`, `internal/host`), the frames (`internal/proto`), the client's catch-up and mode tracker (`internal/term`), the output frames through the client's attach (`internal/client`), and the input filter (`internal/keys`). `internal/term/termtest` makes the output they use: redraws shaped like a coding agent's, and a transcript that scrolls the screen.
 
-`just bench` (or `scripts/bench.sh <base>`) builds the benchmarks at a base commit and in the working tree, runs them in turns on this machine, and compares them with benchstat. It fails when a benchmark is more than 10 % slower with p below 0.05. CI runs it on every pull request against the base branch, with a 15 % limit for the noisier runners.
+`just bench` (or `scripts/bench.sh <base>`) builds the benchmarks at a base commit and in the working tree, runs them in turns on this machine, and compares them with benchstat. A benchmark is slow when it is more than 10 % slower with p below 0.05. A slow benchmark runs again, alone, for 12 more rounds, and the check fails only if it is still slow. One noisy round then does not fail the check, but a real slowdown does. CI runs it on every pull request against the base branch, with a 15 % limit for the noisier runners.
 
 Numbers on an Apple silicon laptop, 15 October 2026, per 32 KiB of agent output:
 
@@ -100,10 +102,11 @@ Numbers on an Apple silicon laptop, 15 October 2026, per 32 KiB of agent output:
 | --- | --- | --- |
 | Ring write (host) | 0.4 µs | 75 GB/s |
 | Screen model (host, for status rules) | 1.3 ms | 26 MB/s |
+| Screen model, a transcript that scrolls (host, 16 October) | 4.3 ms | 7.7 MB/s |
 | Output frame write (host) | 12 µs | 2.8 GB/s |
 | Output frame through the client's attach | 63 µs | 520 MB/s |
 
-The screen model is the slowest step. It is a Go terminal emulator used only to read the screen for status rules, and 26 MB/s is far more than an agent prints.
+The screen model is the slowest step, and it is slower when the output scrolls. It is a Go terminal emulator used only to read the screen for status rules. Even 7.7 MB/s is far more than an agent prints. `BenchmarkScreenModelScroll` also reports the heap that the model keeps (`MiB-kept`).
 
 ## Vulnerabilities and dead code
 

@@ -37,6 +37,7 @@ coverage.*
 .vscode/
 *.swp
 .drop-test.txt
+.e2e-debug.jsonl*
 __pycache__/
 .clip-test.png
 

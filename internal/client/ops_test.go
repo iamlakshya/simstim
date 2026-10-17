@@ -13,3 +13,17 @@ func TestRemotePath(t *testing.T) {
 		}
 	}
 }
+
+func TestNeedMakeFolder(t *testing.T) {
+	c := &Conn{Host: Host{Name: "old"}}
+	if err := c.needMakeFolder(NewArgs{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.needMakeFolder(NewArgs{MakeFolder: true}); err == nil {
+		t.Fatal("an old helper got a folder to make, which it would ignore")
+	}
+	c.Features = []string{"mkdir"}
+	if err := c.needMakeFolder(NewArgs{MakeFolder: true}); err != nil {
+		t.Fatal(err)
+	}
+}

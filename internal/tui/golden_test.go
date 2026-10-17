@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/charmbracelet/x/ansi"
 
@@ -81,6 +82,13 @@ func TestGolden(t *testing.T) {
 			hs.key("down")
 			return hs.m
 		}},
+		{"debug_mark", func(t *testing.T, w, h int) *Model {
+			hs := sessions(t, w, h)
+			hs.be.debugFile = "/state/debug/client-1.jsonl"
+			hs.m.dbg.own, hs.m.dbg.until = true, hs.clock.Add(24*time.Minute)
+			return hs.m
+		}},
+		{"ended", func(t *testing.T, w, h int) *Model { return endedLab(t, w, h).m }},
 		{"all_sessions", func(t *testing.T, w, h int) *Model {
 			hs := home(t, w, h)
 			hs.m.openHost(nil)
@@ -158,6 +166,17 @@ func TestGolden(t *testing.T) {
 		}},
 		{"details", func(t *testing.T, w, h int) *Model {
 			hs := home(t, w, h)
+			hs.key("i")
+			return hs.m
+		}},
+		{"uneven_hosts", func(t *testing.T, w, h int) *Model { return unevenLab(t, w, h).m }},
+		{"uneven_sessions", func(t *testing.T, w, h int) *Model {
+			hs := unevenLab(t, w, h)
+			hs.key("enter")
+			return hs.m
+		}},
+		{"uneven_details", func(t *testing.T, w, h int) *Model {
+			hs := unevenLab(t, w, h)
 			hs.key("i")
 			return hs.m
 		}},

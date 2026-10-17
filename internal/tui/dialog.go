@@ -244,7 +244,7 @@ func (d *newSession) submit(m *Model, attach bool) tea.Cmd {
 		a.Agent, a.Argv = "", []string{"/bin/sh", "-c", "exec " + c}
 	}
 	d.starting, d.err = true, nil
-	return m.startSession(h, a, attach)
+	return m.startSession(h, startReq{args: a, attach: attach, form: d})
 }
 
 // agentKey moves through the agents: arrows and h l, space, or a letter,

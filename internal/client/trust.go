@@ -2,7 +2,6 @@ package client
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -70,15 +69,4 @@ func RememberSetup(host, repo string, run bool) error {
 		return fmt.Errorf("save the answer: %w", err)
 	}
 	return nil
-}
-
-// SetupQuestionOf returns the question in an error from a new session whose
-// repository has a setup script the user has not answered for.
-func SetupQuestionOf(err error) (SetupQuestion, bool) {
-	var ue *UserError
-	var q SetupQuestion
-	if !errors.As(err, &ue) || ue.Code != api.CodeSetupTrust || json.Unmarshal(ue.Data, &q) != nil || q.Repo == "" {
-		return q, false
-	}
-	return q, true
 }

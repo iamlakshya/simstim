@@ -270,3 +270,41 @@ func TestTransportStartEndsWithItsContext(t *testing.T) {
 		t.Errorf("%d bridges open, want 0", n)
 	}
 }
+
+// A missing folder comes back to the client as a question. The start that
+// comes again with MakeFolder makes the folder.
+func TestBridgeMissingFolder(t *testing.T) {
+	h := hosttest.New(t)
+	c := dial(t, h)
+	if !c.HasFeature("mkdir") {
+		t.Fatalf("features %q, want mkdir", c.Features)
+	}
+	ctx := context.Background()
+	dir := filepath.Join(h.Home, "src", "new-app")
+	a := client.NewArgs{Argv: []string{"true"}, Cwd: "~/src/new-app"}
+	_, err := c.NewSession(ctx, a)
+	q, ok := client.FolderQuestionOf(err)
+	if !ok || q.Folder != dir {
+		t.Fatalf("new in a missing folder = %v, want a question about %s", err, dir)
+	}
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Fatalf("the question made the folder: %v", err)
+	}
+	a.MakeFolder = true
+	s, err := c.NewSession(ctx, a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st, err := os.Stat(dir); err != nil || !st.IsDir() || s.Cwd != dir {
+		t.Fatalf("folder %v, session's folder %s", err, s.Cwd)
+	}
+	// A file in the way is not a folder, and is never made into one.
+	if err := os.WriteFile(filepath.Join(h.Home, "a-file"), []byte("x\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err = c.NewSession(ctx, client.NewArgs{Argv: []string{"true"}, Cwd: "~/a-file", MakeFolder: true})
+	var ue *client.UserError
+	if !errors.As(err, &ue) || ue.Code != "bad_folder" {
+		t.Fatalf("new in a file = %v", err)
+	}
+}

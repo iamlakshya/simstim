@@ -54,8 +54,9 @@ func newSink(d api.AlertDestination, e sinkEnv) sink {
 	}
 }
 
-// target describes a destination for logs and results, with its secrets hidden.
-func target(d api.AlertDestination) string {
+// Target describes a destination for logs and results, with the secret parts of an
+// address hidden. For a command, it is the start of the command line.
+func Target(d api.AlertDestination) string {
 	if d.Type == "command" {
 		run := strings.Join(strings.Fields(d.Run), " ")
 		if len(run) > 60 {
@@ -181,7 +182,8 @@ type ntfySink struct {
 
 var ntfyTags = map[string]string{
 	NeedsInput: "bell", TurnDone: "white_check_mark", Exited: "checkered_flag", Failed: "x",
-	OOM: "warning", Started: "arrow_forward", Restored: "arrows_counterclockwise", Test: "test_tube",
+	OOM: "warning", Memory: "chart_with_upwards_trend", Started: "arrow_forward", Restored: "arrows_counterclockwise",
+	Test: "test_tube",
 }
 
 func (n *ntfySink) send(ctx context.Context, ev Event) (string, error) {
@@ -212,7 +214,7 @@ func (n *ntfySink) priority(kind string) string {
 		return strings.ToLower(n.d.Priority)
 	}
 	switch kind {
-	case NeedsInput, Failed, OOM:
+	case NeedsInput, Failed, OOM, Memory:
 		return "high"
 	}
 	return "default"

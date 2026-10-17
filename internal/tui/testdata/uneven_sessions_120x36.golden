@@ -1,0 +1,36 @@
+
+  ⢄⡠⠊ simstim  › atlas-dev                                                         31/100ms · 4 sessions · 1 needs you
+  ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+  ▍ 1 ● auth-refactor                 claude    ~/src/app                                needs input      3m  ⣀⣀⣀⣀⣀⣀⣀⣀
+    2 ⠶ api-tests                     codex     ~/src/api                                working          1m  ⣿⣿⣿⣶⣶⣿⣿⣿
+    3 ○ notes                         shell     ~                                        idle             1h  ⣀⣀⣀⣀⣀⣀⣀⣀
+    4 ✓ docs-pass                     opencode  ~/src/docs                               exited 0         3h  ⣀⣀⣀⣀⣀⣀⣀⣀
+
+    ~/src/app · 6.1 of 8 GiB · s4
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+    ❯ / search every host   n start a session
+    enter attach   space peek   r rename   esc hosts   ctrl+o commands   ? keys

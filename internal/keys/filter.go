@@ -4,8 +4,11 @@
 // While attached, the client owns only two keys: detach (default Ctrl+\) and
 // image paste (default Ctrl+V). A terminal may send them as legacy control bytes,
 // as kitty keyboard protocol CSI u sequences (with event types, lock bits and
-// alternate keys), or as xterm modifyOtherKeys sequences. Bracketed pastes are
-// collected whole, so dropped file paths can be rewritten, and never scanned for keys.
+// alternate keys), or as xterm modifyOtherKeys sequences. The filter collects a
+// bracketed paste whole, so the client can rewrite dropped file paths, and it
+// never scans a paste for keys. If a read splits a paste's start marker right
+// after its ESC, that ESC has already gone out. The paste then passes through
+// as it came, and the client cannot rewrite its paths.
 package keys
 
 import (
@@ -138,6 +141,10 @@ type Filter struct {
 	buf     []byte
 	inPaste bool
 	paste   bytes.Buffer
+	// sent counts the bytes of a paste's start marker that went out before
+	// the filter could tell. They are a lone ESC at the end of a read, and
+	// the bytes right after it. In a paste, its piece leaves them out.
+	sent int
 }
 
 // MaxPaste is the largest paste collected whole; larger pastes pass through as they come.
@@ -157,12 +164,13 @@ func New(watch ...Key) *Filter {
 	return f
 }
 
-// Feed filters p. Bytes of an unfinished escape sequence are kept until the next
-// call, or until Flush. Use Pending to know whether to arm a short flush timer.
+// Feed filters p. The bytes of an unfinished CSI sequence are kept until the
+// next call, or until Flush. A lone ESC at the end of p goes out at once. Use
+// Pending to know whether to arm a short flush timer.
 func (f *Filter) Feed(p []byte) []Piece {
 	f.buf = append(f.buf, p...)
 	s := &scan{b: f.buf}
-	i, stop := 0, false
+	i, stop := f.resume(s), false
 	for i < len(s.b) && !stop {
 		switch {
 		case f.inPaste:
@@ -207,6 +215,31 @@ func (s *scan) match(i, n int, p Piece) int {
 	return i + n
 }
 
+// resume goes on from the last read when it ended in a lone ESC. That ESC
+// went out at once, perhaps with more of a paste's start marker after it.
+// When the new bytes finish the marker, the filter still collects the paste,
+// and never scans its text for keys. It returns where the scan starts.
+func (f *Filter) resume(s *scan) int {
+	if f.inPaste || f.sent == 0 {
+		return 0
+	}
+	sent := f.sent
+	f.sent = 0
+	rest := pasteStart[sent:]
+	n := min(len(rest), len(s.b))
+	if !bytes.Equal(s.b[:n], rest[:n]) {
+		return 0 // not a paste: scan the bytes as usual
+	}
+	if n < len(rest) {
+		// Maybe a paste still: these bytes go out at once too.
+		f.sent = sent + n
+		return n
+	}
+	f.inPaste, f.sent = true, sent
+	s.passStart = n
+	return n
+}
+
 // feedPaste collects a bracketed paste from i. stop is true when the input
 // ran out before the paste's end marker.
 func (f *Filter) feedPaste(s *scan, i int) (next int, stop bool) {
@@ -218,9 +251,9 @@ func (f *Filter) feedPaste(s *scan, i int) (next int, stop bool) {
 		f.paste.Write(b[i : len(b)-keep])
 		i = len(b) - keep
 		if f.paste.Len() > MaxPaste {
-			s.out = append(s.out, Piece{Kind: Pass, Raw: append(append([]byte(nil), pasteStart...), f.paste.Bytes()...)})
+			s.out = append(s.out, Piece{Kind: Pass, Raw: append(append([]byte(nil), pasteStart[f.sent:]...), f.paste.Bytes()...)})
 			f.paste.Reset()
-			f.inPaste = false
+			f.inPaste, f.sent = false, 0
 			s.passStart = i
 			// The rest of this paste, and its end marker, pass through as normal input.
 		}
@@ -228,10 +261,16 @@ func (f *Filter) feedPaste(s *scan, i int) (next int, stop bool) {
 	}
 	f.paste.Write(b[i : i+j])
 	text := append([]byte(nil), f.paste.Bytes()...)
-	raw := append(append(append([]byte(nil), pasteStart...), text...), pasteEnd...)
-	s.out = append(s.out, Piece{Kind: Paste, Raw: raw, Text: text})
+	raw := append(append(append([]byte(nil), pasteStart[f.sent:]...), text...), pasteEnd...)
+	if f.sent > 0 {
+		// The start of its marker went out already, so the paste cannot be
+		// rewritten: the rest of it passes through as it came.
+		s.out = append(s.out, Piece{Kind: Pass, Raw: raw})
+	} else {
+		s.out = append(s.out, Piece{Kind: Paste, Raw: raw, Text: text})
+	}
 	f.paste.Reset()
-	f.inPaste = false
+	f.inPaste, f.sent = false, 0
 	i += j + len(pasteEnd)
 	s.passStart = i
 	return i, false
@@ -250,9 +289,28 @@ func (f *Filter) feedByte(s *scan, i int) int {
 func (f *Filter) feedEsc(s *scan, i int) (next int, stop bool) {
 	b := s.b
 	if i+1 >= len(b) {
-		// A lone ESC at the end of a read is almost always the Esc key.
-		// Keep it only briefly (see Pending/Flush) in case the rest follows.
-		return i, true
+		// A lone ESC at the end of a read is almost always the Esc key, so it
+		// goes out at once. A terminal writes each key in one write, so a read
+		// rarely ends right after the ESC of a longer key. When it does, the
+		// rest of that key comes as plain bytes and passes through unchanged.
+		// A split then costs a missed key, never a changed byte:
+		//   - Legacy Ctrl+\ (0x1c) and Ctrl+V (0x16) have no ESC, so a split
+		//     never hides them.
+		//   - Legacy Alt+V (ESC v), the image paste key on Windows, goes to
+		//     the agent as those two bytes.
+		//   - A kitty CSI u or a modifyOtherKeys key goes to the agent as its
+		//     own bytes: a press, a repeat or a release. After a press that
+		//     the client took, the agent can get a release without its press.
+		//   - A double tap of the detach key sends Ctrl+\ to the agent. If a
+		//     read splits the second press in the kitty or modifyOtherKeys
+		//     form, the agent gets Ctrl+\, and the client still detaches.
+		//   - A paste's start marker is still found (see resume), but the
+		//     paste then passes through as it came: no dropped file is
+		//     uploaded.
+		// A key split later, inside its CSI, is held until it is complete, and
+		// still found.
+		f.sent = 1
+		return i + 1, false
 	}
 	if bytes.HasPrefix(b[i:], pasteStart) {
 		s.pass(i)
@@ -291,14 +349,18 @@ func dropEmpty(ps []Piece) []Piece {
 	return out
 }
 
-// Pending reports whether bytes are held back.
-func (f *Filter) Pending() bool { return len(f.buf) > 0 && !f.inPaste }
+// Pending reports whether the filter waits for more input. Either it holds
+// back an unfinished CSI, or a lone ESC went out, and the rest of a paste's
+// start marker may follow it. Arm a short timer, and call Flush when it fires.
+func (f *Filter) Pending() bool { return !f.inPaste && (len(f.buf) > 0 || f.sent > 0) }
 
-// Flush returns held-back bytes as pass-through input.
+// Flush returns held-back bytes as pass-through input, and ends the wait that
+// Pending reports.
 func (f *Filter) Flush() []byte {
 	if f.inPaste {
 		return nil
 	}
+	f.sent = 0
 	b := append([]byte(nil), f.buf...)
 	f.buf = f.buf[:0]
 	return b

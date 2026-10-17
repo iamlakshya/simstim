@@ -31,13 +31,22 @@ type fakeHost struct {
 	info     client.HostInfo
 	screens  map[string][]byte
 	latency  time.Duration
+	rtts     []time.Duration // when set, the round trips RoundTrip gives in turn
+	pings    int             // calls to RoundTrip
 	dialErr  error
 	newErr   error
 	// setupRepo is a repository with a setup script: a start there asks,
 	// unless it is answered.
 	setupRepo string
+	// missing is a folder that does not exist: a start there asks, unless
+	// it says to make the folder.
+	missing string
 	// checks are the host's agent checks (guide_fake_test.go).
 	checks []client.AgentCheck
+	// resumeErr is what a resume says, if it fails.
+	resumeErr error
+	// debugErr is what a debug start says, if it fails (debug_test.go).
+	debugErr error
 }
 
 // fakeBackend pretends to be SSH, the hosts and the terminal.
@@ -66,6 +75,11 @@ type fakeBackend struct {
 	// attachHook runs during each attach, with the lock held: what the
 	// user does in the session.
 	attachHook func(client.AttachOptions)
+	// debugFile is the launcher's own debug file while its debug is on
+	// (debug_test.go).
+	debugFile string
+	// bundleGate, when set, holds a bundle until it closes.
+	bundleGate chan struct{}
 }
 
 func newFakeBackend() *fakeBackend {
@@ -150,7 +164,7 @@ func (b *fakeBackend) Install(_ context.Context, h client.Host, _ client.Platfor
 	b.installed = true
 	if b.state[h.Name] == nil {
 		b.state[h.Name] = &fakeHost{info: client.HostInfo{Distro: "Ubuntu 24.04", Arch: "arm64", CPUs: 2, MemTotal: 4 << 30,
-			MemoryMax: 1610612736, Agents: map[string]string{"claude": "/usr/bin/claude", "shell": "/bin/bash"}}}
+			MemoryMax: 3116367872, Agents: map[string]string{"claude": "/usr/bin/claude", "shell": "/bin/bash"}}}
 	}
 	b.mu.Unlock()
 	return nil
@@ -238,11 +252,18 @@ func (c *fakeConn) NewSession(_ context.Context, a client.NewArgs) (*client.Sess
 	if a.Setup != "" {
 		c.be.record("new %s setup=%s", c.name, a.Setup)
 	}
+	if a.MakeFolder {
+		c.be.record("new %s mkdir %s", c.name, a.Cwd)
+	}
 	c.be.mu.Lock()
 	defer c.be.mu.Unlock()
 	h := c.host()
 	if h.newErr != nil {
 		return nil, h.newErr
+	}
+	if h.missing != "" && a.Cwd == h.missing && !a.MakeFolder {
+		data, _ := json.Marshal(client.FolderQuestion{Folder: "/home/dev/" + strings.TrimPrefix(h.missing, "~/")})
+		return nil, &client.UserError{Msg: "the folder does not exist", Code: api.CodeNoFolder, Data: data}
 	}
 	if _, known := a.SetupTrust[h.setupRepo]; h.setupRepo != "" && a.Setup == "" && !known {
 		data, _ := json.Marshal(client.SetupQuestion{Repo: h.setupRepo, Script: h.setupRepo + "/.setup"})
@@ -256,6 +277,27 @@ func (c *fakeConn) NewSession(_ context.Context, a client.NewArgs) (*client.Sess
 		State: api.StateStarting, Since: now, CreatedAt: now, Alive: true}
 	h.sessions = append(h.sessions, s)
 	return &s, nil
+}
+
+// Resume starts a session's agent again: it works once more, with nothing
+// of how it ended.
+func (c *fakeConn) Resume(_ context.Context, a client.ResumeArgs) (*client.ResumeResult, error) {
+	c.be.record("resume %s %s memory=%d secrets=%v", c.name, a.ID, a.MemoryMax, a.Secrets)
+	c.be.mu.Lock()
+	defer c.be.mu.Unlock()
+	h := c.host()
+	if h.resumeErr != nil {
+		return nil, h.resumeErr
+	}
+	for i, s := range h.sessions {
+		if s.ID == a.ID {
+			s.State, s.Source, s.Since, s.Alive = api.StateWorking, "start", now, true
+			s.Reason, s.Signal, s.ExitCode, s.OOM = "", "", nil, false
+			h.sessions[i] = s
+			return &client.ResumeResult{Session: s, Why: "resumed its own session"}, nil
+		}
+	}
+	return nil, &client.UserError{Msg: "no session " + a.ID, Hint: "List sessions to find its ID."}
 }
 
 func (c *fakeConn) Delete(_ context.Context, id string) (client.DeleteResult, error) {
@@ -314,7 +356,12 @@ func (c *fakeConn) Setup(context.Context) (client.SetupResult, error) {
 func (c *fakeConn) RoundTrip(context.Context) (time.Duration, error) {
 	c.be.mu.Lock()
 	defer c.be.mu.Unlock()
-	return c.host().latency, nil
+	h := c.host()
+	h.pings++
+	if len(h.rtts) > 0 {
+		return h.rtts[(h.pings-1)%len(h.rtts)], nil
+	}
+	return h.latency, nil
 }
 
 // Done counts its callers as blocked, so the harness knows they wait.
@@ -518,7 +565,7 @@ func labBackend() *fakeBackend {
 	be.state["atlas-dev"] = &fakeHost{
 		latency: 9 * time.Millisecond,
 		info: client.HostInfo{User: "dev", Distro: "Debian 13", Arch: "amd64", CPUs: 4, MemTotal: 8 << 30, DiskFree: 61 << 30,
-			Version: "0.1.0", MemoryMax: 3435973837,
+			Version: "0.1.0", MemoryMax: 6551502848,
 			Agents: map[string]string{"claude": "/usr/local/bin/claude", "codex": "/usr/local/bin/codex", "opencode": "/usr/bin/opencode", "shell": "/usr/bin/zsh"}},
 		sessions: []client.Session{
 			{ID: "s1", Name: "docs-pass", Agent: "opencode", Cwd: "/home/dev/src/docs", State: api.StateExited, ExitCode: code(0), Since: ago(3 * time.Hour), CreatedAt: ago(5 * time.Hour)},
@@ -541,7 +588,7 @@ func labBackend() *fakeBackend {
 	}
 	be.state["gcp-dev"] = &fakeHost{
 		latency: 41 * time.Millisecond,
-		info:    client.HostInfo{Distro: "Ubuntu 24.04", Arch: "amd64", CPUs: 8, MemTotal: 32 << 30, MemoryMax: 8 << 30, Agents: map[string]string{"gemini": "/usr/bin/gemini", "shell": "/bin/bash"}},
+		info:    client.HostInfo{Distro: "Ubuntu 24.04", Arch: "amd64", CPUs: 8, MemTotal: 32 << 30, MemoryMax: 30431772672, Agents: map[string]string{"gemini": "/usr/bin/gemini", "shell": "/bin/bash"}},
 		sessions: []client.Session{
 			{ID: "g1", Name: "bench", Agent: "gemini", Cwd: "/srv/bench", State: api.StateWorking, Since: ago(5 * time.Minute), CreatedAt: ago(2 * time.Hour), Alive: true},
 			{ID: "g2", Name: "scratch", Agent: "shell", Cwd: "/tmp", State: api.StateExited, ExitCode: code(1), Since: ago(50 * time.Hour), CreatedAt: ago(60 * time.Hour)},

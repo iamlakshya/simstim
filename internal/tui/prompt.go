@@ -227,7 +227,7 @@ func (m *Model) promptKey(k tea.KeyPressMsg) tea.Cmd {
 		a := quickArgs(p.in.value(), agentsOn(h), m.defaultAgent(h))
 		p.starting, p.err = true, nil
 		m.lastAgent[h.name()] = a.Agent
-		return m.startSession(h, a, ks == "enter")
+		return m.startSession(h, startReq{args: a, attach: ks == "enter", line: p})
 	}
 	if p.in.key(k) {
 		p.err = nil

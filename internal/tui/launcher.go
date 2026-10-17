@@ -7,8 +7,9 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
+
 	"github.com/iamlakshya/simstim/internal/brand"
-	"github.com/iamlakshya/simstim/internal/client"
 )
 
 // The launcher (docs/contributing/ux-spec.md 2.2 and 2.3) is one list in one column, with no
@@ -71,9 +72,7 @@ func (m *Model) viewLauncher() string {
 	switch {
 	case m.rename != nil:
 		v.hints = []hint{{"enter", "rename"}, {"esc", "cancel"}}
-	case m.prompt != nil && m.prompt.mode == promptSearch:
-		v.hints = []hint{{"enter", "attach"}, {"↑↓", "move"}, {"esc", "close"}}
-	case m.prompt != nil:
+	case m.prompt != nil && m.prompt.mode != promptSearch: // searchView sets its own keys
 		v.hints = []hint{{"enter", "start"}, {"tab", "complete"}, {"ctrl+enter", "detached"}, {"ctrl+f", "form"}, {"esc", "cancel"}}
 	}
 	lines := make([]string, m.height)
@@ -82,9 +81,17 @@ func (m *Model) viewLauncher() string {
 			lines[y] = strings.Repeat(" ", x) + s
 		}
 	}
-	// The header: the logo, the name, where you are; facts on the right.
-	left := m.logo() + " " + m.brandName() + "  " + v.crumb
-	put(headerY, left+strings.Repeat(" ", max(cw-cells(left)-cells(v.facts), 1))+v.facts)
+	// The header: the logo, the name, where you are; facts on the right,
+	// two cells away at least. The debug mark loses its minutes, then the
+	// facts are cut, when they do not fit.
+	left := m.headLeft(v.crumb)
+	if cells(left)+2+cells(v.facts) > cw {
+		left = m.logo() + " " + m.brandName() + "  " + v.crumb + m.debugMark(false)
+	}
+	if room := cw - cells(left) - 2; cells(v.facts) > room {
+		v.facts = ansi.Truncate(v.facts, max(room, 0), "…")
+	}
+	put(headerY, left+strings.Repeat(" ", max(cw-cells(left)-cells(v.facts), 2))+v.facts)
 	put(ruleY, sFaint.Render(strings.Repeat("─", m.ruleLen(cw))))
 
 	m.geo = boxGeo{x: x, y: listTop, w: cw, listY: listTop, top: v.top, sel: -1, from: -1}
@@ -119,6 +126,12 @@ func (m *Model) viewLauncher() string {
 	return strings.Join(lines, "\n")
 }
 
+// headLeft is the left of the header: the logo, the name, where you are,
+// and the mark while the launcher's own debug is on.
+func (m *Model) headLeft(crumb string) string {
+	return m.logo() + " " + m.brandName() + "  " + crumb + m.debugMark(true)
+}
+
 // footer is the keys, or what the quit chord does next.
 func (m *Model) footer(hs []hint, w int) string {
 	if m.quitArmed {
@@ -128,11 +141,12 @@ func (m *Model) footer(hs []hint, w int) string {
 }
 
 // logo is the brand's signal: three braille cells of a small wave in the
-// brand gradient, moving with motion on.
+// brand gradient. With motion on, the wave runs on the logo's clock, so it
+// moves one step with each frame tick and stays still between them.
 func (m *Model) logo() string {
 	t := 0.0
 	if m.motion {
-		t = m.since(m.epoch).Seconds()
+		t = m.logoClock.Seconds()
 	}
 	cols := m.gradient(3)
 	var b strings.Builder
@@ -207,7 +221,7 @@ func (m *Model) sessionsView(cw int) listView {
 		v.crumb, v.facts = sFaint.Render("all sessions"), m.needFacts(sFaint.Render(plural(len(m.hosts), "host", "hosts")))
 	} else {
 		v.crumb = sFaint.Render("› ") + sBold.Render(m.decode(h.name(), m.revealAt))
-		v.facts = m.hostState(h)
+		v.facts = m.hostState(h, cw-cells(m.headLeft(v.crumb))-2)
 	}
 	rows := m.rows()
 	if sessionRows(rows) == 0 {
@@ -237,13 +251,17 @@ func (m *Model) sessionsView(cw int) listView {
 	}
 	if hc, s := m.selectedPair(); s != nil {
 		v.detail = "  " + m.sessionDetail(hc, *s, cw-2, false)
+		if ended(*s) {
+			v.hints = endedHints(hc, *s)
+		}
 	}
 	return v
 }
 
 // searchView lists the sessions of every host that match the search.
 func (m *Model) searchView(cw int) listView {
-	v := listView{crumb: sFaint.Render("› ") + sBold.Render("search"), facts: sFaint.Render("every host")}
+	v := listView{crumb: sFaint.Render("› ") + sBold.Render("search"), facts: sFaint.Render("every host"),
+		hints: []hint{{"enter", "attach"}, {"↑↓", "move"}, {"esc", "close"}}}
 	rs := m.results()
 	p := m.prompt
 	p.sel = min(p.sel, max(len(rs)-1, 0))
@@ -260,39 +278,21 @@ func (m *Model) searchView(cw int) listView {
 	}
 	if r := rs[p.sel]; true {
 		v.detail = "  " + m.sessionDetail(r.h, r.s, cw-2, cols.folder == 0)
+		switch {
+		case ended(r.s) && r.s.Alive:
+			v.hints[0] = hint{"enter", "peek"} // the agent's last screen
+		case ended(r.s):
+			v.hints = v.hints[1:] // nothing to attach to, or to show
+		}
 	}
 	return v
 }
 
-// hostState is the fact at the right of a host's sessions.
-func (m *Model) hostState(h *hostConn) string {
-	switch h.status {
-	case stConnecting:
-		return sAccent.Render(m.spinner()) + " " + m.shimmer("connecting")
-	case stOffline:
-		return sFaint.Render("offline")
-	case stFailed:
-		return sDanger.Render("not ready")
-	default:
-		// Online: the latency, the sessions and who needs you, below.
-	}
-	facts := sFaint.Render(fmtLatency(h.latency) + dot + plural(len(h.sessions), "session", "sessions"))
-	need := 0
-	for _, s := range h.sessions {
-		if s.State == "needs_input" {
-			need++
-		}
-	}
-	if need > 0 {
-		facts += sFaint.Render(dot) + sWarning.Render(fmt.Sprintf("%d needs you", need))
-	}
-	return facts
-}
-
-// Column widths of a session row.
+// Column widths of a session row. The state column fits the longest label,
+// "out of memory".
 const (
 	colAgent = 8
-	colState = 12
+	colState = 13
 	colAge   = 4
 )
 
@@ -300,19 +300,19 @@ const (
 // column goes, and the line under the list still shows the folder.
 const minFolder = 8
 
-// sessColumns is the width of the columns that share the free space. A
-// folder of 0 means the column is hidden.
+// sessColumns is the width of the columns that share the free space, and
+// of the whole row. A folder of 0 means the column is hidden.
 type sessColumns struct {
-	name, folder int
+	name, folder, row int
 }
 
 func sessCols(cw int) sessColumns {
 	fixed := 4 + 2 + colAgent + 2 + colState + 2 + colAge + 2 + traceCells // all but the folder
 	rest := cw - fixed - 2                                                 // name and folder, after the folder's gap
-	c := sessColumns{name: min(max(rest*45/100, 10), 28)}
+	c := sessColumns{name: min(max(rest*45/100, 10), 28), row: cw}
 	c.folder = rest - c.name
 	if c.folder < minFolder {
-		c = sessColumns{name: max(cw-fixed, 6)}
+		c = sessColumns{name: max(cw-fixed, 6), row: cw}
 	}
 	return c
 }
@@ -320,7 +320,7 @@ func sessCols(cw int) sessColumns {
 func (m *Model) sessRowView(r sessRow, n int, c sessColumns, selected, withHost bool) string {
 	switch r.kind {
 	case rowHeader:
-		return sBold.Render(r.h.name()) + "  " + m.hostState(r.h)
+		return sBold.Render(r.h.name()) + "  " + m.hostState(r.h, c.row-cells(r.h.name())-2)
 	case rowNote:
 		msg, _ := errText(r.h.err)
 		if msg == "" {
@@ -332,7 +332,7 @@ func (m *Model) sessRowView(r sessRow, n int, c sessColumns, selected, withHost 
 	}
 	s := r.s
 	glyph, label := m.look(s)
-	traceSt := label.st
+	traceSt := traceStyle(s)
 	if !r.h.loaded {
 		// Remembered from the last run: shown at once, quiet until the host
 		// answers.
@@ -361,41 +361,6 @@ func (m *Model) sessRowView(r sessRow, n int, c sessColumns, selected, withHost 
 		seg{fitRight(fmtAge(m.now().Sub(since(s))), colAge), sFaint}, seg{"  ", sPlain},
 		seg{m.trace(r.key(), traceSt), sPlain})
 	return listRow(selected, segs...)
-}
-
-// sessionDetail is the line under the sessions: what the selected one is
-// doing now, read from its screen, or what it waits for; then where it runs
-// and its memory.
-func (m *Model) sessionDetail(h *hostConn, s client.Session, cw int, withHost bool) string {
-	var now string
-	switch a := m.activity[sessKey{h.name(), s.ID}]; {
-	case s.State == "needs_input" && s.Reason != "":
-		now = sWarning.Render("● " + s.Reason)
-	case len(s.MissingSecrets) > 0 && s.Alive:
-		// After a host restart the agent runs without the secrets it had.
-		now = sWarning.Render("● started without its secrets: " + strings.Join(s.MissingSecrets, ", "))
-	case a.text != "" && s.Alive:
-		now = sAccent.Render("▸ ") + m.decode(a.text, a.at)
-	}
-	where := homePath(h, s.Cwd)
-	if withHost {
-		where = h.name() + ":" + where
-	}
-	var facts []string
-	for _, p := range []string{where, fmtMemory(s.MemoryCurrent, s.MemoryMax), s.ID} {
-		if p != "" {
-			facts = append(facts, p)
-		}
-	}
-	if !h.loaded {
-		facts = append(facts, "last seen before this run")
-	}
-	if now == "" {
-		return sFaint.Render(trunc(strings.Join(facts, dot), cw))
-	}
-	right := sFaint.Render(trunc(strings.Join(facts, dot), cw/2))
-	room := cw - cells(right) - 3
-	return trunc(now, room) + strings.Repeat(" ", max(room-cells(trunc(now, room)), 0)+3) + right
 }
 
 // emptyState explains an empty sessions list, and what to do next.
@@ -464,13 +429,7 @@ func errorBlock(msg, hint string, w int) []string {
 		out = append(out, lead+l)
 	}
 	if hint != "" {
-		for i, l := range wrap(hint, w-2) {
-			lead := sAccent.Render(glyphNext) + " "
-			if i > 0 {
-				lead = "  "
-			}
-			out = append(out, lead+sLink.Render(l))
-		}
+		out = append(out, nextLines(hint, w)...)
 	}
 	return out
 }

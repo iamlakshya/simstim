@@ -3,12 +3,12 @@ package tui
 import (
 	"context"
 	"errors"
-	"fmt"
 	"sort"
 	"strings"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/iamlakshya/simstim/internal/api"
 	"github.com/iamlakshya/simstim/internal/brand"
@@ -35,7 +35,8 @@ type hostConn struct {
 	err      error
 	sessions []client.Session
 	loaded   bool
-	latency  time.Duration
+	rtts     rttWindow // the round trips of the last minute (rtt.go)
+	rtt      rttSpread // their spread, as the launcher shows it
 	info     *client.HostInfo
 	backoff  time.Duration
 	listing  bool
@@ -101,6 +102,7 @@ func (m *Model) dial(h *hostConn) tea.Cmd {
 	h.gen++
 	h.status = stConnecting
 	h.listing, h.pinging = false, false
+	h.rtts, h.rtt = nil, rttSpread{} // a new connection starts its own round trips
 	gen, host, be, ctx, set := h.gen, h.host, m.be, m.ctx, m.conns
 	return func() tea.Msg {
 		dctx, cancel := context.WithTimeout(ctx, 30*time.Second)
@@ -143,6 +145,7 @@ func (m *Model) listSessions(h *hostConn) tea.Cmd {
 	}
 }
 
+// ping times one round trip to h, unless one is on its way.
 func (m *Model) ping(h *hostConn) tea.Cmd {
 	if !h.online() || h.pinging {
 		return nil
@@ -222,6 +225,7 @@ func (m *Model) addHost(host client.Host, conn Conn, info *client.HostInfo) tea.
 	h.gen++
 	h.conn, h.status, h.err, h.backoff, h.info = conn, stOnline, nil, 0, info
 	h.listing, h.pinging = false, false
+	h.rtts, h.rtt = nil, rttSpread{} // the host may be reached another way now
 	return tea.Batch(append(cmds, m.listSessions(h), m.ping(h), waitDone(h.name(), h.gen, conn))...)
 }
 
@@ -274,11 +278,13 @@ func sortSessions(list []client.Session) {
 	})
 }
 
-func ended(s client.Session) bool { return rank(s) == 3 }
-
 // look is how a session's state is drawn: its glyph and its label. A
-// working session's glyph is alive; one that needs the user breathes.
+// working session's glyph is alive, and one that needs the user breathes.
+// An ended session's look says how its agent ended (endLook).
 func (m *Model) look(s client.Session) (glyph, label seg) {
+	if ended(s) {
+		return endLook(s)
+	}
 	switch s.State {
 	case api.StateNeedsInput:
 		return seg{glyphNeedsInput, m.breath(sWarning)}, seg{"needs input", sWarning}
@@ -288,24 +294,21 @@ func (m *Model) look(s client.Session) (glyph, label seg) {
 		return seg{m.spinner(), sKey}, seg{"starting", sFaint}
 	case api.StateIdle:
 		return seg{glyphIdle, sFaint}, seg{"idle", sFaint}
-	case api.StateExited:
-		switch {
-		case s.Signal != "":
-			return seg{glyphFail, sDanger}, seg{"stopped " + strings.TrimPrefix(s.Signal, "SIG"), sDanger}
-		case s.ExitCode != nil && *s.ExitCode != 0:
-			return seg{glyphFail, sDanger}, seg{fmt.Sprintf("exited %d", *s.ExitCode), sDanger}
-		default:
-			return seg{glyphOK, sSuccess}, seg{"exited 0", sFaint}
-		}
-	case api.StateErrored:
-		if s.OOM {
-			return seg{glyphFail, sDanger}, seg{"out of memory", sDanger}
-		}
-		return seg{glyphFail, sDanger}, seg{"failed", sDanger}
-	case api.StateLost:
-		return seg{glyphOffline, sFaint}, seg{"lost", sFaint}
 	}
 	return seg{glyphIdle, sFaint}, seg{strings.ReplaceAll(s.State, "_", " "), sFaint}
+}
+
+// traceStyle colours a session's trace like its state: cyan for working,
+// yellow for needs input, faint otherwise.
+func traceStyle(s client.Session) lipgloss.Style {
+	switch s.State {
+	case api.StateWorking:
+		return sKey
+	case api.StateNeedsInput:
+		return sWarning
+	default:
+		return sFaint
+	}
 }
 
 // homePath shows a path on h with its home folder as "~".

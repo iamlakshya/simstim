@@ -71,6 +71,8 @@ The holder decides each session's state from four layers, strongest first:
 
 Each session row says which layer and rule set its state.
 
+One more source can mark a session as needing you: the warning before the memory cap (3.7). The agent's own wait, from L3, L1 or L2, comes first.
+
 ### 2.4 The agent table
 
 All agent knowledge is data, shipped with the host helper and overridable by the user.
@@ -113,13 +115,16 @@ The full resume table for eight agents is in [the host runtime note](../research
    - `COLORTERM=truecolor`;
    - the client's `TERM_PROGRAM` and its version;
    - `SIMSTIM_SESSION`.
-4. It writes the manifest and starts the holder:
+4. It writes the manifest. It gives `simstim.slice` the limit of all sessions together: the host's memory minus a reserve for the system. It does that only when the slice lacks the limit, and the running sessions use less than it. Then it starts the holder:
 
    ```text
+   systemctl --user set-property simstim.slice MemoryMax=…
    systemd-run --user --unit=simstim-s-<id> --slice=simstim.slice \
-     -p MemoryHigh=… -p MemoryMax=… -p MemorySwapMax=0 -p OOMPolicy=continue \
+     -p MemoryMax=… -p MemorySwapMax=0 -p OOMPolicy=continue \
      simstim-host holder <id>
    ```
+
+   The session's `MemoryMax` is the same limit, or the session's own `memory_max` when that is smaller ([0024](../contributing/decisions/0024-memory-cap.md)).
 
 5. The holder forks the PTY at the client's size and runs the agent's `launch_argv`. It starts the vt child, and opens its socket.
 6. The client attaches at once (3.3).
@@ -177,7 +182,22 @@ Triggers: the detach key, closing the tab, `simstim kill` from elsewhere, or SIG
 ### 3.7 A session ends
 
 - **The agent exits:** the holder records the exit code and signal, keeps the final screen, and marks the session `exited`. The session stays in the list until the user removes it, or respawns it in v2.
-- **Out of memory:** the cgroup's `memory.events` shows the kill, and the session is marked `errored: oom` with its last screen. The host and the other sessions are unharmed.
+- **Close to the memory cap:** the holder warns before the cap stops a process. The cap comes with no swap, so the kernel can free only the page cache and some of its own memory. The kernel also fills that cache up to the cap in normal work, so `memory.current` near the cap means little ([cgroup v2](https://docs.kernel.org/admin-guide/cgroup-v2.html#memory-interface-files), [PSI](https://docs.kernel.org/accounting/psi.html)).
+  - Each second, the holder reads the unit's `memory.events` and `memory.max`. With a cap, it also reads `memory.current`. It reads `memory.stat` only when `memory.current` is at 80 % of the cap, and `memory.pressure` only near 90 %.
+  - It measures the memory that the kernel cannot reclaim: `memory.current`, less the page cache (`file` less `shmem`) and the slab that the kernel can free (`slab_reclaimable`). That leaves the processes' own memory, tmpfs, and the kernel's memory for the session, such as page tables, stacks and socket buffers.
+  - It warns when two things hold. First, that memory reaches 90 % of the cap. Second, a sign shows that the session heads for the cap. Either the `max` count in `memory.events` rose since the last second, so the kernel had to reclaim at the cap. Or the session's tasks stalled on memory for 10 % of the last 10 seconds (`some avg10` in `memory.pressure`). Or that memory still grows: it rose by 1 % of the cap in the last 5 seconds.
+  - At 95 % of the cap, it warns with no other sign ([decision 0027](../contributing/decisions/0027-memory-warning-growth.md)). At most 5 % of the cap is left then, which one tool call can take.
+  - The kernel's signs are not enough. On a test host with a cap of 256 MiB, a program's memory grew by about 2 MiB a second, with no page cache in the unit. The kernel had nothing to reclaim, so `max` stayed at 0 and nothing stalled until the kill. The growth rule warns 12 s before it. The rule catches a leak four times slower than that one.
+  - 90 % is the level that [decision 0008](../contributing/decisions/0008-memory-max-only.md) named. 10 % is the stall at which systemd asks a service to free memory: 200 ms in each 2 s ([`MemoryPressureThresholdSec=`](https://www.freedesktop.org/software/systemd/man/latest/systemd.resource-control.html)).
+  - A full page cache also raises `max`, but the kernel can reclaim the cache, so it does not warn. A large session that does not grow raises neither.
+  - The session then needs input, with a reason such as "close to its memory cap (2.7 of 2.9 GiB)". In `ls --json`, its `source` is `memory`. While the agent waits, the reason stays the agent's question.
+  - It sends one `memory` alert ([decision 0026](../contributing/decisions/0026-end-and-memory-alerts.md)), at once and whether you type or not. The change of state sends no `needs_input`.
+  - The mark stays until the memory falls below 80 % of the cap, or until the cap stops a process. It also clears when someone attaches after the warning showed, and types. A person who was attached all along never saw the warning, so their keys keep it. A reconnect after a dropped link does not count as an attach: the client marks it (`reconnect` in its attach request).
+  - The agent's own turns and questions still send `turn_done` and `needs_input` while the warning shows.
+  - The holder only reads these files. So the warning does not bring back the hang that decision 0008 describes for `MemoryHigh`.
+  - It watches the session's own cap, not the slice's limit. When several sessions share the slice's limit, they can reach it before any one of them is close to its own cap. Then no warning comes before the kill.
+  - [Give a session more memory](../how-to/memory.md#when-a-session-comes-close-to-its-cap) says what to do.
+- **Out of memory:** the cgroup's `memory.events` counts each kill at the cap. If the kill stopped the agent, the holder marks the session `errored: oom` with its last screen. If it stopped a process that the agent started, such as a build, the session keeps its state. It gets the out-of-memory mark, a reason and one `oom` alert. If the agent ends within about two seconds of that kill, its ended session gets the reason and the alert, but not the mark. The host is unharmed. A session's own cap stops only that session. When all sessions together reach the slice's limit, the kernel stops the biggest process of any agent in the slice, normally the one that grew.
 
 ### 3.8 Upgrade
 
@@ -209,11 +229,12 @@ Triggers: the detach key, closing the tab, `simstim kill` from elsewhere, or SIG
 - **Hello first, both ways:** `{magic, protocol: "1.0", features: […], version}`.
 - **Compatibility:** message types are append-only. A peer ignores unknown types. A missing feature degrades with a clear message.
 - **Bridge to client:**
-  - `hello`, `ping`/`pong`;
+  - `hello`, `ping`/`pong` (the pong to a timed ping carries the host's monotonic clock);
   - `hosts.info`, `ls`, `watch`/`event`, `new`, `kill`, `rename`;
   - `upload.begin`/`upload.chunk`/`upload.end`;
   - `attach`, `detach`, `take_size`, `input`, `resize`, `output{offset}`, `snapshot` (VT bytes that redraw the screen; output from `Attached.From` follows).
-- **Holder socket:** the same `attach` family, plus `info`, `subscribe`, `hook`, `set_meta` and `kill`.
+- **Holder socket:** the same `attach` family, plus `info`, `subscribe`, `hook`, `set_meta` and `kill`. While a client traces its attach, a `trace` frame goes before each key.
+- **Debug** ([0025](../contributing/decisions/0025-debug-mode.md)), behind the feature `debug`: `debug.start`, `debug.stop`, `debug.profile` and `debug.save`. For the bundle, `debug.collect` lists the host's files. `debug.read` sends 1 MiB of one listed file at a time, by its name in the list, never by a path.
 - **Back-pressure:**
   - Each client's buffer is capped at 4 MiB.
   - A client that falls behind is dropped to a fresh snapshot.
@@ -236,13 +257,16 @@ The contract has its own page: [the fidelity contract](fidelity.md).
 | `~/.cache/simstim/cm/%C` | ControlMaster sockets. The path is kept under 86 bytes because of macOS. |
 | `~/.cache/simstim/helpers/<version>/` | Host helpers fetched from the release, for a client built with `go install` |
 | `~/.local/state/simstim/` | Logs, and each session's last byte offset |
+| `~/.local/state/simstim/debug/` | The client's debug files, while `--debug` is on (0700; [debug a session](../how-to/debug-a-session.md)) |
+| `./simstim-debug-<time>.tar.gz` | The archive that `debug bundle` writes in the current folder, with private values replaced (0600) |
 
 **Host:**
 
 | Path | Contents |
 | --- | --- |
 | `~/.local/share/simstim/bin/<version>/` and `current` | `simstim-host` and `simstim-vt` |
-| `~/.local/state/simstim/sessions/<id>/` | `manifest.json`, `paste/` (0700), screen snapshot, logs |
+| `~/.local/state/simstim/sessions/<id>/` | `manifest.json`, `paste/` (0700), screen snapshot, `holder.log` (turned over at 1 MiB), and while debug is on, `debug.jsonl` and `debug/` (0700) with profiles and saved windows ([debug a session](../how-to/debug-a-session.md)) |
+| `~/.local/state/simstim/debug/` | The bridges' debug files, while a client with debug on is connected (0700) |
 | `$XDG_RUNTIME_DIR/simstim/s/<id>.sock` | Holder sockets, 0600. Falls back to `/tmp/simstim-<uid>` (0700, owner checked) without linger. |
 | `~/.local/share/simstim/worktrees/<repo>/<slug>-<id>` (v2) | Worktrees per task |
 | `~/.config/simstim/alerts.toml` | Where alerts go: commands, ntfy topics, webhooks (0600; [alerts](../how-to/alerts.md)) |
@@ -292,7 +316,7 @@ For a host you add yourself, if OpenSSH can reach it, simstim can. [The connecti
 | AWS SSM, EC2 Instance Connect Endpoint | SSM is slow (about 0.6 MB/s). EICE ends every connection at 1 hour, and simstim reconnects. |
 | Azure Bastion, Cloudflare Access | Weak fits. Bastion has no ProxyCommand mode, and Cloudflare does not reconnect. |
 
-**Host size:** at least 2 vCPU and 4 GB plus swap. Comfortable: 4 vCPU, 8 GB and 80 GB of disk. One VM with many sessions beats one VM per session: about 5–6 busy Claude sessions fit in 6.5 GiB, against about 4 with a VM each.
+**Host size:** at least 2 vCPU and 4 GB. Comfortable: 4 vCPU, 8 GB and 80 GB of disk. The host keeps a reserve for the system, and its sessions share the rest. That is 2.9 GiB of 4 GiB, and 6.1 GiB of 8 GiB ([0024](../contributing/decisions/0024-memory-cap.md)). Swap does not add to that, because a session's memory never goes to swap. It helps only the system and the programs outside the sessions. One VM with many sessions beats one VM per session. About 5 busy Claude sessions fit in the 6.1 GiB of an 8 GB host, against about 4 with a VM each.
 
 ## 9. What we borrow, and from where
 

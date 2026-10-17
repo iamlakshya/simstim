@@ -84,19 +84,37 @@ func TestListIsNewestFirstAndShowsEndedSessions(t *testing.T) {
 
 func TestNewChecksItsArguments(t *testing.T) {
 	h := hosttest.New(t)
+	writeFile(t, filepath.Join(h.Home, "a-file"), "x\n")
 	for _, c := range []struct {
 		args host.NewArgs
 		code string
+		msg  string // a part of the message, if it matters
 	}{
-		{host.NewArgs{Agent: "no-such-agent"}, "unknown_agent"},
-		{host.NewArgs{Argv: []string{"true"}, Cwd: "~/missing"}, "bad_folder"},
-		{host.NewArgs{Argv: []string{"no-such-program-here"}}, "agent_missing"},
-		{host.NewArgs{Argv: []string{"true"}, Cwd: "~", Worktree: true}, "not_a_repo"},
+		{host.NewArgs{Agent: "no-such-agent"}, "unknown_agent", ""},
+		{host.NewArgs{Argv: []string{"true"}, Cwd: "~/missing"}, api.CodeNoFolder, ""},
+		{host.NewArgs{Argv: []string{"true"}, Cwd: "~/missing", Worktree: true, MakeFolder: true}, "bad_folder", "needs a git repository"},
+		// A missing agent comes first: the user is not asked about a folder
+		// for a start that cannot run.
+		{host.NewArgs{Argv: []string{"no-such-program-here"}, Cwd: "~/missing"}, "agent_missing", ""},
+		{host.NewArgs{Argv: []string{"no-such-program-here"}, Cwd: "~/missing", MakeFolder: true}, "agent_missing", ""},
+		// Only a full path is made: not ~user, and not a path relative to
+		// the folder that the helper runs in.
+		{host.NewArgs{Argv: []string{"true"}, Cwd: "~nobody-here/missing", MakeFolder: true}, "bad_folder", "does not exist"},
+		{host.NewArgs{Argv: []string{"true"}, Cwd: "missing-here/sub", MakeFolder: true}, "bad_folder", "does not exist"},
+		// A file above the folder is in the way, whatever the permissions.
+		{host.NewArgs{Argv: []string{"true"}, Cwd: "~/a-file/sub", MakeFolder: true}, "bad_folder", filepath.Join(h.Home, "a-file") + " on this host is a file"},
+		{host.NewArgs{Argv: []string{"no-such-program-here"}}, "agent_missing", ""},
+		{host.NewArgs{Argv: []string{"true"}, Cwd: "~", Worktree: true}, "not_a_repo", ""},
 	} {
 		_, err := host.New(c.args)
 		var pe *proto.Error
-		if !errors.As(err, &pe) || pe.Code != c.code || pe.Hint == "" {
+		if !errors.As(err, &pe) || pe.Code != c.code || pe.Hint == "" || !strings.Contains(pe.Message, c.msg) {
 			t.Errorf("new %+v = %v, want a %s error with a hint", c.args, err, c.code)
+		}
+	}
+	for _, dir := range []string{filepath.Join(h.Home, "missing"), "~nobody-here", "missing-here"} {
+		if _, err := os.Stat(dir); !os.IsNotExist(err) {
+			t.Errorf("a start that failed made %s: %v", dir, err)
 		}
 	}
 	// A program that cannot run: the holder reports why, and New says so.
@@ -123,6 +141,46 @@ func TestNewChecksItsArguments(t *testing.T) {
 	for _, s := range list {
 		if s.State != host.StateErrored {
 			t.Errorf("the session that failed to start: %+v", s)
+		}
+	}
+}
+
+// New makes a missing folder, and the folders above it, with the mode that
+// mkdir -p gives them. A start that fails after that removes them again,
+// here because the repository's setup script needs an answer first.
+func TestNewMakesTheFolderAndRemovesItAfterAFailedStart(t *testing.T) {
+	h := hosttest.New(t)
+	dir := repo(t, h)
+	hook := filepath.Join(dir, "."+brand.Name, "setup")
+	writeFile(t, hook, "#!/bin/sh\n")
+	if err := os.Chmod(hook, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	a := host.NewArgs{Argv: []string{"sleep", "60"}, Cwd: "~/src/app/pkg/new", MakeFolder: true}
+	_, err := host.New(a)
+	var pe *proto.Error
+	if !errors.As(err, &pe) || pe.Code != api.CodeSetupTrust {
+		t.Fatalf("new = %v, want a %s question", err, api.CodeSetupTrust)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "pkg")); !os.IsNotExist(err) {
+		t.Fatalf("the start that failed left its folders behind: %v", err)
+	}
+	defer syscall.Umask(syscall.Umask(0o022))
+	a.Setup = api.SetupSkip
+	s, err := host.New(a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.Cwd != filepath.Join(dir, "pkg", "new") {
+		t.Errorf("the session's folder is %s", s.Cwd)
+	}
+	for _, d := range []string{filepath.Join(dir, "pkg"), s.Cwd} {
+		st, err := os.Stat(d)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if st.Mode().Perm() != 0o755 {
+			t.Errorf("%s has mode %o, want 755", d, st.Mode().Perm())
 		}
 	}
 }

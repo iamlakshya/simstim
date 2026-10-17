@@ -8,6 +8,7 @@
     space          peek at the screen
     r f2           rename
     d              delete
+    u              resume
     y              copy attach command
     w              next waiting session
     a              add host
@@ -15,6 +16,5 @@
     i              host details
     /              search every host
     alt+e          show ended
-    ?              keys
     q              quit
     ctrl+o         commands

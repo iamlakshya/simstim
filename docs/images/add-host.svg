@@ -22,8 +22,8 @@
 <text x="57.6" y="125.0" textLength="8.4" fill="#656565">1</text>
 <text x="74.4" y="125.0" textLength="8.4" fill="#45733B">●</text>
 <text x="91.2" y="125.0" textLength="58.8" fill="#656565">gcp-dev</text>
-<text x="200.4" y="125.0" textLength="75.6" fill="#656565">1 session</text>
-<text x="796.8" y="125.0" textLength="50.4" fill="#656565">  38ms</text>
+<text x="200.4" y="125.0" textLength="84.0" fill="#656565">2 sessions</text>
+<text x="813.6" y="125.0" textLength="33.6" fill="#656565">38ms</text>
 <text x="864.0" y="125.0" textLength="8.4" fill="#4D776D">⣼</text>
 <text x="872.4" y="125.0" textLength="8.4" fill="#4D776D">⣿</text>
 <text x="880.8" y="125.0" textLength="8.4" fill="#4D776D">⣿</text>
@@ -71,7 +71,7 @@
 <text x="40.8" y="397.0" textLength="16.8" fill="#656565">──</text>
 <text x="66.0" y="397.0" textLength="84.0" fill="#90E1C6" font-weight="bold">Add a host</text>
 <text x="158.4" y="397.0" textLength="646.8" fill="#656565">─────────────────────────────────────────────────────────────────────────────</text>
-<text x="813.6" y="397.0" textLength="92.4" fill="#656565">step 1 of 4</text>
+<text x="813.6" y="397.0" textLength="92.4" fill="#656565">step 1 of 6</text>
 <text x="914.4" y="397.0" textLength="16.8" fill="#656565">──</text>
 <text x="57.6" y="431.0" textLength="159.6" fill="#BFBDB6" font-weight="bold">Where does it live?</text>
 <rect x="166.8" y="452.0" width="8.4" height="17.0" fill="#BFBDB6"/>

@@ -19,4 +19,11 @@ Delete the machine behind a host, then forget the host. It asks first, and refus
 | `--force` | destroy it even while a session is working |
 | `-y`, `--yes` | do not ask first |
 
+## Flags from the parent command
+
+| Flag | What it does |
+| --- | --- |
+| `--debug[=<categories>]` | turn on the debug mode, with every category, or with the categories listed: attach, net, memory, launcher, runtime. A list binds only in the = form, such as `--debug=net` |
+| `--debug-file <file>` | write the client's debug records to this file. On its own, it turns on every category (SIMSTIM_DEBUG_FILE does the same) |
+
 Part of [`host`](host.md): add, create, list, test and remove hosts.

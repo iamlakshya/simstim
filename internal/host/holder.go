@@ -20,6 +20,7 @@ import (
 
 	"github.com/iamlakshya/simstim/internal/agents"
 	"github.com/iamlakshya/simstim/internal/brand"
+	"github.com/iamlakshya/simstim/internal/diag"
 	"github.com/iamlakshya/simstim/internal/paths"
 	"github.com/iamlakshya/simstim/internal/proto"
 	"github.com/iamlakshya/simstim/internal/ring"
@@ -45,6 +46,7 @@ type hclient struct {
 	attached bool
 	once     sync.Once
 	done     chan struct{}
+	tr       clientTrace // the debug trace of this attach (holder_trace.go)
 }
 
 func (c *hclient) close() {
@@ -75,7 +77,16 @@ type Holder struct {
 	exited    bool
 	ended     proto.Ended
 	dirty     bool
-	oomBase   int64
+	// The memory cap's kills (holder_oom.go): the count accounted for, the
+	// count the last tick read, and whether cmd.Wait has returned.
+	oomSeen  int64
+	oomNoted int64
+	reaped   bool
+	// The warning before the memory cap (holder_mem.go).
+	mem memWatch
+	// oomSnapped is the kill count of the last snapshot of the unit's
+	// processes (holder_oomsnap.go).
+	oomSnapped int64
 	// stopping is true while the system stops the session (for example at shutdown).
 	stopping bool
 	// saveMu orders the manifest's saves; closed is set by the last one.
@@ -101,6 +112,8 @@ type Holder struct {
 	// its terminal first (start.go).
 	secretEnv []string
 	notes     []string
+	// The debug trace (holder_trace.go), on while a traced client is attached.
+	dbg holderDebug
 }
 
 // RunHolder runs the holder for session id until the session is killed.
@@ -109,19 +122,23 @@ func RunHolder(id string) error {
 	if err != nil {
 		return fmt.Errorf("load manifest: %w", err)
 	}
-	lf, err := os.OpenFile(paths.HolderLog(id), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	lf, err := openHolderLog(paths.HolderLog(id), holderLogMax)
 	if err != nil {
-		return fmt.Errorf("open the holder log: %w", err)
+		return err
 	}
 	defer lf.Close()
+	lines := diag.NewLines()
 	h := &Holder{
 		id:       id,
 		m:        m,
-		log:      newHolderLog(lf),
+		log:      newHolderLog(lf, lines),
 		ring:     ring.New(RingSize),
 		clients:  map[*hclient]struct{}{},
 		readDone: make(chan struct{}),
 	}
+	h.dbg.lines = lines
+	// A holder that starts again, as after a reboot, starts with debug off.
+	m.DebugUntil = nil
 	h.log.Info("holder starting", "session", id, "helper", brand.HostBinary, "version", version.Version)
 	restored := wasRestored(m)
 	if err := h.listen(); err != nil {
@@ -158,13 +175,6 @@ func RunHolder(id string) error {
 	return nil
 }
 
-// newHolderLog returns the logger of a holder's log file: one line for each
-// event, with a short message and its details as key=value text. It never
-// gets a secret's value or the agent's output.
-func newHolderLog(w io.Writer) *slog.Logger {
-	return slog.New(slog.NewTextHandler(w, nil))
-}
-
 func (h *Holder) listen() error {
 	sock := paths.Socket(h.id)
 	if err := paths.EnsurePrivateDir(filepath.Dir(sock)); err != nil {
@@ -193,8 +203,9 @@ func (h *Holder) start() error {
 		return errors.New("no command to run")
 	}
 	// The setup (or resume) hook and any notes show in the session's
-	// terminal before the agent (start.go).
-	argv := startArgv(m.Agent.Argv, m.RunHook, hookVars(m, wasRestored(m)), h.notes)
+	// terminal before the agent (start.go). After a restore or a resume, the
+	// hook is the resume hook.
+	argv := startArgv(m.Agent.Argv, m.RunHook, hookVars(m, wasRestored(m) || wasResumed(m)), h.notes)
 	m.RunHook = ""
 	bin, err := lookPath(argv[0], envValue(m.Env, "PATH"))
 	if err != nil {
@@ -225,7 +236,9 @@ func (h *Holder) start() error {
 	h.cmd = cmd
 	// Make the agent, not the holder, the first choice of the OOM killer.
 	_ = os.WriteFile(fmt.Sprintf("/proc/%d/oom_score_adj", cmd.Process.Pid), []byte("500"), 0)
-	h.oomBase = readOOMKills(h.id)
+	h.oomSeen = readOOMKills(h.id)
+	h.oomNoted, h.oomSnapped = h.oomSeen, h.oomSeen
+	h.startMemory()
 
 	h.mu.Lock()
 	now := time.Now().UTC()
@@ -247,7 +260,9 @@ func (h *Holder) start() error {
 	if err := m.Save(); err != nil {
 		h.log.Warn("manifest not saved", "err", err)
 	}
-	h.log.Info("agent started", "argv", m.Agent.Argv, "pid", cmd.Process.Pid)
+	// The program and the count of its arguments only: an argument can hold
+	// a prompt's text or a key, and the log goes into a debug bundle.
+	h.log.Info("agent started", "program", m.Agent.Argv[0], "args", len(m.Agent.Argv)-1, "pid", cmd.Process.Pid)
 	return nil
 }
 
@@ -269,8 +284,7 @@ func (h *Holder) readLoop() {
 }
 
 func (h *Holder) output(data []byte) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
+	lt := h.lockTimed()
 	off := h.ring.End()
 	h.ring.Write(data)
 	if h.vt != nil {
@@ -290,7 +304,9 @@ func (h *Holder) output(data []byte) {
 	}
 	h.lastOut = time.Now()
 	h.m.LastActivityAt = time.Now().UTC()
+	fed := lt.now()
 	h.scr.feed(data)
+	feed := lt.since(fed)
 	h.scan.feed(data, func(s outSignal) {
 		switch s {
 		case sigTitle:
@@ -307,10 +323,16 @@ func (h *Holder) output(data []byte) {
 		}
 	})
 	h.dirty = true
+	h.mu.Unlock()
+	lt.read(len(data), feed)
 }
 
 func (h *Holder) waitLoop() {
 	err := h.cmd.Wait()
+	newKills, snap := h.reap()
+	if snap > 0 {
+		h.goSnapshot(snap)
+	}
 	// The agent's last output may still be in the PTY. Let the reader take
 	// it first, so that clients see it before they hear of the end. A
 	// process the agent left behind can keep the PTY open: wait a moment only.
@@ -318,24 +340,12 @@ func (h *Holder) waitLoop() {
 	case <-h.readDone:
 	case <-time.After(time.Second):
 	}
-	ended := proto.Ended{}
-	if err != nil {
-		var ee *exec.ExitError
-		if errors.As(err, &ee) {
-			if ws, ok := ee.Sys().(syscall.WaitStatus); ok && ws.Signaled() {
-				ended.Signal = ws.Signal().String()
-				ended.ExitCode = 128 + int(ws.Signal())
-				if ws.Signal() == syscall.SIGKILL && readOOMKills(h.id) > h.oomBase {
-					ended.OOM = true
-				}
-			} else {
-				ended.ExitCode = ee.ExitCode()
-			}
-		} else {
-			ended.ExitCode = 1
-		}
-	}
-	h.log.Info("agent exited", "code", ended.ExitCode, "signal", ended.Signal, "oom", ended.OOM)
+	ended, killed := endOf(err)
+	// New kills and a SIGKILL: the cap stopped the agent. New kills without
+	// one: it stopped other processes, which no tick has claimed yet.
+	ended.OOM = killed && newKills
+	childOOM := newKills && !killed
+	h.log.Info("agent exited", "code", ended.ExitCode, "signal", ended.Signal, "oom", ended.OOM, "child_oom", childOOM)
 	h.mu.Lock()
 	h.exited = true
 	h.ended = ended
@@ -352,6 +362,12 @@ func (h *Holder) waitLoop() {
 		st.Reason = "oom"
 	} else if code != 0 {
 		st.State = StateErrored
+	}
+	if childOOM {
+		// Not the OOM flag: on an ended session, it means the cap stopped
+		// the agent itself.
+		st.Reason = oomChildReason
+		h.alertOOM()
 	}
 	h.m.Status = st
 	h.alertEnded(ended)
@@ -374,29 +390,47 @@ func (h *Holder) waitLoop() {
 func (h *Holder) tick() {
 	t := time.NewTicker(time.Second)
 	defer t.Stop()
+	last := time.Now()
 	for range t.C {
-		h.mu.Lock()
-		if !h.exited {
-			h.updateStatus()
-		}
-		h.checkOOM()
-		dirty := h.dirty
-		h.dirty = false
-		var snapshot Manifest
-		if dirty {
-			snapshot = *h.m
-		}
-		h.mu.Unlock()
-		if dirty {
-			if err := h.save(&snapshot, false); err != nil {
-				h.log.Warn("manifest not saved", "err", err)
-			}
+		last = h.noteTick(last)
+		h.step()
+	}
+}
+
+// step is one tick: it reads the unit's memory files, updates the status,
+// and saves the manifest when it changed.
+func (h *Holder) step() {
+	mem := h.readMem()
+	lt := h.lockTimed()
+	on := h.mem.on
+	h.checkMemory(mem)
+	h.snapshotBefore(on)
+	// Before updateStatus: a kill that it claims clears the memory warning's
+	// mark, and the status shows that in the same tick.
+	if kills := h.checkOOM(mem.kills); kills > 0 {
+		h.goSnapshot(kills) // in a goroutine: it reads no file under the lock
+	}
+	if !h.exited {
+		h.updateStatus()
+	}
+	dirty := h.dirty
+	h.dirty = false
+	var snapshot Manifest
+	if dirty {
+		snapshot = *h.m
+	}
+	h.mu.Unlock()
+	lt.tick()
+	if dirty {
+		if err := h.save(&snapshot, false); err != nil {
+			h.log.Warn("manifest not saved", "err", err)
 		}
 	}
 }
 
 // updateStatus sets the session's state from the screen rules, the agent's
-// hooks and notifications, and its output. The caller holds h.mu.
+// hooks and notifications, the memory warning, and its output. The caller
+// holds h.mu.
 func (h *Holder) updateStatus() {
 	if h.scr != nil && h.scr.dirty {
 		h.scr.dirty = false
@@ -406,8 +440,42 @@ func (h *Holder) updateStatus() {
 			h.dirty = true
 		}
 	}
-	state := StateIdle
-	src := "quiet"
+	state, src := h.agentState()
+	agentPrev := h.al.agent
+	h.al.agent = state
+	if h.mem.mark && state != StateNeedsInput {
+		// Close to the memory cap (holder_mem.go), after the agent's own wait.
+		state, src = StateNeedsInput, srcMemory
+	}
+	// The wait can also pass between the agent and the memory warning.
+	handover := state == StateNeedsInput && (src == srcMemory) != (h.m.Status.Source == srcMemory)
+	if state != h.m.Status.State || handover {
+		oom := h.m.Status.OOM
+		h.m.Status = Status{State: state, Since: time.Now().UTC(), Source: src, FullScreen: h.m.Status.FullScreen, OOM: oom}
+		switch {
+		case src == srcMemory:
+			h.m.Status.Reason = h.mem.reason()
+			h.mem.shown = time.Now()
+		case state == StateNeedsInput:
+			// The agent's question, if its hook gave one.
+			h.m.Status.Reason = h.notifyMsg
+		case oom:
+			// The memory cap stopped a process that the agent started.
+			h.m.Status.Reason = oomChildReason
+		}
+		h.dirty = true
+	}
+	if h.al.agent != agentPrev {
+		// Alerts follow the agent's own state, so its turns and questions
+		// count while the memory warning shows too.
+		h.alertState(agentPrev, h.al.agent)
+	}
+}
+
+// agentState is the session's state from the agent's own signals, without
+// the memory warning. The caller holds h.mu.
+func (h *Holder) agentState() (state, src string) {
+	state, src = StateIdle, "quiet"
 	switch {
 	case h.ruleState == StateNeedsInput:
 		state, src = StateNeedsInput, "screen:"+h.ruleID
@@ -424,29 +492,5 @@ func (h *Holder) updateStatus() {
 	case time.Since(h.lastOut) < 3*time.Second:
 		state, src = StateWorking, "output"
 	}
-	if state != h.m.Status.State {
-		prev := h.m.Status.State
-		oom, reason := h.m.Status.OOM, h.m.Status.Reason
-		h.m.Status = Status{State: state, Since: time.Now().UTC(), Source: src, FullScreen: h.m.Status.FullScreen}
-		if oom {
-			h.m.Status.OOM, h.m.Status.Reason = true, reason
-		} else if state == StateNeedsInput && h.notifyMsg != "" {
-			h.m.Status.Reason = h.notifyMsg
-		}
-		h.dirty = true
-		h.alertState(prev, state)
-	}
-}
-
-// checkOOM marks the session when the memory cap stopped one of its
-// processes. The caller holds h.mu.
-func (h *Holder) checkOOM() {
-	if n := readOOMKills(h.id); n > h.oomBase && !h.m.Status.OOM {
-		// A process in the session hit the memory cap and was stopped.
-		h.m.Status.OOM = true
-		h.m.Status.Reason = "a process in this session ran out of memory and was stopped"
-		h.needInput = true
-		h.dirty = true
-		h.alertOOM()
-	}
+	return state, src
 }

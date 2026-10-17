@@ -91,6 +91,10 @@ type Model struct {
 	jacking  *jackIn
 	ticking  bool
 
+	// logoClock is how far the logo's wave has run. Only a frame tick moves
+	// it, so the logo stays still while nothing else moves.
+	logoClock time.Duration
+
 	traces     map[sessKey][]time.Time // moments of output, for each row's trace
 	activity   map[sessKey]activity    // what each session is doing, from its screen
 	activityAt time.Time               // when an activity line last changed
@@ -101,7 +105,9 @@ type Model struct {
 	// again continues from the byte the terminal already shows.
 	attach    *client.AttachState
 	lastAgent map[string]string
+	resuming  map[sessKey]bool // the sessions whose resume runs (resume.go)
 	conns     *connSet
+	dbg       launcherDebug // what the debug commands turned on (debug.go)
 
 	// exec hands the terminal to a blocking command; after delivers msg
 	// after d. Tests replace both.
@@ -171,6 +177,7 @@ func (m *Model) Close() {
 	if g, ok := m.modal.(*guide); ok {
 		g.halt() // a half-made machine is deleted before the launcher goes
 	}
+	m.stopBundle() // a bundle that stops leaves no file
 	m.remember()()
 	m.conns.closeAll()
 }
@@ -186,6 +193,7 @@ func (m *Model) Init() tea.Cmd {
 		m.after(refreshEvery, refreshTickMsg{}),
 		m.after(latencyEvery, latencyTickMsg{}),
 		m.after(activityEvery, activityTickMsg{}),
+		m.debugOnStart(),
 	}
 	for _, h := range m.hosts {
 		cmds = append(cmds, m.dial(h))
@@ -214,11 +222,9 @@ type (
 	}
 	activityTickMsg struct{}
 	startedMsg      struct {
-		host   string
-		s      *client.Session
-		err    error
-		attach bool
-		args   client.NewArgs // what started, without secrets, to start again
+		startReq // what started: a question about it sends it again
+		s        *client.Session
+		err      error
 	}
 	attachDoneMsg struct {
 		host, id, name string
@@ -292,6 +298,7 @@ func (m *Model) update(msg tea.Msg) tea.Cmd {
 		return nil
 	case animTickMsg:
 		m.ticking = false
+		m.logoClock += msg.d
 		return nil
 	case jackMsg:
 		return m.onJack()
@@ -310,6 +317,8 @@ func (m *Model) update(msg tea.Msg) tea.Cmd {
 		return m.onPaste(msg.Content)
 	case toastTickMsg:
 		return m.onToastTick()
+	case debugTickMsg, debugDoneMsg:
+		return m.onDebugMsg(msg)
 	case dialledMsg, connDoneMsg, redialMsg, sessionsMsg, latencyMsg, doctorMsg, refreshTickMsg, latencyTickMsg:
 		return m.onConn(msg)
 	case previewTickMsg:
@@ -331,6 +340,8 @@ func (m *Model) update(msg tea.Msg) tea.Cmd {
 		return m.onFolders(msg)
 	case startedMsg:
 		return m.onStarted(msg)
+	case resumedMsg:
+		return m.onResumed(msg)
 	case attachDoneMsg:
 		return m.onAttachEnded(msg)
 	case hostSavedMsg:

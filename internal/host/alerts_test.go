@@ -65,6 +65,12 @@ func TestWasRestored(t *testing.T) {
 	if wasRestored(m) {
 		t.Error("an old restore label counts after a later start")
 	}
+	// The user's resume after that start is not a restore: the session sends
+	// a started alert, and waits for the secrets that the client sends.
+	m.Labels[resumedLabel] = start.Add(3 * time.Hour).Format(time.RFC3339Nano)
+	if wasRestored(m) || !wasResumed(m) {
+		t.Errorf("after a resume: restored %v, resumed %v", wasRestored(m), wasResumed(m))
+	}
 }
 
 // alertHolder is a holder with a dispatcher that posts to a test server.

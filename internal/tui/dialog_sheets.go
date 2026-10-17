@@ -53,7 +53,8 @@ func deleteDialog(h *hostConn, s client.Session) *confirm {
 		fmt.Sprintf("This stops %s on %s and removes the session.", s.Agent, host),
 		fmt.Sprintf("The folder %s stays. Unsaved work in the agent is lost.", homePath(h, s.Cwd)),
 	}
-	if !s.Alive {
+	if ended(s) {
+		// Nothing runs that could lose work: say only what goes.
 		lines = []string{
 			fmt.Sprintf("This removes the session from %s.", host),
 			fmt.Sprintf("The folder %s stays.", homePath(h, s.Cwd)),
@@ -132,7 +133,7 @@ func (d *details) view(m *Model) string {
 			field("System", strings.Join(sys, dot)),
 			field("Helper", brand.HostBinary+" "+i.Version),
 			field("Agents", strings.Join(names, dot)),
-			field("Limits", fmtSize(i.MemoryMax)+" per session"+dot+plural(len(h.sessions), "session", "sessions")))
+			field("Limits", fmtSize(i.MemoryMax)+" for sessions"+dot+plural(len(h.sessions), "session", "sessions")))
 	} else {
 		msg, _ := errText(h.err)
 		if msg == "" {
@@ -142,5 +143,5 @@ func (d *details) view(m *Model) string {
 	}
 	body = append(body, "")
 	hints := []hint{{"t", "test"}, {"s", "shell"}, {"r", "reconnect"}, {"x", "remove"}, {"esc", "back"}}
-	return sheet(w, h.name(), m.hostState(h), hints, trimBlank(body), toneNormal)
+	return sheet(w, h.name(), m.hostState(h, w-8-cells(h.name())), hints, trimBlank(body), toneNormal)
 }

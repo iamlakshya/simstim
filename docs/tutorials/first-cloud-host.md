@@ -28,7 +28,7 @@ Press Enter to keep the default file, and give the key a passphrase. Your Mac ke
 In your provider's console, create a server:
 
 - **Image:** Ubuntu 24.04 LTS or Debian 13. Any recent Linux with systemd works.
-- **Size:** at least 2 vCPUs and 4 GB of memory. 4 vCPUs and 8 GB are comfortable, with room for about five busy agents at once ([host size](../explanation/architecture.md)).
+- **Size:** at least 2 vCPUs and 4 GB of memory, which gives your sessions about 2.8 GiB. A host with 4 vCPUs and 8 GB is comfortable, with room for about five busy agents at once ([memory](../how-to/memory.md)). Swap does not give sessions more room.
 - **SSH key:** paste the contents of `~/.ssh/id_ed25519.pub`. Turn password login off, if the console asks.
 
 Note the server's IP address.

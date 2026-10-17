@@ -101,8 +101,13 @@ func waitFile(t *testing.T, path, want string) []byte {
 	return b
 }
 
-func TestAttachIsByteExact(t *testing.T) {
-	r := newAttachRun(t)
+func TestAttachIsByteExact(t *testing.T) { checkByteExact(t, newAttachRun(t), nil) }
+
+// checkByteExact attaches to a session that prints every byte value and
+// records every key, and checks that both reach the other end unchanged.
+// While attached, it calls during, when it is not nil.
+func checkByteExact(t *testing.T, r *attachRun, during func(id string)) {
+	t.Helper()
 	// Every byte value, and the sequences terminals care most about.
 	data := append(clienttest.EveryByte(4096), []byte("\x1b]8;;https://example.com\x1b\\link\x1b]8;;\x1b\\ \x1b[38;2;255;100;0mtruecolor\x1b[0m "+
 		"\x1b[4:3mcurly\x1b[0m \x1b]777;notify;Title;Body\x1b\\\x1b]52;c;aGVsbG8=\x1b\\\x1b[?2026h\x1b[?2026l END")...)
@@ -122,6 +127,9 @@ func TestAttachIsByteExact(t *testing.T) {
 	r.term.Type(typed)
 	if got := waitFile(t, keys, "\x00"); string(got) != typed {
 		t.Fatalf("the agent got %q, want %q", got, typed)
+	}
+	if during != nil {
+		during(id)
 	}
 	r.term.Type(detach)
 	e := r.end(done)
@@ -163,6 +171,40 @@ func TestDetachKeyTwiceGoesToTheAgent(t *testing.T) {
 	r.term.Type(detach)
 	if e := r.end(done); !e.res.Detached {
 		t.Fatalf("attach = %+v, %v", e.res, e.err)
+	}
+}
+
+// A lone Esc reaches the agent at once, as the same byte. The client holds
+// only an unfinished key sequence, here for an hour, so an Esc that waited
+// for the flush timer would never arrive.
+func TestAttachSendsALoneEscAtOnce(t *testing.T) {
+	defer client.SetEscFlush(time.Hour)()
+	r := newAttachRun(t)
+	keys := filepath.Join(r.h.Home, "keys.bin")
+	id := r.session("stty raw -echo; printf 'READY'; exec cat > " + keys)
+	done := r.attach(context.Background(), id, client.DefaultSettings())
+	r.term.WaitFor("READY")
+	r.term.Type("\x1b")
+	if got := waitFile(t, keys, "\x1b"); string(got) != "\x1b" {
+		t.Fatalf("the agent got %q, want a lone Esc", got)
+	}
+	// The rest of a paste's start marker, in the next read, still makes a
+	// paste: the detach key in it goes to the agent.
+	r.term.Type("[200~a\x1cb\x1b[201~")
+	// The start of a key waits for the rest of it.
+	r.term.Type("\x1b[1")
+	time.Sleep(100 * time.Millisecond)
+	if got, _ := os.ReadFile(keys); bytes.Contains(got, []byte("\x1b[1")) {
+		t.Fatalf("the start of a key went out before its end: the agent got %q", got)
+	}
+	r.term.Type("1~")
+	want := "\x1b[200~a\x1cb\x1b[201~\x1b[11~"
+	if got := waitFile(t, keys, "\x1b[11~"); string(got) != want {
+		t.Fatalf("the agent got %q, want %q", got, want)
+	}
+	r.term.Type(detach)
+	if e := r.end(done); e.err != nil || !e.res.Detached {
+		t.Fatalf("detach = %+v, %v", e.res, e.err)
 	}
 }
 
@@ -294,6 +336,11 @@ func TestAttachReconnectsWithoutAGap(t *testing.T) {
 	}
 	if !bytes.Contains(out, []byte("reconnecting · box/"+id)) {
 		t.Error("the title did not say it was reconnecting")
+	}
+	// The holder knows the second attach is the same person after a dropped
+	// link, so it keeps a memory warning that they never saw.
+	if log := r.h.HolderLog(id); strings.Count(log, "client attached again after a dropped link") != 1 {
+		t.Errorf("the holder did not see one reconnect:\n%s", log)
 	}
 }
 

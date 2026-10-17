@@ -41,6 +41,10 @@ type command struct {
 	hidden     bool // kept out of the palette
 	why        func(m *Model) string
 	run        func(m *Model) tea.Cmd
+	// instead, if set, is what the command's key does when the command
+	// cannot run, in place of the notice that says why. It reports whether
+	// it took the key.
+	instead func(m *Model) (tea.Cmd, bool)
 }
 
 func (c *command) name() string { return c.noun + ": " + c.verb }
@@ -108,6 +112,11 @@ func (c *command) matches(m *Model, key string) bool {
 
 func (m *Model) runCommand(c *command) tea.Cmd {
 	if r := c.reason(m); r != "" {
+		if c.instead != nil {
+			if cmd, ok := c.instead(m); ok {
+				return cmd
+			}
+		}
 		return m.toast(toastInfo, sentence("Not available: "+r))
 	}
 	return c.run(m)
@@ -132,7 +141,27 @@ func registry() []*command {
 		}
 		return ""
 	}
-	return []*command{
+	// needAgent is for what needs the agent to run, and needScreen for what
+	// needs only the session's holder, which keeps the last screen.
+	needAgent := func(m *Model) string {
+		if s := m.selected(); s != nil && ended(*s) {
+			return agentEnded
+		}
+		return needSession(m)
+	}
+	needEnded := func(m *Model) string {
+		if s := m.selected(); s != nil && !ended(*s) {
+			return "the agent still runs"
+		}
+		return needSession(m)
+	}
+	needScreen := func(m *Model) string {
+		if s := m.selected(); s != nil && !s.Alive {
+			return "the session's holder has stopped"
+		}
+		return needSession(m)
+	}
+	return append([]*command{
 		{noun: "session", verb: "new", short: "new session", keys: []binding{{"n", anywhere}},
 			why: func(m *Model) string {
 				h := m.newSessionHost()
@@ -153,19 +182,17 @@ func registry() []*command {
 		}, run: (*Model).openNewSession},
 		{noun: "session", verb: "attach", keys: []binding{{"enter", onSessions}},
 			why: func(m *Model) string {
-				if s := m.selected(); s != nil && !s.Alive {
-					return "the session has ended"
-				}
 				if m.screen == scrSessions && m.selected() == nil && sessionRows(m.rows()) == 0 {
 					return ""
 				}
-				return needSession(m)
+				return needAgent(m)
 			},
-			run: (*Model).attachSelected},
-		{noun: "session", verb: "preview", short: "peek at the screen", keys: []binding{{"space", onSessions}}, why: needSession, run: (*Model).openPreview},
+			run: (*Model).attachSelected, instead: (*Model).enterEnded},
+		{noun: "session", verb: "preview", short: "peek at the screen", keys: []binding{{"space", onSessions}}, why: needScreen, run: (*Model).openPreview},
 		{noun: "session", verb: "rename", keys: []binding{{"r", onSessions}, {"f2", onSessions}}, why: needSession, run: (*Model).startRename},
 		{noun: "session", verb: "delete", keys: []binding{{"d", onSessions}}, why: needSession, run: (*Model).confirmDelete},
-		{noun: "session", verb: "copy attach command", short: "copy attach command", keys: []binding{{"y", onSessions}}, why: needSession, run: (*Model).copyAttach},
+		{noun: "session", verb: "resume", keys: []binding{{resumeKey, onSessions}}, why: needEnded, run: (*Model).resumeSelected},
+		{noun: "session", verb: "copy attach command", short: "copy attach command", keys: []binding{{"y", onSessions}}, why: needAgent, run: (*Model).copyAttach},
 		{noun: "session", verb: "next waiting", short: "next waiting session", keys: []binding{{"w", anywhere}}, run: (*Model).nextWaiting},
 
 		{noun: "host", verb: "open", short: "open host", keys: []binding{{"enter", onHosts}},
@@ -207,7 +234,7 @@ func registry() []*command {
 			}},
 		{noun: brand.Name, verb: "quit", keys: []binding{{"q", anywhere}}, firstRun: true,
 			run: func(*Model) tea.Cmd { return tea.Quit }},
-	}
+	}, debugCommands()...)
 }
 
 // Palette (docs/contributing/ux-spec.md 2.7): Ctrl+O, a filter line, then "noun  verb" rows
@@ -334,7 +361,8 @@ func (m *Model) helpItems() [][2]string {
 		}
 	}
 	for _, c := range commands {
-		if c.hidden || len(m.hosts) == 0 && !c.firstRun {
+		// The sheet leaves out its own key: it is open already.
+		if c.hidden || len(m.hosts) == 0 && !c.firstRun || c.name() == "view: shortcuts" {
 			continue
 		}
 		var keys []string
@@ -416,62 +444,4 @@ func (m *Model) openSettings() tea.Cmd {
 		}
 		return editorDoneMsg{err: err}
 	})
-}
-
-// withKeymap applies the user's [keymap] settings to the registry. A command's
-// new keys keep the scope of its first default key.
-func withKeymap(cmds []*command, km map[string]any) []*command {
-	for _, c := range cmds {
-		v, ok := km[c.name()]
-		if !ok {
-			continue
-		}
-		var keys []string
-		switch x := v.(type) {
-		case string:
-			if x != "" {
-				keys = []string{x}
-			}
-		case []any:
-			for _, k := range x {
-				if s, ok := k.(string); ok && s != "" {
-					keys = append(keys, s)
-				}
-			}
-		case bool:
-			// false unbinds; true keeps the defaults
-			if x {
-				continue
-			}
-		}
-		where := anywhere
-		if len(c.keys) > 0 {
-			where = c.keys[0].where
-		}
-		c.keys = nil
-		for _, k := range keys {
-			c.keys = append(c.keys, binding{key: strings.ToLower(k), where: where})
-		}
-	}
-	return cmds
-}
-
-// KeyEntry is one line of the effective keymap.
-type KeyEntry struct {
-	Command string   `json:"command"`
-	Keys    []string `json:"keys"`
-}
-
-// Keymap returns the effective keymap for the given settings.
-func Keymap(s client.Settings) []KeyEntry {
-	cmds := withKeymap(registry(), s.Keymap)
-	out := make([]KeyEntry, 0, len(cmds))
-	for _, c := range cmds {
-		e := KeyEntry{Command: c.name()}
-		for _, b := range c.keys {
-			e.Keys = append(e.Keys, b.key)
-		}
-		out = append(out, e)
-	}
-	return out
 }

@@ -177,6 +177,20 @@ func (s *SSH) ExitMaster(ctx context.Context) {
 	_ = cmd.Run()
 }
 
+// CheckMaster asks whether the master of the host's shared connection
+// runs, with `ssh -O check`, and returns its process ID.
+func (s *SSH) CheckMaster(ctx context.Context) (running bool, pid int) {
+	args, err := s.baseArgs()
+	if err != nil {
+		return false, 0
+	}
+	args = append(args, "-O", "check", s.Host.SSH)
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	out, _ := exec.CommandContext(ctx, "ssh", args...).CombinedOutput()
+	return parseMaster(string(out))
+}
+
 // sshError turns ssh's exit status and stderr into a user error.
 func sshError(h Host, err error, stderr string) error {
 	msg := strings.TrimSpace(stderr)

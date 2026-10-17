@@ -30,14 +30,16 @@ func termSize() (int, int) {
 }
 
 func newCmd() *cobra.Command {
-	var agent, dir, name, base string
-	var detach, worktree, inline, setup, noSetup bool
+	var agent, dir, name, base, memoryMax string
+	var detach, worktree, inline, setup, noSetup, mkdir bool
 	var secrets []string
 	cmd := &cobra.Command{
 		Use:   "new <host> [-- command…]",
 		Short: "Start a session on a host, and attach to it",
 		Example: "  " + brand.Name + " new my-vps --agent claude --dir ~/src/app\n" +
+			"  " + brand.Name + " new my-vps --agent claude --dir ~/src/new-app --mkdir\n" +
 			"  " + brand.Name + " new my-vps --agent claude --secret ANTHROPIC_API_KEY\n" +
+			"  " + brand.Name + " new my-vps --agent claude --memory-max 6G\n" +
 			"  " + brand.Name + " new my-vps --detach -- htop",
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -47,6 +49,12 @@ func newCmd() *cobra.Command {
 			}
 			if setup && noSetup {
 				return &client.UserError{Msg: "--setup and --no-setup cannot go together", Hint: "Pass one of them."}
+			}
+			var memMax int64
+			if cmd.Flags().Changed("memory-max") {
+				if memMax, err = client.ParseMemoryFlag(memoryMax); err != nil {
+					return err
+				}
 			}
 			// Fetch the secrets first: a password manager may want a touch,
 			// and a failing command should not cost a connection.
@@ -61,7 +69,7 @@ func newCmd() *cobra.Command {
 				return err
 			}
 			cols, rows := termSize()
-			a := client.TerminalArgs(client.NewArgs{Agent: agent, Cwd: client.RemotePath(dir), Name: name, Worktree: worktree, Base: base, Inline: inline, Secrets: values}, cols, rows)
+			a := client.TerminalArgs(client.NewArgs{Agent: agent, Cwd: client.RemotePath(dir), MakeFolder: mkdir, Name: name, Worktree: worktree, Base: base, Inline: inline, MemoryMax: memMax, Secrets: values}, cols, rows)
 			if dash := cmd.ArgsLenAtDash(); dash >= 0 {
 				a.Argv = args[dash:]
 			}
@@ -83,11 +91,13 @@ func newCmd() *cobra.Command {
 	}
 	cmd.Flags().StringVarP(&agent, "agent", "a", "shell", "the agent: "+agentKinds())
 	cmd.Flags().StringVarP(&dir, "dir", "d", "~", "the folder on the host")
+	cmd.Flags().BoolVar(&mkdir, "mkdir", false, "make the folder on the host if it does not exist, without asking")
 	cmd.Flags().StringVarP(&name, "name", "n", "", "a name for the session (default: the folder name)")
 	cmd.Flags().BoolVar(&detach, "detach", false, "start it without attaching")
 	cmd.Flags().BoolVarP(&worktree, "worktree", "w", false, "give the session its own git worktree and branch")
 	cmd.Flags().BoolVar(&inline, "inline", false, "start the agent in its inline mode, so your terminal keeps its scrollback (see agents.inline in config.toml)")
 	cmd.Flags().StringVar(&base, "base", "", "the commit or branch the worktree starts from (default: HEAD)")
+	cmd.Flags().StringVar(&memoryMax, "memory-max", "", "cap the session's memory: auto, or a `size` such as 4G (default: sessions.memory_max in config.toml)")
 	cmd.Flags().StringArrayVar(&secrets, "secret", nil, "pass a secret from config.toml's [secrets] into the session's environment (repeatable)")
 	cmd.Flags().BoolVar(&setup, "setup", false, "run the repository's setup script this time, whatever your answer for it")
 	cmd.Flags().BoolVar(&noSetup, "no-setup", false, "do not run the repository's setup script this time")
@@ -113,18 +123,9 @@ func attachEnded(ctx context.Context, h client.Host, id, name string) (bool, err
 	if err != nil {
 		return false, err
 	}
-	switch {
-	case res.Ended != nil && res.Ended.ExitCode == -1:
-		fmt.Printf("\r\nThe session %s on %s stopped.\n", name, h.Name)
-	case res.Ended != nil:
-		why := fmt.Sprintf("exit code %d", res.Ended.ExitCode)
-		if res.Ended.OOM {
-			why = "out of memory"
-		} else if res.Ended.Signal != "" {
-			why = res.Ended.Signal
-		}
-		fmt.Printf("\r\nThe session %s on %s ended (%s).\n", name, h.Name, why)
-	default:
+	if res.Ended != nil {
+		fmt.Print(endMessage(name, h.Name, id, res.Ended))
+	} else {
 		fmt.Printf("\r\nDetached. %s keeps running on %s.\n", name, h.Name)
 	}
 	return res.Ended != nil, nil
@@ -202,8 +203,8 @@ func attachCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if !s.Alive {
-				return &client.UserError{Msg: fmt.Sprintf("%s on %s is %s", s.Name, h.Name, s.State), Hint: fmt.Sprintf("%s kill %s/%s, then start a new one", brand.Name, h.Name, s.ID)}
+			if client.Ended(*s) {
+				return endedError(h, *s)
 			}
 			return attach(cmd.Context(), h, s.ID, s.Name)
 		},
@@ -284,9 +285,17 @@ func listAll(ctx context.Context, hosts []client.Host) []hostSessions {
 	return results
 }
 
-// printSessions prints one line for each session, by host.
+// printSessions prints one line for each session, by host. The state column
+// is as wide as its longest state, so a cause such as "(out of memory)"
+// keeps the columns after it in line.
 func printSessions(results []hostSessions) {
 	sort.Slice(results, func(i, j int) bool { return results[i].Host < results[j].Host })
+	stateW := 12
+	for _, r := range results {
+		for _, s := range r.Sessions {
+			stateW = max(stateW, len([]rune(stateLabel(s))))
+		}
+	}
 	for _, r := range results {
 		if r.Error != "" {
 			fmt.Printf("%s  ◌ %s\n", r.Host, r.Error)
@@ -297,7 +306,7 @@ func printSessions(results []hostSessions) {
 			continue
 		}
 		for _, s := range r.Sessions {
-			fmt.Printf("%-14s %-10s %-20s %-9s %-12s %6s  %s\n", r.Host, s.ID, trunc(s.Name, 20), s.Agent, stateLabel(s.State), age(s.CreatedAt), s.Cwd)
+			fmt.Printf("%-14s %-10s %-20s %-9s %-*s %6s  %s\n", r.Host, s.ID, trunc(s.Name, 20), s.Agent, stateW, stateLabel(s), age(s.CreatedAt), s.Cwd)
 		}
 	}
 }
@@ -336,8 +345,6 @@ func lsCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&asJSON, "json", false, "print JSON")
 	return cmd
 }
-
-func stateLabel(s string) string { return strings.ReplaceAll(s, "_", " ") }
 
 func trunc(s string, n int) string {
 	r := []rune(s)

@@ -5,9 +5,9 @@ import (
 	"os"
 	"os/exec"
 	"strings"
-	"time"
 
 	"github.com/iamlakshya/simstim/internal/api"
+	"github.com/iamlakshya/simstim/internal/brand"
 )
 
 // Session is a session row, as the host reports it.
@@ -37,9 +37,17 @@ func (c *Conn) Sessions(ctx context.Context) ([]Session, error) {
 	return out, err
 }
 
-// NewSession starts a session.
+// NewSession starts a session. Unless a names a memory cap, the session gets
+// the one in config.toml.
 func (c *Conn) NewSession(ctx context.Context, a NewArgs) (*Session, error) {
+	a, err := withMemoryMax(a)
+	if err != nil {
+		return nil, err
+	}
 	if err := c.RequireSecrets(a); err != nil {
+		return nil, err
+	}
+	if err := c.needMakeFolder(a); err != nil {
 		return nil, err
 	}
 	var s Session
@@ -47,6 +55,15 @@ func (c *Conn) NewSession(ctx context.Context, a NewArgs) (*Session, error) {
 		return nil, err
 	}
 	return &s, nil
+}
+
+// needMakeFolder fails when a start asks the host's helper to make its folder,
+// and the helper is too old to do that. An older helper ignores the request.
+func (c *Conn) needMakeFolder(a NewArgs) error {
+	if !a.MakeFolder || c.HasFeature("mkdir") {
+		return nil
+	}
+	return &UserError{Msg: "the helper on " + c.Host.Name + " is too old to make folders", Hint: brand.Name + " host add " + c.Host.Name + "   (updates the helper)"}
 }
 
 // DeleteResult says what deleting a session did.
@@ -114,16 +131,6 @@ func (c *Conn) Setup(ctx context.Context) (SetupResult, error) {
 	var r SetupResult
 	err := c.Call(ctx, "setup", args, &r)
 	return r, err
-}
-
-// RoundTrip measures the round trip through the bridge.
-func (c *Conn) RoundTrip(ctx context.Context) (time.Duration, error) {
-	start := time.Now()
-	var out []Session
-	if err := c.Call(ctx, "ls", nil, &out); err != nil {
-		return 0, err
-	}
-	return time.Since(start), nil
 }
 
 // SendText types text into a session without attaching.

@@ -1,7 +1,6 @@
 package host
 
 import (
-	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -27,37 +26,6 @@ func SystemdUser() bool {
 	return s == "running" || s == "degraded" || s == "starting"
 }
 
-// MemTotal returns the host's memory in bytes.
-func MemTotal() int64 {
-	f, err := os.Open("/proc/meminfo")
-	if err != nil {
-		return 0
-	}
-	defer f.Close()
-	sc := bufio.NewScanner(f)
-	for sc.Scan() {
-		if v, ok := strings.CutPrefix(sc.Text(), "MemTotal:"); ok {
-			v = strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(v), "kB"))
-			n, _ := strconv.ParseInt(v, 10, 64)
-			return n * 1024
-		}
-	}
-	return 0
-}
-
-// DefaultMemoryMax is 8 GiB or 40 % of the host's memory, whichever is smaller.
-func DefaultMemoryMax() int64 {
-	const cap8 = 8 << 30
-	total := MemTotal()
-	if total <= 0 {
-		return cap8
-	}
-	if v := total * 40 / 100; v < cap8 {
-		return v
-	}
-	return cap8
-}
-
 // UnitName is the systemd unit of a session.
 func UnitName(id string) string { return brand.UnitPrefix + id + ".service" }
 
@@ -72,7 +40,12 @@ func launchHolder(m *Manifest) error {
 	if err != nil {
 		return err
 	}
+	var sliceErr error
 	if SystemdUser() {
+		// All sessions together stay below the host's memory minus the
+		// reserve. Without that limit the session still starts, under its
+		// own cap.
+		sliceErr = limitSessions(DefaultMemoryMax())
 		unit := UnitName(m.ID)
 		args := []string{"--user", "--quiet", "--collect",
 			"--unit=" + unit, "--slice=" + brand.Slice,
@@ -108,7 +81,21 @@ func launchHolder(m *Manifest) error {
 		}
 		_ = cmd.Process.Release()
 	}
-	return waitSocket(m.ID, 5*time.Second)
+	return holderStarted(m.ID, sliceErr, 5*time.Second)
+}
+
+// holderStarted waits until the holder of session id answers. Only then does
+// it write sliceErr, a failure to limit the memory of all sessions, to the
+// session's log. waitSocket reports the log's last line when a start fails,
+// and the slice's limit is never the reason for that.
+func holderStarted(id string, sliceErr error, timeout time.Duration) error {
+	if err := waitSocket(id, timeout); err != nil {
+		return err
+	}
+	if sliceErr != nil {
+		warnSession(id, "could not limit the memory of all sessions", sliceErr)
+	}
+	return nil
 }
 
 func waitSocket(id string, timeout time.Duration) error {

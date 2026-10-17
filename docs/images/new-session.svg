@@ -26,8 +26,8 @@
 <text x="49.2" y="125.0" textLength="25.2" fill="#BFBDB6"> 1 </text>
 <text x="74.4" y="125.0" textLength="8.4" fill="#F9AF4F">●</text>
 <text x="91.2" y="125.0" textLength="109.2" fill="#BFBDB6" font-weight="bold">auth-refactor</text>
-<text x="200.4" y="125.0" textLength="495.6" fill="#BFBDB6">               claude    ~/src/app                         </text>
-<text x="696.0" y="125.0" textLength="100.8" fill="#F9AF4F">needs input </text>
+<text x="200.4" y="125.0" textLength="487.2" fill="#BFBDB6">              claude    ~/src/app                         </text>
+<text x="687.6" y="125.0" textLength="109.2" fill="#F9AF4F">needs input  </text>
 <text x="796.8" y="125.0" textLength="67.2" fill="#BFBDB6">   44s  </text>
 <text x="864.0" y="125.0" textLength="8.4" fill="#F9AF4F">⣿</text>
 <text x="872.4" y="125.0" textLength="8.4" fill="#F9AF4F">⣿</text>
@@ -40,9 +40,9 @@
 <text x="57.6" y="142.0" textLength="8.4" fill="#656565">2</text>
 <text x="74.4" y="142.0" textLength="8.4" fill="#90E1C6">⠶</text>
 <text x="91.2" y="142.0" textLength="75.6" fill="#BFBDB6" font-weight="bold">api-tests</text>
-<text x="326.4" y="142.0" textLength="67.2" fill="#656565">codex   </text>
-<text x="410.4" y="142.0" textLength="75.6" fill="#656565">~/src/api</text>
-<text x="696.0" y="142.0" textLength="100.8" fill="#90E1C6">working     </text>
+<text x="318.0" y="142.0" textLength="67.2" fill="#656565">codex   </text>
+<text x="402.0" y="142.0" textLength="75.6" fill="#656565">~/src/api</text>
+<text x="687.6" y="142.0" textLength="109.2" fill="#90E1C6">working      </text>
 <text x="813.6" y="142.0" textLength="33.6" fill="#656565">  9s</text>
 <text x="864.0" y="142.0" textLength="8.4" fill="#90E1C6">⣿</text>
 <text x="872.4" y="142.0" textLength="8.4" fill="#90E1C6">⣿</text>
@@ -55,9 +55,9 @@
 <text x="57.6" y="159.0" textLength="8.4" fill="#656565">3</text>
 <text x="74.4" y="159.0" textLength="8.4" fill="#656565">○</text>
 <text x="91.2" y="159.0" textLength="75.6" fill="#BFBDB6" font-weight="bold">docs-site</text>
-<text x="326.4" y="159.0" textLength="67.2" fill="#656565">opencode</text>
-<text x="410.4" y="159.0" textLength="84.0" fill="#656565">~/src/docs</text>
-<text x="696.0" y="159.0" textLength="100.8" fill="#656565">idle        </text>
+<text x="318.0" y="159.0" textLength="67.2" fill="#656565">opencode</text>
+<text x="402.0" y="159.0" textLength="84.0" fill="#656565">~/src/docs</text>
+<text x="687.6" y="159.0" textLength="109.2" fill="#656565">idle         </text>
 <text x="813.6" y="159.0" textLength="33.6" fill="#656565"> 20m</text>
 <text x="864.0" y="159.0" textLength="8.4" fill="#656565">⣀</text>
 <text x="872.4" y="159.0" textLength="8.4" fill="#656565">⣀</text>
@@ -70,9 +70,9 @@
 <text x="57.6" y="176.0" textLength="8.4" fill="#656565">4</text>
 <text x="74.4" y="176.0" textLength="8.4" fill="#7FD962">✓</text>
 <text x="91.2" y="176.0" textLength="42.0" fill="#BFBDB6" font-weight="bold">notes</text>
-<text x="326.4" y="176.0" textLength="67.2" fill="#656565">shell   </text>
-<text x="410.4" y="176.0" textLength="8.4" fill="#656565">~</text>
-<text x="696.0" y="176.0" textLength="100.8" fill="#656565">exited 0    </text>
+<text x="318.0" y="176.0" textLength="67.2" fill="#656565">shell   </text>
+<text x="402.0" y="176.0" textLength="8.4" fill="#656565">~</text>
+<text x="687.6" y="176.0" textLength="109.2" fill="#656565">exited 0     </text>
 <text x="813.6" y="176.0" textLength="33.6" fill="#656565">  2h</text>
 <text x="864.0" y="176.0" textLength="8.4" fill="#656565">⣀</text>
 <text x="872.4" y="176.0" textLength="8.4" fill="#656565">⣀</text>

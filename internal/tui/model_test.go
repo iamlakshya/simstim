@@ -55,8 +55,8 @@ func TestSessionOrder(t *testing.T) {
 func TestConnectsAndShowsHosts(t *testing.T) {
 	hs := home(t, 80, 24)
 	dev, aws := hs.m.hostByName("atlas-dev"), hs.m.hostByName("aws-gpu")
-	if !dev.online() || dev.latency != 9*time.Millisecond || dev.info == nil {
-		t.Fatalf("atlas-dev: status %v, latency %v, info %v", dev.status, dev.latency, dev.info)
+	if !dev.online() || dev.rtt.mid != 9*time.Millisecond || dev.info == nil {
+		t.Fatalf("atlas-dev: status %v, round trip %+v, info %v", dev.status, dev.rtt, dev.info)
 	}
 	if aws.status != stOffline {
 		t.Fatalf("aws-gpu status %v, want offline", aws.status)
@@ -261,13 +261,29 @@ func TestAttachKeepsStateAndReportsEnd(t *testing.T) {
 	hasToast(t, hs.m, "Cannot reach atlas-dev: timed out.")
 }
 
+// An end out of memory says what to try next (AGENTS.md rule 7), and the
+// end and its step both show at every size.
+func TestAttachOOMSaysWhatToTry(t *testing.T) {
+	end := &proto.Ended{ExitCode: 137, Signal: "killed", OOM: true}
+	for _, sz := range sizes {
+		hs := sessions(t, sz.w, sz.h)
+		hs.be.attach = client.AttachResult{Ended: end}
+		hs.key("enter")
+		out := plainScreen(hs.m)
+		if !strings.Contains(out, "● auth-refactor on atlas-dev ended (out of memory).") || !strings.Contains(out, "→ "+endHint(end)) {
+			t.Fatalf("at %dx%d the end or its next step is missing:\n%s", sz.w, sz.h, out)
+		}
+	}
+}
+
 func TestAttachEndedSession(t *testing.T) {
 	hs := sessions(t, 80, 24)
 	hs.key("end", "enter")
 	if len(hs.be.attached) != 0 {
 		t.Fatal("attached to an ended session")
 	}
-	hasToast(t, hs.m, "Not available: the session has ended.")
+	// Its holder has stopped too, so there is no last screen to go to.
+	hasToast(t, hs.m, "docs-pass on atlas-dev ended (exit 0), and its holder has stopped.")
 }
 
 func TestDeleteConfirm(t *testing.T) {
@@ -407,7 +423,8 @@ func TestHelpComesFromTheRegistry(t *testing.T) {
 		out := plainScreen(hs.m)
 		for _, c := range commands {
 			for _, b := range c.keys {
-				if !c.hidden && c.applies(hs.m, b) && !strings.Contains(out, keyName(b.key)) {
+				// The sheet leaves out its own key: it is open already.
+				if !c.hidden && c.applies(hs.m, b) && c.name() != "view: shortcuts" && !strings.Contains(out, keyName(b.key)) {
 					t.Errorf("screen %v: the keys miss %s for %s", hs.m.screen, keyName(b.key), c.name())
 				}
 			}

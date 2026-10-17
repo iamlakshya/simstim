@@ -180,6 +180,6 @@ func (w *wizard) readyView(m *Model, cw int) []string {
 		"",
 		field("Agents", strings.Join(names, dot)),
 		field("System", strings.Join(sys, dot)),
-		field("Limits", fmtSize(i.MemoryMax)+" per session"),
+		field("Limits", fmtSize(i.MemoryMax)+" for sessions"),
 	)
 }

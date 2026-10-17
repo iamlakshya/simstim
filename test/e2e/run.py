@@ -4,7 +4,7 @@ Needs: a built client, and a host already added with `host add`.
   E2E_HOST        the host's name in the client (required)
 The product name is read from internal/brand, so nothing here spells it.
 """
-import collections, json, os, re, subprocess, sys, time
+import collections, json, os, re, signal, subprocess, sys, time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))
@@ -49,11 +49,50 @@ def host_rc(cmd, data=None):
     """Runs cmd on the host and returns its exit code; data goes to its stdin."""
     return subprocess.run(host_argv(cmd), input=data, capture_output=True).returncode
 
-def start(name, *argv):
-    t = Term([cli, "new", HOST, "--name", name, "--detach", "--"] + list(argv), env=env)
+def control_dir():
+    """The folder of the client's shared SSH connections, as internal/client works it out."""
+    cache = os.environ.get("XDG_CACHE_HOME", "")
+    d = os.path.join(cache if os.path.isabs(cache) else os.path.expanduser("~/.cache"), NAME, "cm")
+    return d if len(d) + 1 + 40 <= 103 else "/tmp/%s-%d" % (NAME, os.getuid())
+
+def drop_link():
+    """Ends the client's bridges to HOST, as a network drop would. Over SSH,
+    it then ends the shared connection under them. The client's connections
+    to other hosts stay up: only a connection to HOST has HOST's own SSH
+    config, or its container, on its command line. Returns the bridges' PIDs."""
+    machine = host_machine()
+    if machine.get("provider") == "docker":
+        mark = " -u %s %s sh -c " % (machine.get("user") or "root", machine["id"])
+    else:
+        mark = " -F %s " % WRAPPER
+    bridge = re.compile(re.escape(NAME) + r'-host"? bridge')  # the path may be quoted
+    ps = subprocess.run(["ps", "-A", "-ww", "-o", "pid=", "-o", "args="], capture_output=True, text=True).stdout
+    pids = [int(f[0]) for f in (l.split(None, 1) for l in ps.splitlines())
+            if len(f) == 2 and mark in f[1] and bridge.search(f[1])]
+    for pid in pids:
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+    if machine.get("provider") != "docker":
+        try:
+            subprocess.run(["ssh", "-F", WRAPPER, "-o", "ControlPath=" + os.path.join(control_dir(), "%C"),
+                            "-O", "exit", host_entry()["ssh"]], capture_output=True, timeout=10)
+        except subprocess.TimeoutExpired:
+            pass
+    return pids
+
+def start(name, *argv, flags=()):
+    t = Term([cli, "new", HOST, "--name", name, "--detach", *flags, "--"] + list(argv), env=env)
     t.exit_code(60); m = re.search(rb"Started [^/]+/(\w+)", t.buf)
     if not m: print(t.buf.decode(errors="replace"))
     return m.group(1).decode() if m else None
+
+# An interactive bash for the tests to type into. Its HISTFILE is empty, so
+# it adds nothing to the host user's history: bash saves history only to a
+# named HISTFILE. `bash +o history -i` would not do, as bash before 5.1
+# turns history back on for an interactive shell.
+BASH_I = ("/usr/bin/env", "HISTFILE=", "/bin/bash", "--norc", "-i")
 
 created = []
 
@@ -89,6 +128,13 @@ t = Term([cli, "attach", HOST + "/" + sid], env=env)
 # when it arrives in the screen snapshot, which drops trailing spaces.
 if not ok(t.wait_for(rb"\$( |\x1b)", 30), "attach shows the shell prompt"):
     print("  the screen ended with: %r" % t.buf[-300:])
+# This is the host user's own login shell, so the first line turns its
+# history off. bash and zsh save history at exit only to $HISTFILE. bash
+# also stops and clears its list, as with no HISTFILE a PROMPT_COMMAND that
+# runs `history -a` writes to ~/.history. Other shells fail those quietly.
+# A line that starts with a space stays out of history where the rc says so.
+# MARK has its own line, as dash drops the rest of a line after a set error.
+t.send(b" unset HISTFILE; { set +o history; history -c; } 2>/dev/null\r")
 t.send(b"echo MARK-$((40+2))\r")
 ok(t.wait_for(rb"MARK-42", 10), "typed command runs on the host and its output comes back")
 # 3. Detach with Ctrl+\ (legacy byte), wait for the double-tap window.
@@ -120,9 +166,9 @@ ok(code == 0, "single Ctrl+\\ then detaches")
 sid = start("e2e-counter", "/bin/bash", "-c", "sleep 3; for i in $(seq 1 400); do echo N$i; sleep 0.05; done; sleep 600")
 t = Term([cli, "attach", HOST + "/" + sid], env=env)
 ok(t.wait_for(rb"N20\r", 30), "counter running")
-# Kill the client's bridge ssh (as a network drop would), and the shared master.
-subprocess.run(["pkill", "-f", NAME + "-host\"? bridge"], check=False)  # the path may be quoted
-subprocess.run(["pkill", "-f", "ControlPath=.*" + NAME + "/cm"], check=False)
+# Kill the client's bridge to the host (as a network drop would), and the shared master.
+pids = drop_link()
+ok(pids, "the client's bridge to the test host was found and ended (PIDs %s)" % pids)
 t0 = time.time()
 ok(t.wait_for(rb"N400\r", 60), "client reconnected by itself and kept receiving (%.1fs)" % (time.time() - t0))
 nums = [int(x) for x in re.findall(rb"N(\d+)\r", t.buf)]
@@ -159,10 +205,60 @@ ok(t.wait_for(rb" END", 30), "escape test output arrived")
 ok(seq in t.buf, "OSC 8, truecolor, styled underline, OSC 777, OSC 52 and sync output are byte-identical")
 t.send(b"\x1c"); t.exit_code(10)
 
+# C2. With --debug and every category on, the same bytes pass unchanged
+#     (decision 0025). debug start, save, profile and stop work on the
+#     running session, and no debug file holds the session's bytes.
+dbg_file = os.path.join(HERE, ".e2e-debug.jsonl")
+# The debug folders on each side, to remove afterwards what this check made.
+laptop_dbg = os.path.join(os.environ.get("XDG_STATE_HOME", "") if os.path.isabs(os.environ.get("XDG_STATE_HOME", ""))
+                          else os.path.expanduser("~/.local/state"), NAME, "debug")
+host_dbg_dir = ".local/state/%s/debug" % NAME
+def listing(path):
+    return set(os.listdir(path)) if os.path.isdir(path) else set()
+def host_listing():
+    return set(host_ssh("ls -1 %s 2>/dev/null; true" % host_dbg_dir).stdout.decode().split())
+laptop_before, host_before = listing(laptop_dbg), host_listing()
+outside = os.path.join(laptop_dbg, "outside.txt")
+outside_before = open(outside).read() if os.path.exists(outside) else None
+sid3d = start("e2e-bytes-debug", "/bin/bash", "-c", "sleep 3; cat ~/e2e-seq.bin; sleep 600")
+created.append(sid3d)
+t = Term([cli, "--debug", "--debug-file", dbg_file, "attach", HOST + "/" + sid3d], env=env)
+ok(t.wait_for(rb" END", 30), "escape test output arrived with debug on")
+ok(seq in t.buf, "with every debug category on, the attached bytes are byte-identical")
+t.send(b"\x1c"); t.exit_code(10)
+for args, what in ((["start", "--for", "5m"], "debug start"), (["save"], "debug save"),
+                   (["profile", "--for", "2s"], "debug profile"), (["stop"], "debug stop")):
+    argv = [cli, "debug", args[0], HOST + "/" + sid3d] + (["cpu"] if args[0] == "profile" else []) + args[1:]
+    r = subprocess.run(argv, capture_output=True, text=True)
+    ok(r.returncode == 0, "%s works on a running session (%s)" % (what, (r.stdout + r.stderr).strip()[:120]))
+dbg = open(dbg_file, "rb").read() if os.path.exists(dbg_file) else b""
+for p in (dbg_file, dbg_file + ".1"):
+    if os.path.exists(p):
+        os.remove(p)
+ok(b'"ev":"key"' in dbg or b'"ev":"ping"' in dbg, "the client's debug file has records")
+ok(b"truecolor" not in dbg and b"aGVsbG8" not in dbg, "the client's debug file holds none of the session's bytes")
+host_dbg = host_ssh("cat ~/.local/state/%s/sessions/%s/debug.jsonl" % (NAME, sid3d)).stdout
+ok(b'"ev":"start"' in host_dbg and b"truecolor" not in host_dbg, "the host's debug file has records, and none of the session's bytes")
+# Remove what the check made: the client's profiles and its list of files
+# outside the folder on the laptop, and the bridges' files on the host. The
+# session's own files go with the session.
+for f in listing(laptop_dbg) - laptop_before - {"outside.txt"}:
+    os.remove(os.path.join(laptop_dbg, f))
+if outside_before is None:
+    if os.path.exists(outside):
+        os.remove(outside)
+else:
+    open(outside, "w").write(outside_before)
+if not laptop_before and os.path.isdir(laptop_dbg) and not os.listdir(laptop_dbg):
+    os.rmdir(laptop_dbg)
+for f in host_listing() - host_before:
+    if re.fullmatch(r"bridge-[0-9][a-z0-9.-]*", f):
+        host_rc("rm -f %s/%s" % (host_dbg_dir, f))
+
 # D. A dropped local file is uploaded and its remote path pasted.
 local = os.path.join(HERE, ".drop-test.txt")
 open(local, "w").write("dropped file content\n")
-sid4 = start("e2e-drop", "/bin/bash", "--norc", "-i")
+sid4 = start("e2e-drop", *BASH_I)
 t = Term([cli, "attach", HOST + "/" + sid4], env=env)
 time.sleep(2); t.read(1)
 t.send(b"bind 'set enable-bracketed-paste on' 2>/dev/null; printf '\\033[?2004h'; read -r P; cat $P\r"); time.sleep(1)
@@ -178,33 +274,96 @@ time.sleep(1)
 ls = subprocess.run([cli, "ls", "--json"], capture_output=True, text=True).stdout
 ok('"id": "%s"' % sid4 in ls and '"alive": true' in ls, "session survives a killed client")
 
-# F. Memory cap: a hog is OOM-killed and marked; another session is unaffected.
+# F. Memory cap: a hog that the agent started is OOM-killed and the session
+#    marked, while the agent runs on. Another session is unaffected. Then a
+#    hog that is the agent itself ends its session out of memory.
 #    A container has no systemd, so no memory caps: there the hog would only
 #    fill the container, and the check is skipped.
+def session_rows():
+    ls = subprocess.run([cli, "ls", "--json"], capture_output=True, text=True).stdout
+    return {s["id"]: s for h in json.loads(ls) for s in (h["sessions"] or [])}
+
 if host_machine().get("provider") == "docker":
     print("SKIP memory cap: a container has no systemd user manager, so sessions have no memory caps")
     created += [sid, sid2, sid3, sid4]
 else:
-    sid5 = start("e2e-oom", "/bin/bash", "-c", "head -c 3G /dev/zero | tail > /dev/null; sleep 600")
-    time.sleep(40)
-    ls = subprocess.run([cli, "ls", "--json"], capture_output=True, text=True).stdout
-    rows = {s["id"]: s for h in json.loads(ls) for s in (h["sessions"] or [])}
-    r5 = rows.get(sid5, {})
+    # A cap of its own, the smallest there is, makes the check quick, and
+    # keeps the hog far below the host's memory, whatever its size.
+    sid5 = start("e2e-oom", "/bin/bash", "-c", "head -c 1G /dev/zero | tail > /dev/null; sleep 600", flags=("--memory-max", "256M"))
+    deadline = time.time() + 40
+    while True:
+        rows = session_rows()
+        r5 = rows.get(sid5, {})
+        if r5.get("oom_killed") or time.time() > deadline:
+            break
+        time.sleep(2)
     ok(rows.get(sid4, {}).get("alive"), "other sessions keep running")
     print("oom session:", {k: r5.get(k) for k in ("state", "reason", "memory_current", "memory_max")})
+    ok(r5.get("memory_max") == 256 << 20, "the session got the cap it asked for (%s)" % r5.get("memory_max"))
     ok(r5.get("oom_killed") is True, "the over-the-cap process was stopped and the session marked (reason: %s)" % r5.get("reason"))
+    ok(r5.get("state") in ("working", "idle"), "the agent runs on after its child's kill, and does not need input (state: %s)" % r5.get("state"))
+    # All sessions together have a limit too: the host's memory minus a reserve.
+    limit = host_ssh("systemctl --user show %s.slice -p MemoryMax --value" % NAME).stdout.decode().strip()
+    ok(limit.isdigit() and int(limit) > 256 << 20, "the sessions' slice has a memory limit (%s)" % limit)
     created += [sid, sid2, sid3, sid4, sid5]
+    # tail keeps its last line, and /dev/zero has no newline: it grows until the cap stops it.
+    # Without a cap it would fill the host's memory, so it runs only under one.
+    if not r5.get("memory_max"):
+        print("SKIP memory cap on the agent itself: the session has no memory cap")
+    else:
+        sid_oom = start("e2e-oom-agent", "/bin/sh", "-c", "exec tail /dev/zero", flags=("--memory-max", "256M"))
+        created.append(sid_oom)
+        r_oom, end = {}, time.time() + 60
+        while time.time() < end and r_oom.get("state") not in ("exited", "errored"):
+            time.sleep(2)
+            r_oom = session_rows().get(sid_oom, {})
+        print("oom agent session:", {k: r_oom.get(k) for k in ("state", "reason", "signal", "oom_killed")})
+        ok(r_oom.get("oom_killed") is True and r_oom.get("state") == "errored" and r_oom.get("reason") == "oom",
+           "the cap stopped the agent itself, and its session ended out of memory (state: %s, reason: %s)" % (r_oom.get("state"), r_oom.get("reason")))
+
+        # After the cap stops the agent, resume starts it again in the same
+        # session, with a bigger cap. Its first run leaves a process behind,
+        # and fills its cap. The mark makes the second run quiet. --agent ""
+        # keeps the command: the shell agent would continue with a login shell.
+        # setsid keeps the process that the agent leaves out of the terminal's
+        # session, so the end of the agent sends it no SIGHUP.
+        mark = "$HOME/.cache/e2e-resume-%d" % os.getpid()
+        sid_res = start("e2e-resume", "/bin/sh", "-c",
+                        'if [ -e "%s" ]; then exec sleep 600; fi; mkdir -p "$HOME/.cache"; touch "%s"; setsid sleep 913 & exec tail /dev/zero' % (mark, mark),
+                        flags=("--agent", "", "--memory-max", "256M"))
+        created.append(sid_res)
+        r_res, end = {}, time.time() + 60
+        while time.time() < end and r_res.get("state") not in ("exited", "errored"):
+            time.sleep(2)
+            r_res = session_rows().get(sid_res, {})
+        ok(r_res.get("oom_killed") is True, "the cap stopped the agent that resume brings back (state: %s)" % r_res.get("state"))
+        ok(host_rc("pgrep -u \"$(id -u)\" -f 'sleep 91[3]'") == 0, "the stopped agent left a process in its session")
+        t = Term([cli, "resume", HOST + "/" + sid_res, "--memory-max", "300M", "--detach"], env=env)
+        code = t.exit_code(90)
+        ok(code == 0 and b"Resumed" in t.buf, "resume starts the agent again (exit %s): %s" % (code, t.buf.decode(errors="replace").strip()))
+        r_res = session_rows().get(sid_res, {})
+        print("resumed session:", {k: r_res.get(k) for k in ("state", "alive", "memory_max", "oom_killed")})
+        ok(r_res.get("alive") and r_res.get("state") not in ("exited", "errored", "lost") and not r_res.get("oom_killed"),
+           "the resumed agent runs, in the same session (state: %s)" % r_res.get("state"))
+        ok(r_res.get("memory_max") == 300 << 20, "the resumed session got the bigger cap (%s)" % r_res.get("memory_max"))
+        unit = r_res.get("unit") or ""
+        unit_max = host_ssh("systemctl --user show %s -p MemoryMax --value" % unit).stdout.decode().strip() if unit else ""
+        ok(unit_max == str(300 << 20), "the new unit %s has the bigger cap (MemoryMax=%s)" % (unit, unit_max))
+        ok(host_rc("pgrep -u \"$(id -u)\" -f 'sleep 91[3]'") == 1, "resume stopped what the old agent left in its session")
+        t = Term([cli, "resume", HOST + "/" + sid_res, "--detach"], env=env)
+        code = t.exit_code(60)
+        ok(code not in (0, None) and b"still runs" in t.buf, "a resume of an agent that runs is refused (exit %s)" % code)
+        host_rc('rm -f "%s"' % mark)
 
 # G. Laptop sleep: freeze the client and cut its network path; on wake it must
 #    be back to live output within 5 s, with what it missed replayed.
-import signal
 sid6 = start("e2e-wake", "/bin/bash", "-c", "while :; do date +T%s.%N; sleep 0.1; done")
 created.append(sid6)
 t = Term([cli, "attach", HOST + "/" + sid6], env=env)
 t.wait_for(rb"T\d+", 20); time.sleep(1)
 os.kill(t.pid, signal.SIGSTOP)
-subprocess.run(["pkill", "-f", NAME + "-host\"? bridge"], check=False)  # the path may be quoted
-subprocess.run(["pkill", "-f", "ControlPath=.*" + NAME + "/cm"], check=False)
+pids = drop_link()
+ok(pids, "sleep: the client's bridge to the test host was found and ended (PIDs %s)" % pids)
 time.sleep(15)
 t.buf = b""
 woke = time.time()
@@ -236,8 +395,25 @@ t.send(b"\x1c"); t.exit_code(10)
 sid8 = start("e2e-vtcrash", "/bin/bash", "-c", 'printf "\\033[>1u"; i=0; while :; do i=$((i+1)); printf "TICK-%d\\n" $i; sleep 0.2; done')
 created.append(sid8)
 time.sleep(3)
-# Through /proc, not pkill: a slim container image has no procps.
-host_ssh("for p in /proc/[0-9]*; do [ \"$(cat $p/comm 2>/dev/null)\" = '%s' ] && kill -9 \"${p#/proc/}\"; done; sleep 3" % (NAME + "-vt")[:15])
+# Kill this session's shadow terminal and nothing else: the host may run
+# sessions that are not the suite's. The holder runs as `<helper> holder <id>`,
+# and the shadow terminal is its child. With no holder, nothing is killed and
+# the check fails. Through /proc, not pkill: a slim container image has no procps.
+VT_KILL = r"""sid=%s vt=%s holder=
+for p in /proc/[0-9]*; do
+  [ "$(tr '\0' '\n' 2>/dev/null < "$p/cmdline" | tail -n 2 | tr '\n' ' ')" = "holder $sid " ] && holder=${p#/proc/}
+done
+if [ -z "$holder" ]; then echo "found no holder of session $sid"; else
+  for p in /proc/[0-9]*; do
+    [ "$(cat "$p/comm" 2>/dev/null)" = "$vt" ] || continue
+    [ "$(sed -n 's/^PPid:[[:space:]]*//p' "$p/status" 2>/dev/null)" = "$holder" ] || continue
+    kill -9 "${p#/proc/}" && echo "killed $vt ${p#/proc/}, the child of holder $holder"
+  done
+fi
+sleep 3"""
+out = host_ssh(VT_KILL % (sid8, (NAME + "-vt")[:15])).stdout.decode(errors="replace").strip()
+print("  " + out.replace("\n", "\n  "))
+ok("killed " in out, "shadow terminal: the session's own was found and killed")
 t = Term([cli, "attach", HOST + "/" + sid8], env=env)
 t.read(4)
 ticks = [int(x) for x in re.findall(rb"TICK-(\d+)", t.buf)]
@@ -252,7 +428,7 @@ import base64
 png = base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==")
 img = os.path.join(HERE, ".clip-test.png")
 open(img, "wb").write(png)
-sid9 = start("e2e-clip", "/bin/bash", "--norc", "-i")
+sid9 = start("e2e-clip", *BASH_I)
 created.append(sid9)
 env_clip = dict(env); env_clip[NAME.upper() + "_TEST_CLIPBOARD_IMAGE"] = img
 t = Term([cli, "attach", HOST + "/" + sid9], env=env_clip)
@@ -272,7 +448,7 @@ os.remove(img)
 
 # K. The session owns the whole terminal: its PTY is the terminal's size and
 #    follows a resize, and the client draws nothing of its own while attached.
-sid10 = start("e2e-size", "/bin/bash", "--norc", "-i")
+sid10 = start("e2e-size", *BASH_I)
 created.append(sid10)
 t = Term([cli, "attach", HOST + "/" + sid10], cols=101, rows=37, env=env)
 time.sleep(2); t.read(1)

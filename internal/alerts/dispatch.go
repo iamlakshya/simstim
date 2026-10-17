@@ -94,7 +94,7 @@ func (o *Options) sinks(set *Settings) []sink {
 const (
 	inQueue    = 64          // events waiting to be looked at
 	workQueue  = 16          // events waiting to go out
-	sessionGap = time.Minute // one event of a kind per session in this time
+	sessionGap = time.Minute // one event of a kind per session in this time, except an end
 )
 
 // Dispatcher sends one session's events to the destinations in the alerts
@@ -167,6 +167,15 @@ func (d *Dispatcher) StateChanged() { d.gen.Add(1) }
 // Typed tells the dispatcher that a person typed into the session.
 func (d *Dispatcher) Typed() { d.typed.Store(d.o.Clock.Now().UnixNano()) }
 
+// TypedAt returns when a person last typed into the session, or the zero
+// time if nobody has.
+func (d *Dispatcher) TypedAt() time.Time {
+	if n := d.typed.Load(); n != 0 {
+		return time.Unix(0, n)
+	}
+	return time.Time{}
+}
+
 // Close drops every new event, and waits up to wait for deliveries under way.
 func (d *Dispatcher) Close(wait time.Duration) {
 	if d.muted.Swap(true) {
@@ -228,33 +237,44 @@ func (d *Dispatcher) fire(ev Event, set *Settings, sinks []sink) {
 		d.skip(ev, why)
 		return
 	}
+	if why := d.queue(ev, set, sinks); why != "" {
+		d.skip(ev, why)
+	}
+}
+
+// queue applies the limits, then queues ev for delivery. It says why ev
+// did not go out, or nothing when it went out or the dispatcher is closed.
+// The session's minute for a kind starts only when an event of the kind
+// goes out, so an event that the host's limit or a full queue drops does
+// not hold back the next one. It holds d.mu throughout, so two events of
+// one kind cannot both pass the check.
+//
+// A session's end is outside the session's minute (decision 0026): the
+// minute never holds an end back, and an end does not start it. Each run
+// ends once, and restore and resume start a new run in a new holder, so
+// each end is new. The host's limit still counts an end.
+func (d *Dispatcher) queue(ev Event, set *Settings, sinks []sink) string {
 	now := d.o.Clock.Now()
 	d.mu.Lock()
-	if last, ok := d.sent[ev.Event]; ok && now.Sub(last) < sessionGap {
-		d.mu.Unlock()
-		d.skip(ev, "this session sent one "+ev.Event+" in the last minute")
-		return
+	defer d.mu.Unlock()
+	if d.closed {
+		return ""
 	}
-	d.sent[ev.Event] = now
-	d.mu.Unlock()
+	end := ev.ends()
+	if last, ok := d.sent[ev.Event]; ok && !end && now.Sub(last) < sessionGap {
+		return "this session sent one " + ev.Event + " in the last minute"
+	}
 	if !d.o.Limiter.Allow(now) {
-		d.skip(ev, fmt.Sprintf("the host sent %d alerts in the last minute", HostLimit))
-		return
+		return fmt.Sprintf("the host sent %d alerts in the last minute", HostLimit)
 	}
-	ev = prepare(ev, d.o.Host, set)
-	d.mu.Lock()
-	queued := false
-	if !d.closed {
-		select {
-		case d.work <- job{ev: ev, set: set, sinks: sinks}:
-			queued = true
-		default:
+	select {
+	case d.work <- job{ev: prepare(ev, d.o.Host, set), set: set, sinks: sinks}:
+		if !end {
+			d.sent[ev.Event] = now
 		}
-	}
-	closed := d.closed
-	d.mu.Unlock()
-	if !queued && !closed {
-		d.skip(ev, "too many alerts are waiting to go out")
+		return ""
+	default:
+		return "too many alerts are waiting to go out"
 	}
 }
 
@@ -345,7 +365,7 @@ func deliverAll(o *Options, ev Event, set *Settings, sinks []sink, all bool) []a
 			ctx, cancel := context.WithTimeout(context.Background(), deliverTimeout)
 			out, err := deliver(ctx, sinks[i], ev, o.RetryWait)
 			cancel()
-			r := &api.AlertResult{Type: dst.Type, Target: target(dst), OK: err == nil, MS: time.Since(start).Milliseconds()}
+			r := &api.AlertResult{Type: dst.Type, Target: Target(dst), OK: err == nil, MS: time.Since(start).Milliseconds()}
 			if err != nil {
 				r.Error = err.Error()
 				o.Logger.Warn("alert not delivered", "event", ev.Event, "type", r.Type, "target", r.Target, "error", r.Error)

@@ -9,13 +9,11 @@ import (
 	"fmt"
 	"net"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/iamlakshya/simstim/internal/agents"
@@ -29,6 +27,15 @@ import (
 // UserError is an error with a code and a suggested next step.
 func UserError(code, msg, hint string) *proto.Error {
 	return &proto.Error{Code: code, Message: msg, Hint: hint}
+}
+
+// questionError is a UserError that asks the user something before a start
+// can go on. Its data is the question, q. The client asks the user, and
+// starts again with the answer.
+func questionError(code, msg, hint string, q any) *proto.Error {
+	e := UserError(code, msg, hint)
+	e.Data, _ = json.Marshal(q)
+	return e
 }
 
 // NewArgs describes a session to start.
@@ -71,14 +78,18 @@ func expandHome(p string) string {
 }
 
 // New starts a session and returns its row.
-func New(a NewArgs) (*SessionInfo, error) {
+func New(a NewArgs) (_ *SessionInfo, err error) {
+	if err := checkMemoryMax(a.MemoryMax); err != nil {
+		return nil, err
+	}
 	argv, kind, agent, known, err := pickAgent(a)
 	if err != nil {
 		return nil, err
 	}
 	cwd := expandHome(a.Cwd)
-	if st, err := os.Stat(cwd); err != nil || !st.IsDir() {
-		return nil, UserError("bad_folder", fmt.Sprintf("the folder %s does not exist on this host", cwd), "Pick an existing folder.")
+	missing, err := checkFolder(cwd, a.Worktree)
+	if err != nil {
+		return nil, err
 	}
 	secrets, err := checkSecrets(a.Secrets)
 	if err != nil {
@@ -89,13 +100,27 @@ func New(a NewArgs) (*SessionInfo, error) {
 		login = os.Environ()
 	}
 	id := NewID()
-	// Find the agent before anything is made: a missing one leaves nothing
-	// behind, no worktree and no branch.
+	// Find the agent before anything is asked or made. A missing agent
+	// leaves nothing behind: no folder, no worktree and no branch.
 	inline := a.Inline && known && len(a.Argv) == 0 && agent.Inline.Has()
 	env, term := sessionEnv(a, id, login, agent, inline)
 	argv, hooks, sessionUUID := agentArgv(argv, a, agent, known, inline)
 	if _, err := lookPath(argv[0], envValue(env, "PATH")); err != nil {
 		return nil, UserError("agent_missing", argv[0]+" is not installed on this host", "Install it on the host, then try again.")
+	}
+	if len(missing) > 0 {
+		if !a.MakeFolder {
+			return nil, folderQuestion(cwd)
+		}
+		if err := makeFolders(cwd); err != nil {
+			return nil, err
+		}
+		// A start that fails after this point removes the new folders again.
+		defer func() {
+			if err != nil {
+				removeFolders(missing)
+			}
+		}()
 	}
 	var gi *GitInfo
 	if a.Worktree {
@@ -117,17 +142,14 @@ func New(a NewArgs) (*SessionInfo, error) {
 	if name == "" {
 		name = filepath.Base(cwd)
 	}
-	memMax := a.MemoryMax
-	if memMax <= 0 {
-		memMax = DefaultMemoryMax()
-	}
+	asked := max(a.MemoryMax, 0)
 	now := time.Now().UTC()
 	m := &Manifest{
 		Schema: 1, ID: id, Name: name, CreatedAt: now, HostVersion: version.Version,
 		Agent: AgentInfo{Kind: kind, Argv: argv},
 		Cwd:   cwd, Env: env,
 		Term:    TermInfo{Term: term, Cols: a.Cols, Rows: a.Rows},
-		Limits:  Limits{MemoryMax: memMax},
+		Limits:  Limits{MemoryMax: sessionMemoryMax(asked), MemoryAsked: asked},
 		Run:     Runtime{Socket: paths.Socket(id), BootID: BootID()},
 		Status:  Status{State: StateStarting, Since: now},
 		Restart: Restart{Policy: "resume", MaxAttempts: 3},
@@ -273,8 +295,17 @@ func infoFrom(m *Manifest, alive bool) SessionInfo {
 		CreatedAt: m.CreatedAt, LastActivityAt: m.LastActivityAt, LastAttachedAt: m.LastAttachedAt,
 		Alive: alive, Unit: m.Run.Unit, MemoryMax: m.Limits.MemoryMax, MemoryCurrent: memoryCurrent(m.Run.Unit),
 		HostVersion: m.HostVersion, Cols: m.Term.Cols, Rows: m.Term.Rows, MissingSecrets: m.MissingSecrets,
-		FullScreen: st.FullScreen && alive,
+		Secrets: m.Secrets, FullScreen: st.FullScreen && alive,
+		DebugUntil: debugUntil(m, alive),
 	}
+}
+
+// debugUntil is when the session's debug stops by itself, while it is on.
+func debugUntil(m *Manifest, alive bool) *time.Time {
+	if !alive || m.DebugUntil == nil || !m.DebugUntil.After(time.Now()) {
+		return nil
+	}
+	return m.DebugUntil
 }
 
 func memoryCurrent(unit string) int64 {
@@ -399,20 +430,14 @@ func deleteSession(id string, res *DeleteResult) error {
 	if _, err := os.Stat(paths.SessionDir(id)); err != nil {
 		return UserError("not_found", "no session "+id, "List sessions to find its ID.")
 	}
+	unlock, err := lockSession(id)
+	if err != nil {
+		return err
+	}
+	// The folder goes, with the lock's file in it, while the lock holds.
+	defer unlock()
 	m, _ := LoadManifest(id)
-	if alive(id) {
-		_, _ = HolderRequest(id, "kill", nil, 2*time.Second)
-		deadline := time.Now().Add(5 * time.Second)
-		for alive(id) && time.Now().Before(deadline) {
-			time.Sleep(100 * time.Millisecond)
-		}
-	}
-	if m != nil && m.Run.Unit != "" {
-		_ = exec.CommandContext(context.Background(), "systemctl", "--user", "stop", m.Run.Unit).Run()
-	} else if m != nil && m.Run.HolderPID > 0 && alive(id) {
-		_ = syscall.Kill(m.Run.HolderPID, syscall.SIGTERM)
-	}
-	os.Remove(paths.Socket(id))
+	stopHolder(id, m)
 	if m != nil {
 		res.Worktree = removeWorktree(m.Git)
 	}

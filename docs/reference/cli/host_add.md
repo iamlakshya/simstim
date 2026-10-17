@@ -22,4 +22,11 @@ Connect a host. The ssh target is a Host from your SSH config, or user@host. It 
 | `--wake` | start the host through its provider script when it does not answer |
 | `-y`, `--yes` | install the helper without asking |
 
+## Flags from the parent command
+
+| Flag | What it does |
+| --- | --- |
+| `--debug[=<categories>]` | turn on the debug mode, with every category, or with the categories listed: attach, net, memory, launcher, runtime. A list binds only in the = form, such as `--debug=net` |
+| `--debug-file <file>` | write the client's debug records to this file. On its own, it turns on every category (SIMSTIM_DEBUG_FILE does the same) |
+
 Part of [`host`](host.md): add, create, list, test and remove hosts.

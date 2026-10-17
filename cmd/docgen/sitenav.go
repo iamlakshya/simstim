@@ -50,8 +50,9 @@ func sidebar(docs string, pages map[string]string) ([]tab, error) {
 		return nil, err
 	}
 	start := append([]item{at("docs/how-to/install.md", "Install")}, tutorials.items("docs/tutorials", pages, nil)...)
-	help := []item{at("docs/how-to/troubleshoot.md", "Troubleshoot"), at("docs/faq.md", "FAQ"), at("docs/how-to/uninstall.md", "Uninstall")}
-	placed := map[string]bool{"install.md": true, "troubleshoot.md": true, "uninstall.md": true}
+	help := []item{at("docs/how-to/troubleshoot.md", "Troubleshoot"), at("docs/how-to/debug-a-session.md", "Debug a session"),
+		at("docs/faq.md", "FAQ"), at("docs/how-to/uninstall.md", "Uninstall")}
+	placed := map[string]bool{"install.md": true, "troubleshoot.md": true, "debug-a-session.md": true, "uninstall.md": true}
 	var guides []item
 	for _, sec := range howto.sections() {
 		if g := howto.items("docs/how-to", pages, func(l link) bool { return l.section == sec && !placed[l.target] }); len(g) > 0 {

@@ -1,0 +1,20 @@
+
+  ⢄⡠⠊ simstim  hosts                 3 hosts · 1 needs you
+  ────────────────────────────────────────────────────────
+
+  ▍ 1 ● atlas-dev  1 needs you          31/100ms  ⣿⣿⣿⣶⣶⣿⣿⣿
+    2 ◌ aws-gpu    offline                        ⣀⣀⣀⣀⣀⣀⣀⣀
+    3 ● gcp-dev    2 sessions            42/47ms  ⣿⣿⣿⣶⣶⣿⣿⣿
+
+    ssh atlas-dev · Debian 13 · 4 CPUs · claude, codex, o…
+
+
+
+
+
+
+
+
+  ────────────────────────────────────────────────────────
+    ❯ / search every host   n start a session
+    enter open   1–9 jump   a add host   ? keys

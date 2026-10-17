@@ -6,7 +6,7 @@ Every row has a test.
 
 | Feature | How simstim keeps it | Test |
 | --- | --- | --- |
-| Keys: kitty protocol, modifyOtherKeys, Shift+Enter, Option/Alt | Raw input bytes. The filter matches only two keys and never re-encodes. On reattach, the snapshot restores the kitty flags. | `simstim doctor keys`, run end to end |
+| Keys: kitty protocol, modifyOtherKeys, Shift+Enter, Option/Alt | Raw input bytes. The filter matches only two keys and never re-encodes. A lone Esc goes out at once. Only the start of a key sequence that a read splits waits for its end, 15 ms at most. On reattach, the snapshot restores the kitty flags. | `simstim doctor keys`, run end to end |
 | Truecolour, styled underlines | `TERM=xterm-ghostty` with its terminfo installed on the host. `COLORTERM=truecolor`. The client's `TERM_PROGRAM` is passed through. | Fixture replay |
 | Native scrollback and Cmd+F | Output lands in the local terminal's normal screen. No RIS. Replay by offset avoids duplicates. | Manual check plus fixture |
 | OSC 52 clipboard | Passed through. Clipboard reads go to the local terminal's own prompt. | Manual |

@@ -9,6 +9,7 @@ import (
 	"github.com/creack/pty"
 	"golang.org/x/sys/unix"
 
+	"github.com/iamlakshya/simstim/internal/diag"
 	"github.com/iamlakshya/simstim/internal/proto"
 	"github.com/iamlakshya/simstim/internal/version"
 )
@@ -53,6 +54,8 @@ func (h *Holder) serve(conn net.Conn) {
 			if json.Unmarshal(f.Payload, &a) == nil {
 				h.attach(c, a)
 			}
+		case proto.TTrace:
+			c.bridgeRead(f.Payload)
 		case proto.TInput:
 			h.input(c, f.Payload)
 		case proto.TResize:
@@ -76,6 +79,7 @@ func (h *Holder) serve(conn net.Conn) {
 }
 
 func (h *Holder) attach(c *hclient, a proto.Attach) {
+	h.traceAttach(c, a.Trace, a.Categories)
 	snap, snapAt := h.snapshotFor(a)
 	h.mu.Lock()
 	mode, from := "full", h.ring.Start()
@@ -93,9 +97,11 @@ func (h *Holder) attach(c *hclient, a proto.Attach) {
 	exited := h.exited
 	ended := h.ended
 	h.m.LastAttachedAt = time.Now().UTC()
+	h.noteAttach(a)
 	h.dirty = true
 	h.mu.Unlock()
 
+	h.log.Debug("attach", diag.CatKey, diag.CatAttach, "mode", mode, "from", from, "live", live, "cols", a.Cols, "rows", a.Rows)
 	if h.vt != nil {
 		h.vt.AnswerQueries(false) // a client's terminal answers from now on
 	}
@@ -181,7 +187,7 @@ func (c *hclient) writeLoop() {
 }
 
 func (h *Holder) input(c *hclient, p []byte) {
-	h.mu.Lock()
+	lt := h.lockTimed()
 	if h.exited || !c.attached {
 		h.mu.Unlock()
 		return
@@ -195,6 +201,7 @@ func (h *Holder) input(c *hclient, p []byte) {
 	if _, err := h.ptmx.Write(p); err != nil {
 		h.log.Warn("pty write failed", "err", err)
 	}
+	lt.key(c, len(p))
 }
 
 func (h *Holder) resize(c *hclient, rz proto.Resize, force bool) {
@@ -209,6 +216,7 @@ func (h *Holder) resize(c *hclient, rz proto.Resize, force bool) {
 	if !leader || exited || rz.Cols <= 0 || rz.Rows <= 0 {
 		return
 	}
+	h.log.Debug("resize", diag.CatKey, diag.CatAttach, "cols", rz.Cols, "rows", rz.Rows, "force", force)
 	_ = pty.Setsize(h.ptmx, &pty.Winsize{Cols: clamp16(rz.Cols), Rows: clamp16(rz.Rows), X: clamp16(rz.XPx), Y: clamp16(rz.YPx)})
 	h.mu.Lock()
 	h.scr.resize(rz.Cols, rz.Rows)
@@ -226,6 +234,7 @@ func (h *Holder) resize(c *hclient, rz proto.Resize, force bool) {
 }
 
 func (h *Holder) drop(c *hclient) {
+	h.traceOff(c)
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	delete(h.clients, c)

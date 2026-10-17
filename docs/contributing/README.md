@@ -5,6 +5,7 @@ How the project is built, tested, documented and released. New here? Read [CONTR
 | Page | What it covers |
 | --- | --- |
 | [Testing](testing.md) | Unit, golden, fuzz and end-to-end tests, coverage, and how to run them |
+| [Tracing typing lag](debug-trace.md) | The debug trace: turn it on, copy the host's file, and read where a key waits |
 | [How the docs work](docs.md) | How the docs are organised, generated, checked and published |
 | [Style](style.md) | Rules for code and for writing |
 | [Releasing](releasing.md) | Versions, what a release contains, and how to cut and check one |

@@ -19,6 +19,18 @@ type screenModel struct {
 	off   bool
 }
 
+// screenScrollback is how many lines the model keeps after they scroll off
+// its normal screen. Nothing reads them: the status rules read only the
+// visible screen. One line is the least that vt v0.1.0 keeps, because it
+// reads a size of 0 as its default of 10,000 lines. Those lines held 60 to
+// 70 MiB in a holder whose agent printed a long transcript, and that memory
+// counted against the session's memory cap.
+//
+// The alternate screen keeps its own scrollback of 10,000 lines, which
+// vt v0.1.0 does not let us change. A full-screen program fills it only when
+// it scrolls that screen or erases all of it.
+const screenScrollback = 1
+
 func newScreenModel(cols, rows int) *screenModel {
 	if cols <= 0 {
 		cols = 80
@@ -27,7 +39,7 @@ func newScreenModel(cols, rows int) *screenModel {
 		rows = 24
 	}
 	m := &screenModel{e: vt.NewEmulator(cols, rows)}
-	m.e.SetScrollbackSize(0)
+	m.e.SetScrollbackSize(screenScrollback)
 	// The emulator writes replies to queries into a pipe: drain and drop them.
 	go func() { _, _ = io.Copy(io.Discard, m.e) }()
 	return m

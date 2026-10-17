@@ -92,6 +92,10 @@ func (h *Holder) request(c *hclient, req proto.Request) {
 		reply(map[string]bool{"killed": true}, nil)
 		go h.stop("killed by request", false)
 	default:
+		if v, perr, ok := h.debugRequest(req); ok {
+			reply(v, perr)
+			return
+		}
 		reply(nil, &proto.Error{Code: "unknown_op", Message: "unknown request " + req.Op})
 	}
 }

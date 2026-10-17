@@ -22,6 +22,7 @@ The launcher's commands and their default keys. Every command is also in the com
 | session: preview | `space` |
 | session: rename | `r`, `f2` |
 | session: delete | `d` |
+| session: resume | `u` |
 | session: copy attach command | `y` |
 | session: next waiting | `w` |
 | host: open | `enter` |
@@ -40,5 +41,9 @@ The launcher's commands and their default keys. Every command is also in the com
 | simstim: settings | palette only |
 | simstim: about | palette only |
 | simstim: quit | `q` |
+| debug: start | palette only |
+| debug: stop | palette only |
+| debug: save | palette only |
+| debug: bundle | palette only |
 
 While you are attached to a session, only two keys are the client's: `ctrl+\` detaches, and `ctrl+v` pastes an image from the clipboard. Both are settings in [the configuration](config.md); everything else goes to the agent unchanged.

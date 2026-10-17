@@ -14,6 +14,7 @@ import (
 // keeps the time the agent worked in the current turn, for turn_done.
 type holderAlerts struct {
 	d         *alerts.Dispatcher
+	agent     string        // the state from the agent's own signals (agentState)
 	workSince time.Time     // when the current working spell began
 	worked    time.Duration // working time in this turn so far
 }
@@ -31,7 +32,7 @@ func (h *Holder) startAlerts(restored bool) {
 		Dir:    home,
 		Logger: h.log,
 	})
-	h.al.workSince = time.Now() // a session starts out working
+	h.al.agent, h.al.workSince = StateWorking, time.Now() // a session starts out working
 	kind := alerts.Started
 	if restored {
 		kind = alerts.Restored
@@ -39,10 +40,26 @@ func (h *Holder) startAlerts(restored bool) {
 	h.al.d.Notify(h.alertEvent(kind))
 }
 
-// wasRestored reports whether restore started this holder: restore labels a
-// session after the start before.
-func wasRestored(m *Manifest) bool {
-	at, err := time.Parse(time.RFC3339, m.Labels["restored_at"])
+// The labels that say why a session's agent starts again (startAgain).
+const (
+	restoredLabel = "restored_at" // restore, after a host restart
+	resumedLabel  = "resumed_at"  // the user's resume
+)
+
+// wasRestored reports whether restore started this holder, after a host
+// restart. Only then does the session send a restored alert, and start
+// without waiting for secrets that nothing can send.
+func wasRestored(m *Manifest) bool { return labelSinceStart(m, restoredLabel) }
+
+// wasResumed reports whether the user's resume started this holder. The
+// agent then starts again, as after a restore. But the session sends a
+// started alert and gets its secrets from the client, as at a new start.
+func wasResumed(m *Manifest) bool { return labelSinceStart(m, resumedLabel) }
+
+// labelSinceStart reports whether the time in the label k comes after the
+// session's last start: startAgain labels a session after the start before.
+func labelSinceStart(m *Manifest, k string) bool {
+	at, err := time.Parse(time.RFC3339, m.Labels[k])
 	return err == nil && at.After(m.Run.StartedAt)
 }
 
@@ -51,8 +68,9 @@ func (h *Holder) alertEvent(kind string) alerts.Event {
 	return alerts.Event{Event: kind, Session: alerts.Session{ID: h.id, Name: h.m.Name, Agent: h.m.Agent.Kind, Dir: h.m.Cwd}}
 }
 
-// alertState tells the dispatcher that the state changed from prev to next,
-// and raises needs_input or turn_done. The caller holds h.mu.
+// alertState tells the dispatcher that the agent's own state changed from
+// prev to next, and raises needs_input or turn_done. The memory warning does
+// not come here: it sends its own alert (alertMemory). The caller holds h.mu.
 func (h *Holder) alertState(prev, next string) {
 	a := &h.al
 	if a.d == nil {
@@ -116,7 +134,8 @@ func (h *Holder) alertOOM() {
 }
 
 // alertEnded raises exited, failed or oom when the program ends by itself.
-// The caller holds h.mu.
+// Its exit code marks the session's end, which the per-session limit never
+// holds back (decision 0026). The caller holds h.mu.
 func (h *Holder) alertEnded(ended proto.Ended) {
 	if h.al.d == nil {
 		return
