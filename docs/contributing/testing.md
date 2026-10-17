@@ -106,7 +106,7 @@ Numbers on an Apple silicon laptop, 15 October 2026, per 32 KiB of agent output:
 | Output frame write (host) | 12 µs | 2.8 GB/s |
 | Output frame through the client's attach | 63 µs | 520 MB/s |
 
-The screen model is the slowest step, and it is slower when the output scrolls. It is a Go terminal emulator used only to read the screen for status rules. Even 7.7 MB/s is far more than an agent prints. `BenchmarkScreenModelScroll` also reports the heap that the model keeps (`MiB-kept`).
+The screen model is the slowest step, and it is slower when the output scrolls. It is a Go terminal emulator used only to read the screen for status rules. Even 7.7 MB/s is far more than an agent prints. `BenchmarkScreenModelScroll`, and `BenchmarkScreenModelAltScroll` on the alternate screen, also report the heap that the model keeps (`MiB-kept`). `BenchmarkScreenModelSwitch` feeds a program that switches to the alternate screen and back for each character.
 
 ## Vulnerabilities and dead code
 
