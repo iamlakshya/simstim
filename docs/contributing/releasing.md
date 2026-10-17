@@ -49,7 +49,51 @@ The builds are reproducible: `just repro` builds every binary twice from empty c
 
 ## Checking a release
 
-Anyone can check a release three ways: the SSH signature above, the cosign bundle (`cosign verify-blob --bundle checksums.txt.sigstore.json --certificate-identity-regexp 'https://github.com/.*/.github/workflows/release.yml@refs/tags/v.*' --certificate-oidc-issuer https://token.actions.githubusercontent.com checksums.txt`), or the GitHub attestation (`gh attestation verify <archive> --repo <owner>/<repo>`).
+Anyone can check a release with the SSH signature above, the cosign bundle, or the GitHub attestation. Use files from the same selected release throughout.
+
+### Cosign bundle
+
+Install [cosign](https://docs.sigstore.dev/cosign/system_config/installation/) and the GitHub CLI (`gh`). In a fresh directory, select a tag and archive from this repository's release assets. This example selects the Linux amd64 client for v0.1.0:
+
+```sh
+tag='v0.1.0'
+archive='simstim_0.1.0_linux_amd64.tar.gz'
+gh release download "$tag" --repo iamlakshya/simstim \
+  --pattern "$archive" \
+  --pattern checksums.txt \
+  --pattern checksums.txt.sigstore.json
+
+cosign verify-blob checksums.txt \
+  --bundle checksums.txt.sigstore.json \
+  --certificate-identity "https://github.com/iamlakshya/simstim/.github/workflows/release.yml@refs/tags/$tag" \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+```
+
+Change `tag` to the exact release tag, including `v`, and `archive` to that release's exact asset name for your OS and architecture. Keep `iamlakshya/simstim` and `.github/workflows/release.yml` unchanged in both the download and expected identity. Do not copy the expected identity from an untrusted bundle or replace it with a wildcard: that could accept another repository's signature.
+
+The exact identity binds the signer to this repository, this workflow and the selected tag. The [Sigstore CI quickstart](https://docs.sigstore.dev/quickstart/quickstart-ci/#verifying-a-blob) documents the GitHub Actions workflow identity and issuer; [cosign verification](https://docs.sigstore.dev/cosign/verifying/verify/) documents verifying a blob with a bundle and expected identity. Here the workflow runs on a tag, so its identity ends in `@refs/tags/` followed by that tag, not a branch reference.
+
+Only after cosign succeeds, check the selected archive against the signed checksums. On Linux:
+
+```sh
+awk -v file="$archive" '$2 == file' checksums.txt | sha256sum -c -
+```
+
+On macOS:
+
+```sh
+awk -v file="$archive" '$2 == file' checksums.txt | shasum -a 256 -c -
+```
+
+Require an `OK` result for the selected archive before using it. A valid signature on the checksums alone does not check the archive's bytes.
+
+### GitHub attestation
+
+Use an up-to-date [GitHub CLI](https://cli.github.com/manual/gh_attestation_verify) and an authenticated session (`gh auth login`). If `gh attestation --help` is not available, update the CLI first. With the selected archive downloaded and `archive` set as above:
+
+```sh
+gh attestation verify "$archive" --repo iamlakshya/simstim
+```
 
 ## Why one action is pinned by tag
 
