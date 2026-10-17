@@ -4,6 +4,10 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-10-17
+
+A full-screen agent, such as Claude Code in its fullscreen mode, comes back whole when you attach again, and its holder keeps far less memory. A session started with a command of its own comes back with that command after a restore or a resume. `host doctor` checks that the host has the memory that each agent asks for.
+
 ### Added
 
 - `host doctor` checks that the host has the memory that each installed agent asks for. The agent table now holds the memory that an agent's own docs ask a machine to have: 4 GB for Claude Code and for Codex. A host with at least that much passes, such as a VM sold as 4 GB. A host with less gets a warning with a hint. Each line also shows the cap that a session may use. The doctor's "memory for sessions" line also shows the host's swap, and says that swap gives sessions no room ([memory](docs/how-to/memory.md#check-that-the-host-fits-the-agent)). An older host helper shows neither.
