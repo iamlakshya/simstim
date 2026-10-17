@@ -4,6 +4,10 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ## [Unreleased]
 
+### Changed
+
+- The README starts with installation and a complete first-session path, then groups features, trust and replay limits, agent support, daily tasks and contribution links. It uses the Mermaid architecture diagram, still screenshots and separate recording links, with secondary screens collapsed.
+
 ### Fixed
 
 - The security, architecture and restore guides now describe the shipped trust boundary, multi-client input, bounded replay and reboot behaviour. They no longer promise an untrusted-host filter, cached client replies, live holder upgrades or a screen saved across reboot. An accessible Mermaid architecture diagram replaces the introductory text drawing. The site now treats Markdown images as public assets rather than source imports, so the diagram builds under both root and versioned paths.

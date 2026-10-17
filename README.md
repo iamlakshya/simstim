@@ -1,139 +1,181 @@
 # simstim
 
-**Your coding agents, on any host, as if they ran on your laptop.**
+**Your coding agents, on your hosts, in your own terminal.**
 
-simstim runs Claude Code, Codex, opencode, Antigravity CLI or any other terminal program in a session on a host you own: a VPS, a cloud VM or a homelab machine. Close the laptop, change networks, switch devices: the session keeps running. Come back, and you flip straight back in. Your terminal draws the agent's real screen, byte for byte, so keys, colours, scrollback, clipboard and notifications work as they do locally.
+Run Claude Code, Codex, opencode or any terminal program on a Linux host you own. Detach, close your laptop, or change networks without stopping the session. Come back to the agent's real terminal output, not a web UI or a re-rendered pane.
 
-![The launcher: the hosts, one host's sessions, a peek at a session, search across hosts, and the quick-start line](docs/images/launcher.svg)
+[Get started](docs/tutorials/getting-started.md) · [Documentation](https://simstim.astrel.sh) · [Releases](https://github.com/iamlakshya/simstim/releases) · [Get help](SUPPORT.md) · [Contribute](CONTRIBUTING.md)
 
-**Docs:** [simstim.astrel.sh](https://simstim.astrel.sh)
-
+[![CI](https://github.com/iamlakshya/simstim/actions/workflows/ci.yml/badge.svg)](https://github.com/iamlakshya/simstim/actions/workflows/ci.yml)
 [![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/iamlakshya/simstim/badge)](https://scorecard.dev/viewer/?uri=github.com/iamlakshya/simstim)
 
-> **Status:** early. The latest release, 0.1.2, came out on 17 October 2026. Every feature passes 116 end-to-end checks on a Linux test host, and sessions have survived real reboots there. Before 1.0, a minor version may still break the CLI or the config ([versions](docs/contributing/releasing.md#versioning)).
+> **Early release.** Before 1.0, minor versions may change the CLI, configuration or protocol. Read the [changelog](CHANGELOG.md) and [version policy](docs/contributing/releasing.md#versioning) before upgrading. See [testing](docs/contributing/testing.md) for the checks and their limits.
 
-## Why
+## Install
 
-- **Any agent.** Agents are rows in a table, not code paths.
-- **Any host you can reach with `ssh`.** simstim uses your own OpenSSH and your `~/.ssh/config`, so ProxyJump, Tailscale, GCP IAP and AWS SSM all work. Nothing new listens on the host, and there is no relay or cloud account.
-- **The real thing, byte for byte.** No re-rendering and no multiplexer in the way. The kitty keyboard protocol, truecolour, OSC 8 links, OSC 52 clipboard and desktop notifications pass straight through. Native scrollback and search keep working.
-- **Survives sleep.** The client reconnects by itself, and replays exactly the output you missed.
-- **Paste screenshots.** Ctrl+V with an image on your laptop's clipboard uploads it and pastes the remote path into the agent. Dropped files work the same way.
-- **Knows what each agent is doing.** Sessions show working, needs input, idle or exited, from the agents' own hooks and screen rules kept as data. You get a desktop notification when another session needs you.
-- **A worktree per task.** `new --worktree` gives a session its own git branch and folder, and delete keeps it if it has work.
-- **Comes back after a reboot.** A boot-time unit restarts each agent with its own resume command.
+Release binaries support **macOS and Linux, on amd64 and arm64**. You need OpenSSH and curl. Agents run on a **Linux host**: an existing SSH server, a local Lima VM, a Docker container for testing, or an E2B sandbox. Agent accounts and provider charges are your own.
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/iamlakshya/simstim/main/install.sh | sh
+export PATH="$HOME/.local/bin:$PATH"
+simstim version
+```
+
+The installer verifies the release's SSH signature and SHA-256 checksum, then puts the client in `~/.local/bin`. Prefer to inspect the script first? [Read the installer](install.sh), or download an archive from [Releases](https://github.com/iamlakshya/simstim/releases) and [verify it by hand](docs/contributing/releasing.md#checking-a-release).
+
+With Go installed, you can instead run:
+
+```sh
+go install github.com/iamlakshya/simstim@latest
+```
+
+The Go client downloads and verifies its matching host helpers on first connection. See [installation, updates and mirrors](docs/how-to/install.md). The Homebrew tap is not published yet.
+
+## Your first session
+
+Try the launcher without a host or network connection:
+
+```sh
+simstim demo
+```
+
+Then run the guided setup:
+
+```sh
+simstim setup
+```
+
+It connects a host or creates one with a provider, asks before installing the host helper, and offers the agents' official installers and login flows. You choose where the agents run; simstim has no account or relay service.
+
+For an existing SSH host, here is the manual route. Replace `my-vps` with an alias from your `~/.ssh/config`:
+
+```sh
+simstim host add my-vps
+simstim new my-vps --name first
+```
+
+This opens a persistent shell on the host. **Press `Ctrl+\` to detach**, then reconnect to the same session:
+
+```sh
+simstim attach my-vps/first
+```
+
+To run an installed agent instead:
+
+```sh
+simstim new my-vps --agent claude --name coding
+```
+
+Run `simstim` with no arguments to browse hosts and sessions. **Enter** opens the selected row, **`n`** starts a session, **`/`** searches across hosts, and **`?`** shows the keys. While attached, press the detach key twice to send it to the agent. **`Ctrl+V`** uploads an image from your clipboard; without an image, the key passes through.
+
+The [getting-started tutorial](docs/tutorials/getting-started.md) covers setup, the first agent, reattachment and cleanup. [Your first cloud host](docs/tutorials/first-cloud-host.md) starts with renting a server.
+
+## What you get
+
+| Capability | How it works |
+| --- | --- |
+| **The agent's real terminal** | Live output passes through unchanged: kitty keyboard sequences, truecolour, links, clipboard operations and notifications. No panes, prefix layer or replacement agent UI. |
+| **Sessions that outlive the connection** | A host-side holder owns each agent's terminal. The client reconnects after a dropped link and catches up by byte offset when the retained output allows it. |
+| **Your hosts and SSH configuration** | Use OpenSSH with ProxyJump, Tailscale, IAP or SSM. Created Docker and E2B hosts use their provider's exec transport. No new network listener or telemetry. |
+| **Image paste and file drops** | Clipboard images and dropped local files upload to the session; the agent receives their remote paths. |
+| **A worktree per task** | `new --worktree` creates a separate branch and folder. Removing a session keeps a worktree that has changes or new commits. |
+| **Status and alerts** | Sessions report working, needs input, idle or ended. Optional host-side alerts go to your own command, ntfy topic or webhook, even with the laptop shut. |
+| **Recovery and resource limits** | With systemd, session services have memory caps and can resume eligible conversations after a host reboot. |
+
+### Know the limits
+
+- **Trust the host.** Live escape sequences are not sanitised. Clipboard and link behaviour depends on your terminal's policy. There is no untrusted-host filter or read-only attach mode. See the [security model](docs/explanation/security.md).
+- **Replay is bounded.** Each holder keeps 8 MiB of raw output. Outside that window, the shadow terminal restores its screen and retained scrollback, not an unlimited transcript. Kitty graphics and sixel images are not restored. See the [fidelity contract](docs/explanation/fidelity.md).
+- **Scrollback depends on the agent.** A full-screen agent uses its own alternate screen. Use `new --inline` where the agent supports it to keep your terminal's native scrollback and search.
+- **A reboot ends running processes.** Restore starts the agent again with its resume command where possible; it does not preserve the turn that was running. Sessions started with secrets need those secrets again. See [restore and resume](docs/how-to/restore-after-reboot.md).
+- **Memory caps need systemd.** Without a systemd user manager, the holder runs detached but has no systemd memory cap. Docker support is experimental. Multiple attached terminals can answer the same query; multi-device attach is not a read-only sharing feature.
 
 ## How it works
 
-```text
- laptop                                   host
- ┌──────────────────────┐  your ssh   ┌───────────────────────────────────────────┐
- │ simstim (client)     │ ──────────▶ │ simstim-host bridge                       │
- │  screens, attach,    │             │  ├─ holder ── PTY ── claude   (8 MiB ring) │
- │  reconnect, paste    │             │  ├─ holder ── PTY ── codex                 │
- └──────────────────────┘             │  └─ systemd user service per session      │
-                                      └───────────────────────────────────────────┘
-```
+![The local client connects over SSH or provider exec to a bridge on the Linux host. A persistent holder owns the agent's PTY, output ring and shadow terminal independently of the connection.](docs/images/architecture.svg)
 
-Read [the architecture](docs/explanation/architecture.md) for the details.
+The bridge lives for the connection; the holder lives for the session. While attached, the local terminal renders the agent's live bytes. On a fresh attach, a separate Ghostty-based shadow terminal can reconstruct the screen. It does not re-render live output.
+
+[How it works, in plain words](docs/explanation/how-it-works.md) · [Architecture and protocol](docs/explanation/architecture.md) · [Full-size diagram](docs/images/architecture.svg) · [Editable Mermaid source](docs/images/architecture.mmd)
 
 ## Agents
 
-Any program that runs in a terminal runs in a session, unmodified: you log in through the agent's own flow, inside the session. Some agents get more:
+Any terminal program can run unmodified in a session. The built-in [agent table](docs/reference/agents.md) adds launch and resume commands, setup instructions, hooks and screen rules:
 
-| Support | Agents | What it means |
+| Support | Agents | Promise |
 | --- | --- | --- |
-| First-class | Claude Code, Codex | Tested end to end on every release. Status comes from the agent's own hooks, sessions resume after a host reboot, and `agents install` sets them up. |
-| Supported | opencode, Antigravity CLI, a shell | In the agent table and tested when the test host has them. Status comes from screen rules. |
-| Best effort | Gemini CLI, Amp, Cursor CLI, Aider, Goose | In the agent table; contributors keep them working. |
+| First-class | Claude Code, Codex | Tested end to end on releases, with status hooks, conversation resume and installation support. |
+| Supported | opencode, Antigravity CLI, Shell | In the table; tested when available on the test host. Status uses the signals and rules available for that agent. |
+| Best effort | Gemini CLI, Amp, Cursor CLI, Aider, Goose | In the table; contributors keep them working. |
 
-The table lives in `internal/agents`; adding an agent is one row.
+Agent authentication stays with the agent on the host. simstim does not provide model access or bypass agent permissions. [Install and log in to agents](docs/how-to/install-agents.md).
 
-## Build from source
+## Daily use
 
-You need Go 1.26 and [just](https://github.com/casey/just). [Zig 0.16](https://ziglang.org/download/) is optional: it builds the shadow terminal that redraws a session's screen for a new client (without it, new clients get the raw history).
-
-```sh
-just build        # builds the host helpers, then the client, into ./bin
-./bin/simstim --help
-```
-
-## Quick start
-
-```sh
-simstim setup                                    # guided: a host, its agents and their logins, step by step
-simstim host add my-vps                          # or by hand: a Host from ~/.ssh/config: checks it, installs the helper
-simstim                                          # the launcher: Enter on a host, then Enter on a session; n to start one
-simstim new my-vps --agent claude --dir ~/src/app --worktree
-simstim attach my-vps/app                        # attach from a script or a terminal keybinding
-```
-
-While attached, the agent owns your terminal. **Ctrl+\\** detaches (press it twice to send it to the agent). **Ctrl+V** with an image on the clipboard pastes it into the agent.
-
-| Command | Does |
+| Task | Start here |
 | --- | --- |
-| `setup` | The guided setup: where agents run (your SSH config, Lima, Docker, E2B, or a server you rent, step by step), the host, a checklist of agents to install, and their logins |
-| `host add/ls/rm/test/doctor/restore` | Manage hosts; `restore` starts again sessions a reboot stopped |
-| `host create lima/docker/e2b`, `host destroy` | Make a host in one step (a local Lima VM, a test container, an E2B sandbox), and delete it ([how to](docs/how-to/create-a-host.md)) |
-| `host start/stop/status/idle` | Start or stop a created host, or a cloud VM through your provider script ([examples](examples/providers)); set its idle stop |
-| `new <host> [--agent a] [--dir d] [--worktree] [--detach] [-- cmd…]` | Start a session |
-| `ls [--json]`, `attach`, `send`, `rename`, `kill` | Work with sessions |
-| `ports`, `forward` | See and forward the ports a session listens on |
-| `flip` | Quick switcher: every host's sessions, then attach |
-| `doctor keys`, `doctor terminal` | Show what your terminal sends for each key, and what it supports |
-| `config keymap` | Show the launcher's keys; rebind them under `[keymap]` in `config.toml` |
-| `demo [--empty]` | Try the launcher with sample hosts and sessions; nothing connects anywhere |
+| List sessions or attach from a script | `simstim ls --json`, `simstim attach my-vps/first` |
+| Work on a separate branch | [Worktrees](docs/how-to/worktrees.md) |
+| Bring the remote branch home | [Pull a session's branch](docs/how-to/pull.md) |
+| See or forward a development port | [Ports](docs/how-to/ports.md) |
+| Know when an agent needs you | [Alerts](docs/how-to/alerts.md) |
+| Pass secrets without storing their values | [Per-session secrets](docs/how-to/secrets.md) |
+| Diagnose a connection or terminal problem | [Troubleshooting](docs/how-to/troubleshoot.md), `simstim doctor`, `simstim host doctor my-vps` |
+| Share diagnostics for a bug report | [Debug a session](docs/how-to/debug-a-session.md) |
 
-## Screens
+### A closer look
 
-The launcher does one thing: it starts or joins a session in a few keys, then gets out of the way. It is one list in one column. Enter goes forward, Esc goes back, a number opens a row, `/` searches every host, and `n` starts a session from one line. It opens where you left off and draws at once, so `simstim` then Enter takes you back into your last session. The look is its own: a cyan accent, a live trace of each session's output, and sheets that rise from the bottom, with smooth motion in your terminal's own colours ([UX](docs/contributing/ux-spec.md)). `simstim demo` opens these screens with sample data.
+![A host's sessions show their state, agent, folder and recent activity, with the selected session's reason below](docs/images/sessions.svg)
 
-**Sessions.** Each session's state, agent, folder and a trace of its recent output. The line under the list says what the selected one is doing now, what it is waiting for, or why its agent ended.
+<details>
+<summary>More launcher screens</summary>
 
-![The sessions on one host: a cyan marker on the selected row, a braille trace of output on each row, and the question the session waits for under the list](docs/images/sessions.svg)
+**Start a session:** `n` opens one line with agent and remote-folder completion; `Ctrl+F` opens the full form.
 
-**Hosts.** Each host with its state, its sessions, how many need you, and the trace of all its output.
+![The quick-start line completes a remote folder and offers the host's installed agents](docs/images/new-session.svg)
 
-![The hosts list: three hosts, one offline, with session counts, round-trip times and traces](docs/images/hosts.svg)
+**Search all hosts:** `/` finds sessions by name, agent, folder or host.
 
-**Quick start.** `n`, then one line: `claude ~/src/app auth`. Tab completes the agent and the folder from the host; `ctrl+f` opens the full form.
+![Cross-host session search with matching text highlighted](docs/images/search.svg)
 
-![The quick-start line: the host's agents above the prompt, and a folder being completed](docs/images/new-session.svg)
+**Discover commands:** `Ctrl+O` opens the command palette.
 
-**Search every host.** `/` finds a session on any host by name, agent, folder or host.
+![The command palette lists actions and their keyboard shortcuts](docs/images/commands.svg)
 
-![Search across hosts, with the matched letters highlighted](docs/images/search.svg)
+**Attach:** the agent gets the whole terminal, without a frame or status bar.
 
-**Commands.** `ctrl+o` lists every action in plain words, with its key.
+![An attached agent fills the terminal, without a frame or status bar](docs/images/attached.svg)
 
-![The command palette, rising from the bottom over the dimmed list](docs/images/commands.svg)
+</details>
 
-**Attached.** The agent owns every row and column of your terminal. There is no frame or status bar. `ctrl+\` brings the launcher back.
+The screens use your terminal's colours. These images come from the offline demo; [the tapes and screenshot tool](docs/contributing/docs.md#images) make them reproducible. Watch the [launcher recording](docs/images/launcher.svg) or the [attach recording](docs/images/attach.svg) for the full interaction.
 
-![Joining a session: the agent fills the whole terminal, a prompt is typed, and Ctrl+\\ detaches back to the launcher](docs/images/attach.svg)
+## Documentation and help
 
-**Add a host.** The wizard offers the hosts in your `~/.ssh/config`, tests the connection, and installs the helper with your consent.
-
-![Step 1 of the add-host wizard, rising from the bottom](docs/images/add-host.svg)
-
-The images use a dark Ghostty theme and show still frames. In your terminal, the screens use your own colours, and they move. `just screenshots` makes the images again from the demo.
-
-## Docs
-
-Start with [getting started](docs/tutorials/getting-started.md): five minutes from install to an agent on your host. Then:
-
-- [How-to guides](docs/how-to/README.md): add a host, worktrees, ports, image paste, restore after a reboot, keys, troubleshooting.
-- [Reference](docs/reference/_index.md): every command and flag, the configuration, the keys and the agent table, generated from the code.
-- [Explanation](docs/explanation/design.md): why it exists, [how it works](docs/explanation/architecture.md), [the fidelity contract](docs/explanation/fidelity.md) and [the security model](docs/explanation/security.md).
-- [Roadmap](docs/roadmap.md): what comes next, scored by demand, impact and effort.
-- [Contributing](docs/contributing/README.md), [decisions](docs/contributing/decisions/README.md) and [research](docs/research/README.md).
+- **Learn:** [Getting started](docs/tutorials/getting-started.md), [how-to guides](docs/how-to/README.md), [common questions](docs/faq.md).
+- **Look up:** [commands, configuration, keys and agents](docs/reference/_index.md), generated from the code.
+- **Understand:** [design principles](docs/explanation/design.md), [comparison with other tools](docs/explanation/comparison.md), [security](docs/explanation/security.md).
+- **Get help:** [Support](SUPPORT.md) explains questions, bug reports and scope. Maintainers respond as time allows; there is no support contract.
+- **Report a vulnerability privately:** use the route in [SECURITY.md](SECURITY.md), not a public issue. Security fixes go to the latest minor release.
 
 ## Contributing
 
-Read [CONTRIBUTING.md](CONTRIBUTING.md). Contributions are under the Apache-2.0 licence. Report security issues privately, as [SECURITY.md](SECURITY.md) describes.
+Start with [CONTRIBUTING.md](CONTRIBUTING.md) for prerequisites, local setup and pull requests. On macOS or Linux, the setup installs the pinned tools and builds and tests once:
+
+```sh
+git clone https://github.com/iamlakshya/simstim
+cd simstim
+scripts/setup.sh
+export PATH="$PWD/.tools/bin:$PATH"
+just test lint
+```
+
+Useful starting points: [good first issues](https://github.com/iamlakshya/simstim/labels/good%20first%20issue), [agent support](internal/agents), [contributor docs](docs/contributing/README.md), and the [roadmap](docs/roadmap.md). Please discuss large changes before implementing them.
+
+Read the [Code of Conduct](CODE_OF_CONDUCT.md), [governance](GOVERNANCE.md) and [maintainer list](MAINTAINERS.md). Contributions use the same licence as the project; no CLA or sign-off trailer is required.
 
 ## Licence
 
-[Apache-2.0](LICENSE).
+[Apache-2.0](LICENSE). Third-party attributions are in [NOTICE](NOTICE).
 
-The name is a working name, from William Gibson's *Neuromancer*. It may change, so the code keeps it in one place ([docs/contributing/renaming.md](docs/contributing/renaming.md)).
+The working name comes from William Gibson's *Neuromancer*. The code keeps it in [one place](internal/brand), so it can change without renaming the architecture.
