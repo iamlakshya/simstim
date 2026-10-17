@@ -22,6 +22,26 @@ simstim host doctor my-server
 
 The launcher shows what a session uses under the list, such as `942 MiB of 2.9 GiB`.
 
+## Check that the host fits the agent
+
+Some agents' docs name the memory that a machine needs. Claude Code asks for "4 GB+ RAM" ([setup](https://code.claude.com/docs/en/setup#system-requirements)). Codex asks for a "4-GB minimum" ([install](https://github.com/openai/codex/blob/main/docs/install.md#system-requirements)). 4 GB is 3.7 GiB, so a VM sold as 4 GB, with about 3.8 GiB, has enough.
+
+This size is for the whole machine, not for one process. So for each installed agent with such a size, `host doctor` compares it with the host's memory. The line also shows the cap that a session may use. The "memory for sessions" line shows the host's swap. On a VM sold as 4 GB with Claude Code:
+
+```text
+  ✓ memory for sessions    sessions may use 2.8 GiB together, and 1.0 GiB is kept for the system. Swap: none, and swap would not give sessions more room
+  ✓ Claude Code memory     its docs ask for 4 GB of RAM: this host has 3.8 GiB, and a session may use 2.8 GiB
+```
+
+On a 2 GiB host, the line warns:
+
+```text
+  ✕ Claude Code memory     its docs ask for 4 GB of RAM: this host has only 2.0 GiB, and a session may use 1.4 GiB
+    Try: give the host at least 4 GB (3.7 GiB) of memory. Swap does not count, because sessions do not use it. See docs/how-to/memory.md.
+```
+
+The warning does not stop a start. The agent still runs, but normal work can bring it to the cap. To meet the agent's need, give the host more memory ([swap](#swap) says why swap does not help). An agent whose docs name no size gets no line, and neither does a host without memory caps.
+
 ## For one session
 
 <!-- test: help (starts a session) -->
@@ -90,6 +110,6 @@ When all sessions together reach the host's limit, the kernel stops the biggest 
 
 ## Swap
 
-A session's memory never goes to swap, so swap does not give sessions more room. Swap on the host still helps the system and your programs outside the sessions. To give sessions more memory, give the host more: resize the VM, then start the sessions again.
+A session's memory never goes to swap, so swap does not give sessions more room. Swap on the host still helps the system and your programs outside the sessions. `host doctor` shows the host's swap, and says so. To give sessions more memory, give the host more: resize the VM, then start the sessions again.
 
 Hosts without a systemd user manager, such as a [Docker container](create-a-host.md), run sessions without a cap. So do hosts where systemd cannot cap memory, such as hosts with cgroup v1. The "memory caps" line of `host doctor` says so.

@@ -75,6 +75,7 @@ func Doctor() HostInfo {
 			Detail: map[bool]string{true: "cgroup v2 memory controller is delegated", false: "the memory controller is not delegated to the user manager"}[mem]})
 		if mem {
 			info.Checks = append(info.Checks, sessionsMemoryCheck())
+			info.Checks = append(info.Checks, AgentMemoryChecks(info.Agents, info.MemTotal, info.MemoryMax)...)
 		}
 	}
 	gt := HasTerminfo("xterm-ghostty")

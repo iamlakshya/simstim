@@ -3,6 +3,7 @@ package cli
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/iamlakshya/simstim/internal/api"
@@ -82,4 +83,25 @@ func newSessionArgs(t *testing.T, flags ...string) string {
 		t.Fatalf("%q started nothing", args)
 	}
 	return m[1]
+}
+
+// `host doctor` prints the host's line about an agent that asks for more
+// memory than the host has, with its hint, and a line that fits without one.
+func TestHostDoctorPrintsAgentMemory(t *testing.T) {
+	installed := map[string]string{"claude": "/home/dev/.local/bin/claude", "codex": "/home/dev/.local/bin/codex"}
+	var b strings.Builder
+	printChecks(&b, host.AgentMemoryChecks(installed, 2<<30, 1436<<20)) // a 2 GiB host
+	hint := "    Try: give the host at least 4 GB (3.7 GiB) of memory. Swap does not count, because sessions do not use it. See docs/how-to/memory.md.\n"
+	want := "  ✕ Claude Code memory     its docs ask for 4 GB of RAM: this host has only 2.0 GiB, and a session may use 1.4 GiB\n" + hint +
+		"  ✕ Codex memory           its docs ask for 4 GB of RAM: this host has only 2.0 GiB, and a session may use 1.4 GiB\n" + hint
+	if b.String() != want {
+		t.Errorf("on a 2 GiB host:\n%s\nwant:\n%s", b.String(), want)
+	}
+	b.Reset()
+	printChecks(&b, host.AgentMemoryChecks(installed, 3891<<20, 2818<<20)) // a VM sold as 4 GB
+	want = "  ✓ Claude Code memory     its docs ask for 4 GB of RAM: this host has 3.8 GiB, and a session may use 2.8 GiB\n" +
+		"  ✓ Codex memory           its docs ask for 4 GB of RAM: this host has 3.8 GiB, and a session may use 2.8 GiB\n"
+	if b.String() != want {
+		t.Errorf("on a VM sold as 4 GB:\n%s\nwant:\n%s", b.String(), want)
+	}
 }

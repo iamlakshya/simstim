@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/iamlakshya/simstim/internal/agents"
 	"github.com/iamlakshya/simstim/internal/api"
 	"github.com/iamlakshya/simstim/internal/brand"
 	"github.com/iamlakshya/simstim/internal/paths"
@@ -38,7 +39,15 @@ var reserveTiers = []struct{ size, percent int64 }{
 
 // MemTotal returns the host's memory in bytes, from /proc/meminfo, or 0 when
 // it cannot be read.
-func MemTotal() int64 {
+func MemTotal() int64 { return meminfoBytes("MemTotal:") }
+
+// swapTotal returns the host's swap in bytes, from /proc/meminfo, or 0 when
+// the host has none or it cannot be read.
+func swapTotal() int64 { return meminfoBytes("SwapTotal:") }
+
+// meminfoBytes reads the line of /proc/meminfo that starts with key, such
+// as "MemTotal:", in bytes. It is 0 when the line cannot be read.
+func meminfoBytes(key string) int64 {
 	f, err := os.Open(filepath.Join(procRoot, "meminfo"))
 	if err != nil {
 		return 0
@@ -46,7 +55,7 @@ func MemTotal() int64 {
 	defer f.Close()
 	sc := bufio.NewScanner(f)
 	for sc.Scan() {
-		if v, ok := strings.CutPrefix(sc.Text(), "MemTotal:"); ok {
+		if v, ok := strings.CutPrefix(sc.Text(), key); ok {
 			v = strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(v), "kB"))
 			n, _ := strconv.ParseInt(v, 10, 64)
 			return n * 1024
@@ -210,16 +219,32 @@ func warnSession(id, msg string, err error) {
 }
 
 // sessionsMemoryCheck is the host doctor's line about the memory of all
-// sessions together: what they may use, and the reserve. The caller checks
-// that the memory controller is delegated first.
+// sessions together: what they may use, the reserve, and the host's swap.
+// The caller checks that the memory controller is delegated first.
 func sessionsMemoryCheck() Check {
 	total, want := MemTotal(), DefaultMemoryMax()
+	if want <= 0 {
+		return Check{Name: "memory for sessions", Detail: "the host's memory is not known, so sessions have no memory cap"}
+	}
+	c := sliceMemoryCheck(total, want)
+	c.Detail += ". " + swapText(swapTotal())
+	return c
+}
+
+// swapText says how much swap the host has. Sessions run with
+// MemorySwapMax=0 (decision 0008), so swap never gives them more room.
+func swapText(n int64) string {
+	if n <= 0 {
+		return "Swap: none, and swap would not give sessions more room"
+	}
+	return "Swap: " + gibText(n) + ", which does not give sessions more room"
+}
+
+// sliceMemoryCheck compares the limit of the sessions' slice with want, the
+// limit that a host with total bytes of memory gives them.
+func sliceMemoryCheck(total, want int64) Check {
 	c := Check{Name: "memory for sessions", OK: true,
 		Detail: fmt.Sprintf("sessions may use %s together, and %s is kept for the system", gibText(want), gibText(total-want))}
-	if want <= 0 {
-		c.OK, c.Detail = false, "the host's memory is not known, so sessions have no memory cap"
-		return c
-	}
 	if !exists(sliceCgroup()) {
 		// The next start sets the limit, also after the host was resized.
 		if sliceLimit() != want {
@@ -243,6 +268,33 @@ func sessionsMemoryCheck() Check {
 	return c
 }
 
+// AgentMemoryChecks are the host doctor's lines about the memory that the
+// installed agents ask for, from their docs (agents.Agent.Memory). That is a
+// system requirement for the machine, so each line compares it with total,
+// the host's memory, and fails when the host has less. Each line also shows
+// limit, a session's default cap here. installed maps each agent kind on the
+// host to its path. An agent whose docs name no memory gets no line.
+func AgentMemoryChecks(installed map[string]string, total, limit int64) []Check {
+	if total <= 0 {
+		return nil
+	}
+	var out []Check
+	for _, a := range agents.Table {
+		if a.Memory <= 0 || installed[a.Kind] == "" {
+			continue
+		}
+		c := Check{Name: a.Title + " memory", OK: total >= a.Memory,
+			Detail: fmt.Sprintf("its docs ask for %s of RAM: this host has %s, and a session may use %s", gbText(a.Memory), gibText(total), gibText(limit))}
+		if !c.OK {
+			c.Detail = fmt.Sprintf("its docs ask for %s of RAM: this host has only %s, and a session may use %s", gbText(a.Memory), gibText(total), gibText(limit))
+			c.Fix = fmt.Sprintf("give the host at least %s (%s) of memory. Swap does not count, because sessions do not use it. "+
+				"See docs/how-to/memory.md.", gbText(a.Memory), gibText(a.Memory))
+		}
+		out = append(out, c)
+	}
+	return out
+}
+
 func exists(p string) bool {
 	_, err := os.Stat(p)
 	return err == nil
@@ -250,6 +302,11 @@ func exists(p string) bool {
 
 // gibText is a size in GiB, to a tenth: "2.9 GiB".
 func gibText(n int64) string { return fmt.Sprintf("%.1f GiB", float64(n)/gib) }
+
+// gbText is a size in GB, as agents' docs give memory: "4 GB".
+func gbText(n int64) string {
+	return strconv.FormatFloat(float64(n)/agents.GB, 'f', -1, 64) + " GB"
+}
 
 // mibText is a size in whole MiB, for sizes that are close: "2972 MiB".
 func mibText(n int64) string { return strconv.FormatInt(n/mib, 10) + " MiB" }

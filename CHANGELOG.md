@@ -4,6 +4,10 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ## [Unreleased]
 
+### Added
+
+- `host doctor` checks that the host has the memory that each installed agent asks for. The agent table now holds the memory that an agent's own docs ask a machine to have: 4 GB for Claude Code and for Codex. A host with at least that much passes, such as a VM sold as 4 GB. A host with less gets a warning with a hint. Each line also shows the cap that a session may use. The doctor's "memory for sessions" line also shows the host's swap, and says that swap gives sessions no room ([memory](docs/how-to/memory.md#check-that-the-host-fits-the-agent)). An older host helper shows neither.
+
 ### Fixed
 
 - On Windows, a round trip shorter than about half a millisecond read as 0, which the launcher takes as no sample. The clock there moves in steps of that size. A round trip is now never less than 1 µs.

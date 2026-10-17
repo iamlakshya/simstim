@@ -281,10 +281,11 @@ func hostDoctorCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "doctor <name>",
 		Short: "Check a host's setup, and with --fix fix what it can",
-		Long: "Checks a host: systemd and linger, the restore unit, terminfo, memory caps and the\n" +
-			"agents. With --fix it offers to fix linger, the restore unit, Ghostty's terminfo, a\n" +
-			"broken current helper link, stale session sockets and old helper versions. Each fix\n" +
-			"is shown and explained before it runs; one that needs root is printed for you.",
+		Long: "Checks a host: systemd and linger, the restore unit, terminfo, memory caps, swap and the\n" +
+			"agents. It warns when the host has less memory than an agent's docs ask for. With\n" +
+			"--fix it offers to fix linger, the restore unit, Ghostty's terminfo, a broken current\n" +
+			"helper link, stale session sockets and old helper versions. Each fix is shown and\n" +
+			"explained before it runs; one that needs root is printed for you.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			h, err := client.FindHost(args[0])
@@ -310,16 +311,7 @@ func hostDoctorCmd() *cobra.Command {
 			}
 			fmt.Printf("%s: %s (%s/%s), %d CPUs, %.1f GiB, %.1f GiB free disk, helper %s\n", h.Name, d.Distro, d.OS, d.Arch, d.CPUs,
 				float64(d.MemTotal)/(1<<30), float64(d.DiskFree)/(1<<30), d.Version)
-			for _, c := range d.Checks {
-				mark := "✓"
-				if !c.OK {
-					mark = "✕"
-				}
-				fmt.Printf("  %s %-22s %s\n", mark, c.Name, c.Detail)
-				if !c.OK && c.Fix != "" {
-					fmt.Printf("    Try: %s\n", c.Fix)
-				}
-			}
+			printChecks(os.Stdout, d.Checks)
 			fmt.Println("Agents:")
 			printAgentChecks(os.Stdout, h.Name, d.AgentChecks)
 			printScrollback(ctx, conn)

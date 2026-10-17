@@ -12,7 +12,7 @@ simstim host doctor my-server
 - `doctor` checks this computer: `ssh`, the config files, and the commands of your [secrets](secrets.md).
 - `doctor terminal` asks your terminal what it supports: the keyboard protocol, colours, synchronized output.
 - `host test` says whether the host answers, and how fast.
-- `host doctor` checks the host: the helper, systemd and linger, the agents, and memory.
+- `host doctor` checks the host: the helper, systemd and linger, the agents, and memory. It warns when the host has less memory than an agent's docs ask for ([memory](memory.md#check-that-the-host-fits-the-agent)).
 
 ## Let the doctor fix it
 

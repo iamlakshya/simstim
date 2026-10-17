@@ -48,6 +48,16 @@ func TestAntigravity(t *testing.T) {
 	}
 }
 
+// The memory that each agent's own docs ask for, where they name it.
+func TestMemory(t *testing.T) {
+	want := map[string]int64{"claude": 4 * GB, "codex": 4 * GB}
+	for _, a := range Table {
+		if a.Memory != want[a.Kind] {
+			t.Errorf("%s asks for %d bytes, want %d", a.Kind, a.Memory, want[a.Kind])
+		}
+	}
+}
+
 func rank(s Support) int {
 	return map[Support]int{FirstClass: 0, Supported: 1, BestEffort: 2}[s]
 }

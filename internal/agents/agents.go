@@ -30,9 +30,18 @@ type Agent struct {
 	// agent that draws full screen (on the alternate screen) keeps its own
 	// scrollback instead. Empty when the agent has no such mode.
 	Inline Inline `json:"inline,omitzero"`
+	// Memory is the least memory that the agent's own docs ask a machine to
+	// have, in bytes, or 0 when they name none. It is a system requirement,
+	// not a size for one process. The host doctor warns when a host has less.
+	// In October 2026, the docs of opencode and Antigravity CLI named none.
+	Memory int64 `json:"memory,omitempty"`
 	// Setup is how to install the agent and log in (setup.go).
 	Setup *Setup `json:"setup,omitempty"`
 }
+
+// GB is a gigabyte as agents' docs give memory: 10^9 bytes, a little less
+// than a GiB. A machine of "4 GB" has 3.7 GiB.
+const GB = 1_000_000_000
 
 // Inline is an agent's switch to its inline mode: arguments, environment
 // variables, or both.
@@ -83,6 +92,8 @@ var Table = []Agent{
 		// https://code.claude.com/docs/en/fullscreen: forces the classic
 		// renderer, which keeps the conversation in the terminal's scrollback.
 		Inline: Inline{Env: map[string]string{"CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN": "1"}},
+		// "4 GB+ RAM": https://code.claude.com/docs/en/setup#system-requirements.
+		Memory: 4 * GB,
 		Setup: &Setup{
 			Install: "curl -fsSL https://claude.ai/install.sh | bash",
 			Source:  "https://code.claude.com/docs/en/setup",
@@ -110,6 +121,9 @@ var Table = []Agent{
 		// codex-rs/tui/src/cli.rs in openai/codex: "Runs the TUI in inline
 		// mode, preserving terminal scrollback history."
 		Inline: Inline{Args: []string{"--no-alt-screen"}},
+		// "4-GB minimum (8-GB recommended)":
+		// https://github.com/openai/codex/blob/main/docs/install.md#system-requirements.
+		Memory: 4 * GB,
 		Setup: &Setup{
 			// The installer puts codex in $CODEX_INSTALL_DIR, by default ~/.local/bin.
 			Install: "curl -fsSL https://chatgpt.com/codex/install.sh | sh",

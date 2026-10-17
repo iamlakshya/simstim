@@ -10,7 +10,7 @@ Check a host's setup, and with `--fix` fix what it can.
 simstim host doctor <name> [flags]
 ```
 
-Checks a host: systemd and linger, the restore unit, terminfo, memory caps and the agents. With `--fix` it offers to fix linger, the restore unit, Ghostty's terminfo, a broken current helper link, stale session sockets and old helper versions. Each fix is shown and explained before it runs; one that needs root is printed for you.
+Checks a host: systemd and linger, the restore unit, terminfo, memory caps, swap and the agents. It warns when the host has less memory than an agent's docs ask for. With `--fix` it offers to fix linger, the restore unit, Ghostty's terminfo, a broken current helper link, stale session sockets and old helper versions. Each fix is shown and explained before it runs; one that needs root is printed for you.
 
 ## Flags
 
