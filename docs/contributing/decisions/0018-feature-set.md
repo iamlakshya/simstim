@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: accepted (its Now list extended by 0025)
 date: 2026-10-15
 ---
 

@@ -52,13 +52,13 @@ R6 scores low: few developers ask for it, and simstim stores no secrets by desig
 
 | # | Feature | Need (sources / reactions) | D | I | E | Score |
 | --- | --- | --- | --- | --- | --- | --- |
-| O1 | **A debug mode** ([#44](https://github.com/iamlakshya/simstim/issues/44)): off by default. A user turns it on with a flag or in a running session, and shares one local bundle. The owner asked on 16 October 2026 for it to be built now. [0025](contributing/decisions/0025-debug-mode.md) has its design, and its two pull requests build it: the core ([#62](https://github.com/iamlakshya/simstim/pull/62)), then the bundle and the launcher's commands. | No source asks for it. Claude Code and Consul ship one. | 1 | 2 | L | 0.7 |
+| O1 | **A debug mode** ([#44](https://github.com/iamlakshya/simstim/issues/44)): off by default. A user turns it on with a flag or in a running session, and shares one local bundle. The owner asked on 16 October 2026 for it to be built now. [0025](contributing/decisions/0025-debug-mode.md) has its design, and its two pull requests built it: the core ([#62](https://github.com/iamlakshya/simstim/pull/62)), then the bundle and the launcher's commands ([#66](https://github.com/iamlakshya/simstim/pull/66)). | No source asks for it. Claude Code and Consul ship one. | 1 | 2 | L | 0.7 |
 
 O1 scores 0.7, so by its score it would be in Later. It is in Now only because the owner asked for it. No source in the sample asks for a debug mode. It gets a demand of 1, as L1 and L2 do, because other tools have one. It collects the data to find the causes of two open bugs: a session stopped at its memory cap ([#40](https://github.com/iamlakshya/simstim/issues/40)), and typing lag ([#43](https://github.com/iamlakshya/simstim/issues/43)).
 
 ### Status
 
-On 15 October 2026 every item then in Now was built, with docs, tests and end-to-end checks: R1 to R7, and N1 to N3 and N5 to N7. N4, the phone path, is scaffolded and hidden until its launch. The owner asked for O1 on 16 October 2026. Its first part, a trace of typing lag, is built ([#50](https://github.com/iamlakshya/simstim/pull/50)). Two pull requests build the rest, as [0025](contributing/decisions/0025-debug-mode.md) plans: the core ([#62](https://github.com/iamlakshya/simstim/pull/62)), then the bundle and the launcher's commands.
+On 15 October 2026 every item then in Now was built, with docs, tests and end-to-end checks: R1 to R7, and N1 to N3 and N5 to N7. N4, the phone path, is scaffolded and hidden until its launch. The owner asked for O1 on 16 October 2026. Its first part, a trace of typing lag, is built ([#50](https://github.com/iamlakshya/simstim/pull/50)). Two pull requests built the rest, as [0025](contributing/decisions/0025-debug-mode.md) plans: the core ([#62](https://github.com/iamlakshya/simstim/pull/62)), then the bundle and the launcher's commands ([#66](https://github.com/iamlakshya/simstim/pull/66)). The owner accepted 0025 on 17 October 2026.
 
 ## Next
 

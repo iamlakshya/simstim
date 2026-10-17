@@ -1,11 +1,11 @@
 ---
-status: proposed
+status: accepted
 date: 2026-10-16
 ---
 
 # 0025 A debug mode: one switch, files on each side, and one local bundle
 
-**Status:** Proposed, for the owner's review. The owner asked on 16 October 2026 for the rest of [#44](https://github.com/iamlakshya/simstim/issues/44) to be built now, in the plan for #40 to #44. Once accepted, this record adds the debug mode to the Now list of [0018](0018-feature-set.md), as an item that the owner asked for. The rest of 0018 stays.
+**Status:** Accepted. The owner asked on 16 October 2026 for the rest of [#44](https://github.com/iamlakshya/simstim/issues/44) to be built now, in the plan for #40 to #44, and accepted this record on 17 October 2026. It adds the debug mode to the Now list of [0018](0018-feature-set.md), as an item that the owner asked for. The rest of 0018 stays.
 
 Part 1 of #44, a trace of typing lag, is built ([#50](https://github.com/iamlakshya/simstim/pull/50), [tracing typing lag](../debug-trace.md)). This record settles the rest: how a user turns debug on, what each side records, the files and their limits, and the bundle. Two pull requests build it, and each points here:
 
