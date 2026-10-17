@@ -2,19 +2,11 @@
 
 The ideas behind simstim, in plain words, in the order you meet them. Each one links to the guide that uses it. [The architecture](architecture.md) has the details.
 
-```text
- your laptop                             your host (Linux)
-┌────────────────┐                      ┌───────────────────────────────────┐
-│ client         │      your ssh        │ helper                            │
-│  the launcher  │ ───────────────────▶ │  ├─ holder ── claude   a session  │
-│  and commands  │                      │  ├─ holder ── codex    a session  │
-└────────────────┘                      │  └─ holder ── zsh      a session  │
-                                        └───────────────────────────────────┘
-```
+![Your terminal connects through SSH or provider exec to a bridge on your Linux host. The session's holder owns the agent, output ring and shadow terminal, and keeps running when the connection ends.](../images/architecture.svg)
 
 ## Host
 
-A host is a Linux machine you can reach with `ssh`: a VPS, a cloud VM, a machine at home, or a VM on your laptop. simstim connects with your own OpenSSH and reads your `~/.ssh/config`, so jump hosts, keys, certificates and Tailscale work as they do for `ssh`. It never edits that file.
+A host is a Linux machine where agents run: a VPS, a cloud VM, a machine at home, or a VM on your laptop. For SSH hosts, simstim uses your own OpenSSH and reads your `~/.ssh/config`, so jump hosts, keys, certificates and Tailscale work as they do for `ssh`. Adding a host does not edit that file; the guided setup can offer to add an alias with your agreement. Created Docker containers and E2B sandboxes use their provider's exec API instead.
 
 [Add a host](../how-to/add-a-host.md) connects one you have. [Create a host](../how-to/create-a-host.md) makes one for you.
 
@@ -22,7 +14,7 @@ A host is a Linux machine you can reach with `ssh`: a VPS, a cloud VM, a machine
 
 When you add a host, the client copies a small program to it: the helper, `simstim-host`, in `~/.local/share/simstim/bin/`. The helper checks the host, starts and stops sessions, and carries your bytes while you are connected.
 
-The helper opens no port. Each time the client connects, it starts the helper through your SSH connection, and the helper stops when the connection ends.
+The helper opens no network port. Each time the client connects, it starts a bridge through SSH or the provider's exec API. That bridge stops when the connection ends; the session holders keep running.
 
 ## Session
 
@@ -38,7 +30,7 @@ simstim new my-server --agent claude
 
 One process on the host keeps each session alive: its holder. The holder owns the agent's terminal, keeps the last 8 MiB of what the agent wrote, and works out what the agent is doing.
 
-Each holder runs as a systemd user service with a memory cap. All sessions together leave a reserve free for the system, so agents cannot take down the host ([memory](../how-to/memory.md)). When the host restarts, it starts each holder again, and the agent picks up its conversation with its own resume command ([restore after a reboot](../how-to/restore-after-reboot.md)).
+With a systemd user manager, each holder runs as a service with a memory cap. All sessions together also have a limit that leaves a reserve for the system ([memory](../how-to/memory.md)). Without that manager, a holder runs detached but has no systemd memory cap or boot-time restore unit. After a reboot, restore can start eligible sessions again with the agent's resume command. It does not preserve a running process or the old screen ([restore after a reboot](../how-to/restore-after-reboot.md)).
 
 ## Attach and detach
 
@@ -59,7 +51,7 @@ simstim draws no copy. Your terminal gets the agent's own bytes. So Shift+Enter,
 
 ## Reconnect and replay
 
-If the connection drops, because the laptop slept or the network changed, the client reconnects by itself. It tells the holder the last byte it saw, and the holder sends everything after it. Your scrollback goes on with nothing lost and nothing twice.
+If the connection drops, because the laptop slept or the network changed, the client reconnects by itself. It tells the holder the last byte it saw. While that byte is still in the holder's 8 MiB ring, the holder sends the later bytes without duplicating output. Keys typed while disconnected are dropped, not replayed.
 
 If you come back from another machine, or after so long that the holder no longer has that byte, the screen is drawn again from the shadow terminal. So is a full-screen agent, such as Claude Code in its fullscreen mode, when you attach again after a detach: your terminal does not keep a full-screen program's screen once you leave it.
 

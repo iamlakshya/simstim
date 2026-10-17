@@ -156,6 +156,12 @@ func TestResolve(t *testing.T) {
 	if got != want {
 		t.Errorf("rewriteLinks:\n%s\nwant:\n%s", got, want)
 	}
+	md = "![Holder & PTY](../images/attach.svg \"A < B\") and `![code](../images/attach.svg)`\n"
+	got = rewriteLinks(md, "docs/how-to/x.md", "/how-to/x/", pages, "https://github.com/o/r")
+	want = "<img src=\"../../images/attach.svg\" alt=\"Holder &amp; PTY\" title=\"A &lt; B\"> and `![code](../images/attach.svg)`\n"
+	if got != want {
+		t.Errorf("image URLs must be public assets, not Astro source imports:\n%s\nwant:\n%s", got, want)
+	}
 }
 
 // Help text keeps its backslashes, angle brackets and web addresses in

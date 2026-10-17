@@ -1,6 +1,6 @@
 # Bring sessions back after the host restarts
 
-When the host restarts, its processes stop, and so do the agents. At boot, a user unit that `host add` installed starts each session again, in its folder, with the agent's own resume command: Claude Code and Codex continue the same conversation. A session that runs a command of its own runs that command again ([what comes back](#what-comes-back)). Above it, the session shows the screen it had before.
+When the host restarts, its processes stop, and so do the agents. With a systemd user manager and the restore unit enabled, eligible sessions start again at boot, in their folders, with the agent's own resume command: Claude Code and Codex can continue the same conversation. A session that runs a command of its own runs that command again ([what comes back](#what-comes-back)). The old terminal screen and output ring are not saved across the reboot.
 
 To do it by hand, for example when the host has no systemd user manager:
 

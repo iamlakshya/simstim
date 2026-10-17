@@ -4,23 +4,9 @@ How the client, the host helper and the shadow terminal fit together, and how a 
 
 ## 1. The picture
 
-```text
- Laptop: macOS or Linux                       Host: any provider, Linux
-┌──────────────────────────────┐            ┌───────────────────────────────────────────────┐
-│ Ghostty tab                  │            │ simstim-host bridge   (one per client channel)│
-│ └ simstim  (client)          │  system    │    │                                          │
-│    ├ screens: hosts,         │  OpenSSH   │    │ Unix sockets, 0600                       │
-│    │  sessions, dialogs      │ ─────────▶ │    ├─ holder "auth-refactor" ─ PTY ─ claude   │
-│    ├ attach pump (raw bytes) │  your      │    │    ├ output ring, 8 MiB, byte offsets    │
-│    ├ input filter (2 keys)   │  ssh       │    │    ├ manifest.json, status engine        │
-│    └ private ControlMaster   │  config:   │    │    └ vt child (libghostty-vt)            │
-│                              │  ProxyJump,│    ├─ holder "api-tests" ─ PTY ─ codex        │
-│ ~/.config/simstim/           │  IAP, SSM, │    └─ holder "notes" ─ PTY ─ zsh              │
-│   config.toml, hosts.toml    │  Tailscale │                                               │
-└──────────────────────────────┘            │ systemd --user: one service per session,      │
-                                            │ in simstim.slice, with memory caps            │
-                                            └───────────────────────────────────────────────┘
-```
+![The local client connects to a bridge over SSH or provider exec. A persistent holder owns the agent's PTY, output ring and shadow terminal inside a session that survives disconnects.](../images/architecture.svg)
+
+The client runs in your local terminal. It opens one bridge process on the host over SSH or a provider's exec transport (section 8). The bridge connects to session holders through private Unix sockets. Each holder owns an agent's PTY, an 8 MiB output ring, a manifest, a status engine and a shadow terminal child.
 
 There is no daemon on the laptop and no central daemon on the host. Each session is one holder process, with a small vt child. The bridge lives only while a client is connected.
 
@@ -28,12 +14,12 @@ There is no daemon on the laptop and no central daemon on the host. Each session
 
 ### 2.1 Client: `simstim`
 
-One static binary (Go in the proposed design).
+One static Go binary.
 
 | Part | Job |
 | --- | --- |
 | Screens | The launcher: the hosts, then one host's sessions, one list at a time, with search across hosts, a one-line quick start, and sheets (the palette, peek, forms, the add-host wizard) that rise over it. It remembers what it saw, to draw at once. It runs in the alternate screen and is built with Bubble Tea v2. While attached it draws nothing. See [UX](../contributing/ux-spec.md), [0009](../contributing/decisions/0009-light-launcher.md), [0011](../contributing/decisions/0011-instant-launcher.md) and [0012](../contributing/decisions/0012-own-look.md). |
-| CLI | `simstim host …`, `new`, `ls`, `attach`, `kill`, `doctor`, `update`, `completion`. `--json` on every list. |
+| CLI | `simstim host …`, `new`, `ls`, `attach`, `kill`, `doctor`, `completion`. `--json` on every list. |
 | SSH layer | Runs the system `ssh` with a generated config. Owns a private ControlMaster per host. Opens the bridge channel. Uploads files. |
 | Attach pump | Raw mode, an output pump with a passive mode tracker, the input filter, resize forwarding, the reset list on detach. |
 | Reconnect | Heartbeat, wake detection, backoff, and resume by byte offset. |
@@ -54,41 +40,43 @@ Installed by the client into `~/.local/share/simstim/bin/<version>/`, with a `cu
 | `ls --json`, `watch --json` | Reads manifests and probes holders in parallel. `watch` streams status events as NDJSON. | Seconds, or one client |
 | `hook <event>` | Called by agent hooks. Forwards the event to the session's holder (its socket is in the agent's environment). | Milliseconds |
 | `keytest` | Prints every key it receives; run inside a session, it proves keys cross the whole path unchanged | One test |
-| `kill`, `rm` | Stops the session's whole cgroup. Removes the manifest, and in v2 the worktree when it is safe. | Seconds |
+| `kill`, `rm` | Stops the session's whole cgroup. Removes the manifest and the worktree when it is safe. | Seconds |
 | `doctor` | Checks linger, cgroups, terminfo, agents on `PATH` and the disk, and prints fixes | Seconds |
 | `restore [--all]` | Respawns sessions after a reboot with each agent's resume command. A user unit, `<name>-restore.service`, runs it at boot. | Run at boot, then exit |
 
 ### 2.3 Session status
 
-The holder decides each session's state from four layers, strongest first:
+The process exit sets the ended state. While the agent runs, `Holder.agentState` checks these signals in order; the first match wins:
 
-| Layer | Source | Examples |
+| Priority | Source | State |
 | --- | --- | --- |
-| L0 | The process | Exit code, signal, out-of-memory kill (from the cgroup's `memory.events`) |
-| L3 | Screen rules, kept as data in `internal/agents/rules/*.toml` and read from an x/vt copy of the screen | Claude Code's "Do you want to proceed?", an interrupt hint, a spinner title |
-| L1 | The agent's own hooks, added per launch from the agent table | Claude Code's `SessionStart`, `UserPromptSubmit`, `Stop`, `Notification`; Codex's `notify` |
-| L2 | Terminal signals in the output | BEL, OSC 9/777/99 notifications, OSC 9;4 progress, recent output |
+| 1 | Screen rule asking for input | `needs_input` |
+| 2 | Hook or terminal notification asking for input | `needs_input` |
+| 3 | Screen rule showing work | `working` |
+| 4 | Busy hook | `working` |
+| 5 | Terminal progress | `working` |
+| 6 | An idle hook, within three seconds of the turn ending | `idle` |
+| 7 | Output within the last three seconds | `working` |
+| 8 | No match | `idle` (quiet) |
 
-Each session row says which layer and rule set its state.
+Screen rules are data in `internal/agents/rules/*.toml`, read from an x/vt copy of the screen. Each session row says which source set its state.
 
-One more source can mark a session as needing you: the warning before the memory cap (3.7). The agent's own wait, from L3, L1 or L2, comes first.
+One more source can mark a session as needing you: the warning before the memory cap (3.7). The agent's own wait comes first.
 
 ### 2.4 The agent table
 
-All agent knowledge is data, shipped with the host helper and overridable by the user.
+Agent knowledge is data in `internal/agents`, shipped with the host helper. There are no user overrides for this table.
 
 | Field | Example for Claude Code |
 | --- | --- |
 | `kind`, `binaries` | `claude`, `["claude"]` |
-| `launch_argv` | `claude --session-id {uuid} -n {name}` |
-| `resume_argv`, `continue_argv` (v2) | `claude --resume {agent_session_id}`, `claude --continue` |
-| `id_capture` | `choose` (we pick the ID), `create`, `hook`, `scan` or `none` |
-| `hooks` | `SessionStart` calls `simstim-host hook session-start`, because the ID changes on `/clear` |
-| `quirks` | For Codex: add `--no-daemon`, so its work stays inside the session |
-| `hooks` | Extra arguments that make the agent report status and its session ID |
+| `launch` | `claude --session-id {session_uuid}` |
+| `resume`, `continue` | `claude --resume {agent_session_id}`, `claude --continue` |
+| `id_capture` | `choose` (we pick the ID), `hook`, `scan` or `none` |
+| `hooks` | Extra arguments that make the agent report status and its session ID. `SessionStart` calls `simstim-host hook session-start`, because the ID changes on `/clear`. |
 | screen rules | A TOML file per agent in `internal/agents/rules` |
 
-The full resume table for eight agents is in [the host runtime note](../research/host-runtime.md#71-resume-commands).
+Codex's launch, resume and continue commands include `--no-daemon`, so its work stays inside the session. There is no separate `quirks` field. The current agent table is in [the generated reference](../reference/agents.md).
 
 ## 3. Flows
 
@@ -133,13 +121,13 @@ The full resume table for eight agents is in [the host runtime note](../research
 
 1. The client sends `attach{cols, rows, xpx, ypx, client_id, caps, last_offset}`. It sends no offset (−1) when the session was on the alternate screen at the last detach: detach left that screen (3.4), and the terminal threw its cells away ([0028](../contributing/decisions/0028-redraw-the-alternate-screen.md)). A reconnect inside one attach (3.5) never leaves it, and keeps its offset.
 2. The holder decides how to catch the client up:
-   - **Same client, offset still in the ring:** it sends the raw bytes from `last_offset`. Local scrollback continues with no duplicates, and missed notifications arrive. Repeated ones are collapsed.
+   - **Same client, offset still in the ring:** it sends the bytes from `last_offset`, with historical terminal queries removed. Local scrollback continues with no duplicate output bytes; notifications in the replay may be repeated.
    - **New client, no offset, or offset too old:** the vt child makes a snapshot at the client's size. The client pushes what the terminal shows into its scrollback with blank lines, then the snapshot redraws the screen, including the kitty keyboard flags and other modes.
 3. The holder resizes the PTY and sends SIGWINCH to the foreground process group, even if the size is unchanged, so the agent repaints.
 4. Then it is pure pass-through, and the session owns every row and column ([0009](../contributing/decisions/0009-light-launcher.md)):
    - Output frames go straight to stdout. The client draws nothing of its own: no frame, no status line and no window title. The one exception is the reconnect notice (3.5). Alerts about other sessions, and a failed upload, go out as OSC 777 notifications, which draw nothing on the screen.
    - Input bytes go straight to the PTY, except the two filtered keys.
-   - Terminal queries from the agent go to the leader client's terminal, and only the leader's replies reach the PTY.
+   - Live output, including terminal queries, goes to every attached client. Input from every attached client reaches the PTY, including terminal replies and mouse events. Replies are not restricted to the leader, so several terminals may answer the same query.
 
 ### 3.4 Detach
 
@@ -156,7 +144,7 @@ Triggers: the detach key, closing the tab, `simstim kill` from elsewhere, or SIG
    - reset SGR, and pop the title stack.
 
    The full 19-step list is in [the client stack note](../research/client-stack.md#22-what-to-reset-on-detach-in-order).
-3. While no client is attached, the vt child answers the agent's terminal queries from a cached profile of the last client. If the agent turned on focus reporting, the holder sends focus-out.
+3. While no client is attached, the vt child answers the agent's terminal queries. Its XTVERSION answer uses the session's `TERM_PROGRAM` and `TERM_PROGRAM_VERSION` when set; the holder does not cache the last client's terminal replies. Detach does not send focus-out to the agent.
 
 ### 3.5 Sleep and reconnect
 
@@ -181,7 +169,7 @@ Triggers: the detach key, closing the tab, `simstim kill` from elsewhere, or SIG
 
 ### 3.7 A session ends
 
-- **The agent exits:** the holder records the exit code and signal, keeps the final screen, and marks the session `exited`. The session stays in the list until the user removes it, or respawns it in v2.
+- **The agent exits:** the holder records the exit code and signal, keeps the final screen, and marks the session `exited`. The session stays in the list until the user removes it or resumes it.
 - **Close to the memory cap:** the holder warns before the cap stops a process. The cap comes with no swap, so the kernel can free only the page cache and some of its own memory. The kernel also fills that cache up to the cap in normal work, so `memory.current` near the cap means little ([cgroup v2](https://docs.kernel.org/admin-guide/cgroup-v2.html#memory-interface-files), [PSI](https://docs.kernel.org/accounting/psi.html)).
   - Each second, the holder reads the unit's `memory.events` and `memory.max`. With a cap, it also reads `memory.current`. It reads `memory.stat` only when `memory.current` is at 80 % of the cap, and `memory.pressure` only near 90 %.
   - It measures the memory that the kernel cannot reclaim: `memory.current`, less the page cache (`file` less `shmem`) and the slab that the kernel can free (`slab_reclaimable`). That leaves the processes' own memory, tmpfs, and the kernel's memory for the session, such as page tables, stacks and socket buffers.
@@ -202,18 +190,17 @@ Triggers: the detach key, closing the tab, `simstim kill` from elsewhere, or SIG
 ### 3.8 Upgrade
 
 - The client and the helper upgrade independently. New sessions use the new helper, and old holders keep running their own version.
-- `hello` feature flags let a new client drive an old holder. If a feature is missing, the UI says "restart this session to get X".
-- The vt child can be upgraded live: start the new one and replay the ring.
-- In v1.x, a holder can re-exec into the new version in place and keep the PTY.
+- The bridge exchanges `hello` feature flags with the client. This does not upgrade a running holder.
+- A crashed vt child restarts from the ring, using the same executable path beside its holder. There is no live vt upgrade or holder re-exec.
 
-### 3.9 Host reboot and respawn (v2)
+### 3.9 Host reboot and respawn
 
-1. A user unit `simstimd.service` (`WantedBy=default.target`, with linger on) runs `simstim-host restore` at boot.
-2. For each manifest whose `boot_id` differs from the current boot and whose holder is gone:
-   1. start a new holder in its `cwd`;
-   2. run `resume_argv` with the stored `agent_session_id`. Without the ID, run the session's own `command` again if the user gave one, or else `continue_argv`;
-   3. count retries, with backoff.
-3. The old screen snapshot is printed above the resumed agent. It is only used if the same pinned vt build wrote it.
+1. A user unit `simstim-restore.service` (`WantedBy=default.target`, with linger on) runs `simstim-host restore` at boot.
+2. For each manifest whose `boot_id` differs from the current boot and whose holder is gone, restore skips ended sessions, sessions without the `resume` restart policy and sessions at their retry limit. For the others it:
+   1. counts the restore attempt against the retry limit;
+   2. starts a new holder in its `cwd`;
+   3. runs `resume_argv` with the stored `agent_session_id`. Without a usable resume command and ID, it runs the session's own `command`, then `continue_argv`, or finally the previous command as a fresh start.
+3. The old screen is not saved and restored across a reboot. The new holder starts a new output ring and shadow terminal.
 4. The session is marked `restored`. A turn that was running when the host went down is not resumed.
 
 ### 3.10 Worktrees, hooks, ports and providers
@@ -232,14 +219,14 @@ Triggers: the detach key, closing the tab, `simstim kill` from elsewhere, or SIG
   - `hello`, `ping`/`pong` (the pong to a timed ping carries the host's monotonic clock);
   - `hosts.info`, `ls`, `watch`/`event`, `new`, `kill`, `rename`;
   - `upload.begin`/`upload.chunk`/`upload.end`;
-  - `attach`, `detach`, `take_size`, `input`, `resize`, `output{offset}`, `snapshot` (VT bytes that redraw the screen; output from `Attached.From` follows).
+  - `attach`, `detach`, `input`, `resize`, `output{offset}`, `snapshot` (VT bytes that redraw the screen; output from `Attached.From` follows).
 - **Holder socket:** the same `attach` family, plus `info`, `subscribe`, `hook`, `set_meta` and `kill`. While a client traces its attach, a `trace` frame goes before each key.
 - **Debug** ([0025](../contributing/decisions/0025-debug-mode.md)), behind the feature `debug`: `debug.start`, `debug.stop`, `debug.profile` and `debug.save`. For the bundle, `debug.collect` lists the host's files. `debug.read` sends 1 MiB of one listed file at a time, by its name in the list, never by a path.
 - **Back-pressure:**
-  - Each client's buffer is capped at 4 MiB.
-  - A client that falls behind is dropped to a fresh snapshot.
-  - The holder never blocks reading the PTY.
-- **Leader rule:** the last client to type real input owns the size. Replies and mouse events do not count. A device can claim the size without typing by sending `take_size`.
+  - Each client's output queue holds at most 4096 frames, not a fixed number of bytes.
+  - When the queue fills, the holder closes that client's connection. On reconnect, the client catches up by offset if the ring still has it; otherwise it gets a snapshot, or the ring if a snapshot is unavailable.
+  - Queueing output for a slow client does not block the PTY reader.
+- **Leader rule:** the newest attach becomes leader. Any `input` frame from an attached client then makes that client leader, including terminal replies and mouse events. Only the leader's resize frames change the PTY size; typing does not itself apply a size. There is no `take_size` message. When the leader disconnects, no replacement is chosen until another attach or input frame.
 
 ## 5. Terminal fidelity contract
 
@@ -252,7 +239,7 @@ The contract has its own page: [the fidelity contract](fidelity.md).
 | Path | Contents |
 | --- | --- |
 | `~/.config/simstim/config.toml` | Settings and keymap overrides, with a JSON Schema |
-| `~/.config/simstim/hosts.toml` | Saved hosts: name, SSH target, labels, optional provider block (v2) |
+| `~/.config/simstim/hosts.toml` | Saved hosts: name, SSH target, labels, optional provider block |
 | `~/.config/simstim/ssh/hosts.conf` | Generated SSH blocks for hosts added in simstim. Included by the wrapper. |
 | `~/.cache/simstim/cm/%C` | ControlMaster sockets. The path is kept under 86 bytes because of macOS. |
 | `~/.cache/simstim/helpers/<version>/` | Host helpers fetched from the release, for a client built with `go install` |
@@ -265,10 +252,10 @@ The contract has its own page: [the fidelity contract](fidelity.md).
 | Path | Contents |
 | --- | --- |
 | `~/.local/share/simstim/bin/<version>/` and `current` | `simstim-host` and `simstim-vt` |
-| `~/.local/state/simstim/sessions/<id>/` | `manifest.json`, `paste/` (0700), screen snapshot, `holder.log` (turned over at 1 MiB), and while debug is on, `debug.jsonl` and `debug/` (0700) with profiles and saved windows ([debug a session](../how-to/debug-a-session.md)) |
+| `~/.local/state/simstim/sessions/<id>/` | `manifest.json`, `paste/` (0700), `holder.log` (turned over at 1 MiB), and while debug is on, `debug.jsonl` and `debug/` (0700) with profiles and saved windows ([debug a session](../how-to/debug-a-session.md)) |
 | `~/.local/state/simstim/debug/` | The bridges' debug files, while a client with debug on is connected (0700) |
 | `$XDG_RUNTIME_DIR/simstim/s/<id>.sock` | Holder sockets, 0600. Falls back to `/tmp/simstim-<uid>` (0700, owner checked) without linger. |
-| `~/.local/share/simstim/worktrees/<repo>/<slug>-<id>` (v2) | Worktrees per task |
+| `~/.local/share/simstim/worktrees/<repo>/<slug>-<id>` | Worktrees per task |
 | `~/.config/simstim/alerts.toml` | Where alerts go: commands, ntfy topics, webhooks (0600; [alerts](../how-to/alerts.md)) |
 | `~/.local/state/simstim/alerts.log` | Each alert's delivery, as JSON lines; turned over at 1 MiB |
 

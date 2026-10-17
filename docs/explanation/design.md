@@ -56,7 +56,7 @@ Added along the way:
 - **No cloud service.** No account, no relay and no telemetry.
 - **No phone app or web client.** A phone can reach a session through an ordinary SSH app (scaffolded, not launched yet: [0019](../contributing/decisions/0019-alerts-and-hooks.md)).
 - **Hosts are yours.** `host create` makes one on a provider you choose, with your own account; simstim runs no machines of its own.
-- **No promise that a process survives a host reboot.** v2 brings the conversation back, not the turn that was running.
+- **No promise that a process survives a host reboot.** Restore can bring an eligible conversation back, not the turn that was running.
 
 ## Principles
 
@@ -64,7 +64,7 @@ Ranked. Use them to settle trade-offs.
 
 1. **Byte-exact while attached.** simstim adds no modes, colours or key handling. It watches for two keys only: detach, and Ctrl+V when the clipboard holds an image.
 2. **The session outlives the client.** A closed tab, a crash, sleep or a network change never stops a session.
-3. **Plain OpenSSH is the only network path.** If `ssh host` works, simstim works.
+3. **Use existing authenticated transports.** SSH hosts use your OpenSSH. Created Docker containers and E2B sandboxes use their provider's exec API. No new network listener.
 4. **Any agent.** What simstim knows about each agent is data in a table, not code paths.
 5. **Nothing listens and nothing phones home.** No open ports on hosts, no relay, no telemetry, no stored secrets.
 6. **Amp-grade screens.** Colours come from the terminal's own palette. Keyboard first. Every error suggests a next step.
@@ -81,4 +81,4 @@ Ranked. Use them to settle trade-offs.
 | Scope creep towards a multiplexer or an agent UI | Principles 1 and 4, and the non-goals. |
 | Clean-room and licence mistakes | No code or assets from closed tools, ever. Attribution in NOTICE for anything taken from open projects. A review before going public ([going public](../contributing/going-public.md)). |
 | Bus factor of one | Small code base, data-driven agent table, good tests, plain docs. |
-| A compromised host attacks the client through escape sequences | An "untrusted host" mode that filters OSC 52, OSC 8 and report sequences. Never forward the SSH agent by default. |
+| A compromised host attacks the client through escape sequences | Attach only to hosts you trust, and use your terminal's clipboard and link controls. There is no untrusted-host output filter. SSH agent forwarding is off by default. See the [security model](security.md). |

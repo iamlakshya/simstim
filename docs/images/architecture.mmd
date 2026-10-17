@@ -1,0 +1,42 @@
+---
+config:
+  theme: base
+  htmlLabels: false
+  themeVariables:
+    fontFamily: sans-serif
+    fontSize: 16px
+    primaryColor: '#eff6ff'
+    primaryTextColor: '#172554'
+    primaryBorderColor: '#2563eb'
+    lineColor: '#64748b'
+    secondaryColor: '#fff7ed'
+    tertiaryColor: '#f8fafc'
+    clusterBkg: '#f8fafc'
+    clusterBorder: '#cbd5e1'
+  flowchart:
+    curve: linear
+    padding: 20
+---
+flowchart LR
+  accTitle: A connection can end without ending the agent
+  accDescr: The local terminal runs a client. SSH or a provider exec API connects the client to a bridge on a Linux host. Through a private Unix socket, the bridge reaches a persistent holder. The holder owns the agent's PTY, an 8 MiB output ring and a separate shadow terminal for screen snapshots. The bridge ends with the connection; the holder keeps running.
+
+  client[Your terminal and client]
+
+  subgraph host[Your Linux host]
+    bridge[Bridge]
+    subgraph session[Session: survives disconnects]
+      holder[Holder]
+      agent[Agent PTY]
+      ring[Output ring: 8 MiB]
+      shadow[Shadow VT: snapshots]
+      holder <--> agent
+      holder -.-> ring
+      holder -.-> shadow
+    end
+    bridge <-->|Private Unix socket| holder
+  end
+
+  client <-->|SSH or provider exec| bridge
+  classDef persistent fill:#fff7ed,stroke:#c2410c,color:#7c2d12
+  class holder,agent,ring,shadow persistent

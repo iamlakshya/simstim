@@ -1,6 +1,7 @@
 package main
 
 import (
+	"html"
 	"os"
 	"path"
 	"regexp"
@@ -69,6 +70,19 @@ func rewriteLine(line string, fix func(string) string) string {
 	at := 0
 	for _, m := range mdLink.FindAllStringSubmatchIndex(line, -1) {
 		if inCode(m[0]) {
+			continue
+		}
+		if line[m[0]] == '!' {
+			// Relative Markdown images are source imports to Astro, not
+			// URLs into public/. HTML keeps the page-relative asset URL,
+			// including when the site is served under a version prefix.
+			b.WriteString(line[at:m[0]])
+			b.WriteString(`<img src="` + html.EscapeString(fix(line[m[4]:m[5]])) + `" alt="` + html.EscapeString(line[m[2]:m[3]]) + `"`)
+			if title := strings.TrimSpace(line[m[6]:m[7]]); title != "" {
+				b.WriteString(` title="` + html.EscapeString(strings.Trim(title, `"`)) + `"`)
+			}
+			b.WriteString(">")
+			at = m[1]
 			continue
 		}
 		b.WriteString(line[at:m[4]] + fix(line[m[4]:m[5]]))

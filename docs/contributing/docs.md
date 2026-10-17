@@ -39,7 +39,7 @@ To change a reference page, change the code or its comment, then run `just docs`
 `go run ./cmd/docgen -site site/src` (the build runs it) turns the Markdown into the site's pages, in `site/src/content/docs/`, which git ignores:
 
 - each `README.md` becomes its folder's page, each page's first heading its title, and its first paragraph its description;
-- every link between two hosted files becomes a link to that page on the site, relative, so it works under any base (`/dev/`, `/v1.2/`). A link to any other file, such as code or a script, goes to its source on GitHub;
+- every link between two hosted files becomes a link to that page on the site, relative, so it works under any base (`/dev/`, `/v1.2/`). Markdown images become HTML images with relative URLs to the copied public assets, so Astro does not treat them as source imports. A link to any other file, such as code or a script, goes to its source on GitHub;
 - the community files at the root of the repository (`CHANGELOG.md`, `CONTRIBUTING.md`, `SECURITY.md` and the rest) become pages of the Project tab.
 
 It also writes `site/src/generated/`: `pages.json`, which maps each hosted file to its page; `sidebar.json`, the tabs; and `brand.json` and `agents.json` for the landing page. `just docs-check` fails if a built page links to GitHub for a page the site hosts (`scripts/check-site-links.py`).
@@ -104,3 +104,16 @@ Screenshots and recordings come from scripts, never by hand. `just screenshots` 
 - the recorded demos come from the tapes in `docs/demos/*.tape`, with motion on. Each tape is a script of keys and pauses (`send`, `type`, `sleep`, `wait`) between `record start` and `record save`, which writes an animated SVG (it stands still for readers who ask for reduced motion) and an asciicast (`.cast`) for asciinema's player.
 
 Run it after any change to the launcher, so the images always show the current build.
+
+### Architecture diagram
+
+The architecture diagram is separate from the terminal recordings. Its editable Mermaid source is `docs/images/architecture.mmd`; the committed SVG renders on GitHub and the site without client-side JavaScript. It includes an accessible title and description, and uses SVG text rather than HTML labels.
+
+With Node, npm and a [Puppeteer-compatible browser](https://pptr.dev/guides/configuration) available, regenerate it with the pinned [Mermaid CLI](https://github.com/mermaid-js/mermaid-cli):
+
+```sh
+npx --yes --package=@mermaid-js/mermaid-cli@12.0.0 mmdc \
+  -i docs/images/architecture.mmd -o docs/images/architecture.svg -b white
+```
+
+Review the rendered SVG, not just its source, before committing it. Keep the source and generated image together. The site's normal build copies the image; it does not need Mermaid or a browser.

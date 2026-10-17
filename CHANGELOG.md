@@ -4,6 +4,10 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ## [Unreleased]
 
+### Fixed
+
+- The security, architecture and restore guides now describe the shipped trust boundary, multi-client input, bounded replay and reboot behaviour. They no longer promise an untrusted-host filter, cached client replies, live holder upgrades or a screen saved across reboot. An accessible Mermaid architecture diagram replaces the introductory text drawing. The site now treats Markdown images as public assets rather than source imports, so the diagram builds under both root and versioned paths.
+
 ## [0.1.2] - 2026-10-17
 
 A full-screen agent, such as Claude Code in its fullscreen mode, comes back whole when you attach again, and its holder keeps far less memory. A session started with a command of its own comes back with that command after a restore or a resume. `host doctor` checks that the host has the memory that each agent asks for.
