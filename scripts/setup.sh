@@ -88,7 +88,7 @@ for t in just golangci-lint goreleaser gitleaks zig node pnpm typos vale lychee;
     printf '  %-14s %s\n' "$t" "$("$t" --version 2>/dev/null | head -1 || "$t" version 2>/dev/null | head -1)" >&2
 done
 say "  go             $(go version | cut -d' ' -f3) (the toolchain go.mod asks for downloads on first use)"
-command -v python3 >/dev/null 2>&1 || say "Note: python3 is missing; it runs the end-to-end tests (just e2e)."
+command -v python3 >/dev/null 2>&1 || say "Note: python3 is missing; it runs the readiness regression tests (just test) and end-to-end tests (just e2e)."
 
 say ""
 say "Building and testing once, to check the setup…"

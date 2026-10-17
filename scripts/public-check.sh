@@ -12,7 +12,9 @@ cd "$(dirname "$0")/.."
 fail=0
 step() { printf '\n== %s\n' "$*"; }
 need() { command -v "$1" >/dev/null 2>&1 || { echo "public-check: $1 not found. Try: scripts/setup.sh" >&2; exit 1; }; }
-need gitleaks; need scorecard; need uvx
+need gitleaks; need scorecard; need uvx; need python3
+
+step "Local checkout validation (files and history)"
 
 step "The name lives in internal/brand"
 scripts/check-name.sh || fail=1
@@ -38,7 +40,9 @@ uvx zizmor@1.16.0 --offline --min-severity medium .github || fail=1
 step "Docs: build, lint, spelling, prose and links"
 scripts/docs-check.sh || fail=1
 
-step "OpenSSF Scorecard: the checks this repository controls"
+if [ "$fail" -eq 0 ]; then echo "Local checkout: ok"; else echo "Local checkout: FAILED"; fi
+
+step "Hosted OpenSSF Scorecard (GitHub state, not the local checkout)"
 token=${GITHUB_AUTH_TOKEN:-${GITHUB_TOKEN:-$(gh auth token 2>/dev/null || true)}}
 if [ -z "$token" ]; then
     echo "skipped: needs a GitHub token (gh auth login, or GITHUB_TOKEN)"
@@ -46,24 +50,12 @@ if [ -z "$token" ]; then
 else
     module=$(sed -n 's/^module //p' go.mod)
     out=$(mktemp)
-    GITHUB_AUTH_TOKEN=$token scorecard --repo="$module" --format=json >"$out" 2>/dev/null || true
-    python3 - "$out" <<'PY' || fail=1
-import json, sys
-r = json.load(open(sys.argv[1]))
-# Checks the repository's own files decide. The rest need the repository to be
-# public, a first release, time, or a step by the owner (going-public.md).
-want = {"Binary-Artifacts": 10, "Dangerous-Workflow": 10, "Dependency-Update-Tool": 10,
-        "Fuzzing": 10, "License": 10, "Pinned-Dependencies": 9, "SAST": 10,
-        "Security-Policy": 10, "Token-Permissions": 10, "Vulnerabilities": 10}
-bad = 0
-for c in r["checks"]:
-    need = want.get(c["name"])
-    mark = "  " if need is None else ("ok" if c["score"] >= need else "NO")
-    bad += mark == "NO"
-    print(f"{mark} {c['score']:>3}  {c['name']}  ({c['reason'][:70]})")
-print(f"Overall: {r['score']} (the badge needs the repository public)")
-sys.exit(1 if bad else 0)
-PY
+    GITHUB_AUTH_TOKEN=$token scorecard --repo="$module" --format=json >"$out" || {
+        status=$?
+        echo "Hosted Scorecard: command failed (exit $status). Try: check the token and Scorecard diagnostics above." >&2
+        fail=1
+    }
+    python3 scripts/check-scorecard.py "$out" || fail=1
     rm -f "$out"
 fi
 

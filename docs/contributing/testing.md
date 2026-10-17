@@ -4,7 +4,7 @@ Every change keeps the tests green, and every bug fix adds the test that would h
 
 | Command | What it runs | Where |
 | --- | --- | --- |
-| `just test` | Unit tests with the race detector | Anywhere |
+| `just test` | Go unit tests with the race detector, plus offline public-readiness checker regression tests | Needs Python 3 |
 | `just cover` | The unit tests' coverage, which must stay at 70 % or more | Anywhere |
 | `go test ./internal/tui -run TestGolden -update` | Rewrites the golden screens after an intended change; review the diff | Anywhere |
 | `just fuzz` | Fuzzes the input filter and the frame reader for 30 s each (`just fuzz 5m` for longer) | Anywhere |
@@ -16,7 +16,7 @@ Every change keeps the tests green, and every bug fix adds the test that would h
 
 ## Quality bars
 
-Each bar is checked by a tool, locally and in CI; a change that breaks one does not merge.
+These are the project's quality expectations, with tools to check them locally and in CI. Not every CI job is a required branch-protection check. [Decision 0023](decisions/0023-protect-main.md) lists the checks required to merge into `main`.
 
 | Bar | Checked by |
 | --- | --- |

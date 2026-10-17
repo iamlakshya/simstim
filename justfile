@@ -70,6 +70,7 @@ install: build
 # Unit tests with the race detector.
 test:
     go test -race -count=1 ./...
+    python3 scripts/test-scorecard-check.py
 
 # The unit tests' coverage of internal/ without the launcher, counted across packages (the bar is 70 %).
 cover:
