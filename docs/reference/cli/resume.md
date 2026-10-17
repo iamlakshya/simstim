@@ -10,7 +10,7 @@ Start a session's agent again after it ended, and attach to it.
 simstim resume <host>/<session> [flags]
 ```
 
-Starts the agent of a session again, in the same session, after the agent ended. It works after the memory cap stopped the agent, after a crash or an exit, and after its holder was lost. The agent picks up its conversation with its own resume command, where it has one. The session keeps its ID, name, folder and worktree. On a host with systemd, anything that the agent left running in the session stops first. The secrets that hosts.toml gives the host are fetched again. Any other secret that the session started with needs `--secret`.
+Starts the agent of a session again, in the same session, after the agent ended. It works after the memory cap stopped the agent, after a crash or an exit, and after its holder was lost. The agent picks up its conversation with its own resume command, where it has one. Otherwise, a session that started with a command of its own runs that command again. The session keeps its ID, name, folder and worktree. On a host with systemd, anything that the agent left running in the session stops first. The secrets that hosts.toml gives the host are fetched again. Any other secret that the session started with needs `--secret`.
 
 ## Examples
 

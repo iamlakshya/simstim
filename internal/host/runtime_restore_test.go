@@ -1,12 +1,16 @@
 package host_test
 
 import (
+	"fmt"
+	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"syscall"
 	"testing"
 	"time"
 
+	"github.com/iamlakshya/simstim/internal/api"
 	"github.com/iamlakshya/simstim/internal/host"
 	"github.com/iamlakshya/simstim/internal/host/hosttest"
 )
@@ -127,7 +131,7 @@ func TestRestoreReportsAnAgentThatCannotStart(t *testing.T) {
 	crash(t, s.ID)
 	m := manifest(t, s.ID)
 	// The program was removed while the host was down.
-	m.Agent.Argv = []string{filepath.Join(h.Home, "removed-program")}
+	m.Agent.Command = []string{filepath.Join(h.Home, "removed-program")}
 	m.Run.BootID = "a boot before"
 	if err := m.Save(); err != nil {
 		t.Fatal(err)
@@ -166,4 +170,80 @@ func TestRestoredHolderDoesNotWaitForSecrets(t *testing.T) {
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
+}
+
+// A session that runs a command of its own comes back with that command
+// after a resume, and after each restore, not as a login shell. The
+// launcher sends no agent with a command. The client sends the shell agent,
+// its default. Codex reports its ID through hooks, which a command of its
+// own does not get, so it runs the command too. The host chooses the ID of
+// Claude Code, but a command of the user's own passes it only with the
+// placeholder. With it, the agent resumes that conversation, without the
+// command's arguments. Without it, no ID is recorded.
+func TestOwnCommandComesBack(t *testing.T) {
+	run := `echo ran >> "$HOME/runs"; exec sleep 60`
+	cmd := []string{"/bin/sh", "-c", run}
+	for _, c := range []struct {
+		name, agent string
+		argv        []string
+		resumes     bool
+	}{
+		{"no agent", "", cmd, false},
+		{"shell", "shell", cmd, false},
+		{"codex", "codex", cmd, false},
+		{"claude", "claude", cmd, false},
+		{"claude with its ID", "claude", []string{"/bin/sh", "-c", run, "{session_uuid}"}, true},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			h := hosttest.New(t)
+			runs := filepath.Join(h.Home, "runs")
+			fakeClaude(t, h, run)
+			s, err := host.New(host.NewArgs{Agent: c.agent, Name: "own", Cwd: "~", Argv: c.argv})
+			if err != nil {
+				t.Fatal(err)
+			}
+			want, why := cmd, "started its own command again"
+			if m := manifest(t, s.ID); c.resumes {
+				id := m.Agent.AgentSessionID
+				if id == "" || m.Agent.Argv[3] != id {
+					t.Fatalf("the ID %q is not the one that the command got: %q", id, m.Agent.Argv)
+				}
+				want, why = []string{"claude", "--resume", id}, "resumed its own session "+id
+			} else if m.Agent.AgentSessionID != "" {
+				t.Fatalf("an ID that the agent never got was recorded: %q", m.Agent.AgentSessionID)
+			}
+			waitRuns(t, runs, 1)
+			if err := syscall.Kill(live(t, s.ID).Run.AgentPID, syscall.SIGKILL); err != nil {
+				t.Fatal(err)
+			}
+			hosttest.WaitFor(t, 10*time.Second, "the command to end", func() bool {
+				m, err := host.LoadManifest(s.ID)
+				return err == nil && (m.Status.State == host.StateExited || m.Status.State == host.StateErrored)
+			})
+			r := resume(t, api.ResumeArgs{ID: s.ID})
+			if m := manifest(t, s.ID); !slices.Equal(m.Agent.Argv, want) || r.Why != why {
+				t.Fatalf("resume ran %q (%s), want %q (%s)", m.Agent.Argv, r.Why, want, why)
+			}
+			waitRuns(t, runs, 2)
+			// The second restore still has the command.
+			for n := 3; n <= 4; n++ {
+				crash(t, s.ID)
+				res := host.Restore(true)
+				if len(res) != 1 || res[0].Action != "restored" || !slices.Equal(res[0].Argv, want) || res[0].Why != why {
+					t.Fatalf("restore %d = %+v, want %q (%s)", n-2, res, want, why)
+				}
+				waitRuns(t, runs, n)
+			}
+		})
+	}
+}
+
+// waitRuns waits until the file at path has n lines, one for each run of a
+// command.
+func waitRuns(t *testing.T, path string, n int) {
+	t.Helper()
+	hosttest.WaitFor(t, 10*time.Second, fmt.Sprintf("run %d of the command", n), func() bool {
+		b, _ := os.ReadFile(path)
+		return strings.Count(string(b), "\n") == n
+	})
 }

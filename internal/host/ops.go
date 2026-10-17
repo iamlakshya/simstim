@@ -10,6 +10,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -158,6 +159,11 @@ func New(a NewArgs) (_ *SessionInfo, err error) {
 	m.Secrets = secrets
 	m.SetupHook, m.ResumeHook = sessHooks.setup, sessHooks.resume
 	m.RunHook = m.SetupHook
+	if len(a.Argv) > 0 {
+		// A restore or a resume runs the user's own command again, unless
+		// the agent resumes its own session by ID (resumeArgv).
+		m.Agent.Command = slices.Clone(argv)
+	}
 	if known {
 		m.Agent.ResumeArgv = agent.Resume
 		m.Agent.ContinueArgv = agent.Continue
@@ -165,7 +171,10 @@ func New(a NewArgs) (_ *SessionInfo, err error) {
 		if inline {
 			m.Agent.Inline = agent.Inline.Args
 		}
-		if agent.IDCapture == "choose" {
+		// The agent gets the ID only through its command. A command of the
+		// user's own passes it only with the {session_uuid} placeholder, and
+		// a resume by an ID that the agent never got would find nothing.
+		if agent.IDCapture == "choose" && passesID(argv, sessionUUID) {
 			m.Agent.AgentSessionID = sessionUUID
 			m.Agent.IDSource = "chosen"
 		}
@@ -219,6 +228,12 @@ func sessionEnv(a NewArgs, id string, login []string, agent agents.Agent, inline
 		}
 	}
 	return AgentEnv(login, extra), term
+}
+
+// passesID reports whether the command argv hands the agent the ID id, in
+// one of its arguments.
+func passesID(argv []string, id string) bool {
+	return slices.ContainsFunc(argv, func(s string) bool { return strings.Contains(s, id) })
 }
 
 // agentArgv fills in the agent's command: its variables, the login shell,

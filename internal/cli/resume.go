@@ -21,8 +21,9 @@ func resumeCmd() *cobra.Command {
 		Short: "Start a session's agent again after it ended, and attach to it",
 		Long: "Starts the agent of a session again, in the same session, after the agent ended. It works after\n" +
 			"the memory cap stopped the agent, after a crash or an exit, and after its holder was lost. The agent\n" +
-			"picks up its conversation with its own resume command, where it has one. The session keeps its ID,\n" +
-			"name, folder and worktree. On a host with systemd, anything that the agent left running in the\n" +
+			"picks up its conversation with its own resume command, where it has one. Otherwise, a session that\n" +
+			"started with a command of its own runs that command again. The session keeps its ID, name, folder\n" +
+			"and worktree. On a host with systemd, anything that the agent left running in the\n" +
 			"session stops first. The secrets that hosts.toml gives the host are fetched again. Any other secret\n" +
 			"that the session started with needs --secret.",
 		Example: "  " + brand.Name + " resume my-vps/app\n" +

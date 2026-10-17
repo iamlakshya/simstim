@@ -36,9 +36,10 @@ import (
 type ResumeResult = api.ResumeResult
 
 // Resume starts the agent of session a.ID again, after it ended, with the
-// agent's own resume command. It keeps the session's ID, name, folder,
-// worktree and manifest. The cap is the size asked for now, else the size
-// the session asked for before, else the host's default.
+// agent's own resume command, or the session's own command (resumeArgv).
+// It keeps the session's ID, name, folder, worktree and manifest. The cap
+// is the size asked for now, else the size the session asked for before,
+// else the host's default.
 func Resume(a api.ResumeArgs) (*ResumeResult, error) {
 	id := a.ID
 	if !validID(id) {

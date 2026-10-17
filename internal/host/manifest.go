@@ -67,8 +67,15 @@ type Manifest struct {
 
 // AgentInfo is the agent part of a manifest.
 type AgentInfo struct {
-	Kind           string    `json:"kind"`
-	Argv           []string  `json:"argv"`
+	Kind string `json:"kind"`
+	// Argv is the command of the agent's latest start. After a restore or a
+	// resume, it is the command that resumeArgv picked.
+	Argv []string `json:"argv"`
+	// Command is the command that the session started with, when the user
+	// gave it rather than the agent's launch command. A restore or a resume
+	// runs it again, unless the agent resumes its own session by ID. An
+	// older manifest has none.
+	Command        []string  `json:"command,omitempty"`
 	ResumeArgv     []string  `json:"resume_argv,omitempty"`
 	ContinueArgv   []string  `json:"continue_argv,omitempty"`
 	AgentSessionID string    `json:"agent_session_id,omitempty"`

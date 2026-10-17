@@ -22,9 +22,9 @@ func agentEnded(t *testing.T, id string) {
 }
 
 // resume starts the agent of an ended session again, in the same session,
-// with the cap asked for now. A session of new's default agent, the shell,
-// continues with a login shell. Its errors say what to try: an agent that
-// still runs, a session that does not exist, a bad size.
+// with the cap asked for now. A session that runs a command of its own runs
+// it again, with new's default agent, the shell, too. Its errors say what to
+// try: an agent that still runs, a session that does not exist, a bad size.
 func TestResumeCommand(t *testing.T) {
 	newTestHost(t)
 	short := newSession(t, "short", "/bin/sh", "-c", "sleep 3; exit 2")
@@ -34,7 +34,7 @@ func TestResumeCommand(t *testing.T) {
 
 	agentEnded(t, short)
 	out := ok(t, "resume", "box/short", "--detach", "--memory-max", "512M")
-	if want := "Resumed box/" + short + " (short, shell): continued the latest conversation in its folder.\n"; out != want {
+	if want := "Resumed box/" + short + " (short, shell): started its own command again.\n"; out != want {
 		t.Fatalf("resume printed %q, want %q", out, want)
 	}
 	if got := sessionCap(t, short); got != capFor(512<<20) {
@@ -58,10 +58,18 @@ func TestResumeWithAnOldHelper(t *testing.T) {
 	failsWithHint(t, "the helper on box is too old to resume a session", "host add box", "resume", "box/"+id)
 }
 
-// Without --detach, resume attaches to the session, as new does.
+// Without --detach, resume attaches to the session, as new does. A session
+// of the shell comes back as a login shell.
 func TestResumeAttaches(t *testing.T) {
 	newTestHost(t)
-	id := newSession(t, "again", "/bin/sh", "-c", "exit 1")
+	m := startedRE.FindStringSubmatch(ok(t, "new", "box", "--detach", "--name", "again"))
+	if m == nil {
+		t.Fatal("new started no session")
+	}
+	id := m[1]
+	if _, err := host.HolderRequest(id, "send", map[string]any{"text": "exit 1", "enter": true}, 3*time.Second); err != nil {
+		t.Fatal(err)
+	}
 	agentEnded(t, id)
 	term, done := inTerminal(t, "resume", "box/"+id)
 	term.WaitFor("\x1b[22;0t")

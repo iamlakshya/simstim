@@ -323,14 +323,14 @@ else:
 
         # After the cap stops the agent, resume starts it again in the same
         # session, with a bigger cap. Its first run leaves a process behind,
-        # and fills its cap. The mark makes the second run quiet. --agent ""
-        # keeps the command: the shell agent would continue with a login shell.
+        # and fills its cap. The mark makes the second run quiet: resume runs
+        # the session's own command again, not a login shell.
         # setsid keeps the process that the agent leaves out of the terminal's
         # session, so the end of the agent sends it no SIGHUP.
         mark = "$HOME/.cache/e2e-resume-%d" % os.getpid()
         sid_res = start("e2e-resume", "/bin/sh", "-c",
                         'if [ -e "%s" ]; then exec sleep 600; fi; mkdir -p "$HOME/.cache"; touch "%s"; setsid sleep 913 & exec tail /dev/zero' % (mark, mark),
-                        flags=("--agent", "", "--memory-max", "256M"))
+                        flags=("--memory-max", "256M"))
         created.append(sid_res)
         r_res, end = {}, time.time() + 60
         while time.time() < end and r_res.get("state") not in ("exited", "errored"):

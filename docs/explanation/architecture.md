@@ -211,7 +211,7 @@ Triggers: the detach key, closing the tab, `simstim kill` from elsewhere, or SIG
 1. A user unit `simstimd.service` (`WantedBy=default.target`, with linger on) runs `simstim-host restore` at boot.
 2. For each manifest whose `boot_id` differs from the current boot and whose holder is gone:
    1. start a new holder in its `cwd`;
-   2. run `resume_argv` with the stored `agent_session_id`, or `continue_argv` if the ID is unknown;
+   2. run `resume_argv` with the stored `agent_session_id`. Without the ID, run the session's own `command` again if the user gave one, or else `continue_argv`;
    3. count retries, with backoff.
 3. The old screen snapshot is printed above the resumed agent. It is only used if the same pinned vt build wrote it.
 4. The session is marked `restored`. A turn that was running when the host went down is not resumed.

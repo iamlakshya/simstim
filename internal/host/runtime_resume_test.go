@@ -162,7 +162,7 @@ func TestResumeReportsAnAgentThatCannotStart(t *testing.T) {
 	// Without a holder, nothing saves the manifest over this change.
 	crash(t, s.ID)
 	m := manifest(t, s.ID)
-	m.Agent.Argv = []string{filepath.Join(h.Home, "removed-program")}
+	m.Agent.Command = []string{filepath.Join(h.Home, "removed-program")}
 	if err := m.Save(); err != nil {
 		t.Fatal(err)
 	}
@@ -193,7 +193,7 @@ func TestBridgeResume(t *testing.T) {
 		t.Fatalf("sessions = %+v, %v", rows, err)
 	}
 	r, err := c.Resume(ctx, client.ResumeArgs{ID: s.ID, MemoryMax: api.MinMemoryMax})
-	if err != nil || r.Session.ID != s.ID || r.Why != "started fresh" || r.Session.MemoryMax != capFor(api.MinMemoryMax) {
+	if err != nil || r.Session.ID != s.ID || r.Why != "started its own command again" || r.Session.MemoryMax != capFor(api.MinMemoryMax) {
 		t.Fatalf("resume = %+v, %v", r, err)
 	}
 

@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -22,7 +23,8 @@ type RestoreResult = api.RestoreResult
 
 // Restore starts again each session that a host restart (or, with all, any
 // crash) left without a holder. Each agent resumes its own conversation with
-// its resume command; a turn that was running is not resumed.
+// its resume command, and a session's own command runs again (resumeArgv).
+// A turn that was running is not resumed.
 func Restore(all bool) []RestoreResult {
 	boot := BootID()
 	entries, _ := os.ReadDir(paths.SessionsDir())
@@ -95,7 +97,7 @@ type again struct {
 }
 
 // startAgain starts the agent of session m again, in a new holder. It runs
-// the agent's resume command and the session's resume hook, under the cap
+// the command from resumeArgv and the session's resume hook, under the cap
 // that m asks for. The old holder must be gone. It keeps the session's ID,
 // name, folder and worktree. It waits for the start, as New does. It
 // returns the command and what it does, such as "continued the latest
@@ -133,8 +135,18 @@ func startAgain(m *Manifest, a again) (argv []string, why string, err error) {
 	return argv, why, nil
 }
 
-// resumeArgv picks how to bring an agent back: its own session ID if known,
-// else "continue the latest in this folder", else a fresh start.
+// resumeArgv picks how to bring an agent back, in this order:
+//
+//  1. the agent's resume command with its own session ID, when the table
+//     gives a resume command and the session recorded an ID;
+//  2. the command that the user gave the session, if any;
+//  3. the agent's continue command: "continue the latest in this folder";
+//  4. a fresh start with the command of the last start.
+//
+// A resume by ID keeps the conversation, but drops the extra arguments of
+// the user's own command, as before Command. The user's command comes from
+// Command, which no start changes. An older manifest has no Command: a
+// command without an agent then starts fresh from Argv, which still holds it.
 func resumeArgv(m *Manifest) ([]string, string) {
 	vars := map[string]string{"agent_session_id": m.Agent.AgentSessionID}
 	var argv []string
@@ -142,6 +154,8 @@ func resumeArgv(m *Manifest) ([]string, string) {
 	switch {
 	case m.Agent.AgentSessionID != "" && len(m.Agent.ResumeArgv) > 0:
 		argv, why = agents.Expand(m.Agent.ResumeArgv, vars), "resumed its own session "+m.Agent.AgentSessionID
+	case len(m.Agent.Command) > 0:
+		argv, why = slices.Clone(m.Agent.Command), "started its own command again"
 	case len(m.Agent.ContinueArgv) > 0:
 		argv, why = append([]string(nil), m.Agent.ContinueArgv...), "continued the latest conversation in its folder"
 	default:
