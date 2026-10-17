@@ -178,3 +178,16 @@ func TestPongsGoWhereTheyBelong(t *testing.T) {
 		t.Fatalf("records = %+v, want the trace's ping alone", recs)
 	}
 }
+
+// A round trip shorter than a step of the clock, as on Windows, still
+// counts as a sample.
+func TestMeasuredIsNeverZero(t *testing.T) {
+	for _, d := range []time.Duration{0, -time.Nanosecond, time.Nanosecond} {
+		if got := measured(d); got != minRoundTrip {
+			t.Errorf("measured(%v) = %v, want %v", d, got, minRoundTrip)
+		}
+	}
+	if got := measured(31 * time.Millisecond); got != 31*time.Millisecond {
+		t.Errorf("measured(31ms) = %v", got)
+	}
+}

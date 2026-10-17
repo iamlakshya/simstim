@@ -20,6 +20,16 @@ const timedPingBit = 1 << 63
 // the bridge answers pings at all.
 var pongWait = 2 * time.Second
 
+// minRoundTrip is the shortest round trip that RoundTrip reports. Go's
+// monotonic clock on Windows moves in steps of about half a millisecond, so
+// a shorter round trip reads as 0. The launcher reads 0 as no sample, so a
+// round trip below one step counts as this.
+const minRoundTrip = time.Microsecond
+
+// measured is a round trip that RoundTrip reports: never less than
+// minRoundTrip.
+func measured(d time.Duration) time.Duration { return max(d, minRoundTrip) }
+
 // timedPing is one of RoundTrip's pings, on its way.
 type timedPing struct {
 	id   uint64
@@ -43,7 +53,7 @@ func (c *Conn) RoundTrip(ctx context.Context) (time.Duration, error) {
 	defer wait.Stop()
 	select {
 	case at := <-p.pong:
-		return at.Sub(p.sent), nil
+		return measured(at.Sub(p.sent)), nil
 	case <-ctx.Done():
 		return 0, ctx.Err()
 	case <-c.done:
@@ -59,7 +69,7 @@ func (c *Conn) RoundTrip(ctx context.Context) (time.Duration, error) {
 	}
 	select {
 	case at := <-p.pong:
-		return at.Sub(p.sent), nil
+		return measured(at.Sub(p.sent)), nil
 	default:
 		c.noPong.Store(true)
 		return d, nil
@@ -73,7 +83,7 @@ func (c *Conn) listTime(ctx context.Context) (time.Duration, error) {
 	if _, err := c.Sessions(ctx); err != nil {
 		return 0, err
 	}
-	return time.Since(start), nil
+	return measured(time.Since(start)), nil
 }
 
 // sendTimedPing sends a timed ping that RoundTrip waits for.
