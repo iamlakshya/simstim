@@ -4,6 +4,10 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ## [Unreleased]
 
+### Fixed
+
+- On Windows, a round trip shorter than about half a millisecond read as 0, which the launcher takes as no sample. The clock there moves in steps of that size. A round trip is now never less than 1 µs.
+
 ## [0.1.1] - 2026-10-17
 
 Sessions now fit a 4 GB host. A session warns before its memory cap stops it, and `resume` starts its agent again after a stop. The launcher shows why an agent ended, and the spread of each round trip. A debug mode records what a bug report needs, in one local bundle.
