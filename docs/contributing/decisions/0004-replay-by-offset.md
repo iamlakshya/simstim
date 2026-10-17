@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: accepted (its rule that a client in the same terminal always continues from its offset replaced by 0028)
 date: 2026-10-15
 ---
 

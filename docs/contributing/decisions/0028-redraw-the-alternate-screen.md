@@ -3,7 +3,7 @@ status: accepted
 date: 2026-10-17
 ---
 
-# 0024 Draw a session on the alternate screen again after a detach
+# 0028 Draw a session on the alternate screen again after a detach
 
 This record replaces one rule of [0004](0004-replay-by-offset.md): that a client which attaches again in the same terminal always continues from its byte offset. The rest of 0004 stays.
 

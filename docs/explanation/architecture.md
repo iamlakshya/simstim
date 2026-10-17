@@ -131,7 +131,7 @@ The full resume table for eight agents is in [the host runtime note](../research
 
 ### 3.3 Attach
 
-1. The client sends `attach{cols, rows, xpx, ypx, client_id, caps, last_offset}`. It sends no offset (−1) when the session was on the alternate screen at the last detach: detach left that screen (3.4), and the terminal threw its cells away ([0024](../contributing/decisions/0024-redraw-the-alternate-screen.md)). A reconnect inside one attach (3.5) never leaves it, and keeps its offset.
+1. The client sends `attach{cols, rows, xpx, ypx, client_id, caps, last_offset}`. It sends no offset (−1) when the session was on the alternate screen at the last detach: detach left that screen (3.4), and the terminal threw its cells away ([0028](../contributing/decisions/0028-redraw-the-alternate-screen.md)). A reconnect inside one attach (3.5) never leaves it, and keeps its offset.
 2. The holder decides how to catch the client up:
    - **Same client, offset still in the ring:** it sends the raw bytes from `last_offset`. Local scrollback continues with no duplicates, and missed notifications arrive. Repeated ones are collapsed.
    - **New client, no offset, or offset too old:** the vt child makes a snapshot at the client's size. The client pushes what the terminal shows into its scrollback with blank lines, then the snapshot redraws the screen, including the kitty keyboard flags and other modes.
