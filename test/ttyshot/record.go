@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/charmbracelet/x/vt"
 )
@@ -194,7 +195,8 @@ func pieceCSS(pieces []*rowPiece, end time.Duration) string {
 }
 
 // writeCast writes an asciicast v2 file: a header line, then one line per
-// chunk of output.
+// chunk of output. Each chunk ends on a whole character, so its JSON string
+// holds valid UTF-8.
 func writeCast(path string, events []castEvent, cols, rows int) error {
 	var b strings.Builder
 	head, _ := json.Marshal(map[string]any{
@@ -203,7 +205,7 @@ func writeCast(path string, events []castEvent, cols, rows int) error {
 	})
 	b.Write(head)
 	b.WriteByte('\n')
-	for _, e := range events {
+	for _, e := range wholeChars(events) {
 		line, _ := json.Marshal([]any{roundMS(e.at), "o", e.data})
 		b.Write(line)
 		b.WriteByte('\n')
@@ -212,6 +214,43 @@ func writeCast(path string, events []castEvent, cols, rows int) error {
 		return fmt.Errorf("record: %w", err)
 	}
 	return nil
+}
+
+// wholeChars moves the start of a character that a read split into the next
+// event, so each event ends on a character boundary. A JSON string must be
+// valid UTF-8, and json.Marshal replaces each half of a split character with
+// U+FFFD. The events joined keep every byte, in order. An event left empty
+// is dropped, and the last event keeps a tail that nothing finishes.
+func wholeChars(events []castEvent) []castEvent {
+	out := make([]castEvent, 0, len(events))
+	carry := ""
+	for i, e := range events {
+		data := carry + e.data
+		cut := len(data)
+		if i < len(events)-1 {
+			cut = charBoundary(data)
+		}
+		carry = data[cut:]
+		if cut > 0 {
+			out = append(out, castEvent{at: e.at, data: data[:cut]})
+		}
+	}
+	return out
+}
+
+// charBoundary is the length of s without a character that s starts but
+// does not finish. Only the last three bytes can hold such a start.
+func charBoundary(s string) int {
+	for i := len(s) - 1; i >= 0 && i > len(s)-utf8.UTFMax; i-- {
+		if !utf8.RuneStart(s[i]) {
+			continue
+		}
+		if utf8.FullRuneInString(s[i:]) {
+			return len(s)
+		}
+		return i
+	}
+	return len(s)
 }
 
 func roundMS(d time.Duration) float64 { return float64(d.Milliseconds()) / 1000 }

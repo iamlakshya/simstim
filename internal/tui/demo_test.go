@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/charmbracelet/x/ansi"
+	"github.com/charmbracelet/x/vt"
 
 	"github.com/iamlakshya/simstim/internal/client"
 )
@@ -49,6 +50,43 @@ func TestDemoBackend(t *testing.T) {
 	}
 	if hosts, _ := newDemoBackend(true).LoadHosts(); len(hosts) != 0 {
 		t.Fatal("the empty demo has hosts")
+	}
+}
+
+// The demo's agent shows what the user types in its input line, with the
+// cursor after it, and Enter sends the line into the transcript.
+func TestDemoAgentShowsWhatIsTyped(t *testing.T) {
+	a := &demoAgent{s: newDemoBackend(false).sessions["homelab"][0]}
+	for _, k := range []string{"run the testz", "\x7f", "s", "\x1b[A", "\x01"} {
+		a.key([]byte(k))
+	}
+	if got := a.key([]byte("!")); got != keyTyped {
+		t.Errorf("a typed key changed %d, want the input line", got)
+	}
+	// A typed key draws only the input line, over the screen before it.
+	out := a.screen(90, 30) + a.inputRow(90, 30)
+	emu := vt.NewEmulator(90, 30)
+	_, _ = emu.WriteString(out)
+	input := renderScreen([]byte(out), 90, 30).lines[27].String()
+	if !strings.HasPrefix(input, "│ > run the tests! ") || !strings.HasSuffix(input, "│") || ansi.StringWidth(input) != 90 {
+		t.Errorf("the input line is %q", input)
+	}
+	if pos := emu.CursorPosition(); pos.Y != 27 || pos.X != 4+len("run the tests!") {
+		t.Errorf("the cursor is at %+v, want after the text", pos)
+	}
+	if got := a.key([]byte("\r")); got != keySent {
+		t.Errorf("Enter changed %d, want the transcript", got)
+	}
+	var text strings.Builder
+	shot := renderScreen([]byte(a.screen(90, 30)), 90, 30)
+	for _, l := range shot.lines {
+		text.WriteString(l.String() + "\n")
+	}
+	if !strings.Contains(text.String(), " > run the tests!\n\n ∴ Working") {
+		t.Errorf("the sent prompt is not in the transcript:\n%s", text.String())
+	}
+	if input := strings.TrimRight(shot.lines[27].String(), " │"); input != "│ >" {
+		t.Errorf("the input line is not empty after Enter: %q", input)
 	}
 }
 

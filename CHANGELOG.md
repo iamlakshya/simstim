@@ -7,6 +7,8 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 ### Fixed
 
 - On Windows, a round trip shorter than about half a millisecond read as 0, which the launcher takes as no sample. The clock there moves in steps of that size. A round trip is now never less than 1 µs.
+- In `demo`, the made-up agent of a session now shows what you type in its input line, with the cursor after the text. Enter sends the line to its transcript. It used to ignore every key but the detach key, so the README's attach demo never showed the prompt that its tape types. The cursor also sat on the prompt box's lower border.
+- The README's attach demo showed "���" in its asciicast. `ttyshot` wrote each read of the program's output as one event, and a read can split a character in two. Each event now ends on a whole character, and the events keep every byte. The animated SVG never had the fault, because it comes from the terminal's cells.
 
 ## [0.1.1] - 2026-10-17
 
