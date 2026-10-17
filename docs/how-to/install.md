@@ -29,14 +29,16 @@ Each release builds a Homebrew cask, but the tap is not published yet. Until it 
 
 ## From source
 
+Install the macOS or Linux [bootstrap prerequisites](../../CONTRIBUTING.md#set-up) first. You do not need just on PATH yet:
+
 ```sh
 git clone https://github.com/iamlakshya/simstim
 cd simstim
 scripts/setup.sh
-just build
+.tools/bin/just build
 ```
 
-The client is `bin/simstim`.
+The client is `bin/simstim`. To run `just` and the other installed tools by name in this shell, run `export PATH="$PWD/.tools/bin:$PATH"` from the checkout. The setup script cannot change your shell's PATH.
 
 ## Check a release by hand
 
