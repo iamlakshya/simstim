@@ -16,7 +16,7 @@ Run `just public-check` before a public-readiness review. Then read the README a
 
 The name, private-detail, history, secret, licence, workflow and docs checks inspect the local checkout. The Scorecard step instead queries the hosted repository using a GitHub token (`GITHUB_TOKEN`, `GITHUB_AUTH_TOKEN` or `gh auth login`); it does not score unpushed local edits. It requires selected checks to meet their thresholds, including 9 of 10 for Pinned-Dependencies because of the SLSA exception, not a perfect overall score.
 
-An empty, incomplete or malformed Scorecard report fails. Every required check must appear once and meet its threshold; a failed Scorecard command also fails the run even if it prints a complete report. `python3 scripts/test-scorecard-check.py` tests these cases offline, and runs in `just test`. CI currently runs the Go tests directly, so this Python suite must also be run locally before pushing.
+An empty, incomplete or malformed Scorecard report fails. Every required check must appear once and meet its threshold; a failed Scorecard command also fails the run even if it prints a complete report. `python3 scripts/test-scorecard-check.py` tests these cases offline, and runs in both `just test` and CI's required `test` job. The regression suite needs no GitHub token or hosted Scorecard access.
 
 The normal docs check (`just docs-check`, also called by `public-check`) builds the site and checks internal links, generated pages, Markdown, spelling, prose and documented commands. External links need `just docs-check --external`. Neither check completes the owner-only tasks below.
 

@@ -51,6 +51,8 @@ jobs:
         run: scripts/check-private.sh
       - name: Shell script check
         run: scripts/check-scripts.sh
+      - name: Public-readiness checker regression tests (offline)
+        run: python3 scripts/test-scorecard-check.py
       - name: No Go source file over 500 lines
         run: scripts/check-size.sh
       - name: Generated docs are current
