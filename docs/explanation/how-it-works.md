@@ -61,7 +61,7 @@ simstim draws no copy. Your terminal gets the agent's own bytes. So Shift+Enter,
 
 If the connection drops, because the laptop slept or the network changed, the client reconnects by itself. It tells the holder the last byte it saw, and the holder sends everything after it. Your scrollback goes on with nothing lost and nothing twice.
 
-If you come back from another machine, or after so long that the holder no longer has that byte, the screen is drawn again from the shadow terminal.
+If you come back from another machine, or after so long that the holder no longer has that byte, the screen is drawn again from the shadow terminal. So is a full-screen agent, such as Claude Code in its fullscreen mode, when you attach again after a detach: your terminal does not keep a full-screen program's screen once you leave it.
 
 ## Shadow terminal
 

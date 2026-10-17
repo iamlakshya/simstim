@@ -2,12 +2,15 @@ package hosttest
 
 import (
 	"bytes"
+	"io"
 	"os"
+	"strings"
 	"sync"
 	"syscall"
 	"testing"
 	"time"
 
+	"github.com/charmbracelet/x/vt"
 	"github.com/creack/pty"
 )
 
@@ -96,6 +99,28 @@ func tail(b []byte, n int) []byte {
 		return b[len(b)-n:]
 	}
 	return b
+}
+
+// Screen returns what a blank terminal of cols by rows shows after out: the
+// text of each row, and whether it is on the alternate screen.
+func Screen(out []byte, cols, rows int) (lines []string, alt bool) {
+	e := vt.NewEmulator(cols, rows)
+	// The emulator writes replies to queries into a pipe: drain and drop them.
+	go func() { _, _ = io.Copy(io.Discard, e) }()
+	_, _ = e.Write(out)
+	var b strings.Builder
+	for y := range rows {
+		b.Reset()
+		for x := range cols {
+			if c := e.CellAt(x, y); c != nil && c.Content != "" {
+				b.WriteString(c.Content)
+			} else if c == nil || c.Width != 0 {
+				b.WriteByte(' ')
+			}
+		}
+		lines = append(lines, strings.TrimRight(b.String(), " "))
+	}
+	return lines, e.IsAltScreen()
 }
 
 // Type sends keys, as the user's terminal would.

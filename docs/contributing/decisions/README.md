@@ -7,7 +7,7 @@ Each record explains one choice: the context, the options and the outcome. Recor
 | [0001](0001-go-and-bubble-tea.md) | Go for the client and host helper, Bubble Tea v2 for the screens | Accepted |
 | [0002](0002-own-holder-per-session.md) | Our own holder process per session, not zmx | Accepted |
 | [0003](0003-system-openssh.md) | The system OpenSSH client as the only transport | Accepted |
-| [0004](0004-replay-by-offset.md) | Reattach by byte offset, with a full redraw as the fallback | Accepted |
+| [0004](0004-replay-by-offset.md) | Reattach by byte offset, with a full redraw as the fallback (a session on the alternate screen is drawn again, 0024) | Accepted |
 | [0005](0005-apache-2-and-dco.md) | Apache-2.0 with a DCO (DCO part replaced by 0010) | Accepted |
 | [0006](0006-defaults.md) | Detach key, image key and memory cap defaults | Accepted |
 | [0007](0007-name-in-one-place.md) | The product name lives in one package | Accepted |
@@ -27,5 +27,6 @@ Each record explains one choice: the context, the options and the outcome. Recor
 | [0021](0021-site-design.md) | The site: a landing page in the launcher's look, docs kept on Hextra, and a three.js field that loads last (its toolchain, landing sections, field, look and motion setting replaced by 0022) | Accepted |
 | [0022](0022-site-rebuild.md) | The site: Starlight for the docs, three tabs, and a landing page that tells its story in a drawing (replaces the toolchain in 0015, parts of 0021, and 0012's hold on the website) | Accepted |
 | [0023](0023-protect-main.md) | Changes reach main only through a pull request that passes CI | Accepted |
+| [0024](0024-redraw-the-alternate-screen.md) | Draw a session on the alternate screen again after a detach (replaces part of 0004) | Accepted |
 
 Write a new record from [the template](template.md).

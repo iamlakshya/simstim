@@ -210,14 +210,7 @@ func TestAttachReplaysWhatTheTerminalMissed(t *testing.T) {
 	if !r.state.Valid || !r.state.Modes.Private[2004] {
 		t.Fatalf("state = %+v, want the session's bracketed paste mode", r.state)
 	}
-	if _, err := host.HolderRequest(id, "send", map[string]any{"text": "x"}, 3*time.Second); err != nil {
-		t.Fatal(err)
-	}
-	hosttest.WaitFor(t, 5*time.Second, "TWO in the session", func() bool {
-		raw, _ := host.HolderRequest(id, "peek", nil, time.Second)
-		var p struct{ Data []byte }
-		return json.Unmarshal(raw, &p) == nil && bytes.Contains(p.Data, []byte("TWO"))
-	})
+	sendAndWait(t, id, "TWO")
 	// The same terminal attaches again: it gets only what it missed, after
 	// the session's modes are put back, with no redraw.
 	r.term.Clear()
@@ -230,6 +223,46 @@ func TestAttachReplaysWhatTheTerminalMissed(t *testing.T) {
 	}
 	if !bytes.Contains(out, []byte("\x1b[?2004h")) {
 		t.Errorf("the session's modes were not put back: %q", out)
+	}
+}
+
+// sendAndWait types a key into the session while no client is attached, and
+// waits until the session's output holds want.
+func sendAndWait(t *testing.T, id, want string) {
+	t.Helper()
+	if _, err := host.HolderRequest(id, "send", map[string]any{"text": "x"}, 3*time.Second); err != nil {
+		t.Fatal(err)
+	}
+	hosttest.WaitFor(t, 5*time.Second, want+" in the session", func() bool {
+		raw, _ := host.HolderRequest(id, "peek", nil, time.Second)
+		var p struct{ Data []byte }
+		return json.Unmarshal(raw, &p) == nil && bytes.Contains(p.Data, []byte(want))
+	})
+}
+
+// Leaving the alternate screen on detach throws its cells away, so the same
+// terminal cannot continue from its offset: the bytes missed since would
+// paint a few cells on a blank screen (#36). It gets the whole screen again.
+func TestAttachRedrawsTheAlternateScreen(t *testing.T) {
+	r := newAttachRun(t)
+	// A full-screen program that, like Claude Code's, then redraws only what changed.
+	id := r.session("stty raw -echo; printf '\\033[?1049h\\033[HTOP\\033[5;3HMIDDLE'; head -c 1 >/dev/null; printf '\\033[9;1HNEW'; exec sleep 60")
+	done := r.attach(context.Background(), id, client.DefaultSettings())
+	r.term.WaitFor("MIDDLE")
+	r.term.Type(detach)
+	r.end(done)
+	if !r.state.Valid || !r.state.Modes.AltScreen {
+		t.Fatalf("state = %+v, want the session on the alternate screen", r.state)
+	}
+	sendAndWait(t, id, "NEW")
+	r.term.Clear()
+	done = r.attach(context.Background(), id, client.DefaultSettings())
+	out := r.term.WaitFor("NEW")
+	r.term.Type(detach)
+	r.end(done)
+	lines, alt := hosttest.Screen(out, 80, 24)
+	if !alt || lines[0] != "TOP" || lines[4] != "  MIDDLE" || lines[8] != "NEW" {
+		t.Errorf("after the attach, the alternate screen = %v, shows %q; want TOP, MIDDLE and NEW", alt, lines[:9])
 	}
 }
 

@@ -11,6 +11,7 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ### Fixed
 
+- Attaching again, in the same terminal, to an agent on the alternate screen (such as Claude Code in its fullscreen mode) showed a mostly blank screen with a few pieces of its UI. Detach leaves the alternate screen, and the terminal throws its cells away, so the client now asks for the whole screen again instead of only the bytes it missed (decision 0024, [#36](https://github.com/iamlakshya/simstim/issues/36)).
 - A release's notes on GitHub came out empty: the provenance job's upload replaced the draft's body. A last job now writes the notes from the CHANGELOG, with links made absolute (`LINK_BASE` in `scripts/release-notes.sh`) so they work on the release's page.
 
 ## [0.1.0] - 2026-10-16

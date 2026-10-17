@@ -20,7 +20,9 @@ import (
 
 // AttachState is what the client remembers about the last session attached in
 // this terminal, so the next attach can continue from the exact byte the
-// terminal already shows instead of redrawing everything.
+// terminal already shows instead of redrawing everything. A session that was
+// on the alternate screen is drawn again: detach left that screen, and the
+// terminal does not keep it.
 type AttachState struct {
 	Key    string // host/session
 	Offset int64
@@ -99,7 +101,9 @@ func Attach(ctx context.Context, o AttachOptions) (AttachResult, error) {
 		key: o.Host.Name + "/" + o.Session, swallow: map[int]bool{}}
 
 	last := int64(-1)
-	if o.State.Valid && o.State.Key == a.key {
+	// Detach left the alternate screen, and the terminal threw its cells away:
+	// the screen must be drawn again, not continued from the offset.
+	if o.State.Valid && o.State.Key == a.key && !o.State.Modes.AltScreen {
 		last = o.State.Offset
 	}
 	conn, err := Dial(ctx, o.Host, o.Interactive)

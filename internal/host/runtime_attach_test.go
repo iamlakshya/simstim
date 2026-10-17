@@ -182,6 +182,27 @@ func TestSnapshotFromTheShadowTerminal(t *testing.T) {
 	}
 }
 
+// A client that left the alternate screen on detach asks for a snapshot. It
+// must put the terminal back on the alternate screen, with every cell (#36).
+func TestSnapshotOfTheAlternateScreen(t *testing.T) {
+	vt := host.ShadowVT()
+	if vt == "" {
+		t.Skip("the shadow terminal is not built: install Zig 0.16 or set VT_BINARY (see vt/README.md)")
+	}
+	h := hosttest.New(t)
+	defer host.SetExecutable(h.Install("test", vt))()
+	s := start(t, "alt", "/bin/sh", "-c", "printf 'MAIN\\033[?1049h\\033[HTOP\\033[5;3HMIDDLE'; exec sleep 60")
+	waitOutput(t, s.ID, "MIDDLE")
+	b := newRawBridge(t)
+	if a := b.attach(s.ID, -1, 80, 24); a.Mode != "snapshot" {
+		t.Fatalf("attached = %+v, want a snapshot", a)
+	}
+	lines, alt := hosttest.Screen(b.next(proto.TSnapshot).Payload, 80, 24)
+	if !alt || lines[0] != "TOP" || lines[4] != "  MIDDLE" {
+		t.Errorf("after the snapshot, the alternate screen = %v, shows %q; want TOP and MIDDLE", alt, lines[:5])
+	}
+}
+
 // A client gets all of the agent's output before it hears that the agent
 // ended: the last words of a program are often why it ended. The output is
 // written just before the exit, so the end races with the reading of it;
