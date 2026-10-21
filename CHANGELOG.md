@@ -10,6 +10,7 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ### Fixed
 
+- The toolchain is now Go 1.26.10. It fixes a `crypto/x509` issue that govulncheck found (GO-2026-6809), in which certificate checks trusted intermediate certificates that are known to be compromised.
 - CI's required `test` job now runs the offline public-readiness checker regression tests, rather than leaving them only in `just test`.
 - The security, architecture and restore guides now describe the shipped trust boundary, multi-client input, bounded replay and reboot behaviour. They no longer promise an untrusted-host filter, cached client replies, live holder upgrades or a screen saved across reboot. An accessible Mermaid architecture diagram replaces the introductory text drawing. The site now treats Markdown images as public assets rather than source imports, so the diagram builds under both root and versioned paths.
 - The manual cosign verification guide now requires this repository's release workflow and the exact selected tag, rather than accepting any GitHub workflow identity. It downloads matching assets, checks the selected archive's checksum by its complete name, and explains the GitHub CLI requirement for attestation verification.
