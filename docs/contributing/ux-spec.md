@@ -273,7 +273,7 @@ Every dialog is a sheet. It rises from the bottom of the screen over the dimmed 
 | Peek | `space` | The session's last screen, refreshed while the agent runs. ↑↓ move to the next session, and Enter attaches. For an agent that has ended, it shows no memory, and Enter keeps it open. |
 | Commands | `ctrl+o` | The palette: a filter, then every command as plain words ("New session", "Peek at the screen") with its key in cyan. A command that cannot run says why, faint. |
 | Keys | `?` | Every key that works here, in two columns, built from the live registry. It leaves out `?` itself. |
-| Host details | `i` | Route, system, helper, agents, limits; `t` test, `s` shell, `r` reconnect, `x` remove |
+| Host details | `i` | Route, system, helper, agents with their versions (wrapped under the label when they do not fit), limits; `t` test, `s` shell, `r` reconnect, `x` remove |
 | Add a host | `a` | The wizard (2.10) |
 | Set up | Enter on the first-run screen, `s` | The guided setup (2.12) |
 

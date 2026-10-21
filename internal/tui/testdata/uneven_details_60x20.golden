@@ -8,13 +8,13 @@
 
     ssh atlas-dev · Debian 13 · 4 CPUs · claude, codex, o…
 
-
   ── atlas-dev ──── 31/100ms · 4 sessions · 1 needs you ──
 
     Route      atlas-dev
     System     Debian 13 · amd64 · 4 CPUs · 8 GiB · 61 …
     Helper     simstim-host 0.1.0
-    Agents     claude · codex · opencode · shell
+    Agents     claude 2.1.3 · codex 0.46.0
+               opencode 1.0.12 · shell
     Limits     6.1 GiB for sessions · 4 sessions
 
     t test   s shell   r reconnect   x remove   esc back

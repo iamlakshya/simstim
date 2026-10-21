@@ -189,6 +189,9 @@ func runDoctor(args []string) error {
 	}
 	found := make([]string, 0, len(d.Agents))
 	for k := range d.Agents {
+		if v := d.AgentVersions[k]; v != "" {
+			k += " " + v
+		}
 		found = append(found, k)
 	}
 	sort.Strings(found)

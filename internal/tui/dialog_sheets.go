@@ -126,14 +126,24 @@ func (d *details) view(m *Model) string {
 		}
 		var names []string
 		for k := range i.Agents {
+			if v := i.AgentVersions[k]; v != "" {
+				k += " " + v
+			}
 			names = append(names, k)
 		}
 		sort.Strings(names)
 		body = append(body,
 			field("System", strings.Join(sys, dot)),
-			field("Helper", brand.HostBinary+" "+i.Version),
-			field("Agents", strings.Join(names, dot)),
-			field("Limits", fmtSize(i.MemoryMax)+" for sessions"+dot+plural(len(h.sessions), "session", "sessions")))
+			field("Helper", brand.HostBinary+" "+i.Version))
+		// The agents go on more lines rather than lose their versions.
+		for n, l := range joinWrap(names, cw-labelW) {
+			k := ""
+			if n == 0 {
+				k = "Agents"
+			}
+			body = append(body, field(k, l))
+		}
+		body = append(body, field("Limits", fmtSize(i.MemoryMax)+" for sessions"+dot+plural(len(h.sessions), "session", "sessions")))
 	} else {
 		msg, _ := errText(h.err)
 		if msg == "" {

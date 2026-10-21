@@ -566,7 +566,8 @@ func labBackend() *fakeBackend {
 		latency: 9 * time.Millisecond,
 		info: client.HostInfo{User: "dev", Distro: "Debian 13", Arch: "amd64", CPUs: 4, MemTotal: 8 << 30, DiskFree: 61 << 30,
 			Version: "0.1.0", MemoryMax: 6551502848,
-			Agents: map[string]string{"claude": "/usr/local/bin/claude", "codex": "/usr/local/bin/codex", "opencode": "/usr/bin/opencode", "shell": "/usr/bin/zsh"}},
+			Agents:        map[string]string{"claude": "/usr/local/bin/claude", "codex": "/usr/local/bin/codex", "opencode": "/usr/bin/opencode", "shell": "/usr/bin/zsh"},
+			AgentVersions: map[string]string{"claude": "2.1.3", "codex": "0.46.0", "opencode": "1.0.12"}},
 		sessions: []client.Session{
 			{ID: "s1", Name: "docs-pass", Agent: "opencode", Cwd: "/home/dev/src/docs", State: api.StateExited, ExitCode: code(0), Since: ago(3 * time.Hour), CreatedAt: ago(5 * time.Hour)},
 			{ID: "s2", Name: "notes", Agent: "shell", Cwd: "/home/dev", State: api.StateIdle, Since: ago(time.Hour), CreatedAt: ago(26 * time.Hour), Alive: true},

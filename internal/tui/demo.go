@@ -201,7 +201,8 @@ func (c *demoConn) Doctor(context.Context) (client.HostInfo, error) {
 	return client.HostInfo{Hostname: c.host, User: "me", OS: "linux", Arch: "amd64", Distro: "Debian GNU/Linux 13 (trixie)", CPUs: 4,
 		MemTotal: 16 << 30, DiskFree: 61 << 30, Version: "0.1.0", MemoryMax: 14282653696,
 		Agents: map[string]string{"claude": "/home/me/.local/bin/claude", "codex": "/home/me/.local/bin/codex",
-			"opencode": "/home/me/.opencode/bin/opencode", "gemini": "/usr/local/bin/gemini", "shell": "/bin/bash"}}, nil
+			"opencode": "/home/me/.opencode/bin/opencode", "gemini": "/usr/local/bin/gemini", "shell": "/bin/bash"},
+		AgentVersions: map[string]string{"claude": "2.1.3", "codex": "0.46.0", "opencode": "1.0.12", "gemini": "0.9.0"}}, nil
 }
 
 func (c *demoConn) Peek(_ context.Context, id string, _ int) ([]byte, int, int, error) {

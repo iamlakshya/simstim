@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -113,16 +114,8 @@ func loginState(s agents.Setup, bin string, env []string, home string) (string, 
 func runStatus(argv []string, bin string, env []string) int {
 	ctx, cancel := context.WithTimeout(context.Background(), loginStatusTimeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, bin, argv[1:]...)
+	cmd := agentCmd(ctx, bin, argv[1:], env)
 	cmd.Args[0] = argv[0]
-	cmd.Env = env
-	if home, err := os.UserHomeDir(); err == nil {
-		cmd.Dir = home
-	}
-	// Some programs find their own install folder from their path: let them.
-	if dir := filepath.Dir(bin); dir != "." {
-		cmd.Env = append(append([]string(nil), env...), "PATH="+dir+string(filepath.ListSeparator)+envValue(env, "PATH"))
-	}
 	err := cmd.Run()
 	if ctx.Err() != nil {
 		return -1
@@ -135,4 +128,66 @@ func runStatus(argv []string, bin string, env []string) int {
 		return ee.ExitCode()
 	}
 	return -1
+}
+
+// agentCmd is the program at bin with args, run from the home folder with
+// the login shell's environment env.
+func agentCmd(ctx context.Context, bin string, args, env []string) *exec.Cmd {
+	cmd := exec.CommandContext(ctx, bin, args...)
+	cmd.Env = env
+	if home, err := os.UserHomeDir(); err == nil {
+		cmd.Dir = home
+	}
+	// Some programs find their own install folder from their path: let them.
+	if dir := filepath.Dir(bin); dir != "." {
+		cmd.Env = append(append([]string(nil), env...), "PATH="+dir+string(filepath.ListSeparator)+envValue(env, "PATH"))
+	}
+	return cmd
+}
+
+// versionTimeout bounds an agent's --version.
+const versionTimeout = 5 * time.Second
+
+// versionNumber finds the version in what --version prints, such as 2.1.3
+// in "2.1.3 (Claude Code)" or 0.46.0 in "codex-cli 0.46.0".
+var versionNumber = regexp.MustCompile(`\d+(\.\d+)+([-+][0-9A-Za-z.-]+)?`)
+
+// AgentVersions asks each program in bins (by agent kind) for its version,
+// all at once, and returns them by kind. A program that fails, takes too
+// long or prints no version is left out.
+func AgentVersions(bins map[string]string, env []string) map[string]string {
+	out := make(map[string]string, len(bins))
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	for kind, bin := range bins {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if v := agentVersion(bin, env); v != "" {
+				mu.Lock()
+				out[kind] = v
+				mu.Unlock()
+			}
+		}()
+	}
+	wg.Wait()
+	return out
+}
+
+// agentVersion runs `bin --version` and returns the version on the first
+// line it prints, or "" when there is none.
+func agentVersion(bin string, env []string) string {
+	ctx, cancel := context.WithTimeout(context.Background(), versionTimeout)
+	defer cancel()
+	cmd := agentCmd(ctx, bin, []string{"--version"}, env)
+	// A child that keeps the output open must not hold up the doctor.
+	cmd.WaitDelay = time.Second
+	b, err := cmd.Output()
+	// ErrWaitDelay means the program succeeded, but left a child holding
+	// its output open: what it printed is still its version.
+	if err != nil && !errors.Is(err, exec.ErrWaitDelay) {
+		return ""
+	}
+	first, _, _ := strings.Cut(strings.TrimSpace(string(b)), "\n")
+	return versionNumber.FindString(first)
 }

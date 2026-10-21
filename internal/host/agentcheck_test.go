@@ -1,6 +1,7 @@
 package host
 
 import (
+	"maps"
 	"os"
 	"path/filepath"
 	"testing"
@@ -57,6 +58,32 @@ func TestCheckAgentLogin(t *testing.T) {
 	unk.Setup.LoginStatus = nil
 	if c := checkAgent(unk, env, home); c.Login != api.LoginUnknown {
 		t.Fatalf("agent with no login data: %+v", c)
+	}
+}
+
+func TestAgentVersions(t *testing.T) {
+	bin := t.TempDir()
+	// prog writes a program that runs script when called with --version.
+	prog := func(name, script string) string {
+		p := filepath.Join(bin, name)
+		s := "#!/bin/sh\n[ \"$1\" = --version ] || exit 2\n" + script + "\n"
+		if err := os.WriteFile(p, []byte(s), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	got := AgentVersions(map[string]string{
+		"claude": prog("claude", `echo "2.1.3 (Claude Code)"`),
+		"codex":  prog("codex", `echo "codex-cli 0.46.0"`),
+		"aider":  prog("aider", `echo; echo "aider 0.86.1"`),
+		"cursor": prog("agent", `echo "2025.10.02-a1b2c3d"`),
+		"child":  prog("child", `sleep 3 & echo "1.4.0"`),
+		"failed": prog("failed", `echo "1.0.0"; exit 1`),
+		"none":   prog("none", `echo "usage: none [flags]"`),
+	}, []string{"PATH=/usr/bin:/bin"})
+	want := map[string]string{"claude": "2.1.3", "codex": "0.46.0", "aider": "0.86.1", "cursor": "2025.10.02-a1b2c3d", "child": "1.4.0"}
+	if !maps.Equal(got, want) {
+		t.Fatalf("versions: got %v, want %v", got, want)
 	}
 }
 

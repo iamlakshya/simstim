@@ -254,3 +254,22 @@ func wrap(s string, w int) []string {
 	}
 	return out
 }
+
+// joinWrap joins items with dots, in lines of at most w cells. It breaks
+// only between items, so an item never splits. It returns one empty line
+// for no items.
+func joinWrap(items []string, w int) []string {
+	lines := []string{""}
+	for _, s := range items {
+		n := len(lines) - 1
+		switch {
+		case lines[n] == "":
+			lines[n] = s
+		case cells(lines[n]+dot+s) <= w:
+			lines[n] += dot + s
+		default:
+			lines = append(lines, s)
+		}
+	}
+	return lines
+}

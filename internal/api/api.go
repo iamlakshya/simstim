@@ -139,6 +139,10 @@ type HostInfo struct {
 	Agents    map[string]string `json:"agents"`
 	Checks    []Check           `json:"checks"`
 	MemoryMax int64             `json:"memory_max"`
+	// AgentVersions is each agent's version by kind, as its `--version`
+	// says. An agent that gives none is missing, and so is the shell. An
+	// older helper sends no versions.
+	AgentVersions map[string]string `json:"agent_versions,omitempty"`
 	// AgentChecks come from a request of their own ("agents.check"), which
 	// is slower: the client adds them for `host doctor`.
 	AgentChecks []AgentCheck `json:"agent_checks,omitempty"`

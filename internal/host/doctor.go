@@ -50,6 +50,7 @@ func Doctor() HostInfo {
 		login = os.Environ()
 	}
 	path := envValue(login, "PATH")
+	bins := map[string]string{} // the agents' own programs, without the shell
 	for _, a := range agents.Table {
 		for _, b := range a.Binaries {
 			if b == "$SHELL" {
@@ -57,11 +58,12 @@ func Doctor() HostInfo {
 				break
 			}
 			if p, err := lookPath(b, path); err == nil {
-				info.Agents[a.Kind] = p
+				info.Agents[a.Kind], bins[a.Kind] = p, p
 				break
 			}
 		}
 	}
+	info.AgentVersions = AgentVersions(bins, login)
 	sd := SystemdUser()
 	info.Checks = append(info.Checks, Check{Name: "systemd user manager", OK: sd,
 		Detail: map[bool]string{true: "sessions run as user services with memory caps", false: "sessions run as detached processes without memory caps"}[sd]})
