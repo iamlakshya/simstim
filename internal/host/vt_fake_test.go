@@ -134,6 +134,42 @@ func TestVTFramesWithAFakeChild(t *testing.T) {
 	}
 }
 
+// A screen for a preview is a snapshot at the size the shadow terminal has,
+// with no scrollback, so the child does not resize, and neither does the PTY.
+func TestVTScreenKeepsTheSize(t *testing.T) {
+	path, log := fakeVT(t)
+	v, err := StartVT(VTOptions{Path: path, Cols: 100, Rows: 30})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer v.Close()
+	v.Feed(0, []byte("hello"))
+	v.Resize(120, 40, 960, 640)
+	snap, upTo, err := v.Screen(5 * time.Second)
+	if err != nil || upTo != 5 {
+		t.Fatalf("screen = %q, %d, %v", snap, upTo, err)
+	}
+	// The fake echoes the request: the size it has, and no scrollback.
+	if want := []byte{120, 0, 40, 0, 0, 0, 0, 0}; !bytes.Equal(snap, want) {
+		t.Errorf("screen request = %v, want %v", snap, want)
+	}
+	want := []string{
+		`R"d\x00\x1e\x00\x00\x00\x00\x00"`,
+		`Q"\x00"`,
+		`D"hello"`,
+		`R"x\x00(\x00\xc0\x03\x80\x02"`,
+		`S"x\x00(\x00\x00\x00\x00\x00"`, // 120 by 40, as it is
+	}
+	if got := childFrames(t, log, len(want)); strings.Join(got, " ") != strings.Join(want, " ") {
+		t.Errorf("the child got\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	if v.cols != 120 || v.rows != 40 || v.xpx != 960 || v.ypx != 640 {
+		t.Errorf("after a screen, the size is %dx%d, %dx%d px", v.cols, v.rows, v.xpx, v.ypx)
+	}
+}
+
 func TestVTRestartsWithBackoff(t *testing.T) {
 	old := vtBackoff
 	vtBackoff = []time.Duration{10 * time.Millisecond, 20 * time.Millisecond, 40 * time.Millisecond}

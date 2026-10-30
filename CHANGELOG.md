@@ -14,6 +14,7 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ### Fixed
 
+- Peek shows a session's whole screen, as attaching does ([#85](https://github.com/iamlakshya/simstim/issues/85)). It drew the screen from the newest 64 KiB of output alone, so a full-screen agent that redraws only what changes could look mostly blank, with a few clipped lines. The host helper now sends the screen from its shadow terminal, at the session's size, and resizes nothing, so an attached client sees no change. The activity line in the session list reads the same screen. Without the shadow terminal, Peek reads the newest output, as before.
 - The toolchain is now Go 1.26.10. It fixes a `crypto/x509` issue that govulncheck found (GO-2026-6809), in which certificate checks trusted intermediate certificates that are known to be compromised.
 - CI's required `test` job now runs the offline public-readiness checker regression tests, rather than leaving them only in `just test`.
 - The security, architecture and restore guides now describe the shipped trust boundary, multi-client input, bounded replay and reboot behaviour. They no longer promise an untrusted-host filter, cached client replies, live holder upgrades or a screen saved across reboot. An accessible Mermaid architecture diagram replaces the introductory text drawing. The site now treats Markdown images as public assets rather than source imports, so the diagram builds under both root and versioned paths.

@@ -3,6 +3,7 @@ package host
 import (
 	"encoding/json"
 	"strings"
+	"time"
 
 	"github.com/iamlakshya/simstim/internal/proto"
 )
@@ -29,10 +30,7 @@ func (h *Holder) request(c *hclient, req proto.Request) {
 		if args.Bytes <= 0 || args.Bytes > 1<<20 {
 			args.Bytes = 256 << 10
 		}
-		h.mu.Lock()
-		data, start := h.ring.Tail(args.Bytes)
-		cols, rows := h.m.Term.Cols, h.m.Term.Rows
-		h.mu.Unlock()
+		data, start, cols, rows := h.peek(args.Bytes)
 		reply(map[string]any{"data": data, "start": start, "cols": cols, "rows": rows}, nil)
 	case "rename":
 		var args struct {
@@ -98,4 +96,33 @@ func (h *Holder) request(c *hclient, req proto.Request) {
 		}
 		reply(nil, &proto.Error{Code: "unknown_op", Message: "unknown request " + req.Op})
 	}
+}
+
+// peek returns what draws the session's screen in a blank terminal of cols
+// by rows: the shadow terminal's screen and the output after it, as an
+// attach gets, or without it, the newest n bytes of output. A tail alone
+// can start after the screen was drawn and miss most of it (#85). start is
+// the stream offset of the output in data.
+func (h *Holder) peek(n int) (data []byte, start int64, cols, rows int) {
+	h.mu.Lock()
+	vt := h.vt
+	h.mu.Unlock()
+	var snap []byte
+	snapAt := int64(-1)
+	if vt != nil {
+		// Well within the bridge's 3 s, so a slow one still leaves time for the tail.
+		if s, upTo, err := vt.Screen(time.Second); err == nil {
+			snap, snapAt = s, upTo
+		}
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	cols, rows = h.m.Term.Cols, h.m.Term.Rows
+	if snap != nil {
+		if rest, ok := h.ring.ReadFrom(snapAt); ok {
+			return append(snap, rest...), snapAt, cols, rows
+		}
+	}
+	data, start = h.ring.Tail(n)
+	return data, start, cols, rows
 }

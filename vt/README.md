@@ -1,6 +1,6 @@
 # The shadow terminal
 
-A small program that keeps a copy of one session's screen. The session holder starts it as a child process and feeds it every byte the agent writes. On request, it writes a **snapshot**: the bytes that redraw the screen in a blank terminal. A new client gets the snapshot instead of a replay of the output ring, which may start in the middle of the stream.
+A small program that keeps a copy of one session's screen. The session holder starts it as a child process and feeds it every byte the agent writes. On request, it writes a **snapshot**: the bytes that redraw the screen in a blank terminal. A new client gets the snapshot instead of a replay of the output ring, which may start in the middle of the stream. Peek gets one too, of the screen alone and at the size the shadow terminal already has, so it resizes nothing.
 
 It is built on libghostty-vt, Ghostty's terminal core. It runs in its own process, so a crash here cannot take the agent down. The holder restarts it and feeds it the ring again (`internal/host/vt.go`).
 

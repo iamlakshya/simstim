@@ -203,6 +203,36 @@ func TestSnapshotOfTheAlternateScreen(t *testing.T) {
 	}
 }
 
+// Peek draws the screen from the shadow terminal, not from the newest output
+// alone: cells drawn before the last 64 KiB still show (#85).
+func TestPeekShowsTheWholeScreen(t *testing.T) {
+	vt := host.ShadowVT()
+	if vt == "" {
+		t.Skip("the shadow terminal is not built: install Zig 0.16 or set VT_BINARY (see vt/README.md)")
+	}
+	h := hosttest.New(t)
+	defer host.SetExecutable(h.Install("test", vt))()
+	// 20,000 resets are 80,000 bytes that change no cell.
+	const resets = `awk 'BEGIN { for (i = 0; i < 20000; i++) printf "\033[0m" }'`
+	for _, tc := range []struct {
+		name, enter string
+		alt         bool
+	}{
+		{"main", `\033[2J`, false},
+		{"alt", `MAIN\033[?1049h`, true},
+	} {
+		s := start(t, tc.name, "/bin/sh", "-c", `printf '`+tc.enter+`\033[HTOP\033[5;3HMIDDLE'; `+resets+`; printf '\033[9HNEW'; exec sleep 60`)
+		waitOutput(t, s.ID, "NEW")
+		// A second peek finds the same screen: the first one changed nothing.
+		for range 2 {
+			lines, alt := hosttest.Screen([]byte(peek(t, s.ID)), 80, 24)
+			if alt != tc.alt || lines[0] != "TOP" || lines[4] != "  MIDDLE" || lines[8] != "NEW" {
+				t.Fatalf("%s: peek shows the alternate screen = %v, %q; want %v with TOP, MIDDLE and NEW", tc.name, alt, lines[:9], tc.alt)
+			}
+		}
+	}
+}
+
 // A client gets all of the agent's output before it hears that the agent
 // ended: the last words of a program are often why it ended. The output is
 // written just before the exit, so the end races with the reading of it;

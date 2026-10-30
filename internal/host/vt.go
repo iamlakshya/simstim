@@ -265,14 +265,11 @@ func (v *VT) Snapshot(cols, rows, maxLines int, timeout time.Duration) (snap []b
 	if cols <= 0 || rows <= 0 {
 		return nil, 0, fmt.Errorf("snapshot size %dx%d is not valid. Try: send the terminal size", cols, rows)
 	}
-	var p [8]byte
-	binary.LittleEndian.PutUint16(p[0:], clamp16(cols))
-	binary.LittleEndian.PutUint16(p[2:], clamp16(rows))
-	binary.LittleEndian.PutUint32(p[4:], clamp32(maxLines))
 	v.mu.Lock()
 	v.cols, v.rows = cols, rows
 	v.mu.Unlock()
-	out, upTo, err := v.request(vtFrameSnapshot, p[:], timeout)
+	p := snapshotArgs(cols, rows, maxLines)
+	out, upTo, err := v.request(vtFrameSnapshot, func() []byte { return p }, timeout)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -280,6 +277,33 @@ func (v *VT) Snapshot(cols, rows, maxLines int, timeout time.Duration) (snap []b
 		return nil, 0, errors.New("the shadow terminal could not make a snapshot. Try: attach again")
 	}
 	return out, upTo, nil
+}
+
+// Screen is a snapshot of the screen alone, for a preview: the bytes that
+// redraw the screen as it is now, at the shadow terminal's own size, and
+// the stream offset they reach. Unlike Snapshot, it changes nothing: the
+// child resizes only to a new size, so the PTY keeps its size too, and a
+// client can stay attached.
+func (v *VT) Screen(timeout time.Duration) (snap []byte, upTo int64, err error) {
+	// The size is read as the frame is sent, under the lock that orders
+	// the frames, so a resize cannot come between and be undone.
+	out, upTo, err := v.request(vtFrameSnapshot, func() []byte { return snapshotArgs(v.cols, v.rows, 0) }, timeout)
+	if err != nil {
+		return nil, 0, err
+	}
+	if len(out) == 0 {
+		return nil, 0, errors.New("the shadow terminal could not make a snapshot")
+	}
+	return out, upTo, nil
+}
+
+// snapshotArgs is the payload of a snapshot request.
+func snapshotArgs(cols, rows, maxLines int) []byte {
+	var p [8]byte
+	binary.LittleEndian.PutUint16(p[0:], clamp16(cols))
+	binary.LittleEndian.PutUint16(p[2:], clamp16(rows))
+	binary.LittleEndian.PutUint32(p[4:], clamp32(maxLines))
+	return p[:]
 }
 
 // AnswerQueries turns on or off the shadow terminal's replies to the
@@ -340,22 +364,23 @@ func (v *VT) Close() error {
 func (v *VT) dump(maxLines int, timeout time.Duration) ([]byte, error) {
 	var p [4]byte
 	binary.LittleEndian.PutUint32(p[:], clamp32(maxLines))
-	out, _, err := v.request(vtFrameDump, p[:], timeout)
+	out, _, err := v.request(vtFrameDump, func() []byte { return p[:] }, timeout)
 	return out, err
 }
 
 // sync returns once the child has handled everything sent before it, or
 // after 5 seconds with an error.
 func (v *VT) sync() error {
-	_, _, err := v.request(vtFrameSync, nil, 5*time.Second)
+	_, _, err := v.request(vtFrameSync, func() []byte { return nil }, 5*time.Second)
 	return err
 }
 
 // request sends a frame and waits for the reply of the same type. Replies
-// come in order, so each one goes to the oldest waiter.
+// come in order, so each one goes to the oldest waiter. payload makes the
+// frame's payload, with v.mu held.
 // It also returns the stream offset the child has been fed up to when it
 // gets the request.
-func (v *VT) request(kind byte, payload []byte, timeout time.Duration) ([]byte, int64, error) {
+func (v *VT) request(kind byte, payload func() []byte, timeout time.Duration) ([]byte, int64, error) {
 	ch := make(chan vtReply, 1)
 	v.mu.Lock()
 	c := v.child
@@ -365,7 +390,7 @@ func (v *VT) request(kind byte, payload []byte, timeout time.Duration) ([]byte, 
 	}
 	fed := v.fed
 	c.waiters[kind] = append(c.waiters[kind], ch)
-	c.push(vtFrame(kind, payload))
+	c.push(vtFrame(kind, payload()))
 	v.mu.Unlock()
 
 	t := time.NewTimer(timeout)

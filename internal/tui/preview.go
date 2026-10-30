@@ -12,7 +12,8 @@ import (
 	"github.com/charmbracelet/x/vt"
 )
 
-// peekBytes is how much of a session's newest output the preview reads.
+// peekBytes is how much of a session's newest output the preview reads when
+// the host has no snapshot of its screen.
 const peekBytes = 64 << 10
 
 // previewState is the preview of the selected session.
@@ -113,7 +114,7 @@ func (m *Model) schedulePreview() tea.Cmd {
 	return m.after(previewDelay, previewTickMsg{seq: m.preview.seq})
 }
 
-// peek asks the host for the selected session's newest output.
+// peek asks the host for the selected session's screen.
 func (m *Model) peek() tea.Cmd {
 	if !m.previewOpen() || m.preview.inflight || m.preview.key == (sessKey{}) {
 		return nil
@@ -156,8 +157,9 @@ type screenShot struct {
 }
 
 // renderScreen runs bytes through a terminal emulator of the session's size.
-// The bytes are the tail of the session's output, so the first few may be the
-// end of a cut sequence; the emulator shrugs those off.
+// The bytes are a snapshot of the screen and the output after it, or, from a
+// host without one, the tail of the session's output, whose first few bytes
+// may be the end of a cut sequence; the emulator shrugs those off.
 func renderScreen(data []byte, cols, rows int) (shot *screenShot) {
 	// A preview is never worth a crash: odd bytes give an empty screen.
 	defer func() {
