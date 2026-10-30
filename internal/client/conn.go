@@ -55,6 +55,15 @@ type Conn struct {
 // ErrNotInstalled means the host has no helper of this client's version.
 var ErrNotInstalled = errors.New("the helper is not installed")
 
+// How long a dial waits for the bridge's hello. A prompt (a password, a host
+// key, a security key's touch) can hold it up, and sshd gives a login 2
+// minutes (LoginGraceTime), so an interactive dial waits longer than that.
+// Tests change them.
+var (
+	helloWait            = 30 * time.Second
+	interactiveHelloWait = 3 * time.Minute
+)
+
 // Dial starts the bridge on the host and does the hello. For a saved host (one
 // the user added, and so agreed to the helper on), a missing helper of this
 // version is installed first: an upgrade never needs the user.
@@ -66,14 +75,14 @@ func Dial(ctx context.Context, h Host, interactive bool) (*Conn, error) {
 	if err != nil {
 		return nil, err
 	}
-	c, err := dial(ctx, h, r)
+	c, err := dial(ctx, h, r, interactive)
 	var ue *UserError
 	if err != nil && h.Provider != nil && h.Provider.WakeOnAttach && errors.As(err, &ue) && strings.HasPrefix(ue.Msg, "cannot reach") {
 		// A stopped cloud host: start it through its provider script, then try again.
 		if werr := wake(ctx, h); werr != nil {
 			return nil, werr
 		}
-		c, err = dial(ctx, h, r)
+		c, err = dial(ctx, h, r, interactive)
 	}
 	if !errors.Is(err, ErrNotInstalled) {
 		return c, err
@@ -90,10 +99,10 @@ func Dial(ctx context.Context, h Host, interactive bool) (*Conn, error) {
 			return nil, ierr
 		}
 	}
-	return dial(ctx, h, r)
+	return dial(ctx, h, r, interactive)
 }
 
-func dial(ctx context.Context, h Host, rt route) (*Conn, error) {
+func dial(ctx context.Context, h Host, rt route, interactive bool) (*Conn, error) {
 	remote := RemoteHelper(HelperVersion()) + " bridge"
 	ka, _ := rt.t.(KeepAliver)
 	if ka != nil {
@@ -122,10 +131,20 @@ func dial(ctx context.Context, h Host, rt route) (*Conn, error) {
 	}
 	first := make(chan res, 1)
 	go func() { f, err := proto.Read(r); first <- res{f, err} }()
+	wait := helloWait
+	if interactive {
+		wait = interactiveHelloWait
+	}
+	timeout := time.NewTimer(wait)
+	defer timeout.Stop()
 	select {
 	case <-ctx.Done():
 		c.kill()
 		return nil, ctx.Err()
+	case <-timeout.C:
+		// A bridge that never says hello must not hold the caller forever.
+		c.kill()
+		return nil, c.startError(&UserError{Msg: fmt.Sprintf("%s did not answer for %d seconds", h.Name, int(wait.Seconds())), Hint: brand.Name + " host doctor " + h.Name})
 	case x := <-first:
 		if x.err != nil {
 			c.kill()

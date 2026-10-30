@@ -48,6 +48,27 @@ func TestDialWakesAStoppedMachine(t *testing.T) {
 	}
 }
 
+// A bridge that never says hello ends the dial with a user error, and its
+// process is killed (#84).
+func TestDialGivesUpOnASilentBridge(t *testing.T) {
+	defer client.SetHelloWait(50 * time.Millisecond)()
+	h := register(t, clienttest.NewMachine(client.MachineRunning, &clienttest.Transport{Silent: true}))
+	done := make(chan error, 1)
+	go func() {
+		_, err := client.Dial(context.Background(), h, false)
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		var ue *client.UserError
+		if !errors.As(err, &ue) || !strings.Contains(ue.Msg, "did not answer") || !strings.Contains(ue.Hint, "host doctor") {
+			t.Fatalf("err = %v, want a user error saying the host did not answer", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the dial still waits for the hello")
+	}
+}
+
 func TestDialDoesNotWakeWithoutWake(t *testing.T) {
 	m := clienttest.NewMachine(client.MachineStopped, &clienttest.Transport{})
 	h := register(t, m)

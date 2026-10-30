@@ -92,7 +92,7 @@ func (a *attacher) tryReconnect(ctx context.Context) (done bool, err error) {
 	a.conn = conn
 	cols, rows, xpx, ypx := a.size()
 	before := a.cu.Offset
-	att, err := a.handshake(a.cu.Offset, cols, rows, xpx, ypx, true)
+	att, err := a.handshake(ctx, a.cu.Offset, cols, rows, xpx, ypx, true)
 	if err != nil {
 		return errors.As(err, &ue), err
 	}

@@ -27,6 +27,9 @@ type Transport struct {
 	Every time.Duration
 	// Agents is what the bridge's agents.check returns.
 	Agents []api.AgentCheck
+	// Silent makes the bridge read the client's hello and never answer, as
+	// a stuck host does.
+	Silent bool
 
 	mu      sync.Mutex
 	remotes []string
@@ -100,6 +103,10 @@ func (t *Transport) serve(in io.Reader, out io.Writer) {
 	w := proto.NewWriter(out)
 	f, err := proto.Read(r)
 	if err != nil || f.Type != proto.THello {
+		return
+	}
+	if t.Silent {
+		_, _ = io.Copy(io.Discard, r) // until the client kills it
 		return
 	}
 	_ = w.WriteJSON(proto.THello, proto.Hello{Magic: proto.Magic, Protocol: version.Protocol, Version: version.Version, Role: "bridge"})

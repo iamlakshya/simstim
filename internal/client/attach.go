@@ -6,7 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/muesli/cancelreader"
@@ -116,21 +118,27 @@ func Attach(ctx context.Context, o AttachOptions) (AttachResult, error) {
 	if o.State.Valid && o.State.Key == a.key && !o.State.Modes.AltScreen {
 		last = o.State.Offset
 	}
-	conn, err := Dial(ctx, o.Host, o.Interactive)
+	// Until the terminal is raw, Ctrl+C and the default detach key, Ctrl+\,
+	// reach the client as SIGINT and SIGQUIT, not as keys. Either one stops
+	// the attach, instead of nothing or the runtime's goroutine dump (#84).
+	wctx, stopWait := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGQUIT)
+	defer stopWait()
+	conn, err := Dial(wctx, o.Host, o.Interactive)
 	if err != nil {
-		return AttachResult{}, err
+		return AttachResult{}, stoppedWaiting(ctx, wctx, o.Host, err)
 	}
 	a.conn = conn
 	defer func() { a.conn.Close() }()
 	go a.ssh.masterState(ctx, "attach")
 	cols, rows, xpx, ypx := a.size()
-	att, err := a.handshake(last, cols, rows, xpx, ypx, false)
+	att, err := a.handshake(wctx, last, cols, rows, xpx, ypx, false)
 	if err != nil {
-		return AttachResult{}, err
+		return AttachResult{}, stoppedWaiting(ctx, wctx, o.Host, err)
 	}
 	DebugLog().Debug("attached", diag.CatKey, diag.CatAttach, "mode", att.Mode, "from", att.From, "live", att.Live)
 
 	old, err := xterm.MakeRaw(a.fd)
+	stopWait()
 	if err != nil {
 		return AttachResult{}, fmt.Errorf("cannot put the terminal in raw mode: %w", err)
 	}
@@ -198,9 +206,18 @@ func (a *attacher) write(b []byte) {
 
 func (a *attacher) size() (cols, rows, xpx, ypx int) { return termSize(a.o.Out) }
 
-// handshake sends the attach request and waits for the answer. reconnect is
-// true when the attach resumes after a dropped link.
-func (a *attacher) handshake(last int64, cols, rows, xpx, ypx int, reconnect bool) (proto.Attached, error) {
+// stoppedWaiting turns err into a user error when a key stopped the attach
+// before the terminal was raw: wctx ended, and ctx did not.
+func stoppedWaiting(ctx, wctx context.Context, h Host, err error) error {
+	if wctx.Err() == nil || ctx.Err() != nil {
+		return err
+	}
+	return &UserError{Msg: "stopped waiting for " + h.Name, Hint: brand.Name + " host doctor " + h.Name}
+}
+
+// handshake sends the attach request and waits for the answer, or until ctx
+// ends. reconnect is true when the attach resumes after a dropped link.
+func (a *attacher) handshake(ctx context.Context, last int64, cols, rows, xpx, ypx int, reconnect bool) (proto.Attached, error) {
 	trace, cats := a.conn.startTrace()
 	req := proto.Attach{Session: a.o.Session, Cols: cols, Rows: rows, XPx: xpx, YPx: ypx, Client: brand.Name, LastOffset: last,
 		Trace: trace, Categories: cats, Reconnect: reconnect}
@@ -227,6 +244,8 @@ func (a *attacher) handshake(last int64, cols, rows, xpx, ypx int, reconnect boo
 			}
 		case <-a.conn.Done():
 			return proto.Attached{}, ErrClosed
+		case <-ctx.Done():
+			return proto.Attached{}, ctx.Err()
 		case <-timeout:
 			return proto.Attached{}, errors.New("the host did not answer the attach in time")
 		}

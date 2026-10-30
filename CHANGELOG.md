@@ -14,6 +14,7 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ### Fixed
 
+- An attach to a host whose bridge never answered left a blank terminal with no way out, and Ctrl+\ ended the client with a goroutine dump ([#84](https://github.com/iamlakshya/simstim/issues/84)). A connection now waits for the bridge's hello for at most 30 seconds, or 3 minutes when SSH may ask for a password, and then says that the host did not answer. Until the session shows, Ctrl+C and Ctrl+\ stop the attach, which says "stopped waiting" and goes back to the launcher. The session keeps running.
 - The toolchain is now Go 1.26.10. It fixes a `crypto/x509` issue that govulncheck found (GO-2026-6809), in which certificate checks trusted intermediate certificates that are known to be compromised.
 - CI's required `test` job now runs the offline public-readiness checker regression tests, rather than leaving them only in `just test`.
 - The security, architecture and restore guides now describe the shipped trust boundary, multi-client input, bounded replay and reboot behaviour. They no longer promise an untrusted-host filter, cached client replies, live holder upgrades or a screen saved across reboot. An accessible Mermaid architecture diagram replaces the introductory text drawing. The site now treats Markdown images as public assets rather than source imports, so the diagram builds under both root and versioned paths.
