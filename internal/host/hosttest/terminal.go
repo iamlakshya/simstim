@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/vt"
 	"github.com/creack/pty"
 )
@@ -104,23 +105,43 @@ func tail(b []byte, n int) []byte {
 // Screen returns what a blank terminal of cols by rows shows after out: the
 // text of each row, and whether it is on the alternate screen.
 func Screen(out []byte, cols, rows int) (lines []string, alt bool) {
+	e := emulate(out, cols, rows)
+	for y := range rows {
+		lines = append(lines, rowText(cols, func(x int) *uv.Cell { return e.CellAt(x, y) }))
+	}
+	return lines, e.IsAltScreen()
+}
+
+// Scrollback returns the rows that out pushed into the scrollback of a blank
+// terminal of cols by rows, oldest first.
+func Scrollback(out []byte, cols, rows int) []string {
+	e := emulate(out, cols, rows)
+	lines := make([]string, 0, e.ScrollbackLen())
+	for y := range e.ScrollbackLen() {
+		lines = append(lines, rowText(cols, func(x int) *uv.Cell { return e.ScrollbackCellAt(x, y) }))
+	}
+	return lines
+}
+
+func emulate(out []byte, cols, rows int) *vt.Emulator {
 	e := vt.NewEmulator(cols, rows)
 	// The emulator writes replies to queries into a pipe: drain and drop them.
 	go func() { _, _ = io.Copy(io.Discard, e) }()
 	_, _ = e.Write(out)
+	return e
+}
+
+// rowText is the text of one row of cols cells, without trailing spaces.
+func rowText(cols int, cell func(x int) *uv.Cell) string {
 	var b strings.Builder
-	for y := range rows {
-		b.Reset()
-		for x := range cols {
-			if c := e.CellAt(x, y); c != nil && c.Content != "" {
-				b.WriteString(c.Content)
-			} else if c == nil || c.Width != 0 {
-				b.WriteByte(' ')
-			}
+	for x := range cols {
+		if c := cell(x); c != nil && c.Content != "" {
+			b.WriteString(c.Content)
+		} else if c == nil || c.Width != 0 {
+			b.WriteByte(' ')
 		}
-		lines = append(lines, strings.TrimRight(b.String(), " "))
 	}
-	return lines, e.IsAltScreen()
+	return strings.TrimRight(b.String(), " ")
 }
 
 // Type sends keys, as the user's terminal would.

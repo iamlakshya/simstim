@@ -144,7 +144,8 @@ Triggers: the detach key, closing the tab, `simstim kill` from elsewhere, or SIG
    - reset SGR, and pop the title stack.
 
    The full 19-step list is in [the client stack note](../research/client-stack.md#22-what-to-reset-on-detach-in-order).
-3. While no client is attached, the vt child answers the agent's terminal queries. Its XTVERSION answer uses the session's `TERM_PROGRAM` and `TERM_PROGRAM_VERSION` when set; the holder does not cache the last client's terminal replies. Detach does not send focus-out to the agent.
+3. If the session was on the alternate screen, leaving it shows the main screen again. That screen still holds what the agent drew there before it went full screen, because the snapshot (3.3) draws both screens. The client empties it, so no old frame is left over the shell prompt: with `attach.scrollback` set to `keep` it pushes the rows into the scrollback, and with `clear` it erases them ([#38](https://github.com/iamlakshya/simstim/issues/38)).
+4. While no client is attached, the vt child answers the agent's terminal queries. Its XTVERSION answer uses the session's `TERM_PROGRAM` and `TERM_PROGRAM_VERSION` when set; the holder does not cache the last client's terminal replies. Detach does not send focus-out to the agent.
 
 ### 3.5 Sleep and reconnect
 

@@ -179,6 +179,9 @@ func Attach(ctx context.Context, o AttachOptions) (AttachResult, error) {
 	// Put the terminal back exactly as we found it: undo the session's modes,
 	// never with RIS, which would wipe the scrollback.
 	a.write(a.tracker.M.ResetSequence())
+	if a.tracker.M.AltScreen {
+		a.clearMain()
+	}
 	a.write([]byte("\x1b]9;4;0\x1b\\\x1b[23;0t"))
 	_ = xterm.Restore(a.fd, old)
 	_ = cr.Close()
@@ -251,8 +254,27 @@ func (a *attacher) begin(att proto.Attached, st *AttachState, rows int) {
 	if a.o.Settings.Attach.Scrollback == "clear" {
 		a.write([]byte("\x1b[H\x1b[2J\x1b[3J"))
 	} else {
-		a.write([]byte(fmt.Sprintf("\x1b[%d;1H%s\x1b[H", rows, strings.Repeat("\n", rows))))
+		a.write(scrollAway(rows))
 	}
+}
+
+// clearMain empties the main screen that leaving the alternate screen on
+// detach shows again. It still holds what the session drew there before it
+// went full screen, and that old frame must not stay under the shell prompt
+// (#38). "keep" moves it into the scrollback, "clear" erases it.
+func (a *attacher) clearMain() {
+	if a.o.Settings.Attach.Scrollback == "clear" {
+		a.write([]byte("\x1b[H\x1b[2J"))
+		return
+	}
+	_, rows, _, _ := a.size()
+	a.write(scrollAway(rows))
+}
+
+// scrollAway pushes the rows the terminal shows into its scrollback, and
+// leaves the cursor at the top of the empty screen.
+func scrollAway(rows int) []byte {
+	return []byte(fmt.Sprintf("\x1b[%d;1H%s\x1b[H", rows, strings.Repeat("\n", rows)))
 }
 
 // output shows bytes from offset off, skipping any the terminal already has.

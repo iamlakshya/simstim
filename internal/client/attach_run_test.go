@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -305,6 +306,33 @@ func TestAttachRedrawsTheAlternateScreen(t *testing.T) {
 	lines, alt := hosttest.Screen(out, 80, 24)
 	if !alt || lines[0] != "TOP" || lines[4] != "  MIDDLE" || lines[8] != "NEW" {
 		t.Errorf("after the attach, the alternate screen = %v, shows %q; want TOP, MIDDLE and NEW", alt, lines[:9])
+	}
+}
+
+// The snapshot draws the main screen under the alternate one, so leaving the
+// alternate screen on detach shows what the agent drew there before it went
+// full screen. Detach empties that screen, so no old frame is left over the
+// shell prompt (#38).
+func TestDetachEmptiesTheMainScreen(t *testing.T) {
+	for _, mode := range []string{"keep", "clear"} {
+		t.Run(mode, func(t *testing.T) {
+			r := newAttachRun(t)
+			id := r.session("stty raw -echo; printf 'OLD FRAME\\r\\n\\033[?1049h\\033[HFULL'; exec sleep 60")
+			settings := client.DefaultSettings()
+			settings.Attach.Scrollback = mode
+			done := r.attach(context.Background(), id, settings)
+			r.term.WaitFor("FULL")
+			r.term.Type(detach)
+			r.end(done)
+			out := r.term.WaitFor("\x1b[23;0t")
+			lines, alt := hosttest.Screen(out, 80, 24)
+			if alt || strings.Join(lines, "") != "" {
+				t.Errorf("after the detach, the alternate screen = %v, the screen shows %q; want an empty main screen", alt, lines)
+			}
+			if sb := hosttest.Scrollback(out, 80, 24); mode == "keep" && !slices.Contains(sb, "OLD FRAME") {
+				t.Errorf("the scrollback = %q, want the old frame in it", sb)
+			}
+		})
 	}
 }
 
