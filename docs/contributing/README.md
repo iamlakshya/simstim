@@ -12,6 +12,7 @@ How the project is built, tested, documented and released. New here? Read [CONTR
 | [Going public](going-public.md) | What is done, and the owner's steps to make the repo public |
 | [UX spec](ux-spec.md) | The launcher's screens, keys, colours, glyphs and motion |
 | [Renaming](renaming.md) | How to rename the product in one change |
+| [Isolated sessions: spec](isolation-spec.md) | What to build so that each session runs in its own sandbox, on hosts that the user adds: terms, interfaces, config, commands, protocol, platforms, risks and open questions (proposed) |
 | [Decisions](decisions/README.md) | Every design decision, with its reasons |
 | [Research](../research/README.md) | The evidence behind the design |
 | [History](history.md) | The first plan, as built |
