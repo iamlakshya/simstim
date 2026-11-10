@@ -32,5 +32,6 @@ Each record explains one choice: the context, the options and the outcome. Recor
 | [0026](0026-end-and-memory-alerts.md) | The once-a-minute rule never holds back a session's end, and a warning near the memory cap has its own event, `memory` (replaces one rule of the noise control in 0019, and adds an event to it, warning trigger replaced by 0027) | Accepted |
 | [0027](0027-memory-warning-growth.md) | The memory warning also comes when the memory still grows near the cap, and on its own at 95 % (replaces 0026's rule for what starts a warning) | Accepted |
 | [0028](0028-redraw-the-alternate-screen.md) | Draw a session on the alternate screen again after a detach (replaces part of 0004) | Accepted |
+| [0029](0029-a-sandbox-per-session.md) | A sandbox for each session, on hosts the user owns, with every door closed until the user grants it (widens roadmap item X6) | Proposed |
 
 Write a new record from [the template](template.md).
