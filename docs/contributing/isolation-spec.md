@@ -20,7 +20,7 @@ The path reaches L5, but the chosen L5 option secures only the project's own art
 
 Every fact that no primary source confirms is marked UNVERIFIED. Where the fact check corrected a claim, this spec uses the correction.
 
-**The second pass.** On 10 November 2026 the owner asked for more control: one config for all sessions that a narrower place can override, one-off exceptions, no forced strict defaults, a shell beside the agent, and research on automatic classifiers, so that many sessions can run at once. The owner also asked for a command line that is easy to guess. This pass adds the layers, profiles and locks of section 8, the unknown action and the classifier of 7.2 and 7.8, SSH keys (7.9), and shells in a sandbox (6.11). Every command now follows [0033](decisions/0033-one-command-grammar.md). [The research](../research/isolation.md#policy-for-parallel-work) and [the CLI study](../research/cli-dx.md) give the evidence.
+**The second pass.** On 10 November 2026 the owner asked for more control: one config for all sessions that a narrower place can override, one-off exceptions, no forced strict defaults, a shell beside the agent, and research on automatic classifiers, so that many sessions can run at once. The owner also asked for a command line that is easy to guess. This pass adds the layers, profiles and locks of section 8, the unknown action and the classifier of 7.2 and 7.8, SSH keys (7.9), and shells in a sandbox (6.11). After AWS launched Nitro Sandboxes on 9 November 2026, it also adds a `nitro` driver for EC2 hosts (5.1, 11). Every command now follows [0033](decisions/0033-one-command-grammar.md). [The research](../research/isolation.md#policy-for-parallel-work) and [the CLI study](../research/cli-dx.md) give the evidence.
 
 **Words.** `<name>` is `brand.Name`, today `simstim`. Code never spells the product name outside `internal/brand` ([0007](decisions/0007-name-in-one-place.md)). Commands in this spec are written as users type them, `simstim …`. Section 14 writes paths and names with today's name, such as `~/.config/simstim/tiers.toml`. Code builds each of them from `brand`.
 
@@ -311,7 +311,7 @@ func (l Level) String() string
 
 // Driver builds walls of one level on this host.
 type Driver interface {
-    Name() string // "process", "chv", later "gvisor" and "firecracker"
+    Name() string // "process", "chv", later "gvisor", "firecracker" and "nitro"
     Level() Level
     // Probe says whether this host can run the driver, and why not.
     Probe(ctx context.Context) Probe
@@ -391,7 +391,8 @@ Each driver's probe runs inside the sandbox probe (`sandbox.probe`, 14.3): at `h
 | `process` | Linux 5.13 or later. An unprivileged user namespace starts (a fork that calls `unshare(CLONE_NEWUSER)`). `kernel.apparmor_restrict_unprivileged_userns` is 0, or the namespace launcher and its profile from the root step exist (14.4.2). The Landlock ABI from `landlock_create_ruleset(NULL, 0, LANDLOCK_CREATE_RULESET_VERSION)` is 1 or more. seccomp filters load. |
 | `chv` | `/dev/kvm` opens read and write, and `KVM_GET_API_VERSION` answers 12. The host kernel is 6.8 or later ([Cloud Hypervisor README](https://github.com/cloud-hypervisor/cloud-hypervisor/blob/main/README.md)). The pinned `cloud-hypervisor` binary is in the artefact store with its digest. The user is in the group that owns `/dev/kvm`, or has an ACL entry on it (14.4.2). `systemd-detect-virt` is recorded as a fact. |
 | `gvisor` (P6) | Linux 5.6 or later. The pinned `runsc` is present. A smoke run of `runsc` in the OCI user-namespace mode succeeds. |
-| `firecracker` (P6) | `/dev/kvm` as above, and a host kernel of 5.10, 6.1 or 6.18, the ones that Firecracker tests ([kernel policy](https://github.com/firecracker-microvm/firecracker/blob/main/docs/kernel-policy.md)). |
+| `firecracker` (P6) | `/dev/kvm` as above, and a host kernel of 5.10, 6.1 or 6.18, the ones that Firecracker tests ([kernel policy](https://github.com/firecracker-microvm/firecracker/blob/main/docs/kernel-policy.md)). The pinned Firecracker is 1.17.0 or later, for CVE-2026-122192 ([AWS](https://aws.amazon.com/security/security-bulletins/2026-169-aws/)). |
+| `nitro` (P6.4) | `/dev/nitro_enclaves` opens read and write. The parent kernel has the Nitro Sandboxes support of the `nitro_enclaves` driver: Amazon Linux 2023 `kernel6.18` from `6.18.51-120.162.amzn2023`, or a kernel whose `/sys/class/misc/nitro_enclaves/` has `mem_pool/` and `pcie_slots` ([Firecracker](https://github.com/firecracker-microvm/firecracker/blob/firecracker-v1.18/docs/nitro-sandboxes/getting-started.md)). The pinned Firecracker is 1.18.0 or later. The pools and the slot budget fit one sandbox of the session's size. On a host where both this driver and `chv` pass, this one wins: its guest is a first-level guest, where `chv` on EC2 runs nested. |
 
 ### 5.2 `internal/link`
 
@@ -1392,7 +1393,7 @@ Every command follows [0033](decisions/0033-one-command-grammar.md): session ver
 | `simstim host show <host> [--json]` | Each driver's probe, the level now and after the root step, the floor, the tier, the room, the health, and the names of what was sent to the host (14.8.6) | P1, H5 |
 | `simstim host set <host> <key>=<value>…` | Changes named host settings: `floor`, `tier`, `drain` (a reason, or `off`), `idle`. A floor below the tier's lowest floor is refused (14.8.2). Lowering a tier asks first. | P1, H4, H14 |
 | `simstim host add <name> <target> [--tier own\|throwaway\|shared] [--host-key SHA256:…] [--root-step run\|print\|skip] [--images auto\|host\|laptop] [--no-sandbox] [--yes]` | As today, and it pins the host key, asks the tier and prepares the host (14.2.1). With `--yes`, `--tier` is needed. `--no-sandbox` keeps today's flow. | H3, H4, H10 |
-| `simstim host prepare <host> [--root-step run\|print\|skip] [--images auto\|host\|laptop] [--delegate-io]` | The sandbox probe, runtime delivery, the root step and a test boot | H7, H9, H10 |
+| `simstim host prepare <host> [--root-step run\|print\|skip] [--images auto\|host\|laptop] [--delegate-io] [--nitro-slots <n>]` | The sandbox probe, runtime delivery, the root step and a test boot | H7, H9, H10, P6.4 |
 | `simstim host upgrade <host>` | Updates the helper and the runtime | H9 |
 | `simstim host rekey <host>` | Replaces the pinned host key after the user types the host's name (14.7.1) | H3 |
 | `simstim host default [<host>\|auto] [--clear]` | Prints, sets or clears the default host (14.10.1) | H12 |
@@ -1693,7 +1694,8 @@ New event kinds in `internal/alerts`, added to `Kinds` and to `DefaultEvents`:
 | Linux with KVM, host kernel 6.8 or later (Ubuntu 24.04, Debian 13), `/dev/kvm` open to the user (mode 0666, as upstream systemd sets it, or the user already in `kvm`) | microvm (Cloud Hypervisor) | microvm | No root step needed for the level | process |
 | Linux with KVM, `/dev/kvm` 0660 `root:kvm` and the user not in `kvm` (Debian's default) | without root: process (gvisor from P6). After the root step: microvm | the probe's best at that time | The root step's `kvm-acl` opens `/dev/kvm` at once, and `kvm-group` keeps it after a reboot (14.4.2). That Ubuntu also sets 0660 is UNVERIFIED. | process |
 | Linux with KVM, kernel 5.10, 6.1 or 6.18 below 6.8 (Debian 12) | process until P6.2, then microvm (Firecracker) | process | Cloud Hypervisor needs 6.8 or later. Firecracker tests 5.10, 6.1 and 6.18 only ([kernel policy](https://github.com/firecracker-microvm/firecracker/blob/main/docs/kernel-policy.md)). | process |
-| Linux without KVM: Hetzner Cloud ([FAQ](https://docs.hetzner.com/cloud/servers/faq/)), most VPS, EC2 Graviton, GCE Arm, E2 and AMD types other than N4D, Azure Arm sizes | process, gvisor from P6 | process | No nested virtualisation. No root step can give these hosts microvm. | Move the host to a type with it |
+| Linux without KVM: Hetzner Cloud ([FAQ](https://docs.hetzner.com/cloud/servers/faq/)), most VPS, EC2 types without Nitro Enclaves, GCE Arm, E2 and AMD types other than N4D, Azure Arm sizes | process, gvisor from P6 | process | No nested virtualisation. No root step can give these hosts microvm. | Move the host to a type with it |
+| EC2 with Nitro Enclaves, launched with `--enclave-options Enabled=true`: most M, C and R families from the 5th generation on, Intel, AMD and Graviton, except their smallest and most metal sizes ([EC2](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/amazon-ec2-nitro-sandboxes.html)) | without root: process (gvisor from P6). After the root step: microvm (`nitro`, from P6.4) | the probe's best at that time | Firecracker 1.18 drives Nitro Sandboxes through `/dev/nitro_enclaves`, with no `/dev/kvm`. The parent needs Amazon Linux 2023 `kernel6.18`. Memory is donated whole, with no balloon ([question 53](#15-open-questions)). | nested microvm where the type has it, else process |
 | Cloud VM with nested virtualisation: EC2 M7i, C7i, R7i, M8i, C8i, R8i, X8i, I7i and variants, all Intel ([AWS](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/amazon-ec2-nested-virtualization.html)). GCE Intel types except E2 and memory-optimised, and AMD N4D ([GCE](https://docs.cloud.google.com/compute/docs/instances/nested-virtualization/overview)). Azure x86 sizes such as Dsv6. | microvm | microvm | Slower: Google warns of 10 % or more for CPU-bound work. P3.8 measures it. | process |
 | Ubuntu 23.10 or later, any of the above | as above | as above | Unprivileged user namespaces need an `AppArmor` profile ([Ubuntu](https://ubuntu.com/blog/ubuntu-23-10-restricted-unprivileged-user-namespaces)). The root step's `userns-apparmor` installs it for the namespace launcher (14.4.2). Without it, process walls are refused. | microvm, which needs no user namespace for the guest |
 | A host where the user has no sudo | as the rows above say for "without root" | the probe's best | The machine's owner runs the printed root step (14.2.2). | |
@@ -1910,6 +1912,17 @@ Sandboxes on vps
   Level: gvisor. No root step can give vps the microvm level.
 ```
 
+An EC2 instance on Graviton, launched with the enclave option, on Amazon Linux 2023 (P6.4):
+
+```text
+Sandboxes on ec2
+  ✓ kernel 6.18.51, systemd 252, cgroup v2 with cpu, memory and pids
+  ✕ no /dev/kvm: this instance has no nested virtualisation
+  ✓ Nitro Sandboxes: /dev/nitro_enclaves present, 8 vCPUs give a budget of 40
+  ✕ /dev/nitro_enclaves not open to ec2-user (crw-rw---- root root)
+  Level now: process. After one root step: microvm (nitro).
+```
+
 #### 14.2.5 Several hosts and `new auto`
 
 This is the second step of placement (task H13).
@@ -2010,7 +2023,7 @@ Enter hands the terminal to `ssh -t … sudo` with Bubble Tea's `ExecProcess`, a
 | `kvm` group | `user.Current().GroupIds()`, and `os.Getgroups()` for the process now | `kvm.in_group`, `kvm.in_group_now` |
 | CPU | `vmx` or `svm` in `/proc/cpuinfo` flags (amd64) | `cpu_virt` |
 | Inside a VM | `systemd-detect-virt`, when present | `virt` |
-| Nitro | `/dev/nitro_enclaves` exists | `nitro` |
+| Nitro | `/dev/nitro_enclaves` exists, its mode, owner and ACL, and whether it opens. `/sys/class/misc/nitro_enclaves/`: the CPU pool, the memory pool and `pcie_slots`. The instance's vCPU count. | `nitro.present`, `nitro.usable`, `nitro.acl_user`, `nitro.pools` |
 | Landlock | `landlock_create_ruleset(NULL, 0, LANDLOCK_CREATE_RULESET_VERSION)` | `landlock_abi` |
 | seccomp | A `Seccomp:` line in `/proc/self/status` | `seccomp` |
 | User namespaces | `/proc/sys/user/max_user_namespaces` > 0, and `kernel.unprivileged_userns_clone` = 1 and `kernel.apparmor_restrict_unprivileged_userns` = 0 where they exist | `userns`, `apparmor_userns` |
@@ -2031,12 +2044,12 @@ Enter hands the terminal to `ssh -t … sudo` with Bubble Tea's `ExecProcess`, a
 
 | Level now | When |
 | --- | --- |
-| `microvm` | `kvm.usable`, and the runtime has a VMM for this kernel and architecture |
+| `microvm` | `kvm.usable` or `nitro.usable`, and the runtime has a VMM for this kernel and architecture |
 | `gvisor` | Not `microvm`, `userns`, and the runtime has `runsc` (P6) |
 | `process` | Neither, with `userns`, `landlock_abi` 1 or more and `seccomp` |
 | `none` | Not even that. Sandboxes are off on this host. |
 
-The level after the root step is `microvm` when `kvm.present`. Otherwise it is `process` when only `apparmor_userns` stops the `process` driver, and the level now in every other case.
+The level after the root step is `microvm` when `kvm.present` or `nitro.present`. Otherwise it is `process` when only `apparmor_userns` stops the `process` driver, and the level now in every other case.
 
 **The root needs.** The client, not the helper, turns the probe into root steps:
 
@@ -2048,6 +2061,8 @@ The level after the root step is `microvm` when `kvm.present`. Otherwise it is `
 - `userns-apparmor`: `apparmor_userns` restricts user namespaces ([question 4](#15-open-questions)).
 - `io-uring-off`: `io_uring_disabled` is below 2.
 - `vsock-modules`: `vsock_blocked` is false, and the level after the root step is `microvm`.
+- `nitro-acl` and `nitro-udev`: `nitro.present`, not `nitro.usable`, and `has_setfacl`.
+- `nitro-slots`: only with `host prepare --nitro-slots <n>`, when `pcie_slots` is lower.
 
 `host doctor <name> --json` gains a `sandbox` object with the whole probe.
 
@@ -2073,8 +2088,11 @@ The level after the root step is `microvm` when `kvm.present`. Otherwise it is `
 | `userns-apparmor` | Copy the namespace launcher to `/usr/local/libexec/simstim/` (root, 0755), and load an `AppArmor` profile that lets only that path make user namespaces | Process walls on Ubuntu 23.10 or later ([question 4](#15-open-questions)). Machine-wide, but it opens user namespaces for that one program only. | Unload the profile, then remove it and the launcher |
 | `io-uring-off` | Write `kernel.io_uring_disabled = 2` to `/etc/sysctl.d/50-simstim.conf`, then load that file with `sysctl` | Close `io_uring` to every process on the machine, as the seccomp profile already does inside a process wall (section 16). Machine-wide. | Remove the file, then set the value that the step recorded before |
 | `vsock-modules` | Write `/etc/modprobe.d/50-simstim-vsock.conf`, which blocks `vsock_loopback`, `vmw_vsock_virtio_transport` and `vhost_vsock` | No sandbox needs these modules, so blocking them removes kernel code from reach. Machine-wide. | Remove the file |
+| `nitro-acl` | `setfacl -m u:<user>:rw /dev/nitro_enclaves` | Open the Nitro Enclaves driver now, for the `nitro` driver (P6.4) | `setfacl -x u:<user> /dev/nitro_enclaves` |
+| `nitro-udev` | Write `/etc/udev/rules.d/50-simstim-nitro.rules`, whose rule runs the same `setfacl` when the device appears | Keep access after a reboot | Remove the file |
+| `nitro-slots` | Write a number to `/sys/class/misc/nitro_enclaves/pcie_slots` | Room for more sandboxes. Optional, and lost at the next reboot. | Write back the number that the step recorded |
 
-Without `setfacl`, the step is `kvm-group` only, and the client says: "Access starts after the next reboot of box."
+Without `setfacl`, the step is `kvm-group` only, and the client says: "Access starts after the next reboot of box." The `nitro` steps need `setfacl`. A reserved memory pool for Nitro Sandboxes needs a kernel parameter and a reboot, so it is never a root step: the docs show it, and without it the driver takes contiguous memory at each start.
 
 #### 14.4.3 How the client builds the script
 
@@ -2469,6 +2487,8 @@ A start that carries `NewArgs.Need` goes through admission in `host.New`, before
 6. `room` is `DefaultMemoryMax()` less what is reserved. Refuse with `no_room` when `Need.Memory` plus the VMM overhead is more than `room`. The error's `Data` holds fresh facts.
 7. Write the manifest with `limits.declared`, state `starting`, `placed_by` and `place_reason`. The manifest is the reservation.
 8. Release the lock. Then start the sandbox.
+
+On a host with the `nitro` driver, admission also refuses with `no_room` when the sandbox's vCPUs would take the instance past 5 times its vCPU count, when the slot budget has no room, or when the session's memory and the VMM overhead are more than the free memory of the Nitro pool. Nitro donates a sandbox's memory whole, with no balloon ([EC2](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/amazon-ec2-nitro-sandboxes.html)).
 
 A sandbox that does not fit is refused, not made smaller. This differs from [0024](decisions/0024-memory-cap.md), which lowers a session's request to the limit. Sessions without a sandbox keep 0024's rule. Admission counts declared memory, with no overcommit ([question 13](#15-open-questions)).
 
@@ -2906,7 +2926,7 @@ This is the only full list. Each question has its options and a recommended defa
    - (a) Cloud Hypervisor first, Firecracker later for older kernels.
    - (b) Firecracker only.
    - (c) libkrun.
-   - **Recommended:** (a): Cloud Hypervisor v52.0 or later on host kernels 6.8 or later, and Firecracker later for older kernels. No libkrun and no Kata (section 11). libkrun's own model gives the guest the VMM's host permissions, so it does not fit a Linux wall.
+   - **Recommended:** (a): Cloud Hypervisor v52.0 or later on host kernels 6.8 or later, and Firecracker later for older kernels. Firecracker 1.18 also drives Nitro Sandboxes on EC2 ([question 53](#15-open-questions)). No libkrun and no Kata (section 11). libkrun's own model gives the guest the VMM's host permissions, so it does not fit a Linux wall.
 4. **How do process walls get user namespaces on Ubuntu 23.10 or later?**
    - (a) An `AppArmor` profile for a root-owned copy of a small launcher in `/usr/local/libexec/<name>/`: the namespace launcher.
    - (b) Turn the restriction off for the whole host with the sysctl.
@@ -3135,6 +3155,17 @@ This is the only full list. Each question has its options and a recommended defa
     - (b) No.
     - **Recommended:** (a). It is the user's own words, and the only trusted statement of what the work needs. Conseca and Progent build their policies from the user's trusted request in the same way ([research](../research/isolation.md#policy-for-parallel-work)).
 
+### Nitro Sandboxes on EC2
+
+53. **Should EC2 hosts use Nitro Sandboxes?**
+    - (a) Yes: a `nitro` driver at the `microvm` level, on Firecracker 1.18.0 or later. It wins over nested KVM where both work. It comes in phase 6, after the Firecracker driver.
+    - (b) No: nested KVM on the Intel types that have it, and `gvisor` elsewhere.
+    - **Recommended:** (a). It gives EC2's Graviton, AMD and most Intel types a hardware wall, with a first-level guest and no nested overhead, at no extra charge ([EC2](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/amazon-ec2-nitro-sandboxes.html), [research](../research/isolation.md#101-aws-nitro-sandboxes-on-ec2)).
+54. **Direct mode or confidential mode?**
+    - (a) Direct mode. Confidential mode with attestation later, for `shared` EC2 hosts, under its own record.
+    - (b) Confidential mode always.
+    - **Recommended:** (a). The trusted side runs on the parent, and the user owns the instance. Confidential mode needs the proposed DMB patches in the guest kernel, and it hides only the guest's memory: the work disk and the network still pass through the parent.
+
 ### Decided by the design
 
 The research raised four more questions, and the design answers them, so they are not open. No wall has a guest network card, and all egress goes through the egress process (7.2, decision [0029](decisions/0029-a-sandbox-per-session.md)). The client embeds the release manifest, so the runtime needs no rollback floor, key or expiry of its own (14.9.1, 14.11.2). The supervisor dials into the guest, so no trusted-side process listens where a guest can connect (G7, decision [0030](decisions/0030-local-sockets-do-not-listen.md)). The names of these files follow the roadmap.
@@ -3143,7 +3174,7 @@ The research raised four more questions, and the design answers them, so they ar
 
 | Risk | Mitigation |
 | --- | --- |
-| A VMM or KVM bug lets a guest out. Cloud Hypervisor and Firecracker both had serious advisories in 2026, such as GHSA-f47p-p25q-83rh and CVE-2026-5747. | The VMM runs in a jail as a subuid where possible, with no network, a minimal mount namespace, Landlock, seccomp and no core dumps. Raw disks with backing files off. `pins-watch`, the known-bad list, and the advisory time of [question 42](#15-open-questions). |
+| A VMM or KVM bug lets a guest out. Cloud Hypervisor and Firecracker both had serious advisories in 2026, such as GHSA-f47p-p25q-83rh, CVE-2026-5747 and CVE-2026-122192. | The VMM runs in a jail as a subuid where possible, with no network, a minimal mount namespace, Landlock, seccomp and no core dumps. Raw disks with backing files off. `pins-watch`, the known-bad list, and the advisory time of [question 42](#15-open-questions). |
 | A VMM escape lands in the login user's account. From there it can read `~/.ssh` and the agents' logins, rewrite the helper, and reach every later sandbox on that host. | Jails with a subuid where one is available (5.6). The client checks the helper's digest before each dial (P4.1). The docs and the level label say so plainly. The slot launcher and slot accounts are the second phase (14.4.6, [question 27](#15-open-questions)). |
 | The process wall shares the host kernel. A kernel bug that a sandbox can reach breaks it, such as CVE-2024-1086 through user namespaces ([NVD](https://nvd.nist.gov/vuln/detail/CVE-2024-1086)). | The seccomp profile refuses nested user namespaces, `io_uring`, `AF_VSOCK`, `bpf` and others. The row and docs say what the level is worth. microvm is the floor wherever KVM exists. |
 | Ubuntu's user namespace limit has known bypasses ([Qualys](https://www.qualys.com/2025/three-bypasses-of-Ubuntu-unprivileged-user-namespace-restrictions.txt)), and the profile opens user namespaces for its launcher. | The namespace launcher is a root-owned copy that sandboxes never see. The docs say what the profile allows. The step is optional and marked machine-wide (14.4.1). |
@@ -3176,6 +3207,9 @@ The research raised four more questions, and the design answers them, so they ar
 | A Mac host after a reboot cannot start VMs until its keychain is unlocked. Whether this affects Linux guests is UNVERIFIED. | Mac hosts are later ([question 37](#15-open-questions)). |
 | An older client that saves `hosts.toml` drops `wall_floor` and the new host keys. | A host without a floor uses its probe's best level and pins nothing, and the launcher says so (8.4). Tiers stay in `tiers.toml`. |
 | Converting an untrusted image attacks the converter on the trusted side. | A pure Go converter in a jail with no network, digests checked first, and caps on size and entries. |
+| Nitro Sandboxes on EC2 depend on one parent kernel: the documented support is in Amazon Linux 2023 `kernel6.18`. | The `nitro` driver's probe checks the driver's files, not the distribution's name. Other EC2 hosts keep nested KVM or `gvisor`. |
+| A Nitro start fails when no contiguous memory is free, and donated memory may not show in the session's cgroup. | Admission counts the Nitro pool and the vCPU budget itself (14.10.3). The docs show how to reserve a pool at boot. P6.4 measures the cgroup question. |
+| Device back ends still run in the Firecracker process on the parent, whatever hypervisor isolates the guest. | The same `vmm` jail as for KVM. The pinned Firecracker is 1.18.0 or later. |
 | A host name that the guest chose talks a model judge into an allow. | The fixed denies run first. The judge sees fields only, with the host name quoted as data. Its allow never reaches past `max_scope`. The upload budget caps what can leave. `policy log --by classifier` and the launcher's count show every allow, and `policy lockdown` stops all sandboxes at once. |
 | A broad rule for all sessions opens every sandbox at once. | `--dry-run` shows which sandboxes a rule reaches. `policy ls` shows each rule's layer. The launcher never offers "all sessions". Locks keep the denies that matter. |
 | A shell user runs a tool that the agent planted, such as a script in `node_modules/.bin` or a `Makefile` target. | The shell runs inside the wall, behind the same doors. Nothing on the host runs it. Work reaches the laptop only through the review on `pull`. |
