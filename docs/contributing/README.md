@@ -13,6 +13,7 @@ How the project is built, tested, documented and released. New here? Read [CONTR
 | [UX spec](ux-spec.md) | The launcher's screens, keys, colours, glyphs and motion |
 | [Renaming](renaming.md) | How to rename the product in one change |
 | [Isolated sessions: spec](isolation-spec.md) | What to build so that each session runs in its own sandbox, on hosts that the user adds: terms, interfaces, config, commands, protocol, platforms, risks and open questions (proposed) |
+| [Isolated sessions: plan](isolation-plan.md) | The tasks that build the spec, in order, one pull request each, with acceptance criteria and tests (proposed) |
 | [Decisions](decisions/README.md) | Every design decision, with its reasons |
 | [Research](../research/README.md) | The evidence behind the design |
 | [History](history.md) | The first plan, as built |
