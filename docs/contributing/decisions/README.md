@@ -35,5 +35,6 @@ Each record explains one choice: the context, the options and the outcome. Recor
 | [0029](0029-a-sandbox-per-session.md) | A sandbox for each session, on hosts the user owns, with every door closed until the user grants it (widens roadmap item X6) | Proposed |
 | [0030](0030-local-sockets-do-not-listen.md) | Only network ports count as listening on a host: Unix sockets and VM sockets do not | Proposed |
 | [0031](0031-the-egress-process-is-not-a-relay.md) | A sandbox's egress process is not a relay, and a host's download of the runtime is not telemetry | Proposed |
+| [0032](0032-secret-values-in-memory-only.md) | Secret values live only in the memory of the trusted side, never in a file | Proposed |
 
 Write a new record from [the template](template.md).
