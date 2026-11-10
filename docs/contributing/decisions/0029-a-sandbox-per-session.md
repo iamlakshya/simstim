@@ -3,7 +3,7 @@ status: proposed
 date: 2026-11-10
 ---
 
-# 0029 A sandbox for each session, on hosts the user owns, with every door closed until the user grants it
+# 0029 Sessions in sandboxes on hosts the user owns, with every door closed until the user's policy opens it
 
 This record widens roadmap item X6 ([#13](https://github.com/iamlakshya/simstim/issues/13)) into O2 ([#100](https://github.com/iamlakshya/simstim/issues/100)). It replaces no accepted record. [The research note](../../research/isolation.md) has the evidence and the scores, [the spec](../isolation-spec.md) says what to build, and [the plan](../isolation-plan.md) says in what order.
 
@@ -19,6 +19,8 @@ Today simstim gives no isolation between sessions on one host. Every session run
 The threats are real and current. In August 2025, the Nx compromise ran installed agent CLIs with their approvals turned off to list secrets, and pushed them to public repositories in the victim's account ([Snyk](https://snyk.io/blog/weaponizing-ai-coding-agents-for-malware-in-the-nx-malicious-package/)). The Shai-Hulud worm compromised more than 500 npm packages ([CISA](https://www.cisa.gov/news-events/alerts/2025/09/23/widespread-supply-chain-compromise-impacting-npm-ecosystem)). Agents now run for hours without a person, and people run them with approvals off.
 
 The owner asked on 9 November 2026 for each session to run in its own sandbox, with no access to the host or to other sessions. A folder, a network host, a secret, the SSH agent and a port each stay closed until the user opens them with an explicit grant. Users also add machines of their own as hosts: a desktop, a homelab, a Mac, a cloud VM, a bare-metal server or a machine they borrow. They open sandboxes on any of them, as Docker Sandboxes ([architecture](https://docs.docker.com/ai/sandboxes/architecture/)) and a hosted VM service do. Everything stays on machines that the user owns.
+
+On 10 November 2026 the owner asked for more control. One config should cover all sessions, and a narrower place should override it when needed. One-off exceptions should be easy. The defaults should not be the strictest for everyone. A terminal should run beside the agent, in the same files. Many sessions should run at once with confidence, and the owner asked for research on automatic classifiers to that end.
 
 The project's rules stand: the agent's bytes reach the terminal unchanged, nothing new listens on a host, there is no relay or telemetry, and the tool stores no secrets ([governance](../../../GOVERNANCE.md)). Agents are data. The code is clean-room. The project has one maintainer.
 
@@ -94,9 +96,21 @@ Each value below is the option's own, then the best value found below it, where 
 4. A ladder of ways to reach a host behind NAT, with no project relay. 0.620.
 5. Team hosts with one account for each person. 0.495.
 
+**9. Policy: who decides, and where.** These options were not scored by the search. They come from the owner's second request, and from [the research on policy for parallel work](../../research/isolation.md#policy-for-parallel-work).
+
+1. A deny in any layer wins, as in Docker Sandboxes.
+2. Layers from built-in to one session, where the narrowest layer that matches decides, with locks for what must never change.
+3. One policy for each session, with no shared config.
+
+**10. Sites that no rule covers.**
+
+1. Always ask a person.
+2. An action that the user picks in any layer: ask, deny, allow and log, or classify.
+3. A model judge for every unknown site.
+
 ## Decision
 
-Option 5 for the wall, option 4 for control, option 1 for the lifecycle, option 1 for the doors and option 4 for the supply chain. For hosts: option 1 to attach, option 1 then option 2 for placement, and option 1 for the fleet, with option 3 grafted from the fleet decision. These are the paths with the best values, 0.687 and 0.732. The last step of the main path secures only the project's own artefacts, so this record adds grafts from the other options of decision 5 and from the red team.
+Option 5 for the wall, option 4 for control, option 1 for the lifecycle, option 1 for the doors and option 4 for the supply chain. For hosts: option 1 to attach, option 1 then option 2 for placement, and option 1 for the fleet, with option 3 grafted from the fleet decision. For policy: option 2 of decision 9 and option 2 of decision 10. These are the paths with the best values, 0.687 and 0.732. The last step of the main path secures only the project's own artefacts, so this record adds grafts from the other options of decision 5 and from the red team.
 
 ### The wall and its floor
 
@@ -124,12 +138,21 @@ Option 5 for the wall, option 4 for control, option 1 for the lifecycle, option 
 ### The doors
 
 - **Files.** A session works on its own clone, seeded from a git bundle that the trusted side makes. Work leaves through `pull`, now a bundle over the bridge into quarantine refs, with a summary that flags files that run code on the laptop or in CI. The host never runs git or follows a symlink in a folder that a sandbox can write.
-- **Network.** No wall has a network card. Each flow becomes a stream to a per-session egress process, which checks the policy, refuses private, loopback, link-local and metadata addresses, and logs each flow. Presets: `locked`, `balanced` (the default) and `open`, which counts as a downgrade. DNS answers only granted names. The egress process is not a relay ([0031](0031-the-egress-process-is-not-a-relay.md)).
+- **Network.** No wall has a network card. Each flow becomes a stream to a per-sandbox egress process, which checks the policy, refuses private, loopback, link-local and metadata addresses, and logs each flow. Presets: `locked`, `balanced` (the built-in default) and `open`. DNS answers only allowed names. The egress process is not a relay ([0031](0031-the-egress-process-is-not-a-relay.md)).
 - **Secrets.** A secret with known hosts is bound: its value stays in the egress process, and the guest sees a sentinel. The proxy puts the value into one header on those hosts only, refuses any other credential there, and refuses the sentinel anywhere else. Any other secret enters the guest only when the user exposes it by name, and the row shows it. Login files of the host never enter a sandbox. Values stay in memory only ([0032](0032-secret-values-in-memory-only.md)).
-- **SSH agent.** The client turns off agent forwarding on every connection, over the user's own SSH config. A sandbox gets no SSH agent unless the user grants one.
+- **SSH agent.** The client turns off agent forwarding on every connection, over the user's own SSH config. A sandbox gets no SSH agent unless a layer names keys. Then the supervisor serves an agent that holds only those keys, in memory, and logs each signature. The laptop's own agent never enters a sandbox.
 - **Ports, paste, devices.** A forward is a grant for one port, over a Unix socket. Paste takes images and PDF files by default, and never a file whose path the session wrote to the clipboard. No device crosses the wall.
 - **Terminal output** stays byte-exact. The client only observes and warns.
 - **Interception.** The egress process decrypts TLS only for hosts that need it: bound hosts, model APIs, package registries and object stores. This is a new trust decision. It gets its own record, which needs every maintainer's yes, before it is built.
+
+### Policy you configure
+
+- **Layers.** Rules and settings come from six layers: built-in, all sessions, a host, a repository, a profile and a session. Every layer has the same shape. A narrower layer overrides a broader one, and for a destination the narrowest layer with a matching rule decides. A `[lock]` in the user's own config holds what no narrower layer may change. The repository's own file only narrows or proposes.
+- **One-off exceptions.** `policy allow <site> --in <host>/<session>` opens one site for one session, `--for 1h` ends it by itself, and `--once` allows one connection. The same command with `--repo`, `--profile`, `--host` or `--all` writes the rule to that layer, and the change reaches running sandboxes at once.
+- **Defaults are the user's.** The built-in layer stays closed: `balanced` and `ask`. The guided setup asks once how all sessions should treat a site that no rule covers, and a line in the user's config counts as the explicit grant.
+- **Sites that no rule covers.** Each layer picks the unknown action: `ask`, `deny`, `allow` with a log, or `classify`. The classifier runs fixed checks first: known exfiltration services, bare IP addresses, lookalike names and names that look like encoded data. Then an optional judge decides, a model or a program that the user names. It sees structured fields only, never a body or the agent's text. A judge's allow is never wider than the session. The classifier makes fewer questions. It is not a wall.
+- **Shells beside the agent.** `shell` opens a terminal in the same sandbox as the agent, and `exec` runs one command there. The sessions of one sandbox share its files and its policy, because their processes can reach each other.
+- **Commands.** Every command follows [0033](0033-one-command-grammar.md): every rule lives under `policy`.
 
 ### The supply chain and autonomy
 
@@ -146,7 +169,7 @@ Option 5 for the wall, option 4 for control, option 1 for the lifecycle, option 
 
 ### Phases
 
-Phase 0 fixes today's holes for every session: agent forwarding off, a hook socket of its own and a peer check, the Ghostty pin, checked session IDs, cleaned host text, a paste guard, trust tied to a setup script's content, safe copies, and Lima VMs that cannot reach the Mac's loopback. It also adds pinned host keys, host tiers and the grant gate. Phase 1 is a process wall that users can try. Phase 2 keeps secret values outside and closes DNS. Phase 3 adds the release manifest, runtime delivery and microvm. Phase 4 checks the project's own artefacts, and adds placement, health, drain, purge and hosts behind NAT. Phases 5 to 7 add fork, `cp`, `exec`, gVisor, Firecracker, registry gates and decoys. Phase 8 adds separate accounts.
+Phase 0 fixes today's holes for every session: agent forwarding off, a hook socket of its own and a peer check, the Ghostty pin, checked session IDs, cleaned host text, a paste guard, trust tied to a setup script's content, safe copies, and Lima VMs that cannot reach the Mac's loopback. It also adds pinned host keys, host tiers and the grant gate. Phase 1 is a process wall that users can try, with policy layers, profiles, shells and `exec`. Phase 2 keeps secret values outside, closes DNS, and adds the unknown action, the classifier, SSH keys and policy changes that reach running sandboxes. Phase 3 adds the release manifest, runtime delivery and microvm. Phase 4 checks the project's own artefacts, and adds placement, health, drain, purge and hosts behind NAT. Phases 5 to 7 add fork, `cp`, gVisor, Firecracker, registry gates and decoys. Phase 8 adds separate accounts.
 
 Walls stay opt-in until phase 2 ends. Then, with the owner's yes, new sessions run at the host's floor by default. Decisions that only the owner can make are in [the spec's open questions](../isolation-spec.md#15-open-questions), each with a recommended default.
 
@@ -170,5 +193,8 @@ Walls stay opt-in until phase 2 ends. Then, with the owner's yes, new sessions r
 - Bad, because terminal escape sequences still reach the laptop, and granted secrets and hosts can still be misused while a session runs.
 - Bad, because on the first path every sandbox on a host runs as the login user, so a VMM escape reaches that account. Separate accounts come later, as an option.
 - Bad, because agent rows, service rules and the model API guard go stale as agents change, and one maintainer must keep a kernel, a VMM and images up to date.
-- Bad, because the plan is large: nine phases and 71 tasks, most of them M or L on the roadmap's scale.
-- This record replaces no accepted record. It extends [0002](0002-own-holder-per-session.md) (a supervisor and an egress process beside each holder), [0003](0003-system-openssh.md) (options on the command line over the user's SSH config), [0013](0013-host-providers.md) (a stopped session keeps files, not processes), [0017](0017-release-signatures.md) (more signed artefacts) and [0024](0024-memory-cap.md) (a microvm's memory sits inside the session's cap, and admission refuses what does not fit). It needs [0030](0030-local-sockets-do-not-listen.md), [0031](0031-the-egress-process-is-not-a-relay.md) and [0032](0032-secret-values-in-memory-only.md) for the rules that it touches. Records that follow it, in the plan: TLS interception on the trusted side before phase 2 needs it, the memory of microvm guests before phase 3, the signed-tag release gate in phase 4, and the records for sandbox hosts.
+- Good, because one config serves all sessions, any narrower place can override it, and a user can run many sessions at once without a person at each terminal.
+- Bad, because a judge can be fooled, as every model judge in the research was under adaptive attacks. The fixed parts carry the guarantees, and a wrong allow is still capped by the upload budget and seen in the log.
+- Bad, because "the narrowest layer decides" lets a session lift a broad deny. Locks are the answer, and the user must set them.
+- Bad, because the plan is large: nine phases and 76 tasks, most of them M or L on the roadmap's scale.
+- This record replaces no accepted record. It extends [0002](0002-own-holder-per-session.md) (a supervisor and an egress process beside each holder), [0003](0003-system-openssh.md) (options on the command line over the user's SSH config), [0013](0013-host-providers.md) (a stopped session keeps files, not processes), [0017](0017-release-signatures.md) (more signed artefacts) and [0024](0024-memory-cap.md) (a microvm's memory sits inside the session's cap, and admission refuses what does not fit). It needs [0030](0030-local-sockets-do-not-listen.md), [0031](0031-the-egress-process-is-not-a-relay.md) and [0032](0032-secret-values-in-memory-only.md) for the rules that it touches, and [0033](0033-one-command-grammar.md) for its commands. Records that follow it, in the plan: TLS interception on the trusted side before phase 2 needs it, the memory of microvm guests before phase 3, the signed-tag release gate in phase 4, and the records for sandbox hosts.
