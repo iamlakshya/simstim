@@ -166,7 +166,7 @@ The counts are commands, then the words that the user must know.
 | tmux | `new` | `attach` | `ls` | | | | | `kill-session` | |
 | zellij | `attach -c` | `attach` | `ls` | | | `kill-session`, which keeps it for later | `attach` | `delete-session` | |
 | Docker Sandboxes | `create`, `run` | `run` | `ls` | `exec` | `cp` | `stop` | `run` | `rm`, `prune`, `reset` | `policy allow`, `deny`, `ls`, `rm`, `log`, `check` |
-| Hosted VM service | `new`, `fork` | `ssh` | `list` | `exec` | `scp` | `stop` | `resume` | `delete` | firewall rules inside the VM |
+| A hosted VM service | `new`, `fork` | `ssh` | `list` | `exec` | `scp` | `stop` | `resume` | `delete` | firewall rules inside the VM |
 | GitHub Codespaces | `create` | `ssh` | `list` | | `cp` | `stop` | | `delete` | `ports`, `logs` |
 | Coder | `create` | `ssh` | `list` | `ssh <cmd>` | | `stop` | `start` | `delete` | `logs` |
 | Daytona | `create` | `ssh` | `list` | `exec` | | `stop`, `archive` | `start` | `delete` | |

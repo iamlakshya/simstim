@@ -190,7 +190,7 @@ The facts come from the service's public docs, read on 10 November 2026. Command
 | Command history, even when stopped | `history` | Each session's ring of 8 MiB replays while it runs | Differs. The screen does not survive a stop ([question 10](../contributing/isolation-spec.md#15-open-questions)). |
 | Processes | `ps` | `exec -- ps` | Differs |
 | A files API | Read, write, list, search, replace, signed URLs | `cp` and `exec` | Differs |
-| SSH | The hosted VM service's `ssh`, with a host key that changes at each resume | `shell`, and SSH for editors | Planned and New (P1.13, P2.15) |
+| SSH | `ssh`, with a host key that changes at each resume | `shell`, and SSH for editors | Planned and New (P1.13, P2.15) |
 | VS Code and Cursor | Remote-SSH, with a config script to run again after each resume | `ssh-config` writes one managed block once | New (P2.15) |
 | Forward a port to the laptop | `forward --remote P` | `forward` | Built |
 | Forward a laptop port into the sandbox | `forward --reverse --local P` | `forward --reverse`, on `own` hosts | New (P1.9) |
