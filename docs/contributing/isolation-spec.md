@@ -20,7 +20,7 @@ The path reaches L5, but the chosen L5 option secures only the project's own art
 
 Every fact that no primary source confirms is marked UNVERIFIED. Where the fact check corrected a claim, this spec uses the correction.
 
-**The second pass.** On 10 November 2026 the owner asked for more control: one config for all sessions that a narrower place can override, one-off exceptions, no forced strict defaults, a shell beside the agent, and research on automatic classifiers, so that many sessions can run at once. The owner also asked for a command line that is easy to guess. This pass adds the layers, profiles and locks of section 8, the unknown action and the classifier of 7.2 and 7.8, SSH keys (7.9), and shells in a sandbox (6.11). After AWS launched Nitro Sandboxes on 9 November 2026, it also adds a `nitro` driver for EC2 hosts (5.1, 11). Every command now follows [0033](decisions/0033-one-command-grammar.md). [The research](../research/isolation.md#policy-for-parallel-work) and [the CLI study](../research/cli-dx.md) give the evidence.
+**The second pass.** On 10 November 2026 the owner asked for more control: one config for all sessions that a narrower place can override, one-off exceptions, no forced strict defaults, a shell beside the agent, and research on automatic classifiers, so that many sessions can run at once. The owner also asked for a command line that is easy to guess. This pass adds the layers, profiles and locks of section 8, the unknown action and the classifier of 7.2 and 7.8, SSH keys (7.9), and shells in a sandbox (6.11). After AWS launched Nitro Sandboxes on 9 November 2026, it also adds a `nitro` driver for EC2 hosts (5.1, 11). A check of every feature of Docker Sandboxes and the hosted VM service added section 17. Every command now follows [0033](decisions/0033-one-command-grammar.md). [The research](../research/isolation.md#policy-for-parallel-work) and [the CLI study](../research/cli-dx.md) give the evidence.
 
 **Words.** `<name>` is `brand.Name`, today `simstim`. Code never spells the product name outside `internal/brand` ([0007](decisions/0007-name-in-one-place.md)). Commands in this spec are written as users type them, `simstim …`. Section 14 writes paths and names with today's name, such as `~/.config/simstim/tiers.toml`. Code builds each of them from `brand`.
 
@@ -775,6 +775,7 @@ The rules:
 - **One policy for each sandbox.** The sessions of a sandbox share its files, its network policy, its sentinels and its exposed secrets. A process in one session can reach the processes of another session in the same sandbox, so the sandbox is the unit of policy, not the terminal. A rule given `--in` a shell session applies to the whole sandbox, and the answer says so. For a wider door for a short time, use `--for 10m`.
 - **The same user.** A shell runs as the user `agent`, uid 1000, never as root. On a microvm with `--docker`, it is in the `docker` group, as the agent is.
 - **Lifecycle.** The sandbox runs while any of its sessions runs. When the last one ends, the sandbox stops as in 6.6, and keeps `/work`. `stop` on any of its sessions stops the sandbox and all its sessions, and the answer lists them. `rm` on a shell session ends only that session. `rm` on the first session destroys the sandbox, after it lists the other sessions and asks.
+- **Waking.** A wake starts every session of the sandbox again. An agent comes back with its resume command, and a session started with a command of its own comes back with that command, as the hosted VM service's systemd units and Docker's long-running kits do. A shell session gets a fresh shell. So a dev server started with `new --in auth-fix --detach -- npm run dev` survives a stop.
 - **Rows.** The launcher draws the sessions of one sandbox together: the first at the top, the others indented under it. `ls --json` adds `sandbox_of`.
 - **History.** The home resets at each start (7.1), so a shell's history goes with it. `[sandbox] keep = [".bash_history"]` in any layer keeps named files of the home across starts, as `StateDirs` does for agents. `keep` refuses files that a shell runs at start, such as `.bashrc`, `.profile`, `.bash_profile`, `.zshrc` and `.zprofile`, because a dropper would hide there.
 - **Unwalled sessions.** A session at the level `none` has no sandbox. `shell` on it opens a shell session on the host in the same folder, as `new <host> --dir <folder>` does today.
@@ -810,7 +811,7 @@ Each door is closed by the built-in layer. A rule in any layer opens it (8.2), a
 
 The sandbox never sees the host user's home, `$XDG_RUNTIME_DIR` (the systemd user bus, the SSH agent, other sessions' sockets), `/root`, `/var/run/docker.sock`, `/run/user` or other sessions' folders.
 
-**Grants.** `--mount <host-path>[:<guest-path>][:ro|:rw]`, read-only by default, at `/mnt/<base name>` unless a guest path is given. On a process wall it is a bind mount. The supervisor opens the path with `os.Root` and refuses one that leaves its root by a symlink. A writable mount is direct: the guest can plant `.git/hooks`, `.envrc` or editor tasks there. So the row shows "direct folder", and the supervisor binds `.git/hooks` and `.git/config` read-only on top when the folder is a repository. On a microvm, mounts are not possible in P3, because Cloud Hypervisor needs `virtiofsd` for folder sharing. `--mount` there fails with the hint to use `pull`, or `cp` from P5.
+**Grants.** `--mount <host-path>[:<guest-path>][:ro|:rw]`, read-only by default, at `/mnt/<base name>` unless a guest path is given. On a process wall it is a bind mount. The supervisor opens the path with `os.Root` and refuses one that leaves its root by a symlink. A writable mount is direct: the guest can plant `.envrc` or editor tasks there, so the row shows "direct folder". A writable mount of a folder in a git repository is refused with `mount_repo_rw`, and the hint is to work on the clone and `pull`. Read-only binds of `.git/hooks` and `.git/config` are not enough: git also reads `.git/commondir`, which can point it at hooks and config that the guest controls, so the host user's next `git` command would run them ([gitrepository-layout](https://git-scm.com/docs/gitrepository-layout)). Docker Sandboxes also lost a nested read-only mount after edits on the host ([issue 388](https://github.com/docker/sbx-releases/issues/388)). On a microvm, mounts are not possible in P3, because Cloud Hypervisor needs `virtiofsd` for folder sharing. `--mount` there fails with the hint to use `pull`, or `cp` from P5.
 
 **`.worktreeinclude`.** A walled session copies none of the listed files. The laptop's `[repos."<remote>"] include = [".env"]` or `--include .env` copies them into the clone at seed time, through `os.Root`, and records each as an exposure in the audit log.
 
@@ -860,7 +861,7 @@ Before P2 there is no stub, and lookups in the guest fail. Tools that use the pr
 - The guest init writes the CA's certificate to `/run/<name>/ca.pem`, and a bundle of the image's system CAs plus that certificate to `/run/<name>/ca-bundle.pem`. The agent's environment gets `SSL_CERT_FILE` and `REQUESTS_CA_BUNDLE` (the bundle), `NODE_EXTRA_CA_CERTS` (the CA alone), `GIT_SSL_CAINFO` (the bundle), and the agent's own `CAEnv`, such as `CODEX_CA_CERTIFICATE` for Codex ([Codex PR 14178](https://github.com/openai/codex/pull/14178)). Claude Code reads `NODE_EXTRA_CA_CERTS` ([network config](https://code.claude.com/docs/en/network-config)).
 - Upstream, the egress process makes its own TLS connection with the system roots, read at start, and full checks. It never weakens upstream TLS.
 - It parses each request into a canonical form and matches rules on that form. It forwards the canonical form, never the raw bytes. It refuses duplicate `Host` headers, both `Content-Length` and `Transfer-Encoding`, an absolute-form target that differs from the SNI, and a query longer than 8 KiB. It uses one `http.Transport` for each session process. It pins the Go toolchain at or above the fixes for CVE-2026-56866 ([NVD](https://nvd.nist.gov/vuln/detail/CVE-2026-56866)) and CVE-2026-39825 (UNVERIFIED: no primary source was found for the second).
-- HTTP/1.1, HTTP/2, server-sent events and WebSocket upgrades pass through `httputil.ReverseProxy`.
+- HTTP/1.1, HTTP/2, server-sent events and WebSocket upgrades pass through `httputil.ReverseProxy`. The egress process offers HTTP/2 to the guest through ALPN on every intercepted host. A proxy that spoke only HTTP/1.1 made one page 15 times slower in a 2026 test ([write-up](https://ronaldbradford.com/blog/2026-10-12-six-connections-and-a-long-queue/)).
 - A host whose client pins its certificate or needs mTLS goes in the splice-only list, `internal/egress/rules/splice.toml`. It gets no secret.
 
 **Presets.** The lists are data in `internal/egress/rules/presets.toml`, each entry with a source link.
@@ -946,8 +947,10 @@ It never holds a query string, a header value or a body.
 - **Opened by:** `simstim forward devbox/auth-fix 3000`, which adds a `port` rule in the session layer, and the row shows it. `simstim policy allow port 3000 --in devbox/auth-fix` adds one without forwarding.
 - **Path:** while the grant holds, the supervisor listens on the Unix socket `paths.PortSocket(id, port)`, `$XDG_RUNTIME_DIR/<name>/p/<id>/<port>.sock` (0600, in a 0700 folder). `forward` runs `ssh -N -L 127.0.0.1:<port>:<socket>`. Each connection becomes a `port` stream, and the guest init connects it to `127.0.0.1:<port>` inside the sandbox. No TCP port opens on the host.
 - **List:** `ports` shows the guest's claim of its listening ports, marked as claimed, and the granted ones.
+- **No port named:** for a walled session, `forward` with no ports lists the claimed ports and asks which to forward, and without a terminal it forwards none. The guest never chooses a laptop port alone. A Docker Sandboxes sandbox took another sandbox's OAuth callback port that way ([v0.42.0](https://github.com/docker/sbx-releases/releases/tag/v0.42.0)).
 - **Browser:** pages from a session run in the laptop's browser at a localhost origin, which shares cookies with other local apps by port ([RFC 6265, 8.5](https://datatracker.ietf.org/doc/html/rfc6265#section-8.5)). The first forward of a walled session shows a notice that says so, and suggests `http://<id>.localhost:<port>`, which browsers send to the loopback address.
 - **Transports:** `forward` stays SSH-only, as [0013](decisions/0013-host-providers.md) says.
+- **Reverse (P1.9):** `forward --reverse <laptop port>[:<guest port>]` lets a sandbox reach one service on the laptop, such as a database, on `own` hosts only. The guest init listens on the guest's own loopback. Each connection becomes a stream through the supervisor and the bridge to the client, which dials only that laptop port on `127.0.0.1`. Nothing listens on the host. The row shows it, and the audit log records each connection ([question 58](#15-open-questions)).
 
 ### 7.5 Devices
 
@@ -1086,6 +1089,16 @@ mounts = []            # host folders, such as "~/data:/mnt/data:ro"
 secrets = []           # names from [secrets] that every session gets
 ssh_keys = []          # names from [secrets] with kind = "ssh-key" (7.9)
 push = false           # push to this session's branches on the origin
+cpus = 0               # 0: from the template or the agent table (17.1)
+memory = ""            # such as "8G". Empty: from the template or the agent table
+env = {}               # variables that the guest can read, such as { LOG_LEVEL = "debug" } (17.2)
+copy_in = []           # laptop files to copy in at each start (17.3)
+copy_max = "64M"
+seed_max = "512M"      # the largest seed from the laptop (17.4)
+keep_caches = true     # keep package caches across starts, in this sandbox only (17.5)
+caches = []            # more cache folders, or "!path" to drop one
+max_run = ""           # stop the sandbox this long after its start, such as "4h" (17.6)
+sudo = false           # sudo inside a microvm guest (17.10)
 
 [sandbox.image_policy]   # leave it out to trust each image's first digest (P4.5)
 identity = ""            # the cosign certificate identity that must sign images
@@ -1098,6 +1111,7 @@ unknown = "ask"        # ask | deny | allow | classify: a flow that no rule cove
 hold = "20s"           # how long a flow waits for an answer under ask
 upload_budget = "16M"  # for each host and hour, except model APIs and push remotes
 min_release_age = "7d" # registry gates refuse package versions younger than this (P7.1)
+model_budget = 0       # tokens that model API requests may use, 0 for no limit (17.8)
 
 [classifier]           # used when unknown = "classify" (7.8)
 judge = "none"         # none | model | command
@@ -1373,6 +1387,12 @@ Every command follows [0033](decisions/0033-one-command-grammar.md): session ver
 | `simstim new [<host>\|auto] … [--untrusted] [--ssh-agent]` | `--untrusted` sets the request tier (14.8.4). `--ssh-agent` forwards the laptop's SSH agent to one unwalled session on an `own` host (14.8.2). | H5 |
 | `simstim new auto … [--need arch=…,<feature>,<label>=<value>] [--dry-run] [--allow-wake]` | Places the session on a host from live facts, and explains the choice (14.10.5) | H13 |
 | `simstim new <host> … [--image <ref>] [--keep-system] [--docker]` | Microvm options | P3 |
+| `simstim new [<host>] … [--cpus <n>] [--memory <size>] [--env K[=V]]… [--env-file <file>] [--copy <laptop path>[:<guest path>]]… [--seed <laptop folder>] [--seed-dirty]` | Sizes, variables, files from the laptop and a seed from the laptop (17.1 to 17.4) | P1.14 |
+| `simstim new [<host>] … [--rm] [--count <n>]` | A throwaway sandbox, and many at once (17.6) | P1.16 |
+| `simstim forward <host>/<session> --reverse <laptop port>[:<guest port>]` | One laptop service inside the sandbox, on `own` hosts (7.4) | P1.9 |
+| `simstim prune [<host>] [--stopped-before <time>] [--dry-run] [-y]` | Removes stopped sandboxes that have nothing to pull (17.6) | P1.16 |
+| `simstim events [<host> \| <host>/<session>] [--follow] [--json]` | Streams session and sandbox events (17.6) | P1.16 |
+| `simstim ssh-config [--remove]` and `simstim ssh-proxy <session>.<host>.<name>` | Editors and plain SSH tools, with SSH ending in the client (17.7) | P2.15 |
 | `simstim shell <host>/<session> [--new] [--name <n>]` | Opens a shell session in that session's sandbox, or attaches to its newest one (6.11) | P1.13 |
 | `simstim exec <host>/<session> [--timeout <time>] -- <command…>` | Runs one command in the sandbox, prints its output, and exits with its code (6.11) | P1.13 |
 | `simstim policy allow [<door>] <target> <layer> [--once \| --for <time>] [--public] [--tools <name>,…] [--idn] [--dry-run]` | Adds an allow rule. `<door>` is a word from section 7, and `net` when left out. Prints the rule's ID and when it applies. | P1, P1.12, P2 |
@@ -1507,6 +1527,7 @@ The supervisor gives odd stream IDs and the guest gives even ones, so both can o
 | `bundle` | supervisor | `{"dir":"in","repo":"app"}` or `{"dir":"out","base":"<sha>"}` | a git bundle |
 | `exec` | supervisor | `{"id":"<exec id>"}` | the command's stdout and stderr, framed, then its exit code (6.11) |
 | `agent` | guest | `{}` | the SSH agent protocol, for the keys of 7.9 |
+| `sftp` | supervisor | `{}` | the SFTP protocol, which the guest init serves as the user `agent` (17.7) |
 
 ### 10.3 `ctl` operations
 
@@ -1519,7 +1540,7 @@ From the supervisor to the guest init, as `TRequest`:
 | `stop` | `{"grace_ms":10000}` | `{}`, then the guest shuts down |
 | `freeze`, `thaw` | `{}` | `{}` (P5) |
 | `refs` | `{}` | `{"refs":[{"name":"refs/heads/…","sha":"…"}]}` |
-| `spawn` | `{"session":"<id>","argv":[…],"env":[…],"cwd":"/work/app","cols":120,"rows":40}` | `{"pid":31}`. The guest init starts another holder in the same sandbox (6.11). |
+| `spawn` | `{"session":"<id>","argv":[…],"env":[…],"cwd":"/work/app","cols":120,"rows":40,"ephemeral":false}` | `{"pid":31}`. The guest init starts another holder in the same sandbox (6.11). |
 | `exec` | `{"id":"<exec id>","argv":[…],"cwd":"/work/app","timeout_ms":600000}` | `{}`, then the output on an `exec` stream |
 
 From the guest to the supervisor, as `TEvent`, each capped at 64 KiB and at 20 a second. The supervisor cleans every string with `api.CleanText` and keeps them as claims:
@@ -1578,7 +1599,7 @@ New bridge ops. The bridge serves the ops of section 14 in a new `internal/host/
 
 The helper never runs sudo, so no bridge op runs a root step. The client builds the root step and runs it through `ssh -t … sudo` (14.4).
 
-New features in the bridge's hello: `wall`, `policy`, `spawn`, `stop`, `arm`, `pull.bundle`, `put`, `sandbox`, `facts`, `drain` and `purge`. Later: `classify` (P2), `ssh-key` (P2), `images` (P3), `fork` and `cp` (P5). `spawn` covers `shell` and `exec`. `wall` means that the helper can start walled sessions. `sandbox` means that it serves the sandbox probe and the runtime ops. A client that needs a feature the helper lacks says `wall_helper_old` with its hint, or the error "too old for sandboxes" of section 14.14.
+New features in the bridge's hello: `wall`, `policy`, `spawn`, `stop`, `arm`, `pull.bundle`, `put`, `sandbox`, `facts`, `drain`, `purge` and `events`. The op `events.watch` streams the events of 17.6 until the client closes it. Later: `sftp` (P2.15). Later: `classify` (P2), `ssh-key` (P2), `images` (P3), `fork` and `cp` (P5). `spawn` covers `shell` and `exec`. `wall` means that the helper can start walled sessions. `sandbox` means that it serves the sandbox probe and the runtime ops. A client that needs a feature the helper lacks says `wall_helper_old` with its hint, or the error "too old for sandboxes" of section 14.14.
 
 New fields in the hello and in requests:
 
@@ -1736,6 +1757,9 @@ The figures from upstream are for small configurations. Firecracker reaches the 
 | A judge's answer | 5 s at most, by the timeout. The p50 is to measure, for a local model and for an API. | The times in the audit lines over P2.12's test set |
 | A rule for all sessions, to every running sandbox | 2 s or less for 10 sandboxes on 3 reachable hosts | An end-to-end script that times `policy deny --all` until each egress process refuses the host |
 | `shell` to a prompt, sandbox running | 300 ms or less above a plain `attach`, at p50 | `scripts/time-to-agent.sh --shell`, 20 runs |
+| A reinstall after a restart, with kept caches | within 20% of a reinstall with no restart | npm and pnpm on a fixture project, in P1.15 |
+| `ssh auth-fix.box.<name>` to a prompt | 300 ms or less above `shell`, at p50 | P2.15 |
+| An event, from the guest to `events --follow` | 200 ms or less at p50 | P1.16 |
 
 A target that a measurement misses opens an issue before the phase ends. It does not block the phase unless it is the key-to-PTY target, which guards the project's first principle.
 
@@ -2430,7 +2454,7 @@ A template is a user's own image (section 2). User templates come after this pla
 Two other kinds of image follow their own rules:
 
 - **Registry images.** The laptop pins each OCI image that the user names to its manifest digest. The host's image builder pulls by that digest, so the registry's bytes are checked, and converts the image in a jail (P3.2). The trusted manifest records the converted image's root hash.
-- **Saved images.** An image that `save` makes (P5.5) stays on the host that made it. Only sessions on that host can use it, and the launcher marks it "made on <host>". To use it on another host, build a template on the laptop.
+- **Saved images.** An image that `image save` makes (P5.5) stays on the host that made it. Only sessions on that host can use it, and the launcher marks it "made on <host>". To use it on another host, build a template on the laptop.
 
 #### 14.9.6 An image missing at `new`
 
@@ -3166,6 +3190,54 @@ This is the only full list. Each question has its options and a recommended defa
     - (b) Confidential mode always.
     - **Recommended:** (a). The trusted side runs on the parent, and the user owns the instance. Confidential mode needs the proposed DMB patches in the guest kernel, and it hides only the guest's memory: the work disk and the network still pass through the parent.
 
+### Parity with Docker Sandboxes and a hosted VM service
+
+55. **A desktop and computer use?**
+    - (a) No built-in stream. An image with a desktop and a VNC server, reached with `forward`, works today.
+    - (b) A built-in desktop stream, as the hosted VM service has.
+    - **Recommended:** (a). A stream adds a large parser of hostile data on the laptop, and `forward` already reaches a server in the sandbox. Computer use works the same way: an image with a virtual display and a computer-use MCP server needs nothing to cross the wall ([parity](../research/parity.md#33-sharing-desktops-and-snapshots)).
+56. **Public URLs for a sandbox's ports?**
+    - (a) No. `forward` reaches the laptop only.
+    - (b) Yes, through a relay.
+    - **Recommended:** (a). A public URL needs a relay or a listener, which the project's rules forbid. A docs recipe shows `forward` with the user's own tunnel, ending on a machine that the user owns, as [0031](decisions/0031-the-egress-process-is-not-a-relay.md) allows.
+57. **Devices inside a sandbox: `/dev/kvm`, a GPU or FUSE?**
+    - (a) None in this plan.
+    - (b) `/dev/kvm` in microvm guests, as the hosted VM service has.
+    - **Recommended:** (a), except FUSE in a microvm guest with `sandbox.sudo` or `--docker`, because that guest kernel is inside the wall. `/dev/kvm` and a GPU widen the wall: nested virtualisation exposes the host's hypervisor, and a GPU needs device passthrough.
+58. **A laptop or host port inside a sandbox?**
+    - (a) No.
+    - (b) An explicit reverse forward of one laptop port, on `own` hosts.
+    - **Recommended:** (b). It is a door towards the laptop, so the user names the one port, and nothing listens on the host (7.4).
+59. **An SDK, a REST API, webhooks or OpenTelemetry?**
+    - (a) The CLI with `--json`, exit codes and `events` serves scripts. Alerts serve webhooks, and an `otlp` format sends events to a collector that the user names.
+    - (b) A local API server.
+    - **Recommended:** (a). A server would listen, and the CLI already gives every operation.
+60. **Root inside a sandbox?**
+    - (a) Off. `sandbox.sudo = true` on a microvm only.
+    - (b) On by default, as both products do.
+    - **Recommended:** (a). A process wall relies on the guest's user IDs. A microvm does not, so root there is the user's choice.
+61. **Share package caches between sandboxes?**
+    - (a) No: kept caches stay in each sandbox, and images give warm starts.
+    - (b) A shared read-only cache on each host.
+    - **Recommended:** (a). Some tools do not check what they read from a cache ([parity](../research/parity.md#5-performance)).
+62. **How do editors reach a sandbox?**
+    - (a) SSH that ends in the client, with `ssh-config`.
+    - (b) An SSH server inside the sandbox.
+    - **Recommended:** (a). A server in the sandbox is under the sandbox's control. Docker Sandboxes ends SSH outside the sandbox too.
+63. **Does a seed from the laptop include uncommitted work?**
+    - (a) Only with `--seed-dirty`, through a temporary index that writes no ref.
+    - (b) Always.
+    - **Recommended:** (a). Untracked files can hold secrets, so the user asks for them by name.
+64. **A host-side MCP gateway or a shared skills store?**
+    - (a) No. MCP servers run in the sandbox behind the same doors. Skills arrive by `copy_in`.
+    - (b) A gateway on the host, as Docker has.
+    - **Recommended:** (a). URL servers work through a `net` rule and a bound secret, and stdio servers run inside the sandbox. Docker's gateway runs the stdio servers that the user registers on the host, outside the wall ([architecture](https://docs.docker.com/ai/sandboxes/architecture/)).
+
+65. **How does a host get a private registry image?**
+    - (a) The laptop pulls it with its own registry login, and copies it to the host, as `fetch = "laptop"` does for runtime files.
+    - (b) A registry token goes to the host as a secret.
+    - **Recommended:** (a). No registry token leaves the laptop, and the host checks the digest as for any image (14.9).
+
 ### Decided by the design
 
 The research raised four more questions, and the design answers them, so they are not open. No wall has a guest network card, and all egress goes through the egress process (7.2, decision [0029](decisions/0029-a-sandbox-per-session.md)). The client embeds the release manifest, so the runtime needs no rollback floor, key or expiry of its own (14.9.1, 14.11.2). The supervisor dials into the guest, so no trusted-side process listens where a guest can connect (G7, decision [0030](decisions/0030-local-sockets-do-not-listen.md)). The names of these files follow the roadmap.
@@ -3191,7 +3263,7 @@ The research raised four more questions, and the design answers them, so they ar
 | One maintainer must keep a guest kernel, a VMM, images and rules up to date. | Kernel updates on a schedule, not for each CVE. Reproducible builds. `pins-watch`. Phases that each ship on their own. |
 | Nested virtualisation is slow, and its cost on Lima and cloud hosts is not measured. | P3.8 measures it. A host may pin `process` when microvm is too slow. |
 | Density on small hosts: a microvm holds guest memory. | The balloon returns freed pages. A stopped session uses no memory. Admission refuses a sandbox that does not fit (14.10.3). The density targets of section 12. |
-| A tool ignores `HTTPS_PROXY`, such as Node's built-in `fetch` without its proxy setting (UNVERIFIED for current Node releases). | `ProxyEnv` in the agent table. The transparent proxy on microvms. The 403 or the failed lookup names the problem. |
+| A tool ignores `HTTPS_PROXY`. Node's `fetch` reads it only with `NODE_USE_ENV_PROXY=1`, from Node 24.0.0 and 22.21.0, and its `http` module from 24.5.0 ([Node](https://nodejs.org/api/cli.html)). | The base environment of every sandbox sets `NODE_USE_ENV_PROXY=1`. `ProxyEnv` in the agent table. The transparent proxy on microvms. The 403 or the failed lookup names the problem. |
 | Claude Code's own sandbox fails inside a process wall, because nested user namespaces are refused. | The docs say so. microvm runs it. The tool does not change the agent's settings. |
 | A compromised login account on the host defeats the checks there (N5). It can also capture the sudo password through its shell start files. | `security.md` says so. Subuid jails for the processes that touch untrusted input. [Question 28](#15-open-questions) for a separate user. The root step runs through sudo by default only at the first add, before any sandbox has run there, and is printed for the owner after that (14.4.4). |
 | A compromised host lies in its sandbox probe to get a weaker floor, or in its facts to attract sessions with secrets. | The floor is pinned on the laptop at set-up. Later probes can only raise it, and the user confirms any change. Facts are checked against the values at prepare time. A host that takes most placements ranks lower, and the reason for each placement is recorded (14.10.5). Tiers cap what any host gets. |
@@ -3216,11 +3288,129 @@ The research raised four more questions, and the design answers them, so they ar
 | A hand edit that no running sandbox has applied looks like it holds. | `ls` marks such a session with `~`, `show` names the layer, and `policy apply` sends it. |
 | An SSH key in a sandbox signs for any server that the network door allows. | Deploy keys that write to one repository. An audit line for each signature, with the server's host key. `own` hosts by default. The row shows the key. |
 | A remote judge learns which sites sessions reach. | The judge is off by default. A local model keeps names on the host. The audit log records each call ([0031](decisions/0031-the-egress-process-is-not-a-relay.md)). |
+| An editor's remote extension host runs commands on the laptop. VS Code and Cursor allow it by design. | `ssh-config` and the docs say so. Plain `ssh` and `sftp`, or the editor's restricted mode, for a repository you do not trust. An audit line and a row mark for each SSH connection (17.7). |
+| `copy_in` or `--seed-dirty` sends a file that holds a secret. | Both refuse the paste guard's sensitive names. `--seed-dirty` prints each untracked file that it sends. `pull`'s review finds the session's own secrets on the way back (7.1). |
+| A kept cache that the agent poisoned is used again after a restart. | It stays inside the one sandbox that poisoned it, which can already change its own dependencies. `rm` deletes it, and caches are never shared (17.5). |
+| `new --count` asks for more sandboxes than a host can take. | Admission refuses each one that does not fit, and the answer lists which started (14.10.3). |
+| A Claude.ai login brings the account's MCP connectors, which act on the provider's side with no field in the request ([issue 612](https://github.com/docker/sbx-releases/issues/612)). | The model API guard cannot see them. The docs say to use an API key, or an account without connectors, for a sandbox. |
+| Text that a sandbox writes to the clipboard with OSC 52 reaches the laptop's clipboard, because the bytes pass unchanged. Docker Sandboxes made its text copy opt-in in v0.51.0. | The client counts the writes (7.7). The docs show each terminal's setting that asks before a clipboard write, such as Ghostty's `clipboard-write = ask`. |
 | `hcsshim`'s licence and the exact Cloud Hypervisor, Lima and gVisor options in this spec may differ in the pinned versions. | Each task that uses one checks it against the pinned release, and the UNVERIFIED marks go only after that check. |
 | E2B, Docker and machine-per-session hosts have no trusted egress path outside the session. | Their floor is `none` unless a wall runs inside, and a downgrade is recorded. Exposed secrets only. E2B hosts are `shared` ([question 32](#15-open-questions)). |
 | Exposed secrets and logins made inside a sandbox stay on its disk. | The row badge and `secret_exposed`. Bound secrets are the default from P2. The docs say what stays on disk. |
 | A forwarded port runs hostile pages in the laptop's browser at localhost. | A grant for each port, a notice on the first forward, and `<id>.localhost` names. |
 | The approval prompt is phished: an injected agent reaches for lookalike names. | Registrable domains in bold, ASCII forms, no "always" in the launcher, and a stop after 5 refusals. |
+
+## 17. Parity with Docker Sandboxes and a hosted VM service
+
+[The parity note](../research/parity.md) lists every user-facing feature of Docker Sandboxes and a hosted VM service, and this design's answer to each. This section specifies the features that the note adds. Each names its task. The features that stay out are [questions 55 to 64](#15-open-questions), each with a default.
+
+### 17.1 Sizes (P1.14)
+
+- `sandbox.cpus` and `sandbox.memory` in any layer, and `new --cpus <n> --memory <size>`. A profile can name a size, as the hosted VM service's `--type` does.
+- Without either, the size comes from the template, then the agent table ([question 14](#15-open-questions)), then 2 CPUs and 4 GiB.
+- A new size applies at the next start, as the hosted VM service's `resume --type` does. `resume` and `attach` take `--cpus` and `--memory` for the wake. No wall changes the size of a running sandbox, and a Nitro Sandbox cannot (5.1).
+- Admission counts the size (14.10.3).
+- `sandbox.disk_max` caps the session disk of a microvm. On a process wall it is a soft cap: the supervisor measures the session folder, kept caches included, every minute, and stops the sandbox with the alert `disk_full` past it. A hard quota needs root, and is a later root step.
+
+### 17.2 Variables (P1.14)
+
+- `sandbox.env = { LOG_LEVEL = "debug" }` in any layer, and `new --env K=V`, `--env K` (the value from the laptop's environment) and `--env-file <laptop file>`. For one name, the narrowest layer wins.
+- A name that `[secrets]` holds is refused with `env_is_secret`, so that a secret always goes through `--secret` and can be bound.
+- The guest can read every variable, and the docs say so, as Docker's docs do for its `-e`.
+- Every sandbox also gets its identity: `brand.Env("SESSION")`, `brand.Env("HOST")`, `brand.Env("AGENT")` and `brand.Env("SANDBOX")`, the name of its first session.
+- `BROWSER` points at a small helper in the guest that prints the URL in the session's terminal, instead of opening a browser. With `forward` of the callback port, a login that opens a browser works, as Docker added in v0.26.1 ([release](https://github.com/docker/sbx-releases/releases/tag/v0.26.1)).
+
+### 17.3 Files from the laptop (P1.14)
+
+- `sandbox.copy_in = ["~/.claude/skills"]` in any layer, and `new --copy <laptop path>[:<guest path>]`. Without a guest path, a path under the laptop's home goes to the same path under the home of the user `agent`, and any other path to `/mnt/<base name>`.
+- The client reads the files on the laptop at each start, with `os.Root`, and sends them through `put` streams. Each start copies at most `sandbox.copy_max` (64 MiB) and 10,000 files.
+- It refuses the paths that the paste guard refuses (7.6), such as `~/.ssh` and `*.pem`, with `copy_sensitive`. A repository's `.env` goes through `--include` instead, which records it.
+- Each file writes an audit line `copy_in`.
+- This covers Docker's shared skills store and the hosted VM service's `new --file`.
+
+### 17.4 Seeds from the laptop (P1.14)
+
+- `new <host> --seed <laptop folder>` starts the session from a repository on the laptop, as the hosted VM service's `run --push` and `push` do. The client runs `git bundle create` there for the branch that is checked out, with its history, and sends the bundle through a `bundle` stream. The guest clones it as in 6.1, step 8. The clone's `origin` is the laptop repository's `origin`, so push rules work.
+- `--seed-dirty` adds the working tree, untracked files that git does not ignore included, as one more commit. The client makes it with a temporary index (`GIT_INDEX_FILE`), `git add -A`, `write-tree` and `commit-tree`. This writes objects into the laptop's repository, but no ref, no index and no file. The client prints the untracked files that it sends, and refuses the names of 7.6 with `copy_sensitive`.
+- The laptop's git runs with `-c core.hooksPath=/dev/null -c core.fsmonitor=false`. A bundle above `sandbox.seed_max` (512 MiB) is refused, with the hint to clone on the host.
+- `--seed` repeats. Each folder becomes `/work/<base name>`, and `pull --repo <base name>` brings back the branches of one repository. A host folder that `--dir` names counts as one of them.
+- Every clone, seeded on the host or from the laptop, gets the laptop's `user.name` and `user.email` in its own `.git/config`, because the guest's home is new at each start. Docker's kits set the same with `git-identity` ([capabilities](https://docs.docker.com/ai/sandboxes/customize/author/capabilities/)).
+- The hosted VM service's `run --push . -- make test` becomes `new box --seed . --rm -- make test`.
+
+### 17.5 Kept caches (P1.15)
+
+- The home resets at each start (7.1), and package caches went with it. Now the folders that `internal/sandbox/caches.toml` lists stay across starts, inside each sandbox, as `StateDirs` do. Each entry has its source. The first list: `.npm/_cacache`, the pnpm store, `.yarn/berry/cache`, `.cache/pip`, `.cache/uv`, `.cargo/registry`, `.cargo/git`, `go/pkg/mod`, `.cache/go-build`, `.gradle/caches` and `.m2/repository`. P1.15 checks each path against the tool's docs.
+- `sandbox.keep_caches = true` is built in. `sandbox.caches` adds or drops paths, with `!` to drop one.
+- Caches are never shared between sandboxes. pip, uv and Cargo state no check of what they read from their caches, and Cargo had an extraction bug that wrote outside its folder ([Cargo](https://blog.rust-lang.org/2022/09/14/cargo-cves/)). A poisoned cache stays in the sandbox that poisoned it, which can already change its own dependencies in `/work`.
+- `.cargo/bin` and other folders of programs are not caches, and never stay.
+- A new sandbox starts warm only through `fork`, which copies the session disk with its caches. `image save` keeps the root's changes, not the session disk, so its images hold no caches.
+- `stop` keeps the caches, and `rm` deletes them.
+
+### 17.6 Runs for many sessions (P1.16)
+
+- **`new --rm`.** When the session's program exits, the sandbox is removed, as `sbx run --rm` and the hosted VM service's `run` do. With commits that are not pulled, it stops instead, and says so: "auth-fix has 2 commits that you have not pulled, so it stopped instead of being removed." When attached, `new` exits with the program's exit code. Without a terminal, as in CI, `new … -- <command>` does not attach: it runs the command through `exec` (6.11), prints its output and exits with its code, so `--rm` works there too.
+- **`new --count <n>`.** It starts n sessions with the same arguments, named `<name>-1` to `<name>-<n>`, each in its own sandbox. With `auto`, placement spreads them (14.10.5). Admission still refuses what does not fit, and the answer lists which started. `--json` prints one object for each.
+- **`prune [<host>] [--stopped-before 7d] [--dry-run] [-y]`.** It removes stopped sandboxes that have no commits waiting to be pulled, and lists them first.
+- **`events [<host> | <host>/<session>] [--follow] [--json]`.** It prints one line for each event: a state change, `needs_input`, `turn_done`, `ended`, a held flow, a classifier's allow, `sandbox_ready`, `sandbox_stopped` and `sandbox_error`. The client holds the bridge op `events.watch` open, so nothing polls and nothing listens.
+- **Alert events.** Alerts ([0019](decisions/0019-alerts-and-hooks.md)) gain `sandbox_ready`, `sandbox_stopped`, `sandbox_error`, `health_degraded` and `health_recovered`, beside `egress_blocked`. The noise control of 0019 applies. This covers the hosted VM service's webhooks. Alerts also gain the format `otlp`, which sends each event as an OTLP/HTTP log record to an endpoint that the user names, as the webhook format does ([0031](decisions/0031-the-egress-process-is-not-a-relay.md)).
+- **`sandbox.max_run`.** The supervisor stops the sandbox this long after its start, keeps its work, and raises `sandbox_stopped` with the reason `max_run`. It caps an unattended run, and it is not set by default. It is set for each start: a change applies at the next one.
+
+### 17.7 Editors over SSH (P2.15)
+
+- **Setup.** `ssh-config` writes `~/.ssh/<name>/config` and `~/.ssh/<name>/known_hosts`, then asks before it adds `Include ~/.ssh/<name>/config` to the top of `~/.ssh/config`. `ssh-config --remove` undoes both. The block:
+
+  ```text
+  Host *.simstim
+    ProxyCommand simstim ssh-proxy %n
+    User agent
+    IdentityAgent none
+    IdentityFile /dev/null
+    IdentitiesOnly yes
+    ForwardAgent no
+    ForwardX11 no
+    PermitLocalCommand no
+    ControlMaster no
+    StrictHostKeyChecking yes
+    UserKnownHostsFile ~/.ssh/simstim/known_hosts
+  ```
+
+- **Names.** A session is `<session>.<host>.<name>`, such as `auth-fix.box.simstim`. `ssh-proxy` checks the name against `^[a-z0-9-]+\.[a-z0-9-]+\.<name>$`, and uses `%n`, never `%r`, which OpenSSH 10.1 fixed for command injection ([OpenSSH 10.1](https://www.openssh.com/txt/release-10.1)).
+- **SSH ends in the client.** `ssh-proxy` is the SSH server, on its own standard input and output, with `golang.org/x/crypto/ssh` v0.56.0 or later ([vulnerabilities](https://pkg.go.dev/vuln/list?q=golang.org/x/crypto)). Docker Sandboxes ends SSH in its own daemon for the same reason: code in the sandbox controls any server that runs there ([integrations](https://docs.docker.com/ai/sandboxes/integrations/)). Its host key is one Ed25519 key for each laptop, in the client's state folder. It accepts the `none` method, because the outer SSH connection already proved who the user is.
+- **Allowed requests, and nothing else.**
+
+  | SSH request | Becomes |
+  | --- | --- |
+  | `session` with `pty-req`, `shell`, `window-change` and `signal` | `spawn` with `ephemeral`: a terminal in the sandbox that is not a row and does not come back after a stop |
+  | `session` with `exec` | `exec` (6.11), with its exit status |
+  | `subsystem sftp` | an `sftp` stream, which the guest init serves with `github.com/pkg/sftp` as the user `agent` |
+  | `direct-tcpip` and `direct-streamlocal@openssh.com` to the guest's loopback | a `port` stream, with an audit line |
+
+  `tcpip-forward`, `streamlocal-forward@openssh.com`, `x11-req`, `auth-agent-req@openssh.com`, `env` and every other request are refused, each with a reply, so that no client hangs. Channel opens are limited to 20 a second.
+- **Waking.** `ssh-proxy` wakes a stopped sandbox, as `attach` does.
+- **Editor servers.** VS Code, Cursor and Zed can install their servers from the laptop over sftp: the docs set `remote.SSH.localServerDownload` to `always` for VS Code, the same setting for Cursor, and `upload_binary_over_ssh` for Zed ([VS Code](https://code.visualstudio.com/docs/remote/ssh), [Zed](https://zed.dev/docs/remote-development)). Then no network rule is needed. A profile `editor` lists their download hosts for those who want them.
+- **Trust.** VS Code and Cursor run an extension host whose remote side can run commands on the laptop by design. Microsoft says: "A compromised remote could use the VS Code Remote connection to execute code on your local machine" ([Remote-SSH](https://marketplace.visualstudio.com/items?itemName=ms-vscode-remote.remote-ssh), [Calif](https://blog.calif.io/p/vibe-hacking-abusing-developer-trust)). So `ssh-config` prints this once, and the docs say: for a repository you do not trust, use plain `ssh` or `sftp`, or the editor's restricted mode. Each connection writes an audit line `ssh_open`, and the launcher shows "ssh" on the row while one is open.
+- **Plain tools.** `ssh auth-fix.box.simstim` opens a shell, and `scp` and `sftp` work, because OpenSSH's `scp` uses SFTP since 9.0 ([OpenSSH 9.0](https://www.openssh.com/txt/release-9.0)).
+
+### 17.8 Model usage and budgets (P2.16)
+
+- The egress process reads the `usage` object of each model API answer that it already parses (P2.4): input, output and cached tokens, by model. For a streamed answer, it reads the final event.
+- `show` and `ls --json` add `usage`. `policy log --door net` lists it for each request.
+- `network.model_budget`, in tokens, in any layer. Past it, model requests get the API's own error shape with HTTP 429 and a "Try:" line, and the alert `model_budget` goes out. It is a network value, so `policy` changes it while the session runs (8.8).
+- The tool shows no prices: they change, and the user's account shows them.
+
+### 17.9 More agent rows (P2.17)
+
+Rows for GitHub Copilot CLI, Kiro CLI, Factory Droid, pi, Kimi Code and Mistral Vibe, at the `best-effort` level, each with its install, login and resume commands from the agent's own docs. Their `Egress` and `Secrets` come from recorded traffic, as in P2.4, or stay empty. Then the policy or the classifier decides their sites.
+
+### 17.10 Root inside a microvm (P3.4)
+
+`sandbox.sudo = true` lets the user `agent` run `sudo` without a password inside a `microvm` guest. It is refused on `process` and `gvisor` with `sudo_wall`, because those walls rely on the guest's user IDs. Changes to the system go with the overlay at the next start, unless `system = "keep"`. The row shows "root".
+
+### 17.11 Setup and stop scripts (P1.11)
+
+- The repository's `.<name>/setup` and `.<name>/resume` run inside the sandbox, as the user `agent`, before the agent starts, after the user's yes for the script's hash on the laptop (P0.6). They never run on the host for a walled session.
+- The user's own host hook, `~/.config/<name>/hooks/setup`, is read by the trusted side as data and copied into the sandbox, where it runs the same way. The host never runs it in a folder that the sandbox can write.
+- A new `.<name>/stop` runs inside the sandbox when it stops, within `sandbox.stop_grace` (10 s by default, at most 60 s), before the agent gets `SIGTERM`. The hosted VM service gives its pre-stop hook 60 s.
 
 ## Sources
 
