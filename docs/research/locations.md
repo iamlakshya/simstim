@@ -107,4 +107,4 @@ The rules for the note:
 5. **The doctor reads MDM control.** It reports enrolment, a managed sshd, hidden settings and an Energy Saver payload, and suggests the tier `shared` on a Mac that an organisation manages.
 6. **No second machine at a Mac's location.** Nothing in the design needs a waker, a jump host or a subnet router there.
 7. **In the homelab, the docs recommend a VM and the probe decides.** The doctor names the fix for a missing `/dev/kvm`: CPU type `host` on Proxmox.
-8. **Wake a homelab host through a provider script on its own LAN.** The tool's existing provider scripts run the wake. The tool listens nowhere.
+8. **Hosts that stay on need no wake.** For a host that sleeps, the tool's existing provider scripts can send the wake from its own LAN. The tool listens nowhere.

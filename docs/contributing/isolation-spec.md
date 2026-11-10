@@ -3560,7 +3560,9 @@ laptop -> Mac sshd, as the dedicated account (its key may only open 127.0.0.1:<p
 
 **Placement and health.** `auto` already ranks a host on battery one band lower (14.10.5). On battery, the Mac sleeps by its own settings. So `host doctor` adds the health item `mac_on_battery` (warn), and the item `mac_sleep_on` (warn) when `pmset -c sleep` is not 0.
 
-**Restarts.**
+**Day to day.** A Mac host only needs to stay on. The VM runs from a launch daemon, so a locked screen or a logged-out user does not stop it. The docs advise a screen lock, because an unlocked screen lets anyone at the Mac act as its logged-in user. That user's files and keychain are outside the VM, but sessions do not need them.
+
+**Restarts.** A restart is rare on a Mac that stays on: a power cut, or a macOS update.
 
 - **A planned restart.** The docs give `sudo fdesetup authrestart`, which the user runs at the Mac or over their own SSH login. It skips the FileVault unlock for that one restart, and keeps an unlock key in memory until then. The tool does not run it, because that would need an admin login on the Mac ([question 68](#15-open-questions)).
 - **Any other restart**, a power cut that empties the battery included, stops at the FileVault unlock. Tailscale does not run before the unlock. Only an SSH session from the Mac's own LAN, or a person at the Mac, can unlock it. Until then `ls` shows the host as away. `host doctor` says: "mac1 is away. If it restarted, unlock FileVault from its LAN: ssh <your user>@<its LAN address>."
@@ -3576,7 +3578,7 @@ laptop -> Mac sshd, as the dedicated account (its key may only open 127.0.0.1:<p
 - **Proxmox.** The docs recommend a VM with CPU type `host`, or with the `nested-virt` flag on a model that matches the host. Then the probe finds `/dev/kvm`, and the host gets microvm walls. Such a VM cannot live-migrate. An LXC container shares the Proxmox kernel, so the docs advise against it. In a container, the probe decides the level. The docs never suggest a privileged container, or `/dev/kvm` passed into a container.
 - **No KVM.** When `/dev/kvm` is missing and `/proc/cpuinfo` has no `vmx` or `svm` flag, `host doctor` adds the hint: "Try: give the VM the host's CPU type. On Proxmox: qm set <vmid> --cpu host".
 - **TrueNAS and Unraid.** The docs say to run the helper in a VM, not on the base system. TrueNAS does not support changes from its command line.
-- **Wake.** A homelab host that sleeps or is off can wake through a provider script with `--wake` (`examples/providers`). A new example sends the magic packet from an awake machine on the same LAN, over SSH, or runs `pvenode wakeonlan` on a Proxmox node. It sets `cost = "free"`, so `auto` uses it as a free wake (14.10.5).
+- **Wake.** A homelab host normally stays on, and needs no wake. A host that sleeps can wake through a provider script with `--wake` (`examples/providers`), which sends the magic packet from an awake machine on the same LAN. This plan adds no new script for it.
 
 ### 18.6 Reaching each location
 
