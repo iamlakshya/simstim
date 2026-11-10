@@ -76,7 +76,7 @@ Each value below is the option's own, then the best value found below it, where 
 
 1. `host add` over SSH as today, then prepare: probe, runtime, one shown and reversible root step, a test boot. 0.615, then 0.732.
 2. Rootless only, with no guest network card. 0.513.
-3. A one-line join on the machine that makes a dedicated account. 0.585.
+3. A one-line join on the machine that makes a dedicated account. 0.585. Added later as a second way in, at the owner's request.
 4. Slot accounts and a small root-owned launcher. 0.570.
 5. Hosts made by providers, and adopted fleets. 0.515.
 
@@ -162,6 +162,8 @@ Option 5 for the wall, option 4 for control, option 1 for the lifecycle, option 
 ### Your own hosts
 
 - **Attach.** `host add` stays the way in, over the user's own SSH. Then it prepares the host: a read-only sandbox probe, the runtime checked against the client's digests, one optional root step that the user sees line by line with its undo, and a test boot. A host without sudo still works, at the level that it can run without root.
+- **Join.** At the owner's request, a machine can also prepare itself: `host invite` on the laptop prints a code, `host join` on the machine makes a dedicated account and a narrow SSH path, and `host add --accept` reads its reply. The laptop still starts every connection, so the machine never calls home. A Mac joins as a Lima VM that starts at boot.
+- **Locations.** Labels name the location of each host, such as a homelab or another building. `on_hosts` in a repository, a profile or a secret keeps that work on the hosts of one location, as a rule, not a preference.
 - **Identity.** Each saved host has a pinned host key that the user's SSH config cannot undo, and a host ID that the helper keeps. A changed ID warns.
 - **Tiers.** Each host has a tier: `own`, `throwaway` or `shared`. The tier caps what may leave the laptop for that host: secrets, the SSH agent, alert tokens and repositories. One grant gate on the laptop checks each grant, and a grant ledger records the names, never the values. A new host added with `--yes` is `shared`.
 - **Placement.** `new <host>` and a saved default come first. `new auto` follows: the client ranks the user's hosts from live facts and explains its choice, and the chosen host admits or refuses the sandbox under a lock. A sandbox that does not fit is refused, not shrunk.
@@ -197,5 +199,5 @@ Walls stay opt-in until phase 2 ends. Then, with the owner's yes, new sessions r
 - Bad, because a judge can be fooled, as every model judge in the research was under adaptive attacks. The fixed parts carry the guarantees, and a wrong allow is still capped by the upload budget and seen in the log.
 - Bad, because "the narrowest layer decides" lets a session lift a broad deny. Locks are the answer, and the user must set them.
 - Good, because a check of every feature of Docker Sandboxes and a hosted VM service found each one built, planned, met another way, or left out for a stated reason ([parity](../../research/parity.md)).
-- Bad, because the plan is large: nine phases and 83 tasks, most of them M or L on the roadmap's scale.
+- Bad, because the plan is large: nine phases and 86 tasks, most of them M or L on the roadmap's scale.
 - This record replaces no accepted record. It extends [0002](0002-own-holder-per-session.md) (a supervisor and an egress process beside each holder), [0003](0003-system-openssh.md) (options on the command line over the user's SSH config), [0013](0013-host-providers.md) (a stopped session keeps files, not processes), [0017](0017-release-signatures.md) (more signed artefacts) and [0024](0024-memory-cap.md) (a microvm's memory sits inside the session's cap, and admission refuses what does not fit). It needs [0030](0030-local-sockets-do-not-listen.md), [0031](0031-the-egress-process-is-not-a-relay.md) and [0032](0032-secret-values-in-memory-only.md) for the rules that it touches, and [0033](0033-one-command-grammar.md) for its commands. Records that follow it, in the plan: TLS interception on the trusted side before phase 2 needs it, the memory of microvm guests before phase 3, the signed-tag release gate in phase 4, and the records for sandbox hosts.

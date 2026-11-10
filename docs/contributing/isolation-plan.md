@@ -4,7 +4,7 @@
 
 This plan says in what order to build [the spec](isolation-spec.md), one pull request at a time. A coding agent builds each task under [AGENTS.md](../../AGENTS.md), [CONTRIBUTING.md](../../CONTRIBUTING.md) and [testing](testing.md). The spec says what each part does. This plan says which files each task changes, what proves it done, and which open questions it uses.
 
-Task IDs are names, not positions. P0.1 to P7.5 come from the spec's sandbox sections, and H1 to H18 from its section 14, hosts you add. The order table gives the order. When this plan folds one task into another, the folds section says so, and both IDs stay valid.
+Task IDs are names, not positions. P0.1 to P7.5 come from the spec's sandbox sections, and H1 to H18 from its section 14, hosts you add. H19 to H21 come from its section 18, hosts in more than one location. The order table gives the order. When this plan folds one task into another, the folds section says so, and both IDs stay valid.
 
 Spec sections 1 to 13 cover the sandbox. Section 14 covers hosts you add, section 15 lists the open questions, and section 16 lists the risks. "Spec 14.10.5" means section 14.10.5 of the spec. "End-to-end test 2" means item 2 of the end-to-end tests in spec 14.16.
 
@@ -113,6 +113,10 @@ Spec section 15 has each question in full, with its options: [open questions](is
 | 63 | Does a seed from the laptop include uncommitted work? | Only with `--seed-dirty`. | P1.14 |
 | 64 | A host-side MCP gateway or a shared skills store? | No. MCP servers run in the sandbox, and skills arrive by `copy_in`. | none |
 | 65 | How does a host get a private registry image? | The laptop pulls it with its own login and copies it. | P3.2 |
+| 66 | Is a location a rule or a preference? | A rule: `on_hosts` refuses every other host. | H19 |
+| 67 | How does a machine join? | Also `host invite` and `host join`. The laptop still starts every connection. | H20 |
+| 68 | How does a Mac host restart with FileVault on? | The docs give `fdesetup authrestart` for planned restarts, and an unlock from the Mac's own LAN after others. | H21 |
+| 69 | May a Mac that an organisation manages with MDM be a host? | Yes, as `shared`, after `host doctor` shows what MDM controls. | H21 |
 
 ## Order
 
@@ -189,20 +193,23 @@ Build the tasks from top to bottom. Every task named under "Depends on" is above
 | 67 | H14 | Health, runtime upgrades and drain | 4 | H11, H9, P4.6 | 42 | M |
 | 68 | H15 | Leave and wipe | 4 | H7, H5, H9 | 29 | M |
 | 69 | H16 | Reach a host behind NAT | 4 | H3, H9, 0031 | 36 | S |
-| 70 | P5.1 | Fork | 5 | P3.6 | 11 | M |
-| 71 | P5.2 | Copy files in and out | 5 | P1.9 | none | M |
-| 72 | P5.4 | Checkpoints | 5 | P3.6 | none | M |
-| 73 | P5.5 | Save an image | 5 | P3.2 | none | M |
-| 74 | P6.1 | The gvisor wall | 6 | P1.5, H9 | 2 | L |
-| 75 | P6.2 | The Firecracker driver | 6 | P3.8 | 3 | M |
-| 76 | P6.4 | Nitro Sandboxes on EC2 | 6 | P6.2, P3.1, H7, H9 | 53, 54 | M |
-| 77 | P6.3 | Unwalled sessions on the supervisor's path | 6 | P1.11, P2.10, and one release with walls on by default | 1 | M |
-| 78 | P7.1 | Registry gates in the egress process | 7 | P2.2 | 20 | M |
-| 79 | P7.2 | Decoys | 7 | P2.3 | none | S |
-| 80 | P7.3 | Observe terminal output | 7 | P4.6 | 26 | M |
-| 81 | P7.4 | A machine for each session | 7 | P1.11, H4, H5 | 22, 32 | L |
-| 82 | H17 | Separate accounts, part 1: the root-owned launcher | 8 | H7, H9, P4.1, 0043 (here) | 27, 30, 38 | L |
-| 83 | H18 | Separate accounts, part 2: slot accounts and the root-owned store | 8 | H17, P3.3 | 27 | L |
+| 70 | H19 | Locations | 4 | P1.12, H5, H12, H13 | 66 | M |
+| 71 | H20 | Machines that join | 4 | H3, H4, H7, H10, H15 | 67 | L |
+| 72 | H21 | A Mac as a host | 4 | H20, H14, H16, P0.8 | 37, 68, 69 | L |
+| 73 | P5.1 | Fork | 5 | P3.6 | 11 | M |
+| 74 | P5.2 | Copy files in and out | 5 | P1.9 | none | M |
+| 75 | P5.4 | Checkpoints | 5 | P3.6 | none | M |
+| 76 | P5.5 | Save an image | 5 | P3.2 | none | M |
+| 77 | P6.1 | The gvisor wall | 6 | P1.5, H9 | 2 | L |
+| 78 | P6.2 | The Firecracker driver | 6 | P3.8 | 3 | M |
+| 79 | P6.4 | Nitro Sandboxes on EC2 | 6 | P6.2, P3.1, H7, H9 | 53, 54 | M |
+| 80 | P6.3 | Unwalled sessions on the supervisor's path | 6 | P1.11, P2.10, and one release with walls on by default | 1 | M |
+| 81 | P7.1 | Registry gates in the egress process | 7 | P2.2 | 20 | M |
+| 82 | P7.2 | Decoys | 7 | P2.3 | none | S |
+| 83 | P7.3 | Observe terminal output | 7 | P4.6 | 26 | M |
+| 84 | P7.4 | A machine for each session | 7 | P1.11, H4, H5 | 22, 32 | L |
+| 85 | H17 | Separate accounts, part 1: the root-owned launcher | 8 | H7, H9, P4.1, 0043 (here) | 27, 30, 38 | L |
+| 86 | H18 | Separate accounts, part 2: slot accounts and the root-owned store | 8 | H17, P3.3 | 27 | L |
 
 ## Folds
 
@@ -1276,7 +1283,7 @@ At the end of phase 3, a host with KVM and Linux 6.8 or later runs each session 
 
 ## Phase 4: the project's own supply chain, and many hosts
 
-The rule of this phase: **the laptop holds the digests, the hosts hold the bytes.** A host never decides what is trusted. Then H11 to H16 let `new` place a sandbox on any of the user's hosts, keep each host healthy, and leave a host clean. H11 to H13 replace P7.5.
+The rule of this phase: **the laptop holds the digests, the hosts hold the bytes.** A host never decides what is trusted. Then H11 to H16 let `new` place a sandbox on any of the user's hosts, keep each host healthy, and leave a host clean. H11 to H13 replace P7.5. H19 to H21 add hosts in more than one location: rules that keep work in one location, machines that join from their own keyboard, and Macs as hosts.
 
 ### P4.2 Run verified bytes only
 
@@ -1469,6 +1476,75 @@ The rule of this phase: **the laptop holds the digests, the hosts hold the bytes
 - **Depends on:** H3, H9, [0031](decisions/0031-the-egress-process-is-not-a-relay.md).
 - **Questions:** [36](isolation-spec.md#15-open-questions).
 - **Effort:** S.
+
+### H19 Locations
+
+- **Goal:** spec 18.2 and 18.5. `on_hosts` in every layer and in `[secrets.NAME]`, repository sections whose names end in `/*`, `host set <host> label.<key>=<value>`, labels in `host ls` and the launcher, and the homelab notes.
+- **Files:**
+  - New `internal/client/onhosts.go` (`HostSelector`, `Match`).
+  - `internal/client/place.go` (`ResolveHost`, and the candidates of `Place`).
+  - `internal/client/tier.go` and `internal/client/secrets.go` (the `on_hosts` check in the grant gate).
+  - `internal/client/config.go` (`[repos."<owner>/*"]`, and `on_hosts` in a secret).
+  - `internal/cli/host.go` (`host set … label.`), and `internal/tui/hosts_view.go` (the host list grouped by `location`).
+  - `internal/host/doctor.go` (the hint for a VM without the CPU's virtualisation flags).
+  - New `examples/providers/wake-on-lan.sh`.
+- **Acceptance:**
+  - With `sandbox.on_hosts = ["location=annex"]` for `github.com/acme/*`, `new box` in a clone of `github.com/acme/api` refuses with `host_not_allowed`. `new` with no host picks the host in that location.
+  - `--set sandbox.on_hosts=box` lets one session run on `box`, unless `[lock]` holds the key.
+  - `auto` never contacts a host outside the list. A `shared` host that the list names joins the pool for that start.
+  - A secret whose `on_hosts` does not match never leaves the laptop, and the grant ledger records `secret_not_here`.
+  - An exact repository section wins over a section whose name ends in `/*`.
+  - The example provider script wakes a host from an awake machine on the same LAN.
+- **Tests:** table tests of the selector: names, labels, `!`, `*` and no key. Tests of `ResolveHost` and of the grant gate with `on_hosts`. A test of the layer merge with a lock.
+- **Docs:** new `docs/how-to/hosts-at-two-locations.md` (labels, `on_hosts`, Tailscale on each host, and the homelab notes of spec 18.5). `just docs` for the reference.
+- **CHANGELOG:** Added. "Keep work on the hosts of one location. `on_hosts` in a repository, a profile or a secret names the hosts or labels that may get it, and `new` refuses any other host."
+- **Depends on:** P1.12, H5, H12, H13.
+- **Questions:** [66](isolation-spec.md#15-open-questions).
+- **Effort:** M.
+
+### H20 Machines that join
+
+- **Goal:** spec 18.3. `host invite` on the laptop, `host join` and `host leave` on a Linux machine, and `host add --accept` on the laptop. The laptop still starts every connection.
+- **Files:**
+  - New `internal/client/invite.go` (the codes, their checks, and the invite store).
+  - New `internal/join/` (`plan.go` for the list of changes, `ledger.go`, `leave.go` and `linux.go`).
+  - `internal/cli/host.go` (`hostInviteCmd`, `hostJoinCmd`, `hostLeaveCmd`, and `--accept` and `--address` on `hostAddCmd`).
+  - `internal/client/ssh.go` (a generated SSH config with more than one hop).
+- **Acceptance:**
+  - On a new Debian VM, `host join` with an invite code makes the account, the key line, the sshd drop-in and linger. Its reply makes `host add <name> --accept -` add the host with its key pinned, and asks no question about the key.
+  - A changed character in a code fails its checksum. A reply to an invite older than one hour fails with `invite_expired`.
+  - The code never appears in an argument, in the shell history or in the process list.
+  - The key cannot open a remote forward, or forward the agent or X11.
+  - `host leave` undoes each change in the ledger, newest first.
+- **Tests:** units of the codes and the checks. The end-to-end test runs only on a VM that the test creates and deletes, never on a shared test host.
+- **Docs:** new `docs/how-to/join-a-machine.md`. `just docs` for the reference.
+- **CHANGELOG:** Added. "Add a machine from its own keyboard. `host invite` on the laptop prints a code, `host join` on the machine prepares it and prints a reply, and `host add --accept` adds it. The laptop still starts every connection."
+- **Depends on:** H3, H4, H7, H10, H15.
+- **Questions:** [67](isolation-spec.md#15-open-questions).
+- **Effort:** L.
+
+### H21 A Mac as a host
+
+- **Goal:** spec 18.4. `host join` and `host leave` on a Mac. They manage the hidden account, the pinned Lima, the VM in plain mode, the launch daemon, the narrow key, the facts script and the power step. On the laptop: the Mac's facts, its health items, and its block in `host doctor`.
+- **Files:**
+  - New `internal/join/darwin.go`, and the Mac's steps in `internal/join/leave.go`.
+  - `internal/provider/lima/lima.go` (the template for a Mac host: plain mode, a fixed SSH port and no loopback).
+  - New `internal/client/macfacts.go` (runs the facts script, and merges `on_battery` into the host's facts).
+  - `internal/cli/host.go` (the Mac block and the health items `mac_on_battery` and `mac_sleep_on` in `host doctor`).
+  - The release manifest: the pinned Lima release and base image.
+- **Acceptance:**
+  - On an M3 Mac or later with macOS 26, `host join` and `host add --accept` give a host with microvm walls. An M1 or M2 Mac gives process walls.
+  - After a restart and a FileVault unlock over SSH from the LAN, the VM starts while nobody is logged in. The sessions that were working come back.
+  - The account's key cannot open a shell, a terminal, or a channel to any port but the VM's.
+  - On battery, `host doctor` shows `mac_on_battery`, and `auto` ranks the host one band lower.
+  - `host leave` removes the account, the VM, the launch daemon and the drop-in, and restores the `pmset` values.
+  - The join never turns on Remote Login, and never changes the battery settings.
+- **Tests:** units of the plan of changes for given Mac facts. CI has no Mac that can run a VM for a hidden account. So the pull request holds a checklist, done by hand on an M1 or M2 Mac and on an M3 Mac or later. A Mac is used only with its owner's yes, and each change is logged outside the repository ([AGENTS.md](../../AGENTS.md), rule 10).
+- **Docs:** new `docs/how-to/a-mac-as-a-host.md`: the steps, power, restarts with FileVault, MDM and the organisation's IT team, the tier, and leave. `docs/explanation/architecture.md` (the path through the Mac).
+- **CHANGELOG:** Added. "A Mac at another location can be a host. `host join` makes a hidden account and a Lima VM that starts at boot. The laptop reaches the VM through a key that can open nothing else."
+- **Depends on:** H20, H14, H16, P0.8.
+- **Questions:** [37, 68 and 69](isolation-spec.md#15-open-questions).
+- **Effort:** L.
 
 ## Phase 5: fork, copy and save
 
@@ -1685,7 +1761,7 @@ The design's own risks are in [spec 16](isolation-spec.md#16-risks-and-mitigatio
 | Stacked branches drift. A change to an early pull request after review means a rebase of every later branch. | Keep each task small. After the owner merges a pull request or asks for a change, rebase the later branches in order, and run the checks again on each. |
 | Test host access. End-to-end tests need a host whose owner allowed them, and some tests need root or a reboot. | Use `hosttest` and VMs that the tests create and delete. Mark a check manual when it needs a reboot, a prompt, root without `E2E_ROOT=run`, or a paid provider. |
 | Upstream pins move. Ghostty, Cloud Hypervisor, Firecracker, gVisor, Lima and the guest kernel may change between this plan and the task. | Each task checks its pin against the pinned release before it builds on it. P0.9 watches the pins from the start. An UNVERIFIED mark goes only after that check. |
-| One maintainer reviews 83 pull requests, and accepts 15 decision records. | Each record lands with its first task, so the owner reviews it once. Each phase ends with something that users can use, so the owner can merge one phase and stop. |
+| One maintainer reviews 86 pull requests, and accepts 15 decision records. | Each record lands with its first task, so the owner reviews it once. Each phase ends with something that users can use, so the owner can merge one phase and stop. |
 | The spec and this plan drift apart. The folds rename some parts, such as P3.7's set-up command. | Each task corrects the spec in the same pull request when it builds a folded part. |
 | Proposed records block the stack. A record that the owner rejects stops every later task that needs it. | Each pull request names its records. The owner can merge the tasks before a rejected record, and the implementer reworks the rest. |
 | A model judge is slow or costly when many sessions run at once. | The fixed steps decide most flows without a judge. The rate limit, the 5 s timeout and the cache of answers for each session bound it. P2.12 measures it, and a local model costs nothing to call. |
