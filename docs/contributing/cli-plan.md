@@ -42,6 +42,7 @@ Follow the rules of [the isolation plan](isolation-plan.md#how-to-work), with th
 | 9 | C9 | `config check` | C2 | none | S |
 | 10 | C10 | Completion | C5, C7 | none | S |
 | 11 | C11 | The launcher and the CLI agree | C5, C7 | none | S |
+| 12 | C12 | Docs for agents | none | none | S |
 
 The isolation plan's task P1.8 depends on C2 and C4, so its commands use the shared errors, prompts and machine output. It also depends on 0033.
 
@@ -221,6 +222,18 @@ The isolation plan's task P1.8 depends on C2 and C4, so its commands use the sha
 - **Docs:** [the UX spec](ux-spec.md).
 - **CHANGELOG:** Changed. "The launcher and the command line use the same words."
 - **Depends on:** C5, C7.
+- **Questions:** none.
+- **Effort:** S.
+
+## C12 Docs for agents
+
+- **Goal:** agents read this project's docs as a hosted VM service's docs are read ([parity](../research/parity.md#35-integration-teams-and-data)). The docs site publishes `llms.txt`, a Markdown copy of each page, and a short `AGENTS.md` snippet for projects that use this tool.
+- **Files:** `cmd/docgen` (the `-site` build), `site/`, new `docs/how-to/use-with-agents.md`.
+- **Acceptance:** `llms.txt` lists every page with its one-line summary, and each page's Markdown copy matches its source. `just docs-check` checks both.
+- **Tests:** a unit test of the generator.
+- **Docs:** the new how-to page.
+- **CHANGELOG:** Added. "The docs site publishes `llms.txt` and a Markdown copy of each page, for coding agents."
+- **Depends on:** nothing.
 - **Questions:** none.
 - **Effort:** S.
 
