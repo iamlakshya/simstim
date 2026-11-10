@@ -15,10 +15,10 @@ The words follow spec 2 and spec 14.1. A level is a wall's strength: `none`, `pr
 A coding agent can build each task in this plan, one pull request at a time, without a guess. The design is done when these five things are true:
 
 1. Each task names the spec sections that define it, and the research that backs its choices. [Traceability](#traceability) lists them.
-2. The spec states each behaviour, input, error and test. No rule exists only in this plan.
+2. The spec states each behaviour, input and error. This plan says what proves each task done, and its tests check only what the spec states. No rule exists only in this plan.
 3. Each fact that would change the build cites a primary source. A fact that nobody could check carries the mark UNVERIFIED, and names the task step that checks it first.
 4. The research, the spec and this plan agree. Where an older research note differs, the note says which spec section replaced it.
-5. Each choice that the owner made, and each default that a task takes, is an open question in spec section 15, with its answer.
+5. Each choice that the owner made, and each default with real options, is an open question in spec section 15, with its answer. A number that no source sets is marked as a project choice, or as a target that a task measures.
 
 The same goal holds for [the CLI plan](cli-plan.md) and [the CLI spec](cli-spec.md).
 
@@ -74,7 +74,7 @@ Spec section 15 has each question in full, with its options: [open questions](is
 | 11 | Memory snapshots later? | Not in this plan. Look again only for sessions whose secrets are all bound. | P3.6, P5.1, P5.4, P6.2 |
 | 12 | Encrypt a stopped session's disk with a key that the laptop sends at each start? | Not now. It would block a restore without the laptop. | P3.6 |
 | 13 | Memory overcommit for sandboxes? | None. Admission counts declared memory. | H11 |
-| 14 | The size of a sandbox when the user names none? | The template's size, with a size for each agent in the agent table as the template's default. | H11 |
+| 14 | The size of a sandbox when the user names none? | The template's size, with a size for each agent in the agent table as the template's default. | P1.14, H11 |
 | 15 | Which logins and keys work in a sandbox? | API keys and long-lived tokens as bound secrets, and exposed logins with a badge. An OAuth broker and a re-signing door are later research. | P1.8, P2.3 |
 | 16 | TLS interception and body checks on model API hosts? | Yes, in its own decision record, accepted before the interception task merges. | P2.2, P2.4 |
 | 17 | May sandboxed sessions push? | Only with a push grant, only to the session's own branches, and to a public repository only when the user names it. | P2.5 |
@@ -89,7 +89,7 @@ Spec section 15 has each question in full, with its options: [open questions](is
 | 26 | An opt-in guarded attach, or a filter for terminal escapes from `shared` and `throwaway` hosts? | Not now. Advise users to set their terminal's clipboard writes to "ask", ship the observer, measure, then decide. | H4, P7.3 |
 | 27 | Separate accounts for sandboxes, with a root-owned launcher and slot accounts? | An option in the first version. The default only after an outside review of the launcher. | H17, H18 |
 | 28 | A separate system user for the trusted side? | Not now. Subuid jails for the processes that touch untrusted input. | P1.3 |
-| 29 | May host set-up run one-time root steps? | Yes, each line shown first and run only after a yes. On `shared` hosts, by default only the machine's owner runs the printed script, and `--root-step run` needs the typed host name. | H7, H10, H15 |
+| 29 | May host set-up run one-time root steps? | Yes, each line shown first and run only after a yes. On `shared` hosts, by default only the machine's owner runs the printed script, and `--root-step run` needs the typed host name. A machine of `new --machine` is the one exception (spec 21.8). | H7, H10, H15, P7.4 |
 | 30 | Which key signs what the client trusts? | The release key of decision 0017 signs each release, and the client embeds the release manifest. The owner adds a hardware key for the signed-tag gate. A transparency log comes later. | P4.1, P4.4, H17 |
 | 31 | A key of its own for each shared host? | A docs recipe, not required. | H4 |
 | 32 | The tier of E2B and other hosted providers? | `shared`. | H4, P7.4 |
@@ -97,7 +97,7 @@ Spec section 15 has each question in full, with its options: [open questions](is
 | 34 | The word for how far the user trusts a host? | "tier" (`own`, `throwaway`, `shared`), because "level" names a wall's strength and "trust" names setup-script trust. | H4 |
 | 35 | Copies from one host to another? | Never. Runtime files come from the release or the laptop, templates from the laptop, and registry images by a digest that the laptop pins. A saved image stays on the host that made it. | H9, P3.2, P4.5, P5.5 |
 | 36 | Hosts behind NAT? | Docs for the user's own overlay network, plus a hardened reverse-tunnel recipe on a machine the user owns. | H16 |
-| 37 | Mac hosts? | Later, after a test of Apple's Virtualization framework from an SSH session. Until then a Mac runs sandboxes in a Lima VM. | P0.8, P3.7 |
+| 37 | A native macOS host, with a `vz` level? | Later, after a test of Apple's Virtualization framework from an SSH session. Until then a Mac runs sandboxes in a Lima VM, and a Mac at another location joins with `host join`. | P0.8, P3.7, H21 |
 | 38 | How are signatures checked? | In Go on both sides, so the client's OpenSSH minimum version stays 8.0. | P4.1, H17 |
 | 39 | May a host download the runtime itself? | `auto`: the host fetches from the release when it can, and the laptop copies it otherwise. `fetch = "laptop"` keeps the old rule. | H9, P3.2, H10 |
 | 40 | Ship the forwarding fix first? | Yes, task H2 on its own, first. | H2 |
@@ -150,6 +150,7 @@ Spec section 15 has each question in full, with its options: [open questions](is
 | 87 | Checkpoints: on by default, and how many? | On for microvm sandboxes where reflinks work, keeping the last 10. | P5.4 |
 | 88 | How does the gvisor wall get its namespaces? | The helper, or the namespace launcher of spec 14.4, makes them, and `runsc` runs inside as uid 0. | P6.1 |
 | 89 | How many slot accounts, and where is the store? | 16 slots, and the store in `/var/lib/<name>/store/`. | H18 |
+| 90 | What does a config layer's level below the host's floor do? | The client raises it to the floor, with a line that says so. `--wall` below the floor still fails without `--downgrade`. | P1.8, P1.12 |
 
 ## Order
 
@@ -173,20 +174,20 @@ Build the tasks from top to bottom. Every task named under "Depends on" is above
 | 14 | P1.1 | Wall levels, the sandbox probe and the floor | 1 | H5 | 2, 5 | M |
 | 15 | H7 | The root step | 1 | P1.1, H4, 0037 (here) | 4, 29, 79 | M |
 | 16 | P1.2 | The link | 1 | none | none | M |
-| 17 | P1.3 | Jails | 1 | none | 28, 79 | M |
+| 17 | P1.3 | Jails | 1 | none | 4, 28, 79 | M |
 | 18 | P1.4 | The supervisor, the guest init and the holder's guest mode | 1 | P1.2, P0.2, 0029, 0030 | 23 | L |
 | 19 | P1.5 | The process wall | 1 | P1.3, P1.4, H7 | 4 | L |
 | 20 | P1.6 | The files door | 1 | P1.5 | 8, 21, 51 | M |
 | 21 | P1.7 | The egress process, first version | 1 | P1.4, 0030, 0031 | 23, 24 | L |
-| 22 | P1.8 | The client and the launcher | 1 | P1.1, P1.5, P1.7, H5, 0033, C2, C4 | 1, 5, 15 | M |
-| 23 | P1.12 | Layers, profiles and locks | 1 | P1.7, P1.8, 0033 | 44 | M |
+| 22 | P1.8 | The client and the launcher | 1 | P1.1, P1.5, P1.7, H5, 0033, C2, C4, C5 | 1, 5, 15, 90 | M |
+| 23 | P1.12 | Layers, profiles and locks | 1 | P1.7, P1.8, 0033 | 44, 90 | M |
 | 24 | P1.13 | Shells and commands in a sandbox | 1 | P1.4, P1.5, P1.8 | 47, 48 | M |
 | 25 | P1.14 | Sizes, variables, files and seeds from the laptop | 1 | P1.6, P1.12, P1.13 | 14, 63 | M |
 | 26 | P1.15 | Kept caches | 1 | P1.6 | 61 | S |
 | 27 | P1.9 | Paste and ports through the supervisor | 1 | P1.4, P1.5, 0030 | 19, 23, 58 | M |
 | 28 | P1.10 | Pull through a bundle, with a review | 1 | P1.6 | none | M |
 | 29 | P1.11 | Destroy, stop, restore and the phase's checks | 1 | P1.8, P1.10, P1.13 | 9, 10 | M |
-| 30 | P1.16 | Runs for many sessions | 1 | P1.8, P1.11 | none | M |
+| 30 | P1.16 | Runs for many sessions | 1 | P1.8, P1.11 | 59 | M |
 | 31 | P2.1 | DNS policy | 2 | P1.7 | none | M |
 | 32 | P2.2 | Interception, and method and path rules | 2 | P2.1, 0032, 0038 (here) | 16, 25 | L |
 | 33 | P2.3 | Bound secrets | 2 | P2.2, 0032 | 15, 25, 72 | L |
@@ -208,11 +209,11 @@ Build the tasks from top to bottom. Every task named under "Depends on" is above
 | 49 | P3.1 | The boot pair | 3 | P1.4, P4.1 | 3 | L |
 | 50 | H9 | Runtime delivery and the host cache | 3 | P4.1, P1.1, P3.1, 0039 (here) | 35, 39 | M |
 | 51 | P3.2 | Images | 3 | P1.3, H9 | 35, 39, 65, 81 | L |
-| 52 | P3.3 | The Cloud Hypervisor driver | 3 | P3.1, P3.2, P1.3, H9, 0030, 0040 (here) | 3, 23, 80 | L |
+| 52 | P3.3 | The Cloud Hypervisor driver | 3 | P3.1, P3.2, P1.3, H9, 0030, 0040 (here) | 3, 23, 79, 80 | L |
 | 53 | P3.4 | The guest init on a microvm | 3 | P3.3 | 8, 60, 57 | M |
 | 54 | P3.5 | The agents disk | 3 | P3.2 | 21 | M |
 | 55 | P3.6 | Lifecycle on a microvm | 3 | P3.4 | 9, 10, 11, 12 | M |
-| 56 | P3.7 | The microvm probe, the kernel list and Lima | 3 | P3.3, H7, P0.8 | 7, 37, 83 | S |
+| 56 | P3.7 | The microvm probe, the kernel list and Lima | 3 | P3.3, H7, P0.8 | 7, 37, 79, 83 | S |
 | 57 | H10 | Prepare in `host add` | 3 | H7, H9, P3.4, P1.8 | 2, 29, 39 | M |
 | 58 | P3.8 | Conformance, measurements and release | 3 | P3.1 to P3.7, H10 | 2, 9, 80 | M |
 | 59 | P4.2 | Run verified bytes only | 4 | P4.1, P3.3, H9 | 82 | M |
@@ -233,14 +234,14 @@ Build the tasks from top to bottom. Every task named under "Depends on" is above
 | 74 | P5.2 | Copy files in and out | 5 | P1.9 | none | M |
 | 75 | P5.4 | Checkpoints | 5 | P3.6, P5.1 | 11, 87 | M |
 | 76 | P5.5 | Save an image | 5 | P3.2 | 35 | M |
-| 77 | P6.1 | The gvisor wall | 6 | P1.5, H9 | 2, 88 | L |
-| 78 | P6.2 | The Firecracker driver | 6 | P3.8 | 3 | M |
-| 79 | P6.4 | Nitro Sandboxes on EC2 | 6 | P6.2, P3.1, H7, H9 | 53, 54 | M |
+| 77 | P6.1 | The gvisor wall | 6 | P1.5, H9 | 2, 4, 88 | L |
+| 78 | P6.2 | The Firecracker driver | 6 | P3.8 | 3, 11 | M |
+| 79 | P6.4 | Nitro Sandboxes on EC2 | 6 | P6.2, P3.1, H7, H9 | 3, 53, 54 | M |
 | 80 | P6.3 | Unwalled sessions on the supervisor's path | 6 | P1.11, P2.10, and one release with walls on by default | 1 | M |
 | 81 | P7.1 | Registry gates in the egress process | 7 | P2.2 | 20 | M |
 | 82 | P7.2 | Decoys | 7 | P2.3 | 85 | S |
 | 83 | P7.3 | Observe terminal output | 7 | P4.6 | 26 | M |
-| 84 | P7.4 | A machine for each session | 7 | P1.11, H4, H5, P6.1 | 22, 32, 86 | L |
+| 84 | P7.4 | A machine for each session | 7 | P1.11, H4, H5, P6.1 | 6, 22, 29, 32, 86 | L |
 | 85 | H17 | Separate accounts, part 1: the root-owned launcher | 8 | H7, H9, P4.1, 0043 (here) | 27, 30, 38 | L |
 | 86 | H18 | Separate accounts, part 2: slot accounts and the root-owned store | 8 | H17, P3.3 | 27, 89 | L |
 
@@ -253,7 +254,7 @@ Each task, in the order of the table in "Order", with the spec sections that def
 | H2 | Turn off forwarding on every connection | 3.2, 14.8.5 | [isolation 9.1](../research/isolation.md#91-do-now-before-any-wall), [connectivity 7.2](../research/connectivity-and-providers.md#72-ssh-agent-forwarding), [connectivity 7.5](../research/connectivity-and-providers.md#75-options-simstim-passes-on-its-connections) |
 | P0.1 | Bump the shadow terminal's Ghostty pin, and cap terminal sizes | 3.2, 19.1 | [isolation 1.4](../research/isolation.md#14-walls-break-too), [build facts 6.1](../research/build-facts.md#61-ghostty-and-its-advisories) |
 | P0.2 | A hook socket of its own, and a peer check on the holder's socket | 10.4 | [isolation 9.1](../research/isolation.md#91-do-now-before-any-wall) |
-| P0.3 | Check an agent's session ID before it enters a command | 10.3, 8.6 | [isolation 9.1](../research/isolation.md#91-do-now-before-any-wall), [build facts 1.1](../research/build-facts.md#11-claude-code), [build facts 1.2](../research/build-facts.md#12-codex) |
+| P0.3 | Check an agent's session ID before it enters a command | 8.6, 10.3 | [isolation 9.1](../research/isolation.md#91-do-now-before-any-wall), [build facts 1.1](../research/build-facts.md#11-claude-code), [build facts 1.2](../research/build-facts.md#12-codex) |
 | P0.4 | Clean every string that a host sends before the client draws it | 3.2, 5.5, 10.8 | [isolation 9.1](../research/isolation.md#91-do-now-before-any-wall) |
 | P0.5 | A paste guard | 3.3 | [isolation 9.1](../research/isolation.md#91-do-now-before-any-wall) |
 | P0.6 | Tie setup trust to the script's content | 3.2, 19.2 | [isolation 9.1](../research/isolation.md#91-do-now-before-any-wall) |
@@ -263,8 +264,8 @@ Each task, in the order of the table in "Order", with the spec sections that def
 | H3 | Pinned host keys and `host rekey` | 14.7.1, 14.14 | [isolation Attach](../research/isolation.md#attach), [connectivity 7.5](../research/connectivity-and-providers.md#75-options-simstim-passes-on-its-connections) |
 | H4 | The host ID and the tiers file | 14.6.1, 14.7.2, 14.8 | [isolation Fleet](../research/isolation.md#fleet) |
 | H5 | The grant gate and the grant ledger | 14.8.2, 14.8.3, 14.8.4, 14.8.5, 14.8.6 | [isolation Fleet](../research/isolation.md#fleet) |
-| P1.1 | Wall levels, the sandbox probe and the floor | 5.1, 14.3, 14.2.1, 10.5, 14.8.2 | [isolation 4.5](../research/isolation.md#45-the-winner-levels-with-a-pinned-floor-node-5), [isolation Attach](../research/isolation.md#attach) |
-| H7 | The root step | 11, 14.3, 14.4, 14.4.2, 14.4.1, 14.4.4 | [isolation Attach](../research/isolation.md#attach), [build facts 4.1](../research/build-facts.md#41-ubuntus-user-namespace-restriction), [build facts 4.3](../research/build-facts.md#43-devkvm-its-acl-and-the-kvm-group), [build facts 4.5](../research/build-facts.md#45-cgroup-delegation-to-the-user-manager) |
+| P1.1 | Wall levels, the sandbox probe and the floor | 5.1, 10.5, 14.2.1, 14.3, 14.8.2, 14.14 | [isolation 4.5](../research/isolation.md#45-the-winner-levels-with-a-pinned-floor-node-5), [isolation Attach](../research/isolation.md#attach) |
+| H7 | The root step | 11, 14.3, 14.4, 14.4.1, 14.4.2, 14.4.4 | [isolation Attach](../research/isolation.md#attach), [build facts 4.1](../research/build-facts.md#41-ubuntus-user-namespace-restriction), [build facts 4.3](../research/build-facts.md#43-devkvm-its-acl-and-the-kvm-group), [build facts 4.5](../research/build-facts.md#45-cgroup-delegation-to-the-user-manager) |
 | P1.2 | The link | 5.2, 10.1, 10.2, 12 | [isolation 5.6](../research/isolation.md#56-the-winner-holder-inside-thin-supervisor-outside-node-14) |
 | P1.3 | Jails | 5.6, 14.4.2 | [isolation 9.2](../research/isolation.md#92-the-wall), [build facts 4.2](../research/build-facts.md#42-what-a-jail-needs-a-user-namespace-for) |
 | P1.4 | The supervisor, the guest init and the holder's guest mode | 4, 10.7 | [isolation 5.6](../research/isolation.md#56-the-winner-holder-inside-thin-supervisor-outside-node-14) |
@@ -272,68 +273,68 @@ Each task, in the order of the table in "Order", with the spec sections that def
 | P1.6 | The files door | 7.1 | [isolation 7.3](../research/isolation.md#73-git-only-workspace-node-29), [isolation 6.6](../research/isolation.md#66-the-winner-cold-boot-from-a-verified-image-node-16) |
 | P1.7 | The egress process, first version | 7.2, 8.6 | [isolation 7.5](../research/isolation.md#75-the-winner-nic-less-wall-egress-proxy-sentinel-keys-node-26), [build facts 1.4](../research/build-facts.md#14-node-and-the-proxy-variables) |
 | P1.8 | The client and the launcher | 9, 9.4 | [isolation 4.5](../research/isolation.md#45-the-winner-levels-with-a-pinned-floor-node-5), [cli-dx 9](../research/cli-dx.md#9-the-command-map) |
-| P1.12 | Layers, profiles and locks | 8.1, 8.2, 8.3, 8.7 | [isolation Policy for parallel work](../research/isolation.md#policy-for-parallel-work) |
+| P1.12 | Layers, profiles and locks | 6.4, 8.1, 8.2, 8.3, 8.7 | [isolation Policy for parallel work](../research/isolation.md#policy-for-parallel-work) |
 | P1.13 | Shells and commands in a sandbox | 6.11 | [isolation Terminals beside the agent](../research/isolation.md#terminals-beside-the-agent), [parity 2.1](../research/parity.md#21-lifecycle-and-the-command-line) |
 | P1.14 | Sizes, variables, files and seeds from the laptop | 17.1, 17.2, 17.3, 17.4 | [parity 2.2](../research/parity.md#22-workspaces), [parity 2.3](../research/parity.md#23-kits-templates-and-environment-files), [parity 3.1](../research/parity.md#31-machines-and-lifecycle) |
-| P1.15 | Kept caches | 17.5, 12 | [parity 4](../research/parity.md#4-the-features-this-note-adds), [parity 5](../research/parity.md#5-performance) |
+| P1.15 | Kept caches | 12, 17.5 | [parity 4](../research/parity.md#4-the-features-this-note-adds), [parity 5](../research/parity.md#5-performance) |
 | P1.9 | Paste and ports through the supervisor | 7.4, 7.6 | [isolation 7.5](../research/isolation.md#75-the-winner-nic-less-wall-egress-proxy-sentinel-keys-node-26), [parity 2.4](../research/parity.md#24-network) |
 | P1.10 | Pull through a bundle, with a review | 6.10, 7.1 | [isolation 7.3](../research/isolation.md#73-git-only-workspace-node-29), [isolation 8.3](../research/isolation.md#83-throwaway-sessions-and-a-reviewed-exit-node-33) |
 | P1.11 | Destroy, stop, restore and the phase's checks | 6.6, 6.7, 6.8, 12, 17.11 | [isolation 6.6](../research/isolation.md#66-the-winner-cold-boot-from-a-verified-image-node-16), [parity 3.1](../research/parity.md#31-machines-and-lifecycle) |
-| P1.16 | Runs for many sessions | 17.6, 12 | [parity 2.1](../research/parity.md#21-lifecycle-and-the-command-line), [parity 3.5](../research/parity.md#35-integration-teams-and-data) |
+| P1.16 | Runs for many sessions | 12, 17.6 | [parity 2.1](../research/parity.md#21-lifecycle-and-the-command-line), [parity 3.5](../research/parity.md#35-integration-teams-and-data) |
 | P2.1 | DNS policy | 7.2 | [isolation 7.5](../research/isolation.md#75-the-winner-nic-less-wall-egress-proxy-sentinel-keys-node-26) |
 | P2.2 | Interception, and method and path rules | 7.2 | [isolation 7.5](../research/isolation.md#75-the-winner-nic-less-wall-egress-proxy-sentinel-keys-node-26) |
 | P2.3 | Bound secrets | 7.3, 8.6, 9.3 | [isolation 7.5](../research/isolation.md#75-the-winner-nic-less-wall-egress-proxy-sentinel-keys-node-26), [build facts 1.1](../research/build-facts.md#11-claude-code), [build facts 1.2](../research/build-facts.md#12-codex) |
 | P2.4 | The model API guard | 7.2, 8.6 | [isolation 8.4](../research/isolation.md#84-agent-rows-as-policy-node-35), [build facts 2.4](../research/build-facts.md#24-server-tools-and-fields-that-make-the-provider-fetch), [build facts 2.5](../research/build-facts.md#25-websocket-mode) |
-| P2.5 | Service rules | 7.2, 5.5 | [isolation 7.5](../research/isolation.md#75-the-winner-nic-less-wall-egress-proxy-sentinel-keys-node-26) |
+| P2.5 | Service rules | 5.5, 7.2 | [isolation 7.5](../research/isolation.md#75-the-winner-nic-less-wall-egress-proxy-sentinel-keys-node-26) |
 | P2.6 | Holds and approvals | 7.2, 9.4 | [isolation 7.5](../research/isolation.md#75-the-winner-nic-less-wall-egress-proxy-sentinel-keys-node-26), [build facts 2.6](../research/build-facts.md#26-client-timeouts-under-a-hold) |
 | P2.11 | The unknown action and the classifier's fixed steps | 7.2, 7.8, 12 | [isolation Fixed checks before any model](../research/isolation.md#fixed-checks-before-any-model) |
 | P2.12 | The judge | 7.8 | [isolation Automatic classifiers in products](../research/isolation.md#automatic-classifiers-in-products), [isolation What the research says](../research/isolation.md#what-the-research-says) |
 | P2.13 | SSH keys | 7.9 | [isolation 7.5](../research/isolation.md#75-the-winner-nic-less-wall-egress-proxy-sentinel-keys-node-26), [parity 2.5](../research/parity.md#25-credentials-and-ssh) |
-| P2.14 | Change policy while sessions run | 8.8, 10.4, 12, 9.3 | [build facts 3a](../research/build-facts.md#3a-live-policy-changes) |
+| P2.14 | Change policy while sessions run | 8.8, 9.3, 10.4, 12 | [build facts 3a](../research/build-facts.md#3a-live-policy-changes) |
 | P2.15 | Editors over SSH | 17.7 | [parity 2.6](../research/parity.md#26-inside-the-sandbox), [parity 3.2](../research/parity.md#32-commands-files-and-editors) |
 | P2.16 | Model usage and budgets | 17.8 | [build facts 2.1](../research/build-facts.md#21-usage-in-answers), [build facts 2.2](../research/build-facts.md#22-retries-and-a-refusal-that-stops-the-client), [build facts 2.3](../research/build-facts.md#23-error-shapes) |
-| P2.17 | More agent rows | 17.9, 8.6 | [build facts 1.3](../research/build-facts.md#13-the-six-best-effort-agents), [parity 2.7](../research/parity.md#27-mcp-skills-and-agents) |
-| P2.7 | Budgets and stricter targets | 7.2, 5.5 | [isolation 7.5](../research/isolation.md#75-the-winner-nic-less-wall-egress-proxy-sentinel-keys-node-26) |
+| P2.17 | More agent rows | 8.6, 17.9 | [build facts 1.3](../research/build-facts.md#13-the-six-best-effort-agents), [parity 2.7](../research/parity.md#27-mcp-skills-and-agents) |
+| P2.7 | Budgets and stricter targets | 5.5, 7.2 | [isolation 7.5](../research/isolation.md#75-the-winner-nic-less-wall-egress-proxy-sentinel-keys-node-26) |
 | P2.8 | Package managers in the guest | 7.10 | [isolation 8.1](../research/isolation.md#81-registry-firewall-node-31), [build facts 3.1](../research/build-facts.md#31-minimum-release-age), [build facts 3.2](../research/build-facts.md#32-install-scripts-and-source-builds), [build facts 3.4](../research/build-facts.md#34-go) |
 | P2.9 | A repository's own file | 8.5 | [isolation Policy for parallel work](../research/isolation.md#policy-for-parallel-work) |
 | P2.10 | Walls by default | 3.3, 6.1, 8.2, 8.4 | [isolation 4.5](../research/isolation.md#45-the-winner-levels-with-a-pinned-floor-node-5) |
-| P4.1 | The release manifest and the check before the bridge | 20.1, 20.5, 20.9 | [isolation 8.5](../research/isolation.md#85-the-winner-laptop-held-digests-node-34) |
+| P4.1 | The release manifest and the check before the bridge | 14.9.1, 14.9.2, 20.1, 20.5, 20.9 | [isolation 8.5](../research/isolation.md#85-the-winner-laptop-held-digests-node-34) |
 | P3.1 | The boot pair | 20.1 | [isolation 8.5](../research/isolation.md#85-the-winner-laptop-held-digests-node-34), [build facts 5.1](../research/build-facts.md#51-the-guest-kernels-options), [build facts 5.5](../research/build-facts.md#55-reproducible-kernels-and-erofs-images) |
-| H9 | Runtime delivery and the host cache | 14.9.3, 14.9.4, 14.5, 10.7, 20.5 | [isolation 8.5](../research/isolation.md#85-the-winner-laptop-held-digests-node-34), [isolation Your own hosts](../research/isolation.md#your-own-hosts) |
-| P3.2 | Images | 20.2, 14.9.5 | [isolation 6.6](../research/isolation.md#66-the-winner-cold-boot-from-a-verified-image-node-16), [build facts 5.4](../research/build-facts.md#54-images-tar2ext4-and-dm-verity) |
-| P3.3 | The Cloud Hypervisor driver | 20.3, 20.10 | [isolation 1.4](../research/isolation.md#14-walls-break-too), [isolation 4.3](../research/isolation.md#43-w3-a-kvm-microvm-node-3), [build facts 5.2](../research/build-facts.md#52-cloud-hypervisor) |
+| H9 | Runtime delivery and the host cache | 9.1, 10.7, 14.5, 14.9.3, 14.9.4, 20.5 | [isolation 8.5](../research/isolation.md#85-the-winner-laptop-held-digests-node-34), [isolation Your own hosts](../research/isolation.md#your-own-hosts) |
+| P3.2 | Images | 10.5, 14.9.5, 20.2 | [isolation 6.6](../research/isolation.md#66-the-winner-cold-boot-from-a-verified-image-node-16), [build facts 5.4](../research/build-facts.md#54-images-tar2ext4-and-dm-verity) |
+| P3.3 | The Cloud Hypervisor driver | 20.3, 20.10 | [isolation 1.4](../research/isolation.md#14-walls-break-too), [isolation 4.3](../research/isolation.md#43-w3-a-kvm-microvm-node-3), [build facts 5.2](../research/build-facts.md#52-cloud-hypervisor), [build facts 5.6](../research/build-facts.md#56-memory-that-a-cgroup-charges) |
 | P3.4 | The guest init on a microvm | 4.1, 6.6, 7.1, 17.10, 20.3 | [isolation 6.6](../research/isolation.md#66-the-winner-cold-boot-from-a-verified-image-node-16), [isolation 5.6](../research/isolation.md#56-the-winner-holder-inside-thin-supervisor-outside-node-14) |
 | P3.5 | The agents disk | 20.4 | [parity 3.1](../research/parity.md#31-machines-and-lifecycle) |
 | P3.6 | Lifecycle on a microvm | 6.2, 6.6, 6.8, 17.1 | [isolation 6.6](../research/isolation.md#66-the-winner-cold-boot-from-a-verified-image-node-16) |
-| P3.7 | The microvm probe, the kernel list and Lima | 20.11 | [isolation 1.4](../research/isolation.md#14-walls-break-too), [locations 1.4](../research/locations.md#14-lima-in-november-2026) |
-| H10 | Prepare in `host add` | 14.2.1, 8.4, 14.2.6 | [isolation Attach](../research/isolation.md#attach) |
+| P3.7 | The microvm probe, the kernel list and Lima | 5.1, 14.3, 20.11 | [isolation 1.4](../research/isolation.md#14-walls-break-too), [locations 1.4](../research/locations.md#14-lima-in-november-2026) |
+| H10 | Prepare in `host add` | 8.4, 14.2.1, 14.2.6 | [isolation Attach](../research/isolation.md#attach) |
 | P3.8 | Conformance, measurements and release | 12, 20.10 | [isolation Performance](../research/isolation.md#performance), [parity 5](../research/parity.md#5-performance), [build facts 5.6](../research/build-facts.md#56-memory-that-a-cgroup-charges) |
 | P4.2 | Run verified bytes only | 20.5 | [isolation 8.5](../research/isolation.md#85-the-winner-laptop-held-digests-node-34), [build facts 5.7](../research/build-facts.md#57-fs-verity) |
-| P4.3 | Reproducible kernel and tools image | 20.6 | [isolation 8.5](../research/isolation.md#85-the-winner-laptop-held-digests-node-34), [build facts 5.5](../research/build-facts.md#55-reproducible-kernels-and-erofs-images) |
+| P4.3 | Reproducible kernel and tools image | 20.1, 20.6 | [isolation 8.5](../research/isolation.md#85-the-winner-laptop-held-digests-node-34), [build facts 5.5](../research/build-facts.md#55-reproducible-kernels-and-erofs-images) |
 | P4.4 | A signed-tag release gate | 20.7 | [isolation 8.5](../research/isolation.md#85-the-winner-laptop-held-digests-node-34), [build facts 6.2](../research/build-facts.md#62-signed-tags) |
 | P4.5 | Image policy | 20.8 | [isolation 8.5](../research/isolation.md#85-the-winner-laptop-held-digests-node-34), [build facts 6.3](../research/build-facts.md#63-image-signatures) |
 | P4.6 | Known-bad versions | 20.9 | [isolation 8.5](../research/isolation.md#85-the-winner-laptop-held-digests-node-34), [build facts 6.4](../research/build-facts.md#64-the-time-to-answer-an-advisory) |
 | H11 | Facts and admission | 14.10.2, 14.10.3 | [isolation Placement](../research/isolation.md#placement) |
 | H12 | Named placement | 14.10.1, 14.10.4, 14.14 | [isolation Placement](../research/isolation.md#placement) |
-| H13 | `new auto` | 14.10.5, 14.2.5, 14.8.2 | [isolation Placement](../research/isolation.md#placement) |
-| H14 | Health, runtime upgrades and drain | 14.11, 14.11.3, 14.11.1 | [isolation Fleet](../research/isolation.md#fleet) |
+| H13 | `new auto` | 14.2.5, 14.8.2, 14.10.5 | [isolation Placement](../research/isolation.md#placement) |
+| H14 | Health, runtime upgrades and drain | 14.11, 14.11.1, 14.11.2, 14.11.3 | [isolation Fleet](../research/isolation.md#fleet) |
 | H15 | Leave and wipe | 14.12 | [isolation Fleet](../research/isolation.md#fleet) |
 | H16 | Reach a host behind NAT | 14.13 | [isolation Fleet](../research/isolation.md#fleet), [connectivity 4.8](../research/connectivity-and-providers.md#48-a-homelab-vm-behind-a-proxyjump-host) |
 | H19 | Host rules | 18.2, 18.5 | [locations 7](../research/locations.md#7-picking-a-host) |
 | H20 | Machines that join | 18.3 | [locations 6](../research/locations.md#6-joining-a-machine) |
 | H21 | A Mac as a host | 18.4 | [locations 1](../research/locations.md#1-mac-laptops-as-hosts), [locations 5](../research/locations.md#5-mac-hosts-checked-again) |
-| P5.1 | Fork | 6.5 | [isolation 6.1](../research/isolation.md#61-snapshot-first-node-17), [parity 3.3](../research/parity.md#33-sharing-desktops-and-snapshots) |
-| P5.2 | Copy files in and out | 21.1 | [isolation 1.3](../research/isolation.md#13-supply-chain-incidents-aimed-at-developers), [parity 6](../research/parity.md#6-safety) |
-| P5.4 | Checkpoints | 21.2, 12 | [isolation 6.1](../research/isolation.md#61-snapshot-first-node-17), [build facts 5.8](../research/build-facts.md#58-reflinks) |
-| P5.5 | Save an image | 21.3, 14.9.5 | [parity 2.3](../research/parity.md#23-kits-templates-and-environment-files), [parity 3.3](../research/parity.md#33-sharing-desktops-and-snapshots) |
-| P6.1 | The gvisor wall | 21.4, 14.4 | [isolation 4.2](../research/isolation.md#42-w2-gvisor-node-2), [build facts 4.7](../research/build-facts.md#47-gvisor-without-root) |
-| P6.2 | The Firecracker driver | 21.5 | [isolation 4.3](../research/isolation.md#43-w3-a-kvm-microvm-node-3), [build facts 5.3](../research/build-facts.md#53-firecracker) |
-| P6.4 | Nitro Sandboxes on EC2 | 5.1, 11, 14.2.4, 14.10.3, 21.5 | [isolation 10.1](../research/isolation.md#101-aws-nitro-sandboxes-on-ec2), [build facts 5.3](../research/build-facts.md#53-firecracker) |
-| P6.3 | Unwalled sessions on the supervisor's path | 21.6, 12 | [isolation 4.5](../research/isolation.md#45-the-winner-levels-with-a-pinned-floor-node-5) |
+| P5.1 | Fork | 5.1, 6.5, 10.3, 10.7 | [isolation 6.1](../research/isolation.md#61-snapshot-first-node-17), [parity 3.3](../research/parity.md#33-sharing-desktops-and-snapshots) |
+| P5.2 | Copy files in and out | 8.3, 10.2, 21.1 | [isolation 1.3](../research/isolation.md#13-supply-chain-incidents-aimed-at-developers), [parity 6](../research/parity.md#6-safety) |
+| P5.4 | Checkpoints | 12, 21.2 | [isolation 6.1](../research/isolation.md#61-snapshot-first-node-17), [build facts 5.8](../research/build-facts.md#58-reflinks) |
+| P5.5 | Save an image | 14.9.5, 21.3 | [parity 2.3](../research/parity.md#23-kits-templates-and-environment-files), [parity 3.3](../research/parity.md#33-sharing-desktops-and-snapshots) |
+| P6.1 | The gvisor wall | 14.4, 21.4 | [isolation 4.2](../research/isolation.md#42-w2-gvisor-node-2), [build facts 4.7](../research/build-facts.md#47-gvisor-without-root) |
+| P6.2 | The Firecracker driver | 5.1, 21.5 | [isolation 4.3](../research/isolation.md#43-w3-a-kvm-microvm-node-3), [build facts 5.3](../research/build-facts.md#53-firecracker) |
+| P6.4 | Nitro Sandboxes on EC2 | 5.1, 11, 14.2.4, 14.4.2, 14.10.3, 21.5 | [isolation 10.1](../research/isolation.md#101-aws-nitro-sandboxes-on-ec2), [build facts 5.3](../research/build-facts.md#53-firecracker) |
+| P6.3 | Unwalled sessions on the supervisor's path | 5.1, 12, 21.6 | [isolation 4.5](../research/isolation.md#45-the-winner-levels-with-a-pinned-floor-node-5) |
 | P7.1 | Registry gates in the egress process | 7.11 | [isolation 8.1](../research/isolation.md#81-registry-firewall-node-31), [build facts 3.5](../research/build-facts.md#35-publish-times-that-a-gate-can-trust) |
-| P7.2 | Decoys | 21.7 | [isolation 8.2](../research/isolation.md#82-flight-recorder-and-tripwires-node-32), [build facts 7.1](../research/build-facts.md#71-decoy-credentials-caught-a-real-breach) |
-| P7.3 | Observe terminal output | 7.7 | [isolation 1.4](../research/isolation.md#14-walls-break-too), [isolation 9.1](../research/isolation.md#91-do-now-before-any-wall) |
-| P7.4 | A machine for each session | 21.8, 14.8.2 | [isolation 5.4](../research/isolation.md#54-one-provider-machine-per-session-node-15), [sandboxes 2. E2B](../research/sandboxes.md#2-e2b), [build facts 7.4](../research/build-facts.md#74-e2bs-guest-kernel-config) |
+| P7.2 | Decoys | 8.3, 10.8, 21.7 | [isolation 8.2](../research/isolation.md#82-flight-recorder-and-tripwires-node-32), [build facts 7.1](../research/build-facts.md#71-decoy-credentials-caught-a-real-breach) |
+| P7.3 | Observe terminal output | 7.7, 14.9.1 | [isolation 1.4](../research/isolation.md#14-walls-break-too), [isolation 9.1](../research/isolation.md#91-do-now-before-any-wall) |
+| P7.4 | A machine for each session | 14.8.2, 21.8 | [isolation 5.4](../research/isolation.md#54-one-provider-machine-per-session-node-15), [sandboxes 2. E2B](../research/sandboxes.md#2-e2b), [build facts 7.4](../research/build-facts.md#74-e2bs-guest-kernel-config) |
 | H17 | Separate accounts, part 1: the root-owned launcher | 14.4.6, 14.9.2, 21.9 | [isolation Fleet](../research/isolation.md#fleet), [isolation 4.4](../research/isolation.md#44-w4-one-full-vm-per-session-node-4) |
 | H18 | Separate accounts, part 2: slot accounts and the root-owned store | 14.4.6, 21.9 | [build facts 7.3](../research/build-facts.md#73-build-users-in-nix) |
 
@@ -398,7 +399,7 @@ Five records already exist in this branch, as proposed records: 0029 to 0032 for
 | `0037-the-root-step.md` | New, in H7 | The root step: the sandbox probe as its input, one optional script, and sudo in the user's terminal. It bends "setup needs no root". | H7 | 4, 29 |
 | `0038-tls-interception-on-the-trusted-side.md` | New, in P2.2 | The egress process decrypts TLS for bound hosts, model APIs, registries and object stores. It needs every maintainer's yes. | P2.2 | 16, 25 |
 | `0039-runtime-delivery.md` | New, in H9 | Runtime delivery, and downloads by the host. It extends [0017](decisions/0017-release-signatures.md). | H9 | 35, 39 |
-| `0040-memory-of-microvm-guests.md` | New, in P3.3 | A microvm guest gets the session's size as its RAM, and the unit's cap adds the reserve of spec 20.10. It extends [0024](decisions/0024-memory-cap.md). | P3.3 | 3 |
+| `0040-memory-of-microvm-guests.md` | New, in P3.3 | A microvm guest gets the session's size as its RAM, and the unit's cap adds the reserve of spec 20.10. It extends [0024](decisions/0024-memory-cap.md). | P3.3 | 80 |
 | `0041-a-signed-tag-release-gate.md` | New, in P4.4 | A release builds only from a tag signed with a hardware key. It extends [0017](decisions/0017-release-signatures.md). | P4.4 | 30 |
 | `0042-admission-refuses-what-does-not-fit.md` | New, in H11 | A sandbox that does not fit is refused, not made smaller. It amends [0024](decisions/0024-memory-cap.md) for sandboxes only. | H11 | 13, 14 |
 | `0043-separate-accounts-for-sandboxes.md` | New, in H17 | A root-owned launcher, one sudo line that allows no arguments, and slot accounts | H17, then H18 | 27, 30, 38 |
@@ -576,7 +577,7 @@ These tasks need no wall, and they help every session. H2 goes first ([question 
   - New `docs/contributing/decisions/0035-pinned-host-keys.md`, and the records index.
 - **Acceptance:**
   - `host add` prints where the pin came from.
-  - A changed key fails with the message of spec 14.14 and the exit code 2, even with `StrictHostKeyChecking no` in `~/.ssh/config`.
+  - A changed key fails with the message of spec 14.14 and the exit code 5 ([CLI spec, 5.3](cli-spec.md#53-the-codes-of-the-isolation-spec)), even with `StrictHostKeyChecking no` in `~/.ssh/config`.
   - `host rekey` replaces the pin after the user types the host's name.
   - Lima hosts are pinned at `host create`.
   - `ForgetHost` also removes `known_hosts-<name>`.
@@ -662,7 +663,7 @@ At the end of phase 1, `simstim new box --wall process` runs a session in a sand
   - `host add` and `host create` pin the strongest level that probes OK, unless the user names a lower level ([question 2](isolation-spec.md#15-open-questions)).
   - `host doctor` prints the "Sandboxes" block of spec 14.2.1, and its `--json` holds the whole probe as `sandbox`.
   - The probe changes no file outside `artefacts/incoming/`.
-  - An older helper gives `wall_helper_old`: "too old for sandboxes".
+  - A helper without the feature `sandbox` gives the error of spec 14.14: "The helper on box is too old for sandboxes."
   - The bridge op is `sandbox.probe`, behind the feature `sandbox` (spec 10.5 and 14.3).
   - `host set … floor=` refuses a floor below the weakest level that the host's tier allows (spec 14.8.2). Lowering a host's tier raises its floor to that level.
   - Each driver's probe is cached for each boot in `StateDir()/walls.json`, keyed by `BootID()`.
@@ -685,9 +686,9 @@ At the end of phase 1, `simstim new box --wall process` runs a session in a sand
   - New `docs/contributing/decisions/0037-the-root-step.md`, and the records index.
 - **Acceptance:**
   - The steps are those of spec 14.4.2: `kvm-acl`, `kvm-group`, `linger`, `delegate-io`, `subuid`, `io-uring-off` and `vsock-modules`. Each has its line, its reason and its undo.
-  - P1.5 adds the eighth step, `userns-apparmor`, because it needs the namespace launcher.
+  - P1.5 adds the eighth step, `userns-apparmor`, because it needs the namespace launcher. It is the third machine-wide step. P6.4 adds the three `nitro` steps.
   - The client offers a step only when the sandbox probe shows its need. The kvm steps appear only when the probe lists a microvm driver, from P3.3 on.
-  - The client marks the three steps that change the machine for every user as "machine-wide" before it runs them (spec 14.4.1).
+  - The client marks each step that changes the machine for every user as "machine-wide" before it runs it (spec 14.4.1). This task has two: `io-uring-off` and `vsock-modules`.
   - `--root-step print` writes `./simstim-root-<host>.sh` (0600), and prints its SHA-256 and the line to run.
   - `--root-step run` runs the script through sudo over `ssh -t`, and checks for `__ROOT_STEP_DONE__`. Then it probes again. The probe, not the exit code, says whether the step worked.
   - The default mode follows spec 14.4.4. On a `shared` host it is `print`, and `--root-step run` needs the typed host name ([question 29](isolation-spec.md#15-open-questions)).
@@ -729,7 +730,7 @@ At the end of phase 1, `simstim new box --wall process` runs a session in a sand
 - **Docs:** `docs/explanation/architecture.md` (the jail, and how it differs from a wall).
 - **CHANGELOG:** Added. "The host helper can confine the programs that read untrusted input, such as a VMM or an image converter, with namespaces, Landlock and seccomp. No program uses it yet."
 - **Depends on:** nothing.
-- **Questions:** [28](isolation-spec.md#15-open-questions), [79](isolation-spec.md#15-open-questions).
+- **Questions:** [4](isolation-spec.md#15-open-questions), [28](isolation-spec.md#15-open-questions), [79](isolation-spec.md#15-open-questions).
 - **Effort:** M.
 
 ### P1.4 The supervisor, the guest init and the holder's guest mode
@@ -827,7 +828,7 @@ At the end of phase 1, `simstim new box --wall process` runs a session in a sand
   - The commands `policy allow`, `policy rm`, `policy ls` and `policy log` for the session layer, `stop` and `show`, and the policy sheet without holds. P1.12 adds the other layers.
   - Badges, the `wall_downgraded` and `secret_exposed` alerts, and "exposed: NAME" for every secret in a walled session.
   - The launcher's host rows show the floor and the level that the host gives now. This is the launcher part of H10.
-- **Files:** `internal/cli/session.go`, new `internal/cli/policy.go`, `internal/cli/stop.go` and `internal/cli/show.go`, `internal/client/ops.go`, `internal/client/tier.go` (the grant gate for door grants), `internal/tui/rows.go`, `internal/tui/dialog_sheets.go`, new `internal/tui/policy.go`, `internal/tui/hosts_view.go` (`hostRow`, `hostDetail`), `internal/alerts/event.go`, `internal/host/bridge.go`.
+- **Files:** `internal/cli/session.go`, new `internal/cli/policy.go` and `internal/cli/stop.go`, `internal/cli/show.go` (new in C5 of [the CLI plan](cli-plan.md)), `internal/client/ops.go`, `internal/client/tier.go` (the grant gate for door grants), `internal/tui/rows.go`, `internal/tui/dialog_sheets.go`, new `internal/tui/policy.go`, `internal/tui/hosts_view.go` (`hostRow`, `hostDetail`), `internal/alerts/event.go`, `internal/host/bridge.go`.
 - **Acceptance:**
   - A level below the floor is refused without `--downgrade`.
   - The `process` level runs only on `own` and `throwaway` hosts, labelled "shares your account". It gets no `own`-tier secret unless the user names it with `--expose` ([question 5](isolation-spec.md#15-open-questions)).
@@ -839,8 +840,8 @@ At the end of phase 1, `simstim new box --wall process` runs a session in a sand
 - **Tests:** unit tests, golden tests, and an end-to-end run of each command.
 - **Docs:** `docs/how-to/sandboxes.md`, `docs/how-to/policy.md`, `docs/contributing/ux-spec.md` (2.3 and 2.4), the reference through `just docs`.
 - **CHANGELOG:** Added. "`stop`, `show` and `policy` work on sandboxed sessions. The launcher marks each session's wall and each host's floor, and `p` opens a session's policy."
-- **Depends on:** P1.1, P1.5, P1.7, H5, 0033, and C2 and C4 of [the CLI plan](cli-plan.md).
-- **Questions:** [1](isolation-spec.md#15-open-questions), [5](isolation-spec.md#15-open-questions), [15](isolation-spec.md#15-open-questions).
+- **Depends on:** P1.1, P1.5, P1.7, H5, 0033, and C2, C4 and C5 of [the CLI plan](cli-plan.md).
+- **Questions:** [1](isolation-spec.md#15-open-questions), [5](isolation-spec.md#15-open-questions), [15](isolation-spec.md#15-open-questions), [90](isolation-spec.md#15-open-questions).
 - **Effort:** M.
 
 ### P1.12 Layers, profiles and locks
@@ -850,17 +851,18 @@ At the end of phase 1, `simstim new box --wall process` runs a session in a sand
   - Profiles, `--profile` and `--set`. Lists that add up, with `!` to drop an inherited item. Locks at the top level and in a host's entry.
   - `policy allow`, `deny`, `rm`, `ls` and `check` at every layer, with `--once`, `--for` and `--dry-run`. P1.8 built them for the session layer only.
   - The new shape of `config.toml` and `hosts.toml`, and `config check` for it (C9 of [the CLI plan](cli-plan.md)).
-- **Files:** new `internal/grant/merge.go` and `internal/grant/decide.go`, `internal/api` (`Rule`, `Lock`, `LayerKind`, `Policy`), `internal/client/config.go` (profiles, `[lock]`, the shape of `[repos]` and of hosts), `internal/cli/policy.go`, `internal/cli/session.go` (`--profile`, `--set`, `--task`).
+- **Files:** new `internal/grant/merge.go` and `internal/grant/decide.go`, `internal/api` (`Rule`, `Lock`, `Layer`, `LayerKind`, `Policy`), `internal/client/config.go` (profiles, `[lock]`, the shape of `[repos]` and of hosts), `internal/cli/policy.go`, `internal/cli/session.go` (`--profile`, `--set`, `--task`).
 - **Acceptance:**
   - A table test covers each rule of spec 8.2: a session's allow over a deny for all sessions, a lock over a session's allow (refused with `policy_locked`), a profile after a repository, lists with `!`, and a repository file that only narrows.
   - `policy check` names the deciding rule and its layer in each case of that table.
   - `policy allow api.example.com --repo .` writes `network.allow` in the section of the folder's origin. With `--dry-run` it writes nothing.
   - A rule with `--once` ends after one flow, and a rule with `--for` at its time.
+  - Until P2.14, a rule in a wider layer applies to a running sandbox at its next start. The answer says so (spec 6.4, step 5).
 - **Tests:** unit and table tests, golden tests of `policy ls`, and an end-to-end run of each command.
-- **Docs:** new `docs/how-to/policy.md`, `docs/reference/config.md` through `just docs`, `docs/contributing/ux-spec.md`.
+- **Docs:** `docs/how-to/policy.md`, `docs/reference/config.md` through `just docs`, `docs/contributing/ux-spec.md`.
 - **CHANGELOG:** Added. "One config for all sessions, which a host, a repository, a profile or one session can override. `policy allow` and `policy deny` add rules at any of those places, and `policy check` says which rule decides."
 - **Depends on:** P1.7, P1.8, 0033.
-- **Questions:** [44](isolation-spec.md#15-open-questions).
+- **Questions:** [44](isolation-spec.md#15-open-questions), [90](isolation-spec.md#15-open-questions).
 - **Effort:** M.
 
 ### P1.13 Shells and commands in a sandbox
@@ -927,11 +929,12 @@ At the end of phase 1, `simstim new box --wall process` runs a session in a sand
   - `forward` reaches a server in the sandbox, and only while granted.
   - A PDF passes, and a `.zip` is refused unless `paste = "any"` ([question 19](isolation-spec.md#15-open-questions)).
   - A forwarded port is a Unix socket on the host, never a TCP port.
+  - On an `own` host, `forward --reverse 5432` lets a client in the sandbox reach the laptop's port 5432. Nothing listens on the host, and the audit log records each connection. Other tiers refuse it (spec 7.4).
 - **Tests:** unit tests. End to end.
 - **Docs:** `docs/how-to/image-paste.md`, `docs/how-to/ports.md`.
 - **CHANGELOG:** Added. "Image paste and `forward` work with sandboxed sessions. Forwarding a port also grants it."
 - **Depends on:** P1.4, P1.5, [0030](decisions/0030-local-sockets-do-not-listen.md).
-- **Questions:** [19](isolation-spec.md#15-open-questions), [23](isolation-spec.md#15-open-questions).
+- **Questions:** [19](isolation-spec.md#15-open-questions), [23](isolation-spec.md#15-open-questions), [58](isolation-spec.md#15-open-questions).
 - **Effort:** M.
 
 ### P1.10 Pull through a bundle, with a review
@@ -981,7 +984,7 @@ At the end of phase 1, `simstim new box --wall process` runs a session in a sand
 - **Docs:** `docs/how-to/sessions.md` (new in C5 of the CLI plan), `docs/how-to/alerts.md`.
 - **CHANGELOG:** Added. "`new --rm` and `new --count` run throwaway and parallel sessions, `prune` cleans up stopped sandboxes, and `events --follow` streams what sessions do."
 - **Depends on:** P1.8, P1.11.
-- **Questions:** none.
+- **Questions:** [59](isolation-spec.md#15-open-questions).
 - **Effort:** M.
 
 ## Phase 2: secrets that stay outside, and a closed network
@@ -1008,6 +1011,7 @@ At the end of phase 2, a sandboxed session holds no real secret value. Its DNS a
   - `npm install` works, and `npm publish` gets a 403.
   - The request smuggling cases of the test list are refused.
   - The CA's key lives only in the egress process's memory, for one session, never in a file.
+  - `go.mod` names a Go toolchain with the fixes of spec 7.2. The pull request checks CVE-2026-39825 in Go's release notes. It then removes the UNVERIFIED mark there, or the CVE.
   - A manual check for the owner, listed in the pull request: Claude Code and Codex work through the proxy against their real APIs. No test sends a prompt on a test host.
 - **Tests:** unit tests, a table of request smuggling cases, and fuzz tests of the canonical parser. End to end: `npm install` and `npm publish` in a sandbox.
 - **Docs:** `docs/explanation/security.md`, `docs/how-to/policy.md`. The record 0038, for every maintainer's yes.
@@ -1026,7 +1030,7 @@ At the end of phase 2, a sandboxed session holds no real secret value. Its DNS a
   - Another `x-api-key` to `api.anthropic.com` is refused.
   - After a restart of the session's unit, the session says "secrets not armed", and an attach arms it.
   - No file on the host holds the value.
-  - Manual checks for the owner: Claude Code works with the bound key. In traffic that the owner records, `CLAUDE_CODE_OAUTH_TOKEN` travels in `Authorization: Bearer`, and `anthropic-beta: oauth-2025-04-20` reaches the API unchanged. Then the UNVERIFIED mark on that header goes.
+  - Manual checks for the owner: Claude Code works with the bound key, and the key starts with `sk-ant-api03-` (spec 8.6). In traffic that the owner records, `CLAUDE_CODE_OAUTH_TOKEN` travels in `Authorization: Bearer`, and `anthropic-beta: oauth-2025-04-20` reaches the API unchanged. Then the UNVERIFIED mark on that header goes.
   - A manual check for the owner: Codex's TUI works with the sentinel that `Store` saved. The check records whether the TUI also needs `-c cli_auth_credentials_store="file"` at launch, and the pull request adds it to the row if so.
   - A ChatGPT login is not bound. It works only as an exposed login, and the row shows it ([question 72](isolation-spec.md#15-open-questions)).
 - **Tests:** unit tests of each rule. End to end, without a prompt.
@@ -1049,12 +1053,13 @@ At the end of phase 2, a sandboxed session holds no real secret value. Its DNS a
     - a request to `/v1/messages/batches`.
   - Under the `locked` preset a web search tool is refused. Under `balanced`, Claude Code's recorded WebSearch passes.
   - A `response.create` message with an `mcp` tool closes the WebSocket with code 1008. The upgrade that reaches the API carries no `permessage-deflate` offer.
+  - The pull request records what Codex does after the close with code 1008. CI runs Codex against a fake upstream, never on a test host. The pull request corrects spec 7.2, where this is UNVERIFIED.
   - The Anthropic and OpenAI SDKs, in TypeScript and Python, each make exactly one request when they get a refusal.
   - Claude Code and Codex pass their recorded sessions unchanged. The recordings come from the owner's manual check of P2.3.
 - **Tests:** table tests from the recordings, and from the request shapes of [build facts 2](../research/build-facts.md#2-model-apis). Fuzz tests of the JSON walker and of the WebSocket frame reader.
 - **Docs:** `docs/how-to/policy.md` (`--tools`).
 - **CHANGELOG:** Added. "The proxy refuses model API requests that would make the provider fetch an address of the request's choosing, unless you grant it."
-- **Depends on:** P2.2.
+- **Depends on:** P2.2, P2.3 (its recordings).
 - **Questions:** [16](isolation-spec.md#15-open-questions), [71](isolation-spec.md#15-open-questions).
 - **Effort:** M.
 
@@ -1083,6 +1088,7 @@ At the end of phase 2, a sandboxed session holds no real secret value. Its DNS a
   - `policy ls` lists the held request, and `policy allow <host> --in <s>` during the hold lets it through too.
   - After the hold ends, `curl` gets the 403 line "waits for an answer". The held request stays open for `ask_open`. An answer then allows the host, and the next `curl` passes.
   - `pip install` from a new index host fails its first attempt at 15 s, and a later attempt passes after Enter.
+  - The pull request records when uv and the Go command give up under the hold, in both modes. It corrects spec 7.2, where these timers are UNVERIFIED.
   - Ten flows to one host open one held request. A held request that ends with `x`, or at the end of `ask_open`, counts one refusal.
   - The transparent path has a unit test here: a flow waits 3 s at most. The microvm tasks of phase 3 run it end to end.
   - The sheet shows `xn--` forms.
@@ -1138,8 +1144,8 @@ At the end of phase 2, a sandboxed session holds no real secret value. Its DNS a
 - **Files:** new `internal/supervisor/sshagent.go`, new `internal/guest/sshagent.go`, `internal/client/config.go` (`kind`), the grant gate of H5.
 - **Acceptance:**
   - `git push` over SSH from a sandbox works with a deploy key named in `ssh_keys`, and `ssh-add -L` in the guest lists only that key.
-  - Adding a key, and every extension request, are refused.
-  - Each signature writes an audit line with the key's fingerprint.
+  - Requests to add, remove or lock a key are refused, and so is every extension but `session-bind@openssh.com` (spec 7.9).
+  - Each signature writes an audit line with the key's fingerprint. The pull request records whether the test's `ssh` sends `session-bind@openssh.com`, and corrects spec 7.9.
   - The grant gate refuses a key that the host's tier may not get.
 - **Tests:** unit tests against the agent protocol, and an end-to-end push to a test repository on a local git server.
 - **Docs:** new `docs/how-to/ssh-keys.md`.
@@ -1208,6 +1214,7 @@ At the end of phase 2, a sandboxed session holds no real secret value. Its DNS a
   - Each UNVERIFIED value of spec 17.9 is checked on a test host without a prompt, such as from `--help` or a session file's name. The test host's log records each install. A check that needs a prompt is a manual check for the owner. An unchecked field stays empty, and the row ships at `best-effort`.
   - Copilot's resume is `copilot --resume={agent_session_id}`. Kimi Code's `IDPattern` takes `session_<uuid>` and refuses a bare UUID. Droid's `Setup.Login` is `droid`.
   - A Kimi Code ID of `--yolo` from a hook changes nothing (P0.3).
+  - The check of spec 8.6 finds out whether a Codex resume by ID needs `.codex/state_5.sqlite`. The row drops the file if not.
 - **Tests:** the agent table's unit tests.
 - **Docs:** `docs/reference/agents.md` through `just docs`.
 - **CHANGELOG:** Added. "The agent table knows GitHub Copilot CLI, Kiro, Droid, pi, Kimi Code and Mistral Vibe."
@@ -1237,7 +1244,7 @@ At the end of phase 2, a sandboxed session holds no real secret value. Its DNS a
   - `pnpm config get minimumReleaseAge` prints `10080`.
   - With `strict`, `PIP_ONLY_BINARY` and `UV_NO_BUILD` are set. With `off`, the guest init writes nothing. A name in `sandbox.env` wins.
   - `network.min_release_age = "90m"` fails `config check` with `release_age_invalid`.
-  - The pull request records whether a repository file can undo the pnpm, Yarn, Bun and pip settings, and corrects the UNVERIFIED cells of spec 7.10.
+  - The pull request records whether a repository file can undo the pnpm, Yarn and Bun settings, and what pip 26.0 does with `PIP_UPLOADED_PRIOR_TO=P7D`. It corrects the UNVERIFIED cells of spec 7.10.
   - The docs say that guest root and the agent can undo these settings, so they are defence in depth only.
 - **Tests:** the tests of spec 7.10. Golden tests cover the variables and files for each level and for the ages `0d`, `1d` and `7d`. The end-to-end checks above run in a sandbox.
 - **Docs:** `docs/how-to/sandboxes.md`: what changes for installs, and how to turn it off.
@@ -1283,7 +1290,7 @@ At the end of phase 3, a host with KVM and Linux 6.8 or later runs each session 
 - **Goal:** the client embeds `release-manifest.json`, the SHA-256 of each trusted artefact of the release, for each architecture. It starts with the helper, `<name>-vt` and the namespace launcher of P1.5. P3.1, P3.3 and P6.1 add the kernel, the tools image with its root hash and salt, the VMM and `runsc`. `dial()` runs the bridge only after `sha256sum -c` passes. H8 is part of this task. Spec 14.9.1 and 14.9.2 define it, and spec 20.1, 20.5 and 20.9 add fields that later tasks read.
 - **Files:** new `internal/supply/*.go` (the format, `Load`, `Check`), `internal/client/helpers/embed.go` (embed the manifest), `internal/client/conn.go`, `.goreleaser.yaml`, `.github/workflows/release.yml`.
 - **Acceptance:**
-  - A changed byte in the installed helper stops the dial with `digest_mismatch`. The check adds 25 ms or less.
+  - A changed byte in the installed helper stops the dial with `digest_mismatch`. The check adds 25 ms or less at p50.
   - Each entry has its kind, name, version, architecture, SHA-256, size, and a URL on the project's own release. A GPL entry has a `source_url`. A VMM has its `eol` and `host_kernel`. Later tasks add fields: the tools image's `root_hash`, `salt` and `data_blocks` (P3.1), `fsverity` (P4.2) and `released` (P4.6).
   - The manifest has an `advisories` list, which P4.6 fills.
   - The release job checks that each entry's digest and size match the uploaded file before it uploads the manifest.
@@ -1299,9 +1306,9 @@ At the end of phase 3, a host with KVM and Linux 6.8 or later runs each session 
 ### P3.1 The boot pair
 
 - **Goal:** a guest kernel and a tools image for amd64 and arm64, built in CI, and named in the release manifest (spec 20.1).
-- **Files:** new `guest/kernel/config-amd64` and `guest/kernel/config-arm64`, `guest/supply.lock` (the kernel.org long-term tarball by SHA-256), `.github/workflows/release.yml`, `.goreleaser.yaml`, `internal/supply` (the two entries). The configs hold every required symbol of spec 20.1, and none of its forbidden ones. New `guest/kernel/check-config.sh`, new `guest/verity/` (the tools image's verity tree), and `justfile` (`guest` and `guest-boot`).
+- **Files:** new `guest/kernel/config-amd64` and `guest/kernel/config-arm64`, `guest/supply.lock` (the `[kernel]`, `[erofs_utils]`, `[moby_check_config]` and `[vmm]` tables of spec 20.1, with their `[[pin]]` entries), `.github/workflows/release.yml`, `.goreleaser.yaml`, `internal/supply` (the two entries). The configs hold every required symbol of spec 20.1, and none of its forbidden ones. New `guest/kernel/check-config.sh`, new `guest/verity/` (the tools image's verity tree), and `justfile` (`guest` and `guest-boot`).
 - **Acceptance:** a release candidate has the assets of spec 20.1: `vmlinux-amd64`, `Image-arm64`, `tools-<arch>.erofs` with its verity tree, the kernel's source tarball and both configs. The release manifest names each. It gives the kernel its `source_url`, and the tools image its `root_hash`, `salt` and `data_blocks`. `check-config.sh` passes on both configs.
-- **Tests:** unit tests of `check-config.sh`. CI boots the kernel under Cloud Hypervisor on a runner with KVM, and runs the guest init's self-test. Step 2 checks that GitHub's runners give `/dev/kvm` (UNVERIFIED). Without it, the boot test runs in `just e2e`.
+- **Tests:** unit tests of `check-config.sh`. CI boots the kernel under the Cloud Hypervisor of the `[vmm]` pin, on a runner with KVM, and runs the guest init's self-test. So that pin lands here, and P3.3 mirrors the VMM in the release. Step 2 checks that GitHub's runners give `/dev/kvm` (UNVERIFIED). Without it, the boot test runs in `just e2e`.
 - **Docs:** `docs/contributing/releasing.md`.
 - **CHANGELOG:** Added. "Each release now carries a guest kernel and a tools image for microvm sandboxes, with the kernel's source and config."
 - **Depends on:** P1.4, P4.1.
@@ -1315,7 +1322,7 @@ At the end of phase 3, a host with KVM and Linux 6.8 or later runs each session 
   - New `internal/host/runtime_install.go`, and `internal/host/bridge_sandbox.go` (`runtime.fetch`, `runtime.install`, `runtime.status`).
   - `internal/host/prune.go`, and `internal/host/fix.go` (`old-runtime`).
   - New `internal/client/runtime.go` (`EnsureRuntime`, and the copy from the laptop).
-  - `internal/client/config.go` (`[images] fetch`) and `internal/cli/host.go` (`--images`).
+  - `internal/client/config.go` (`[images] fetch`) and `internal/cli/host.go` (`--images`, and the runtime in `host upgrade`).
   - `internal/paths/paths.go` (`ArtefactsDir()`).
   - New `docs/contributing/decisions/0039-runtime-delivery.md`, and the records index.
 - **Acceptance:**
@@ -1325,6 +1332,7 @@ At the end of phase 3, a host with KVM and Linux 6.8 or later runs each session 
   - `auto` falls back to `laptop` once, and says so.
   - No host gets a file from another host, or a key to another host ([question 35](isolation-spec.md#15-open-questions)).
   - `prune` keeps what spec 14.9.4 keeps.
+  - `host upgrade` also installs the runtime files that the release manifest names and the host lacks (spec 9.1, [CLI spec 11.4](cli-spec.md#114-host-upgrade)).
 - **Tests:** units of the runtime install: a wrong SHA-256 deletes the part file, and a size over the entry's stops the copy. End-to-end test 5.
 - **Docs:** `docs/how-to/add-a-host.md`, the reference through `just docs` for `[images]` and `--images`. The record 0039, which extends [0017](decisions/0017-release-signatures.md).
 - **CHANGELOG:** Added. "A host can get the files that sandboxes need, such as the guest kernel, from the release or from your laptop. It checks each file against the digest in your client before it keeps it."
@@ -1335,7 +1343,7 @@ At the end of phase 3, a host with KVM and Linux 6.8 or later runs each session 
 ### P3.2 Images
 
 - **Goal:** `internal/image` pulls an OCI image by digest, flattens its layers with their whiteouts, and writes ext4 with `tar2ext4.Convert` and `AppendDMVerity` from `hcsshim` v0.15.0 (spec 20.2 and 14.9.5). The work runs in a `converter` jail with no network, with caps on size and entry count. A content-addressed store with garbage collection. `images.lock` on the laptop. The default image is a Debian snapshot with git, curl and CA certificates, and no proprietary agent.
-- **Files:** new `internal/image/*.go`, `internal/host/prune.go`, new `internal/client/images.go`, new `internal/cli/image.go` (`image ls`, `image pull`, `image rm`), `internal/supply` (the default image's entry).
+- **Files:** new `internal/image/*.go`, `internal/host/bridge_sandbox.go` (the `image.*` ops behind the feature `images`, spec 10.5), `internal/host/prune.go`, new `internal/client/images.go`, new `internal/cli/image.go` (`image ls`, `image pull`, `image rm`), `internal/supply` (the default image's entry).
 - **Acceptance:**
   - The same digest converts to the same root hash on two hosts.
   - An image's digest comes from the release manifest (the default image) or from the laptop's `images.lock` (a user image), never from a host ([question 35](isolation-spec.md#15-open-questions)).
@@ -1361,12 +1369,12 @@ At the end of phase 3, a host with KVM and Linux 6.8 or later runs each session 
   - The guest reaches no host socket, and no TCP, UDP or `AF_UNIX` endpoint.
   - The subuid keeps `/dev/kvm` access through the kvm group (UNVERIFIED until this test passes).
   - Guest memory is the session's size. The unit's cap is the size plus the reserve of spec 20.10, as the record 0040 states ([question 80](isolation-spec.md#15-open-questions)).
-  - A golden test fixes the argv and the kernel command line of spec 20.3. Every disk has `image_type=raw`, `backing_files=off` and `direct=on`.
+  - A golden test fixes the argv and the kernel command line of spec 20.3. Every disk has `image_type=raw` and `backing_files=off`. Every disk has `direct=on`, unless the 512-byte test of spec 20.3 fails for the session disk.
 - **Tests:** the escape suite of P1.5 for microvm, plus the QCOW2 case. The fidelity fixtures.
 - **Docs:** `docs/explanation/security.md`. The record 0040, which extends [0024](decisions/0024-memory-cap.md).
 - **CHANGELOG:** Added. "The host helper gains a Cloud Hypervisor driver for microvm sandboxes. It runs the VMM confined, with no network and raw disks only."
 - **Depends on:** P3.1, P3.2, P1.3, H9, [0030](decisions/0030-local-sockets-do-not-listen.md). It adds the record 0040.
-- **Questions:** [3](isolation-spec.md#15-open-questions), [23](isolation-spec.md#15-open-questions), [80](isolation-spec.md#15-open-questions).
+- **Questions:** [3](isolation-spec.md#15-open-questions), [23](isolation-spec.md#15-open-questions), [79](isolation-spec.md#15-open-questions), [80](isolation-spec.md#15-open-questions).
 - **Effort:** L.
 
 ### P3.4 The guest init on a microvm
@@ -1382,7 +1390,7 @@ At the end of phase 3, a host with KVM and Linux 6.8 or later runs each session 
 - **Docs:** `docs/how-to/sandboxes.md`.
 - **CHANGELOG:** Added. "In a microvm sandbox, the system and the home reset at each start. `/work` and the agent's history stay."
 - **Depends on:** P3.3.
-- **Questions:** [8](isolation-spec.md#15-open-questions).
+- **Questions:** [8](isolation-spec.md#15-open-questions), [57](isolation-spec.md#15-open-questions), [60](isolation-spec.md#15-open-questions).
 - **Effort:** M.
 
 ### P3.5 The agents disk
@@ -1428,7 +1436,7 @@ At the end of phase 3, a host with KVM and Linux 6.8 or later runs each session 
 - **Docs:** `docs/how-to/sandboxes.md`, `docs/how-to/create-a-host.md`.
 - **CHANGELOG:** Added. "`host doctor` warns when a host's kernel is on the list of known local root bugs. A Lima VM on an M3 or later Mac with macOS 15 or later can run microvm sandboxes."
 - **Depends on:** P3.3, H7, P0.8.
-- **Questions:** [7](isolation-spec.md#15-open-questions), [37](isolation-spec.md#15-open-questions), [83](isolation-spec.md#15-open-questions).
+- **Questions:** [7](isolation-spec.md#15-open-questions), [37](isolation-spec.md#15-open-questions), [79](isolation-spec.md#15-open-questions), [83](isolation-spec.md#15-open-questions).
 - **Effort:** S.
 
 ### H10 Prepare in `host add`
@@ -1436,12 +1444,12 @@ At the end of phase 3, a host with KVM and Linux 6.8 or later runs each session 
 - **Goal:** `host add` takes a bare machine to a host with a proven wall, as spec 14.2.1 shows. Spec 14.2.6 gives its sheet, and spec 8.4 its keys. It runs the sandbox probe, runtime delivery, the root step and a test boot, in that order. The launcher part of this task is in P1.8.
 - **Files:**
   - `internal/cli/host.go`: `connectHost` calls prepare, with `--no-sandbox`, `--root-step` and `--images`.
-  - `internal/client/config.go`: `Host.Sandbox`, with `level`, `level_after_root`, `runtime`, `arch`, `mem_total` and `prepared_at`.
+  - `internal/client/config.go`: `Host.Prepared`, the table `[host.prepared]`, with `level`, `level_after_root`, `runtime`, `arch`, `mem_total` and `prepared_at`.
   - `internal/client/ops.go` (`Conn.Prepare`).
   - `internal/host/bridge_sandbox.go` (`sandbox.prepare`: a test boot through the sandbox start).
   - The add-host sheet, in `internal/tui/wizard.go` and `internal/tui/wizard_view.go`.
 - **Acceptance:**
-  - On a host with KVM access, `host add` ends with "microVM wall ready" and a boot time.
+  - On a host with KVM access, `host add` ends with "microvm walls ready" and a boot time, as spec 14.2.1 shows.
   - Without KVM access, the level that the host gives now is saved and named.
   - `--no-sandbox` keeps today's flow.
   - `[host.prepared]` in `hosts.toml` keeps the level at prepare time, as a cache (spec 8.4).
@@ -1466,7 +1474,7 @@ At the end of phase 3, a host with KVM and Linux 6.8 or later runs each session 
 - **Docs:** `docs/how-to/sandboxes.md`, `docs/explanation/architecture.md`, `docs/contributing/testing.md`.
 - **CHANGELOG:** Added. "`--wall microvm` runs a session in its own virtual machine with its own kernel, on hosts with KVM and Linux 6.8 or later. It boots from images that the host checks against their digests, and keeps only its work and the agent's history between starts."
 - **Depends on:** P3.1 to P3.7, H10.
-- **Questions:** [2](isolation-spec.md#15-open-questions), [9](isolation-spec.md#15-open-questions).
+- **Questions:** [2](isolation-spec.md#15-open-questions), [9](isolation-spec.md#15-open-questions), [80](isolation-spec.md#15-open-questions).
 - **Effort:** M.
 
 ## Phase 4: the project's own supply chain, and many hosts
@@ -1488,7 +1496,7 @@ The rule of this phase: **the laptop holds the digests, the hosts hold the bytes
 ### P4.3 Reproducible kernel and tools image
 
 - **Goal:** `just repro` builds the kernel and the tools image twice and compares them. Spec 20.6 gives the steps. They are a pinned build container, the kernel tarball in a fixed path, `SOURCE_DATE_EPOCH` and the three `KBUILD_BUILD_*` values. The kernel has no modules, `RANDSTRUCT` or debug information. `mkfs.erofs -T <epoch> -U clear --all-root` runs from erofs-utils 1.9.3 or later. The verity tree has no superblock and a fixed salt.
-- **Files:** `scripts/repro.sh`, new `guest/build.sh`, `.github/workflows/ci.yml`.
+- **Files:** `scripts/repro.sh`, new `guest/build.sh`, `guest/supply.lock` (the `[builder]` table of spec 20.1), `.github/workflows/ci.yml`.
 - **Acceptance:** two builds from empty caches give byte-identical kernels and tools images, verity trees included.
 - **Tests:** `just repro` in CI.
 - **Docs:** `docs/contributing/releasing.md`, `docs/contributing/testing.md` (`just repro`).
@@ -1499,7 +1507,7 @@ The rule of this phase: **the laptop holds the digests, the hosts hold the bytes
 
 ### P4.4 A signed-tag release gate
 
-- **Goal:** `release.yml` runs `scripts/verify-tag.sh` before it builds (spec 20.7). It checks out with `actions/checkout` v6.0.2 or later, fetches the tag again, and reads `.github/tag-signers` from the protected `main` branch, never from the tag. It needs git 2.34 or later and OpenSSH 8.8 or later. The maintainer's tag key is a hardware ed25519-sk key ([question 30](isolation-spec.md#15-open-questions)).
+- **Goal:** `release.yml` runs `scripts/verify-tag.sh` before it builds (spec 20.7). It checks out with `actions/checkout` v6.0.2 or later, fetches the tag again, and reads `.github/tag-signers` from the protected `main` branch, never from the tag. It needs git 2.34 or later and OpenSSH 8.8 or later. The maintainer's tag key is a hardware `sk-ssh-ed25519` key ([question 30](isolation-spec.md#15-open-questions)).
 - **Files:** `.github/workflows/release.yml`, new `scripts/verify-tag.sh` and `scripts/test-verify-tag.sh`, new `.github/tag-signers`, new `docs/contributing/decisions/0041-a-signed-tag-release-gate.md`, the records index.
 - **Acceptance:** four kinds of tag fail before the first build step. They are an unsigned tag, a lightweight tag, and a tag off `main`. The fourth is a tag signed by a key that `main`'s file does not list. `docs/contributing/releasing.md` names the tag ruleset and the branch protection that the gate needs.
 - **Tests:** `scripts/test-verify-tag.sh` runs the cases of spec 20.7 in a temporary repository. Never push a tag to test the gate.
@@ -1621,7 +1629,7 @@ The rule of this phase: **the laptop holds the digests, the hosts hold the bytes
   - The client adds `runtime-missing` when the host lacks a runtime file that its release manifest names. It is `blocks_new` for the microvm level. No item checks a minimum version or an expiry, because the client embeds the digests.
   - The `advisory` item and the `exposed` mark read the `advisories` list of P4.6.
   - A drained host refuses new sandboxes with `draining`, and keeps running ones.
-  - An `own` host gets a new VMM on its next `new` without a question. A `shared` host asks.
+  - An `own` or `throwaway` host gets a new VMM on its next `new` without a question. A `shared` host asks (spec 14.11.2).
   - Running sandboxes keep their runtime. `ls` marks a session `outdated` when its runtime is older than the client's.
 - **Tests:** units of health, with fixtures. Drain under `hosttest`. End-to-end test 6, its drain part: while drained, a start gets `draining`. The test removes the drain mark at its end, and the log records both changes.
 - **Docs:** new `docs/how-to/restart-a-host.md` ("Restart a host"), `docs/explanation/architecture.md` (3.8), the reference through `just docs`.
@@ -1667,10 +1675,10 @@ The rule of this phase: **the laptop holds the digests, the hosts hold the bytes
 
 ### H19 Host rules
 
-- **Goal:** spec 18.2 and 18.5. The invoker picks the host. When the invoker names none, `sandbox.host` in a profile or a repository section picks it, and repository sections whose names end in `/*` cover an organisation. Labels become metadata, and `--need` no longer takes them. A secret's optional `on_hosts` lists the only hosts that may get it.
+- **Goal:** spec 18.2 and 18.5. The invoker picks the host. When the invoker names none, `sandbox.host` in a profile or a repository section picks it, and repository sections whose names end in `/*` cover an organisation. Labels stay metadata, and no rule, placement step or grant reads them. A secret's optional `on_hosts` lists the only hosts that may get it.
 - **Files:**
   - New `internal/client/hostrule.go` (`sandbox.host`: a name, a list or `auto`, and the reason for each host passed over).
-  - `internal/client/place.go` (`ResolveHost` in the order of spec 18.2, and `--need` without labels).
+  - `internal/client/place.go` (`ResolveHost` in the order of spec 18.2).
   - `internal/client/tier.go` and `internal/client/secrets.go` (the `on_hosts` check in the grant gate).
   - `internal/client/config.go` (`[repos."<path>/*"]`, the longest match, `sandbox.host`, and `on_hosts` in a secret). `config check` reports a rule that names a host that is not saved.
   - `internal/cli/session.go` (the line that says what picked the host), `internal/cli/host.go` (`host set … label.`), and `internal/tui/dialog.go` (the host row filled from the rule).
@@ -1680,9 +1688,9 @@ The rule of this phase: **the laptop holds the digests, the hosts hold the bytes
   - When `mac1` has no room, `new` starts on `mac2`, and says why it passed over `mac1`.
   - `new nuc` in the same clone starts on `nuc`. No rule picks another host instead of the one that the invoker names. When the grant gate stops the start, the error says why and lists the hosts that would pass.
   - `[repos."github.com/acme/infra"]` wins over `[repos."github.com/acme/*"]`, and `new --profile review` wins over both.
-  - `sandbox.host` in the all-sessions layer or in `[lock]` is an error at `config check`.
+  - `sandbox.host` in the all-sessions layer or in `[lock]` fails `config check` with `host_rule_layer`.
   - A label changes no choice of host.
-  - A secret whose `on_hosts` does not list the host never leaves the laptop. The start stops with `secret_not_here`, and the grant ledger records it.
+  - A secret whose `on_hosts` does not list the host never leaves the laptop. The start stops with `secret_not_here`, and the grant ledger gains no entry for that host.
 - **Tests:** table tests of `ResolveHost`: a named host, `-`, `auto`, a rule with one name, a list and `auto`, the default, and a rule that names an unknown host. Tests of the longest match of repository sections. Tests of the grant gate with `on_hosts`.
 - **Docs:** new `docs/how-to/pick-a-host.md` (the order, rules by profile, repository and organisation, and labels as metadata), new `docs/how-to/hosts-in-two-locations.md` (Tailscale on each host, and the homelab notes of spec 18.5). `just docs` for the reference.
 - **CHANGELOG:** Added. "Name a host for a repository, an organisation or a profile with `sandbox.host`, and `new` uses it when you name no host. A host that you name always wins over a rule. Labels are notes that never pick a host."
@@ -1699,11 +1707,11 @@ The rule of this phase: **the laptop holds the digests, the hosts hold the bytes
   - `internal/cli/host.go` (`hostInviteCmd`, `hostJoinCmd`, `hostLeaveCmd`, and `--accept` and `--address` on `hostAddCmd`).
   - `internal/client/ssh.go` (a generated SSH config with more than one hop).
 - **Acceptance:**
-  - On a new Debian VM, `host join` with an invite code makes the account, the key line, the sshd drop-in and linger. Its reply makes `host add <name> --accept -` add the host with its key pinned. Both sides print the same `SHA256:` fingerprints.
+  - On a new Debian VM, `host join` with an invite code makes the account, the key line, the sshd drop-in and linger. Its reply makes `host add <name> --accept -` add the host with its key pinned. Both sides print the same `SHA256:` fingerprints. A no at the question of `host add --accept` pins nothing.
   - A changed character in a code fails the check of its group, and the error names that group. A reply after the invite's `--ttl` (one hour by default) fails with `invite_expired`, and `host join` refuses an expired invite before it changes anything.
   - `sshd -T -C user=<account>` shows every value of the drop-in, and `host join` stops when one differs.
   - The code never appears in an argument, in the shell history or in the process list.
-  - The key cannot open a remote forward, `-R <port>` or `-R /path`, and cannot forward the agent or X11.
+  - The key cannot open a remote forward, `-R <port>` or `-R /path`, and cannot forward the agent or X11. `forward` of a walled session still works, through a local forward to a Unix socket.
   - `host leave` undoes each change in the ledger, newest first.
 - **Tests:** units of the codes and the checks. The end-to-end test runs only on a VM that the test creates and deletes, never on a shared test host.
 - **Docs:** new `docs/how-to/join-a-machine.md`. `just docs` for the reference.
@@ -1752,7 +1760,7 @@ The rule of this phase: **the laptop holds the digests, the hosts hold the bytes
 
 ### P5.2 Copy files in and out
 
-- **Goal:** spec 21.1: `cp` over `put` and a new `get` stream kind (10.2), with the cap `sandbox.cp_max` (8.3) and the errors of 21.1. It never follows a symlink on the laptop, and it flags files that run code for a review. It opens every path with `os.Root` on both sides and never extracts a tar: Docker Sandboxes' `cp` followed planted symlinks (CVE-2026-103916), and its tar extraction wrote outside its target (CVE-2026-17106). A test plants both cases.
+- **Goal:** spec 21.1: `cp` over `put` and a new `get` stream kind (10.2), with the cap `sandbox.cp_max` (8.3) and the errors of 21.1. It never follows a symlink on the laptop, and it flags files that run code for a review. It opens every path with `os.Root` on both sides, and never extracts a tar. Docker Sandboxes' `cp` followed planted symlinks (CVE-2026-103916), and its tar extraction wrote outside its target (CVE-2026-17106). A test plants both cases.
 - **Files:** `internal/link/link.go` (`KindGet`), `internal/proto/proto.go` (`UploadBegin` gains `Path` and `Replace`), new `internal/supervisor/cp.go`, new `internal/guest/cp.go`, new `internal/cli/cp.go`, `internal/client/config.go` (`sandbox.cp_max`).
 - **Acceptance:** `cp` copies a file and a folder into a sandbox and out of it, as spec 21.1 says. A copy above `sandbox.cp_max` fails with `cp_too_big`. A symlink on the laptop is never followed, and a name with `..` or a `.git` part is refused. A file that runs code, such as a git hook, stops the copy with `cp_flagged` until the user agrees. A session at `none` fails with `cp_unwalled`.
 - **Tests:** the tests of spec 21.1. Unit tests cover the names, the cap, the flags, and the planted symlink and `../` cases. A check finds no `archive/tar` in the `cp` packages. End to end runs on a process wall and a microvm.
@@ -1764,7 +1772,7 @@ The rule of this phase: **the laptop holds the digests, the hosts hold the bytes
 
 ### P5.4 Checkpoints
 
-- **Goal:** spec 21.2: a checkpoint of a microvm sandbox's session disk at each `turn_done`, and `rewind <host>/<session> [<n>]`. Checkpoints need `FICLONE`: XFS made by xfsprogs 5.1 or later, Btrfs, or others that the probe finds ([facts](../research/build-facts.md#4-linux-walls)).
+- **Goal:** spec 21.2: a checkpoint of a microvm sandbox's session disk at each `turn_done`, and `rewind <host>/<session> [<n>]`. Checkpoints need `FICLONE`: XFS made by xfsprogs 5.1 or later, Btrfs, or others that the probe finds ([facts](../research/build-facts.md#58-reflinks)).
 - **Files:** new `internal/supervisor/checkpoint.go`, `internal/guest/freeze.go` (the `max_ms` limit), new `internal/cli/rewind.go`, `internal/client/config.go` (`sandbox.checkpoints`).
 - **Acceptance:** step 1 measures 20 checkpoints on XFS or Btrfs. The pull request reports p50 and p95 against the target of 1 s at p95 (spec 12). The supervisor keeps the newest `sandbox.checkpoints` (10). `rewind` takes a checkpoint first, then restores the one named, and the agent resumes. On ext4 and on other walls, checkpoints are off, `host show` says why, and `rewind` fails with `rewind_off`.
 - **Tests:** the tests of spec 21.2. End to end on a host with XFS or Btrfs, where the owner of a test host has one.
@@ -1783,7 +1791,7 @@ The rule of this phase: **the laptop holds the digests, the hosts hold the bytes
 - **Docs:** `docs/how-to/sandboxes.md`.
 - **CHANGELOG:** Added. "`image save` makes an image from a sandbox's system changes, after you review them."
 - **Depends on:** P3.2.
-- **Questions:** 35.
+- **Questions:** [35](isolation-spec.md#15-open-questions).
 - **Effort:** M.
 
 ## Phase 6: more walls, one path
@@ -1797,7 +1805,7 @@ The rule of this phase: **the laptop holds the digests, the hosts hold the bytes
 - **Docs:** `docs/how-to/sandboxes.md`.
 - **CHANGELOG:** Added. "`--wall gvisor` puts gVisor's kernel between a sandbox and the host's kernel, on hosts without KVM."
 - **Depends on:** P1.5, H9.
-- **Questions:** [2](isolation-spec.md#15-open-questions), [88](isolation-spec.md#15-open-questions).
+- **Questions:** [2](isolation-spec.md#15-open-questions), [4](isolation-spec.md#15-open-questions), [88](isolation-spec.md#15-open-questions).
 - **Effort:** L.
 
 ### P6.2 The Firecracker driver
@@ -1809,7 +1817,7 @@ The rule of this phase: **the laptop holds the digests, the hosts hold the bytes
 - **Docs:** `docs/how-to/sandboxes.md`.
 - **CHANGELOG:** Added. "`--wall microvm` also runs on hosts with Linux 5.10, 6.1 or 6.18, with Firecracker."
 - **Depends on:** P3.8.
-- **Questions:** [3](isolation-spec.md#15-open-questions).
+- **Questions:** [3](isolation-spec.md#15-open-questions), [11](isolation-spec.md#15-open-questions).
 - **Effort:** M.
 
 ### P6.4 Nitro Sandboxes on EC2
@@ -1821,16 +1829,16 @@ The rule of this phase: **the laptop holds the digests, the hosts hold the bytes
   - Admission with the Nitro limits of spec 14.10.3. `nitro` wins over `chv` where both pass.
 - **Files:** new `internal/wall/nitro/*.go`, on the Firecracker client of P6.2, which it starts with the PCI transport (spec 21.5). The guest kernel's config in `guest/`, `guest/supply.lock`, `internal/supply` (the Firecracker 1.18 entry), the sandbox probe, the root step builder of H7, and admission.
 - **Acceptance:**
-  - On one Graviton and one x86_64 EC2 instance, launched with the enclave option and Amazon Linux 2023 `kernel6.18`, the escape suite and the fidelity fixtures pass at `--wall microvm` with the `nitro` driver.
+  - The test uses one Graviton and one x86_64 EC2 instance, launched with the enclave option and Amazon Linux 2023 `kernel6.18`. On both, the escape suite and the fidelity fixtures pass at `--wall microvm` with the `nitro` driver.
   - The probe reports the device, the pools and the vCPU budget. `nitro-acl` opens the device without a reboot.
   - The `nitro` driver starts Firecracker with virtio-pci, and the `firecracker` driver of P6.2 still never does. A start that fails with "Failed to query hypervisor-supported flags" gives `wall_unavailable`, with the hint to update the parent kernel.
   - Admission refuses a sandbox past the vCPU budget, the slot budget or the Nitro memory pool, with `no_room`.
   - The pull request reports the time from start to the holder's answer, and whether donated memory counts in the session's cgroup.
-- **Tests:** the escape suite and the fidelity fixtures for `nitro`, unit tests of its probe and of the admission limits, and an end-to-end run on an instance that its owner provides as `E2E_HOST`. The task never launches or terminates an instance.
+- **Tests:** the escape suite and the fidelity fixtures for `nitro`, and unit tests of its probe and of the admission limits. An end-to-end run uses an instance that its owner provides as `E2E_HOST`. The task never launches or terminates an instance.
 - **Docs:** `docs/how-to/sandboxes.md` (EC2 hosts: the instance types, the enclave option, Amazon Linux 2023 and the root step).
 - **CHANGELOG:** Added. "`--wall microvm` runs on EC2 instances that support Nitro Enclaves, Graviton included, through AWS Nitro Sandboxes, with no nested virtualisation."
 - **Depends on:** P6.2, P3.1, H7, H9.
-- **Questions:** [53](isolation-spec.md#15-open-questions), [54](isolation-spec.md#15-open-questions).
+- **Questions:** [3](isolation-spec.md#15-open-questions), [53](isolation-spec.md#15-open-questions), [54](isolation-spec.md#15-open-questions).
 - **Effort:** M.
 
 ### P6.3 Unwalled sessions on the supervisor's path
@@ -1906,7 +1914,7 @@ The rule of this phase: **the laptop holds the digests, the hosts hold the bytes
 - **Docs:** `docs/how-to/sandboxes.md`, `docs/how-to/create-a-host.md`.
 - **CHANGELOG:** Added. "`new --machine <provider>` makes a machine at a provider for one session, runs the session in a sandbox there, and removes the machine when the session ends."
 - **Depends on:** P1.11, H4, H5, P6.1.
-- **Questions:** [22](isolation-spec.md#15-open-questions), [32](isolation-spec.md#15-open-questions), [86](isolation-spec.md#15-open-questions).
+- **Questions:** [6](isolation-spec.md#15-open-questions), [22](isolation-spec.md#15-open-questions), [29](isolation-spec.md#15-open-questions), [32](isolation-spec.md#15-open-questions), [86](isolation-spec.md#15-open-questions).
 - **Effort:** L.
 
 ## Phase 8: separate accounts

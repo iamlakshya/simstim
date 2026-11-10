@@ -307,6 +307,28 @@ The isolation spec owns the messages and the hints of its errors. This table own
 | No KVM, no sudo, a failed root step, a failed download or checksum, a missing image | 14.14 | `KindFailed` | 1 |
 | A user name that a script cannot use, facts that disagree, waking that is off | 14.14 | `KindFailed` | 1 |
 | A purge while a session works, a helper without the feature | 14.14 | `KindFailed` | 1 |
+| `policy_unreached`, `secret_store`, `git_scope` | 9.3 | `KindFailed` | 1 |
+| `lockdown_confirm` | 9.3 | `KindNeedsAnswer` | 4 |
+| `setup_outside` | 9.3 | `KindRefused` | 5 |
+| `image_bad_layer`, `image_root_mismatch`, `image_in_use`, `sandbox_boot`, `agents_disk` | 9.3, 20 | `KindFailed` | 1 |
+| `image_moved`, `image_signature`, `runtime_advisory` | 9.3, 20 | `KindRefused` | 5 |
+| `cp_too_big`, `cp_path`, `cp_git`, `cp_flagged`, `image_secret`, `image_flagged`, `image_elsewhere` | 9.3, 21 | `KindRefused` | 5 |
+| `cp_exists`, `rewind_off`, `image_exists`, `machine_token` | 9.3, 21 | `KindFailed` | 1 |
+| `machine_provider` | 9.3, 21 | `KindUsage` | 2 |
+| `rewind_unknown` | 9.3, 21 | `KindNotFound` | 3 |
+| `launcher_refused`. Lima before 2.3.0 at `host create lima`. | 14.14, 21.9 | `KindFailed` | 1 |
+| `image_wall`, `cp_unwalled` | 9.3 | `KindFailed` | 1 |
+| `mount_repo_rw`, `image_too_large` | 9.3 | `KindRefused` | 5 |
+| `release_age_invalid`, `package_level_invalid` | 7.10 | `KindUsage` | 2 |
+| `feed_unavailable` | 7.11 | `KindFailed` | 1 |
+| `env_is_secret`, `copy_sensitive` | 17.2, 17.3 | `KindRefused` | 5 |
+| `sudo_wall` | 17.10 | `KindRefused` | 5 |
+| `secret_not_here` | 18.2 | `KindRefused` | 5 |
+| `no_host` | 18.2 | `KindFailed` | 1 |
+| `invite_expired`, `invite_unknown` | 18.3 | `KindFailed` | 1 |
+| `code_check` | 18.3, 18.8 | `KindUsage` | 2 |
+| `host_rule_layer` | 18.2, 18.8 | `KindUsage` | 2 |
+| `setup_trust` | 19.2 | `KindNeedsAnswer` | 4 |
 
 The pinned host key lives with the tier in `tiers.toml` (isolation spec 14.6), so a changed key is a refusal by tier.
 

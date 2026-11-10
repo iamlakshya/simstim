@@ -493,7 +493,7 @@ No outside source sets a time for a project like this one. The 7 days of [questi
 
 ## 7. Later phases
 
-Checked on 10 November 2026, for spec section 21 (tasks P5.2 to H18). Section 4 has the facts about gVisor flags and reflinks, and section 6 the facts about Firecracker and Nitro Sandboxes.
+Checked on 10 November 2026, for spec section 21 (tasks P5.2 to H18). Section 4.7 has the gVisor flags, section 5.8 the reflinks, and section 5.3 Firecracker and Nitro Sandboxes.
 
 ### 7.1 Decoy credentials caught a real breach
 
