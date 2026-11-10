@@ -50,7 +50,7 @@ Spec section 15 has each question in full, with its options: [open questions](is
 | --- | --- | --- | --- |
 | 1 | When are walls on by default? | After phase 2, when bound secrets work. | P1.8, P2.10, P6.3 |
 | 2 | On a small host, the strongest level or the densest level that meets the floor? | The strongest. A host may pin a lower level by name. | P1.1, H10, P3.8, P6.1 |
-| 3 | Which microvm VMM? | Cloud Hypervisor v52.0 or later on host kernels 6.8 or later. Firecracker later for older kernels. No libkrun, no Kata. | P3.1, P3.3, P6.2 |
+| 3 | Which microvm VMM? | Cloud Hypervisor v52.0 or later on host kernels 6.8 or later. Firecracker later for older kernels. No libkrun, no Kata. Firecracker 1.18 also drives Nitro Sandboxes on EC2. | P3.1, P3.3, P6.2, P6.4 |
 | 4 | How do process walls get user namespaces on Ubuntu 23.10 or later? | An `AppArmor` profile for a root-owned copy of a small launcher. | H7, P1.5 |
 | 5 | Where may the `process` level run? | On `own` and `throwaway` hosts, labelled "shares your account", never chosen by `new auto`, and with no `own`-tier secrets unless the user asks. | P1.1, P1.8, P2.10, H13 |
 | 6 | Hosts that can run only `none`, such as Docker and E2B hosts, once walls are the default? | Refuse new sessions there without `--downgrade`. | P2.10 |
@@ -100,6 +100,8 @@ Spec section 15 has each question in full, with its options: [open questions](is
 | 50 | What does `host add --yes` do without `--tier`? | It fails, and names the flag. | H4 |
 | 51 | What does a walled session do with a folder outside git? | It gets an empty workspace, and the row says "scratch". | P1.6 |
 | 52 | Does the judge see the task line of `new --task`? | Yes. | P2.12 |
+| 53 | Should EC2 hosts use Nitro Sandboxes? | Yes: a `nitro` driver at the `microvm` level, on Firecracker 1.18.0 or later, in phase 6. It wins over nested KVM. | P6.4 |
+| 54 | Direct mode or confidential mode? | Direct. Confidential mode with attestation later, under its own record. | P6.4 |
 
 ## Order
 
@@ -176,13 +178,14 @@ Build the tasks from top to bottom. Every task named under "Depends on" is above
 | 67 | P5.5 | Save an image | 5 | P3.2 | none | M |
 | 68 | P6.1 | The gvisor wall | 6 | P1.5, H9 | 2 | L |
 | 69 | P6.2 | The Firecracker driver | 6 | P3.8 | 3 | M |
-| 70 | P6.3 | Unwalled sessions on the supervisor's path | 6 | P1.11, P2.10, and one release with walls on by default | 1 | M |
-| 71 | P7.1 | Registry gates in the egress process | 7 | P2.2 | 20 | M |
-| 72 | P7.2 | Decoys | 7 | P2.3 | none | S |
-| 73 | P7.3 | Observe terminal output | 7 | P4.6 | 26 | M |
-| 74 | P7.4 | A machine for each session | 7 | P1.11, H4, H5 | 22, 32 | L |
-| 75 | H17 | Separate accounts, part 1: the root-owned launcher | 8 | H7, H9, P4.1, 0043 (here) | 27, 30, 38 | L |
-| 76 | H18 | Separate accounts, part 2: slot accounts and the root-owned store | 8 | H17, P3.3 | 27 | L |
+| 70 | P6.4 | Nitro Sandboxes on EC2 | 6 | P6.2, P3.1, H7, H9 | 53, 54 | M |
+| 71 | P6.3 | Unwalled sessions on the supervisor's path | 6 | P1.11, P2.10, and one release with walls on by default | 1 | M |
+| 72 | P7.1 | Registry gates in the egress process | 7 | P2.2 | 20 | M |
+| 73 | P7.2 | Decoys | 7 | P2.3 | none | S |
+| 74 | P7.3 | Observe terminal output | 7 | P4.6 | 26 | M |
+| 75 | P7.4 | A machine for each session | 7 | P1.11, H4, H5 | 22, 32 | L |
+| 76 | H17 | Separate accounts, part 1: the root-owned launcher | 8 | H7, H9, P4.1, 0043 (here) | 27, 30, 38 | L |
+| 77 | H18 | Separate accounts, part 2: slot accounts and the root-owned store | 8 | H17, P3.3 | 27 | L |
 
 ## Folds
 
@@ -1419,7 +1422,7 @@ The rule of this phase: **the laptop holds the digests, the hosts hold the bytes
 
 ### P6.2 The Firecracker driver
 
-- **Goal:** microvm on host kernels 5.10, 6.1 and 6.18, with Firecracker 1.14.4 or later, or 1.15.1 or later. It uses the default MMIO transport only, because CVE-2026-5747 hits the PCI transport ([NVD](https://nvd.nist.gov/vuln/detail/CVE-2026-5747)). It runs without the jailer, which needs root, in the same `vmm` jail. It needs no folder sharing, because Firecracker has no virtio-fs.
+- **Goal:** microvm on host kernels 5.10, 6.1 and 6.18, with Firecracker 1.17.0 or later. Versions up to 1.16.1 let guest root read or change the Firecracker process's memory, CVE-2026-122192 ([AWS](https://aws.amazon.com/security/security-bulletins/2026-169-aws/)). It uses the default MMIO transport only, because CVE-2026-5747 hit the PCI transport ([NVD](https://nvd.nist.gov/vuln/detail/CVE-2026-5747)). It runs without the jailer, which needs root, in the same `vmm` jail. It needs no folder sharing, because Firecracker has no virtio-fs.
 - **Files:** new `internal/wall/firecracker/*.go`, `guest/supply.lock`, `.goreleaser.yaml` and `internal/supply` (the Firecracker entry).
 - **Acceptance:** the escape suite and the fidelity fixtures pass on one of those kernels. The driver refuses the PCI transport.
 - **Tests:** the escape suite and the fidelity fixtures for the Firecracker driver. Unit tests of its probe.
@@ -1427,6 +1430,26 @@ The rule of this phase: **the laptop holds the digests, the hosts hold the bytes
 - **CHANGELOG:** Added. "`--wall microvm` also runs on hosts with Linux 5.10, 6.1 or 6.18, with Firecracker."
 - **Depends on:** P3.8.
 - **Questions:** [3](isolation-spec.md#15-open-questions).
+- **Effort:** M.
+
+### P6.4 Nitro Sandboxes on EC2
+
+- **Goal:** the `nitro` driver of spec 5.1, at the `microvm` level, with spec 11 and the EC2 example of spec 14.2.4.
+  - Firecracker 1.18.0 or later, in direct mode, through `/dev/nitro_enclaves` instead of `/dev/kvm`. The guest has no network device, and the link runs over vsock, as on every microvm.
+  - A guest kernel in the boot pair with an EFI stub, ACPI and virtio-pci, for x86_64 and arm64. Firecracker builds the boot image in memory from it.
+  - The probe's Nitro facts, the root steps `nitro-acl`, `nitro-udev` and `nitro-slots`, and `host prepare --nitro-slots`.
+  - Admission with the Nitro limits of spec 14.10.3. `nitro` wins over `chv` where both pass.
+- **Files:** new `internal/wall/nitro/*.go`, on the Firecracker client of P6.2. The guest kernel's config in `guest/`, `guest/supply.lock`, `internal/supply` (the Firecracker 1.18 entry), the sandbox probe, the root step builder of H7, and admission.
+- **Acceptance:**
+  - On one Graviton and one x86_64 EC2 instance, launched with the enclave option and Amazon Linux 2023 `kernel6.18`, the escape suite and the fidelity fixtures pass at `--wall microvm` with the `nitro` driver.
+  - The probe reports the device, the pools and the vCPU budget. `nitro-acl` opens the device without a reboot.
+  - Admission refuses a sandbox past the vCPU budget, the slot budget or the Nitro memory pool, with `no_room`.
+  - The pull request reports the time from start to the holder's answer, and whether donated memory counts in the session's cgroup.
+- **Tests:** the escape suite and the fidelity fixtures for `nitro`, unit tests of its probe and of the admission limits, and an end-to-end run on an instance that its owner provides as `E2E_HOST`. The task never launches or terminates an instance.
+- **Docs:** `docs/how-to/sandboxes.md` (EC2 hosts: the instance types, the enclave option, Amazon Linux 2023 and the root step).
+- **CHANGELOG:** Added. "`--wall microvm` runs on EC2 instances that support Nitro Enclaves, Graviton included, through AWS Nitro Sandboxes, with no nested virtualisation."
+- **Depends on:** P6.2, P3.1, H7, H9.
+- **Questions:** [53](isolation-spec.md#15-open-questions), [54](isolation-spec.md#15-open-questions).
 - **Effort:** M.
 
 ### P6.3 Unwalled sessions on the supervisor's path
@@ -1548,7 +1571,7 @@ The design's own risks are in [spec 16](isolation-spec.md#16-risks-and-mitigatio
 | Stacked branches drift. A change to an early pull request after review means a rebase of every later branch. | Keep each task small. After the owner merges a pull request or asks for a change, rebase the later branches in order, and run the checks again on each. |
 | Test host access. End-to-end tests need a host whose owner allowed them, and some tests need root or a reboot. | Use `hosttest` and VMs that the tests create and delete. Mark a check manual when it needs a reboot, a prompt, root without `E2E_ROOT=run`, or a paid provider. |
 | Upstream pins move. Ghostty, Cloud Hypervisor, Firecracker, gVisor, Lima and the guest kernel may change between this plan and the task. | Each task checks its pin against the pinned release before it builds on it. P0.9 watches the pins from the start. An UNVERIFIED mark goes only after that check. |
-| One maintainer reviews 76 pull requests, and accepts 15 decision records. | Each record lands with its first task, so the owner reviews it once. Each phase ends with something that users can use, so the owner can merge one phase and stop. |
+| One maintainer reviews 77 pull requests, and accepts 15 decision records. | Each record lands with its first task, so the owner reviews it once. Each phase ends with something that users can use, so the owner can merge one phase and stop. |
 | The spec and this plan drift apart. The folds rename some parts, such as P3.7's set-up command. | Each task corrects the spec in the same pull request when it builds a folded part. |
 | Proposed records block the stack. A record that the owner rejects stops every later task that needs it. | Each pull request names its records. The owner can merge the tasks before a rejected record, and the implementer reworks the rest. |
 | A model judge is slow or costly when many sessions run at once. | The fixed steps decide most flows without a judge. The rate limit, the 5 s timeout and the cache of answers for each session bound it. P2.12 measures it, and a local model costs nothing to call. |
