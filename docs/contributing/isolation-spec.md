@@ -1,6 +1,6 @@
 # Isolated sessions: spec
 
-**Status:** proposed, 10 November 2026. **Decision:** [0029](decisions/0029-a-sandbox-per-session.md). **Plan:** [isolation-plan.md](isolation-plan.md). **Research:** [isolation](../research/isolation.md). **Issue:** [#100](https://github.com/iamlakshya/simstim/issues/100). **Roadmap:** O2, which widens X6 ([#13](https://github.com/iamlakshya/simstim/issues/13)).
+**Status:** proposed, 10 November 2026. **Decision:** [0029](decisions/0029-a-sandbox-per-session.md). **Plan:** [isolation-plan.md](isolation-plan.md). **Research:** [isolation](../research/isolation.md), [locations](../research/locations.md), [build facts](../research/build-facts.md). **CLI:** [cli-spec.md](cli-spec.md). **Issue:** [#100](https://github.com/iamlakshya/simstim/issues/100). **Roadmap:** O2, which widens X6 ([#13](https://github.com/iamlakshya/simstim/issues/13)).
 
 This spec says what to build so that each session runs in its own sandbox. [The plan](isolation-plan.md) says in what order. Another coding agent will build it one pull request at a time, under [AGENTS.md](../../AGENTS.md) and [CONTRIBUTING.md](../../CONTRIBUTING.md). Task IDs such as P1.4 and H7 name tasks in the plan, which gives their order.
 
@@ -120,7 +120,7 @@ One name for each thing. Other documents and the code use these names and no oth
 | runtime | The artefacts that a host needs for walls: the VMM, `runsc` and the boot pair. The release manifest names each by digest. | |
 | prepare | The sandbox probe, runtime delivery, the root step and a test boot, in that order (14.2.1). | `host prepare`, `sandbox.prepare` |
 | root step | The one optional script that needs root on a host. The client builds it, and the user runs it through sudo or gives it to the machine's owner (14.4). | `client.RootScript` |
-| namespace launcher | A root-owned copy of a small program that an `AppArmor` profile lets make user namespaces, for process walls on Ubuntu 23.10 or later ([question 4](#15-open-questions)). | `/usr/local/libexec/<name>/` |
+| namespace launcher | A small static program, `cmd/userns`, that makes a process wall's namespaces and mounts, then starts the guest init with no capabilities (4.1). On Ubuntu 23.10 or later, a root-owned copy runs under an `AppArmor` profile that lets it make user namespaces ([question 4](#15-open-questions)). | `/usr/local/libexec/<name>/` |
 | slot launcher | A root-owned program that starts each VMM as a slot account, through one sudo line (14.4.6, [question 27](#15-open-questions)). | `cmd/launch` |
 | facts | A host's live numbers for placement. | `host.facts`, `api.HostFacts` |
 | admission | The host's own check, under a lock, that a sandbox fits. | `admit.go` |
@@ -151,12 +151,14 @@ The 2025 npm attacks show T1, T2 and T5 together. The Nx payload ran installed a
 - **Untrusted:** everything in the wall (the guest init, the holder, the shadow terminal, the agent and its tools), everything that a session wrote (its clone, its disk, its bundles, its claims), a repository's own files until the user trusts them, and a host's answers about itself. A compromised host can lie in its sandbox probe and its facts. The floor guards against mistakes, not against a hostile host.
 - **Today's holes,** fixed in phase 0 whatever the wall:
   - Any process of the host user can attach to any holder socket and type into any session. `Holder.serve` in `internal/host/holder_conn.go` checks no peer and no role, and the agent's hook uses the full socket.
-  - The shadow terminal parses hostile bytes in an unconfined child of the holder (`internal/host/vt_child.go`). Its Ghostty pin, `ad97d331`, comes before the fix `e257bb45` of [GHSA-w9q4-5jvv-mcv4](https://github.com/ghostty-org/ghostty/security/advisories/GHSA-w9q4-5jvv-mcv4). GitHub rates that advisory Moderate, and it may not be reachable with the 10,000-line scrollback that `vt/src/main.zig` sets (UNVERIFIED either way).
+  - The shadow terminal parses hostile bytes in an unconfined child of the holder (`internal/host/vt_child.go`). Its Ghostty pin, `ad97d331`, is in the ranges of two advisories. In [GHSA-w9q4-5jvv-mcv4](https://github.com/ghostty-org/ghostty/security/advisories/GHSA-w9q4-5jvv-mcv4), terminal output alone can corrupt memory. In [GHSA-jqr7-69mm-v35h](https://github.com/ghostty-org/ghostty/security/advisories/GHSA-jqr7-69mm-v35h), a very wide terminal crashes when it is narrowed. The pin already holds the fix of a third, GHSA-qjfx-r533-6vx3. The holder caps a client's terminal size only at 65535 (`clamp16`). Fixed by 19.1 ([build facts](../research/build-facts.md#61-ghostty-and-its-advisories)).
   - `applyHook` stores any `session_id` that a hook sends (`internal/host/hooks.go`), and `resumeArgv` puts it into the resume command (`internal/host/restore.go`).
   - The launcher draws a session's reason without cleaning it (`internal/tui/detail.go`), and `oscSafe` removes only C0 and DEL (`internal/client/attach_notify.go`).
   - A paste whose words are all local files uploads them (`internal/client/attach_paste.go`). A session can put a path on the laptop's clipboard with OSC 52 first.
-  - Setup trust is a yes or no for each repository, not tied to the script's content (`internal/client/trust.go`).
-  - `copyWorktreeInclude` follows symlinks (`internal/host/worktree.go`).
+  - Setup trust is a yes or no for each repository, not tied to the script's content (`internal/client/trust.go`). Fixed by 19.2.
+  - `copyWorktreeInclude` follows symlinks (`internal/host/worktree.go`). Host git runs in a session's worktree with the repository's own fsmonitor, hooks and filters, outside every session's unit (`removeWorktree`, and `SessionRepo` in `internal/client/pull.go`). Fixed by 19.3.
+  - A VM that `host create lima` makes can reach services on the Mac's loopback address through `host.lima.internal`. Fixed by 19.4.
+  - No job watches the pins that no package ecosystem covers, such as the Ghostty commit. Fixed by 19.5.
   - The generated SSH wrapper includes the user's `~/.ssh/config` first, so a `ForwardAgent yes` there reaches every host (`writeWrapper` in `internal/client/ssh.go`). Task H2 fixes it (14.8.5).
 
 ### 3.3 What the design guarantees
@@ -245,13 +247,43 @@ flowchart LR
 | Part | process wall (W1) | microvm wall (W3) |
 | --- | --- | --- |
 | Supervisor, egress process | The session's unit, as the login user | The same |
-| What makes the wall | The guest init, started in new user, mount, PID, network, IPC, UTS and cgroup namespaces, with Landlock and seccomp | Cloud Hypervisor in a jail, on `/dev/kvm` |
+| What makes the wall | The namespace launcher: new user, mount, PID, network, IPC, UTS and cgroup namespaces, the mounts, Landlock and seccomp. It then starts the guest init with no capabilities. | Cloud Hypervisor in a jail, on `/dev/kvm` |
 | Link | One end of a socket pair that the guest init inherits | vsock: the supervisor connects to the VMM's Unix socket and sends `CONNECT <port>` |
 | Holder, ring, shadow terminal, agent | Inside, on the host kernel | Inside, on the guest kernel |
 | Root file system | The host's `/usr`, `/bin`, `/lib` and a filtered `/etc`, read-only | A verified image with an overlay that resets at each start |
 | `/work/<repo>` | A folder in the session folder, bound into the sandbox | On the session disk |
 | Network | An empty namespace. An explicit proxy on the guest's loopback. | No network card. A transparent redirect and an explicit proxy in the guest. |
 | gvisor wall (W2, P6) | As the process wall, with gVisor's sentry between the guest and the host kernel | |
+
+**The process wall's set-up (P1.5).** The namespace launcher, `cmd/userns`, builds the wall. It is a static binary with no dynamic loader, so `LD_PRELOAD` cannot reach it. It reads one JSON request from the supervisor on fd 3, and never takes a path to run. In order, it:
+
+1. Sets `PR_SET_DUMPABLE` to 0, so that no other process of the user can trace it.
+2. Makes new user, mount, PID, network, IPC, UTS and cgroup namespaces, and maps the host user to uid 0 in them.
+3. Applies the mount plan of 7.1: the binds, a tmpfs home, a new `devpts`, the `/dev` nodes, then `pivot_root`.
+4. Brings up `lo` in the new network namespace.
+5. Makes a child user namespace that maps uid 0 of the outer one to uid 1000, `agent`, and gid 0 to gid 1000.
+6. Sets `no_new_privs`, drops every capability, and loads the seccomp profile below and the Landlock rules.
+7. Forks once. The child, PID 1 of the new PID namespace, runs the guest init from `/opt/<name>/bin/` as uid 1000.
+
+On a host with Ubuntu's user-namespace restriction, the launcher is the root-owned copy of the `userns-apparmor` step. Its `AppArmor` profile puts the guest init into a child profile that denies every capability (14.4.2). On other hosts, the supervisor runs the launcher from the helper's own folder, with the same steps. The guest init needs no capability: it serves the link, the proxy on `lo` and the DNS stub, and starts the holder. The holder and the agent run as uid 1000 (17.10).
+
+**The seccomp profile** (`internal/wall/process/seccomp.go`) allows every system call except these, which fail with `EPERM`:
+
+- `unshare`, `setns`, and `clone` with any `CLONE_NEW*` flag. `clone3` fails with `ENOSYS` instead, so that the C library falls back to `clone`, whose flags seccomp can read. Docker's default profile does the same ([moby](https://github.com/moby/profiles/blob/main/seccomp/default.json)).
+- The mount family: `mount`, `umount2`, `pivot_root`, `move_mount`, `open_tree`, `fsopen`, `fsmount`, `fsconfig`, `fspick` and `mount_setattr`.
+- `keyctl`, `add_key`, `request_key`, `bpf`, `perf_event_open`, `userfaultfd`, `io_uring_setup`, `io_uring_enter`, `io_uring_register`, `kexec_load`, `kexec_file_load`, `init_module`, `finit_module` and `delete_module`.
+- `socket` with any family but `AF_UNIX`, `AF_INET`, `AF_INET6` and `AF_NETLINK`. So `AF_VSOCK` and `AF_PACKET` fail.
+- `socket(AF_NETLINK, …)` with any protocol but `NETLINK_ROUTE` (0), such as `NETLINK_NETFILTER`, `NETLINK_AUDIT`, `NETLINK_KOBJECT_UEVENT` and `NETLINK_SOCK_DIAG`.
+
+`NETLINK_ROUTE` stays open because glibc's `getifaddrs` needs it: without it, Node's `os.networkInterfaces()` throws, and Go's `net.Interfaces` fails. In the empty network namespace, a `NETLINK_ROUTE` read shows only `lo`, and a change needs `CAP_NET_ADMIN`, which the agent lacks ([build facts](../research/build-facts.md#4-linux-walls)).
+
+**Tests (P1.5).** The escape suite, `test/e2e/escape.py`, runs inside a sandbox and checks each of these:
+
+1. `unshare -U`, `mount` and `bpf` fail with `EPERM`. `clone3` fails with `ENOSYS`.
+2. `socket(AF_VSOCK)` and a `NETLINK_AUDIT` socket fail. `RTM_NEWADDR` on a `NETLINK_ROUTE` socket fails with `EPERM`.
+3. `node -e 'console.log(os.networkInterfaces())'` lists `lo`.
+4. The process status shows no capability in the guest init, the holder or the agent.
+5. An unconfined process of the user that runs the namespace launcher, or traces it, gets no capability in any namespace.
 
 ### 4.2 A session from start to end
 
@@ -273,7 +305,7 @@ flowchart LR
 | Supervisor | Owns the sandbox, the unit's limits, the trusted manifest, the audit log, alerts, the policy and the link. Serves the session socket and passes its frames to the holder. | Host, the session's unit | Trusted | `internal/supervisor` (new) |
 | Egress process | Makes every network connection: policy, DNS, splice or intercept, sentinels, audit lines | Host, the session's unit | Trusted, confined | `internal/egress` (new) |
 | Jail | Confines trusted-side processes that touch untrusted input | Host | Trusted code, confined process | `internal/jail` (new) |
-| Wall drivers | Probe, prepare, start, stop and destroy sandboxes | Host, in the supervisor | Trusted | `internal/wall`, `internal/wall/process`, `internal/wall/chv`, later `internal/wall/gvisor`, `internal/wall/firecracker` |
+| Wall drivers | Probe, prepare, start, stop and destroy sandboxes | Host, in the supervisor | Trusted | `internal/wall`, `internal/wall/process`, `internal/wall/chv`, later `internal/wall/gvisor`, `internal/wall/firecracker`, `internal/wall/nitro` and `internal/wall/none` (21) |
 | Link | Many streams over one byte stream, with flow control | Both sides | Parses hostile frames on the trusted side | `internal/link` (new) |
 | Guest init | PID 1 in the sandbox: mounts, the network shim, the DNS stub, the holder's start, clean shutdown | Inside the wall | Untrusted | `internal/guest` (new) |
 | Holder | As today, in a guest mode that listens on guest paths | Inside the wall | Untrusted | `internal/host/holder*.go` |
@@ -311,7 +343,7 @@ func (l Level) String() string
 
 // Driver builds walls of one level on this host.
 type Driver interface {
-    Name() string // "process", "chv", later "gvisor", "firecracker" and "nitro"
+    Name() string // "process", "chv", later "gvisor", "firecracker", "nitro" and "none" (21)
     Level() Level
     // Probe says whether this host can run the driver, and why not.
     Probe(ctx context.Context) Probe
@@ -349,7 +381,7 @@ type Abilities struct {
 type Spec struct {
     ID         string
     SessionDir string
-    Image      *ImageRef // microvm and gvisor. nil for process.
+    Image      *ImageRef // microvm. nil for process, none and, in this plan, gvisor (21.4).
     Mounts     []Mount   // the files door
     StateDirs  []string  // the agent's folders that stay across starts
     MemoryMax  int64     // the unit's cap, decision 0024
@@ -388,11 +420,12 @@ Each driver's probe runs inside the sandbox probe (`sandbox.probe`, 14.3): at `h
 
 | Driver | Probe checks |
 | --- | --- |
-| `process` | Linux 5.13 or later. An unprivileged user namespace starts (a fork that calls `unshare(CLONE_NEWUSER)`). `kernel.apparmor_restrict_unprivileged_userns` is 0, or the namespace launcher and its profile from the root step exist (14.4.2). The Landlock ABI from `landlock_create_ruleset(NULL, 0, LANDLOCK_CREATE_RULESET_VERSION)` is 1 or more. seccomp filters load. |
+| `none` (P6.3) | Always passes on a host that runs sessions today. It builds no wall (21.6). |
+| `process` | Linux 5.13 or later. A child makes a user and a mount namespace, writes its uid map and mounts a tmpfs. It does this directly, or through the namespace launcher of the root step (14.4.2). This test decides, not a sysctl: on Ubuntu 23.10 or later, `unshare(CLONE_NEWUSER)` succeeds, but the namespace has no capability ([build facts](../research/build-facts.md#4-linux-walls)). `kernel.apparmor_restrict_unprivileged_userns` is a fact only. The Landlock ABI from `landlock_create_ruleset(NULL, 0, LANDLOCK_CREATE_RULESET_VERSION)` is 1 or more. seccomp filters load. |
 | `chv` | `/dev/kvm` opens read and write, and `KVM_GET_API_VERSION` answers 12. The host kernel is 6.8 or later ([Cloud Hypervisor README](https://github.com/cloud-hypervisor/cloud-hypervisor/blob/main/README.md)). The pinned `cloud-hypervisor` binary is in the artefact store with its digest. The user is in the group that owns `/dev/kvm`, or has an ACL entry on it (14.4.2). `systemd-detect-virt` is recorded as a fact. |
-| `gvisor` (P6) | Linux 5.6 or later. The pinned `runsc` is present. A smoke run of `runsc` in the OCI user-namespace mode succeeds. |
-| `firecracker` (P6) | `/dev/kvm` as above, and a host kernel of 5.10, 6.1 or 6.18, the ones that Firecracker tests ([kernel policy](https://github.com/firecracker-microvm/firecracker/blob/main/docs/kernel-policy.md)). The pinned Firecracker is 1.17.0 or later, for CVE-2026-122192 ([AWS](https://aws.amazon.com/security/security-bulletins/2026-169-aws/)). |
-| `nitro` (P6.4) | `/dev/nitro_enclaves` opens read and write. The parent kernel has the Nitro Sandboxes support of the `nitro_enclaves` driver: Amazon Linux 2023 `kernel6.18` from `6.18.51-120.162.amzn2023`, or a kernel whose `/sys/class/misc/nitro_enclaves/` has `mem_pool/` and `pcie_slots` ([Firecracker](https://github.com/firecracker-microvm/firecracker/blob/firecracker-v1.18/docs/nitro-sandboxes/getting-started.md)). The pinned Firecracker is 1.18.0 or later. The pools and the slot budget fit one sandbox of the session's size. On a host where both this driver and `chv` pass, this one wins: its guest is a first-level guest, where `chv` on EC2 runs nested. |
+| `gvisor` (P6) | Linux 5.6 or later. The pinned `runsc` is present. The namespaces of 21.4 start, directly or through the namespace launcher. A smoke run of `runsc` with the flags of 21.4 succeeds. |
+| `firecracker` (P6) | `/dev/kvm` as above, and a host kernel of 5.10, 6.1 or 6.18, the ones that Firecracker tests ([kernel policy](https://github.com/firecracker-microvm/firecracker/blob/main/docs/kernel-policy.md)). The pinned Firecracker is 1.17.0 or later ([AWS](https://aws.amazon.com/security/security-bulletins/2026-169-aws/)). The driver uses the MMIO transport only, and no jailer (21.5). |
+| `nitro` (P6.4) | `/dev/nitro_enclaves` opens read and write. The parent kernel has the Nitro Sandboxes support of the `nitro_enclaves` driver: Amazon Linux 2023 `kernel6.18` from `6.18.51-120.162.amzn2023`, or a kernel whose `/sys/class/misc/nitro_enclaves/` has `mem_pool/` and `pcie_slots` ([Firecracker](https://github.com/firecracker-microvm/firecracker/blob/firecracker-v1.18/docs/nitro-sandboxes/getting-started.md)). That second test is an inference: the guide lists those files, but does not call them a test of support. A start that fails with "Failed to query hypervisor-supported flags" means an old driver, as the guide says. The driver uses virtio-pci, because Nitro Sandboxes are PCIe only ([comparison](https://github.com/firecracker-microvm/firecracker/blob/firecracker-v1.18/docs/nitro-sandboxes/comparison-with-kvm.md), 21.5). The pinned Firecracker is 1.18.0 or later. The pools and the slot budget fit one sandbox of the session's size. On a host where both this driver and `chv` pass, this one wins: its guest is a first-level guest, where `chv` on EC2 runs nested. |
 
 ### 5.2 `internal/link`
 
@@ -413,6 +446,12 @@ const (
     KindPort   Kind = "port"   // one forwarded connection into the guest
     KindPut    Kind = "put"    // one pasted file into the guest
     KindBundle Kind = "bundle" // a git bundle in (seed) or out (pull)
+    KindExec   Kind = "exec"   // the output and exit code of one exec (6.11, P1.13)
+    KindRPort  Kind = "rport"  // one connection from the guest to a laptop port (7.4, P1.9)
+    KindAgent  Kind = "agent"  // one SSH agent connection from the guest (7.9, P2.13)
+    KindSFTP   Kind = "sftp"   // one SFTP session of an editor (17.7, P2.15)
+    KindGet    Kind = "get"    // one file copied out of the guest (P5.2)
+    KindLayer  Kind = "layer"  // the guest's root as a tar stream, for image save (21.3, P5.5)
 )
 
 // Side is the end of a link.
@@ -427,8 +466,9 @@ const (
 // stream of another kind, or one from the wrong side, and counts it.
 var Opener = map[Kind]Side{
     KindCtl: Supervisor, KindHolder: Supervisor, KindPort: Supervisor,
-    KindPut: Supervisor, KindBundle: Supervisor,
-    KindEgress: Guest, KindDNS: Guest,
+    KindPut: Supervisor, KindBundle: Supervisor, KindExec: Supervisor,
+    KindSFTP: Supervisor, KindGet: Supervisor, KindLayer: Supervisor,
+    KindEgress: Guest, KindDNS: Guest, KindRPort: Guest, KindAgent: Guest,
 }
 
 // Options bound a link.
@@ -462,6 +502,8 @@ func (st *Stream) CloseWrite() error
 ```
 
 Each stream has its own credit window, so a large download on an `egress` stream never holds back `holder` output. The writer of the link sends the frames of streams in turn, and `holder` and `ctl` streams go first when several wait.
+
+**The numbers are targets (P1.2).** The window of 256 KiB starts from yamux's initial stream window ([yamux](https://github.com/hashicorp/yamux/blob/master/const.go), master, October 2026). The limits of 1,024 streams and a 4 KiB header are this project's own bounds, with no outside source. P1.2's benchmark passes 1 GiB through a socket pair for each window from 64 KiB to 1 MiB. P1.2 sets the default to the smallest window within 10 % of the best throughput, and records the numbers in its pull request. The 100 MiB/s on one core of section 12 is a target, not a pass mark.
 
 ### 5.3 `internal/supervisor`
 
@@ -519,7 +561,8 @@ type Decision struct {
     Why    string // in plain words, for the audit line and the 403 body
 }
 
-// Decide applies the policy. A deny always wins over an allow.
+// Decide applies the policy. The narrowest layer with a matching rule
+// decides, and in that layer a deny wins over an allow (8.2).
 func (p *Policy) Decide(r Request) Decision
 ```
 
@@ -658,9 +701,25 @@ type Spec struct {
 // also sets no_new_privs and PR_SET_DUMPABLE to 0, and drops all
 // capabilities before it runs argv.
 func Command(ctx context.Context, s Spec) (*exec.Cmd, error)
+
+// Userns says whether jails on this host get a user namespace: directly,
+// or through the namespace launcher (14.4.2).
+func Userns() bool
 ```
 
-Libraries: `github.com/landlock-lsm/go-landlock` (MIT) and `github.com/elastic/go-seccomp-bpf` (Apache-2.0), with attribution in `NOTICE`. A jail never shows `$XDG_RUNTIME_DIR` (the systemd user bus, other sessions' sockets, the SSH agent), `/dev/vhost-*` or the user's home.
+Libraries: `github.com/landlock-lsm/go-landlock` (MIT) and `github.com/elastic/go-seccomp-bpf` (Apache-2.0), with attribution in `NOTICE`. A jail that has a user namespace never shows `$XDG_RUNTIME_DIR` (the systemd user bus, other sessions' sockets, the SSH agent), `/dev/vhost-*` or the user's home.
+
+**User namespaces.** Every jail uses `Binds`. The `vmm`, `converter` and `git` jails also use `NetNone`, and `Subuid` where it is possible. These three features need a user namespace. On Ubuntu 23.10 or later, a jail gets one only through the namespace launcher of the root step (14.4.2). The launcher serves jails as it serves process walls. Without one, `Command` still sets `no_new_privs`, `PR_SET_DUMPABLE`, Landlock and seccomp, and `Userns` reports false. Landlock alone still stops the jail from tracing the supervisor or reading its memory ([build facts](../research/build-facts.md#4-linux-walls)).
+
+| Feature | Without a user namespace |
+| --- | --- |
+| `Binds` | Landlock refuses every other path, but the paths stay visible. |
+| `NetNone` | seccomp refuses `socket` with `AF_INET` and `AF_INET6`. |
+| `Subuid` | None: the command runs as the login user. |
+| Hiding `$XDG_RUNTIME_DIR` | Landlock controls `connect` to a Unix socket path only from ABI 9 (Linux 7.1). |
+| Hiding the host's abstract Unix sockets | Landlock scopes them only from ABI 6 (Linux 6.12). |
+
+So on Linux 6.8 (Ubuntu 24.04, Landlock ABI 4), such a jail can still connect to the systemd user bus. It can also reach the SSH agent's socket and the host's abstract sockets. The sandbox probe's `userns` is false there, and `host show` names this gap, with the hint `simstim host prepare <host>`. The `egress` jail uses `NetHost`, so only `Binds` and `Subuid` change for it.
 
 ## 6. Flows
 
@@ -668,7 +727,7 @@ Every flow below is for a walled session. A session at level `none` keeps today'
 
 ### 6.1 Create
 
-1. **Level.** The client picks the host first (14.10.1). It then picks the level in this order: `--wall`, the repository's section in `config.toml`, `[sandbox] wall`, then the host's floor. `auto` means the floor. A level below the floor stops here with the error `wall_floor` (9.3), unless the command has `--downgrade` or the launcher's downgrade sheet got the typed level name.
+1. **Level.** The client picks the host first (14.10.1). It then picks the level in this order: `--wall`, the repository's section in `config.toml`, `[sandbox] wall`, then the host's floor. `auto` means the floor. A level below the floor stops here with the error `wall_floor` (9.3), unless the command has `--downgrade` or the launcher's downgrade sheet got the typed level name. Until task P2.10, a session for which no layer names a level runs at `none`, as today, whatever the floor ([question 1](#15-open-questions)). A level that a layer names must still meet the floor.
 2. **Secrets.** The grant gate checks each secret against the host's tier (14.8.5). The client then fetches the values of the session's secrets, as today ([secrets](../how-to/secrets.md)). For each secret it also sends the mode: bound when the user's config or the agent table names its hosts (P2), exposed when the user passed `--expose NAME`. Before P2 every secret is exposed.
 3. **Policy layers.** The client sends `new` with `NewArgs.Wall`, `NewArgs.Downgrade` and `NewArgs.Layers`: the layers of 8.2 that the laptop holds. These are all sessions, the host, the repository's section, the profile and the session's flags, with the locks. The host adds the built-in layer: the preset lists and the agent's needs.
 4. **Repository file.** If the folder is in a git repository with `.<name>/sandbox.toml`, the host reads it from the host's working tree, the trusted source, before any sandbox exists. Its denies, a stronger level and a tighter preset apply at once. Its proposed grants come back as a question (`CodeGrantQuestion`) with the file's SHA-256, unless the client's answers for that hash came with the request.
@@ -721,6 +780,7 @@ A `stopped` session wakes on attach, as a stopped host does ([0013](decisions/00
 2. The supervisor copies the session folder for each child, with a reflink where the file system has one, or a sparse copy. Then it thaws the source.
 3. Each child gets a new ID, a trusted manifest with `ForkOf`, the parent's grants, new sentinels and a new CA. It cold-starts with the agent's `Fork` command from the agent table, such as `claude --resume {agent_session_id} --fork-session`. An agent without one starts with its continue command.
 4. Each child's row shows "forked from auth-fix".
+5. With separate accounts, the slot launcher's `copy` op makes the copies (21.9).
 
 ### 6.6 Stop and resume
 
@@ -756,7 +816,7 @@ A `stopped` session wakes on attach, as a stopped host does ([0013](decisions/00
 1. `simstim pull devbox/auth-fix` sends the bridge op `pull.begin`. The supervisor opens a `bundle` stream. The guest runs `git bundle create - <branch> --not <base>` for its branches under `refs/heads/<name>/<id>/`, and streams it.
 2. The supervisor caps the bundle at `[sandbox] pull_max` (512 MiB by default) and passes it in 1 MiB chunks through `pull.read`, as `debug.read` does.
 3. The client writes the bundle to a temporary file, runs `git bundle verify`, then fetches it with `-c transfer.fsckObjects=true -c fetch.fsckObjects=true -c core.hooksPath=/dev/null` into `refs/<name>/sessions/<host>/<id>/*`. It never checks out.
-4. The client reads the diff from the base in the user's own repository and prints the review summary (7.1). When nothing is flagged, or with `--yes`, it moves the branch `--into` (the session's branch name by default), as `pull` does today.
+4. The client reads the diff from the base in the user's own repository and prints the review summary (7.1). When nothing is flagged, or with `--allow-flagged`, it moves the branch `--into` (the session's branch name by default), as `pull` does today.
 5. The client sends `pulled` with the commits it fetched, and the supervisor records them in `Manifest.Pulled`.
 6. This path works over every transport, so `pull` now works on hosts made by `host create docker` and `e2b` too.
 
@@ -768,7 +828,7 @@ Daily work needs a terminal beside the agent, in the same files: to run the test
 2. The guest init starts a second holder, with its own socket `/run/<name>/holder-<id>.sock`. The supervisor serves the session socket `paths.Socket(<id>)` for it. The bridge, attach, replay by offset and alerts then work as for any session.
 3. The new session's trusted manifest has `SandboxOf` set to the first session's ID. Its name is `<name>-sh`, then `<name>-sh2` and so on, unless `--name` gives one. `shell` attaches to the newest shell session of the sandbox when one runs, and starts one when none does. `--new` always starts one.
 4. `simstim new devbox --in auth-fix --agent codex` starts a second agent in the same sandbox, in the same way.
-5. `simstim exec devbox/auth-fix -- npm test` runs one command without a terminal. The supervisor sends `exec`. The guest init runs the command as the agent's user in `/work/<repo>`, streams its output on a new `exec` stream, and returns its exit code. `exec` exits with that code. `--timeout` limits it, 10 minutes by default.
+5. `simstim exec devbox/auth-fix -- npm test` runs one command without a terminal. The supervisor sends `exec`. The guest init runs the command as the agent's user in `/work/<repo>`, streams its output on a new `exec` stream, and returns its exit code. `exec` exits with that code. `--timeout` limits it, 10 minutes by default. If `exec` fails before the command starts, it exits with 125. A `--timeout` that runs out exits with 124 ([CLI spec, 5.2](cli-spec.md#52-exec)).
 
 The rules:
 
@@ -801,7 +861,7 @@ Each door is closed by the built-in layer. A rule in any layer opens it (8.2), a
 **Default.** The sandbox sees:
 
 - `/work/<repo>`: its own clone, from the seed bundle (6.1). It is writable, and it stays across stops.
-- The home of the user `agent`: a fresh home at each start (tmpfs on a process wall, the overlay on a microvm). Only the agent's `StateDirs` stay, from the session folder or disk: `~/.claude/projects` for Claude Code, `~/.codex/sessions` for Codex. These hold what a resume needs and nothing that runs code, so a dropper in `~/.bashrc` or a hook in `~/.claude/settings.json` goes at the next start.
+- The home of the user `agent`: a fresh home at each start (tmpfs on a process wall, the overlay on a microvm). Only the agent's `StateDirs` stay, from the session folder or disk: `~/.claude/projects` for Claude Code, the session folders and the thread file of 8.6 for Codex. These hold what a resume needs and nothing that runs code, so a dropper in `~/.bashrc` or a hook in `~/.claude/settings.json` goes at the next start.
 - `/tmp` and `/var/tmp`: fresh at each start.
 - System files, read-only. On a process wall: the host's `/usr`, `/bin`, `/sbin`, `/lib`, `/lib64` and `/etc`, with these files replaced: `/etc/passwd` and `/etc/group` (the user `agent`, uid 1000), `/etc/resolv.conf` (`nameserver 127.0.0.53`) and `/etc/hosts`. On a microvm: the image, with an overlay that resets at each start unless `[sandbox] system = "keep"`.
 - The agent's install folders, read-only: on a process wall, each folder in the agent's `InstallDirs` and the folder of its resolved binary, at their host paths. On a microvm, the agents disk at `/opt/agents`.
@@ -829,7 +889,7 @@ The sandbox never sees the host user's home, `$XDG_RUNTIME_DIR` (the systemd use
 | hidden text | bidirectional controls, zero-width and tag characters in added lines |
 | secrets | an added line that holds the value of one of the session's secrets, or a sentinel, as fetched on the laptop |
 
-**The host never runs git, and never follows a symlink, in a folder that a sandbox can write.** It only removes such folders.
+**The host never runs git, and never follows a symlink, in a folder that a sandbox can write.** It only removes such folders. An unwalled session has no sandbox: the host runs git in its worktree only as 19.3 says ([question 77](#15-open-questions)).
 
 ### 7.2 Network
 
@@ -883,24 +943,41 @@ Before P2 there is no stub, and lookups in the guest fail. Tools that use the pr
 | Object stores (`*.s3.amazonaws.com`, `storage.googleapis.com`, `*.blob.core.windows.net`) | Every method but GET and HEAD, when a grant allows the host at all |
 | Any bound host | Endpoints that mint or rotate tokens, listed for each service |
 
-**Model APIs (P2, a graft from "Agent rows as policy" and the red team).** Model hosts are always intercepted. For each agent, `ModelGuard` in the agent table names the wire format and the allowed paths. The egress process parses the JSON body of each model request and refuses:
+**Model APIs (P2, a graft from "Agent rows as policy" and the red team).** Model hosts are always intercepted. For each agent, `ModelGuard` in the agent table (8.6) names the wire format, the allowed paths and the allowed tool types. The egress process parses the JSON body of each model request. When the agent uses OpenAI's WebSocket mode, as Codex does, it also parses each `response.create` message on the socket ([build facts](../research/build-facts.md#2-model-apis)). It refuses:
 
-- tools that make the provider fetch a URL that the caller chose: Anthropic's web fetch tool and `mcp_servers`, and OpenAI's `mcp` tool with a `server_url` ([OpenAI](https://developers.openai.com/api/docs/guides/tools-connectors-mcp)),
-- file uploads to the provider's file API,
-- endpoints that are not in the agent's list, so that a new server-side feature fails closed.
+- **A tool type that is not on the agent's list.** A `tools[]` entry passes when it has no `type`, or when its `type` is in `ModelGuard.Tools`. A type in `ModelGuard.Search` passes too, under every preset but `locked`. Every other type is refused, so a new dated server tool fails closed. The refused types include Anthropic's `web_fetch_*`, `code_execution_*` and `mcp_toolset`, and OpenAI's `mcp`, `file_search` and `code_interpreter`.
+- **An MCP server that the provider calls.** Anthropic's top-level `mcp_servers` when it is not empty, and every OpenAI `mcp` tool, whether it names a `server_url`, a `connector_id` or a `tunnel_id` ([OpenAI](https://developers.openai.com/api/docs/guides/tools-connectors-mcp), [Anthropic](https://platform.claude.com/docs/en/agents-and-tools/mcp-connector)).
+- **Content that the provider fetches by URL.** Anthropic `image` and `document` blocks with `source.type: "url"`, and OpenAI `input_image.image_url` and `input_file.file_url` with an `http` or `https` URL. A `data:` URL and a file ID pass. The egress process looks for them anywhere in the messages or the input, tool results included.
+- **Web search under the `locked` preset.** Anthropic's `web_search_*` and OpenAI's `web_search` and `web_search_2025_08_26` send a query that the model wrote to a search provider. They pass under `balanced` and `open` when `ModelGuard.Search` names them, and `locked` refuses them ([question 71](#15-open-questions)).
+- **File uploads** to the provider's file API (`POST /v1/files`).
+- **A path that is not on the agent's list.** `/v1/messages/batches` is never on it, because batch results arrive later, outside the count of 17.8. `/v1/messages/count_tokens` may be on it, and counts no tokens.
 
-Each refusal returns the API's own error shape with a `Try:` line in the message, and raises `egress_blocked`. A grant `net <host> --tools web_fetch` opens a refused tool for one session. The lists come from recorded traffic of each first-class agent (task P2.4).
+Each refusal is an HTTP 403 in the API's own error shape, with the header `x-should-retry: false`, so that no SDK retries it. For Anthropic: `{"type":"error","error":{"type":"permission_error","message":"<line>"},"request_id":"req_<random>"}`. For OpenAI: `{"error":{"message":"<line>","type":"request_forbidden","param":null,"code":null}}`. The line reads `simstim: devbox/auth-fix may not use web_fetch_20260318 at api.anthropic.com. Try: simstim policy allow api.anthropic.com --tools web_fetch --in devbox/auth-fix`. Each refusal raises `egress_blocked`.
+
+On a model host, the egress process reads the frames of a WebSocket itself, instead of passing the upgraded connection through `httputil.ReverseProxy`. It removes `permessage-deflate` from the upgrade's `Sec-WebSocket-Extensions`, so no message arrives compressed, and it refuses a frame with the compression bit (RSV1) set. A refused message closes the socket with code 1008 and the line as its reason, cut to 123 bytes. Codex then falls back to HTTPS, where the same request gets the 403 (UNVERIFIED: P2.4 checks it in a recording).
+
+A grant `net <host> --tools <name>` opens refused types for one session. The names are `web_fetch` (Anthropic `web_fetch_*`), `web_search` (the search types under `locked`) and `code_execution` (Anthropic `code_execution_*` and OpenAI `code_interpreter`). The others are `mcp` (`mcp_servers`, `mcp_toolset` and OpenAI `mcp`), `url_content` (content by URL) and `files` (the file API). The lists come from recorded traffic of each first-class agent (task P2.4).
 
 **Unknown sites (P2).** A flow that no rule covers gets the unknown action of the narrowest layer that sets one (8.2). Before P2, every unknown flow is refused.
 
 | Action | What happens | Meant for |
 | --- | --- | --- |
-| `ask` | The flow waits up to `[network] hold` (20 s by default). The session's state becomes `needs_input` with the source `network` and the reason "wants api.example.com:443", and an `egress_blocked` alert goes out. An answer within the hold opens the flow, at the scope that the user picks (9.4). No answer refuses it. | Work with a person at the terminal |
+| `ask` | The flow becomes a held request (below). The session's state becomes `needs_input` with the source `network` and the reason "wants api.example.com:443", and an `egress_blocked` alert goes out. An answer opens the host at the scope that the user picks (9.4). | Work with a person at the terminal |
 | `deny` | The flow is refused at once. | Unattended work with a known list |
 | `allow` | The flow goes through. Its audit line has `"decision":"allow-unknown"`, and the first flow to each new host raises `egress_unknown` once. | Learning what a project needs, before `policy learn` (8.8) |
 | `classify` | The classifier decides (7.8). | Unattended and parallel work |
 
 The built-in layer sets `ask`. The guided setup asks once which action the user wants for all sessions, and writes the answer to `config.toml` ([question 43](#15-open-questions)).
+
+**Held requests (P2.6).** A client gives up on a waiting connection when its own timer ends, and that timer depends on the mode ([build facts](../research/build-facts.md#2-model-apis)). So a held request outlives the flows that wait on it ([question 70](#15-open-questions)):
+
+- **Explicit mode.** The egress process holds the flow before it answers `CONNECT`, or before it forwards an absolute-form request. It holds it for up to `[network] hold` (20 s). The model SDKs, Claude Code, npm, pnpm, cargo and the Go command wait that long under a read timer. pip gives up after 15 s, and uv probably after 10 s.
+- **Transparent mode (microvm).** The client has already sent its ClientHello, so a short connect timer runs. It is 5 s in the Python SDKs, and 10 s in Node, uv, pnpm and Go. The egress process holds such a flow for 3 s at most, whatever `hold` says.
+- **The held request stays open.** When the hold ends, or the client gives up, the held request stays in the policy sheet and in `policy ls` for `[network] ask_open` (5 minutes). New flows to the same host and port join it, and open no second question. An answer opens the host at its scope, so the client's next try passes. Agents and most package managers try again by themselves, and pip makes 5 attempts.
+- **What the guest sees.** A flow whose hold ends before an answer gets a 403 whose body is one line: `simstim: api.example.com:443 waits for an answer in devbox/auth-fix. Try: answer in the launcher (p), then run the command again`. In explicit mode the 403 answers `CONNECT`. In transparent mode on port 443, the egress process completes TLS with a leaf from the session's CA, then answers each request with the 403. On any other port it closes the stream with code 2 (refused), and the guest init resets the connection.
+- **Answers.** `o` (once) lets the waiting flows through, or the next flow to that host and port when none waits. `x` (refuse) and the end of `ask_open` close the held request. Each counts as one refusal: the count of 5 refusals below counts held requests, not flows.
+
+Docker Sandboxes refuses the first request at once, and lets a later try pass ([approvals](https://docs.docker.com/ai/governance/local/approvals/)). This design adds the hold in explicit mode, so that a quick answer needs no retry.
 
 A refused flow gets a 403 whose body is one line, the same each time: `simstim: api.example.com is not allowed in devbox/auth-fix. Try: simstim policy allow api.example.com --in devbox/auth-fix`. After 5 refusals in 10 minutes, `ask` and `classify` stop: new unknown hosts are refused at once, and the row says so. A `policy` command on the session resets the count.
 
@@ -935,8 +1012,8 @@ It never holds a query string, a header value or a body.
 
 | Agent | Path |
 | --- | --- |
-| Claude Code | An API key as `ANTHROPIC_API_KEY`, or a long-lived token from `claude setup-token` as `CLAUDE_CODE_OAUTH_TOKEN` ([authentication](https://code.claude.com/docs/en/authentication)), each a bound secret for `api.anthropic.com`. Which header carries the OAuth token is UNVERIFIED (likely `Authorization: Bearer`). Task P2.3 checks it against recorded traffic. |
-| Codex | An API key as `OPENAI_API_KEY`, bound to `api.openai.com`. A ChatGPT login needs token refresh, which a header swap cannot do. It is not supported in a walled session, except as an exposed login made inside the sandbox, which the row shows. |
+| Claude Code | An API key as `ANTHROPIC_API_KEY`, in `x-api-key`, or a long-lived token from `claude setup-token` as `CLAUDE_CODE_OAUTH_TOKEN`, each a bound secret for `api.anthropic.com` ([authentication](https://code.claude.com/docs/en/authentication)). The token starts with `sk-ant-oat01-`. It goes in `Authorization: Bearer`, beside `anthropic-beta: oauth-2025-04-20`, which the swap leaves as it is. Claude Code's docs name no header for the token, so this comes from a secondary source. It stays UNVERIFIED until P2.3 checks it against recorded traffic ([build facts](../research/build-facts.md#1-agent-data)). |
+| Codex | An API key, bound to `api.openai.com` in `Authorization: Bearer`. The TUI does not read `OPENAI_API_KEY` as its credential: it reads the key that `codex login --with-api-key` saved. So the guest init runs the row's `Store` command with the sentinel at each start (8.6), and a failure stops the start with `secret_store` (9.3). `codex exec` also reads `CODEX_API_KEY`. A ChatGPT login is not bound in this plan. It works only as an exposed login made inside the sandbox, which the row shows. Docker Sandboxes shows that a swap can carry it, when the trusted side signs in and refreshes the token ([question 72](#15-open-questions)). |
 | Others | An API key bound to the agent's model host, from the agent table. |
 
 **SSH keys** have a door of their own (7.9). **Not supported in this plan:** forwarding the laptop's own SSH agent into a sandbox, AWS SigV4 keys, GCP service-account keys, mTLS client keys and signing keys. They need a re-signing door, which is an open question ([question 15](#15-open-questions)).
@@ -950,7 +1027,7 @@ It never holds a query string, a header value or a body.
 - **No port named:** for a walled session, `forward` with no ports lists the claimed ports and asks which to forward, and without a terminal it forwards none. The guest never chooses a laptop port alone. A Docker Sandboxes sandbox took another sandbox's OAuth callback port that way ([v0.42.0](https://github.com/docker/sbx-releases/releases/tag/v0.42.0)).
 - **Browser:** pages from a session run in the laptop's browser at a localhost origin, which shares cookies with other local apps by port ([RFC 6265, 8.5](https://datatracker.ietf.org/doc/html/rfc6265#section-8.5)). The first forward of a walled session shows a notice that says so, and suggests `http://<id>.localhost:<port>`, which browsers send to the loopback address.
 - **Transports:** `forward` stays SSH-only, as [0013](decisions/0013-host-providers.md) says.
-- **Reverse (P1.9):** `forward --reverse <laptop port>[:<guest port>]` lets a sandbox reach one service on the laptop, such as a database, on `own` hosts only. The guest init listens on the guest's own loopback. Each connection becomes a stream through the supervisor and the bridge to the client, which dials only that laptop port on `127.0.0.1`. Nothing listens on the host. The row shows it, and the audit log records each connection ([question 58](#15-open-questions)).
+- **Reverse (P1.9):** `forward --reverse <laptop port>[:<guest port>]` lets a sandbox reach one service on the laptop, such as a database, on `own` hosts only. The guest init listens on the guest's own loopback. Each connection becomes an `rport` stream (5.2) through the supervisor and the bridge to the client, which dials only that laptop port on `127.0.0.1`. Nothing listens on the host. The row shows it, and the audit log records each connection ([question 58](#15-open-questions)).
 
 ### 7.5 Devices
 
@@ -1003,7 +1080,7 @@ The steps run in this order. Each step decides, or passes the flow on.
 
    The judge gets structured fields only: the host, the port, the registrable domain, the facts, the method and the path when the egress process intercepts the host (never the query or the body), the repository's remote and its ecosystems as the trusted side read them at seed time, the agent's name, the profile's name, and the task line that the user gave with `new --task`. The host name is the one field that the guest chose, so the request quotes it as data. The judge never gets a response body, the agent's text, a file's contents, or the agent's reasons.
 
-   The judge answers `allow`, `deny` or `unsure`, with a reason of 200 characters at most and a scope. The scope is never wider than `[classifier] max_scope`: `once` or `session`, and `session` by default. A judge never writes a rule in a wider layer. The flow waits at most `[classifier] timeout` (5 s by default), and no answer is unsure. A session gets at most `[classifier] rate` judge calls a minute (20 by default). Above that, flows are unsure.
+   The judge answers `allow`, `deny` or `unsure`, with a reason of 200 characters at most and a scope. The scope is never wider than `[classifier] max_scope`: `once` or `session`, and `session` by default. A judge never writes a rule in a wider layer. The flow waits at most `[classifier] timeout` (5 s by default), and no answer is unsure. In transparent mode (microvm) the flow waits 3 s at most, as a held request does (7.2, [question 70](#15-open-questions)). A later answer still sets its rule at its scope, so the client's next try passes. A session gets at most `[classifier] rate` judge calls a minute (20 by default). Above that, flows are unsure.
 5. **Unsure.** `[classifier] unsure` decides: `ask`, the built-in value, or `deny`, for unattended work.
 
 Each step writes the flow's audit line with `"rule":"classify:<step>"` and the reason. The launcher shows, for each session, how many flows the classifier allowed. `policy log --by classifier` lists them, and `policy learn` turns them into rules that a person approves (8.8).
@@ -1016,9 +1093,118 @@ A judge that sees only destinations cannot see data inside a path, a query or a 
 
 - **Closed:** no sandbox gets an SSH agent unless a layer names a key.
 - **Opened by:** `ssh_keys = ["DEPLOY_KEY"]` in any layer, or `policy allow ssh-key DEPLOY_KEY --in <host>/<session>`. Each name is a secret in `[secrets]` with `kind = "ssh-key"`, whose command prints a private key. The client fetches it at the start, as it fetches any secret, and the grant gate checks its tier (14.8.2).
-- **How:** the supervisor keeps the key in memory only ([0032](decisions/0032-secret-values-in-memory-only.md)) and serves an SSH agent that holds only the named keys, over an `agent` stream. The guest init offers it at `/run/<name>/ssh-agent.sock` and sets `SSH_AUTH_SOCK`. The agent answers requests to list keys and to sign. It refuses requests to add, remove or lock keys, and every extension. Each signature writes an audit line with the key's fingerprint, and the server's host key when the client binds the agent connection to its session with the `session-bind@openssh.com` extension ([PROTOCOL.agent](https://github.com/openssh/openssh-portable/blob/master/PROTOCOL.agent)). Which OpenSSH release first sends it is UNVERIFIED.
+- **How:** the supervisor keeps the key in memory only ([0032](decisions/0032-secret-values-in-memory-only.md)) and serves an SSH agent that holds only the named keys, over an `agent` stream. The guest init offers it at `/run/<name>/ssh-agent.sock` and sets `SSH_AUTH_SOCK`. The agent answers requests to list keys and to sign. It refuses requests to add, remove or lock keys, and every extension but `session-bind@openssh.com`, which it reads only to record the server's host key. Each signature writes an audit line with the key's fingerprint, and the server's host key when the client binds the agent connection to its session with the `session-bind@openssh.com` extension ([PROTOCOL.agent](https://github.com/openssh/openssh-portable/blob/master/PROTOCOL.agent)). Which OpenSSH release first sends it is UNVERIFIED.
 - **Network:** git over SSH still needs a `net` rule for the server and port 22. The egress process cannot read an SSH stream, so the push door's limits on refs do not apply there. Use a deploy key that can write to one repository only. The row shows "ssh-key: DEPLOY_KEY".
 - **The laptop's own agent** never enters a sandbox. `new --ssh-agent` stays for one unwalled session on an `own` host (14.8.2).
+
+### 7.10 Package managers in the guest (P2.8)
+
+A poisoned package is a common way for hostile code to reach a sandbox (T1). The wall holds such code, but it can persist in `/work` and reach the laptop through `pull`. So the guest init makes package managers refuse fresh versions and skip install scripts. These settings are defence in depth: guest root and the agent itself can unset them. The registry gates of 7.11 are the control that the guest cannot change.
+
+**Levels.** `sandbox.package_managers` picks one of three levels ([question 74](#15-open-questions)). The client sends it in `start` (10.3), with `network.min_release_age`.
+
+| Level | What the guest init writes |
+| --- | --- |
+| `guarded` (built in) | A minimum release age for each tool that has one, no dependency install scripts for npm, pnpm, Yarn and Bun, and the Go settings below |
+| `strict` | `guarded`, and no source builds for pip and uv: `PIP_ONLY_BINARY=:all:` and `UV_NO_BUILD=1` |
+| `off` | Nothing |
+
+**How it writes them.** The guest init puts each tool's variables into the agent's environment, and into every shell and command of the sandbox (6.11). npm reads its environment before any npmrc file, so a repository's own `.npmrc` cannot undo them. pip and uv also put their variables above a project's files. A tool that reads a setting only from a file gets that file in the home, which is new at each start (7.1). The guest init never writes to `/etc`, because a process wall binds the host's `/etc` read-only. A name in `sandbox.env` (17.2) replaces the guest init's value for that name, so a user can loosen one tool on purpose.
+
+**The age.** `network.min_release_age` is a whole number of days, from `0d` to `365d`, and `7d` by default. `0d` writes no age setting. Each tool gets the age in its own unit. A change applies at the next start, because the guest init writes the settings once.
+
+The settings of `guarded`, with N the age in days ([build facts](../research/build-facts.md#3-package-managers-and-registries)):
+
+| Tool | Age | Scripts | Written as | Can a repository undo it? |
+| --- | --- | --- | --- | --- |
+| npm 11.10.0 or later | `min-release-age`, N days | `ignore-scripts=true` | `npm_config_min_release_age=N`, `npm_config_ignore_scripts=true` | No: the environment wins over every npmrc file |
+| pnpm 10.16 or later | `minimumReleaseAge`, N × 1440 minutes | `ignoreScripts: true` | `~/.config/pnpm/config.yaml`. pnpm 11 ignores `npm_config_*`, and reads the age only from that file or `pnpm-workspace.yaml`. | UNVERIFIED: a repository's `pnpm-workspace.yaml` may win. P2.8 checks it. |
+| Yarn 4.10 or later (Berry, UNVERIFIED) | `npmMinimalAgeGate`, N × 1440 as a plain number of minutes | `enableScripts: false` | `YARN_NPM_MINIMAL_AGE_GATE`, `YARN_ENABLE_SCRIPTS=false` | UNVERIFIED. P2.8 checks it. |
+| Bun 1.3 or later (UNVERIFIED) | `[install] minimumReleaseAge`, N × 86400 seconds | `[install] ignoreScripts = true` | `~/.bunfig.toml` | UNVERIFIED: a project `bunfig.toml` may win. P2.8 checks it. |
+| pip 26.1 or later (inferred, UNVERIFIED) | `--uploaded-prior-to`, `P<N>D` | none in `guarded` | `PIP_UPLOADED_PRIOR_TO=P<N>D` | No |
+| uv 0.9.17 or later | `exclude-newer`, the time N days before the start, in RFC 3339 | none in `guarded` | `UV_EXCLUDE_NEWER=<time>`. A fixed time avoids the bug of a duration in that variable ([uv 18829](https://github.com/astral-sh/uv/issues/18829)). | No |
+| cargo | none: no stable setting exists | none: `build.rs` and procedural macros always run | nothing | Only the gate of 7.11 covers crates |
+| Go | none: no setting exists | none: the go command runs no module code | `GOTOOLCHAIN=local`, `GOPROXY=https://proxy.golang.org`, `GOSUMDB=sum.golang.org`, `GOVCS=*:off` | No: `go.mod` cannot set these |
+
+- uv's fixed time moves forward only at a restart, so a long-running sandbox is stricter, never looser.
+- What pip before 26.0 does with `PIP_UPLOADED_PRIOR_TO` is UNVERIFIED. P2.8 checks it, and leaves the variable out for such a pip if it fails.
+- A pip requirements file can still ask for `--no-binary` under `strict`, and the docs say so.
+
+**Go.** Since Go 1.16 the go command acts as if `-mod=readonly` were set, so the guest sets no `GOFLAGS`. `GOTOOLCHAIN=local` stops the go command from downloading and running the toolchain that a `go.mod` asks for. A module that needs a newer Go then fails with a message that names `GOTOOLCHAIN`. `GOPROXY` without `,direct`, and `GOVCS=*:off`, keep every module fetch on the proxy, where the gate of 7.11 sees it. The guest init passes none of `GOPRIVATE`, `GONOPROXY`, `GONOSUMDB`, `GOINSECURE` and `GOFLAGS`. So private modules fail unless the user sets `GOPRIVATE`, `GOPROXY` and `GOVCS` in `sandbox.env`.
+
+**Shown.** `show` prints the level and the age, such as "packages: guarded, 7 days".
+
+**Errors.** `config check` and `new --set` refuse a bad value:
+
+| Code | Message | Try |
+| --- | --- | --- |
+| `release_age_invalid` | network.min_release_age is "90m", and it must be a whole number of days from 0d to 365d. | Set `network.min_release_age = "7d"` in config.toml |
+| `package_level_invalid` | sandbox.package_managers is "on", and it must be guarded, strict or off. | Set `sandbox.package_managers = "guarded"` in config.toml |
+
+**Tests (P2.8).**
+
+- Golden tests of the variables and files that the guest init writes for each level, with the ages `0d`, `1d` and `7d`.
+- End to end, with a repository `.npmrc` that sets `ignore-scripts=false` and `min-release-age=0`: `npm config get ignore-scripts` says `true`, and `npm config get min-release-age` says `7`.
+- `go env GOTOOLCHAIN GOPROXY GOVCS` prints `local`, `https://proxy.golang.org` and `*:off`, and `go env GOFLAGS` prints nothing.
+- `pnpm config get minimumReleaseAge` prints `10080`. P2.8 records whether a repository file can lower the pnpm, Yarn and Bun settings, and corrects the table above.
+- With `off`, the guest init writes nothing. With a name in `sandbox.env`, the user's value wins.
+
+### 7.11 Registry gates (P7.1)
+
+On an intercepted registry host, the egress process refuses three things, whatever the guest's settings say:
+
+1. A version younger than `network.min_release_age`.
+2. A version in the OSV malicious-package feed.
+3. A tarball that a package manager fetches from a host that is not a registry.
+
+The gate checks downloads, never metadata. Metadata passes unchanged, so the resolver still sees every version. The guest's settings (7.10) make the resolver pick an older version, and the gate refuses what still gets through.
+
+**Publish times.** The gate trusts only a time that the registry sets, never one that the package's author sets ([build facts](../research/build-facts.md#3-package-managers-and-registries)):
+
+| Registry | Download that it checks | Publish time that it trusts | How it gets the time |
+| --- | --- | --- | --- |
+| npm, `registry.npmjs.org` | `GET /<name>/-/<file>.tgz`, and the scoped form | `time[<version>]` in the full packument | It fetches `GET /<name>` with `Accept: application/json` itself, because abbreviated metadata has only `modified`. |
+| PyPI, `files.pythonhosted.org` | each wheel or source distribution | `upload-time` of that file in the Simple JSON index | It fetches `https://pypi.org/simple/<project>/` with `Accept: application/vnd.pypi.simple.v1+json`, and finds the file by name. A new wheel on an old release is new. |
+| crates.io, `static.crates.io` | `GET /crates/<name>/<name>-<version>.crate` | `version.created_at` | It fetches `https://crates.io/api/v1/crates/<name>/<version>`. |
+| Go, `proxy.golang.org` | `GET /<module>/@v/<version>.zip` | `Timestamp` in index.golang.org: "the time it was first cached by proxy.golang.org" | From a mirror of the index window, below. Never the `.info` `Time`, which is the commit time that the author sets. |
+
+**The Go window.** The index is a feed with a `since` parameter, not a lookup for one module. So the egress processes of a host share one mirror of the feed, from now minus the age, in `StateDir()/goindex/` under a file lock. It exists only while a session there reaches `proxy.golang.org`. It holds a hash of each module path and version, and reads new entries each minute.
+
+- A version in the window is young, and refused.
+- A version that the proxy has never cached gets its first `Timestamp` when the guest asks for it, so it is young too. The gate reads the feed again until the feed passes the time of the guest's first request for that version, for up to 30 s. If the version appears, the gate refuses it.
+- If the feed does not pass that time within 30 s, the gate refuses the download, and the line says why.
+- UNVERIFIED: how soon the index lists a first fetch, how large a 7-day window is, and how long the go command waits for an answer. P7.1 measures all three, and corrects these numbers.
+
+**Lookups from the trusted side.** The gate's own requests leave from the egress process, never from the guest. They go only to the registry that the guest already asked, or to index.golang.org for a Go download. They are not telemetry ([0031](decisions/0031-the-egress-process-is-not-a-relay.md)). The gate caches each answer for 10 minutes. When it cannot learn a publish time within 10 s, it refuses the download.
+
+**The feed.** The OSV malicious-package records (`MAL-` IDs) for npm, PyPI, crates.io and Go come with each release, in `internal/egress/rules/feed/`. `simstim host feed sync [<host>]` downloads a newer copy on the laptop from OSV's public data, and copies it to the host. Nothing fetches the feed by itself. The gate matches the ecosystem, the package name and the version.
+
+**Tarballs and git.** npm, pnpm, Yarn, Bun, pip and uv name themselves in their `User-Agent`. When such a client fetches an archive from a host outside the table above, the gate refuses it. An archive is a `.tgz`, `.tar.gz`, `.zip` or `.whl` file, or a path with `/tarball/` or `/tar.gz/`. This catches a package manager that follows a URL dependency. It does not stop code that fetches an archive itself: the network door covers that. A git dependency runs `git` itself, so the gate cannot tell it from a clone. pnpm refuses git and tarball sub-dependencies by default ([pnpm](https://pnpm.io/supply-chain-security)). A setting for npm, Yarn and Bun is UNVERIFIED, and P7.1 records one if it exists.
+
+**What the guest sees.** A 403 whose body is one line, and an `egress_blocked` alert. The audit line has `"rule":"gate:age"`, `"gate:feed"`, `"gate:url"` or `"gate:unknown"`.
+
+- `simstim: left-pad 1.4.0 is 2 days old, and devbox/auth-fix takes versions 7 days old or older. Try: pin an older version, or lower network.min_release_age with simstim policy edit`
+- `simstim: evil-pkg 1.0.0 is in the malicious-package feed as MAL-2026-1234. Try: remove it from the dependencies`
+- `simstim: npm fetched a tarball from codeload.github.com, and devbox/auth-fix takes packages from registries only. Try: depend on a registry version`
+- `simstim: the publish time of left-pad 1.4.0 is unknown, so it is refused. Try: run the command again`
+
+A lower `network.min_release_age` reaches the gate of a running session at once (8.8). The guest's settings keep the old age until the next start.
+
+**Errors.**
+
+| Code | Message | Try |
+| --- | --- | --- |
+| `feed_unavailable` | The malicious-package feed could not be downloaded: the connection timed out. The copy from the release stays in use. | `simstim host feed sync devbox` again later |
+
+**Tests (P7.1).**
+
+- Unit tests with recorded answers: an npm packument with `time`, a PyPI Simple JSON page with `upload-time`, a crates.io version with `created_at`, and index lines.
+- A Go version whose `.info` `Time` is 30 days old and whose index `Timestamp` is 1 day old is refused.
+- A wheel uploaded yesterday to a release of last year is refused, and the old files of that release pass.
+- A version in the feed is refused. A tarball from a code host with an `npm/` user agent is refused.
+- A registry that does not answer within 10 s gives the "unknown" line.
+- A fuzz test of the parser that maps a download path to a package and a version.
+- Nothing fetches the feed unless a release carries it or the user runs `host feed sync`.
 
 ## 8. Policy and config
 
@@ -1032,7 +1218,7 @@ A judge that sees only destinations cannot see data inside a path, a query or a 
 | `~/.local/state/<name>/grants.json` | Laptop | The client | The grant ledger: names, never values (14.8.6) |
 | `~/.local/state/<name>/grant-trust.json` | Laptop | The client | The user's answers to a repository file's proposals, by host, repository and the file's SHA-256 |
 | `~/.local/state/<name>/setup-trust.json` | Laptop | The client | Setup trust, now by the script's SHA-256 (P0.6) |
-| `~/.config/<name>/images.lock` | Laptop | The client (P3) | Image references and their digests and verity root hashes |
+| `~/.config/<name>/images.lock` | Laptop | The client (P3) | Image references and their digests, with each first conversion's root hash as a check value (20.8) |
 | `.<name>/sandbox.toml` | Repository | The repository's authors | Narrowing rules and proposals. Untrusted. |
 | `<SessionDir>/manifest.json` | Host | The supervisor | The sandbox's layers, its merged policy, its level, and its secret names and modes |
 
@@ -1057,7 +1243,7 @@ Every layer has the same shape: the tables `sandbox`, `network` and `classifier`
 2. **For a destination, the narrowest layer with a matching rule decides.** In that layer, a deny wins over an allow. A session can allow a host that all sessions deny, and a profile can deny a host that a repository allows.
 3. **Lists add up.** `mounts`, `secrets`, `ssh_keys`, `include` and `keep` gather from every layer. A narrower layer drops an inherited item with a leading `!`, as in `secrets = ["!GITHUB_TOKEN"]`.
 4. **Locks win over every layer.** A `[lock]` table at the top level of `config.toml`, or in a host's entry, holds values and denies that no narrower layer may change. A flag or a rule that tries fails with `policy_locked`, and names the lock. kubectl also stops when a flag conflicts with a file, instead of choosing one in silence ([kubectl conventions](https://github.com/kubernetes/community/blob/master/contributors/devel/sig-cli/kubectl-conventions.md)). The repository's own file cannot lock.
-5. **The level** is the highest of the host's floor and the levels that the layers ask for. Only `--wall <level> --downgrade`, or the launcher's typed confirmation, goes below the floor. Then the level is exactly the one named, and the downgrade is recorded.
+5. **The level** is the highest of the host's floor and the levels that the layers ask for. Only `--wall <level> --downgrade`, or the launcher's typed confirmation, goes below the floor. Then the level is exactly the one named, and the downgrade is recorded. Until task P2.10, a session that no layer gives a level runs at `none` (6.1, step 1).
 6. **The repository's own file only narrows.** Its denies, a stronger level, a tighter preset and a stricter unknown action apply at once. Its allows are proposals. They apply only after the user's answer for that file's hash.
 7. **The tier caps every layer.** No layer gives a host what its tier refuses (14.8.2). The caps are settings too, in `tiers.toml`.
 8. **A profile comes after the repository,** because the user picks it for this run.
@@ -1076,13 +1262,15 @@ wall = "auto"          # auto = the host's floor | none | process | gvisor | mic
 preset = "balanced"    # locked | balanced | open
 profile = ""           # a profile that every session uses unless a narrower layer names another
 system = "reset"       # reset | keep: whether system changes stay across starts (microvm)
-image = "default"      # an OCI reference, pinned in images.lock (microvm)
-disk_max = "20G"       # the session disk's cap (microvm)
+image = "default"      # default (pinned by the release) or an OCI reference pinned in images.lock (microvm)
+disk_max = "20G"       # the session disk's cap: hard on microvm, soft on process (17.1)
 idle_stop = "never"    # stop a walled session after this long with no client and no work
 paste = "media"        # media (images and PDF files) | any
 pull_max = "512M"      # the largest bundle that pull brings back
+cp_max = "256M"        # the most that one cp copies, in either direction (21.1)
+checkpoints = 10       # checkpoints to keep for microvm sandboxes where reflinks work. 0 turns them off (21.2)
 docker = false         # a Docker engine inside microvm sandboxes
-decoys = true          # decoy credential files whose values are tripwires (P7.2)
+decoys = true          # decoy credential files whose values are tripwires (21.7, P7.2)
 shell = ""             # the shell that `shell` starts. Empty: the image's login shell.
 keep = []              # files of the home to keep across starts, such as ".bash_history"
 mounts = []            # host folders, such as "~/data:/mnt/data:ro"
@@ -1099,18 +1287,21 @@ keep_caches = true     # keep package caches across starts, in this sandbox only
 caches = []            # more cache folders, or "!path" to drop one
 max_run = ""           # stop the sandbox this long after its start, such as "4h" (17.6)
 sudo = false           # sudo inside a microvm guest (17.10)
+package_managers = "guarded" # guarded | strict | off: package manager settings in the guest (7.10)
 
 [sandbox.image_policy]   # leave it out to trust each image's first digest (P4.5)
 identity = ""            # the cosign certificate identity that must sign images
 issuer = ""              # the OIDC issuer of that identity
+trusted_root = ""        # a Sigstore trusted_root.json on the laptop. Empty: the one that the client embeds (20.8)
 
 [network]
 allow = []             # hosts that sessions may reach
 deny = []              # hosts that sessions may not reach
 unknown = "ask"        # ask | deny | allow | classify: a flow that no rule covers (7.2)
 hold = "20s"           # how long a flow waits for an answer under ask
+ask_open = "5m"        # how long a held request stays open after its flows end (7.2)
 upload_budget = "16M"  # for each host and hour, except model APIs and push remotes
-min_release_age = "7d" # registry gates refuse package versions younger than this (P7.1)
+min_release_age = "7d" # whole days: package managers and registry gates refuse younger versions (7.10, 7.11)
 model_budget = 0       # tokens that model API requests may use, 0 for no limit (17.8)
 
 [classifier]           # used when unknown = "classify" (7.8)
@@ -1135,6 +1326,7 @@ classifier.unsure = "deny"
 
 [profiles.untrusted]
 sandbox.preset = "locked"
+sandbox.package_managers = "strict"
 sandbox.wall = "microvm"
 network.unknown = "deny"
 
@@ -1172,6 +1364,10 @@ wake = "ask"                     # ask, always or never: a wake that costs money
 
 [images]
 fetch = "auto"                   # auto, host or laptop: how runtime files and images reach a host (14.9.3)
+
+[machines.e2b]                   # new --machine e2b: one machine for each session (21.8)
+token_command = ""               # a command that prints the API key. Empty: E2B_API_KEY or the E2B CLI's login
+template = ""                    # empty: the template that host create e2b uses
 ```
 
 `--images` on `host add` and `host prepare` overrides `[images] fetch` for one command.
@@ -1246,7 +1442,9 @@ New fields in `internal/agents.Agent`. All are data, and no code branches on an 
 
 ```go
 // Egress lists the hosts the agent needs: its model API and its login.
-// The locked preset allows these and nothing else.
+// The locked preset allows these and nothing else. An entry with a path,
+// such as "api.github.com/copilot_internal/", makes the host intercepted,
+// and allows only paths under that prefix.
 Egress []string `json:"egress,omitempty"`
 // Secrets binds the agent's credential variables to hosts and headers.
 Secrets []SecretBinding `json:"secrets,omitempty"`
@@ -1260,8 +1458,12 @@ IDPattern string `json:"id_pattern,omitempty"`
 // DangerFlags are arguments that turn the agent's own approvals off. The
 // host refuses a command with one unless the user typed the command.
 DangerFlags []string `json:"danger_flags,omitempty"`
-// StateDirs are folders under the home that a resume needs. A sandbox
-// keeps them across starts, and nothing else in the home.
+// DangerText is text that makes any argument dangerous, such as
+// "bypassPermissions" inside a --settings value. The host checks it as it
+// checks DangerFlags.
+DangerText []string `json:"danger_text,omitempty"`
+// StateDirs are folders, or single files, under the home that a resume
+// needs. A sandbox keeps them across starts, and nothing else in the home.
 StateDirs []string `json:"state_dirs,omitempty"`
 // InstallDirs are folders under the home that hold the agent's files.
 // A process wall binds them read-only. The agents disk copies them.
@@ -1284,6 +1486,20 @@ type SecretBinding struct {
     Format string   `json:"format"` // "{value}"
     Prefix string   `json:"prefix,omitempty"` // kept in the sentinel, "sk-ant-api03-"
     Source string   `json:"source"` // a link to the agent's docs
+    // Store is a command that saves the sentinel where the agent reads its
+    // key, with the sentinel on stdin. The guest init runs it at each start.
+    Store  []string `json:"store,omitempty"` // ["codex", "login", "--with-api-key"]
+}
+
+// ModelGuard says what the egress process lets through to a model API (7.2).
+type ModelGuard struct {
+    Wire      string   `json:"wire"`                // "anthropic-messages", "openai-responses" or "openai-chat"
+    Hosts     []string `json:"hosts"`               // "api.anthropic.com"
+    Paths     []string `json:"paths"`               // "POST /v1/messages"
+    Tools     []string `json:"tools"`               // tools[].type values that pass, such as "custom"
+    Search    []string `json:"search,omitempty"`    // web search types, refused under the locked preset
+    WebSocket bool     `json:"websocket,omitempty"` // the agent may use WebSocket mode on a listed path
+    Source    string   `json:"source"`              // the recordings in internal/agents/testdata/traffic/
 }
 ```
 
@@ -1291,15 +1507,19 @@ Values for the first-class agents:
 
 | Field | Claude Code | Codex |
 | --- | --- | --- |
-| `Egress` | `api.anthropic.com`, `claude.ai`, `platform.claude.com` ([network config](https://code.claude.com/docs/en/network-config)) | `api.openai.com`, `auth.openai.com` (UNVERIFIED: recorded traffic in P2.4 confirms) |
-| `Secrets` | `ANTHROPIC_API_KEY` in `x-api-key`. `CLAUDE_CODE_OAUTH_TOKEN` in `Authorization: Bearer` (UNVERIFIED). | `OPENAI_API_KEY` in `Authorization: Bearer` |
+| `Egress` | `api.anthropic.com`, `platform.claude.com`, `claude.ai`, `claude.com`, `sso.claude.com` ([network config](https://code.claude.com/docs/en/network-config)) | `api.openai.com` for an API key. `chatgpt.com`, only the paths of `ModelGuard`, and `auth.openai.com` for a ChatGPT login ([build facts](../research/build-facts.md#1-agent-data)) |
+| `Secrets` | `ANTHROPIC_API_KEY` in `x-api-key`, prefix `sk-ant-api03-`. `ANTHROPIC_AUTH_TOKEN` in `Authorization: Bearer`. `CLAUDE_CODE_OAUTH_TOKEN` in `Authorization: Bearer`, prefix `sk-ant-oat01-` (the header is UNVERIFIED, 7.3). | `OPENAI_API_KEY` in `Authorization: Bearer`, with the `Store` command `codex login --with-api-key`. `CODEX_API_KEY` in the same header, for `codex exec`. |
 | `CAEnv` | `NODE_EXTRA_CA_CERTS` | `CODEX_CA_CERTIFICATE`, `SSL_CERT_FILE` |
-| `IDPattern` | a UUID: `^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$` | a UUID, as above (UNVERIFIED) |
-| `DangerFlags` | `--dangerously-skip-permissions`, `--permission-mode=bypassPermissions` | `--dangerously-bypass-approvals-and-sandbox`, `--yolo` (the alias is UNVERIFIED) |
-| `StateDirs` | `.claude/projects` | `.codex/sessions` |
+| `IDPattern` | a UUID: `^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$` | a UUID, as above: Codex makes UUIDv7 IDs |
+| `DangerFlags` | `--dangerously-skip-permissions`, `--allow-dangerously-skip-permissions`, `--permission-mode=bypassPermissions` | `--dangerously-bypass-approvals-and-sandbox`, `--yolo`, `--dangerously-bypass-hook-trust`, `--approve-for-me`, `--not-so-yolo`, `--profile`, `-p` |
+| `DangerText` | `bypassPermissions`, which also catches `--permission-mode bypassPermissions` and a `--settings` value | `danger-full-access`, `approval_policy`, `sandbox_mode`, which catch `-s danger-full-access` and `-c` values |
+| `StateDirs` | `.claude/projects` | `.codex/sessions`, `.codex/archived_sessions`, and the file `.codex/state_5.sqlite`, which holds thread names. Whether a resume by ID needs the file is UNVERIFIED. P2.17 checks it, as a manual check for the owner if it needs a prompt, and drops the file if not. |
 | `InstallDirs` | `.local/share/claude` | none: the binary's folder is enough |
 | `ProjectFiles` | `.claude/`, `CLAUDE.md`, `.mcp.json` | `AGENTS.md`, `.codex/` |
-| `Fork` | `claude --resume {agent_session_id} --fork-session` ([CLI reference](https://code.claude.com/docs/en/cli-reference)) | `codex --no-daemon fork {agent_session_id}` (the `fork` command is in Codex's docs, the flag order is UNVERIFIED) |
+| `Fork` | `claude --resume {agent_session_id} --fork-session` ([CLI reference](https://code.claude.com/docs/en/cli-reference)) | `codex --no-daemon fork {agent_session_id}`: a unit test in Codex keeps `--no-daemon` before `fork` |
+| `ModelGuard` | wire `anthropic-messages` on `api.anthropic.com`. Paths and tool types from recordings (P2.4). `Search` holds the `web_search_*` type that Claude Code's WebSearch uses. | wire `openai-responses` on `api.openai.com` and `chatgpt.com`, with `WebSocket` on. Paths and tool types from recordings (P2.4). |
+
+The values come from each agent's docs or source on 10 November 2026 ([build facts](../research/build-facts.md#1-agent-data)). A list of flags cannot see a settings file: Claude Code also starts in bypass mode from `permissions.defaultMode` in the user's settings. In a sandbox the home is new at each start (7.1), so no such file stays. `Egress` leaves three kinds of host out on purpose. `downloads.claude.ai` is the updater, and agents do not update in a sandbox ([question 21](#15-open-questions)). `mcp-proxy.anthropic.com` serves claude.ai connectors, which a rule can grant. The telemetry hosts are optional. Both agents read the proxy variables themselves, and neither runs on Node. Claude Code's `LoginFiles` also gain `~/.config/anthropic/`, where a keyless Console sign-in keeps its profile (P2.17).
 
 The agent table also gets a hint for each agent about a low-value token that a `shared` host may get, such as a token from `claude setup-token` (14.2.3). The size of a sandbox for each agent is data there too ([question 14](#15-open-questions)).
 
@@ -1369,12 +1589,27 @@ The row shows `!` and "none, below the floor process", and a `wall_downgraded` a
 
 ### 8.8 Changing policy while sessions run (P2.14)
 
-1. **A command changes running sandboxes.** `policy allow`, `deny` and `rm` write the rule to its layer's file. The client then sends the new layer to every running sandbox that the layer reaches, on every host that it can reach. Network and push rules change at once. Mounts, secrets, SSH keys and paste apply at the next start, and the answer says so.
+1. **A command changes running sandboxes.** `policy allow`, `deny` and `rm` write the rule to its layer's file. The client then sends the new layers with the op `policy.replace` (10.4). They go to every running sandbox that the layer reaches, on every host that the client can reach. The client contacts the hosts in parallel, and waits at most 5 s for each. Network and push rules change at once. Mounts, secrets, SSH keys, paste and the package settings of 7.10 apply at the next start, and the answer says so. "At once" means:
+   - The egress process swaps its policy in one step, and answers with the hash of the new layers. A flow meets the old policy or the new one, never a mix.
+   - Every new flow, and every new request or WebSocket message on an intercepted host, meets the new policy.
+   - A held request that the new policy allows goes through. One that it refuses ends refused.
+   - An open flow that the new policy refuses closes: a spliced flow at once, and an intercepted one before its next request. `policy rm` does the same (9.1). Docker Sandboxes keeps such connections open until a restart ([build facts](../research/build-facts.md#3a-live-policy-changes)).
+   - The client prints each sandbox's change only after its hash comes back. The target is 2 s or less for 10 sandboxes on 3 reachable hosts (section 12). No comparable tool documents such a time, so P2.14 measures it.
 2. **A hand edit waits for a start, or for `policy apply`.** `policy apply` shows the change for each sandbox and asks, then sends it. `--dry-run` only shows it, as Terraform's plan does ([Terraform](https://developer.hashicorp.com/terraform/cli/commands/plan)). Each sandbox records a hash of its layers. `ls` marks a session whose layers differ from the laptop's files with `~`, and `show` names the layer that changed.
-3. **A host that the client cannot reach** gets the change at its next contact. The answer lists those hosts.
-4. **Lockdown.** `policy lockdown [--host <h>]` adds a lock layer to every running sandbox that it reaches: `unknown = "deny"`, the preset `locked`, and every session rule paused. It is the step to take when something looks wrong. `policy lockdown --off` lifts it, after the user types the word `lockdown`, or passes `--confirm=lockdown`.
+3. **A host that the client cannot reach** gets the change at its next contact. The next `attach`, `ls`, `new` or `policy` command that reaches the host compares the hashes, and sends the layers again when they differ. The answer lists the hosts that the client could not reach. `allow`, `deny`, `rm` and `apply` still exit 0.
+4. **Lockdown.** `policy lockdown [--host <h>]` adds a lock layer to every running sandbox that it reaches: `unknown = "deny"`, the preset `locked`, and every session rule paused. It closes every open flow that the lock layer refuses. The supervisor keeps the lock layer in the trusted manifest, so it holds across a restart of the session. The client records the lockdown in `lockdown.json` in its state folder, so that each later start in its scope gets the same layer. It is the step to take when something looks wrong. A lockdown that misses a host with running sandboxes fails with `policy_unreached`, and names that host. The client applies it there at its next contact. `policy lockdown --off` lifts it, after the user types the word `lockdown`, or passes `--confirm=lockdown`. Without a terminal and without `--confirm`, it fails with `lockdown_confirm`.
 5. **Learn.** `policy learn <host>/<session> [--repo <r> | --profile <p> | --all]` reads the session's audit log. It proposes one rule for each host that the unknown action `allow` let through, that the judge allowed, or that a person allowed at a hold, with the count of flows. The user picks rules from a list, and the client writes them to the layer. `--dry-run` prints them. Harden-Runner builds its baseline from past runs in the same way, and offers a policy from it ([baseline](https://docs.stepsecurity.io/github-actions/harden-runner/baseline)).
 6. **Edit.** `policy edit [--repo <r> | --profile <p> | --host <h> | --all]` opens the file at that layer's table in `$EDITOR`. It then runs `config check`, and `policy apply --dry-run`.
+
+**Errors** (9.3): `policy_unreached` and `lockdown_confirm`.
+
+**Tests (P2.14).**
+
+- A race test of the swap: flows during a swap meet the old policy or the new one, never a mix.
+- An open spliced flow closes when a new layer refuses its host. A held request ends when a new layer decides it.
+- End to end, on two or more hosts that the owner allows: `policy deny x --all` with 10 running sandboxes. Each egress process refuses `x` within 2 s, and an open stream to `x` closes.
+- End to end: with one host's SSH blocked by the test, `policy lockdown` fails with `policy_unreached` and names that host. After the block lifts, the next `ls` applies the lock layer there.
+- `ls` shows `~` after a hand edit, until `policy apply`.
 
 ## 9. The CLI and the launcher
 
@@ -1419,6 +1654,7 @@ Every command follows [0033](decisions/0033-one-command-grammar.md): session ver
 | `simstim host add <name> <target> [--tier own\|throwaway\|shared] [--host-key SHA256:…] [--root-step run\|print\|skip] [--images auto\|host\|laptop] [--no-sandbox] [--yes]` | As today, and it pins the host key, asks the tier and prepares the host (14.2.1). With `--yes`, `--tier` is needed. `--no-sandbox` keeps today's flow. | H3, H4, H10 |
 | `simstim host prepare <host> [--root-step run\|print\|skip] [--images auto\|host\|laptop] [--delegate-io] [--nitro-slots <n>]` | The sandbox probe, runtime delivery, the root step and a test boot | H7, H9, H10, P6.4 |
 | `simstim host upgrade <host>` | Updates the helper and the runtime | H9 |
+| `simstim host feed sync [<host>]` | Downloads the malicious-package feed on the laptop and copies it to the host (7.11) | P7.1 |
 | `simstim host rekey <host>` | Replaces the pinned host key after the user types the host's name (14.7.1) | H3 |
 | `simstim host default [<host>\|auto] [--clear]` | Prints, sets or clears the default host (14.10.1) | H12 |
 | `simstim host rm <host> [--purge] [--destroy] [--force] [--root-step run\|print\|skip] [--confirm <name>]` | Forgets the host, then asks about each further part. `--purge` removes everything that the tool put on the host (14.12). `--purge` and `--destroy` need the typed name, or `--confirm`. | H15 |
@@ -1427,11 +1663,13 @@ Every command follows [0033](decisions/0033-one-command-grammar.md): session ver
 | `simstim host add <name> --accept - [--address <address>]` | Reads the reply, pins its host keys and adds the host (18.3) | H20 |
 | `simstim host leave` | On a joined machine: undoes what `host join` did (18.4) | H20, H21 |
 | `simstim host set <host> label.<key>=<value>` | Sets or removes a label, which is metadata (18.2) | H19 |
-| `simstim host doctor <host> [--fix] [--json]` | As today, with a "Sandboxes" block, health items and the route | H6, H14, H16 |
-| `simstim image ls [<host>]`, `image pull <ref> <host>`, `image rm <digest> <host>` | Lists, prepares and removes images on a host | P3 |
-| `simstim image save <host>/<session> <ref>` | Saves the root's changes as an image, after a review (microvm) | P5 |
+| `simstim host doctor <host> [--fix] [--json]` | As today, with a "Sandboxes" block, health items and the route | P1.1, H14, H16 |
+| `simstim image ls [<host>]`, `image pull <ref> <host> [--update]`, `image rm <digest> <host>` | Lists, prepares and removes images on a host. `--update` pins a tag that moved, after it shows both digests (20.8). | P3.2, P4.5 |
+| `simstim image save <host>/<session> <ref> [--allow-flagged] [--replace]` | Saves the root's changes as an image on that host, after a scan for secrets and a review (microvm, 21.3) | P5.5 |
 | `simstim fork <host>/<session> [--name <n>] [--count <n>] [--detach]` | Copies a stopped or frozen sandbox into new sessions | P5 |
-| `simstim cp <host>/<session>:<path> <local>` and `cp <local> <host>/<session>:<path>` | Copies files out of or into a sandbox, with a size cap | P5 |
+| `simstim cp <host>/<session>:<path> <local> [-f] [--allow-flagged]` and `cp <local> <host>/<session>:<path> [-f]` | Copies files and folders out of or into a running sandbox, with a size cap and a review of files that run code (21.1) | P5.2 |
+| `simstim rewind <host>/<session> [<n>] [--list] [-y]` | Lists the checkpoints of a microvm sandbox, or puts its session disk back to checkpoint n (21.2) | P5.4 |
+| `simstim new --machine <provider> …` | Makes one provider machine for the session, and removes it at `rm` (21.8) | P7.4 |
 
 ### 9.2 What users of other tools will find
 
@@ -1461,20 +1699,49 @@ Each error has a message and a `Try:` line ([style](style.md)). The host sends a
 | `wall_setup` | devbox needs a one-time root step before it can run process walls: Ubuntu limits user namespaces. | `simstim host prepare devbox` (runs or prints the root step) |
 | `wall_helper_old` | The helper on devbox is too old for walls. | `simstim host upgrade devbox` |
 | `policy_locked` | A lock in config.toml denies api.stripe.com, so no layer can allow it. | `simstim policy edit --all`, and remove it from `[lock] network.deny` |
+| `policy_unreached` | The lockdown did not reach box, so its sandboxes still run without it. | Run `simstim policy lockdown` again when box is back, or `simstim host doctor box` |
+| `lockdown_confirm` | Lifting a lockdown needs the word lockdown, and there is no terminal to type it. | `simstim policy lockdown --off --confirm=lockdown` |
 | `layer_missing` | Say where the rule goes: a session, a profile, a repository, a host or all sessions. | `simstim policy allow api.example.com --in devbox/auth-fix` |
 | `grant_wildcard` | `*.vercel.app` covers sites of many owners. | Grant the one host you need, such as `myapp.vercel.app` |
 | `grant_idn` | `gіthub.com` holds characters that are not Latin. Its ASCII form is `xn--gthub-…`. | Type the name as you mean it, with `--idn` |
 | `grant_public` | acme/site is a public repository, so each push publishes. | `simstim policy allow push github.com/acme/site --in <s> --public` |
 | `secret_unbound` | GITHUB_TOKEN has no hosts, so it would enter the sandbox as a plain value. | Add `hosts = ["api.github.com", "github.com"]` to `[secrets.GITHUB_TOKEN]`, or pass `--expose GITHUB_TOKEN` |
+| `secret_store` | `codex login --with-api-key` failed in auth-fix, so Codex has no key there. | `simstim new devbox --agent codex --expose OPENAI_API_KEY`, which puts the real key in the sandbox |
 | `sandbox_stopped` | auth-fix on devbox is stopped. | `simstim attach devbox/auth-fix` (wakes it) |
 | `sandbox_busy` | auth-fix on devbox is starting or stopping. | Wait a moment, then try again |
+| `setup_outside` | The setup script of ~/src/app, .simstim/setup, points outside the repository, so it cannot run. | Make `.simstim/setup` a file in the repository, or start with `--no-setup` (19.2) |
+| `git_scope` | Could not start git in a scope on devbox: Failed to connect to bus. | `simstim host doctor devbox` (19.3) |
 | `unpulled` | auth-fix has 3 commits that you have not pulled. | `simstim pull devbox/auth-fix`, or `simstim rm devbox/auth-fix --force` |
 | `pull_flagged` | The work changes files that run code on your laptop or in CI: `.github/workflows/ci.yml`, `.claude/settings.json`. | Review them with `git diff <base> refs/simstim/sessions/devbox/<id>/…`, then `simstim pull devbox/auth-fix --allow-flagged` |
 | `mount_microvm` | microvm sandboxes cannot share a folder in this version. | `simstim pull`, or `simstim cp` |
-| `digest_mismatch` | The VMM on devbox does not match the digest in this client. | `simstim host upgrade devbox` (installs the files again) |
+| `digest_mismatch` | A runtime file on devbox, such as the helper or the VMM, does not match the digest in this client. | `simstim host upgrade devbox` (installs the files again) |
+| `image_bad_layer` | A layer of ghcr.io/acme/dev:1 has a path that leaves the image: `../etc/passwd`. | Rebuild the image, or use another one (20.2) |
+| `image_too_large` | ghcr.io/acme/big:1 unpacks to more than 16 GiB, the cap for an image. | Use a smaller image (20.2) |
+| `image_root_mismatch` | ghcr.io/acme/dev@sha256:ab12… gave another root hash on nuc than on devbox. nuc deleted its copy. | `simstim host doctor nuc`, and report both root hashes as a bug (20.2) |
+| `image_in_use` | auth-fix on devbox still uses ghcr.io/acme/dev@sha256:ab12…. | `simstim rm devbox/auth-fix`, then remove the image (20.2) |
+| `image_moved` | ghcr.io/acme/dev:1 now points at sha256:cd34…, and images.lock pins sha256:ab12…. | `simstim image pull ghcr.io/acme/dev:1 devbox --update`, after you check the new image (20.8) |
+| `image_signature` | ghcr.io/acme/dev@sha256:ab12… has no signature that `[sandbox.image_policy]` accepts. | Sign it with cosign, or change `[sandbox.image_policy]` in config.toml (20.8) |
+| `sandbox_boot` | auth-fix on devbox did not boot: its guest init did not answer within 60 s. | `simstim host doctor devbox` (20.3) |
+| `agents_disk` | devbox could not build the agents disk: claude's install folders hold more than 500,000 files. | `simstim host doctor devbox` (20.4) |
+| `runtime_advisory` | cloud-hypervisor 51.1 on devbox has a known advisory: GHSA-f47p-p25q-83rh. | `simstim host upgrade devbox` (20.9) |
 | `judge_unavailable` | The judge at 127.0.0.1:11434 did not answer, so unknown sites are unsure. | Start the model server, or set `classifier.judge = "none"` |
 | `ssh_key_kind` | DEPLOY_KEY is not an SSH key. | Add `kind = "ssh-key"` to `[secrets.DEPLOY_KEY]` in config.toml |
 | `keep_refused` | `.bashrc` runs at every start, so `keep` cannot hold it. | Keep `.bash_history`, and put start-up commands in the image |
+| `cp_too_big` | The copy from auth-fix holds 1.2 GiB, and cp copies at most 256 MiB. | `simstim pull devbox/auth-fix` for work in git, or raise `sandbox.cp_max` in config.toml |
+| `cp_path` | /etc/shadow is outside the folders that cp reaches: /work, the agent's home folder, /tmp and /mnt. | Copy from a path under one of those folders |
+| `cp_git` | out/.git/hooks/pre-commit would land in a .git folder on your laptop. | Copy the files you need, without their .git folder |
+| `cp_exists` | ./notes.md already exists on your laptop. | `simstim cp devbox/auth-fix:/work/app/notes.md ./notes.md -f` (replaces it) |
+| `cp_flagged` | The copy holds files that run code on your laptop or in CI: .envrc, .githooks/pre-commit. | Read them with `simstim shell devbox/auth-fix`, then add `--allow-flagged` |
+| `cp_unwalled` | auth-fix runs with no wall, so its files are your own files on devbox. | `scp devbox:<path> .` |
+| `rewind_off` | Checkpoints are off on devbox: ext4 cannot clone files. | `simstim host show devbox` (says what turns them on) |
+| `rewind_unknown` | auth-fix has no checkpoint 7: it keeps 4. | `simstim rewind devbox/auth-fix --list` |
+| `image_wall` | image save needs a microvm sandbox, and auth-fix runs at process. | `simstim new devbox --wall microvm`, set it up there, then save |
+| `image_secret` | /etc/app/config.json holds the value of ANTHROPIC_API_KEY, so image save stopped and kept nothing. | Remove it with `simstim shell devbox/auth-fix`, then save again |
+| `image_flagged` | The changes add files that run code at login or at start: /etc/profile.d/tools.sh. | Read them with `simstim shell devbox/auth-fix`, then add `--allow-flagged` |
+| `image_exists` | devbox already has an image named devtools. | Add `--replace`, or pick another name |
+| `image_elsewhere` | devtools was made on devbox, so only devbox can use it. | `simstim new devbox --image devtools`, or build a template on your laptop (14.9.5) |
+| `machine_provider` | lima cannot make a machine for each session. Only e2b can. | `simstim new --machine e2b` |
+| `machine_token` | No API key for e2b: E2B_API_KEY is not set, and the E2B CLI is not logged in. | Add `[machines.e2b] token_command = "<command>"` to config.toml |
 
 In the guest, a refused flow gets a 403 whose body is one line: `simstim: api.example.com is not allowed in devbox/auth-fix. Try: simstim policy allow api.example.com --in devbox/auth-fix`.
 
@@ -1532,11 +1799,13 @@ The supervisor gives odd stream IDs and the guest gives even ones, so both can o
 | `egress` | guest | `{"via":"explicit\|transparent","host":"…","port":443}` | raw bytes of the flow |
 | `dns` | guest | `{}` | one DNS message each way |
 | `port` | supervisor | `{"port":3000}` | raw bytes |
-| `put` | supervisor | `{"name":"shot.png","size":123456,"sha256":"…"}` | the file's bytes. The guest answers with the path. |
+| `put` | supervisor | `{"name":"shot.png","size":123456,"sha256":"…"}`, with `"path":"/work/app/data.csv"` and `"replace":true` for `cp` (21.1) | the file's bytes. The guest answers with the path. Without `path`, the file goes to the paste folder (7.6). |
 | `bundle` | supervisor | `{"dir":"in","repo":"app"}` or `{"dir":"out","base":"<sha>"}` | a git bundle |
 | `exec` | supervisor | `{"id":"<exec id>"}` | the command's stdout and stderr, framed, then its exit code (6.11) |
 | `agent` | guest | `{}` | the SSH agent protocol, for the keys of 7.9 |
 | `sftp` | supervisor | `{}` | the SFTP protocol, which the guest init serves as the user `agent` (17.7) |
+| `get` | supervisor | `{"path":"/work/app/out.txt","max":268435456}` | the file's bytes, then a close. More than `max` bytes closes the stream as refused (21.1). |
+| `layer` | supervisor | `{}` | the guest's whole root as one tar stream, without the paths that 21.3 leaves out, under the caps of 20.2 (21.3) |
 
 ### 10.3 `ctl` operations
 
@@ -1545,9 +1814,11 @@ From the supervisor to the guest init, as `TRequest`:
 | Op | Arguments | Answer |
 | --- | --- | --- |
 | `seed` | `{"repo":"app","branch":"main","into":"<name>/<id>/<slug>","bundle_stream":7}` | `{"head":"<sha>"}` |
-| `start` | `{"argv":[…],"env":[…],"cwd":"/work/app","cols":120,"rows":40,"hooks":[…],"ca_pem":"…","proxy":"http://127.0.0.1:3128","dns":"real\|synthetic","state_dirs":[…],"package_managers":true}` | `{"agent_pid":12}` |
+| `start` | `{"argv":[…],"env":[…],"cwd":"/work/app","cols":120,"rows":40,"hooks":[…],"ca_pem":"…","proxy":"http://127.0.0.1:3128","dns":"real\|synthetic","state_dirs":[…],"package_managers":"guarded","min_release_age":"7d"}` | `{"agent_pid":12}` |
 | `stop` | `{"grace_ms":10000}` | `{}`, then the guest shuts down |
-| `freeze`, `thaw` | `{}` | `{}` (P5) |
+| `freeze`, `thaw` | `freeze`: `{"max_ms":5000}`. `thaw`: `{}` | `{}`. The guest thaws by itself after `max_ms` (6.5, 21.2). |
+| `cp.list` | `{"path":"/work/app/out","max_entries":10000}` | `{"entries":[{"path":"a/b.txt","type":"file","size":12}]}` (21.1) |
+| `changes` | `{"max_entries":100000}` | `{"paths":["/usr/local/bin/tool"]}`: the paths in the upper folder of the root overlay, for the review of `image save` (21.3) |
 | `refs` | `{}` | `{"refs":[{"name":"refs/heads/…","sha":"…"}]}` |
 | `spawn` | `{"session":"<id>","argv":[…],"env":[…],"cwd":"/work/app","cols":120,"rows":40,"ephemeral":false}` | `{"pid":31}`. The guest init starts another holder in the same sandbox (6.11). |
 | `exec` | `{"id":"<exec id>","argv":[…],"cwd":"/work/app","timeout_ms":600000}` | `{}`, then the output on an `exec` stream |
@@ -1584,11 +1855,14 @@ The supervisor serves `paths.Socket(id)` with the holder's protocol. It answers 
 | `stop` | supervisor | New |
 | `arm` | supervisor | New: `{"env":{"NAME":"value"}}`, values for bound secrets |
 | `pull.begin`, `pull.read`, `pulled` | supervisor | New |
+| `cp.list`, `cp.read`, `checkpoints`, `rewind`, `image.save`, `image.keep`, `image.drop` | supervisor | New: sections 21.1 to 21.3 |
 | `hook` | refused | Hooks reach the guest holder's hook socket only |
 
 `TUploadBegin`, `TUploadChunk` and `TUploadEnd` are now accepted on the session socket too, for walled sessions (feature `put`).
 
-The holder of an unwalled session (P0.2) checks the peer of each connection. It reads `SO_PEERCRED`, then `/proc/<pid>/cgroup`. A peer inside any session's unit gets only `hello` and `ping`, and the error `forbidden` for anything else. Hooks use the new hook socket, `paths.HookSocket(id)`, which accepts only the role `hook` and the op `hook`.
+The holder of an unwalled session (P0.2) checks the peer of each connection. It reads `SO_PEERCRED`, whose credentials are those of the peer at `connect` time ([unix(7)](https://man7.org/linux/man-pages/man7/unix.7.html)), then `/proc/<pid>/cgroup`. Where the kernel has `SO_PEERPIDFD` (Linux 6.5, [kernelnewbies](https://kernelnewbies.org/Linux_6.5)), the holder also gets a pidfd. After it reads the cgroup, it checks with `pidfd_send_signal(pidfd, 0)` that the same process still lives. So a reused pid cannot pass. A peer whose cgroup path lies under `<name>.slice` gets only `hello` and `ping`, and the error `forbidden` for anything else. That slice holds every session's unit and the git scopes of 19.3. A peer whose cgroup the holder cannot read counts as inside. Hooks use the new hook socket, `paths.HookSocket(id)`, which accepts only the role `hook` and the op `hook`.
+
+**Without a systemd user manager,** sessions have no unit, so the holder cannot tell a session's process from another process of the user. It keeps the role check alone: the hook socket accepts only `hook`, and the agent's environment names only the hook socket. Any process of the user can still dial a session socket. `host doctor` reports the check "session sockets" as weak there, with the hint to run sessions under systemd's user manager.
 
 ### 10.5 Bridge ops, features and hello
 
@@ -1601,6 +1875,7 @@ New bridge ops. The bridge serves the ops of section 14 in a new `internal/host/
 | `runtime.status` | `sandbox` | The runtime files that the host holds, and the bytes so far of a download | 14.9.3 |
 | `runtime.fetch` | `sandbox` | The host downloads the files that the client names by digest | 14.9.3 |
 | `runtime.install` | `sandbox` | The host checks files that the laptop copied, and moves them into the store | 14.9.3 |
+| `image.ls`, `image.pull`, `image.install`, `image.status`, `image.rm` | `images` | List the host's images, fetch one by digest, check the layers that the laptop copied, report progress, and remove one | 20.2 |
 | `host.facts` | `facts` | The host's facts and health items | 14.10.2, 14.11.1 |
 | `host.drain` | `drain` | Sets or clears the drain mark | 14.11.3 |
 | `host.purge` | `purge` | Removes what the helper put on the host, and reports it | 14.12 |
@@ -1608,13 +1883,14 @@ New bridge ops. The bridge serves the ops of section 14 in a new `internal/host/
 
 The helper never runs sudo, so no bridge op runs a root step. The client builds the root step and runs it through `ssh -t … sudo` (14.4).
 
-New features in the bridge's hello: `wall`, `policy`, `spawn`, `stop`, `arm`, `pull.bundle`, `put`, `sandbox`, `facts`, `drain`, `purge` and `events`. The op `events.watch` streams the events of 17.6 until the client closes it. Later: `sftp` (P2.15). Later: `classify` (P2), `ssh-key` (P2), `images` (P3), `fork` and `cp` (P5). `spawn` covers `shell` and `exec`. `wall` means that the helper can start walled sessions. `sandbox` means that it serves the sandbox probe and the runtime ops. A client that needs a feature the helper lacks says `wall_helper_old` with its hint, or the error "too old for sandboxes" of section 14.14.
+New features in the bridge's hello: `wall`, `policy`, `spawn`, `stop`, `arm`, `pull.bundle`, `put`, `sandbox`, `facts`, `drain`, `purge` and `events`. The op `events.watch` streams the events of 17.6 until the client closes it. Later: `sftp` (P2.15). Later: `classify` (P2), `ssh-key` (P2), `images` (P3), `fork`, `cp`, `rewind` and `image.save` (P5, section 21). `spawn` covers `shell` and `exec`. `wall` means that the helper can start walled sessions. `sandbox` means that it serves the sandbox probe and the runtime ops. A client that needs a feature the helper lacks says `wall_helper_old` with its hint, or the error "too old for sandboxes" of section 14.14.
 
 New fields in the hello and in requests:
 
 - `proto.Hello` gains a field `HostID`, with the JSON name `host_id` (14.7.2).
 - `api.NewArgs` gains `Need *Need`, `PlacedBy string` and `PlaceReason string` (14.10, 14.15), beside the fields of 10.6.
 - New error codes: `no_room`, `draining`, `level_below`, `runtime_missing`, `unsaved` and `busy` (14.15).
+- Section 20 adds the error codes `image_bad_layer`, `image_too_large`, `image_root_mismatch`, `image_in_use`, `image_moved`, `image_signature`, `sandbox_boot`, `agents_disk` and `runtime_advisory`.
 
 ### 10.6 Types in `internal/api`
 
@@ -1691,6 +1967,7 @@ Guest       *GuestClaims      `json:"guest,omitempty"`        // the last status
 Pulled      []string          `json:"pulled,omitempty"`       // commits that the client fetched
 Image       *ImageRecord      `json:"image,omitempty"`        // ref, digest, root hash (P3)
 Disk        *DiskRecord       `json:"disk,omitempty"`         // path, cap (P3)
+Agents      string            `json:"agents,omitempty"`       // the agents disk's SHA-256 (P3.5, 20.4)
 ForkOf      string            `json:"fork_of,omitempty"`      // (P5)
 Limits      *Limits           `json:"limits,omitempty"`       // declared: the memory that admission reserved (14.10.3)
 PlacedBy    string            `json:"placed_by,omitempty"`    // "auto", or "" (14.10.5)
@@ -1707,11 +1984,19 @@ New event kinds in `internal/alerts`, added to `Kinds` and to `DefaultEvents`:
 | Event | When |
 | --- | --- |
 | `wall_downgraded` | A session starts below its host's floor, or with the `open` preset |
-| `egress_blocked` | A flow waits for an answer, or the model API guard refuses a request. At most one a minute for each session. |
-| `secret_misuse` | A sentinel goes to the wrong place, or another credential goes to a bound host |
+| `egress_blocked` | A held request opens, or the model API guard or a registry gate refuses a request. At most one a minute for each session. |
+| `secret_misuse` | A sentinel goes to the wrong place, another credential goes to a bound host, or a request carries a decoy's value (21.7) |
 | `secret_minted` | A bound host answers with a new credential |
 | `secret_exposed` | A session starts with an exposed secret |
 | `link_silent` | The guest init has not sent a heartbeat for 15 s |
+| `egress_unknown` | Under `network.unknown = "allow"`, the first flow to a host that no rule names (7.2). Once for each host. |
+| `model_budget` | A session passes `network.model_budget`, and the egress process starts to refuse model requests (17.8) |
+| `disk_full` | A process wall's session folder passes `sandbox.disk_max`, and the supervisor stops the sandbox (17.1) |
+| `sandbox_ready` | A sandbox has started, and its guest init answers (17.6) |
+| `sandbox_stopped` | A sandbox stops: by `stop`, by `idle_stop` or by `max_run` (17.6) |
+| `sandbox_error` | A sandbox fails to start, or its wall fails while it runs (17.6) |
+| `health_degraded` | A host gets a health item that it did not have (14.11.1) |
+| `health_recovered` | A host's last health item goes (14.11.1) |
 
 `secret_misuse` and `link_silent` skip the once-a-minute rule, as a session's end does ([0026](decisions/0026-end-and-memory-alerts.md)). For a walled session, the `DETAIL` variable of a command destination holds text that the guest wrote. A new variable, `<NAME>_DETAIL_FROM=guest`, says so, and the docs say never to put `DETAIL` into code.
 
@@ -1721,21 +2006,21 @@ New event kinds in `internal/alerts`, added to `Kinds` and to `DefaultEvents`:
 
 | Platform | Strongest level | Floor that `host prepare` pins | Notes | Fallback |
 | --- | --- | --- | --- | --- |
-| Linux with KVM, host kernel 6.8 or later (Ubuntu 24.04, Debian 13), `/dev/kvm` open to the user (mode 0666, as upstream systemd sets it, or the user already in `kvm`) | microvm (Cloud Hypervisor) | microvm | No root step needed for the level | process |
-| Linux with KVM, `/dev/kvm` 0660 `root:kvm` and the user not in `kvm` (Debian's default) | without root: process (gvisor from P6). After the root step: microvm | the probe's best at that time | The root step's `kvm-acl` opens `/dev/kvm` at once, and `kvm-group` keeps it after a reboot (14.4.2). That Ubuntu also sets 0660 is UNVERIFIED. | process |
+| Linux with KVM, host kernel 6.8 or later (Ubuntu 24.04, Debian 13), `/dev/kvm` open to the user (mode 0666, as upstream systemd sets it since v236, or the user already in `kvm`) | microvm (Cloud Hypervisor) | microvm | No root step needed for the level | process |
+| Linux with KVM, `/dev/kvm` 0660 `root:kvm` and the user not in `kvm` (the default of Debian and Ubuntu) | without root: process (gvisor from P6). After the root step: microvm | the probe's best at that time | The root step's `kvm-acl` opens `/dev/kvm` at once, and `kvm-group` keeps it after a reboot (14.4.2). Debian and Ubuntu build systemd with `-Ddev-kvm-mode=0660`, so both set 0660 ([build facts](../research/build-facts.md#4-linux-walls)). Their default server images lack `setfacl`, so there `kvm-group` alone opens it, after the next reboot (14.4.2). | process |
 | Linux with KVM, kernel 5.10, 6.1 or 6.18 below 6.8 (Debian 12) | process until P6.2, then microvm (Firecracker) | process | Cloud Hypervisor needs 6.8 or later. Firecracker tests 5.10, 6.1 and 6.18 only ([kernel policy](https://github.com/firecracker-microvm/firecracker/blob/main/docs/kernel-policy.md)). | process |
-| Linux without KVM: Hetzner Cloud ([FAQ](https://docs.hetzner.com/cloud/servers/faq/)), most VPS, EC2 types without Nitro Enclaves, GCE Arm, E2 and AMD types other than N4D, Azure Arm sizes | process, gvisor from P6 | process | No nested virtualisation. No root step can give these hosts microvm. | Move the host to a type with it |
+| Linux without KVM: Hetzner Cloud ([FAQ](https://docs.hetzner.com/cloud/servers/faq/)), most VPS, EC2 types without Nitro Enclaves, GCE Arm, E2 and AMD types other than N4D, Azure Arm sizes | process, gvisor from P6 | process, then gvisor from P6.1 ([question 2](#15-open-questions)) | No nested virtualisation. No root step can give these hosts microvm. | Move the host to a type with it |
 | EC2 with Nitro Enclaves, launched with `--enclave-options Enabled=true`: most M, C and R families from the 5th generation on, Intel, AMD and Graviton, except their smallest and most metal sizes ([EC2](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/amazon-ec2-nitro-sandboxes.html)) | without root: process (gvisor from P6). After the root step: microvm (`nitro`, from P6.4) | the probe's best at that time | Firecracker 1.18 drives Nitro Sandboxes through `/dev/nitro_enclaves`, with no `/dev/kvm`. The parent needs Amazon Linux 2023 `kernel6.18`. Memory is donated whole, with no balloon ([question 53](#15-open-questions)). | nested microvm where the type has it, else process |
 | Cloud VM with nested virtualisation: EC2 M7i, C7i, R7i, M8i, C8i, R8i, X8i, I7i and variants, all Intel ([AWS](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/amazon-ec2-nested-virtualization.html)). GCE Intel types except E2 and memory-optimised, and AMD N4D ([GCE](https://docs.cloud.google.com/compute/docs/instances/nested-virtualization/overview)). Azure x86 sizes such as Dsv6. | microvm | microvm | Slower: Google warns of 10 % or more for CPU-bound work. P3.8 measures it. | process |
-| Ubuntu 23.10 or later, any of the above | as above | as above | Unprivileged user namespaces need an `AppArmor` profile ([Ubuntu](https://ubuntu.com/blog/ubuntu-23-10-restricted-unprivileged-user-namespaces)). The root step's `userns-apparmor` installs it for the namespace launcher (14.4.2). Without it, process walls are refused. | microvm, which needs no user namespace for the guest |
+| Ubuntu 23.10 or later, any of the above | as above | as above | Unprivileged user namespaces need an `AppArmor` profile ([Ubuntu](https://ubuntu.com/blog/ubuntu-23-10-restricted-unprivileged-user-namespaces)). The root step's `userns-apparmor` installs it for the namespace launcher, which starts the guest init with no capabilities (14.4.2). Without it, process and gvisor walls are refused, and jails run without namespaces (5.6). Ubuntu 24.04 sets `apparmor_restrict_unprivileged_userns=1`. 25.04 and later also set `apparmor_restrict_unprivileged_unconfined=1` ([build facts](../research/build-facts.md#4-linux-walls)). | microvm, which needs no user namespace for the guest |
 | A host where the user has no sudo | as the rows above say for "without root" | the probe's best | The machine's owner runs the printed root step (14.2.2). | |
-| Mac, Apple M3 or later, macOS 15 or later | microvm, inside a Lima VM | microvm | `host create lima` sets `nestedVirtualization: true`, which Lima supports with `vmType: vz` on M3 or later and macOS 15 or later ([Lima template](https://raw.githubusercontent.com/lima-vm/lima/master/templates/default.yaml)). | process |
+| Mac, Apple M3 or later, macOS 15 or later | microvm, inside a Lima VM | microvm | `host create lima` turns on `nestedVirtualization` where Lima's own check passes (19.4). Lima supports it with `vmType: vz` on M3 or later and macOS 15 or later ([Lima template](https://raw.githubusercontent.com/lima-vm/lima/master/templates/default.yaml)). | process |
 | Mac, Apple M1 or M2 | process, inside a Lima VM | process | No nested virtualisation. gvisor from P6. | none |
 | Mac, Apple silicon, as a host itself | none: no native helper in this plan | | `vz` is a later level for such hosts. It needs a darwin helper, launchd and an entitled binary ([question 37](#15-open-questions)). | A Lima VM, as above |
 | Any Mac host while the laptop sleeps | | | A local Lima VM stops with the laptop. Sessions that must outlive the lid belong on a remote host. | |
 | Host made by `host create docker` | none | none | Docker's default seccomp profile refuses `unshare`, and there is no `/dev/kvm` ([Docker](https://docs.docker.com/engine/security/seccomp/)). Tier `own`. | Use `--wall none --downgrade`, or another host |
-| Host made by `host create e2b` | process (UNVERIFIED: nothing has tested namespaces inside an E2B guest yet) | the probe's answer | Each E2B sandbox is a Firecracker microVM. Pause keeps memory, with any exposed secret, at E2B. Tier `shared` ([question 32](#15-open-questions)). | none, with a downgrade |
-| Host made by `host create lima` | as for the Mac above, or the Linux host's KVM | | `host create lima` also sets `networkOpts.hostLoopback: false`, so the guest cannot reach the laptop's loopback services. The default is true since Lima 2.3. (P0.8) Tier `own`. | |
+| Host made by `host create e2b`, or a machine of `new --machine e2b` (21.8) | the probe's answer: gvisor or process where it passes, else none (UNVERIFIED: step 1 of P7.4 runs the probe there) | the probe's answer. Below gvisor, a session needs `--downgrade`, because the tier is `shared` (14.8.2). | Each E2B sandbox is a Firecracker microVM. Pause keeps memory, with any exposed secret, at E2B. Tier `shared` ([question 32](#15-open-questions)). | none, with a downgrade |
+| Host made by `host create lima` | as for the Mac above, or the Linux host's KVM | | `host create lima` also sets `networkOpts.hostLoopback: false`, so the guest cannot reach the laptop's loopback services. The default is true since Lima 2.3. Lima refuses the setting with QEMU, so a Lima VM on a Linux laptop can still reach that laptop's loopback, and `host doctor` warns (19.4). Tier `own`. | |
 | Windows host | none | | No helper | |
 | Windows laptop | as the host allows | | The client runs. Paste paths and notices behave as today. | |
 
@@ -1752,11 +2037,11 @@ The figures from upstream are for small configurations. Firecracker reaches the 
 | Key to PTY, added by the supervisor and the link | p50 0.3 ms or less, p99 2 ms or less | The debug trace (`--debug=attach`) gives the bridge's read and the holder's write of each key. Compare a `none` and a `process` session on the same host, 1,000 keys each, with `scripts/bench.sh`. |
 | Output through the supervisor | 100 MiB/s or more on one core | A Go benchmark in `internal/link` and `internal/supervisor` that passes 1 GiB through a socket pair, beside `internal/client/attach_bench_test.go` |
 | Start to the agent's first output, process wall | 700 ms or less above a `none` session, at p50 | `scripts/time-to-agent.sh` with `--wall process`, 20 runs |
-| Start to the holder's answer, microvm, image cached | 1.5 s or less on bare-metal KVM, 4 s or less nested, at p50 | `time-to-agent.sh` with `--wall microvm`. The supervisor's log has a time for each step: VMM up, kernel, guest init, holder. |
+| Start to the holder's answer, microvm, image cached | 1.5 s or less on bare-metal KVM, 4 s or less nested, at p50. Both are project targets, with no upstream figure. | `time-to-agent.sh` with `--wall microvm`. The supervisor's log has a time for each step: VMM up, kernel, guest init, holder. |
 | Wake on attach | The start above, plus 0.5 s or less | `time-to-agent.sh --stop-first` |
 | Stop | 5 s or less at p95 | The supervisor's log, from `stop` to the unit's end |
-| Memory for each idle walled session, above a `none` session | process: 40 MiB or less. microvm: 160 MiB or less above the agent's own use. | `memory.current` of the unit with the agent idle for 60 s, read by `ls --json` |
-| Density on the 4 GB test host (2.9 GiB for sessions) | 3 idle Claude Code sessions at process, 2 at microvm with 1 GiB guests | An end-to-end script that starts sessions until the next one fails, and records each unit's memory |
+| Memory for each idle walled session, above a `none` session | process: 40 MiB or less. microvm: each part of 20.10 within its budget. That is 96 MiB inside the guest above the agent's own use. Outside the guest, it is a reserve of 128 MiB plus 1/256 of the size. | `memory.current` of the unit with the agent idle for 60 s, read by `ls --json`. For microvm, also the split of 20.10. |
+| Density on the 4 GB test host (2.9 GiB for sessions) | 3 idle Claude Code sessions at process, 2 at microvm with 1 GiB guests | An end-to-end script that starts the target count of idle sessions, checks that each answers, and records each unit's memory. It never starts sessions until one fails. The largest count that fits is the memory for sessions divided by each sandbox's size plus its reserve (20.10). |
 | A spliced flow's set-up, without DNS | 3 ms or less added, at p50 | A Go benchmark with a local TLS server, direct against through the egress process |
 | An intercepted request, leaf certificate cached | 10 ms or less added, at p50 | The same benchmark |
 | Spliced throughput | 200 MiB/s or more | The same benchmark |
@@ -1769,6 +2054,9 @@ The figures from upstream are for small configurations. Firecracker reaches the 
 | A reinstall after a restart, with kept caches | within 20% of a reinstall with no restart | npm and pnpm on a fixture project, in P1.15 |
 | `ssh auth-fix.box.<name>` to a prompt | 300 ms or less above `shell`, at p50 | P2.15 |
 | An event, from the guest to `events --follow` | 200 ms or less at p50 | P1.16 |
+| A checkpoint, from `freeze` to `thaw`, microvm on XFS or Btrfs | 1 s or less at p95, an estimate to check | P5.4, from the supervisor's log (21.2) |
+| `npm install` of a fixture project, gvisor against process | No target. P6.1 records both times. | P6.1 (21.4) |
+| Key to PTY on the `none` driver, against today's path | The key-to-PTY target above | P6.3 (21.6) |
 
 A target that a measurement misses opens an issue before the phase ends. It does not block the phase unless it is the key-to-PTY target, which guards the project's first principle.
 
@@ -1791,10 +2079,10 @@ Each line that says "bent" needs the owner's yes, and each rule change needs its
 | The user's SSH settings win | Changed for saved hosts | The host key pin and the forwarding options go on the `ssh` command line, where they win over the user's config (14.7.1, 14.8.5). Record 3 of section 14.17 states this. |
 | Agents are data | No | Low-value token hints and each agent's sandbox size go in `internal/agents` (8.6). The classifier's fixed lists are data in `internal/egress/rules/classify.toml`. |
 | Decision 0002, one holder for each session | No, but extended | Still one holder, now in the wall, plus a supervisor, an egress process and, for a microvm, a VMM, in the same unit |
-| Decision 0024, the memory cap | Extended | A microvm's guest memory is the session's cap minus 160 MiB for the VMM, the supervisor and the egress process. The balloon device returns freed pages. Admission refuses a sandbox that does not fit, where 0024 lowers a request to the limit (14.10.3). Record 5 of section 14.17 amends 0024. |
+| Decision 0024, the memory cap | Extended | A microvm's guest memory is the session's size. The unit's cap adds a reserve for the VMM, the supervisor, the egress process and page tables: 128 MiB plus 1/256 of the size (20.10). The balloon device returns freed pages. Admission refuses a sandbox that does not fit, where 0024 lowers a request to the limit (14.10.3). Record 0040 extends 0024 for a guest's memory, and record 0042 amends it for admission ([decision records](isolation-plan.md#decision-records)). |
 | Decision 0013 and the design's non-goal "no promise that a process survives a host reboot" | Extended | A stopped session keeps its files, not its processes. An idle stop, when the user turns it on, stops processes too. Principle 2 holds while a session runs. `host create e2b` gives the tier `shared` ([question 32](#15-open-questions)), in record 2 of section 14.17. |
 | Clean-room | No | The design follows public docs. It copies no code, prompts or assets from Docker Sandboxes, a hosted VM service, Nomad (BUSL-1.1) or any closed tool. |
-| Licences | No, but read the detail | Cloud Hypervisor is Apache-2.0 and BSD-3-Clause, both together ([CONTRIBUTING](https://github.com/cloud-hypervisor/cloud-hypervisor/blob/main/CONTRIBUTING.md)): the BSD notice ships. The guest kernel is GPL-2.0: it ships as a separate file with its source and config in each release, never linked. `go-landlock` (MIT), `go-seccomp-bpf` (Apache-2.0), `go-containerregistry` (Apache-2.0), `x/net` (BSD-3-Clause), `sigstore-go` (Apache-2.0) and `hiddeco/sshsig` (Apache-2.0, [sshsig](https://github.com/hiddeco/sshsig)) are compatible. `hcsshim`'s licence is MIT by its repository (UNVERIFIED in this research: P3.2 checks it). gitleaks rules (MIT) get attribution in `NOTICE`. |
+| Licences | No, but read the detail | Cloud Hypervisor is Apache-2.0 and BSD-3-Clause, both together ([CONTRIBUTING](https://github.com/cloud-hypervisor/cloud-hypervisor/blob/main/CONTRIBUTING.md)): the BSD notice ships. The guest kernel is GPL-2.0: it ships as a separate file with its source and config in each release, never linked. `go-landlock` (MIT), `go-seccomp-bpf` (Apache-2.0), `go-containerregistry` (Apache-2.0), `x/net` (BSD-3-Clause), `sigstore-go` (Apache-2.0) and `hiddeco/sshsig` (Apache-2.0, [sshsig](https://github.com/hiddeco/sshsig)) are compatible. `hcsshim` is MIT at v0.15.0 ([LICENSE](https://github.com/microsoft/hcsshim/blob/v0.15.0/LICENSE)), and it raises the module's `go` line to 1.26.8 (20.2). gitleaks rules (MIT) get attribution in `NOTICE`. |
 
 ## 14. Hosts you add
 
@@ -1888,7 +2176,7 @@ Run it now with sudo on box? You type your password into sudo, not into simstim.
   ✓ 2/2 kvm-group
   ✓ microvm walls ready: a test sandbox booted in 0.9s and was deleted
 
-box is ready: own, floor microvm, room for 14 sandboxes of 4 GiB.
+box is ready: own, floor microvm, room for 13 sandboxes of 4 GiB.
 Start one with `simstim new box --agent claude`.
 
 $ simstim new box --agent claude --dir ~/src/app
@@ -2053,16 +2341,16 @@ Enter hands the terminal to `ssh -t … sudo` with Bubble Tea's `ExecProcess`, a
 | `/dev/kvm` | `os.Stat`: mode, owner and group | `kvm.present`, `kvm.mode`, `kvm.group` |
 | `/dev/kvm` works | `open(O_RDWR\|O_CLOEXEC)`, then `ioctl(KVM_GET_API_VERSION)` returns 12 | `kvm.usable` |
 | ACL | The `system.posix_acl_access` xattr, parsed for an entry with the user's uid | `kvm.acl_user` |
-| `kvm` group | `user.Current().GroupIds()`, and `os.Getgroups()` for the process now | `kvm.in_group`, `kvm.in_group_now` |
+| `kvm` group | `user.Current().GroupIds()`, `os.Getgroups()` for the process now, and the `Groups:` line of `/proc/<pid>/status` for the user manager, whose PID is in `user@<uid>.service/init.scope/cgroup.procs` | `kvm.in_group`, `kvm.in_group_now`, `kvm.in_group_manager` |
 | CPU | `vmx` or `svm` in `/proc/cpuinfo` flags (amd64) | `cpu_virt` |
 | Inside a VM | `systemd-detect-virt`, when present | `virt` |
 | Nitro | `/dev/nitro_enclaves` exists, its mode, owner and ACL, and whether it opens. `/sys/class/misc/nitro_enclaves/`: the CPU pool, the memory pool and `pcie_slots`. The instance's vCPU count. | `nitro.present`, `nitro.usable`, `nitro.acl_user`, `nitro.pools` |
 | Landlock | `landlock_create_ruleset(NULL, 0, LANDLOCK_CREATE_RULESET_VERSION)` | `landlock_abi` |
 | seccomp | A `Seccomp:` line in `/proc/self/status` | `seccomp` |
-| User namespaces | `/proc/sys/user/max_user_namespaces` > 0, and `kernel.unprivileged_userns_clone` = 1 and `kernel.apparmor_restrict_unprivileged_userns` = 0 where they exist | `userns`, `apparmor_userns` |
+| User namespaces | `/proc/sys/user/max_user_namespaces` > 0, and the test of the `process` probe (5.1). In that test, a child makes a user and a mount namespace and mounts a tmpfs, directly or through the namespace launcher. `kernel.apparmor_restrict_unprivileged_userns` is read as a fact. | `userns`, `apparmor_userns` |
 | `io_uring` | `/proc/sys/kernel/io_uring_disabled` | `io_uring_disabled` |
 | vsock modules | The block list of the `vsock-modules` step exists | `vsock_blocked` |
-| Subordinate IDs | A range for the user in `/etc/subuid` and `/etc/subgid`, and `newuidmap` on `PATH` | `subuid` |
+| Subordinate IDs | A range for the user in `/etc/subuid` and `/etc/subgid`, and `newuidmap` and `newgidmap` on `PATH` (package `uidmap`) | `subuid`, `has_newuidmap` |
 | Tools | `exec.LookPath("setfacl")` | `has_setfacl` |
 | sudo | `/usr/bin/sudo` exists. `sudo -n true` exits 0, with a 3 s timeout | `sudo`, `sudo_passwordless` |
 | Disk | `paths.DataDir()`: `diskFree`, `statfs` type, a `FICLONE` test | `disk_free`, `disk_fs`, `reflink` |
@@ -2082,7 +2370,7 @@ Enter hands the terminal to `ssh -t … sudo` with Bubble Tea's `ExecProcess`, a
 | `process` | Neither, with `userns`, `landlock_abi` 1 or more and `seccomp` |
 | `none` | Not even that. Sandboxes are off on this host. |
 
-The level after the root step is `microvm` when `kvm.present` or `nitro.present`. Otherwise it is `process` when only `apparmor_userns` stops the `process` driver, and the level now in every other case.
+The level after the root step is `microvm` when `kvm.present` or `nitro.present`. Otherwise it is the stronger of `gvisor` and `process` whose driver only `apparmor_userns` stops (21.4), and the level now in every other case.
 
 **The root needs.** The client, not the helper, turns the probe into root steps:
 
@@ -2090,8 +2378,8 @@ The level after the root step is `microvm` when `kvm.present` or `nitro.present`
 - `kvm-group`: `kvm.present`, not `kvm.in_group`, and `kvm.group` is `kvm`.
 - `linger`: `linger` is off.
 - `delegate-io`: only with `host prepare --delegate-io`, when `io` is not in `delegated`.
-- `subuid`: `subuid` is false.
-- `userns-apparmor`: `apparmor_userns` restricts user namespaces ([question 4](#15-open-questions)).
+- `subuid`: the user has no range, and `has_newuidmap`. Without `newuidmap`, a range gives a jail nothing, so the client does not offer the step.
+- `userns-apparmor`: the namespace test of the `process` probe fails, and `apparmor_userns` restricts user namespaces ([question 4](#15-open-questions)).
 - `io-uring-off`: `io_uring_disabled` is below 2.
 - `vsock-modules`: `vsock_blocked` is false, and the level after the root step is `microvm`.
 - `nitro-acl` and `nitro-udev`: `nitro.present`, not `nitro.usable`, and `has_setfacl`.
@@ -2113,12 +2401,12 @@ The level after the root step is `microvm` when `kvm.present` or `nitro.present`
 
 | ID | Line | Why | Undo |
 | --- | --- | --- | --- |
-| `kvm-acl` | `setfacl -m u:<user>:rw /dev/kvm` | Open `/dev/kvm` now. A group change would need a restart of the user manager, which stops every session. | `setfacl -x u:<user> /dev/kvm` |
+| `kvm-acl` | `setfacl -m u:<user>:rw /dev/kvm` | Open `/dev/kvm` now. A group change would need a restart of the user manager, which stops every session. udev keeps the entry when the device changes. A reboot loses it. | `setfacl -x u:<user> /dev/kvm` |
 | `kvm-group` | `usermod -aG kvm <user>` | Keep access after a reboot, when the ACL is gone. | `gpasswd -d <user> kvm` |
 | `linger` | `loginctl enable-linger <user>` | Sessions survive logout. Offered only when `Setup`'s own `sudo -n` failed. | `loginctl disable-linger <user>` |
-| `delegate-io` | Write `/etc/systemd/system/user@<uid>.service.d/50-simstim-delegate.conf` with `Delegate=cpu cpuset io memory pids`, then `systemctl daemon-reload` | Cap each sandbox's disk I/O. It takes effect when the user manager next starts. | Remove the file, then `systemctl daemon-reload` |
+| `delegate-io` | Write `/etc/systemd/system/user@<uid>.service.d/50-simstim-delegate.conf` with `Delegate=cpu cpuset io memory pids`, then `systemctl daemon-reload` | Cap each sandbox's disk I/O. After the script, the client runs `systemctl --user daemon-reexec` as the user, so that the user manager reads its controllers again. Running sessions continue. | Remove the file, then `systemctl daemon-reload` |
 | `subuid` | `usermod --add-subuids <range> --add-subgids <range> <user>`, for 65,536 IDs that the client computes from the uid alone | Let jails run the VMM, the image converter and host-side git as a subuid (5.6) | `usermod --del-subuids <range> --del-subgids <range> <user>` |
-| `userns-apparmor` | Copy the namespace launcher to `/usr/local/libexec/simstim/` (root, 0755), and load an `AppArmor` profile that lets only that path make user namespaces | Process walls on Ubuntu 23.10 or later ([question 4](#15-open-questions)). Machine-wide, but it opens user namespaces for that one program only. | Unload the profile, then remove it and the launcher |
+| `userns-apparmor` | Copy the namespace launcher to `/usr/local/libexec/simstim/userns` (root, 0755). Write `/etc/apparmor.d/simstim-userns` and load it with `apparmor_parser -r`. The profile is below. | Process and gvisor walls, and jails with namespaces, on Ubuntu 23.10 or later ([question 4](#15-open-questions)). Machine-wide, but only that program gets capabilities, and nothing that it starts keeps one. | Unload the profile, then remove it and the launcher |
 | `io-uring-off` | Write `kernel.io_uring_disabled = 2` to `/etc/sysctl.d/50-simstim.conf`, then load that file with `sysctl` | Close `io_uring` to every process on the machine, as the seccomp profile already does inside a process wall (section 16). Machine-wide. | Remove the file, then set the value that the step recorded before |
 | `vsock-modules` | Write `/etc/modprobe.d/50-simstim-vsock.conf`, which blocks `vsock_loopback`, `vmw_vsock_virtio_transport` and `vhost_vsock` | No sandbox needs these modules, so blocking them removes kernel code from reach. Machine-wide. | Remove the file |
 | `nitro-acl` | `setfacl -m u:<user>:rw /dev/nitro_enclaves` | Open the Nitro Enclaves driver now, for the `nitro` driver (P6.4) | `setfacl -x u:<user> /dev/nitro_enclaves` |
@@ -2126,6 +2414,23 @@ The level after the root step is `microvm` when `kvm.present` or `nitro.present`
 | `nitro-slots` | Write a number to `/sys/class/misc/nitro_enclaves/pcie_slots` | Room for more sandboxes. Optional, and lost at the next reboot. | Write back the number that the step recorded |
 
 Without `setfacl`, the step is `kvm-group` only, and the client says: "Access starts after the next reboot of box." The `nitro` steps need `setfacl`. A reserved memory pool for Nitro Sandboxes needs a kernel parameter and a reboot, so it is never a root step: the docs show it, and without it the driver takes contiguous memory at each start.
+
+**Packages.** The root step adds no package (14.4.1). Default Ubuntu server cloud images (24.04, 25.10, 26.04) and the Debian 13 cloud image ship neither `acl` (`setfacl`) nor `uidmap` (`newuidmap`, `newgidmap`) ([build facts](../research/build-facts.md#4-linux-walls)). On such a host, the client offers neither `kvm-acl` nor the `nitro` steps nor `subuid`, and jails run without a subuid (5.6). `host show` names each missing package, and the line that installs it by hand, such as `sudo apt install acl uidmap` ([question 79](#15-open-questions)).
+
+**`/dev/kvm`.** Debian and Ubuntu build systemd with `-Ddev-kvm-mode=0660`, so `/dev/kvm` is 0660 `root:kvm`. Upstream systemd uses 0666 since v236. The ACL of `kvm-acl` survives a udev `change` event, because udev changes the mode only when the bits differ, and never removes an ACL entry. This is source reading. UNVERIFIED by test: H7's test runs `udevadm trigger --action=change /dev/kvm`, then `getfacl /dev/kvm`. A reboot loses the ACL, because `/dev` is a devtmpfs in memory. The `kvm` group also opens `/dev/vhost-net` and `/dev/vhost-vsock`, which have the same group and mode, so no jail shows them (5.6).
+
+**A VMM that runs as a subuid.** The ACL names the login uid. So it does not cover a `vmm` jail that runs as a subuid. That jail reaches `/dev/kvm` only through the `kvm` group, which it keeps: it never calls `setgroups` (Go `SysProcAttr.Credential.NoSetGroups`). A unit's processes get the groups of the user manager, which holds the groups that it had when it started ([build facts](../research/build-facts.md#4-linux-walls)). So the jail uses a subuid only when the probe's `kvm.in_group_manager` is true. Until the user manager restarts after `kvm-group`, the VMM runs as the login user, and `host show` says so (P3.3).
+
+**`delegate-io`.** `user@.service` delegates `pids`, `memory` and `cpu` by default (`cpu` from systemd 252). The user manager reads its controllers only when it starts, and a re-execution counts as a start. So after the script, the client runs `systemctl --user daemon-reexec` as the user, over plain SSH. Running units stay. UNVERIFIED: that `daemon-reload` gives the running `user@<uid>.service` the `io` controller. H7's test checks that a session's `io.max` can be written after the step.
+
+**The `userns-apparmor` profile.** It follows the pattern of Ubuntu's own profile for bubblewrap, `bwrap-userns-restrict` ([`AppArmor`](https://gitlab.com/apparmor/apparmor/-/raw/master/profiles/apparmor/profiles/extras/bwrap-userns-restrict)), for this project's launcher:
+
+- The profile `simstim-userns` attaches to `/usr/local/libexec/simstim/userns` only. It allows `userns,`, the `mount`, `umount` and `pivot_root` rules, and the capabilities of the set-up in 4.1: `sys_admin`, `setuid`, `setgid` and `net_admin`. It allows no `ptrace (tracedby)`, so `AppArmor` refuses a tracer.
+- It runs every program through the stack `pix /** -> &simstim-userns//&simstim-userns-child`. The stack is needed because the launcher sets `no_new_privs` before it starts the guest init.
+- The child profile `simstim-userns-child` allows files, sockets, signals and `ptrace` inside the sandbox, and has `audit deny capability,`. So nothing that the launcher starts keeps a capability, in any namespace.
+- The profile starts with `abi <abi/4.0>,`, which the `AppArmor` of Ubuntu 24.04 reads. UNVERIFIED: that the stacked transition works on 24.04. P1.5's test checks it.
+
+Ubuntu calls a profile that allows `userns` for a program that can run any code "a trivial bypass" ([Ubuntu](https://discourse.ubuntu.com/t/understanding-apparmor-user-namespace-restriction/58007)). This profile avoids it. The program that holds capabilities is static and root-owned, and takes only a request. It starts other code only in the child profile.
 
 #### 14.4.3 How the client builds the script
 
@@ -2198,6 +2503,8 @@ This phase starts only after [question 27](#15-open-questions). It closes the ma
 - The slot launcher accepts a new version of itself only when the release key of decision [0017](decisions/0017-release-signatures.md) signed it, and it is newer. It checks that signature in Go (14.9.2). Upgrades then need no password.
 - The level label becomes `microvm (own account)`.
 
+Section 21.9 specifies the slots, the store, the requests and the tests of this phase.
+
 ### 14.5 Files and paths
 
 **On the host:**
@@ -2208,6 +2515,9 @@ This phase starts only after [question 27](#15-open-questions). It closes the ma
 | `~/.local/share/simstim/artefacts/runtime/<runtime>.json` | The release manifest's runtime entries that a client sent, by runtime label | The login user |
 | `~/.local/share/simstim/artefacts/incoming/` | Partial downloads and copies, 0700 | The login user |
 | `~/.local/share/simstim/images/` | Images by digest, with their verity trees (`paths.ImagesDir()`, P3.2) | The login user |
+| `~/.local/share/simstim/images/<hex>/` | One image: `rootfs.img` with its verity tree (0444), and `image.json` (20.2) | The login user |
+| `~/.local/share/simstim/images/incoming/` | Layer blobs while a pull or a copy runs, 0700 (20.2) | The login user |
+| `~/.local/share/simstim/images/agents/` | Agents disks by SHA-256, and `source.json` (20.4) | The login user |
 | The session folder | A sandbox's session disk and sockets (10.7) | The login user |
 | `~/.local/state/simstim/sandboxes-started` | The count of sandboxes started | The login user |
 | `~/.local/state/simstim/host-id` | The host ID, 0600 | The login user |
@@ -2224,6 +2534,7 @@ This phase starts only after [question 27](#15-open-questions). It closes the ma
 | `~/.config/simstim/tiers.toml` | Each host's tier, host ID and pinned key fingerprint (0600) |
 | `~/.config/simstim/ssh/known_hosts-<name>` | The pinned host key (0600) |
 | `~/.cache/simstim/runtime/sha256/<hex>` | Runtime files that the laptop fetched, to copy to a host |
+| `~/.cache/simstim/images/blobs/sha256/<hex>` | Image layers that the laptop fetched, to copy to a host (20.2) |
 | `~/.cache/simstim/facts.json` | The last facts of each host |
 | `~/.cache/simstim/placements.json` | This laptop's auto placements of the last 10 minutes |
 | `~/.local/state/simstim/grants.json` | The grant ledger: names, never values (0600) |
@@ -2233,7 +2544,7 @@ This phase starts only after [question 27](#15-open-questions). It closes the ma
 
 ### 14.6 Configuration
 
-Section 8.4 specifies the keys that this section adds to `hosts.toml`: `default`, `repos`, the prepare cache in `[host.sandbox]`, and `[host.place]`. Section 8.3 specifies its keys in `config.toml`: `[placement]`, `[images]` and `[secret_tiers]`. Tiers live in a file of their own.
+Section 8.4 specifies the keys that this section adds to `hosts.toml`: `default`, `repos`, the prepare cache in `[host.prepared]`, and `[host.place]`. Section 8.3 specifies its keys in `config.toml`: `[placement]`, `[images]` and `[secret_tiers]`. Tiers live in a file of their own.
 
 #### 14.6.1 `tiers.toml`
 
@@ -2251,7 +2562,7 @@ set_at = 2026-11-09T10:00:00Z
 
 An older client's `SaveHosts` writes `hosts.toml` from its own struct, so it drops keys that it does not know. So tiers live in `tiers.toml`, which older clients never write.
 
-- **Migration.** When `tiers.toml` does not exist, the first client that reads it writes every host in `hosts.toml` as `own`, and sets `migrated`. Today's hosts keep today's behaviour.
+- **Migration.** When `tiers.toml` does not exist, the first client that reads it writes every host in `hosts.toml` as `own`. It copies the fingerprint of each `known_hosts-<name>` that H3 wrote into `key`, and sets `migrated`. Today's hosts keep today's behaviour.
 - **After the migration,** a host in `hosts.toml` with no entry, for example one that an older client added, has no tier. It counts as `shared`. In a terminal, the client asks the tier question at its next use.
 
 ### 14.7 Host identity
@@ -2268,7 +2579,7 @@ At `host add`, `client.PinHostKey`:
    - With `--host-key SHA256:…`, it connects once with `StrictHostKeyChecking=accept-new` into a temporary file, compares the fingerprint, and keeps it or fails.
    - In a terminal, it connects once with `StrictHostKeyChecking=ask`, so `ssh` shows the fingerprint and asks.
    - With `--yes`, it accepts the key on first use, and prints: "host key SHA256:3f9a…c1 pinned on first use. Check it on the machine: ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub".
-4. Stores the fingerprint in `tiers.toml`.
+4. Keeps the pin in `known_hosts-<name>`, which is the record. From H4 on, the client also copies its fingerprint into the host's `key` in `tiers.toml` (14.6.1), for `host show` and `host rekey`.
 
 From then on, `SSH.baseArgs` adds these options on the command line, where they win over every config file:
 
@@ -2281,7 +2592,7 @@ From then on, `SSH.baseArgs` adds these options on the command line, where they 
 
 - The pin covers the destination only. Jump hosts follow the user's own config, because options on the command line do not reach the nested `ssh` of a ProxyJump. A jump host cannot read or change the session, because the session to the destination is end-to-end SSH with a pinned key.
 - A changed key makes `ssh` exit with 255 and "REMOTE HOST IDENTIFICATION HAS CHANGED". `sshError` turns that into the error in section 14.14.
-- `simstim host rekey <name>` shows the old and the new fingerprint, asks the user to type the host's name, replaces the pin, and sets the tier to `shared`.
+- `simstim host rekey <name>` shows the old and the new fingerprint, asks the user to type the host's name, replaces the pin, and, from H4 on, sets the tier to `shared`.
 - `ForgetHost` also removes `known_hosts-<name>`.
 
 #### 14.7.2 The host ID
@@ -2330,10 +2641,10 @@ The host never learns its tier. The client enforces every rule in this section, 
 | Way in | Tier |
 | --- | --- |
 | `host add` or `setup --host` in a terminal | The question in 14.2.1. It has no default answer. |
-| `host add --yes` without `--tier` | `shared`, with the line "Tier: shared. Pass --tier own if only you have root on box." |
+| `host add --yes` without `--tier` | None. The command fails with exit code 4, "needs an answer", and names `--tier` ([question 50](#15-open-questions)). |
 | `host create lima`, `host create docker` | `own` |
 | `host create e2b` | `shared` ([question 32](#15-open-questions)) |
-| `host add --provider-script` | The question, or `shared` with `--yes` |
+| `host add --provider-script` | The question. With `--yes`, it needs `--tier`, as in the first row. |
 | `host add --accept` | The question. It shows the reply's suggestion: `shared` for a Mac enrolled in MDM (18.4). |
 | A host that existed before the migration | `own` |
 | A host with no entry after the migration | `shared` until the user answers |
@@ -2393,7 +2704,7 @@ Rotate these secrets, which lab got: CLAUDE_LAB.
 
 #### 14.9.1 The release manifest
 
-Each client release embeds one release manifest (section 5, `internal/supply`, task P4.1). It lists every trusted artefact of the release by digest. This section names the format of its entries:
+Each client release embeds one release manifest (the table of section 5, `internal/supply`, task P4.1). It lists every trusted artefact of the release by digest. This section names the format of its entries:
 
 ```json
 {
@@ -2419,8 +2730,9 @@ Each client release embeds one release manifest (section 5, `internal/supply`, t
 - `runtime` is a label that changes when any runtime item changes. Hosts and the launcher show it, and the host's cache keeps the files of the two newest labels (14.9.4).
 - The release manifest has no key, minimum version or expiry of its own. The client embeds it, and the release that carries the client is signed as decision [0017](decisions/0017-release-signatures.md) says. Each start names its runtime files by the client's digests, so a host cannot roll back to an older runtime ([question 30](#15-open-questions)).
 - Every `url` points at the project's own release, never at a third party. Each GPL item has a `source_url`.
-- `advisories` is the known-bad list of task P4.6. The client refuses a microvm start on a host whose VMM is in it.
-- Images are not in the release manifest. `images.lock` on the laptop pins each image by digest and verity root hash (8.1). The default image, `agent-base` in these examples, is pinned the same way.
+- `advisories` is the known-bad list of task P4.6. Each entry has a `kind`: `vmm`, `kernel`, `gvisor` or `terminal`. The client refuses a microvm start on a host whose VMM or guest kernel is in it. It also refuses a gvisor start whose `runsc` is in it (21.4). A `terminal` entry names a range of the terminal library on hosts, and `ls` marks sessions on such a host `exposed` (7.7).
+- The release manifest pins one image: the default image, `agent-base` in these examples, by digest and verity root hash. `images.lock` on the laptop pins each image that the user names by digest (8.1, 20.8). It also keeps the first conversion's root hash, as a check value and not a pin (20.2). A host never supplies a pin.
+- Section 20 gives the rest of the format. 20.1 adds the `tools` fields `root_hash`, `salt` and `data_blocks`, and 20.2 the `image` entry. 20.5 adds each runtime entry's `fsverity`, and 20.9 its `released`. 20.9 also gives the fields and the match rule of `advisories`.
 
 #### 14.9.2 Checks
 
@@ -2464,7 +2776,7 @@ A template is a user's own image (section 2). User templates come after this pla
 Two other kinds of image follow their own rules:
 
 - **Registry images.** The laptop pins each OCI image that the user names to its manifest digest. The host's image builder pulls by that digest, so the registry's bytes are checked, and converts the image in a jail (P3.2). The trusted manifest records the converted image's root hash.
-- **Saved images.** An image that `image save` makes (P5.5) stays on the host that made it. Only sessions on that host can use it, and the launcher marks it "made on <host>". To use it on another host, build a template on the laptop.
+- **Saved images.** An image that `image save` makes (P5.5) stays on the host that made it. Only sessions on that host can use it, and the launcher marks it "made on <host>". To use it on another host, build a template on the laptop. The laptop records the digest that the host reports for it in `images.lock`, tied to that host. This is the only digest that the client takes from a host, and the client uses it only on that host. Rule 3 still holds for templates and runtime files.
 
 #### 14.9.6 An image missing at `new`
 
@@ -2518,7 +2830,7 @@ A start that carries `NewArgs.Need` goes through admission in `host.New`, before
 3. Refuse with `runtime_missing` when a file that `Need.Runtime` names by digest is not in the store. The client then installs it (14.11.2).
 4. Refuse with `level_below` when the host's level now is weaker than `Need.MinLevel`.
 5. Work out what is reserved. A session counts when its manifest has the current `boot_id`, and its holder is alive or its state is `starting` and less than 2 minutes old. Add its `limits.declared` when it has a sandbox, or its `memory.current` when it has none.
-6. `room` is `DefaultMemoryMax()` less what is reserved. Refuse with `no_room` when `Need.Memory` plus the VMM overhead is more than `room`. The error's `Data` holds fresh facts.
+6. `room` is `DefaultMemoryMax()` less what is reserved. Refuse with `no_room` when `Need.Memory` plus the VMM overhead is more than `room`. For a microvm, the overhead is the reserve of 20.10. The error's `Data` holds fresh facts.
 7. Write the manifest with `limits.declared`, state `starting`, `placed_by` and `place_reason`. The manifest is the reservation.
 8. Release the lock. Then start the sandbox.
 
@@ -2543,7 +2855,7 @@ A sandbox that does not fit is refused, not made smaller. This differs from [002
    - Its architecture, level or tier do not match.
    - Its room, less this laptop's in-flight placements of the last 60 s, is less than the need.
    - Its free disk is less than the missing image plus the sandbox's disk.
-   - Its facts disagree with `[host.sandbox]`: `mem_total` differs by more than 1 %, `arch` differs, or `level` is stronger than at prepare time.
+   - Its facts disagree with `[host.prepared]`: `mem_total` differs by more than 1 %, `arch` differs, or `level` is stronger than at prepare time.
 5. **Rank.** A fixed order, not a weighted sum, so one line explains each choice:
    1. Awake, then a free wake (Lima, Docker, a script with `cost = "free"`), then a paid wake (E2B, a script with `cost = "paid"`).
    2. The order in `[placement] prefer`.
@@ -2579,6 +2891,8 @@ The helper adds health items to each facts reply. The client adds the three that
 | `drain` | `drain.json` exists | `blocks_new` |
 | `linger` | Linger is off | `warn` |
 | `clock` | The host's clock differs from the laptop's by more than 5 minutes. The client compares them. | `warn` |
+| `mac-on-battery` | A Mac host runs on its battery (18.4) | `warn` |
+| `mac-sleep-on` | A Mac host may sleep on mains power (18.4) | `warn` |
 
 Health shows in the launcher's host row and details, in `host ls`, and in `host doctor`. Health is self-reported. It catches drift and accidents, not an attacker.
 
@@ -2635,7 +2949,7 @@ Section 18.6 applies this to hosts in more than one location. `host doctor` prin
 
 ### 14.14 Errors
 
-Every error is a `client.UserError`. The exit code is 1 unless the table says otherwise.
+Every error is a `client.UserError`. Its exit code comes from [the CLI spec, 5.3](cli-spec.md#53-the-codes-of-the-isolation-spec).
 
 | When | Message | Hint (Try:) |
 | --- | --- | --- |
@@ -2643,13 +2957,16 @@ Every error is a `client.UserError`. The exit code is 1 unless the table says ot
 | No `/dev/kvm` at all | vps has no /dev/kvm, so no root step can give it the microvm level. | `simstim new vps --wall gvisor`, or pick a host with KVM: `simstim host ls` |
 | `--root-step run` on a shared host, without the typed name | lab is a shared host, so its owner runs the root step. | `simstim host prepare lab --root-step print` |
 | No sudo | The account me has no sudo on lab. | `simstim host prepare lab --root-step print`, and give the script to the machine's owner |
+| A package that a root step needs is missing (a note in `host show`) | box lacks setfacl (package acl), so /dev/kvm opens only after the next reboot. | `sudo apt install acl uidmap` on box, then `simstim host prepare box` |
+| Lima before 2.3.0, at `host create lima` | Lima 2.2.1 is too old for host create: 2.3.0 or later can keep the VM away from your Mac's loopback services. | Update Lima (`https://lima-vm.io/docs/installation/`), then run this again (19.4) |
+| A Lima VM that reaches the Mac's loopback (a doctor warning) | box can reach services on your Mac's loopback address. | `limactl stop <instance>`, then `limactl edit --set '.networkOpts.hostLoopback = false' <instance>`, then `limactl start <instance>` |
 | A root step failed | The root step on box stopped at kvm-group: usermod: group 'kvm' does not exist. | `simstim host doctor box` |
 | A user name that the script cannot use | The account name "a b" on box cannot go in a root script. | Run the steps by hand, as `simstim host doctor box --fix` prints them |
 | A host download failed | box could not download cloud-hypervisor 54.0: connection refused. | `simstim host prepare box --images laptop` |
 | A checksum mismatch | agent-base did not match its SHA-256 on box, so it was deleted. | `simstim host prepare box` |
 | A runtime file missing (`runtime_missing`) | box lacks cloud-hypervisor 54.0 of this client's release. | `simstim host prepare box` |
 | An image missing, no terminal | box lacks agent-base@1a2b3c4d (1.0 GB). | `simstim host prepare box` |
-| A changed host key (exit code 2) | box's host key changed: SHA256:3f9a…c1 was pinned, and the host shows SHA256:77b0…02. | If you reinstalled box: `simstim host rekey box`. Otherwise, do not connect. |
+| A changed host key | box's host key changed: SHA256:3f9a…c1 was pinned, and the host shows SHA256:77b0…02. | If you reinstalled box: `simstim host rekey box`. Otherwise, do not connect. |
 | A changed host ID (a warning) | box answers with a different host ID, so its tier is now shared. | If it is the same machine: `simstim host set box tier=own` |
 | A secret above the tier | lab is a shared host, so it does not get ANTHROPIC_API_KEY. | Make a low-limit token for lab, and mark it under `[secret_tiers]` in config.toml |
 | The SSH agent above the tier | lab is a shared host, so it does not get your SSH agent. | Use a deploy key made for lab, or bring the work back with `simstim pull` |
@@ -2668,7 +2985,9 @@ Every error is a `client.UserError`. The exit code is 1 unless the table says ot
 | Facts that disagree | box reports 128 GiB of memory, but had 62.8 GiB at prepare, so auto placement skips it. | `simstim host prepare box` |
 | Purge while a session works | 2 sessions on box are working. | `simstim host rm box --purge --force` |
 | Purge with unsaved work (`unsaved`) | box has a worktree with work that is not pushed: ~/.local/share/simstim/worktrees/app/fix-12ab. | `simstim pull box/12ab`, then purge again, or add `--force` |
-| A helper without the feature | The helper on box is too old for sandboxes. | `simstim host add box` |
+| A helper without the feature | The helper on box is too old for sandboxes. | `simstim host upgrade box` |
+| No free slot under separate accounts (`no_room`) | box has no free slot: 16 sandboxes run under accounts of their own. | `simstim ls box`, then stop one |
+| The slot launcher refused a request (`launcher_refused`) | The slot launcher on box refused the start: a process of simstim-s03 still runs. | `simstim host doctor box` |
 
 ### 14.15 Go sketches
 
@@ -2693,6 +3012,7 @@ type KVM struct {
     ACLUser    bool   `json:"acl_user,omitempty"`
     InGroup    bool   `json:"in_group,omitempty"`
     InGroupNow bool   `json:"in_group_now,omitempty"`
+    InGroupManager bool `json:"in_group_manager,omitempty"` // the user manager's own groups hold kvm
 }
 
 // CapProbe is the answer to sandbox.probe. It never holds a secret.
@@ -2714,6 +3034,7 @@ type CapProbe struct {
     VsockBlocked             bool        `json:"vsock_blocked"`
     Subuid                   bool        `json:"subuid"`
     HasSetfacl               bool        `json:"has_setfacl"`
+    HasNewuidmap             bool        `json:"has_newuidmap"`
     Sudo, SudoPasswordless   bool
     DiskFree                 int64       `json:"disk_free"`
     DiskFS                   string      `json:"disk_fs"`
@@ -2931,15 +3252,9 @@ The bridge serves the new requests in a new `bridge_sandbox.go`, as `handleMore`
 
 ### 14.17 Docs and decision records
 
-Each task ships its docs, a CHANGELOG line, and `just docs` after a change to a command, a flag or a key. [The plan](isolation-plan.md) gives the tasks H1 to H18 and their order. The new decision records, in task H1:
+Each task ships its docs, a CHANGELOG line, and `just docs` after a change to a command, a flag or a key. [The plan](isolation-plan.md) gives the tasks and their order.
 
-1. Sandbox hosts: the sandbox probe, the root step, and who runs sudo.
-2. Host tiers and the grant gate, with `tiers.toml`, the E2B default and the change to agent forwarding.
-3. Saved hosts pin their host key, and turn off forwarding, on the `ssh` command line, over the user's own config.
-4. Runtime delivery and downloads by the host. It extends [0017](decisions/0017-release-signatures.md).
-5. Admission: a sandbox that does not fit is refused, not shrunk. It amends [0024](decisions/0024-memory-cap.md).
-
-Decision [0030](decisions/0030-local-sockets-do-not-listen.md), on Unix sockets and VM sockets ([question 23](#15-open-questions)), is a dependency of record 1.
+Records 0029 to 0033 already exist in this branch, as proposed records. The plan lists ten new records, 0034 to 0043, and the task whose pull request carries each one ([decision records](isolation-plan.md#decision-records)). Each record lands beside the code that it decides.
 
 ## 15. Open questions
 
@@ -2960,25 +3275,25 @@ This is the only full list. Each question has its options and a recommended defa
    - (a) Cloud Hypervisor first, Firecracker later for older kernels.
    - (b) Firecracker only.
    - (c) libkrun.
-   - **Recommended:** (a): Cloud Hypervisor v52.0 or later on host kernels 6.8 or later, and Firecracker later for older kernels. Firecracker 1.18 also drives Nitro Sandboxes on EC2 ([question 53](#15-open-questions)). No libkrun and no Kata (section 11). libkrun's own model gives the guest the VMM's host permissions, so it does not fit a Linux wall.
+   - **Recommended:** (a): Cloud Hypervisor on host kernels 6.8 or later, pinned at v54.0, with v52.0 as the advisory floor (20.3). Firecracker comes later for older kernels. Firecracker 1.18 also drives Nitro Sandboxes on EC2 ([question 53](#15-open-questions)). No libkrun and no Kata (section 11). libkrun's own model gives the guest the VMM's host permissions, so it does not fit a Linux wall.
 4. **How do process walls get user namespaces on Ubuntu 23.10 or later?**
    - (a) An `AppArmor` profile for a root-owned copy of a small launcher in `/usr/local/libexec/<name>/`: the namespace launcher.
    - (b) Turn the restriction off for the whole host with the sysctl.
    - (c) No process walls on such hosts.
-   - **Recommended:** (a). A profile for a path that the user can write would be a bypass for any of the user's processes.
+   - **Recommended:** (a). The launcher does every step that needs a capability. It then starts the guest init through an `AppArmor` stack, into a child profile that denies every capability (14.4.2). Ubuntu's own profile for bubblewrap does the same. A profile that let a program that the user can write keep capabilities would be a bypass for any of the user's processes.
 5. **Where may the `process` level run?** It shares the user's account and the host's kernel.
    - (a) Everywhere.
    - (b) On `own` and `throwaway` hosts, labelled "shares your account", never chosen by `new auto`, and with no `own`-tier secrets unless the user asks.
    - (c) Nowhere.
    - **Recommended:** (b).
-6. **Hosts that can run only `none`, such as Docker and E2B hosts, once walls are the default?**
+6. **Hosts that can run only `none`, such as Docker hosts, and E2B hosts where the probe finds no wall (21.8), once walls are the default?**
    - (a) Refuse new sessions there without `--downgrade`.
    - (b) Allow them, with a badge.
    - **Recommended:** (a).
 7. **A host kernel with a known unpatched local root bug?**
    - (a) Doctor lowers the floor by itself.
    - (b) Doctor warns, and the user decides.
-   - **Recommended:** (b), because distributions backport fixes without changing the upstream version.
+   - **Recommended:** (b), because distributions backport fixes without changing the upstream version. Section 20.11 gives the list's format and its match rule.
 8. **The guest's root file system across starts?**
    - (a) Reset at each start, keeping `/work` and the agent's state.
    - (b) Keep it, as Docker Sandboxes do.
@@ -2986,7 +3301,7 @@ This is the only full list. Each question has its options and a recommended defa
 9. **Idle stop for sandboxes?**
    - (a) Never.
    - (b) 2 hours, for microvm sandboxes only.
-   - **Recommended:** (a) in phase 1, then (b) after the phase 3 measurements (P3.8).
+   - **Recommended:** (a) in phase 1, then (b) after the phase 3 measurements (P3.8). The 2 hours are a project choice, with no outside source. P3.8 sets the default only when wake on attach meets its target in section 12.
 10. **Keep the last screen across a stop?** Saving the ring's tail would keep output that can hold secrets, on a disk that the guest controls.
     - (a) Yes.
     - (b) No.
@@ -3100,7 +3415,7 @@ This is the only full list. Each question has its options and a recommended defa
 33. **Where tiers live, and what `--yes` means?**
     - (a) In `hosts.toml`.
     - (b) In `tiers.toml`, which older clients never write.
-    - **Recommended:** (b). `host add --yes` without `--tier` gives `shared`.
+    - **Recommended:** (b). `host add --yes` without `--tier` fails, and names the flag ([question 50](#15-open-questions)).
 34. **The word for how far the user trusts a host?**
     - (a) "tier", with `own`, `throwaway` and `shared`.
     - (b) "level".
@@ -3114,7 +3429,7 @@ This is the only full list. Each question has its options and a recommended defa
     - (a) Docs for the user's own overlay only.
     - (b) Also a hardened reverse-tunnel recipe, last, on a machine that the user owns.
     - **Recommended:** (b), with the machine owner's consent stated.
-37. **Mac hosts?**
+37. **A native macOS host, with a `vz` level?**
     - (a) In the first version.
     - (b) Later, after a test of Apple's Virtualization framework from an SSH session, and of the keychain rule for Linux guests.
     - **Recommended:** (b). Until then a Mac runs sandboxes in a Lima VM. There, microvm needs nested virtualisation on M3 or later with macOS 15 or later. A Mac at another location joins with `host join` (18.4).
@@ -3141,7 +3456,7 @@ This is the only full list. Each question has its options and a recommended defa
 42. **How fast does the project answer an advisory for the VMM, the kernel or Ghostty?**
     - (a) A fixed time.
     - (b) Best effort.
-    - **Recommended:** (a): a release within 7 days for a high severity, with the known-bad list (P4.6) in that release.
+    - **Recommended:** (a): a release within 7 days, with the known-bad list (P4.6) in that release. It covers an advisory with a CVSS score of 7.0 or more, and any advisory whose range holds a current pin (20.9). The 7 days are a project choice. The nearest outside norm is the linux-distros list, whose members release a fix within 10 days of a public issue ([distros](https://oss-security.openwall.org/wiki/mailing-lists/distros)).
 
 ### Policy, shells and the classifier
 
@@ -3248,6 +3563,8 @@ This is the only full list. Each question has its options and a recommended defa
     - (b) A registry token goes to the host as a secret.
     - **Recommended:** (a). No registry token leaves the laptop, and the host checks the digest as for any image (14.9).
 
+This question came from the fact check of the network door on 10 November 2026:
+
 ### Hosts in more than one location
 
 66. **How is a session's host picked?**
@@ -3260,13 +3577,136 @@ This is the only full list. Each question has its options and a recommended defa
     - (c) The machine connects to the laptop, or to a service.
     - **Recommended:** (b). The owner asked to prepare a Mac from its own keyboard. (c) needs a listener or a relay, which the project's rules forbid.
 68. **How does a Mac host restart with FileVault on?**
-    - (a) The docs give `sudo fdesetup authrestart` for a planned restart, and an unlock from the Mac's own LAN after any other.
+    - (a) The docs give `sudo fdesetup authrestart` for a planned restart. After any other, a person at the Mac or an SSH session that reaches its LAN unlocks it.
     - (b) A `host restart` command that uses the user's own admin login on the Mac.
     - **Recommended:** (a). `authrestart` keeps an unlock key in memory, and the tool should not hold an admin login on a Mac that an organisation manages.
 69. **May a Mac that an organisation manages with MDM be a host?**
     - (a) No.
     - (b) Yes, at the tier `shared`, after `host doctor` shows what MDM controls, and with the advice to ask the organisation's IT team first.
     - **Recommended:** (b). The organisation's admins have root through MDM, which is what `shared` means.
+
+### From the fact check of 10 November 2026
+
+The research of 10 November 2026 checked the facts that the build depends on ([build facts](../research/build-facts.md), [locations](../research/locations.md)). These questions came from it.
+
+70. **How long does a flow wait under `ask`, and what happens when its client gives up first?** Many clients give up after 5 to 15 s in transparent mode, and pip after 15 s in both modes ([build facts](../research/build-facts.md#2-model-apis)).
+    - (a) One hold of 20 s in both modes, and a refusal after it.
+    - (b) In explicit mode, a hold of up to 20 s before the `CONNECT` reply. In transparent mode, a hold of 3 s at most. In both, the held request stays open for 5 minutes, so the client's next try passes after the answer.
+    - (c) A refusal at once in both modes, with the question kept open, as Docker Sandboxes does.
+    - (d) In transparent mode, TLS completes at once with a leaf from the session's CA, and the hold moves to the client's longer read timer.
+    - **Recommended:** (b). (a) fails most transparent clients and pip. (c) makes every answer wait for a retry. (d) would intercept every unknown host, and break clients that pin certificates or speak no HTTP.
+
+71. **Does the model API guard let a web search tool through?** The query, which the model wrote, goes to a search provider. Claude Code's WebSearch uses Anthropic's server tool.
+    - (a) Always, for an agent whose row names it.
+    - (b) Under `balanced` and `open` only. `locked` refuses it, and `--tools web_search` opens it for one session.
+    - (c) Never without a grant.
+    - **Recommended:** (b). Untrusted work runs under `locked`, and daily work keeps the agent's search. Web fetch stays refused under every preset, because it fetches any URL that the conversation holds.
+
+72. **How does a ChatGPT login (Codex) reach a walled session?** Docker Sandboxes signs in on the host, and its proxy refreshes Codex's tokens ([build facts](../research/build-facts.md#1-agent-data)). So a header swap can carry the login, when the trusted side refreshes the token.
+    - (a) Only as an exposed login made inside the sandbox, which the row shows.
+    - (b) A sign-in for the sandbox alone, made on the trusted side with the host's own `codex login --device-auth` and a private `CODEX_HOME`. The egress process reads the tokens into memory, removes the file, refreshes them at `auth.openai.com/oauth/token`, and the guest sees sentinels.
+    - (c) The laptop's own login, sent as a bound secret.
+    - **Recommended:** (a) in P2.3, then (b) as a later task with its own decision record. The sign-in writes a token file for a moment, which bends [0032](decisions/0032-secret-values-in-memory-only.md). (b) is option (c) of [question 15](#15-open-questions), made concrete. Never (c): a refresh in the sandbox may rotate the refresh token, and end the laptop's own login. Whether OpenAI rotates it is UNVERIFIED.
+
+73. **What counts against `network.model_budget` when an answer reports no usage?** A Chat Completions stream has usage only when the client asks for it, and a cut stream has none.
+    - (a) Nothing: the request is free.
+    - (b) An estimate: the bytes of the request body and of the answer, divided by 4, rounded up.
+    - (c) The egress process adds `stream_options.include_usage` to the request.
+    - **Recommended:** (b). (a) lets a client escape the budget, and (c) changes what the client receives. The estimate overcounts on purpose, so a budget refuses early rather than late (17.8).
+
+74. **How strict are the package manager settings by default?** Refusing source builds for pip and uv stops build code at install, but breaks packages that have no wheel for the guest.
+    - (a) `guarded` built in: release ages, no install scripts for npm, pnpm, Yarn and Bun, and the Go settings. `strict` adds `PIP_ONLY_BINARY=:all:` and `UV_NO_BUILD=1`.
+    - (b) `strict` built in.
+    - (c) `off` built in, and the user turns them on.
+    - **Recommended:** (a), with `strict` in the `untrusted` profile of 8.3. cargo's build scripts and the agent's own commands run code anyway, so `strict` adds little to daily work (7.10).
+
+75. **Which Ghostty commit does the shadow terminal pin, and with which Zig?** The fixes for GHSA-w9q4 and GHSA-jqr7 need Zig 0.17. The repository builds with Zig 0.16.
+    - (a) The tag `vt-1.0.0`, the first libghostty-vt release, with Zig 0.17.0 for the whole build, in one pull request (P0.1).
+    - (b) Stay on Zig 0.16, and carry the two fixes as patches on the old pin.
+    - (c) The app's tag `v1.4.0`, with Zig 0.17.0.
+    - **Recommended:** (a). A libghostty-vt tag gives each later bump a name that P0.9 can compare. Patches on an old commit need a review at each bump ([build facts](../research/build-facts.md#61-ghostty-and-its-advisories)).
+
+76. **How large may a terminal be?** GHSA-jqr7 says to cap the columns, and names no number. Ghostty itself allows 65535.
+    - (a) 4096 columns and 4096 rows.
+    - (b) 65535, Ghostty's own limit.
+    - (c) 1024.
+    - **Recommended:** (a), as the project's own choice. A screen 7,680 pixels wide with cells 6 pixels wide holds 1,280 columns, so 4096 leaves room for any real window (19.1).
+
+77. **How does the host run git in an unwalled session's repository?** The session can write the repository's config. `git status` can run a filter that the config names.
+    - (a) With `-c core.fsmonitor=false -c core.hooksPath=/dev/null` only.
+    - (b) Never: no `git status` before `rm` and `pull`, as the research proposed ([research 9.1](../research/isolation.md#91-do-now-before-any-wall)).
+    - (c) With those options, and each operation in a scope under `<name>.slice`, where the peer check of P0.2 holds whatever git starts.
+    - **Recommended:** (c). (a) leaves the filters open, and (b) loses the check that stops `rm` from deleting work that nobody committed. Walled sessions keep the rule of 7.1 (19.3).
+
+78. **How does `host create lima` find out whether the Mac can run a VM inside its VM?**
+    - (a) The chip's name from `sysctl -n machdep.cpu.brand_string`, M3 or later, and `sw_vers` 15 or later.
+    - (b) Ask Lima: create the VM with `--nested-virt`. On Lima's own refusal, turn it off with `limactl edit`, and start again.
+    - (c) Leave it to P3.7.
+    - **Recommended:** (b). Lima asks Apple's `isNestedVirtualizationSupported`, which stays right for chips whose names a pattern would miss. The research asked for a probe, not a name ([research 9.1](../research/isolation.md#91-do-now-before-any-wall), 19.4).
+
+79. **The root step adds no package, but default server images lack `acl` and `uidmap`. What then?** Ubuntu's server images 24.04 to 26.04 and Debian 13's cloud image have neither `setfacl` nor `newuidmap`.
+    - (a) Keep the rule. Without `setfacl`, `kvm-group` alone opens `/dev/kvm` after the next reboot. Without `newuidmap`, jails run without a subuid. `host show` names the packages, and the line that installs them.
+    - (b) Install the two packages in the root step, marked "machine-wide".
+    - (c) Set the ACL with a `systemd-tmpfiles` line, `a+ /dev/kvm - - - - u:<user>:rw`, which needs no package.
+    - **Recommended:** (a) now. P3.7 tests (c) across a reboot on a VM that the test makes. If the entry holds there, a new record moves `kvm-acl` to (c). (b) would bend 14.4.1 for two packages that the user can add with one line ([build facts](../research/build-facts.md#4-linux-walls)).
+
+80. **Is a microvm's size the guest's RAM, or the unit's whole cap?** The unit also holds the VMM, the supervisor and the egress process.
+    - (a) The size is the guest's RAM. The unit's cap adds a reserve, and admission counts both.
+    - (b) The size is the unit's cap, and the guest gets the size less the reserve.
+    - **Recommended:** (a). A user who asks for 4 GiB gets 4 GiB of RAM in the guest. Admission already adds the VMM overhead (14.10.3). The reserve is 128 MiB plus 1/256 of the size (20.10).
+
+81. **Where does a user image's root hash come from?** The host converts the image, and the guest's verity table needs the root hash.
+    - (a) From the first conversion. The laptop records it in `images.lock` as a check value, and every later conversion must match it.
+    - (b) The laptop converts each image itself, and pins the root hash.
+    - (c) Each host's own conversion, with no check.
+    - **Recommended:** (a). The digest stays the only pin, and a host can only make a start fail. (b) parses hostile layers on the laptop, outside any jail. (c) misses a converter that differs between hosts (20.2).
+
+82. **How does the supervisor keep the VMM and the kernel to their digests between the check and the start?**
+    - (a) fs-verity where the store's file system has it. Otherwise a sealed `memfd` copy, which it hashes.
+    - (b) Hash the open file, then run it from that descriptor.
+    - (c) fs-verity only, and no microvm on other file systems.
+    - **Recommended:** (a). (b) misses a write into the same file after the hash. (c) leaves out ext4 file systems made without the `verity` feature. The copies cost about 19 MiB for each session (20.5).
+
+83. **How does the host kernel list match a distribution's kernel?** Distributions backport fixes without changing the upstream version ([question 7](#15-open-questions)).
+    - (a) By the kernel package version where the list has a row for the distribution. Otherwise by the upstream version, reported as "maybe".
+    - (b) By the upstream version only.
+    - (c) No match: doctor lists the advisories, and the user checks.
+    - **Recommended:** (a). It is exact on Debian and Ubuntu, and it never reports a bug as present when the package already has the fix. Section 20.11 gives the rule.
+
+84. **What does a start do when an image's tag now points at another digest?**
+    - (a) It uses the digest that `images.lock` pins. `image pull` refuses the new digest until the user passes `--update`.
+    - (b) It refuses until the user accepts the new digest.
+    - (c) It follows the tag.
+    - **Recommended:** (a). A lock file keeps each start the same until the user chooses, and a start needs no registry. (c) lets whoever controls the tag change what boots (20.8).
+
+85. **Decoy credential files in sandboxes (P7.2)?** No source measures decoys inside a sandbox. Canary keys caught a real CI breach when the attacker checked them, and worms check the keys that they find (21.7).
+    - (a) On by default, only in forms that no tool sends by default. `[sandbox] decoys = false` turns them off.
+    - (b) Off by default.
+    - (c) None: sentinels are the only tripwires.
+    - **Recommended:** (a). A wall does not stop a harvester that reads the sandbox's own files, and a decoy turns that read into an alert. The cost is a data file. The risk is a false alarm, which P7.2's tests bound.
+
+86. **A provider machine for each session (P7.4)?** The research scored one provider machine per session lowest of its layer, at 0.423 ([research](../research/isolation.md#54-one-provider-machine-per-session-node-15)). That option replaced the supervisor. P7.4 keeps the supervisor and the egress process, and runs a wall inside the machine (21.8).
+    - (a) Build it, as section 21.8 says, last in phase 7.
+    - (b) Drop it. The docs show `host create e2b` and `new --rm` for one session by hand.
+    - **Recommended:** (a). It serves users who own no host that can run walls, and it reuses the E2B provider. If phase 7 runs late, it is the first task to drop.
+
+87. **Checkpoints (P5.4): on by default, and how many?** A checkpoint shares blocks with the session disk. It costs the blocks that change after it (21.2).
+    - (a) On for microvm sandboxes where reflinks work, keeping the last 10.
+    - (b) Off unless `sandbox.checkpoints` is set.
+    - (c) One for every turn, until the session stops.
+    - **Recommended:** (a). `sandbox.checkpoints = 0` turns them off. (c) has no bound on the disk that old blocks hold.
+
+88. **How does the gvisor wall get its namespaces (P6.1)?** A non-root `runsc` calls `unshare(CLONE_NEWUSER)` itself, so Ubuntu's restriction stops it ([facts](../research/build-facts.md#4-linux-walls)).
+    - (a) The helper makes the user and network namespaces, or on Ubuntu 23.10 or later the namespace launcher of 14.4 does. `runsc` runs inside them as uid 0.
+    - (b) `runsc --rootless`.
+    - (c) The OCI user-namespace mode, with `newuidmap`.
+    - **Recommended:** (a). It needs the same root step as the process wall (21.4). `--rootless` refuses `create`, has no save and restore, and makes its own user namespace. The OCI mode needs `newuidmap`, which server images lack.
+
+89. **Slot accounts and the store (H18)?** No source sets a number. Nix runs builds as build users from a root-owned store. No more builds run at once than it has build users, and its installer makes 32 ([facts](../research/build-facts.md#7-later-phases)).
+    - (a) 16 slot accounts, and the store in `/var/lib/<name>/store/`.
+    - (b) A number that `host prepare` asks for.
+    - (c) One account for each sandbox, made at each start.
+    - **Recommended:** (a). With the default size of 4 GiB (17.1), 16 sandboxes need 64 GiB. A later root step can add slots when a host runs out. (c) would run `useradd` as root at each start.
 
 ### Decided by the design
 
@@ -3288,12 +3728,12 @@ The research raised four more questions, and the design answers them, so they ar
 | Root on a host sees the memory and disk of every sandbox there, and every secret sent (N10). | Tiers and the grant gate limit what goes there. `[secret_tiers]` and the agents' low-value token hints. The rotate list says what to change. |
 | Agent rows and service rules go stale as agents change their hosts, endpoints and tools. A stale row breaks an agent or leaves a gap. | Rows have source links. Recorded traffic tests run on each release. Unknown model endpoints fail closed with a clear error, so a break is visible. |
 | Hostile terminal output reaches the laptop, such as a title report that became command injection (CVE-2024-56803, [NVD](https://nvd.nist.gov/vuln/detail/CVE-2024-56803)). | Byte-exact stays. The observer (P7.3), the docs on terminal settings, the XTVERSION warning, and the open question on a guarded attach ([question 26](#15-open-questions)). |
-| A backdoor in a commit passes the review, and users tire of reviews. | The summary lists only flagged files. It flags files that run code. `--yes` is explicit each time. |
+| A backdoor in a commit passes the review, and users tire of reviews. | The summary lists only flagged files. It flags files that run code. `--allow-flagged` is explicit each time. |
 | The laptop's git parses a hostile pack on `pull`. | `git bundle verify`, fsck on fetch, hooks off, no checkout. The client warns when the laptop's git is older than the fixes for CVE-2025-48384. |
 | One maintainer must keep a guest kernel, a VMM, images and rules up to date. | Kernel updates on a schedule, not for each CVE. Reproducible builds. `pins-watch`. Phases that each ship on their own. |
 | Nested virtualisation is slow, and its cost on Lima and cloud hosts is not measured. | P3.8 measures it. A host may pin `process` when microvm is too slow. |
 | Density on small hosts: a microvm holds guest memory. | The balloon returns freed pages. A stopped session uses no memory. Admission refuses a sandbox that does not fit (14.10.3). The density targets of section 12. |
-| A tool ignores `HTTPS_PROXY`. Node's `fetch` reads it only with `NODE_USE_ENV_PROXY=1`, from Node 24.0.0 and 22.21.0, and its `http` module from 24.5.0 ([Node](https://nodejs.org/api/cli.html)). | The base environment of every sandbox sets `NODE_USE_ENV_PROXY=1`. `ProxyEnv` in the agent table. The transparent proxy on microvms. The 403 or the failed lookup names the problem. |
+| A tool ignores `HTTPS_PROXY`. Node's `fetch` reads it only with `NODE_USE_ENV_PROXY=1`, from Node 24.0.0 and 22.21.0, and its `http` module from 24.5.0 and 22.21.0 ([Node](https://nodejs.org/api/cli.html)). Claude Code, Codex and Mistral Vibe do not run on Node, and read the proxy variables themselves ([build facts](../research/build-facts.md#1-agent-data)). | The base environment of every sandbox sets `NODE_USE_ENV_PROXY=1`. `ProxyEnv` in the agent table. The transparent proxy on microvms. The 403 or the failed lookup names the problem. |
 | Claude Code's own sandbox fails inside a process wall, because nested user namespaces are refused. | The docs say so. microvm runs it. The tool does not change the agent's settings. |
 | A compromised login account on the host defeats the checks there (N5). It can also capture the sudo password through its shell start files. | `security.md` says so. Subuid jails for the processes that touch untrusted input. [Question 28](#15-open-questions) for a separate user. The root step runs through sudo by default only at the first add, before any sandbox has run there, and is printed for the owner after that (14.4.4). |
 | A compromised host lies in its sandbox probe to get a weaker floor, or in its facts to attract sessions with secrets. | The floor is pinned on the laptop at set-up. Later probes can only raise it, and the user confirms any change. Facts are checked against the values at prepare time. A host that takes most placements ranks lower, and the reason for each placement is recorded (14.10.5). Tiers cap what any host gets. |
@@ -3306,7 +3746,7 @@ The research raised four more questions, and the design answers them, so they ar
 | A reverse tunnel puts a key to the rendezvous on a borrowed host, and an allow-all tailnet lets a host reach the laptop. | Docs only: a hardened tunnel recipe on a machine that the user owns, and Tailscale shares for borrowed machines (14.13). The tool runs no tunnel ([0031](decisions/0031-the-egress-process-is-not-a-relay.md)). |
 | A template built on a host, or copied from one, poisons the fleet. | Templates come from the laptop or the release only. No host-to-host copies, and no host key on another host (14.9.5, [question 35](#15-open-questions)). |
 | A host that downloads the runtime itself makes new outbound traffic, and a download can be changed on the way. | The host checks each file's size and SHA-256 against the client's digests (14.9.2). `fetch = "laptop"` keeps the old rule ([question 39](#15-open-questions)). |
-| A Mac host after a reboot cannot start VMs until its keychain is unlocked. Whether this affects Linux guests is UNVERIFIED. | Mac hosts are later ([question 37](#15-open-questions)). |
+| A Mac host after a reboot cannot start its VM, because nobody has logged in. | Lima's contributors report that a Linux VM starts from a boot daemon with nobody logged in. The keychain need applies to macOS guests. H21 starts with a test by hand (18.4), and each macOS update is tested again, because Apple does not support the Virtualization framework in a daemon. |
 | An older client that saves `hosts.toml` drops `wall_floor` and the new host keys. | A host without a floor uses its probe's best level and pins nothing, and the launcher says so (8.4). Tiers stay in `tiers.toml`. |
 | Converting an untrusted image attacks the converter on the trusted side. | A pure Go converter in a jail with no network, digests checked first, and caps on size and entries. |
 | Nitro Sandboxes on EC2 depend on one parent kernel: the documented support is in Amazon Linux 2023 `kernel6.18`. | The `nitro` driver's probe checks the driver's files, not the distribution's name. Other EC2 hosts keep nested KVM or `gvisor`. |
@@ -3324,10 +3764,10 @@ The research raised four more questions, and the design answers them, so they ar
 | `new --count` asks for more sandboxes than a host can take. | Admission refuses each one that does not fit, and the answer lists which started (14.10.3). |
 | A Mac host restarts while nobody is near it, and stays at the FileVault unlock. | `ls` shows it as away, and `auto` skips it. The docs give `fdesetup authrestart` for planned restarts. The invoker can start work that must not wait on another host, unless a secret's `on_hosts` forbids it. |
 | A Mac laptop that runs all day with the lid open ages its battery and runs hot. | The docs say to set Charge Limit to 80 % and to keep the Mac at 10 °C to 35 °C with good air flow. `host doctor` reads the thermal state. |
-| An organisation's MDM changes sshd or the power settings under the host. | The key's own options hold with a managed sshd. `host doctor` reports what MDM controls, and the health items `mac_sleep_on` and `mac_on_battery`. |
-| A Claude.ai login brings the account's MCP connectors, which act on the provider's side with no field in the request ([issue 612](https://github.com/docker/sbx-releases/issues/612)). | The model API guard cannot see them. The docs say to use an API key, or an account without connectors, for a sandbox. |
+| An organisation's MDM changes sshd or the power settings under the host. | The key's own options hold with a managed sshd. `host doctor` reports what MDM controls, and the health items `mac-sleep-on` and `mac-on-battery`. |
+| A Claude.ai login brings the account's MCP connectors, which act on the provider's side with no field in the request ([issue 612](https://github.com/docker/sbx-releases/issues/612)). | The model API guard cannot see a connector in the request. Claude Code reaches claude.ai connectors through `mcp-proxy.anthropic.com` ([network config](https://code.claude.com/docs/en/network-config)), and that host is not in its `Egress` (8.6). So a sandbox reaches them only when a rule grants that host. That no connector works without it is UNVERIFIED. The docs also say to use an API key, or an account without connectors, for a sandbox. |
 | Text that a sandbox writes to the clipboard with OSC 52 reaches the laptop's clipboard, because the bytes pass unchanged. Docker Sandboxes made its text copy opt-in in v0.51.0. | The client counts the writes (7.7). The docs show each terminal's setting that asks before a clipboard write, such as Ghostty's `clipboard-write = ask`. |
-| `hcsshim`'s licence and the exact Cloud Hypervisor, Lima and gVisor options in this spec may differ in the pinned versions. | Each task that uses one checks it against the pinned release, and the UNVERIFIED marks go only after that check. |
+| The exact Cloud Hypervisor, Lima and gVisor options in this spec may differ in the pinned versions. | Each task that uses one checks it against the pinned release, and the UNVERIFIED marks go only after that check. |
 | E2B, Docker and machine-per-session hosts have no trusted egress path outside the session. | Their floor is `none` unless a wall runs inside, and a downgrade is recorded. Exposed secrets only. E2B hosts are `shared` ([question 32](#15-open-questions)). |
 | Exposed secrets and logins made inside a sandbox stay on its disk. | The row badge and `secret_exposed`. Bound secrets are the default from P2. The docs say what stays on disk. |
 | A forwarded port runs hostile pages in the laptop's browser at localhost. | A grant for each port, a notice on the first forward, and `<id>.localhost` names. |
@@ -3342,7 +3782,7 @@ The research raised four more questions, and the design answers them, so they ar
 - `sandbox.cpus` and `sandbox.memory` in any layer, and `new --cpus <n> --memory <size>`. A profile can name a size, as the hosted VM service's `--type` does.
 - Without either, the size comes from the template, then the agent table ([question 14](#15-open-questions)), then 2 CPUs and 4 GiB.
 - A new size applies at the next start, as the hosted VM service's `resume --type` does. `resume` and `attach` take `--cpus` and `--memory` for the wake. No wall changes the size of a running sandbox, and a Nitro Sandbox cannot (5.1).
-- Admission counts the size (14.10.3).
+- Admission counts the size (14.10.3), from task H11.
 - `sandbox.disk_max` caps the session disk of a microvm. On a process wall it is a soft cap: the supervisor measures the session folder, kept caches included, every minute, and stops the sandbox with the alert `disk_full` past it. A hard quota needs root, and is a later root step.
 
 ### 17.2 Variables (P1.14)
@@ -3426,18 +3866,47 @@ The research raised four more questions, and the design answers them, so they ar
 
 ### 17.8 Model usage and budgets (P2.16)
 
-- The egress process reads the `usage` object of each model API answer that it already parses (P2.4): input, output and cached tokens, by model. For a streamed answer, it reads the final event.
+- The egress process reads the usage of each model API answer that it already parses (P2.4), by model, as each API defines it ([build facts](../research/build-facts.md#2-model-apis)):
+  - **Anthropic Messages.** A plain answer has `usage`. A stream starts with `message_start`, whose `message.usage` holds `input_tokens`, `cache_creation_input_tokens`, `cache_read_input_tokens` and `output_tokens`. Each `message_delta` has a `usage` whose counts are cumulative. The egress process takes the `message_start` values, then replaces each field with its value in the last `message_delta`. It never adds deltas. It also keeps `server_tool_use.web_search_requests`.
+  - **OpenAI Responses.** The `usage` of the `response` object in `response.completed`, `response.incomplete` or `response.failed`, over HTTP or WebSocket: `input_tokens`, `input_tokens_details.cached_tokens`, `output_tokens`, `output_tokens_details.reasoning_tokens` and `total_tokens`.
+  - **OpenAI Chat Completions.** A plain answer has `usage`. A stream has it only when the client set `stream_options.include_usage`. Then one chunk before `data: [DONE]` holds it, and every other chunk has `usage: null`. The egress process never adds the option.
+- **The count.** A request counts each token that its answer reports, once. For Anthropic that is `input_tokens`, `cache_creation_input_tokens`, `cache_read_input_tokens` and `output_tokens`. For OpenAI it is `total_tokens`, because OpenAI's input count already holds the cached tokens. `/v1/messages/count_tokens` counts nothing.
+- **No usage.** An answer that ends without usage gets an estimate: a cut connection, a Chat Completions stream without `include_usage`, or a WebSocket that closes early. The estimate is the bytes of the request body and of the answer, divided by 4, rounded up. The audit line marks it `"usage":"estimate"`, and `show` counts such requests ([question 73](#15-open-questions)).
 - `show` and `ls --json` add `usage`. `policy log --door net` lists it for each request.
-- `network.model_budget`, in tokens, in any layer. Past it, model requests get the API's own error shape with HTTP 429 and a "Try:" line, and the alert `model_budget` goes out. It is a network value, so `policy` changes it while the session runs (8.8).
+- `network.model_budget`, in tokens, in any layer, and 0 for no limit. Before each model request, the egress process compares the session's count with the budget. A request in flight finishes, even when its answer passes the budget. Past the budget, each model request gets a refusal that no client retries, and the alert `model_budget` goes out once:
+  - **Anthropic:** HTTP 429, the header `x-should-retry: false`, no `retry-after`, and the body `{"type":"error","error":{"type":"billing_error","message":"<line>"},"request_id":"req_<random>"}`. This copies the spend cap of Claude Code's apps gateway, which Claude Code shows without a retry.
+  - **OpenAI:** HTTP 429, the header `x-should-retry: false`, no `retry-after`, and the body `{"error":{"message":"<line>","type":"insufficient_quota","param":null,"code":"insufficient_quota"}}`. The header stops both OpenAI SDKs, and the body makes Codex stop with a fatal error.
+  - **WebSocket:** an upgrade past the budget gets the OpenAI refusal. An open socket closes with code 1008 after its current response, so the next request meets the refusal. How Codex treats code 1008 is UNVERIFIED: P2.16 checks it.
+  - `<line>` reads `simstim: devbox/auth-fix used 2000412 of its 2000000 model tokens. Try: raise network.model_budget with simstim policy edit, then simstim policy apply`.
+  - The refusal never carries `retry-after`. The Anthropic SDKs obey any positive delay, up to about 24.8 days in TypeScript and 49.7 days in Python.
+- It is a network value, so `policy` changes it while the session runs (8.8). A raised budget lets the next request through.
 - The tool shows no prices: they change, and the user's account shows them.
+- **Tests (P2.16).** Unit tests run on the recordings of P2.4. A stream of cumulative deltas counts once. A Chat Completions stream counts with `include_usage`, and gives an estimate without it. A cut stream gives an estimate. In CI, against a fake upstream and never on a test host, each client makes exactly one request after the refusal. The clients are the Anthropic and OpenAI SDKs in TypeScript and Python, Claude Code and Codex.
 
 ### 17.9 More agent rows (P2.17)
 
-Rows for GitHub Copilot CLI, Kiro CLI, Factory Droid, pi, Kimi Code and Mistral Vibe, at the `best-effort` level, each with its install, login and resume commands from the agent's own docs. Their `Egress` and `Secrets` come from recorded traffic, as in P2.4, or stay empty. Then the policy or the classifier decides their sites.
+Rows for six more agents, at the `best-effort` level. The values come from each agent's docs or source on 10 November 2026 ([build facts](../research/build-facts.md#1-agent-data)). Where a value is UNVERIFIED, P2.17 checks it on a test host without a prompt. It reads `--help` or the name of a session file, for example. A check that needs a prompt is a manual check for the owner. The row ships at `best-effort` either way, and a field that nobody checked stays empty.
+
+| Agent | Install | Login | Resume | `IDPattern` | `DangerFlags` and `DangerText` | `Egress` | Proxy and CA |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| GitHub Copilot CLI | `curl -fsSL https://gh.io/copilot-install \| bash` | `copilot login`. No status command. `COPILOT_GITHUB_TOKEN`, header UNVERIFIED. | `copilot --resume={agent_session_id}` (the value is optional, so `=`), `copilot --continue` | a UUID: `--session-id` takes only a valid UUID. That every ID is one is UNVERIFIED. | `--allow-all`, `--yolo`, `--allow-all-tools`, `--allow-all-paths`, `--allow-all-urls` | `github.com/login/`, `api.github.com/user`, `api.github.com/copilot_internal/`, `*.githubcopilot.com`, `copilot-proxy.githubusercontent.com` | `HTTPS_PROXY`. CA: `NODE_EXTRA_CA_CERTS`. WebSocket UNVERIFIED. |
+| Kiro CLI | `curl -fsSL https://cli.kiro.dev/install \| bash` | `kiro-cli login --use-device-flow`. `kiro-cli whoami`, exit code UNVERIFIED. | `kiro-cli chat --resume-id {agent_session_id}`, `kiro-cli chat --resume` | a UUID | `--trust-all-tools`, `--trust-tools` | `runtime.us-east-1.kiro.dev`, `management.us-east-1.kiro.dev`, `q.us-east-1.amazonaws.com`, `prod.us-east-1.auth.desktop.kiro.dev`, `app.kiro.dev`, `cognito-identity.us-east-1.amazonaws.com`, and the `eu-central-1` twins | `HTTPS_PROXY` from 1.8.0. CA UNVERIFIED. |
+| Factory Droid | `curl -fsSL https://app.factory.ai/cli \| sh` | `droid`, then `/login`. `FACTORY_API_KEY`, header UNVERIFIED. | `droid --resume {agent_session_id}` | none: the ID format is UNVERIFIED | `--skip-permissions-unsafe`, `--auto`. Text: `autonomyLevel`. | `api.factory.ai`, `app.factory.ai`, `auth.factory.ai`, `api.workos.com`, `auth.workos.com` | `HTTPS_PROXY`. CA: `NODE_EXTRA_CA_CERTS`. |
+| pi | `curl -fsSL https://pi.dev/install.sh \| sh` | `pi auth login <provider>`, kept in `~/.pi/agent/auth.json`. A variable for each provider, such as `ANTHROPIC_API_KEY`. | `pi --session {agent_session_id}`, `pi --continue` | a UUID (UUIDv7 by default) | none: pi asks for no approval | none fixed: a rule or the classifier decides the provider's host | `HTTPS_PROXY`, through its own dispatcher. CA: Node's `NODE_EXTRA_CA_CERTS`, which pi's docs do not name. |
+| Kimi Code | `curl -fsSL https://code.kimi.com/kimi-code/install.sh \| bash` | `kimi login`, which exits 0 or 1. `KIMI_API_KEY` in `Authorization: Bearer`. | `kimi --session {agent_session_id}`, `kimi --continue` | `^session_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$` | `--auto`, `--yolo`, `-y`, `--yes`, `--auto-approve` | `api.kimi.com`, `auth.kimi.com`, and `api.moonshot.ai` for a platform key | `HTTPS_PROXY`, through its own dispatcher. CA UNVERIFIED. |
+| Mistral Vibe | `curl -LsSf https://mistral.ai/vibe/install.sh \| bash` | `vibe --setup`, which saves `MISTRAL_API_KEY` in `~/.vibe/.env`. Header UNVERIFIED. | `vibe --resume {agent_session_id}`, `vibe --continue` | none: the ID format is UNVERIFIED | `--auto-approve`, `--yolo`, `--trust`. Text: `auto-approve`. | `api.mistral.ai`, `auth.mistral.ai` | `HTTPS_PROXY`. CA: `SSL_CERT_FILE`, `SSL_CERT_DIR`. |
+
+- An `Egress` entry with a path makes the host intercepted, and allows only that path (8.6).
+- A row with no `IDPattern` keeps no ID from a hook (P0.3), so its resume uses `Continue`.
+- `Secrets` stay empty where the header is UNVERIFIED. A user can still bind a provider key with `[secrets.NAME] hosts` (8.3), as for any tool.
+- Copilot's `COPILOT_ALLOW_ALL` is a variable, so the argument check cannot see it. The guest init passes it only when `sandbox.env` names it.
+- Kiro's `KIRO_API_KEY` works only without the TUI. A walled Kiro session therefore logs in only with an exposed login made inside the sandbox.
+- Droid documents no login command outside its REPL, so its `Setup.Login` is `droid`, as Antigravity's is `agy`.
+- pi runs every tool without asking, so the wall is its only fence. The docs say so.
 
 ### 17.10 Root inside a microvm (P3.4)
 
-`sandbox.sudo = true` lets the user `agent` run `sudo` without a password inside a `microvm` guest. It is refused on `process` and `gvisor` with `sudo_wall`, because those walls rely on the guest's user IDs. Changes to the system go with the overlay at the next start, unless `system = "keep"`. The row shows "root".
+`sandbox.sudo = true` lets the user `agent` run `sudo` without a password inside a `microvm` guest. It is refused on `process` and `gvisor` with `sudo_wall`, because those walls rely on the guest's user IDs. Changes to the system go with the overlay at the next start, unless `system = "keep"`. The row shows "root". The holder runs as the guest user `holder` (uid 900), apart from `agent` (uid 1000). Without `sudo = true`, the agent cannot reach the holder's process. With it, the agent can, as with any root in the guest. The supervisor outside the wall stays the trusted side.
 
 ### 17.11 Setup and stop scripts (P1.11)
 
@@ -3460,20 +3929,24 @@ The invoker picks the host. Hosts are known by their names, and labels are metad
 
 **Order.** `client.ResolveHost` (14.10.1) picks the host of a new session in this order:
 
-1. A host that the invoker names, on the command line or in the launcher's dialog, or `-` for the host of the last session. It always wins. No rule and no lock can refuse it.
+1. A host that the invoker names, on the command line or in the launcher's dialog, or `-` for the host of the last session. It always wins: no rule and no lock picks another host instead. The grant gate can still stop the start (14.8.5). Its error says why, and lists the hosts that would pass.
 2. `auto` on the command line (14.10.5).
 3. A rule: `sandbox.host` from the narrowest layer that sets it (8.2). That is the session's own `--set`, then its profile, then its repository.
 4. `SIMSTIM_DEFAULT_HOST`, then the default host that `host default` sets, then the only saved host that is not `shared`.
 5. Otherwise, the error in section 14.14, which lists the hosts.
 
-`new` and the launcher say what picked the host, for example "mac1, from the rule for github.com/acme/*". The launcher's dialog fills its host row in the same way, and the invoker can change it there.
+`new` and the launcher say what picked the host, for example "mac1, from the rule for github.com/acme/*". The launcher's dialog fills its host row in the same way, and the invoker can change it there. This follows tools for one person, such as Docker and kubectl contexts, where a flag wins over a saved default. Hosted platforms add defaults for each repository, as the rules here do ([research](../research/locations.md#7-picking-a-host)).
 
 **Rules.** `sandbox.host` holds a host name, a list of names, or `auto`.
 
 - **A list** means the first host in it that answers and admits the session (14.10.3). `new` names each host that it passed over, with the reason: "mac1 has no room, so mac2."
 - **`auto`** ranks the hosts of the pool (14.10.5).
 - **A profile** stands for a kind of task: `new --profile review` takes the rule in `[profiles.review]`. The one line of `new --task` stays a note for people and the judge. A rule that matched free text would pick hosts by accident.
-- **A repository section** is named by the repository's origin, or by a path that ends in `/*`, such as an organisation: `[repos."github.com/acme/*"]`. The longest name that matches wins, so an exact name wins over a name with `/*`.
+- **A repository section** is named by the repository's origin, or by a path that ends in `/*`, such as an organisation: `[repos."github.com/acme/*"]`.
+  - The client reads only the `origin` remote. It drops the scheme, the user and a trailing `.git`, turns `git@host:path` into `host/path`, and puts the host in lower case. It keeps the case of the path.
+  - A name that ends in `/*` matches its path and every path below it, on a `/` boundary, as Git's `http.<url>` keys do. So `github.com/acme/*` matches `github.com/acme/team/api`, but not `github.com/acme-labs/x`.
+  - `*` is allowed only at the end, after a `/`. So two names that match never tie.
+  - The longest name that matches wins, so an exact name wins over a name with `/*`. TOML keeps no order of sections, so no rule can depend on their order ([research](../research/locations.md#7-picking-a-host)).
 - **Not in every layer.** The all-sessions layer cannot set `sandbox.host`, because `host default` already sets the host for sessions that no rule covers. `[lock]` cannot hold it, because the invoker always picks.
 - **A rule that names a host that is not saved** is an error at `config check`, and at `new` when that rule applies.
 - **A `shared` host** that a rule names counts as named by the request (14.8.2), as the invoker's own choice does.
@@ -3506,22 +3979,23 @@ ACME_GITHUB_TOKEN = "shared"               # the Macs are shared hosts (18.4)
 
 `host add` stays the main way in: the laptop connects over the user's own SSH and prepares the host (14.2). A machine can also prepare itself from its own keyboard. The laptop then adds it, and still starts every connection ([question 67](#15-open-questions)).
 
-1. **Invite, on the laptop.** `simstim host invite <name> [--label <key>=<value>,…] [--key <public key file>]`
+1. **Invite, on the laptop.** `simstim host invite <name> [--label <key>=<value>,…] [--key <public key file>] [--ttl <duration>]`
    - It makes an Ed25519 key pair for that host only, in `~/.config/<name>/ssh/id-<host>` (0600). `--key` names a public key of the user's own instead.
-   - It prints an invite code: the host's name, the labels, the public key, a random 128-bit nonce, and an expiry one hour later. The code is base32 text with a checksum.
-   - The code holds no secret. But a changed code could make the machine trust another key. So both sides print a check of 8 characters: the first 40 bits of the code's SHA-256, in base32.
+   - It prints an invite code: the public key, a random 64-bit nonce, and an expiry, one hour later by default. `--ttl` sets another time, because a Mac's join downloads Lima and an image. The name and the labels stay in the invite store, not in the code.
+   - The code is base32 text in groups of 13 characters. Each group ends with one check character, as Syncthing's device IDs do. So an error names the group that has the typo.
+   - The codes hold no secret, but they must arrive unchanged. A changed invite makes the machine trust another key. A forged reply makes the laptop pin another machine, and anyone who saw the invite can forge one. The check characters catch typos, not a deliberate change ([research](../research/locations.md#6-joining-a-machine)). So the user types the codes, or copies them through a channel that the user trusts, and compares the host key fingerprints that both sides print (step 4).
    - The invite waits in `~/.local/state/<name>/invites/<host>.json` until the laptop accepts a reply, or until it expires.
 2. **Join, on the machine.** The user installs the CLI with the signed installer or a package manager, then runs `simstim host join`.
-   - It reads the code from standard input, never from an argument. So the code stays out of the shell history and the process list.
-   - It prints the check, and asks the user to compare it with the laptop's.
+   - At a terminal, it asks for the code at a prompt, and asks again after a failed check. When standard input is a pipe, it reads the code from there. It never takes the code as an argument, so the code stays out of the shell history and the process list.
+   - It checks the expiry before it changes anything, and stops with `invite_expired` when the code is too old.
    - It shows every change that it will make, with its undo, and asks once, as the root step does (14.4). It needs `sudo`.
    - It writes each change to a footprint ledger before it makes it (14.12), and writes a leave script.
    - It can run again, and it continues from its ledger.
    - Section 18.3.1 lists its changes on Linux, and section 18.4 on a Mac.
-3. **Reply, on the machine.** `host join` prints a reply code and its check. The code holds the nonce from the invite, the account, the addresses and the SSH port. It also holds the fingerprint of each SSH host key on the path, and facts that suggest a tier, such as MDM enrolment.
+3. **Reply, on the machine.** `host join` prints a reply code, in the same groups, and the `SHA256:` fingerprint of each host key in it. The code holds the nonce from the invite, the account, the addresses and the SSH port. It also holds the fingerprint of each SSH host key on the path, and facts that suggest a tier, such as MDM enrolment.
 4. **Accept, on the laptop.** `simstim host add <name> --accept -` reads the reply from standard input.
-   - It refuses a reply whose nonce matches no open invite with `invite_unknown`, and a reply to an old invite with `invite_expired`.
-   - It pins each host key from the reply (14.7), and writes the generated SSH config for each hop.
+   - It refuses a reply whose nonce matches no open invite with `invite_unknown`, and a reply to an old invite with `invite_expired`. When the user's own reply fails with `invite_unknown`, another reply may have used the invite. The hint says: "Try: simstim host rm <name>, then simstim host invite <name>."
+   - It shows the `SHA256:` fingerprint of each host key in the reply, for the user to compare with the machine's screen. Then it pins each key (14.7), and writes the generated SSH config for each hop.
    - It picks the address that `--address` names, else a tailnet name from the reply, else the first LAN address.
    - It asks the tier. It shows the reply's suggestion, but does not choose it (14.8.3).
    - Then the normal `host add` runs: the helper, the probe, the runtime, any root step that is left, and a test boot (14.2). The helper comes from the laptop, so it matches the client.
@@ -3529,8 +4003,11 @@ ACME_GITHUB_TOKEN = "shared"               # the Macs are shared hosts (18.4)
 #### 18.3.1 Join on Linux
 
 - **Account.** A new account, named by `--account` (by default the product's name), with a home folder and no password. `--account` can also name an account that exists. A dedicated account keeps the helper's files and the agents' logins away from the user's own login on that machine.
-- **Key.** The laptop's key goes into the account's `~/.ssh/authorized_keys` with `restrict,pty,port-forwarding`. `attach` needs a terminal, and `forward` needs local port forwards.
-- **sshd.** A drop-in `/etc/ssh/sshd_config.d/<name>.conf` holds a `Match User` block for the account: `AuthenticationMethods publickey`, `AllowTcpForwarding local`, `AllowAgentForwarding no`, `X11Forwarding no` and `PermitUserRC no`. When sshd does not include that folder, `host join` prints the lines for the user to add.
+- **Key.** The laptop's key goes into the account's `~/.ssh/authorized_keys` with `restrict,pty,port-forwarding`. `attach` needs a terminal, and `forward` needs local port forwards. `port-forwarding` also allows remote forwards and Unix-socket forwards, so the sshd drop-in stops those.
+- **sshd.** A drop-in `/etc/ssh/sshd_config.d/00-<name>.conf` holds a `Match User` block for the account: `AuthenticationMethods publickey`, `AllowTcpForwarding local`, `AllowStreamLocalForwarding no`, `PermitListen none`, `PermitTunnel no`, `AllowAgentForwarding no`, `X11Forwarding no` and `PermitUserRC no`.
+  - Its name sorts first, because sshd takes the first value of each keyword.
+  - `host join` checks each value with `sudo sshd -T -C user=<account>`, and stops when one differs.
+  - sshd includes that folder from OpenSSH 8.2. Debian 11 and Ubuntu 20.04 have it, and Debian 10 does not. Without it, `host join` prints the lines for the user to add, and checks them after the user's edit.
 - **Root step.** `host join` runs the items of the root step that the probe asks for (14.4), and turns linger on for the account. So the laptop's `host add` finds nothing left to do as root.
 
 ### 18.4 A Mac as a host (H21)
@@ -3542,39 +4019,45 @@ laptop -> Mac sshd, as the dedicated account (its key may only open 127.0.0.1:<p
        -> Lima's host agent on 127.0.0.1:<port> -> vsock -> the VM's sshd -> the helper
 ```
 
-**Needs.** Apple silicon and macOS 15 or later. microvm walls need an M3 chip or later (11). M1 and M2 Macs get process walls, and gvisor after P6. The SSH unlock of FileVault needs macOS 26.
+**Needs.** Apple silicon and macOS 15 or later. Lima's `vz` works from macOS 13, but in November 2026 macOS 15 is the oldest release that still gets Apple's security fixes ([research](../research/locations.md#5-mac-hosts-checked-again)). microvm walls need an M3 chip or later (11). M1 and M2 Macs get process walls, and gvisor after P6. The SSH unlock of FileVault needs macOS 26.
 
 **What `host join` does on a Mac.**
 
-1. **Checks.** The chip, the macOS version, FileVault, MDM enrolment, a managed sshd and Remote Login. UNVERIFIED: whether `profiles status -type enrollment` works without admin rights. H21 checks it.
-2. **Account.** A standard account, hidden from the login window, with a random password that the join does not keep. It logs in by key only.
-3. **Lima.** The Lima release that the release manifest pins, checked by its digest, in a folder that root owns. A Homebrew upgrade cannot change it.
+1. **Checks.** The chip, the macOS version, FileVault, MDM enrolment, a managed sshd and Remote Login. The join runs as root, so each check works. For Remote Login, it reads `launchctl print-disabled system`, and the members of the group `com.apple.access_ssh`.
+2. **Account.** A standard account, hidden from the login window, with a random password that the join does not keep. It logs in by key only. Its shell is a real shell, because sshd runs the forced command of step 7 through it. The join adds `;DisabledTags;SecureToken` to the account's `AuthenticationAuthority`, so the account never becomes a FileVault user.
+3. **Lima.** The Lima release that the release manifest pins, v2.3.0 or later, checked by its digest, in a folder that root owns. A Homebrew upgrade cannot change it.
 4. **VM.** Made as that account, from the template of `host create lima` (P0.8), with these changes:
    - `vmType: vz`, in plain mode: no mounts, no port forwards and no containerd.
    - `networkOpts.hostLoopback: false`.
    - `ssh.localPort` fixed at a free port that the join picks.
+   - An instance name that holds the account's name. Lima's daemon label holds only the instance name, so two instances with one name would collide.
    - `nestedVirtualization: true` on an M3 chip or later.
    - Less than half of the Mac's CPUs and memory, because Virtualization.framework does not return all freed memory to macOS. `--cpus` and `--memory` change both.
    - The base image that the release manifest pins by its digest.
 5. **VM key.** The laptop's key goes into the VM user's `~/.ssh/authorized_keys`.
-6. **Start at boot.** `limactl autostart enable --condition=boot --user <account>` installs a launch daemon. The VM starts at boot, before anyone logs in, and starts again when it stops.
-7. **Mac key.** The laptop's key goes into the account's `authorized_keys` on the Mac with `restrict,port-forwarding,permitopen="127.0.0.1:<port>",command="<facts script>"`. The key can open a channel only to the VM's port, or run the facts script. It has no shell on the Mac.
-8. **sshd.** A drop-in `/etc/ssh/sshd_config.d/<name>.conf` holds a `Match User` block for the account: `AuthenticationMethods publickey`, `AllowTcpForwarding local`, `PermitTTY no`, `AllowAgentForwarding no` and `X11Forwarding no`. With a managed sshd, the drop-in has no effect, and the key's own options still hold.
+6. **Start at boot.** `host join` writes the launch daemon's plist itself, from Lima's template: `/Library/LaunchDaemons/io.lima-vm.daemon.<instance>.plist`, with `UserName` set to the account, `LIMA_HOME`, `KeepAlive` and `ExitTimeOut` of 60 s. Then it runs `launchctl bootstrap system` on it.
+   - `limactl autostart enable` cannot do this. `limactl` refuses to run as root, and then needs `sudo` as the account, which has no known password.
+   - The VM starts at boot, before anyone logs in. It starts again when Lima's host agent exits with an error.
+   - `ExitTimeOut` gives the guest time to shut down. Without it, launchd kills the host agent 5 s after `SIGTERM`.
+7. **Mac key.** The laptop's key goes into the account's `authorized_keys` on the Mac with `restrict,port-forwarding,permitopen="127.0.0.1:<port>",permitlisten="127.0.0.1:<port>",command="<facts script>"`. The key can open a channel only to the VM's port, or run the facts script. It has no shell on the Mac. Lima already holds that port, so a remote forward to it fails. The client asks for `127.0.0.1`, not `localhost`, because `permitopen` matches the literal host.
+8. **sshd.** A drop-in `/etc/ssh/sshd_config.d/00-<name>.conf` holds a `Match User` block for the account: `AuthenticationMethods publickey`, `AllowTcpForwarding local`, `AllowStreamLocalForwarding no`, `PermitListen none`, `PermitTTY no`, `AllowAgentForwarding no` and `X11Forwarding no`. The join checks the values with `sshd -T -C user=<account>`, as on Linux (18.3.1). With a managed sshd, the drop-in has no effect. The key's own options still limit local forwards, but the key can then listen on a Unix socket as the account. `host doctor` reports a managed sshd.
 9. **Remote Login.** The join never turns it on. When it is off, or does not allow the account, the join stops: "Remote Login is off. Try: turn it on in System Settings > General > Sharing > Remote Login, add <account> to Allow access for, then run simstim host join again."
 10. **Power.** With the user's yes and an undo, it sets `pmset -c sleep 0`, so the Mac does not sleep on power. It never changes the settings for battery.
-11. **Steps for the user.** It prints the steps that it cannot take: Charge Limit at 80 %, the lid open, and a place with good air flow at 10 °C to 35 °C. When the user uses Tailscale, it also names Tailscale's open-source daemon (18.6).
+11. **Steps for the user.** It prints the steps that it cannot take: Charge Limit at 80 %, the lid open, and a place with good air flow at 10 °C to 35 °C. With the lid closed and no display, the Mac sleeps even with `pmset -c sleep 0`. The tool does not use the undocumented `pmset disablesleep`. When the user uses Tailscale, it also names Tailscale's open-source daemon (18.6).
 12. **Reply.** The reply holds both host keys: the Mac's sshd key and the VM's.
 
-**The facts script.** Root owns it, and the account cannot change it. It prints JSON with the power source and battery level (`pmset -g batt`), the sleep settings and assertions (`pmset -g`, `pmset -g assertions`), and the thermal state (`pmset -g therm`). The JSON also holds FileVault's state (`fdesetup status`), the macOS version, MDM enrolment, and whether MDM manages sshd's files. The laptop runs it over the same SSH path. The helper's `host.facts` cannot see the Mac's battery, because the VM has none. So the client takes `on_battery` from the Mac's facts (14.10.2).
+**A gate before H21.** Lima's contributors report that a Linux VM starts from such a daemon with nobody logged in. No source covers an account that has never logged in, with FileVault on. Apple does not support the Virtualization framework in a daemon, so a macOS update can break it. H21 starts with the test by hand in [the research note](../research/locations.md#5-mac-hosts-checked-again), on macOS 15 and on macOS 26. If the test fails, H21 stops, and the owner decides again.
 
-**Placement and health.** `auto` already ranks a host on battery one band lower (14.10.5). On battery, the Mac sleeps by its own settings. So `host doctor` adds the health item `mac_on_battery` (warn), and the item `mac_sleep_on` (warn) when `pmset -c sleep` is not 0.
+**The facts script.** Root owns it, and the account cannot change it. It prints JSON with the power source and battery level (`pmset -g batt`), the sleep settings and assertions (`pmset -g`, `pmset -g assertions`), and the thermal state (`pmset -g therm`). The JSON also holds FileVault's state (`fdesetup status`), the macOS version, MDM enrolment, and whether MDM manages sshd's files. The laptop runs it over the same SSH path. The helper's `host.facts` cannot see the Mac's battery, because the VM has none. So the client takes `on_battery` from the Mac's facts (14.10.2). The script runs as the account, a standard user. These `pmset`, `fdesetup` and `profiles` reads worked without `sudo` for an admin user. UNVERIFIED for a standard user: H21 checks it.
+
+**Placement and health.** `auto` already ranks a host on battery one band lower (14.10.5). On battery, the Mac sleeps by its own settings. So `host doctor` adds the health item `mac-on-battery` (warn), and the item `mac-sleep-on` (warn) when `pmset -c sleep` is not 0. It also reports when the user has turned the launch daemon off in System Settings > General > Login Items & Extensions.
 
 **Day to day.** A Mac host only needs to stay on. The VM runs from a launch daemon, so a locked screen or a logged-out user does not stop it. The docs advise a screen lock, because an unlocked screen lets anyone at the Mac act as its logged-in user. That user's files and keychain are outside the VM, but sessions do not need them.
 
 **Restarts.** A restart is rare on a Mac that stays on: a power cut, or a macOS update.
 
 - **A planned restart.** The docs give `sudo fdesetup authrestart`, which the user runs at the Mac or over their own SSH login. It skips the FileVault unlock for that one restart, and keeps an unlock key in memory until then. The tool does not run it, because that would need an admin login on the Mac ([question 68](#15-open-questions)).
-- **Any other restart**, a power cut that empties the battery included, stops at the FileVault unlock. Tailscale does not run before the unlock. Only an SSH session from the Mac's own LAN, or a person at the Mac, can unlock it. Until then `ls` shows the host as away. `host doctor` says: "mac1 is away. If it restarted, unlock FileVault from its LAN: ssh <your user>@<its LAN address>."
+- **Any other restart**, a power cut that empties the battery included, stops at the FileVault unlock. Tailscale does not run before the unlock. A person at the Mac can unlock it. So can an SSH session that reaches the Mac's LAN address: from that LAN, or through a Tailscale subnet router on it. The SSH unlock takes a FileVault user's password, not a key. Before the unlock, the network cannot use a VPN or 802.1X, so the Mac needs Ethernet or WPA2 Personal. Until then `ls` shows the host as away. `host doctor` says: "mac1 is away. If it restarted, unlock FileVault from its LAN: ssh <your user>@<its LAN address>."
 - **After the unlock**, the launch daemon starts the VM, and the helper restores the sessions that were working (6.8).
 - **macOS updates** that restart the Mac follow the same rules. The docs say to install them by hand, or at the times that the organisation's MDM sets.
 
@@ -3587,7 +4070,7 @@ laptop -> Mac sshd, as the dedicated account (its key may only open 127.0.0.1:<p
 - **Proxmox.** The docs recommend a VM with CPU type `host`, or with the `nested-virt` flag on a model that matches the host. Then the probe finds `/dev/kvm`, and the host gets microvm walls. Such a VM cannot live-migrate. An LXC container shares the Proxmox kernel, so the docs advise against it. In a container, the probe decides the level. The docs never suggest a privileged container, or `/dev/kvm` passed into a container.
 - **No KVM.** When `/dev/kvm` is missing and `/proc/cpuinfo` has no `vmx` or `svm` flag, `host doctor` adds the hint: "Try: give the VM the host's CPU type. On Proxmox: qm set <vmid> --cpu host".
 - **TrueNAS and Unraid.** The docs say to run the helper in a VM, not on the base system. TrueNAS does not support changes from its command line.
-- **Wake.** A homelab host normally stays on, and needs no wake. A host that sleeps can wake through a provider script with `--wake` (`examples/providers`), which sends the magic packet from an awake machine on the same LAN. This plan adds no new script for it.
+- **Wake.** Homelab hosts stay on, and this plan adds nothing to wake them. A user whose host sleeps can write a provider script that wakes it. The scripts in `examples/providers` start cloud machines only. Wake-on-LAN packets do not cross Tailscale, so such a script must send the packet from a machine on the host's own LAN.
 
 ### 18.6 Reaching each location
 
@@ -3615,6 +4098,1326 @@ laptop -> Mac sshd, as the dedicated account (its key may only open 127.0.0.1:<p
 | `host join` while Remote Login is off | Remote Login is off. | Turn it on in System Settings > General > Sharing > Remote Login, add the account to Allow access for, and run simstim host join again |
 | The user answers no when `host join` asks to compare the checks | The invite may have changed on its way, so host join stopped and changed nothing. | `simstim host invite mac1` again, and copy the code with care |
 
+## 19. Today's holes, in detail (phase 0)
+
+Section 3.2 lists the holes that exist today, whatever the wall. This section specifies five fixes that need more than one line, in 19.1 to 19.5. Section 10.4 specifies the peer check of P0.2, and section 8.6 the agent data of P0.3.
+
+### 19.1 The Ghostty pin and the size cap (P0.1)
+
+**Why.** The pin `ad97d331` is in the ranges of GHSA-w9q4-5jvv-mcv4 and GHSA-jqr7-69mm-v35h. It already holds the fixes of GHSA-qjfx-r533-6vx3 and GHSA-3r5j-c6rj-xq2v ([build facts](../research/build-facts.md#61-ghostty-and-its-advisories)). GHSA-jqr7 names apps that take terminal sizes from a remote client, and the holder is such an app.
+
+**The pin.**
+
+- `vt/build.zig.zon` pins the commit of Ghostty's tag `vt-1.0.0` (`0fa3d577…`), by its full hash and its Zig package hash. A later commit is allowed when it holds `e257bb45`, `0af5c9e55`, `65ff54c6` and `44c4c8f5`.
+- The tag and the two new fixes need Zig 0.17. So the same pull request moves the whole build to Zig 0.17.0 ([question 75](#15-open-questions)):
+
+| File | Change |
+| --- | --- |
+| `vt/build.zig.zon` | `minimum_zig_version = "0.17.0"`, and the new Ghostty URL and hash |
+| `vt/build.zig`, `vt/src/*.zig` | The changes that Zig 0.17 and the libghostty-vt 1.0 API need |
+| `vt/README.md` | The pin, its date, the advisories that it fixes, and "Zig 0.17.0 exactly" |
+| `justfile` | `_vt-if-zig` checks for `0.17.`, and its notes and the comment of `vt` say 0.17 |
+| `scripts/tools.lock` | The four `zig 0.17.0` lines, each with the SHA-256 of its download from ziglang.org |
+| `.github/workflows/ci.yml`, `.github/workflows/release.yml` | Each `setup-zig` step has `version: 0.17.0` |
+| `internal/host/vt_test.go` | The version prefix `0.17.` and its skip message |
+| `.goreleaser.yaml`, `CONTRIBUTING.md`, `scripts/repro.sh`, `scripts/test-install.sh`, `scripts/time-to-agent.sh` | Each mention of Zig 0.16 |
+
+**The size cap.** The cap is 4096 columns and 4096 rows. This is the project's own choice: Ghostty allows 65535, and GHSA-jqr7 names no number ([question 76](#15-open-questions)).
+
+- A new `clampTerm(n int) uint16` in `internal/host/vt.go` maps a value below 1 to 1, and a value above 4096 to 4096.
+- It replaces `clamp16` for columns and rows in the PTY size at the holder's start (`holder.go`) and in the resize (`holder_conn.go`). It also replaces it in the size frames to the shadow terminal (`vt.go`, `vt_child.go`). Pixel sizes keep `clamp16`.
+- The shadow terminal applies the same cap itself, in `vt/src/main.zig`, to `--cols`, `--rows` and each resize message. So a size that reaches it by another path cannot pass the cap.
+- A clamped size writes one debug line to the holder's log: `resize clamped`, with the size asked for and the size set.
+
+**Errors.**
+
+| When | Message | Try |
+| --- | --- | --- |
+| `just vt`, `just build` or the vt tests with another Zig | The shadow terminal needs Zig 0.17.0, and this machine has 0.16.0. | `just setup`, which puts the pinned Zig into `.tools/` |
+
+**Tests.**
+
+1. Unit tests of `clampTerm`: -1, 0, 1, 80, 4096, 4097, 65535 and the largest `int`.
+2. A holder test: a `TResize` of 65535 by 65535 sets the PTY and the shadow terminal to 4096 by 4096.
+3. A test of the shadow terminal: `--cols 65535` starts it at 4096 columns.
+4. The replay fixtures of `TestVT` and the fidelity fixtures of `test/ttyshot` pass with the new pin.
+5. In the pull request: the compare API answers "ahead" or "identical" for each of the four fix commits against the new pin. From P0.9 on, the watch job checks this each day.
+
+### 19.2 Setup trust tied to the script's content (P0.6)
+
+**Today.** `setup-trust.json` keeps a yes or a no for each host and repository (`internal/client/trust.go`). A yes holds for any later content of `.<name>/setup` and `.<name>/resume`.
+
+**The setup hash.** The host computes it at a repository's top level, in a new `setupHash` in `internal/host/setup.go`:
+
+1. It opens the top level with `os.OpenRoot`, and reads `.<name>/setup` and `.<name>/resume` through that root. A script that is not an executable regular file counts as absent, as today.
+2. For each script, it takes the hex SHA-256 of its bytes, or the word `none` when the script is absent.
+3. The setup hash is the hex SHA-256 of the text `v2\nsetup <hex or none>\nresume <hex or none>\n`.
+4. A script that leaves the top level through a symlink cannot run. `os.Root` refuses it, and the start fails with `setup_outside`.
+
+**What the host does.** For a repository that has a script, the first rule that matches decides:
+
+1. `NewArgs.Setup` is `run` or `skip`: as today.
+2. `NewArgs.SetupTrust[repo]` is false: the repository's scripts do not run, as today.
+3. `NewArgs.SetupHashes[repo]` equals the setup hash: they run.
+4. Otherwise the host returns `setup_trust`, with a `SetupQuestion` that carries the setup hash.
+
+The trusted manifest keeps the setup hash in a new field, `SetupHash`. Before a respawn, after a restore or a resume, the host computes the hash again. When it differs, the host skips the repository's `resume` script and runs the host's own hook, as for a repository that is not trusted. It writes one line to the session's log: "skipped the resume script of <repo>: it changed after the start".
+
+**Types.**
+
+```go
+// NewArgs, a new field. SetupTrust now holds refusals only.
+SetupHashes map[string]string `json:"setup_hashes,omitempty"` // repository: the setup hash that the user trusted
+
+// SetupQuestion, a new field. An older helper sends none.
+Hash string `json:"hash,omitempty"`
+
+// Manifest, a new field.
+SetupHash string `json:"setup_hash,omitempty"`
+```
+
+**The file, version 2.** `~/.local/state/<name>/setup-trust.json`, 0600:
+
+```json
+{
+  "version": 2,
+  "hosts": {"box": {"/home/me/src/old": false}},
+  "trusted": {"box": {"/home/me/src/app": {"sha256": "9c1e…", "at": "2026-11-10T10:00:00Z"}}}
+}
+```
+
+- `hosts` keeps the shape of version 1, and holds refusals only. An older client reads it, and keeps refusing.
+- `trusted` holds each yes, with the setup hash and the time.
+- A yes removes the repository from `hosts`. A no removes it from `trusted`.
+
+**Migration.** A file without `version` is version 1. The client reads it as follows, and writes version 2 at its next answer:
+
+- A `false` stays in `hosts`.
+- A `true` becomes an entry in `trusted` with an empty `sha256`: "asked, no hash". The client sends no hash for it, so the next start asks once.
+- An older client that writes the file drops `trusted`. The new client then asks again for those repositories. No path runs a script without a yes.
+- A file that does not parse becomes `setup-trust.json.bad`, and the client starts with an empty file.
+
+**The question.** The client words it from what it holds. With no entry for the repository, the question is as today. With an entry in `trusted`, it starts: "The setup script of <repo> on <host> changed after you trusted it." A yes goes into the file with the question's hash. The client then starts again with `SetupHashes[repo]` set to that hash, not with `--setup`. So a script that changes again between the question and the start asks again.
+
+When the question has no hash, the helper is older. The client then answers as today, with `Setup` set to `run` or `skip` for this start.
+
+**Errors.**
+
+| Code | Message | Try |
+| --- | --- | --- |
+| `setup_trust`, after a change | The setup script of ~/src/app on box changed after you trusted it. | Pass `--setup` to run it, or `--no-setup` to start without it. The launcher asks. |
+| `setup_outside` | The setup script of ~/src/app, .simstim/setup, points outside the repository, so it cannot run. | Make `.simstim/setup` a file in the repository, or start with `--no-setup` |
+| A file that does not parse (a warning) | Could not read setup-trust.json, so each setup script asks again. The old file is now setup-trust.json.bad. | Compare the two files, then delete `setup-trust.json.bad` |
+
+**Tests.**
+
+1. `setupHash`: setup only, resume only, both, neither, a symlink inside the repository, a symlink out of it (`setup_outside`), and a file that is not executable.
+2. The host's order: one case for each rule above.
+3. The file: version 1 to version 2, a round trip, a rewrite through the version 1 struct, and a file that does not parse.
+4. The question: the wording for a changed script, and the fallback for a question without a hash.
+5. A restore after the `resume` script changed: the script is skipped, and the log has its line.
+6. End to end: trust a script, commit a change to it, then `new` asks at a terminal, and skips with a note without one.
+
+### 19.3 Safe copies and host git (P0.7)
+
+**Copies.** `copyWorktreeInclude(root, wt)` in `internal/host/worktree.go` copies the files that `.worktreeinclude` lists from the repository into a new worktree. It never follows a symlink out of either folder:
+
+1. It opens both folders with `os.OpenRoot` ([Go 1.24](https://go.dev/doc/go1.24)).
+2. It reads `.worktreeinclude` through the repository's root, only when that is a regular file.
+3. Each line that is not empty and not a comment is a pattern for `fs.Glob` on the root's `FS()`. A pattern that is not a valid `io/fs` path, such as `../x` or `/etc/x`, is skipped.
+4. For each match, it calls `Lstat` through the root, and copies only a regular file. A symlink is skipped, and so is a path that leaves the root.
+5. It writes through the worktree's root with `O_CREATE|O_EXCL`. So it never replaces a file that the worktree has, and never writes through a symlink there. The copy keeps the source's permission bits.
+6. Each skipped entry writes one line to the session's log, with the reason. The start goes on.
+
+**What git can run.** The host runs git in repositories that an unwalled session can write. These are the worktree, and the main repository's `.git`, which the worktree shares. A repository's config can name commands that git runs:
+
+- `core.fsmonitor` names a hook command that `status` runs ([git config](https://git-scm.com/docs/git-config#Documentation/git-config.txt-corefsmonitor)).
+- Hooks run on index writes and ref changes, such as `post-index-change` and `reference-transaction`, and `post-checkout` runs at `worktree add` ([githooks](https://git-scm.com/docs/githooks)).
+- A `filter.<driver>.clean` or `process` command runs when git hashes a work tree file. `status` does this for a file whose stat data changed: `ce_compare_data` in [read-cache.c](https://github.com/git/git/blob/master/read-cache.c) calls `index_fd` in [object-file.c](https://github.com/git/git/blob/master/object-file.c), which applies the filters (master, November 2026). This is source reading. UNVERIFIED by test: test 3 below checks it.
+
+`-c core.fsmonitor=false -c core.hooksPath=/dev/null` turns off the first two. No option turns off every filter, so the two options alone do not cover `status`. A filter that the bridge starts runs outside every session's unit, where the peer check of P0.2 does not hold it (10.4).
+
+**Host git.** So the helper runs git as follows ([question 77](#15-open-questions)):
+
+1. Every git command of the helper gets `-c core.fsmonitor=false -c core.hooksPath=/dev/null`, through `git()` in `internal/host/worktree.go`.
+2. Each operation on a repository runs as one child, `<helper> git-op <op>`, with a JSON request on stdin and a JSON answer on stdout. The operations are `worktree.add`, `worktree.remove`, `worktree.discard` and `repo.info`. `copyWorktreeInclude` runs no git, so it stays in the parent.
+3. With a systemd user manager, the helper starts that child with `systemd-run --user --scope --quiet --collect --slice=<name>.slice --unit=<name>-git-<8 hex>.scope` ([systemd-run](https://www.freedesktop.org/software/systemd/man/latest/systemd-run.html)). git, and every command that git starts, then sits under `<name>.slice`. There the peer check treats it as a session's process (10.4).
+4. Without a systemd user manager, the child runs without a scope. The peer check there is the weaker role check (10.4), so a filter gains nothing that a session's own process lacks.
+5. `SessionRepo` in `internal/client/pull.go` runs `<helper> git-op repo.info` over SSH, in place of its shell line. The answer has the top folder, the branch and the count of changed files.
+
+Walled sessions follow 7.1: the host runs no git in a folder that a sandbox can write. Their seed runs in a `git` jail (6.1).
+
+**Errors.** The errors of today keep their messages: `no_git`, `not_a_repo`, `bad_base` and `worktree`.
+
+| Code | Message | Try |
+| --- | --- | --- |
+| `git_scope` | Could not start git in a scope on box: Failed to connect to bus. | `simstim host doctor box` |
+
+**Tests.**
+
+1. Copies: an entry of `.worktreeinclude` that is a symlink to a file outside the repository copies nothing. Nor does an entry under a symlinked folder that leaves it, the pattern `../x`, or an entry whose destination in the worktree is a symlink. A regular `.env` copies, with its mode. A `.worktreeinclude` that is itself a symlink is ignored.
+2. Arguments: every git command line starts with the two options. With a fake `systemd-run` on `PATH`, each operation runs once through it, with `--scope` and `--slice=<name>.slice`.
+3. With real git, in Linux CI, a fixture repository sets `core.fsmonitor`, two hooks and a clean filter. The hooks are `post-index-change` and `reference-transaction`, and each of the four writes a marker file. After `worktree.remove`, no marker from the fsmonitor or a hook exists, and the filter's marker shows whether `status` ran it.
+4. End to end, on a test host with a systemd user manager, the clean filter of test 3 records `/proc/self/cgroup`. That path lies under `<name>.slice`.
+5. `pull` of an unwalled session still prints the branch and the count of changed files.
+
+### 19.4 Lima VMs (P0.8)
+
+**Facts.** Lima 2.3.0 (6 November 2026) adds `networkOpts.hostLoopback`. False stops the guest from reaching the host's loopback services through `host.lima.internal` ([template](https://github.com/lima-vm/lima/blob/v2.3.0/templates/default.yaml)). Only `vmType: vz` supports it. Lima's QEMU driver refuses it: "field `networkOpts.hostLoopback: false` is not supported for vmType: qemu" ([qemu_driver.go](https://github.com/lima-vm/lima/blob/v2.3.0/pkg/driver/qemu/qemu_driver.go)). With `nestedVirtualization: true`, Lima's `vz` driver asks Apple's `isNestedVirtualizationSupported` when it starts the VM. It fails with "nested virtualization is not supported on this device" or "nested virtualization requires macOS 15 or newer" ([vm_darwin.go](https://github.com/lima-vm/lima/blob/v2.3.0/pkg/driver/vz/vm_darwin.go)). `limactl list --json` gives each instance's `vmType` and its `config`, which holds `networkOpts.hostLoopback` ([lima_instance.go](https://github.com/lima-vm/lima/blob/v2.3.0/pkg/limatype/lima_instance.go)).
+
+**`host create lima`.**
+
+1. It runs `limactl --version`, and reads `limactl version <x.y.z>`. It refuses a version below 2.3.0.
+2. On macOS, `CreateArgs` adds `--vm-type=vz`, `--set=.networkOpts.hostLoopback = false` and `--nested-virt`. The explicit `vz` wins over a `vmType` in the user's `$LIMA_HOME/_config/default.yaml`.
+3. On Linux, Lima uses QEMU, which refuses the option. `CreateArgs` adds none of the three, and the client prints the warning below.
+4. It starts the VM. When the start fails with one of Lima's two nested-virtualisation messages, the client runs `limactl edit --tty=false --set '.nestedVirtualization = false' <instance>`, and starts again. It prints: "This Mac cannot run a VM inside a VM, so box gets no microvm sandboxes." Any other failure is reported as today.
+
+So Lima decides nested virtualisation with Apple's own check, not with the chip's name ([question 78](#15-open-questions)).
+
+**`host doctor` on a Lima host.** The client reads the instance from `limactl list --json`. The check "laptop loopback" passes when `vmType` is `vz` and `config.networkOpts.hostLoopback` is false. Otherwise it warns, also for an instance made before P0.8. The check runs on the laptop: `LoopbackCheck` in `internal/provider/lima/lima.go`, which `hostDoctorCmd` adds to the host's checks.
+
+**Errors.**
+
+| When | Message | Try |
+| --- | --- | --- |
+| Lima before 2.3.0 | Lima 2.2.1 is too old for host create: 2.3.0 or later can keep the VM away from your Mac's loopback services. | Update Lima (`https://lima-vm.io/docs/installation/`), then run this again. |
+| No version | Could not read the version of limactl from "limactl: command failed". | `limactl --version` |
+| Loopback open (a doctor warning) | box can reach services on your Mac's loopback address. | `limactl stop <instance>`, then `limactl edit --set '.networkOpts.hostLoopback = false' <instance>`, then `limactl start <instance>` |
+| On Linux (a warning at create) | Lima with QEMU cannot stop box from reaching this machine's loopback services. | Run untrusted work on a remote host: `simstim host add` |
+
+**Tests.**
+
+1. `CreateArgs` for `darwin` and `linux`, against golden argument lists in `testdata`.
+2. `parseLimaVersion`: `limactl version 2.3.0`, `2.2.1`, `2.10.0`, `2.3.0-rc.1`, and text that is not a version.
+3. The start again: a fake `limactl` fails its first start with each recorded message, then succeeds. The client edits once and starts once more.
+4. `LoopbackCheck`: recorded `limactl list --json` lines with `hostLoopback` false, true and absent, and one with `vmType: qemu`.
+5. By hand on a Mac, as Lima's own test does ([vz-host-loopback.bats](https://github.com/lima-vm/lima/blob/v2.3.0/hack/bats/extras/vz-host-loopback.bats)), start a listener on the Mac's `127.0.0.1`. A connection from a new VM to `host.lima.internal` and that port is refused.
+
+### 19.5 The watch job for pins (P0.9)
+
+**Why.** CI already runs `govulncheck` for Go. Nothing watches the Ghostty commit, and later the VMM, the kernel and `runsc`. The Ghostty advisories are in neither OSV nor GitHub's global database ([build facts](../research/build-facts.md#61-ghostty-and-its-advisories)).
+
+**The pins.** `scripts/pins-watch.py` reads:
+
+- The Ghostty commit, from the URL of `.ghostty` in `vt/build.zig.zon`, which has the form `…/archive/<40 hex>.tar.gz`. Its repository is `ghostty-org/ghostty`.
+- Each `[[pin]]` of `guest/supply.lock`. P0.9 makes the file with its header and no pin. Later tasks add their entries: the kernel (P3.1), the VMM (P3.3), `runsc` (P6.1) and Firecracker (P6.2).
+
+```toml
+# Pins that no package ecosystem covers. scripts/pins-watch.py checks each one daily (spec 19.5).
+version = 1
+
+# [[pin]]
+# name = "cloud-hypervisor"                    # a short name, for messages and issues
+# repo = "cloud-hypervisor/cloud-hypervisor"   # owner/name on GitHub, for its advisories
+# ref = "v54.0"                                # the tag, for people
+# commit = "<40 hex>"                          # the commit of ref, which the build uses
+# watch = "github"                             # "github": advisories and ancestry. "osv": OSV only.
+```
+
+`name`, `ref` and `commit` are needed. `repo` is needed when `watch` is `github`, the default. The script ignores keys that it does not know, so later tasks may add fields such as `url` and `sha256`. Section 20.1 adds named tables of build inputs to the same file. The watch job reads only the `[[pin]]` entries.
+
+**The check.** For Ghostty, and for each pin with `watch = "github"`:
+
+1. Read `GET /repos/<repo>/security-advisories?state=published&per_page=100`, every page ([repository advisories](https://docs.github.com/en/rest/security-advisories/repository-advisories)).
+2. In each entry of an advisory's `vulnerabilities`, take each hex string of 7 to 40 characters from `vulnerable_version_range` and `patched_versions`.
+3. A hash in the range that follows `>=`, `from` or `since` is an introduced commit. Every other hash in the range, and each hash in `patched_versions`, is a fix.
+4. "A reaches the pin" means that `GET /repos/<repo>/compare/<A>...<pin>` answers `ahead` or `identical`.
+5. An entry affects the pin when none of its fixes reaches the pin, and one of its introduced commits does, or it names none.
+6. An advisory with no hash in any entry is "unread" for a commit pin.
+
+For every pin, the Ghostty commit included, the script also sends `POST https://api.osv.dev/v1/query` with `{"commit": "<pin>"}`. Each answer is a finding. This covers the entries that have a CVE and a `GIT` range. A pin with `watch = "osv"` gets this step only.
+
+The job also runs `govulncheck` at the version that CI pins. It checks the Go toolchain of `go.mod` and the modules.
+
+**Verdicts.** A person may record a verdict for one advisory and one pin commit in `scripts/pins-watch-reviewed.toml`:
+
+```toml
+[[verdict]]
+advisory = "GHSA-3r5j-c6rj-xq2v"
+pin = "ghostty"
+commit = "<40 hex>"   # the verdict holds for this commit only
+verdict = "fixed"     # "fixed" or "not-affected"
+why = "The pin holds 44c4c8f5."
+```
+
+A verdict silences a finding, or an unread advisory, for that commit only. A new pin commit is checked again.
+
+**The job.** `.github/workflows/pins-watch.yml`:
+
+- It runs on `schedule` (`cron: "23 5 * * *"`), on `workflow_dispatch`, and on pull requests that change `vt/build.zig.zon`, `go.mod`, `guest/supply.lock`, `scripts/pins-watch.py`, `scripts/pins-watch-reviewed.toml` or the workflow.
+- It pins each action by its commit SHA, sets `persist-credentials: false`, and passes zizmor.
+- It has `permissions: contents: read`. Only the scheduled run adds `issues: write`.
+- It sends `GITHUB_TOKEN` to the API, for the rate limit.
+- It fails when a pin is affected, when an advisory is unread, and when an API call fails. It never passes on a partial read.
+- On a scheduled run with findings, it opens one issue for each pin and advisory that no open issue names in its title. The title is `pins-watch: <pin> is in <advisory>`, and the labels are `dependencies` and `needs triage`. The body has the advisory's link, its severity, the range as text, the pin's commit and the next step.
+
+The job reports every severity. [Question 42](#15-open-questions) sets how fast a release follows.
+
+**Errors.** Each message of the script ends with a `Try:` line.
+
+| When | Message | Try |
+| --- | --- | --- |
+| A pin is affected | ghostty (ad97d331) is in GHSA-w9q4-5jvv-mcv4: it lacks the fix e257bb45. | Move the pin past e257bb45 (vt/README.md), or record a verdict in scripts/pins-watch-reviewed.toml |
+| An unread advisory | Cannot read the range of GHSA-xxxx-xxxx-xxxx for ghostty: "1.0.0 to 1.3.1". | Check it by hand, then record a verdict for commit ad97d331 in scripts/pins-watch-reviewed.toml |
+| An API failure | Could not read the advisories of ghostty-org/ghostty: HTTP 403. | Run the job again later. Locally, set GITHUB_TOKEN. |
+| No Ghostty commit | Could not find the Ghostty commit in vt/build.zig.zon. | Keep the dependency's URL in the form …/archive/<commit>.tar.gz |
+| A bad lock file | guest/supply.lock: the pin "chv" has no commit. | Add the 40-character commit of its ref |
+
+**Tests.** `scripts/test-pins-watch.py` runs offline, from recorded answers in `scripts/testdata/pins-watch/`. `just test` and CI run it.
+
+1. The old pin `ad97d331`: findings for GHSA-w9q4-5jvv-mcv4 and GHSA-jqr7-69mm-v35h, and none for GHSA-qjfx-r533-6vx3 and GHSA-3r5j-c6rj-xq2v.
+2. The commit of `vt-1.0.0`: no finding.
+3. An advisory with no hash: unread, and the job fails.
+4. A verdict for that advisory and the pin's commit: the job passes. The same verdict for another commit: it fails.
+5. An OSV answer with one entry: a finding.
+6. An API answer of 403: the job fails.
+7. A `supply.lock` pin without `commit` fails. A pin with an unknown key passes.
+
+**Acceptance.** On a branch that restores `ad97d331`, the pull request's run fails, and names GHSA-w9q4-5jvv-mcv4 and GHSA-jqr7-69mm-v35h.
+
+## 20. The microvm build and the supply chain
+
+This section specifies how the project builds what a microvm boots, and how a host keeps each artefact to the client's digest. It covers the boot pair, images, the Cloud Hypervisor driver, the agents disk, and the checks of phase 4. Each subsection names its task. [Build facts 5](../research/build-facts.md#5-the-microvm-and-its-build) and [build facts 6](../research/build-facts.md#6-pins-advisories-and-signatures) give the sources. A fact that no primary source confirms is UNVERIFIED, and names the task step that checks it.
+
+The rule of phase 4 holds in every subsection: the laptop holds the digests, and the hosts hold the bytes. A host never decides what is trusted.
+
+### 20.1 The boot pair (P3.1)
+
+**Behaviour.** Each release builds a guest kernel and a tools image for amd64 and arm64, in CI. The release manifest names each one by digest (14.9.1).
+
+**The kernel.**
+
+- The source is the latest 6.18 long-term release, as a kernel.org tarball. `guest/supply.lock` pins its version, URL and SHA-256. A pin bump checks the tarball once against kernel.org's signed `sha256sums.asc`, then records the hash.
+- `guest/kernel/config-amd64` and `guest/kernel/config-arm64` are full `.config` files. P3.1 step 1 takes Cloud Hypervisor's or Firecracker's published guest config for 6.18 as the start (UNVERIFIED that either exists: step 1 checks it). Without one, the start is `make defconfig`. The task then runs `make olddefconfig`, and commits the result.
+- `guest/kernel/check-config.sh <config> <arch>` reads a final `.config`. It fails when a required symbol is not `y`, or when a forbidden symbol is set. CI runs it before each build.
+- The build makes `vmlinux` on amd64, a PVH ELF, and `arch/arm64/boot/Image` on arm64. Cloud Hypervisor boots these formats ([build facts 5](../research/build-facts.md#5-the-microvm-and-its-build)).
+
+Required symbols, each `=y`:
+
+| Symbols | Why |
+| --- | --- |
+| `CONFIG_PVH` (amd64 only) | Cloud Hypervisor boots a PVH `vmlinux` on x86-64 |
+| `CONFIG_VIRTIO_PCI`, `CONFIG_VIRTIO_BLK`, `CONFIG_VIRTIO_CONSOLE`, `CONFIG_HW_RANDOM_VIRTIO` | The VMM's devices |
+| `CONFIG_VIRTIO_BALLOON` | Free page reporting returns freed pages to the host (20.10). It selects `PAGE_REPORTING`. |
+| `CONFIG_VSOCKETS`, `CONFIG_VIRTIO_VSOCKETS` | The link (20.3) |
+| `CONFIG_BLK_DEV_DM`, `CONFIG_DM_INIT`, `CONFIG_DM_VERITY` | `dm-mod.create` sets up both verified disks with no initramfs. `DM_INIT` needs `BLK_DEV_DM=y`. |
+| `CONFIG_EROFS_FS`, `CONFIG_EXT4_FS`, `CONFIG_OVERLAY_FS`, `CONFIG_TMPFS`, `CONFIG_DEVTMPFS` | The tools image, user images, the agents disk, the session disk and the overlay root (P3.4) |
+| `CONFIG_NF_TABLES`, `CONFIG_NFT_REDIR` | The transparent redirect to the guest's proxy (P3.4) |
+| `CONFIG_CGROUPS`, `CONFIG_MEMCG` | The guest init caps the agent's group, so that a kill for lack of memory in the guest takes the agent before the holder (P3.4) |
+| `CONFIG_SECURITY_LANDLOCK` with `landlock` in `CONFIG_LSM`, `CONFIG_SECCOMP_FILTER`, `CONFIG_USER_NS` | The agents' own sandboxes, which the design keeps on (13) |
+| `CONFIG_FUSE_FS` | FUSE with `sandbox.sudo` or `--docker` ([question 57](#15-open-questions)) |
+| `CONFIG_VMGENID` | Cloud Hypervisor v54.0 always adds the device. A cold boot does not need it. It reseeds the guest's random numbers if memory snapshots ever come ([question 11](#15-open-questions)). |
+| `CONFIG_ACPI` (amd64 only) | The guest's power-off ends the VMM (6.6) |
+| `CONFIG_RANDSTRUCT_NONE`, `CONFIG_DEBUG_INFO_NONE` | A reproducible build with no paths in it (20.6) |
+| Each symbol of the "Generally Necessary" part of moby's `contrib/check-config.sh`, at the commit that `guest/supply.lock` pins | Docker inside a microvm (`--docker`, 7.5) |
+
+Forbidden symbols, each unset or `=n`: `CONFIG_MODULES`, `CONFIG_IO_URING`, `CONFIG_VSOCKETS_LOOPBACK` (it is `default y`, so the config names it), `CONFIG_KVM` (no `/dev/kvm` in a guest, [question 57](#15-open-questions)), `CONFIG_IKHEADERS` and `CONFIG_LOCALVERSION_AUTO`.
+
+**The tools image.**
+
+- It holds `/init`, which is the host helper for that architecture (13), and `/bin/<name>-vt`, the shadow terminal. It also holds the empty mount points that P3.4 names, and nothing else.
+- `mkfs.erofs -T <epoch> -U clear --all-root -b 4096 tools-<arch>.erofs <tree>` makes it, with no compression. erofs-utils is 1.9.3 or later, built from the source tarball that `guest/supply.lock` pins. `<epoch>` is the `SOURCE_DATE_EPOCH` of 20.6.
+- The build pads the file with zeros to a multiple of 4096 bytes. Then `go run ./guest/verity` appends a verity tree with no verity superblock. It uses `MerkleTree` and `RootHash` from `hcsshim`'s `dmverity` package: SHA-256, blocks of 4096 bytes, and a salt of 32 zero bytes. User images use the same package (20.2).
+- The release manifest's `tools` entry gives the whole file's `sha256` and `size`, and `root_hash`, `salt` (64 zeros in hex) and `data_blocks`.
+
+**The release assets.** `vmlinux-amd64`, `Image-arm64`, `tools-amd64.erofs`, `tools-arm64.erofs`, the kernel tarball `linux-<version>.tar.xz`, `config-amd64` and `config-arm64`. The kernel's entry has a `source_url` that points at the tarball in the same release. The release also mirrors the pinned VMM of 20.3.
+
+**Inputs.** `guest/supply.lock`, the two configs, and the helper and `<name>-vt` of the same release. The format of `guest/supply.lock`:
+
+```toml
+# Every outside input of the boot pair and the VMM, pinned by SHA-256.
+[kernel]
+version = "6.18.…"
+url = "https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.18.….tar.xz"
+sha256 = "…"
+
+[erofs_utils]
+version = "1.9.4"
+url = "…"
+sha256 = "…"
+
+[moby_check_config]
+commit = "…"                     # moby's contrib/check-config.sh at this commit
+sha256 = "…"
+
+[builder]
+image = "docker.io/library/debian@sha256:…"   # the build container of 20.6, by digest
+
+[vmm]
+name = "cloud-hypervisor"
+version = "54.0"
+released = 2026-10-14
+eol = 2027-01-06
+amd64 = { url = "https://github.com/cloud-hypervisor/cloud-hypervisor/releases/download/v54.0/cloud-hypervisor-static", sha256 = "…", size = 0 }
+arm64 = { url = "https://github.com/cloud-hypervisor/cloud-hypervisor/releases/download/v54.0/cloud-hypervisor-static-aarch64", sha256 = "…", size = 0 }
+source = { url = "https://github.com/cloud-hypervisor/cloud-hypervisor/releases/download/v54.0/cloud-hypervisor-v54.0.tar.xz", sha256 = "…" }
+```
+
+These tables share the file with the `[[pin]]` list of 19.5. `version = 1` and the `[[pin]]` entries come first, then the named tables. Each input that has advisories of its own, such as the kernel, erofs-utils and the VMM, also has a `[[pin]]` entry with the same version in `ref`. A CI check fails when a named table and its pin disagree.
+
+**Errors.** These are CI errors. Each prints a message and a "Try:" line.
+
+| When | Message | Try |
+| --- | --- | --- |
+| A required symbol is missing | `check-config: CONFIG_DM_INIT is n in guest/kernel/config-amd64, and the guest needs y.` | Set it, run `make olddefconfig`, and commit the config |
+| A forbidden symbol is set | `check-config: CONFIG_MODULES is y in guest/kernel/config-arm64, and the guest forbids it.` | Unset it, run `make olddefconfig`, and commit the config |
+| A pinned input differs | `supply: linux-6.18.….tar.xz does not match its SHA-256 in guest/supply.lock.` | Download it again. If it still differs, stop, and check kernel.org's signed `sha256sums.asc`. |
+| The boot test times out | `boot test: the amd64 guest did not answer within 60 s.` | `just guest-boot ARCH=amd64`, which prints the guest's serial console |
+
+**Tests.**
+
+- Unit tests of `check-config.sh` with three small configs: one passes, one lacks a symbol, one sets a forbidden symbol.
+- CI boots each kernel under the pinned Cloud Hypervisor on a runner with KVM, and runs the guest init's self-test. UNVERIFIED that GitHub's hosted Linux runners give `/dev/kvm`: P3.1 step 2 checks it. Without it, the boot test runs in `just e2e` on `E2E_HOST`.
+- The release job checks each asset's SHA-256 and size against the release manifest, before it uploads the manifest (P4.1).
+
+### 20.2 Images (P3.2)
+
+**Behaviour.** On the host, the image builder turns an OCI image into a read-only ext4 file with a verity tree. Each layer must match the client's digest.
+
+1. **Pin.** The release manifest pins the default image. `images.lock` on the laptop pins each image that the user names (20.8). The pin is the manifest digest. A host never supplies it ([question 35](#15-open-questions)).
+2. **Fetch.** `[images] fetch` picks the way, as for runtime files (14.9.3, [question 39](#15-open-questions)):
+   - `host`: the request `image.pull` gives the helper the reference, the pinned digest and the architecture. The helper fetches the manifest by digest, with no registry login, and checks its SHA-256. From an index it takes the `linux/<arch>` manifest, and checks that digest too. It downloads each layer into `images/incoming/<hex>.part`, stops at the layer's size, and checks its SHA-256.
+   - `laptop`: the client does the same with the user's registry login ([question 65](#15-open-questions)), into `~/.cache/<name>/images/blobs/sha256/`. It copies each blob to `images/incoming/` as 14.9.3 does. Then `image.install` makes the helper check each blob again.
+   - A private image always takes the `laptop` way. No registry login reaches a host.
+3. **Flatten.** The converter jail applies the layers in order, as the rules below say, and writes one normalised tar stream.
+4. **Convert.** The same jail calls `tar2ext4.Convert(tar, out, tar2ext4.AppendDMVerity)` from `github.com/Microsoft/hcsshim` v0.15.0 (MIT). It passes no other option. The output is the ext4 data, one verity superblock of 4096 bytes, then the tree.
+5. **Root hash.** The helper, outside the jail, reads the tree's first block. It computes the root hash itself, with `dmverity.RootHash`. It reads `data_blocks` from the ext4 superblock. Each value goes into `image.json`.
+6. **Check value.** When the client sends a root hash for the digest, the helper compares it ([question 81](#15-open-questions)). The default image's root hash comes from the release manifest. A user image's comes from `images.lock`, which records the first conversion's root hash and the host that made it. A different root hash deletes the result, with `image_root_mismatch`.
+7. **Store.** The helper moves the file into the store, 0444, and deletes the layer blobs.
+
+A root hash is a check value, not a pin. A host can make a start fail with it, but cannot change which bytes a sandbox boots. Conversion is deterministic for one tar stream ([build facts 5](../research/build-facts.md#5-the-microvm-and-its-build)), so two honest hosts agree.
+
+**The converter jail.** `<helper> image-convert` runs in a `converter` jail (5.6), in a transient scope with `MemoryMax=1G`. It has `NetNone`, no binds, and the `converter` seccomp profile. Its `Files` are the layer blobs in order from fd 3, and the output file last. 1 GiB is a target that P3.2 checks with a 1 GiB image.
+
+**Flatten rules.**
+
+1. Each layer's media type is an OCI tar, tar with gzip or tar with zstd, or Docker's `rootfs.diff.tar.gzip`. Any other type stops the pull with `image_bad_layer`.
+2. A name loses a leading `./` or `/`, and is then cleaned. A name with a `..` part, a NUL byte, or more than 4,096 bytes stops the pull with `image_bad_layer`.
+3. `.wh.<name>` removes `<name>` from the lower layers. `.wh..wh..opq` removes everything under its folder from the lower layers. No whiteout file enters the output.
+4. Regular files, folders, symlinks, hard links and FIFOs stay. Character and block devices are dropped, because the guest's `/dev` is its own. The helper logs the count. Any other type stops the pull with `image_bad_layer`.
+5. A hard link must name a path that exists at that point in the merged tree. Otherwise the pull stops with `image_bad_layer`. A link keeps its content when a later layer removes its target.
+6. The output tar is in PAX format. It lists each folder before its children, and the children of a folder in byte order of their names.
+7. Each entry keeps the mode, uid, gid, link target and modification time of the last layer that wrote it. Access and change times, user names and group names are dropped. PAX xattrs stay, except `trusted.*`.
+
+**Caps.** The jail counts each cap while it reads, so a decompression bomb stops early.
+
+| Cap | Value | Error |
+| --- | --- | --- |
+| Compressed layers, all together | 8 GiB | `image_too_large` |
+| Uncompressed bytes, all together | 16 GiB, which is `tar2ext4`'s default maximum | `image_too_large` |
+| Entries in the flattened tree | 1,000,000 | `image_too_large` |
+| Layers | 128 | `image_too_large` |
+| A manifest or an index | 4 MiB | `image_bad_layer` |
+
+**The store.** Under `paths.ImagesDir()` (14.5):
+
+| Path | Contents |
+| --- | --- |
+| `images/<hex>/rootfs.img` | The ext4 file with its verity superblock and tree, 0444. `<hex>` is the platform manifest's digest. |
+| `images/<hex>/image.json` | `ref`, `digest`, `platform_digest`, `arch`, `root_hash`, `data_blocks`, `size`, `converted_at` and `used_at` |
+| `images/incoming/` | Layer blobs while a pull or a copy runs, 0700 |
+| `images/agents/` | Agents disks (20.4) |
+
+**Garbage collection.** `simstim-host prune` keeps an image when one of these holds:
+
+- The trusted manifest of a session that is not deleted names it.
+- One of the two newest runtime labels names it as its default image (14.9.4).
+- Its `used_at` or `converted_at` is in the last 7 days.
+- It arrived in the last hour.
+
+`prune` removes every other image. `image rm <digest> <host>` removes one image at once. It refuses with `image_in_use` while a session's trusted manifest names the image, a stopped session included.
+
+**The default image.** A Debian snapshot with git, curl and CA certificates, and no proprietary agent. CI builds it, pushes it to the project's registry, and converts it with the same code. The release manifest pins it: `{"kind": "image", "name": "agent-base", "arch": "amd64", "digest": "sha256:…", "root_hash": "…", "data_blocks": 0}`.
+
+**Bridge ops.** `image.ls`, `image.pull`, `image.install`, `image.status` and `image.rm`, behind the feature `images` (10.5). `image.status` gives the bytes so far, as `runtime.status` does.
+
+**Go version.** `hcsshim` v0.15.0 says `go 1.26.8` in its `go.mod`. So adding it raises this module's `go` line from 1.26.0 to 1.26.8. The `toolchain` line already names go1.26.10.
+
+**Errors.**
+
+| Code | Message | Try |
+| --- | --- | --- |
+| `image_bad_layer` | A layer of ghcr.io/acme/dev:1 has a path that leaves the image: `../etc/passwd`. | Rebuild the image, or use another one |
+| `image_too_large` | ghcr.io/acme/big:1 unpacks to more than 16 GiB, the cap for an image. | Use a smaller image |
+| `image_root_mismatch` | ghcr.io/acme/dev@sha256:ab12… gave another root hash on nuc than on box. nuc deleted its copy. | `simstim host doctor nuc`. Report both root hashes as a bug. |
+| `image_in_use` | auth-fix on box still uses ghcr.io/acme/dev@sha256:ab12…. | `simstim rm box/auth-fix`, then remove the image |
+| `digest_mismatch` | A layer of ghcr.io/acme/dev:1 on box does not match its digest. box deleted it. | `simstim image pull ghcr.io/acme/dev:1 box` |
+
+**Tests.**
+
+- Unit tests with small images in `testdata`. They cover whiteouts, opaque folders, symlinks, device nodes, a `..` name and each cap. They also cover a hard link whose target a later layer removes.
+- A fuzz test of the flattener.
+- Determinism: one tar converts twice to the same bytes up to the verity superblock, and to the same root hash.
+- Two hosts, or one host twice, convert one digest to the same root hash. A wrong root hash in the request gives `image_root_mismatch`, and leaves no file.
+- `prune` keeps and removes images as the list above says.
+
+### 20.3 The Cloud Hypervisor driver (P3.3)
+
+**The pin.** `guest/supply.lock` pins Cloud Hypervisor v54.0, the static build: `cloud-hypervisor-static` for amd64 and `cloud-hypervisor-static-aarch64` for arm64. The release mirrors both, and the release manifest names each as the `vmm` entry. The reasons, from [build facts 5](../research/build-facts.md#5-the-microvm-and-its-build):
+
+- v54.0 is the latest release, of 14 October 2026. It gets fixes until about 6 January 2027, which is the entry's `eol`.
+- It gives the main thread its own seccomp filter. Before v54.0 the main thread had none.
+- It requires `image_type` on every disk, which fits the rule of raw disks only.
+- It always adds the VM Generation ID device.
+- v52.0 is the advisory floor, and no pin goes below it. v51.2 and v52.0 fix GHSA-f47p-p25q-83rh, and v50.1 and v51.0 fix GHSA-jmr4-g2hv-mjj6. No newer advisory exists on 10 November 2026. The known-bad list holds both (20.9).
+
+A pin bump follows the same reasons. The health item `runtime-eol` warns when the pinned VMM passes its `eol` (14.11.1).
+
+**The jail.** The VMM runs in a `vmm` jail (5.6):
+
+- `NetNone`, `PR_SET_DUMPABLE` 0, no core dumps, and the `vmm` seccomp profile of the jail.
+- A mount namespace with only the session folder, the store's files that the start names, and `/dev/kvm`.
+- A subuid where one is available, with its supplementary groups kept. Whether a subuid can open `/dev/kvm` follows 14.4.2 and [build facts 4](../research/build-facts.md#4-linux-walls). When it cannot, the VMM runs as the login user, and `host show` says so.
+- Cloud Hypervisor's own `--seccomp true` and `--landlock` as well.
+
+**The command.** The supervisor builds the argv from the start request only. `<vmm>` and each `/proc/self/fd/<n>` come from 20.5. Until P4.2 lands, P3.3 passes the files' paths in the store.
+
+```text
+<vmm> \
+  --api-socket path=<VMMSocket(id)> \
+  --kernel /proc/self/fd/<kernel> \
+  --cmdline "<the kernel command line below>" \
+  --cpus boot=<cpus> \
+  --memory size=<guest RAM in MiB>M \
+  --balloon size=0,free_page_reporting=on \
+  --disk path=/proc/self/fd/<tools>,readonly=on,direct=on,image_type=raw,backing_files=off,serial=tools \
+         path=/proc/self/fd/<image>,readonly=on,direct=on,image_type=raw,backing_files=off,serial=image \
+         path=/proc/self/fd/<agents>,readonly=on,direct=on,image_type=raw,backing_files=off,serial=agents \
+         path=<SessionDisk(id)>,readonly=off,direct=on,image_type=raw,backing_files=off,sparse=on,serial=session \
+  --vsock cid=3,socket=<VsockSocket(id)> \
+  --serial off --console off \
+  --seccomp true --landlock
+```
+
+- Every disk has `image_type=raw` and `backing_files=off`, so the VMM never reads a format header that a guest wrote ([threat model](https://github.com/cloud-hypervisor/cloud-hypervisor/blob/main/docs/threat-model.md)).
+- Every disk has `direct=on`, so the VMM's reads add no host page cache to the session's cap (20.10).
+- v54.0 fails an unaligned request to a raw disk with `direct=on` with an I/O error. UNVERIFIED whether a guest's 512-byte direct write reaches the VMM unaligned: P3.3's test runs `dd bs=512 oflag=direct` on `/work`. If it fails, the session disk drops `direct=on`, and 20.10 counts its page cache.
+- The jail creates the session disk at the first start, as a sparse file of `sandbox.disk_max` bytes, 0600. So it belongs to the VMM's uid.
+- Neither console reaches a file on the host, because a guest could fill it. The guest init sends its log over the link (P3.4).
+
+**The kernel command line.**
+
+```text
+ro quiet root=/dev/dm-0 rootfstype=erofs init=/init dm-mod.waitfor=/dev/vda,/dev/vdb dm-mod.create="tools,,0,ro,0 <T*8> verity 1 /dev/vda /dev/vda 4096 4096 <T> <T> sha256 <tools root hash> <salt> 1 panic_on_corruption;image,,1,ro,0 <I*8> verity 1 /dev/vdb /dev/vdb 4096 4096 <I> <I+1> sha256 <image root hash> <salt> 1 panic_on_corruption"
+```
+
+- `<T>` is the tools entry's `data_blocks`, and `<I>` the image's. A table's length is in 512-byte sectors, so it is the data blocks times 8.
+- The hash start block is `<T>` for the tools image, whose tree follows the data with no superblock (20.1). It is `<I+1>` for a user image, whose tree follows a verity superblock of one block (20.2).
+- `<salt>` is 64 zeros in hex. The algorithm is `sha256`, and both block sizes are 4096 ([dm-init](https://docs.kernel.org/admin-guide/device-mapper/dm-init.html), [verity](https://docs.kernel.org/admin-guide/device-mapper/verity.html)).
+- The line has no `panic=` value, so a guest that panics halts. The link then goes silent. After 15 s the supervisor raises `link_silent` (10.8), kills the VMM and raises `sandbox_error`.
+- The guest names the disks `vda` to `vdd` in the order of `--disk`. UNVERIFIED: P3.3's boot test reads `/sys/block/vd*/serial` and checks the order. The guest init checks each serial before it mounts the agents disk and the session disk.
+
+**The link.**
+
+1. The supervisor connects to `VsockSocket(id)` and writes `CONNECT 1024\n`. The guest init listens on vsock port 1024.
+2. The supervisor reads one line. `OK <port>` means the link is up. UNVERIFIED for Cloud Hypervisor, whose docs show no reply: P3.3's link test reads it.
+3. Any other answer, or a closed socket, means that the guest init does not listen yet. The supervisor tries again every 50 ms, until the boot timeout.
+4. The supervisor never creates a `<VsockSocket(id)>_<port>` listener, so a guest's own connection to the host reaches nothing ([question 23](#15-open-questions)).
+
+**Start and stop.**
+
+- The boot timeout is 60 s, from the VMM's start to the guest init's hello. Past it, the supervisor kills the VMM, and `new` fails with `sandbox_boot`.
+- The supervisor keeps the last 64 KiB of the VMM's standard error in `SupervisorLog(id)`. A VMM that exits with an error raises `sandbox_error`, with the last line.
+- The supervisor uses the API socket for two things only. It reads the VM's state, and it presses the power button when the guest init does not answer `stop` (6.6).
+- Stop follows 6.6. After the grace, the supervisor kills the VMM.
+
+**Memory.** Guest RAM is the session's size. The unit's cap is the size plus the reserve of 20.10.
+
+**Inputs.** The start request. It holds the runtime items by digest, with their `fsverity` values from P4.2. It also holds the tools entry, the image's digest, root hash and data blocks, and the agents disk's digest. Last come the size, the CPUs and `sandbox.disk_max`.
+
+**Errors.**
+
+| Code | Message | Try |
+| --- | --- | --- |
+| `sandbox_boot` | auth-fix on box did not boot: its guest init did not answer within 60 s. | `simstim host doctor box` |
+| `sandbox_boot` | auth-fix on box did not boot: the VMM exited: `<its last line>`. | `simstim host doctor box` |
+| `digest_mismatch` | A runtime file on box, such as the helper or the VMM, does not match the digest in this client. | `simstim host upgrade box` (installs the files again) |
+| `wall_unavailable` | The microvm wall needs /dev/kvm, and devbox has none. | `simstim host show devbox` |
+
+**Tests.**
+
+- A golden test of the argv and the kernel command line, from a fixed start request.
+- A guest that writes a QCOW2 header to its session disk and reboots reads zeros, not a host file.
+- A guest write to `/dev/vda`, `/dev/vdb` or `/dev/vdc` fails.
+- A changed byte in the tools image, made after the check, stops the boot with `sandbox_boot`.
+- The disk order, by serial, and the `CONNECT` reply.
+- The guest reaches no host socket, and no TCP, UDP or `AF_UNIX` endpoint. This is the escape suite of P1.5 for microvm.
+- The unit's `MemoryMax` and the VMM's `--memory` match 20.10.
+
+### 20.4 The agents disk (P3.5)
+
+**Behaviour.** A microvm guest gets the host's installed agents read-only, from one disk at `/opt/agents`. The host builds it, so it is outside guarantee G11. The guest only reads it, so its content cannot harm the trusted side.
+
+1. **When.** The helper builds a disk after `agents install` ends, and at a microvm start when the installed agents differ from the newest disk.
+2. **What.** For each agent of the agent table that the host has installed: each folder of its `InstallDirs`, and its resolved binary (`internal/agents`).
+3. **Read.** The helper reads each folder with `os.Root`, so no symlink leads outside it. Symlinks stay as symlinks.
+4. **Tar.** It writes one tar stream. Each entry's name is `root/<host path>`, without the leading `/`. Entries come in byte order, and every folder before its children. `bin/<binary name>` is a symlink to `../root/<host path of the binary>`.
+5. **Owner.** Every entry belongs to uid and gid 1000, the guest's `agent`, and keeps its mode and modification time. So the agent can read and run what its host user could.
+6. **Convert.** A `converter` jail calls `tar2ext4.Convert` with no verity tree. The file goes to `images/agents/<hex>.img`, 0444, where `<hex>` is the file's SHA-256.
+7. **Source digest.** `images/agents/source.json` holds a SHA-256 over each entry's path, size, mode and modification time, for the newest disk. When the installed agents give the same source digest, the helper reuses that disk.
+8. **Boot.** The VMM gets the disk with `readonly=on` (20.3). The guest init mounts it at `/opt/agents` with `ro,nodev,nosuid`, and puts `/opt/agents/bin` first in the agent's `PATH` (P3.4).
+9. **Record.** The trusted manifest records the disk's digest in `agents` (10.7). A running sandbox keeps its disk until its next start.
+
+Agents cannot update themselves: their files are on a read-only disk ([question 21](#15-open-questions)). `agents install` on the host updates them, and the next start gets the new disk.
+
+**Caps.** 4 GiB for the disk, and 500,000 entries. Past either, the build stops with `agents_disk`.
+
+**Garbage collection.** `prune` keeps the newest disk, and each disk that the trusted manifest of a session that is not deleted names. It removes the rest.
+
+**Errors.**
+
+| Code | Message | Try |
+| --- | --- | --- |
+| `agents_disk` | box could not build the agents disk: claude's install folders hold more than 500,000 files. | `simstim host doctor box` |
+| `agents_disk` | box could not build the agents disk: codex is in the agent table, but its binary is missing. | `simstim agents install codex box` |
+
+**Tests.**
+
+- Unit tests with a fake agent table and fake install folders. Two builds from the same folders give the same digest.
+- A symlink in an install folder that points outside it stays a symlink, and its target does not enter the disk.
+- In a guest, a write under `/opt/agents` fails with `EROFS`.
+- `agents install` gives a new digest. A running sandbox keeps the old disk, and `prune` removes it after that sandbox ends.
+
+### 20.5 Run verified bytes only (P4.2)
+
+**Behaviour.** Between the check of a runtime file and its use, a change to the file in the store changes nothing that runs. The supervisor guards the VMM and the guest kernel in one of two ways ([question 82](#15-open-questions)). Verity in the guest guards the tools image and the user's image (20.3).
+
+**At install.** After the SHA-256 check of 14.9.2 and the move into `artefacts/sha256/<hex>`, the helper calls `FS_IOC_ENABLE_VERITY` on a read-only descriptor. It asks for SHA-256, blocks of 4096 bytes and no salt. The ioctl needs write access to the inode, but no root, so the helper calls it before it sets the file to 0444. For a file already in the store, it adds the owner's write bit for the call, then removes it. It works on ext4 with the `verity` feature, on f2fs, and on btrfs from Linux 5.15 ([build facts 5](../research/build-facts.md#5-the-microvm-and-its-build)). On any other file system, the ioctl fails, and the file stays as it is.
+
+**At each start,** for the VMM binary and for the guest kernel:
+
+1. The supervisor opens the file in the store with `os.Root`, `O_RDONLY` and `O_NOFOLLOW`.
+2. **fs-verity path.** It calls `FS_IOC_MEASURE_VERITY`. When that works, it compares the digest with the entry's `fsverity` value from the start request. A file with fs-verity on cannot be opened for writing, and the kernel checks each read. The supervisor then uses this descriptor.
+3. **Sealed copy path.** When the file has no fs-verity, the supervisor makes a `memfd_create` file with `MFD_CLOEXEC` and `MFD_ALLOW_SEALING`. It copies at most the entry's size plus one byte, and refuses a longer file.
+4. It seals the copy with `F_SEAL_SHRINK`, `F_SEAL_GROW`, `F_SEAL_WRITE` and `F_SEAL_SEAL`. It then reads the copy from offset 0, and compares its SHA-256 with the entry's `sha256`. The supervisor then uses the copy's descriptor.
+5. A mismatch on either path stops the start with `digest_mismatch`.
+6. The jail starts the VMM with `execve` of `/proc/self/fd/<n>`, a descriptor that it inherits. The VMM gets the kernel as `--kernel /proc/self/fd/<k>`.
+
+The supervisor also opens the tools image, the user's image and the agents disk, and passes each to the VMM as a descriptor (20.3). So a rename in the store after the open changes nothing.
+
+**The `fsverity` value.** Each runtime entry of the release manifest gets `fsverity`. It is the file's fs-verity digest for SHA-256 and blocks of 4096 bytes, with no salt. `internal/supply` computes it in Go, and its tests compare it with the output of `fsverity digest` for fixed files.
+
+**The cost.** The sealed copies live in the session's unit. They are about 19 MiB for v54.0 and kernel 6.18, and the reserve counts them on every host (20.10). The VMM may keep the kernel open for a guest reboot, so the budget counts both copies for the session's whole run.
+
+**UNVERIFIED.** That Cloud Hypervisor's Landlock rules allow a path under `/proc/self/fd`. P4.2's first test checks it. If they do not, the supervisor adds `--landlock-rules path=/proc/self/fd/<n>,access=r` for each such path.
+
+**Errors.** `digest_mismatch` (9.3), with the file's name: "The VMM on box does not match the digest in this client." Try: `simstim host upgrade box`.
+
+**Tests.**
+
+- A rename of another file over the VMM's path, between the check and the start, changes nothing that runs.
+- On the sealed copy path, a write into the store's file after the copy changes nothing that runs.
+- On the fs-verity path, an open for writing fails. A test injects the ioctl's answers, so it runs on any file system.
+- A file one byte longer than its entry stops the copy with `digest_mismatch`.
+- The `fsverity` value matches `fsverity digest` for three fixed files.
+
+### 20.6 Reproducible kernel and tools image (P4.3)
+
+**Behaviour.** `just repro` also builds the guest kernel and the tools image twice, from empty caches, and fails when any byte differs. CI runs it.
+
+**The build.**
+
+1. Each build runs in the container that `guest/supply.lock` pins by digest, so both builds use the same compiler and tools.
+2. The kernel builds from the pinned tarball, unpacked to a fixed path, `/build/linux`. There is no `.git`, so `scripts/setlocalversion` adds nothing.
+3. `SOURCE_DATE_EPOCH` is the commit time of the newest commit that changed `guest/`, from `git log -1 --format=%ct -- guest/`.
+4. `KBUILD_BUILD_TIMESTAMP` is that time, written as `date -u -d @<epoch>` writes it. `KBUILD_BUILD_USER` is `builder`, and `KBUILD_BUILD_HOST` is `guest`.
+5. The config has no modules, no `RANDSTRUCT`, no debug information, no `IKHEADERS` and no `LOCALVERSION_AUTO` (20.1). So no module signature, seed or build path enters the kernel.
+6. The helper and `<name>-vt` come from the same `goreleaser` build as today's `just repro`, with `-trimpath`.
+7. The tools image uses `mkfs.erofs -T <epoch> -U clear --all-root -b 4096`, from erofs-utils 1.9.3 or later. 1.9.3 sorts inline xattrs, and earlier versions are not reproducible ([build facts 5](../research/build-facts.md#5-the-microvm-and-its-build)).
+8. The verity tree has no superblock and a fixed salt (20.1), so it has no random UUID.
+
+**Errors.**
+
+| When | Message | Try |
+| --- | --- | --- |
+| Two builds differ | `repro: tools-amd64.erofs differs between the two builds.` | Compare the two files with `diffoscope`, and fix the input that changed |
+| An old erofs-utils | `repro: mkfs.erofs is 1.8.6, and a reproducible tools image needs 1.9.3 or later.` | Bump erofs-utils in `guest/supply.lock` |
+
+**Tests.** `just repro` in CI. A unit test of the script's version check of `mkfs.erofs`.
+
+### 20.7 A signed-tag release gate (P4.4)
+
+**Behaviour.** `release.yml` builds only from an annotated tag that a key in `.github/tag-signers` signed. That file comes from the protected `main` branch, never from the tag. The maintainer's tag key is a hardware `sk-ssh-ed25519` key ([question 30](#15-open-questions)).
+
+**The steps,** in `scripts/verify-tag.sh`, which the release job runs before any build step:
+
+1. `actions/checkout` is pinned by SHA, at v6.0.2 or later, with `fetch-depth: 0`. Before v6.0.2 it could turn an annotated tag into a lightweight one. The job pins v7.0.1 today.
+2. The script checks that `git --version` is 2.34 or later, and that `ssh -V` is OpenSSH 8.8 or later. Git's notes warn against 8.7.
+3. It runs `git fetch --force origin main "+refs/tags/$TAG:refs/tags/$TAG"`.
+4. It checks that `git cat-file -t "$TAG"` says `tag`. A lightweight tag fails here.
+5. It runs `git show origin/main:.github/tag-signers > "$RUNNER_TEMP/signers"`.
+6. It runs `git -c gpg.ssh.allowedSignersFile="$RUNNER_TEMP/signers" verify-tag "$TAG"`.
+7. It checks that `git merge-base --is-ancestor "$TAG^{commit}" origin/main` succeeds, so the tagged commit is on `main`.
+8. Any failure stops the job before the first build step.
+
+**`.github/tag-signers`.** One line for each maintainer's key, in the allowed signers format: `<email> namespaces="git" sk-ssh-ed25519@openssh.com AAAA… <comment>`. The job needs no hardware key to check a signature.
+
+**The limit.** On a tag push, the job checks out the tagged commit. The workflow file probably comes from that commit too (UNVERIFIED: GitHub's docs do not say so in these words). So a tag on a commit that changes `release.yml` could skip the gate. Two settings close this, and `docs/contributing/releasing.md` lists both:
+
+- A tag ruleset on `refs/tags/v*` that lets only the owner create, move or delete those tags.
+- Branch protection on `main`, so that commits reach it only through reviewed pull requests.
+
+Step 7 catches a tag on an unreviewed branch by mistake. It does not stop a person who can change the workflow in the tagged commit.
+
+**Errors.** These are CI errors.
+
+| When | Message | Try |
+| --- | --- | --- |
+| A lightweight tag | `release: v0.6.0 is a lightweight tag, and a release needs a signed annotated tag.` | `git tag -s v0.6.0 -m v0.6.0`, then push the tag again |
+| No good signature | `release: v0.6.0 is not signed by a key in .github/tag-signers on main.` | Sign it with your key from that file. Add a new key to the file through a pull request first. |
+| Not on main | `release: the commit of v0.6.0 is not on main.` | Tag a commit that is on `main` |
+| Old tools | `release: the runner has OpenSSH 8.7, and the check needs 8.8 or later.` | Pin a newer runner image in `release.yml` |
+
+**Tests.** `scripts/test-verify-tag.sh`, which CI runs on each pull request. It makes a temporary repository and an ed25519 key with no passphrase, and runs `scripts/verify-tag.sh` on these tags:
+
+- A tag signed by a listed key passes.
+- An unsigned annotated tag fails, and a lightweight tag fails.
+- A tag signed by a key that is not listed fails.
+- A tag whose own commit adds its key to `.github/tag-signers` fails, because the file comes from `main`.
+- A tag on a commit that is not on `main` fails.
+
+The test never pushes a tag.
+
+### 20.8 Image policy (P4.5)
+
+**Behaviour.** The laptop pins each image that the user names by digest, in `images.lock`. A start uses the pin, and never follows a tag that moved ([question 84](#15-open-questions)). With `[sandbox.image_policy]`, the laptop also checks a cosign signature before it pins an image. No host takes part in either step, and no host's answer changes a pin ([question 35](#15-open-questions)).
+
+**`images.lock`.** TOML, written only by the client:
+
+```toml
+# Written by simstim. Each image that sandboxes may boot, pinned by digest.
+version = 1
+
+[[image]]
+ref = "ghcr.io/acme/dev:1"
+digest = "sha256:ab12…"        # the manifest or index that the tag resolved to
+pinned_at = 2026-11-10T09:00:00Z
+signed_by = ""                 # the identity that the image policy accepted, or ""
+policy = ""                    # the SHA-256 of the image policy that checked it
+
+[[image.platform]]
+arch = "amd64"
+digest = "sha256:cd34…"        # the platform manifest inside the index
+root_hash = "…"                # the first conversion's root hash (20.2)
+data_blocks = 0
+root_from = "box"              # the host of the first conversion
+```
+
+**Pins.**
+
+1. `simstim image pull <ref> <host>` resolves `<ref>` on the laptop, with the user's registry login.
+2. A reference with `@sha256:` pins that digest. Nothing resolves it.
+3. A tag that `images.lock` does not hold gets pinned at once, and the client prints the pin: "Pinned ghcr.io/acme/dev:1 to sha256:ab12…".
+4. A tag that `images.lock` holds, and that now resolves to another digest, stops with `image_moved`. `image pull <ref> <host> --update` shows both digests, then pins the new one.
+5. `new --image <ref>` never resolves a tag that `images.lock` holds. It uses the pin. A tag that the file does not hold gets pinned as in step 3.
+6. The first conversion of each platform records its `root_hash`, `data_blocks` and host in `images.lock`. Later starts send them as the check value of 20.2.
+
+**Signatures.** Only when `[sandbox.image_policy]` names an `identity` and an `issuer` (8.3):
+
+1. The client fetches the signature for the pinned digest from the registry itself. It reads the OCI 1.1 referrers API for artefacts of type `application/vnd.dev.sigstore.bundle.v0.3+json`. It then tries the referrers tag schema, `sha256-<hex>`. Last, it tries the legacy tag `sha256-<hex>.sig`, as `sigstore-go`'s OCI example does.
+2. It verifies each bundle with `sigstore-go` v1.4.0 or later, offline. The trusted root is the `trusted_root.json` that the client embeds, or the file that `[sandbox.image_policy] trusted_root` names.
+3. The identity check is `verify.NewShortCertificateIdentity(issuer, "", identity, "")`: both values must match exactly. The check needs one transparency log entry and one observed timestamp.
+4. The signed payload must name the pinned digest. A signature on the index digest or on the platform digest counts. UNVERIFIED: the exact payload of a cosign v3 bundle for an image. P4.5 step 1 checks it with a signature that cosign v3 made.
+5. A pass records `signed_by` and `policy` in `images.lock`. A change to the image policy makes the next start check the pin again.
+
+The embedded `trusted_root.json` comes from the Sigstore public instance, and each release refreshes it. A signature made with a key newer than that file fails until the user updates the client, or names a newer file.
+
+**Errors.**
+
+| Code | Message | Try |
+| --- | --- | --- |
+| `image_moved` | ghcr.io/acme/dev:1 now points at sha256:cd34…, and images.lock pins sha256:ab12…. | `simstim image pull ghcr.io/acme/dev:1 box --update`, after you check the new image |
+| `image_signature` | ghcr.io/acme/dev@sha256:ab12… has no signature. | Sign it with cosign, or remove `[sandbox.image_policy]` from config.toml |
+| `image_signature` | ghcr.io/acme/dev@sha256:ab12… is signed by `ci@example.com`, and the image policy wants `release@example.com`. | Sign it as `release@example.com`, or change `identity` in `[sandbox.image_policy]` |
+| `image_signature` | The signature of ghcr.io/acme/dev@sha256:ab12… uses a Sigstore key that this client does not know. | Update simstim, or set `trusted_root` in `[sandbox.image_policy]` |
+
+**Tests.** Unit tests with a recorded registry and recorded signature bundles. The cases are a legacy `.sig` signature, a referrers bundle, a wrong identity and a missing signature. A moved tag is tested with and without `--update`.
+
+### 20.9 Known-bad versions (P4.6)
+
+**Behaviour.** The `advisories` list of the release manifest names versions with a known advisory. These are versions of the VMM, the guest kernel and the terminal library. The client reads it in five places. The 7-day rule of [question 42](#15-open-questions) sets how fast a new entry ships.
+
+**An entry.**
+
+```json
+{"id": "GHSA-f47p-p25q-83rh", "kind": "vmm", "name": "cloud-hypervisor", "before": "51.2",
+ "severity": "high", "cvss": 8.9, "published": "2026-05-14",
+ "url": "https://github.com/cloud-hypervisor/cloud-hypervisor/security/advisories/GHSA-f47p-p25q-83rh"}
+```
+
+- `kind` is `vmm`, `kernel` (the guest kernel), `gvisor` (the pinned `runsc`, 21.4) or `terminal`.
+- A `terminal` entry names `<name>-vt`. Its `before` is the first helper version whose Ghostty pin holds every fix.
+- `before` is the lowest version from which every later version has the fix.
+- `severity` is `high` when the CVSS score, 3.1 or 4.0, is 7.0 or more. Otherwise it is the advisory's own word.
+
+**The match rule.** An item matches an entry when the kind and the name are equal, and the item's version is below `before`. Versions compare as dotted numbers, part by part: `51.1` is below `51.2`, and `6.18.9` is below `6.18.10`. A missing part counts as 0.
+
+**Where the client reads it.**
+
+1. **The release job.** It fails when an item of its own release manifest matches an entry: `release: cloud-hypervisor 51.1 matches GHSA-f47p-p25q-83rh.` Try: bump the pin in `guest/supply.lock`.
+2. **A start.** The client refuses a microvm start when an item of `Need.Runtime` matches, with `runtime_advisory`. The release job makes this rare. It guards a mistake in the runtime that a start names.
+3. **`ls` and the launcher.** A running session whose recorded runtime or helper version matches is marked `exposed` (14.11.2). A `terminal` entry marks each session whose holder runs a matching helper (7.7).
+4. **Health.** The item `advisory` warns while a running sandbox matches (14.11.1).
+5. **`host doctor`.** It shows the age of each runtime pin, from the entry's `released` date, and the VMM's `eol`. For example: "cloud-hypervisor 54.0: 27 days old, fixes until 2027-01-06".
+
+Each runtime entry of the release manifest therefore also has `released`, the upstream release date.
+
+**The 7-day rule.** A release with the new entry, and with a fixed pin where one exists, ships within 7 days of an advisory's publication. The rule covers an advisory of `severity` `high`, and any advisory whose range holds a pin of the current release. The 7 days are a project choice. The nearest outside norm is the linux-distros list's 10 days ([build facts 6](../research/build-facts.md#6-pins-advisories-and-signatures)). `pins-watch` (P0.9) finds the advisories, and `docs/contributing/releasing.md` states the rule.
+
+**Errors.**
+
+| Code | Message | Try |
+| --- | --- | --- |
+| `runtime_advisory` | cloud-hypervisor 51.1 on box has a known advisory: GHSA-f47p-p25q-83rh. | `simstim host upgrade box` |
+
+**Tests.** Unit tests of the match rule, with versions of two and three parts. A test of each of the five places, with a fixture release manifest whose runtime matches its own list.
+
+### 20.10 The memory of a microvm (P3.3, P3.8)
+
+**The rule** ([question 80](#15-open-questions)). The session's size, from `sandbox.memory`, the template, the agent table or 4 GiB (17.1), is the guest's RAM. The unit's cap is the size plus a reserve for everything outside the guest:
+
+```text
+guest RAM  = size
+reserve    = 128 MiB + size / 256, rounded up to a whole MiB
+MemoryMax  = size + reserve        (MemorySwapMax=0)
+```
+
+Admission counts the size plus the reserve. That sum is "the VMM overhead" of 14.10.3. A 4 GiB sandbox reserves 4,240 MiB, and a 1 GiB sandbox reserves 1,156 MiB. A process wall keeps the rule of [0024](decisions/0024-memory-cap.md): its size is the unit's cap.
+
+**The budget.** Each part has a source, or it is a target that P3.8 measures.
+
+| Part | Where | Budget | Basis |
+| --- | --- | --- | --- |
+| The guest's kernel, guest init, holder with its 8 MiB ring, and shadow terminal | Inside guest RAM | 96 MiB | Target. The research's estimate of 55 to 90 MiB is UNVERIFIED. |
+| The VMM, without guest RAM | Reserve | 16 MiB | Cloud Hypervisor's CI asserts 10 MiB or less for a 512 MiB guest. The other 6 MiB, for more vCPUs, four disks and vsock, is a target. |
+| Page tables for guest RAM, the VMM's and KVM's | Reserve | size / 256 | Computed: 8 bytes for each 4 KiB page, in two tables. cgroup v2 charges both, as `pagetables` and `sec_pagetables`. Huge pages make it much smaller. |
+| The sealed copies of the VMM and the kernel (20.5) | Reserve | 24 MiB | Their sizes, about 19 MiB at v54.0 and kernel 6.18. Counted on every host, so the reservation does not depend on the file system. |
+| The supervisor | Reserve | 24 MiB | Target |
+| The egress process | Reserve | 40 MiB | Target. The research's estimate of 10 to 20 MiB is UNVERIFIED. |
+| Host page cache from disk reads | Reserve | 0 | Every disk has `direct=on` (20.3). cgroup v2 charges page cache to the unit that reads it. |
+| Margin: socket buffers, kernel stacks and short peaks | Reserve | 24 MiB | Target |
+
+The fixed parts add up to 128 MiB. [Build facts 5](../research/build-facts.md#5-the-microvm-and-its-build) gives each source.
+
+**The balloon.** `free_page_reporting=on` returns the pages that the guest frees, so `memory.current` falls. Admission still counts the whole size plus the reserve, with no overcommit ([question 13](#15-open-questions)).
+
+**Past the cap.** A unit that reaches its cap gets a kill for lack of memory, as [0024](decisions/0024-memory-cap.md) says. The guest cannot pass its own RAM, so only the parts outside it can cause this. `sandbox_error` reports it (10.8).
+
+**Measured by P3.8.** With the agent idle for 60 s:
+
+- Outside the guest: the unit's `memory.current`, less the VMM's guest RAM mapping from `/proc/<vmm>/smaps`. P3.8 also records each process's RSS, and `pagetables` and `sec_pagetables` from `memory.stat`.
+- Inside the guest: `MemTotal` less `MemAvailable`, less the RSS of the agent's process group. The guest init reports it, as a claim.
+
+A part over its budget opens an issue. P3.8 may lower the reserve in record 0040 when every part stays well under it.
+
+**Tests.** A unit test of the formula. The P3.3 test that the unit's `MemoryMax` and the VMM's `--memory` match it. The measurements of P3.8 and section 12.
+
+### 20.11 The host kernel list (P3.7)
+
+**Behaviour.** `host doctor` warns when the host's kernel has a known local root bug. It never lowers a floor, changes a level or refuses a start ([question 7](#15-open-questions)). The list is data in `internal/host/kernel_bugs.toml`, which the helper embeds. Each release refreshes it.
+
+**The format.**
+
+```toml
+# Host kernel bugs that give an unprivileged user root. Each entry cites its advisory.
+schema = 1
+
+[[bug]]
+id = "CVE-2026-53365"
+name = "VsockDrop"
+what = "an unprivileged local user becomes root through vsock and io_uring"
+url = "https://access.redhat.com/security/cve/cve-2026-53365"
+checked = 2026-11-09
+mitigated_by = ["module:vhost_vsock=absent"]   # every condition must hold
+
+[[bug.upstream]]          # one row for each stable line that the bug reaches
+from = "…"                # the first affected version
+fixed = "…"               # the first fixed version on that line, or "" for none
+
+[[bug.distro]]
+id = "debian"             # ID in /etc/os-release
+version_id = "13"         # VERSION_ID in /etc/os-release
+fixed = "…"               # the first kernel package version with the fix
+```
+
+- P3.7 fills each `from`, `fixed` and `mitigated_by` value from the bug's advisory and from each distribution's security tracker, on the day in `checked`. The first list holds VsockDrop (CVE-2026-53365) and Vghost (CVE-2026-74580), from research section 1.4.
+- A `mitigated_by` condition is `<fact>=<value>`, where `<fact>` is a field of the sandbox probe (14.3), or `module:<name>=absent`, which reads `/sys/module/<name>`. P3.7 writes a condition only when the advisory itself names that mitigation.
+
+**The match rule** ([question 83](#15-open-questions)). The helper reads `uname -r`, `uname -v`, `/proc/version_signature` where it exists, and `ID` and `VERSION_ID` from `/etc/os-release`. For each bug:
+
+1. **Distribution package.** When a `bug.distro` row has this `ID` and `VERSION_ID`, the helper takes the running kernel's package version. Debian writes it in `uname -v` after "Debian ". Ubuntu writes it as the second field of `/proc/version_signature`, without the flavour. It compares the version with the row's `fixed` by Debian's version order. Below it: `affected`. Otherwise: `fixed`.
+2. **Upstream version.** Otherwise, the helper takes the first three numbers of `uname -r`. It matches a `bug.upstream` row when it is at or above `from`, and below `fixed` or `fixed` is "". A match gives `maybe`, because distributions backport fixes without changing the upstream version. No match gives `fixed`.
+3. **Mitigation.** An `affected` or `maybe` result becomes `mitigated` when every `mitigated_by` condition holds.
+4. **Unknown.** A version that the helper cannot read gives `unknown`.
+
+**What doctor prints.**
+
+| Result | Severity | Example |
+| --- | --- | --- |
+| `affected` | `warn` | "Kernel 6.12.48-1 has VsockDrop (CVE-2026-53365), fixed in package 6.12.57-1. Update the kernel, then reboot." |
+| `maybe` | `warn` | "Kernel 6.8.12 is in the range of VsockDrop (CVE-2026-53365). Your distribution may have fixed it: check its tracker." |
+| `mitigated` | `ok` | "VsockDrop (CVE-2026-53365): mitigated, vhost_vsock is not loaded." |
+| `fixed` | none | Nothing |
+| `unknown` | `ok` | "The kernel's version could not be read, so the list of known bugs was not checked." |
+
+Each warning's hint names the root step that removes the path when one exists, such as `vsock-modules` (14.4.2). `host doctor --json` gives each result with its `id`.
+
+**Tests.** Unit tests with recorded `uname -r`, `uname -v`, `/proc/version_signature` and `os-release` strings from Debian 13, Ubuntu 24.04 and one other distribution. Cases: affected, fixed, maybe, mitigated and unknown. A test of Debian's version order, with `~` and an epoch. A test that a result never changes the floor.
+
+## 21. Later phases
+
+This section specifies the tasks of phases 5 to 8 that the sections above only name. Each subsection gives the behaviour, the inputs, the errors and the tests of one task. Paths use today's name, as section 14 does. This section calls a choice that no source supports a project choice. It marks a fact that nobody could check UNVERIFIED, and names the task step that checks it first.
+
+### 21.1 Copy files in and out (P5.2)
+
+`cp` copies files between the laptop and a running sandbox. It is a second file channel beside `pull`, so it gets the same care. Docker Sandboxes' `cp` followed symlinks that a sandbox planted (CVE-2026-103916), and its tar extraction wrote outside its target (CVE-2026-17106) ([research](../research/isolation.md#13-supply-chain-incidents-aimed-at-developers)).
+
+**Inputs.**
+
+- `simstim cp <host>/<session>:<path> <laptop path> [-f] [--allow-flagged]` copies out of the sandbox.
+- `simstim cp <laptop path> <host>/<session>:<path> [-f]` copies into the sandbox.
+- A path in the sandbox is absolute, and lies under `/work`, the agent's home folder (`~`), `/tmp` or `/mnt`.
+- The source is a file or a folder. A folder copies with its files and folders, at most 10,000 entries.
+- The sandbox must run. A stopped one fails with `sandbox_stopped` (9.3), whose hint wakes it.
+- `sandbox.cp_max` (256 MiB) caps the bytes of one command, in both directions. The value is a project choice, between `copy_max` (17.3) and `pull_max` (6.10).
+- The session ops `cp.list` and `cp.read` (10.4), the `ctl` op `cp.list` (10.3), the stream kinds `get` and `put` (10.2), and the feature `cp` (10.5).
+
+**Out.**
+
+1. The client sends `cp.list` with the path. The supervisor passes it to the guest init on the `ctl` stream. The guest init answers with the entries: a relative path, a type and a size.
+2. The supervisor caps the answer at 10,000 entries and 1 MiB. It cleans each path with `api.CleanText`, and drops a path that the cleaning changes.
+3. The client adds up the sizes. A total above `sandbox.cp_max` stops the copy with `cp_too_big`. The client skips symlinks and special files, and lists them.
+4. The client checks each path against the flag rules of 7.1 (`internal/client/review/flags.toml`). Flagged files stop the copy with `cp_flagged`, unless the user answers yes at a terminal or passed `--allow-flagged`.
+5. The client opens the destination's parent folder with `os.Root`. It refuses a name that is empty, `.` or `..`, or that holds `/`, NUL or a control character, with `cp_path`. It refuses a destination with a `.git` part, with `cp_git`.
+6. An existing destination stops the copy with `cp_exists`, unless the command has `-f`. The client checks every destination before it writes one, so a refusal changes nothing.
+7. For each file, the client sends `cp.read` with the path and an offset, as `pull.read` does (6.10). The supervisor opens a `get` stream for the file, and passes its bytes in chunks of 1 MiB. A file that sends more bytes than its listed size stops the copy with `cp_too_big`.
+8. The client writes each file under a temporary name in its folder, then renames it into place. A rename replaces a symlink, and never follows it.
+9. Files arrive with mode 0644, and folders with 0755. The guest's modes, owners and times do not cross. This is a project choice: a file from a sandbox becomes a program on the laptop only after the user's own `chmod`.
+
+**In.**
+
+1. The client reads each laptop file through `os.Root`. It refuses the paths that the paste guard refuses (7.6), with `copy_sensitive`, as `copy_in` does (17.3).
+2. The client sends each file with the upload frames that paste uses (7.6). `proto.UploadBegin` gains two fields: `path`, the guest path, and `replace`.
+3. The supervisor writes each file into the guest on a `put` stream. The guest init writes it as the user `agent`, through `os.Root` opened at the top folder of the path. It makes missing folders.
+4. An existing file in the guest stops the copy with `cp_exists`, unless the command has `-f`.
+
+**Both ways.** The guest init reads and writes as the user `agent`. So a symlink in the sandbox reaches only what the agent can already read. No side extracts a tar. Each file writes an audit line `cp_in` or `cp_out`, with its path and size.
+
+**Errors.**
+
+| When | Code | Message | Try |
+| --- | --- | --- | --- |
+| The copy is larger than the cap | `cp_too_big` | The copy from auth-fix holds 1.2 GiB, and cp copies at most 256 MiB. | `simstim pull devbox/auth-fix` for work in git, or raise `sandbox.cp_max` in config.toml |
+| A guest path outside the four folders, or a bad name | `cp_path` | /etc/shadow is outside the folders that cp reaches: /work, the agent's home folder, /tmp and /mnt. | Copy from a path under one of those folders |
+| A destination in a `.git` folder | `cp_git` | out/.git/hooks/pre-commit would land in a .git folder on your laptop. | Copy the files you need, without their .git folder |
+| The destination exists | `cp_exists` | ./notes.md already exists on your laptop. | `simstim cp devbox/auth-fix:/work/app/notes.md ./notes.md -f` (replaces it) |
+| Files that run code | `cp_flagged` | The copy holds files that run code on your laptop or in CI: .envrc, .githooks/pre-commit. | Read them with `simstim shell devbox/auth-fix`, then add `--allow-flagged` |
+| A session at `none` | `cp_unwalled` | auth-fix runs with no wall, so its files are your own files on devbox. | `scp devbox:<path> .` |
+
+**Tests.**
+
+- Unit tests of the name checks, the `.git` refusal, the flag rules and `-f`.
+- Unit tests of the cap: the total, and a file that sends more than its size.
+- Planted cases: a guest that lists `../x`, a guest that sends a symlink as a file, and a laptop symlink that points outside the folder. The copy writes nothing outside the destination, and the symlink's target does not change.
+- A symlink in the sandbox that points at `/etc/shadow` copies nothing that the user `agent` cannot read.
+- A test that the packages of `cp` do not import `archive/tar`.
+- End to end, in and out, on a process wall and on a microvm.
+
+### 21.2 Checkpoints and `rewind` (P5.4)
+
+A checkpoint is a copy of a microvm sandbox's session disk, made at the end of a turn. `rewind` puts the disk back to a checkpoint. The research's snapshot option kept "a disk checkpoint at each finished turn, for a `rewind` command" ([research](../research/isolation.md#61-snapshot-first-node-17)). A checkpoint holds no memory ([question 11](#15-open-questions)).
+
+**Where.** Only microvm sandboxes get checkpoints, because only they have one session disk file. The file system must clone a file with `FICLONE`. ext4 cannot. XFS can when `mkfs.xfs` made it with reflinks, the default since xfsprogs 5.1.0. Btrfs can ([facts](../research/build-facts.md#4-linux-walls)).
+
+- The rule is a test, not a file system's name. The probe's `reflink` fact comes from a `FICLONE` test (14.3). The supervisor also tests `FICLONE` in the session folder at the first checkpoint.
+- Where a test fails, checkpoints are off. `host show` and the row say why: "checkpoints: off, ext4 cannot clone files".
+- Process and gvisor walls get no checkpoints in this plan.
+
+**Inputs.**
+
+- `sandbox.checkpoints` (10) in any layer: the number to keep. `0` turns checkpoints off ([question 87](#15-open-questions)).
+- `simstim rewind <host>/<session> --list` prints the checkpoints, newest first, numbered from 1, with their times.
+- `simstim rewind <host>/<session> <n> [-y]` puts the session disk back to checkpoint `n`. Without `n`, it lists the checkpoints and asks at a terminal. Without a terminal, it fails with exit code 4, as a missing answer does (14.8.3).
+- The session ops `checkpoints` and `rewind` (10.4), the `ctl` ops `freeze` and `thaw` (10.3), and the feature `rewind` (10.5).
+
+**A checkpoint.**
+
+1. The guest init reports `turn_done` (10.3). The supervisor makes at most one checkpoint in 30 s. This limit is a project choice, so that a guest that claims turns in a loop cannot push older checkpoints out.
+2. The supervisor skips the checkpoint when the free space of the session folder's file system is less than `sandbox.disk_max`. The row then says "checkpoints paused: low disk".
+3. The supervisor sends `freeze` with `{"max_ms":5000}`. The guest init runs `FIFREEZE` on the session disk's file system, as fork does (6.5). It thaws by itself after `max_ms`, so a lost `thaw` cannot hang the guest.
+4. The supervisor clones the session disk to `checkpoints/<UTC time>.disk` in the session folder, and writes the guest's last `refs` claim beside it in `<UTC time>.json`. Then it sends `thaw`.
+5. It keeps the newest `sandbox.checkpoints` and deletes the rest.
+6. It writes the audit line `checkpoint`, with the time and the claimed turn.
+
+The time from `freeze` to `thaw` is a target to measure: 1 s or less at p95 (section 12). No source gives a figure. UNVERIFIED: step 1 of P5.4 measures it.
+
+**Rewind.**
+
+1. The client prints the checkpoint's time, and each branch whose head differs from the checkpoint's `refs` claim. It asks, unless the command has `-y`.
+2. The supervisor stops the sandbox as in 6.6.
+3. It clones the current disk as a new checkpoint. So `rewind <s> 1` undoes a rewind.
+4. It clones checkpoint `n` to a temporary file, and renames it over the session disk.
+5. It starts the sandbox cold, with the agent's resume command (6.2). The agent's state folders are on the disk, so the conversation goes back with the files.
+6. It writes the audit line `rewind`. `Manifest.Pulled` does not change, and commits that the client pulled stay on the laptop.
+
+With separate accounts, the disk lives in `vms/<id>/`, and the slot launcher's `copy` op makes each clone (21.9).
+
+**Errors.**
+
+| When | Code | Message | Try |
+| --- | --- | --- | --- |
+| No reflinks, or not a microvm | `rewind_off` | Checkpoints are off on devbox: ext4 cannot clone files. | `simstim host show devbox` (says what turns them on) |
+| No such checkpoint | `rewind_unknown` | auth-fix has no checkpoint 7: it keeps 4. | `simstim rewind devbox/auth-fix --list` |
+
+**Tests.**
+
+- Step 1: on a test host with XFS or Btrfs, 20 checkpoints of a 20 GiB session disk after 2 GiB of writes. The pull request reports p50 and p95.
+- Unit tests of the 30 s limit, the count and the low-disk skip.
+- Unit tests of the guest init's own thaw after `max_ms`, and of the order of the rewind steps with a fake driver.
+- End to end, where a test host has XFS or Btrfs:
+  1. Write a file, and finish a turn with the test agent.
+  2. Change the file, and finish a turn.
+  3. Run `rewind 2`.
+  4. Check the old content, and that the agent resumed.
+- On ext4: `host show` says why, and `rewind` fails with `rewind_off`.
+
+### 21.3 Save an image (P5.5)
+
+`image save` turns the system changes of a microvm sandbox into an image on the same host. Users set tools up once, then start new sandboxes from them (9.2). A saved image stays on the host that made it (14.9.5, [question 35](#15-open-questions)).
+
+**Inputs.**
+
+- `simstim image save <host>/<session> <ref> [--allow-flagged] [--replace]`. `<ref>` matches `^[a-z0-9][a-z0-9._-]{0,63}$`.
+- The session must be a running microvm sandbox. Another level fails with `image_wall`, and a stopped one with `sandbox_stopped` (9.3).
+- The session ops `image.save`, `image.keep` and `image.drop` (10.4), the `ctl` op `changes` (10.3), the stream kind `layer` (10.2), and the feature `image.save` (10.5).
+- The data file `internal/image/review.toml`, with a source link for each rule.
+
+**What it saves.** The guest's root as the session sees it: the image and the changes in its overlay (7.1). With `system = "reset"`, the changes are those since the last start. These paths never enter an image:
+
+- `/work`, `/mnt`, `/tmp`, `/var/tmp`, `/run`, `/opt/agents` and `/opt/<name>`.
+- The agent's `StateDirs` and the kept caches (17.5).
+- Every agent's `LoginFiles` (8.6), so a login made inside the sandbox never enters an image (7.3).
+- The decoys (21.7).
+- In the agent's home folder and in `/root`: the folders and names that the paste guard refuses (7.6), such as `.ssh`, `.aws`, `.config`, `.env`, `*.pem`, `*.key`, `id_*` and `credentials*`.
+
+**Steps.**
+
+1. The client fetches the values of the session's secrets on the laptop, as the review of `pull` does (7.1). It sends `image.save` with the ref and the values. The values live in memory only ([0032](decisions/0032-secret-values-in-memory-only.md)).
+2. The supervisor sends the `ctl` op `changes`. The guest init answers with the paths in the upper folder of its root overlay, at most 100,000 paths and 8 MiB.
+3. The supervisor opens a `layer` stream. The guest init syncs, then writes its whole root as one tar stream, without `/proc`, `/sys`, `/dev` and the paths above.
+4. The converter jail of 20.2 reads the stream, under the caps of 20.2. It drops the paths above, and records each with its reason. So a guest that sends them anyway gains nothing.
+5. The jail scans every file in the stream for each secret value, each sentinel and each decoy value of the session. It matches the raw bytes, and the standard base64 form at each of the three byte alignments. A match stops the save with `image_secret`. The message names the file and the secret's name, never the value, and nothing is kept.
+6. The jail flags each path in the `changes` list that `review.toml` names:
+   - Shell start files: `/etc/profile`, `/etc/profile.d/**`, `/etc/bash.bashrc`, `/etc/zsh/**`, and `.bashrc`, `.profile`, `.bash_profile`, `.zshrc` and `.zprofile` in a home.
+   - Git: `/etc/gitconfig`, `.gitconfig` in a home, and `/usr/share/git-core/templates/**`.
+   - New or changed files in the folders of the image's `PATH`, and in `~/.local/bin`.
+   - systemd units, cron files, `/etc/ld.so.preload` and `/etc/ld.so.conf.d/**`.
+   - Files with the setuid or setgid bit.
+
+   The `changes` list comes from the guest, so a hostile session can hide a change from the review. The scan and the left-out paths do not depend on it. An image from a hostile session stays hostile, which is one reason why it stays on its host (14.9.5).
+
+7. The jail converts the tar as 20.2 does, to ext4 with a verity tree, in `images/incoming/`. The host answers with a save ID, the size, the flagged paths and the paths left out.
+8. The client prints the review. Flagged paths stop the save with `image_flagged`, unless the user answers yes at a terminal or passed `--allow-flagged`.
+9. On a yes, the client sends `image.keep` with the save ID. The helper moves the image into `images/`, and answers with its digest and root hash. On a no, `image.drop` deletes it. A save that nobody keeps goes after one hour (14.9.4).
+10. The laptop records the ref, the digest and the root hash in `images.lock`, tied to the host ID (14.9.5). A ref that this host already has fails with `image_exists`, unless the command has `--replace`.
+11. The launcher marks the image "made on <host>". `new <host> --image <ref>` uses it on that host only.
+12. The supervisor writes the audit line `image_save`, with the ref, the digest and the counts of flagged and left-out paths.
+
+**Errors.**
+
+| When | Code | Message | Try |
+| --- | --- | --- | --- |
+| Not a microvm | `image_wall` | image save needs a microvm sandbox, and auth-fix runs at process. | `simstim new devbox --wall microvm`, set it up there, then save |
+| A secret value in the stream | `image_secret` | /etc/app/config.json holds the value of ANTHROPIC_API_KEY, so image save stopped and kept nothing. | Remove it with `simstim shell devbox/auth-fix`, then save again |
+| Flagged paths, no yes | `image_flagged` | The changes add files that run code at login or at start: /etc/profile.d/tools.sh. | Read them with `simstim shell devbox/auth-fix`, then add `--allow-flagged` |
+| The ref exists on this host | `image_exists` | devbox already has an image named devtools. | Add `--replace`, or pick another name |
+| A saved image on another host | `image_elsewhere` | devtools was made on devbox, so only devbox can use it. | `simstim new devbox --image devtools`, or build a template on your laptop (14.9.5) |
+
+**Tests.**
+
+- Unit tests of the left-out paths, the review rules, and the scan: the raw value and the three base64 forms.
+- A test that a `LoginFiles` path, a decoy and a sentinel never reach an image, also when the guest sends them in the stream.
+- End to end on a microvm: install a tool, save, start a new session from the image on the same host, and check the tool. Then `new` on another host fails with `image_elsewhere`.
+
+### 21.4 The gvisor wall (P6.1)
+
+The gvisor wall puts gVisor's user-space kernel between a sandbox and the host's kernel. It serves hosts without KVM (11, [question 2](#15-open-questions)). The driver is `internal/wall/gvisor`, named `gvisor`, at the level `gvisor`.
+
+**Runtime.** The release pins one `runsc` by SHA-256 in `guest/supply.lock`, and mirrors it. The release manifest names it as an item of kind `gvisor` (14.9.1), and the known-bad list of 20.9 takes the same kind. A host gets it as it gets other runtime files (14.9.3).
+
+**Namespaces** ([question 88](#15-open-questions)).
+
+- `runsc` runs as uid 0 inside a user namespace and a network namespace that the helper makes. Only the login user's uid maps, to 0.
+- Where Ubuntu restricts user namespaces, the namespace launcher of 14.4 makes them, as it does for the process wall. One root step serves both walls.
+- The driver never uses `--rootless`. That mode refuses `create`, has no save and restore, and calls `unshare(CLONE_NEWUSER)` itself, which the restriction stops.
+- The driver never uses the OCI user-namespace mode. It needs `newuidmap`, which server images lack, and a non-root `runsc` there also makes its own user namespace ([facts](../research/build-facts.md#4-linux-walls)).
+- UNVERIFIED: that `runsc` starts under the launcher's child profile, which denies capabilities (14.4). Step 1 of P6.1 checks it. If it fails, the driver's probe reports gvisor as unavailable on hosts with the restriction, with that reason. It works on other hosts.
+
+**Start.** The driver writes an OCI bundle in the session folder, with no hooks. Inside the namespaces, it runs:
+
+```text
+runsc --root <SessionDir>/runsc --network=none --directfs=false --ignore-cgroups --host-uds=none \
+  run --bundle <SessionDir>/bundle --pass-fd <fd>:3 <id>
+```
+
+- `--network=none`: the sandbox has only `lo`, as a process wall has (7.2). Every flow leaves on an `egress` stream.
+- `--directfs=false`: the Sentry reaches files through the gofer, not through host descriptors.
+- `--ignore-cgroups`: the session's unit already caps memory and tasks (6.1), and the Sentry runs inside it.
+- `--host-uds=none`: no host Unix socket opens from inside. It is the default, and the driver names it so that it stays.
+- `--pass-fd <fd>:3`: one end of the supervisor's socket pair becomes fd 3 of the guest init. That is the link, as on the process wall. This replaces the research's `--host-uds=open`, which would open host sockets by path.
+- The platform is systrap, the default, which needs no virtualisation.
+
+Each flag exists in `runsc` release-20261102.0 ([facts](../research/build-facts.md#4-linux-walls)). UNVERIFIED: the command line as a whole. Step 1 of P6.1 runs it.
+
+**Files.** The OCI spec gives the files of a process wall (7.1). These are the session's clone, a fresh home, and the host's system folders read-only. They also include the agent's install folders and `/opt/<name>/bin`. `Spec.Image` stays nil in this plan. An image root waits until gVisor fixes the overlay issue of an EROFS root ([gvisor#13529](https://github.com/google/gvisor/issues/13529)), in a task of its own.
+
+**Probe** (5.1). Linux 5.6 or later, on amd64 or arm64. The pinned `runsc` is in the artefact store with its digest. The namespaces start, directly or through the launcher. A smoke run with the flags above and the command `true` exits 0 within 10 s. The facts are the `runsc` version and `platform=systrap`.
+
+**Level.** Where no stronger driver passes, `gvisor` is the host's best level (14.3), and `host prepare` pins it as the floor. It meets the lowest floor of the `shared` tier (14.8.2).
+
+**Errors.**
+
+| When | Code | Message | Try |
+| --- | --- | --- | --- |
+| The smoke run fails | `wall_unavailable` | devbox cannot run gvisor walls: runsc exited with code 1. | `simstim host doctor devbox` |
+| Restricted user namespaces, no launcher | `wall_setup` | devbox needs a one-time root step before it can run gvisor walls: Ubuntu limits user namespaces. | `simstim host prepare devbox` (runs or prints the root step) |
+| `runsc` missing from the store | `runtime_missing` (14.14) | box lacks runsc release-20261102.0 of this client's release. | `simstim host prepare box` |
+
+**Tests.**
+
+- Step 1: the command line above on Ubuntu 24.04 and 25.10, with the restriction on, after the root step, and on Debian 13. The pull request records each result.
+- The escape suite and the fidelity fixtures with the `gvisor` driver.
+- A test that the guest init's fd 3 is the link, and that no `runsc` process holds a host socket path.
+- A test that the driver never passes `--rootless`, and never another value of `--network` or `--host-uds`.
+- The time of `npm install` on a fixture project, against the process wall, in the pull request (section 12).
+
+### 21.5 The Firecracker driver (P6.2)
+
+The `firecracker` driver gives the `microvm` level on hosts with Linux 5.10 or 6.1, where Cloud Hypervisor does not run ([question 3](#15-open-questions)). On 6.18 both drivers pass, and `chv` wins. The `nitro` driver (P6.4) uses the same Firecracker client, with another transport. The driver is `internal/wall/firecracker`.
+
+**Version.** The release pins one Firecracker, 1.18.0 or later, for both drivers. The `firecracker` driver refuses a version below 1.17.0.
+
+- CVE-2026-122192 hits Firecracker up to 1.16.1. It applies only to a VM restored from a snapshot with the File memory backend and a balloon or virtio-mem device. The design never restores a snapshot ([question 11](#15-open-questions)), so it is not exposed.
+- The floor stays, because the 1.16 line ends support on 3 December 2026 ([facts](../research/build-facts.md#6-pins-advisories-and-signatures)).
+
+**Transport.** The `firecracker` driver uses the MMIO transport, Firecracker's default, and never passes `--enable-pci`. virtio-pci is opt-in since 1.13.0. CVE-2026-5747 was a guest-to-host bug in that transport. Every version that the design allows has the fix. MMIO keeps that code out of the guest's reach, as a project choice. The `nitro` driver uses virtio-pci, because Nitro Sandboxes are PCIe only (P6.4) ([facts](../research/build-facts.md#6-pins-advisories-and-signatures)).
+
+**No jailer.** Firecracker's jailer runs as root, and treats all its inputs as trusted ([research](../research/isolation.md#43-w3-a-kvm-microvm-node-3)). The driver runs the VMM in the `vmm` jail of 5.6, as the `chv` driver does. The jail gives no network, a minimal mount namespace, Landlock, seccomp and no core dumps. With separate accounts, the slot launcher starts the same jail as a slot account (21.9). One jail then serves every VMM, as a project choice.
+
+**Start.**
+
+- The supervisor writes `<SessionDir>/fc.json`, and starts `firecracker --config-file <SessionDir>/fc.json --api-sock <VMMSocket(id)>` in the jail. The API socket is 0600 in a 0700 folder (13).
+- The config names these parts:
+  - The guest kernel and its command line, from the boot pair (20.1).
+  - The image and the tools image, read-only, with their verity tables.
+  - The agents disk, read-only, and the session disk.
+  - The vCPUs, and the guest memory of 20.10.
+  - A vsock device at `paths.VsockSocket(id)`.
+- The link uses the hybrid vsock that Cloud Hypervisor also speaks, so both drivers share the link code ([research](../research/isolation.md#43-w3-a-kvm-microvm-node-3)).
+- The guest has no network device. Firecracker has no virtio-fs, so `--mount` fails with `mount_microvm` (9.3), as on `chv`.
+- UNVERIFIED: that Firecracker boots the P3.1 guest kernel unchanged. Step 1 of P6.2 boots it. If it fails, P6.2 adds a Firecracker build of the same config to the boot pair.
+
+**Probe.** As 5.1 says. The release manifest's Firecracker entry is 1.17.0 or later.
+
+**Errors.**
+
+| When | Code | Message | Try |
+| --- | --- | --- | --- |
+| A kernel that neither VMM supports | `wall_unavailable` | devbox runs Linux 6.6, and neither Cloud Hypervisor (6.8 or later) nor Firecracker (5.10, 6.1 or 6.18) supports it. | `simstim host show devbox` (shows what this host can run) |
+
+**Tests.**
+
+- Step 1: boot the P3.1 kernel on Firecracker on a 6.1 host, and record the result.
+- The escape suite and the fidelity fixtures on a host with 5.10, 6.1 or 6.18.
+- A test that the VMM's arguments hold no `--enable-pci`, and that the guest's `/sys/bus/pci/devices` is empty.
+- Unit tests of the probe, of the refusal of a manifest entry below 1.17.0, and of the choice between `chv` and `firecracker` on 6.18.
+
+### 21.6 The `none` driver (P6.3)
+
+The `none` driver runs a session with no wall on the path of a walled session: a supervisor, the link and the guest init. Every new session then has one code path. It opens and closes no door: a session at `none` sees what it sees today. The driver is `internal/wall/none`.
+
+**Behaviour.**
+
+- `Name()` is `none`, and `Level()` is `None`. Its probe passes on every host that runs sessions today.
+- `Prepare` makes the session's folder as today: the worktree, or the folder of `--dir`. It makes no clone and no seed bundle.
+- `Start` starts `<helper> guest --wall none` as a child of the supervisor, in the session's unit, with one end of a socket pair on fd 3. It makes no namespace, and loads no Landlock or seccomp filter.
+- The guest init skips the mounts, the network shim, the proxy and the DNS stub. It puts its sockets in `$XDG_RUNTIME_DIR/<name>/g/<id>/` (0700), because no `/run/<name>/` exists.
+- The `start` op carries the environment that the holder gets today, with the secrets' values. Every secret is exposed, as today.
+- No egress process starts. Policy, the classifier, sentinels and decoys do not apply, as before this task.
+- Paste, hooks, alerts and `shell` (6.11) work through the supervisor, as for a walled session.
+
+**The old path.** A session that runs when the helper updates keeps the old path until it ends. `restore` after a reboot starts it on the new path. A later task removes the old code.
+
+**Byte-exact.** The supervisor passes output frames without reading them (13). The key-to-PTY target of section 12 applies to the new path against the old one.
+
+**Errors.** None new.
+
+**Tests.**
+
+- The runtime tests in `internal/host` with the `none` driver.
+- The attach fixtures on the new path.
+- A test that the guest init shares every namespace of the supervisor, from `/proc/<pid>/ns/*`, and that no egress process starts.
+- The key-to-PTY benchmark: the new path against the old path, 1,000 keys each.
+
+### 21.7 Decoys (P7.2)
+
+A decoy is a fake credential file in a sandbox's home. No tool needs its value, so a request that carries it shows that something harvested the files. The research's flight-recorder option kept "planted decoys as exact-match tripwires in the egress process" ([research](../research/isolation.md#82-flight-recorder-and-tripwires-node-32)).
+
+**Evidence** ([facts](../research/build-facts.md#7-later-phases)).
+
+- Grafana Labs keeps AWS canary keys among its GitHub secrets. In April 2025, an attacker stole CI secrets and checked them with TruffleHog. TruffleHog's `sts:GetCallerIdentity` call with a canary key raised the alert.
+- The Shai-Hulud worm of September 2025 used TruffleHog to scan the file system for keys, and to check whether they were valid. This comes from a secondary source.
+- No source measures decoys inside a developer sandbox, or their rate of false alarms.
+
+**Why the design keeps them** ([question 85](#15-open-questions)). A wall does not stop a harvester that reads the sandbox's own files, and today that read is silent. A decoy turns it into an alert, often at the harvester's first check of the key. The cost is one data file, and the tripwire that sentinels already have. There are two risks:
+
+- A tool can send a decoy by itself, which raises a false alarm. The rules and tests below bound this.
+- A targeted attacker can read the public list and skip the decoys. That costs no more than having no decoys.
+
+**The data.** `internal/guest/decoys.toml` lists each decoy, with a source link. A row has these fields:
+
+- The name, and the path in the home of `agent`.
+- A template for the file.
+- The value's format: a prefix, a length and an alphabet that scanners match.
+- `hosts`: the hosts where the real credential works.
+
+A decoy takes only a form that its tool does not read by default. The first list:
+
+| Name | File | Form | Hosts |
+| --- | --- | --- | --- |
+| `aws` | `~/.aws/credentials` | An access key ID (`AKIA` and 16 characters) and a secret key, in a profile named `prod-admin`, never `default` | `sts.amazonaws.com`, `sts.*.amazonaws.com` |
+| `git` | `~/.git-credentials` | A GitHub token (`ghp_` and 36 characters), in a line `https://deploy:<token>@github.com` | `github.com`, `api.github.com` |
+
+The AWS CLI uses the profile `default` unless a command names another ([AWS](https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-files.html)). git reads `~/.git-credentials` through the `store` helper ([git](https://git-scm.com/docs/git-credential-store)). The sandbox does not set that helper. P7.2's tests check both claims. P7.2 adds rows only under the same rule and tests.
+
+**Behaviour.**
+
+1. At each start, the supervisor makes a new value for each decoy with `crypto/rand`, in the row's format. The values live in the trusted side's memory only, as sentinels do.
+2. The supervisor sends the values to the egress process as tripwires, and the files to the guest init in the `start` op. The guest init writes them in the home of `agent`, with mode 0600.
+3. The home resets at each start (7.1), so old decoys go. `image save` leaves decoys out (21.3), and a fork's children get new ones at their cold start.
+4. The egress process treats a decoy value as a sentinel (7.3). A decoy in a URL, a header or a DNS name of any flow refuses the flow. On an intercepted host, the egress process also checks the first 1 MiB of each request body. It matches the raw value and its base64 forms (21.3).
+5. The egress process intercepts flows to a decoy's `hosts`, as a class rule (7.2), even when the policy refuses the host. The egress process reads the request line and the headers, checks them, and then applies the policy's decision. Without this, a key check to a refused host shows only its name.
+6. A match raises `secret_misuse` (10.8) with the detail "decoy aws, sent to sts.amazonaws.com". It writes the audit line `decoy`, and refuses the flow. The row shows "decoy used" in red. The session keeps running, and the user decides whether to stop it.
+7. Decoys exist only in walled sessions. `[sandbox] decoys = false` in any layer writes none and registers none.
+
+**Inputs.** `[sandbox] decoys` (8.3). `docs/how-to/sandboxes.md` lists each decoy.
+
+**Errors.** None. A match is an alert, not an error.
+
+**Tests.**
+
+- Unit tests: each value matches its format and changes at each start. The egress process refuses a decoy in a URL, a header, a DNS name, an intercepted body and a base64 form. A decoy key sent to `sts.amazonaws.com` raises `secret_misuse` when the policy refuses the host. `decoys = false` writes no file and registers no value.
+- The quiet test, with a recording egress process: these commands of the default image send no decoy. They are `aws s3 ls` without a profile, `git ls-remote` over HTTPS, and `npm install` and `pip install` of fixtures.
+- A manual check: a scan of the home with TruffleHog finds both decoys.
+
+### 21.8 A machine for each session (P7.4)
+
+`new --machine <provider>` makes one provider machine for one session. The helper runs there as on any host, and the session runs in a sandbox at that machine's level. The machine goes when the session goes.
+
+**Why the design keeps it** ([question 86](#15-open-questions)). The research scored "one provider machine per session" lowest of its layer, at 0.423 ([research](../research/isolation.md#54-one-provider-machine-per-session-node-15)). That option replaced the supervisor with the machine, cloned logins into each machine, and cost density on the user's own hosts. P7.4 differs on each point:
+
+- A supervisor and an egress process still run on the machine, outside the inner wall.
+- The client copies no login file, and secrets follow [question 22](#15-open-questions).
+- It uses provider machines only, so the density of the user's own hosts does not change.
+
+It serves users who own no host that can run walls, and it reuses the E2B provider of `host create e2b` (`internal/provider/e2b`). It is the last task of phase 7, and the first to drop if the phase runs late.
+
+**Inputs.**
+
+- `simstim new --machine <provider> …` with the other flags of `new`. Only `e2b` works in this plan.
+- `[machines.e2b]` in `config.toml`: `token_command`, a command that prints the API key, as `host create e2b --token-command` takes it. And `template`, empty for the template that `host create e2b` uses. Without `token_command`, the key comes from `E2B_API_KEY` or the E2B CLI's login, as for `host create e2b`.
+
+**Steps.**
+
+1. The client makes a machine through the provider. It saves it as a host named `m-<session name>`, with `machine = true` in `hosts.toml`. `host ls` marks such hosts `machine`.
+2. The host's tier is `shared` (14.8.3, [question 32](#15-open-questions)).
+3. The client prepares the machine as `host add` does (14.2): the helper, the probe, the runtime and the root step. The root step runs in mode `run` without a question. The machine is new and holds nothing else, and E2B runs its commands as root without a password ([research](../research/sandboxes.md#23-inside-the-vm)). The rule for `shared` hosts in 14.4.4 protects a typed password, and nobody types one here.
+4. The level is the probe's answer, as on every host. E2B's published kernel config for x86_64 enables user namespaces, seccomp filters and Landlock, on Linux 6.1 ([facts](../research/build-facts.md#7-later-phases)). So `process` and `gvisor` may pass there. UNVERIFIED: that repository is archived, so the kernel that E2B runs today may differ. Step 1 of P7.4 runs the probe in a new machine.
+5. The lowest floor of the `shared` tier is `gvisor` (14.8.2). A machine whose best level is lower needs `--downgrade`, and the row shows it.
+6. A secret reaches the machine only when `[secret_tiers]` marks it `shared`, and only as an exposed secret, recorded as such ([question 22](#15-open-questions)).
+7. The session starts as on any host (6.1). Its address is `m-<session name>/<session name>`.
+8. The machine follows the provider's lifecycle of [0013](decisions/0013-host-providers.md): its lease, pause and resume. A pause keeps memory at E2B, with any exposed secret (11).
+9. `rm` runs its checks (6.7), then destroys the machine and forgets the host. A machine that the provider already removed is forgotten without an error.
+10. `--count <n>` makes one machine for each session (17.6).
+
+**Errors.**
+
+| When | Code | Message | Try |
+| --- | --- | --- | --- |
+| Another provider | `machine_provider` | lima cannot make a machine for each session. Only e2b can. | `simstim new --machine e2b` |
+| No API key | `machine_token` | No API key for e2b: E2B_API_KEY is not set, and the E2B CLI is not logged in. | Add `[machines.e2b] token_command = "<command>"` to config.toml |
+
+The provider's own errors stay as `host create e2b` reports them.
+
+**Tests.**
+
+- Step 1, a manual check for the owner, because E2B costs money: the probe in a new E2B machine, recorded in the pull request.
+- Unit tests with the fake E2B provider in `internal/provider/e2b`: create, prepare, and the level from a recorded probe.
+- Unit tests of the downgrade rule, the secret rule, `rm`, and a machine that is already gone.
+
+### 21.9 Slot accounts and the root-owned store (H18)
+
+This section specifies the second phase of 14.4.6. H17 builds the slot launcher, its request parser and its `update` op. H18 builds the slots, the store and the other ops. Separate accounts stay an option, off by default ([question 27](#15-open-questions)).
+
+**Slots** ([question 89](#15-open-questions)).
+
+- The root step adds 16 system accounts, `simstim-s00` to `simstim-s15`, with `useradd --system --user-group --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin`.
+- Each slot account is in its own group and, where it exists, in `kvm`, and in no other group. The `nitro-udev` rule (14.4.2) also grants each slot account `rw` on `/dev/nitro_enclaves`.
+- A host runs at most 16 sandboxes under separate accounts at once. Admission (14.10.3) counts free slots, and refuses a start with `no_room` when none is free.
+- No source sets the number, so 16 is a project choice. Nix runs builds as build users from a root-owned store, and no more builds run at once than it has build users. Its installer makes 32 ([facts](../research/build-facts.md#7-later-phases)). With the default size of 4 GiB (17.1), 16 sandboxes need 64 GiB of guest memory.
+
+**Taking and freeing a slot.**
+
+1. The slot launcher takes a lock with `flock(LOCK_EX|LOCK_NB)` on `/var/lib/simstim/slots/<NN>.lock`, in slot order, and uses the first slot that it locks. Nix locks its build users in the same way.
+2. It writes `<NN>.json` with the session ID and the caller's uid, from `SUDO_UID`, which sudo sets.
+3. It kills every process of the slot's uid: a child takes that uid and calls `kill(-1, SIGKILL)` until none is left, as Nix's `killUser` does. A process of that uid that remains stops the start with `launcher_refused`.
+4. The first process of the jail, as the slot account, keeps the lock's descriptor open, read-only, and waits for the VMM. The slot frees when the jail ends, also when the launcher has exited.
+
+**Paths.**
+
+| Path | Contents | Owner, mode |
+| --- | --- | --- |
+| `/var/lib/simstim/store/sha256/<hex>` | Runtime files and images, by digest | root, 0444, in 0755 folders |
+| `/var/lib/simstim/store/incoming/` | Files on their way in | root, 0700 |
+| `/var/lib/simstim/slots/<NN>.lock`, `<NN>.json` | A slot's lock, and the session and uid that hold it | root, 0644 |
+| `/var/lib/simstim/vms/<id>/` | One sandbox's session disk, checkpoints, VMM sockets and logs | the slot account that runs it, the login user's group, 02770 |
+
+- A file enters the store only through the op `store`. The helper streams the bytes on the launcher's standard input. The launcher writes them to `incoming/`, stops at the declared size, checks the SHA-256, then renames the file into place. It never opens a path that a request names.
+- The store keeps runtime files safe from a VMM that escapes into a slot account, and keeps one slot from another. It does not defend against a compromised login account, which names the digests. The egress process stays in the login user's unit (14.4.6).
+- The setgid bit and a umask of 0007 for the VMM let the supervisor, as the login user, reach the VMM's sockets through the group. The slot account gets no access to the login user's files. UNVERIFIED: that each VMM keeps that group access on its sockets. Step 1 of H18 checks it.
+- The login user can write in `vms/<id>/`. So the launcher opens every path there with `os.Root`, and never follows a symlink. At each start, it gives `vms/<id>/` and its files to the slot that it took.
+
+**Requests.** The helper runs `sudo -n /usr/local/libexec/simstim/launch`, and writes one JSON line of at most 64 KiB, then any bytes that the op takes. The launcher refuses an unknown op or field. It refuses a session ID that fails the session ID pattern, and a digest that is not 64 lower-case hex characters. It answers one JSON line: `{"ok":true,…}`, or `{"ok":false,"error":"…"}`.
+
+| Op | Fields | Does | Task |
+| --- | --- | --- | --- |
+| `update` | `size`, `sig_size`, then the binary and its SSHSIG signature | Replaces the launcher when the release key signed the new one and it is newer (14.9.2) | H17 |
+| `store` | `sha256`, `size`, then the bytes | Adds a file to the store | H18 |
+| `start` | `session`, `driver` (`chv`, `firecracker` or `nitro`), the digests of the VMM, the kernel, the tools image and the image, `cpus`, `memory_mib`, `disk_max_gib` | Takes a slot, and starts the VMM in its jail as the slot account. It builds the VMM's arguments from a fixed template for each driver, never from a string in the request. It answers with the slot and the VMM's process ID. | H18 |
+| `kill` | `session` | Ends the session's VMM, and frees its slot | H18 |
+| `copy` | `from` and `to`: a session ID, or `<session>/checkpoints/<time>` | A clone or a sparse copy inside `vms/`, for fork (6.5) and checkpoints (21.2) | H18 |
+| `destroy` | `session` | Removes `vms/<id>/`, after a `kill` | H18 |
+| `prune` | `keep`: a list of digests | Removes the store files that no running slot uses and `keep` does not name | H18 |
+| `slots` | none | Lists the slots, with their sessions and uids | H18 |
+
+`start`, `kill`, `copy` and `destroy` refuse a session that another login user holds.
+
+**Limits.** The VMM must stay in the session's unit, so that `MemoryMax` covers it. UNVERIFIED: that sudo leaves the launcher in the caller's cgroup. Step 1 of H18 reads the VMM's `/proc/<pid>/cgroup`, and checks that a stop of the unit ends the VMM.
+
+**Errors** (14.14).
+
+| When | Code | Message | Try |
+| --- | --- | --- | --- |
+| No free slot | `no_room` | box has no free slot: 16 sandboxes run under accounts of their own. | `simstim ls box`, then stop one |
+| The launcher refused | `launcher_refused` | The slot launcher on box refused the start: a process of simstim-s03 still runs. | `simstim host doctor box` |
+
+**Tests.**
+
+- Step 1, on a test host whose owner set `E2E_ROOT=run`, checks three things. The supervisor reaches the VMM's sockets through the group. The VMM is in the session's cgroup. A stop of the unit ends the VMM.
+- End to end on that host: each VMM runs as a slot account. From a slot account, a write to the store and a read of the login user's home both fail. Two sandboxes get two slots. After `kill`, no process of the slot's uid remains.
+- Unit tests: 17 starts at once give 16 slots and one `no_room`. Each refusal path ends without a change. Fork and a checkpoint work through `copy`.
+- Fuzz tests of the request parser (H17).
+
 ## Sources
 
 The decision and this spec draw on the research of the tree search ([research note](../research/isolation.md)). The main primary sources, besides those linked in the text:
@@ -3630,3 +5433,5 @@ The decision and this spec draw on the research of the tree search ([research no
 - Tailscale: [sharing](https://tailscale.com/kb/1084/sharing), a shared machine that cannot start connections.
 - Hosts you add: the sources of [Your own hosts](../research/isolation.md#your-own-hosts) in the research note.
 - Locations, Mac hosts and homelab hosts: [Hosts in two locations](../research/locations.md), which links each Apple, Lima, Proxmox and Tailscale source.
+- Agent data, model APIs, package managers, Linux walls, pins and the later phases: [Facts for the build](../research/build-facts.md), checked on 10 November 2026.
+- The microvm build and the supply chain: [build facts 5](../research/build-facts.md#5-the-microvm-and-its-build) and [build facts 6](../research/build-facts.md#6-pins-advisories-and-signatures), which link each Cloud Hypervisor, Linux, `hcsshim`, erofs-utils, Sigstore and git source.
