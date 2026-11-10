@@ -1162,6 +1162,9 @@ sandbox.include = [".env.test"]  # files to copy into the clone at seed time
 sandbox.wall = "microvm"
 network.allow = ["api.stripe.com"]
 
+[repos."github.com/acme/*"]      # every repository of one owner. An exact name wins (18.2).
+sandbox.on_hosts = ["location=annex"]   # the hosts that may run these sessions
+
 [placement]                      # for new auto (14.10.5)
 strategy = "spread"              # spread or pack
 prefer = ["box", "nuc"]          # earlier names win a tie
@@ -1184,6 +1187,7 @@ default = "box"
 [[host]]
 name = "box"
 ssh = "me@box"
+labels = { location = "home" }        # host add --label and host set label.<key>= (18.2)
 wall_floor = "microvm"           # the floor: pinned by host add, host create and host prepare, changed by host set
 # Repositories that may be sent to this host in clone mode. Only shared hosts use it.
 repos = ["github.com/example/*"]
@@ -1418,6 +1422,11 @@ Every command follows [0033](decisions/0033-one-command-grammar.md): session ver
 | `simstim host rekey <host>` | Replaces the pinned host key after the user types the host's name (14.7.1) | H3 |
 | `simstim host default [<host>\|auto] [--clear]` | Prints, sets or clears the default host (14.10.1) | H12 |
 | `simstim host rm <host> [--purge] [--destroy] [--force] [--root-step run\|print\|skip] [--confirm <name>]` | Forgets the host, then asks about each further part. `--purge` removes everything that the tool put on the host (14.12). `--purge` and `--destroy` need the typed name, or `--confirm`. | H15 |
+| `simstim host invite <name> [--label <key>=<value>,…] [--key <file>]` | Prints a code for a machine that will join, with a key for that host only (18.3) | H20 |
+| `simstim host join [--account <name>] [--cpus <n>] [--memory <size>]` | On the machine: makes the account, the path and, on a Mac, the VM, then prints a reply code (18.3, 18.4) | H20, H21 |
+| `simstim host add <name> --accept - [--address <address>]` | Reads the reply, pins its host keys and adds the host (18.3) | H20 |
+| `simstim host leave` | On a joined machine: undoes what `host join` did (18.4) | H20, H21 |
+| `simstim host set <host> label.<key>=<value>` | Sets or removes a label (18.2) | H19 |
 | `simstim host doctor <host> [--fix] [--json]` | As today, with a "Sandboxes" block, health items and the route | H6, H14, H16 |
 | `simstim image ls [<host>]`, `image pull <ref> <host>`, `image rm <digest> <host>` | Lists, prepares and removes images on a host | P3 |
 | `simstim image save <host>/<session> <ref>` | Saves the root's changes as an image, after a review (microvm) | P5 |
@@ -2325,6 +2334,7 @@ The host never learns its tier. The client enforces every rule in this section, 
 | `host create lima`, `host create docker` | `own` |
 | `host create e2b` | `shared` ([question 32](#15-open-questions)) |
 | `host add --provider-script` | The question, or `shared` with `--yes` |
+| `host add --accept` | The question. It shows the reply's suggestion: `shared` for a Mac enrolled in MDM (18.4). |
 | A host that existed before the migration | `own` |
 | A host with no entry after the migration | `shared` until the user answers |
 
@@ -2474,6 +2484,8 @@ The grammar is `new [<host> | auto | -] [flags] [-- command…]`. Only one word 
 4. No host: `SIMSTIM_DEFAULT_HOST`, then `default` in `hosts.toml`, then the only saved host that is not `shared`.
 5. Otherwise, the error in section 14.14, which lists the hosts with room.
 
+Each step takes only hosts that match the session's `on_hosts` (18.2).
+
 - `auto` and any name that starts with `-` cannot name a host. `ValidHostName` refuses them.
 - `simstim host default <name>` sets the default. `host default` prints it. `host default --clear` removes it. `host default auto` makes `auto` the default, after task H13.
 - A `shared` host cannot be the default.
@@ -2621,7 +2633,7 @@ The tool sets up no tunnel and runs no relay. A new how-to, "Reach a host behind
 3. `ProxyJump` through a machine that is already reachable.
 4. Last, a reverse SSH tunnel to an always-on machine that the user owns, with the machine owner's consent. The rendezvous account uses `restrict,port-forwarding,permitlisten="localhost:<port>"`, and `AllowTcpForwarding remote` in a `Match` block. The laptop reaches it with `ProxyJump` and the pinned host key.
 
-`host doctor` prints the route, from `ssh -G`: `route: direct`, `route: jump via <alias>`, `route: proxy command`, or `route: tailnet` for an address in `100.64/10` or a name under `ts.net`. The launcher's details line shows the same word.
+Section 18.6 applies this to hosts in more than one location. `host doctor` prints the route, from `ssh -G`: `route: direct`, `route: jump via <alias>`, `route: proxy command`, or `route: tailnet` for an address in `100.64/10` or a name under `ts.net`. The launcher's details line shows the same word.
 
 ### 14.14 Errors
 
@@ -3107,7 +3119,7 @@ This is the only full list. Each question has its options and a recommended defa
 37. **Mac hosts?**
     - (a) In the first version.
     - (b) Later, after a test of Apple's Virtualization framework from an SSH session, and of the keychain rule for Linux guests.
-    - **Recommended:** (b). Until then a Mac runs sandboxes in a Lima VM. There, microvm needs nested virtualisation on M3 or later with macOS 15 or later.
+    - **Recommended:** (b). Until then a Mac runs sandboxes in a Lima VM. There, microvm needs nested virtualisation on M3 or later with macOS 15 or later. A Mac at another location joins with `host join` (18.4).
 38. **How are signatures checked?**
     - (a) Raise the client's OpenSSH minimum version from 8.0 to 8.1, for `ssh-keygen -Y verify`.
     - (b) Check in Go on both sides.
@@ -3238,6 +3250,26 @@ This is the only full list. Each question has its options and a recommended defa
     - (b) A registry token goes to the host as a secret.
     - **Recommended:** (a). No registry token leaves the laptop, and the host checks the digest as for any image (14.9).
 
+### Hosts in more than one location
+
+66. **Is a location a rule or a preference?**
+    - (a) A rule: `on_hosts` refuses every other host.
+    - (b) A preference that `auto` ranks first.
+    - **Recommended:** (a). An organisation's code and secrets must not reach a home host while the hosts of their location are away. `[placement] prefer` already gives a preference.
+67. **How does a machine join?**
+    - (a) Only through `host add` from the laptop.
+    - (b) Also `host invite` and `host join`: the machine prepares itself, and the laptop then connects to it.
+    - (c) The machine connects to the laptop, or to a service.
+    - **Recommended:** (b). The owner asked to prepare a Mac from its own keyboard. (c) needs a listener or a relay, which the project's rules forbid.
+68. **How does a Mac host restart with FileVault on?**
+    - (a) The docs give `sudo fdesetup authrestart` for a planned restart, and an unlock from the Mac's own LAN after any other.
+    - (b) A `host restart` command that uses the user's own admin login on the Mac.
+    - **Recommended:** (a). `authrestart` keeps an unlock key in memory, and the tool should not hold an admin login on a Mac that an organisation manages.
+69. **May a Mac that an organisation manages with MDM be a host?**
+    - (a) No.
+    - (b) Yes, at the tier `shared`, after `host doctor` shows what MDM controls, and with the advice to ask the organisation's IT team first.
+    - **Recommended:** (b). The organisation's admins have root through MDM, which is what `shared` means.
+
 ### Decided by the design
 
 The research raised four more questions, and the design answers them, so they are not open. No wall has a guest network card, and all egress goes through the egress process (7.2, decision [0029](decisions/0029-a-sandbox-per-session.md)). The client embeds the release manifest, so the runtime needs no rollback floor, key or expiry of its own (14.9.1, 14.11.2). The supervisor dials into the guest, so no trusted-side process listens where a guest can connect (G7, decision [0030](decisions/0030-local-sockets-do-not-listen.md)). The names of these files follow the roadmap.
@@ -3292,6 +3324,9 @@ The research raised four more questions, and the design answers them, so they ar
 | `copy_in` or `--seed-dirty` sends a file that holds a secret. | Both refuse the paste guard's sensitive names. `--seed-dirty` prints each untracked file that it sends. `pull`'s review finds the session's own secrets on the way back (7.1). |
 | A kept cache that the agent poisoned is used again after a restart. | It stays inside the one sandbox that poisoned it, which can already change its own dependencies. `rm` deletes it, and caches are never shared (17.5). |
 | `new --count` asks for more sandboxes than a host can take. | Admission refuses each one that does not fit, and the answer lists which started (14.10.3). |
+| A Mac host restarts while nobody is near it, and stays at the FileVault unlock. | `ls` shows it as away, and `auto` skips it. The docs give `fdesetup authrestart` for planned restarts. Work that must not wait goes to a host at another location, if `on_hosts` allows one. |
+| A Mac laptop that runs all day with the lid open ages its battery and runs hot. | The docs say to set Charge Limit to 80 % and to keep the Mac at 10 °C to 35 °C with good air flow. `host doctor` reads the thermal state. |
+| An organisation's MDM changes sshd or the power settings under the host. | The key's own options hold with a managed sshd. `host doctor` reports what MDM controls, and the health items `mac_sleep_on` and `mac_on_battery`. |
 | A Claude.ai login brings the account's MCP connectors, which act on the provider's side with no field in the request ([issue 612](https://github.com/docker/sbx-releases/issues/612)). | The model API guard cannot see them. The docs say to use an API key, or an account without connectors, for a sandbox. |
 | Text that a sandbox writes to the clipboard with OSC 52 reaches the laptop's clipboard, because the bytes pass unchanged. Docker Sandboxes made its text copy opt-in in v0.51.0. | The client counts the writes (7.7). The docs show each terminal's setting that asks before a clipboard write, such as Ghostty's `clipboard-write = ask`. |
 | `hcsshim`'s licence and the exact Cloud Hypervisor, Lima and gVisor options in this spec may differ in the pinned versions. | Each task that uses one checks it against the pinned release, and the UNVERIFIED marks go only after that check. |
@@ -3412,6 +3447,162 @@ Rows for GitHub Copilot CLI, Kiro CLI, Factory Droid, pi, Kimi Code and Mistral 
 - The user's own host hook, `~/.config/<name>/hooks/setup`, is read by the trusted side as data and copied into the sandbox, where it runs the same way. The host never runs it in a folder that the sandbox can write.
 - A new `.<name>/stop` runs inside the sandbox when it stops, within `sandbox.stop_grace` (10 s by default, at most 60 s), before the agent gets `SIGTERM`. The hosted VM service gives its pre-stop hook 60 s.
 
+## 18. Hosts in more than one location
+
+### 18.1 Scope
+
+- A user may keep hosts in more than one location, for example a homelab and Mac laptops in another building. Some work must stay in one location: an organisation's repositories and secrets on the hosts there, and personal work at home.
+- This section adds four parts. A rule keeps sessions and secrets on chosen hosts (18.2). A machine can prepare itself from its own keyboard (18.3). Mac laptops can be hosts (18.4). Notes cover homelab hosts (18.5).
+- The project's rules stay. Nothing listens, nothing calls home, and the tool runs no relay. The laptop starts every connection.
+- The research is in [Hosts in two locations](../research/locations.md).
+
+### 18.2 Locations (H19)
+
+**Labels.** `host add --label location=annex` saves labels today, in `client.Host.Labels`. `host set <host> label.<key>=<value>` changes one, and `label.<key>=` with no value removes it. `host ls` and the launcher's details line show the labels. When any host has a `location` label, the launcher groups its host list by that label.
+
+**`on_hosts`.** This key holds a list of host names and `<key>=<value>` selectors. A host matches when it matches any item. `!` before an item drops the hosts that it matches, as `!NAME` does in other lists (8.2). No key, or `["*"]`, means every host.
+
+- `sandbox.on_hosts` in any layer of `config.toml` limits where a session may run. The narrowest layer that sets it decides, and `[lock]` holds it, as for every key (8.2).
+- `on_hosts` in `[secrets.NAME]` limits which hosts may get that secret. The grant gate checks it with the tier (14.8.5), and both must pass. The key `hosts` in the same table names web sites, not machines (7.3).
+- A repository section's name may end in `/*`. `[repos."github.com/acme/*"]` matches every repository of that owner. An exact name wins over a name with `/*`.
+
+```toml
+[repos."github.com/acme/*"]                # every repository of one organisation
+sandbox.on_hosts = ["location=annex"]
+sandbox.secrets = ["ACME_GITHUB_TOKEN"]
+
+[secrets.ACME_GITHUB_TOKEN]
+run = "op read op://acme/github/token"
+hosts = ["github.com", "api.github.com"]   # the web sites that the value may reach (7.3)
+on_hosts = ["location=annex"]                  # the machines that may get it
+
+[secret_tiers]
+ACME_GITHUB_TOKEN = "shared"               # the Macs in that location are shared hosts (18.4)
+
+[profiles.personal]
+sandbox.on_hosts = ["location=home"]
+```
+
+**Host choice.** `client.ResolveHost` (14.10.1) applies the session's `on_hosts`:
+
+1. A host named on the command line, or `-`, must match. Otherwise `new` refuses with `host_not_allowed`.
+2. `auto` takes only matching hosts as candidates. A `shared` host that `on_hosts` names, by its name or a label, counts as named by the request (14.8.2). So it joins the pool for that start.
+3. With no host named, `new` takes the default host when it matches. Otherwise it takes the only matching host. Otherwise it uses `auto` within the list, after H13. Otherwise the error lists the matching hosts.
+
+**Secrets.** The grant gate refuses a secret whose `on_hosts` does not match the host, with `secret_not_here`. The grant ledger records the refusal, as for a tier.
+
+**A rule, not a preference.** A preference could send an organisation's code to a home host while the hosts of its location are away. `[placement] prefer` already gives a preference ([question 66](#15-open-questions)).
+
+### 18.3 A machine that joins (H20)
+
+`host add` stays the main way in: the laptop connects over the user's own SSH and prepares the host (14.2). A machine can also prepare itself from its own keyboard. The laptop then adds it, and still starts every connection ([question 67](#15-open-questions)).
+
+1. **Invite, on the laptop.** `simstim host invite <name> [--label <key>=<value>,…] [--key <public key file>]`
+   - It makes an Ed25519 key pair for that host only, in `~/.config/<name>/ssh/id-<host>` (0600). `--key` names a public key of the user's own instead.
+   - It prints an invite code: the host's name, the labels, the public key, a random 128-bit nonce, and an expiry one hour later. The code is base32 text with a checksum.
+   - The code holds no secret. But a changed code could make the machine trust another key. So both sides print a check of 8 characters: the first 40 bits of the code's SHA-256, in base32.
+   - The invite waits in `~/.local/state/<name>/invites/<host>.json` until the laptop accepts a reply, or until it expires.
+2. **Join, on the machine.** The user installs the CLI with the signed installer or a package manager, then runs `simstim host join`.
+   - It reads the code from standard input, never from an argument. So the code stays out of the shell history and the process list.
+   - It prints the check, and asks the user to compare it with the laptop's.
+   - It shows every change that it will make, with its undo, and asks once, as the root step does (14.4). It needs `sudo`.
+   - It writes each change to a footprint ledger before it makes it (14.12), and writes a leave script.
+   - It can run again, and it continues from its ledger.
+   - Section 18.3.1 lists its changes on Linux, and section 18.4 on a Mac.
+3. **Reply, on the machine.** `host join` prints a reply code and its check. The code holds the nonce from the invite, the account, the addresses and the SSH port. It also holds the fingerprint of each SSH host key on the path, and facts that suggest a tier, such as MDM enrolment.
+4. **Accept, on the laptop.** `simstim host add <name> --accept -` reads the reply from standard input.
+   - It refuses a reply whose nonce matches no open invite with `invite_unknown`, and a reply to an old invite with `invite_expired`.
+   - It pins each host key from the reply (14.7), and writes the generated SSH config for each hop.
+   - It picks the address that `--address` names, else a tailnet name from the reply, else the first LAN address.
+   - It asks the tier. It shows the reply's suggestion, but does not choose it (14.8.3).
+   - Then the normal `host add` runs: the helper, the probe, the runtime, any root step that is left, and a test boot (14.2). The helper comes from the laptop, so it matches the client.
+
+#### 18.3.1 Join on Linux
+
+- **Account.** A new account, named by `--account` (by default the product's name), with a home folder and no password. `--account` can also name an account that exists. A dedicated account keeps the helper's files and the agents' logins away from the user's own login on that machine.
+- **Key.** The laptop's key goes into the account's `~/.ssh/authorized_keys` with `restrict,pty,port-forwarding`. `attach` needs a terminal, and `forward` needs local port forwards.
+- **sshd.** A drop-in `/etc/ssh/sshd_config.d/<name>.conf` holds a `Match User` block for the account: `AuthenticationMethods publickey`, `AllowTcpForwarding local`, `AllowAgentForwarding no`, `X11Forwarding no` and `PermitUserRC no`. When sshd does not include that folder, `host join` prints the lines for the user to add.
+- **Root step.** `host join` runs the items of the root step that the probe asks for (14.4), and turns linger on for the account. So the laptop's `host add` finds nothing left to do as root.
+
+### 18.4 A Mac as a host (H21)
+
+A Mac host is a Lima VM on the Mac. The helper runs in the VM, as on any Linux host. This plan has no native macOS helper ([question 37](#15-open-questions)). The laptop reaches the VM through the Mac's own sshd:
+
+```text
+laptop -> Mac sshd, as the dedicated account (its key may only open 127.0.0.1:<port>)
+       -> Lima's host agent on 127.0.0.1:<port> -> vsock -> the VM's sshd -> the helper
+```
+
+**Needs.** Apple silicon and macOS 15 or later. microvm walls need an M3 chip or later (11). M1 and M2 Macs get process walls, and gvisor after P6. The SSH unlock of FileVault needs macOS 26.
+
+**What `host join` does on a Mac.**
+
+1. **Checks.** The chip, the macOS version, FileVault, MDM enrolment, a managed sshd and Remote Login. UNVERIFIED: whether `profiles status -type enrollment` works without admin rights. H21 checks it.
+2. **Account.** A standard account, hidden from the login window, with a random password that the join does not keep. It logs in by key only.
+3. **Lima.** The Lima release that the release manifest pins, checked by its digest, in a folder that root owns. A Homebrew upgrade cannot change it.
+4. **VM.** Made as that account, from the template of `host create lima` (P0.8), with these changes:
+   - `vmType: vz`, in plain mode: no mounts, no port forwards and no containerd.
+   - `networkOpts.hostLoopback: false`.
+   - `ssh.localPort` fixed at a free port that the join picks.
+   - `nestedVirtualization: true` on an M3 chip or later.
+   - Less than half of the Mac's CPUs and memory, because Virtualization.framework does not return all freed memory to macOS. `--cpus` and `--memory` change both.
+   - The base image that the release manifest pins by its digest.
+5. **VM key.** The laptop's key goes into the VM user's `~/.ssh/authorized_keys`.
+6. **Start at boot.** `limactl autostart enable --condition=boot --user <account>` installs a launch daemon. The VM starts at boot, before anyone logs in, and starts again when it stops.
+7. **Mac key.** The laptop's key goes into the account's `authorized_keys` on the Mac with `restrict,port-forwarding,permitopen="127.0.0.1:<port>",command="<facts script>"`. The key can open a channel only to the VM's port, or run the facts script. It has no shell on the Mac.
+8. **sshd.** A drop-in `/etc/ssh/sshd_config.d/<name>.conf` holds a `Match User` block for the account: `AuthenticationMethods publickey`, `AllowTcpForwarding local`, `PermitTTY no`, `AllowAgentForwarding no` and `X11Forwarding no`. With a managed sshd, the drop-in has no effect, and the key's own options still hold.
+9. **Remote Login.** The join never turns it on. When it is off, or does not allow the account, the join stops: "Remote Login is off. Try: turn it on in System Settings > General > Sharing > Remote Login, add <account> to Allow access for, then run simstim host join again."
+10. **Power.** With the user's yes and an undo, it sets `pmset -c sleep 0`, so the Mac does not sleep on power. It never changes the settings for battery.
+11. **Steps for the user.** It prints the steps that it cannot take: Charge Limit at 80 %, the lid open, and a place with good air flow at 10 °C to 35 °C. When the user uses Tailscale, it also names Tailscale's open-source daemon (18.6).
+12. **Reply.** The reply holds both host keys: the Mac's sshd key and the VM's.
+
+**The facts script.** Root owns it, and the account cannot change it. It prints JSON with the power source and battery level (`pmset -g batt`), the sleep settings and assertions (`pmset -g`, `pmset -g assertions`), and the thermal state (`pmset -g therm`). The JSON also holds FileVault's state (`fdesetup status`), the macOS version, MDM enrolment, and whether MDM manages sshd's files. The laptop runs it over the same SSH path. The helper's `host.facts` cannot see the Mac's battery, because the VM has none. So the client takes `on_battery` from the Mac's facts (14.10.2).
+
+**Placement and health.** `auto` already ranks a host on battery one band lower (14.10.5). On battery, the Mac sleeps by its own settings. So `host doctor` adds the health item `mac_on_battery` (warn), and the item `mac_sleep_on` (warn) when `pmset -c sleep` is not 0.
+
+**Restarts.**
+
+- **A planned restart.** The docs give `sudo fdesetup authrestart`, which the user runs at the Mac or over their own SSH login. It skips the FileVault unlock for that one restart, and keeps an unlock key in memory until then. The tool does not run it, because that would need an admin login on the Mac ([question 68](#15-open-questions)).
+- **Any other restart**, a power cut that empties the battery included, stops at the FileVault unlock. Tailscale does not run before the unlock. Only an SSH session from the Mac's own LAN, or a person at the Mac, can unlock it. Until then `ls` shows the host as away. `host doctor` says: "mac1 is away. If it restarted, unlock FileVault from its LAN: ssh <your user>@<its LAN address>."
+- **After the unlock**, the launch daemon starts the VM, and the helper restores the sessions that were working (6.8).
+- **macOS updates** that restart the Mac follow the same rules. The docs say to install them by hand, or at the times that the organisation's MDM sets.
+
+**The tier.** A Mac that an organisation manages with MDM is `shared`, because the organisation's admins have root through MDM. The reply suggests `shared` when the Mac is enrolled. A `shared` host takes only the repositories that its `repos` list matches (14.8.2), so `host add --accept` asks for that list, for example `github.com/acme/*`. The organisation's secrets get `shared` in `[secret_tiers]` and an `on_hosts` rule (18.2). Personal secrets stay `own`, so they never reach such a Mac. The docs say to ask the organisation's IT team before its Mac becomes a host ([question 69](#15-open-questions)).
+
+**Leave.** `sudo simstim host leave` on the Mac runs the leave script. It stops and deletes the VM, and removes the launch daemon, the drop-in, the account and its home folder. Then it restores the old `pmset` values. `host rm --purge` on the laptop purges the helper's files in the VM, as for any host (14.12). Its key has no shell on the Mac, so it cannot undo the Mac's changes. It ends with: "Run sudo simstim host leave on mac1 to remove the account and the VM."
+
+### 18.5 Homelab hosts (H19)
+
+- **Proxmox.** The docs recommend a VM with CPU type `host`, or with the `nested-virt` flag on a model that matches the host. Then the probe finds `/dev/kvm`, and the host gets microvm walls. Such a VM cannot live-migrate. An LXC container shares the Proxmox kernel, so the docs advise against it. In a container, the probe decides the level. The docs never suggest a privileged container, or `/dev/kvm` passed into a container.
+- **No KVM.** When `/dev/kvm` is missing and `/proc/cpuinfo` has no `vmx` or `svm` flag, `host doctor` adds the hint: "Try: give the VM the host's CPU type. On Proxmox: qm set <vmid> --cpu host".
+- **TrueNAS and Unraid.** The docs say to run the helper in a VM, not on the base system. TrueNAS does not support changes from its command line.
+- **Wake.** A homelab host that sleeps or is off can wake through a provider script with `--wake` (`examples/providers`). A new example sends the magic packet from an awake machine on the same LAN, over SSH, or runs `pvenode wakeonlan` on a Proxmox node. It sets `cost = "free"`, so `auto` uses it as a free wake (14.10.5).
+
+### 18.6 Reaching each location
+
+- The docs recommend the user's own Tailscale on every host, with tags and grants, as 14.13 does. Tailscale connects directly when the laptop is on the same LAN, so one address works at both locations.
+- On a Mac, the docs name Tailscale's open-source `tailscaled` as a launch daemon, because the apps start only at login.
+- The design assumes that no other machine at a Mac's location stays online. So it needs no waker, jump host or subnet router there. When a network blocks Tailscale, the laptop reaches the Mac only from the Mac's own LAN, and `host doctor` shows `route: direct`.
+- Wake-on-LAN cannot cross Tailscale, so Mac hosts stay awake instead.
+
+### 18.7 What stays out
+
+- No program on a host calls the laptop or any service. A joined machine waits for the laptop's SSH, as any host does.
+- The tool adds no relay, tunnel or listener. Lima's host agent listens on the Mac's loopback. Through sshd, only the account's key reaches it, and the VM accepts only Lima's key and the laptop's key.
+- The tool does not restart a Mac, change FileVault or change MDM settings.
+
+### 18.8 Errors
+
+| When | Message | Hint (Try:) |
+| --- | --- | --- |
+| `new box` where `on_hosts` does not match box (`host_not_allowed`) | box is not in on_hosts for github.com/acme/api (location=annex). | `simstim new mac1` |
+| A secret's `on_hosts` does not match the host (`secret_not_here`) | ACME_GITHUB_TOKEN may go only to hosts with location=annex. | `simstim new mac1` |
+| A reply that matches no open invite (`invite_unknown`) | This reply does not match an invite on this laptop. | `simstim host invite mac1`, then run simstim host join on the machine again |
+| A reply to an expired invite (`invite_expired`) | The invite for mac1 expired at 14:05. | `simstim host invite mac1` |
+| `host join` on an Intel Mac, or on macOS older than 15 | This Mac cannot be a host: it needs Apple silicon and macOS 15 or later. | Use a Linux host: `simstim host add` |
+| `host join` while Remote Login is off | Remote Login is off. | Turn it on in System Settings > General > Sharing > Remote Login, add the account to Allow access for, and run simstim host join again |
+| The user answers no when `host join` asks to compare the checks | The invite may have changed on its way, so host join stopped and changed nothing. | `simstim host invite mac1` again, and copy the code with care |
+
 ## Sources
 
 The decision and this spec draw on the research of the tree search ([research note](../research/isolation.md)). The main primary sources, besides those linked in the text:
@@ -3426,3 +3617,4 @@ The decision and this spec draw on the research of the tree search ([research no
 - OpenSSH: [ssh_config](https://man.openbsd.org/ssh_config) (command-line options win, `ClearAllForwardings`), [sshd(8)](https://man.openbsd.org/sshd.8) (`restrict`, `permitlisten`), [sshd_config](https://man.openbsd.org/sshd_config.5) (`AllowTcpForwarding remote`).
 - Tailscale: [sharing](https://tailscale.com/kb/1084/sharing), a shared machine that cannot start connections.
 - Hosts you add: the sources of [Your own hosts](../research/isolation.md#your-own-hosts) in the research note.
+- Locations, Mac hosts and homelab hosts: [Hosts in two locations](../research/locations.md), which links each Apple, Lima, Proxmox and Tailscale source.
