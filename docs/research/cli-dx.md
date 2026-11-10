@@ -2,7 +2,7 @@
 
 Researched on 10 November 2026.
 
-This note asks how to make the command line easy to guess, hard to misuse and consistent. It audits today's commands and the commands that [the isolation spec](../contributing/isolation-spec.md) plans. It then reads published CLI guidelines, the commands of other session and sandbox tools, and user research. [The CLI plan](../contributing/cli-plan.md) turns the findings into tasks.
+This note asks how to make the command line easy to guess, hard to misuse and consistent. It audits today's commands and the commands that [the isolation spec](../contributing/isolation-spec.md) plans. It then reads published CLI guidelines, the commands of other session and sandbox tools, and user research. [The CLI plan](../contributing/cli-plan.md) turns the findings into tasks, and [the CLI spec](../contributing/cli-spec.md) states what each task builds.
 
 The rules for the note:
 
@@ -20,6 +20,7 @@ The rules for the note:
 5. **Sandbox tools share one rule model.** Docker Sandboxes puts every network rule under `policy`: `allow`, `deny`, `ls`, `rm`, `log` and `check`. No tool in the sample uses `grant` and `revoke` for network rules ([section 6](#6-other-session-and-sandbox-tools)).
 6. **People guess different words.** In a classic study, two people chose the same word for a command less than one time in five. Aliases improved success several times over ([section 7](#7-user-research)).
 7. **The proposal.** A grammar of 14 rules ([section 8](#8-the-grammar-we-propose)) and a command map from today's and the planned names to the new ones ([section 9](#9-the-command-map)). Sessions keep short verbs at the top level. Everything else is a noun with verbs under it: `host`, `policy`, `agents`, `image`, `debug` and `config`. Rules for every door live under `policy`, at any layer from all sessions down to one session.
+8. **Three tasks of the plan needed more research.** Other CLIs complete names with a live call. A dial here could stop at an SSH question, so completion reads local files ([section 10](#10-completion-of-values)). Agents read `llms.txt`, Markdown copies of pages, `AGENTS.md` and `--help` ([section 11](#11-docs-for-agents)). Every launcher in the sample runs the agent's own login, or takes a token that the vendor made ([section 12](#12-installing-agents-and-logging-in)).
 
 ## 1. Method
 
@@ -248,7 +249,7 @@ The door words are the same everywhere: `net`, `push`, `mount`, `secret`, `ssh-k
 
 | Today or planned | Proposed | What changes |
 | --- | --- | --- |
-| `host idle`, planned `host tier`, `host wall --floor`, `host drain`, `host undrain` | `host set <host> idle=2h tier=own floor=microvm drain=on` | One form for every host setting. `host idle` becomes a warned alias. |
+| `host idle`, planned `host tier`, `host wall --floor`, `host drain`, `host undrain` | `host set <host> idle=2h tier=own floor=microvm drain="kernel update"` | One form for every host setting. `drain` takes a reason, and `drain=off` clears it. `host idle` becomes a warned alias. |
 | planned `host wall <h>`, `host grants <h>` | `host show <host>` | The levels, the floor, the tier, room, health, and the names sent to the host. It also gives the launcher's "host details" a command. |
 | `host rm`, `host destroy`, planned `host rm --purge` | `host rm <host> [--purge] [--destroy]` | At a terminal it asks about each part and says what it removes. `--purge` and `--destroy` need the typed name or `--confirm`. `host destroy` becomes a warned alias for `host rm --destroy`. |
 | planned `--root run\|print\|skip` | `--root-step run\|print\|skip` | No clash with the guest's system files. |
@@ -262,12 +263,62 @@ The door words are the same everywhere: `net`, `push`, `mount`, `secret`, `ssh-k
 | none | `agents login <agent> [<host>]` | Runs the agent's own device login in a session. |
 | none | `config check` | Reads every config file and reports errors with their line. |
 
-## 10. What could not be verified
+This note first proposed `drain=on`. [The isolation spec](../contributing/isolation-spec.md) (9.1 and 14.11.3) changed it to `drain=<reason>` and `drain=off`, so that a host says why it drains. The table above follows the isolation spec.
+
+## 10. Completion of values
+
+Added on 10 November 2026 for task C10 of the plan. The question: how should the shell complete hosts, sessions and agents?
+
+- **How Cobra completes.** The shell's script runs a hidden command, `__complete`, with the words typed so far. Cobra parses the flags, then calls the command's `ValidArgsFunction`, or a flag's function from `RegisterFlagCompletionFunc`. The function returns the values and a directive. The hidden command prints one value on each line, then `:<directive>` ([Cobra](https://github.com/spf13/cobra/blob/main/site/content/completions/_index.md)).
+- **Descriptions.** A value may carry a description after a tab. zsh, fish and PowerShell show them. bash shows them with the second version of its script (the same source).
+- **Directives.** `ShellCompDirectiveNoFileComp` stops the shell from offering file names. `NoSpace` stops the space after a value, and `KeepOrder` keeps the order. With `Error`, the shell ignores the values (the same source).
+- **Debugging.** Cobra's `CompDebugln` writes to the file that `BASH_COMP_DEBUG_FILE` names. A completion function must not print to stdout, because the script reads stdout as values (the same source).
+- **This repository.** It uses Cobra v1.10.2 (`go.mod`). `--debug` already completes its categories through `RegisterFlagCompletionFunc`. `startDebug` skips `__complete`, because the root's persistent hooks run for it too ([debug.go](../../internal/cli/debug.go)). The release ships scripts for bash, zsh, fish and PowerShell ([docgen](../../cmd/docgen/cli.go)).
+- **No reference page.** Cobra adds its `completion` command in `ExecuteC`, so a tree that never runs has no such command (`command.go` in Cobra v1.10.2). `cmd/docgen` never runs the tree, so the reference has no page for `completion`.
+- **kubectl** completes resource names with a live request to the API server at each completion. It sets no time limit, and a comment in its code suggests 5 seconds. It drops errors, and returns `NoFileComp` ([kubectl](https://github.com/kubernetes/kubectl/blob/master/pkg/util/completion/completion.go)).
+- **docker** completes container names with a `ContainerList` call to the daemon at each completion. It returns `ShellCompDirectiveError` when the call fails ([docker](https://github.com/docker/cli/blob/master/cli/command/completion/functions.go)).
+- **gh** completes flag values from fixed lists, and branch names from the local git repository, not from its API. It completes no branch when `--repo` names another repository ([gh](https://github.com/cli/cli/blob/trunk/pkg/cmdutil/flags.go)).
+- **SSH can ask questions.** A connection can stop for a password or a host key. `BatchMode` turns those questions off for scripts ([ssh_config](https://man.openbsd.org/ssh_config.5#BatchMode)).
+
+What this means for C10: complete values from local files only. Hosts come from `hosts.toml`, sessions from the launcher's memory of [0011](../contributing/decisions/0011-instant-launcher.md), and agents from the agent table. A dial at each tab would wait on the network, and could stop at an SSH question. [The CLI spec, section 14](../contributing/cli-spec.md#14-completion-c10) builds this.
+
+## 11. Docs for agents
+
+Added on 10 November 2026 for task C12 of the plan. The question: which files and formats do coding agents read to learn a tool?
+
+- **`llms.txt`** is a Markdown file at the root of a site, or under one of its paths. Only an H1 is required. A quote with a summary, notes, and H2 lists of links follow, each as `[name](url): notes`. An H2 named "Optional" holds links that an agent may skip ([llmstxt.org](https://llmstxt.org/)).
+- **Markdown copies.** The same proposal asks for a clean Markdown copy of each page at the page's URL with `.md`. A page can point to its copy with `rel="alternate" type="text/markdown"` ([llmstxt.org](https://llmstxt.org/)).
+- **In practice.** The Claude Code docs serve each page as Markdown. Each page starts with a line that points to the site's `llms.txt`, and links other pages by their `.md` copies ([Claude Code docs](https://code.claude.com/docs/en/memory)).
+- **A Starlight plugin**, starlight-llms-txt, writes `llms.txt`, `llms-full.txt` and `llms-small.txt`, and needs the `site` option. Its docs do not say that it writes a copy of each page ([plugin](https://delucis.github.io/starlight-llms-txt/getting-started/)). Starlight's `head` front matter adds a tag to the `<head>` of one page ([Starlight](https://starlight.astro.build/reference/frontmatter/#head)).
+- **`AGENTS.md`** is plain Markdown at the root of a repository, with no required fields. The nearest file to the work wins. More than 20 tools read it, among them Codex, Cursor, Gemini CLI, Aider, Amp, Zed and GitHub Copilot's coding agent ([agents.md](https://agents.md/)).
+- **Codex** reads one file in its home folder, then one in each folder from the project root down to the current folder. It stops at 32 KiB by default, the setting `project_doc_max_bytes` ([Codex](https://developers.openai.com/codex/guides/agents-md)).
+- **Claude Code** reads `AGENTS.md` when the folder and its parents have no `CLAUDE.md`, from v2.1.277. A `CLAUDE.md` can import it ([Claude Code](https://code.claude.com/docs/en/memory)).
+- **`--help`.** Anthropic's guide says that for a CLI that the agent has not seen, a pointer to `--help` is enough ([best practices](https://code.claude.com/docs/en/best-practices)).
+- **This repository.** `cmd/docgen -site` already knows each page's title, its description and its source. It already writes `site/public/images/`, which git ignores ([site.go](../../cmd/docgen/site.go)). Astro copies `public/` into the build untouched ([Astro](https://docs.astro.build/en/basics/project-structure/#public)).
+
+What this means for C12: `cmd/docgen` can write `llms.txt` and the copies with no new package. The examples that C3 adds to every command's help serve agents too. A snippet of a few lines for a project's `AGENTS.md` stays far under the limit of Codex. [The CLI spec, section 16](../contributing/cli-spec.md#16-docs-for-agents-c12) builds this.
+
+## 12. Installing agents and logging in
+
+Added on 10 November 2026 for task C8 of the plan. The question: how do other launchers install an agent and log in to it?
+
+- **This repository.** The agent table holds each agent's install command and its source page ([setup.go](../../internal/agents/setup.go)). It also holds the login command, a status command, the credential files and the login variables. `agents install` runs the vendor's installer in a session that the user watches ([agents.go](../../internal/cli/agents.go)). The guided setup offers each login as `new <host> -- <login>` ([flow.go](../../internal/onboard/flow.go)). No command logs in, and the tool never logs in for the user ([install agents](../how-to/install-agents.md)).
+- **Claude Code.** `claude auth login` signs in. `claude auth status` exits with 0 when logged in, and 1 when not ([CLI reference](https://code.claude.com/docs/en/cli-reference)).
+- **Claude Code without a browser.** When the browser does not open, the user presses `c` to copy the login URL. `claude setup-token` makes a one-year token for CI and scripts. It prints the token and saves nothing, and the user sets it as `CLAUDE_CODE_OAUTH_TOKEN` ([authentication](https://code.claude.com/docs/en/authentication)).
+- **Codex.** On a remote or headless machine, Codex's docs prefer `codex login --device-auth`. An API key goes in through stdin: `printenv OPENAI_API_KEY | codex login --with-api-key`. A fallback copies `~/.codex/auth.json` over SSH. `codex login status` shows the method ([Codex](https://developers.openai.com/codex/auth)).
+- **The device grant.** OAuth's device grant is for devices that lack a browser, or that make typing hard ([RFC 8628](https://datatracker.ietf.org/doc/html/rfc8628)).
+- **Docker Sandboxes** starts an agent by name, as `sbx run claude`, from an image that it pulls the first time. For a Claude subscription, the user runs `/login` inside the sandbox. The session token stays outside the sandbox, on the user's machine. API keys go in with `sbx secret set` ([get started](https://docs.docker.com/ai/sandboxes/get-started/)).
+- **Coder's Claude Code module** installs Claude Code in a workspace. It logs in with an API key, or with a token from `claude setup-token` that the user passes as `claude_code_oauth_token` ([Coder](https://github.com/coder/registry/blob/main/registry/coder/modules/claude-code/README.md)).
+
+What this means for C8: no launcher in the sample logs in with the user's password. Each one runs the agent's own login, or takes a token that the vendor made. A login in a session on the host fits a host without a browser, because the agent prints a link or a device code. A token in `[secrets]` fits scripts and walled sessions. [The CLI spec, section 12](../contributing/cli-spec.md#12-agents-install-and-log-in-c8) builds `agents login`.
+
+## 13. What could not be verified
 
 - The exact list of Docker Sandboxes' Balanced preset.
 - Whether users of session tools recall `kill` or `rm` more often. No study was found.
 - Whether a stale kubectl context leads users to act on the wrong cluster.
+- Whether starlight-llms-txt writes a Markdown copy of each page. Its docs name only its three files, so the spec has `cmd/docgen` write the copies.
 
 ## Sources and method
 
-Two researchers worked on 10 November 2026. One audited this repository's CLI, the generated reference and the docs, and the planned commands in the isolation spec. They built the CLI to read its real errors. The other read the guidelines, the reference pages of the tools in section 6, and the four studies in section 7. Every external claim links its source. No account was made, and nothing was installed outside the repository's own build.
+Two researchers worked on 10 November 2026. One audited this repository's CLI, the generated reference and the docs, and the planned commands in the isolation spec. They built the CLI to read its real errors. The other read the guidelines, the reference pages of the tools in section 6, and the four studies in section 7. Every external claim links its source. No account was made, and nothing was installed outside the repository's own build. Later on the same day, a third pass added sections 10 to 12 for tasks C8, C10 and C12 of the plan. It read the vendors' docs and the source code of Cobra, kubectl, docker and gh.
