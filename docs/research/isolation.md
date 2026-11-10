@@ -88,13 +88,13 @@ A wall is code, and code has bugs. These bugs set the design's limits.
 | --- | --- | --- |
 | CVE-2024-1086, a use-after-free in nf_tables, is in CISA's KEV catalogue. Public exploits reach it through unprivileged user namespaces. | A shared kernel is one bug from a full escape | [Red Hat](https://access.redhat.com/security/cve/cve-2024-1086) |
 | CVE-2026-5747: an out-of-bounds write in Firecracker's virtio PCI transport (1.13.0 to 1.14.3, and 1.15.0) lets guest root crash the VMM or run code on the host. CVSS 4.0 score 8.7. Fixed in 1.14.4 and 1.15.1. PCI is opt-in. | The VMM is attack surface | [NVD](https://nvd.nist.gov/vuln/detail/CVE-2026-5747) |
-| CVE-2026-122192: in Firecracker 0.23.0 to 1.16.1, a failed memory discard can let guest root read or change the memory of the Firecracker process. Fixed in 1.16.2 and 1.17.0. | Every VMM line needs a minimum version, and the minimum moves | [AWS](https://aws.amazon.com/security/security-bulletins/2026-169-aws/) |
-| CVE-2026-45782 (GHSA-f47p-p25q-83rh): a use-after-free in Cloud Hypervisor's virtio-block async I/O, from 21.0 to before 51.2. | The same, for the other VMM | [advisory](https://github.com/cloud-hypervisor/cloud-hypervisor/security/advisories/GHSA-f47p-p25q-83rh), [v52.0](https://www.cloudhypervisor.org/blog/cloud-hypervisor-v52.0-released/) |
+| CVE-2026-122192: in Firecracker 0.23.0 to 1.16.1, a failed memory discard can let guest root read or change the memory of the Firecracker process. It applies only to a VM restored from a snapshot with the File memory backend and a balloon or virtio-mem device ([advisory](https://github.com/firecracker-microvm/firecracker/security/advisories/GHSA-48ww-rqpp-2mgm)). Fixed in 1.16.2 and 1.17.0. | Every VMM line needs a minimum version, and the minimum moves | [AWS](https://aws.amazon.com/security/security-bulletins/2026-169-aws/) |
+| CVE-2026-45782 (GHSA-f47p-p25q-83rh): a use-after-free in Cloud Hypervisor's virtio-block async I/O, from 21.0 to 51.1. Fixed in 51.2 and 52.0. | The same, for the other VMM | [advisory](https://github.com/cloud-hypervisor/cloud-hypervisor/security/advisories/GHSA-f47p-p25q-83rh), [v52.0](https://www.cloudhypervisor.org/blog/cloud-hypervisor-v52.0-released/) |
 | CVE-2026-27211 (GHSA-jmr4-g2hv-mjj6): a guest writes a QCOW2 header with a host path as its backing file, and Cloud Hypervisor serves that host file at the next boot. v51.0 added a `backing_files` switch. | Never let a VMM probe the format of a guest-written disk | [advisory](https://github.com/cloud-hypervisor/cloud-hypervisor/security/advisories/GHSA-jmr4-g2hv-mjj6), [v51.0](https://www.cloudhypervisor.org/blog/cloud-hypervisor-v51.0-released/) |
 | VsockDrop, CVE-2026-53365 (August 2026): an unprivileged local user becomes root through vsock and io_uring. Red Hat's mitigation unloads and blocks `vhost_vsock`. | Host kernel modules are attack surface, with no VM needed | [Red Hat](https://access.redhat.com/security/cve/cve-2026-53365), [CVE record](https://www.cve.org/CVERecord?id=CVE-2026-53365) |
 | PwnEscape, CVE-2026-99999 (October 2026): a host-kernel IPv4 checksum flaw, turned into a Firecracker guest escape on a setup without the jailer. Patched kernels shipped in mid-October. That its trigger needs guest networking through TAP or vhost-net is **UNVERIFIED** ([TuxCare](https://tuxcare.com/blog/pwnescape-kvm-guest-escape/)). | A guest network card is a path to the host kernel | [write-up](https://pwn.ai/blog/firecracker-escape), [AlmaLinux](https://almalinux.org/blog/2026-10-16-pwnescape-cve-2026-99999/) |
 | Vghost, CVE-2026-74580 (October 2026): a user who can open a `/dev/vhost-*` node becomes root, and in some setups a guest can write host memory. | Membership of the kvm group is not harmless | [Tencent](https://matrix.tencent.com/en/2026/10/12/vghost-cve-2026-74580) |
-| GHSA-w9q4-5jvv-mcv4 (27 October 2026): terminal output alone can corrupt memory in libghostty-vt. GitHub rates it Moderate, and it needs a very small scrollback limit. | Terminal parsers are memory-unsafe attack surface | [advisory](https://github.com/ghostty-org/ghostty/security/advisories/GHSA-w9q4-5jvv-mcv4) |
+| GHSA-w9q4-5jvv-mcv4 (27 October 2026): terminal output alone can corrupt memory in libghostty-vt. GitHub rates it Moderate. Its advisory says that libghostty-vt is affected in its default configuration ([build facts](build-facts.md#61-ghostty-and-its-advisories)). | Terminal parsers are memory-unsafe attack surface | [advisory](https://github.com/ghostty-org/ghostty/security/advisories/GHSA-w9q4-5jvv-mcv4) |
 | CVE-2024-56803 (Ghostty) and CVE-2024-38396 (iTerm2): a title report turned output into command input. | Answer-back is an injection path to the laptop | [NVD](https://nvd.nist.gov/vuln/detail/CVE-2024-56803), [NVD](https://nvd.nist.gov/vuln/detail/CVE-2024-38396) |
 
 ### 1.5 Why permission prompts do not scale
@@ -305,7 +305,7 @@ What the table shows:
 
 **Evidence.**
 
-- `runsc --rootless` refuses `create`, save and restore, and netstack ([rootless](https://gvisor.dev/docs/user_guide/rootless/)). So the design uses an OCI user namespace that maps one uid, with `--network=none` and `--directfs=false` ([gvisor#16342](https://github.com/google/gvisor/issues/16342)). A gVisor maintainer says rootless mode skips defences that only root can set up ([gvisor#10359](https://github.com/google/gvisor/issues/10359)).
+- `runsc --rootless` refuses `create`, save and restore, and netstack ([rootless](https://gvisor.dev/docs/user_guide/rootless/)). So the spec runs `runsc` as uid 0 in a user and network namespace that the helper or the namespace launcher makes ([spec 21.4](../contributing/isolation-spec.md#214-the-gvisor-wall-p61)). It runs with `--network=none` and `--directfs=false` ([gvisor#16342](https://github.com/google/gvisor/issues/16342)). The OCI user-namespace mode needs `newuidmap`, and a non-root `runsc` makes its own user namespace there ([facts](build-facts.md#4-linux-walls)). A gVisor maintainer says rootless mode skips defences that only root can set up ([gvisor#10359](https://github.com/google/gvisor/issues/10359)).
 - The systrap platform is the default since mid-2023 and needs no virtualisation. gVisor calls it the better choice inside a VM ([platforms](https://gvisor.dev/docs/architecture_guide/platforms/)). gVisor runs on x86_64 and ARM64 with Linux 5.6 or later ([install](https://gvisor.dev/docs/user_guide/install/)).
 - gVisor treats itself as two layers: a Sentry bug alone is not an escape ([security policy](https://github.com/google/gvisor/security)). Its record page lists the high-impact Linux CVEs it tracks as 96% defended ([track record](https://gvisor.dev/security-track-record/)).
 - An empty container uses 23.7 MB under runsc and 4.1 MB under runc in gVisor's own density data, with no date ([density.csv](https://raw.githubusercontent.com/google/gvisor/master/website/performance/density.csv)). A third party measured about 30 µs per syscall on 1 vCPU (**UNVERIFIED**, [tacy](https://github.com/tacyhq/tacy/blob/main/docs/22-sandbox-runner.md)).
@@ -330,7 +330,7 @@ What the table shows:
 
 **Why it lost.** It had the best security of the five (7.5), but fit 4 and convenience 4: no `/dev/kvm` on M1 and M2 Macs, Hetzner Cloud or most VPS. Effort 3.
 
-**Kept.** No network card, with egress over vsock to a broker outside. The VMM confined with Landlock and a seccomp filter that refuses `AF_INET` and `AF_INET6`. The PTY carried as a stream that resumes by offset ([0004](../contributing/decisions/0004-replay-by-offset.md)). Guest RAM equal to the session cap, so the guest's OOM killer acts first. dockerd started only on first use.
+**Kept.** No network card, with egress over vsock to a broker outside. The VMM confined with Landlock and a seccomp filter that refuses `AF_INET` and `AF_INET6`. The PTY carried as a stream that resumes by offset ([0004](../contributing/decisions/0004-replay-by-offset.md)). Guest RAM equal to the session cap, so the guest's OOM killer acts first. Spec 20.10 replaced this: guest RAM is the session's size, and the cap adds a reserve. dockerd started only on first use.
 
 ### 4.4 W4: one full VM per session (node 4)
 
@@ -361,11 +361,11 @@ What the table shows:
 
 **Changed after review.**
 
-- One W3 VMM per host, chosen by the probe ([section 10](#10-platforms), [question 3](../contributing/isolation-spec.md#15-open-questions)). On host kernels 6.8 and later, it is Cloud Hypervisor v52.0 or later. On the kernels that Firecracker tests, it is Firecracker 1.14.4, 1.15.1 or later with the default MMIO transport. Both speak the same hybrid vsock, so the driver code is shared.
+- One W3 VMM per host, chosen by the probe ([section 10](#10-platforms), [question 3](../contributing/isolation-spec.md#15-open-questions)). On host kernels 6.8 and later, it is Cloud Hypervisor v52.0 or later. On the kernels that Firecracker tests, it is Firecracker 1.14.4, 1.15.1 or later with the default MMIO transport. The fact check later raised this to 1.17.0 ([9.2](#92-the-wall)). Both speak the same hybrid vsock, so the driver code is shared.
 - libkrun is not a default. It may serve only with TSI and implicit vsock off, in an empty network namespace, behind a conformance test ([section 11](#11-the-red-teams-gaps)).
 - No Kata in the first release: it adds a root containerd, a root shim and a root virtiofsd ([Kata rootless](https://github.com/kata-containers/kata-containers/blob/86dcc18971958caf58325bb196e349f7d5cc80cc/docs/how-to/how-to-run-rootless-vmm.md)).
 - New sessions below W1 are refused by default. A downgrade is offered only for a new session, through a sheet that lists what the user loses.
-- **Names.** The spec names the levels `none`, `process`, `gvisor` and `microvm` (W0 to W3). W4 is a placement, not a level: each session gets a provider machine of its own. The spec treats an E2B host as level `none` with one machine per session ([question 6](../contributing/isolation-spec.md#15-open-questions) and [question 22](../contributing/isolation-spec.md#15-open-questions)).
+- **Names.** The spec names the levels `none`, `process`, `gvisor` and `microvm` (W0 to W3). W4 is a placement, not a level: each session gets a provider machine of its own. The level of an E2B host is the probe's answer, as on every host. P7.4 gives one machine to each session ([spec 21.8](../contributing/isolation-spec.md#218-a-machine-for-each-session-p74), [question 22](../contributing/isolation-spec.md#15-open-questions)).
 
 ## 5. L2: control
 
@@ -377,7 +377,7 @@ What the table shows:
 | 14 | Holder inside, thin supervisor outside | 8.5 | 6 | 7 | 7 | 3 | 0.678 |
 | 15 | One provider machine per session | 5.5 | 4 | 4 | 4 | 2 | 0.423 |
 
-One fact shaped this layer. libghostty-vt, which the shadow terminal embeds, had memory-corruption advisories in October 2026 that terminal output alone can trigger ([GHSA-w9q4](https://github.com/ghostty-org/ghostty/security/advisories/GHSA-w9q4-5jvv-mcv4), [GHSA-qjfx](https://github.com/ghostty-org/ghostty/security/advisories/GHSA-qjfx-r533-6vx3)). A third, GHSA-jqr7, matters when an application takes terminal sizes from an untrusted peer. The holder clamps client sizes only to 65535 (`clamp16`) ([GHSA-jqr7](https://github.com/ghostty-org/ghostty/security/advisories/GHSA-jqr7-69mm-v35h), [holder_conn.go](../../internal/host/holder_conn.go)). The fact check adds that GitHub rates GHSA-w9q4 Moderate, and that it needs a scrollback limit so small that one clear deletes the cursor's page. The shadow terminal sets 10,000 lines ([main.zig](../../vt/src/main.zig)), so the bug may not be reachable here. That is unproven. The layer therefore rests on a general rule, not on this one advisory: keep memory-unsafe parsers of hostile bytes inside the wall.
+One fact shaped this layer. libghostty-vt, which the shadow terminal embeds, had memory-corruption advisories in October 2026 that terminal output alone can trigger ([GHSA-w9q4](https://github.com/ghostty-org/ghostty/security/advisories/GHSA-w9q4-5jvv-mcv4), [GHSA-qjfx](https://github.com/ghostty-org/ghostty/security/advisories/GHSA-qjfx-r533-6vx3)). A third, GHSA-jqr7, matters when an application takes terminal sizes from an untrusted peer. The holder clamps client sizes only to 65535 (`clamp16`) ([GHSA-jqr7](https://github.com/ghostty-org/ghostty/security/advisories/GHSA-jqr7-69mm-v35h), [holder_conn.go](../../internal/host/holder_conn.go)). GitHub rates GHSA-w9q4 Moderate, and its advisory says that libghostty-vt is affected in its default configuration. The pin already holds the fix of GHSA-qjfx, so P0.1 moves it past GHSA-w9q4 and GHSA-jqr7 ([build facts](build-facts.md#61-ghostty-and-its-advisories)). The layer therefore rests on a general rule, not on this one advisory: keep memory-unsafe parsers of hostile bytes inside the wall.
 
 ### 5.1 Box is a small host (node 11)
 
@@ -405,6 +405,8 @@ The holder speaks SSH with `golang.org/x/crypto/ssh` to an `sshd -i` inside the 
 
 Each session is a child host in `hosts.toml`, cloned from a base machine. It lost (0.423). It reverses the repository's own sizing: about 5 busy sessions fit in an 8 GB host, against about 4 with a VM each ([architecture](../explanation/architecture.md)). A Lima child boots in tens of seconds (**UNVERIFIED**). Clones copy agent logins and alert tokens into every child.
 
+The spec keeps a narrower form for provider machines only. The supervisor and the egress process run on the machine, and no login is copied ([spec 21.8](../contributing/isolation-spec.md#218-a-machine-for-each-session-p74), [question 86](../contributing/isolation-spec.md#15-open-questions)).
+
 ### 5.5 Options under the hardened-process wall (nodes 6 to 10)
 
 Under node 1 the best control option was node 7 (0.612): the trusted holder outside, with a tiny init inside that owns the PTY and hands file descriptors out over a socketpair. Node 10 (0.584) made each sandbox a child host of a "cell" provider, with one bridge per parent. Node 8 (0.515) added an OpenSSH door that ends SSH on the trusted side, which Docker Sandboxes also ships as `ssh <name>.sbx`. Node 9 (0.467) put the holder in an outer ring of the wall. Node 6 (0.49) put the whole helper inside. All of them inherit W1's security of 4.5 or so, which capped them.
@@ -415,7 +417,7 @@ Under node 1 the best control option was node 7 (0.612): the trusted holder outs
 
 1. **Split.** Inside the wall, a static guest init (the helper) starts the holder. The holder keeps the PTY, the 8 MiB ring, the shadow terminal, the scanner, the screen rules, the hook socket and the paste folder. These are today's code, moved. Where the agent does not need guest root, the holder runs as a guest uid apart from the agent's.
 2. **Outside,** a per-session supervisor (`supervise <id>`) is the main process of the session's systemd unit. It owns the box, the limits, memory and OOM facts from the host cgroup, the egress and credential endpoint (L4), the trusted manifest, an append-only `audit.jsonl`, alert delivery and secrets in memory.
-3. **Channel.** Each connection is one framed stream over `Box.Dial`: hybrid vsock on W3, a bind-mounted Unix socket on W2 (`runsc --host-uds=open`), an inherited socketpair on W1. No TCP port exists anywhere.
+3. **Channel.** Each connection is one framed stream over `Box.Dial`: hybrid vsock on W3, a socket pair on W2 too, passed with `runsc --pass-fd` ([spec 21.4](../contributing/isolation-spec.md#214-the-gvisor-wall-p61)), an inherited socketpair on W1. No TCP port exists anywhere.
 4. **Protocol.** Frame types in `internal/proto` are append-only. The supervisor answers `info`, `kill`, `ls` and `subscribe` from the trusted manifest. It passes attach, input, resize, output and snapshot frames unchanged, after a type allowlist and the existing size limits. New control frames carry status, alerts, ports and the session's end from the guest, and start, paste, identity and stop to it.
 5. **Trust rules.** The supervisor never runs, interpolates or renders guest data. Every guest field has a type, a size cap and a filter for control characters. The launcher marks the agent's state as "claimed by the session". Only the supervisor decides end, OOM and kill, from the VMM's exit and the host cgroup's `memory.events`.
 
@@ -475,7 +477,7 @@ It lost on effort (2.5) and fit (4): a step engine, an OCI store, signing and th
 
 ### 6.4 A fleet of owned hosts (node 20)
 
-The client places each session on one of the user's hosts by labels, the pinned floor, readiness and free memory. Each host admits or refuses under its own lock, so no central state is needed. Scripts get a JSON-RPC API on stdio, like MCP's stdio transport ([MCP transports](https://modelcontextprotocol.io/specification/2025-06-18/basic/transports)). CI gets scoped, expiring SSH keys (`command=`, `expiry-time=`, `from=`) ([sshd](https://man.openbsd.org/sshd.8)), in the spirit of the hosted VM service's key presets.
+The client places each session on one of the user's hosts by labels, the pinned floor, readiness and free memory. (A later change: labels are metadata only, and a host is picked by name or by a rule. See [spec 18.2](../contributing/isolation-spec.md#182-picking-a-host-h19).) Each host admits or refuses under its own lock, so no central state is needed. Scripts get a JSON-RPC API on stdio, like MCP's stdio transport ([MCP transports](https://modelcontextprotocol.io/specification/2025-06-18/basic/transports)). CI gets scoped, expiring SSH keys (`command=`, `expiry-time=`, `from=`) ([sshd](https://man.openbsd.org/sshd.8)), in the spirit of the hosted VM service's key presets.
 
 Nomad packs by default, and kube-scheduler spreads by default ([Nomad](https://developer.hashicorp.com/nomad/api-docs/operator/scheduler), [kube-scheduler](https://kubernetes.io/docs/reference/scheduling/config/)). Packing lets idle stop actually stop hosts. It scored 0.630 but does not say how a sandbox is made on one host, so it lost here and joins later as the layer across hosts.
 
@@ -491,7 +493,7 @@ Under node 12 the search found the same shapes again. Node 25, a fleet routed by
 
 1. **Images.** The helper builds a read-only root image once for each OCI digest. It pulls, flattens the layers with whiteouts, and writes EROFS with `mkfs.erofs --tar` or ext4 with the Go `tar2ext4` ([mkfs.erofs](https://man.archlinux.org/man/mkfs.erofs.1.en), [tar2ext4](https://pkg.go.dev/github.com/Microsoft/hcsshim/ext4/tar2ext4)). A dm-verity tree protects it, and the manifest pins the root hash. The kernel sets up the verity device from its command line with `dm-mod.create`, so no initramfs is needed ([dm-init](https://docs.kernel.org/admin-guide/device-mapper/dm-init.html)).
 2. **One sparse disk per session** holds the repository at a stable path (`/work/<repo>`), the agent's home and the root overlay's upper layer, with a size cap (20 GiB by default). A stable path matters because agents key their transcripts by working folder.
-3. **Start is a cold boot,** then the agent's resume command, the path that [restore.go](../../internal/host/restore.go) already runs after a host reboot. Secrets come in the start frame at each boot and never go on the disk. The unit's `MemoryMax` is the guest RAM plus a margin of about 64 MiB, so the guest's OOM killer picks the agent first.
+3. **Start is a cold boot,** then the agent's resume command, the path that [restore.go](../../internal/host/restore.go) already runs after a host reboot. Secrets come in the start frame at each boot and never go on the disk. The unit's `MemoryMax` is the guest RAM plus a margin of about 64 MiB, so the guest's OOM killer picks the agent first. Spec 20.10 replaced this margin with a budget for each part.
 4. **Stop** comes from the user, a per-session idle timer or a host shutdown. The guest ends the agent, writes the ring tail to the disk, syncs and powers off. A new state, `stopped`, keeps the disk and uses no RAM.
 5. **After a host reboot,** only sessions that were working boot again, a few at a time. The rest wake when a client attaches.
 6. **Fork and checkpoint** freeze the guest file system, copy the disk with `FICLONE` (or a sparse copy), and thaw it ([ioctl_ficlone](https://man7.org/linux/man-pages/man2/ioctl_ficlone.2.html)). The child starts with a new `Fork` row in the agent table, such as `claude --resume {id} --fork-session` ([Claude Code CLI](https://code.claude.com/docs/en/cli-reference)).
@@ -622,7 +624,7 @@ The supervisor writes a metadata-only record outside the wall. Each record carri
 
 It lost on effort (2): three recorder backends, a rule engine and a kill switch. It also detects and contains, but never prevents the first harmful action.
 
-**Kept.** A trust label on every security record and alert. Sentinels and planted decoys as exact-match tripwires in the egress process, including base64 forms. Rules, kept as data, for the worms' GitHub moves: repository creation, visibility changes, workflow writes and runner registration tokens ([GitHub runners API](https://docs.github.com/en/rest/actions/self-hosted-runners)). The kill switch on the trusted side.
+**Kept.** A trust label on every security record and alert. Sentinels and planted decoys as exact-match tripwires in the egress process, including base64 forms. Rules, kept as data, for the worms' GitHub moves: repository creation, visibility changes, workflow writes and runner registration tokens ([GitHub runners API](https://docs.github.com/en/rest/actions/self-hosted-runners)). The kill switch on the trusted side. Evidence for decoys came later: canary keys caught a real CI breach when the attacker checked them ([facts](build-facts.md#7-later-phases), [spec 21.7](../contributing/isolation-spec.md#217-decoys-p72)).
 
 ### 8.3 Throwaway sessions and a reviewed exit (node 33)
 
@@ -654,7 +656,7 @@ It lost on fit (4) and convenience (3). Settings fragments change an agent's per
 2. **Reproducible builds.** The release workflow builds a kernel.org longterm kernel, pinned by SHA-256, with a committed config based on Firecracker's CI configs plus `DM_VERITY`, `DM_INIT`, `EROFS`, `OVERLAY_FS` and `VSOCK` ([kernel policy](https://github.com/firecracker-microvm/firecracker/blob/main/docs/kernel-policy.md)). `CONFIG_MODULES=n` removes module signing, a known cause of builds that differ, and the `KBUILD_BUILD_*` values are fixed ([reproducible builds](https://docs.kernel.org/kbuild/reproducible-builds.html)). The tools image comes from `mkfs.erofs` with a fixed time, no UUID and root owners, plus a verity tree with a fixed salt ([mkfs.erofs](https://github.com/erofs/erofs-utils/blob/dev/man/mkfs.erofs.1)). Each release also ships the kernel's source and config.
 3. **Upstream pins.** A lock file pins the VMM and runsc by SHA-256. At pin time CI compares each hash with the upstream checksum and with GitHub's immutable asset digest ([asset digests](https://github.blog/changelog/2025-06-03-releases-now-expose-digests-for-release-assets/)). Firecracker publishes only `.sha256` files, with no public signature ([firecracker#6117](https://github.com/firecracker-microvm/firecracker/issues/6117)).
 4. **Checks.** `dial` checks the helper with `sha256sum -c` against the client's digest before the bridge starts. The supervisor hashes the VMM binary through an open file descriptor and runs that descriptor, so nothing can swap the file between check and run. It builds the kernel command line only from the client's digests, with two verity tables and `panic_on_corruption` ([verity](https://docs.kernel.org/admin-guide/device-mapper/verity.html)). fs-verity seals artefacts where the file system has it ([fs-verity](https://docs.kernel.org/filesystems/fsverity.html)).
-5. **pins-watch.** A daily CI job checks every pin outside a package ecosystem (the Ghostty commit, the VMM, the kernel, runsc) against GitHub repository advisories and OSV, and opens an issue on a match. A bump waits 7 days unless it fixes a security problem. The Ghostty advisories use commit ranges in the "other" ecosystem, so ordinary scanners do not match them to a Zig pin (an inference, **UNVERIFIED**).
+5. **pins-watch.** A daily CI job checks every pin outside a package ecosystem (the Ghostty commit, the VMM, the kernel, runsc) against GitHub repository advisories and OSV, and opens an issue on a match. A bump waits 7 days unless it fixes a security problem. The Ghostty advisories use the "other" ecosystem, with free-text commit ranges, and are in neither OSV nor GitHub's global database. So no package scanner matches them to a Zig pin ([build facts](build-facts.md#61-ghostty-and-its-advisories)).
 6. **A signed-tag release gate.** `release.yml` runs `git verify-tag` against a committed allowed-signers file before any build. The tag key is a hardware-backed `ed25519-sk` key ([Yubico](https://developers.yubico.com/SSH/Securing_git_with_SSH_and_FIDO2.html)). A stolen GitHub token alone cannot make a release, the lesson of tj-actions ([GHSA-mw4p](https://github.com/tj-actions/changed-files/security/advisories/GHSA-mw4p-6x4p-x5m5)). Immutable releases lock tags and assets ([GitHub](https://github.blog/changelog/2025-10-28-immutable-releases-are-now-generally-available/)).
 
 It builds on what exists: the SSH release signature of decision [0017](../contributing/decisions/0017-release-signatures.md), cosign, SLSA provenance and `just repro`. Go builds with `CGO_ENABLED=0 -trimpath` are reproducible ([Go](https://go.dev/blog/rebuild)). sigstore-go verifies offline ([sigstore-go](https://docs.sigstore.dev/language_clients/go/)).
@@ -733,7 +735,7 @@ These fix holes that exist today. Each one stands alone.
 | Existing provider: docker | W0 | The default seccomp profile blocks namespaces, and no `/dev/kvm` is passed in | Refuse by default and require a named downgrade ([question 6](../contributing/isolation-spec.md#15-open-questions)), run the container under runsc as root on the Docker host, or place walled sessions elsewhere | [Docker seccomp](https://docs.docker.com/engine/security/seccomp/) |
 | Existing provider: e2b | W4 | Each sandbox is a Firecracker microVM, but nothing trusted runs outside it | Use E2B's own egress lists and `allowPublicTraffic: false`. Keys in the environment only as a recorded downgrade ([question 22](../contributing/isolation-spec.md#15-open-questions)). Whether W1 or W2 runs inside an E2B guest is untested | [E2B network](https://docs.e2b.dev/network/internet-access), [persistence](https://docs.e2b.dev/sandbox/persistence) |
 
-**Density.** On the 4 GB test host, about 2 or 3 W3 sessions with 1 GiB guests fit, with dozens more stopped on disk. On an 8 GB host, about 5 busy Claude sessions fit today ([architecture](../explanation/architecture.md)). The research estimates 55 to 90 MiB more per W3 session for the guest kernel, the holder and the supervisor (**UNVERIFIED**, not measured). Fixed guest RAM is the real limit, because Firecracker's free page reporting is still a developer preview ([ballooning](https://github.com/firecracker-microvm/firecracker/blob/main/docs/ballooning.md)).
+**Density.** On the 4 GB test host, about 2 or 3 W3 sessions with 1 GiB guests fit, with dozens more stopped on disk. On an 8 GB host, about 5 busy Claude sessions fit today ([architecture](../explanation/architecture.md)). The research estimates 55 to 90 MiB more per W3 session for the guest kernel, the holder and the supervisor (**UNVERIFIED**, not measured). Spec 20.10 now gives a budget for each part, which P3.8 measures. Fixed guest RAM is the real limit, because Firecracker's free page reporting is still a developer preview ([ballooning](https://github.com/firecracker-microvm/firecracker/blob/main/docs/ballooning.md)).
 
 ### 10.1 AWS Nitro Sandboxes on EC2
 
@@ -750,7 +752,7 @@ Researched on 10 November 2026. AWS announced Nitro Sandboxes on 9 November 2026
 
 - Firecracker opens the Nitro Enclaves driver at `/dev/nitro_enclaves` instead of `/dev/kvm`. It keeps its API, its jailer and its virtio devices, and a new `PUT /enclave` endpoint picks the mode ([release](https://github.com/firecracker-microvm/firecracker/releases/tag/v1.18.0)).
 - No `/dev/kvm` and no bare-metal instance are needed. Guest CPUs are hardware CPUs that the Nitro System schedules, so the parent's cgroups do not govern them ([comparison with KVM](https://github.com/firecracker-microvm/firecracker/blob/firecracker-v1.18/docs/nitro-sandboxes/comparison-with-kvm.md)).
-- The guest boots through UEFI from an Enclave Image Format file, which Firecracker can build in memory from a kernel and boot arguments. The guest kernel needs an EFI stub, ACPI, PCIe and virtio-pci. The MMIO transport is not available ([getting started](https://github.com/firecracker-microvm/firecracker/blob/firecracker-v1.18/docs/nitro-sandboxes/getting-started.md)).
+- The guest boots through UEFI from an Enclave Image Format file, which Firecracker can build in memory from a kernel and boot arguments. The guest kernel needs an EFI stub, ACPI, PCIe and virtio-pci ([getting started](https://github.com/firecracker-microvm/firecracker/blob/firecracker-v1.18/docs/nitro-sandboxes/getting-started.md)). The MMIO transport is not available ([comparison with KVM](https://github.com/firecracker-microvm/firecracker/blob/firecracker-v1.18/docs/nitro-sandboxes/comparison-with-kvm.md)). So the `nitro` driver uses virtio-pci, and the KVM `firecracker` driver keeps MMIO ([spec 21.5](../contributing/isolation-spec.md#215-the-firecracker-driver-p62)).
 - Memory is donated whole at start from a physically contiguous pool, and returns only at the end. There is no balloon, no huge pages, no snapshot and no pause ([comparison with KVM](https://github.com/firecracker-microvm/firecracker/blob/firecracker-v1.18/docs/nitro-sandboxes/comparison-with-kvm.md)).
 - The parent kernel needs the Nitro Sandboxes support in its `nitro_enclaves` driver. The documented kernel is Amazon Linux 2023 `kernel6.18` from `6.18.51-120.162.amzn2023` ([getting started](https://github.com/firecracker-microvm/firecracker/blob/firecracker-v1.18/docs/nitro-sandboxes/getting-started.md)). `/dev/nitro_enclaves` is `root:root` with mode 0660 in its example.
 
@@ -831,7 +833,7 @@ A fact check re-read the claims that the design leans on. This note uses each co
 | Docker Sandboxes keeps real keys out of the VM | Confirmed, with four details | Swaps happen in headers only. A kit can pass a real OAuth token in. Claude Code logs in inside when no credential is stored. A workspace is optional since sbx 0.42.0 | [credentials](https://docs.docker.com/ai/sandboxes/configuration/credentials/) |
 | Docker Sandboxes on Linux works for one user with UID 1000 | Wrong, out of date | The current install page asks for Ubuntu 24.04 or later, KVM and the kvm group, and names no UID limit | [install](https://docs.docker.com/ai/sandboxes/install/) |
 | The hosted VM service's feature list | Confirmed, extended | $0.036 an hour, a stopped disk kept at least 14 days, a new IP at each resume, some sandboxes without their own IPv4 | Its docs |
-| The Ghostty advisory forces the parser inside the wall | Confirmed facts, softer weight | GitHub rates it Moderate, and it needs a tiny scrollback limit. The 10,000-line setting may make it unreachable here. Bump the pin anyway, and rest the L2 choice on the general rule | [GHSA-w9q4](https://github.com/ghostty-org/ghostty/security/advisories/GHSA-w9q4-5jvv-mcv4) |
+| The Ghostty advisory forces the parser inside the wall | Confirmed facts, softer weight | GitHub rates it Moderate, and the advisory says that libghostty-vt is affected in its default configuration. Bump the pin, and rest the L2 choice on the general rule | [GHSA-w9q4](https://github.com/ghostty-org/ghostty/security/advisories/GHSA-w9q4-5jvv-mcv4) |
 
 ## 13. Rules the design bends
 
@@ -917,7 +919,7 @@ The words in this section are those of the whole note:
 
 ### Summary
 
-1. **`host add` stays the only way in.** Of five ways to attach a machine, the best is today's path: SSH, consent, install, doctor. A new prepare phase follows it. A sandbox probe, a runtime checked against the release manifest, one optional root step and a test boot make the host a sandbox host. It needs no new port, relay, daemon or pairing service.
+1. **`host add` stays the only way in.** (A later change: `host join` adds a second way in, at the owner's request. See [spec 18.3](../contributing/isolation-spec.md#183-a-machine-that-joins-h20).) Of five ways to attach a machine, the best is today's path: SSH, consent, install, doctor. A new prepare phase follows it. A sandbox probe, a runtime checked against the release manifest, one optional root step and a test boot make the host a sandbox host. It needs no new port, relay, daemon or pairing service.
 2. **Most Debian and Ubuntu hosts need root once.** Debian builds systemd so that `/dev/kvm` is mode 0660 for the `kvm` group. Upstream systemd uses 0666. The probe says which level the host gives now, and which level it gives after the root step.
 3. **The root step stays small when the guest has no network card.** A guest that reaches the host only over vsock needs no TAP device, no network namespace and no user namespace. The root step then holds only `/dev/kvm` access, linger, and an optional cgroup delegation. It needs no `AppArmor` profile, which would weaken Ubuntu's user namespace restriction for the whole account. The main design adds a few more lines to the root step ([section 13](#13-rules-the-design-bends), [question 4](../contributing/isolation-spec.md#15-open-questions)).
 4. **The laptop writes the root script, and sudo asks for the password.** The helper must not write a script that root runs. The client builds the script from fixed templates, shows each line with its reason and its undo, and runs it through `ssh -t … sudo`. The user can also print it for the machine's owner, or skip it.
@@ -1071,7 +1073,7 @@ Its security score is 4 of 10. The sandboxes, the egress process and the runtime
 **cgroups**
 
 - `user@.service` has `Delegate=pids memory cpu` and `DelegateSubgroup=init.scope` ([user@.service.in](https://github.com/systemd/systemd/blob/main/units/user%40.service.in)). The `io` and `cpuset` controllers need a drop-in, which needs root. A drop-in for one user goes in `user@<uid>.service.d`. A drop-in in `user@.service.d` changes every user on the machine.
-- Whether a changed `Delegate=` takes effect without a restart of the user manager is **UNVERIFIED**.
+- The user manager reads its controllers only when it starts. `systemctl --user daemon-reexec` counts as a start, needs no root, and keeps running units ([build facts](build-facts.md#4-linux-walls)). UNVERIFIED: that `daemon-reload` gives the running unit the `io` controller.
 
 **Disks**
 
@@ -1097,8 +1099,8 @@ Its security score is 4 of 10. The sandboxes, the egress process and the runtime
 **Mac hosts**
 
 - A process that uses Apple's Virtualization framework needs the `com.apple.security.virtualization` entitlement ([Apple](https://developer.apple.com/documentation/bundleresources/entitlements/com.apple.security.virtualization)). Lima signs `limactl` with it and runs VZ VMs without root ([vz.entitlements](https://github.com/lima-vm/lima/blob/master/vz.entitlements)).
-- From macOS 15, the Virtualization framework needs an unlocked login keychain when it runs a VM ([Tart FAQ](https://tart.run/faq/)). One third-party project says that only macOS guests need it, and that Linux guests are unaffected ([tart-skills](https://github.com/jonnyzzz/tart-skills)). For Linux guests, this is **UNVERIFIED**.
-- That a Virtualization framework VM can be started and kept from a headless SSH session is **UNVERIFIED** from a primary source.
+- From macOS 15, the Virtualization framework needs an unlocked login keychain when it runs a VM ([Tart FAQ](https://tart.run/faq/)). The check of 10 November 2026 found that this applies to macOS guests. Lima's contributors report that a Linux VM starts from a boot launch daemon with nobody logged in ([locations, section 5](locations.md#5-mac-hosts-checked-again)).
+- An account that has never logged in, with FileVault on, is still **UNVERIFIED**. The locations note gives a test by hand.
 
 **Sizes**
 
@@ -1420,11 +1422,11 @@ The `microvm` level needs Linux on amd64 or arm64, systemd with cgroup v2, and a
 
 - That Ubuntu builds systemd with `/dev/kvm` mode 0660, as Debian does.
 - That an ACL on `/dev/kvm` lasts until the next reboot and survives udev change events.
-- That a changed `Delegate=` takes effect without a restart of the user manager.
-- That `setfacl` (package `acl`) is installed by default on minimal Debian and Ubuntu servers.
+- That `daemon-reload` gives a running user manager the `io` controller. A re-execution of the user manager follows it ([build facts](build-facts.md#4-linux-walls)).
+- Settled since: default Ubuntu and Debian cloud images include neither `acl` nor `uidmap` ([build facts](build-facts.md#4-linux-walls)).
 - That Cloud Hypervisor runs with a user-mode network stack on a Unix socket.
 - That a guest with an agent boots to ready in about 1 s.
-- That the Virtualization framework can start and keep VMs from a headless SSH session, and whether Linux guests need an unlocked keychain.
+- That the Virtualization framework can start a Linux VM at boot for an account that has never logged in ([locations, section 5](locations.md#5-mac-hosts-checked-again)).
 - That libkrun has no snapshot API (from a Lima issue, not libkrun's docs).
 - That `sshd` checks `expiry-time` only at login.
 - That Firecracker GPU passthrough exists in any form.
@@ -1559,6 +1561,36 @@ Option 2, with `ask` in the built-in layer. For `classify`, the fixed checks abo
 - The licence of the combined Tranco list.
 - Which OpenSSH release first sends the `session-bind@openssh.com` extension.
 - The 2026 DNS incidents at OpenAI and Check Point that one paper cites.
+
+## Later changes in the spec
+
+The spec and the plan came after this note, and changed some of its choices. This list names each change, so that a reader of this note knows which text wins. The spec wins.
+
+| This note says | The spec now says | Where |
+| --- | --- | --- |
+| Policy layers: "A deny always wins" (L4, item 5). | The narrowest layer with a matching rule decides. In that layer, a deny wins. A session can allow a host that all sessions deny. | [Spec 8.2](../contributing/isolation-spec.md#82-layers-and-precedence), rule 2 |
+| A trusted repository file is a layer. | A repository's own file is untrusted. It only narrows, and its allows are proposals. | [Spec 8.5](../contributing/isolation-spec.md#85-a-repositorys-own-file) |
+| The egress process strips the headers that make the vendor fetch a URL. | The model API guard parses the request body, and refuses a request with a server-side fetch tool. | [Spec 7.2](../contributing/isolation-spec.md#72-network) |
+| Alerts `key_misuse` and `key_minted`. | `secret_misuse` and `secret_minted`. | [Spec 10.8](../contributing/isolation-spec.md#108-alerts) |
+| Pushes go only under `refs/heads/agent/<session>/`. | The push door's prefix is `refs/heads/<name>/<id>/`. | [Spec 7.2](../contributing/isolation-spec.md#72-network) |
+| Approvals never offer "always". | The policy sheet offers a lasting rule for the repository or the profile, and never for all sessions. | [Spec 9.4](../contributing/isolation-spec.md#94-the-launcher) |
+| Per-session spend and rate caps. | A token budget, `network.model_budget`. The tool shows no prices. | [Spec 17.8](../contributing/isolation-spec.md#178-model-usage-and-budgets-p216) |
+| Package manager settings in phase 0. | Task P2.8, in phase 2. | [Spec 7.10](../contributing/isolation-spec.md#710-package-managers-in-the-guest-p28) |
+| The guest sets `GOFLAGS=-mod=readonly` (8.1). | Go has acted as if `-mod=readonly` were set since 1.16. The guest sets `GOTOOLCHAIN=local`, `GOPROXY` without `direct`, and `GOVCS=*:off`. | [Spec 7.10](../contributing/isolation-spec.md#710-package-managers-in-the-guest-p28), [build facts 3](build-facts.md#3-package-managers-and-registries) |
+| The guest writes the cargo publish-age setting (8.1). | cargo has no stable setting. Only the registry gate covers crates. | [Spec 7.11](../contributing/isolation-spec.md#711-registry-gates-p71) |
+| The firewall drops versions with git or URL dependencies (8.1). | The gate refuses a tarball that a package manager fetches from a host that is not a registry. A git dependency looks like any clone, so the gate cannot see it. | [Spec 7.11](../contributing/isolation-spec.md#711-registry-gates-p71) |
+| Shared caches, read-only. | Kept caches belong to one sandbox and are never shared. | [Spec 17.5](../contributing/isolation-spec.md#175-kept-caches-p115) |
+| The guest writes the ring tail to disk at a stop. | No screen is kept across a stop. | [Question 10](../contributing/isolation-spec.md#15-open-questions) |
+| The holder runs as a guest user apart from the agent. | On a process wall, both run as uid 1000. On a microvm, the holder is uid 900 and the agent uid 1000. | [Spec 17.10](../contributing/isolation-spec.md#1710-root-inside-a-microvm-p34) |
+| The floor is `wall.floor`. | The key is `wall_floor` in `hosts.toml`. | [Spec 8.4](../contributing/isolation-spec.md#84-hoststoml) |
+| Root step (b), the `AppArmor` profile, is gone. | A root-owned launcher gets the profile, and starts the guest init in a child profile with no capabilities, as Ubuntu's own bubblewrap profile does. | [Spec 14.4](../contributing/isolation-spec.md#144-privileges-the-root-step), [build facts 4](build-facts.md#4-linux-walls) |
+| `doctor` lowers the level or warns on a kernel with a known local root bug. | `doctor` warns, and the user decides. | [Question 7](../contributing/isolation-spec.md#15-open-questions) |
+| An E2B host runs at level `none`. | Spec 11 gives E2B `process`, marked UNVERIFIED. The probe decides. | [Spec 11](../contributing/isolation-spec.md#11-platform-matrix-and-fallbacks) |
+| CVE-2026-39825, with no mark. | The spec marks it UNVERIFIED. | [Spec 7.2](../contributing/isolation-spec.md#72-network) |
+| Stop running host git in a session's repository (9.1, item 5). | The host runs git in an unwalled session's repository with hooks and fsmonitor off, in a scope under the sessions' slice. It runs no git where a sandbox can write. | [Spec 19.3](../contributing/isolation-spec.md#193-safe-copies-and-host-git-p07), [question 77](../contributing/isolation-spec.md#15-open-questions) |
+| A microvm's guest memory equals the session's cap, or the cap less about 64 MiB. | The spec gives a memory budget with each part. | [Spec 20.10](../contributing/isolation-spec.md#2010-the-memory-of-a-microvm-p33-p38) |
+| Images are EROFS from `mkfs.erofs --tar`, or ext4 from `tar2ext4`. | User images and the agents disk are ext4 from `tar2ext4`. Only the tools image is EROFS, and CI builds it. | [Spec 20.2](../contributing/isolation-spec.md#202-images-p32) |
+| Cloud Hypervisor v52.0 or later. | The pin is v54.0, and v52.0 is the advisory floor. | [Spec 20.3](../contributing/isolation-spec.md#203-the-cloud-hypervisor-driver-p33) |
 
 ## Sources and method
 

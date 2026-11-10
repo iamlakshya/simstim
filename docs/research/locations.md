@@ -12,9 +12,9 @@ The rules for the note:
 
 ## Summary
 
-1. **The invoker picks the host, and rules fill in.** Hosts are known by their names, and labels exist today as metadata. Nothing yet picks a host for a repository, an organisation or a kind of task. `sandbox.host` in a profile or a repository section adds that (spec 18.2).
-2. **A Mac laptop can be a host, through a Lima VM, with limits.** It must stay on power with the lid open. After an unplanned restart, FileVault holds it at the unlock screen until someone unlocks it from the Mac's own LAN. Tailscale starts only after that unlock. With no other machine online at that location, nothing can wake or unlock it from far away.
-3. **A machine can prepare itself, and the laptop still connects to it.** `host join` on the machine makes a dedicated account, the VM and a narrow SSH path, then prints a reply code. The laptop reads the code and connects over SSH as `host add` does today. The machine never calls the laptop or any service of ours.
+1. **The invoker picks the host, and rules fill in.** Hosts are known by their names, and labels exist today as metadata. Nothing yet picks a host for a repository, an organisation or a kind of task. `sandbox.host` in a profile or a repository section adds that (spec 18.2). Tools for one person work the same way (section 7).
+2. **A Mac laptop can be a host, through a Lima VM, with limits.** It must stay on power with the lid open. After an unplanned restart, FileVault holds it at the unlock screen until someone unlocks it at the Mac, or over SSH from its LAN (section 5). Tailscale starts only after that unlock. With no other machine online at that location, nothing can wake or unlock it from far away.
+3. **A machine can prepare itself, and the laptop still connects to it.** `host join` on the machine makes a dedicated account, the VM and a narrow SSH path, then prints a reply code. The laptop reads the code and connects over SSH as `host add` does today. The machine never calls the laptop or any service of ours. The codes hold no secret, but must arrive unchanged (section 6).
 4. **In a homelab, use a VM with the host's CPU type, and probe for KVM.** Proxmox hides the CPU's virtualisation flags from a VM by default, and an LXC container shares the Proxmox kernel. TrueNAS and Unraid hosts get the helper in a VM.
 5. **Each host joins the user's own overlay.** Tailscale runs on each host as a system daemon. The tool adds no relay. Wake-on-LAN cannot cross Tailscale, so a sleeping host needs an awake machine on its own LAN.
 
@@ -100,11 +100,93 @@ The rules for the note:
 
 ## 4. What the design takes from this
 
-1. **The invoker picks, and rules fill in.** A profile, a repository or an organisation can name the host for its sessions. A host that the invoker names always wins. A secret can list the only hosts that may get it.
-2. **A Mac host is a Lima VM behind a narrow door.** The VM runs in plain mode, with `hostLoopback` off and a fixed SSH port. A dedicated macOS account holds a key that can only open a channel to that port. A launch daemon starts the VM at boot.
+1. **The invoker picks, and rules fill in.** A profile, a repository or an organisation can name the host for its sessions. No rule picks another host instead of the one that the invoker names. The grant gate can still stop a start. A secret can list the only hosts that may get it.
+2. **A Mac host is a Lima VM behind a narrow door.** The VM runs in plain mode, with `hostLoopback` off and a fixed SSH port. A dedicated macOS account holds a key that can only open a channel to that port. sshd's drop-in also stops remote forwards. A launch daemon, which the join writes itself, starts the VM at boot (section 5).
 3. **The Mac stays awake on purpose.** The join sets `pmset -c sleep 0` with the user's consent and records the old values. The docs say: lid open, on power, Charge Limit at 80 %, good air flow.
 4. **Restarts are a known gap.** The docs explain the FileVault unlock and `fdesetup authrestart`. `host doctor` shows the restart risk, and `ls` marks a Mac host "away" until it answers.
 5. **The doctor reads MDM control.** It reports enrolment, a managed sshd, hidden settings and an Energy Saver payload, and suggests the tier `shared` on a Mac that an organisation manages.
-6. **No second machine at a Mac's location.** Nothing in the design needs a waker, a jump host or a subnet router there.
+6. **No second machine at a Mac's location.** Nothing in the design needs a waker, a jump host or a subnet router there. A subnet router there would allow a FileVault unlock from far away (section 5).
 7. **In the homelab, the docs recommend a VM and the probe decides.** The doctor names the fix for a missing `/dev/kvm`: CPU type `host` on Proxmox.
-8. **Hosts that stay on need no wake.** For a host that sleeps, the tool's existing provider scripts can send the wake from its own LAN. The tool listens nowhere.
+8. **Hosts that stay on need no wake.** For a host that sleeps, the user can write a provider script that sends the wake from a machine on its own LAN. The examples have no such script. The tool listens nowhere.
+
+## 5. Mac hosts, checked again
+
+Checked on 10 November 2026, after an audit of the spec. A researcher read the man pages on a Mac laptop with macOS 26.5.1.
+
+- **A VM at boot, with nobody logged in.** Lima's contributors report that a `vz` Linux VM starts from `limactl autostart --condition=boot` after a reboot, with nobody logged in. They tested Apple silicon with macOS 26 ([pull 4984](https://github.com/lima-vm/lima/pull/4984), [pull 5088](https://github.com/lima-vm/lima/pull/5088)). A user report shows a hidden service account that ran a `vz` VM from a launch daemon ([issue 5087](https://github.com/lima-vm/lima/issues/5087)).
+- **The keychain.** The keychain errors in Apple's forums come from macOS guests ([thread 822670](https://developer.apple.com/forums/thread/822670)). No report links them to Linux guests.
+- **No support from Apple.** Apple's support staff say that the Virtualization framework "links with AppKit, which is obviously not daemon-safe" ([thread 841688](https://developer.apple.com/forums/thread/841688)). So a macOS update can break a start at boot.
+- **UNVERIFIED:** a start at boot for an account that has never logged in and has no login keychain, with FileVault on. The test at the end of this section settles it.
+- **`limactl` and root.** `limactl autostart enable --condition=boot --user <user>` exists from Lima v2.2.0. It writes `/Library/LaunchDaemons/io.lima-vm.daemon.<instance>.plist` with `UserName`. `KeepAlive` and `LIMA_HOME` are in the plist from v2.3.0 ([autostart](https://lima-vm.io/docs/usage/autostart/), [plist](https://github.com/lima-vm/lima/blob/v2.3.0/pkg/autostart/launchd/io.lima-vm.daemon.INSTANCE.plist)). `limactl` refuses to run as root, and runs `sudo` itself for the install ([source](https://github.com/lima-vm/lima/blob/v2.3.0/cmd/limactl/autostart_darwin.go)). An account with no known password cannot answer that `sudo`.
+- **The daemon's limits.** `KeepAlive` restarts the job only after an exit with an error. Without `ExitTimeOut`, launchd kills the host agent 5 s after `SIGTERM`, before the guest shuts down ([issue 5765](https://github.com/lima-vm/lima/issues/5765)). The label holds only the instance name, so two instances with one name collide ([issue 5643](https://github.com/lima-vm/lima/issues/5643)).
+- **macOS versions.** `vz` needs macOS 13 ([vz](https://lima-vm.io/docs/config/vmtype/vz/)). On 9 November 2026, Apple released security fixes for macOS 27, 26 and 15 only. The last fix for macOS 14 came on 6 August 2026 ([security releases](https://support.apple.com/en-us/100100)). So macOS 15 is the oldest release that still gets security fixes.
+- **The FileVault unlock over SSH** takes the password of a FileVault user, not a key. SSH then drops, and the Mac finishes the boot (man page `fdesetup`). Before the unlock, no daemon on the data volume runs, Tailscale included. Any machine that reaches the Mac's LAN address can do the unlock, for example through a Tailscale subnet router on that LAN ([subnet routers](https://tailscale.com/kb/1019/subnets)).
+- **Commands without root.** `pmset -g batt`, `pmset -g assertions`, `fdesetup status` and `profiles status -type enrollment` ran without `sudo` for an admin user. **UNVERIFIED** for a standard account. `pmset -c sleep 0` needs root (man page `pmset`). On Apple silicon, `pmset -g therm` reported only that no thermal warning was recorded.
+- **Remote Login without root.** `launchctl print-disabled system` shows `"com.openssh.sshd" => enabled` when Remote Login is on. A security benchmark uses this check without `sudo` ([DISA STIG check](https://stigaview.com/products/macos14/v2r1/APPL-14-000080), secondary).
+- **The lid.** With the lid closed and no display, a Mac laptop sleeps, whatever `pmset -c sleep` says ([Apple](https://support.apple.com/en-us/102501)). `pmset disablesleep 1` is undocumented, and only third parties report that it works.
+- **sshd and the key's options.** macOS 26.5.1 ships `Include /etc/ssh/sshd_config.d/*`, with OpenSSH 10.2p1. sshd runs a forced `command=` through the account's login shell (man page `sshd`). `permitopen` limits local forwards to a literal host and port, so the client must ask for `127.0.0.1`, not `localhost`.
+- **Remote forwards.** The key's options do not limit remote forwards. With no `permitlisten`, the key can listen on any TCP port. It can listen on any Unix socket path even with `permitlisten` ([channels.c](https://github.com/openssh/openssh-portable/blob/V_10_2_P1/channels.c)). Only sshd's config stops these, with `AllowTcpForwarding local` and `AllowStreamLocalForwarding no`.
+- **Hidden accounts.** launchd runs a system job as its `UserName`, and needs no password (man page `launchd.plist`). When a user logs in, macOS tries to give that user a secure token. `;DisabledTags;SecureToken` in the account's `AuthenticationAuthority` stops this, so the account never becomes a FileVault user ([secure tokens](https://support.apple.com/guide/deployment/use-secure-and-bootstrap-tokens-dep24dbdcf9e/web)). Security tools flag hidden accounts ([MITRE ATT&CK T1564.002](https://attack.mitre.org/techniques/T1564/002/)).
+- **Local network privacy** allows any daemon that launchd starts, so the VM reaches the LAN with no prompt ([TN3179](https://developer.apple.com/documentation/technotes/tn3179-understanding-local-network-privacy)).
+- **Login Items.** From macOS 13, a user can turn a launch daemon off in System Settings > General > Login Items & Extensions ([Apple](https://support.apple.com/guide/deployment/depdca572563/web)).
+
+**A test by hand, before H21.** Do it on Apple silicon with FileVault on, first with macOS 15, then with macOS 26:
+
+1. Make a hidden standard account with a random password. Do not log in as it.
+2. As that account, make a `vz` Linux VM with Lima v2.3.0.
+3. As root, write the daemon's plist with `UserName` set to the account. Then run `launchctl bootstrap system <plist>`.
+4. Restart. Unlock FileVault over SSH as your own user. Do not log in at the login window.
+5. From a second machine, connect through the Mac's sshd to the VM's port.
+6. Record `limactl list`, the daemon's error log, and `log show --last 10m --predicate 'process == "limactl"'`. Look for errors about keys or the keychain.
+
+The test passes when the VM runs and the account has no login keychain.
+
+## 6. Joining a machine
+
+Checked on 10 November 2026.
+
+| Tool | What the code carries | Lifetime | Typos and theft | How the user enters it |
+| --- | --- | --- | --- | --- |
+| kubeadm | A token `[a-z0-9]{6}.[a-z0-9]{16}`. `--discovery-token-ca-cert-hash` pins the CA. | 24 hours, `--ttl` | No check characters. A thief can join nodes. | An argument or a config file |
+| k3s | `K10<CA hash>::<credentials>` | 24 hours for bootstrap tokens | The server token gives "full administrator access". | `--token`, `K3S_TOKEN` or `--token-file` |
+| Tailscale | An auth key | 1 to 90 days | One-off keys end after use. Reusable keys are "very dangerous if stolen". | `--auth-key`, or `file:<path>` |
+| Teleport | A secret token, and `--ca-pin` | 30 minutes by default | Secret tokens are "prone to secret exfiltration". `bound_keypair` registers a public key first. | `--token`, a value or a file |
+| Syncthing | A device ID: the SHA-256 of a certificate, in base32 | No end | One check character in each group. The ID is public, and both sides add each other. | A paste |
+| Magic Wormhole | A number and words, 16 bits, with SPAKE2 | One use | An attacker gets one guess. | A prompt |
+| Proxmox | An address, a certificate fingerprint and the root password | None | The password is typed by hand. | `pvecm add` prompts |
+
+Sources: [bootstrap tokens](https://kubernetes.io/docs/reference/access-authn-authz/bootstrap-tokens/), [kubeadm token](https://kubernetes.io/docs/reference/setup-tools/kubeadm/kubeadm-token/), [kubeadm join](https://kubernetes.io/docs/reference/setup-tools/kubeadm/kubeadm-join/), [k3s token](https://docs.k3s.io/cli/token), [Tailscale auth keys](https://tailscale.com/kb/1085/auth-keys), [Teleport join methods](https://goteleport.com/docs/reference/deployment/join-methods/), [Syncthing device IDs](https://docs.syncthing.net/dev/device-ids.html), [Magic Wormhole](https://magic-wormhole.readthedocs.io/en/latest/welcome.html), [pvecm](https://pve.proxmox.com/pve-docs/pvecm.1.html).
+
+- **The nearest models.** Syncthing is the nearest: its IDs are public, and the user carries them both ways. Teleport's `bound_keypair` is the nearest server model, because it registers a public key before the join.
+- **The lifetime.** One hour is in line with Teleport, which advises a token "valid only 1 hour for example". kubeadm and k3s use 24 hours. A Mac join downloads Lima and an image, so it can take more than one hour. kubeadm and Teleport let the user set the lifetime.
+- **Typos.** A 40-bit hash of the whole code misses a random error about once in 10^12, but it cannot say where the error is. Syncthing puts a check character in each group for this reason ([luhn.go](https://github.com/syncthing/syncthing/blob/main/lib/protocol/luhn.go)). The codes of this design pass 100 characters, so users will paste them.
+- **A leaked code.** A leaked invite gives nothing to log in with: the key is public, and the nonce only matches a reply. A leaked reply shows addresses and facts, but no secret.
+- **A changed code.** A changed invite makes the machine trust another key. A forged reply makes the laptop pin other host keys and send its work there. Anyone who saw the invite can forge a reply. A 40-bit check takes about 10^12 SHA-256 trials to match, which one current GPU does in about a minute ([hashcat figures](https://gist.github.com/Chick3nman/32e662a5bb63bc4f51b847bb422222fd), secondary). ZRTP can use a short check only because a hash commitment gives the attacker one guess ([RFC 6189](https://www.rfc-editor.org/rfc/rfc6189.html), section 4.4.1.1). So the check is a typo check. The defence is a channel that the user trusts, and a comparison of host key fingerprints.
+- **Standard input.** By default every user can read a process's command line ([proc(5)](https://man7.org/linux/man-pages/man5/proc.5.html)), and Bash writes typed lines to a file ([history](https://www.gnu.org/software/bash/manual/html_node/Bash-History-Facilities.html)). Docker and gh read secrets from standard input for this reason ([docker login](https://docs.docker.com/reference/cli/docker/login/), [gh auth login](https://cli.github.com/manual/gh_auth_login)).
+- **`restrict` and forwards.** `restrict` turns off forwarding, the PTY and `~/.ssh/rc`. `pty` and `port-forwarding` turn the first two back on ([sshd(8)](https://man.openbsd.org/sshd.8)). `port-forwarding` allows all four kinds of forward: local and remote TCP, and local and remote Unix sockets. `AllowTcpForwarding local` stops remote TCP forwards. Only `AllowStreamLocalForwarding no` stops a remote Unix-socket forward ([auth-options.c](https://github.com/openssh/openssh-portable/blob/master/auth-options.c), [channels.c](https://github.com/openssh/openssh-portable/blob/master/channels.c)).
+- **Drop-ins.** `Include` came in OpenSSH 8.2 ([release notes](https://www.openssh.com/txt/release-8.2)). Debian 11 and Ubuntu 20.04 include `/etc/ssh/sshd_config.d/`. Debian 10 does not. sshd reads included files in lexical order, and the first value of a keyword wins, also in `Match` blocks ([sshd_config(5)](https://man.openbsd.org/sshd_config.5)). `sshd -T -C user=<account>` prints the settings that apply to an account.
+- **Linger.** `loginctl enable-linger` starts a user's service manager at boot, and keeps it after logout ([loginctl](https://man7.org/linux/man-pages/man1/loginctl.1.html)).
+
+## 7. Picking a host
+
+Checked on 10 November 2026.
+
+| Tool | Does an explicit choice win? | A default by repository or organisation? | Do labels select? |
+| --- | --- | --- | --- |
+| GitHub Actions | Yes, within runner groups | Organisations scope runner groups to repositories | Yes: a runner needs all the labels |
+| GitLab | Yes | Untagged jobs go only to runners set to take them | Yes: all the tags |
+| Buildkite | Yes | A step with no queue goes to the default queue | Yes |
+| Codespaces | Within policy | `hostRequirements` for each repository, policy for each organisation | No |
+| Coder | Within template permissions | Templates belong to an organisation | No |
+| DevPod | Yes, `--provider` | One default provider | No |
+| Docker | Yes, `--context` | No | No |
+| kubectl | Yes, `--context` | No | No |
+
+Sources: [runners in a workflow](https://docs.github.com/en/actions/how-tos/manage-runners/self-hosted-runners/use-in-a-workflow), [GitLab runners](https://docs.gitlab.com/ci/runners/configure_runners/), [Buildkite queues](https://buildkite.com/docs/agent/queues), [Codespaces minimum specification](https://docs.github.com/en/codespaces/setting-up-your-project-for-codespaces/configuring-dev-containers/setting-a-minimum-specification-for-codespace-machines), [Coder templates](https://coder.com/docs/admin/templates/template-permissions), [DevPod providers](https://devpod.sh/docs/managing-providers/add-provider), [Docker contexts](https://docs.docker.com/engine/manage-resources/contexts/), [kubeconfig](https://kubernetes.io/docs/concepts/configuration/organize-cluster-access-kubeconfig/).
+
+- **Two families.** Tools for one person name a target, the person's flag wins, and one default applies. CI systems use labels as selectors, because any worker of a pool can take a job. Hosted platforms add defaults and limits for each repository or organisation. **UNVERIFIED:** whether Coder or DevPod have a default for each repository.
+- **The longest match.** Config keyed by a URL usually takes the longest match. Git matches `http.<url>` "on a slash (`/`) boundary", and "longer matches take precedence". Its `insteadOf` uses "the longest match" ([git-config](https://git-scm.com/docs/git-config)). nginx takes "the longest matching prefix" ([nginx](https://nginx.org/en/docs/http/ngx_http_core_module.html)). ssh_config takes the first match, so its users must order sections by hand ([ssh_config](https://man.openbsd.org/ssh_config.5)). TOML promises no order for the keys of a table ([TOML 1.0](https://toml.io/en/v1.0.0)), so an order rule cannot work for `[repos.*]` sections.
+- **Git's own repository match.** `includeIf "hasconfig:remote.*.url:<pattern>"` came in Git 2.36 ([release notes](https://raw.githubusercontent.com/git/git/master/Documentation/RelNotes/2.36.0.adoc)). It matches any remote, not only `origin`, and the last value wins.
+- **Refusals.** Shared platforms refuse some choices. Codespaces limits machine types by an organisation's policy ([machine types](https://docs.github.com/en/codespaces/managing-codespaces-for-your-organization/restricting-access-to-machine-types)). Docker, kubectl and DevPod never refuse a flag.
+
+**What the design takes.** The design follows the tools for one person, and adds defaults for each repository, as hosted platforms do. A rule never picks another host instead of the invoker's. The grant gate can still stop a start, and says why. A section name that ends in `/*` matches on a `/` boundary, as Git's `http.<url>` does, and only the `origin` remote counts. Labels stay metadata, because `new auto` already covers pools of hosts.

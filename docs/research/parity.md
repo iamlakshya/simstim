@@ -266,7 +266,7 @@ The facts come from the service's public docs, read on 10 November 2026. Command
 | Package installs after a restart | Persistent | Persistent disk | Kept caches (P1.15) |
 | Proxy cost | All TCP through a host proxy, no figure | No proxy | Targets of 3 ms for a spliced flow and 10 ms for an intercepted request (spec 12). A proxy that spoke only HTTP/1.1 turned a 491 ms page into 7,374 ms, and HTTP/2 brought it to 843 ms ([write-up](https://ronaldbradford.com/blog/2026-10-12-six-connections-and-a-long-queue/)). Spec 7.2 now requires HTTP/2 towards the guest. |
 | Many at once | Three parallel sandboxes were 1.47 times faster than serial in a user report ([issue 775](https://github.com/docker/sbx-releases/issues/775)) | 100 at once and 12 starts a minute on the $20 plan | As many as each host's memory admits, across every host the user adds |
-| Memory | Half the host by default, per sandbox ([run](https://docs.docker.com/reference/cli/sbx/run/)) | Fixed sizes, all but 512 MiB usable | The session's cap. The spec's target for a microvm is 160 MiB or less above the agent's own use, not yet measured. KSM stays off, because page sharing leaks across guests ([CVE-2024-0564](https://access.redhat.com/security/cve/cve-2024-0564)). |
+| Memory | Half the host by default, per sandbox ([run](https://docs.docker.com/reference/cli/sbx/run/)) | Fixed sizes, all but 512 MiB usable | The session's size is the guest's RAM, and the unit's cap adds a reserve of 128 MiB plus 1/256 of the size (spec 20.10). Not yet measured. KSM stays off, because page sharing leaks across guests ([CVE-2024-0564](https://access.redhat.com/security/cve/cve-2024-0564)). |
 
 Further facts that shaped the tasks:
 
