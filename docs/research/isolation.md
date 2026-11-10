@@ -4,7 +4,7 @@ Researched on 9 and 10 November 2026.
 
 This note asks how each session could run in its own sandbox. The sandbox must not reach the host, other sessions or the laptop unless the user grants it. It is the evidence behind roadmap item O2, which widens X6 ([roadmap](../roadmap.md), [#100](https://github.com/iamlakshya/simstim/issues/100), [#13](https://github.com/iamlakshya/simstim/issues/13)). It builds on the [sandboxes note](sandboxes.md), which covers providers as hosts, and on the [security model](../explanation/security.md), which says what the tool does today.
 
-Two Monte Carlo tree searches ran. The main search looked at the sandbox design, in sections 1 to 15. The hosts search looked at the machines that a user adds as hosts, in [Your own hosts](#your-own-hosts). The design that follows from both is in decision [0029](../contributing/decisions/0029-a-sandbox-per-session.md), [the spec](../contributing/isolation-spec.md) and [the plan](../contributing/isolation-plan.md).
+Two Monte Carlo tree searches ran. The main search looked at the sandbox design, in sections 1 to 15. The hosts search looked at the machines that a user adds as hosts, in [Your own hosts](#your-own-hosts). A second pass, without a search, looked at configurable policy, shells and automatic classifiers, in [Policy for parallel work](#policy-for-parallel-work). The design that follows from both is in decision [0029](../contributing/decisions/0029-a-sandbox-per-session.md), [the spec](../contributing/isolation-spec.md) and [the plan](../contributing/isolation-plan.md).
 
 The rules for the note:
 
@@ -32,6 +32,7 @@ The rules for the note:
 11. **Platforms.** Linux with KVM gets W3. Cloud VMs without nested virtualisation (Hetzner Cloud, EC2 Graviton, GCE Arm) get W2. A Mac gets W3 only through Lima on an M3 or later chip with macOS 15 or later, and W2 in Lima otherwise. Hosts made by the docker provider give W0 and need a named downgrade.
 12. **The design bends rules, and says so.** No network port opens, and the supervisor dials into the guest, so no host socket waits for a guest ([0030](../contributing/decisions/0030-local-sockets-do-not-listen.md)). Real keys live in host memory for the whole session ([0032](../contributing/decisions/0032-secret-values-in-memory-only.md)). The trusted side opens TLS to some hosts. The host gains a VMM, runsc, a guest kernel and images, plus a one-time root step ([section 13](#13-rules-the-design-bends)).
 13. **Your own hosts.** The hosts search ran 4 iterations over three layers: attach, placement and fleet. Its best path, at 0.732, is SSH add, then client placement with host admission, then tiers as a grant ceiling. Only the client enforces the tiers: `own`, `throwaway` and `shared`. The path holds under all six weight sets ([Your own hosts](#your-own-hosts)).
+14. **Policy for parallel work.** A second pass, on 10 November 2026, answered the owner's request for one config with overrides, one-off exceptions, shells beside the agent and automatic classifiers. Every product that decides on its own puts rules before a model, and every model guard in the research broke under adaptive attack. So the design adds six layers of policy with locks, an unknown action for each layer, and a classifier with fixed checks first and an optional judge ([Policy for parallel work](#policy-for-parallel-work)).
 
 ## 1. Why
 
@@ -1382,11 +1383,141 @@ The `microvm` level needs Linux on amd64 or arm64, systemd with cgroup v2, and a
 - The exact licence of each Cloud Hypervisor source file.
 - That the facts request takes under 10 ms on a host with many sessions.
 
+## Policy for parallel work
+
+Researched on 10 November 2026.
+
+On 10 November 2026 the owner asked for more control over the design above:
+
+- One config for all sessions, which a narrower place can override when it needs to.
+- Network rules for all sessions, or one-off exceptions.
+- Not the strictest defaults for everyone: full control, so that many sessions can run at once with confidence.
+- A terminal beside the agent, in the same files, for commands that a person runs.
+- Research on automatic classifiers.
+
+This section did not run a tree search. Three researchers worked in parallel: one on shipping products, one on published research, and one on egress tools and on the services that real attacks used. Their reports were checked against the primary sources for the numbers that the design leans on. The design that follows is in [the spec](../contributing/isolation-spec.md), sections 6.11, 7.2, 7.8, 7.9 and 8, and in decision [0029](../contributing/decisions/0029-a-sandbox-per-session.md).
+
+### Summary
+
+1. **Every product that decides on its own puts rules first and a model second.** Claude Code checks a fixed allowlist and the user's rules before its classifier ([auto mode](https://www.anthropic.com/engineering/claude-code-auto-mode)). Codex reviews only requests that its allowlist does not cover ([auto-review](https://learn.chatgpt.com/docs/sandboxing/auto-review)). Anthropic's sandbox runtime checks its deny and allow lists before it asks a callback ([sandbox-runtime](https://github.com/anthropics/sandbox-runtime)).
+2. **Published error rates are useful but uneven.** Claude Code's classifier reports a 0.4% false-positive rate on 10,000 real calls, and misses of 17% on 52 real overeager actions and 5.7% on 1,000 synthetic exfiltration attempts. An independent stress test of the same system measured 81.0% misses end to end, and 70.3% misses with 31.9% false positives on the actions that the classifier sees ([stress test](https://arxiv.org/abs/2604.04978)). Codex's reviewer approves about 99% of the requests it reviews, and catches 90.3% of synthetic overeager actions and 99.3% of synthetic prompt injections ([OpenAI](https://alignment.openai.com/auto-review/)).
+3. **Research finds every guard breakable.** Adaptive attacks broke 12 published defences, most of them at over 90% attack success, with a median of 13 to 110 queries ([paper](https://arxiv.org/abs/2510.09023)). Defences that build a policy from the user's trusted request, and enforce it in code, held better in their own tests ([Progent](https://arxiv.org/abs/2504.11703), [Conseca](https://arxiv.org/abs/2501.17070), [CaMeL](https://arxiv.org/abs/2503.18813)).
+4. **Data leaves through channels that are already allowed.** Examples are an allowed model API used with the attacker's own key ([write-up](https://embracethered.com/blog/posts/2025/claude-abusing-network-access-and-anthropic-api-for-data-exfiltration/)), DNS lookups by allowed tools ([CVE-2025-55284](https://embracethered.com/blog/posts/2025/claude-code-exfiltration-via-dns-requests/)), and an allowed proxy ([EchoLeak](https://arxiv.org/abs/2509.10540)). A judge that sees only destinations cannot see these. The design's identity pin, closed DNS and upload budget cover them.
+5. **Real attacks used a short list of services.** These are `webhook.site`, `requestcatcher.com`, `lhr.life`, `trycloudflare.com`, out-of-band test hosts, Discord and Telegram webhooks, bare IP addresses and lookalike domains. Fixed rules catch them with no model (section [Fixed checks](#fixed-checks-before-any-model)).
+6. **Configurable policy elsewhere is simpler than the owner asks for.** Docker Sandboxes lets a deny in any source win. GitHub's firewall has an organisation and a repository level. Codex Cloud offers three presets. None of them lets one session lift a broad deny for an exception, which the owner asked for.
+7. **A terminal beside the agent is common.** Docker Sandboxes, the hosted VM service, GitHub Codespaces and Modal each give a shell in the same sandbox.
+8. **The choice.** Six layers with one shape, where the narrowest matching layer decides and locks hold what must never change. An unknown action that each layer picks: ask, deny, allow with a log, or classify. A classifier with fixed checks first and an optional judge that sees structured fields only. Shells inside the sandbox, sharing its policy. SSH keys through the sandbox's own agent.
+
+### Configurable policy in other tools
+
+| Tool | Layers | Precedence | One-off exceptions |
+| --- | --- | --- | --- |
+| Docker Sandboxes | A preset, global rules, rules for one sandbox, and rules that kits bring | A deny from any source beats an allow ([local policy](https://docs.docker.com/ai/governance/local/)) | An approval makes a rule for one host and port in one sandbox ([approvals](https://docs.docker.com/ai/governance/local/approvals/)) |
+| GitHub Copilot cloud agent | The organisation, then the repository, which the organisation may allow ([firewall](https://docs.github.com/en/copilot/how-tos/copilot-on-github/customize-copilot/customize-the-firewall)) | Allowlists add up | None. A blocked request appears in the pull request. |
+| Codex Cloud | Presets: none, common dependencies or all, plus the user's own domains, and an option for `GET`, `HEAD` and `OPTIONS` only ([internet access](https://learn.chatgpt.com/docs/cloud/internet-access)) | The preset, then the list | None found |
+| Codex CLI | `domains = {host = "allow" \| "deny"}` in its config ([approvals](https://learn.chatgpt.com/docs/agent-approvals-security)) | A deny wins | The reviewer, or the user, approves one request |
+| Gemini CLI | TOML rules with a priority ([policy engine](https://geminicli.com/docs/reference/policy-engine/)) | The highest priority wins. Without a person, "ask" means deny. | A rule with a higher priority |
+| Claude Code | Settings at several levels. It never reads its classifier's rules from a repository's settings ([auto mode config](https://code.claude.com/docs/en/auto-mode-config)). | A hard deny, then a soft deny, then an allow, then the user's clear intent | The user's own words in the session |
+| Harden-Runner | Audit mode, then block mode. A baseline from past runs becomes a policy ([baseline](https://docs.stepsecurity.io/github-actions/harden-runner/baseline)). | Its global block list applies even in audit mode ([repository](https://github.com/step-security/harden-runner)) | A change to the baseline |
+
+Desktop firewalls answer the question of scope well. OpenSnitch offers once, a time from 30 seconds to 12 hours, until reboot and forever, and it denies after 30 seconds by default ([prompt durations](https://github.com/evilsocket/opensnitch/blob/master/ui/opensnitch/dialogs/prompt/utils.py), [defaults](https://github.com/evilsocket/opensnitch/blob/master/ui/opensnitch/config.py)). Little Snitch turns each answer into a rule with a lifetime ([Little Snitch](https://help.obdev.at/littlesnitch7/alert-overview)). The design's `--once`, `--for` and layers follow the same idea.
+
+### Automatic classifiers in products
+
+| Product | What it judges | How | What it never sees | Measured |
+| --- | --- | --- | --- | --- |
+| Claude Code auto mode | Tool calls that its rules do not settle | Two stages: a fast filter tuned to block, then reasoning on flagged calls only. The docs name Sonnet 5 as the default model ([permission modes](https://code.claude.com/docs/en/permission-modes)). | The agent's prose and every tool result. "Assistant prose, tool-call descriptions, and tool outputs are stripped" ([auto mode](https://www.anthropic.com/engineering/claude-code-auto-mode)). | Above, in the summary. Users approved 93% of manual prompts. |
+| Codex auto-review | Escalations, and network requests that need approval | A separate agent on GPT-5.4 Thinking at low reasoning ([OpenAI](https://alignment.openai.com/auto-review/)) | It sees tool output, labelled as untrusted evidence ([policy template](https://github.com/openai/codex/blob/rust-v0.167.0/codex-rs/prompts/templates/guardian/policy_template.md)) | About 200 times fewer interruptions than manual approval |
+| Cursor | Commands that cannot run in its sandbox | A small model in the agent's own request stream ([run modes](https://cursor.com/docs/agent/security/run-modes)) | Not stated | Blocks about 4% of the calls it reviews. Cursor says it "is not a security boundary" ([blog](https://cursor.com/blog/agent-autonomy-auto-review)). |
+| Gemini CLI with Conseca | Tool calls | A model writes a policy from the user's prompt, and a small model checks each call against it ([pull request](https://github.com/google-gemini/gemini-cli/pull/13193)) | Not stated | None published |
+| Anthropic's sandbox runtime | Network requests | Deny list, allow list, then a decider program. Nothing is dialled before an allow, and a decider that takes more than 5 seconds gives 503 ([srt-proxy](https://github.com/anthropics/sandbox-runtime/blob/main/docs/srt-proxy.md)). | The decider gets method, host, port, server name, path, query and headers | None |
+| Amp | Tool calls | Rules, or a program of the user's that answers by exit code ([permissions](https://ampcode.com/notes/permissions)) | Only the tool's parameters | None |
+| Docker Sandboxes, GitHub Copilot | Network requests | Rules only. Nothing decides on its own. | | |
+
+What the products teach:
+
+- **Keep text that an attacker wrote away from the judge.** Claude Code removes tool results so that injected content never reaches its classifier. It also removes the agent's own text, so that the agent cannot argue its case.
+- **Judge a destination once, then enforce it in code.** In Claude Code's sandbox, the classifier judges a command's list of hosts once, and the proxy enforces it for each connection ([sandboxing](https://code.claude.com/docs/en/sandboxing)).
+- **Fail closed, and give the same reason each time.** Claude Code asks a person after 3 denials in a row or 20 in all ([permission modes](https://code.claude.com/docs/en/permission-modes)). Codex stops a turn after 3 in a row or 10 in the last 50 ([auto-review](https://learn.chatgpt.com/docs/sandboxing/auto-review)).
+- **Never take the judge's rules from the repository.** Claude Code refuses its classifier's settings from a repository, "so a checked-in repo… could otherwise inject its own allow rules" ([auto mode config](https://code.claude.com/docs/en/auto-mode-config)).
+- **For a push, the payload matters as much as the target.** Codex's default policy says that authorisation for sensitive egress "must specify the payload to be sent as well as the destination" ([policy](https://github.com/openai/codex/blob/rust-v0.167.0/codex-rs/prompts/templates/guardian/policy.md)). The design keeps pushes on the push door, where the egress process reads the refs (spec 7.2).
+
+### What the research says
+
+- **Guards built on a model.** LlamaFirewall's two guards brought attack success on AgentDojo from 17.6% to 1.75%, at a utility of 42.7% against 47.7% ([LlamaFirewall](https://arxiv.org/html/2505.03574v1)). MELON reached 0.32% ([MELON](https://arxiv.org/html/2502.05174)). Task Shield reached 2.07% ([Task Shield](https://arxiv.org/abs/2412.16682)).
+- **The same guards under adaptive attack.** A 2025 study broke 12 defences, most of them at over 90% attack success. MELON fell to 71% to 95%, and an adaptive search beat PromptGuard at 94% to 99% ([paper](https://arxiv.org/abs/2510.09023)). An earlier study broke all eight that it tried, at over 50% ([paper](https://arxiv.org/abs/2503.00061)). An agent that writes injections into its own output evades the monitors that read it ([paper](https://arxiv.org/abs/2510.09462)).
+- **Policies from trusted intent.** Progent cut attack success on AgentDojo from 39.9% to 1.0% with the same utility, with rules over tool arguments ([Progent](https://arxiv.org/html/2504.11703v3)). Conseca writes a policy for each task from the user's request, never from tool output, and enforces it in code ([Conseca](https://arxiv.org/html/2501.17070v3)). CaMeL solved 77% of AgentDojo's tasks with provable security, against 84% with no defence ([CaMeL](https://arxiv.org/html/2503.18813v2)). Their evaluations are small or their own.
+- **Monitoring over time.** An ensemble that reviews actions after the fact reached 6% misses at 1% false positives on held-out work ([Async Control](https://arxiv.org/abs/2512.13526)). Splitting a harmful goal into harmless steps beat single-step checks 87% of the time, and a monitor that read the sequence stopped 93% ([paper](https://arxiv.org/abs/2506.10949)).
+- **Where the evidence is weak.** No paper tests a judge that sees only destinations and push targets. No study measures leakage from a sandbox that holds no real secrets. Most defence numbers come from fixed attacks, which adaptive attacks overturn.
+
+### Exfiltration through allowed channels
+
+- A model API that the sandbox must reach takes uploads with the attacker's own key, up to 30 MB a file ([write-up](https://embracethered.com/blog/posts/2025/claude-abusing-network-access-and-anthropic-api-for-data-exfiltration/)). The design's identity pin refuses any credential that the egress process did not put in (spec 7.3).
+- Allowed tools such as `ping`, `nslookup` and `dig` carried data in DNS names ([CVE-2025-55284](https://embracethered.com/blog/posts/2025/claude-code-exfiltration-via-dns-requests/)). A resolver that answers only allowed names stopped DNS exfiltration behind a firewall ([paper](https://arxiv.org/abs/2610.22578)). The design's DNS stub does the same (spec 7.2).
+- A fetch URL that looks like part of the task carried secrets out at 79.7% success across 11 models ([LLMLeak](https://arxiv.org/abs/2610.01768)). A destination judge cannot see the data in a path or a query. The upload budget and the method rules limit it.
+- A Microsoft 365 attack evaded a classifier and then used a proxy that the content security policy allowed ([EchoLeak](https://arxiv.org/abs/2509.10540)).
+
+### Fixed checks before any model
+
+| Check | Why | Source |
+| --- | --- | --- |
+| Normalise the name, refuse a null byte and an empty label, and never read an empty list as "allow all" | Both bypassed another sandbox's allowlist in 2025 | [write-up](https://oddguan.com/blog/second-time-same-sandbox-anthropic-claude-code-network-allowlist-bypass-data-exfiltration/) |
+| Refuse an IP address that no rule names | A February 2026 npm campaign sent data to a bare address and port | [Socket](https://socket.dev/blog/stegabin-26-malicious-npm-packages-use-pastebin-steganography) |
+| Refuse `webhook.site` | Shai-Hulud sent stolen secrets there in September 2025 | [Wiz](https://www.wiz.io/blog/shai-hulud-npm-supply-chain-attack) |
+| Refuse `*.requestcatcher.com` and `*.lhr.life`, and the out-of-band test hosts in the same detection rules | A 38-package npm campaign in May 2026 used them | [Panther](https://panther.com/blog/frankly-malicious-inside-a-38-package-npm-supply-chain-campaign-targeting-tech-giants) |
+| Refuse `*.trycloudflare.com`, and lookalikes such as `scan.aquasecurtiy.org` | The TeamPCP campaign of March 2026 used both | [Unit 42](https://unit42.paloaltonetworks.com/teampcp-supply-chain-attacks/) |
+| Refuse `oast.fun` | An August 2026 dependency-confusion advisory | [advisory](https://github.com/advisories/GHSA-j8vq-ph59-27pv) |
+| Refuse Discord webhooks and the Telegram bot API by path | npm and PyPI campaigns sent data to both | [Datadog](https://securitylabs.datadoghq.com/articles/mut-8964-an-npm-and-pypi-malicious-campaign-targeting-windows-users/), [Socket](https://socket.dev/blog/weaponizing-discord-for-command-and-control) |
+| Refuse a name whose confusable skeleton equals an allowed name's | Lookalike domains | [UTS #39](https://www.unicode.org/reports/tr39/) |
+| Refuse long random labels | DNS tunnels put encoded data in labels | [Unit 42](https://unit42.paloaltonetworks.com/detecting-dns-tunneling-campaigns/) |
+| Tag a domain 32 days old or less, when the user turns RDAP on | Over 70% of newly registered domains were malicious, suspicious or not safe for work | [Unit 42](https://unit42.paloaltonetworks.com/newly-registered-domains-malicious-abuse-by-bad-actors/), [RFC 9083](https://www.rfc-editor.org/rfc/rfc9083) |
+| Never treat popularity as safety | Discord, GitHub and Pastebin are popular, and attacks used all three. tj-actions was caught by a call to `gist.githubusercontent.com`. | [StepSecurity](https://www.stepsecurity.io/blog/harden-runner-detection-tj-actions-changed-files-action-is-compromised), [Datadog](https://securitylabs.datadoghq.com/articles/shai-hulud-2.0-npm-worm/) |
+
+The tool ships no popularity list. The licence of the combined Tranco list is not stated, and one of its sources is CC BY-NC 4.0 ([Tranco](https://tranco-list.eu/)).
+
+### Terminals beside the agent
+
+Docker Sandboxes gives `sbx exec -it <name> bash` ([usage](https://docs.docker.com/ai/sandboxes/usage/)). The hosted VM service gives `ssh <id>`. GitHub Codespaces gives `gh codespace ssh` ([gh codespace](https://cli.github.com/manual/gh_codespace)), and Modal gives `modal shell` ([Modal](https://modal.com/docs/reference/cli/shell)). In each, the shell shares the sandbox's files and limits. None gives a terminal its own network policy inside one sandbox.
+
+### The choices
+
+**Layers, and who decides.** Three options:
+
+1. A deny in any layer wins, as in Docker Sandboxes. It is simple and safe, but a session can never lift a broad deny, which the owner asked for.
+2. Six layers with one shape, where the narrowest layer that matches decides, and `[lock]` holds what must never change. It gives one-off exceptions and keeps hard denies possible.
+3. One policy for each session, with no shared config. It is easy to reason about, but every parallel session repeats the same rules.
+
+Option 2. It follows the order of clig.dev, where flags beat project files and project files beat user files ([clig.dev](https://clig.dev/#configuration)). The repository's own file only narrows, for the reason that Claude Code gives.
+
+**Sites that no rule covers.** Three options:
+
+1. Always ask a person. It does not scale: users approve 93% of prompts, and parallel sessions stall.
+2. An unknown action that each layer picks: `ask`, `deny`, `allow` with a log, or `classify`.
+3. A model judge for every unknown site. It sends names to a third party by default, and research shows that judges can be fooled.
+
+Option 2, with `ask` in the built-in layer. For `classify`, the fixed checks above run first, and the judge is optional. The judge sees structured fields, as Claude Code's classifier does, and the user's own task line, as Conseca does. Its allow never reaches past the session. `allow` with a log, then `policy learn`, follows Harden-Runner's path from audit to a baseline.
+
+**Shells.** Inside the sandbox, sharing its policy, because processes in one sandbox can reach each other. A shell on the host would need the host to run code in a folder that the sandbox can write.
+
+**SSH keys.** The original request named the SSH agent as a door that a grant opens, but the first spec said "never". A sandbox now gets an agent that the supervisor serves, which holds only the keys that a layer names. The laptop's own agent still never enters a sandbox, because it holds every key and its forward ends when the laptop sleeps.
+
+### What this section could not verify
+
+- The exact host list of Docker Sandboxes' Balanced preset.
+- The latency and the cost of Claude Code's classifier. Anthropic publishes neither.
+- Whether a judge that sees only destinations makes errors at the rates that judges of whole actions make. No study tests one.
+- That ngrok and transfer.sh appear in 2024 to 2026 supply-chain incidents. They appear in detection rules, not in incident reports.
+- The licence of the combined Tranco list.
+- Which OpenSSH release first sends the `session-bind@openssh.com` extension.
+- The 2026 DNS incidents at OpenAI and Check Point that one paper cites.
+
 ## Sources and method
 
 The main search ran seven expansions on 9 November 2026. Each sent five researchers in parallel, one per option, and two judges scored the five. Researchers read official docs, specifications, security advisories, release notes, papers and public repositories, and read this repository's code. A red team and a fact check then read the best path, its research and its scores. The fact check re-read the claims that the design leans on, and checked feasibility on each platform. Two writers then wrote the drafts, and the main search used 53 agents in all.
 
 The hosts search ran four expansions in the same way. One critic then served as its red team and its fact check, and one writer wrote its draft. It used 30 agents in all ([Your own hosts](#your-own-hosts)).
+
+The second pass, [Policy for parallel work](#policy-for-parallel-work), ran on 10 November 2026. Three researchers read product docs, papers, egress tools and incident reports in parallel. The numbers that the design leans on were checked against their sources: Claude Code's auto mode, the independent stress test of it, Codex's auto-review and the sandbox runtime's decider.
 
 The weight sensitivity in [section 3.6](#36-weight-sensitivity) was computed on 10 November 2026, from the judges' scores of both searches. It used no new research.
 
