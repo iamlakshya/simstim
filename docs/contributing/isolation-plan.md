@@ -55,7 +55,7 @@ Spec section 15 has each question in full, with its options: [open questions](is
 | 5 | Where may the `process` level run? | On `own` and `throwaway` hosts, labelled "shares your account", never chosen by `new auto`, and with no `own`-tier secrets unless the user asks. | P1.1, P1.8, P2.10, H13 |
 | 6 | Hosts that can run only `none`, such as Docker and E2B hosts, once walls are the default? | Refuse new sessions there without `--downgrade`. | P2.10 |
 | 7 | A host kernel with a known unpatched local root bug? | Doctor warns, and the user decides. | P3.7 |
-| 8 | The guest's root file system across starts? | Reset at each start, keeping `/work` and the agent's state. `root = "keep"` for those who want it. | P1.6, P3.4 |
+| 8 | The guest's root file system across starts? | Reset at each start, keeping `/work` and the agent's state. `system = "keep"` for those who want it. | P1.6, P3.4 |
 | 9 | Idle stop for sandboxes? | Never in phase 1. Then 2 hours for microvm sandboxes, after the phase 3 measurements. | P1.11, P3.6, P3.8 |
 | 10 | Keep the last screen across a stop? | No. | P1.11, P3.6 |
 | 11 | Memory snapshots later? | Not in this plan. Look again only for sessions whose secrets are all bound. | P3.6, P5.1 |
@@ -76,11 +76,11 @@ Spec section 15 has each question in full, with its options: [open questions](is
 | 26 | An opt-in guarded attach, or a filter for terminal escapes from `shared` and `throwaway` hosts? | Not now. Advise users to set their terminal's clipboard writes to "ask", ship the observer, measure, then decide. | H4, P7.3 |
 | 27 | Separate accounts for sandboxes, with a root-owned launcher and slot accounts? | An option in the first version. The default only after an outside review of the launcher. | H17, H18 |
 | 28 | A separate system user for the trusted side? | Not now. Subuid jails for the processes that touch untrusted input. | P1.3 |
-| 29 | May host set-up run one-time root steps? | Yes, each line shown first and run only after a yes. On `shared` hosts, by default only the machine's owner runs the printed script, and `--root run` needs the typed host name. | H7, H10, H15 |
+| 29 | May host set-up run one-time root steps? | Yes, each line shown first and run only after a yes. On `shared` hosts, by default only the machine's owner runs the printed script, and `--root-step run` needs the typed host name. | H7, H10, H15 |
 | 30 | Which key signs what the client trusts? | The release key of decision 0017 signs each release, and the client embeds the release manifest. The owner adds a hardware key for the signed-tag gate. A transparency log comes later. | P4.1, P4.4, H17 |
 | 31 | A key of its own for each shared host? | A docs recipe, not required. | H4 |
 | 32 | The tier of E2B and other hosted providers? | `shared`. | H4, P7.4 |
-| 33 | Where tiers live, and what `--yes` means? | In `tiers.toml`, which older clients never write. `host add --yes` without `--tier` gives `shared`. | H4, H5 |
+| 33 | Where tiers live, and what `--yes` means? | In `tiers.toml`, which older clients never write. `host add --yes` without `--tier` fails, and names the flag ([question 50](isolation-spec.md#15-open-questions)). | H4, H5 |
 | 34 | The word for how far the user trusts a host? | "tier" (`own`, `throwaway`, `shared`), because "level" names a wall's strength and "trust" names setup-script trust. | H4 |
 | 35 | Copies from one host to another? | Never. Runtime files come from the release or the laptop, templates from the laptop, and registry images by a digest that the laptop pins. A saved image stays on the host that made it. | H9, P3.2, P4.5, P5.5 |
 | 36 | Hosts behind NAT? | Docs for the user's own overlay network, plus a hardened reverse-tunnel recipe on a machine the user owns. | H16 |
@@ -90,14 +90,24 @@ Spec section 15 has each question in full, with its options: [open questions](is
 | 40 | Ship the forwarding fix first? | Yes, task H2 on its own, first. | H2 |
 | 41 | Team hosts and timed loans? | Wait for demand. A teammate's machine is a `shared` host meanwhile. | H4 |
 | 42 | How fast does the project answer an advisory for the VMM, the kernel or Ghostty? | A release within 7 days for a high severity, with the known-bad list in that release. | P0.9, P4.6, H14 |
+| 43 | What does the built-in layer do with a site that no rule covers? | `ask`. The guided setup asks once and offers all four actions. | P2.11 |
+| 44 | Can a narrower layer allow what a broader layer denies? | Yes. The narrowest matching layer decides, and `[lock]` holds what must never change. | P1.12 |
+| 45 | Does the classifier ship with a judge turned on? | No. `judge = "none"` is built in. A model or a program is the user's choice. | P2.11, P2.12 |
+| 46 | How wide is a judge's allow? | The session. Profiles may set `once`. | P2.12 |
+| 47 | Do the sessions of one sandbox share its policy? | Yes. | P1.13 |
+| 48 | Where does `shell` run? | Inside the sandbox. | P1.13 |
+| 49 | Can a sandbox get the laptop's own SSH agent? | No. Named keys only, from the sandbox's own agent. | P2.13 |
+| 50 | What does `host add --yes` do without `--tier`? | It fails, and names the flag. | H4 |
+| 51 | What does a walled session do with a folder outside git? | It gets an empty workspace, and the row says "scratch". | P1.6 |
+| 52 | Does the judge see the task line of `new --task`? | Yes. | P2.12 |
 
 ## Order
 
-Build the tasks from top to bottom. Every task named under "Depends on" is above the task that needs it. A four-digit number there is a decision record that the owner accepts before the pull request merges. "(here)" marks a record that the task itself adds.
+Build the tasks from top to bottom. Every task named under "Depends on" is above the task that needs it, or is a task of [the CLI plan](cli-plan.md), such as C2 and C4. A four-digit number there is a decision record that the owner accepts before the pull request merges. "(here)" marks a record that the task itself adds.
 
 | # | ID | Title | Phase | Depends on | Questions | Effort |
 | --- | --- | --- | --- | --- | --- | --- |
-| 1 | H2 | Turn off forwarding on every connection | 0 | 0033 (here) | 40 | S |
+| 1 | H2 | Turn off forwarding on every connection | 0 | 0034 (here) | 40 | S |
 | 2 | P0.1 | Bump the shadow terminal's Ghostty pin, and cap terminal sizes | 0 | none | none | S |
 | 3 | P0.2 | A hook socket of its own, and a peer check on the holder's socket | 0 | 0030 | 23 | M |
 | 4 | P0.3 | Check an agent's session ID before it enters a command | 0 | none | none | S |
@@ -107,79 +117,85 @@ Build the tasks from top to bottom. Every task named under "Depends on" is above
 | 8 | P0.7 | Safe copies and safer git on the trusted side | 0 | none | none | S |
 | 9 | P0.8 | Lima VMs that cannot reach the laptop's loopback | 0 | none | 37 | S |
 | 10 | P0.9 | Watch pins that no package ecosystem covers | 0 | none | 42 | S |
-| 11 | H3 | Pinned host keys and `host rekey` | 0 | H2, 0034 (here) | none | M |
-| 12 | H4 | The host ID and the tiers file | 0 | H3, 0035 (here) | 26, 31, 32, 33, 34, 41 | M |
-| 13 | H5 | The grant gate and the grant ledger | 0 | H4, 0035 | 33 | M |
+| 11 | H3 | Pinned host keys and `host rekey` | 0 | H2, 0035 (here) | none | M |
+| 12 | H4 | The host ID and the tiers file | 0 | H3, 0036 (here) | 26, 31, 32, 33, 34, 41, 50 | M |
+| 13 | H5 | The grant gate and the grant ledger | 0 | H4, 0036 | 33 | M |
 | 14 | P1.1 | Wall levels, the sandbox probe and the floor | 1 | H5 | 2, 5 | M |
-| 15 | H7 | The root step | 1 | P1.1, H4, 0036 (here) | 4, 29 | M |
+| 15 | H7 | The root step | 1 | P1.1, H4, 0037 (here) | 4, 29 | M |
 | 16 | P1.2 | The link | 1 | none | none | M |
 | 17 | P1.3 | Jails | 1 | none | 28 | M |
 | 18 | P1.4 | The supervisor, the guest init and the holder's guest mode | 1 | P1.2, P0.2, 0029, 0030 | 23 | L |
 | 19 | P1.5 | The process wall | 1 | P1.3, P1.4, H7 | 4 | L |
-| 20 | P1.6 | The files door | 1 | P1.5 | 8, 21 | M |
+| 20 | P1.6 | The files door | 1 | P1.5 | 8, 21, 51 | M |
 | 21 | P1.7 | The egress process, first version | 1 | P1.4, 0030, 0031 | 23, 24 | L |
-| 22 | P1.8 | The client and the launcher | 1 | P1.1, P1.5, P1.7, H5 | 1, 5, 15 | M |
-| 23 | P1.9 | Paste and ports through the supervisor | 1 | P1.4, P1.5, 0030 | 19, 23 | M |
-| 24 | P1.10 | Pull through a bundle, with a review | 1 | P1.6 | none | M |
-| 25 | P1.11 | Destroy, stop, restore and the phase's checks | 1 | P1.8, P1.10 | 9, 10 | M |
-| 26 | P2.1 | DNS policy | 2 | P1.7 | none | M |
-| 27 | P2.2 | Interception, and method and path rules | 2 | P2.1, 0032, 0037 (here) | 16, 25 | L |
-| 28 | P2.3 | Bound secrets | 2 | P2.2, 0032 | 15, 25 | L |
-| 29 | P2.4 | The model API guard | 2 | P2.2 | 16 | M |
-| 30 | P2.5 | Service rules | 2 | P2.3 | 17 | M |
-| 31 | P2.6 | Holds and approvals | 2 | P1.8, P2.2 | none | M |
-| 32 | P2.7 | Budgets and stricter targets | 2 | P2.2 | none | S |
-| 33 | P2.8 | Package managers in the guest | 2 | P1.5 | 20 | S |
-| 34 | P2.9 | A repository's own file | 2 | P1.8 | 18 | M |
-| 35 | P2.10 | Walls by default | 2 | P2.3, P2.6, P2.8, H4, H5, 0029 | 1, 5, 6, 20 | S |
-| 36 | P4.1 | The release manifest and the check before the bridge | 3 | none | 30, 38 | M |
-| 37 | P3.1 | The boot pair | 3 | P1.4, P4.1 | 3 | L |
-| 38 | H9 | Runtime delivery and the host cache | 3 | P4.1, P1.1, P3.1, 0038 (here) | 35, 39 | M |
-| 39 | P3.2 | Images | 3 | P1.3, H9 | 35, 39 | L |
-| 40 | P3.3 | The Cloud Hypervisor driver | 3 | P3.1, P3.2, P1.3, H9, 0030, 0039 (here) | 3, 23 | L |
-| 41 | P3.4 | The guest init on a microvm | 3 | P3.3 | 8 | M |
-| 42 | P3.5 | The agents disk | 3 | P3.2 | 21 | M |
-| 43 | P3.6 | Lifecycle on a microvm | 3 | P3.4 | 9, 10, 11, 12 | M |
-| 44 | P3.7 | The microvm probe, the kernel list and Lima | 3 | P3.3, H7, P0.8 | 7, 37 | S |
-| 45 | H10 | Prepare in `host add` | 3 | H7, H9, P3.4, P1.8 | 2, 29, 39 | M |
-| 46 | P3.8 | Conformance, measurements and release | 3 | P3.1 to P3.7, H10 | 2, 9 | M |
-| 47 | P4.2 | Run verified bytes only | 4 | P4.1, P3.3, H9 | none | M |
-| 48 | P4.3 | Reproducible kernel and tools image | 4 | P3.1 | none | M |
-| 49 | P4.4 | A signed-tag release gate | 4 | 0040 (here) | 30 | S |
-| 50 | P4.5 | Image policy | 4 | P3.2 | 35 | M |
-| 51 | P4.6 | Known-bad versions | 4 | P4.1, P0.9 | 42 | S |
-| 52 | H11 | Facts and admission | 4 | P1.1, P1.5, H9, 0041 (here) | 13, 14 | M |
-| 53 | H12 | Named placement | 4 | H11, H4, H5 | none | S |
-| 54 | H13 | `new auto` | 4 | H12, H5, P3.8 | 5 | M |
-| 55 | H14 | Health, runtime upgrades and drain | 4 | H11, H9, P4.6 | 42 | M |
-| 56 | H15 | Leave and wipe | 4 | H7, H5, H9 | 29 | M |
-| 57 | H16 | Reach a host behind NAT | 4 | H3, H9, 0031 | 36 | S |
-| 58 | P5.1 | Fork | 5 | P3.6 | 11 | M |
-| 59 | P5.2 | Copy files in and out | 5 | P1.9 | none | M |
-| 60 | P5.3 | Run a command | 5 | P1.4 | none | S |
-| 61 | P5.4 | Checkpoints | 5 | P3.6 | none | M |
-| 62 | P5.5 | Save an image | 5 | P3.2 | none | M |
-| 63 | P6.1 | The gvisor wall | 6 | P1.5, H9 | 2 | L |
-| 64 | P6.2 | The Firecracker driver | 6 | P3.8 | 3 | M |
-| 65 | P6.3 | Unwalled sessions on the supervisor's path | 6 | P1.11, P2.10, and one release with walls on by default | 1 | M |
-| 66 | P7.1 | Registry gates in the egress process | 7 | P2.2 | 20 | M |
-| 67 | P7.2 | Decoys | 7 | P2.3 | none | S |
-| 68 | P7.3 | Observe terminal output | 7 | P4.6 | 26 | M |
-| 69 | P7.4 | A machine for each session | 7 | P1.11, H4, H5 | 22, 32 | L |
-| 70 | H17 | Separate accounts, part 1: the root-owned launcher | 8 | H7, H9, P4.1, 0042 (here) | 27, 30, 38 | L |
-| 71 | H18 | Separate accounts, part 2: slot accounts and the root-owned store | 8 | H17, P3.3 | 27 | L |
+| 22 | P1.8 | The client and the launcher | 1 | P1.1, P1.5, P1.7, H5, 0033, C2, C4 | 1, 5, 15 | M |
+| 23 | P1.12 | Layers, profiles and locks | 1 | P1.7, P1.8, 0033 | 44 | M |
+| 24 | P1.13 | Shells and commands in a sandbox | 1 | P1.4, P1.5, P1.8 | 47, 48 | M |
+| 25 | P1.9 | Paste and ports through the supervisor | 1 | P1.4, P1.5, 0030 | 19, 23 | M |
+| 26 | P1.10 | Pull through a bundle, with a review | 1 | P1.6 | none | M |
+| 27 | P1.11 | Destroy, stop, restore and the phase's checks | 1 | P1.8, P1.10, P1.13 | 9, 10 | M |
+| 28 | P2.1 | DNS policy | 2 | P1.7 | none | M |
+| 29 | P2.2 | Interception, and method and path rules | 2 | P2.1, 0032, 0038 (here) | 16, 25 | L |
+| 30 | P2.3 | Bound secrets | 2 | P2.2, 0032 | 15, 25 | L |
+| 31 | P2.4 | The model API guard | 2 | P2.2 | 16 | M |
+| 32 | P2.5 | Service rules | 2 | P2.3 | 17 | M |
+| 33 | P2.6 | Holds and approvals | 2 | P1.8, P2.2 | none | M |
+| 34 | P2.11 | The unknown action and the classifier's fixed steps | 2 | P2.1, P2.6 | 43, 45 | M |
+| 35 | P2.12 | The judge | 2 | P2.11, P2.3, 0031 | 45, 46, 52 | M |
+| 36 | P2.13 | SSH keys | 2 | P2.3, H5, 0032 | 49 | M |
+| 37 | P2.14 | Change policy while sessions run | 2 | P1.12, P2.6 | none | M |
+| 38 | P2.7 | Budgets and stricter targets | 2 | P2.2 | none | S |
+| 39 | P2.8 | Package managers in the guest | 2 | P1.5 | 20 | S |
+| 40 | P2.9 | A repository's own file | 2 | P1.8 | 18 | M |
+| 41 | P2.10 | Walls by default | 2 | P2.3, P2.6, P2.8, H4, H5, 0029 | 1, 5, 6, 20 | S |
+| 42 | P4.1 | The release manifest and the check before the bridge | 3 | none | 30, 38 | M |
+| 43 | P3.1 | The boot pair | 3 | P1.4, P4.1 | 3 | L |
+| 44 | H9 | Runtime delivery and the host cache | 3 | P4.1, P1.1, P3.1, 0039 (here) | 35, 39 | M |
+| 45 | P3.2 | Images | 3 | P1.3, H9 | 35, 39 | L |
+| 46 | P3.3 | The Cloud Hypervisor driver | 3 | P3.1, P3.2, P1.3, H9, 0030, 0040 (here) | 3, 23 | L |
+| 47 | P3.4 | The guest init on a microvm | 3 | P3.3 | 8 | M |
+| 48 | P3.5 | The agents disk | 3 | P3.2 | 21 | M |
+| 49 | P3.6 | Lifecycle on a microvm | 3 | P3.4 | 9, 10, 11, 12 | M |
+| 50 | P3.7 | The microvm probe, the kernel list and Lima | 3 | P3.3, H7, P0.8 | 7, 37 | S |
+| 51 | H10 | Prepare in `host add` | 3 | H7, H9, P3.4, P1.8 | 2, 29, 39 | M |
+| 52 | P3.8 | Conformance, measurements and release | 3 | P3.1 to P3.7, H10 | 2, 9 | M |
+| 53 | P4.2 | Run verified bytes only | 4 | P4.1, P3.3, H9 | none | M |
+| 54 | P4.3 | Reproducible kernel and tools image | 4 | P3.1 | none | M |
+| 55 | P4.4 | A signed-tag release gate | 4 | 0041 (here) | 30 | S |
+| 56 | P4.5 | Image policy | 4 | P3.2 | 35 | M |
+| 57 | P4.6 | Known-bad versions | 4 | P4.1, P0.9 | 42 | S |
+| 58 | H11 | Facts and admission | 4 | P1.1, P1.5, H9, 0042 (here) | 13, 14 | M |
+| 59 | H12 | Named placement | 4 | H11, H4, H5 | none | S |
+| 60 | H13 | `new auto` | 4 | H12, H5, P3.8 | 5 | M |
+| 61 | H14 | Health, runtime upgrades and drain | 4 | H11, H9, P4.6 | 42 | M |
+| 62 | H15 | Leave and wipe | 4 | H7, H5, H9 | 29 | M |
+| 63 | H16 | Reach a host behind NAT | 4 | H3, H9, 0031 | 36 | S |
+| 64 | P5.1 | Fork | 5 | P3.6 | 11 | M |
+| 65 | P5.2 | Copy files in and out | 5 | P1.9 | none | M |
+| 66 | P5.4 | Checkpoints | 5 | P3.6 | none | M |
+| 67 | P5.5 | Save an image | 5 | P3.2 | none | M |
+| 68 | P6.1 | The gvisor wall | 6 | P1.5, H9 | 2 | L |
+| 69 | P6.2 | The Firecracker driver | 6 | P3.8 | 3 | M |
+| 70 | P6.3 | Unwalled sessions on the supervisor's path | 6 | P1.11, P2.10, and one release with walls on by default | 1 | M |
+| 71 | P7.1 | Registry gates in the egress process | 7 | P2.2 | 20 | M |
+| 72 | P7.2 | Decoys | 7 | P2.3 | none | S |
+| 73 | P7.3 | Observe terminal output | 7 | P4.6 | 26 | M |
+| 74 | P7.4 | A machine for each session | 7 | P1.11, H4, H5 | 22, 32 | L |
+| 75 | H17 | Separate accounts, part 1: the root-owned launcher | 8 | H7, H9, P4.1, 0043 (here) | 27, 30, 38 | L |
+| 76 | H18 | Separate accounts, part 2: slot accounts and the root-owned store | 8 | H17, P3.3 | 27 | L |
 
 ## Folds
 
-This plan folds four tasks whole into others, and seven parts of tasks in part. A fold keeps the acceptance criteria and the tests of both tasks. Only three parts go: H8's separate runtime key, its minimum version and its expiry. The release manifest makes them needless.
+This plan folds five tasks whole into others, and seven parts of tasks in part. A fold keeps the acceptance criteria and the tests of both tasks. Only three parts go: H8's separate runtime key, its minimum version and its expiry. The release manifest makes them needless.
 
 ### Whole folds
 
 | Task | Into | Why |
 | --- | --- | --- |
 | H1 Decision records for sandbox hosts | The first task that needs each record: H2, H3, H4, H7, H9 and H11 | Each record lands beside the code it decides. The next section gives the reasons. |
-| H6 The sandbox probe | P1.1 | Both add one read-only bridge request that reports what a host can run. P1.1 keeps the levels, the floor and `host wall`. H6 adds the host's facts, the "Sandboxes" block of `host doctor` and the name `sandbox.probe`. |
+| H6 The sandbox probe | P1.1 | Both add one read-only bridge request that reports what a host can run. P1.1 keeps the levels, the floor, `host show` and `host set … floor=`. H6 adds the host's facts, the "Sandboxes" block of `host doctor` and the name `sandbox.probe`. |
 | H8 The signed runtime manifest | P4.1 | Both make one list of trusted files for each release. The client embeds the digests, so a host cannot roll back, and no separate key, minimum version or expiry is needed ([question 30](isolation-spec.md#15-open-questions)). |
+| P5.3 Run a command | P1.13 | Both start a process in a running sandbox through the supervisor. `exec` is the same path as `shell` without a terminal, and daily work needs both from phase 1. |
 | P7.5 Placement across hosts | H11, H12 and H13 | H11 to H13 build the same placement in more detail: facts, admission under a lock, a default host, then `new auto`. P7.5's `node.info` request is `host.facts`, and its `full` answer is `no_room`. |
 
 ### Why H1 is not a task of its own
@@ -197,7 +213,7 @@ No task is then a records-only task. Each record's pull request carries the CHAN
 
 | Part | From | Into | Why |
 | --- | --- | --- | --- |
-| `host wall --setup`, with the `io_uring`, vsock module and subuid steps | P3.7 | H7 | One root step serves every level, through one command, `host prepare --root`. The client runs sudo in the user's terminal, so the helper has no bridge op that runs sudo. |
+| P3.7's set-up command, with the `io_uring`, vsock module and subuid steps | P3.7 | H7 | One root step serves every level, through one command, `host prepare --root-step`. The client runs sudo in the user's terminal, so the helper has no bridge op that runs sudo. |
 | The `AppArmor` step for user namespaces | P3.7 | P1.5 | The process wall needs it on Ubuntu 23.10 or later, long before phase 3 ([question 4](isolation-spec.md#15-open-questions)). |
 | The level and the floor in the launcher's host rows | H10 | P1.8 | P1.8 already changes the host rows. H10 keeps the prepare flow of `host add`. |
 | The host's store of runtime files | H9 and P4.2 | One artefact store | H9 creates `DataDir()/artefacts/sha256/` (spec 10.7 and 14.5). P4.2 seals its files and runs them from a checked descriptor. |
@@ -210,11 +226,11 @@ No task is then a records-only task. Each record's pull request carries the CHAN
 - **P7.4 and the provider tier** ([question 32](isolation-spec.md#15-open-questions)). P7.4 stays a task of its own. H4 already gives each provider host its tier, and P7.4 uses it. An E2B machine is `shared`, and its secrets go only as exposed secrets ([question 22](isolation-spec.md#15-open-questions)).
 - **P1.1 and H10.** P1.1 pins the floor at `host add`. H10 adds the rest of the prepare flow. They change different steps of `host add`.
 - **User templates** (spec 14.9.5) have no task in this plan. They come later, under the rules of 14.9.5. H5's grant table keeps their row for that work.
-- **H5 and the `grant` command of P1.8.** The grant gate caps the door grants of P1.8 by tier. P1.8 calls `Allow` and adds no gate of its own.
+- **H5 and the `policy allow` command of P1.8.** The grant gate caps the door grants of P1.8 by tier. P1.8 calls `Allow` and adds no gate of its own.
 
 ### Decision records
 
-Four records already exist in this branch, as proposed records. This plan adds ten more, each in the pull request of the task that first needs it.
+Five records already exist in this branch, as proposed records: 0029 to 0032 for this plan, and 0033, the command grammar of [the CLI plan](cli-plan.md). Every command that this plan adds follows 0033. This plan adds ten more records, each in the pull request of the task that first needs it.
 
 | Record | Status | Decides | Needed by | Questions |
 | --- | --- | --- | --- | --- |
@@ -222,16 +238,17 @@ Four records already exist in this branch, as proposed records. This plan adds t
 | [0030](decisions/0030-local-sockets-do-not-listen.md) | Proposed, in this branch | Unix sockets and VM sockets do not count as listening on a host | P0.2, P1.4, P1.7, P1.9, P3.3 | 23 |
 | [0031](decisions/0031-the-egress-process-is-not-a-relay.md) | Proposed, in this branch | A sandbox's egress process on the user's own host is not a relay | P1.7, H16 | 24 |
 | [0032](decisions/0032-secret-values-in-memory-only.md) | Proposed, in this branch | Secret values live only in the memory of the trusted side | P2.2, P2.3 | 25 |
-| `0033-ssh-options-on-the-command-line.md` | New, in H2 | The client puts the options that keep a host safe on the `ssh` command line, where they win over the user's own config. It starts with forwarding. | H2 | 40 |
-| `0034-pinned-host-keys.md` | New, in H3 | Saved hosts pin their host key on the command line, under the rule of 0033 | H3 | none |
-| `0035-host-tiers-and-the-grant-gate.md` | New, in H4 | Host tiers in `tiers.toml`, one grant gate on the laptop, `shared` for E2B, and the SSH agent only for `own` hosts | H4, then H5 | 32, 33, 34 |
-| `0036-the-root-step.md` | New, in H7 | The root step: the sandbox probe as its input, one optional script, and sudo in the user's terminal. It bends "setup needs no root". | H7 | 4, 29 |
-| `0037-tls-interception-on-the-trusted-side.md` | New, in P2.2 | The egress process decrypts TLS for bound hosts, model APIs, registries and object stores. It needs every maintainer's yes. | P2.2 | 16, 25 |
-| `0038-runtime-delivery.md` | New, in H9 | Runtime delivery, and downloads by the host. It extends [0017](decisions/0017-release-signatures.md). | H9 | 35, 39 |
-| `0039-memory-of-microvm-guests.md` | New, in P3.3 | A microvm guest gets the session's cap minus 160 MiB. It extends [0024](decisions/0024-memory-cap.md). | P3.3 | 3 |
-| `0040-a-signed-tag-release-gate.md` | New, in P4.4 | A release builds only from a tag signed with a hardware key. It extends [0017](decisions/0017-release-signatures.md). | P4.4 | 30 |
-| `0041-admission-refuses-what-does-not-fit.md` | New, in H11 | A sandbox that does not fit is refused, not made smaller. It amends [0024](decisions/0024-memory-cap.md) for sandboxes only. | H11 | 13, 14 |
-| `0042-separate-accounts-for-sandboxes.md` | New, in H17 | A root-owned launcher, one sudo line that allows no arguments, and slot accounts | H17, then H18 | 27, 30, 38 |
+| [0033](decisions/0033-one-command-grammar.md) | Proposed, in this branch | One grammar for the command line: session verbs at the top, a noun and a verb for everything else, and every rule under `policy` | P1.8, P1.12 and every task that adds a command | none |
+| `0034-ssh-options-on-the-command-line.md` | New, in H2 | The client puts the options that keep a host safe on the `ssh` command line, where they win over the user's own config. It starts with forwarding. | H2 | 40 |
+| `0035-pinned-host-keys.md` | New, in H3 | Saved hosts pin their host key on the command line, under the rule of 0034 | H3 | none |
+| `0036-host-tiers-and-the-grant-gate.md` | New, in H4 | Host tiers in `tiers.toml`, one grant gate on the laptop, `shared` for E2B, and the SSH agent only for `own` hosts | H4, then H5 | 32, 33, 34 |
+| `0037-the-root-step.md` | New, in H7 | The root step: the sandbox probe as its input, one optional script, and sudo in the user's terminal. It bends "setup needs no root". | H7 | 4, 29 |
+| `0038-tls-interception-on-the-trusted-side.md` | New, in P2.2 | The egress process decrypts TLS for bound hosts, model APIs, registries and object stores. It needs every maintainer's yes. | P2.2 | 16, 25 |
+| `0039-runtime-delivery.md` | New, in H9 | Runtime delivery, and downloads by the host. It extends [0017](decisions/0017-release-signatures.md). | H9 | 35, 39 |
+| `0040-memory-of-microvm-guests.md` | New, in P3.3 | A microvm guest gets the session's cap minus 160 MiB. It extends [0024](decisions/0024-memory-cap.md). | P3.3 | 3 |
+| `0041-a-signed-tag-release-gate.md` | New, in P4.4 | A release builds only from a tag signed with a hardware key. It extends [0017](decisions/0017-release-signatures.md). | P4.4 | 30 |
+| `0042-admission-refuses-what-does-not-fit.md` | New, in H11 | A sandbox that does not fit is refused, not made smaller. It amends [0024](decisions/0024-memory-cap.md) for sandboxes only. | H11 | 13, 14 |
+| `0043-separate-accounts-for-sandboxes.md` | New, in H17 | A root-owned launcher, one sudo line that allows no arguments, and slot accounts | H17, then H18 | 27, 30, 38 |
 
 ## Phase 0: close today's holes
 
@@ -240,15 +257,15 @@ These tasks need no wall, and they help every session. H2 goes first ([question 
 ### H2 Turn off forwarding on every connection
 
 - **Goal:** close today's gap. A `ForwardAgent yes` in the user's SSH config no longer reaches any host. The client puts its own options on the `ssh` command line, where they win over every config file.
-- **Files:** `internal/client/ssh.go` (`baseArgs`, `Command`), `internal/client/transport.go` (`SSH.Start`), new `test/e2e/sandbox_hosts.py` (run with `E2E_ONLY=sandbox-hosts`), `test/e2e/run.py`, new `docs/contributing/decisions/0033-ssh-options-on-the-command-line.md`, `docs/contributing/decisions/README.md`.
+- **Files:** `internal/client/ssh.go` (`baseArgs`, `Command`), `internal/client/transport.go` (`SSH.Start`), new `test/e2e/sandbox_hosts.py` (run with `E2E_ONLY=sandbox-hosts`), `test/e2e/run.py`, new `docs/contributing/decisions/0034-ssh-options-on-the-command-line.md`, `docs/contributing/decisions/README.md`.
 - **Acceptance:**
   - Every `ssh` command has `-o ForwardAgent=no -o ForwardX11=no -o PermitLocalCommand=no`.
   - The bridge and `Run` also have `-o ClearAllForwardings=yes`.
   - `forward` still forwards its ports. `SSH.Forward` keeps its own `-L` options and has no `ClearAllForwardings`.
 - **Tests:** unit tests of the arguments in `internal/client` and in `internal/cli/commands_ssh_test.go`. End-to-end test 2: with `ForwardAgent yes` in a throwaway client SSH config, a session on the host has no `SSH_AUTH_SOCK`.
-- **Docs:** `docs/explanation/security.md` (agent forwarding). Section 7.5 of `docs/research/connectivity-and-providers.md` now holds, and it says so. The record 0033.
+- **Docs:** `docs/explanation/security.md` (agent forwarding). Section 7.5 of `docs/research/connectivity-and-providers.md` now holds, and it says so. The record 0034.
 - **CHANGELOG:** Security. "The client no longer forwards your SSH agent, X11 or a local command to any host, even when your `~/.ssh/config` asks for it. `forward` still forwards the ports you name."
-- **Depends on:** nothing. It adds the record 0033.
+- **Depends on:** nothing. It adds the record 0034.
 - **Questions:** [40](isolation-spec.md#15-open-questions).
 - **Effort:** S.
 
@@ -387,7 +404,7 @@ These tasks need no wall, and they help every session. H2 goes first ([question 
   - `internal/cli/host.go` (`--host-key`, and a new `hostRekeyCmd`).
   - `internal/provider/lima/lima.go` (the pin at `host create`).
   - `go.mod` (`golang.org/x/crypto`).
-  - New `docs/contributing/decisions/0034-pinned-host-keys.md`, and the records index.
+  - New `docs/contributing/decisions/0035-pinned-host-keys.md`, and the records index.
 - **Acceptance:**
   - `host add` prints where the pin came from.
   - A changed key fails with the message of spec 14.14 and the exit code 2, even with `StrictHostKeyChecking no` in `~/.ssh/config`.
@@ -395,9 +412,9 @@ These tasks need no wall, and they help every session. H2 goes first ([question 
   - Lima hosts are pinned at `host create`.
   - `ForgetHost` also removes `known_hosts-<name>`.
 - **Tests:** units of `PinHostKey`: known hosts files with plain, hashed and `[host]:port` entries, and with none. Units of `baseArgs`: the pin options are there when `known_hosts-<name>` exists. End-to-end test 3.
-- **Docs:** `docs/how-to/add-a-host.md`, `docs/explanation/security.md`, the reference through `just docs` for `host rekey` and `--host-key`. The record 0034.
+- **Docs:** `docs/how-to/add-a-host.md`, `docs/explanation/security.md`, the reference through `just docs` for `host rekey` and `--host-key`. The record 0035.
 - **CHANGELOG:** Security. "Each host you add over SSH now has a pinned host key that your SSH config cannot turn off. A changed key stops the connection, and `host rekey` replaces the pin after you confirm."
-- **Depends on:** H2. It adds the record 0034.
+- **Depends on:** H2. It adds the record 0035.
 - **Questions:** none.
 - **Effort:** M.
 
@@ -411,19 +428,19 @@ These tasks need no wall, and they help every session. H2 goes first ([question 
   - `internal/cli/host.go` (`--tier`, the question, a new `hostTierCmd`, and a tier column in `hostLsCmd`).
   - `internal/cli/create.go` (the tier for each provider) and `internal/cli/guided.go` (the question in `setup`).
   - `internal/tui/hosts_view.go` (`hostDetail`), and the add-host sheet in `internal/tui/wizard.go` and `internal/tui/wizard_view.go`.
-  - New `docs/contributing/decisions/0035-host-tiers-and-the-grant-gate.md`, and the records index.
+  - New `docs/contributing/decisions/0036-host-tiers-and-the-grant-gate.md`, and the records index.
 - **Acceptance:**
   - The first run of the new client writes `tiers.toml`, with every host as `own`.
-  - `host add` asks the question in a terminal. `--yes` without `--tier` gives `shared`, with the line of spec 14.8.3.
+  - `host add` asks the question in a terminal. `--yes` without `--tier` fails with exit code 4, and names `--tier` ([question 50](isolation-spec.md#15-open-questions)).
   - `host create e2b` gives `shared`. Lima and Docker hosts get `own`.
   - A changed host ID warns, and sets the tier to `shared`.
   - `host rekey` sets the tier to `shared`.
-  - `host tier <name>` prints the tier. Lowering works at once. Raising needs a connection that passes the pinned key, and the typed host name.
+  - `host show <name>` prints the tier, and `host set <name> tier=<tier>` changes it. Lowering works at once. Raising needs a connection that passes the pinned key, and the typed host name.
 - **Tests:** units of `LoadTiers`: the migration, and a host with no entry after it. A golden screen of the tier sheet. CLI tests of the flags.
-- **Docs:** new `docs/how-to/choose-a-host-tier.md` ("Choose a host's tier"). It says that a teammate's machine is a `shared` host, and gives the recipe for a key of its own for each shared host. It also advises users to set their terminal's clipboard writes to "ask" for `shared` and `throwaway` hosts. The reference through `just docs`. The record 0035.
-- **CHANGELOG:** Added. "Each host has a tier: `own`, `throwaway` or `shared`. `host add` asks who else has root on the machine, and `host tier` shows or changes the answer. Hosts that you added before keep working as `own`."
-- **Depends on:** H3. It adds the record 0035.
-- **Questions:** [26](isolation-spec.md#15-open-questions), [31](isolation-spec.md#15-open-questions), [32](isolation-spec.md#15-open-questions), [33](isolation-spec.md#15-open-questions), [34](isolation-spec.md#15-open-questions), [41](isolation-spec.md#15-open-questions).
+- **Docs:** new `docs/how-to/choose-a-host-tier.md` ("Choose a host's tier"). It says that a teammate's machine is a `shared` host, and gives the recipe for a key of its own for each shared host. It also advises users to set their terminal's clipboard writes to "ask" for `shared` and `throwaway` hosts. The reference through `just docs`. The record 0036.
+- **CHANGELOG:** Added. "Each host has a tier: `own`, `throwaway` or `shared`. `host add` asks who else has root on the machine, and `host show` and `host set` show or change the answer. Hosts that you added before keep working as `own`."
+- **Depends on:** H3. It adds the record 0036.
+- **Questions:** [26](isolation-spec.md#15-open-questions), [31](isolation-spec.md#15-open-questions), [32](isolation-spec.md#15-open-questions), [33](isolation-spec.md#15-open-questions), [34](isolation-spec.md#15-open-questions), [41](isolation-spec.md#15-open-questions), [50](isolation-spec.md#15-open-questions).
 - **Effort:** M.
 
 ### H5 The grant gate and the grant ledger
@@ -437,22 +454,22 @@ These tasks need no wall, and they help every session. H2 goes first ([question 
   - `internal/cli/session.go` (`--untrusted`, `--ssh-agent`), `internal/cli/alerts.go` and `internal/cli/forward.go`.
   - `internal/client/ssh.go` (agent forwarding for the one session that `--ssh-agent` names).
   - `internal/cli/host.go` (a new `hostGrantsCmd`, and the rotate list in `hostRmCmd`).
-  - `internal/cli/create.go` (the rotate list in `host destroy`).
+  - `internal/cli/create.go` (the rotate list in `host rm --destroy`).
   - `internal/tui/actions.go` and `internal/tui/backend.go`.
   - `internal/agents/agents.go` (a hint for a low-value token, for each agent).
 - **Acceptance:**
   - Each row of spec 14.8.2 holds at each call site of spec 14.8.5 that exists now.
-  - Later tasks add the call sites of their own features. P1.8 adds `grant`, and H7 the root step. H12 adds the default host, H13 the pool, and H14 silent upgrades.
+  - Later tasks add the call sites of their own features. P1.8 adds `policy allow`, and H7 the root step. H12 adds the default host, H13 the pool, and H14 silent upgrades.
   - `new --ssh-agent` forwards the SSH agent to one session at level `none` on an `own` host. The gate refuses it on other tiers, and no sandbox ever gets it.
   - The row for user templates stays in the table. No task in this plan builds user templates, so that row has no call site yet.
   - A refused secret never runs its command.
-  - `host grants` lists names and counts.
-  - `host rm` and `host destroy` print the rotate list.
+  - `host show` lists names and counts.
+  - `host rm` prints the rotate list, with or without `--destroy`.
   - `new --untrusted` sets the request tier to `throwaway` or lower (spec 14.8.4).
 - **Tests:** the table of `Allow`: every grant against every tier, with and without `[secret_tiers]`. The ledger test: a secret value in the environment, a session start, and then no file under the state folder holds the value. End-to-end test 4.
 - **Docs:** `docs/how-to/secrets.md`, `docs/explanation/security.md`, the reference through `just docs` for `[secret_tiers]`, `repos` and the new commands.
-- **CHANGELOG:** Security. "A `throwaway` or `shared` host gets a secret only when `[secret_tiers]` marks it for that tier, and never gets an alert token. `host grants` lists what each host got, by name, and `host rm` lists the secrets to rotate. `new --ssh-agent` forwards your agent to one session on an `own` host."
-- **Depends on:** H4, and the record 0035 that H4 adds.
+- **CHANGELOG:** Security. "A `throwaway` or `shared` host gets a secret only when `[secret_tiers]` marks it for that tier, and never gets an alert token. `host show` lists what each host got, by name, and `host rm` lists the secrets to rotate. `new --ssh-agent` forwards your agent to one session on an `own` host."
+- **Depends on:** H4, and the record 0036 that H4 adds.
 - **Questions:** [33](isolation-spec.md#15-open-questions).
 - **Effort:** M.
 
@@ -467,50 +484,50 @@ At the end of phase 1, `simstim new box --wall process` runs a session in a sand
   - New `internal/wall/wall.go` (`Level`, `ParseLevel`, `Driver`, `Probe`, `Best`, `Drivers`), new `internal/wall/probe.go` and new `internal/wall/process/probe.go`.
   - New `internal/api/wall.go` (`WallProbe`, `WallInfo`) and new `internal/api/hostcap.go` (`CapProbe`, `KVM`, `LevelsFor`).
   - New `internal/host/capprobe.go`, `internal/host/capprobe_linux.go` and `internal/host/capprobe_other.go` (`CapabilityProbe`), new `internal/host/bridge_sandbox.go` (`sandbox.probe`, behind the feature `sandbox`), `internal/host/doctor.go` (`HostInfo.Walls`), `internal/paths/paths.go` (`WallProbes()`), `cmd/host/main.go` (`wall probe --json`).
-  - `internal/client/ops.go` (`Conn.CapProbe`), `internal/client/config.go` (`Host.WallFloor`), `internal/cli/host.go` (a new `host wall`, the floor at `host add`, and a "Sandboxes" block in `hostDoctorCmd`), `internal/cli/create.go` (the floor at `host create`).
+  - `internal/client/ops.go` (`Conn.CapProbe`), `internal/client/config.go` (`Host.WallFloor`), `internal/cli/host.go` (new `host show` and `host set … floor=`, the floor at `host add`, and a "Sandboxes" block in `hostDoctorCmd`), `internal/cli/create.go` (the floor at `host create`).
 - **Acceptance:**
-  - `simstim host wall box` prints each driver, OK or not, with a reason and a fix.
+  - `simstim host show box` prints each driver, OK or not, with a reason and a fix.
   - `--floor process` writes `wall_floor`. A floor above the probe's best level is refused.
   - `host add` and `host create` pin the strongest level that probes OK, unless the user names a lower level ([question 2](isolation-spec.md#15-open-questions)).
   - `host doctor` prints the "Sandboxes" block of spec 14.2.1, and its `--json` holds the whole probe as `sandbox`.
   - The probe changes no file outside `artefacts/incoming/`.
   - An older helper gives `wall_helper_old`: "too old for sandboxes".
   - The bridge op is `sandbox.probe`, behind the feature `sandbox` (spec 10.5 and 14.3).
-  - `host wall --floor` refuses a floor below the weakest level that the host's tier allows (spec 14.8.2). Lowering a host's tier raises its floor to that level.
+  - `host set … floor=` refuses a floor below the weakest level that the host's tier allows (spec 14.8.2). Lowering a host's tier raises its floor to that level.
   - Each driver's probe is cached for each boot in `StateDir()/walls.json`, keyed by `BootID()`.
 - **Tests:** unit tests of `ParseLevel`, `Best`, `LevelsFor` (a table of probes), and the process driver's probe with fake files. The sandbox probe's parsers, with fixture files for `cpuinfo`, `os-release`, `cgroup.controllers` and ACL xattr bytes, on any OS. A sandbox probe under `hosttest`. End to end on the test host.
 - **Docs:** new `docs/how-to/sandboxes.md` (its first part), `docs/how-to/add-a-host.md` (what the "Sandboxes" block means), `docs/how-to/troubleshoot.md`, the reference through `just docs`.
-- **CHANGELOG:** Added. "`host wall` shows which sandbox levels a host can run, and sets the weakest level that new sessions there may get. `host doctor` shows what the host offers for sandboxes."
+- **CHANGELOG:** Added. "`host show` shows which sandbox levels a host can run, and `host set … floor=` sets the weakest level that new sessions there may get. `host doctor` shows what the host offers for sandboxes."
 - **Depends on:** H5, for the weakest level that each tier allows.
 - **Questions:** [2](isolation-spec.md#15-open-questions), [5](isolation-spec.md#15-open-questions).
 - **Effort:** M.
 
 ### H7 The root step
 
-- **Goal:** the user can give a host the root access that its sandboxes need, once, seeing each line, with an undo (spec 14.4). The helper never runs sudo: the client starts sudo in a terminal that the user sees. This task also builds the set-up of P3.7. `host prepare --root` is the one command for the root step, and no bridge op runs sudo.
+- **Goal:** the user can give a host the root access that its sandboxes need, once, seeing each line, with an undo (spec 14.4). The helper never runs sudo: the client starts sudo in a terminal that the user sees. This task also builds the set-up of P3.7. `host prepare --root-step` is the one command for the root step, and no bridge op runs sudo.
 - **Files:**
   - New `internal/client/rootstep.go` (`RootStepID`, `RootScript`, `BuildRootScript`, `RootStepsFor`), and `internal/client/ssh.go` (`RunRoot`).
-  - `internal/cli/host.go`: a new `hostPrepareCmd` with `--root run|print|skip` and `--delegate-io`.
+  - `internal/cli/host.go`: a new `hostPrepareCmd` with `--root-step run|print|skip` and `--delegate-io`.
   - `internal/host/fix.go`: the manual fixes `kvm-access` and `delegate-io`, which point at `host prepare`.
   - New `internal/tui/rootstep.go` (the root step sheet, run with `tea.ExecProcess`).
   - `internal/api/hostcap.go` (`root_steps`), and `test/e2e/sandbox_hosts.py` (`E2E_ROOT`).
-  - New `docs/contributing/decisions/0036-the-root-step.md`, and the records index.
+  - New `docs/contributing/decisions/0037-the-root-step.md`, and the records index.
 - **Acceptance:**
   - The steps are those of spec 14.4.2: `kvm-acl`, `kvm-group`, `linger`, `delegate-io`, `subuid`, `io-uring-off` and `vsock-modules`. Each has its line, its reason and its undo.
   - P1.5 adds the eighth step, `userns-apparmor`, because it needs the namespace launcher.
   - The client offers a step only when the sandbox probe shows its need. The kvm steps appear only when the probe lists a microvm driver, from P3.3 on.
   - The client marks the three steps that change the machine for every user as "machine-wide" before it runs them (spec 14.4.1).
-  - `--root print` writes `./simstim-root-<host>.sh` (0600), and prints its SHA-256 and the line to run.
-  - `--root run` runs the script through sudo over `ssh -t`, and checks for `__ROOT_STEP_DONE__`. Then it probes again. The probe, not the exit code, says whether the step worked.
-  - The default mode follows spec 14.4.4. On a `shared` host it is `print`, and `--root run` needs the typed host name ([question 29](isolation-spec.md#15-open-questions)).
-  - With `--yes`, the mode is `print` unless `--root` says otherwise. `--root run --yes` works only with passwordless sudo.
+  - `--root-step print` writes `./simstim-root-<host>.sh` (0600), and prints its SHA-256 and the line to run.
+  - `--root-step run` runs the script through sudo over `ssh -t`, and checks for `__ROOT_STEP_DONE__`. Then it probes again. The probe, not the exit code, says whether the step worked.
+  - The default mode follows spec 14.4.4. On a `shared` host it is `print`, and `--root-step run` needs the typed host name ([question 29](isolation-spec.md#15-open-questions)).
+  - With `--yes`, the mode is `print` unless `--root-step` says otherwise. `--root-step run --yes` works only with passwordless sudo.
   - The root-owned `undo.sh` undoes every step, newest first. The laptop keeps `root-steps.json`.
   - `host doctor --fix` prints the root fixes and never runs sudo.
   - `BuildRootScript` refuses a user name outside `^[a-z_][a-z0-9_-]{0,31}$`, the name `root`, a uid of 0, and any step ID that this task does not list. No script contains `$USER`.
-- **Tests:** golden scripts and undo scripts for each mix of steps, in `internal/client/testdata/root/`. The quoting fuzz test of `RunRoot`. The default-mode table of `RootStepsFor`. End-to-end test 1, with `--root print`. On a test host whose owner set `E2E_ROOT=run`: run, then undo, and then the probe is as before.
-- **Docs:** new `docs/how-to/give-a-host-the-root-step.md` ("Give a host the root step"), with each line and its undo. `docs/how-to/uninstall.md`. The reference through `just docs`. The record 0036.
-- **CHANGELOG:** Added. "`host prepare --root` shows the one-time root step that a host needs for stronger sandboxes, line by line. It runs the step with sudo in your terminal, or prints it for the machine's owner, and leaves an undo script on the host."
-- **Depends on:** P1.1, H4. It adds the record 0036.
+- **Tests:** golden scripts and undo scripts for each mix of steps, in `internal/client/testdata/root/`. The quoting fuzz test of `RunRoot`. The default-mode table of `RootStepsFor`. End-to-end test 1, with `--root-step print`. On a test host whose owner set `E2E_ROOT=run`: run, then undo, and then the probe is as before.
+- **Docs:** new `docs/how-to/give-a-host-the-root-step.md` ("Give a host the root step"), with each line and its undo. `docs/how-to/uninstall.md`. The reference through `just docs`. The record 0037.
+- **CHANGELOG:** Added. "`host prepare --root-step` shows the one-time root step that a host needs for stronger sandboxes, line by line. It runs the step with sudo in your terminal, or prints it for the machine's owner, and leaves an undo script on the host."
+- **Depends on:** P1.1, H4. It adds the record 0037.
 - **Questions:** [4](isolation-spec.md#15-open-questions), [29](isolation-spec.md#15-open-questions).
 - **Effort:** M.
 
@@ -551,7 +568,7 @@ At the end of phase 1, `simstim new box --wall process` runs a session in a sand
   - `internal/host/manifest.go` and `internal/paths/paths.go` (the fields and paths of spec 10.7).
   - `cmd/host/main.go` (`supervise`, `wall-init`).
 - **Acceptance:**
-  - With the `plain` driver, attach, replay, snapshot, resize, image paste, alerts, `ls`, `rename`, `kill` and resume all work.
+  - With the `plain` driver, attach, replay, snapshot, resize, image paste, alerts, `ls`, `rename`, `rm` and resume all work.
   - The attach fixtures prove the bytes unchanged.
   - A forged `status` claim shows as claimed.
   - A frame of a type outside the allowlist closes the connection.
@@ -599,11 +616,12 @@ At the end of phase 1, `simstim new box --wall process` runs a session in a sand
   - A file listed in `.worktreeinclude` is not copied without `--include`.
   - `StateDirs` survive a stop, and the rest of the home does not ([question 8](isolation-spec.md#15-open-questions)).
   - The host's agents enter read-only, from their `InstallDirs` ([question 21](isolation-spec.md#15-open-questions)).
+  - A folder outside git gives an empty `/work/scratch`, and the row says "scratch" ([question 51](isolation-spec.md#15-open-questions)).
 - **Tests:** unit tests of the seed and the mount parser. End to end.
 - **Docs:** `docs/how-to/sandboxes.md` (files), `docs/how-to/worktrees.md`.
 - **CHANGELOG:** Added. "A sandbox works on its own clone of the repository. `--mount` gives it a folder of the host, read-only unless you add `:rw`."
 - **Depends on:** P1.5.
-- **Questions:** [8](isolation-spec.md#15-open-questions), [21](isolation-spec.md#15-open-questions).
+- **Questions:** [8](isolation-spec.md#15-open-questions), [21](isolation-spec.md#15-open-questions), [51](isolation-spec.md#15-open-questions).
 - **Effort:** M.
 
 ### P1.7 The egress process, first version
@@ -616,7 +634,7 @@ At the end of phase 1, `simstim new box --wall process` runs a session in a sand
   - An ECH ClientHello is refused.
   - The egress process opens no TCP or UDP port. It takes flows from the supervisor over a socket pair.
 - **Tests:** unit tests of `Decide` and of the address checks, IPv4 inside IPv6 too. Fuzz tests of the stream header and the SNI reader. End to end.
-- **Docs:** new `docs/how-to/grants.md`.
+- **Docs:** new `docs/how-to/policy.md`.
 - **CHANGELOG:** Added. "A sandbox reaches the network only through its preset, `--allow` and `--deny`. The host writes an audit line for each connection."
 - **Depends on:** P1.4, [0030](decisions/0030-local-sockets-do-not-listen.md), [0031](decisions/0031-the-egress-process-is-not-a-relay.md).
 - **Questions:** [23](isolation-spec.md#15-open-questions), [24](isolation-spec.md#15-open-questions).
@@ -626,22 +644,60 @@ At the end of phase 1, `simstim new box --wall process` runs a session in a sand
 
 - **Goal:** spec 9 for phase 1.
   - On `new`: `--wall auto`, the floor check, `--downgrade` and the downgrade sheet.
-  - The commands `grant`, `revoke`, `grants`, `audit` and `stop`, and the grants sheet without holds.
+  - The commands `policy allow`, `policy rm`, `policy ls` and `policy log` for the session layer, `stop` and `show`, and the policy sheet without holds. P1.12 adds the other layers.
   - Badges, the `wall_downgraded` and `secret_exposed` alerts, and "exposed: NAME" for every secret in a walled session.
   - The launcher's host rows show the floor and the level that the host gives now. This is the launcher part of H10.
-- **Files:** `internal/cli/session.go`, new `internal/cli/grant.go` and `internal/cli/stop.go`, `internal/client/ops.go`, `internal/client/tier.go` (the grant gate for door grants), `internal/tui/rows.go`, `internal/tui/dialog_sheets.go`, new `internal/tui/grants.go`, `internal/tui/hosts_view.go` (`hostRow`, `hostDetail`), `internal/alerts/event.go`, `internal/host/bridge.go`.
+- **Files:** `internal/cli/session.go`, new `internal/cli/policy.go`, `internal/cli/stop.go` and `internal/cli/show.go`, `internal/client/ops.go`, `internal/client/tier.go` (the grant gate for door grants), `internal/tui/rows.go`, `internal/tui/dialog_sheets.go`, new `internal/tui/policy.go`, `internal/tui/hosts_view.go` (`hostRow`, `hostDetail`), `internal/alerts/event.go`, `internal/host/bridge.go`.
 - **Acceptance:**
   - A level below the floor is refused without `--downgrade`.
   - The `process` level runs only on `own` and `throwaway` hosts, labelled "shares your account". It gets no `own`-tier secret unless the user names it with `--expose` ([question 5](isolation-spec.md#15-open-questions)).
-  - `grant` passes the grant gate of H5. A grant above the host's tier is refused, with a hint.
+  - `policy allow` passes the grant gate of H5. A rule above the host's tier is refused, with a hint.
+  - Every new command follows [0033](decisions/0033-one-command-grammar.md), and uses the errors, prompts and `--json` of C2 and C4 in [the CLI plan](cli-plan.md).
   - The launcher's golden tests show the marks of spec 9.4 on session rows, and the floor and the level on host rows.
   - Each secret in a walled session shows as "exposed: NAME", and raises `secret_exposed` ([question 15](isolation-spec.md#15-open-questions)).
   - `--wall` defaults to `none` until P2.10 ([question 1](isolation-spec.md#15-open-questions)).
 - **Tests:** unit tests, golden tests, and an end-to-end run of each command.
-- **Docs:** `docs/how-to/sandboxes.md`, `docs/how-to/grants.md`, `docs/contributing/ux-spec.md` (2.3 and 2.4), the reference through `just docs`.
-- **CHANGELOG:** Added. "`stop`, `grant`, `revoke`, `grants` and `audit` work on sandboxed sessions. The launcher marks each session's wall and each host's floor, and `g` opens a session's grants."
-- **Depends on:** P1.1, P1.5, P1.7, H5.
+- **Docs:** `docs/how-to/sandboxes.md`, `docs/how-to/policy.md`, `docs/contributing/ux-spec.md` (2.3 and 2.4), the reference through `just docs`.
+- **CHANGELOG:** Added. "`stop`, `show` and `policy` work on sandboxed sessions. The launcher marks each session's wall and each host's floor, and `p` opens a session's policy."
+- **Depends on:** P1.1, P1.5, P1.7, H5, 0033, and C2 and C4 of [the CLI plan](cli-plan.md).
 - **Questions:** [1](isolation-spec.md#15-open-questions), [5](isolation-spec.md#15-open-questions), [15](isolation-spec.md#15-open-questions).
+- **Effort:** M.
+
+### P1.12 Layers, profiles and locks
+
+- **Goal:** spec 8.1 to 8.3 and 8.7.
+  - The six layers of spec 8.2, each with the same shape, and their merge in `internal/grant`: locks first, then the narrowest layer that sets a value or has a matching rule.
+  - Profiles, `--profile` and `--set`. Lists that add up, with `!` to drop an inherited item. Locks at the top level and in a host's entry.
+  - `policy allow`, `deny`, `rm`, `ls` and `check` at every layer, with `--once`, `--for` and `--dry-run`. P1.8 built them for the session layer only.
+  - The new shape of `config.toml` and `hosts.toml`, and `config check` for it (C9 of [the CLI plan](cli-plan.md)).
+- **Files:** new `internal/grant/merge.go` and `internal/grant/decide.go`, `internal/api` (`Rule`, `Lock`, `LayerKind`, `Policy`), `internal/client/config.go` (profiles, `[lock]`, the shape of `[repos]` and of hosts), `internal/cli/policy.go`, `internal/cli/session.go` (`--profile`, `--set`, `--task`).
+- **Acceptance:**
+  - A table test covers each rule of spec 8.2: a session's allow over a deny for all sessions, a lock over a session's allow (refused with `policy_locked`), a profile after a repository, lists with `!`, and a repository file that only narrows.
+  - `policy check` names the deciding rule and its layer in each case of that table.
+  - `policy allow api.example.com --repo .` writes `network.allow` in the section of the folder's origin. With `--dry-run` it writes nothing.
+  - A rule with `--once` ends after one flow, and a rule with `--for` at its time.
+- **Tests:** unit and table tests, golden tests of `policy ls`, and an end-to-end run of each command.
+- **Docs:** new `docs/how-to/policy.md`, `docs/reference/config.md` through `just docs`, `docs/contributing/ux-spec.md`.
+- **CHANGELOG:** Added. "One config for all sessions, which a host, a repository, a profile or one session can override. `policy allow` and `policy deny` add rules at any of those places, and `policy check` says which rule decides."
+- **Depends on:** P1.7, P1.8, 0033.
+- **Questions:** [44](isolation-spec.md#15-open-questions).
+- **Effort:** M.
+
+### P1.13 Shells and commands in a sandbox
+
+- **Goal:** spec 6.11. `shell`, `exec` and `new --in`. The `ctl` ops `spawn` and `exec`, and the `exec` stream. `[sandbox] shell` and `keep`. The sessions of one sandbox drawn together, and `t` in the launcher. This task folds P5.3.
+- **Files:** new `internal/supervisor/spawn.go`, new `internal/guest/spawn.go` and `internal/guest/exec.go`, `internal/link` (the `exec` stream), new `internal/cli/shell.go` and `internal/cli/exec.go`, `internal/host/manifest.go` (`SandboxOf`), `internal/tui/rows.go`, `internal/tui/keys.go`.
+- **Acceptance:**
+  - `shell` opens a prompt in `/work/<repo>` as the user `agent`. The agent's session sees the files that the shell writes.
+  - A request from the shell to a host that no rule allows gets the same 403 as the agent's.
+  - `exec box/s -- false` exits with 1. A command past `--timeout` is killed, and `exec` exits with 124. A stopped sandbox gives `sandbox_stopped` with its hint.
+  - `stop` on a shell session stops the whole sandbox and lists its sessions. `rm` on a shell session ends only that session.
+  - `keep` refuses `.bashrc` with `keep_refused`.
+- **Tests:** unit tests, golden tests of the rows, and end-to-end runs of `shell` and `exec` on a process wall.
+- **Docs:** new `docs/how-to/shells.md`, the reference through `just docs`, `docs/contributing/ux-spec.md`.
+- **CHANGELOG:** Added. "`shell` opens a terminal in the same sandbox as the agent, and `exec` runs one command there."
+- **Depends on:** P1.4, P1.5, P1.8.
+- **Questions:** [47](isolation-spec.md#15-open-questions), [48](isolation-spec.md#15-open-questions).
 - **Effort:** M.
 
 ### P1.9 Paste and ports through the supervisor
@@ -666,7 +722,7 @@ At the end of phase 1, `simstim new box --wall process` runs a session in a sand
 - **Files:** new `internal/supervisor/pull.go`, new `internal/guest/bundle.go`, `internal/cli/pull.go`, new `internal/client/review/` (`flags.toml`, the scanner).
 - **Acceptance:**
   - `pull` works over every transport, a Docker host included.
-  - A change to `.github/workflows/ci.yml` stops before the branch moves, until `--yes`.
+  - A change to `.github/workflows/ci.yml` stops before the branch moves, until `--allow-flagged`.
   - The laptop never checks out.
   - A `.gitmodules` value with a CR is refused.
 - **Tests:** unit tests of the flag rules, with hidden-text cases. End to end.
@@ -682,13 +738,13 @@ At the end of phase 1, `simstim new box --wall process` runs a session in a sand
 - **Files:** `internal/host/restore.go` (lazy restore for walled sessions), `internal/host/ops.go` (`Delete` for walled sessions), new `internal/supervisor/stop.go`, `scripts/time-to-agent.sh` (`--wall`), `scripts/bench.sh`.
 - **Acceptance:**
   - After a host reboot, a session that was working starts again, and the others show `stopped`.
-  - `kill` refuses while commits are not pulled.
+  - `rm` refuses while commits are not pulled.
   - The key-to-PTY target is met, or an issue explains the gap.
   - Sandboxes have no idle stop in this phase ([question 9](isolation-spec.md#15-open-questions)). A stop keeps no screen ([question 10](isolation-spec.md#15-open-questions)).
 - **Tests:** end to end. The reboot test runs only on a VM that the test creates and deletes, such as one from `host create lima`. Otherwise the pull request marks it manual. Measurements on a test host start, and then stop, only their own sessions.
 - **Docs:** `docs/how-to/restore-after-reboot.md`, `docs/how-to/sandboxes.md`, `docs/contributing/testing.md` (the measurements).
 - **CHANGELOG:** Added. "Sandboxed sessions can be stopped, and they wake when you attach. After a host restart, only the sessions that were working start again at once."
-- **Depends on:** P1.8, P1.10.
+- **Depends on:** P1.8, P1.10, P1.13.
 - **Questions:** [9](isolation-spec.md#15-open-questions), [10](isolation-spec.md#15-open-questions).
 - **Effort:** M.
 
@@ -702,7 +758,7 @@ At the end of phase 2, a sandboxed session holds no real secret value. Its DNS a
 - **Files:** new `internal/guest/dns.go`, new `internal/egress/dns.go`, `go.mod` (`golang.org/x/net/dns/dnsmessage`).
 - **Acceptance:** `getent hosts example.com` fails in a `balanced` session, and the name never leaves the host: a test resolver sees no query. A granted name resolves.
 - **Tests:** unit and fuzz tests of the DNS handler. End to end.
-- **Docs:** `docs/how-to/grants.md`.
+- **Docs:** `docs/how-to/policy.md`.
 - **CHANGELOG:** Added. "A sandbox's DNS answers only the hosts it may reach, and sends no other name out."
 - **Depends on:** P1.7.
 - **Questions:** none.
@@ -711,16 +767,16 @@ At the end of phase 2, a sandboxed session holds no real secret value. Its DNS a
 ### P2.2 Interception, and method and path rules
 
 - **Goal:** the CA of each session, intercepted hosts, canonical requests, registries and object stores limited to GET and HEAD, and the splice-only list (spec 7.2).
-- **Files:** new `internal/egress/ca.go`, `internal/egress/intercept.go`, `internal/egress/canon.go` and `internal/egress/rules.go`, new `internal/egress/rules/*.toml`, new `internal/guest/ca.go`, `internal/agents/agents.go` (a new field `CAEnv`), new `docs/contributing/decisions/0037-tls-interception-on-the-trusted-side.md`, the records index.
+- **Files:** new `internal/egress/ca.go`, `internal/egress/intercept.go`, `internal/egress/canon.go` and `internal/egress/rules.go`, new `internal/egress/rules/*.toml`, new `internal/guest/ca.go`, `internal/agents/agents.go` (a new field `CAEnv`), new `docs/contributing/decisions/0038-tls-interception-on-the-trusted-side.md`, the records index.
 - **Acceptance:**
   - `npm install` works, and `npm publish` gets a 403.
   - The request smuggling cases of the test list are refused.
   - The CA's key lives only in the egress process's memory, for one session, never in a file.
   - A manual check for the owner, listed in the pull request: Claude Code and Codex work through the proxy against their real APIs. No test sends a prompt on a test host.
 - **Tests:** unit tests, a table of request smuggling cases, and fuzz tests of the canonical parser. End to end: `npm install` and `npm publish` in a sandbox.
-- **Docs:** `docs/explanation/security.md`, `docs/how-to/grants.md`. The record 0037, for every maintainer's yes.
+- **Docs:** `docs/explanation/security.md`, `docs/how-to/policy.md`. The record 0038, for every maintainer's yes.
 - **CHANGELOG:** Added. "The proxy of a sandbox can read requests to package registries, model APIs and other hosts with rules. It refuses writes to registries, such as a publish."
-- **Depends on:** P2.1, [0032](decisions/0032-secret-values-in-memory-only.md). It adds the record 0037, which the owner accepts before it merges.
+- **Depends on:** P2.1, [0032](decisions/0032-secret-values-in-memory-only.md). It adds the record 0038, which the owner accepts before it merges.
 - **Questions:** [16](isolation-spec.md#15-open-questions), [25](isolation-spec.md#15-open-questions).
 - **Effort:** L.
 
@@ -748,7 +804,7 @@ At the end of phase 2, a sandboxed session holds no real secret value. Its DNS a
 - **Files:** new `internal/egress/model.go`, new `internal/agents/guard.go`, new `internal/agents/testdata/traffic/` (recorded requests, with no secret).
 - **Acceptance:** a request with an `mcp` tool and a `server_url`, or with Anthropic's web fetch tool, is refused with the API's error shape. Claude Code and Codex pass their recorded sessions unchanged. The recordings come from the owner's manual check of P2.3.
 - **Tests:** table tests from the recordings. A fuzz test of the JSON walker.
-- **Docs:** `docs/how-to/grants.md` (`--tools`).
+- **Docs:** `docs/how-to/policy.md` (`--tools`).
 - **CHANGELOG:** Added. "The proxy refuses model API requests that would make the provider fetch an address of the request's choosing, unless you grant it."
 - **Depends on:** P2.2.
 - **Questions:** [16](isolation-spec.md#15-open-questions).
@@ -764,7 +820,7 @@ At the end of phase 2, a sandboxed session holds no real secret value. Its DNS a
   - `POST /user/repos` is refused.
   - A token in a response becomes a sentinel, and raises `secret_minted`.
 - **Tests:** unit tests. A fuzz test of the pkt-line reader.
-- **Docs:** `docs/how-to/grants.md`.
+- **Docs:** `docs/how-to/policy.md`.
 - **CHANGELOG:** Added. "A sandboxed session can push only to its own branches, and only to repositories you grant. It cannot create repositories or gists, change workflows, or register runners through a granted token."
 - **Depends on:** P2.3.
 - **Questions:** [17](isolation-spec.md#15-open-questions).
@@ -772,13 +828,83 @@ At the end of phase 2, a sandboxed session holds no real secret value. Its DNS a
 
 ### P2.6 Holds and approvals
 
-- **Goal:** the hold of spec 7.2, `needs_input` with the source `network`, and the held requests in the grants sheet. Also `egress_blocked`, the display of registrable domains and ASCII forms, and the stop after 5 refusals.
-- **Files:** new `internal/egress/hold.go`, new `internal/supervisor/claims.go`, `internal/tui/grants.go`, new `internal/grant/check.go`.
+- **Goal:** the unknown action `ask` of spec 7.2: the hold, `needs_input` with the source `network`, and the held requests in the policy sheet, with the keys for once, the session, the repository and the profile. Also `egress_blocked`, the display of registrable domains and ASCII forms, and the stop after 5 refusals.
+- **Files:** new `internal/egress/hold.go`, new `internal/supervisor/claims.go`, `internal/tui/policy.go`, new `internal/grant/check.go`.
 - **Acceptance:** a flow to a new host waits, the launcher shows it, and Enter lets it through within the hold. The sheet shows `xn--` forms.
 - **Tests:** unit and golden tests.
-- **Docs:** `docs/how-to/grants.md`, `docs/contributing/ux-spec.md`.
-- **CHANGELOG:** Added. "When a sandboxed agent reaches for a host it may not use, the session waits for you. The launcher lets you allow it for the session or the repository."
+- **Docs:** `docs/how-to/policy.md`, `docs/contributing/ux-spec.md`.
+- **CHANGELOG:** Added. "When a sandboxed agent reaches for a host it may not use, the session waits for you. The launcher lets you allow it once, or for the session, the repository or the profile."
 - **Depends on:** P1.8, P2.2.
+- **Questions:** none.
+- **Effort:** M.
+
+### P2.11 The unknown action and the classifier's fixed steps
+
+- **Goal:** spec 7.2 ("Unknown sites") and spec 7.8, steps 1, 2, 3 and 5.
+  - The unknown actions `ask` (the hold of P2.6), `deny`, `allow` and `classify`, in every layer, and the alert `egress_unknown`.
+  - The normalising step, and the fixed denies in `internal/egress/rules/classify.toml`, each with its source link.
+  - The facts: the registrable domain, the optional RDAP age and the optional popularity file.
+  - `unsure`, which is `ask` or `deny`, and the stop after 5 refusals for `classify`.
+  - The guided setup asks once for the unknown action of all sessions.
+  - The launcher's count of flows that the classifier allowed, and `policy log --by classifier`.
+- **Files:** new `internal/egress/classify/` (`normalise.go`, `fixed.go`, `facts.go`), new `internal/egress/rules/classify.toml`, `internal/egress/hold.go`, `internal/cli/guided.go`, `internal/tui/rows.go`.
+- **Acceptance:**
+  - Each entry in `classify.toml` has a test with a name that it must deny, and a close name that it must not.
+  - Under `classify`, `webhook.site`, an IP address and a lookalike of an allowed host are refused without a judge.
+  - Under `allow`, the first flow to a new host raises `egress_unknown` once.
+  - With `judge = "none"`, every flow that passes the fixed steps is unsure, and `unsure = "deny"` refuses it at once.
+- **Tests:** unit and table tests, the benchmark for the 1 ms target of spec 12, and an end-to-end run of each action.
+- **Docs:** `docs/how-to/policy.md` (unknown sites), `docs/explanation/security.md` (what the classifier is not).
+- **CHANGELOG:** Added. "Choose what happens to a site that no rule covers: ask, deny, allow and log, or classify. The classifier refuses known exfiltration services, bare IP addresses and lookalike names on its own."
+- **Depends on:** P2.1, P2.6.
+- **Questions:** [43](isolation-spec.md#15-open-questions), [45](isolation-spec.md#15-open-questions).
+- **Effort:** M.
+
+### P2.12 The judge
+
+- **Goal:** spec 7.8, step 4. `judge = "model"` and `judge = "command"`, a request with structured fields only, an answer whose scope is never wider than `max_scope`, the timeout and the rate. `new --task` reaches the judge. A test set, and a report of its results.
+- **Files:** new `internal/egress/classify/judge.go`, `judge_model.go` and `judge_command.go`, new `internal/egress/classify/testdata/`, `internal/cli/session.go` (`--task`).
+- **Acceptance:**
+  - The judge's request holds only the fields of spec 7.8. A test fails if it carries a body, a query, or any text from the guest but the host name.
+  - A judge's `allow` with a scope wider than `max_scope` is cut to `max_scope`.
+  - A judge that does not answer within 5 s gives unsure, and `judge_unavailable` shows once.
+  - The test set holds at least 200 destinations from real sessions' allowed traffic, and at least 200 from the exfiltration incidents in [the research](../research/isolation.md#policy-for-parallel-work) and lookalikes of them. The pull request reports the share of wrong allows and wrong denies for one local model and one API model, with the fixed steps alone as the baseline. It claims no rate that it did not measure.
+- **Tests:** unit tests with a fake judge, and the test set as a Go test that runs only with `JUDGE_EVAL=1`.
+- **Docs:** `docs/how-to/policy.md` (the judge), `docs/explanation/security.md`.
+- **CHANGELOG:** Added. "An optional judge, a model or a program of your own, decides the sites that the rules and the fixed checks leave open."
+- **Depends on:** P2.11, P2.3, 0031.
+- **Questions:** [45](isolation-spec.md#15-open-questions), [46](isolation-spec.md#15-open-questions), [52](isolation-spec.md#15-open-questions).
+- **Effort:** M.
+
+### P2.13 SSH keys
+
+- **Goal:** spec 7.9. Secrets with `kind = "ssh-key"`, `ssh_keys` in every layer, the supervisor's SSH agent on `golang.org/x/crypto/ssh/agent`, the `agent` stream, and an audit line for each signature.
+- **Files:** new `internal/supervisor/sshagent.go`, new `internal/guest/sshagent.go`, `internal/client/config.go` (`kind`), the grant gate of H5.
+- **Acceptance:**
+  - `git push` over SSH from a sandbox works with a deploy key named in `ssh_keys`, and `ssh-add -L` in the guest lists only that key.
+  - Adding a key, and every extension request, are refused.
+  - Each signature writes an audit line with the key's fingerprint.
+  - The grant gate refuses a key that the host's tier may not get.
+- **Tests:** unit tests against the agent protocol, and an end-to-end push to a test repository on a local git server.
+- **Docs:** new `docs/how-to/ssh-keys.md`.
+- **CHANGELOG:** Added. "A sandbox can use the SSH keys that you name, through its own agent, without holding the keys."
+- **Depends on:** P2.3, H5, 0032.
+- **Questions:** [49](isolation-spec.md#15-open-questions).
+- **Effort:** M.
+
+### P2.14 Change policy while sessions run
+
+- **Goal:** spec 8.8. The bridge op `policy.replace`, the layers' hash and the `~` mark in `ls`, `policy apply`, `policy lockdown`, `policy learn` and `policy edit`.
+- **Files:** new `internal/cli/policy_apply.go`, new `internal/client/policypush.go`, new `internal/supervisor/policy.go`, `internal/tui/rows.go`.
+- **Acceptance:**
+  - `policy deny x --all` makes 10 running sandboxes on 3 hosts refuse `x` within 2 s (spec 12).
+  - After a hand edit, each running session shows `~` until `policy apply`.
+  - `policy lockdown` makes every running sandbox refuse unknown sites at once. `--off` needs the typed word.
+  - `policy learn` proposes one rule for each host that `allow` or the judge let through, and writes only the rules that the user picks.
+- **Tests:** unit tests, and an end-to-end run on two hosts.
+- **Docs:** `docs/how-to/policy.md`.
+- **CHANGELOG:** Added. "Policy changes reach running sessions at once. `policy lockdown` closes every sandbox, and `policy learn` turns what a session reached into rules."
+- **Depends on:** P1.12, P2.6.
 - **Questions:** none.
 - **Effort:** M.
 
@@ -788,7 +914,7 @@ At the end of phase 2, a sandboxed session holds no real secret value. Its DNS a
 - **Files:** new `internal/egress/budget.go`, `internal/grant/check.go`.
 - **Acceptance:** `*.vercel.app` is refused, and `app.vercel.app` passes. An upload of 20 MiB to a granted paste site waits after 16 MiB.
 - **Tests:** unit tests.
-- **Docs:** `docs/how-to/grants.md`, the reference through `just docs`.
+- **Docs:** `docs/how-to/policy.md`, the reference through `just docs`.
 - **CHANGELOG:** Added. "Sandboxed sessions get an upload budget for each host. Grants of whole shared domains, such as `*.vercel.app`, are refused."
 - **Depends on:** P2.2.
 - **Questions:** none.
@@ -817,7 +943,7 @@ At the end of phase 2, a sandboxed session holds no real secret value. Its DNS a
 - **Files:** new `internal/host/sandboxfile.go`, new `internal/client/granttrust.go`, `internal/api/setup.go` (`CodeGrantQuestion`), `internal/tui/question.go`.
 - **Acceptance:** a file that asks for `open` is ignored, with a note. A changed proposal asks again.
 - **Tests:** unit tests. End to end.
-- **Docs:** `docs/how-to/grants.md`.
+- **Docs:** `docs/how-to/policy.md`.
 - **CHANGELOG:** Added. "A repository can ask, in `.simstim/sandbox.toml`, for a stronger wall, a tighter preset or hosts it needs. You answer once for each version of the file."
 - **Depends on:** P1.8.
 - **Questions:** [18](isolation-spec.md#15-open-questions).
@@ -825,7 +951,7 @@ At the end of phase 2, a sandboxed session holds no real secret value. Its DNS a
 
 ### P2.10 Walls by default
 
-- **Goal:** new sessions get the host's floor. `none` needs `--downgrade`. Hosts without a floor get one at their next `host add` or `host wall`.
+- **Goal:** new sessions get the host's floor. `none` needs `--downgrade`. Hosts without a floor get one at their next `host add` or `host prepare`.
 - **Files:** `internal/client/config.go` (the default), `internal/cli/session.go`, `internal/tui/` (the new-session form), the docs below.
 - **Acceptance:**
   - A fresh install starts a sandboxed session on a host that can run one.
@@ -882,7 +1008,7 @@ At the end of phase 3, a host with KVM and Linux 6.8 or later runs each session 
   - New `internal/client/runtime.go` (`EnsureRuntime`, and the copy from the laptop).
   - `internal/client/config.go` (`[images] fetch`) and `internal/cli/host.go` (`--images`).
   - `internal/paths/paths.go` (`ArtefactsDir()`).
-  - New `docs/contributing/decisions/0038-runtime-delivery.md`, and the records index.
+  - New `docs/contributing/decisions/0039-runtime-delivery.md`, and the records index.
 - **Acceptance:**
   - `--images host`, `laptop` and `auto` each install the runtime that the release manifest names. `auto` is the default ([question 39](isolation-spec.md#15-open-questions)).
   - The store is the artefact store of spec 10.7, `DataDir()/artefacts/sha256/<digest>`, with each file 0444. P4.2 later runs files from it by descriptor.
@@ -891,16 +1017,16 @@ At the end of phase 3, a host with KVM and Linux 6.8 or later runs each session 
   - No host gets a file from another host, or a key to another host ([question 35](isolation-spec.md#15-open-questions)).
   - `prune` keeps what spec 14.9.4 keeps.
 - **Tests:** units of the runtime install: a wrong SHA-256 deletes the part file, and a size over the entry's stops the copy. End-to-end test 5.
-- **Docs:** `docs/how-to/add-a-host.md`, the reference through `just docs` for `[images]` and `--images`. The record 0038, which extends [0017](decisions/0017-release-signatures.md).
+- **Docs:** `docs/how-to/add-a-host.md`, the reference through `just docs` for `[images]` and `--images`. The record 0039, which extends [0017](decisions/0017-release-signatures.md).
 - **CHANGELOG:** Added. "A host can get the files that sandboxes need, such as the guest kernel, from the release or from your laptop. It checks each file against the digest in your client before it keeps it."
-- **Depends on:** P4.1, P1.1, P3.1. It adds the record 0038.
+- **Depends on:** P4.1, P1.1, P3.1. It adds the record 0039.
 - **Questions:** [35](isolation-spec.md#15-open-questions), [39](isolation-spec.md#15-open-questions).
 - **Effort:** M.
 
 ### P3.2 Images
 
 - **Goal:** `internal/image` pulls an OCI image by digest, flattens its layers with their whiteouts, and writes ext4 with `tar2ext4` and `AppendDMVerity` from `hcsshim`. The work runs in a `converter` jail with no network, with caps on size and entry count. A content-addressed store with garbage collection. `images.lock` on the laptop. The default image is a Debian snapshot with git, curl and CA certificates, and no proprietary agent.
-- **Files:** new `internal/image/*.go`, `internal/host/prune.go`, new `internal/client/images.go`, `internal/cli/host.go` (`host images`), `internal/supply` (the default image's entry).
+- **Files:** new `internal/image/*.go`, `internal/host/prune.go`, new `internal/client/images.go`, new `internal/cli/image.go` (`image ls`, `image pull`, `image rm`), `internal/supply` (the default image's entry).
 - **Acceptance:**
   - The same digest converts to the same root hash on two hosts.
   - An image's digest comes from the release manifest (the default image) or from the laptop's `images.lock` (a user image), never from a host ([question 35](isolation-spec.md#15-open-questions)).
@@ -908,7 +1034,7 @@ At the end of phase 3, a host with KVM and Linux 6.8 or later runs each session 
   - The `hcsshim` licence is checked against its pinned release, and the UNVERIFIED mark goes.
 - **Tests:** unit tests with small images in `testdata`. A fuzz test of the tar flattener.
 - **Docs:** a new section in `docs/how-to/sandboxes.md`.
-- **CHANGELOG:** Added. "`host images` lists, gets and removes the images that microvm sandboxes boot from. Your laptop pins each image by digest."
+- **CHANGELOG:** Added. "`image ls`, `image pull` and `image rm` list, get and remove the images that microvm sandboxes boot from. Your laptop pins each image by digest."
 - **Depends on:** P1.3, H9.
 - **Questions:** [35](isolation-spec.md#15-open-questions), [39](isolation-spec.md#15-open-questions).
 - **Effort:** L.
@@ -919,16 +1045,16 @@ At the end of phase 3, a host with KVM and Linux 6.8 or later runs each session 
 - **The jail:** the VMM runs in a `vmm` jail. That is a subuid when one is available, with its supplementary groups kept for `/dev/kvm`. It has an empty network namespace, and a mount namespace with only the session's folder, the artefacts and `/dev/kvm`. `PR_SET_DUMPABLE` is 0. The VMM runs with `--landlock` and `--seccomp true`. Every disk has `image_type=raw` and backing files off ([threat model](https://github.com/cloud-hypervisor/cloud-hypervisor/blob/main/docs/threat-model.md)). The session disk belongs to the VMM's uid. A balloon with free page reporting returns freed pages.
 - **The boot:** the kernel command line carries `dm-mod.create` with two verity tables: the tools image as `dm-0`, and the user's image as `dm-1`, with `panic_on_corruption`. It ends with `root=/dev/dm-0 ro init=/init`. The supervisor builds it only from the digests in the start request.
 - **The link:** the supervisor connects to the VMM's vsock socket and sends `CONNECT 1024`. It never creates a `<socket>_<port>` listener.
-- **Files:** new `internal/wall/chv/*.go`, `guest/supply.lock`, `.goreleaser.yaml` and `internal/supply` (the release mirrors the pinned VMM and names it in the release manifest), new `docs/contributing/decisions/0039-memory-of-microvm-guests.md`, the records index.
+- **Files:** new `internal/wall/chv/*.go`, `guest/supply.lock`, `.goreleaser.yaml` and `internal/supply` (the release mirrors the pinned VMM and names it in the release manifest), new `docs/contributing/decisions/0040-memory-of-microvm-guests.md`, the records index.
 - **Acceptance:**
   - A guest that writes a QCOW2 header to its session disk and reboots reads zeros, not a host file.
   - The guest reaches no host socket, and no TCP, UDP or `AF_UNIX` endpoint.
   - The subuid keeps `/dev/kvm` access through the kvm group (UNVERIFIED until this test passes).
-  - Guest memory is the session's cap minus 160 MiB, as the record 0039 states.
+  - Guest memory is the session's cap minus 160 MiB, as the record 0040 states.
 - **Tests:** the escape suite of P1.5 for microvm, plus the QCOW2 case. The fidelity fixtures.
-- **Docs:** `docs/explanation/security.md`. The record 0039, which extends [0024](decisions/0024-memory-cap.md).
+- **Docs:** `docs/explanation/security.md`. The record 0040, which extends [0024](decisions/0024-memory-cap.md).
 - **CHANGELOG:** Added. "The host helper gains a Cloud Hypervisor driver for microvm sandboxes. It runs the VMM confined, with no network and raw disks only."
-- **Depends on:** P3.1, P3.2, P1.3, H9, [0030](decisions/0030-local-sockets-do-not-listen.md). It adds the record 0039.
+- **Depends on:** P3.1, P3.2, P1.3, H9, [0030](decisions/0030-local-sockets-do-not-listen.md). It adds the record 0040.
 - **Questions:** [3](isolation-spec.md#15-open-questions), [23](isolation-spec.md#15-open-questions).
 - **Effort:** L.
 
@@ -940,7 +1066,7 @@ At the end of phase 3, a host with KVM and Linux 6.8 or later runs each session 
   - The transparent proxy, and the synthetic DNS mode.
   - A clean shutdown with `reboot(2)`, and the `mem` claims.
 - **Files:** new `internal/guest/vm_linux.go`, new `internal/guest/nft.go`, new `internal/guest/shutdown.go`.
-- **Acceptance:** a file in `~/.bashrc` is gone after a stop and a start. `/work` and `~/.claude/projects` stay ([question 8](isolation-spec.md#15-open-questions)). `root = "keep"` keeps the root. The agent cannot `ptrace` the holder.
+- **Acceptance:** a file in `~/.bashrc` is gone after a stop and a start. `/work` and `~/.claude/projects` stay ([question 8](isolation-spec.md#15-open-questions)). `system = "keep"` keeps the root. The agent cannot `ptrace` the holder.
 - **Tests:** unit tests. End to end.
 - **Docs:** `docs/how-to/sandboxes.md`.
 - **CHANGELOG:** Added. "In a microvm sandbox, the system and the home reset at each start. `/work` and the agent's history stay."
@@ -979,7 +1105,7 @@ At the end of phase 3, a host with KVM and Linux 6.8 or later runs each session 
 
 ### P3.7 The microvm probe, the kernel list and Lima
 
-- **Goal:** the `chv` driver's probe, the doctor's warning for host kernels with known local root bugs, and microvm on Lima for M3 or later. The root step of this task, `host wall --setup`, is part of H7 and P1.5.
+- **Goal:** the `chv` driver's probe, the doctor's warning for host kernels with known local root bugs, and microvm on Lima for M3 or later. The root step of this task is part of H7 and P1.5.
 - **Files:** new `internal/wall/chv/probe.go`, `internal/host/doctor.go`, new `internal/host/kernel_bugs.toml` (the data list), `internal/cli/host.go`.
 - **Acceptance:**
   - The sandbox probe reports the `chv` driver OK on a host with usable KVM, Linux 6.8 or later, and the VMM in the store.
@@ -998,7 +1124,7 @@ At the end of phase 3, a host with KVM and Linux 6.8 or later runs each session 
 
 - **Goal:** `host add` takes a bare machine to a host with a proven wall, as spec 14.2.1 shows. It runs the sandbox probe, runtime delivery, the root step and a test boot, in that order. The launcher part of this task is in P1.8.
 - **Files:**
-  - `internal/cli/host.go`: `connectHost` calls prepare, with `--no-sandbox`, `--root` and `--images`.
+  - `internal/cli/host.go`: `connectHost` calls prepare, with `--no-sandbox`, `--root-step` and `--images`.
   - `internal/client/config.go`: `Host.Sandbox`, with `level`, `level_after_root`, `runtime`, `arch`, `mem_total` and `prepared_at`.
   - `internal/client/ops.go` (`Conn.Prepare`).
   - `internal/host/bridge_sandbox.go` (`sandbox.prepare`: a test boot through the sandbox start).
@@ -1062,12 +1188,12 @@ The rule of this phase: **the laptop holds the digests, the hosts hold the bytes
 ### P4.4 A signed-tag release gate
 
 - **Goal:** `release.yml` runs `git verify-tag` against a committed allowed-signers file before it builds. The maintainer's tag key is a hardware ed25519-sk key ([question 30](isolation-spec.md#15-open-questions)).
-- **Files:** `.github/workflows/release.yml`, new `.github/tag-signers`, new `docs/contributing/decisions/0040-a-signed-tag-release-gate.md`, the records index.
+- **Files:** `.github/workflows/release.yml`, new `.github/tag-signers`, new `docs/contributing/decisions/0041-a-signed-tag-release-gate.md`, the records index.
 - **Acceptance:** an unsigned tag fails the workflow.
 - **Tests:** a script test that runs the same `git verify-tag` step on a signed and an unsigned tag in a temporary repository. Never push a tag to test the gate.
-- **Docs:** `docs/contributing/releasing.md`. The record 0040, which extends [0017](decisions/0017-release-signatures.md).
+- **Docs:** `docs/contributing/releasing.md`. The record 0041, which extends [0017](decisions/0017-release-signatures.md).
 - **CHANGELOG:** Security. "A release now builds only from a tag that a maintainer signed with a key in the repository's list."
-- **Depends on:** nothing. It adds the record 0040.
+- **Depends on:** nothing. It adds the record 0041.
 - **Questions:** [30](isolation-spec.md#15-open-questions).
 - **Effort:** S.
 
@@ -1106,7 +1232,7 @@ The rule of this phase: **the laptop holds the digests, the hosts hold the bytes
   - `internal/host/memsample.go` (a reader of the host's memory pressure), and `internal/agents/agents.go` (a size for each agent).
   - New `internal/client/facts.go` (`FetchFacts`).
   - `internal/tui/hosts_conn.go` (a facts request every 10 s), `internal/tui/backend.go`, and `internal/tui/hosts_view.go` (the room in `hostRow`).
-  - New `docs/contributing/decisions/0041-admission-refuses-what-does-not-fit.md`, and the records index.
+  - New `docs/contributing/decisions/0042-admission-refuses-what-does-not-fit.md`, and the records index.
 - **Acceptance:**
   - The launcher shows the room of each online host, and still draws at once ([0011](decisions/0011-instant-launcher.md)).
   - Two starts at once never pass the room.
@@ -1117,9 +1243,9 @@ The rule of this phase: **the laptop holds the digests, the hosts hold the bytes
   - `runtime_missing` is the only runtime check: the client embeds the digests, so no minimum version or expiry exists.
   - P7.5's criterion holds: the chosen host admits the session under its own lock, or answers `no_room`.
 - **Tests:** admission under `hosttest` with two processes: the total never passes the room. Manifests of another boot, and of dead holders, do not count. Units of the facts. The fake backend. End-to-end test 6, its first part: sandboxes fill the room, and the next start gets `no_room`. The sandboxes stay idle, because admission counts declared memory. Any test that loads memory runs under a cap of 512 MiB or less.
-- **Docs:** `docs/how-to/memory.md`. The record 0041, which amends [0024](decisions/0024-memory-cap.md) for sandboxes only.
+- **Docs:** `docs/how-to/memory.md`. The record 0042, which amends [0024](decisions/0024-memory-cap.md) for sandboxes only.
 - **CHANGELOG:** Added. "Each host now reports its free room for sandboxes, and the launcher shows it. A host refuses a sandbox that does not fit, and does not make it smaller."
-- **Depends on:** P1.1, P1.5, H9. It adds the record 0041.
+- **Depends on:** P1.1, P1.5, H9. It adds the record 0042.
 - **Questions:** [13](isolation-spec.md#15-open-questions), [14](isolation-spec.md#15-open-questions).
 - **Effort:** M.
 
@@ -1187,7 +1313,7 @@ The rule of this phase: **the laptop holds the digests, the hosts hold the bytes
   - Running sandboxes keep their runtime. `ls` marks a session `outdated` when its runtime is older than the client's.
 - **Tests:** units of health, with fixtures. Drain under `hosttest`. End-to-end test 6, its drain part: while drained, a start gets `draining`. The test removes the drain mark at its end, and the log records both changes.
 - **Docs:** new `docs/how-to/restart-a-host.md` ("Restart a host"), `docs/explanation/architecture.md` (3.8), the reference through `just docs`.
-- **CHANGELOG:** Added. "Each host reports its health, such as a missed runtime update or low disk, in `host ls`, `host doctor` and the launcher. `host drain` stops new sandboxes on a host before a restart, and `host undrain` ends the drain."
+- **CHANGELOG:** Added. "Each host reports its health, such as a missed runtime update or low disk, in `host ls`, `host doctor` and the launcher. `host set <host> drain=<reason>` stops new sandboxes on a host before a restart, and `drain=off` ends the drain."
 - **Depends on:** H11, H9, P4.6.
 - **Questions:** [42](isolation-spec.md#15-open-questions).
 - **Effort:** M.
@@ -1200,7 +1326,7 @@ The rule of this phase: **the laptop holds the digests, the hosts hold the bytes
   - Footprint entries in `internal/host/doctor.go` (`Setup`), `internal/host/fix.go` (`InstallRestoreUnit`, `installTerminfo`) and `internal/host/idle.go` (`IdleSetup`).
   - Footprint entries in `internal/host/memory.go` (`limitSessions`) and `internal/host/restore.go`.
   - `internal/client/ops.go` (`Conn.Purge`), and new `internal/client/baseline.go`.
-  - `internal/cli/host.go`: `--purge`, `--force`, `--root`, and the consent text in `connectHost`.
+  - `internal/cli/host.go`: `--purge`, `--force`, `--root-step`, and the consent text in `connectHost`.
 - **Acceptance:**
   - The purge follows the steps of spec 14.12.
   - The root step's undo runs, prints or skips by the modes of H7.
@@ -1227,7 +1353,7 @@ The rule of this phase: **the laptop holds the digests, the hosts hold the bytes
 - **Questions:** [36](isolation-spec.md#15-open-questions).
 - **Effort:** S.
 
-## Phase 5: fork, copy, run and save
+## Phase 5: fork, copy and save
 
 ### P5.1 Fork
 
@@ -1253,23 +1379,11 @@ The rule of this phase: **the laptop holds the digests, the hosts hold the bytes
 - **Questions:** none.
 - **Effort:** M.
 
-### P5.3 Run a command
-
-- **Goal:** `exec` runs one command in a running sandbox, with its output on stdout and its exit code.
-- **Files:** new `internal/guest/exec.go`, new `internal/cli/exec.go`.
-- **Acceptance:** `exec box/app -- git status` prints the command's output and exits with its code. A stopped sandbox gives `sandbox_stopped` with its hint.
-- **Tests:** unit tests. End to end.
-- **Docs:** the reference through `just docs`.
-- **CHANGELOG:** Added. "`exec` runs a command in a sandbox without attaching."
-- **Depends on:** P1.4.
-- **Questions:** none.
-- **Effort:** S.
-
 ### P5.4 Checkpoints
 
 - **Goal:** a copy of the session disk at each `turn_done` where the file system has reflinks, and `rewind <host>/<session> [n]`.
 - **Files:** new `internal/supervisor/checkpoint.go`, new `internal/cli/rewind.go`.
-- **Acceptance:** on XFS or Btrfs, a checkpoint takes under a second. On ext4, checkpoints are off, and `host wall` says why.
+- **Acceptance:** on XFS or Btrfs, a checkpoint takes under a second. On ext4, checkpoints are off, and `host show` says why.
 - **Tests:** unit tests. End to end on a host with XFS or Btrfs, where the owner of a test host has one.
 - **Docs:** `docs/how-to/sandboxes.md`.
 - **CHANGELOG:** Added. "On hosts whose disks support it, a sandbox keeps a checkpoint after each turn, and `rewind` goes back to one."
@@ -1279,12 +1393,12 @@ The rule of this phase: **the laptop holds the digests, the hosts hold the bytes
 
 ### P5.5 Save an image
 
-- **Goal:** `save` turns a microvm session's root changes into a new image. A review first flags shell start files, git hooks and folders on `PATH`, and a scan looks for the session's secret values.
-- **Files:** new `internal/image/save.go`, new `internal/cli/save.go`.
-- **Acceptance:** `save` makes an image only after the review. A session's secret value in the changes stops the save. The image stays on the host that made it, and the launcher marks it "made on <host>". The laptop records its digest in `images.lock` for that host only, and never sends the image or its digest to another host (spec 14.9.5).
+- **Goal:** `image save` turns a microvm session's root changes into a new image. A review first flags shell start files, git hooks and folders on `PATH`, and a scan looks for the session's secret values.
+- **Files:** new `internal/image/save.go`, `internal/cli/image.go` (`image save`).
+- **Acceptance:** `image save` makes an image only after the review. A session's secret value in the changes stops the save. The image stays on the host that made it, and the launcher marks it "made on <host>". The laptop records its digest in `images.lock` for that host only, and never sends the image or its digest to another host (spec 14.9.5).
 - **Tests:** unit tests of the review and of the scan.
 - **Docs:** `docs/how-to/sandboxes.md`.
-- **CHANGELOG:** Added. "`save` makes an image from a sandbox's system changes, after you review them."
+- **CHANGELOG:** Added. "`image save` makes an image from a sandbox's system changes, after you review them."
 - **Depends on:** P3.2.
 - **Questions:** 35.
 - **Effort:** M.
@@ -1339,7 +1453,7 @@ The rule of this phase: **the laptop holds the digests, the hosts hold the bytes
 - **Files:** new `internal/egress/registry.go`, new `internal/egress/rules/feed/` (the feed that each release carries), `internal/cli/host.go` (`host feed sync`).
 - **Acceptance:** a version younger than the age is refused, with a hint. A version in the feed is refused. A dependency from a git URL is refused. Nothing fetches the feed unless a release carries it or the user starts a sync.
 - **Tests:** unit tests with recorded registry answers.
-- **Docs:** `docs/how-to/grants.md`.
+- **Docs:** `docs/how-to/policy.md`.
 - **CHANGELOG:** Added. "The proxy of a sandbox refuses package versions published in the last week, and known malicious packages."
 - **Depends on:** P2.2.
 - **Questions:** [20](isolation-spec.md#15-open-questions).
@@ -1374,7 +1488,7 @@ The rule of this phase: **the laptop holds the digests, the hosts hold the bytes
 - **Goal:** `new --machine <provider>` makes one provider machine for the session. The helper runs there as a host, and the session runs inside at that machine's own floor. A supervisor and an egress process still sit outside the inner wall. The machine gets its provider's tier from H4: `shared` for E2B and other hosted providers ([question 32](isolation-spec.md#15-open-questions)).
 - **Files:** `internal/cli/session.go` (`--machine`), `internal/client/machine.go`, `internal/client/provider.go`, `internal/provider/e2b/`.
 - **Acceptance:**
-  - `new --machine e2b` makes one machine, runs the session in a sandbox there, and removes the machine at `kill`.
+  - `new --machine e2b` makes one machine, runs the session in a sandbox there, and removes the machine at `rm`.
   - A secret reaches the machine only as an exposed secret, recorded as such, and only when `[secret_tiers]` allows its tier ([question 22](isolation-spec.md#15-open-questions)).
   - On E2B, the task first tests whether P1.5 works inside E2B's guest, and records the result. Until a test passes, the floor there is the probe's answer.
 - **Tests:** unit tests with the fake E2B provider in `internal/provider/e2b`. A run against E2B itself costs money, so it is a manual check for the owner.
@@ -1396,7 +1510,7 @@ These tasks come last ([question 27](isolation-spec.md#15-open-questions)). Sepa
   - `internal/client/rootstep.go` (the `launcher` step).
   - `internal/supply` (the launcher as an entry of the release manifest).
   - `go.mod` (`github.com/hiddeco/sshsig`).
-  - New `docs/contributing/decisions/0042-separate-accounts-for-sandboxes.md`, and the records index.
+  - New `docs/contributing/decisions/0043-separate-accounts-for-sandboxes.md`, and the records index.
 - **Acceptance:**
   - The sudoers line allows no arguments.
   - The launcher refuses any request that fails its checks.
@@ -1404,9 +1518,9 @@ These tasks come last ([question 27](isolation-spec.md#15-open-questions)). Sepa
   - It checks signatures in Go, never with `ssh-keygen` ([question 38](isolation-spec.md#15-open-questions)).
   - An outside security review has read it. The pull request asks for the review, and the owner merges only after it.
 - **Tests:** fuzz tests of the request parser. Tests that every refusal path ends without a change.
-- **Docs:** `docs/how-to/give-a-host-the-root-step.md`. The record 0042.
-- **CHANGELOG:** Added. "An optional root-owned launcher can start sandboxes under accounts of their own. `host prepare --root` installs it with one sudo line that allows no arguments."
-- **Depends on:** H7, H9, P4.1. It adds the record 0042.
+- **Docs:** `docs/how-to/give-a-host-the-root-step.md`. The record 0043.
+- **CHANGELOG:** Added. "An optional root-owned launcher can start sandboxes under accounts of their own. `host prepare --root-step` installs it with one sudo line that allows no arguments."
+- **Depends on:** H7, H9, P4.1. It adds the record 0043.
 - **Questions:** [27](isolation-spec.md#15-open-questions), [30](isolation-spec.md#15-open-questions), [38](isolation-spec.md#15-open-questions).
 - **Effort:** L.
 
@@ -1434,6 +1548,9 @@ The design's own risks are in [spec 16](isolation-spec.md#16-risks-and-mitigatio
 | Stacked branches drift. A change to an early pull request after review means a rebase of every later branch. | Keep each task small. After the owner merges a pull request or asks for a change, rebase the later branches in order, and run the checks again on each. |
 | Test host access. End-to-end tests need a host whose owner allowed them, and some tests need root or a reboot. | Use `hosttest` and VMs that the tests create and delete. Mark a check manual when it needs a reboot, a prompt, root without `E2E_ROOT=run`, or a paid provider. |
 | Upstream pins move. Ghostty, Cloud Hypervisor, Firecracker, gVisor, Lima and the guest kernel may change between this plan and the task. | Each task checks its pin against the pinned release before it builds on it. P0.9 watches the pins from the start. An UNVERIFIED mark goes only after that check. |
-| One maintainer reviews 71 pull requests, and accepts 14 decision records. | Each record lands with its first task, so the owner reviews it once. Each phase ends with something that users can use, so the owner can merge one phase and stop. |
-| The spec and this plan drift apart. The folds rename some parts, such as `host wall --setup`. | Each task corrects the spec in the same pull request when it builds a folded part. |
+| One maintainer reviews 76 pull requests, and accepts 15 decision records. | Each record lands with its first task, so the owner reviews it once. Each phase ends with something that users can use, so the owner can merge one phase and stop. |
+| The spec and this plan drift apart. The folds rename some parts, such as P3.7's set-up command. | Each task corrects the spec in the same pull request when it builds a folded part. |
 | Proposed records block the stack. A record that the owner rejects stops every later task that needs it. | Each pull request names its records. The owner can merge the tasks before a rejected record, and the implementer reworks the rest. |
+| A model judge is slow or costly when many sessions run at once. | The fixed steps decide most flows without a judge. The rate limit, the 5 s timeout and the cache of answers for each session bound it. P2.12 measures it, and a local model costs nothing to call. |
+| The two plans rename commands at the same time. | Every command of this plan follows 0033 from the start. [The CLI plan](cli-plan.md) renames only today's commands, with warned aliases. P1.8 waits for C2 and C4. |
+| A shell beside the agent makes users trust the sandbox's files on the laptop. | Work still reaches the laptop only through `pull` and its review. `docs/how-to/shells.md` says so. |
