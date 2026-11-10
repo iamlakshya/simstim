@@ -27,7 +27,7 @@ state() { cat "$FAKE_DIR/state-$1" 2>/dev/null; }
 case $cmd in
 inspect)
   name=$3
-  if [ -f "$FAKE_DIR/state-$name" ]; then state "$name"; else echo "Error: No such object: $name" >&2; exit 1; fi ;;
+  if [ -f "$FAKE_DIR/state-$name" ]; then state "$name"; else echo "${FAKE_MISSING:-Error: No such object}: $name" >&2; exit 1; fi ;;
 run)
   while [ "$1" != "--name" ]; do shift; done
   echo running > "$FAKE_DIR/state-$2"; echo 0123456789ab ;;
@@ -131,6 +131,36 @@ func TestCreateAndLifecycle(t *testing.T) {
 	// Destroying what is gone is fine.
 	if err := lc.Destroy(ctx); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// Docker words a missing container in more than one way, and newer Docker
+// writes it in lower case. Each one means "no container", not an error.
+func TestMissingContainerWording(t *testing.T) {
+	for _, msg := range []string{
+		"Error: No such object",
+		"error: no such object",
+		"Error response from daemon: No such container",
+	} {
+		t.Run(msg, func(t *testing.T) {
+			setup(t)
+			t.Setenv("FAKE_MISSING", msg)
+			ctx := context.Background()
+			h, err := docker.Provider{}.Create(ctx, provider.Request{Name: "box"})
+			if err != nil {
+				t.Fatalf("create: %v", err)
+			}
+			lc, err := docker.Provider{}.Open(h)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := lc.Destroy(ctx); err != nil {
+				t.Fatal(err)
+			}
+			if s, err := lc.Status(ctx); err != nil || s != client.MachineMissing {
+				t.Fatalf("status after destroy = %s, %v", s, err)
+			}
+		})
 	}
 }
 
