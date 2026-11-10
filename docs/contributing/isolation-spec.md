@@ -1163,7 +1163,7 @@ sandbox.wall = "microvm"
 network.allow = ["api.stripe.com"]
 
 [repos."github.com/acme/*"]      # every repository of one owner. An exact name wins (18.2).
-sandbox.on_hosts = ["location=annex"]   # the hosts that may run these sessions
+sandbox.host = ["mac1", "mac2"]   # the host when the invoker names none (18.2)
 
 [placement]                      # for new auto (14.10.5)
 strategy = "spread"              # spread or pack
@@ -1187,7 +1187,7 @@ default = "box"
 [[host]]
 name = "box"
 ssh = "me@box"
-labels = { location = "home" }        # host add --label and host set label.<key>= (18.2)
+labels = { location = "home" }        # metadata: shown, never used to pick a host (18.2)
 wall_floor = "microvm"           # the floor: pinned by host add, host create and host prepare, changed by host set
 # Repositories that may be sent to this host in clone mode. Only shared hosts use it.
 repos = ["github.com/example/*"]
@@ -1389,7 +1389,7 @@ Every command follows [0033](decisions/0033-one-command-grammar.md): session ver
 | `simstim new [<host>\|auto] … [--wall auto\|none\|process\|gvisor\|microvm] [--downgrade] [--profile <p>] [--set <key>=<value>]… [--preset locked\|balanced\|open] [--allow <host>]… [--deny <host>]… [--mount <path>[:<guest>][:ro\|:rw]]… [--expose <NAME>]… [--include <path>]… [--task <text>]` | Starts a session in a new sandbox. The host comes from section 14.10.1. The other flags stay as today. `--task` is one line about the work, which the launcher shows and the judge reads (7.8). | P1, P1.12, P2, H12 |
 | `simstim new [<host>] --in <session> …` | Starts another agent in that session's sandbox (6.11) | P1.13 |
 | `simstim new [<host>\|auto] … [--untrusted] [--ssh-agent]` | `--untrusted` sets the request tier (14.8.4). `--ssh-agent` forwards the laptop's SSH agent to one unwalled session on an `own` host (14.8.2). | H5 |
-| `simstim new auto … [--need arch=…,<feature>,<label>=<value>] [--dry-run] [--allow-wake]` | Places the session on a host from live facts, and explains the choice (14.10.5) | H13 |
+| `simstim new auto … [--need arch=…,<feature>] [--dry-run] [--allow-wake]` | Places the session on a host from live facts, and explains the choice (14.10.5) | H13 |
 | `simstim new <host> … [--image <ref>] [--keep-system] [--docker]` | Microvm options | P3 |
 | `simstim new [<host>] … [--cpus <n>] [--memory <size>] [--env K[=V]]… [--env-file <file>] [--copy <laptop path>[:<guest path>]]… [--seed <laptop folder>] [--seed-dirty]` | Sizes, variables, files from the laptop and a seed from the laptop (17.1 to 17.4) | P1.14 |
 | `simstim new [<host>] … [--rm] [--count <n>]` | A throwaway sandbox, and many at once (17.6) | P1.16 |
@@ -1426,7 +1426,7 @@ Every command follows [0033](decisions/0033-one-command-grammar.md): session ver
 | `simstim host join [--account <name>] [--cpus <n>] [--memory <size>]` | On the machine: makes the account, the path and, on a Mac, the VM, then prints a reply code (18.3, 18.4) | H20, H21 |
 | `simstim host add <name> --accept - [--address <address>]` | Reads the reply, pins its host keys and adds the host (18.3) | H20 |
 | `simstim host leave` | On a joined machine: undoes what `host join` did (18.4) | H20, H21 |
-| `simstim host set <host> label.<key>=<value>` | Sets or removes a label (18.2) | H19 |
+| `simstim host set <host> label.<key>=<value>` | Sets or removes a label, which is metadata (18.2) | H19 |
 | `simstim host doctor <host> [--fix] [--json]` | As today, with a "Sandboxes" block, health items and the route | H6, H14, H16 |
 | `simstim image ls [<host>]`, `image pull <ref> <host>`, `image rm <digest> <host>` | Lists, prepares and removes images on a host | P3 |
 | `simstim image save <host>/<session> <ref>` | Saves the root's changes as an image, after a review (microvm) | P5 |
@@ -2481,10 +2481,8 @@ The grammar is `new [<host> | auto | -] [flags] [-- command…]`. Only one word 
 1. A host named on the command line.
 2. `-`: the host of the last session that the launcher attached to (`tui.LastSession`).
 3. `auto`: section 14.10.5 (task H13).
-4. No host: `SIMSTIM_DEFAULT_HOST`, then `default` in `hosts.toml`, then the only saved host that is not `shared`.
+4. No host: a rule, which is `sandbox.host` from the session's profile or repository (18.2). Then `SIMSTIM_DEFAULT_HOST`, then `default` in `hosts.toml`, then the only saved host that is not `shared`.
 5. Otherwise, the error in section 14.14, which lists the hosts with room.
-
-Each step takes only hosts that match the session's `on_hosts` (18.2).
 
 - `auto` and any name that starts with `-` cannot name a host. `ValidHostName` refuses them.
 - `simstim host default <name>` sets the default. `host default` prints it. `host default --clear` removes it. `host default auto` makes `auto` the default, after task H13.
@@ -2536,13 +2534,13 @@ A sandbox that does not fit is refused, not made smaller. This differs from [002
 
 `client.Place` does these steps:
 
-1. **Need.** Memory and CPUs come from the sandbox's size: `--memory-max`, `sessions.memory_max` or the template ([question 14](#15-open-questions)). `--need arch=arm64,gpu,label=value` adds the architecture, features and labels. `MinLevel` is `microvm`, or the level that `--wall` or the config names. `gvisor` is the weakest level that `auto` takes, and `process` is never allowed for `auto` ([question 5](#15-open-questions)). A request that names an `own`-tier secret needs an `own` host.
+1. **Need.** Memory and CPUs come from the sandbox's size: `--memory-max`, `sessions.memory_max` or the template ([question 14](#15-open-questions)). `--need arch=arm64,gpu` adds the architecture and features. `MinLevel` is `microvm`, or the level that `--wall` or the config names. `gvisor` is the weakest level that `auto` takes, and `process` is never allowed for `auto` ([question 5](#15-open-questions)). A request that names an `own`-tier secret needs an `own` host.
 2. **Candidates.** The hosts in the pool, by section 14.8.2 and `[host.place]`, whose `mandatory` features the request names. Hosts outside the pool are never contacted.
 3. **Facts.** Cached facts younger than 30 s. For the rest, all at once, `Dial` with `WithoutWake` and a deadline of 2.5 s for the whole fan-out. A host that misses it is "away". A stopped machine host is classed by its lifecycle's `Status`, without a dial.
 4. **Filter.** A host is rejected, with a reason, when:
    - It is away and has no wake.
    - It drains, or has a `blocks_new` health item.
-   - Its architecture, level, labels or tier do not match.
+   - Its architecture, level or tier do not match.
    - Its room, less this laptop's in-flight placements of the last 60 s, is less than the need.
    - Its free disk is less than the missing image plus the sandbox's disk.
    - Its facts disagree with `[host.sandbox]`: `mem_total` differs by more than 1 %, `arch` differs, or `level` is stronger than at prepare time.
@@ -3252,10 +3250,10 @@ This is the only full list. Each question has its options and a recommended defa
 
 ### Hosts in more than one location
 
-66. **Is a location a rule or a preference?**
-    - (a) A rule: `on_hosts` refuses every other host.
-    - (b) A preference that `auto` ranks first.
-    - **Recommended:** (a). An organisation's code and secrets must not reach a home host while the hosts of their location are away. `[placement] prefer` already gives a preference.
+66. **How is a session's host picked?**
+    - (a) By a hard rule: `on_hosts` refuses every host outside it, even one that the invoker names.
+    - (b) By the invoker. When the invoker names no host, a rule picks one by profile, repository or organisation, then the default host does.
+    - **Recommended:** (b), as the owner decided on 10 November 2026. Hosts are known by their names, and labels are metadata. A secret's optional `on_hosts` keeps one hard limit where the user wants it.
 67. **How does a machine join?**
     - (a) Only through `host add` from the laptop.
     - (b) Also `host invite` and `host join`: the machine prepares itself, and the laptop then connects to it.
@@ -3324,7 +3322,7 @@ The research raised four more questions, and the design answers them, so they ar
 | `copy_in` or `--seed-dirty` sends a file that holds a secret. | Both refuse the paste guard's sensitive names. `--seed-dirty` prints each untracked file that it sends. `pull`'s review finds the session's own secrets on the way back (7.1). |
 | A kept cache that the agent poisoned is used again after a restart. | It stays inside the one sandbox that poisoned it, which can already change its own dependencies. `rm` deletes it, and caches are never shared (17.5). |
 | `new --count` asks for more sandboxes than a host can take. | Admission refuses each one that does not fit, and the answer lists which started (14.10.3). |
-| A Mac host restarts while nobody is near it, and stays at the FileVault unlock. | `ls` shows it as away, and `auto` skips it. The docs give `fdesetup authrestart` for planned restarts. Work that must not wait goes to a host at another location, if `on_hosts` allows one. |
+| A Mac host restarts while nobody is near it, and stays at the FileVault unlock. | `ls` shows it as away, and `auto` skips it. The docs give `fdesetup authrestart` for planned restarts. The invoker can start work that must not wait on another host, unless a secret's `on_hosts` forbids it. |
 | A Mac laptop that runs all day with the lid open ages its battery and runs hot. | The docs say to set Charge Limit to 80 % and to keep the Mac at 10 °C to 35 °C with good air flow. `host doctor` reads the thermal state. |
 | An organisation's MDM changes sshd or the power settings under the host. | The key's own options hold with a managed sshd. `host doctor` reports what MDM controls, and the health items `mac_sleep_on` and `mac_on_battery`. |
 | A Claude.ai login brings the account's MCP connectors, which act on the provider's side with no field in the request ([issue 612](https://github.com/docker/sbx-releases/issues/612)). | The model API guard cannot see them. The docs say to use an API key, or an account without connectors, for a sandbox. |
@@ -3452,46 +3450,57 @@ Rows for GitHub Copilot CLI, Kiro CLI, Factory Droid, pi, Kimi Code and Mistral 
 ### 18.1 Scope
 
 - A user may keep hosts in more than one location, for example a homelab and Mac laptops in another building. Some work must stay in one location: an organisation's repositories and secrets on the hosts there, and personal work at home.
-- This section adds four parts. A rule keeps sessions and secrets on chosen hosts (18.2). A machine can prepare itself from its own keyboard (18.3). Mac laptops can be hosts (18.4). Notes cover homelab hosts (18.5).
+- This section adds four parts. Rules pick a host when the invoker names none (18.2). A machine can prepare itself from its own keyboard (18.3). Mac laptops can be hosts (18.4). Notes cover homelab hosts (18.5).
 - The project's rules stay. Nothing listens, nothing calls home, and the tool runs no relay. The laptop starts every connection.
 - The research is in [Hosts in two locations](../research/locations.md).
 
-### 18.2 Locations (H19)
+### 18.2 Picking a host (H19)
 
-**Labels.** `host add --label location=annex` saves labels today, in `client.Host.Labels`. `host set <host> label.<key>=<value>` changes one, and `label.<key>=` with no value removes it. `host ls` and the launcher's details line show the labels. When any host has a `location` label, the launcher groups its host list by that label.
+The invoker picks the host. Hosts are known by their names, and labels are metadata. When the invoker names no host, rules pick one by the kind of task, the repository or the organisation ([question 66](#15-open-questions)).
 
-**`on_hosts`.** This key holds a list of host names and `<key>=<value>` selectors. A host matches when it matches any item. `!` before an item drops the hosts that it matches, as `!NAME` does in other lists (8.2). No key, or `["*"]`, means every host.
+**Order.** `client.ResolveHost` (14.10.1) picks the host of a new session in this order:
 
-- `sandbox.on_hosts` in any layer of `config.toml` limits where a session may run. The narrowest layer that sets it decides, and `[lock]` holds it, as for every key (8.2).
-- `on_hosts` in `[secrets.NAME]` limits which hosts may get that secret. The grant gate checks it with the tier (14.8.5), and both must pass. The key `hosts` in the same table names web sites, not machines (7.3).
-- A repository section's name may end in `/*`. `[repos."github.com/acme/*"]` matches every repository of that owner. An exact name wins over a name with `/*`.
+1. A host that the invoker names, on the command line or in the launcher's dialog, or `-` for the host of the last session. It always wins. No rule and no lock can refuse it.
+2. `auto` on the command line (14.10.5).
+3. A rule: `sandbox.host` from the narrowest layer that sets it (8.2). That is the session's own `--set`, then its profile, then its repository.
+4. `SIMSTIM_DEFAULT_HOST`, then the default host that `host default` sets, then the only saved host that is not `shared`.
+5. Otherwise, the error in section 14.14, which lists the hosts.
+
+`new` and the launcher say what picked the host, for example "mac1, from the rule for github.com/acme/*". The launcher's dialog fills its host row in the same way, and the invoker can change it there.
+
+**Rules.** `sandbox.host` holds a host name, a list of names, or `auto`.
+
+- **A list** means the first host in it that answers and admits the session (14.10.3). `new` names each host that it passed over, with the reason: "mac1 has no room, so mac2."
+- **`auto`** ranks the hosts of the pool (14.10.5).
+- **A profile** stands for a kind of task: `new --profile review` takes the rule in `[profiles.review]`. The one line of `new --task` stays a note for people and the judge. A rule that matched free text would pick hosts by accident.
+- **A repository section** is named by the repository's origin, or by a path that ends in `/*`, such as an organisation: `[repos."github.com/acme/*"]`. The longest name that matches wins, so an exact name wins over a name with `/*`.
+- **Not in every layer.** The all-sessions layer cannot set `sandbox.host`, because `host default` already sets the host for sessions that no rule covers. `[lock]` cannot hold it, because the invoker always picks.
+- **A rule that names a host that is not saved** is an error at `config check`, and at `new` when that rule applies.
+- **A `shared` host** that a rule names counts as named by the request (14.8.2), as the invoker's own choice does.
 
 ```toml
 [repos."github.com/acme/*"]                # every repository of one organisation
-sandbox.on_hosts = ["location=annex"]
+sandbox.host = ["mac1", "mac2"]            # the first that answers and has room
 sandbox.secrets = ["ACME_GITHUB_TOKEN"]
+
+[repos."github.com/acme/infra"]            # an exact name wins over the section above
+sandbox.host = "mac2"
+
+[profiles.review]                          # new --profile review
+sandbox.host = "nuc"
 
 [secrets.ACME_GITHUB_TOKEN]
 run = "op read op://acme/github/token"
 hosts = ["github.com", "api.github.com"]   # the web sites that the value may reach (7.3)
-on_hosts = ["location=annex"]                  # the machines that may get it
+on_hosts = ["mac1", "mac2"]                # optional: the only hosts that may get it
 
 [secret_tiers]
-ACME_GITHUB_TOKEN = "shared"               # the Macs in that location are shared hosts (18.4)
-
-[profiles.personal]
-sandbox.on_hosts = ["location=home"]
+ACME_GITHUB_TOKEN = "shared"               # the Macs are shared hosts (18.4)
 ```
 
-**Host choice.** `client.ResolveHost` (14.10.1) applies the session's `on_hosts`:
+**Labels.** `host add --label location=annex` saves labels today, in `client.Host.Labels`. `host set <host> label.<key>=<value>` changes one, and `label.<key>=` with no value removes it. `host ls`, `host show`, `--json` and the launcher's details line show the labels, and provider scripts get them. No rule, placement step or grant reads a label.
 
-1. A host named on the command line, or `-`, must match. Otherwise `new` refuses with `host_not_allowed`.
-2. `auto` takes only matching hosts as candidates. A `shared` host that `on_hosts` names, by its name or a label, counts as named by the request (14.8.2). So it joins the pool for that start.
-3. With no host named, `new` takes the default host when it matches. Otherwise it takes the only matching host. Otherwise it uses `auto` within the list, after H13. Otherwise the error lists the matching hosts.
-
-**Secrets.** The grant gate refuses a secret whose `on_hosts` does not match the host, with `secret_not_here`. The grant ledger records the refusal, as for a tier.
-
-**A rule, not a preference.** A preference could send an organisation's code to a home host while the hosts of its location are away. `[placement] prefer` already gives a preference ([question 66](#15-open-questions)).
+**Secrets.** `on_hosts` in `[secrets.NAME]` is optional. It lists the names of the hosts that may get that secret. The grant gate checks it with the tier (14.8.5), and both must pass. When the invoker picks a host outside the list, the start stops before anything leaves the laptop, with `secret_not_here`. The invoker can then pick another host, or start without that secret. Without the key, every host that the tier allows may get the secret. The key `hosts` in the same table names web sites, not machines (7.3).
 
 ### 18.3 A machine that joins (H20)
 
@@ -3569,7 +3578,7 @@ laptop -> Mac sshd, as the dedicated account (its key may only open 127.0.0.1:<p
 - **After the unlock**, the launch daemon starts the VM, and the helper restores the sessions that were working (6.8).
 - **macOS updates** that restart the Mac follow the same rules. The docs say to install them by hand, or at the times that the organisation's MDM sets.
 
-**The tier.** A Mac that an organisation manages with MDM is `shared`, because the organisation's admins have root through MDM. The reply suggests `shared` when the Mac is enrolled. A `shared` host takes only the repositories that its `repos` list matches (14.8.2), so `host add --accept` asks for that list, for example `github.com/acme/*`. The organisation's secrets get `shared` in `[secret_tiers]` and an `on_hosts` rule (18.2). Personal secrets stay `own`, so they never reach such a Mac. The docs say to ask the organisation's IT team before its Mac becomes a host ([question 69](#15-open-questions)).
+**The tier.** A Mac that an organisation manages with MDM is `shared`, because the organisation's admins have root through MDM. The reply suggests `shared` when the Mac is enrolled. A `shared` host takes only the repositories that its `repos` list matches (14.8.2), so `host add --accept` asks for that list, for example `github.com/acme/*`. The organisation's secrets get `shared` in `[secret_tiers]`, and their `on_hosts` can list the Macs (18.2). Personal secrets stay `own`, so they never reach such a Mac. The docs say to ask the organisation's IT team before its Mac becomes a host ([question 69](#15-open-questions)).
 
 **Leave.** `sudo simstim host leave` on the Mac runs the leave script. It stops and deletes the VM, and removes the launch daemon, the drop-in, the account and its home folder. Then it restores the old `pmset` values. `host rm --purge` on the laptop purges the helper's files in the VM, as for any host (14.12). Its key has no shell on the Mac, so it cannot undo the Mac's changes. It ends with: "Run sudo simstim host leave on mac1 to remove the account and the VM."
 
@@ -3597,8 +3606,9 @@ laptop -> Mac sshd, as the dedicated account (its key may only open 127.0.0.1:<p
 
 | When | Message | Hint (Try:) |
 | --- | --- | --- |
-| `new box` where `on_hosts` does not match box (`host_not_allowed`) | box is not in on_hosts for github.com/acme/api (location=annex). | `simstim new mac1` |
-| A secret's `on_hosts` does not match the host (`secret_not_here`) | ACME_GITHUB_TOKEN may go only to hosts with location=annex. | `simstim new mac1` |
+| A rule names a host that is not saved (`host_unknown`) | The rule for github.com/acme/* names mac3, which is not a saved host. | `simstim host ls`, then fix the rule and run `simstim config check` |
+| No host in a rule's list can take the session (`no_host`) | No host in the rule for github.com/acme/* can take this session: mac1 is away, and mac2 has no room. | `simstim new nuc`, to pick a host yourself |
+| A secret's `on_hosts` does not list the host (`secret_not_here`) | ACME_GITHUB_TOKEN may go only to mac1 and mac2. | `simstim new mac1`, or start without it: `--set sandbox.secrets=!ACME_GITHUB_TOKEN` |
 | A reply that matches no open invite (`invite_unknown`) | This reply does not match an invite on this laptop. | `simstim host invite mac1`, then run simstim host join on the machine again |
 | A reply to an expired invite (`invite_expired`) | The invite for mac1 expired at 14:05. | `simstim host invite mac1` |
 | `host join` on an Intel Mac, or on macOS older than 15 | This Mac cannot be a host: it needs Apple silicon and macOS 15 or later. | Use a Linux host: `simstim host add` |

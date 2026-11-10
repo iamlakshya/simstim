@@ -113,7 +113,7 @@ Spec section 15 has each question in full, with its options: [open questions](is
 | 63 | Does a seed from the laptop include uncommitted work? | Only with `--seed-dirty`. | P1.14 |
 | 64 | A host-side MCP gateway or a shared skills store? | No. MCP servers run in the sandbox, and skills arrive by `copy_in`. | none |
 | 65 | How does a host get a private registry image? | The laptop pulls it with its own login and copies it. | P3.2 |
-| 66 | Is a location a rule or a preference? | A rule: `on_hosts` refuses every other host. | H19 |
+| 66 | How is a session's host picked? | By the invoker. Otherwise a rule by profile, repository or organisation, then the default host. | H19 |
 | 67 | How does a machine join? | Also `host invite` and `host join`. The laptop still starts every connection. | H20 |
 | 68 | How does a Mac host restart with FileVault on? | The docs give `fdesetup authrestart` for planned restarts, and an unlock from the Mac's own LAN after others. | H21 |
 | 69 | May a Mac that an organisation manages with MDM be a host? | Yes, as `shared`, after `host doctor` shows what MDM controls. | H21 |
@@ -193,7 +193,7 @@ Build the tasks from top to bottom. Every task named under "Depends on" is above
 | 67 | H14 | Health, runtime upgrades and drain | 4 | H11, H9, P4.6 | 42 | M |
 | 68 | H15 | Leave and wipe | 4 | H7, H5, H9 | 29 | M |
 | 69 | H16 | Reach a host behind NAT | 4 | H3, H9, 0031 | 36 | S |
-| 70 | H19 | Locations | 4 | P1.12, H5, H12, H13 | 66 | M |
+| 70 | H19 | Host rules | 4 | P1.12, H5, H12, H13 | 66 | M |
 | 71 | H20 | Machines that join | 4 | H3, H4, H7, H10, H15 | 67 | L |
 | 72 | H21 | A Mac as a host | 4 | H20, H14, H16, P0.8 | 37, 68, 69 | L |
 | 73 | P5.1 | Fork | 5 | P3.6 | 11 | M |
@@ -1283,7 +1283,7 @@ At the end of phase 3, a host with KVM and Linux 6.8 or later runs each session 
 
 ## Phase 4: the project's own supply chain, and many hosts
 
-The rule of this phase: **the laptop holds the digests, the hosts hold the bytes.** A host never decides what is trusted. Then H11 to H16 let `new` place a sandbox on any of the user's hosts, keep each host healthy, and leave a host clean. H11 to H13 replace P7.5. H19 to H21 add hosts in more than one location: rules that keep work in one location, machines that join from their own keyboard, and Macs as hosts.
+The rule of this phase: **the laptop holds the digests, the hosts hold the bytes.** A host never decides what is trusted. Then H11 to H16 let `new` place a sandbox on any of the user's hosts, keep each host healthy, and leave a host clean. H11 to H13 replace P7.5. H19 to H21 add hosts in more than one location: rules that pick a host by task, repository or organisation, machines that join from their own keyboard, and Macs as hosts.
 
 ### P4.2 Run verified bytes only
 
@@ -1396,7 +1396,7 @@ The rule of this phase: **the laptop holds the digests, the hosts hold the bytes
 
 ### H13 `new auto`
 
-- **Goal:** the client picks a host from live facts, explains why, and moves on when a host refuses (spec 14.10.5). P7.5's goal holds: `new` picks a host by floor, labels and free memory, from a quick facts request to each host.
+- **Goal:** the client picks a host from live facts, explains why, and moves on when a host refuses (spec 14.10.5). P7.5's goal holds: `new` picks a host by floor and free memory, from a quick facts request to each host.
 - **Files:**
   - `internal/client/place.go` (`Filter`, `Rank`, `Explain`, `Place`, the placements).
   - `internal/client/config.go` (`[placement]`, `Host.Place`).
@@ -1477,25 +1477,27 @@ The rule of this phase: **the laptop holds the digests, the hosts hold the bytes
 - **Questions:** [36](isolation-spec.md#15-open-questions).
 - **Effort:** S.
 
-### H19 Locations
+### H19 Host rules
 
-- **Goal:** spec 18.2 and 18.5. `on_hosts` in every layer and in `[secrets.NAME]`, repository sections whose names end in `/*`, `host set <host> label.<key>=<value>`, labels in `host ls` and the launcher, and the homelab notes.
+- **Goal:** spec 18.2 and 18.5. The invoker picks the host. When the invoker names none, `sandbox.host` in a profile or a repository section picks it, and repository sections whose names end in `/*` cover an organisation. Labels become metadata, and `--need` no longer takes them. A secret's optional `on_hosts` lists the only hosts that may get it.
 - **Files:**
-  - New `internal/client/onhosts.go` (`HostSelector`, `Match`).
-  - `internal/client/place.go` (`ResolveHost`, and the candidates of `Place`).
+  - New `internal/client/hostrule.go` (`sandbox.host`: a name, a list or `auto`, and the reason for each host passed over).
+  - `internal/client/place.go` (`ResolveHost` in the order of spec 18.2, and `--need` without labels).
   - `internal/client/tier.go` and `internal/client/secrets.go` (the `on_hosts` check in the grant gate).
-  - `internal/client/config.go` (`[repos."<owner>/*"]`, and `on_hosts` in a secret).
-  - `internal/cli/host.go` (`host set … label.`), and `internal/tui/hosts_view.go` (the host list grouped by `location`).
+  - `internal/client/config.go` (`[repos."<path>/*"]`, the longest match, `sandbox.host`, and `on_hosts` in a secret). `config check` reports a rule that names a host that is not saved.
+  - `internal/cli/session.go` (the line that says what picked the host), `internal/cli/host.go` (`host set … label.`), and `internal/tui/dialog.go` (the host row filled from the rule).
   - `internal/host/doctor.go` (the hint for a VM without the CPU's virtualisation flags).
 - **Acceptance:**
-  - With `sandbox.on_hosts = ["location=annex"]` for `github.com/acme/*`, `new box` in a clone of `github.com/acme/api` refuses with `host_not_allowed`. `new` with no host picks the host in that location.
-  - `--set sandbox.on_hosts=box` lets one session run on `box`, unless `[lock]` holds the key.
-  - `auto` never contacts a host outside the list. A `shared` host that the list names joins the pool for that start.
-  - A secret whose `on_hosts` does not match never leaves the laptop, and the grant ledger records `secret_not_here`.
-  - An exact repository section wins over a section whose name ends in `/*`.
-- **Tests:** table tests of the selector: names, labels, `!`, `*` and no key. Tests of `ResolveHost` and of the grant gate with `on_hosts`. A test of the layer merge with a lock.
-- **Docs:** new `docs/how-to/hosts-at-two-locations.md` (labels, `on_hosts`, Tailscale on each host, and the homelab notes of spec 18.5). `just docs` for the reference.
-- **CHANGELOG:** Added. "Keep work on the hosts of one location. `on_hosts` in a repository, a profile or a secret names the hosts or labels that may get it, and `new` refuses any other host."
+  - With `sandbox.host = ["mac1", "mac2"]` for `github.com/acme/*`, `new` in a clone of `github.com/acme/api` starts on `mac1`, and prints "mac1, from the rule for github.com/acme/*".
+  - When `mac1` has no room, `new` starts on `mac2`, and says why it passed over `mac1`.
+  - `new nuc` in the same clone starts on `nuc`. No rule refuses a host that the invoker names.
+  - `[repos."github.com/acme/infra"]` wins over `[repos."github.com/acme/*"]`, and `new --profile review` wins over both.
+  - `sandbox.host` in the all-sessions layer or in `[lock]` is an error at `config check`.
+  - A label changes no choice of host.
+  - A secret whose `on_hosts` does not list the host never leaves the laptop. The start stops with `secret_not_here`, and the grant ledger records it.
+- **Tests:** table tests of `ResolveHost`: a named host, `-`, `auto`, a rule with one name, a list and `auto`, the default, and a rule that names an unknown host. Tests of the longest match of repository sections. Tests of the grant gate with `on_hosts`.
+- **Docs:** new `docs/how-to/pick-a-host.md` (the order, rules by profile, repository and organisation, and labels as metadata), new `docs/how-to/hosts-in-two-locations.md` (Tailscale on each host, and the homelab notes of spec 18.5). `just docs` for the reference.
+- **CHANGELOG:** Added. "Name a host for a repository, an organisation or a profile with `sandbox.host`, and `new` uses it when you name no host. A host that you name always wins. Labels are notes that never pick a host."
 - **Depends on:** P1.12, H5, H12, H13.
 - **Questions:** [66](isolation-spec.md#15-open-questions).
 - **Effort:** M.

@@ -12,7 +12,7 @@ The rules for the note:
 
 ## Summary
 
-1. **A location is a label and a rule.** Labels exist today: `host add --label location=annex` saves them. A rule that keeps a repository, a profile or a secret on the hosts of one location does not exist. The new key `on_hosts` adds it (spec 18.2).
+1. **The invoker picks the host, and rules fill in.** Hosts are known by their names, and labels exist today as metadata. Nothing yet picks a host for a repository, an organisation or a kind of task. `sandbox.host` in a profile or a repository section adds that (spec 18.2).
 2. **A Mac laptop can be a host, through a Lima VM, with limits.** It must stay on power with the lid open. After an unplanned restart, FileVault holds it at the unlock screen until someone unlocks it from the Mac's own LAN. Tailscale starts only after that unlock. With no other machine online at that location, nothing can wake or unlock it from far away.
 3. **A machine can prepare itself, and the laptop still connects to it.** `host join` on the machine makes a dedicated account, the VM and a narrow SSH path, then prints a reply code. The laptop reads the code and connects over SSH as `host add` does today. The machine never calls the laptop or any service of ours.
 4. **In a homelab, use a VM with the host's CPU type, and probe for KVM.** Proxmox hides the CPU's virtualisation flags from a VM by default, and an LXC container shares the Proxmox kernel. TrueNAS and Unraid hosts get the helper in a VM.
@@ -100,7 +100,7 @@ The rules for the note:
 
 ## 4. What the design takes from this
 
-1. **Labels name locations, and `on_hosts` keeps work there.** A repository, a profile or a secret names the hosts or labels that may get it. `new` refuses any other host.
+1. **The invoker picks, and rules fill in.** A profile, a repository or an organisation can name the host for its sessions. A host that the invoker names always wins. A secret can list the only hosts that may get it.
 2. **A Mac host is a Lima VM behind a narrow door.** The VM runs in plain mode, with `hostLoopback` off and a fixed SSH port. A dedicated macOS account holds a key that can only open a channel to that port. A launch daemon starts the VM at boot.
 3. **The Mac stays awake on purpose.** The join sets `pmset -c sleep 0` with the user's consent and records the old values. The docs say: lid open, on power, Charge Limit at 80 %, good air flow.
 4. **Restarts are a known gap.** The docs explain the FileVault unlock and `fdesetup authrestart`. `host doctor` shows the restart risk, and `ls` marks a Mac host "away" until it answers.
