@@ -20,6 +20,8 @@ The path reaches L5, but the chosen L5 option secures only the project's own art
 
 Every fact that no primary source confirms is marked UNVERIFIED. Where the fact check corrected a claim, this spec uses the correction.
 
+**The second pass.** On 10 November 2026 the owner asked for more control: one config for all sessions that a narrower place can override, one-off exceptions, no forced strict defaults, a shell beside the agent, and research on automatic classifiers, so that many sessions can run at once. The owner also asked for a command line that is easy to guess. This pass adds the layers, profiles and locks of section 8, the unknown action and the classifier of 7.2 and 7.8, SSH keys (7.9), and shells in a sandbox (6.11). Every command now follows [0033](decisions/0033-one-command-grammar.md). [The research](../research/isolation.md#policy-for-parallel-work) and [the CLI study](../research/cli-dx.md) give the evidence.
+
 **Words.** `<name>` is `brand.Name`, today `simstim`. Code never spells the product name outside `internal/brand` ([0007](decisions/0007-name-in-one-place.md)). Commands in this spec are written as users type them, `simstim …`. Section 14 writes paths and names with today's name, such as `~/.config/simstim/tiers.toml`. Code builds each of them from `brand`.
 
 ## 1. Goal, scope and non-goals
@@ -36,7 +38,10 @@ The product reference is a sandbox service on hosts that the user owns: one comm
 - A floor for each host, pinned on the laptop, and recorded downgrades.
 - A trusted supervisor for each session, outside the wall, and the holder inside it.
 - Doors that are closed by default: files, network, secrets, ports, devices, paste and terminal output (section 7).
-- Grants and policy, with presets, per-repository rules and live grants.
+- Policy in layers: built-in, all sessions, a host, a repository, a profile and a session, with locks, one-off rules that end by themselves, and changes that reach running sandboxes (section 8).
+- An unknown action for sites that no rule covers, and a classifier that decides them for work with nobody at the terminal (7.2, 7.8).
+- Shells and commands in the same sandbox as the agent (6.11).
+- SSH keys that a sandbox can use but not read (7.9).
 - Secrets that the sandbox can use but not read (sentinels).
 - Stop, wake on attach, restore after a reboot, fork and destroy.
 - A verified boot chain for the microvm wall, and checks of the project's own artefacts.
@@ -54,6 +59,7 @@ The product reference is a sandbox service on hosts that the user owns: one comm
 - **No judgement of code.** The review summary on `pull` flags risky files. It cannot find a backdoor in ordinary code.
 - **No GPU or other device passthrough** in this plan.
 - **The tool still never changes an agent's own permissions** ([design](../explanation/design.md#non-goals)). Policy acts at the doors, outside the agent.
+- **No judgement of commands.** The classifier judges only what crosses a door. Whatever runs inside the sandbox stays inside it (7.8).
 
 ## 2. Terms
 
@@ -63,9 +69,10 @@ One name for each thing. Other documents and the code use these names and no oth
 | --- | --- | --- |
 | host | A machine that runs the host helper and sessions, as today. | `client.Host` |
 | laptop | The machine that runs the client, as today. | |
-| session | One unit of work in the list: a name, an agent, a folder and a state, as today. `new` starts one. | `host.Manifest` |
+| session | One unit of work in the list: a name, an agent, a folder and a state, as today. `new` starts one. A walled session runs in one sandbox. | `host.Manifest` |
 | agent | The AI coding CLI, or any program, that a session runs. Never the helper. | `agents.Agent` |
-| sandbox | The isolated place where one session's agent and all its processes run. A walled session has exactly one sandbox. | `wall.Sandbox` |
+| sandbox | The isolated place where one or more sessions run, with all their processes. `new` makes a sandbox for its session. `shell` and `new --in` add sessions to a sandbox that exists. The sessions in a sandbox share its files, its policy and its secrets. | `wall.Sandbox` |
+| shell session | A session that runs a login shell in the sandbox of another session, for commands that the user types (6.11). | `api.SessionInfo.SandboxOf` |
 | wall | What separates a sandbox from the host and from other sandboxes. Never the name of a kind of sandbox. | `internal/wall` |
 | level | How strong a wall is: `none` (W0), `process` (W1), `gvisor` (W2) or `microvm` (W3). `vz` is a later level for Mac hosts ([question 37](#15-open-questions)), and it ranks with `microvm`. | `wall.Level` |
 | floor | Only this: the weakest level that a host may give a new session. The client pins it in `hosts.toml`. A host's tier sets the lowest floor allowed (14.8.2). | `client.Host.WallFloor` |
@@ -80,13 +87,20 @@ One name for each thing. Other documents and the code use these names and no oth
 | guest init | The host helper as the first process inside the wall. It sets the sandbox up, starts the holder and serves the link. | `internal/guest` |
 | holder | As today: the PTY, the 8 MiB ring, the shadow terminal and the status engine. In a walled session it runs inside the wall. | `host.Holder` |
 | link | The one byte stream between a supervisor and its guest init. It carries many streams. | `internal/link` |
-| stream | One two-way byte stream inside a link. Each has a kind: `ctl`, `holder`, `egress`, `dns`, `port`, `put` or `bundle`. | `link.Stream` |
+| stream | One two-way byte stream inside a link. Each has a kind: `ctl`, `holder`, `egress`, `dns`, `port`, `put`, `bundle`, `exec` or `agent`. | `link.Stream` |
 | door | One typed way across the wall: files, network, secrets, ports, devices, paste or terminal output. | `api.Door` |
-| grant | An explicit permission, made on the laptop, that opens a door for one target, with a scope, a source and an optional end time. A host's tier caps the grants that its sandboxes may get. | `api.Grant` |
+| rule | One allow or one deny for one door and one target, in one layer, with a source and an optional end time. | `api.Rule` |
+| grant | A rule that allows. A host's tier caps the grants that its sandboxes may get. | `api.Rule` |
+| layer | One place that rules and settings come from: built-in, all sessions, a host, a repository, a profile or a session (8.2). | `api.Layer` |
+| profile | A named set of settings and rules for a kind of work, such as `unattended`. A session uses at most one (8.3). | `config.Profile` |
+| lock | A value or a deny that no narrower layer may change. Only the user's own layers can lock (8.2). | `api.Lock` |
 | grant gate | The client's check that a host's tier allows each thing that leaves the laptop for it: a secret, the SSH agent, an alert token, a repository, a place in the auto pool (14.8). | `client.Allow` |
 | grant ledger | The laptop's record of which grants each host got: names, never values. | `grants.json` |
-| policy | The merged grants, denies, preset and level of one session. The supervisor keeps it. | `api.Policy` |
-| preset | A named starting point for the network door: `locked`, `balanced` or `open`. | `api.Preset` |
+| policy | The merged layers of one sandbox: its rules, locks, preset, unknown action and level. The supervisor keeps it. | `api.Policy` |
+| preset | A named starting point for the network door: `locked`, `balanced` or `open`. Any layer may pick it. | `api.Preset` |
+| unknown action | What the egress process does with a flow that no rule covers: `ask`, `deny`, `allow` or `classify` (7.2). | `api.Unknown` |
+| classifier | The trusted code that decides a flow that no rule covers, when the unknown action is `classify`. It runs fixed checks first, then the judge (7.8). | `internal/egress/classify` |
+| judge | The optional last step of the classifier: a model or a program that the user configures. It answers allow, deny or unsure. | `classify.Judge` |
 | egress process | The trusted, confined process of one session that makes every network connection for it. | `internal/egress` |
 | bound secret | A secret whose value stays in the egress process. The proxy puts it into requests to its bound hosts. | `api.SecretBound` |
 | exposed secret | A secret whose value enters the guest's environment, as all secrets do today. | `api.SecretExposed` |
@@ -192,6 +206,8 @@ Each guarantee names the levels and the phase from which it holds.
 
 A walled session has two halves. The trusted half runs in the session's systemd user unit, outside the wall: the supervisor and the egress process. The untrusted half runs inside the wall: the guest init, the holder with its ring and shadow terminal, and the agent. One link joins them. The client and the bridge do not change their path: the bridge still dials the session's socket, `paths.Socket(id)`. The supervisor serves that socket now, and passes each connection on to the holder inside the wall.
 
+A sandbox may hold more than one session: a shell session beside the agent, or a second agent (6.11). Its sessions share one supervisor, one egress process and one link. Each session has its own holder inside the wall and its own session socket outside.
+
 ```mermaid
 flowchart LR
   subgraph laptop["Laptop"]
@@ -246,7 +262,7 @@ flowchart LR
 5. Over the `ctl` stream it sends `start`: the command, an environment made from a fixed base (never the host's login environment), the sentinels, the proxy settings and the terminal size. The guest init clones the bundle into `/work/<repo>`, starts the holder, and the holder starts the agent.
 6. The client attaches. The supervisor passes frames to the holder and back. It checks frame types and sizes, and never reads the output's payload.
 7. Every network flow from the agent becomes an `egress` stream. The egress process decides, makes the connection, swaps sentinels for values on bound hosts, and writes one audit line.
-8. `pull` brings the work out as a git bundle into quarantine refs on the laptop. `stop` shuts the sandbox down and keeps `/work` and the agent's state folders. `kill` destroys it.
+8. `pull` brings the work out as a git bundle into quarantine refs on the laptop. `stop` shuts the sandbox down and keeps `/work` and the agent's state folders. `rm` destroys it.
 
 ## 5. Components
 
@@ -264,7 +280,8 @@ flowchart LR
 | Shadow terminal | As today. It now parses hostile bytes inside the wall. | Inside the wall | Untrusted | `vt/` |
 | Image builder | Pulls OCI images, flattens them, writes ext4 with a verity tree | Host, in a jail | Trusted code, confined process | `internal/image` (new, P3) |
 | Supply checks | The release manifest, digest checks, exec from a hashed descriptor, verity tables | Laptop and host | Trusted | `internal/supply` (new, P4) |
-| Grant rules | Policy merge, host pattern checks, scopes | Laptop and host | Trusted | `internal/grant` (new), types in `internal/api` |
+| Policy layers | The merge of layers, host pattern checks, locks | Laptop and host | Trusted | `internal/grant` (new), types in `internal/api` |
+| Classifier | The steps of 7.8, and the judge's client | Host, in the egress process | Trusted | `internal/egress/classify` (new) |
 | Grant gate | Checks each thing that leaves the laptop against the host's tier, and records it in the grant ledger | Laptop | Trusted | `internal/client/tier.go`, `grants.go` (new, 14.8) |
 | Placement | Picks a host for `new`, from saved defaults or live facts | Laptop | Trusted | `internal/client/place.go`, `facts.go` (new, 14.10) |
 | Sandbox probe, admission, purge | Report a host's features and facts, admit a sandbox under a lock, remove what the tool put on a host | Host | Trusted. The client treats their answers as claims. | `internal/host/capprobe*.go`, `facts.go`, `admit.go`, `purge.go` (new, 14) |
@@ -367,7 +384,7 @@ func Best(probes []Probe) Level
 func Drivers() []Driver
 ```
 
-Each driver's probe runs inside the sandbox probe (`sandbox.probe`, 14.3): at `host add`, `host prepare`, `host wall` and `host doctor`. Its result is cached for each boot in `StateDir()/walls.json`, keyed by `BootID()`.
+Each driver's probe runs inside the sandbox probe (`sandbox.probe`, 14.3): at `host add`, `host prepare`, `host show` and `host doctor`. Its result is cached for each boot in `StateDir()/walls.json`, keyed by `BootID()`.
 
 | Driver | Probe checks |
 | --- | --- |
@@ -520,36 +537,62 @@ const (
     DoorSecret Door = "secret" // a secret, bound or exposed
     DoorPort   Door = "port"   // a port forwarded to the laptop
     DoorPaste  Door = "paste"  // file types for drops and pastes
+    DoorSSHKey Door = "ssh-key" // a key that the sandbox's own SSH agent holds (7.9)
     DoorDevice Door = "device" // reserved, no grant is possible in this plan
 )
 
-// Scope is how long and how widely a grant holds.
-type Scope string
+// LayerKind is where a rule or a setting comes from, broadest first (8.2).
+type LayerKind string
 
 const (
-    ScopeSession Scope = "session" // this session only
-    ScopeRepo    Scope = "repo"    // every session of this repository, on the laptop
-    ScopeHost    Scope = "host"    // every session on this host, on the laptop
-    ScopeAlways  Scope = "always"  // every session, in config.toml
+    LayerBuiltin LayerKind = "builtin" // the preset lists, the agent table, the refused ranges
+    LayerAll     LayerKind = "all"     // the top level of config.toml
+    LayerHost    LayerKind = "host"    // the host's entry in hosts.toml
+    LayerRepo    LayerKind = "repo"    // the laptop's section, then the repository's own file
+    LayerProfile LayerKind = "profile" // [profiles.<name>]
+    LayerSession LayerKind = "session" // flags, --set, and rules made --in the session
 )
 
-// Grant opens one door for one target.
-type Grant struct {
+// Unknown is what the egress process does with a flow that no rule covers.
+type Unknown string
+
+const (
+    UnknownAsk      Unknown = "ask"
+    UnknownDeny     Unknown = "deny"
+    UnknownAllow    Unknown = "allow"
+    UnknownClassify Unknown = "classify"
+)
+
+// Rule allows or denies one door for one target. A rule that allows is a grant.
+type Rule struct {
     ID      string    `json:"id"`              // "g" and 6 base32 characters
+    Allow   bool      `json:"allow"`
     Door    Door      `json:"door"`
     Target  string    `json:"target"`          // "api.stripe.com:443", "~/data", "3000"
     Mode    string    `json:"mode,omitempty"`  // "ro" or "rw", "read" or "write", "bound" or "exposed"
-    Scope   Scope     `json:"scope"`
-    Source  string    `json:"source"`          // "preset", "agent", "user", "repo", "session", "live"
+    Layer   LayerKind `json:"layer"`
+    Name    string    `json:"name,omitempty"`  // the profile's name, the repository's remote or the host's name
+    Source  string    `json:"source"`          // "preset", "agent", "user", "repo-file", "live", "classifier"
+    Once    bool      `json:"once,omitempty"`  // ends after one flow
     Expires time.Time `json:"expires,omitzero"`
 }
 
-// Policy is one session's merged policy.
+// Lock is a value or a deny that no narrower layer may change.
+type Lock struct {
+    Key   string `json:"key"`             // "network.deny", "network.unknown", "sandbox.wall"
+    Value string `json:"value"`           // for a deny, the target
+    From  string `json:"from"`            // "config.toml" or the host's name
+}
+
+// Policy is one sandbox's merged policy.
 type Policy struct {
-    Level  string  `json:"level"`
-    Preset Preset  `json:"preset"`
-    Allow  []Grant `json:"allow"`
-    Deny   []Grant `json:"deny"`
+    Level   string  `json:"level"`
+    Preset  Preset  `json:"preset"`
+    Unknown Unknown `json:"unknown"`
+    Profile string  `json:"profile,omitempty"`
+    Rules   []Rule  `json:"rules"`
+    Locks   []Lock  `json:"locks,omitempty"`
+    Hash    string  `json:"hash"`  // of the layers, to find a sandbox whose files changed (8.8)
 }
 
 // CleanText removes C0 and C1 controls, DEL, bidirectional controls,
@@ -560,22 +603,27 @@ func CleanText(s string, max int) string
 ```
 
 ```go
-// Package grant merges the layers of a session's policy and checks targets.
+// Package grant merges the layers of a sandbox's policy and checks targets.
 package grant
 
-// Layer is one source of grants, lowest first: the preset, the agent,
-// the user's config, the repository, the session's flags, live grants.
+// Layer is one layer of section 8.2. Every layer has the same shape.
 type Layer struct {
-    Source string
-    Allow  []api.Grant
-    Deny   []api.Grant
-    Level  string // a level this layer asks for, or ""
-    Preset string // a preset this layer asks for, or ""
-    MayLower bool // true only for the user's own layers
+    Kind     api.LayerKind
+    Name     string            // the profile, the repository's remote or the host
+    Rules    []api.Rule
+    Values   map[string]string // "sandbox.preset": "locked", "network.unknown": "deny"
+    Lists    map[string][]string // "sandbox.secrets", with "!NAME" to drop an inherited item
+    Locks    []api.Lock        // only from the layers for all sessions and for a host
+    Untrusted bool             // the repository's own file: it may only narrow
 }
 
-// Merge applies the precedence of section 8.2.
+// Merge applies the precedence of section 8.2: locks first, then the
+// narrowest layer that sets a value or has a matching rule.
 func Merge(floor string, layers []Layer) (api.Policy, error)
+
+// Decide finds the rule that decides one target, and its layer. It
+// returns nil when no rule matches, and the caller takes the unknown action.
+func Decide(p api.Policy, door api.Door, target string) *api.Rule
 
 // CheckHost refuses a network target that is an IP literal in a refused
 // range, a wildcard that spans a public suffix or a private suffix of the
@@ -621,9 +669,9 @@ Every flow below is for a walled session. A session at level `none` keeps today'
 
 1. **Level.** The client picks the host first (14.10.1). It then picks the level in this order: `--wall`, the repository's section in `config.toml`, `[sandbox] wall`, then the host's floor. `auto` means the floor. A level below the floor stops here with the error `wall_floor` (9.3), unless the command has `--downgrade` or the launcher's downgrade sheet got the typed level name.
 2. **Secrets.** The grant gate checks each secret against the host's tier (14.8.5). The client then fetches the values of the session's secrets, as today ([secrets](../how-to/secrets.md)). For each secret it also sends the mode: bound when the user's config or the agent table names its hosts (P2), exposed when the user passed `--expose NAME`. Before P2 every secret is exposed.
-3. **Policy layers.** The client sends `new` with `NewArgs.Wall`, `NewArgs.Downgrade` and `NewArgs.Layers`: the user's config, the laptop's section for the repository, and the session's flags. The host adds the preset and the agent's needs.
+3. **Policy layers.** The client sends `new` with `NewArgs.Wall`, `NewArgs.Downgrade` and `NewArgs.Layers`: the layers of 8.2 that the laptop holds. These are all sessions, the host, the repository's section, the profile and the session's flags, with the locks. The host adds the built-in layer: the preset lists and the agent's needs.
 4. **Repository file.** If the folder is in a git repository with `.<name>/sandbox.toml`, the host reads it from the host's working tree, the trusted source, before any sandbox exists. Its denies, a stronger level and a tighter preset apply at once. Its proposed grants come back as a question (`CodeGrantQuestion`) with the file's SHA-256, unless the client's answers for that hash came with the request.
-5. **Seed.** The host runs `git bundle create <SessionDir>/seed.bundle <branch>` in the source repository, in a `git` jail with `-c core.fsmonitor=false -c core.hooksPath=/dev/null`. The bundle holds the branch that the folder has checked out (or `--base`), with its history. Untracked files, stashes, other branches and `.git/config` never enter. A folder outside git is refused, with `--mount` as the step to try.
+5. **Seed.** The host runs `git bundle create <SessionDir>/seed.bundle <branch>` in the source repository, in a `git` jail with `-c core.fsmonitor=false -c core.hooksPath=/dev/null`. The bundle holds the branch that the folder has checked out (or `--base`), with its history. Untracked files, stashes, other branches and `.git/config` never enter. A folder outside git gives an empty workspace, `/work/scratch`, and the row says "scratch". `--mount` brings such a folder in when the user wants it.
 6. **Manifest and unit.** When the request carries `NewArgs.Need`, admission runs first (14.10.3), and the trusted manifest is its reservation. The host writes the trusted manifest with `Wall`, `Policy` and the names and modes of the secrets, never their values. It starts the unit:
 
    ```text
@@ -655,15 +703,16 @@ A `stopped` session wakes on attach, as a stopped host does ([0013](decisions/00
 3. The supervisor passes frames both ways. To the guest it passes `THello`, `TPing`, `TAttach`, `TInput`, `TResize`, `TDetach`, `TTrace` and the `TRequest` ops of 10.4. To the bridge it passes `THello`, `TError`, `TPong`, `TResponse`, `TAttached`, `TOutput`, `TSnapshot`, `TEnded` and `TEvent`. Any other type closes the connection. It never reads an output payload.
 4. When the session is not armed (6.8) and the client has the values, the client sends `arm` before `attach`.
 
-### 6.4 Grant and revoke
+### 6.4 Add and remove a rule
 
-1. `simstim grant devbox/auth-fix net api.stripe.com` runs `grant.CheckHost` on the laptop. A `push` grant also asks the forge, with the real token on the laptop, whether the repository is public, and refuses a public one unless the user passed `--public`.
-2. The client sends the bridge op `grant`. The bridge passes it to the supervisor, which checks the target again and records the grant in the policy of the trusted manifest.
-3. The supervisor sends the new policy to the egress process, and writes the audit line `grant`.
-4. Doors that change while the session runs: `net`, `push` and `port`. Doors that change at the next start: `mount`, `secret` and `paste` types. For those, the answer says "applies at the next start".
-5. A scope wider than `session` is also written on the laptop: `repo` in `[repos."<remote>"]`, `host` in the host's entry of `hosts.toml`, and `always` in `[network]`. The launcher never offers `always` (9.4).
-6. `simstim revoke devbox/auth-fix g7k2m4q` removes the grant. The egress process closes every open flow that the grant allowed, and the supervisor writes the audit line `revoke`. A revoked port stops listening at once.
-7. Approving a held flow (7.2) is a grant with scope `session` and source `live`.
+1. `simstim policy allow api.stripe.com --in devbox/auth-fix` runs `grant.CheckHost` on the laptop. A `push` rule also asks the forge, with the real token on the laptop, whether the repository is public, and refuses a public one unless the user passed `--public`.
+2. For the session layer, the client sends the bridge op `policy.add`. The bridge passes it to the supervisor, which checks the target again and records the rule in the session layer of the trusted manifest.
+3. The supervisor merges the layers again (8.2), sends the new policy to the egress process, and writes the audit line `rule`.
+4. Doors that change while the session runs: `net`, `push` and `port`. Doors that change at the next start: `mount`, `secret`, `ssh-key` and `paste`. For those, the answer says "applies at the next start".
+5. For a wider layer (`--profile`, `--repo`, `--host` or `--all`), the client writes the rule to that layer's file. It then sends the new layer with `policy.replace` to every running sandbox that the layer reaches (8.8).
+6. `simstim policy rm g7k2m4q --in devbox/auth-fix` removes the rule. The egress process closes every open flow that the rule allowed, and the supervisor writes the audit line `rule_rm`. A removed port rule stops listening at once.
+7. A rule with `--once` ends after one flow. A rule with `--for` ends at its time. The supervisor removes it then, and writes the audit line `rule_end`.
+8. Approving a held flow (7.2) adds a rule with the scope that the user picked (9.4) and the source `live`. A judge's allow adds a rule with the source `classifier` and the scope `once` or `session` (7.8).
 
 ### 6.5 Fork (P5)
 
@@ -674,7 +723,7 @@ A `stopped` session wakes on attach, as a stopped host does ([0013](decisions/00
 
 ### 6.6 Stop and resume
 
-1. `simstim stop devbox/auth-fix` sends the session op `stop`. The supervisor sends `stop {grace: 10s}` on the `ctl` stream.
+1. `simstim stop devbox/auth-fix` sends the session op `stop`. The supervisor sends `stop {grace: 10s}` on the `ctl` stream. Every session of the sandbox stops with it.
 2. The guest holder sends `SIGTERM` to the agent's process group and waits. The guest init syncs, unmounts the session disk and calls `reboot(2)`. A microvm's VMM then exits. A process wall's guest init exits.
 3. After the grace, the supervisor kills the sandbox. It sets the state `stopped`, tells the egress process to drop its values, and exits. The unit ends.
 4. `/work/<repo>` and the agent's state folders stay. Everything else in the home, `/tmp` and the root's overlay goes.
@@ -682,8 +731,8 @@ A `stopped` session wakes on attach, as a stopped host does ([0013](decisions/00
 
 ### 6.7 Destroy
 
-1. `simstim kill devbox/auth-fix` stops the sandbox as in 6.6, with a 5 s grace.
-2. The supervisor compares the guest's last `refs` claim with the commits that the client has pulled (`Manifest.Pulled`). When commits are not pulled, `kill` refuses: "auth-fix has 3 commits that you have not pulled." Try: `simstim pull devbox/auth-fix`, or `simstim kill devbox/auth-fix --force`. The launcher's delete sheet says the same in its red rule. The host never runs git on the session's files to find out.
+1. `simstim rm devbox/auth-fix` stops the sandbox as in 6.6, with a 5 s grace. When the session is the first of its sandbox and others run there, `rm` lists them and asks first.
+2. The supervisor compares the guest's last `refs` claim with the commits that the client has pulled (`Manifest.Pulled`). When commits are not pulled, `rm` refuses: "auth-fix has 3 commits that you have not pulled." Try: `simstim pull devbox/auth-fix`, or `simstim rm devbox/auth-fix --force`. The launcher's delete sheet says the same in its red rule. The host never runs git on the session's files to find out.
 3. The driver's `Destroy` removes the session folder: the clone or the session disk, the state folders, the audit log and the logs. `os.RemoveAll` follows no symlink.
 
 ### 6.8 Restore after a host reboot
@@ -710,19 +759,40 @@ A `stopped` session wakes on attach, as a stopped host does ([0013](decisions/00
 5. The client sends `pulled` with the commits it fetched, and the supervisor records them in `Manifest.Pulled`.
 6. This path works over every transport, so `pull` now works on hosts made by `host create docker` and `e2b` too.
 
+### 6.11 Shells and commands in a sandbox (P1.13)
+
+Daily work needs a terminal beside the agent, in the same files: to run the tests, start a dev server or read the work. A shell on the host would need the host to run code in a folder that the sandbox can write, which the host never does (7.1). So the shell runs inside the sandbox.
+
+1. `simstim shell devbox/auth-fix` asks the supervisor of auth-fix for a new session in its sandbox. The supervisor sends `spawn` on the `ctl` stream, with the session's new ID, the command, the agent's base environment (the proxy, CA and sentinel variables), `cwd` `/work/<repo>` and the terminal size. The command is the image's login shell, or `[sandbox] shell` from any layer.
+2. The guest init starts a second holder, with its own socket `/run/<name>/holder-<id>.sock`. The supervisor serves the session socket `paths.Socket(<id>)` for it. The bridge, attach, replay by offset and alerts then work as for any session.
+3. The new session's trusted manifest has `SandboxOf` set to the first session's ID. Its name is `<name>-sh`, then `<name>-sh2` and so on, unless `--name` gives one. `shell` attaches to the newest shell session of the sandbox when one runs, and starts one when none does. `--new` always starts one.
+4. `simstim new devbox --in auth-fix --agent codex` starts a second agent in the same sandbox, in the same way.
+5. `simstim exec devbox/auth-fix -- npm test` runs one command without a terminal. The supervisor sends `exec`. The guest init runs the command as the agent's user in `/work/<repo>`, streams its output on a new `exec` stream, and returns its exit code. `exec` exits with that code. `--timeout` limits it, 10 minutes by default.
+
+The rules:
+
+- **One policy for each sandbox.** The sessions of a sandbox share its files, its network policy, its sentinels and its exposed secrets. A process in one session can reach the processes of another session in the same sandbox, so the sandbox is the unit of policy, not the terminal. A rule given `--in` a shell session applies to the whole sandbox, and the answer says so. For a wider door for a short time, use `--for 10m`.
+- **The same user.** A shell runs as the user `agent`, uid 1000, never as root. On a microvm with `--docker`, it is in the `docker` group, as the agent is.
+- **Lifecycle.** The sandbox runs while any of its sessions runs. When the last one ends, the sandbox stops as in 6.6, and keeps `/work`. `stop` on any of its sessions stops the sandbox and all its sessions, and the answer lists them. `rm` on a shell session ends only that session. `rm` on the first session destroys the sandbox, after it lists the other sessions and asks.
+- **Rows.** The launcher draws the sessions of one sandbox together: the first at the top, the others indented under it. `ls --json` adds `sandbox_of`.
+- **History.** The home resets at each start (7.1), so a shell's history goes with it. `[sandbox] keep = [".bash_history"]` in any layer keeps named files of the home across starts, as `StateDirs` does for agents. `keep` refuses files that a shell runs at start, such as `.bashrc`, `.profile`, `.bash_profile`, `.zshrc` and `.zprofile`, because a dropper would hide there.
+- **Unwalled sessions.** A session at the level `none` has no sandbox. `shell` on it opens a shell session on the host in the same folder, as `new <host> --dir <folder>` does today.
+
 ## 7. The doors
 
-Each door is closed by default. Each door has one kind of grant, and each grant goes into the audit log.
+Each door is closed by the built-in layer. A rule in any layer opens it (8.2), and every decision goes into the audit log. The word in the second column names the door in `policy` commands, in config files and in the audit log.
 
-| Door | Closed by default means | Grant | Changes while running | Phase |
-| --- | --- | --- | --- | --- |
-| Files | Only the session's own clone, a private home and read-only system files | `--mount`, `grant … mount` | No, next start | P1 |
-| Network | No route out but the egress process, and that refuses all but the preset | `--allow`, `grant … net`, `grant … push`, an approved hold | Yes | P1, P2 |
-| Secrets | No secret value in the guest | `--secret` (bound from P2), `--expose` | No, next start | P1, P2 |
-| Ports | Nothing from the sandbox reaches the laptop | `forward`, `grant … port` | Yes | P1 |
-| Devices | No device beyond the basics | None in this plan. `--docker` on a microvm (P3). | No | P3 |
-| Paste | Images and PDF files only, no sensitive path | `[sandbox] paste = "any"` | No | P0, P1 |
-| Terminal output | Bytes pass unchanged. Risky sequences are counted. | None | Not a door that closes | P7 |
+| Door | Word | Closed by the built-in layer means | Opened by | Changes while running | Phase |
+| --- | --- | --- | --- | --- | --- |
+| Files | `mount` | Only the session's own clone, a private home and read-only system files | `mounts` in any layer, `--mount`, `policy allow mount` | No, next start | P1 |
+| Network | `net` | No route out but the egress process, and that refuses all but the preset | `allow` in any layer, `--allow`, `policy allow`, the unknown action (7.2) | Yes | P1, P2 |
+| Pushes | `push` | No push from the sandbox | `push` in any layer, `policy allow push` | Yes | P2 |
+| Secrets | `secret` | No secret value in the guest | `secrets` in any layer, `--secret` (bound from P2), `--expose` | No, next start | P1, P2 |
+| SSH keys | `ssh-key` | No SSH agent in the guest | `ssh_keys` in any layer, `policy allow ssh-key` (7.9) | No, next start | P2 |
+| Ports | `port` | Nothing from the sandbox reaches the laptop | `forward`, `policy allow port` | Yes | P1 |
+| Devices | `device` | No device beyond the basics | `--docker` on a microvm (P3). Nothing else in this plan. | No | P3 |
+| Paste | `paste` | Images and PDF files only, no sensitive path | `paste = "any"` in any layer | No | P0, P1 |
+| Terminal output | none | Bytes pass unchanged. Risky sequences are counted. | Nothing | Not a door that closes | P7 |
 
 ### 7.1 Files
 
@@ -731,7 +801,7 @@ Each door is closed by default. Each door has one kind of grant, and each grant 
 - `/work/<repo>`: its own clone, from the seed bundle (6.1). It is writable, and it stays across stops.
 - The home of the user `agent`: a fresh home at each start (tmpfs on a process wall, the overlay on a microvm). Only the agent's `StateDirs` stay, from the session folder or disk: `~/.claude/projects` for Claude Code, `~/.codex/sessions` for Codex. These hold what a resume needs and nothing that runs code, so a dropper in `~/.bashrc` or a hook in `~/.claude/settings.json` goes at the next start.
 - `/tmp` and `/var/tmp`: fresh at each start.
-- System files, read-only. On a process wall: the host's `/usr`, `/bin`, `/sbin`, `/lib`, `/lib64` and `/etc`, with these files replaced: `/etc/passwd` and `/etc/group` (the user `agent`, uid 1000), `/etc/resolv.conf` (`nameserver 127.0.0.53`) and `/etc/hosts`. On a microvm: the image, with an overlay that resets at each start unless `[sandbox] root = "keep"`.
+- System files, read-only. On a process wall: the host's `/usr`, `/bin`, `/sbin`, `/lib`, `/lib64` and `/etc`, with these files replaced: `/etc/passwd` and `/etc/group` (the user `agent`, uid 1000), `/etc/resolv.conf` (`nameserver 127.0.0.53`) and `/etc/hosts`. On a microvm: the image, with an overlay that resets at each start unless `[sandbox] system = "keep"`.
 - The agent's install folders, read-only: on a process wall, each folder in the agent's `InstallDirs` and the folder of its resolved binary, at their host paths. On a microvm, the agents disk at `/opt/agents`.
 - `/opt/<name>/bin`: the helper and the shadow terminal of the supervisor's version, read-only.
 - `/run/<name>/`: the holder's socket, the hook socket, the paste folder and, from P2, the CA files.
@@ -777,7 +847,7 @@ Before P2 there is no stub, and lookups in the guest fail. Tools that use the pr
 
 **Decisions.** For each flow the egress process:
 
-1. Matches the host and port against the policy. A deny wins.
+1. Checks the locks. Then it finds the narrowest layer with a rule that matches the host and port (8.2). In that layer a deny wins over an allow. With no match, it takes the unknown action below.
 2. Resolves the name and refuses every address in `internal/egress/rules/ranges.toml`: `0.0.0.0/8`, the private ranges of RFC 1918 (`10/8`, `172.16/12`, `192.168/16`), the shared address space (`100.64/10`), `127.0.0.0/8`, `169.254.0.0/16`, `192.0.0.0/24`, `198.18.0.0/15`, `224.0.0.0/4`, `240.0.0.0/4`, `::/128`, `::1/128`, `fc00::/7`, `fe80::/10`, `ff00::/8`, `fd00:ec2::254`, IPv4 inside `64:ff9b::/96` when the inner address is refused, and the host's own addresses, read at start. A grant that names such an address by number opens it. Short forms such as `10/8` stand for the full ranges.
 3. On port 443, reads the ClientHello, checks that the SNI equals the host, and refuses one that carries the `encrypted_client_hello` extension.
 4. Splices, or, when a rule needs it, intercepts (P2).
@@ -797,8 +867,8 @@ Before P2 there is no stub, and lookups in the guest fail. Tools that use the pr
 | Preset | Allows | Meant for |
 | --- | --- | --- |
 | `locked` | The agent's `Egress` hosts (its model API and its login hosts) and nothing else | Untrusted repositories and research |
-| `balanced` (default) | `locked`, plus package registries (GET and HEAD only from P2), plus code hosts for reading, plus pushes to granted repositories | Daily work |
-| `open` | Every public host, still never the refused ranges, with secrets still bound and every flow logged | Exploration. It counts as a downgrade: recorded, shown and alerted. |
+| `balanced` (the built-in default) | `locked`, plus package registries (GET and HEAD only from P2), plus code hosts for reading, plus pushes to granted repositories | Daily work |
+| `open` | Every public host, still never the refused ranges or a locked deny, with secrets still bound and every flow logged | Exploration. The row shows "net: open". |
 
 **Rules for services (P2).** Data in `internal/egress/rules/*.toml`:
 
@@ -819,7 +889,18 @@ Before P2 there is no stub, and lookups in the guest fail. Tools that use the pr
 
 Each refusal returns the API's own error shape with a `Try:` line in the message, and raises `egress_blocked`. A grant `net <host> --tools web_fetch` opens a refused tool for one session. The lists come from recorded traffic of each first-class agent (task P2.4).
 
-**Holds and approvals (P2).** Under `balanced` and `locked`, a flow to a host that no rule covers waits up to `[network] hold` (20 s by default). The session's state becomes `needs_input` with source `network` and the reason "wants api.example.com:443". An `egress_blocked` alert goes out. An answer within the hold opens it. No answer refuses it, with a 403 whose body names the command to grant it. After 5 refusals in 10 minutes, new unknown hosts are refused at once, without a hold, and the row says so.
+**Unknown sites (P2).** A flow that no rule covers gets the unknown action of the narrowest layer that sets one (8.2). Before P2, every unknown flow is refused.
+
+| Action | What happens | Meant for |
+| --- | --- | --- |
+| `ask` | The flow waits up to `[network] hold` (20 s by default). The session's state becomes `needs_input` with the source `network` and the reason "wants api.example.com:443", and an `egress_blocked` alert goes out. An answer within the hold opens the flow, at the scope that the user picks (9.4). No answer refuses it. | Work with a person at the terminal |
+| `deny` | The flow is refused at once. | Unattended work with a known list |
+| `allow` | The flow goes through. Its audit line has `"decision":"allow-unknown"`, and the first flow to each new host raises `egress_unknown` once. | Learning what a project needs, before `policy learn` (8.8) |
+| `classify` | The classifier decides (7.8). | Unattended and parallel work |
+
+The built-in layer sets `ask`. The guided setup asks once which action the user wants for all sessions, and writes the answer to `config.toml` ([question 43](#15-open-questions)).
+
+A refused flow gets a 403 whose body is one line, the same each time: `simstim: api.example.com is not allowed in devbox/auth-fix. Try: simstim policy allow api.example.com --in devbox/auth-fix`. After 5 refusals in 10 minutes, `ask` and `classify` stop: new unknown hosts are refused at once, and the row says so. A `policy` command on the session resets the count.
 
 **Budgets (P2).** For each host that is not a model API and not a granted push remote, a session may upload `[network] upload_budget` (16 MiB by default) in each hour. After that, flows to the host wait as above, with an alert.
 
@@ -856,12 +937,12 @@ It never holds a query string, a header value or a body.
 | Codex | An API key as `OPENAI_API_KEY`, bound to `api.openai.com`. A ChatGPT login needs token refresh, which a header swap cannot do. It is not supported in a walled session, except as an exposed login made inside the sandbox, which the row shows. |
 | Others | An API key bound to the agent's model host, from the agent table. |
 
-**Not supported in this plan:** SSH agent forwarding into a sandbox (never), AWS SigV4 keys, GCP service-account keys, mTLS client keys and signing keys. They need a re-signing door, which is an open question ([question 15](#15-open-questions)).
+**SSH keys** have a door of their own (7.9). **Not supported in this plan:** forwarding the laptop's own SSH agent into a sandbox, AWS SigV4 keys, GCP service-account keys, mTLS client keys and signing keys. They need a re-signing door, which is an open question ([question 15](#15-open-questions)).
 
 ### 7.4 Ports
 
 - **Default:** nothing from a sandbox reaches the laptop or the host.
-- **Grant:** `simstim forward devbox/auth-fix 3000` is the grant. It records a `port` grant with scope `session`, and the row shows it. `grant … port 3000` records one without forwarding.
+- **Opened by:** `simstim forward devbox/auth-fix 3000`, which adds a `port` rule in the session layer, and the row shows it. `simstim policy allow port 3000 --in devbox/auth-fix` adds one without forwarding.
 - **Path:** while the grant holds, the supervisor listens on the Unix socket `paths.PortSocket(id, port)`, `$XDG_RUNTIME_DIR/<name>/p/<id>/<port>.sock` (0600, in a 0700 folder). `forward` runs `ssh -N -L 127.0.0.1:<port>:<socket>`. Each connection becomes a `port` stream, and the guest init connects it to `127.0.0.1:<port>` inside the sandbox. No TCP port opens on the host.
 - **List:** `ports` shows the guest's claim of its listening ports, marked as claimed, and the granted ones.
 - **Browser:** pages from a session run in the laptop's browser at a localhost origin, which shares cookies with other local apps by port ([RFC 6265, 8.5](https://datatracker.ietf.org/doc/html/rfc6265#section-8.5)). The first forward of a walled session shows a notice that says so, and suggests `http://<id>.localhost:<port>`, which browsers send to the loopback address.
@@ -893,46 +974,104 @@ The bytes stay exact (G8). From P7, the client observes, reads only, and never c
 
 An opt-in guarded attach, which would drop some sequences, is not in this plan ([question 26](#15-open-questions)).
 
+### 7.8 The classifier (P2.11, P2.12)
+
+The classifier decides a flow that no rule covers, when the unknown action is `classify`. Many sessions can then run with nobody at their terminals. It judges only what crosses a door: a network destination and, from P2, a push target. It never judges a command inside the sandbox, because the wall holds whatever runs there.
+
+The classifier makes fewer questions. It is not a wall. Every model judge that researchers tested with adaptive attacks could be fooled ([research](../research/isolation.md#policy-for-parallel-work)). The guarantees stay in the fixed parts: no network card, DNS only through the egress process, sentinels in place of secrets, the identity pin, the service rules, the upload budget and the review on `pull`.
+
+The steps run in this order. Each step decides, or passes the flow on.
+
+1. **Normalise.** Lower case, IDNA A-labels and no trailing dot. A name with a null byte or an empty label, or one longer than 253 bytes, is refused. An empty allow list never means "allow all". Both mistakes let flows past another sandbox's allowlist in 2025 ([write-up](https://oddguan.com/blog/second-time-same-sandbox-anthropic-claude-code-network-allowlist-bypass-data-exfiltration/)).
+2. **Fixed denies.** The list is data in `internal/egress/rules/classify.toml`, each entry with a source link. A fixed deny is final, and no judge sees the flow.
+   - An IP address that no rule names, as in a February 2026 npm campaign ([Socket](https://socket.dev/blog/stegabin-26-malicious-npm-packages-use-pastebin-steganography)).
+   - Services that real attacks used to carry data out or to tunnel: `webhook.site` ([Wiz](https://www.wiz.io/blog/shai-hulud-npm-supply-chain-attack)), `*.requestcatcher.com` and `*.lhr.life` ([Panther](https://panther.com/blog/frankly-malicious-inside-a-38-package-npm-supply-chain-campaign-targeting-tech-giants)), `*.trycloudflare.com` ([Unit 42](https://unit42.paloaltonetworks.com/teampcp-supply-chain-attacks/)), `oast.fun` ([advisory](https://github.com/advisories/GHSA-j8vq-ph59-27pv)), and the other out-of-band test hosts that the Panther rules list. Some only by path: `discord.com/api/webhooks/*` and `api.telegram.org/bot*` ([Datadog](https://securitylabs.datadoghq.com/articles/mut-8964-an-npm-and-pypi-malicious-campaign-targeting-windows-users/)), and writes to `pastebin.com`.
+   - A lookalike: a name whose confusable skeleton ([UTS #39](https://www.unicode.org/reports/tr39/)) equals that of an allowed host but whose name differs, as in the March 2026 TeamPCP domains ([Unit 42](https://unit42.paloaltonetworks.com/teampcp-supply-chain-attacks/)).
+   - A name with a label of 40 characters or more that looks random, as DNS tunnels use ([Unit 42](https://unit42.paloaltonetworks.com/detecting-dns-tunneling-campaigns/)). The length and the randomness test are starting values that P2.12 measures.
+3. **Facts.** These are tags for the judge, never decisions on their own.
+   - The registrable domain, from the [Public Suffix List](https://publicsuffix.org/), and whether the session already reaches it.
+   - The domain's age, from RDAP ([RFC 9083](https://www.rfc-editor.org/rfc/rfc9083)), only with `[classifier] rdap = true`, because a lookup tells the registry which names the session asks for. A domain 32 days old or less is tagged new, after Unit 42's definition ([Unit 42](https://unit42.paloaltonetworks.com/newly-registered-domains-malicious-abuse-by-bad-actors/)). Answers are cached for a day. A timeout is "unknown", never "old".
+   - A rank from a popularity list, only when the user points `[classifier] popularity` at a file. The tool ships no list, because the licence of the combined Tranco list is not stated ([Tranco](https://tranco-list.eu/)). A popular host is not a safe host: Discord, GitHub and Pastebin are all popular.
+4. **The judge.** `[classifier] judge` picks it:
+   - `none`, the built-in value: no judge. A flow that reaches this step is unsure.
+   - `model`: a model API that the user names, such as Anthropic's or OpenAI's, or a local server that speaks the OpenAI chat format, such as Ollama on the host. Its key is a secret from `[secrets]`, bound to the endpoint's host, and the egress process holds it as it holds any bound secret.
+   - `command`: a program on the host. It reads one JSON request on stdin and writes one JSON answer on stdout. Any other result is unsure.
+
+   The judge gets structured fields only: the host, the port, the registrable domain, the facts, the method and the path when the egress process intercepts the host (never the query or the body), the repository's remote and its ecosystems as the trusted side read them at seed time, the agent's name, the profile's name, and the task line that the user gave with `new --task`. The host name is the one field that the guest chose, so the request quotes it as data. The judge never gets a response body, the agent's text, a file's contents, or the agent's reasons.
+
+   The judge answers `allow`, `deny` or `unsure`, with a reason of 200 characters at most and a scope. The scope is never wider than `[classifier] max_scope`: `once` or `session`, and `session` by default. A judge never writes a rule in a wider layer. The flow waits at most `[classifier] timeout` (5 s by default), and no answer is unsure. A session gets at most `[classifier] rate` judge calls a minute (20 by default). Above that, flows are unsure.
+5. **Unsure.** `[classifier] unsure` decides: `ask`, the built-in value, or `deny`, for unattended work.
+
+Each step writes the flow's audit line with `"rule":"classify:<step>"` and the reason. The launcher shows, for each session, how many flows the classifier allowed. `policy log --by classifier` lists them, and `policy learn` turns them into rules that a person approves (8.8).
+
+The judge's own requests leave from the trusted side, never from the guest. They are not telemetry: the user turns the judge on, names its endpoint, and sees each call in the audit log ([0031](decisions/0031-the-egress-process-is-not-a-relay.md)). A local model keeps every name on the host.
+
+A judge that sees only destinations cannot see data inside a path, a query or a body sent to an allowed host. It cannot see a write to another account on an allowed host either. The service rules, the identity pin, the upload budget and the push door cover those.
+
+### 7.9 SSH keys (P2.13)
+
+- **Closed:** no sandbox gets an SSH agent unless a layer names a key.
+- **Opened by:** `ssh_keys = ["DEPLOY_KEY"]` in any layer, or `policy allow ssh-key DEPLOY_KEY --in <host>/<session>`. Each name is a secret in `[secrets]` with `kind = "ssh-key"`, whose command prints a private key. The client fetches it at the start, as it fetches any secret, and the grant gate checks its tier (14.8.2).
+- **How:** the supervisor keeps the key in memory only ([0032](decisions/0032-secret-values-in-memory-only.md)) and serves an SSH agent that holds only the named keys, over an `agent` stream. The guest init offers it at `/run/<name>/ssh-agent.sock` and sets `SSH_AUTH_SOCK`. The agent answers requests to list keys and to sign. It refuses requests to add, remove or lock keys, and every extension. Each signature writes an audit line with the key's fingerprint, and the server's host key when the client binds the agent connection to its session with the `session-bind@openssh.com` extension ([PROTOCOL.agent](https://github.com/openssh/openssh-portable/blob/master/PROTOCOL.agent)). Which OpenSSH release first sends it is UNVERIFIED.
+- **Network:** git over SSH still needs a `net` rule for the server and port 22. The egress process cannot read an SSH stream, so the push door's limits on refs do not apply there. Use a deploy key that can write to one repository only. The row shows "ssh-key: DEPLOY_KEY".
+- **The laptop's own agent** never enters a sandbox. `new --ssh-agent` stays for one unwalled session on an `own` host (14.8.2).
+
 ## 8. Policy and config
 
 ### 8.1 Where policy lives
 
 | File | Side | Written by | Holds |
 | --- | --- | --- | --- |
-| `~/.config/<name>/config.toml` | Laptop | The user, and `grant --scope always` | `[sandbox]`, `[network]`, `[secrets]`, `[secret_tiers]`, `[repos."<remote>"]`, `[placement]`, `[images]` |
-| `~/.config/<name>/hosts.toml` | Laptop | `host add`, `host create`, `host prepare`, `host wall`, `host default`, `grant --scope host` | `default`, and for each host: `wall_floor`, `repos`, `[host.sandbox]` (grants and the prepare cache) and `[host.place]` |
-| `~/.config/<name>/tiers.toml` | Laptop | `host add`, `host create`, `host tier`, `host rekey` | Each host's tier, host ID and pinned key fingerprint (14.6) |
+| `~/.config/<name>/config.toml` | Laptop | The user, `policy edit`, and `policy allow` or `deny` with `--all`, `--repo` or `--profile` | The layer for all sessions (`[sandbox]`, `[network]`, `[classifier]`), `[lock]`, `[profiles.<name>]`, `[repos."<remote>"]`, `[secrets]`, `[secret_tiers]`, `[placement]`, `[images]` |
+| `~/.config/<name>/hosts.toml` | Laptop | `host add`, `host create`, `host prepare`, `host set`, `host default`, and `policy allow` or `deny` with `--host` | `default`, and for each host: `wall_floor`, `repos`, its layer (`[host.sandbox]`, `[host.network]`, `[host.classifier]`), `[host.lock]`, the prepare cache (`[host.prepared]`) and `[host.place]` |
+| `~/.config/<name>/tiers.toml` | Laptop | `host add`, `host create`, `host set … tier=`, `host rekey` | Each host's tier, host ID and pinned key fingerprint (14.6) |
 | `~/.local/state/<name>/grants.json` | Laptop | The client | The grant ledger: names, never values (14.8.6) |
 | `~/.local/state/<name>/grant-trust.json` | Laptop | The client | The user's answers to a repository file's proposals, by host, repository and the file's SHA-256 |
 | `~/.local/state/<name>/setup-trust.json` | Laptop | The client | Setup trust, now by the script's SHA-256 (P0.6) |
 | `~/.config/<name>/images.lock` | Laptop | The client (P3) | Image references and their digests and verity root hashes |
 | `.<name>/sandbox.toml` | Repository | The repository's authors | Narrowing rules and proposals. Untrusted. |
-| `<SessionDir>/manifest.json` | Host | The supervisor | The session's policy, level and secret names and modes |
+| `<SessionDir>/manifest.json` | Host | The supervisor | The sandbox's layers, its merged policy, its level, and its secret names and modes |
 
 Policy never comes from the session's own files. The host reads a repository file from the trusted source at the start (6.1), never from the sandbox's clone or disk.
 
-### 8.2 Precedence
+### 8.2 Layers and precedence
 
-The layers, lowest first: the preset, the agent table, the user (`config.toml`), the host (`[host.sandbox]`), the repository (the laptop's `[repos."<remote>"]`, then the repository's own file), the session (flags), and live grants.
+Every setting and every rule comes from a layer. The layers, broadest first:
 
-1. **Level.** The highest of: the host's floor, `[sandbox] wall`, the laptop's repository section, the repository file and `--wall`. `auto` asks for nothing beyond the floor. Only `--wall <level> --downgrade`, or the launcher's typed confirmation, can set a level below the floor. Then the level is exactly the one named, and the downgrade is recorded.
-2. **Preset.** `--preset`, then the laptop's repository section, then `[sandbox] preset`. The repository file may only make it tighter: `open` to `balanced` to `locked`.
-3. **Allows.** The union of every layer's allows. A repository file's allows are proposals: they apply only after the user's answer for that file's hash.
-4. **Denies.** The union of every layer's denies. A deny wins over every allow. A live grant that a deny covers is refused, with the hint to remove the deny from its file.
-5. **Secrets.** The host's `secrets` list, the laptop's repository section and `--secret`. The mode is bound when hosts are known, and exposed only with `--expose`.
-6. **Mounts.** The laptop's repository section and `--mount`. A repository file cannot ask for a mount.
+| # | Layer | Where it lives | Written by |
+| --- | --- | --- | --- |
+| 1 | Built-in | The preset lists, the agent table and the refused ranges | The project |
+| 2 | All sessions | The top level of `config.toml` | The user, or `policy … --all` |
+| 3 | Host | The host's entry in `hosts.toml` | The user, or `policy … --host` |
+| 4 | Repository | `[repos."<remote>"]` in `config.toml`, then the repository's own file (8.5) | The user, or `policy … --repo`. The repository's authors, untrusted. |
+| 5 | Profile | `[profiles.<name>]` in `config.toml`, picked by `--profile` or by a `profile` key in a broader layer | The user, or `policy … --profile` |
+| 6 | Session | The flags of `new`, `--set`, and rules made `--in` the session | The user, the launcher, and the classifier at session scope only |
 
-The host's tier caps every layer: no layer grants what the tier refuses (14.8.2).
+Every layer has the same shape: the tables `sandbox`, `network` and `classifier`. A key means the same thing in every layer, and `config check` refuses a key that a layer may not hold. `new --set network.unknown=deny` sets any key for one session. clig.dev puts flags above project files and project files above user files, and these layers follow that order ([clig.dev](https://clig.dev/#configuration)).
+
+1. **A narrower layer overrides a broader one.** For a value, such as `preset` or `network.unknown`, the narrowest layer that sets it wins.
+2. **For a destination, the narrowest layer with a matching rule decides.** In that layer, a deny wins over an allow. A session can allow a host that all sessions deny, and a profile can deny a host that a repository allows.
+3. **Lists add up.** `mounts`, `secrets`, `ssh_keys`, `include` and `keep` gather from every layer. A narrower layer drops an inherited item with a leading `!`, as in `secrets = ["!GITHUB_TOKEN"]`.
+4. **Locks win over every layer.** A `[lock]` table at the top level of `config.toml`, or in a host's entry, holds values and denies that no narrower layer may change. A flag or a rule that tries fails with `policy_locked`, and names the lock. kubectl also stops when a flag conflicts with a file, instead of choosing one in silence ([kubectl conventions](https://github.com/kubernetes/community/blob/master/contributors/devel/sig-cli/kubectl-conventions.md)). The repository's own file cannot lock.
+5. **The level** is the highest of the host's floor and the levels that the layers ask for. Only `--wall <level> --downgrade`, or the launcher's typed confirmation, goes below the floor. Then the level is exactly the one named, and the downgrade is recorded.
+6. **The repository's own file only narrows.** Its denies, a stronger level, a tighter preset and a stricter unknown action apply at once. Its allows are proposals. They apply only after the user's answer for that file's hash.
+7. **The tier caps every layer.** No layer gives a host what its tier refuses (14.8.2). The caps are settings too, in `tiers.toml`.
+8. **A profile comes after the repository,** because the user picks it for this run.
+
+`policy ls` prints every rule and value with the layer that it comes from, as `git config --show-origin` does. `policy check <target> --in <host>/<session>` prints the one rule that decides, its layer, and the unknown action when no rule matches. Both work before a session exists: `--repo`, `--profile` and `--host` name the layers to merge.
 
 ### 8.3 `config.toml`
 
 The comments on the fields in `internal/client/config.go` are the config reference, and `just docs` writes `docs/reference/config.md` from them. This is the only place that specifies these keys.
 
 ```toml
+# The top level is the layer for all sessions. Narrower layers override it (8.2).
+
 [sandbox]
 wall = "auto"          # auto = the host's floor | none | process | gvisor | microvm
-preset = "balanced"    # locked | balanced | open (open counts as a downgrade)
-root = "reset"         # reset | keep: whether system changes stay across starts (microvm)
+preset = "balanced"    # locked | balanced | open
+profile = ""           # a profile that every session uses unless a narrower layer names another
+system = "reset"       # reset | keep: whether system changes stay across starts (microvm)
 image = "default"      # an OCI reference, pinned in images.lock (microvm)
 disk_max = "20G"       # the session disk's cap (microvm)
 idle_stop = "never"    # stop a walled session after this long with no client and no work
@@ -940,17 +1079,49 @@ paste = "media"        # media (images and PDF files) | any
 pull_max = "512M"      # the largest bundle that pull brings back
 docker = false         # a Docker engine inside microvm sandboxes
 decoys = true          # decoy credential files whose values are tripwires (P7.2)
+shell = ""             # the shell that `shell` starts. Empty: the image's login shell.
+keep = []              # files of the home to keep across starts, such as ".bash_history"
+mounts = []            # host folders, such as "~/data:/mnt/data:ro"
+secrets = []           # names from [secrets] that every session gets
+ssh_keys = []          # names from [secrets] with kind = "ssh-key" (7.9)
+push = false           # push to this session's branches on the origin
 
 [sandbox.image_policy]   # leave it out to trust each image's first digest (P4.5)
 identity = ""            # the cosign certificate identity that must sign images
 issuer = ""              # the OIDC issuer of that identity
 
 [network]
-allow = []             # hosts that every walled session may reach
-deny = []              # hosts that no walled session may reach
+allow = []             # hosts that sessions may reach
+deny = []              # hosts that sessions may not reach
+unknown = "ask"        # ask | deny | allow | classify: a flow that no rule covers (7.2)
+hold = "20s"           # how long a flow waits for an answer under ask
 upload_budget = "16M"  # for each host and hour, except model APIs and push remotes
-hold = "20s"           # how long a flow to an unknown host waits for an answer
 min_release_age = "7d" # registry gates refuse package versions younger than this (P7.1)
+
+[classifier]           # used when unknown = "classify" (7.8)
+judge = "none"         # none | model | command
+endpoint = ""          # model: such as "https://api.anthropic.com", or "http://127.0.0.1:11434/v1" for a local server
+model = ""             # model: the model's name at that endpoint
+key = ""               # model: a name in [secrets], bound to the endpoint's host
+command = ""           # command: a program on the host
+unsure = "ask"         # ask | deny
+max_scope = "session"  # once | session: the widest scope that a judge's answer gets
+timeout = "5s"         # how long a flow waits for the judge
+rate = 20              # judge calls for each session and minute
+rdap = false           # look up a domain's age
+popularity = ""        # a file of ranked domains on the host
+
+[lock]                 # values and denies that no narrower layer may change
+network.deny = ["pastebin.com"]
+
+[profiles.unattended]  # a profile has the same tables as the top level
+network.unknown = "classify"
+classifier.unsure = "deny"
+
+[profiles.untrusted]
+sandbox.preset = "locked"
+sandbox.wall = "microvm"
+network.unknown = "deny"
 
 [secrets]
 GITHUB_TOKEN = "gh auth token"   # the plain form: a command, as today
@@ -961,16 +1132,20 @@ hosts = ["api.anthropic.com"]    # bound: the value stays in the egress process
 # header = "x-api-key"           # when the agent table gives none
 # format = "{value}"             # "Bearer {value}", or "basic:x-access-token:{value}"
 
+[secrets.DEPLOY_KEY]
+run = "op read op://dev/api-deploy-key/private-key"
+kind = "ssh-key"                 # served by the sandbox's own SSH agent (7.9)
+
 [secret_tiers]
 CLAUDE_LAB = "shared"            # the lowest tier that may get this secret. Unlisted secrets: own.
 
 [repos."github.com/acme/api"]    # the repository's origin, without the scheme and .git
-allow = ["api.stripe.com"]
-push = true                      # push to this session's branches on the origin
-secrets = ["STRIPE_TEST_KEY"]
-include = [".env.test"]          # files to copy into the clone at seed time
-wall = "microvm"
-preset = "locked"
+sandbox.profile = "web"
+sandbox.push = true
+sandbox.secrets = ["STRIPE_TEST_KEY"]
+sandbox.include = [".env.test"]  # files to copy into the clone at seed time
+sandbox.wall = "microvm"
+network.allow = ["api.stripe.com"]
 
 [placement]                      # for new auto (14.10.5)
 strategy = "spread"              # spread or pack
@@ -994,14 +1169,19 @@ default = "box"
 [[host]]
 name = "box"
 ssh = "me@box"
-wall_floor = "microvm"           # the floor: pinned by host add, host create, host prepare and host wall
+wall_floor = "microvm"           # the floor: pinned by host add, host create and host prepare, changed by host set
 # Repositories that may be sent to this host in clone mode. Only shared hosts use it.
 repos = ["github.com/example/*"]
 
-[host.sandbox]
-allow = ["pypi.internal.example:443"]  # grants for every session on this host
+[host.network]                   # this host's layer has the same tables as the top level of config.toml
+allow = ["pypi.internal.example:443"]
 deny = []
+
+[host.lock]                      # values and denies that no narrower layer may change on this host
+network.unknown = "deny"
+
 # Written by host add and host prepare. A cache: the client probes again when it is missing.
+[host.prepared]
 level = "gvisor"                 # the level at the last prepare
 level_after_root = "microvm"
 runtime = "2026.11.0"
@@ -1017,7 +1197,7 @@ cost = "free"                    # free or paid: what a wake of this host costs
 max_sandboxes = 0                # 0: no limit but memory
 ```
 
-A host saved before this change has no `wall_floor`. Until the user runs `host wall`, `host prepare` or `host add` again, `--wall auto` uses the strongest level from the host's sandbox probe at that start, and pins nothing. The launcher says so once for each such host: "box has no wall floor yet. Try: simstim host wall box".
+A host saved before this change has no `wall_floor`. Until the user runs `host set <host> floor=<level>`, `host prepare` or `host add` again, `--wall auto` uses the strongest level from the host's sandbox probe at that start, and pins nothing. The launcher says so once for each such host: "box has no wall floor yet. Try: simstim host prepare box".
 
 An older client that saves `hosts.toml` drops the keys above, because `SaveHosts` writes the file from its own struct. The floor then behaves as for a host saved before this change, and the prepare cache is probed again. Tiers live in `tiers.toml` for this reason (14.6).
 
@@ -1034,7 +1214,10 @@ preset = "locked"     # may tighten the preset, never loosen it
 [network]
 allow = ["api.stripe.com"]  # proposals: the client asks once for each version of this file
 deny = ["*.example.net"]    # applied at once
+unknown = "deny"            # may make the unknown action stricter: allow, classify, ask, deny
 ```
+
+The file has no `[classifier]` table and no `[lock]`, and it cannot name a profile, a mount, a secret or an SSH key. A repository's own settings must never choose who judges its traffic. Claude Code also never reads its classifier's rules from a repository's settings, so that a repository cannot add its own allow rules ([auto mode config](https://code.claude.com/docs/en/auto-mode-config)).
 
 The client shows the proposals once, with the file's short hash, and keeps the answer in `grant-trust.json`. A change to the file asks again.
 
@@ -1105,28 +1288,57 @@ Service rules are data in `internal/egress/rules/`: `presets.toml`, `ranges.toml
 
 ### 8.7 Examples
 
-**An open-source repository you do not know.** Locked, a microvm, no secrets but the agent's own:
+**An open-source repository that you do not know.** The profile `untrusted` of 8.3 gives a locked microvm that refuses every unknown site:
 
 ```sh
-simstim new devbox --agent claude --dir ~/src/unknown-lib --preset locked --wall microvm
+simstim new devbox --agent claude --dir ~/src/unknown-lib --profile untrusted
 ```
 
-The agent reaches its model API and nothing else. `npm install` fails, and the agent sees a 403 that names `simstim grant devbox/<s> net registry.npmjs.org`.
+The agent reaches its model API and nothing else. `npm install` fails, and the agent sees a 403 that names `simstim policy allow registry.npmjs.org --in devbox/<s>`.
 
-**Your own work repository.** In `config.toml`:
+**Your own work repository.** The section `[repos."github.com/acme/api"]` of 8.3 gives the profile `web`, Stripe's API with a sentinel, and pushes to `refs/heads/simstim/<id>/*` on the origin:
+
+```sh
+simstim new devbox --agent claude --dir ~/src/api
+```
+
+**One exception for one session.** It ends by itself after an hour:
+
+```sh
+simstim policy allow api.example.com --in devbox/auth-fix --for 1h
+```
+
+`--once` allows one connection only. Without `--for` or `--once`, the rule lasts as long as the session.
+
+**A rule for every session.** It reaches every running sandbox at once (8.8):
+
+```sh
+simstim policy deny paste.example.net --all
+```
+
+**Parallel work with nobody watching.** A judge on a local model, then four sessions with the profile `unattended` of 8.3:
 
 ```toml
-[repos."github.com/acme/api"]
-allow = ["api.stripe.com"]
-push = true
-secrets = ["STRIPE_TEST_KEY"]
-
-[secrets.STRIPE_TEST_KEY]
-run = "op read op://dev/stripe/test-key"
-hosts = ["api.stripe.com"]
+[classifier]
+judge = "model"
+endpoint = "http://127.0.0.1:11434/v1"
+model = "my-local-model"
 ```
 
-`simstim new devbox --agent claude --dir ~/src/api` then gets the balanced preset, Stripe's API with a sentinel, and pushes to `refs/heads/simstim/<id>/*` on the origin.
+```sh
+for n in 1 2 3 4; do
+  simstim new devbox --agent claude --dir ~/src/api --profile unattended \
+    --name "issue-$n" --task "Fix issue $n" --detach --json
+done
+```
+
+Each session runs without stopping for a question. A site that the rules do not cover goes to the judge, and a site that the judge is unsure about is refused. `policy log --by classifier` lists what the judge allowed, and `policy learn` turns it into rules for the next run.
+
+**A shell beside the agent.** It shares the agent's files and policy (6.11):
+
+```sh
+simstim shell devbox/auth-fix
+```
 
 **A quick look with the old behaviour.** On a host whose floor is `process`:
 
@@ -1136,59 +1348,77 @@ simstim new devbox --wall none --downgrade -- htop
 
 The row shows `!` and "none, below the floor process", and a `wall_downgraded` alert goes out.
 
+### 8.8 Changing policy while sessions run (P2.14)
+
+1. **A command changes running sandboxes.** `policy allow`, `deny` and `rm` write the rule to its layer's file. The client then sends the new layer to every running sandbox that the layer reaches, on every host that it can reach. Network and push rules change at once. Mounts, secrets, SSH keys and paste apply at the next start, and the answer says so.
+2. **A hand edit waits for a start, or for `policy apply`.** `policy apply` shows the change for each sandbox and asks, then sends it. `--dry-run` only shows it, as Terraform's plan does ([Terraform](https://developer.hashicorp.com/terraform/cli/commands/plan)). Each sandbox records a hash of its layers. `ls` marks a session whose layers differ from the laptop's files with `~`, and `show` names the layer that changed.
+3. **A host that the client cannot reach** gets the change at its next contact. The answer lists those hosts.
+4. **Lockdown.** `policy lockdown [--host <h>]` adds a lock layer to every running sandbox that it reaches: `unknown = "deny"`, the preset `locked`, and every session rule paused. It is the step to take when something looks wrong. `policy lockdown --off` lifts it, after the user types the word `lockdown`, or passes `--confirm=lockdown`.
+5. **Learn.** `policy learn <host>/<session> [--repo <r> | --profile <p> | --all]` reads the session's audit log. It proposes one rule for each host that the unknown action `allow` let through, that the judge allowed, or that a person allowed at a hold, with the count of flows. The user picks rules from a list, and the client writes them to the layer. `--dry-run` prints them. Harden-Runner builds its baseline from past runs in the same way, and offers a policy from it ([baseline](https://docs.stepsecurity.io/github-actions/harden-runner/baseline)).
+6. **Edit.** `policy edit [--repo <r> | --profile <p> | --host <h> | --all]` opens the file at that layer's table in `$EDITOR`. It then runs `config check`, and `policy apply --dry-run`.
+
 ## 9. The CLI and the launcher
 
-Host commands stay under `host`, as `host idle` and `host alerts` do. Session commands take `<host>/<session>`, as `attach`, `pull` and `debug start` do. Run `just docs` after each change to a command, a flag, a config key or a key.
+Every command follows [0033](decisions/0033-one-command-grammar.md): session verbs at the top level, a noun and a verb for everything else, and every rule of every door under `policy`. Session commands take `<host>/<session>`, and the host may be left out when the name is unique. The shared parts come from [the CLI plan](cli-plan.md): errors with a "Try:" line, exit codes, prompts only at a terminal, `--no-input`, `--json` and pickers. Run `just docs` after each change to a command, a flag, a config key or a key.
 
 ### 9.1 Commands
 
+`<layer>` below is one of `--in <host>/<session>`, `--profile <p>`, `--repo <r>`, `--host <h>` or `--all`. `--repo .` means the origin of the current folder's repository. A `policy` command that changes a rule needs a layer. Without one it asks at a terminal, and fails elsewhere with `layer_missing`.
+
 | Command | Does | Phase or task |
 | --- | --- | --- |
-| `simstim new [<host>\|auto\|-] … [--wall auto\|none\|process\|gvisor\|microvm] [--downgrade] [--preset locked\|balanced\|open] [--allow host[:port]]… [--deny host]… [--mount path[:guest][:ro\|:rw]]… [--expose NAME]… [--include path]…` | Starts a session in a sandbox. The host comes from section 14.10.1. The other flags stay as today. | P1, P2, H12 |
-| `simstim new [<host>\|auto] … [--untrusted] [--ssh-agent]` | `--untrusted` sets the request tier (14.8.4). `--ssh-agent` forwards the SSH agent to one unwalled session on an `own` host (14.8.2). | H5 |
-| `simstim new auto … [--need arch=…,<feature>,<label>=<value>] [--dry-run] [--wake]` | Places the session on a host from live facts, and explains the choice (14.10.5) | H13 |
-| `simstim new <host> … [--image ref] [--root reset\|keep] [--docker]` | Microvm options | P3 |
-| `simstim grant <host>/<session> net\|push\|port\|mount\|secret\|paste <target> [--scope session\|repo\|host\|always] [--for 1h] [--public] [--tools name,…] [--idn]` | Opens a door. Prints the grant's ID, and when it applies. | P1, P2 |
-| `simstim revoke <host>/<session> <grant-id>` | Closes a door. Open flows that it allowed close. | P1 |
-| `simstim grants <host>/<session> [--json]` | Lists the policy: level, preset, held requests, grants and denies, each with its source and scope | P1 |
-| `simstim audit <host>/<session> [--door net\|secret\|grant\|wall\|paste] [--since 1h] [--follow] [--json]` | Shows the audit log, like `sbx policy log` | P1 |
-| `simstim stop <host>/<session>` | Shuts the sandbox down and keeps `/work` and the agent's state | P1 |
+| `simstim new [<host>\|auto] … [--wall auto\|none\|process\|gvisor\|microvm] [--downgrade] [--profile <p>] [--set <key>=<value>]… [--preset locked\|balanced\|open] [--allow <host>]… [--deny <host>]… [--mount <path>[:<guest>][:ro\|:rw]]… [--expose <NAME>]… [--include <path>]… [--task <text>]` | Starts a session in a new sandbox. The host comes from section 14.10.1. The other flags stay as today. `--task` is one line about the work, which the launcher shows and the judge reads (7.8). | P1, P1.12, P2, H12 |
+| `simstim new [<host>] --in <session> …` | Starts another agent in that session's sandbox (6.11) | P1.13 |
+| `simstim new [<host>\|auto] … [--untrusted] [--ssh-agent]` | `--untrusted` sets the request tier (14.8.4). `--ssh-agent` forwards the laptop's SSH agent to one unwalled session on an `own` host (14.8.2). | H5 |
+| `simstim new auto … [--need arch=…,<feature>,<label>=<value>] [--dry-run] [--allow-wake]` | Places the session on a host from live facts, and explains the choice (14.10.5) | H13 |
+| `simstim new <host> … [--image <ref>] [--keep-system] [--docker]` | Microvm options | P3 |
+| `simstim shell <host>/<session> [--new] [--name <n>]` | Opens a shell session in that session's sandbox, or attaches to its newest one (6.11) | P1.13 |
+| `simstim exec <host>/<session> [--timeout <time>] -- <command…>` | Runs one command in the sandbox, prints its output, and exits with its code (6.11) | P1.13 |
+| `simstim policy allow [<door>] <target> <layer> [--once \| --for <time>] [--public] [--tools <name>,…] [--idn] [--dry-run]` | Adds an allow rule. `<door>` is a word from section 7, and `net` when left out. Prints the rule's ID and when it applies. | P1, P1.12, P2 |
+| `simstim policy deny [<door>] <target> <layer> [--dry-run]` | Adds a deny rule | P1.12 |
+| `simstim policy rm <id or target> <layer>` | Removes a rule. Open flows that it allowed close. | P1, P1.12 |
+| `simstim policy ls [<layer>] [--json]` | Lists the merged policy: the level, the preset, the unknown action, the locks, held requests, and every rule with its layer and end time | P1, P1.12 |
+| `simstim policy check <target> [<layer>]` | Prints the rule that decides a target and its layer, or the unknown action when no rule matches | P1.12 |
+| `simstim policy log [<layer>] [--door <word>] [--by classifier] [--since 1h] [--follow] [--json]` | Shows the door decisions from the audit log, as `sbx policy log` does | P1 |
+| `simstim policy edit [<layer>]`, `policy apply [--dry-run]`, `policy learn <host>/<session> [<layer>] [--dry-run]`, `policy lockdown [--host <h>] [--off]` | Edits, applies, learns and locks down (8.8) | P2.14 |
+| `simstim stop <host>/<session>` | Shuts the sandbox down, and keeps `/work` and the agents' state. It stops every session in the sandbox. | P1 |
+| `simstim attach [<host>/<session>]` | As today. It also wakes a stopped sandbox, and offers to restart an ended agent. | P1 |
 | `simstim resume <host>/<session>` | As today, and it also wakes a stopped sandbox | P1 |
-| `simstim attach <host>/<session>` | As today, and it wakes a stopped sandbox first | P1 |
-| `simstim kill <host>/<session> [--force]` | Destroys the sandbox. Refuses while commits are not pulled, unless `--force`. | P1 |
-| `simstim pull <host>/<session> [--into b] [--force] [--yes]` | For a walled session: a bundle into quarantine refs, the review summary, then the branch | P1 |
-| `simstim forward <host>/<session> [port…]` | As today. For a walled session it also records a port grant. | P1 |
-| `simstim ls [--json]` | Text shows each session's level. JSON adds `wall`, `armed`, `exposed`, `claimed`, `placed_by` and `place_reason`. | P1, H13 |
-| `simstim host wall <host> [--floor level] [--json]` | Shows each driver's probe, and sets the floor. A floor below the tier's lowest floor is refused (14.8.2). | P1 |
-| `simstim host add <name> <target> [--tier own\|throwaway\|shared] [--host-key SHA256:…] [--root run\|print\|skip] [--images auto\|host\|laptop] [--no-sandbox] [--yes]` | As today, and it pins the host key, asks the tier, and prepares the host (14.2.1). `--no-sandbox` keeps today's flow. | H3, H4, H10 |
-| `simstim host prepare <host> [--root run\|print\|skip] [--images auto\|host\|laptop] [--delegate-io]` | The sandbox probe, runtime delivery, the root step and a test boot | H7, H9, H10 |
-| `simstim host tier <host> [own\|throwaway\|shared]` | Prints or sets the host's tier (14.8.3) | H4 |
+| `simstim rm <host>/<session> [--force] [-y]` | Ends the session. On the first session of a sandbox, it destroys the sandbox. It refuses while commits are not pulled, unless `--force`. | P1 |
+| `simstim show <host>/<session> [--json]` | Everything about one session: its level, its layers, its unknown action, its rules and its counts | P1.8 |
+| `simstim pull <host>/<session> [--into <b>] [--force] [--allow-flagged]` | For a walled session: a bundle into quarantine refs, the review summary, then the branch. `--allow-flagged` moves the branch even when the review flags files. | P1 |
+| `simstim forward <host>/<session> [port…]` | As today. For a walled session it also adds a `port` rule. | P1 |
+| `simstim ls [<host>] [--json]` | Text shows each session's level, and indents the sessions of one sandbox. JSON adds `wall`, `armed`, `exposed`, `claimed`, `sandbox_of`, `layers_hash`, `placed_by` and `place_reason`. | P1, P1.13, H13 |
+| `simstim host show <host> [--json]` | Each driver's probe, the level now and after the root step, the floor, the tier, the room, the health, and the names of what was sent to the host (14.8.6) | P1, H5 |
+| `simstim host set <host> <key>=<value>…` | Changes named host settings: `floor`, `tier`, `drain` (a reason, or `off`), `idle`. A floor below the tier's lowest floor is refused (14.8.2). Lowering a tier asks first. | P1, H4, H14 |
+| `simstim host add <name> <target> [--tier own\|throwaway\|shared] [--host-key SHA256:…] [--root-step run\|print\|skip] [--images auto\|host\|laptop] [--no-sandbox] [--yes]` | As today, and it pins the host key, asks the tier and prepares the host (14.2.1). With `--yes`, `--tier` is needed. `--no-sandbox` keeps today's flow. | H3, H4, H10 |
+| `simstim host prepare <host> [--root-step run\|print\|skip] [--images auto\|host\|laptop] [--delegate-io]` | The sandbox probe, runtime delivery, the root step and a test boot | H7, H9, H10 |
+| `simstim host upgrade <host>` | Updates the helper and the runtime | H9 |
 | `simstim host rekey <host>` | Replaces the pinned host key after the user types the host's name (14.7.1) | H3 |
-| `simstim host grants <host>` | Lists the grant ledger for the host: names and counts, never values | H5 |
 | `simstim host default [<host>\|auto] [--clear]` | Prints, sets or clears the default host (14.10.1) | H12 |
-| `simstim host drain <host> [--reason text]` and `host undrain <host>` | Sets or clears the drain mark (14.11.3) | H14 |
-| `simstim host rm <host> [--purge] [--force] [--root run\|print\|skip]` | As today. `--purge` removes everything that the tool put on the host (14.12). | H15 |
+| `simstim host rm <host> [--purge] [--destroy] [--force] [--root-step run\|print\|skip] [--confirm <name>]` | Forgets the host, then asks about each further part. `--purge` removes everything that the tool put on the host (14.12). `--purge` and `--destroy` need the typed name, or `--confirm`. | H15 |
 | `simstim host doctor <host> [--fix] [--json]` | As today, with a "Sandboxes" block, health items and the route | H6, H14, H16 |
-| `simstim host images <host> [ls\|pull <ref>\|rm <digest>]` | Lists, prepares and removes images on a host | P3 |
-| `simstim fork <host>/<session> [--name n] [--count n] [--detach]` | Copies a stopped or frozen sandbox into new sessions | P5 |
+| `simstim image ls [<host>]`, `image pull <ref> <host>`, `image rm <digest> <host>` | Lists, prepares and removes images on a host | P3 |
+| `simstim image save <host>/<session> <ref>` | Saves the root's changes as an image, after a review (microvm) | P5 |
+| `simstim fork <host>/<session> [--name <n>] [--count <n>] [--detach]` | Copies a stopped or frozen sandbox into new sessions | P5 |
 | `simstim cp <host>/<session>:<path> <local>` and `cp <local> <host>/<session>:<path>` | Copies files out of or into a sandbox, with a size cap | P5 |
-| `simstim exec <host>/<session> -- <command…>` | Runs one command in a running sandbox and prints its output, without attaching | P5 |
-| `simstim save <host>/<session> <ref>` | Saves the root's changes as an image, after a review (microvm) | P5 |
 
 ### 9.2 What users of other tools will find
 
 | Docker Sandboxes (`sbx`) | A hosted VM service | This design |
 | --- | --- | --- |
 | `sbx run` | `new` | `simstim new` |
-| `sbx policy allow network <host>` | | `simstim grant <s> net <host>` |
-| `sbx policy log` | | `simstim audit <s> --door net` |
+| `sbx exec -it <name> bash` | `ssh` | `simstim shell` |
+| `sbx exec` | `exec` | `simstim exec` |
+| `sbx policy allow network <host>` | firewall rules inside the VM | `simstim policy allow <host> --in <s>`, or `--all` for every session |
+| `sbx policy log` | | `simstim policy log` |
+| `sbx policy check network` | | `simstim policy check` |
 | `sbx secret set` | environment secrets | `[secrets.NAME]` with `hosts` |
-| `sbx stop`, `sbx rm` | `stop`, delete | `simstim stop`, `simstim kill` |
-| | `resume` | `simstim resume`, or attach |
+| `sbx stop`, `sbx rm` | `stop`, `delete` | `simstim stop`, `simstim rm` |
+| | `resume` | `simstim attach`, or `resume` |
 | | `fork` | `simstim fork` (P5) |
 | `sbx cp` | `scp` | `simstim cp` (P5) |
-| `sbx exec` | `exec` | `simstim exec` (P5) |
-| Templates | Environments | Images and `save` (P3, P5) |
+| Templates | Environments | Profiles, images and `image save` (P3, P5) |
 
 ### 9.3 Errors
 
@@ -1196,46 +1426,55 @@ Each error has a message and a `Try:` line ([style](style.md)). The host sends a
 
 | Code | Message | Try |
 | --- | --- | --- |
-| `wall_floor` | devbox runs sessions at microvm or stronger, and process is weaker. | `simstim new devbox --wall process --downgrade` (records a downgrade), or `simstim host wall devbox --floor process` |
-| `wall_unavailable` | The microvm wall needs /dev/kvm, and devbox has none. | `simstim host wall devbox` (shows what this host can run) |
+| `wall_floor` | devbox runs sessions at microvm or stronger, and process is weaker. | `simstim new devbox --wall process --downgrade` (records a downgrade), or `simstim host set devbox floor=process` |
+| `wall_unavailable` | The microvm wall needs /dev/kvm, and devbox has none. | `simstim host show devbox` (shows what this host can run) |
 | `wall_setup` | devbox needs a one-time root step before it can run process walls: Ubuntu limits user namespaces. | `simstim host prepare devbox` (runs or prints the root step) |
-| `wall_helper_old` | The helper on devbox is too old for walls. | `simstim host add devbox` (updates the helper) |
-| `grant_refused` | api.stripe.com is in your deny list. | Remove it from `[network] deny` in config.toml |
+| `wall_helper_old` | The helper on devbox is too old for walls. | `simstim host upgrade devbox` |
+| `policy_locked` | A lock in config.toml denies api.stripe.com, so no layer can allow it. | `simstim policy edit --all`, and remove it from `[lock] network.deny` |
+| `layer_missing` | Say where the rule goes: a session, a profile, a repository, a host or all sessions. | `simstim policy allow api.example.com --in devbox/auth-fix` |
 | `grant_wildcard` | `*.vercel.app` covers sites of many owners. | Grant the one host you need, such as `myapp.vercel.app` |
 | `grant_idn` | `gіthub.com` holds characters that are not Latin. Its ASCII form is `xn--gthub-…`. | Type the name as you mean it, with `--idn` |
-| `grant_public` | acme/site is a public repository, so each push publishes. | `simstim grant <s> push github.com/acme/site --public` |
+| `grant_public` | acme/site is a public repository, so each push publishes. | `simstim policy allow push github.com/acme/site --in <s> --public` |
 | `secret_unbound` | GITHUB_TOKEN has no hosts, so it would enter the sandbox as a plain value. | Add `hosts = ["api.github.com", "github.com"]` to `[secrets.GITHUB_TOKEN]`, or pass `--expose GITHUB_TOKEN` |
-| `sandbox_stopped` | auth-fix on devbox is stopped. | `simstim resume devbox/auth-fix` |
+| `sandbox_stopped` | auth-fix on devbox is stopped. | `simstim attach devbox/auth-fix` (wakes it) |
 | `sandbox_busy` | auth-fix on devbox is starting or stopping. | Wait a moment, then try again |
-| `unpulled` | auth-fix has 3 commits that you have not pulled. | `simstim pull devbox/auth-fix`, or `kill --force` |
-| `pull_flagged` | The work changes files that run code on your laptop or in CI: `.github/workflows/ci.yml`, `.claude/settings.json`. | Review them with `git diff <base> refs/simstim/sessions/devbox/<id>/…`, then `simstim pull devbox/auth-fix --yes` |
+| `unpulled` | auth-fix has 3 commits that you have not pulled. | `simstim pull devbox/auth-fix`, or `simstim rm devbox/auth-fix --force` |
+| `pull_flagged` | The work changes files that run code on your laptop or in CI: `.github/workflows/ci.yml`, `.claude/settings.json`. | Review them with `git diff <base> refs/simstim/sessions/devbox/<id>/…`, then `simstim pull devbox/auth-fix --allow-flagged` |
 | `mount_microvm` | microvm sandboxes cannot share a folder in this version. | `simstim pull`, or `simstim cp` |
-| `digest_mismatch` | The VMM on devbox does not match the digest in this client. | `simstim host add devbox` (installs the files again) |
+| `digest_mismatch` | The VMM on devbox does not match the digest in this client. | `simstim host upgrade devbox` (installs the files again) |
+| `judge_unavailable` | The judge at 127.0.0.1:11434 did not answer, so unknown sites are unsure. | Start the model server, or set `classifier.judge = "none"` |
+| `ssh_key_kind` | DEPLOY_KEY is not an SSH key. | Add `kind = "ssh-key"` to `[secrets.DEPLOY_KEY]` in config.toml |
+| `keep_refused` | `.bashrc` runs at every start, so `keep` cannot hold it. | Keep `.bash_history`, and put start-up commands in the image |
 
-In the guest, a refused flow gets a 403 whose body is one line: `simstim: api.example.com is not granted to this session. Try: simstim grant devbox/auth-fix net api.example.com`.
+In the guest, a refused flow gets a 403 whose body is one line: `simstim: api.example.com is not allowed in devbox/auth-fix. Try: simstim policy allow api.example.com --in devbox/auth-fix`.
 
 ### 9.4 The launcher
 
 - **Session rows** get a one-cell mark between the state glyph and the name: `▣` microvm, `▤` gvisor, `□` process, a space for none. A downgraded session shows a yellow `!` in its place. The golden tests in `internal/tui/testdata` change with it.
-- **The line under the list** adds the level: `~/src/app · microvm · 6.1 of 8 GiB · s4`. A downgrade reads "! none, below the floor process" in yellow. Exposed secrets read "exposed: GITHUB_TOKEN" in yellow. A session that is not armed reads "secrets not armed: attach to arm them". A claimed state is followed by a faint "(claimed)" when the row has room.
-- **A held flow:** the session needs input, and the line reads "● wants api.example.com:443   g grants".
+- **The line under the list** adds the level: `~/src/app · microvm · 6.1 of 8 GiB · s4`. A downgrade reads "! none, below the floor process" in yellow. Exposed secrets read "exposed: GITHUB_TOKEN" in yellow. A session that is not armed reads "secrets not armed: attach to arm them". A claimed state is followed by a faint "(claimed)" when the row has room. The unknown action shows when it is not `ask`, with the classifier's count: "net: classify, 3 allowed". A session whose layers differ from the laptop's files shows "policy changed: apply" in faint text.
+- **Sessions of one sandbox** sit together. The first is at the top, and the others are indented under it with their own state glyphs (6.11).
+- **A held flow:** the session needs input, and the line reads "● wants api.example.com:443   p policy".
 - **Host rows** add the floor, the room and health, as section 14.2.6 draws them. The tier shows only when it is not `own`.
-- **The grants sheet** opens with `g` on a session. Its rule says the level and the preset. Held requests come first, in yellow, with the registrable domain in bold and the ASCII form of an internationalised name. Then the grants by door, each with its source, faint. Keys: `enter` allow for this session, `p` allow for this repository, `x` refuse, `del` revoke, `esc` close. The sheet never offers "always". After 5 refusals in 10 minutes, it stops prompting and says so.
+- **The policy sheet** opens with `p` on a session. Its rule says the level, the preset, the unknown action and the profile. Held requests come first, in yellow, with the registrable domain in bold and the ASCII form of an internationalised name. Then the rules by door, each with its layer, faint. Keys: `o` allow once, `enter` allow for this session, `r` allow for this repository, `f` allow for the session's profile, `x` refuse, `del` remove the selected rule, `esc` close. The sheet never offers "all sessions": that needs `policy allow --all`, typed. After 5 refusals in 10 minutes, it stops asking and says so.
+- **A shell:** `t` on a session opens a shell session in its sandbox, or attaches to the newest one (6.11).
 - **The new-session form** gets a `Wall` row: `auto (microvm)  process  none…`. Picking a level below the floor opens the downgrade sheet: a red rule, "Run below the floor of devbox?", the list of what the session loses, and a field where the user types the level's name. It also gets a `Host` row (14.2.6).
 - **The add-host sheet** gains the steps Tier, Sandboxes and Root step (14.2.6).
 - **The delete sheet** for a walled session says what goes: the sandbox, its clone or disk, its state and its audit log, and the count of commits not pulled.
 - **Waking:** Enter on a stopped session shows "Waking auth-fix on devbox…", then attaches.
 - **Notices:** "Stopped auth-fix on devbox. Its work stays." "Granted api.stripe.com to auth-fix for this session." "Revoked api.stripe.com from auth-fix."
-- **The palette** adds "Grants", "Audit log", "Stop session" and, from P5, "Fork session". Stop has no default key, as the debug commands have none.
+- **The palette** adds "Policy", "Policy log", "Open a shell", "Stop session", "Lock down every sandbox" and, from P5, "Fork session". Stop and lockdown have no default key, as the debug commands have none.
 - **Attached:** nothing changes. The session owns every row and column. Placement, prepare and the root step print before an attach, never during it.
 
 | Key | Where | Action |
 | --- | --- | --- |
-| `g` | Sessions | Open the grants sheet |
-| `enter` | Grants sheet | Allow the held request for this session |
-| `p` | Grants sheet | Allow it for this repository |
-| `x` | Grants sheet | Refuse it |
-| `del` | Grants sheet | Revoke the selected grant |
+| `p` | Sessions | Open the policy sheet |
+| `t` | Sessions | Open a shell in the session's sandbox |
+| `o` | Policy sheet | Allow the held request once |
+| `enter` | Policy sheet | Allow it for this session |
+| `r` | Policy sheet | Allow it for this repository |
+| `f` | Policy sheet | Allow it for the session's profile |
+| `x` | Policy sheet | Refuse it |
+| `del` | Policy sheet | Remove the selected rule |
 
 ## 10. Protocol changes
 
@@ -1265,6 +1504,8 @@ The supervisor gives odd stream IDs and the guest gives even ones, so both can o
 | `port` | supervisor | `{"port":3000}` | raw bytes |
 | `put` | supervisor | `{"name":"shot.png","size":123456,"sha256":"…"}` | the file's bytes. The guest answers with the path. |
 | `bundle` | supervisor | `{"dir":"in","repo":"app"}` or `{"dir":"out","base":"<sha>"}` | a git bundle |
+| `exec` | supervisor | `{"id":"<exec id>"}` | the command's stdout and stderr, framed, then its exit code (6.11) |
+| `agent` | guest | `{}` | the SSH agent protocol, for the keys of 7.9 |
 
 ### 10.3 `ctl` operations
 
@@ -1277,6 +1518,8 @@ From the supervisor to the guest init, as `TRequest`:
 | `stop` | `{"grace_ms":10000}` | `{}`, then the guest shuts down |
 | `freeze`, `thaw` | `{}` | `{}` (P5) |
 | `refs` | `{}` | `{"refs":[{"name":"refs/heads/…","sha":"…"}]}` |
+| `spawn` | `{"session":"<id>","argv":[…],"env":[…],"cwd":"/work/app","cols":120,"rows":40}` | `{"pid":31}`. The guest init starts another holder in the same sandbox (6.11). |
+| `exec` | `{"id":"<exec id>","argv":[…],"cwd":"/work/app","timeout_ms":600000}` | `{}`, then the output on an `exec` stream |
 
 From the guest to the supervisor, as `TEvent`, each capped at 64 KiB and at 20 a second. The supervisor cleans every string with `api.CleanText` and keeps them as claims:
 
@@ -1303,8 +1546,10 @@ The supervisor serves `paths.Socket(id)` with the holder's protocol. It answers 
 | `ports` | both | The claim, and the granted ports |
 | `debug.*` | both | The supervisor's own files, and the guest's through the `ctl` stream |
 | `secrets` | supervisor | Only before the sandbox starts, as today |
-| `grants`, `grant`, `revoke` | supervisor | New |
-| `audit` | supervisor | New: `{"since":"…","door":"net","max":500}` |
+| `policy.ls`, `policy.add`, `policy.rm`, `policy.check` | supervisor | New |
+| `policy.replace` | supervisor | New: the new layers for every layer but the session's (8.8) |
+| `policy.log` | supervisor | New: `{"since":"…","door":"net","by":"classifier","max":500}` |
+| `spawn`, `exec` | supervisor | New: a session or a command in the same sandbox (6.11) |
 | `stop` | supervisor | New |
 | `arm` | supervisor | New: `{"env":{"NAME":"value"}}`, values for bound secrets |
 | `pull.begin`, `pull.read`, `pulled` | supervisor | New |
@@ -1328,11 +1573,11 @@ New bridge ops. The bridge serves the ops of section 14 in a new `internal/host/
 | `host.facts` | `facts` | The host's facts and health items | 14.10.2, 14.11.1 |
 | `host.drain` | `drain` | Sets or clears the drain mark | 14.11.3 |
 | `host.purge` | `purge` | Removes what the helper put on the host, and reports it | 14.12 |
-| `grants`, `grant`, `revoke`, `audit`, `stop`, `arm`, `pull.begin`, `pull.read`, `pulled` | `grants`, `audit`, `stop`, `arm`, `pull.bundle` | The bridge passes these to the session's supervisor | 6, 10.4 |
+| `policy.ls`, `policy.add`, `policy.rm`, `policy.check`, `policy.replace`, `policy.log`, `spawn`, `exec`, `stop`, `arm`, `pull.begin`, `pull.read`, `pulled` | `policy`, `spawn`, `stop`, `arm`, `pull.bundle` | The bridge passes these to the session's supervisor | 6, 10.4 |
 
 The helper never runs sudo, so no bridge op runs a root step. The client builds the root step and runs it through `ssh -t … sudo` (14.4).
 
-New features in the bridge's hello: `wall`, `grants`, `audit`, `stop`, `arm`, `pull.bundle`, `put`, `sandbox`, `facts`, `drain` and `purge`. Later: `images` (P3), `fork`, `cp`, `exec` (P5). `wall` means that the helper can start walled sessions. `sandbox` means that it serves the sandbox probe and the runtime ops. A client that needs a feature the helper lacks says `wall_helper_old` with its hint, or the error "too old for sandboxes" of section 14.14.
+New features in the bridge's hello: `wall`, `policy`, `spawn`, `stop`, `arm`, `pull.bundle`, `put`, `sandbox`, `facts`, `drain` and `purge`. Later: `classify` (P2), `ssh-key` (P2), `images` (P3), `fork` and `cp` (P5). `spawn` covers `shell` and `exec`. `wall` means that the helper can start walled sessions. `sandbox` means that it serves the sandbox probe and the runtime ops. A client that needs a feature the helper lacks says `wall_helper_old` with its hint, or the error "too old for sandboxes" of section 14.14.
 
 New fields in the hello and in requests:
 
@@ -1347,7 +1592,10 @@ New fields in the hello and in requests:
 Wall      string  `json:"wall,omitempty"`      // "auto", or a level
 Downgrade bool    `json:"downgrade,omitempty"` // the user named a level below the floor
 Floor     string  `json:"floor,omitempty"`     // the floor that the client pinned
-Layers    []Layer `json:"layers,omitempty"`    // user, repository and session layers
+Layers    []Layer `json:"layers,omitempty"`    // the layers of 8.2 that the laptop holds, with their locks
+Profile   string  `json:"profile,omitempty"`   // the profile's name, for the row
+Task      string  `json:"task,omitempty"`      // new --task: one line about the work, for the row and the judge
+In        string  `json:"in,omitempty"`        // new --in: the session whose sandbox this session joins (6.11)
 SecretModes map[string]string `json:"secret_modes,omitempty"` // NAME: "bound" or "exposed"
 GrantAnswers map[string]bool  `json:"grant_answers,omitempty"` // proposal: yes or no, for the file's hash
 Mounts    []string `json:"mounts,omitempty"`   // "path[:guest][:ro|:rw]"
@@ -1383,6 +1631,10 @@ Armed    bool      `json:"armed,omitempty"`
 Exposed  []string  `json:"exposed,omitempty"`  // names of exposed secrets
 Claimed  bool      `json:"claimed,omitempty"`  // the state comes from the guest
 Held     []string  `json:"held,omitempty"`     // "api.example.com:443", flows that wait
+SandboxOf string   `json:"sandbox_of,omitempty"` // the first session of this session's sandbox (6.11)
+Unknown  string    `json:"unknown,omitempty"`  // the unknown action, when it is not ask
+Classified int     `json:"classified,omitempty"` // flows that the classifier allowed
+LayersHash string  `json:"layers_hash,omitempty"` // compared with the laptop's files (8.8)
 Stopped  bool      `json:"stopped,omitempty"`  // state "stopped"
 Outdated bool      `json:"outdated,omitempty"` // its runtime is older than the client's (14.11.2)
 
@@ -1436,7 +1688,7 @@ New event kinds in `internal/alerts`, added to `Kinds` and to `DefaultEvents`:
 
 "Without root" is what the host gives before the root step of section 14.4. "After the root step" is what it gives after.
 
-| Platform | Strongest level | Floor that `host wall` pins | Notes | Fallback |
+| Platform | Strongest level | Floor that `host prepare` pins | Notes | Fallback |
 | --- | --- | --- | --- | --- |
 | Linux with KVM, host kernel 6.8 or later (Ubuntu 24.04, Debian 13), `/dev/kvm` open to the user (mode 0666, as upstream systemd sets it, or the user already in `kvm`) | microvm (Cloud Hypervisor) | microvm | No root step needed for the level | process |
 | Linux with KVM, `/dev/kvm` 0660 `root:kvm` and the user not in `kvm` (Debian's default) | without root: process (gvisor from P6). After the root step: microvm | the probe's best at that time | The root step's `kvm-acl` opens `/dev/kvm` at once, and `kvm-group` keeps it after a reboot (14.4.2). That Ubuntu also sets 0660 is UNVERIFIED. | process |
@@ -1477,7 +1729,11 @@ The figures from upstream are for small configurations. Firecracker reaches the 
 | An intercepted request, leaf certificate cached | 10 ms or less added, at p50 | The same benchmark |
 | Spliced throughput | 200 MiB/s or more | The same benchmark |
 | The digest check before the bridge (P4) | 25 ms or less at p50 | `time-to-agent.sh`, the dial step |
-| A first image conversion, 1 GiB image | 90 s or less (an estimate to check) | `simstim host images devbox pull <ref>` with `time` |
+| A first image conversion, 1 GiB image | 90 s or less (an estimate to check) | `simstim image pull <ref> devbox` with `time` |
+| A flow that the classifier's fixed steps decide | 1 ms or less added, at p50 | A Go benchmark in `internal/egress/classify` |
+| A judge's answer | 5 s at most, by the timeout. The p50 is to measure, for a local model and for an API. | The times in the audit lines over P2.12's test set |
+| A rule for all sessions, to every running sandbox | 2 s or less for 10 sandboxes on 3 reachable hosts | An end-to-end script that times `policy deny --all` until each egress process refuses the host |
+| `shell` to a prompt, sandbox running | 300 ms or less above a plain `attach`, at p50 | `scripts/time-to-agent.sh --shell`, 20 runs |
 
 A target that a measurement misses opens an issue before the phase ends. It does not block the phase unless it is the key-to-PTY target, which guards the project's first principle.
 
@@ -1490,7 +1746,7 @@ Each line that says "bent" needs the owner's yes, and each rule change needs its
 | The agent's bytes reach the terminal unchanged | No | The supervisor passes output frames on without reading them. The client only observes. Placement, prepare and the root step print before an attach, never during it. An opt-in filter would bend this rule ([question 26](#15-open-questions)). |
 | Nothing new listens on a host | No, under [0030](decisions/0030-local-sockets-do-not-listen.md) | No new TCP or UDP port, loopback included. The supervisor serves the session's existing Unix socket path. Forwarded ports are Unix sockets, as SSH reaches them. Cloud Hypervisor's API socket is a Unix socket for the supervisor only (0600, 0700 folder). No trusted process listens where a guest can connect: the supervisor dials into a microvm, and the other walls get one end of a socket pair. Inside the guest, the proxy listens on the guest's own loopback. Decision 0030 records that a Unix socket in a folder that only the user can reach, and a VM socket that only one sandbox's VMM can reach, are not listening on a host ([question 23](#15-open-questions)). |
 | No relay | No, under [0031](decisions/0031-the-egress-process-is-not-a-relay.md) | The egress process runs on the user's own host, for one session, under the user's grants. Decision 0031 records that it is not a relay ([question 24](#15-open-questions)). The laptop copies its own files to its own hosts, and no bytes go from one host to another. Jump hosts, tunnels and overlays are the user's own set-up, on machines that the user owns (14.13). The tool runs no tunnel. |
-| No telemetry | No | Image pulls and artefact downloads are fetches that the user starts. A host may download the runtime from the release ([question 39](#15-open-questions)): that is new outbound traffic, but it reports nothing. The malware feed of P7 comes with releases or by a sync the user starts. |
+| No telemetry | No | A judge's requests go only to an endpoint that the user names, and the audit log records each one ([0031](decisions/0031-the-egress-process-is-not-a-relay.md)). Image pulls and artefact downloads are fetches that the user starts. A host may download the runtime from the release ([question 39](#15-open-questions)): that is new outbound traffic, but it reports nothing. The malware feed of P7 comes with releases or by a sync the user starts. |
 | The tool stores no secrets | No, under [0032](decisions/0032-secret-values-in-memory-only.md) | No value is ever written. But the egress process holds the values of bound secrets, and the session's TLS key, in memory for the whole session, where today the holder drops values as soon as the agent starts. Decision 0032 records this ([question 25](#15-open-questions)). The laptop arms them again after a host reboot. No memory snapshot is ever made. The docs and `security.md` must say this plainly. A login that a user makes inside a sandbox is written by the agent, on the session's disk, and the row shows it. `tiers.toml` and the grant ledger hold names, times and host IDs, never values. |
 | Principle 7: small and boring, one binary on each side | **Bent** | Hosts that run microvm walls also hold a VMM, a guest kernel, a tools image, an agents disk and images (later `runsc`). The client stays one binary and embeds only digests. The guest helper is the same binary as the host helper. |
 | Setup needs no root, except `sudo -n poweroff` for idle stop | **Bent** | The root step of `host prepare` (14.4) may run root steps once: the kvm ACL and group, linger, the namespace launcher's `AppArmor` profile, `kernel.io_uring_disabled=2`, a list of blocked vsock modules, and subuid ranges. The client builds the script and shows every line first. It runs the script through sudo in the user's terminal only after a yes, and never at attach. The helper never runs sudo ([question 29](#15-open-questions)). |
@@ -1498,7 +1754,7 @@ Each line that says "bent" needs the owner's yes, and each rule change needs its
 | The tool never changes an agent's permissions | No | Policy acts at the doors. The model API guard refuses some server-side tools at the proxy, as a network rule refuses a host. The package manager settings that the guest init writes change tools, not the agent. The agent's own sandbox is not turned off. |
 | `internal/host/fix.go`: "Nothing here uses sudo" | No | The helper never runs sudo. The client runs `ssh -t … sudo`, and the user types the password into sudo (14.4.1). |
 | The user's SSH settings win | Changed for saved hosts | The host key pin and the forwarding options go on the `ssh` command line, where they win over the user's config (14.7.1, 14.8.5). Record 3 of section 14.17 states this. |
-| Agents are data | No | Low-value token hints and each agent's sandbox size go in `internal/agents` (8.6). |
+| Agents are data | No | Low-value token hints and each agent's sandbox size go in `internal/agents` (8.6). The classifier's fixed lists are data in `internal/egress/rules/classify.toml`. |
 | Decision 0002, one holder for each session | No, but extended | Still one holder, now in the wall, plus a supervisor, an egress process and, for a microvm, a VMM, in the same unit |
 | Decision 0024, the memory cap | Extended | A microvm's guest memory is the session's cap minus 160 MiB for the VMM, the supervisor and the egress process. The balloon device returns freed pages. Admission refuses a sandbox that does not fit, where 0024 lowers a request to the limit (14.10.3). Record 5 of section 14.17 amends 0024. |
 | Decision 0013 and the design's non-goal "no promise that a process survives a host reboot" | Extended | A stopped session keeps its files, not its processes. An idle stop, when the user turns it on, stops processes too. Principle 2 holds while a session runs. `host create e2b` gives the tier `shared` ([question 32](#15-open-questions)), in record 2 of section 14.17. |
@@ -1738,7 +1994,7 @@ Enter hands the terminal to `ssh -t … sudo` with Bubble Tea's `ExecProcess`, a
 
 ### 14.3 The sandbox probe
 
-**When it runs:** in `host add` after the doctor line, in `host prepare`, in `host wall`, in `host doctor` (a "Sandboxes" block), and again after the root step.
+**When it runs:** in `host add` after the doctor line, in `host prepare`, in `host show`, in `host doctor` (a "Sandboxes" block), and again after the root step.
 
 **What it is:** the bridge request `sandbox.probe`, behind the feature `sandbox`. Its argument is `{"release_url": "<url>"}`, or `{}` when images come from the laptop. It changes nothing on the host. The reflink test makes two files in `artefacts/incoming/` and deletes them at once. It runs each driver's probe of section 5.1, and returns them in `walls`.
 
@@ -1858,7 +2114,7 @@ The undo script lists the steps in reverse order. A later root step on the same 
 
 #### 14.4.4 How it runs
 
-The user picks one of three modes. `--root run|print|skip` on `host add`, `host prepare` and `host rm --purge` picks it without a question.
+The user picks one of three modes. `--root-step run|print|skip` on `host add`, `host prepare` and `host rm --purge` picks it without a question.
 
 - **run:** the client runs `ssh -t -F <wrapper> <pin options> -- <target> /usr/bin/sudo /bin/sh -c '<script>'` through `SSH.RunRoot`. It quotes the script with single quotes, and writes `'\''` for each single quote in it. It prints the SHA-256 of the exact text before it sends it. It checks for `__ROOT_STEP_DONE__`, then probes again. The probe, not the exit code, says whether the step worked.
 - **print:** the client writes `./simstim-root-<host>.sh` (0600) and prints its SHA-256 and the line `sudo sh simstim-root-<host>.sh`. The machine's owner runs it from a root console. `host prepare` then probes again.
@@ -1869,9 +2125,9 @@ The default mode:
 | Tier | Default |
 | --- | --- |
 | `own`, `throwaway` | `run` when this laptop has started no sandbox on this host ID and the probe reports `started` = 0. `print` after that, because a compromised account could capture the password. |
-| `shared` | `print`. `--root run` works only after the user types the host's name. |
+| `shared` | `print`. `--root-step run` works only after the user types the host's name. |
 
-With `--yes`, the mode is `print` unless `--root` says otherwise. `--root run --yes` works only when the probe says `sudo_passwordless`.
+With `--yes`, the mode is `print` unless `--root-step` says otherwise. `--root-step run --yes` works only when the probe says `sudo_passwordless`.
 
 #### 14.4.5 Records
 
@@ -1931,7 +2187,7 @@ Section 8.4 specifies the keys that this section adds to `hosts.toml`: `default`
 #### 14.6.1 `tiers.toml`
 
 ```toml
-# Tiers of simstim hosts. Edit with `simstim host tier`.
+# Tiers of simstim hosts. Edit with `simstim host set <host> tier=<tier>`.
 migrated = 2026-11-09T10:00:00Z
 
 [[host]]
@@ -2003,7 +2259,8 @@ The host never learns its tier. The client enforces every rule in this section, 
 | Grant | `own` | `throwaway` | `shared` |
 | --- | --- | --- | --- |
 | A secret from `[secrets]` | Yes | Only when `[secret_tiers]` marks it `throwaway` or `shared` | Only when `[secret_tiers]` marks it `shared`, and in a terminal after "Send CLAUDE_LAB to lab? Its owner can read it. [y/N]" |
-| The SSH agent, for one session at level `none` with `new --ssh-agent`. No sandbox ever gets it (7.3). | Yes | No | No |
+| The laptop's SSH agent, for one session at level `none` with `new --ssh-agent`. No sandbox ever gets it (7.9). | Yes | No | No |
+| An SSH key for a sandbox's own agent (7.9) | Yes | Only when `[secret_tiers]` marks it `throwaway` or `shared` | Only when `[secret_tiers]` marks it `shared`, after a question |
 | An alert token (`host alerts set --token-cmd`, or a webhook URL with a credential) | Yes | No | No |
 | A repository in clone mode | Any | Any | Only those that match `repos` |
 | Port forward, image paste | Yes | Yes, with a notice about localhost cookies | Yes, with the notice |
@@ -2015,7 +2272,7 @@ The host never learns its tier. The client enforces every rule in this section, 
 | The lowest floor allowed | `process`, with a notice | `process`, with a notice | `gvisor` |
 | A user template | Yes | Yes | Only one named with `--template` on that start |
 
-`--ssh-agent` and `net` grants to private ranges are doors of section 7. This section only gates them. `host wall --floor` refuses a floor below the tier's lowest floor. Lowering a host's tier raises its floor to that tier's lowest floor when the floor is below it ([question 5](#15-open-questions)).
+`--ssh-agent` and `net` grants to private ranges are doors of section 7. This section only gates them. `host set … floor=` refuses a floor below the tier's lowest floor. Lowering a host's tier raises its floor to that tier's lowest floor when the floor is below it ([question 5](#15-open-questions)).
 
 #### 14.8.3 The tier at each way in
 
@@ -2029,7 +2286,7 @@ The host never learns its tier. The client enforces every rule in this section, 
 | A host that existed before the migration | `own` |
 | A host with no entry after the migration | `shared` until the user answers |
 
-`simstim host tier <name>` prints the tier. `simstim host tier <name> own|throwaway|shared` sets it.
+`simstim host show <name>` prints the tier. `simstim host set <name> tier=own|throwaway|shared` sets it.
 
 - **Lowering** works at once. The client lists the sessions that hold grants the new tier refuses. It says that a value already sent cannot be taken back.
 - **Raising** needs a connection that passes the pinned key, and the user must type the host's name.
@@ -2064,15 +2321,17 @@ All checks call `client.Allow`, which returns a `*client.UserError` with a hint.
 `~/.local/state/simstim/grants.json` records, for each grant: the host's name and ID, the kind, the name, the first and last time, and a count. It never holds a value.
 
 ```text
-$ simstim host grants lab
-lab: shared, host ID 6f1d…4e5f
+$ simstim host show lab
+…
+Sent to lab (shared, host ID 6f1d…4e5f)
   secret     CLAUDE_LAB              sent 3 times, last 9 Nov 14:02
   ssh agent  never
+  ssh keys   never
   repos      github.com/example/web
   pastes     2 images
 ```
 
-`host rm`, `host destroy` and `host rm --purge` end with the rotate list:
+`host rm`, `host rm --destroy` and `host rm --purge` end with the rotate list:
 
 ```text
 Rotate these secrets, which lab got: CLAUDE_LAB.
@@ -2241,7 +2500,7 @@ A sandbox that does not fit is refused, not made smaller. This differs from [002
    7. `spread`: the most room. `pack`: the least room that fits.
    8. The fewest sandboxes.
    9. The host's name.
-6. **Wake.** Only when no awake host passes. A free wake runs with a progress line. A paid wake asks "No awake host can take it. Wake cloud (e2b, billed while it runs)? [y/N]", unless `--wake` is given or `wake = "always"`. With `wake = "never"`, it fails.
+6. **Wake.** Only when no awake host passes. A free wake runs with a progress line. A paid wake asks "No awake host can take it. Wake cloud (e2b, billed while it runs)? [y/N]", unless `--allow-wake` is given or `wake = "always"`. With `wake = "never"`, it fails.
 7. **Admit.** Send `new` to the first host. On `no_room`, update its facts from the error and try the next host, at most 3 hosts in all.
 8. **Record.** Add the placement to `placements.json`. The manifest's `placed_by` is `auto`, and `place_reason` is the winning line, for example "awake, image cached, most room". `ls --json` shows both.
 
@@ -2279,18 +2538,18 @@ Health shows in the launcher's host row and details, in `host ls`, and in `host 
 
 #### 14.11.3 Drain
 
-- `simstim host drain <name> [--reason text]` writes `drain.json` on the host, through the request `host.drain` (feature `drain`).
+- `simstim host set <name> drain=<reason>` writes `drain.json` on the host, through the request `host.drain` (feature `drain`).
 - While the mark is there, admission refuses new sandboxes with `draining`. Running sandboxes keep running. `new auto` skips the host.
-- `simstim host undrain <name>` removes the mark.
+- `simstim host set <name> drain=off` removes the mark.
 - The docs give the order for a host restart: drain, wait or stop sessions, restart, undrain. Restore at boot ([architecture, 3.9](../explanation/architecture.md#39-host-reboot-and-respawn)) brings eligible sessions back.
 
 ### 14.12 Leave and wipe
 
 `simstim host rm <name>` keeps today's behaviour: it forgets the host, and prints the rotate list.
 
-`simstim host rm <name> --purge [--force] [--root run|print|skip]` removes everything that the tool put on the host:
+`simstim host rm <name> --purge [--force] [--root-step run|print|skip]` removes everything that the tool put on the host:
 
-1. **Ask.** "Remove everything simstim put on box? This stops 3 sessions. [y/N]". It refuses while a session works, unless `--force`, as `host destroy` does.
+1. **Ask.** "Remove everything simstim put on box? This stops 3 sessions. [y/N]". It refuses while a session works, unless `--force`, as `host rm --destroy` does.
 2. **Purge on the host.** The request `host.purge` (feature `purge`) makes the helper:
    1. Refuse with `unsaved` when a worktree has changes or commits that are not pushed, unless `--force`, and list them.
    2. Stop and delete every session.
@@ -2326,10 +2585,10 @@ Every error is a `client.UserError`. The exit code is 1 unless the table says ot
 
 | When | Message | Hint (Try:) |
 | --- | --- | --- |
-| No KVM access, at `new` with `--wall microvm` (`level_below`) | box gives the gvisor level, and this session asks for microvm. | `simstim host prepare box --root run`, or `simstim new box --wall gvisor` |
+| No KVM access, at `new` with `--wall microvm` (`level_below`) | box gives the gvisor level, and this session asks for microvm. | `simstim host prepare box --root-step run`, or `simstim new box --wall gvisor` |
 | No `/dev/kvm` at all | vps has no /dev/kvm, so no root step can give it the microvm level. | `simstim new vps --wall gvisor`, or pick a host with KVM: `simstim host ls` |
-| `--root run` on a shared host, without the typed name | lab is a shared host, so its owner runs the root step. | `simstim host prepare lab --root print` |
-| No sudo | The account me has no sudo on lab. | `simstim host prepare lab --root print`, and give the script to the machine's owner |
+| `--root-step run` on a shared host, without the typed name | lab is a shared host, so its owner runs the root step. | `simstim host prepare lab --root-step print` |
+| No sudo | The account me has no sudo on lab. | `simstim host prepare lab --root-step print`, and give the script to the machine's owner |
 | A root step failed | The root step on box stopped at kvm-group: usermod: group 'kvm' does not exist. | `simstim host doctor box` |
 | A user name that the script cannot use | The account name "a b" on box cannot go in a root script. | Run the steps by hand, as `simstim host doctor box --fix` prints them |
 | A host download failed | box could not download cloud-hypervisor 54.0: connection refused. | `simstim host prepare box --images laptop` |
@@ -2337,21 +2596,21 @@ Every error is a `client.UserError`. The exit code is 1 unless the table says ot
 | A runtime file missing (`runtime_missing`) | box lacks cloud-hypervisor 54.0 of this client's release. | `simstim host prepare box` |
 | An image missing, no terminal | box lacks agent-base@1a2b3c4d (1.0 GB). | `simstim host prepare box` |
 | A changed host key (exit code 2) | box's host key changed: SHA256:3f9a…c1 was pinned, and the host shows SHA256:77b0…02. | If you reinstalled box: `simstim host rekey box`. Otherwise, do not connect. |
-| A changed host ID (a warning) | box answers with a different host ID, so its tier is now shared. | If it is the same machine: `simstim host tier box own` |
+| A changed host ID (a warning) | box answers with a different host ID, so its tier is now shared. | If it is the same machine: `simstim host set box tier=own` |
 | A secret above the tier | lab is a shared host, so it does not get ANTHROPIC_API_KEY. | Make a low-limit token for lab, and mark it under `[secret_tiers]` in config.toml |
 | The SSH agent above the tier | lab is a shared host, so it does not get your SSH agent. | Use a deploy key made for lab, or bring the work back with `simstim pull` |
 | An alert token above the tier | lab is a shared host, so it does not get an alert token. | `simstim host alerts set lab --ntfy <topic>` without a token |
 | A repository outside `repos` | lab may not get github.com/example/api. | Add a pattern to the `repos` of lab in hosts.toml, for example `github.com/example/api` |
-| No tier after the migration | box has no tier yet, so it counts as shared. | `simstim host tier box own`, or `throwaway`, or `shared` |
+| No tier after the migration | box has no tier yet, so it counts as shared. | `simstim host set box tier=own`, or `tier=throwaway`, or `tier=shared` |
 | `no_room`, named host | box has no room for a 4 GiB sandbox: 2.1 GiB free of 57.3 GiB. | `simstim new nuc` (9 GiB free), or end a session: `simstim ls --host box` |
 | `no_room` on every host | No host in the pool can take a 4 GiB microvm sandbox. | `simstim new auto --dry-run` |
-| `draining` | box is draining (kernel update), so it takes no new sandboxes. | `simstim host undrain box`, or pick another host |
+| `draining` | box is draining (kernel update), so it takes no new sandboxes. | `simstim host set box drain=off`, or pick another host |
 | `busy` | box is busy with another start. | Try again in a few seconds. |
 | No host given, no default | Name a host: you have 3 hosts and no default. | `simstim new box`, or set one: `simstim host default box` |
-| A shared host as the default | lab is a shared host, so it cannot be the default. | `simstim host tier lab own`, only if nobody else has root on lab |
+| A shared host as the default | lab is a shared host, so it cannot be the default. | `simstim host set lab tier=own`, only if nobody else has root on lab |
 | A reserved name | "auto" cannot name a host. | Pick another name. |
 | Two words before `--` | new takes one host. A command goes after --. | `simstim new box -- htop` |
-| Waking is off | No awake host can take this sandbox, and waking is off. | `simstim new auto --wake` |
+| Waking is off | No awake host can take this sandbox, and waking is off. | `simstim new auto --allow-wake` |
 | Facts that disagree | box reports 128 GiB of memory, but had 62.8 GiB at prepare, so auto placement skips it. | `simstim host prepare box` |
 | Purge while a session works | 2 sessions on box are working. | `simstim host rm box --purge --force` |
 | Purge with unsaved work (`unsaved`) | box has a worktree with work that is not pushed: ~/.local/share/simstim/worktrees/app/fix-12ab. | `simstim pull box/12ab`, then purge again, or add `--force` |
@@ -2465,7 +2724,7 @@ const (
 type OutboundKind string
 
 // Outbound is one thing that may leave the laptop, by kind and name.
-// It is not api.Grant, which opens a door inside a sandbox.
+// It is not api.Rule, which opens a door inside a sandbox.
 type Outbound struct {
     Kind OutboundKind
     Name string
@@ -2606,9 +2865,9 @@ The bridge serves the new requests in a new `bridge_sandbox.go`, as `handleMore`
 - Purge: under `hosttest`, the files in the home folder after `host add` then `host rm --purge` are the same as before `host add`.
 - Launcher: golden screens for the host rows with floor, tier and room, the tier sheet, the sandboxes sheet, the root step sheet and the host row of the new-session dialog. A model test: `n` with a default host opens the dialog.
 
-**End-to-end tests:** a new `test/e2e/sandbox_hosts.py`, run with `E2E_ONLY=sandbox-hosts`. Test hosts are other people's machines: the suite never uses `--root run` unless the host's owner sets `E2E_ROOT=run`.
+**End-to-end tests:** a new `test/e2e/sandbox_hosts.py`, run with `E2E_ONLY=sandbox-hosts`. Test hosts are other people's machines: the suite never uses `--root-step run` unless the host's owner sets `E2E_ROOT=run`.
 
-1. `host add --tier own --root print --yes`: the probe block prints, the root script prints with its SHA-256, and nothing changes outside the user's home.
+1. `host add --tier own --root-step print --yes`: the probe block prints, the root script prints with its SHA-256, and nothing changes outside the user's home.
 2. With `ForwardAgent yes` in a throwaway client SSH config, a session on the host has no `SSH_AUTH_SOCK`.
 3. With a wrong key in `known_hosts-<name>`, the client refuses to connect, with the message of section 14.14.
 4. A `shared` host never gets an `own`-tier secret: the start is refused, and `env` on the host lacks it.
@@ -2642,7 +2901,7 @@ This is the only full list. Each question has its options and a recommended defa
 2. **On a small host, the strongest level or the densest level that meets the floor?**
    - (a) The strongest level that the host can run.
    - (b) The densest level that still meets the floor, such as `process` where microvm guests would not fit.
-   - **Recommended:** (a). A host may pin a lower level by name, with `host wall --floor`.
+   - **Recommended:** (a). A host may pin a lower level by name, with `host set … floor=`.
 3. **Which microvm VMM?**
    - (a) Cloud Hypervisor first, Firecracker later for older kernels.
    - (b) Firecracker only.
@@ -2669,7 +2928,7 @@ This is the only full list. Each question has its options and a recommended defa
 8. **The guest's root file system across starts?**
    - (a) Reset at each start, keeping `/work` and the agent's state.
    - (b) Keep it, as Docker Sandboxes do.
-   - **Recommended:** (a), with `root = "keep"` for those who want it.
+   - **Recommended:** (a), with `system = "keep"` for those who want it.
 9. **Idle stop for sandboxes?**
    - (a) Never.
    - (b) 2 hours, for microvm sandboxes only.
@@ -2768,7 +3027,7 @@ This is the only full list. Each question has its options and a recommended defa
     - (a) Yes, each line shown first and run only after a yes.
     - (b) No: print the commands for the user.
     - (c) On a machine that the user does not own, only the machine's owner runs the printed script.
-    - **Recommended:** (a), with (b) when the user has no sudo. On `shared` hosts, (c) by default, and `--root run` needs the typed host name.
+    - **Recommended:** (a), with (b) when the user has no sudo. On `shared` hosts, (c) by default, and `--root-step run` needs the typed host name.
 30. **Which key signs what the client trusts?**
     - (a) The release key of decision [0017](decisions/0017-release-signatures.md).
     - (b) A separate key, kept offline or in hardware.
@@ -2830,6 +3089,52 @@ This is the only full list. Each question has its options and a recommended defa
     - (b) Best effort.
     - **Recommended:** (a): a release within 7 days for a high severity, with the known-bad list (P4.6) in that release.
 
+### Policy, shells and the classifier
+
+43. **What does the built-in layer do with a site that no rule covers, and what does the guided setup offer?**
+    - (a) `ask`.
+    - (b) `deny`.
+    - (c) `classify`.
+    - (d) `allow`.
+    - **Recommended:** (a) for the built-in layer: it never lets an unknown site through in silence, and it needs no setting. The guided setup asks once, offers all four, and writes the answer to `config.toml`. It suggests `ask` for work at a terminal, and `classify` with `unsure = "deny"` for parallel work.
+44. **Can a narrower layer allow a host that a broader layer denies?**
+    - (a) Yes. The narrowest layer with a matching rule decides, and `[lock]` holds what must never change.
+    - (b) No. A deny in any layer wins, as in Docker Sandboxes.
+    - **Recommended:** (a). The owner asked for one-off exceptions to a common config. Locks keep a deny that nothing can lift.
+45. **Does the classifier ship with a judge turned on?**
+    - (a) No. `judge = "none"` is built in. `model` and `command` are the user's choice.
+    - (b) Yes, a model judge with the agent's own key.
+    - **Recommended:** (a). A remote judge sends names to a third party, and every judge tested with adaptive attacks could be fooled. The fixed steps work without one.
+46. **How wide is a judge's allow?**
+    - (a) The session.
+    - (b) One flow.
+    - **Recommended:** (a) in the built-in layer, so that a session does not ask the judge again for each connection. Profiles for unattended work may set `max_scope = "once"`.
+47. **Do the sessions of one sandbox share its policy?**
+    - (a) Yes.
+    - (b) Each terminal gets its own.
+    - **Recommended:** (a). Processes in one sandbox can reach each other, so a policy for each terminal would not hold.
+48. **Where does `shell` run?**
+    - (a) Inside the sandbox.
+    - (b) On the host, in the sandbox's folder.
+    - **Recommended:** (a). The host never runs code in a folder that a sandbox can write (7.1).
+49. **Can a sandbox get the laptop's own SSH agent?**
+    - (a) No. Named keys only, from the sandbox's own agent (7.9).
+    - (b) Yes, while a client is attached, on `own` hosts.
+    - **Recommended:** (a). The laptop's agent holds every key the user has, and its forward ends when the laptop sleeps.
+50. **What does `host add --yes` do without `--tier`?**
+    - (a) It fails, and names the flag to pass.
+    - (b) It takes `shared`.
+    - (c) It takes `own`.
+    - **Recommended:** (a). A script then never changes its meaning in silence ([the CLI study](../research/cli-dx.md#3-what-the-isolation-spec-adds)).
+51. **What does a walled session do with a folder outside git?**
+    - (a) It gets an empty workspace, and the row says "scratch".
+    - (b) It is refused.
+    - **Recommended:** (a), so that today's first command, `new my-vps --name first`, keeps working.
+52. **Does the judge see the task line of `new --task`?**
+    - (a) Yes.
+    - (b) No.
+    - **Recommended:** (a). It is the user's own words, and the only trusted statement of what the work needs. Conseca and Progent build their policies from the user's trusted request in the same way ([research](../research/isolation.md#policy-for-parallel-work)).
+
 ### Decided by the design
 
 The research raised four more questions, and the design answers them, so they are not open. No wall has a guest network card, and all egress goes through the egress process (7.2, decision [0029](decisions/0029-a-sandbox-per-session.md)). The client embeds the release manifest, so the runtime needs no rollback floor, key or expiry of its own (14.9.1, 14.11.2). The supervisor dials into the guest, so no trusted-side process listens where a guest can connect (G7, decision [0030](decisions/0030-local-sockets-do-not-listen.md)). The names of these files follow the roadmap.
@@ -2871,6 +3176,12 @@ The research raised four more questions, and the design answers them, so they ar
 | A Mac host after a reboot cannot start VMs until its keychain is unlocked. Whether this affects Linux guests is UNVERIFIED. | Mac hosts are later ([question 37](#15-open-questions)). |
 | An older client that saves `hosts.toml` drops `wall_floor` and the new host keys. | A host without a floor uses its probe's best level and pins nothing, and the launcher says so (8.4). Tiers stay in `tiers.toml`. |
 | Converting an untrusted image attacks the converter on the trusted side. | A pure Go converter in a jail with no network, digests checked first, and caps on size and entries. |
+| A host name that the guest chose talks a model judge into an allow. | The fixed denies run first. The judge sees fields only, with the host name quoted as data. Its allow never reaches past `max_scope`. The upload budget caps what can leave. `policy log --by classifier` and the launcher's count show every allow, and `policy lockdown` stops all sandboxes at once. |
+| A broad rule for all sessions opens every sandbox at once. | `--dry-run` shows which sandboxes a rule reaches. `policy ls` shows each rule's layer. The launcher never offers "all sessions". Locks keep the denies that matter. |
+| A shell user runs a tool that the agent planted, such as a script in `node_modules/.bin` or a `Makefile` target. | The shell runs inside the wall, behind the same doors. Nothing on the host runs it. Work reaches the laptop only through the review on `pull`. |
+| A hand edit that no running sandbox has applied looks like it holds. | `ls` marks such a session with `~`, `show` names the layer, and `policy apply` sends it. |
+| An SSH key in a sandbox signs for any server that the network door allows. | Deploy keys that write to one repository. An audit line for each signature, with the server's host key. `own` hosts by default. The row shows the key. |
+| A remote judge learns which sites sessions reach. | The judge is off by default. A local model keeps names on the host. The audit log records each call ([0031](decisions/0031-the-egress-process-is-not-a-relay.md)). |
 | `hcsshim`'s licence and the exact Cloud Hypervisor, Lima and gVisor options in this spec may differ in the pinned versions. | Each task that uses one checks it against the pinned release, and the UNVERIFIED marks go only after that check. |
 | E2B, Docker and machine-per-session hosts have no trusted egress path outside the session. | Their floor is `none` unless a wall runs inside, and a downgrade is recorded. Exposed secrets only. E2B hosts are `shared` ([question 32](#15-open-questions)). |
 | Exposed secrets and logins made inside a sandbox stay on its disk. | The row badge and `secret_exposed`. Bound secrets are the default from P2. The docs say what stays on disk. |

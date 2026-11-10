@@ -12,7 +12,7 @@ How the project is built, tested, documented and released. New here? Read [CONTR
 | [Going public](going-public.md) | What is done, and the owner's steps to make the repo public |
 | [UX spec](ux-spec.md) | The launcher's screens, keys, colours, glyphs and motion |
 | [Renaming](renaming.md) | How to rename the product in one change |
-| [Isolated sessions: spec](isolation-spec.md) | What to build so that each session runs in its own sandbox, on hosts that the user adds: terms, interfaces, config, commands, protocol, platforms, risks and open questions (proposed) |
+| [Isolated sessions: spec](isolation-spec.md) | What to build so that each session runs in its own sandbox, on hosts that the user adds: terms, interfaces, policy layers, the classifier, shells, config, commands, protocol, platforms, risks and open questions (proposed) |
 | [Isolated sessions: plan](isolation-plan.md) | The tasks that build the spec, in order, one pull request each, with acceptance criteria and tests (proposed) |
 | [The command line: plan](cli-plan.md) | The tasks that make the command line easy to guess and hard to misuse: errors, exit codes, prompts, help, session verbs, flags, host commands and completion, under record 0033 (proposed) |
 | [Decisions](decisions/README.md) | Every design decision, with its reasons |
