@@ -29,7 +29,7 @@ The rules for the note:
 8. **Doors (L4): no network card, one egress process per session, sentinel keys.** The guest sees random sentinels. The trusted side swaps in the real key only for the hosts bound to it, and refuses any other credential there. This closes key theft and the "attacker's own key" path.
 9. **Supply chain (L5): the laptop holds the digests.** Every binary, kernel and image that a session boots is named by a digest that the client sends. Release builds are reproducible and signed. A daily job watches advisories for pins that no scanner covers. The current Ghostty pin sits inside two October 2026 advisory ranges.
 10. **The red team found 23 gaps. The worst is the login user.** The VMM, the egress process and the image converter all ran as the login user in the first draft. A VMM escape would then reach every session's keys and the shell rc files. The design now gives each of them its own identity and jail ([section 11](#11-the-red-teams-gaps)).
-11. **Platforms.** Linux with KVM gets W3. Cloud VMs without nested virtualisation (Hetzner Cloud, EC2 Graviton, GCE Arm) get W2. A Mac gets W3 only through Lima on an M3 or later chip with macOS 15 or later, and W2 in Lima otherwise. Hosts made by the docker provider give W0 and need a named downgrade.
+11. **Platforms.** Linux with KVM gets W3. EC2 instances that support Nitro Enclaves, Graviton included, also get W3 from 9 November 2026, through AWS Nitro Sandboxes and Firecracker 1.18, with no KVM inside the instance ([section 10.1](#101-aws-nitro-sandboxes-on-ec2)). Other cloud VMs without nested virtualisation (Hetzner Cloud, GCE Arm) get W2. A Mac gets W3 only through Lima on an M3 or later chip with macOS 15 or later, and W2 in Lima otherwise. Hosts made by the docker provider give W0 and need a named downgrade.
 12. **The design bends rules, and says so.** No network port opens, and the supervisor dials into the guest, so no host socket waits for a guest ([0030](../contributing/decisions/0030-local-sockets-do-not-listen.md)). Real keys live in host memory for the whole session ([0032](../contributing/decisions/0032-secret-values-in-memory-only.md)). The trusted side opens TLS to some hosts. The host gains a VMM, runsc, a guest kernel and images, plus a one-time root step ([section 13](#13-rules-the-design-bends)).
 13. **Your own hosts.** The hosts search ran 4 iterations over three layers: attach, placement and fleet. Its best path, at 0.732, is SSH add, then client placement with host admission, then tiers as a grant ceiling. Only the client enforces the tiers: `own`, `throwaway` and `shared`. The path holds under all six weight sets ([Your own hosts](#your-own-hosts)).
 14. **Policy for parallel work.** A second pass, on 10 November 2026, answered the owner's request for one config with overrides, one-off exceptions, shells beside the agent and automatic classifiers. Every product that decides on its own puts rules before a model, and every model guard in the research broke under adaptive attack. So the design adds six layers of policy with locks, an unknown action for each layer, and a classifier with fixed checks first and an optional judge ([Policy for parallel work](#policy-for-parallel-work)).
@@ -88,6 +88,7 @@ A wall is code, and code has bugs. These bugs set the design's limits.
 | --- | --- | --- |
 | CVE-2024-1086, a use-after-free in nf_tables, is in CISA's KEV catalogue. Public exploits reach it through unprivileged user namespaces. | A shared kernel is one bug from a full escape | [Red Hat](https://access.redhat.com/security/cve/cve-2024-1086) |
 | CVE-2026-5747: an out-of-bounds write in Firecracker's virtio PCI transport (1.13.0 to 1.14.3, and 1.15.0) lets guest root crash the VMM or run code on the host. CVSS 4.0 score 8.7. Fixed in 1.14.4 and 1.15.1. PCI is opt-in. | The VMM is attack surface | [NVD](https://nvd.nist.gov/vuln/detail/CVE-2026-5747) |
+| CVE-2026-122192: in Firecracker 0.23.0 to 1.16.1, a failed memory discard can let guest root read or change the memory of the Firecracker process. Fixed in 1.16.2 and 1.17.0. | Every VMM line needs a minimum version, and the minimum moves | [AWS](https://aws.amazon.com/security/security-bulletins/2026-169-aws/) |
 | CVE-2026-45782 (GHSA-f47p-p25q-83rh): a use-after-free in Cloud Hypervisor's virtio-block async I/O, from 21.0 to before 51.2. | The same, for the other VMM | [advisory](https://github.com/cloud-hypervisor/cloud-hypervisor/security/advisories/GHSA-f47p-p25q-83rh), [v52.0](https://www.cloudhypervisor.org/blog/cloud-hypervisor-v52.0-released/) |
 | CVE-2026-27211 (GHSA-jmr4-g2hv-mjj6): a guest writes a QCOW2 header with a host path as its backing file, and Cloud Hypervisor serves that host file at the next boot. v51.0 added a `backing_files` switch. | Never let a VMM probe the format of a guest-written disk | [advisory](https://github.com/cloud-hypervisor/cloud-hypervisor/security/advisories/GHSA-jmr4-g2hv-mjj6), [v51.0](https://www.cloudhypervisor.org/blog/cloud-hypervisor-v51.0-released/) |
 | VsockDrop, CVE-2026-53365 (August 2026): an unprivileged local user becomes root through vsock and io_uring. Red Hat's mitigation unloads and blocks `vhost_vsock`. | Host kernel modules are attack surface, with no VM needed | [Red Hat](https://access.redhat.com/security/cve/cve-2026-53365), [CVE record](https://www.cve.org/CVERecord?id=CVE-2026-53365) |
@@ -683,7 +684,7 @@ These fix holes that exist today. Each one stands alone.
 ### 9.2 The wall
 
 - The levels `process`, `gvisor` and `microvm` (W1 to W3), probed at setup, with the floor pinned on the laptop. New sessions below W1 are refused by default. W4 is a placement for provider hosts.
-- W3 is the default where `/dev/kvm` works: Cloud Hypervisor v52.0 or later on host kernels 6.8 and later, or Firecracker 1.14.4, 1.15.1 or later on 5.10, 6.1 and 6.18. Disks are always raw, with backing files off, and Cloud Hypervisor starts with `--landlock`.
+- W3 is the default where `/dev/kvm` works: Cloud Hypervisor v52.0 or later on host kernels 6.8 and later, or Firecracker 1.17.0 or later on 5.10, 6.1 and 6.18. On EC2, W3 also comes from Nitro Sandboxes through Firecracker 1.18.0 or later ([section 10.1](#101-aws-nitro-sandboxes-on-ec2)). Disks are always raw, with backing files off, and Cloud Hypervisor starts with `--landlock`.
 - **Each component that touches untrusted input gets its own identity:** the VMM, the egress process, the image converter and any host-side git. Each runs in a user namespace with a mapped subuid and an empty network namespace. Its mount namespace shows only its session folder and sockets: no `/dev/vhost-*`, no `$HOME` writes, no systemd user bus. Each gets Landlock, seccomp, `NO_NEW_PRIVS` and `PR_SET_DUMPABLE=0`.
 - Kernel hardening: the W1 seccomp filter refuses `AF_VSOCK` and `io_uring_setup`. Host setup blocks the `vsock_loopback`, `vmw_vsock_virtio_transport` and `vhost_vsock` modules, which hybrid vsock does not need, and sets `kernel.io_uring_disabled=2`. The guest kernel is built without vsock loopback and io_uring. `doctor` checks the host kernel against a data list of known local root bugs.
 
@@ -723,8 +724,9 @@ These fix holes that exist today. Each one stands alone.
 | Mac, Lima vz host, M1 or M2 | W2 | gVisor arm64 with systrap. The Ubuntu template needs an `AppArmor` userns profile | W1, or W4 with one Lima VM per session | [gVisor install](https://gvisor.dev/docs/user_guide/install/), [Ubuntu](https://ubuntu.com/blog/ubuntu-23-10-restricted-unprivileged-user-namespaces) |
 | Linux with KVM, host kernel 6.8 or later (Ubuntu 24.04, Debian 13) | W3 | Cloud Hypervisor as the user in the kvm group, after one root step | W2, recorded | [Cloud Hypervisor](https://github.com/cloud-hypervisor/cloud-hypervisor/blob/main/README.md) |
 | Linux with KVM, host kernel 5.10, 6.1 or 6.18 (Debian 12 is 6.1) | W3 | Firecracker with the MMIO transport. Clone mode only, since it has no virtio-fs | W2, recorded | [kernel policy](https://github.com/firecracker-microvm/firecracker/blob/main/docs/kernel-policy.md) |
-| Cloud VM without nested virtualisation: Hetzner Cloud, EC2 Graviton and unlisted types, GCE Arm, E2 and AMD other than N4D, Azure Arm | W2 | gVisor systrap, no memory checkpoint when rootless | W1 where runsc cannot run, or W4 through E2B | [Hetzner](https://docs.hetzner.com/cloud/servers/faq/), [GCE](https://docs.cloud.google.com/compute/docs/instances/nested-virtualization/overview) |
+| Cloud VM without nested virtualisation: Hetzner Cloud, EC2 types without Nitro Enclaves, GCE Arm, E2 and AMD other than N4D, Azure Arm | W2 | gVisor systrap, no memory checkpoint when rootless | W1 where runsc cannot run, or W4 through E2B | [Hetzner](https://docs.hetzner.com/cloud/servers/faq/), [GCE](https://docs.cloud.google.com/compute/docs/instances/nested-virtualization/overview) |
 | EC2 with nested KVM: M7i, C7i, R7i, M8i, C8i, R8i, X8i, I7i and their variants, all Intel | W3, nested | KVM only, as the hypervisor inside the instance. AWS advises bare metal for latency-sensitive work | Benchmark W2 against W3 at setup and pin the faster one that meets the floor | [EC2](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/amazon-ec2-nested-virtualization.html) |
+| EC2 with Nitro Enclaves: most M, C and R families from the 5th generation on, Intel, AMD and Graviton, except their smallest sizes and most metal sizes | W3, a first-level guest | Firecracker 1.18.0 or later drives `/dev/nitro_enclaves` instead of `/dev/kvm`. The Nitro hypervisor enforces the boundary. Needs the enclave option at launch and an Amazon Linux 2023 kernel 6.18 parent | Nested KVM where the type has it, else W2 | [EC2](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/amazon-ec2-nitro-sandboxes.html), [Firecracker](https://github.com/firecracker-microvm/firecracker/blob/firecracker-v1.18/docs/nitro-sandboxes/README.md) |
 | GCE with nested virtualisation | W3, nested | KVM only, with a CPU penalty of 10% or more | As for EC2 | [GCE](https://docs.cloud.google.com/compute/docs/instances/nested-virtualization/overview) |
 | Azure x86 sizes such as Dsv6 | W3, nested | Arm sizes such as Dpsv6 have no nested virtualisation | W2 | [Dpsv6](https://learn.microsoft.com/en-us/azure/virtual-machines/sizes/general-purpose/dpsv6-series) |
 | Existing provider: lima | As for the Mac rows | Add `--nested-virt` where supported and `hostLoopback: false` to `CreateArgs` | W2 in one Lima VM rather than one VM per session | [lima.go](../../internal/provider/lima/lima.go) |
@@ -732,6 +734,52 @@ These fix holes that exist today. Each one stands alone.
 | Existing provider: e2b | W4 | Each sandbox is a Firecracker microVM, but nothing trusted runs outside it | Use E2B's own egress lists and `allowPublicTraffic: false`. Keys in the environment only as a recorded downgrade ([question 22](../contributing/isolation-spec.md#15-open-questions)). Whether W1 or W2 runs inside an E2B guest is untested | [E2B network](https://docs.e2b.dev/network/internet-access), [persistence](https://docs.e2b.dev/sandbox/persistence) |
 
 **Density.** On the 4 GB test host, about 2 or 3 W3 sessions with 1 GiB guests fit, with dozens more stopped on disk. On an 8 GB host, about 5 busy Claude sessions fit today ([architecture](../explanation/architecture.md)). The research estimates 55 to 90 MiB more per W3 session for the guest kernel, the holder and the supervisor (**UNVERIFIED**, not measured). Fixed guest RAM is the real limit, because Firecracker's free page reporting is still a developer preview ([ballooning](https://github.com/firecracker-microvm/firecracker/blob/main/docs/ballooning.md)).
+
+### 10.1 AWS Nitro Sandboxes on EC2
+
+Researched on 10 November 2026. AWS announced Nitro Sandboxes on 9 November 2026 ([announcement](https://aws.amazon.com/about-aws/whats-new/2026/11/nitro-sandboxes-eks-ecs-ec2/)). The same day, Firecracker 1.18.0 added support for them ([release](https://github.com/firecracker-microvm/firecracker/releases/tag/v1.18.0)).
+
+**What it is.**
+
+- A Nitro Sandbox is "a lightweight virtual machine, or child VM" that runs beside the workload on an EC2 instance. It is "a first-level, hardware-virtualized guest", not a nested guest. The Nitro hypervisor isolates it from the parent instance and from other sandboxes ([EC2 guide](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/amazon-ec2-nitro-sandboxes.html)).
+- It runs on Intel, AMD and Graviton, at no extra charge, in every commercial region ([announcement](https://aws.amazon.com/about-aws/whats-new/2026/11/nitro-sandboxes-eks-ecs-ec2/)). AWS names "agentic workloads" that "generate and run untrusted code" as a use, "giving each agent session a hardware-isolated boundary" ([EC2 guide](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/amazon-ec2-nitro-sandboxes.html)).
+- It needs an instance type that supports Nitro Enclaves, launched with `--enclave-options Enabled=true`. Most M, C and R families from the 5th generation on qualify, except their smallest size and most metal sizes. The burstable T families are not on the list ([EC2 guide](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/amazon-ec2-nitro-sandboxes.html)).
+- EKS runs a pod in one with `runtimeClassName: isolated-sandbox`, and ECS has isolated and confidential tasks on Managed Instances. Inside, EKS starts a Firecracker microVM per pod, and a pod can boot with no network device at all ([EKS](https://docs.aws.amazon.com/eks/latest/userguide/sandboxing.html), [ECS](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/isolated-confidential-tasks.html)). The EKS guide warns that the guest's vsock channel can still reach ports bound inside the guest, so a missing network device "is not absolute isolation". The design's link already dials only into the guest ([0030](../contributing/decisions/0030-local-sockets-do-not-listen.md)).
+
+**How Firecracker drives it.**
+
+- Firecracker opens the Nitro Enclaves driver at `/dev/nitro_enclaves` instead of `/dev/kvm`. It keeps its API, its jailer and its virtio devices, and a new `PUT /enclave` endpoint picks the mode ([release](https://github.com/firecracker-microvm/firecracker/releases/tag/v1.18.0)).
+- No `/dev/kvm` and no bare-metal instance are needed. Guest CPUs are hardware CPUs that the Nitro System schedules, so the parent's cgroups do not govern them ([comparison with KVM](https://github.com/firecracker-microvm/firecracker/blob/firecracker-v1.18/docs/nitro-sandboxes/comparison-with-kvm.md)).
+- The guest boots through UEFI from an Enclave Image Format file, which Firecracker can build in memory from a kernel and boot arguments. The guest kernel needs an EFI stub, ACPI, PCIe and virtio-pci. The MMIO transport is not available ([getting started](https://github.com/firecracker-microvm/firecracker/blob/firecracker-v1.18/docs/nitro-sandboxes/getting-started.md)).
+- Memory is donated whole at start from a physically contiguous pool, and returns only at the end. There is no balloon, no huge pages, no snapshot and no pause ([comparison with KVM](https://github.com/firecracker-microvm/firecracker/blob/firecracker-v1.18/docs/nitro-sandboxes/comparison-with-kvm.md)).
+- The parent kernel needs the Nitro Sandboxes support in its `nitro_enclaves` driver. The documented kernel is Amazon Linux 2023 `kernel6.18` from `6.18.51-120.162.amzn2023` ([getting started](https://github.com/firecracker-microvm/firecracker/blob/firecracker-v1.18/docs/nitro-sandboxes/getting-started.md)). `/dev/nitro_enclaves` is `root:root` with mode 0660 in its example.
+
+**Two modes.**
+
+| | Direct | Confidential, the default |
+| --- | --- | --- |
+| The parent's access to guest memory | Read and write. "Its trust model is equivalent to a standard nested virtual machine." | None |
+| Attestation | None | A Nitro Security Module with measurement registers, checked by an outside verifier such as KMS |
+| The guest kernel | Unpatched virtio drivers work | Needs the proposed DMB virtio patches |
+| I/O | Higher throughput | Device queues in dedicated buffers |
+
+Sources: [EC2 guide](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/amazon-ec2-nitro-sandboxes.html), [comparison with KVM](https://github.com/firecracker-microvm/firecracker/blob/firecracker-v1.18/docs/nitro-sandboxes/comparison-with-kvm.md).
+
+**Limits.**
+
+- The vCPUs of all sandboxes on an instance add up to at most 5 times the instance's vCPUs. Memory is not overcommitted, so memory also limits the count ([EC2 guide](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/amazon-ec2-nitro-sandboxes.html)).
+- A sandbox has at most 32 devices, 64 MiB of memory or more in steps of 2 MiB, and a fixed size for its life ([comparison with KVM](https://github.com/firecracker-microvm/firecracker/blob/firecracker-v1.18/docs/nitro-sandboxes/comparison-with-kvm.md)).
+- The parent's network stack is shared. One sandbox can fill the connection-tracking table or the DNS resolver for the others, so the parent should cap each one ([EC2 guide](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/amazon-ec2-nitro-sandboxes.html)). In this design a sandbox has no network device, and its egress process has budgets.
+- The device back ends still run in the Firecracker process on the parent. A back-end bug lands there, as with KVM, so the VMM's jail stays.
+
+**What it means for this design.** EC2 stops being a host that gets only W2 on Graviton and on most Intel and AMD types. A `nitro` driver gives the `microvm` level there, in direct mode, because the trusted side already runs on the parent and the user owns the instance. It fits the cold boot of L3, which never snapshots, and the link of L2, which uses vsock. It costs a second guest kernel build, with an EFI stub and virtio-pci, and admission must count donated memory, the vCPU budget and the device slots. Confidential mode with attestation could later keep a guest's memory from the owner of a `shared` EC2 host. The work disk and the network still pass through the parent, so that needs more than a mode switch ([question 54](../contributing/isolation-spec.md#15-open-questions)).
+
+**What could not be verified.**
+
+- Whether the enclave option can be turned on for an instance that was launched without it.
+- Whether a parent kernel other than Amazon Linux 2023's `kernel6.18` has the support, and whether it is in upstream Linux.
+- Whether donated memory counts against the cgroup of the process that donates it.
+- The time to boot a sandbox with an agent, and its speed against nested KVM. AWS says "near-native".
 
 ## 11. The red team's gaps
 
@@ -1044,7 +1092,7 @@ Its security score is 4 of 10. The sandboxes, the egress process and the runtime
 - EC2 supports nested virtualisation on virtual instances of the M7i, M7i-flex, M8i, M8id, M8i-flex, C7i, C7i-flex, C8i, C8id, C8i-flex, R7i, `R7iz`, R8i, R8id, R8i-flex, X8i, I7i and I7ie families. No Graviton type is listed ([AWS](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/amazon-ec2-nested-virtualization.html)).
 - GCE nested virtualisation does not work on E2, memory-optimised, Arm or most AMD VMs. CPU-bound work may lose 10 % or more ([GCE](https://docs.cloud.google.com/compute/docs/instances/nested-virtualization/overview)).
 - Hetzner Cloud servers cannot run nested virtualisation ([Hetzner FAQ](https://docs.hetzner.com/cloud/servers/faq/)).
-- From v1.18, Firecracker can launch Nitro Sandboxes through `/dev/nitro_enclaves` on EC2 types that support Nitro Enclaves, on x86_64 and Graviton, with no `/dev/kvm` ([Nitro Sandboxes](https://github.com/firecracker-microvm/firecracker/blob/main/docs/nitro-sandboxes/README.md)). Whether this can give a level is for the main search. The probe reports the device.
+- From v1.18, Firecracker can launch Nitro Sandboxes through `/dev/nitro_enclaves` on EC2 types that support Nitro Enclaves, on x86_64 and Graviton, with no `/dev/kvm` ([Nitro Sandboxes](https://github.com/firecracker-microvm/firecracker/blob/main/docs/nitro-sandboxes/README.md)). AWS launched it on 9 November 2026, and it gives the `microvm` level through a `nitro` driver ([section 10.1](#101-aws-nitro-sandboxes-on-ec2)). The probe reports the device.
 
 **Mac hosts**
 
@@ -1319,7 +1367,8 @@ This section's own check found one more correction. One third-party source says 
 | Debian with KVM, user not in `kvm` | `gvisor` if user namespaces work, else `process` | `microvm` | `/dev/kvm` is 0660 root:kvm. |
 | Ubuntu 23.10 or later with KVM, user not in `kvm` | `process` | `microvm` | User namespaces are blocked without an `AppArmor` profile. The hosts draft installed none. The main design adds one for a root-owned launcher only ([question 4](../contributing/isolation-spec.md#15-open-questions)). |
 | Cloud VM with nested KVM (the EC2 families above, GCE N2 and others) | as Linux above | `microvm` | GCE warns of 10 % or more CPU loss. |
-| Cloud VM without nested KVM (Hetzner Cloud, Graviton, GCE E2) | `gvisor` or `process` | `gvisor` or `process` | Firecracker's Nitro backend on EC2 is for the main search. |
+| EC2 with Nitro Enclaves, Graviton included | `gvisor` or `process` | `microvm` | The `nitro` driver needs `/dev/nitro_enclaves` open to the user, which a root step gives ([section 10.1](#101-aws-nitro-sandboxes-on-ec2)). |
+| Cloud VM without nested KVM or Nitro Enclaves (Hetzner Cloud, GCE E2) | `gvisor` or `process` | `gvisor` or `process` | |
 | Bare metal | as Linux above | `microvm` | |
 | Mac, Apple silicon | not in the first version | `vz`, later | Needs a darwin helper, launchd and an entitled binary ([question 37](../contributing/isolation-spec.md#15-open-questions)). |
 | Windows | no | no | |
