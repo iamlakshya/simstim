@@ -53,14 +53,14 @@ The root holds only the words in this table. `TestTopLevel` in `internal/cli` wa
 | Group | Commands | Tasks |
 | --- | --- | --- |
 | Sessions | `new`, `attach`, `resume`, `ls`, `show`, `rm`, `rename`, `send`, `ports`, `forward`, `pull` | today, C5 |
-| Sessions, from the isolation plan | `stop`, `shell`, `exec`, `cp`, `fork`, `prune`, `events` | P1, P1.13, P1.16, P5 |
+| Sessions, from the isolation plan | `stop`, `shell`, `exec`, `cp`, `fork`, `rewind`, `prune`, `events` | P1, P1.13, P1.16, P5 |
 | Hosts | `host` | today |
 | Policy | `policy` | P1.8 |
 | Images | `image` | P3 |
 | Agents | `agents` | today |
 | Setup and help | `setup`, `doctor`, `debug`, `config`, `demo`, `version`, `completion`, `help`, `ssh-config`, `ssh-proxy` | today, C10, P2.15 |
 
-A hidden command that carries an old name ([section 3](#3-old-names-and-warnings-c5-c6-c7)) is not in the table, and the test skips it.
+A hidden command that carries an old name ([section 3](#3-old-names-and-warnings-c5-c6-c7)) is not in the table, and the test skips it. So is a help topic of [section 8.3](#83-help-topics), which runs nothing.
 
 ### 2.2 Depth
 
@@ -69,7 +69,7 @@ No command is deeper than two levels, with one exception. `host alerts set`, `te
 ### 2.3 Tests
 
 - C1 changes only the record. Its status is accepted, or a new record replaces it, and `just docs-check` passes.
-- C3 adds `TestTopLevel` and `TestDepth`, with the groups of [section 8.1](#81-the-root-help).
+- C3 adds `TestDepth`, and the groups of [section 8.1](#81-the-root-help). C5 adds `TestTopLevel`, because `kill` and `flip` stay visible until C5 hides them.
 
 ## 3. Old names and warnings (C5, C6, C7)
 
@@ -77,7 +77,7 @@ An old name keeps working for a time, and warns. This section gives the mechanis
 
 ### 3.1 Behaviour
 
-1. One table in `internal/cli/deprecated.go` holds every old form. Each row has the old form, the new form, the kind, the version that adds the warning, and its date.
+1. One table in `internal/cli/deprecated.go` holds every old form. Each row has the old form, the new form, the kind, the version that adds the warning, and its date. C4 makes the file, with the row of `host ls --json`. Each later task of section 3.2 adds its rows.
 2. When a user types an old form, the command does what the old form did. It also prints one warning on stderr, once per run.
 3. The warning has this form, in yellow when stderr is a terminal:
 
@@ -96,7 +96,7 @@ An old name keeps working for a time, and warns. This section gives the mechanis
 | Old form | New form | Kind | Task | Note |
 | --- | --- | --- | --- | --- |
 | `kill <address>` | `rm <address> -y` | command | C5 | `kill` never asks, as before. |
-| `flip [<address>]` | `attach [<address>]` | command | C5 | |
+| `flip [<address>]` | `attach [<address>]` | command | C5 | `flip` alone opens the launcher's switcher, as today. |
 | `rm` or `delete` with input off and no `-y` | `rm -y` | behaviour | C5 | Until the end, it deletes and warns. After the end, it fails with exit code 4. |
 | `host idle <host> <time>` | `host set <host> idle=<time>` | command | C7 | |
 | `host destroy <host> [-y] [--force]` | `host rm <host> --destroy [--confirm <host>] [--force]` | command | C7 | `-y` becomes `--confirm <host>`. |
@@ -105,6 +105,7 @@ An old name keeps working for a time, and warns. This section gives the mechanis
 | `new --setup`, `new --no-setup` | `--setup-script`, `--no-setup-script` | flag | C6 | "Setup" then names only the guided setup. |
 | `agents install --force` | `--reinstall` | flag | C6 | |
 | `host alerts log -n` | `--lines` | short flag | C6 | `-n` then means only `--name`. |
+| `-v` on the root | `--version` | short flag | C6 | Cobra adds `-v` today, because `Root()` sets `Version` ([section 10.1](#101-short-flags)). |
 | `host create --memory 8`, a bare number | `--memory 8G` | value | C6 | A bare number still means GiB. |
 | `host create --disk 40`, a bare number | `--disk 40G` | value | C6 | The same. |
 | The keys of `host ls --json` in Go form: `Name`, `SSH`, `SSHConfig`, `Labels`, `Provider`, `Machine`, `Secrets`, and the keys inside `Provider` and `Machine` | The same keys in `snake_case`: `name`, `ssh`, `ssh_config` and so on | JSON key | C4 | Both forms print until the end (question C-9). |
@@ -198,6 +199,7 @@ C2 replaces them:
 
 - The root and every noun get an `Args` function that returns the unknown-command error with suggestions.
 - Every noun gets a `RunE`. Without an argument it prints its help on stdout and exits with 0. With an argument it returns the unknown-command error.
+- `doctor` and `host alerts` are not nouns. Each runs, and also has subcommands, so each keeps its own `RunE`. `doctor` gets the same `Args` function as a noun, so `doctor termnal` suggests `terminal`. `host alerts` keeps its one host argument.
 - `SetFlagErrorFunc` on the root turns every flag error into a `UserError`.
 
 | Case | Message | Try | Exit |
@@ -241,6 +243,7 @@ Its kind is `KindFailed`, and its code is `internal`.
 - A table test of suggestions: `atach` gives `attach`, `delte` gives `delete`, `d` gives three names, `list` gives `ls`, and `xyz` gives none.
 - A test that every synonym target exists in `Root()`.
 - A test that `host ad` fails with exit code 2, and `host` alone prints help and exits with 0.
+- A test that `doctor termnal` fails with exit code 2 and suggests `terminal`, and that `doctor` alone runs its checks.
 
 ## 5. Exit codes (C2)
 
@@ -267,6 +270,7 @@ Rules:
 3. A listing or describing command (`ls`, `host ls`, `host show`) reports a host that does not answer as data, in that host's entry, and exits with 0.
 4. "No hosts yet" exits with 1. A host that the user named and that does not exist exits with 3.
 5. `ErrClosed`, the connection that closed, exits with 1.
+6. The codes that today's helper sends get a kind in the same map as section 5.3. `not_found` is `KindNotFound`, and `no_folder` is `KindNeedsAnswer`, because `new` asks before it makes a folder. Every other code of today, such as `bad_request`, `exited` and `worktree`, is `KindFailed`.
 
 ### 5.2 `exec`
 
@@ -304,7 +308,7 @@ The isolation spec owns the messages and the hints of its errors. This table own
 | A changed host key | 14.14 | `KindRefused` | 5 |
 | A secret, the SSH agent or an alert token above the tier. A repository outside `repos`. A shared host as the default. `--root-step run` on a shared host. No tier after the migration, where it stops a command. | 14.14 | `KindRefused` | 5 |
 | No host given and no default. A reserved name. Two words before `--`. | 14.14 | `KindUsage` | 2 |
-| No KVM, no sudo, a failed root step, a failed download or checksum, a missing image | 14.14 | `KindFailed` | 1 |
+| No KVM, no sudo, no passwordless sudo for `--root-step run --yes`, a failed root step, a failed download or checksum, a missing image | 14.14 | `KindFailed` | 1 |
 | A user name that a script cannot use, facts that disagree, waking that is off | 14.14 | `KindFailed` | 1 |
 | A purge while a session works, a helper without the feature | 14.14 | `KindFailed` | 1 |
 | `policy_unreached`, `secret_store`, `git_scope` | 9.3 | `KindFailed` | 1 |
@@ -327,15 +331,17 @@ The isolation spec owns the messages and the hints of its errors. This table own
 | `no_host` | 18.2 | `KindFailed` | 1 |
 | `invite_expired`, `invite_unknown` | 18.3 | `KindFailed` | 1 |
 | `code_check` | 18.3, 18.8 | `KindUsage` | 2 |
+| `code_version` | 18.3, 18.8 | `KindFailed` | 1 |
 | `host_rule_layer` | 18.2, 18.8 | `KindUsage` | 2 |
+| An `ssh` without the fix of CVE-2023-51385, at `ssh-config` | 17.7 | `KindFailed` | 1 |
 | `setup_trust` | 19.2 | `KindNeedsAnswer` | 4 |
 
-The pinned host key lives with the tier in `tiers.toml` (isolation spec 14.6), so a changed key is a refusal by tier.
+The pinned host key lives in `known_hosts-<name>`, and `tiers.toml` keeps a copy of its fingerprint (isolation spec 14.7.1). A changed key is a refusal, as a tier's is.
 
 ### 5.4 Tests
 
 - A table test of `Kind` to exit code.
-- A test that lists the error codes in `internal/api`, and fails on a code without a kind in the table of section 5.3.
+- A test that lists the error codes in `internal/api`, and each code that `internal/host` passes to `UserError` or `proto.Error`, with `go/ast`. It fails on a code without a kind in section 5.1, rule 6, or in the table of section 5.3.
 - Unit tests of `exec`'s codes with a fake runner. Task P1.13 adds the end-to-end run.
 - `docs/reference/exit-codes.md` is written by `just docs` from the same table that `printError` uses, so `just docs-check` fails when they differ.
 
@@ -355,7 +361,7 @@ A prompt never appears when input is off ([clig.dev](https://clig.dev/#interacti
 ### 6.2 Prompts
 
 1. A prompt writes its question to stderr, and reads one line from stdin.
-2. Every prompt has a flag that answers it. The prompt table below lists it.
+2. Every prompt has a flag that answers it, and the prompt table below lists it. There are two exceptions: `--root-step run` on a `shared` host, and a secret or an SSH key for a `shared` host. Only a person at a terminal answers these (isolation spec 14.4.4 and 14.8.5).
 3. A yes or no question shows its default in capitals: `[Y/n]` or `[y/N]` ([Primer](https://github.com/cli/cli/blob/trunk/docs/primer/components/README.md)). Enter takes the default. `y`, `yes`, `n` and `no` work in any case. Any other answer asks again, up to three times, then cancels.
 4. A question about deleting something defaults to no.
 5. A severe action asks for a typed name (G9): `Type box to delete the machine, or press Enter to keep it:`. Only the exact name confirms. Enter keeps the thing. Any other text cancels. `--confirm <name>` gives the name instead.
@@ -372,7 +378,7 @@ Error: rm needs a yes to delete box/auth-fix, and input is off.
 Try: simstim rm box/auth-fix -y
 ```
 
-**The prompt table.** A test checks that each prompt in the code has a row, and that each row's flag exists on its command.
+**The prompt table.** A test checks that each prompt in the code has a row, and that each row's flag exists on its command. A task that adds a prompt adds its row in the same pull request.
 
 | Command | Question | Default | Flag | Input off |
 | --- | --- | --- | --- | --- |
@@ -382,12 +388,21 @@ Try: simstim rm box/auth-fix -y
 | `new`, a repository's setup script | `Run it? [y/N]` | No | `--setup-script`, `--no-setup-script` | Keep: skip it, with today's note |
 | `host add` | Install the helper | No | `--yes` | Fail |
 | `host add --yes` without `--tier` (H4) | Which tier | None | `--tier` | Fail |
+| `host add --accept` (H20) | Do the host keys match the machine's screen? | No | `--host-key SHA256:…`, once for each key | Fail |
+| `host join` (H20) | Make these changes? | No | `--yes` | Fail |
 | `host rm` on a created host | The typed name of the machine | Keep it | `--destroy --confirm <host>` | Keep: forget only |
 | `host rm`, purge (H15) | The typed name of the host | Keep it | `--purge --confirm <host>` | Keep: forget only |
+| `host rm`, purge (H15): the agents' logins | `Delete these logins on box? [y/N]` | No | `--delete-logins` | Keep: the logins stay |
 | `host set … tier=` to a lower tier (H4) | As isolation spec 9.1 | No | `-y` | Fail |
+| `host set … tier=` to a higher tier (H4) | The typed name of the host | Keep the tier | `--confirm <host>` | Fail |
+| `host rekey` (H3) | The typed name of the host | Keep the pin | `--confirm <host>` | Fail |
+| `--root-step run` on a `shared` host (H7) | The typed name of the host | Keep it | None | Refuse, with exit code 5 (section 5.3) |
+| `new` or `resume` with a secret or an SSH key that `[secret_tiers]` marks `shared`, for a `shared` host (H5) | `Send CLAUDE_LAB to lab? Its owner can read it. [y/N]` | No | None | Refuse, with exit code 5 (section 5.3) |
 | `doctor --fix`, `host doctor --fix` | `Fix it? [y/N]` for each fix | No | `-y` | Fail |
 | `setup` | Each question of the guided setup | | `--yes` with `--host` or `--create` and `--agents` | Fail |
 | A `policy` change without a layer (P1.12) | Which layer | None | A layer flag | Fail (`layer_missing`) |
+| `policy apply` (P2.14) | `Send these changes to 4 sandboxes? [y/N]` | No | `-y` | Fail |
+| `policy learn` (P2.14) | The rules to write, picked from a list | None | `-y`, which writes every rule of the list | Fail |
 
 Today `confirm` in `internal/cli/host.go` writes its question to stdout, and reads an end of file as no. C4 moves every prompt into `internal/cli/prompt.go`.
 
@@ -418,13 +433,14 @@ The picker is `internal/tui/picker.go`, with Bubble Tea v2, the launcher's frame
 
 ### 7.1 Which commands print JSON
 
-Every command that prints data or makes something takes `--json` (G10).
+Every command that prints data or makes something takes `--json` (G10). This table lists each command that has it. A task that adds such a command adds its row and its shape in the same pull request. A command without a row has no `--json` yet.
 
 | Command | Top-level value | Task |
 | --- | --- | --- |
 | `ls` | An array of `{v, host, sessions, error}`, as today, with `v` | today, C4 |
 | `show` | A session object | C5 |
 | `new --detach`, `resume --detach` | A session object | C4 |
+| `new --count <n>` | An array: a session object for each session that started, and `{v, name, error}` for each that did not | P1.16 |
 | `ports` | `{v, host, session, ports}`, each port with `port`, `address`, `pid` and `process` (`api.Port`) | C4 |
 | `doctor` | `{v, checks, fixes}`, each fix with `id` and `problem` | C4 |
 | `host ls` | An array of host objects, with `v` | today, C4 |
@@ -444,13 +460,15 @@ Every command that prints data or makes something takes `--json` (G10).
 
 `new` and `resume` take `--json` only with `--detach`. Without it they fail with exit code 2: `--json needs --detach, because an attached session owns the terminal`, and `Try: simstim new my-vps --detach --json`.
 
+`new --count` never attaches, so it takes `--json` without `--detach`. Its `error` is the object of [section 7.4](#74-errors-and-warnings-with---json). It exits with 0 when every session started, and otherwise with the exit code of the first error. When no session started, it fails as one command does.
+
 ### 7.2 Field rules
 
 These rules are the contract of question C-5.
 
-1. Keys are `snake_case`, and match `^[a-z][a-z0-9_]*$`. The Go keys of `host ls` are the one exception, until their end ([section 3](#3-old-names-and-warnings-c5-c6-c7)). Today `client.Host` has TOML tags and no JSON tags, so `host ls --json` prints Go field names.
+1. Keys are `snake_case`, and match `^[a-z][a-z0-9_]*$`. The rule covers the keys that the code names. A map that holds data, such as a host's `labels`, keeps its keys as the user wrote them. The Go keys of `host ls` are the one exception, until their end ([section 3](#3-old-names-and-warnings-c5-c6-c7)). Today `client.Host` has TOML tags and no JSON tags, so `host ls --json` prints Go field names.
 2. Every top-level object, and every element of a top-level array, has `"v": 1`. Nested objects do not. Today's arrays stay arrays, so that no script breaks.
-3. Times are RFC 3339 strings, and their keys end in `_at`. The client writes them in UTC. A script must accept any offset.
+3. Times are RFC 3339 strings. New keys of times end in `_at`, and older keys, such as `since`, `debug_until` and `time`, keep their names. The client writes them in UTC. A script must accept any offset.
 4. New durations are whole numbers, and their keys end in `_s` or `_ms`.
 5. New sizes are whole numbers of bytes, and their keys end in `_bytes`. Older keys, such as `memory_max`, keep their names.
 6. A value that is not set is left out. The client never writes `null`.
@@ -468,7 +486,7 @@ These rules are the contract of question C-5.
 
 ### 7.4 Errors and warnings with `--json`
 
-When a command fails, stdout stays empty, and stderr gets one line (question C-7):
+When a command fails, stdout stays empty, and stderr gets one line (question C-7). Only `new --count` differs, when some of its sessions started ([section 7.1](#71-which-commands-print-json)):
 
 ```json
 {"v":1,"error":{"code":"host_not_found","kind":"not_found","message":"no host named \"bx\"","try":"simstim host ls","exit":3,"suggestions":["box"]}}
@@ -560,7 +578,7 @@ A topic is a Cobra command with only `Use`, `Short` and `Long`. Cobra lists it u
 | --- | --- | --- |
 | `concepts` | One line for each word that a user meets | C3 |
 | `exit-codes` | The tables of sections 5.1 and 5.2 | C3 |
-| `policy` | The layers, and three examples | P1.12 |
+| `policy` | The layers, and three examples. They are the `Long` of the `policy` command, because a topic cannot share a command's name. | P1.12 |
 
 `concepts` holds the words of the build. C3 ships these: host, helper, session, address, agent, launcher, attach and detach, worktree, secret, alert and provider script. Each task that adds a word adds its line in the same pull request. The isolation plan adds sandbox, wall, level, floor, tier, layer, profile, rule, door, preset and drain.
 
@@ -621,15 +639,15 @@ Try: simstim attach box/1a2b
 
 1. The client reads the session cache.
 2. For each saved host whose list is older than 60 seconds or missing, it asks the host for its sessions. It asks every such host at once, without waking a stopped host, within the time limit of `ls`. It writes the answers to the cache.
-3. A host that does not answer counts with its cached list, whatever its age.
+3. A host that does not answer counts with its cached list, whatever its age. That list may lack a newer session of the same name.
 4. The word matches a session's ID first, then its name, on every host.
-5. One match is the session. No match fails with exit code 3: `no session named "a" on any host`, with suggestions within two edits, and `Try: simstim ls`.
+5. One match is the session. `rm` and `kill` are the exception when a host did not answer at step 3, because the match may not be unique. They fail with exit code 2, and the `Try:` line holds the full address. Other commands go on, and name on stderr each host that did not answer. No match fails with exit code 3: `no session named "a" on any host`, with suggestions within two edits, and `Try: simstim ls`.
 6. Two or more matches fail with exit code 2, and list each full address. The `Try:` line holds the first.
 7. The command then dials the host, as it must to act. If the session is gone, it fails with exit code 3.
 
-A bare word is always a session, also when a host has that name. `attach box` looks for a session named `box`.
+In an address, a bare word is always a session, also when a host has that name. `attach box` looks for a session named `box`. `debug bundle` and `events` take a host or `<host>/<session>`, not an address. So a bare word there names a host, as `debug bundle` does today.
 
-**The session cache moves.** C5 moves the code of `internal/tui/memory.go` to the new `internal/client/seen.go`, so that the client and the launcher share it. The file stays `launcher.json` in the state folder. It gains `seen`, a map from each host's name to the time of its list. The launcher, `ls` and the steps above write it. Each writer reads the file first, changes only its hosts, and saves through a temporary file and a rename, as today.
+**The session cache moves.** C5 moves the code of `internal/tui/memory.go` to the new `internal/client/seen.go`, so that the client and the launcher share it. The file stays `launcher.json` in the state folder. It gains `seen`, a map from each host's name to the time of its list. The launcher, `ls` and the steps above write it. Each writer reads the file first, changes only its hosts, and saves through a temporary file and a rename. Each writer's temporary file has its own name, from `os.CreateTemp` in the same folder. Today every writer uses `launcher.json.tmp`, so two writers can rename a half-written file. Two writers at once can still lose one change. The file is a cache: the next list mends a lost list, and the next attach a lost last session.
 
 ### 9.3 `attach`
 
@@ -641,14 +659,14 @@ A bare word is always a session, also when a host has that name. `attach box` lo
 6. `--restart` on a running agent does not restart it. `attach` attaches, and says on stderr that the agent runs, so it did not restart it.
 7. An agent that cannot start again, because it has no resume command, gets today's ended error, with exit code 1.
 8. `attach` records the session as the last one, as `tui.RememberLast` does today.
-9. `flip` runs `attach`, and warns.
+9. `flip <address>` runs `attach`, and warns. `flip` alone opens the launcher's switcher, as today, and warns.
 
 ### 9.4 `resume`
 
 1. On an ended agent, `resume` works as today.
 2. On a running session, it prints `auth-fix on box is running, so this attaches.` on stderr, and attaches.
 3. With `--detach` on a running session, it prints `auth-fix on box is already running.` and exits with 0. With `--json`, it prints the session object.
-4. `--memory-max` or `--secret` on a running session does not fail. `resume` says on stderr that they apply when the agent starts again, and attaches. G6 forbids a refusal that depends only on a session's state.
+4. `--memory-max` or `--secret` on a running session does not fail, because G6 forbids a refusal that depends only on a session's state. Nothing records them, so they change nothing. `resume` says so on stderr, says to pass them again after the agent ends, and attaches. From isolation task P1.14, `resume` and `attach` treat `--cpus` and `--memory` on a running sandbox in the same way. They say to pass them again at the next wake (isolation spec 17.1).
 
 ### 9.5 `rm`
 
@@ -700,8 +718,9 @@ A bare word is always a session, also when a host has that name. `attach box` lo
 
 - Unit tests of the address rules, with these cases:
   - `-`, `box/a`, `a` on one host, `a` on two hosts, and no `a`.
-  - A stale cache, and a host that does not answer.
+  - A stale cache, and a host that does not answer, with `rm` and with `attach`.
   - A session whose name is also a host's name.
+  - Two writers of the session cache at once leave a file that parses.
 - Golden tests of the prompts of `rm` and `attach`.
 - End-to-end runs of `rm`, `attach` and `show` against `E2E_HOST`, on sessions that the test starts and deletes.
 
@@ -709,19 +728,20 @@ A bare word is always a session, also when a host has that name. `attach box` lo
 
 ### 10.1 Short flags
 
-Each short flag has one meaning everywhere. A test walks `Root()`, and fails when a letter has two long names, or when a short flag is not in this table.
+Each short flag has one meaning everywhere. A test walks `Root()`, and fails when a letter has two long names, or when a short flag is not in this table. The test skips a hidden flag that keeps an old form of section 3, such as `-d` for `--dir`, until its end.
 
 | Short | Long | Meaning | Commands |
 | --- | --- | --- | --- |
 | `-a` | `--agent` | The agent to start | `new` |
 | `-C` | `--dir` | The folder on the host | `new` |
 | `-d` | `--detach` | Start without attaching. Only after the end of section 3 | `new`, `resume`, `fork` |
+| `-f` | `--force` | Go on although work is lost, such as a file that `cp` replaces | `cp` (P5.2) |
 | `-h` | `--help` | Help | every command |
 | `-n` | `--name` | The name of what the command makes | `new`, `setup`, `shell`, `fork` |
 | `-w` | `--worktree` | Give the session its own worktree | `new` |
 | `-y` | `--yes` | Answer yes to the command's questions | every command that asks |
 
-No command has `-v` ([clig.dev](https://clig.dev/#arguments-and-flags)).
+No command has `-v` ([clig.dev](https://clig.dev/#arguments-and-flags)). Today the root has it. Cobra adds `-v, --version` at the first run, because `Root()` sets `Version` (`InitDefaultVersionFlag` in Cobra v1.10.2). So C6 defines `--version` in `Root()` without a short form, and Cobra adds none. `-v` stays as a hidden old form of section 3. The test calls `InitDefaultVersionFlag` on the root before it walks `Root()`.
 
 ### 10.2 Flags that more than one command uses
 
@@ -729,9 +749,9 @@ Each of these flags has one meaning on every command that takes it. Helper funct
 
 | Flag | Meaning | Commands |
 | --- | --- | --- |
-| `-y`, `--yes` | Answers yes to every question that the command would ask. It never skips a typed name, and never goes on where work is lost. | `rm`, `prune`, `doctor`, `host doctor`, `host add`, `host set`, `setup` |
-| `--force` | Goes on although work is lost. | `rm`, `pull`, `host rm` |
-| `--confirm <name>` | Gives the typed name of a severe action. | `host rm`, `policy lockdown` |
+| `-y`, `--yes` | Answers yes to every question that the command would ask. It never skips a typed name, and never goes on where work is lost. | `rm`, `prune`, `doctor`, `host doctor`, `host add`, `host set`, `setup`, `new` with `--in` (P1.13), `policy apply` and `policy learn` (P2.14), `rewind` (P5.4) |
+| `--force` | Goes on although work is lost. `cp` also takes it as `-f`. | `rm`, `pull`, `host rm`, `cp` |
+| `--confirm <name>` | Gives the typed name of a severe action. | `host rm`, `host rekey`, `host set`, `policy lockdown` |
 | `--json` | Prints data for scripts, and turns input off. | [Section 7.1](#71-which-commands-print-json) |
 | `--dry-run` | Shows what would change, and changes nothing. | `new auto`, `prune`, `policy allow`, `deny`, `learn`, `apply` |
 | `--no-input` | Turns input off. | every command, from the root |
@@ -741,8 +761,8 @@ Each of these flags has one meaning on every command that takes it. Helper funct
 | `--host <host>` | The host to act on. Under `policy`, the host layer. | `ls`, `agents install`, `agents login`, `setup`, `policy` |
 | `-d`, `--detach` | Starts without attaching. | `new`, `resume`, `fork` |
 | `--memory-max <size>` | Caps the memory of one session. | `new`, `resume` |
-| `--memory <size>` | The memory that a machine or a sandbox gets. | `host create`, `host join`, `new` (P1.14) |
-| `--cpus <n>` | The CPUs that a machine or a sandbox gets. | `host create`, `host join`, `new` (P1.14) |
+| `--memory <size>` | The memory that a machine or a sandbox gets. | `host create`, `host join`, `new`, `resume`, `attach` (P1.14) |
+| `--cpus <n>` | The CPUs that a machine or a sandbox gets. | `host create`, `host join`, `new`, `resume`, `attach` (P1.14) |
 | `--secret <NAME>` | Passes a secret from `[secrets]`. | `new`, `resume` |
 | `--for <time>` | How long it lasts. | `debug start`, `debug profile`, `policy allow` |
 | `--all` | Widens the command to every session. | `host restore`, `policy` |
@@ -769,13 +789,13 @@ Each of these flags has one meaning on every command that takes it. Helper funct
 1. C6 adds `-C` as the short form of `--dir`.
 2. Until the end of section 3, `-d <folder>` sets the folder and warns. pflag gives a flag one short form only (`Flag.Shorthand` in pflag's `flag.go`), so `-d` is a hidden flag that sets the same value.
 3. After the end, `-d` is the short form of `--detach` on `new`, `resume` and `fork`.
-4. A script that still passes `-d ~/src` then fails loudly. `~/src` becomes a second word before `--`, which is the usage error "Two words before `--`" of isolation spec 14.14.
+4. A script that still passes `<host> -d ~/src` then fails loudly. `~/src` becomes a second word before `--`, which is the usage error "Two words before `--`" of isolation spec 14.14. Without a host word, which isolation task H12 allows, `~/src` names the host, and an unknown host fails with exit code 3. Only a folder that has a saved host's name would start a detached session there instead.
 
 ### 10.5 Tests
 
 - The short-flag test of section 10.1, and the helper test of section 10.2.
 - Unit tests of the list, size and duration parsers.
-- A unit test of each old flag of section 3.
+- A unit test of each old flag of section 3. A unit test of `new -d <folder>` after the end, with and without a host.
 
 ## 11. Host commands (C7)
 
@@ -814,7 +834,7 @@ Each of these flags has one meaning on every command that takes it. Helper funct
 
 ### 11.3 `host rm`
 
-`host rm <host> [--destroy] [--purge] [--force] [--confirm <host>] [--root-step run|print|skip]`
+`host rm <host> [--destroy] [--purge] [--force] [--confirm <host>] [--delete-logins] [--root-step run|print|skip]`
 
 1. An unknown host fails with exit code 3, with suggestions.
 2. The parts:
@@ -833,8 +853,8 @@ Each of these flags has one meaning on every command that takes it. Helper funct
 6. With input off, the command does only what the flags say. `--destroy` or `--purge` without `--confirm <host>` fails with exit code 4, and `Try: simstim host rm box --destroy --confirm box`.
 7. `--confirm` with another name fails with exit code 2.
 8. `--destroy` on a host without a machine fails with exit code 2: `box was not made by host create, so there is no machine to delete`, and `Try: simstim host rm box`.
-9. `--destroy` refuses while a session works, as `host destroy` does today, unless `--force`. The refusal has exit code 1.
-10. The work goes in this order: purge, destroy, then forget. A failure stops the command with exit code 1, and the host stays saved, so the user can run the command again.
+9. `--destroy` refuses while a session works, as `host destroy` does today, unless `--force`. The refusal has exit code 1. A running machine whose sessions the client cannot list counts as one where a session works. Today `workingSessions` in `internal/cli/create.go` counts it as idle.
+10. The work goes in this order: purge, destroy, then forget. The client records each part, and each step of isolation spec 14.12, in `~/.local/state/simstim/hosts/<host>/removal.json` when it ends. A failure stops the command with exit code 1, and the host stays saved, so the user can run the command again. A second run skips each recorded step. So it never dials a purged host, which would install the helper again. A machine that its provider no longer has counts as destroyed.
 11. The command prints what it did and what stays, on stderr. A kept machine gets today's line, which names the provider's own tools.
 12. `host destroy <host>` runs `host rm <host> --destroy`, and warns. Its `-y` becomes `--confirm <host>`, and its `--force` stays.
 
@@ -842,13 +862,14 @@ Each of these flags has one meaning on every command that takes it. Helper funct
 
 `host upgrade <host>` updates the helper on one host.
 
-1. It dials the host, and compares the helper's version with the helper in this client.
-2. The same version: it prints `box has helper 0.1.2 already.` and exits with 0.
-3. An older version: it installs this client's helper, as `host add` does, without the other steps of `host add` and without a question. The verb is the user's yes.
-4. A newer version on the host: it changes nothing, prints that the host's helper is newer than this client's, and exits with 0.
+1. It does not start the bridge first. A dial installs a missing helper by itself (`Dial` in `internal/client/conn.go`). From isolation task P4.1, a changed helper stops a dial with `digest_mismatch`. So `host upgrade` reads the host over the transport, as `Probe` in `internal/client/bootstrap.go` does. From P4.1 it also runs the digest check there.
+2. This client's helper is there, and its digest matches: it prints `box has helper 0.1.2 already.` and exits with 0.
+3. This client's helper is missing, or its digest does not match: it installs the helper, as `host add` does, without the other steps of `host add` and without a question. The verb is the user's yes. Then it dials, with the check of P4.1.
+4. A newer helper on the host, from a newer client, stays. Each client runs its own version of the helper.
 5. Running sessions keep their own process, as today. New sessions use the new helper.
 6. Isolation task H9 adds the runtime files.
 7. A host that does not answer fails with exit code 1.
+8. Isolation task P7.1 adds `--feed`. It also copies the newest malicious-package feed to the host (isolation spec 7.11).
 
 ### 11.5 `host add --yes` and the tier
 
@@ -857,6 +878,7 @@ Once isolation task H4 adds tiers, `host add --yes` without `--tier` fails with 
 ### 11.6 Tests
 
 - Unit tests of `host set`: each key and value, an unknown key, a bad value, and a failure in the middle.
+- A unit test that `--destroy` refuses when the machine runs and its session list fails.
 - Golden tests of the questions of `host rm`.
 - A test that `host show box --json` and the launcher's host details come from one fixture with the same data.
 - An end-to-end run against a test host: `host show` and `host upgrade` with the same version, which change nothing.
@@ -864,6 +886,8 @@ Once isolation task H4 adds tiers, `host add --yes` without `--tier` fails with 
 ## 12. Agents: install and log in (C8)
 
 The agent table already holds what each agent needs: `Setup.Install`, `Setup.Source`, `Setup.Login`, `Setup.LoginStatus`, `Setup.LoginFiles` and `Setup.LoginEnv` (`internal/agents/setup.go`). C8 adds no field. [The CLI study, section 12](../research/cli-dx.md#12-installing-agents-and-logging-in) shows how other launchers do this.
+
+Their sessions change the host's own installs and login files, which no sandbox reaches. So from isolation task P2.10, when walls are on by default, they still run at the level `none`. The command names that level for the user, so it needs no `--downgrade`. The trusted manifest still records a downgrade, the row shows `!`, and the `wall_downgraded` alert goes out (isolation spec 8.2, rule 5).
 
 ### 12.1 Which host
 
@@ -889,7 +913,7 @@ The agent table already holds what each agent needs: `Setup.Install`, `Setup.Sou
 1. An unknown agent fails with exit code 3, with suggestions.
 2. An agent without `Setup.Login` fails with exit code 2. The message names its variables from `Setup.LoginEnv`: `aider has no login of its own. It reads ANTHROPIC_API_KEY or OPENAI_API_KEY.` The `Try:` line says: `Add the key under [secrets] in config.toml, and pass it with --secret.`
 3. The command dials the host and checks the agent. An agent that is not installed fails with exit code 1, and `Try: simstim agents install claude box`.
-4. When a session named `login-<agent>` runs on the host, the command attaches to it, and says so. It never starts a second login.
+4. When a session named `login-<agent>` runs on the host, the command attaches to it, and says so. With two such sessions, it attaches to the newer. Two clients that start a login at the same moment can still make two sessions.
 5. Otherwise it starts a session named `login-<agent>`. The session runs `Setup.Login`, or the agent itself when `Setup.Login` is the agent's first binary, as `onboard.LoginCommand` decides today. The session gets no secret.
 6. With input on, the command attaches. When the user leaves, by a detach or at the end, it checks the login as `host doctor` does. It prints the agent's line with its mark: ✓, !, ? or ✕.
 7. If the login still runs after a detach, it prints `The login keeps running. Attach again: simstim attach box/login-claude`.
@@ -909,7 +933,7 @@ The agent table already holds what each agent needs: `Setup.Install`, `Setup.Sou
 
 ### 13.1 What it reads
 
-1. `config.toml` and `hosts.toml` in the folder that `config path` prints.
+1. `config.toml` and `hosts.toml`, the two files whose paths `config path` prints.
 2. From the isolation plan: `tiers.toml` (isolation spec 14.6), and the repository file `.simstim/sandbox.toml` of the current folder's repository (isolation spec 8.5).
 
 A file that does not exist is not a finding. The report says `none yet`.
@@ -929,7 +953,7 @@ A file that does not exist is not a finding. The report says `none yet`.
 | An old name of section 3 | warning | `old_name` | C9 |
 | A key that a layer may not hold (isolation spec 8.2) | error | `layer_key` | P1.12 |
 | A rule that names a host that is not saved | error | `host_unknown` | H19 |
-| `sandbox.host` in the layer for all sessions, or in `[lock]` | error | `layer_key` | H19 |
+| `sandbox.host` in the layer for all sessions, or in `[lock]` | error | `host_rule_layer` | H19 |
 
 The known keys come from the TOML tags of `client.Settings` and `client.Host`, read with `reflect`, as `cmd/docgen` reads them for the reference. `[keymap]` and `[secrets]` are free maps: their keys are checked by the rows above.
 
@@ -945,7 +969,7 @@ A syntax error carries its line and column in `toml.ParseError.Position` (`error
 ### 13.4 What other commands do with a broken file
 
 - A syntax error in `hosts.toml` stops a command, as `LoadHosts` does today, with exit code 2 and `Try: simstim config check`.
-- A syntax error in `config.toml` does not stop a command. Today `LoadSettings` ignores it without a word. After C9, the command prints one warning, `config.toml has an error on line 4, so its settings are not used`, then goes on with the defaults.
+- A syntax error in `config.toml` does not stop a command. Today `LoadSettings` ignores it without a word. After C9, the command prints one warning, `config.toml has an error on line 4, so its settings are not used`, then goes on with the defaults. From isolation task P1.12, `config.toml` holds locks, policy layers and secrets. Then a syntax error in it stops each command that writes or sends them, with exit code 2 and `Try: simstim config check`. These are `new`, `resume`, `fork`, `image pull` and each `policy` command that writes or sends layers. `policy lockdown` still runs (isolation spec 8.2, rule 4). `ls` and `attach` keep the warning, send no layers and arm no secrets.
 - An unknown key stops nothing. `doctor` reports it as today, and adds `Try: simstim config check`.
 
 ### 13.5 Output and exit codes
@@ -989,7 +1013,7 @@ Layers for ~/src/app:
 
 - Unit tests with one broken file for each row of section 13.2, and a check of each line number.
 - Golden tests of the text and JSON reports.
-- A test that a syntax error in `config.toml` gives one warning, and the defaults.
+- A test that a syntax error in `config.toml` gives one warning, and the defaults. From P1.12, the same error stops `new` and `policy allow` with exit code 2.
 
 ## 14. Completion (C10)
 
@@ -1079,12 +1103,12 @@ The isolation plan adds palette commands (isolation spec 9.4), each with its com
 
 | Palette command | Command | Task |
 | --- | --- | --- |
-| Policy | `policy ls --in <host>/<session>` | P1.8 |
-| Policy log | `policy log --in <host>/<session>` | P1.8 |
-| Open a shell | `shell <host>/<session>` | P1.13 |
-| Stop session | `stop <host>/<session>` | P1.8 |
-| Lock down every sandbox | `policy lockdown` | P2.14 |
-| Fork session | `fork <host>/<session>` | P5 |
+| session: policy | `policy ls --in <host>/<session>` | P1.8 |
+| session: policy log | `policy log --in <host>/<session>` | P1.8 |
+| session: shell | `shell <host>/<session>` | P1.13 |
+| session: stop | `stop <host>/<session>` | P1.8 |
+| policy: lockdown | `policy lockdown` | P2.14 |
+| session: fork | `fork <host>/<session>` | P5 |
 
 ### 15.3 How the code keeps them in step
 
@@ -1176,12 +1200,12 @@ C-1 to C-6 come from [the plan](cli-plan.md#open-questions-and-their-defaults). 
 | C1 | [2](#2-the-grammar-c1) | [CLI study 8](../research/cli-dx.md#8-the-grammar-we-propose) |
 | C2 | [4](#4-errors-and-suggestions-c2), [5](#5-exit-codes-c2) | CLI study 2.5, 5.4, 5.5, G11, G12 |
 | C3 | [8](#8-help-c3) | CLI study 2.5, 5.5, G13 |
-| C4 | [6](#6-prompts-pickers-and-input-c4), [7](#7-machine-output-c4) | CLI study 5.3, 5.4, G8, G10 |
+| C4 | [3](#3-old-names-and-warnings-c5-c6-c7), [6](#6-prompts-pickers-and-input-c4), [7](#7-machine-output-c4) | CLI study 5.3, 5.4, G8, G10 |
 | C5 | [3](#3-old-names-and-warnings-c5-c6-c7), [9](#9-session-verbs-c5) | CLI study 2.2, 2.3, 6, 7, 9.1, G2, G3, G6, G14 |
 | C6 | [3](#3-old-names-and-warnings-c5-c6-c7), [10](#10-flags-c6) | CLI study 2.4, 5.2, G7 |
 | C7 | [3](#3-old-names-and-warnings-c5-c6-c7), [11](#11-host-commands-c7) | CLI study 3, 5.3, 5.6, 9.3, G9 |
 | C8 | [12](#12-agents-install-and-log-in-c8) | [CLI study 12](../research/cli-dx.md#12-installing-agents-and-logging-in) |
 | C9 | [13](#13-config-check-c9) | CLI study 9.3, 5.6 |
 | C10 | [14](#14-completion-c10) | [CLI study 10](../research/cli-dx.md#10-completion-of-values) |
-| C11 | [15](#15-the-launcher-and-the-cli-agree-c11) | CLI study 2.2 |
+| C11 | [3](#3-old-names-and-warnings-c5-c6-c7), [15](#15-the-launcher-and-the-cli-agree-c11) | CLI study 2.2 |
 | C12 | [16](#16-docs-for-agents-c12) | [CLI study 11](../research/cli-dx.md#11-docs-for-agents), [parity 3.5](../research/parity.md#35-integration-teams-and-data) |

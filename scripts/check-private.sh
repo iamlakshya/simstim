@@ -3,7 +3,8 @@
 # or Tailscale address, a tailnet name or an email address. Examples in the
 # docs use the documentation ranges (192.0.2.0/24, 198.51.100.0/24,
 # 203.0.113.0/24), example.com (or the reserved example.invalid) and the
-# users "me", "you" and "dev".
+# users "me", "you" and "dev". /home/agent is allowed too: it is the home
+# folder of the sandbox's own guest user, which the design names (spec 7.1).
 #
 # A maintainer can add words of their own (machine names, a homelab's name)
 # to private/deny.txt, one extended regex per line. A line that starts with
@@ -41,7 +42,7 @@ fi
 # Matches that are fine: generic users, documentation names and addresses,
 # the bots' addresses, and another project's public contact addresses that an
 # old version of a research note quoted.
-allow='/Users/(me|you|runner|shared)([/" ]|$)|/home/(me|you|u|dev|user|runner|linuxbrew|admin|ubuntu|debian|vscode|node)([/" .:;)\<&]|$)|example-tailnet\.ts\.net|@([A-Za-z0-9-]+\.)*(example|example\.(com|org|net|invalid)|openssh\.com|users\.noreply\.github\.com)([^A-Za-z0-9.-]|$)|git@github\.com|support@github\.com|noreply@|user@UID|@v[0-9]|@sha256|@latest|[a-z]+@herdr\.dev'
+allow='/Users/(me|you|runner|shared)([/" ]|$)|/home/(me|you|u|dev|user|runner|linuxbrew|admin|ubuntu|debian|vscode|node|agent)([/" .:;,)\<&`]|$)|example-tailnet\.ts\.net|@([A-Za-z0-9-]+\.)*(example|example\.(com|org|net|invalid)|openssh\.com|users\.noreply\.github\.com)([^A-Za-z0-9.-]|$)|git@github\.com|support@github\.com|noreply@|user@UID|@v[0-9]|@sha256|@latest|[a-z]+@herdr\.dev'
 allow+="$more_allow"
 
 # --history checks every version of every file in every commit, plus the

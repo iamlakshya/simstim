@@ -39,19 +39,19 @@ Follow the rules of [the isolation plan](isolation-plan.md#how-to-work), with th
 | # | ID | Title | Depends on | Questions | Effort |
 | --- | --- | --- | --- | --- | --- |
 | 1 | C1 | The grammar record | none | none | S |
-| 2 | C2 | Errors, suggestions and exit codes | C1, 0033 | C-6 | M |
-| 3 | C4 | Prompts, pickers and machine output | C2 | C-4, C-5 | M |
-| 4 | C3 | Help that teaches | C2 | none | M |
-| 5 | C5 | Session verbs | C4 | C-1, C-3, C-4 | M |
+| 2 | C2 | Errors, suggestions and exit codes | C1, 0033 | C-6, C-8 | M |
+| 3 | C4 | Prompts, pickers and machine output | C2 | C-4, C-5, C-7, C-9, C-13 | M |
+| 4 | C3 | Help that teaches | C2 | C-12 | M |
+| 5 | C5 | Session verbs | C4 | C-1, C-3, C-4, C-10 | M |
 | 6 | C6 | One meaning for each flag | C2 | C-1, C-2 | S |
 | 7 | C7 | Host commands | C4 | C-1 | M |
 | 8 | C8 | Agents: install and log in | C4 | none | S |
 | 9 | C9 | `config check` | C2 | none | S |
 | 10 | C10 | Completion | C5, C7 | none | S |
 | 11 | C11 | The launcher and the CLI agree | C5, C7 | none | S |
-| 12 | C12 | Docs for agents | none | none | S |
+| 12 | C12 | Docs for agents | none | C-11 | S |
 
-The isolation plan's task P1.8 depends on C2 and C4, so its commands use the shared errors, prompts and machine output. It also depends on 0033.
+Some isolation tasks depend on tasks of this plan, so their commands use the shared errors, prompts and machine output. H3 depends on C2 and C4, H4 on C7, P1.8 on C2, C4 and C5, and P1.12 and P2.8 on C9. P1.8 also depends on 0033.
 
 [The spec's open questions](cli-spec.md#17-open-questions) hold C-1 to C-13 with the sections that use them.
 
@@ -79,14 +79,14 @@ The isolation plan's task P1.8 depends on C2 and C4, so its commands use the sha
 - **Files:** `main.go`, new `internal/cli/errors.go`, `internal/cli/main.go` (the root's argument check, which today turns suggestions off), `internal/client/config.go` (`UserError` gains `Kind`, and every error sets its existing `Code`), every command file in `internal/cli` that returns a plain error.
 - **Acceptance:**
   - `atach x` prints `Did you mean "attach"?` and a "Try:" line, and exits with 2.
-  - `attach` with no argument at a terminal opens the picker of C4. Without a terminal, it prints the short help and an example, and exits with 2.
+  - `attach` with no argument prints the short help and an example, and exits with 2. C4 adds the picker at a terminal.
   - "No hosts yet" exits with 3 only when a host is not found, and with 1 otherwise.
   - A test parses every `client.UserError` literal under `internal/`, and fails on one without a `Code` or a hint.
 - **Tests:** unit tests for the mapping, and golden tests of the error output.
 - **Docs:** new `docs/reference/exit-codes.md`, written by `just docs` from the code. `docs/contributing/style.md` gets the one style for hints.
 - **CHANGELOG:** Changed. "Every error now ends with a "Try:" line, a mistyped command gets a suggestion, and exit codes follow a documented table."
 - **Depends on:** C1, and the owner's yes to 0033.
-- **Questions:** C-6.
+- **Questions:** C-6, C-8.
 - **Effort:** M.
 
 ## C3 Help that teaches
@@ -99,12 +99,12 @@ The isolation plan's task P1.8 depends on C2 and C4, so its commands use the sha
   - No internal words in help: "holder", "flight recorder", "linger" and "restore unit" become words that a user knows, or go.
 - **Spec:** [cli-spec.md, section 8](cli-spec.md#8-help-c3).
 - **Files:** `internal/cli/main.go`, every command file in `internal/cli`, `cmd/docgen` (aliases, old names and topics).
-- **Acceptance:** every reference page has an example and its aliases. `help concepts` exists. A test fails on the internal words above in any help text. `TestTopLevel` and `TestDepth` pass.
+- **Acceptance:** every reference page has an example and its aliases. `help concepts` exists. A test fails on the internal words above in any help text. `TestDepth` passes. C5 adds `TestTopLevel`, once `kill` and `flip` are hidden.
 - **Tests:** a unit test that walks the command tree, and golden tests of the root help.
 - **Docs:** the reference through `just docs`, and [the UX spec](ux-spec.md)'s CLI table, which now lists every command.
 - **CHANGELOG:** Changed. "The help groups commands, every command has an example, and `help concepts` explains the words that the tool uses."
 - **Depends on:** C2.
-- **Questions:** none.
+- **Questions:** C-12.
 - **Effort:** M.
 
 ## C4 Prompts, pickers and machine output
@@ -115,17 +115,18 @@ The isolation plan's task P1.8 depends on C2 and C4, so its commands use the sha
   - A shared picker: a short inline list of hosts or sessions, with search, for a command whose required argument is missing at a terminal (question C-4).
   - `--json` on every command that prints data or makes something: `new --detach`, `resume --detach`, `ports`, `doctor`, `host test`, `host restore`, `host status` and `version`. Field names follow question C-5. With `--json`, an error is one JSON line on stderr (question C-7).
   - Data goes to stdout, and messages, confirmations, progress and warnings to stderr. Spinners only at a terminal. Colour follows `NO_COLOR`, `TERM=dumb` and `--no-color`.
-- **Spec:** [cli-spec.md, section 6](cli-spec.md#6-prompts-pickers-and-input-c4) and [section 7](cli-spec.md#7-machine-output-c4).
-- **Files:** new `internal/cli/prompt.go`, new `internal/tui/picker.go`, `internal/cli/session.go`, `internal/cli/resume.go`, `internal/cli/host.go`, `internal/cli/create.go`, `internal/cli/doctor.go`, `internal/cli/main.go` (`version`).
+- **Spec:** [cli-spec.md, section 6](cli-spec.md#6-prompts-pickers-and-input-c4), [section 7](cli-spec.md#7-machine-output-c4) and [section 3](cli-spec.md#3-old-names-and-warnings-c5-c6-c7).
+- **Files:** new `internal/cli/prompt.go`, new `internal/tui/picker.go`, `internal/cli/session.go`, `internal/cli/resume.go`, `internal/cli/host.go`, `internal/cli/create.go`, `internal/cli/doctor.go`, `internal/cli/main.go` (`version`), new `internal/cli/deprecated.go` (the table of spec 3, with its first row).
 - **Acceptance:**
   - `new box --detach --json` prints one JSON object with `id`, `name`, `host` and `"v": 1`, and nothing else on stdout.
   - With `--no-input`, `host add box` fails with exit code 4 and the flag `--yes`.
   - Piped output has no colour and no spinner.
+  - `attach` with no argument at a terminal opens the picker. With `--no-input`, it fails with exit code 2.
 - **Tests:** unit tests with a fake terminal, golden tests of each `--json` shape, and an end-to-end run of `new --detach --json` in a script.
 - **Docs:** `docs/how-to/scripting.md` (new): `--json`, `--no-input`, exit codes and examples.
 - **CHANGELOG:** Added. "`--no-input`, `--json` on every command that prints data, and a picker when a command needs a session or a host that you did not name."
 - **Depends on:** C2.
-- **Questions:** C-4, C-5.
+- **Questions:** C-4, C-5, C-7, C-9, C-13.
 - **Effort:** M.
 
 ## C5 Session verbs
@@ -138,16 +139,17 @@ The isolation plan's task P1.8 depends on C2 and C4, so its commands use the sha
   - `ls [<host>]`: the host as an argument. `--host` stays.
   - The host part of an address may be left out when the session's name is unique (question C-3). `-` means the last session, and nothing else.
 - **Spec:** [cli-spec.md, section 9](cli-spec.md#9-session-verbs-c5) and [section 3](cli-spec.md#3-old-names-and-warnings-c5-c6-c7).
-- **Files:** `internal/cli/session.go`, `internal/cli/resume.go`, `internal/cli/ended.go`, new `internal/cli/show.go`, new `internal/cli/address.go`, and the session cache, which moves from `internal/tui/memory.go` to the new `internal/client/seen.go`.
+- **Files:** `internal/cli/session.go`, `internal/cli/resume.go`, `internal/cli/ended.go`, `internal/cli/deprecated.go`, new `internal/cli/show.go`, new `internal/cli/address.go`, and the session cache, which moves from `internal/tui/memory.go` to the new `internal/client/seen.go`.
 - **Acceptance:**
   - `kill box/a` works, warns once on stderr, and names `rm`.
   - `attach box/a` on an ended agent asks "Start claude again? [Y/n]" at a terminal. With `--no-input` it fails with exit code 4 and `--restart`.
   - `attach a` finds `box/a` when no other host has a session named `a`. Two matches fail with both full names.
+  - `TestTopLevel` passes, with `kill` and `flip` hidden ([CLI spec, 2.3](cli-spec.md#23-tests)).
 - **Tests:** unit tests for the address rules, golden tests of the prompts, and end-to-end runs of `rm`, `attach` and `show`.
 - **Docs:** the README's first-session path, new `docs/how-to/sessions.md`, [the UX spec](ux-spec.md), the reference through `just docs`.
 - **CHANGELOG:** Changed. "`rm` deletes a session, and asks first. `kill` still works for now, and warns. `attach` wakes a stopped session and offers to restart an ended agent. `show` describes one session. You can leave out the host when a session's name is unique."
 - **Depends on:** C4.
-- **Questions:** C-1, C-3, C-4.
+- **Questions:** C-1, C-3, C-4, C-10.
 - **Effort:** M.
 
 ## C6 One meaning for each flag
@@ -162,7 +164,7 @@ The isolation plan's task P1.8 depends on C2 and C4, so its commands use the sha
   - `new --setup` and `--no-setup` become `--setup-script` and `--no-setup-script`, so that "setup" names only the guided setup.
   - `-n` is `--name` everywhere. `host alerts log -n` becomes `--lines` alone, with a warned alias.
 - **Spec:** [cli-spec.md, section 10](cli-spec.md#10-flags-c6) and [section 3](cli-spec.md#3-old-names-and-warnings-c5-c6-c7).
-- **Files:** `internal/cli/session.go`, `internal/cli/alerts.go`, `internal/cli/create.go`, `internal/cli/agents.go`, `internal/cli/guided.go`, new `internal/cli/flags.go` (shared list and size parsers, and the warned aliases).
+- **Files:** `internal/cli/session.go`, `internal/cli/alerts.go`, `internal/cli/create.go`, `internal/cli/agents.go`, `internal/cli/guided.go`, new `internal/cli/flags.go` (shared list and size parsers), `internal/cli/deprecated.go` (the warned aliases).
 - **Acceptance:** each old form works and warns once. A test fails when two commands give one short flag two meanings.
 - **Tests:** unit tests for the parsers and the aliases.
 - **Docs:** the reference through `just docs`, and every how-to guide that shows an old form.
@@ -180,7 +182,7 @@ The isolation plan's task P1.8 depends on C2 and C4, so its commands use the sha
   - `host upgrade <host>` updates the helper. Today the user runs `host add` again.
   - With `--yes`, `host add` needs `--tier` once the isolation plan adds tiers (H4). Without it, the command fails with exit code 4 and the flag to pass.
 - **Spec:** [cli-spec.md, section 11](cli-spec.md#11-host-commands-c7) and [section 3](cli-spec.md#3-old-names-and-warnings-c5-c6-c7).
-- **Files:** `internal/cli/host.go`, `internal/cli/create.go`, new `internal/cli/host_set.go`, `internal/client/config.go`.
+- **Files:** `internal/cli/host.go`, `internal/cli/create.go`, new `internal/cli/host_set.go`, `internal/cli/deprecated.go`, `internal/client/config.go`.
 - **Acceptance:** `host set box idle=2h` does what `host idle box 2h` did. `host rm` on a created machine says that it holds 2 sessions. It asks "Type box to delete the machine too, or press Enter to keep it:". `host show box --json` matches the launcher's details.
 - **Tests:** unit tests, golden tests of the prompts, and an end-to-end run against a test host.
 - **Docs:** `docs/how-to/add-a-host.md`, `docs/how-to/create-a-host.md`, `docs/how-to/uninstall.md`, the reference through `just docs`.
@@ -235,9 +237,9 @@ The isolation plan's task P1.8 depends on C2 and C4, so its commands use the sha
   - "host: details" runs `host show`, and "host: reconnect" gets `host test --reconnect`.
   - The palette's "delete" matches `rm`.
   - [The UX spec](ux-spec.md)'s CLI table lists every command.
-- **Spec:** [cli-spec.md, section 15](cli-spec.md#15-the-launcher-and-the-cli-agree-c11).
-- **Files:** `internal/tui/palette.go`, `internal/cli/show.go` (`--screen`), `internal/cli/host.go` (`--reconnect`), `docs/contributing/ux-spec.md`.
-- **Acceptance:** a test compares the palette's actions with the command tree, and fails on an action without a command.
+- **Spec:** [cli-spec.md, section 15](cli-spec.md#15-the-launcher-and-the-cli-agree-c11) and [section 3](cli-spec.md#3-old-names-and-warnings-c5-c6-c7).
+- **Files:** `internal/tui/palette.go`, `internal/cli/deprecated.go` (the old keymap name), `internal/cli/show.go` (`--screen`), `internal/cli/host.go` (`--reconnect`), `docs/contributing/ux-spec.md`.
+- **Acceptance:** a test compares the palette's actions with the command tree. It fails on an action with neither a command nor a launcher-only reason, or with both, and on a command that the tree lacks.
 - **Tests:** a unit test and golden tests.
 - **Docs:** [the UX spec](ux-spec.md).
 - **CHANGELOG:** Changed. "The launcher and the command line use the same words."
@@ -255,7 +257,7 @@ The isolation plan's task P1.8 depends on C2 and C4, so its commands use the sha
 - **Docs:** the new how-to page.
 - **CHANGELOG:** Added. "The docs site publishes `llms.txt` and a Markdown copy of each page, for coding agents."
 - **Depends on:** nothing.
-- **Questions:** none.
+- **Questions:** C-11.
 - **Effort:** S.
 
 ## Risks to the delivery
