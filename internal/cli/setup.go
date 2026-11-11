@@ -43,6 +43,9 @@ func startSession(ctx context.Context, conn *client.Conn, h client.Host, a clien
 			return s, err
 		}
 		past := answers.Past(q)
+		if q.Kept != "" {
+			fmt.Fprintf(os.Stderr, "On %s: %s\n", h.Name, client.CleanPath(q.Kept))
+		}
 		if !interactive {
 			fmt.Fprintln(os.Stderr, skipNote(h.Name, q, past))
 			a.Setup = api.SetupSkip

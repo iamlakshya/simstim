@@ -7,6 +7,7 @@ import (
 	"errors"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -15,6 +16,7 @@ import (
 	"github.com/iamlakshya/simstim/internal/brand"
 	"github.com/iamlakshya/simstim/internal/client"
 	"github.com/iamlakshya/simstim/internal/client/clienttest"
+	"github.com/iamlakshya/simstim/internal/host/hosttest"
 	"github.com/iamlakshya/simstim/internal/proto"
 	"github.com/iamlakshya/simstim/internal/provider"
 )
@@ -267,11 +269,70 @@ func TestPrintedCommandsNameTheID(t *testing.T) {
 	}
 }
 
+// A clean filter in the session's repository writes the OSC 52 clipboard
+// sequence and more to stderr, and fails. git's error, which pull prints,
+// passes the cleaner: the text arrives, without its control bytes.
+func TestPullCleansAFiltersError(t *testing.T) {
+	hosttest.SkipOnGit254(t)
+	th := newTestHost(t)
+	th.h.Install(client.HelperVersion(), "")
+	remote := filepath.Join(th.h.Home, "src", "app")
+	if err := os.MkdirAll(remote, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	git := func(dir string, args ...string) {
+		t.Helper()
+		if out, err := runGit(dir, args...); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	for name, body := range map[string]string{"README": "app\n", ".gitattributes": "README filter=evil\n"} {
+		if err := os.WriteFile(filepath.Join(remote, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	git(remote, "init", "-q", "-b", "main")
+	git(remote, "add", "README", ".gitattributes")
+	git(remote, "commit", "-q", "-m", "first")
+	said := filepath.Join(th.h.Root, "said")
+	filter := filepath.Join(th.h.Root, "evil.sh")
+	if err := os.WriteFile(said, []byte("fatal: "+hostile), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filter, []byte("#!/bin/sh\ncat "+said+" >&2\nexit 1\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	git(remote, "config", "filter.evil.clean", filter)
+	git(remote, "config", "filter.evil.required", "true")
+	// A new time, so that git status reads the file through the filter.
+	later := time.Now().Add(10 * time.Second)
+	if err := os.Chtimes(filepath.Join(remote, "README"), later, later); err != nil {
+		t.Fatal(err)
+	}
+	m := startedRE.FindStringSubmatch(ok(t, "new", "box", "--detach", "--name", "evil", "--dir", remote, "--", "sleep", "60"))
+	if m == nil {
+		t.Fatal("new did not start the session")
+	}
+	local := t.TempDir()
+	git(local, "init", "-q", "-b", "main")
+	t.Chdir(local)
+	_, err := run(t, "pull", "box/"+m[1])
+	var ue *client.UserError
+	if !errors.As(err, &ue) || !strings.Contains(ue.Msg, "fatal: ]52;c;aGk=Allow this?") || ue.Hint == "" {
+		t.Fatalf("pull = %v, want git's error with the filter's text, cleaned", err)
+	}
+	noHostBits(t, "pull's error", ue.Msg+"\n"+ue.Hint)
+}
+
 // pull's two early refusals print the session's name and its branch, both
 // the host's text, as plain text: a session with no branch, and a branch
 // that is checked out here.
 func TestPullRefusalsCleanHostText(t *testing.T) {
-	newTestHost(t)
+	// pull asks the helper about the repository (git-op repo.info), which
+	// git 2.54 may not count the changes of.
+	hosttest.SkipOnGit254(t)
+	th := newTestHost(t)
+	th.h.Install(client.HelperVersion(), "")
 	git := func(dir string, args ...string) {
 		t.Helper()
 		cmd := exec.CommandContext(context.Background(), "git", args...)

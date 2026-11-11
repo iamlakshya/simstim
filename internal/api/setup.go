@@ -32,4 +32,7 @@ type SetupQuestion struct {
 	// this content only. The client starts again with it in
 	// NewArgs.SetupHashes. An older helper sends none.
 	Hash string `json:"hash,omitempty"`
+	// Kept says where a worktree that this start made, and could not
+	// remove before it asked, stays on the host, and how to remove it.
+	Kept string `json:"kept,omitempty"`
 }

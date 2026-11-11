@@ -310,6 +310,26 @@ func TestDeleteConfirm(t *testing.T) {
 	}
 }
 
+// A delete whose worktree an error kept is a warning, with the host's name
+// in it and the step to try under it, not a success.
+func TestDeleteKeptWorktreeWarns(t *testing.T) {
+	hs := sessions(t, 80, 24)
+	hs.be.deleted = &client.DeleteResult{Deleted: true,
+		Worktree:     "kept the worktree ~/w (branch b): could not check it: could not start git in a scope on this host: Failed to connect to bus",
+		WorktreeCode: api.CodeGitScope, WorktreeHint: "Run the host doctor."}
+	hs.key("down", "d", "enter")
+	want := "Deleted api-tests on atlas-dev. Kept the worktree ~/w (branch b): could not check it: could not start git in a scope on atlas-dev: Failed to connect to bus."
+	var found *toast
+	for _, x := range append(append([]toast(nil), hs.m.toasts.shown...), hs.m.toasts.queue...) {
+		if x.text == want {
+			found = &x
+		}
+	}
+	if found == nil || found.kind != toastWarning || found.hint != brand.Name+" host doctor atlas-dev" {
+		t.Fatalf("toast = %+v; have %q", found, toastTexts(hs.m))
+	}
+}
+
 func TestRename(t *testing.T) {
 	hs := sessions(t, 80, 24)
 	hs.key("r")

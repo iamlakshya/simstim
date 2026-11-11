@@ -276,6 +276,7 @@ func startSession(m *Manifest, secrets map[string]api.Secret) (*SessionInfo, err
 	if err := m.Save(); err != nil {
 		return nil, err
 	}
+	logSkippedCopies(id, m.Git)
 	if err := startHolder(m); err != nil {
 		return nil, UserError("start_failed", err.Error(), "Check the session log with the host doctor.")
 	}
@@ -448,7 +449,10 @@ func deleteSession(id string, res *DeleteResult) error {
 	m, _ := LoadManifest(id)
 	stopHolder(id, m)
 	if m != nil {
-		res.Worktree = removeWorktree(m.Git)
+		var kept *proto.Error
+		if res.Worktree, kept = removeWorktree(m.Git); kept != nil {
+			res.WorktreeCode, res.WorktreeHint = kept.Code, kept.Hint
+		}
 	}
 	if err := os.RemoveAll(paths.SessionDir(id)); err != nil {
 		return fmt.Errorf("remove the files of session %s: %w", id, err)

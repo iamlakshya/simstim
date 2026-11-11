@@ -218,8 +218,13 @@ func (m *Model) deleteSession(host string, s client.Session) tea.Cmd {
 		defer cancel()
 		res, err := c.Delete(cctx, id)
 		ok := fmt.Sprintf("Deleted %s on %s.", s.Name, host)
-		if res.Worktree != "" {
-			ok += " " + sentence(res.Worktree)
+		note, hint := client.WorktreeNote(host, res)
+		if note != "" {
+			ok += " " + sentence(note)
+		}
+		if hint != "" {
+			// An error kept the worktree: a warning, with what to try.
+			return opDoneMsg{host: host, warn: ok, hint: hint, err: err, drop: id}
 		}
 		return opDoneMsg{host: host, ok: ok, err: err, drop: id}
 	}

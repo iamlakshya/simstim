@@ -109,7 +109,11 @@ func RunBridge(in io.Reader, out io.Writer) error {
 		case proto.TRequest:
 			var req proto.Request
 			if json.Unmarshal(f.Payload, &req) == nil {
-				go b.serve(req)
+				liveRequests.Add(1) // EndBridge waits for it
+				go func() {
+					defer liveRequests.Add(-1)
+					b.serve(req)
+				}()
 			}
 		case proto.TAttach:
 			var a proto.Attach

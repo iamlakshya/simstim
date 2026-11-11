@@ -142,6 +142,15 @@ if os.environ.get("E2E_ONLY") == "session-sockets":
     print("RESULT %d/%d passed" % (sum(results), len(results)))
     sys.exit(0 if all(results) else 1)
 
+# Git on the host (host_git.py). E2E_ONLY=host-git runs only these.
+import host_git as host_git_e2e  # section N uses the name host_git for a flag
+def host_git_checks():
+    host_git_e2e.run(host_git_e2e.Ctx(cli=cli, HOST=HOST, NAME=NAME, env=env, ok=ok, host_ssh=host_ssh, host_rc=host_rc, host_argv=host_argv))
+if os.environ.get("E2E_ONLY") == "host-git":
+    host_git_checks()
+    print("RESULT %d/%d passed" % (sum(results), len(results)))
+    sys.exit(0 if all(results) else 1)
+
 # --- Attach, detach, reattach ---
 # 1. Start a detached shell session.
 t = Term([cli, "new", HOST, "--agent", "shell", "--name", "e2e-attach", "--detach"], env=env)
@@ -566,6 +575,7 @@ setup_checks()
 guided_checks()
 sandbox_host_checks()
 socket_checks()
+host_git_checks()
 # M. Full screen (roadmap N2): a program on the alternate screen is reported
 #    as full screen, and host doctor says so.
 sid_fs = start("e2e-fullscreen", "/bin/bash", "-c", 'printf "\\033[?1049hFULL"; sleep 600')

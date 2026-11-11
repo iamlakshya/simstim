@@ -201,6 +201,11 @@ type Port struct {
 type DeleteResult struct {
 	Deleted  bool   `json:"deleted"`
 	Worktree string `json:"worktree,omitempty"`
+	// WorktreeCode and WorktreeHint come with a Worktree note when an error
+	// kept the worktree, such as git_scope: the error's code, and what to
+	// try. An older helper sends neither.
+	WorktreeCode string `json:"worktree_code,omitempty"`
+	WorktreeHint string `json:"worktree_hint,omitempty"`
 }
 
 // FoldersResult is what the new-session dialog completes folders from.

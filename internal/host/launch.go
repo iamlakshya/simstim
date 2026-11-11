@@ -40,12 +40,17 @@ func launchHolder(m *Manifest) error {
 	if err != nil {
 		return err
 	}
-	var sliceErr error
+	// Every warning of the start goes to the session's log before the
+	// holder opens it, so that the log has one writer while it runs. The
+	// report of a failed start reads only what came after them.
+	var from int64
 	if SystemdUser() {
 		// All sessions together stay below the host's memory minus the
 		// reserve. Without that limit the session still starts, under its
 		// own cap.
-		sliceErr = limitSessions(DefaultMemoryMax())
+		if err := limitSessions(DefaultMemoryMax()); err != nil {
+			warnSession(m.ID, "could not limit the memory of all sessions", "err", err)
+		}
 		unit := UnitName(m.ID)
 		args := []string{"--user", "--quiet", "--collect",
 			"--unit=" + unit, "--slice=" + brand.Slice,
@@ -61,6 +66,7 @@ func launchHolder(m *Manifest) error {
 				"-p", "MemorySwapMax=0")
 		}
 		args = append(args, exe, "holder", m.ID)
+		from = logSize(m.ID)
 		out, err := exec.CommandContext(context.Background(), "systemd-run", args...).CombinedOutput()
 		if err != nil {
 			return fmt.Errorf("systemd-run: %w: %s", err, strings.TrimSpace(string(out)))
@@ -76,29 +82,34 @@ func launchHolder(m *Manifest) error {
 		cmd := exec.CommandContext(context.Background(), exe, "holder", m.ID)
 		cmd.Stdin, cmd.Stdout, cmd.Stderr = devnull, devnull, devnull
 		cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+		from = logSize(m.ID)
 		if err := cmd.Start(); err != nil {
 			return fmt.Errorf("start the holder: %w", err)
 		}
 		_ = cmd.Process.Release()
 	}
-	return holderStarted(m.ID, sliceErr, 5*time.Second)
+	return holderStarted(m.ID, from, 5*time.Second)
 }
 
-// holderStarted waits until the holder of session id answers. Only then does
-// it write sliceErr, a failure to limit the memory of all sessions, to the
-// session's log. waitSocket reports the log's last line when a start fails,
-// and the slice's limit is never the reason for that.
-func holderStarted(id string, sliceErr error, timeout time.Duration) error {
-	if err := waitSocket(id, timeout); err != nil {
-		return err
-	}
-	if sliceErr != nil {
-		warnSession(id, "could not limit the memory of all sessions", "err", sliceErr)
-	}
-	return nil
+// holderStarted waits until the holder of session id answers. It writes
+// nothing to the session's log, which the holder owns once it runs. When the
+// start fails, it reports the last line that the holder wrote after the
+// offset from, never a warning of the start itself.
+func holderStarted(id string, from int64, timeout time.Duration) error {
+	return waitSocket(id, from, timeout)
 }
 
-func waitSocket(id string, timeout time.Duration) error {
+// logSize is the size of the session's log now, the offset from which the
+// holder writes.
+func logSize(id string) int64 {
+	st, err := os.Stat(paths.HolderLog(id))
+	if err != nil {
+		return 0
+	}
+	return st.Size()
+}
+
+func waitSocket(id string, from int64, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
 		d := net.Dialer{Timeout: 200 * time.Millisecond}
@@ -112,7 +123,11 @@ func waitSocket(id string, timeout time.Duration) error {
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-	if b, err := os.ReadFile(paths.HolderLog(id)); err == nil && len(b) > 0 {
+	b, _ := os.ReadFile(paths.HolderLog(id))
+	if int64(len(b)) >= from { // a log that turned over since starts again at 0
+		b = b[from:]
+	}
+	if len(strings.TrimSpace(string(b))) > 0 {
 		lines := strings.Split(strings.TrimSpace(string(b)), "\n")
 		return fmt.Errorf("the session did not start: %s", logText(lines[len(lines)-1]))
 	}

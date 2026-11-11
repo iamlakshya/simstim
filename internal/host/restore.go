@@ -161,11 +161,16 @@ func resumeHook(m *Manifest) string {
 	if hook == "" || filepath.Base(filepath.Dir(hook)) != "."+brand.Name {
 		return hook
 	}
-	repo, top := repoOf(m.Cwd)
+	// git answers in a git operation's child. When it cannot, as for
+	// git_scope, the script is not checked, so it does not run.
+	repo, top, err := repoOf(m.Cwd)
 	var why string
-	if m.SetupHash == "" {
+	switch {
+	case err != nil:
+		repo, why = m.Cwd, "could not find its repository: "+err.Error()
+	case m.SetupHash == "":
 		why = "the session kept no setup hash to check it against"
-	} else {
+	default:
 		switch s, err := readScripts(top); {
 		case err != nil:
 			why = "could not check it: " + err.Error()

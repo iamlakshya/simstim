@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/iamlakshya/simstim/internal/api"
 	"github.com/iamlakshya/simstim/internal/brand"
@@ -28,6 +29,16 @@ func setupRepo(t *testing.T) string {
 	for k, v := range map[string]string{"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.com", "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.com", "GIT_CONFIG_GLOBAL": os.DevNull} {
 		t.Setenv(k, v)
 	}
+	childRaces(t)
+	// No systemd user manager can be reached from here, as in hosttest.New,
+	// so git never runs in the developer's own slice. The scope tests fake
+	// one.
+	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
+	t.Setenv("DBUS_SESSION_BUS_ADDRESS", "")
+	// A fake systemctl can take seconds to start on a busy machine.
+	old := gitScopeProbeTimeout
+	gitScopeProbeTimeout = 30 * time.Second
+	t.Cleanup(func() { gitScopeProbeTimeout = old })
 	dir, _ := filepath.EvalSymlinks(t.TempDir())
 	repo := filepath.Join(dir, "app")
 	hook := filepath.Join(repo, "."+brand.Name, "setup")
@@ -41,6 +52,22 @@ func setupRepo(t *testing.T) string {
 		}
 	}
 	return repo
+}
+
+// childRaces makes the race detector of the git operations' children, which
+// are this test binary, write its reports to a folder, and fails the test
+// when one does. It also stops their pause at exit, a second each.
+func childRaces(t *testing.T) {
+	t.Helper()
+	dir := t.TempDir()
+	t.Setenv("GORACE", "log_path="+filepath.Join(dir, "race")+" atexit_sleep_ms=0")
+	t.Cleanup(func() {
+		reports, _ := filepath.Glob(filepath.Join(dir, "race.*"))
+		for _, r := range reports {
+			b, _ := os.ReadFile(r)
+			t.Errorf("a git operation's child found a data race:\n%s", b)
+		}
+	})
 }
 
 func question(t *testing.T, err error) api.SetupQuestion {
@@ -125,14 +152,15 @@ func TestSetupHooksNeedTrust(t *testing.T) {
 }
 
 func TestSetupHooksInANewWorktree(t *testing.T) {
+	skipOnGit254(t)
 	repo := setupRepo(t)
 	gi, err := makeWorktree(repo, "fix", "abcd2345", "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	// The worktree shares the repository's answer.
-	if key, top := repoOf(gi.Worktree); key != repo || top != gi.Worktree {
-		t.Fatalf("repoOf(worktree) = %s, %s", key, top)
+	if key, top, err := repoOf(gi.Worktree); key != repo || top != gi.Worktree || err != nil {
+		t.Fatalf("repoOf(worktree) = %s, %s, %v", key, top, err)
 	}
 	// The worktree's scripts are the repository's: the same hash.
 	h, err := setupHooks(NewArgs{SetupHashes: map[string]string{repo: hashOf(t, repo)}}, gi.Worktree, gi)

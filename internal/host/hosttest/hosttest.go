@@ -3,12 +3,14 @@
 // and the real bridge in the test's own process. Only tests import it.
 //
 // The holders are the test binary itself, started again with the helper's
-// own arguments ("holder <id>", "hook <event>"): a test binary that uses this
-// package calls Main from its TestMain. No systemd is used: holders start
-// detached, as they do in a container.
+// own arguments ("holder <id>", "hook <event>"), and so are the children
+// that run git ("git-op <op>"): a test binary that uses this package calls
+// Main from its TestMain. No systemd is used: holders start detached, as
+// they do in a container, and git runs without a scope.
 package hosttest
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -17,6 +19,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"syscall"
@@ -29,8 +32,8 @@ import (
 )
 
 // Main runs the tests, or acts as the host helper when the binary was
-// started as one: "holder <id>", "hook <event> [args]" or "keytest". Call it
-// from TestMain.
+// started as one: "holder <id>", "hook <event> [args]", "git-op <op>" or
+// "keytest". Call it from TestMain.
 func Main(m *testing.M) {
 	if len(os.Args) >= 3 {
 		switch os.Args[1] {
@@ -45,6 +48,12 @@ func Main(m *testing.M) {
 			os.Exit(0)
 		case "rm-as-caller":
 			rmAsCaller(os.Args[2:])
+		case "git-op":
+			if err := host.RunGitOp(os.Args[2:], os.Stdin, os.Stdout); err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				os.Exit(1)
+			}
+			os.Exit(0)
 		}
 	}
 	if len(os.Args) == 2 && os.Args[1] == "keytest" {
@@ -334,6 +343,17 @@ func WaitFor(t testing.TB, timeout time.Duration, what string, cond func() bool)
 			t.Fatalf("timed out after %s waiting for %s", timeout, what)
 		}
 		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+// SkipOnGit254 skips a test whose session makes a worktree, or counts the
+// changed files of its repository, when this machine's git is 2.54.x: the
+// helper refuses that git for a step that fires hooks (spec 19.3).
+func SkipOnGit254(t testing.TB) {
+	t.Helper()
+	out, _ := exec.CommandContext(context.Background(), "git", "version").Output()
+	if regexp.MustCompile(`^git version 2\.54(\.|\s|$)`).Match(out) {
+		t.Skip("the helper refuses git 2.54 for a step that fires hooks")
 	}
 }
 
