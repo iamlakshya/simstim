@@ -1132,14 +1132,15 @@ The isolation plan adds palette commands (isolation spec 9.4), each with its com
 1. **`llms.txt`** at the root of each build of the site, such as `/llms.txt` or `/v1.2/llms.txt`, in the format of [llmstxt.org](https://llmstxt.org/):
    - An H1 with the display name.
    - A quote with the site's description.
-   - One paragraph: each page has a Markdown copy, and `simstim <command> --help` prints the same reference.
-   - One H2 for each tab of the site, in the order of `sidebar.json`. Each page is one item: `[title](copy URL): description`. The description is the one that `describe` in `cmd/docgen/site.go` gives the page.
-   - An H2 "Optional" last, with the contributing docs, the research notes and the project pages.
+   - One paragraph: each page has a Markdown copy, and `simstim <command> --help` prints a command's description, usage, examples and flags, as its page under Reference does.
+   - One H2 for each tab of the site, in the order of `sidebar.json`. Each page is one item: `[title](copy URL): description`. The description is the one that `describe` in `cmd/docgen/site.go` gives the page. The landing page's copy is the first item.
+   - An H2 "Optional" last, whatever the order of the tabs, with the contributing docs, the research notes and the project pages. These pages make up the Project tab, so the Project tab's H2 is "Optional", and each page is listed once.
 2. **A Markdown copy of each page.** Its URL is the page's URL without its trailing slash, plus `.md` (question C-11). `/how-to/add-a-host/` has `/how-to/add-a-host.md`, `/how-to/` has `/how-to.md`, and `/` has `/index.md`.
    - The copy is `# <title>`, a blank line, then the page's body as `cmd/docgen` gives it to the site, without front matter.
    - Its links to other pages point to their copies.
-3. **A link to the copy in each HTML page:** `<link rel="alternate" type="text/markdown" href="…">`, as llmstxt.org proposes. `cmd/docgen` adds it through Starlight's `head` front matter ([Starlight](https://starlight.astro.build/reference/frontmatter/#head)).
-4. **A snippet for a project's `AGENTS.md`**, in the new `docs/how-to/use-with-agents.md`. It has at most 15 lines of plain Markdown, and no front matter:
+   - The landing page draws its own content. Its copy is the repository's README, the file that links to `/` stand for.
+3. **A link to the copy in each HTML page:** `<link rel="alternate" type="text/markdown" href="…">`, as llmstxt.org proposes. `cmd/docgen` adds it through Starlight's `head` front matter ([Starlight](https://starlight.astro.build/reference/frontmatter/#head)). It joins a `head` list that the page has already. The landing page is an Astro page, so `site/src/pages/index.astro` adds its own link.
+4. **A snippet for a project's `AGENTS.md`**, in the new `docs/how-to/use-with-agents.md`. It has at most 15 lines of plain Markdown, and no front matter. When every task of this spec has shipped, it reads:
 
    ```markdown
    ## Remote sessions
@@ -1147,19 +1148,24 @@ The isolation plan adds palette commands (isolation spec 9.4), each with its com
    This project runs coding agents in simstim sessions on remote hosts.
 
    - List the sessions: `simstim ls --json`
+   - List the hosts: `simstim host ls --json`
    - Describe one: `simstim show <host>/<session> --json`
    - Read its screen: `simstim show <host>/<session> --screen`
-   - In scripts, pass `--no-input`. Exit codes: `simstim help exit-codes`
+   - In scripts, pass `--no-input`.
+   - Exit codes: `simstim help exit-codes`
+   - Help for a command: `simstim <command> --help`
    - Docs for agents: https://<docs site>/llms.txt
    ```
 
-   The page says where each agent reads it. Codex and others read `AGENTS.md`. Claude Code reads it when the folder has no `CLAUDE.md`, and a `CLAUDE.md` can import it.
+   The snippet names only commands that exist. C12 ships the lines of `ls`, `host ls`, `--help` and the docs. Each other task adds its own line when it ships its command: C5 the `show --json` line, C11 the `show --screen` line, C4 the `--no-input` line, and C3 the `help exit-codes` line.
+
+   The page says where each agent reads it. Codex and others read `AGENTS.md`. Claude Code reads it when the folder has no `CLAUDE.md`, and a `CLAUDE.md` can import it. Gemini CLI and Aider read it only after a setting, which the page gives.
 
 Not in scope: `llms-full.txt`, which would hold every page in one file, and a docs server for agents.
 
 ### 16.2 How the build makes them
 
-1. `cmd/docgen -site site/src -site-url <url>` writes `site/public/llms.txt` and each copy under `site/public/`. It adds the `head` link to each page's front matter. Before it writes, it removes the copies of its last run, as it clears `site/public/images/` today.
+1. `cmd/docgen -site site/src -site-url <url>` writes `site/public/llms.txt` and each copy under `site/public/`. `-site` needs `-site-url`. It adds the `head` link to each page's front matter. Before it writes, it removes the copies of its last run, as it clears `site/public/images/` today. It removes only regular files, and refuses a `site/public` that is a symbolic link. It writes the images, the copies and `llms.txt` through `site/public/` alone, so no write follows a link out of it. A link where a file goes is removed first. A linked folder that leads out of `site/public/` stops the build, with a hint.
 2. `scripts/docs-site.sh` passes the URL that it already builds from `SITE_URL` and `SITE_BASE`. A dev build uses `https://example.invalid/`, as today.
 3. Astro copies `site/public/` into the build as it is ([Astro](https://docs.astro.build/en/basics/project-structure/#public)).
 4. `.gitignore` gets `/site/public/llms.txt` and `/site/public/**/*.md`, beside `/site/public/images/`, which `cmd/docgen` already writes.
@@ -1171,8 +1177,11 @@ Not in scope: `llms-full.txt`, which would hold every page in one file, and a do
 - `llms.txt` misses a page of `site/src/generated/pages.json`.
 - `llms.txt` lists a page twice, or lists a page without a description.
 - A copy that `llms.txt` names is missing from `build/site/public/`.
+- A copy's title differs from its source's title, or its text differs from its source's text. Code counts as it is. Only the destinations of the links that `cmd/docgen` rewrites may differ.
+- A link that `cmd/docgen` rewrites leads elsewhere than `cmd/docgen` sends the source's link: to the copy of the page it names, to the image, or to the file on GitHub.
+- A relative link in a copy leads to no Markdown copy or image in the build. lychee checks the copies' links too.
 
-A unit test in `cmd/docgen` builds a small docs tree. It checks that each copy equals its source after the link rewrite, and compares `llms.txt` with a golden file.
+A unit test in `cmd/docgen` builds a small docs tree. It checks that each copy equals its source after the link rewrite, and compares `llms.txt` with a golden file. The golden file holds no product name: the test fills it in from `internal/brand`. `scripts/test-check-llms-txt.py`, in `just test`, breaks a small built site in each of the ways above, and expects the check to fail.
 
 ## 17. Open questions
 

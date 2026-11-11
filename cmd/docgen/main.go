@@ -4,7 +4,10 @@
 //
 //	go run ./cmd/docgen                       # docs/reference
 //	go run ./cmd/docgen -man build/man -completions build/completions
-//	go run ./cmd/docgen -site site/src        # the docs site's content
+//	go run ./cmd/docgen -site site/src -site-url https://docs.example.org/dev/
+//
+// The last writes the docs site's content for a build served at that
+// address. scripts/docs-site.sh runs it with the right address.
 package main
 
 import (
@@ -21,10 +24,11 @@ func main() {
 	man := flag.String("man", "", "also write man pages into this folder")
 	comp := flag.String("completions", "", "also write shell completions into this folder")
 	site := flag.String("site", "", "also write the docs site's pages and data into this folder (the site's src)")
+	siteURL := flag.String("site-url", "", "with -site: the address that this build of the docs site is served at, with its base, for llms.txt")
 	flag.Parse()
 	err := run(*out, *man, *comp)
 	if err == nil && *site != "" {
-		err = sitePages("docs", *site, repoURL())
+		err = sitePages("docs", *site, repoURL(), *siteURL)
 	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "docgen:", err)

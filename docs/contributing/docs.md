@@ -36,13 +36,23 @@ To change a reference page, change the code or its comment, then run `just docs`
 
 ### How the pages get there
 
-`go run ./cmd/docgen -site site/src` (the build runs it) turns the Markdown into the site's pages, in `site/src/content/docs/`, which git ignores:
+`go run ./cmd/docgen -site site/src -site-url <address>` (the build runs it) turns the Markdown into the site's pages, in `site/src/content/docs/`, which git ignores:
 
 - each `README.md` becomes its folder's page, each page's first heading its title, and its first paragraph its description;
 - every link between two hosted files becomes a link to that page on the site, relative, so it works under any base (`/dev/`, `/v1.2/`). Markdown images become HTML images with relative URLs to the copied public assets, so Astro does not treat them as source imports. A link to any other file, such as code or a script, goes to its source on GitHub;
 - the community files at the root of the repository (`CHANGELOG.md`, `CONTRIBUTING.md`, `SECURITY.md` and the rest) become pages of the Project tab.
 
-It also writes `site/src/generated/`: `pages.json`, which maps each hosted file to its page; `sidebar.json`, the tabs; and `brand.json` and `agents.json` for the landing page. `just docs-check` fails if a built page links to GitHub for a page the site hosts (`scripts/check-site-links.py`).
+It also writes `site/src/generated/`: `pages.json`, which maps each hosted file to its page; `sidebar.json`, the tabs; and `brand.json` and `agents.json` for the landing page and the site's description. `just docs-check` fails if a built page links to GitHub for a page the site hosts (`scripts/check-site-links.py`).
+
+### Docs for agents
+
+The same run writes the docs for coding agents into `site/public/`, which git ignores, and Astro copies them into the build ([CLI spec, section 16](cli-spec.md#16-docs-for-agents-c12)):
+
+- A Markdown copy of each page, at the page's address without the trailing slash, plus `.md`. The copy is the page's title as a level-one heading, then the page's body without front matter. Its links to other pages go to their copies, and its images stay Markdown images. The landing page's copy is the repository's README.
+- `llms.txt`, in the format of [llmstxt.org](https://llmstxt.org/). It lists each page once, with its description, under its tab. The landing page comes first. The Project tab is the section "Optional", which comes last.
+- A `<link rel="alternate" type="text/markdown">` in each page's head, which points to its copy. It joins the page's own `head` list when the page has one.
+
+`llms.txt` links the copies by their full address. `scripts/docs-site.sh` passes the address of the build to `cmd/docgen` as `-site-url`, which `-site` needs. A dev build uses `https://example.invalid/`. Before it writes, `cmd/docgen` removes `llms.txt` and every Markdown file under `site/public/`. It follows no symbolic link, and refuses a `site/public` that is one. It writes into `site/public/` through an `os.Root`, so no write can follow a link out of the folder. A link where a file goes is removed first, and a linked folder that leads out stops the build. [Use with coding agents](../how-to/use-with-agents.md) tells users about these docs.
 
 ### Tabs and the sidebar
 
@@ -95,6 +105,7 @@ CI builds the site on every push and keeps it as an artifact named `docs-site`. 
 - every command in the tutorials and how-to guides: each must exist with its flags, and with `DOCS_HOST` set, `just test-docs` runs them on a test host (a comment before a block can mark it `skip` or `help`);
 - every link on the built site (lychee, offline). `just docs-check --external` also checks links to other sites, which CI does on `main` and weekly;
 - no built page links to GitHub for a page the site hosts.
+- `llms.txt` lists every page of `pages.json` once, each with a description, and each copy that it names exists (`scripts/check-llms-txt.py`). Each copy has its source's title and text, with code exactly as it is. Each link leads where `cmd/docgen` sends the source's link, and its relative links lead to other copies or to images. lychee checks the copies' links too. A page needs a first paragraph for its description.
 
 ## Images
 

@@ -4,7 +4,7 @@ Every change keeps the tests green, and every bug fix adds the test that would h
 
 | Command | What it runs | Where |
 | --- | --- | --- |
-| `just test` | Go unit tests with the race detector, plus offline tests of the public-readiness checker, of the end-to-end cleanup, of the end-to-end probe of the session sockets and of the pins watch, of the release's signed-tag gate in a temporary repository (`scripts/test-verify-tag.sh`), and of the cleanup of `test/e2e/host_git.py` | Needs Python 3.11 or later. The gate's test skips without git 2.34 and OpenSSH 8.8, except in CI |
+| `just test` | Go unit tests with the race detector, plus offline tests of the public-readiness checker, of the end-to-end cleanup, of the end-to-end probe of the session sockets and of the pins watch, of the release's signed-tag gate in a temporary repository (`scripts/test-verify-tag.sh`), of the cleanup of `test/e2e/host_git.py`, and of the `llms.txt` check | Needs Python 3.11 or later. The gate's test skips without git 2.34 and OpenSSH 8.8, except in CI |
 | `just cover` | The unit tests' coverage, which must stay at 70 % or more | Anywhere |
 | `go test ./internal/tui -run TestGolden -update` | Rewrites the golden screens after an intended change; review the diff | Anywhere |
 | `just fuzz` | Fuzzes the input filter, the frame reader, the holder's hook handler, the text cleaner and the paste guard's reader for 30 s each (`just fuzz 5m` for longer) | Anywhere |
