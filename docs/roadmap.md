@@ -53,8 +53,22 @@ R6 scores low: few developers ask for it, and simstim stores no secrets by desig
 | # | Feature | Need (sources / reactions) | D | I | E | Score |
 | --- | --- | --- | --- | --- | --- | --- |
 | O1 | **A debug mode** ([#44](https://github.com/iamlakshya/simstim/issues/44)): off by default. A user turns it on with a flag or in a running session, and shares one local bundle. The owner asked on 16 October 2026 for it to be built now. [0025](contributing/decisions/0025-debug-mode.md) has its design, and its two pull requests built it: the core ([#62](https://github.com/iamlakshya/simstim/pull/62)), then the bundle and the launcher's commands ([#66](https://github.com/iamlakshya/simstim/pull/66)). | No source asks for it. Claude Code and Consul ship one. | 1 | 2 | L | 0.7 |
+| O2 | **Isolated sessions** ([#100](https://github.com/iamlakshya/simstim/issues/100)): each session runs in its own sandbox, with no access to the host or to other sessions. A folder, a network host, a secret, the SSH agent and a port are each closed until the user opens it with a grant. Users add their own machines as hosts and open sandboxes on any of them. The owner asked for it on 9 November 2026. It widens X6. [0029](contributing/decisions/0029-a-sandbox-per-session.md) proposes the design, [the spec](contributing/isolation-spec.md) says what to build, and [the plan](contributing/isolation-plan.md) says in what order. On 10 November 2026 the owner also asked for one config for all sessions with overrides, one-off exceptions, shells beside the agent and automatic classifiers, and the design now has them. Nothing is built yet. | sandbox-isolation [15 / 0](research/developer-needs.md#needs-ranked); supply-chain attacks on developers and their AI coding tools ([isolation](research/isolation.md)) | 4 | 3 | L | 4.0 |
+| O3 | **A command line that is easy to guess** ([the CLI study](research/cli-dx.md)): one grammar, session verbs at the top and a noun and a verb for everything else, errors that end with a "Try:" line, exit codes by kind, prompts only at a terminal, `--json` on every command that prints data, help with examples, and safe renames with warned aliases. The owner asked for it on 10 November 2026. [0033](contributing/decisions/0033-one-command-grammar.md) proposes the grammar, and [the CLI plan](contributing/cli-plan.md) says in what order to build it. Nothing is built yet. | setup-time [12 / 389](research/developer-needs.md#needs-ranked); two people pick the same word for a command less than one time in five ([the CLI study](research/cli-dx.md#7-user-research)) | 2 | 2 | M | 2.0 |
 
 O1 scores 0.7, so by its score it would be in Later. It is in Now only because the owner asked for it. No source in the sample asks for a debug mode. It gets a demand of 1, as L1 and L2 do, because other tools have one. It collects the data to find the causes of two open bugs: a session stopped at its memory cap ([#40](https://github.com/iamlakshya/simstim/issues/40)), and typing lag ([#43](https://github.com/iamlakshya/simstim/issues/43)).
+
+O2 scores 4.0, so its score alone would put it in Now. It is listed here because the owner asked for it. It widens X6, which scored 2.7 for a smaller feature: an optional isolation level on a shared host.
+
+- **Demand 4.** The need is the same as X6's: 15 sources ask for sandbox isolation, with no GitHub items behind them ([developer needs](research/developer-needs.md#needs-ranked)).
+- **Impact 3, not 2.** A sandbox by default changes who can let an agent run without approvals. It also keeps a core promise: one agent cannot harm the host or the other sessions. [The research](research/isolation.md) records the supply-chain attacks of 2025 and 2026 that make this urgent.
+- **Effort L,** the top of the scale. [The plan](contributing/isolation-plan.md) has several phases, so the real effort is more than a month.
+
+O3 scores 2.0, so by its score it would be in Next. It is in Now because the owner asked for it.
+
+- **Demand 2.** No source asks for a better command line by name. The nearest need is setup time, which 12 sources raise, and the CLI study found commands that refuse each other's states and errors with no hint.
+- **Impact 2.** Every user meets the command line every day, but it adds no new capability.
+- **Effort M.** [The CLI plan](contributing/cli-plan.md) has eleven tasks, most of them S or M.
 
 ### Status
 
@@ -69,7 +83,7 @@ On 15 October 2026 every item then in Now was built, with docs, tests and end-to
 | X3 | Show the link state and the replayed bytes after a reconnect | reliable-reconnect 14 / 242 | 3 | 1 | S | 3.0 | [#10](https://github.com/iamlakshya/simstim/issues/10) |
 | X4 | Choose the worktree's base branch in the new-session form | worktrees 10 / 216; [Claude Code #23622](https://github.com/anthropics/claude-code/issues/23622), 87 reactions | 3 | 1 | S | 3.0 | [#11](https://github.com/iamlakshya/simstim/issues/11) |
 | X5 | Tests of OSC 52 copy in each agent's full-screen mode | clipboard 10 / 502 | 3 | 1 | S | 3.0 | [#12](https://github.com/iamlakshya/simstim/issues/12) |
-| X6 | Per-session isolation: a separate Unix user or systemd sandboxing, for agents run without approvals | sandbox-isolation 15 / 0 | 4 | 2 | L | 2.7 | [#13](https://github.com/iamlakshya/simstim/issues/13) |
+| X6 | Per-session isolation: a separate Unix user or systemd sandboxing, for agents run without approvals. Widened into [O2](#asked-for-by-the-owner) ([#100](https://github.com/iamlakshya/simstim/issues/100)). | sandbox-isolation 15 / 0 | 4 | 2 | L | 2.7 | [#13](https://github.com/iamlakshya/simstim/issues/13) |
 | X7 | Laptop and phone attached together, as a tested case | multi-device-attach 4 / 51 | 2 | 2 | M | 2.0 | [#14](https://github.com/iamlakshya/simstim/issues/14) |
 | X8 | Sessions inside the repo's devcontainer on the host | own-environment 7 / 1,235 | 3 | 2 | L | 2.0 | [#15](https://github.com/iamlakshya/simstim/issues/15) |
 | X9 | Background runs with a result: start an agent with a prompt, get its exit and summary when it ends | parallel-agents; scheduled runs are sold by Cursor and Amp | 2 | 2 | M | 2.0 | [#16](https://github.com/iamlakshya/simstim/issues/16) |

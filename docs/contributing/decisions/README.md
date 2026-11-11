@@ -32,5 +32,10 @@ Each record explains one choice: the context, the options and the outcome. Recor
 | [0026](0026-end-and-memory-alerts.md) | The once-a-minute rule never holds back a session's end, and a warning near the memory cap has its own event, `memory` (replaces one rule of the noise control in 0019, and adds an event to it, warning trigger replaced by 0027) | Accepted |
 | [0027](0027-memory-warning-growth.md) | The memory warning also comes when the memory still grows near the cap, and on its own at 95 % (replaces 0026's rule for what starts a warning) | Accepted |
 | [0028](0028-redraw-the-alternate-screen.md) | Draw a session on the alternate screen again after a detach (replaces part of 0004) | Accepted |
+| [0029](0029-a-sandbox-per-session.md) | Sessions in sandboxes on hosts the user owns, with every door closed until the user's policy opens it (widens roadmap item X6) | Proposed |
+| [0030](0030-local-sockets-do-not-listen.md) | Only network ports count as listening on a host: Unix sockets and VM sockets do not | Accepted |
+| [0031](0031-the-egress-process-is-not-a-relay.md) | A sandbox's egress process is not a relay, and neither a host's download of the runtime nor a judge that the user names is telemetry | Proposed |
+| [0032](0032-secret-values-in-memory-only.md) | Secret values live only in the memory of the trusted side, never in a file | Proposed |
+| [0033](0033-one-command-grammar.md) | One grammar for the command line: session verbs at the top, a noun and a verb for everything else, and every rule under `policy` | Accepted |
 
 Write a new record from [the template](template.md).

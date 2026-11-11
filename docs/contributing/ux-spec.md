@@ -576,7 +576,19 @@ The launcher is the home, and every action also has a command, for scripts and t
 | `simstim debug bundle [<host> \| <host>/<session>] [--ssh]` | Writes one archive of the debug files in the current folder, with private values replaced. Nothing is uploaded |
 | `simstim version`, `completion zsh\|bash\|fish` | Housekeeping |
 
-**Exit codes:** 0 for success, 1 for a user error, 2 for a host or network error, 3 for a session or host that is not found.
+**Exit codes** follow [the CLI spec, section 5](cli-spec.md#5-exit-codes-c2):
+
+| Code | Meaning |
+| --- | --- |
+| 0 | Done |
+| 1 | Failed: the command could not do its job, for example because a host did not answer |
+| 2 | Wrong usage: an unknown command, flag or key, a missing argument, or a bad value |
+| 3 | Not found: no host, session or agent of that name |
+| 4 | Needs an answer: a prompt with input off, such as `rm` without `-y` in a script |
+| 5 | Refused by a policy or a tier |
+| 130 | Cancelled |
+
+`exec` returns the exit code of the command that it ran.
 
 ## 7. Config
 
@@ -616,3 +628,5 @@ These parts of the spec are planned, and are not in the current build:
 - the ⧗ mark for hosts with a time limit (GCP IAP, AWS EICE);
 - the disk check in the add-host wizard's test step;
 - editing a host from host details.
+
+The exit codes of section 6 are not built yet either. Task C2 of [the CLI plan](cli-plan.md) builds them. Today a host or network error exits with 2, and an error whose message names a missing host or session exits with 3.

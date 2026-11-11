@@ -1,6 +1,6 @@
 # Research
 
-The evidence behind the design, gathered on 14 and 15 October 2026. Each note marks what it could not verify.
+The evidence behind the design, gathered between 14 October and 10 November 2026. Each note marks what it could not verify.
 
 | Note | What it covers |
 | --- | --- |
@@ -16,5 +16,10 @@ The evidence behind the design, gathered on 14 and 15 October 2026. Each note ma
 | [Websites for developer tools](website.md) | 18 landing pages and docs sites of terminal and developer tools, measured: hero, motion, type, navigation, search, weight and accessibility, how ASCII and WebGL art is drawn, and braille in web fonts; then a second round: docs frameworks built against our docs, how 16 projects arrange their docs, words and space on 23 landing pages, and motion that explains (15 October 2026) |
 | [An audit of the site](website-audit.md) | The first site, walked in Chrome on a laptop and a phone, in both themes: every problem in its navigation, density, type, motion and copy (15 October 2026) |
 | [Go project structure](go-project-structure.md) | Thirteen well-run Go repos: code layout, tests, CI, releases, docs sites and public repo setup; our target layouts and a migration plan (15 October 2026) |
+| [Isolated sessions](isolation.md) | A sandbox for each session, and hosts that the user adds: what a session can reach today, the threats and the 2025 and 2026 incidents, Docker Sandboxes and a hosted VM service, walls from namespaces to microVMs, doors, secrets and the supply chain. Scored by two Monte Carlo tree searches, with a red team, a fact check and a check of the weights. A second pass covers configurable policy, shells beside the agent and automatic classifiers in products and research (9 and 10 November 2026) |
+| [The command line](cli-dx.md) | Today's commands and the planned ones, audited for names, flags, errors and help. Published CLI guidelines, the verbs of ten session and sandbox tools, and user research. The grammar and command map that the CLI plan builds, and evidence for completion, docs for agents and agent logins (10 November 2026) |
+| [Parity with Docker Sandboxes and a hosted VM service](parity.md) | Every user-facing feature of both products, mapped to this design: built, planned, new, met another way, or left out with a reason. Performance and safety compared, with Docker's 2026 advisories and what each teaches (10 November 2026) |
+| [Hosts in two locations](locations.md) | A homelab, and Mac laptops, as hosts: keeping a Mac awake, FileVault restarts, MDM, Lima, Proxmox, Wake-on-LAN and Tailscale. What the design takes for picking a host, for machines that join and for Mac hosts. A second check of Mac hosts, and evidence for joining a machine and for picking a host (10 November 2026) |
+| [Facts for the build](build-facts.md) | The facts that an audit of the spec found unsourced, checked against vendor docs, source and advisories: agent data, model APIs, package managers, Linux walls, the microvm build, pins and signatures, and the later phases (10 November 2026) |
 
 A clean-room study of the Amp CLI binary, and the screens and images captured for [Amp's TUI, observed](amp-tui.md), are kept outside git (`private/`, ignored). They must never enter the history of this repo. Only what they show, described in our own words, appears in the notes and in [the UX spec](../contributing/ux-spec.md).
