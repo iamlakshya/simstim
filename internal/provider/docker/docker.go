@@ -76,7 +76,7 @@ func (Provider) Create(ctx context.Context, req provider.Request) (client.Host, 
 func inspect(ctx context.Context, c string) (string, error) {
 	out, err := provider.Exec(ctx, install, "docker", "inspect", "-f", "{{.State.Status}}", c)
 	if err != nil {
-		if strings.Contains(err.Error(), "No such object") || strings.Contains(err.Error(), "No such container") {
+		if msg := strings.ToLower(err.Error()); strings.Contains(msg, "no such object") || strings.Contains(msg, "no such container") {
 			return "", nil
 		}
 		return "", err
