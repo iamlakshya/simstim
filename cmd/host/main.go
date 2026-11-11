@@ -207,6 +207,10 @@ func runHook(args []string) error {
 }
 
 func runRestore(args []string) error {
+	// Restore starts sessions again: not from inside a session.
+	if err := host.CheckCaller(); err != nil {
+		return err
+	}
 	res := host.Restore(hasFlag(args, "--all"))
 	if hasFlag(args, "--json") {
 		return printJSON(res)

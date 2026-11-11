@@ -195,21 +195,25 @@ func currentLinkFix() []fixItem {
 		}}}
 }
 
+// staleSocketsFix finds the session sockets (s/) and hook sockets (h/) that
+// nothing answers on.
 func staleSocketsFix() []fixItem {
-	dir := filepath.Join(paths.RuntimeDir(), "s")
-	entries, _ := os.ReadDir(dir)
+	dir := paths.RuntimeDir()
 	var stale []string
-	for _, e := range entries {
-		p := filepath.Join(dir, e.Name())
-		if e.Type()&os.ModeSocket == 0 || !strings.HasSuffix(e.Name(), ".sock") {
-			continue
+	for _, sub := range []string{"s", "h"} {
+		entries, _ := os.ReadDir(filepath.Join(dir, sub))
+		for _, e := range entries {
+			p := filepath.Join(dir, sub, e.Name())
+			if e.Type()&os.ModeSocket == 0 || !strings.HasSuffix(e.Name(), ".sock") {
+				continue
+			}
+			d := net.Dialer{Timeout: 300 * time.Millisecond}
+			if c, err := d.DialContext(context.Background(), "unix", p); err == nil {
+				c.Close()
+				continue
+			}
+			stale = append(stale, p)
 		}
-		d := net.Dialer{Timeout: 300 * time.Millisecond}
-		if c, err := d.DialContext(context.Background(), "unix", p); err == nil {
-			c.Close()
-			continue
-		}
-		stale = append(stale, p)
 	}
 	if len(stale) == 0 {
 		return nil

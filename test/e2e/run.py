@@ -132,6 +132,16 @@ if os.environ.get("E2E_ONLY") == "sandbox-hosts":
     print("RESULT %d/%d passed" % (sum(results), len(results)))
     sys.exit(0 if all(results) else 1)
 
+# The session sockets (session_sockets.py). E2E_ONLY=session-sockets runs only these.
+import session_sockets
+def socket_checks():
+    session_sockets.run(session_sockets.Ctx(cli=cli, HOST=HOST, NAME=NAME, env=env, ok=ok, Term=Term,
+                                            start=start, BASH_I=BASH_I, HELPER=HELPER))
+if os.environ.get("E2E_ONLY") == "session-sockets":
+    socket_checks()
+    print("RESULT %d/%d passed" % (sum(results), len(results)))
+    sys.exit(0 if all(results) else 1)
+
 # --- Attach, detach, reattach ---
 # 1. Start a detached shell session.
 t = Term([cli, "new", HOST, "--agent", "shell", "--name", "e2e-attach", "--detach"], env=env)
@@ -555,6 +565,7 @@ if saved:
 setup_checks()
 guided_checks()
 sandbox_host_checks()
+socket_checks()
 # M. Full screen (roadmap N2): a program on the alternate screen is reported
 #    as full screen, and host doctor says so.
 sid_fs = start("e2e-fullscreen", "/bin/bash", "-c", 'printf "\\033[?1049hFULL"; sleep 600')
