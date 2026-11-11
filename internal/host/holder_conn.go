@@ -205,21 +205,27 @@ func (h *Holder) input(c *hclient, p []byte) {
 }
 
 func (h *Holder) resize(c *hclient, rz proto.Resize, force bool) {
+	if rz.Cols <= 0 || rz.Rows <= 0 {
+		return
+	}
+	asked := rz
+	rz.Cols, rz.Rows = capTerm(rz.Cols, rz.Rows)
 	h.mu.Lock()
 	leader := h.leader == c
 	exited := h.exited
-	if leader && rz.Cols > 0 && rz.Rows > 0 {
+	if leader {
 		h.m.Term.Cols, h.m.Term.Rows = rz.Cols, rz.Rows
 		h.dirty = true
 	}
 	h.mu.Unlock()
-	if !leader || exited || rz.Cols <= 0 || rz.Rows <= 0 {
+	if !leader || exited {
 		return
 	}
+	h.noteClamp(asked, rz)
 	h.log.Debug("resize", diag.CatKey, diag.CatAttach, "cols", rz.Cols, "rows", rz.Rows, "force", force)
-	_ = pty.Setsize(h.ptmx, &pty.Winsize{Cols: clamp16(rz.Cols), Rows: clamp16(rz.Rows), X: clamp16(rz.XPx), Y: clamp16(rz.YPx)})
+	_ = pty.Setsize(h.ptmx, &pty.Winsize{Cols: clampCols(rz.Cols), Rows: clampRows(rz.Rows), X: clamp16(rz.XPx), Y: clamp16(rz.YPx)})
 	h.mu.Lock()
-	h.scr.resize(rz.Cols, rz.Rows)
+	h.scr.resize(rz.Cols, rz.Rows) // the screen model has a smaller cap of its own
 	vt := h.vt
 	h.mu.Unlock()
 	if vt != nil {
@@ -230,6 +236,39 @@ func (h *Holder) resize(c *hclient, rz proto.Resize, force bool) {
 		if pgrp, err := unix.IoctlGetInt(h.fd, unix.TIOCGPGRP); err == nil && pgrp > 0 {
 			_ = unix.Kill(-pgrp, unix.SIGWINCH)
 		}
+	}
+}
+
+// startSize is the size of the agent's terminal when it starts: the last
+// size that a client set, or 80 by 24 when there is none, within
+// maxTermCols by maxTermRows. The manifest keeps the size that it sets, so
+// the session's row and peek report it.
+func (h *Holder) startSize() (cols, rows int) {
+	h.mu.Lock()
+	term := h.m.Term
+	asked := proto.Resize{Cols: term.Cols, Rows: term.Rows}
+	if asked.Cols <= 0 {
+		asked.Cols = 80
+	}
+	if asked.Rows <= 0 {
+		asked.Rows = 24
+	}
+	set := asked
+	set.Cols, set.Rows = capTerm(asked.Cols, asked.Rows)
+	// The manifest keeps "no size" only when a client gave neither number.
+	if term.Cols > 0 || term.Rows > 0 {
+		h.m.Term.Cols, h.m.Term.Rows = set.Cols, set.Rows
+	}
+	h.mu.Unlock()
+	h.noteClamp(asked, set)
+	return set.Cols, set.Rows
+}
+
+// noteClamp writes a line to the holder's log when the cap changed a
+// client's terminal size: the size asked for, and the size set.
+func (h *Holder) noteClamp(asked, set proto.Resize) {
+	if asked.Cols != set.Cols || asked.Rows != set.Rows {
+		h.log.Info("resize clamped", "asked_cols", asked.Cols, "asked_rows", asked.Rows, "cols", set.Cols, "rows", set.Rows)
 	}
 }
 

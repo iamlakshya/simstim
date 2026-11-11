@@ -14,6 +14,7 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ### Fixed
 
+- The shadow terminal now uses libghostty-vt 1.0.0. It fixes one advisory in which terminal output could corrupt its memory, and one in which a very wide terminal could crash it when narrowed. The host caps a terminal size from a client at 4096 columns and 2048 rows. Building the shadow terminal now needs Zig 0.17.0.
 - `host create docker` works again with newer Docker, which writes "no such object" in lower case. The Docker provider now reads the missing-container error in either case. Before, it took the new wording as a failure and stopped.
 - The toolchain is now Go 1.26.11. It fixes two issues that govulncheck found. In GO-2026-6809, `crypto/x509` certificate checks trusted intermediate certificates that are known to be compromised. In GO-2026-6859, an HTTP/1 server that limits request bodies could crash when its handler read the body while it wrote the response header.
 - CI's required `test` job now runs the offline public-readiness checker regression tests, rather than leaving them only in `just test`.

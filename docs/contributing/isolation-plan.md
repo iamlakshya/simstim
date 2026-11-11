@@ -138,7 +138,7 @@ Spec section 15 has each question in full, with its options: [open questions](is
 | 73 | What counts against `network.model_budget` when an answer reports no usage? | An estimate: the bytes of the request and of the answer, divided by 4. | P2.16 |
 | 74 | How strict are the package manager settings by default? | `guarded`: release ages, no npm-family install scripts, and the Go settings. `strict` adds no source builds for pip and uv, and the `untrusted` profile uses it. | P2.8 |
 | 75 | Which Ghostty commit does the shadow terminal pin, and with which Zig? | The tag `vt-1.0.0`, and Zig 0.17.0 for the whole build. The owner decided. | P0.1 |
-| 76 | How large may a terminal be? | 4096 columns and 4096 rows, the project's own choice. | P0.1 |
+| 76 | How large may a terminal be? | 4096 columns and 2048 rows, and at most 1000 by 500 for the holder's Go screen model, the project's own choice. | P0.1 |
 | 77 | How does the host run git in an unwalled session's repository? | With hooks and fsmonitor off, and each operation in a scope under `<name>.slice`. | P0.7 |
 | 78 | How does `host create lima` find out whether the Mac can run a VM inside its VM? | It asks Lima, which asks Apple. On a refusal, it turns nesting off and starts again. | P0.8 |
 | 79 | The root step adds no package, but default server images lack `acl` and `uidmap`. What then? | Keep the rule: `kvm-group` alone, jails without a subuid, and `host show` names the packages. P3.7 tests a `systemd-tmpfiles` ACL. | H7, P1.3, P3.3, P3.7 |
@@ -448,15 +448,16 @@ These tasks need no wall, and they help every session. H2 goes first ([question 
 
 ### P0.1 Bump the shadow terminal's Ghostty pin, and cap terminal sizes
 
-- **Goal:** the shadow terminal pins Ghostty's tag `vt-1.0.0`, which holds the fixes `e257bb45` ([GHSA-w9q4-5jvv-mcv4](https://github.com/ghostty-org/ghostty/security/advisories/GHSA-w9q4-5jvv-mcv4)) and `0af5c9e55` ([GHSA-jqr7-69mm-v35h](https://github.com/ghostty-org/ghostty/security/advisories/GHSA-jqr7-69mm-v35h)), and the build moves to Zig 0.17.0. The host caps a terminal size from a client at 4096 columns and rows, not 65535 (spec 3.2 and 19.1, [build facts](../research/build-facts.md#61-ghostty-and-its-advisories)).
-- **Files:** the files of the Zig table in spec 19.1: `vt/`, `justfile`, `scripts/tools.lock`, the two workflows, `internal/host/vt_test.go`, `.goreleaser.yaml`, `CONTRIBUTING.md` and three script comments. `internal/host/holder.go`, `internal/host/holder_conn.go`, `internal/host/vt.go` and `internal/host/vt_child.go` (a new `clampTerm` in place of `clamp16` for columns and rows), and `vt/src/main.zig` (the same cap).
+- **Goal:** the shadow terminal pins Ghostty's tag `vt-1.0.0`, which holds the fixes `e257bb45` ([GHSA-w9q4-5jvv-mcv4](https://github.com/ghostty-org/ghostty/security/advisories/GHSA-w9q4-5jvv-mcv4)) and `0af5c9e55` ([GHSA-jqr7-69mm-v35h](https://github.com/ghostty-org/ghostty/security/advisories/GHSA-jqr7-69mm-v35h)), and the build moves to Zig 0.17.0. The host caps a terminal size from a client at 4096 columns and 2048 rows, not 65535, and its Go screen model at 1000 by 500 (spec 3.2 and 19.1, [build facts](../research/build-facts.md#61-ghostty-and-its-advisories)).
+- **Files:** the files of the Zig table in spec 19.1: `vt/`, `justfile`, `scripts/tools.lock`, the two workflows, `internal/host/vt_test.go`, `.goreleaser.yaml`, `CONTRIBUTING.md` and three script comments. `internal/host/holder.go`, `internal/host/holder_conn.go`, `internal/host/vt.go` and `internal/host/vt_child.go` (new `clampCols` and `clampRows` in place of `clamp16` for columns and rows), `internal/host/screen.go` (the screen model's own cap), and `vt/src/main.zig` (the same caps).
 - **Acceptance:**
   - `just vt` builds with Zig 0.17.0, and prints the note of spec 19.1 with another Zig.
   - The compare API answers "ahead" or "identical" for `e257bb45`, `0af5c9e55`, `65ff54c6` and `44c4c8f5` against the new pin. The pull request quotes the four answers.
-  - The replay fixtures pass. A resize to 65535 columns sets 4096, in the PTY, the Go screen model and the shadow terminal. So does a start at 65535 columns.
-- **Tests:** the tests of spec 19.1: `clampTerm`, the holder's resize, the shadow terminal's `--cols`, the vt tests and the fidelity fixtures in `test/ttyshot`.
+  - The replay fixtures pass. A resize to 65535 by 65535 sets 4096 by 2048 in the PTY and the shadow terminal, and 1000 by 500 in the Go screen model. A start at 65535 columns runs at 4096, and the manifest says so.
+  - `just build` with another Zig removes an old build of the shadow terminal, and the vt tests never run one.
+- **Tests:** the tests of spec 19.1: `clampCols` and `clampRows`, the holder's resize and start, the shadow terminal's `--cols` and `--rows`, the vt tests, and `TestVTSnapshotFixtures` and `TestVTSnapshotCases` in `internal/host`.
 - **Docs:** `vt/README.md` (the pin, the advisories, and Zig 0.17.0), `CONTRIBUTING.md` (Zig 0.17).
-- **CHANGELOG:** Fixed. "The shadow terminal now uses libghostty-vt 1.0.0. It fixes one advisory in which terminal output could corrupt its memory, and one in which a very wide terminal could crash it when narrowed. The host caps a terminal size from a client at 4096 columns and rows. Building the shadow terminal now needs Zig 0.17.0."
+- **CHANGELOG:** Fixed. "The shadow terminal now uses libghostty-vt 1.0.0. It fixes one advisory in which terminal output could corrupt its memory, and one in which a very wide terminal could crash it when narrowed. The host caps a terminal size from a client at 4096 columns and 2048 rows. Building the shadow terminal now needs Zig 0.17.0."
 - **Depends on:** nothing.
 - **Questions:** [75](isolation-spec.md#15-open-questions), [76](isolation-spec.md#15-open-questions).
 - **Effort:** S.

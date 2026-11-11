@@ -15,6 +15,12 @@ func ShadowVT() string {
 	return vtBinPath
 }
 
+// ShadowVTSkip says why ShadowVT is "", for a test's skip.
+func ShadowVTSkip() string {
+	vtBinOnce.Do(findVTBinary)
+	return vtBinSkip
+}
+
 // LockSession takes the lock of a session, as a resume, a restore and a
 // delete do. It returns the function that lets it go.
 func LockSession(id string) (func(), error) { return lockSession(id) }

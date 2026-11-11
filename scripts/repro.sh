@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Builds every release binary twice, each time from empty Go and Zig caches,
-# and fails if any binary differs. Needs goreleaser and Zig 0.16.
+# and fails if any binary differs. Needs goreleaser and Zig 0.17.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 

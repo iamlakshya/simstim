@@ -394,7 +394,7 @@ internal/
   host/             the host side: holder, bridge, sessions, worktrees, hooks, ports, restore, doctor.
   tui/              the launcher. One package: its files depend on each other too much to split well.
   provider/         when cloud hosts arrive: one sub-package per provider, tested against recorded responses.
-vt/                 the shadow terminal (Zig 0.16 and libghostty-vt). A separate build, so it stays at the top.
+vt/                 the shadow terminal (Zig 0.17 and libghostty-vt). A separate build, so it stays at the top.
 examples/
   providers/        provider scripts a user copies. Unchanged.
 scripts/            shell helpers that just calls: check-name, check-private, rename, screenshots, release notes.

@@ -269,3 +269,32 @@ func (l *lineLog) has(parts ...string) bool {
 	}
 	return false
 }
+
+// The vt tests run only a shadow terminal built from the pinned commit.
+// These find the pin, and the commit that a binary says it is built from.
+func TestVTBinaryCommit(t *testing.T) {
+	dir, err := filepath.Abs(filepath.Join("..", "..", "vt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pin, err := vtPinnedCommit(dir)
+	if err != nil || len(pin) != 40 {
+		t.Fatalf("pin = %q, %v; want a full commit hash", pin, err)
+	}
+	if _, err := vtPinnedCommit(t.TempDir()); err == nil {
+		t.Error("a folder with no build.zig.zon has a pin")
+	}
+	bin := filepath.Join(t.TempDir(), "shadow-vt")
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\necho '0.1.0 ghostty "+pin+"'\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if got := vtCommitOf(bin); got != pin {
+		t.Errorf("commit = %q, want %q", got, pin)
+	}
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\nexit 1\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if got := vtCommitOf(bin); got == pin || !strings.Contains(got, "unknown") {
+		t.Errorf("a binary that fails has the commit %q", got)
+	}
+}

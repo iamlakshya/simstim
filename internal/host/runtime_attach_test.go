@@ -77,6 +77,82 @@ func TestAttachInputAndResize(t *testing.T) {
 	}
 }
 
+// A client may ask for 65535 columns and rows. The agent's terminal and the
+// shadow terminal get 4096 by 2048, the caps. Without a shadow terminal
+// built, the test checks the PTY alone.
+func TestAttachResizeIsCapped(t *testing.T) {
+	h := hosttest.New(t)
+	vt := host.ShadowVT()
+	if vt != "" {
+		defer host.SetExecutable(h.Install("test", vt))()
+	} else {
+		t.Log("only the PTY is checked: " + host.ShadowVTSkip())
+	}
+	// The agent shows its size, then, once its input says so, asks its
+	// terminal for its size in cells (CSI 18 t) and shows the answer. The
+	// answer comes from the shadow terminal, as no client is attached then.
+	s := start(t, "big", "/bin/sh", "-c", "stty raw -echo; head -c 1 >/dev/null; stty size; "+
+		"head -c 1 >/dev/null; sleep 0.5; printf '\\033[18t'; head -c 14 | od -An -c | tr -d ' \\n'; printf '\\nASKED\\n'; exec sleep 60")
+	b := newRawBridge(t)
+	b.attach(s.ID, -1, 80, 24)
+	b.sendJSON(proto.TResize, proto.Resize{Cols: 65535, Rows: 65535})
+	hosttest.WaitFor(t, 5*time.Second, "the capped size", func() bool {
+		m := live(t, s.ID)
+		return m.Term.Cols == 4096 && m.Term.Rows == 2048
+	})
+	b.send(proto.TInput, []byte("x"))
+	waitOutput(t, s.ID, "2048 4096")
+	if vt == "" {
+		return
+	}
+	// The detach lets the shadow terminal answer the agent's query.
+	b.send(proto.TInput, []byte("y"))
+	b.send(proto.TDetach, nil)
+	waitOutput(t, s.ID, "ASKED")
+	if out := peek(t, s.ID); !strings.Contains(out, `033[8;2048;4096t`) {
+		t.Errorf("the shadow terminal did not answer 2048 rows by 4096 columns: %q", out)
+	}
+}
+
+// A session started at 65535 by 50 runs at 4096 by 50, and reports that
+// size: in its row, its saved manifest, peek and the list. The holder's
+// log says that the size was clamped.
+func TestStartSizeIsCapped(t *testing.T) {
+	h := hosttest.New(t)
+	s, err := host.New(host.NewArgs{Name: "wide", Cwd: "~", Argv: []string{"/bin/sh", "-c", "stty size; exec sleep 60"},
+		Cols: 65535, Rows: 50})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.Cols != 4096 || s.Rows != 50 {
+		t.Errorf("the session's row says %d by %d, want 4096 by 50", s.Cols, s.Rows)
+	}
+	waitOutput(t, s.ID, "50 4096")
+	if m := manifest(t, s.ID); m.Term.Cols != 4096 || m.Term.Rows != 50 {
+		t.Errorf("the saved manifest says %d by %d, want 4096 by 50", m.Term.Cols, m.Term.Rows)
+	}
+	raw, err := host.HolderRequest(s.ID, "peek", map[string]int{"bytes": 1024}, 3*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var p struct{ Cols, Rows int }
+	if err := json.Unmarshal(raw, &p); err != nil || p.Cols != 4096 || p.Rows != 50 {
+		t.Errorf("peek says %d by %d (%v), want 4096 by 50", p.Cols, p.Rows, err)
+	}
+	all, err := host.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range all {
+		if r.ID == s.ID && (r.Cols != 4096 || r.Rows != 50) {
+			t.Errorf("the list says %d by %d, want 4096 by 50", r.Cols, r.Rows)
+		}
+	}
+	if log := h.HolderLog(s.ID); !strings.Contains(log, `level=INFO msg="resize clamped" asked_cols=65535 asked_rows=50 cols=4096 rows=50`) {
+		t.Errorf("holder.log has no line for the clamp:\n%s", log)
+	}
+}
+
 func TestAttachToAnEndedSession(t *testing.T) {
 	hosttest.New(t)
 	s := start(t, "ends", "/bin/sh", "-c", "head -c 1 >/dev/null; echo BYE; exit 7")
@@ -162,7 +238,7 @@ func TestBridgeRefusesAnOldClient(t *testing.T) {
 func TestSnapshotFromTheShadowTerminal(t *testing.T) {
 	vt := host.ShadowVT()
 	if vt == "" {
-		t.Skip("the shadow terminal is not built: install Zig 0.16 or set VT_BINARY (see vt/README.md)")
+		t.Skip(host.ShadowVTSkip())
 	}
 	h := hosttest.New(t)
 	defer host.SetExecutable(h.Install("test", vt))()
@@ -187,7 +263,7 @@ func TestSnapshotFromTheShadowTerminal(t *testing.T) {
 func TestSnapshotOfTheAlternateScreen(t *testing.T) {
 	vt := host.ShadowVT()
 	if vt == "" {
-		t.Skip("the shadow terminal is not built: install Zig 0.16 or set VT_BINARY (see vt/README.md)")
+		t.Skip(host.ShadowVTSkip())
 	}
 	h := hosttest.New(t)
 	defer host.SetExecutable(h.Install("test", vt))()

@@ -429,7 +429,7 @@ Under node 1 the best control option was node 7 (0.612): the trusted holder outs
 - **No host listener for the guest.** In the first draft, the guest dialled the supervisor's control port and its egress port. These were Unix sockets at `<uds>_<port>`: not network ports, but host listeners that a guest could reach. Node 12's rule (the host dials, the guest never dials) removes them, with the egress flows carried on a link that the supervisor opens. The spec takes this rule ([question 23](../contributing/isolation-spec.md#15-open-questions), decision [0030](../contributing/decisions/0030-local-sockets-do-not-listen.md)).
 - **Guest root voids the uid split.** If the agent needs guest root (apt, sudo, Docker inside), the in-guest holder is fully hostile. The trusted manifest, OOM facts and audit log stay correct, but status, replay and the port list are only claims.
 - **Validate claims before they act.** A guest-claimed agent session ID must match a per-agent pattern (a UUID for Claude Code) before it enters an argv. An argv with a danger flag that the user did not type is refused ([section 11](#11-the-red-teams-gaps)).
-- **Bump the Ghostty pin past `e257bb45` and `0af5c9e55` now,** and cap client sizes at about 4096 columns and rows. This is needed on every path.
+- **Bump the Ghostty pin past `e257bb45` and `0af5c9e55` now,** and cap client sizes at about 4096 columns and rows. This is needed on every path. Spec 19.1 sets 4096 columns and 2048 rows.
 
 ## 6. L3: lifecycle
 
@@ -674,7 +674,7 @@ The search picked the path. The fact check, the red team and the losers' best id
 These fix holes that exist today. Each one stands alone.
 
 1. Give each agent a hook-only socket that accepts only hook events, enforce `Hello.Role`, and check the peer in `Holder.serve`.
-2. Move the Ghostty pin past `e257bb45` and `0af5c9e55`, and cap client sizes at about 4096 columns and rows.
+2. Move the Ghostty pin past `e257bb45` and `0af5c9e55`, and cap client sizes at about 4096 columns and rows (spec 19.1 sets 4096 columns and 2048 rows).
 3. Validate a hook's session ID against a per-agent pattern before it enters the manifest, and refuse an argv with a danger flag that the user did not type.
 4. Pin setup-script trust to the script's SHA-256, and ask again after any change.
 5. Stop running host git in a session's repository: replace the `git status` calls in `removeWorktree` and `pull`. Copy `.worktreeinclude` files through `os.Root` or `openat2` with `RESOLVE_BENEATH` and `RESOLVE_NO_SYMLINKS` ([Go 1.24](https://go.dev/doc/go1.24)).
