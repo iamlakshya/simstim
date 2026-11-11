@@ -403,15 +403,15 @@ No task is then a records-only task. Each record's pull request carries the CHAN
 
 ### Decision records
 
-Five records already exist in this branch, as proposed records: 0029 to 0032 for this plan, and 0033, the command grammar of [the CLI plan](cli-plan.md). Every command that this plan adds follows 0033. This plan adds eleven more records, each in the pull request of the task that first needs it.
+Five records already exist in this branch: 0029 to 0032 for this plan, and 0033, the command grammar of [the CLI plan](cli-plan.md). The owner accepted 0030 and 0033 on 11 November 2026, and 0029, 0031 and 0032 are still proposed. Every command that this plan adds follows 0033. This plan adds eleven more records, each in the pull request of the task that first needs it.
 
 | Record | Status | Decides | Needed by | Questions |
 | --- | --- | --- | --- | --- |
 | [0029](decisions/0029-a-sandbox-per-session.md) | Proposed, in this branch | Each session runs in its own sandbox, behind a wall with a floor, and every door stays closed until the user grants it | P1.4, which may not merge before the owner accepts it. P2.10 also needs it, for walls by default. | 1 |
-| [0030](decisions/0030-local-sockets-do-not-listen.md) | Proposed, in this branch | Unix sockets and VM sockets do not count as listening on a host | P0.2, P1.4, P1.7, P1.9, P3.3 | 23 |
+| [0030](decisions/0030-local-sockets-do-not-listen.md) | Accepted | Unix sockets and VM sockets do not count as listening on a host | P0.2, P1.4, P1.7, P1.9, P3.3 | 23 |
 | [0031](decisions/0031-the-egress-process-is-not-a-relay.md) | Proposed, in this branch | A sandbox's egress process on the user's own host is not a relay | P1.7, P2.12, H16 | 24 |
 | [0032](decisions/0032-secret-values-in-memory-only.md) | Proposed, in this branch | Secret values live only in the memory of the trusted side | P2.2, P2.3, P2.13 | 25 |
-| [0033](decisions/0033-one-command-grammar.md) | Proposed, in this branch | One grammar for the command line: session verbs at the top, a noun and a verb for everything else, and every rule under `policy` | P1.8, P1.12 and every task that adds a command | none |
+| [0033](decisions/0033-one-command-grammar.md) | Accepted | One grammar for the command line: session verbs at the top, a noun and a verb for everything else, and every rule under `policy` | P1.8, P1.12 and every task that adds a command | none |
 | `0034-ssh-options-on-the-command-line.md` | New, in H2 | The client puts the options that keep a host safe on the `ssh` command line, where they win over the user's own config. It starts with forwarding. | H2 | 40 |
 | `0035-pinned-host-keys.md` | New, in H3 | Saved hosts pin their host key on the command line, under the rule of 0034 | H3 | none |
 | `0036-host-tiers-and-the-grant-gate.md` | New, in H4 | Host tiers in `tiers.toml`, one grant gate on the laptop, `shared` for E2B, and the SSH agent only for `own` hosts | H4, then H5 | 32, 33, 34 |

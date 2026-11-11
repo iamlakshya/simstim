@@ -3399,7 +3399,7 @@ The bridge serves the new requests in a new `bridge_sandbox.go`, as `handleMore`
 
 Each task ships its docs, a CHANGELOG line, and `just docs` after a change to a command, a flag or a key. [The plan](isolation-plan.md) gives the tasks and their order.
 
-Records 0029 to 0033 already exist in this branch, as proposed records. The plan lists eleven new records, 0034 to 0044, and the task whose pull request carries each one ([decision records](isolation-plan.md#decision-records)). Each record lands beside the code that it decides.
+Records 0029 to 0033 already exist in this branch. The owner accepted 0030 and 0033 on 11 November 2026, and 0029, 0031 and 0032 are still proposed. The plan lists eleven new records, 0034 to 0044, and the task whose pull request carries each one ([decision records](isolation-plan.md#decision-records)). Each record lands beside the code that it decides.
 
 ## 15. Open questions
 

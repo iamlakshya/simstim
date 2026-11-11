@@ -66,7 +66,7 @@ Ranked. Use them to settle trade-offs.
 2. **The session outlives the client.** A closed tab, a crash, sleep or a network change never stops a session.
 3. **Use existing authenticated transports.** SSH hosts use your OpenSSH. Created Docker containers and E2B sandboxes use their provider's exec API. No new network listener.
 4. **Any agent.** What simstim knows about each agent is data in a table, not code paths.
-5. **Nothing listens and nothing phones home.** No open ports on hosts, no relay, no telemetry, no stored secrets.
+5. **Nothing listens and nothing phones home.** No open ports on hosts, no relay, no telemetry, no stored secrets. A private Unix socket or a VM socket is not an open port, and the trusted side never listens for a guest ([0030](../contributing/decisions/0030-local-sockets-do-not-listen.md)).
 6. **Amp-grade screens.** Colours come from the terminal's own palette. Keyboard first. Every error suggests a next step.
 7. **Small and boring.** One binary on each side. Files, not databases. Everything carries a version.
 
