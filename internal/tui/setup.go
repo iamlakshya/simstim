@@ -50,6 +50,9 @@ func (s *setupAsk) view(m *Model) string {
 	if h != nil {
 		repo, script = homePath(h, repo), homePath(h, script)
 	}
+	// The repository and the script come from the host. The answer is kept
+	// for the repository's own path (key), and this shows that path.
+	repo, script = client.ShowPath(repo), client.ShowPath(script)
 	body := make([]string, 1, 12) // a blank line first
 	for _, l := range []string{
 		"The repository " + repo + " on " + s.host + " has a setup script, " + script + ".",

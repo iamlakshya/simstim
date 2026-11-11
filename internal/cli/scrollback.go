@@ -38,7 +38,7 @@ func printScrollback(ctx context.Context, conn *client.Conn) {
 	if err != nil {
 		return
 	}
-	for _, line := range scrollbackAdvice(sessions) {
+	for _, line := range scrollbackAdvice(client.CleanSessions(sessions)) {
 		fmt.Printf("  ! scrollback: %s\n", line)
 	}
 }

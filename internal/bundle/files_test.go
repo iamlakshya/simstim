@@ -31,11 +31,11 @@ func newTestBuilder(t *testing.T, o Options) *builder {
 func TestTheClientTrustsNoNameFromTheHost(t *testing.T) {
 	h := client.Host{Name: "box"}
 	b := newTestBuilder(t, Options{Host: &h})
-	bad := []string{"../../.zshrc", "/etc/x", "laptop/x", "host/\x1b]52;c;eA==\x07x", "host/../../x"}
+	bad := []string{"../../.zshrc", "/etc/x", "laptop/x", "host/\x1b]52;c;eA==\x07x", "host/../../x", "/host/\u202ex\u200by\U000e0041\ufe0f"}
 	for _, p := range bad {
 		b.col.Files = append(b.col.Files, client.DebugFileInfo{Path: p, Size: 1})
 	}
-	b.col.Notes = []string{"note \x1b]52;c;eA==\x07 end"}
+	b.col.Notes = []string{"note \x1b]52;c;eA==\x07 \u202ebidi\u200b zero\U000e0041 tag end"}
 	// b.conn is nil: a name that passed would make the bundle ask for it.
 	if err := b.hostFiles(context.Background()); err != nil {
 		t.Fatal(err)
@@ -43,12 +43,15 @@ func TestTheClientTrustsNoNameFromTheHost(t *testing.T) {
 	if len(b.res.Left) != len(bad) {
 		t.Fatalf("left out %+v", b.res.Left)
 	}
+	// Neither control codes nor bidirectional, zero-width, tag or
+	// variation characters (api.CleanText).
+	const hidden = "\x1b\x07\u202e\u200b\U000e0041\ufe0f"
 	for _, l := range b.res.Left {
-		if strings.ContainsAny(l.Name, "\x1b\x07") {
-			t.Errorf("a name with control codes: %q", l.Name)
+		if strings.ContainsAny(l.Name, hidden) {
+			t.Errorf("a name with control or hidden characters: %q", l.Name)
 		}
 	}
-	if len(b.res.Notes) != 1 || strings.ContainsAny(b.res.Notes[0], "\x1b\x07") {
+	if len(b.res.Notes) != 1 || strings.ContainsAny(b.res.Notes[0], hidden) || !strings.Contains(b.res.Notes[0], "bidi zero tag end") {
 		t.Errorf("notes %q", b.res.Notes)
 	}
 	for _, f := range b.a.files {

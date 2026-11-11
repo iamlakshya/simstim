@@ -243,6 +243,12 @@ func TestEnvdRun(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "exit status 3") || !strings.Contains(err.Error(), "oops") {
 		t.Fatalf("a failing command: %v", err)
 	}
+	// What the command writes to stderr is the host's text: the error keeps
+	// it cleaned, ESC c and OSC 52 and hidden characters gone.
+	_, err = e.Run(context.Background(), `printf 'a\033c b\033]52;c;aGk=\007 c\342\200\256d\342\200\213e\n' >&2; exit 3`, nil)
+	if err == nil || !strings.Contains(err.Error(), "ac b]52;c;aGk= cde") || strings.ContainsAny(err.Error(), "\x1b\x07\u202e\u200b") {
+		t.Fatalf("a failing command with a hostile stderr: %q", err)
+	}
 	// The helper is not installed: the shell's "not found" reaches stderr,
 	// which is how the client knows to install it.
 	p, err := e.Start(context.Background(), "/nowhere/helper bridge")

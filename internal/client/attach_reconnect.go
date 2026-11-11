@@ -21,8 +21,7 @@ func (a *attacher) reconnect(ctx context.Context) (detached bool, err error) {
 	since := diag.Now()
 	DebugLog().Debug("connection lost", diag.CatKey, diag.CatNet, "reason", reason)
 	go a.ssh.masterState(context.WithoutCancel(ctx), "drop")
-	// The title says so too, pushed so that it can be put back as it was.
-	a.write([]byte("\x1b]9;4;3\x1b\\\x1b[22;0t\x1b]2;⧗ reconnecting · " + a.key + "\x1b\\"))
+	a.write(a.reconnectTitle())
 	defer func() {
 		a.write([]byte("\x1b]9;4;0\x1b\\\x1b[23;0t"))
 		if len(a.tracker.M.Title) > 0 {
@@ -46,6 +45,14 @@ func (a *attacher) reconnect(ctx context.Context) (detached bool, err error) {
 		DebugLog().Debug("reconnect failed", diag.CatKey, diag.CatNet, "err", err)
 		delay = nextRetry(delay)
 	}
+}
+
+// reconnectTitle says in the terminal's title that the link is down. It
+// pushes the title first, so that it can be put back as it was. The title
+// holds the session's ID, which the host sent: it gets a cleaned copy,
+// with no BEL or ESC to end it early.
+func (a *attacher) reconnectTitle() []byte {
+	return []byte("\x1b]9;4;3\x1b\\\x1b[22;0t\x1b]2;" + CleanLine("⧗ reconnecting · "+a.key) + "\x1b\\")
 }
 
 // waitToRetry waits for the next try: the retry delay, or a key press. It

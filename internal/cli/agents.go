@@ -111,7 +111,7 @@ func installAgent(ctx context.Context, h client.Host, a agents.Agent, force bool
 	}
 	if c, ok := findCheck(checks, a.Kind); ok && c.Installed && !force {
 		conn.Close()
-		fmt.Printf("%s is already installed on %s, at %s.\n", a.Title, h.Name, c.Path)
+		fmt.Printf("%s is already installed on %s, at %s.\n", a.Title, h.Name, client.CleanPath(c.Path))
 		printAgentChecks(os.Stdout, h.Name, []api.AgentCheck{c})
 		fmt.Printf("\nTo run its installer again, for example to update it, add --force.\n")
 		return nil
@@ -126,7 +126,8 @@ func installAgent(ctx context.Context, h client.Host, a agents.Agent, force bool
 		return err
 	}
 	if !isTerminal(os.Stdin) || !isTerminal(os.Stdout) {
-		fmt.Printf("Started %s/%s. Attach to answer its questions: %s attach %s/%s\n", h.Name, s.ID, brand.Name, h.Name, s.ID)
+		target := client.CommandTarget(h.Name, s.ID)
+		fmt.Printf("Started %s. Attach to answer its questions: %s attach %s\n", target, brand.Name, target)
 		return nil
 	}
 	ended, err := attachEnded(ctx, h, s.ID, s.Name)
@@ -181,7 +182,7 @@ func loginCommand(host string, a agents.Agent) string { return onboard.LoginComm
 
 // printAgentChecks prints one line for each agent, and what to do next.
 func printAgentChecks(w io.Writer, host string, checks []api.AgentCheck) {
-	for _, c := range checks {
+	for _, c := range client.CleanAgentChecks(checks) {
 		printLine(w, onboard.Describe(host, c))
 	}
 }

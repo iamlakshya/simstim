@@ -192,7 +192,8 @@ func (g *guide) runSession(h client.Host, a onboard.Action) (string, bool, error
 	if g.tty {
 		ended, err = attachEnded(g.ctx, h, s.ID, s.Name)
 	} else {
-		fmt.Fprintf(g.out, "Started %s/%s. Waiting for it to end (%s attach %s/%s shows it)…\n", h.Name, s.Name, brand.Name, h.Name, s.ID)
+		d := client.CleanSession(*s) // the host's own text, only printed
+		fmt.Fprintf(g.out, "Started %s/%s. Waiting for it to end (%s attach %s shows it)…\n", h.Name, d.Name, brand.Name, client.CommandTarget(h.Name, s.ID))
 		ended, err = waitEnded(g.ctx, h, s.ID, 15*time.Minute)
 	}
 	return s.ID, ended, err

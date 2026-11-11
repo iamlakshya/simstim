@@ -10,6 +10,8 @@ import (
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/vt"
+
+	"github.com/iamlakshya/simstim/internal/api"
 )
 
 // peekBytes is how much of a session's newest output the preview reads.
@@ -69,16 +71,17 @@ func (p *previewModal) key(m *Model, k tea.KeyPressMsg) tea.Cmd {
 }
 
 func (p *previewModal) view(m *Model) string {
-	hc, s := m.selectedPair()
-	if s == nil {
+	hc, row := m.selectedPair()
+	if row == nil {
 		return ""
 	}
+	s := shown(*row)
 	w := m.dialogWidth()
 	cw := w - 4
-	_, label := m.look(*s)
+	_, label := m.look(s)
 	hints := []hint{{"enter", "attach"}, {"↑↓", "next"}, {"esc", "close"}}
 	mem := fmtMemory(s.MemoryCurrent, s.MemoryMax)
-	if ended(*s) {
+	if ended(s) {
 		// The last screen of an agent that has ended: nothing to attach to,
 		// and the memory is no longer the agent's.
 		hints, mem = hints[1:], ""
@@ -226,20 +229,40 @@ func (s *screenShot) view(w, h int) []string {
 	return out
 }
 
-// renderCells draws the first w cells of a line with their styles.
+// renderCells draws the first w cells of a line with their styles. The
+// cells hold what the session printed, so each is cleaned (cleanCell).
 func renderCells(l uv.Line, w int) string {
 	if w <= 0 {
 		return ""
 	}
 	cut := make(uv.Line, 0, w)
 	for x := 0; x < len(l) && x < w; x++ {
-		c := l[x]
+		c := cleanCell(l[x])
 		if c.Width > 1 && x+c.Width > w {
 			c = uv.EmptyCell
 		}
 		cut = append(cut, c)
 	}
 	return cut.Render() + ansi.ResetStyle
+}
+
+// cleanCell is a cell without the characters that api.CleanText removes.
+// The terminal model drops most of them, but it keeps tag characters in a
+// cell. A cell that cleaning changes keeps its width: it holds the cleaned
+// text when that is as wide, and spaces when it is not.
+func cleanCell(c uv.Cell) uv.Cell {
+	// An OSC 8 link's address and parameters are the session's text too,
+	// and Render would send them to the terminal. The peek shows no links.
+	c.Link = uv.Link{}
+	clean := api.CleanText(c.Content, len(c.Content))
+	if clean == c.Content {
+		return c
+	}
+	if clean == "" || ansi.StringWidth(clean) != c.Width {
+		clean = strings.Repeat(" ", max(c.Width, 0))
+	}
+	c.Content = clean
+	return c
 }
 
 // previewLines fills the preview box.

@@ -79,7 +79,7 @@ simstim host alerts set my-vps --add --command \
   'curl -s -d chat_id=12345 --data-urlencode "text=$SIMSTIM_SUMMARY" "https://api.telegram.org/bot$(cat ~/.telegram-token)/sendMessage"'
 ```
 
-Event values never go into the command line itself, so a session name such as `$(rm -rf ~)` is only text. Keep it that way in your own scripts: quote the variables (`"$SIMSTIM_SUMMARY"`), and never pass them to `eval` or `sh -c`.
+Event values never go into the command line itself, so a session name such as `$(rm -rf ~)` is only text. Keep it that way in your own scripts: quote the variables (`"$SIMSTIM_SUMMARY"`), and never pass them to `eval` or `sh -c`. This matters most for `SIMSTIM_DETAIL`, which the agent, or any program in the session, writes. Treat it as data, and never put it into code, such as a script or a template.
 
 A command has 10 seconds. After that it is stopped, with any children it started. Its output goes to the delivery log, cut short.
 

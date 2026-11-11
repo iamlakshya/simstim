@@ -107,7 +107,7 @@ func (m *Model) dial(h *hostConn) tea.Cmd {
 	return func() tea.Msg {
 		dctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 		defer cancel()
-		c, err := be.Dial(dctx, host)
+		c, err := dialClean(dctx, be, host)
 		if err == nil && !set.add(c) {
 			return nil
 		}
@@ -357,20 +357,10 @@ func (m *Model) alertNew(h *hostConn, list []client.Session) tea.Cmd {
 		if s.Reason != "" {
 			body += ": " + s.Reason
 		}
-		b.WriteString("\x1b]777;notify;" + oscText(brand.DisplayName+" · "+h.name()) + ";" + oscText(body) + "\x1b\\")
+		b.WriteString("\x1b]777;notify;" + client.OSCText(brand.DisplayName+" · "+h.name()) + ";" + client.OSCText(body) + "\x1b\\")
 	}
 	if b.Len() == 0 {
 		return nil
 	}
 	return tea.Raw(b.String())
-}
-
-// oscText keeps text safe inside an OSC string.
-func oscText(s string) string {
-	return strings.Map(func(r rune) rune {
-		if r < 0x20 || r == 0x7f || r == ';' {
-			return ' '
-		}
-		return r
-	}, s)
 }

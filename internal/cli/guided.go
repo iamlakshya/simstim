@@ -122,7 +122,7 @@ func (g *guide) all() error {
 		if out, err := g.local.SetIdle(g.ctx, h); err != nil {
 			fmt.Fprintf(g.out, "  ✕ idle stop: %v\n", err)
 		} else {
-			fmt.Fprintf(g.out, "  ✓ idle stop: %s\n", out)
+			fmt.Fprintf(g.out, "  ✓ idle stop: %s\n", client.CleanLine(out))
 		}
 	}
 	f := onboard.NewFlow(h.Name, checks, g.log)

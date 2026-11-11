@@ -26,12 +26,10 @@ func portsCmd() *cobra.Command {
 					return err
 				}
 				if len(ports) == 0 {
-					fmt.Printf("%s on %s listens on no TCP ports.\n", s.Name, h.Name)
+					fmt.Printf("%s on %s listens on no TCP ports.\n", client.CleanLine(s.Name), h.Name)
 					return nil
 				}
-				for _, p := range ports {
-					fmt.Printf("%-6d %-16s %s (pid %d)\n", p.Port, p.Address, p.Process, p.PID)
-				}
+				printPorts(os.Stdout, ports)
 				return nil
 			})
 		},
@@ -81,7 +79,7 @@ func forwardPairs(ctx context.Context, conn *client.Conn, h client.Host, s *clie
 		}
 	}
 	if len(want) == 0 {
-		return nil, &client.UserError{Msg: fmt.Sprintf("%s on %s listens on no TCP ports yet", s.Name, h.Name), Hint: "Start the dev server in the session, or give the port."}
+		return nil, &client.UserError{Msg: fmt.Sprintf("%s on %s listens on no TCP ports yet", client.CleanLine(s.Name), h.Name), Hint: "Start the dev server in the session, or give the port."}
 	}
 	pairs := make([]client.ForwardPair, 0, len(want))
 	for _, w := range want {

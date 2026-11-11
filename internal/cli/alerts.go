@@ -185,7 +185,7 @@ func alertsTestCmd() *cobra.Command {
 						mark, what = "✕", r.Error
 						failed++
 					}
-					fmt.Printf("  %s %-8s %s  %s\n", mark, r.Type, r.Target, what)
+					fmt.Printf("  %s %-8s %s  %s\n", mark, client.CleanLine(r.Type), client.CleanLine(r.Target), client.CleanLine(what))
 				}
 				if failed > 0 {
 					return &client.UserError{Msg: fmt.Sprintf("%d of %d destinations did not get it", failed, len(res)),
@@ -253,6 +253,7 @@ func alertsOffCmd() *cobra.Command {
 
 // printAlerts shows a host's alerts file in the style of host doctor.
 func printAlerts(host string, info client.AlertsInfo) {
+	info = cleanAlertsInfo(info) // the host's own text
 	if !info.Exists {
 		fmt.Printf("Alerts on %s are off: there is no %s.\n", host, info.Path)
 		fmt.Printf("    Try: %s host alerts set %s --ntfy https://ntfy.sh/<your-topic>\n", brand.Name, host)
@@ -335,10 +336,10 @@ func printAlertLog(log []client.AlertLogEntry) {
 		default:
 			result = "✕ " + strings.TrimSpace(e.Type+" "+e.Error)
 		}
-		name := e.Session
+		name := client.CleanLine(e.Session)
 		if name == "" {
 			name = "-"
 		}
-		fmt.Printf("  %s  %-11s %-16s %s\n", e.Time.Local().Format("Jan 02 15:04:05"), e.Event, trunc(name, 16), result)
+		fmt.Printf("  %s  %-11s %-16s %s\n", e.Time.Local().Format("Jan 02 15:04:05"), client.CleanLine(e.Event), trunc(name, 16), client.CleanLine(result))
 	}
 }

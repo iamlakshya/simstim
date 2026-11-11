@@ -45,19 +45,22 @@ func SessionRepo(ctx context.Context, h Host, dir string) (RepoInfo, error) {
 	cmd := fmt.Sprintf(`cd %s && git rev-parse --show-toplevel && git rev-parse --abbrev-ref HEAD && git status --porcelain | wc -l`, shellWord(dir))
 	out, err := s.Run(ctx, cmd, nil)
 	if err != nil {
-		return RepoInfo{}, &UserError{Msg: fmt.Sprintf("%s on %s is not in a git repository", dir, h.Name), Hint: "pull works for sessions started in a repository or a worktree"}
+		return RepoInfo{}, &UserError{Msg: fmt.Sprintf("%s on %s is not in a git repository", CleanPath(dir), h.Name), Hint: "pull works for sessions started in a repository or a worktree"}
 	}
 	return parseRepoInfo(string(out))
 }
 
 func parseRepoInfo(out string) (RepoInfo, error) {
+	// The host's output shows escaped to ASCII: it is the host's text.
+	bad := &UserError{Msg: fmt.Sprintf("could not read the repository from %+q", CleanLine(out)),
+		Hint: "check that git works in the session's folder on the host, then pull again"}
 	lines := strings.Split(strings.TrimSpace(out), "\n")
 	if len(lines) < 3 {
-		return RepoInfo{}, fmt.Errorf("could not read the repository from %q", out)
+		return RepoInfo{}, bad
 	}
 	dirty, err := strconv.Atoi(strings.TrimSpace(lines[2]))
 	if err != nil {
-		return RepoInfo{}, fmt.Errorf("could not read the repository from %q: %w", out, err)
+		return RepoInfo{}, bad
 	}
 	return RepoInfo{Root: strings.TrimSpace(lines[0]), Branch: strings.TrimSpace(lines[1]), Dirty: dirty}, nil
 }

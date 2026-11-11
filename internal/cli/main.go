@@ -79,10 +79,12 @@ func printError(err error) int {
 	if os.Getenv("NO_COLOR") != "" || !isTerminal(os.Stderr) {
 		red, blue, bold, reset = "", "", "", ""
 	}
+	// An error can hold what a host sent, whatever built it: the message
+	// and the step print cleaned, line by line.
 	if errors.As(err, &ue) {
-		fmt.Fprintf(os.Stderr, "%s%sError:%s %s\n", bold, red, reset, ue.Msg)
+		fmt.Fprintf(os.Stderr, "%s%sError:%s %s\n", bold, red, reset, client.CleanBlock(ue.Msg))
 		if ue.Hint != "" {
-			fmt.Fprintf(os.Stderr, "\n%sTry:%s %s\n", blue, reset, ue.Hint)
+			fmt.Fprintf(os.Stderr, "\n%sTry:%s %s\n", blue, reset, client.CleanBlock(ue.Hint))
 		}
 		if ue.Hint != "" && containsAny(ue.Msg, "cannot reach", "connection") {
 			return exitHost
@@ -96,7 +98,7 @@ func printError(err error) int {
 		fmt.Fprintf(os.Stderr, "%s%sError:%s the connection to the host closed\n\n%sTry:%s run the command again\n", bold, red, reset, blue, reset)
 		return exitHost
 	}
-	fmt.Fprintf(os.Stderr, "%s%sError:%s %v\n", bold, red, reset, err)
+	fmt.Fprintf(os.Stderr, "%s%sError:%s %s\n", bold, red, reset, client.CleanBlock(err.Error()))
 	return exitUser
 }
 

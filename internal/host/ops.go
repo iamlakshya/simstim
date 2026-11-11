@@ -44,7 +44,8 @@ type NewArgs = api.NewArgs
 // SessionInfo is one row of the session list.
 type SessionInfo = api.SessionInfo
 
-const idAlphabet = "abcdefghijklmnopqrstuvwxyz234567"
+// idAlphabet is the client's rule too (api.ValidSessionID).
+const idAlphabet = api.SessionIDAlphabet
 
 // NewID makes a short random session ID.
 func NewID() string {
@@ -477,14 +478,4 @@ func Rename(id, name string) error {
 	return m.Save()
 }
 
-func validID(id string) bool {
-	if len(id) == 0 || len(id) > 32 {
-		return false
-	}
-	for _, c := range id {
-		if !strings.ContainsRune(idAlphabet, c) {
-			return false
-		}
-	}
-	return true
-}
+func validID(id string) bool { return api.ValidSessionID(id) }

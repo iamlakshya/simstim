@@ -292,10 +292,12 @@ func (s *SSH) Run(ctx context.Context, remote string, stdin io.Reader) ([]byte, 
 	var out, errb bytes.Buffer
 	cmd.Stdin = stdin
 	cmd.Stdout = &out
+	cmd.Stderr = &errb
 	if s.Interactive {
-		cmd.Stderr = io.MultiWriter(&errb, os.Stderr)
-	} else {
-		cmd.Stderr = &errb
+		// The user sees what the host writes, as it comes, but cleaned.
+		shown := &cleanWriter{w: os.Stderr}
+		defer shown.Flush()
+		cmd.Stderr = io.MultiWriter(&errb, shown)
 	}
 	if err := cmd.Run(); err != nil {
 		return out.Bytes(), sshError(s.Host, err, errb.String())
@@ -344,10 +346,7 @@ func (s *SSH) CheckMaster(ctx context.Context) (running bool, pid int) {
 
 // sshError turns ssh's exit status and stderr into a user error.
 func sshError(h Host, err error, stderr string) error {
-	msg := strings.TrimSpace(stderr)
-	if lines := strings.Split(msg, "\n"); len(lines) > 3 {
-		msg = strings.Join(lines[len(lines)-3:], "\n")
-	}
+	msg := tailStderr(stderr)
 	var ee *exec.ExitError
 	if ok := asExit(err, &ee); ok && ee.ExitCode() == 255 {
 		if msg == "" {

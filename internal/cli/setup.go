@@ -45,7 +45,7 @@ func startSession(ctx context.Context, conn *client.Conn, h client.Host, a clien
 			}
 			a.Setup = setupValue(run)
 		} else {
-			fmt.Fprintf(os.Stderr, "Skipping the setup script of %s: you have not said that it may run on %s. Pass --setup to run it.\n", q.Repo, h.Name)
+			fmt.Fprintf(os.Stderr, "Skipping the setup script of %s: you have not said that it may run on %s. Pass --setup to run it.\n", client.ShowPath(q.Repo), h.Name)
 			a.Setup = api.SetupSkip
 		}
 	}
@@ -58,15 +58,17 @@ func setupValue(run bool) string {
 	return api.SetupSkip
 }
 
-// askSetup asks whether a repository's setup script may run on host.
+// askSetup asks whether a repository's setup script may run on host. The
+// repository and the script come from the host, so they are shown cleaned,
+// or quoted when they hold hidden characters (client.ShowPath).
 func askSetup(in io.Reader, w io.Writer, host string, q client.SetupQuestion) bool {
-	fmt.Fprintf(w, "The repository %s on %s has a setup script:\n\n    %s\n\n", q.Repo, host, q.Script)
+	fmt.Fprintf(w, "The repository %s on %s has a setup script:\n\n    %s\n\n", client.ShowPath(q.Repo), host, client.ShowPath(q.Script))
 	fmt.Fprintf(w, "It runs in the session before the agent, as you, with the session's environment and\nsecrets. Say yes only for a repository you trust. The answer is kept for this\nrepository on %s; --setup and --no-setup override it.\n\n", host)
 	return ask(bufio.NewReader(in), w, "Run it?")
 }
 
 // askMakeFolder asks whether a new session's missing folder may be made on host.
 func askMakeFolder(in io.Reader, w io.Writer, host string, q client.FolderQuestion) bool {
-	fmt.Fprintf(w, "The folder %s does not exist on %s.\n", q.Folder, host)
+	fmt.Fprintf(w, "The folder %s does not exist on %s.\n", client.ShowPath(q.Folder), host)
 	return ask(bufio.NewReader(in), w, "Make it?")
 }

@@ -24,6 +24,7 @@ const minFacts = 12
 
 // sessionDetail is the line under the sessions, cw cells wide.
 func (m *Model) sessionDetail(h *hostConn, s client.Session, cw int, withHost bool) string {
+	s = shown(s)
 	now, steps := m.sessionNow(h, s)
 	where := homePath(h, s.Cwd)
 	if withHost {
