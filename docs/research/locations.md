@@ -130,7 +130,7 @@ Checked on 10 November 2026, after an audit of the spec. A researcher read the m
 - **Local network privacy** allows any daemon that launchd starts, so the VM reaches the LAN with no prompt ([TN3179](https://developer.apple.com/documentation/technotes/tn3179-understanding-local-network-privacy)).
 - **Login Items.** From macOS 13, a user can turn a launch daemon off in System Settings > General > Login Items & Extensions ([Apple](https://support.apple.com/guide/deployment/depdca572563/web)).
 
-**A test by hand, before H21.** Do it on Apple silicon with FileVault on, first with macOS 15, then with macOS 26:
+**A test by hand, when the build is done (spec 18.4).** Do it on Apple silicon with FileVault on, first with macOS 15, then with macOS 26:
 
 1. Make a hidden standard account with a random password. Do not log in as it.
 2. As that account, make a `vz` Linux VM with Lima v2.3.0.

@@ -151,7 +151,7 @@ Spec section 15 has each question in full, with its options: [open questions](is
 | 88 | How does the gvisor wall get its namespaces? | The helper, or the namespace launcher of spec 14.4, makes them, and `runsc` runs inside as uid 0. | P6.1 |
 | 89 | How many slot accounts, and where is the store? | 16 slots, and the store in `/var/lib/<name>/store/`. | H18 |
 | 90 | What does a config layer's level below the host's floor do? | The client raises it to the floor, with a line that says so. `--wall` below the floor still fails without `--downgrade`. | P1.8, P1.12 |
-| 91 | If the test by hand before H21 fails, how does a Mac host start its VM? | From a launch agent of the Mac's logged-in user, with a warning. | H21 |
+| 91 | If the Mac test by hand fails, how does a Mac host start its VM? | From a launch agent of the Mac's logged-in user, with a warning. | H21 |
 
 ## Order
 
@@ -1723,7 +1723,7 @@ The rule of this phase: **the laptop holds the digests, the hosts hold the bytes
 
 ### H21 A Mac as a host
 
-- **Goal:** spec 18.4. First, the test by hand of [research, locations 5](../research/locations.md#5-mac-hosts-checked-again). If a Linux VM does not start from the launch daemon for an account that has never logged in, stop and ask the owner ([question 91](isolation-spec.md#15-open-questions)). Then `host join` and `host leave` on a Mac. They manage the hidden account, the pinned Lima, the VM in plain mode, the launch daemon that the join writes, the narrow key, the facts script and the power step. On the laptop: the Mac's facts, its health items, and its block in `host doctor`.
+- **Goal:** spec 18.4. `host join` and `host leave` on a Mac. They manage the hidden account, the pinned Lima, the VM in plain mode, the launch daemon that the join writes, the narrow key, the facts script and the power step. On the laptop: the Mac's facts, its health items, and its block in `host doctor`. When the build is done, run the test by hand of [research, locations 5](../research/locations.md#5-mac-hosts-checked-again). If a Linux VM does not start from the launch daemon for an account that has never logged in, ask the owner ([question 91](isolation-spec.md#15-open-questions)).
 - **Files:**
   - New `internal/join/darwin.go`, and the Mac's steps in `internal/join/leave.go`.
   - `internal/provider/lima/lima.go` (the template for a Mac host: plain mode, a fixed SSH port and no loopback).
@@ -1739,7 +1739,7 @@ The rule of this phase: **the laptop holds the digests, the hosts hold the bytes
   - On battery, `host doctor` shows `mac-on-battery`, and `auto` ranks the host one band lower.
   - `host leave` removes the account, the VM, the launch daemon and the drop-in, and restores the `pmset` values.
   - The join never turns on Remote Login, and never changes the battery settings.
-- **Tests:** units of the plan of changes for given Mac facts. CI has no Mac that can run a VM for a hidden account. So the pull request holds a checklist, done by hand on an M1 or M2 Mac and on an M3 Mac or later. A Mac is used only with its owner's yes, and each change is logged outside the repository ([AGENTS.md](../../AGENTS.md), rule 10).
+- **Tests:** units of the plan of changes for given Mac facts. CI has no Mac that can run a VM for a hidden account. So a checklist, done by hand on an M1 or M2 Mac and on an M3 Mac or later, runs with the test by hand when the build is done. H21 counts as done only after it. A Mac is used only with its owner's yes, and each change is logged outside the repository ([AGENTS.md](../../AGENTS.md), rule 10).
 - **Docs:** new `docs/how-to/a-mac-as-a-host.md`: the steps, power, why the Mac must stay on and logged in, MDM and the organisation's IT team, the tier, and leave. `docs/explanation/architecture.md` (the path through the Mac).
 - **CHANGELOG:** Added. "A Mac at another location can be a host. `host join` makes a hidden account and a Lima VM that starts at boot. The laptop reaches the VM through a key that can open nothing else."
 - **Depends on:** H20, H14, H16, P0.8.
