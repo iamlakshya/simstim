@@ -1,13 +1,17 @@
 package host
 
 import (
+	"bufio"
 	"bytes"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"syscall"
@@ -19,8 +23,13 @@ import (
 )
 
 // The shadow terminal is built from vt/ with Zig. These tests use the
-// binary named by VT_BINARY, or build it with Zig 0.16 when Zig is
-// installed, or use one built before. Without any of these they skip.
+// binary named by VT_BINARY, or build it with Zig 0.17 when Zig is
+// installed, or use one built before. Without any of these they skip. They
+// also skip when the binary is built from another Ghostty commit than the
+// one that vt/build.zig.zon pins, so no test runs an old shadow terminal.
+
+// vtZig is the Zig version that builds the shadow terminal (vt/build.zig.zon).
+const vtZig = "0.17."
 
 var (
 	vtBinOnce sync.Once
@@ -42,33 +51,86 @@ func vtBinary(t *testing.T) string {
 }
 
 func findVTBinary() {
-	if p := os.Getenv("VT_BINARY"); p != "" {
-		vtBinPath = p
-		return
-	}
 	dir, err := filepath.Abs(filepath.Join("..", "..", "vt"))
 	if err != nil {
 		vtBinSkip = err.Error()
 		return
 	}
+	zig, _ := exec.LookPath("zig")
+	vtBinPath, vtBinSkip, vtBinFail = pickVTBinary(dir, os.Getenv("VT_BINARY"), zig)
+}
+
+// pickVTBinary picks the shadow terminal that the tests use: env (the value
+// of VT_BINARY) when it is set, or else the build in dir/zig-out, which it
+// first builds with zig when zig is 0.17. zig is "" when there is none. It
+// returns the binary's path, or why the tests skip, or why they fail.
+func pickVTBinary(dir, env, zig string) (path, skip, fail string) {
+	pin, err := vtPinnedCommit(dir)
+	if err != nil {
+		return "", "", err.Error()
+	}
+	if env != "" {
+		if got := vtCommitOf(env); got != pin {
+			return "", fmt.Sprintf("VT_BINARY %s is built from Ghostty %s, not the pinned %s. "+
+				"Try: build it again from vt/ with Zig 0.17.0, or unset VT_BINARY", env, got, pin), ""
+		}
+		return env, "", ""
+	}
 	built := filepath.Join(dir, "zig-out", "bin", "shadow-vt")
-	if zig, err := exec.LookPath("zig"); err == nil {
+	have := "no Zig"
+	if zig != "" {
 		out, err := exec.Command(zig, "version").Output()
-		if err == nil && strings.HasPrefix(string(out), "0.16.") {
+		if v := strings.TrimSpace(string(out)); err == nil && v != "" {
+			have = v
+		}
+		if strings.HasPrefix(have, vtZig) {
 			// The shipped mode: Debug is far too slow for the long tests.
 			cmd := exec.Command(zig, "build", "-Doptimize=ReleaseSafe")
 			cmd.Dir = dir
 			if out, err := cmd.CombinedOutput(); err != nil {
-				vtBinFail = fmt.Sprintf("zig build in vt/ failed: %v\n%s", err, out)
-				return
+				return "", "", fmt.Sprintf("zig build in vt/ failed: %v\n%s", err, out)
 			}
 		}
 	}
+	// The same note as `just vt` gives without the pinned Zig.
+	note := fmt.Sprintf("the shadow terminal needs Zig 0.17.0, and this machine has %s.", have)
+	try := " Try: just setup, which puts the pinned Zig into .tools/, or set VT_BINARY (see vt/README.md)"
 	if _, err := os.Stat(built); err != nil {
-		vtBinSkip = "shadow terminal not built: install Zig 0.16 or set VT_BINARY (see vt/README.md)"
-		return
+		return "", note + try, ""
 	}
-	vtBinPath = built
+	if got := vtCommitOf(built); got != pin {
+		return "", note + fmt.Sprintf(" The build in vt/zig-out is from Ghostty %s, not the pinned %s.", got, pin) + try, ""
+	}
+	return built, "", ""
+}
+
+// vtPinnedCommit is the Ghostty commit that vt/build.zig.zon in dir pins.
+func vtPinnedCommit(dir string) (string, error) {
+	zon := filepath.Join(dir, "build.zig.zon")
+	b, err := os.ReadFile(zon)
+	if err != nil {
+		return "", fmt.Errorf("read the shadow terminal's pin: %w", err)
+	}
+	m := regexp.MustCompile(`ghostty/archive/([0-9a-f]{40})\.tar\.gz`).FindSubmatch(b)
+	if m == nil {
+		return "", fmt.Errorf("%s pins no Ghostty commit. Try: zig fetch --save=ghostty <url> in vt/ (see vt/README.md)", zon)
+	}
+	return string(m[1]), nil
+}
+
+// vtCommitOf is the Ghostty commit that the shadow terminal at path says,
+// in its --version, that it is built from. It is "an unknown commit" when
+// the binary does not say.
+func vtCommitOf(path string) string {
+	out, err := exec.Command(path, "--version").Output()
+	if err != nil {
+		return "an unknown commit"
+	}
+	_, commit, ok := strings.Cut(strings.TrimSpace(string(out)), " ghostty ")
+	if !ok || commit == "" {
+		return "an unknown commit"
+	}
+	return commit
 }
 
 type vtRecorder struct {
@@ -677,5 +739,74 @@ func TestVTMissingBinary(t *testing.T) {
 	_, err := StartVT(VTOptions{Path: filepath.Join(t.TempDir(), "missing")})
 	if err == nil || !strings.Contains(err.Error(), "Try:") {
 		t.Fatalf("want an error with a hint, got %v", err)
+	}
+}
+
+// The shadow terminal caps a size itself, by whatever path the size comes:
+// the command line, a resize and a snapshot. The holder caps sizes first,
+// so this test speaks to the process directly.
+func TestVTCapsItsSize(t *testing.T) {
+	cmd := exec.Command(vtBinary(t), "--cols", "65535", "--rows", "70000")
+	in, err := cmd.StdinPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := cmd.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = in.Close(); _ = cmd.Wait() })
+	r := bufio.NewReader(out)
+
+	// size sends the frames, then asks for a dump, and returns its size.
+	size := func(frames ...[]byte) (cols, rows int) {
+		t.Helper()
+		for _, f := range append(frames, vtFrame(vtFrameDump, []byte{0, 0, 0, 0})) {
+			if _, err := in.Write(f); err != nil {
+				t.Fatal(err)
+			}
+		}
+		for {
+			var hdr [5]byte
+			if _, err := io.ReadFull(r, hdr[:]); err != nil {
+				t.Fatal(err)
+			}
+			p := make([]byte, binary.LittleEndian.Uint32(hdr[1:]))
+			if _, err := io.ReadFull(r, p); err != nil {
+				t.Fatal(err)
+			}
+			if hdr[0] != vtFrameDump {
+				continue // the reply to a snapshot
+			}
+			var d vtDump
+			if err := json.Unmarshal(p, &d); err != nil {
+				t.Fatalf("dump is not JSON: %v", err)
+			}
+			return d.Cols, d.Rows
+		}
+	}
+	sizeFrame := func(kind byte, cols, rows uint16, extra ...byte) []byte {
+		p := binary.LittleEndian.AppendUint16(nil, cols)
+		p = binary.LittleEndian.AppendUint16(p, rows)
+		return vtFrame(kind, append(p, extra...))
+	}
+
+	if cols, rows := size(); cols != 4096 || rows != 2048 {
+		t.Errorf("--cols 65535 --rows 70000 started it at %d by %d, want 4096 by 2048", cols, rows)
+	}
+	if cols, rows := size(sizeFrame(vtFrameResize, 100, 30), sizeFrame(vtFrameResize, 65535, 65535)); cols != 4096 || rows != 2048 {
+		t.Errorf("a resize to 65535 by 65535 set %d by %d, want 4096 by 2048", cols, rows)
+	}
+	if cols, rows := size(sizeFrame(vtFrameResize, 100, 30), sizeFrame(vtFrameSnapshot, 65535, 65535, 0, 0, 0, 0)); cols != 4096 || rows != 2048 {
+		t.Errorf("a snapshot at 65535 by 65535 set %d by %d, want 4096 by 2048", cols, rows)
+	}
+	if cols, rows := size(sizeFrame(vtFrameResize, 4096, 2048)); cols != 4096 || rows != 2048 {
+		t.Errorf("a resize to the caps set %d by %d, want 4096 by 2048", cols, rows)
+	}
+	if cols, rows := size(sizeFrame(vtFrameResize, 4096, 30)); cols != 4096 || rows != 30 {
+		t.Errorf("a resize within the caps set %d by %d, want 4096 by 30", cols, rows)
 	}
 }

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Tests install.sh end to end against a local snapshot release: it must
 # install a release whose signature and checksum match, and refuse one whose
-# checksums, signature or archive were changed. Needs goreleaser and Zig 0.16.
+# checksums, signature or archive were changed. Needs goreleaser and Zig 0.17.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 

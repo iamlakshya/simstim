@@ -9,6 +9,9 @@ module := `sed -n 's/^module //p' go.mod`
 version := `git describe --tags --always --dirty 2>/dev/null || echo 0.0.0-dev`
 ldflags := "-s -w -X " + module + "/internal/version.Version=" + version
 helpers := "internal/client/helpers"
+# A shell line that sets zig_note when this machine's Zig cannot build the
+# shadow terminal. vt/build.zig.zon pins Zig 0.17.0.
+zig_check := 'have=$(zig version 2>/dev/null || echo "no Zig"); case "$have" in 0.17.*) zig_note="" ;; *) zig_note="The shadow terminal needs Zig 0.17.0, and this machine has $have." ;; esac'
 
 default:
     @just --list
@@ -27,10 +30,16 @@ helpers:
     done
     ls -l {{helpers}}
 
-# Build the shadow terminal (vt/, Zig 0.16) for every host platform, into the client's embed folder.
+# Build the shadow terminal (vt/, Zig 0.17) for every host platform, into the client's embed folder.
 vt:
     #!/usr/bin/env sh
     set -eu
+    {{zig_check}}
+    if [ -n "$zig_note" ]; then
+        echo "error: $zig_note" >&2
+        echo "Try: just setup, which puts the pinned Zig into .tools/." >&2
+        exit 1
+    fi
     # Zig fetches Ghostty's dependencies on the first build; a download can
     # fail now and then, so try three times before giving up.
     for try in 1 2 3; do
@@ -44,14 +53,21 @@ vt:
     done
     ls -l {{helpers}}/vt-linux-*
 
-# Build the shadow terminal if Zig 0.16 is installed; otherwise say so and go on.
+# Build the shadow terminal if Zig 0.17 is installed; otherwise say so and go on
+# without it. An old build of it is removed, so the client never embeds one.
 _vt-if-zig:
     #!/usr/bin/env sh
     set -eu
-    if ! command -v zig >/dev/null 2>&1; then
-        echo "note: zig not found, so the shadow terminal was not built (see vt/README.md)"
-    elif ! zig version | grep -q '^0\.16\.'; then
-        echo "note: the shadow terminal needs Zig 0.16, not $(zig version), so it was not built (see vt/README.md)"
+    {{zig_check}}
+    if [ -n "$zig_note" ]; then
+        old=$(ls {{helpers}}/vt-linux-* 2>/dev/null || true)
+        rm -f {{helpers}}/vt-linux-*
+        if [ -n "$old" ]; then
+            echo "note: $zig_note The build goes on without the shadow terminal, and removed the old build of it (see vt/README.md)."
+        else
+            echo "note: $zig_note The build goes on without the shadow terminal (see vt/README.md)."
+        fi
+        echo "Try: just setup, which puts the pinned Zig into .tools/."
     else
         {{just_executable()}} vt
     fi

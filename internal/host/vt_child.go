@@ -92,7 +92,8 @@ func (v *VT) start() error {
 
 // spawn starts the process and its goroutines.
 func (v *VT) spawn(cols, rows int) (*vtChild, error) {
-	args := []string{"--cols", strconv.Itoa(cols), "--rows", strconv.Itoa(rows)}
+	// The sizes are capped already. The cap here is a guard.
+	args := []string{"--cols", strconv.Itoa(int(clampCols(cols))), "--rows", strconv.Itoa(int(clampRows(rows)))}
 	if v.opt.Scrollback > 0 {
 		args = append(args, "--scrollback", strconv.Itoa(v.opt.Scrollback))
 	}
@@ -268,8 +269,8 @@ func (v *VT) restart(wait time.Duration) {
 
 func (v *VT) resizeFrame() []byte {
 	var p [8]byte
-	binary.LittleEndian.PutUint16(p[0:], clamp16(v.cols))
-	binary.LittleEndian.PutUint16(p[2:], clamp16(v.rows))
+	binary.LittleEndian.PutUint16(p[0:], clampCols(v.cols))
+	binary.LittleEndian.PutUint16(p[2:], clampRows(v.rows))
 	binary.LittleEndian.PutUint16(p[4:], clamp16(v.xpx))
 	binary.LittleEndian.PutUint16(p[6:], clamp16(v.ypx))
 	return vtFrame(vtFrameResize, p[:])
@@ -324,6 +325,7 @@ func vtFrame(kind byte, payload []byte) []byte {
 }
 
 // clamp16 is n as a uint16: a negative n is 0, and a larger one the largest.
+// It is for pixel sizes. Columns and rows use clampCols and clampRows.
 func clamp16(n int) uint16 {
 	return uint16(min(max(n, 0), 0xffff))
 }

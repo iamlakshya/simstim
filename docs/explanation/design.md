@@ -74,7 +74,7 @@ Ranked. Use them to settle trade-offs.
 
 | Risk | Mitigation |
 | --- | --- |
-| libghostty-vt has no stable API and no tags | Pin one Ghostty commit. Keep the interface tiny (bytes in, resize, snapshot, events out). Run it in its own process. Replay tests on every bump. |
+| libghostty-vt is young: its first release, 1.0.0, came in November 2026 | Pin one release tag. Keep the interface tiny (bytes in, resize, snapshot, events out). Run it in its own process. Replay tests on every bump. |
 | Agents change their signals and flags often | Keep agent knowledge as data. Show the source of each status in the UI. Test against recorded fixtures. |
 | A terminal or agent update breaks fidelity | The fixture suite and `doctor keys` catch it. Pin and test before release. |
 | Provider tunnels drop sessions (IAP after 1 hour idle, EICE at 1 hour, Cloudflare on edge restart) | Auto-reconnect with replay. Warn about each recipe's limit in the host details view. |

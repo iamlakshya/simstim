@@ -18,7 +18,7 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
     const strip = b.option(bool, "strip", "Strip debug information") orelse
-        (optimize != .Debug);
+        (optimize != .debug);
 
     const options = b.addOptions();
     options.addOption([]const u8, "version", zon.version);
@@ -29,7 +29,7 @@ pub fn build(b: *std.Build) void {
     b.installArtifact(exe);
 
     const run = b.addRunArtifact(exe);
-    if (b.args) |args| run.addArgs(args);
+    run.addPassthruArgs();
     b.step("run", "Run the shadow terminal").dependOn(&run.step);
 
     // Static Linux binaries for hosts. ReleaseSafe keeps Zig's safety
@@ -38,10 +38,10 @@ pub fn build(b: *std.Build) void {
     // corrupt screen.
     const linux = b.step("linux", "Build static Linux binaries for amd64 and arm64");
     const linux_optimize = b.option(
-        std.builtin.OptimizeMode,
+        std.builtin.Optimize,
         "linux-optimize",
         "Optimisation for the linux step (default ReleaseSafe)",
-    ) orelse .ReleaseSafe;
+    ) orelse .safe;
     for (linux_targets) |t| {
         const resolved = b.resolveTargetQuery(t[0]);
         const linux_exe = addExe(b, options, resolved, linux_optimize, true);
@@ -57,7 +57,7 @@ fn addExe(
     b: *std.Build,
     options: *std.Build.Step.Options,
     target: std.Build.ResolvedTarget,
-    optimize: std.builtin.OptimizeMode,
+    optimize: std.builtin.Optimize,
     strip: bool,
 ) *std.Build.Step.Compile {
     const mod = b.createModule(.{
@@ -75,7 +75,7 @@ fn addExe(
 fn ghosttyModule(
     b: *std.Build,
     target: std.Build.ResolvedTarget,
-    optimize: std.builtin.OptimizeMode,
+    optimize: std.builtin.Optimize,
 ) *std.Build.Module {
     const dep = b.dependency("ghostty", .{
         .target = target,

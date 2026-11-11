@@ -7,7 +7,7 @@ before:
     - go mod tidy -diff
     # The client embeds the host helpers, so build them first.
     - sh -c 'for arch in amd64 arm64; do CGO_ENABLED=0 GOOS=linux GOARCH=$arch go build -trimpath -ldflags "-s -w -X {{ .Env.MODULE }}/internal/version.Version={{ .Version }}" -o internal/client/helpers/host-linux-$arch ./cmd/host; done'
-    # The shadow terminal (Zig 0.16), embedded next to the host helpers.
+    # The shadow terminal (Zig 0.17), embedded next to the host helpers.
     - sh -c 'cd vt && zig build linux && cd .. && for arch in amd64 arm64; do cp vt/zig-out/linux/shadow-vt-$arch internal/client/helpers/vt-linux-$arch; done'
     # Man pages and shell completions, from the command tree.
     - go run ./cmd/docgen -out build/reference -man build/man -completions build/completions
