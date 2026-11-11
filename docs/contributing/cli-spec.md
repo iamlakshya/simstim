@@ -314,6 +314,7 @@ The isolation spec owns the messages and the hints of its errors. This table own
 | `policy_unreached`, `secret_store`, `git_scope` | 9.3 | `KindFailed` | 1 |
 | `lockdown_confirm` | 9.3 | `KindNeedsAnswer` | 4 |
 | `setup_outside` | 9.3 | `KindRefused` | 5 |
+| `setup_unreadable` | 19.2 | `KindFailed` | 1 |
 | `image_bad_layer`, `image_root_mismatch`, `image_in_use`, `sandbox_boot`, `agents_disk` | 9.3, 20 | `KindFailed` | 1 |
 | `image_moved`, `image_signature`, `runtime_advisory` | 9.3, 20 | `KindRefused` | 5 |
 | `cp_too_big`, `cp_path`, `cp_git`, `cp_flagged`, `image_secret`, `image_flagged`, `image_elsewhere` | 9.3, 21 | `KindRefused` | 5 |

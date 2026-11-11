@@ -228,6 +228,7 @@ type (
 		startReq // what started: a question about it sends it again
 		s        *client.Session
 		err      error
+		warn     *client.UserError // the answers about setup scripts did not parse
 	}
 	attachDoneMsg struct {
 		host, id, name string
@@ -334,6 +335,8 @@ func (m *Model) update(msg tea.Msg) tea.Cmd {
 		return nil
 	case opDoneMsg:
 		return m.onOpDone(msg)
+	case setupWarnMsg:
+		return m.toastSetupWarn(msg.warn)
 	case shellDoneMsg:
 		if msg.err != nil {
 			return m.toastErr(&client.UserError{Msg: "the shell on " + msg.host + " ended with an error: " + msg.err.Error()})

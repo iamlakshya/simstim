@@ -129,8 +129,12 @@ func TestSessionCommandsCleanHostText(t *testing.T) {
 // it holds hidden characters, so the user sees them before answering.
 func TestQuestionsShowHostPaths(t *testing.T) {
 	var out bytes.Buffer
-	askSetup(strings.NewReader("n\n"), &out, "box", client.SetupQuestion{
-		Repo: "/home/dev/src/app\x1b]52;c;aGk=\x07\u202e", Script: "/home/dev/src/app/.setup\u200b"})
+	q := client.SetupQuestion{Repo: "/home/dev/src/app\x1b]52;c;aGk=\x07\u202e", Script: "/home/dev/src/app/.setup\u200b"}
+	// Each wording of the setup question, and the note without a terminal.
+	for _, past := range []client.SetupPast{client.SetupNotTrusted, client.SetupChanged, client.SetupUnchecked} {
+		askSetup(strings.NewReader("n\n"), &out, "box", q, past)
+		out.WriteString(skipNote("box", q, past) + "\n")
+	}
 	askMakeFolder(strings.NewReader("n\n"), &out, "box", client.FolderQuestion{Folder: "/home/dev/src/mi\u200cnd"})
 	noHostBits(t, "the questions", out.String())
 	for _, want := range []string{`"/home/dev/src/app\x1b]52;c;aGk=\a\u202e"`, `"/home/dev/src/app/.setup\u200b"`, `"/home/dev/src/mi\u200cnd"`} {

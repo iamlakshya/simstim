@@ -36,8 +36,13 @@ type fakeHost struct {
 	dialErr  error
 	newErr   error
 	// setupRepo is a repository with a setup script: a start there asks,
-	// unless it is answered.
-	setupRepo string
+	// unless the user refused it, or trusted setupHash, the setup hash of
+	// its scripts. An empty setupHash is an older helper, which sends no
+	// hash.
+	setupRepo, setupHash string
+	// setupErr is the code of a start whose script cannot run, such as
+	// setup_outside: every start fails with it, unless it skips the scripts.
+	setupErr string
 	// missing is a folder that does not exist: a start there asks, unless
 	// it says to make the folder.
 	missing string
@@ -72,8 +77,12 @@ type fakeBackend struct {
 	saves     int
 	secrets   map[string]api.Secret // a host's own secrets, for every start
 	secretErr error
-	trust     map[string]map[string]bool // answers about setup scripts, by host and repository
-	local     *fakeLocal                 // the guided setup's computer (guide_fake_test.go)
+	trust     map[string]client.SetupAnswers // answers about setup scripts, by host
+	trustWarn *client.UserError              // the answers' file did not parse
+	// rememberWarn is the warning of the next answer: the file did not
+	// parse when the answer was kept.
+	rememberWarn *client.UserError
+	local        *fakeLocal // the guided setup's computer (guide_fake_test.go)
 	// attachHook runs during each attach, with the lock held: what the
 	// user does in the session.
 	attachHook func(client.AttachOptions)
@@ -257,6 +266,9 @@ func (c *fakeConn) NewSession(_ context.Context, a client.NewArgs) (*client.Sess
 	if a.Setup != "" {
 		c.be.record("new %s setup=%s", c.name, a.Setup)
 	}
+	if len(a.SetupHashes) > 0 {
+		c.be.record("new %s setup_hashes=%v", c.name, a.SetupHashes)
+	}
 	if a.MakeFolder {
 		c.be.record("new %s mkdir %s", c.name, a.Cwd)
 	}
@@ -270,9 +282,16 @@ func (c *fakeConn) NewSession(_ context.Context, a client.NewArgs) (*client.Sess
 		data, _ := json.Marshal(client.FolderQuestion{Folder: "/home/dev/" + strings.TrimPrefix(h.missing, "~/")})
 		return nil, &client.UserError{Msg: "the folder does not exist", Code: api.CodeNoFolder, Data: data}
 	}
-	if _, known := a.SetupTrust[h.setupRepo]; h.setupRepo != "" && a.Setup == "" && !known {
-		data, _ := json.Marshal(client.SetupQuestion{Repo: h.setupRepo, Script: h.setupRepo + "/.setup"})
+	// The order of the host: the override, a refusal, the trusted hash.
+	run, known := a.SetupTrust[h.setupRepo]
+	refused := known && !run
+	if h.setupRepo != "" && a.Setup == "" && !refused && (h.setupHash == "" || a.SetupHashes[h.setupRepo] != h.setupHash) {
+		data, _ := json.Marshal(client.SetupQuestion{Repo: h.setupRepo, Script: h.setupRepo + "/.setup", Hash: h.setupHash})
 		return nil, &client.UserError{Msg: "the repository has a setup script", Code: api.CodeSetupTrust, Data: data}
+	}
+	if h.setupErr != "" && a.Setup != api.SetupSkip {
+		return nil, &client.UserError{Msg: "the setup script of /home/dev/src/app, .x/setup, points outside the repository, so it cannot run",
+			Hint: "Make .x/setup a file in the repository, or start with --no-setup.", Code: h.setupErr}
 	}
 	name := a.Name
 	if name == "" {

@@ -138,8 +138,11 @@ def setup_checks(c, envx, tmp, created):
         i, j = out.find(b"SETUP-RAN name=e2e-setup-ask new=0"), out.find(b"AGENT-RAN")
         if not c.ok(0 <= i < j and b": running " in out, "setup: the trusted script ran in the session's terminal, before the program"):
             print(out.decode(errors="replace")[-600:])
-    trust = open(os.path.join(tmp, "state", c.NAME, "setup-trust.json")).read()
-    c.ok("e2e-setup-repo" in trust and "true" in trust, "setup: the answer is kept for the repository on the host")
+    with open(os.path.join(tmp, "state", c.NAME, "setup-trust.json")) as f:
+        trust = json.load(f)
+    kept = [e for r, e in trust.get("trusted", {}).get(c.HOST, {}).items() if r.endswith("/e2e-setup-repo")]
+    c.ok(trust.get("version") == 2 and len(kept) == 1 and re.fullmatch(r"[0-9a-f]{64}", kept[0].get("sha256", "")),
+         "setup: the answer is kept for the repository on the host, with the hash of its scripts")
 
     # The answer goes along: a new worktree runs the script with no question.
     sid, r = new(c, envx, "--dir", "~/e2e-setup-repo", "--name", "e2e-setup-wt", "--worktree", "--detach", *prog)
@@ -148,6 +151,29 @@ def setup_checks(c, envx, tmp, created):
     if sid:
         out = screen(c, envx, sid, rb"AGENT-RAN")
         c.ok(b"SETUP-RAN name=e2e-setup-wt new=1" in out, "setup: in a new worktree the script runs, and knows the worktree is new")
+
+    # A commit that changes the trusted script asks again (spec 19.2): without
+    # a terminal, new skips it with a note; at one, it asks and says why.
+    changed = script.replace("SETUP-RAN", "SETUP-CHANGED")
+    c.host_ssh("set -e; cd ~/e2e-setup-repo; printf '%s' > .%s/setup; chmod +x .%s/setup; "
+               "git add -A; git -c user.name=e2e -c user.email=e2e@example.com commit -qm change" % (changed, c.NAME, c.NAME))
+    sid, r = new(c, envx, "--dir", "~/e2e-setup-repo", "--name", "e2e-setup-changed", "--detach", *prog)
+    created += [sid] if sid else []
+    c.ok(sid and "it changed after you trusted it" in r.stderr, "setup: without a terminal, a changed script is skipped with a note")
+    if sid:
+        out = screen(c, envx, sid, rb"AGENT-RAN")
+        c.ok(b"AGENT-RAN" in out and b"SETUP-CHANGED" not in out, "setup: the changed script did not run")
+    t = c.Term([c.cli, "new", c.HOST, "--dir", "~/e2e-setup-repo", "--name", "e2e-setup-reask", "--detach"] + prog, env=envx)
+    asked = t.wait_for(rb"Run it\? \[y/N\]", 60)
+    c.ok(asked and b"changed after you trusted it" in t.buf, "setup: at a terminal, new asks again and says that the script changed")
+    t.send(b"y\r")
+    t.exit_code(60)
+    m = re.search(rb"Started [^/]+/(\w+)", t.buf)
+    if c.ok(m, "setup: the new yes starts the session"):
+        sid = m.group(1).decode()
+        created.append(sid)
+        out = screen(c, envx, sid, rb"AGENT-RAN")
+        c.ok(b"SETUP-CHANGED name=e2e-setup-reask" in out, "setup: after the new yes, the changed script runs")
 
     # A failing script shows its exit code, and the program still starts.
     c.host_ssh("echo 7 > ~/.e2e-setup-exit")

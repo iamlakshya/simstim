@@ -84,10 +84,12 @@ func (b *demoBackend) Settings() client.Settings {
 func (b *demoBackend) HelperVersion() string { return "0.1.0" }
 
 // The demo forgets: it starts the same way every time.
-func (b *demoBackend) Memory() memory                           { return memory{} }
-func (b *demoBackend) Remember(memory)                          {}
-func (b *demoBackend) SetupTrust(string) map[string]bool        { return nil }
-func (b *demoBackend) RememberSetup(string, string, bool) error { return nil }
+func (b *demoBackend) Memory() memory                          { return memory{} }
+func (b *demoBackend) Remember(memory)                         {}
+func (b *demoBackend) SetupAnswers(string) client.SetupAnswers { return client.SetupAnswers{} }
+func (b *demoBackend) RememberSetup(string, string, bool, string) (*client.UserError, error) {
+	return nil, nil
+}
 func (b *demoBackend) Secrets(context.Context, client.Host) (map[string]api.Secret, error) {
 	return nil, nil
 }

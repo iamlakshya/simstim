@@ -39,10 +39,12 @@ type Backend interface {
 	// SessionSecrets fetches the values of the named secrets again, for a
 	// resume of a session that started with them. It never prompts.
 	SessionSecrets(ctx context.Context, names []string) (map[string]api.Secret, error)
-	// SetupTrust and RememberSetup read and keep the user's answers about
-	// repositories' setup scripts on a host.
-	SetupTrust(host string) map[string]bool
-	RememberSetup(host, repo string, run bool) error
+	// SetupAnswers and RememberSetup read and keep the user's answers about
+	// repositories' setup scripts on a host. A yes keeps the setup hash of
+	// the question that it answers. RememberSetup's warning says that the
+	// answers file did not parse, and where it went.
+	SetupAnswers(host string) client.SetupAnswers
+	RememberSetup(host, repo string, run bool, hash string) (*client.UserError, error)
 	// Local is what the guided setup reads and changes on this computer:
 	// where agents can run, SSH keys and config, and making hosts.
 	Local() onboard.Local
@@ -86,9 +88,12 @@ func (realBackend) HelperVersion() string             { return client.HelperVers
 func (realBackend) Memory() memory                    { return loadMemory() }
 func (realBackend) Remember(mem memory)               { _ = saveMemory(mem) }
 
-func (realBackend) SetupTrust(host string) map[string]bool { return client.SetupTrust(host) }
-func (realBackend) RememberSetup(host, repo string, run bool) error {
-	return client.RememberSetup(host, repo, run)
+func (realBackend) SetupAnswers(host string) client.SetupAnswers {
+	return client.LoadSetupAnswers(host)
+}
+
+func (realBackend) RememberSetup(host, repo string, run bool, hash string) (*client.UserError, error) {
+	return client.RememberSetup(host, repo, run, hash)
 }
 
 func (realBackend) Secrets(ctx context.Context, h client.Host) (map[string]api.Secret, error) {

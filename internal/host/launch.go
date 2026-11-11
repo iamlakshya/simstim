@@ -93,7 +93,7 @@ func holderStarted(id string, sliceErr error, timeout time.Duration) error {
 		return err
 	}
 	if sliceErr != nil {
-		warnSession(id, "could not limit the memory of all sessions", sliceErr)
+		warnSession(id, "could not limit the memory of all sessions", "err", sliceErr)
 	}
 	return nil
 }
