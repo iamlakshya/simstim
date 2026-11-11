@@ -595,8 +595,15 @@ func TestAHookReachesOnlyItsOwnSession(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			r := newPeerRig(t, rigPeer{check: true, cgroup: tc.cgroup, alive: tc.alive})
+			// The holder keeps an agent's session ID only in the agent's
+			// form. So the session counts as Claude Code's here, and the
+			// hook sends a UUID.
+			const agentUUID = "3f2b8c1e-9d4a-4e6b-8f7c-1a2b3c4d5e6f"
+			r.h.mu.Lock()
+			r.h.m.Agent.Kind = "claude"
+			r.h.mu.Unlock()
 			f, resp := r.hookEvent(roleHook, notification("hook"))
-			_, resp2 := r.hookEvent(roleHook, sessionStart("agent-id-1"))
+			_, resp2 := r.hookEvent(roleHook, sessionStart(agentUUID))
 			switch {
 			case tc.ok && (resp == nil || !resp.OK || resp2 == nil || !resp2.OK):
 				t.Fatalf("the hook was refused: %v %s", f.Type, f.Payload)
@@ -613,7 +620,7 @@ func TestAHookReachesOnlyItsOwnSession(t *testing.T) {
 			r.h.mu.Lock()
 			agentID := r.h.m.Agent.AgentSessionID
 			r.h.mu.Unlock()
-			if (agentID == "agent-id-1") != tc.ok {
+			if (agentID == agentUUID) != tc.ok {
 				t.Errorf("the agent's ID is %q", agentID)
 			}
 		})

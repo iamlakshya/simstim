@@ -1501,11 +1501,21 @@ ProxyEnv map[string]string `json:"proxy_env,omitempty"`
 // "chosen") needs no match. Without a pattern, the host keeps no other ID.
 IDPattern string `json:"id_pattern,omitempty"`
 // DangerFlags are arguments that turn the agent's own approvals off. The
-// host refuses a command with one unless the user typed the command.
+// host refuses a command with one unless the user typed that argument:
+// the same argument, with the same values, in the session's own command.
+// "--flag" is a switch. "--flag=*" takes one value, any value.
+// "--flag=a|b" takes one value and counts only with one of these, and
+// "--flag!=a|b" with any value but these. "--flag=..." takes a list of
+// values, up to the next argument that starts with "-". A value is joined
+// with "=", joined to a short flag, or the next argument. The value "{}"
+// stands for a JSON object.
 DangerFlags []string `json:"danger_flags,omitempty"`
 // DangerText is text that makes any argument dangerous, such as
 // "bypassPermissions" inside a --settings value. The host checks it as it
-// checks DangerFlags.
+// checks DangerFlags. It checks the argument as written, and the keys and
+// strings that it decodes to: a JSON object, or a key=value override
+// whose value is TOML. "key!=a|b" is that key with any value but these,
+// and "key=*" is that key with any value.
 DangerText []string `json:"danger_text,omitempty"`
 // StateDirs are folders, or single files, under the home that a resume
 // needs. A sandbox keeps them across starts, and nothing else in the home.
@@ -1556,15 +1566,19 @@ Values for the first-class agents:
 | `Secrets` | `ANTHROPIC_API_KEY` in `x-api-key`, prefix `sk-ant-api03-` (UNVERIFIED: no source in build facts, and P2.3's manual check confirms it). `ANTHROPIC_AUTH_TOKEN` in `Authorization: Bearer`. `CLAUDE_CODE_OAUTH_TOKEN` in `Authorization: Bearer`, prefix `sk-ant-oat01-` (the header is UNVERIFIED, 7.3). | `OPENAI_API_KEY` in `Authorization: Bearer`, with the `Store` command `codex login --with-api-key`. `CODEX_API_KEY` in the same header, for `codex exec`. |
 | `CAEnv` | `NODE_EXTRA_CA_CERTS` | `CODEX_CA_CERTIFICATE`, `SSL_CERT_FILE` |
 | `IDPattern` | a UUID: `^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$` | a UUID, as above: Codex makes UUIDv7 IDs |
-| `DangerFlags` | `--dangerously-skip-permissions`, `--allow-dangerously-skip-permissions`, `--permission-mode=bypassPermissions` | `--dangerously-bypass-approvals-and-sandbox`, `--yolo`, `--dangerously-bypass-hook-trust`, `--approve-for-me`, `--not-so-yolo`, `--profile`, `-p` |
-| `DangerText` | `bypassPermissions`, which also catches `--permission-mode bypassPermissions` and a `--settings` value | `danger-full-access`, `approval_policy`, `sandbox_mode`, which catch `-s danger-full-access` and `-c` values |
+| `DangerFlags` | `--dangerously-skip-permissions`, `--allow-dangerously-skip-permissions`, `--permission-mode!=default\|manual\|plan` (every other mode, `acceptEdits`, `auto`, `dontAsk` or `bypassPermissions`, changes what runs without a prompt), `--allowedTools=...`, `--allowed-tools=...` and `--add-dir=...` (each takes a list), `--plugin-dir=*`, `--plugin-url=*` (a plugin can bring hooks), and `--settings!={}` (a path to a settings file, which no check can read) | `--dangerously-bypass-approvals-and-sandbox`, `--yolo`, `--dangerously-bypass-hook-trust`, `--approve-for-me`, `--not-so-yolo`, `--profile=*`, `-p=*`, `-a=never`, `--ask-for-approval=never`, `--add-dir=*` and `--search`, which widen what the agent may do without a prompt, and `--enable=web_search\|web_search_request` (`--enable FEATURE` is `-c features.FEATURE=true`: `FeatureToggles` in `cli/src/main.rs`) |
+| `DangerText` | `bypassPermissions`, `defaultMode!=default\|manual\|plan`, `permissionMode!=default\|manual\|plan` (a subagent in `--agents`), `permissions.allow`, `additionalDirectories` (the settings form of `--add-dir`), `PermissionRequest` and `PreToolUse` (hooks that can approve a tool call), and `autoAllowBashIfSandboxed!=false` and `sandbox.enabled!=false` (sandboxed Bash runs without a prompt, and the first is true by default). They catch `--permission-mode bypassPermissions`, and the decoded values of `--settings` and `--agents`. | `danger-full-access`, `approval_policy`, `sandbox_mode`, `approvals_reviewer`, `default_permissions`, `permissions=*`, `permissions.`, `profile=*`, `sandbox_workspace_write`, and the `-c` forms of the flags: `web_search!=disabled\|cached\|false` (`--search` sets `web_search="live"`, and the default is `cached`), `web_search_request!=false` (a legacy toggle for `live`) and `hooks.state` (where hook trust is kept). They catch `-s danger-full-access`, and the keys of `-c` with their values decoded as TOML. |
 | `StateDirs` | `.claude/projects` | `.codex/sessions`, `.codex/archived_sessions`, and the file `.codex/state_5.sqlite`, which holds thread names. Whether a resume by ID needs the file is UNVERIFIED. P2.17 checks it, as a manual check for the owner if it needs a prompt, and drops the file if not. |
 | `InstallDirs` | `.local/share/claude` | none: the binary's folder is enough |
 | `ProjectFiles` | `.claude/`, `CLAUDE.md`, `.mcp.json` | `AGENTS.md`, `.codex/` |
 | `Fork` | `claude --resume {agent_session_id} --fork-session` ([CLI reference](https://code.claude.com/docs/en/cli-reference)) | `codex --no-daemon fork {agent_session_id}`: a unit test in Codex keeps `--no-daemon` before `fork` |
 | `ModelGuard` | wire `anthropic-messages` on `api.anthropic.com`. Paths and tool types from recordings (P2.4). `Search` holds the `web_search_*` type that Claude Code's WebSearch uses. | wire `openai-responses` on `api.openai.com` and `chatgpt.com`, with `WebSocket` on. Paths and tool types from recordings (P2.4). |
 
-The values come from each agent's docs or source on 10 November 2026 ([build facts](../research/build-facts.md#1-agent-data)). A list of flags cannot see a settings file: Claude Code also starts in bypass mode from `permissions.defaultMode` in the user's settings. In a sandbox the home is new at each start (7.1), so no such file stays. `Egress` leaves three kinds of host out on purpose. `downloads.claude.ai` is the updater, and agents do not update in a sandbox ([question 21](#15-open-questions)). `mcp-proxy.anthropic.com` serves claude.ai connectors, which a rule can grant. The telemetry hosts are optional. Both agents read the proxy variables themselves, and neither runs on Node. Claude Code's `LoginFiles` also gain `~/.config/anthropic/`, where a keyless Console sign-in keeps its profile (P2.17).
+The values come from each agent's docs or source on 10 November 2026 ([build facts](../research/build-facts.md#1-agent-data)). A list of flags cannot see a settings file. So `--settings` with a path is refused, but Claude Code also starts in bypass mode from `permissions.defaultMode` in the user's own settings. In a sandbox the home is new at each start (7.1), so no such file stays.
+
+`DangerFlags` and `DangerText` are a deny list. They catch a bug in the table, an old manifest, or a flag that a helper of another version wrote. They cannot list every spelling in every version of an agent, and until phase 1 the agent can write the manifest that the check reads, so the check is not a wall. Each new version of an agent needs its flags checked again, by the watch of P0.9 or a step of the release.
+
+`Egress` leaves three kinds of host out on purpose. `downloads.claude.ai` is the updater, and agents do not update in a sandbox ([question 21](#15-open-questions)). `mcp-proxy.anthropic.com` serves claude.ai connectors, which a rule can grant. The telemetry hosts are optional. Both agents read the proxy variables themselves, and neither runs on Node. Claude Code's `LoginFiles` also gain `~/.config/anthropic/`, where a keyless Console sign-in keeps its profile (P2.17).
 
 The agent table also gets a hint for each agent about a low-value token that a `shared` host may get, such as a token from `claude setup-token` (14.2.3). The size of a sandbox for each agent is data there too ([question 14](#15-open-questions)).
 

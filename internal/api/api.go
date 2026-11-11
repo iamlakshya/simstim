@@ -2,7 +2,10 @@
 // It has no dependencies, so the client stays small and portable.
 package api
 
-import "time"
+import (
+	"fmt"
+	"time"
+)
 
 // Session states.
 const (
@@ -161,11 +164,23 @@ type SetupResult struct {
 
 // RestoreResult is one session that restore looked at.
 type RestoreResult struct {
-	ID     string   `json:"id"`
-	Name   string   `json:"name"`
-	Action string   `json:"action"` // restored, skipped, failed
-	Why    string   `json:"why,omitempty"`
-	Argv   []string `json:"argv,omitempty"`
+	ID     string `json:"id"`
+	Name   string `json:"name"`
+	Action string `json:"action"` // restored, skipped, failed
+	Why    string `json:"why,omitempty"`
+	// Hint is what to try next, after a failure that has one.
+	Hint string   `json:"hint,omitempty"`
+	Argv []string `json:"argv,omitempty"`
+}
+
+// Text is the result as `host restore` and the boot-time restore print
+// it: one line, and the hint on a line of its own.
+func (r RestoreResult) Text() string {
+	s := fmt.Sprintf("%-10s %-20s %-9s %s\n", r.ID, r.Name, r.Action, r.Why)
+	if r.Hint != "" {
+		s += "    Try: " + r.Hint + "\n"
+	}
+	return s
 }
 
 // Port is a TCP port a session's processes listen on.

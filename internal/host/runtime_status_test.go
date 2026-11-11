@@ -109,11 +109,21 @@ func TestStatusFromHooks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	send(t, s.ID, "echo '{\"session_id\":\"abc-123\",\"source\":\"startup\"}' | "+hookCommand(t, h, "SessionStart"))
+	// An ID that is not a UUID could be a flag for claude's resume command.
+	// The holder does not keep it, and its log says why. The hooks run in
+	// turn, so the second ID is the only one in the history.
+	const id = "3f2b8c1e-9d4a-4e6b-8f7c-1a2b3c4d5e6f"
+	send(t, s.ID, "echo '{\"session_id\":\"--dangerously-skip-permissions\",\"source\":\"startup\"}' | "+hookCommand(t, h, "SessionStart"))
+	send(t, s.ID, "echo '{\"session_id\":\""+id+"\",\"source\":\"clear\"}' | "+hookCommand(t, h, "SessionStart"))
 	hosttest.WaitFor(t, 10*time.Second, "the agent's own session ID", func() bool {
 		a := live(t, s.ID).Agent
-		return a.AgentSessionID == "abc-123" && a.IDSource == "hook" && len(a.IDHistory) == 1
+		return a.AgentSessionID == id && a.IDSource == "hook" && len(a.IDHistory) == 1
 	})
+	log, err := os.ReadFile(paths.HolderLog(s.ID))
+	if err != nil || !strings.Contains(string(log), `msg="session ID from a hook not kept"`) ||
+		!strings.Contains(string(log), "id=--dangerously-skip-permissions") {
+		t.Errorf("the holder's log does not say why it kept no ID (%v):\n%s", err, log)
+	}
 	send(t, s.ID, "echo '{\"message\":\"Claude needs your permission\"}' | "+hookCommand(t, h, "Notification"))
 	m := waitStatus(t, s.ID, host.StateNeedsInput, "notify")
 	if m.Status.Reason != "Claude needs your permission" {

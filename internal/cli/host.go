@@ -363,7 +363,7 @@ func hostRestoreCmd() *cobra.Command {
 				fmt.Printf("Nothing to restore on %s.\n", h.Name)
 			}
 			for _, r := range res {
-				fmt.Printf("%-10s %-20s %-9s %s\n", r.ID, r.Name, r.Action, r.Why)
+				fmt.Print(r.Text())
 			}
 			return nil
 		},

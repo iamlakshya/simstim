@@ -16,6 +16,7 @@ import (
 	"github.com/iamlakshya/simstim/internal/api"
 	"github.com/iamlakshya/simstim/internal/brand"
 	"github.com/iamlakshya/simstim/internal/paths"
+	"github.com/iamlakshya/simstim/internal/proto"
 )
 
 // RestoreResult is one session that restore looked at.
@@ -77,6 +78,10 @@ func restoreOne(id, boot string, all bool) (RestoreResult, bool) {
 		r.Argv = argv
 		if err != nil {
 			r.Action, r.Why = "failed", err.Error()
+			var pe *proto.Error
+			if errors.As(err, &pe) {
+				r.Hint = pe.Hint
+			}
 			break
 		}
 		r.Action, r.Why = "restored", why
@@ -103,7 +108,11 @@ type again struct {
 // returns the command and what it does, such as "continued the latest
 // conversation in its folder".
 func startAgain(m *Manifest, a again) (argv []string, why string, err error) {
-	argv, why = resumeArgv(m)
+	argv, why, err = resumeArgv(m)
+	if err != nil {
+		return nil, why, err
+	}
+	dropUnusableID(m)
 	m.Agent.Argv = argv
 	m.Env = withHookSocket(m.Env, m.ID)
 	m.RunHook = m.ResumeHook
@@ -139,7 +148,8 @@ func startAgain(m *Manifest, a again) (argv []string, why string, err error) {
 // resumeArgv picks how to bring an agent back, in this order:
 //
 //  1. the agent's resume command with its own session ID, when the table
-//     gives a resume command and the session recorded an ID;
+//     gives a resume command and the session recorded an ID that may enter
+//     it (idUnusable);
 //  2. the command that the user gave the session, if any;
 //  3. the agent's continue command: "continue the latest in this folder";
 //  4. a fresh start with the command of the last start.
@@ -148,13 +158,22 @@ func startAgain(m *Manifest, a again) (argv []string, why string, err error) {
 // the user's own command, as before Command. The user's command comes from
 // Command, which no start changes. An older manifest has no Command: a
 // command without an agent then starts fresh from Argv, which still holds it.
-func resumeArgv(m *Manifest) ([]string, string) {
+//
+// A resume command that an older helper saved without its "--" gets the
+// agent's current one (agents.Agent.ResumeTemplate). The hooks' and the
+// inline mode's arguments go before a "--" in the command, so that the ID
+// after it stays a positional argument. The command is refused when it
+// holds a run of arguments that turns the agent's own approvals off
+// (agents.Agent.Dangers), unless the user's own command holds the same run.
+func resumeArgv(m *Manifest) ([]string, string, error) {
+	agent, _ := agents.Find(m.Agent.Kind)
 	vars := map[string]string{"agent_session_id": m.Agent.AgentSessionID}
 	var argv []string
 	why := "started fresh"
 	switch {
-	case m.Agent.AgentSessionID != "" && len(m.Agent.ResumeArgv) > 0:
-		argv, why = agents.Expand(m.Agent.ResumeArgv, vars), "resumed its own session "+m.Agent.AgentSessionID
+	case len(m.Agent.ResumeArgv) > 0 && idUnusable(agent, m.Agent) == nil:
+		argv = agents.Expand(agent.ResumeTemplate(m.Agent.ResumeArgv), vars)
+		why = "resumed its own session " + m.Agent.AgentSessionID
 	case len(m.Agent.Command) > 0:
 		argv, why = slices.Clone(m.Agent.Command), "started its own command again"
 	case len(m.Agent.ContinueArgv) > 0:
@@ -167,7 +186,73 @@ func resumeArgv(m *Manifest) ([]string, string) {
 			argv[i] = LoginShell()
 		}
 	}
-	return append(append(argv, m.Agent.Hooks...), m.Agent.Inline...), why
+	argv = withOptions(argv, m.Agent.Hooks, m.Agent.Inline)
+	for _, sp := range agent.Dangers(argv) {
+		run := argv[sp.I : sp.I+sp.N]
+		if !holdsRun(m.Agent.Command, run) {
+			return nil, why, UserError(dangerRefused,
+				fmt.Sprintf("%s did not start again: you did not type %q, which turns the agent's own approvals off", m.Name, clip(strings.Join(run, " "), 60)),
+				"Start a new session, and put that argument in its command if you want it.")
+		}
+	}
+	return argv, why, nil
+}
+
+// dangerRefused is the code of the error of resumeArgv.
+const dangerRefused = "danger_refused"
+
+// holdsRun reports whether cmd holds run, as consecutive arguments.
+func holdsRun(cmd, run []string) bool {
+	for i := 0; i+len(run) <= len(cmd); i++ {
+		if slices.Equal(cmd[i:i+len(run)], run) {
+			return true
+		}
+	}
+	return false
+}
+
+// errNoID is idUnusable's reason when the session recorded no ID.
+var errNoID = errors.New("the session recorded no agent session ID")
+
+// idUnusable says why a.AgentSessionID, the ID that the session recorded,
+// may not enter the resume command of agent, or returns nil when it may. A
+// hook can report any text as the ID, such as a flag, and an older helper
+// kept it. So the ID must match the agent's IDPattern, wherever it came
+// from. An ID that the host chose itself needs no match (spec 8.6).
+func idUnusable(agent agents.Agent, a AgentInfo) error {
+	switch {
+	case a.AgentSessionID == "":
+		return errNoID
+	case a.IDSource == "chosen":
+		return nil
+	}
+	return agent.CheckID(a.AgentSessionID)
+}
+
+// dropUnusableID drops the agent session ID that session m recorded when
+// it may not enter a resume command (idUnusable). The session then comes
+// back without it, and the session's holder log says why.
+func dropUnusableID(m *Manifest) {
+	agent, _ := agents.Find(m.Agent.Kind)
+	why := idUnusable(agent, m.Agent)
+	if why == nil || errors.Is(why, errNoID) {
+		return
+	}
+	if l, err := openHolderLog(paths.HolderLog(m.ID), holderLogMax); err == nil {
+		newHolderLog(l, nil).Warn("saved session ID not used", "reason", why.Error(), "kind", m.Agent.Kind, "id", clip(m.Agent.AgentSessionID, 80))
+		_ = l.Close()
+	}
+	m.Agent.AgentSessionID, m.Agent.IDSource = "", ""
+}
+
+// withOptions returns argv with the arguments of opts added: before the
+// first "--", which ends the agent's options, or else at the end.
+func withOptions(argv []string, opts ...[]string) []string {
+	extra := slices.Concat(opts...)
+	if i := slices.Index(argv, "--"); i >= 0 {
+		return slices.Concat(argv[:i], extra, argv[i:])
+	}
+	return slices.Concat(argv, extra)
 }
 
 func withLabel(l map[string]string, k, v string) map[string]string {

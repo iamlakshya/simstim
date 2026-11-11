@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/iamlakshya/simstim/internal/agents"
 	"github.com/iamlakshya/simstim/internal/brand"
 	"github.com/iamlakshya/simstim/internal/paths"
 	"github.com/iamlakshya/simstim/internal/proto"
@@ -134,10 +135,8 @@ func (h *Holder) applyHook(ev HookEvent) {
 	now := time.Now().UTC()
 	switch ev.Event {
 	case "session-start":
-		if p.SessionID != "" && p.SessionID != h.m.Agent.AgentSessionID {
-			h.m.Agent.AgentSessionID = p.SessionID
-			h.m.Agent.IDSource = "hook"
-			h.m.Agent.IDHistory = append(h.m.Agent.IDHistory, IDEvent{ID: p.SessionID, Source: p.Source, At: now})
+		if !h.keepAgentID(p.SessionID, p.Source, now) {
+			return // the event changes nothing
 		}
 	case "prompt":
 		h.hookBusy, h.needInput, h.notifyMsg = true, false, ""
@@ -155,4 +154,32 @@ func (h *Holder) applyHook(ev HookEvent) {
 	}
 	h.hookSeen = true
 	h.dirty = true
+}
+
+// keepAgentID records id, the agent's own session ID from a session-start
+// hook, for the agent's resume command (resumeArgv). A hook runs what the
+// agent tells it to, so the ID can be any text, such as a flag that turns
+// the agent's approvals off at its next start. The holder keeps the ID only
+// when it has the form of the agent's IDs (agents.Agent.CheckID), even when
+// it is the ID that the session already has: an older helper kept any ID.
+// If it does not, the holder logs why and reports false. The caller holds
+// h.mu.
+func (h *Holder) keepAgentID(id, source string, now time.Time) bool {
+	if id == "" {
+		return true
+	}
+	agent, _ := agents.Find(h.m.Agent.Kind)
+	if err := agent.CheckID(id); err != nil {
+		h.log.Warn("session ID from a hook not kept", "reason", err.Error(), "kind", h.m.Agent.Kind, "id", clip(id, 80))
+		return false
+	}
+	if id == h.m.Agent.AgentSessionID {
+		// The startup hook repeats the ID that the host chose. The hook
+		// counts as seen, and the history gets no second entry.
+		return true
+	}
+	h.m.Agent.AgentSessionID = id
+	h.m.Agent.IDSource = "hook"
+	h.m.Agent.IDHistory = append(h.m.Agent.IDHistory, IDEvent{ID: id, Source: source, At: now})
+	return true
 }
