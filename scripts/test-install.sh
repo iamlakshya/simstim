@@ -22,9 +22,12 @@ goreleaser release --snapshot --clean --skip=publish,sign,sbom >"$work/build.log
     { cat "$work/build.log" >&2; exit 1; }
 version=$(sed -n 's/.*"version":"\([^"]*\)".*/\1/p' dist/metadata.json)
 
-# A throwaway key stands in for the release key.
+# Two throwaway keys stand in for the release keys, as while a rotation lists
+# the old key and the new one.
 ssh-keygen -q -t ed25519 -N '' -C test -f "$work/key"
-signers="release namespaces=\"file\" $(cut -d' ' -f1,2 "$work/key.pub")"
+ssh-keygen -q -t ed25519 -N '' -C test2 -f "$work/key2"
+signers="release namespaces=\"file\" $(cut -d' ' -f1,2 "$work/key.pub")
+release namespaces=\"file\" $(cut -d' ' -f1,2 "$work/key2.pub")"
 mkdir "$work/www"
 cp dist/*.tar.gz dist/checksums.txt "$work/www/"
 ssh-keygen -q -Y sign -n file -f "$work/key" "$work/www/checksums.txt"
@@ -46,6 +49,15 @@ run "$work/ok" >"$work/ok.log" 2>&1 || { cat "$work/ok.log" >&2; exit 1; }
 grep -q "signature and checksum verified" "$work/ok.log"
 echo "test-install: ok, a signed release installs and runs"
 
+# 1b. A release signed by the other listed key installs too.
+cp "$work/www/checksums.txt.sig" "$work/sig.first"
+cp "$work/www/checksums.txt" "$work/c2" && ssh-keygen -q -Y sign -n file -f "$work/key2" "$work/c2"
+cp "$work/c2.sig" "$work/www/checksums.txt.sig"
+run "$work/ok2" >"$work/ok2.log" 2>&1 || { cat "$work/ok2.log" >&2; exit 1; }
+"$work/ok2/$APP_NAME" version >/dev/null
+echo "test-install: ok, a release signed by the second listed key installs"
+cp "$work/sig.first" "$work/www/checksums.txt.sig"
+
 expect_fail() { # expect_fail <what> <message>
     if run "$work/bad" >"$work/bad.log" 2>&1; then
         echo "test-install: FAIL, installed despite $1" >&2
@@ -62,7 +74,7 @@ echo "0000000000000000000000000000000000000000000000000000000000000000  extra.ta
 expect_fail "changed checksums" "does not match the release key"
 cp "$work/checksums.good" "$work/www/checksums.txt"
 
-# 3. A signature by another key is refused.
+# 3. A signature by a third key, which is not listed, is refused.
 cp "$work/www/checksums.txt.sig" "$work/sig.good"
 ssh-keygen -q -t ed25519 -N '' -C other -f "$work/other"
 cp "$work/www/checksums.txt" "$work/c" && ssh-keygen -q -Y sign -n file -f "$work/other" "$work/c"

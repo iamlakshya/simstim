@@ -19,10 +19,13 @@ import (
 	"time"
 )
 
-// ReleaseSigner is the key that signs every release's checksums.txt, as an
-// allowed-signers line for ssh-keygen. It is the same as
+// ReleaseSigners are the keys that sign releases' checksums.txt, as
+// allowed-signers lines for ssh-keygen, one line for each key. A signature by
+// any of them passes. During a key rotation the new key is listed beside the
+// old one, until a release that the new key signed ships
+// (docs/contributing/releasing.md). It is the same list as
 // .github/release-signers and install.sh's; a test keeps them equal.
-const ReleaseSigner = `release namespaces="file" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGyv3BRbYeIpUvqwia5q4CuqngP+aUzouWZ8x73U2LOy`
+const ReleaseSigners = `release namespaces="file" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGyv3BRbYeIpUvqwia5q4CuqngP+aUzouWZ8x73U2LOy`
 
 // fetched holds helpers downloaded from a release, for a client built
 // without them (go install).
@@ -141,8 +144,8 @@ func httpGet(ctx context.Context, url string) ([]byte, error) {
 	return b, nil
 }
 
-// signer is the allowed-signers line; tests replace it.
-var signer = ReleaseSigner
+// trusted holds the allowed-signers lines; tests replace it.
+var trusted = ReleaseSigners
 
 // verifySignature checks checksums.txt against its SSH signature with
 // ssh-keygen, which every machine with OpenSSH has.
@@ -153,7 +156,7 @@ func verifySignature(ctx context.Context, sums, sig []byte) error {
 	}
 	defer os.RemoveAll(dir)
 	signers, sigFile := filepath.Join(dir, "signers"), filepath.Join(dir, "sig")
-	if err := os.WriteFile(signers, []byte(signer+"\n"), 0o600); err != nil {
+	if err := os.WriteFile(signers, []byte(trusted+"\n"), 0o600); err != nil {
 		return fmt.Errorf("verify the release: %w", err)
 	}
 	if err := os.WriteFile(sigFile, sig, 0o600); err != nil {

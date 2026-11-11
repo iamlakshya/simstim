@@ -5169,25 +5169,35 @@ The supervisor also opens the tools image, the user's image and the agents disk,
 
 ### 20.7 A signed-tag release gate (P4.4)
 
-**Behaviour.** `release.yml` builds only from an annotated tag that a key in `.github/tag-signers` signed. That file comes from the protected `main` branch, never from the tag. The maintainer's tag key is a hardware `sk-ssh-ed25519` key ([question 30](#15-open-questions)).
+**Behaviour.** `release.yml` builds only from an annotated tag that a key in `.github/tag-signers` signed. That file comes from the protected `main` branch, never from the tag. So does the gate itself: the job runs `main`'s copy of `scripts/verify-tag.sh`, so a tag cannot bring its own gate. The maintainer's tag key is a hardware `sk-ssh-ed25519` key ([question 30](#15-open-questions)).
 
-**The steps,** in `scripts/verify-tag.sh`, which the release job runs before any build step:
+**The steps.** The release job runs them before any build step. Step 1 is in `release.yml`, and the rest are in `scripts/verify-tag.sh`:
 
-1. `actions/checkout` is pinned by SHA, at v6.0.2 or later, with `fetch-depth: 0`. Before v6.0.2 it could turn an annotated tag into a lightweight one. The job pins v7.0.1 today.
-2. The script checks that `git --version` is 2.34 or later, and that `ssh -V` is OpenSSH 8.8 or later. Git's notes warn against 8.7.
-3. It runs `git fetch --force origin main "+refs/tags/$TAG:refs/tags/$TAG"`.
-4. It checks that `git cat-file -t "$TAG"` says `tag`. A lightweight tag fails here.
-5. It runs `git show origin/main:.github/tag-signers > "$RUNNER_TEMP/signers"`.
-6. It runs `git -c gpg.ssh.allowedSignersFile="$RUNNER_TEMP/signers" verify-tag "$TAG"`.
-7. It checks that `git rev-parse "$TAG^{commit}"` equals `git rev-parse HEAD`, so the job builds the commit that it verified. Then it checks that `git merge-base --is-ancestor "$TAG^{commit}" origin/main` succeeds, so the tagged commit is on `main`.
+1. `actions/checkout` is pinned by SHA, at v6.0.2 or later, with `fetch-depth: 0`. Before v6.0.2 it could turn an annotated tag into a lightweight one. The job pins v7.0.1 today. The gate fetches the tag again, so it does not rely on the checkout's copy. After the checkout, the job runs `git fetch --force origin +refs/heads/main:refs/remotes/origin/main`. It writes `git show refs/remotes/origin/main:scripts/verify-tag.sh` to a file under `$RUNNER_TEMP`, and runs that copy with `bash`. It never runs the tagged commit's copy. Both fetches use no token, on purpose. This repository is public, and a token in the gate would be one more secret that a tag's run can reach. A private fork must give the gate's fetch a read-only token, and remove it before the build.
+2. The script checks that it has one argument, the tag, and that the tag's name does not start with `-`. `git tag` cannot make such a tag, so the hint deletes it by its full ref. It checks that `git --version` is 2.34 or later, and that `ssh -V` is OpenSSH 8.8 or later. Git's notes warn against 8.7.
+3. It runs `git fetch --force origin "+refs/heads/main:refs/remotes/origin/main" "+refs/tags/$TAG:refs/tags/$TAG"`. The full refspec for `main` updates `origin/main` whatever the clone's fetch settings are.
+4. It checks that `git cat-file -t "refs/tags/$TAG"` says `tag`. A lightweight tag fails here.
+5. It runs `git show "refs/remotes/origin/main:.github/tag-signers" > "$dir/signers"`, in a temporary folder under `$RUNNER_TEMP`. Each line that is not a comment or blank must be a hardware key for git signatures: `<principal> namespaces="git" sk-ssh-ed25519@openssh.com <key> [<comment>]`, or the same with `sk-ecdsa-sha2-nistp256@openssh.com`. A line with another kind of key, no namespace or more options fails.
+6. It runs `git -c gpg.ssh.program=ssh-keygen -c gpg.ssh.allowedSignersFile="$dir/signers" verify-tag "refs/tags/$TAG"`. The pin keeps any git config from naming another program. Only an SSH signature counts. The last signature block of the tag must be `-----BEGIN SSH SIGNATURE-----`. Otherwise git checks it against the runner's own GPG keys. Then the script checks that the `tag` line of `git cat-file tag "refs/tags/$TAG"` names `$TAG`. So the signed tag of an older release cannot pass under a new name.
+7. It checks that the tag names a commit, and that `git rev-parse "refs/tags/$TAG^{commit}"` equals `git rev-parse HEAD`. So the job builds the commit that it verified. Then it checks that `git merge-base --is-ancestor "refs/tags/$TAG^{commit}" refs/remotes/origin/main` succeeds, so the tagged commit is on `main`.
 8. Any failure stops the job before the first build step.
+
+GoReleaser builds the tag that the gate checked: `release.yml` sets `GORELEASER_CURRENT_TAG` to the pushed tag. Without it, GoReleaser picks the highest version among the tags on the commit, which may be another, unsigned tag.
 
 **`.github/tag-signers`.** One line for each maintainer's key, in the allowed signers format: `<email> namespaces="git" sk-ssh-ed25519@openssh.com AAAA… <comment>`. The job needs no hardware key to check a signature.
 
-**The limit.** On a tag push, the job checks out the tagged commit. The workflow file probably comes from that commit too (UNVERIFIED: GitHub's docs do not say so in these words). So a tag on a commit that changes `release.yml` could skip the gate. Two settings close this, and `docs/contributing/releasing.md` lists both:
+**The release environment.** The release job names the environment `release`. The release key (`RELEASE_SSH_KEY`) and the tap token (`HOMEBREW_TAP_TOKEN`) are secrets of that environment, never of the repository. A deployment rule lets only tags that match `v*` use it. The owner sets this up by hand, with a new release key, because GitHub never shows a secret again. The rotation has two steps, so that `install.sh` and the client can always check the latest release. First the new public key is listed beside the old one, and a release signed by the new key ships. Then a later pull request removes the old key (`docs/contributing/releasing.md`). Until then, the job reads the repository's secret.
+
+**The limit.** On a tag push, the job checks out the tagged commit. The workflow file probably comes from that commit too (UNVERIFIED: GitHub's docs do not say so in these words). This leaves two ways around the gate:
+
+- A tag on a commit that changes `release.yml` itself. The gate's script comes from `main`, so a change to it alone changes nothing.
+- A tag on a commit from before the gate, such as the commit of 0.1.2. That commit's `release.yml` has no gate, and the tag can be lightweight or unsigned. Its job does not name the release environment, so it reads an empty release key. GoReleaser still makes a draft release with `GITHUB_TOKEN`, and cosign signs its checksums with the workflow's identity, which the cosign check in `releasing.md` accepts. Then the step that signs with the release key fails, and the job stops. So the draft has no `checksums.txt.sig`, no attestation and no provenance. `install.sh` and the client's download of helpers refuse a release without that signature.
+
+Three settings narrow these, and `docs/contributing/releasing.md` lists them:
 
 - A tag ruleset on `refs/tags/v*` that lets only the owner create, move or delete those tags.
 - Branch protection on `main`, so that commits reach it only through reviewed pull requests.
+- The release environment, which holds the release secrets, with no copy at the repository level.
 
 Step 7 catches a tag on an unreviewed branch by mistake. It does not stop a person who can change the workflow in the tagged commit.
 
@@ -5195,22 +5205,43 @@ Step 7 catches a tag on an unreviewed branch by mistake. It does not stop a pers
 
 | When | Message | Try |
 | --- | --- | --- |
-| A lightweight tag | `release: v0.6.0 is a lightweight tag, and a release needs a signed annotated tag.` | `git tag -s v0.6.0 -m v0.6.0`, then push the tag again |
-| No good signature | `release: v0.6.0 is not signed by a key in .github/tag-signers on main.` | Sign it with your key from that file. Add a new key to the file through a pull request first. |
+| No argument | `release: verify-tag.sh needs one argument, the tag to check.` | Pass the tag, as in `verify-tag.sh v0.6.0` |
+| No gate on `main` | `release: cannot read scripts/verify-tag.sh from main. The gate fetches with no token, so it needs a public repository.` | Run the release job again. If it fails again, check that `main` has the script. A private fork must give the gate's fetch a read-only token, and remove it before the build. |
+| A name that starts with `-` | `release: -v1 starts with "-", and git tag cannot make a tag with that name.` | Delete it by its full ref, with `git push --delete origin refs/tags/-v1` and `git update-ref -d refs/tags/-v1`, then choose a release tag name that starts with `v` |
+| A lightweight tag | `release: v0.6.0 is a lightweight tag, and a release needs a signed annotated tag.` | `git tag -s -f -m v0.6.0 -- v0.6.0 <commit>`, then `git push --force origin refs/tags/v0.6.0`. The hint names the commit that the tag names now. It quotes each value for the shell, because a tag name may hold `;`, `$(…)`, quotes or a leading `-`. |
+| A bad line in the list | `release: line 3 of .github/tag-signers on main is not a hardware key with namespaces="git".` | Fix the line through a pull request |
+| No good signature | `release: v0.6.0 is not signed by a key in .github/tag-signers on main.` | Sign it with your key from that file, as for a lightweight tag. If your key is new, add it to the file through a pull request first. |
+| An old signed tag under a new name | `release: v0.6.0 is a signed tag made for v0.5.0, under another name.` | If you did not push it, delete it and find out who did. Otherwise, the commands of a lightweight tag, with the commit that the tag names now. |
+| Not a commit | `release: v0.6.0 does not name a commit.` | Tag a commit that is on `main` |
 | Not on main | `release: the commit of v0.6.0 is not on main.` | Tag a commit that is on `main` |
-| A moved tag | `release: v0.6.0 now names another commit than the one this job checked out.` | Run the release job again for the tag |
-| Old tools | `release: the runner has OpenSSH 8.7, and the check needs 8.8 or later.` | Pin a newer runner image in `release.yml` |
+| A moved tag | `release: v0.6.0 now names another commit than the one this job checked out.` | The push that moved the tag starts its own release run, which checks the tag again. Use that run. |
+| Old tools | `release: the runner has OpenSSH 8.7, and the check needs 8.8 or later.` The same for git before 2.34. | Pin a newer runner image in `release.yml` |
+| No list on `main` | `release: main has no .github/tag-signers, so no key may sign a release.` | Add the file to `main` through a pull request, with the line of your tag key |
+| No temporary folder | `release: cannot make a temporary folder in /home/runner/work/_temp.` | Run the release job again |
+| The fetch fails | `release: cannot fetch main and v0.6.0 from origin. The gate fetches with no token, so it needs a public repository.` | Run the release job again. If it fails again, check that the tag v0.6.0 still exists. A private fork must give the gate's fetch a read-only token, and remove it before the build. |
 
-**Tests.** `scripts/test-verify-tag.sh`, which CI runs on each pull request. It makes a temporary repository and an ed25519 key with no passphrase, and runs `scripts/verify-tag.sh` on these tags:
+**Tests.** `scripts/test-verify-tag.sh`, which CI runs on each pull request. It makes a temporary repository and ed25519 keys with no passphrase. Each run of the gate is in a checkout made as `actions/checkout` makes it: fetched from origin, detached at the tag, with no local `main`. Most cases run the gate's step as `release.yml` has it, which runs `main`'s copy. The test cannot make a hardware key, so `main`'s copy also takes plain ed25519 keys. Cases that run the shipped gate check the hardware rule. The test checks these:
 
+- The gate is the release job's first step after the checkout. The job names the release environment, and the GoReleaser step sets `GORELEASER_CURRENT_TAG` from the pushed tag.
 - A tag signed by a listed key passes.
-- An unsigned annotated tag fails, and a lightweight tag fails.
-- A tag signed by a key that is not listed fails.
+- An unsigned annotated tag and a lightweight tag each fail. The hint for a lightweight tag names its commit.
+- A tag whose last block is a PGP signature fails, and so does one with an SSH block before that PGP block. A stand-in `gpg` on `PATH` calls every signature good.
+- A tag signed by a key that is not listed fails. It also fails when a git config names a stand-in `ssh-keygen` that calls every signature good.
 - A tag whose own commit adds its key to `.github/tag-signers` fails, because the file comes from `main`.
+- A tag whose own commit replaces `scripts/verify-tag.sh` with `exit 0` fails, because the job runs `main`'s copy.
 - A tag on a commit that is not on `main` fails.
 - A tag that names another commit than `HEAD` fails.
+- The signed tag of an older release, under a new name, fails.
+- A tag that origin does not have fails. An origin that refuses the fetch, as a private repository refuses a fetch with no token, fails at the step's fetch and at the gate's fetch, and each message says that the gate needs a public repository.
+- A tag whose name starts with `-` fails with a hint to delete it. The two printed commands, run with the real git, delete it.
+- A runner with git 2.33 or OpenSSH 8.7 fails. Stand-ins on `PATH` print those versions.
+- No argument, no temporary folder, and a signed tag of a tree each fail with a message and a hint.
+- The shipped gate refuses a plain key on `main`'s list. A line with no namespace, another namespace or `cert-authority` fails.
+- The gate fetches `main` again on its own: a key that `main` drops after the checkout no longer signs.
+- A tag fails when `.github/tag-signers` on `main` lists no keys, or when `main` has no `.github/tag-signers`.
+- The repository's own `.github/tag-signers` passes the shipped gate's line check.
 
-The test never pushes a tag.
+The test never pushes a tag. Its origin is a local repository.
 
 ### 20.8 Image policy (P4.5)
 

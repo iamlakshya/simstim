@@ -34,8 +34,11 @@ Completed steps and pending owner-only tasks are listed separately by state belo
 | Turn on GitHub Pages, from GitHub Actions; the docs workflow deploys the site | Done |
 | Review and enable GitHub secret scanning and push protection in the repository's security settings; a local history scan does not enable them | The owner |
 | Ask GitHub Support to purge the old commits by SHA (the request with the SHAs is in `private/`) | The owner |
-| Publish the Homebrew tap: create `homebrew-tap`, and add a token that can write to it as the Actions secret `HOMEBREW_TAP_TOKEN` | The owner |
+| Publish the Homebrew tap: create `homebrew-tap`, and add a token that can write to it as the secret `HOMEBREW_TAP_TOKEN` of the `release` environment ([decision 0041](decisions/0041-a-signed-tag-release-gate.md)) | The owner |
 | Cut the first release, with the steps in [releasing](releasing.md) | Done: 0.1.0, 16 October 2026 |
 | Add the Scorecard badge to the README once the score is 8 or more | Done: 8.1 on 16 October 2026, after the first release and decision 0023 |
 | Apply for the OpenSSF Best Practices badge at <https://www.bestpractices.dev> (it needs an account) | The owner |
+| Make a hardware tag key, and add its line to `.github/tag-signers` through a pull request ([set up your tag key](releasing.md#set-up-your-tag-key)). Until then, the release job refuses every tag. | The owner |
+| Add a tag ruleset on `refs/tags/v*` that lets only the owner create, move or delete those tags ([the settings the gate needs](releasing.md#the-settings-the-gate-needs)) | The owner |
+| Make the `release` environment with a deployment rule for tags `v*`, rotate the release key into it in two steps, and delete the repository's `RELEASE_SSH_KEY` ([set up the release environment](releasing.md#set-up-the-release-environment)) | The owner |
 | Announce it | The owner |
