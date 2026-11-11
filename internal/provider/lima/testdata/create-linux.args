@@ -1,0 +1,8 @@
+create
+--tty=false
+--name=vm
+--plain
+--cpus=2
+--memory=4
+--disk=40
+template:ubuntu-lts
