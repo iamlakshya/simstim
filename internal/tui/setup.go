@@ -78,12 +78,17 @@ func (s *setupAsk) view(m *Model) string {
 	case client.SetupNotTrusted:
 		first = "The repository " + repo + " on " + s.host + " has a setup script, " + script + "."
 	}
-	body := make([]string, 1, 12) // a blank line first
-	for _, l := range []string{
+	body := make([]string, 1, 14) // a blank line first
+	lines := []string{
 		first,
 		"It runs in the session before the agent, as you, with the session's environment and secrets. Say yes only for a repository you trust.",
 		"The answer is kept for this repository on " + s.host + " until the script changes.",
-	} {
+	}
+	// Where a worktree that the start could not remove stays (host text).
+	if s.q.Kept != "" {
+		lines = append(lines, client.CleanPath(s.q.Kept))
+	}
+	for _, l := range lines {
 		body = append(body, wrap(l, w-4)...)
 		body = append(body, "")
 	}

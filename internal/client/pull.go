@@ -1,10 +1,15 @@
 package client
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
-	"strconv"
 	"strings"
+
+	"github.com/iamlakshya/simstim/internal/api"
+	"github.com/iamlakshya/simstim/internal/brand"
+	"github.com/iamlakshya/simstim/internal/proto"
 )
 
 // GitSSHCommand is the ssh command line for GIT_SSH_COMMAND, so git reaches
@@ -32,37 +37,81 @@ func shellWord(s string) string {
 }
 
 // RepoInfo is what pull needs to know about the git repository a session's
-// folder is in, on the host.
-type RepoInfo struct {
-	Root   string // the repository's top folder
-	Branch string // the branch checked out there, or "HEAD" when detached
-	Dirty  int    // files with uncommitted changes
-}
+// folder is in, on the host: its top folder (Root), its branch, or "HEAD"
+// when detached, and the count of files with uncommitted changes (Dirty).
+type RepoInfo = api.RepoInfo
 
-// SessionRepo asks the host about the git repository at dir.
+// SessionRepo asks the host about the git repository at dir. The helper
+// runs git there in its git operation repo.info: with the repository's hooks
+// and fsmonitor off, and in a scope under the sessions' slice when the host
+// has a systemd user manager.
 func SessionRepo(ctx context.Context, h Host, dir string) (RepoInfo, error) {
 	s := &SSH{Host: h}
-	cmd := fmt.Sprintf(`cd %s && git rev-parse --show-toplevel && git rev-parse --abbrev-ref HEAD && git status --porcelain | wc -l`, shellWord(dir))
-	out, err := s.Run(ctx, cmd, nil)
+	req, err := json.Marshal(api.RepoInfoArgs{Dir: dir, Changes: true})
 	if err != nil {
-		return RepoInfo{}, &UserError{Msg: fmt.Sprintf("%s on %s is not in a git repository", CleanPath(dir), h.Name), Hint: "pull works for sessions started in a repository or a worktree"}
+		return RepoInfo{}, fmt.Errorf("write the request for the repository: %w", err)
 	}
-	return parseRepoInfo(string(out))
+	out, err := s.Run(ctx, RemoteHelper(HelperVersion())+" git-op "+api.GitOpRepoInfo, bytes.NewReader(req))
+	if err != nil {
+		return RepoInfo{}, &UserError{Msg: fmt.Sprintf("could not ask %s about the repository at %s: %s", h.Name, CleanPath(dir), CleanLine(err.Error())),
+			Hint: brand.Name + " host doctor " + h.Name}
+	}
+	return parseRepoInfo(h, dir, out)
 }
 
-func parseRepoInfo(out string) (RepoInfo, error) {
-	// The host's output shows escaped to ASCII: it is the host's text.
-	bad := &UserError{Msg: fmt.Sprintf("could not read the repository from %+q", CleanLine(out)),
-		Hint: "check that git works in the session's folder on the host, then pull again"}
-	lines := strings.Split(strings.TrimSpace(out), "\n")
-	if len(lines) < 3 {
-		return RepoInfo{}, bad
+// parseRepoInfo reads the answer of repo.info about dir on h. Each text
+// that it prints from the host passes the cleaner (hostError, CleanLine,
+// CleanPath): a filter of the repository writes what git says.
+func parseRepoInfo(h Host, dir string, out []byte) (RepoInfo, error) {
+	var ans struct {
+		Error *proto.Error  `json:"error"`
+		Repo  *api.RepoInfo `json:"repo"`
 	}
-	dirty, err := strconv.Atoi(strings.TrimSpace(lines[2]))
-	if err != nil {
-		return RepoInfo{}, bad
+	if err := json.Unmarshal(out, &ans); err != nil || (ans.Error == nil && ans.Repo == nil) {
+		// The host's output shows escaped to ASCII: it is the host's text.
+		return RepoInfo{}, &UserError{Msg: fmt.Sprintf("could not read what %s said about the repository at %s: %+q", h.Name, CleanPath(dir), CleanLine(strings.TrimSpace(string(out)))),
+			Hint: brand.Name + " host add " + h.Name + "   (reinstalls the helper)"}
 	}
-	return RepoInfo{Root: strings.TrimSpace(lines[0]), Branch: strings.TrimSpace(lines[1]), Dirty: dirty}, nil
+	switch e := ans.Error; {
+	case e == nil:
+		return *ans.Repo, nil
+	case e.Code == "no_git":
+		return RepoInfo{}, &UserError{Msg: "git is not installed on " + h.Name, Hint: "install git on " + h.Name + ", then pull again", Code: e.Code}
+	case e.Code == "not_a_repo":
+		return RepoInfo{}, &UserError{Msg: fmt.Sprintf("%s on %s is not in a git repository", CleanPath(dir), h.Name), Hint: "pull works for sessions started in a repository or a worktree", Code: e.Code}
+	default:
+		ue := hostErrorOn(h.Name, e)
+		if ue.Hint == "" {
+			ue.Hint = "check the repository with git status on " + h.Name
+		}
+		return RepoInfo{}, ue
+	}
+}
+
+// hostErrorOn is hostError, cleaned, for an answer of host. The helper's
+// git errors say "on this host", and the client names the host instead. A
+// git_scope error's hint runs the host doctor for that host.
+func hostErrorOn(host string, e *proto.Error) *UserError {
+	ue := hostError(e)
+	switch e.Code {
+	case api.CodeGitScope:
+		ue.Hint = brand.Name + " host doctor " + CleanLine(host)
+		fallthrough
+	case api.CodeGitHooks, api.CodeGitTimeout, api.CodeGitVersion:
+		ue.Msg = strings.Replace(ue.Msg, "on this host", "on "+CleanLine(host), 1)
+	}
+	return ue
+}
+
+// WorktreeNote is what a delete on host says about the session's worktree,
+// and what to try when an error kept it, cleaned and formatted as
+// hostErrorOn does.
+func WorktreeNote(host string, res DeleteResult) (note, hint string) {
+	if res.WorktreeCode == "" {
+		return CleanPath(res.Worktree), ""
+	}
+	ue := hostErrorOn(host, &proto.Error{Code: res.WorktreeCode, Message: res.Worktree, Hint: res.WorktreeHint})
+	return ue.Msg, ue.Hint
 }
 
 // FetchArgs is the git fetch that brings branch from the host's repository

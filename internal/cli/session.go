@@ -227,8 +227,13 @@ func killCmd() *cobra.Command {
 				}
 				d := client.CleanSession(*s)
 				fmt.Printf("Deleted %s (%s) on %s.\n", d.Name, d.ID, h.Name)
-				if w := client.CleanPath(res.Worktree); w != "" {
-					fmt.Println(strings.ToUpper(w[:1]) + w[1:] + ".")
+				// WorktreeNote cleans the note and the hint (P0.4).
+				note, hint := client.WorktreeNote(h.Name, res)
+				if note != "" {
+					fmt.Println(strings.ToUpper(note[:1]) + note[1:] + ".")
+				}
+				if hint != "" {
+					fmt.Println("Try: " + hint)
 				}
 				return nil
 			})

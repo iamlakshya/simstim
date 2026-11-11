@@ -3,6 +3,7 @@ package host
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -15,6 +16,7 @@ import (
 	"github.com/iamlakshya/simstim/internal/api"
 	"github.com/iamlakshya/simstim/internal/brand"
 	"github.com/iamlakshya/simstim/internal/paths"
+	"github.com/iamlakshya/simstim/internal/proto"
 )
 
 // Repository setup hooks (roadmap N6). A repository can keep an executable
@@ -44,24 +46,30 @@ var readScripts = setupHash
 // setupHooks picks a new session's hooks for the folder cwd. When the
 // repository has hooks and neither a.Setup nor the user's answers decide, it
 // returns a setup_trust error that asks the user. When a hook cannot run, it
-// returns a setup_outside or setup_unreadable error. Each error first
-// removes the worktree gi that this start made.
+// returns a setup_outside or setup_unreadable error, and when git cannot
+// answer, an error such as git_scope. Each error first removes the worktree
+// gi that this start made. When that removal fails, the error says where
+// the worktree stays, and so does the question's Kept.
 func setupHooks(a NewArgs, cwd string, gi *GitInfo) (sessionHooks, error) {
-	repo, top := repoOf(cwd)
-	h, err := repoHooks(a, repo, top)
-	if err != nil {
-		if gi != nil {
-			discardWorktree(gi)
+	repo, top, err := repoOf(cwd)
+	if err == nil {
+		var h sessionHooks
+		if h, err = repoHooks(a, repo, top); err == nil {
+			if h.setup == "" {
+				h.setup = hostHook("setup")
+			}
+			if h.resume == "" {
+				h.resume = hostHook("resume")
+			}
+			return h, nil
 		}
-		return sessionHooks{}, err
 	}
-	if h.setup == "" {
-		h.setup = hostHook("setup")
+	if gi != nil {
+		if derr := discardWorktree(gi); derr != nil {
+			err = worktreeStays(err, gi)
+		}
 	}
-	if h.resume == "" {
-		h.resume = hostHook("resume")
-	}
-	return h, nil
+	return sessionHooks{}, err
 }
 
 // repoHooks returns the repository's scripts that a new session runs, by
@@ -245,24 +253,53 @@ func scriptSum(root *os.Root, rel string) (string, error) {
 
 // repoOf finds the repository of dir: its main folder, which every worktree
 // of it shares and which keys the user's answer, and dir's own top level,
-// where its hooks are. Outside git, both are dir.
-func repoOf(dir string) (repo, top string) {
-	top, err := git(dir, "rev-parse", "--show-toplevel")
-	if err != nil {
-		return dir, dir
+// where its hooks are. Outside git, or without git, both are dir. git runs
+// in the git operation repo.info, and any other failure of it is an error,
+// such as git_scope: the start does not go on without its answer.
+func repoOf(dir string) (repo, top string, err error) {
+	ans, err := gitOp(gitOpRepoInfo, gitOpRequest{RepoInfoArgs: api.RepoInfoArgs{Dir: dir}})
+	var pe *proto.Error
+	switch {
+	case err == nil && ans.Repo != nil:
+		return ans.Repo.Main, ans.Repo.Root, nil
+	case errors.As(err, &pe) && (pe.Code == "not_a_repo" || pe.Code == "no_git"):
+		return dir, dir, nil
+	case err == nil:
+		err = UserError("git_op", "git-op repo.info gave no answer about "+dir, gitOpHint)
 	}
-	common, err := git(dir, "rev-parse", "--git-common-dir")
-	if err != nil {
-		return top, top
+	return "", "", err
+}
+
+// worktreeStays adds to err that the worktree g, which the start made and
+// could not remove, is still on the host, and how to remove it. A setup
+// question also carries it in its Kept, which the client shows.
+func worktreeStays(err error, g *GitInfo) error {
+	pe := *asProtoError(err)
+	pe.Message += ". " + strings.TrimSuffix(keptNote(g), ".")
+	var q api.SetupQuestion
+	if pe.Code == api.CodeSetupTrust && json.Unmarshal(pe.Data, &q) == nil {
+		q.Kept = keptNote(g)
+		pe.Data, _ = json.Marshal(q)
 	}
-	if !filepath.IsAbs(common) {
-		common = filepath.Join(dir, common)
-	}
-	common = filepath.Clean(common)
-	if filepath.Base(common) == ".git" {
-		return filepath.Dir(common), top
-	}
-	return common, top // a bare repository
+	return &pe
+}
+
+// keptNote says where the worktree g stays, and how to remove it.
+func keptNote(g *GitInfo) string {
+	return fmt.Sprintf("The new worktree %s (branch %s) is still on the host. Remove it there with `%s`.", g.Worktree, g.Branch, removeCommand(g))
+}
+
+// removeCommand is a shell command line that removes the worktree g and its
+// branch: also a locked worktree (force twice), and the record of one whose
+// folder is gone (prune). Each step runs whether the one before worked.
+func removeCommand(g *GitInfo) string {
+	repo := "git -C " + shellArg(g.RepoRoot)
+	return repo + " worktree remove --force --force " + shellArg(g.Worktree) + "; " + repo + " worktree prune; " + repo + " branch -D " + shellArg(g.Branch)
+}
+
+// shellArg quotes s as one word for a POSIX shell, whatever it holds.
+func shellArg(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
 // hostHook is the host's own executable hook of this kind, or "".
@@ -280,10 +317,59 @@ func executable(p string) string {
 }
 
 // discardWorktree removes a worktree this start just made, and its branch.
-func discardWorktree(g *GitInfo) {
+// git runs in a git operation's child.
+func discardWorktree(g *GitInfo) error {
+	_, err := gitOp(gitOpWorktreeDiscard, gitOpRequest{Git: g})
+	return err
+}
+
+// discardWorktreeHere is worktree.discard, in the git operation's child. It
+// also removes what an add that was stopped had begun: a folder that git
+// does not know as a worktree yet, under the helper's own worktrees folder,
+// and a branch without a worktree. It fails when the worktree or the branch
+// stays.
+func discardWorktreeHere(g *GitInfo) error {
+	if g == nil {
+		return nil
+	}
+	hint := "Remove it on the host with git worktree remove --force, then git branch -D."
 	_, _ = git(g.RepoRoot, "worktree", "unlock", g.Worktree)
-	_, _ = git(g.RepoRoot, "worktree", "remove", "--force", g.Worktree)
-	_, _ = git(g.RepoRoot, "branch", "-D", g.Branch)
+	if _, err := os.Lstat(g.Worktree); err == nil {
+		if _, err := git(g.RepoRoot, "worktree", "remove", "--force", g.Worktree); err != nil {
+			if !strings.HasPrefix(g.Worktree, WorktreesDir()+string(filepath.Separator)) {
+				return asUserError(err, "worktree", hint)
+			}
+			if err := os.RemoveAll(g.Worktree); err != nil {
+				return UserError("worktree", "could not remove "+g.Worktree+": "+err.Error(), hint)
+			}
+		}
+	}
+	_, _ = git(g.RepoRoot, "worktree", "prune")
+	if _, err := git(g.RepoRoot, "branch", "-D", g.Branch); err != nil {
+		// Only a branch that git says does not exist is fine. Any other
+		// failure, such as a config that git_hooks refuses, keeps it.
+		if gone, verr := branchMissing(g.RepoRoot, g.Branch); verr != nil || !gone {
+			return asUserError(err, "worktree", hint)
+		}
+	}
+	return nil
+}
+
+// branchMissing reports whether git says that the branch does not exist in
+// the repository at dir. It is an error when git cannot tell.
+func branchMissing(dir, branch string) (bool, error) {
+	hooks, err := configHooks(dir)
+	if err != nil {
+		return false, err
+	}
+	out, code, err := runGit(dir, hooks, "rev-parse", "--verify", "--quiet", "refs/heads/"+branch)
+	switch {
+	case code == 0:
+		return false, nil
+	case code == 1 && out == "": // --verify --quiet: no such ref
+		return true, nil
+	}
+	return false, err
 }
 
 // hookVars tell a hook about its session: its name and folder, whether its

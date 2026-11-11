@@ -86,6 +86,8 @@ type fakeBackend struct {
 	// attachHook runs during each attach, with the lock held: what the
 	// user does in the session.
 	attachHook func(client.AttachOptions)
+	// deleted, when set, is what a delete says, for any session.
+	deleted *client.DeleteResult
 	// debugFile is the launcher's own debug file while its debug is on
 	// (debug_test.go).
 	debugFile string
@@ -335,6 +337,9 @@ func (c *fakeConn) Delete(_ context.Context, id string) (client.DeleteResult, er
 			res := client.DeleteResult{Deleted: true}
 			if s.Name == "api-tests" {
 				res.Worktree = "kept the worktree ~/src/api-tests: it has uncommitted changes"
+			}
+			if c.be.deleted != nil {
+				res = *c.be.deleted
 			}
 			return res, nil
 		}

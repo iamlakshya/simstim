@@ -311,7 +311,7 @@ The isolation spec owns the messages and the hints of its errors. This table own
 | No KVM, no sudo, no passwordless sudo for `--root-step run --yes`, a failed root step, a failed download or checksum, a missing image | 14.14 | `KindFailed` | 1 |
 | A user name that a script cannot use, facts that disagree, waking that is off | 14.14 | `KindFailed` | 1 |
 | A purge while a session works, a helper without the feature | 14.14 | `KindFailed` | 1 |
-| `policy_unreached`, `secret_store`, `git_scope` | 9.3 | `KindFailed` | 1 |
+| `policy_unreached`, `secret_store`, `git_scope`, `git_hooks`, `git_timeout`, `git_version` | 9.3 | `KindFailed` | 1 |
 | `lockdown_confirm` | 9.3 | `KindNeedsAnswer` | 4 |
 | `setup_outside` | 9.3 | `KindRefused` | 5 |
 | `setup_unreadable` | 19.2 | `KindFailed` | 1 |

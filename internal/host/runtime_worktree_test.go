@@ -29,6 +29,7 @@ func repo(t *testing.T, h *hosttest.Host) string {
 }
 
 func TestWorktreeSessions(t *testing.T) {
+	hosttest.SkipOnGit254(t)
 	h := hosttest.New(t)
 	dir := repo(t, h)
 	s, err := host.New(host.NewArgs{Name: "Fix the auth bug!", Cwd: "~/src/app", Worktree: true, Argv: []string{"sleep", "60"}})
@@ -80,6 +81,44 @@ func TestWorktreeSessions(t *testing.T) {
 	}
 	if _, err := os.Stat(g.Worktree); err != nil {
 		t.Error("the worktree with work in it was removed")
+	}
+}
+
+// An entry of .worktreeinclude that is a symlink to the user's SSH key
+// copies nothing into the worktree, and the session's log says why. So does
+// a pattern that leaves the repository.
+func TestWorktreeIncludeSkipsASymlinkOut(t *testing.T) {
+	hosttest.SkipOnGit254(t)
+	h := hosttest.New(t)
+	dir := repo(t, h)
+	key := filepath.Join(h.Home, ".ssh", "id_ed25519")
+	writeFile(t, key, "PRIVATE KEY\n")
+	if err := os.Symlink(key, filepath.Join(dir, "id")); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(dir, ".worktreeinclude"), ".env\nid\n../outside\n")
+	s, err := host.New(host.NewArgs{Name: "keys", Cwd: dir, Worktree: true, Argv: []string{"sleep", "60"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wt := manifest(t, s.ID).Git.Worktree
+	if _, err := os.Lstat(filepath.Join(wt, "id")); !os.IsNotExist(err) {
+		t.Errorf("the symlink to the key reached the worktree: %v", err)
+	}
+	if b, err := os.ReadFile(filepath.Join(wt, ".env")); err != nil || string(b) != "SECRET=not-in-git\n" {
+		t.Errorf(".env = %q, %v", b, err)
+	}
+	log := h.HolderLog(s.ID)
+	for _, want := range []string{
+		`msg="did not copy an entry of .worktreeinclude into the worktree" file=id why="it is a symbolic link, and only regular files are copied"`,
+		`file=../outside why="the pattern is not a path inside the repository"`,
+	} {
+		if !strings.Contains(log, want) {
+			t.Errorf("the session's log does not say %q:\n%s", want, log)
+		}
+	}
+	if strings.Contains(log, "file=.env") {
+		t.Errorf("the log lists .env, which was copied:\n%s", log)
 	}
 }
 

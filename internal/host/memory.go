@@ -207,15 +207,16 @@ func sliceLimit() int64 {
 	return n
 }
 
-// warnSession writes a warning to the log of session id, where a failed
-// start and the host doctor look. args are its details, as for slog.
+// warnSession writes a warning, with its details as key and value pairs,
+// to the log of session id, where a failed start and the host doctor look.
+// It writes through the log's turnover, as the holder does.
 func warnSession(id, msg string, args ...any) {
-	f, ferr := os.OpenFile(paths.HolderLog(id), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
-	if ferr != nil {
+	l, err := openHolderLog(paths.HolderLog(id), holderLogMax)
+	if err != nil {
 		return
 	}
-	defer f.Close()
-	newHolderLog(f, nil).Warn(msg, args...)
+	defer l.Close()
+	newHolderLog(l, nil).Warn(msg, args...)
 }
 
 // sessionsMemoryCheck is the host doctor's line about the memory of all

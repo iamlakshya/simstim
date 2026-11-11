@@ -217,6 +217,9 @@ type (
 		ok   string
 		err  error
 		drop string // a session to take off the list
+		// warn, when set, replaces ok: the operation worked, with a
+		// problem that hint says how to fix.
+		warn, hint string
 	}
 	foldersMsg struct {
 		host, prefix string
@@ -385,9 +388,12 @@ func (m *Model) onToastTick() tea.Cmd {
 // onOpDone reports a finished operation, and lists the host's sessions again.
 func (m *Model) onOpDone(msg opDoneMsg) tea.Cmd {
 	var cmd tea.Cmd
-	if msg.err != nil {
+	switch {
+	case msg.err != nil:
 		cmd = m.toastErr(msg.err)
-	} else if msg.ok != "" {
+	case msg.warn != "":
+		cmd = m.toastNext(toastWarning, msg.warn, msg.hint)
+	case msg.ok != "":
 		cmd = m.toast(toastSuccess, msg.ok)
 	}
 	if h := m.hostByName(msg.host); h != nil {

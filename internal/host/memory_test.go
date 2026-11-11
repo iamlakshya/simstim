@@ -162,9 +162,9 @@ func TestLimitSessions(t *testing.T) {
 	}
 }
 
-// A failure to limit the slice goes to the session's log only after the
-// holder answers. A start that fails reports its own reason, never the
-// slice's.
+// A failure to limit the slice goes to the session's log before the holder
+// starts. A start that fails reports the holder's own reason, never the
+// slice's. Once the holder runs, the start writes nothing to its log.
 func TestHolderStarted(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	run, err := os.MkdirTemp("", "rt")
@@ -173,10 +173,14 @@ func TestHolderStarted(t *testing.T) {
 	}
 	t.Cleanup(func() { os.RemoveAll(run) })
 	t.Setenv("XDG_RUNTIME_DIR", run)
-	sliceErr := errors.New("Access denied")
-	logged := func(id string) bool {
-		b, _ := os.ReadFile(paths.HolderLog(id))
-		return strings.Contains(string(b), "could not limit the memory of all sessions")
+	// warned writes the slice's warning, as the start does before the
+	// holder, and returns the offset from which the holder writes.
+	warned := func(id string) int64 {
+		if err := paths.EnsurePrivateDir(paths.SessionDir(id)); err != nil {
+			t.Fatal(err)
+		}
+		warnSession(id, "could not limit the memory of all sessions", "err", errors.New("Access denied"))
+		return logSize(id)
 	}
 
 	// The holder could not start the agent: that is the reason.
@@ -184,22 +188,42 @@ func TestHolderStarted(t *testing.T) {
 	if err := failed.Save(); err != nil {
 		t.Fatal(err)
 	}
-	if err := holderStarted(failed.ID, sliceErr, time.Second); err == nil || err.Error() != "the agent did not start: boom" || logged(failed.ID) {
-		t.Errorf("a failed start = %v, with the slice's warning logged: %v", err, logged(failed.ID))
+	if err := holderStarted(failed.ID, warned(failed.ID), time.Second); err == nil || err.Error() != "the agent did not start: boom" {
+		t.Errorf("a failed start = %v", err)
 	}
-	// Nothing answers, and the log is empty.
-	if err := holderStarted("silentst", sliceErr, 100*time.Millisecond); err == nil || strings.Contains(err.Error(), "limit") || logged("silentst") {
+	// Nothing answers, and the holder wrote nothing: the slice's warning is
+	// not the reason.
+	if err := holderStarted("silentst", warned("silentst"), 100*time.Millisecond); err == nil || err.Error() != "the session did not start in time" {
 		t.Errorf("a start that timed out = %v", err)
 	}
+	// Nothing answers, and the holder wrote a line: that is the reason.
+	from := warned("loggedst")
+	f, _ := os.OpenFile(paths.HolderLog("loggedst"), os.O_APPEND|os.O_WRONLY, 0)
+	_, _ = f.WriteString("time=x level=ERROR msg=\"listen failed\" err=\"address in use\"\n")
+	f.Close()
+	if err := holderStarted("loggedst", from, 100*time.Millisecond); err == nil || err.Error() != "the session did not start: listen failed: address in use" {
+		t.Errorf("a start that the holder logged = %v", err)
+	}
 
-	// The holder answers: the warning goes to its log.
+	// The holder answers, with its log open and near its size: the start
+	// writes nothing, so the holder's turnover keeps every line. A second
+	// writer would turn the log over under the holder, whose own turnover
+	// would then replace that archive.
 	const id = "startedx"
 	if err := paths.EnsurePrivateDir(filepath.Dir(paths.Socket(id))); err != nil {
 		t.Fatal(err)
 	}
-	if err := paths.EnsurePrivateDir(paths.SessionDir(id)); err != nil {
+	warned(id)
+	pad, _ := os.OpenFile(paths.HolderLog(id), os.O_APPEND|os.O_WRONLY, 0)
+	// 30 bytes of room: any line of a second writer turns the log over.
+	_, _ = pad.WriteString(strings.Repeat("x", int(holderLogMax-logSize(id)-31)) + "\n")
+	pad.Close()
+	from = logSize(id)
+	hl, err := openHolderLog(paths.HolderLog(id), holderLogMax)
+	if err != nil {
 		t.Fatal(err)
 	}
+	defer hl.Close()
 	l, err := (&net.ListenConfig{}).Listen(context.Background(), "unix", paths.Socket(id))
 	if err != nil {
 		t.Fatal(err)
@@ -214,12 +238,21 @@ func TestHolderStarted(t *testing.T) {
 			c.Close()
 		}
 	}()
-	if err := holderStarted(id, sliceErr, 5*time.Second); err != nil || !logged(id) {
-		t.Errorf("a start that worked = %v, with the slice's warning logged: %v", err, logged(id))
+	if err := holderStarted(id, from, 5*time.Second); err != nil {
+		t.Errorf("a start that worked = %v", err)
 	}
-	b, _ := os.ReadFile(paths.HolderLog(id))
-	if got := logText(strings.TrimSpace(string(b))); got != "could not limit the memory of all sessions: Access denied" {
-		t.Errorf("the log says %q", got)
+	for i := range 4 {
+		if _, err := fmt.Fprintf(hl, "time=x level=INFO msg=\"holder line %d\" %s\n", i, strings.Repeat("x", 60)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	old, _ := os.ReadFile(paths.HolderLog(id) + ".1")
+	cur, _ := os.ReadFile(paths.HolderLog(id))
+	all := string(old) + string(cur)
+	for _, want := range []string{"could not limit the memory of all sessions", "holder line 0", "holder line 3"} {
+		if !strings.Contains(all, want) {
+			t.Errorf("the logs lost %q:\n%s\n--\n%s", want, old, cur)
+		}
 	}
 }
 

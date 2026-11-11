@@ -290,7 +290,7 @@ func (c *Conn) Call(ctx context.Context, op string, args any, out any) error {
 		}
 		if !resp.OK {
 			if resp.Error != nil {
-				return hostError(resp.Error)
+				return hostErrorOn(c.Host.Name, resp.Error)
 			}
 			return errors.New("the host refused the request")
 		}

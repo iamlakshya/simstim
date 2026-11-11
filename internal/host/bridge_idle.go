@@ -16,15 +16,23 @@ func BridgeInput(in io.Reader, args []string) io.Reader {
 	for i := 0; i+1 < len(args); i++ {
 		if args[i] == "--idle-exit" {
 			if n, err := strconv.Atoi(args[i+1]); err == nil && n > 0 {
-				return WatchInput(in, time.Duration(n)*time.Second, func() {
-					// Exit skips the bridge's own defers: end its debug first.
-					stopBridgesDebug("idle")
-					os.Exit(0)
-				})
+				return WatchInput(in, time.Duration(n)*time.Second, idleExit)
 			}
 		}
 	}
 	return in
+}
+
+// exitProcess is os.Exit. Tests replace it.
+var exitProcess = os.Exit
+
+// idleExit ends a bridge that its client left idle. The exit skips the
+// bridge's own defers and main's EndBridge: so it ends the bridge's git
+// operations and requests (EndBridge), then its debug, first.
+func idleExit() {
+	EndBridge()
+	stopBridgesDebug("idle")
+	exitProcess(0)
 }
 
 // WatchInput returns a reader that calls onIdle once when no read of in has

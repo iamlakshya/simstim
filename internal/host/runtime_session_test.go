@@ -197,6 +197,7 @@ func TestNewMakesTheFolderAndRemovesItAfterAFailedStart(t *testing.T) {
 // start with setup_outside, and the start leaves no worktree behind. The
 // scripts would not run with --no-setup, so that start goes on.
 func TestNewRefusesASetupScriptOutsideTheRepository(t *testing.T) {
+	hosttest.SkipOnGit254(t) // each start makes a worktree
 	h := hosttest.New(t)
 	dir := repo(t, h)
 	outside := filepath.Join(h.Home, "elsewhere")
