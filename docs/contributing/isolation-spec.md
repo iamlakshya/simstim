@@ -668,8 +668,11 @@ type Policy struct {
 
 // CleanText removes C0 and C1 controls, DEL, bidirectional controls,
 // zero-width characters and Unicode tag characters from s, and cuts it
-// to max runes. Every string that a host or a guest sends goes through it
-// before it is drawn or stored.
+// to max runes. The client draws every string that a host or a guest
+// sends through it. It cleans a copy to draw, and keeps the raw value in
+// memory and in the requests that go back. JSON output escapes these
+// characters instead, and keeps the values. A folder suggestion that the
+// cleaning would change is dropped, not offered.
 func CleanText(s string, max int) string
 ```
 

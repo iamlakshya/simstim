@@ -27,6 +27,13 @@ type Transport struct {
 	Every time.Duration
 	// Agents is what the bridge's agents.check returns.
 	Agents []api.AgentCheck
+	// Answers, when set, are what the bridge returns for requests by their
+	// op, such as "ports", in place of the answers above.
+	Answers map[string]any
+	// Features are the features that the bridge's hello offers.
+	Features []string
+	// Uname is what the probe's uname -sm prints: "Linux aarch64" when empty.
+	Uname string
 
 	mu      sync.Mutex
 	remotes []string
@@ -71,7 +78,11 @@ func (t *Transport) Run(_ context.Context, remote string, stdin io.Reader) ([]by
 	}
 	switch {
 	case strings.Contains(remote, "uname -sm"):
-		return []byte("Linux aarch64\n__HELPER_PRESENT__\n"), nil
+		uname := t.Uname
+		if uname == "" {
+			uname = "Linux aarch64"
+		}
+		return []byte(uname + "\n__HELPER_PRESENT__\n"), nil
 	case strings.Contains(remote, " idle setup "):
 		return []byte("powers off when idle\n"), nil
 	}
@@ -102,7 +113,7 @@ func (t *Transport) serve(in io.Reader, out io.Writer) {
 	if err != nil || f.Type != proto.THello {
 		return
 	}
-	_ = w.WriteJSON(proto.THello, proto.Hello{Magic: proto.Magic, Protocol: version.Protocol, Version: version.Version, Role: "bridge"})
+	_ = w.WriteJSON(proto.THello, proto.Hello{Magic: proto.Magic, Protocol: version.Protocol, Version: version.Version, Role: "bridge", Features: t.Features})
 	for {
 		f, err := proto.Read(r)
 		if err != nil {
@@ -126,6 +137,10 @@ func (t *Transport) serve(in io.Reader, out io.Writer) {
 
 func (t *Transport) answer(req proto.Request) proto.Response {
 	var v any
+	if a, ok := t.Answers[req.Op]; ok {
+		b, _ := json.Marshal(a)
+		return proto.Response{ID: req.ID, OK: true, Result: b}
+	}
 	switch req.Op {
 	case "ls":
 		sessions := t.Sessions

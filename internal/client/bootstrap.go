@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/iamlakshya/simstim/internal/api"
 	"github.com/iamlakshya/simstim/internal/brand"
 	"github.com/iamlakshya/simstim/internal/client/helpers"
 	"github.com/iamlakshya/simstim/internal/version"
@@ -52,21 +53,33 @@ func Probe(ctx context.Context, s Transport) (Platform, error) {
 		}
 		f := strings.Fields(line)
 		if len(f) == 2 && p.OS == "" {
-			p.OS = strings.ToLower(f[0])
-			switch f[1] {
-			case "x86_64", "amd64":
-				p.Arch = "amd64"
-			case "aarch64", "arm64":
-				p.Arch = "arm64"
-			default:
-				p.Arch = f[1]
-			}
+			p.OS, p.Arch = platformOf(f[0], f[1])
 		}
 	}
 	if p.OS == "" {
-		return p, fmt.Errorf("could not read the host's platform from %q", strings.TrimSpace(string(out)))
+		return p, fmt.Errorf("could not read the host's platform from %+q", CleanLine(string(out)))
 	}
 	return p, nil
+}
+
+// platformOf reads the system and the machine that uname prints. A value
+// that no helper is built for is kept to show in an error, cleaned and cut
+// short, since it is the host's own text. The supported platforms are
+// linux on amd64 and arm64 (helpers.For).
+func platformOf(system, machine string) (goos, arch string) {
+	goos = strings.ToLower(system)
+	switch machine {
+	case "x86_64", "amd64":
+		arch = "amd64"
+	case "aarch64", "arm64":
+		arch = "arm64"
+	default:
+		arch = api.CleanText(machine, 32)
+	}
+	if goos != "linux" && goos != "darwin" {
+		goos = api.CleanText(goos, 32)
+	}
+	return goos, arch
 }
 
 // Install uploads the helper for p, and the shadow terminal when this build
@@ -129,7 +142,7 @@ func upload(ctx context.Context, s Transport, ver, name string, data []byte, las
 		return err
 	}
 	if !strings.Contains(string(out), "__INSTALLED__") {
-		return fmt.Errorf("the install of %s did not finish: %s", name, strings.TrimSpace(string(out)))
+		return fmt.Errorf("the install of %s did not finish: %s", name, tailStderr(string(out)))
 	}
 	return nil
 }

@@ -330,7 +330,7 @@ func (m *Model) sessRowView(r sessRow, n int, c sessColumns, selected, withHost 
 	default:
 		// A session row is drawn by the caller.
 	}
-	s := r.s
+	s := shown(r.s)
 	glyph, label := m.look(s)
 	traceSt := traceStyle(s)
 	if !r.h.loaded {

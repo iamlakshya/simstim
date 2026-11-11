@@ -195,6 +195,7 @@ func (f *funcExec) Run() error {
 
 // attachTo hands the terminal to the session until the user detaches.
 func (m *Model) attachTo(h *hostConn, id, name string) tea.Cmd {
+	name = client.CleanLine(name) // only drawn, in the notices after the attach
 	o := client.AttachOptions{
 		Host: h.host, Session: id, Settings: m.settings, State: m.attach,
 		// The launcher has let go of the terminal, so SSH may prompt.

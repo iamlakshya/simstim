@@ -137,9 +137,9 @@ func debugStartCmd() *cobra.Command {
 				if st.Until != nil {
 					until = clockTime(*st.Until)
 				}
-				fmt.Printf("Debug is on for %s on %s until %s (%s).\n", s.Name, h.Name, until, strings.Join(st.Categories, ", "))
-				fmt.Printf("The host writes its records to %s.\n", st.File)
-				fmt.Printf("To trace your keys too, attach with --debug. To stop: %s debug stop %s/%s\n", brand.Name, h.Name, s.Name)
+				fmt.Printf("Debug is on for %s on %s until %s (%s).\n", client.CleanLine(s.Name), h.Name, until, client.CleanLine(strings.Join(st.Categories, ", ")))
+				fmt.Printf("The host writes its records to %s.\n", client.CleanPath(st.File))
+				fmt.Printf("To trace your keys too, attach with --debug. To stop: %s debug stop %s\n", brand.Name, client.CommandTarget(h.Name, s.ID))
 				return nil
 			})
 		},
@@ -189,10 +189,10 @@ func debugStopCmd() *cobra.Command {
 					return err
 				}
 				if !st.Stopped {
-					fmt.Printf("Debug was not on for %s on %s.\n", s.Name, h.Name)
+					fmt.Printf("Debug was not on for %s on %s.\n", client.CleanLine(s.Name), h.Name)
 					return nil
 				}
-				fmt.Printf("Debug is off for %s on %s. Its records are in %s on the host.\n", s.Name, h.Name, st.File)
+				fmt.Printf("Debug is off for %s on %s. Its records are in %s on the host.\n", client.CleanLine(s.Name), h.Name, client.CleanPath(st.File))
 				return nil
 			})
 		},
@@ -213,7 +213,7 @@ func debugSaveCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				fmt.Printf("Saved the flight recorder of %s: %s on %s (%s).\n", s.Name, f.Path, h.Name, sizeText(f.Size))
+				fmt.Printf("Saved the flight recorder of %s: %s on %s (%s).\n", client.CleanLine(s.Name), client.CleanPath(f.Path), h.Name, sizeText(f.Size))
 				return nil
 			})
 		},
@@ -246,7 +246,7 @@ func debugProfileCmd() *cobra.Command {
 				wait := 30 * time.Second
 				if kind == diag.ProfileCPU {
 					wait += d
-					defer countDown("Profiling the CPU of "+s.Name, d)()
+					defer countDown("Profiling the CPU of "+client.CleanLine(s.Name), d)()
 				}
 				// A CPU profile may take longer than the connection's own time.
 				ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), wait)
@@ -255,7 +255,7 @@ func debugProfileCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				fmt.Printf("Wrote a %s profile of %s: %s on %s (%s).\n", kind, s.Name, f.Path, h.Name, sizeText(f.Size))
+				fmt.Printf("Wrote a %s profile of %s: %s on %s (%s).\n", kind, client.CleanLine(s.Name), client.CleanPath(f.Path), h.Name, sizeText(f.Size))
 				return nil
 			})
 		},

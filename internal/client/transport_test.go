@@ -80,3 +80,37 @@ func TestDialNotInstalledOverAnyTransport(t *testing.T) {
 		t.Fatalf("err = %v, want a user error to add the host", err)
 	}
 }
+
+// An interactive ssh shows the user what the host writes to stderr, as it
+// comes, but cleaned: ESC c, an OSC 52 write, a bidirectional override and
+// a zero-width space never reach the terminal, when the command works and
+// when it fails.
+func TestInteractiveStderrIsClean(t *testing.T) {
+	fakeSSH(t)
+	const remote = `printf 'a\033c b\033]52;c;aGk=\007 c\342\200\256d\342\200\213e\nprompt: ' >&2`
+	for _, tail := range []string{"", "; exit 3"} {
+		f, err := os.CreateTemp(t.TempDir(), "stderr")
+		if err != nil {
+			t.Fatal(err)
+		}
+		old := os.Stderr
+		os.Stderr = f
+		s := &client.SSH{Host: client.Host{Name: "box", SSH: "box"}, Interactive: true}
+		_, runErr := s.Run(context.Background(), remote+tail, nil)
+		os.Stderr = old
+		_ = f.Close()
+		got, err := os.ReadFile(f.Name())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if want := "ac b]52;c;aGk= cde\nprompt: "; string(got) != want {
+			t.Errorf("with %q the terminal got %q, want %q", tail, got, want)
+		}
+		if (tail == "") != (runErr == nil) {
+			t.Errorf("with %q: %v", tail, runErr)
+		}
+		if runErr != nil && strings.ContainsAny(runErr.Error(), "\x1b\x07\u202e\u200b") {
+			t.Errorf("the error holds the host's controls: %q", runErr.Error())
+		}
+	}
+}

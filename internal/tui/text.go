@@ -8,6 +8,8 @@ import (
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
+
+	"github.com/iamlakshya/simstim/internal/client"
 )
 
 // cells is the width of s in terminal cells, ignoring escape sequences.
@@ -222,10 +224,11 @@ func errText(err error) (msg, hint string) {
 	if err == nil {
 		return "", ""
 	}
+	// An error can hold what a host sent.
 	if ue, ok := asUserError(err); ok {
-		return ue.Msg, ue.Hint
+		return client.CleanLine(ue.Msg), client.CleanLine(ue.Hint)
 	}
-	return err.Error(), ""
+	return client.CleanLine(err.Error()), ""
 }
 
 // sentence makes a message start with a capital letter and end with a stop.

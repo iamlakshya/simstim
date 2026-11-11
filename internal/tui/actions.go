@@ -3,7 +3,6 @@ package tui
 import (
 	"context"
 	"fmt"
-	"strings"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -170,19 +169,9 @@ func (m *Model) copyAttach() tea.Cmd {
 	if s == nil {
 		return nil
 	}
-	ref := s.ID
-	if s.Name != "" && !strings.ContainsAny(s.Name, " /'\"") {
-		n := 0
-		for _, o := range h.sessions {
-			if o.Name == s.Name {
-				n++
-			}
-		}
-		if n == 1 {
-			ref = s.Name
-		}
-	}
-	text := fmt.Sprintf("%s attach %s/%s", brand.Name, h.name(), ref)
+	// By the session's ID: a name is the host's text, and could be shell
+	// syntax when the command is pasted.
+	text := fmt.Sprintf("%s attach %s", brand.Name, client.CommandTarget(h.name(), s.ID))
 	return tea.Batch(tea.SetClipboard(text), m.toast(toastSuccess, "Copied: "+text+"."))
 }
 

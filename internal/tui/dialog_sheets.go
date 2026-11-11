@@ -48,20 +48,20 @@ func (c *confirm) view(m *Model) string {
 }
 
 func deleteDialog(h *hostConn, s client.Session) *confirm {
-	host := h.name()
+	host, d := h.name(), shown(s)
 	lines := []string{
-		fmt.Sprintf("This stops %s on %s and removes the session.", s.Agent, host),
-		fmt.Sprintf("The folder %s stays. Unsaved work in the agent is lost.", homePath(h, s.Cwd)),
+		fmt.Sprintf("This stops %s on %s and removes the session.", d.Agent, host),
+		fmt.Sprintf("The folder %s stays. Unsaved work in the agent is lost.", homePath(h, d.Cwd)),
 	}
 	if ended(s) {
 		// Nothing runs that could lose work: say only what goes.
 		lines = []string{
 			fmt.Sprintf("This removes the session from %s.", host),
-			fmt.Sprintf("The folder %s stays.", homePath(h, s.Cwd)),
+			fmt.Sprintf("The folder %s stays.", homePath(h, d.Cwd)),
 		}
 	}
 	return &confirm{
-		title: "Delete " + s.Name + "?", lines: lines, danger: true,
+		title: "Delete " + d.Name + "?", lines: lines, danger: true,
 		yes: hint{"enter", "delete"}, no: hint{"esc", "keep"},
 		run: func(m *Model) tea.Cmd { return m.deleteSession(host, s) },
 	}

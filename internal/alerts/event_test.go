@@ -2,6 +2,7 @@ package alerts
 
 import (
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -67,5 +68,21 @@ func TestEventEnv(t *testing.T) {
 		if !strings.Contains(env, want) {
 			t.Errorf("env lacks %q:\n%s", want, env)
 		}
+	}
+}
+
+// An event has no word about who wrote its detail yet. That variable,
+// <NAME>_DETAIL_FROM, comes with walled sessions, whose guest writes it
+// (docs/contributing/isolation-spec.md 10.8).
+func TestEventHasNoDetailFrom(t *testing.T) {
+	if _, ok := reflect.TypeOf(Event{}).FieldByName("DetailFrom"); ok {
+		t.Error("Event has DetailFrom")
+	}
+	ev := Event{V: 1, Event: NeedsInput, Host: "box", Detail: "Proceed?", Summary: "s"}
+	if j := string(ev.JSON()); strings.Contains(j, "detail_from") {
+		t.Errorf("the JSON has detail_from: %s", j)
+	}
+	if env := strings.Join(ev.env(), "\n"); strings.Contains(env, "DETAIL_FROM") {
+		t.Errorf("env has DETAIL_FROM:\n%s", env)
 	}
 }

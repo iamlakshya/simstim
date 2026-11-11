@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"fmt"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -42,12 +41,12 @@ func (w *wizard) onProbe(m *Model, msg probeMsg) tea.Cmd {
 	w.plat = msg.p
 	w.checks = []check{
 		{name: "connect", state: ckOK, took: msg.took},
-		{name: "system", state: ckOK, detail: msg.p.OS + "/" + msg.p.Arch},
+		{name: "system", state: ckOK, detail: client.CleanLine(msg.p.OS + "/" + msg.p.Arch)},
 	}
 	if _, ok := m.be.HelperSize(msg.p); !ok && !msg.p.Installed {
 		w.checks[1].state = ckFailed
 		w.err = &client.UserError{
-			Msg:  fmt.Sprintf("this build has no helper for %s/%s", msg.p.OS, msg.p.Arch),
+			Msg:  "this build has no helper for " + client.CleanLine(msg.p.OS+"/"+msg.p.Arch),
 			Hint: "Linux hosts on amd64 and arm64 are supported.",
 		}
 		return nil

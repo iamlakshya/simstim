@@ -149,7 +149,7 @@ func debugConnOf(h *hostConn) (debugConn, error) {
 	if !h.online() {
 		return nil, offlineErr(h)
 	}
-	dc, ok := h.conn.(debugConn)
+	dc, ok := unclean(h.conn).(debugConn)
 	if !ok {
 		return nil, &client.UserError{Msg: "the connection to " + h.name() + " has no debug mode",
 			Hint: brand.Name + " host add " + h.name() + "   (updates the helper)"}
@@ -288,7 +288,7 @@ func (m *Model) debugSave() tea.Cmd {
 			cctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 			defer cancel()
 			f, err := dc.DebugSave(cctx, id)
-			return debugDoneMsg{ok: fmt.Sprintf("Saved the flight recorder of %s on %s:", sname, name), path: f.Path, err: err}
+			return debugDoneMsg{ok: fmt.Sprintf("Saved the flight recorder of %s on %s:", sname, name), path: client.CleanPath(f.Path), err: err}
 		})
 	}
 	if len(cmds) == 0 {

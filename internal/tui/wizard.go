@@ -358,7 +358,7 @@ func (w *wizard) setup(m *Model) tea.Cmd {
 		start := clock()
 		cctx, cancel := context.WithTimeout(ctx, 90*time.Second)
 		defer cancel()
-		c, err := be.Dial(cctx, h)
+		c, err := dialClean(cctx, be, h)
 		if err != nil {
 			return setupMsg{seq: seq, err: err}
 		}
@@ -381,6 +381,7 @@ func (w *wizard) setup(m *Model) tea.Cmd {
 			if err != nil {
 				st.OK, st.Detail = false, err.Error()
 			}
+			st.Detail = client.CleanLine(st.Detail) // the host's own words
 			res.Steps = append(res.Steps, st)
 		}
 		return setupMsg{seq: seq, conn: c, res: res, info: info, took: clock().Sub(start)}

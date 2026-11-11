@@ -43,14 +43,14 @@ func resumeCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			s := res.Session
+			s, d := res.Session, client.CleanSession(res.Session)
 			if res.DebugStopped {
 				// Before an attach takes the terminal.
-				fmt.Fprintf(os.Stderr, "Debug was on in %s, and stopped with the agent's old run. To record again: %s debug start %s/%s\n",
-					s.Name, brand.Name, h.Name, s.Name)
+				fmt.Fprintf(os.Stderr, "Debug was on in %s, and stopped with the agent's old run. To record again: %s debug start %s\n",
+					d.Name, brand.Name, client.CommandTarget(h.Name, s.ID))
 			}
 			if detach {
-				fmt.Printf("Resumed %s/%s (%s, %s): %s.\n", h.Name, s.ID, s.Name, s.Agent, res.Why)
+				fmt.Printf("Resumed %s/%s (%s, %s): %s.\n", h.Name, d.ID, d.Name, d.Agent, client.CleanLine(res.Why))
 				return nil
 			}
 			return attach(cmd.Context(), h, s.ID, s.Name)
@@ -86,8 +86,8 @@ func resumeSession(ctx context.Context, target string, a client.ResumeArgs, pass
 		return h, nil, err
 	}
 	if !client.Ended(*s) {
-		return h, nil, &client.UserError{Msg: fmt.Sprintf("the agent of %s on %s still runs", s.Name, h.Name),
-			Hint: fmt.Sprintf("%s attach %s/%s", brand.Name, h.Name, s.ID)}
+		return h, nil, &client.UserError{Msg: fmt.Sprintf("the agent of %s on %s still runs", client.CleanLine(s.Name), h.Name),
+			Hint: fmt.Sprintf("%s attach %s", brand.Name, client.CommandTarget(h.Name, s.ID))}
 	}
 	names, err := client.ResumeSecrets(h, *s, passed)
 	if err != nil {

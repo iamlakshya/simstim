@@ -337,7 +337,7 @@ func TestCopyAttachCommand(t *testing.T) {
 		t.Fatal("y returned no command")
 	}
 	hs.do(cmd)
-	hasToast(t, hs.m, "Copied: "+brand.Name+" attach atlas-dev/auth-refactor.")
+	hasToast(t, hs.m, "Copied: "+brand.Name+" attach atlas-dev/s4.")
 }
 
 func TestSearchEveryHost(t *testing.T) {
@@ -356,11 +356,11 @@ func TestSearchEveryHost(t *testing.T) {
 	hs.key("ctrl+u")
 	hs.typeText("bench")
 	rs := hs.m.results()
-	if len(rs) != 1 || rs[0].s.ID != "g1" {
+	if len(rs) != 1 || rs[0].s.ID != "g6" {
 		t.Fatalf("results %v", rs)
 	}
 	hs.key("enter")
-	if len(hs.be.attached) != 1 || hs.be.attached[0].Session != "g1" || hs.m.cur != "gcp-dev" {
+	if len(hs.be.attached) != 1 || hs.be.attached[0].Session != "g6" || hs.m.cur != "gcp-dev" {
 		t.Fatal("enter did not attach the match")
 	}
 	hs.key("/", "esc")

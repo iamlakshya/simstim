@@ -142,7 +142,7 @@ func dial(ctx context.Context, h Host, rt route) (*Conn, error) {
 		}
 		if err := hello.Check(version.Protocol); err != nil {
 			c.kill()
-			return nil, &UserError{Msg: err.Error(), Hint: brand.Name + " host add " + h.Name + "   (reinstalls the helper)"}
+			return nil, &UserError{Msg: CleanLine(err.Error()), Hint: brand.Name + " host add " + h.Name + "   (reinstalls the helper)"}
 		}
 		c.Features = hello.Features
 	}
@@ -171,9 +171,7 @@ func (c *Conn) startError(err error) error {
 	if msg == "" {
 		return err
 	}
-	if lines := strings.Split(msg, "\n"); len(lines) > 3 {
-		msg = strings.Join(lines[len(lines)-3:], "\n")
-	}
+	msg = tailStderr(msg)
 	if errors.Is(waitErr, ErrUnreachable) {
 		return &UserError{Msg: fmt.Sprintf("cannot reach %s: %s", c.Host.Name, msg), Hint: c.hint}
 	}
@@ -292,7 +290,7 @@ func (c *Conn) Call(ctx context.Context, op string, args any, out any) error {
 		}
 		if !resp.OK {
 			if resp.Error != nil {
-				return &UserError{Msg: resp.Error.Message, Hint: resp.Error.Hint, Code: resp.Error.Code, Data: resp.Error.Data}
+				return hostError(resp.Error)
 			}
 			return errors.New("the host refused the request")
 		}
@@ -355,7 +353,7 @@ func (c *Conn) Upload(ctx context.Context, session, name string, data []byte) (s
 		}
 		if !resp.OK {
 			if resp.Error != nil {
-				return "", &UserError{Msg: resp.Error.Message, Hint: resp.Error.Hint}
+				return "", hostError(resp.Error)
 			}
 			return "", errors.New("upload failed")
 		}
