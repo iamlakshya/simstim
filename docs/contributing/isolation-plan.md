@@ -128,7 +128,7 @@ Spec section 15 has each question in full, with its options: [open questions](is
 | 65 | How does a host get a private registry image? | The laptop pulls it with its own login and copies it. | P3.2 |
 | 66 | How is a session's host picked? | By the invoker. Otherwise a rule by profile, repository or organisation, then the default host. | H19 |
 | 67 | How does a machine join? | Also `host invite` and `host join`. The laptop still starts every connection. | H20 |
-| 68 | How does a Mac host restart with FileVault on? | The docs give `fdesetup authrestart` for planned restarts, and an unlock from the Mac's own LAN after others. | H21 |
+| 68 | How does a Mac host restart with FileVault on? | It does not, as the owner decided. After a rare restart, the Mac's user logs in, and the launch daemon starts the VM. | H21 |
 | 69 | May a Mac that an organisation manages with MDM be a host? | Yes, as `shared`, after `host doctor` shows what MDM controls. | H21 |
 | 70 | How long does a flow wait under `ask`, and what happens when its client gives up first? | Explicit mode holds before the `CONNECT` reply for up to 20 s. Transparent mode holds for 3 s at most. The held request stays open for 5 minutes, so a retry passes after the answer. | P2.6, P2.12 |
 | 71 | Does the model API guard let a web search tool through? | Under `balanced` and `open`, for agents whose row names it. `locked` refuses it. | P2.4 |
@@ -151,6 +151,7 @@ Spec section 15 has each question in full, with its options: [open questions](is
 | 88 | How does the gvisor wall get its namespaces? | The helper, or the namespace launcher of spec 14.4, makes them, and `runsc` runs inside as uid 0. | P6.1 |
 | 89 | How many slot accounts, and where is the store? | 16 slots, and the store in `/var/lib/<name>/store/`. | H18 |
 | 90 | What does a config layer's level below the host's floor do? | The client raises it to the floor, with a line that says so. `--wall` below the floor still fails without `--downgrade`. | P1.8, P1.12 |
+| 91 | If the test by hand before H21 fails, how does a Mac host start its VM? | From a launch agent of the Mac's logged-in user, with a warning. | H21 |
 
 ## Order
 
@@ -229,7 +230,7 @@ Build the tasks from top to bottom. Every task named under "Depends on" is above
 | 69 | H16 | Reach a host behind NAT | 4 | H3, H9, 0031 | 36 | S |
 | 70 | H19 | Host rules | 4 | P1.12, H5, H12, H13 | 66 | M |
 | 71 | H20 | Machines that join | 4 | H3, H4, H7, H10, H15 | 67 | L |
-| 72 | H21 | A Mac as a host | 4 | H20, H14, H16, P0.8 | 37, 68, 69 | L |
+| 72 | H21 | A Mac as a host | 4 | H20, H14, H16, P0.8 | 37, 68, 69, 91 | L |
 | 73 | P5.1 | Fork | 5 | P3.6 | 11 | M |
 | 74 | P5.2 | Copy files in and out | 5 | P1.9 | none | M |
 | 75 | P5.4 | Checkpoints | 5 | P3.6, P5.1 | 11, 87 | M |
@@ -1722,7 +1723,7 @@ The rule of this phase: **the laptop holds the digests, the hosts hold the bytes
 
 ### H21 A Mac as a host
 
-- **Goal:** spec 18.4. First, the test by hand of [research, locations 5](../research/locations.md#5-mac-hosts-checked-again). If a Linux VM does not start at boot for an account that has never logged in, stop and ask the owner. Then `host join` and `host leave` on a Mac. They manage the hidden account, the pinned Lima, the VM in plain mode, the launch daemon that the join writes, the narrow key, the facts script and the power step. On the laptop: the Mac's facts, its health items, and its block in `host doctor`.
+- **Goal:** spec 18.4. First, the test by hand of [research, locations 5](../research/locations.md#5-mac-hosts-checked-again). If a Linux VM does not start from the launch daemon for an account that has never logged in, stop and ask the owner ([question 91](isolation-spec.md#15-open-questions)). Then `host join` and `host leave` on a Mac. They manage the hidden account, the pinned Lima, the VM in plain mode, the launch daemon that the join writes, the narrow key, the facts script and the power step. On the laptop: the Mac's facts, its health items, and its block in `host doctor`.
 - **Files:**
   - New `internal/join/darwin.go`, and the Mac's steps in `internal/join/leave.go`.
   - `internal/provider/lima/lima.go` (the template for a Mac host: plain mode, a fixed SSH port and no loopback).
@@ -1731,14 +1732,15 @@ The rule of this phase: **the laptop holds the digests, the hosts hold the bytes
   - The release manifest: the pinned Lima release and base image.
 - **Acceptance:**
   - On an M3 Mac or later with macOS 26, `host join` and `host add --accept` give a host with microvm walls. An M1 or M2 Mac gives process walls.
-  - After a restart and a FileVault unlock over SSH from the LAN, the VM starts while nobody is logged in. The sessions that were working come back.
+  - The VM runs while another user is logged in at the Mac, and keeps running after that user logs out.
+  - After a restart and that user's login, the VM starts again, and the sessions that were working come back.
   - The account's key cannot open a shell, a terminal, or a channel to any port but the VM's. `-R <port>` and `-R /path` fail while the drop-in applies.
   - The account has no secure token, and the launch daemon's plist has `UserName`, `LIMA_HOME`, `KeepAlive` and `ExitTimeOut`.
   - On battery, `host doctor` shows `mac-on-battery`, and `auto` ranks the host one band lower.
   - `host leave` removes the account, the VM, the launch daemon and the drop-in, and restores the `pmset` values.
   - The join never turns on Remote Login, and never changes the battery settings.
 - **Tests:** units of the plan of changes for given Mac facts. CI has no Mac that can run a VM for a hidden account. So the pull request holds a checklist, done by hand on an M1 or M2 Mac and on an M3 Mac or later. A Mac is used only with its owner's yes, and each change is logged outside the repository ([AGENTS.md](../../AGENTS.md), rule 10).
-- **Docs:** new `docs/how-to/a-mac-as-a-host.md`: the steps, power, restarts with FileVault, MDM and the organisation's IT team, the tier, and leave. `docs/explanation/architecture.md` (the path through the Mac).
+- **Docs:** new `docs/how-to/a-mac-as-a-host.md`: the steps, power, why the Mac must stay on and logged in, MDM and the organisation's IT team, the tier, and leave. `docs/explanation/architecture.md` (the path through the Mac).
 - **CHANGELOG:** Added. "A Mac at another location can be a host. `host join` makes a hidden account and a Lima VM that starts at boot. The laptop reaches the VM through a key that can open nothing else."
 - **Depends on:** H20, H14, H16, P0.8.
 - **Questions:** [37, 68 and 69](isolation-spec.md#15-open-questions).

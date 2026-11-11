@@ -13,7 +13,7 @@ The rules for the note:
 ## Summary
 
 1. **The invoker picks the host, and rules fill in.** Hosts are known by their names, and labels exist today as metadata. Nothing yet picks a host for a repository, an organisation or a kind of task. `sandbox.host` in a profile or a repository section adds that (spec 18.2). Tools for one person work the same way (section 7).
-2. **A Mac laptop can be a host, through a Lima VM, with limits.** It must stay on power with the lid open. After an unplanned restart, FileVault holds it at the unlock screen until someone unlocks it at the Mac, or over SSH from its LAN (section 5). Tailscale starts only after that unlock. With no other machine online at that location, nothing can wake or unlock it from far away.
+2. **A Mac laptop can be a host, through a Lima VM, with limits.** It must stay on power with the lid open. After an unplanned restart, FileVault holds it at the unlock screen until someone unlocks it at the Mac, or over SSH from its LAN (section 5). Tailscale starts only after that unlock. With no other machine online at that location, nothing can wake or unlock it from far away. So the design assumes that a Mac host does not restart, and that its user logs in after a rare restart (spec 18.4).
 3. **A machine can prepare itself, and the laptop still connects to it.** `host join` on the machine makes a dedicated account, the VM and a narrow SSH path, then prints a reply code. The laptop reads the code and connects over SSH as `host add` does today. The machine never calls the laptop or any service of ours. The codes hold no secret, but must arrive unchanged (section 6).
 4. **In a homelab, use a VM with the host's CPU type, and probe for KVM.** Proxmox hides the CPU's virtualisation flags from a VM by default, and an LXC container shares the Proxmox kernel. TrueNAS and Unraid hosts get the helper in a VM.
 5. **Each host joins the user's own overlay.** Tailscale runs on each host as a system daemon. The tool adds no relay. Wake-on-LAN cannot cross Tailscale, so a sleeping host needs an awake machine on its own LAN.
@@ -103,9 +103,9 @@ The rules for the note:
 1. **The invoker picks, and rules fill in.** A profile, a repository or an organisation can name the host for its sessions. No rule picks another host instead of the one that the invoker names. The grant gate can still stop a start. A secret can list the only hosts that may get it.
 2. **A Mac host is a Lima VM behind a narrow door.** The VM runs in plain mode, with `hostLoopback` off and a fixed SSH port. A dedicated macOS account holds a key that can only open a channel to that port. sshd's drop-in also stops remote forwards. A launch daemon, which the join writes itself, starts the VM at boot (section 5).
 3. **The Mac stays awake on purpose.** The join sets `pmset -c sleep 0` with the user's consent and records the old values. The docs say: lid open, on power, Charge Limit at 80 %, good air flow.
-4. **Restarts are a known gap.** The docs explain the FileVault unlock and `fdesetup authrestart`. `host doctor` shows the restart risk, and `ls` marks a Mac host "away" until it answers.
+4. **The design assumes no restarts.** On 11 November 2026 the owner set this: a Mac host does not restart, and after a rare restart its user logs in at the Mac. The tool has no unlock from far away, and `ls` marks a Mac host "away" until it answers (spec 18.4).
 5. **The doctor reads MDM control.** It reports enrolment, a managed sshd, hidden settings and an Energy Saver payload, and suggests the tier `shared` on a Mac that an organisation manages.
-6. **No second machine at a Mac's location.** Nothing in the design needs a waker, a jump host or a subnet router there. A subnet router there would allow a FileVault unlock from far away (section 5).
+6. **No second machine at a Mac's location.** Nothing in the design needs a waker, a jump host or a subnet router there.
 7. **In the homelab, the docs recommend a VM and the probe decides.** The doctor names the fix for a missing `/dev/kvm`: CPU type `host` on Proxmox.
 8. **Hosts that stay on need no wake.** For a host that sleeps, the user can write a provider script that sends the wake from a machine on its own LAN. The examples have no such script. The tool listens nowhere.
 
@@ -116,11 +116,11 @@ Checked on 10 November 2026, after an audit of the spec. A researcher read the m
 - **A VM at boot, with nobody logged in.** Lima's contributors report that a `vz` Linux VM starts from `limactl autostart --condition=boot` after a reboot, with nobody logged in. They tested Apple silicon with macOS 26 ([pull 4984](https://github.com/lima-vm/lima/pull/4984), [pull 5088](https://github.com/lima-vm/lima/pull/5088)). A user report shows a hidden service account that ran a `vz` VM from a launch daemon ([issue 5087](https://github.com/lima-vm/lima/issues/5087)).
 - **The keychain.** The keychain errors in Apple's forums come from macOS guests ([thread 822670](https://developer.apple.com/forums/thread/822670)). No report links them to Linux guests.
 - **No support from Apple.** Apple's support staff say that the Virtualization framework "links with AppKit, which is obviously not daemon-safe" ([thread 841688](https://developer.apple.com/forums/thread/841688)). So a macOS update can break a start at boot.
-- **UNVERIFIED:** a start at boot for an account that has never logged in and has no login keychain, with FileVault on. The test at the end of this section settles it.
+- **UNVERIFIED:** a start from a launch daemon for an account that has never logged in and has no login keychain, while another user is logged in. The test at the end of this section settles it.
 - **`limactl` and root.** `limactl autostart enable --condition=boot --user <user>` exists from Lima v2.2.0. It writes `/Library/LaunchDaemons/io.lima-vm.daemon.<instance>.plist` with `UserName`. `KeepAlive` and `LIMA_HOME` are in the plist from v2.3.0 ([autostart](https://lima-vm.io/docs/usage/autostart/), [plist](https://github.com/lima-vm/lima/blob/v2.3.0/pkg/autostart/launchd/io.lima-vm.daemon.INSTANCE.plist)). `limactl` refuses to run as root, and runs `sudo` itself for the install ([source](https://github.com/lima-vm/lima/blob/v2.3.0/cmd/limactl/autostart_darwin.go)). An account with no known password cannot answer that `sudo`.
 - **The daemon's limits.** `KeepAlive` restarts the job only after an exit with an error. Without `ExitTimeOut`, launchd kills the host agent 5 s after `SIGTERM`, before the guest shuts down ([issue 5765](https://github.com/lima-vm/lima/issues/5765)). The label holds only the instance name, so two instances with one name collide ([issue 5643](https://github.com/lima-vm/lima/issues/5643)).
 - **macOS versions.** `vz` needs macOS 13 ([vz](https://lima-vm.io/docs/config/vmtype/vz/)). On 9 November 2026, Apple released security fixes for macOS 27, 26 and 15 only. The last fix for macOS 14 came on 6 August 2026 ([security releases](https://support.apple.com/en-us/100100)). So macOS 15 is the oldest release that still gets security fixes.
-- **The FileVault unlock over SSH** takes the password of a FileVault user, not a key. SSH then drops, and the Mac finishes the boot (man page `fdesetup`). Before the unlock, no daemon on the data volume runs, Tailscale included. Any machine that reaches the Mac's LAN address can do the unlock, for example through a Tailscale subnet router on that LAN ([subnet routers](https://tailscale.com/kb/1019/subnets)).
+- **The FileVault unlock over SSH** takes the password of a FileVault user, not a key. SSH then drops, and the Mac finishes the boot (man page `fdesetup`). Before the unlock, no daemon on the data volume runs, Tailscale included. Any machine that reaches the Mac's LAN address can do the unlock, for example through a Tailscale subnet router on that LAN ([subnet routers](https://tailscale.com/kb/1019/subnets)). The design no longer needs this unlock, because a Mac host's user logs in after a restart (spec 18.4).
 - **Commands without root.** `pmset -g batt`, `pmset -g assertions`, `fdesetup status` and `profiles status -type enrollment` ran without `sudo` for an admin user. **UNVERIFIED** for a standard account. `pmset -c sleep 0` needs root (man page `pmset`). On Apple silicon, `pmset -g therm` reported only that no thermal warning was recorded.
 - **Remote Login without root.** `launchctl print-disabled system` shows `"com.openssh.sshd" => enabled` when Remote Login is on. A security benchmark uses this check without `sudo` ([DISA STIG check](https://stigaview.com/products/macos14/v2r1/APPL-14-000080), secondary).
 - **The lid.** With the lid closed and no display, a Mac laptop sleeps, whatever `pmset -c sleep` says ([Apple](https://support.apple.com/en-us/102501)). `pmset disablesleep 1` is undocumented, and only third parties report that it works.
@@ -134,12 +134,16 @@ Checked on 10 November 2026, after an audit of the spec. A researcher read the m
 
 1. Make a hidden standard account with a random password. Do not log in as it.
 2. As that account, make a `vz` Linux VM with Lima v2.3.0.
-3. As root, write the daemon's plist with `UserName` set to the account. Then run `launchctl bootstrap system <plist>`.
-4. Restart. Unlock FileVault over SSH as your own user. Do not log in at the login window.
+3. As root, write the daemon's plist with `UserName` set to the account.
+4. As root, run `launchctl bootstrap system <plist>`, while your own user stays logged in.
 5. From a second machine, connect through the Mac's sshd to the VM's port.
-6. Record `limactl list`, the daemon's error log, and `log show --last 10m --predicate 'process == "limactl"'`. Look for errors about keys or the keychain.
+6. Log out of your own user.
+7. Do step 5 again.
+8. Restart the Mac, and log in as your own user at the login window.
+9. Do step 5 again.
+10. Record `limactl list`, the daemon's error log, and `log show --last 10m --predicate 'process == "limactl"'`. Look for errors about keys or the keychain.
 
-The test passes when the VM runs and the account has no login keychain.
+The test passes when the VM answers in steps 5, 7 and 9, and the account has no login keychain.
 
 ## 6. Joining a machine
 

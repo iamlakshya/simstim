@@ -1100,7 +1100,7 @@ Its security score is 4 of 10. The sandboxes, the egress process and the runtime
 
 - A process that uses Apple's Virtualization framework needs the `com.apple.security.virtualization` entitlement ([Apple](https://developer.apple.com/documentation/bundleresources/entitlements/com.apple.security.virtualization)). Lima signs `limactl` with it and runs VZ VMs without root ([vz.entitlements](https://github.com/lima-vm/lima/blob/master/vz.entitlements)).
 - From macOS 15, the Virtualization framework needs an unlocked login keychain when it runs a VM ([Tart FAQ](https://tart.run/faq/)). The check of 10 November 2026 found that this applies to macOS guests. Lima's contributors report that a Linux VM starts from a boot launch daemon with nobody logged in ([locations, section 5](locations.md#5-mac-hosts-checked-again)).
-- An account that has never logged in, with FileVault on, is still **UNVERIFIED**. The locations note gives a test by hand.
+- A daemon's start for an account that has never logged in is still **UNVERIFIED**. The locations note gives a test by hand.
 
 **Sizes**
 

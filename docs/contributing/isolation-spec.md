@@ -3612,7 +3612,8 @@ This is the only full list. Each question has its options and a recommended defa
 68. **How does a Mac host restart with FileVault on?**
     - (a) The docs give `sudo fdesetup authrestart` for a planned restart. After any other, a person at the Mac or an SSH session that reaches its LAN unlocks it.
     - (b) A `host restart` command that uses the user's own admin login on the Mac.
-    - **Recommended:** (a). `authrestart` keeps an unlock key in memory, and the tool should not hold an admin login on a Mac that an organisation manages.
+    - (c) It does not. After a rare restart, the Mac's user logs in at the Mac, and the launch daemon starts the VM.
+    - **Recommended:** (c), as the owner decided on 11 November 2026. The tool needs no unlock from far away and no admin login on the Mac. (a) keeps an unlock key in memory until the restart.
 69. **May a Mac that an organisation manages with MDM be a host?**
     - (a) No.
     - (b) Yes, at the tier `shared`, after `host doctor` shows what MDM controls, and with the advice to ask the organisation's IT team first.
@@ -3746,6 +3747,13 @@ The research of 10 November 2026 checked the facts that the build depends on ([b
     - (b) The client raises it to the floor, and `new` prints a line that says so.
     - **Recommended:** (b). A layer states a minimum for many hosts, and the floor is one host's own minimum, so the higher one wins. `--wall` on the command line names one start, so a level below the floor there fails without `--downgrade`.
 
+### From the owner's choice of 11 November 2026
+
+91. **If the test by hand of 18.4 fails, how does a Mac host start its VM?**
+    - (a) From a launch agent in the session of the Mac's user, who stays logged in. This avoids a daemon, which Apple's staff call unsafe for the framework (18.4). The VM's disk, with the agents' logins, then belongs to that user. Anyone at the unlocked Mac can read it.
+    - (b) It does not. Mac hosts wait for a Lima or macOS release that passes the test.
+    - **Recommended:** (a), with a warning in `host join` and in `host doctor`. The hidden account still holds the narrow key, so the laptop's path stays the same. A screen lock closes the new gap.
+
 ### Decided by the design
 
 The research raised four more questions, and the design answers them, so they are not open. No wall has a guest network card, and all egress goes through the egress process (7.2, decision [0029](decisions/0029-a-sandbox-per-session.md)). The client embeds the release manifest, so the runtime needs no rollback floor, key or expiry of its own (14.9.1, 14.11.2). The supervisor dials into the guest, so no trusted-side process listens where a guest can connect (G7, decision [0030](decisions/0030-local-sockets-do-not-listen.md)). The names of these files follow the roadmap.
@@ -3784,7 +3792,7 @@ The research raised four more questions, and the design answers them, so they ar
 | A reverse tunnel puts a key to the rendezvous on a borrowed host, and an allow-all tailnet lets a host reach the laptop. | Docs only: a hardened tunnel recipe on a machine that the user owns, and Tailscale shares for borrowed machines (14.13). The tool runs no tunnel ([0031](decisions/0031-the-egress-process-is-not-a-relay.md)). |
 | A template built on a host, or copied from one, poisons the fleet. | Templates come from the laptop or the release only. No host-to-host copies, and no host key on another host (14.9.5, [question 35](#15-open-questions)). |
 | A host that downloads the runtime itself makes new outbound traffic, and a download can be changed on the way. | The host checks each file's size and SHA-256 against the client's digests (14.9.2). `fetch = "laptop"` keeps the old rule ([question 39](#15-open-questions)). |
-| A Mac host after a reboot cannot start its VM, because nobody has logged in. | Lima's contributors report that a Linux VM starts from a boot daemon with nobody logged in. The keychain need applies to macOS guests. H21 starts with a test by hand (18.4), and each macOS update is tested again, because Apple does not support the Virtualization framework in a daemon. |
+| A Mac host's VM does not start from a launch daemon for an account that has never logged in, or a macOS update breaks that start. | Lima's contributors report that a Linux VM starts from a boot daemon with nobody logged in. The keychain need applies to macOS guests. H21 starts with a test by hand (18.4), and each macOS update is tested again, because Apple does not support the Virtualization framework in a daemon. [Question 91](#15-open-questions) holds the way out if the test fails. |
 | An older client that saves `hosts.toml` drops `wall_floor` and the new host keys. | A host without a floor uses its probe's best level and pins nothing, and the launcher says so (8.4). Tiers stay in `tiers.toml`. |
 | Converting an untrusted image attacks the converter on the trusted side. | A pure Go converter in a jail with no network, digests checked first, and caps on size and entries. |
 | Nitro Sandboxes on EC2 depend on one parent kernel: the documented support is in Amazon Linux 2023 `kernel6.18`. | The `nitro` driver's probe checks the driver's files, not the distribution's name. Other EC2 hosts keep nested KVM or `gvisor`. |
@@ -3800,7 +3808,7 @@ The research raised four more questions, and the design answers them, so they ar
 | `copy_in` or `--seed-dirty` sends a file that holds a secret. | Both refuse the paste guard's sensitive names. `--seed-dirty` prints each untracked file that it sends. `pull`'s review finds the session's own secrets on the way back (7.1). |
 | A kept cache that the agent poisoned is used again after a restart. | It stays inside the one sandbox that poisoned it, which can already change its own dependencies. `rm` deletes it, and caches are never shared (17.5). |
 | `new --count` asks for more sandboxes than a host can take. | Admission refuses each one that does not fit, and the answer lists which started (14.10.3). |
-| A Mac host restarts while nobody is near it, and stays at the FileVault unlock. | `ls` shows it as away, and `auto` skips it. The docs give `fdesetup authrestart` for planned restarts. The invoker can start work that must not wait on another host, unless a secret's `on_hosts` forbids it. |
+| A Mac host restarts, and nobody logs in at it. | The design assumes that the Mac's user logs in after a rare restart ([question 68](#15-open-questions)). Until then `ls` shows the host as away, and `auto` skips it. The invoker can start work that must not wait on another host, unless a secret's `on_hosts` forbids it. |
 | A Mac laptop that runs all day with the lid open ages its battery and runs hot. | The docs say to set Charge Limit to 80 % and to keep the Mac at 10 °C to 35 °C with good air flow. `host doctor` reads the thermal state. |
 | An organisation's MDM changes sshd or the power settings under the host. | The key's own options hold with a managed sshd. `host doctor` reports what MDM controls, and the health items `mac-sleep-on` and `mac-on-battery`. |
 | A Claude.ai login brings the account's MCP connectors, which act on the provider's side with no field in the request ([issue 612](https://github.com/docker/sbx-releases/issues/612)). | The model API guard cannot see a connector in the request. Claude Code reaches claude.ai connectors through `mcp-proxy.anthropic.com` ([network config](https://code.claude.com/docs/en/network-config)), and that host is not in its `Egress` (8.6). So a sandbox reaches them only when a rule grants that host. That no connector works without it is UNVERIFIED. The docs also say to use an API key, or an account without connectors, for a sandbox. |
@@ -4057,11 +4065,11 @@ laptop -> Mac sshd, as the dedicated account (its key may only open 127.0.0.1:<p
        -> Lima's host agent on 127.0.0.1:<port> -> vsock -> the VM's sshd -> the helper
 ```
 
-**Needs.** Apple silicon and macOS 15 or later. Lima's `vz` works from macOS 13, but in November 2026 macOS 15 is the oldest release that still gets Apple's security fixes ([research](../research/locations.md#5-mac-hosts-checked-again)). microvm walls need an M3 chip or later (11). M1 and M2 Macs get process walls, and gvisor after P6. The SSH unlock of FileVault needs macOS 26.
+**Needs.** Apple silicon and macOS 15 or later. Lima's `vz` works from macOS 13, but in November 2026 macOS 15 is the oldest release that still gets Apple's security fixes ([research](../research/locations.md#5-mac-hosts-checked-again)). microvm walls need an M3 chip or later (11). M1 and M2 Macs get process walls, and gvisor after P6.
 
 **What `host join` does on a Mac.**
 
-1. **Checks.** The chip, the macOS version, FileVault, MDM enrolment, a managed sshd and Remote Login. The join runs as root, so each check works. For Remote Login, it reads `launchctl print-disabled system`, and the members of the group `com.apple.access_ssh`. UNVERIFIED: no Apple document names that group. H21 checks it on macOS 15 and 26 before it builds the check.
+1. **Checks.** The chip, the macOS version, MDM enrolment, a managed sshd and Remote Login. The join runs as root, so each check works. For Remote Login, it reads `launchctl print-disabled system`, and the members of the group `com.apple.access_ssh`. UNVERIFIED: no Apple document names that group. H21 checks it on macOS 15 and 26 before it builds the check.
 2. **Account.** A standard account, hidden from the login window, with a random password that the join does not keep. It logs in by key only. Its shell is a real shell, because sshd runs the forced command of step 7 through it. The join adds `;DisabledTags;SecureToken` to the account's `AuthenticationAuthority`, so the account never becomes a FileVault user.
 3. **Lima.** The Lima release that the release manifest pins as an item of kind `lima` (14.9.1), v2.3.0 or later, checked by its digest, in a folder that root owns. A Homebrew upgrade cannot change it.
 4. **VM.** Made as that account, from the template of `host create lima` (P0.8), with these changes:
@@ -4075,29 +4083,30 @@ laptop -> Mac sshd, as the dedicated account (its key may only open 127.0.0.1:<p
 5. **VM key.** The laptop's key goes into the VM user's `~/.ssh/authorized_keys`.
 6. **Start at boot.** `host join` writes the launch daemon's plist itself, from Lima's template: `/Library/LaunchDaemons/io.lima-vm.daemon.<instance>.plist`, with `UserName` set to the account, `LIMA_HOME`, `KeepAlive` and `ExitTimeOut` of 60 s. Then it runs `launchctl bootstrap system` on it.
    - `limactl autostart enable` cannot do this. `limactl` refuses to run as root, and then needs `sudo` as the account, which has no known password.
-   - The VM starts at boot, before anyone logs in. It starts again when Lima's host agent exits with an error.
+   - The VM starts at boot as the account, whichever user logs in. With FileVault on, the boot waits for the login that unlocks the disk.
+   - The VM starts again when Lima's host agent exits with an error.
    - `ExitTimeOut` gives the guest time to shut down. Without it, launchd kills the host agent 5 s after `SIGTERM`.
 7. **Mac key.** The laptop's key goes into the account's `authorized_keys` on the Mac with `restrict,port-forwarding,permitopen="127.0.0.1:<port>",permitlisten="127.0.0.1:<port>",command="<facts script>"`. The key can open a channel only to the VM's port, or run the facts script. It has no shell on the Mac. Lima already holds that port, so a remote forward to it fails. The client asks for `127.0.0.1`, not `localhost`, because `permitopen` matches the literal host.
 8. **sshd.** A drop-in `/etc/ssh/sshd_config.d/00-<name>.conf` holds a `Match User` block for the account: `AuthenticationMethods publickey`, `AllowTcpForwarding local`, `AllowStreamLocalForwarding no`, `PermitListen none`, `PermitTTY no`, `AllowAgentForwarding no` and `X11Forwarding no`. The join checks the values with `sshd -T -C user=<account>`, as on Linux (18.3.1). With a managed sshd, the drop-in has no effect. The key's own options still limit local forwards, but the key can then listen on a Unix socket as the account. `host doctor` reports a managed sshd.
 9. **Remote Login.** The join never turns it on. When it is off, or does not allow the account, the join stops: "Remote Login is off. Try: turn it on in System Settings > General > Sharing > Remote Login, add <account> to Allow access for, then run simstim host join again."
 10. **Power.** With the user's yes and an undo, it sets `pmset -c sleep 0`, so the Mac does not sleep on power. It never changes the settings for battery.
-11. **Steps for the user.** It prints the steps that it cannot take: Charge Limit at 80 %, the lid open, and a place with good air flow at 10 °C to 35 °C. With the lid closed and no display, the Mac sleeps even with `pmset -c sleep 0`. The tool does not use the undocumented `pmset disablesleep`. When the user uses Tailscale, it also names Tailscale's open-source daemon (18.6).
+11. **Steps for the user.** It prints the steps that it cannot take: Charge Limit at 80 %, the lid open, and a place with good air flow at 10 °C to 35 °C. With the lid closed and no display, the Mac sleeps even with `pmset -c sleep 0`. The tool does not use the undocumented `pmset disablesleep`.
 12. **Reply.** The reply holds both host keys: the Mac's sshd key and the VM's.
 
-**A gate before H21.** Lima's contributors report that a Linux VM starts from such a daemon with nobody logged in. No source covers an account that has never logged in, with FileVault on. Apple does not support the Virtualization framework in a daemon, so a macOS update can break it. H21 starts with the test by hand in [the research note](../research/locations.md#5-mac-hosts-checked-again), on macOS 15 and on macOS 26. If the test fails, H21 stops, and the owner decides again.
+**A gate before H21.** Lima's contributors report that a Linux VM starts from such a daemon with nobody logged in. No source covers an account that has never logged in and has no login keychain. Apple does not support the Virtualization framework in a daemon, so a macOS update can break it. H21 starts with the test by hand in [the research note](../research/locations.md#5-mac-hosts-checked-again), on macOS 15 and on macOS 26. If the test fails, H21 stops, and the owner picks the way out ([question 91](#15-open-questions)).
 
-**The facts script.** Root owns it, and the account cannot change it. It prints JSON with the power source and battery level (`pmset -g batt`), the sleep settings and assertions (`pmset -g`, `pmset -g assertions`), and the thermal state (`pmset -g therm`). The JSON also holds FileVault's state (`fdesetup status`), the macOS version, MDM enrolment, and whether MDM manages sshd's files. The laptop runs it over the same SSH path. The helper's `host.facts` cannot see the Mac's battery, because the VM has none. So the client takes `on_battery` from the Mac's facts (14.10.2). The script runs as the account, a standard user. These `pmset`, `fdesetup` and `profiles` reads worked without `sudo` for an admin user. UNVERIFIED for a standard user: H21 checks it.
+**The facts script.** Root owns it, and the account cannot change it. It prints JSON with the power source and battery level (`pmset -g batt`), the sleep settings and assertions (`pmset -g`, `pmset -g assertions`), and the thermal state (`pmset -g therm`). The JSON also holds the macOS version, MDM enrolment, and whether MDM manages sshd's files. The laptop runs it over the same SSH path. The helper's `host.facts` cannot see the Mac's battery, because the VM has none. So the client takes `on_battery` from the Mac's facts (14.10.2). The script runs as the account, a standard user. These `pmset` and `profiles` reads worked without `sudo` for an admin user. UNVERIFIED for a standard user: H21 checks it.
 
 **Placement and health.** `auto` already ranks a host on battery one band lower (14.10.5). On battery, the Mac sleeps by its own settings. So `host doctor` adds the health item `mac-on-battery` (warn), and the item `mac-sleep-on` (warn) when `pmset -c sleep` is not 0. It also reports when the user has turned the launch daemon off in System Settings > General > Login Items & Extensions.
 
 **Day to day.** A Mac host only needs to stay on. The VM runs from a launch daemon, so a locked screen or a logged-out user does not stop it. The docs advise a screen lock, because an unlocked screen lets anyone at the Mac act as its logged-in user. That user's files and keychain are outside the VM, but sessions do not need them.
 
-**Restarts.** A restart is rare on a Mac that stays on: a power cut, or a macOS update.
+**Restarts.** The design assumes that a Mac host does not restart. After a rare restart, such as a power cut or a macOS update, the Mac's user logs in at the Mac ([question 68](#15-open-questions)).
 
-- **A planned restart.** The docs give `sudo fdesetup authrestart`, which the user runs at the Mac or over their own SSH login. It skips the FileVault unlock for that one restart, and keeps an unlock key in memory until then. The tool does not run it, because that would need an admin login on the Mac ([question 68](#15-open-questions)).
-- **Any other restart**, a power cut that empties the battery included, stops at the FileVault unlock. Tailscale does not run before the unlock. A person at the Mac can unlock it. So can an SSH session that reaches the Mac's LAN address: from that LAN, or through a Tailscale subnet router on it. The SSH unlock takes a FileVault user's password, not a key. Before the unlock, the network cannot use a VPN or 802.1X, so the Mac needs Ethernet or WPA2 Personal. Until then `ls` shows the host as away. `host doctor` says: "mac1 is away. If it restarted, unlock FileVault from its LAN: ssh <your user>@<its LAN address>."
-- **After the unlock**, the launch daemon starts the VM, and the helper restores the sessions that were working (6.8).
-- **macOS updates** that restart the Mac follow the same rules. The docs say to install them by hand, or at the times that the organisation's MDM sets.
+- The login unlocks FileVault. Then the launch daemon starts the VM, and the helper restores the sessions that were working (6.8).
+- Until then `ls` shows the host as away, as for any host that does not answer. `host doctor` says: "mac1 is away. Try: if it restarted, log in at the Mac."
+- The tool does not unlock FileVault, and the docs describe no unlock from far away.
+- The docs say to install macOS updates by hand, or at the times that the organisation's MDM sets.
 
 **The tier.** A Mac that an organisation manages with MDM is `shared`, because the organisation's admins have root through MDM. The reply suggests `shared` when the Mac is enrolled. A `shared` host takes only the repositories that its `repos` list matches (14.8.2), so `host add --accept` asks for that list, for example `github.com/acme/*`. The organisation's secrets get `shared` in `[secret_tiers]`, and their `on_hosts` can list the Macs (18.2). Personal secrets stay `own`, so they never reach such a Mac. The docs say to ask the organisation's IT team before its Mac becomes a host ([question 69](#15-open-questions)).
 
@@ -4113,7 +4122,7 @@ laptop -> Mac sshd, as the dedicated account (its key may only open 127.0.0.1:<p
 ### 18.6 Reaching each location
 
 - The docs recommend the user's own Tailscale on every host, with tags and grants, as 14.13 does. Tailscale connects directly when the laptop is on the same LAN, so one address works at both locations.
-- On a Mac, the docs name Tailscale's open-source `tailscaled` as a launch daemon, because the apps start only at login.
+- On a Mac, any Tailscale variant works, because the design assumes that the Mac's user stays logged in (18.4).
 - The design assumes that no other machine at a Mac's location stays online. So it needs no waker, jump host or subnet router there. When a network blocks Tailscale, the laptop reaches the Mac only from the Mac's own LAN, and `host doctor` shows `route: direct`.
 - Wake-on-LAN cannot cross Tailscale, so Mac hosts stay awake instead.
 
