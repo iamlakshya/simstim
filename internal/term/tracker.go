@@ -213,15 +213,15 @@ func (t *Tracker) oscToken(tok Token) {
 	num, rest, _ := bytes.Cut(tok.Payload, []byte(";"))
 	switch string(num) {
 	case "0", "2":
-		m.Title = append([]byte(nil), tok.Raw...)
+		m.Title = ended(tok.Raw)
 	case "10", "11", "12", "17", "19":
 		if !bytes.HasSuffix(rest, []byte("?")) {
-			m.Colors[string(num)] = append([]byte(nil), tok.Raw...)
+			m.Colors[string(num)] = ended(tok.Raw)
 		}
 	case "4":
 		if !bytes.Contains(rest, []byte("?")) {
 			idx, _, _ := bytes.Cut(rest, []byte(";"))
-			m.Colors["4;"+string(idx)] = append([]byte(nil), tok.Raw...)
+			m.Colors["4;"+string(idx)] = ended(tok.Raw)
 		}
 	case "104":
 		for k := range m.Colors {
@@ -234,6 +234,16 @@ func (t *Tracker) oscToken(tok Token) {
 	case "22":
 		m.Pointer = len(rest) > 0
 	}
+}
+
+// ended is a copy of an OSC sequence to send again, with an ST when an ESC
+// that started the next sequence ended it.
+func ended(raw []byte) []byte {
+	out := append([]byte(nil), raw...)
+	if !bytes.HasSuffix(out, []byte("\a")) && !bytes.HasSuffix(out, []byte("\x1b\\")) {
+		out = append(out, "\x1b\\"...)
+	}
+	return out
 }
 
 func csi(b *bytes.Buffer, s string) { b.WriteString("\x1b[" + s) }

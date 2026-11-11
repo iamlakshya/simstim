@@ -52,7 +52,12 @@ func ShowPath(p string) string {
 // OSCText keeps text from a host safe inside an OSC string, such as a
 // desktop notification: it cleans the text, and turns each ";", which
 // ends a field, into a space.
-func OSCText(s string) string { return strings.ReplaceAll(CleanLine(s), ";", " ") }
+func OSCText(s string) string { return oscText(s, textMax) }
+
+// oscText is OSCText that keeps at most maxRunes runes.
+func oscText(s string, maxRunes int) string {
+	return strings.ReplaceAll(api.CleanText(s, maxRunes), ";", " ")
+}
 
 // CommandTarget is host/session as a command that the client prints,
 // suggests or copies names it. It names the session by its ID, never by a

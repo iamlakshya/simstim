@@ -23,7 +23,7 @@ One static Go binary.
 | SSH layer | Runs the system `ssh` with a generated config. Owns a private ControlMaster per host. Opens the bridge channel. Uploads files. |
 | Attach pump | Raw mode, an output pump with a passive mode tracker, the input filter, resize forwarding, the reset list on detach. |
 | Reconnect | Heartbeat, wake detection, backoff, and resume by byte offset. |
-| Clipboard | Reads images from the local clipboard. Rewrites dropped file paths. |
+| Clipboard | Reads images from the local clipboard. Rewrites dropped file paths. The paste guard refuses private files, and paths that the session put on the clipboard. |
 | Capability probe | One batch of terminal queries at start-up, cached per terminal. It drives simstim's own screens and `doctor`. |
 
 ### 2.2 Host: `simstim-host` and `simstim-vt`
@@ -169,6 +169,18 @@ Triggers: the detach key, closing the tab, `simstim kill` from elsewhere, or SIG
 3. If it holds an image (16 MiB at most), the client uploads it over the bridge. The holder stores it under the session's `paste/` folder, mode 0700, and deletes it after 24 hours.
 4. The client sends the remote path as one bracketed paste. Claude Code, Codex, Gemini CLI, opencode and Amp all attach an image when you paste its path. So no agent needs special code.
 5. **Dropped files:** a bracketed paste is rewritten only when every token in it is an existing local file. Each file is uploaded, and its path replaced with the remote one.
+6. **The paste guard:** before a drop uploads, the client checks each file.
+   - A paste that equals the text on the local clipboard, or on the primary selection, is a paste, not a drag, and uploads nothing. This check needs no parsing of terminal output.
+   - It refuses a file in a private folder, such as `~/.ssh`, or with a secret's name, such as `*.pem`. It compares the identity of each folder above the path as given and above the resolved path, so links and other spellings count. It opens the resolved path with `O_NOFOLLOW`, checks that it opened the file that it checked, and the upload reads that file.
+   - It refuses a file whose path a session put on the clipboard in the last day. It reads every byte that goes to the terminal, the session's and the client's own, and changes none. Its parser follows the parse table of the Ghostty commit that the shadow terminal pins. It reads OSC 52, iTerm2's `Copy` and `CopyToClipboard`, and kitty's OSC 5522.
+   - It over-approximates: it records every reading of the two that spec 7.6 names, the pinned Ghostty's and xterm's with C1 controls on. Two readers read every byte from the start of the attach. The second reads each C1 control as its 7-bit ESC form. In ground, each reader jumps to the next byte that can start an OSC string, so plain text costs about one pass. Every OSC 52 selection letter but `p` counts for the clipboard.
+   - It keeps the SHA-256 of the text of the last 256 writes for 24 hours, in `paste-guard.json` in the state folder, mode 0600, under a lock that every client process shares. Before the output goes on, the reader appends each write's hashes to a journal beside the file, in one write, with the lock held shared. A goroutine folds the journal into the file with the lock held alone. A drop checks the file, the journal and the hashes not yet folded. Clipboard writes are rare, so normal output does no file work.
+   - When the file holds 256 writes, every drop is refused until the oldest is a day old. If the file cannot be read, the drop is refused. Writes to a selection, such as the primary one, have their own list in the file for each reading, which never fills the clipboard's. Each write has a time in nanoseconds that keeps its order, and a full list drops the oldest by that order. A write more than a minute ahead of the clock means that the clock moved back, and every drop is refused for a day.
+   - A reader that loses track of a write, such as kitty data that joins a transfer whose start it did not see, refuses every drop for a day. It appends that time to the journal first, so every client process refuses too, also after a restart.
+   - The open goes through folder handles, one folder at a time without following a link, and checks each folder again. On Windows the client checks the final path of the open file instead.
+   - A kitty transfer that a detach cuts counts as a write as far as it went, and the next attach in the same process goes on with it.
+   - If it refuses one file, nothing is uploaded, and the paste goes to the agent as the terminal sent it.
+   - A notice (OSC 777) names each upload with its size, and each refusal with its reason and a hint ([image paste](../how-to/image-paste.md)). A notice waits until the terminal is between sequences, so it never cuts one.
 
 ### 3.7 A session ends
 

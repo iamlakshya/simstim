@@ -142,6 +142,8 @@ func parseCSI(b []byte) (int, Token, bool) {
 }
 
 // parseString parses a sequence that ends with BEL (OSC only) or ST (ESC \).
+// An OSC string also ends at any other ESC, as a terminal ends it: the ESC
+// then starts the next token, so an OSC token never holds a second sequence.
 func parseString(b []byte, kind Kind) (int, Token, bool) {
 	for j := 2; j < len(b); j++ {
 		switch b[j] {
@@ -155,6 +157,9 @@ func parseString(b []byte, kind Kind) (int, Token, bool) {
 			}
 			if b[j+1] == '\\' {
 				return j + 2, Token{Kind: kind, Raw: b[:j+2], Payload: b[2:j]}, true
+			}
+			if kind == OSC {
+				return j, Token{Kind: kind, Raw: b[:j], Payload: b[2:j]}, true
 			}
 		}
 	}
