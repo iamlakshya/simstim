@@ -1,0 +1,21 @@
+# {{display}}
+
+> {{display}} runs Claude Code, Codex or any terminal agent in a session on a machine you own, and shows you its real screen, byte for byte.
+
+Each link below goes to the Markdown copy of a page. Every page of the site has one, at its address without the trailing slash, plus `.md`. `{{name}} <command> --help` prints a command's description, usage, examples and flags, as its page under Reference does.
+
+## Docs
+
+- [Tool](https://docs.example.org/dev/index.md): Run agents on hosts. See install and the script.
+- [Docs](https://docs.example.org/dev/docs.md): The docs. Start with how-to guides or the guides folder.
+- [Install](https://docs.example.org/dev/how-to/install.md): Install the client. Then read the reference, go home, or back.
+- [How-to guides](https://docs.example.org/dev/how-to.md): One task per page.
+- [FAQ](https://docs.example.org/dev/faq.md)
+
+## Reference
+
+- [Reference \[all\]](https://docs.example.org/dev/reference.md): Generated from the code.
+
+## Optional
+
+- [Notes](https://docs.example.org/dev/contributing/notes.md): Notes for contributors.

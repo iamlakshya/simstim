@@ -48,7 +48,8 @@ export default defineConfig({
 	integrations: [
 		starlight({
 			title: brand.displayName,
-			description: `${brand.displayName} runs Claude Code, Codex or any terminal agent in a session on a machine you own, and shows you its real screen, byte for byte.`,
+			// cmd/docgen writes it, for llms.txt too.
+			description: brand.description,
 			locales: { root: { label: 'English', lang: 'en-GB' } },
 			favicon: '/favicon.svg',
 			social: repo ? [{ icon: 'github', label: 'Source on GitHub', href: repo }] : [],

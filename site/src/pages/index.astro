@@ -38,7 +38,12 @@ const steps = [
 		pagefind: false,
 		landing: true,
 		editUrl: false,
-		head: [{ tag: 'title', content: `${name}: walk away, and your agents keep working` }],
+		head: [
+			{ tag: 'title', content: `${name}: walk away, and your agents keep working` },
+			// The page's Markdown copy, for coding agents: cmd/docgen writes it
+			// from the repository's README.
+			{ tag: 'link', attrs: { rel: 'alternate', type: 'text/markdown', href: to('/index.md') } },
+		],
 	}}
 	hasSidebar={false}
 >

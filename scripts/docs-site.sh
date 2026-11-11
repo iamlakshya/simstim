@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Builds the docs site into build/site/public (decision 0022): first the
-# pages and data from docs/ (go run ./cmd/docgen -site site/src), then Astro
-# with Starlight (site/). The name comes from internal/brand through the
-# generated data, and the repository's address from go.mod.
+# pages and data from docs/ (go run ./cmd/docgen -site site/src), with
+# llms.txt and a Markdown copy of each page for this build's address, then
+# Astro with Starlight (site/). The name comes from internal/brand through
+# the generated data, and the repository's address from go.mod.
 #
 #   scripts/docs-site.sh [version] [base]
 #
@@ -37,7 +38,7 @@ path="/${path#/}"
 path="${path%/}/"
 root=$(printf '%s' "$path" | sed -E 's#(v[0-9]+\.[0-9]+|dev)/$##')
 
-go run ./cmd/docgen -site site/src
+go run ./cmd/docgen -site site/src -site-url "$url$path"
 # The lockfile pins every package with its hash; install only what it says.
 if [ ! -d site/node_modules ] || [ site/pnpm-lock.yaml -nt site/node_modules/.pnpm/lock.yaml ]; then
     pnpm --dir site install --frozen-lockfile

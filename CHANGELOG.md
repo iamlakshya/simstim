@@ -7,6 +7,7 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 ### Added
 
 - The launcher's host details show each agent's version, such as `claude 2.1.3` ([#26](https://github.com/iamlakshya/simstim/issues/26)). The host helper reads it from the agent's `--version` when the launcher connects, and the launcher keeps it for that connection. `host doctor --json` has the versions too, as `agent_versions`. When the agents do not fit on one line, as at 60 columns, they wrap under their label. The shell shows no version, and neither does an agent that prints none. An older host helper sends no versions, so its details show the names alone.
+- The docs site publishes `llms.txt` and a Markdown copy of each page, for coding agents. A new guide, [use with coding agents](docs/how-to/use-with-agents.md), has a snippet for a project's `AGENTS.md`.
 
 ### Changed
 

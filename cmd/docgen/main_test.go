@@ -88,7 +88,7 @@ func TestSitePages(t *testing.T) {
 		}
 	}
 	out := filepath.Join(t.TempDir(), "src")
-	if err := sitePages("docs", out, "https://github.com/o/r"); err != nil {
+	if err := sitePages("docs", out, "https://github.com/o/r", "https://docs.example.org/dev/"); err != nil {
 		t.Fatal(err)
 	}
 	b, err := os.ReadFile(filepath.Join(out, "generated", "pages.json"))

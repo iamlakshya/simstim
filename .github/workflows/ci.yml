@@ -63,6 +63,8 @@ jobs:
         run: scripts/test-verify-tag.sh
       - name: End-to-end cleanup tests of host git (offline)
         run: python3 test/e2e/test_host_git.py
+      - name: llms.txt checker tests (offline)
+        run: python3 scripts/test-check-llms-txt.py
       - name: No Go source file over 500 lines
         run: scripts/check-size.sh
       - name: Generated docs are current
