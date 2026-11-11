@@ -12,7 +12,6 @@ import (
 	"path/filepath"
 	"slices"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -220,7 +219,9 @@ func sessionEnv(a NewArgs, id string, login []string, agent agents.Agent, inline
 	extra := map[string]string{
 		"TERM": term, "COLORTERM": colorterm,
 		"TERM_PROGRAM": a.TermProgram, "TERM_PROGRAM_VERSION": a.TermProgramVersion,
-		brand.Env("SESSION"): id, brand.Env("SOCK"): paths.Socket(id),
+		// Only the hook socket: the session socket refuses the session's own
+		// programs where the peer check works (holder_peer.go).
+		brand.Env("SESSION"): id, brand.Env("HOOK_SOCK"): paths.HookSocket(id),
 	}
 	if inline {
 		for k, v := range agent.Inline.Env {
@@ -260,6 +261,9 @@ func agentArgv(argv []string, a NewArgs, agent agents.Agent, known, inline bool)
 	return argv, hooks, vars["session_uuid"]
 }
 
+// startHolder is launchHolder. Tests replace it.
+var startHolder = launchHolder
+
 // startSession saves a new session's manifest, starts its holder, hands the
 // holder the secrets and waits for the agent to start. It returns the
 // session's row.
@@ -271,12 +275,12 @@ func startSession(m *Manifest, secrets map[string]api.Secret) (*SessionInfo, err
 	if err := m.Save(); err != nil {
 		return nil, err
 	}
-	if err := launchHolder(m); err != nil {
+	if err := startHolder(m); err != nil {
 		return nil, UserError("start_failed", err.Error(), "Check the session log with the host doctor.")
 	}
 	if err := deliverSecrets(id, secrets); err != nil {
 		_ = deleteSession(id, &DeleteResult{})
-		return nil, UserError("secrets_failed", "the session could not get its secrets, so it was removed", "Try again.")
+		return nil, secretsFailed(err)
 	}
 	if mm := waitStarted(id, 5*time.Second); mm != nil {
 		if mm.Status.State == StateErrored && mm.Run.AgentPID == 0 {
@@ -321,20 +325,6 @@ func debugUntil(m *Manifest, alive bool) *time.Time {
 		return nil
 	}
 	return m.DebugUntil
-}
-
-func memoryCurrent(unit string) int64 {
-	if unit == "" {
-		return 0
-	}
-	uid := os.Getuid()
-	p := fmt.Sprintf("/sys/fs/cgroup/user.slice/user-%d.slice/user@%d.service/%s/%s/memory.current", uid, uid, brand.Slice, unit)
-	b, err := os.ReadFile(p)
-	if err != nil {
-		return 0
-	}
-	n, _ := strconv.ParseInt(strings.TrimSpace(string(b)), 10, 64)
-	return n
 }
 
 func alive(id string) bool {
@@ -431,6 +421,9 @@ func HolderRequest(id, op string, args any, timeout time.Duration) (json.RawMess
 // Delete stops a session and removes its files, and its worktree when that loses nothing.
 func Delete(id string) (DeleteResult, error) {
 	var res DeleteResult
+	if err := CheckCaller(); err != nil {
+		return res, err
+	}
 	err := deleteSession(id, &res)
 	return res, err
 }
@@ -468,6 +461,9 @@ func Rename(id, name string) error {
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return UserError("bad_name", "a name is needed", "")
+	}
+	if err := CheckCaller(); err != nil {
+		return err
 	}
 	if alive(id) {
 		_, err := HolderRequest(id, "rename", map[string]string{"name": name}, 2*time.Second)

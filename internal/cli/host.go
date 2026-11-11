@@ -281,11 +281,12 @@ func hostDoctorCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "doctor <name>",
 		Short: "Check a host's setup, and with --fix fix what it can",
-		Long: "Checks a host: systemd and linger, the restore unit, terminfo, memory caps, swap and the\n" +
-			"agents. It warns when the host has less memory than an agent's docs ask for. With\n" +
-			"--fix it offers to fix linger, the restore unit, Ghostty's terminfo, a broken current\n" +
-			"helper link, stale session sockets and old helper versions. Each fix is shown and\n" +
-			"explained before it runs; one that needs root is printed for you.",
+		Long: "Checks a host: systemd and linger, the restore unit, terminfo, memory caps, swap, the\n" +
+			"session sockets and the agents. It warns when the host has less memory than an agent's\n" +
+			"docs ask for, and when a program in one session could drive another through its\n" +
+			"socket. With --fix it offers to fix linger, the restore unit, Ghostty's terminfo, a\n" +
+			"broken current helper link, stale session sockets and old helper versions. Each fix is\n" +
+			"shown and explained before it runs; one that needs root is printed for you.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			h, err := client.FindHost(args[0])

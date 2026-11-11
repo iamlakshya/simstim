@@ -74,6 +74,17 @@ func deliverSecrets(id string, s map[string]api.Secret) error {
 	return nil
 }
 
+// secretsFailed is the error of a new session whose holder did not take its
+// secrets. From inside a session, the holder refuses them, and a retry cannot
+// help: that refusal comes back as it is.
+func secretsFailed(err error) error {
+	var pe *proto.Error
+	if errors.As(err, &pe) && pe.Code == errInside.Code {
+		return pe
+	}
+	return UserError("secrets_failed", "the session could not get its secrets, so it was removed", "Try again.")
+}
+
 // awaitSecrets waits on the holder's socket for the session's secrets and
 // returns them as environment entries for the agent. Any other connection
 // is told the session is starting. It returns nil after the timeout.
@@ -91,7 +102,7 @@ func (h *Holder) awaitSecrets(want []string, timeout time.Duration) []string {
 			h.log.Warn("secrets did not arrive, starting without them", "waited", timeout)
 			return nil
 		}
-		env, err := readSecrets(conn, want, deadline)
+		env, err := h.readSecrets(conn, want, deadline)
 		conn.Close()
 		if err == nil {
 			h.log.Info("secrets received", "count", len(env))
@@ -101,7 +112,9 @@ func (h *Holder) awaitSecrets(want []string, timeout time.Duration) []string {
 }
 
 // readSecrets serves one connection while the holder waits for its secrets.
-func readSecrets(conn net.Conn, want []string, deadline time.Time) ([]string, error) {
+// A program inside a session gets the same answers as later: a pong for a
+// ping, and forbidden for anything else, the secrets too (holder_peer.go).
+func (h *Holder) readSecrets(conn net.Conn, want []string, deadline time.Time) ([]string, error) {
 	_ = conn.SetDeadline(minTime(deadline, time.Now().Add(3*time.Second)))
 	r := bufio.NewReader(conn)
 	w := proto.NewWriter(conn)
@@ -110,6 +123,15 @@ func readSecrets(conn net.Conn, want []string, deadline time.Time) ([]string, er
 	}
 	if err := w.WriteJSON(proto.THello, proto.Hello{Magic: proto.Magic, Protocol: version.Protocol, Version: version.Version, Role: "holder"}); err != nil {
 		return nil, err
+	}
+	if !h.fullPeer(conn) {
+		c := &hclient{conn: conn, w: w, access: accessPing}
+		for {
+			f, err := proto.Read(r)
+			if err != nil || !h.serveLimited(c, f) {
+				return nil, errors.New(errInside.Message)
+			}
+		}
 	}
 	f, err := proto.Read(r)
 	if err != nil || f.Type != proto.TRequest {

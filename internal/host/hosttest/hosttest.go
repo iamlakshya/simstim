@@ -43,6 +43,8 @@ func Main(m *testing.M) {
 		case "hook":
 			host.RunHook(os.Args[2], os.Args[3:])
 			os.Exit(0)
+		case "rm-as-caller":
+			rmAsCaller(os.Args[2:])
 		}
 	}
 	if len(os.Args) == 2 && os.Args[1] == "keytest" {
@@ -100,8 +102,52 @@ func New(t testing.TB) *Host {
 	// A data race in a holder is written here, and fails the test. The
 	// race detector's pause at exit would slow every holder down.
 	t.Setenv("GORACE", "log_path="+filepath.Join(root, "race")+" atexit_sleep_ms=0")
+	// Registered before the cleanup below, so it is undone after it: the
+	// cleanup deletes the sessions from outside every session too.
+	outside(t)
 	t.Cleanup(h.cleanup)
 	return h
+}
+
+// rmAsCaller is a test's stand-in for a program that runs the helper's rm:
+// "rm-as-caller <id> <manager namespace or none>". It prints its own view of
+// its cgroup, waits for a line on stdin, then deletes session id as rm does,
+// with its real cgroup and namespace, and the user manager's namespace from
+// its argument. It prints the result, and exits.
+func rmAsCaller(args []string) {
+	if len(args) != 2 {
+		os.Exit(2)
+	}
+	manager := args[1]
+	if manager == "none" {
+		manager = ""
+	}
+	host.CgroupNamespaces = func() (string, string, error) {
+		self, err := os.Readlink("/proc/self/ns/cgroup")
+		return self, manager, err
+	}
+	self, _ := os.ReadFile("/proc/self/cgroup")
+	fmt.Printf("SELF %q\n", strings.TrimSpace(string(self)))
+	_, _ = io.ReadAll(io.LimitReader(os.Stdin, 1))
+	if _, err := host.Delete(args[0]); err != nil {
+		fmt.Printf("RESULT %v\n", err)
+	} else {
+		fmt.Println("RESULT deleted")
+	}
+	os.Exit(0)
+}
+
+// outside makes this test's process look, to the helper's own check
+// (host.CheckCaller), like a login shell outside every session, on a host
+// with a systemd user manager, until the test ends. So the tests pass even
+// when they run inside a session's unit. InSession says otherwise.
+func outside(t testing.TB) {
+	uid := os.Getuid()
+	cgroup := fmt.Sprintf("0::/user.slice/user-%d.slice/session-1.scope\n", uid)
+	self, ns := host.SelfCgroup, host.CgroupNamespaces
+	host.SelfCgroup = func() ([]byte, error) { return []byte(cgroup), nil }
+	host.CgroupNamespaces = func() (string, string, error) { return "cgroup:[1]", "cgroup:[1]", nil }
+	t.Cleanup(func() { host.SelfCgroup, host.CgroupNamespaces = self, ns })
 }
 
 // systemPath is a $PATH of the system's folders, and of the folders of the
@@ -307,4 +353,17 @@ func (h *Host) Script(name, body string) string {
 		h.t.Fatal(err)
 	}
 	return p
+}
+
+// InSession makes this test's process look, to the helper's own check
+// (host.CheckCaller), like a program in the unit of session id, until the
+// test ends. It overrides New's outside. Holders that the test starts are
+// other processes: they keep their own cgroup.
+func InSession(t testing.TB, id string) {
+	t.Helper()
+	uid := os.Getuid()
+	cgroup := fmt.Sprintf("0::/user.slice/user-%d.slice/user@%d.service/%s/%s\n", uid, uid, brand.Slice, host.UnitName(id))
+	old := host.SelfCgroup
+	host.SelfCgroup = func() ([]byte, error) { return []byte(cgroup), nil }
+	t.Cleanup(func() { host.SelfCgroup = old })
 }

@@ -88,6 +88,7 @@ test:
     go test -race -count=1 ./...
     python3 scripts/test-scorecard-check.py
     python3 test/e2e/test_sandbox_hosts.py
+    python3 test/e2e/test_session_sockets.py
 
 # The unit tests' coverage of internal/ without the launcher, counted across packages (the bar is 70 %).
 cover:

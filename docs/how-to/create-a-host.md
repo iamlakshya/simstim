@@ -59,6 +59,7 @@ It starts a container from `debian:stable-slim` (change it with `--image`; the i
 What does not work in a container:
 
 - There is no systemd, so sessions run as detached processes, without memory caps, and they are not restored after a restart.
+- Without a unit for each session, a program in one session can still attach to, type into or stop another through its socket. `host doctor` reports the session sockets as weak ([security model](../explanation/security.md)).
 - Docker's default seccomp profile blocks bubblewrap, so agents' own sandboxes fail.
 - `forward` needs SSH, so it does not work.
 - There is no idle stop. Stop the container with `simstim host stop test`.

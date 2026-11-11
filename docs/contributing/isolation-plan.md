@@ -170,6 +170,7 @@ Spec section 15 has each question in full, with its options: [open questions](is
 | 105 | May a Mac host's Lima host agent listen on a TCP port on the Mac's loopback? | Yes, in a new record that names the Mac host as the one exception to 0030, unless Lima can serve SSH on a Unix socket. H21 waits for the owner's yes. | H21 |
 | 106 | Does the purge's question about agent logins default to yes on a `shared` host? | No, as for every question that deletes something. `--delete-logins` answers yes, and a `shared` host gets a warning. | H15 |
 | 107 | How does the client find the repository's sections for a host folder that `--dir` names? | From the folder's `origin`, which the host reads with `repo.info`. `new` names the sections, and later starts use the names that the trusted manifest keeps. | P1.12 |
+| 108 | Should session units lose access to the user manager's bus and to `/sys/fs/cgroup`? | No, not before walls (G5). The peer check stays a speed bump, and its docs say so. | P0.2 |
 
 ## Order
 
@@ -179,7 +180,7 @@ Build the tasks from top to bottom. Every task named under "Depends on" is above
 | --- | --- | --- | --- | --- | --- | --- |
 | 1 | H2 | Turn off forwarding on every connection | 0 | 0034 (here) | 40 | S |
 | 2 | P0.1 | Bump the shadow terminal's Ghostty pin, and cap terminal sizes | 0 | none | 75, 76 | S |
-| 3 | P0.2 | A hook socket of its own, and a peer check on the holder's socket | 0 | 0030 | 23 | M |
+| 3 | P0.2 | A hook socket of its own, and a peer check on the holder's socket | 0 | 0030 | 23, 108 | M |
 | 4 | P0.3 | Check an agent's session ID before it enters a command | 0 | none | none | S |
 | 5 | P0.4 | Clean every string that a host sends before the client draws it | 0 | none | none | S |
 | 6 | P0.5 | A paste guard | 0 | none | 96 | S |
@@ -483,7 +484,7 @@ These tasks need no wall, and they help every session. H2 goes first ([question 
 - **Docs:** `docs/explanation/security.md`.
 - **CHANGELOG:** Security. "A program in one session can no longer type into, attach to or stop another session through its socket. A program that it starts outside its session still can. Sandboxes close that gap. Agents' hooks use a socket that accepts only hook events."
 - **Depends on:** [0030](decisions/0030-local-sockets-do-not-listen.md): the hook socket is a Unix socket, which does not listen on the host.
-- **Questions:** [23](isolation-spec.md#15-open-questions).
+- **Questions:** [23](isolation-spec.md#15-open-questions), [108](isolation-spec.md#15-open-questions).
 - **Effort:** M.
 
 ### P0.3 Check an agent's session ID before it enters a command

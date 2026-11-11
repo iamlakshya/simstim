@@ -105,6 +105,7 @@ type again struct {
 func startAgain(m *Manifest, a again) (argv []string, why string, err error) {
 	argv, why = resumeArgv(m)
 	m.Agent.Argv = argv
+	m.Env = withHookSocket(m.Env, m.ID)
 	m.RunHook = m.ResumeHook
 	m.Run.BootID = BootID()
 	// The old processes are gone. The new holder records its own.

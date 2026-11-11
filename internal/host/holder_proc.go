@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/iamlakshya/simstim/internal/brand"
-	"github.com/iamlakshya/simstim/internal/paths"
 )
 
 // kill stops the agent's whole process group, then the holder.
@@ -56,10 +55,7 @@ func (h *Holder) stop(reason string, system bool) {
 	m := *h.m
 	h.mu.Unlock()
 	_ = h.save(&m, true)
-	if h.ln != nil {
-		h.ln.Close()
-	}
-	os.Remove(paths.Socket(h.id))
+	h.closeSockets()
 	os.Exit(0)
 }
 

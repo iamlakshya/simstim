@@ -318,3 +318,18 @@ func limitText(n int64) string {
 	}
 	return gibText(n)
 }
+
+// memoryCurrent reads the memory that the unit of a session uses now.
+func memoryCurrent(unit string) int64 {
+	if unit == "" {
+		return 0
+	}
+	uid := os.Getuid()
+	p := fmt.Sprintf("/sys/fs/cgroup/user.slice/user-%d.slice/user@%d.service/%s/%s/memory.current", uid, uid, brand.Slice, unit)
+	b, err := os.ReadFile(p)
+	if err != nil {
+		return 0
+	}
+	n, _ := strconv.ParseInt(strings.TrimSpace(string(b)), 10, 64)
+	return n
+}
