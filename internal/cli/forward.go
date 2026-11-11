@@ -42,8 +42,9 @@ func forwardCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "forward <host>/<session> [port…]",
 		Short: "Forward a session's ports to localhost (all of them if none are given)",
-		Long: "Forwards ports from the host to 127.0.0.1 on this machine, through your SSH connection,\n" +
-			"until you press Ctrl+C. Write local:remote to use another local port. Nothing is exposed beyond this machine.",
+		Long: "Forwards ports from the host to 127.0.0.1 on this machine, through an SSH connection of its own,\n" +
+			"until you press Ctrl+C. Write local:remote to use another local port. Nothing is exposed beyond this machine.\n" +
+			"It refuses to start when your SSH config has a RemoteForward, a Tunnel or ForkAfterAuthentication yes for the host.",
 		Example: "  " + brand.Name + " forward my-vps/web 3000\n  " + brand.Name + " forward my-vps/web 8080:3000",
 		Args:    cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {

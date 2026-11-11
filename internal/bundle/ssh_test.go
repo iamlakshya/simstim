@@ -7,6 +7,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -94,5 +95,30 @@ func TestTheSSHLogLosesWhatSSHKnows(t *testing.T) {
 	b.sshFacts(context.Background())
 	if b.sshLog != nil || len(b.res.Notes) != 1 || !strings.Contains(b.res.Notes[0], "reached through its provider") {
 		t.Errorf("a provider's host: log %q, notes %v", b.sshLog, b.res.Notes)
+	}
+}
+
+// When ssh -G prints a line too long to read, the bundle keeps the values
+// before it, and says that some may not be replaced.
+func TestSSHValuesCutShort(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	bin := filepath.Join(home, "bin")
+	if err := os.MkdirAll(bin, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	script := "#!/bin/sh\nprintf 'hostname 198.51.100.77\\nxauthlocation /'\nhead -c 2100000 /dev/zero | tr '\\0' x\nprintf '\\nuser zorbo\\n'\n"
+	if err := os.WriteFile(filepath.Join(bin, "ssh"), []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+":"+os.Getenv("PATH"))
+	b := &builder{vals: Values{}, res: &Result{}}
+	b.sshValues(context.Background(), client.Host{Name: "sshbox", SSH: "sshbox"})
+	if !slices.Contains(b.vals.Hosts, "198.51.100.77") {
+		t.Errorf("the value before the long line is lost: %v", b.vals.Hosts)
+	}
+	if len(b.res.Notes) != 1 || !strings.Contains(b.res.Notes[0], "may not be replaced") {
+		t.Errorf("notes %q, want one that says some values may not be replaced", b.res.Notes)
 	}
 }

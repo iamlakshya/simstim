@@ -4,7 +4,7 @@ Every change keeps the tests green, and every bug fix adds the test that would h
 
 | Command | What it runs | Where |
 | --- | --- | --- |
-| `just test` | Go unit tests with the race detector, plus offline public-readiness checker regression tests | Needs Python 3 |
+| `just test` | Go unit tests with the race detector, plus offline tests of the public-readiness checker and of the end-to-end cleanup | Needs Python 3 |
 | `just cover` | The unit tests' coverage, which must stay at 70 % or more | Anywhere |
 | `go test ./internal/tui -run TestGolden -update` | Rewrites the golden screens after an intended change; review the diff | Anywhere |
 | `just fuzz` | Fuzzes the input filter and the frame reader for 30 s each (`just fuzz 5m` for longer) | Anywhere |
@@ -89,6 +89,8 @@ It covers start, attach and detach, resize, byte-exact output, replay after a dr
 `test/e2e/agent_setup.py` checks setting up hosts and sessions: the agent checks, a secret that reaches the session's environment and no file, log, command line or unit on the host, setup scripts with and without trust, and `host doctor --fix` on a stale socket it makes. It uses a throwaway client config, so your own secrets and answers are never read. It installs no agent: it runs `agents install` only for an agent the host already has, which installs nothing. To run only these checks, set `E2E_ONLY=agent-setup`.
 
 `test/e2e/guided_setup.py` checks the guided setup: `setup --host <host> --agents shell --yes --no-login` connects the host, shows the checklist, installs nothing, asks nothing, and ends with the summary and the first session's command; `setup` without a terminal or flags, or with an unknown agent, refuses before it changes anything; and Ctrl+C at the first question stops it and says nothing was changed. It uses a throwaway client config with a copy of `hosts.toml`. To run only these checks, set `E2E_ONLY=guided-setup`.
+
+`test/e2e/sandbox_hosts.py` checks hosts you add ([isolation spec, 14.16](isolation-spec.md#1416-tests)). For now it has one check: with `ForwardAgent` naming a throwaway agent in a throwaway client SSH config, a session on the host has no `SSH_AUTH_SOCK`. The agent holds no keys, and your own agent is never forwarded. To show that the check can fail, plain `ssh` with the same config, and without the client's options, forwards that empty agent once. The check needs OpenSSH 8.2 or later on your computer. It skips a host that is not reached over SSH, and a host whose sshd forwards no agent even to plain `ssh`. A read of the session's environment that fails is a failure. Each run starts a session with a name of its own. It passes its cleanup only when the host confirms that the session is gone. A timeout, a failed command or an error for the host fails the cleanup, keeps the throwaway folder and prints the command to delete the session by hand. `test/e2e/test_sandbox_hosts.py` tests that cleanup offline, and `just test` runs it. To run only these checks, set `E2E_ONLY=sandbox-hosts`.
 
 ## Benchmarks
 

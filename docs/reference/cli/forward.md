@@ -10,7 +10,7 @@ Forward a session's ports to localhost (all of them if none are given).
 simstim forward <host>/<session> [port…]
 ```
 
-Forwards ports from the host to 127.0.0.1 on this machine, through your SSH connection, until you press Ctrl+C. Write local:remote to use another local port. Nothing is exposed beyond this machine.
+Forwards ports from the host to 127.0.0.1 on this machine, through an SSH connection of its own, until you press Ctrl+C. Write local:remote to use another local port. Nothing is exposed beyond this machine. It refuses to start when your SSH config has a RemoteForward, a Tunnel or ForkAfterAuthentication yes for the host.
 
 ## Examples
 

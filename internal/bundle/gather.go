@@ -68,11 +68,16 @@ func (b *builder) configValues(ctx context.Context) {
 	}
 }
 
-// sshValues adds the values of `ssh -G` for a host.
+// sshValues adds the values of `ssh -G` for a host. When ssh's answer
+// cannot be read to its end, it adds the values before that point, and a
+// note, as the values after it are not replaced.
 func (b *builder) sshValues(ctx context.Context, h client.Host) {
 	vals, err := (&client.SSH{Host: h}).ConfigValues(ctx)
-	if err != nil {
+	if err != nil && vals == nil {
 		return
+	}
+	if err != nil {
+		b.res.Notes = append(b.res.Notes, "ssh -G for a host printed more than the bundle reads, so some of its values may not be replaced")
 	}
 	b.vals.Hosts = append(b.vals.Hosts, vals["hostname"]...)
 	b.vals.Users = append(b.vals.Users, vals["user"]...)

@@ -26,10 +26,10 @@ Only the latest minor release gets security fixes. The first release is 0.1.0.
 - The tool adds no network listener on a host. Connections use the host's SSH server, Docker exec through the Docker daemon, or E2B's envd process API. Access depends on the chosen transport's permissions and credentials.
 - There is no relay, no cloud service and no telemetry.
 - The tool stores no secrets. Agent logins stay on each host.
-- SSH agent forwarding is off by default.
+- SSH agent and X11 forwarding are always off, whatever the user's SSH config says.
 - Host helpers are checked by SHA-256 before they are installed.
 - Sockets and uploaded files are private to the user (modes 0600 and 0700).
-- Ports forwarded to the laptop bind to `127.0.0.1` only.
+- The ports that `forward` names bind to `127.0.0.1` on the laptop only.
 
 Live terminal output is passed through unchanged, not made safe for an untrusted host. Remote escape sequences can use features your local terminal permits, including clipboard operations and links. There is no untrusted-host output filter. Trust hosts before attaching and keep your terminal up to date.
 

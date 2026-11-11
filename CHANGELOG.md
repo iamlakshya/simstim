@@ -22,6 +22,10 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 - `public-check` rejects empty, incomplete, duplicate or malformed hosted Scorecard reports, and keeps a failed Scorecard command's diagnostics and failure status. Its output separates local checkout checks from hosted results. Offline regression tests run in `just test`; Python 3 is needed for them. The public-readiness guide distinguishes completed work from the owner's remaining security and publishing tasks.
 - Contributor and source-install instructions now state the bootstrap prerequisites and how to put the pinned tools on PATH, rather than assuming a setup script can change its caller's shell. The contributor guide explains the pull-request and docs checks. The Code of Conduct links directly to its existing private reporting route instead of offering a GitHub private message that does not exist.
 
+### Security
+
+- The client no longer forwards your SSH agent, X11 or a local command to any host, even when your `~/.ssh/config` asks for it. `forward` still forwards the ports you name. The port forwards that your SSH config names no longer come up with the client's connections, except with `forward`. The client also no longer delegates your Kerberos credentials, and a `ProxyJump` hop gets the same settings. `forward` now has a connection of its own, and refuses to start when your config has a `RemoteForward`, a `Tunnel` or `ForkAfterAuthentication yes` for the host ([decision 0034](docs/contributing/decisions/0034-ssh-options-on-the-command-line.md)).
+
 ## [0.1.2] - 2026-10-17
 
 A full-screen agent, such as Claude Code in its fullscreen mode, comes back whole when you attach again, and its holder keeps far less memory. A session started with a command of its own comes back with that command after a restore or a resume. `host doctor` checks that the host has the memory that each agent asks for.
