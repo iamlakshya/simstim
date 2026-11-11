@@ -37,5 +37,6 @@ Each record explains one choice: the context, the options and the outcome. Recor
 | [0031](0031-the-egress-process-is-not-a-relay.md) | A sandbox's egress process is not a relay, and neither a host's download of the runtime nor a judge that the user names is telemetry | Proposed |
 | [0032](0032-secret-values-in-memory-only.md) | Secret values live only in the memory of the trusted side, never in a file | Proposed |
 | [0033](0033-one-command-grammar.md) | One grammar for the command line: session verbs at the top, a noun and a verb for everything else, and every rule under `policy` | Accepted |
+| [0034](0034-ssh-options-on-the-command-line.md) | The client puts the options that keep a host safe on the `ssh` command line and at the top of its generated config, where they win over the user's own config. It starts with forwarding off (adds to 0003) | Accepted |
 
 Write a new record from [the template](template.md).

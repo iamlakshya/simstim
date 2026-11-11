@@ -21,7 +21,7 @@ If `ssh my-server` works, then:
 simstim host add my-server --yes
 ```
 
-The client uses the system `ssh`, so everything in `~/.ssh/config` applies: `ProxyJump`, keys, agents, certificates and Tailscale. It never edits your SSH config.
+The client uses the system `ssh`, so everything in `~/.ssh/config` applies: `ProxyJump`, keys, agents, certificates and Tailscale. It never edits your SSH config. Forwarding is the exception: the client never forwards your SSH agent or your X11 display to a host, even when your config turns it on ([security](../explanation/security.md)).
 
 ## A host by address
 

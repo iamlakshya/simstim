@@ -241,7 +241,7 @@ The contract has its own page: [the fidelity contract](fidelity.md).
 | `~/.config/simstim/config.toml` | Settings and keymap overrides, with a JSON Schema |
 | `~/.config/simstim/hosts.toml` | Saved hosts: name, SSH target, labels, optional provider block |
 | `~/.config/simstim/ssh/hosts.conf` | Generated SSH blocks for hosts added in simstim. Included by the wrapper. |
-| `~/.cache/simstim/cm/%C` | ControlMaster sockets. The path is kept under 86 bytes because of macOS. |
+| `~/.cache/simstim/cm/nf-%C` | ControlMaster sockets. The path is kept under 86 bytes because of macOS. The `nf-` prefix keeps the client off masters that older clients started ([decision 0034](../contributing/decisions/0034-ssh-options-on-the-command-line.md)). |
 | `~/.cache/simstim/helpers/<version>/` | Host helpers fetched from the release, for a client built with `go install` |
 | `~/.local/state/simstim/` | Logs, and each session's last byte offset |
 | `~/.local/state/simstim/debug/` | The client's debug files, while `--debug` is on (0700; [debug a session](../how-to/debug-a-session.md)) |

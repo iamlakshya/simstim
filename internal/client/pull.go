@@ -9,7 +9,7 @@ import (
 
 // GitSSHCommand is the ssh command line for GIT_SSH_COMMAND, so git reaches
 // a host the way the client does: through the client's own SSH config and
-// shared connection.
+// shared connection, with no forwarding.
 func GitSSHCommand(h Host) (string, error) {
 	s := &SSH{Host: h}
 	args, err := s.baseArgs()
@@ -17,7 +17,7 @@ func GitSSHCommand(h Host) (string, error) {
 		return "", err
 	}
 	parts := []string{"ssh"}
-	for _, a := range args {
+	for _, a := range append(args, NoPortForwards()...) {
 		parts = append(parts, shellWord(a))
 	}
 	return strings.Join(parts, " "), nil

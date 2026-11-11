@@ -81,4 +81,4 @@ Ranked. Use them to settle trade-offs.
 | Scope creep towards a multiplexer or an agent UI | Principles 1 and 4, and the non-goals. |
 | Clean-room and licence mistakes | No code or assets from closed tools, ever. Attribution in NOTICE for anything taken from open projects. A review before going public ([going public](../contributing/going-public.md)). |
 | Bus factor of one | Small code base, data-driven agent table, good tests, plain docs. |
-| A compromised host attacks the client through escape sequences | Attach only to hosts you trust, and use your terminal's clipboard and link controls. There is no untrusted-host output filter. SSH agent forwarding is off by default. See the [security model](security.md). |
+| A compromised host attacks the client through escape sequences | Attach only to hosts you trust, and use your terminal's clipboard and link controls. There is no untrusted-host output filter. SSH agent forwarding is always off, whatever your SSH config says. See the [security model](security.md). |

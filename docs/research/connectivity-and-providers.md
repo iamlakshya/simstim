@@ -895,6 +895,8 @@ simstim itself should hold no tokens, so a stolen simstim config reveals host na
 
 `PermitLocalCommand` is off by default; leave it so.
 
+Task H2 of [the isolation plan](../contributing/isolation-plan.md) takes only the forwarding options from this list ([the isolation spec, 14.8.5](../contributing/isolation-spec.md#1485-where-the-client-checks)). Every `ssh` command that the client runs has `ForwardAgent=no`, `ForwardX11=no`, `PermitLocalCommand=no` and `GSSAPIDelegateCredentials=no` on its command line, where they win over the user's config ([decision 0034](../contributing/decisions/0034-ssh-options-on-the-command-line.md)). The generated config starts with the same settings and `ClearAllForwardings yes`, for a `ProxyJump` hop. Every connection but `forward` also has `ClearAllForwardings=yes`. `forward` has a connection of its own and `ClearAllForwardings=no`, and refuses a `RemoteForward`, a `Tunnel` or `ForkAfterAuthentication yes` from the config. A user's config can no longer turn on agent or X11 forwarding, so the warning that section 7.2 suggests is not needed. The multiplexing options stay as today (`ControlMaster=auto`), so the client does not use the `ControlMaster=no -S <private path>` line above.
+
 ## 8. Recommendations
 
 ### v1
