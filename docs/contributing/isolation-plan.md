@@ -89,7 +89,7 @@ Spec section 15 has each question in full, with its options: [open questions](is
 | 26 | An opt-in guarded attach, or a filter for terminal escapes from `shared` and `throwaway` hosts? | Not now. Advise users to set their terminal's clipboard writes to "ask", ship the observer, measure, then decide. | H4, P7.3 |
 | 27 | Separate accounts for sandboxes, with a root-owned launcher and slot accounts? | An option in the first version. The default only after an outside review of the launcher. | H17, H18 |
 | 28 | A separate system user for the trusted side? | Not now. Subuid jails for the processes that touch untrusted input. | P1.3 |
-| 29 | May host set-up run one-time root steps? | Yes, each line shown first and run only after a yes. On `shared` hosts, by default only the machine's owner runs the printed script, and `--root-step run` needs the typed host name. A machine of `new --machine` is the one exception (spec 21.8). | H7, H10, H15, P7.4 |
+| 29 | May host set-up run one-time root steps? | Yes, each line shown first and run only after a yes. On `shared` hosts, by default only the machine's owner runs the printed script, and `--root-step run` needs the typed host name. A machine of `new --machine` is the one exception (spec 21.8). The owner decided. | H7, H10, H15, P7.4 |
 | 30 | Which key signs what the client trusts? | The release key of decision 0017 signs each release, and the client embeds the release manifest. The owner adds a hardware key for the signed-tag gate. A transparency log comes later. | P4.1, P4.4, H17 |
 | 31 | A key of its own for each shared host? | A docs recipe, not required. | H4 |
 | 32 | The tier of E2B and other hosted providers? | `shared`. | H4, P7.4 |
@@ -135,7 +135,7 @@ Spec section 15 has each question in full, with its options: [open questions](is
 | 72 | How does a ChatGPT login (Codex) reach a walled session? | As an exposed login in P2.3. A sign-in for the sandbox alone, refreshed on the trusted side, comes later under its own record. Never the laptop's own login. | P2.3 |
 | 73 | What counts against `network.model_budget` when an answer reports no usage? | An estimate: the bytes of the request and of the answer, divided by 4. | P2.16 |
 | 74 | How strict are the package manager settings by default? | `guarded`: release ages, no npm-family install scripts, and the Go settings. `strict` adds no source builds for pip and uv, and the `untrusted` profile uses it. | P2.8 |
-| 75 | Which Ghostty commit does the shadow terminal pin, and with which Zig? | The tag `vt-1.0.0`, and Zig 0.17.0 for the whole build. | P0.1 |
+| 75 | Which Ghostty commit does the shadow terminal pin, and with which Zig? | The tag `vt-1.0.0`, and Zig 0.17.0 for the whole build. The owner decided. | P0.1 |
 | 76 | How large may a terminal be? | 4096 columns and 4096 rows, the project's own choice. | P0.1 |
 | 77 | How does the host run git in an unwalled session's repository? | With hooks and fsmonitor off, and each operation in a scope under `<name>.slice`. | P0.7 |
 | 78 | How does `host create lima` find out whether the Mac can run a VM inside its VM? | It asks Lima, which asks Apple. On a refusal, it turns nesting off and starts again. | P0.8 |
@@ -151,7 +151,7 @@ Spec section 15 has each question in full, with its options: [open questions](is
 | 88 | How does the gvisor wall get its namespaces? | The helper, or the namespace launcher of spec 14.4, makes them, and `runsc` runs inside as uid 0. | P6.1 |
 | 89 | How many slot accounts, and where is the store? | 16 slots, and the store in `/var/lib/<name>/store/`. | H18 |
 | 90 | What does a config layer's level below the host's floor do? | The client raises it to the floor, with a line that says so. `--wall` below the floor still fails without `--downgrade`. | P1.8, P1.12 |
-| 91 | If the Mac test by hand fails, how does a Mac host start its VM? | From a launch agent of the Mac's logged-in user, with a warning. | H21 |
+| 91 | If the Mac test by hand fails, how does a Mac host start its VM? | From a launch agent of the Mac's logged-in user, with a warning. The owner decided. | H21 |
 
 ## Order
 
@@ -1731,7 +1731,7 @@ The rule of this phase: **the laptop holds the digests, the hosts hold the bytes
   - `internal/cli/host.go` (the Mac block and the health items `mac-on-battery` and `mac-sleep-on` in `host doctor`).
   - The release manifest: the pinned Lima release and base image.
 - **Acceptance:**
-  - On an M3 Mac or later with macOS 26, `host join` and `host add --accept` give a host with microvm walls. An M1 or M2 Mac gives process walls.
+  - On an M3 Mac or later with the newest macOS, `host join` and `host add --accept` give a host with microvm walls. An M1 or M2 Mac gives process walls.
   - The VM runs while another user is logged in at the Mac, and keeps running after that user logs out.
   - After a restart and that user's login, the VM starts again, and the sessions that were working come back.
   - The account's key cannot open a shell, a terminal, or a channel to any port but the VM's. `-R <port>` and `-R /path` fail while the drop-in applies.

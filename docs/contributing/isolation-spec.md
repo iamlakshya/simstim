@@ -3431,7 +3431,7 @@ This is the only full list. Each question has its options and a recommended defa
     - (a) Yes, each line shown first and run only after a yes.
     - (b) No: print the commands for the user.
     - (c) On a machine that the user does not own, only the machine's owner runs the printed script.
-    - **Recommended:** (a), with (b) when the user has no sudo. On `shared` hosts, (c) by default, and `--root-step run` needs the typed host name. A machine of `new --machine` is the one exception: it is new and holds nothing, so its root step runs without the name (21.8).
+    - **Recommended:** (a), with (b) when the user has no sudo. On `shared` hosts, (c) by default, and `--root-step run` needs the typed host name. A machine of `new --machine` is the one exception: it is new and holds nothing, so its root step runs without the name (21.8). The owner confirmed this on 11 November 2026, the exception included.
 30. **Which key signs what the client trusts?**
     - (a) The release key of decision [0017](decisions/0017-release-signatures.md).
     - (b) A separate key, kept offline or in hardware.
@@ -3658,7 +3658,7 @@ The research of 10 November 2026 checked the facts that the build depends on ([b
     - (a) The tag `vt-1.0.0`, the first libghostty-vt release, with Zig 0.17.0 for the whole build, in one pull request (P0.1).
     - (b) Stay on Zig 0.16, and carry the two fixes as patches on the old pin.
     - (c) The app's tag `v1.4.0`, with Zig 0.17.0.
-    - **Recommended:** (a). A libghostty-vt tag gives each later bump a name that P0.9 can compare. Patches on an old commit need a review at each bump ([build facts](../research/build-facts.md#61-ghostty-and-its-advisories)).
+    - **Recommended:** (a), as the owner decided on 11 November 2026. A libghostty-vt tag gives each later bump a name that P0.9 can compare. Patches on an old commit need a review at each bump ([build facts](../research/build-facts.md#61-ghostty-and-its-advisories)).
 
 76. **How large may a terminal be?** GHSA-jqr7 says to cap the columns, and names no number. Ghostty itself allows 65535.
     - (a) 4096 columns and 4096 rows.
@@ -3752,7 +3752,14 @@ The research of 10 November 2026 checked the facts that the build depends on ([b
 91. **If the test by hand of 18.4 fails, how does a Mac host start its VM?**
     - (a) From a launch agent in the session of the Mac's user, who stays logged in. This avoids a daemon, which Apple's staff call unsafe for the framework (18.4). The VM's disk, with the agents' logins, then belongs to that user. Anyone at the unlocked Mac can read it.
     - (b) It does not. Mac hosts wait for a Lima or macOS release that passes the test.
-    - **Recommended:** (a), with a warning in `host join` and in `host doctor`. The hidden account still holds the narrow key, so the laptop's path stays the same. A screen lock closes the new gap.
+    - **Recommended:** (a), as the owner decided on 11 November 2026, with a warning in `host join` and in `host doctor`. The hidden account still holds the narrow key, so the laptop's path stays the same. A screen lock closes the new gap.
+
+On 11 November 2026 the owner also confirmed these choices of the design:
+
+- The exit codes of the isolation spec's errors, in [CLI spec 5.3](cli-spec.md#53-the-codes-of-the-isolation-spec).
+- The release manifest's kinds `lima` and `vm-image` for Mac hosts (14.9.1).
+- The Cloud Hypervisor pin lands in P3.1, so that CI boots the guest kernel under the VMM that ships (20.1).
+- The test by hand of 18.4 runs on macOS 15 and on the newest macOS of that day.
 
 ### Decided by the design
 
@@ -4069,7 +4076,7 @@ laptop -> Mac sshd, as the dedicated account (its key may only open 127.0.0.1:<p
 
 **What `host join` does on a Mac.**
 
-1. **Checks.** The chip, the macOS version, MDM enrolment, a managed sshd and Remote Login. The join runs as root, so each check works. For Remote Login, it reads `launchctl print-disabled system`, and the members of the group `com.apple.access_ssh`. UNVERIFIED: no Apple document names that group. The test by hand checks it on macOS 15 and 26, when the build is done.
+1. **Checks.** The chip, the macOS version, MDM enrolment, a managed sshd and Remote Login. The join runs as root, so each check works. For Remote Login, it reads `launchctl print-disabled system`, and the members of the group `com.apple.access_ssh`. UNVERIFIED: no Apple document names that group. The test by hand checks it on macOS 15 and on the newest macOS, when the build is done.
 2. **Account.** A standard account, hidden from the login window, with a random password that the join does not keep. It logs in by key only. Its shell is a real shell, because sshd runs the forced command of step 7 through it. The join adds `;DisabledTags;SecureToken` to the account's `AuthenticationAuthority`, so the account never becomes a FileVault user.
 3. **Lima.** The Lima release that the release manifest pins as an item of kind `lima` (14.9.1), v2.3.0 or later, checked by its digest, in a folder that root owns. A Homebrew upgrade cannot change it.
 4. **VM.** Made as that account, from the template of `host create lima` (P0.8), with these changes:
@@ -4093,7 +4100,7 @@ laptop -> Mac sshd, as the dedicated account (its key may only open 127.0.0.1:<p
 11. **Steps for the user.** It prints the steps that it cannot take: Charge Limit at 80 %, the lid open, and a place with good air flow at 10 °C to 35 °C. With the lid closed and no display, the Mac sleeps even with `pmset -c sleep 0`. The tool does not use the undocumented `pmset disablesleep`.
 12. **Reply.** The reply holds both host keys: the Mac's sshd key and the VM's.
 
-**A test when the build is done.** Lima's contributors report that a Linux VM starts from such a daemon with nobody logged in. No source covers an account that has never logged in and has no login keychain. Apple does not support the Virtualization framework in a daemon, so a macOS update can break it. The owner chose on 11 November 2026 to build first. The test by hand in [the research note](../research/locations.md#5-mac-hosts-checked-again) runs when the build is done, on macOS 15 and on macOS 26. If the test fails, the owner picks the way out ([question 91](#15-open-questions)). Then H21 changes the steps that make and start the VM.
+**A test when the build is done.** Lima's contributors report that a Linux VM starts from such a daemon with nobody logged in. No source covers an account that has never logged in and has no login keychain. Apple does not support the Virtualization framework in a daemon, so a macOS update can break it. The owner chose on 11 November 2026 to build first. The test by hand in [the research note](../research/locations.md#5-mac-hosts-checked-again) runs when the build is done, on macOS 15 and on the newest macOS of that day. If the test fails, the owner picks the way out ([question 91](#15-open-questions)). Then H21 changes the steps that make and start the VM.
 
 **The facts script.** Root owns it, and the account cannot change it. It prints JSON with the power source and battery level (`pmset -g batt`), the sleep settings and assertions (`pmset -g`, `pmset -g assertions`), and the thermal state (`pmset -g therm`). The JSON also holds the macOS version, MDM enrolment, and whether MDM manages sshd's files. The laptop runs it over the same SSH path. The helper's `host.facts` cannot see the Mac's battery, because the VM has none. So the client takes `on_battery` from the Mac's facts (14.10.2). The script runs as the account, a standard user. These `pmset` and `profiles` reads worked without `sudo` for an admin user. UNVERIFIED for a standard user: H21 checks it.
 

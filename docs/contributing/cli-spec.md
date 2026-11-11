@@ -285,7 +285,7 @@ The error and its `Try:` line still print on stderr, so a person sees the kind. 
 
 ### 5.3 The codes of the isolation spec
 
-The isolation spec owns the messages and the hints of its errors. This table owns their exit codes.
+The isolation spec owns the messages and the hints of its errors. This table owns their exit codes. The owner confirmed these kinds on 11 November 2026.
 
 | Code or case | Where | Kind | Exit |
 | --- | --- | --- | --- |
