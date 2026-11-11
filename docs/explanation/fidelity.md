@@ -9,7 +9,7 @@ The last column distinguishes automated checks, manual checks, documented limits
 | Keys: kitty protocol, modifyOtherKeys, Shift+Enter, Option/Alt | Raw input bytes. The filter matches only two keys and never re-encodes. A lone Esc goes out at once. Only the start of a key sequence that a read splits waits for its end, 15 ms at most. On reattach, the snapshot restores the kitty flags. | `simstim doctor keys`, run end to end |
 | Truecolour, styled underlines | `TERM=xterm-ghostty` with its terminfo installed on the host. `COLORTERM=truecolor`. The client's `TERM_PROGRAM` is passed through. | Fixture replay |
 | Native scrollback and Cmd+F | Output lands in the local terminal's normal screen. No RIS. Replay by offset avoids duplicates. | Manual check plus fixture |
-| OSC 52 clipboard | Passed through live. Clipboard access depends on the local terminal's policy; simstim does not add a permission prompt or filter. | Manual |
+| OSC 52 clipboard | Passed through live. Clipboard access depends on the local terminal's policy; simstim does not add a permission prompt or filter. The [paste guard](../how-to/image-paste.md#files-that-stay-on-your-laptop) reads each write and changes none. | Manual, and a unit test that the bytes stay the same |
 | OSC 8 links, OSC 9 and 777 notifications, OSC 9;4 progress | Passed through live and may be repeated when historical output is replayed. | Fixture |
 | Synchronized output (mode 2026) | Passed through, so no flicker | Fixture |
 | Mouse, focus, bracketed paste | Passed through, and reset on detach | `x/vt` baseline after detach |
