@@ -287,7 +287,7 @@ Each task, in the order of the table in "Order", with the spec sections that def
 | H7 | The root step | 11, 14.3, 14.4, 14.4.1, 14.4.2, 14.4.3, 14.4.4, 14.4.5, 14.14 | [isolation Attach](../research/isolation.md#attach), [build facts 4.1](../research/build-facts.md#41-ubuntus-user-namespace-restriction), [build facts 4.3](../research/build-facts.md#43-devkvm-its-acl-and-the-kvm-group), [build facts 4.5](../research/build-facts.md#45-cgroup-delegation-to-the-user-manager) |
 | P1.2 | The link | 5.2, 10.1, 10.2, 12 | [isolation 5.6](../research/isolation.md#56-the-winner-holder-inside-thin-supervisor-outside-node-14) |
 | P1.3 | Jails | 5.6, 14.4.2 | [isolation 9.2](../research/isolation.md#92-the-wall), [build facts 4.2](../research/build-facts.md#42-what-a-jail-needs-a-user-namespace-for) |
-| P1.4 | The supervisor, the guest init and the holder's guest mode | 4, 10.7 | [isolation 5.6](../research/isolation.md#56-the-winner-holder-inside-thin-supervisor-outside-node-14) |
+| P1.4 | The supervisor, the guest init and the holder's guest mode | 4, 4.2, 10.7 | [isolation 5.6](../research/isolation.md#56-the-winner-holder-inside-thin-supervisor-outside-node-14) |
 | P1.5 | The process wall | 4.1, 6.2, 6.6, 7.1, 14.3, 14.4.2 | [isolation 4.1](../research/isolation.md#41-w1-a-hardened-process-node-1), [build facts 4.1](../research/build-facts.md#41-ubuntus-user-namespace-restriction), [build facts 4.6](../research/build-facts.md#46-netlink-in-the-seccomp-profile) |
 | P1.6 | The files door | 7.1 | [isolation 7.3](../research/isolation.md#73-git-only-workspace-node-29), [isolation 6.6](../research/isolation.md#66-the-winner-cold-boot-from-a-verified-image-node-16) |
 | P1.7 | The egress process, first version | 7.2, 8.6 | [isolation 7.5](../research/isolation.md#75-the-winner-nic-less-wall-egress-proxy-sentinel-keys-node-26), [build facts 1.4](../research/build-facts.md#14-node-and-the-proxy-variables) |
@@ -911,7 +911,7 @@ At the end of phase 1, `simstim new box --wall process` runs a session in a sand
   - The trusted manifest keeps the layers (spec 10.7). After a restart of the supervisor, `policy ls` shows the same rules, each with its layer.
   - With a `config.toml` that does not parse, `new` and `policy allow --all` stop with exit code 2 and `Try: simstim config check`. `ls` still runs, with one warning (spec 8.2, rule 4, and [CLI spec, 13.4](cli-spec.md#134-what-other-commands-do-with-a-broken-file)).
   - Until P2.14, a rule in a wider layer applies to a running sandbox at its next start. The answer says so (spec 6.4, step 5).
-  - `policy allow 192.168.1.10:5432 --in <s>` passes `grant.CheckHost`, and the grant gate allows it on an `own` host only.
+  - `policy allow <a LAN address>:5432 --in <s>`, with an RFC 1918 address, passes `grant.CheckHost`, and the grant gate allows it on an `own` host only.
 - **Tests:** unit and table tests, golden tests of `policy ls`, and an end-to-end run of each command.
 - **Docs:** `docs/how-to/policy.md`, `docs/reference/config.md` through `just docs`, `docs/contributing/ux-spec.md`.
 - **CHANGELOG:** Added. "One config for all sessions, which a host, a repository, a profile or one session can override. `policy allow` and `policy deny` add rules at any of those places, and `policy check` says which rule decides."
