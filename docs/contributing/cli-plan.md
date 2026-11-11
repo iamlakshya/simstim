@@ -57,7 +57,7 @@ Some isolation tasks depend on tasks of this plan, so their commands use the sha
 
 ## C1 The grammar record
 
-- **Goal:** the owner accepts or changes [0033](decisions/0033-one-command-grammar.md). This branch already holds it, as a proposed record.
+- **Goal:** the owner accepts or changes [0033](decisions/0033-one-command-grammar.md). The owner accepted it on 11 November 2026, so this task is done.
 - **Spec:** [cli-spec.md, section 2](cli-spec.md#2-the-grammar-c1).
 - **Files:** `docs/contributing/decisions/0033-one-command-grammar.md`, `docs/contributing/decisions/README.md`.
 - **Acceptance:** the record's status is accepted, or a new record replaces it.
