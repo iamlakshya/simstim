@@ -25,7 +25,7 @@ Press Ctrl+C while Lima or Docker makes the machine, and the setup deletes the h
 
 [Lima](https://lima-vm.io) runs Linux VMs on macOS and Linux. It is free and needs no account.
 
-1. Install Lima: see [its install guide](https://lima-vm.io/docs/installation/).
+1. Install Lima 2.3.0 or later: see [its install guide](https://lima-vm.io/docs/installation/). `host create` checks the version with `limactl --version`, and refuses an older Lima.
 2. Create the host:
 
    ```sh
@@ -37,6 +37,40 @@ Press Ctrl+C while Lima or Docker makes the machine, and the setup deletes the h
 4. Install your agents in the VM, from a shell there (`limactl shell simstim-dev`), then start a session: `simstim new dev --agent claude`.
 
 simstim reaches the VM with the system `ssh` and Lima's generated `ssh.config`, which its own generated config includes. Your `~/.ssh/config` is never changed.
+
+### Your Mac's loopback services
+
+Lima lets a VM reach the services on your Mac's loopback address, `127.0.0.1`, through the name `host.lima.internal`. Such a service can be a local database, a development server or a tool's local API. Without a change, an agent in the VM can connect to them too.
+
+On a Mac, `host create lima` closes this path:
+
+- It makes the VM with Apple's Virtualization framework (Lima's `vz`), and sets Lima's `networkOpts.hostLoopback` to false. The VM then cannot connect to your Mac's loopback services.
+- Lima's `~/.lima/_config/override.yaml` wins over these settings. Before the VM first starts, `host create` checks them again. If the file keeps the path open, `host create` deletes the new VM and tells you which settings to remove from the file. It does the same when `default.yaml` or `override.yaml` gives every VM a `user-v2` network, which Lima cannot run with the path closed, and it names that network.
+- It also asks Lima for nested virtualisation, which later sandboxes need to run a VM inside the VM. macOS allows it on Apple M3 or later, with macOS 15 or later. On another Mac, Lima refuses it when the VM starts. `host create` then turns it off, starts the VM again, and says that the host gets no microvm sandboxes. If the VM still does not start, `host create` deletes it, because no host names it yet. If `override.yaml` sets `nestedVirtualization: true`, the change has no effect: `host create` deletes the VM and tells you to remove that setting from the file.
+
+On Linux, Lima runs the VM with QEMU, which cannot close the path. `host create` and `host doctor` warn you about this. Run untrusted work on a remote host instead.
+
+`host doctor` checks the path of a Lima VM, on your computer, in its "laptop loopback" line. It warns for a VM that can still reach your loopback services, such as a VM made before this check. To close the path of such a VM, stop it, change the setting, and start it again:
+
+<!-- test: skip (it changes a Lima VM) -->
+```sh
+limactl stop simstim-dev
+limactl edit --set '.networkOpts.hostLoopback = false' simstim-dev
+limactl start simstim-dev
+```
+
+This works only for a VM that uses `vz`. Lima refuses the setting for a VM on QEMU. On a Mac, replace a VM on QEMU with a new host, which uses `vz`:
+
+<!-- test: skip (it deletes and makes a VM) -->
+```sh
+simstim host destroy dev
+simstim host create lima dev
+```
+
+Two cases need another step, and `host doctor` names it in its Try line:
+
+- If `~/.lima/_config/override.yaml` sets `networkOpts.hostLoopback: true`, that file wins over the VM's own setting, and the edit above does nothing. Remove the setting from the file, then stop and start the VM.
+- A running VM keeps the network that it started with. If the VM's settings, or Lima's `default.yaml` or `override.yaml`, changed after the VM started, `host doctor` warns until you stop and start the VM.
 
 ### Idle stop and wake
 

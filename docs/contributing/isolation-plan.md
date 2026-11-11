@@ -570,7 +570,7 @@ These tasks need no wall, and they help every session. H2 goes first ([question 
 ### P0.8 Lima VMs that cannot reach the laptop's loopback
 
 - **Goal:** `host create lima` sets `networkOpts.hostLoopback: false` on macOS. It turns on nested virtualisation for phase 3 where Lima's own check passes (spec 11 and 19.4).
-- **Files:** `internal/provider/lima/lima.go` (`CreateArgs` with the OS, `parseLimaVersion`, the start again without nested virtualisation, and `LoopbackCheck`), `internal/cli/host.go` (`hostDoctorCmd` adds the check), `internal/provider/lima/testdata/`.
+- **Files:** `internal/provider/lima/lima.go` (`CreateArgs` with the OS), `version.go` (`parseLimaVersion`), `nested.go` (the start again without nested virtualisation), `loopback.go` (`LoopbackCheck`, and the check before the first start), `internal/provider/provider.go` (`ExecError`, which keeps a tool's whole stderr), `internal/cli/host.go` (`hostDoctorCmd` adds the check), `internal/provider/lima/testdata/`.
 - **Acceptance:**
   - On a Mac, a new VM cannot connect to a test server on the Mac's loopback address (spec 19.4, test 5, by hand).
   - `limactl` before 2.3.0 is refused with the hint of spec 19.4.

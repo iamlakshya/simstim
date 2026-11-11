@@ -12,7 +12,7 @@ simstim host doctor my-server
 - `doctor` checks this computer: `ssh`, the config files, and the commands of your [secrets](secrets.md).
 - `doctor terminal` asks your terminal what it supports: the keyboard protocol, colours, synchronized output.
 - `host test` says whether the host answers, and how fast.
-- `host doctor` checks the host: the helper, systemd and linger, the session sockets, the agents, and memory. It warns when the host has less memory than an agent's docs ask for ([memory](memory.md#check-that-the-host-fits-the-agent)).
+- `host doctor` checks the host: the helper, systemd and linger, the session sockets, the agents, and memory. It warns when the host has less memory than an agent's docs ask for ([memory](memory.md#check-that-the-host-fits-the-agent)). For a Lima VM, it also checks whether the VM can reach your computer's loopback services ([create a host](create-a-host.md#your-macs-loopback-services)). When Lima's `override.yaml` keeps that path open, its Try line names the file. When the VM's settings changed while it ran, the Try line asks you to stop and start the VM.
 
 ## Let the doctor fix it
 

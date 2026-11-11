@@ -1,0 +1,3 @@
+# written from Lima 2.3.0's source (cmd/limactl/hostagent.go:201, pkg/driver/vz/vz_driver_darwin.go:489, pkg/driver/vz/vm_darwin.go:433, pkg/hostagent/hostagent.go:462-465, cmd/limactl/main.go:56), not recorded. Other lines are left out.
+{"level":"info","msg":"Starting VZ (hint: to watch the boot progress, see `/Users/me/.lima/dev-vm/serial*.log`)","time":"2026-11-11T10:00:01Z"}
+{"level":"fatal","msg":"nested virtualization is not supported on this device","time":"2026-11-11T10:00:01Z"}

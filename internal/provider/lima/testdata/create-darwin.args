@@ -1,0 +1,11 @@
+create
+--tty=false
+--name=vm
+--plain
+--vm-type=vz
+--set=.networkOpts.hostLoopback = false
+--nested-virt
+--cpus=2
+--memory=4
+--disk=40
+template:ubuntu-lts
