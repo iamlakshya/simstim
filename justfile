@@ -90,6 +90,7 @@ test:
     python3 test/e2e/test_sandbox_hosts.py
     python3 test/e2e/test_session_sockets.py
     python3 scripts/test-pins-watch.py
+    scripts/test-verify-tag.sh
 
 # The unit tests' coverage of internal/ without the launcher, counted across packages (the bar is 70 %).
 cover:

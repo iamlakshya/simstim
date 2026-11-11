@@ -9,6 +9,10 @@ permissions: {}
 jobs:
   release:
     runs-on: ubuntu-latest
+    # The release secrets live in this environment, not in the repository,
+    # so a workflow from before the signed-tag gate cannot read them
+    # (decision 0041, docs/contributing/releasing.md).
+    environment: release
     permissions:
       contents: write # create the draft release
       id-token: write # keyless signing with cosign, and attestations
@@ -17,10 +21,30 @@ jobs:
     outputs:
       hashes: ${{ steps.hashes.outputs.hashes }}
     steps:
+      # Pinned at v6.0.2 or later, as spec 20.7 asks. The gate fetches the
+      # tag again, so it does not rely on the checkout's copy.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
+      - name: The signed-tag gate, before any build step (decision 0041)
+        # main's copy of the gate, never the tagged commit's, so a tag cannot
+        # bring its own gate. Both fetches use no token on purpose: the
+        # repository is public, and a token here would be one more secret
+        # that a tag's run can reach. It wants a signed annotated tag, by a key in
+        # .github/tag-signers as main has it, on a commit on main that this
+        # job checked out. Any failure stops the job here.
+        # scripts/test-verify-tag.sh runs this block as it stands.
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          if ! git fetch --quiet --force origin +refs/heads/main:refs/remotes/origin/main ||
+            ! git show refs/remotes/origin/main:scripts/verify-tag.sh >"$RUNNER_TEMP/verify-tag.sh"; then
+            echo "release: cannot read scripts/verify-tag.sh from main. The gate fetches with no token, so it needs a public repository." >&2
+            echo "Try: run the release job again. If it fails again, check that main has the script. A private fork must give the gate's fetch a read-only token, and remove it before the build." >&2
+            exit 1
+          fi
+          bash "$RUNNER_TEMP/verify-tag.sh" "$TAG"
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
@@ -45,8 +69,13 @@ jobs:
           args: release --clean --release-notes=${{ runner.temp }}/notes.md
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Set this secret once the tap repository exists; until then the
-          # cask is built into dist/ and not pushed.
+          # Build the tag that the gate checked. Without it, GoReleaser picks
+          # the highest version among the tags on this commit, which may be
+          # another, unsigned tag.
+          GORELEASER_CURRENT_TAG: ${{ github.ref_name }}
+          # Set this secret, in the release environment, once the tap
+          # repository exists; until then the cask is built into dist/ and
+          # not pushed.
           HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
       - name: Sign the checksums with the release SSH key
         # install.sh checks this signature with ssh-keygen, which every host

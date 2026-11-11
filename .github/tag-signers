@@ -1,0 +1,17 @@
+# The keys that may sign a release tag (decision 0041). The release job reads
+# this file from main, never from the tag, and builds only from an annotated
+# tag that one of these keys signed (scripts/verify-tag.sh).
+#
+# One line for each maintainer's key, in the allowed signers format of
+# ssh-keygen, with the namespace "git":
+#   <email> namespaces="git" sk-ssh-ed25519@openssh.com AAAA... <comment>
+# Each key is a hardware key (sk-ssh-ed25519 or sk-ecdsa-sha2-nistp256), and
+# the gate refuses any other line that is not a comment. A new key reaches
+# this file only through a pull request to main. docs/contributing/releasing.md
+# says how to make one.
+#
+# Check a tag by hand, before you push it:
+#   git -c gpg.ssh.allowedSignersFile=.github/tag-signers verify-tag vX.Y.Z
+#
+# No key is listed yet. Until the owner adds the line of their hardware key,
+# the release job refuses every tag.
