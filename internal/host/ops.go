@@ -157,7 +157,7 @@ func New(a NewArgs) (_ *SessionInfo, err error) {
 	}
 	m.Git = gi
 	m.Secrets = secrets
-	m.SetupHook, m.ResumeHook = sessHooks.setup, sessHooks.resume
+	m.SetupHook, m.ResumeHook, m.SetupHash = sessHooks.setup, sessHooks.resume, sessHooks.hash
 	m.RunHook = m.SetupHook
 	if len(a.Argv) > 0 {
 		// A restore or a resume runs the user's own command again, unless

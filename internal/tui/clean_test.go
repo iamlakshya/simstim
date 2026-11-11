@@ -203,7 +203,23 @@ func TestQuestionsShowHostPaths(t *testing.T) {
 		t.Errorf("the setup question does not quote the repository:\n%s", out)
 	}
 	hs.key("y")
-	hasCall(t, hs.be, "remember atlas-dev "+repo+" run=true")
+	hasCall(t, hs.be, "remember atlas-dev "+repo+" run=true hash=h1")
+	// The question after a change of the script is clean too.
+	hs.be.state["atlas-dev"].setupHash = "h2"
+	hs.key("n")
+	hs.typeText("claude ~/src/app")
+	hs.key("enter")
+	if ask, ok := hs.m.modal.(*setupAsk); !ok || ask.past() != client.SetupChanged {
+		t.Fatalf("no question about the change; modal %T", hs.m.modal)
+	}
+	checkClean(t, "the question about a changed script", hs.m.render())
+	out := plainScreen(hs.m)
+	if !strings.Contains(out, `"~/src/app\x1b]52;c;aGk=\a\u202e"`) {
+		t.Errorf("the question about a changed script does not quote the repository:\n%s", out)
+	}
+	if !strings.Contains(out, "after you trusted it") {
+		t.Errorf("the question does not say that the script changed:\n%s", out)
+	}
 
 	hs = folderLab(t)
 	hs.key("n")

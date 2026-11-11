@@ -1,0 +1,24 @@
+
+  ⢄⡠⠊ simstim  hosts                                     3 hosts · 1 needs you
+  ────────────────────────────────────────────────────────────────────────────
+
+  ▍ 1 ● atlas-dev  4 sessions · 1 needs you                      9ms  ⣀⣀⣀⣀⣀⣀⣀⣼
+    2 ◌ aws-gpu    offline                                            ⣀⣀⣀⣀⣀⣀⣀⣀
+    3 ● gcp-dev    2 sessions                                   41ms  ⣀⣀⣀⣀⣀⣀⣀⣼
+
+    ssh atlas-dev · Debian 13 · 4 CPUs · claude, codex, opencode, shell
+
+
+
+
+
+
+  ── Start without its setup script? ─────────────────────────────────────────
+
+    The setup script of /home/dev/src/app, .x/setup, points outside the
+    repository, so it cannot run.
+
+    Start the session without the repository's setup scripts? Your own hooks
+    on atlas-dev still run.
+
+    y start without it   n cancel

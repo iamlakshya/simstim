@@ -7,6 +7,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/iamlakshya/simstim/internal/api"
 	"github.com/iamlakshya/simstim/internal/brand"
 	"github.com/iamlakshya/simstim/internal/client"
 )
@@ -79,27 +80,41 @@ func (m *Model) startSession(h *hostConn, r startReq) tea.Cmd {
 	return func() tea.Msg {
 		cctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 		defer cancel()
-		if r.args.Setup == "" {
-			r.args.SetupTrust = be.SetupTrust(r.host)
+		var warn *client.UserError
+		if r.args.Setup == "" && !r.answered {
+			answers := be.SetupAnswers(r.host)
+			answers.Apply(&r.args)
+			r.answered, r.answers, warn = true, answers, answers.Warning
 		}
 		// One fetch of the secrets for each start. A question about the
 		// start keeps them for the start after the answer.
 		if r.args.Secrets == nil {
 			secrets, err := be.Secrets(cctx, host)
 			if err != nil {
-				return startedMsg{startReq: r, err: err}
+				return startedMsg{startReq: r, err: err, warn: warn}
 			}
 			r.args.Secrets = secrets
 		}
 		s, err := c.NewSession(cctx, r.args)
-		return startedMsg{startReq: r, s: s, err: err}
+		return startedMsg{startReq: r, s: s, err: err, warn: warn}
 	}
 }
 
-// onStarted shows how a start went, in the form or the quick-start line that
-// waits for it, or opens the host's question about it. After esc, nothing
-// waits: the launcher asks nothing, and does not attach to the session.
+// onStarted shows how a start went, and a warning about the user's answers
+// about setup scripts, when they could not be read.
 func (m *Model) onStarted(msg startedMsg) tea.Cmd {
+	cmd := m.showStarted(msg)
+	if w := msg.warn; w != nil {
+		return tea.Batch(m.toastSetupWarn(w), cmd)
+	}
+	return cmd
+}
+
+// showStarted shows how a start went, in the form or the quick-start line
+// that waits for it, or opens the host's question about it. After esc,
+// nothing waits: the launcher asks nothing, and does not attach to the
+// session.
+func (m *Model) showStarted(msg startedMsg) tea.Cmd {
 	d, p := m.waiting(msg.startReq)
 	waited := d != nil || p != nil
 	if q, ok := client.FolderQuestionOf(msg.err); ok && !msg.args.MakeFolder {
@@ -112,6 +127,10 @@ func (m *Model) onStarted(msg startedMsg) tea.Cmd {
 		if waited {
 			m.modal = &setupAsk{startReq: msg.startReq, q: q}
 		}
+		return nil
+	}
+	if ue, ok := setupCannotRun(msg.err); ok && msg.args.Setup != api.SetupSkip && waited {
+		m.modal = &setupSkipAsk{startReq: msg.startReq, err: ue}
 		return nil
 	}
 	if msg.err != nil {

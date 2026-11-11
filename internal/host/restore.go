@@ -115,7 +115,7 @@ func startAgain(m *Manifest, a again) (argv []string, why string, err error) {
 	dropUnusableID(m)
 	m.Agent.Argv = argv
 	m.Env = withHookSocket(m.Env, m.ID)
-	m.RunHook = m.ResumeHook
+	m.RunHook = resumeHook(m)
 	m.Run.BootID = BootID()
 	// The old processes are gone. The new holder records its own.
 	m.Run.HolderPID, m.Run.AgentPID, m.Run.Unit = 0, 0, ""
@@ -143,6 +143,40 @@ func startAgain(m *Manifest, a again) (argv []string, why string, err error) {
 		return argv, why, errors.New(mm.Status.Reason)
 	}
 	return argv, why, nil
+}
+
+// resumeHook is the hook that runs before the agent of m starts again: the
+// session's resume hook. When that is the repository's own script, the host
+// reads the scripts again first, at the top level of the session's folder
+// (spec 19.2). If their setup hash differs from the one that the session
+// started with, or the session kept none, the script is skipped, and the
+// host's own hook runs, as for a repository that is not trusted. A line in
+// the session's log says so.
+func resumeHook(m *Manifest) string {
+	hook := m.ResumeHook
+	// The repository's script is <top>/.<name>/resume. Any other hook is
+	// the host's own, which is the user's: it is never checked. The path of
+	// the host's hooks depends on the environment of the moment, so it is
+	// not the test.
+	if hook == "" || filepath.Base(filepath.Dir(hook)) != "."+brand.Name {
+		return hook
+	}
+	repo, top := repoOf(m.Cwd)
+	var why string
+	if m.SetupHash == "" {
+		why = "the session kept no setup hash to check it against"
+	} else {
+		switch s, err := readScripts(top); {
+		case err != nil:
+			why = "could not check it: " + err.Error()
+		case s.hash != m.SetupHash || s.resume != hook:
+			why = "it changed after the start"
+		default:
+			return hook
+		}
+	}
+	warnSession(m.ID, "skipped the resume script of "+repo+": "+why)
+	return hostHook("resume")
 }
 
 // resumeArgv picks how to bring an agent back, in this order:

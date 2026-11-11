@@ -56,31 +56,60 @@ func question(t *testing.T, err error) api.SetupQuestion {
 	return q
 }
 
+// hashOf is the setup hash of the scripts at top, for a test.
+func hashOf(t *testing.T, top string) string {
+	t.Helper()
+	s, err := setupHash(top)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return s.hash
+}
+
 func TestSetupHooksNeedTrust(t *testing.T) {
 	repo := setupRepo(t)
 	script := filepath.Join(repo, "."+brand.Name, "setup")
 	sub := filepath.Join(repo, "src")
 	_ = os.MkdirAll(sub, 0o755)
+	hash := hashOf(t, repo)
 
-	// Unknown: ask, from the repository's root, even in a subfolder.
+	// Unknown: ask, from the repository's root, even in a subfolder. The
+	// question carries the setup hash.
 	_, err := setupHooks(NewArgs{}, sub, nil)
-	if q := question(t, err); q.Repo != repo || q.Script != script {
-		t.Fatalf("question %+v", q)
+	if q := question(t, err); q.Repo != repo || q.Script != script || q.Hash != hash {
+		t.Fatalf("question %+v, want hash %s", q, hash)
 	}
-	// Trusted, refused, and the two overrides.
+	// The order of spec 19.2: the override, the refusal, the hash.
 	for _, c := range []struct {
+		name string
 		a    NewArgs
 		want string
 	}{
-		{NewArgs{SetupTrust: map[string]bool{repo: true}}, script},
-		{NewArgs{SetupTrust: map[string]bool{repo: false}}, ""},
-		{NewArgs{Setup: api.SetupRun, SetupTrust: map[string]bool{repo: false}}, script},
-		{NewArgs{Setup: api.SetupSkip, SetupTrust: map[string]bool{repo: true}}, ""},
+		{"--setup", NewArgs{Setup: api.SetupRun, SetupTrust: map[string]bool{repo: false}}, script},
+		{"--no-setup", NewArgs{Setup: api.SetupSkip, SetupHashes: map[string]string{repo: hash}}, ""},
+		{"refused", NewArgs{SetupTrust: map[string]bool{repo: false}, SetupHashes: map[string]string{repo: hash}}, ""},
+		{"trusted", NewArgs{SetupHashes: map[string]string{repo: hash}}, script},
 	} {
 		h, err := setupHooks(c.a, sub, nil)
 		if err != nil || h.setup != c.want {
-			t.Errorf("%+v: setup %q, %v; want %q", c.a, h.setup, err, c.want)
+			t.Errorf("%s: setup %q, %v; want %q", c.name, h.setup, err, c.want)
 		}
+		if (h.hash != "") != (c.want != "") || h.hash != "" && h.hash != hash {
+			t.Errorf("%s: hash %q, want it only when the scripts run", c.name, h.hash)
+		}
+	}
+	// Otherwise it asks: for another hash, saying that the script changed,
+	// and for an older client's yes without a hash.
+	_, err = setupHooks(NewArgs{SetupHashes: map[string]string{repo: "an older hash"}}, sub, nil)
+	var pe *proto.Error
+	if q := question(t, err); q.Hash != hash || !errors.As(err, &pe) || !strings.Contains(pe.Message, "changed after you trusted it") {
+		t.Errorf("changed: %v, question %+v", err, q)
+	}
+	if q := question(t, func() error {
+		_, err := setupHooks(NewArgs{SetupTrust: map[string]bool{repo: true}}, sub, nil)
+		return err
+	}()); q.Hash != hash {
+		t.Errorf("an older client's yes: question %+v", q)
 	}
 	// A refused repository falls back to the host's own hook.
 	own := filepath.Join(paths.ConfigDir(), "hooks", "setup")
@@ -105,7 +134,8 @@ func TestSetupHooksInANewWorktree(t *testing.T) {
 	if key, top := repoOf(gi.Worktree); key != repo || top != gi.Worktree {
 		t.Fatalf("repoOf(worktree) = %s, %s", key, top)
 	}
-	h, err := setupHooks(NewArgs{SetupTrust: map[string]bool{repo: true}}, gi.Worktree, gi)
+	// The worktree's scripts are the repository's: the same hash.
+	h, err := setupHooks(NewArgs{SetupHashes: map[string]string{repo: hashOf(t, repo)}}, gi.Worktree, gi)
 	if err != nil || h.setup != filepath.Join(gi.Worktree, "."+brand.Name, "setup") {
 		t.Fatalf("trusted worktree: %+v %v", h, err)
 	}

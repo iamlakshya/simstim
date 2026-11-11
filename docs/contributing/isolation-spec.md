@@ -1266,6 +1266,7 @@ A lower `network.min_release_age` reaches the gate of a running session at once 
 | `~/.local/state/<name>/grants.json` | Laptop | The client | The grant ledger: names, never values (14.8.6) |
 | `~/.local/state/<name>/grant-trust.json` | Laptop | The client | The user's answers to a repository file's proposals, by host, repository and the file's SHA-256 |
 | `~/.local/state/<name>/setup-trust.json` | Laptop | The client | Setup trust, now by the script's SHA-256 (P0.6) |
+| `~/.local/state/<name>/setup-trust.json.lock` | Laptop | The client | The lock that each read, recovery and save of `setup-trust.json` holds (19.2) |
 | `~/.config/<name>/images.lock` | Laptop | The client (P3) | Image references and their digests, with each first conversion's root hash as a check value (20.8) |
 | `.<name>/sandbox.toml` | Repository | The repository's authors | Narrowing rules and proposals. Untrusted. |
 | `<SessionDir>/manifest.json` | Host | The supervisor | The sandbox's layers, its merged policy, its level, and its secret names and modes |
@@ -4469,19 +4470,28 @@ Section 3.2 lists the holes that exist today, whatever the wall. This section sp
 2. For each script, it takes the hex SHA-256 of its bytes, or the word `none` when the script is absent.
 3. The setup hash is the hex SHA-256 of the text `v2\nsetup <hex or none>\nresume <hex or none>\nstop <hex or none>\n`.
 4. A script that leaves the top level through a symlink cannot run. `os.Root` refuses it, and the start fails with `setup_outside`.
+5. An absolute symlink fails in the same way, even when it points inside the top level: `os.Root` refuses every absolute link.
+6. A symlink out of the top level to nothing, or to a file that is not executable, counts as absent, because it could not run.
+7. An executable script that the host cannot open or read fails the start with `setup_unreadable`, because its content cannot be checked. So does a top level that `os.OpenRoot` cannot open, such as a folder of mode 0111: a script in it can still run by its path, so what it holds is unknown.
 
 The hash covers `stop` from P0.6, although only P1.11 runs it. This is a project choice: P1.11 then changes no hash, so no repository asks again when it lands. Until P1.11, a change to `stop` alone also asks again.
 
-**What the host does.** For a repository that has a script, the first rule that matches decides:
+**What the host does.** For a repository that has a script, the first rule that matches decides. Any of the three scripts counts, `stop` too:
 
 1. `NewArgs.Setup` is `run` or `skip`: as today.
 2. `NewArgs.SetupTrust[repo]` is false: the repository's scripts do not run, as today.
 3. `NewArgs.SetupHashes[repo]` equals the setup hash: they run.
 4. Otherwise the host returns `setup_trust`, with a `SetupQuestion` that carries the setup hash.
 
+`skip` and a refusal decide before the host reads any script. So they also win over `setup_outside` and `setup_unreadable`, and a start with `--no-setup-script` or a refusal never fails on a script. `run` reads the scripts, and fails on them.
+
 The host checks the hash just before it starts the script, and runs the script by its path, so `$0` and the files beside it work as today. A process that changes the script between the check and the start already runs as the user, and could change the host's own hooks instead (N5). So the hash guards against content that changed since the yes, not against such a process.
 
 The trusted manifest keeps the setup hash in a new field, `SetupHash`. The host computes it at each start that runs the repository's scripts, also when `NewArgs.Setup` is `run`. Before a respawn, after a restore or a resume, the host computes the hash again, at the top level of the session's folder (`Cwd`). When it differs, the host skips the repository's `resume` script and runs the host's own hook, as for a repository that is not trusted. It writes one line to the session's log: "skipped the resume script of <repo>: it changed after the start".
+
+- The session's resume hook is the repository's script when its folder is `.<name>`. Any other hook is the host's own, and the host never checks it. The path of the host's own hooks depends on `XDG_CONFIG_HOME` at that moment, so a comparison with that path is not the test.
+- A session whose manifest has no `SetupHash`, such as one that started before P0.6, skips the repository's `resume` script at each respawn. Its log line ends "the session kept no setup hash to check it against". A new session runs the script again.
+- When the host cannot read the scripts at a respawn, such as a script that now leads outside the top level, it skips the `resume` script too. Its log line ends "could not check it: " and the reason.
 
 **Types.**
 
@@ -4506,6 +4516,7 @@ SetupHash string `json:"setup_hash,omitempty"`
 }
 ```
 
+- Each read, recovery and save of the file holds an exclusive lock on `setup-trust.json.lock`, beside it. The client takes it with the file lock of P0.5 (`flock` on Unix, `LockFileEx` on Windows), and waits for it up to 2 s, the wait of the clipboard memory's lock. So two client processes never lose each other's answers, and never move the same broken file aside. A lock that the client cannot take in time fails closed. A read then trusts no repository, and warns. An answer is not kept, and its start fails with the error.
 - `hosts` keeps the shape of version 1, and holds refusals only. An older client reads it, and keeps refusing.
 - `trusted` holds each yes, with the setup hash and the time.
 - A yes removes the repository from `hosts`. A no removes it from `trusted`.
@@ -4515,9 +4526,17 @@ SetupHash string `json:"setup_hash,omitempty"`
 - A `false` stays in `hosts`.
 - A `true` becomes an entry in `trusted` with an empty `sha256`: "asked, no hash". The client sends no hash for it, so the next start asks once.
 - An older client that writes the file drops `trusted`. The new client then asks again for those repositories. No path runs a script without a yes.
-- A file that does not parse becomes `setup-trust.json.bad`, and the client starts with an empty file.
+- A file that does not parse becomes `setup-trust.json.bad`, and the client starts with an empty file. When `setup-trust.json.bad` exists, the file takes the first free name of `setup-trust.json.bad.1`, `setup-trust.json.bad.2` and so on, with no limit, so that it never replaces the copy that an earlier warning named. An error other than "does not exist" when the client checks a name leaves the file in place, as below.
+- When the file breaks after the client read the answers, such as while a question waits, keeping the answer moves it aside in the same way. The answer starts a new file, and the caller gets the warning apart from any failure to save. The CLI prints it, and the launcher shows it as a notice.
+- When the file that does not parse cannot move, the client reads no answers, and each script asks. An answer then fails with the warning, so that it never writes over the file.
 
-**The question.** The client words it from what it holds. With no entry for the repository, the question is as today. With an entry in `trusted`, it starts: "The setup script of <repo> on <host> changed after you trusted it." A yes goes into the file with the question's hash. The client then starts again with `SetupHashes[repo]` set to that hash, not with `--setup-script`. So a script that changes again between the question and the start asks again.
+**The question.** The client words it from what it holds:
+
+- With no entry in `trusted` for the repository, or a question with no hash, the question is as today.
+- With an entry whose `sha256` is not empty and differs from the question's hash, it starts: "The setup script of <repo> on <host> changed after you trusted it."
+- With an entry whose `sha256` is empty, from version 1 or from an older helper, the client cannot know whether the script changed. The question starts: "You trusted the setup script of <repo> on <host> before this version checked its content."
+
+The note without a terminal gives the same reason. A yes goes into the file with the question's hash. The client then starts again with `SetupHashes[repo]` set to that hash, not with `--setup-script`. So a script that changes again between the question and the start asks again.
 
 When the question has no hash, the helper is older. The client then answers as today, with `Setup` set to `run` or `skip` for this start.
 
@@ -4526,15 +4545,20 @@ When the question has no hash, the helper is older. The client then answers as t
 | Code | Message | Try |
 | --- | --- | --- |
 | `setup_trust`, after a change | The setup script of ~/src/app on box changed after you trusted it. | Pass `--setup-script` to run it, or `--no-setup-script` to start without it. The launcher asks. |
-| `setup_outside` | The setup script of ~/src/app, .simstim/setup, points outside the repository, so it cannot run. | Make `.simstim/setup` a file in the repository, or start with `--no-setup-script` |
+| `setup_outside` | The setup script of ~/src/app, .simstim/setup, points outside the repository, so it cannot run. | Make `.simstim/setup` a file in the repository, or start with `--no-setup-script`. The launcher offers to start without the repository's scripts, with `Setup` set to `skip`. |
+| `setup_unreadable` | Could not read the setup script of ~/src/app, .simstim/setup: permission denied. | Let your user on the host read `.simstim/setup`, or start with `--no-setup-script`. The launcher offers to start without the repository's scripts. |
+| `setup_unreadable`, for the top level | Could not read the folder ~/src/app, so the setup scripts of ~/src/app cannot be checked: permission denied. | Let your user on the host read the folder ~/src/app, or start with `--no-setup-script`. The launcher offers to start without the repository's scripts. |
 | A file that does not parse (a warning) | Could not read setup-trust.json, so each setup script asks again. The old file is now setup-trust.json.bad. | Compare the two files, then delete `setup-trust.json.bad` |
+| A file that does not parse and cannot move (a warning, and the error of an answer) | Could not read setup-trust.json, and could not move it aside: permission denied. Each setup script asks again, and no answer is kept. | Fix or delete `setup-trust.json` |
+| The file's lock is busy past the wait (a warning when reading) | Could not lock setup-trust.json, so no setup script is trusted this time: … another client process holds the lock. | Another client is reading or saving setup answers. Wait a moment, then try again. |
+| The file's lock is busy past the wait (the error of an answer) | Could not lock setup-trust.json, so the answer is not kept: … another client process holds the lock. | Another client is reading or saving setup answers. Wait a moment, then try again. |
 
 **Tests.**
 
-1. `setupHash`: setup only, resume only, both, neither, a symlink inside the repository, a symlink out of it (`setup_outside`), and a file that is not executable.
-2. The host's order: one case for each rule above.
-3. The file: version 1 to version 2, a round trip, a rewrite through the version 1 struct, and a file that does not parse.
-4. The question: the wording for a changed script, and the fallback for a question without a hash.
+1. `setupHash`: setup only, resume only, stop only, all three, none, a symlink inside the repository, a symlink out of it (`setup_outside`), an absolute symlink that points inside, a symlink out to nothing or to a file that is not executable, a file that is not executable, and an executable file that cannot be read (`setup_unreadable`).
+2. The host's order: one case for each rule above. `--no-setup-script` and a refusal read no script.
+3. The file: version 1 to version 2, a round trip, a rewrite through the version 1 struct, a file that does not parse, one that does not parse while `setup-trust.json.bad` exists, and one that cannot move. Several client processes that save different answers at once lose none, and leave valid JSON. While another holds the lock past the wait, a read trusts nothing and an answer is not kept.
+4. The question: the wording for a changed script, for a yes with no hash, and the fallback for a question without a hash. In the launcher, `setup_outside` offers to start without the scripts.
 5. A restore after the `resume` script changed: the script is skipped, and the log has its line. A session that started with `--setup-script` runs an unchanged script at a restore.
 6. End to end: trust a script, commit a change to it, then `new` asks at a terminal, and skips with a note without one.
 

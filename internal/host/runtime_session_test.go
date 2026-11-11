@@ -193,6 +193,41 @@ func TestNewMakesTheFolderAndRemovesItAfterAFailedStart(t *testing.T) {
 	}
 }
 
+// A setup script that leaves the repository through a symlink fails the
+// start with setup_outside, and the start leaves no worktree behind. The
+// scripts would not run with --no-setup, so that start goes on.
+func TestNewRefusesASetupScriptOutsideTheRepository(t *testing.T) {
+	h := hosttest.New(t)
+	dir := repo(t, h)
+	outside := filepath.Join(h.Home, "elsewhere")
+	writeFile(t, outside, "#!/bin/sh\necho not from the repository\n")
+	if err := os.Chmod(outside, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(dir, "."+brand.Name, "setup")
+	if err := os.MkdirAll(filepath.Dir(link), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, link); err != nil {
+		t.Fatal(err)
+	}
+	git(t, dir, "add", "-A")
+	git(t, dir, "commit", "-q", "-m", "a setup script elsewhere")
+	a := host.NewArgs{Argv: []string{"sleep", "60"}, Cwd: "~/src/app", Worktree: true}
+	_, err := host.New(a)
+	var pe *proto.Error
+	if !errors.As(err, &pe) || pe.Code != api.CodeSetupOutside || !strings.Contains(pe.Message, "points outside the repository") {
+		t.Fatalf("new = %v, want %s", err, api.CodeSetupOutside)
+	}
+	if n := strings.Count(git(t, dir, "worktree", "list"), "\n") + 1; n != 1 {
+		t.Errorf("the refused start left a worktree: %d worktrees", n)
+	}
+	a.Setup = api.SetupSkip
+	if _, err := host.New(a); err != nil {
+		t.Errorf("new --no-setup = %v", err)
+	}
+}
+
 func TestShellIsTheDefaultAgent(t *testing.T) {
 	hosttest.New(t)
 	s, err := host.New(host.NewArgs{Cwd: "~", Term: "no-such-terminal", TermProgram: "TestTerm", TermProgramVersion: "1.0"})

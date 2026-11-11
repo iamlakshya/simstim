@@ -7,9 +7,19 @@ const (
 )
 
 // CodeSetupTrust is the error code of a new session whose repository has a
-// setup script that the user has neither trusted nor refused on this host.
-// The error's data is a SetupQuestion.
+// setup script that the user has neither refused on this host nor trusted
+// with its current content. The error's data is a SetupQuestion.
 const CodeSetupTrust = "setup_trust"
+
+// CodeSetupOutside is the error code of a new session whose repository's
+// setup or resume script leaves the repository through a symlink, so it
+// cannot run.
+const CodeSetupOutside = "setup_outside"
+
+// CodeSetupUnreadable is the error code of a new session whose repository's
+// setup, resume or stop script is executable but cannot be read, so its
+// content cannot be checked.
+const CodeSetupUnreadable = "setup_unreadable"
 
 // SetupQuestion asks the user whether a repository's setup script may run.
 type SetupQuestion struct {
@@ -18,4 +28,8 @@ type SetupQuestion struct {
 	Repo string `json:"repo"`
 	// Script is the script that would run.
 	Script string `json:"script"`
+	// Hash is the setup hash of the repository's scripts: a yes holds for
+	// this content only. The client starts again with it in
+	// NewArgs.SetupHashes. An older helper sends none.
+	Hash string `json:"hash,omitempty"`
 }
