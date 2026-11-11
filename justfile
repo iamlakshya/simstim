@@ -94,10 +94,11 @@ test:
 cover:
     scripts/cover.sh
 
-# Fuzz the input filter for a while.
+# Fuzz the input filter, the frame reader and the hook handler for a while.
 fuzz time="30s":
     go test ./internal/keys -run '^$' -fuzz FuzzFilter -fuzztime {{time}}
     go test ./internal/proto -run '^$' -fuzz FuzzRead -fuzztime {{time}}
+    go test ./internal/host -run '^$' -fuzz FuzzApplyHook -fuzztime {{time}}
 
 # Static checks.
 lint: check-name check-private check-scripts check-size
