@@ -3624,7 +3624,7 @@ This is the only full list. Each question has its options and a recommended defa
 42. **How fast does the project answer an advisory for the VMM, the kernel or Ghostty?**
     - (a) A fixed time.
     - (b) Best effort.
-    - **Recommended:** (a): a release within 7 days, with the known-bad list (P4.6) in that release. It covers an advisory with a CVSS score of 7.0 or more, and any advisory whose range holds a current pin (20.9). The 7 days are a project choice. The nearest outside norm is the linux-distros list, whose members release a fix within 10 days of a public issue ([distros](https://oss-security.openwall.org/wiki/mailing-lists/distros)).
+    - **Recommended:** (a): a release within 7 days, with the known-bad list (P4.6) in that release. It covers an advisory of severity high or critical (CVSS 7.0 or more), and any advisory whose range holds a current pin (20.9). The 7 days are a project choice. The nearest outside norm is the linux-distros list, whose members release a fix within 10 days of a public issue ([distros](https://oss-security.openwall.org/wiki/mailing-lists/distros)).
 
 ### Policy, shells and the classifier
 
@@ -4629,9 +4629,9 @@ So Lima decides nested virtualisation with Apple's own check, not with the chip'
 
 **Why.** CI already runs `govulncheck` for Go. Nothing watches the Ghostty commit, and later the VMM, the kernel and `runsc`. The Ghostty advisories are in neither OSV nor GitHub's global database ([build facts](../research/build-facts.md#61-ghostty-and-its-advisories)).
 
-**The pins.** `scripts/pins-watch.py` reads:
+**The pins.** `scripts/pins-watch.py` runs the code in `scripts/pinswatch/`. It reads:
 
-- The Ghostty commit, from the URL of `.ghostty` in `vt/build.zig.zon`, which has the form `…/archive/<40 hex>.tar.gz`. Its repository is `ghostty-org/ghostty`.
+- The Ghostty commit, from the URL of the active `.ghostty` dependency in `vt/build.zig.zon`, which has the form `…/archive/<40 hex>.tar.gz`. A declaration or a `.url` inside a `//` comment does not count. Its repository is `ghostty-org/ghostty`.
 - Each `[[pin]]` of `guest/supply.lock`. P0.9 makes the file with its header and no pin. Later tasks add their entries: the kernel, erofs-utils and the VMM (P3.1, for its boot test), `runsc` (P6.1) and Firecracker (P6.2).
 
 ```toml
@@ -4644,22 +4644,59 @@ version = 1
 # ref = "v54.0"                                # the tag, for people
 # commit = "<40 hex>"                          # the commit of ref, which the build uses
 # watch = "github"                             # "github": advisories and ancestry. "osv": OSV only.
+# tag = "v{version}"                           # optional: the tag of a release, for advisories that name versions
 ```
 
-`name`, `ref` and `commit` are needed. `repo` is needed when `watch` is `github`, the default. The script ignores keys that it does not know, so later tasks may add fields such as `url` and `sha256`. Section 20.1 adds named tables of build inputs to the same file. The watch job reads only the `[[pin]]` entries.
+`name`, `ref` and `commit` are needed. A `ref` is printable ASCII with no space, as a tag name is. `repo` is needed when `watch` is `github`, the default. `tag` gives the form of the project's release tags, with `{version}` in the place of the version. Its default is `v{version}`. The script ignores keys that it does not know, so later tasks may add fields such as `url` and `sha256`. Section 20.1 adds named tables of build inputs to the same file. The watch job reads only the `[[pin]]` entries.
 
 **The check.** For Ghostty, and for each pin with `watch = "github"`:
 
-1. Read `GET /repos/<repo>/security-advisories?state=published&per_page=100`, every page ([repository advisories](https://docs.github.com/en/rest/security-advisories/repository-advisories)).
-2. In each entry of an advisory's `vulnerabilities`, take each hex string of 7 to 40 characters from `vulnerable_version_range` and `patched_versions`.
-3. A hash in the range that follows `>=`, `from` or `since` is an introduced commit. A hash that follows `<` or `up to but not including`, and each hash in `patched_versions`, is a fix. A hash in any other form, such as after `<=`, makes the advisory unread.
-4. "A reaches the pin" means that `GET /repos/<repo>/compare/<A>...<pin>` answers `ahead` or `identical`.
-5. An entry affects the pin when none of its fixes reaches the pin, and one of its introduced commits does, or it names none.
-6. An advisory with no hash in any entry is "unread" for a commit pin.
+1. Check that the pin's commit is in its repository, with `GET /repos/<repo>/commits/<commit>`. For a pin of `guest/supply.lock`, check also that its `ref` is a tag that names that commit. Each failure is an error with a `Try:` line, never an unread advisory.
+2. Read `GET /repos/<repo>/security-advisories?state=published&per_page=100`, every page ([repository advisories](https://docs.github.com/en/rest/security-advisories/repository-advisories)).
+3. Read each entry of an advisory's `vulnerabilities`, with the original text of its `vulnerable_version_range` and `patched_versions`. The script cleans and shortens text only to print it. An entry with a hex string of 7 to 40 characters in either field goes by the hash rule. Any other entry goes by the tag rule below. Both rules read their fields by the grammar below, which is the one rule for what the watch reads.
+4. The hash rule splits the range into intervals at each `or` or `||`. An interval's introduced commit is the hash after `>=`, `from` or `since`. Its fix is the hash after `<` or `up to but not including`. An interval may have at most one of each.
+5. A hash in `patched_versions` is a fix too. When the range has one interval, it is a fix of that interval. When the range has more, each hash in `patched_versions` must be the fix of one of them, or the entry is unread.
+6. "A reaches the pin" means that `GET /repos/<repo>/compare/<A>...<pin>` answers `ahead` or `identical`. A compare that answers 404 or 422 names a commit that the repository does not know. The script tests every fix of an interval before it calls the entry unread for that reason, because another fix may reach the pin.
+7. The pin lies in an interval when none of its fixes reaches the pin, and its introduced commit does, or it names none. The pin lies outside an interval when one of its fixes reaches the pin, or when its introduced commit does not. An entry affects the pin when the pin lies in any of its intervals. Each interval counts on its own: a fix of one interval never clears the pin from another.
+8. An advisory is a finding when one of its entries affects the pin. Otherwise it is unread when one of its entries is unread, or when it has no entry. Entries with hashes go first, because they name the exact fix.
 
-For every pin, the Ghostty commit included, the script also sends `POST https://api.osv.dev/v1/query` with `{"commit": "<pin>"}`. Each answer is a finding. This covers the entries that have a CVE and a `GIT` range. A pin with `watch = "osv"` gets this step only.
+**The grammar.** It is an allow-list. Each field may hold printable ASCII only (U+0020 to U+007E). Any other character makes the entry unread, such as a line break, a tab, a no-break space, a zero-width space, a combining mark or a variation selector. The field must then split completely into the tokens below, with plain spaces between them. Words match in any case. A word ends where no letter or digit follows. Any other token makes the entry unread, such as `|`, `!`, `>`, `<=`, `not`, `and`, `after`, a parenthesis, or a version in a hash rule's range. The watch never picks out the tokens that it knows and skips the rest.
 
-The job also runs `govulncheck` at the version that CI pins. It checks the Go toolchain of `go.mod` and the modules.
+```text
+hash rule
+  range       = interval *( [","] separator interval )
+  separator   = "or" / "||"
+  interval    = [ "main" ] bound *( [","] bound )
+  bound       = introduced / fix
+  introduced  = ( ">=" / "from" / "since" ) [ "commit" ] hash
+  fix         = ( "<" / "up to but not including" ) [ "commit" ] hash
+  patched     = [ item *( "," item ) ]
+  item        = [ "main" "at" ] hash
+  hash        = 7 to 40 hex digits
+
+tag rule
+  range       = vbound *( "," vbound )
+  vbound      = [ ">=" / "<=" / "<" / "=" ] version
+  patched     = [ version *( "," version ) ]
+  version     = 1*digit 1*3( "." 1*digit )
+```
+
+In the tag rule, a range has at most one lower bound: a `vbound` with `>=`, `=` or no operator.
+
+**The tag rule.** An entry with no hash names release versions, not commits. The script reads it through the project's release tags:
+
+1. Both fields must follow the tag rule of the grammar above. So `patched_versions` is empty, or holds plain versions, such as `1.4.0`, with commas between them and no empty element.
+2. Each version maps to a tag by the entry's package. For Ghostty, the package `ghostty` maps to `v<version>`, and `libghostty-vt` maps to `vt-<version>`. Any other package makes the entry unread. A pin of `guest/supply.lock` uses its `tag` form for every package.
+3. The script resolves each tag with `GET /repos/<repo>/git/ref/tags/<tag>`, and follows an annotated tag to its commit. It never gives a bare name to the compare API, where a branch of the same name could match.
+4. When a patched release reaches the pin, the entry does not affect it.
+5. When none does, the entry affects the pin if the range has no lower bound, or if the pin holds the lowest affected release. Otherwise the entry is unread. The lower bound alone never clears a pin, because a commit between two releases can hold the bug.
+6. A tag that does not exist makes the entry unread.
+
+With the advisories of 11 November 2026, every Ghostty advisory reads at both pins of this plan. At `vt-1.0.0`, none affects the pin. At `ad97d331`, eleven are findings: GHSA-w9q4-5jvv-mcv4, GHSA-jqr7-69mm-v35h, and nine advisories with no hash that release 1.4.0 fixed.
+
+For every pin, the Ghostty commit included, the script also sends `POST https://api.osv.dev/v1/query` with `{"commit": "<pin>"}`. Each answer is a finding. This covers the entries that have a CVE and a `GIT` range. A pin with `watch = "osv"` gets this step only. An OSV entry whose ID or alias names an advisory that the repository's list already found is not reported twice.
+
+The daily run also runs `govulncheck` at the version that CI pins. It checks the Go toolchain of `go.mod` and the modules. CI runs it on each pull request, so the watch does not.
 
 **Verdicts.** A person may record a verdict for one advisory and one pin commit in `scripts/pins-watch-reviewed.toml`:
 
@@ -4672,39 +4709,58 @@ verdict = "fixed"     # "fixed" or "not-affected"
 why = "The pin holds 44c4c8f5."
 ```
 
-A verdict silences a finding, or an unread advisory, for that commit only. A new pin commit is checked again.
+A verdict silences a finding, or an unread advisory, for that commit only. A new pin commit is checked again. A verdict matches an advisory by its GHSA ID, by its CVE ID, or by an alias that OSV gives.
 
 **The job.** `.github/workflows/pins-watch.yml`:
 
-- It runs on `schedule` (`cron: "23 5 * * *"`), on `workflow_dispatch`, and on pull requests that change `vt/build.zig.zon`, `go.mod`, `guest/supply.lock`, `scripts/pins-watch.py`, `scripts/pins-watch-reviewed.toml` or the workflow.
+- It runs on `schedule` (`cron: "23 5 * * *"`) and on `workflow_dispatch`. It runs on pull requests that change `vt/build.zig.zon`, `guest/supply.lock`, `scripts/pins-watch.py`, `scripts/pinswatch/`, `scripts/test-pins-watch.py`, `scripts/testdata/pins-watch/`, `scripts/pins-watch-reviewed.toml` or the workflow. The govulncheck job does not run on pull requests.
 - It pins each action by its commit SHA, sets `persist-credentials: false`, and passes zizmor.
-- It has `permissions: contents: read`. Only a separate job that runs on `schedule` has `issues: write`, and only that job opens issues.
-- It sends `GITHUB_TOKEN` to the API, for the rate limit.
-- It fails when a pin is affected, when an advisory is unread, and when an API call fails. It never passes on a partial read.
-- On a scheduled run with findings, it opens one issue for each pin and advisory that no open issue names in its title. The title is `pins-watch: <pin> is in <advisory>`, and the labels are `dependencies` and `needs triage`. The body has the advisory's link, its severity, the range as text, the pin's commit and the next step.
+- It has `permissions: contents: read`. Only a separate job that runs on `schedule` has `issues: write`, and only that job opens issues. That job runs the check again, instead of reading the first job's output.
+- It sends `GITHUB_TOKEN` to `api.github.com` only, for the rate limit. It follows no redirect to another host, and a redirect never carries the token. A run on a laptop needs no token.
+- It fails when a pin is affected, when an advisory is unread, when a pin's commit or ref is wrong, when a file that it reads is bad or is not UTF-8 text, and when an API call fails. It never passes on a partial read.
+- On a scheduled run, it opens one issue for each finding and each unread advisory, unless one of its own open issues has the same title. It lists only the open issues that `github-actions[bot]` opened with the label `dependencies`, and compares the whole title. Outsiders cannot set labels, so an issue that someone else opens cannot silence a finding.
+- The title of a finding's issue is `pins-watch: <pin> is in <advisory>`. The title of an unread advisory's issue is `pins-watch: <pin> cannot be checked against <advisory>`. The labels are `dependencies` and `needs triage`. The body has the advisory's link, its severity, the range as text, the pin's commit and the next step. The range and the severity are code, and an OSV severity must be a CVSS vector.
 
 The job reports every severity. [Question 42](#15-open-questions) sets how fast a release follows.
 
-**Errors.** Each message of the script ends with a `Try:` line.
+**Errors.** Each message of the script ends with a `Try:` line. The script cleans every message before it prints it, and before it writes a workflow annotation, so outside text never prints raw. That covers a ref, a tag, a field of an advisory and the text of an API's answer.
 
 | When | Message | Try |
 | --- | --- | --- |
 | A pin is affected | ghostty (ad97d331) is in GHSA-w9q4-5jvv-mcv4: it lacks the fix e257bb45. | Move the pin past e257bb45 (vt/README.md), or record a verdict in scripts/pins-watch-reviewed.toml |
-| An unread advisory | Cannot read the range of GHSA-xxxx-xxxx-xxxx for ghostty: "1.0.0 to 1.3.1". | Check it by hand, then record a verdict for commit ad97d331 in scripts/pins-watch-reviewed.toml |
+| A pin lacks a patched release | ghostty (ad97d331) is in GHSA-2r63-vmw6-3m3c: it lacks the release v1.4.0. | Move the pin past the release v1.4.0 (vt/README.md), or record a verdict in scripts/pins-watch-reviewed.toml |
+| An unread advisory | Cannot read the range of GHSA-xxxx-xxxx-xxxx for ghostty: "1.0.0 to 1.3.1": it is not a plain version range. | Check it by hand, then record a verdict for commit ad97d331 in scripts/pins-watch-reviewed.toml |
 | An API failure | Could not read the advisories of ghostty-org/ghostty: HTTP 403. | Run the job again later. Locally, set GITHUB_TOKEN. |
+| A pin commit that the repository does not know | ghostty: the commit 11111111 is not in ghostty-org/ghostty. | Check the URL of the ghostty dependency in vt/build.zig.zon |
+| A ref that names another commit | guest/supply.lock: the ref "v54.0" of the pin "chv" is the commit 22222222, not 11111111. | Set commit to the commit of its ref, or fix the ref |
 | No Ghostty commit | Could not find the Ghostty commit in vt/build.zig.zon. | Keep the dependency's URL in the form …/archive/<commit>.tar.gz |
 | A bad lock file | guest/supply.lock: the pin "chv" has no commit. | Add the 40-character commit of its ref |
+| A file that is not UTF-8 | guest/supply.lock: cannot read it: it is not UTF-8 text. | Save the file as UTF-8 |
+| A bad argument | pins-watch: argument --root: expected one argument. | python3 scripts/pins-watch.py --help |
 
-**Tests.** `scripts/test-pins-watch.py` runs offline, from recorded answers in `scripts/testdata/pins-watch/`. `just test` and CI run it.
+**Tests.** `scripts/test-pins-watch.py` runs offline, from recorded answers in `scripts/testdata/pins-watch/`. `just test` and CI run it. It runs the tests in `scripts/pinswatch/tests/`, one file for each group, and builds each checkout from fixtures. One test parses the repository's own pin files, and nothing more, so a real pin or verdict does not break the tests.
 
-1. The old pin `ad97d331`: findings for GHSA-w9q4-5jvv-mcv4 and GHSA-jqr7-69mm-v35h, and none for GHSA-qjfx-r533-6vx3 and GHSA-3r5j-c6rj-xq2v.
-2. The commit of `vt-1.0.0`: no finding.
-3. An advisory with no hash: unread, and the job fails.
+1. The old pin `ad97d331`: findings for GHSA-w9q4-5jvv-mcv4 and GHSA-jqr7-69mm-v35h, and for the nine advisories with no hash that release 1.4.0 fixed. None for GHSA-qjfx-r533-6vx3, GHSA-3r5j-c6rj-xq2v and the five advisories with no hash that an older release fixed.
+2. The commit of `vt-1.0.0`: no finding and no unread advisory, so the job passes with no verdict.
+3. An advisory whose range is neither hashes nor plain versions: unread, and the job fails.
 4. A verdict for that advisory and the pin's commit: the job passes. The same verdict for another commit: it fails.
 5. An OSV answer with one entry: a finding.
-6. An API answer of 403: the job fails.
+6. An API answer of 403: the job fails. So does a cut answer.
 7. A `supply.lock` pin without `commit` fails. A pin with an unknown key passes.
 8. A range `<= <pin commit>`: the advisory is unread, and the job fails.
+9. GHSA-jqr7-69mm-v35h's range, reworded: `main from commit d7bb4b863 up to but not including 0af5c9e55` is a finding. `introduced in d7bb4b863, fixed in 0af5c9e55`, `d7bb4b863..0af5c9e55`, `starting with d7bb4b863, before 0af5c9e55`, `≥ d7bb4b863, < 0af5c9e55` and the forms with `>` and `after` are unread. None passes.
+10. A range of 216 characters is read whole.
+11. A `.ghostty` declaration or a `.url` inside a comment does not count.
+12. A redirect to another host is refused, and a redirect never carries the token.
+13. The tag rule: a pin older than the lowest affected release is unread, not clear. A missing tag and an unknown package are unread. A version-only `libghostty-vt` entry resolves the tag `vt-<version>`. A tag or a ref that names a blob or a tree is refused, with a `Try:` line.
+14. An issue that someone else opened, or one with another title, does not stop the job's own issue.
+15. The range `>= A, < B, or >= C, < D`, with A, B and C in the pin and D not: a finding. The fix B of the first interval does not clear the pin from the second.
+16. `up to but not including <hash>` with a zero-width space, U+034F or U+FE0F in it or next to it: unread, and it never clears a pin.
+17. A patched list `,1.4.0`, `1.4.0,` or `1.4.0,,1.3.0`: unread.
+18. `guest/supply.lock`, `scripts/pins-watch-reviewed.toml` or `vt/build.zig.zon` that is not UTF-8 text: an error with a `Try:` line.
+19. `< bbbbbbb | >= ccccccc` and `!>= aaaaaaa`: unread, with exit 1, though each would clear the pin if the watch skipped the unknown token.
+20. A ref with a character that is not printable ASCII, such as U+034F: an error with a `Try:` line.
+21. A ref of `bad`, a line break and `::warning::injected`, or one with a terminal control: no raw workflow command and no terminal control on stdout or stderr.
 
 **Acceptance.** On a branch that restores `ad97d331`, the pull request's run fails, and names GHSA-w9q4-5jvv-mcv4 and GHSA-jqr7-69mm-v35h.
 
@@ -5208,7 +5264,7 @@ The embedded `trusted_root.json` comes from the Sigstore public instance, and ea
 
 Each runtime entry of the release manifest therefore also has `released`, the upstream release date.
 
-**The 7-day rule.** A release with the new entry, and with a fixed pin where one exists, ships within 7 days of an advisory's publication. The rule covers an advisory of `severity` `high`, and any advisory whose range holds a pin of the current release. The 7 days are a project choice. The nearest outside norm is the linux-distros list's 10 days ([build facts 6](../research/build-facts.md#6-pins-advisories-and-signatures)). `pins-watch` (P0.9) finds the advisories, and `docs/contributing/releasing.md` states the rule.
+**The 7-day rule.** A release with the new entry, and with a fixed pin where one exists, ships within 7 days of an advisory's publication. The rule covers an advisory of severity high or critical (CVSS 7.0 or more), and any advisory whose range holds a pin of the current release. The 7 days are a project choice. The nearest outside norm is the linux-distros list's 10 days ([build facts 6](../research/build-facts.md#6-pins-advisories-and-signatures)). `pins-watch` (P0.9) finds the advisories, and `docs/contributing/releasing.md` states the rule.
 
 **Errors.**
 

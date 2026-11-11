@@ -1,0 +1,2 @@
+# A lock file with its header and no pin, for the tests of scripts/pins-watch.py.
+version = 1

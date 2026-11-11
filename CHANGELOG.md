@@ -10,6 +10,7 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ### Changed
 
+- A daily job checks the Ghostty commit and the guest pins against each project's own advisories and OSV, and the Go toolchain with govulncheck. It opens an issue when an advisory covers a pin, or when it cannot check a pin against an advisory.
 - The README starts with installation and a complete first-session path, then groups features, trust and replay limits, agent support, daily tasks and contribution links. It uses the Mermaid architecture diagram, still screenshots and separate recording links, with secondary screens collapsed.
 
 ### Fixed
