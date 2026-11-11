@@ -243,6 +243,14 @@ Triggers: the detach key, closing the tab, `simstim kill` from elsewhere, or SIG
   - Each client's output queue holds at most 4096 frames, not a fixed number of bytes.
   - When the queue fills, the holder closes that client's connection. On reconnect, the client catches up by offset if the ring still has it; otherwise it gets a snapshot, or the ring if a snapshot is unavailable.
   - Queueing output for a slow client does not block the PTY reader.
+- **Streams** (`internal/link`, for sandboxes): one connection between a sandbox's supervisor and its guest init carries many streams. No session uses it yet, and its frames do not travel between the client and a host yet, so sessions do not change.
+  - Four frames carry them. Each payload starts with a `u32` stream ID: `TStreamOpen` (`0x50`) with a JSON header that names the stream's kind, `TStreamData` (`0x51`) with bytes, `TStreamClose` (`0x52`) with one byte (`0` both ways, `1` the sender's writes only, `2` refused or reset), and `TStreamWindow` (`0x53`) with a `u32` of more credit.
+  - The link starts with a hello each way, with the role `supervisor` or `guest`, within 10 s. The supervisor refuses a guest of another helper version.
+  - The supervisor gives odd stream IDs, and the guest even ones. Each side's IDs are consecutive. Each kind has one side that may open it.
+  - Each stream has its own credit each way, 64 KiB at the start. The reader gives more as it reads. So a stream that nobody reads stops only its own writer. The writer sends one frame of each waiting stream in turn, and `holder` and `ctl` streams go first.
+  - Close sends the bytes that wait, then the close, and succeeds only once the connection has written them. When the other end has not taken them after 5 s, Close resets the stream, so the other end's reads fail rather than end cleanly, and Close returns an error.
+  - Memory has a fixed bound. A stream holds at most a window each way, copied into one buffer, whatever the sizes of its frames. The guest may open 96 streams and the supervisor 32, counted apart. So a guest can make the supervisor hold at most 16 MiB for each link.
+  - A frame is at most 64 KiB. An end that breaks a rule, such as data beyond the credit, an ID that was never opened, or a frame type that a link does not carry, loses the whole link. An open of a kind that the sender may not open, a header over 4 KiB, or an open past the opener's stream limit is refused alone.
 - **Leader rule:** the newest attach becomes leader. Any `input` frame from an attached client then makes that client leader, including terminal replies and mouse events. Only the leader's resize frames change the PTY size; typing does not itself apply a size. There is no `take_size` message. When the leader disconnects, no replacement is chosen until another attach or input frame.
 
 ## 5. Terminal fidelity contract

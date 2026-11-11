@@ -54,6 +54,24 @@ const (
 	TUploadBegin Type = 0x40
 	TUploadChunk Type = 0x41
 	TUploadEnd   Type = 0x42
+
+	// The stream frames carry many streams over one link (package link).
+	// Their payloads are binary and start with a u32 stream ID,
+	// little-endian. They never travel between the client and a host's
+	// bridge outside an op that streams.
+
+	// TStreamOpen opens a stream: the ID, then a JSON header that names the
+	// stream's kind.
+	TStreamOpen Type = 0x50
+	// TStreamData carries a stream's bytes: the ID, then the bytes.
+	TStreamData Type = 0x51
+	// TStreamClose closes a stream: the ID, then one byte. 0 closes both
+	// ways, 1 the sender's writes only, and 2 refuses or resets the
+	// stream.
+	TStreamClose Type = 0x52
+	// TStreamWindow gives credit: the ID, then a u32 of more bytes that
+	// the sender of the frame will take on that stream.
+	TStreamWindow Type = 0x53
 )
 
 // Frame is one decoded frame.

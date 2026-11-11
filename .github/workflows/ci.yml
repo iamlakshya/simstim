@@ -38,6 +38,10 @@ jobs:
           for arch in amd64 arm64; do cp vt/zig-out/linux/shadow-vt-$arch internal/client/helpers/vt-linux-$arch; done
       - run: go vet ./...
       - run: go test -race -count=1 ./...
+      - name: The link's tests again, over a pipe with no buffer
+        env:
+          LINK_TEST_PIPE: "1"
+        run: go test -race -count=1 ./internal/link
       - name: Coverage of internal/ without the launcher (70 % or more)
         run: scripts/cover.sh 70
       - name: Cross-build the client

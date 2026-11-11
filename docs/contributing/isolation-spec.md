@@ -476,11 +476,14 @@ var Opener = map[Kind]Side{
     KindEgress: Guest, KindDNS: Guest, KindRPort: Guest, KindAgent: Guest,
 }
 
-// Options bound a link.
+// Options bound a link. Both ends use the same Window.
 type Options struct {
-    Window     uint32 // credit for each stream, 256 KiB by default
-    MaxStreams int    // open streams at once, 1024 by default
-    MaxHeader  int    // the JSON header of an open, 4 KiB by default
+    Window               uint32 // credit for each stream, each way, 64 KiB by default
+    MaxSupervisorStreams int    // streams that the supervisor opened, open at once, 32 by default
+    MaxGuestStreams      int    // streams that the guest opened, open at once, 96 by default
+    MaxHeader            int    // the JSON header of an open, 4 KiB by default
+    HelloTimeout         time.Duration // the wait for the other end's hello, 10 s by default
+    Opener               map[Kind]Side // replaces the Opener table, for other links (10.5)
 }
 
 // Session is one end of a link.
@@ -508,7 +511,16 @@ func (st *Stream) CloseWrite() error
 
 Each stream has its own credit window, so a large download on an `egress` stream never holds back `holder` output. The writer of the link sends the frames of streams in turn, and `holder` and `ctl` streams go first when several wait.
 
-**The numbers are targets (P1.2).** The window of 256 KiB starts from yamux's initial stream window ([yamux](https://github.com/hashicorp/yamux/blob/master/const.go), master, October 2026). The limits of 1,024 streams and a 4 KiB header are this project's own bounds, with no outside source. P1.2's benchmark passes 1 GiB through a socket pair for each window from 64 KiB to 1 MiB. P1.2 sets the default to the smallest window within 10 % of the best throughput, and records the numbers in its pull request. The 100 MiB/s on one core of section 12 is a target, not a pass mark.
+**Memory.** A hostile guest can make the supervisor hold only a fixed number of bytes for each link, heap counted:
+
+- A stream copies the bytes that it receives into one buffer of at most a window. Small frames therefore cost no more memory than large ones.
+- `Write` queues at most a window for each stream, in a buffer of the same kind. The writer copies a frame's bytes when it sends them.
+- The streams of each side count apart. A guest that has opened all of its 96 streams cannot stop the supervisor from opening its own 32, such as `holder` and `ctl`.
+- With the defaults, a link holds at most 8 MiB that the other end sent and 8 MiB that waits to be sent: 128 streams of 64 KiB each way. That is 16 MiB for each link, inside the supervisor's budget of 20.10. The link's own buffers, for the frame that it reads and the frames that it writes, add less than 1 MiB.
+
+**Close.** `Close` sends the bytes that wait, then a close with code 0. It returns without an error only once the connection has written every batch that holds the stream's bytes and its close. It waits for 5 s, or until the write deadline when one is set. When the other end has not taken every byte by then, `Close` sends code 2 instead, so that the other end's reads fail, and returns an error. When the bytes and the close still wait for the connection, `Close` returns an error too, and they go when the connection takes them. When the other end closes the stream both ways first, the bytes that wait here are dropped, and `Close` returns nil, because that end asked to read no more. When the other end resets the stream with code 2 and so drops bytes that wait here, `Close` returns `ErrRefused`. A `Close` after the link has failed returns the link's error when bytes of the stream were lost with it, waiting or in a batch that the connection never finished. A stream never ends with a clean end of file after bytes were dropped. A stream counts against its side's limit, and its open waits in memory, until the writer hands its close to the connection.
+
+**The numbers are the project's choice (P1.2, [question 110](#15-open-questions)).** The window of 64 KiB and the limits of 96 and 32 streams keep the supervisor inside its budget. The 4 KiB header and the 10 s hello wait are this project's own bounds too, with no outside source. P1.2's benchmark passed 1 GiB through a socket pair for each window from 64 KiB to 1 MiB, and 64 KiB was far above the 100 MiB/s on one core of section 12. That target is not a pass mark.
 
 ### 5.3 `internal/supervisor`
 
@@ -1860,7 +1872,7 @@ In the guest, a refused flow gets a 403 whose body is one line: `simstim: api.ex
 
 ## 10. Protocol changes
 
-Frame types and fields are append-only ([architecture, 4](../explanation/architecture.md#4-protocol)). The protocol's major version stays `1`. A peer ignores a type it does not know, and a new feature waits for its flag in the hello. This section lists every change to the protocol. A row may point to the subsection of section 14 that specifies it.
+Frame types and fields are append-only ([architecture, 4](../explanation/architecture.md#4-protocol)). The protocol's major version stays `1`. A peer ignores a type it does not know, and a new feature waits for its flag in the hello. A link between a supervisor and its guest init is the exception: both ends run one version, and a type that a link does not carry closes it (10.1). This section lists every change to the protocol. A row may point to the subsection of section 14 that specifies it.
 
 ### 10.1 New frame types
 
@@ -1870,18 +1882,23 @@ These four travel on a link. Between the client and the bridge, they carry only 
 | --- | --- | --- |
 | `TStreamOpen` | `0x50` | u32 stream ID (little-endian), then the JSON header: `{"kind":"egress", …}` |
 | `TStreamData` | `0x51` | u32 stream ID, then the bytes |
-| `TStreamClose` | `0x52` | u32 stream ID, then u8: 0 both ways, 1 the sender's writes only, 2 refused |
+| `TStreamClose` | `0x52` | u32 stream ID, then u8: 0 both ways, 1 the sender's writes only, 2 refused or reset (5.2, **Close**) |
 | `TStreamWindow` | `0x53` | u32 stream ID, then u32 bytes of new credit |
 
-The supervisor gives odd stream IDs and the guest gives even ones, so both can open at once. A link starts with `THello` both ways: role `supervisor` or `guest`, and the helper's version. The supervisor refuses a guest of another version (6.9).
+A frame on a link is at most 64 KiB: its type byte and payload, the cap of 5.3. So a data frame carries at most 65,531 bytes.
 
-**A hostile peer.** Each stream starts with `Window` bytes of credit each way (5.2), and only `TStreamWindow` adds more. A side closes the whole link when the other side breaks one of these rules:
+The supervisor gives odd stream IDs and the guest gives even ones, so both can open at once. Each side's IDs are consecutive: the supervisor's first is 1 and the guest's first is 2, and each next ID is the last plus 2. A link starts with `THello` both ways: role `supervisor` or `guest`, and the helper's version. A hello is at most 4 KiB. A side ends the link when the other side's hello has not come within `HelloTimeout`. The supervisor refuses a guest of another version (6.9).
 
-- an open whose ID has the wrong parity, or is not above the last ID that side opened
-- a frame for an ID that was never opened, or data after the sender's own close
+**A hostile peer.** Each stream starts with `Window` bytes of credit each way (5.2), and only `TStreamWindow` adds more. Credit counts from when its frame goes, not from when the receiver queues it. A side closes the whole link when the other side breaks one of these rules:
+
+- an open whose ID is not that side's last ID plus 2
+- a frame for an ID that was never opened: ID 0, an ID of the other side from its next ID on, or an ID of this side whose open it has not sent, even when this side has opened that stream. An open counts as sent once the writer hands its batch to the connection, because the other end can read the open and answer it before the write returns. For the same reason, a stream's slot is free once its close goes to the connection.
+- data after the sender's own close
 - data beyond the credit that the receiver gave, or credit that would pass the largest u32
+- a frame over 64 KiB, an empty frame, a stream frame too short for its fields, or a close code above 2
+- a frame of any type but the four above, after the hello. Both ends run one version (6.9), so neither needs to skip a type that it does not know. The supervisor parses only link frames (5.3).
 
-A frame for a stream that the receiver has closed is dropped, because the sender may not have seen the close yet. A header above `MaxHeader`, a kind that the side may not open, and an open past `MaxStreams` close only that stream, with code 2 (refused). The supervisor raises `sandbox_error` when it closes a link.
+A frame for a stream that the receiver has closed is dropped, because the sender may not have seen the close yet. IDs are consecutive, so an ID below the next one that is not open belongs to such a stream. A header above `MaxHeader`, a header that is not a JSON object with a `kind`, a kind that the side may not open, a second `ctl`, and an open past the opener's stream limit close only that stream, with code 2 (refused). When the refusals that wait reach the opener's stream limit, the receiver reads no more frames until its writer has sent them. A burst of refused opens never closes the link. A stream's end never gets weaker: after code 2, a later close with code 0 or 1 changes nothing, and the stream stays refused or reset. The supervisor raises `sandbox_error` when it closes a link.
 
 ### 10.2 Stream headers
 
@@ -1980,6 +1997,8 @@ New bridge ops. The bridge serves the ops of section 14 in a new `internal/host/
 | `cp.list`, `cp.read`, `checkpoints`, `rewind`, `image.save`, `image.keep`, `image.drop` | `cp`, `rewind`, `image.save` | The bridge passes these to the session's supervisor, from P5 | 10.4, 21.1 to 21.3 |
 
 **Ops that stream.** `exec`, `events.watch` and `port.reverse` go on after their answer, and so do the `sftp` and `port` channels of `ssh-proxy` (17.7). Each such op takes a bridge connection of its own, through the same SSH control connection. After the op's `TResponse`, that connection carries only the op's streams, in the frames and under the rules of 10.1. The host side opens each stream with an odd ID, and its header names the kind: `exec`, `rport`, `sftp`, `port` or `events`. The bridge passes the frames between the client and the supervisor unchanged, and serves `events` itself. When the client closes a stream, the supervisor closes the guest's stream, and kills an `exec` command.
+
+**A gap for the task that builds this (P1.9, P1.13 or P1.16, whichever comes first).** The `Opener` table of 5.2 does not fit these connections. Here the host side opens `rport` streams, which only the guest opens on a link, and the kind `events` is not in the table. `internal/link` takes `Options.Opener` for this. That task gives this connection its own table, and its own stream limits, and checks that the bridge passes the frames of a client of another version, which 10.1 does not allow on a link.
 
 The helper never runs a root step, so no bridge op does (14.4.1). The client builds the root step and runs it through `ssh -t … sudo` (14.4).
 
@@ -4012,6 +4031,14 @@ The review of this spec on 11 November 2026 raised these choices. The text alrea
      - (b) Refuse `.env` only, as 7.6 said before.
      - **Recommended:** (a), as 7.6 takes it. These files often hold secrets, a refused file costs the user one copy by hand, and by custom the three names left out hold no secret.
 
+### From the review of P1.2, 11 November 2026
+
+110. **How much may a guest make the supervisor hold through the link?** Each stream's window, and the number of streams, bound what a hostile guest can make the supervisor keep: the bytes that the guest sent and nobody read yet, and the bytes that wait for the guest's credit. The supervisor's budget is 24 MiB (20.10).
+     - (a) A window of 64 KiB, at most 96 streams that the guest opened and 32 that the supervisor opened, counted apart. At most 8 MiB received and 8 MiB queued: 16 MiB for each link, heap counted.
+     - (b) A window of 256 KiB, as yamux starts with, and 1,024 streams for both sides together: 256 MiB received and 256 MiB queued for each link.
+     - (c) A window of 128 KiB and 64 streams, 48 of them for the guest: also 16 MiB for each link, with fewer flows.
+     - **Recommended:** (a), a project choice, as 5.2 and 10.1 take it. It fits the supervisor's budget with room for its other parts. P1.2's benchmark found 64 KiB far above the 100 MiB/s on one core of section 12. 96 streams leave room for an agent's parallel downloads. P1.15's npm and pnpm fixtures check that they are enough. (b) lets one guest take a quarter of a 1 GiB session's memory, or the host. A guest that holds all its streams in (b) also stops the supervisor's own opens.
+
 ### Decided by the design
 
 The research raised four more questions, and the design answers them, so they are not open. No wall has a guest network card, and all egress goes through the egress process (7.2, decision [0029](decisions/0029-a-sandbox-per-session.md)). The client embeds the release manifest, so the runtime needs no rollback floor, key or expiry of its own (14.9.1, 14.11.2). The supervisor dials into the guest, so no trusted-side process listens where a guest can connect (G7, decision [0030](decisions/0030-local-sockets-do-not-listen.md)). The names of these files follow the roadmap.
@@ -5399,7 +5426,7 @@ Admission counts the size plus the reserve. The reserve is "the VMM overhead" of
 | The VMM, without guest RAM | Reserve | 16 MiB | Cloud Hypervisor's CI asserts 10 MiB or less for a 512 MiB guest. The other 6 MiB, for more vCPUs, four disks and vsock, is a target. |
 | Page tables for guest RAM, the VMM's and KVM's | Reserve | size / 256 | Computed: 8 bytes for each 4 KiB page, in two tables. cgroup v2 charges both, as `pagetables` and `sec_pagetables`. Huge pages make it much smaller. |
 | The sealed copies of the VMM and the kernel (20.5) | Reserve | 24 MiB | Their sizes, about 19 MiB at v54.0 and kernel 6.18. Counted on every host, so the reservation does not depend on the file system. |
-| The supervisor | Reserve | 24 MiB | Target |
+| The supervisor | Reserve | 24 MiB | Target. Of it, the link to the guest holds at most 16 MiB of streams when the guest is hostile, 8 MiB that the guest sent and 8 MiB that waits to be sent, and less than 1 MiB of its own buffers (5.2, [question 110](#15-open-questions)). An idle link holds far less. |
 | The egress process | Reserve | 40 MiB | Target. The research's estimate of 10 to 20 MiB is UNVERIFIED. |
 | Host page cache from disk reads | Reserve | 0 | Every disk has `direct=on` (20.3). cgroup v2 charges page cache to the unit that reads it. |
 | Margin: socket buffers, kernel stacks and short peaks | Reserve | 24 MiB | Target |
