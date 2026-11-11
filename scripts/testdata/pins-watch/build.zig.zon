@@ -1,0 +1,15 @@
+.{
+    .name = .shadow_vt,
+    .version = "0.1.0",
+    .minimum_zig_version = "0.16.0",
+    .dependencies = .{
+        .ghostty = .{
+            .url = "https://github.com/ghostty-org/ghostty/archive/0000000000000000000000000000000000000000.tar.gz",
+        },
+    },
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+    },
+}

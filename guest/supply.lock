@@ -1,0 +1,10 @@
+# Pins that no package ecosystem covers. scripts/pins-watch.py checks each one daily (spec 19.5).
+version = 1
+
+# [[pin]]
+# name = "cloud-hypervisor"                    # a short name, for messages and issues
+# repo = "cloud-hypervisor/cloud-hypervisor"   # owner/name on GitHub, for its advisories
+# ref = "v54.0"                                # the tag, for people
+# commit = "<40 hex>"                          # the commit of ref, which the build uses
+# watch = "github"                             # "github": advisories and ancestry. "osv": OSV only.
+# tag = "v{version}"                           # optional: the tag of a release, for advisories that name versions

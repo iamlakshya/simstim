@@ -4,7 +4,7 @@ Every change keeps the tests green, and every bug fix adds the test that would h
 
 | Command | What it runs | Where |
 | --- | --- | --- |
-| `just test` | Go unit tests with the race detector, plus offline tests of the public-readiness checker, of the end-to-end cleanup and of the end-to-end probe of the session sockets | Needs Python 3 |
+| `just test` | Go unit tests with the race detector, plus offline tests of the public-readiness checker, of the end-to-end cleanup, of the end-to-end probe of the session sockets and of the pins watch | Needs Python 3.11 or later |
 | `just cover` | The unit tests' coverage, which must stay at 70 % or more | Anywhere |
 | `go test ./internal/tui -run TestGolden -update` | Rewrites the golden screens after an intended change; review the diff | Anywhere |
 | `just fuzz` | Fuzzes the input filter, the frame reader, the holder's hook handler and the text cleaner for 30 s each (`just fuzz 5m` for longer) | Anywhere |
@@ -116,6 +116,8 @@ The screen model is the slowest step, and it is slower when the output scrolls. 
 ## Vulnerabilities and dead code
 
 `just vulncheck` runs govulncheck, which reports known vulnerabilities only in code the project calls, and deadcode, which fails on any function that neither the program nor a test reaches. CI runs both on every push.
+
+The pins watch also runs govulncheck each day, so a new advisory shows up without a push. It checks the pins that no package ecosystem covers, such as the shadow terminal's Ghostty commit ([releasing](releasing.md#advisories-for-pins-outside-package-ecosystems)). `scripts/test-pins-watch.py` runs its tests offline, from `scripts/pinswatch/tests/`, with API answers recorded in `scripts/testdata/pins-watch/`.
 
 ## Time to first agent
 
