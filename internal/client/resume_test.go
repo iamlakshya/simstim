@@ -5,6 +5,8 @@ import (
 	"errors"
 	"strings"
 	"testing"
+
+	"github.com/iamlakshya/simstim/internal/brand"
 )
 
 // A helper without the resume feature is too old, and so is one that
@@ -47,5 +49,8 @@ func TestResumeSecrets(t *testing.T) {
 	_, err = ResumeSecrets(h, s, s.Secrets)
 	if !errors.As(err, &ue) || strings.ContainsRune(ue.Msg+ue.Hint, 0x1b) || !strings.Contains(ue.Msg, `\x1b`) {
 		t.Fatalf("a name with escapes = %v", err)
+	}
+	if want := "Run " + brand.Name + " kill box/a1, then start a new session."; ue.Hint != want {
+		t.Errorf("hint = %q, want %q", ue.Hint, want)
 	}
 }

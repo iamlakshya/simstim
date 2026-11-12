@@ -1,0 +1,146 @@
+== atach box/auth-fix, colour false, exit 2
+Error: unknown command "atach".
+
+Did you mean "attach"?
+
+Try: <name> attach box/auth-fix
+== atach box/auth-fix, colour true, exit 2
+[1m[31mError:[0m unknown command "atach".
+
+Did you mean "attach"?
+
+[34mTry:[0m <name> attach box/auth-fix
+== d, colour false, exit 2
+Error: unknown command "d".
+
+Try: <name> --help
+== d, colour true, exit 2
+[1m[31mError:[0m unknown command "d".
+
+[34mTry:[0m <name> --help
+== xyz, colour false, exit 2
+Error: unknown command "xyz".
+
+Try: <name> --help
+== xyz, colour true, exit 2
+[1m[31mError:[0m unknown command "xyz".
+
+[34mTry:[0m <name> --help
+== host ad box, colour false, exit 2
+Error: host has no command "ad".
+
+Did you mean "add"?
+
+Try: <name> host add box
+== host ad box, colour true, exit 2
+[1m[31mError:[0m host has no command "ad".
+
+Did you mean "add"?
+
+[34mTry:[0m <name> host add box
+== attach, colour false, exit 2
+Error: attach needs <host>/<session> or -.
+
+Usage:   <name> attach <host>/<session> | -
+Example: <name> attach my-vps/auth-fix
+
+Try: <name> attach --help
+== attach, colour true, exit 2
+[1m[31mError:[0m attach needs <host>/<session> or -.
+
+Usage:   <name> attach <host>/<session> | -
+Example: <name> attach my-vps/auth-fix
+
+[34mTry:[0m <name> attach --help
+== rename a b c, colour false, exit 2
+Error: rename takes <host>/<session> <new-name>, and got 3 words.
+
+Try: <name> rename --help
+== rename a b c, colour true, exit 2
+[1m[31mError:[0m rename takes <host>/<session> <new-name>, and got 3 words.
+
+[34mTry:[0m <name> rename --help
+== new box --detatch, colour false, exit 2
+Error: new has no flag --detatch.
+
+Did you mean "--detach"?
+
+Try: <name> new box --detach
+== new box --detatch, colour true, exit 2
+[1m[31mError:[0m new has no flag --detatch.
+
+Did you mean "--detach"?
+
+[34mTry:[0m <name> new box --detach
+== new --dir, colour false, exit 2
+Error: --dir needs a value.
+
+Try: <name> new --help
+== new --dir, colour true, exit 2
+[1m[31mError:[0m --dir needs a value.
+
+[34mTry:[0m <name> new --help
+== debug start box/s --for soon, colour false, exit 2
+Error: --for "soon" is not a time, such as 30s or 5m.
+
+Try: <name> debug start --help
+== debug start box/s --for soon, colour true, exit 2
+[1m[31mError:[0m --for "soon" is not a time, such as 30s or 5m.
+
+[34mTry:[0m <name> debug start --help
+== not found, colour false, exit 3
+Error: no host named "bx".
+
+Try: <name> host add bx
+== not found, colour true, exit 3
+[1m[31mError:[0m no host named "bx".
+
+[34mTry:[0m <name> host add bx
+== needs an answer, colour false, exit 4
+Error: setup asks its questions on a terminal.
+
+Try: <name> setup --host <host> --yes
+== needs an answer, colour true, exit 4
+[1m[31mError:[0m setup asks its questions on a terminal.
+
+[34mTry:[0m <name> setup --host <host> --yes
+== refused, colour false, exit 5
+Error: devbox runs sessions at microvm or stronger, and process is weaker.
+
+Try: <name> new devbox --wall microvm
+== refused, colour true, exit 5
+[1m[31mError:[0m devbox runs sessions at microvm or stronger, and process is weaker.
+
+[34mTry:[0m <name> new devbox --wall microvm
+== cancelled, colour false, exit 130
+Error: cancelled; nothing was deleted.
+
+Try: <name> host destroy box
+== cancelled, colour true, exit 130
+[1m[31mError:[0m cancelled; nothing was deleted.
+
+[34mTry:[0m <name> host destroy box
+== a host error without a hint, colour false, exit 3
+Error: no session abc.
+
+Try: <name> --help
+== a host error without a hint, colour true, exit 3
+[1m[31mError:[0m no session abc.
+
+[34mTry:[0m <name> --help
+== closed, colour false, exit 1
+Error: the connection to the host closed.
+
+Try: Run the command again.
+== closed, colour true, exit 1
+[1m[31mError:[0m the connection to the host closed.
+
+[34mTry:[0m Run the command again.
+== not a user error, colour false, exit 1
+Error: read /home/me/hosts.toml: permission denied
+
+Try: <name> debug bundle (it writes one file to attach to a bug report)
+== not a user error, colour true, exit 1
+[1m[31mError:[0m read /home/me/hosts.toml: permission denied
+
+[34mTry:[0m <name> debug bundle (it writes one file to attach to a bug report)

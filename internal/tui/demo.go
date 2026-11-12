@@ -102,7 +102,7 @@ func (b *demoBackend) Dial(_ context.Context, h client.Host) (Conn, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if b.offline[h.Name] {
-		return nil, &client.UserError{Msg: "cannot reach " + h.Name + ": connection timed out", Hint: "ssh " + h.SSH}
+		return nil, &client.UserError{Msg: "cannot reach " + h.Name + ": connection timed out", Hint: "ssh " + h.SSH, Code: "unreachable"}
 	}
 	return &demoConn{be: b, host: h.Name, done: make(chan struct{})}, nil
 }

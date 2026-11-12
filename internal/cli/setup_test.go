@@ -2,8 +2,10 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -20,8 +22,8 @@ func TestAskSetup(t *testing.T) {
 	q := client.SetupQuestion{Repo: "/home/me/src/app", Script: "/home/me/src/app/.x/setup", Hash: "h"}
 	for in, want := range map[string]bool{"y\n": true, "yes\n": true, "\n": false, "n\n": false, "": false} {
 		var out bytes.Buffer
-		if got := askSetup(strings.NewReader(in), &out, "box", q, client.SetupNotTrusted); got != want {
-			t.Errorf("%q: %v, want %v", in, got, want)
+		if got, err := askSetup(context.Background(), strings.NewReader(in), &out, "box", q, client.SetupNotTrusted); got != want || err != nil {
+			t.Errorf("%q: %v %v, want %v", in, got, err, want)
 		}
 		s := out.String()
 		if !strings.Contains(s, "The repository /home/me/src/app on box has a setup script:\n\n    /home/me/src/app/.x/setup") ||
@@ -45,8 +47,8 @@ func TestAskSetupAfterAChange(t *testing.T) {
 		client.SetupUnchecked: "You trusted the setup script of /home/me/src/app on box before this version checked its content:\n\n    /home/me/src/app/.x/setup\n\n",
 	} {
 		var out bytes.Buffer
-		if !askSetup(strings.NewReader("y\n"), &out, "box", q, past) {
-			t.Fatal("yes read as no")
+		if yes, err := askSetup(context.Background(), strings.NewReader("y\n"), &out, "box", q, past); !yes || err != nil {
+			t.Fatalf("yes read as %v, %v", yes, err)
 		}
 		if s := out.String(); !strings.HasPrefix(s, want) {
 			t.Fatalf("prompt:\n%s", s)
@@ -170,11 +172,27 @@ func TestAskMakeFolder(t *testing.T) {
 	q := client.FolderQuestion{Folder: "/home/me/src/new-app"}
 	for in, want := range map[string]bool{"y\n": true, "yes\n": true, "\n": false, "n\n": false, "": false} {
 		var out bytes.Buffer
-		if got := askMakeFolder(strings.NewReader(in), &out, "box", q); got != want {
-			t.Errorf("%q: %v, want %v", in, got, want)
+		if got, err := askMakeFolder(context.Background(), strings.NewReader(in), &out, "box", q); got != want || err != nil {
+			t.Errorf("%q: %v %v, want %v", in, got, err, want)
 		}
 		if s := out.String(); s != "The folder /home/me/src/new-app does not exist on box.\nMake it? [y/N] " {
 			t.Fatalf("prompt:\n%s", s)
 		}
+	}
+}
+
+// The answer no to a question cancels: the error keeps the question's
+// words, hint and data, has the code of a cancel, and exits with 130.
+func TestAnsweredNoIsACancel(t *testing.T) {
+	q := &client.UserError{Msg: "the folder /x does not exist on this host", Hint: "Pass --mkdir.", Code: api.CodeNoFolder,
+		Kind: client.KindNeedsAnswer, Data: []byte(`{"folder":"/x"}`)}
+	var ue *client.UserError
+	if err := answeredNo(q); !errors.As(err, &ue) || ue.Kind != client.KindCancelled || ue.Code != "cancelled" ||
+		ue.Msg != q.Msg || ue.Hint != q.Hint || string(ue.Data) != `{"folder":"/x"}` || q.Kind != client.KindNeedsAnswer || q.Code != api.CodeNoFolder {
+		t.Errorf("answeredNo = %+v", err)
+	}
+	plain := errors.New("plain")
+	if !errors.Is(answeredNo(plain), plain) {
+		t.Error("a plain error changed")
 	}
 }

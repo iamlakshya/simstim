@@ -4,12 +4,8 @@
 package cli
 
 import (
-	"context"
-	"errors"
 	"fmt"
 	"os"
-	"os/signal"
-	"syscall"
 
 	"github.com/spf13/cobra"
 
@@ -18,28 +14,20 @@ import (
 	"github.com/iamlakshya/simstim/internal/version"
 )
 
-// Exit codes.
-const (
-	exitUser    = 1
-	exitHost    = 2
-	exitMissing = 3
-)
-
 // Main runs the client with the process's arguments and returns its exit
-// code.
+// code, which comes from the kind of the error (docs/reference/exit-codes.md).
 func Main() int {
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM)
+	ctx, stop := listen()
 	defer stop()
-	err := Root().ExecuteContext(ctx)
+	cmd, err := Root().ExecuteContextC(withLine(ctx, os.Args[1:]))
+	// ctx ends only at a signal.
+	signalled := ctx.Err() != nil
 	if err != nil {
 		client.DebugLog().Warn("the command failed", "err", err)
 	}
 	// The debug files are complete before the process ends.
 	client.StopDebug(os.Stderr)
-	if err != nil {
-		return printError(err)
-	}
-	return 0
+	return finish(os.Stderr, err, cmd, colourOn(os.Stderr), signalled)
 }
 
 // Root builds the command tree.
@@ -51,13 +39,23 @@ func Root() *cobra.Command {
 		Version:       fmt.Sprintf("%s (protocol %s)", version.Version, version.Protocol),
 		SilenceUsage:  true,
 		SilenceErrors: true,
-		Args:          cobra.NoArgs,
+		Args:          unknownCommand,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return runHome(cmd.Context())
 		},
 	}
 	root.AddCommand(setupCmd(), hostCmd(), newCmd(), lsCmd(), agentsCmd(), attachCmd(), resumeCmd(), flipCmd(), sendCmd(), killCmd(), renameCmd(), portsCmd(), forwardCmd(), pullCmd(), doctorCmd(), debugCmd(), configCmd(), demoCmd(), versionCmd())
 	addDebugFlags(root)
+	// Cobra adds these two itself when it runs, after guard would have
+	// looked: add them now, so that they get the same errors.
+	root.InitDefaultHelpCmd()
+	root.InitDefaultCompletionCmd()
+	for _, c := range root.Commands() {
+		if c.Name() == "help" {
+			c.Args = helpArgs
+		}
+	}
+	guard(root)
 	return root
 }
 
@@ -70,47 +68,4 @@ func versionCmd() *cobra.Command {
 			fmt.Printf("%s %s (protocol %s, host helper %s)\n", brand.Name, version.Version, version.Protocol, client.HelperVersion())
 		},
 	}
-}
-
-// printError prints an error with its suggested next step, and returns the exit code.
-func printError(err error) int {
-	var ue *client.UserError
-	red, blue, bold, reset := "\x1b[31m", "\x1b[34m", "\x1b[1m", "\x1b[0m"
-	if os.Getenv("NO_COLOR") != "" || !isTerminal(os.Stderr) {
-		red, blue, bold, reset = "", "", "", ""
-	}
-	// An error can hold what a host sent, whatever built it: the message
-	// and the step print cleaned, line by line.
-	if errors.As(err, &ue) {
-		fmt.Fprintf(os.Stderr, "%s%sError:%s %s\n", bold, red, reset, client.CleanBlock(ue.Msg))
-		if ue.Hint != "" {
-			fmt.Fprintf(os.Stderr, "\n%sTry:%s %s\n", blue, reset, client.CleanBlock(ue.Hint))
-		}
-		if ue.Hint != "" && containsAny(ue.Msg, "cannot reach", "connection") {
-			return exitHost
-		}
-		if containsAny(ue.Msg, "no session", "no host") {
-			return exitMissing
-		}
-		return exitUser
-	}
-	if errors.Is(err, client.ErrClosed) {
-		fmt.Fprintf(os.Stderr, "%s%sError:%s the connection to the host closed\n\n%sTry:%s run the command again\n", bold, red, reset, blue, reset)
-		return exitHost
-	}
-	fmt.Fprintf(os.Stderr, "%s%sError:%s %s\n", bold, red, reset, client.CleanBlock(err.Error()))
-	return exitUser
-}
-
-func containsAny(s string, subs ...string) bool {
-	for _, x := range subs {
-		if len(x) > 0 && len(s) >= len(x) {
-			for i := 0; i+len(x) <= len(s); i++ {
-				if s[i:i+len(x)] == x {
-					return true
-				}
-			}
-		}
-	}
-	return false
 }

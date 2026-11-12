@@ -168,7 +168,7 @@ func (e *Envd) KeepAlive() time.Duration { return 10 * time.Second }
 
 // ReachHint says how to check the sandbox.
 func (e *Envd) ReachHint() string {
-	return brand.Name + " host status " + e.Host + "   (is the sandbox running?)"
+	return brand.Name + " host status " + e.Host + " (says whether the sandbox runs)"
 }
 
 // Start runs remote with /bin/sh -c in the sandbox, with a tag of its own

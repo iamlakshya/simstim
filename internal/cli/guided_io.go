@@ -2,60 +2,32 @@ package cli
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
-	"os"
 	"strconv"
 	"strings"
-
-	"github.com/muesli/cancelreader"
 
 	"github.com/iamlakshya/simstim/internal/onboard"
 )
 
-// The guided setup's prompts read one line at a time, straight from the
-// terminal, with no reader left behind: an attached session needs every
-// byte of stdin. Ctrl+C ends the context, and a read waiting for a line
-// returns at once.
+// The guided setup's prompts read through answer: one line at a time,
+// straight from the terminal, with no reader left behind, since an
+// attached session needs every byte of stdin. Ctrl+C ends the context, and
+// a read waiting for a line returns at once, even one that cannot be
+// cancelled.
 
-// readLine reads one line from in. On a terminal the read can be cancelled
-// by ctx; other readers are read a byte at a time, so nothing is buffered
-// past the line.
+// readLine reads one line from in, without its spaces. A cancel, a signal
+// or the end of ctx, returns context.Canceled, also when it came with the
+// line. A closed input with nothing on the line is an error.
 func readLine(ctx context.Context, in io.Reader) (string, error) {
-	if err := ctx.Err(); err != nil {
-		return "", err
+	line, err := answer(ctx, in)
+	if err != nil {
+		return "", context.Canceled
 	}
-	r := in
-	if f, ok := in.(*os.File); ok && isTerminal(f) {
-		cr, err := cancelreader.NewReader(f)
-		if err == nil {
-			defer cr.Close()
-			stop := context.AfterFunc(ctx, func() { cr.Cancel() })
-			defer stop()
-			r = cr
-		}
+	if line == "" {
+		return "", fmt.Errorf("read the answer: %w", io.EOF)
 	}
-	var b strings.Builder
-	one := make([]byte, 1)
-	for {
-		n, err := r.Read(one)
-		if n == 1 {
-			if one[0] == '\n' {
-				return strings.TrimSpace(b.String()), nil
-			}
-			b.WriteByte(one[0])
-		}
-		if err != nil {
-			if ctx.Err() != nil || errors.Is(err, cancelreader.ErrCanceled) {
-				return "", context.Canceled
-			}
-			if errors.Is(err, io.EOF) && b.Len() > 0 {
-				return strings.TrimSpace(b.String()), nil
-			}
-			return "", fmt.Errorf("read the answer: %w", err)
-		}
-	}
+	return strings.TrimSpace(line), nil
 }
 
 // ask prints a question and reads the answer.

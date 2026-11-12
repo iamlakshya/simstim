@@ -237,7 +237,7 @@ func (d *newSession) submit(m *Model, attach bool) tea.Cmd {
 	if d.agent() == otherAgent {
 		c := strings.TrimSpace(d.command.value())
 		if c == "" {
-			d.field, d.err = 4, &client.UserError{Msg: "type the command to run", Hint: "For example: aider --model sonnet"}
+			d.field, d.err = 4, &client.UserError{Msg: "type the command to run", Hint: "Type a command, such as aider --model sonnet.", Code: "missing_value", Kind: client.KindUsage}
 			return nil
 		}
 		// exec replaces the shell, so the command is the session's process.

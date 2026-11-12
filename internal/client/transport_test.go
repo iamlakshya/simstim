@@ -55,7 +55,7 @@ func TestSSHTransportUnreachable(t *testing.T) {
 	if p.Stderr() == "" {
 		t.Fatal("stderr was not kept")
 	}
-	if got := s.ReachHint(); got != "ssh unreachable   (check that this works first)" {
+	if got := s.ReachHint(); got != "ssh unreachable (check that this works first)" {
 		t.Fatalf("hint = %q", got)
 	}
 }

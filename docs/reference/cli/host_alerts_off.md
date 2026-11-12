@@ -10,6 +10,12 @@ Turn alerts off on a host: remove its alerts file.
 simstim host alerts off <host>
 ```
 
+## Examples
+
+```sh
+simstim host alerts off my-vps
+```
+
 ## Flags from the parent command
 
 | Flag | What it does |

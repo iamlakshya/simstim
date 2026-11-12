@@ -61,7 +61,8 @@ func (c *Conn) callBundle(ctx context.Context, op string, args, out any) error {
 	if errors.As(err, &ue) && ue.Code == "unknown_op" {
 		return &UserError{
 			Msg:  fmt.Sprintf("the host helper on %s is too old for the debug bundle", c.Host.Name),
-			Hint: brand.Name + " host add " + c.Host.Name + "   (updates the helper)",
+			Hint: brand.Name + " host add " + c.Host.Name + " (updates the helper)",
+			Code: "helper_old",
 		}
 	}
 	return err
@@ -94,7 +95,7 @@ func SaveDebugFlight() (string, error) {
 	p, err := debugRuntime().Save("request")
 	if errors.Is(err, diag.ErrNoRecorder) {
 		return "", &UserError{Msg: "the flight recorder of this process is off: it runs while the runtime category is on",
-			Hint: "Start debug with every category, or with --debug=runtime."}
+			Hint: "Start debug with every category, or with --debug=runtime.", Code: "no_recorder"}
 	}
 	if err != nil {
 		return "", fmt.Errorf("save the flight recorder: %w", err)

@@ -10,6 +10,12 @@ Forget a host (its sessions keep running).
 simstim host rm <name>
 ```
 
+## Examples
+
+```sh
+simstim host rm my-vps
+```
+
 ## Flags from the parent command
 
 | Flag | What it does |

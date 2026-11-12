@@ -276,11 +276,11 @@ func (w *wizard) submit(m *Model) tea.Cmd {
 	w.err = nil
 	switch {
 	case target == "":
-		w.err = &client.UserError{Msg: "an SSH target is needed", Hint: "Type a Host from ~/.ssh/config, or user@host."}
+		w.err = &client.UserError{Msg: "an SSH target is needed", Hint: "Type a Host from ~/.ssh/config, or user@host.", Code: "missing_value", Kind: client.KindUsage}
 	case !client.ValidHostName(name):
-		w.err = &client.UserError{Msg: fmt.Sprintf("%q cannot name a host", name), Hint: "Use letters, digits, dots, dashes and underscores."}
+		w.err = &client.UserError{Msg: fmt.Sprintf("%q cannot name a host", name), Hint: "Use letters, digits, dots, dashes and underscores.", Code: "bad_name", Kind: client.KindUsage}
 	case m.hostByName(name) != nil:
-		w.err = &client.UserError{Msg: "there is already a host named " + name, Hint: "Pick another name, or remove " + name + " first."}
+		w.err = &client.UserError{Msg: "there is already a host named " + name, Hint: "Pick another name, or remove " + name + " first.", Code: "host_exists"}
 	}
 	if w.err != nil {
 		return nil
@@ -298,7 +298,7 @@ func (w *wizard) cliHint() string {
 	if w.host.SSHConfig != "" {
 		s += " --ssh-config " + w.host.SSHConfig
 	}
-	return s + "   (it can ask for passwords)"
+	return s + " (it can ask for passwords)"
 }
 
 // sshErr explains a failed SSH step. The wizard cannot show SSH's prompts,
@@ -306,7 +306,7 @@ func (w *wizard) cliHint() string {
 func (w *wizard) sshErr(err error) error {
 	msg, hint := errText(err)
 	if offline(err) || strings.Contains(msg, "Permission denied") || strings.Contains(msg, "Host key") || hint == "" {
-		return &client.UserError{Msg: msg, Hint: w.cliHint()}
+		return &client.UserError{Msg: msg, Hint: w.cliHint(), Code: "ssh_failed"}
 	}
 	return err
 }

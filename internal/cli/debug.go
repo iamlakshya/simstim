@@ -71,7 +71,7 @@ func startDebug(cmd *cobra.Command, args []string) error {
 		c, err := diag.ParseCats(val)
 		if err != nil {
 			return &client.UserError{Msg: "--debug: " + err.Error(),
-				Hint: "Pass --debug alone for every category, or a list in the = form, such as --debug=attach,net."}
+				Hint: "Pass --debug alone for every category, or a list in the = form, such as --debug=attach,net.", Code: "bad_value", Kind: client.KindUsage}
 		}
 		cats = c
 	}
@@ -103,7 +103,6 @@ func debugCmd() *cobra.Command {
 		Long: "The debug mode records what the client and the host helper do, into files on each side.\n" +
 			"Nothing listens and nothing is uploaded. --debug turns it on for one command. These commands work\n" +
 			"on a running session, from any terminal, with no restart. See docs/how-to/debug-a-session.md.",
-		Args: cobra.NoArgs,
 	}
 	cmd.AddCommand(debugStartCmd(), debugStopCmd(), debugSaveCmd(), debugProfileCmd(), debugBundleCmd())
 	return cmd
@@ -122,7 +121,7 @@ func debugStartCmd() *cobra.Command {
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if d < time.Second || d > api.DebugForMax {
-				return &client.UserError{Msg: "--for: " + d.String() + " is not between 1s and 24h", Hint: "Pass a time such as 30m or 8h."}
+				return &client.UserError{Msg: "--for: " + d.String() + " is not between 1s and 24h", Hint: "Pass a time such as 30m or 8h.", Code: "bad_value", Kind: client.KindUsage}
 			}
 			cats, err := hostCats(only)
 			if err != nil {
@@ -158,11 +157,11 @@ func hostCats(only string) (diag.Cats, error) {
 	}
 	cats, err := diag.ParseCats(only)
 	if err != nil {
-		return 0, &client.UserError{Msg: "--only: " + err.Error(), Hint: "Name attach, memory or runtime."}
+		return 0, &client.UserError{Msg: "--only: " + err.Error(), Hint: "Name attach, memory or runtime.", Code: "bad_value", Kind: client.KindUsage}
 	}
 	if other := cats &^ diag.HostCats; other != 0 {
 		return 0, &client.UserError{Msg: "--only: " + other.String() + " is not a category of the host",
-			Hint: "Name attach, memory or runtime. The client records net and launcher with --debug."}
+			Hint: "Name attach, memory or runtime, and record net and launcher on this computer with --debug.", Code: "bad_value", Kind: client.KindUsage}
 	}
 	return cats, nil
 }
@@ -179,9 +178,10 @@ func clockTime(t time.Time) string {
 
 func debugStopCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "stop <host>/<session>",
-		Short: "Turn off the debug of a session at once, and the host side of each traced attach",
-		Args:  cobra.ExactArgs(1),
+		Use:     "stop <host>/<session>",
+		Short:   "Turn off the debug of a session at once, and the host side of each traced attach",
+		Example: "  " + brand.Name + " debug stop my-vps/auth-fix",
+		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return withSession(cmd.Context(), args[0], func(ctx context.Context, h client.Host, conn *client.Conn, s *client.Session) error {
 				st, err := conn.DebugStop(ctx, s.ID)
@@ -233,14 +233,14 @@ func debugProfileCmd() *cobra.Command {
 			switch kind {
 			case diag.ProfileCPU, diag.ProfileHeap, diag.ProfileGoroutine:
 			default:
-				return &client.UserError{Msg: "no profile " + kind, Hint: "Name cpu, heap or goroutine."}
+				return &client.UserError{Msg: "no profile " + kind, Hint: "Name cpu, heap or goroutine.", Code: "bad_value", Kind: client.KindUsage}
 			}
 			if kind != diag.ProfileCPU && cmd.Flags().Changed("for") {
 				return &client.UserError{Msg: "--for is for a cpu profile only: a " + kind + " profile is taken at once",
-					Hint: "Leave out --for, or name cpu."}
+					Hint: "Leave out --for, or name cpu.", Code: "flags_conflict", Kind: client.KindUsage}
 			}
 			if d < time.Second || d > diag.ProfileMax {
-				return &client.UserError{Msg: "--for: " + d.String() + " is not between 1s and 5m", Hint: "Pass a time such as 30s or 2m."}
+				return &client.UserError{Msg: "--for: " + d.String() + " is not between 1s and 5m", Hint: "Pass a time such as 30s or 2m.", Code: "bad_value", Kind: client.KindUsage}
 			}
 			return withSession(cmd.Context(), args[0], func(ctx context.Context, h client.Host, conn *client.Conn, s *client.Session) error {
 				wait := 30 * time.Second

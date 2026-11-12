@@ -203,7 +203,7 @@ func badTrustFile() (warn *UserError, stuck bool) {
 			return stuckTrustFile(err), true
 		}
 		return &UserError{Msg: "could not read setup-trust.json, so each setup script asks again. The old file is now " + filepath.Base(bad) + ".",
-			Hint: "Compare the two files, then delete " + bad + "."}, false
+			Hint: "Compare the two files, then delete " + bad + ".", Code: "trust_file"}, false
 	}
 }
 
@@ -211,7 +211,7 @@ func badTrustFile() (warn *UserError, stuck bool) {
 // parse and could not move aside, because of err.
 func stuckTrustFile(err error) *UserError {
 	return &UserError{Msg: "could not read setup-trust.json, and could not move it aside: " + err.Error() + ". Each setup script asks again, and no answer is kept.",
-		Hint: "Fix or delete " + trustPath() + "."}
+		Hint: "Fix or delete " + trustPath() + ".", Code: "trust_file"}
 }
 
 func (f *trustFile) trusted(host string) map[string]trustEntry {
@@ -242,7 +242,7 @@ func trustLockError(what string, err error) *UserError {
 	if errors.Is(err, errLockBusy) {
 		hint = "Another client is reading or saving setup answers. Wait a moment, then try again."
 	}
-	return &UserError{Msg: "could not lock setup-trust.json, so " + what + ": " + err.Error(), Hint: hint}
+	return &UserError{Msg: "could not lock setup-trust.json, so " + what + ": " + err.Error(), Hint: hint, Code: "trust_lock"}
 }
 
 // LoadSetupAnswers returns the user's answers for a host. When the lock of

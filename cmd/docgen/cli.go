@@ -52,10 +52,16 @@ func cliPages(pages map[string][]byte) error {
 	return nil
 }
 
-// visible lists a command's subcommands that a user can run.
+// visible lists a command's subcommands that a user can run. It leaves out
+// Cobra's own completion command, which Root() adds so that it gets the
+// client's errors: its help is Cobra's, and the reference does not
+// document it yet (docs/contributing/cli-spec.md 14.5).
 func visible(c *cobra.Command) []*cobra.Command {
 	var out []*cobra.Command
 	for _, sub := range c.Commands() {
+		if !c.HasParent() && sub.Name() == "completion" {
+			continue
+		}
 		if sub.IsAvailableCommand() && !sub.IsAdditionalHelpTopicCommand() {
 			out = append(out, sub)
 		}

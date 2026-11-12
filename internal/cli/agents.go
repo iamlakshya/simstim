@@ -61,7 +61,10 @@ func agentsInstallCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			a, ok := agents.Find(args[0])
 			if !ok || a.Setup == nil || a.Setup.Install == "" {
-				return &client.UserError{Msg: fmt.Sprintf("there is no install command for %q", args[0]), Hint: brand.Name + " agents ls"}
+				return &client.UnknownNameError{
+					UserError: &client.UserError{Msg: fmt.Sprintf("there is no install command for %q", args[0]), Hint: brand.Name + " agents ls", Code: "agent_not_found", Kind: client.KindNotFound},
+					Name:      args[0], Known: installable(),
+				}
 			}
 			h, err := pickHost(hostName)
 			if err != nil {
@@ -75,10 +78,21 @@ func agentsInstallCmd() *cobra.Command {
 	return cmd
 }
 
+// installable lists the agents that agents install can install.
+func installable() []string {
+	all := agents.Installable()
+	out := make([]string, len(all))
+	for i, a := range all {
+		out[i] = a.Kind
+	}
+	return out
+}
+
 // pickHost is the named host, or the only one.
 func pickHost(name string) (client.Host, error) {
 	if name != "" {
-		return client.FindHost(name)
+		h, err := client.FindHost(name)
+		return h, fromFlag(err, "host")
 	}
 	hosts, err := client.LoadHosts()
 	if err != nil {
@@ -86,7 +100,7 @@ func pickHost(name string) (client.Host, error) {
 	}
 	switch len(hosts) {
 	case 0:
-		return client.Host{}, &client.UserError{Msg: "no hosts yet", Hint: brand.Name + " host add <name>"}
+		return client.Host{}, &client.UserError{Msg: "no hosts yet", Hint: brand.Name + " host add <name>", Code: "no_hosts"}
 	case 1:
 		return hosts[0], nil
 	}
@@ -94,7 +108,7 @@ func pickHost(name string) (client.Host, error) {
 	for i, h := range hosts {
 		names[i] = h.Name
 	}
-	return client.Host{}, &client.UserError{Msg: "which host? You have " + strings.Join(names, ", "), Hint: "Add --host <name>."}
+	return client.Host{}, &client.UserError{Msg: "which host? You have " + strings.Join(names, ", "), Hint: "Add --host <name>.", Code: "host_needed", Kind: client.KindUsage}
 }
 
 func installAgent(ctx context.Context, h client.Host, a agents.Agent, force bool) error {
@@ -157,7 +171,7 @@ func afterInstall(ctx context.Context, h client.Host, a agents.Agent) error {
 	c, ok := findCheck(checks, a.Kind)
 	if !ok || !c.Installed {
 		return &client.UserError{Msg: fmt.Sprintf("%s is still not installed on %s", a.Title, h.Name),
-			Hint: "Read the installer's output above, or see " + a.Setup.Source}
+			Hint: "See " + a.Setup.Source + ", or read the installer's output above.", Code: "install_failed"}
 	}
 	fmt.Println()
 	printAgentChecks(os.Stdout, h.Name, []api.AgentCheck{c})

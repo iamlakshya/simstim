@@ -67,7 +67,7 @@ func (c *Conn) needMakeFolder(a NewArgs) error {
 	if !a.MakeFolder || c.HasFeature("mkdir") {
 		return nil
 	}
-	return &UserError{Msg: "the helper on " + c.Host.Name + " is too old to make folders", Hint: brand.Name + " host add " + c.Host.Name + "   (updates the helper)"}
+	return &UserError{Msg: "the helper on " + c.Host.Name + " is too old to make folders", Hint: brand.Name + " host add " + c.Host.Name + " (updates the helper)", Code: "helper_old"}
 }
 
 // DeleteResult says what deleting a session did.

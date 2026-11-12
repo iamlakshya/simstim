@@ -87,6 +87,10 @@ func (g *guide) rentKey(r *onboard.RentPlan) error {
 			}
 			continue
 		}
+		if err := g.ctx.Err(); err != nil {
+			// A Ctrl+C that came with the yes: make no key.
+			return err
+		}
 		cmd := exec.CommandContext(g.ctx, onboard.KeyArgs[0], onboard.KeyArgs[1:]...)
 		cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
 		if err := cmd.Run(); err != nil {
@@ -137,8 +141,12 @@ func (g *guide) rentName(r *onboard.RentPlan) error {
 			return err
 		}
 		if ok {
+			if err := g.ctx.Err(); err != nil {
+				// A Ctrl+C that came with the yes: write nothing.
+				return err
+			}
 			if err := g.local.AddSSHHost(r.ConfigLines()); err != nil {
-				return &client.UserError{Msg: "could not add the lines to ~/.ssh/config: " + err.Error(), Hint: "Add them yourself, then run " + brand.Name + " setup --host " + r.Name}
+				return &client.UserError{Msg: "could not add the lines to ~/.ssh/config: " + err.Error(), Hint: "Add them yourself, then run " + brand.Name + " setup --host " + shellWord(r.Name) + ".", Code: "ssh_config_write"}
 			}
 			fmt.Fprintf(g.out, "  ✓ added %s to ~/.ssh/config\n", r.Name)
 			g.log.Add("added %s to ~/.ssh/config", r.Name)

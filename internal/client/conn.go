@@ -79,7 +79,7 @@ func Dial(ctx context.Context, h Host, interactive bool) (*Conn, error) {
 		return c, err
 	}
 	if _, ferr := FindHost(h.Name); ferr != nil {
-		return nil, &UserError{Msg: fmt.Sprintf("the %s helper is not installed on %s", brand.Name, h.Name), Hint: brand.Name + " host add " + h.Name}
+		return nil, &UserError{Msg: fmt.Sprintf("the %s helper is not installed on %s", brand.Name, h.Name), Hint: brand.Name + " host add " + h.Name, Code: "helper_missing"}
 	}
 	p, perr := Probe(ctx, r.t)
 	if perr != nil {
@@ -142,7 +142,7 @@ func dial(ctx context.Context, h Host, rt route) (*Conn, error) {
 		}
 		if err := hello.Check(version.Protocol); err != nil {
 			c.kill()
-			return nil, &UserError{Msg: CleanLine(err.Error()), Hint: brand.Name + " host add " + h.Name + "   (reinstalls the helper)"}
+			return nil, &UserError{Msg: CleanLine(err.Error()), Hint: brand.Name + " host add " + h.Name + " (reinstalls the helper)", Code: "protocol"}
 		}
 		c.Features = hello.Features
 	}
@@ -173,9 +173,9 @@ func (c *Conn) startError(err error) error {
 	}
 	msg = tailStderr(msg)
 	if errors.Is(waitErr, ErrUnreachable) {
-		return &UserError{Msg: fmt.Sprintf("cannot reach %s: %s", c.Host.Name, msg), Hint: c.hint}
+		return &UserError{Msg: fmt.Sprintf("cannot reach %s: %s", c.Host.Name, msg), Hint: c.hint, Code: "unreachable"}
 	}
-	return &UserError{Msg: fmt.Sprintf("the helper on %s did not start: %s", c.Host.Name, msg), Hint: brand.Name + " host doctor " + c.Host.Name}
+	return &UserError{Msg: fmt.Sprintf("the helper on %s did not start: %s", c.Host.Name, msg), Hint: brand.Name + " host doctor " + c.Host.Name, Code: "helper_failed"}
 }
 
 func (c *Conn) readLoop(r *bufio.Reader) {

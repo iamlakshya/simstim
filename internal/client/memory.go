@@ -12,7 +12,7 @@ const MemoryAuto = api.MemoryAuto
 func ParseMemoryFlag(v string) (int64, error) {
 	n, err := api.ParseMemoryMax(v)
 	if err != nil {
-		return 0, &UserError{Msg: "--memory-max: " + err.Error(), Hint: "Pass auto, or a size of 256M or more: " + api.MemorySizes + "."}
+		return 0, &UserError{Msg: "--memory-max: " + err.Error(), Hint: "Pass auto, or a size of 256M or more: " + api.MemorySizes + ".", Code: "bad_value", Kind: KindUsage}
 	}
 	if n == 0 {
 		return MemoryAuto, nil
@@ -26,7 +26,7 @@ func SettingsMemoryMax(s Settings) (int64, error) {
 	n, err := api.ParseMemoryMax(s.Sessions.MemoryMax)
 	if err != nil {
 		return 0, &UserError{Msg: "memory_max in config.toml: " + err.Error(),
-			Hint: `Set [sessions] memory_max to "auto", or to a size of 256M or more (` + api.MemorySizes + "), in " + settingsPath() + "."}
+			Hint: `Set [sessions] memory_max to "auto", or to a size of 256M or more (` + api.MemorySizes + "), in " + settingsPath() + ".", Code: "bad_config", Kind: KindUsage}
 	}
 	return n, nil
 }

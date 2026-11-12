@@ -139,7 +139,7 @@ func (System) SSHWorks(ctx context.Context, target string) error {
 		}
 		dir := filepath.Join(client.ConfigDir(), "ssh")
 		return &client.UserError{Msg: "cannot write the SSH config that ssh needs: " + err.Error(),
-			Hint: "Make " + dir + " a folder that you can write to, or set XDG_CONFIG_HOME to one."}
+			Hint: "Make " + dir + " a folder that you can write to, or set XDG_CONFIG_HOME to one.", Code: "ssh_config_write"}
 	}
 	ctx, cancel := context.WithTimeout(ctx, 25*time.Second)
 	defer cancel()
@@ -154,11 +154,11 @@ func (System) SSHWorks(ctx context.Context, target string) error {
 		if msg == "" {
 			msg = err.Error()
 		}
-		hint := "ssh " + target + "   (run it yourself to see what it asks)"
+		hint := client.SSHCommand(target) + " (run it yourself to see what it asks)"
 		if strings.Contains(msg, "Host key verification failed") {
-			hint = "ssh " + target + "   (once, by hand: check the key's fingerprint, then answer yes)"
+			hint = client.SSHCommand(target) + " (once, by hand: check the key's fingerprint, then answer yes)"
 		}
-		return &client.UserError{Msg: fmt.Sprintf("cannot log in to %s with ssh yet: %s", target, msg), Hint: hint}
+		return &client.UserError{Msg: fmt.Sprintf("cannot log in to %s with ssh yet: %s", target, msg), Hint: hint, Code: "unreachable"}
 	}
 	return nil
 }
@@ -171,7 +171,7 @@ func (s System) Create(ctx context.Context, kind, name string, out io.Writer) (c
 			return Create(ctx, p, provider.Request{Name: name, Out: out})
 		}
 	}
-	return client.Host{}, &client.UserError{Msg: fmt.Sprintf("this build cannot make %s hosts", kind), Hint: "Pick another place."}
+	return client.Host{}, &client.UserError{Msg: fmt.Sprintf("this build cannot make %s hosts", kind), Hint: "Pick another place.", Code: "unknown_provider"}
 }
 
 // SetIdle sets up idle stop (see SetIdle).

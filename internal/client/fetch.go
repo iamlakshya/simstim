@@ -23,13 +23,15 @@ func EnsureHelpers(ctx context.Context) error {
 	if base == "" {
 		return &UserError{
 			Msg:  "this build has no host helpers, and no release to fetch them from",
-			Hint: "install a release (see the install guide), or build from source with `just build`",
+			Hint: "Install a release (see the install guide), or build from source with `just build`.",
+			Code: "no_helper",
 		}
 	}
 	if err := helpers.Fetch(ctx, version.Version, base, CacheDir()); err != nil {
 		return &UserError{
 			Msg:  "could not fetch the host helpers for " + version.Version + ": " + err.Error(),
-			Hint: "check your network, or install a release with the installer",
+			Hint: "Check your network, or install a release with the installer.",
+			Code: "fetch_failed",
 		}
 	}
 	return nil

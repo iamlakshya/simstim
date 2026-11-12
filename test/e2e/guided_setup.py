@@ -64,11 +64,11 @@ def with_flags(c, envx):
 
 def refusals(c, envx):
     r = subprocess.run([c.cli, "setup"], env=envx, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=60)
-    c.ok(r.returncode == 1 and "Try:" in r.stderr and "--yes" in r.stderr,
-         "guided: with no terminal and no flags, setup refuses and says which flags to pass")
+    c.ok(r.returncode == 4 and "Try:" in r.stderr and "--yes" in r.stderr,
+         "guided: with no terminal and no flags, setup refuses with exit code 4 and says which flags to pass")
     r = subprocess.run([c.cli, "setup", "--host", c.HOST, "--agents", "no-such-agent", "--yes"],
                        env=envx, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=60)
-    c.ok(r.returncode == 1 and 'no agent called "no-such-agent"' in r.stderr and "Connecting" not in r.stdout,
+    c.ok(r.returncode == 3 and 'no agent called "no-such-agent"' in r.stderr and "Connecting" not in r.stdout,
          "guided: an unknown agent is refused before anything runs")
 
 
@@ -77,5 +77,5 @@ def stop(c, envx):
     asked = t.wait_for(rb"Pick one \[1-\d\]: ", 60)
     t.send(b"\x03")  # Ctrl+C, as the terminal sends it
     code = t.exit_code(30)
-    c.ok(asked and code == 1 and b"setup stopped; nothing was changed" in t.buf,
+    c.ok(asked and code == 130 and b"setup stopped; nothing was changed" in t.buf,
          "guided: Ctrl+C at the first question stops, and says nothing was changed (exit %s)" % code)

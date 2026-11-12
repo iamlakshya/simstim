@@ -27,15 +27,15 @@ func PowersOffWhenIdle(p string) bool { return p == Lima }
 // made.
 func CheckCreate(p provider.Provider, req provider.Request) error {
 	if !client.ValidHostName(req.Name) {
-		return &client.UserError{Msg: fmt.Sprintf("%q cannot name a host", req.Name), Hint: "Use letters, digits, dots, dashes and underscores."}
+		return &client.UserError{Msg: fmt.Sprintf("%q cannot name a host", req.Name), Hint: "Use letters, digits, dots, dashes and underscores.", Code: "bad_name", Kind: client.KindUsage}
 	}
 	if req.IdleStop != "" && req.IdleStop != "never" {
 		if d, err := time.ParseDuration(req.IdleStop); err != nil || d < time.Minute {
-			return &client.UserError{Msg: fmt.Sprintf("%q is not an idle time", req.IdleStop), Hint: "Use a duration of a minute or more, such as 30m or 2h, or never."}
+			return &client.UserError{Msg: fmt.Sprintf("%q is not an idle time", req.IdleStop), Hint: "Use a duration of a minute or more, such as 30m or 2h, or never.", Code: "bad_value", Kind: client.KindUsage}
 		}
 	}
 	if _, err := client.FindHost(req.Name); err == nil {
-		return &client.UserError{Msg: "there is already a host called " + req.Name, Hint: brand.Name + " host create " + p.Name() + " <another-name>"}
+		return &client.UserError{Msg: "there is already a host called " + req.Name, Hint: brand.Name + " host create " + p.Name() + " <another-name>", Code: "host_exists"}
 	}
 	return nil
 }
@@ -70,7 +70,7 @@ func Create(ctx context.Context, p provider.Provider, req provider.Request) (cli
 	if ctx.Err() == nil {
 		return client.Host{}, err
 	}
-	stopped := &client.UserError{Msg: fmt.Sprintf("stopped while making %s; nothing was saved", req.Name), Hint: brand.Name + " setup"}
+	stopped := &client.UserError{Msg: fmt.Sprintf("stopped while making %s; nothing was saved", req.Name), Hint: brand.Name + " setup", Code: "cancelled", Kind: client.KindCancelled}
 	switch {
 	case fresh:
 		// A fresh context: the user's has ended, and the clean-up must still run.

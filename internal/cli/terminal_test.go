@@ -3,8 +3,6 @@ package cli
 import (
 	"bytes"
 	"context"
-	"errors"
-	"io"
 	"os"
 	"strings"
 	"testing"
@@ -116,7 +114,7 @@ func TestKeyTester(t *testing.T) {
 	term.Type("\x1b[200~hi\x1b[201~")
 	term.WaitFor("← a paste")
 	term.Type("q")
-	time.Sleep(50 * time.Millisecond)
+	term.WaitFor(`"q"`)
 	term.Type("q")
 	if err := wait(t, done); err != nil {
 		t.Fatal(err)
@@ -163,57 +161,4 @@ func TestTerminalCommandsNeedATerminal(t *testing.T) {
 	defer func() { os.Stdin = old }()
 	fails(t, "needs a terminal", "doctor", "keys")
 	fails(t, "needs a terminal", "doctor", "terminal")
-}
-
-func TestPrintError(t *testing.T) {
-	for _, c := range []struct {
-		err  error
-		code int
-		want string
-	}{
-		{&client.UserError{Msg: "cannot reach box: refused", Hint: "ssh box"}, exitHost, "Error: cannot reach box: refused\n\nTry: ssh box\n"},
-		{&client.UserError{Msg: `no session "x" on box`, Hint: "ls"}, exitMissing, "Error: no session"},
-		{&client.UserError{Msg: "bad name"}, exitUser, "Error: bad name\n"},
-		{client.ErrClosed, exitHost, "Error: the connection to the host closed\n\nTry: run the command again\n"},
-		{errors.New("plain"), exitUser, "Error: plain\n"},
-	} {
-		got, code := captureStderr(t, func() int { return printError(c.err) })
-		if code != c.code || !strings.HasPrefix(got, c.want) {
-			t.Errorf("printError(%v) = %d %q, want %d %q", c.err, code, got, c.code, c.want)
-		}
-	}
-	if containsAny("abc", "", "x") || !containsAny("abc", "bc") {
-		t.Error("containsAny")
-	}
-}
-
-func captureStderr(t *testing.T, fn func() int) (string, int) {
-	t.Helper()
-	t.Setenv("NO_COLOR", "1")
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	old := os.Stderr
-	os.Stderr = w
-	code := fn()
-	os.Stderr = old
-	_ = w.Close()
-	b, _ := io.ReadAll(r)
-	return string(b), code
-}
-
-func TestMainRunsTheCommandLine(t *testing.T) {
-	newTestHost(t)
-	old := os.Args
-	defer func() { os.Args = old }()
-	os.Args = []string{"client", "host", "rm", "nowhere"}
-	got, code := captureStderr(t, Main)
-	if code != exitMissing || !strings.Contains(got, `no host named "nowhere"`) {
-		t.Errorf("Main = %d %q", code, got)
-	}
-	os.Args = []string{"client", "config", "path"}
-	if _, code := captureStderr(t, Main); code != 0 {
-		t.Errorf("Main config path = %d", code)
-	}
 }

@@ -52,7 +52,7 @@ func StartDebug(o DebugOptions) (string, error) {
 	now := time.Now()
 	dir := DebugDir()
 	if err := diag.EnsureDir(dir); err != nil {
-		return "", &UserError{Msg: "cannot make the debug folder: " + err.Error(), Hint: "Check that you can write " + dir + "."}
+		return "", &UserError{Msg: "cannot make the debug folder: " + err.Error(), Hint: "Check that you can write " + dir + ".", Code: "debug_file"}
 	}
 	prefix := fmt.Sprintf("client-%s-%d", diag.TimeName(now), os.Getpid())
 	path := o.File
@@ -69,7 +69,7 @@ func StartDebug(o DebugOptions) (string, error) {
 	})
 	if err != nil {
 		return "", &UserError{Msg: "cannot write the debug file: " + err.Error(),
-			Hint: "Pass --debug-file with a file you can write, or unset " + diag.EnvFile + "."}
+			Hint: "Pass --debug-file with a file you can write, or unset " + diag.EnvFile + ".", Code: "debug_file"}
 	}
 	if filepath.Dir(path) != dir {
 		noteOutside(dir, path)

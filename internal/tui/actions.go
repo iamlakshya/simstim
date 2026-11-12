@@ -30,9 +30,9 @@ func (m *Model) op(h *hostConn, ok string, fn func(context.Context, Conn) error)
 
 func offlineErr(h *hostConn) error {
 	if h.status == stConnecting {
-		return &client.UserError{Msg: "still connecting to " + h.name(), Hint: "Wait a moment, then try again."}
+		return &client.UserError{Msg: "still connecting to " + h.name(), Hint: "Wait a moment, then try again.", Code: "connecting"}
 	}
-	return &client.UserError{Msg: h.name() + " is offline", Hint: fmt.Sprintf("%s host test %s", brand.Name, h.name())}
+	return &client.UserError{Msg: h.name() + " is offline", Hint: fmt.Sprintf("%s host test %s", brand.Name, h.name()), Code: "offline"}
 }
 
 // newSessionHost picks the host for "session: new": the host in play, or

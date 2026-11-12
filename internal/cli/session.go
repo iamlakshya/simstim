@@ -48,7 +48,7 @@ func newCmd() *cobra.Command {
 				return err
 			}
 			if setup && noSetup {
-				return &client.UserError{Msg: "--setup and --no-setup cannot go together", Hint: "Pass one of them."}
+				return &client.UserError{Msg: "--setup and --no-setup cannot go together", Hint: "Pass one of them.", Code: "flags_conflict", Kind: client.KindUsage}
 			}
 			var memMax int64
 			if cmd.Flags().Changed("memory-max") {
@@ -115,7 +115,7 @@ func attach(ctx context.Context, h client.Host, id, name string) error {
 // session ended (rather than the user detaching).
 func attachEnded(ctx context.Context, h client.Host, id, name string) (bool, error) {
 	if !isTerminal(os.Stdin) || !isTerminal(os.Stdout) {
-		return false, &client.UserError{Msg: "attach needs a terminal", Hint: "Run it from a terminal, not a pipe."}
+		return false, &client.UserError{Msg: "attach needs a terminal", Hint: "Run it from a terminal, not a pipe.", Code: "no_terminal"}
 	}
 	tui.RememberLast(h.Name, id, name)
 	name = client.CleanLine(name) // the host's own text, from here only printed
@@ -152,9 +152,9 @@ func resolve(ctx context.Context, conn *client.Conn, ref string) (*client.Sessio
 	case 1:
 		return &byName[0], nil
 	case 0:
-		return nil, &client.UserError{Msg: fmt.Sprintf("no session %q on %s", ref, conn.Host.Name), Hint: brand.Name + " ls --host " + conn.Host.Name}
+		return nil, &client.UserError{Msg: fmt.Sprintf("no session %q on %s", ref, conn.Host.Name), Hint: brand.Name + " ls --host " + conn.Host.Name, Code: "session_not_found", Kind: client.KindNotFound}
 	default:
-		return nil, &client.UserError{Msg: fmt.Sprintf("%d sessions are named %q on %s", len(byName), ref, conn.Host.Name), Hint: "Use the session ID from `" + brand.Name + " ls`."}
+		return nil, &client.UserError{Msg: fmt.Sprintf("%d sessions are named %q on %s", len(byName), ref, conn.Host.Name), Hint: "Use the session ID from `" + brand.Name + " ls`.", Code: "session_ambiguous", Kind: client.KindUsage}
 	}
 }
 
@@ -186,13 +186,15 @@ func attachCmd() *cobra.Command {
 		Use:     "attach <host>/<session> | -",
 		Aliases: []string{"a"},
 		Short:   "Attach to a session (detach with Ctrl+\\); - is the last one",
-		Args:    cobra.ExactArgs(1),
+		Example: "  " + brand.Name + " attach my-vps/auth-fix\n" +
+			"  " + brand.Name + " attach -   # the last session you attached to",
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			target := args[0]
 			if target == "-" {
 				host, id, ok := tui.LastSession()
 				if !ok {
-					return &client.UserError{Msg: "no session has been attached yet", Hint: brand.Name + " attach <host>/<session>, or pick one in " + brand.Name}
+					return &client.UserError{Msg: "no session has been attached yet", Hint: "Attach to a session by its name, or run " + brand.Name + " and pick one.", Code: "no_last_session", Kind: client.KindNotFound}
 				}
 				target = host + "/" + id
 			}
@@ -218,6 +220,7 @@ func killCmd() *cobra.Command {
 		Use:     "kill <host>/<session>",
 		Aliases: []string{"rm", "delete"},
 		Short:   "Stop a session and remove it",
+		Example: "  " + brand.Name + " kill my-vps/auth-fix",
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return withSession(cmd.Context(), args[0], func(ctx context.Context, h client.Host, conn *client.Conn, s *client.Session) error {
@@ -243,9 +246,10 @@ func killCmd() *cobra.Command {
 
 func renameCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "rename <host>/<session> <new-name>",
-		Short: "Rename a session",
-		Args:  cobra.ExactArgs(2),
+		Use:     "rename <host>/<session> <new-name>",
+		Short:   "Rename a session",
+		Example: "  " + brand.Name + " rename my-vps/auth-fix login-fix",
+		Args:    cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return withSession(cmd.Context(), args[0], func(ctx context.Context, h client.Host, conn *client.Conn, s *client.Session) error {
 				if err := conn.RenameSession(ctx, s.ID, args[1]); err != nil {
@@ -339,12 +343,12 @@ func lsCmd() *cobra.Command {
 			if hostName != "" {
 				h, err := client.FindHost(hostName)
 				if err != nil {
-					return err
+					return fromFlag(err, "host")
 				}
 				hosts = []client.Host{h}
 			}
 			if len(hosts) == 0 {
-				return &client.UserError{Msg: "no hosts yet", Hint: brand.Name + " host add <name>"}
+				return &client.UserError{Msg: "no hosts yet", Hint: brand.Name + " host add <name>", Code: "no_hosts"}
 			}
 			results := listAll(cmd.Context(), hosts)
 			if asJSON {

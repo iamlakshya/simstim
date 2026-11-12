@@ -7,6 +7,7 @@ import (
 
 	"github.com/iamlakshya/simstim/internal/agents"
 	"github.com/iamlakshya/simstim/internal/brand"
+	"github.com/iamlakshya/simstim/internal/cli"
 	"github.com/iamlakshya/simstim/internal/client"
 	"github.com/iamlakshya/simstim/internal/tui"
 )
@@ -141,6 +142,23 @@ func installTable(b *strings.Builder) {
 	}
 }
 
+// exitCodesPage lists the exit codes, from the table that the client uses.
+func exitCodesPage() []byte {
+	var b strings.Builder
+	b.WriteString(header("Exit codes", "5"))
+	b.WriteString("Every command exits with one of these codes. The code comes from the kind of the error, never from its message, so a script can rely on it. The error itself goes to stderr: `Error:` and the message, then one `Try:` line with the next step.\n\n")
+	b.WriteString("| Code | Kind | Meaning | Examples |\n| --- | --- | --- | --- |\n")
+	for _, e := range cli.ExitCodes() {
+		kind := ""
+		if e.Code != 0 {
+			kind = "`" + e.Kind.String() + "`"
+		}
+		fmt.Fprintf(&b, "| %d | %s | %s | %s |\n", e.Code, kind, e.Meaning, e.Examples)
+	}
+	b.WriteString("\nThe shell reports a process that a signal ended as 128 plus the signal's number, so Ctrl+C outside an attach gives 130. The client gives 130 for SIGTERM too, because both are a cancel.\n")
+	return []byte(b.String())
+}
+
 // indexPage is the reference section's home.
 func indexPage() []byte {
 	var b strings.Builder
@@ -150,6 +168,7 @@ func indexPage() []byte {
 	b.WriteString("- [Configuration](config.md): `config.toml` and `hosts.toml`.\n")
 	b.WriteString("- [Keys](keymap.md): the launcher's commands and keys.\n")
 	b.WriteString("- [Agents](agents.md): the agent table.\n")
+	b.WriteString("- [Exit codes](exit-codes.md): what each exit code means.\n")
 	return []byte(b.String())
 }
 

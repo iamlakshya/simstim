@@ -12,6 +12,13 @@ simstim host doctor <name> [flags]
 
 Checks a host: systemd and linger, the restore unit, terminfo, memory caps, swap, the session sockets and the agents. It warns when the host has less memory than an agent's docs ask for, and when a program in one session could drive another through its socket. For a VM made by host create lima, it also checks, on this computer, that the VM cannot reach services on this computer's loopback address. With `--fix` it offers to fix linger, the restore unit, Ghostty's terminfo, a broken current helper link, stale session sockets and old helper versions. Each fix is shown and explained before it runs; one that needs root is printed for you.
 
+## Examples
+
+```sh
+simstim host doctor my-vps
+simstim host doctor my-vps --fix
+```
+
 ## Flags
 
 | Flag | What it does |

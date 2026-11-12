@@ -10,6 +10,13 @@ Set how long a created host may idle before it stops, for example 30m, or never.
 simstim host idle <name> <duration|never>
 ```
 
+## Examples
+
+```sh
+simstim host idle lima 30m
+simstim host idle lima never
+```
+
 ## Flags from the parent command
 
 | Flag | What it does |

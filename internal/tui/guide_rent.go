@@ -50,7 +50,7 @@ func (g *guide) checkUser(m *Model) tea.Cmd {
 		u = onboard.RentUser
 	}
 	if !onboard.ValidUser(u) {
-		g.err = &client.UserError{Msg: fmt.Sprintf("%q cannot name a user", u), Hint: "Use lower-case letters, digits, dashes and underscores."}
+		g.err = &client.UserError{Msg: fmt.Sprintf("%q cannot name a user", u), Hint: "Use lower-case letters, digits, dashes and underscores.", Code: "bad_name", Kind: client.KindUsage}
 		return nil
 	}
 	g.plan.User = u
@@ -109,10 +109,10 @@ func (g *guide) nameServer(m *Model) tea.Cmd {
 	}
 	switch {
 	case !client.ValidHostName(name):
-		g.err = &client.UserError{Msg: fmt.Sprintf("%q cannot name a host", name), Hint: "Use letters, digits, dots, dashes and underscores."}
+		g.err = &client.UserError{Msg: fmt.Sprintf("%q cannot name a host", name), Hint: "Use letters, digits, dots, dashes and underscores.", Code: "bad_name", Kind: client.KindUsage}
 		return nil
 	case m.hostByName(name) != nil:
-		g.err = &client.UserError{Msg: "there is already a host named " + name, Hint: "Pick another name."}
+		g.err = &client.UserError{Msg: "there is already a host named " + name, Hint: "Pick another name.", Code: "host_exists"}
 		return nil
 	}
 	g.plan.Name, g.err = name, nil
@@ -125,7 +125,7 @@ func (g *guide) configKey(m *Model, ks string) tea.Cmd {
 	case ks == "y" && !g.present && !g.asked:
 		local, lines := m.be.Local(), g.plan.ConfigLines()
 		if err := local.AddSSHHost(lines); err != nil {
-			g.err = &client.UserError{Msg: "could not add the lines to ~/.ssh/config: " + err.Error(), Hint: "Add them yourself, then press enter."}
+			g.err = &client.UserError{Msg: "could not add the lines to ~/.ssh/config: " + err.Error(), Hint: "Add them yourself, then press enter.", Code: "ssh_config_write"}
 			g.asked = true
 			return nil
 		}

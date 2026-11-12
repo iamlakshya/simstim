@@ -83,12 +83,12 @@ func checkVersion(ctx context.Context) error {
 		return err
 	}
 	if err != nil {
-		return &client.UserError{Msg: fmt.Sprintf("could not read the version of limactl from %q", client.CleanLine(failure(out, err))), Hint: "limactl --version"}
+		return &client.UserError{Msg: fmt.Sprintf("could not read the version of limactl from %q", client.CleanLine(failure(out, err))), Hint: "limactl --version", Code: "lima_version"}
 	}
 	text := strings.TrimSpace(string(out))
 	v, err := parseLimaVersion(text)
 	if err != nil {
-		return &client.UserError{Msg: fmt.Sprintf("could not read the version of limactl from %q", client.CleanLine(text)), Hint: "limactl --version"}
+		return &client.UserError{Msg: fmt.Sprintf("could not read the version of limactl from %q", client.CleanLine(text)), Hint: "limactl --version", Code: "lima_version"}
 	}
 	if v.before(minVersion) {
 		return tooOld(v.text, goos)
@@ -106,6 +106,7 @@ func tooOld(version, system string) error {
 	return &client.UserError{
 		Msg:  fmt.Sprintf("Lima %s is too old for host create: %s", version, why),
 		Hint: "Update Lima (https://lima-vm.io/docs/installation/), then run this again.",
+		Code: "lima_version",
 	}
 }
 

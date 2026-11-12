@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/iamlakshya/simstim/internal/brand"
 	"github.com/iamlakshya/simstim/internal/client"
 	"github.com/iamlakshya/simstim/internal/host"
 	"github.com/iamlakshya/simstim/internal/host/hosttest"
@@ -170,6 +171,11 @@ func TestAttachNeedsATerminal(t *testing.T) {
 	fails(t, "attach needs a terminal", "attach", "box/"+id)
 	fails(t, "attach needs a terminal", "new", "box", "--", "sleep", "60")
 	fails(t, "no session has been attached yet", "attach", "-")
+	_, err := run(t, "attach", "-")
+	var ue *client.UserError
+	if want := "Attach to a session by its name, or run " + brand.Name + " and pick one."; !errors.As(err, &ue) || ue.Hint != want {
+		t.Errorf("attach - = %v, want the hint %q", err, want)
+	}
 	// A session whose holder is gone cannot be attached to: a resume brings
 	// it back first.
 	lost := newSession(t, "lost", "sleep", "60")

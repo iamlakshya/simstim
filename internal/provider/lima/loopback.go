@@ -164,7 +164,7 @@ func checkClosed(ctx context.Context, inst string) error {
 		return discard(ctx, inst, fmt.Sprintf("could not read the new VM %s from limactl (%v)", inst, err), "run this again")
 	}
 	if in == nil {
-		return &client.UserError{Msg: "limactl did not list the new VM " + inst, Hint: "limactl list"}
+		return &client.UserError{Msg: "limactl did not list the new VM " + inst, Hint: "limactl list", Code: "lima_vm"}
 	}
 	if closed(in) {
 		// Lima's vz driver refuses hostLoopback false with a user-v2

@@ -20,8 +20,8 @@ func TestParseRepoInfo(t *testing.T) {
 		t.Fatalf("%+v %v", r, err)
 	}
 	for _, c := range []struct{ out, msg, hint string }{
-		{`{"error":{"code":"not_a_repo","message":"~ is not inside a git repository"}}`, "~/src/app on box is not in a git repository", "pull works for sessions"},
-		{`{"error":{"code":"no_git","message":"git is not installed on this host"}}`, "git is not installed on box", "install git on box"},
+		{`{"error":{"code":"not_a_repo","message":"~ is not inside a git repository"}}`, "~/src/app on box is not in a git repository", "Start the session in a repository"},
+		{`{"error":{"code":"no_git","message":"git is not installed on this host"}}`, "git is not installed on box", "Install git on box"},
 		{`{"error":{"code":"git_scope","message":"could not start git in a scope on this host: Failed to connect to bus"}}`, "on box: Failed to connect to bus", brand.Name + " host doctor box"},
 		{`{"error":{"code":"git","message":"git status: fatal: bad index"}}`, "bad index", "git status on box"},
 		{"fatal: not a git repository\n", "could not read what box said", "host add box"},

@@ -10,6 +10,12 @@ Check that a host answers, and how fast.
 simstim host test <name>
 ```
 
+## Examples
+
+```sh
+simstim host test my-vps
+```
+
 ## Flags from the parent command
 
 | Flag | What it does |

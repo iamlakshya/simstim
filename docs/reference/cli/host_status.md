@@ -10,6 +10,12 @@ Ask the provider or provider script whether the host is running.
 simstim host status <name>
 ```
 
+## Examples
+
+```sh
+simstim host status my-vps
+```
+
 ## Flags from the parent command
 
 | Flag | What it does |

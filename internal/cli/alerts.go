@@ -131,10 +131,10 @@ func (f *alertsSetFlags) config(cmd *cobra.Command) (client.AlertsConfig, bool, 
 	var c client.AlertsConfig
 	fl := cmd.Flags()
 	if f.tokenCmd != "" && f.ntfy == "" {
-		return c, false, &client.UserError{Msg: "--token-cmd needs --ntfy", Hint: "Give the ntfy topic with --ntfy."}
+		return c, false, &client.UserError{Msg: "--token-cmd needs --ntfy", Hint: "Give the ntfy topic with --ntfy.", Code: "missing_flag", Kind: client.KindUsage}
 	}
 	if f.format != "" && f.webhook == "" {
-		return c, false, &client.UserError{Msg: "--format needs --webhook", Hint: "Give the address with --webhook."}
+		return c, false, &client.UserError{Msg: "--format needs --webhook", Hint: "Give the address with --webhook.", Code: "missing_flag", Kind: client.KindUsage}
 	}
 	if f.ntfy != "" {
 		c.Destinations = append(c.Destinations, client.AlertDestination{Type: "ntfy", URL: f.ntfy})
@@ -160,7 +160,7 @@ func (f *alertsSetFlags) config(cmd *cobra.Command) (client.AlertsConfig, bool, 
 		c.Detail = &f.detail
 	}
 	if len(c.Destinations) == 0 && !fl.Changed("events") && !fl.Changed("delay") && !fl.Changed("min-turn") && !fl.Changed("detail") {
-		return c, false, &client.UserError{Msg: "nothing to set", Hint: "Name a destination with --ntfy, --webhook or --command, or change --events, --delay, --min-turn or --detail."}
+		return c, false, &client.UserError{Msg: "nothing to set", Hint: "Name a destination with --ntfy, --webhook or --command, or change --events, --delay, --min-turn or --detail.", Code: "nothing_to_set", Kind: client.KindUsage}
 	}
 	return c, f.add || len(c.Destinations) == 0, nil
 }
@@ -168,9 +168,10 @@ func (f *alertsSetFlags) config(cmd *cobra.Command) (client.AlertsConfig, bool, 
 func alertsTestCmd() *cobra.Command {
 	var event string
 	cmd := &cobra.Command{
-		Use:   "test <host>",
-		Short: "Send a test alert to every destination now, and say what each did",
-		Args:  cobra.ExactArgs(1),
+		Use:     "test <host>",
+		Short:   "Send a test alert to every destination now, and say what each did",
+		Example: "  " + brand.Name + " host alerts test my-vps",
+		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return withHost(cmd.Context(), args[0], func(ctx context.Context, h client.Host, conn *client.Conn) error {
 				res, err := conn.TestAlerts(ctx, event)
@@ -189,7 +190,7 @@ func alertsTestCmd() *cobra.Command {
 				}
 				if failed > 0 {
 					return &client.UserError{Msg: fmt.Sprintf("%d of %d destinations did not get it", failed, len(res)),
-						Hint: brand.Name + " host alerts log " + h.Name}
+						Hint: brand.Name + " host alerts log " + h.Name, Code: "delivery_failed"}
 				}
 				return nil
 			})
@@ -203,9 +204,10 @@ func alertsLogCmd() *cobra.Command {
 	var n int
 	var asJSON bool
 	cmd := &cobra.Command{
-		Use:   "log <host>",
-		Short: "Show the host's last alert deliveries, and why any were not sent",
-		Args:  cobra.ExactArgs(1),
+		Use:     "log <host>",
+		Short:   "Show the host's last alert deliveries, and why any were not sent",
+		Example: "  " + brand.Name + " host alerts log my-vps",
+		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return withHost(cmd.Context(), args[0], func(ctx context.Context, h client.Host, conn *client.Conn) error {
 				log, err := conn.AlertsLog(ctx, n)
@@ -231,9 +233,10 @@ func alertsLogCmd() *cobra.Command {
 
 func alertsOffCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "off <host>",
-		Short: "Turn alerts off on a host: remove its alerts file",
-		Args:  cobra.ExactArgs(1),
+		Use:     "off <host>",
+		Short:   "Turn alerts off on a host: remove its alerts file",
+		Example: "  " + brand.Name + " host alerts off my-vps",
+		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return withHost(cmd.Context(), args[0], func(ctx context.Context, h client.Host, conn *client.Conn) error {
 				removed, err := conn.AlertsOff(ctx)

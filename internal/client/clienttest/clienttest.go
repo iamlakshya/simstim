@@ -34,6 +34,8 @@ type Transport struct {
 	Features []string
 	// Uname is what the probe's uname -sm prints: "Linux aarch64" when empty.
 	Uname string
+	// fail makes the bridge answer a request with an error, by its op.
+	fail map[string]*proto.Error
 
 	mu      sync.Mutex
 	remotes []string
@@ -45,6 +47,17 @@ func (t *Transport) Remotes() []string {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	return append([]string(nil), t.remotes...)
+}
+
+// Fail makes the bridge answer every request of op with e, an error such
+// as a host sends. A nil e answers op again.
+func (t *Transport) Fail(op string, e *proto.Error) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.fail == nil {
+		t.fail = map[string]*proto.Error{}
+	}
+	t.fail[op] = e
 }
 
 // SetAgents changes what agents.check returns, as an install would.
@@ -136,6 +149,12 @@ func (t *Transport) serve(in io.Reader, out io.Writer) {
 }
 
 func (t *Transport) answer(req proto.Request) proto.Response {
+	t.mu.Lock()
+	fail := t.fail[req.Op]
+	t.mu.Unlock()
+	if fail != nil {
+		return proto.Response{ID: req.ID, Error: fail}
+	}
 	var v any
 	if a, ok := t.Answers[req.Op]; ok {
 		b, _ := json.Marshal(a)

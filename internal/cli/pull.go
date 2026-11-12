@@ -26,7 +26,7 @@ func pullCmd() *cobra.Command {
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := gitHere(cmd.Context(), "rev-parse", "--show-toplevel"); err != nil {
-				return &client.UserError{Msg: "this folder is not in a git repository", Hint: "cd into your clone of the repository, then run pull again"}
+				return &client.UserError{Msg: "this folder is not in a git repository", Hint: "Run pull again in your clone of the repository.", Code: "not_a_repo"}
 			}
 			return withSession(cmd.Context(), args[0], func(ctx context.Context, h client.Host, _ *client.Conn, s *client.Session) error {
 				return pull(ctx, h, s, into, force)
@@ -40,20 +40,20 @@ func pullCmd() *cobra.Command {
 
 func pull(ctx context.Context, h client.Host, s *client.Session, into string, force bool) error {
 	if h.SSH == "" {
-		return &client.UserError{Msg: fmt.Sprintf("pull needs SSH, and %s is reached through %s", h.Name, h.Target()), Hint: "Push the branch from the session to a remote you share, then fetch it here."}
+		return &client.UserError{Msg: fmt.Sprintf("pull needs SSH, and %s is reached through %s", h.Name, h.Target()), Hint: "Push the branch from the session to a remote you share, then fetch it here.", Code: "needs_ssh"}
 	}
 	repo, err := client.SessionRepo(ctx, h, s.Cwd)
 	if err != nil {
 		return err
 	}
 	if repo.Branch == "HEAD" {
-		return &client.UserError{Msg: client.CleanLine(s.Name) + " has no branch checked out (a detached HEAD)", Hint: "create a branch in the session, then pull again"}
+		return &client.UserError{Msg: client.CleanLine(s.Name) + " has no branch checked out (a detached HEAD)", Hint: "Create a branch in the session, then pull again.", Code: "detached_head"}
 	}
 	if into == "" {
 		into = repo.Branch
 	}
 	if cur, _ := gitOut(ctx, "symbolic-ref", "--quiet", "--short", "HEAD"); cur == into {
-		return &client.UserError{Msg: client.CleanLine(into) + " is the branch you have checked out here", Hint: "pull into another branch with --into, or switch branches first"}
+		return &client.UserError{Msg: client.CleanLine(into) + " is the branch you have checked out here", Hint: "Pull into another branch with --into, or switch branches first.", Code: "branch_checked_out"}
 	}
 	sshCmd, err := client.GitSSHCommand(h)
 	if err != nil {
@@ -65,10 +65,9 @@ func pull(ctx context.Context, h client.Host, s *client.Session, into string, fo
 	if err != nil {
 		msg := strings.TrimSpace(string(out))
 		if strings.Contains(msg, "non-fast-forward") || strings.Contains(msg, "rejected") {
-			return &client.UserError{Msg: fmt.Sprintf("%s here has commits that %s on %s does not", client.CleanLine(into), client.CleanLine(repo.Branch), h.Name),
-				Hint: "pull into another branch with --into, or replace it with --force"}
+			return &client.UserError{Msg: fmt.Sprintf("%s here has commits that %s on %s does not", client.CleanLine(into), client.CleanLine(repo.Branch), h.Name), Hint: "Pull into another branch with --into, or replace it with --force.", Code: "branch_diverged"}
 		}
-		return &client.UserError{Msg: "git fetch failed: " + client.CleanLine(msg), Hint: "ssh " + h.SSH + " works? Then try git fetch yourself"}
+		return &client.UserError{Msg: "git fetch failed: " + client.CleanLine(msg), Hint: "Check that ssh " + h.SSH + " works, then run the git fetch yourself.", Code: "fetch_failed"}
 	}
 	ahead, _ := gitOut(ctx, "rev-list", "--count", into, "^HEAD")
 	fmt.Printf("Fetched %s from %s on %s into %s", client.CleanLine(repo.Branch), client.CleanLine(s.Name), h.Name, client.CleanLine(into))

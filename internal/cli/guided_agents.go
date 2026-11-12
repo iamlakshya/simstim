@@ -144,6 +144,10 @@ func (g *guide) login(h client.Host, f *onboard.Flow, a onboard.Action) error {
 // inSession runs an install or a login, checks the host again, and says
 // how it went.
 func (g *guide) inSession(h client.Host, f *onboard.Flow, a onboard.Action) error {
+	if err := g.ctx.Err(); err != nil {
+		// A Ctrl+C that came with the last answer: start nothing.
+		return err
+	}
 	if g.tty {
 		fmt.Fprintf(g.out, "It runs in the session %s on %s. Answer it there; ctrl+\\ leaves it running.\n", a.Args.Name, h.Name)
 	}

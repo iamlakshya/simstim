@@ -10,6 +10,12 @@ List the TCP ports a session's processes listen on.
 simstim ports <host>/<session>
 ```
 
+## Examples
+
+```sh
+simstim ports my-vps/auth-fix
+```
+
 ## Flags from the parent command
 
 | Flag | What it does |

@@ -10,6 +10,12 @@ Start the host through its provider or provider script.
 simstim host start <name>
 ```
 
+## Examples
+
+```sh
+simstim host start my-vps
+```
+
 ## Flags from the parent command
 
 | Flag | What it does |

@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"bufio"
 	"context"
 	"fmt"
 	"io"
@@ -16,13 +15,12 @@ import (
 // offerFixes shows each fix, with what it does and the command it runs, and
 // asks before each one unless yes. It applies the chosen ones with apply and
 // prints how each went. A manual fix is printed for the user to run.
-func offerFixes(in io.Reader, w io.Writer, fixes []api.Fix, yes bool, apply func(ids []string) ([]api.Fix, error)) error {
+func offerFixes(ctx context.Context, in io.Reader, w io.Writer, fixes []api.Fix, yes bool, apply func(ids []string) ([]api.Fix, error)) error {
 	if len(fixes) == 0 {
 		fmt.Fprintln(w, "\nNothing to fix.")
 		return nil
 	}
 	fmt.Fprintf(w, "\nFound %d to fix:\n", len(fixes))
-	answers := bufio.NewReader(in)
 	var chosen []string
 	for i, f := range fixes {
 		f = cleanFix(f)
@@ -32,13 +30,24 @@ func offerFixes(in io.Reader, w io.Writer, fixes []api.Fix, yes bool, apply func
 			continue
 		}
 		fmt.Fprintf(w, "   Fix: %s.\n   Runs: %s\n", f.Action, f.Command)
-		if yes || ask(answers, w, "   Fix it?") {
+		ok := yes
+		if !ok {
+			var err error
+			if ok, err = question(ctx, in, w, "   Fix it?"); err != nil {
+				return err
+			}
+		}
+		if ok {
 			chosen = append(chosen, f.ID)
 		}
 	}
 	if len(chosen) == 0 {
 		fmt.Fprintln(w, "\nNothing was changed.")
 		return nil
+	}
+	if stopped(ctx) {
+		// A signal that came with the last answer: fix nothing.
+		return errInterrupted
 	}
 	res, err := apply(chosen)
 	if err != nil {
@@ -57,7 +66,7 @@ func offerFixes(in io.Reader, w io.Writer, fixes []api.Fix, yes bool, apply func
 		}
 	}
 	if failed > 0 {
-		return &client.UserError{Msg: fmt.Sprintf("%d of %d fixes failed", failed, len(chosen)), Hint: "Read each one's reason above; a fix that needs root says which command to run."}
+		return &client.UserError{Msg: fmt.Sprintf("%d of %d fixes failed", failed, len(chosen)), Hint: "Read the reason of each fix above: a fix that needs root names the command to run.", Code: "fix_failed"}
 	}
 	return nil
 }
@@ -68,14 +77,6 @@ func cleanFix(f api.Fix) api.Fix {
 	f.Problem, f.Action, f.Error = client.CleanLine(f.Problem), client.CleanLine(f.Action), client.CleanLine(f.Error)
 	f.Command = client.CleanPath(f.Command) // the longer limit of a path, for a long command
 	return f
-}
-
-// ask asks a yes-or-no question; anything but yes is no.
-func ask(r *bufio.Reader, w io.Writer, q string) bool {
-	fmt.Fprintf(w, "%s [y/N] ", q)
-	line, _ := r.ReadString('\n')
-	line = strings.ToLower(strings.TrimSpace(line))
-	return line == "y" || line == "yes"
 }
 
 func sentenceCase(s string) string {
@@ -110,7 +111,7 @@ func fixHost(ctx context.Context, conn *client.Conn, h client.Host, yes bool) er
 	for i := range fixes {
 		fixes[i].Command = strings.ReplaceAll(fixes[i].Command, "<host>", h.SSH)
 	}
-	return offerFixes(os.Stdin, os.Stdout, fixes, yes, func(ids []string) ([]api.Fix, error) {
+	return offerFixes(ctx, os.Stdin, os.Stdout, fixes, yes, func(ids []string) ([]api.Fix, error) {
 		actx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 		defer cancel()
 		return conn.HostFixes(actx, true, ids)

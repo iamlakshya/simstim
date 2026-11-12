@@ -28,7 +28,7 @@ type Check = api.Check
 // the terminfo fix.
 func (c *Conn) HostFixes(ctx context.Context, apply bool, ids []string) ([]Fix, error) {
 	if !c.HasFeature("doctor.fix") {
-		return nil, &UserError{Msg: "the helper on " + c.Host.Name + " is too old to fix itself", Hint: brand.Name + " host add " + c.Host.Name + "   (updates the helper)"}
+		return nil, &UserError{Msg: "the helper on " + c.Host.Name + " is too old to fix itself", Hint: brand.Name + " host add " + c.Host.Name + " (updates the helper)", Code: "helper_old"}
 	}
 	a := api.FixArgs{Apply: apply, IDs: ids}
 	if src, err := exec.CommandContext(ctx, "infocmp", "-x", "xterm-ghostty").Output(); err == nil {

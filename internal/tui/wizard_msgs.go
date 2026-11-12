@@ -47,7 +47,8 @@ func (w *wizard) onProbe(m *Model, msg probeMsg) tea.Cmd {
 		w.checks[1].state = ckFailed
 		w.err = &client.UserError{
 			Msg:  "this build has no helper for " + client.CleanLine(msg.p.OS+"/"+msg.p.Arch),
-			Hint: "Linux hosts on amd64 and arm64 are supported.",
+			Hint: "Use a Linux host on amd64 or arm64.",
+			Code: "no_helper",
 		}
 		return nil
 	}

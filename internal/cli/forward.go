@@ -16,9 +16,10 @@ import (
 
 func portsCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "ports <host>/<session>",
-		Short: "List the TCP ports a session's processes listen on",
-		Args:  cobra.ExactArgs(1),
+		Use:     "ports <host>/<session>",
+		Short:   "List the TCP ports a session's processes listen on",
+		Example: "  " + brand.Name + " ports my-vps/auth-fix",
+		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return withSession(cmd.Context(), args[0], func(ctx context.Context, h client.Host, conn *client.Conn, s *client.Session) error {
 				ports, err := conn.Ports(ctx, s.ID)
@@ -79,7 +80,7 @@ func forwardPairs(ctx context.Context, conn *client.Conn, h client.Host, s *clie
 		}
 	}
 	if len(want) == 0 {
-		return nil, &client.UserError{Msg: fmt.Sprintf("%s on %s listens on no TCP ports yet", client.CleanLine(s.Name), h.Name), Hint: "Start the dev server in the session, or give the port."}
+		return nil, &client.UserError{Msg: fmt.Sprintf("%s on %s listens on no TCP ports yet", client.CleanLine(s.Name), h.Name), Hint: "Start the dev server in the session, or give the port.", Code: "no_ports"}
 	}
 	pairs := make([]client.ForwardPair, 0, len(want))
 	for _, w := range want {
@@ -90,7 +91,7 @@ func forwardPairs(ctx context.Context, conn *client.Conn, h client.Host, s *clie
 		lp, err1 := strconv.Atoi(l)
 		rp, err2 := strconv.Atoi(r)
 		if err1 != nil || err2 != nil {
-			return nil, &client.UserError{Msg: fmt.Sprintf("%q is not a port or local:remote pair", w), Hint: brand.Name + " forward " + target + " 3000"}
+			return nil, &client.UserError{Msg: fmt.Sprintf("%q is not a port or local:remote pair", w), Hint: brand.Name + " forward " + shellWord(target) + " 3000", Code: "bad_value", Kind: client.KindUsage}
 		}
 		if !ok && !free(ctx, lp) {
 			lp = freePort(ctx)
@@ -103,7 +104,7 @@ func forwardPairs(ctx context.Context, conn *client.Conn, h client.Host, s *clie
 // runForward forwards the pairs through ssh until Ctrl+C.
 func runForward(ctx context.Context, h client.Host, pairs []client.ForwardPair) error {
 	if h.SSH == "" {
-		return &client.UserError{Msg: fmt.Sprintf("forward needs SSH, and %s is reached through %s", h.Name, h.Target()), Hint: "Forward from inside the host instead, for example with the provider's own port tools."}
+		return &client.UserError{Msg: fmt.Sprintf("forward needs SSH, and %s is reached through %s", h.Name, h.Target()), Hint: "Forward from inside the host instead, for example with the provider's own port tools.", Code: "needs_ssh"}
 	}
 	s := &client.SSH{Host: h, Interactive: true}
 	c, err := s.Forward(ctx, pairs)
@@ -116,7 +117,7 @@ func runForward(ctx context.Context, h client.Host, pairs []client.ForwardPair) 
 	fmt.Println("Press Ctrl+C to stop.")
 	c.Stdin, c.Stdout, c.Stderr = os.Stdin, os.Stdout, os.Stderr
 	if err := c.Run(); err != nil && ctx.Err() == nil {
-		return &client.UserError{Msg: "the forward stopped: " + err.Error(), Hint: "Check that the local port is free, then try again."}
+		return &client.UserError{Msg: "the forward stopped: " + err.Error(), Hint: "Check that the local port is free, then try again.", Code: "forward_failed"}
 	}
 	return nil
 }

@@ -21,7 +21,7 @@ func EndHint(e *proto.Ended, ref string) string {
 	if e == nil || !e.OOM {
 		return ""
 	}
-	return brand.Name + " resume " + ref + "   (--memory-max <size> gives it a bigger cap)"
+	return brand.Name + " resume " + ref + " (--memory-max <size> gives it a bigger cap)"
 }
 
 // SessionEndHint is EndHint for a listed session whose agent has ended: the

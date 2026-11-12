@@ -42,7 +42,7 @@ func startNew(ctx context.Context, out io.Writer, host, inst string) error {
 		return err
 	}
 	fmt.Fprintf(out, "  This Mac cannot run a VM inside a VM, so %s gets no microvm sandboxes.\n", host)
-	again := brand.Name + " host create lima " + host + "   (to try again)"
+	again := brand.Name + " host create lima " + host + " (to try again)"
 	edit := []string{"edit", "--tty=false", "--set", ".nestedVirtualization = false", inst}
 	fmt.Fprintf(out, "  Turning nested virtualisation off: limactl %s\n", shellLine(edit))
 	if _, err := provider.Exec(ctx, install, "limactl", edit...); err != nil {

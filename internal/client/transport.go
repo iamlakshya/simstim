@@ -145,5 +145,5 @@ func (s *SSH) Start(ctx context.Context, remote string) (Proc, error) {
 
 // ReachHint is the ssh command that should work before anything else does.
 func (s *SSH) ReachHint() string {
-	return fmt.Sprintf("ssh %s   (check that this works first)", s.Host.SSH)
+	return SSHCommand(s.Host.SSH) + " (check that this works first)"
 }

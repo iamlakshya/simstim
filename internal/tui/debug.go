@@ -67,7 +67,7 @@ func (realBackend) StopDebug() error {
 	var warn bytes.Buffer
 	client.StopDebug(&warn)
 	if msg, hint, ok := strings.Cut(strings.TrimSpace(warn.String()), "\nTry: "); ok {
-		return &client.UserError{Msg: strings.TrimPrefix(msg, "Warning: "), Hint: hint}
+		return &client.UserError{Msg: strings.TrimPrefix(msg, "Warning: "), Hint: hint, Code: "debug_warning"}
 	}
 	return nil
 }
@@ -152,7 +152,7 @@ func debugConnOf(h *hostConn) (debugConn, error) {
 	dc, ok := unclean(h.conn).(debugConn)
 	if !ok {
 		return nil, &client.UserError{Msg: "the connection to " + h.name() + " has no debug mode",
-			Hint: brand.Name + " host add " + h.name() + "   (updates the helper)"}
+			Hint: brand.Name + " host add " + h.name() + " (updates the helper)", Code: "helper_old"}
 	}
 	return dc, nil
 }

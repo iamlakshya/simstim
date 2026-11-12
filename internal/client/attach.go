@@ -104,11 +104,11 @@ func Attach(ctx context.Context, o AttachOptions) (AttachResult, error) {
 	}
 	dk, err := keys.Parse(o.Settings.Attach.DetachKey)
 	if err != nil {
-		return AttachResult{}, &UserError{Msg: "bad detach key: " + err.Error(), Hint: "Fix attach.detach_key in the config."}
+		return AttachResult{}, &UserError{Msg: "bad detach key: " + err.Error(), Hint: "Fix attach.detach_key in the config.", Code: "bad_config", Kind: KindUsage}
 	}
 	pk, err := keys.Parse(o.Settings.Attach.ImagePasteKey)
 	if err != nil {
-		return AttachResult{}, &UserError{Msg: "bad image paste key: " + err.Error(), Hint: "Fix attach.image_paste_key in the config."}
+		return AttachResult{}, &UserError{Msg: "bad image paste key: " + err.Error(), Hint: "Fix attach.image_paste_key in the config.", Code: "bad_config", Kind: KindUsage}
 	}
 	tr := openAttachTrace(o.Session)
 	ctx = withTrace(ctx, tr)

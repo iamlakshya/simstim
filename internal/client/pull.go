@@ -54,7 +54,7 @@ func SessionRepo(ctx context.Context, h Host, dir string) (RepoInfo, error) {
 	out, err := s.Run(ctx, RemoteHelper(HelperVersion())+" git-op "+api.GitOpRepoInfo, bytes.NewReader(req))
 	if err != nil {
 		return RepoInfo{}, &UserError{Msg: fmt.Sprintf("could not ask %s about the repository at %s: %s", h.Name, CleanPath(dir), CleanLine(err.Error())),
-			Hint: brand.Name + " host doctor " + h.Name}
+			Hint: brand.Name + " host doctor " + h.Name, Code: "ssh_failed"}
 	}
 	return parseRepoInfo(h, dir, out)
 }
@@ -70,19 +70,19 @@ func parseRepoInfo(h Host, dir string, out []byte) (RepoInfo, error) {
 	if err := json.Unmarshal(out, &ans); err != nil || (ans.Error == nil && ans.Repo == nil) {
 		// The host's output shows escaped to ASCII: it is the host's text.
 		return RepoInfo{}, &UserError{Msg: fmt.Sprintf("could not read what %s said about the repository at %s: %+q", h.Name, CleanPath(dir), CleanLine(strings.TrimSpace(string(out)))),
-			Hint: brand.Name + " host add " + h.Name + "   (reinstalls the helper)"}
+			Hint: brand.Name + " host add " + h.Name + " (reinstalls the helper)", Code: "protocol"}
 	}
 	switch e := ans.Error; {
 	case e == nil:
 		return *ans.Repo, nil
 	case e.Code == "no_git":
-		return RepoInfo{}, &UserError{Msg: "git is not installed on " + h.Name, Hint: "install git on " + h.Name + ", then pull again", Code: e.Code}
+		return RepoInfo{}, &UserError{Msg: "git is not installed on " + h.Name, Hint: "Install git on " + h.Name + ", then pull again.", Code: e.Code}
 	case e.Code == "not_a_repo":
-		return RepoInfo{}, &UserError{Msg: fmt.Sprintf("%s on %s is not in a git repository", CleanPath(dir), h.Name), Hint: "pull works for sessions started in a repository or a worktree", Code: e.Code}
+		return RepoInfo{}, &UserError{Msg: fmt.Sprintf("%s on %s is not in a git repository", CleanPath(dir), h.Name), Hint: "Start the session in a repository or a worktree to pull its work.", Code: e.Code}
 	default:
 		ue := hostErrorOn(h.Name, e)
 		if ue.Hint == "" {
-			ue.Hint = "check the repository with git status on " + h.Name
+			ue.Hint = "Check the repository with git status on " + h.Name + "."
 		}
 		return RepoInfo{}, ue
 	}

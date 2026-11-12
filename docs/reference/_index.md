@@ -10,3 +10,4 @@ Generated from the code, so it always matches the build.
 - [Configuration](config.md): `config.toml` and `hosts.toml`.
 - [Keys](keymap.md): the launcher's commands and keys.
 - [Agents](agents.md): the agent table.
+- [Exit codes](exit-codes.md): what each exit code means.

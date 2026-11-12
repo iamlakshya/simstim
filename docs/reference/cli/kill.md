@@ -10,6 +10,12 @@ Stop a session and remove it.
 simstim kill <host>/<session>
 ```
 
+## Examples
+
+```sh
+simstim kill my-vps/auth-fix
+```
+
 ## Flags from the parent command
 
 | Flag | What it does |

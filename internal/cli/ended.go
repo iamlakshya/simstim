@@ -91,11 +91,11 @@ func endedError(h client.Host, row client.Session) error {
 	switch {
 	case hint != "":
 	case s.State == api.StateLost:
-		hint = fmt.Sprintf("%s   (%s host restore %s --all brings back every lost session)", resume, brand.Name, h.Name)
+		hint = fmt.Sprintf("%s, or %s host restore %s --all (brings back every lost session)", resume, brand.Name, h.Name)
 	case client.CleanExit(s):
-		hint = fmt.Sprintf("%s   (or %s kill %s to remove it)", resume, brand.Name, ref)
+		hint = fmt.Sprintf("%s, or %s kill %s (removes it)", resume, brand.Name, ref)
 	default:
 		hint = resume
 	}
-	return &client.UserError{Msg: msg, Hint: hint}
+	return &client.UserError{Msg: msg, Hint: hint, Code: "session_ended"}
 }
