@@ -4,10 +4,10 @@ Every change keeps the tests green, and every bug fix adds the test that would h
 
 | Command | What it runs | Where |
 | --- | --- | --- |
-| `just test` | Go unit tests with the race detector, plus offline tests of the public-readiness checker, of the end-to-end cleanup, of the end-to-end probe of the session sockets and of the pins watch, of the release's signed-tag gate in a temporary repository (`scripts/test-verify-tag.sh`), of the cleanup of `test/e2e/host_git.py`, and of the `llms.txt` check | Needs Python 3.11 or later. The gate's test skips without git 2.34 and OpenSSH 8.8, except in CI |
+| `just test` | Go unit tests with the race detector, then the tests of `internal/link` again over a pipe with no buffer (`LINK_TEST_PIPE=1`), plus offline tests of the public-readiness checker, of the end-to-end cleanup, of the end-to-end probe of the session sockets and of the pins watch, of the release's signed-tag gate in a temporary repository (`scripts/test-verify-tag.sh`), of the cleanup of `test/e2e/host_git.py`, and of the `llms.txt` check | Needs Python 3.11 or later. The gate's test skips without git 2.34 and OpenSSH 8.8, except in CI |
 | `just cover` | The unit tests' coverage, which must stay at 70 % or more | Anywhere |
 | `go test ./internal/tui -run TestGolden -update` | Rewrites the golden screens after an intended change; review the diff | Anywhere |
-| `just fuzz` | Fuzzes the input filter, the frame reader, the holder's hook handler, the text cleaner and the paste guard's reader for 30 s each (`just fuzz 5m` for longer) | Anywhere |
+| `just fuzz` | Fuzzes the input filter, the frame reader, the holder's hook handler, the text cleaner, the paste guard's reader and the link's frame reader for 30 s each (`just fuzz 5m` for longer) | Anywhere |
 | `just lint` | `go vet`, the strict golangci-lint set, and the name, private-detail, script and file-size checks | Anywhere |
 | `just e2e` | The end-to-end suite against a real host | Needs a test host |
 | `just screenshots` | The README images, drawn from `demo` | Anywhere |
@@ -32,6 +32,7 @@ These are the project's quality expectations, with tools to check them locally a
 | The frame reader and the input filter never lose a byte | fuzz targets (`just fuzz`) |
 | No hook can put an agent session ID without the agent's form into a resume command | a fuzz target (`just fuzz`) |
 | The paste guard finds the same clipboard writes in output that frames cut anywhere as in the whole output | a fuzz target (`just fuzz`) |
+| The link's frame reader holds no more than its limits, whatever the other end sends | a fuzz target (`just fuzz`), and a test of the link's heap with 1-byte frames |
 | The attach pump is no slower than before | benchmarks (`just bench`), on every pull request |
 
 ## Unit and golden tests
@@ -116,6 +117,16 @@ Numbers on an Apple silicon laptop, 15 October 2026, per 32 KiB of agent output:
 | Output frame through the client's attach | 63 µs | 520 MB/s |
 
 The screen model is the slowest step, and it is slower when the output scrolls. It is a Go terminal emulator used only to read the screen for status rules. Even 7.7 MB/s is far more than an agent prints. `BenchmarkScreenModelScroll`, and `BenchmarkScreenModelAltScroll` on the alternate screen, also report the heap that the model keeps (`MiB-kept`). `BenchmarkScreenModelSwitch` feeds a program that switches to the alternate screen and back for each character.
+
+The tests of the link of a sandbox (`internal/link`) run over a socket pair. With `LINK_TEST_PIPE=1` they run over `net.Pipe` instead, as on Windows. That pipe has no buffer, so a test that needs one fails there. `just test` runs them both ways.
+
+The link has a benchmark of its own. `just bench` does not run it yet, because no session uses the link. It passes 1 GiB through one stream over a socket pair, for each window from 64 KiB to 1 MiB, on one core:
+
+```sh
+go test ./internal/link -run '^$' -bench Throughput -benchtime 1024x -cpu 1
+```
+
+The target is 100 MiB/s or more ([isolation spec, 12](isolation-spec.md#12-performance-targets-and-how-to-measure-them)). Every window passed it by far, the default of 64 KiB too. The default comes from the supervisor's memory budget, not from the benchmark ([isolation spec, 5.2](isolation-spec.md#52-internallink)).
 
 ## Vulnerabilities and dead code
 

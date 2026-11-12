@@ -172,6 +172,7 @@ Spec section 15 has each question in full, with its options: [open questions](is
 | 107 | How does the client find the repository's sections for a host folder that `--dir` names? | From the folder's `origin`, which the host reads with `repo.info`. `new` names the sections, and later starts use the names that the trusted manifest keeps. | P1.12 |
 | 108 | Should session units lose access to the user manager's bus and to `/sys/fs/cgroup`? | No, not before walls (G5). The peer check stays a speed bump, and its docs say so. | P0.2 |
 | 109 | Should the paste guard also refuse `.env.local` and the other `.env.*` files? | Yes: `.env` and every `.env.*` except `.env.example`, `.env.sample` and `.env.template`. | P0.5 |
+| 110 | How much may a guest make the supervisor hold through the link? | A window of 64 KiB, 96 streams that the guest opened and 32 that the supervisor opened, counted apart: 16 MiB for each link, heap counted. A project choice. | P1.2 |
 
 ## Order
 
@@ -194,7 +195,7 @@ Build the tasks from top to bottom. Every task named under "Depends on" is above
 | 13 | H5 | The grant gate and the grant ledger | 0 | H4, 0036 | 33 | M |
 | 14 | P1.1 | Wall levels, the sandbox probe and the floor | 1 | H5 | 2, 5 | M |
 | 15 | H7 | The root step | 1 | P1.1, H4, 0037 (here) | 4, 29, 79 | M |
-| 16 | P1.2 | The link | 1 | none | none | M |
+| 16 | P1.2 | The link | 1 | none | 110 | M |
 | 17 | P1.3 | Jails | 1 | none | 4, 28, 79 | M |
 | 18 | P1.4 | The supervisor, the guest init and the holder's guest mode | 1 | P1.2, P0.2, 0029, 0030 | 23 | L |
 | 19 | P1.5 | The process wall | 1 | P1.3, P1.4, H7 | 4 | L |
@@ -751,12 +752,12 @@ At the end of phase 1, `simstim new box --wall process` runs a session in a sand
 
 - **Goal:** many streams over one byte stream, with flow control (spec 5.2, 10.1, 10.2 and 12).
 - **Files:** new `internal/link/*.go`, `internal/proto/proto.go` (`TStreamOpen`, `TStreamData`, `TStreamClose`, `TStreamWindow`).
-- **Acceptance:** 1,000 streams of mixed sizes complete over a socket pair. A blocked stream does not hold others back. A wrong kind or side is refused. A scripted peer breaks each rule of spec 10.1 for a hostile peer. A breach of the link closes the link, and a breach of one stream closes only that stream.
-- **Tests:** unit tests. A fuzz test of the frame reader. The benchmark of spec 12 that passes 1 GiB through a socket pair, for each window from 64 KiB to 1 MiB. The task sets the default window as spec 5.2 says, and records the numbers in its pull request. 100 MiB/s on one core is a target: a result below it opens an issue (spec 12), and does not fail the task.
+- **Acceptance:** 1,000 streams of mixed sizes complete over a socket pair. A blocked stream does not hold others back. A wrong kind or side is refused. A scripted peer breaks each rule of spec 10.1 for a hostile peer. A breach of the link closes the link, and a breach of one stream closes only that stream. A hostile guest makes the supervisor hold no more than the bound of spec 5.2, heap counted, whatever the sizes of its frames.
+- **Tests:** unit tests. A fuzz test of the frame reader. A test that measures the heap with 1-byte frames on many streams. The benchmark of spec 12 that passes 1 GiB through a socket pair, for each window from 64 KiB to 1 MiB. The task sets the default window as spec 5.2 says, and records the numbers in its pull request. 100 MiB/s on one core is a target: a result below it opens an issue (spec 12), and does not fail the task.
 - **Docs:** `docs/explanation/architecture.md` (the protocol section).
-- **CHANGELOG:** Added. "The protocol gains stream frames, which carry many streams over one connection between a sandbox and its host. They never travel between the client and a host, so sessions do not change."
+- **CHANGELOG:** Added. "The protocol gains stream frames, which carry many streams over one connection between a sandbox and its host. They do not travel between the client and a host yet, so sessions do not change."
 - **Depends on:** nothing.
-- **Questions:** none.
+- **Questions:** [110](isolation-spec.md#15-open-questions).
 - **Effort:** M.
 
 ### P1.3 Jails

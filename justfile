@@ -86,6 +86,7 @@ install: build
 # Unit tests with the race detector.
 test:
     go test -race -count=1 ./...
+    LINK_TEST_PIPE=1 go test -race -count=1 ./internal/link
     python3 scripts/test-scorecard-check.py
     python3 test/e2e/test_sandbox_hosts.py
     python3 test/e2e/test_session_sockets.py
@@ -98,13 +99,14 @@ test:
 cover:
     scripts/cover.sh
 
-# Fuzz the input filter, the frame reader, the hook handler, the text cleaner and the paste guard's reader for a while.
+# Fuzz the input filter, the frame readers, the hook handler, the text cleaner and the paste guard's reader for a while.
 fuzz time="30s":
     go test ./internal/keys -run '^$' -fuzz FuzzFilter -fuzztime {{time}}
     go test ./internal/proto -run '^$' -fuzz FuzzRead -fuzztime {{time}}
     go test ./internal/host -run '^$' -fuzz FuzzApplyHook -fuzztime {{time}}
     go test ./internal/api -run '^$' -fuzz FuzzCleanText -fuzztime {{time}}
     go test ./internal/client -run '^$' -fuzz FuzzPasteGuard -fuzztime {{time}}
+    go test ./internal/link -run '^$' -fuzz FuzzReadFrames -fuzztime {{time}}
 
 # Static checks.
 lint: check-name check-private check-scripts check-size
