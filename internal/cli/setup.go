@@ -1,8 +1,8 @@
 package cli
 
 import (
-	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -32,8 +32,15 @@ func startSession(ctx context.Context, conn *client.Conn, h client.Host, a clien
 		s, err := conn.NewSession(cctx, a)
 		cancel()
 		if q, ok := client.FolderQuestionOf(err); ok && !a.MakeFolder {
-			if !interactive || !askMakeFolder(os.Stdin, os.Stdout, h.Name, q) {
+			if !interactive {
 				return nil, err
+			}
+			yes, aerr := askMakeFolder(ctx, os.Stdin, os.Stdout, h.Name, q)
+			if aerr != nil {
+				return nil, aerr
+			}
+			if !yes {
+				return nil, answeredNo(err)
 			}
 			a.MakeFolder = true
 			continue
@@ -51,7 +58,15 @@ func startSession(ctx context.Context, conn *client.Conn, h client.Host, a clien
 			a.Setup = api.SetupSkip
 			continue
 		}
-		run := askSetup(os.Stdin, os.Stdout, h.Name, q, past)
+		run, err := askSetup(ctx, os.Stdin, os.Stdout, h.Name, q, past)
+		if err != nil {
+			// A signal is no answer: nothing is kept.
+			return nil, err
+		}
+		if stopped(ctx) {
+			// A signal that came with the answer cancels it too.
+			return nil, errInterrupted
+		}
 		if err := rememberAnswer(os.Stderr, h.Name, q, run); err != nil {
 			return nil, err
 		}
@@ -75,6 +90,17 @@ func printWarning(w io.Writer, warn *client.UserError) {
 	if warn != nil {
 		fmt.Fprintf(w, "Warning: %s\nTry: %s\n", warn.Msg, warn.Hint)
 	}
+}
+
+// answeredNo is the error of a question that the user answered no: a
+// cancel, with the code cancelled, and the words, the hint and the data of
+// the question's own error.
+func answeredNo(err error) error {
+	var ue *client.UserError
+	if !errors.As(err, &ue) {
+		return err
+	}
+	return &client.UserError{Msg: ue.Msg, Hint: ue.Hint, Data: ue.Data, Code: "cancelled", Kind: client.KindCancelled}
 }
 
 func setupValue(run bool) string {
@@ -104,8 +130,9 @@ func skipNote(host string, q client.SetupQuestion, past client.SetupPast) string
 // askSetup asks whether a repository's setup script may run on host. Its
 // first line follows what the user said before. The repository and the
 // script come from the host, so they are shown cleaned, or quoted when they
-// hold hidden characters (client.ShowPath).
-func askSetup(in io.Reader, w io.Writer, host string, q client.SetupQuestion, past client.SetupPast) bool {
+// hold hidden characters (client.ShowPath). A signal is no answer, and
+// returns errInterrupted.
+func askSetup(ctx context.Context, in io.Reader, w io.Writer, host string, q client.SetupQuestion, past client.SetupPast) (bool, error) {
 	repo, script := client.ShowPath(q.Repo), client.ShowPath(q.Script)
 	switch past {
 	case client.SetupChanged:
@@ -116,11 +143,14 @@ func askSetup(in io.Reader, w io.Writer, host string, q client.SetupQuestion, pa
 		fmt.Fprintf(w, "The repository %s on %s has a setup script:\n\n    %s\n\n", repo, host, script)
 	}
 	fmt.Fprintf(w, "It runs in the session before the agent, as you, with the session's environment and\nsecrets. Say yes only for a repository you trust. The answer is kept for this\nrepository on %s until the script changes; --setup and --no-setup override it.\n\n", host)
-	return ask(bufio.NewReader(in), w, "Run it?")
+	return question(ctx, in, w, "Run it?")
 }
 
-// askMakeFolder asks whether a new session's missing folder may be made on host.
-func askMakeFolder(in io.Reader, w io.Writer, host string, q client.FolderQuestion) bool {
+// askMakeFolder asks whether a new session's missing folder may be made on
+// host. The folder comes from the host, so it is shown cleaned, or quoted
+// when it holds hidden characters (client.ShowPath). A signal is no
+// answer, and returns errInterrupted.
+func askMakeFolder(ctx context.Context, in io.Reader, w io.Writer, host string, q client.FolderQuestion) (bool, error) {
 	fmt.Fprintf(w, "The folder %s does not exist on %s.\n", client.ShowPath(q.Folder), host)
-	return ask(bufio.NewReader(in), w, "Make it?")
+	return question(ctx, in, w, "Make it?")
 }

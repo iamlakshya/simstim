@@ -33,7 +33,7 @@ func RunWith(ctx context.Context, o Options) error {
 
 func runWith(ctx context.Context, be Backend, o Options) error {
 	if !term.IsTerminal(int(os.Stdin.Fd())) || !term.IsTerminal(int(os.Stdout.Fd())) {
-		return &client.UserError{Msg: "the launcher needs a terminal", Hint: brand.Name + " ls, or run it in a terminal"}
+		return &client.UserError{Msg: "the launcher needs a terminal", Hint: brand.Name + " ls (lists the sessions without a terminal)", Code: "no_terminal"}
 	}
 	o.Motion = motionOn(be.Settings().UI.Motion, os.Getenv)
 	m := New(ctx, be, o)

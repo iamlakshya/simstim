@@ -10,6 +10,13 @@ Attach to a session (detach with Ctrl+\\); - is the last one.
 simstim attach <host>/<session> | -
 ```
 
+## Examples
+
+```sh
+simstim attach my-vps/auth-fix
+simstim attach -   # the last session you attached to
+```
+
 ## Flags from the parent command
 
 | Flag | What it does |

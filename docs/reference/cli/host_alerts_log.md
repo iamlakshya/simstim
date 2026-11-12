@@ -10,6 +10,12 @@ Show the host's last alert deliveries, and why any were not sent.
 simstim host alerts log <host> [flags]
 ```
 
+## Examples
+
+```sh
+simstim host alerts log my-vps
+```
+
 ## Flags
 
 | Flag | What it does |

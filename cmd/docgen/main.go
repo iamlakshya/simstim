@@ -48,6 +48,7 @@ func run(out, man, comp string) error {
 	pages["config.md"] = cfg
 	pages["keymap.md"] = keymapPage()
 	pages["agents.md"] = agentsPage()
+	pages["exit-codes.md"] = exitCodesPage()
 	pages["_index.md"] = indexPage()
 	if err := writeAll(out, pages); err != nil {
 		return err

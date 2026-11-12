@@ -10,6 +10,12 @@ Turn off the debug of a session at once, and the host side of each traced attach
 simstim debug stop <host>/<session>
 ```
 
+## Examples
+
+```sh
+simstim debug stop my-vps/auth-fix
+```
+
 ## Flags from the parent command
 
 | Flag | What it does |

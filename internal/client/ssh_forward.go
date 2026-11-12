@@ -61,13 +61,13 @@ func (s *SSH) checkForward(ctx context.Context, opts []string) error {
 			msg = strings.TrimSpace(string(ee.Stderr))
 		}
 		return &UserError{Msg: fmt.Sprintf("forward cannot check the SSH config for %s: %s", s.Host.Name, msg),
-			Hint: "ssh -G " + s.Host.SSH + "   (check that this works first)"}
+			Hint: "ssh -G " + ShellWord(s.Host.SSH) + " (check that this works first)", Code: "ssh_failed"}
 	}
 	vals, err := parseConfigValues(out)
 	if err != nil {
 		// A line that is too long to read hides every line after it.
 		return &UserError{Msg: fmt.Sprintf("forward cannot read all of what ssh -G prints for %s, so it cannot check it: %v", s.Host.Name, err),
-			Hint: "Look for a very long line in your SSH config for " + s.Host.SSH + ":   ssh -G " + s.Host.SSH}
+			Hint: "Look for a very long line in your SSH config for " + s.Host.SSH + " (ssh -G " + ShellWord(s.Host.SSH) + " prints it).", Code: "ssh_config_read"}
 	}
 	return forwardRisk(s.Host, vals)
 }
@@ -104,5 +104,6 @@ func forwardRisk(h Host, vals map[string][]string) error {
 		Msg: fmt.Sprintf("your SSH config would let %s reach this computer, or keep the forward running after forward ends, so forward will not start: %s",
 			h.Name, strings.Join(lines, ", ")),
 		Hint: fmt.Sprintf("Remove %s from the block for %s in %s, then run %s forward again.", what, h.SSH, where, brand.Name),
+		Code: "forward_risk", Kind: KindRefused,
 	}
 }

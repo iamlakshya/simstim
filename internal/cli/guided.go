@@ -112,7 +112,12 @@ func (g *guide) all() error {
 		case g.o.yes:
 			return true, nil
 		}
-		return g.yesNo(q, false)
+		ok, err := g.yesNo(q, false)
+		if err == nil && g.ctx.Err() != nil {
+			// A Ctrl+C that came with the yes: install nothing.
+			return false, g.ctx.Err()
+		}
+		return ok, err
 	}
 	checks, err := connectHost(g.ctx, g.out, h, consent, g.log)
 	if err != nil {
@@ -137,7 +142,7 @@ func (g *guide) all() error {
 // check refuses flags that cannot work, before anything changes.
 func (g *guide) check() error {
 	if g.o.host != "" && g.o.create != "" {
-		return &client.UserError{Msg: "--host and --create cannot go together", Hint: "Pass one of them."}
+		return &client.UserError{Msg: "--host and --create cannot go together", Hint: "Pass one of them.", Code: "flags_conflict", Kind: client.KindUsage}
 	}
 	if g.o.create != "" {
 		if _, err := findProvider(g.o.create); err != nil {
@@ -146,13 +151,15 @@ func (g *guide) check() error {
 	}
 	if g.o.agentsSet {
 		if err := onboard.CheckAgents(g.o.agents); err != nil {
-			return err
+			return fromFlag(err, "agents")
 		}
 	}
 	if !g.tty && (g.o.host == "" && g.o.create == "" || !g.o.yes) {
 		return &client.UserError{
 			Msg:  "setup asks its questions on a terminal, and there is none here; flags must answer them",
-			Hint: brand.Name + " setup --host <host> --agents claude --yes   (or --create lima instead of --host)",
+			Hint: brand.Name + " setup --host <host> --agents claude --yes (or --create lima instead of --host)",
+			Code: "answers_needed",
+			Kind: client.KindNeedsAnswer,
 		}
 	}
 	return nil
@@ -173,7 +180,7 @@ func (g *guide) stopped(err error) error {
 	if errors.As(err, &ue) && strings.HasPrefix(ue.Msg, "stopped") {
 		msg = "setup " + ue.Msg
 	}
-	return &client.UserError{Msg: msg, Hint: brand.Name + " setup   (it picks up what is already done)"}
+	return &client.UserError{Msg: msg, Hint: brand.Name + " setup (it picks up what is already done)", Code: "cancelled", Kind: client.KindCancelled}
 }
 
 // where asks where agents will run, and returns the host to connect. made
@@ -259,13 +266,13 @@ func (g *guide) namedHost(target string) (client.Host, error) {
 // with the same name and target is used as it is.
 func (g *guide) newHost(name, target string) (client.Host, error) {
 	if !client.ValidHostName(name) {
-		return client.Host{}, &client.UserError{Msg: fmt.Sprintf("%q cannot name a host", name), Hint: "Use letters, digits, dots, dashes and underscores, with --name."}
+		return client.Host{}, &client.UserError{Msg: fmt.Sprintf("%q cannot name a host", name), Hint: "Use letters, digits, dots, dashes and underscores, with --name.", Code: "bad_name", Kind: client.KindUsage}
 	}
 	if h, err := client.FindHost(name); err == nil {
 		if h.SSH == target {
 			return h, nil
 		}
-		return client.Host{}, &client.UserError{Msg: fmt.Sprintf("there is already a host called %s, reached by %s", name, h.Target()), Hint: "Pick another name with --name, or use the host as it is: " + brand.Name + " setup --host " + name}
+		return client.Host{}, &client.UserError{Msg: fmt.Sprintf("there is already a host called %s, reached by %s", name, h.Target()), Hint: brand.Name + " setup --host " + shellWord(target) + " --name <another-name>, or " + brand.Name + " setup --host " + shellWord(name), Code: "host_exists"}
 	}
 	return client.Host{Name: name, SSH: target}, nil
 }
@@ -335,6 +342,10 @@ func (g *guide) create(kind string) (client.Host, error) {
 				name = a
 			}
 		}
+	}
+	if err := g.ctx.Err(); err != nil {
+		// A Ctrl+C that came with the last answer: make nothing.
+		return client.Host{}, err
 	}
 	fmt.Fprintf(g.out, "\nCreating %s with %s…\n", name, kind)
 	h, err := g.local.Create(g.ctx, kind, name, g.out)

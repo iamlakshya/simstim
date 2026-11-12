@@ -53,7 +53,7 @@ func runBundle(ctx context.Context, args []string, ssh bool) (*bundle.Result, er
 	if len(args) == 1 {
 		hn, ref, slash := strings.Cut(args[0], "/")
 		if hn == "" || slash && ref == "" {
-			return nil, &client.UserError{Msg: fmt.Sprintf("%q is not a host or host/session", args[0]), Hint: brand.Name + " ls"}
+			return nil, &client.UserError{Msg: fmt.Sprintf("%q is not a host or host/session", args[0]), Hint: brand.Name + " ls", Code: "bad_address", Kind: client.KindUsage}
 		}
 		h, err := client.FindHost(hn)
 		if err != nil {
@@ -61,7 +61,7 @@ func runBundle(ctx context.Context, args []string, ssh bool) (*bundle.Result, er
 		}
 		o.Host, o.Session = &h, ref
 	} else if ssh {
-		return nil, &client.UserError{Msg: "--ssh needs a host", Hint: brand.Name + " debug bundle <host> --ssh"}
+		return nil, &client.UserError{Msg: "--ssh needs a host", Hint: brand.Name + " debug bundle <host> --ssh", Code: "missing_argument", Kind: client.KindUsage}
 	}
 	dir, err := os.Getwd()
 	if err != nil {

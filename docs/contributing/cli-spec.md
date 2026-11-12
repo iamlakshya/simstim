@@ -1,6 +1,6 @@
 # The command line: spec
 
-**Status:** proposed, 10 November 2026. **Plan:** [cli-plan.md](cli-plan.md). **Decision:** [0033](decisions/0033-one-command-grammar.md). **Research:** [the CLI study](../research/cli-dx.md).
+**Status:** proposed, 10 November 2026. **Plan:** [cli-plan.md](cli-plan.md). **Decision:** [0033](decisions/0033-one-command-grammar.md), accepted. **Research:** [the CLI study](../research/cli-dx.md).
 
 This spec says what to build so that the command line is easy to guess, hard to misuse and consistent. [The plan](cli-plan.md) says in what order. A coding agent builds it one pull request at a time, under [AGENTS.md](../../AGENTS.md) and [CONTRIBUTING.md](../../CONTRIBUTING.md). Task IDs such as C2 name tasks in the plan. Each section names the tasks that it serves, such as "(C2)". [Traceability](#18-traceability) lists each task with its sections and its research.
 
@@ -135,13 +135,14 @@ Try: simstim attach box/auth-fix
 ```
 
 1. `Error:` comes first, bold and red when stderr has colour ([section 7.5](#75-streams-and-colour)). The message follows.
-2. The message names the bad input and says what went wrong, in one or two sentences.
+2. The message names the bad input and says what went wrong, in one or two sentences. The code keeps it without a full stop at its end, and the CLI adds one when it prints a user error. An error that is not a user error prints as it is ([section 4.5](#45-errors-that-are-not-user-errors)). The launcher and `--json` show the message without the full stop.
 3. A suggestion line follows when [section 4.3](#43-suggestions) finds one, after a blank line.
 4. Exactly one `Try:` line comes last, after a blank line. `Try:` is blue when stderr has colour.
 5. Nothing goes to stdout.
 6. With `--json`, the error is one JSON line on stderr instead ([section 7.4](#74-errors-and-warnings-with---json)).
+7. What reaches the terminal has no control or hidden characters: the client cleans the message and the hint that a host sends with `api.CleanText` ([isolation spec 14.15](isolation-spec.md#1415-go-sketches)), and drops them from the user's own words that a `Try:` line repeats.
 
-`client.UserError` keeps `Msg`, `Hint`, `Code` and `Data`, and gains `Kind`, the kind of [section 5](#5-exit-codes-c2). `Code` names the error, such as `host_not_found` or `wall_floor`. Every `UserError` that the client builds sets `Code` and `Hint`. A zero `Kind` means `KindFailed`.
+`client.UserError` keeps `Msg`, `Hint`, `Code` and `Data`, and gains `Kind`, the kind of [section 5](#5-exit-codes-c2). `Code` names the error, such as `host_not_found` or `wall_floor`. Every `UserError` that the client builds sets `Code` and `Hint`. A zero `Kind` means `KindFailed`. One code has one kind everywhere. `client.UnknownNameError` wraps the `UserError` of a name that does not exist, with the names that do, so that the CLI can suggest the nearest ([section 4.3](#43-suggestions)).
 
 ### 4.2 The "Try:" line
 
@@ -152,25 +153,29 @@ C2 writes these rules into [the style guide](style.md):
 3. A command may end with a short note in brackets, such as `simstim host upgrade devbox (installs the files again)`.
 4. Two commands may join with ", or" when either one fixes the error.
 5. The line is never a question or a fragment.
+6. A command that repeats a word the user typed quotes it for the shell. A name that no host could have, such as one with a space, a `;` or a leading dash, is not repeated: the line names the command that lists the hosts instead.
 
 ### 4.3 Suggestions
 
 "Did you mean" helps when a user types a name that does not exist. A suggestion never runs ([clig.dev](https://clig.dev/#help), [git](https://git-scm.com/docs/git-config#Documentation/git-config.txt-helpautoCorrect)).
 
-**Where.** Suggestions follow an unknown command at any level, and an unknown flag. They also follow an unknown key of `host set` or of a config file, and an unknown host, session or agent.
+**Where.** Suggestions follow an unknown command at any level, and an unknown flag. C2 also gives them to an unknown host (every command that names one) and an unknown agent (`agents install` and `setup --agents`). An unknown session gets them with the addresses of C5 ([section 9.2](#92-addresses)). An unknown key of `host set` or of a config file gets them with C7 and C9.
 
 **The rule.**
 
-1. A candidate is a name within two edits of the typed word, ignoring case. The edit distance is Levenshtein's, as in Cobra's `SuggestionsFor` (`command.go` in Cobra v1.10.2).
-2. For commands, a name that starts with the typed word is also a candidate, as in Cobra. Kept aliases count as names.
-3. The synonym table below adds candidates that are far in spelling but close in meaning.
-4. The line shows at most three candidates: the nearest first, then in alphabetical order.
+1. Case does not count.
+2. A typed word of one or two runes matches only by prefix: a candidate is a thing, such as a command, a flag, a host or an agent, with a name that starts with the word, never one a few edits away. When more than three things match, there is no suggestion. So `x` gets none, `at` gets `attach`, and `d` gets none, because `debug`, `demo`, `doctor` and `kill` (through its alias `delete`) all start with it.
+3. For a longer word, a candidate is a thing with a name at most one edit from the typed word when the word has three or four runes, and at most two edits when it is longer. The edit distance is Levenshtein's.
+4. For commands, a name that starts with the typed word also makes a candidate, as in Cobra. Kept aliases count as names, but each command counts once, by its name: `delte` suggests `kill`, through its alias `delete`.
+5. A synonym of the table below that matches the typed word is the only candidate.
+6. The line shows at most three candidates. They are in order of the real edit distance of their nearest name, prefixes included, then in alphabetical order.
 
 **The line.**
 
-- One candidate: `Did you mean "attach"?`. The `Try:` line is the user's command line with the typed word replaced. Words with spaces or shell characters are quoted with single quotes.
-- Two or three: `Did you mean one of these: "debug", "demo", "doctor"?`. The `Try:` line is the parent's help, such as `simstim --help`.
-- None: no suggestion line, and the `Try:` line is the parent's help.
+- One candidate: `Did you mean "attach"?`. Two or three: `Did you mean one of these: "bash", "zsh"?`.
+- The `Try:` line is the user's command line with the nearest candidate in place of the typed word, at the place where the parser found it, when that line parses. For a host or an agent, the error says where the name came from, an argument or a flag, and the item when the word is a list such as `codex,cluade`. Only that word, or that item, changes. The line parses when it names a real command, with flags that it has and the words that it takes. Words with spaces or shell characters are quoted with single quotes.
+- When that line does not parse, the `Try:` line of a command is the help of the nearest candidate, such as `simstim kill --help`. That of a flag is the command's help, and that of a host or an agent is the error's own hint.
+- With no candidate, the `Try:` line is the parent's help, or the error's own hint for a host or an agent.
 
 **The synonym table** lives in `internal/cli/errors.go`. A unit test checks that every target exists in `Root()`. The task that adds a target adds its rows.
 
@@ -197,26 +202,26 @@ Cobra's own errors carry no hint. The root's `cobra.NoArgs` says "unknown comman
 
 C2 replaces them:
 
-- The root and every noun get an `Args` function that returns the unknown-command error with suggestions.
+- The root and every noun get an `Args` function that returns the unknown-command error with suggestions. Cobra adds its `help` and `completion` commands only when it runs, so `Root()` adds them first, and they get the same errors. `help` checks its words too: every word that is left, `-` and the words after `--` included, must name a command. `help atach`, `help host ad` and `help -` fail with the error of an unknown command, and exit with 2.
 - Every noun gets a `RunE`. Without an argument it prints its help on stdout and exits with 0. With an argument it returns the unknown-command error.
 - `doctor` and `host alerts` are not nouns. Each runs, and also has subcommands, so each keeps its own `RunE`. `doctor` gets the same `Args` function as a noun, so `doctor termnal` suggests `terminal`. `host alerts` keeps its one host argument.
 - `SetFlagErrorFunc` on the root turns every flag error into a `UserError`.
 
 | Case | Message | Try | Exit |
 | --- | --- | --- | --- |
-| An unknown command | `unknown command "atach"`, or `"ad" is not a host command` | [Section 4.3](#43-suggestions) | 2 |
+| An unknown command | `unknown command "atach"`, or `host has no command "ad"` | [Section 4.3](#43-suggestions) | 2 |
 | An unknown flag | `new has no flag --detatch` | 4.3, else `simstim new --help` | 2 |
 | A flag without its value | `--dir needs a value` | `simstim new --help` | 2 |
 | A value that does not parse | `--memory-max "4X" is not a size, such as 4G` | `simstim new --help` | 2 |
-| A missing argument | `attach needs a session, as <host>/<session>`, then the short help | `simstim attach --help` | 2 |
-| An extra argument | `rename takes a session and a new name, and got 3 words` | `simstim rename --help` | 2 |
+| A missing argument | `attach needs <host>/<session> or -`, then the short help | `simstim attach --help` | 2 |
+| An extra argument | `rename takes <host>/<session> <new-name>, and got 3 words` | `simstim rename --help` | 2 |
 
-The short help of question C-4 follows the message of a missing argument. It holds the usage line and the command's first example:
+The message of a missing or an extra argument comes from the words of the command's `Use`, so it is right for every command without a message of its own. Choices, as in `<host>/<session> | -`, join with "or". The short help of question C-4 follows the message of a missing argument. It holds the usage line and the command's first example, so every command that needs a word has an example:
 
 ```text
-Error: attach needs a session, as <host>/<session>.
+Error: attach needs <host>/<session> or -.
 
-Usage:   simstim attach [<host>/<session>]
+Usage:   simstim attach <host>/<session> | -
 Example: simstim attach my-vps/auth-fix
 
 Try: simstim attach --help
@@ -238,9 +243,9 @@ Its kind is `KindFailed`, and its code is `internal`.
 
 ### 4.6 Tests
 
-- `TestEveryUserErrorHasHint` parses every Go file under `internal/` with `go/ast`. It fails, with the file and line, on a `client.UserError` literal without a `Code` or with an empty `Hint`.
+- `TestEveryUserErrorHasHint` parses every Go file under `internal/` with `go/ast`, except tests, which build bare errors on purpose. It fails, with the file and line, on a `client.UserError` literal, under any name of the import, without a `Code` or with an empty `Hint`, also one made of constants, such as `"" + ""`. It also fails on `new(client.UserError)`, on a zero `UserError`, and on an empty constant set into a field named `Code` or `Hint`. A value that is empty only at run time cannot be read from the source: `TestDescribeAlwaysHasATry` checks that every error still gets a `Try:` line.
 - Golden tests of `printError` for each kind, with colour and without.
-- A table test of suggestions: `atach` gives `attach`, `delte` gives `delete`, `d` gives three names, `list` gives `ls`, and `xyz` gives none.
+- A table test of suggestions, with the whole list and the `Try:` line: `list` gives `ls`, `run` gives `new`, `at` gives `attach`, `ssh box` gives none, `kil` gives `kill`, `LS` gives `ls`, `Attach` gives `attach`, and `x` and `d` give none. A test that the `Try:` line fixes the word where the parser found it, as in `--debug-file atach atach box/s`, and only the word of the unknown name, as in `new --dir bo/s bo` and `agents install --host cluade cluade`.
 - A test that every synonym target exists in `Root()`.
 - A test that `host ad` fails with exit code 2, and `host` alone prints help and exits with 0.
 - A test that `doctor termnal` fails with exit code 2 and suggests `terminal`, and that `doctor` alone runs its checks.
@@ -270,7 +275,10 @@ Rules:
 3. A listing or describing command (`ls`, `host ls`, `host show`) reports a host that does not answer as data, in that host's entry, and exits with 0.
 4. "No hosts yet" exits with 1. A host that the user named and that does not exist exits with 3.
 5. `ErrClosed`, the connection that closed, exits with 1.
-6. The codes that today's helper sends get a kind in the same map as section 5.3. `not_found` is `KindNotFound`, and `no_folder` is `KindNeedsAnswer`, because `new` asks before it makes a folder. Every other code of today, such as `bad_request`, `exited` and `worktree`, is `KindFailed`.
+6. The codes that today's helper sends get a kind in the same map as section 5.3. A code takes the kind that the table above gives its meaning, the same kind as the client's own check of the same mistake. `not_found` and `unknown_agent` are `KindNotFound`. `bad_name`, `bad_secret` and `memory_max` are `KindUsage`. `no_folder` and `setup_trust` are `KindNeedsAnswer`, because `new` asks before it makes a folder or runs a setup script. Every other code of today, such as `bad_request`, `exited` and `worktree`, is `KindFailed`.
+7. SIGINT and SIGTERM cancel a command outside an attach: it exits with 130, also when it returns no error, and the client prints the cancel and closes its debug file. Every read that waits for the terminal gives up at the signal, such as the key tester of `doctor keys`, and puts the terminal back. A signal at a question is a cancel, never an answer: the command keeps no answer, and changes nothing more. A signal that comes with the answer wins. A read that cannot be cancelled, as on some Windows consoles, does not keep the command waiting. Inside an attach, Ctrl+C is a byte for the agent ([AGENTS.md](../../AGENTS.md), rule 2).
+8. A `hosts.toml` that does not decode is `KindUsage`, and its message names the file, the line and the column. A file that cannot be read is `KindFailed`.
+9. Until C4 moves the prompts, a prompt with input off reads no answer as no, and exits with 130. C4 makes it exit with 4, as [section 6.2](#62-prompts) says.
 
 ### 5.2 `exec`
 

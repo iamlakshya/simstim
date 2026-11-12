@@ -50,7 +50,7 @@ func (c *Conn) resumeError(err error) error {
 // tooOldToResume is the error for a host whose helper cannot resume.
 func (c *Conn) tooOldToResume() error {
 	return &UserError{Msg: "the helper on " + c.Host.Name + " is too old to resume a session",
-		Hint: brand.Name + " host add " + c.Host.Name + "   (updates the helper)"}
+		Hint: brand.Name + " host add " + c.Host.Name + " (updates the helper)", Code: "helper_old"}
 }
 
 // ResumeSecrets picks the secrets that a resume of session s on host h
@@ -67,7 +67,7 @@ func ResumeSecrets(h Host, s Session, passed []string) ([]string, error) {
 		switch {
 		case !secretNameRE.MatchString(n):
 			return nil, &UserError{Msg: fmt.Sprintf("%s on %s asks for a secret named %+q, which is not a name", CleanLine(s.Name), h.Name, n),
-				Hint: fmt.Sprintf("%s kill %s, then start a new session", brand.Name, CommandTarget(h.Name, s.ID))}
+				Hint: fmt.Sprintf("Run %s kill %s, then start a new session.", brand.Name, CommandTarget(h.Name, s.ID)), Code: "bad_secret", Kind: KindUsage}
 		case slices.Contains(own, n), slices.Contains(passed, n):
 			names = append(names, n)
 		default:
@@ -80,6 +80,7 @@ func ResumeSecrets(h Host, s Session, passed []string) ([]string, error) {
 	flags := "--secret " + strings.Join(missing, " --secret ")
 	return nil, &UserError{
 		Msg:  fmt.Sprintf("%s on %s asks for secrets that hosts.toml does not give %s: %s", CleanLine(s.Name), h.Name, h.Name, strings.Join(missing, ", ")),
-		Hint: fmt.Sprintf("%s resume %s %s   (passes them, if you trust %s with them)", brand.Name, CommandTarget(h.Name, s.ID), flags, h.Name),
+		Hint: fmt.Sprintf("%s resume %s %s (passes them, if you trust %s with them)", brand.Name, CommandTarget(h.Name, s.ID), flags, h.Name),
+		Code: "secrets_missing",
 	}
 }

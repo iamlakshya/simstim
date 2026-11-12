@@ -205,7 +205,7 @@ func TestSetupStopsAndSaysWhatWasDone(t *testing.T) {
 	defer cancel2()
 	g2, out2, _ := testGuide(t, ctx2, guideOpts{}, &guideLocal{}, tr, "", true)
 	g2.in = &cancelReader{r: strings.NewReader(""), cancel: cancel2}
-	if err := g2.run(); !errors.As(err, &ue) || ue.Msg != "setup stopped; nothing was changed" {
+	if err := g2.run(); !errors.As(err, &ue) || ue.Msg != "setup stopped; nothing was changed" || ue.Kind != client.KindCancelled {
 		t.Fatalf("a stop at the first question: %v\n%s", err, out2)
 	}
 }
@@ -216,7 +216,7 @@ func TestSetupNeedsATerminalOrFlags(t *testing.T) {
 		g, _, _ := testGuide(t, context.Background(), o, &guideLocal{}, &clienttest.Transport{}, "", false)
 		err := g.run()
 		var ue *client.UserError
-		if !errors.As(err, &ue) || !strings.Contains(ue.Hint, "--yes") {
+		if !errors.As(err, &ue) || !strings.Contains(ue.Hint, "--yes") || ue.Kind != client.KindNeedsAnswer {
 			t.Errorf("%+v: err = %v", o, err)
 		}
 	}

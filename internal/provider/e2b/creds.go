@@ -69,12 +69,13 @@ func runTokenCommand(ctx context.Context, command string) (string, error) {
 	if err := cmd.Run(); err != nil {
 		return "", &client.UserError{
 			Msg:  fmt.Sprintf("the token command failed: %v: %s", err, provider.Tail(errb.String(), 2)),
-			Hint: "Run it by hand to check it prints the key: " + command,
+			Hint: "Run " + command + " by hand, and check that it prints the key.",
+			Code: "token_command",
 		}
 	}
 	key := strings.TrimSpace(out.String())
 	if key == "" {
-		return "", &client.UserError{Msg: "the token command printed nothing", Hint: "Run it by hand to check it prints the key: " + command}
+		return "", &client.UserError{Msg: "the token command printed nothing", Hint: "Run " + command + " by hand, and check that it prints the key.", Code: "token_command"}
 	}
 	return key, nil
 }
@@ -93,7 +94,8 @@ func apiKey(ctx context.Context, tokenCommand, cliPath string) (string, error) {
 	}
 	return "", &client.UserError{
 		Msg:  "no E2B API key: E2B_API_KEY is not set, the E2B CLI is not logged in, and the host has no token_command",
-		Hint: "export E2B_API_KEY=…   (or run `e2b auth login`, or pass --token-command to `" + brand.Name + " host create e2b`)",
+		Hint: "export E2B_API_KEY=… (or run `e2b auth login`, or pass --token-command to `" + brand.Name + " host create e2b`)",
+		Code: "no_api_key",
 	}
 }
 

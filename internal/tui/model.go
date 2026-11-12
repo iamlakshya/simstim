@@ -342,7 +342,7 @@ func (m *Model) update(msg tea.Msg) tea.Cmd {
 		return m.toastSetupWarn(msg.warn)
 	case shellDoneMsg:
 		if msg.err != nil {
-			return m.toastErr(&client.UserError{Msg: "the shell on " + msg.host + " ended with an error: " + msg.err.Error()})
+			return m.toastErr(&client.UserError{Msg: "the shell on " + msg.host + " ended with an error: " + msg.err.Error(), Hint: "Open the shell again.", Code: "shell_failed"})
 		}
 		return nil
 	case foldersMsg:

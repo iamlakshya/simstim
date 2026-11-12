@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/BurntSushi/toml"
@@ -144,16 +145,51 @@ func StateDir() string {
 func hostsPath() string    { return filepath.Join(ConfigDir(), "hosts.toml") }
 func settingsPath() string { return filepath.Join(ConfigDir(), "config.toml") }
 
-// LoadHosts reads the saved hosts.
+// LoadHosts reads the saved hosts. A file that cannot be read is an
+// error of the file system. A file that does not decode is the user's to
+// fix: a usage error that says where.
 func LoadHosts() ([]Host, error) {
-	var f hostsFile
-	if _, err := toml.DecodeFile(hostsPath(), &f); err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return nil, nil
-		}
+	b, err := os.ReadFile(hostsPath())
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
 		return nil, fmt.Errorf("read %s: %w", hostsPath(), err)
 	}
+	var f hostsFile
+	if _, err := toml.Decode(string(b), &f); err != nil {
+		return nil, tomlError(hostsPath(), string(b), err)
+	}
 	return f.Hosts, nil
+}
+
+// tomlLine finds the line in the error of a value of the wrong type, which
+// the TOML package gives only in its text.
+var tomlLine = regexp.MustCompile(`^toml: line (\d+)`)
+
+// tomlError is the usage error of a TOML file that does not decode, with
+// the line and column of the mistake.
+func tomlError(path, data string, err error) error {
+	msg, line, col := err.Error(), 0, 0
+	var pe toml.ParseError
+	if errors.As(err, &pe) {
+		msg, line, col = pe.Message, pe.Position.Line, pe.Position.Col
+	} else if m := tomlLine.FindStringSubmatch(msg); m != nil {
+		// A type error names its line and key: point at the line's first word.
+		line, _ = strconv.Atoi(m[1])
+		if _, rest, ok := strings.Cut(msg, "): "); ok {
+			msg = rest
+		}
+		if lines := strings.Split(data, "\n"); line >= 1 && line <= len(lines) {
+			col = len(lines[line-1]) - len(strings.TrimLeft(lines[line-1], " \t")) + 1
+		}
+	}
+	where, hint := path, "Fix "+path+"."
+	if line > 0 {
+		where = fmt.Sprintf("%s, line %d, column %d", path, line, col)
+		hint = fmt.Sprintf("Fix line %d of %s.", line, path)
+	}
+	return &UserError{Msg: where + ": " + strings.TrimPrefix(msg, "toml: "), Hint: hint, Code: "bad_config", Kind: KindUsage}
 }
 
 // SaveHosts writes the saved hosts.
@@ -207,7 +243,20 @@ func FindHost(name string) (Host, error) {
 			return h, nil
 		}
 	}
-	return Host{}, &UserError{Msg: fmt.Sprintf("no host named %q", name), Hint: fmt.Sprintf("%s host add %s", brand.Name, name)}
+	names := make([]string, len(hosts))
+	for i, h := range hosts {
+		names[i] = h.Name
+	}
+	// A name that can name a host is safe to repeat in a command. Another
+	// one, with a space, a ; or a leading dash, is not.
+	hint := fmt.Sprintf("%s host add %s", brand.Name, name)
+	if !ValidHostName(name) {
+		hint = fmt.Sprintf("Name one of the hosts that %s host ls lists.", brand.Name)
+	}
+	return Host{}, &UnknownNameError{
+		UserError: &UserError{Msg: fmt.Sprintf("no host named %q", name), Hint: hint, Code: "host_not_found", Kind: KindNotFound},
+		Name:      name, Known: names,
+	}
 }
 
 var hostNameRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$`)
@@ -238,14 +287,19 @@ func LoadSettings() Settings {
 	return s
 }
 
-// UserError is an error with a suggested next step.
+// UserError is an error with a suggested next step: the message, and the
+// "Try:" line (docs/contributing/cli-spec.md, section 4).
 type UserError struct {
 	Msg  string
 	Hint string
-	// Code and Data come from the host, for errors a client acts on, such
-	// as a repository's setup script that needs the user's answer.
+	// Code names the error, such as host_not_found. A host sends its own
+	// codes, and the client acts on some of them, such as a repository's
+	// setup script that needs the user's answer. Data carries what the
+	// client needs for that.
 	Code string
 	Data json.RawMessage
+	// Kind sets the exit code. The zero Kind is KindFailed.
+	Kind Kind
 }
 
 func (e *UserError) Error() string { return e.Msg }
@@ -254,7 +308,7 @@ func (e *UserError) Error() string { return e.Msg }
 func SplitTarget(t string) (host, session string, err error) {
 	host, session, ok := strings.Cut(t, "/")
 	if !ok || host == "" || session == "" {
-		return "", "", &UserError{Msg: fmt.Sprintf("%q is not host/session", t), Hint: brand.Name + " ls"}
+		return "", "", &UserError{Msg: fmt.Sprintf("%q is not host/session", t), Hint: brand.Name + " ls", Code: "bad_address", Kind: KindUsage}
 	}
 	return host, session, nil
 }

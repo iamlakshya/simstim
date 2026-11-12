@@ -51,7 +51,7 @@ func TestRunIsStable(t *testing.T) {
 	if second := snapshot(t, dir); second != first {
 		t.Error("a second run changed the pages")
 	}
-	for _, f := range []string{"config.md", "keymap.md", "agents.md", "cli/_index.md", "cli/host_add.md"} {
+	for _, f := range []string{"config.md", "keymap.md", "agents.md", "exit-codes.md", "cli/_index.md", "cli/host_add.md"} {
 		b, err := os.ReadFile(filepath.Join(dir, f))
 		if err != nil || !strings.Contains(string(b), "Do not edit by hand") {
 			t.Errorf("%s: missing or not marked generated", f)

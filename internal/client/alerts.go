@@ -45,7 +45,8 @@ func (c *Conn) needAlerts() error {
 	}
 	return &UserError{
 		Msg:  fmt.Sprintf("the %s on %s is too old for alerts", brand.HostBinary, c.Host.Name),
-		Hint: brand.Name + " host add " + c.Host.Name + "   (installs this version's helper)",
+		Hint: brand.Name + " host add " + c.Host.Name + " (installs this version's helper)",
+		Code: "helper_old",
 	}
 }
 
@@ -116,11 +117,11 @@ func SecretFromCommand(ctx context.Context, line string) (string, error) {
 	out, err := cmd.Output()
 	hint := "Run the command by hand, and check that it prints only the token."
 	if err != nil {
-		return "", &UserError{Msg: "the token command failed (" + err.Error() + ")", Hint: hint}
+		return "", &UserError{Msg: "the token command failed (" + err.Error() + ")", Hint: hint, Code: "token_command"}
 	}
 	tok := strings.TrimSpace(string(out))
 	if tok == "" || strings.ContainsAny(tok, "\r\n") {
-		return "", &UserError{Msg: "the token command printed nothing, or more than one line", Hint: hint}
+		return "", &UserError{Msg: "the token command printed nothing, or more than one line", Hint: hint, Code: "token_command"}
 	}
 	return tok, nil
 }

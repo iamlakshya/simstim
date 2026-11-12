@@ -10,6 +10,12 @@ Start again the sessions a host restart stopped (the host also does this at boot
 simstim host restore <name> [flags]
 ```
 
+## Examples
+
+```sh
+simstim host restore my-vps
+```
+
 ## Flags
 
 | Flag | What it does |

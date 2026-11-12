@@ -157,7 +157,7 @@ func checkTemplate(ctx context.Context, a *api, name string, out io.Writer) erro
 	}
 	t := findTemplate(list, name)
 	if t == nil {
-		return &client.UserError{Msg: fmt.Sprintf("your E2B team has no template called %q", name), Hint: BuildHint(name)}
+		return &client.UserError{Msg: fmt.Sprintf("your E2B team has no template called %q", name), Hint: BuildHint(name), Code: "template_not_found", Kind: client.KindNotFound}
 	}
 	if t.CPUCount < 2 || t.MemoryMB < 4096 {
 		fmt.Fprintf(out, "  Note: the template %s has %d vCPUs and %d MiB of memory; agents want 2 vCPUs and 4 GiB or more. To fix it, %s.\n",

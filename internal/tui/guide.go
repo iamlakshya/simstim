@@ -155,7 +155,7 @@ func (g *guide) key(m *Model, k tea.KeyPressMsg) tea.Cmd {
 		if ks == "enter" {
 			addr := strings.TrimSpace(g.in.value())
 			if !onboard.ValidAddr(addr) {
-				g.err = &client.UserError{Msg: "type the server's address", Hint: "An IP address or a DNS name, as the provider's console shows it."}
+				g.err = &client.UserError{Msg: "type the server's address", Hint: "Type its IP address or DNS name, as the provider's console shows it.", Code: "missing_value", Kind: client.KindUsage}
 				return nil
 			}
 			g.plan.Addr, g.err = addr, nil
@@ -249,7 +249,7 @@ func (g *guide) choose(m *Model, p onboard.Place) tea.Cmd {
 	if !p.Ready {
 		if g.pending == p.Kind {
 			g.pending = ""
-			g.err = &client.UserError{Msg: p.Title + " is not ready yet: " + p.Note, Hint: "Do the steps above, then press enter again."}
+			g.err = &client.UserError{Msg: p.Title + " is not ready yet: " + p.Note, Hint: "Do the steps above, then press enter again.", Code: "not_ready"}
 			return nil
 		}
 		return g.probe(m, p.Kind)
@@ -292,10 +292,10 @@ func (g *guide) create(m *Model) tea.Cmd {
 	}
 	switch {
 	case !client.ValidHostName(name):
-		g.err = &client.UserError{Msg: fmt.Sprintf("%q cannot name a host", name), Hint: "Use letters, digits, dots, dashes and underscores."}
+		g.err = &client.UserError{Msg: fmt.Sprintf("%q cannot name a host", name), Hint: "Use letters, digits, dots, dashes and underscores.", Code: "bad_name", Kind: client.KindUsage}
 		return nil
 	case m.hostByName(name) != nil:
-		g.err = &client.UserError{Msg: "there is already a host named " + name, Hint: "Pick another name."}
+		g.err = &client.UserError{Msg: "there is already a host named " + name, Hint: "Pick another name.", Code: "host_exists"}
 		return nil
 	}
 	g.step, g.note = gdCreate, ""

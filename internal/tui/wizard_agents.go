@@ -265,7 +265,7 @@ func (w *wizard) startSession(m *Model, agent string) {
 // hostErr says why the wizard's host cannot be reached now.
 func (w *wizard) hostErr(h *hostConn) error {
 	if h == nil {
-		return &client.UserError{Msg: w.host.Name + " is no longer in the list", Hint: "Close this, and add the host again."}
+		return &client.UserError{Msg: w.host.Name + " is no longer in the list", Hint: "Close this, and add the host again.", Code: "host_not_found", Kind: client.KindNotFound}
 	}
 	return offlineErr(h)
 }

@@ -42,7 +42,7 @@ func writeWrapper(h Host) (string, error) {
 	if h.SSHConfig != "" {
 		hostConfig = expand(h.SSHConfig)
 		if _, err := os.Stat(hostConfig); err != nil {
-			return "", &UserError{Msg: fmt.Sprintf("the SSH config %s for host %s is missing", hostConfig, h.Name), Hint: brand.Name + " host edit " + h.Name}
+			return "", &UserError{Msg: fmt.Sprintf("the SSH config %s for host %s is missing", hostConfig, h.Name), Hint: "Make the file, or change the ssh_config of " + h.Name + " in hosts.toml.", Code: "ssh_config_missing", Kind: KindUsage}
 		}
 	}
 	return writeConfig(wrapperPath(h), fmt.Sprintf("host %q", h.Name), hostConfig, true)
@@ -352,7 +352,7 @@ func sshError(h Host, err error, stderr string) error {
 		if msg == "" {
 			msg = "ssh failed"
 		}
-		return &UserError{Msg: fmt.Sprintf("cannot reach %s: %s", h.Name, msg), Hint: fmt.Sprintf("ssh %s   (check that this works first)", h.SSH)}
+		return &UserError{Msg: fmt.Sprintf("cannot reach %s: %s", h.Name, msg), Hint: SSHCommand(h.SSH) + " (check that this works first)", Code: "unreachable"}
 	}
 	if msg == "" {
 		return err

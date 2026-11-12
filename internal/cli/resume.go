@@ -87,7 +87,7 @@ func resumeSession(ctx context.Context, target string, a client.ResumeArgs, pass
 	}
 	if !client.Ended(*s) {
 		return h, nil, &client.UserError{Msg: fmt.Sprintf("the agent of %s on %s still runs", client.CleanLine(s.Name), h.Name),
-			Hint: fmt.Sprintf("%s attach %s", brand.Name, client.CommandTarget(h.Name, s.ID))}
+			Hint: fmt.Sprintf("%s attach %s", brand.Name, client.CommandTarget(h.Name, s.ID)), Code: "agent_running"}
 	}
 	names, err := client.ResumeSecrets(h, *s, passed)
 	if err != nil {

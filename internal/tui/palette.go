@@ -440,7 +440,7 @@ func (m *Model) openSettings() tea.Cmd {
 	}}
 	return m.exec(x, func(err error) tea.Msg {
 		if err != nil {
-			err = &client.UserError{Msg: "the editor failed: " + err.Error(), Hint: "Set $EDITOR, or edit " + path + " by hand."}
+			err = &client.UserError{Msg: "the editor failed: " + err.Error(), Hint: "Set $EDITOR, or edit " + path + " by hand.", Code: "editor_failed"}
 		}
 		return editorDoneMsg{err: err}
 	})

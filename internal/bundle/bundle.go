@@ -102,7 +102,7 @@ func Write(ctx context.Context, o Options) (*Result, error) {
 	res, err := write(ctx, o)
 	if err != nil && ctx.Err() != nil {
 		return nil, &client.UserError{Msg: "the bundle stopped before it was complete, and left no file",
-			Hint: brand.Name + " debug bundle" + target(o) + "   (to start it again)"}
+			Hint: brand.Name + " debug bundle" + target(o) + " (to start it again)", Code: "cancelled", Kind: client.KindCancelled}
 	}
 	return res, err
 }
@@ -135,7 +135,7 @@ func write(ctx context.Context, o Options) (*Result, error) {
 	now := time.Now()
 	a, err := newArchive(o.Dir, now)
 	if err != nil {
-		return nil, &client.UserError{Msg: "cannot write the bundle in " + o.Dir + ": " + err.Error(), Hint: "Run it in a folder that you can write."}
+		return nil, &client.UserError{Msg: "cannot write the bundle in " + o.Dir + ": " + err.Error(), Hint: "Run it in a folder that you can write.", Code: "bundle_write"}
 	}
 	done := false
 	defer func() {
@@ -263,7 +263,7 @@ func (b *builder) hostFiles(ctx context.Context) error {
 		}
 		if errors.Is(err, client.ErrClosed) {
 			return &client.UserError{Msg: "the connection to " + b.o.Host.Name + " closed while the bundle read its files",
-				Hint: brand.Name + " debug bundle" + target(b.o) + "   (try again)"}
+				Hint: brand.Name + " debug bundle" + target(b.o) + " (try again)", Code: "closed"}
 		}
 		if err != nil {
 			b.res.Left = append(b.res.Left, Left{Name: printable(f.Path), Why: "the host could not send it: " + printable(err.Error())})
@@ -300,8 +300,8 @@ func pick(list []client.Session, ref, host string) (client.Session, error) {
 	case 1:
 		return byName[0], nil
 	case 0:
-		return client.Session{}, &client.UserError{Msg: fmt.Sprintf("no session %q on %s", ref, host), Hint: brand.Name + " ls --host " + host}
+		return client.Session{}, &client.UserError{Msg: fmt.Sprintf("no session %q on %s", ref, host), Hint: brand.Name + " ls --host " + host, Code: "session_not_found", Kind: client.KindNotFound}
 	}
 	return client.Session{}, &client.UserError{Msg: fmt.Sprintf("%d sessions are named %q on %s", len(byName), ref, host),
-		Hint: "Use the session ID from `" + brand.Name + " ls`."}
+		Hint: "Use the session ID from `" + brand.Name + " ls`.", Code: "session_ambiguous", Kind: client.KindUsage}
 }

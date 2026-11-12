@@ -68,7 +68,7 @@ func TestOfferFixesCleansHostText(t *testing.T) {
 	fixes := []api.Fix{{ID: "x\u200b", Problem: "linger is off" + hostile, Action: "turn on\x1b[2J linger", Command: "loginctl\u202e enable-linger me"}}
 	var out bytes.Buffer
 	var asked []string
-	err := offerFixes(strings.NewReader("y\n"), &out, fixes, false, func(ids []string) ([]api.Fix, error) {
+	err := offerFixes(context.Background(), strings.NewReader("y\n"), &out, fixes, false, func(ids []string) ([]api.Fix, error) {
 		asked = ids
 		res := append([]api.Fix(nil), fixes...)
 		res[0].Error = "it failed: " + hostile
@@ -134,10 +134,10 @@ func TestQuestionsShowHostPaths(t *testing.T) {
 	q := client.SetupQuestion{Repo: "/home/dev/src/app\x1b]52;c;aGk=\x07\u202e", Script: "/home/dev/src/app/.setup\u200b"}
 	// Each wording of the setup question, and the note without a terminal.
 	for _, past := range []client.SetupPast{client.SetupNotTrusted, client.SetupChanged, client.SetupUnchecked} {
-		askSetup(strings.NewReader("n\n"), &out, "box", q, past)
+		_, _ = askSetup(context.Background(), strings.NewReader("n\n"), &out, "box", q, past)
 		out.WriteString(skipNote("box", q, past) + "\n")
 	}
-	askMakeFolder(strings.NewReader("n\n"), &out, "box", client.FolderQuestion{Folder: "/home/dev/src/mi\u200cnd"})
+	_, _ = askMakeFolder(context.Background(), strings.NewReader("n\n"), &out, "box", client.FolderQuestion{Folder: "/home/dev/src/mi\u200cnd"})
 	noHostBits(t, "the questions", out.String())
 	for _, want := range []string{`"/home/dev/src/app\x1b]52;c;aGk=\a\u202e"`, `"/home/dev/src/app/.setup\u200b"`, `"/home/dev/src/mi\u200cnd"`} {
 		if !strings.Contains(out.String(), want) {
@@ -145,7 +145,7 @@ func TestQuestionsShowHostPaths(t *testing.T) {
 		}
 	}
 	out.Reset()
-	askMakeFolder(strings.NewReader("n\n"), &out, "box", client.FolderQuestion{Folder: "/home/dev/src/new-app"})
+	_, _ = askMakeFolder(context.Background(), strings.NewReader("n\n"), &out, "box", client.FolderQuestion{Folder: "/home/dev/src/new-app"})
 	if !strings.Contains(out.String(), "The folder /home/dev/src/new-app does not exist") {
 		t.Errorf("a clean folder is quoted:\n%s", out.String())
 	}
@@ -463,17 +463,9 @@ func TestDestroyRefusalCleansHostText(t *testing.T) {
 func TestPrintErrorCleansEveryError(t *testing.T) {
 	printed := func(err error) string {
 		t.Helper()
-		f, ferr := os.CreateTemp(t.TempDir(), "stderr")
-		if ferr != nil {
-			t.Fatal(ferr)
-		}
-		old := os.Stderr
-		os.Stderr = f
-		printError(err)
-		os.Stderr = old
-		_ = f.Close()
-		b, _ := os.ReadFile(f.Name())
-		return string(b)
+		var b strings.Builder
+		printError(&b, err, nil, false, false)
+		return b.String()
 	}
 	out := printed(&client.UserError{Msg: "made here: \x1bc" + hostile + "\nline two" + hostile, Hint: "do\x1b]52;c;aGk=\x07 this"})
 	noHostBits(t, "a user error", out)

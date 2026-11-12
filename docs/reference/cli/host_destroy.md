@@ -12,6 +12,12 @@ simstim host destroy <name> [flags]
 
 Delete the machine behind a host, then forget the host. It asks first, and refuses while a session is working unless you pass `--force`.
 
+## Examples
+
+```sh
+simstim host destroy lima
+```
+
 ## Flags
 
 | Flag | What it does |

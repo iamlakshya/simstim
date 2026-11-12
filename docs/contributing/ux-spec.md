@@ -629,4 +629,4 @@ These parts of the spec are planned, and are not in the current build:
 - the disk check in the add-host wizard's test step;
 - editing a host from host details.
 
-The exit codes of section 6 are not built yet either. Task C2 of [the CLI plan](cli-plan.md) builds them. Today a host or network error exits with 2, and an error whose message names a missing host or session exits with 3.
+Parts of the exit codes are not built yet either. A prompt with input off, such as `host destroy` in a script, reads no answer as no and exits with 130, not 4. Task C4 of [the CLI plan](cli-plan.md) builds that. `exec` and its exit codes come with task P1.13 of [the isolation plan](isolation-plan.md). Until that plan builds policies and tiers, no command exits with 5.

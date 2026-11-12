@@ -10,6 +10,12 @@ Stop the host through its provider or provider script (a VM's sessions stop too;
 simstim host stop <name>
 ```
 
+## Examples
+
+```sh
+simstim host stop my-vps
+```
+
 ## Flags from the parent command
 
 | Flag | What it does |

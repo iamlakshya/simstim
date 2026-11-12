@@ -71,6 +71,7 @@ func (m *Model) onConnDone(msg connDoneMsg) tea.Cmd {
 	h.err = &client.UserError{
 		Msg:  "lost the connection to " + h.name(),
 		Hint: fmt.Sprintf("%s host test %s", brand.Name, h.name()),
+		Code: "closed",
 	}
 	h.backoff = nextBackoff(h.backoff)
 	return tea.Batch(m.dropConn(old), m.after(h.backoff, redialMsg{name: h.name(), gen: h.gen}))

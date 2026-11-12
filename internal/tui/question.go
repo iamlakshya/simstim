@@ -48,7 +48,7 @@ func (m *Model) startAgain(r startReq) tea.Cmd {
 	h := m.hostByName(r.host)
 	if h == nil {
 		m.cancelStart(r)
-		return m.toastErr(&client.UserError{Msg: "the host " + r.host + " is no longer in the list", Hint: "Add the host again, then start the session."})
+		return m.toastErr(&client.UserError{Msg: "the host " + r.host + " is no longer in the list", Hint: "Add the host again, then start the session.", Code: "host_not_found", Kind: client.KindNotFound})
 	}
 	m.modal = nil
 	if r.form != nil {

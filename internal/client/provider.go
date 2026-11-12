@@ -41,7 +41,7 @@ type ProviderStatus struct {
 // RunProvider runs one provider action for h.
 func RunProvider(ctx context.Context, h Host, action string) ([]byte, error) {
 	if h.Provider == nil || h.Provider.Script == "" {
-		return nil, &UserError{Msg: h.Name + " has no provider script", Hint: brand.Name + " host add " + h.Name + " --provider-script <path>"}
+		return nil, &UserError{Msg: h.Name + " has no provider script", Hint: brand.Name + " host add " + h.Name + " --provider-script <path>", Code: "no_provider_script"}
 	}
 	job, _ := json.Marshal(map[string]any{"action": action, "host": map[string]any{"name": h.Name, "ssh": h.SSH, "labels": h.Labels}})
 	cmd := exec.CommandContext(ctx, expand(h.Provider.Script), action)
@@ -54,7 +54,7 @@ func RunProvider(ctx context.Context, h Host, action string) ([]byte, error) {
 		if msg == "" {
 			msg = err.Error()
 		}
-		return nil, &UserError{Msg: fmt.Sprintf("the provider script could not %s %s: %s", action, h.Name, msg), Hint: "Run the script by hand: " + h.Provider.Script + " " + action}
+		return nil, &UserError{Msg: fmt.Sprintf("the provider script could not %s %s: %s", action, h.Name, msg), Hint: "Run " + pathWord(h.Provider.Script) + " " + action + " by hand to see what fails.", Code: "provider_script"}
 	}
 	return out.Bytes(), nil
 }

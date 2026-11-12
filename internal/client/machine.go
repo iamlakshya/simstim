@@ -97,13 +97,13 @@ func RegisterProvider(name string, open func(Host) (Lifecycle, error)) {
 // OpenMachine returns the lifecycle of the machine behind h.
 func OpenMachine(h Host) (Lifecycle, error) {
 	if h.Machine == nil {
-		return nil, &UserError{Msg: h.Name + " was not made by `host create`", Hint: brand.Name + " host rm " + h.Name + "   (forgets a host you added)"}
+		return nil, &UserError{Msg: h.Name + " was not made by `host create`", Hint: brand.Name + " host rm " + h.Name + " (forgets a host you added)", Code: "not_created"}
 	}
 	providersMu.RLock()
 	open := providers[h.Machine.Provider]
 	providersMu.RUnlock()
 	if open == nil {
-		return nil, &UserError{Msg: fmt.Sprintf("%s was made by the %q provider, which this build does not know", h.Name, h.Machine.Provider), Hint: brand.Name + " update"}
+		return nil, &UserError{Msg: fmt.Sprintf("%s was made by the %q provider, which this build does not know", h.Name, h.Machine.Provider), Hint: "Install a release of " + brand.Name + " that knows the provider.", Code: "unknown_provider"}
 	}
 	return open(h)
 }
@@ -124,7 +124,7 @@ func ForgetHost(name string) error {
 		out = append(out, h)
 	}
 	if !found {
-		return &UserError{Msg: fmt.Sprintf("no host named %q", name), Hint: brand.Name + " host ls"}
+		return &UserError{Msg: fmt.Sprintf("no host named %q", name), Hint: brand.Name + " host ls", Code: "host_not_found", Kind: KindNotFound}
 	}
 	if err := SaveHosts(out); err != nil {
 		return err
@@ -203,11 +203,12 @@ func ensureRunning(ctx context.Context, h Host, lc Lifecycle) error {
 	case MachineMissing:
 		return &UserError{
 			Msg:  fmt.Sprintf("the %s machine of %s (%s) is gone", h.Machine.Provider, h.Name, h.Machine.ID),
-			Hint: brand.Name + " host destroy " + h.Name + "   (forgets it)",
+			Hint: brand.Name + " host destroy " + h.Name + " (forgets it)",
+			Code: "machine_gone",
 		}
 	}
 	if !wakeAllowed(ctx) {
-		return &UserError{Msg: fmt.Sprintf("%s is %s", h.Name, st), Hint: brand.Name + " host start " + h.Name + "   (or attach to one of its sessions)"}
+		return &UserError{Msg: fmt.Sprintf("%s is %s", h.Name, st), Hint: brand.Name + " host start " + h.Name + " (an attach to one of its sessions starts it too)", Code: "host_stopped"}
 	}
 	if st != MachineStarting {
 		if err := lc.Start(ctx); err != nil {
@@ -242,5 +243,6 @@ func waitReady(ctx context.Context, h Host, lc Lifecycle, limit time.Duration) e
 	return &UserError{
 		Msg:  fmt.Sprintf("%s did not answer within %s of starting: %v", h.Name, limit, last),
 		Hint: brand.Name + " host status " + h.Name,
+		Code: "start_timeout",
 	}
 }

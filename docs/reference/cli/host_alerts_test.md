@@ -10,6 +10,12 @@ Send a test alert to every destination now, and say what each did.
 simstim host alerts test <host> [flags]
 ```
 
+## Examples
+
+```sh
+simstim host alerts test my-vps
+```
+
 ## Flags
 
 | Flag | What it does |

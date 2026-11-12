@@ -10,6 +10,12 @@ Rename a session.
 simstim rename <host>/<session> <new-name>
 ```
 
+## Examples
+
+```sh
+simstim rename my-vps/auth-fix login-fix
+```
+
 ## Flags from the parent command
 
 | Flag | What it does |

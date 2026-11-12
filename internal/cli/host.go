@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -39,6 +38,8 @@ func hostAddCmd() *cobra.Command {
 		Short: "Connect a host: check it, install the helper, prepare it",
 		Long: "Connect a host. The ssh target is a Host from your SSH config, or user@host.\n" +
 			"It defaults to the name. --ssh-config adds an extra SSH config file, for example a repo's own.",
+		Example: "  " + brand.Name + " host add my-vps" + "\n" +
+			"  " + brand.Name + " host add my-vps dev@203.0.113.10",
 		Args: cobra.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			h := client.Host{Name: args[0], SSH: args[0], SSHConfig: sshConfig}
@@ -56,7 +57,7 @@ func hostAddCmd() *cobra.Command {
 				}
 			}
 			if !client.ValidHostName(h.Name) {
-				return &client.UserError{Msg: fmt.Sprintf("%q cannot name a host", h.Name), Hint: "Use letters, digits, dots, dashes and underscores."}
+				return &client.UserError{Msg: fmt.Sprintf("%q cannot name a host", h.Name), Hint: "Use letters, digits, dots, dashes and underscores.", Code: "bad_name", Kind: client.KindUsage}
 			}
 			return addHost(cmd.Context(), h, yes)
 		},
@@ -70,7 +71,17 @@ func hostAddCmd() *cobra.Command {
 }
 
 func addHost(ctx context.Context, h client.Host, yes bool) error {
-	consent := func(q string) (bool, error) { return yes || confirm(q), nil }
+	consent := func(q string) (bool, error) {
+		if yes {
+			return true, nil
+		}
+		ok, err := confirm(ctx, q)
+		if err == nil && ok && stopped(ctx) {
+			// A signal that came with the yes: install nothing.
+			return false, errInterrupted
+		}
+		return ok, err
+	}
 	checks, err := connectHost(ctx, os.Stdout, h, consent, nil)
 	if err != nil {
 		return err
@@ -117,7 +128,7 @@ func connectHost(ctx context.Context, w io.Writer, h client.Host, consent func(q
 	if !p.Installed {
 		bin, ok := helpers.For(p.OS, p.Arch)
 		if !ok {
-			return nil, &client.UserError{Msg: fmt.Sprintf("no helper for %s/%s in this build", p.OS, p.Arch), Hint: "Linux hosts on amd64 and arm64 are supported."}
+			return nil, &client.UserError{Msg: fmt.Sprintf("no helper for %s/%s in this build", p.OS, p.Arch), Hint: "Use a Linux host on amd64 or arm64.", Code: "no_helper"}
 		}
 		fmt.Fprintf(w, "\n%s needs a small helper on the host to keep sessions alive.\n", brand.DisplayName)
 		fmt.Fprintf(w, "    What   %s %s, %.1f MB, SHA-256 checked\n", brand.HostBinary, client.HelperVersion(), float64(len(bin))/1e6)
@@ -129,7 +140,7 @@ func connectHost(ctx context.Context, w io.Writer, h client.Host, consent func(q
 			return nil, err
 		}
 		if !ok {
-			return nil, &client.UserError{Msg: "cancelled; nothing was installed", Hint: brand.Name + " host add " + h.Name}
+			return nil, &client.UserError{Msg: "cancelled; nothing was installed", Hint: brand.Name + " host add " + h.Name, Code: "cancelled", Kind: client.KindCancelled}
 		}
 		ictx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 		err = client.Install(ictx, s, p)
@@ -176,13 +187,6 @@ func connectHost(ctx context.Context, w io.Writer, h client.Host, consent func(q
 	return client.CleanAgentChecks(checks), nil
 }
 
-func confirm(q string) bool {
-	fmt.Printf("%s [y/N] ", q)
-	line, _ := bufio.NewReader(os.Stdin).ReadString('\n')
-	line = strings.ToLower(strings.TrimSpace(line))
-	return line == "y" || line == "yes"
-}
-
 func hostLsCmd() *cobra.Command {
 	var asJSON bool
 	cmd := &cobra.Command{
@@ -217,13 +221,18 @@ func hostLsCmd() *cobra.Command {
 
 func hostRmCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "rm <name>",
-		Short: "Forget a host (its sessions keep running)",
-		Args:  cobra.ExactArgs(1),
+		Use:     "rm <name>",
+		Short:   "Forget a host (its sessions keep running)",
+		Example: "  " + brand.Name + " host rm my-vps",
+		Args:    cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
 			hosts, err := client.LoadHosts()
 			if err != nil {
 				return err
+			}
+			names := make([]string, 0, len(hosts))
+			for _, h := range hosts {
+				names = append(names, h.Name)
 			}
 			out := hosts[:0]
 			var gone *client.Host
@@ -235,7 +244,10 @@ func hostRmCmd() *cobra.Command {
 				out = append(out, h)
 			}
 			if gone == nil {
-				return &client.UserError{Msg: fmt.Sprintf("no host named %q", args[0]), Hint: brand.Name + " host ls"}
+				return &client.UnknownNameError{
+					UserError: &client.UserError{Msg: fmt.Sprintf("no host named %q", args[0]), Hint: brand.Name + " host ls", Code: "host_not_found", Kind: client.KindNotFound},
+					Name:      args[0], Known: names,
+				}
 			}
 			if err := client.SaveHosts(out); err != nil {
 				return err
@@ -251,9 +263,10 @@ func hostRmCmd() *cobra.Command {
 
 func hostTestCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "test <name>",
-		Short: "Check that a host answers, and how fast",
-		Args:  cobra.ExactArgs(1),
+		Use:     "test <name>",
+		Short:   "Check that a host answers, and how fast",
+		Example: "  " + brand.Name + " host test my-vps",
+		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			h, err := client.FindHost(args[0])
 			if err != nil {
@@ -291,6 +304,8 @@ func hostDoctorCmd() *cobra.Command {
 			"fix linger, the restore unit, Ghostty's terminfo, a broken current helper link, stale\n" +
 			"session sockets and old helper versions. Each fix is shown and explained before it\n" +
 			"runs; one that needs root is printed for you.",
+		Example: "  " + brand.Name + " host doctor my-vps" + "\n" +
+			"  " + brand.Name + " host doctor my-vps --fix",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			h, err := client.FindHost(args[0])
@@ -362,9 +377,10 @@ func printJSON(v any) error {
 func hostRestoreCmd() *cobra.Command {
 	var all bool
 	cmd := &cobra.Command{
-		Use:   "restore <name>",
-		Short: "Start again the sessions a host restart stopped (the host also does this at boot)",
-		Args:  cobra.ExactArgs(1),
+		Use:     "restore <name>",
+		Short:   "Start again the sessions a host restart stopped (the host also does this at boot)",
+		Example: "  " + brand.Name + " host restore my-vps",
+		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			h, err := client.FindHost(args[0])
 			if err != nil {
@@ -394,9 +410,10 @@ func hostRestoreCmd() *cobra.Command {
 
 func hostProviderCmd(action, short string) *cobra.Command {
 	return &cobra.Command{
-		Use:   action + " <name>",
-		Short: short,
-		Args:  cobra.ExactArgs(1),
+		Use:     action + " <name>",
+		Short:   short,
+		Example: "  " + brand.Name + " host " + action + " my-vps",
+		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			h, err := client.FindHost(args[0])
 			if err != nil {

@@ -12,6 +12,13 @@ simstim host add <name> [ssh-target] [flags]
 
 Connect a host. The ssh target is a Host from your SSH config, or user@host. It defaults to the name. `--ssh-config` adds an extra SSH config file, for example a repo's own.
 
+## Examples
+
+```sh
+simstim host add my-vps
+simstim host add my-vps dev@203.0.113.10
+```
+
 ## Flags
 
 | Flag | What it does |

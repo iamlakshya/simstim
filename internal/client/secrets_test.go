@@ -69,6 +69,9 @@ func TestFetchSecretsErrorsShowNoValue(t *testing.T) {
 		if strings.Contains(ue.Msg+ue.Hint, testSecret) {
 			t.Errorf("%s: the error shows the value: %+v", name, ue)
 		}
+		if want := "Add MISSING = \"<the command that prints it>\" under [secrets] in " + settingsPath() + "."; name == "MISSING" && ue.Hint != want {
+			t.Errorf("MISSING: hint %q, want %q", ue.Hint, want)
+		}
 	}
 }
 

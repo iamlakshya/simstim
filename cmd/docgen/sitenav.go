@@ -81,6 +81,7 @@ func sidebar(docs string, pages map[string]string) ([]tab, error) {
 			at("docs/reference/config.md", "Configuration"),
 			at("docs/reference/keymap.md", "Keys"),
 			at("docs/reference/agents.md", "Agents"),
+			at("docs/reference/exit-codes.md", "Exit codes"),
 			at("examples/providers/README.md", "Provider scripts"),
 		},
 		Links: map[string]string{"Commands": "/reference/cli/"},
