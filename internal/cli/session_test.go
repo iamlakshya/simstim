@@ -86,7 +86,9 @@ func TestLsSaysWhyAnAgentEnded(t *testing.T) {
 		out := ok(t, "ls")
 		return want[0].MatchString(out) && want[1].MatchString(out)
 	})
-	failsWithHint(t, "the session crash on box ended (exit code 3)", "resume box/"+crash, "attach", "box/crash")
+	if out := ok(t, "show", "box/crash"); !strings.Contains(out, "errored (exit code 3, from ") {
+		t.Errorf("show box/crash:\n%s", out)
+	}
 }
 
 // attach to an agent that has ended reads like the message at the end of an
@@ -108,7 +110,7 @@ func TestEndedErrorSaysWhatToTry(t *testing.T) {
 	}
 	done := client.Session{ID: "b2", Name: "docs", State: api.StateExited, ExitCode: new(0)}
 	if err := endedError(h, done); !errors.As(err, &ue) || ue.Msg != "the session docs on box ended (exit code 0)" ||
-		!strings.Contains(ue.Hint, "resume box/b2") || !strings.Contains(ue.Hint, "kill box/b2") {
+		!strings.Contains(ue.Hint, "resume box/b2") || !strings.Contains(ue.Hint, "rm box/b2") {
 		t.Fatalf("endedError = %+v", err)
 	}
 	lost := client.Session{ID: "c3", Name: "pair", State: api.StateLost, Reason: "the host restarted"}

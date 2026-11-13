@@ -13,6 +13,7 @@ This project runs coding agents in simstim sessions on remote hosts.
 
 - List the sessions: `simstim ls --json`
 - List the hosts: `simstim host ls --json`
+- Describe one: `simstim show <host>/<session> --json`
 - In scripts, pass `--no-input`.
 - Exit codes: `simstim help exit-codes`
 - Help for a command: `simstim <command> --help`

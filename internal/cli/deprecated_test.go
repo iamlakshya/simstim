@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -74,9 +75,9 @@ func TestEachOldFormWorksAndWarnsOnce(t *testing.T) {
 		old, now string
 	}{
 		{"-v", []string{"-v"}, 0, "", ""},
-		{"new -d", []string{"new", "nowhere", "-d", "/a", "-d", "/b"}, 3, "", ""},
-		{"new --setup", []string{"new", "nowhere", "--setup", "--setup"}, 3, "", ""},
-		{"new --no-setup", []string{"new", "nowhere", "--no-setup"}, 3, "", ""},
+		{"new -d", []string{"new", "nowhere", "-d", "/a", "-d", "/b", "--detach"}, 3, "", ""},
+		{"new --setup", []string{"new", "nowhere", "--setup", "--setup", "--detach"}, 3, "", ""},
+		{"new --no-setup", []string{"new", "nowhere", "--no-setup", "--detach"}, 3, "", ""},
 		{"agents install --force", []string{"agents", "install", "claude", "--force", "--host", "nowhere"}, 3, "", ""},
 		{"host alerts set --token-cmd", []string{"host", "alerts", "set", "nowhere", "--token-cmd", "echo x"}, 2, "", ""},
 		{"host alerts log -n", []string{"host", "alerts", "log", "nowhere", "-n", "5"}, 3, "", ""},
@@ -304,7 +305,7 @@ func withoutOld(t *testing.T, ids ...string) {
 // passes a folder after -d then fails loudly (cli-spec 10.4).
 func TestAfterTheEndOfDashD(t *testing.T) {
 	hosttest.New(t)
-	if err := client.SaveHosts([]client.Host{{Name: "box", SSH: "box"}}); err != nil {
+	if err := client.SaveHosts(context.Background(), []client.Host{{Name: "box", SSH: "box"}}); err != nil {
 		t.Fatal(err)
 	}
 	withoutOld(t, "new -d")
@@ -369,7 +370,7 @@ func TestNewWithTheOldDashD(t *testing.T) {
 	if code != 0 || m == nil || !strings.HasPrefix(stderr, warningOf(t, "new -d", "", "")) || strings.Count(stderr, "Warning:") != 1 {
 		t.Fatalf("new -d = %d, %q:\n%s", code, out, stderr)
 	}
-	if _, stderr, code := mainLine(t, "new", "box", "--setup", "--no-setup"); code != 2 || !strings.Contains(stderr, "Error: --setup-script and --no-setup-script cannot go together.") {
+	if _, stderr, code := mainLine(t, "new", "box", "--setup", "--no-setup", "--detach"); code != 2 || !strings.Contains(stderr, "Error: --setup-script and --no-setup-script cannot go together.") {
 		t.Errorf("new box --setup --no-setup = %d:\n%s", code, stderr)
 	}
 	var list []hostSessions

@@ -168,11 +168,11 @@ func (c *handoffConn) Resume(ctx context.Context, a client.ResumeArgs) (*client.
 	return c.fakeConn.Resume(ctx, a)
 }
 
-func (c *handoffConn) Delete(ctx context.Context, id string) (client.DeleteResult, error) {
+func (c *handoffConn) DeleteNamed(ctx context.Context, id, name string) (client.DeleteResult, error) {
 	if err := c.gate(ctx, "delete"); err != nil {
 		return client.DeleteResult{}, err
 	}
-	return c.fakeConn.Delete(ctx, id)
+	return c.fakeConn.DeleteNamed(ctx, id, name)
 }
 
 func (c *handoffConn) RoundTrip(ctx context.Context) (time.Duration, error) {

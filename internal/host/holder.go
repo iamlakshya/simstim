@@ -96,6 +96,12 @@ type Holder struct {
 	// saveMu orders the manifest's saves; closed is set by the last one.
 	saveMu sync.Mutex
 	closed bool
+	// copies numbers each copy of the manifest for a save, under mu, and
+	// saved is the number of the newest copy saved, under saveMu: a save of
+	// an older copy never replaces a newer one, such as a renamed one.
+	copies, saved uint64
+	syncFirstSave bool
+	loadedName    string
 	// From agent hooks.
 	hookSeen    bool
 	hookBusy    bool
@@ -122,10 +128,16 @@ type Holder struct {
 
 // RunHolder runs the holder for session id until the session is killed.
 func RunHolder(id string) error {
+	releaseLock, err := acquireHolderLock(id)
+	if err != nil {
+		return err
+	}
+	defer releaseLock()
 	m, err := LoadManifest(id)
 	if err != nil {
 		return fmt.Errorf("load manifest: %w", err)
 	}
+	afterHolderLoad(id)
 	lf, err := openHolderLog(paths.HolderLog(id), holderLogMax)
 	if err != nil {
 		return err
@@ -133,16 +145,20 @@ func RunHolder(id string) error {
 	defer lf.Close()
 	lines := diag.NewLines()
 	h := &Holder{
-		id:       id,
-		m:        m,
-		log:      newHolderLog(lf, lines),
-		ring:     ring.New(RingSize),
-		clients:  map[*hclient]struct{}{},
-		readDone: make(chan struct{}),
+		id:            id,
+		m:             m,
+		log:           newHolderLog(lf, lines),
+		ring:          ring.New(RingSize),
+		clients:       map[*hclient]struct{}{},
+		readDone:      make(chan struct{}),
+		syncFirstSave: true,
+		loadedName:    m.Name,
 	}
 	h.dbg.lines = lines
 	// A holder that starts again, as after a reboot, starts with debug off.
 	m.DebugUntil = nil
+	// The unit goes in before any save, the save of a start that fails too.
+	h.takeUnit()
 	h.log.Info("holder starting", "session", id, "helper", brand.HostBinary, "version", version.Version)
 	restored := wasRestored(m)
 	if err := h.listen(); err != nil {
@@ -155,8 +171,9 @@ func RunHolder(id string) error {
 		h.mu.Lock()
 		code := 127
 		h.m.Status = Status{State: StateErrored, Since: time.Now().UTC(), ExitCode: &code, Reason: err.Error()}
+		c := h.copyForSave()
 		h.mu.Unlock()
-		_ = h.m.Save()
+		_ = h.save(c, false)
 		h.closeSockets()
 		return err
 	}
@@ -218,9 +235,6 @@ func (h *Holder) start() error {
 
 	h.mu.Lock()
 	now := time.Now().UTC()
-	if u := ownUnit(h.id); u != "" {
-		m.Run.Unit = u
-	}
 	m.Run.HolderPID = os.Getpid()
 	m.Run.AgentPID = cmd.Process.Pid
 	m.Run.Socket = paths.Socket(h.id)
@@ -232,8 +246,11 @@ func (h *Holder) start() error {
 	m.HostVersion = version.Version
 	m.Status = Status{State: StateWorking, Since: now, Source: "start"}
 	h.lastOut = time.Now()
+	// A numbered copy, as every save of the holder: a rename that comes
+	// now is not undone by this save (holder_rename.go).
+	c := h.copyForSave()
 	h.mu.Unlock()
-	if err := m.Save(); err != nil {
+	if err := h.save(c, false); err != nil {
 		h.log.Warn("manifest not saved", "err", err)
 	}
 	// The program and the count of its arguments only: an argument can hold
@@ -357,51 +374,9 @@ func (h *Holder) waitLoop() {
 		}
 	}
 	// Save a copy: other goroutines change the manifest under the lock.
-	m := *h.m
+	c := h.copyForSave()
 	h.mu.Unlock()
-	_ = h.save(&m, false)
-}
-
-// tick updates the status and saves the manifest when it changed.
-func (h *Holder) tick() {
-	t := time.NewTicker(time.Second)
-	defer t.Stop()
-	last := time.Now()
-	for range t.C {
-		last = h.noteTick(last)
-		h.step()
-	}
-}
-
-// step is one tick: it reads the unit's memory files, updates the status,
-// and saves the manifest when it changed.
-func (h *Holder) step() {
-	mem := h.readMem()
-	lt := h.lockTimed()
-	on := h.mem.on
-	h.checkMemory(mem)
-	h.snapshotBefore(on)
-	// Before updateStatus: a kill that it claims clears the memory warning's
-	// mark, and the status shows that in the same tick.
-	if kills := h.checkOOM(mem.kills); kills > 0 {
-		h.goSnapshot(kills) // in a goroutine: it reads no file under the lock
-	}
-	if !h.exited {
-		h.updateStatus()
-	}
-	dirty := h.dirty
-	h.dirty = false
-	var snapshot Manifest
-	if dirty {
-		snapshot = *h.m
-	}
-	h.mu.Unlock()
-	lt.tick()
-	if dirty {
-		if err := h.save(&snapshot, false); err != nil {
-			h.log.Warn("manifest not saved", "err", err)
-		}
-	}
+	_ = h.save(c, false)
 }
 
 // updateStatus sets the session's state from the screen rules, the agent's

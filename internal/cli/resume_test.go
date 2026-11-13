@@ -24,13 +24,16 @@ func agentEnded(t *testing.T, id string) {
 // resume starts the agent of an ended session again, in the same session,
 // with the cap asked for now. A session that runs a command of its own runs
 // it again, with new's default agent, the shell, too. Its errors say what to
-// try: an agent that still runs, a session that does not exist, a bad size.
+// try: a session that does not exist, a bad size. On an agent that still
+// runs, --detach says so, and exits with 0 (cli-spec 9.4).
 func TestResumeCommand(t *testing.T) {
 	newTestHost(t)
 	short := newSession(t, "short", "/bin/sh", "-c", "sleep 3; exit 2")
-	failsWithHint(t, "the agent of short on box still runs", "attach box/"+short, "resume", "box/"+short, "--detach")
-	failsWithHint(t, `no session "nosuch" on box`, "ls --host box", "resume", "box/nosuch")
-	failsWithHint(t, `"100M" is below the smallest cap, 256M`, "size of 256M or more", "resume", "box/"+short, "--memory-max", "100M")
+	if out := okSaid(t, "resume", "box/"+short, "--detach"); out != "short on box is already running.\n" {
+		t.Errorf("resume --detach on a running agent: %q", out)
+	}
+	failsWithHint(t, `no session "nosuch" on box`, "ls box", "resume", "box/nosuch", "--detach")
+	failsWithHint(t, `"100M" is below the smallest cap, 256M`, "size of 256M or more", "resume", "box/"+short, "--detach", "--memory-max", "100M")
 
 	agentEnded(t, short)
 	out := okSaid(t, "resume", "box/short", "--detach", "--memory-max", "512M")
@@ -43,11 +46,14 @@ func TestResumeCommand(t *testing.T) {
 	if s := sessionState(t, short); s == api.StateExited || s == api.StateErrored {
 		t.Errorf("after the resume the session is %s", s)
 	}
-	failsWithHint(t, "the agent of short on box still runs", "attach box/"+short, "resume", "box/"+short, "--detach")
+	if out := okSaid(t, "resume", "short", "--detach"); out != "short on box is already running.\n" {
+		t.Errorf("resume --detach after the resume: %q", out)
+	}
 }
 
 // With a helper from before the resume, the command says that it is too
-// old, and how to update it.
+// old, and how to update it. attach on an ended agent gets the error of
+// an ended agent instead of asking to start it again (cli-spec 9.3).
 func TestResumeWithAnOldHelper(t *testing.T) {
 	newTestHost(t)
 	id := newSession(t, "short", "/bin/sh", "-c", "exit 0")
@@ -55,7 +61,12 @@ func TestResumeWithAnOldHelper(t *testing.T) {
 	old := host.Features
 	host.Features = slices.DeleteFunc(slices.Clone(old), func(f string) bool { return f == "resume" })
 	t.Cleanup(func() { host.Features = old })
-	failsWithHint(t, "the helper on box is too old to resume a session", "host add box", "resume", "box/"+id)
+	failsWithHint(t, "the helper on box is too old to resume a session", "host add box", "resume", "box/"+id, "--detach")
+	_, done := inTerminal(t, "attach", "box/"+id)
+	err := wait(t, done)
+	if _, code := reportOf(err); code != 1 || err.Error() != "the session short on box ended (exit code 0)" {
+		t.Errorf("attach with an old helper: exit %d, %v", code, err)
+	}
 }
 
 // Without --detach, resume attaches to the session, as new does. A session

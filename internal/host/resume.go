@@ -3,6 +3,7 @@ package host
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"sort"
 	"strings"
@@ -64,7 +65,11 @@ func Resume(a api.ResumeArgs) (*ResumeResult, error) {
 		return nil, UserError("not_found", "no session "+id, "List sessions to find its ID.")
 	}
 	if alive(id) && m.Status.State != StateExited && m.Status.State != StateErrored {
-		return nil, UserError("agent_running", "the agent of "+m.Name+" still runs",
+		name := m.Name
+		if settled, ok := settledRenameName(id); ok {
+			name = settled
+		}
+		return nil, UserError("agent_running", "the agent of "+name+" still runs",
 			"Attach to it. To start it again, quit the agent first, then resume the session.")
 	}
 	secrets, err := resumeSecrets(m.Secrets, a.Secrets)
@@ -78,10 +83,20 @@ func Resume(a api.ResumeArgs) (*ResumeResult, error) {
 	}
 	// The session's debug stops with its old holder (holder_debug.go).
 	debugOn := debugUntil(m, alive(id)) != nil
-	stopHolder(id, m)
+	if err := stopHolder(id, m); err != nil {
+		return nil, UserError("busy", fmt.Sprintf("the previous holder of session %s could not be stopped: %v", id, err),
+			"Try again in a moment, or check the host with the host doctor.")
+	}
+	if oldHolderRuns(id) {
+		return nil, UserError("busy", fmt.Sprintf("the previous holder of session %s is still running", id),
+			"Try again in a moment, or check the host with the host doctor.")
+	}
 	// The old holder saves the manifest a last time as it stops.
 	if m, err = LoadManifest(id); err != nil {
 		return nil, UserError("not_found", "no session "+id, "List sessions to find its ID.")
+	}
+	if err := reconcileUnsavedLocked(m); err != nil {
+		return nil, UserError("start_failed", err.Error(), "Check the session log with the host doctor.")
 	}
 	switch {
 	case a.MemoryMax > 0:
@@ -135,37 +150,87 @@ var stopWait = 5 * time.Second
 
 // stopHolder stops the holder of session id, then its unit, and with the
 // unit every process that the agent left there. m is the session's
-// manifest, or nil when it cannot be read.
-func stopHolder(id string, m *Manifest) {
-	if alive(id) {
-		_, _ = HolderRequest(id, "kill", nil, 2*time.Second)
-		deadline := time.Now().Add(stopWait)
-		for alive(id) && time.Now().Before(deadline) {
-			time.Sleep(100 * time.Millisecond)
+// manifest, or nil when it cannot be read. It returns an error when a live
+// or starting holder could not be stopped.
+func stopHolder(id string, m *Manifest) error {
+	if err := stopOverSocket(id, m); err != nil {
+		return err
+	}
+	killedUnit := false
+	if m != nil && m.Run.Unit != "" {
+		if SystemdUser() {
+			err := stopUnitChecked(m.Run.Unit)
+			waitUnitUnloaded(m.Run.Unit)
+			if err != nil {
+				return err
+			}
+			killedUnit = true
+		} else {
+			stopUnit(m.Run.Unit)
 		}
 	}
-	switch {
-	case m != nil && m.Run.Unit != "":
-		stopUnit(m.Run.Unit)
-	case m != nil && m.Run.HolderPID > 0 && alive(id):
-		killHolder(m.Run.HolderPID)
+	killedPID := false
+	if m != nil && m.Run.HolderPID > 0 && (alive(id) || holderLockHeld(id)) && (m.Run.BootID == "" || m.Run.BootID == BootID()) {
+		if !killHolder(m.Run.HolderPID) {
+			return fmt.Errorf("the holder, process %d, did not stop", m.Run.HolderPID)
+		}
+		killedPID = true
 	}
-	os.Remove(paths.Socket(id))
-	os.Remove(paths.HookSocket(id))
+	if holderLockHeld(id) {
+		deadline := time.Now().Add(stopWait)
+		for holderLockHeld(id) && time.Now().Before(deadline) {
+			time.Sleep(50 * time.Millisecond)
+		}
+		if holderLockHeld(id) {
+			return fmt.Errorf("the holder of session %s is still running", id)
+		}
+	}
+	if !killedPID && !killedUnit && alive(id) {
+		return fmt.Errorf("the holder of session %s did not stop", id)
+	}
+	_ = os.Remove(paths.Socket(id))
+	_ = os.Remove(paths.HookSocket(id))
+	return nil
+}
+
+// holderStopWaiting lets tests release a legacy holder after its socket
+// closes but before its final save and process exit.
+var holderStopWaiting = func(string) {}
+
+// stopOverSocket allows an acknowledged legacy stop to finish without
+// signalling the recorded PID after its socket has gone.
+func stopOverSocket(id string, m *Manifest) error {
+	if alive(id) {
+		_, requestErr := HolderRequest(id, "kill", nil, 2*time.Second)
+		deadline := time.Now().Add(stopWait)
+		for (alive(id) || holderLockHeld(id) || requestErr == nil && recordedProcessRuns(id, m)) && time.Now().Before(deadline) {
+			holderStopWaiting(id)
+			time.Sleep(50 * time.Millisecond)
+		}
+		if requestErr == nil && !alive(id) && !holderLockHeld(id) && recordedProcessRuns(id, m) {
+			return fmt.Errorf("the holder of session %s accepted its stop but is still running", id)
+		}
+	}
+	return nil
+}
+
+// recordedProcessRuns observes the old holder after a successful stop reply.
+// It never signals or reaps a process whose socket has already closed.
+func recordedProcessRuns(id string, m *Manifest) bool {
+	return m != nil && (m.Run.BootID == "" || m.Run.BootID == BootID()) && holderPIDAlive(m.Run.HolderPID, id)
 }
 
 // killHolder stops a holder that did not stop when asked: SIGTERM first,
-// then SIGKILL when it is still there after stopWait. It returns only once
-// the holder is gone, or after stopWait more. The holder saves the manifest
-// and removes its socket as it stops. Both must come before a new holder
-// starts.
-func killHolder(pid int) {
+// then SIGKILL when it is still there after stopWait. It returns whether
+// the holder process is gone. The holder saves the manifest and removes its
+// socket as it stops. Both must come before a new holder starts.
+func killHolder(pid int) bool {
 	_ = syscall.Kill(pid, syscall.SIGTERM)
 	if waitGone(pid, stopWait) {
-		return
+		return true
 	}
 	_ = syscall.Kill(pid, syscall.SIGKILL)
-	waitGone(pid, stopWait)
+	return waitGone(pid, stopWait)
 }
 
 // waitGone waits until the process pid has exited, for timeout at most. It
@@ -195,6 +260,12 @@ func stopUnit(unit string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	_, _ = systemctl(ctx, "stop", unit)
+	waitUnitUnloaded(unit)
+}
+
+func waitUnitUnloaded(unit string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
 		out, err := systemctl(ctx, "show", unit, "-p", "LoadState", "--value")

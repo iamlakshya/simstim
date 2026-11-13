@@ -11,6 +11,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/iamlakshya/simstim/internal/api"
 	"github.com/iamlakshya/simstim/internal/brand"
 	"github.com/iamlakshya/simstim/internal/client"
 )
@@ -69,7 +70,10 @@ var errSignal = errors.New("a signal ended the command")
 // of "Did you mean", or the short help of a missing argument.
 type usageError struct {
 	*client.UserError
-	suggestions    []string
+	suggestions []string
+	// labels, when set, holds a name for each suggestion, which the error
+	// shows beside it: a session's name beside its host/ID.
+	labels         []string
 	usage, example string
 }
 
@@ -81,6 +85,7 @@ type report struct {
 	code           string
 	kind           client.Kind
 	suggestions    []string
+	labels         []string
 	usage, example string
 	data           json.RawMessage
 	// user is true for a user error, whose message is a sentence.
@@ -103,7 +108,7 @@ func describe(err error, cmd *cobra.Command) report {
 		r := report{msg: ue.Msg, try: ue.Hint, code: ue.Code, kind: ue.Kind, data: ue.Data, user: true}
 		var u *usageError
 		if errors.As(err, &u) {
-			r.suggestions, r.usage, r.example = u.suggestions, u.usage, u.example
+			r.suggestions, r.labels, r.usage, r.example = u.suggestions, u.labels, u.usage, u.example
 		}
 		var un *client.UnknownNameError
 		if errors.As(err, &un) && cmd != nil {
@@ -127,12 +132,39 @@ func describe(err error, cmd *cobra.Command) report {
 	}
 }
 
-// helpOf is the command line that prints the help of cmd.
+// helpOf is the command line that prints the help of cmd, or of its new
+// form when cmd is an old command.
 func helpOf(cmd *cobra.Command) string {
 	if cmd == nil {
 		return brand.Name + " --help"
 	}
+	if form, ok := oldCommands[cmd.Name()]; ok && cmd.Parent() == cmd.Root() {
+		return brand.Name + " " + form[0] + " --help"
+	}
 	return cmd.CommandPath() + " --help"
+}
+
+// shown is text as an error shows it on a terminal: on one line, and
+// without control or hidden characters, wherever the text came from.
+func shown(s string) string {
+	return api.CleanText(oneLineText(s), 4000)
+}
+
+// shownShort bounds descriptive metadata, such as a session or host name,
+// before it joins a note or message that ends with a printed command.
+func shownShort(s string) string {
+	return api.CleanText(oneLineText(s), 200)
+}
+
+// shownNote cleans a note for stderr or JSON without truncating a validated
+// trailing command.
+func shownNote(s string) string {
+	s = oneLineText(s)
+	return api.CleanText(s, max(len(s)+1, 4000))
+}
+
+func oneLineText(s string) string {
+	return strings.NewReplacer("\r\n", " ", "\n", " ", "\t", " ").Replace(s)
 }
 
 // print writes the report in the one form of an error, on w
@@ -155,7 +187,10 @@ func (r report) print(w io.Writer, colour bool) {
 	fmt.Fprintf(w, "%s%sError:%s %s\n", bold, red, reset, msg)
 	q := make([]string, len(r.suggestions))
 	for i, s := range r.suggestions {
-		q[i] = fmt.Sprintf("%q", client.CleanLine(s))
+		q[i] = fmt.Sprintf("%q", shown(s))
+		if i < len(r.labels) && r.labels[i] != "" {
+			q[i] += " (" + shown(r.labels[i]) + ")"
+		}
 	}
 	switch len(q) {
 	case 0:
@@ -165,12 +200,12 @@ func (r report) print(w io.Writer, colour bool) {
 		fmt.Fprintf(w, "\nDid you mean one of these: %s?\n", strings.Join(q, ", "))
 	}
 	if r.usage != "" {
-		fmt.Fprintf(w, "\nUsage:   %s\n", client.CleanLine(r.usage))
+		fmt.Fprintf(w, "\nUsage:   %s\n", shown(r.usage))
 		if r.example != "" {
-			fmt.Fprintf(w, "Example: %s\n", client.CleanLine(r.example))
+			fmt.Fprintf(w, "Example: %s\n", shown(r.example))
 		}
 	}
-	fmt.Fprintf(w, "\n%sTry:%s %s\n", blue, reset, client.CleanLine(r.try))
+	fmt.Fprintf(w, "\n%sTry:%s %s\n", blue, reset, shown(r.try))
 }
 
 // printError prints err with its next step on w, and returns its exit code.
@@ -231,15 +266,19 @@ func colourOn(f *os.File) bool {
 // here.
 var synonyms = map[string]map[string]string{
 	"": {
-		"list":    "ls",
-		"remove":  "rm",
-		"del":     "rm",
-		"connect": "attach",
-		"open":    "attach",
-		"create":  "new",
-		"run":     "new",
-		"install": "agents install",
-		"hosts":   "host ls",
+		"list":     "ls",
+		"remove":   "rm",
+		"del":      "rm",
+		"connect":  "attach",
+		"open":     "attach",
+		"create":   "new",
+		"run":      "new",
+		"install":  "agents install",
+		"hosts":    "host ls",
+		"info":     "show",
+		"status":   "show",
+		"describe": "show",
+		"inspect":  "show",
 	},
 	"host": {
 		"list": "ls",
@@ -352,8 +391,10 @@ func suggestName(cmd *cobra.Command, e *client.UnknownNameError) ([]string, stri
 	if len(cands) == 0 {
 		return nil, e.Hint
 	}
-	if line, ok := withName(cmd, commandLine(cmd), e, cands[0]); ok && parses(line) {
-		return cands, brand.Name + " " + joinWords(line)
+	if line, ok := withName(cmd, commandLine(cmd), e, cands[0]); ok {
+		if line = newForm(cmd, line); parses(line) {
+			return cands, suggestedLine(line, e.Hint)
+		}
 	}
 	return cands, e.Hint
 }

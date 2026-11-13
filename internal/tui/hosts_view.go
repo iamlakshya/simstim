@@ -19,7 +19,7 @@ func (m *Model) hostsView(cw int) listView {
 	vh := m.visibleHosts()
 	nameW := 8
 	for _, h := range vh {
-		nameW = max(nameW, cells(h.name()))
+		nameW = max(nameW, cells(shown(h.name())))
 	}
 	nameW = min(nameW, max(cw/4, 8))
 	rttW := hostRight
@@ -84,7 +84,7 @@ func (m *Model) hostRow(h *hostConn, n int, selected bool, cw, nameW, rttW int) 
 		detail[i].s = trunc(detail[i].s, detailW-used)
 		used += cells(detail[i].s)
 	}
-	name := nameSegs(h.name(), nameW, nameSt, "")
+	name := nameSegs(shown(h.name()), nameW, nameSt, "")
 	segs := make([]seg, 0, 10+len(name)+len(detail)+len(right))
 	segs = append(segs, gutter(n), seg{" ", sPlain}, glyph, seg{" ", sPlain})
 	segs = append(segs, name...)
@@ -192,16 +192,16 @@ func joinFacts(facts ...string) string {
 
 // hostDetail is the line under the hosts: how it is reached, and what it is.
 func (m *Model) hostDetail(h *hostConn, cw int) string {
-	parts := []string{"ssh " + h.host.SSH}
+	parts := []string{"ssh " + shown(h.host.SSH)}
 	if i := h.info; i != nil {
-		for _, s := range []string{i.Distro, plural(i.CPUs, "CPU", "CPUs")} {
+		for _, s := range []string{shown(i.Distro), plural(i.CPUs, "CPU", "CPUs")} {
 			if s != "" && !strings.HasPrefix(s, "0 ") {
 				parts = append(parts, s)
 			}
 		}
 		names := make([]string, 0, len(i.Agents))
 		for k := range i.Agents {
-			names = append(names, k)
+			names = append(names, shown(k))
 		}
 		sort.Strings(names)
 		if len(names) > 0 {

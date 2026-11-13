@@ -51,7 +51,7 @@ The doctor never uses sudo. When a fix needs root, for example linger on some ho
 | The screen looks wrong after attaching | Detach and attach again. If it stays wrong, open an issue with your terminal's name and version. |
 | A session `ended (out of memory)` | The session's memory cap stopped the agent. Resume it in the same session: `simstim resume my-server/app`, or `u` in the launcher. Claude Code and Codex pick up the same conversation. `--memory-max 4G` gives it a bigger cap ([memory](memory.md#when-the-cap-stops-an-agent)). |
 | A session needs you: "close to its memory cap (2.7 of 2.9 GiB)" | The session's memory cap can soon stop a process, often the agent. Save your work first, then see [when a session comes close to its cap](memory.md#when-a-session-comes-close-to-its-cap). |
-| A session's agent `exited` or crashed | `simstim resume my-server/app`, or `u` in the launcher, starts it again in the same session. `simstim kill my-server/app`, or `d`, removes the session. |
+| A session's agent `exited` or crashed | `simstim resume my-server/app`, or `u` in the launcher, starts it again in the same session. `simstim rm my-server/app`, or `d`, removes the session. |
 | "A process in this session ran out of memory and was stopped" | The cap stopped a process that the agent started, such as a build. The agent runs on, and usually reports the failed step itself. |
 
 ## Logs

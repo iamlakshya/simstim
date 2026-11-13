@@ -67,15 +67,15 @@ function sample() {
   return [
     {
       name: "gcp-dev", online: true, rtt: "38ms", os: "Debian GNU/Linux 13 (trixie)", cpus: 4,
-      sessions: [s("t3f8a1zk", "data-pipeline", "gemini", "~/pipeline", "working", 3, "290 MiB", "6 GiB")],
+      sessions: [s("t3f6a2zk", "data-pipeline", "gemini", "~/pipeline", "working", 3, "290 MiB", "6 GiB")],
     },
     { name: "hetzner-box", online: false, sessions: [] },
     {
       name: "homelab", online: true, rtt: "4ms", os: "Debian GNU/Linux 13 (trixie)", cpus: 4,
       sessions: [
         s("k2v7m4qa", "auth-refactor", "claude", "~/src/app", "needs", 40, "612 MiB", "8 GiB", { ask: "Do you want to proceed?" }),
-        s("p9x3hdte", "api-tests", "codex", "~/src/api", "working", 5, "140 MiB", "8 GiB"),
-        s("w5c8n2rb", "docs-site", "opencode", "~/src/docs", "idle", 20 * 60, "380 MiB", "8 GiB"),
+        s("p2x3hdte", "api-tests", "codex", "~/src/api", "working", 5, "140 MiB", "8 GiB"),
+        s("w5c6n2rb", "docs-site", "opencode", "~/src/docs", "idle", 20 * 60, "380 MiB", "8 GiB"),
         s("j6r4y7uf", "notes", "shell", "~", "exited", 2 * 3600, "", ""),
       ],
     },

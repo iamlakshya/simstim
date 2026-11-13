@@ -1,6 +1,7 @@
 package host
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -52,24 +53,106 @@ func (h *Holder) stop(reason string, system bool) {
 	case h.m.Status.State != StateExited && h.m.Status.State != StateErrored:
 		h.m.Status = Status{State: StateExited, Since: time.Now().UTC(), Reason: reason}
 	}
-	m := *h.m
+	c := h.copyForSave()
 	h.mu.Unlock()
-	_ = h.save(&m, true)
+	_ = h.save(c, true)
 	h.closeSockets()
 	os.Exit(0)
 }
 
-// save writes m, a copy of the manifest, unless the holder has made its
+// savedCopy is a copy of the manifest for a save, with its number.
+type savedCopy struct {
+	m Manifest
+	n uint64
+}
+
+// copyForSave copies the manifest for a save, with the next number. The
+// caller holds h.mu.
+func (h *Holder) copyForSave() savedCopy {
+	h.copies++
+	return savedCopy{m: *h.m, n: h.copies}
+}
+
+// save writes c, a copy of the manifest, unless the holder has made its
 // last save. After that, Delete may remove the session's folder at any
 // moment, and a late save would bring it back.
-func (h *Holder) save(m *Manifest, last bool) error {
+func (h *Holder) save(c savedCopy, last bool) error {
+	_, err := h.write(c, last)
+	return err
+}
+
+// write is save, and reports whether the holder could still save. A copy
+// no newer than the one saved last, such as one that a tick took during a
+// rename, would put back what is older on disk: write saves the session as
+// it is now instead. The saved number moves only after a good write.
+func (h *Holder) write(c savedCopy, last bool) (bool, error) {
 	h.saveMu.Lock()
 	defer h.saveMu.Unlock()
 	if h.closed {
-		return nil
+		return false, nil
 	}
-	h.closed = last
-	return m.Save()
+	if h.syncFirstSave && h.saved == 0 {
+		unlock, err := lockFirstSave(h.id, renameWait)
+		if err != nil {
+			if sessionGone(h.id) {
+				h.closed = true
+				return false, nil
+			}
+			return true, err
+		}
+		defer unlock()
+		if sessionGone(h.id) {
+			h.closed = true
+			return false, nil
+		}
+		diskM, merr := LoadManifest(h.id)
+		switch {
+		case errors.Is(merr, os.ErrNotExist):
+			h.closed = true
+			return false, nil
+		case merr == nil && diskM.Name != h.loadedName:
+			h.mu.Lock()
+			h.m.Name = diskM.Name
+			h.mu.Unlock()
+			c.m.Name = diskM.Name
+		}
+	}
+	if last {
+		h.closed = true
+	}
+	if c.n <= h.saved {
+		h.mu.Lock()
+		c = h.copyForSave()
+		h.mu.Unlock()
+	}
+	if err := c.m.Save(); err != nil {
+		return true, err
+	}
+	h.saved = c.n
+	return true, nil
+}
+
+// takeUnit records the unit that the holder runs in, when it knows one
+// (holderUnit), in its manifest.
+func (h *Holder) takeUnit() {
+	if u := holderUnit(h.id); u != "" {
+		h.m.Run.Unit = u
+	}
+}
+
+// holderUnit is the systemd unit that this holder runs in: the one that its
+// cgroup shows (ownUnit), or else the one that launchHolder named in
+// unitEnv, when it is the unit of session id. A host with cgroup v1 shows
+// no unit in the cgroup file, and the holder still records its unit in its
+// first save. Every later save keeps it.
+func holderUnit(id string) string {
+	if u := ownUnit(id); u != "" {
+		return u
+	}
+	if u := os.Getenv(unitEnv); u == UnitName(id) {
+		return u
+	}
+	return ""
 }
 
 // ownUnit returns the systemd unit this holder runs in, when it is the unit

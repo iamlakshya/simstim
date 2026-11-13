@@ -78,29 +78,30 @@ func signalWord(sig string) string {
 // endWhy says why an ended session's agent ended, for the line under the
 // list: "stopped at its memory cap of 1.5 GiB".
 func endWhy(s client.Session) string {
+	reason := shown(s.Reason)
 	if s.State == api.StateLost {
-		if s.Reason != "" {
-			return s.Reason
+		if reason != "" {
+			return reason
 		}
 		return "its holder stopped"
 	}
-	reason := s.Reason
-	if s.OOM || reason == "oom" || reason == api.ReasonChildOOM {
+	if s.OOM || s.Reason == "oom" || s.Reason == api.ReasonChildOOM {
 		// The memory cap's mark and texts. The cases below say when the cap
 		// stopped the agent, and the note at the right of the line says when
 		// it stopped another process. Other reasons, such as why the agent
 		// did not start, stay.
 		reason = ""
 	}
+	sig := shown(s.Signal)
 	switch {
 	case client.CapStopped(s) && s.MemoryMax > 0:
 		return "stopped at its memory cap of " + fmtSize(s.MemoryMax)
 	case client.CapStopped(s):
 		return "stopped at its memory cap"
-	case s.Signal != "" && s.ExitCode != nil && *s.ExitCode > 128:
-		return fmt.Sprintf("stopped by signal %d (%s)", *s.ExitCode-128, s.Signal)
-	case s.Signal != "":
-		return "stopped by a signal (" + s.Signal + ")"
+	case sig != "" && s.ExitCode != nil && *s.ExitCode > 128:
+		return fmt.Sprintf("stopped by signal %d (%s)", *s.ExitCode-128, sig)
+	case sig != "":
+		return "stopped by a signal (" + sig + ")"
 	case s.ExitCode != nil && reason != "":
 		return fmt.Sprintf("exited with code %d: %s", *s.ExitCode, reason)
 	case s.ExitCode != nil:
@@ -155,7 +156,7 @@ func endedSteps(h *hostConn, s client.Session) []hint {
 
 // restoreCommand brings back the sessions on h that lost their holder.
 func restoreCommand(h *hostConn) string {
-	return fmt.Sprintf("%s host restore %s --all", brand.Name, h.name())
+	return fmt.Sprintf("%s host restore %s --all", brand.Name, shown(h.name()))
 }
 
 // stepText draws one next step: a key, as the keys at the bottom show it,
@@ -209,7 +210,7 @@ func (m *Model) openEnded(h *hostConn, s client.Session) tea.Cmd {
 	if s.Alive {
 		return m.openPreview()
 	}
-	text := fmt.Sprintf("%s on %s ended", s.Name, h.name())
+	text := fmt.Sprintf("%s on %s ended", shown(s.Name), shown(h.name()))
 	if c := endCause(s); c != "" {
 		text += " (" + c + ")"
 	}
@@ -236,7 +237,7 @@ func endCause(s client.Session) string {
 	case client.CapStopped(s):
 		return "out of memory"
 	case s.Signal != "":
-		return s.Signal
+		return shown(s.Signal)
 	case s.ExitCode != nil:
 		return fmt.Sprintf("exit %d", *s.ExitCode)
 	default:

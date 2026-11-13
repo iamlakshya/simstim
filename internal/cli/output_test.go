@@ -37,9 +37,12 @@ func TestVersioned(t *testing.T) {
 // machine to machine: a golden file shows them as <key>.
 var volatile = regexp.MustCompile(`(?m)^(\s*)"(id|ID|cwd|created_at|since|last_activity_at|last_attached_at|host_version|helper|connect_ms|round_trip_ms|detail|state|source|memory_max|memory_current|unit|version)": ("[^"]*"|[0-9.]+)(,?)$`)
 
+// addressKey is the key of an address: host/ID, whose ID is volatile.
+var addressKey = regexp.MustCompile(`(?m)^(\s*"address": "[^"/]*/)[^"]*"`)
+
 // masked is a command's real JSON with its volatile values replaced.
 func masked(out string) string {
-	return volatile.ReplaceAllString(out, `$1"$2": "<$2>"$4`)
+	return addressKey.ReplaceAllString(volatile.ReplaceAllString(out, `$1"$2": "<$2>"$4`), `$1<id>"`)
 }
 
 // Each JSON shape of cli-spec 7.1, from the real commands against the test
@@ -59,6 +62,7 @@ func TestGoldenJSON(t *testing.T) {
 	show("new", "box", "--detach", "--json", "--name", "api", "--memory-max", "256M", "--", "sleep", "60")
 	show("ls", "--json")
 	show("ports", "box/api", "--json")
+	show("show", "box/api", "--json")
 	show("doctor", "--json")
 	show("host", "ls", "--json")
 	show("host", "test", "box", "--json")
@@ -199,12 +203,12 @@ func TestNewDetachJSON(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &s); err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
-	if s["v"] != float64(1) || s["host"] != "box" || s["name"] != "api" || s["id"] == "" || s["address"] != "box/api" || errOut != "" {
+	if s["v"] != float64(1) || s["host"] != "box" || s["name"] != "api" || s["id"] == "" || s["address"] != "box/"+s["id"].(string) || errOut != "" {
 		t.Fatalf("stdout %s, stderr %q", out, errOut)
 	}
 	checkJSON(t, "new --detach --json", out, false)
 
-	// A second session of that name gets its ID in its address.
+	// A second session of that name gets its ID in its address too.
 	out = okJSON(t, "new", "box", "--detach", "--json", "--name", "api", "--", "sleep", "60")
 	_ = json.Unmarshal([]byte(out), &s)
 	if s["address"] != "box/"+s["id"].(string) {
@@ -351,9 +355,9 @@ func TestStreams(t *testing.T) {
 	if err != nil || !strings.Contains(out, " s ") || errOut != "" {
 		t.Errorf("ls: %v, stdout %q, stderr %q", err, out, errOut)
 	}
-	out, errOut, err = runApart(t, "kill", "box/s")
+	out, errOut, err = runApart(t, "rm", "box/s", "-y")
 	if err != nil || out != "" || !strings.HasPrefix(errOut, "Deleted s (") {
-		t.Errorf("kill: %v, stdout %q, stderr %q", err, out, errOut)
+		t.Errorf("rm -y: %v, stdout %q, stderr %q", err, out, errOut)
 	}
 	var ue *client.UserError
 	if _, _, err := runApart(t, "resume", "box/x", "--json"); !errors.As(err, &ue) || ue.Code != "json_needs_detach" {

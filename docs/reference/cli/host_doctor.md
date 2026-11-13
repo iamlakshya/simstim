@@ -7,16 +7,19 @@ title: "simstim host doctor"
 Check a host's setup, and with `--fix` fix what it can.
 
 ```text
-simstim host doctor <name> [flags]
+simstim host doctor <host> [flags]
 ```
 
-Checks a host: systemd and linger, the restore unit, terminfo, memory caps, swap, the session sockets and the agents. It warns when the host has less memory than an agent's docs ask for, and when a program in one session could drive another through its socket. For a VM made by host create lima, it also checks, on this computer, that the VM cannot reach services on this computer's loopback address. With `--fix` it offers to fix linger, the restore unit, Ghostty's terminfo, a broken current helper link, stale session sockets and old helper versions. Each fix is shown and explained before it runs; one that needs root is printed for you.
+Checks systemd, terminfo, memory caps, swap and the agents on a host. It checks that sessions keep running after you log out. It also checks the start-up entry that brings sessions back after a reboot. It warns when the host has less memory than an agent's docs ask for. It warns when a program in one session could drive another through its socket. For a VM made by host create lima, it checks, on this computer, that the VM cannot reach services on this computer's loopback address.
+
+With `--fix` it offers to fix what it found: sessions that stop when you log out, the start-up entry and Ghostty's terminfo. It also fixes a broken current helper link, stale session sockets and old helper versions. Each fix is shown and explained before it runs. A fix that needs root is printed for you.
 
 ## Examples
 
 ```sh
 simstim host doctor my-vps
 simstim host doctor my-vps --fix
+simstim host doctor my-vps --json
 ```
 
 ## Flags
@@ -24,8 +27,8 @@ simstim host doctor my-vps --fix
 | Flag | What it does |
 | --- | --- |
 | `--fix` | offer to fix the problems found, one by one |
-| `--json` | print JSON |
-| `-y`, `--yes` | with `--fix`, apply every fix without asking |
+| `--json` | print JSON for scripts, and ask nothing (see docs/how-to/scripting.md) |
+| `-y`, `--yes` | answer yes to every question: apply each fix that `--fix` offers |
 
 ## Flags from the parent command
 
@@ -33,5 +36,7 @@ simstim host doctor my-vps --fix
 | --- | --- |
 | `--debug[=<categories>]` | turn on the debug mode, with every category, or with the categories listed: attach, net, memory, launcher, runtime. A list binds only in the = form, such as `--debug=net` |
 | `--debug-file <file>` | write the client's debug records to this file. On its own, it turns on every category (SIMSTIM_DEBUG_FILE does the same) |
+| `--no-color` | print no colour (NO_COLOR does the same) |
+| `--no-input` | ask nothing: a question that needs an answer fails with exit code 4, and names the flag that answers it (SIMSTIM_NO_INPUT=1 does the same) |
 
 Part of [`host`](host.md): add, create, list, test and remove hosts.

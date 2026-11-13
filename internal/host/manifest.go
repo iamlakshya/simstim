@@ -236,6 +236,8 @@ func (m *Manifest) Save() error {
 	}
 	tmp.Close()
 	if err := os.Rename(tmp.Name(), filepath.Join(dir, "manifest.json")); err != nil {
+		// A save that fails again, as each tick tries it, leaves no file.
+		os.Remove(tmp.Name())
 		return fmt.Errorf("save the manifest of session %s: %w", m.ID, err)
 	}
 	// Make the rename itself durable, so a shutdown right after cannot lose it.

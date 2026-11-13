@@ -10,11 +10,18 @@ List the agents in the agent table, with how each one installs.
 simstim agents ls [flags]
 ```
 
+## Examples
+
+```sh
+simstim agents ls
+simstim agents ls --json
+```
+
 ## Flags
 
 | Flag | What it does |
 | --- | --- |
-| `--json` | print JSON |
+| `--json` | print JSON for scripts, and ask nothing (see docs/how-to/scripting.md) |
 
 ## Flags from the parent command
 
@@ -22,5 +29,7 @@ simstim agents ls [flags]
 | --- | --- |
 | `--debug[=<categories>]` | turn on the debug mode, with every category, or with the categories listed: attach, net, memory, launcher, runtime. A list binds only in the = form, such as `--debug=net` |
 | `--debug-file <file>` | write the client's debug records to this file. On its own, it turns on every category (SIMSTIM_DEBUG_FILE does the same) |
+| `--no-color` | print no colour (NO_COLOR does the same) |
+| `--no-input` | ask nothing: a question that needs an answer fails with exit code 4, and names the flag that answers it (SIMSTIM_NO_INPUT=1 does the same) |
 
 Part of [`agents`](agents.md): list the agents, and install one on a host.

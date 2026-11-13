@@ -12,7 +12,7 @@ Facts about this repository come from its code on 10 November 2026. Facts about 
 
 - `<name>` is `brand.Name`, today `simstim`. Commands are written as users type them, `simstim …`. Code builds every name from `internal/brand` ([0007](decisions/0007-name-in-one-place.md)). The variable `SIMSTIM_NO_INPUT` is `brand.Env("NO_INPUT")` in code.
 - **Input is on** when stdin, stdout and stderr are all terminals, and the user did not turn input off ([section 6](#6-prompts-pickers-and-input-c4)). Otherwise **input is off**.
-- **The session cache** is the launcher's memory of [0011](decisions/0011-instant-launcher.md): each host's sessions when last seen, and the session last attached to. Today it is `launcher.json` in the state folder, with the last session in `last.json` beside it (`internal/tui/memory.go`).
+- **The session cache** is the launcher's memory of [0011](decisions/0011-instant-launcher.md): each host's sessions when last seen, and the session last attached to. It is `launcher.json` in the state folder, with the last session in `last.json` beside it (`internal/client/seen.go`, since C5).
 - **An address** names a session: `<host>/<session>`, a bare `<session>`, or `-` ([section 9.2](#92-addresses)).
 - **The end** of an old name is the point after which it stops working ([section 3](#3-old-names-and-warnings-c5-c6-c7)).
 - **A release** is a new minor or major version, such as 0.2.0 after 0.1.2. A patch version is not a release in this spec.
@@ -131,7 +131,7 @@ Error: no host named "bx".
 
 Did you mean "box"?
 
-Try: simstim attach box/auth-fix
+Try: simstim attach box/abcd2345
 ```
 
 1. `Error:` comes first, bold and red when stderr has colour ([section 7.5](#75-streams-and-colour)). The message follows.
@@ -164,9 +164,9 @@ C2 writes these rules into [the style guide](style.md):
 **The rule.**
 
 1. Case does not count.
-2. A typed word of one or two runes matches only by prefix: a candidate is a thing, such as a command, a flag, a host or an agent, with a name that starts with the word, never one a few edits away. When more than three things match, there is no suggestion. So `x` gets none, `at` gets `attach`, and `d` gets none, because `debug`, `demo`, `doctor` and `kill` (through its alias `delete`) all start with it.
+2. A typed word of one or two runes matches only by prefix: a candidate is a thing, such as a command, a flag, a host or an agent, with a name that starts with the word, never one a few edits away. When more than three things match, there is no suggestion. So `x` gets none, `at` gets `attach`, and `d` gets none, because `debug`, `demo`, `doctor` and `rm` (through its alias `delete`) all start with it.
 3. For a longer word, a candidate is a thing with a name at most one edit from the typed word when the word has three or four runes, and at most two edits when it is longer. The edit distance is Levenshtein's.
-4. For commands, a name that starts with the typed word also makes a candidate, as in Cobra. Kept aliases count as names, but each command counts once, by its name: `delte` suggests `kill`, through its alias `delete`.
+4. For commands, a name that starts with the typed word also makes a candidate, as in Cobra. Kept aliases count as names, but each command counts once, by its name: `delte` suggests `rm`, through its alias `delete`. Until its end, an old name of [section 3](#3-old-names-and-warnings-c5-c6-c7) counts as a name of its new command, which help shows: `kil` suggests `rm`.
 5. A synonym of the table below that matches the typed word is the only candidate.
 6. The line shows at most three candidates. They are in order of the real edit distance of their nearest name, prefixes included, then in alphabetical order.
 
@@ -174,7 +174,8 @@ C2 writes these rules into [the style guide](style.md):
 
 - One candidate: `Did you mean "attach"?`. Two or three: `Did you mean one of these: "bash", "zsh"?`.
 - The `Try:` line is the user's command line with the nearest candidate in place of the typed word, at the place where the parser found it, when that line parses. For a host or an agent, the error says where the name came from, an argument or a flag, and the item when the word is a list such as `codex,cluade`. Only that word, or that item, changes. The line parses when it names a real command, with flags that it has and the words that it takes. Words with spaces or shell characters are quoted with single quotes.
-- When that line does not parse, the `Try:` line of a command is the help of the nearest candidate, such as `simstim kill --help`. That of a flag is the command's help, and that of a host or an agent is the error's own hint.
+- The line names a session only as the user typed it by `host/ID`, or as `-` ([section 9.2](#92-addresses)). No lookup found any other session word, and a name may mean another session once cleaned. When the line's command takes a session, and the line names it any other way, the `Try:` line lists the sessions instead: `atach box/auth-fix` gives `Try: simstim ls box`, and `atach box/abcd2345` gives `Try: simstim attach box/abcd2345`. This holds for a misspelt command, a misspelt flag and an unknown host, and for the old forms, so a suggested `rm` never names a session by its name. The `Try:` line of a question with input off, and of `--json` without `--detach`, repeats the typed line under the same rule (`typedLine` in `internal/cli/printed.go`).
+- When that line does not parse, or a word of it would not reach the terminal whole, the `Try:` line of a command is the help of the nearest candidate, such as `simstim rm --help`. That of a flag is the command's help, and that of a host or an agent is the error's own hint.
 - With no candidate, the `Try:` line is the parent's help, or the error's own hint for a host or an agent.
 
 **The synonym table** lives in `internal/cli/errors.go`. A unit test checks that every target exists in `Root()`. The task that adds a target adds its rows.
@@ -245,7 +246,7 @@ Its kind is `KindFailed`, and its code is `internal`.
 
 - `TestEveryUserErrorHasHint` parses every Go file under `internal/` with `go/ast`, except tests, which build bare errors on purpose. It fails, with the file and line, on a `client.UserError` literal, under any name of the import, without a `Code` or with an empty `Hint`, also one made of constants, such as `"" + ""`. It also fails on `new(client.UserError)`, on a zero `UserError`, and on an empty constant set into a field named `Code` or `Hint`. A value that is empty only at run time cannot be read from the source: `TestDescribeAlwaysHasATry` checks that every error still gets a `Try:` line.
 - Golden tests of `printError` for each kind, with colour and without.
-- A table test of suggestions, with the whole list and the `Try:` line: `list` gives `ls`, `run` gives `new`, `at` gives `attach`, `ssh box` gives none, `kil` gives `kill`, `LS` gives `ls`, `Attach` gives `attach`, and `x` and `d` give none. A test that the `Try:` line fixes the word where the parser found it, as in `--debug-file atach atach box/s`, and only the word of the unknown name, as in `new --dir bo/s bo` and `agents install --host cluade cluade`.
+- A table test of suggestions, with the whole list and the `Try:` line: `list` gives `ls`, `run` gives `new`, `at` gives `attach`, `ssh box` gives none, `kil` gives `rm`, `LS` gives `ls`, `Attach` gives `attach`, and `x` and `d` give none. A test that the `Try:` line fixes the word where the parser found it, as in `--debug-file atach atach box/abcd2345`, and only the word of the unknown name, as in `new --dir bo/s bo` and `agents install --host cluade cluade`. Round-trip tests of the suggestions for `rn box/A -y`, `rm box/A --yse`, `kil`, `flip … --restrt` and an unknown host, with two sessions whose names clean to the same text: each `Try:` line names the session by `host/ID`, or lists the sessions.
 - A test that every synonym target exists in `Root()`.
 - A test that `host ad` fails with exit code 2, and `host` alone prints help and exits with 0.
 - A test that `doctor termnal` fails with exit code 2 and suggests `terminal`, and that `doctor` alone runs its checks.
@@ -384,9 +385,9 @@ The launcher saves the terminal mode before opening its reader. Only one termina
 The form of a failure:
 
 ```text
-Error: rm needs a yes to delete box/auth-fix, and input is off.
+Error: rm needs a yes to delete auth-fix on box, and input is off.
 
-Try: simstim rm box/auth-fix -y
+Try: simstim rm box/abcd2345 -y
 ```
 
 **The prompt table.** A test checks that each prompt in the code has a row, and that each row's flag exists on its command. A task that adds a prompt adds its row in the same pull request.
@@ -394,7 +395,7 @@ Try: simstim rm box/auth-fix -y
 | Command | Question | Default | Flag | Input off |
 | --- | --- | --- | --- | --- |
 | `rm` | `Delete auth-fix on box?` with what stops and what stays | No | `-y` | Fail, after the end of section 3 |
-| `attach` on an ended agent | `Start claude again in box/auth-fix? [Y/n]` | Yes | `--restart` | Fail |
+| `attach` on an ended agent | `Start claude again in auth-fix on box? [Y/n]` | Yes | `--restart` | Fail |
 | `new`, missing folder | `Make it? [y/N]` | No | `--mkdir` | Fail |
 | `new`, a repository's setup script | `Run it? [y/N]` | No | `--setup-script`, `--no-setup-script` | Keep: skip it, with today's note |
 | `host add` | Install the helper | No | `--yes` | Fail |
@@ -469,7 +470,9 @@ Every command that prints data or makes something takes `--json` (G10). This tab
 | `config check` | The report of [section 13.5](#135-output-and-exit-codes) | C9 |
 | `version` | `{v, version, protocol, helper}` | C4 |
 
-**A session object** holds `v`, `host`, `address` and every field of `api.SessionInfo` that has a value. The address is `host/name`, or `host/id` when two sessions on the host share the name. P1.8 adds the fields of isolation spec 9.1.
+**A session object** holds `v`, `host`, `address` and every field of `api.SessionInfo` that has a value. P1.8 adds the fields of isolation spec 9.1.
+
+**Every `address` in JSON is `host/ID`**, never a name, the same rule as the JSON of `agents login` (C8). A name can change, or come to mean another session, between the moment that the command reads it and the script's next step. An ID cannot. A command that the CLI prints for a person names a session by `host/ID` too, as [section 9.2](#92-addresses) says.
 
 `new` and `resume` take `--json` only with `--detach`. Without it they fail with exit code 2: `--json needs --detach, because an attached session owns the terminal`, and `Try: simstim new my-vps --detach --json`.
 
@@ -655,41 +658,51 @@ A test fails when one of these words appears in the help of any command, a hidde
 
 An address has one of three forms: `<host>/<session>`, `<session>` or `-`. The `<session>` part is a session's ID or its name.
 
+**IDs and names never collide.** The helper's `NewID` makes an ID of 8 characters of `api.SessionIDAlphabet` (lower-case base32), with at least one digit from 2 to 7. An ID drawn without one gets a random digit at a random place. A word of exactly that form, 8 characters of the alphabet with at least one digit, is always an ID and never a name. A word of 8 letters, such as `frontend`, has no digit, so it is a name, and an address reaches its session by it as before. In `<host>/<word>` and `<word>`, such a word matches the IDs of sessions alone. When no session has that ID, the command fails as not found, with exit code 3: `no session has the ID "abcd2345" on box`. It never falls back to a name. So `new --name`, `rename` and the launcher refuse a name of that form, before they send anything, and the helper refuses it too. They fail with exit code 2 and the code `bad_name`: `a name of 8 letters a to z and digits 2 to 7, with a digit, looks like a session ID`, and `Try: Add a dash, as in abcd-2345, or use a name of another length.` A name that a user gives has at most 64 characters, with the same code. A session that already has such a name, from an older helper, keeps it. Its ID or the picker reaches it, and `ls` shows it as before. A new session skips any ID that a session on the host already has as its ID or as such an older name, so a new session's ID never equals an existing session's name. A name that `new` takes from a folder whose name has the form of an ID gets `-s` at its end, as `proj2345-s`, so `new` never makes a session whose name looks like an ID. The helper also refuses a name that the user gives when it is the ID of a session on the host, with `bad_name`. An older helper's ID without a digit can be such a name. An address with that word finds that session first. A name that `new` takes from the folder gets `-s` at its end instead, as `oldoldid-s`: a name with `-` is never an ID. The helper checks the final name against the sessions' IDs under the lock of the new session's first save.
+
+An older helper made IDs without a digit, about one in five. While such a session exists, its ID matches first, before any name, as for every word that does not have the form of an ID. A script that keeps such an old ID after its session is gone may reach a session named like it. A new helper never makes such an ID.
+
+**Printed commands name the ID.** Every command that the CLI prints for a person names a session that it found by `host/ID`: a `Try:` line, a hint, the restart hint of `attach`, the hints of `rm`, the notes of `debug start` and `resume`, the attach line of `show`, the list of an ambiguous word, and the command that the launcher copies. The session's name appears only in the text around it, cleaned. A printed command reaches the terminal whole, or the CLI prints `simstim ls <host>`, or `simstim ls`, instead: a word that cleaning would change, or a line that the cut at 4000 runes would shorten, could read as another session. A word that names no session gets `Try: simstim ls <host>`, or `simstim ls`, and suggestions within two edits of a name or an ID, each by `host/ID` with its name beside it: `Did you mean "box/abcd2345" (auth-fix)?`. The typed word is never repeated as a command.
+
 **`-`** is the last session in the session cache. With none, the command fails with exit code 3: `no session has been attached yet`, and `Try: simstim ls`. For `new`, `-` names the host of the last session (isolation spec 14.10.1). `-` never means stdin.
 
-**`<host>/<session>`.** The host part names a saved host. An unknown host fails with exit code 3, with suggestions from the saved hosts. On that host, the session part matches a session's ID first, then its name, as `resolve` in `internal/cli/session.go` does today. Two sessions with that name fail with exit code 2:
+**`<host>/<session>`.** The host part names a saved host. An unknown host fails with exit code 3, with suggestions from the saved hosts. On that host, the session part matches a session's ID first, then its name, unless it has the form of an ID, as `findIn` in `internal/cli/address.go` does. Two sessions with that name fail with exit code 2:
 
 ```text
-Error: 2 sessions are named "a" on box: box/1a2b, box/3c4d.
+Error: 2 sessions are named "a" on box: box/abcd2345, box/efgh2345.
 
-Try: simstim attach box/1a2b
+Try: simstim attach box/abcd2345
 ```
 
-**`<session>` alone** (question C-3):
+**`<session>` alone** (question C-3). The session cache only says which host to ask. What the command acts on is decided by that host's own list, when the command dials it, from the word that the user typed. A session renamed since the cache saw it is then not found, and a new session of that name is found.
 
 1. The client reads the session cache.
-2. For each saved host whose list is older than 60 seconds or missing, it asks the host for its sessions. It asks every such host at once, without waking a stopped host, within the time limit of `ls`. It writes the answers to the cache.
+2. For each saved host whose list is older than 60 seconds, missing, or from the future, as after the clock was set back, it asks the host for its sessions. It asks every such host at once, without waking a stopped host, within the time limit of `ls`. It writes the answers to the cache.
 3. A host that does not answer counts with its cached list, whatever its age. That list may lack a newer session of the same name.
-4. The word matches a session's ID first, then its name, on every host.
-5. One match is the session. `rm` and `kill` are the exception when a host did not answer at step 3, because the match may not be unique. They fail with exit code 2, and the `Try:` line holds the full address. Other commands go on, and name on stderr each host that did not answer. No match fails with exit code 3: `no session named "a" on any host`, with suggestions within two edits, and `Try: simstim ls`.
-6. Two or more matches fail with exit code 2, and list each full address. The `Try:` line holds the first.
-7. The command then dials the host, as it must to act. If the session is gone, it fails with exit code 3.
+4. On each host, the word matches a session's ID first, then its name, unless it has the form of an ID. The hosts' matches then add up, so an ID on one host and a name on another are two matches.
+5. When nothing matches, the client first asks again the hosts that step 2 did not ask, because a list younger than 60 seconds may lack a session made since. No match then fails with exit code 3: `no session named "a" on any host`, with suggestions within two edits by `host/ID`, and `Try: simstim ls`.
+6. Matches on one host give that host. `rm` and `kill` are the exception when a host did not answer: they fail with exit code 2, and the `Try:` line holds the host and the ID of the session found. When the host that did not answer is another one, it may have a session of the same name: `"a" is on box, but nuc did not answer, so it may have a session of that name too`. When it is the match's own host, its list may be out of date: `"a" is on box as last seen, but box did not answer, so its list may be out of date`. Other commands go on, and name on stderr each host that did not answer.
+7. Matches on two or more hosts fail with exit code 2, and list each full address, by `host/ID`. The `Try:` line holds the first.
+8. The command then dials the host, as it must to act, and finds the word in the host's list, as for `<host>/<session>`. It writes that list to the cache. If the word names no session there, it fails with exit code 3, and the error repeats only the word. If it names two, it fails with exit code 2, as above.
 
-In an address, a bare word is always a session, also when a host has that name. `attach box` looks for a session named `box`. `debug bundle` and `events` take a host or `<host>/<session>`, not an address. So a bare word there names a host, as `debug bundle` does today.
+`-` and a row of the picker name a session by its ID, which the host's list finds by its ID alone, never by a name: a session named like that ID is never taken for it. When it is gone, the error names it by its name, such as `the last session, auth-fix on box, is gone`, not by an ID that the user did not type.
 
-**The session cache moves.** C5 moves the code of `internal/tui/memory.go` to the new `internal/client/seen.go`, so that the client and the launcher share it. The file stays `launcher.json` in the state folder. It gains `seen`, a map from each host's name to the time of its list. The launcher, `ls` and the steps above write it. Each writer reads the file first, changes only its hosts, and saves through a temporary file and a rename. Each writer's temporary file has its own name, from `os.CreateTemp` in the same folder, so no writer renames a half-written file. The session last attached to is in `last.json`, a file of its own: only an attach writes it, and the writers of lists never touch it. The cache is advisory. Two writers at once can still lose one change, and the next refresh mends a lost list.
+In an address, a bare word is always a session, also when a host has that name. `attach box` looks for a session named `box`. `debug bundle` and `events` take a host or `<host>/<session>`, not an address. So a bare word there names a host, as `debug bundle` does today. In `debug bundle <host>/<word>`, a word of the form of an ID matches IDs alone too. The hint that runs the bundle again names the session by the ID that the bundle found, and before that lists the host's sessions.
+
+**The session cache moves.** C5 moves the code of `internal/tui/memory.go` to the new `internal/client/seen.go`, so that the client and the launcher share it. The file stays `launcher.json` in the state folder. It gains `seen`, a map from each host's name to the time of its list. The launcher, `ls`, the picker and the steps above write it. `new` and `rename` put their session in its host's list, and `rm` takes it out, without changing the time of the list. A list keeps the time when it arrived from the host. Each host's time is taken when its own answer comes, so a slow host does not make another host's list look newer. The launcher saves a list with that time, so a host whose connection failed since keeps its older time, and a command asks it again. A list older than the one that the cache has changes nothing. Each writer reads the file first, changes only its hosts, and saves through a temporary file and a rename. Each writer's temporary file has its own name, from `os.CreateTemp` in the same folder, so no writer renames a half-written file. The session last attached to is in `last.json`, a file of its own: only an attach writes it, and the writers of lists never touch it. A writer removes a temporary file that a crash left, once it is an hour old. The cache is advisory. Two writers at once can still lose one change, and the next refresh mends a lost list.
 
 ### 9.3 `attach`
 
-1. Without an address, and with input on, `attach` opens the picker of [section 6.3](#63-pickers).
-2. `attach` needs stdin and stdout to be terminals. Without them it fails with exit code 2: `attach needs a terminal`, and `Try: simstim send box/auth-fix 'text'`.
+1. Without an address, and with input on, `attach` opens the picker of [section 6.3](#63-pickers). With input off, the missing address fails first, with exit code 2.
+2. `attach` needs stdin and stdout to be terminals. Without them it fails with exit code 2 and the code `no_terminal`: `attach needs a terminal`, and `Try: simstim send <host>/<ID> 'text'`. Nothing looked the address up, so the `Try:` line repeats it only when it means one session as it is: `-`, or a saved host's name with an ID, as `box/abcd2345`. This check comes before any lookup of the address, and before any other step of this list: a script opens no connection to a host, and wakes none. Every command that needs a terminal fails the same way, with `no_terminal` and exit code 2, the attach of `new` and `resume` too. `new` and `resume` without `--detach` check for the terminal first too, before any lookup: a script opens no connection, and starts or resumes no session. Their `Try:` line adds `--detach` to the typed line, under the rule of [section 4.3](#43-suggestions).
 3. A host with a provider script and `wake_on_attach` wakes, as today. From isolation task P1, a stopped sandbox wakes too, with `Waking auth-fix on box…` on stderr.
-4. On an ended agent, with input on, it asks `Start claude again in box/auth-fix? [Y/n]`. Yes does what `resume` does, then attaches. No prints why the agent ended, as today's error does, and exits with 130.
-5. With input off, an ended agent fails with exit code 4, and `Try: simstim attach box/auth-fix --restart`.
+4. On an ended agent, with input on, it asks `Start claude again in auth-fix on box? [Y/n]`. Yes does what `resume` does, then attaches. No prints why the agent ended, as today's error does, and exits with 130.
+5. At a terminal with input off, as with `--no-input`, an ended agent fails with exit code 4, and `Try: simstim attach box/abcd2345 --no-input --restart`. The `Try:` line is the command line with `host/ID` in place of the typed address, also for an older ID without a digit. A script without a terminal gets exit code 2 at step 2 instead. It can start the agent with `resume --detach`.
 6. `--restart` on a running agent does not restart it. `attach` attaches, and says on stderr that the agent runs, so it did not restart it.
-7. An agent that cannot start again, because it has no resume command, gets today's ended error, with exit code 1.
-8. `attach` records the session as the last one, as `tui.RememberLast` does today.
-9. `flip <address>` runs `attach`, and warns. `flip` alone opens the launcher's switcher, as today, and warns.
+7. An agent that cannot start again, because the host's helper cannot resume, gets today's ended error, with exit code 1.
+8. When another client starts the agent again while the question waits, the host refuses the second resume with `agent_running`. `attach` then reads the session's row again. When the row shows the agent running, it attaches to it, with a note. When the row shows that the agent ended again, it resumes once more, and a second refusal of that kind is the error of an ended agent. `resume` does the same between its list and its request.
+9. `attach` records the session as the last one, as `client.RememberLast` does.
+10. `flip <address>` runs `attach`, and warns. `flip` alone opens the launcher's switcher, as today, and warns. A `Try:` line of `flip` or `kill` names the new form, `attach` or `rm … -y`, with `-y` before any `--`, and parses as a command of the new form. Their help hints name `attach --help` and `rm --help`.
 
 ### 9.4 `resume`
 
@@ -706,32 +719,55 @@ In an address, a bare word is always a session, also when a host has that name. 
    ```text
    Delete auth-fix on box?
    This stops claude on box and removes the session.
-   The folder ~/src/app stays. Unsaved work in the agent is lost.
+   The folder /home/dev/src/app stays. Unsaved work in the agent is lost.
    Delete it? [y/N]
    ```
 
+   The command line shows the folder as the host reports it. The launcher shows `~` for the home folder, because it knows the host's user. The helper does not say which session made a worktree, so a session in the helper's folder of worktrees gets a line that is true either way: `If the session made the worktree /home/dev/.local/share/simstim/worktrees/app/fix-1a2b, it goes with its branch, unless it has changes or new commits.` Every word from the host is cleaned of control and hidden characters, here and in `show`.
+
 3. With input off and without `-y`, `rm` deletes and warns until the end of section 3. The warning is `Warning: without a terminal, "rm" needs -y from v0.4.0 and 10 November 2027, whichever comes later.` After the end, it fails with exit code 4 (question C-10). `gh repo delete` also needs `--yes` to delete without a prompt ([gh](https://cli.github.com/manual/gh_repo_delete)).
-4. `kill` runs `rm -y`, and warns.
-5. It prints `Deleted auth-fix (1a2b) on box.` on stderr, and the worktree line of today.
-6. From isolation task P1, it refuses while commits are not pulled, unless `--force` (isolation spec 9.1).
+4. `kill` runs `rm -y`, and warns. Without a session it warns too, then fails with the usage of `rm`.
+5. The delete is bound to the session that the user confirmed. After the answer, `rm` reads the host's list again. When the session is gone, or has another name, it deletes nothing: `auth-fix on box was renamed api while the question waited, so it was not deleted`, with the code `session_renamed` and exit code 1. The delete request also carries the name, and the host refuses it with `session_renamed` when the session's name is another, which closes the rest of the race. The launcher's delete sends the name that its question showed in the same way. An older helper ignores the name, and the client's own check still runs.
+
+   On the host, a rename and a delete take the same lock of the session, the file `op.lock` in its folder, which a resume and a restore take too. A delete takes it at once, or says that the session is busy, and holds it across its check of the name and the delete. A rename waits up to 10 seconds for it.
+
+   - A resume or a delete may stop a holder whose rename waits for the lock. The holder then goes without an answer: the connection closes, or the holder answers `exiting`. The rename takes the lock itself, and looks again: a new holder from a resume renames itself, a session that does not run is renamed on disk, and a deleted one is `not_found`. When the holder that it then finds goes away too, the rename fails with `busy`. A rename never fails with the closed connection.
+   - A holder that waits for its secrets answers `starting`. The start or the resume holds the lock until the holder has started, so the rename waits for the lock in the same way, and looks again.
+   - A holder that does not answer within the rename's time is not one that went away: the rename fails with `busy`, and says that the holder did not answer in time.
+
+   - A running session's holder renames itself, and takes the lock itself, around the whole rename. It writes the manifest with the new name first. Only after a good write does it change the name in memory and count that copy as saved, and only then does it answer. A failed write changes neither, and is the answer. So a rename that a client saw succeed is in the manifest. The client does not hold the lock for it: a client that stops waiting, as on a time-out, cannot leave a rename running outside the lock.
+   - A holder names the feature `rename.saved` in its hello. A holder of an older helper, which goes on running after the helper's upgrade, names none. It answers a rename before it saves the name, at its next tick, and it never takes the lock. For such a holder, the helper takes the lock first and writes `rename.unsaved` before it sends the rename. That record starts as uncertain. When the older holder rejects the rename, and is not ending, the helper puts the earlier record back. When the rename fails without a clear answer, the uncertain record stays, and another rename on that holder fails with `busy`. Once the holder answers yes, the helper marks the record settled, and waits up to 5 seconds for the manifest save. When the name is not in the manifest in time, the rename fails with `busy`. A settled record stays for the whole life of that older holder, while its socket, lock, process or unit lives. The process check reads kernel state without reaping. A recorded process must belong to this user and name the same holder and session. A socketless older holder that cannot be stopped safely keeps resume and restore closed. So a slow tick copy from before the rename cannot expose the old name again. Once no older holder runs, the helper reads the latest manifest under `first.lock` before writing a settled name. It preserves the final exit state and removes `rename.unsaved` only after the save. Resume reconciles before applying memory choices and clearing the restore count. Restore reconciles before counting its attempt, and a failed reconciliation starts nothing. An uncertain record keeps guarded deletes closed with `session_renamed`, even after the holder stops, until a rename sets a new name.
+   - For a session that does not run, the rename takes `op.lock` and `first.lock`, writes the manifest, and removes `rename.unsaved`.
+   - A delete with a name checks it against the manifest alone, and asks the running session nothing. The empty name of a session with no name is a name too: the client sends it, and the host refuses the delete when the session got a name since. Only a delete without a name, as the helper's own `rm`, takes the session whatever its name. A manifest that cannot be read fails closed, with `name_unknown`. A rename never comes between that check and the delete. A delete stops the holder without the lock's help, so a holder's rename that waits for the lock never blocks it.
+   - The holder numbers each copy of the manifest that it saves, its first save at the start too, and the saved number moves only after a good write. A copy that is not newer than the one saved last, such as one that a tick took during a rename, would put back an older state: its save writes the session as it is now instead. A tick whose save fails keeps the session marked as changed, so the next tick saves it again.
+   - A new session's start holds `op.lock` from its first save until the holder has started. A resume and a restore hold `op.lock` across their start too. Each holder also holds `holder.lock` while its process runs, and takes `first.lock` around its first save. When a slow restored holder has not opened its socket yet, a rename writes the new name under `first.lock`. The holder's first save then reads that name, or stops without writing if a delete removed the folder. The holder records its own unit.
+   - A failed write of the manifest leaves no temporary file, so a tick that tries again each second leaves none either.
+   - When a new session's secrets cannot reach its holder, the start stops that holder and waits for it, under the lock, before it deletes the session. A resume or a restore whose secrets cannot reach the new holder stops it in the same way, so its agent never starts without them. A holder that waits for its secrets answers no other request, so it would start its agent later, and save into the deleted folder. With systemd, the unit must be inactive or failed within 3 seconds, whatever the stop answered: a unit that systemd already removed, as after its holder crashed, counts as stopped. Without systemd, the start waits for the very process that it started, with SIGTERM and then SIGKILL, so a process ID that another process took never passes for it. When the start cannot establish that the holder stopped, it keeps the session, and its error says why, with `secrets_failed`, and that the agent may start later without its secrets. A failed start removes the folders that `--mkdir` made only when it removed the session too. A session that it keeps, as one whose agent could not start, keeps its folder, so that a resume can start the agent there.
+   - A holder that started, and does not answer within the start's 5 seconds, is stopped in the same way: the start deletes the session, or keeps it when the holder cannot be stopped, with `start_failed`. A holder that recorded its own end, `errored` or `exited`, before any agent started, as one whose agent could not start, is not late: its session stays, with that record. A holder that recorded nothing yet, its agent working, or an end after its agent started, is late. A resume stops a late holder too, and keeps its session. A restored holder never waits for secrets, so a restore does not stop a late one. It waits up to 30 seconds more for it, and the session runs when it answers. When it still has not answered, the restore records its process or unit in the manifest under `first.lock`. A later delete or resume then stops that pending holder before acting, and another restore skips it. When the restore cannot save that record, it stops the holder at once.
+   - `launchHolder` names the unit to the holder in the variable `SIMSTIM_UNIT`. The holder takes its unit from its cgroup, or else from that variable when it names the unit of its own session, right after it loads the manifest. So it records the unit in its first save also on a host with cgroup v1, the save of an agent that cannot start too, and every later save keeps it.
+6. It prints `Deleted auth-fix (abcd2345) on box.` on stderr, and the worktree line of today.
+7. From isolation task P1, it refuses while commits are not pulled, unless `--force` (isolation spec 9.1).
 
 ### 9.6 `show`
 
 `show [<address>] [--json] [--screen]` describes one session.
 
 1. Without an address, and with input on, it opens the picker.
-2. It dials the host and reads the session's details.
-3. The text form starts with a title line. Then comes one line for each field of `api.SessionInfo` that has a value, in the order of the type. Each line has a label in sentence case. The last line is `Attach`, with the command:
+2. It dials the host and reads the session's details. It does not wake a stopped host. On a host that its provider script starts and that does not answer, it asks the script's `status`. Only when that says `stopped` does it fail with `box is stopped, and show does not start it`, and `Try: simstim host start box`. Any other failure, such as a key that SSH refused, keeps its own error and hint.
+3. The text form starts with a title line. Then comes one line for each field of `api.SessionInfo` that has a value, in the order of the type. Each line has a label in sentence case. The last line is `Attach`, with the command. It names the session by `host/ID`, as every printed command does ([section 9.2](#92-addresses)), so it never names another session:
 
    ```text
    auth-fix on box
-     ID         1a2b3c4d
-     Agent      claude
-     State      working (from hooks)
-     Folder     ~/src/app
-     Created    10 Nov 2026 10:40
-     Attach     simstim attach box/auth-fix
+     ID              abcd2345
+     Agent           claude
+     Folder          /home/dev/src/app
+     State           working (from hooks)
+     Since           10 Nov 2026 10:40
+     Created         10 Nov 2026 10:40
+     Attach          simstim attach box/abcd2345
    ```
+
+   The name is in the title. The state line holds where the state came from, and why an agent ended, as `errored (exit code 3, from process)`. A field that it says faithfully has no line of its own. Any other has one: the reason of a start that failed, a signal that the out-of-memory mark hides, or an exit code of 0. An ended agent whose session is still open says so. The columns and the rows share one line, `Size`.
 
 4. `--json` prints the session object of [section 7.1](#71-which-commands-print-json).
 5. `--screen` (C11) prints the session's last screen as plain text. It reads the screen through the `peek` op, as the launcher's peek does, and renders it with the same terminal model. It prints one line for each row, without escape sequences and without spaces at the ends of lines. With `--json`, it adds `screen`, an array of lines.
@@ -751,6 +787,9 @@ In an address, a bare word is always a session, also when a host has that name. 
   - A stale cache, and a host that does not answer, with `rm` and with `attach`.
   - A session whose name is also a host's name.
   - Two writers of the session cache at once leave a file that parses.
+  - A session whose name is another session's ID, an ID that went with a session named like it still there, `new` and `rename` with a name of an ID's form, and a script's `host/ID` from `--json`.
+  - `NewID` always makes an ID with a digit, a name of 8 letters such as `frontend` is a name, and a folder named like an ID gives a name with `-s`.
+- Round-trip tests of every printed command: each one parses as its command, and its address finds the same session. Two sessions have names that clean to the same text, and a host's name is long enough to cut the line.
 - Golden tests of the prompts of `rm` and `attach`.
 - End-to-end runs of `rm`, `attach` and `show` against `E2E_HOST`, on sessions that the test starts and deletes.
 

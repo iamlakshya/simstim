@@ -33,7 +33,7 @@ def run(c):
         fix_checks(c)
     finally:
         for s in created:
-            subprocess.run([c.cli, "kill", c.HOST + "/" + s], capture_output=True)
+            subprocess.run([c.cli, "rm", c.HOST + "/" + s, "-y"], capture_output=True)
         c.host_rc("rm -rf ~/e2e-setup-repo ~/.e2e-setup-exit ~/.local/share/%s/worktrees/e2e-setup-repo" % c.NAME)
         shutil.rmtree(tmp, ignore_errors=True)
 

@@ -66,7 +66,9 @@ func TestStopHolderWaitsForAStuckHolder(t *testing.T) {
 	t.Cleanup(func() { _ = syscall.Kill(pid, syscall.SIGKILL) })
 	time.Sleep(100 * time.Millisecond) // for the trap to be set
 
-	stopHolder(id, &Manifest{ID: id, Run: Runtime{HolderPID: pid}})
+	if err := stopHolder(id, &Manifest{ID: id, Run: Runtime{HolderPID: pid}}); err != nil {
+		t.Fatalf("stopHolder: %v", err)
+	}
 	if err := syscall.Kill(pid, 0); err == nil {
 		t.Error("the stuck holder still runs after stopHolder")
 	}

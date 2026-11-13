@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -83,10 +84,14 @@ var (
 	qHostFix       = &question{cmd: "host doctor", flag: "-y"}
 	qDestroy       = &question{cmd: "host destroy", flag: "-y"}
 	qSetup         = &question{cmd: "setup", flag: "--yes"}
+	// qDelete fails with input off only after the end of its old form:
+	// until then rm deletes and warns (rm.go).
+	qDelete  = &question{cmd: "rm", flag: "-y"}
+	qRestart = &question{cmd: "attach", flag: "--restart", def: true}
 )
 
 // questions lists every row, for the tests.
-var questions = []*question{qInstallHelper, qAddAgents, qMakeFolder, qSetupScript, qFix, qHostFix, qDestroy, qSetup}
+var questions = []*question{qInstallHelper, qAddAgents, qMakeFolder, qSetupScript, qFix, qHostFix, qDestroy, qSetup, qDelete, qRestart}
 
 // prompter asks a command's questions on stderr, and reads the answers from
 // stdin.
@@ -103,6 +108,17 @@ type prompter struct {
 	flagsAt int
 	// path is the command's path, for a line that is not known.
 	path string
+	// For a question about a session (sessionPrompts): short is the
+	// command's path and the session's host/ID alone, the line when the
+	// whole line would not reach the terminal whole, and host is the
+	// session's host. try, when set, is the Try: line instead, as when the
+	// session's address could not go in a command.
+	short []string
+	host  string
+	try   string
+	// help is the command's help, the Try: line when the line holds a
+	// word that would not reach the terminal whole.
+	help string
 	// log lists what earlier steps changed, for the line of a cancel. Steps
 	// add to it as they change something, so a cancel at any point lists
 	// all of it.
@@ -110,28 +126,57 @@ type prompter struct {
 }
 
 // prompts is the prompter of cmd.
+// An old name's line is in its new form, so that a Try: line teaches it.
 func prompts(cmd *cobra.Command) *prompter {
-	line := commandLine(cmd)
+	line := newForm(cmd, commandLine(cmd))
 	return &prompter{ctx: cmd.Context(), in: os.Stdin, out: os.Stderr, on: inputOn(cmd),
-		line: line, flagsAt: flagsAt(cmd, line), path: cmd.CommandPath()}
+		line: line, flagsAt: flagsAt(cmd, line), path: cmd.CommandPath(), help: helpOf(cmd)}
 }
 
 // withFlags is p's command line with flags added before any "--", as a
 // command that runs as written.
 func (p *prompter) withFlags(flags ...string) string {
-	if len(p.line) == 0 {
-		return strings.Join(append([]string{p.path}, flags...), " ")
+	if p.try != "" {
+		return p.try
 	}
+	out := lineWithFlags(p.path, p.line, p.flagsAt, flags)
+	if p.short != nil {
+		// The line holds the found host/ID, and sessionLine checked each
+		// word, so an older ID without a digit keeps its command.
+		if !whole(out) {
+			return printedOr(p.host, lineWithFlags(p.path, p.short, len(p.short), flags))
+		}
+		return out
+	}
+	if len(p.line) == 0 {
+		return out
+	}
+	// The line repeats what the user typed: it goes through typedLine.
 	at := min(p.flagsAt, len(p.line))
+	words := append(append(slices.Clone(p.line[:at]), flags...), p.line[at:]...)
+	help := p.help
+	if help == "" {
+		help = p.path + " --help"
+	}
+	return typedLine(words, out, help)
+}
+
+// lineWithFlags is line with flags added at index at, as a command that
+// runs as written, or path and the flags when line is empty.
+func lineWithFlags(path string, line []string, at int, flags []string) string {
+	if len(line) == 0 {
+		return strings.Join(append([]string{path}, flags...), " ")
+	}
+	at = min(at, len(line))
 	// The user's words are quoted where a shell needs it. The flags are
 	// ours, placeholders such as <host> included, and stay as they are.
 	parts := []string{brand.Name}
 	if at > 0 {
-		parts = append(parts, joinWords(p.line[:at]))
+		parts = append(parts, joinWords(line[:at]))
 	}
 	parts = append(parts, flags...)
-	if at < len(p.line) {
-		parts = append(parts, joinWords(p.line[at:]))
+	if at < len(line) {
+		parts = append(parts, joinWords(line[at:]))
 	}
 	return strings.Join(parts, " ")
 }

@@ -44,8 +44,11 @@ func newCmd() *cobra.Command {
 			"  " + brand.Name + " new my-vps --agent claude --detach --json",
 		Args: oneHost,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if asJSON && !detach {
-				return needsDetach(cmd)
+			if err := beforeAttach(cmd, asJSON, detach); err != nil {
+				return err
+			}
+			if err := client.CheckSessionName(name); err != nil {
+				return err
 			}
 			h, err := client.FindHost(args[0])
 			if err != nil {
@@ -86,17 +89,17 @@ func newCmd() *cobra.Command {
 				conn.Close()
 				return err
 			}
+			// An address without a host finds the new session at once.
+			client.RememberSession(h.Name, *s)
 			if !detach {
 				conn.Close()
 				return attach(cmd.Context(), h, s.ID, s.Name)
 			}
-			if asJSON {
-				defer conn.Close()
-				return printSession(cmd, conn, h, *s)
-			}
 			conn.Close()
-			d := client.CleanSession(*s)
-			say(cmd, "Started %s/%s (%s, %s).\n", h.Name, d.ID, d.Name, d.Agent)
+			if asJSON {
+				return printJSON(sessionObject(h.Name, *s))
+			}
+			say(cmd, "Started %s/%s (%s, %s).\n", shown(h.Name), shown(s.ID), shown(s.Name), shown(s.Agent))
 			return nil
 		},
 	}
@@ -163,105 +166,6 @@ func oneHost(c *cobra.Command, args []string) error {
 	return nil
 }
 
-// printSession prints a session that a command started, as JSON (cli-spec
-// 7.1). It asks the host for its list, so that the address uses the ID when
-// the name could mean another session. The session has started, so a list
-// that does not come is no failure: the address then uses the ID, and a
-// warning says why.
-func printSession(cmd *cobra.Command, conn *client.Conn, h client.Host, s client.Session) error {
-	lctx, cancel := context.WithTimeout(cmd.Context(), 30*time.Second)
-	defer cancel()
-	list, err := listSessions(lctx, conn)
-	obj := sessionObject(h.Name, s, list)
-	if err != nil {
-		obj["address"] = h.Name + "/" + s.ID
-		note(cmd, "address_by_id", fmt.Sprintf("%s/%s started, but %s did not list its sessions (%v), so the address uses the ID.", h.Name, s.ID, h.Name, err))
-	}
-	return printJSON(obj)
-}
-
-// resolve finds a session by ID or by unique name.
-func resolve(ctx context.Context, conn *client.Conn, ref string) (*client.Session, error) {
-	list, err := conn.Sessions(ctx)
-	if err != nil {
-		return nil, err
-	}
-	return resolveIn(list, ref, conn.Host.Name)
-}
-
-// resolveIn finds a session of host by ID or by unique name in list.
-func resolveIn(list []client.Session, ref, host string) (*client.Session, error) {
-	var byName []client.Session
-	for _, s := range list {
-		if s.ID == ref {
-			return &s, nil
-		}
-		if s.Name == ref {
-			byName = append(byName, s)
-		}
-	}
-	switch len(byName) {
-	case 1:
-		return &byName[0], nil
-	case 0:
-		return nil, &client.UserError{Msg: fmt.Sprintf("no session %q on %s", ref, host), Hint: brand.Name + " ls --host " + host, Code: "session_not_found", Kind: client.KindNotFound}
-	default:
-		return nil, &client.UserError{Msg: fmt.Sprintf("%d sessions are named %q on %s", len(byName), ref, host), Hint: "Use the session ID from `" + brand.Name + " ls`.", Code: "session_ambiguous", Kind: client.KindUsage}
-	}
-}
-
-func withSession(ctx context.Context, target string, fn func(context.Context, client.Host, *client.Conn, *client.Session) error) error {
-	hn, ref, err := client.SplitTarget(target)
-	if err != nil {
-		return err
-	}
-	h, err := client.FindHost(hn)
-	if err != nil {
-		return err
-	}
-	cctx, cancel := context.WithTimeout(ctx, 60*time.Second)
-	defer cancel()
-	conn, err := client.Dial(cctx, h, true)
-	if err != nil {
-		return err
-	}
-	defer conn.Close()
-	s, err := resolve(cctx, conn, ref)
-	if err != nil {
-		return err
-	}
-	return fn(cctx, h, conn, s)
-}
-
-func killCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:     "kill <host>/<session>",
-		Aliases: []string{"rm", "delete"},
-		Short:   "Stop a session and remove it",
-		Example: "  " + brand.Name + " kill my-vps/auth-fix",
-		Args:    cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return withSession(cmd.Context(), args[0], func(ctx context.Context, h client.Host, conn *client.Conn, s *client.Session) error {
-				res, err := conn.Delete(ctx, s.ID)
-				if err != nil {
-					return err
-				}
-				d := client.CleanSession(*s)
-				say(cmd, "Deleted %s (%s) on %s.\n", d.Name, d.ID, h.Name)
-				// WorktreeNote cleans the note and the hint (P0.4).
-				note, hint := client.WorktreeNote(h.Name, res)
-				if note != "" {
-					say(cmd, "%s\n", strings.ToUpper(note[:1])+note[1:]+".")
-				}
-				if hint != "" {
-					say(cmd, "Try: %s\n", hint)
-				}
-				return nil
-			})
-		},
-	}
-}
-
 func renameCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:     "rename <host>/<session> <name>",
@@ -269,11 +173,21 @@ func renameCmd() *cobra.Command {
 		Example: "  " + brand.Name + " rename my-vps/auth-fix login-fix",
 		Args:    cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return withSession(cmd.Context(), args[0], func(ctx context.Context, h client.Host, conn *client.Conn, s *client.Session) error {
-				if err := conn.RenameSession(ctx, s.ID, args[1]); err != nil {
+			name := strings.TrimSpace(args[1])
+			if name == "" {
+				return &client.UserError{Msg: "a name is needed", Hint: "Pass a non-empty name for the session.", Code: "bad_name", Kind: client.KindUsage}
+			}
+			if err := client.CheckSessionName(name); err != nil {
+				return err
+			}
+			return withSession(cmd, args[0], func(ctx context.Context, h client.Host, conn *client.Conn, s *client.Session) error {
+				if err := conn.RenameSession(ctx, s.ID, name); err != nil {
 					return err
 				}
-				say(cmd, "Renamed %s to %s on %s.\n", client.CleanLine(s.Name), args[1], h.Name)
+				renamed := *s
+				renamed.Name = name
+				client.RememberSession(h.Name, renamed)
+				say(cmd, "Renamed %s to %s on %s.\n", shown(s.Name), shown(name), shown(h.Name))
 				return nil
 			})
 		},
@@ -286,18 +200,23 @@ type hostSessions struct {
 	Error    string           `json:"error,omitempty"`
 	// err is the error behind Error.
 	err error
+	// at is when the host's list arrived, taken in its own worker, so that
+	// a slow host does not make another host's list look newer.
+	at time.Time
 }
 
 // rememberLists writes the lists of the hosts that answered to the session
-// cache, so that the picker and the launcher draw them at once.
+// cache, so that the picker and the launcher draw them at once. Each list
+// keeps the time when it arrived: a list that is older than the cache's
+// changes nothing.
 func rememberLists(results []hostSessions) {
-	lists := map[string][]client.Session{}
+	lists := map[string]client.HostList{}
 	for _, r := range results {
 		if r.err == nil {
-			lists[r.Host] = r.Sessions
+			lists[r.Host] = client.HostList{Sessions: r.Sessions, At: r.at}
 		}
 	}
-	tui.RememberSessions(lists)
+	client.RememberLists(lists)
 }
 
 // listAll asks every host for its sessions at once. Listing does not boot
@@ -318,7 +237,8 @@ func listAll(ctx context.Context, hosts []client.Host) []hostSessions {
 				return
 			}
 			defer conn.Close()
-			list, err := conn.Sessions(ctx)
+			list, err := listSessions(ctx, conn)
+			results[i].at = time.Now()
 			if err != nil {
 				results[i].Error, results[i].err = err.Error(), err
 			}
@@ -351,16 +271,17 @@ func printSessions(all []hostSessions) {
 		}
 	}
 	for _, r := range results {
+		host := shown(r.Host)
 		if r.Error != "" {
-			fmt.Printf("%s  ◌ %s\n", r.Host, r.Error)
+			fmt.Printf("%s  ◌ %s\n", host, shown(r.Error))
 			continue
 		}
 		if len(r.Sessions) == 0 {
-			fmt.Printf("%s  no sessions\n", r.Host)
+			fmt.Printf("%s  no sessions\n", host)
 			continue
 		}
 		for _, s := range r.Sessions {
-			fmt.Printf("%-14s %-10s %-20s %-9s %-*s %6s  %s\n", r.Host, s.ID, trunc(s.Name, 20), s.Agent, stateW, stateLabel(s), age(s.CreatedAt), s.Cwd)
+			fmt.Printf("%-14s %-10s %-20s %-9s %-*s %6s  %s\n", host, shown(s.ID), trunc(shown(s.Name), 20), shown(s.Agent), stateW, stateLabel(s), age(s.CreatedAt), shown(s.Cwd))
 		}
 	}
 }
@@ -369,19 +290,19 @@ func lsCmd() *cobra.Command {
 	var hostName string
 	var asJSON bool
 	cmd := &cobra.Command{
-		Use:     "ls",
-		Short:   "List sessions on every host",
-		Example: "  " + brand.Name + " ls\n  " + brand.Name + " ls --host my-vps --json",
-		Args:    cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
+		Use:     "ls [<host>]",
+		Short:   "List sessions on every host, or on one",
+		Example: "  " + brand.Name + " ls\n  " + brand.Name + " ls my-vps --json",
+		Args:    cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
 			hosts, err := client.LoadHosts()
 			if err != nil {
 				return err
 			}
-			if hostName != "" {
-				h, err := client.FindHost(hostName)
+			if len(args) == 1 || hostName != "" {
+				h, err := lsHost(args, hostName)
 				if err != nil {
-					return fromFlag(err, "host")
+					return err
 				}
 				hosts = []client.Host{h}
 			}
@@ -397,9 +318,27 @@ func lsCmd() *cobra.Command {
 			return nil
 		},
 	}
-	addHostFlag(cmd, &hostName, "only this host")
+	addHostFlag(cmd, &hostName, "only this host, as the argument does")
 	addJSON(cmd, &asJSON)
 	return cmd
+}
+
+// lsHost is the one host that ls lists: its argument, or --host, which
+// stays as a kept alias. Two different hosts are a usage error.
+func lsHost(args []string, flag string) (client.Host, error) {
+	if len(args) == 1 && flag != "" && flag != args[0] {
+		hint := brand.Name + " ls " + args[0]
+		if !client.ValidHostName(args[0]) {
+			hint = brand.Name + " host ls (lists the hosts)"
+		}
+		return client.Host{}, &client.UserError{Msg: fmt.Sprintf("ls got two hosts: %s and %s", args[0], flag),
+			Hint: hint, Code: "two_hosts", Kind: client.KindUsage}
+	}
+	if len(args) == 1 {
+		return client.FindHost(args[0])
+	}
+	h, err := client.FindHost(flag)
+	return h, fromFlag(err, "host")
 }
 
 func trunc(s string, n int) string {
@@ -432,11 +371,11 @@ func sendCmd() *cobra.Command {
 		Example: "  " + brand.Name + " send my-vps/auth-fix \"run the tests and fix what fails\"",
 		Args:    cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return withSession(cmd.Context(), args[0], func(ctx context.Context, h client.Host, conn *client.Conn, s *client.Session) error {
+			return withSession(cmd, args[0], func(ctx context.Context, h client.Host, conn *client.Conn, s *client.Session) error {
 				if err := conn.SendText(ctx, s.ID, args[1], !noEnter); err != nil {
 					return err
 				}
-				say(cmd, "Sent to %s on %s.\n", client.CleanLine(s.Name), h.Name)
+				say(cmd, "Sent to %s on %s.\n", shown(nameOf(*s)), shown(h.Name))
 				return nil
 			})
 		},

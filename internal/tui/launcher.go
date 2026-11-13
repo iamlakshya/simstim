@@ -220,7 +220,7 @@ func (m *Model) sessionsView(cw int) listView {
 	if h == nil {
 		v.crumb, v.facts = sFaint.Render("all sessions"), m.needFacts(sFaint.Render(plural(len(m.hosts), "host", "hosts")))
 	} else {
-		v.crumb = sFaint.Render("› ") + sBold.Render(m.decode(h.name(), m.revealAt))
+		v.crumb = sFaint.Render("› ") + sBold.Render(m.decode(shown(h.name()), m.revealAt))
 		v.facts = m.hostState(h, cw-cells(m.headLeft(v.crumb))-2)
 	}
 	rows := m.rows()
@@ -320,17 +320,18 @@ func sessCols(cw int) sessColumns {
 func (m *Model) sessRowView(r sessRow, n int, c sessColumns, selected, withHost bool) string {
 	switch r.kind {
 	case rowHeader:
-		return sBold.Render(r.h.name()) + "  " + m.hostState(r.h, c.row-cells(r.h.name())-2)
+		hn := shown(r.h.name())
+		return sBold.Render(hn) + "  " + m.hostState(r.h, c.row-cells(hn)-2)
 	case rowNote:
 		msg, _ := errText(r.h.err)
 		if msg == "" {
 			msg = "not ready"
 		}
-		return "  " + sDanger.Render(glyphFail) + " " + sFaint.Render(trunc(sentence(msg), c.name+c.folder+20))
+		return "  " + sDanger.Render(glyphFail) + " " + sFaint.Render(trunc(sentence(shown(msg)), c.name+c.folder+20))
 	default:
 		// A session row is drawn by the caller.
 	}
-	s := shown(r.s)
+	s := shownSession(r.s)
 	glyph, label := m.look(s)
 	traceSt := traceStyle(s)
 	if !r.h.loaded {
@@ -342,17 +343,18 @@ func (m *Model) sessRowView(r sessRow, n int, c sessColumns, selected, withHost 
 	if m.prompt != nil && m.prompt.mode == promptSearch {
 		q = m.prompt.in.value()
 	}
-	name := nameSegs(s.Name, c.name, sBold, q)
+	name := nameSegs(shown(s.Name), c.name, sBold, q)
 	if m.rename != nil && m.rename.key == r.key() {
 		name = []seg{{fit(m.rename.in.view(c.name, true), c.name), sPlain}}
 	}
-	where := truncPath(homePath(r.h, s.Cwd), c.folder)
+	folder := shown(homePath(r.h, s.Cwd))
+	where := truncPath(folder, c.folder)
 	if withHost {
-		where = trunc(r.h.name()+":"+homePath(r.h, s.Cwd), c.folder)
+		where = trunc(shown(r.h.name())+":"+folder, c.folder)
 	}
 	segs := []seg{gutter(n), {" ", sPlain}, glyph, {" ", sPlain}}
 	segs = append(segs, name...)
-	segs = append(segs, seg{"  ", sPlain}, seg{fit(s.Agent, colAgent), sFaint}, seg{"  ", sPlain})
+	segs = append(segs, seg{"  ", sPlain}, seg{fit(shown(s.Agent), colAgent), sFaint}, seg{"  ", sPlain})
 	if c.folder > 0 {
 		segs = append(segs, seg{fit(where, c.folder), sFaint}, seg{"  ", sPlain})
 	}
@@ -383,20 +385,21 @@ func (m *Model) emptyState(cw int) []string {
 		}
 		for _, x := range m.hosts {
 			if x.status == stOffline || x.status == stFailed {
-				out = append(out, sFaint.Render(trunc(glyphOffline+" "+x.name()+" is offline.", cw)))
+				out = append(out, sFaint.Render(trunc(glyphOffline+" "+shown(x.name())+" is offline.", cw)))
 			}
 		}
 		return out
 	}
+	hn := shown(h.name())
 	switch {
 	case h.status == stOffline || h.status == stFailed:
 		return m.hostError(h, cw)
 	case !h.loaded:
-		return []string{sAccent.Render(m.spinner()) + " " + m.shimmer(trunc("Connecting to "+h.name()+"…", cw-2))}
+		return []string{sAccent.Render(m.spinner()) + " " + m.shimmer(trunc("Connecting to "+hn+"…", cw-2))}
 	case len(h.sessions) > 0 && m.hideExited:
 		return []string{sFaint.Render("No running sessions."), "", keyHint(optKey+"+e", "show ended sessions")}
 	default:
-		return []string{sFaint.Render(trunc("No sessions on "+h.name()+" yet.", cw)), "", keyHint("n", "start one from a single line, like: claude ~/src/app")}
+		return []string{sFaint.Render(trunc("No sessions on "+hn+" yet.", cw)), "", keyHint("n", "start one from a single line, like: claude ~/src/app")}
 	}
 }
 
@@ -407,14 +410,15 @@ func keyHint(key, desc string) string {
 
 // hostError says why a host cannot be used, and what to try.
 func (m *Model) hostError(h *hostConn, cw int) []string {
+	hn := shown(h.name())
 	msg, hint := errText(h.err)
 	if msg == "" {
-		msg = h.name() + " is offline"
+		msg = hn + " is offline"
 	}
 	if hint == "" {
-		hint = fmt.Sprintf("%s host test %s", brand.Name, h.name())
+		hint = fmt.Sprintf("%s host test %s", brand.Name, hn)
 	}
-	return append(errorBlock(msg, hint, cw), "", sFaint.Render("Retrying in the background."))
+	return append(errorBlock(shown(msg), shown(hint), cw), "", sFaint.Render("Retrying in the background."))
 }
 
 // errorBlock is an error and the step to try next, wrapped to w cells: a red

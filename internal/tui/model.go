@@ -403,11 +403,12 @@ func (m *Model) onToastTick() tea.Cmd {
 
 // onFolders takes folder completions, for the quick start or the form.
 func (m *Model) onFolders(msg foldersMsg) tea.Cmd {
+	res := cleanFolders(msg.res)
 	if p := m.prompt; msg.quick && p != nil && p.host == msg.host && p.asked == msg.prefix {
-		p.folders = msg.res.Matches
+		p.folders = res.Matches
 	}
 	if d, ok := m.modal.(*newSession); ok && d.host == msg.host && !msg.quick {
-		d.setSuggestions(msg.prefix, msg.res)
+		d.setSuggestions(msg.prefix, res)
 	}
 	return nil
 }

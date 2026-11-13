@@ -2,7 +2,7 @@
 
 ## From each host
 
-Stop your sessions first (`simstim ls`, then `simstim kill <host>/<session>`). Then, on the host:
+Stop your sessions first (`simstim ls`, then `simstim rm <host>/<session>`). Then, on the host:
 
 <!-- test: skip (removes the helper from the host) -->
 ```sh

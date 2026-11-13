@@ -2954,7 +2954,7 @@ The grammar is `new [<host> | auto | -] [flags] [-- command…]`. Only one word 
 `client.ResolveHost` picks the host in this order:
 
 1. A host named on the command line.
-2. `-`: the host of the last session that the launcher attached to (`tui.LastSession`).
+2. `-`: the host of the last session that the launcher attached to (`client.LoadLast`).
 3. `auto`: section 14.10.5 (task H13).
 4. No host: a rule, which is `sandbox.host` from the narrowest layer that sets it: the session's `--set`, its profile, then its repository (18.2). Then `SIMSTIM_DEFAULT_HOST`, then `default` in `hosts.toml`, then the only saved host that is not `shared`.
 5. Otherwise, the error in section 14.14, which lists the hosts with room.

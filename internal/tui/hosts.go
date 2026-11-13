@@ -28,13 +28,17 @@ const (
 // hostConn is one saved host and its background connection. Only Update
 // touches it; the work happens in tea.Cmds that report back with messages.
 type hostConn struct {
-	host      client.Host
-	status    connStatus
-	conn      Conn
-	gen       int // bumped on every dial, so late answers from old connections are dropped
-	err       error
-	sessions  []client.Session
-	loaded    bool
+	host     client.Host
+	status   connStatus
+	conn     Conn
+	gen      int // bumped on every dial, so late answers from old connections are dropped
+	err      error
+	sessions []client.Session
+	loaded   bool
+	// seenAt is when the host's list last arrived, for the session cache,
+	// as the worker that fetched it saw it: a list that the launcher saves
+	// later keeps this time.
+	seenAt    time.Time
 	rtts      rttWindow // the round trips of the last minute (rtt.go)
 	rtt       rttSpread // their spread, as the launcher shows it
 	info      *client.HostInfo
@@ -73,6 +77,9 @@ type (
 		changes int
 		list    []client.Session
 		err     error
+		// at is when the list arrived, taken by the worker that asked: the
+		// launcher may handle the message much later, as after an attach.
+		at time.Time
 	}
 	latencyMsg struct {
 		name string
@@ -154,7 +161,7 @@ func (m *Model) listSessions(h *hostConn) tea.Cmd {
 		cctx, cancel := context.WithTimeout(bgCtx, 15*time.Second)
 		defer cancel()
 		list, err := c.Sessions(cctx)
-		return sessionsMsg{name: name, gen: gen, changes: changes, list: list, err: err}
+		return sessionsMsg{name: name, gen: gen, changes: changes, list: list, err: err, at: time.Now()}
 	})
 }
 
@@ -319,7 +326,7 @@ func (m *Model) look(s client.Session) (glyph, label seg) {
 	case api.StateIdle:
 		return seg{glyphIdle, sFaint}, seg{"idle", sFaint}
 	}
-	return seg{glyphIdle, sFaint}, seg{strings.ReplaceAll(s.State, "_", " "), sFaint}
+	return seg{glyphIdle, sFaint}, seg{strings.ReplaceAll(shown(s.State), "_", " "), sFaint}
 }
 
 // traceStyle colours a session's trace like its state: cyan for working,
@@ -377,11 +384,11 @@ func (m *Model) alertNew(h *hostConn, list []client.Session) tea.Cmd {
 		if s.State != api.StateNeedsInput || before[s.ID] == api.StateNeedsInput {
 			continue
 		}
-		body := s.Name + " needs you"
-		if s.Reason != "" {
-			body += ": " + s.Reason
+		body := shown(s.Name) + " needs you"
+		if r := shown(s.Reason); r != "" {
+			body += ": " + r
 		}
-		b.WriteString("\x1b]777;notify;" + client.OSCText(brand.DisplayName+" · "+h.name()) + ";" + client.OSCText(body) + "\x1b\\")
+		b.WriteString("\x1b]777;notify;" + oscText(brand.DisplayName+" · "+shown(h.name())) + ";" + oscText(body) + "\x1b\\")
 	}
 	if b.Len() == 0 {
 		return nil
@@ -398,4 +405,9 @@ func (m *Model) rememberCreatedHost(host client.Host) {
 	m.hosts = append(m.hosts, &hostConn{host: host, status: stOffline})
 	sort.SliceStable(m.hosts, func(i, j int) bool { return m.hosts[i].name() < m.hosts[j].name() })
 	m.syncSel()
+}
+
+// oscText keeps text safe inside an OSC string.
+func oscText(s string) string {
+	return strings.ReplaceAll(shown(s), ";", " ")
 }

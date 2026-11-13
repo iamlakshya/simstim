@@ -48,7 +48,7 @@ func (h *Holder) serve(conn net.Conn, hookSock bool) {
 		_ = c.w.WriteJSON(proto.TError, refused)
 		return
 	}
-	if err := c.w.WriteJSON(proto.THello, proto.Hello{Magic: proto.Magic, Protocol: version.Protocol, Version: version.Version, Role: "holder"}); err != nil {
+	if err := c.w.WriteJSON(proto.THello, proto.Hello{Magic: proto.Magic, Protocol: version.Protocol, Version: version.Version, Role: "holder", Features: holderFeatures}); err != nil {
 		return
 	}
 	h.dispatch(c, r)

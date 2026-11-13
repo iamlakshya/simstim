@@ -20,8 +20,8 @@ simstim host alerts log my-vps
 
 | Flag | What it does |
 | --- | --- |
-| `--json` | print JSON |
-| `-n`, `--lines <int>` | how many lines to show (default: `20`) |
+| `--json` | print JSON for scripts, and ask nothing (see docs/how-to/scripting.md) |
+| `--lines <int>` | how many lines to show (default: `20`) |
 
 ## Flags from the parent command
 
@@ -29,5 +29,15 @@ simstim host alerts log my-vps
 | --- | --- |
 | `--debug[=<categories>]` | turn on the debug mode, with every category, or with the categories listed: attach, net, memory, launcher, runtime. A list binds only in the = form, such as `--debug=net` |
 | `--debug-file <file>` | write the client's debug records to this file. On its own, it turns on every category (SIMSTIM_DEBUG_FILE does the same) |
+| `--no-color` | print no colour (NO_COLOR does the same) |
+| `--no-input` | ask nothing: a question that needs an answer fails with exit code 4, and names the flag that answers it (SIMSTIM_NO_INPUT=1 does the same) |
 
-Part of [`host alerts`](host_alerts.md): show where a host sends alerts about its sessions, and the last deliveries.
+## Old names
+
+These still work, and print a warning on stderr, until their end.
+
+| Old | New | Works until | Note |
+| --- | --- | --- | --- |
+| -n | --lines | v0.4.0 and 11 November 2027, whichever comes later | `-n` then means only `--name`. |
+
+Part of [`host alerts`](host_alerts.md): show where a host sends alerts, and the last deliveries.

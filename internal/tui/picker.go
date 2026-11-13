@@ -49,7 +49,7 @@ func (r PickRow) Address() string {
 // CachedSessions is the session cache's rows for hosts: the sessions each
 // host had when the launcher or a command last saw it.
 func CachedSessions(hosts []string) []PickRow {
-	mem := loadMemory()
+	mem := client.LoadSessionCache()
 	var rows []PickRow
 	for _, h := range hosts {
 		for _, s := range client.ValidSessions(h, mem.Sessions[h]) {
@@ -146,7 +146,7 @@ func (p *picker) matches() []PickRow {
 	q := strings.ToLower(string(p.filter))
 	var out []PickRow
 	for _, r := range p.rows {
-		if strings.Contains(strings.ToLower(r.Address()), q) {
+		if strings.Contains(strings.ToLower(shown(r.Address())), q) {
 			out = append(out, r)
 		}
 	}
@@ -261,7 +261,7 @@ func (p *picker) render() string {
 	m := p.matches()
 	w := max(p.width, 20)
 	var b strings.Builder
-	left := sTitle.Render(p.title) + " " + sAccent.Render(glyphPrompt) + " " + string(p.filter) + sKey.Reverse(true).Render(" ")
+	left := sTitle.Render(shown(p.title)) + " " + sAccent.Render(glyphPrompt) + " " + string(p.filter) + sKey.Reverse(true).Render(" ")
 	hint := fmt.Sprintf("%d of %d", len(m), len(p.rows))
 	if p.loading {
 		hint += dot + "checking hosts…"
@@ -275,7 +275,7 @@ func (p *picker) render() string {
 	}
 	switch {
 	case len(p.rows) == 0 && p.loading:
-		b.WriteString("\n" + sFaint.Render("  Looking for sessions on "+listNames(p.hosts)+"…"))
+		b.WriteString("\n" + sFaint.Render("  Looking for sessions on "+listNames(shownAll(p.hosts))+"…"))
 		return b.String()
 	case len(m) == 0:
 		b.WriteString("\n" + sFaint.Render("  No session matches."))
@@ -283,16 +283,15 @@ func (p *picker) render() string {
 	}
 	addrW, agentW := 0, 0
 	for _, r := range m {
-		addrW = max(addrW, cells(r.Address()))
-		agentW = max(agentW, cells(client.CleanLine(r.Session.Agent)))
+		addrW = max(addrW, cells(shown(r.Address())))
+		agentW = max(agentW, cells(shown(r.Session.Agent)))
 	}
 	addrW = min(addrW, max(12, w/2))
 	now := p.now()
 	for i := p.top; i < len(m) && i < p.top+pickRows; i++ {
 		r := m[i]
-		d := shown(r.Session)
-		state := strings.ReplaceAll(d.State, "_", " ")
-		line := fit(r.Address(), addrW) + "  " + fit(d.Agent, agentW) + "  " + fit(state, 12) + " " + fitRight(fmtAge(now.Sub(d.CreatedAt)), 4)
+		state := strings.ReplaceAll(shown(r.Session.State), "_", " ")
+		line := fit(shown(r.Address()), addrW) + "  " + fit(shown(r.Session.Agent), agentW) + "  " + fit(state, 12) + " " + fitRight(fmtAge(now.Sub(r.Session.CreatedAt)), 4)
 		line = trunc(line, w-2)
 		if i == p.cur {
 			b.WriteString("\n" + sAccent.Render(glyphMarker) + " " + sBold.Render(line))

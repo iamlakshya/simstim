@@ -151,6 +151,15 @@ if os.environ.get("E2E_ONLY") == "host-git":
     print("RESULT %d/%d passed" % (sum(results), len(results)))
     sys.exit(0 if all(results) else 1)
 
+# The session verbs (session_verbs.py). E2E_ONLY=session-verbs runs only these.
+import session_verbs
+def verbs_checks():
+    session_verbs.run(session_verbs.Ctx(cli=cli, HOST=HOST, NAME=NAME, HELPER=HELPER, env=env, ok=ok, Term=Term, host_rc=host_rc))
+if os.environ.get("E2E_ONLY") == "session-verbs":
+    verbs_checks()
+    print("RESULT %d/%d passed" % (sum(results), len(results)))
+    sys.exit(0 if all(results) else 1)
+
 # --- A script: new --detach --json, as the scripting guide shows it ---
 # stdout is one JSON object and nothing else. The script reads the address
 # from it, then deletes the session.
@@ -163,10 +172,10 @@ def parsed(text):
         return {}
 js = parsed(r.stdout)
 ok(r.returncode == 0 and js.get("v") == 1 and js.get("host") == HOST and js.get("name") == "e2e-json" and js.get("id")
-   and js.get("address") in (HOST + "/e2e-json", HOST + "/" + str(js.get("id"))) and r.stderr == "",
+   and js.get("address") == HOST + "/" + str(js.get("id")) and r.stderr == "",
    "new --detach --json prints one session object, and nothing on stderr (exit %d)" % r.returncode)
 if js.get("id"):
-    r = subprocess.run([cli, "kill", HOST + "/" + js["id"]], stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=60)
+    r = subprocess.run([cli, "rm", HOST + "/" + js["id"], "-y"], stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=60)
     ok(r.returncode == 0 and r.stdout == "" and "Deleted e2e-json" in r.stderr,
        "the script deletes the session, and the confirmation goes to stderr")
 r = subprocess.run([cli, "new", HOST, "--json"], stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=60)
@@ -598,6 +607,7 @@ guided_checks()
 sandbox_host_checks()
 socket_checks()
 host_git_checks()
+verbs_checks()
 # M. Full screen (roadmap N2): a program on the alternate screen is reported
 #    as full screen, and host doctor says so.
 sid_fs = start("e2e-fullscreen", "/bin/bash", "-c", 'printf "\\033[?1049hFULL"; sleep 600')
@@ -644,7 +654,7 @@ else:
 
 # Clean up.
 for s in created:
-    subprocess.run([cli, "kill", HOST + "/" + s], capture_output=True)
+    subprocess.run([cli, "rm", HOST + "/" + s, "-y"], capture_output=True)
 try:
     host_ssh("rm -f ~/e2e-seq.bin")
     os.remove(local)

@@ -94,6 +94,7 @@ func setupValue(run bool) string {
 }
 
 func skipNote(host string, q client.SetupQuestion, past client.SetupPast) string {
+	host = shownShort(host)
 	var why string
 	switch past {
 	case client.SetupChanged:
@@ -108,6 +109,7 @@ func skipNote(host string, q client.SetupQuestion, past client.SetupPast) string
 
 func askSetup(p *prompter, host string, q client.SetupQuestion, past client.SetupPast) (bool, error) {
 	repo, script := client.ShowPath(q.Repo), client.ShowPath(q.Script)
+	host = shownShort(host)
 	if p.on {
 		switch past {
 		case client.SetupChanged:
@@ -124,6 +126,7 @@ func askSetup(p *prompter, host string, q client.SetupQuestion, past client.Setu
 
 func askMakeFolder(p *prompter, host string, q client.FolderQuestion) (bool, error) {
 	folder := client.ShowPath(q.Folder)
+	host = shownShort(host)
 	if p.on {
 		fmt.Fprintf(p.out, "The folder %s does not exist on %s.\n", folder, host)
 	}

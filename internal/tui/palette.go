@@ -168,7 +168,7 @@ func registry() []*command {
 				case h == nil:
 					return "choose a host first"
 				case h.status == stOffline || h.status == stFailed:
-					return h.name() + " is offline"
+					return shown(h.name()) + " is offline"
 				}
 				return ""
 			},
@@ -229,7 +229,7 @@ func registry() []*command {
 		{noun: brand.Name, verb: "settings", firstRun: true, run: (*Model).openSettings},
 		{noun: brand.Name, verb: "about", firstRun: true,
 			run: func(m *Model) tea.Cmd {
-				return m.toast(toastInfo, fmt.Sprintf("%s %s, protocol %s, host helper %s.", brand.DisplayName, version.Version, version.Protocol, m.be.HelperVersion()))
+				return m.toast(toastInfo, fmt.Sprintf("%s %s, protocol %s, host helper %s.", brand.DisplayName, version.Version, version.Protocol, shown(m.be.HelperVersion())))
 			}},
 		{noun: brand.Name, verb: "quit", keys: []binding{{"q", anywhere}}, firstRun: true,
 			run: func(*Model) tea.Cmd { return tea.Quit }},

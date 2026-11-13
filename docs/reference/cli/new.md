@@ -7,17 +7,18 @@ title: "simstim new"
 Start a session on a host, and attach to it.
 
 ```text
-simstim new <host> [-- command…] [flags]
+simstim new <host> [-- <command>…] [flags]
 ```
 
 ## Examples
 
 ```sh
-simstim new my-vps --agent claude --dir ~/src/app
+simstim new my-vps --agent claude -C ~/src/app
 simstim new my-vps --agent claude --dir ~/src/new-app --mkdir
 simstim new my-vps --agent claude --secret ANTHROPIC_API_KEY
 simstim new my-vps --agent claude --memory-max 6G
 simstim new my-vps --detach -- htop
+simstim new my-vps --agent claude --detach --json
 ```
 
 ## Flags
@@ -27,14 +28,15 @@ simstim new my-vps --detach -- htop
 | `-a`, `--agent <string>` | the agent: claude, codex, opencode, antigravity, gemini, amp, cursor, aider, goose or shell (default: `shell`) |
 | `--base <string>` | the commit or branch the worktree starts from (default: HEAD) |
 | `--detach` | start it without attaching |
-| `-d`, `--dir <string>` | the folder on the host (default: `~`) |
+| `-C`, `--dir <string>` | the folder on the host (default: `~`) |
 | `--inline` | start the agent in its inline mode, so your terminal keeps its scrollback (see agents.inline in config.toml) |
+| `--json` | print JSON for scripts, and ask nothing (see docs/how-to/scripting.md) |
 | `--memory-max <size>` | cap the session's memory: auto, or a size such as 4G (default: sessions.memory_max in config.toml) |
 | `--mkdir` | make the folder on the host if it does not exist, without asking |
 | `-n`, `--name <string>` | a name for the session (default: the folder name) |
-| `--no-setup` | do not run the repository's setup script this time |
-| `--secret <stringArray>` | pass a secret from config.toml's [secrets] into the session's environment (repeatable) |
-| `--setup` | run the repository's setup script this time, whatever your answer for it |
+| `--no-setup-script` | do not run the repository's setup script this time |
+| `--secret <list>` | pass secrets from config.toml's [secrets] into the session's environment, such as A,B, or the flag again |
+| `--setup-script` | run the repository's setup script this time, whatever your answer for it |
 | `-w`, `--worktree` | give the session its own git worktree and branch |
 
 ## Flags from the parent command
@@ -43,5 +45,17 @@ simstim new my-vps --detach -- htop
 | --- | --- |
 | `--debug[=<categories>]` | turn on the debug mode, with every category, or with the categories listed: attach, net, memory, launcher, runtime. A list binds only in the = form, such as `--debug=net` |
 | `--debug-file <file>` | write the client's debug records to this file. On its own, it turns on every category (SIMSTIM_DEBUG_FILE does the same) |
+| `--no-color` | print no colour (NO_COLOR does the same) |
+| `--no-input` | ask nothing: a question that needs an answer fails with exit code 4, and names the flag that answers it (SIMSTIM_NO_INPUT=1 does the same) |
+
+## Old names
+
+These still work, and print a warning on stderr, until their end.
+
+| Old | New | Works until | Note |
+| --- | --- | --- | --- |
+| -d | -C | v0.4.0 and 11 November 2027, whichever comes later | After its end, `-d` is the short form of `--detach`. |
+| --setup | --setup-script | v0.4.0 and 11 November 2027, whichever comes later | "Setup" then names only the guided setup. |
+| --no-setup | --no-setup-script | v0.4.0 and 11 November 2027, whichever comes later |  |
 
 See [all commands](_index.md).

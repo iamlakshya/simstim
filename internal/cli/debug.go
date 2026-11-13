@@ -130,7 +130,7 @@ func debugStartCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return withSession(cmd.Context(), args[0], func(ctx context.Context, h client.Host, conn *client.Conn, s *client.Session) error {
+			return withSession(cmd, args[0], func(ctx context.Context, h client.Host, conn *client.Conn, s *client.Session) error {
 				st, err := conn.DebugStart(ctx, s.ID, cats, d)
 				if err != nil {
 					return err
@@ -139,9 +139,9 @@ func debugStartCmd() *cobra.Command {
 				if st.Until != nil {
 					until = clockTime(*st.Until)
 				}
-				fmt.Fprintf(os.Stderr, "Debug is on for %s on %s until %s (%s).\n", client.CleanLine(s.Name), h.Name, until, client.CleanLine(strings.Join(st.Categories, ", ")))
-				fmt.Fprintf(os.Stderr, "The host writes its records to %s.\n", client.CleanPath(st.File))
-				fmt.Fprintf(os.Stderr, "To trace your keys too, attach with --debug. To stop: %s debug stop %s\n", brand.Name, client.CommandTarget(h.Name, s.ID))
+				fmt.Fprintf(os.Stderr, "Debug is on for %s on %s until %s (%s).\n", shownShort(nameOf(*s)), shownShort(h.Name), until, shownShort(strings.Join(st.Categories, ", ")))
+				fmt.Fprintf(os.Stderr, "The host writes its records to %s.\n", shown(st.File))
+				fmt.Fprintf(os.Stderr, "To trace your keys too, attach with --debug. To stop: %s\n", sessionCommand(h.Name, s.ID, "debug stop"))
 				return nil
 			})
 		},
@@ -188,16 +188,16 @@ func debugStopCmd() *cobra.Command {
 		Example: "  " + brand.Name + " debug stop my-vps/auth-fix",
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return withSession(cmd.Context(), args[0], func(ctx context.Context, h client.Host, conn *client.Conn, s *client.Session) error {
+			return withSession(cmd, args[0], func(ctx context.Context, h client.Host, conn *client.Conn, s *client.Session) error {
 				st, err := conn.DebugStop(ctx, s.ID)
 				if err != nil {
 					return err
 				}
 				if !st.Stopped {
-					fmt.Fprintf(os.Stderr, "Debug was not on for %s on %s.\n", client.CleanLine(s.Name), h.Name)
+					fmt.Fprintf(os.Stderr, "Debug was not on for %s on %s.\n", shown(nameOf(*s)), shown(h.Name))
 					return nil
 				}
-				fmt.Fprintf(os.Stderr, "Debug is off for %s on %s. Its records are in %s on the host.\n", client.CleanLine(s.Name), h.Name, client.CleanPath(st.File))
+				fmt.Fprintf(os.Stderr, "Debug is off for %s on %s. Its records are in %s on the host.\n", shown(nameOf(*s)), shown(h.Name), shown(st.File))
 				return nil
 			})
 		},
@@ -213,12 +213,12 @@ func debugSaveCmd() *cobra.Command {
 		Example: "  " + brand.Name + " debug save my-vps/auth-fix",
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return withSession(cmd.Context(), args[0], func(ctx context.Context, h client.Host, conn *client.Conn, s *client.Session) error {
+			return withSession(cmd, args[0], func(ctx context.Context, h client.Host, conn *client.Conn, s *client.Session) error {
 				f, err := conn.DebugSave(ctx, s.ID)
 				if err != nil {
 					return err
 				}
-				fmt.Fprintf(os.Stderr, "Saved the recent debug record of %s: %s on %s (%s).\n", client.CleanLine(s.Name), client.CleanPath(f.Path), h.Name, sizeText(f.Size))
+				fmt.Fprintf(os.Stderr, "Saved the recent debug record of %s: %s on %s (%s).\n", shown(nameOf(*s)), shown(f.Path), shown(h.Name), sizeText(f.Size))
 				return nil
 			})
 		},
@@ -247,11 +247,11 @@ func debugProfileCmd() *cobra.Command {
 			if d < time.Second || d > diag.ProfileMax {
 				return &client.UserError{Msg: "--for: " + d.String() + " is not between 1s and 5m", Hint: "Pass a time such as 30s or 2m.", Code: "bad_value", Kind: client.KindUsage}
 			}
-			return withSession(cmd.Context(), args[0], func(ctx context.Context, h client.Host, conn *client.Conn, s *client.Session) error {
+			return withSession(cmd, args[0], func(ctx context.Context, h client.Host, conn *client.Conn, s *client.Session) error {
 				wait := 30 * time.Second
 				if kind == diag.ProfileCPU {
 					wait += d
-					defer countDown("Profiling the CPU of "+client.CleanLine(s.Name), d)()
+					defer countDown("Profiling the CPU of "+shown(nameOf(*s)), d)()
 				}
 				// A CPU profile may take longer than the connection's own time.
 				ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), wait)
@@ -260,7 +260,7 @@ func debugProfileCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				fmt.Fprintf(os.Stderr, "Wrote a %s profile of %s: %s on %s (%s).\n", kind, client.CleanLine(s.Name), client.CleanPath(f.Path), h.Name, sizeText(f.Size))
+				fmt.Fprintf(os.Stderr, "Wrote a %s profile of %s: %s on %s (%s).\n", kind, shown(nameOf(*s)), shown(f.Path), shown(h.Name), sizeText(f.Size))
 				return nil
 			})
 		},

@@ -70,7 +70,7 @@ Every list screen has the same parts, top to bottom:
 
     ● Do you want to proceed?              ~/src/app · 6.1 of 8 GiB · s4          ← the line under the list
 
-    ✓ Copied: simstim attach atlas-dev/auth-refactor.                            ← notices
+    ✓ Copied: simstim attach atlas-dev/s4.                                       ← notices
   ────────────────────────────────────────────────────────────────────────────   ← bottom rule
     ❯ / search every host   n start a session                                     ← the prompt line
     enter attach   space peek   r rename   esc hosts   ? keys                      ← the keys
@@ -200,7 +200,7 @@ Every list screen has the same parts, top to bottom:
     Retrying in the background.
   ```
 
-- **Every host:** `simstim flip`, or "All sessions" in the palette, lists every host's sessions in one list, under each host's name.
+- **Every host:** "All sessions" in the palette lists every host's sessions in one list, under each host's name. `simstim flip` opens the same list, and warns: it is an old name ([CLI spec, section 3](cli-spec.md#3-old-names-and-warnings-c5-c6-c7)). `simstim attach` with no session opens the picker instead, an inline list.
 
 #### 2.4.1 Resume
 
@@ -269,7 +269,7 @@ Every dialog is a sheet. It rises from the bottom of the screen over the dimmed 
 | Sheet | Opens on | What it holds |
 | --- | --- | --- |
 | New session | `ctrl+f` in the quick start, or the palette | Agent (the chosen one lit while the row has focus), folder with completion from the host, name, and worktree. "other…" runs any command you type. |
-| Delete | `d` | Red rule and title: "Delete api-tests?", what stops and what stays. For an agent that has ended, only what it removes. |
+| Delete | `d` | Red rule and title: "Delete api-tests?", what stops and what stays. For an agent that has ended, only what it removes. `simstim rm` asks with the same lines (`client.DeleteLines`). |
 | Peek | `space` | The session's last screen, refreshed while the agent runs. ↑↓ move to the next session, and Enter attaches. For an agent that has ended, it shows no memory, and Enter keeps it open. |
 | Commands | `ctrl+o` | The palette: a filter, then every command as plain words ("New session", "Peek at the screen") with its key in cyan. A command that cannot run says why, faint. |
 | Keys | `?` | Every key that works here, in two columns, built from the live registry. It leaves out `?` itself. |
@@ -342,7 +342,7 @@ The agent owns the whole terminal: every row and every column. There is no borde
 - **The mouse.** Click a row to select it, and click the selected row to open it. The wheel moves the selection, and a click on a palette row runs it.
 - **The tab title** counts the sessions that need you: `● 1 · simstim · homelab`.
 - **When nobody is looking.** If a session starts to need you while the terminal is in the background, the launcher sends a desktop notification.
-- **From the shell.** `simstim attach -` attaches to the last session.
+- **From the shell.** `simstim attach -` attaches to the last session. `simstim attach auth-refactor` finds the host of a session whose name is unique.
 
 ### 2.12 Guided setup
 
@@ -524,7 +524,7 @@ It shows what the agent will get through the pass-through.
 
 - "Detached. auth-refactor keeps running on atlas-dev."
 - "Reconnected to atlas-dev."
-- "Copied: simstim attach atlas-dev/auth-refactor."
+- "Copied: simstim attach atlas-dev/s4." The command names the session by its host and its ID.
 
 A repeat extends the notice instead of adding a line.
 
@@ -554,21 +554,23 @@ The launcher is the home, and every action also has a command, for scripts and t
 
 The root help groups the commands as this table does: Sessions, Hosts, Agents, and Setup and help ([CLI spec, 8.1](cli-spec.md#81-the-root-help)). Every command has an example in its help, and `simstim help concepts` explains the words that the tool uses.
 
+An address names a session: `<host>/<session>`, or `<session>` alone when no other host has a session of that name, or `-` for the last session attached to ([CLI spec, section 9.2](cli-spec.md#92-addresses)).
+
 | Command | Does |
 | --- | --- |
 | `simstim` | Opens the launcher |
 | **Sessions** | |
 | `simstim new <host> [--agent claude] [-C ~/src/app [--mkdir]] [--name x] [--worktree [--base ref]] [--secret NAME] [--memory-max 4G] [--inline] [--setup-script \| --no-setup-script] [--detach [--json]] [-- <command>…]` | Starts a session, and attaches unless `--detach`. `-C` is the short form of `--dir` |
-| `simstim attach [<host>/<session>\|-]` | Attaches directly. `-` is the last session. Good for a Ghostty keybinding. Without a session, and with input on, it opens the picker: an inline list of sessions, from the session cache, with a filter. To a session whose agent has ended, it says why and what to try, as at the end of an attach. `a` is its alias. |
-| `simstim resume <host>/<session> [--memory-max 4G] [--secret NAME] [--detach [--json]]` | Starts an ended agent again in its session, with its resume command, and attaches unless `--detach`. Without `--memory-max`, the cap is the one the session asked for. |
-| `simstim ls [--host h] [--json]` | Lists sessions, with their state and where the state came from, and why an agent ended: `errored (out of memory)` |
-| `simstim kill <host>/<session>` | Stops a session and removes it, and keeps a worktree that has work. `rm` and `delete` are its aliases. |
-| `simstim rename <host>/<session> <name>` | Renames a session |
-| `simstim send <host>/<session> <text> [--no-enter]` | Types text into a session without attaching, then presses Enter |
-| `simstim ports <host>/<session> [--json]` | Lists the ports a session listens on |
-| `simstim forward <host>/<session> [<port>…]` | Forwards a session's ports to localhost, until Ctrl+C |
-| `simstim pull <host>/<session> [--into <branch>] [--force]` | Brings a session's branch into the git repository in the current folder |
-| `simstim flip [<host>/<session>\|-]` | A quick switch: the sessions of every host in one list, then attach |
+| `simstim attach [<address>] [--restart]` | Attaches directly. `a` is its alias. Without an address and with input on, it opens the picker. A stopped host with a provider script wakes first. On an ended agent it asks to start it again; `--restart` answers yes. |
+| `simstim resume <address> [--memory-max 4G] [--secret NAME] [--detach [--json]]` | Starts an ended agent again in its session and attaches unless `--detach`. On a running agent it attaches, or with `--detach` says that it runs. The old memory cap stays unless a new one is named. |
+| `simstim ls [<host>] [--host h] [--json]` | Lists sessions on every host or one host, with their state, its source and why an agent ended. |
+| `simstim show [<address>] [--json]` | Describes one session and the command that attaches to it. Without an address and with input on, it opens the picker. |
+| `simstim rm [<address>] [-y]` | Stops and removes a session, keeping a worktree that has work. It asks first and opens the picker without an address. `delete` is an alias. The old `kill` and `flip` names still work and warn. |
+| `simstim rename <address> <name>` | Renames a session |
+| `simstim send <address> <text> [--no-enter]` | Types text into a session without attaching, then presses Enter |
+| `simstim ports <address> [--json]` | Lists the ports a session listens on |
+| `simstim forward <address> [<port>…]` | Forwards a session's ports to localhost, until Ctrl+C |
+| `simstim pull <address> [--into <branch>] [--force]` | Brings a session's branch into the git repository in the current folder |
 | **Hosts** | |
 | `simstim host add <name> [<ssh-target>] [--ssh-config f] [--label k=v] [--provider-script s --wake] [--yes]` | Connects a host: probe, consent, install, setup and doctor, and with input on the agent checklist when an agent is missing |
 | `simstim host ls [--json]` | Lists the hosts |
@@ -576,7 +578,7 @@ The root help groups the commands as this table does: Sessions, Hosts, Agents, a
 | `simstim host doctor <host> [--fix [--yes]] [--json]` | Checks a host's setup, and with `--fix` fixes what it can |
 | `simstim host rm <host>` | Forgets a host (its sessions keep running) |
 | `simstim host restore <host> [--all] [--json]` | Starts again the sessions that a host restart stopped (or, with `--all`, a crash) |
-| `simstim host create lima\|docker\|e2b [<name>] [--cpus n] [--memory 8] [--disk 40] [--image i] [--template t] [--idle-stop 30m] [--token-command c]` | Makes a host with a provider, installs the helper and connects |
+| `simstim host create lima\|docker\|e2b [<name>] [--cpus n] [--memory 8G] [--disk 40G] [--image i] [--template t] [--idle-stop 30m] [--token-command c]` | Makes a host with a provider, installs the helper and connects |
 | `simstim host destroy <host> [--yes] [--force]` | Deletes a created host's VM, container or sandbox, and every session on it |
 | `simstim host idle <host> <duration>\|never` | Sets how long a created host may idle before it stops |
 | `simstim host start\|stop\|status <host>` | Runs the host's provider or provider script. `status` takes `--json` |
@@ -585,7 +587,7 @@ The root help groups the commands as this table does: Sessions, Hosts, Agents, a
 | `simstim host alerts test <host> [--event e]`, `host alerts log <host> [--lines n] [--json]`, `host alerts off <host>` | Sends a test alert, shows the last deliveries, or turns alerts off |
 | **Agents** | |
 | `simstim agents ls [--json]` | Lists the agent table, with how each agent installs |
-| `simstim agents install <agent> [--host h] [--force]` | Installs an agent on a host with its vendor's installer, in a session you watch |
+| `simstim agents install <agent> [--host h] [--reinstall]` | Installs an agent on a host with its vendor's installer, in a session you watch |
 | **Setup and help** | |
 | `simstim setup [--host h \| --create lima\|docker\|e2b] [--name n] [--agents a,b] [--yes] [--no-login]` | The guided setup: where agents run, the host, the agent checklist, the installs and the logins, then the first session's command |
 | `simstim doctor [--fix [--yes]]` | Checks this computer: ssh, the config files and the secrets' commands |

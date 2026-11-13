@@ -121,7 +121,7 @@ func (h *Holder) readSecrets(conn net.Conn, want []string, deadline time.Time) (
 	if f, err := proto.Read(r); err != nil || f.Type != proto.THello {
 		return nil, errors.New("no hello")
 	}
-	if err := w.WriteJSON(proto.THello, proto.Hello{Magic: proto.Magic, Protocol: version.Protocol, Version: version.Version, Role: "holder"}); err != nil {
+	if err := w.WriteJSON(proto.THello, proto.Hello{Magic: proto.Magic, Protocol: version.Protocol, Version: version.Version, Role: "holder", Features: holderFeatures}); err != nil {
 		return nil, err
 	}
 	if !h.fullPeer(conn) {

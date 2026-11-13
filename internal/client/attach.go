@@ -80,7 +80,11 @@ type attacher struct {
 	swallow map[int]bool
 	// seen is the last known state of each session on this host, for notifications.
 	seen map[string]string
-	tr   *attachTrace // the debug trace (trace.go), or nil
+	// outStream tracks ground boundaries in TOutput so notifications never
+	// split an unfinished escape sequence or multi-byte UTF-8 rune.
+	outStream     outStream
+	pendingNotify [][]byte
+	tr            *attachTrace // the debug trace (trace.go), or nil
 	// dropped says why the attach dropped its connection, for the debug
 	// mode: "" when the connection closed by itself.
 	dropped string
@@ -174,6 +178,7 @@ func Attach(ctx context.Context, o AttachOptions) (AttachResult, error) {
 	// never with RIS, which would wipe the scrollback.
 	a.write(a.tracker.M.ResetSequence())
 	a.endGuard()
+	a.flushPendingNotify()
 	a.write([]byte("\x1b]9;4;0\x1b\\\x1b[23;0t"))
 
 	o.State.Key, o.State.Offset, o.State.Modes, o.State.Valid = a.key, a.cu.Offset, a.tracker.M, true
@@ -196,8 +201,7 @@ func (a *attacher) write(b []byte) {
 // show sends the session's bytes to the terminal, unchanged, then any
 // notice that waited for the terminal to be between sequences.
 func (a *attacher) show(b []byte) {
-	a.write(b)
-	a.writeHeld()
+	a.writeOutput(b)
 }
 
 func (a *attacher) size() (cols, rows, xpx, ypx int) { return termSize(a.o.Out) }
@@ -249,6 +253,7 @@ func (a *attacher) begin(att proto.Attached, st *AttachState, rows int) {
 	}
 	// A full redraw. Keep what is on screen in the scrollback, then start clean.
 	a.tracker = term.NewTracker()
+	a.outStream.reset()
 	a.cu.Offset = att.From
 	// For "snapshot", a TSnapshot frame redraws the screen as of From, and the
 	// output from From follows; bytes before Live are history and are sanitised.
@@ -257,6 +262,7 @@ func (a *attacher) begin(att proto.Attached, st *AttachState, rows int) {
 	} else {
 		a.write([]byte(fmt.Sprintf("\x1b[%d;1H%s\x1b[H", rows, strings.Repeat("\n", rows))))
 	}
+	a.flushPendingNotify()
 }
 
 // output shows bytes from offset off, skipping any the terminal already has.
@@ -265,7 +271,7 @@ func (a *attacher) output(off int64, data []byte) {
 	if fresh == nil {
 		return // the terminal already shows it
 	}
-	a.show(show)
+	a.writeOutput(show)
 	a.tracker.Feed(fresh)
 }
 

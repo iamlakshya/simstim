@@ -223,7 +223,7 @@ These copies replace nothing.
 - Each debug file turns over at 8 MiB to the same name with `.1` added. `holder.log` turns over at 1 MiB.
 - A session's `debug/` folder keeps 32 MiB, and each debug folder 64 MiB. The oldest files go first, the windows saved by themselves before the rest. A file in use, or still being written, stays.
 - The saved window of a busy session can be about 12 MiB, more than the 8 MiB that Go aims for.
-- `kill` removes a session's files with its folder.
+- `rm` removes a session's files with its folder.
 - With debug off, the client and the bridge discard their debug lines, and each hook costs one check.
 
 ## What it never records

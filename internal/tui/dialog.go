@@ -299,12 +299,12 @@ func (d *newSession) view(m *Model) string {
 	)
 	switch {
 	case d.starting:
-		body = append(body, sKey.Render(m.spinner())+" "+sFaint.Render(fmt.Sprintf("Starting %s on %s…", d.agent(), d.host)), "")
+		body = append(body, sKey.Render(m.spinner())+" "+sFaint.Render(fmt.Sprintf("Starting %s on %s…", shown(d.agent()), shown(d.host))), "")
 	case d.err != nil:
 		body = append(append(body, errorLines(d.err, cw)...), "")
 	}
 	hints := []hint{{"enter", "start"}, {"tab", "next"}, {"ctrl+enter", "start detached"}, {"esc", "cancel"}}
-	return sheet(w, "New session on "+d.host, "", hints, trimBlank(body), toneNormal)
+	return sheet(w, "New session on "+shown(d.host), "", hints, trimBlank(body), toneNormal)
 }
 
 // worktreeRow is a choice of two: the folder itself, or a new git worktree.
@@ -412,7 +412,7 @@ func (d *newSession) suggestLine(w int) string {
 	if d.hints {
 		lead = "recent: "
 	}
-	return sFaint.Render(fit(lead+strings.Join(d.suggest, "  "), w))
+	return sFaint.Render(fit(lead+strings.Join(shownAll(d.suggest), "  "), w))
 }
 
 // completion returns the next match that extends what the user typed. Adding

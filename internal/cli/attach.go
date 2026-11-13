@@ -32,10 +32,12 @@ func attachEnded(ctx context.Context, h client.Host, id, name string) (bool, err
 
 func attachSession(ctx context.Context, h client.Host, id, name string) (ended, stuck bool, err error) {
 	if !isTerminal(os.Stdin) || !isTerminal(os.Stdout) {
-		return false, false, &client.UserError{Msg: "attach needs a terminal", Hint: "Run it from a terminal, not a pipe.", Code: "no_terminal"}
+		return false, false, &client.UserError{Msg: "attach needs a terminal", Hint: "Run it from a terminal, not a pipe.", Code: "no_terminal", Kind: client.KindUsage}
 	}
-	tui.RememberLast(h.Name, id, name)
-	name = client.CleanLine(name) // only printed after the last-session record
+	client.RememberLast(h.Name, id, name)
+	// The name comes from the host: it is cleaned before it is drawn. The
+	// session's own bytes pass as they are.
+	name = shown(name)
 	res, err := client.Attach(ctx, client.AttachOptions{
 		Host: h, Session: id, Settings: client.LoadSettings(), Interactive: true,
 	})
@@ -45,72 +47,139 @@ func attachSession(ctx context.Context, h client.Host, id, name string) (ended, 
 	if res.Ended != nil {
 		fmt.Fprint(os.Stderr, endMessage(name, h.Name, id, res.Ended))
 	} else {
-		fmt.Fprintf(os.Stderr, "\r\nDetached. %s keeps running on %s.\n", name, h.Name)
+		fmt.Fprintf(os.Stderr, "\r\nDetached. %s keeps running on %s.\n", name, shown(h.Name))
 	}
 	return res.Ended != nil, res.ReaderStuck, nil
 }
 
 func attachCmd() *cobra.Command {
-	return &cobra.Command{
+	var restart bool
+	cmd := &cobra.Command{
 		Use:     "attach [<host>/<session>|-]",
 		Aliases: []string{"a"},
 		Short:   "Attach to a session",
-		Long: "Shows the session in this terminal, as the agent draws it. The detach key, Ctrl+\\ unless\n" +
-			"config.toml names another, leaves it, and the session keeps running. The address - is the\n" +
-			"last session that you attached to. Without an address, you pick a session from a list.",
+		Long: "Attaches this terminal to a session. A stopped host that its provider script can start wakes first.\n" +
+			"When the session's agent has ended, attach asks to start it again, as resume does. --restart\n" +
+			"answers yes. The host may be left out when no other host has a session of that name.",
 		Example: "  " + brand.Name + " attach my-vps/auth-fix\n" +
-			"  " + brand.Name + " attach -   # the last session you attached to\n" +
-			"  " + brand.Name + " attach     # pick one from a list",
+			"  " + brand.Name + " attach -          # the last session you attached to\n" +
+			"  " + brand.Name + " attach auth-fix   # the host is found when the name is unique\n" +
+			"  " + brand.Name + " attach            # pick one from a list",
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			var target string
-			if len(args) == 1 {
-				target = args[0]
-			} else {
-				t, err := pickSession(cmd, "<host>/<session>")
-				if err != nil {
-					return err
-				}
-				target = t
-			}
-			if target == "-" {
-				host, id, ok := tui.LastSession()
-				if !ok {
-					return &client.UserError{Msg: "no session has been attached yet", Hint: "Attach to a session by its name, or run " + brand.Name + " and pick one.", Code: "no_last_session", Kind: client.KindNotFound}
-				}
-				target = host + "/" + id
-			}
-			var h client.Host
-			var s *client.Session
-			err := withSession(cmd.Context(), target, func(_ context.Context, hh client.Host, _ *client.Conn, ss *client.Session) error {
-				h, s = hh, ss
-				return nil
-			})
-			if err != nil {
-				return err
-			}
-			if client.Ended(*s) {
-				return endedError(h, *s)
-			}
-			return attach(cmd.Context(), h, s.ID, s.Name)
+			return runAttach(cmd, args, restart)
 		},
 	}
+	addRestart(cmd, &restart)
+	return cmd
+}
+
+// addRestart gives cmd the flag that answers attach's question about an
+// ended agent.
+func addRestart(cmd *cobra.Command, p *bool) {
+	cmd.Flags().BoolVar(p, "restart", false, "when the agent has ended, start it again without asking")
+}
+
+// runAttach attaches to the session that args name, or that the user
+// picks (cli-spec 9.3). It needs a terminal. Without a session, the picker
+// or its missing argument comes first. With one, the check for a terminal
+// comes before any lookup, so that a script opens no connection to a host,
+// and no host wakes for nothing. On an ended agent it asks to start the
+// agent again, and then does what resume does.
+func runAttach(cmd *cobra.Command, args []string, restart bool) error {
+	if len(args) > 0 && (!isTerminal(os.Stdin) || !isTerminal(os.Stdout)) {
+		// No lookup comes first, so the hint repeats the address only when
+		// it means one session as it is.
+		return &client.UserError{Msg: "attach needs a terminal", Hint: brand.Name + " send " + typedAddress(args[0]) + " 'text'",
+			Code: "no_terminal", Kind: client.KindUsage}
+	}
+	a, err := sessionArg(cmd, args, false)
+	if err != nil {
+		return err
+	}
+	var s client.Session
+	err = a.open(cmd.Context(), cmd, func(ctx context.Context, f found) error {
+		s = *f.s
+		if !client.Ended(s) {
+			if restart {
+				say(cmd, "The agent of %s on %s runs, so attach did not restart it.\n", shown(nameOf(s)), shown(f.host.Name))
+			}
+			return nil
+		}
+		r, err := restartAgent(ctx, cmd, f, restart)
+		if err == nil {
+			s = *r
+		}
+		return err
+	})
+	if err != nil {
+		return err
+	}
+	return attach(cmd.Context(), a.host, s.ID, s.Name)
+}
+
+// restartAgent starts again the ended agent of the session f found, as
+// resume does, after a yes or with restart. With input off and without
+// restart, the question fails with exit code 4. The answer no says why the
+// agent ended, and cancels. A helper that cannot resume gets the error of
+// an ended agent.
+func restartAgent(ctx context.Context, cmd *cobra.Command, f found, restart bool) (*client.Session, error) {
+	if !f.conn.HasFeature("resume") {
+		return nil, endedError(f.host, *f.s)
+	}
+	if !restart {
+		ok, err := askRestart(sessionPrompts(cmd, f.host.Name, f.s.ID), f.host.Name, *f.s)
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
+			return nil, declined(f.host, *f.s)
+		}
+	}
+	res, now, err := resumeRacing(ctx, f, client.ResumeArgs{}, nil, secretTerminal(cmd))
+	if now != nil {
+		say(cmd, "Another client started the agent of %s on %s again first, so this attaches.\n", shown(nameOf(*now)), shown(f.host.Name))
+		return now, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	debugStopped(cmd, f.host, res)
+	return &res.Session, nil
+}
+
+// askRestart asks whether to start the ended agent of the session s of
+// host again. The question names the session by its name. The Try: line
+// of p, when input is off, names it by host/ID (sessionPrompts).
+func askRestart(p *prompter, host string, s client.Session) (bool, error) {
+	where, agent := shown(nameOf(s))+" on "+shown(host), shown(s.Agent)
+	return p.confirm(qRestart, fmt.Sprintf("Start %s again in %s?", agent, where), fmt.Sprintf("a yes to start %s again in %s", agent, where))
+}
+
+// declined is the answer no at the question of an ended agent: it says why
+// the agent ended, as the error of an ended agent does, and cancels.
+func declined(h client.Host, s client.Session) error {
+	var ue *client.UserError
+	if !errors.As(endedError(h, s), &ue) {
+		return cancelled()
+	}
+	return &client.UserError{Msg: ue.Msg, Hint: ue.Hint, Code: "cancelled", Kind: client.KindCancelled}
 }
 
 // pickSession opens the picker for a command whose address is missing, and
-// returns the address picked (cli-spec 6.3). With input off, the missing
-// address is the usage error of a missing argument. want names the address
-// in that error.
-func pickSession(cmd *cobra.Command, want string) (string, error) {
+// returns the session picked, by its ID, which the host's list then finds
+// (cli-spec 6.3). With input off, the missing address is the usage error
+// of a missing argument. want names the address in that error.
+func pickSession(cmd *cobra.Command, want string) (address, error) {
 	if !inputOn(cmd) {
-		return "", missingArgument(cmd, "a session, as "+want)
+		return address{}, missingArgument(cmd, "a session, as "+want)
 	}
 	hosts, err := client.LoadHosts()
 	if err != nil {
-		return "", err
+		return address{}, err
 	}
 	if len(hosts) == 0 {
-		return "", &client.UserError{Msg: "no hosts yet", Hint: brand.Name + " host add <name>", Code: "no_hosts"}
+		return address{}, &client.UserError{Msg: "no hosts yet", Hint: brand.Name + " host add <name>", Code: "no_hosts"}
 	}
 	names := make([]string, len(hosts))
 	for i, h := range hosts {
@@ -122,13 +191,23 @@ func pickSession(cmd *cobra.Command, want string) (string, error) {
 	})
 	switch {
 	case errors.Is(err, tui.ErrPickCancelled):
-		return "", cancelled()
+		return address{}, cancelled()
 	case errors.Is(err, tui.ErrNoSessions):
-		return "", &client.UserError{Msg: "no sessions on any host", Hint: brand.Name + " new " + hosts[0].Name, Code: "no_sessions", Kind: client.KindNotFound}
+		return address{}, &client.UserError{Msg: "no sessions on any host", Hint: newHostHint(hosts[0].Name), Code: "no_sessions", Kind: client.KindNotFound}
 	case err != nil:
-		return "", err
+		return address{}, err
 	}
-	return picked.Host + "/" + picked.Session.ID, nil
+	return pickedAddress(picked)
+}
+
+// pickedAddress is the address of a picked row: its session's ID, which
+// the host's list finds by its ID alone.
+func pickedAddress(picked tui.PickRow) (address, error) {
+	h, err := client.FindHost(picked.Host)
+	if err != nil {
+		return address{}, err
+	}
+	return address{host: h, ref: picked.Session.ID, byID: true, gone: fmt.Sprintf("%s on %s is gone", shown(nameOf(picked.Session)), shown(h.Name))}, nil
 }
 
 // pickRefresh asks every host for its sessions, as ls does, without waking
@@ -166,16 +245,20 @@ func pickRefresh(hosts []client.Host, cached []tui.PickRow) func(context.Context
 	}
 }
 
+// flipCmd is the old name of attach. Alone, it opens the launcher's
+// switcher, as before. Both warn.
 func flipCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "flip [<host>/<session>|-]",
-		Short: "Switch sessions: pick from the sessions of every host, and attach",
-		Example: "  " + brand.Name + " flip\n" +
-			"  " + brand.Name + " flip my-vps/auth-fix   # attach at once, as attach does",
-		Args: cobra.MaximumNArgs(1),
+	var restart bool
+	cmd := &cobra.Command{
+		Use:     "flip [<host>/<session>|-]",
+		Short:   `Switch sessions: the old name of "attach"`,
+		Example: "  " + brand.Name + " flip my-vps/auth-fix",
+		Hidden:  true,
+		Args:    cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			warnOld(cmd, oldFlip)
 			if len(args) == 1 {
-				return attachCmd().RunE(cmd, args)
+				return runAttach(cmd, args, restart)
 			}
 			if err := checkLauncher(cmd, "the switcher", brand.Name+" flip <host>/<session>, or "+brand.Name+" ls"); err != nil {
 				return err
@@ -183,6 +266,8 @@ func flipCmd() *cobra.Command {
 			return tui.RunWith(cmd.Context(), tui.Options{Switcher: true, Local: onboard.System{Providers: providers}})
 		},
 	}
+	addRestart(cmd, &restart)
+	return cmd
 }
 
 // sentence is s with a capital letter first and a full stop at its end.

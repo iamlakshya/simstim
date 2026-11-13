@@ -21,13 +21,8 @@ func (a *attacher) reconnect(ctx context.Context) (detached bool, err error) {
 	since := diag.Now()
 	DebugLog().Debug("connection lost", diag.CatKey, diag.CatNet, "reason", reason)
 	go a.ssh.masterState(context.WithoutCancel(ctx), "drop")
-	a.write(a.reconnectTitle())
-	defer func() {
-		a.write([]byte("\x1b]9;4;0\x1b\\\x1b[23;0t"))
-		if len(a.tracker.M.Title) > 0 {
-			a.write(a.tracker.M.Title) // for terminals without a title stack
-		}
-	}()
+	finishNotice := a.reconnectNotice()
+	defer finishNotice()
 	banner := time.After(bannerAfter)
 	delay := time.Duration(0)
 	for {
@@ -44,6 +39,22 @@ func (a *attacher) reconnect(ctx context.Context) (detached bool, err error) {
 		}
 		DebugLog().Debug("reconnect failed", diag.CatKey, diag.CatNet, "err", err)
 		delay = nextRetry(delay)
+	}
+}
+
+// reconnectNotice draws only the client's complete control sequences. They
+// abort any unfinished session escape, so the notification boundary starts
+// again at ground, including when the next attach uses replay.
+func (a *attacher) reconnectNotice() func() {
+	// The title says so too, pushed so that it can be put back as it was.
+	a.write([]byte("\x1b]9;4;3\x1b\\\x1b[22;0t\x1b]2;⧗ reconnecting · " + oscSafe(a.key) + "\x1b\\"))
+	a.outStream.reset()
+	return func() {
+		a.write([]byte("\x1b]9;4;0\x1b\\\x1b[23;0t"))
+		a.outStream.reset()
+		if len(a.tracker.M.Title) > 0 {
+			a.writeOutput(a.tracker.M.Title) // for terminals without a title stack
+		}
 	}
 }
 

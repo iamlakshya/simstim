@@ -60,7 +60,7 @@ func listed(t *testing.T, id string) host.SessionInfo {
 // writes profiles and its flight recorder on request. debug stop ends it.
 func TestDebugStartAndStopInARunningSession(t *testing.T) {
 	h := hosttest.New(t)
-	s := start(t, "debugged", "/bin/sh", "-c", "stty raw -echo; printf 'READY'; head -c 4 >/dev/null; printf 'GOT'; exec sleep 60")
+	s := start(t, "debug-me", "/bin/sh", "-c", "stty raw -echo; printf 'READY'; head -c 4 >/dev/null; printf 'GOT'; exec sleep 60")
 	waitOutput(t, s.ID, "READY")
 	b := newRawBridge(t)
 	b.attach(s.ID, -1, 80, 24)

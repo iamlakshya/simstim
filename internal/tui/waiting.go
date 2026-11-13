@@ -22,7 +22,7 @@ func (m *Model) nextWaiting() tea.Cmd {
 			if s.State != api.StateNeedsInput {
 				continue
 			}
-			d := shown(s)
+			d := shownSession(s)
 			msg := d.Name + " on " + h.name() + " needs you"
 			if d.Reason != "" {
 				msg += ": " + d.Reason

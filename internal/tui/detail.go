@@ -24,11 +24,11 @@ const minFacts = 12
 
 // sessionDetail is the line under the sessions, cw cells wide.
 func (m *Model) sessionDetail(h *hostConn, s client.Session, cw int, withHost bool) string {
-	s = shown(s)
+	s = shownSession(s)
 	now, steps := m.sessionNow(h, s)
-	where := homePath(h, s.Cwd)
+	where := shown(homePath(h, s.Cwd))
 	if withHost {
-		where = h.name() + ":" + where
+		where = shown(h.name()) + ":" + where
 	}
 	mem, note := "", ""
 	if !ended(s) {
@@ -42,7 +42,7 @@ func (m *Model) sessionDetail(h *hostConn, s client.Session, cw int, withHost bo
 	}
 	empty := func(p string) bool { return p == "" }
 	head := slices.DeleteFunc([]string{where, mem}, empty)
-	tail := slices.DeleteFunc([]string{s.ID}, empty)
+	tail := slices.DeleteFunc([]string{shown(s.ID)}, empty)
 	if !h.loaded {
 		tail = append(tail, "last seen before this run")
 	}
@@ -89,12 +89,12 @@ func (m *Model) sessionNow(h *hostConn, s client.Session) (string, []hint) {
 	}
 	switch a := m.activity[sessKey{h.name(), s.ID}]; {
 	case s.State == api.StateNeedsInput && s.Reason != "":
-		return sWarning.Render("● " + s.Reason), nil
+		return sWarning.Render("● " + shown(s.Reason)), nil
 	case len(s.MissingSecrets) > 0:
 		// After a host restart the agent runs without the secrets it had.
-		return sWarning.Render("● started without its secrets: " + strings.Join(s.MissingSecrets, ", ")), nil
+		return sWarning.Render("● started without its secrets: " + strings.Join(shownAll(s.MissingSecrets), ", ")), nil
 	case a.text != "":
-		return sAccent.Render("▸ ") + m.decode(a.text, a.at), nil
+		return sAccent.Render("▸ ") + m.decode(shown(a.text), a.at), nil
 	}
 	return "", nil
 }

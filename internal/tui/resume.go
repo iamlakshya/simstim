@@ -59,11 +59,12 @@ func (m *Model) resumeSelected() tea.Cmd {
 		res, err := c.Resume(cctx, client.ResumeArgs{ID: key.id, Secrets: secrets})
 		return resumedMsg{key: key, res: res, err: err}
 	})
-	text := fmt.Sprintf("Resuming %s on %s…", s.Name, h.name())
+	name, host := shown(s.Name), shown(h.name())
+	text := fmt.Sprintf("Resuming %s on %s…", name, host)
 	if client.CapStopped(*s) && s.MemoryMax > 0 {
 		// The cap that stopped the agent applies again, unless the command
 		// line gives another.
-		text = fmt.Sprintf("Resuming %s on %s, with its cap of %s…", s.Name, h.name(), fmtSize(s.MemoryMax))
+		text = fmt.Sprintf("Resuming %s on %s, with its cap of %s…", name, host, fmtSize(s.MemoryMax))
 	}
 	return tea.Batch(m.toast(toastInfo, text), resume)
 }
@@ -95,5 +96,5 @@ func (m *Model) onResumed(msg resumedMsg) tea.Cmd {
 	if m.sel == msg.key && m.modal == nil && m.prompt == nil && m.rename == nil {
 		return m.jack(h, s.ID, s.Name)
 	}
-	return tea.Batch(m.toast(toastSuccess, fmt.Sprintf("Resumed %s on %s.", s.Name, h.name())), m.listSessions(h))
+	return tea.Batch(m.toast(toastSuccess, fmt.Sprintf("Resumed %s on %s.", shown(s.Name), shown(h.name()))), m.listSessions(h))
 }

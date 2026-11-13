@@ -11,3 +11,4 @@ Generated from the code, so it always matches the build.
 - [Keys](keymap.md): the launcher's commands and keys.
 - [Agents](agents.md): the agent table.
 - [Exit codes](exit-codes.md): what each exit code means.
+- [Concepts](concepts.md): the words that the tool uses.

@@ -28,7 +28,7 @@ func pullCmd() *cobra.Command {
 			if err := gitHere(cmd.Context(), "rev-parse", "--show-toplevel"); err != nil {
 				return &client.UserError{Msg: "this folder is not in a git repository", Hint: "Run pull again in your clone of the repository.", Code: "not_a_repo"}
 			}
-			return withSession(cmd.Context(), args[0], func(ctx context.Context, h client.Host, _ *client.Conn, s *client.Session) error {
+			return withSession(cmd, args[0], func(ctx context.Context, h client.Host, _ *client.Conn, s *client.Session) error {
 				return pull(ctx, h, s, into, force)
 			})
 		},
@@ -70,7 +70,7 @@ func pull(ctx context.Context, h client.Host, s *client.Session, into string, fo
 		return &client.UserError{Msg: "git fetch failed: " + client.CleanLine(msg), Hint: "Check that ssh " + h.SSH + " works, then run the git fetch yourself.", Code: "fetch_failed"}
 	}
 	ahead, _ := gitOut(ctx, "rev-list", "--count", into, "^HEAD")
-	fmt.Fprintf(os.Stderr, "Fetched %s from %s on %s into %s", client.CleanLine(repo.Branch), client.CleanLine(s.Name), h.Name, client.CleanLine(into))
+	fmt.Fprintf(os.Stderr, "Fetched %s from %s on %s into %s", shown(repo.Branch), shown(nameOf(*s)), shown(h.Name), shown(into))
 	if ahead != "" && ahead != "0" {
 		fmt.Fprintf(os.Stderr, ": %s commits that your current branch does not have", ahead)
 	}

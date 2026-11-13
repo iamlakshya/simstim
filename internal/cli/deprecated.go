@@ -47,6 +47,10 @@ type oldForm struct {
 	Keeps string
 	// Note says more about the old form, for the reference.
 	Note string
+	// From, for a behaviour that changes at the end, says what holds from
+	// then, without its full stop, such as `without a terminal, "rm" needs
+	// -y`. The warning is then that sentence with the end.
+	From string
 }
 
 // releaseDays holds the day of each release that adds a warning, as
@@ -83,10 +87,36 @@ var oldForms = []oldForm{
 		Note: "A bare number means GiB. 0 or less means the default."},
 	{ID: "host create --disk", Cmd: "host create", Old: "--disk 40", New: "--disk 40G", Kind: "value", Version: "0.2.0", Code: "old_name",
 		Note: "A bare number means GiB. 0 or less means the default."},
+	{ID: "kill", Old: "kill", New: "rm", Kind: "command", Cmd: "rm", Version: "0.2.0", Code: "old_name"},
+	{ID: "flip", Old: "flip", New: "attach", Kind: "command", Cmd: "attach", Version: "0.2.0", Code: "old_name"},
+	{
+		ID: "rm without -y", Old: `"rm" without -y, with input off`, New: "rm -y", Kind: "behaviour", Cmd: "rm",
+		Version: "0.2.0", Code: "rm_needs_yes", From: `without a terminal, "rm" needs -y`,
+	},
 }
 
-// oldHostKeys is the row of the Go keys of `host ls --json`.
-var oldHostKeys = &oldForms[0]
+// The rows that the commands warn with. The release that removes the row
+// of rm without -y, at its end, sets oldRmWithoutYes to nil: rm with input
+// off and without -y then fails with exit code 4 (question C-10).
+var (
+	// oldHostKeys is the row of the Go keys of `host ls --json`.
+	oldHostKeys = oldRow(`the Go keys of "host ls --json"`)
+	// oldKill and oldFlip are the old names of rm -y and attach.
+	oldKill = oldRow("kill")
+	oldFlip = oldRow("flip")
+	// oldRmWithoutYes is rm that deletes with input off and without -y.
+	oldRmWithoutYes = oldRow(`"rm" without -y, with input off`)
+)
+
+// oldRow is the row of the old form old.
+func oldRow(old string) *oldForm {
+	for i := range oldForms {
+		if oldForms[i].Old == old {
+			return &oldForms[i]
+		}
+	}
+	panic("deprecated.go: no row for " + old)
+}
 
 // end is the release and the day of the old form's end: two releases, and
 // 12 months, after the release that adds its warning.
@@ -96,6 +126,19 @@ func (o oldForm) end() (string, time.Time) {
 		panic("deprecated.go: release " + o.Version + " of " + o.Old + " has no day in releaseDays")
 	}
 	return twoReleasesAfter(o.Version), day.AddDate(1, 0, 0)
+}
+
+// oldNamesOf lists the old names of the command c that still work, such
+// as "kill" for rm. A suggestion counts them as names of c, so a word near
+// an old name suggests the new one: help leaves the old names out.
+func oldNamesOf(c *cobra.Command) []string {
+	var out []string
+	for _, o := range oldForms {
+		if o.Kind == "command" && o.New == shortPath(c) {
+			out = append(out, o.Old)
+		}
+	}
+	return out
 }
 
 // OldName is an old form that still works, for the reference page of its
@@ -133,19 +176,25 @@ func twoReleasesAfter(v string) string {
 
 // says is the warning's first sentence.
 func (o oldForm) says() string {
-	if o.Says != "" {
+	switch {
+	case o.Says != "":
 		return o.Says
+	case o.From != "":
+		return sentence(o.From)
 	}
 	return fmt.Sprintf("%q is now %q.", o.Old, o.New)
 }
 
 // warning is the whole warning, without "Warning:".
 func (o oldForm) warning() string {
+	version, day := o.end()
+	if o.From != "" {
+		return fmt.Sprintf("%s from v%s and %s, whichever comes later.", o.From, version, day.Format("2 January 2006"))
+	}
 	keeps := o.Keeps
 	if keeps == "" {
 		keeps = fmt.Sprintf("%q works", o.Old)
 	}
-	version, day := o.end()
 	return fmt.Sprintf("%s %s until v%s and %s, whichever comes later.", o.says(), keeps, version, day.Format("2 January 2006"))
 }
 

@@ -25,6 +25,10 @@ func SetVerboseLog(t *testing.T, log []byte) {
 	t.Cleanup(func() { verboseLog = old })
 }
 
+// AfterHostFacts is afterHostFacts, for a test that stops a bundle, or
+// closes its connection, once it found its session.
+var AfterHostFacts = &afterHostFacts
+
 // AddEntry adds a file to a new archive, as the bundle does, and reports
 // whether the archive took its name.
 func AddEntry(t *testing.T, name string) error {

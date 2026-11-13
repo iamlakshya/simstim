@@ -29,10 +29,11 @@ func (m *Model) op(h *hostConn, ok string, fn func(context.Context, Conn) error)
 }
 
 func offlineErr(h *hostConn) error {
+	name := shown(h.name())
 	if h.status == stConnecting {
-		return &client.UserError{Msg: "still connecting to " + h.name(), Hint: "Wait a moment, then try again.", Code: "connecting"}
+		return &client.UserError{Msg: "still connecting to " + name, Hint: "Wait a moment, then try again.", Code: "connecting"}
 	}
-	return &client.UserError{Msg: h.name() + " is offline", Hint: fmt.Sprintf("%s host test %s", brand.Name, h.name()), Code: "offline"}
+	return &client.UserError{Msg: name + " is offline", Hint: fmt.Sprintf("%s host test %s", brand.Name, name), Code: "offline"}
 }
 
 // newSessionHost picks the host for "session: new": the host in play, or
@@ -71,6 +72,10 @@ func (m *Model) openSelectedHost() tea.Cmd {
 // startSession sends "new" to the host h, for the start r.
 func (m *Model) startSession(h *hostConn, r startReq) tea.Cmd {
 	r.host = h.name()
+	// A name that looks like an ID fails before any secret is fetched.
+	if err := client.CheckSessionName(r.args.Name); err != nil {
+		return func() tea.Msg { return startedMsg{startReq: r, err: err} }
+	}
 	if !h.online() {
 		err := offlineErr(h)
 		return func() tea.Msg { return startedMsg{startReq: r, err: err} }
@@ -171,7 +176,7 @@ func (m *Model) showStarted(msg startedMsg) tea.Cmd {
 			return m.jack(h, msg.s.ID, msg.s.Name)
 		}
 	}
-	return tea.Batch(m.toast(toastSuccess, fmt.Sprintf("Started %s on %s.", msg.s.Name, h.name())), m.listSessions(h))
+	return tea.Batch(m.toast(toastSuccess, fmt.Sprintf("Started %s on %s.", shown(msg.s.Name), shown(h.name()))), m.listSessions(h))
 }
 
 func (m *Model) attachSelected() tea.Cmd {
@@ -188,14 +193,20 @@ func (m *Model) attachSelected() tea.Cmd {
 	return m.jack(h, s.ID, s.Name)
 }
 
+// copyAttach copies the command that attaches to the selected session. It
+// names the session by host/ID, never by its name, which can mean another
+// session (cli-spec 9.2). An address that a shell would not read back as it
+// is, as from a host that sends an odd ID, is not copied.
 func (m *Model) copyAttach() tea.Cmd {
 	h, s := m.selectedPair()
 	if s == nil {
 		return nil
 	}
-	// By the session's ID: a name is the host's text, and could be shell
-	// syntax when the command is pasted.
-	text := fmt.Sprintf("%s attach %s", brand.Name, client.CommandTarget(h.name(), s.ID))
+	addr := h.name() + "/" + s.ID
+	if client.ShellWord(addr) != addr {
+		return m.toastErr(&client.UserError{Msg: "the address of this session cannot go in a command", Hint: brand.Name + " ls", Code: "bad_address", Kind: client.KindUsage})
+	}
+	text := brand.Name + " attach " + addr
 	return tea.Batch(tea.SetClipboard(text), m.toast(toastSuccess, "Copied: "+text+"."))
 }
 
@@ -208,7 +219,9 @@ func (m *Model) confirmDelete() tea.Cmd {
 	return nil
 }
 
-// deleteSession runs after the confirm.
+// deleteSession runs after the confirm. s is the session as the question
+// showed it: the host deletes it only while its name is still s.Name, so a
+// session renamed since stays.
 func (m *Model) deleteSession(host string, s client.Session) tea.Cmd {
 	h := m.hostByName(host)
 	if h == nil {
@@ -221,8 +234,8 @@ func (m *Model) deleteSession(host string, s client.Session) tea.Cmd {
 	return m.bgCmd(func(ctx context.Context) tea.Msg {
 		cctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 		defer cancel()
-		res, err := c.Delete(cctx, id)
-		ok := fmt.Sprintf("Deleted %s on %s.", s.Name, host)
+		res, err := c.DeleteNamed(cctx, id, s.Name)
+		ok := fmt.Sprintf("Deleted %s on %s.", shown(s.Name), shown(host))
 		note, hint := client.WorktreeNote(host, res)
 		if note != "" {
 			ok += " " + sentence(note)
@@ -279,6 +292,6 @@ func (m *Model) testHost(h *hostConn) tea.Cmd {
 		if err != nil {
 			return opDoneMsg{host: name, err: err}
 		}
-		return opDoneMsg{host: name, ok: fmt.Sprintf("%s answers in %s.", name, fmtLatency(d))}
+		return opDoneMsg{host: name, ok: fmt.Sprintf("%s answers in %s.", shown(name), fmtLatency(d))}
 	})
 }

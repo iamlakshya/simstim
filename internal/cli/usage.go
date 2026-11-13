@@ -86,9 +86,10 @@ func unknownWord(parent *cobra.Command, typed string, lineCmd *cobra.Command, sk
 	} else {
 		var things []named
 		for _, sub := range parent.Commands() {
-			// A help topic counts: help and the root print it.
+			// A help topic counts alongside warned old names.
 			if sub.IsAvailableCommand() || IsTopic(sub) {
-				things = append(things, named{sub.Name(), append([]string{sub.Name()}, sub.Aliases...)})
+				answers := append([]string{sub.Name()}, sub.Aliases...)
+				things = append(things, named{sub.Name(), append(answers, oldNamesOf(sub)...)})
 			}
 		}
 		cands = suggest(typed, things, true)
@@ -113,12 +114,13 @@ func commandTry(parent, lineCmd *cobra.Command, skip int, cands []string) string
 		return helpOf(parent)
 	}
 	line := commandLine(lineCmd)
+	help := strings.TrimSuffix(parent.CommandPath()+" "+cands[0], " ") + " --help"
 	if at := plain(lineCmd, line); len(at) > skip {
 		if fixed := replaceAt(line, at[skip], cands[0]); parses(fixed) {
-			return brand.Name + " " + joinWords(fixed)
+			return suggestedLine(fixed, help)
 		}
 	}
-	return strings.TrimSuffix(parent.CommandPath()+" "+cands[0], " ") + " --help"
+	return help
 }
 
 // shortPath is a command's path without the product's name: "host add".
@@ -304,8 +306,8 @@ func unknownFlag(c *cobra.Command, name string, e *pflag.NotExistError) error {
 			if text := line[w.at]; w.isFlag && (text == typed || strings.HasPrefix(text, typed+"=")) {
 				fixed := slices.Clone(line)
 				fixed[w.at] = cands[0] + strings.TrimPrefix(text, typed)
-				if parses(fixed) {
-					try = brand.Name + " " + joinWords(fixed)
+				if fixed = newForm(c, fixed); parses(fixed) {
+					try = suggestedLine(fixed, try)
 				}
 				break
 			}

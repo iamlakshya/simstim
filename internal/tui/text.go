@@ -9,8 +9,27 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/iamlakshya/simstim/internal/api"
 	"github.com/iamlakshya/simstim/internal/client"
 )
+
+// shown is text from a host or config as the launcher shows it on one line:
+// without control or hidden characters.
+func shown(s string) string {
+	return api.CleanText(strings.NewReplacer("\r\n", " ", "\n", " ", "\t", " ").Replace(s), 4000)
+}
+
+func shownAll(ss []string) []string {
+	out := make([]string, len(ss))
+	for i, s := range ss {
+		out[i] = shown(s)
+	}
+	return out
+}
+
+func cleanFolders(res client.FoldersResult) client.FoldersResult {
+	return client.OfferFolders(res)
+}
 
 // cells is the width of s in terminal cells, ignoring escape sequences.
 func cells(s string) int { return ansi.StringWidth(s) }

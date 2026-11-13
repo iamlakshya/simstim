@@ -14,14 +14,14 @@ Sessions:
   new         Start a session on a host, and attach to it
   attach      Attach to a session
   resume      Start a session's agent again after it ended, and attach to it
-  ls          List sessions on every host
-  kill        Stop a session and remove it
+  ls          List sessions on every host, or on one
+  show        Describe a session
+  rm          Delete a session, after a question
   rename      Rename a session
   send        Type text into a session without attaching, then press Enter
   ports       List the TCP ports a session's processes listen on
   forward     Forward a session's ports to localhost: all, or those you name
   pull        Bring a session's branch into the git repository you are in
-  flip        Switch sessions: pick from the sessions of every host, and attach
 
 Hosts:
   host        Add, create, list, test and remove hosts
@@ -69,7 +69,8 @@ The words that <name> uses, and what each one means.
   host               The Linux machine, VM or container that runs sessions.
   helper             The program on each host that runs its sessions.
   session            A terminal on a host, which keeps running when you leave.
-  address            <host>/<session>. attach and flip take - for the last one.
+  address            <host>/<session>, a unique session name, or - for the last
+                     attached.
   agent              A coding agent, such as Claude Code or Codex.
   launcher           The screen of hosts and sessions that <name> opens.
   attach and detach  Attach shows a session in this terminal. Ctrl+\ detaches by

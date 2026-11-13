@@ -1,7 +1,6 @@
 package host
 
 import (
-	"bufio"
 	"context"
 	"crypto/rand"
 	"encoding/json"
@@ -44,19 +43,11 @@ type NewArgs = api.NewArgs
 // SessionInfo is one row of the session list.
 type SessionInfo = api.SessionInfo
 
-// idAlphabet is the client's rule too (api.ValidSessionID).
-const idAlphabet = api.SessionIDAlphabet
-
-// NewID makes a short random session ID.
-func NewID() string {
-	var b [8]byte
-	_, _ = rand.Read(b[:])
-	out := make([]byte, 8)
-	for i := range b {
-		out[i] = idAlphabet[int(b[i])%len(idAlphabet)]
-	}
-	return string(out)
-}
+// NewID makes a short random session ID: 8 characters of the ID's
+// alphabet, at least one of them a digit. A name without a digit then never
+// looks like an ID (cli-spec 9.2). An ID drawn without one gets a random
+// digit at a random place.
+func NewID() string { return api.NewSessionID() }
 
 func newUUID() string {
 	var b [16]byte
@@ -80,6 +71,9 @@ func expandHome(p string) string {
 
 // New starts a session and returns its row.
 func New(a NewArgs) (_ *SessionInfo, err error) {
+	if err := checkName(a.Name); err != nil {
+		return nil, err
+	}
 	if err := checkMemoryMax(a.MemoryMax); err != nil {
 		return nil, err
 	}
@@ -100,7 +94,7 @@ func New(a NewArgs) (_ *SessionInfo, err error) {
 	if err != nil {
 		login = os.Environ()
 	}
-	id := NewID()
+	id := unusedID()
 	// Find the agent before anything is asked or made. A missing agent
 	// leaves nothing behind: no folder, no worktree and no branch.
 	inline := a.Inline && known && len(a.Argv) == 0 && agent.Inline.Has()
@@ -116,12 +110,9 @@ func New(a NewArgs) (_ *SessionInfo, err error) {
 		if err := makeFolders(cwd); err != nil {
 			return nil, err
 		}
-		// A start that fails after this point removes the new folders again.
-		defer func() {
-			if err != nil {
-				removeFolders(missing)
-			}
-		}()
+		// A start that fails after this point removes the new folders again,
+		// unless it kept its session.
+		defer func() { removeFoldersAfter(err, id, missing) }()
 	}
 	var gi *GitInfo
 	if a.Worktree {
@@ -141,7 +132,7 @@ func New(a NewArgs) (_ *SessionInfo, err error) {
 	}
 	name := strings.TrimSpace(a.Name)
 	if name == "" {
-		name = filepath.Base(cwd)
+		name = folderName(cwd)
 	}
 	asked := max(a.MemoryMax, 0)
 	now := time.Now().UTC()
@@ -179,7 +170,7 @@ func New(a NewArgs) (_ *SessionInfo, err error) {
 			m.Agent.IDSource = "chosen"
 		}
 	}
-	return startSession(m, a.Secrets)
+	return startSession(m, a.Secrets, strings.TrimSpace(a.Name) == "")
 }
 
 // pickAgent returns the command a new session runs and its kind, and the
@@ -268,21 +259,63 @@ var startHolder = launchHolder
 // startSession saves a new session's manifest, starts its holder, hands the
 // holder the secrets and waits for the agent to start. It returns the
 // session's row.
-func startSession(m *Manifest, secrets map[string]api.Secret) (*SessionInfo, error) {
+//
+// It holds the session's lock from its first save until the holder
+// listens and the save of the unit is done. A rename takes the same lock,
+// so it never writes the manifest between a new holder's load of it and
+// that holder's first save, which would put the old name back.
+func startSession(m *Manifest, secrets map[string]api.Secret, derived bool) (*SessionInfo, error) {
 	id := m.ID
-	if err := paths.EnsurePrivateDir(paths.SessionDir(id)); err != nil {
+	if err := makeSessionDir(id); err != nil {
+		return nil, err
+	}
+	unlock, err := lockSession(id)
+	if err != nil {
+		_ = os.RemoveAll(paths.SessionDir(id))
+		return nil, err
+	}
+	defer unlock()
+	// No session's ID is the name: an address with it would reach that
+	// session first (cli-spec 9.2). derived is true for a name from the
+	// folder.
+	if m.Name, err = freeName(id, m.Name, derived); err != nil {
+		_ = os.RemoveAll(paths.SessionDir(id))
 		return nil, err
 	}
 	if err := m.Save(); err != nil {
+		_ = os.RemoveAll(paths.SessionDir(id))
 		return nil, err
 	}
 	logSkippedCopies(id, m.Git)
-	if err := startHolder(m); err != nil {
+	proc, err := launchHolder(m)
+	waiting := false // a Wait on proc goes on: it must not be released
+	defer func() {
+		if proc != nil && !waiting {
+			_ = proc.Release()
+		}
+	}()
+	if err != nil {
+		lateStart(id)
+	}
+	if err != nil && (proc == nil && m.Run.Unit == "" || holderEnded(id)) {
 		return nil, UserError("start_failed", err.Error(), "Check the session log with the host doctor.")
 	}
-	if err := deliverSecrets(id, secrets); err != nil {
-		_ = deleteSession(id, &DeleteResult{})
-		return nil, secretsFailed(err)
+	if err != nil {
+		// The holder started, and did not answer in time: it could still
+		// start its agent, without its secrets. It stops, and the session
+		// goes, only once the holder is known to have stopped.
+		if kept := abandonStart(m, proc, "start_failed", "the holder did not answer in time: "+err.Error()); kept != nil {
+			waiting = true
+			return nil, kept
+		}
+		return nil, UserError("start_failed", err.Error()+", so the session was removed", "Try again. If it goes on, check the host with the host doctor.")
+	}
+	if err := deliver(id, secrets); err != nil {
+		if kept := abandonStart(m, proc, "secrets_failed", "the session could not get its secrets"); kept != nil {
+			waiting = true
+			return nil, kept
+		}
+		return nil, UserError("secrets_failed", "the session could not get its secrets, so it was removed", "Try again.")
 	}
 	if mm := waitStarted(id, 5*time.Second); mm != nil {
 		if mm.Status.State == StateErrored && mm.Run.AgentPID == 0 {
@@ -290,14 +323,30 @@ func startSession(m *Manifest, secrets map[string]api.Secret) (*SessionInfo, err
 			// starts, and then could not start the agent.
 			return nil, UserError("start_failed", mm.Status.Reason, "Check the session log with the host doctor.")
 		}
-		if mm.Run.Unit == "" && m.Run.Unit != "" {
-			mm.Run.Unit = m.Run.Unit
-			_ = mm.Save()
-		}
+		// The holder records its own unit (ownUnit), as after a resume. No
+		// save here could put back a state older than the holder's own.
 		m = mm
 	}
 	info := infoFrom(m, true)
 	return &info, nil
+}
+
+// makeSessionDir creates the new session's private folder, and fails if a
+// session already has that ID.
+func makeSessionDir(id string) error {
+	if err := paths.EnsurePrivateDir(paths.SessionsDir()); err != nil {
+		return err
+	}
+	dir := paths.SessionDir(id)
+	if err := os.Mkdir(dir, 0o700); err != nil {
+		return fmt.Errorf("make %s: %w", dir, err)
+	}
+	//nolint:gosec // G302: a folder needs the execute bit to be opened; 0700 is the owner's alone
+	if err := os.Chmod(dir, 0o700); err != nil {
+		_ = os.Remove(dir)
+		return fmt.Errorf("make %s private: %w", dir, err)
+	}
+	return nil
 }
 
 func infoFrom(m *Manifest, alive bool) SessionInfo {
@@ -363,6 +412,7 @@ func List() ([]SessionInfo, error) {
 			if err != nil {
 				return
 			}
+			reconcileForList(id, m)
 			info := infoFrom(m, alive(id))
 			mu.Lock()
 			out = append(out, info)
@@ -373,113 +423,3 @@ func List() ([]SessionInfo, error) {
 	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.After(out[j].CreatedAt) })
 	return out, nil
 }
-
-// HolderRequest sends one request to a session's holder.
-func HolderRequest(id, op string, args any, timeout time.Duration) (json.RawMessage, error) {
-	d := net.Dialer{Timeout: timeout}
-	conn, err := d.DialContext(context.Background(), "unix", paths.Socket(id))
-	if err != nil {
-		return nil, fmt.Errorf("reach the holder of session %s: %w", id, err)
-	}
-	defer conn.Close()
-	_ = conn.SetDeadline(time.Now().Add(timeout))
-	w := proto.NewWriter(conn)
-	r := bufio.NewReader(conn)
-	if err := w.WriteJSON(proto.THello, proto.Hello{Magic: proto.Magic, Protocol: version.Protocol, Version: version.Version, Role: "bridge"}); err != nil {
-		return nil, err
-	}
-	if f, err := proto.Read(r); err != nil || f.Type != proto.THello {
-		return nil, errors.New("holder did not answer")
-	}
-	req := proto.Request{ID: 1, Op: op}
-	if args != nil {
-		req.Args, _ = json.Marshal(args)
-	}
-	if err := w.WriteJSON(proto.TRequest, req); err != nil {
-		return nil, err
-	}
-	for {
-		f, err := proto.Read(r)
-		if err != nil {
-			return nil, err
-		}
-		if f.Type != proto.TResponse {
-			continue
-		}
-		var resp proto.Response
-		if err := json.Unmarshal(f.Payload, &resp); err != nil {
-			return nil, fmt.Errorf("read the holder's reply: %w", err)
-		}
-		if !resp.OK {
-			if resp.Error != nil {
-				return nil, resp.Error
-			}
-			return nil, errors.New("request failed")
-		}
-		return resp.Result, nil
-	}
-}
-
-// Delete stops a session and removes its files, and its worktree when that loses nothing.
-func Delete(id string) (DeleteResult, error) {
-	var res DeleteResult
-	if err := CheckCaller(); err != nil {
-		return res, err
-	}
-	err := deleteSession(id, &res)
-	return res, err
-}
-
-// DeleteResult says what deleting a session did.
-type DeleteResult = api.DeleteResult
-
-func deleteSession(id string, res *DeleteResult) error {
-	if !validID(id) {
-		return UserError("not_found", "no session "+id, "List sessions to find its ID.")
-	}
-	if _, err := os.Stat(paths.SessionDir(id)); err != nil {
-		return UserError("not_found", "no session "+id, "List sessions to find its ID.")
-	}
-	unlock, err := lockSession(id)
-	if err != nil {
-		return err
-	}
-	// The folder goes, with the lock's file in it, while the lock holds.
-	defer unlock()
-	m, _ := LoadManifest(id)
-	stopHolder(id, m)
-	if m != nil {
-		var kept *proto.Error
-		if res.Worktree, kept = removeWorktree(m.Git); kept != nil {
-			res.WorktreeCode, res.WorktreeHint = kept.Code, kept.Hint
-		}
-	}
-	if err := os.RemoveAll(paths.SessionDir(id)); err != nil {
-		return fmt.Errorf("remove the files of session %s: %w", id, err)
-	}
-	res.Deleted = true
-	return nil
-}
-
-// Rename changes a session's name.
-func Rename(id, name string) error {
-	name = strings.TrimSpace(name)
-	if name == "" {
-		return UserError("bad_name", "a name is needed", "")
-	}
-	if err := CheckCaller(); err != nil {
-		return err
-	}
-	if alive(id) {
-		_, err := HolderRequest(id, "rename", map[string]string{"name": name}, 2*time.Second)
-		return err
-	}
-	m, err := LoadManifest(id)
-	if err != nil {
-		return UserError("not_found", "no session "+id, "List sessions to find its ID.")
-	}
-	m.Name = name
-	return m.Save()
-}
-
-func validID(id string) bool { return api.ValidSessionID(id) }

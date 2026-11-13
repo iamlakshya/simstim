@@ -267,21 +267,22 @@ func (m *Model) promptLine(w int) string {
 	}
 	label := "search"
 	if p.mode == promptNew {
-		label = p.host
+		label = shown(p.host)
 	}
 	lead := sAccent.Render(label) + " " + sAccent.Bold(true).Render(glyphPrompt) + " "
 	room := w - cells(lead)
 	if p.starting {
 		a := quickArgs(p.in.value(), m.agentsFor(p.host), "")
-		return lead + sKey.Render(m.spinner()) + " " + m.shimmer(fmt.Sprintf("Starting %s on %s…", orDefault(a.Agent, "the agent"), p.host))
+		return lead + sKey.Render(m.spinner()) + " " + m.shimmer(fmt.Sprintf("Starting %s on %s…", shown(orDefault(a.Agent, "the agent")), shown(p.host)))
 	}
-	g := m.ghost()
+	g := shown(m.ghost())
 	if g == "" || p.in.pos != len(p.in.val) {
 		return lead + p.in.view(room, true)
 	}
 	// The cursor sits on the completion's first letter.
-	r := []rune(trunc(g, max(room-cells(p.in.value()), 1)))
-	return lead + trunc(p.in.value(), room-len(r)) + sPlain.Reverse(true).Faint(true).Render(string(r[:1])) + sFaint.Render(string(r[1:]))
+	val := shown(p.in.value())
+	r := []rune(trunc(g, max(room-cells(val), 1)))
+	return lead + trunc(val, room-len(r)) + sPlain.Reverse(true).Faint(true).Render(string(r[:1])) + sFaint.Render(string(r[1:]))
 }
 
 func (m *Model) agentsFor(host string) []string {
@@ -321,11 +322,11 @@ func (m *Model) quickHints(w int) string {
 	}
 	out := strings.Join(parts, "  ")
 	if len(p.folders) > 0 {
-		out += sFaint.Render(sep + strings.Join(p.folders, "  "))
+		out += sFaint.Render(sep + strings.Join(shownAll(p.folders), "  "))
 	}
 	if p.err != nil {
 		msg, _ := errText(p.err)
-		out = sErrHead.Render(glyphFail) + " " + sDanger.Render(sentence(msg))
+		out = sErrHead.Render(glyphFail) + " " + sDanger.Render(sentence(shown(msg)))
 	}
 	return trunc(out, w)
 }

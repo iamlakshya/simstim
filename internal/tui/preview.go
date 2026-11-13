@@ -75,7 +75,7 @@ func (p *previewModal) view(m *Model) string {
 	if row == nil {
 		return ""
 	}
-	s := shown(*row)
+	s := shownSession(*row)
 	w := m.dialogWidth()
 	cw := w - 4
 	_, label := m.look(s)
@@ -87,7 +87,7 @@ func (p *previewModal) view(m *Model) string {
 		hints, mem = hints[1:], ""
 	}
 	var facts []string
-	for _, f := range []string{s.Agent, truncPath(homePath(hc, s.Cwd), max(cw/3, 16)), mem} {
+	for _, f := range []string{shown(s.Agent), truncPath(shown(homePath(hc, s.Cwd)), max(cw/3, 16)), mem} {
 		if f != "" {
 			facts = append(facts, f)
 		}
@@ -96,7 +96,7 @@ func (p *previewModal) view(m *Model) string {
 	body := make([]string, 0, 2+len(preview))
 	body = append(body, sFaint.Render(trunc(strings.Join(facts, dot), cw)), "")
 	body = append(body, preview...)
-	return sheet(w, "Peek · "+s.Name, label.st.Render(label.s), hints, body, toneNormal)
+	return sheet(w, "Peek · "+shown(s.Name), label.st.Render(label.s), hints, body, toneNormal)
 }
 
 // schedulePreview loads the preview of the selected session after a short
@@ -273,7 +273,7 @@ func (m *Model) previewLines(w, h int) []string {
 		return []string{sKey.Render(m.spinner()) + " " + sFaint.Render("Loading the last screen…")}
 	case p.shot == nil && p.err != "":
 		var out []string
-		for _, l := range wrap(sentence(p.err), w) {
+		for _, l := range wrap(sentence(shown(p.err)), w) {
 			out = append(out, sFaint.Render(l))
 		}
 		return out

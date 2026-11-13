@@ -10,12 +10,12 @@ import (
 // (api.CleanText). Cleaning changes some text, so the model keeps each
 // session row as the host sent it, for the requests that go back: its ID,
 // its name, its folder and its secrets' names. Each place that draws a row
-// draws shown(row) instead. Toasts and errors are cleaned where they are
+// draws shownSession(row) instead. Toasts and errors are cleaned where they are
 // drawn (toastStack.push, errText).
 
-// shown is a copy of a session row to draw, with every string that the
+// shownSession is a copy of a session row to draw, with every string that the
 // host sent cleaned.
-func shown(s client.Session) client.Session { return client.CleanSession(s) }
+func shownSession(s client.Session) client.Session { return client.CleanSession(s) }
 
 // cleanConn cleans, on a connection, the answers that the launcher only
 // draws: the host's doctor report, its setup steps and its agent checks.

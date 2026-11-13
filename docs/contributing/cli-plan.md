@@ -139,14 +139,14 @@ Some isolation tasks depend on tasks of this plan, so their commands use the sha
   - `ls [<host>]`: the host as an argument. `--host` stays.
   - The host part of an address may be left out when the session's name is unique (question C-3). `-` means the last session, and nothing else.
 - **Spec:** [cli-spec.md, section 9](cli-spec.md#9-session-verbs-c5) and [section 3](cli-spec.md#3-old-names-and-warnings-c5-c6-c7).
-- **Files:** `internal/cli/session.go`, `internal/cli/resume.go`, `internal/cli/ended.go`, `internal/cli/deprecated.go`, new `internal/cli/show.go`, new `internal/cli/address.go`, and the session cache, which moves from `internal/tui/memory.go` to the new `internal/client/seen.go`.
+- **Files:** `internal/cli/session.go`, `internal/cli/resume.go`, `internal/cli/ended.go`, `internal/cli/deprecated.go`, new `internal/cli/show.go`, new `internal/cli/address.go`, new `internal/cli/rm.go`, and the session cache, which moves from `internal/tui/memory.go` to the new `internal/client/seen.go`.
 - **Acceptance:**
   - `kill box/a` works, warns once on stderr, and names `rm`.
   - `attach box/a` on an ended agent asks "Start claude again? [Y/n]" at a terminal. With `--no-input` it fails with exit code 4 and `--restart`.
   - `attach a` finds `box/a` when no other host has a session named `a`. Two matches fail with both full names.
   - `TestTopLevel` passes, with `kill` and `flip` hidden ([CLI spec, 2.3](cli-spec.md#23-tests)).
 - **Tests:** unit tests for the address rules, golden tests of the prompts, and end-to-end runs of `rm`, `attach` and `show`.
-- **Docs:** the README's first-session path, new `docs/how-to/sessions.md`, [the UX spec](ux-spec.md), the reference through `just docs`. The line `Describe one: simstim show <host>/<session> --json` in the snippet of `docs/how-to/use-with-agents.md` ([CLI spec, 16.1](cli-spec.md#161-what-the-docs-site-publishes)). The `address` line of `help concepts` (`concepts` in `internal/cli/topics.go`) says that only `attach` and `flip` take `-`. Widen it once every verb takes `-`. `TestTopLevel` skips the help topics with `IsTopic`: they are hidden commands that run.
+- **Docs:** the README's first-session path, new `docs/how-to/sessions.md`, [the UX spec](ux-spec.md), the reference through `just docs`. The line `Describe one: simstim show <host>/<session> --json` in the snippet of `docs/how-to/use-with-agents.md` ([CLI spec, 16.1](cli-spec.md#161-what-the-docs-site-publishes)). The `address` line of `help concepts` (`concepts` in `internal/cli/topics.go`) describes `<host>/<session>`, a unique session name and `-` for every session verb. `TestTopLevel` skips the help topics with `IsTopic`: they are hidden commands that run.
 - **CHANGELOG:** Changed. "`rm` deletes a session, and asks first. `kill` still works for now, and warns. `attach` wakes a stopped session and offers to restart an ended agent. `show` describes one session. You can leave out the host when a session's name is unique."
 - **Depends on:** C4.
 - **Questions:** C-1, C-3, C-4, C-10.

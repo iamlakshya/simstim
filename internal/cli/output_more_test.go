@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -14,23 +15,59 @@ import (
 	"github.com/iamlakshya/simstim/internal/host/hosttest"
 )
 
-// Every address that the JSON gives finds its own session again: the ID
-// stands in for a name that another session has as its name or its ID.
-func TestAddressesResolveBack(t *testing.T) {
+// A word of the form of an ID, with a digit, finds a session by its ID
+// alone, never by a name (cli-spec 9.2), on a host's own list and across
+// the hosts' lists. A word of another form, such as a name of 8 letters,
+// finds an ID first, then a name. With no session of that ID, the word is
+// not found, with the sessions that it may mean by host/ID. The JSON
+// address is always host/ID (cli-spec 7.1).
+func TestAWordOfAnIDsFormIsAnID(t *testing.T) {
 	list := []client.Session{
-		{ID: "abcdefgh", Name: "web"},
-		{ID: "zzzzzzzz", Name: "abcdefgh"}, // its name is the other's ID
-		{ID: "c3c3c3c3", Name: "dup"},
+		{ID: "abcd2345", Name: "web"},
+		{ID: "zzzz2345", Name: "abcd2345"}, // an older name: the other's ID
+		{ID: "c3c3c3c3", Name: "qqqq2345"}, // an older name of an ID's form
 		{ID: "d4d4d4d4", Name: "dup"},
-		{ID: "e5e5e5e5", Name: ""},
-		{ID: "f6f6f6f6", Name: "f6f6f6f6"}, // its name is its own ID
+		{ID: "e5e5e5e5", Name: "f6"},
+		{ID: "f6", Name: "x"},              // an ID of another form, from another helper
+		{ID: "g7g7g7g7", Name: "frontend"}, // a name of 8 letters is a name
+		{ID: "oldoldid", Name: "old"},      // an older helper's ID without a digit
+		{ID: "h2h2h2h2", Name: "oldoldid"},
+	}
+	for word, want := range map[string]string{"abcd2345": "abcd2345", "zzzz2345": "zzzz2345", "web": "abcd2345", "dup": "d4d4d4d4", "f6": "f6", "x": "f6",
+		"frontend": "g7g7g7g7", "oldoldid": "oldoldid"} {
+		if s, err := findIn(nil, list, word, "box"); err != nil || s.ID != want {
+			t.Errorf("%q finds %+v, %v, want %s", word, s, err, want)
+		}
+	}
+	// An older ID without a digit matches first while its session exists.
+	// Once that session is gone, a session named like it is reached.
+	if s, err := findIn(nil, slices.DeleteFunc(slices.Clone(list), func(s client.Session) bool { return s.ID == "oldoldid" }), "oldoldid", "box"); err != nil || s.ID != "h2h2h2h2" {
+		t.Errorf("an older ID without a digit, after its session went: %+v, %v", s, err)
+	}
+	_, err := findIn(nil, list, "qqqq2345", "box")
+	text, code := reportOf(err)
+	if code != 3 || !strings.Contains(text, `no session has the ID "qqqq2345" on box`) || !strings.Contains(text, `"box/c3c3c3c3" (qqqq2345)`) {
+		t.Errorf("a word of an ID's form that only a name has: exit %d\n%s", code, text)
+	}
+	hosts := []client.Host{{Name: "box"}, {Name: "nuc"}}
+	lists := map[string][]client.Session{"box": list, "nuc": {{ID: "n2n2n2n2", Name: "qqqq2345"}, {ID: "n3n3n3n3", Name: "frontend"}}}
+	if m := matchesOf(hosts, lists, "qqqq2345"); len(m) != 0 {
+		t.Errorf("a word of an ID's form matched names: %+v", m)
+	}
+	if m := matchesOf(hosts, lists, "abcd2345"); len(m) != 1 || m[0].s.ID != "abcd2345" {
+		t.Errorf("a word of an ID's form matched %+v", m)
+	}
+	if m := matchesOf(hosts, lists, "frontend"); len(m) != 2 {
+		t.Errorf("a name of 8 letters matched %+v", m)
+	}
+	text, code = reportOf(noSessionNamed("qqqq2345", lists))
+	if code != 3 || !strings.Contains(text, `no session has the ID "qqqq2345" on any host`) ||
+		!strings.Contains(text, `"box/c3c3c3c3" (qqqq2345)`) || !strings.Contains(text, `"nuc/n2n2n2n2" (qqqq2345)`) {
+		t.Errorf("no session of that ID on any host: exit %d\n%s", code, text)
 	}
 	for _, s := range list {
-		addr, _ := sessionObject("box", s, list)["address"].(string)
-		ref := strings.TrimPrefix(addr, "box/")
-		got, err := resolveIn(list, ref, "box")
-		if err != nil || got.ID != s.ID {
-			t.Errorf("%s/%q: the address %s finds %+v, %v", s.ID, s.Name, addr, got, err)
+		if addr := sessionObject("box", s)["address"]; addr != "box/"+s.ID {
+			t.Errorf("%s/%q: the JSON address is %v", s.ID, s.Name, addr)
 		}
 	}
 }
@@ -71,10 +108,9 @@ func TestJSONErrorWhereverJSONIs(t *testing.T) {
 	}
 }
 
-// When the host does not list its sessions after new --detach --json, the
-// session has still started: the object prints, with the ID as its
-// address, and a JSON warning says why. The run does not fail.
-func TestNewDetachJSONWhenTheListFails(t *testing.T) {
+// new --detach --json needs no list of the host's sessions: its address
+// is host/ID. A list that would fail changes nothing, and nothing warns.
+func TestNewDetachJSONNeedsNoList(t *testing.T) {
 	newTestHost(t)
 	old := listSessions
 	listSessions = func(context.Context, *client.Conn) ([]client.Session, error) {
@@ -86,12 +122,7 @@ func TestNewDetachJSONWhenTheListFails(t *testing.T) {
 	if err != nil || json.Unmarshal([]byte(out), &s) != nil {
 		t.Fatalf("%v\nstdout %q\nstderr %q", err, out, errOut)
 	}
-	var warn struct {
-		V       int
-		Warning map[string]string
-	}
-	if s["address"] != "box/"+s["id"].(string) || json.Unmarshal([]byte(errOut), &warn) != nil || warn.Warning["code"] != "address_by_id" ||
-		!strings.Contains(warn.Warning["message"], "the list broke") {
+	if s["address"] != "box/"+s["id"].(string) || errOut != "" {
 		t.Errorf("stdout %s\nstderr %q", out, errOut)
 	}
 }

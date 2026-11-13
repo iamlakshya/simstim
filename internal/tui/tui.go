@@ -55,7 +55,7 @@ func runWith(ctx context.Context, be Backend, o Options) error {
 func runNamed(ctx context.Context, be Backend, o Options, what, hint string) error {
 	in, out := launcherIn(), launcherOut()
 	if !isTerminal(in) || !isTerminal(out) || !isTerminal(os.Stderr) {
-		return &client.UserError{Msg: what + " needs a terminal", Hint: hint, Code: "no_terminal"}
+		return &client.UserError{Msg: what + " needs a terminal", Hint: hint, Code: "no_terminal", Kind: client.KindUsage}
 	}
 	if !client.InputAllowed(ctx) {
 		return &client.UserError{
@@ -138,7 +138,7 @@ func (m *Model) View() tea.View {
 	v.ReportFocus = true
 	v.WindowTitle = brand.DisplayName
 	if h := m.selectedHost(); h != nil && m.screen == scrSessions {
-		v.WindowTitle += " · " + h.name()
+		v.WindowTitle += " · " + shown(h.name())
 	}
 	if n := m.needYou(); n > 0 {
 		v.WindowTitle = fmt.Sprintf("● %d · %s", n, v.WindowTitle)
@@ -350,10 +350,11 @@ func (m *Model) onAttachDone(msg attachDoneMsg) tea.Cmd {
 		return tea.Batch(append(cmds, m.toastErr(msg.err))...)
 	}
 	r := msg.res
+	name, host := shown(msg.name), shown(msg.host)
 	if r.Reconnects > 0 {
-		text := fmt.Sprintf("Reconnected to %s.", msg.host)
+		text := fmt.Sprintf("Reconnected to %s.", host)
 		if r.Missed > 0 {
-			text = fmt.Sprintf("Reconnected to %s (missed %s, replayed).", msg.host, fmtSize(r.Missed))
+			text = fmt.Sprintf("Reconnected to %s (missed %s, replayed).", host, fmtSize(r.Missed))
 		}
 		cmds = append(cmds, m.toast(toastInfo, text))
 	}
@@ -361,15 +362,15 @@ func (m *Model) onAttachDone(msg attachDoneMsg) tea.Cmd {
 	kind := toastSuccess
 	switch e := r.Ended; {
 	case e == nil:
-		text = fmt.Sprintf("Detached. %s keeps running on %s.", msg.name, msg.host)
+		text = fmt.Sprintf("Detached. %s keeps running on %s.", name, host)
 	case e.ExitCode == -1:
-		text, kind = fmt.Sprintf("%s on %s stopped.", msg.name, msg.host), toastWarning
+		text, kind = fmt.Sprintf("%s on %s stopped.", name, host), toastWarning
 	case e.OOM:
-		text, kind = fmt.Sprintf("%s on %s ended (out of memory).", msg.name, msg.host), toastWarning
+		text, kind = fmt.Sprintf("%s on %s ended (out of memory).", name, host), toastWarning
 	case e.Signal != "":
-		text, kind = fmt.Sprintf("%s on %s ended (%s).", msg.name, msg.host, e.Signal), toastWarning
+		text, kind = fmt.Sprintf("%s on %s ended (%s).", name, host, shown(e.Signal)), toastWarning
 	default:
-		text = fmt.Sprintf("%s on %s ended (exit %d).", msg.name, msg.host, e.ExitCode)
+		text = fmt.Sprintf("%s on %s ended (exit %d).", name, host, e.ExitCode)
 		if e.ExitCode != 0 {
 			kind = toastWarning
 		}

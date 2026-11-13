@@ -3,9 +3,10 @@ package tui
 import (
 	"slices"
 	"strings"
-	"unicode"
 
 	tea "charm.land/bubbletea/v2"
+
+	"github.com/iamlakshya/simstim/internal/api"
 )
 
 // input is a one-line text field. It draws its own cursor as a reverse-video
@@ -17,29 +18,22 @@ type input struct {
 }
 
 func newInput(value, placeholder string) input {
-	r := []rune(value)
-	return input{val: r, pos: len(r), placeholder: placeholder}
+	r := []rune(shown(value))
+	return input{val: r, pos: len(r), placeholder: shown(placeholder)}
 }
 
 func (in *input) value() string { return string(in.val) }
 
 func (in *input) set(v string) {
-	in.val = []rune(v)
+	in.val = []rune(shown(v))
 	in.pos = len(in.val)
 }
 
-// insert adds text at the cursor. Control characters and line breaks are
-// dropped, so a paste stays on one line.
+// insert adds text at the cursor. Control, hidden and bidi characters are
+// dropped, and line breaks become spaces, so a paste stays on one safe line.
 func (in *input) insert(s string) {
-	s = strings.Map(func(r rune) rune {
-		if r == '\n' || r == '\r' || r == '\t' {
-			return ' '
-		}
-		if unicode.IsControl(r) {
-			return -1
-		}
-		return r
-	}, s)
+	s = strings.NewReplacer("\r\n", " ", "\n", " ", "\r", " ", "\t", " ").Replace(s)
+	s = api.CleanText(s, 4000)
 	r := []rune(s)
 	in.val = slices.Insert(in.val, in.pos, r...)
 	in.pos += len(r)
@@ -98,8 +92,9 @@ func (in *input) view(w int, focused bool) string {
 	if w <= 0 {
 		return ""
 	}
-	if len(in.val) == 0 {
-		ph := []rune(trunc(in.placeholder, w))
+	val := []rune(shown(string(in.val)))
+	if len(val) == 0 {
+		ph := []rune(trunc(shown(in.placeholder), w))
 		if !focused {
 			return sFaint.Render(string(ph))
 		}
@@ -108,20 +103,21 @@ func (in *input) view(w int, focused bool) string {
 		}
 		return sPlain.Reverse(true).Render(string(ph[:1])) + sFaint.Render(string(ph[1:]))
 	}
+	pos := min(max(in.pos, 0), len(val))
 	start := 0
-	if focused && in.pos >= w {
-		start = in.pos - w + 1
+	if focused && pos >= w {
+		start = pos - w + 1
 	}
-	end := min(len(in.val), start+w)
+	end := min(len(val), start+w)
 	if !focused {
-		return string(in.val[start:end])
+		return string(val[start:end])
 	}
-	before := string(in.val[start:in.pos])
+	before := string(val[start:pos])
 	cur, after := " ", ""
-	if in.pos < len(in.val) {
-		cur = string(in.val[in.pos])
-		if in.pos+1 < end {
-			after = string(in.val[in.pos+1 : end])
+	if pos < len(val) {
+		cur = string(val[pos])
+		if pos+1 < end {
+			after = string(val[pos+1 : end])
 		}
 	}
 	return before + sPlain.Reverse(true).Render(cur) + after

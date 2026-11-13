@@ -36,7 +36,7 @@ func (m *Model) sessionsOf(h *hostConn) []client.Session {
 }
 
 func matchSession(q string, row client.Session) bool {
-	s := shown(row)
+	s := shownSession(row)
 	if _, ok := fuzzy(q, s.Name); ok {
 		return true
 	}

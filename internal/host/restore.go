@@ -61,9 +61,15 @@ func restoreOne(id, boot string, all bool) (RestoreResult, bool) {
 	if m, err = LoadManifest(id); err != nil {
 		return RestoreResult{}, false
 	}
-	switch {
-	case alive(id):
+	if holderPendingOrAlive(id, m) || oldHolderRuns(id) {
 		return r, false
+	}
+	if err := reconcileUnsavedLocked(m); err != nil {
+		r.Action, r.Why = "failed", err.Error()
+		return r, true
+	}
+	r.Name = m.Name
+	switch {
 	case m.Status.State == StateExited || m.Status.State == StateErrored:
 		r.Action, r.Why = "skipped", "the agent had ended"
 	case m.Restart.Policy != "resume":
@@ -106,7 +112,8 @@ type again struct {
 // that m asks for. The old holder must be gone. It keeps the session's ID,
 // name, folder and worktree. It waits for the start, as New does. It
 // returns the command and what it does, such as "continued the latest
-// conversation in its folder".
+// conversation in its folder". The caller reconciles any legacy rename
+// before applying memory and restore-attempt changes.
 func startAgain(m *Manifest, a again) (argv []string, why string, err error) {
 	argv, why, err = resumeArgv(m)
 	if err != nil {
@@ -131,11 +138,44 @@ func startAgain(m *Manifest, a again) (argv []string, why string, err error) {
 	if err := m.Save(); err != nil {
 		return argv, why, err
 	}
-	if err := launchHolder(m); err != nil {
+	proc, err := launchHolder(m)
+	if err != nil && a.label == restoredLabel && (proc != nil || m.Run.Unit != "") {
+		// A restored holder never waits for secrets (secretsBeforeStart),
+		// so it cannot start its agent without them. A slow one, as at a
+		// busy boot, is not stopped: it gets more time.
+		lateStart(m.ID)
+		if err = waitSocket(m.ID, logSize(m.ID), restoreWait); err != nil {
+			return argv, why, finishSlowRestore(m, proc, err)
+		}
+	}
+	if err != nil {
+		// A holder that started, and did not answer in time, could still
+		// start its agent without its secrets: it stops first.
+		if proc != nil || m.Run.Unit != "" {
+			if serr := stopStarting(m, proc); serr != nil {
+				return argv, why, fmt.Errorf("%w, and its holder could not be stopped, so its agent may start later without its secrets: %w", err, serr)
+			}
+			_ = os.Remove(paths.Socket(m.ID))
+		}
+		if proc != nil {
+			_ = proc.Release()
+		}
 		return argv, why, err
 	}
-	if err := deliverSecrets(m.ID, a.secrets); err != nil {
+	if err := deliver(m.ID, a.secrets); err != nil {
+		// The new holder waits for its secrets. It stops first, so that its
+		// agent never starts without them, as after a failed start.
+		if serr := stopStarting(m, proc); serr != nil {
+			return argv, why, fmt.Errorf("%w, and its holder could not be stopped, so its agent may start without them: %w", err, serr)
+		}
+		_ = os.Remove(paths.Socket(m.ID))
+		if proc != nil {
+			_ = proc.Release()
+		}
 		return argv, why, err
+	}
+	if proc != nil {
+		_ = proc.Release()
 	}
 	// The holder answers on its socket before it starts the agent, as New
 	// knows too: wait for the start before saying it worked.
@@ -182,6 +222,59 @@ func resumeHook(m *Manifest) string {
 	}
 	warnSession(m.ID, "skipped the resume script of "+repo+": "+why)
 	return hostHook("resume")
+}
+
+// finishSlowRestore records a slow restored holder's ownership in
+// manifest.json, or stops the holder via proc when that record cannot be
+// saved.
+func finishSlowRestore(m *Manifest, proc *os.Process, waitErr error) error {
+	if !holderEnded(m.ID) {
+		if perr := persistPendingHolder(m); perr != nil {
+			if serr := stopStarting(m, proc); serr != nil {
+				return fmt.Errorf("%w, could not record its holder (%w), and could not stop it: %w", waitErr, perr, serr)
+			}
+			_ = os.Remove(paths.Socket(m.ID))
+			if proc != nil {
+				_ = proc.Release()
+			}
+			return fmt.Errorf("%w, so its holder was stopped: %w", waitErr, perr)
+		}
+		waitErr = fmt.Errorf("%w, and its holder may still start", waitErr)
+	}
+	if proc != nil {
+		_ = proc.Release()
+	}
+	return waitErr
+}
+
+// writePendingManifest writes a slow restored holder's manifest record.
+// Tests replace it to inject a save failure.
+var writePendingManifest = func(m *Manifest) error { return m.Save() }
+
+// persistPendingHolder records a slow restored holder's process or unit in
+// manifest.json under first.lock before restoreOne releases op.lock, so a
+// later Delete or Resume can stop that holder before its socket opens.
+func persistPendingHolder(m *Manifest) error {
+	if m.Run.HolderPID == 0 && m.Run.Unit == "" {
+		return errors.New("no holder process or unit recorded")
+	}
+	unlock, err := lockFirstSave(m.ID, renameWait)
+	if err != nil {
+		return fmt.Errorf("lock first save of session %s: %w", m.ID, err)
+	}
+	defer unlock()
+	diskM, err := LoadManifest(m.ID)
+	if err != nil {
+		return fmt.Errorf("load manifest of session %s: %w", m.ID, err)
+	}
+	if diskM.Status.State != StateStarting || diskM.Run.AgentPID != 0 {
+		return nil
+	}
+	diskM.Run.HolderPID = m.Run.HolderPID
+	if m.Run.Unit != "" {
+		diskM.Run.Unit = m.Run.Unit
+	}
+	return writePendingManifest(diskM)
 }
 
 // resumeArgv picks how to bring an agent back, in this order:

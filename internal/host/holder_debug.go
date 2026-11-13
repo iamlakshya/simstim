@@ -133,9 +133,9 @@ func (h *Holder) endDebug(reason string, all bool) bool {
 func (h *Holder) setDebugUntil(until *time.Time) {
 	h.mu.Lock()
 	h.m.DebugUntil = until
-	m := *h.m
+	c := h.copyForSave()
 	h.mu.Unlock()
-	if err := h.save(&m, false); err != nil {
+	if err := h.save(c, false); err != nil {
 		h.log.Warn("manifest not saved", "err", err)
 	}
 }

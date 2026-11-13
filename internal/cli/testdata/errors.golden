@@ -3,13 +3,13 @@ Error: unknown command "atach".
 
 Did you mean "attach"?
 
-Try: <name> attach box/auth-fix
+Try: <name> ls box
 == atach box/auth-fix, colour true, exit 2
 [1m[31mError:[0m unknown command "atach".
 
 Did you mean "attach"?
 
-[34mTry:[0m <name> attach box/auth-fix
+[34mTry:[0m <name> ls box
 == d, colour false, exit 2
 Error: unknown command "d".
 

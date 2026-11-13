@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -56,6 +57,51 @@ func TestAttachAndCloseRemember(t *testing.T) {
 	}
 	if _, ok := hs.be.mem.Sessions["aws-gpu"]; ok {
 		t.Fatal("a host that never answered was saved with sessions")
+	}
+}
+
+// The launcher saves each list with the time when it arrived. A host whose
+// list then fails, and is over a minute old when the launcher closes,
+// keeps its old time, so a command asks that host again
+// (docs/contributing/cli-spec.md 9.2).
+func TestCloseKeepsTheTimeOfEachList(t *testing.T) {
+	hs := sessions(t, 80, 24)
+	h := hs.m.hostByName("atlas-dev")
+	arrived := h.seenAt
+	if arrived.IsZero() {
+		t.Fatal("the list has no time")
+	}
+	hs.clock = hs.clock.Add(2 * time.Minute)
+	hs.m.Update(sessionsMsg{name: h.name(), gen: h.gen, changes: h.changes, err: errors.New("the host is down")})
+	hs.m.Close()
+	if got := hs.be.mem.Seen["atlas-dev"]; !got.Equal(arrived) {
+		t.Errorf("closing saved atlas-dev's list at %v, want the time it arrived, %v", got, arrived)
+	}
+}
+
+// The time of a list is when its worker got it, not when the launcher
+// handled it, which can be much later, as after an attach (V5). An older
+// list, saved later, never replaces a newer one that another client saved
+// in between.
+func TestALateListKeepsTheTimeItArrived(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	hs := sessions(t, 80, 24)
+	h := hs.m.hostByName("atlas-dev")
+	arrived := hs.clock.Add(-2 * time.Minute)
+	// Another client saves a newer list of atlas-dev.
+	client.RememberLists(map[string]client.HostList{"atlas-dev": {Sessions: []client.Session{{ID: "newer"}}, At: arrived.Add(time.Minute)}})
+	// The launcher handles the older answer only now, minutes later.
+	hs.clock = hs.clock.Add(5 * time.Minute)
+	hs.m.Update(sessionsMsg{name: h.name(), gen: h.gen, changes: h.changes, list: []client.Session{{ID: "older"}}, at: arrived})
+	hs.m.Close()
+	saved := hs.be.mem
+	if got := saved.Seen["atlas-dev"]; !got.Equal(arrived) {
+		t.Fatalf("the launcher saved the list at %v, want the time it arrived, %v", got, arrived)
+	}
+	// What the real backend does with it: the newer list stays.
+	client.RememberLists(map[string]client.HostList{"atlas-dev": {Sessions: saved.Sessions["atlas-dev"], At: saved.Seen["atlas-dev"]}})
+	if c := client.LoadSessionCache(); len(c.Sessions["atlas-dev"]) != 1 || c.Sessions["atlas-dev"][0].ID != "newer" {
+		t.Errorf("the older list replaced the newer one: %+v", c.Sessions["atlas-dev"])
 	}
 }
 

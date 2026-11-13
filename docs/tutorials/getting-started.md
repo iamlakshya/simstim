@@ -101,8 +101,10 @@ Or run `simstim` with no arguments to open the launcher: Enter on a host shows i
 ## 5. Clean up
 
 ```sh
-simstim kill my-server/first
+simstim rm my-server/first
 ```
+
+`rm` says what stops and what stays, and asks first. Type `y` to delete the session. Its folder stays on the host.
 
 ## Next
 
