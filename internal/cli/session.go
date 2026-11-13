@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 	"golang.org/x/term"
 
 	"github.com/iamlakshya/simstim/internal/agents"
@@ -35,13 +36,13 @@ func newCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "new <host> [-- <command>…]",
 		Short: "Start a session on a host, and attach to it",
-		Example: "  " + brand.Name + " new my-vps --agent claude --dir ~/src/app\n" +
+		Example: "  " + brand.Name + " new my-vps --agent claude -C ~/src/app\n" +
 			"  " + brand.Name + " new my-vps --agent claude --dir ~/src/new-app --mkdir\n" +
 			"  " + brand.Name + " new my-vps --agent claude --secret ANTHROPIC_API_KEY\n" +
 			"  " + brand.Name + " new my-vps --agent claude --memory-max 6G\n" +
 			"  " + brand.Name + " new my-vps --detach -- htop\n" +
 			"  " + brand.Name + " new my-vps --agent claude --detach --json",
-		Args: cobra.MinimumNArgs(1),
+		Args: oneHost,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if asJSON && !detach {
 				return needsDetach(cmd)
@@ -51,7 +52,7 @@ func newCmd() *cobra.Command {
 				return err
 			}
 			if setup && noSetup {
-				return &client.UserError{Msg: "--setup and --no-setup cannot go together", Hint: "Pass one of them.", Code: "flags_conflict", Kind: client.KindUsage}
+				return &client.UserError{Msg: "--setup-script and --no-setup-script cannot go together", Hint: "Pass one of them.", Code: "flags_conflict", Kind: client.KindUsage}
 			}
 			var memMax int64
 			if cmd.Flags().Changed("memory-max") {
@@ -99,24 +100,68 @@ func newCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVarP(&agent, "agent", "a", "shell", "the agent: "+agentKinds())
-	cmd.Flags().StringVarP(&dir, "dir", "d", "~", "the folder on the host")
-	cmd.Flags().BoolVar(&mkdir, "mkdir", false, "make the folder on the host if it does not exist, without asking")
-	cmd.Flags().StringVarP(&name, "name", "n", "", "a name for the session (default: the folder name)")
-	cmd.Flags().BoolVar(&detach, "detach", false, "start it without attaching")
-	cmd.Flags().BoolVarP(&worktree, "worktree", "w", false, "give the session its own git worktree and branch")
-	cmd.Flags().BoolVar(&inline, "inline", false, "start the agent in its inline mode, so your terminal keeps its scrollback (see agents.inline in config.toml)")
-	cmd.Flags().StringVar(&base, "base", "", "the commit or branch the worktree starts from (default: HEAD)")
-	cmd.Flags().StringVar(&memoryMax, "memory-max", "", "cap the session's memory: auto, or a `size` such as 4G (default: sessions.memory_max in config.toml)")
-	cmd.Flags().StringArrayVar(&secrets, "secret", nil, "pass a secret from config.toml's [secrets] into the session's environment (repeatable)")
-	cmd.Flags().BoolVar(&setup, "setup", false, "run the repository's setup script this time, whatever your answer for it")
-	cmd.Flags().BoolVar(&noSetup, "no-setup", false, "do not run the repository's setup script this time")
+	f := cmd.Flags()
+	f.StringVarP(&agent, "agent", "a", "shell", "the agent: "+agentKinds())
+	f.StringVarP(&dir, "dir", "C", "~", "the folder on the host")
+	f.BoolVar(&mkdir, "mkdir", false, "make the folder on the host if it does not exist, without asking")
+	addName(cmd, &name, "a name for the session (default: the folder name)")
+	addDetach(cmd, &detach, "start it without attaching")
+	f.BoolVarP(&worktree, "worktree", "w", false, "give the session its own git worktree and branch")
+	f.BoolVar(&inline, "inline", false, "start the agent in its inline mode, so your terminal keeps its scrollback (see agents.inline in config.toml)")
+	f.StringVar(&base, "base", "", "the commit or branch the worktree starts from (default: HEAD)")
+	addMemoryMax(cmd, &memoryMax, "cap the session's memory: auto, or a `size` such as 4G (default: sessions.memory_max in config.toml)")
+	addSecret(cmd, &secrets, "pass secrets from config.toml's [secrets] into the session's environment, such as A,B, or the flag again")
+	f.BoolVar(&setup, "setup-script", false, "run the repository's setup script this time, whatever your answer for it")
+	f.BoolVar(&noSetup, "no-setup-script", false, "do not run the repository's setup script this time")
+	addOldNewFlags(f, &dir, &setup, &noSetup)
 	addJSON(cmd, &asJSON)
 	return cmd
 }
 
+// addOldNewFlags adds the hidden flags that keep the old forms of new while
+// their rows last: -d for --dir, and --setup and --no-setup for
+// --setup-script and --no-setup-script (cli-spec 3.2).
+func addOldNewFlags(f *pflag.FlagSet, dir *string, setup, noSetup *bool) {
+	if liveOld("new -d") {
+		f.StringVarP(dir, "d", "d", "~", "")
+		hideOld(f, "d", "new -d")
+	}
+	for _, o := range []struct {
+		name string
+		p    *bool
+	}{{"setup", setup}, {"no-setup", noSetup}} {
+		if id := "new --" + o.name; liveOld(id) {
+			f.BoolVar(o.p, o.name, false, "")
+			hideOld(f, o.name, id)
+		}
+	}
+}
+
 // listSessions asks a host for its sessions. Tests replace it.
 var listSessions = func(ctx context.Context, conn *client.Conn) ([]client.Session, error) { return conn.Sessions(ctx) }
+
+// oneHost is the argument check of new: one host, then any command after
+// "--" (isolation spec 14.14). A second word before "--" fails, so that an
+// old "-d <folder>" after its end, or a command without its "--", never
+// starts a session that the user did not mean.
+func oneHost(c *cobra.Command, args []string) error {
+	before := len(args)
+	if dash := c.ArgsLenAtDash(); dash >= 0 {
+		before = dash
+	}
+	switch {
+	case before == 0:
+		return argsError(c, nil)
+	case before > 1:
+		// A word that no host could have is not repeated (cli-spec 4.2).
+		hint := brand.Name + " host ls"
+		if client.ValidHostName(args[0]) {
+			hint = brand.Name + " new " + args[0] + " -- htop (a folder goes after -C)"
+		}
+		return &client.UserError{Msg: "new takes one host. A command goes after --", Hint: hint, Code: "extra_argument", Kind: client.KindUsage}
+	}
+	return nil
+}
 
 // printSession prints a session that a command started, as JSON (cli-spec
 // 7.1). It asks the host for its list, so that the address uses the ID when
@@ -352,7 +397,7 @@ func lsCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&hostName, "host", "", "only this host")
+	addHostFlag(cmd, &hostName, "only this host")
 	addJSON(cmd, &asJSON)
 	return cmd
 }

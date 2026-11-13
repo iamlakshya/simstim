@@ -63,9 +63,9 @@ func resumeCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&memoryMax, "memory-max", "", "cap the session's memory from now on: auto, or a `size` such as 4G (default: the size it had)")
-	cmd.Flags().BoolVar(&detach, "detach", false, "resume it without attaching")
-	cmd.Flags().StringArrayVar(&secrets, "secret", nil, "pass again a secret that the session started with and that hosts.toml does not give its host (repeatable)")
+	addMemoryMax(cmd, &memoryMax, "cap the session's memory from now on: auto, or a `size` such as 4G (default: the size it had)")
+	addDetach(cmd, &detach, "resume it without attaching")
+	addSecret(cmd, &secrets, "pass again secrets that the session started with and that hosts.toml does not give its host, such as A,B, or the flag again")
 	addJSON(cmd, &asJSON)
 	return cmd
 }

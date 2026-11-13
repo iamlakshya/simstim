@@ -8,7 +8,7 @@ The repository /home/dev/src/app on box has a setup script:
 
 It runs in the session before the agent, as you, with the session's environment and
 secrets. Say yes only for a repository you trust. The answer is kept for this
-repository on box until the script changes; --setup and --no-setup override it.
+repository on box until the script changes; --setup-script and --no-setup-script override it.
 
 Run it? [y/N] 
 == doctor --fix (answers "y\n")

@@ -68,9 +68,9 @@ func TestAskSetupAfterAChange(t *testing.T) {
 		}
 	}
 	for past, want := range map[client.SetupPast]string{
-		client.SetupNotTrusted: "Skipping the setup script of /home/me/src/app: you have not said that it may run on box. Pass --setup to run it.",
-		client.SetupChanged:    "Skipping the setup script of /home/me/src/app: it changed after you trusted it on box. Pass --setup to run it.",
-		client.SetupUnchecked:  "Skipping the setup script of /home/me/src/app: you trusted it on box before this version checked its content. Pass --setup to run it.",
+		client.SetupNotTrusted: "Skipping the setup script of /home/me/src/app: you have not said that it may run on box. Pass --setup-script to run it.",
+		client.SetupChanged:    "Skipping the setup script of /home/me/src/app: it changed after you trusted it on box. Pass --setup-script to run it.",
+		client.SetupUnchecked:  "Skipping the setup script of /home/me/src/app: you trusted it on box before this version checked its content. Pass --setup-script to run it.",
 	} {
 		if got := skipNote("box", q, past); got != want {
 			t.Errorf("past %v: %q, want %q", past, got, want)

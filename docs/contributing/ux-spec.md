@@ -558,7 +558,7 @@ The root help groups the commands as this table does: Sessions, Hosts, Agents, a
 | --- | --- |
 | `simstim` | Opens the launcher |
 | **Sessions** | |
-| `simstim new <host> [--agent claude] [--dir ~/src/app [--mkdir]] [--name x] [--worktree [--base ref]] [--secret NAME] [--memory-max 4G] [--inline] [--setup \| --no-setup] [--detach [--json]] [-- <command>…]` | Starts a session, and attaches unless `--detach` |
+| `simstim new <host> [--agent claude] [-C ~/src/app [--mkdir]] [--name x] [--worktree [--base ref]] [--secret NAME] [--memory-max 4G] [--inline] [--setup-script \| --no-setup-script] [--detach [--json]] [-- <command>…]` | Starts a session, and attaches unless `--detach`. `-C` is the short form of `--dir` |
 | `simstim attach [<host>/<session>\|-]` | Attaches directly. `-` is the last session. Good for a Ghostty keybinding. Without a session, and with input on, it opens the picker: an inline list of sessions, from the session cache, with a filter. To a session whose agent has ended, it says why and what to try, as at the end of an attach. `a` is its alias. |
 | `simstim resume <host>/<session> [--memory-max 4G] [--secret NAME] [--detach [--json]]` | Starts an ended agent again in its session, with its resume command, and attaches unless `--detach`. Without `--memory-max`, the cap is the one the session asked for. |
 | `simstim ls [--host h] [--json]` | Lists sessions, with their state and where the state came from, and why an agent ended: `errored (out of memory)` |
@@ -602,6 +602,8 @@ The root help groups the commands as this table does: Sessions, Hosts, Agents, a
 | `simstim version [--json]`, `completion bash\|zsh\|fish\|powershell` | Housekeeping |
 | `simstim help [<command>]`, `help concepts`, `help exit-codes` | The help of a command, the words that the tool uses, or the exit codes |
 | `simstim --no-input <command>`, `simstim --no-color <command>` | Turn questions or colour off for any command. `SIMSTIM_NO_INPUT` and `NO_COLOR` do the same. With input off, a question that needs an answer fails with exit code 4, and names the flag that answers it ([CLI spec, section 6](cli-spec.md#6-prompts-pickers-and-input-c4)) |
+
+**Flags** mean one thing everywhere ([the CLI spec, section 10](cli-spec.md#10-flags-c6)). A list takes the flag again or commas, and a size takes a unit. An old form still works for two releases or 12 months, whichever is later, and prints one warning on stderr.
 
 **Exit codes** follow [the CLI spec, section 5](cli-spec.md#5-exit-codes-c2). `simstim help exit-codes` prints them:
 

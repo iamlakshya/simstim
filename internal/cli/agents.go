@@ -56,7 +56,7 @@ func agentsLsCmd() *cobra.Command {
 
 func agentsInstallCmd() *cobra.Command {
 	var hostName string
-	var force bool
+	var reinstall bool
 	cmd := &cobra.Command{
 		Use:   "install <agent>",
 		Short: "Install an agent on a host with its official installer",
@@ -77,11 +77,15 @@ func agentsInstallCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return installAgent(cmd.Context(), h, a, force, inputOn(cmd))
+			return installAgent(cmd.Context(), h, a, reinstall, inputOn(cmd))
 		},
 	}
-	cmd.Flags().StringVar(&hostName, "host", "", "the host (needed when you have more than one)")
-	cmd.Flags().BoolVar(&force, "force", false, "run the installer even when the agent is installed, for example to update it")
+	addHostFlag(cmd, &hostName, "the host (needed when you have more than one)")
+	cmd.Flags().BoolVar(&reinstall, "reinstall", false, "run the installer even when the agent is installed, for example to update it")
+	if liveOld("agents install --force") {
+		cmd.Flags().BoolVar(&reinstall, "force", false, "")
+		hideOld(cmd.Flags(), "force", "agents install --force")
+	}
 	return cmd
 }
 
@@ -121,7 +125,7 @@ func pickHost(name string) (client.Host, error) {
 // installAgent runs an agent's installer in a session on h. With attachOK,
 // which input on gives, it attaches, so the user answers the installer.
 // Otherwise it starts the session, and says how to attach to it.
-func installAgent(ctx context.Context, h client.Host, a agents.Agent, force, attachOK bool) error {
+func installAgent(ctx context.Context, h client.Host, a agents.Agent, reinstall, attachOK bool) error {
 	cctx, cancel := context.WithTimeout(ctx, 90*time.Second)
 	defer cancel()
 	conn, err := client.Dial(cctx, h, true)
@@ -133,11 +137,11 @@ func installAgent(ctx context.Context, h client.Host, a agents.Agent, force, att
 		conn.Close()
 		return err
 	}
-	if c, ok := findCheck(checks, a.Kind); ok && c.Installed && !force {
+	if c, ok := findCheck(checks, a.Kind); ok && c.Installed && !reinstall {
 		conn.Close()
 		fmt.Fprintf(os.Stderr, "%s is already installed on %s, at %s.\n", a.Title, h.Name, client.CleanPath(c.Path))
 		printAgentChecks(os.Stderr, h.Name, []api.AgentCheck{c})
-		fmt.Fprintf(os.Stderr, "\nTo run its installer again, for example to update it, add --force.\n")
+		fmt.Fprintf(os.Stderr, "\nTo run its installer again, for example to update it, add --reinstall.\n")
 		return nil
 	}
 	fmt.Fprintf(os.Stderr, "Installing %s on %s with its vendor's installer:\n\n    %s\n\n", a.Title, h.Name, a.Setup.Install)

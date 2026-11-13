@@ -23,7 +23,7 @@ const usage = `%[1]s keeps agent sessions alive on this host. The client runs it
 Usage:
   %[1]s bridge              serve one client on stdin and stdout
   %[1]s ls [--json]         list sessions
-  %[1]s new [--agent a] [--dir d [--mkdir]] [--name n] [--memory-max size] [--setup|--no-setup] [-- argv…]
+  %[1]s new [--agent a] [--dir d [--mkdir]] [--name n] [--memory-max size] [--setup-script|--no-setup-script] [-- argv…]
   %[1]s rm <id>             stop a session and remove it
   %[1]s doctor [--json]     check this host
   %[1]s keytest             print every key the terminal sends
@@ -146,9 +146,9 @@ func newArgs(args []string) (host.NewArgs, error) {
 		case "--name":
 			i++
 			a.Name = arg(args, i)
-		case "--setup":
+		case "--setup-script", "--setup":
 			a.Setup = api.SetupRun
-		case "--no-setup":
+		case "--no-setup-script", "--no-setup":
 			a.Setup = api.SetupSkip
 		case "--memory-max":
 			i++

@@ -36,8 +36,10 @@ type Provider interface {
 type Request struct {
 	// Name is the new host's name.
 	Name string
-	// CPUs, MemoryGiB and DiskGiB size a VM.
-	CPUs, MemoryGiB, DiskGiB int
+	// CPUs, Memory and Disk size a VM. Memory and Disk are in bytes, and
+	// 0 is the provider's default.
+	CPUs         int
+	Memory, Disk int64
 	// Image is the container image, for docker.
 	Image string
 	// Template is the sandbox template, for e2b.

@@ -40,7 +40,7 @@ Setup and help:
   help        Show the help of a command or a topic
 
 Flags:
-      --debug categories[="attach,net,memory,launcher,runtime"]
+      --debug categories[=attach,net,memory,launcher,runtime]
                 turn on the debug mode, with every category, or with the
                 categories listed: attach, net, memory, launcher, runtime.
                 A list binds only in the = form, such as --debug=net
@@ -55,8 +55,8 @@ Flags:
                 ask nothing: a question that needs an answer fails with
                 exit code 4, and names the flag that answers it
                 (<NAME>_NO_INPUT=1 does the same)
-  -v, --version
-                version for <name>
+      --version
+                print the version
 
 Additional help topics:
   concepts    The words that this tool uses

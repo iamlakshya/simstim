@@ -24,20 +24,13 @@ import (
 // client's debug before any command runs.
 func addDebugFlags(root *cobra.Command) {
 	f := root.PersistentFlags()
-	f.String("debug", "", "turn on the debug mode, with every category, or with the `categories` listed: "+
+	addList(f, new([]string), "debug", "turn on the debug mode, with every category, or with the `categories` listed: "+
 		strings.ReplaceAll(diag.CatList, ",", ", ")+". A list binds only in the = form, such as --debug=net")
 	f.Lookup("debug").NoOptDefVal = diag.CatList
 	f.String("debug-file", "", "write the client's debug records to this `file`. On its own, it turns on every category ("+diag.EnvFile+" does the same)")
+	shared(f, "debug")
+	shared(f, "debug-file")
 	_ = root.RegisterFlagCompletionFunc("debug", completeCats(diag.AllCats))
-	root.PersistentPreRunE = func(cmd *cobra.Command, args []string) error {
-		applyNoColor(cmd)
-		if !inputOn(cmd) {
-			// Nothing asks: SSH runs with BatchMode=yes, and keeps its words
-			// out of the terminal (cli-spec 6.1).
-			cmd.SetContext(client.WithoutInput(cmd.Context()))
-		}
-		return startDebug(cmd, args)
-	}
 }
 
 // completeCats completes a list of categories from cats, separated by
@@ -65,7 +58,7 @@ func startDebug(cmd *cobra.Command, args []string) error {
 		return nil // the shell's completion of a word: nothing to record, and nothing to print
 	}
 	flags := cmd.Flags()
-	val, _ := flags.GetString("debug")
+	val := flags.Lookup("debug").Value.String()
 	file, _ := flags.GetString("debug-file")
 	set := flags.Changed("debug")
 	if !flags.Changed("debug-file") {
@@ -120,7 +113,7 @@ func debugCmd() *cobra.Command {
 
 func debugStartCmd() *cobra.Command {
 	var d time.Duration
-	var only string
+	var only []string
 	cmd := &cobra.Command{
 		Use:   "start <host>/<session>",
 		Short: "Turn on the debug of a running session, for 30 minutes or --for",
@@ -133,7 +126,7 @@ func debugStartCmd() *cobra.Command {
 			if d < time.Second || d > api.DebugForMax {
 				return &client.UserError{Msg: "--for: " + d.String() + " is not between 1s and 24h", Hint: "Pass a time such as 30m or 8h.", Code: "bad_value", Kind: client.KindUsage}
 			}
-			cats, err := hostCats(only)
+			cats, err := hostCats(only, listTyped(cmd.Flags(), "only"))
 			if err != nil {
 				return err
 			}
@@ -153,19 +146,20 @@ func debugStartCmd() *cobra.Command {
 			})
 		},
 	}
-	cmd.Flags().DurationVar(&d, "for", api.DebugFor, "how long debug stays on, up to 24h")
-	cmd.Flags().StringVar(&only, "only", "", "record only these host `categories`: attach, memory or runtime (default: all three)")
+	addFor(cmd, &d, api.DebugFor, "how long debug stays on, up to 24h")
+	addList(cmd.Flags(), &only, "only", "record only these host `categories`: attach, memory or runtime (default: all three)")
 	_ = cmd.RegisterFlagCompletionFunc("only", completeCats(diag.HostCats))
 	return cmd
 }
 
-// hostCats reads --only: categories of the host only. An empty list is
-// every one of them.
-func hostCats(only string) (diag.Cats, error) {
-	if only == "" {
+// hostCats reads --only: categories of the host only. When --only is not
+// set, or was set to nothing, as "", it returns every one of them, as
+// before. A list of no names, such as ",", is an error.
+func hostCats(only []string, set bool) (diag.Cats, error) {
+	if !set {
 		return diag.HostCats, nil
 	}
-	cats, err := diag.ParseCats(only)
+	cats, err := diag.ParseCats(strings.Join(only, ","))
 	if err != nil {
 		return 0, &client.UserError{Msg: "--only: " + err.Error(), Hint: "Name attach, memory or runtime.", Code: "bad_value", Kind: client.KindUsage}
 	}
@@ -271,7 +265,7 @@ func debugProfileCmd() *cobra.Command {
 			})
 		},
 	}
-	cmd.Flags().DurationVar(&d, "for", diag.ProfileDefault, "cpu only: how long the profile runs, up to 5m")
+	addFor(cmd, &d, diag.ProfileDefault, "cpu only: how long the profile runs, up to 5m")
 	cmd.ValidArgsFunction = func(_ *cobra.Command, args []string, _ string) ([]string, cobra.ShellCompDirective) {
 		if len(args) == 1 {
 			return []string{diag.ProfileCPU, diag.ProfileHeap, diag.ProfileGoroutine}, cobra.ShellCompDirectiveNoFileComp

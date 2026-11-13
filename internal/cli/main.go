@@ -23,11 +23,14 @@ func Main() int {
 	cmd, err := Root().ExecuteContextC(withLine(ctx, args))
 	// ctx ends only at a signal.
 	signalled := ctx.Err() != nil
+	asJSON := jsonAsked(cmd, args)
+	// A run that ended before its command ran, as -v does, still warns
+	// about the old forms that it used.
+	warnOldFlags(cmd)
 	if err != nil {
 		client.DebugLog().Warn("the command failed", "err", err)
 	}
 	// The debug files are complete before the process ends.
-	asJSON := jsonAsked(cmd, args)
 	stopDebug(stderrFor(asJSON, "debug_incomplete"))
 	return finish(os.Stderr, err, cmd, colourAsked(cmd, args, os.Stderr), signalled, asJSON)
 }
@@ -57,6 +60,15 @@ func Root() *cobra.Command {
 	root.AddCommand(topics()...)
 	addRootFlags(root)
 	addDebugFlags(root)
+	root.PersistentPreRunE = beforeRun
+	// --version has no short form: Cobra adds -v only when the root has no
+	// flag called version (docs/contributing/cli-spec.md 10.1).
+	var showVersion bool
+	root.Flags().BoolVar(&showVersion, "version", false, "print the version")
+	if liveOld("-v") {
+		root.Flags().BoolVarP(&showVersion, "v", "v", false, "")
+		hideOld(root.Flags(), "v", "-v")
+	}
 	// Cobra adds these two itself when it runs, after guard would have
 	// looked: add them now, so that they get the same errors and help.
 	root.InitDefaultHelpCmd()
@@ -69,6 +81,20 @@ func Root() *cobra.Command {
 	}
 	guard(root)
 	return root
+}
+
+// beforeRun runs before every command: it applies --no-color and input
+// off, warns about the old forms that the command line used, then turns on
+// the debug mode that it asks for.
+func beforeRun(cmd *cobra.Command, args []string) error {
+	applyNoColor(cmd)
+	if !inputOn(cmd) {
+		// Nothing asks: SSH runs with BatchMode=yes, and keeps its words
+		// out of the terminal (cli-spec 6.1).
+		cmd.SetContext(client.WithoutInput(cmd.Context()))
+	}
+	warnOldFlags(cmd)
+	return startDebug(cmd, args)
 }
 
 func versionCmd() *cobra.Command {

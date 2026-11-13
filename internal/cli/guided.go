@@ -29,6 +29,7 @@ type guideOpts struct {
 
 func setupCmd() *cobra.Command {
 	var o guideOpts
+	var agentList []string
 	cmd := &cobra.Command{
 		Use:   "setup",
 		Short: "Set up step by step: a host, its agents, and their logins",
@@ -44,6 +45,7 @@ func setupCmd() *cobra.Command {
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			o.agentsSet = cmd.Flags().Changed("agents")
+			o.agents = strings.Join(agentList, ",")
 			ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt)
 			defer stop()
 			g := newGuide(ctx, o, onboard.System{Providers: providers})
@@ -54,11 +56,11 @@ func setupCmd() *cobra.Command {
 		},
 	}
 	f := cmd.Flags()
-	f.StringVar(&o.host, "host", "", "use this host: a saved host, a Host from your SSH config, or user@host")
+	addHostFlag(cmd, &o.host, "use this host: a saved host, a Host from your SSH config, or user@host")
 	f.StringVar(&o.create, "create", "", "make a new host with a provider: lima, docker or e2b")
-	f.StringVar(&o.name, "name", "", "the host's name (default: from --host, or the provider's name)")
-	f.StringVar(&o.agents, "agents", "", "the agents to install, such as claude,codex (none installs nothing)")
-	f.BoolVarP(&o.yes, "yes", "y", false, "do not ask: install the helper, and only the agents in --agents")
+	addName(cmd, &o.name, "the host's name (default: from --host, or the provider's name)")
+	addList(f, &agentList, "agents", "the agents to install, such as claude,codex (none installs nothing)")
+	addYes(cmd, &o.yes, "install the helper, and install no agent outside --agents")
 	f.BoolVar(&o.noLogin, "no-login", false, "do not offer the agents' logins")
 	return cmd
 }

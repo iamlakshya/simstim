@@ -102,7 +102,7 @@ func (s *setupAsk) view(m *Model) string {
 
 // setupSkipAsk offers to start without the repository's scripts, when one
 // of them cannot run: it leads outside the repository (setup_outside), or
-// it cannot be read (setup_unreadable). The error's hint names --no-setup,
+// it cannot be read (setup_unreadable). The error's hint names --no-setup-script,
 // which the launcher has no flag for: this is the launcher's way to it.
 type setupSkipAsk struct {
 	startReq

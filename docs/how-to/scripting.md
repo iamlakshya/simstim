@@ -30,7 +30,7 @@ These are the questions, and the flag that answers each:
 | `host add` | Install the helper? | `--yes` | Fails with exit code 4 |
 | `host add` | Which agents to install, when the host lacks one | `--yes` offers none | Installs nothing |
 | `new` | Make the folder that does not exist? | `--mkdir` | Fails with exit code 4 |
-| `new` | Run the repository's setup script? | `--setup` or `--no-setup` | Skips the script, and says so |
+| `new` | Run the repository's setup script? | `--setup-script` or `--no-setup-script` | Skips the script, and says so |
 | `doctor --fix`, `host doctor --fix` | Fix it? | `-y` | Fails with exit code 4. With `--json` and `-y`, the JSON holds how each fix ended |
 | `host destroy` | Delete the machine? | `-y` | Fails with exit code 4 |
 | `setup` | Each question of the guided setup | `--yes`, with `--host` or `--create`, and `--agents` | Fails with exit code 4 |

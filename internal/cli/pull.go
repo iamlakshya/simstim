@@ -34,7 +34,7 @@ func pullCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&into, "into", "", "the local branch to fetch into (default: the session's branch name)")
-	cmd.Flags().BoolVar(&force, "force", false, "move the local branch even when the fetch is not a fast-forward")
+	addForce(cmd, &force, "move the local branch even when the fetch is not a fast-forward")
 	return cmd
 }
 

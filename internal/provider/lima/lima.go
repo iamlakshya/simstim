@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"runtime"
+	"strconv"
 	"strings"
 
 	"github.com/iamlakshya/simstim/internal/brand"
@@ -20,11 +21,14 @@ import (
 
 const install = "Install Lima (https://lima-vm.io/docs/installation/), then run this again."
 
-// Defaults for a new VM: small, and a sparse disk.
+// Defaults for a new VM: small, and a sparse disk. The sizes are in bytes.
 const (
-	DefaultCPUs      = 2
-	DefaultMemoryGiB = 4
-	DefaultDiskGiB   = 40
+	// DefaultCPUs is the CPU count of a new VM.
+	DefaultCPUs = 2
+	// DefaultMemory is the memory of a new VM, in bytes.
+	DefaultMemory = 4 << 30
+	// DefaultDisk is the sparse disk size of a new VM, in bytes.
+	DefaultDisk = 40 << 30
 	// Template is Lima's Ubuntu LTS template.
 	Template = "template:ubuntu-lts"
 	// DefaultIdleStop is how long a VM idles before it powers itself off.
@@ -101,21 +105,26 @@ func parseList(out []byte, name string) (*instance, error) {
 // that hostLoopback can close the loopback path, and --nested-virt asks Lima
 // to run Apple's own nesting check when the VM starts.
 func CreateArgs(inst string, req provider.Request, system string) []string {
-	cpus, mem, disk := req.CPUs, req.MemoryGiB, req.DiskGiB
+	cpus, mem, disk := req.CPUs, req.Memory, req.Disk
 	if cpus <= 0 {
 		cpus = DefaultCPUs
 	}
 	if mem <= 0 {
-		mem = DefaultMemoryGiB
+		mem = DefaultMemory
 	}
 	if disk <= 0 {
-		disk = DefaultDiskGiB
+		disk = DefaultDisk
 	}
 	args := []string{"create", "--tty=false", "--name=" + inst, "--plain"}
 	if system == "darwin" {
 		args = append(args, "--vm-type=vz", "--set=.networkOpts.hostLoopback = false", "--nested-virt")
 	}
-	return append(args, fmt.Sprintf("--cpus=%d", cpus), fmt.Sprintf("--memory=%d", mem), fmt.Sprintf("--disk=%d", disk), Template)
+	return append(args, fmt.Sprintf("--cpus=%d", cpus), "--memory="+gib(mem), "--disk="+gib(disk), Template)
+}
+
+// gib formats bytes as the GiB number that limactl accepts.
+func gib(bytes int64) string {
+	return strconv.FormatFloat(float64(bytes)/(1<<30), 'f', -1, 64)
 }
 
 // Create makes and starts the VM, and returns the host that reaches it

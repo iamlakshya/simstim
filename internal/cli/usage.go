@@ -286,7 +286,9 @@ func unknownFlag(c *cobra.Command, name string, e *pflag.NotExistError) error {
 		typed = "-" + e.GetSpecifiedName()
 	}
 	var cands []string
-	if e.GetSpecifiedShortnames() == "" {
+	if now, ok := flagSynonyms[shortPath(c)][typed]; ok {
+		cands = []string{now}
+	} else if e.GetSpecifiedShortnames() == "" {
 		var things []named
 		c.Flags().VisitAll(func(f *pflag.Flag) {
 			if !f.Hidden && f.Deprecated == "" {
@@ -315,13 +317,26 @@ func unknownFlag(c *cobra.Command, name string, e *pflag.NotExistError) error {
 	}
 }
 
-func flagName(f *pflag.Flag) string { return "--" + f.Name }
+// flagName is the flag as the user types it. A hidden flag that keeps an
+// old short form, such as -d, has that letter as its long name too, and
+// is named by its short form, which help and the reference show.
+func flagName(f *pflag.Flag) string {
+	if f.Name == f.Shorthand && len(f.Annotations[oldKey]) > 0 {
+		return "-" + f.Shorthand
+	}
+	return "--" + f.Name
+}
 
 // valueKind says what a flag's value must be, from its type.
 func valueKind(e *pflag.InvalidValueError) string {
 	switch e.GetFlag().Value.Type() {
 	case "duration":
+		if _, ok := e.GetFlag().Value.(*neverValue); ok {
+			return "a time of a minute or more, such as 30m, or never"
+		}
 		return "a time, such as 30s or 5m"
+	case "size":
+		return "a size, such as 4G"
 	case "int", "int8", "int16", "int32", "int64", "uint", "uint8", "uint16", "uint32", "uint64", "count":
 		return "a whole number"
 	case "float32", "float64":

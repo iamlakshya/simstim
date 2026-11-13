@@ -118,8 +118,8 @@ func hostDoctorCmd() *cobra.Command {
 		},
 	}
 	addJSON(cmd, &asJSON)
-	cmd.Flags().BoolVar(&fix, "fix", false, "offer to fix the problems found, one by one")
-	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "with --fix, apply every fix without asking")
+	addFix(cmd, &fix)
+	addYes(cmd, &yes, "apply each fix that --fix offers")
 	return cmd
 }
 
@@ -190,7 +190,7 @@ func hostRestoreCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().BoolVar(&all, "all", false, "also restart sessions that crashed without a host restart")
+	addAll(cmd, &all, "also restart sessions that crashed without a host restart")
 	addJSON(cmd, &asJSON)
 	return cmd
 }

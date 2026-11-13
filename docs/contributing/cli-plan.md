@@ -164,7 +164,7 @@ Some isolation tasks depend on tasks of this plan, so their commands use the sha
   - `new --setup` and `--no-setup` become `--setup-script` and `--no-setup-script`, so that "setup" names only the guided setup.
   - `-n` is `--name` everywhere. `host alerts log -n` becomes `--lines` alone, with a warned alias.
 - **Spec:** [cli-spec.md, section 10](cli-spec.md#10-flags-c6) and [section 3](cli-spec.md#3-old-names-and-warnings-c5-c6-c7).
-- **Files:** `internal/cli/session.go`, `internal/cli/alerts.go`, `internal/cli/create.go`, `internal/cli/agents.go`, `internal/cli/guided.go`, new `internal/cli/flags.go` (shared list and size parsers), `internal/cli/deprecated.go` (the warned aliases), and `cmd/docgen`, whose pages show the old flags through `cli.OldNames`.
+- **Files:** `internal/cli/session.go`, `internal/cli/alerts.go`, `internal/cli/create.go`, `internal/cli/agents.go`, `internal/cli/guided.go`, new `internal/cli/flags.go` (shared list and size parsers), `internal/cli/deprecated.go` (the warned aliases), and `cmd/docgen`, whose pages show the old flags through `cli.OldNames`. Also every other command file that defines a flag of spec 10.2. Also `internal/cli/main.go` (`--version`), `internal/api/memory.go` (`ParseSize`) and `internal/provider` (sizes in bytes).
 - **Acceptance:** each old form works and warns once. A test fails when two commands give one short flag two meanings.
 - **Tests:** unit tests for the parsers and the aliases.
 - **Docs:** the reference through `just docs`, and every how-to guide that shows an old form.

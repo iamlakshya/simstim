@@ -35,7 +35,8 @@ func hostCmd() *cobra.Command {
 }
 
 func hostAddCmd() *cobra.Command {
-	var sshConfig, label, providerScript string
+	var sshConfig, providerScript string
+	var labels []string
 	var yes, wake bool
 	cmd := &cobra.Command{
 		Use:   "add <name> [<ssh-target>]",
@@ -53,9 +54,9 @@ func hostAddCmd() *cobra.Command {
 			if len(args) == 2 {
 				h.SSH = args[1]
 			}
-			if label != "" {
+			if len(labels) > 0 {
 				h.Labels = map[string]string{}
-				for _, kv := range strings.Split(label, ",") {
+				for _, kv := range labels {
 					k, v, _ := strings.Cut(kv, "=")
 					h.Labels[strings.TrimSpace(k)] = strings.TrimSpace(v)
 				}
@@ -67,8 +68,8 @@ func hostAddCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&sshConfig, "ssh-config", "", "an extra SSH config file to include")
-	cmd.Flags().StringVar(&label, "label", "", "labels, for example provider=gcp,region=eu")
-	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "install the helper without asking, and offer no agents to install")
+	addLabel(cmd, &labels, "labels as key=value, for example provider=gcp,region=eu")
+	addYes(cmd, &yes, "install the helper, and offer no agents to install")
 	cmd.Flags().StringVar(&providerScript, "provider-script", "", "a script that starts and stops the host (see examples/providers)")
 	cmd.Flags().BoolVar(&wake, "wake", false, "start the host through its provider script when it does not answer")
 	return cmd

@@ -103,7 +103,7 @@ func skipNote(host string, q client.SetupQuestion, past client.SetupPast) string
 	case client.SetupNotTrusted:
 		why = "you have not said that it may run on " + host
 	}
-	return fmt.Sprintf("Skipping the setup script of %s: %s. Pass --setup to run it.", client.ShowPath(q.Repo), why)
+	return fmt.Sprintf("Skipping the setup script of %s: %s. Pass --setup-script to run it.", client.ShowPath(q.Repo), why)
 }
 
 func askSetup(p *prompter, host string, q client.SetupQuestion, past client.SetupPast) (bool, error) {
@@ -117,7 +117,7 @@ func askSetup(p *prompter, host string, q client.SetupQuestion, past client.Setu
 		case client.SetupNotTrusted:
 			fmt.Fprintf(p.out, "The repository %s on %s has a setup script:\n\n    %s\n\n", repo, host, script)
 		}
-		fmt.Fprintf(p.out, "It runs in the session before the agent, as you, with the session's environment and\nsecrets. Say yes only for a repository you trust. The answer is kept for this\nrepository on %s until the script changes; --setup and --no-setup override it.\n\n", host)
+		fmt.Fprintf(p.out, "It runs in the session before the agent, as you, with the session's environment and\nsecrets. Say yes only for a repository you trust. The answer is kept for this\nrepository on %s until the script changes; --setup-script and --no-setup-script override it.\n\n", host)
 	}
 	return p.confirm(qSetupScript, "Run it?", "an answer for the setup script of "+repo)
 }

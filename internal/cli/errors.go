@@ -246,6 +246,14 @@ var synonyms = map[string]map[string]string{
 	},
 }
 
+// flagSynonyms holds the old flags whose end has passed (cli-spec 3.1,
+// rule 8). It is keyed by the command's path without the product's name,
+// then by the old flag as typed, such as "--token-cmd" or "-n". A value is
+// the new flag, which "Did you mean" names. The release that removes a
+// flag's row from oldForms adds it here. A test checks that every new flag
+// exists.
+var flagSynonyms = map[string]map[string]string{}
+
 // named is one thing that a typed word may mean: its name, and every name
 // that it answers to, such as a command's aliases.
 type named struct {

@@ -31,7 +31,7 @@ simstim agents install claude --host my-server
 
 The client:
 
-1. Checks the host. If the agent is already installed, it says where and stops; `--force` runs the installer again, for example to update the agent.
+1. Checks the host. If the agent is already installed, it says where and stops. `--reinstall` runs the installer again, for example to update the agent.
 2. Prints the install command and the vendor page it comes from.
 3. Starts a session named `install-claude` that runs the command, and attaches to it. Answer the installer's questions there. Detach with `ctrl+\` at any time; the installer keeps running, and `simstim attach my-server/install-claude` brings you back.
 4. When the installer ends, checks the host again and says how to log in.

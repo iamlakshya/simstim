@@ -36,16 +36,32 @@ var (
 // here, since auto already lets a session use all that the host gives its
 // sessions (decision 0024).
 func ParseMemoryMax(v string) (int64, error) {
-	s := strings.ToLower(strings.TrimSpace(v))
-	switch s {
+	switch strings.ToLower(strings.TrimSpace(v)) {
 	case "", "auto":
 		return 0, nil
 	case "max", "infinity", "inf", "unlimited", "none":
 		return 0, fmt.Errorf("%q is not a size: auto already lets a session use all the memory that the host gives its sessions", v)
 	}
+	n, err := ParseSize(v)
+	if err != nil {
+		return 0, err
+	}
+	if n < MinMemoryMax {
+		return 0, fmt.Errorf("%q is below the smallest cap, 256M", v)
+	}
+	return n, nil
+}
+
+// ParseSize reads a size in bytes: a number and a unit, K, M, G or T, in
+// powers of 1024, such as "512M", "4Gi" or "1.5GiB". Case does not
+// matter. A size needs its unit: a bare number is an error. Every size of
+// the client and of config.toml has these rules (docs/contributing/cli-spec.md
+// 10.3).
+func ParseSize(v string) (int64, error) {
+	s := strings.ToLower(strings.TrimSpace(v))
 	m := memorySize.FindStringSubmatch(s)
 	if m == nil {
-		if bareNumber.MatchString(s) {
+		if IsBareNumber(s) {
 			return 0, fmt.Errorf("%q has no unit", v)
 		}
 		return 0, fmt.Errorf("%q is not a size", v)
@@ -56,11 +72,12 @@ func ParseMemoryMax(v string) (int64, error) {
 	}
 	shift := 10 * (strings.Index("kmgt", m[2]) + 1)
 	bytes := n * float64(int64(1)<<shift)
-	switch {
-	case bytes >= 1<<62:
+	if bytes >= 1<<62 {
 		return 0, fmt.Errorf("%q is too big", v)
-	case bytes < MinMemoryMax:
-		return 0, fmt.Errorf("%q is below the smallest cap, 256M", v)
 	}
 	return int64(bytes), nil
 }
+
+// IsBareNumber reports whether v is a number without a unit, such as "8"
+// or "1.5".
+func IsBareNumber(v string) bool { return bareNumber.MatchString(strings.TrimSpace(v)) }

@@ -177,9 +177,9 @@ def setup_checks(c, envx, tmp, created):
 
     # A failing script shows its exit code, and the program still starts.
     c.host_ssh("echo 7 > ~/.e2e-setup-exit")
-    sid, r = new(c, envx, "--dir", "~/e2e-setup-repo", "--name", "e2e-setup-fail", "--setup", "--detach", *prog)
+    sid, r = new(c, envx, "--dir", "~/e2e-setup-repo", "--name", "e2e-setup-fail", "--setup-script", "--detach", *prog)
     created += [sid] if sid else []
-    if c.ok(sid, "setup: --setup starts a session (%s)" % r.stderr.strip()):
+    if c.ok(sid, "setup: --setup-script starts a session (%s)" % r.stderr.strip()):
         out = screen(c, envx, sid, rb"AGENT-RAN")
         i, j = out.find(b"exited with 7; the agent starts anyway"), out.find(b"AGENT-RAN")
         c.ok(0 <= i < j, "setup: a failing script shows its exit code, then the program starts")

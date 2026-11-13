@@ -86,10 +86,10 @@ An old name keeps working for a time, and warns. This section gives the mechanis
    ```
 
 4. The end is two releases after the version that adds the warning, and 12 months after its date, whichever comes later. Kubernetes uses the same rule for a deprecated command ([Kubernetes](https://kubernetes.io/docs/reference/using-api/deprecation-policy/)).
-5. With `--json`, the warning is one JSON line on stderr ([section 7.4](#74-errors-and-warnings-with---json)).
+5. With `--json`, the warning is one JSON line on stderr ([section 7.4](#74-errors-and-warnings-with---json)). This also holds when parsing or argument checks stop the command before it runs. `--no-color` applies to early warnings too. A flag after `--`, or a string flag's value, does not change their format.
 6. A warning never prints during shell completion (`__complete`), and never on stdout.
 7. Help and completion leave out old names. The reference page of the new command lists them under "Old names", with their end.
-8. After the end, a release removes the row. The old name then moves to the synonym table of [section 4.3](#43-suggestions), so a user who types it gets "Did you mean".
+8. After the end, a release removes the row. The old name then moves to the synonym table of [section 4.3](#43-suggestions), so a user who types it gets "Did you mean". An old flag moves to the flag synonyms in the same file, so its unknown-flag error names the new flag.
 
 ### 3.2 Every old form
 
@@ -117,7 +117,7 @@ Kept aliases do not warn and do not end: `a` for `attach`, `delete` for `rm`, `l
 
 - A unit test checks each row: the old form runs, does what it did, and prints the warning once.
 - A unit test checks that each row's end is two releases after its version, and 12 months after its date.
-- A unit test runs `__complete` with an old name, and checks that stderr is empty.
+- A unit test runs `__complete` with an old name, and checks that stderr holds no warning. Cobra writes one line of its own there, "Completion ended with directive", which the shell's script drops. Nothing else may come.
 - The release checklist in [releasing](releasing.md) gets one step: remove each row whose end has passed, and add its old name to the synonym table.
 
 ## 4. Errors and suggestions (C2)
@@ -810,16 +810,18 @@ Each of these flags has one meaning on every command that takes it. Helper funct
 
 **Lists.** A list of names takes a repeated flag or commas: `--agents claude,codex` is the same as `--agents claude --agents codex`. pflag's `StringSlice` reads each value as comma-separated, and `StringArray` does not split (`string_slice.go` in pflag v1.0.10). A list of values that may hold a comma takes only a repeated flag. Such values are paths, commands, and `KEY=VALUE` pairs with free values. The flags are `--env`, `--set`, `--copy`, `--mount` and `--include`. `--label` takes both forms, as today.
 
-**Sizes.** A size is a number and a unit in powers of 1024, such as `512M`, `4G`, `4GiB` or `1.5G`, as `sessions.memory_max` takes. One parser in `internal/cli/flags.go` reads every size, with the unit rules of `api.ParseMemoryMax` and without its minimum. A bare number is an error with exit code 2, except for the two old forms of section 3.
+An explicit `host alerts set --events` list must name at least one event. An empty value or a list of only commas is an error. Omitting the flag keeps the existing defaults.
 
-**Durations** are Go durations, such as `30s`, `10m` or `2h`. A flag that can turn a time off also takes `never`.
+**Sizes.** A size is a number and a unit in powers of 1024, such as `512M`, `4G`, `4GiB` or `1.5G`, as `sessions.memory_max` takes. One parser in `internal/cli/flags.go` reads every size, with the unit rules of `api.ParseSize`, which `api.ParseMemoryMax` also uses, and without its minimum. A size that comes to less than one byte is an error. A bare number is an error with exit code 2, except for the two old forms of section 3. In those, a bare number is GiB, and 0 or less is the default, as before. A whole number keeps the forms that the old flag read, such as `010` for 8 and `0x10` for 16.
+
+**Durations** are Go durations, such as `30s`, `10m` or `2h`. A flag that can turn a time off also takes `never`. An empty value of such a flag keeps its default, as before.
 
 ### 10.4 The change of `-d`
 
 1. C6 adds `-C` as the short form of `--dir`.
 2. Until the end of section 3, `-d <folder>` sets the folder and warns. pflag gives a flag one short form only (`Flag.Shorthand` in pflag's `flag.go`), so `-d` is a hidden flag that sets the same value.
 3. After the end, `-d` is the short form of `--detach` on `new`, `resume` and `fork`.
-4. A script that still passes `<host> -d ~/src` then fails loudly. `~/src` becomes a second word before `--`, which is the usage error "Two words before `--`" of isolation spec 14.14. Without a host word, which isolation task H12 allows, `~/src` names the host, and an unknown host fails with exit code 3. Only a folder that has a saved host's name would start a detached session there instead.
+4. A script that still passes `<host> -d ~/src` then fails loudly. `~/src` becomes a second word before `--`, which is the usage error "Two words before `--`" of isolation spec 14.14. C6 adds that check to `new`, so that it does not wait for H12. Without a host word, which isolation task H12 allows, `~/src` names the host, and an unknown host fails with exit code 3. Only a folder that has a saved host's name would start a detached session there instead.
 
 ### 10.5 Tests
 

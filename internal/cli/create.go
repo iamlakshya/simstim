@@ -48,6 +48,8 @@ func powersOffWhenIdle(p string) bool { return onboard.PowersOffWhenIdle(p) }
 
 func hostCreateCmd() *cobra.Command {
 	var req provider.Request
+	memory := sizeValue{bytes: lima.DefaultMemory, text: "4G", old: "host create --memory"}
+	disk := sizeValue{bytes: lima.DefaultDisk, text: "40G", old: "host create --disk"}
 	cmd := &cobra.Command{
 		Use:   "create <provider> [<name>]",
 		Short: "Make a host with lima, docker or e2b, and connect it",
@@ -67,17 +69,18 @@ func hostCreateCmd() *cobra.Command {
 				req.Name = args[1]
 			}
 			req.Out = os.Stderr
+			req.Memory, req.Disk = memory.bytes, disk.bytes
 			return createHost(cmd.Context(), p, req)
 		},
 	}
 	f := cmd.Flags()
-	f.IntVar(&req.CPUs, "cpus", lima.DefaultCPUs, "lima: CPUs")
-	f.IntVar(&req.MemoryGiB, "memory", lima.DefaultMemoryGiB, "lima: memory in GiB")
-	f.IntVar(&req.DiskGiB, "disk", lima.DefaultDiskGiB, "lima: disk in GiB (sparse: it grows as it fills)")
+	addCPUs(cmd, &req.CPUs, lima.DefaultCPUs, "lima: CPUs")
+	addMemory(cmd, &memory, "lima: memory, a `size` such as 8G")
+	addSize(f, &disk, "disk", "lima: disk, a `size` such as 80G (sparse: it grows as it fills)")
 	f.StringVar(&req.Image, "image", docker.DefaultImage, "docker: the image, which needs sh, bash and coreutils")
 	f.StringVar(&req.Template, "template", e2b.DefaultTemplate, "e2b: the template, which sets CPUs and memory")
-	f.StringVar(&req.TokenCommand, "token-command", "", "e2b: a command that prints the API key, if E2B_API_KEY is not set and the E2B CLI is not logged in")
-	f.StringVar(&req.IdleStop, "idle-stop", "", "stop after this long with no client and no working session, or never (lima: 30m, e2b: 15m)")
+	addTokenCommand(cmd, &req.TokenCommand, "e2b: a command that prints the API key, if E2B_API_KEY is not set and the E2B CLI is not logged in")
+	addNever(f, &req.IdleStop, "idle-stop", "stop after this `duration` with no client and no working session, or never (lima: 30m, e2b: 15m)")
 	return cmd
 }
 
@@ -136,8 +139,8 @@ func hostDestroyCmd() *cobra.Command {
 			return destroyHost(cmd.Context(), prompts(cmd), args[0], force, yes)
 		},
 	}
-	cmd.Flags().BoolVar(&force, "force", false, "destroy it even while a session is working")
-	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "do not ask first")
+	addForce(cmd, &force, "destroy it even while a session is working")
+	addYes(cmd, &yes, "delete the machine")
 	return cmd
 }
 
@@ -233,12 +236,11 @@ func hostIdleCmd() *cobra.Command {
 			if h.Machine == nil {
 				return &client.UserError{Msg: h.Name + " was not made by `host create`", Hint: "Use a host made by " + brand.Name + " host create.", Code: "not_created"}
 			}
-			if args[1] != "never" {
-				if d, err := time.ParseDuration(args[1]); err != nil || d < time.Minute {
-					return &client.UserError{Msg: fmt.Sprintf("%q is not an idle time", args[1]), Hint: "Use a duration of a minute or more, such as 30m or 2h, or never.", Code: "bad_value", Kind: client.KindUsage}
-				}
+			idle, err := parseIdle(args[1])
+			if err != nil {
+				return &client.UserError{Msg: fmt.Sprintf("%q is not an idle time", args[1]), Hint: "Use a duration of a minute or more, such as 30m or 2h, or never.", Code: "bad_value", Kind: client.KindUsage}
 			}
-			h.Machine.IdleStop = args[1]
+			h.Machine.IdleStop = idle
 			if err := saveHost(cmd.Context(), h); err != nil {
 				return err
 			}
@@ -246,7 +248,7 @@ func hostIdleCmd() *cobra.Command {
 			case powersOffWhenIdle(h.Machine.Provider):
 				return applyIdle(cmd.Context(), h)
 			case h.Machine.Provider == "e2b":
-				say(cmd, "%s pauses %s after the last client goes, while no session works.\n", h.Name, args[1])
+				say(cmd, "%s pauses %s after the last client goes, while no session works.\n", h.Name, h.Machine.IdleStop)
 			default:
 				say(cmd, "Saved, but %s hosts do not stop by themselves.\n", h.Machine.Provider)
 			}

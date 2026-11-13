@@ -32,7 +32,7 @@ Press Ctrl+C while Lima or Docker makes the machine, and the setup deletes the h
    simstim host create lima dev
    ```
 
-   It makes the VM `simstim-dev` with 2 CPUs, 4 GiB of memory and a 40 GiB disk that grows as it fills. Change them with `--cpus`, `--memory` and `--disk`. The VM is made with Lima's `--plain`, so it cannot see your home folder, and its ports are not forwarded to your machine.
+   It makes the VM `simstim-dev` with 2 CPUs, 4 GiB of memory and a 40 GiB disk that grows as it fills. Change them with `--cpus`, `--memory` and `--disk`. A size takes a unit, such as `--memory 8G` or `--disk 80G`. The VM is made with Lima's `--plain`, so it cannot see your home folder, and its ports are not forwarded to your machine.
 3. It installs the helper, turns on linger, and sets up idle stop. The first time, with the image download, this took about a minute on an Apple silicon Mac.
 4. Install your agents in the VM, from a shell there (`limactl shell simstim-dev`), then start a session: `simstim new dev --agent claude`.
 
