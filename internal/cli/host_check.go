@@ -20,7 +20,7 @@ import (
 func hostTestCmd() *cobra.Command {
 	var asJSON bool
 	cmd := &cobra.Command{
-		Use:     "test <name>",
+		Use:     "test <host>",
 		Short:   "Check that a host answers, and how fast",
 		Example: "  " + brand.Name + " host test my-vps\n  " + brand.Name + " host test my-vps --json",
 		Args:    cobra.ExactArgs(1),
@@ -56,16 +56,18 @@ func hostTestCmd() *cobra.Command {
 func hostDoctorCmd() *cobra.Command {
 	var asJSON, fix, yes bool
 	cmd := &cobra.Command{
-		Use:   "doctor <name>",
+		Use:   "doctor <host>",
 		Short: "Check a host's setup, and with --fix fix what it can",
-		Long: "Checks a host: systemd and linger, the restore unit, terminfo, memory caps, swap, the\n" +
-			"session sockets and the agents. It warns when the host has less memory than an agent's\n" +
-			"docs ask for, and when a program in one session could drive another through its\n" +
-			"socket. For a VM made by host create lima, it also checks, on this computer, that the\n" +
-			"VM cannot reach services on this computer's loopback address. With --fix it offers to\n" +
-			"fix linger, the restore unit, Ghostty's terminfo, a broken current helper link, stale\n" +
-			"session sockets and old helper versions. Each fix is shown and explained before it\n" +
-			"runs; one that needs root is printed for you.",
+		Long: "Checks systemd, terminfo, memory caps, swap and the agents on a host.\n" +
+			"It checks that sessions keep running after you log out. It also checks the start-up entry\n" +
+			"that brings sessions back after a reboot. It warns when the host has less memory than\n" +
+			"an agent's docs ask for. It warns when a program in one session could drive another\n" +
+			"through its socket. For a VM made by host create lima, it checks, on this computer, that\n" +
+			"the VM cannot reach services on this computer's loopback address.\n\n" +
+			"With --fix it offers to fix what it found: sessions that stop when you log out, the start-up\n" +
+			"entry and Ghostty's terminfo. It also fixes a broken current helper link, stale session sockets\n" +
+			"and old helper versions. Each fix is shown and explained before it runs. A fix that needs root\n" +
+			"is printed for you.",
 		Example: "  " + brand.Name + " host doctor my-vps\n  " + brand.Name + " host doctor my-vps --fix\n  " + brand.Name + " host doctor my-vps --json",
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -154,8 +156,9 @@ func hostFixesJSON(ctx context.Context, conn *client.Conn, h client.Host, d clie
 func hostRestoreCmd() *cobra.Command {
 	var all, asJSON bool
 	cmd := &cobra.Command{
-		Use:     "restore <name>",
-		Short:   "Start again the sessions a host restart stopped (the host also does this at boot)",
+		Use:     "restore <host>",
+		Short:   "Start again the sessions that a host restart stopped",
+		Long:    "Starts again the sessions that a host restart stopped. The host also does this when it starts.",
 		Example: "  " + brand.Name + " host restore my-vps\n  " + brand.Name + " host restore my-vps --all --json",
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -187,16 +190,17 @@ func hostRestoreCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().BoolVar(&all, "all", false, "also restart sessions whose holder crashed without a host restart")
+	cmd.Flags().BoolVar(&all, "all", false, "also restart sessions that crashed without a host restart")
 	addJSON(cmd, &asJSON)
 	return cmd
 }
 
-func hostProviderCmd(action, short string) *cobra.Command {
+func hostProviderCmd(action, short, long string) *cobra.Command {
 	var asJSON bool
 	cmd := &cobra.Command{
-		Use:     action + " <name>",
+		Use:     action + " <host>",
 		Short:   short,
+		Long:    long,
 		Example: "  " + brand.Name + " host " + action + " my-vps",
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {

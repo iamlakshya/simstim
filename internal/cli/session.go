@@ -33,7 +33,7 @@ func newCmd() *cobra.Command {
 	var detach, worktree, inline, setup, noSetup, mkdir, asJSON bool
 	var secrets []string
 	cmd := &cobra.Command{
-		Use:   "new <host> [-- command…]",
+		Use:   "new <host> [-- <command>…]",
 		Short: "Start a session on a host, and attach to it",
 		Example: "  " + brand.Name + " new my-vps --agent claude --dir ~/src/app\n" +
 			"  " + brand.Name + " new my-vps --agent claude --dir ~/src/new-app --mkdir\n" +
@@ -219,7 +219,7 @@ func killCmd() *cobra.Command {
 
 func renameCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:     "rename <host>/<session> <new-name>",
+		Use:     "rename <host>/<session> <name>",
 		Short:   "Rename a session",
 		Example: "  " + brand.Name + " rename my-vps/auth-fix login-fix",
 		Args:    cobra.ExactArgs(2),
@@ -404,8 +404,10 @@ func demoCmd() *cobra.Command {
 	var empty bool
 	cmd := &cobra.Command{
 		Use:   "demo",
-		Short: "Try the launcher with sample hosts and sessions (nothing connects anywhere)",
-		Args:  cobra.NoArgs,
+		Short: "Try the launcher with sample data (nothing connects anywhere)",
+		Example: "  " + brand.Name + " demo\n" +
+			"  " + brand.Name + " demo --empty   # as on the first run",
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if err := checkLauncher(cmd, "the demo", brand.Name+" demo (run it at a terminal with input on)"); err != nil {
 				return err

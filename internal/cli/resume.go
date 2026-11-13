@@ -19,16 +19,16 @@ func resumeCmd() *cobra.Command {
 		Use:   "resume <host>/<session>",
 		Short: "Start a session's agent again after it ended, and attach to it",
 		Long: "Starts the agent of a session again, in the same session, after the agent ended. It works after\n" +
-			"the memory cap stopped the agent, after a crash or an exit, and after its holder was lost. The agent\n" +
-			"picks up its conversation with its own resume command, where it has one. Otherwise, a session that\n" +
-			"started with a command of its own runs that command again. The session keeps its ID, name, folder\n" +
-			"and worktree. On a host with systemd, anything that the agent left running in the\n" +
-			"session stops first. The secrets that hosts.toml gives the host are fetched again. Any other secret\n" +
-			"that the session started with needs --secret.",
-		Example: "  " + brand.Name + " resume my-vps/app\n" +
-			"  " + brand.Name + " resume my-vps/app --memory-max 6G\n" +
-			"  " + brand.Name + " resume my-vps/app --secret GITHUB_TOKEN\n" +
-			"  " + brand.Name + " resume my-vps/app --detach --json",
+			"the memory cap stopped the agent, after a crash or an exit, and after the session's process on the\n" +
+			"host was lost. The agent picks up its conversation with its own resume command, where it has one.\n" +
+			"Otherwise, a session that started with a command of its own runs that command again. The session\n" +
+			"keeps its ID, name, folder and worktree. On a host with systemd, anything that the agent left\n" +
+			"running in the session stops first. The secrets that hosts.toml gives the host are fetched again.\n" +
+			"Any other secret that the session started with needs --secret.",
+		Example: "  " + brand.Name + " resume my-vps/auth-fix\n" +
+			"  " + brand.Name + " resume my-vps/auth-fix --memory-max 6G\n" +
+			"  " + brand.Name + " resume my-vps/auth-fix --secret GITHUB_TOKEN\n" +
+			"  " + brand.Name + " resume my-vps/auth-fix --detach --json",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if asJSON && !detach {

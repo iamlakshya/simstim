@@ -60,7 +60,7 @@ The root holds only the words in this table. `TestTopLevel` in `internal/cli` wa
 | Agents | `agents` | today |
 | Setup and help | `setup`, `doctor`, `debug`, `config`, `demo`, `version`, `completion`, `help`, `ssh-config`, `ssh-proxy` | today, C10, P2.15 |
 
-A hidden command that carries an old name ([section 3](#3-old-names-and-warnings-c5-c6-c7)) is not in the table, and the test skips it. So is a help topic of [section 8.3](#83-help-topics), which runs nothing.
+A hidden command that carries an old name ([section 3](#3-old-names-and-warnings-c5-c6-c7)) is not in the table, and the test skips it. So is a help topic of [section 8.3](#83-help-topics), which only prints itself.
 
 ### 2.2 Depth
 
@@ -214,14 +214,14 @@ C2 replaces them:
 | A flag without its value | `--dir needs a value` | `simstim new --help` | 2 |
 | A value that does not parse | `--memory-max "4X" is not a size, such as 4G` | `simstim new --help` | 2 |
 | A missing argument | `attach needs <host>/<session> or -`, then the short help | `simstim attach --help` | 2 |
-| An extra argument | `rename takes <host>/<session> <new-name>, and got 3 words` | `simstim rename --help` | 2 |
+| An extra argument | `rename takes <host>/<session> <name>, and got 3 words` | `simstim rename --help` | 2 |
 
-The message of a missing or an extra argument comes from the words of the command's `Use`, so it is right for every command without a message of its own. Choices, as in `<host>/<session> | -`, join with "or". The short help of question C-4 follows the message of a missing argument. It holds the usage line and the command's first example, so every command that needs a word has an example:
+The message of a missing or an extra argument comes from the words of the command's `Use`, so it is right for every command without a message of its own. Choices, as in `<host>/<session>|-`, join with "or". The short help of question C-4 follows the message of a missing argument. It holds the usage line and the command's first example, so every command that needs a word has an example:
 
 ```text
 Error: attach needs <host>/<session> or -.
 
-Usage:   simstim attach <host>/<session> | -
+Usage:   simstim attach <host>/<session>|-
 Example: simstim attach my-vps/auth-fix
 
 Try: simstim attach --help
@@ -550,8 +550,13 @@ The root help groups the commands, with Cobra's `AddGroup` and `GroupID`. `SetHe
 Run any coding agent on any host, and use it as if it ran here
 
 Usage:
-  simstim             opens the launcher
+  simstim            opens the launcher
   simstim [command]
+
+Examples:
+  simstim setup                       # connect a host, step by step
+  simstim new my-vps --agent claude   # start an agent, and attach to it
+  simstim attach my-vps/auth-fix      # go back to a session
 
 Sessions:
   new         Start a session on a host, and attach to it
@@ -562,17 +567,24 @@ Hosts:
   host        Add, create, list, test and remove hosts
 
 Agents:
-  agents      List the agents, install one, and log in
+  agents      List the agents, and install one on a host
 
 Setup and help:
   setup       …
+
+Flags:
+  …
 
 Additional help topics:
   concepts    The words that this tool uses
   exit-codes  What each exit code means
 
-Use "simstim [command] --help" for more about a command.
+Use "simstim [command] --help" for more information about a command.
 ```
+
+The root help starts with the root's `Short`. Its usage line says what the command does alone. The root's `Long` says the same, for the reference index and the man page, so the root help leaves it out. The commands of a group come in the order of the table in [section 2.1](#21-the-top-level). The footer is Cobra's, as in the help of every other command. C8 changes the line of `agents` when it adds `agents login`.
+
+Every line of every help fits 80 columns. The help wraps each paragraph of a `Long` and the usage of the flags. A line that starts with a space, such as a command, keeps its width, and so does an example. An example that would be wider goes on in a second line, after a backslash.
 
 ### 8.2 The help of a command
 
@@ -587,21 +599,21 @@ The help keeps Cobra's order: the description, usage, aliases, examples, subcomm
 
 ### 8.3 Help topics
 
-A topic is a Cobra command with only `Use`, `Short` and `Long`. Cobra lists it under "Additional help topics", and `simstim help <topic>` prints it.
+A topic is a command with only `Use`, `Short` and `Long`, and a mark that makes it a topic (`IsTopic` in `internal/cli`). The root help lists it under "Additional help topics", and `simstim help <topic>` prints it. `simstim <topic>` prints it too. The topic runs, hidden, so that a word after it fails with exit code 2, as it does after `help <topic>`. Cobra prints the help of a command that does not run before it checks the words.
 
 | Topic | What it holds | Task |
 | --- | --- | --- |
 | `concepts` | One line for each word that a user meets | C3 |
-| `exit-codes` | The tables of sections 5.1 and 5.2 | C3 |
+| `exit-codes` | The tables of sections 5.1 and 5.2. Until `exec` exists, the topic holds only 5.1. P1.13 adds the table of 5.2 with `exec`. | C3, P1.13 |
 | `policy` | The layers, and three examples. They are the `Long` of the `policy` command, because a topic cannot share a command's name. | P1.12 |
 
-`concepts` holds the words of the build. C3 ships these: host, helper, session, address, agent, launcher, attach and detach, worktree, secret, alert and provider script. Each task that adds a word adds its line in the same pull request. The isolation plan adds sandbox, wall, level, floor, tier, layer, profile, rule, door, preset and drain.
+`concepts` holds the words of the build. C3 ships these: host, helper, session, address, agent, launcher, attach and detach, worktree, secret, alert and provider script. P4.1 adds digest when it adds `host upgrade`. P4.6 adds runtime pin when `host doctor` shows pin ages. Each task that adds a word adds its line in the same pull request. The isolation plan adds sandbox, wall, level, floor, tier, layer, profile, rule, door, preset and drain.
 
-`cmd/docgen` writes each topic to `docs/reference/<topic>.md`, and the reference index links it. C2 writes `docs/reference/exit-codes.md` first, from the table of section 5.
+`cmd/docgen` writes each topic to `docs/reference/<topic>.md`, and the reference index links it. C2 writes `docs/reference/exit-codes.md` first, from the table of section 5. The topic and its page share their prose: `ConceptsIntro`, `ExitCodesIntro` and `ExitCodesOutro` in `internal/cli`.
 
 ### 8.4 Internal words
 
-A test fails when one of these words appears, in any case, in a `Short`, a `Long`, an `Example` or a flag's usage.
+A test fails when one of these words appears in the help of any command, a hidden one too: its `Use`, `Short`, `Long`, `Example` or `Deprecated`, or a flag's usage or deprecation. The test reads a word in any case and in any form, such as "lingered", and with any space, line break or dash inside, such as "flight" at the end of one line and "recorder" at the start of the next.
 
 | Word | Write instead |
 | --- | --- |
@@ -616,8 +628,11 @@ A test fails when one of these words appears, in any case, in a `Short`, a `Long
 
 ### 8.6 Tests
 
-- `TestEveryCommandHasExample` walks `Root()`, and fails on a runnable command with an empty `Example`. `just test` runs it, so `scripts/docs-check.sh` needs no change.
+- `TestEveryCommandHasExample` walks `Root()`, and fails on a runnable command with an empty `Example`, a hidden one too. A topic needs none. `just test` runs it, so `scripts/docs-check.sh` needs no change.
+- `TestEveryExampleParses` finds the command of each example, and checks its flags, its words and its required flags.
 - `TestHelpHasNoInternalWords`, as in section 8.4.
+- `TestHelpFitsTheWidth` runs the help of every command, and fails on a line wider than 80 columns, or one that ends with a space.
+- `TestTopicsTakeNoWords`: `simstim concepts extra` exits with 2.
 - Golden tests of the root help and of `help concepts`.
 - A `cmd/docgen` test that a page shows its aliases and old names.
 

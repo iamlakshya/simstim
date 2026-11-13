@@ -23,8 +23,8 @@ const bundleWait = 10 * time.Minute
 func debugBundleCmd() *cobra.Command {
 	var ssh bool
 	cmd := &cobra.Command{
-		Use:   "bundle [<host> | <host>/<session>]",
-		Short: "Write one local archive of the debug files, with private values replaced, to attach to an issue",
+		Use:   "bundle [<host>|<host>/<session>]",
+		Short: "Write one archive of the debug files, with private values replaced",
 		Long: "Without an argument, the bundle takes the laptop's side only. With a host, it adds every session\n" +
 			"on that host that has debug files, and with a session, that session only. It writes\n" +
 			brand.Name + "-debug-<time>.tar.gz in the current folder, with mode 0600. It replaces host names,\n" +

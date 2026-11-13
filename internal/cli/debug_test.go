@@ -103,7 +103,7 @@ func TestTheDebugCommands(t *testing.T) {
 	if ls := ok(t, "ls", "--json"); !strings.Contains(ls, `"debug_until"`) {
 		t.Errorf("ls --json shows no end: %s", ls)
 	}
-	if out := okSaid(t, "debug", "save", "box/dbg"); !strings.Contains(out, "Saved the flight recorder of dbg: ~/") {
+	if out := okSaid(t, "debug", "save", "box/dbg"); !strings.Contains(out, "Saved the recent debug record of dbg: ~/") {
 		t.Errorf("debug save = %q", out)
 	}
 	if out := okSaid(t, "debug", "profile", "box/dbg", "heap"); !strings.Contains(out, "Wrote a heap profile of dbg: ~/") {

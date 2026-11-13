@@ -148,11 +148,11 @@ It asks first. It refuses while a session is working, unless you pass `--force`.
 
 | Command | Does |
 | --- | --- |
-| `host create <provider> [name]` | Makes, bootstraps and connects a new host |
-| `host start <name>` | Starts or resumes it |
-| `host stop <name>` | Stops a VM or container, or pauses a sandbox |
-| `host status <name>` | Asks the provider whether it runs |
-| `host idle <name> <30m\|never>` | Sets the idle time |
-| `host destroy <name>` | Deletes it and forgets it |
+| `host create <provider> [<name>]` | Makes, bootstraps and connects a new host |
+| `host start <host>` | Starts or resumes it |
+| `host stop <host>` | Stops a VM or container, or pauses a sandbox |
+| `host status <host>` | Asks the provider whether it runs |
+| `host idle <host> <duration>\|never` | Sets the idle time |
+| `host destroy <host>` | Deletes it and forgets it |
 
 Every flag is in [the command reference](../reference/cli/host_create.md).

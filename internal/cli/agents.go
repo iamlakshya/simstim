@@ -18,7 +18,12 @@ import (
 )
 
 func agentsCmd() *cobra.Command {
-	cmd := &cobra.Command{Use: "agents", Short: "List the agents, and install one on a host"}
+	cmd := &cobra.Command{
+		Use:   "agents",
+		Short: "List the agents, and install one on a host",
+		Example: "  " + brand.Name + " agents ls\n" +
+			"  " + brand.Name + " agents install claude --host my-vps",
+	}
 	cmd.AddCommand(agentsLsCmd(), agentsInstallCmd())
 	return cmd
 }
@@ -28,7 +33,9 @@ func agentsLsCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "ls",
 		Short: "List the agents in the agent table, with how each one installs",
-		Args:  cobra.NoArgs,
+		Example: "  " + brand.Name + " agents ls\n" +
+			"  " + brand.Name + " agents ls --json",
+		Args: cobra.NoArgs,
 		RunE: func(*cobra.Command, []string) error {
 			if asJSON {
 				return printJSON(agents.Table)
@@ -52,7 +59,7 @@ func agentsInstallCmd() *cobra.Command {
 	var force bool
 	cmd := &cobra.Command{
 		Use:   "install <agent>",
-		Short: "Install an agent on a host with its vendor's installer, in a session you can watch",
+		Short: "Install an agent on a host with its official installer",
 		Long: "Runs the agent's official install command in a new session on the host, so you see\n" +
 			"its output and can answer its questions. Then it says how to log in: you run the\n" +
 			"agent's own login, in a session. " + brand.DisplayName + " never logs in for you.",

@@ -19,12 +19,18 @@ import (
 )
 
 func hostCmd() *cobra.Command {
-	cmd := &cobra.Command{Use: "host", Short: "Add, create, list, test and remove hosts"}
+	cmd := &cobra.Command{
+		Use:   "host",
+		Short: "Add, create, list, test and remove hosts",
+		Example: "  " + brand.Name + " host add my-vps\n" +
+			"  " + brand.Name + " host ls",
+	}
 	cmd.AddCommand(hostAddCmd(), hostLsCmd(), hostRmCmd(), hostTestCmd(), hostDoctorCmd(), hostRestoreCmd(), hostAlertsCmd(),
 		hostCreateCmd(), hostDestroyCmd(), hostIdleCmd(),
-		hostProviderCmd("start", "Start the host through its provider or provider script"),
-		hostProviderCmd("stop", "Stop the host through its provider or provider script (a VM's sessions stop too; a sandbox's are paused)"),
-		hostProviderCmd("status", "Ask the provider or provider script whether the host is running"))
+		hostProviderCmd("start", "Start the host through its provider or provider script", ""),
+		hostProviderCmd("stop", "Stop the host through its provider or provider script",
+			"Stops the host through its provider or provider script. A VM's sessions stop too, and a sandbox's are paused."),
+		hostProviderCmd("status", "Ask the provider or provider script whether the host is running", ""))
 	return cmd
 }
 
@@ -32,7 +38,7 @@ func hostAddCmd() *cobra.Command {
 	var sshConfig, label, providerScript string
 	var yes, wake bool
 	cmd := &cobra.Command{
-		Use:   "add <name> [ssh-target]",
+		Use:   "add <name> [<ssh-target>]",
 		Short: "Connect a host: check it, install the helper, prepare it",
 		Long: "Connect a host. The ssh target is a Host from your SSH config, or user@host.\n" +
 			"It defaults to the name. --ssh-config adds an extra SSH config file, for example a repo's own.",
@@ -162,7 +168,8 @@ func connectHost(ctx context.Context, w io.Writer, h client.Host, consent func(q
 		fmt.Fprintf(w, "\n%s needs a small helper on the host to keep sessions alive.\n", brand.DisplayName)
 		fmt.Fprintf(w, "    What   %s %s, %.1f MB, SHA-256 checked\n", brand.HostBinary, client.HelperVersion(), float64(len(bin))/1e6)
 		fmt.Fprintf(w, "    Where  ~/.local/share/%s/bin/%s/\n", brand.Name, client.HelperVersion())
-		fmt.Fprintf(w, "    Also   turn on linger, install this terminal's terminfo\n")
+		fmt.Fprintf(w, "    Also   keep sessions running after you log out, and install this\n")
+		fmt.Fprintf(w, "           terminal's terminfo\n")
 		fmt.Fprintf(w, "  Nothing listens on the network. To remove it later, delete ~/.local/share/%s on the host.\n\n", brand.Name)
 		ok, err := consent("Install it?")
 		if err != nil {
@@ -259,7 +266,7 @@ func hostLsCmd() *cobra.Command {
 
 func hostRmCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:     "rm <name>",
+		Use:     "rm <host>",
 		Short:   "Forget a host (its sessions keep running)",
 		Example: "  " + brand.Name + " host rm my-vps",
 		Args:    cobra.ExactArgs(1),
