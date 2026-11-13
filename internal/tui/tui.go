@@ -53,10 +53,6 @@ func runWith(ctx context.Context, be Backend, o Options) error {
 }
 
 func runNamed(ctx context.Context, be Backend, o Options, what, hint string) error {
-	in, out := launcherIn(), launcherOut()
-	if !isTerminal(in) || !isTerminal(out) || !isTerminal(os.Stderr) {
-		return &client.UserError{Msg: what + " needs a terminal", Hint: hint, Code: "no_terminal", Kind: client.KindUsage}
-	}
 	if !client.InputAllowed(ctx) {
 		return &client.UserError{
 			Msg:  what + " cannot open with input off",
@@ -64,6 +60,10 @@ func runNamed(ctx context.Context, be Backend, o Options, what, hint string) err
 			Code: "no_input",
 			Kind: client.KindNeedsAnswer,
 		}
+	}
+	in, out := launcherIn(), launcherOut()
+	if !isTerminal(in) || !isTerminal(out) || !isTerminal(os.Stderr) {
+		return &client.UserError{Msg: what + " needs a terminal", Hint: hint, Code: "launcher_no_terminal", Kind: client.KindFailed}
 	}
 	o.Motion = motionOn(be.Settings().UI.Motion, os.Getenv)
 	m := New(ctx, be, o)

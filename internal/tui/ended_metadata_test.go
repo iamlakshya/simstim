@@ -121,15 +121,16 @@ func TestRenameAndFolderCompletionCleanHostileMetadata(t *testing.T) {
 	checkClean(t, "post-rename view", hs.m.View().Content)
 	hasToast(t, hs.m, "Renamed authc]52;c;YWJjfix to clean on atlas-dev.")
 
-	// Quick-start folder ghost and Tab completion clean host-supplied paths.
-	const wantFolder = "~/src/appc]52;c;YWJj"
+	// A suggestion whose display would change is never substituted with
+	// its cleaned name. Only the exact safe folder is offered and completed.
+	const wantFolder = "~/src/app-safe/"
 	hs.key("n")
 	hs.typeText("~/sr")
 	hs.m.onFolders(foldersMsg{
 		host:   "atlas-dev",
 		prefix: "~/sr",
 		quick:  true,
-		res:    client.FoldersResult{Matches: []string{rawFolder}},
+		res:    client.FoldersResult{Matches: []string{rawFolder, wantFolder}},
 	})
 	if len(hs.m.prompt.folders) != 1 || hs.m.prompt.folders[0] != wantFolder {
 		t.Fatalf("quick-start folders = %#v, want [%q]", hs.m.prompt.folders, wantFolder)
@@ -142,7 +143,8 @@ func TestRenameAndFolderCompletionCleanHostileMetadata(t *testing.T) {
 	checkClean(t, "quick-start completed view", hs.m.View().Content)
 	hs.key("esc")
 
-	// New-session sheet folder suggestions and Tab completion clean paths too.
+	// The new-session sheet rejects the same hostile path and completes
+	// only the unchanged safe suggestion too.
 	hs.key("n", "ctrl+f", "down")
 	d, ok := hs.m.modal.(*newSession)
 	if !ok || d.field != 1 {
@@ -153,7 +155,7 @@ func TestRenameAndFolderCompletionCleanHostileMetadata(t *testing.T) {
 	hs.m.onFolders(foldersMsg{
 		host:   "atlas-dev",
 		prefix: "~/sr",
-		res:    client.FoldersResult{Matches: []string{rawFolder}},
+		res:    client.FoldersResult{Matches: []string{rawFolder, wantFolder}},
 	})
 	if len(d.suggest) != 1 || d.suggest[0] != wantFolder {
 		t.Fatalf("new-session suggestions = %#v, want [%q]", d.suggest, wantFolder)

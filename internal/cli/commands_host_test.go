@@ -98,14 +98,17 @@ func TestHostDoctorChecksALimaVM(t *testing.T) {
 	}
 	// A VM made before host create closed the path has no hostLoopback.
 	write(`{}`)
-	out := ok(t, "host", "doctor", "box")
-	for _, want := range []string{
-		"  ✕ laptop loopback        box can reach services on your Mac's loopback address\n",
-		"    Try: limactl stop " + inst + ", then limactl edit --set '.networkOpts.hostLoopback = false' " + inst + ", then limactl start " + inst + "\n",
-	} {
-		if !strings.Contains(out, want) {
-			t.Errorf("host doctor lacks %q:\n%s", want, out)
-		}
+	out, hints, err := runApart(t, "host", "doctor", "box")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "  ✕ laptop loopback        box can reach services on your Mac's loopback address\n"
+	if !strings.Contains(out, want) {
+		t.Errorf("host doctor stdout lacks %q:\n%s", want, out)
+	}
+	hint := "    Try: limactl stop " + inst + ", then limactl edit --set '.networkOpts.hostLoopback = false' " + inst + ", then limactl start " + inst + "\n"
+	if !strings.Contains(hints, hint) || strings.Contains(out, hint) {
+		t.Errorf("host doctor needs its hint on stderr: stdout %q, stderr %q, want %q", out, hints, hint)
 	}
 	write(`{"networkOpts":{"hostLoopback":false}}`)
 	if out := ok(t, "host", "doctor", "box"); !strings.Contains(out, "  ✓ laptop loopback        box cannot reach services on your Mac's loopback address\n") {
@@ -125,14 +128,17 @@ func TestHostDoctorChecksALimaVM(t *testing.T) {
 	if err := os.Chtimes(filepath.Join(vmDir, "lima.yaml"), later, later); err != nil {
 		t.Fatal(err)
 	}
-	out = ok(t, "host", "doctor", "box")
-	for _, want := range []string{
-		"  ✕ laptop loopback        the Lima settings of box changed after its VM started, so they apply only after a restart\n",
-		"    Try: limactl stop " + inst + ", then limactl start " + inst + "\n",
-	} {
-		if !strings.Contains(out, want) {
-			t.Errorf("host doctor lacks %q:\n%s", want, out)
-		}
+	out, hints, err = runApart(t, "host", "doctor", "box")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want = "  ✕ laptop loopback        the Lima settings of box changed after its VM started, so they apply only after a restart\n"
+	if !strings.Contains(out, want) {
+		t.Errorf("host doctor stdout lacks %q:\n%s", want, out)
+	}
+	hint = "    Try: limactl stop " + inst + ", then limactl start " + inst + "\n"
+	if !strings.Contains(hints, hint) || strings.Contains(out, hint) {
+		t.Errorf("host doctor needs its hint on stderr: stdout %q, stderr %q, want %q", out, hints, hint)
 	}
 }
 

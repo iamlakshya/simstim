@@ -67,10 +67,47 @@ func TestLauncherEntryPointsRespectNoInputAndStderrTerminal(t *testing.T) {
 
 	t.Setenv(noInputEnv, "")
 	for _, c := range commands {
-		err := runWithStreams(c.args, term.TTY, term.TTY, redirected)
-		var ue *client.UserError
-		if !errors.As(err, &ue) || ue.Code != "no_terminal" || !strings.Contains(ue.Hint, c.hint) || ue.Msg != c.term {
-			t.Errorf("%v with redirected stderr: err=%v, ue=%+v, want no_terminal and %q", c.args, err, ue, c.term)
+		for missing := range 3 {
+			streams := []*os.File{term.TTY, term.TTY, term.TTY}
+			streams[missing] = redirected
+			err := runWithStreams(c.args, streams[0], streams[1], streams[2])
+			var ue *client.UserError
+			if !errors.As(err, &ue) || ue.Code != "launcher_no_terminal" || ue.Kind != client.KindFailed || exitCode(ue.Kind) != 1 || !strings.Contains(ue.Hint, c.hint) || ue.Msg != c.term {
+				t.Errorf("%v with redirected stream %d: err=%v, ue=%+v, want launcher_no_terminal, exit 1 and %q", c.args, missing, err, ue, c.term)
+			}
+		}
+	}
+}
+
+// Input off wins when the launcher is also missing a terminal. Neither
+// the root, bare flip nor demo may open a reader before this refusal.
+func TestLauncherInputOffWinsWithoutATerminal(t *testing.T) {
+	hosttest.New(t)
+	term := hosttest.NewTerminal(t, 80, 24)
+	redirected, err := os.Create(filepath.Join(t.TempDir(), "redirected.log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer redirected.Close()
+	for _, environment := range []bool{false, true} {
+		t.Setenv(noInputEnv, "")
+		if environment {
+			t.Setenv(noInputEnv, "1")
+		}
+		for _, command := range [][]string{nil, {"flip"}, {"demo"}} {
+			args := append([]string(nil), command...)
+			if !environment {
+				args = append(args, "--no-input")
+			}
+			for missing := range 3 {
+				streams := []*os.File{term.TTY, term.TTY, term.TTY}
+				streams[missing] = redirected
+				err := runWithStreams(args, streams[0], streams[1], streams[2])
+				var ue *client.UserError
+				if !errors.As(err, &ue) || ue.Code != "no_input" || ue.Kind != client.KindNeedsAnswer || exitCode(ue.Kind) != 4 {
+					t.Fatalf("%v environment=%v stream=%d: err=%v, want no_input and exit 4", args, environment, missing, err)
+				}
+			}
 		}
 	}
 }

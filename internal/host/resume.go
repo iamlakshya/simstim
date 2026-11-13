@@ -7,7 +7,6 @@ import (
 	"os"
 	"sort"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/iamlakshya/simstim/internal/api"
@@ -156,41 +155,37 @@ func stopHolder(id string, m *Manifest) error {
 	if err := stopOverSocket(id, m); err != nil {
 		return err
 	}
-	killedUnit := false
 	if m != nil && m.Run.Unit != "" {
-		if SystemdUser() {
-			err := stopUnitChecked(m.Run.Unit)
-			waitUnitUnloaded(m.Run.Unit)
-			if err != nil {
-				return err
-			}
-			killedUnit = true
-		} else {
-			stopUnit(m.Run.Unit)
+		if m.Run.Unit != UnitName(id) {
+			return fmt.Errorf("the recorded unit does not belong to session %s", id)
+		}
+		if !SystemdUser() {
+			return fmt.Errorf("the service manager cannot confirm the stop of session %s", id)
+		}
+		err := stopUnitChecked(m.Run.Unit)
+		waitUnitUnloaded(m.Run.Unit)
+		if err != nil {
+			return err
 		}
 	}
-	killedPID := false
-	if m != nil && m.Run.HolderPID > 0 && (alive(id) || holderLockHeld(id)) && (m.Run.BootID == "" || m.Run.BootID == BootID()) {
-		if !killHolder(m.Run.HolderPID) {
-			return fmt.Errorf("the holder, process %d, did not stop", m.Run.HolderPID)
-		}
-		killedPID = true
+	// A lock proves that a holder exists, not that its recorded PID still
+	// names that process. Recovery never signals or reaps that bare PID.
+	// Only a launch that owns its *os.Process may stop it directly.
+	deadline := time.Now().Add(stopWait)
+	for holderStillRuns(id, m) && time.Now().Before(deadline) {
+		holderStopWaiting(id)
+		time.Sleep(50 * time.Millisecond)
 	}
-	if holderLockHeld(id) {
-		deadline := time.Now().Add(stopWait)
-		for holderLockHeld(id) && time.Now().Before(deadline) {
-			time.Sleep(50 * time.Millisecond)
-		}
-		if holderLockHeld(id) {
-			return fmt.Errorf("the holder of session %s is still running", id)
-		}
-	}
-	if !killedPID && !killedUnit && alive(id) {
-		return fmt.Errorf("the holder of session %s did not stop", id)
+	if holderStillRuns(id, m) {
+		return fmt.Errorf("the holder of session %s has not confirmed its stop", id)
 	}
 	_ = os.Remove(paths.Socket(id))
 	_ = os.Remove(paths.HookSocket(id))
 	return nil
+}
+
+func holderStillRuns(id string, m *Manifest) bool {
+	return alive(id) || holderLockHeld(id) || recordedProcessRuns(id, m)
 }
 
 // holderStopWaiting lets tests release a legacy holder after its socket
@@ -218,39 +213,6 @@ func stopOverSocket(id string, m *Manifest) error {
 // It never signals or reaps a process whose socket has already closed.
 func recordedProcessRuns(id string, m *Manifest) bool {
 	return m != nil && (m.Run.BootID == "" || m.Run.BootID == BootID()) && holderPIDAlive(m.Run.HolderPID, id)
-}
-
-// killHolder stops a holder that did not stop when asked: SIGTERM first,
-// then SIGKILL when it is still there after stopWait. It returns whether
-// the holder process is gone. The holder saves the manifest and removes its
-// socket as it stops. Both must come before a new holder starts.
-func killHolder(pid int) bool {
-	_ = syscall.Kill(pid, syscall.SIGTERM)
-	if waitGone(pid, stopWait) {
-		return true
-	}
-	_ = syscall.Kill(pid, syscall.SIGKILL)
-	return waitGone(pid, stopWait)
-}
-
-// waitGone waits until the process pid has exited, for timeout at most. It
-// reaps the process when it is a child of this one, since a child that is
-// not reaped still answers kill(pid, 0). It reports whether it is gone.
-func waitGone(pid int, timeout time.Duration) bool {
-	deadline := time.Now().Add(timeout)
-	for {
-		var ws syscall.WaitStatus
-		if p, _ := syscall.Wait4(pid, &ws, syscall.WNOHANG, nil); p == pid {
-			return true
-		}
-		if errors.Is(syscall.Kill(pid, 0), syscall.ESRCH) {
-			return true
-		}
-		if time.Now().After(deadline) {
-			return false
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
 }
 
 // stopUnit stops a session's unit, with every process in it. It then waits

@@ -63,6 +63,7 @@
   "host": "box",
   "host_version": "<host_version>",
   "id": "<id>",
+  "memory_max": "<memory_max>",
   "name": "api",
   "rows": 24,
   "since": "<since>",

@@ -253,7 +253,8 @@ var writePendingManifest = func(m *Manifest) error { return m.Save() }
 
 // persistPendingHolder records a slow restored holder's process or unit in
 // manifest.json under first.lock before restoreOne releases op.lock, so a
-// later Delete or Resume can stop that holder before its socket opens.
+// later Delete or Resume can detect that holder before its socket opens.
+// The recorded PID is observation only, never permission to signal it.
 func persistPendingHolder(m *Manifest) error {
 	if m.Run.HolderPID == 0 && m.Run.Unit == "" {
 		return errors.New("no holder process or unit recorded")

@@ -24,7 +24,7 @@ import (
 func TestTheBundlesHintsNameTheSessionItFound(t *testing.T) {
 	h := hosttest.New(t)
 	ch, tr := h.ClientHost("box")
-	if err := client.SaveHosts([]client.Host{ch}); err != nil {
+	if err := client.SaveHosts(context.Background(), []client.Host{ch}); err != nil {
 		t.Fatal(err)
 	}
 	s, err := host.New(host.NewArgs{Name: "frontend", Cwd: "~", Argv: []string{"sleep", "60"}, Cols: 80, Rows: 24})

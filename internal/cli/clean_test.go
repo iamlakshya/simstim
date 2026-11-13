@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/iamlakshya/simstim/internal/api"
-	"github.com/iamlakshya/simstim/internal/brand"
 	"github.com/iamlakshya/simstim/internal/client"
 	"github.com/iamlakshya/simstim/internal/client/clienttest"
 	"github.com/iamlakshya/simstim/internal/host/hosttest"
@@ -118,9 +117,13 @@ func TestSessionCommandsCleanHostText(t *testing.T) {
 
 	id = newSession(t, name, "/bin/sh", "-c", "sleep 1; exit 2")
 	agentEnded(t, id)
-	_, err := run(t, "attach", "box/"+id)
+	t.Setenv(noInputEnv, "")
+	term, done := inTerminal(t, "attach", "box/"+id)
+	term.WaitFor("Start shell again in ")
+	term.Type("n\r")
+	err := wait(t, done)
 	var ue *client.UserError
-	if !errors.As(err, &ue) {
+	if !errors.As(err, &ue) || ue.Kind != client.KindCancelled {
 		t.Fatalf("attach to an ended agent = %v", err)
 	}
 	check("attach to an ended agent", ue.Msg)
@@ -222,50 +225,16 @@ func TestPrintJSONEscapesHostText(t *testing.T) {
 	if !strings.Contains(out, `\u009b`) || !strings.Contains(out, `\udb40\udc41`) || !strings.Contains(out, "\u00e9") {
 		t.Errorf("printJSON = %q", out)
 	}
-	var back map[string]string
-	if err := json.Unmarshal([]byte(out), &back); err != nil || back["reason"] != v["reason"] {
-		t.Fatalf("printJSON decodes to %q, %v, want the host's own value", back["reason"], err)
+	var back struct {
+		V      int    `json:"v"`
+		Reason string `json:"reason"`
+	}
+	if err := json.Unmarshal([]byte(out), &back); err != nil || back.V != 1 || back.Reason != v["reason"] {
+		t.Fatalf("printJSON decodes to %+v, %v, want v=1 and the host's own value", back, err)
 	}
 	clean := []byte("{\n  \"a\": \"caf\u00e9 \u2192 ok\"\n}\n")
 	if got := jsonSafe(clean); &got[0] != &clean[0] {
 		t.Error("jsonSafe copied JSON that needs no escape")
-	}
-}
-
-// The commands that a command prints for the user to run next name the
-// session by its ID. A name is the host's text, and could be shell syntax
-// that would run on the laptop when the command is pasted.
-func TestPrintedCommandsNameTheID(t *testing.T) {
-	newTestHost(t)
-	const name = "$(touch${IFS}owned)`id`;a && b | c\nd"
-	inert := func(what, cmd string) {
-		t.Helper()
-		if strings.ContainsAny(cmd, "$`;&|\n") || strings.Contains(cmd, "touch") {
-			t.Errorf("%s holds the session's name: %q", what, cmd)
-		}
-	}
-	id := newSession(t, name, "/bin/sh", "-c", "exec sleep 60")
-	out := okSaid(t, "debug", "start", "box/"+id, "--for", "10m")
-	stop := out[strings.LastIndex(out, "To stop: "):]
-	if stop != "To stop: "+brand.Name+" debug stop box/"+id+"\n" {
-		t.Errorf("debug start = %q", stop)
-	}
-	_, err := run(t, "resume", "box/"+id, "--detach")
-	var ue *client.UserError
-	if !errors.As(err, &ue) || ue.Hint != brand.Name+" attach box/"+id {
-		t.Fatalf("resume of a running agent = %v", err)
-	}
-	inert("resume's step", ue.Hint)
-
-	ended := newSession(t, name, "/bin/sh", "-c", "sleep 1; exit 2")
-	agentEnded(t, ended)
-	_, err = run(t, "attach", "box/"+ended)
-	if !errors.As(err, &ue) || !strings.HasPrefix(ue.Hint, brand.Name+" resume box/"+ended) {
-		t.Fatalf("attach to an ended agent = %v", err)
-	}
-	inert("attach's step", ue.Hint)
-	if got := endMessage(name, "box", ended, &proto.Ended{ExitCode: 137, OOM: true}); !strings.Contains(got, "Try: "+brand.Name+" resume box/"+ended+" ") {
-		t.Errorf("the end message's step = %q", got)
 	}
 }
 

@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sync/atomic"
 	"syscall"
@@ -707,20 +708,39 @@ func TestANewSessionFromInsideSaysWhyItsSecretsFailed(t *testing.T) {
 	oldWait, oldStart := stopWait, startHolder
 	stopWait = 100 * time.Millisecond
 	t.Cleanup(func() { stopWait, startHolder = oldWait, oldStart })
-	startHolder = func(m *Manifest) error {
+	startHolder = func(m *Manifest) (*os.Process, error) {
 		h := &Holder{id: m.ID, m: m, log: slog.New(slog.DiscardHandler), ring: ring.New(1 << 16), clients: map[*hclient]struct{}{}}
 		if err := h.listen(); err != nil {
-			return err
+			return nil, err
 		}
 		t.Cleanup(h.closeSockets)
 		h.peerCheck = true
+		// The listener stays in this process so fakePeer controls its peer
+		// check. The launch still returns an owned child that cleanup must
+		// stop and reap before removing the session.
+		child := exec.Command("sleep", "60")
+		if err := child.Start(); err != nil {
+			return nil, err
+		}
+		oldSignal := signalHolder
+		signalHolder = func(p *os.Process, sig os.Signal) error {
+			if p == child.Process {
+				h.closeSockets()
+			}
+			return oldSignal(p, sig)
+		}
+		t.Cleanup(func() { signalHolder = oldSignal })
+		t.Cleanup(func() {
+			_ = child.Process.Kill()
+			_, _ = child.Process.Wait()
+		})
 		go h.awaitSecrets(m.Secrets, 3*time.Second)
-		return nil
+		return child.Process, nil
 	}
 	id := NewID()
 	m := &Manifest{Schema: 1, ID: id, Name: "s", Agent: AgentInfo{Kind: "custom", Argv: []string{"/bin/true"}},
 		Cwd: t.TempDir(), Secrets: []string{"OPENAI_API_KEY"}}
-	_, err := startSession(m, map[string]api.Secret{"OPENAI_API_KEY": secretValue})
+	_, err := startSession(m, map[string]api.Secret{"OPENAI_API_KEY": secretValue}, false)
 	var pe *proto.Error
 	if !errors.As(err, &pe) || pe.Code != "forbidden" || pe.Message != errInside.Message || pe.Hint != errInside.Hint {
 		t.Fatalf("new from inside a session: %v", err)

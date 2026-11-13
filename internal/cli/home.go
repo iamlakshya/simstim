@@ -34,7 +34,8 @@ func checkLauncher(cmd *cobra.Command, what, offHint string) error {
 		return &client.UserError{
 			Msg:  what + " needs a terminal",
 			Hint: offHint,
-			Code: "no_terminal",
+			Code: "launcher_no_terminal",
+			Kind: client.KindFailed,
 		}
 	}
 	return nil

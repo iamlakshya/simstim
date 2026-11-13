@@ -28,7 +28,7 @@ func TestAttachChecksTheTerminalFirst(t *testing.T) {
 	}
 	_, err := run(t, "attach", "a")
 	var ue *client.UserError
-	if !errors.As(err, &ue) || ue.Code != "no_terminal" {
+	if !errors.As(err, &ue) || ue.Code != "no_terminal" || ue.Kind != client.KindUsage || exitCode(ue.Kind) != 2 {
 		t.Errorf("the code is %v", err)
 	}
 	// The attach of new does the same, before it starts anything.

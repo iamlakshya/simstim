@@ -271,3 +271,18 @@ func writeFile(t *testing.T, path, body string) {
 		t.Fatal(err)
 	}
 }
+
+// holderRuns reports whether session id's holder runs.
+func holderRuns(t *testing.T, id string) bool {
+	t.Helper()
+	list, err := host.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range list {
+		if s.ID == id {
+			return s.Alive
+		}
+	}
+	return false
+}

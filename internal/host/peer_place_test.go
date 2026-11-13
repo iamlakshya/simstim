@@ -19,6 +19,7 @@ import (
 	"github.com/iamlakshya/simstim/internal/paths"
 	"github.com/iamlakshya/simstim/internal/proto"
 	"github.com/iamlakshya/simstim/internal/ring"
+	"github.com/iamlakshya/simstim/internal/testhome"
 	"github.com/iamlakshya/simstim/internal/version"
 )
 
@@ -240,11 +241,11 @@ func TestTheHookSocketFitsWhereTheSessionSocketFits(t *testing.T) {
 	alertHome(t)
 	most := len(syscall.RawSockaddrUnix{}.Path) - 1 // 107 on Linux, 103 on macOS
 	id := NewID()
-	base, err := os.MkdirTemp("/tmp", "sl")
+	base, err := testhome.ShortTempDir("sl")
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { os.RemoveAll(base) })
+	t.Cleanup(func() { _ = os.RemoveAll(base) })
 	tail := len("/" + brand.Name + "/s/" + id + ".sock")
 	runtime := filepath.Join(base, strings.Repeat("r", most-tail-len(base)-1))
 	if err := os.Mkdir(runtime, 0o700); err != nil {

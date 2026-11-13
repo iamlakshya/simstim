@@ -530,7 +530,7 @@ func TestLauncherChecksStderrAndInputAllowed(t *testing.T) {
 	)
 	err := runWith(context.Background(), be, Options{})
 	var ue *client.UserError
-	if !errors.As(err, &ue) || ue.Code != "no_terminal" || runs != 0 {
+	if !errors.As(err, &ue) || ue.Code != "launcher_no_terminal" || ue.Kind != client.KindFailed || runs != 0 {
 		t.Fatalf("redirected stderr: err=%v (code=%v), runs=%d", err, ue, runs)
 	}
 

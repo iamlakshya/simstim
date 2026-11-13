@@ -10,6 +10,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/iamlakshya/simstim/internal/testhome"
 )
 
 func TestLocalFixes(t *testing.T) {
@@ -188,10 +190,10 @@ func TestLocalChecks(t *testing.T) {
 // shortDir is a folder with a path short enough for sockets on macOS.
 func shortDir(t *testing.T) string {
 	t.Helper()
-	d, err := os.MkdirTemp("/tmp", "fx")
+	dir, err := testhome.ShortTempDir("fx")
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { os.RemoveAll(d) })
-	return d
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	return dir
 }

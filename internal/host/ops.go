@@ -287,7 +287,7 @@ func startSession(m *Manifest, secrets map[string]api.Secret, derived bool) (*Se
 		return nil, err
 	}
 	logSkippedCopies(id, m.Git)
-	proc, err := launchHolder(m)
+	proc, err := startHolder(m)
 	waiting := false // a Wait on proc goes on: it must not be released
 	defer func() {
 		if proc != nil && !waiting {
@@ -315,7 +315,7 @@ func startSession(m *Manifest, secrets map[string]api.Secret, derived bool) (*Se
 			waiting = true
 			return nil, kept
 		}
-		return nil, UserError("secrets_failed", "the session could not get its secrets, so it was removed", "Try again.")
+		return nil, secretsFailed(err)
 	}
 	if mm := waitStarted(id, 5*time.Second); mm != nil {
 		if mm.Status.State == StateErrored && mm.Run.AgentPID == 0 {

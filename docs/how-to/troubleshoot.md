@@ -16,6 +16,8 @@ simstim host doctor my-server
 
 ## Let the doctor fix it
 
+If a resume or delete reports that a session is busy, its holder has not confirmed that it stopped. The helper keeps the session and its files. It never kills a process just because the manifest records its number, because that number may now belong to another program. Wait a moment and try again. If it stays busy, run `simstim host doctor <host>` and check the session's log.
+
 Both doctors can fix the common problems they find. Each fix is shown first, with what it does and the command it runs, and runs only when you say yes:
 
 <!-- test: help (it changes the host) -->

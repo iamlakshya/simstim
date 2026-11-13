@@ -12,6 +12,7 @@ import (
 
 	"github.com/iamlakshya/simstim/internal/brand"
 	"github.com/iamlakshya/simstim/internal/paths"
+	"github.com/iamlakshya/simstim/internal/testhome"
 )
 
 func TestReconcileRenameReloadsFinalManifest(t *testing.T) {
@@ -78,7 +79,7 @@ func checkReconcileFinalManifest(t *testing.T, uncertain bool) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("XDG_STATE_HOME", filepath.Join(home, "state"))
-	run, err := os.MkdirTemp("/tmp", "rename-run-")
+	run, err := testhome.ShortTempDir("rn")
 	if err != nil {
 		t.Fatal(err)
 	}
