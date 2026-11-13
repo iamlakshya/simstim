@@ -17,7 +17,7 @@ var _ Backend = (*demoBackend)(nil)
 func TestDemoBackend(t *testing.T) {
 	ctx := context.Background()
 	be := newDemoBackend(false)
-	hosts, _ := be.LoadHosts()
+	hosts, _ := be.LoadHosts(context.Background())
 	if len(hosts) != 3 {
 		t.Fatalf("got %d hosts, want 3", len(hosts))
 	}
@@ -48,7 +48,7 @@ func TestDemoBackend(t *testing.T) {
 	if len(list) != 4 || list[0].Name != "renamed" || s.Name != "app" {
 		t.Fatalf("after rename, delete and new: %+v", list)
 	}
-	if hosts, _ := newDemoBackend(true).LoadHosts(); len(hosts) != 0 {
+	if hosts, _ := newDemoBackend(true).LoadHosts(context.Background()); len(hosts) != 0 {
 		t.Fatal("the empty demo has hosts")
 	}
 }

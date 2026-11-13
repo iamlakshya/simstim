@@ -5,7 +5,9 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -16,13 +18,19 @@ import (
 	"github.com/iamlakshya/simstim/internal/brand"
 	"github.com/iamlakshya/simstim/internal/client"
 	"github.com/iamlakshya/simstim/internal/host/hosttest"
+	"github.com/iamlakshya/simstim/internal/proto"
 )
+
+// testPrompts is a prompter with input on, which reads in and writes to out.
+func testPrompts(in string, out *bytes.Buffer) *prompter {
+	return &prompter{ctx: context.Background(), in: strings.NewReader(in), out: out, on: true, line: []string{"new", "box"}, flagsAt: 2}
+}
 
 func TestAskSetup(t *testing.T) {
 	q := client.SetupQuestion{Repo: "/home/me/src/app", Script: "/home/me/src/app/.x/setup", Hash: "h"}
-	for in, want := range map[string]bool{"y\n": true, "yes\n": true, "\n": false, "n\n": false, "": false} {
+	for in, want := range map[string]bool{"y\n": true, "yes\n": true, "\n": false, "n\n": false} {
 		var out bytes.Buffer
-		if got, err := askSetup(context.Background(), strings.NewReader(in), &out, "box", q, client.SetupNotTrusted); got != want || err != nil {
+		if got, err := askSetup(testPrompts(in, &out), "box", q, client.SetupNotTrusted); got != want || err != nil {
 			t.Errorf("%q: %v %v, want %v", in, got, err, want)
 		}
 		s := out.String()
@@ -31,6 +39,11 @@ func TestAskSetup(t *testing.T) {
 			!strings.HasSuffix(s, "Run it? [y/N] ") {
 			t.Fatalf("prompt:\n%s", s)
 		}
+	}
+	// The end of input cancels.
+	var out bytes.Buffer
+	if _, err := askSetup(testPrompts("", &out), "box", q, client.SetupNotTrusted); !isCancel(err) {
+		t.Errorf("no answer: %v, want a cancel", err)
 	}
 	if setupValue(true) != api.SetupRun || setupValue(false) != api.SetupSkip {
 		t.Fatal("setupValue")
@@ -47,7 +60,7 @@ func TestAskSetupAfterAChange(t *testing.T) {
 		client.SetupUnchecked: "You trusted the setup script of /home/me/src/app on box before this version checked its content:\n\n    /home/me/src/app/.x/setup\n\n",
 	} {
 		var out bytes.Buffer
-		if yes, err := askSetup(context.Background(), strings.NewReader("y\n"), &out, "box", q, past); !yes || err != nil {
+		if yes, err := askSetup(testPrompts("y\n", &out), "box", q, past); !yes || err != nil {
 			t.Fatalf("yes read as %v, %v", yes, err)
 		}
 		if s := out.String(); !strings.HasPrefix(s, want) {
@@ -81,7 +94,7 @@ func TestRememberAnswerShowsTheRecoveryWarning(t *testing.T) {
 	}
 	var out bytes.Buffer
 	q := client.SetupQuestion{Repo: "/home/me/src/app", Script: "/home/me/src/app/.x/setup", Hash: "h1"}
-	if err := rememberAnswer(&out, "box", q, true); err != nil {
+	if err := rememberAnswer(context.Background(), &out, "box", q, true); err != nil {
 		t.Fatal(err)
 	}
 	want := "Warning: could not read setup-trust.json, so each setup script asks again. The old file is now setup-trust.json.bad.\n" +
@@ -116,14 +129,28 @@ func TestNewChecksTheSetupScriptsContent(t *testing.T) {
 		}
 	}
 	start := func(name string) (id, note string) {
-		note = stderrOf(t, func() {
-			out := ok(t, "new", "box", "--detach", "--dir", "~/src/app", "--name", name, "--", "/bin/sh", "-c", "echo AGENT-UP; exec sleep 60")
-			if m := startedRE.FindStringSubmatch(out); m != nil {
-				id = m[1]
+		out, warnings, err := runApart(t, "new", "box", "--detach", "--json", "--dir", "~/src/app", "--name", name, "--", "/bin/sh", "-c", "echo AGENT-UP; exec sleep 60")
+		if err != nil {
+			t.Fatalf("new %s: %v: %s", name, err, warnings)
+		}
+		var session client.Session
+		if err := json.Unmarshal([]byte(out), &session); err != nil {
+			t.Fatal(err)
+		}
+		id = session.ID
+		// Decode warning messages, while retaining their original text checks.
+		for _, line := range strings.Split(strings.TrimSpace(warnings), "\n") {
+			if line == "" {
+				continue
 			}
-		})
+			var item struct{ Warning struct{ Message string } }
+			if err := json.Unmarshal([]byte(line), &item); err != nil {
+				t.Fatal(err)
+			}
+			note += item.Warning.Message + "\n"
+		}
 		if id == "" {
-			t.Fatalf("new %s started nothing: stderr %q", name, note)
+			t.Fatalf("new %s started nothing: %s", name, warnings)
 		}
 		hosttest.WaitFor(t, 30*time.Second, "the program of "+name, func() bool { return strings.Contains(peekOutput(t, id), "AGENT-UP") })
 		return id, note
@@ -170,29 +197,62 @@ func TestNewChecksTheSetupScriptsContent(t *testing.T) {
 
 func TestAskMakeFolder(t *testing.T) {
 	q := client.FolderQuestion{Folder: "/home/me/src/new-app"}
-	for in, want := range map[string]bool{"y\n": true, "yes\n": true, "\n": false, "n\n": false, "": false} {
+	for in, want := range map[string]bool{"y\n": true, "yes\n": true, "\n": false, "n\n": false} {
 		var out bytes.Buffer
-		if got, err := askMakeFolder(context.Background(), strings.NewReader(in), &out, "box", q); got != want || err != nil {
+		if got, err := askMakeFolder(testPrompts(in, &out), "box", q); got != want || err != nil {
 			t.Errorf("%q: %v %v, want %v", in, got, err, want)
 		}
 		if s := out.String(); s != "The folder /home/me/src/new-app does not exist on box.\nMake it? [y/N] " {
 			t.Fatalf("prompt:\n%s", s)
 		}
 	}
+	// With input off, the question fails with exit code 4, and names --mkdir.
+	var out bytes.Buffer
+	p := testPrompts("", &out)
+	p.on = false
+	_, err := askMakeFolder(p, "box", q)
+	var ue *client.UserError
+	if !errors.As(err, &ue) || ue.Kind != client.KindNeedsAnswer || ue.Hint != brand.Name+" new box --mkdir" ||
+		ue.Msg != "new needs a yes to make the folder /home/me/src/new-app, which does not exist on box, and input is off" || out.Len() != 0 {
+		t.Errorf("input off: %+v, printed %q", err, out.String())
+	}
 }
 
-// The answer no to a question cancels: the error keeps the question's
-// words, hint and data, has the code of a cancel, and exits with 130.
+// The answer no to a question cancels: the error is the cancel of the
+// prompts (cli-spec 6.2, rule 6), with the code of a cancel, and exits with
+// 130. The host makes no folder.
 func TestAnsweredNoIsACancel(t *testing.T) {
-	q := &client.UserError{Msg: "the folder /x does not exist on this host", Hint: "Pass --mkdir.", Code: api.CodeNoFolder,
-		Kind: client.KindNeedsAnswer, Data: []byte(`{"folder":"/x"}`)}
-	var ue *client.UserError
-	if err := answeredNo(q); !errors.As(err, &ue) || ue.Kind != client.KindCancelled || ue.Code != "cancelled" ||
-		ue.Msg != q.Msg || ue.Hint != q.Hint || string(ue.Data) != `{"folder":"/x"}` || q.Kind != client.KindNeedsAnswer || q.Code != api.CodeNoFolder {
-		t.Errorf("answeredNo = %+v", err)
+	hosttest.New(t)
+	withSignal(t)
+	_, tr := withFake(t, nil)
+	if err := client.SaveHosts(context.Background(), []client.Host{{Name: "box", Machine: &client.Machine{Provider: "fake", ID: "fake-box"}}}); err != nil {
+		t.Fatal(err)
 	}
-	plain := errors.New("plain")
-	if !errors.Is(answeredNo(plain), plain) {
-		t.Error("a plain error changed")
+	q, _ := json.Marshal(api.FolderQuestion{Folder: "/x"})
+	tr.Fail("new", &proto.Error{Code: api.CodeNoFolder, Message: "the folder /x does not exist on this host", Hint: "Pass --mkdir.", Data: q})
+	h, err := client.FindHost("box")
+	if err != nil {
+		t.Fatal(err)
 	}
+	conn, err := client.Dial(context.Background(), h, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	t.Setenv(noInputEnv, "")
+	term := hosttest.NewTerminal(t, 100, 30)
+	oldIn, oldOut, oldErr := os.Stdin, os.Stdout, os.Stderr
+	os.Stdin, os.Stdout, os.Stderr = term.TTY, term.TTY, term.TTY
+	defer func() { os.Stdin, os.Stdout, os.Stderr = oldIn, oldOut, oldErr }()
+	term.Type("n\n")
+	_, err = startSession(sessionCmd(context.Background()), conn, h, client.NewArgs{})
+	if !isCancel(err) || err.Error() != "Cancelled. Nothing changed." || printError(io.Discard, err, nil, false, false) != 130 {
+		t.Fatalf("the answer no = %v", err)
+	}
+	var b bytes.Buffer
+	printErrorJSON(&b, err, nil, false)
+	if !strings.Contains(b.String(), `"code":"cancelled"`) || !strings.Contains(b.String(), `"kind":"cancelled"`) {
+		t.Errorf("the answer no in JSON: %s", b.String())
+	}
+	term.WaitFor("Make it? [y/N] ")
 }

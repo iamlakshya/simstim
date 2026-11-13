@@ -10,6 +10,24 @@ import (
 	"github.com/iamlakshya/simstim/internal/brand"
 )
 
+// The page of a command with an old form lists it under "Old names", with
+// its end (docs/contributing/cli-spec.md 3.1, rule 7).
+func TestPagesListOldNames(t *testing.T) {
+	r := root()
+	ls, _, err := r.Find([]string{"host", "ls"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	page := commandPage(ls)
+	if !strings.Contains(page, "## Old names") || !strings.Contains(page, `the Go keys of "host ls --json"`) || !strings.Contains(page, "v0.4.0 and ") {
+		t.Errorf("the host ls page lacks its old names:\n%s", page)
+	}
+	add, _, _ := r.Find([]string{"host", "add"})
+	if strings.Contains(commandPage(add), "## Old names") {
+		t.Error("host add lists old names it does not have")
+	}
+}
+
 func TestPageName(t *testing.T) {
 	for in, want := range map[string]string{
 		brand.Name:                  "_index.md",

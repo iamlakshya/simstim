@@ -8,17 +8,21 @@ import (
 	"errors"
 	"io"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/muesli/cancelreader"
+	"github.com/spf13/cobra"
 
 	"github.com/iamlakshya/simstim/internal/api"
 	"github.com/iamlakshya/simstim/internal/client"
 	"github.com/iamlakshya/simstim/internal/client/clienttest"
+	"github.com/iamlakshya/simstim/internal/client/helpers"
 	"github.com/iamlakshya/simstim/internal/host/hosttest"
+	"github.com/iamlakshya/simstim/internal/keyread"
 	"github.com/iamlakshya/simstim/internal/proto"
 )
 
@@ -72,19 +76,6 @@ func (w *waiting) Read([]byte) (int, error) {
 	return 0, io.EOF
 }
 
-// readStarts is a terminal's reader that closes reading when its first
-// read starts.
-type readStarts struct {
-	cancelreader.CancelReader
-	reading chan struct{}
-	once    sync.Once
-}
-
-func (r *readStarts) Read(p []byte) (int, error) {
-	r.once.Do(func() { close(r.reading) })
-	return r.CancelReader.Read(p)
-}
-
 // within fails the test unless fn returns within five seconds.
 func within(t *testing.T, what string, fn func()) {
 	t.Helper()
@@ -114,8 +105,8 @@ func TestAnswerTakesNothingAfterTheNewline(t *testing.T) {
 	if got, err := answer(context.Background(), strings.NewReader("no newline")); got != "no newline" || err != nil {
 		t.Errorf("answer of a closed input = %q, %v", got, err)
 	}
-	if got, err := readAnswer(bufio.NewReader(strings.NewReader("y\n"))); got != "y\n" || err != nil {
-		t.Errorf("readAnswer = %q, %v", got, err)
+	if got, err := answer(context.Background(), bufio.NewReader(strings.NewReader("y\n"))); got != "y\n" || err != nil {
+		t.Errorf("answer of a buffered reader = %q, %v", got, err)
 	}
 }
 
@@ -140,16 +131,17 @@ func TestAnswerGivesUpAtACancel(t *testing.T) {
 		<-in.reading
 		close(signal)
 	}()
-	within(t, "readAnswer after a signal, with the input blocked,", func() {
-		if _, err := readAnswer(bufio.NewReader(in)); !errors.Is(err, errInterrupted) {
-			t.Errorf("readAnswer = %v", err)
+	within(t, "answer after a signal, with the input blocked,", func() {
+		if _, err := answer(context.Background(), bufio.NewReader(in)); !errors.Is(err, errInterrupted) {
+			t.Errorf("answer = %v", err)
 		}
 	})
 
 	// A signal before the question: no read starts, and the input waits.
 	buffered := bufio.NewReader(strings.NewReader("yes\n"))
-	if _, err := ask(buffered, io.Discard, "Fix it?"); !errors.Is(err, errInterrupted) || buffered.Buffered() != 0 {
-		t.Errorf("ask after a signal = %v", err)
+	p := &prompter{ctx: context.Background(), in: buffered, out: io.Discard, on: true}
+	if _, err := p.yesNo("Fix it?", false); !errors.Is(err, errInterrupted) || buffered.Buffered() != 0 {
+		t.Errorf("a question after a signal = %v", err)
 	}
 	if rest, _ := io.ReadAll(buffered); string(rest) != "yes\n" {
 		t.Errorf("the answer after a signal was read: %q left", rest)
@@ -175,7 +167,7 @@ func TestAnAnswerThatMeetsASignalKeepsNothing(t *testing.T) {
 	hosttest.New(t)
 	withSignal(t)
 	_, tr := withFake(t, nil)
-	if err := client.SaveHosts([]client.Host{{Name: "box", Machine: &client.Machine{Provider: "fake", ID: "fake-box"}}}); err != nil {
+	if err := client.SaveHosts(context.Background(), []client.Host{{Name: "box", Machine: &client.Machine{Provider: "fake", ID: "fake-box"}}}); err != nil {
 		t.Fatal(err)
 	}
 	q, _ := json.Marshal(api.SetupQuestion{Repo: "/home/me/app", Script: "/home/me/app/.x/setup"})
@@ -189,55 +181,110 @@ func TestAnAnswerThatMeetsASignalKeepsNothing(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer conn.Close()
+	// The question asks only with input on: stdin, stdout and stderr are
+	// the terminal.
+	t.Setenv(noInputEnv, "")
 	term := hosttest.NewTerminal(t, 100, 30)
-	oldIn, oldOut := os.Stdin, os.Stdout
-	os.Stdin, os.Stdout = term.TTY, term.TTY
-	defer func() { os.Stdin, os.Stdout = oldIn, oldOut }()
+	oldIn, oldOut, oldErr := os.Stdin, os.Stdout, os.Stderr
+	os.Stdin, os.Stdout, os.Stderr = term.TTY, term.TTY, term.TTY
+	defer func() { os.Stdin, os.Stdout, os.Stderr = oldIn, oldOut, oldErr }()
 
 	term.Type("y\n")
 	beforeChoice = func() { close(interrupted) }
-	if _, err := startSession(context.Background(), conn, h, client.NewArgs{}); !errors.Is(err, errInterrupted) {
+	if _, err := startSession(sessionCmd(context.Background()), conn, h, client.NewArgs{}); !errors.Is(err, errInterrupted) {
 		t.Fatalf("a yes with a signal = %v, want a cancel", err)
 	}
 	withSignal(t)
 	term.Type("y\n")
 	ctx, cancel := context.WithCancel(context.Background())
 	beforeChoice = cancel
-	if _, err := startSession(ctx, conn, h, client.NewArgs{}); !errors.Is(err, errInterrupted) {
+	if _, err := startSession(sessionCmd(ctx), conn, h, client.NewArgs{}); !errors.Is(err, errInterrupted) {
 		t.Fatalf("a yes as the context ends = %v, want a cancel", err)
 	}
 	withSignal(t)
 	term.Type("y\n")
 	ctx, cancel = context.WithCancel(context.Background())
 	afterAnswer = func(string) { cancel() }
-	if _, err := startSession(ctx, conn, h, client.NewArgs{}); !errors.Is(err, errInterrupted) {
+	if _, err := startSession(sessionCmd(ctx), conn, h, client.NewArgs{}); !errors.Is(err, errInterrupted) {
 		t.Fatalf("a cancel after the yes = %v, want a cancel", err)
 	}
-	// The context ends while the read of the terminal waits.
+	// The context ends while the read of the terminal waits. A question
+	// reads the terminal through keyread: on a new terminal, keyread.Open
+	// gives it a reader whose read says, from inside Read, that it has
+	// started, and waits there. Only then does the context end, so the
+	// cancel meets a blocked read.
 	withSignal(t)
-	reading := make(chan struct{})
-	open := newKeyReader
-	newKeyReader = func(f *os.File) (cancelreader.CancelReader, error) {
-		cr, err := open(f)
-		if err != nil {
-			return nil, err
-		}
-		return &readStarts{CancelReader: cr, reading: reading}, nil
-	}
-	defer func() { newKeyReader = open }()
+	blocked := hosttest.NewTerminal(t, 100, 30)
+	os.Stdin, os.Stdout, os.Stderr = blocked.TTY, blocked.TTY, blocked.TTY
+	src := &heldRead{entered: make(chan struct{}, 1), stop: make(chan struct{})}
+	open := keyread.Open
+	keyread.Open = func(io.Reader) (cancelreader.CancelReader, error) { return src, nil }
+	defer func() { keyread.Open = open }()
 	ctx, cancel = context.WithCancel(context.Background())
 	go func() {
-		<-reading
+		<-src.entered
 		cancel()
 	}()
 	within(t, "the question after the context ended, with the input blocked,", func() {
-		if _, err := startSession(ctx, conn, h, client.NewArgs{}); !errors.Is(err, errInterrupted) {
+		//nolint:contextcheck // startSession takes ctx from its command
+		if _, err := startSession(sessionCmd(ctx), conn, h, client.NewArgs{}); !errors.Is(err, errInterrupted) {
 			t.Errorf("a cancel with no answer = %v, want a cancel", err)
 		}
 	})
+	if !src.waited() {
+		t.Error("the read of the terminal ended before the context did")
+	}
 	if kept := keptAnswers("box"); len(kept) != 0 {
 		t.Errorf("the client kept %v", kept)
 	}
+}
+
+// heldRead is a terminal's reader whose read says, from inside Read, that
+// it has started, and waits there until its Cancel. keyread never cancels a
+// read: the terminal's cleanup does (keyread.Release).
+type heldRead struct {
+	entered chan struct{}
+	stop    chan struct{}
+	once    sync.Once
+	mu      sync.Mutex
+	inRead  bool
+	// held stays true once a read was still in Read after it said so.
+	held bool
+}
+
+func (h *heldRead) Read([]byte) (int, error) {
+	h.mu.Lock()
+	h.inRead = true
+	h.mu.Unlock()
+	h.entered <- struct{}{}
+	<-h.stop
+	h.mu.Lock()
+	h.inRead = false
+	h.mu.Unlock()
+	return 0, cancelreader.ErrCanceled
+}
+
+func (h *heldRead) Cancel() bool {
+	h.once.Do(func() { close(h.stop) })
+	return true
+}
+
+func (*heldRead) Close() error { return nil }
+
+// waited reports whether the read is still held in Read: the question
+// ended with its read blocked.
+func (h *heldRead) waited() bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.held = h.held || h.inRead
+	return h.held
+}
+
+// sessionCmd is a command for startSession, with ctx as its context.
+func sessionCmd(ctx context.Context) *cobra.Command {
+	c := &cobra.Command{Use: "new"}
+	c.SetContext(withLine(ctx, []string{"new", "box"}))
+	return c
 }
 
 // lockedBuffer is a buffer that a guide writes while a test reads it.
@@ -260,7 +307,7 @@ func (l *lockedBuffer) String() string {
 
 // The guided setup stops at a cancel while its input is blocked, a read
 // that cannot be cancelled: at the end of its context, and at a signal. It
-// changes nothing, and exits with 130.
+// changes nothing, says so, and exits with 130.
 func TestTheGuidedSetupStopsWithItsInputBlocked(t *testing.T) {
 	for _, bySignal := range []bool{false, true} {
 		withSignal(t)
@@ -283,8 +330,8 @@ func TestTheGuidedSetupStopsWithItsInputBlocked(t *testing.T) {
 		var err error
 		within(t, "the setup", func() { err = g.run() })
 		cancel()
-		var ue *client.UserError
-		if !errors.As(err, &ue) || ue.Msg != "setup stopped; nothing was changed" || printError(io.Discard, err, nil, false, false) != 130 {
+		// The stop is the cancel of the prompts (cli-spec 6.2, rule 6).
+		if !isCancel(err) || err.Error() != "Cancelled. Nothing changed." || printError(io.Discard, err, nil, false, false) != 130 {
 			t.Errorf("signal %v: %v\n%s", bySignal, err, out.String())
 		}
 		if hosts, _ := client.LoadHosts(); len(hosts) != 0 || len(l.added) != 0 {
@@ -443,7 +490,8 @@ func TestASignalAfterTheLastYesAppliesNoFix(t *testing.T) {
 		}
 	}
 	applied := false
-	err := offerFixes(context.Background(), strings.NewReader("y\n"), io.Discard, sampleFixes[:1], false, func([]string) ([]api.Fix, error) {
+	p := &prompter{ctx: context.Background(), in: strings.NewReader("y\n"), out: io.Discard, on: true}
+	err := offerFixes(p, qFix, sampleFixes[:1], false, func([]string) ([]api.Fix, error) {
 		applied = true
 		return nil, nil
 	})
@@ -452,11 +500,80 @@ func TestASignalAfterTheLastYesAppliesNoFix(t *testing.T) {
 	}
 }
 
+// A cancel just after the yes to the helper's install installs nothing.
+func TestACancelAfterTheYesInstallsNothing(t *testing.T) {
+	withSignal(t)
+	_, tr := withFake(t, nil)
+	tr.NoHelper = true
+	if _, ok := helpers.For("linux", "arm64"); !ok {
+		t.Skip("this build has no helper for linux/arm64 (run just helpers)")
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	afterAnswer = func(string) { cancel() }
+	p := &prompter{ctx: ctx, in: strings.NewReader("y\n"), out: io.Discard, on: true}
+	box := client.Host{Name: "box", Machine: &client.Machine{Provider: "fake", ID: "fake-box"}}
+	err := addHost(ctx, p, box, false)
+	if !errors.Is(err, errInterrupted) {
+		t.Errorf("host add with a cancel after the yes = %v", err)
+	}
+	for _, r := range tr.Remotes() {
+		if strings.Contains(r, "__INSTALLED__") {
+			t.Errorf("the helper was installed after the cancel: %q", r)
+		}
+	}
+}
+
+// The question before the helper's install looks for a cancel once more
+// after its yes: a cancel that came with the yes, which the question
+// itself did not see, installs nothing.
+func TestTheInstallConsentLooksForACancel(t *testing.T) {
+	withSignal(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	for _, c := range []struct {
+		ctx  context.Context
+		want bool
+	}{{context.Background(), true}, {ctx, false}} {
+		p := &prompter{ctx: context.Background(), in: strings.NewReader("y\n"), out: io.Discard, on: true}
+		ok, err := installConsent(c.ctx, p, client.Host{Name: "box"}, false)("Install it?")
+		if ok != c.want || !c.want && !errors.Is(err, errInterrupted) {
+			t.Errorf("a yes with the context ended %v: %v, %v", !c.want, ok, err)
+		}
+	}
+}
+
+// A cancel while host add waits for its last answer from the host, the
+// agents' checks, saves no host: SaveHosts refuses after a cancel. Guided
+// setup connects a host through the same code.
+func TestACancelDuringHostAddsLastRequestSavesNothing(t *testing.T) {
+	withSignal(t)
+	_, tr := withFake(t, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	tr.OnRequest = func(op string) {
+		if op == "agents.check" {
+			cancel()
+		}
+	}
+	p := &prompter{ctx: ctx, in: strings.NewReader(""), out: io.Discard, on: true}
+	box := client.Host{Name: "box", Machine: &client.Machine{Provider: "fake", ID: "fake-box"}}
+	if err := addHost(ctx, p, box, true); !errors.Is(err, context.Canceled) {
+		t.Errorf("host add with a cancel during its last request = %v", err)
+	}
+	if !slices.Contains(tr.Requests(), "agents.check") {
+		t.Fatalf("host add never asked for the agents' checks: %q", tr.Requests())
+	}
+	if h, err := client.FindHost("box"); err == nil {
+		t.Errorf("host add saved %+v after the cancel", h)
+	}
+}
+
 // A signal just after the yes to host destroy deletes nothing.
 func TestASignalAfterTheYesDestroysNothing(t *testing.T) {
 	withSignal(t)
 	m, _ := withFake(t, nil)
-	if err := client.SaveHosts([]client.Host{{Name: "box", Machine: &client.Machine{Provider: "fake", ID: "fake-box"}}}); err != nil {
+	if err := client.SaveHosts(context.Background(), []client.Host{{Name: "box", Machine: &client.Machine{Provider: "fake", ID: "fake-box"}}}); err != nil {
 		t.Fatal(err)
 	}
 	in, w, err := os.Pipe()
@@ -472,7 +589,8 @@ func TestASignalAfterTheYesDestroysNothing(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	afterAnswer = func(string) { cancel() }
-	if err := destroyHost(ctx, "box", true, false); !errors.Is(err, errInterrupted) {
+	p := &prompter{ctx: ctx, in: in, out: io.Discard, on: true}
+	if err := destroyHost(ctx, p, "box", true, false); !errors.Is(err, errInterrupted) {
 		t.Errorf("destroyHost = %v, want a cancel", err)
 	}
 	for _, c := range m.Calls() {

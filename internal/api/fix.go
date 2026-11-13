@@ -24,4 +24,8 @@ type Fix struct {
 	// Done and Error report what happened when the fix ran.
 	Done  bool   `json:"done,omitempty"`
 	Error string `json:"error,omitempty"`
+	// Changed lists each change that the fix made, as it made it, such as
+	// "removed <file>": also those of a fix that a cancel stopped before
+	// its end. A fix of the host fills it in no version yet.
+	Changed []string `json:"changed,omitempty"`
 }

@@ -87,6 +87,13 @@ func commandPage(c *cobra.Command) string {
 	if t := flagTable(c.InheritedFlags()); t != "" {
 		b.WriteString("## Flags from the parent command\n\n" + t + "\n")
 	}
+	if olds := cli.OldNames(shortPath(c)); len(olds) > 0 {
+		b.WriteString("## Old names\n\nThese still work, and print a warning on stderr, until their end.\n\n| Old | New | Works until |\n| --- | --- | --- |\n")
+		for _, o := range olds {
+			fmt.Fprintf(&b, "| %s | %s | %s |\n", plainCell(o.Old), plainCell(o.New), plainCell(o.Until))
+		}
+		b.WriteString("\n")
+	}
 	if subs := visible(c); len(subs) > 0 {
 		b.WriteString("## Commands\n\n| Command | What it does |\n| --- | --- |\n")
 		for _, sub := range subs {
@@ -186,6 +193,12 @@ func prose(s string) string {
 		paras = append(paras, inline(strings.Join(lines, " ")))
 	}
 	return strings.Join(paras, "\n\n")
+}
+
+// plainCell is text for a table cell as it is, with its HTML characters and
+// pipes escaped: an old form that quotes a command is already plain.
+func plainCell(s string) string {
+	return strings.ReplaceAll(escapes.Replace(strings.Join(strings.Fields(s), " ")), "|", "\\|")
 }
 
 // cell is help text inside a table cell.

@@ -61,7 +61,7 @@ func TestQuickStartAsksAboutASetupScript(t *testing.T) {
 // before the start after a yes, it asks again.
 func TestSetupScriptChangedAsksAgain(t *testing.T) {
 	hs := trustLab(t)
-	if _, err := hs.be.RememberSetup("atlas-dev", "/home/dev/src/app", true, "h0"); err != nil {
+	if _, err := hs.be.RememberSetup(hs.m.ctx, "atlas-dev", "/home/dev/src/app", true, "h0"); err != nil {
 		t.Fatal(err)
 	}
 	hs.key("n")
@@ -95,7 +95,7 @@ func TestSetupScriptChangedAsksAgain(t *testing.T) {
 // question says that the yes came before this version checked the content.
 func TestSetupScriptTrustedBeforeHashes(t *testing.T) {
 	hs := trustLab(t)
-	if _, err := hs.be.RememberSetup("atlas-dev", "/home/dev/src/app", true, ""); err != nil {
+	if _, err := hs.be.RememberSetup(hs.m.ctx, "atlas-dev", "/home/dev/src/app", true, ""); err != nil {
 		t.Fatal(err)
 	}
 	hs.key("n")

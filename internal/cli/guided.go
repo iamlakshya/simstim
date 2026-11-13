@@ -46,7 +46,11 @@ func setupCmd() *cobra.Command {
 			o.agentsSet = cmd.Flags().Changed("agents")
 			ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt)
 			defer stop()
-			return newGuide(ctx, o, onboard.System{Providers: providers}).run()
+			g := newGuide(ctx, o, onboard.System{Providers: providers})
+			g.p = prompts(cmd)
+			g.p.ctx, g.p.log = ctx, g.log
+			g.tty = g.p.on
+			return g.run()
 		},
 	}
 	f := cmd.Flags()
@@ -68,8 +72,12 @@ type guide struct {
 	tty   bool // a terminal on stdin and stdout: prompts and attach work
 	local onboard.Local
 	o     guideOpts
-	log   *onboard.Log
-	part  int
+	// p builds the error of a question that input off leaves without an
+	// answer, from the command line.
+	p           *prompter
+	log         *onboard.Log
+	part        int
+	readerStuck bool
 
 	// session runs an install or a login in a session on a host, and
 	// returns the session's ID and whether it ended; checks reads a host's
@@ -79,8 +87,9 @@ type guide struct {
 }
 
 func newGuide(ctx context.Context, o guideOpts, local onboard.Local) *guide {
-	g := &guide{ctx: ctx, in: os.Stdin, out: os.Stdout, tty: isTerminal(os.Stdin) && isTerminal(os.Stdout),
-		local: local, o: o, log: &onboard.Log{}}
+	tty := isTerminal(os.Stdin) && isTerminal(os.Stdout) && isTerminal(os.Stderr)
+	g := &guide{ctx: ctx, in: os.Stdin, out: os.Stderr, tty: tty,
+		local: local, o: o, log: &onboard.Log{}, p: &prompter{ctx: ctx, in: os.Stdin, out: os.Stderr, on: tty, path: brand.Name + " setup"}}
 	g.session, g.checks = g.runSession, g.agentChecks
 	return g
 }
@@ -155,32 +164,29 @@ func (g *guide) check() error {
 		}
 	}
 	if !g.tty && (g.o.host == "" && g.o.create == "" || !g.o.yes) {
-		return &client.UserError{
-			Msg:  "setup asks its questions on a terminal, and there is none here; flags must answer them",
-			Hint: brand.Name + " setup --host <host> --agents claude --yes (or --create lima instead of --host)",
-			Code: "answers_needed",
-			Kind: client.KindNeedsAnswer,
+		// Input is off: the flags must answer every question (qSetup).
+		var flags []string
+		if g.o.host == "" && g.o.create == "" {
+			flags = append(flags, "--host", "<host>")
 		}
+		if !g.o.yes {
+			flags = append(flags, "--yes")
+		}
+		return g.p.needs(qSetup, "--host or --create, with --yes, to answer its questions", flags...)
 	}
 	return nil
 }
 
 // stopped says what was done before Ctrl+C.
+// A stop while a machine is made says what became of the machine. Any other
+// stop is a cancel, whose line lists what was done.
 func (g *guide) stopped(err error) error {
 	fmt.Fprintln(g.out)
-	msg := "setup stopped; nothing was changed"
-	if lines := g.log.Lines(); len(lines) > 0 {
-		fmt.Fprintln(g.out, "Done before the stop:")
-		for _, l := range lines {
-			fmt.Fprintf(g.out, "  ✓ %s\n", l)
-		}
-		msg = "setup stopped; nothing else was changed"
-	}
 	var ue *client.UserError
 	if errors.As(err, &ue) && strings.HasPrefix(ue.Msg, "stopped") {
-		msg = "setup " + ue.Msg
+		return &client.UserError{Msg: "setup " + ue.Msg, Hint: brand.Name + " setup (it picks up what is already done)", Code: "cancelled", Kind: client.KindCancelled}
 	}
-	return &client.UserError{Msg: msg, Hint: brand.Name + " setup (it picks up what is already done)", Code: "cancelled", Kind: client.KindCancelled}
+	return cancelled(g.log.Lines()...)
 }
 
 // where asks where agents will run, and returns the host to connect. made

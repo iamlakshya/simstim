@@ -29,11 +29,13 @@ import (
 	"github.com/iamlakshya/simstim/internal/brand"
 	"github.com/iamlakshya/simstim/internal/host"
 	"github.com/iamlakshya/simstim/internal/paths"
+	"github.com/iamlakshya/simstim/internal/testhome"
 )
 
 // Main runs the tests, or acts as the host helper when the binary was
 // started as one: "holder <id>", "hook <event> [args]", "git-op <op>" or
-// "keytest". Call it from TestMain.
+// "keytest". Call it from TestMain. The tests run in a home of their own
+// (testhome), so no test reads or writes the user's real folders.
 func Main(m *testing.M) {
 	if len(os.Args) >= 3 {
 		switch os.Args[1] {
@@ -56,6 +58,15 @@ func Main(m *testing.M) {
 			os.Exit(0)
 		}
 	}
+	// A helper that this binary stands in for, reached through a fake
+	// ssh, serves the bridge.
+	if len(os.Args) >= 2 && os.Args[1] == "bridge" {
+		if err := host.RunBridge(host.BridgeInput(os.Stdin, os.Args[2:]), os.Stdout); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		os.Exit(0)
+	}
 	if len(os.Args) == 2 && os.Args[1] == "keytest" {
 		if err := host.KeyTest(); err != nil {
 			fmt.Fprintln(os.Stderr, err)
@@ -63,14 +74,26 @@ func Main(m *testing.M) {
 		}
 		os.Exit(0)
 	}
+	done, err := testhome.Isolate()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
 	flag.Parse()
 	// Child processes write their coverage where this binary writes its
 	// own, so `go test -cover` counts the code that holders run too.
 	if f := flag.Lookup("test.gocoverdir"); f != nil && f.Value.String() != "" {
 		_ = os.Setenv("GOCOVERDIR", f.Value.String())
 	}
-	os.Exit(m.Run())
+	code := m.Run()
+	done()
+	os.Exit(ExitCode(code))
 }
+
+// ExitCode is the test binary's exit code for the code of its tests' run.
+// A package whose test binary also stands in for a command, in a child,
+// sets it: so a failed child says so with a code of its own.
+var ExitCode = func(code int) int { return code }
 
 // Host is one host's folders, in a temporary place that the test owns.
 type Host struct {
@@ -175,17 +198,8 @@ func systemPath() string {
 // must fit in about 100 bytes, and t.TempDir's names are long.
 func shortTempDir(t testing.TB) string {
 	t.Helper()
-	dir, err := os.MkdirTemp("", "ht")
+	dir, err := testhome.ShortTempDir("ht")
 	if err != nil {
-		t.Fatal(err)
-	}
-	if len(dir) > 60 {
-		_ = os.RemoveAll(dir)
-		if dir, err = os.MkdirTemp("/tmp", "ht"); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if dir, err = filepath.EvalSymlinks(dir); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(dir) })

@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/muesli/cancelreader"
 	xterm "golang.org/x/term"
 
 	"github.com/iamlakshya/simstim/internal/brand"
@@ -44,10 +43,11 @@ type AttachOptions struct {
 
 // AttachResult says how an attach ended.
 type AttachResult struct {
-	Detached   bool
-	Ended      *proto.Ended
-	Missed     int64 // bytes replayed after reconnects
-	Reconnects int
+	Detached    bool
+	Ended       *proto.Ended
+	Missed      int64 // bytes replayed after reconnects
+	Reconnects  int
+	ReaderStuck bool
 }
 
 // Heartbeat timings.
@@ -72,6 +72,7 @@ type attacher struct {
 	tracker *term.Tracker
 	cu      term.Catchup // where the terminal is in the session's output
 	filter  *keys.Filter
+	in      *attachInput
 	inCh    chan []byte
 	res     AttachResult
 	key     string
@@ -98,6 +99,9 @@ func Attach(ctx context.Context, o AttachOptions) (AttachResult, error) {
 	}
 	if o.Out == nil {
 		o.Out = os.Stdout
+	}
+	if err := checkAttachInput(o.In); err != nil {
+		return AttachResult{}, err
 	}
 	if o.State == nil {
 		o.State = &AttachState{}
@@ -135,36 +139,21 @@ func Attach(ctx context.Context, o AttachOptions) (AttachResult, error) {
 	}
 	DebugLog().Debug("attached", diag.CatKey, diag.CatAttach, "mode", att.Mode, "from", att.From, "live", att.Live)
 
-	old, err := xterm.MakeRaw(a.fd)
+	original, err := xterm.GetState(a.fd)
 	if err != nil {
+		return AttachResult{}, fmt.Errorf("save the terminal state: %w", err)
+	}
+	defer func() { _ = xterm.Restore(a.fd, original) }()
+	a.inCh = make(chan []byte, 256)
+	a.in, err = startAttachInput(o.In, a.inCh, a.tr)
+	if err != nil {
+		return AttachResult{}, err
+	}
+	if _, err := xterm.MakeRaw(a.fd); err != nil {
+		a.in.finish()
 		return AttachResult{}, fmt.Errorf("cannot put the terminal in raw mode: %w", err)
 	}
-	cr, err := cancelreader.NewReader(o.In)
-	if err != nil {
-		_ = xterm.Restore(a.fd, old)
-		return AttachResult{}, fmt.Errorf("read the terminal: %w", err)
-	}
-	a.inCh = make(chan []byte, 256)
-	stop, readDone := make(chan struct{}), make(chan struct{})
-	go func() {
-		defer close(readDone)
-		buf := make([]byte, 32<<10)
-		for {
-			n, err := cr.Read(buf)
-			if n > 0 {
-				a.tr.stdin(n)
-				select {
-				case a.inCh <- append([]byte(nil), buf[:n]...):
-				case <-stop:
-					return
-				}
-			}
-			if err != nil {
-				close(a.inCh)
-				return
-			}
-		}
-	}()
+	a.in.ask()
 
 	// The paste guard takes the terminal's state that the last attach in
 	// this process left only now, when nothing more can fail before the
@@ -178,20 +167,14 @@ func Attach(ctx context.Context, o AttachOptions) (AttachResult, error) {
 	runErr := a.loop(ctx)
 
 	// Stop the reader before its files are closed, and before anything else
-	// reads the terminal.
-	cr.Cancel()
-	close(stop)
-	select {
-	case <-readDone:
-	case <-time.After(time.Second):
-	}
+	// reads the terminal. A read that could not be stopped stays open rather
+	// than race with its close.
+	a.res.ReaderStuck = a.in.finish()
 	// Put the terminal back exactly as we found it: undo the session's modes,
 	// never with RIS, which would wipe the scrollback.
 	a.write(a.tracker.M.ResetSequence())
 	a.endGuard()
 	a.write([]byte("\x1b]9;4;0\x1b\\\x1b[23;0t"))
-	_ = xterm.Restore(a.fd, old)
-	_ = cr.Close()
 
 	o.State.Key, o.State.Offset, o.State.Modes, o.State.Valid = a.key, a.cu.Offset, a.tracker.M, true
 	if a.res.Ended != nil {
@@ -322,6 +305,7 @@ func (a *attacher) loop(ctx context.Context) error {
 			if a.onKeys(ctx, b, ok, &detachTimer, &flushTimer) {
 				return nil
 			}
+			a.in.ask()
 		case <-flushTimer:
 			flushTimer = nil
 			if b := a.filter.Flush(); len(b) > 0 {

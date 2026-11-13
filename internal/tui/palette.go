@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -428,17 +427,28 @@ func (m *Model) openSettings() tea.Cmd {
 		editor = "vi"
 	}
 	argv := strings.Fields(editor)
+	if len(argv) == 0 {
+		return m.toastErr(&client.UserError{
+			Msg:  "the editor command is empty",
+			Hint: "Set $EDITOR or $VISUAL to an editor command.",
+			Code: "editor_failed",
+		})
+	}
+	ctx := m.ctx
 	x := &funcExec{run: func(in, out *os.File) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 			return fmt.Errorf("make %s: %w", filepath.Dir(path), err)
 		}
 		// The user's own editor, from their $VISUAL or $EDITOR; no timeout,
 		// since they edit for as long as they like.
-		cmd := exec.CommandContext(context.Background(), argv[0], append(argv[1:], path)...) //nolint:gosec // G702: see above
+		cmd := exec.CommandContext(ctx, argv[0], append(argv[1:], path)...) //nolint:gosec // G702: see above
 		cmd.Stdin, cmd.Stdout, cmd.Stderr = in, out, os.Stderr
 		return cmd.Run()
 	}}
-	return m.exec(x, func(err error) tea.Msg {
+	return m.execWithInput(x, func(err error) tea.Msg {
 		if err != nil {
 			err = &client.UserError{Msg: "the editor failed: " + err.Error(), Hint: "Set $EDITOR, or edit " + path + " by hand.", Code: "editor_failed"}
 		}

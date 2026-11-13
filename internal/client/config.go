@@ -3,6 +3,7 @@
 package client
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -192,8 +193,13 @@ func tomlError(path, data string, err error) error {
 	return &UserError{Msg: where + ": " + strings.TrimPrefix(msg, "toml: "), Hint: hint, Code: "bad_config", Kind: KindUsage}
 }
 
-// SaveHosts writes the saved hosts.
-func SaveHosts(hosts []Host) error {
+// SaveHosts writes the saved hosts. It is the one function that writes
+// hosts.toml, and it writes nothing once ctx has ended: a cancel that came
+// before the save keeps the file as it was (StoppedError).
+func SaveHosts(ctx context.Context, hosts []Host) error {
+	if err := ctx.Err(); err != nil {
+		return stoppedBefore("save the hosts", err)
+	}
 	sort.Slice(hosts, func(i, j int) bool { return hosts[i].Name < hosts[j].Name })
 	if err := os.MkdirAll(ConfigDir(), 0o700); err != nil {
 		return fmt.Errorf("make %s: %w", ConfigDir(), err)
@@ -217,8 +223,9 @@ func SaveHosts(hosts []Host) error {
 	return nil
 }
 
-// SaveHost adds h to the saved hosts, or replaces the host of the same name.
-func SaveHost(h Host) error {
+// SaveHost adds h to the saved hosts, or replaces the host of the same
+// name, through SaveHosts: nothing once ctx has ended.
+func SaveHost(ctx context.Context, h Host) error {
 	hosts, err := LoadHosts()
 	if err != nil {
 		return err
@@ -226,10 +233,30 @@ func SaveHost(h Host) error {
 	for i := range hosts {
 		if hosts[i].Name == h.Name {
 			hosts[i] = h
-			return SaveHosts(hosts)
+			return SaveHosts(ctx, hosts)
 		}
 	}
-	return SaveHosts(append(hosts, h))
+	return SaveHosts(ctx, append(hosts, h))
+}
+
+// StoppedError is the error of a change that a cancel or a timeout came
+// before: nothing was changed. It is a UserError, of KindCancelled after a
+// cancel, and it is the context's error too, for errors.Is.
+type StoppedError struct {
+	*UserError
+	Err error
+}
+
+// Unwrap gives the UserError and the context's error.
+func (e *StoppedError) Unwrap() []error { return []error{e.UserError, e.Err} }
+
+// stoppedBefore is the StoppedError of what, which err stopped.
+func stoppedBefore(what string, err error) error {
+	ue := &UserError{Msg: "cancelled before it could " + what + "; nothing was changed", Hint: "Run the command again.", Code: "cancelled", Kind: KindCancelled}
+	if errors.Is(err, context.DeadlineExceeded) {
+		ue = &UserError{Msg: "timed out before it could " + what + "; nothing was changed", Hint: "Run the command again.", Code: "timeout"}
+	}
+	return &StoppedError{UserError: ue, Err: err}
 }
 
 // FindHost returns the saved host with the given name.

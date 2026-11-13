@@ -94,7 +94,7 @@ func TestCompleteCategories(t *testing.T) {
 func TestTheDebugCommands(t *testing.T) {
 	newTestHost(t)
 	id := newSession(t, "dbg", "/bin/sh", "-c", "exec sleep 60")
-	out := ok(t, "debug", "start", "box/dbg", "--for", "10m", "--only", "memory,runtime")
+	out := okSaid(t, "debug", "start", "box/dbg", "--for", "10m", "--only", "memory,runtime")
 	for _, want := range []string{"Debug is on for dbg on box until ", "(memory, runtime)", "~/.local/state/", "debug stop box/" + id} {
 		if !strings.Contains(out, want) {
 			t.Errorf("debug start lacks %q:\n%s", want, out)
@@ -103,19 +103,19 @@ func TestTheDebugCommands(t *testing.T) {
 	if ls := ok(t, "ls", "--json"); !strings.Contains(ls, `"debug_until"`) {
 		t.Errorf("ls --json shows no end: %s", ls)
 	}
-	if out := ok(t, "debug", "save", "box/dbg"); !strings.Contains(out, "Saved the flight recorder of dbg: ~/") {
+	if out := okSaid(t, "debug", "save", "box/dbg"); !strings.Contains(out, "Saved the flight recorder of dbg: ~/") {
 		t.Errorf("debug save = %q", out)
 	}
-	if out := ok(t, "debug", "profile", "box/dbg", "heap"); !strings.Contains(out, "Wrote a heap profile of dbg: ~/") {
+	if out := okSaid(t, "debug", "profile", "box/dbg", "heap"); !strings.Contains(out, "Wrote a heap profile of dbg: ~/") {
 		t.Errorf("debug profile = %q", out)
 	}
-	if out := ok(t, "debug", "profile", "box/dbg", "cpu", "--for", "1s"); !strings.Contains(out, "Wrote a cpu profile") {
+	if out := okSaid(t, "debug", "profile", "box/dbg", "cpu", "--for", "1s"); !strings.Contains(out, "Wrote a cpu profile") {
 		t.Errorf("debug profile cpu = %q", out)
 	}
-	if out := ok(t, "debug", "stop", "box/dbg"); !strings.HasPrefix(out, "Debug is off for dbg on box.") {
+	if out := okSaid(t, "debug", "stop", "box/dbg"); !strings.HasPrefix(out, "Debug is off for dbg on box.") {
 		t.Errorf("debug stop = %q", out)
 	}
-	if out := ok(t, "debug", "stop", "box/dbg"); out != "Debug was not on for dbg on box.\n" {
+	if out := okSaid(t, "debug", "stop", "box/dbg"); out != "Debug was not on for dbg on box.\n" {
 		t.Errorf("a second debug stop = %q", out)
 	}
 	fails(t, "--for is for a cpu profile only", "debug", "profile", "box/dbg", "heap", "--for", "1m")

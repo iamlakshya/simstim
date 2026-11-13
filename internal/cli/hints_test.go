@@ -11,7 +11,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/iamlakshya/simstim/internal/api"
 	"github.com/iamlakshya/simstim/internal/client"
 	"github.com/iamlakshya/simstim/internal/host/hosttest"
 )
@@ -274,8 +273,7 @@ func TestRunTimeErrorsKeepOneKind(t *testing.T) {
 		_, err := line(t, args...)
 		errs = append(errs, err)
 	}
-	errs = append(errs, errInterrupted,
-		answeredNo(&client.UserError{Msg: "no folder", Hint: "Pass --mkdir.", Code: api.CodeNoFolder, Kind: client.KindNeedsAnswer}))
+	errs = append(errs, errInterrupted)
 	path := filepath.Join(client.ConfigDir(), "hosts.toml")
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		t.Fatal(err)
@@ -293,6 +291,14 @@ func TestRunTimeErrorsKeepOneKind(t *testing.T) {
 		}
 		if want, ok := lits[ue.Code]; !ok || names[ue.Kind] != want {
 			t.Errorf("%q has the code %s and %s, and the literals give that code %q", ue.Msg, ue.Code, names[ue.Kind], want)
+		}
+	}
+	// The cancel of the prompts, as the answer no makes it, is not a user
+	// error: its report has the code and the kind of a cancel.
+	for _, err := range []error{cancelled(), cancelled("saved the host box")} {
+		r := describe(err, nil)
+		if want, ok := lits[r.code]; !ok || names[r.kind] != want {
+			t.Errorf("%q has the code %s and %s, and the literals give that code %q", r.msg, r.code, names[r.kind], want)
 		}
 	}
 }

@@ -92,7 +92,9 @@ func (g *guide) rentKey(r *onboard.RentPlan) error {
 			return err
 		}
 		cmd := exec.CommandContext(g.ctx, onboard.KeyArgs[0], onboard.KeyArgs[1:]...)
-		cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
+		// What ssh-keygen says is a message, so it goes where the guide
+		// writes, stderr, and never to stdout.
+		cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, g.out, os.Stderr
 		if err := cmd.Run(); err != nil {
 			if g.ctx.Err() != nil {
 				return g.ctx.Err()

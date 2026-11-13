@@ -112,8 +112,10 @@ func SecretFromCommand(ctx context.Context, line string) (string, error) {
 	} else {
 		cmd = exec.CommandContext(ctx, "/bin/sh", "-c", line)
 	}
-	cmd.Stdin = os.Stdin // a keychain may ask for a password
-	cmd.Stderr = os.Stderr
+	if InputAllowed(ctx) {
+		cmd.Stdin = os.Stdin // a keychain may ask for a password
+		cmd.Stderr = os.Stderr
+	}
 	out, err := cmd.Output()
 	hint := "Run the command by hand, and check that it prints only the token."
 	if err != nil {

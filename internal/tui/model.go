@@ -2,8 +2,9 @@ package tui
 
 import (
 	"context"
-	"slices"
 	"sort"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -111,8 +112,19 @@ type Model struct {
 
 	// exec hands the terminal to a blocking command; after delivers msg
 	// after d. Tests replace both.
-	exec  func(tea.ExecCommand, tea.ExecCallback) tea.Cmd
-	after func(d time.Duration, msg tea.Msg) tea.Cmd
+	exec          func(tea.ExecCommand, tea.ExecCallback) tea.Cmd
+	after         func(d time.Duration, msg tea.Msg) tea.Cmd
+	handoff       bool
+	pendingAttach *pendingAttach
+	pendingExec   *pendingExec
+	stopInput     func() bool
+	inputErr      error
+	bgMu          sync.Mutex
+	bgCtx         context.Context
+	bgCancel      context.CancelFunc
+	bgWG          sync.WaitGroup
+	waiters       atomic.Int32
+	hostSaves     hostSaveCompletions
 }
 
 // renameState is the inline rename of a session row.
@@ -149,7 +161,7 @@ func New(ctx context.Context, be Backend, o Options) *Model {
 	m.epoch, m.revealAt = m.now(), m.now()
 	m.settings = be.Settings()
 	commands = withKeymap(registry(), m.settings.Keymap)
-	hosts, err := be.LoadHosts()
+	hosts, err := be.LoadHosts(ctx)
 	m.loadErr = err
 	sort.SliceStable(hosts, func(i, j int) bool { return hosts[i].Name < hosts[j].Name })
 	for _, h := range hosts {
@@ -170,6 +182,7 @@ func New(ctx context.Context, be Backend, o Options) *Model {
 		// One host: its sessions are the only useful list.
 		m.screen, m.cur = scrSessions, m.hosts[0].name()
 	}
+	m.openBg(ctx)
 	m.syncSel()
 	return m
 }
@@ -177,8 +190,14 @@ func New(ctx context.Context, be Backend, o Options) *Model {
 // Close closes every connection and saves what the launcher saw. Run calls
 // it after the program ends.
 func (m *Model) Close() {
+	m.pauseBg()
+	_ = m.drainHostSaves(true)
+	if w, ok := m.modal.(*wizard); ok {
+		w.stop()
+		w.conn = nil
+	}
 	if g, ok := m.modal.(*guide); ok {
-		g.halt() // a half-made machine is deleted before the launcher goes
+		m.stopGuide(g) // join cleanup and retain completed saved hosts
 	}
 	m.stopBundle() // a bundle that stops leaves no file
 	m.remember()()
@@ -187,9 +206,8 @@ func (m *Model) Close() {
 
 // Init starts the connections and the timers.
 func (m *Model) Init() tea.Cmd {
-	be := m.be
 	cmds := []tea.Cmd{
-		func() tea.Msg { return sshHostsMsg{be.SSHConfigHosts()} },
+		m.loadSSHHosts(),
 		tea.RequestBackgroundColor,
 		tea.RequestForegroundColor,
 		queryPalette(),
@@ -238,11 +256,6 @@ type (
 		res            client.AttachResult
 		err            error
 	}
-	hostSavedMsg struct {
-		host   client.Host
-		remove bool
-		err    error
-	}
 	settingsMsg struct{ s client.Settings }
 	sshHostsMsg struct{ hosts []string }
 )
@@ -279,6 +292,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m *Model) update(msg tea.Msg) tea.Cmd {
 	switch msg := msg.(type) {
+	case execInputFailedMsg:
+		m.inputErr = msg.err
+		return tea.Quit
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 		m.syncSel()
@@ -385,31 +401,6 @@ func (m *Model) onToastTick() tea.Cmd {
 	return nil
 }
 
-// onOpDone reports a finished operation, and lists the host's sessions again.
-func (m *Model) onOpDone(msg opDoneMsg) tea.Cmd {
-	var cmd tea.Cmd
-	switch {
-	case msg.err != nil:
-		cmd = m.toastErr(msg.err)
-	case msg.warn != "":
-		cmd = m.toastNext(toastWarning, msg.warn, msg.hint)
-	case msg.ok != "":
-		cmd = m.toast(toastSuccess, msg.ok)
-	}
-	if h := m.hostByName(msg.host); h != nil {
-		h.changes++
-		if msg.err == nil && msg.drop != "" {
-			h.sessions = slices.DeleteFunc(h.sessions, func(s client.Session) bool { return s.ID == msg.drop })
-			m.syncSel()
-		}
-		cmd = tea.Batch(cmd, m.listSessions(h))
-	}
-	if m.rename != nil && m.rename.busy {
-		m.rename = nil
-	}
-	return cmd
-}
-
 // onFolders takes folder completions, for the quick start or the form.
 func (m *Model) onFolders(msg foldersMsg) tea.Cmd {
 	if p := m.prompt; msg.quick && p != nil && p.host == msg.host && p.asked == msg.prefix {
@@ -428,17 +419,6 @@ func (m *Model) onAttachEnded(msg attachDoneMsg) tea.Cmd {
 		cmd = tea.Batch(cmd, w.afterAttach(m, msg))
 	}
 	return cmd
-}
-
-// onSetup passes a setup step's result to the wizard, or drops it if the wizard closed.
-func (m *Model) onSetup(msg setupMsg) tea.Cmd {
-	if w, ok := m.modal.(*wizard); ok {
-		return w.onMsg(m, msg)
-	}
-	if msg.conn != nil {
-		return m.dropConn(msg.conn) // the wizard closed while it ran
-	}
-	return nil
 }
 
 // onEditorDone reloads the settings after the editor closes.

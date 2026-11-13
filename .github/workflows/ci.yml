@@ -166,7 +166,7 @@ jobs:
         with:
           go-version-file: go.mod
       - name: Unit tests of the portable packages
-        run: go test -count=1 ./internal/client/... ./internal/keys/... ./internal/term/... ./internal/ring/... ./internal/proto/... ./internal/agents/... ./internal/api/...
+        run: go test -count=1 ./internal/client/... ./internal/keys/... ./internal/keyread/... ./internal/term/... ./internal/ring/... ./internal/proto/... ./internal/agents/... ./internal/api/... ./internal/testhome/...
       - name: Build the client
         run: go build -o client.exe .
 

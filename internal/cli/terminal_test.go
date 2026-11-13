@@ -8,26 +8,43 @@ import (
 	"testing"
 	"time"
 
+	"github.com/spf13/cobra"
+
 	"github.com/iamlakshya/simstim/internal/client"
 	"github.com/iamlakshya/simstim/internal/host/hosttest"
 	"github.com/iamlakshya/simstim/internal/proto"
 )
 
-// inTerminal runs the command line with a terminal as its stdin and stdout,
-// in the background. It returns the terminal and a channel for the error.
+// inTerminal runs the command line with a terminal as its stdin, stdout and
+// stderr, in the background, so input is on. It returns the terminal and a
+// channel for the error.
 func inTerminal(t *testing.T, args ...string) (*hosttest.Terminal, chan error) {
 	t.Helper()
 	term := hosttest.NewTerminal(t, 90, 30)
-	oldIn, oldOut := os.Stdin, os.Stdout
-	os.Stdin, os.Stdout = term.TTY, term.TTY
-	done := make(chan error, 1)
-	go func() {
-		root := Root()
-		root.SetArgs(args)
-		done <- root.ExecuteContext(context.Background())
-	}()
-	t.Cleanup(func() { os.Stdin, os.Stdout = oldIn, oldOut })
+	oldIn, oldOut, oldErr := os.Stdin, os.Stdout, os.Stderr
+	os.Stdin, os.Stdout, os.Stderr = term.TTY, term.TTY, term.TTY
+	root := Root()
+	root.SetArgs(args)
+	done, stop := runInBackground(root, args)
+	t.Cleanup(func() {
+		stop()
+		os.Stdin, os.Stdout, os.Stderr = oldIn, oldOut, oldErr
+	})
 	return term, done
+}
+
+func runInBackground(root *cobra.Command, args []string) (chan error, func()) {
+	ctx, cancel := context.WithCancel(withLine(context.Background(), args))
+	done := make(chan error, 1)
+	finished := make(chan struct{})
+	go func() {
+		defer close(finished)
+		done <- root.ExecuteContext(ctx)
+	}()
+	return done, func() {
+		cancel()
+		<-finished
+	}
 }
 
 func wait(t *testing.T, done chan error) error {

@@ -49,3 +49,11 @@ func FlushClipMemory() {
 		m.flush(10 * time.Second)
 	}
 }
+
+// SetRequestStage makes f see each stage of a request (requestStage), for
+// the rest of a test. It returns a function that puts the old one back.
+func SetRequestStage(f func(stage string)) func() {
+	old := requestStage
+	requestStage = f
+	return func() { requestStage = old }
+}

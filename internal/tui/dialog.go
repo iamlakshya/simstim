@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -365,8 +366,8 @@ func (m *Model) fetchFolders(d *newSession) tea.Cmd {
 	if h == nil || !h.online() {
 		return nil
 	}
-	prefix, name, c, ctx := d.folder.value(), h.name(), h.conn, m.ctx
-	return func() tea.Msg {
+	prefix, name, c := d.folder.value(), h.name(), h.conn
+	return m.bgCmd(func(ctx context.Context) tea.Msg {
 		cctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 		defer cancel()
 		res, err := c.Folders(cctx, prefix)
@@ -374,7 +375,7 @@ func (m *Model) fetchFolders(d *newSession) tea.Cmd {
 			return nil
 		}
 		return foldersMsg{host: name, prefix: prefix, res: res}
-	}
+	})
 }
 
 // setSuggestions keeps completions that still fit what the user has typed.
@@ -446,5 +447,12 @@ func (m *Model) openShell(h *hostConn) tea.Cmd {
 		return m.toastErr(err)
 	}
 	name := h.name()
-	return tea.ExecProcess(cmd, func(err error) tea.Msg { return shellDoneMsg{host: name, err: err} })
+	x := &funcExec{run: func(in, out *os.File) error {
+		cmd.Stdin, cmd.Stdout, cmd.Stderr = in, out, os.Stderr
+		if err := cmd.Run(); err != nil {
+			return fmt.Errorf("run the shell: %w", err)
+		}
+		return nil
+	}}
+	return m.execWithInput(x, func(err error) tea.Msg { return shellDoneMsg{host: name, err: err} })
 }

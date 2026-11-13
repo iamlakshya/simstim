@@ -28,19 +28,20 @@ const (
 // hostConn is one saved host and its background connection. Only Update
 // touches it; the work happens in tea.Cmds that report back with messages.
 type hostConn struct {
-	host     client.Host
-	status   connStatus
-	conn     Conn
-	gen      int // bumped on every dial, so late answers from old connections are dropped
-	err      error
-	sessions []client.Session
-	loaded   bool
-	rtts     rttWindow // the round trips of the last minute (rtt.go)
-	rtt      rttSpread // their spread, as the launcher shows it
-	info     *client.HostInfo
-	backoff  time.Duration
-	listing  bool
-	pinging  bool
+	host      client.Host
+	status    connStatus
+	conn      Conn
+	gen       int // bumped on every dial, so late answers from old connections are dropped
+	err       error
+	sessions  []client.Session
+	loaded    bool
+	rtts      rttWindow // the round trips of the last minute (rtt.go)
+	rtt       rttSpread // their spread, as the launcher shows it
+	info      *client.HostInfo
+	backoff   time.Duration
+	listing   bool
+	pinging   bool
+	doctoring bool
 	// changes counts local edits to the list (a new, renamed or deleted
 	// session). A list asked for before the latest edit is stale.
 	changes int
@@ -101,28 +102,40 @@ func (m *Model) hostByName(name string) *hostConn {
 func (m *Model) dial(h *hostConn) tea.Cmd {
 	h.gen++
 	h.status = stConnecting
-	h.listing, h.pinging = false, false
+	h.listing, h.pinging, h.doctoring = false, false, false
 	h.rtts, h.rtt = nil, rttSpread{} // a new connection starts its own round trips
-	gen, host, be, ctx, set := h.gen, h.host, m.be, m.ctx, m.conns
-	return func() tea.Msg {
-		dctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	gen, host, be, set := h.gen, h.host, m.be, m.conns
+	return m.bgCmd(func(bgCtx context.Context) tea.Msg {
+		dctx, cancel := context.WithTimeout(bgCtx, 30*time.Second)
 		defer cancel()
 		c, err := dialClean(dctx, be, host)
-		if err == nil && !set.add(c) {
-			return nil
+		if err == nil && c != nil {
+			if bgCtx.Err() != nil || !set.addUnadopted(c) {
+				c.Close()
+				return nil
+			}
 		}
 		return dialledMsg{name: host.Name, gen: gen, conn: c, err: err}
-	}
+	})
 }
 
-func waitDone(name string, gen int, c Conn) tea.Cmd {
-	return func() tea.Msg {
-		<-c.Done()
-		return connDoneMsg{name: name, gen: gen}
-	}
+func (m *Model) waitDone(name string, gen int, c Conn) tea.Cmd {
+	return m.bgCmd(func(bgCtx context.Context) tea.Msg {
+		m.waiters.Add(1)
+		defer m.waiters.Add(-1)
+		select {
+		case <-c.Done():
+			return connDoneMsg{name: name, gen: gen}
+		case <-bgCtx.Done():
+			return nil
+		}
+	})
 }
 
 func (m *Model) dropConn(c Conn) tea.Cmd {
+	if c == nil {
+		return nil
+	}
 	set := m.conns
 	return func() tea.Msg {
 		set.drop(c)
@@ -136,13 +149,13 @@ func (m *Model) listSessions(h *hostConn) tea.Cmd {
 		return nil
 	}
 	h.listing = true
-	name, gen, changes, c, ctx := h.name(), h.gen, h.changes, h.conn, m.ctx
-	return func() tea.Msg {
-		cctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	name, gen, changes, c := h.name(), h.gen, h.changes, h.conn
+	return m.bgCmd(func(bgCtx context.Context) tea.Msg {
+		cctx, cancel := context.WithTimeout(bgCtx, 15*time.Second)
 		defer cancel()
 		list, err := c.Sessions(cctx)
 		return sessionsMsg{name: name, gen: gen, changes: changes, list: list, err: err}
-	}
+	})
 }
 
 // ping times one round trip to h, unless one is on its way.
@@ -151,26 +164,30 @@ func (m *Model) ping(h *hostConn) tea.Cmd {
 		return nil
 	}
 	h.pinging = true
-	name, gen, c, ctx := h.name(), h.gen, h.conn, m.ctx
-	return func() tea.Msg {
-		cctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	name, gen, c := h.name(), h.gen, h.conn
+	return m.bgCmd(func(bgCtx context.Context) tea.Msg {
+		cctx, cancel := context.WithTimeout(bgCtx, 15*time.Second)
 		defer cancel()
 		d, err := c.RoundTrip(cctx)
 		if err != nil {
 			d = 0
 		}
 		return latencyMsg{name: name, gen: gen, d: d}
-	}
+	})
 }
 
 func (m *Model) doctor(h *hostConn) tea.Cmd {
-	name, gen, c, ctx := h.name(), h.gen, h.conn, m.ctx
-	return func() tea.Msg {
-		cctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	if !h.online() || h.doctoring {
+		return nil
+	}
+	h.doctoring = true
+	name, gen, c := h.name(), h.gen, h.conn
+	return m.bgCmd(func(bgCtx context.Context) tea.Msg {
+		cctx, cancel := context.WithTimeout(bgCtx, 30*time.Second)
 		defer cancel()
 		info, err := c.Doctor(cctx)
 		return doctorMsg{name: name, gen: gen, info: info, err: err}
-	}
+	})
 }
 
 // nextBackoff is 1 s, then doubles up to 30 s.
@@ -219,14 +236,21 @@ func (m *Model) addHost(host client.Host, conn Conn, info *client.HostInfo) tea.
 			h.conn = nil
 		}
 	}
+	if conn != nil && !m.conns.adopt(conn) {
+		conn = nil
+	}
 	if conn == nil {
 		return tea.Batch(append(cmds, m.dial(h))...)
 	}
 	h.gen++
 	h.conn, h.status, h.err, h.backoff, h.info = conn, stOnline, nil, 0, info
-	h.listing, h.pinging = false, false
+	h.listing, h.pinging, h.doctoring = false, false, false
 	h.rtts, h.rtt = nil, rttSpread{} // the host may be reached another way now
-	return tea.Batch(append(cmds, m.listSessions(h), m.ping(h), waitDone(h.name(), h.gen, conn))...)
+	cmds = append(cmds, m.listSessions(h), m.ping(h), m.waitDone(h.name(), h.gen, conn))
+	if info == nil {
+		cmds = append(cmds, m.doctor(h))
+	}
+	return tea.Batch(cmds...)
 }
 
 // removeHost forgets h here. Its sessions keep running on the host.
@@ -363,4 +387,15 @@ func (m *Model) alertNew(h *hostConn, list []client.Session) tea.Cmd {
 		return nil
 	}
 	return tea.Raw(b.String())
+}
+
+// rememberCreatedHost lists a machine that Create already saved when a stop
+// raced its completion. It issues no dial or preparation request after the stop.
+func (m *Model) rememberCreatedHost(host client.Host) {
+	if m.hostByName(host.Name) != nil {
+		return
+	}
+	m.hosts = append(m.hosts, &hostConn{host: host, status: stOffline})
+	sort.SliceStable(m.hosts, func(i, j int) bool { return m.hosts[i].name() < m.hosts[j].name() })
+	m.syncSel()
 }

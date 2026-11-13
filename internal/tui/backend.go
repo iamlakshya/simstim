@@ -16,8 +16,11 @@ import (
 // SSH, the host helper and attach. The real one wraps package client. Tests
 // use a fake, so every screen can be checked without SSH.
 type Backend interface {
-	LoadHosts() ([]client.Host, error)
-	SaveHosts([]client.Host) error
+	// LoadHosts and SaveHosts read and write the saved hosts. Neither does
+	// anything once ctx has ended, the command's own context: a save that a
+	// cancel came before writes nothing (client.SaveHosts).
+	LoadHosts(ctx context.Context) ([]client.Host, error)
+	SaveHosts(ctx context.Context, hosts []client.Host) error
 	Settings() client.Settings
 	// Dial opens a background connection. It never prompts.
 	Dial(ctx context.Context, h client.Host) (Conn, error)
@@ -30,9 +33,11 @@ type Backend interface {
 	SSHConfigHosts() []string
 	// Attach runs a session in this terminal until the user detaches.
 	Attach(ctx context.Context, o client.AttachOptions) (client.AttachResult, error)
-	// Memory and Remember read and write the launcher's memory.
+	// Memory and Remember read and write the launcher's memory: Remember
+	// writes the sessions, and RememberLast the session last attached to.
 	Memory() memory
 	Remember(memory)
+	RememberLast(host, id, name string)
 	// Secrets fetches the values of a host's own secrets for a new
 	// session. It never prompts.
 	Secrets(ctx context.Context, h client.Host) (map[string]api.Secret, error)
@@ -42,9 +47,10 @@ type Backend interface {
 	// SetupAnswers and RememberSetup read and keep the user's answers about
 	// repositories' setup scripts on a host. A yes keeps the setup hash of
 	// the question that it answers. RememberSetup's warning says that the
-	// answers file did not parse, and where it went.
+	// answers file did not parse, and where it went. A cancelled write
+	// keeps the stored answers as they were.
 	SetupAnswers(host string) client.SetupAnswers
-	RememberSetup(host, repo string, run bool, hash string) (*client.UserError, error)
+	RememberSetup(ctx context.Context, host, repo string, run bool, hash string) (*client.UserError, error)
 	// Local is what the guided setup reads and changes on this computer:
 	// where agents can run, SSH keys and config, and making hosts.
 	Local() onboard.Local
@@ -81,19 +87,28 @@ func (b realBackend) Local() onboard.Local {
 	return b.local
 }
 
-func (realBackend) LoadHosts() ([]client.Host, error) { return client.LoadHosts() }
-func (realBackend) SaveHosts(h []client.Host) error   { return client.SaveHosts(h) }
-func (realBackend) Settings() client.Settings         { return client.LoadSettings() }
-func (realBackend) HelperVersion() string             { return client.HelperVersion() }
-func (realBackend) Memory() memory                    { return loadMemory() }
-func (realBackend) Remember(mem memory)               { _ = saveMemory(mem) }
+func (realBackend) LoadHosts(ctx context.Context) ([]client.Host, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return client.LoadHosts()
+}
+
+func (realBackend) SaveHosts(ctx context.Context, h []client.Host) error {
+	return client.SaveHosts(ctx, h)
+}
+func (realBackend) Settings() client.Settings          { return client.LoadSettings() }
+func (realBackend) HelperVersion() string              { return client.HelperVersion() }
+func (realBackend) Memory() memory                     { return loadMemory() }
+func (realBackend) Remember(mem memory)                { _ = saveMemory(mem) }
+func (realBackend) RememberLast(host, id, name string) { RememberLast(host, id, name) }
 
 func (realBackend) SetupAnswers(host string) client.SetupAnswers {
 	return client.LoadSetupAnswers(host)
 }
 
-func (realBackend) RememberSetup(host, repo string, run bool, hash string) (*client.UserError, error) {
-	return client.RememberSetup(host, repo, run, hash)
+func (realBackend) RememberSetup(ctx context.Context, host, repo string, run bool, hash string) (*client.UserError, error) {
+	return client.RememberSetupContext(ctx, host, repo, run, hash)
 }
 
 func (realBackend) Secrets(ctx context.Context, h client.Host) (map[string]api.Secret, error) {
@@ -147,14 +162,23 @@ func (realBackend) Attach(ctx context.Context, o client.AttachOptions) (client.A
 // connSet tracks every open connection, so quitting closes them all, even
 // one whose dial finishes after the screen has gone.
 type connSet struct {
-	mu     sync.Mutex
-	conns  map[Conn]struct{}
-	closed bool
+	mu        sync.Mutex
+	conns     map[Conn]struct{}
+	unadopted map[Conn]struct{}
+	dropped   map[Conn]struct{}
+	closed    bool
 }
 
-func newConnSet() *connSet { return &connSet{conns: map[Conn]struct{}{}} }
+func newConnSet() *connSet {
+	return &connSet{
+		conns:     map[Conn]struct{}{},
+		unadopted: map[Conn]struct{}{},
+		dropped:   map[Conn]struct{}{},
+	}
+}
 
-// add records c. It closes c and returns false after closeAll.
+// add records an already-adopted connection c. It closes c and returns false
+// after closeAll.
 func (s *connSet) add(c Conn) bool {
 	s.mu.Lock()
 	if s.closed {
@@ -167,10 +191,68 @@ func (s *connSet) add(c Conn) bool {
 	return true
 }
 
+// addUnadopted records a freshly dialled connection before Update adopts it.
+// If the program stops before Update adopts c, dropUnadopted closes it.
+func (s *connSet) addUnadopted(c Conn) bool {
+	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
+		c.Close()
+		return false
+	}
+	s.conns[c] = struct{}{}
+	s.unadopted[c] = struct{}{}
+	s.mu.Unlock()
+	return true
+}
+
+// adopt marks c as owned by Model.hosts. It returns false if c was already
+// closed or dropped before Update could adopt it.
+func (s *connSet) adopt(c Conn) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return false
+	}
+	if _, wasDropped := s.dropped[c]; wasDropped {
+		return false
+	}
+	delete(s.unadopted, c)
+	s.conns[c] = struct{}{}
+	return true
+}
+
+// dropUnadopted closes and forgets every connection that Update never adopted.
+func (s *connSet) dropUnadopted() {
+	s.mu.Lock()
+	if len(s.unadopted) == 0 {
+		s.mu.Unlock()
+		return
+	}
+	stale := make([]Conn, 0, len(s.unadopted))
+	for c := range s.unadopted {
+		stale = append(stale, c)
+		delete(s.conns, c)
+		s.dropped[c] = struct{}{}
+	}
+	clear(s.unadopted)
+	s.mu.Unlock()
+	for _, c := range stale {
+		c.Close()
+	}
+}
+
+func (s *connSet) count() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.conns)
+}
+
 // drop closes c and forgets it.
 func (s *connSet) drop(c Conn) {
 	s.mu.Lock()
 	delete(s.conns, c)
+	delete(s.unadopted, c)
 	s.mu.Unlock()
 	c.Close()
 }
@@ -184,6 +266,7 @@ func (s *connSet) closeAll() {
 		all = append(all, c)
 	}
 	clear(s.conns)
+	clear(s.unadopted)
 	s.mu.Unlock()
 	var wg sync.WaitGroup
 	for _, c := range all {

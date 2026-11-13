@@ -78,7 +78,7 @@ func TestNewMemoryMax(t *testing.T) {
 func newSessionArgs(t *testing.T, flags ...string) string {
 	t.Helper()
 	args := append(append([]string{"new", "box", "--detach"}, flags...), "--", "sleep", "60")
-	m := startedRE.FindStringSubmatch(ok(t, args...))
+	m := startedRE.FindStringSubmatch(okSaid(t, args...))
 	if m == nil {
 		t.Fatalf("%q started nothing", args)
 	}
@@ -90,7 +90,7 @@ func newSessionArgs(t *testing.T, flags ...string) string {
 func TestHostDoctorPrintsAgentMemory(t *testing.T) {
 	installed := map[string]string{"claude": "/home/dev/.local/bin/claude", "codex": "/home/dev/.local/bin/codex"}
 	var b strings.Builder
-	printChecks(&b, host.AgentMemoryChecks(installed, 2<<30, 1436<<20)) // a 2 GiB host
+	printChecks(&b, &b, host.AgentMemoryChecks(installed, 2<<30, 1436<<20)) // a 2 GiB host
 	hint := "    Try: give the host at least 4 GB (3.7 GiB) of memory. Swap does not count, because sessions do not use it. See docs/how-to/memory.md.\n"
 	want := "  ✕ Claude Code memory     its docs ask for 4 GB of RAM: this host has only 2.0 GiB, and a session may use 1.4 GiB\n" + hint +
 		"  ✕ Codex memory           its docs ask for 4 GB of RAM: this host has only 2.0 GiB, and a session may use 1.4 GiB\n" + hint
@@ -98,7 +98,7 @@ func TestHostDoctorPrintsAgentMemory(t *testing.T) {
 		t.Errorf("on a 2 GiB host:\n%s\nwant:\n%s", b.String(), want)
 	}
 	b.Reset()
-	printChecks(&b, host.AgentMemoryChecks(installed, 3891<<20, 2818<<20)) // a VM sold as 4 GB
+	printChecks(&b, &b, host.AgentMemoryChecks(installed, 3891<<20, 2818<<20)) // a VM sold as 4 GB
 	want = "  ✓ Claude Code memory     its docs ask for 4 GB of RAM: this host has 3.8 GiB, and a session may use 2.8 GiB\n" +
 		"  ✓ Codex memory           its docs ask for 4 GB of RAM: this host has 3.8 GiB, and a session may use 2.8 GiB\n"
 	if b.String() != want {

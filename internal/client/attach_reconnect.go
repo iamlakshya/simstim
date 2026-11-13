@@ -74,6 +74,7 @@ func (a *attacher) waitToRetry(ctx context.Context, banner, retry <-chan time.Ti
 				}
 			}
 			_ = a.filter.Flush()
+			a.in.ask()
 			return false // a key press: try again now
 		case <-retry:
 			return false

@@ -2,7 +2,10 @@ package cli
 
 import (
 	"bytes"
+	"context"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -22,71 +25,199 @@ const (
 	mainArgsEnv  = "CLI_TEST_MAIN_ARGS"
 	mainSceneEnv = "CLI_TEST_MAIN_SCENE"
 	mainArgsSep  = "\x1f"
+	// childFailed is the exit code of a child whose scene failed in its
+	// setup or its cleanup: no code of Main's.
+	childFailed = 97
 )
 
 // TestMainInAChild runs Main in a child process for the signal tests. In
 // a normal run it does nothing. The scene "setup-trust" starts a test host
-// with a repository whose setup script needs an answer, and prints the
-// answers that the client keeps after Main returns.
+// with a repository whose setup script needs an answer, names its folder
+// on stderr, and prints the answers that the client keeps after Main
+// returns. The scene "cleanup-fails" has a cleanup that fails. The scene
+// runs as a subtest, so that its cleanups, which end the test host and
+// remove its folder, run before the child exits: os.Exit runs none. The
+// child exits with Main's code when the scene's setup and cleanup went
+// well. When they did not, the test returns: the testing package prints
+// what failed, and the child exits with childFailed (hosttest.ExitCode).
 func TestMainInAChild(t *testing.T) {
 	args := os.Getenv(mainArgsEnv)
 	if args == "" {
 		return
 	}
 	scene := os.Getenv(mainSceneEnv)
-	if scene == "setup-trust" {
-		th := newTestHost(t)
-		hook := filepath.Join(th.h.Home, "proj", "."+brand.Name, "setup")
-		if err := os.MkdirAll(filepath.Dir(hook), 0o755); err != nil {
-			t.Fatal(err)
+	code := 0
+	ok := t.Run("main", func(t *testing.T) {
+		if scene == "cleanup-fails" {
+			t.Cleanup(func() { t.Error("the scene's cleanup failed") })
 		}
-		if err := os.WriteFile(hook, []byte("#!/bin/sh\n"), 0o755); err != nil {
-			t.Fatal(err)
+		if scene == "setup-trust" {
+			th := newTestHost(t)
+			fmt.Fprintf(os.Stderr, "test host: %s\n", th.h.Root)
+			hook := filepath.Join(th.h.Home, "proj", "."+brand.Name, "setup")
+			if err := os.MkdirAll(filepath.Dir(hook), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(hook, []byte("#!/bin/sh\n"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+		}
+		os.Args = append([]string{"client"}, strings.Split(args, mainArgsSep)...)
+		code = Main()
+		if scene == "setup-trust" {
+			fmt.Printf("\r\nkept answers: %v\r\n", keptAnswers("box"))
+		}
+	})
+	if ok {
+		os.Exit(code)
+	}
+}
+
+// A child's failed run exits with childFailed, a code that Main never has.
+func init() {
+	if os.Getenv(mainArgsEnv) != "" {
+		hosttest.ExitCode = func(code int) int {
+			if code != 0 {
+				return childFailed
+			}
+			return code
 		}
 	}
-	os.Args = append([]string{"client"}, strings.Split(args, mainArgsSep)...)
-	code := Main()
-	if scene == "setup-trust" {
-		fmt.Printf("\r\nkept answers: %v\r\n", keptAnswers("box"))
+}
+
+// A child whose scene fails in its cleanup says so with its exit code, not
+// with Main's, which the tests would take for a clean run, and prints what
+// failed.
+func TestAChildWhoseCleanupFailsSaysSo(t *testing.T) {
+	hosttest.New(t)
+	cmd, out := child(t, nil, "cleanup-fails", "version")
+	if code := exitOf(t, cmd); code != childFailed || !strings.Contains(out.String(), "the scene's cleanup failed") {
+		t.Errorf("a child whose cleanup failed exited with %d, want %d, and said:\n%s", code, childFailed, out.String())
 	}
-	os.Exit(code)
+}
+
+// The child of the signal tests leaves no test host behind: its folder is
+// gone once the child has exited.
+func TestTheChildLeavesNoTestHost(t *testing.T) {
+	hosttest.New(t)
+	cmd, stderr := child(t, nil, "setup-trust", "version")
+	if code := exitOf(t, cmd); code != 0 {
+		t.Fatalf("version in the child: exit %d:\n%s", code, stderr.String())
+	}
+	_, rest, _ := strings.Cut(stderr.String(), "test host: ")
+	root, _, _ := strings.Cut(rest, "\n")
+	if root == "" {
+		t.Fatalf("the child named no test host:\n%s", stderr.String())
+	}
+	if _, err := os.Stat(root); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("the child left its test host %s: %v", root, err)
+	}
+}
+
+// childProc wraps a started child process with a single Wait goroutine so
+// exitOf and t.Cleanup never call Wait or read ProcessState concurrently.
+type childProc struct {
+	*exec.Cmd
+	done chan struct{}
+	code int
+}
+
+func startChild(t *testing.T, cmd *exec.Cmd) *childProc {
+	t.Helper()
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	c := &childProc{Cmd: cmd, done: make(chan struct{})}
+	go func() {
+		_ = cmd.Wait()
+		if cmd.ProcessState != nil {
+			c.code = cmd.ProcessState.ExitCode()
+		}
+		close(c.done)
+	}()
+	t.Cleanup(func() {
+		select {
+		case <-c.done:
+		default:
+			_ = cmd.Process.Kill()
+			<-c.done
+		}
+	})
+	return c
 }
 
 // child starts the test binary as a client that runs args. With term, the
-// terminal is its stdin, stdout and stderr.
-func child(t *testing.T, term *hosttest.Terminal, scene string, args ...string) (*exec.Cmd, *bytes.Buffer) {
+// terminal is its stdin, stdout and stderr. Without it, the buffer gets
+// stderr and stdout.
+func child(t *testing.T, term *hosttest.Terminal, scene string, args ...string) (*childProc, *bytes.Buffer) {
 	t.Helper()
 	cmd := exec.Command(os.Args[0], "-test.run=^TestMainInAChild$")
 	cmd.Env = append(os.Environ(), mainArgsEnv+"="+strings.Join(args, mainArgsSep), mainSceneEnv+"="+scene, "NO_COLOR=1")
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
+	cmd.Stdout = &stderr
 	if term != nil {
 		cmd.Stdin, cmd.Stdout, cmd.Stderr = term.TTY, term.TTY, term.TTY
 	}
-	if err := cmd.Start(); err != nil {
-		t.Fatal(err)
-	}
-	return cmd, &stderr
+	return startChild(t, cmd), &stderr
 }
 
 // childWait is how long a test waits for a child. A child takes about a
 // second, but a busy machine can make it far slower.
 const childWait = 60 * time.Second
 
-func exitOf(t *testing.T, cmd *exec.Cmd) int {
-	t.Helper()
-	done := make(chan struct{})
-	go func() {
-		_ = cmd.Wait()
-		close(done)
-	}()
+func waitChild(c *childProc, d time.Duration) (int, bool) {
 	select {
-	case <-done:
-	case <-time.After(childWait):
-		_ = cmd.Process.Kill()
+	case <-c.done:
+		return c.code, true
+	case <-time.After(d):
+		_ = c.Process.Kill()
+		<-c.done
+		return 0, false
+	}
+}
+
+func exitOf(t *testing.T, c *childProc) int {
+	t.Helper()
+	code, ok := waitChild(c, childWait)
+	if !ok {
 		t.Fatal("the client did not end after the signal")
 	}
-	return cmd.ProcessState.ExitCode()
+	return code
+}
+
+// A timeout in waitChild kills the child and waits for cmd.Wait and its output
+// copy goroutines to finish, so reading stderr immediately never races and the
+// subtest's cleanup never calls Wait a second time.
+func TestChildTimeoutCleanupJoinsSingleWaiter(t *testing.T) {
+	var proc *childProc
+	var stderr bytes.Buffer
+	started := filepath.Join(t.TempDir(), "started")
+	t.Run("timed-out-child", func(t *testing.T) {
+		cmd := exec.Command("sh", "-c", `touch "$1"; while :; do echo noise >&2; done`, "sh", started)
+		cmd.Stderr = &stderr
+		cmd.Stdout = &stderr
+		proc = startChild(t, cmd)
+		for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(time.Millisecond) {
+			if _, err := os.Stat(started); err == nil {
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatal("noisy child never started")
+			}
+		}
+		if _, ok := waitChild(proc, 10*time.Millisecond); ok {
+			t.Fatal("noisy loop finished within 10ms")
+		}
+		if stderr.String() == "" {
+			t.Log("child exited before flushing noise")
+		}
+	})
+	select {
+	case <-proc.done:
+	default:
+		t.Fatal("cleanup returned before the child waiter finished")
+	}
 }
 
 // A signal ends the command's context before it closes interrupted, so a
@@ -116,7 +247,7 @@ func TestSignalsCancel(t *testing.T) {
 	if err := os.WriteFile(script, []byte("#!/bin/sh\ntouch "+started+"\nexec sleep 30\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := client.SaveHosts([]client.Host{{Name: "box", SSH: "box", Provider: &client.Provider{Script: script}}}); err != nil {
+	if err := client.SaveHosts(context.Background(), []client.Host{{Name: "box", SSH: "box", Provider: &client.Provider{Script: script}}}); err != nil {
 		t.Fatal(err)
 	}
 	for _, sig := range []os.Signal{syscall.SIGTERM, os.Interrupt} {
@@ -128,7 +259,7 @@ func TestSignalsCancel(t *testing.T) {
 			}
 			if time.Now().After(deadline) {
 				_ = cmd.Process.Kill()
-				_ = cmd.Wait()
+				<-cmd.done
 				t.Fatalf("%v: the provider script did not start within %s, stderr:\n%s", sig, childWait, stderr.String())
 			}
 		}

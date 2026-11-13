@@ -35,7 +35,7 @@ simstim doctor --fix
 | `doctor --fix` | SSH configs generated for hosts you removed: removes them. |
 | | ControlMaster sockets whose SSH master died, which can make connections hang: removes them. |
 
-The doctor never uses sudo. When a fix needs root, for example linger on some hosts, it prints the command for you to run. `--yes` applies every fix without asking.
+The doctor never uses sudo. When a fix needs root, for example linger on some hosts, it prints the command for you to run. `--yes` applies every fix without asking. In a script, or with `--no-input`, `--fix` needs `--yes`, and fails with exit code 4 without it.
 
 ## Common problems
 

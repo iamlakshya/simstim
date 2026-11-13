@@ -166,7 +166,7 @@ Triggers: the detach key, closing the tab, `simstim kill` from elsewhere, or SIG
 1. The input filter sees Ctrl+V in any encoding: legacy `0x16`, kitty CSI u (with lock bits masked and event types), or modifyOtherKeys.
 2. The client reads the local clipboard. On macOS this takes about 20 µs warm.
    - If it holds no image, the key is passed through unchanged.
-3. If it holds an image (16 MiB at most), the client uploads it over the bridge. The holder stores it under the session's `paste/` folder, mode 0700, and deletes it after 24 hours.
+3. If it holds an image (16 MiB at most), the client uploads it over the bridge. The holder stores it under the session's `paste/` folder, mode 0700, and deletes it after 24 hours. An upload whose end never comes, as one that a cancel stopped, leaves nothing: the bridge removes its part when the connection closes, also when a bridge ends itself after its client went quiet, when the connection begins another upload, and after two minutes with no frame of it. So the client sends one upload at a time on a connection: the next waits until the last one has its answer.
 4. The client sends the remote path as one bracketed paste. Claude Code, Codex, Gemini CLI, opencode and Amp all attach an image when you paste its path. So no agent needs special code.
 5. **Dropped files:** a bracketed paste is rewritten only when every token in it is an existing local file. Each file is uploaded, and its path replaced with the remote one.
 6. **The paste guard:** before a drop uploads, the client checks each file.
@@ -266,7 +266,7 @@ The contract has its own page: [the fidelity contract](fidelity.md).
 | `~/.config/simstim/config.toml` | Settings and keymap overrides, with a JSON Schema |
 | `~/.config/simstim/hosts.toml` | Saved hosts: name, SSH target, labels, optional provider block |
 | `~/.config/simstim/ssh/hosts.conf` | Generated SSH blocks for hosts added in simstim. Included by the wrapper. |
-| `~/.cache/simstim/cm/nf-%C` | ControlMaster sockets. The path is kept under 86 bytes because of macOS. The `nf-` prefix keeps the client off masters that older clients started ([decision 0034](../contributing/decisions/0034-ssh-options-on-the-command-line.md)). |
+| `~/.cache/simstim/cm/nf-%C` | ControlMaster sockets. Each path fits the system's socket limit. The `nf-` prefix keeps the client off masters that older clients started ([decision 0034](../contributing/decisions/0034-ssh-options-on-the-command-line.md)). When the cache path is too long, the sockets go in `cm` of the runtime folder (`$XDG_RUNTIME_DIR/simstim`, or `simstim-<uid>` in the temporary folder without it), when that folder is the user's, is not a link and nobody else may write it. Else they go in a private `/tmp/simstim-<uid>`. |
 | `~/.cache/simstim/helpers/<version>/` | Host helpers fetched from the release, for a client built with `go install` |
 | `~/.local/state/simstim/` | Logs, and each session's last byte offset |
 | `~/.local/state/simstim/debug/` | The client's debug files, while `--debug` is on (0700; [debug a session](../how-to/debug-a-session.md)) |

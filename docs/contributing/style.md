@@ -6,7 +6,7 @@
 - **Byte-exact while attached.** Nothing may change the bytes between an agent's terminal and the user's, except the two keys the input filter owns. A change near the attach path needs a test that proves the bytes are unchanged.
 - **Agents are data**, in `internal/agents`. No other code branches on an agent's name.
 - **Errors say what to try next.** A user-facing error is a `client.UserError` with a message, a hint, a `Code` that names it, such as `host_not_found`, and a `Kind` that sets its exit code ([exit codes](../reference/exit-codes.md)). A test fails on a `UserError` without a `Code` or a hint. Wrap other errors with context: `fmt.Errorf("read %s: %w", path, err)`. The client prints those with the hint to make a debug bundle.
-- **A question reads through `answer`** (`internal/cli/answer.go`), so that a signal or the end of the context always ends it, and a cancel that comes with the answer wins. A test fails on a direct read of `os.Stdin` anywhere else in `internal/cli`.
+- **A question reads through `answer`** (`internal/cli/answer.go`), so that a signal or the end of the context always ends it, and a cancel that comes with the answer wins. At a terminal, `answer` and the picker read through `keyread.For`, the terminal's one reader, so that a question never makes a reader of its own. A test fails on a direct read of `os.Stdin` anywhere else in `internal/cli`.
 - **Every exported name has a doc comment.**
 - **Small files and functions:** a file over 500 lines, or a function that is hard to follow, is split.
 - **No new listening ports, relays or telemetry.**

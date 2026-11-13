@@ -14,6 +14,9 @@ import (
 // top, the prompt line, an inline rename, then the numbers, the moves and the
 // command registry.
 func (m *Model) onKey(k tea.KeyPressMsg) tea.Cmd {
+	if m.transferInputBlocked() {
+		return nil
+	}
 	ks := k.String()
 	if m.quitArmed {
 		// ctrl+c again quits, anything else cancels.
@@ -26,9 +29,6 @@ func (m *Model) onKey(k tea.KeyPressMsg) tea.Cmd {
 	if ks == "ctrl+c" {
 		m.quitArmed = true
 		return nil
-	}
-	if m.jacking != nil {
-		return nil // a few frames until the session takes over
 	}
 	if m.modal != nil {
 		return m.modal.key(m, k)
@@ -89,6 +89,9 @@ func (m *Model) navKey(ks string) bool {
 // onPaste handles a paste: into a field being typed, or, if it is a session
 // ID, a jump to that session.
 func (m *Model) onPaste(text string) tea.Cmd {
+	if m.transferInputBlocked() {
+		return nil
+	}
 	switch {
 	case m.modal != nil:
 		if p, ok := m.modal.(interface{ paste(string) }); ok {

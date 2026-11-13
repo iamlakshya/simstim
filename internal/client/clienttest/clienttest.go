@@ -9,8 +9,11 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"os"
+	"os/exec"
 	"strings"
 	"sync"
+	"testing"
 	"time"
 
 	"github.com/iamlakshya/simstim/internal/api"
@@ -18,6 +21,24 @@ import (
 	"github.com/iamlakshya/simstim/internal/proto"
 	"github.com/iamlakshya/simstim/internal/version"
 )
+
+// WriteScript writes an executable script at path, for a test to run as a
+// fake program. Another process writes it, so this one never holds the
+// file open for writing: a process that this one starts at that moment
+// would keep the open file, and the script's exec would fail with "text
+// file busy".
+func WriteScript(t testing.TB, path, body string) {
+	t.Helper()
+	src := path + ".src"
+	if err := os.WriteFile(src, []byte(body), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	if out, err := exec.CommandContext(ctx, "cp", src, path).CombinedOutput(); err != nil {
+		t.Fatalf("write the script %s: %v: %s", path, err, out)
+	}
+}
 
 // Transport serves a fake bridge for Start, and answers the probe for Run.
 type Transport struct {
@@ -36,10 +57,29 @@ type Transport struct {
 	Uname string
 	// fail makes the bridge answer a request with an error, by its op.
 	fail map[string]*proto.Error
+	// NoHelper makes the probe answer as a host without the helper.
+	NoHelper bool
+	// OnRun, if set, gets each command that Run is given, before Run
+	// answers it.
+	OnRun func(remote string)
+	// OnRequest, if set, gets the op of each request that reaches the
+	// bridge, before the bridge answers it.
+	OnRequest func(op string)
+	// Fixes is what doctor.fix lists, and applies as done.
+	Fixes []api.Fix
 
-	mu      sync.Mutex
-	remotes []string
-	pings   int
+	mu       sync.Mutex
+	remotes  []string
+	pings    int
+	requests []string
+}
+
+// Requests lists the ops of the requests that reached the bridge, in
+// order.
+func (t *Transport) Requests() []string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return append([]string(nil), t.requests...)
 }
 
 // Remotes lists the commands that Start and Run were given.
@@ -83,19 +123,27 @@ func (t *Transport) record(remote string) {
 // ReachHint is fixed.
 func (t *Transport) ReachHint() string { return "check the fake" }
 
-// Run answers the bootstrap probe as a Linux host with the helper installed.
+// Run answers the bootstrap probe as a Linux host with the helper installed,
+// or without it when NoHelper is set, and takes an install.
 func (t *Transport) Run(_ context.Context, remote string, stdin io.Reader) ([]byte, error) {
 	t.record(remote)
+	if t.OnRun != nil {
+		t.OnRun(remote)
+	}
 	if stdin != nil {
 		_, _ = io.Copy(io.Discard, stdin)
 	}
 	switch {
+	case strings.Contains(remote, "uname -sm") && t.NoHelper:
+		return []byte("Linux aarch64\n"), nil
 	case strings.Contains(remote, "uname -sm"):
 		uname := t.Uname
 		if uname == "" {
 			uname = "Linux aarch64"
 		}
 		return []byte(uname + "\n__HELPER_PRESENT__\n"), nil
+	case strings.Contains(remote, "echo __INSTALLED__"):
+		return []byte("__INSTALLED__\n"), nil
 	case strings.Contains(remote, " idle setup "):
 		return []byte("powers off when idle\n"), nil
 	}
@@ -118,7 +166,7 @@ func (t *Transport) Start(_ context.Context, remote string) (client.Proc, error)
 }
 
 // serve speaks just enough of the bridge's protocol: hello, ping, ls,
-// setup, doctor and agents.check.
+// setup, doctor, agents.check and doctor.fix.
 func (t *Transport) serve(in io.Reader, out io.Writer) {
 	r := bufio.NewReader(in)
 	w := proto.NewWriter(out)
@@ -141,6 +189,12 @@ func (t *Transport) serve(in io.Reader, out io.Writer) {
 		case proto.TRequest:
 			var req proto.Request
 			_ = json.Unmarshal(f.Payload, &req)
+			t.mu.Lock()
+			t.requests = append(t.requests, req.Op)
+			t.mu.Unlock()
+			if t.OnRequest != nil {
+				t.OnRequest(req.Op)
+			}
 			_ = w.WriteJSON(proto.TResponse, t.answer(req))
 		default:
 			// The fake bridge answers pings and requests only.
@@ -176,6 +230,19 @@ func (t *Transport) answer(req proto.Request) proto.Response {
 		agents := append([]api.AgentCheck{}, t.Agents...)
 		t.mu.Unlock()
 		v = agents
+	case "doctor.fix":
+		var a api.FixArgs
+		_ = json.Unmarshal(req.Args, &a)
+		fixes := append([]api.Fix{}, t.Fixes...)
+		for i := range fixes {
+			fixes[i].Done = a.Apply
+		}
+		v = fixes
+	case "new":
+		// A session that runs nothing: the fake only says that it started.
+		var a api.NewArgs
+		_ = json.Unmarshal(req.Args, &a)
+		v = api.SessionInfo{ID: "fake1", Name: a.Name, Agent: a.Agent, State: api.StateStarting, Alive: true}
 	default:
 		return proto.Response{ID: req.ID, Error: &proto.Error{Code: "unknown_op", Message: "unknown request " + req.Op}}
 	}

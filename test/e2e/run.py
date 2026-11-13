@@ -151,6 +151,28 @@ if os.environ.get("E2E_ONLY") == "host-git":
     print("RESULT %d/%d passed" % (sum(results), len(results)))
     sys.exit(0 if all(results) else 1)
 
+# --- A script: new --detach --json, as the scripting guide shows it ---
+# stdout is one JSON object and nothing else. The script reads the address
+# from it, then deletes the session.
+r = subprocess.run([cli, "new", HOST, "--agent", "shell", "--name", "e2e-json", "--detach", "--json"],
+                   env=dict(os.environ, **env), stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=120)
+def parsed(text):
+    try:
+        return json.loads(text)
+    except ValueError:
+        return {}
+js = parsed(r.stdout)
+ok(r.returncode == 0 and js.get("v") == 1 and js.get("host") == HOST and js.get("name") == "e2e-json" and js.get("id")
+   and js.get("address") in (HOST + "/e2e-json", HOST + "/" + str(js.get("id"))) and r.stderr == "",
+   "new --detach --json prints one session object, and nothing on stderr (exit %d)" % r.returncode)
+if js.get("id"):
+    r = subprocess.run([cli, "kill", HOST + "/" + js["id"]], stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=60)
+    ok(r.returncode == 0 and r.stdout == "" and "Deleted e2e-json" in r.stderr,
+       "the script deletes the session, and the confirmation goes to stderr")
+r = subprocess.run([cli, "new", HOST, "--json"], stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=60)
+ok(r.returncode == 2 and r.stdout == "" and parsed(r.stderr).get("error", {}).get("kind") == "usage",
+   "new --json without --detach fails with exit code 2, as one JSON line on stderr")
+
 # --- Attach, detach, reattach ---
 # 1. Start a detached shell session.
 t = Term([cli, "new", HOST, "--agent", "shell", "--name", "e2e-attach", "--detach"], env=env)
@@ -547,7 +569,7 @@ ok(r.returncode == 0 and "are on" in r.stdout, "alerts: set writes a command des
 mode = host_ssh("stat -c %a " + ALERTS_TOML).stdout.decode().strip()
 ok(mode == "600", "alerts: the alerts file is mode 0600 (%s)" % mode)
 r = host_cli("test", HOST)
-ok(r.returncode == 0 and "✓ command" in r.stdout, "alerts: test reports ok for the command")
+ok(r.returncode == 0 and "✓ command" in r.stderr, "alerts: test reports ok for the command, on stderr")
 ok(alert_events("test", timeout=5), "alerts: the test event reached the command")
 # An agent hook raises needs_input; it goes out after the 2 s delay.
 t0 = time.time()
@@ -564,7 +586,7 @@ ok(hits and hits[0].get("exit_code") == 3 and "failed (exit 3)" in hits[0].get("
 r = host_cli("log", HOST, "-n", "10")
 ok(r.returncode == 0 and "needs_input" in r.stdout and "failed" in r.stdout, "alerts: the log shows the deliveries")
 r = host_cli("off", HOST)
-ok(r.returncode == 0 and "off" in r.stdout, "alerts: off removes the file")
+ok(r.returncode == 0 and "off" in r.stderr, "alerts: off removes the file, and says so on stderr")
 r = host_cli(HOST)
 ok(r.returncode == 0 and "are off" in r.stdout, "alerts: the host says alerts are off")
 host_ssh("rm -f " + ALERTS_OUT)

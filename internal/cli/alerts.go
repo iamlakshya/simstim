@@ -46,7 +46,7 @@ func hostAlertsCmd() *cobra.Command {
 			})
 		},
 	}
-	cmd.Flags().BoolVar(&asJSON, "json", false, "print JSON")
+	addJSON(cmd, &asJSON)
 	cmd.AddCommand(alertsSetCmd(), alertsTestCmd(), alertsLogCmd(), alertsOffCmd())
 	return cmd
 }
@@ -106,7 +106,7 @@ func alertsSetCmd() *cobra.Command {
 					return err
 				}
 				printAlerts(h.Name, info)
-				fmt.Printf("\nSend a test alert with `%s host alerts test %s`.\n", brand.Name, h.Name)
+				say(cmd, "\nSend a test alert with `%s host alerts test %s`.\n", brand.Name, h.Name)
 				return nil
 			})
 		},
@@ -178,7 +178,7 @@ func alertsTestCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				fmt.Printf("Sent a test alert from %s:\n", h.Name)
+				say(cmd, "Sent a test alert from %s:\n", h.Name)
 				failed := 0
 				for _, r := range res {
 					mark, what := "✓", fmt.Sprintf("%d ms", r.MS)
@@ -186,7 +186,7 @@ func alertsTestCmd() *cobra.Command {
 						mark, what = "✕", r.Error
 						failed++
 					}
-					fmt.Printf("  %s %-8s %s  %s\n", mark, client.CleanLine(r.Type), client.CleanLine(r.Target), client.CleanLine(what))
+					say(cmd, "  %s %-8s %s  %s\n", mark, client.CleanLine(r.Type), client.CleanLine(r.Target), client.CleanLine(what))
 				}
 				if failed > 0 {
 					return &client.UserError{Msg: fmt.Sprintf("%d of %d destinations did not get it", failed, len(res)),
@@ -218,7 +218,7 @@ func alertsLogCmd() *cobra.Command {
 					return printJSON(log)
 				}
 				if len(log) == 0 {
-					fmt.Printf("%s has sent no alerts yet.\n", h.Name)
+					say(cmd, "%s has sent no alerts yet.\n", h.Name)
 					return nil
 				}
 				printAlertLog(log)
@@ -227,7 +227,7 @@ func alertsLogCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().IntVarP(&n, "lines", "n", 20, "how many lines to show")
-	cmd.Flags().BoolVar(&asJSON, "json", false, "print JSON")
+	addJSON(cmd, &asJSON)
 	return cmd
 }
 
@@ -244,9 +244,9 @@ func alertsOffCmd() *cobra.Command {
 					return err
 				}
 				if removed {
-					fmt.Printf("Alerts on %s are off: its alerts file is gone.\n", h.Name)
+					say(cmd, "Alerts on %s are off: its alerts file is gone.\n", h.Name)
 				} else {
-					fmt.Printf("Alerts on %s were already off.\n", h.Name)
+					say(cmd, "Alerts on %s were already off.\n", h.Name)
 				}
 				return nil
 			})

@@ -39,16 +39,16 @@ Did you mean "add"?
 
 [34mTry:[0m <name> host add box
 == attach, colour false, exit 2
-Error: attach needs <host>/<session> or -.
+Error: attach needs a session, as <host>/<session>.
 
-Usage:   <name> attach <host>/<session> | -
+Usage:   <name> attach [<host>/<session> | -]
 Example: <name> attach my-vps/auth-fix
 
 Try: <name> attach --help
 == attach, colour true, exit 2
-[1m[31mError:[0m attach needs <host>/<session> or -.
+[1m[31mError:[0m attach needs a session, as <host>/<session>.
 
-Usage:   <name> attach <host>/<session> | -
+Usage:   <name> attach [<host>/<session> | -]
 Example: <name> attach my-vps/auth-fix
 
 [34mTry:[0m <name> attach --help
@@ -120,6 +120,22 @@ Try: <name> host destroy box
 [1m[31mError:[0m cancelled; nothing was deleted.
 
 [34mTry:[0m <name> host destroy box
+== a cancel at a prompt, colour false, exit 130
+Cancelled. Nothing changed.
+== a cancel at a prompt, colour true, exit 130
+Cancelled. Nothing changed.
+== a cancel after a change, colour false, exit 130
+Cancelled. Done before that: installed the helper on box, and saved the host box.
+== a cancel after a change, colour true, exit 130
+Cancelled. Done before that: installed the helper on box, and saved the host box.
+== needs an answer at a prompt, colour false, exit 4
+Error: host add needs a yes to install the helper on box, and input is off.
+
+Try: <name> host add box --yes
+== needs an answer at a prompt, colour true, exit 4
+[1m[31mError:[0m host add needs a yes to install the helper on box, and input is off.
+
+[34mTry:[0m <name> host add box --yes
 == a host error without a hint, colour false, exit 3
 Error: no session abc.
 

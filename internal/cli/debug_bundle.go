@@ -38,7 +38,7 @@ func debugBundleCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			printBundle(os.Stdout, res)
+			printBundle(os.Stderr, res)
 			return nil
 		},
 	}

@@ -62,7 +62,10 @@ func Create(ctx context.Context, p provider.Provider, req provider.Request) (cli
 	}
 	h, err := p.Create(ctx, req)
 	if err == nil {
-		err = client.SaveHost(h)
+		// The machine is made: it is saved, also when a cancel came just
+		// now, so that host destroy finds it. The caller's next step sees
+		// the cancel, and lists the machine among the changes.
+		err = client.SaveHost(context.WithoutCancel(ctx), h)
 	}
 	if err == nil {
 		return h, nil

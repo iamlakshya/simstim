@@ -70,13 +70,13 @@ func pull(ctx context.Context, h client.Host, s *client.Session, into string, fo
 		return &client.UserError{Msg: "git fetch failed: " + client.CleanLine(msg), Hint: "Check that ssh " + h.SSH + " works, then run the git fetch yourself.", Code: "fetch_failed"}
 	}
 	ahead, _ := gitOut(ctx, "rev-list", "--count", into, "^HEAD")
-	fmt.Printf("Fetched %s from %s on %s into %s", client.CleanLine(repo.Branch), client.CleanLine(s.Name), h.Name, client.CleanLine(into))
+	fmt.Fprintf(os.Stderr, "Fetched %s from %s on %s into %s", client.CleanLine(repo.Branch), client.CleanLine(s.Name), h.Name, client.CleanLine(into))
 	if ahead != "" && ahead != "0" {
-		fmt.Printf(": %s commits that your current branch does not have", ahead)
+		fmt.Fprintf(os.Stderr, ": %s commits that your current branch does not have", ahead)
 	}
-	fmt.Println(".")
+	fmt.Fprintln(os.Stderr, ".")
 	if repo.Dirty > 0 {
-		fmt.Printf("The session has %d files with uncommitted changes; they stay on the host until they are committed there.\n", repo.Dirty)
+		fmt.Fprintf(os.Stderr, "The session has %d files with uncommitted changes; they stay on the host until they are committed there.\n", repo.Dirty)
 	}
 	return nil
 }

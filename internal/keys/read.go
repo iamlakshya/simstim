@@ -4,7 +4,12 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"time"
 )
+
+const readReleaseWait = 5 * time.Second
+
+var afterReadReleaseWait = time.After
 
 // CancelReader is a reader whose waiting read can be asked to stop, as the
 // readers of github.com/muesli/cancelreader can. Cancel reports whether it
@@ -19,11 +24,11 @@ type CancelReader interface {
 // with ctx's error. It starts a read only when fn has asked for more, so
 // it takes nothing past the chunk where fn stopped. When it ends it asks r
 // to cancel a read that waits. When Cancel reports that it could, ReadUntil
-// waits for the read to end, so that the caller may close r: a read that
-// still ran would use r as it closes. When Cancel reports that it could
-// not, as on some Windows consoles, ReadUntil returns at once, and the
-// read stays waiting in its own goroutine until the process ends: the
-// caller must not close r then.
+// waits at most five seconds for the read to end. Cancel can report success
+// without waking a read on some Windows consoles. The caller must track the
+// read's completion before closing r, even when Cancel reports success.
+// When Cancel reports that it could not stop the read, ReadUntil returns at
+// once. A read that still waits keeps its own goroutine until it ends.
 func ReadUntil(ctx context.Context, r CancelReader, fn func([]byte) bool) error {
 	type chunk struct {
 		b   []byte
@@ -36,7 +41,10 @@ func ReadUntil(ctx context.Context, r CancelReader, fn func([]byte) bool) error 
 	defer func() {
 		close(done)
 		if r.Cancel() {
-			<-exited
+			select {
+			case <-exited:
+			case <-afterReadReleaseWait(readReleaseWait):
+			}
 		}
 	}()
 	go func() {
