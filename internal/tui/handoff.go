@@ -4,7 +4,16 @@ import (
 	"context"
 
 	tea "charm.land/bubbletea/v2"
+
+	"github.com/iamlakshya/simstim/internal/client"
 )
+
+// launcherContext keeps launcher-owned questions and notices on the screen
+// while inheriting the current operation's values and cancellation.
+func (m *Model) launcherContext(ctx context.Context) context.Context {
+	ctx = client.WithWarnings(client.WithNotes(ctx, nil), nil)
+	return client.WithTierQuestion(client.WithoutTierLoginPrompt(ctx), m.askHostTier)
+}
 
 // openBg starts a fresh background command context for one tea.Program run.
 func (m *Model) openBg(parent context.Context) {
@@ -93,7 +102,7 @@ func (m *Model) resumeAfterHandoff(after func() tea.Cmd) tea.Cmd {
 	for _, h := range m.hosts {
 		h.listing, h.pinging, h.doctoring = false, false, false
 	}
-	completed := m.drainHostSaves(false)
+	completed := m.drainHostSaves(m.backgroundContext(), false)
 	cmds := []tea.Cmd{
 		completed,
 		m.waitForTierQuestion(),

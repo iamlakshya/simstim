@@ -57,7 +57,7 @@ func TestLauncherRestartsInterruptedDoctorAfterAttachHandoff(t *testing.T) {
 				if cmd == nil {
 					t.Fatal("Enter on session returned nil cmd")
 				}
-				ps.attachQuit(cmd, "box", s.ID, doctorBlocked.Load)
+				ps.attachQuit(cmd, s.ID, doctorBlocked.Load)
 			case 2:
 				rm := fr.m.(*resumedModel)
 				ps := newProgStepper(t, pm, rm.m)

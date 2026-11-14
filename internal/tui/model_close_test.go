@@ -34,3 +34,30 @@ func TestLauncherProgramBoundaryJoinsRetiredCleanup(t *testing.T) {
 		}
 	})
 }
+
+func TestLauncherCancelledFinalizerStillJoinsCleanup(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		m := New(ctx, newFakeBackend(), Options{})
+		entered, release := make(chan struct{}), make(chan struct{})
+		m.conns.onClose(func() { close(entered); <-release })
+		cancel()
+		finished := make(chan struct{})
+		go func() { m.closeAfterProgramContext(ctx); close(finished) }()
+		<-entered
+		time.Sleep(pinCleanupGrace + time.Millisecond)
+		synctest.Wait()
+		select {
+		case <-finished:
+			t.Error("cancellation let the finalizer skip owned cleanup")
+		default:
+		}
+		close(release)
+		synctest.Wait()
+		select {
+		case <-finished:
+		default:
+			t.Error("the cancelled finalizer did not join finished cleanup")
+		}
+	})
+}

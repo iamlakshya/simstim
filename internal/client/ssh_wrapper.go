@@ -26,15 +26,6 @@ func oldWrapperPath(name string) string {
 	return filepath.Join(ConfigDir(), "ssh", "config-"+name)
 }
 
-func generatedFor(path string) (name string, ok bool) {
-	f, err := os.Open(path)
-	if err != nil {
-		return "", false
-	}
-	defer f.Close()
-	return generatedConfigOwner(f)
-}
-
 // generatedConfigOwner checks the header from the same descriptor as its inode.
 func generatedConfigOwner(r io.Reader) (name string, ok bool) {
 	line, _ := bufio.NewReader(io.LimitReader(r, 512)).ReadString('\n')

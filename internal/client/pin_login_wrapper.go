@@ -35,7 +35,7 @@ func beginLoginWrapperScope(ctx context.Context, h Host) (*loginWrapperScope, er
 		return nil, err
 	}
 	if st == nil {
-		return nil, fmt.Errorf("the login check has no owned host key stage")
+		return nil, errors.New("the login check has no owned host key stage")
 	}
 	scope := &loginWrapperScope{ctx: ctx, owner: h.Name, base: st.path + "-config",
 		allowed: map[string]bool{}, files: map[string]ownedSSHConfig{}}
@@ -77,7 +77,7 @@ func loginWrapperWriteHooks(path, what string) (atomicFileHooks, error) {
 	}
 	name, err := strconv.Unquote(quoted)
 	if err != nil {
-		return atomicFileHooks{}, nil
+		return atomicFileHooks{}, fmt.Errorf("identify the host for the SSH config: %w\nTry: run %s setup again", err, brand.Name)
 	}
 	stagesMu.Lock()
 	st := stages[name]

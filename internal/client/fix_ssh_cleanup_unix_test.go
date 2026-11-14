@@ -46,7 +46,7 @@ func TestDoctorSnapshotDoesNotBlockOnAReplacedFIFO(t *testing.T) {
 }
 
 func TestCancelledLiveControlProbeCannotCreateAnUnlinkFix(t *testing.T) {
-	path := indexedControlPath(t, "box", strings.Repeat("k", 26))
+	path := indexedControlPath(t, strings.Repeat("k", 26))
 	listener, err := net.Listen("unix", path)
 	if err != nil {
 		t.Fatal(err)
@@ -86,7 +86,7 @@ func TestLocalFixesContextReportsCancellationFromAnEmptyProbeResult(t *testing.T
 }
 
 func TestCancelledCapturedControlFixCannotUnlink(t *testing.T) {
-	path := indexedControlPath(t, "box", strings.Repeat("k", 26))
+	path := indexedControlPath(t, strings.Repeat("k", 26))
 	listener, err := net.ListenUnix("unix", &net.UnixAddr{Name: path, Net: "unix"})
 	if err != nil {
 		t.Fatal(err)
@@ -110,7 +110,7 @@ func TestCancelledCapturedControlFixCannotUnlink(t *testing.T) {
 func TestControlProbeCancellationErrorsNeverMeanStale(t *testing.T) {
 	for name, cause := range map[string]error{"cancelled": context.Canceled, "deadline": context.DeadlineExceeded} {
 		t.Run(name, func(t *testing.T) {
-			path := indexedControlPath(t, "box", strings.Repeat("k", 26))
+			path := indexedControlPath(t, strings.Repeat("k", 26))
 			listener, err := net.Listen("unix", path)
 			if err != nil {
 				t.Fatal(err)

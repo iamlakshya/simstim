@@ -15,10 +15,12 @@ import (
 // record, so these checks cover both resources without connecting to a host.
 type retryStageBackend struct {
 	*fakeBackend
-	stageErr error
-	gate     <-chan struct{}
-	entered  chan struct{}
-	owners   map[string]*retryPinOwner
+	stageErr    error
+	gate        <-chan struct{}
+	entered     chan struct{}
+	installGate <-chan struct{}
+	installing  chan struct{}
+	owners      map[string]*retryPinOwner
 }
 
 func (b *retryStageBackend) StagePin(ctx context.Context, name string) error {
@@ -62,10 +64,15 @@ func (b *retryStageBackend) AbortPin(name string) {
 
 func stageRetryWizard(t *testing.T) (*Model, *wizard, *retryStageBackend) {
 	t.Helper()
+	return stageRetryWizardContext(t, context.Background())
+}
+
+func stageRetryWizardContext(t *testing.T, ctx context.Context) (*Model, *wizard, *retryStageBackend) {
+	t.Helper()
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	be := &retryStageBackend{fakeBackend: newFakeBackend()}
 	be.pinUnknown = true
-	m := New(context.Background(), be, Options{})
+	m := New(ctx, be, Options{})
 	w := newWizard()
 	w.host = client.Host{Name: "box", SSH: "box"}
 	m.modal = w

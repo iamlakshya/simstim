@@ -117,7 +117,7 @@ func TestFirstTierQuestionFailureNeverPublishesOwn(t *testing.T) {
 			defer cancel()
 			previousWrite := writeSavedTierFile
 			t.Cleanup(func() { writeSavedTierFile = previousWrite })
-			ctx = WithTierQuestion(ctx, func(context.Context, Host) (Tier, error) {
+			ctx = WithTierQuestion(ctx, func(ctx context.Context, _ Host) (Tier, error) {
 				switch failure {
 				case "cancel":
 					cancel()
@@ -128,7 +128,7 @@ func TestFirstTierQuestionFailureNeverPublishesOwn(t *testing.T) {
 				case "saved entry changed":
 					replacement := h
 					replacement.Machine = &Machine{Provider: "tiertest", ID: "replacement"}
-					if err := SaveHosts(context.Background(), []Host{replacement}); err != nil {
+					if err := SaveHosts(ctx, []Host{replacement}); err != nil {
 						t.Fatal(err)
 					}
 				}

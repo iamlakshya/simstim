@@ -93,7 +93,7 @@ func TestLauncherStopsCleanlyWhenAttachReaderStuck(t *testing.T) {
 			if cmd == nil {
 				t.Fatal("Enter on session returned nil cmd")
 			}
-			ps.attachQuit(cmd, "box", s.ID, nil)
+			ps.attachQuit(cmd, s.ID, nil)
 			return nil
 		},
 	)
@@ -147,7 +147,7 @@ func TestLauncherResumesAfterCleanAttachHandoff(t *testing.T) {
 				if cmd == nil {
 					t.Fatal("Enter on session returned nil cmd")
 				}
-				ps.attachQuit(cmd, "box", s.ID, nil)
+				ps.attachQuit(cmd, s.ID, nil)
 			case 2:
 				rm, ok := fr.m.(*resumedModel)
 				if !ok {
@@ -245,7 +245,7 @@ func TestLauncherDropsUnadoptedDialAcrossAttachHandoff(t *testing.T) {
 				if cmd == nil {
 					t.Fatal("Enter on session returned nil cmd")
 				}
-				ps.attachQuit(cmd, "box", s.ID, slowBlocked.Load)
+				ps.attachQuit(cmd, s.ID, slowBlocked.Load)
 
 				// Let slow's Dial finish and call addUnadopted right as the
 				// program exits, without delivering dialledMsg to Update.
@@ -341,7 +341,7 @@ func TestLauncherWaitDoneDoesNotAccumulateAndHandlesCloseDuringAttach(t *testing
 				if cmd == nil {
 					t.Fatalf("run %d: Enter returned nil cmd", runs)
 				}
-				ps.attachQuit(cmd, "box", s.ID, nil)
+				ps.attachQuit(cmd, s.ID, nil)
 				return nil
 			}
 			statusAfterClose = m.hostByName("box").status

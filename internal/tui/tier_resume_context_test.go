@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"sync/atomic"
@@ -111,6 +112,43 @@ func TestPendingTransfersKeepTheLauncherTierContext(t *testing.T) {
 			}
 			if warnings.Load() != 0 {
 				t.Fatal("a host identity warning escaped after resume")
+			}
+		})
+	}
+}
+
+func TestPendingTransfersInheritTheCurrentContext(t *testing.T) {
+	for _, transfer := range []string{"attach", "exec"} {
+		t.Run(transfer, func(t *testing.T) {
+			parent := context.WithValue(context.Background(), handoffContextKey{}, "model")
+			m := New(parent, newFakeBackend(), Options{})
+			defer m.Close()
+			m.pauseBg()
+			ctx, cancel := context.WithCancelCause(context.WithValue(parent, handoffContextKey{}, "transfer"))
+			defer cancel(nil)
+			var err error
+			if transfer == "attach" {
+				h := client.Host{Name: "box", SSH: "box"}
+				m.pendingAttach = &pendingAttach{host: h.Name, id: "abcd2345", opts: client.AttachOptions{Host: h, Session: "abcd2345", State: m.attach}}
+				_, err = m.runPendingAttach(ctx, nil, nil, false)
+			} else {
+				m.pendingExec = &pendingExec{command: noopHandoffExec()}
+				_, err = m.runPendingExec(ctx, nil, nil, false)
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			bg := m.backgroundContext()
+			if got := bg.Value(handoffContextKey{}); got != "transfer" {
+				t.Fatalf("resumed context value = %v, want current transfer", got)
+			}
+			cause := errors.New("the transfer ended")
+			cancel(cause)
+			if !errors.Is(context.Cause(bg), cause) {
+				t.Fatalf("resumed context cause = %v, want transfer cancellation", context.Cause(bg))
+			}
+			if m.ctx.Err() != nil {
+				t.Fatal("ending one transfer cancelled the whole launcher")
 			}
 		})
 	}

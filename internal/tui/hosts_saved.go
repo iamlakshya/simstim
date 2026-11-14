@@ -21,8 +21,12 @@ type hostReloadedMsg struct {
 
 // reloadHost reads the saved entry of host name again, in the background.
 func (m *Model) reloadHost(name string) tea.Cmd {
+	return m.reloadHostFrom(m.backgroundContext(), name)
+}
+
+func (m *Model) reloadHostFrom(ctx context.Context, name string) tea.Cmd {
 	be := m.be
-	return m.bgCmd(func(ctx context.Context) tea.Msg {
+	return m.bgCmdFrom(ctx, func(ctx context.Context) tea.Msg {
 		hosts, err := be.LoadHosts(ctx)
 		if err != nil {
 			return hostReloadedMsg{name: name, err: err}

@@ -147,7 +147,6 @@ func New(ctx context.Context, be Backend, o Options) *Model {
 	// The launcher draws its own screen: a wait of the client, such as for
 	// the lock of hosts.toml, writes nothing on it, and a host-ID change on
 	// Dial surfaces as a toast rather than stderr text.
-	ctx = client.WithWarnings(client.WithNotes(ctx, nil), nil)
 	ctx, cancelTier := context.WithCancel(ctx)
 	m := &Model{
 		ctx: ctx, be: be, now: o.Now, motion: o.Motion,
@@ -164,7 +163,7 @@ func New(ctx context.Context, be Backend, o Options) *Model {
 			return tea.Tick(d, func(time.Time) tea.Msg { return msg })
 		},
 	}
-	ctx = client.WithTierQuestion(client.WithoutTierLoginPrompt(ctx), m.askHostTier)
+	ctx = m.launcherContext(ctx)
 	m.ctx = ctx
 	if m.now == nil {
 		m.now = time.Now

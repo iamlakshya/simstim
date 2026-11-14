@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"testing"
 	"time"
 
@@ -110,6 +111,21 @@ func TestLoginWrapperScopeNeverAdoptsAPreExistingFile(t *testing.T) {
 				t.Fatalf("cleanup adopted a pre-existing file: %v", err)
 			}
 		})
+	}
+}
+
+func TestLoginWrapperMalformedHostLeavesTheDestinationAlone(t *testing.T) {
+	ctx, _, scope := loginWrapperFixture(t)
+	body := []byte("Host user-config\n")
+	if err := os.WriteFile(scope.base, body, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := writeConfig(scope.base, `host "unterminated`, "", true); !errors.Is(err, strconv.ErrSyntax) {
+		t.Fatalf("malformed host config did not report its parse failure: %v", err)
+	}
+	scope.cleanup(ctx)
+	if got, err := os.ReadFile(scope.base); err != nil || string(got) != string(body) {
+		t.Fatalf("malformed host config replaced or adopted a foreign file: %v", err)
 	}
 }
 

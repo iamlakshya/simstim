@@ -55,7 +55,8 @@ func TestDoctorKeepsAnInodeOrHeaderReplacedAfterItsQuestion(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				contents = append(old, []byte("# replacement\n")...)
+				contents = old
+				contents = append(contents, []byte("# replacement\n")...)
 				if err := writeAtomicFile(candidate.path, ".replacement-*", contents); err != nil {
 					t.Fatal(err)
 				}

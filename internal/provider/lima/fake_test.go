@@ -4,13 +4,14 @@ import (
 	"context"
 	"errors"
 
-	"github.com/iamlakshya/simstim/internal/client"
 	"os"
 	"path/filepath"
 	"runtime"
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/iamlakshya/simstim/internal/client"
 )
 
 // fakeLimactl acts as limactl for one Mac or Linux machine. It keeps each

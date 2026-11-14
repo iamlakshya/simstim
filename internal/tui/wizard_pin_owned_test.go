@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/iamlakshya/simstim/internal/client"
 )
@@ -142,6 +143,16 @@ func (b *retryStageBackend) Install(ctx context.Context, h client.Host, p client
 	if _, err := b.pinOwner(ctx, h.Name); err != nil {
 		return err
 	}
+	if b.installing != nil {
+		close(b.installing)
+	}
+	if b.installGate != nil {
+		select {
+		case <-b.installGate:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
 	return b.fakeBackend.Install(ctx, h, p)
 }
 
@@ -160,7 +171,7 @@ func (b *retryStageBackend) SaveHostPinContext(ctx context.Context, h client.Hos
 	if owner != nil {
 		defer owner.abort()
 	}
-	return b.SaveHostPin(h)
+	return b.fakeBackend.SaveHostPinContext(ctx, h)
 }
 
 func TestWizardOldOwnerKeepsAReplacementStage(t *testing.T) {
@@ -238,17 +249,31 @@ func TestWizardOwnedStageSurvivesStepDeadlines(t *testing.T) {
 }
 
 func TestWizardOwnedStageHonoursModelCancellation(t *testing.T) {
-	m, w, be := stageRetryWizard(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	m, w, be := stageRetryWizardContext(t, ctx)
 	be.pinUnknown = false
 	be.probe = client.Platform{OS: "linux", Arch: "arm64"}
 	w.onProbe(m, w.probe(m)().(probeMsg))
-	ctx, cancel := context.WithCancel(m.ctx)
-	t.Cleanup(cancel)
-	m.ctx = ctx
+	gate := make(chan struct{})
+	defer close(gate)
+	be.installGate, be.installing = gate, make(chan struct{})
 	cmd := w.install(m)
+	done := make(chan installMsg, 1)
+	go func() { done <- cmd().(installMsg) }()
+	select {
+	case <-be.installing:
+	case <-time.After(5 * time.Second):
+		t.Fatal("install did not enter the owned backend")
+	}
 	cancel()
-	if msg := cmd().(installMsg); !errors.Is(msg.err, context.Canceled) {
-		t.Fatalf("install = %v, want parent cancellation", msg.err)
+	select {
+	case msg := <-done:
+		if !errors.Is(msg.err, context.Canceled) {
+			t.Fatalf("install = %v, want parent cancellation", msg.err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("install did not finish after parent cancellation")
 	}
 }
 
@@ -367,5 +392,47 @@ func (b *retryStageBackend) UpdateHostsContext(ctx context.Context, c client.Hos
 	if owner != nil {
 		defer owner.abort()
 	}
-	return b.UpdateHosts(c)
+	return b.fakeBackend.UpdateHostsContext(ctx, c)
+}
+
+func TestWizardSaveBackendKeepsCancellationAfterOwnerCheck(t *testing.T) {
+	for _, operation := range []string{"pin", "host"} {
+		t.Run(operation, func(t *testing.T) {
+			be := &retryStageBackend{fakeBackend: newFakeBackend()}
+			gate := make(chan struct{})
+			be.saveGate, be.saving = gate, make(chan struct{})
+			defer close(gate)
+			ctx, cancel := context.WithCancel(context.WithValue(context.Background(), handoffContextKey{}, "owned save"))
+			defer cancel()
+			h := client.Host{Name: "box", SSH: "box"}
+			done := make(chan error, 1)
+			go func() {
+				if operation == "pin" {
+					done <- be.SaveHostPinContext(ctx, h)
+				} else {
+					_, err := be.UpdateHostsContext(ctx, client.HostChange{Kind: "wizard test", Now: &h})
+					done <- err
+				}
+			}()
+			select {
+			case <-be.saving:
+			case <-time.After(5 * time.Second):
+				t.Fatal("save did not pass the owner check")
+			}
+			cancel()
+			select {
+			case err := <-done:
+				if !errors.Is(err, context.Canceled) {
+					t.Fatalf("save = %v, want cancellation", err)
+				}
+			case <-time.After(5 * time.Second):
+				t.Fatal("the backend lost cancellation after its owner check")
+			}
+			be.mu.Lock()
+			defer be.mu.Unlock()
+			if be.saveCtx != ctx || be.saveCtx.Value(handoffContextKey{}) != "owned save" || len(be.hosts) != 0 {
+				t.Fatal("the backend replaced the save context or saved after cancellation")
+			}
+		})
+	}
 }

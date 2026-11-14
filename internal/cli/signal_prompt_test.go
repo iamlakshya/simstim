@@ -121,7 +121,7 @@ func TestSignalAtAQuestionRestoresTheTerminal(t *testing.T) {
 	hosttest.New(t)
 	for _, sig := range []syscall.Signal{syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP, syscall.SIGQUIT} {
 		_ = os.MkdirAll(filepath.Join(client.ConfigDir(), "ssh"), 0o700)
-		_ = os.WriteFile(filepath.Join(client.ConfigDir(), "ssh", "config-gone"), generatedSSHFixture("gone"), 0o600)
+		_ = os.WriteFile(filepath.Join(client.ConfigDir(), "ssh", "config-gone"), generatedSSHFixture(), 0o600)
 		term, cmd := childOnTerminal(t, "doctor", "--fix")
 		term.WaitFor("Fix it? [y/N] ")
 		time.Sleep(100 * time.Millisecond) // the question reads in raw mode by now

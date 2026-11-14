@@ -3,7 +3,6 @@ package host
 import (
 	"context"
 	"encoding/json"
-	"io"
 	"log/slog"
 	"net"
 	"sync"
@@ -45,7 +44,7 @@ func newHolderStartup(id string) *holderStartup {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &holderStartup{ctx: ctx, cancel: cancel,
 		connections: make(map[net.Conn]struct{}),
-		peer:        &Holder{id: id, log: slog.New(slog.NewTextHandler(io.Discard, nil))}}
+		peer:        &Holder{id: id, log: slog.New(slog.DiscardHandler)}}
 }
 
 func beginHolderStartup(id string) (*holderStartup, error) {

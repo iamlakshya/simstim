@@ -308,7 +308,7 @@ func (m *Model) onHostSaved(msg hostSavedMsg) tea.Cmd {
 		}
 		return nil
 	}
-	return m.applyHostSaved(msg)
+	return m.applyHostSaved(m.backgroundContext(), msg)
 }
 
 // testHost measures the round trip to h.

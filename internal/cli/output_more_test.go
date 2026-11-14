@@ -181,7 +181,7 @@ func TestStreamsOfEachCommand(t *testing.T) {
 		}
 	}
 	_ = os.MkdirAll(filepath.Join(client.ConfigDir(), "ssh"), 0o700)
-	_ = os.WriteFile(filepath.Join(client.ConfigDir(), "ssh", "config-gone"), generatedSSHFixture("gone"), 0o600)
+	_ = os.WriteFile(filepath.Join(client.ConfigDir(), "ssh", "config-gone"), generatedSSHFixture(), 0o600)
 	out, errOut, err := runApart(t, "doctor")
 	if err != nil || !strings.Contains(out, "This computer:") || !strings.Contains(out, "✕ 1 generated SSH config") || strings.Contains(out, "Try:") ||
 		!strings.Contains(errOut, "Try: ") {
@@ -202,7 +202,7 @@ func TestFixWithJSON(t *testing.T) {
 	hosttest.New(t)
 	gone := filepath.Join(client.ConfigDir(), "ssh", "config-gone")
 	_ = os.MkdirAll(filepath.Dir(gone), 0o700)
-	_ = os.WriteFile(gone, generatedSSHFixture("gone"), 0o600)
+	_ = os.WriteFile(gone, generatedSSHFixture(), 0o600)
 	_, errOut, code := mainRun(t, "doctor", "--fix", "--json")
 	if code != 4 || !strings.Contains(errOut, `"try":"`) || !strings.Contains(errOut, `doctor --fix --json -y"`) {
 		t.Errorf("--fix --json: exit %d, %q", code, errOut)

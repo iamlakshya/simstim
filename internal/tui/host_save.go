@@ -19,10 +19,10 @@ type hostSavedMsg struct {
 	completion *hostSaveCompletion
 }
 
-func (m *Model) applyHostSaved(msg hostSavedMsg) tea.Cmd {
+func (m *Model) applyHostSaved(ctx context.Context, msg hostSavedMsg) tea.Cmd {
 	if hostChanged(msg.err) {
 		text, _ := errText(msg.err)
-		return tea.Batch(m.toastNext(toastError, sentence(text), "The list now shows the host as it is saved. Try again if you still want to."), m.reloadHost(msg.host.Name))
+		return tea.Batch(m.toastNext(toastError, sentence(text), "The list now shows the host as it is saved. Try again if you still want to."), m.reloadHostFrom(ctx, msg.host.Name))
 	}
 	if msg.err != nil {
 		return m.toastErr(msg.err)
@@ -36,19 +36,6 @@ func (m *Model) applyHostSaved(msg hostSavedMsg) tea.Cmd {
 		return tea.Batch(cmds...)
 	}
 	return nil
-}
-
-func changedHosts(hosts []client.Host, host client.Host, remove bool) []client.Host {
-	out := make([]client.Host, 0, len(hosts)+1)
-	for _, h := range hosts {
-		if h.Name != host.Name {
-			out = append(out, h)
-		}
-	}
-	if !remove {
-		out = append(out, host)
-	}
-	return out
 }
 
 func (m *Model) saveWizardHost(w *wizard, wctx context.Context, seq int, host client.Host) tea.Cmd {

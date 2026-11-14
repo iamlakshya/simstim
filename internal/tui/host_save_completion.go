@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"slices"
 	"sync"
 
@@ -74,12 +75,12 @@ func (s *hostSaveCompletions) close() {
 // drainHostSaves runs after pauseBg joins, before any resumed polling, host
 // reload or Close's cache save. The ordinary acknowledgement and common-result
 // handler produce cleanup commands and notices exactly once.
-func (m *Model) drainHostSaves(closing bool) tea.Cmd {
+func (m *Model) drainHostSaves(ctx context.Context, closing bool) tea.Cmd {
 	msgs := m.hostSaves.snapshot()
 	cmds := make([]tea.Cmd, 0, len(msgs))
 	for _, msg := range msgs {
 		if saved, ok := m.hostSaves.acknowledge(msg); ok {
-			cmds = append(cmds, m.applyHostSaved(saved))
+			cmds = append(cmds, m.applyHostSaved(ctx, saved))
 		}
 	}
 	if closing {

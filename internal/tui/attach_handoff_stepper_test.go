@@ -95,8 +95,9 @@ func (ps *progStepper) step(cmd tea.Cmd) {
 // attachQuit follows asynchronous tier resolution through normal Update.
 // A quit is accepted only after its owned reader stopped and the exact
 // foreground attach intent, state and remembered session were retained.
-func (ps *progStepper) attachQuit(cmd tea.Cmd, host, id string, extraBlocked func() int64) {
+func (ps *progStepper) attachQuit(cmd tea.Cmd, id string, extraBlocked func() int64) {
 	ps.t.Helper()
+	const host = "box"
 	quits, stops := ps.quits, ps.inputStops.Load()
 	ps.stepUntil(cmd, extraBlocked)
 	if ps.quits-quits != 1 {

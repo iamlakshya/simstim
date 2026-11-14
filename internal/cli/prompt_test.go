@@ -315,7 +315,7 @@ func TestCommandsWithNoInput(t *testing.T) {
 
 	// doctor --fix: each fix needs -y.
 	_ = os.MkdirAll(filepath.Join(client.ConfigDir(), "ssh"), 0o700)
-	_ = os.WriteFile(filepath.Join(client.ConfigDir(), "ssh", "config-gone"), generatedSSHFixture("gone"), 0o600)
+	_ = os.WriteFile(filepath.Join(client.ConfigDir(), "ssh", "config-gone"), generatedSSHFixture(), 0o600)
 	got, code = lineErr(t, "doctor", "--fix", "--no-input")
 	if code != 4 || !strings.Contains(got, "doctor needs a yes for each fix, and input is off") || !strings.Contains(got, "Try: "+brand.Name+" doctor --fix --no-input -y") {
 		t.Errorf("doctor --fix: exit %d\n%s", code, got)

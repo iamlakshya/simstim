@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 
 	"github.com/iamlakshya/simstim/internal/client"
 )
@@ -313,10 +314,17 @@ func colourAsked(cmd *cobra.Command, args []string, f *os.File) bool {
 // flag, --name=<bool> counts by its value, and the last one wins. Without
 // cmd, the flags of the top command read it.
 func flagOn(cmd *cobra.Command, args []string, name string) bool {
-	fs := Root().PersistentFlags()
-	if cmd != nil {
-		fs = cmd.Flags()
+	if cmd == nil {
+		// Reading global flags must not build executable command handlers.
+		cmd = &cobra.Command{}
+		addRootFlags(cmd)
+		addDebugFlags(cmd)
+		return boolFlagAsked(cmd.PersistentFlags(), args, name)
 	}
+	return boolFlagAsked(cmd.Flags(), args, name)
+}
+
+func boolFlagAsked(fs *pflag.FlagSet, args []string, name string) bool {
 	on := false
 	for _, w := range words(fs, args) {
 		if !w.isFlag {

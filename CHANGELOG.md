@@ -29,6 +29,8 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ### Fixed
 
+- The launcher keeps cancellation and its own tier questions after terminal handoff. Host save tests preserve the caller's context, and final cleanup still joins owned work after cancellation.
+- A temporary SSH config write now stops if its host label cannot be read. It leaves any existing file alone.
 - Pending holders confirm a stop before the agent starts. Delayed work keeps the session until its stop is confirmed.
 - Tests keep shared SSH control sockets in a directory owned by their run. Holder lifetime checks inspect only children they launched.
 - Provider SSH routes keep the original saved machine identity for pin checks. Failed host removal retires the pin before config cleanup, and stale saves cannot change a replacement's tier.

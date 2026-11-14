@@ -14,10 +14,10 @@ import (
 	"testing"
 )
 
-func indexedControlPath(t *testing.T, name, key string) string {
+func indexedControlPath(t *testing.T, key string) string {
 	t.Helper()
 	sshDirs(t)
-	h := Host{Name: name, SSH: name + ".example"}
+	h := Host{Name: "box", SSH: "box.example"}
 	if err := SaveHosts(context.Background(), []Host{h}); err != nil {
 		t.Fatal(err)
 	}
@@ -40,7 +40,7 @@ func captureControlRemoval(t *testing.T) (context.Context, *[]string) {
 }
 
 func TestControlCleanupUsesOnlyCurrentRootIndexedEpochs(t *testing.T) {
-	path := indexedControlPath(t, "box", strings.Repeat("k", 26))
+	path := indexedControlPath(t, strings.Repeat("k", 26))
 	deadControlSocket(t, path)
 	unknown := filepath.Join(filepath.Dir(filepath.Dir(path)), "custom-dead")
 	deadControlSocket(t, unknown)
@@ -71,8 +71,8 @@ func TestControlCleanupUsesOnlyCurrentRootIndexedEpochs(t *testing.T) {
 func TestControlCleanupKeepsReplacedAndLiveSockets(t *testing.T) {
 	for _, kind := range []string{"regular file", "live replacement", "same inode becomes live"} {
 		t.Run(kind, func(t *testing.T) {
-			path := indexedControlPath(t, "box", strings.Repeat("k", 26))
-			var fd int = -1
+			path := indexedControlPath(t, strings.Repeat("k", 26))
+			fd := -1
 			if kind == "same inode becomes live" {
 				var err error
 				fd, err = syscall.Socket(syscall.AF_UNIX, syscall.SOCK_STREAM, 0)
@@ -134,7 +134,7 @@ func TestControlCleanupKeepsReplacedAndLiveSockets(t *testing.T) {
 func TestControlCleanupRechecksIndexHostAndRoot(t *testing.T) {
 	for _, kind := range []string{"marker inode", "marker token", "saved entry", "other root"} {
 		t.Run(kind, func(t *testing.T) {
-			path := indexedControlPath(t, "box", strings.Repeat("k", 26))
+			path := indexedControlPath(t, strings.Repeat("k", 26))
 			deadControlSocket(t, path)
 			candidate := oneOwnedControl(t, path)
 			hook := beforeControlRemove
@@ -185,7 +185,7 @@ func TestControlCleanupRechecksIndexHostAndRoot(t *testing.T) {
 }
 
 func TestControlCleanupRejectsForeignOwnershipAndCancelledVerdicts(t *testing.T) {
-	path := indexedControlPath(t, "box", strings.Repeat("k", 26))
+	path := indexedControlPath(t, strings.Repeat("k", 26))
 	deadControlSocket(t, path)
 	candidate := oneOwnedControl(t, path)
 	owner := controlCleanupOwned

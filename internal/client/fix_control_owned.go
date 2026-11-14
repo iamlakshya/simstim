@@ -45,10 +45,11 @@ var (
 	beforeControlRemove = func(string) {}
 	probeOwnedControl   = func(ctx context.Context, path string) error {
 		conn, err := (&net.Dialer{Timeout: 300 * time.Millisecond}).DialContext(ctx, "unix", path)
-		if err == nil {
-			_ = conn.Close()
+		if err != nil {
+			return fmt.Errorf("probe the owned shared SSH socket: %w", err)
 		}
-		return err
+		_ = conn.Close()
+		return nil
 	}
 )
 
@@ -158,93 +159,6 @@ func withControlHost(ctx context.Context, host Host, run func([]Host) error) err
 		return err
 	}
 	return run(hosts)
-}
-
-func ownedControlSockets(ctx context.Context) []ownedControlSocket {
-	if !controlMaster {
-		return nil
-	}
-	hosts, err := LoadHosts()
-	if err != nil {
-		return nil
-	}
-	scope, scoped := controlScope()
-	if !scoped {
-		return nil
-	}
-	var found []ownedControlSocket
-	for _, host := range hosts {
-		if !ValidHostName(host.Name) {
-			continue
-		}
-		err := withControlHost(ctx, host, func(current []Host) error {
-			if !slices.ContainsFunc(current, func(h Host) bool { return h.Name == host.Name && SameEntry(h, host) }) {
-				return nil
-			}
-			for _, base := range controlDirs() {
-				baseInfo, err := os.Lstat(base)
-				if err != nil || !privateControlInfo(baseInfo) {
-					continue
-				}
-				top := filepath.Join(base, "h")
-				topInfo, err := os.Lstat(top)
-				if err != nil || !privateControlInfo(topInfo) {
-					continue
-				}
-				hostKey := controlHostKey(host.Name)
-				hostDir := filepath.Join(top, hostKey)
-				hostInfo, err := os.Lstat(hostDir)
-				if err != nil || !privateControlInfo(hostInfo) {
-					continue
-				}
-				entries, err := os.ReadDir(hostDir)
-				if err != nil {
-					continue
-				}
-				for _, entry := range entries {
-					if !controlKeyRE.MatchString(entry.Name()) {
-						continue
-					}
-					token, marker, ok := readOwnedControlMarker(filepath.Join(hostDir, entry.Name()))
-					if !ok {
-						continue
-					}
-					epochInfo, err := os.Lstat(filepath.Join(base, token))
-					if err != nil || !privateControlInfo(epochInfo) {
-						continue
-					}
-					sockets, err := os.ReadDir(filepath.Join(base, token))
-					if err != nil {
-						continue
-					}
-					for _, socket := range sockets {
-						if !epochSocketName.MatchString(socket.Name()) {
-							continue
-						}
-						info, err := os.Lstat(filepath.Join(base, token, socket.Name()))
-						if err != nil || info.Mode()&os.ModeSocket == 0 || !controlCleanupOwned(info) {
-							continue
-						}
-						c := ownedControlSocket{host: host, base: base, scope: scope, hostKey: hostKey, key: entry.Name(), token: token, name: socket.Name(),
-							baseInfo: baseInfo, topInfo: topInfo, hostInfo: hostInfo, markerInfo: marker, epochInfo: epochInfo, socketInfo: info}
-						root, ok := currentControlRoot(c, current)
-						if !ok {
-							continue
-						}
-						_ = root.Close()
-						if refusedControlSocket(ctx, c.path()) {
-							found = append(found, c)
-						}
-					}
-				}
-			}
-			return ctx.Err()
-		})
-		if err != nil && ctx.Err() != nil {
-			break
-		}
-	}
-	return found
 }
 
 func removeOwnedControlSocket(ctx context.Context, c ownedControlSocket) (bool, error) {
