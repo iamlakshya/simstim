@@ -22,24 +22,40 @@ import (
 )
 
 type sandbox struct {
-	spec   wall.Spec
-	mu     sync.Mutex
-	cmd    *exec.Cmd
-	pidfd  int
-	link   *net.UnixConn
-	exited chan struct{}
-	closed bool
-	forced bool
-	result wall.Exit
+	spec         wall.Spec
+	lifeMu       sync.Mutex
+	mu           sync.Mutex
+	storage      *runtimeStorage
+	cmd          *exec.Cmd
+	pidfd        int
+	link         *net.UnixConn
+	exited       chan struct{}
+	closed       bool
+	forced       bool
+	initProven   bool
+	result       wall.Exit
+	transferDone chan struct{}
 }
 
 func newSandbox(spec wall.Spec) (wall.Sandbox, error) {
-	return &sandbox{spec: spec, pidfd: -1, exited: make(chan struct{})}, nil
+	storage, err := openRuntimeStorage(spec.SessionDir)
+	if err != nil {
+		return nil, setupError("cannot pin sandbox runtime storage", err)
+	}
+	return &sandbox{spec: spec, storage: storage, pidfd: -1, exited: make(chan struct{})}, nil
 }
 
 // Start owns every descriptor and partial child before returning. The caller's
 // context bounds the start, while the sandbox outlives a successful start.
 func (s *sandbox) Start(ctx context.Context) (net.Conn, error) {
+	s.lifeMu.Lock()
+	defer s.lifeMu.Unlock()
+	s.mu.Lock()
+	unavailable := s.closed || s.cmd != nil
+	s.mu.Unlock()
+	if unavailable {
+		return nil, setupError("sandbox already started or closed", nil)
+	}
 	if err := ctx.Err(); err != nil {
 		return nil, setupError("sandbox start was cancelled", err)
 	}
@@ -52,14 +68,21 @@ func (s *sandbox) Start(ctx context.Context) (net.Conn, error) {
 		return nil, err
 	}
 	rootPath := filepath.Join(s.spec.SessionDir, "process-root")
-	if err = os.MkdirAll(rootPath, 0700); err != nil {
+	if err = s.storage.root.Mkdir("process-root", 0700); err != nil && !errors.Is(err, os.ErrExist) {
 		return nil, setupError("cannot make private root mount point", err)
+	}
+	if err = s.storage.capture("process-root"); err != nil {
+		return nil, setupError("cannot identify private root mount point", err)
 	}
 	root, err := pinSource(rootPath)
 	if err != nil {
 		return nil, setupError("cannot pin private root mount point", err)
 	}
 	defer root.Close()
+	rootInfo, err := root.Stat()
+	if err != nil || !os.SameFile(s.storage.owned["process-root"], rootInfo) {
+		return nil, setupError("private root mount point changed", err)
+	}
 	fds, err := unix.Socketpair(unix.AF_UNIX, unix.SOCK_STREAM|unix.SOCK_CLOEXEC, 0)
 	if err != nil {
 		return nil, setupError("cannot make guest link", err)
@@ -109,12 +132,25 @@ func (s *sandbox) Start(ctx context.Context) (net.Conn, error) {
 			f.Close()
 		}
 	}()
-	logf, err := os.OpenFile(filepath.Join(s.spec.SessionDir, "namespace.log"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
+	if err = s.storage.capture("namespace.log"); err != nil {
+		link.Close()
+		return nil, setupError("cannot identify namespace log", err)
+	}
+	logf, err := s.storage.root.OpenFile("namespace.log", os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
 	if err != nil {
 		link.Close()
 		return nil, setupError("cannot open namespace log", err)
 	}
 	defer logf.Close()
+	if err = s.storage.capture("namespace.log"); err != nil {
+		link.Close()
+		return nil, setupError("cannot own namespace log", err)
+	}
+	logInfo, err := logf.Stat()
+	if err != nil || !os.SameFile(logInfo, s.storage.owned["namespace.log"]) {
+		link.Close()
+		return nil, setupError("namespace log changed before use", err)
+	}
 	cmd := exec.Command(launcher)
 	cmd.Env = []string{"PATH=/usr/bin:/bin", "LANG=C", "LC_ALL=C"}
 	cmd.ExtraFiles = extra
@@ -136,9 +172,12 @@ func (s *sandbox) Start(ctx context.Context) (net.Conn, error) {
 		link.Close()
 		return nil, setupError("cannot start static namespace launcher", err)
 	}
-	s.cmd, s.link = cmd, link
+	s.cmd, s.link, s.transferDone = cmd, link, make(chan struct{})
 	s.mu.Unlock()
 	go s.reap(cmd)
+	var transferOnce sync.Once
+	finishTransfer := func() { transferOnce.Do(func() { close(s.transferDone) }) }
+	defer finishTransfer()
 	requestDone := make(chan error, 1)
 	go func() {
 		e := json.NewEncoder(writer).Encode(req)
@@ -151,9 +190,10 @@ func (s *sandbox) Start(ctx context.Context) (net.Conn, error) {
 	abort := func(cause error) (net.Conn, error) {
 		writer.Close()
 		link.Close()
-		_ = s.Kill()
-		_ = s.Wait()
-		return nil, setupError("namespace launcher did not start the sandbox", cause)
+		killErr := s.Kill()
+		finishTransfer()
+		result := s.Wait()
+		return nil, setupError("namespace launcher did not start the sandbox", errors.Join(cause, killErr, result.Err))
 	}
 	select {
 	case err = <-requestDone:
@@ -179,6 +219,7 @@ func (s *sandbox) Start(ctx context.Context) (net.Conn, error) {
 		return abort(ctx.Err())
 	}
 	_ = link.SetReadDeadline(time.Time{})
+	finishTransfer()
 	return link, nil
 }
 
@@ -214,17 +255,11 @@ func (s *sandbox) adoptInit(conn *net.UnixConn) error {
 	unix.CloseOnExec(fd)
 	// Verify this is a pidfd without delivering a signal. The launcher cannot
 	// substitute a file, mount descriptor or arbitrary open socket.
-	if err = unix.PidfdSendSignal(fd, 0, nil, 0); err != nil {
+	if err = signalInit(fd, 0, nil, 0); err != nil && !errors.Is(err, unix.ESRCH) {
 		unix.Close(fd)
 		return fmt.Errorf("validate namespace-init pidfd: %w", err)
 	}
 	s.mu.Lock()
-	if s.closed {
-		s.mu.Unlock()
-		_ = unix.PidfdSendSignal(fd, unix.SIGKILL, nil, 0)
-		unix.Close(fd)
-		return fmt.Errorf("sandbox ended before ownership transfer")
-	}
 	s.pidfd = fd
 	// Ownership is published before the acknowledgement. Kill and reap use
 	// this same lock, so neither can release or overlook an acknowledged init.
@@ -238,18 +273,33 @@ func (s *sandbox) adoptInit(conn *net.UnixConn) error {
 
 func (s *sandbox) reap(cmd *exec.Cmd) {
 	err := cmd.Wait()
+	// The final ownership message may already be queued when the launcher
+	// exits. Join its reader before deciding that there is no owned init.
+	if s.transferDone != nil {
+		<-s.transferDone
+	}
 	s.mu.Lock()
-	s.closed = true
+	var cleanupErr error
 	if s.pidfd >= 0 {
 		if !initExited(s.pidfd) {
 			s.forced = true
 		}
-		_ = unix.PidfdSendSignal(s.pidfd, unix.SIGKILL, nil, 0)
-		waitInitExit(s.pidfd)
-		_ = unix.Close(s.pidfd)
-		s.pidfd = -1
+		if signalErr := signalInit(s.pidfd, unix.SIGKILL, nil, 0); signalErr != nil && !errors.Is(signalErr, unix.ESRCH) {
+			cleanupErr = fmt.Errorf("end owned namespace init: %w", signalErr)
+		}
+		if waitErr := waitInitExit(s.pidfd); waitErr != nil {
+			// Keep this exact owned descriptor. A completed launcher is not
+			// proof that its namespace init and descendants have ceased.
+			cleanupErr = errors.Join(cleanupErr, waitErr)
+			s.forced = true
+		} else {
+			s.initProven = true
+			cleanupErr = errors.Join(cleanupErr, unix.Close(s.pidfd))
+			s.pidfd = -1
+		}
 	}
-	s.result = wall.Exit{Err: err}
+	s.closed = s.pidfd < 0
+	s.result = wall.Exit{Err: errors.Join(err, cleanupErr)}
 	if cmd.ProcessState != nil {
 		s.result.Code = cmd.ProcessState.ExitCode()
 		if ws, ok := cmd.ProcessState.Sys().(syscall.WaitStatus); ok && ws.Signaled() {
@@ -263,8 +313,11 @@ func (s *sandbox) reap(cmd *exec.Cmd) {
 // Stop terminates the namespace init after the caller's graceful ctl exchange.
 func (s *sandbox) Stop(ctx context.Context, grace time.Duration) error {
 	s.mu.Lock()
+	var signalErr error
 	if s.pidfd >= 0 {
-		_ = unix.PidfdSendSignal(s.pidfd, unix.SIGTERM, nil, 0)
+		if err := signalInit(s.pidfd, unix.SIGTERM, nil, 0); err != nil && !errors.Is(err, unix.ESRCH) {
+			signalErr = err
+		}
 	}
 	started := s.cmd != nil
 	s.mu.Unlock()
@@ -275,12 +328,13 @@ func (s *sandbox) Stop(ctx context.Context, grace time.Duration) error {
 	defer timer.Stop()
 	select {
 	case <-s.exited:
-		return nil
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		return errors.Join(signalErr, s.result.Err)
 	case <-ctx.Done():
-		_ = s.Kill()
-		return ctx.Err()
+		return errors.Join(ctx.Err(), signalErr, s.Kill())
 	case <-timer.C:
-		return s.Kill()
+		return errors.Join(signalErr, s.Kill())
 	}
 }
 
@@ -295,8 +349,21 @@ func (s *sandbox) Kill() error {
 		if !initExited(s.pidfd) {
 			s.forced = true
 		}
-		if err := unix.PidfdSendSignal(s.pidfd, unix.SIGKILL, nil, 0); err != nil && !errors.Is(err, unix.ESRCH) {
+		if err := signalInit(s.pidfd, unix.SIGKILL, nil, 0); err != nil && !errors.Is(err, unix.ESRCH) {
 			return fmt.Errorf("kill namespace init: %w", err)
+		}
+		select {
+		case <-s.exited:
+			// A previous wait error retained this descriptor. Retry physical
+			// cleanup against the same owned init, preserving the old error.
+			if err := waitInitExit(s.pidfd); err != nil {
+				return errors.Join(s.result.Err, err)
+			}
+			s.initProven = true
+			closeErr := unix.Close(s.pidfd)
+			s.pidfd, s.closed = -1, true
+			s.result.Err = errors.Join(s.result.Err, closeErr)
+		default:
 		}
 	}
 	// Before the acknowledged transfer the outer launcher owns the blocked
@@ -309,10 +376,11 @@ func (s *sandbox) Kill() error {
 	} else {
 		s.closed = true
 	}
-	return nil
+	return s.result.Err
 }
 
-// Wait publishes an end only after the namespace init has been killed.
+// Wait returns the owned wait result. A cleanup error retains uncertain init
+// ownership; it is never evidence of a clean or physically completed exit.
 func (s *sandbox) Wait() wall.Exit {
 	s.mu.Lock()
 	started := s.cmd != nil
@@ -327,13 +395,18 @@ func (s *sandbox) Wait() wall.Exit {
 
 // Destroy removes only a stopped sandbox's private runtime files.
 func (s *sandbox) Destroy() error {
+	s.lifeMu.Lock()
+	defer s.lifeMu.Unlock()
 	s.mu.Lock()
-	running := s.cmd != nil && !s.closed
+	running := s.pidfd >= 0 || s.cmd != nil && !s.closed
+	if !running {
+		s.closed = true
+	}
 	s.mu.Unlock()
 	if running {
 		return setupError("stop the sandbox before destroying it", nil)
 	}
-	if err := os.RemoveAll(s.spec.SessionDir); err != nil {
+	if err := s.storage.destroy(); err != nil {
 		return setupError("cannot remove sandbox files", err)
 	}
 	return nil
@@ -342,32 +415,10 @@ func (s *sandbox) Destroy() error {
 // Abilities reports no optional copy or freeze support at this level.
 func (s *sandbox) Abilities() wall.Abilities { return wall.Abilities{} }
 
-// waitInitExit holds ownership until the namespace init has actually exited.
-// Killing a pidfd is asynchronous. Poll readiness is the kernel's evidence,
-// including when the outer launcher died before it could reap PID1.
-func waitInitExit(fd int) {
-	poll := []unix.PollFd{{Fd: int32(fd), Events: unix.POLLIN}}
-	for {
-		n, err := unix.Poll(poll, -1)
-		if errors.Is(err, unix.EINTR) {
-			continue
-		}
-		if err != nil || n > 0 {
-			return
-		}
-	}
-}
-
 // CleanExit is trusted evidence for committing an already captured state epoch.
 // It stays false until actual Wait completion, and after forced termination.
 func (s *sandbox) CleanExit() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.closed && s.cmd != nil && s.result.Err == nil && s.result.Code == 0 && !s.forced
-}
-
-func initExited(fd int) bool {
-	poll := []unix.PollFd{{Fd: int32(fd), Events: unix.POLLIN}}
-	n, err := unix.Poll(poll, 0)
-	return err == nil && n > 0 && poll[0].Revents&unix.POLLIN != 0
+	return s.closed && s.initProven && s.cmd != nil && s.result.Err == nil && s.result.Code == 0 && !s.forced
 }

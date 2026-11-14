@@ -79,6 +79,9 @@ func (s *Session) waitRefusals() {
 // refuses an empty frame, and a frame over maxFrame before it reads the
 // frame's body.
 func (s *Session) readFrame(r *bufio.Reader) (proto.Frame, error) {
+	if err := s.terminalError(); err != nil {
+		return proto.Frame{}, err
+	}
 	head, err := r.Peek(4)
 	if err != nil {
 		return proto.Frame{}, readErr(err)
@@ -89,13 +92,23 @@ func (s *Session) readFrame(r *bufio.Reader) (proto.Frame, error) {
 	case n > maxFrame:
 		return proto.Frame{}, breach("a frame of %d bytes, over %d", n, maxFrame)
 	}
+	s.mu.Lock()
+	if s.closed {
+		err := s.err
+		s.mu.Unlock()
+		return proto.Frame{}, err
+	}
 	if s.rbuf == nil {
 		s.rbuf = make([]byte, maxFrame)
 	}
 	buf := s.rbuf[:binary.LittleEndian.Uint32(head)]
+	s.mu.Unlock()
 	_, _ = r.Discard(4)
 	if _, err := io.ReadFull(r, buf); err != nil {
 		return proto.Frame{}, readErr(err)
+	}
+	if err := s.terminalError(); err != nil {
+		return proto.Frame{}, err
 	}
 	return proto.Frame{Type: proto.Type(buf[0]), Payload: buf[1:]}, nil
 }
@@ -128,6 +141,11 @@ func (s *Session) readHello(r *bufio.Reader) error {
 		return &VersionError{Guest: clean(h.Version), Supervisor: version.Version}
 	}
 	s.mu.Lock()
+	if s.closed {
+		err := s.err
+		s.mu.Unlock()
+		return err
+	}
 	s.helloOK = true
 	s.mu.Unlock()
 	close(s.hello)
@@ -166,6 +184,9 @@ func readErr(err error) error {
 // handle applies one frame of the other end. Both ends run one version of
 // the helper, so a frame of another type breaks the link.
 func (s *Session) handle(f proto.Frame) error {
+	if err := s.terminalError(); err != nil {
+		return err
+	}
 	switch f.Type {
 	case proto.TStreamOpen:
 		return s.onOpen(f.Payload)
@@ -183,12 +204,15 @@ func (s *Session) handle(f proto.Frame) error {
 // onOpen takes a stream that the other end opened, or refuses it. Its ID
 // must be the other end's last ID plus 2.
 func (s *Session) onOpen(p []byte) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return s.err
+	}
 	if len(p) < 4 {
 		return breach("an open frame of %d bytes", len(p))
 	}
 	id := binary.LittleEndian.Uint32(p)
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	if uint64(id) != s.nextPeer {
 		return breach("stream %d was opened, but the next ID of the %s is %d", id, s.side.other(), s.nextPeer)
 	}
@@ -224,6 +248,9 @@ func (s *Session) onOpen(p []byte) error {
 // admit checks an open's header: its size, the streams that the other end
 // has open, its kind, and the side that may open that kind. Under s.mu.
 func (s *Session) admit(hdr []byte) (Kind, bool) {
+	if s.closed {
+		return "", false
+	}
 	peer := s.side.other()
 	if len(hdr) > s.opt.MaxHeader || s.count[peer] >= s.opt.maxOpen(peer) {
 		return "", false
@@ -252,6 +279,9 @@ func (s *Session) admit(hdr []byte) (Kind, bool) {
 // closed here, it gives nil and no error: the frame is dropped, because its
 // sender may not have seen the close yet. Under s.mu.
 func (s *Session) lookup(id uint32, what string) (*Stream, error) {
+	if s.closed {
+		return nil, s.err
+	}
 	if s.neverOpened(id) {
 		return nil, breach("%s for stream %d, which was never opened", what, id)
 	}
@@ -274,12 +304,15 @@ func (s *Session) neverOpened(id uint32) bool {
 
 // onData copies the bytes of a stream into its buffer, within its credit.
 func (s *Session) onData(p []byte) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return s.err
+	}
 	if len(p) < 4 {
 		return breach("a data frame of %d bytes", len(p))
 	}
 	id, data := binary.LittleEndian.Uint32(p), p[4:]
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	st, err := s.lookup(id, "data")
 	if st == nil {
 		return err
@@ -303,6 +336,11 @@ func (s *Session) onData(p []byte) error {
 
 // onClose applies the other end's close of a stream.
 func (s *Session) onClose(p []byte) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return s.err
+	}
 	if len(p) != 5 {
 		return breach("a close frame of %d bytes", len(p))
 	}
@@ -310,8 +348,6 @@ func (s *Session) onClose(p []byte) error {
 	if code > closeRefused {
 		return breach("close code %d on stream %d", code, id)
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	st, err := s.lookup(id, "a close")
 	if st == nil {
 		return err
@@ -338,12 +374,15 @@ func (s *Session) onClose(p []byte) error {
 
 // onWindow adds the other end's credit to a stream.
 func (s *Session) onWindow(p []byte) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return s.err
+	}
 	if len(p) != 8 {
 		return breach("a credit frame of %d bytes", len(p))
 	}
 	id, n := binary.LittleEndian.Uint32(p), binary.LittleEndian.Uint32(p[4:])
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	st, err := s.lookup(id, "credit")
 	if st == nil {
 		return err

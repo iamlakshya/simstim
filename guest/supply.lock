@@ -1,10 +1,53 @@
-# Pins that no package ecosystem covers. scripts/pins-watch.py checks each one daily (spec 19.5).
+# Pins that no package ecosystem covers, and every outside input of the boot
+# pair and the VMM, pinned by SHA-256 (spec 19.5 and 20.1).
 version = 1
 
-# [[pin]]
-# name = "cloud-hypervisor"                    # a short name, for messages and issues
-# repo = "cloud-hypervisor/cloud-hypervisor"   # owner/name on GitHub, for its advisories
-# ref = "v54.0"                                # the tag, for people
-# commit = "<40 hex>"                          # the commit of ref, which the build uses
-# watch = "github"                             # "github": advisories and ancestry. "osv": OSV only.
-# tag = "v{version}"                           # optional: the tag of a release, for advisories that name versions
+[[pin]]
+name = "kernel"
+ref = "v6.18.63"
+commit = "1cdda838e8475edf89b73ff0cc952005dd0b1fa7"
+watch = "osv"
+
+[[pin]]
+name = "erofs-utils"
+repo = "erofs/erofs-utils"
+ref = "v1.9.4"
+commit = "f36cadb5c563995ab3aa8572a60ed6b721b9557d"
+watch = "github"
+
+[[pin]]
+name = "cloud-hypervisor"
+repo = "cloud-hypervisor/cloud-hypervisor"
+ref = "v54.1"
+commit = "74aeae19cb1ee2c44d33796b0e4e95e1a68e94dd"
+watch = "github"
+
+[kernel]
+version = "6.18.63"
+released = 2026-11-10
+url = "https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.18.63.tar.xz"
+sha256 = "81764a545072d160748beff4d9de2e7d95aa9f16e8261110288f067a2cc61d71"
+
+[erofs_utils]
+version = "1.9.4"
+url = "https://github.com/erofs/erofs-utils/archive/refs/tags/v1.9.4.tar.gz"
+sha256 = "7d135aa2550326a5acf20f53c518aea5a8900015ce50700044e40f818c31dd80"
+
+[moby_check_config]
+commit = "70efc0e31da3a115fc87574d1b786fa2b867c346"
+sha256 = "fda4343e9b50c47896653ca774ccbe9614bfcdb60f080d2b6277baf27efc0a71"
+
+[builder]
+image = "docker.io/library/debian@sha256:9c6e381421d0f48d1b8133e573f33c185ee16cbf505eda9c4a8a4791b25ea8a6"
+snapshot = "20261110T000000Z"
+suite = "trixie"
+inrelease_sha256 = "0584fba32e13e0ab8285fb16c27adea1ec03a73669c18702821094fd6ca86675"
+
+[[vmm]]
+name = "cloud-hypervisor"
+version = "54.1"
+released = 2026-11-11
+eol = 2027-01-06
+amd64 = { url = "https://github.com/cloud-hypervisor/cloud-hypervisor/releases/download/v54.1/cloud-hypervisor-static", sha256 = "f9ffb9646783233d1f0fb09e77db1fca66499d1041e63bc011b90683c0d49933", size = 7344872 }
+arm64 = { url = "https://github.com/cloud-hypervisor/cloud-hypervisor/releases/download/v54.1/cloud-hypervisor-static-aarch64", sha256 = "96ef17679a4a75be8eefa1956dd645a57f7974ec50565090ea9298f9bbb761ad", size = 5824616 }
+source = { url = "https://github.com/cloud-hypervisor/cloud-hypervisor/releases/download/v54.1/cloud-hypervisor-v54.1.tar.xz", sha256 = "7f030190ea1d47c45d1a6eff02b94378987091cf60c2462ee0a6105e5dfdb78a", size = 33472980 }

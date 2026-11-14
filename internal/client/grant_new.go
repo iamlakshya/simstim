@@ -100,11 +100,20 @@ func (c *Conn) prepareNewGrants(ctx context.Context, a NewArgs) (NewArgs, Tier, 
 		return a, TierUnknown, err
 	}
 	r := grantRequestOf(ctx)
-	tier, ceiling, err := c.newGrantTier(ctx, secretMapNames(a.Secrets), a.SSHAgent)
+	names := secretMapNames(a.Secrets)
+	plan := newPlanOf(ctx)
+	if plan != nil {
+		names = plan.selection.Names()
+	}
+	tier, ceiling, err := c.newGrantTier(ctx, names, a.SSHAgent)
 	if err != nil {
 		return a, tier, err
 	}
 	a.SSHAgent = a.SSHAgent || r.SSHAgent
+	if plan != nil {
+		a, err = plan.final(ctx, c, a, tier, ceiling)
+		return a, tier, err
+	}
 	// Even a normal start checks an existing file for damage, rather than
 	// silently treating damaged grant state as a higher ceiling.
 	if _, err := SandboxPolicies(ctx, c.Host); err != nil {

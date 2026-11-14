@@ -56,6 +56,7 @@ type instance struct {
 	Memory        int64  `json:"memory"`
 	Disk          int64  `json:"disk"`
 	Config        *struct {
+		Plain                *bool `json:"plain"`
 		NestedVirtualization *bool `json:"nestedVirtualization"`
 		NetworkOpts          struct {
 			HostLoopback *bool `json:"hostLoopback"`
@@ -175,6 +176,11 @@ func (Provider) Create(ctx context.Context, req provider.Request) (client.Host, 
 		Name: req.Name, SSH: sshAlias(inst), SSHConfig: in.SSHConfigFile,
 		Machine: &client.Machine{Provider: "lima", ID: inst, IdleStop: idle},
 	}
+	source, sourceErr := capturePlainSource(ctx, h, in)
+	if sourceErr != nil {
+		return client.Host{}, sourceErr
+	}
+	h.Machine.Source = source
 	// Lima's own SSH config checks no host key. The client pins the new
 	// VM's key now, before its first connection (isolation spec 14.7.1).
 	pin, err := pinHostKey(ctx, h)

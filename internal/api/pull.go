@@ -14,6 +14,9 @@ const PullMaxDefault int64 = 512 << 20
 // PullReadMax is the most that one pull.read response may carry.
 const PullReadMax = 1 << 20
 
+// PullExportsMax bounds exports of one existing outer connection.
+const PullExportsMax = 4
+
 // Pull operation names use the existing authenticated bridge connection.
 const (
 	OpPullBegin = "pull.begin"

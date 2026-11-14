@@ -90,7 +90,7 @@ func TestOwnedStoreActualFreshWakeAndSpawnCallBeforeHolder(t *testing.T) {
 			report := filepath.Join(root, "work", "caller-report.json")
 			kind := storeAgentFixture(t, []agents.SecretBinding{{Env: "STORE_KEY", Store: []string{"/usr/bin/python3", "-c", storeCallerReportScript, report, brand.Env("SESSION"), brand.Env("HOOK_SOCK")}}})
 			barrier := storeCallerHolderBarrier(t)
-			// The existing fixture's root/home/work and ALLstate/XDG paths are
+			// The fixture's private root, home, work and all state/XDG paths are
 			// owned1000 and traversable. The init's path mapping stays owned.
 			g := &Init{root: root, primary: "store234", members: map[string]*holderProc{"parent234": {id: "parent234", done: make(chan struct{})}}, memberStarts: map[string]bool{"store234": true}, sessionPrepared: !restore}
 			args := proto.CtlStartArgs{Session: "store234", Agent: kind, Argv: []string{"/usr/bin/true"}, Env: directCallerIdentityEnv(base, false), Cwd: filepath.Join(root, "work"), Secrets: map[string]string{"STORE_KEY": "public-sentinel-no-newline", "EXPOSED_KEY": "real-exposed-must-not-enter-Store"}, SecretModes: map[string]api.SecretMode{"STORE_KEY": api.SecretModeBound, "EXPOSED_KEY": api.SecretModeExposed}}

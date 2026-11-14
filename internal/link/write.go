@@ -19,11 +19,28 @@ const (
 	maxBatch = 256 << 10
 )
 
+// sessionWriter admits an actual raw write under the logical-state lock.
+// The one writer retains its buffer through the syscall. Abort revokes queued
+// work, while the transport owner must close and join already admitted I/O.
+type sessionWriter struct{ session *Session }
+
+func (w sessionWriter) Write(p []byte) (int, error) {
+	s := w.session
+	s.mu.Lock()
+	if s.closed {
+		err := s.err
+		s.mu.Unlock()
+		return 0, err
+	}
+	s.mu.Unlock()
+	return s.conn.Write(p)
+}
+
 // writeLoop sends this side's hello, then the frames of the streams, until
 // the link ends. It is the only writer of the connection.
 func (s *Session) writeLoop() {
 	h := proto.Hello{Magic: proto.Magic, Protocol: version.Protocol, Version: version.Version, Role: s.side.String()}
-	if err := proto.NewWriter(s.conn).WriteJSON(proto.THello, h); err != nil {
+	if err := proto.NewWriter(sessionWriter{s}).WriteJSON(proto.THello, h); err != nil {
 		s.fail(fmt.Errorf("link: send the hello: %w", err))
 		return
 	}
@@ -42,7 +59,7 @@ func (s *Session) writeContinuation() {
 			if len(b) == 0 {
 				break
 			}
-			n, err := s.conn.Write(b)
+			n, err := (sessionWriter{s}).Write(b)
 			if err == nil && n != len(b) {
 				err = io.ErrShortWrite
 			}
@@ -60,6 +77,9 @@ func (s *Session) writeContinuation() {
 func (s *Session) wrote(seq uint64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.aborted {
+		return
+	}
 	s.written = seq
 	s.progress.wake()
 }
@@ -136,6 +156,9 @@ func (s *Session) pop() *Stream {
 // schedule queues st for the writer when it has a frame to send. Under
 // s.mu.
 func (s *Session) schedule(st *Stream) {
+	if s.closed {
+		return
+	}
 	if st.queued || !st.sendable() {
 		return
 	}

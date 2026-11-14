@@ -40,7 +40,7 @@ type inputPlanSelection struct {
 	primaryIncludes []string               // NEW-only local reviewed selection, not host include
 	base            string                 // applies only to the primary source
 	metadata        LocalGitMetadataOpener // original canonical settings/source lease factory
-	resolvedEnv     map[string]string // actual same-snapshot ordinary environment; non-nil empty is known empty
+	resolvedEnv     map[string]string      // actual same-snapshot ordinary environment; non-nil empty is known empty
 }
 
 // SessionInputPlan owns a sealed local declaration and private source facts.
@@ -61,6 +61,7 @@ type SessionInputPlan struct {
 	seeds     map[string]*laptopSeed
 	facts     []inputSourceFact
 	seedOrder []*laptopSeed
+	discovery *inputSeedDiscovery
 }
 
 func buildSessionInputPlan(ctx context.Context, selection inputPlanSelection) (_ *SessionInputPlan, err error) {
@@ -85,6 +86,11 @@ func buildSessionInputPlan(ctx context.Context, selection inputPlanSelection) (_
 	// environment before path reads. A missing source never becomes Settings{}.
 	if selection.resolvedEnv == nil {
 		return nil, gitMetadataFailure()
+	}
+	if selection.discovery.primary() != nil {
+		if err := selection.discovery.revalidatePrimaryPolicy(ctx); err != nil {
+			return nil, err
+		}
 	}
 	env := maps.Clone(selection.resolvedEnv)
 	copyMax, seedMax, err := api.InputLimits(selection.values)
@@ -118,7 +124,7 @@ func buildSessionInputPlan(ctx context.Context, selection inputPlanSelection) (_
 		}
 	}
 	plan := &SessionInputPlan{mode: selection.mode, sourcePin: slices.Clone(selection.sourcePin), env: env,
-		copyMax: copyMax, seedMax: seedMax, copies: map[string]plannedCopy{}, seeds: map[string]*laptopSeed{}}
+		copyMax: copyMax, seedMax: seedMax, copies: map[string]plannedCopy{}, seeds: map[string]*laptopSeed{}, discovery: selection.discovery}
 	defer func() {
 		if err != nil {
 			_ = plan.Close()
@@ -174,7 +180,11 @@ func buildSessionInputPlan(ctx context.Context, selection inputPlanSelection) (_
 		if index == 0 && selection.discovery.primary() != nil {
 			base = selection.base
 		}
-		seed, err := createLaptopSeed(ctx, directory, selection.seedDirty, seedMax, plan.plan.Identity, base, selection.metadata)
+		var selected *seedPolicySnapshot
+		if index == 0 && selection.discovery.primary() != nil {
+			selected = discovered[index].policy
+		}
+		seed, err := createLaptopSeedSelected(ctx, directory, selection.seedDirty, seedMax, plan.plan.Identity, base, selected, selection.metadata)
 		if err != nil {
 			return nil, err
 		}
@@ -249,7 +259,13 @@ func (p *SessionInputPlan) withSources(ctx context.Context, publish func(api.Ses
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	if p.discovery.primary() != nil {
+		if err := p.discovery.revalidatePrimaryPolicy(ctx); err != nil {
+			return err
+		}
+	}
 	sources := inputtransfer.Sources{
+		ValidatePayload: func(ctx context.Context) error { return p.discovery.revalidatePrimaryPolicy(ctx) },
 		File: func(ctx context.Context, file api.InputFile, out io.Writer) error {
 			copy, ok := p.copies[file.Path]
 			if !ok || copy.file != file {
@@ -288,6 +304,9 @@ func (p *SessionInputPlan) Close() error {
 		if err := seed.close(); err != nil {
 			failures = append(failures, err)
 		}
+	}
+	if p.discovery != nil {
+		failures = append(failures, p.discovery.Close())
 	}
 	err := errors.Join(failures...)
 	// A failed close keeps the plan retryable and retains each seed's actual

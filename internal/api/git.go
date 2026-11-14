@@ -26,6 +26,9 @@ const (
 
 // RepoInfoArgs asks repo.info about a folder.
 type RepoInfoArgs struct {
+	// Policy asks the trusted source reader for its repository policy too.
+	Policy bool `json:"policy,omitempty"`
+
 	// Dir is the folder on the host.
 	Dir string `json:"dir,omitempty"`
 	// Changes asks for the count of changed files too. That runs git status,
@@ -35,6 +38,15 @@ type RepoInfoArgs struct {
 
 // RepoInfo is what repo.info says about a folder's git repository.
 type RepoInfo struct {
+	// PolicyChecked distinguishes no file from an older helper ignoring Policy.
+	PolicyChecked bool `json:"policy_checked,omitempty"`
+
+	// Policy is the bounded repository policy read from this trusted source tree.
+	Policy *RepositoryPolicy `json:"policy,omitempty"`
+
+	// Origin is the origin remote URL, used to select repository layers.
+	Origin string `json:"origin,omitempty"`
+
 	// Root is the top folder of the folder's work tree: a worktree's own.
 	Root string `json:"root"`
 	// Main is the main repository's folder, from git's common folder. Every

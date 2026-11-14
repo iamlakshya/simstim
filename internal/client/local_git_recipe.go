@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/iamlakshya/simstim/internal/api"
+	"github.com/iamlakshya/simstim/internal/brand"
 )
 
 // localGitRecipe recognises the closed operations of the existing executor.
@@ -30,6 +31,8 @@ func localGitRecipe(args []string) bool {
 		return false
 	}
 	switch args[0] {
+	case "ls-tree":
+		return len(args) == 5 && args[1] == "-z" && api.ValidGitOID(args[2]) && args[3] == "--" && (args[4] == "."+brand.Name || args[4] == "."+brand.Name+"/sandbox.toml")
 	case "rev-parse":
 		return localGitRevisionRecipe(args[1:])
 	case "cat-file":

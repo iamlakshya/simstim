@@ -6,6 +6,8 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ### Added
 
+- Laptop seeds bind repository policy to the exact selected commit. Dirty seeds reuse one private prospective commit through review and transfer. Local Git checks actual managed provider sharing and keeps uncertain native captures until cleanup joins.
+
 - Completion on the real `policy rm` command lists rule IDs and targets from every local config layer. Profile names use the same config schema. Both stay local and quiet, including when another command holds a host lock.
 
 - Policy commands read and change rules in all-session, host, repository, profile and session layers. File changes preserve unrelated keys. Dry runs change nothing. `config check` reports the current folder's layers and their sources.
@@ -49,6 +51,10 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 - `agents install --force` is now `--reinstall`. `--force` still works until v0.4.0 and 11 November 2027, whichever comes later, and warns.
 
 ### Fixed
+
+- Process walls retain init ownership after an uncertain wait, preserve session data during runtime cleanup, and reject trailing specification data.
+
+- Keep physical link closure available after logical stream abort, and reject later stream admission or queued frame dispatch.
 
 - Interrupted host changes keep one cancellation policy: unsaved machines are cleaned up and completed deletions can be retried. Cleanup reports a provider that cannot open the machine, and a late cancel keeps the actual save failure. Screen fixtures close and join their query readers.
 - Session JSON keeps integer values exact, including large memory sizes.

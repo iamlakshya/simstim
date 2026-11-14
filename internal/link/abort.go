@@ -20,6 +20,7 @@ func (s *Session) AbortStreams() {
 	}
 	s.accepts, s.opens, s.grants, s.refusals = nil, nil, nil, nil
 	s.hi, s.lo = nil, nil
+	signal(s.wake)
 	s.acceptQ.wake()
 	s.drained.wake()
 	s.progress.wake()

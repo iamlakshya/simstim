@@ -6,23 +6,16 @@ package sourcecompose
 
 import (
 	"context"
-	"sync"
 
 	"github.com/iamlakshya/simstim/internal/client"
+	"github.com/iamlakshya/simstim/internal/gitsource"
 	"github.com/iamlakshya/simstim/internal/host"
 )
 
-var install struct {
-	sync.Once
-	err error
-}
-
-// Install fixes the canonical Linux provider once before CLI or TUI work.
-func Install() error {
-	install.Do(func() {
-		install.err = client.InstallLocalGitSources(func(ctx context.Context, path string, graph bool) (client.LocalGitSource, error) {
-			return host.OpenGitSourceCapability(ctx, path, graph)
-		}, client.OpenLocalGitMetadataSource)
-	})
-	return install.err
+func openPlatformSource(ctx context.Context, path string, graph bool, restrictions []gitsource.Restriction) (client.LocalGitSource, error) {
+	extra := make([]host.GitSourceRestriction, 0, len(restrictions))
+	for _, r := range restrictions {
+		extra = append(extra, host.GitSourceRestriction{Path: r.Path, Identity: r.Identity})
+	}
+	return host.OpenGitSourceCapabilityRestricted(ctx, path, graph, extra...)
 }

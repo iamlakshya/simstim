@@ -1,6 +1,6 @@
 package tomlinspect
 
-func (s *indexStore) put(tree byte, key numericKey, value numericValue) error {
+func (s *numericTrees) put(tree byte, key numericKey, value numericValue) error {
 	if tree >= treeCount {
 		return ErrIndexInvariant
 	}
@@ -81,7 +81,7 @@ func (s *indexStore) put(tree byte, key numericKey, value numericValue) error {
 
 // splitLeaf owns and releases oldSlot on every path. All moved records are
 // fixed metadata references; no decoded input is copied into page storage.
-func (s *indexStore) splitLeaf(tree byte, old []byte, oldSlot int, key numericKey, value numericValue) (numericKey, uint32, error) {
+func (s *numericTrees) splitLeaf(tree byte, old []byte, oldSlot int, key numericKey, value numericValue) (numericKey, uint32, error) {
 	mid := leafCapacity/2 + 1
 	separator := readKey(old, indexPageHeader+mid*leafRecordBytes)
 	id, next, nextSlot, err := s.allocate(pageBTreeLeaf, tree)
@@ -95,7 +95,13 @@ func (s *indexStore) splitLeaf(tree byte, old []byte, oldSlot int, key numericKe
 	write32(next, 20, read32(old, 20))
 	write16(old, 16, uint16(mid))
 	write32(old, 20, id)
-	if compareKey(key, separator) < 0 {
+	order, err := s.order(key, separator)
+	if err != nil {
+		s.release(oldSlot, true)
+		s.release(nextSlot, true)
+		return numericKey{}, 0, err
+	}
+	if order < 0 {
 		at, _, failure := s.leafPosition(old, key)
 		if failure == nil {
 			failure = insertLeaf(old, at, key, value)
@@ -117,7 +123,7 @@ func (s *indexStore) splitLeaf(tree byte, old []byte, oldSlot int, key numericKe
 	return separator, id, nil
 }
 
-func (s *indexStore) splitBranch(tree byte, old []byte, oldSlot, at int, key numericKey, right uint32) (numericKey, uint32, error) {
+func (s *numericTrees) splitBranch(tree byte, old []byte, oldSlot, at int, key numericKey, right uint32) (numericKey, uint32, error) {
 	mid := branchCapacity / 2
 	separator := readKey(old, indexPageHeader+mid*branchRecordBytes)
 	id, next, nextSlot, err := s.allocate(pageBTreeBranch, tree)

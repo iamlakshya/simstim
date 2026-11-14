@@ -74,9 +74,13 @@ type LockMoby struct {
 	SHA256 string `toml:"sha256"`
 }
 
-// LockBuilder pins the container image used for reproducible builds by digest.
+// LockBuilder pins the container and the signed Debian package snapshot used
+// for reproducible builds. The InRelease digest binds the package checksums.
 type LockBuilder struct {
-	Image string `toml:"image"`
+	Image           string `toml:"image"`
+	Snapshot        string `toml:"snapshot"`
+	Suite           string `toml:"suite"`
+	InReleaseSHA256 string `toml:"inrelease_sha256"`
 }
 
 // LockFile pins a downloaded binary or source archive by URL, SHA-256 and optional size.
@@ -192,8 +196,8 @@ func (l *Lock) Validate() error {
 	if !hex64.MatchString(l.MobyCheckConfig.SHA256) {
 		return fmt.Errorf("guest/supply.lock: [moby_check_config] sha256 %q is not 64 lower-case hex digits", l.MobyCheckConfig.SHA256)
 	}
-	if ref, digest, ok := strings.Cut(l.Builder.Image, "@sha256:"); !ok || strings.TrimSpace(ref) == "" || !hex64.MatchString(digest) {
-		return fmt.Errorf("guest/supply.lock: [builder] image %q must pin a digest with @sha256:<64 hex>", l.Builder.Image)
+	if err := validateBuilder(l.Builder); err != nil {
+		return err
 	}
 	if len(l.VMMs) == 0 {
 		return errors.New("guest/supply.lock: needs at least one [[vmm]] table")

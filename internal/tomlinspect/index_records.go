@@ -30,112 +30,15 @@ func recordBytes(class byte) int {
 	}
 }
 
-func (s *indexStore) retainNameDirectory(slot int) error {
-	tag := &s.tags[slot]
-	if tag.held {
-		return nil
-	}
-	if s.nameDirectoryCount == len(s.nameDirectories) {
-		return ErrIndexInvariant
-	}
-	tag.held = true
-	tag.pins++
-	s.pins++
-	s.nameDirectories[s.nameDirectoryCount] = tag.id
-	s.nameDirectoryCount++
-	s.counters.PeakPins = max(s.counters.PeakPins, s.pins)
-	return nil
-}
-
 func (s *indexStore) recordPage(class byte, virtual uint32, create bool) (uint32, error) {
-	if class >= recordClassCount || virtual >= directorySlots*directorySlots {
+	if class >= recordClassCount {
 		return 0, ErrIndexInvariant
 	}
-	state := &s.classes[class]
-	var root []byte
-	var slot int
-	var err error
-	if state.root == 0 {
-		if !create {
-			return 0, ErrIndexCorrupt
-		}
-		state.root, root, slot, err = s.allocate(pageDirectoryRoot, class)
-	} else {
-		root, slot, err = s.pin(state.root)
-	}
-	if err != nil {
-		return 0, err
-	}
-	if root[8] != pageDirectoryRoot || root[9] != class {
-		s.release(slot, false)
-		return 0, ErrIndexCorrupt
-	}
+	directory := recordDirectory{indexPages: &s.indexPages, root: &s.classes[class].root, class: class}
 	if class == recordNames {
-		if err := s.retainNameDirectory(slot); err != nil {
-			s.release(slot, false)
-			return 0, err
-		}
+		directory.held, directory.heldCount = &s.nameDirectories, &s.nameDirectoryCount
 	}
-	offset := indexPageHeader + int(virtual/directorySlots)*4
-	child := read32(root, offset)
-	dirty := false
-	if child == 0 && create {
-		var next []byte
-		var nextSlot int
-		child, next, nextSlot, err = s.allocate(pageDirectoryLeaf, class)
-		_ = next
-		if err == nil {
-			if class == recordNames {
-				err = s.retainNameDirectory(nextSlot)
-			}
-			s.release(nextSlot, true)
-		}
-		if err != nil {
-			s.release(slot, false)
-			return 0, err
-		}
-		write32(root, offset, child)
-		dirty = true
-	}
-	s.release(slot, dirty)
-	if child == 0 {
-		return 0, ErrIndexCorrupt
-	}
-	leaf, leafSlot, err := s.pin(child)
-	if err != nil {
-		return 0, err
-	}
-	if leaf[8] != pageDirectoryLeaf || leaf[9] != class {
-		s.release(leafSlot, false)
-		return 0, ErrIndexCorrupt
-	}
-	if class == recordNames {
-		if err := s.retainNameDirectory(leafSlot); err != nil {
-			s.release(leafSlot, false)
-			return 0, err
-		}
-	}
-	offset = indexPageHeader + int(virtual%directorySlots)*4
-	page := read32(leaf, offset)
-	dirty = false
-	if page == 0 && create {
-		var data []byte
-		var dataSlot int
-		page, data, dataSlot, err = s.allocate(pageRecordData, class)
-		_ = data
-		if err != nil {
-			s.release(leafSlot, false)
-			return 0, err
-		}
-		s.release(dataSlot, true)
-		write32(leaf, offset, page)
-		dirty = true
-	}
-	s.release(leafSlot, dirty)
-	if page == 0 {
-		return 0, ErrIndexCorrupt
-	}
-	return page, nil
+	return directory.page(virtual, create)
 }
 
 func (s *indexStore) recordLocation(class byte, id uint32, create bool) (uint32, int, error) {

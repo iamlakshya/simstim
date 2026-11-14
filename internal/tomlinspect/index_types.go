@@ -48,7 +48,10 @@ type indexCounters struct {
 	ReadBytes, WrittenBytes, RecordIOReads           uint64
 }
 
-type indexStore struct {
+// indexPages owns only the existing fixed metadata cache, physical page
+// allocator and checked I/O state. It carries no TOML source, name, object,
+// schema, permission or sublease. The domain owner supplies its proven bound.
+type indexPages struct {
 	ctx                context.Context
 	file               IndexFile
 	data               []byte
@@ -57,6 +60,11 @@ type indexStore struct {
 	nextPage, maxPages uint32
 	pins               uint64
 	counters           indexCounters
+}
+
+// indexStore adds the pinned TOML domain to the same physical page store.
+type indexStore struct {
+	indexPages
 	classes            [recordClassCount]recordClassState
 	roots              [treeCount]uint32
 	nameRoot           uint32
@@ -80,7 +88,7 @@ func (s *indexStore) reset(ctx context.Context, file IndexFile, slab []byte, inp
 	if err != nil || info == nil || !info.Mode().IsRegular() || info.Size() != 0 {
 		return ErrIndexInvariant
 	}
-	*s = indexStore{ctx: ctx, file: file, data: slab[:indexCacheBytes], nextPage: 1, maxPages: uint32((256*size + (128 << 10) + indexPageBytes - 1) / indexPageBytes), textSource: input}
+	*s = indexStore{indexPages: indexPages{ctx: ctx, file: file, data: slab[:indexCacheBytes], nextPage: 1, maxPages: uint32((256*size + (128 << 10) + indexPageBytes - 1) / indexPageBytes)}, textSource: input}
 	return nil
 }
 

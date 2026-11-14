@@ -25,6 +25,7 @@ type SchemaVisitor interface {
 // explicit resource capability. It retains no parsed value or permission
 // result after Inspect returns. One mode factory serialises all slab use.
 type Inspector struct {
+	outer     inspectionState
 	factory   IndexFactory
 	source    source
 	store     indexStore
@@ -147,7 +148,7 @@ func (i *Inspector) detach() {
 	i.stack = lexStack{}
 	i.source = source{}
 	counters := i.store.counters
-	i.store = indexStore{counters: counters}
+	i.store = indexStore{indexPages: indexPages{counters: counters}}
 }
 
 func nilInterface(input any) bool {

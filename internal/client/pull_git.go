@@ -193,7 +193,11 @@ func (g *pullGit) runIO(ctx context.Context, input io.Reader, output io.Writer, 
 	if err := g.ownership.quiescent(); err != nil {
 		return err
 	}
-	source, err := openLocalSource(ctx, g.root, args[0] != "version")
+	sourceEnvironment, err := g.metadata.environment(ctx, localGitNormal, "", api.GitIdentity{})
+	if err != nil {
+		return err
+	}
+	source, err := openLocalSource(ctx, g.root, args[0] != "version", sourceEnvironment)
 	if err != nil {
 		return err
 	}

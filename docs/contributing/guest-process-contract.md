@@ -35,3 +35,5 @@ Only init resolves the fixed account and starts that child. The holder does
 not switch credentials or inherit root. Guest init still treats holder events
 as guest claims when forwarding them to the trusted supervisor. The trusted
 supervisor derives sandbox lifetime from its owned runtime, not those claims.
+
+Logical stream abort revokes every stream and queued frame. It does not close raw transport or wait for raw I/O. The same transport owner must still close it and join the reader and writer before releasing their permissions or buffers. A frame that finishes after abort cannot reopen a stream or acknowledge queued work.

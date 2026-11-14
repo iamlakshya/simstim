@@ -24,6 +24,7 @@ type GrantRequest struct {
 	legacyResume       *legacyResumeGrantIntent
 	resumeGroup        bool
 	review             *reviewGrantIntent
+	newSecrets         *newSecretPlan
 
 	recordMu  sync.Mutex
 	selection *grantSelectionSource

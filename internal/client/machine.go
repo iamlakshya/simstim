@@ -46,6 +46,8 @@ type Machine struct {
 	// Lima and Docker give each machine of a host the same name, so this
 	// tells them apart for the record of an unfinished `host rm`.
 	Created string `toml:"created,omitempty"`
+	// Source binds closed-create resource/locator provenance; current sharing is inspected separately.
+	Source *MachineSourceProvenance `toml:"source,omitempty"`
 }
 
 // Machine states, as a Lifecycle reports them.

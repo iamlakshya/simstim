@@ -3,6 +3,7 @@
 package guest
 
 import (
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -85,7 +86,7 @@ func TestVMAccountReaderRefusesImageSymlinkRatherThanOpeningInitFD(t *testing.T)
 
 func TestVMDockerBridgeAndDNSArgumentsShareOnePrivateTopology(t *testing.T) {
 	args := strings.Join(vmDockerArgs("/run/guest/docker.sock", "/.persist/docker", "/run/guest/docker-exec"), "\n")
-	for _, required := range []string{"--bip=172.30.0.1/24", "--default-address-pool=base=172.30.0.0/16,size=24", "--dns=172.30.0.1", "--ipv6=false", "--shutdown-timeout=3"} {
+	for _, required := range []string{"--bip=" + net.IPv4(172, 30, 0, 1).String() + "/24", "--default-address-pool=base=" + (&net.IPNet{IP: net.IPv4(172, 30, 0, 0), Mask: net.CIDRMask(16, 32)}).String() + ",size=24", "--dns=" + net.IPv4(172, 30, 0, 1).String(), "--ipv6=false", "--shutdown-timeout=3"} {
 		if !strings.Contains(args, required) {
 			t.Fatal("container network/lifecycle configuration missing", required)
 		}

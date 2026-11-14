@@ -3,7 +3,12 @@ package client
 import (
 	"context"
 	"errors"
+	"os"
+	"runtime"
+	"slices"
 	"sync"
+
+	"github.com/iamlakshya/simstim/internal/api"
 )
 
 // LocalGitSource is an opaque read-only source capability, held until actual
@@ -16,7 +21,7 @@ type LocalGitSource interface {
 
 // LocalGitSourceOpener is supplied by the application composition root.
 // Linux uses the canonical host inventory/guard, never another manifest parser.
-type LocalGitSourceOpener func(context.Context, string, bool) (LocalGitSource, error)
+type LocalGitSourceOpener func(context.Context, string, bool, []string) (LocalGitSource, error)
 
 var localSourceProvider struct {
 	sync.Mutex
@@ -69,7 +74,7 @@ func openGitMetadataSource(ctx context.Context, supplied []LocalGitMetadataOpene
 	return source, nil
 }
 
-func openLocalSource(ctx context.Context, path string, graph bool) (LocalGitSource, error) {
+func openLocalSource(ctx context.Context, path string, graph bool, supplied ...[]string) (_ LocalGitSource, err error) {
 	localSourceProvider.Lock()
 	localSourceProvider.used = true
 	open := localSourceProvider.open
@@ -81,7 +86,57 @@ func openLocalSource(ctx context.Context, path string, graph bool) (LocalGitSour
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	return open(ctx, path, graph)
+	if len(supplied) > 1 {
+		return nil, gitMetadataFailure()
+	}
+	var environment []string
+	if len(supplied) == 1 {
+		environment = supplied[0]
+	} else {
+		// Legacy SDK checks use the SAME actual canonical namespace operation.
+		source, openErr := openGitMetadataSource(ctx, nil)
+		if openErr != nil {
+			return nil, openErr
+		}
+		metadata, captureErr := captureGitMetadata(ctx, source, os.LookupEnv, runtime.GOOS == "windows")
+		if captureErr != nil {
+			return nil, captureErr
+		}
+		environment, err = metadata.environment(ctx, localGitNormal, "", api.GitIdentity{})
+		if err != nil {
+			return nil, errors.Join(err, metadata.Close())
+		}
+		inner, openErr := open(ctx, path, graph, slices.Clone(environment))
+		if openErr != nil {
+			return nil, errors.Join(openErr, metadata.Close())
+		}
+		return &metadataLocalSource{LocalGitSource: inner, metadata: metadata}, nil
+	}
+	if err := validateGitRoleEnvironment(localGitNormal, environment, runtime.GOOS == "windows"); err != nil {
+		return nil, err
+	}
+	return open(ctx, path, graph, slices.Clone(environment))
+}
+
+// The standalone SDK source check retains the SAME namespace operation until
+// the caller joins and closes its source capability. Revalidation never renews
+// that operation from a different settings selection.
+type metadataLocalSource struct {
+	LocalGitSource
+	metadata *localGitMetadata
+}
+
+func (s *metadataLocalSource) Revalidate(ctx context.Context) error {
+	if err := s.metadata.source.Revalidate(ctx); err != nil {
+		return err
+	}
+	if err := s.LocalGitSource.Revalidate(ctx); err != nil {
+		return err
+	}
+	return s.metadata.source.Revalidate(ctx)
+}
+func (s *metadataLocalSource) Close() error {
+	return errors.Join(s.LocalGitSource.Close(), s.metadata.Close())
 }
 
 // RunLocalGitMetadata uses the same source capability, safe Git definition and

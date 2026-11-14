@@ -46,8 +46,17 @@ type RepoInfo = api.RepoInfo
 // and fsmonitor off, and in a scope under the sessions' slice when the host
 // has a systemd user manager.
 func SessionRepo(ctx context.Context, h Host, dir string) (RepoInfo, error) {
+	return sessionRepoInfo(ctx, h, dir, true)
+}
+
+// SessionRepoPolicy reads repository policy without running git status.
+func SessionRepoPolicy(ctx context.Context, h Host, dir string) (RepoInfo, error) {
+	return sessionRepoInfo(ctx, h, dir, false)
+}
+
+func sessionRepoInfo(ctx context.Context, h Host, dir string, changes bool) (RepoInfo, error) {
 	s := &SSH{Host: h}
-	req, err := json.Marshal(api.RepoInfoArgs{Dir: dir, Changes: true})
+	req, err := json.Marshal(api.RepoInfoArgs{Dir: dir, Changes: changes, Policy: !changes})
 	if err != nil {
 		return RepoInfo{}, fmt.Errorf("write the request for the repository: %w", err)
 	}
@@ -62,7 +71,14 @@ func SessionRepo(ctx context.Context, h Host, dir string) (RepoInfo, error) {
 		return RepoInfo{}, &UserError{Msg: fmt.Sprintf("could not ask %s about the repository at %s: %s", h.Name, CleanPath(dir), CleanLine(err.Error())),
 			Hint: brand.Name + " host doctor " + h.Name, Code: "ssh_failed"}
 	}
-	return parseRepoInfo(h, dir, out)
+	repo, err := parseRepoInfo(h, dir, out)
+	if err != nil {
+		return repo, err
+	}
+	if !changes && !repo.PolicyChecked {
+		return RepoInfo{}, &UserError{Msg: "the helper cannot check repository policy files", Hint: brand.Name + " host add " + ShellWord(h.Name) + " (updates the helper)", Code: "helper_old", Kind: KindFailed}
+	}
+	return repo, nil
 }
 
 // parseRepoInfo reads the answer of repo.info about dir on h. Each text

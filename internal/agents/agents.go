@@ -15,6 +15,8 @@ import (
 
 // Agent describes one agent CLI.
 type Agent struct {
+	// CAEnv names the canonical PEM CA file variables used inside a wall.
+	CAEnv    []string `json:"ca_env,omitempty"`
 	Kind     string   `json:"kind"`
 	Title    string   `json:"title"`
 	Binaries []string `json:"binaries"`
@@ -122,7 +124,8 @@ const claudeHooks = `{"hooks":{` +
 // this order.
 var Table = withSecretData([]Agent{
 	{
-		Kind: "claude", Title: "Claude Code", Binaries: []string{"claude"},
+		CAEnv: []string{"NODE_EXTRA_CA_CERTS"},
+		Kind:  "claude", Title: "Claude Code", Binaries: []string{"claude"},
 		Egress:    []string{"api.anthropic.com", "platform.claude.com", "claude.ai", "claude.com", "sso.claude.com"},
 		Launch:    []string{"claude", "--session-id", "{session_uuid}"},
 		Resume:    []string{"claude", "--resume", "{agent_session_id}"},
@@ -171,7 +174,8 @@ var Table = withSecretData([]Agent{
 		},
 	},
 	{
-		Kind: "codex", Title: "Codex", Binaries: []string{"codex"},
+		CAEnv: []string{"CODEX_CA_CERTIFICATE", "SSL_CERT_FILE"},
+		Kind:  "codex", Title: "Codex", Binaries: []string{"codex"},
 		Egress: []string{"api.openai.com", "chatgpt.com", "auth.openai.com"},
 		// --no-daemon keeps Codex's work inside the session's PTY and cgroup.
 		Launch: []string{"codex", "--no-daemon"},

@@ -3,6 +3,7 @@
 package api
 
 import (
+	"encoding/json"
 	"fmt"
 	"time"
 )
@@ -25,6 +26,8 @@ const ReasonChildOOM = "a process in this session ran out of memory and was stop
 
 // NewArgs describes a session to start.
 type NewArgs struct {
+	// VMNeedV1 is accepted only from the same locally sealed authenticated plan.
+	VMNeedV1 json.RawMessage `json:"vm_need_v1,omitempty"`
 	// Inputs and Environment come from one sealed local start selection.
 	Inputs         *InputSummary         `json:"inputs,omitempty"`
 	Environment    *SessionEnvironment   `json:"environment,omitempty"`

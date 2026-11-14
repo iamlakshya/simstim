@@ -352,19 +352,28 @@ func checkReader(it Item, name string, size int64, r io.Reader) error {
 			return err
 		}
 	}
-	if size != it.Size {
-		return &MismatchError{Name: name, What: "size", Want: strconv.FormatInt(it.Size, 10) + " bytes", Got: strconv.FormatInt(size, 10) + " bytes"}
+	return checkBytes(name, it.Size, it.SHA256, size, r)
+}
+
+// checkBytes is the one bounded size/digest loop for release roles and
+// host-created content. Callers establish role, descriptor and provenance.
+func checkBytes(name string, expected int64, expectedSHA string, size int64, r io.Reader) error {
+	if expected <= 0 || expected == math.MaxInt64 || !IsHex64(expectedSHA) {
+		return fmt.Errorf("%s has no bounded canonical size and SHA-256", name)
+	}
+	if size != expected {
+		return &MismatchError{Name: name, What: "size", Want: strconv.FormatInt(expected, 10) + " bytes", Got: strconv.FormatInt(size, 10) + " bytes"}
 	}
 	h := sha256.New()
-	n, err := io.Copy(h, io.LimitReader(r, it.Size+1))
+	n, err := io.Copy(h, io.LimitReader(r, expected+1))
 	if err != nil {
 		return fmt.Errorf("check %s: %w", name, err)
 	}
-	if n != it.Size {
-		return &MismatchError{Name: name, What: "size", Want: strconv.FormatInt(it.Size, 10) + " bytes", Got: strconv.FormatInt(n, 10) + " bytes"}
+	if n != expected {
+		return &MismatchError{Name: name, What: "size", Want: strconv.FormatInt(expected, 10) + " bytes", Got: strconv.FormatInt(n, 10) + " bytes"}
 	}
-	if got := hex.EncodeToString(h.Sum(nil)); got != it.SHA256 {
-		return &MismatchError{Name: name, What: "SHA-256", Want: it.SHA256, Got: got}
+	if got := hex.EncodeToString(h.Sum(nil)); got != expectedSHA {
+		return &MismatchError{Name: name, What: "SHA-256", Want: expectedSHA, Got: got}
 	}
 	return nil
 }

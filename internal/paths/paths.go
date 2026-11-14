@@ -93,6 +93,11 @@ func Socket(id string) string { return filepath.Join(RuntimeDir(), "s", id+".soc
 // socket fits: Linux allows 107 bytes, macOS 103.
 func HookSocket(id string) string { return filepath.Join(RuntimeDir(), "h", id+".sock") }
 
+// SandboxRoot is a process sandbox's private guest root. The test driver
+// uses the same short runtime path, which keeps the guest sockets within
+// the length that a socket's path may have.
+func SandboxRoot(id string) string { return filepath.Join(RuntimeDir(), "g", id) }
+
 // BinDir is where versioned helpers are installed.
 func BinDir() string { return filepath.Join(DataDir(), "bin") }
 

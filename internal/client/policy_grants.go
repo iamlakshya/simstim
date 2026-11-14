@@ -46,7 +46,11 @@ func (c *Conn) allowLayerGrants(ctx context.Context, tier Tier, layers []api.Lay
 // CheckNewPolicyGrants checks every layered network allowance before a front
 // end fetches values. It neither records an exposure nor sends a mutation.
 func (c *Conn) CheckNewPolicyGrants(ctx context.Context, layers []api.Layer) error {
-	tier, _, err := c.newGrantTier(ctx, nil, false)
+	names, err := PolicySecretNames(layers)
+	if err != nil {
+		return err
+	}
+	tier, _, err := c.newGrantTier(ctx, names, false)
 	if err != nil {
 		return err
 	}

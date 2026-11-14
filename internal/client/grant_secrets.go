@@ -47,6 +47,9 @@ func FetchHostSecrets(ctx context.Context, h Host, names []string, terminal bool
 	if err := allowSecretNames(ctx, h, hostID, tier, settings, names); err != nil {
 		return nil, err
 	}
+	if plan := newPlanOf(ctx); plan != nil {
+		return plan.fetch(ctx, h, names, terminal)
+	}
 	return FetchSecrets(ctx, settings, names, terminal)
 }
 

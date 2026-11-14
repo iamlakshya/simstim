@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"github.com/iamlakshya/simstim/internal/api"
 	"github.com/iamlakshya/simstim/internal/brand"
+	"maps"
 	"os"
 	"os/exec"
+	"slices"
 	"strings"
 )
 
@@ -92,7 +94,12 @@ func (c *Conn) NewSession(ctx context.Context, a NewArgs) (*Session, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	a, err := withMemoryMax(a)
+	var err error
+	if plan := newPlanOf(ctx); plan != nil {
+		a, err = plan.arguments(ctx, c, a)
+	} else {
+		a, err = withMemoryMax(a)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -102,6 +109,7 @@ func (c *Conn) NewSession(ctx context.Context, a NewArgs) (*Session, error) {
 	if err := c.needMakeFolder(a); err != nil {
 		return nil, err
 	}
+	baseContext := ctx
 	ctx, release, err := c.beginGrant(ctx, "new", a.SSHAgent || grantRequestOf(ctx).SSHAgent)
 	if err != nil {
 		return nil, err
@@ -110,12 +118,28 @@ func (c *Conn) NewSession(ctx context.Context, a NewArgs) (*Session, error) {
 	// One immutable local layer snapshot supplies both the creation pin
 	// and the actual outgoing arguments for this attempt.
 	a.Layers = api.CloneLayers(a.Layers)
+	a.Argv = slices.Clone(a.Argv)
+	a.Secrets = maps.Clone(a.Secrets)
+	a.HostLabel = c.Host.Name
 	a, tier, err := c.prepareNewGrants(ctx, a)
 	if err != nil {
 		return nil, err
 	}
-	if err := recordSecretNames(ctx, c.Host, c.HostID(), tier, a.Secrets); err != nil {
-		return nil, err
+	plan := newPlanOf(ctx)
+	if plan == nil || plan.intent == nil {
+		if err := recordSecretNames(ctx, c.Host, c.HostID(), tier, a.Secrets); err != nil {
+			return nil, err
+		}
+	}
+	if plan != nil {
+		if err := plan.beginPublication(); err != nil {
+			return nil, err
+		}
+		defer plan.endPublication()
+		ctx, err = newPublicationContext(baseContext, ctx, c, plan, a)
+		if err != nil {
+			return nil, err
+		}
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -130,6 +154,11 @@ func (c *Conn) NewSession(ctx context.Context, a NewArgs) (*Session, error) {
 	if a.ID != "" && s.ID != a.ID {
 		return nil, &UserError{Msg: "the helper returned another session's ID",
 			Hint: brand.Name + " host doctor " + ShellWord(c.Host.Name), Code: "protocol"}
+	}
+	if plan != nil && plan.intent == nil {
+		plan.mu.Lock()
+		plan.published = true
+		plan.mu.Unlock()
 	}
 	return &s, nil
 }

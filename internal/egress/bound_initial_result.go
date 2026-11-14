@@ -64,50 +64,17 @@ func ValidateBoundInitialResult(ctx context.Context, args BoundInitArgs, result 
 		}
 		if present {
 			value := api.Secret(text)
-			if err := ValidatePublicSecretValue(ctx, name, public, args.Binds[name], value); err != nil {
+			if err := validateFreshAcknowledgedBound(ctx, name, public, args.Binds[name], value, sources[name], aliases); err != nil {
 				return err
 			}
-			binding, err := canonicalRegistryBinding(name, args.Binds[name])
-			if err != nil {
-				return err
-			}
-			bound, err := restoredBoundSecret(ctx, name, public, binding)
-			if err != nil {
-				return err
-			}
-			probe := registeredSecret{mode: mode, value: value, present: true, identity: public.Identity, bound: bound}
-			probe.bound.sentinel = public.Sentinel
-			for _, kind := range sources[name] {
-				if err := requireSelectedPrefix(kind, name, probe, value, true); err != nil {
-					return err
-				}
-			}
-			key, err := publicInitialAliasKey(binding, public, value)
-			if err != nil {
-				return err
-			}
-			if other, exists := aliases[key]; exists && (other.Sentinel != public.Sentinel || other.Identity != public.Identity) {
-				return invalidPublicSessionState()
-			}
-			aliases[key] = public
 		} else if _, saved := args.Saved[name]; !saved {
 			return invalidPublicSessionState()
 		}
 	}
-	for _, records := range result.Minted {
-		for _, public := range records {
-			if actuals[public.Sentinel] {
-				return invalidPublicSessionState()
-			}
-		}
+	if err := checkAcknowledgedActualCollisions(ctx, state, actuals); err != nil {
+		return err
 	}
-	for _, records := range result.Retired {
-		for _, public := range records {
-			if actuals[public.Sentinel] {
-				return invalidPublicSessionState()
-			}
-		}
-	}
+
 	expected, err := prepareRetiredPrimaries(ctx, args.Saved, args.SavedRetired, args.Binds)
 	if err != nil {
 		return err

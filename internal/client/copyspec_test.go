@@ -17,7 +17,7 @@ func TestCopySourceDriveAndUNCGrammar(t *testing.T) {
 
 func TestCopySourceRejectsAmbiguousTargetAndRuntime(t *testing.T) {
 	for _, raw := range []string{"file:", "file:relative", "file:/a:/b", "file:/proc/self/mem", "file:/x/../a", "file:/repo/.git/config"} {
-		if _, err := ParseCopySource(raw, "/home/example", false); err == nil {
+		if _, err := ParseCopySource(raw, "/home/you", false); err == nil {
 			t.Fatalf("accepted %q", raw)
 		}
 	}

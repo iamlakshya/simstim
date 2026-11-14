@@ -3,12 +3,15 @@ package process
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 
+	"github.com/iamlakshya/simstim/internal/files"
 	"github.com/iamlakshya/simstim/internal/proto"
 	"github.com/iamlakshya/simstim/internal/wall"
 )
@@ -71,14 +74,15 @@ func (Driver) Prepare(ctx context.Context, spec wall.Spec) (wall.Sandbox, error)
 	if err != nil {
 		return nil, setupError("cannot write sandbox specification", err)
 	}
-	_, err = f.Write(b)
-	closeErr := f.Close()
-	if err != nil || closeErr != nil {
-		root.Remove("process.json.new")
-		return nil, setupError("cannot save sandbox specification", err)
+	created, statErr := f.Stat()
+	if statErr != nil {
+		return nil, setupError("cannot identify new sandbox specification", errors.Join(statErr, f.Close()))
+	}
+	if err = writePreparedSpec(f, b); err != nil {
+		return nil, setupError("cannot save sandbox specification", errors.Join(err, removePreparedTemp(root, created)))
 	}
 	if err = root.Rename("process.json.new", "process.json"); err != nil {
-		return nil, setupError("cannot publish sandbox specification", err)
+		return nil, setupError("cannot publish sandbox specification", errors.Join(err, removePreparedTemp(root, created)))
 	}
 	return newSandbox(spec)
 }
@@ -98,21 +102,86 @@ func (Driver) Open(ctx context.Context, dir string) (wall.Sandbox, error) {
 		return nil, setupError("cannot open sandbox folder", err)
 	}
 	defer root.Close()
-	f, err := root.Open("process.json")
+	f, err := files.OpenRegular(root, "process.json")
 	if err != nil {
 		return nil, setupError("cannot read sandbox specification", err)
 	}
-	defer f.Close()
-	var spec wall.Spec
-	d := json.NewDecoder(f)
-	d.DisallowUnknownFields()
-	if err = d.Decode(&spec); err != nil {
+	spec, err := readPreparedSpec(f)
+	err = errors.Join(err, f.Close())
+	if err != nil {
 		return nil, setupError("cannot decode sandbox specification", err)
 	}
 	if filepath.Clean(spec.SessionDir) != filepath.Clean(dir) {
 		return nil, setupError("sandbox specification names a different folder", nil)
 	}
 	return newSandbox(spec)
+}
+
+func writePreparedSpec(file io.WriteCloser, data []byte) error {
+	n, err := file.Write(data)
+	if err == nil && n != len(data) {
+		err = io.ErrShortWrite
+	}
+	return errors.Join(err, file.Close())
+}
+
+func removePreparedTemp(root *os.Root, created os.FileInfo) error {
+	current, err := root.Lstat("process.json.new")
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if created == nil || !current.Mode().IsRegular() || !os.SameFile(created, current) {
+		return fmt.Errorf("new sandbox specification changed before cleanup")
+	}
+	return root.Remove("process.json.new")
+}
+
+func readPreparedSpec(file *os.File) (wall.Spec, error) {
+	var spec wall.Spec
+	before, err := file.Stat()
+	if err != nil {
+		return spec, err
+	}
+	if !before.Mode().IsRegular() || before.Size() < 0 {
+		return spec, fmt.Errorf("sandbox specification is not a sized regular file")
+	}
+	// The actual pinned file size bounds this streaming read. There is no
+	// unrelated new size cap and a concurrent append cannot extend parsing.
+	section := io.NewSectionReader(file, 0, before.Size())
+	decoder := json.NewDecoder(section)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&spec); err != nil {
+		return spec, err
+	}
+	// EOF permits only JSON whitespace after the ONE specification. Inspect
+	// bytes directly so another huge JSON value is never decoded/allocated.
+	rest := io.MultiReader(decoder.Buffered(), section)
+	var buffer [4096]byte
+	for {
+		n, err := rest.Read(buffer[:])
+		for _, value := range buffer[:n] {
+			if value != ' ' && value != '\t' && value != '\r' && value != '\n' {
+				return spec, fmt.Errorf("sandbox specification has trailing data")
+			}
+		}
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return spec, err
+		}
+	}
+	after, err := file.Stat()
+	if err != nil {
+		return spec, err
+	}
+	if after.Size() != before.Size() || !os.SameFile(before, after) {
+		return spec, fmt.Errorf("sandbox specification changed while decoding")
+	}
+	return spec, nil
 }
 
 // resolveSessionDir allows an ordinary alias in the trusted storage prefix,

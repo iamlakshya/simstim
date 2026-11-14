@@ -6,8 +6,6 @@ import (
 	"os"
 	"path"
 	"strings"
-
-	"github.com/iamlakshya/simstim/internal/cachefs"
 )
 
 func (s *Store) purgePlatformLease(ctx context.Context, name string) (*Lease, error) {

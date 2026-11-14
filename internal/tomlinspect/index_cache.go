@@ -1,10 +1,10 @@
 package tomlinspect
 
-func (s *indexStore) view(slot int) []byte {
+func (s *indexPages) view(slot int) []byte {
 	return s.data[slot*indexPageBytes : (slot+1)*indexPageBytes]
 }
 
-func (s *indexStore) flush(slot int) error {
+func (s *indexPages) flush(slot int) error {
 	tag := &s.tags[slot]
 	if tag.id == 0 || !tag.dirty {
 		return nil
@@ -29,7 +29,7 @@ func (s *indexStore) flush(slot int) error {
 	return nil
 }
 
-func (s *indexStore) victim() (int, error) {
+func (s *indexPages) victim() (int, error) {
 	index := -1
 	for slot := range s.tags {
 		tag := &s.tags[slot]
@@ -52,7 +52,7 @@ func (s *indexStore) victim() (int, error) {
 	return index, nil
 }
 
-func (s *indexStore) pin(id uint32) ([]byte, int, error) {
+func (s *indexPages) pin(id uint32) ([]byte, int, error) {
 	if err := s.ctx.Err(); err != nil {
 		return nil, 0, err
 	}
@@ -99,7 +99,7 @@ func (s *indexStore) pin(id uint32) ([]byte, int, error) {
 	return data, slot, nil
 }
 
-func (s *indexStore) release(slot int, dirty bool) {
+func (s *indexPages) release(slot int, dirty bool) {
 	tag := &s.tags[slot]
 	if tag.pins == 0 {
 		panic("owned index page pin invariant")
@@ -109,7 +109,7 @@ func (s *indexStore) release(slot int, dirty bool) {
 	s.pins--
 }
 
-func (s *indexStore) allocate(kind, class byte) (uint32, []byte, int, error) {
+func (s *indexPages) allocate(kind, class byte) (uint32, []byte, int, error) {
 	if err := s.ctx.Err(); err != nil {
 		return 0, nil, 0, err
 	}

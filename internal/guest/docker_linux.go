@@ -18,9 +18,9 @@ import (
 	"github.com/iamlakshya/simstim/internal/proto"
 )
 
-const (
-	vmDockerGateway = "172.30.0.1"
-	vmDockerPool    = "172.30.0.0/16"
+var (
+	vmDockerGateway = net.IPv4(172, 30, 0, 1).String()
+	vmDockerPool    = (&net.IPNet{IP: net.IPv4(172, 30, 0, 0), Mask: net.CIDRMask(16, 32)}).String()
 )
 
 func vmDockerArgs(socket, dataRoot, execRoot string) []string {

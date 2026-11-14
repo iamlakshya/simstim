@@ -14,6 +14,16 @@ import (
 // verification bounded even when metadata describes a much larger input.
 const maxToolsDataBytes = 512 << 20
 
+// CheckToolsMetadata applies the same canonical geometry and build limit as
+// the byte verifier, before a caller persists or fetches a tools item. It
+// checks metadata only and creates no role or byte-provenance authority.
+func CheckToolsMetadata(it Item) error {
+	if it.Kind != KindTools {
+		return errors.New("tools metadata needs the tools role")
+	}
+	return checkToolsBounds(it)
+}
+
 func checkToolsBounds(it Item) error {
 	if err := it.validateTools(); err != nil {
 		return err

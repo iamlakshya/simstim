@@ -83,6 +83,10 @@ func readCommandGitIdentity(ctx context.Context, originalCwd string, metadata ..
 }
 
 func createLaptopSeed(ctx context.Context, source string, dirty bool, limit int64, identity api.GitIdentity, base string, metadata ...LocalGitMetadataOpener) (_ *laptopSeed, err error) {
+	return createLaptopSeedSelected(ctx, source, dirty, limit, identity, base, nil, metadata...)
+}
+
+func createLaptopSeedSelected(ctx context.Context, source string, dirty bool, limit int64, identity api.GitIdentity, base string, selected *seedPolicySnapshot, metadata ...LocalGitMetadataOpener) (_ *laptopSeed, err error) {
 	if limit <= 0 {
 		return nil, &UserError{Code: "bad_seed_max", Msg: "seed_max must be a positive size", Hint: "Set sandbox.seed_max to a size such as 512M.", Kind: KindUsage}
 	}
@@ -115,6 +119,24 @@ func createLaptopSeed(ctx context.Context, source string, dirty bool, limit int6
 	if err != nil || !api.ValidGitOID(commit) {
 		return nil, &UserError{Code: "seed_history", Msg: "the laptop repository has no committed HEAD", Hint: "Create an initial commit before seeding it.", Kind: KindUsage}
 	}
+	if selected != nil {
+		selectedBase := selected.base
+		if selectedBase == "" {
+			selectedBase = "HEAD"
+		}
+		head, headErr := git.ref(ctx, "HEAD")
+		if headErr != nil {
+			return nil, headErr
+		}
+		if !selected.ready || selected.dirty != dirty || selectedBase != base || head != selected.head || commit != selected.parent {
+			return nil, copyInputError("seed_changed", "the captured seed no longer matches its selected primary policy")
+		}
+		if dirty && identity != selected.identity {
+			return nil, copyInputError("seed_changed", "the dirty seed identity changed after policy selection")
+		}
+		commit = selected.commit
+		seed.untracked = append([]string(nil), selected.untracked...)
+	}
 	branch, err := git.run(ctx, nil, 4096, "rev-parse", "--symbolic-full-name", "--verify", "--end-of-options", base)
 	if err != nil {
 		return nil, err
@@ -130,7 +152,7 @@ func createLaptopSeed(ctx context.Context, source string, dirty bool, limit int6
 	if err != nil {
 		return nil, err
 	}
-	if dirty {
+	if dirty && selected == nil {
 		commit, seed.untracked, err = dirtySeedCommit(ctx, git, directory, commit, identity)
 		if err != nil {
 			return nil, err

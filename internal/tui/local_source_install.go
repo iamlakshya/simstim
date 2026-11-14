@@ -1,6 +1,4 @@
-//go:build linux
-
-package cli
+package tui
 
 import "github.com/iamlakshya/simstim/internal/sourcecompose"
 

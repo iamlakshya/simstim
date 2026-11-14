@@ -87,7 +87,7 @@ func (st *Stream) HeaderBytes() []byte { return append([]byte(nil), st.header...
 func (st *Stream) PeerWriteClosed() bool {
 	st.s.mu.Lock()
 	defer st.s.mu.Unlock()
-	return st.remoteEOF && !st.peerGone && !st.refused && !st.closedLocal
+	return !st.s.aborted && st.remoteEOF && !st.peerGone && !st.refused && !st.closedLocal
 }
 
 // Read reads the bytes that the other end sent. It returns io.EOF after
@@ -114,6 +114,9 @@ func (st *Stream) Read(p []byte) (int, error) {
 // tryRead reads what it can now. done is false when the Read must wait.
 // Under s.mu.
 func (st *Stream) tryRead(p []byte) (n int, done bool, err error) {
+	if st.s.aborted {
+		return 0, true, st.s.err
+	}
 	switch {
 	case st.closedLocal:
 		return 0, true, net.ErrClosed
@@ -181,6 +184,9 @@ func (st *Stream) Write(p []byte) (int, error) {
 
 // writeErr is why a Write fails now, or nil. Under s.mu.
 func (st *Stream) writeErr() error {
+	if st.s.aborted {
+		return st.s.err
+	}
 	switch {
 	case st.closedLocal:
 		return net.ErrClosed
@@ -305,6 +311,9 @@ func (st *Stream) linger(dl time.Time) error {
 // has left the link and the connection has written every batch that holds
 // its data or its close, or the link has ended. Under s.mu.
 func (st *Stream) closed() (bool, error) {
+	if st.s.aborted {
+		return true, st.s.err
+	}
 	switch {
 	case st.gone && st.lastSeq <= st.s.written:
 		if st.dropped {

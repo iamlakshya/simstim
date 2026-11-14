@@ -66,14 +66,43 @@ func Exec(ctx context.Context, install string, name string, args ...string) ([]b
 
 // ExecInput is Exec with stdin.
 func ExecInput(ctx context.Context, stdin io.Reader, install string, name string, args ...string) ([]byte, error) {
+	return execInput(ctx, stdin, nil, 0, install, name, args...)
+}
+
+// ExecEnvironment runs the existing provider command with an explicit original
+// operation environment. It is used to pin a selected creation locator, never
+// to import an agent/session environment into provider operations.
+func ExecEnvironment(ctx context.Context, environment []string, install, name string, args ...string) ([]byte, error) {
+	if environment == nil {
+		return nil, fmt.Errorf("the explicit provider environment is unavailable")
+	}
+	return execInput(ctx, nil, environment, 0, install, name, args...)
+}
+
+func execInput(ctx context.Context, stdin io.Reader, environment []string, limit int, install string, name string, args ...string) ([]byte, error) {
 	if _, err := exec.LookPath(name); err != nil {
 		return nil, &client.UserError{Msg: name + " is not installed, or not on your PATH", Hint: install, Code: "tool_missing"}
 	}
 	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Stdin = stdin
+	if environment != nil {
+		cmd.Env = environment
+	}
 	var out, errb bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &errb
-	if err := cmd.Run(); err != nil {
+	var boundedOut, boundedError *boundedMetadataOutput
+	if limit > 0 {
+		boundedOut, boundedError = &boundedMetadataOutput{limit: limit}, &boundedMetadataOutput{limit: 64 << 10}
+		cmd.Stdout, cmd.Stderr = boundedOut, boundedError
+	}
+	runErr := cmd.Run()
+	if limit > 0 {
+		out, errb = boundedOut.Buffer, boundedError.Buffer
+		if boundedOut.exceeded || boundedError.exceeded {
+			return nil, fmt.Errorf("provider metadata exceeds its read bound")
+		}
+	}
+	if err := runErr; err != nil {
 		if ctx.Err() != nil {
 			return out.Bytes(), fmt.Errorf("%s %s: %w", name, firstWord(args), ctx.Err())
 		}

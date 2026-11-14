@@ -45,6 +45,12 @@ func (c *Conn) callWithSent(ctx context.Context, op string, args any, out any, a
 		}
 		req.Args = b
 	}
+	witness, _ := ctx.Value(newPublicationKey{}).(*newPublicationWitness)
+	if witness != nil {
+		if err := witness.beforeRequest(ctx, c, req, args); err != nil {
+			return err
+		}
+	}
 	ch := make(chan proto.Response, 1)
 	c.mu.Lock()
 	if c.err != nil {
@@ -64,6 +70,9 @@ func (c *Conn) callWithSent(ctx context.Context, op string, args any, out any, a
 			return ctx.Err()
 		}
 		return ErrClosed
+	}
+	if witness != nil {
+		witness.wroteRequest(c, id)
 	}
 	release()
 	select {
@@ -85,6 +94,11 @@ func (c *Conn) callWithSent(ctx context.Context, op string, args any, out any, a
 		if out != nil && len(resp.Result) > 0 {
 			if err := json.Unmarshal(resp.Result, out); err != nil {
 				return fmt.Errorf("read the answer to %s: %w", op, err)
+			}
+		}
+		if witness != nil {
+			if err := witness.afterResponse(ctx, c, resp, out); err != nil {
+				return err
 			}
 		}
 		return nil

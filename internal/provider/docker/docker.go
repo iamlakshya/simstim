@@ -43,12 +43,20 @@ const addUser = `id -u ` + DefaultUser + ` >/dev/null 2>&1 || useradd -m -s /bin
 
 // Create starts the container and gives it a user like a VM's.
 func (Provider) Create(ctx context.Context, req provider.Request) (client.Host, error) {
+	locator, err := captureSourceLocator(ctx)
+	if err != nil {
+		return client.Host{}, err
+	}
 	out := req.Out
 	if out == nil {
 		out = io.Discard
 	}
 	c := provider.MachineName(req.Name)
-	st, err := inspect(ctx, c)
+	rawState, err := locator.exec(ctx, "inspect", "-f", "{{.State.Status}}", c)
+	st := strings.TrimSpace(string(rawState))
+	if err != nil && (strings.Contains(strings.ToLower(err.Error()), "no such object") || strings.Contains(strings.ToLower(err.Error()), "no such container")) {
+		st, err = "", nil
+	}
 	if err != nil {
 		return client.Host{}, err
 	}
@@ -61,15 +69,22 @@ func (Provider) Create(ctx context.Context, req provider.Request) (client.Host, 
 	}
 	args := RunArgs(c, req.Name, image)
 	fmt.Fprintf(out, "  Starting the container: docker %s\n", strings.Join(args, " "))
-	if _, err := provider.Exec(ctx, install, "docker", args...); err != nil {
+	runID, err := locator.exec(ctx, args...)
+	if err != nil {
 		return client.Host{}, err
 	}
 	user := DefaultUser
-	if _, err := provider.Exec(ctx, install, "docker", "exec", "-u", "0", c, "sh", "-c", addUser); err != nil {
+	if _, err := locator.exec(ctx, "exec", "-u", "0", strings.TrimSpace(string(runID)), "sh", "-c", addUser); err != nil {
 		fmt.Fprintf(out, "  Note: could not add the user %q (%v), so sessions run as root.\n", DefaultUser, err)
 		user = "root"
 	}
-	return client.Host{Name: req.Name, Machine: &client.Machine{Provider: "docker", ID: c, User: user, Image: image}}, nil
+	host := client.Host{Name: req.Name, Machine: &client.Machine{Provider: "docker", ID: c, User: user, Image: image}}
+	source, err := locator.receipt(ctx, host, string(runID))
+	if err != nil {
+		return client.Host{}, &client.UserError{Code: "source_inventory", Msg: "the created container is retained because its actual source provenance could not be confirmed", Hint: "Inspect the container on its original Docker engine before creating another host.", Kind: client.KindRefused}
+	}
+	host.Machine.Source = source
+	return host, nil
 }
 
 // inspect returns the container's state, or "" when there is no container.

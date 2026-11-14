@@ -35,3 +35,7 @@ What the tool does to keep your hosts and your laptop safe, and what it leaves t
 - **A compromised host** can see everything its agents can see. It can also send terminal escape sequences to the laptop. Their effects depend on your terminal's features, permissions and bugs. Trust a host before attaching, keep your terminal up to date, and use its clipboard and link controls to limit what remote output can do. simstim does not make hostile terminal output safe.
 - **Several attached clients** all receive live output, including queries, and all can send input. The size leader is not an access-control boundary. Do not treat another attached client as a read-only viewer.
 - **A compromised laptop** can drive every host it has keys for, as it already can through `ssh`.
+
+Local Git checks known private folders and the actual writable roots of managed sandboxes before reading a source repository. Managed local Lima and Docker machines need their original creation record and a fresh check of the same configuration and resource. An old or changed record cannot establish an empty sharing set. Shares added outside the tool remain the owner’s responsibility.
+
+A laptop seed reads repository policy from the commit selected for the bundle. Ordinary seeds ignore working-tree edits to that file. A dirty seed makes one private prospective commit and uses that same commit for policy review and the bundle. A changed source or selected base stops the operation before values or input payload are sent.

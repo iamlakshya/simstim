@@ -47,7 +47,7 @@ func writeKey(data []byte, offset int, key numericKey) {
 	write32(data, offset+4, key.second)
 }
 
-func (s *indexStore) leafPosition(data []byte, key numericKey) (int, bool, error) {
+func (s *numericTrees) leafPosition(data []byte, key numericKey) (int, bool, error) {
 	n := int(read16(data, 16))
 	if n > leafCapacity {
 		return 0, false, ErrIndexCorrupt
@@ -58,16 +58,24 @@ func (s *indexStore) leafPosition(data []byte, key numericKey) (int, bool, error
 			return 0, false, err
 		}
 		mid := (lo + hi) / 2
-		if compareKey(readKey(data, indexPageHeader+mid*leafRecordBytes), key) < 0 {
+		order, err := s.order(readKey(data, indexPageHeader+mid*leafRecordBytes), key)
+		if err != nil {
+			return 0, false, err
+		}
+		if order < 0 {
 			lo = mid + 1
 		} else {
 			hi = mid
 		}
 	}
-	return lo, lo < n && compareKey(readKey(data, indexPageHeader+lo*leafRecordBytes), key) == 0, nil
+	if lo == n {
+		return lo, false, nil
+	}
+	order, err := s.order(readKey(data, indexPageHeader+lo*leafRecordBytes), key)
+	return lo, order == 0, err
 }
 
-func (s *indexStore) branchPosition(data []byte, key numericKey) (int, uint32, error) {
+func (s *numericTrees) branchPosition(data []byte, key numericKey) (int, uint32, error) {
 	n := int(read16(data, 16))
 	if n == 0 || n > branchCapacity {
 		return 0, 0, ErrIndexCorrupt
@@ -78,7 +86,11 @@ func (s *indexStore) branchPosition(data []byte, key numericKey) (int, uint32, e
 			return 0, 0, err
 		}
 		mid := (lo + hi) / 2
-		if compareKey(key, readKey(data, indexPageHeader+mid*branchRecordBytes)) < 0 {
+		order, err := s.order(key, readKey(data, indexPageHeader+mid*branchRecordBytes))
+		if err != nil {
+			return 0, 0, err
+		}
+		if order < 0 {
 			hi = mid
 		} else {
 			lo = mid + 1
@@ -90,7 +102,7 @@ func (s *indexStore) branchPosition(data []byte, key numericKey) (int, uint32, e
 	return lo, read32(data, indexPageHeader+(lo-1)*branchRecordBytes+8), nil
 }
 
-func (s *indexStore) descend(tree byte, key numericKey, path *treePath) (uint32, error) {
+func (s *numericTrees) descend(tree byte, key numericKey, path *treePath) (uint32, error) {
 	if err := s.ctx.Err(); err != nil {
 		return 0, err
 	}
@@ -135,7 +147,7 @@ func (s *indexStore) descend(tree byte, key numericKey, path *treePath) (uint32,
 	return 0, nil
 }
 
-func (s *indexStore) get(tree byte, key numericKey) (numericValue, bool, error) {
+func (s *numericTrees) get(tree byte, key numericKey) (numericValue, bool, error) {
 	var value numericValue
 	s.counters.NumericLookups++
 	page, err := s.descend(tree, key, nil)

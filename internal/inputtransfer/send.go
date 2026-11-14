@@ -15,6 +15,10 @@ import (
 type Sources struct {
 	File       func(context.Context, api.InputFile, io.Writer) error
 	Repository func(context.Context, api.InputRepository, io.Writer) error
+	// ValidatePayload rechecks the sealed local snapshot after readiness and
+	// a required bundle opener, before the canonical first-write gate or any
+	// payload/control bytes. It supplies no publication permission.
+	ValidatePayload func(context.Context) error
 	// OpenBundle opens the one seed-input KindBundle on the SAME dedicated
 	// continuation. It is required for repositories, never for copied files.
 	OpenBundle func(context.Context, Header) (Stream, error)
@@ -105,6 +109,11 @@ func Send(ctx context.Context, stream Stream, scope Scope, plan api.SessionInput
 			return target, nil
 		}
 		gated = true
+		if sources.ValidatePayload != nil {
+			if err := sources.ValidatePayload(ctx); err != nil {
+				return nil, err
+			}
+		}
 		if sources.BeforePayload == nil {
 			return target, nil
 		}

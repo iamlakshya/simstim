@@ -1,7 +1,7 @@
 package tomlinspect
 
-func (s *indexStore) walk(tree byte, first uint32, visit func(numericKey, numericValue) error) error {
-	if visit == nil {
+func (s *numericTrees) walk(tree byte, first uint32, visit func(numericKey, numericValue) error) error {
+	if visit == nil || s.comparison != nil && !s.prefixGrouped {
 		return ErrIndexInvariant
 	}
 	page, err := s.descend(tree, numericKey{first: first}, nil)
@@ -52,8 +52,14 @@ func (s *indexStore) walk(tree byte, first uint32, visit func(numericKey, numeri
 		var value numericValue
 		copy(value[:], data[offset+8:offset+leafRecordBytes])
 		s.release(slot, false)
-		if havePrevious && compareKey(previous, key) >= 0 {
-			return ErrIndexCorrupt
+		if havePrevious {
+			order, err := s.order(previous, key)
+			if err != nil {
+				return err
+			}
+			if order >= 0 {
+				return ErrIndexCorrupt
+			}
 		}
 		previous, havePrevious = key, true
 		if key.first > first {

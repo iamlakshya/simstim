@@ -14,6 +14,8 @@ import (
 type discoveredInputSeed struct {
 	root, name, origin string
 	identity           os.FileInfo
+	head               string
+	policy             *seedPolicySnapshot
 }
 
 // inputSeedDiscovery is private read-only source metadata. H5 feeds ONLY its
@@ -87,7 +89,8 @@ func discoverInputSeed(ctx context.Context, source string, metadata ...LocalGitM
 	if err != nil {
 		return discoveredInputSeed{}, err
 	}
-	if oid, err := git.ref(ctx, "HEAD"); err != nil || !api.ValidGitOID(oid) {
+	head, err := git.ref(ctx, "HEAD")
+	if err != nil || !api.ValidGitOID(head) {
 		return discoveredInputSeed{}, errors.Join(&UserError{Code: "seed_history", Msg: "a laptop seed has no committed HEAD",
 			Hint: "Create an initial commit before seeding this repository.", Kind: KindUsage}, err)
 	}
@@ -102,5 +105,5 @@ func discoverInputSeed(ctx context.Context, source string, metadata ...LocalGitM
 	if err != nil || !os.SameFile(identity, after) {
 		return discoveredInputSeed{}, copyInputError("seed_changed", "the source repository changed during discovery")
 	}
-	return discoveredInputSeed{root: git.root, name: name, origin: gitLine(origin), identity: identity}, ctx.Err()
+	return discoveredInputSeed{root: git.root, name: name, origin: gitLine(origin), identity: identity, head: head}, ctx.Err()
 }
