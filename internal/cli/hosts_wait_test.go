@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -64,7 +65,7 @@ func TestASignalWhileWaitingForHostsToml(t *testing.T) {
 
 // holdHostsToml takes the lock of hosts.toml, as another command that
 // saves it and does not let it go, until the test ends.
-func holdHostsToml(t *testing.T) {
+func holdHostsToml(t *testing.T) func() {
 	t.Helper()
 	if err := os.MkdirAll(client.ConfigDir(), 0o700); err != nil {
 		t.Fatal(err)
@@ -73,10 +74,12 @@ func holdHostsToml(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { f.Close() })
+	release := sync.OnceFunc(func() { _ = f.Close() })
+	t.Cleanup(release)
 	if err := unix.Flock(int(f.Fd()), unix.LOCK_EX); err != nil {
 		t.Fatal(err)
 	}
+	return release
 }
 
 // host create never leaves a machine that no saved host names: when the

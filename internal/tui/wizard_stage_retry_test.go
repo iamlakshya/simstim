@@ -24,34 +24,24 @@ type retryStageBackend struct {
 }
 
 func (b *retryStageBackend) StagePin(ctx context.Context, name string) error {
-	if b.entered != nil {
-		close(b.entered)
-	}
-	if b.gate != nil {
-		select {
-		case <-b.gate:
-		case <-ctx.Done():
-			return ctx.Err()
+	_, _, err := b.StagePinOwned(ctx, name)
+	return err
+}
+
+// closeStages releases only stages that this fixture actually opened. A
+// legacy call shape still captures the owned abort rather than abort by name.
+func (b *retryStageBackend) closeStages() {
+	b.mu.Lock()
+	var aborts []func()
+	for _, owner := range b.owners {
+		if owner.abort != nil {
+			aborts = append(aborts, owner.abort)
 		}
 	}
-	if b.stageErr != nil {
-		return b.stageErr
+	b.mu.Unlock()
+	for _, abort := range aborts {
+		abort()
 	}
-	if err := client.StagePin(ctx, name); err != nil {
-		return err
-	}
-	b.record("stage %s", name)
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	if b.staged == nil {
-		b.staged = map[string]string{}
-	}
-	b.staged[name] = ""
-	if b.owners == nil {
-		b.owners = map[string]*retryPinOwner{}
-	}
-	b.owners[name] = &retryPinOwner{name: name}
-	return nil
 }
 
 func (b *retryStageBackend) AbortPin(name string) {
@@ -78,7 +68,7 @@ func stageRetryWizardContext(t *testing.T, ctx context.Context) (*Model, *wizard
 	m.modal = w
 	t.Cleanup(func() {
 		m.Close()
-		be.AbortPin(w.host.Name)
+		be.closeStages()
 	})
 	return m, w, be
 }

@@ -44,10 +44,13 @@ func CheckCreate(p provider.Provider, req provider.Request) error {
 // so that `host rm --destroy` can always find what was made. It does not install
 // the helper: the caller connects the host next.
 //
-// If ctx ends while the provider works, as when the user presses Ctrl+C,
-// Create deletes the machine it had begun to make, when the provider names
-// machines after their hosts and no such machine was there before. The
-// error then says what was cleaned up.
+// If ctx ends before the provider returns a machine, Create deletes the
+// machine it had begun to make only when the provider names machines after
+// their hosts and no such machine was there before. If the provider returns
+// a machine but its initial save fails, bounded cleanup deletes that exact
+// machine before the host lock is released. The error says what was cleaned
+// up. A host whose initial save committed stays saved if later preparation
+// stops; cancellation permits no further host write.
 func Create(ctx context.Context, p provider.Provider, req provider.Request) (client.Host, error) {
 	// No host rm of this name runs while the machine is made and saved. A
 	// caller that saves the host again after it, as `host create` and the
@@ -110,12 +113,14 @@ func Create(ctx context.Context, p provider.Provider, req provider.Request) (cli
 		// A fresh context: the user's has ended, and the clean-up must still run.
 		cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Minute)
 		defer cancel()
-		if lc, oerr := p.Open(probe); oerr == nil {
-			if derr := lc.Destroy(cctx); derr != nil {
-				stopped.Msg = fmt.Sprintf("stopped while making %s, and the %s machine %s may be left: %v", req.Name, p.Name(), probe.Machine.ID, derr)
-				stopped.Hint = "Delete it with " + p.Name() + "'s own tools."
-				return client.Host{}, stopped
-			}
+		lc, cleanupErr := p.Open(probe)
+		if cleanupErr == nil {
+			cleanupErr = lc.Destroy(cctx)
+		}
+		if cleanupErr != nil {
+			stopped.Msg = fmt.Sprintf("stopped while making %s, and the %s machine %s may be left: %v", req.Name, p.Name(), probe.Machine.ID, cleanupErr)
+			stopped.Hint = "Delete it with " + p.Name() + "'s own tools."
+			return client.Host{}, stopped
 		}
 		stopped.Msg = fmt.Sprintf("stopped while making %s; the half-made %s machine %s was deleted", req.Name, p.Name(), probe.Machine.ID)
 	case !named[p.Name()]:
@@ -134,7 +139,7 @@ func unsaved(ctx context.Context, p provider.Provider, req provider.Request, h c
 		Hint: fmt.Sprintf("%s host create %s %s (after you fix the cause)", brand.Name, p.Name(), req.Name)}
 	var ue *client.UserError
 	switch {
-	case ctx.Err() != nil:
+	case errors.Is(saveErr, context.Canceled):
 		out = &client.UserError{Msg: fmt.Sprintf("stopped while making %s; nothing was saved", req.Name), Hint: brand.Name + " setup", Code: "cancelled", Kind: client.KindCancelled}
 	case errors.As(saveErr, &ue):
 		kept := *ue

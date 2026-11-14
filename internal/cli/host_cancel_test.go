@@ -35,10 +35,29 @@ func (m observationMachine) Status(ctx context.Context) (string, error) {
 }
 
 func (m observationMachine) Destroy(ctx context.Context) error {
+	if err := m.Machine.Destroy(ctx); err != nil {
+		return err
+	}
 	if err := os.WriteFile(filepath.Join(m.dir, "destroyed"), nil, 0o600); err != nil {
 		return err
 	}
-	return m.Machine.Destroy(ctx)
+	if m.stage != "destroy" {
+		return nil
+	}
+	// The parent takes the save lock only after the actual delete, so
+	// its signal observes the forget rather than the initial entry check.
+	tick := time.NewTicker(10 * time.Millisecond)
+	defer tick.Stop()
+	for {
+		if _, err := os.Stat(filepath.Join(m.dir, "release-destroy")); err == nil {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-tick.C:
+		}
+	}
 }
 
 type observationTransport struct {
@@ -110,7 +129,11 @@ func TestHostObservationChild(t *testing.T) {
 	if stage == "bridge" {
 		transport = observationTransport{Transport: tr, dir: dir}
 	}
-	m := observationMachine{Machine: clienttest.NewMachine(client.MachineRunning, transport), stage: stage, dir: dir}
+	state := client.MachineRunning
+	if stage == "retry" {
+		state = client.MachineMissing
+	}
+	m := observationMachine{Machine: clienttest.NewMachine(state, transport), stage: stage, dir: dir}
 	client.RegisterProvider("observation", func(client.Host) (client.Lifecycle, error) { return m, nil })
 	os.Args = append([]string{"client"}, strings.Split(os.Getenv(mainArgsEnv), mainArgsSep)...)
 	os.Exit(Main())
@@ -240,23 +263,67 @@ func TestSignalDuringHostShowWritesNoStdout(t *testing.T) {
 }
 
 func TestSignalAfterDestroyReportsTheCompletedStep(t *testing.T) {
-	saveObservationHost(t)
-	holdHostsToml(t)
-	cmd, out, errOut, dir := observationChild(t, "destroy", nil, "host", "rm", "box", "--destroy", "--confirm", "box")
-	hosttest.WaitFor(t, 10*time.Second, "the wait after deletion", func() bool {
-		return strings.Contains(errOut.String(), "Waiting for another command that saves ")
-	})
-	if err := cmd.Process.Signal(os.Interrupt); err != nil {
-		t.Fatal(err)
-	}
-	if code := observationExit(t, cmd); code != 130 || out.Len() != 0 || !strings.Contains(errOut.String(), "Cancelled. Done before that: deleted the observation machine test-box.") {
-		t.Errorf("exit %d, stdout %q, stderr %q", code, out.String(), errOut.String())
-	}
-	if _, err := os.Stat(filepath.Join(dir, "destroyed")); err != nil {
-		t.Errorf("no completed deletion: %v", err)
-	}
-	if _, err := client.FindHost("box"); err != nil {
-		t.Errorf("the cancelled forget removed the saved entry: %v", err)
+	for _, interactive := range []bool{false, true} {
+		t.Run(map[bool]string{false: "non-interactive retry", true: "interactive retry"}[interactive], func(t *testing.T) {
+			saveObservationHost(t)
+			cmd, out, errOut, dir := observationChild(t, "destroy", nil, "host", "rm", "box", "--destroy", "--confirm", "box")
+			hosttest.WaitFor(t, 10*time.Second, "the machine deletion", func() bool {
+				_, err := os.Stat(filepath.Join(dir, "destroyed"))
+				return err == nil
+			})
+			releaseHosts := holdHostsToml(t)
+			if err := os.WriteFile(filepath.Join(dir, "release-destroy"), nil, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			hosttest.WaitFor(t, 10*time.Second, "the wait after deletion", func() bool {
+				return strings.Contains(errOut.String(), "Waiting for another command that saves ")
+			})
+			if err := cmd.Process.Signal(os.Interrupt); err != nil {
+				t.Fatal(err)
+			}
+			if code := observationExit(t, cmd); code != 130 || out.Len() != 0 || !strings.Contains(errOut.String(), "Cancelled. Done before that: deleted the observation machine test-box.") {
+				t.Errorf("exit %d, stdout %q, stderr %q", code, out.String(), errOut.String())
+			}
+			if _, err := os.Stat(filepath.Join(dir, "destroyed")); err != nil {
+				t.Errorf("no completed deletion: %v", err)
+			}
+			saved, err := client.FindHost("box")
+			if err != nil {
+				t.Fatalf("the cancelled forget removed the saved entry: %v", err)
+			}
+			if rec := client.LoadRemoval(saved); !rec.Has(client.RemovalDestroy) {
+				t.Fatal("the completed deletion has no retry receipt")
+			}
+			if who, _ := filepath.Glob(filepath.Join(client.StateDir(), "hosts", "*.who")); len(who) != 0 {
+				t.Fatalf("the cancelled command left lock owners: %v", who)
+			}
+			releaseHosts()
+			var terminal *hosttest.Terminal
+			if interactive {
+				terminal = hosttest.NewTerminal(t, 100, 30)
+			}
+			retry, retryOut, retryErr, _ := observationChild(t, "retry", terminal, "host", "rm", "box")
+			if code := observationExit(t, retry); code != 0 {
+				t.Fatalf("retry exited %d: %s%s", code, retryOut.String(), retryErr.String())
+			}
+			said := retryOut.String() + retryErr.String()
+			if terminal != nil {
+				said = string(terminal.WaitFor("Forgot box."))
+			}
+			if !strings.Contains(said, "was deleted by an earlier run") {
+				t.Fatalf("retry did not reconcile the completed deletion: %q", said)
+			}
+			if _, err := client.FindHost("box"); err == nil {
+				t.Fatal("retry left the host saved")
+			}
+			receipt := filepath.Join(client.StateDir(), "hosts", client.HostFileKey("box"), "removal.json")
+			if _, err := os.Stat(receipt); !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("retry left the removal receipt: %v", err)
+			}
+			if who, _ := filepath.Glob(filepath.Join(client.StateDir(), "hosts", "*.who")); len(who) != 0 {
+				t.Fatalf("retry left lock owners: %v", who)
+			}
+		})
 	}
 }
 

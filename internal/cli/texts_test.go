@@ -50,47 +50,33 @@ func TestTheTextsOfTheQuestionsAndTheFixes(t *testing.T) {
 	}
 }
 
-// The CHANGELOG and cli-spec 5.1 rule 7 name the same two exceptions to "no
-// host is saved after a cancel" as the code has: the only saves of the
-// hosts that a cancel does not stop are host destroy's, once the machine is
-// gone (client.ForgetHost), and host create's, once the machine is made
-// (onboard.Create).
-func TestTheCancelsExceptionsAreTheCodes(t *testing.T) {
+// The general cancellation rule and the host command's rule agree: saves
+// stop with their caller. Machine cleanup and completed-step reporting do not
+// grant a cancelled command permission to save or forget a host.
+func TestTheCancellationPolicyMatchesHostSaves(t *testing.T) {
 	changelog, err := os.ReadFile(filepath.Join("..", "..", "CHANGELOG.md"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(changelog), "After a cancel, the client sends a host no more requests and saves no host, with two exceptions: `host create` saves a machine that it has made, and `host destroy` forgets a host whose machine it has deleted.") {
-		t.Error("the CHANGELOG does not name the two exceptions")
+	if !strings.Contains(string(changelog), "A machine whose initial host save already committed stays saved if later preparation stops, with no further host write.") {
+		t.Error("the CHANGELOG does not distinguish committed creation from later preparation")
+	}
+	if !strings.Contains(string(changelog), "After a cancel, the client sends a host no more requests and saves no host.") {
+		t.Error("the CHANGELOG does not state the host-save cancellation policy")
 	}
 	spec, err := os.ReadFile(filepath.Join("..", "..", "docs", "contributing", "cli-spec.md"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(spec), "`host destroy` forgets a host whose machine it has deleted, and `host create` saves a machine that it has made.") {
-		t.Error("cli-spec 5.1 rule 7 does not name the two exceptions")
-	}
-	var found []string
-	err = filepath.WalkDir(filepath.Join("..", ".."), func(p string, d os.DirEntry, err error) error {
-		if err != nil || d.IsDir() || !strings.HasSuffix(p, ".go") || strings.HasSuffix(p, "_test.go") {
-			return err
-		}
-		src, err := os.ReadFile(p)
-		if err != nil {
-			return err
-		}
-		for _, line := range strings.Split(string(src), "\n") {
-			if strings.Contains(line, "SaveHost") && (strings.Contains(line, "WithoutCancel") || strings.Contains(line, "context.Background()")) {
-				rel, _ := filepath.Rel(filepath.Join("..", ".."), p)
-				found = append(found, filepath.ToSlash(rel))
-			}
-		}
-		return nil
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if want := []string{"internal/client/machine.go", "internal/onboard/create.go"}; strings.Join(found, " ") != strings.Join(want, " ") {
-		t.Errorf("the saves that a cancel does not stop are in %q, want %q", found, want)
+	_, general, _ := strings.Cut(string(spec), "### 5.1 The table")
+	general, _, _ = strings.Cut(general, "### 5.2 `exec`")
+	_, hosts, _ := strings.Cut(string(spec), "### 11.3 `host rm`")
+	hosts, _, _ = strings.Cut(hosts, "### 11.4 `host upgrade`")
+	if !strings.Contains(general, "A cancelled command never writes `hosts.toml`.") ||
+		!strings.Contains(hosts, "A cancelled command never saves:") ||
+		!strings.Contains(general, "bounded cleanup under the held host lock deletes") ||
+		!strings.Contains(general, "Once that initial save commits") ||
+		!strings.Contains(general, "a cancelled forget keeps the saved host") {
+		t.Error("the general and host cancellation rules do not agree")
 	}
 }

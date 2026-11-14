@@ -111,6 +111,7 @@ func TestResumeSecretsAndErrors(t *testing.T) {
 		}
 	}
 	h.host.Secrets = []string{"TOKEN"}
+	replace(hs.be, h.host)
 	hs.be.secrets = map[string]api.Secret{"TOKEN": "t0k", "OTHER": "x", "GITHUB_TOKEN": "gh"}
 	setSecrets("TOKEN", "GITHUB_TOKEN")
 	hs.key("u")
@@ -138,12 +139,20 @@ func TestResumeSecretsAndErrors(t *testing.T) {
 // memory cap, the notice says which cap the agent gets again.
 func TestResumeOnceAtATime(t *testing.T) {
 	hs := endedLab(t, 80, 24)
-	cmd := hs.m.resumeSelected()
+	resolve := hs.m.resumeSelected()
+	if resolve == nil {
+		t.Fatal("u did not start the saved host's tier check")
+	}
+	_, cmd := hs.m.Update(resolve())
 	if cmd == nil || !hs.m.resuming[sessKey{"gcp-dev", "g3"}] {
 		t.Fatal("u did not start a resume")
 	}
 	hasToast(t, hs.m, "Resuming importer on gcp-dev, with its cap of 1.5 GiB…")
-	if again := hs.m.resumeSelected(); again != nil {
+	resolve = hs.m.resumeSelected()
+	if resolve == nil {
+		t.Fatal("the repeated key did not check current saved policy")
+	}
+	if _, again := hs.m.Update(resolve()); again != nil {
 		t.Error("a second u started another resume of the same session")
 	}
 	hs.do(cmd)

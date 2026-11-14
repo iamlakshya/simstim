@@ -146,8 +146,13 @@ func TestWizard(t *testing.T) {
 	hs.key("tab", "tab")
 	hs.typeText("~/infra/ssh/config")
 	hs.key("enter")
-	if w.step != wzTest || w.err != nil || len(w.checks) != 3 {
+	if w.step != wzTest || w.err != nil || len(w.checks) != 4 {
 		t.Fatalf("test step: %v %v %+v", w.step, w.err, w.checks)
+	}
+	for i, name := range []string{"host key", "connect", "system", "helper"} {
+		if w.checks[i].name != name {
+			t.Fatalf("test check %d is %q, want %q", i, w.checks[i].name, name)
+		}
 	}
 	hs.key("enter", "1")
 	if w.step != wzInstall {

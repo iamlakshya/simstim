@@ -63,6 +63,7 @@ func TestShowOnAStoppedProviderHost(t *testing.T) {
 		if err := client.SaveHostsContext(context.Background(), []client.Host{{Name: "cloud", SSH: "cloud", Provider: &client.Provider{Script: provider(c.state), WakeOnAttach: true}}}); err != nil {
 			t.Fatal(err)
 		}
+		pinFor(t, "cloud")
 		got, code := failsAs(t, "show", "cloud/c")
 		if code != 1 || !strings.Contains(got, c.want) || !strings.Contains(got, c.try) {
 			t.Errorf("show cloud/c on a %s host: exit %d\n%s", c.state, code, got)

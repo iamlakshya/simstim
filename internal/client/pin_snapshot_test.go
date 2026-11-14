@@ -450,6 +450,10 @@ func TestForgetFailureLeavesNoConnectableHostAndRetries(t *testing.T) {
 		t.Fatal(err)
 	}
 	pinFor(t, "box")
+	wantKey, err := recordedTierKey("box")
+	if err != nil || wantKey == "" {
+		t.Fatalf("the saved host has no recorded fingerprint: %q, %v", wantKey, err)
+	}
 	wp, err := writeWrapper(h)
 	if err != nil {
 		t.Fatal(err)
@@ -475,8 +479,12 @@ func TestForgetFailureLeavesNoConnectableHostAndRetries(t *testing.T) {
 	if _, err := writeWrapper(h); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := (&SSH{Host: h}).Command(ctx, "true"); !errors.As(err, &ue) || ue.Code != "host_key_unpinned" {
-		t.Errorf("after partial ForgetHost: %v, want host_key_unpinned", err)
+	if _, err := (&SSH{Host: h}).Command(ctx, "true"); !errors.As(err, &ue) || ue.Code != "host_key_unreadable" ||
+		ue.Kind != KindRefused || exitCodeOf(ue) != 5 || !strings.Contains(ue.Msg, "("+wantKey+") is missing") || ue.Hint != rekeyHint("box") {
+		t.Errorf("after partial ForgetHost: %#v, want the recorded missing-pin refusal and rekey hint", err)
+	}
+	if calls := sshCalls(t, dir); len(calls) != 0 {
+		t.Errorf("the missing recorded pin ran ssh: %q", calls)
 	}
 	// Retrying ForgetHost now finishes cleanly.
 	if err := ForgetHost("box"); err != nil {

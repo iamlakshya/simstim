@@ -24,7 +24,7 @@ func TestTheWizardCleansWhatTheHostSaid(t *testing.T) {
 		if strings.ContainsAny(c.name+c.detail, "\x1b\x07\u202e\n") {
 			t.Errorf("the check %q has %q", c.name, c.detail)
 		}
-		found = found || c.name == "idle stop" && c.detail == "powers offc after]52;c;aGk= 30midle"
+		found = found || c.name == "idle stop" && c.detail == "powers offc after]52;c;aGk= 30m idle"
 	}
 	if !found {
 		t.Errorf("no cleaned idle stop in %+v", w.checks)

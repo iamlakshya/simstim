@@ -3,8 +3,11 @@ package tui
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
+
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/iamlakshya/simstim/internal/client"
 )
@@ -68,14 +71,52 @@ func TestUnsavedWizardBackClosesItsConnection(t *testing.T) {
 }
 
 func TestCancelledWizardSaveClosesItsConnection(t *testing.T) {
-	hs := home(t, 80, 24)
+	ctx, cancel := context.WithCancel(context.WithValue(context.Background(), saveContextKey{}, "kept"))
+	defer cancel()
+	be := newFakeBackend()
+	m := New(ctx, be, Options{Now: func() time.Time { return now }})
+	m.after = func(time.Duration, tea.Msg) tea.Cmd { return nil }
+	t.Cleanup(func() { m.closeAfterProgramContext(ctx) })
 	w := newWizard()
-	c := &fakeConn{be: hs.be, name: "atlas-dev", done: make(chan struct{})}
-	hs.m.conns.add(c)
-	w.conn, hs.m.modal = c, w
-	hs.send(hostSavedMsg{err: context.Canceled})
+	w.host, w.step = client.Host{Name: "box", SSH: "box"}, wzReady
+	c := &fakeConn{be: be, name: "box", done: make(chan struct{})}
+	m.conns.add(c)
+	w.conn, m.modal = c, w
+	be.saveGate, be.saving = make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	letGo := func() { once.Do(func() { close(be.saveGate) }) }
+	cmd := w.save(m)
+	got, done := make(chan tea.Msg, 1), make(chan struct{})
+	t.Cleanup(func() { cancel(); letGo(); waitSaveWorker(t, done) })
+	go func() { defer close(done); got <- cmd() }()
+	select {
+	case <-be.saving:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the owned wizard save did not reach its transaction gate")
+	}
+	be.mu.Lock()
+	saveCtx := be.saveCtx
+	be.mu.Unlock()
+	if saveCtx == nil || saveCtx.Value(saveContextKey{}) != "kept" {
+		t.Fatal("the wizard save lost its construction parent's values")
+	}
+	cancel()
+	letGo()
+	var msg tea.Msg
+	select {
+	case msg = <-got:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the cancelled wizard save did not end")
+	}
+	_, cleanup := m.Update(msg)
+	executeHandoffCommand(cleanup)
 	if w.conn != nil || !c.isClosed() || !errors.Is(w.err, context.Canceled) {
 		t.Errorf("cancelled save left a connection: conn %v, closed %v, err %v", w.conn, c.isClosed(), w.err)
+	}
+	be.mu.Lock()
+	defer be.mu.Unlock()
+	if len(be.saved) != 0 || len(be.hosts) != 0 {
+		t.Fatal("the cancelled wizard saved its host")
 	}
 }
 

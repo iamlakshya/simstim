@@ -239,7 +239,11 @@ func TestGolden(t *testing.T) {
 			hs := newHarness(t, be, w, h)
 			hs.key("a")
 			hs.typeText("pi@raspberry")
-			hs.key("enter", "enter", "enter")
+			hs.key("enter", "enter", "1")
+			wiz, ok := hs.m.modal.(*wizard)
+			if !ok || wiz.step != wzInstall || wiz.tier != client.TierOwn {
+				t.Fatalf("the explicit tier did not reach install consent: %T %+v", hs.m.modal, wiz)
+			}
 			return hs.m
 		}},
 		{"wizard_ready", func(t *testing.T, w, h int) *Model {
@@ -248,7 +252,11 @@ func TestGolden(t *testing.T) {
 			hs := newHarness(t, be, w, h)
 			hs.key("a")
 			hs.typeText("pi@raspberry")
-			hs.key("enter", "enter", "enter", "enter")
+			hs.key("enter", "enter", "1", "enter")
+			wiz, ok := hs.m.modal.(*wizard)
+			if !ok || wiz.step != wzReady || !wiz.saved || wiz.tier != client.TierOwn {
+				t.Fatalf("the explicit tier and install did not reach ready: %T %+v", hs.m.modal, wiz)
+			}
 			return hs.m
 		}},
 	}
