@@ -9,7 +9,6 @@ import (
 	"reflect"
 	"slices"
 
-	"github.com/iamlakshya/simstim/internal/api"
 	"github.com/iamlakshya/simstim/internal/egress"
 	"github.com/iamlakshya/simstim/internal/proto"
 )

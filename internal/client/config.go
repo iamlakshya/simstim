@@ -25,6 +25,8 @@ import (
 
 // Host is one saved host.
 type Host struct {
+	// Private once-only creation capability; never serialized or metadata authority.
+	machineSourceBirth *hostMachineSourceBirth `toml:"-" json:"-"`
 	// WallFloor is the host's actual pinned minimum wall level.
 	WallFloor string `toml:"wall_floor,omitempty"`
 	api.LayerValues
@@ -70,6 +72,14 @@ func (h Host) Pool() (inPool, set bool) {
 // fields are the config reference: cmd/docgen turns them into
 // docs/reference/config.md.
 type Settings struct {
+	// Images selects how runtime files and images reach a host.
+	Images struct {
+		// Fetch is auto, host or laptop. Auto uses the host when it can reach
+		// the release, then falls back to the laptop once if that fetch fails.
+		// Host downloads on the host. Laptop copies checked files from here.
+		Fetch string `toml:"fetch"`
+	} `toml:"images"`
+
 	api.LayerValues
 	// Lock fixes values and denies that narrower layers may not change.
 	Lock *api.LayerValues `toml:"lock,omitempty"`
@@ -135,6 +145,7 @@ type Settings struct {
 // DefaultSettings are the settings with nothing in config.toml.
 func DefaultSettings() Settings {
 	var s Settings
+	s.Images.Fetch = "auto"
 	s.UI.Motion = "auto"
 	s.Attach.DetachKey = "ctrl+\\"
 	// Windows Terminal keeps Ctrl+V for itself.
@@ -148,7 +159,9 @@ func DefaultSettings() Settings {
 }
 
 type hostsFile struct {
-	Hosts []Host `toml:"host"`
+	// Default is a saved host name, auto, or empty when none is selected.
+	Default string `toml:"default,omitempty"`
+	Hosts   []Host `toml:"host"`
 }
 
 // ConfigDir is $XDG_CONFIG_HOME/<name>, or ~/.config/<name> (on macOS too).
@@ -206,20 +219,8 @@ func ConfigFiles() []ConfigFile {
 // file, or is too large, cannot be used, and says so. A file that does not
 // decode is the user's to fix: a usage error that says where.
 func LoadHosts() ([]Host, error) {
-	b, err := ReadConfigFile(hostsPath())
-	switch {
-	case errors.Is(err, os.ErrNotExist):
-		return nil, nil
-	case errors.Is(err, ErrNotAFile), errors.Is(err, ErrConfigTooLarge):
-		return nil, &UserError{Msg: hostsPath() + " cannot be used: " + err.Error(), Hint: brand.Name + " config check", Code: "config_unusable"}
-	case err != nil:
-		return nil, err
-	}
-	var f hostsFile
-	if _, err := decodeConfig(string(b), &f); err != nil {
-		return nil, tomlError(hostsPath(), string(b), err)
-	}
-	return f.Hosts, nil
+	file, err := loadHostsFile()
+	return file.Hosts, err
 }
 
 // tomlLine finds the line in the error of a value of the wrong type, which
@@ -399,6 +400,9 @@ func ReadSettings() (Settings, string) {
 // withDefaults fills each setting that s leaves empty with its default.
 func withDefaults(s Settings) Settings {
 	d := DefaultSettings()
+	if s.Images.Fetch == "" {
+		s.Images.Fetch = d.Images.Fetch
+	}
 	if s.UI.Motion == "" {
 		s.UI.Motion = d.UI.Motion
 	}

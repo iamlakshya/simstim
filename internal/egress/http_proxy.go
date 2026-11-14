@@ -48,6 +48,7 @@ func (s *Server) proxyHTTPRequest(w http.ResponseWriter, req *http.Request, hdr 
 	}
 	var scope *originRequest
 	var secrets *boundHTTPSecrets
+	var model *modelRequest
 	defer func() {
 		if turn != nil && bodyProgress != nil && !bodyProgress.complete.Load() {
 			turn.stopRead()
@@ -146,6 +147,12 @@ func (s *Server) proxyHTTPRequest(w http.ResponseWriter, req *http.Request, hdr 
 	}
 	secrets, err = s.prepareBoundHTTPSecrets(scope, req, plan)
 	if err != nil {
+		if kind, _, _ := httpClass(scope.request.Host); kind == "model" {
+			model = &modelRequest{request: scope.request, guard: s.currentEngine().modelGuard(scope.request)}
+			entry.Status, entry.Rule = http.StatusForbidden, "model:protocol"
+			writeModelRefusal(w, model, s.modelRefusalLine(model, "model WebSocket protocol"))
+			return
+		}
 		entry.Status, entry.Rule = http.StatusBadRequest, "secret_protocol"
 		writeInspectedError(w, brand.Name+": bound request protocol is unsupported. Try: send a complete uncompressed request with matching helpers.", entry.Status)
 		return
@@ -155,6 +162,12 @@ func (s *Server) proxyHTTPRequest(w http.ResponseWriter, req *http.Request, hdr 
 		if err != nil {
 			if ctx.Err() != nil {
 				refuseCancelled()
+				return
+			}
+			if kind, _, _ := httpClass(scope.request.Host); kind == "model" {
+				model = &modelRequest{request: scope.request, guard: s.currentEngine().modelGuard(scope.request)}
+				entry.Status, entry.Rule = http.StatusForbidden, "model:encoding"
+				writeModelRefusal(w, model, s.modelRefusalLine(model, "complete model JSON"))
 				return
 			}
 			entry.Status, entry.Rule = http.StatusUnsupportedMediaType, "http:encoding"
@@ -170,6 +183,25 @@ func (s *Server) proxyHTTPRequest(w http.ResponseWriter, req *http.Request, hdr 
 		if secrets != nil {
 			req.Body = &secretRequestTrailerBody{reader: req.Body, request: req, secrets: secrets}
 		}
+	}
+	model, modelFailure := s.prepareModelHTTPRequest(scope, req)
+	if modelFailure != "" {
+		entry.Status, entry.Rule = http.StatusForbidden, "model:"+modelFailure
+		writeModelRefusal(w, model, s.modelRefusalLine(model, modelFailure))
+		if req.Body != nil {
+			_ = req.Body.Close()
+		}
+		return
+	}
+	if failure := s.prepareServiceHTTPRequest(scope, req); failure != "" {
+		entry.Status, entry.Rule = http.StatusForbidden, "service:"+failure
+		writeInspectedError(w, brand.Name+": this service operation is not allowed. Try: allow its exact write path and method for this session.", entry.Status)
+		if req.Body != nil {
+			_ = req.Body.Close()
+		}
+		return
+	}
+	if req.Body != nil && req.Body != http.NoBody {
 		delivery := &httpBodyProgress{reader: req.Body, remaining: req.ContentLength}
 		delivery.closeRead = func() { _ = bodyProgress.Close() }
 		if !scope.setDelivery(delivery) {
@@ -216,7 +248,7 @@ func (s *Server) proxyHTTPRequest(w http.ResponseWriter, req *http.Request, hdr 
 			if err := prepareHTTPResponse(resp, req.Method); err != nil {
 				return err
 			}
-			if err := secrets.prepareResponse(req, resp); err != nil {
+			if err := secrets.prepareResponse(req, resp, scope, model); err != nil {
 				return err
 			}
 			entry.Status = resp.StatusCode

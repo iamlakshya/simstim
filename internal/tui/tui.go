@@ -55,7 +55,7 @@ func runWith(ctx context.Context, be Backend, o Options) error {
 	return runNamed(ctx, be, o, what, hint)
 }
 
-func runNamed(ctx context.Context, be Backend, o Options, what, hint string) error {
+func runNamed(ctx context.Context, be Backend, o Options, what, hint string) (runErr error) {
 	if !client.InputAllowed(ctx) {
 		return &client.UserError{
 			Msg:  what + " cannot open with input off",
@@ -72,7 +72,7 @@ func runNamed(ctx context.Context, be Backend, o Options, what, hint string) err
 	o.Motion = motionOn(s.UI.Motion, os.Getenv)
 	m := New(ctx, be, o)
 	m.handoff = true
-	defer m.closeAfterProgramContext(ctx)
+	defer func() { m.closeAfterProgramContext(ctx); runErr = errors.Join(runErr, m.grantOwners.pendingError()) }()
 	prog := timeFrames(m)
 	resumed := false
 	for {
@@ -88,6 +88,9 @@ func runNamed(ctx context.Context, be Backend, o Options, what, hint string) err
 		stuck := li.finish()
 		li.restoreTerminal()
 		m.pauseBg()
+		if cleanupErr := m.grantOwners.pendingError(); cleanupErr != nil {
+			return cleanupErr
+		}
 		if err != nil && ctx.Err() != nil {
 			return nil // stopped by a signal; sessions keep running
 		}

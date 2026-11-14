@@ -41,7 +41,7 @@ func TestGitMetadataRejectsNamespaceBeforeAnyLookup(t *testing.T) {
 	if !errors.Is(err, failure) || reads != 0 || !source.closed {
 		t.Fatalf("namespace gate: reads=%d closed=%v err=%v", reads, source.closed, err)
 	}
-	if !slices.Contains(source.checked, "PATH") || !slices.Contains(source.checked, "GIT_INDEX_FILE") {
+	if !slices.Contains(source.checked, "PATH") || !slices.Contains(source.checked, "GIT_INDEX_FILE") || !slices.Contains(source.checked, "XDG_STATE_HOME") || !slices.Contains(source.checked, "XDG_RUNTIME_DIR") {
 		t.Fatal("closed policy did not supply all role keys")
 	}
 }

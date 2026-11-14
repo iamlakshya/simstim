@@ -70,11 +70,12 @@ var loadPresets = sync.OnceValues(func() ([]compiledRule, error) {
 
 // Request describes a network flow or HTTP request to evaluate against policy.
 type Request struct {
-	Host   string
-	Port   int
-	Method string
-	Path   string // The visible URL path. Empty means the flow is opaque.
-	Now    time.Time
+	withoutModelTools bool // internal probe through the same policy matcher
+	Host              string
+	Port              int
+	Method            string
+	Path              string // The visible URL path. Empty means the flow is opaque.
+	Now               time.Time
 }
 
 // Decision is the policy engine's verdict for one Request.
@@ -105,6 +106,7 @@ type compiledRule struct {
 	port       int // 0 means default: 443 on allow, any port on deny
 	path       string
 	pathPrefix bool
+	tools      []string
 	methods    *[]string
 	once       bool
 	until      time.Time
@@ -122,15 +124,16 @@ type compiledLayer struct {
 // Engine evaluates network flows against locks, merged layers, the agent's
 // Egress hosts and the active preset (spec 7.2 and 8.2).
 type Engine struct {
-	now        func() time.Time
-	agentKind  string
-	agentRules []compiledRule
-	balanced   []compiledRule
-	preset     api.Preset
-	unknown    api.Unknown
-	locks      []compiledRule
-	layers     []compiledLayer // narrowest first
-	ledger     *onceLedger
+	now         func() time.Time
+	modelGuards []agents.ModelGuard
+	agentKind   string
+	agentRules  []compiledRule
+	balanced    []compiledRule
+	preset      api.Preset
+	unknown     api.Unknown
+	locks       []compiledRule
+	layers      []compiledLayer // narrowest first
+	ledger      *onceLedger
 }
 
 // NewEngine builds a policy engine for agentKind from a merged Policy.
@@ -139,10 +142,19 @@ func NewEngine(agentKind string, pol api.Policy) (*Engine, error) {
 	if err != nil {
 		return nil, err
 	}
-	return newEngineWithAgentRules(agentKind, agentRules, pol)
+	engine, err := newEngineWithAgentRules(agentKind, agentRules, pol)
+	if err == nil {
+		engine.addModelAgent(agentKind)
+	}
+	return engine, err
 }
 
 func newEngineWithAgentRules(agentKind string, agentRules []compiledRule, pol api.Policy) (*Engine, error) {
+	rules, err := CanonicalRuleInstances(pol.Rules)
+	if err != nil {
+		return nil, err
+	}
+	pol.Rules = rules
 	balanced, err := loadPresets()
 	if err != nil {
 		return nil, err

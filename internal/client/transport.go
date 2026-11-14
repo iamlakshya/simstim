@@ -141,22 +141,50 @@ func (s *SSH) Start(ctx context.Context, remote string) (Proc, error) {
 }
 
 func (s *SSH) startWith(lockCtx, procCtx context.Context, remote string) (Proc, error) {
-	logFile, err := newSSHLog()
+	lockCtx, release, err := s.beginSSHStart(lockCtx, "connect")
 	if err != nil {
 		return nil, err
+	}
+	defer release()
+	var logFile *sshLogFile
+	if s.bindingCollector != nil {
+		logFile = &sshLogFile{path: s.bindingCollector.log.Path(), agent: s.bindingCollector.log}
+	} else {
+		logFile, err = newSSHLog()
+		if err != nil {
+			return nil, err
+		}
 	}
 	cmd, err := s.command(lockCtx, procCtx, remote, "-T", "-E", logFile.path)
 	if err != nil {
 		logFile.finish()
 		return nil, err
 	}
+	var nativeProgram *nativeAgentProgram
+	if s.bindingCollector != nil {
+		nativeProgram, err = openNativeAgentProgram(cmd.Path)
+		if err != nil {
+			logFile.finish()
+			return nil, err
+		}
+		defer nativeProgram.Close()
+	}
 	// ssh exits with 255 when it could not reach the host.
 	p, err := CommandProc(cmd, func(code int, _ string) bool { return code == 255 })
+	release()
 	if err != nil {
 		logFile.finish()
 		return nil, err
 	}
-	return &sshProc{Proc: p, ctx: context.WithoutCancel(lockCtx), host: s.Host, args: cmd.Args, logFile: logFile}, nil
+	wrapped := &sshProc{Proc: p, rawDone: make(chan struct{}), ctx: context.WithoutCancel(lockCtx), host: s.Host, args: cmd.Args, logFile: logFile}
+	if s.bindingCollector != nil {
+		if err := s.bindingCollector.attachOwner(wrapped, procCtx, nativeProgram); err != nil {
+			wrapped.Kill()
+			_ = wrapped.Wait()
+			return nil, err
+		}
+	}
+	return wrapped, nil
 }
 
 type sshProc struct {
@@ -167,21 +195,46 @@ type sshProc struct {
 	logFile *sshLogFile
 
 	once    sync.Once
+	rawDone chan struct{}
 	waitErr error
 	code    int
 
-	logMu sync.Mutex
-	log   string
+	logMu            sync.Mutex
+	log              string
+	nativeDiag       nativeSSHDiagnosis
+	nativeClassified bool
 }
 
 func (p *sshProc) Wait() error {
 	p.once.Do(func() {
 		p.waitErr = p.Proc.Wait()
-		log := p.logFile.finish()
+		if p.rawDone != nil {
+			close(p.rawDone)
+		}
+		log := ""
+		var diagnosis nativeSSHDiagnosis
+		classified := false
+		if p.logFile != nil && p.logFile.agent != nil {
+			summary, err := p.logFile.agent.FinishScan(func(reader io.Reader) error {
+				var scanError error
+				diagnosis, scanError = scanNativeSSHDiagnosis(reader, pinAlias(p.host.Name))
+				return scanError
+			})
+			p.logFile.agentMu.Lock()
+			p.logFile.agentErr = err
+			p.logFile.agentMu.Unlock()
+			log, classified = summary.Text, err == nil && summary.Complete && summary.Classified
+		} else {
+			log = p.logFile.finish()
+		}
 		p.logMu.Lock()
-		p.log = log
+		p.log, p.code, p.nativeClassified = log, exitCode(p.waitErr), classified
+		// A timed-out callback may still unwind. Read its result only
+		// after FinishScan has confirmed successful complete classification.
+		if classified {
+			p.nativeDiag = diagnosis
+		}
 		p.logMu.Unlock()
-		p.code = exitCode(p.waitErr)
 		if p.host.SSH != "" && ValidHostName(p.host.Name) && !pinned(p.host.Name) {
 			cleanupUnpinnedMaster(p.ctx, p.host, p.args)
 		}
@@ -206,4 +259,28 @@ func (p *sshProc) sshDiag() (string, int) {
 // ReachHint is the ssh command that should work before anything else does.
 func (s *SSH) ReachHint() string {
 	return SSHCommand(s.Host.SSH) + " (check that this works first)"
+}
+
+func (p *sshProc) agentFailure() error {
+	if p.logFile != nil && p.logFile.agent != nil && p.rawDone != nil {
+		select {
+		case <-p.rawDone:
+			if failure := agentProcessExitFailure(exitCode(p.waitErr)); failure != nil {
+				return failure
+			}
+		default:
+		}
+	}
+	if p.logFile != nil && p.logFile.agent != nil {
+		if err := p.logFile.agent.Failure(); err != nil {
+			return agentNativeResourceError(err)
+		}
+		p.logFile.agentMu.Lock()
+		err := p.logFile.agentErr
+		p.logFile.agentMu.Unlock()
+		if err != nil {
+			return agentNativeResourceError(err)
+		}
+	}
+	return nil
 }

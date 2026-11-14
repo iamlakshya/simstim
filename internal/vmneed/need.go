@@ -41,13 +41,10 @@ func (n NeedV1) Clone() NeedV1 { n.BootV1 = n.BootV1.Clone(); return n }
 // Validate checks the complete known Need before persistence or effects. The
 // authenticated owner separately applies grants, normalisation and admission.
 func (n NeedV1) Validate(arch string) error {
-	if n.Driver != "chv" {
-		return fmt.Errorf("the VM Need names an unsupported driver")
-	}
-	if err := n.BootV1.Validate(arch); err != nil {
+	if err := n.BootV1.ValidateForDriver(n.Driver, arch); err != nil {
 		return err
 	}
-	return ValidateLimits(n.CPUs, n.DiskMax, arch)
+	return ValidateLimitsForDriver(n.Driver, n.CPUs, n.DiskMax, arch)
 }
 
 // ValidateWall additionally rejects conflicting enclosing wall metadata and
@@ -68,13 +65,19 @@ func (n NeedV1) ValidateWall(arch, level, driver string, unitLimit int64) error 
 
 // Validate checks all boot metadata using existing canonical validators.
 func (b BootV1) Validate(arch string) error {
+	return b.ValidateForDriver("chv", arch)
+}
+
+// ValidateForDriver checks the same boot format for the selected driver. It
+// never turns metadata into original-client or protected-operation authority.
+func (b BootV1) ValidateForDriver(driver, arch string) error {
 	if b.Version != 1 {
 		return fmt.Errorf("the VM Need version is unsupported")
 	}
 	if arch != "amd64" && arch != "arm64" || b.Image.Arch != arch || b.Image.Transfer != "" {
 		return fmt.Errorf("the VM Need architecture or image transfer is invalid")
 	}
-	if err := ValidateRuntime(b.Runtime, arch); err != nil {
+	if err := ValidateRuntimeForDriver(driver, b.Runtime, arch); err != nil {
 		return err
 	}
 	if err := b.Image.Validate(); err != nil {
@@ -94,11 +97,27 @@ func (b BootV1) Validate(arch string) error {
 // Its config.rs MAX_SUPPORTED_CPUS is 8192 on x86_64 KVM and 255 on arm64.
 // Host capacity and configuration defaults remain the admission owner's.
 func ValidateLimits(cpus int, diskMax int64, arch string) error {
-	maximum := 255
-	if arch == "amd64" {
-		maximum = 8192
-	} else if arch != "arm64" {
+	return ValidateLimitsForDriver("chv", cpus, diskMax, arch)
+}
+
+// ValidateLimitsForDriver rejects values the pinned driver's KVM path cannot
+// represent. It does not clamp guest RAM, CPUs or the admitted disk size.
+func ValidateLimitsForDriver(driver string, cpus int, diskMax int64, arch string) error {
+	if arch != "amd64" && arch != "arm64" {
 		return fmt.Errorf("the VM limits name an unsupported architecture")
+	}
+	maximum := 255
+	switch driver {
+	case "chv":
+		if arch == "amd64" {
+			maximum = 8192
+		}
+	case "firecracker":
+		// v1.18.0's KVM startup path allows 32 vCPUs on both architectures.
+		// Odd counts are valid because this driver always disables SMT.
+		maximum = 32
+	default:
+		return fmt.Errorf("the VM Need names an unsupported driver")
 	}
 	if cpus <= 0 || cpus > maximum || diskMax <= 0 {
 		return fmt.Errorf("the VM Need has unrepresentable CPU or non-positive disk limits")

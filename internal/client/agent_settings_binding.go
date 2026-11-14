@@ -5,7 +5,6 @@ import (
 	"unicode/utf8"
 
 	"github.com/iamlakshya/simstim/internal/api"
-	"github.com/iamlakshya/simstim/internal/secretbind"
 	"github.com/iamlakshya/simstim/internal/tomlinspect"
 )
 

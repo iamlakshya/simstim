@@ -59,6 +59,12 @@ func TestStartSecretRequestSurvivesOnlyItsOwnFolderRetry(t *testing.T) {
 	if first.grants == nil || len(backend.fetches) != 1 || len(connection.calls) != 1 || backend.fetches[0] != connection.calls[0] {
 		t.Fatal("prefetch and first start did not share their actual request context")
 	}
+	hs.m.grantOwners.mu.Lock()
+	_, held := hs.m.grantOwners.held[first.grants]
+	hs.m.grantOwners.mu.Unlock()
+	if !held {
+		t.Fatal("the folder question lost its original input owner")
+	}
 	if connection.calls[0].Err() != context.Canceled {
 		t.Fatal("completed first start kept its context alive")
 	}
@@ -70,6 +76,12 @@ func TestStartSecretRequestSurvivesOnlyItsOwnFolderRetry(t *testing.T) {
 	}
 	if len(backend.fetches) != 1 || len(connection.calls) != 2 {
 		t.Fatal("folder retry fetched values again or omitted the actual start")
+	}
+	hs.m.grantOwners.mu.Lock()
+	_, held = hs.m.grantOwners.held[first.grants]
+	hs.m.grantOwners.mu.Unlock()
+	if held {
+		t.Fatal("the completed logical start retained its input owner")
 	}
 	fresh, ok := hs.m.startSessionReady(h, request)().(startedMsg)
 	if !ok || fresh.grants == nil || fresh.grants == first.grants || len(backend.fetches) != 2 {
@@ -98,5 +110,26 @@ func TestResumeSecretFetchKeepsActualHostSessionAndContext(t *testing.T) {
 	}
 	if connection.calls[0].Err() != context.Canceled {
 		t.Fatal("completed resume kept its context alive")
+	}
+}
+
+func TestProgramPauseReleasesADroppedStartQuestion(t *testing.T) {
+	hs := folderLab(t)
+	host := hs.m.hostByName("atlas-dev")
+	result, ok := hs.m.startSessionReady(host, startReq{args: client.NewArgs{Agent: "shell", Cwd: "~/src/new-app"}})().(startedMsg)
+	if !ok {
+		t.Fatal("the real start produced no result")
+	}
+	if _, asks := client.FolderQuestionOf(result.err); !asks || result.grants == nil {
+		t.Fatalf("the fixture made no owned folder question: %v", result.err)
+	}
+	// Do not deliver the result to Update. The terminal handoff must still
+	// own and release it after joining the original background operations.
+	hs.m.pauseBg()
+	hs.m.grantOwners.mu.Lock()
+	held := len(hs.m.grantOwners.held)
+	hs.m.grantOwners.mu.Unlock()
+	if held != 0 || hs.m.grantOwners.pendingError() != nil {
+		t.Fatalf("a dropped question retained inputs after the join: held=%d err=%v", held, hs.m.grantOwners.pendingError())
 	}
 }

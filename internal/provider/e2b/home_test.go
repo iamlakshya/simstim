@@ -8,9 +8,6 @@ import (
 	"github.com/iamlakshya/simstim/internal/testhome"
 )
 
-// The tests run in a home of their own (testhome).
-func TestMain(m *testing.M) { testhome.Main(m) }
-
 // The tests run in a home of their own: no test reads or writes the
 // user's real home and folders, such as the E2B login, nor uses the shared runtime folder.
 func TestTheTestsHaveAHomeOfTheirOwn(t *testing.T) {

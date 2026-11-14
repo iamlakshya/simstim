@@ -41,6 +41,13 @@ type Source interface {
 	Close() error
 }
 
+// RepositorySource selects one protected repository on the SAME owned source.
+// Manager calls it once before reading seeds or capturing any bundle bytes.
+type RepositorySource interface {
+	Source
+	SelectRepository(string) error
+}
+
 // Open claims an actual canonical Source, never a different process engine.
 type Open func(ctx context.Context, originalID, expectedPrimary string) (Source, error)
 
@@ -114,7 +121,7 @@ func (m *Manager) PrepareBegin(ctx context.Context, owner, primary string, args 
 // PrepareBeginRequest records the existing begin correlation ID as the work
 // epoch. A following full request replaces it under the same retained source.
 func (m *Manager) PrepareBeginRequest(ctx context.Context, owner, primary string, args api.PullBeginArgs, limit int64, epoch uint64) (func(context.Context) (api.PullExport, error), error) {
-	if owner == "" || !api.ValidSessionID(primary) || !api.ValidSessionID(args.ID) || !api.ValidSessionID(args.Token) || len(args.Token) != 26 || limit <= 0 {
+	if args.Repo != "" && !api.InputRepoName(args.Repo) || owner == "" || !api.ValidSessionID(primary) || !api.ValidSessionID(args.ID) || !api.ValidSessionID(args.Token) || len(args.Token) != 26 || limit <= 0 {
 		return nil, exportError("pull_protocol", "invalid pull export admission")
 	}
 	if err := ctx.Err(); err != nil {
@@ -126,7 +133,7 @@ func (m *Manager) PrepareBeginRequest(ctx context.Context, owner, primary string
 	m.mu.Lock()
 	current := m.primary[primary]
 	if current != nil {
-		if m.exports[args.Token] != nil || current.owner != owner || current.id != args.ID || !args.Full || args.Previous != current.token || args.Token == current.token {
+		if m.exports[args.Token] != nil || current.owner != owner || current.id != args.ID || current.repo != args.Repo || !args.Full || args.Previous != current.token || args.Token == current.token {
 			m.mu.Unlock()
 			return nil, exportError("sandbox_busy", "this sandbox already has an owned pull export")
 		}
@@ -166,7 +173,7 @@ func (m *Manager) PrepareBeginRequest(ctx context.Context, owner, primary string
 		return nil, exportError("sandbox_busy", "all pull export slots for this connection are in use")
 	}
 	lifetime, cancel := context.WithCancel(m.life)
-	current = &export{manager: m, owner: owner, primary: primary, id: args.ID, token: args.Token, epoch: epoch, full: args.Full, limit: limit, life: lifetime, cancel: cancel, closed: make(chan struct{}), workDone: make(chan struct{}), capturing: true, last: m.options.Now()}
+	current = &export{manager: m, owner: owner, primary: primary, id: args.ID, repo: args.Repo, token: args.Token, epoch: epoch, full: args.Full, limit: limit, life: lifetime, cancel: cancel, closed: make(chan struct{}), workDone: make(chan struct{}), capturing: true, last: m.options.Now()}
 	m.exports[args.Token] = current
 	m.primary[primary] = current
 	workDone := current.workDone

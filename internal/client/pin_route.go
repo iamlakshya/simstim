@@ -227,11 +227,12 @@ func needsPin(ctx context.Context, h Host) (bool, error) {
 // file that is gone, which it refuses, and a published pin whose host was
 // removed from hosts.toml is refused too.
 func (s *SSH) connArgs(ctx context.Context, shared bool) ([]string, error) {
+	ctx = s.policyContext(ctx)
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 	if s.Host.SSH == "" || !ValidHostName(s.Host.Name) {
-		return s.args(shared) // writeWrapper refuses a bad name
+		return s.argsContext(ctx, shared) // writeWrapper refuses a bad name
 	}
 	if _, err := stageForContext(ctx, s.Host.Name); err != nil {
 		return nil, err
@@ -252,7 +253,7 @@ func (s *SSH) connArgs(ctx context.Context, shared bool) ([]string, error) {
 			isSaved, serr = savedHost(s.Host.Name)
 		}
 		if err == nil && serr == nil && ok && (snap.staged || isSaved) {
-			args, err = s.argsWith(&snap, shared)
+			args, err = s.argsWithContext(ctx, &snap, shared)
 		}
 	}); lerr != nil {
 		return nil, lerr
@@ -264,6 +265,9 @@ func (s *SSH) connArgs(ctx context.Context, shared bool) ([]string, error) {
 		return nil, serr
 	}
 	if ok && (snap.staged || isSaved) {
+		if err := s.checkSSHEnvironment(ctx, args); err != nil {
+			return nil, err
+		}
 		return args, nil
 	}
 	if isSaved {
@@ -320,6 +324,14 @@ func hostKeyError(h Host, sshLog string, code int) *UserError {
 	}
 	shownType, shown, ok := parseHostKeyStop(sshLog, pinAlias(h.Name))
 	if !ok {
+		return nil
+	}
+	return hostKeyStopError(h, shownType, shown)
+}
+
+// hostKeyStopError formats a proven pin stop from either complete parser.
+func hostKeyStopError(h Host, shownType, shown string) *UserError {
+	if !pinned(h.Name) {
 		return nil
 	}
 	hint := rekeyHint(h.Name)

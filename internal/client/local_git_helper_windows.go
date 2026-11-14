@@ -3,12 +3,11 @@
 package client
 
 import (
-	"errors"
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"sync"
 
@@ -95,16 +94,18 @@ func runLocalGitWindowsHelper(control, status *os.File, request localGitRequest)
 		gate.Unlock()
 		close(cancel)
 	}()
-	command := exec.Command(request.Executable, localGitArguments(request)...)
-	command.Dir, command.Env = request.Directory, request.Env
-	command.Stdin, command.Stdout, command.Stderr = os.Stdin, os.Stdout, os.Stderr
+	arguments := append([]string{request.Executable}, localGitArguments(request)...)
 	// Inherit the already-assigned Job by CreateProcess's ordinary rules.
 	// Only stdio is inherited; private controls were made non-inheritable and
 	// the assignment handle was closed before READY. No BREAKAWAY flag.
 	gate.Lock()
 	var err error
+	var process *os.Process
 	if !gateCancelled {
-		err = command.Start()
+		// os/exec also consults PATHEXT for an absolute .exe, and may try
+		// git.exe.com if the pinned path disappears. Start the exact selected
+		// native filename directly; no extension or current-directory lookup.
+		process, err = os.StartProcess(request.Executable, arguments, &os.ProcAttr{Dir: request.Directory, Env: slices.Clone(request.Env), Files: []*os.File{os.Stdin, os.Stdout, os.Stderr}})
 	}
 	started := !gateCancelled && err == nil
 	gate.Unlock()
@@ -112,11 +113,15 @@ func runLocalGitWindowsHelper(control, status *os.File, request localGitRequest)
 		sendLocalGitStatus(status, localGitStatus{Quiescent: true, Code: -1, Failure: "the native launch did not start"})
 		return 0
 	}
-	direct := make(chan error, 1)
-	go func() { direct <- command.Wait() }()
-	var directErr error
+	type result struct {
+		state *os.ProcessState
+		err   error
+	}
+	direct := make(chan result, 1)
+	go func() { state, err := process.Wait(); direct <- result{state, err} }()
+	var joined result
 	select {
-	case directErr = <-direct:
+	case joined = <-direct:
 	case <-cancel:
 		// The parent terminates and queries its same actual Job. Parent death
 		// closes its last handle. The helper never guesses a Git process ID.
@@ -124,14 +129,10 @@ func runLocalGitWindowsHelper(control, status *os.File, request localGitRequest)
 	}
 	control.Close()
 	<-cancel
-	code := 0
-	if directErr != nil {
-		code = -1
-		var exited *exec.ExitError
-		if errors.As(directErr, &exited) {
-			code = exited.ExitCode()
-		}
+	if joined.err != nil || joined.state == nil {
+		sendLocalGitStatus(status, localGitStatus{NativeDone: true, Code: -1, Failure: "the direct native Git wait did not complete"})
+		return 125
 	}
-	sendLocalGitStatus(status, localGitStatus{NativeDone: true, Code: code})
+	sendLocalGitStatus(status, localGitStatus{NativeDone: true, Code: joined.state.ExitCode()})
 	return 0
 }

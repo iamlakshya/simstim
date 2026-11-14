@@ -108,6 +108,9 @@ func resumeBundleLocked(original string, a api.ResumeArgs, root *Manifest) (*Res
 	if err := ApplyRepositoryResume(&preview, a); err != nil {
 		return nil, err
 	}
+	if err := prepareResumeEnvironment(&preview, a.Environment); err != nil {
+		return nil, err
+	}
 	if err := validateResumeInputs(&preview, a.Inputs); err != nil {
 		return nil, err
 	}
@@ -144,6 +147,9 @@ func resumeBundleLocked(original string, a api.ResumeArgs, root *Manifest) (*Res
 		root.Limits.MemoryAsked = 0
 	}
 	if err := validateResumeInputs(root, a.Inputs); err != nil {
+		return nil, err
+	}
+	if err := prepareResumeEnvironment(root, a.Environment); err != nil {
 		return nil, err
 	}
 	root.HostLabel = a.HostLabel

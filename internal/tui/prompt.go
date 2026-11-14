@@ -25,23 +25,35 @@ const (
 )
 
 type promptState struct {
-	mode     promptMode
-	in       input
-	host     string   // where a new session starts
-	sel      int      // the selected search result
-	folders  []string // the host's completions for the folder being typed
-	asked    string   // the folder prefix last asked for
-	starting bool
-	err      error
-	at       time.Time
+	folderSeq     uint64
+	folderCtx     context.Context
+	folderProgram context.Context
+	folderCancel  context.CancelFunc
+	folderGen     int
+	folderHost    client.Host
+	mode          promptMode
+	in            input
+	host          string   // where a new session starts
+	sel           int      // the selected search result
+	folders       []string // the host's completions for the folder being typed
+	asked         string   // the folder prefix last asked for
+	starting      bool
+	err           error
+	at            time.Time
 }
 
 func (m *Model) openSearch() tea.Cmd {
+	if m.prompt != nil {
+		m.prompt.stopFolders()
+	}
 	m.prompt = &promptState{mode: promptSearch, in: newInput("", "a session, an agent, a folder or a host"), at: m.now()}
 	return nil
 }
 
 func (m *Model) openQuickStart() tea.Cmd {
+	if m.prompt != nil {
+		m.prompt.stopFolders()
+	}
 	h := m.newSessionHost()
 	if h == nil {
 		m.backToHosts()
@@ -124,7 +136,7 @@ func (m *Model) ghost() string {
 			}
 		}
 	}
-	if pathWord(word) {
+	if pathWord(word) && m.quickFoldersCurrent(p) {
 		for _, f := range p.folders {
 			if strings.HasPrefix(f, word) && f != word && f != word+"/" {
 				return f[len(word):]
@@ -164,12 +176,14 @@ func (m *Model) promptKey(k tea.KeyPressMsg) tea.Cmd {
 	ks := k.String()
 	if p.starting {
 		if ks == "esc" {
+			p.stopFolders()
 			m.prompt = nil
 		}
 		return nil
 	}
 	switch ks {
 	case "esc":
+		p.stopFolders()
 		m.prompt = nil
 		return nil
 	case "up", "ctrl+p":
@@ -200,17 +214,20 @@ func (m *Model) promptKey(k tea.KeyPressMsg) tea.Cmd {
 	}
 	h := m.hostByName(p.host)
 	if h == nil {
+		p.stopFolders()
 		m.prompt = nil
 		return nil
 	}
 	switch ks {
 	case "tab":
 		if g := m.ghost(); g != "" {
+			p.stopFolders()
 			p.in.insert(g)
 			return m.askFolders()
 		}
 		return nil
 	case "ctrl+f":
+		p.stopFolders()
 		d := newSessionDialog(m, h)
 		a := quickArgs(p.in.value(), agentsOn(h), m.defaultAgent(h))
 		for i, c := range d.choices {
@@ -225,37 +242,17 @@ func (m *Model) promptKey(k tea.KeyPressMsg) tea.Cmd {
 		return nil
 	case "enter", "ctrl+enter", "alt+enter", "ctrl+j":
 		a := quickArgs(p.in.value(), agentsOn(h), m.defaultAgent(h))
+		p.stopFolders()
 		p.starting, p.err = true, nil
 		m.lastAgent[h.name()] = a.Agent
 		return m.startSession(h, startReq{args: a, attach: ks == "enter", line: p})
 	}
 	if p.in.key(k) {
+		p.stopFolders()
 		p.err = nil
 		return m.askFolders()
 	}
 	return nil
-}
-
-// askFolders asks the host for completions of the folder being typed.
-func (m *Model) askFolders() tea.Cmd {
-	p := m.prompt
-	h := m.hostByName(p.host)
-	text := p.in.value()
-	word := text[strings.LastIndex(text, " ")+1:]
-	if h == nil || !h.online() || !pathWord(word) || word == p.asked {
-		return nil
-	}
-	p.asked = word
-	name, c := h.name(), h.conn
-	return m.bgCmd(func(ctx context.Context) tea.Msg {
-		cctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-		defer cancel()
-		res, err := c.Folders(cctx, word)
-		if err != nil {
-			return nil
-		}
-		return foldersMsg{host: name, prefix: word, res: res, quick: true}
-	})
 }
 
 // promptLine draws the prompt: the host or "search", the text with its

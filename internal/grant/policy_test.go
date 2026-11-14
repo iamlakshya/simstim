@@ -1,6 +1,8 @@
 package grant
 
 import (
+	"bytes"
+	"encoding/json"
 	"net/netip"
 	"testing"
 
@@ -34,5 +36,36 @@ func TestCheckHostLeavesPrivateNetworkAuthorityToClient(t *testing.T) {
 	}
 	if _, private, err := CheckHost("api.example.com"); err != nil || private {
 		t.Fatalf("public host: private=%v err=%v", private, err)
+	}
+}
+
+func TestAdditionPreviewUsesCanonicalReplacementAndSessionCollision(t *testing.T) {
+	original := api.Rule{Layer: api.LayerSession, Allow: true, Door: api.DoorNet, Target: "session-collision-7608.example", Once: true}
+	original.ID = api.RuleID(original)
+	policy, _, err := MergeLayers([]api.Layer{{Kind: api.LayerSession, Rules: []api.Rule{original}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, err := json.Marshal(policy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := CheckAddition(policy, api.Rule{Allow: true, Door: api.DoorNet, Target: original.Target}); err != nil {
+		t.Fatalf("preview refused the same canonical replacement as a real addition: %v", err)
+	}
+	collision := api.Rule{Allow: true, Door: api.DoorNet, Target: "session-collision-21481.example"}
+	collision.Layer = api.LayerSession
+	if api.RuleID(collision) != original.ID {
+		t.Fatal("the real session collision fixture changed")
+	}
+	if err := CheckAddition(policy, collision); err == nil {
+		t.Fatal("preview accepted an addition that collides in the actual session layer")
+	}
+	after, err := json.Marshal(policy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(after, before) {
+		t.Fatal("addition preview mutated the original policy or once lease")
 	}
 }

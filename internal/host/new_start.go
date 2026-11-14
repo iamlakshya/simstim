@@ -1,6 +1,7 @@
 package host
 
 import (
+	"context"
 	"time"
 
 	"github.com/iamlakshya/simstim/internal/api"
@@ -22,14 +23,31 @@ func startSession(m *Manifest, secrets map[string]api.Secret, fromFolder ...bool
 }
 
 func startReservedSession(m *Manifest, secrets map[string]api.Secret, reservation *sessionReservation, fromFolder ...bool) (*SessionInfo, error) {
-	id := m.ID
-	derived := len(fromFolder) > 0 && fromFolder[0]
-
-	unlock, err := lockSession(id)
+	operation, err := beginReservedSessionOperation(context.Background(), reservation)
 	if err != nil {
 		return nil, err
 	}
-	defer unlock()
+	defer func() {
+		reservation.close()
+		operation.Close()
+	}()
+	return startReservedSessionWithOperation(m, secrets, reservation, operation, fromFolder...)
+}
+
+// startReservedSessionWithOperation consumes the original reservation's held OP.
+// New keeps it across its first save, launch, delivery, readiness and original
+// failure cleanup. The child must borrow that same lock, never reacquire it.
+func startReservedSessionWithOperation(m *Manifest, secrets map[string]api.Secret, reservation *sessionReservation, operation *SessionOperation, fromFolder ...bool) (*SessionInfo, error) {
+	if m == nil || reservation == nil || reservation.dir == nil || operation == nil ||
+		reservation.id != m.ID || !operation.Valid(m.ID) || operation.native.borrowed {
+		return nil, sessionLeaseError("startup has no original reserved primary operation")
+	}
+	if err := operation.native.rootRef.CheckRoot(reservation.dir); err != nil {
+		return nil, err
+	}
+	id := m.ID
+	derived := len(fromFolder) > 0 && fromFolder[0]
+	var err error
 	// No session's ID is the name: an address with it would reach that
 	// session first (cli-spec 9.2). derived is true for a name from the
 	// folder.

@@ -123,10 +123,6 @@ func (g *Init) prepareInputs(raw []byte) error {
 func (g *Init) acceptInputStream(st *link.Stream) bool {
 	var header inputtransfer.Header
 	if st.Header(&header) != nil || header.Purpose != "inputs" {
-		if st.Kind() == link.KindPut {
-			_ = st.Close()
-			return true
-		}
 		return false
 	}
 	if !api.ExactJSONFields(st.HeaderBytes(), struct {

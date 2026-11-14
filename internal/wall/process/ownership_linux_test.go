@@ -207,3 +207,49 @@ func TestDestroyKeepsSessionDataAndRefusesRuntimeReplacement(t *testing.T) {
 		t.Fatal("owned runtime remains", err)
 	}
 }
+
+func TestFailedInitKillDoesNotWaitOrReleaseLiveOwnership(t *testing.T) {
+	_, _, originalFD := ownedChild(t)
+	fd, err := unix.FcntlInt(uintptr(originalFD), unix.F_DUPFD_CLOEXEC, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prepared, err := newSandbox(wall.Spec{SessionDir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := prepared.(*sandbox)
+	launcher := exec.Command(os.Args[0], "-test.run=^TestOwnedPIDFDHelper$")
+	if err := launcher.Start(); err != nil {
+		t.Fatal(err)
+	}
+	s.cmd, s.pidfd = launcher, fd
+	oldPoll, oldSignal := pollInit, signalInit
+	defer func() { pollInit, signalInit = oldPoll, oldSignal }()
+	polls := 0
+	pollInit = func(_ []unix.PollFd, timeout int) (int, error) {
+		polls++
+		if timeout != 0 {
+			return -1, unix.EIO
+		}
+		return 0, nil
+	}
+	signalInit = func(int, unix.Signal, *unix.Siginfo, int) error { return unix.EPERM }
+	s.reap(launcher)
+	if result := s.Wait(); !errors.Is(result.Err, unix.EPERM) || errors.Is(result.Err, unix.EIO) || polls != 1 {
+		t.Fatalf("failed kill was hidden or waited: %+v polls=%d", result, polls)
+	}
+	if s.closed || s.pidfd != fd || s.CleanExit() {
+		t.Fatal("failed kill released live ownership")
+	}
+	if err := s.Destroy(); err == nil {
+		t.Fatal("destroy accepted failed kill")
+	}
+	pollInit, signalInit = oldPoll, oldSignal
+	if err := s.Kill(); !errors.Is(err, unix.EPERM) {
+		t.Fatal("physical retry lost original failed kill", err)
+	}
+	if err := s.Destroy(); err != nil {
+		t.Fatal(err)
+	}
+}

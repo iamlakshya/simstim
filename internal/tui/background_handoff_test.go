@@ -263,11 +263,13 @@ func handoffCommandCases() []handoffCommandCase {
 		}},
 		{"test host", "ping", func(m *Model, h *hostConn, _ *wizard) tea.Cmd { return m.testHost(h) }},
 		{"quick folders", "folders", func(m *Model, h *hostConn, _ *wizard) tea.Cmd {
-			m.prompt = &promptState{host: h.name(), in: newInput("~/src", "")}
+			m.prompt = &promptState{mode: promptNew, host: h.name(), in: newInput("~/src", "")}
 			return m.askFolders()
 		}},
 		{"form folders", "folders", func(m *Model, h *hostConn, _ *wizard) tea.Cmd {
-			return m.fetchFolders(&newSession{host: h.name(), folder: newInput("~/src", "")})
+			d := &newSession{host: h.name(), folder: newInput("~/src", "")}
+			m.modal = d
+			return m.fetchFolders(d)
 		}},
 		{"resume", "resume", func(m *Model, _ *hostConn, _ *wizard) tea.Cmd { return m.resumeSelected() }},
 		{"debug start", "debug-start", func(m *Model, _ *hostConn, _ *wizard) tea.Cmd { return m.debugStart() }},

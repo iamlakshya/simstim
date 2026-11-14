@@ -47,6 +47,9 @@ type Model struct {
 	ctx                context.Context
 	cancelTier         context.CancelFunc
 	tierRequests       chan tierQuestionRequest
+	grantRequests      chan grantQuestionRequest
+	grantActive        chan bool
+	grantOwners        grantOwners
 	be                 Backend
 	settings           client.Settings
 	now                func() time.Time
@@ -156,7 +159,8 @@ func New(ctx context.Context, be Backend, o Options) *Model {
 	m := &Model{
 		ctx: ctx, be: be, now: o.Now, motion: o.Motion,
 		cancelTier: cancelTier, tierRequests: make(chan tierQuestionRequest, 1),
-		width: 80, height: 24, dark: true, focused: true,
+		grantRequests: make(chan grantQuestionRequest, 1),
+		width:         80, height: 24, dark: true, focused: true,
 		autoSel:   true,
 		attach:    &client.AttachState{},
 		lastAgent: map[string]string{},
@@ -213,6 +217,7 @@ func (m *Model) Init() tea.Cmd {
 		m.after(activityEvery, activityTickMsg{}),
 		m.debugOnStart(),
 		m.waitForTierQuestion(),
+		m.waitForGrantQuestion(),
 		m.keymapOnStart(),
 	}
 	for _, h := range m.hosts {
@@ -229,47 +234,21 @@ func (m *Model) Init() tea.Cmd {
 	return tea.Batch(append(cmds, m.startTimers())...)
 }
 
-// Timer and result messages.
-type (
-	previewTickMsg struct{ seq int }
-	opDoneMsg      struct {
-		host string
-		ok   string
-		err  error
-		drop string // a session to take off the list
-		// warn, when set, replaces ok: the operation worked, with a
-		// problem that hint says how to fix.
-		warn, hint string
-	}
-	foldersMsg struct {
-		host, prefix string
-		res          client.FoldersResult
-		quick        bool // for the quick-start line
-	}
-	activityTickMsg struct{}
-	startedMsg      struct {
-		startReq // what started: a question about it sends it again
-		s        *client.Session
-		err      error
-		warn     *client.UserError // the answers about setup scripts did not parse
-		settingsRead
-	}
-	attachDoneMsg struct {
-		host, id, name string
-		res            client.AttachResult
-		err            error
-		settingsRead
-	}
-	sshHostsMsg struct{ hosts []string }
-)
-
 // Update handles one message. It never blocks: everything slow is a command.
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	quick := m.prompt
+	quickText, quickSeq := "", uint64(0)
+	if quick != nil {
+		quickText, quickSeq = quick.in.value(), quick.folderSeq
+	}
 	before, modal, scr, cur, armed := m.sel, m.modal, m.screen, m.cur, m.quitArmed
 	selIdx, hostSel := m.selIdx, m.hostSel
 	// An action that read config.toml brings the settings first, so that
 	// what it leads to, such as an attach, uses them.
 	cmd := tea.Batch(m.settingsOf(msg), m.update(msg))
+	m.retireQuickFolders(quick, quickText, quickSeq)
+	m.retireFormFolders(modal)
+	m.retirePolicy(modal)
 	if m.sel != before {
 		cmd = tea.Batch(cmd, m.schedulePreview())
 	}
@@ -357,8 +336,21 @@ func (m *Model) update(msg tea.Msg) tea.Cmd {
 	case peekMsg:
 		m.onPeek(msg)
 		return nil
+	case policyMsg:
+		return m.onPolicy(msg)
+	case policyStoppedMsg:
+		return m.onPolicyStopped(msg)
 	case opDoneMsg:
 		return m.onOpDone(msg)
+	case grantCleanupMsg:
+		if msg.err != nil {
+			return m.toastErr(msg.err)
+		}
+		return nil
+	case grantQuestionRequest:
+		return m.onGrantQuestion(msg)
+	case grantQuestionEndedMsg:
+		return m.onGrantQuestionEnded(msg)
 	case tierQuestionRequest:
 		return m.onTierQuestion(msg)
 	case tierQuestionEndedMsg:
@@ -408,18 +400,6 @@ func (m *Model) onToastTick() tea.Cmd {
 		if d, ok := m.toasts.next(m.now()); ok {
 			return m.after(d, toastTickMsg{})
 		}
-	}
-	return nil
-}
-
-// onFolders takes folder completions, for the quick start or the form.
-func (m *Model) onFolders(msg foldersMsg) tea.Cmd {
-	res := cleanFolders(msg.res)
-	if p := m.prompt; msg.quick && p != nil && p.host == msg.host && p.asked == msg.prefix {
-		p.folders = res.Matches
-	}
-	if d, ok := m.modal.(*newSession); ok && d.host == msg.host && !msg.quick {
-		d.setSuggestions(msg.prefix, res)
 	}
 	return nil
 }

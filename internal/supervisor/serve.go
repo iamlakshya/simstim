@@ -81,6 +81,9 @@ func (s *Supervisor) acceptLoop() {
 
 // client is one connection to the session's socket.
 type client struct {
+	copyMu     sync.Mutex
+	copyBusy   bool
+	copyPlan   *copyReadPlan
 	pullMu     sync.Mutex
 	pull       *host.PullRPC
 	pullClosed bool
@@ -218,6 +221,9 @@ func (s *Supervisor) serve(conn net.Conn) {
 			}
 			continue
 		}
+		if s.uploadFrame(c, r, f, wasFirst) {
+			return
+		}
 		if s.inputFrame(c, r, f, wasFirst) {
 			return
 		}
@@ -296,6 +302,9 @@ func (s *Supervisor) request(c *client, f proto.Frame) bool {
 		return false
 	}
 	if s.armRequest(c, req) {
+		return true
+	}
+	if s.copyRequest(c, req) {
 		return true
 	}
 	if s.pullRequest(c, req) {

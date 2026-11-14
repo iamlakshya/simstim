@@ -159,6 +159,7 @@ func (s *Supervisor) stopGuest(grace time.Duration, ended <-chan struct{}) {
 // kills each process that it can tie to the sandbox, and waits for the
 // sandbox's end. It may run more than once.
 func (s *Supervisor) closeSandbox() (cleanupErr error) {
+	s.closeFileTransfers()
 	defer func() {
 		s.stopEgress()
 		s.runtimeCleanup.Do(func() {

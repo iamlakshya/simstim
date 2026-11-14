@@ -43,5 +43,11 @@ func NewEngineForAgents(kinds []string, policy api.Policy) (*Engine, error) {
 	if len(kinds) == 1 {
 		legacyKind = kinds[0]
 	}
-	return newEngineWithAgentRules(legacyKind, rules, policy)
+	engine, err := newEngineWithAgentRules(legacyKind, rules, policy)
+	if err == nil {
+		for _, kind := range kinds {
+			engine.addModelAgent(kind)
+		}
+	}
+	return engine, err
 }

@@ -67,6 +67,9 @@ var errStopped = &proto.Error{Code: "stopped", Message: "the host stopped the se
 
 // Supervisor holds one walled session's trusted state.
 type Supervisor struct {
+	fileWG sync.WaitGroup
+	fileTransfers map[*fileTransfer]struct{}
+	fileTransfersClosed bool
 	diskWatcher           *diskWatcherV1
 	sandboxStartAttempted bool
 	bootCancel            context.CancelCauseFunc

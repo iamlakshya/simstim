@@ -3,12 +3,8 @@ package host
 import (
 	"context"
 	"errors"
-	"fmt"
 	"os"
-	"path/filepath"
 	"time"
-
-	"golang.org/x/sys/unix"
 
 	"github.com/iamlakshya/simstim/internal/paths"
 )
@@ -52,43 +48,10 @@ func lockFileWait(id, name string, d time.Duration) (unlock func(), err error) {
 	return lockFileWaitContext(context.Background(), id, name, d)
 }
 
-func lockFileWaitContext(ctx context.Context, id, name string, d time.Duration) (unlock func(), err error) {
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	f, err := os.OpenFile(filepath.Join(paths.SessionDir(id), name), os.O_RDWR|os.O_CREATE, 0o600)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return nil, UserError("not_found", "no session "+id, "List sessions to find its ID.")
-		}
-		return nil, fmt.Errorf("lock session %s: %w", id, err)
-	}
-	deadline := time.Now().Add(d)
-	for {
-		if err := ctx.Err(); err != nil {
-			f.Close()
-			return nil, err
-		}
-		err := unix.Flock(int(f.Fd()), unix.LOCK_EX|unix.LOCK_NB)
-		switch {
-		case err == nil:
-			return func() {
-				_ = unix.Flock(int(f.Fd()), unix.LOCK_UN)
-				f.Close()
-			}, nil
-		case !errors.Is(err, unix.EWOULDBLOCK):
-			f.Close()
-			return nil, fmt.Errorf("lock session %s: %w", id, err)
-		case !time.Now().Before(deadline):
-			f.Close()
-			return nil, UserError("busy", "session "+id+" is busy: a resume, a restore, a rename or a delete of it runs",
-				"Wait until it ends, then try again.")
-		}
-		timer := time.NewTimer(20 * time.Millisecond)
-		select {
-		case <-ctx.Done():
-			timer.Stop()
-		case <-timer.C:
-		}
-	}
+// lockFileWaitContext retains the same native lease while a pending owner waits.
+// Cancellation ends admission without leaving a deferred waiter behind.
+func lockFileWaitContext(ctx context.Context, id, name string, d time.Duration) (func(), error) {
+	lease, err := openOwnedSessionFileLease(ctx, id, name, d)
+	if err != nil { return nil, err }
+	return func() { _ = lease.Close() }, nil
 }

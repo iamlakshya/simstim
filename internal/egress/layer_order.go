@@ -70,6 +70,10 @@ func badLayerOrder() error {
 func legacyPolicyLayers(pol api.Policy) ([]compiledLayer, error) {
 	byLayer := map[api.LayerKind][]compiledRule{}
 	for _, rule := range pol.Rules {
+		ref := api.LayerRef{Kind: rule.Layer, Name: rule.Name, Source: rule.Source}
+		if !api.ValidLayerRef(ref) || api.LayerRank(rule.Layer) < api.LayerRank(api.LayerAll) || api.LayerRank(rule.Layer) > api.LayerRank(api.LayerLockdown) {
+			return nil, badLayerOrder()
+		}
 		if _, err := canonicalRuleMethods(rule); err != nil {
 			return nil, err
 		}

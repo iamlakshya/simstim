@@ -88,7 +88,7 @@ A command has 10 seconds. After that it is stopped, with any children it started
 `host alerts set` writes `~/.config/simstim/alerts.toml` on the host, mode 0600. You may also edit it by hand. A file that other users can read is not used: `chmod 600` it. An unknown key is an error, so a typo never turns alerts off without a word.
 
 ```toml
-events = ["needs_input", "turn_done", "failed", "oom", "memory"]  # the default
+events = ["needs_input", "turn_done", "failed", "oom", "memory", "egress_blocked"]  # the default
 delay = "10s"               # how long needs_input waits before it is sent
 min_turn = "60s"            # the shortest turn that sends turn_done
 detail = false              # add the agent's question to needs_input
@@ -132,6 +132,7 @@ A destination flag without `--add` replaces the whole file. With no destination 
 
 | Event | When |
 | --- | --- |
+| `egress_blocked` | A model API guard refuses a request. At most once a minute for each session. See [model API guards](model-api-guards.md). |
 | `needs_input` | The agent waits for you, from its own hook or from what its screen shows, for longer than `delay` |
 | `turn_done` | The agent finished a turn in which it worked for longer than `min_turn` |
 | `exited` | The program ended with code 0 |

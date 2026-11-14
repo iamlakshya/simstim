@@ -8,6 +8,7 @@ package docker
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os/exec"
@@ -42,11 +43,23 @@ func RunArgs(container, host, image string) []string {
 const addUser = `id -u ` + DefaultUser + ` >/dev/null 2>&1 || useradd -m -s /bin/bash ` + DefaultUser
 
 // Create starts the container and gives it a user like a VM's.
-func (Provider) Create(ctx context.Context, req provider.Request) (client.Host, error) {
+func (Provider) Create(ctx context.Context, req provider.Request) (_ client.Host, returned error) {
+	scope, err := client.HostCreationSourceScopeContext(ctx)
+	if err != nil {
+		return client.Host{}, err
+	}
+	if scope.Request() != provider.CreationSourceRequest("docker", req) {
+		return client.Host{}, sourceUnknown()
+	}
+	frame := &dockerSourceBirth{scope: scope, request: scope.Request()}
+	ctx = context.WithValue(ctx, dockerSourceBirthKey{}, frame)
+	frame.ctx = ctx
 	locator, err := captureSourceLocator(ctx)
 	if err != nil {
 		return client.Host{}, err
 	}
+	frame.locator = &locator
+	defer func() { returned = errors.Join(returned, locator.close()) }()
 	out := req.Out
 	if out == nil {
 		out = io.Discard
@@ -73,6 +86,7 @@ func (Provider) Create(ctx context.Context, req provider.Request) (client.Host, 
 	if err != nil {
 		return client.Host{}, err
 	}
+	frame.runID = strings.TrimSpace(string(runID))
 	user := DefaultUser
 	if _, err := locator.exec(ctx, "exec", "-u", "0", strings.TrimSpace(string(runID)), "sh", "-c", addUser); err != nil {
 		fmt.Fprintf(out, "  Note: could not add the user %q (%v), so sessions run as root.\n", DefaultUser, err)
@@ -84,7 +98,8 @@ func (Provider) Create(ctx context.Context, req provider.Request) (client.Host, 
 		return client.Host{}, &client.UserError{Code: "source_inventory", Msg: "the created container is retained because its actual source provenance could not be confirmed", Hint: "Inspect the container on its original Docker engine before creating another host.", Kind: client.KindRefused}
 	}
 	host.Machine.Source = source
-	return host, nil
+	frame.result = freezeBirthHost(host)
+	return client.RecordHostMachineSourceBirthContext(ctx, host)
 }
 
 // inspect returns the container's state, or "" when there is no container.

@@ -17,6 +17,7 @@ import (
 // bundle domain. Call and Open must address the same existing guest link.
 // Close cancels and joins that owner's resources, releasing its primary lease.
 type GuestOptions struct {
+	Repositories     []GuestRepository
 	ID, Primary, Cwd string
 	Seeds            []string
 	PullMax          int64
@@ -29,16 +30,34 @@ type GuestOptions struct {
 // GuestSource uses the canonical ExecRecords for a domain-checked guest bundle.
 // It owns no process, sandbox factory, operation lease or alternate parser.
 type GuestSource struct {
-	options GuestOptions
-	once    sync.Once
-	closed  chan struct{}
-	err     error
+	selectMu   sync.Mutex
+	selected   bool
+	repository string
+	options    GuestOptions
+	once       sync.Once
+	closed     chan struct{}
+	err        error
 }
 
 // NewGuestSource validates the exact inner identity before exposing the source.
 func NewGuestSource(options GuestOptions) (*GuestSource, error) {
 	if !api.ValidSessionID(options.ID) || len(options.ID) != 26 || !api.ValidSessionID(options.Primary) || options.Cwd == "" || options.PullMax <= 0 || options.Call == nil || options.Open == nil || options.Record == nil || options.Close == nil {
 		return nil, exportError("pull_protocol", "the owned guest bundle source is incomplete")
+	}
+	options.Repositories = slices.Clone(options.Repositories)
+	seen := map[string]bool{}
+	for index := range options.Repositories {
+		plan := &options.Repositories[index]
+		if !api.InputRepoName(plan.Name) || seen[plan.Name] || plan.Cwd != "/work/"+plan.Name {
+			return nil, exportError("pull_repo", "the protected repository source plan is invalid")
+		}
+		seen[plan.Name] = true
+		plan.Seeds = slices.Clone(plan.Seeds)
+		for _, seed := range plan.Seeds {
+			if !api.ValidGitOID(seed) {
+				return nil, exportError("pull_seed", "the selected protected seed is invalid")
+			}
+		}
 	}
 	options.Seeds = slices.Clone(options.Seeds)
 	for _, seed := range options.Seeds {

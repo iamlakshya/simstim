@@ -75,6 +75,7 @@ func (a *attacher) waitToRetry(ctx context.Context, banner, retry <-chan time.Ti
 		case <-banner:
 			a.flash(ctx, "connection lost · reconnecting · keys are not sent · "+a.o.Settings.Attach.DetachKey+" to leave")
 		case b, ok := <-a.inCh:
+			a.inputPending = false
 			if !ok {
 				return true
 			}
@@ -85,7 +86,7 @@ func (a *attacher) waitToRetry(ctx context.Context, banner, retry <-chan time.Ti
 				}
 			}
 			_ = a.filter.Flush()
-			a.in.ask()
+			a.askInput()
 			return false // a key press: try again now
 		case <-retry:
 			return false
@@ -101,17 +102,17 @@ func (a *attacher) waitToRetry(ctx context.Context, banner, retry <-chan time.Ti
 func (a *attacher) tryReconnect(ctx context.Context) (done bool, err error) {
 	a.ssh.ExitMaster(ctx)
 	dctx, cancel := context.WithTimeout(quietAttachContext(ctx), 20*time.Second)
-	conn, err := Dial(dctx, a.o.Host, false)
+	conn, agent, err := dialAttach(dctx, a.o.Host, a.o.Session, false)
 	cancel()
 	var ue *UserError
 	if err != nil {
 		return errors.As(err, &ue), err
 	}
-	a.conn.Close()
-	a.conn = conn
+	a.closeConnections()
+	a.conn, a.agent = conn, agent
 	cols, rows, xpx, ypx := a.size()
 	before := a.cu.Offset
-	att, err := a.handshake(a.cu.Offset, cols, rows, xpx, ypx, true)
+	att, err := a.handshake(ctx, a.cu.Offset, cols, rows, xpx, ypx, true)
 	if err != nil {
 		return errors.As(err, &ue), err
 	}
@@ -121,6 +122,7 @@ func (a *attacher) tryReconnect(ctx context.Context) (done bool, err error) {
 	} else {
 		a.begin(ctx, att, &AttachState{}, rows)
 	}
+	a.startAgent(ctx)
 	a.res.Missed += att.Live - before
 	return true, nil
 }

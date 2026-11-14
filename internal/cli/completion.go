@@ -10,6 +10,7 @@ import (
 	"github.com/spf13/pflag"
 
 	"github.com/iamlakshya/simstim/internal/agents"
+	"github.com/iamlakshya/simstim/internal/alerts"
 	"github.com/iamlakshya/simstim/internal/api"
 	"github.com/iamlakshya/simstim/internal/brand"
 	"github.com/iamlakshya/simstim/internal/client"
@@ -79,7 +80,7 @@ func polishCompletionCmd(root *cobra.Command) {
 }
 
 func wireKnownFlagCompletions(root *cobra.Command) {
-	alertEvents := []string{"needs_input", "turn_done", "exited", "failed", "oom", "memory", "started", "restored"}
+	alertEvents := slices.Clone(alerts.Kinds)
 	var walk func(c *cobra.Command)
 	walk = func(c *cobra.Command) {
 		if !c.Hidden {
@@ -110,6 +111,8 @@ func registerKnownFlags(c *cobra.Command, fs *pflag.FlagSet, alertEvents []strin
 			fn = completeProviders
 		case "secret":
 			fn = completeSecrets
+		case "tools":
+			fn = completeCommaFixed(api.ModelToolNames()...)
 		case "profile":
 			fn = completeProfiles
 		case "door":
@@ -133,7 +136,7 @@ func registerKnownFlags(c *cobra.Command, fs *pflag.FlagSet, alertEvents []strin
 		case "events":
 			fn = completeCommaFixed(alertEvents...)
 		case "event":
-			fn = completeFixed(append([]string{"test"}, alertEvents...)...)
+			fn = completeFixed(append([]string{alerts.Test}, alertEvents...)...)
 		case "debug-file", "ssh-config", "provider-script":
 			fn = completeLocalFiles
 		}

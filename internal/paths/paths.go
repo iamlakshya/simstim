@@ -112,3 +112,6 @@ func EnsurePrivateDir(dir string) error {
 	}
 	return nil
 }
+
+// AuditLog is the trusted supervisor audit file for one session.
+func AuditLog(id string) string { return filepath.Join(SessionDir(id), "audit.jsonl") }

@@ -163,6 +163,9 @@ func registry() []*command {
 		return needSession(m)
 	}
 	return append([]*command{
+		{noun: "session", verb: "policy", cli: "policy ls", keys: []binding{{"p", onSessions}}, why: needSession, run: (*Model).openPolicy},
+		{noun: "session", verb: "policy log", cli: "policy log", why: needSession, run: (*Model).openPolicyLog},
+		{noun: "session", verb: "stop", cli: "stop", why: needSession, run: (*Model).stopSelected},
 		{noun: "session", verb: "new", short: "new session", cli: "new", keys: []binding{{"n", anywhere}},
 			why: func(m *Model) string {
 				h := m.newSessionHost()

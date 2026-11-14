@@ -20,7 +20,12 @@ func InspectConfigTable(table map[string]any, typ reflect.Type) ConfigTable {
 }
 
 // decodeConfig keeps ordinary loader callsites on the shared decoder.
-func decodeConfig(data string, dst any) (toml.MetaData, error) { return configdata.Decode(data, dst) }
+func decodeConfig(data string, dst any) (toml.MetaData, error) {
+	if hosts, ok := dst.(*hostsFile); ok {
+		return decodeMachineSourceHosts(data, hosts)
+	}
+	return configdata.Decode(data, dst)
+}
 
 type configAliasError = configdata.AliasError
 

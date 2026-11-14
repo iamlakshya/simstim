@@ -211,6 +211,9 @@ func configTableAliases(value any, typ reflect.Type, path toml.Key, shapeErr *er
 		return nil // The typed decoder reports a wrong type.
 	}
 	for _, key := range InspectConfigTable(table, typ).Keys {
+		if err := CheckConfigTools(typ, strings.EqualFold(key.Spelling, "tools")); err != nil && *shapeErr == nil {
+			*shapeErr = fmt.Errorf("%s %w", path.String(), err)
+		}
 		if key.Conflict != "" {
 			where := ""
 			if len(path) > 0 {

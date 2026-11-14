@@ -11,7 +11,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"sync"
@@ -24,17 +23,19 @@ const gitSSHMode = "__git_ssh"
 const gitSSHLeaseTimeout = 30 * time.Second
 
 type gitSSHConfig struct {
-	Version int      `json:"version"`
-	Name    string   `json:"name"`
-	Args    []string `json:"args"`
-	Target  string   `json:"target"`
-	Root    string   `json:"root"`
+	Version     int      `json:"version"`
+	Name        string   `json:"name"`
+	Args        []string `json:"args"`
+	Target      string   `json:"target"`
+	Root        string   `json:"root"`
+	EntryDigest string   `json:"entry_digest"`
 }
 
 type gitSSHStatus struct {
-	Exited  bool `json:"exited"`
-	Code    int  `json:"code"`
-	Stopped bool `json:"stopped"`
+	Exited     bool       `json:"exited"`
+	Code       int        `json:"code"`
+	Stopped    bool       `json:"stopped"`
+	LocalError *UserError `json:"local_error,omitempty"`
 }
 
 // GitSSHMode runs the private Git SSH executor when args names it. The
@@ -84,7 +85,7 @@ func readGitSSHConfig(path, expectedDigest string) (gitSSHConfig, error) {
 	if decoder.Decode(new(any)) != io.EOF {
 		return config, errors.New("the private Git SSH configuration has trailing data")
 	}
-	if config.Version != 1 {
+	if config.Version != 2 {
 		return config, errors.New("the private Git SSH configuration has an unknown version")
 	}
 	if err := validateGitSSHConfig(config, filepath.Dir(path)); err != nil {
@@ -118,15 +119,23 @@ func runGitSSH(configPath, expectedDigest string, more []string) int {
 	leaseDone := make(chan struct{})
 	defer close(leaseDone)
 	go watchGitLease(stop, filepath.Join(dir, "lease"), leaseDone, gitSSHLeaseTimeout)
-	command := exec.CommandContext(ctx, "ssh", append(config.Args, more...)...) //nolint:gosec // G702: fixed executable, validated hardened snapshot and restricted Git transport arguments, no shell.
+	command, release, err := prepareGitSSHStart(ctx, config, dir, more)
+	if err != nil {
+		writeGitLocalError(dir, err)
+		fmt.Fprintln(os.Stderr, CleanLine(err.Error()))
+		return 127
+	}
+	defer release()
 	// Start still rejects a cancelled context. This function owns the
 	// single graceful signal and bounded kill instead of exec's watcher.
 	command.Cancel = nil
 	command.Stdin, command.Stdout, command.Stderr = os.Stdin, os.Stdout, os.Stderr
 	if err := command.Start(); err != nil {
+		release()
 		fmt.Fprintln(os.Stderr, "start SSH:", err)
 		return 127
 	}
+	release()
 	wait := make(chan error, 1)
 	go func() { wait <- command.Wait() }()
 	stopped := false
@@ -246,9 +255,10 @@ func (lease *gitLease) close() {
 func readGitSSHStatus(path string) (gitSSHStatus, bool) {
 	var status gitSSHStatus
 	var record struct {
-		Exited  *bool `json:"exited"`
-		Code    *int  `json:"code"`
-		Stopped *bool `json:"stopped"`
+		Exited     *bool      `json:"exited"`
+		Code       *int       `json:"code"`
+		Stopped    *bool      `json:"stopped"`
+		LocalError *UserError `json:"local_error"`
 	}
 	f, err := os.Open(path)
 	if err != nil {
@@ -266,6 +276,9 @@ func readGitSSHStatus(path string) (gitSSHStatus, bool) {
 	if record.Exited == nil || record.Code == nil || record.Stopped == nil {
 		return status, false
 	}
-	status = gitSSHStatus{Exited: *record.Exited, Code: *record.Code, Stopped: *record.Stopped}
+	if record.LocalError != nil && (!validGitLocalError(record.LocalError) || *record.Exited || *record.Code != -1 || *record.Stopped) {
+		return status, false
+	}
+	status = gitSSHStatus{Exited: *record.Exited, Code: *record.Code, Stopped: *record.Stopped, LocalError: record.LocalError}
 	return status, status.Code >= -1 && status.Code <= 255
 }

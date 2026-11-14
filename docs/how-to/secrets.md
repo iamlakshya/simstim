@@ -75,3 +75,7 @@ Without it, `resume` fetches nothing, and says which secrets the host asks for. 
 When the host restarts, the session comes back without its secrets: nothing on the host has them, and your laptop may be closed. The agent starts anyway. Its terminal says which secrets it lacks, and the launcher shows "started without its secrets" on the session. To get them back, start a new session.
 
 The launcher may keep your last valid display settings after a broken edit. Secret commands still require the current config and permissions. Fix the file before starting or resuming a session that needs them.
+
+For a grant that needs live consent, the launcher asks with no as its default. Some grants require the exact saved host name. Enter never approves a yes or no question. A cancelled or replaced question cannot approve later work. The answer applies only to that operation.
+
+The launcher and start notes label only known exposed credentials as exposed. Bound credentials keep their delivery mode. Missing, future or incomplete delivery metadata is shown as unknown. These labels grant no access and never arm a credential.

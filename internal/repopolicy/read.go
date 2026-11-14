@@ -105,7 +105,10 @@ func Decode(repo string, data []byte) (*api.RepositoryPolicy, error) {
 	emptyQuestion, _ := json.Marshal(api.GrantQuestion{Repo: repo, Hash: out.Hash, Proposals: []api.Rule{}})
 	proposalBytes := len(emptyQuestion)
 	addProposal := func(rule api.Rule) error {
-		if _, known := proposals[rule.ID]; known {
+		if previous, known := proposals[rule.ID]; known {
+			if err := egress.ValidateRuleIdentities([]api.Rule{previous, rule}); err != nil {
+				return err
+			}
 			return nil
 		}
 		encoded, err := json.Marshal(rule)
@@ -153,6 +156,21 @@ func Decode(repo string, data []byte) (*api.RepositoryPolicy, error) {
 		}
 	}
 	out.Layer.Network.Rules = retained
+	current, cleaned, err := egress.MergeLayers([]api.Layer{out.Layer})
+	if err != nil {
+		return nil, err
+	}
+	identities := append([]api.Rule(nil), current.Rules...)
+	for _, rule := range proposals {
+		identities = append(identities, rule)
+	}
+	if err := egress.ValidateRuleIdentities(identities); err != nil {
+		return nil, err
+	}
+	if len(cleaned) != 1 {
+		return nil, repoPolicyError("repository policy layer is inconsistent", nil)
+	}
+	out.Layer = cleaned[0]
 	for _, rule := range proposals {
 		out.Proposals = append(out.Proposals, rule)
 	}

@@ -129,6 +129,11 @@ func gitTimeoutError(op string, d time.Duration) error {
 // StopGitOps stops it, the parent stops the scope, or the child's process
 // group. The answer holds the plan of worktree.add, when the child sent one.
 func gitOpWithin(kind *gitOpKind, req gitOpRequest, deadline time.Duration) (gitOpAnswer, error) {
+	return gitOpWithinContext(context.Background(), kind, req, deadline)
+}
+
+// gitOpWithinContext retains the existing scoped owner and honours its connection lifetime.
+func gitOpWithinContext(parent context.Context, kind *gitOpKind, req gitOpRequest, deadline time.Duration) (gitOpAnswer, error) {
 	op := kind.name
 	exe, err := holderExecutable()
 	if err != nil {
@@ -144,7 +149,11 @@ func gitOpWithin(kind *gitOpKind, req gitOpRequest, deadline time.Duration) (git
 		return gitOpAnswer{}, err
 	}
 	scope, argv := gitOpArgv(exe, op, scoped)
-	ctx, cancel := context.WithTimeout(context.Background(), deadline+gitOpGrace)
+	ctx, cancel := context.WithCancel(parent)
+	if deadline > 0 {
+		cancel()
+		ctx, cancel = context.WithTimeout(parent, deadline+gitOpGrace)
+	}
 	defer cancel()
 	ended, err := liveGitOp(op, cancel)
 	if err != nil {

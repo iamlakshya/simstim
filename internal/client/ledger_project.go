@@ -104,11 +104,11 @@ func projectLedgerRow(p *api.JSONProjection, span api.JSONSpan) (projectedLedger
 		return row, err
 	}
 	row.host = ledgerString{span: fields[0]}
-	valid, err := p.MatchRegexp(fields[0], hostNameRE)
-	if err != nil {
+	var hostName hostNameValidation
+	if err := p.WalkString(fields[0], func(r rune) error { hostName.Rune(r); return nil }); err != nil {
 		return row, err
 	}
-	if !valid {
+	if !hostName.Valid() {
 		return row, badGrantStateError(grantsFileName)
 	}
 	row.id, err = ledgerEmptyString(p, fields[1])

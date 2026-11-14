@@ -11,6 +11,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/iamlakshya/simstim/internal/api"
 	"github.com/iamlakshya/simstim/internal/paths"
 	"github.com/iamlakshya/simstim/internal/proto"
 )
@@ -48,21 +49,35 @@ func init() { uploadIdle.Store(int64(2 * time.Minute)) }
 // upload is one upload that has begun and not ended: its temporary file in
 // the session's paste folder, and the hash of what came so far.
 type upload struct {
-	session string
-	name    string
-	size    int64
-	f       *os.File
-	n       int64
-	h       hash.Hash
+	remote     *holderLine
+	stopRemote func() bool
+	failed     error
+	limit      int64
+	session    string
+	name       string
+	size       int64
+	f          *os.File
+	n          int64
+	h          hash.Hash
 	// idle reclaims the upload when no frame of it comes for uploadIdle.
 	idle *time.Timer
 }
 
 // drop closes the upload's file and removes it.
 func (u *upload) drop() {
-	u.idle.Stop()
-	_ = u.f.Close()
-	_ = os.Remove(u.f.Name())
+	if u.idle != nil {
+		u.idle.Stop()
+	}
+	if u.stopRemote != nil {
+		u.stopRemote()
+	}
+	if u.remote != nil {
+		_ = u.remote.c.Close()
+	}
+	if u.f != nil {
+		_ = u.f.Close()
+		_ = os.Remove(u.f.Name())
+	}
 }
 
 // reclaimUploadsAt drops every upload that has begun and not ended. When
@@ -75,7 +90,16 @@ func (b *bridge) reclaimUploadsAt(stop bool) {
 	}
 	gone := b.uploads
 	b.uploads = map[uint64]*upload{}
+	var finishing []*upload
+	if stop {
+		for up := range b.finishingUploads {
+			finishing = append(finishing, up)
+		}
+	}
 	b.umu.Unlock()
+	for _, up := range finishing {
+		_ = up.remote.c.Close()
+	}
 	if len(gone) > 0 {
 		runAfterUploadUntracked()
 	}
@@ -116,43 +140,53 @@ func (b *bridge) reclaimUpload(id uint64, u *upload) {
 }
 
 func (b *bridge) uploadBegin(p []byte) {
-	var u proto.UploadBegin
-	if err := json.Unmarshal(p, &u); err != nil {
+	var begin proto.UploadBegin
+	if err := json.Unmarshal(p, &begin); err != nil || !api.ExactJSONFields(p, begin) {
 		return
 	}
-	fail := func(err error) { b.reply(u.ID, nil, err) }
-	if !validID(u.Session) {
-		fail(UserError("not_found", "no session "+u.Session, ""))
+	fail := func(err error) { b.reply(begin.ID, nil, err) }
+	if !validID(begin.Session) {
+		fail(UserError("not_found", "no session "+begin.Session, "List sessions to choose an existing session."))
 		return
 	}
-	if u.Size < 0 || u.Size > MaxUpload {
-		fail(UserError("too_big", "the file is larger than 16 MiB", ""))
-		return
-	}
-	// A client sends one upload at a time: one that began before and never
-	// ended, its client gave up.
+	// The same lock linearises supervisor admission with EndBridge.
 	b.reclaimUploads()
-	dir := paths.PasteDir(u.Session)
-	if err := paths.EnsurePrivateDir(dir); err != nil {
-		fail(err)
-		return
-	}
-	cleanOld(dir, 24*time.Hour)
 	b.umu.Lock()
 	if b.uploadsDone {
 		b.umu.Unlock()
 		return
 	}
-	f, err := os.CreateTemp(dir, ".upload-*")
+	up, limit, err := b.prepareWalledUpload(begin)
 	if err != nil {
 		b.umu.Unlock()
 		fail(err)
 		return
 	}
-	up := &upload{session: u.Session, name: safeName(u.Name), size: u.Size, f: f, h: sha256.New()}
-	b.uploads[u.ID] = up
+	if begin.Size < 0 || begin.Size > limit {
+		b.umu.Unlock()
+		fail(UserError("too_big", "the file is larger than its upload limit", "Choose a smaller file."))
+		return
+	}
+	if up == nil {
+		dir := paths.PasteDir(begin.Session)
+		if err := paths.EnsurePrivateDir(dir); err != nil {
+			b.umu.Unlock()
+			fail(err)
+			return
+		}
+		cleanOld(dir, 24*time.Hour)
+		file, err := os.CreateTemp(dir, ".upload-*")
+		if err != nil {
+			b.umu.Unlock()
+			fail(err)
+			return
+		}
+		up = &upload{session: begin.Session, name: safeName(begin.Name), size: begin.Size, f: file}
+	}
+	up.limit, up.h = limit, sha256.New()
+	b.uploads[begin.ID] = up
 	b.uploadsWG.Add(1)
-	up.idle = time.AfterFunc(time.Duration(uploadIdle.Load()), func() { b.reclaimUpload(u.ID, up) })
+	up.idle = time.AfterFunc(time.Duration(uploadIdle.Load()), func() { b.reclaimUpload(begin.ID, up) })
 	b.umu.Unlock()
 }
 
@@ -169,10 +203,18 @@ func (b *bridge) uploadChunk(p []byte) {
 	}
 	u.idle.Reset(time.Duration(uploadIdle.Load()))
 	u.n += int64(len(data))
-	if u.n > MaxUpload {
+	if u.n > u.limit || u.n > u.size {
+		u.failed = UserError("upload", "the upload exceeds its declared size", "Upload the file again with its exact size.")
 		return
 	}
-	_, _ = u.f.Write(data)
+	if u.remote != nil {
+		if u.failed == nil {
+			_ = u.remote.c.SetWriteDeadline(time.Now().Add(10 * time.Second))
+			u.failed = u.remote.w.Write(proto.TUploadChunk, p)
+		}
+	} else if u.failed == nil {
+		_, u.failed = u.f.Write(data)
+	}
 	_, _ = u.h.Write(data)
 }
 
@@ -184,6 +226,12 @@ func (b *bridge) uploadEnd(p []byte) {
 	b.umu.Lock()
 	u := b.uploads[e.ID]
 	delete(b.uploads, e.ID)
+	if u != nil && u.remote != nil {
+		if b.finishingUploads == nil {
+			b.finishingUploads = make(map[*upload]struct{})
+		}
+		b.finishingUploads[u] = struct{}{}
+	}
 	b.umu.Unlock()
 	if u == nil {
 		b.reply(e.ID, nil, UserError("upload", "unknown upload", ""))
@@ -191,9 +239,13 @@ func (b *bridge) uploadEnd(p []byte) {
 	}
 	runAfterUploadUntracked()
 	u.idle.Stop()
+	if u.remote != nil {
+		b.finishWalledUpload(e.ID, u, p)
+		return
+	}
 	_ = u.f.Close()
 	sum := hex.EncodeToString(u.h.Sum(nil))
-	if u.n != u.size || !strings.EqualFold(sum, e.SHA256) {
+	if u.failed != nil || u.n != u.size || !strings.EqualFold(sum, e.SHA256) {
 		_ = os.Remove(u.f.Name())
 		b.uploadsWG.Done()
 		b.reply(e.ID, nil, UserError("upload", "the upload was damaged in transit", "Try again."))

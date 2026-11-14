@@ -13,6 +13,7 @@ import (
 type pullRoute struct {
 	original, primary, token string
 	beginToken               string
+	repo                     string
 	beginID                  uint64
 	beginPending             bool
 	epoch                    uint64
@@ -67,7 +68,7 @@ func (b *bridge) prepareRoutedPull(owner *bridgePull, req proto.Request) (func(c
 
 func (b *bridge) admitPullRoute(owner *bridgePull, req proto.Request) (*pullRoute, error) {
 	var args api.PullBeginArgs
-	if json.Unmarshal(req.Args, &args) != nil || !api.ValidSessionID(args.ID) || !api.ValidSessionID(args.Token) || len(args.Token) != 26 {
+	if !api.ExactJSONFields(req.Args, args) || json.Unmarshal(req.Args, &args) != nil || args.Repo != "" && !api.InputRepoName(args.Repo) || !api.ValidSessionID(args.ID) || !api.ValidSessionID(args.Token) || len(args.Token) != 26 {
 		return nil, pullRouteError("the pull admission identity is invalid")
 	}
 	primary, err := SandboxPrimaryID(args.ID)
@@ -93,9 +94,9 @@ func (b *bridge) admitPullRoute(owner *bridgePull, req proto.Request) (*pullRout
 		if args.Previous != "" || len(owner.routes) >= api.PullExportsMax {
 			return nil, UserError("sandbox_busy", "the prior export is unavailable or all pull slots are in use", "Finish or cancel the current pulls before starting another.")
 		}
-		route = &pullRoute{original: args.ID, primary: primary, token: args.Token, live: live}
+		route = &pullRoute{original: args.ID, primary: primary, token: args.Token, repo: args.Repo, live: live}
 		owner.routes[primary] = route
-	} else if route.original != args.ID || !args.Full || args.Previous != route.token || route.beginPending || route.finishing != 0 {
+	} else if route.original != args.ID || route.repo != args.Repo || !args.Full || args.Previous != route.token || route.beginPending || route.finishing != 0 {
 		return nil, UserError("sandbox_busy", "this primary already has a different owned pull", "Finish or cancel that pull before starting another.")
 	}
 	if !initial {
@@ -246,7 +247,7 @@ func (b *bridge) observePull(response proto.Response) {
 		return
 	}
 	var descriptor api.PullExport
-	if json.Unmarshal(response.Result, &descriptor) != nil || descriptor.ID != route.original || descriptor.Primary != route.primary || descriptor.Token != pending.token {
+	if json.Unmarshal(response.Result, &descriptor) != nil || descriptor.ID != route.original || descriptor.Primary != route.primary || descriptor.Token != pending.token || descriptor.Repo != route.repo {
 		// Joining a relay from its reader callback would join itself. End
 		// the outer owner asynchronously, which first cancels actual output.
 		go b.closePull()

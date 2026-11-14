@@ -84,6 +84,14 @@ func updateHostsFileContext(ctx context.Context, change func(context.Context, []
 	if err != nil {
 		return hooks.failed(err)
 	}
+	if err := checkHostMachineSourceRows(ctx, hosts, out); err != nil {
+		return hooks.failed(err)
+	}
+	if hooks.document == nil {
+		if err := checkTypedHostMachineSources(ctx, out); err != nil {
+			return hooks.failed(err)
+		}
+	}
 	beforeHostsSave()
 	if err := ctx.Err(); err != nil {
 		return hooks.failed(err)
@@ -126,11 +134,16 @@ func writeHostsFileGeneration(hosts []Host, generation string) error {
 	if !ValidHostID(generation) {
 		return hostStateRemovalError("the selected host membership generation is invalid")
 	}
+	file, err := loadHostsFile()
+	if err != nil {
+		return err
+	}
 	hosts = slices.Clone(hosts)
 	sort.Slice(hosts, func(i, j int) bool { return hosts[i].Name < hosts[j].Name })
+	file.Hosts = hosts
 	var b bytes.Buffer
 	fmt.Fprintf(&b, "# Hosts for %s. Edit with `%s host`.\n\n", brand.DisplayName, brand.Name)
-	if err := toml.NewEncoder(&b).Encode(hostsFile{Hosts: hosts}); err != nil {
+	if err := toml.NewEncoder(&b).Encode(file); err != nil {
 		return fmt.Errorf("save the hosts: %w", err)
 	}
 	return writeHostsSelectedDocumentGeneration(b.Bytes(), generation)

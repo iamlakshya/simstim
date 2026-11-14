@@ -35,6 +35,7 @@ func (m *Model) pauseBg() {
 	}
 	m.bgMu.Unlock()
 	m.bgWG.Wait()
+	m.grantOwners.releaseAll()
 	m.conns.dropUnadopted()
 }
 
@@ -91,6 +92,7 @@ func (m *Model) resumeAfterExec(msg tea.Msg) tea.Cmd {
 func (m *Model) resumeAfterHandoff(after func() tea.Cmd) tea.Cmd {
 	m.clearHandoff()
 	m.retireTierQuestion()
+	m.retireGrantQuestion()
 	m.ticking = false
 	m.preview.inflight = false
 	m.rename = nil
@@ -106,8 +108,10 @@ func (m *Model) resumeAfterHandoff(after func() tea.Cmd) tea.Cmd {
 	cmds := []tea.Cmd{
 		completed,
 		m.waitForTierQuestion(),
+		m.waitForGrantQuestion(),
 		m.resumeWizard(),
 		m.resumeGuide(),
+		m.resumePolicy(),
 		after(),
 		m.onDebugTick(),
 		m.after(refreshEvery, refreshTickMsg{}),

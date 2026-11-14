@@ -79,3 +79,13 @@ address is valid syntax, and an allowance for it needs an `own` host.
 A broken `config.toml` stops `new`, `resume` and policy mutations with exit
 code 2. Run `simstim config check` to find the file and line. `ls` and `attach`
 still run with one warning. They send no layers and arm no secrets.
+
+## Choose model capabilities for one session
+
+Use `policy allow` with `--in` and `--tools` to allow named capabilities at an exact model host. The names are `web_fetch`, `web_search`, `code_execution`, `mcp`, `url_content` and `files`. Repeat the flag or separate names with commas. An empty list is an error.
+
+```sh
+simstim policy allow api.openai.com --in box/auth-fix --tools web_search,files --dry-run
+```
+
+Tools apply only to session allowances. They cannot appear on a deny or a wider file layer. `--once` and `--for` keep their existing lifetime rules. An older helper refuses a tools allowance, including its dry run. Ordinary allowances keep their existing IDs.

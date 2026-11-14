@@ -19,18 +19,23 @@ type HostCreationRequest struct {
 }
 
 type hostCreationReservation struct {
-	request   HostCreationRequest
-	stage     *stageBinding
-	op        atomic.Pointer[heldLock]
-	bound     bool                        // protected by the containing observation's mu
-	started   bool                        // protected by the containing observation's mu
-	preflight *hostCreationPreflightProof // protected by the containing observation's mu
+	request               HostCreationRequest
+	stage                 *stageBinding
+	op                    atomic.Pointer[heldLock]
+	bound                 bool                        // protected by the containing observation's mu
+	started               bool                        // protected by the containing observation's mu
+	preflight             *hostCreationPreflightProof // protected by the containing observation's mu
+	sourceScope           *HostCreationSourceScope
+	sourceBirth           *hostMachineSourceBirth
+	sourceRecordAttempted bool
+	sourceProducerEntered bool
 }
 
 // BeginHostCreationContext owns only an empty key stage and the actual OP.
 // Empty is not checked pin identity. The caller must immediately defer release
 // and still owns every provider action, partial response and cleanup outcome.
 func BeginHostCreationContext(ctx context.Context, request HostCreationRequest) (context.Context, func(), error) {
+	freezeHostMachineSourceObservers()
 	if err := ctx.Err(); err != nil {
 		return ctx, nil, err
 	}
@@ -144,6 +149,7 @@ func StartHostCreationContext(ctx context.Context) error {
 			return hostStateRemovalError("the creation reservation already entered its provider attempt")
 		}
 		o.creation.started = true
+		o.creation.sourceScope = &HostCreationSourceScope{observation: o, op: owned, stage: o.stage, request: o.creation.request}
 		return o.checkOwner(locked)
 	})
 }
@@ -180,6 +186,9 @@ func BindHostCreationResultContext(ctx context.Context, result Host) (Host, erro
 		if !o.creation.started {
 			return hostStateRemovalError("the result did not follow its reserved provider attempt")
 		}
+		if err := checkHostMachineSourceBirthBindingLocked(o, result); err != nil {
+			return err
+		}
 		if o.creation.bound {
 			if !SameEntry(o.prospective, result) {
 				return hostStateRemovalError("the creation attempt already bound another result")
@@ -189,6 +198,7 @@ func BindHostCreationResultContext(ctx context.Context, result Host) (Host, erro
 		}
 		result = cloneObservationHost(result)
 		result.Machine.Created = time.Now().UTC().Format(time.RFC3339Nano)
+		bindHostMachineSourceBirthLocked(o, result)
 		o.prospective = cloneObservationHost(result)
 		o.creation.bound = true
 		return o.checkOwner(locked)

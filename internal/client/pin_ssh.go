@@ -53,7 +53,7 @@ func sshG(ctx context.Context, args []string, target string) (map[string][]strin
 // hostKeyValues reads ssh's values for h through its generated config, the
 // user's own config included.
 func hostKeyValues(ctx context.Context, h Host) (map[string][]string, error) {
-	cfg, err := writeWrapper(h)
+	cfg, err := writeWrapperContext(ctx, h)
 	if err != nil {
 		return nil, err
 	}
@@ -64,7 +64,7 @@ func hostKeyValues(ctx context.Context, h Host) (map[string][]string, error) {
 			msg = err.Error()
 		}
 		return nil, &UserError{Msg: fmt.Sprintf("cannot read the SSH config for %s: %s", h.Name, msg),
-			Hint: "ssh -G " + ShellWord(h.SSH) + " (check that this works first)", Code: "ssh_failed"}
+			Hint: sshGCommand(h.SSH) + " (check that this works first)", Code: "ssh_failed"}
 	}
 	return vals, nil
 }
@@ -104,12 +104,34 @@ var unknownOptionRE = regexp.MustCompile(`(?i)(Bad configuration option|Unsuppor
 var sshKnowsOption = knowsOption
 
 func knowsOption(opt string) (bool, error) {
-	knowsMu.Lock()
+	return knowsOptionContext(context.Background(), opt)
+}
+
+// sshKnowsOptionContext carries a command's cancellation through the local
+// SSH capability query and the wait for another query to finish.
+var sshKnowsOptionContext = knowsOptionContext
+
+func knowsOptionContext(ctx context.Context, opt string) (bool, error) {
+	for !knowsMu.TryLock() {
+		timer := time.NewTimer(10 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return false, ctx.Err()
+		case <-timer.C:
+		}
+	}
 	defer knowsMu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
 	if v, ok := knows[opt]; ok {
 		return v, nil
 	}
-	_, stderr, err := sshG(context.Background(), []string{"-F", os.DevNull, "-o", opt}, "probe.invalid")
+	_, stderr, err := sshG(ctx, []string{"-F", os.DevNull, "-o", opt}, "probe.invalid")
+	if ctx.Err() != nil {
+		return false, ctx.Err()
+	}
 	switch {
 	case unknownOptionRE.MatchString(stderr):
 		knows[opt] = false
@@ -135,9 +157,13 @@ func firstLine(stderr string, err error) string {
 // 8.5. NoHostAuthenticationForProxyCommand turns off the check of host
 // keys for a ProxyCommand in the ssh builds that have it.
 func optionalPinArgs() ([]string, error) {
+	return optionalPinArgsContext(context.Background())
+}
+
+func optionalPinArgsContext(ctx context.Context) ([]string, error) {
 	var args []string
 	for _, o := range []string{"KnownHostsCommand=none", "NoHostAuthenticationForProxyCommand=no"} {
-		ok, err := sshKnowsOption(o)
+		ok, err := sshKnowsOptionContext(ctx, o)
 		if err != nil {
 			return nil, err
 		}
@@ -175,7 +201,7 @@ var (
 // reaches no terminal: ssh logs only errors, and the client keeps them for
 // its own message, cleaned.
 func fetchHostKey(ctx context.Context, h Host, ask bool, algs string) ([]hostKey, error) {
-	cfg, err := writeWrapper(h)
+	cfg, err := writeWrapperContext(ctx, h)
 	if err != nil {
 		return nil, err
 	}
@@ -188,7 +214,7 @@ func fetchHostKey(ctx context.Context, h Host, ask bool, algs string) ([]hostKey
 	if err := os.WriteFile(file, nil, 0o600); err != nil {
 		return nil, fmt.Errorf("make a file for the host key: %w", err)
 	}
-	opts, err := fetchArgs(h.Name, file, ask)
+	opts, err := fetchArgsContext(ctx, h.Name, file, ask)
 	if err != nil {
 		return nil, err
 	}
@@ -229,6 +255,10 @@ func fetchHostKey(ctx context.Context, h Host, ask bool, algs string) ([]hostKey
 // file. Like the pin's options, they keep every other source of keys out.
 // No method of login is left but "none", which a host refuses.
 func fetchArgs(name, file string, ask bool) ([]string, error) {
+	return fetchArgsContext(context.Background(), name, file, ask)
+}
+
+func fetchArgsContext(ctx context.Context, name, file string, ask bool) ([]string, error) {
 	strict, batch := "accept-new", "yes"
 	if ask {
 		strict, batch = "ask", "no"
@@ -249,7 +279,7 @@ func fetchArgs(name, file string, ask bool) ([]string, error) {
 		"-o", "LogLevel=ERROR",
 	)
 	args = append(args, noLoginArgs...)
-	more, err := optionalPinArgs()
+	more, err := optionalPinArgsContext(ctx)
 	return append(args, more...), err
 }
 

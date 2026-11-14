@@ -40,11 +40,21 @@ func (m *Model) sessionDetail(h *hostConn, s client.Session, cw int, withHost bo
 		// The cap stopped another process in the session, not the agent.
 		note = capNote
 	}
+	facts := []string{where, mem, shown(s.ID)}
+	if s.Task != "" {
+		facts = append(facts, "task: "+shown(s.Task))
+	}
+	if detail := wallDetail(s, facts, cw); detail != "" {
+		return detail
+	}
 	empty := func(p string) bool { return p == "" }
-	head := slices.DeleteFunc([]string{where, mem}, empty)
+	head := slices.DeleteFunc([]string{where, sessionWallLevel(s), mem}, empty)
 	tail := slices.DeleteFunc([]string{shown(s.ID)}, empty)
 	if !h.loaded {
 		tail = append(tail, "last seen before this run")
+	}
+	if now == "" && s.Task != "" {
+		now = sFaint.Render("task: " + shown(s.Task))
 	}
 	if now == "" {
 		return factsLine(head, note, tail, cw)

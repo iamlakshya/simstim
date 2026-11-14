@@ -133,7 +133,7 @@ func levelPrerequisites(p CapProbe, r RuntimeStatus, probe WallProbe) bool {
 	case "gvisor":
 		return probe.Driver == "gvisor" && r.supports(probe.Driver, p) && kernelAtLeast(p.Kernel, "5.6")
 	case "microvm":
-		return r.supports(probe.Driver, p) && microVMKernel(probe.Driver, p.Kernel)
+		return r.supports(probe.Driver, p) && SupportsMicroVMKernel(probe.Driver, p.Kernel)
 	default:
 		return false
 	}
@@ -176,7 +176,9 @@ func (r RuntimeStatus) supports(name string, p CapProbe) bool {
 	return false
 }
 
-func microVMKernel(driver, kernel string) bool {
+// SupportsMicroVMKernel applies the same driver kernel policy used by LevelsFor.
+// It supplies no runtime, native ownership, boot evidence or admission.
+func SupportsMicroVMKernel(driver, kernel string) bool {
 	switch driver {
 	case "chv":
 		return kernelAtLeast(kernel, "6.8")

@@ -126,11 +126,14 @@ func TestRenameAndFolderCompletionCleanHostileMetadata(t *testing.T) {
 	const wantFolder = "~/src/app-safe/"
 	hs.key("n")
 	hs.typeText("~/sr")
+	hs.m.prompt.stopFolders()
+	_ = hs.m.askFolders() // Prepare the actual quick-prompt request.
+	quick := hs.m.prompt
+	quickHost := hs.m.hostByName(quick.host)
 	hs.m.onFolders(foldersMsg{
-		host:   "atlas-dev",
-		prefix: "~/sr",
-		quick:  true,
-		res:    client.FoldersResult{Matches: []string{rawFolder, wantFolder}},
+		host: "atlas-dev", prefix: "~/sr", quick: true,
+		quickOwner: quick, quickSeq: quick.folderSeq, quickGen: quickHost.gen, quickHost: quickHost.host,
+		res: client.FoldersResult{Matches: []string{rawFolder, wantFolder}},
 	})
 	if len(hs.m.prompt.folders) != 1 || hs.m.prompt.folders[0] != wantFolder {
 		t.Fatalf("quick-start folders = %#v, want [%q]", hs.m.prompt.folders, wantFolder)
@@ -152,10 +155,12 @@ func TestRenameAndFolderCompletionCleanHostileMetadata(t *testing.T) {
 	}
 	hs.key("ctrl+u")
 	hs.typeText("~/sr")
+	_ = hs.m.fetchFolders(d) // Prepare the actual form-owned request.
+	folderHost := hs.m.hostByName(d.host)
 	hs.m.onFolders(foldersMsg{
-		host:   "atlas-dev",
-		prefix: "~/sr",
-		res:    client.FoldersResult{Matches: []string{rawFolder, wantFolder}},
+		host: "atlas-dev", prefix: "~/sr", owner: d, seq: d.folderSeq,
+		gen: folderHost.gen, originalHost: folderHost.host,
+		res: client.FoldersResult{Matches: []string{rawFolder, wantFolder}},
 	})
 	if len(d.suggest) != 1 || d.suggest[0] != wantFolder {
 		t.Fatalf("new-session suggestions = %#v, want [%q]", d.suggest, wantFolder)

@@ -5,6 +5,7 @@ import (
 
 	"github.com/iamlakshya/simstim/internal/api"
 	"github.com/iamlakshya/simstim/internal/egress"
+	"github.com/iamlakshya/simstim/internal/filecopy"
 )
 
 func encodeLocalPolicySources(a NewArgs) (json.RawMessage, error) {
@@ -34,7 +35,16 @@ func encodeLocalPolicySources(a NewArgs) (json.RawMessage, error) {
 	// A checked remote file may narrow an already approved resource ceiling;
 	// ordinary scalar precedence must never make it raise local approval.
 	limit := min(localLimit, checkedLimit)
-	pin, err := api.PinPolicySourcesWithResources(a.Layers, api.PolicyResourcePin{Version: 1, PullMax: limit})
+	localCopy, err := filecopy.CopyMax(&local)
+	if err != nil {
+		return nil, err
+	}
+	checkedCopy, err := filecopy.CopyMax(&policy)
+	if err != nil {
+		return nil, err
+	}
+	copyLimit := min(localCopy, checkedCopy)
+	pin, err := api.PinPolicySourcesWithResources(a.Layers, api.PolicyResourcePin{Version: 1, PullMax: limit, CPMax: &copyLimit})
 	if err != nil {
 		return nil, policySourceStateError()
 	}

@@ -93,7 +93,8 @@ func (m *Model) startSessionReady(h *hostConn, r startReq) tea.Cmd {
 	}
 	c, be, originalHost, kept, cols, rows := h.conn, m.be, h.host, m.settings, m.width, m.height
 	read := m.beginSettingsRead()
-	return m.bgCmd(func(ctx context.Context) tea.Msg {
+	return m.bgCmd(func(ctx context.Context) (message tea.Msg) {
+		defer func() { message = m.finishStartGrant(message) }()
 		settings, read := readSettings(be, kept, read)
 		if _, err := client.ReadPolicySettings(); err != nil {
 			return startedMsg{startReq: r, err: err, settingsRead: read}
@@ -112,6 +113,9 @@ func (m *Model) startSessionReady(h *hostConn, r startReq) tea.Cmd {
 			if err != nil {
 				return startedMsg{startReq: r, err: err, settingsRead: read}
 			}
+		}
+		if r.grants == nil {
+			r.wallIntent = r.args.Wall
 		}
 		if planner, ok := unclean(c).(interface {
 			ResolveNewWall(context.Context, client.NewArgs) (client.NewArgs, error)
@@ -133,8 +137,35 @@ func (m *Model) startSessionReady(h *hostConn, r startReq) tea.Cmd {
 			if err != nil {
 				return startedMsg{startReq: r, err: err, settingsRead: read}
 			}
+			m.grantOwners.add(r.grants)
 		}
 		cctx = client.WithGrantRequest(cctx, r.grants)
+		if r.args.Wall == "microvm" && r.vm == nil {
+			planner, ok := unclean(c).(interface {
+				PrepareNewVM(context.Context, client.NewArgs, string) (*client.VMNeedPlanV1, error)
+			})
+			if !ok {
+				return startedMsg{startReq: r, err: &client.UserError{Msg: "this connection cannot prepare a microvm", Hint: "Update the client and host helper, then try again.", Code: "vm_prepare", Kind: client.KindRefused}, settingsRead: read}
+			}
+			r.vm, err = planner.PrepareNewVM(cctx, r.args, r.wallIntent)
+			if err != nil {
+				return startedMsg{startReq: r, err: err, settingsRead: read}
+			}
+		}
+		if planner, ok := unclean(c).(interface {
+			PrepareNewSecrets(context.Context, client.NewArgs, ...*client.VMNeedPlanV1) (client.NewArgs, error)
+		}); ok {
+			if r.vm != nil {
+				r.args, err = planner.PrepareNewSecrets(cctx, r.args, r.vm)
+			} else {
+				r.args, err = planner.PrepareNewSecrets(cctx, r.args)
+			}
+			if err != nil {
+				return startedMsg{startReq: r, err: err, settingsRead: read}
+			}
+		} else if r.args.Wall != "" && r.args.Wall != "none" {
+			return startedMsg{startReq: r, err: &client.UserError{Msg: "this connection cannot prepare sandbox inputs", Hint: "Update the client and host helper, then try again.", Code: "secret_helper_old", Kind: client.KindRefused}, settingsRead: read}
+		}
 		effectiveNames := client.SecretNames(originalHost, nil)
 		if len(r.args.Layers) > 0 {
 			effectiveNames, err = client.PolicySecretNames(r.args.Layers)
@@ -142,13 +173,17 @@ func (m *Model) startSessionReady(h *hostConn, r startReq) tea.Cmd {
 				return startedMsg{startReq: r, err: err, settingsRead: read}
 			}
 		}
-		if err := c.CheckNewGrants(cctx, effectiveNames, r.args.SSHAgent); err != nil {
+		if err := m.grantQuestions(cctx, func(ctx context.Context) error {
+			return c.CheckNewGrants(ctx, effectiveNames, r.args.SSHAgent)
+		}); err != nil {
 			return startedMsg{startReq: r, err: err, settingsRead: read}
 		}
 		if planner, ok := unclean(c).(interface {
 			CheckNewPolicyGrants(context.Context, []api.Layer) error
 		}); ok {
-			if err := planner.CheckNewPolicyGrants(cctx, r.args.Layers); err != nil {
+			if err := m.grantQuestions(cctx, func(ctx context.Context) error {
+				return planner.CheckNewPolicyGrants(ctx, r.args.Layers)
+			}); err != nil {
 				return startedMsg{startReq: r, err: err, settingsRead: read}
 			}
 		}
@@ -161,13 +196,23 @@ func (m *Model) startSessionReady(h *hostConn, r startReq) tea.Cmd {
 		// One fetch of the secrets for each start. A question about the
 		// start keeps them for the start after the answer.
 		if r.args.Secrets == nil {
-			secrets, err := be.Secrets(cctx, settings, originalHost, effectiveNames)
+			var secrets map[string]api.Secret
+			err := m.grantQuestions(cctx, func(ctx context.Context) error {
+				var err error
+				secrets, err = be.Secrets(ctx, settings, originalHost, effectiveNames)
+				return err
+			})
 			if err != nil {
 				return startedMsg{startReq: r, err: err, warn: warn, settingsRead: read}
 			}
 			r.args.Secrets = secrets
 		}
-		s, err := c.NewSession(cctx, r.args)
+		var s *client.Session
+		err = m.grantQuestions(cctx, func(ctx context.Context) error {
+			var err error
+			s, err = c.NewSession(ctx, r.args)
+			return err
+		})
 		return startedMsg{startReq: r, s: s, err: err, warn: warn, settingsRead: read}
 	})
 }
@@ -175,7 +220,15 @@ func (m *Model) startSessionReady(h *hostConn, r startReq) tea.Cmd {
 // onStarted shows how a start went, and a warning about the user's answers
 // about setup scripts, when they could not be read.
 func (m *Model) onStarted(msg startedMsg) tea.Cmd {
+	d, p := m.waiting(msg.startReq)
+	waited := d != nil || p != nil
 	cmd := m.showStarted(msg)
+	if keepStartGrant(msg) && !waited {
+		cmd = tea.Batch(cmd, m.releaseGrant(msg.grants))
+	}
+	if msg.cleanupErr != nil {
+		cmd = tea.Batch(cmd, m.toastErr(msg.cleanupErr))
+	}
 	if w := msg.warn; w != nil {
 		return tea.Batch(m.toastSetupWarn(w), cmd)
 	}
@@ -189,6 +242,11 @@ func (m *Model) onStarted(msg startedMsg) tea.Cmd {
 func (m *Model) showStarted(msg startedMsg) tea.Cmd {
 	d, p := m.waiting(msg.startReq)
 	waited := d != nil || p != nil
+	if q, ok := downgradeOf(msg.err); ok && waited && msg.grants == nil && msg.args.Wall != "auto" && msg.args.Wall != "" {
+		cleanup := m.disposeModal()
+		m.modal = &downgradeSheet{request: msg.startReq, level: q.Level, floor: q.Floor, typed: newInput("", q.Level)}
+		return cleanup
+	}
 	if q, ok := client.FolderQuestionOf(msg.err); ok && !msg.args.MakeFolder {
 		if waited {
 			cleanup := m.disposeModal()

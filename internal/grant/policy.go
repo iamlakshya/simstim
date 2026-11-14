@@ -78,12 +78,5 @@ func badCheckTarget() error {
 // CheckAddition validates a proposed session rule against the canonical locks
 // without touching a running engine or its once-grant ledger.
 func CheckAddition(policy api.Policy, rule api.Rule) error {
-	var layers []api.Layer
-	for _, lock := range policy.Locks {
-		copy := lock
-		layers = append(layers, api.Layer{Kind: lock.Layer, Name: lock.Name, Lock: &copy})
-	}
-	layers = append(layers, api.Layer{Kind: api.LayerSession, Rules: []api.Rule{rule}})
-	_, _, err := egress.MergeLayers(layers)
-	return err
+	return egress.CheckRuleAddition(policy, rule)
 }

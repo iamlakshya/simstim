@@ -1,6 +1,7 @@
 package jail
 
 import (
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -91,7 +92,7 @@ func TestTargetTraceSharesLinkAndParentSemanticsWithoutCreation(t *testing.T) {
 			t.Errorf("read-only planning created %s: %v", name, err)
 		}
 	}
-	if after := openFDs(t); after != before {
-		t.Errorf("target tracing leaked descriptors: before%d after%d", before, after)
+	if after := openFDs(t); !maps.Equal(after, before) {
+		t.Errorf("target tracing leaked descriptors: before%v after%v", before, after)
 	}
 }

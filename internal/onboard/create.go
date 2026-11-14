@@ -52,47 +52,34 @@ func CheckCreate(p provider.Provider, req provider.Request) error {
 // up. A host whose initial save committed stays saved if later preparation
 // stops; cancellation permits no further host write.
 func Create(ctx context.Context, p provider.Provider, req provider.Request) (client.Host, error) {
-	// No host rm of this name runs while the machine is made and saved. A
-	// caller that saves the host again after it, as `host create` and the
-	// guided setup do, holds the lock in ctx through that save too.
-	ctx, unlock, err := client.LockHost(ctx, req.Name, "host create")
+	ctx, release, err := client.BeginHostCreationContext(ctx, CreationRequest(p, req))
 	if err != nil {
 		return client.Host{}, err
 	}
-	defer unlock()
+	defer release()
 	if err := CheckCreate(p, req); err != nil {
 		return client.Host{}, err
 	}
-	// A new host starts with no record of an earlier removal. The record
-	// goes before anything is made, so a failure here leaves no machine
-	// that no saved host names.
-	if err := client.ClearRemoval(req.Name); err != nil {
-		var ue *client.UserError
-		if !errors.As(err, &ue) {
-			return client.Host{}, err
-		}
-		return client.Host{}, &client.UserError{Msg: ue.Msg + ", so nothing was made", Hint: ue.Hint, Code: ue.Code}
-	}
-	probe := client.Host{Name: req.Name, Machine: &client.Machine{Provider: p.Name(), ID: provider.MachineName(req.Name)}}
-	fresh := false
-	if named[p.Name()] {
-		if lc, err := p.Open(probe); err == nil {
-			st, err := lc.Status(ctx)
-			fresh = err == nil && st == client.MachineMissing
-		}
-	}
-	// A provider that pins the new machine's key, as Lima's does, pins it
-	// into a stage, which the save moves to the host's own pin.
-	ctx, abort, err := client.StagePinOwned(ctx, req.Name)
-	if err != nil {
+	if err := client.CheckHostCreationRemovalContext(ctx, req.Name); err != nil {
 		return client.Host{}, err
 	}
-	defer abort()
+	// Begin owns the one provider key stage. Do not shadow its captured
+	// stage or refresh its absent-name source after an external reply.
+	if err := client.StartHostCreationContext(ctx); err != nil {
+		return client.Host{}, err
+	}
 	h, err := p.Create(ctx, req)
-	if err == nil && h.Machine != nil {
-		// The stamp tells this machine from an earlier one of the same
-		// name.
-		h.Machine.Created = time.Now().UTC().Format(time.RFC3339Nano)
+	if err == nil {
+		if err := validateCreationResult(p, req, h); err != nil {
+			// A malformed identity cannot authorise Destroy of the returned
+			// name or ID. Preserve and report its actual partial outcome.
+			return h, err
+		}
+		bound, bindErr := client.BindHostCreationResultContext(ctx, h)
+		if bindErr != nil {
+			return client.Host{}, unsaved(ctx, p, req, h, bindErr)
+		}
+		h = bound
 		// A new host: the save compares with no entry (cli-spec 11.3),
 		// publishes any pin that the provider staged, and records the
 		// provider's tier (isolation spec 14.8.3).
@@ -101,32 +88,20 @@ func Create(ctx context.Context, p provider.Provider, req provider.Request) (cli
 		}
 		return h, nil
 	}
-	if err == nil {
-		return h, nil
+	if h.Machine != nil || h.Name != "" {
+		// Presence supplies reporting data only, never Bind/Update/Destroy
+		// authority. Preserve the actual value/private token on uncertainty.
+		return h, partialCreationResult(ctx, h, err)
 	}
 	if ctx.Err() == nil {
 		return client.Host{}, err
 	}
-	stopped := &client.UserError{Msg: fmt.Sprintf("stopped while making %s; nothing was saved", req.Name), Hint: brand.Name + " setup", Code: "cancelled", Kind: client.KindCancelled}
-	switch {
-	case fresh:
-		// A fresh context: the user's has ended, and the clean-up must still run.
-		cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Minute)
-		defer cancel()
-		lc, cleanupErr := p.Open(probe)
-		if cleanupErr == nil {
-			cleanupErr = lc.Destroy(cctx)
-		}
-		if cleanupErr != nil {
-			stopped.Msg = fmt.Sprintf("stopped while making %s, and the %s machine %s may be left: %v", req.Name, p.Name(), probe.Machine.ID, cleanupErr)
-			stopped.Hint = "Delete it with " + p.Name() + "'s own tools."
-			return client.Host{}, stopped
-		}
-		stopped.Msg = fmt.Sprintf("stopped while making %s; the half-made %s machine %s was deleted", req.Name, p.Name(), probe.Machine.ID)
-	case !named[p.Name()]:
-		stopped.Msg = fmt.Sprintf("stopped while making %s; if %s had begun a machine, it stops by itself when its lease ends", req.Name, p.Name())
-		stopped.Hint = "Check " + p.Name() + "'s own console for a machine labelled " + req.Name + "."
+	stopped := &client.UserError{Msg: fmt.Sprintf("stopped while making %s. Nothing was saved and an unverified partial %s resource may remain", req.Name, p.Name()),
+		Hint: "Inspect " + p.Name() + "'s own console and this creation attempt before retrying or deleting any resource.", Code: "cancelled", Kind: client.KindCancelled}
+	if p.Name() == E2B {
+		stopped.Msg += ". A sandbox may stop when its lease ends"
 	}
+
 	return client.Host{}, stopped
 }
 
@@ -139,7 +114,7 @@ func unsaved(ctx context.Context, p provider.Provider, req provider.Request, h c
 		Hint: fmt.Sprintf("%s host create %s %s (after you fix the cause)", brand.Name, p.Name(), req.Name)}
 	var ue *client.UserError
 	switch {
-	case errors.Is(saveErr, context.Canceled):
+	case ctx.Err() != nil:
 		out = &client.UserError{Msg: fmt.Sprintf("stopped while making %s; nothing was saved", req.Name), Hint: brand.Name + " setup", Code: "cancelled", Kind: client.KindCancelled}
 	case errors.As(saveErr, &ue):
 		kept := *ue

@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -9,6 +10,7 @@ import (
 	"github.com/iamlakshya/simstim/internal/api"
 	"github.com/iamlakshya/simstim/internal/brand"
 	"github.com/iamlakshya/simstim/internal/client"
+	"github.com/iamlakshya/simstim/internal/egress"
 	"github.com/iamlakshya/simstim/internal/grant"
 )
 
@@ -19,6 +21,7 @@ func policyAddCmd(allow bool) *cobra.Command {
 	var layer policyLayerFlags
 	var once, dryRun, asJSON bool
 	var duration time.Duration
+	var tools []string
 	verb := "deny"
 	if allow {
 		verb = "allow"
@@ -37,6 +40,13 @@ func policyAddCmd(allow bool) *cobra.Command {
 			if err != nil {
 				return policyUsage("invalid network target: "+client.CleanLine(err.Error()), "Pass a host, IP address or CIDR, with an optional port or path.", "bad_target")
 			}
+			selectedTools, err := api.CanonicalModelTools(tools)
+			if err != nil {
+				return client.PolicyError(err)
+			}
+			if cmd.Flags().Changed("tools") && (len(selectedTools) == 0 || !allow || layer.in == "") {
+				return policyUsage("--tools needs a non-empty session allowance", "Pass --in and one or more named capabilities to policy allow.", "bad_tools")
+			}
 			if err := layer.mutation(cmd); err != nil {
 				return err
 			}
@@ -51,7 +61,12 @@ func policyAddCmd(allow bool) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			rule := api.Rule{Allow: allow, Door: door, Target: canonical, Once: once, Until: until}
+			rule := api.Rule{Allow: allow, Door: door, Target: canonical, Once: once, Until: until, Tools: selectedTools}
+			if len(rule.Tools) > 0 {
+				if err := egress.CheckRuleAddition(api.Policy{}, rule); err != nil {
+					return client.PolicyError(err)
+				}
+			}
 			if layer.in == "" {
 				selected, err := layer.file(cmd.Context())
 				if err != nil {
@@ -83,17 +98,20 @@ func policyAddCmd(allow bool) *cobra.Command {
 					}
 				}
 				if dryRun {
+					if err := c.CheckHTTPMethodFeature([]api.Layer{{Kind: api.LayerSession, Rules: []api.Rule{rule}}}); err != nil {
+						return err
+					}
 					policy, err := c.Policy(ctx, s.ID)
 					if err != nil {
 						return err
 					}
+					rule.Layer = api.LayerSession
+					rule.ID = api.RuleID(rule)
 					if err := grant.CheckAddition(policy, rule); err != nil {
 						return client.PolicyError(err)
 					}
-					rule.Layer = api.LayerSession
-					rule.ID = api.RuleID(rule)
 				} else {
-					a := api.PolicyAddArgs{ID: s.ID, Allow: allow, Door: door, Target: canonical, Once: once, Until: until}
+					a := api.PolicyAddArgs{ID: s.ID, Allow: allow, Door: door, Target: canonical, Once: once, Until: until, Tools: selectedTools}
 					if allow {
 						err = grantQuestions(cmd, func(ctx context.Context) error { rule, err = c.AllowPolicy(ctx, a); return err })
 					} else {
@@ -115,6 +133,7 @@ func policyAddCmd(allow bool) *cobra.Command {
 	layer.add(cmd)
 	addDryRun(cmd, &dryRun, "show the rule without writing or sending a mutation")
 	if allow {
+		addList(cmd.Flags(), &tools, "tools", "allow model capabilities for this session: a comma-separated list, or the flag again")
 		cmd.Flags().BoolVar(&once, "once", false, "allow one matching flow, at session scope")
 		addFor(cmd, &duration, 0, "keep a session rule for a duration, such as 1h")
 		cmd.MarkFlagsMutuallyExclusive("once", "for")
@@ -135,6 +154,7 @@ func policyRmCmd() *cobra.Command {
 	var asJSON bool
 	cmd := &cobra.Command{Use: "rm <id or target>", ValidArgsFunction: firstArg(completeRuleIDs), Short: "Remove a rule from one policy layer", Args: cobra.ExactArgs(1), Example: "  " + brand.Name + " policy rm <rule-id> --repo .",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			word := strings.TrimSpace(args[0])
 			if _, err := client.ReadPolicySettings(); err != nil {
 				return err
 			}
@@ -146,26 +166,29 @@ func policyRmCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				out, err := client.ChangeFilePolicy(cmd.Context(), selected, api.Rule{}, args[0], false)
+				out, err := client.ChangeFilePolicy(cmd.Context(), selected, api.Rule{}, word, false)
 				if err != nil {
 					return err
 				}
 				if asJSON {
 					return printJSON(map[string]any{"removed": out.Removed, "applies": "next_start"})
 				}
-				say(cmd, "Removed %s; applies at the next start.\n", client.CleanLine(args[0]))
+				say(cmd, "Removed %s; applies at the next start.\n", client.CleanLine(word))
 				return nil
 			}
 			return withSession(cmd, layer.in, func(ctx context.Context, h client.Host, c *client.Conn, s *client.Session) error {
-				policy, err := c.Policy(ctx, s.ID)
-				if err != nil {
-					return err
-				}
-				remove := api.PolicyRmArgs{Session: s.ID, Target: args[0]}
-				for _, rule := range policy.Rules {
-					if rule.ID == args[0] && rule.Layer == api.LayerSession {
-						remove.ID, remove.Target = rule.ID, ""
-						break
+				remove := api.PolicyRmArgs{Session: s.ID, Target: word}
+				if api.IsRuleID(word) {
+					policy, err := c.Policy(ctx, s.ID)
+					if err != nil {
+						return err
+					}
+					found, err := egress.CheckRuleIDSelection(policy.Rules, word, api.LayerRef{Kind: api.LayerSession})
+					if err != nil {
+						return client.PolicyError(err)
+					}
+					if found {
+						remove.ID, remove.Target = word, ""
 					}
 				}
 				removed, err := c.RemovePolicy(ctx, remove)
@@ -177,7 +200,7 @@ func policyRmCmd() *cobra.Command {
 					out["removed"] = removed
 					return printJSON(out)
 				}
-				say(cmd, "Revoked %s from %s.\n", client.CleanLine(args[0]), client.CleanLine(s.Name))
+				say(cmd, "Revoked %s from %s.\n", client.CleanLine(word), client.CleanLine(s.Name))
 				return nil
 			})
 		}}

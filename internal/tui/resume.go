@@ -7,6 +7,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/iamlakshya/simstim/internal/api"
 	"github.com/iamlakshya/simstim/internal/client"
 )
 
@@ -51,8 +52,10 @@ func (m *Model) resumeSelectedReady() tea.Cmd {
 	m.resuming[key] = true
 	c, be, originalHost, originalSession, kept := h.conn, m.be, h.host, *s, m.settings
 	request := client.NewGrantRequest(false, false)
+	m.grantOwners.add(request)
 	read := m.beginSettingsRead()
 	resume := m.bgCmd(func(ctx context.Context) tea.Msg {
+		defer func() { _ = m.grantOwners.release(request) }()
 		settings, read := readSettings(be, kept, read)
 		if _, err := client.ReadPolicySettings(); err != nil {
 			return resumedMsg{key: key, err: err, settingsRead: read}
@@ -74,21 +77,35 @@ func (m *Model) resumeSelectedReady() tea.Cmd {
 		if err != nil {
 			return resumedMsg{key: key, err: err, settingsRead: read}
 		}
-		if err := c.CheckResumeGrants(cctx, key.id, effectiveNames); err != nil {
+		if err := m.grantQuestions(cctx, func(ctx context.Context) error {
+			return c.CheckResumeGrants(ctx, key.id, effectiveNames)
+		}); err != nil {
 			return resumedMsg{key: key, err: err, settingsRead: read}
 		}
 		if planner, ok := unclean(c).(interface {
 			CheckResumePolicyBeforeFetch(context.Context, string, client.ResumePolicyPlan) error
 		}); ok {
-			if err := planner.CheckResumePolicyBeforeFetch(cctx, key.id, plan); err != nil {
+			if err := m.grantQuestions(cctx, func(ctx context.Context) error {
+				return planner.CheckResumePolicyBeforeFetch(ctx, key.id, plan)
+			}); err != nil {
 				return resumedMsg{key: key, err: err, settingsRead: read}
 			}
 		}
-		secrets, err := be.SessionSecrets(cctx, settings, originalHost, key.id, effectiveNames)
+		var secrets map[string]api.Secret
+		err = m.grantQuestions(cctx, func(ctx context.Context) error {
+			var err error
+			secrets, err = be.SessionSecrets(ctx, settings, originalHost, key.id, effectiveNames)
+			return err
+		})
 		if err != nil {
 			return resumedMsg{key: key, err: err, settingsRead: read}
 		}
-		res, err := c.Resume(cctx, client.ResumeArgs{ID: key.id, Secrets: secrets, Layers: plan.Layers})
+		var res *client.ResumeResult
+		err = m.grantQuestions(cctx, func(ctx context.Context) error {
+			var err error
+			res, err = c.Resume(ctx, client.ResumeArgs{ID: key.id, Secrets: secrets, Layers: plan.Layers})
+			return err
+		})
 		return resumedMsg{key: key, res: res, err: err, settingsRead: read}
 	})
 	name, host := shown(s.Name), shown(h.name())

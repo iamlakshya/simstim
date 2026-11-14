@@ -340,3 +340,5 @@ For a host you add yourself, if OpenSSH can reach it, simstim can. [The connecti
 | Herdr | Apache-2.0 | The managed SSH config and banner skipping. Remote install with consent. The reconnect ladder and wake detection. The image paste bridge. The resume table and hooks. The agent detection manifests. Safe file writes. The pane environment clean-up. Exact files are listed in [the Herdr note](../research/herdr.md#83-modules-worth-borrowing). |
 | Amp | Proprietary | **Patterns only, clean-room.** No code, prompts or assets. See [UX](../contributing/ux-spec.md). |
 | VS Code Remote, Zed | — | The login-shell environment resolution. Uploading a versioned server over SSH. |
+
+Policy requests use the host bridge and the session's supervisor. A helper upgrade does not upgrade a running supervisor. Stop and resume a session before adding HTTP method constraints if its supervisor lacks that feature. Programs inside a session cannot use the bridge to read or change sandbox policies.

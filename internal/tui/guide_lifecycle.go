@@ -105,8 +105,19 @@ func (m *Model) resumeGuide() tea.Cmd {
 // disposeModal stops its ownership before a late start installs a question.
 // Prepared wizard connections remain tracked until their cleanup command or
 // the next pauseBg closes them.
-func (m *Model) disposeModal() tea.Cmd {
-	switch d := m.modal.(type) {
+func (m *Model) disposeModal() tea.Cmd { return m.disposeModalOwner(m.modal) }
+
+func (m *Model) disposeModalOwner(owner modal) tea.Cmd {
+	switch d := owner.(type) {
+	case *downgradeSheet:
+		d.closed = true
+	case *newSession:
+		d.stopFolders()
+	case *grantQuestion:
+		d.answer(false)
+		return m.disposeModalOwner(d.previous)
+	case *policySheet:
+		d.stop()
 	case *wizard:
 		d.stop()
 		drop := m.dropConn(d.takeConn())

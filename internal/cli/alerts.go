@@ -8,6 +8,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/iamlakshya/simstim/internal/alerts"
 	"github.com/iamlakshya/simstim/internal/brand"
 	"github.com/iamlakshya/simstim/internal/client"
 )
@@ -126,7 +127,7 @@ func alertsSetCmd() *cobra.Command {
 		fl.StringVar(&f.tokenCommand, "token-cmd", "", "")
 		hideOld(fl, "token-cmd", "host alerts set --token-cmd")
 	}
-	addList(fl, &f.events, "events", "the events to send, such as failed,oom: needs_input, turn_done, exited, failed, oom, memory, started, restored")
+	addList(fl, &f.events, "events", "the events to send, such as failed,oom: "+strings.Join(alerts.Kinds, ", "))
 	fl.DurationVar(&f.delay, "delay", 0, "how long needs_input waits before it is sent (default 10s)")
 	fl.DurationVar(&f.minTurn, "min-turn", 0, "the shortest turn that sends turn_done (default 1m)")
 	fl.BoolVar(&f.detail, "detail", false, "add the agent's question to needs_input (it can hold code)")

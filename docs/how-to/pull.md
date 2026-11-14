@@ -19,3 +19,5 @@ simstim pull my-server/auth-fix
 - Uncommitted changes in the session stay on the host; `pull` says how many there are. Ask the agent to commit them, or commit them yourself in the session.
 
 Sessions started with `--worktree` work best: each has a branch of its own ([worktrees](worktrees.md)).
+
+When a sandbox has several repositories, pass `--repo` with one protected repository basename. A full-history retry keeps that repository and its own seed history. An older running supervisor must be stopped and resumed before it can accept this selector.

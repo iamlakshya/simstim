@@ -23,7 +23,7 @@ func (s *Server) admitSecretHTTPRequest(scope *originRequest, req *http.Request,
 		return requestSecretPlan{}, Decision{}, failure
 	}
 	engine := s.currentEngine()
-	decision := engine.evaluateHTTP(scope.request, scope.permit, evalPrecheck)
+	decision := engine.evaluateModelNetwork(scope.request, scope.permit, evalPrecheck)
 	if !decision.Allow {
 		return requestSecretPlan{}, decision, nil
 	}
@@ -36,9 +36,14 @@ func (s *Server) admitSecretHTTPRequest(scope *originRequest, req *http.Request,
 			return requestSecretPlan{}, Decision{}, requestSecretRefusal(http.StatusForbidden, "secret_lifetime")
 		}
 	}
-	decision = engine.evaluateHTTP(scope.request, scope.permit, evalReserve)
+	kind, _, _ := httpClass(scope.request.Host)
+	mode := evalReserve
+	if kind == "model" {
+		mode = evalPrecheck
+	} // The complete body is checked before any model-host lease is reserved.
+	decision = engine.evaluateModelNetwork(scope.request, scope.permit, mode)
 	scope.mu.Lock()
-	scope.reserved = true
+	scope.reserved = mode == evalReserve
 	scope.mu.Unlock()
 	if !decision.Allow {
 		return requestSecretPlan{}, decision, nil

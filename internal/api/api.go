@@ -196,6 +196,9 @@ type Check struct {
 
 // HostInfo describes the host.
 type HostInfo struct {
+	// Sandbox is a fresh, optional capability report requested by doctor.
+	// Older helpers leave it absent. It supplies no admission authority.
+	Sandbox   *CapProbe         `json:"sandbox,omitempty"`
 	Hostname  string            `json:"hostname"`
 	OS        string            `json:"os"`
 	Arch      string            `json:"arch"`

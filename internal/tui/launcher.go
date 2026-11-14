@@ -307,7 +307,7 @@ type sessColumns struct {
 }
 
 func sessCols(cw int) sessColumns {
-	fixed := 4 + 2 + colAgent + 2 + colState + 2 + colAge + 2 + traceCells // all but the folder
+	fixed := 5 + 2 + colAgent + 2 + colState + 2 + colAge + 2 + traceCells // all but the folder
 	rest := cw - fixed - 2                                                 // name and folder, after the folder's gap
 	c := sessColumns{name: min(max(rest*45/100, 10), 28), row: cw}
 	c.folder = rest - c.name
@@ -353,7 +353,7 @@ func (m *Model) sessRowView(r sessRow, n int, c sessColumns, selected, withHost 
 	if withHost {
 		where = trunc(shown(r.h.name())+":"+folder, c.folder)
 	}
-	segs := []seg{gutter(n), {" ", sPlain}, glyph, {" ", sPlain}}
+	segs := []seg{gutter(n), {" ", sPlain}, glyph, wallMark(s), {" ", sPlain}}
 	segs = append(segs, name...)
 	segs = append(segs, seg{"  ", sPlain}, seg{fit(shown(s.Agent), colAgent), sFaint}, seg{"  ", sPlain})
 	if c.folder > 0 {

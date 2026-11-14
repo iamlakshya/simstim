@@ -120,6 +120,7 @@ func sessionDetails(s client.Session) []detail {
 	state := showState(s)
 	add("ID", s.ID)
 	add("Agent", s.Agent)
+	add("Task", s.Task)
 	add("Folder", s.Cwd)
 	add("State", state)
 	add("Since", showTime(s.Since))

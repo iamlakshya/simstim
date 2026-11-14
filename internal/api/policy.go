@@ -91,8 +91,10 @@ type Rule struct {
 	Mode    string    `json:"mode,omitempty"`
 	// Methods preserves absent versus explicit empty exact HTTP token sets.
 	Methods *[]string `json:"methods,omitempty" toml:"methods,omitempty"`
-	Once    bool      `json:"once,omitempty"`
-	Until   time.Time `json:"until,omitzero"`
+	// Tools grants provider capabilities only for this session and exact host.
+	Tools []string  `json:"tools,omitempty" toml:"-"`
+	Once  bool      `json:"once,omitempty"`
+	Until time.Time `json:"until,omitzero"`
 }
 
 // Lock holds values and denies that no narrower layer may override (spec 8.2).
@@ -175,6 +177,13 @@ func RuleID(r Rule) string {
 		}
 		identity += "\x00policy-http-methods-v1\n" + strings.Join(*methods, "\n") + "\n"
 	}
+	if len(r.Tools) != 0 {
+		tools, err := CanonicalModelTools(r.Tools)
+		if err != nil {
+			tools = r.Tools
+		} // Admission rejects invalid capabilities.
+		identity += "\x00policy-model-tools-v1\n" + strings.Join(tools, "\n") + "\n"
+	}
 	sum := sha256.Sum256([]byte(identity))
 	enc := strings.ToLower(base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(sum[:]))
 	return "g" + enc[:6]
@@ -189,8 +198,10 @@ type PolicyAddArgs struct {
 	Mode   string `json:"mode,omitempty"`
 	// Methods preserves absent versus explicit empty exact HTTP token sets.
 	Methods *[]string `json:"methods,omitempty" toml:"methods,omitempty"`
-	Once    bool      `json:"once,omitempty"`
-	Until   time.Time `json:"until,omitzero"`
+	// Tools grants provider capabilities only for this session and exact host.
+	Tools []string  `json:"tools,omitempty" toml:"-"`
+	Once  bool      `json:"once,omitempty"`
+	Until time.Time `json:"until,omitzero"`
 }
 
 // PolicyRmArgs asks a supervisor to remove a rule from the session layer.

@@ -18,6 +18,7 @@ import (
 // attachedAgent owns a separate agent-only bridge. Its raw transport close
 // never joins the link reader. The attacher joins everything after revoke.
 type attachedAgent struct {
+	parent   *Conn
 	conn     *Conn
 	mode     *agentModeResources
 	ownsMode bool
@@ -127,7 +128,7 @@ func (a *attachedAgent) readControlReply(ctx context.Context, action string, seq
 // Activate checks local policy again after the exact terminal attach. The
 // ledger and policy lock cover actual activation publication, not queuing.
 func (a *attachedAgent) Activate(ctx context.Context) error {
-	if !a.binding.matches(a.conn, a.scope) {
+	if err := a.checkParent(); err != nil {
 		err := agentChannelError("a trusted outer agent binding is not available")
 		a.CloseWithError(err)
 		return err
@@ -141,7 +142,7 @@ func (a *attachedAgent) Activate(ctx context.Context) error {
 	}
 	a.activating = true
 	a.mu.Unlock()
-	ctx, release, err := a.conn.beginGrant(ctx, "attach", true)
+	ctx, release, err := a.parent.beginGrant(ctx, "attach", true)
 	if err != nil {
 		a.revoke(err)
 		return err
@@ -154,13 +155,13 @@ func (a *attachedAgent) Activate(ctx context.Context) error {
 		a.CloseWithError(err)
 		return err
 	}
-	if err := a.conn.checkAgentPolicy(ctx, a.scope.Session, a.mode.inspector); err != nil {
+	if err := a.parent.checkAgentPolicy(ctx, a.scope.Session, a.mode.inspector); err != nil {
 		return abort(err)
 	}
 	if err := checkLocalSSHAgentPath(a.target); err != nil {
 		return abort(err)
 	}
-	if err := RecordGrantContext(ctx, a.conn.Host, a.conn.HostID(), Outbound{Kind: OutboundSSHAgent}); err != nil {
+	if err := RecordGrantContext(ctx, a.parent.Host, a.parent.HostID(), Outbound{Kind: OutboundSSHAgent}); err != nil {
 		return abort(err)
 	}
 	// Correctly scoped streams can wait, bounded by their sixteen slots.
@@ -175,6 +176,9 @@ func (a *attachedAgent) Activate(ctx context.Context) error {
 		close(a.activation)
 		a.mu.Unlock()
 		release()
+	}
+	if err := a.checkParent(); err != nil {
+		return abort(err)
 	}
 	if err := a.control(ctx, "activate", published); err != nil {
 		return abort(err)
@@ -236,7 +240,7 @@ func (a *attachedAgent) serve(stream *link.Stream) {
 	case <-a.ctx.Done():
 		return
 	}
-	if !a.binding.matches(a.conn, a.scope) {
+	if err := a.checkParent(); err != nil {
 		a.revoke(agentChannelError("a trusted outer agent binding is not available"))
 		return
 	}

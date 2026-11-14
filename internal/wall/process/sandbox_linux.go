@@ -281,13 +281,18 @@ func (s *sandbox) reap(cmd *exec.Cmd) {
 	s.mu.Lock()
 	var cleanupErr error
 	if s.pidfd >= 0 {
-		if !initExited(s.pidfd) {
+		ready, readinessErr := pollInitExit(s.pidfd)
+		cleanupErr = errors.Join(cleanupErr, readinessErr)
+		var signalErr error
+		if !ready {
 			s.forced = true
+			signalErr = signalInit(s.pidfd, unix.SIGKILL, nil, 0)
 		}
-		if signalErr := signalInit(s.pidfd, unix.SIGKILL, nil, 0); signalErr != nil && !errors.Is(signalErr, unix.ESRCH) {
-			cleanupErr = fmt.Errorf("end owned namespace init: %w", signalErr)
-		}
-		if waitErr := waitInitExit(s.pidfd); waitErr != nil {
+		if signalErr != nil && !errors.Is(signalErr, unix.ESRCH) {
+			// A failed kill cannot make a live init ready. Retain ownership
+			// and return uncertainty rather than block forever on that init.
+			cleanupErr = errors.Join(cleanupErr, fmt.Errorf("end owned namespace init: %w", signalErr))
+		} else if waitErr := waitInitExit(s.pidfd); waitErr != nil {
 			// Keep this exact owned descriptor. A completed launcher is not
 			// proof that its namespace init and descendants have ceased.
 			cleanupErr = errors.Join(cleanupErr, waitErr)
@@ -299,7 +304,7 @@ func (s *sandbox) reap(cmd *exec.Cmd) {
 		}
 	}
 	s.closed = s.pidfd < 0
-	s.result = wall.Exit{Err: errors.Join(err, cleanupErr)}
+	s.result = wall.Exit{Err: errors.Join(s.result.Err, err, cleanupErr)}
 	if cmd.ProcessState != nil {
 		s.result.Code = cmd.ProcessState.ExitCode()
 		if ws, ok := cmd.ProcessState.Sys().(syscall.WaitStatus); ok && ws.Signaled() {
@@ -346,11 +351,14 @@ func (s *sandbox) Kill() error {
 		return nil
 	}
 	if s.pidfd >= 0 {
-		if !initExited(s.pidfd) {
+		ready, readinessErr := pollInitExit(s.pidfd)
+		s.result.Err = errors.Join(s.result.Err, readinessErr)
+		if !ready {
 			s.forced = true
 		}
 		if err := signalInit(s.pidfd, unix.SIGKILL, nil, 0); err != nil && !errors.Is(err, unix.ESRCH) {
-			return fmt.Errorf("kill namespace init: %w", err)
+			s.result.Err = errors.Join(s.result.Err, fmt.Errorf("kill namespace init: %w", err))
+			return s.result.Err
 		}
 		select {
 		case <-s.exited:

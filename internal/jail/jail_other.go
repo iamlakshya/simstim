@@ -49,6 +49,9 @@ func (*Cmd) Pid() int { return 0 }
 // ExitCode returns -1: no jail runs here.
 func (*Cmd) ExitCode() int { return -1 }
 
+// PhysicalExitV1 supplies no native process-closure evidence off Linux.
+func (*Cmd) PhysicalExitV1() bool { return false }
+
 // Init does nothing here: only Linux has jails.
 func Init() {}
 

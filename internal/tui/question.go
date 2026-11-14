@@ -19,7 +19,9 @@ type startReq struct {
 	// the start after an answer does not fetch them again.
 	args client.NewArgs
 	// grants belongs to this logical start, including its setup retries.
-	grants *client.GrantRequest
+	grants     *client.GrantRequest
+	vm         *client.VMNeedPlanV1
+	wallIntent string
 	// answered is true once the start has read the user's answers about
 	// setup scripts into args. A start after an answer keeps the answers
 	// it has, with the new one in them. answers are those answers, so a
@@ -49,8 +51,8 @@ func (m *Model) waiting(r startReq) (*newSession, *promptState) {
 func (m *Model) startAgain(r startReq) tea.Cmd {
 	h := m.hostByName(r.host)
 	if h == nil {
-		m.cancelStart(r)
-		return m.toastErr(&client.UserError{Msg: "the host " + r.host + " is no longer in the list", Hint: "Add the host again, then start the session.", Code: "host_not_found", Kind: client.KindNotFound})
+		cleanup := m.cancelStart(r)
+		return tea.Batch(cleanup, m.toastErr(&client.UserError{Msg: "the host " + r.host + " is no longer in the list", Hint: "Add the host again, then start the session.", Code: "host_not_found", Kind: client.KindNotFound}))
 	}
 	m.modal = nil
 	if r.form != nil {
@@ -61,7 +63,7 @@ func (m *Model) startAgain(r startReq) tea.Cmd {
 
 // cancelStart closes a question about a start, and brings back what started
 // it, ready to start again: the new-session form, or the quick-start line.
-func (m *Model) cancelStart(r startReq) {
+func (m *Model) cancelStart(r startReq) tea.Cmd {
 	m.modal = nil
 	if r.form != nil {
 		r.form.starting = false
@@ -70,4 +72,5 @@ func (m *Model) cancelStart(r startReq) {
 	if r.line != nil {
 		r.line.starting = false
 	}
+	return m.releaseGrant(r.grants)
 }

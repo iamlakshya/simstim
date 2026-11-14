@@ -112,6 +112,10 @@ func Resume(a api.ResumeArgs) (*ResumeResult, error) {
 			return nil, err
 		}
 	}
+	environmentPreview := CloneManifest(*m)
+	if err := prepareResumeEnvironment(&environmentPreview, a.Environment); err != nil {
+		return nil, err
+	}
 	// The session's debug stops with its old holder (holder_debug.go).
 	debugOn := debugUntil(m, alive(id)) != nil
 	if err := stopResumeHolder(id, m, pending); err != nil {
@@ -139,6 +143,9 @@ func Resume(a api.ResumeArgs) (*ResumeResult, error) {
 		m.Limits.MemoryAsked = 0
 	}
 	if err := validateResumeInputs(m, a.Inputs); err != nil {
+		return nil, err
+	}
+	if err := prepareResumeEnvironment(m, a.Environment); err != nil {
 		return nil, err
 	}
 	m.HostLabel = a.HostLabel

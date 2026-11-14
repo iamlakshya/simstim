@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/iamlakshya/simstim/internal/api"
 	"github.com/iamlakshya/simstim/internal/host"
 	"github.com/iamlakshya/simstim/internal/link"
 	"github.com/iamlakshya/simstim/internal/proto"
@@ -160,7 +161,30 @@ func guestPullSource(m, protected *host.Manifest, call func(context.Context, str
 		return nil, err
 	}
 	id := strings.ToLower(base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(nonce[:]))
-	return pullexport.NewGuestSource(pullexport.GuestOptions{ID: id, Primary: m.ID, Cwd: m.Cwd, Seeds: seed, PullMax: limit, Call: call, Open: open, Record: record, Close: closeOwned})
+	options := pullexport.GuestOptions{ID: id, Primary: m.ID, Cwd: m.Cwd, Seeds: seed, PullMax: limit, Call: call, Open: open, Record: record, Close: closeOwned}
+	if protected.Files != nil {
+		repositories, _, err := protected.Files.NormaliseRepositories()
+		if err != nil {
+			return nil, err
+		}
+		for _, repository := range repositories {
+			if repository.Scratch {
+				continue
+			}
+			head := protected.SeedHeads[repository.Repo]
+			if head == "" {
+				head = repository.Commit
+			}
+			if !api.ValidGitOID(head) || repository.Commit != "" && repository.Commit != head {
+				return nil, pullChanged()
+			}
+			options.Repositories = append(options.Repositories, pullexport.GuestRepository{Name: repository.Repo, Cwd: "/work/" + repository.Repo, Seeds: []string{head}})
+		}
+		if len(options.Repositories) == 0 {
+			return nil, &proto.Error{Code: "pull_repo", Message: "the sandbox has no protected Git repository", Hint: "Use cp for a scratch workspace, or create a sandbox from a repository."}
+		}
+	}
+	return pullexport.NewGuestSource(options)
 }
 
 func pullChanged() error {

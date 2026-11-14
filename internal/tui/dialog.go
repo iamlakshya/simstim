@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"strings"
-	"time"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -37,20 +36,27 @@ type agentChoice struct {
 }
 
 type newSession struct {
-	host     string
-	choices  []agentChoice
-	ai       int
-	field    int // 0 agent, 1 folder, 2 name, 3 worktree, 4 command (only for "other")
-	command  input
-	folder   input
-	name     input
-	worktree bool
-	suggest  []string // folder completions for the current folder text
-	hints    bool     // suggest holds recent folders and repositories, not completions
-	si       int      // the next suggestion Tab takes
-	finding  bool     // the host's agents are not known yet
-	starting bool
-	err      error
+	folderSeq    uint64
+	folderCtx    context.Context
+	folderCancel context.CancelFunc
+	folderGen    int
+	folderHost   client.Host
+	wall         string
+	downgrade    bool
+	host         string
+	choices      []agentChoice
+	ai           int
+	field        int // 0 agent, 1 folder, 2 name, 3 worktree, 4 command (only for "other")
+	command      input
+	folder       input
+	name         input
+	worktree     bool
+	suggest      []string // folder completions for the current folder text
+	hints        bool     // suggest holds recent folders and repositories, not completions
+	si           int      // the next suggestion Tab takes
+	finding      bool     // the host's agents are not known yet
+	starting     bool
+	err          error
 }
 
 const labelW = 11
@@ -110,8 +116,12 @@ func (d *newSession) agent() string {
 func (d *newSession) busy() bool { return d.starting }
 
 func (d *newSession) paste(s string) {
+	if d.starting {
+		return
+	}
 	switch d.field {
 	case 1:
+		d.stopFolders()
 		d.folder.insert(s)
 	case 2:
 		d.name.insert(s)
@@ -123,9 +133,9 @@ func (d *newSession) paste(s string) {
 // order is the sequence Tab moves through; the command field exists only for "other".
 func (d *newSession) order() []int {
 	if d.agent() == otherAgent {
-		return []int{0, 4, 1, 2, 3}
+		return []int{0, 4, 1, 2, 3, 5}
 	}
-	return []int{0, 1, 2, 3}
+	return []int{0, 1, 2, 3, 5}
 }
 
 func (d *newSession) step(n int) {
@@ -170,6 +180,7 @@ func (d *newSession) key(m *Model, k tea.KeyPressMsg) tea.Cmd {
 	ks := k.String()
 	if d.starting {
 		if ks == "esc" {
+			d.stopFolders()
 			m.modal = nil
 		}
 		return nil
@@ -184,6 +195,7 @@ func (d *newSession) key(m *Model, k tea.KeyPressMsg) tea.Cmd {
 	}
 	switch ks {
 	case "esc":
+		d.stopFolders()
 		m.modal = nil
 		return nil
 	case "tab", "down":
@@ -209,6 +221,8 @@ func (d *newSession) key(m *Model, k tea.KeyPressMsg) tea.Cmd {
 		d.name.key(k)
 	case 4:
 		d.command.key(k)
+	case 5:
+		d.wallKey(ks)
 	case 3:
 		switch ks {
 		case "left", "h":
@@ -234,7 +248,7 @@ func (d *newSession) submit(m *Model, attach bool) tea.Cmd {
 	if folder == "" {
 		folder = "~"
 	}
-	a := client.NewArgs{Agent: d.agent(), Cwd: client.RemotePath(folder), Name: strings.TrimSpace(d.name.value()), Worktree: d.worktree}
+	a := client.NewArgs{Agent: d.agent(), Cwd: client.RemotePath(folder), Name: strings.TrimSpace(d.name.value()), Worktree: d.worktree, Wall: d.wall, Downgrade: d.downgrade}
 	if d.agent() == otherAgent {
 		c := strings.TrimSpace(d.command.value())
 		if c == "" {
@@ -244,6 +258,7 @@ func (d *newSession) submit(m *Model, attach bool) tea.Cmd {
 		// exec replaces the shell, so the command is the session's process.
 		a.Agent, a.Argv = "", []string{"/bin/sh", "-c", "exec " + c}
 	}
+	d.stopFolders()
 	d.starting, d.err = true, nil
 	return m.startSession(h, startReq{args: a, attach: attach, form: d})
 }
@@ -295,6 +310,8 @@ func (d *newSession) view(m *Model) string {
 		label(2, "Name")+d.name.view(fw, d.field == 2),
 		"",
 		label(3, "Worktree")+d.worktreeRow(),
+		label(5, "Wall")+d.wallRow(m, fw),
+		sFaint.Render(fit("Host", labelW))+shown(d.host),
 		"",
 	)
 	switch {
@@ -358,24 +375,6 @@ func (d *newSession) agentRow(w int) string {
 		}
 	}
 	return b.String()
-}
-
-// fetchFolders asks the host for completions of the folder field.
-func (m *Model) fetchFolders(d *newSession) tea.Cmd {
-	h := m.hostByName(d.host)
-	if h == nil || !h.online() {
-		return nil
-	}
-	prefix, name, c := d.folder.value(), h.name(), h.conn
-	return m.bgCmd(func(ctx context.Context) tea.Msg {
-		cctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-		defer cancel()
-		res, err := c.Folders(cctx, prefix)
-		if err != nil {
-			return nil
-		}
-		return foldersMsg{host: name, prefix: prefix, res: res}
-	})
 }
 
 // setSuggestions keeps completions that still fit what the user has typed.

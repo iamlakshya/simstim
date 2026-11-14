@@ -8,6 +8,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/iamlakshya/simstim/internal/api"
 	"github.com/iamlakshya/simstim/internal/client"
 )
 
@@ -57,8 +58,12 @@ func completeRuleIDs(_ *cobra.Command, _ []string, prefix string) ([]string, cob
 	if !ok {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
+	return completionRuleRows(metadata.Rules, prefix), cobra.ShellCompDirectiveNoFileComp
+}
+
+func completionRuleRows(rules []api.Rule, prefix string) []string {
 	var out []string
-	for _, rule := range metadata.Rules {
+	for _, rule := range rules {
 		if rule.ID == "" || cleanCompMapKey(rule.ID) != rule.ID || strings.TrimSpace(rule.ID) != rule.ID || !strings.HasPrefix(rule.ID, prefix) {
 			continue
 		}
@@ -67,5 +72,5 @@ func completeRuleIDs(_ *cobra.Command, _ []string, prefix string) ([]string, cob
 	// Equal IDs with different targets keep both descriptions. A truncated
 	// stable hash must never choose one arbitrary configured rule for the user.
 	slices.Sort(out)
-	return slices.Compact(out), cobra.ShellCompDirectiveNoFileComp
+	return slices.Compact(out)
 }

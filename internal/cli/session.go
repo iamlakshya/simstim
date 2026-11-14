@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"sort"
@@ -44,7 +45,7 @@ func newCmd() *cobra.Command {
 			"  " + brand.Name + " new my-vps --agent claude --detach --json",
 		Args:              oneHost,
 		ValidArgsFunction: completeNewHost,
-		RunE: func(cmd *cobra.Command, args []string) error {
+		RunE: func(cmd *cobra.Command, args []string) (runErr error) {
 			if _, err := client.ReadPolicySettings(); err != nil {
 				return err
 			}
@@ -87,6 +88,12 @@ func newCmd() *cobra.Command {
 			cols, rows := termSize()
 			a := client.TerminalArgs(client.NewArgs{Agent: agent, Cwd: client.RemotePath(dir), MakeFolder: mkdir, Name: name, Worktree: worktree, Base: base, Inline: inline, MemoryMax: memMax, SSHAgent: sshAgent, Downgrade: downgrade, Mounts: mounts, Include: include}, cols, rows)
 			a.Wall, a.Task = requestedWall, task
+			if dash := cmd.ArgsLenAtDash(); dash >= 0 {
+				a.Argv = args[dash:]
+			}
+			if setup || noSetup {
+				a.Setup = setupValue(setup)
+			}
 			values, err := client.ParseLayerSets(sets)
 			if err != nil {
 				conn.Close()
@@ -110,16 +117,14 @@ func newCmd() *cobra.Command {
 				return err
 			}
 			a.Layers = start.Layers
-			a, err = prepareWallStart(cmd, conn, h, a, untrusted, secrets, expose)
+			var request *client.GrantRequest
+			a, request, err = prepareWallStart(cmd, conn, h, a, untrusted, secrets, expose)
+			if request != nil {
+				defer func() { runErr = errors.Join(runErr, request.Close()) }()
+			}
 			if err != nil {
 				conn.Close()
 				return err
-			}
-			if dash := cmd.ArgsLenAtDash(); dash >= 0 {
-				a.Argv = args[dash:]
-			}
-			if setup || noSetup {
-				a.Setup = setupValue(setup)
 			}
 			s, err := startSession(cmd, conn, h, a)
 			if err == nil {

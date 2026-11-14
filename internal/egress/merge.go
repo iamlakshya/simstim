@@ -3,7 +3,6 @@ package egress
 import (
 	"fmt"
 	"slices"
-	"sort"
 	"strings"
 
 	"github.com/iamlakshya/simstim/internal/api"
@@ -44,6 +43,11 @@ func compileRule(r api.Rule) (compiledRule, error) {
 	if err != nil {
 		return compiledRule{}, err
 	}
+	tools, err := canonicalRuleTools(r)
+	if err != nil {
+		return compiledRule{}, err
+	}
+	r.Tools = tools
 	cr, err := compileTarget(r.Target, r.Allow)
 	if err != nil {
 		return compiledRule{}, &proto.Error{
@@ -53,7 +57,7 @@ func compileRule(r api.Rule) (compiledRule, error) {
 		}
 	}
 	id := r.ID
-	if methods != nil {
+	if methods != nil || len(tools) != 0 {
 		r.Methods, r.Target = methods, formatCompiledTarget(cr)
 		canonicalID := api.RuleID(r)
 		if id != "" && id != canonicalID {
@@ -68,6 +72,7 @@ func compileRule(r api.Rule) (compiledRule, error) {
 	}
 	cr.id = id
 	cr.methods = methods
+	cr.tools = tools
 	cr.ref = api.LayerRef{Kind: r.Layer, Name: r.Name, Source: r.Source}
 	cr.allow = r.Allow
 	cr.once = r.Once
@@ -167,27 +172,22 @@ func MergeLayers(layers []api.Layer) (api.Policy, []api.Layer, error) {
 		pol.Rules = append(pol.Rules, rules...)
 		pol.Order = append(pol.Order, api.LayerRef{Kind: l.Kind, Name: l.Name, Source: l.Source})
 	}
+	if err := ValidateRuleIdentities(pol.Rules); err != nil {
+		return api.Policy{}, nil, err
+	}
 	return pol, sorted, nil
 }
 
 func cleanLayerRules(l api.Layer, denies []lockedRule) ([]api.Rule, error) {
-	dedup := map[string]api.Rule{}
+	dedup := map[ruleInstanceIdentity]api.Rule{}
 	for _, r := range l.Rules {
 		r.Layer, r.Name, r.Source = l.Kind, l.Name, l.Source
-		if r.Door == "" {
-			r.Door = api.DoorNet
-		}
-		methods, err := canonicalRuleMethods(r)
+		var err error
+		r, err = canonicalIdentityRule(r)
 		if err != nil {
 			return nil, err
 		}
-		r.Methods = methods
 		if r.Door == api.DoorNet {
-			norm, err := ValidateRuleTarget(r.Target)
-			if err != nil {
-				return nil, err
-			}
-			r.Target = norm
 			if r.Allow {
 				cr, _ := compileTarget(r.Target, true)
 				cr.methods = r.Methods
@@ -199,11 +199,11 @@ func cleanLayerRules(l api.Layer, denies []lockedRule) ([]api.Rule, error) {
 			}
 		}
 		canonicalID := api.RuleID(r)
-		if r.Methods != nil && r.ID != "" && r.ID != canonicalID {
+		if (r.Methods != nil || len(r.Tools) != 0) && r.ID != "" && r.ID != canonicalID {
 			return nil, &proto.Error{Code: "bad_rule_id", Message: "method-qualified rule has a noncanonical ID", Hint: "Remove the supplied rule ID and submit the rule again."}
 		}
 		r.ID = canonicalID
-		dedup[r.ID] = r
+		dedup[ruleInstanceKey(r)] = r
 	}
 	if len(dedup) == 0 {
 		return nil, nil
@@ -212,7 +212,7 @@ func cleanLayerRules(l api.Layer, denies []lockedRule) ([]api.Rule, error) {
 	for _, r := range dedup {
 		out = append(out, r)
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	slices.SortFunc(out, compareRuleInstances)
 	return out, nil
 }
 

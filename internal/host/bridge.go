@@ -30,14 +30,17 @@ import (
 var Features = []string{"attach.replay", "upload", "peek", "setup", "rename", "send", "hooks", "restore", "ports", "worktree", "folders", "alerts", "trace", api.FeatureSandboxReviewContext, api.FeatureSandboxCohort, inputtransfer.Feature, inputtransfer.FinishFeature, api.FeatureExecStream, api.FeatureSpawn, api.FeatureSandboxGroupRM, api.FeatureSandboxSnapshot, "session.id", agentbridge.Feature}
 
 type bridge struct {
-	pullClosed  bool
-	pull        *bridgePull
-	ownedOutput OwnedBridgeOutput
-	agents      agentsDiskService
-	images      imageService
-	runtime     runtimeService
-	ctx         context.Context
-	w           *proto.Writer
+	copyMu                             sync.Mutex
+	copyBusy, copyClosed, copyWatching bool
+	copyRoute                          *bridgeCopyRoute
+	pullClosed                         bool
+	pull                               *bridgePull
+	ownedOutput                        OwnedBridgeOutput
+	agents                             agentsDiskService
+	images                             imageService
+	runtime                            runtimeService
+	ctx                                context.Context
+	w                                  *proto.Writer
 	// log takes the bridge's debug lines, while its debug is on
 	// (bridge_debug.go).
 	log *slog.Logger
@@ -59,10 +62,11 @@ type bridge struct {
 	// files of each, and uploadsDone, whether the bridge takes no more
 	// (bridge_upload.go). uploadsWG counts every tracked upload until its
 	// disk cleanup or finalisation has finished.
-	umu         sync.Mutex
-	uploads     map[uint64]*upload
-	uploadsDone bool
-	uploadsWG   sync.WaitGroup
+	umu              sync.Mutex
+	uploads          map[uint64]*upload
+	finishingUploads map[*upload]struct{}
+	uploadsDone      bool
+	uploadsWG        sync.WaitGroup
 }
 
 // RunBridge serves one client over in and out (the SSH channel's stdio).
@@ -98,7 +102,7 @@ func runBridge(in io.Reader, out io.Writer, owned OwnedBridgeOutput) (returned e
 	}
 	features := Features
 	if owned == nil {
-		features = slices.DeleteFunc(slices.Clone(Features), func(feature string) bool { return feature == api.FeaturePullBundle })
+		features = slices.DeleteFunc(slices.Clone(Features), func(feature string) bool { return feature == api.FeaturePullBundle || feature == api.FeaturePullRepositories })
 	}
 	if err := w.WriteJSON(proto.THello, proto.Hello{Magic: proto.Magic, Protocol: version.Protocol, Version: version.Version, Role: "bridge", HostID: hostID, Features: features}); err != nil {
 		return err
@@ -122,6 +126,7 @@ func runBridge(in io.Reader, out io.Writer, owned OwnedBridgeOutput) (returned e
 			_ = owned.Cancel()
 		}
 		b.closePull()
+		b.closeCopy()
 	}()
 	inside := CheckCaller() != nil // bridge_inside.go
 	firstFrame := true
@@ -209,22 +214,6 @@ func runBridge(in io.Reader, out io.Writer, owned OwnedBridgeOutput) (returned e
 			// A client sends no other frame: drop it.
 		}
 	}
-}
-
-func (b *bridge) reply(id uint64, v any, err error) {
-	b.noteReply(id)
-	resp := proto.Response{ID: id, OK: err == nil}
-	if err != nil {
-		var pe *proto.Error
-		if errors.As(err, &pe) {
-			resp.Error = pe
-		} else {
-			resp.Error = &proto.Error{Code: "error", Message: err.Error()}
-		}
-	} else if v != nil {
-		resp.Result, _ = json.Marshal(v)
-	}
-	_ = b.w.WriteJSON(proto.TResponse, resp)
 }
 
 func (b *bridge) handle(req proto.Request) {
@@ -395,7 +384,7 @@ func (b *bridge) handle(req proto.Request) {
 		v, err := alertsRequest(req.Op, req.Args)
 		b.reply(req.ID, v, err)
 	default:
-		if !b.handleAgentsDisk(req) && !b.handleRuntime(req) && !b.handleImages(req) && !b.handlePull(req) && !b.handleMore(req) && !b.handleDebug(req) {
+		if !b.handleCopy(req) && !b.handlePolicy(req) && !b.handleAgentsDisk(req) && !b.handleRuntime(req) && !b.handleImages(req) && !b.handlePull(req) && !b.handleMore(req) && !b.handleDebug(req) {
 			b.reply(req.ID, nil, UserError("unknown_op", "unknown request "+req.Op, "Update the host helper."))
 		}
 	}

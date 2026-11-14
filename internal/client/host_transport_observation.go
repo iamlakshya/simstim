@@ -89,7 +89,6 @@ func beginHostTransportObservation(ctx context.Context, h Host) (context.Context
 		if !SameEntry(*saved, h) {
 			return ctx, nil, nil, grantIdentityError(h)
 		}
-		var err error
 		owned, unlock, err = LockHost(ctx, h.Name, "connect")
 		if err != nil {
 			return ctx, nil, nil, err

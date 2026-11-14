@@ -43,7 +43,9 @@ func generatedConfigOwner(r io.Reader) (name string, ok bool) {
 
 // hostWrapperPaths lists every current wrapper variant for a host. A
 // downstream environment policy extends this one accessor with its paths.
-func hostWrapperPaths(h Host) []string { return []string{wrapperPath(h)} }
+func hostWrapperPaths(h Host) []string {
+	return []string{wrapperPath(h), wrapperEnvPath(h, false)}
+}
 
 // removeHostWrappers runs under the caller's pin and hosts-file locks.
 // remaining is the exact saved list after the proposed forget. It removes

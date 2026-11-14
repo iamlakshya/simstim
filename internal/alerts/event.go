@@ -120,6 +120,8 @@ func summary(ev Event) string {
 		if ev.Usage != "" {
 			s += " (" + ev.Usage + ")"
 		}
+	case EgressBlocked:
+		s = on + " was blocked by its network policy"
 	case Started:
 		s = name + " started on " + ev.Host
 	case Restored:

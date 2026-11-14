@@ -24,6 +24,10 @@ import (
 // LogLevel would hide the message, or show a host's banner, which could
 // imitate it.
 func pinArgs(name, path string) ([]string, error) {
+	return pinArgsContext(context.Background(), name, path)
+}
+
+func pinArgsContext(ctx context.Context, name, path string) ([]string, error) {
 	args := make([]string, 0, 24)
 	args = append(args,
 		"-o", "HostKeyAlias="+pinAlias(name),
@@ -37,7 +41,7 @@ func pinArgs(name, path string) ([]string, error) {
 		"-o", "FingerprintHash=sha256",
 		"-o", "LogLevel=ERROR",
 	)
-	more, err := optionalPinArgs()
+	more, err := optionalPinArgsContext(ctx)
 	if err != nil {
 		return nil, err
 	}

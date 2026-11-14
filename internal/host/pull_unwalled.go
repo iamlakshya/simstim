@@ -39,6 +39,14 @@ func NewUnwalledPullSource(m *Manifest, release func() error) (pullexport.Source
 	return &unwalledPullSource{id: m.ID, cwd: m.Cwd, limit: limit, close: release}, nil
 }
 
+// SelectRepository accepts only this already owned ordinary repository.
+func (s *unwalledPullSource) SelectRepository(name string) error {
+	if name != "" && (!api.InputRepoName(name) || name != filepath.Base(s.cwd)) {
+		return UserError("pull_repo", "the unwalled source has no such protected repository", "Choose its original repository basename, or omit --repo.")
+	}
+	return nil
+}
+
 func (s *unwalledPullSource) SeedHeads() []string { return nil }
 func (s *unwalledPullSource) PullMax() int64      { return s.limit }
 

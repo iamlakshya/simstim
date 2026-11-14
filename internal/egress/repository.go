@@ -70,42 +70,52 @@ func PrepareRepositoryLayer(file *api.RepositoryPolicy, broader []api.Layer, has
 	if _, _, err := MergeLayers(append(slices.Clone(broader), layer)); err != nil {
 		return api.Layer{}, nil, err
 	}
-	proposals := map[string]api.Rule{}
-	for _, proposal := range file.Proposals {
-		rule := proposal
-		rule.Layer, rule.Name, rule.Source = api.LayerRepo, file.Repo, api.SourceRepositoryFile
-		if !rule.Allow || rule.Door != api.DoorNet || rule.Once || !rule.Until.IsZero() {
-			return api.Layer{}, nil, badRepositoryData()
-		}
-		target, err := ValidateRuleTarget(rule.Target)
-		if err != nil {
-			return api.Layer{}, nil, err
-		}
-		rule.Target = target
-		if api.RuleID(rule) != proposal.ID {
-			return api.Layer{}, nil, badRepositoryData()
-		}
-		proposals[proposal.ID] = rule
+	proposals, err := canonicalRepositoryProposals(file)
+	if err != nil {
+		return api.Layer{}, nil, err
+	}
+	// Check identity against every broader/file deny BEFORE a question or
+	// answer is trusted, without applying unapproved allowances to locks.
+	current, _, err := MergeLayers(append(slices.Clone(broader), layer))
+	if err != nil {
+		return api.Layer{}, nil, err
+	}
+	identities := append(slices.Clone(current.Rules), proposals...)
+	if err := ValidateRuleIdentities(identities); err != nil {
+		return api.Layer{}, nil, err
 	}
 	if len(proposals) > 0 {
 		complete := hash == file.Hash
-		for id := range proposals {
-			if _, ok := answers[id]; !ok {
+		for _, rule := range proposals {
+			if _, ok := answers[rule.ID]; !ok {
 				complete = false
 			}
 		}
 		if !complete {
-			question := api.GrantQuestion{Repo: file.Repo, Hash: file.Hash, Proposals: slices.Clone(file.Proposals), Notes: notes}
+			question := api.GrantQuestion{Repo: file.Repo, Hash: file.Hash, Proposals: proposals, Notes: notes}
 			data, _ := json.Marshal(question)
 			return layer, notes, &proto.Error{Code: api.CodeGrantQuestion, Message: "the repository proposes network allowances", Hint: "Review the proposals in the client. Each answer is bound to this file's hash.", Data: data}
 		}
-		for id, rule := range proposals {
-			if answers[id] {
+		for _, rule := range proposals {
+			if answers[rule.ID] {
 				layer.Rules = append(layer.Rules, rule)
 			}
 		}
 		layer.ReviewedHash = file.Hash
 	}
+	// True answers take effect only after the same final canonical merge.
+	// False answers remain possible even when a lock forbids the proposal.
+	_, cleaned, err := MergeLayers(append(slices.Clone(broader), layer))
+	if err != nil {
+		return api.Layer{}, nil, err
+	}
+	for _, candidate := range cleaned {
+		if candidate.Kind == api.LayerRepo && candidate.Name == file.Repo && candidate.Source == api.SourceRepositoryFile {
+			layer = candidate
+			break
+		}
+	}
+
 	return layer, notes, nil
 }
 
@@ -158,4 +168,25 @@ func RepositoryBroader(layers []api.Layer) []api.Layer {
 		}
 	}
 	return out
+}
+
+func canonicalRepositoryProposals(file *api.RepositoryPolicy) ([]api.Rule, error) {
+	proposals := make([]api.Rule, 0, len(file.Proposals))
+	for _, input := range file.Proposals {
+		rule := input
+		rule.Layer, rule.Name, rule.Source = api.LayerRepo, file.Repo, api.SourceRepositoryFile
+		if !rule.Allow || rule.Door != api.DoorNet || rule.Once || !rule.Until.IsZero() || rule.Mode != "" || rule.GrantID != "" {
+			return nil, badRepositoryData()
+		}
+		canonical, err := canonicalIdentityRule(rule)
+		if err != nil {
+			return nil, err
+		}
+		canonical.ID = api.RuleID(canonical)
+		if canonical.ID != input.ID {
+			return nil, badRepositoryData()
+		}
+		proposals = append(proposals, canonical)
+	}
+	return CanonicalRuleInstances(proposals)
 }

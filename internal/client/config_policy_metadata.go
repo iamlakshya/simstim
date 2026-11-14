@@ -4,6 +4,7 @@ import (
 	"maps"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/iamlakshya/simstim/internal/api"
 	"github.com/iamlakshya/simstim/internal/brand"
@@ -47,7 +48,16 @@ func CollectPolicyCompletionMetadata(settings Settings, hosts []Host) (PolicyCom
 	add := func(layer api.Layer) error {
 		// Validate the actual complete layer once. Effective Rules collapse
 		// short-ID collisions, so enumerate physical file rows separately.
-		if _, _, err := egress.MergeLayers(api.CloneLayers([]api.Layer{layer})); err != nil {
+		if err := egress.ValidateLayerValues(layer.LayerValues); err != nil {
+			return policyError(err)
+		}
+		// Display metadata is not policy-wide short-ID admission. Validate
+		// scalar/lock shape once, then each physical tuple below. Root's
+		// authority merger correctly rejects collisions; listing must keep
+		// every colliding description so the user can repair the source.
+		values := layer
+		values.Network.Allow, values.Network.Deny, values.Network.Rules, values.Rules = nil, nil, nil, nil
+		if _, _, err := egress.MergeLayers(api.CloneLayers([]api.Layer{values})); err != nil {
 			return policyError(err)
 		}
 		row := func(raw api.NetworkRule) error {
@@ -131,27 +141,36 @@ func CollectPolicyCompletionMetadata(settings Settings, hosts []Host) (PolicyCom
 			}
 			return -1
 		}
-		return strings.Compare(ak.methods, bk.methods)
+		if order := strings.Compare(ak.methods, bk.methods); order != 0 {
+			return order
+		}
+		return strings.Compare(ak.tools, bk.tools)
 	})
 	return out, nil
 }
 
-// The short displayed RuleID is not equality. A comparable full Rule value
-// covers every other identity field; Methods compares canonical contents and
-// presence, not its pointer. Canonical HTTP tokens contain no NUL separator.
+// The short displayed RuleID is not equality. Keep explicit comparable
+// canonical fields so new mutable Rule.Tools never becomes a map key by
+// pointer or makes the entire struct uncomparable. Tools is a canonical set;
+// empty/absent retains legacy identity, unlike constrained Methods presence.
 type policyCompletionRuleKey struct {
-	rule           api.Rule
+	source         api.LayerSource
+	grantID        string
+	layer          api.LayerKind
+	name           string
+	allow          bool
+	door           api.Door
+	target, mode   string
+	once           bool
+	until          time.Time
 	methodsPresent bool
-	methods        string
+	methods, tools string
 }
 
 func completionRuleKey(rule api.Rule) policyCompletionRuleKey {
-	key := policyCompletionRuleKey{methodsPresent: rule.Methods != nil}
+	key := policyCompletionRuleKey{source: rule.Source, grantID: rule.GrantID, layer: rule.Layer, name: rule.Name, allow: rule.Allow, door: rule.Door, target: rule.Target, mode: rule.Mode, once: rule.Once, until: rule.Until, methodsPresent: rule.Methods != nil, tools: strings.Join(rule.Tools, "\x00")}
 	if rule.Methods != nil {
 		key.methods = strings.Join(*rule.Methods, "\x00")
 	}
-	rule.ID = ""
-	rule.Methods = nil
-	key.rule = rule
 	return key
 }

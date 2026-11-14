@@ -24,8 +24,10 @@ type PolicySourcePin struct {
 // PolicyResourcePin preserves a resource ceiling resolved at creation. It is
 // local metadata, never a secret, network grant or host-supplied authority.
 type PolicyResourcePin struct {
-	Version int   `json:"version"`
-	PullMax int64 `json:"pull_max"`
+	// CPMax is absent for legacy approvals; absence grants no copy ceiling.
+	CPMax   *int64 `json:"cp_max,omitempty"`
+	Version int    `json:"version"`
+	PullMax int64  `json:"pull_max"`
 }
 
 // PinPolicySources selects only the immutable metadata needed at a next start.
@@ -54,7 +56,12 @@ func PinPolicySourcesWithResources(layers []Layer, resources PolicyResourcePin) 
 	if err != nil || pin == nil {
 		return pin, err
 	}
-	pin.Resources = &resources
+	copy := resources
+	if resources.CPMax != nil {
+		size := *resources.CPMax
+		copy.CPMax = &size
+	}
+	pin.Resources = &copy
 	if err := validatePolicyPin(pin); err != nil {
 		return nil, err
 	}
@@ -95,7 +102,7 @@ func validatePolicyPin(pin *PolicySourcePin) error {
 	if r := pin.Resources; r != nil {
 		// ParseSize uses this same positive range. A raw integer must not
 		// bypass its upper bound or turn the ceiling into an unlimited value.
-		if r.Version != 1 || r.PullMax <= 0 || r.PullMax >= 1<<62 {
+		if r.Version != 1 || r.PullMax <= 0 || r.PullMax >= 1<<62 || r.CPMax != nil && (*r.CPMax <= 0 || *r.CPMax >= 1<<62) {
 			return fmt.Errorf("unsupported or invalid local policy resource projection")
 		}
 	}

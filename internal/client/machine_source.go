@@ -44,6 +44,7 @@ type MachineSourceProvenance struct {
 	Endpoint   string              `toml:"endpoint,omitempty"`
 	EngineID   string              `toml:"engine_id,omitempty"`
 	Config     MachineConfigSource `toml:"config"`
+	opaque     *machineSourceOpaque
 }
 
 // CloneMachineSource returns an independent copy of immutable source data.
@@ -53,6 +54,12 @@ func CloneMachineSource(source *MachineSourceProvenance) *MachineSourceProvenanc
 		return nil
 	}
 	copy := *source
+	if source.opaque != nil {
+		opaque := *source.opaque
+		opaque.table = cloneMachineSourceValue(source.opaque.table)
+		opaque.keys = append([]string(nil), source.opaque.keys...)
+		copy.opaque = &opaque
+	}
 	return &copy
 }
 
@@ -70,7 +77,7 @@ func machineSourceText(value string) bool {
 // engine/resource/configuration completely before adding source restrictions.
 // Missing, zero and future formats never authorise a provider command or read.
 func NormaliseMachineSource(provider string, source *MachineSourceProvenance) (*MachineSourceProvenance, error) {
-	if source == nil || source.Version != MachineSourceVersion || !machineSourceText(source.ResourceID) {
+	if source == nil || source.opaque != nil || source.Version != MachineSourceVersion || !machineSourceText(source.ResourceID) {
 		return nil, machineSourceUnknown()
 	}
 	if err := checkMachineConfigSource(source.Config); err != nil {

@@ -116,7 +116,7 @@ func (a *attacher) watchAgentGrant(ctx context.Context) error {
 	}
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
-	if err := a.agent.conn.checkLiveAgentGrant(ctx, a.o.Session, a.agent.target, a.agent.mode.inspector); err != nil {
+	if err := a.agent.checkLiveGrant(ctx, a.o.Session, a.agent.target); err != nil {
 		// A host operation may have committed a downgrade or removal
 		// before releasing its operation lock. Busy cannot renew stale
 		// credential authority while that operation finishes.

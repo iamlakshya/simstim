@@ -46,9 +46,14 @@ func waitInitExit(fd int) error {
 	}
 }
 
-func initExited(fd int) bool {
+func pollInitExit(fd int) (bool, error) {
 	poll := []unix.PollFd{{Fd: int32(fd), Events: unix.POLLIN}}
 	n, err := pollInit(poll, 0)
+	if err != nil {
+		return false, fmt.Errorf("inspect owned namespace-init exit: %w", err)
+	}
 	ready, checkErr := pidfdExitReady(n, poll[0].Revents)
-	return err == nil && checkErr == nil && ready
+	return ready, checkErr
 }
+
+func initExited(fd int) bool { ready, err := pollInitExit(fd); return err == nil && ready }

@@ -9,6 +9,8 @@ import (
 
 // Probe is what a driver found on this host.
 type Probe struct {
+	// CanPrepare reports verified boot inputs; it is not compatibility readiness or admission.
+	CanPrepare bool `json:"can_prepare,omitempty"`
 	Driver  string            `json:"driver"`
 	Level   Level             `json:"level"`
 	OK      bool              `json:"ok"`

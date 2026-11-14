@@ -20,6 +20,7 @@ type dockerSourceLocator struct {
 	endpoint, engine string
 	config           client.MachineConfigSource
 	environment      []string
+	pin              *provider.SourceConfigPin
 }
 
 func sourceUnknown() error {
@@ -33,8 +34,7 @@ func (l dockerSourceLocator) exec(ctx context.Context, args ...string) ([]byte, 
 	return provider.ExecEnvironment(ctx, l.environment, install, "docker", l.args(args...)...)
 }
 
-func captureSourceLocator(ctx context.Context) (dockerSourceLocator, error) {
-	var locator dockerSourceLocator
+func captureSourceLocator(ctx context.Context) (locator dockerSourceLocator, returned error) {
 	config := os.Getenv("DOCKER_CONFIG")
 	if config == "" {
 		home, err := os.UserHomeDir()
@@ -43,11 +43,18 @@ func captureSourceLocator(ctx context.Context) (dockerSourceLocator, error) {
 		}
 		config = filepath.Join(home, ".docker")
 	}
-	source, err := provider.CaptureSourceConfig(config)
+	source, pin, err := provider.CaptureSourceConfigPinned(config)
 	if err != nil {
 		return locator, err
 	}
 	locator.config = source
+	locator.pin = pin
+	complete := false
+	defer func() {
+		if !complete {
+			returned = errors.Join(returned, pin.Close())
+		}
+	}()
 	// Host creation retains its existing authorised provider environment, but
 	// the three mutable selector variables cannot override the pinned locator.
 	for _, entry := range os.Environ() {
@@ -85,11 +92,19 @@ func captureSourceLocator(ctx context.Context) (dockerSourceLocator, error) {
 	if err != nil || json.Unmarshal(raw, &locator.engine) != nil || locator.engine == "" {
 		return locator, sourceUnknown()
 	}
-	pin, err := provider.PinSourceConfig(source)
-	if err != nil {
+	if err := pin.Revalidate(); err != nil {
 		return locator, err
 	}
-	return locator, pin.Close()
+	complete = true
+	return locator, nil
+}
+
+func (l *dockerSourceLocator) close() error {
+	if l == nil {
+		return nil
+	}
+	clear(l.environment)
+	return l.pin.Close()
 }
 
 type dockerSharing struct {
@@ -105,6 +120,14 @@ type dockerSharing struct {
 
 func sharingTemplate() string {
 	return `{"id":{{json .Id}},"name":{{json .Name}},"label":{{json (index .Config.Labels "` + brand.Name + `.host")}},"mounts":{{json .Mounts}}}`
+}
+
+func sharingMatches(sharing dockerSharing, h client.Host, resource string) bool {
+	if h.Machine == nil {
+		return false
+	}
+	prefix := brand.Name + "-"
+	return strings.HasPrefix(h.Machine.ID, prefix) && sharing.ID == resource && sharing.Name == "/"+h.Machine.ID && sharing.Label == strings.TrimPrefix(h.Machine.ID, prefix) && sharing.Mounts != nil
 }
 
 // InspectSource reads the ORIGINAL actual engine/resource and complete current
@@ -148,7 +171,7 @@ func InspectSource(ctx context.Context, h client.Host, environment []string) (_ 
 		return nil, err
 	}
 	var sharing dockerSharing
-	if json.Unmarshal(raw, &sharing) != nil || sharing.ID != source.ResourceID || sharing.Name != "/"+h.Machine.ID || sharing.Label != h.Name || sharing.Mounts == nil {
+	if json.Unmarshal(raw, &sharing) != nil || !sharingMatches(sharing, h, source.ResourceID) {
 		return nil, sourceUnknown()
 	}
 	inspection := &provider.SourceInspection{Config: pin}
@@ -196,7 +219,7 @@ func (l dockerSourceLocator) receipt(ctx context.Context, h client.Host, id stri
 		return nil, err
 	}
 	var sharing dockerSharing
-	if json.Unmarshal(raw, &sharing) != nil || sharing.ID != source.ResourceID || sharing.Name != "/"+h.Machine.ID || sharing.Label != h.Name || sharing.Mounts == nil {
+	if json.Unmarshal(raw, &sharing) != nil || !sharingMatches(sharing, h, source.ResourceID) {
 		return nil, sourceUnknown()
 	}
 	pin, err := provider.PinSourceConfig(source.Config)

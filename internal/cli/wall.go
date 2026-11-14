@@ -2,7 +2,6 @@ package cli
 
 import (
 	"context"
-	"sort"
 
 	"github.com/spf13/cobra"
 
@@ -11,15 +10,16 @@ import (
 
 // Resolve the actual wall before creating H5's immutable local intent and
 // before a password manager can fetch a refused secret.
-func prepareWallStart(cmd *cobra.Command, c *client.Conn, h client.Host, a client.NewArgs, untrusted bool, secrets, expose []string) (client.NewArgs, error) {
+func prepareWallStart(cmd *cobra.Command, c *client.Conn, h client.Host, a client.NewArgs, untrusted bool, secrets, expose []string) (client.NewArgs, *client.GrantRequest, error) {
 	var err error
 	a, err = c.PrepareNewPolicy(cmd.Context(), a)
 	if err != nil {
-		return a, err
+		return a, nil, err
 	}
+	intent := a.Wall
 	a, err = c.ResolveNewWall(cmd.Context(), a)
 	if err != nil {
-		return a, err
+		return a, nil, err
 	}
 	if message := client.PolicyWallNote(h, a.Layers); message != "" {
 		note(cmd, "wall_floor_raised", message)
@@ -30,12 +30,27 @@ func prepareWallStart(cmd *cobra.Command, c *client.Conn, h client.Host, a clien
 	}
 	request, err := client.NewWallGrantRequest(untrusted, a.SSHAgent, level, expose)
 	if err != nil {
-		return a, err
+		return a, nil, err
 	}
 	cmd.SetContext(client.WithGrantRequest(cmd.Context(), request))
+	var vm *client.VMNeedPlanV1
+	if a.Wall == "microvm" {
+		vm, err = c.PrepareNewVM(cmd.Context(), a, intent)
+		if err != nil {
+			return a, request, err
+		}
+	}
+	if vm != nil {
+		a, err = c.PrepareNewSecrets(cmd.Context(), a, vm)
+	} else {
+		a, err = c.PrepareNewSecrets(cmd.Context(), a)
+	}
+	if err != nil {
+		return a, request, err
+	}
 	layerSecrets, err := client.PolicySecretNames(a.Layers)
 	if err != nil {
-		return a, err
+		return a, request, err
 	}
 	effective := h
 	effective.Secrets = nil
@@ -51,7 +66,7 @@ func prepareWallStart(cmd *cobra.Command, c *client.Conn, h client.Host, a clien
 		a.Secrets, err = client.FetchHostSecrets(ctx, h, names, secretTerminal(cmd))
 		return err
 	})
-	return a, err
+	return a, request, err
 }
 
 // These notes end before attach starts. The attach pump owns all attached
@@ -63,15 +78,17 @@ func wallStartNotes(cmd *cobra.Command, s client.Session) {
 	if s.Wall.DowngradedFrom != "" {
 		note(cmd, "wall_downgraded", s.Wall.Level+", below the floor "+s.Wall.DowngradedFrom+".")
 	}
-	if s.Wall.Level == "none" {
+	if s.Wall.Level == "none" && s.Wall.DowngradedFrom == "" {
 		return
 	}
 	if s.Wall.Level == "process" {
 		note(cmd, "wall_process", "process shares your account.")
 	}
-	names := append([]string(nil), s.Secrets...)
-	sort.Strings(names)
-	for _, name := range names {
+	presentation := client.PresentSessionSecrets(s)
+	for _, name := range presentation.Exposed {
 		note(cmd, "secret_exposed", "exposed: "+client.CleanLine(name))
+	}
+	for _, name := range presentation.Unknown {
+		note(cmd, "secret_delivery_unknown", "secret delivery unknown: "+client.CleanLine(name))
 	}
 }

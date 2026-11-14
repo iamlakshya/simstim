@@ -15,6 +15,7 @@ import (
 type export struct {
 	manager                   *Manager
 	owner, primary, id, token string
+	repo                      string
 	full                      bool
 	epoch                     uint64
 	readTicket                *readReservation
@@ -102,6 +103,15 @@ func (e *export) capture(caller context.Context, full bool, admitted <-chan stru
 		}
 		e.mu.Lock()
 		e.source = source
+		e.mu.Unlock()
+		if selector, ok := source.(RepositorySource); ok {
+			if err := selector.SelectRepository(e.repo); err != nil {
+				return api.PullExport{}, err
+			}
+		} else if e.repo != "" {
+			return api.PullExport{}, exportError("pull_repo", "the retained source cannot select a protected repository")
+		}
+		e.mu.Lock()
 		e.seeds = append([]string(nil), source.SeedHeads()...)
 		freshCap := source.PullMax()
 		e.limit = min(e.limit, freshCap)
@@ -180,7 +190,7 @@ func sameHeads(a, b []proto.BundleRef) bool {
 func (e *export) description(empty bool) api.PullExport {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	return api.PullExport{ID: e.id, Primary: e.primary, Token: e.token, Full: e.full, Empty: empty, Size: e.size, SeedHeads: append([]string(nil), e.seeds...), DefaultRef: e.defaultRef}
+	return api.PullExport{Repo: e.repo, ID: e.id, Primary: e.primary, Token: e.token, Full: e.full, Empty: empty, Size: e.size, SeedHeads: append([]string(nil), e.seeds...), DefaultRef: e.defaultRef}
 }
 
 type readReservation struct {

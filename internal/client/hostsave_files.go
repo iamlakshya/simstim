@@ -9,6 +9,9 @@ func changeHostFiles(ctx context.Context, c HostChange, hosts []Host, withPin bo
 	if err != nil {
 		return nil, hostFileHooks{}, err
 	}
+	if err := checkHostMachineSourceChange(ctx, c); err != nil {
+		return nil, hostFileHooks{}, err
+	}
 	sourceGeneration, generation, err := prepareHostForgetGeneration(ctx, c, hosts)
 	if err != nil {
 		return nil, hostFileHooks{}, err
@@ -71,6 +74,7 @@ func changeHostFiles(ctx context.Context, c HostChange, hosts []Host, withPin bo
 			priorCommit()
 		}
 		recordHostForgetWitness(ctx, c, generation)
+		recordHostMachineSourceBirthCommit(ctx, c)
 	}
 	return out, hooks, nil
 }

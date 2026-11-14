@@ -34,6 +34,11 @@ var gitWindowsMetadata = []string{"USERPROFILE", "HOMEDRIVE", "HOMEPATH", "TMP",
 var gitHelperRuntimeMetadata = []string{"GORACE", "GOMAXPROCS", "GOMEMLIMIT", "GOGC", "GOTRACEBACK", "GODEBUG"}
 var gitDirtyMetadata = []string{"GIT_INDEX_FILE", "GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL"}
 
+// The SAME source guard reads these local locator keys while acquiring its
+// actual managed/private inventory. Check their namespace before that read;
+// they are never inherited by the helper or final Git as a result.
+var gitSourceLocatorKeys = []string{"XDG_CONFIG_HOME", "XDG_STATE_HOME", "XDG_RUNTIME_DIR"}
+
 func gitMetadataKey(key string, windows bool) string {
 	if windows {
 		return strings.ToUpper(key)
@@ -51,6 +56,7 @@ func gitMetadataLookupKeys(windows bool) []string {
 
 func gitMetadataCheckKeys(windows bool) []string {
 	keys := append(gitMetadataLookupKeys(windows), "LC_ALL", "GIT_ALLOW_PROTOCOL", "GIT_NO_LAZY_FETCH", "GIT_TERMINAL_PROMPT", "GIT_CONFIG_GLOBAL", "GIT_CONFIG_NOSYSTEM")
+	keys = append(keys, gitSourceLocatorKeys...)
 	keys = append(keys, gitDirtyMetadata...)
 	for index := range keys {
 		keys[index] = gitMetadataKey(keys[index], windows)

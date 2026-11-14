@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -91,5 +92,24 @@ func TestPolicyRuleCompletionKeepsDistinctTargetsWithOneStableID(t *testing.T) {
 	want := []string{id + "\t" + targets[0], id + "\t" + targets[1]}
 	if !slices.Equal(got, want) || directive != cobra.ShellCompDirectiveNoFileComp || stderr != "" {
 		t.Fatalf("distinct colliding rules disappeared: %q, %d, %q, want %q", got, directive, stderr, want)
+	}
+}
+
+func TestRuleCompletionCollapsesLeaseRowsWithoutHidingCollidingTargets(t *testing.T) {
+	const id = "gcqjkxl"
+	first := api.Rule{Layer: api.LayerSession, Door: api.DoorNet, Allow: true, Target: "session-collision-7608.example", Once: true}
+	first.ID = api.RuleID(first)
+	lease := first
+	lease.Once = false
+	lease.Until = time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC)
+	other := api.Rule{Layer: api.LayerSession, Door: api.DoorNet, Allow: true, Target: "session-collision-21481.example"}
+	other.ID = api.RuleID(other)
+	if first.ID != id || api.RuleID(lease) != id || other.ID != id {
+		t.Fatal("the actual ID/lease/collision contract changed")
+	}
+	want := []string{id + "\t" + other.Target, id + "\t" + first.Target}
+	slices.Sort(want)
+	if got := completionRuleRows([]api.Rule{first, lease, first, other}, id); !slices.Equal(got, want) {
+		t.Fatalf("lease rows duplicated an ID or hid a colliding target: %q, want %q", got, want)
 	}
 }

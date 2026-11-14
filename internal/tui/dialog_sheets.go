@@ -103,7 +103,7 @@ func (d *details) view(m *Model) string {
 		return ""
 	}
 	field := func(k, v string) string { return sFaint.Render(fit(k, labelW)) + trunc(v, cw-labelW) }
-	body := []string{""}
+	body := []string{"", field("Floor", hostWallFloor(h)), field("Level now", hostWallNow(h))}
 	// The lines come from the client, as `host show` prints them
 	// (cli-spec 11.2).
 	for _, line := range (client.HostDetails{Host: h.host, Tier: h.tier, IDChanged: h.idChanged, Info: h.info, Sessions: len(h.sessions)}).Lines() {

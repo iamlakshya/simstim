@@ -36,11 +36,18 @@ func LoginShell() string {
 // LoginEnv runs the user's login shell once and returns its environment, the way
 // VS Code Remote does. This finds agents installed with nvm, mise, bun or npm.
 func LoginEnv(timeout time.Duration) ([]string, error) {
+	return LoginEnvContext(context.Background(), timeout)
+}
+
+func LoginEnvContext(owner context.Context, timeout time.Duration) ([]string, error) {
+	if err := owner.Err(); err != nil {
+		return nil, err
+	}
 	shell := LoginShell()
 	var nonce [8]byte
 	_, _ = rand.Read(nonce[:])
 	marker := "__" + strings.ToUpper(brand.Name) + "_ENV_" + hex.EncodeToString(nonce[:]) + "__"
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	ctx, cancel := context.WithTimeout(owner, timeout)
 	defer cancel()
 	args := []string{"-l", "-i", "-c", "printf '%s' " + marker + "; env -0"}
 	if strings.HasSuffix(shell, "/sh") || strings.HasSuffix(shell, "/dash") {
@@ -57,10 +64,16 @@ func LoginEnv(timeout time.Duration) ([]string, error) {
 	_ = cmd.Run()
 	i := bytes.Index(out.Bytes(), []byte(marker))
 	if i < 0 {
+		if owner.Err() != nil {
+			return nil, owner.Err()
+		}
 		if ctx.Err() != nil {
 			return nil, errors.New("the login shell took too long to start")
 		}
 		return nil, errors.New("could not read the login shell's environment")
+	}
+	if owner.Err() != nil {
+		return nil, owner.Err()
 	}
 	var env []string
 	for _, kv := range bytes.Split(out.Bytes()[i+len(marker):], []byte{0}) {

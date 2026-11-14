@@ -4,10 +4,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"os"
-	"path/filepath"
-	"runtime"
-	"strings"
 )
 
 type boundedMetadataOutput struct {
@@ -31,26 +27,9 @@ func ExecMetadata(ctx context.Context, environment []string, limit int, install,
 	if environment == nil || limit <= 0 || name != "docker" && name != "limactl" {
 		return nil, fmt.Errorf("provider metadata operation has no closed environment")
 	}
-	path := ""
-	for _, entry := range environment {
-		if key, value, ok := strings.Cut(entry, "="); ok && key == "PATH" {
-			path = value
-		}
+	resolved, err := resolveProviderEnvironment(name, environment)
+	if err != nil {
+		return nil, err
 	}
-	leaf := name
-	if runtime.GOOS == "windows" {
-		leaf += ".exe"
-	}
-	for _, directory := range filepath.SplitList(path) {
-		if directory == "" || !filepath.IsAbs(directory) {
-			continue
-		}
-		candidate := filepath.Join(directory, leaf)
-		info, err := os.Stat(candidate)
-		if err != nil || !info.Mode().IsRegular() || runtime.GOOS != "windows" && info.Mode().Perm()&0111 == 0 {
-			continue
-		}
-		return execInput(ctx, nil, environment, limit, install, candidate, args...)
-	}
-	return nil, fmt.Errorf("the fixed provider metadata tool is unavailable")
+	return execInput(ctx, nil, environment, limit, install, resolved, args...)
 }

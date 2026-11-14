@@ -99,6 +99,12 @@ func New(a NewArgs) (_ *SessionInfo, err error) {
 	// leaves nothing behind: no folder, no worktree and no branch.
 	inline := a.Inline && known && len(a.Argv) == 0 && agent.Inline.Has()
 	env, term := sessionEnv(a, id, login, agent, inline)
+	if a.Environment != nil {
+		env, term, err = resolvedUnwalledEnv(a, id, login, agent, inline, initialSecretState(a.SecretDelivery), secrets)
+		if err != nil {
+			return nil, err
+		}
+	}
 	argv, hooks, sessionUUID := agentArgv(argv, a, agent, known, inline)
 	if _, err := lookPath(argv[0], envValue(env, "PATH")); err != nil {
 		return nil, UserError("agent_missing", argv[0]+" is not installed on this host", "Install it on the host, then try again.")

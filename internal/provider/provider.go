@@ -80,22 +80,26 @@ func ExecEnvironment(ctx context.Context, environment []string, install, name st
 }
 
 func execInput(ctx context.Context, stdin io.Reader, environment []string, limit int, install string, name string, args ...string) ([]byte, error) {
-	if _, err := exec.LookPath(name); err != nil {
-		return nil, &client.UserError{Msg: name + " is not installed, or not on your PATH", Hint: install, Code: "tool_missing"}
-	}
-	cmd := exec.CommandContext(ctx, name, args...)
-	cmd.Stdin = stdin
-	if environment != nil {
-		cmd.Env = environment
+	if environment == nil {
+		if _, err := exec.LookPath(name); err != nil {
+			return nil, &client.UserError{Msg: name + " is not installed, or not on your PATH", Hint: install, Code: "tool_missing"}
+		}
 	}
 	var out, errb bytes.Buffer
-	cmd.Stdout, cmd.Stderr = &out, &errb
+	var stdout, stderr io.Writer = &out, &errb
 	var boundedOut, boundedError *boundedMetadataOutput
 	if limit > 0 {
 		boundedOut, boundedError = &boundedMetadataOutput{limit: limit}, &boundedMetadataOutput{limit: 64 << 10}
-		cmd.Stdout, cmd.Stderr = boundedOut, boundedError
+		stdout, stderr = boundedOut, boundedError
 	}
-	runErr := cmd.Run()
+	var runErr error
+	if environment != nil {
+		runErr = runProviderEnvironment(ctx, name, args, environment, stdin, stdout, stderr)
+	} else {
+		cmd := exec.CommandContext(ctx, name, args...)
+		cmd.Stdin, cmd.Stdout, cmd.Stderr = stdin, stdout, stderr
+		runErr = cmd.Run()
+	}
 	if limit > 0 {
 		out, errb = boundedOut.Buffer, boundedError.Buffer
 		if boundedOut.exceeded || boundedError.exceeded {

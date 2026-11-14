@@ -46,7 +46,7 @@ func (p *PullRPC) Prepare(req proto.Request) (run func(context.Context) (any, er
 	switch req.Op {
 	case api.OpPullBegin:
 		var args api.PullBeginArgs
-		if json.Unmarshal(req.Args, &args) != nil {
+		if !api.ExactJSONFields(req.Args, args) || json.Unmarshal(req.Args, &args) != nil {
 			return nil, bad()
 		}
 		primary, err := SandboxPrimaryID(args.ID)

@@ -394,6 +394,9 @@ type Ended struct {
 
 // UploadBegin starts an upload of a file into a session's paste folder.
 type UploadBegin struct {
+	// Path and Replace are used only after file-transfer-v1 negotiation.
+	Path    string `json:"path,omitempty"`
+	Replace bool   `json:"replace,omitempty"`
 	ID      uint64 `json:"id"`
 	Session string `json:"session"`
 	Name    string `json:"name"`

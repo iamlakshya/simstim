@@ -88,6 +88,9 @@ func (c *Conn) NewSession(ctx context.Context, a NewArgs) (*Session, error) {
 		return nil, err
 	}
 	ctx, _ = ensureGrantRequest(ctx)
+	if newPlanOf(ctx) == nil && (a.SecretDelivery != nil || len(a.VMNeedV1) != 0) {
+		return nil, grantOperationError()
+	}
 	if err := checkWallGrantArgs(ctx, a.Wall, a.SSHAgent); err != nil {
 		return nil, err
 	}
@@ -123,6 +126,15 @@ func (c *Conn) NewSession(ctx context.Context, a NewArgs) (*Session, error) {
 	a.HostLabel = c.Host.Name
 	a, tier, err := c.prepareNewGrants(ctx, a)
 	if err != nil {
+		return nil, err
+	}
+	if err := c.CheckPolicyLayerFeature(a.Layers); err != nil {
+		return nil, err
+	}
+	if err := c.CheckHTTPMethodFeature(StartPolicyLayers(a)); err != nil {
+		return nil, err
+	}
+	if err := c.checkLayerGrants(ctx, tier, StartPolicyLayers(a)); err != nil {
 		return nil, err
 	}
 	plan := newPlanOf(ctx)
@@ -256,13 +268,6 @@ func (c *Conn) RenameSession(ctx context.Context, id, name string) error {
 		return err
 	}
 	return c.Call(ctx, "rename", map[string]string{"id": id, "name": name}, nil)
-}
-
-// Doctor asks the host to check itself.
-func (c *Conn) Doctor(ctx context.Context) (HostInfo, error) {
-	var d HostInfo
-	err := c.Call(ctx, "doctor", nil, &d)
-	return d, err
 }
 
 // Peek returns the newest output of a session, for a preview.

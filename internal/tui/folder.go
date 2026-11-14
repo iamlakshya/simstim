@@ -21,7 +21,7 @@ func (f *makeFolderAsk) key(m *Model, k tea.KeyPressMsg) tea.Cmd {
 		r.args.MakeFolder = true
 		return m.startAgain(r)
 	case "n", "esc", "q":
-		m.cancelStart(f.startReq)
+		return m.cancelStart(f.startReq)
 	}
 	return nil
 }

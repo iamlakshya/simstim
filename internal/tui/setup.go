@@ -29,8 +29,7 @@ func (s *setupAsk) key(m *Model, k tea.KeyPressMsg) tea.Cmd {
 	case "n":
 		run = false
 	case "esc", "q":
-		m.cancelStart(s.startReq)
-		return nil
+		return m.cancelStart(s.startReq)
 	default:
 		return nil
 	}
@@ -126,7 +125,7 @@ func (s *setupSkipAsk) key(m *Model, k tea.KeyPressMsg) tea.Cmd {
 		r.args.Setup = api.SetupSkip
 		return m.startAgain(r)
 	case "n", "esc", "q":
-		m.cancelStart(s.startReq)
+		return m.cancelStart(s.startReq)
 	}
 	return nil
 }

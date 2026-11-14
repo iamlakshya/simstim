@@ -77,6 +77,14 @@ func UpdateHosts(ctx context.Context, c HostChange) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	if c.Was != nil {
+		previous := cloneObservationHost(*c.Was)
+		c.Was = &previous
+	}
+	if c.Now != nil {
+		next := cloneObservationHost(*c.Now)
+		c.Now = &next
+	}
 	name := c.name()
 	if name == "" {
 		return errNoEntry
@@ -190,6 +198,7 @@ func SameEntry(a, b Host) bool { return reflect.DeepEqual(entryOf(a), entryOf(b)
 
 // entryOf is h as SameEntry compares it.
 func entryOf(h Host) Host {
+	h.machineSourceBirth = nil // Ephemeral capability is checked separately, never saved-entry data.
 	if len(h.Labels) == 0 {
 		h.Labels = nil
 	}

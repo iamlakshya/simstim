@@ -62,7 +62,7 @@ func (e *Engine) evaluate(req Request, p *Permit, mode evalMode) Decision {
 	}
 	for _, layer := range e.layers {
 		allow, denied := e.choose(layer.rules, p, mode, func(r compiledRule) bool {
-			return matchesRuleMethod(r, method) && e.matchesLocked(r, host, addr, isIP, req.Port, path, at)
+			return (!req.withoutModelTools || !r.allow || len(r.tools) == 0) && matchesRuleMethod(r, method) && e.matchesLocked(r, host, addr, isIP, req.Port, path, at)
 		})
 		if denied != nil {
 			match := denied.ref

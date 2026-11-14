@@ -232,6 +232,10 @@ func CleanHostInfo(i HostInfo) HostInfo {
 	i.AgentVersions = cleanMap(i.AgentVersions, CleanLine)
 	i.Checks = CleanChecks(i.Checks)
 	i.AgentChecks = CleanAgentChecks(i.AgentChecks)
+	if i.Sandbox != nil {
+		probe := CleanCapProbe(*i.Sandbox)
+		i.Sandbox = &probe
+	}
 	return i
 }
 

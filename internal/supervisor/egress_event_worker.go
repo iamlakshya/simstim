@@ -54,6 +54,7 @@ func (c *egressCtl) runEvents(ctx context.Context) {
 		audits, fault := c.events.takeAudits()
 		for _, entry := range audits {
 			c.s.audit.writeNet(entry.entry)
+			c.s.raiseModelBlocked(entry.entry)
 			audited = entry.seq
 		}
 		if fault && !reported {

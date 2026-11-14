@@ -20,6 +20,7 @@ type commander interface {
 	Signal(os.Signal) error
 	Pid() int
 	ExitCode() int
+	PhysicalExitV1() bool
 }
 
 var _ commander = (*Cmd)(nil)

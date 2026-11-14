@@ -100,6 +100,7 @@ func RegisterProvider(name string, open func(Host) (Lifecycle, error)) {
 
 // OpenMachine returns the lifecycle of the machine behind h.
 func OpenMachine(h Host) (Lifecycle, error) {
+	freezeHostMachineSourceObservers()
 	if h.Machine == nil {
 		return nil, &UserError{Msg: h.Name + " was not made by `host create`", Hint: brand.Name + " host rm " + h.Name + " (forgets a host you added)", Code: "not_created", Kind: KindUsage}
 	}
@@ -241,8 +242,9 @@ func NewSSH(ctx context.Context, h Host, interactive bool) *SSH {
 // route is how to reach a host: its transport, and the lifecycle of its
 // machine when a provider made it.
 type route struct {
-	t  Transport
-	lc Lifecycle
+	agentOnly bool // only the owned explicit agent transport constructor
+	t         Transport
+	lc        Lifecycle
 }
 
 func routeTo(ctx context.Context, h Host, interactive bool) (route, error) {

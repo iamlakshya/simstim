@@ -10,16 +10,21 @@ func (m *Model) close(ctx context.Context) {
 	if m.cancelTier != nil {
 		m.cancelTier()
 	}
+	if p := policyOwner(m.modal); p != nil {
+		p.stop()
+	}
+	if d, ok := questionOwner(m.modal).(*newSession); ok {
+		d.stopFolders()
+	}
+	if d, ok := questionOwner(m.modal).(*downgradeSheet); ok {
+		d.closed = true
+	}
+	if m.prompt != nil {
+		m.prompt.stopFolders()
+	}
 	m.pauseBg()
 	_ = m.drainHostSaves(ctx, true)
-	active := m.modal
-	for {
-		q, ok := active.(*hostTierQuestion)
-		if !ok {
-			break
-		}
-		active = q.previous
-	}
+	active := questionOwner(m.modal)
 	if w, ok := active.(*wizard); ok {
 		w.end(m)
 		w.conn = nil
@@ -30,6 +35,7 @@ func (m *Model) close(ctx context.Context) {
 	m.stopBundle()
 	m.remember()()
 	m.conns.closeAll()
+	m.grantOwners.releaseAll()
 	m.conns.finishCleanup()
 }
 

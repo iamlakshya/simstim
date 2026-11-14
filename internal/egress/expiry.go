@@ -25,11 +25,15 @@ func (e *Engine) leaseKeys() map[onceKey]struct{} {
 }
 
 func (s *Server) expire(eng *Engine, at time.Time) {
-	var due []RuleExpiryEvent
+	type expiry struct {
+		event RuleExpiryEvent
+		key   onceKey
+	}
+	var due []expiry
 	for _, layer := range eng.layers {
 		for _, r := range layer.rules {
 			if !r.until.IsZero() && !at.Before(r.until) {
-				due = append(due, RuleExpiryEvent{ID: r.id, GrantID: r.grantID, Until: r.until})
+				due = append(due, expiry{event: RuleExpiryEvent{ID: r.id, GrantID: r.grantID, Until: r.until}, key: r.instanceKey()})
 			}
 		}
 	}
@@ -37,8 +41,8 @@ func (s *Server) expire(eng *Engine, at time.Time) {
 		return
 	}
 	s.flows.revalidate(eng, s.dialer)
-	for _, ended := range due {
-		key := onceKey{id: ended.ID, grantID: ended.GrantID, until: canonicalInstant(ended.Until)}
+	for _, item := range due {
+		ended, key := item.event, item.key
 		s.mu.Lock()
 		if s.engine != eng {
 			s.mu.Unlock()

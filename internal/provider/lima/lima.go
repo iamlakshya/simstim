@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"runtime"
@@ -130,7 +131,22 @@ func gib(bytes int64) string {
 
 // Create makes and starts the VM, and returns the host that reaches it
 // through Lima's ssh.config.
-func (Provider) Create(ctx context.Context, req provider.Request) (client.Host, error) {
+func (Provider) Create(ctx context.Context, req provider.Request) (_ client.Host, returned error) {
+	scope, err := client.HostCreationSourceScopeContext(ctx)
+	if err != nil {
+		return client.Host{}, err
+	}
+	if scope.Request() != provider.CreationSourceRequest("lima", req) {
+		return client.Host{}, plainSourceUnknown()
+	}
+	frame := &limaSourceBirth{scope: scope, request: scope.Request()}
+	ctx = context.WithValue(ctx, limaSourceBirthKey{}, frame)
+	frame.ctx = ctx
+	defer func() {
+		if frame.inspection != nil {
+			returned = errors.Join(returned, frame.inspection.Close())
+		}
+	}()
 	out := req.Out
 	if out == nil {
 		out = io.Discard
@@ -153,6 +169,7 @@ func (Provider) Create(ctx context.Context, req provider.Request) (client.Host, 
 	if _, err := provider.Exec(ctx, install, "limactl", args...); err != nil {
 		return client.Host{}, err
 	}
+	frame.created = true
 	if goos == "darwin" {
 		if err := checkClosed(ctx, inst); err != nil {
 			return client.Host{}, err
@@ -176,11 +193,12 @@ func (Provider) Create(ctx context.Context, req provider.Request) (client.Host, 
 		Name: req.Name, SSH: sshAlias(inst), SSHConfig: in.SSHConfigFile,
 		Machine: &client.Machine{Provider: "lima", ID: inst, IdleStop: idle},
 	}
-	source, sourceErr := capturePlainSource(ctx, h, in)
+	source, inspection, sourceErr := capturePlainSource(ctx, h, in)
 	if sourceErr != nil {
 		return client.Host{}, sourceErr
 	}
 	h.Machine.Source = source
+	frame.inspection = inspection
 	// Lima's own SSH config checks no host key. The client pins the new
 	// VM's key now, before its first connection (isolation spec 14.7.1).
 	pin, err := pinHostKey(ctx, h)
@@ -188,7 +206,8 @@ func (Provider) Create(ctx context.Context, req provider.Request) (client.Host, 
 		return client.Host{}, discard(ctx, inst, fmt.Sprintf("could not pin the host key of the new VM %s (%v)", inst, err), "run this again")
 	}
 	fmt.Fprintf(out, "  ✓ %s\n", pin.Line())
-	return h, nil
+	frame.result = freezeBirthHost(h)
+	return client.RecordHostMachineSourceBirthContext(ctx, h)
 }
 
 // pinHostKey pins the host key of a new VM on first use: the client made

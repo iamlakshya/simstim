@@ -138,6 +138,12 @@ func (m *Model) hostSummary(h *hostConn, w int) []seg {
 			base = h.tier.String()
 		}
 	}
+	wall := hostWallFacts(h)
+	if cells(wall+dot+base) <= w {
+		base = wall + dot + base
+	} else if (!h.tier.Valid() || h.tier == client.TierOwn) && cells(wall) <= w {
+		base = wall
+	}
 	out := []seg{{base, sFaint}}
 	if h.idChanged {
 		changed := seg{"host ID changed", sWarning}
@@ -245,5 +251,6 @@ func (m *Model) hostDetail(h *hostConn, cw int) string {
 			parts = append(parts, strings.Join(names, ", "))
 		}
 	}
+	parts = append(parts, hostWallFacts(h))
 	return sFaint.Render(trunc(strings.Join(parts, dot), cw))
 }

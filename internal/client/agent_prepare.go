@@ -66,7 +66,20 @@ func prepareAttachedAgent(ctx context.Context, probe *Conn, session string, inte
 	transport.bindingCollector = collector
 	route := probe.route
 	route.t, route.lc, route.agentOnly = &transport, nil, true
-	conn, err := dial(ctx, probe.Host, route)
+	// Capture the child transport under the original parent Source BEFORE
+	// it can start SSH. A remove/re-add may not refresh this continuation.
+	observed, endObservation, attempt, err := beginHostTransportObservation(ctx, probe.Host)
+	if err != nil {
+		return nil, err
+	}
+	defer endObservation()
+	if err := checkAcceptedHostTransport(probe); err != nil {
+		return nil, err
+	}
+	if attempt.kind != hostTransportSaved || attempt.observation == nil || !sameHostTransportSource(attempt.observation.source, probe.hostTransport.source) {
+		return nil, agentBindingProofError()
+	}
+	conn, err := dialObserved(observed, ctx, probe.Host, route, attempt)
 	if err != nil {
 		return nil, err
 	}
@@ -79,7 +92,7 @@ func prepareAttachedAgent(ctx context.Context, probe *Conn, session string, inte
 	if conn.HostID() != probe.HostID() || conn.HostIDChanged() || !conn.HasFeature(agentbridge.Feature) {
 		return nil, grantIdentityError(probe.Host)
 	}
-	a, err := bindAgentConn(ctx, conn, scope, target, collector, mode)
+	a, err := bindAgentConn(ctx, conn, scope, target, collector, mode, probe)
 	if err != nil {
 		return nil, err
 	}
@@ -87,15 +100,27 @@ func prepareAttachedAgent(ctx context.Context, probe *Conn, session string, inte
 	return a, nil
 }
 
-func bindAgentConn(ctx context.Context, conn *Conn, scope agentbridge.Scope, target string, collector *agentBindingCollector, mode *agentModeResources) (*attachedAgent, error) {
+func bindAgentConn(ctx context.Context, conn *Conn, scope agentbridge.Scope, target string, collector *agentBindingCollector, mode *agentModeResources, parents ...*Conn) (*attachedAgent, error) {
 	if err := mode.checkAgentSettingsMode(ctx); err != nil {
 		return nil, err
 	}
 	if err := scope.Check(); err != nil {
 		return nil, agentChannelError("the agent lease scope is invalid")
 	}
+	if len(parents) > 1 {
+		return nil, agentBindingProofError()
+	}
+	var parent *Conn
+	var parentDone <-chan struct{}
+	if len(parents) == 1 {
+		parent = parents[0]
+		if err := checkAgentParent(parent, conn); err != nil {
+			return nil, err
+		}
+		parentDone = parent.Done()
+	}
 	live, cancel := context.WithCancel(context.WithoutCancel(ctx))
-	a := &attachedAgent{conn: conn, scope: scope, target: target, mode: mode,
+	a := &attachedAgent{conn: conn, parent: parent, scope: scope, target: target, mode: mode,
 		ctx: live, cancel: cancel, turn: make(chan struct{}, 1), slots: make(chan struct{}, agentbridge.MaxStreams),
 		sources: map[net.Conn]struct{}{}, activation: make(chan struct{}), acceptDone: make(chan struct{}), done: make(chan struct{})}
 	a.mux = link.New(agentbridge.NewConn(conn.agentReader, conn.stdin, conn.closeAgentTransport), link.Supervisor, agentbridge.Options())
@@ -108,6 +133,8 @@ func bindAgentConn(ctx context.Context, conn *Conn, scope agentbridge.Scope, tar
 		select {
 		case <-a.mux.Done():
 			a.revoke(agentLinkError(conn, a.mux.Err()))
+		case <-parentDone:
+			a.revoke(ErrClosed)
 		case <-conn.Done():
 			a.revoke(agentLinkError(conn, ErrClosed))
 		case <-rawExited:
@@ -145,6 +172,9 @@ func bindAgentConn(ctx context.Context, conn *Conn, scope agentbridge.Scope, tar
 		if err != nil {
 			return nil, err
 		}
+	}
+	if a.binding != nil {
+		a.binding.parent = parent
 	}
 	a.ownsMode, ready = true, true
 	return a, nil

@@ -181,7 +181,21 @@ func (c *Conn) PrepareNewSecrets(ctx context.Context, a NewArgs, vm ...*VMNeedPl
 		} else if err != nil {
 			return a, err
 		}
-		plan.creation = cloneSandboxPolicy(creation)
+		// Retain the ACTUAL canonical reservation bytes under this SAME OP.
+		// A prospective DTO has no canonical nested raw fields and cannot
+		// later stand in for the exact ACK/abort compare-and-swap snapshot.
+		saved, readErr := LoadSandboxPolicy(owned, c.Host, id)
+		if readErr != nil {
+			return a, readErr
+		}
+		if saved == nil || saved.request != token || saved.HostID != c.HostID() || saved.SessionID != id ||
+			saved.FutureDelivery || saved.FutureLineage || saved.futureDeliveryReceipt || saved.futureInputOperation ||
+			saved.deliveryReceipt != nil || saved.inputOperation != nil ||
+			!reflect.DeepEqual(saved.DeliveryIntent, plan.intent) || !slices.Equal(saved.Secrets, creation.Secrets) ||
+			!bytes.Equal(saved.PolicySources, creation.PolicySources) {
+			return a, sandboxReceiptError()
+		}
+		plan.creation = cloneSandboxPolicy(saved)
 		r.mu.Lock()
 		if r.newSecrets != nil {
 			r.mu.Unlock()

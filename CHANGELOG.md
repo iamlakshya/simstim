@@ -6,6 +6,26 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ### Added
 
+- GitHub repository creation, gists, visibility changes, workflow writes, runner registration and collaborator changes require an explicit network path grant. The existing request permit also checks that grant during policy changes.
+
+- A bundle pull can select one protected repository with --repo. Full-history retries keep that same repository and its seed history.
+
+- `policy allow --tools` grants named model capabilities for one session and exact model host. It takes repeated or comma-separated names. Empty sets and wider layers fail. Dry runs use the same canonical rule identity and helper feature gate as real changes. Shell completion uses the same capability table. Alert event values also come from their canonical event table.
+
+- `policy allow --tools` grants named model capabilities for one session and exact model host. It takes repeated or comma-separated names. Empty sets and wider layers fail. Dry runs use the same canonical rule identity and helper feature gate as real changes.
+
+- Secret badges and start notes use the compact delivery summary. Bound credentials are no longer labelled exposed. Missing or incomplete metadata stays unknown. Displaying a session changes no credential or permission.
+
+- Model API requests check exact paths, tool types, remote content and file uploads before reaching the provider. Session tool grants share the existing network permit and lease ledger. Refusals use provider-shaped HTTP 403 errors or WebSocket policy closes ([model API guards](docs/how-to/model-api-guards.md)).
+
+- Image paste sends sandboxed sessions a guest path through a checked file stream. The default sandbox policy accepts images and PDF files.
+
+- The launcher asks for scoped grants while the original operation stays alive. Yes or no questions default to no. Typed host approval requires the exact name. Cancel, closing the launcher or handing off the terminal stops the wait and cannot approve a later request.
+
+- The launcher opens session policy and its log from the palette. It can allow or revoke a rule and stop a sandbox while keeping its work. Closing a sheet cancels its pending work. Late results cannot replace another sheet or another host connection.
+
+- Firecracker boot configuration and private control use the canonical VM plan, fixed devices and one owned connection. Driver selection keeps the existing boot format and checks each VMM's CPU and version limits.
+
 - Laptop seeds bind repository policy to the exact selected commit. Dirty seeds reuse one private prospective commit through review and transfer. Local Git checks actual managed provider sharing and keeps uncertain native captures until cleanup joins.
 
 - Completion on the real `policy rm` command lists rule IDs and targets from every local config layer. Profile names use the same config schema. Both stay local and quiet, including when another command holds a host lock.
@@ -24,6 +44,8 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 - `host upgrade <host>` installs this client's helper on a host, without the other steps of `host add`. It removes no helper, so a newer client's helper stays ([add a host](docs/how-to/add-a-host.md#update-the-helper)).
 
 ### Changed
+
+- VM process and disk ownership now use one shared implementation. Cloud Hypervisor keeps its existing entry points.
 
 - The launcher checks current local permissions before fetching secrets for a start or resume. A broken config cannot run commands from settings kept for display. One request retains its exact permissions through setup retries.
 
@@ -52,6 +74,18 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ### Fixed
 
+- VM cleanup keeps its original process owner and resource leases after an uncertain wait. It refuses deletion until physical exit is proved and retains earlier cleanup errors.
+
+- Retain jail process ownership after an uncertain wait and require kernel exit readiness before releasing native resources.
+
+- Route sandbox policy requests through the guarded bridge handler, and negotiate method constraints with the running supervisor.
+
+- The docs site pins Astro 7.4.7, which includes the fixes for [dynamic tag injection](https://github.com/withastro/astro/security/advisories/GHSA-mh32-jxcr-mh9f) and [image path checks](https://github.com/withastro/astro/security/advisories/GHSA-r3h5-4585-7x3w).
+- An E2B command's input error keeps its diagnostic text and hint when cancellation arrives as the command finishes. Before, that race could replace the input error with an invalid cancellation message.
+- The fake envd in the E2B tests now keeps buffered output when a command ends or is killed. Before, a signal could discard stdout and diagnostic stderr.
+- The E2B provider's tests no longer hang for minutes when the machine is busy. Their fake of envd now ends every command, and each child it left, when a test ends. If something still runs after 10 s, the test fails and names it.
+- The helper's install in an E2B sandbox no longer stops part way on a slow link or a busy machine. The client queued the whole helper at once, and gave up when it could not send all of it in 10 s. Now it queues at most 1 MiB at a time. During `Close`, it gives up when no `SendInput` or `CloseStdin` call completes for 10 s. A `Write` blocked by the full queue waits for its current `SendInput` call or the install to stop. Each unary input call has a 30 s request limit. With `stdin = "stream"`, `StreamInput` uses the client's own transport unchanged. Progress during the stream is the transport's reads of the request body pipe, and the client gives up when the transport reads nothing from it for 10 s. After the transport has read the body's end, `Close` waits the 10 s stall limit plus about 11 s (about 21 s in all) for `envd` to answer, assuming the far end and the path hold at most 1 MiB plus 64 KiB at 100 KiB/s. A larger buffer makes `Close` give up early, safely, with no end of input and no success. The separate final `CloseStdin` request has its own 30 s limit. It sends the end of the input only after the sandbox has taken all of it. Before, a link that broke could give a command a part of its input as the whole.
+- The client now waits for the kill of a stopped command in an E2B sandbox. Before, it sent the kill in the background, and a client that exited at once could leave the command running. The client also kills a command whose stream broke, or whose start stopped or broke before its process ID arrived. It does the same when it cannot read or send the command's input, or the end of that input. When an install's input could not be sent, the client said nothing, and the install failed only after its 5-minute limit. It now fails at once, says why, and says what to try. A stopped command's error also says why it stopped. That error, and the error of a failed input, now end with the last lines that the command wrote to stderr. The client keeps at most the last 8 KiB for those diagnostics.
 - Process walls retain init ownership after an uncertain wait, preserve session data during runtime cleanup, and reject trailing specification data.
 
 - Keep physical link closure available after logical stream abort, and reject later stream admission or queued frame dispatch.

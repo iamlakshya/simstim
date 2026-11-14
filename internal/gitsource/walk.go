@@ -91,6 +91,9 @@ func (w *sourceWalk) followLink(current *os.Root, part string, st os.FileInfo) e
 	if err != nil {
 		return err
 	}
+	if err := validateSourceSpelling(target); err != nil {
+		return err
+	}
 	again, err := current.Lstat(part)
 	if err != nil || !os.SameFile(st, again) {
 		return sourceError("a source link changed while resolving it", "Try again with a stable source folder.")
@@ -179,6 +182,9 @@ func (w *sourceWalk) step() error {
 func (a sourceAuthority) pinTrustedSource(name string, children bool) (_ *sourcePin, err error) {
 	if !utf8.ValidString(name) {
 		return nil, metadataRefused()
+	}
+	if err := validateSourceSpelling(name); err != nil {
+		return nil, err
 	}
 	roots, err := a.writeRoots()
 	if err != nil {

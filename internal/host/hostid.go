@@ -8,8 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-
-	"github.com/iamlakshya/simstim/internal/paths"
 )
 
 // ValidHostID reports whether id is 32 lower-case hex characters.
@@ -33,19 +31,20 @@ func ValidHostID(id string) bool {
 // runs see one whole ID and never partial bytes. An existing file whose content
 // is not 32 lower-case hex characters is an error, and is never replaced.
 func HostID() (string, error) {
-	dir := paths.StateDir()
-	if err := paths.EnsurePrivateDir(dir); err != nil {
+	placementProcesses.Lock()
+	entry := placementProcesses.entry
+	placementProcesses.Unlock()
+	if entry != nil {
+		return entry.hostID, nil
+	}
+	if err := CheckCaller(); err != nil {
 		return "", err
 	}
-	path := paths.HostID()
-	id, err := readHostID(path)
-	if err == nil {
-		return id, nil
-	}
-	if !errors.Is(err, os.ErrNotExist) {
+	p, err := placementForCall()
+	if err != nil {
 		return "", err
 	}
-	return createHostID(dir, path)
+	return p.hostID, nil
 }
 
 func readHostID(path string) (string, error) {

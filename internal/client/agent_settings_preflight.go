@@ -25,6 +25,13 @@ func (node *agentSchemaNode) preflight(value tomlinspect.ValueCursor, shape *err
 			if err != nil {
 				return err
 			}
+			tools, err := name.EqualFold("tools")
+			if err != nil {
+				return err
+			}
+			if err := configdata.CheckConfigTools(node.typ, tools); err != nil && *shape == nil {
+				*shape = err
+			}
 			index, err := node.field(name)
 			if err != nil {
 				return err

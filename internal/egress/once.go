@@ -1,11 +1,13 @@
 package egress
 
 import (
+	"strings"
 	"sync"
 	"time"
 )
 
 type onceKey struct {
+	tools   string
 	id      string
 	grantID string
 	until   time.Time
@@ -41,7 +43,7 @@ type onceLedger struct {
 func newOnceLedger() *onceLedger { return &onceLedger{slots: map[onceKey]*onceSlot{}} }
 
 func (r compiledRule) instanceKey() onceKey {
-	return onceKey{id: r.id, grantID: r.grantID, until: canonicalInstant(r.until)}
+	return onceKey{id: r.id, grantID: r.grantID, until: canonicalInstant(r.until), tools: strings.Join(r.tools, "\x00")}
 }
 
 // syncPolicy binds a new immutable engine before it is published. Old permits
@@ -56,7 +58,10 @@ func (l *onceLedger) syncPolicy(e *Engine) {
 			return
 		}
 		key := r.instanceKey()
-		slot := l.slots[key]
+		slot := next[key]
+		if slot == nil {
+			slot = l.slots[key]
+		}
 		if slot == nil {
 			slot = &onceSlot{key: key}
 		}
@@ -160,6 +165,8 @@ const (
 	evalReserve
 	evalPrecheck
 	evalRevalidate
+	evalModelPrecheck
+	evalModelReserve
 )
 
 // oncePriority runs under ledger.mu. Denies never use or consume a slot.
@@ -179,7 +186,7 @@ func (e *Engine) oncePriority(r compiledRule, p *Permit, mode evalMode) (int, bo
 	if e.ledger.slots[slot.key] != slot {
 		return 0, false
 	}
-	if mode != evalRevalidate && slot.state == slotAvailable && (p == nil || !p.committed) {
+	if mode != evalRevalidate && slot.state == slotAvailable && (p == nil || !p.committed || mode == evalModelPrecheck || mode == evalModelReserve) {
 		return 2, true
 	}
 	return 0, false
@@ -191,8 +198,11 @@ func (e *Engine) useOnce(r *compiledRule, p *Permit, mode evalMode) {
 	}
 	if mode == evalStandalone {
 		r.slot.state, r.slot.owner = slotConsumed, nil
-	} else if mode == evalReserve && r.slot.state == slotAvailable {
+	} else if (mode == evalReserve || mode == evalModelReserve) && r.slot.state == slotAvailable {
 		r.slot.state, r.slot.owner = slotReserved, p
+		if p.committed {
+			r.slot.state = slotCommitted
+		}
 		p.owned[r.slot] = struct{}{}
 	}
 }

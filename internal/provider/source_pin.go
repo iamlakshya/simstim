@@ -25,43 +25,64 @@ type SourceConfigPin struct {
 // CaptureSourceConfig observes the actual selected directory or its existing
 // parent/absence witness. It creates no configuration directory.
 func CaptureSourceConfig(path string) (client.MachineConfigSource, error) {
-	absolute, err := filepath.Abs(path)
-	if err != nil {
-		return client.MachineConfigSource{}, err
-	}
-	if resolved, resolveErr := filepath.EvalSymlinks(absolute); resolveErr == nil {
-		file, err := pinSourceConfigDirectory(resolved)
-		if err != nil {
-			return client.MachineConfigSource{}, err
-		}
-		identity, err := files.Identity(file)
-		closeErr := file.Close()
-		if err != nil || closeErr != nil {
-			return client.MachineConfigSource{}, errors.Join(err, closeErr)
-		}
-		return client.MachineConfigSource{Role: client.MachineConfigExisting, Path: resolved, ObjectID: identity}, nil
-	} else if !errors.Is(resolveErr, os.ErrNotExist) {
-		return client.MachineConfigSource{}, resolveErr
-	}
-	parent, err := filepath.EvalSymlinks(filepath.Dir(absolute))
-	if err != nil {
-		return client.MachineConfigSource{}, err
-	}
-	file, err := pinSourceConfigDirectory(parent)
-	if err != nil {
-		return client.MachineConfigSource{}, err
-	}
-	identity, err := files.Identity(file)
-	closeErr := file.Close()
-	if err != nil || closeErr != nil {
-		return client.MachineConfigSource{}, errors.Join(err, closeErr)
-	}
-	source := client.MachineConfigSource{Role: client.MachineConfigAbsent, Path: filepath.Join(parent, filepath.Base(absolute)), ParentID: identity}
-	pin, err := PinSourceConfig(source)
+	source, pin, err := CaptureSourceConfigPinned(path)
 	if err != nil {
 		return client.MachineConfigSource{}, err
 	}
 	return source, pin.Close()
+}
+
+// CaptureSourceConfigPinned keeps the actually observed native object alive
+// across capture and the closed creation operation. No original ID is allowed
+// to become reusable before its retained pin has been acquired.
+func CaptureSourceConfigPinned(path string) (_ client.MachineConfigSource, _ *SourceConfigPin, err error) {
+	absolute, err := filepath.Abs(path)
+	if err != nil {
+		return client.MachineConfigSource{}, nil, err
+	}
+	resolved, resolveErr := filepath.EvalSymlinks(absolute)
+	var source client.MachineConfigSource
+	var witnessed string
+	if resolveErr == nil {
+		witnessed = resolved
+		source = client.MachineConfigSource{Role: client.MachineConfigExisting, Path: resolved}
+	} else {
+		if !errors.Is(resolveErr, os.ErrNotExist) {
+			return client.MachineConfigSource{}, nil, resolveErr
+		}
+		parent, err := filepath.EvalSymlinks(filepath.Dir(absolute))
+		if err != nil {
+			return client.MachineConfigSource{}, nil, err
+		}
+		witnessed = parent
+		source = client.MachineConfigSource{Role: client.MachineConfigAbsent, Path: filepath.Join(parent, filepath.Base(absolute))}
+	}
+	file, err := pinSourceConfigDirectory(witnessed)
+	if err != nil {
+		return client.MachineConfigSource{}, nil, err
+	}
+	var retained *SourceConfigPin
+	defer func() {
+		err = errors.Join(err, file.Close())
+		if err != nil && retained != nil {
+			err = errors.Join(err, retained.Close())
+		}
+	}()
+	identity, err := files.Identity(file)
+	if err != nil {
+		return client.MachineConfigSource{}, nil, err
+	}
+	if source.Role == client.MachineConfigExisting {
+		source.ObjectID = identity
+	} else {
+		source.ParentID = identity
+	}
+	pin, err := PinSourceConfig(source)
+	if err != nil {
+		return client.MachineConfigSource{}, nil, err
+	}
+	retained = pin
+	return source, pin, nil
 }
 
 // PinSourceConfig pins the actual existing source or selected absent-path

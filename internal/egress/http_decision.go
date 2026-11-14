@@ -40,7 +40,7 @@ func (e *Engine) requiresHTTPWitness(host string, port int) bool {
 
 func (e *Engine) revalidateFlow(request Request, permit *Permit) Decision {
 	if request.Path != "" {
-		return e.evaluateHTTP(request, permit, evalRevalidate)
+		return e.evaluateModelNetwork(request, permit, evalRevalidate)
 	}
 	return e.Revalidate(request, permit)
 }

@@ -36,25 +36,32 @@ type Cmd struct {
 	pipes       [3]*os.File        // the jail's ends of StdinPipe, StdoutPipe and StderrPipe
 	ends        []*os.File         // the caller's ends of those pipes
 
-	mu        sync.Mutex
-	phase     phase
-	pid       int           // published only after exec.Cmd.Start returns
-	reaped    bool          // the first stage was reaped, so its process group may be gone
-	abort     chan struct{} // closed by Signal during the set-up
-	abortOnce sync.Once
-	done      chan struct{} // closed when the jail was reaped
-	exit      *ExitError
+	mu           sync.Mutex
+	phase        phase
+	pid          int  // published only after exec.Cmd.Start returns
+	reaped       bool // the first stage was reaped, so its process group may be gone
+	pidfd        int  // created with this child, never recovered from pid
+	owned        bool
+	physical     bool // actual POLLIN on this creation pidfd, or no child was started
+	groupUnsafe  bool // a failed wait revoked numeric group signalling
+	lifecycleErr error
+	abort        chan struct{} // closed by Signal during the set-up
+	abortOnce    sync.Once
+	done         chan struct{} // logical completion; never physical-exit evidence
+	doneOnce     sync.Once
+	exit         *ExitError
 }
 
 // phase is how far a Cmd has gone.
 type phase int
 
 const (
-	phaseNew     phase = iota // Start was not called
-	phaseSetup                // the first stage runs, and reads its set-up
-	phaseRunning              // the set-up is in, and Wait was not called
-	phaseWaiting              // Wait was called
-	phaseFailed               // Start failed, and reaped what it started
+	phaseNew       phase = iota // Start was not called
+	phaseSetup                  // the first stage runs, and reads its set-up
+	phaseRunning                // the set-up is in, and Wait was not called
+	phaseWaiting                // Wait was called
+	phaseFailed                 // Start failed, and reaped what it started
+	phaseUncertain              // logical wait failed; exact native child ownership is retained
 )
 
 // Start starts the jail. Its first stage is a new session, and the leader
@@ -73,7 +80,11 @@ func (c *Cmd) Start() error {
 	// Before the jail starts, a failure closes both ends of each pipe.
 	early := func(err error) error {
 		c.closeEnds(true)
-		c.setPhase(phaseFailed)
+		c.mu.Lock()
+		c.phase = phaseFailed
+		c.physical = true
+		c.lifecycleErr = errors.Join(c.lifecycleErr, err)
+		c.mu.Unlock()
 		return err
 	}
 	if err := c.ctx.Err(); err != nil {
@@ -100,11 +111,19 @@ func (c *Cmd) Start() error {
 		return early(failure("cannot make the jail's pipe: "+err.Error(), "Check the open-file limit."))
 	}
 	c.cmd.ExtraFiles = append(append(slices.Clone(files), setupR, statusW), c.pins...)
+	createdFD := -1
+	attr := syscall.SysProcAttr{}
+	if c.cmd.SysProcAttr != nil {
+		attr = *c.cmd.SysProcAttr
+	}
+	attr.PidFD = &createdFD
+	c.cmd.SysProcAttr = &attr
 	err = c.cmd.Start()
 	release() // the child has its own copies, or no child was created
 	if err == nil {
 		c.mu.Lock()
 		c.pid = c.cmd.Process.Pid
+		c.pidfd, c.owned = createdFD, true
 		c.mu.Unlock()
 	}
 	_, _ = setupR.Close(), statusW.Close()
@@ -114,13 +133,30 @@ func (c *Cmd) Start() error {
 		return early(failure("cannot start the jail: "+err.Error(), "Check that this program can start itself again."))
 	}
 	c.status = statusR
+	if createdFD < 0 {
+		c.mu.Lock()
+		c.groupUnsafe = true
+		c.phase = phaseUncertain
+		c.lifecycleErr = errors.New("the kernel returned no creation pidfd for the owned jail child")
+		cause := c.lifecycleErr
+		c.mu.Unlock()
+		setupW.Close()
+		c.closeEnds(true)
+		return stepFailed("cannot retain native jail ownership", "Use a supported kernel with creation pidfds.", cause)
+	}
+	unix.CloseOnExec(createdFD)
 	written := make(chan error, 1)
 	go func() {
-		_, err := setupW.Write(c.setup)
+		n, err := setupW.Write(c.setup)
+		if err == nil && n != len(c.setup) {
+			err = io.ErrShortWrite
+		}
 		written <- errors.Join(err, setupW.Close())
 	}()
+	writePending := true
 	select {
 	case err = <-written:
+		writePending = false
 		if err != nil {
 			err = stepFailed("the jail ended during its set-up", "Read the jail's stderr.", err)
 		}
@@ -136,15 +172,26 @@ func (c *Cmd) Start() error {
 		err = c.toRunning()
 	}
 	if err != nil {
-		c.killGroup()
-		_ = c.cmd.Wait()
-		_ = statusR.Close()
-		c.closeEnds(true)
+		closeErr := setupW.Close()
+		var writeErr error
+		if writePending {
+			writeErr = <-written
+		}
+		killErr := c.killGroup()
 		c.mu.Lock()
-		c.phase, c.reaped = phaseFailed, true
+		c.lifecycleErr = errors.Join(c.lifecycleErr, err, closeErr, writeErr, killErr)
 		c.mu.Unlock()
-		close(c.done)
-		return err
+		if killErr != nil {
+			return c.uncertainWait(killErr)
+		}
+		if waitErr := waitOwnedPIDFD(createdFD, -1); waitErr != nil {
+			return c.uncertainWait(waitErr)
+		}
+		result := c.completeOwnedWait(true)
+		c.mu.Lock()
+		c.phase = phaseFailed
+		c.mu.Unlock()
+		return errors.Join(err, result)
 	}
 	go c.watch()
 	return nil
@@ -197,14 +244,51 @@ func (c *Cmd) watch() {
 	}
 }
 
-// killGroup kills every process of the jail: the first stage leads its
-// process group, and no process of the jail can leave it.
-func (c *Cmd) killGroup() {
+// killGroup targets the original group while the unreaped owned child pins
+// its number. A failed wait revokes group-number signalling permanently;
+// subsequent cleanup uses only the exact creation pidfd. This makes no claim
+// about a descendant that escaped that group or its namespace.
+func (c *Cmd) killGroup() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if !c.reaped && c.cmd.Process != nil {
-		_ = unix.Kill(-c.cmd.Process.Pid, unix.SIGKILL)
+	if !c.reaped && c.owned {
+		err := c.signalOwnedLocked(unix.SIGKILL)
+		if err != nil {
+			c.lifecycleErr = errors.Join(c.lifecycleErr, err)
+			return err
+		}
 	}
+	return nil
+}
+
+// signalOwnedLocked checks current child ownership through the creation
+// descriptor before any group-number signal. This also fences a concurrent
+// watcher against a wait that just lost ownership. Caller holds mu.
+func (c *Cmd) signalOwnedLocked(sig syscall.Signal) error {
+	var checkErr error
+	if sig == unix.SIGKILL && !c.groupUnsafe {
+		var info unix.Siginfo
+		for {
+			checkErr = ownedWaitid(unix.P_PIDFD, c.pidfd, &info, unix.WEXITED|unix.WNOWAIT|unix.WNOHANG, nil)
+			if errors.Is(checkErr, unix.EINTR) {
+				continue
+			}
+			break
+		}
+		if checkErr != nil {
+			c.groupUnsafe = true
+		}
+	}
+	var signalErr error
+	if sig == unix.SIGKILL && !c.groupUnsafe {
+		signalErr = ownedGroupSignal(-c.pid, sig)
+	} else {
+		signalErr = ownedPidfdSignal(c.pidfd, sig, nil, 0)
+	}
+	if errors.Is(signalErr, unix.ESRCH) {
+		signalErr = nil
+	}
+	return errors.Join(checkErr, signalErr)
 }
 
 // Signal sends sig to the jail, whose init passes it on to the command.
@@ -220,13 +304,11 @@ func (c *Cmd) Signal(sig os.Signal) error {
 	case c.phase == phaseSetup:
 		c.abortOnce.Do(func() { close(c.abort) })
 		return nil
-	case (c.phase == phaseRunning || c.phase == phaseWaiting) && !c.reaped:
-		pid := c.pid
-		if s == unix.SIGKILL {
-			pid = -pid // init cannot forward SIGKILL to its children
-		}
-		if err := unix.Kill(pid, s); err != nil {
-			return failure("cannot signal the jail: "+err.Error(), "Check that the jail still runs.")
+	case (c.phase == phaseRunning || c.phase == phaseWaiting || c.phase == phaseUncertain) && !c.reaped:
+		err := c.signalOwnedLocked(s)
+		if err != nil {
+			c.lifecycleErr = errors.Join(c.lifecycleErr, err)
+			return stepFailed("cannot signal the jail", "Check that the jail still runs.", err)
 		}
 		return nil
 	default:
@@ -240,71 +322,6 @@ func (c *Cmd) Pid() int {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.pid
-}
-
-// Wait waits for the jail to end, kills any process of it that is left,
-// and returns how its command ended: nil, an *ExitError, or ctx's error
-// when ctx ended the jail. It waits on no copy of stdio: there is none.
-// It closes the caller's ends of the pipes, as exec.Cmd's Wait does.
-func (c *Cmd) Wait() error {
-	c.mu.Lock()
-	switch c.phase {
-	case phaseRunning:
-		c.phase = phaseWaiting
-	case phaseWaiting:
-		c.mu.Unlock()
-		return failure("Wait was already called on this jail", "Call Wait once for each Start.")
-	case phaseFailed:
-		c.mu.Unlock()
-		return failure("the jail did not start", "Read the error that Start returned.")
-	default:
-		c.mu.Unlock()
-		return failure("the jail was not started", "Call Start before Wait.")
-	}
-	c.mu.Unlock()
-	pid := c.cmd.Process.Pid
-	var info unix.Siginfo
-	for {
-		err := unix.Waitid(unix.P_PID, pid, &info, unix.WEXITED|unix.WNOWAIT, nil)
-		if !errors.Is(err, unix.EINTR) {
-			break
-		}
-	}
-	// The first stage is a zombie, so its process group still exists.
-	c.killGroup()
-	c.mu.Lock()
-	c.reaped = true
-	c.mu.Unlock()
-	werr := c.cmd.Wait()
-	b, _ := io.ReadAll(c.status)
-	_ = c.status.Close()
-	exit := parseStatus(string(b))
-	var ee *exec.ExitError
-	if exit == nil && errors.As(werr, &ee) {
-		exit = exitOf(ee.ProcessState)
-	}
-	c.finish(exit, func() { c.closeEnds(true) })
-	switch {
-	case werr != nil && !errors.As(werr, &ee):
-		return stepFailed("cannot wait for the jail", "Report this as a bug.", werr)
-	case exit != nil && exit.Code == 0:
-		return nil
-	case c.ctx.Err() != nil && parseStatus(string(b)) == nil:
-		return c.ctx.Err()
-	case exit != nil:
-		return exit
-	default:
-		return nil
-	}
-}
-
-// finish publishes the result before releasing pipes and notifying waiters.
-func (c *Cmd) finish(exit *ExitError, release func()) {
-	c.mu.Lock()
-	c.exit = exit
-	c.mu.Unlock()
-	release()
-	close(c.done)
 }
 
 // Run starts the jail and waits for it.
@@ -345,7 +362,11 @@ func (c *Cmd) CombinedOutput() ([]byte, error) {
 	if err == nil {
 		err = c.Wait()
 	}
-	// A Start that failed killed the jail, so the read ends too.
+	// On uncertain physical completion the child may retain its stream.
+	// Close only our reader, so returning the owned failure cannot hang on EOF.
+	if err != nil && !c.PhysicalExitV1() {
+		_ = r.Close()
+	}
 	return <-out, err
 }
 

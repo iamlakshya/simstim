@@ -17,6 +17,7 @@ import (
 
 // sessionOps are the bridge's requests that act on a session.
 var sessionOps = map[string]bool{
+	"policy.ls": true, "policy.add": true, "policy.rm": true, "policy.log": true,
 	api.SandboxReviewContextOp: true, "inputs.begin": true, inputtransfer.Describe: true, "sandbox.snapshot": true, "exec": true, "spawn": true,
 	"delete": true, "resume": true, "restore": true, "send": true, "peek": true, "rename": true, "kill": true,
 }
@@ -28,6 +29,14 @@ func (b *bridge) refuseInside(f proto.Frame) bool {
 	switch f.Type {
 	case proto.TAttach:
 		_ = b.w.WriteJSON(proto.TError, errCallerInside)
+		return true
+	case proto.TUploadBegin:
+		var begin proto.UploadBegin
+		if json.Unmarshal(f.Payload, &begin) == nil {
+			b.reply(begin.ID, nil, errCallerInside)
+		}
+		return true
+	case proto.TUploadChunk, proto.TUploadEnd:
 		return true
 	case proto.TRequest:
 		var req proto.Request

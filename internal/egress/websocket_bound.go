@@ -10,6 +10,7 @@ import (
 	"io"
 	"sync"
 	"sync/atomic"
+	"unicode/utf8"
 )
 
 // A filter receives one decoded logical payload, not an individual wire frame.
@@ -127,8 +128,15 @@ func (s *boundWebSocketState) fail(err error) {
 	payload := make([]byte, 2, 125)
 	binary.BigEndian.PutUint16(payload, failure.code)
 	reason := failure.Error()
+	var model modelWebSocketRefusal
+	if errors.As(err, &model) {
+		reason = model.line
+	}
 	if len(reason) > 123 {
 		reason = reason[:123]
+		for !utf8.ValidString(reason) {
+			reason = reason[:len(reason)-1]
+		}
 	}
 	payload = append(payload, reason...)
 	wire, _ := encodeWebSocketFrame(webSocketClose, true, false, payload, nil)
@@ -307,6 +315,10 @@ func (d *webSocketDirection) message(opcode byte, message *webSocketMessageReade
 	}
 	filtered, err := d.filter(d.owner.ctx, opcode, input)
 	if err != nil || filtered == nil {
+		var model modelWebSocketRefusal
+		if errors.As(err, &model) {
+			return model
+		}
 		return webSocketFailure{1008}
 	}
 	closeFiltered := sync.OnceValue(filtered.Close)

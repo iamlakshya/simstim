@@ -19,24 +19,30 @@ func plainSourceUnknown() error {
 	return &client.UserError{Code: "source_inventory", Msg: "the original Lima plain instance or applicable sharing configuration cannot be checked", Hint: "Use the original tool-created plain instance and repair its local configuration before running local Git.", Kind: client.KindRefused}
 }
 
-func capturePlainSource(ctx context.Context, h client.Host, in *instance) (*client.MachineSourceProvenance, error) {
+func capturePlainSource(ctx context.Context, h client.Host, in *instance) (_ *client.MachineSourceProvenance, inspection *provider.SourceInspection, returned error) {
 	if in == nil || in.Config == nil || in.Config.Plain == nil || !*in.Config.Plain || in.Dir == "" || in.Name != h.Machine.ID {
-		return nil, plainSourceUnknown()
+		return nil, nil, plainSourceUnknown()
 	}
-	config, err := provider.CaptureSourceConfig(in.Dir)
+	config, pin, err := provider.CaptureSourceConfigPinned(in.Dir)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
+	defer func() {
+		returned = errors.Join(returned, pin.Close())
+		if returned != nil && inspection != nil {
+			returned = errors.Join(returned, inspection.Close())
+		}
+	}()
 	source := &client.MachineSourceProvenance{Version: client.MachineSourceVersion, Kind: "lima-plain", ResourceID: in.Name, Config: config}
 	if _, err := client.NormaliseMachineSource("lima", source); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	h.Machine.Source = source
-	inspection, err := InspectSource(ctx, h, nil)
+	inspection, err = InspectSource(ctx, h, nil)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return source, inspection.Close()
+	return source, inspection, nil
 }
 
 // InspectSource uses actual closed-create plain provenance plus the SAME

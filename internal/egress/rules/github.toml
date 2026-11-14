@@ -1,0 +1,51 @@
+# Protected REST operations from isolation spec 7.2. These barriers grant no
+# host or path. The ordinary policy engine must find an explicit path allow.
+
+[[barriers]]
+hosts = ["api.github.com", "github.com"]
+methods = ["POST"]
+path = "/user/repos"
+kind = "grant"
+source = "https://docs.github.com/en/rest/repos/repos#create-a-repository-for-the-authenticated-user"
+
+[[barriers]]
+hosts = ["api.github.com", "github.com"]
+methods = ["POST"]
+path = "/orgs/*/repos"
+kind = "grant"
+source = "https://docs.github.com/en/rest/repos/repos#create-an-organization-repository"
+
+[[barriers]]
+hosts = ["api.github.com", "github.com"]
+methods = ["POST"]
+path = "/gists"
+kind = "grant"
+source = "https://docs.github.com/en/rest/gists/gists#create-a-gist"
+
+[[barriers]]
+hosts = ["api.github.com", "github.com"]
+methods = ["PATCH"]
+path = "/repos/*/*"
+kind = "visibility"
+source = "https://docs.github.com/en/rest/repos/repos#update-a-repository"
+
+[[barriers]]
+hosts = ["api.github.com", "github.com"]
+methods = ["PUT", "DELETE"]
+path = "/repos/*/*/contents/.github/**"
+kind = "grant"
+source = "https://docs.github.com/en/rest/repos/contents#create-or-update-file-contents"
+
+[[barriers]]
+hosts = ["api.github.com", "github.com"]
+methods = ["POST"]
+path = "/repos/*/*/actions/runners/registration-token"
+kind = "grant"
+source = "https://docs.github.com/en/rest/actions/self-hosted-runners#create-a-registration-token-for-a-repository"
+
+[[barriers]]
+hosts = ["api.github.com", "github.com"]
+methods = ["POST", "PUT", "PATCH", "DELETE"]
+path = "/repos/*/*/collaborators/**"
+kind = "grant"
+source = "https://docs.github.com/en/rest/collaborators/collaborators"

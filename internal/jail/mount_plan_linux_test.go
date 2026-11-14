@@ -324,16 +324,16 @@ func TestMountGraphAllowsAlreadySatisfiedCompatibleAliasProviders(t *testing.T) 
 	if got := g.ready(rank); !slices.Equal(got, []int{1, 2}) {
 		t.Errorf("compatible aliases cannot progress in either order: %v", got)
 	}
-	g.steps[1].object.Ino ^= 1
+	g.steps[1].object.ino ^= 1
 	if g.providerImagePresent(fd, dev, 1, paths, rank) {
 		t.Error("a different provider inode was treated as the visible directory image")
 	}
-	g.steps[1].object.Ino ^= 1
-	g.steps[1].object.Dev ^= 1
+	g.steps[1].object.ino ^= 1
+	g.steps[1].object.dev ^= 1
 	if g.providerImagePresent(fd, dev, 1, paths, rank) {
 		t.Error("a different provider device was treated as the visible directory image")
 	}
-	g.steps[1].object.Dev ^= 1
+	g.steps[1].object.dev ^= 1
 	g.appliedNames[0] = "/old-work"
 	if g.providerImagePresent(fd, dev, 1, paths, rank) {
 		t.Error("a changed completed walk was treated as the same directory image")
@@ -464,11 +464,11 @@ func TestFinalMountAuditRejectsWrongObjectsAndMissingReadOnly(t *testing.T) {
 	b := bind{Path: "/file", Kind: kindFile, Dev: st.Dev, Ino: st.Ino}
 	trace := mountTrace{path: "/file", prefixes: []string{"/"}, entries: []string{"/file"}}
 	g := graphForTest([]bind{b}, nil)
-	g.steps[0].object.Ino ^= 1
+	g.steps[0].object.ino ^= 1
 	if err := g.verify(fd, dev, []mountTrace{trace}); err == nil || !strings.Contains(err.Error(), "changed or was hidden") || hintOf(err) == "" {
 		t.Errorf("wrong final object = %v, want an identity error with a hint", err)
 	}
-	g.steps[0].object.Ino = st.Ino
+	g.steps[0].object.ino = st.Ino
 	trace.path = "/other"
 	if err := g.verify(fd, dev, []mountTrace{trace}); err == nil || !strings.Contains(err.Error(), "changed or was hidden") || hintOf(err) == "" {
 		t.Errorf("wrong final target = %v, want a target error with a hint", err)

@@ -67,3 +67,5 @@ Pass `--no-descriptions` to any [`simstim completion`](../reference/cli/completi
 Completion preserves local secret names in full. Its 4 MiB file limit applies to the open file. Pipes and devices give no values and never wait for input.
 
 `policy rm` completes rule IDs from local all-session, host, repository and profile layers. Each ID shows its target. Profile completion uses the same config schema. Neither runs a command or connects to a host.
+
+`policy allow --tools` completes capability names from the same fixed table that validates an allowance. Comma-separated lists keep their earlier selections and do not offer them twice.

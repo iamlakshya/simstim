@@ -29,7 +29,11 @@ func RunGitFetch(ctx context.Context, h Host, root, branch, into string, force b
 	}
 	sshArgs = append(sshArgs, NoPortForwards()...)
 	sshArgs = append(sshArgs, "-E", logFile.path)
-	config, err := json.Marshal(gitSSHConfig{Version: 1, Name: h.Name, Args: sshArgs, Target: h.SSH, Root: root})
+	entryDigest, err := gitSSHEntryDigest(h)
+	if err != nil {
+		return nil, err
+	}
+	config, err := json.Marshal(gitSSHConfig{Version: 2, Name: h.Name, Args: sshArgs, Target: h.SSH, Root: root, EntryDigest: entryDigest})
 	if err != nil {
 		return nil, fmt.Errorf("encode the Git SSH configuration: %w", err)
 	}
@@ -67,6 +71,9 @@ func RunGitFetch(ctx context.Context, h Host, root, branch, into string, force b
 		return output, nil
 	}
 	status, ok := readGitSSHStatus(filepath.Join(logFile.dir, "status.json"))
+	if ok && status.LocalError != nil {
+		return output, status.LocalError
+	}
 	if !ok || status.Stopped || !status.Exited {
 		return output, fmt.Errorf("fetch the branch: %w", runErr)
 	}

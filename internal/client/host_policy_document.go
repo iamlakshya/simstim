@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"slices"
 	"sort"
-
-	"github.com/BurntSushi/toml"
 )
 
 // The typed encoder, selected-generation forget, legacy initialisation and
@@ -51,7 +49,7 @@ func writeHostPolicyDocumentContext(ctx context.Context, expected Host, next []H
 	}
 	document := bytes.Clone(encoded)
 	var parsed hostsFile
-	if _, err := toml.Decode(string(document), &parsed); err != nil {
+	if _, err := decodeConfig(string(document), &parsed); err != nil {
 		return tomlError(hostsPath(), string(document), err)
 	}
 	if !sameHostDocumentRows(parsed.Hosts, frozen) {

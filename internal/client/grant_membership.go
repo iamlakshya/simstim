@@ -45,6 +45,7 @@ func cloneGrantHost(h Host) Host {
 	}
 	if h.Machine != nil {
 		v := *h.Machine
+		v.Source = CloneMachineSource(h.Machine.Source)
 		h.Machine = &v
 	}
 	if h.pool != nil {

@@ -59,6 +59,14 @@ Most of the host helper runs in the unit tests, on the machine that runs them, w
 - **Process observers inspect owned children only.** Holder lifetime tests record the actual child at launch. Native birth information distinguishes that child from a reused PID. They do not scan the process table or read another process's arguments. Fixture service tools stay available until the test host has stopped its sessions.
 - **Races in holders count.** The race detector writes a holder's report to a file, and the test fails.
 
+The E2B provider's tests use fakes of E2B's API and of envd, the daemon in each sandbox. The fake envd runs each command on this machine, under a wrapper: the test binary, started again by `TestMain`. The wrapper leads a process group of its own and stays until the test ends. Then it kills its group: the command, and every child that the command left in the group. The fake never signals a process by its number. A test parses the package's Go files and fails on the forms of such a signal that it knows. These are the kill calls of `syscall` and `unix` under any import name, `os.FindProcess`, an `os.Process` made from a literal, and `kill`, `pkill` or `killall` in a command line. The wrapper's kill of its own group is the only one that passes. The test cannot see a kill that a program builds while it runs. The fake's answers follow envd's: a SIGKILL ends the command's stream, and a write to a command that has ended fails with `internal`. When a test ends, the fake also closes every connection and ends every handler. If that takes more than 10 s, the test fails and names what still runs. A stuck command then cannot hang the package until its timeout.
+
+After SIGKILL, the fake keeps buffered stdout and stderr before ending the command's stream. Its readers drain only bytes ready now. Each stream keeps at most 1 MiB from that drain. A child that keeps writing cannot hold the drain open.
+
+Cancellation tests also cover a command that has ended before its input reader fails. Cancellation during error selection must keep the input error, its hint and any stderr.
+
+Command error tests also split more than 8 KiB of stderr across different event boundaries. `Run` keeps the final diagnostic in its own fixed byte ring. `Start` keeps the existing head of stderr and does not allocate that ring. Tests check the final three lines, a multibyte character at the ring boundary, the retained size and concurrent reads.
+
 Some parts need Linux: ports and idle stop read `/proc`, and memory caps need systemd. Their tests read a fake `/proc` instead (`procRoot`). The memory cap's tests use a fake `/proc/meminfo`, cgroup tree (`cgroupRoot`) and `systemctl`. Tests that need the shadow terminal skip when it is not built. Its Go side is also tested with a fake child, a shell script that echoes every frame.
 
 ## Host keys against a real sshd

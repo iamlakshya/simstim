@@ -32,6 +32,8 @@ type originRequest struct {
 	body     io.Closer
 	progress *httpBodyProgress
 	delivery *httpBodyProgress
+	model    *modelRequest   // immutable snapshots; publication uses mu
+	service  *serviceRequest // same ownership for a service body/path decision
 	http2    bool
 	writerMu sync.Mutex // serialises writer use with retirement before handler return
 	writer   *http.ResponseController
@@ -83,7 +85,7 @@ func (r *originRequest) track() bool {
 
 func (r *originRequest) allowed(eng *Engine, dialer *Dialer) bool {
 	r.mu.Lock()
-	closed, reserved, addr := r.closed, r.reserved, r.addr
+	closed, reserved, addr, model, service := r.closed, r.reserved, r.addr, r.model, r.service
 	r.mu.Unlock()
 	if closed {
 		return false
@@ -91,8 +93,14 @@ func (r *originRequest) allowed(eng *Engine, dialer *Dialer) bool {
 	if r.tunnel != nil && r.tunnel.ctx.Err() != nil {
 		return false
 	}
+	if model != nil && model.refusal(eng, r.permit, evalRevalidate) != "" {
+		return false
+	}
+	if service != nil && !service.allowed(eng, r.permit) {
+		return false
+	}
 	if !reserved {
-		return eng.evaluateHTTP(r.request, r.permit, evalPrecheck).Allow
+		return eng.evaluateModelNetwork(r.request, r.permit, evalPrecheck).Allow
 	}
 	return flowAllowed(eng, dialer, activeFlow{request: r.request, addr: addr, permit: r.permit})
 }
