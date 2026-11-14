@@ -298,6 +298,7 @@ The agent owns the whole terminal: every row and every column. There is no borde
 - **Size:** the agent's PTY is the terminal's size, and follows every resize.
 - **Window title:** the agent's own. simstim saves the title before attaching and puts it back on detach.
 - **Detach:** Ctrl+\ goes back to the launcher, on the same session, and the rows fade back in. Press it twice quickly to send it to the agent.
+- **Handoff:** the launcher cancels and joins its background requests before attaching. On return, it applies completed host removals before refreshing the lists and clears a cancelled rename. A failed reader restart after a shell, an editor or key creation exits the launcher and restores the terminal. While the launcher prepares a handoff, queued keys, clicks, scrolling and pastes cannot replace its target. Interrupted setup checks can be tried again after the launcher returns. Completed host creations stay saved.
 - **Lost connection** is the only thing the client draws on the screen:
   - At once, the title shows `⧗ reconnecting · atlas-dev/s4`, and an OSC 9;4 progress mark appears.
   - After 3 s, one faint line is drawn on the bottom row: `simstim · connection lost · reconnecting · keys are not sent · ctrl+\ to leave`.
@@ -306,7 +307,7 @@ The agent owns the whole terminal: every row and every column. There is no borde
 
 ### 2.10 Add a host
 
-`a`, from any screen: a sheet with one step per screen, the step count at the right of its rule. Esc goes back one step.
+`a`, from any screen: a sheet with one step per screen, the step count at the right of its rule. Esc goes back one step. A reply to a closed setup step cannot advance a later setup. A check that times out shows its error and can be tried again.
 
 1. **Where.** A target from `~/.ssh/config` (↑↓ pick, and typing filters), a name, and an optional extra SSH config file.
 2. **Test.** Each check shows the spinner, then `✓` or `✕` with the time it took. A failure shows the error and its next step.
@@ -373,6 +374,8 @@ Enter on the first-run screen, or `s` from any screen: a sheet that asks where a
 
 2. **A host in the SSH config** opens the wizard's first step, with the hosts listed. Esc there comes back.
 3. **Lima, Docker or E2B** asks for a name, then makes the machine. The spinner shows the provider's last line of progress. Esc stops it, and a half-made Lima VM or container is deleted. The wizard then installs the helper without its consent screen, since making the host was the user's yes, and turns on idle stop for a VM.
+   If creation completed before the stop, the host stays saved and appears in the list without further preparation. The notice gives the command to continue setup.
+
 4. **A server I will rent** has one screen for each step, with the step count at the right of the rule:
    1. **An SSH key.** The key it found, or how to make one. `k` runs `ssh-keygen` in the terminal.
    2. **A server.** What to rent, and the command that prints the key to paste. Then its address.
@@ -553,14 +556,14 @@ The launcher is the home, and every action also has a command, for scripts and t
 | --- | --- |
 | `simstim` | Opens the launcher |
 | `simstim setup [--host h \| --create lima\|docker\|e2b] [--name n] [--agents a,b] [--yes] [--no-login]` | The guided setup: where agents run, the host, the agent checklist, the installs and the logins, then the first session's command |
-| `simstim host add <name> [target] [--ssh-config f] [--provider-script s --wake] [--yes]` | Connects a host: probe, consent, install, setup, doctor; in a terminal, the agent checklist when an agent is missing |
-| `simstim host ls`, `test`, `doctor`, `rm` | Host management |
-| `simstim host restore <name> [--all]` | Starts again the sessions that a host restart stopped (or, with `--all`, a crash) |
-| `simstim host start\|stop\|status <name>` | Runs the host's provider script |
-| `simstim new <host> [--agent claude] [--dir ~/src/app [--mkdir]] [--name x] [--worktree [--base ref]] [--memory-max 4G] [--detach] [-- cmd…]` | Starts a session, and attaches unless `--detach` |
+| `simstim host add <name> [target] [--ssh-config f] [--provider-script s --wake] [--yes]` | Connects a host: probe, consent, install, setup, doctor; with input on, the agent checklist when an agent is missing |
+| `simstim host ls`, `test`, `doctor`, `rm` | Host management. `host ls`, `test` and `doctor` take `--json` |
+| `simstim host restore <name> [--all] [--json]` | Starts again the sessions that a host restart stopped (or, with `--all`, a crash) |
+| `simstim host start\|stop\|status <name>` | Runs the host's provider script. `status` takes `--json` |
+| `simstim new <host> [--agent claude] [--dir ~/src/app [--mkdir]] [--name x] [--worktree [--base ref]] [--memory-max 4G] [--detach [--json]] [-- cmd…]` | Starts a session, and attaches unless `--detach` |
 | `simstim ls [--host h] [--json]` | Lists sessions, with their state and where the state came from, and why an agent ended: `errored (out of memory)` |
-| `simstim attach <host>/<session>`, `attach -` | Attaches directly; `-` is the last session. Good for a Ghostty keybinding. To a session whose agent has ended, it says why and what to try, as at the end of an attach. |
-| `simstim resume <host>/<session> [--memory-max 4G] [--secret NAME] [--detach]` | Starts an ended agent again in its session, with its resume command, and attaches unless `--detach`. Without `--memory-max`, the cap is the one the session asked for. |
+| `simstim attach [<host>/<session> \| -]` | Attaches directly; `-` is the last session. Good for a Ghostty keybinding. Without a session, and with input on, it opens the picker: an inline list of sessions, from the session cache, with a filter. To a session whose agent has ended, it says why and what to try, as at the end of an attach. |
+| `simstim resume <host>/<session> [--memory-max 4G] [--secret NAME] [--detach [--json]]` | Starts an ended agent again in its session, with its resume command, and attaches unless `--detach`. Without `--memory-max`, the cap is the one the session asked for. |
 | `simstim flip [<host>/<session>]` | A quick switch: the sessions of every host in one list, then attach |
 | `simstim send <host>/<session> <text> [--no-enter]` | Types text into a session without attaching |
 | `simstim rename <host>/<session> <name>`, `kill <host>/<session>` | Renames; stops and removes (keeping a worktree that has work) |
@@ -574,7 +577,8 @@ The launcher is the home, and every action also has a command, for scripts and t
 | `simstim debug save <host>/<session>` | Saves the last seconds of the session's flight recorder on the host |
 | `simstim debug profile <host>/<session> cpu\|heap\|goroutine [--for 30s]` | Writes a profile of the session's holder on the host. `--for` is for `cpu` only |
 | `simstim debug bundle [<host> \| <host>/<session>] [--ssh]` | Writes one archive of the debug files in the current folder, with private values replaced. Nothing is uploaded |
-| `simstim version`, `completion zsh\|bash\|fish` | Housekeeping |
+| `simstim version [--json]`, `completion zsh\|bash\|fish` | Housekeeping |
+| `simstim --no-input <command>`, `simstim --no-color <command>` | Turn questions or colour off for any command. `SIMSTIM_NO_INPUT` and `NO_COLOR` do the same. With input off, a question that needs an answer fails with exit code 4, and names the flag that answers it ([CLI spec, section 6](cli-spec.md#6-prompts-pickers-and-input-c4)) |
 
 **Exit codes** follow [the CLI spec, section 5](cli-spec.md#5-exit-codes-c2):
 

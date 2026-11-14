@@ -12,11 +12,20 @@ simstim doctor [flags]
 
 Checks this computer: ssh, the config files and the secrets' commands. With `--fix` it offers to fix what it can: SSH configs it generated for hosts you removed, and ControlMaster sockets whose master died. Each fix is shown before it runs. `host doctor <name>` checks a host.
 
+## Examples
+
+```sh
+simstim doctor
+simstim doctor --fix
+simstim doctor --json
+```
+
 ## Flags
 
 | Flag | What it does |
 | --- | --- |
 | `--fix` | offer to fix the problems found, one by one |
+| `--json` | print JSON for scripts, and ask nothing (see docs/how-to/scripting.md) |
 | `-y`, `--yes` | with `--fix`, apply every fix without asking |
 
 ## Flags from the parent command
@@ -25,6 +34,8 @@ Checks this computer: ssh, the config files and the secrets' commands. With `--f
 | --- | --- |
 | `--debug[=<categories>]` | turn on the debug mode, with every category, or with the categories listed: attach, net, memory, launcher, runtime. A list binds only in the = form, such as `--debug=net` |
 | `--debug-file <file>` | write the client's debug records to this file. On its own, it turns on every category (SIMSTIM_DEBUG_FILE does the same) |
+| `--no-color` | print no colour (NO_COLOR does the same) |
+| `--no-input` | ask nothing: a question that needs an answer fails with exit code 4, and names the flag that answers it (SIMSTIM_NO_INPUT=1 does the same) |
 
 ## Commands
 

@@ -33,7 +33,7 @@ func TestResumeCommand(t *testing.T) {
 	failsWithHint(t, `"100M" is below the smallest cap, 256M`, "size of 256M or more", "resume", "box/"+short, "--memory-max", "100M")
 
 	agentEnded(t, short)
-	out := ok(t, "resume", "box/short", "--detach", "--memory-max", "512M")
+	out := okSaid(t, "resume", "box/short", "--detach", "--memory-max", "512M")
 	if want := "Resumed box/" + short + " (short, shell): started its own command again.\n"; out != want {
 		t.Fatalf("resume printed %q, want %q", out, want)
 	}
@@ -62,7 +62,7 @@ func TestResumeWithAnOldHelper(t *testing.T) {
 // of the shell comes back as a login shell.
 func TestResumeAttaches(t *testing.T) {
 	newTestHost(t)
-	m := startedRE.FindStringSubmatch(ok(t, "new", "box", "--detach", "--name", "again"))
+	m := startedRE.FindStringSubmatch(okSaid(t, "new", "box", "--detach", "--name", "again"))
 	if m == nil {
 		t.Fatal("new started no session")
 	}

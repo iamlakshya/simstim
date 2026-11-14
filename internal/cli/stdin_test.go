@@ -10,12 +10,14 @@ import (
 )
 
 // stdinAllowed lists the functions, outside answer.go, that hand os.Stdin
-// to code that reads it only through answer. Each has its reason.
+// to code that reads it only through answer, or through keyread, the one
+// reader of the terminal that answer reads through too. Each has its
+// reason.
 var stdinAllowed = map[string]string{
-	"newGuide":     "the guide reads g.in only through readLine, which reads through answer",
-	"startSession": "askSetup and askMakeFolder read through question, which reads through answer",
-	"doctorCmd":    "offerFixes reads its answers through question",
-	"fixHost":      "offerFixes reads its answers through question",
+	"newGuide": "the guide reads g.in only through its prompter, whose questions read through answer",
+	"prompts":  "the prompter reads p.in only through readLine, which reads through answer",
+	"pickSession": "the picker reads os.Stdin only through keyread.For: the terminal's one reader, which answer shares, " +
+		"so the picker and the questions never make a second reader, which on Windows would drop what waits in the console",
 }
 
 // lineReads are the calls that read a line or a buffer of their own. Only
@@ -30,7 +32,7 @@ var lineReads = map[string]bool{
 // (docs/contributing/cli-spec.md 5.1, rule 7), so that every question ends
 // at a cancel. Outside answer.go, os.Stdin may only be asked whether it is
 // a terminal (isTerminal, Fd), be a child process's stdin, be opened
-// through inputOf, or be handed on by a function of stdinAllowed. No file
+// through inputOf, checked for an existing stuck reader, or be handed on by a function of stdinAllowed. No file
 // but answer.go makes a reader of lines or calls ReadString, ReadLine,
 // ReadRune or ReadByte. The check reads the source: it cannot follow a
 // reader that a function of stdinAllowed passes on, which is why each
@@ -70,8 +72,9 @@ func b() { _ = bufio.NewReader(os.Stdin) }
 func c(in io.Reader) { _, _ = bufio.NewReader(in).ReadString('\n') }
 func d() { var s string; fmt.Scanln(&s) }
 func e() { use(os.Stdin) }
-func f() { _ = isTerminal(os.Stdin); _ = os.Stdin.Fd(); cmd.Stdin = os.Stdin; inputOf(os.Stdin) }
+func f() { _ = isTerminal(os.Stdin); _ = os.Stdin.Fd(); cmd.Stdin = os.Stdin; inputOf(os.Stdin); keyread.CheckStuck(os.Stdin) }
 func newGuide() { use(os.Stdin) }
+func keyTester() { os.Stdin.Read(nil) }
 `
 	fset := token.NewFileSet()
 	f, err := parser.ParseFile(fset, "x.go", src, 0)
@@ -79,7 +82,7 @@ func newGuide() { use(os.Stdin) }
 		t.Fatal(err)
 	}
 	got := strings.Join(stdinReads(fset, f), "\n")
-	for _, line := range []string{"x.go:3:", "x.go:4:", "x.go:5:", "x.go:6:", "x.go:7:"} {
+	for _, line := range []string{"x.go:3:", "x.go:4:", "x.go:5:", "x.go:6:", "x.go:7:", "x.go:10:"} {
 		if !strings.Contains(got, line) {
 			t.Errorf("no problem at %s in:\n%s", line, got)
 		}
@@ -153,7 +156,8 @@ func stdinUseIsSafe(stack []ast.Node) bool {
 		return p.Sel.Name == "Fd"
 	case *ast.CallExpr:
 		name := callName(p)
-		return name == "isTerminal" || name == "inputOf"
+		// CheckStuck inspects file identity and registry state. It does not read.
+		return name == "isTerminal" || name == "inputOf" || name == "keyread.CheckStuck"
 	case *ast.AssignStmt:
 		for i, r := range p.Rhs {
 			if isStdin(r) && i < len(p.Lhs) {

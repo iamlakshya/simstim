@@ -27,7 +27,7 @@ simstim host add my-vps dev@203.0.113.10
 | `--provider-script <string>` | a script that starts and stops the host (see examples/providers) |
 | `--ssh-config <string>` | an extra SSH config file to include |
 | `--wake` | start the host through its provider script when it does not answer |
-| `-y`, `--yes` | install the helper without asking |
+| `-y`, `--yes` | install the helper without asking, and offer no agents to install |
 
 ## Flags from the parent command
 
@@ -35,5 +35,7 @@ simstim host add my-vps dev@203.0.113.10
 | --- | --- |
 | `--debug[=<categories>]` | turn on the debug mode, with every category, or with the categories listed: attach, net, memory, launcher, runtime. A list binds only in the = form, such as `--debug=net` |
 | `--debug-file <file>` | write the client's debug records to this file. On its own, it turns on every category (SIMSTIM_DEBUG_FILE does the same) |
+| `--no-color` | print no colour (NO_COLOR does the same) |
+| `--no-input` | ask nothing: a question that needs an answer fails with exit code 4, and names the flag that answers it (SIMSTIM_NO_INPUT=1 does the same) |
 
 Part of [`host`](host.md): add, create, list, test and remove hosts.

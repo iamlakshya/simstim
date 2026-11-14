@@ -2,45 +2,42 @@ package cli
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
-	"os"
 	"time"
+
+	"github.com/spf13/cobra"
 
 	"github.com/iamlakshya/simstim/internal/api"
 	"github.com/iamlakshya/simstim/internal/client"
 )
 
-// startSession starts a session, and asks on this terminal what the host
-// needs to know first: whether a missing folder may be made, and whether a
-// repository's setup script may run on h. Each answer starts it again. It
-// asks only when stdin and stdout are both terminals, so that a person sees
-// the question. Otherwise a missing folder stays an error (--mkdir answers
-// it), and a setup script with no answer, or one that changed after the
-// user's yes, is skipped this time, with a note.
-func startSession(ctx context.Context, conn *client.Conn, h client.Host, a client.NewArgs) (*client.Session, error) {
+// startSession asks through the command's input policy while preserving the
+// content-bound setup answers. A changed script asks again. With input off,
+// a missing folder needs --mkdir and an untrusted script is skipped.
+func startSession(cmd *cobra.Command, conn *client.Conn, h client.Host, a client.NewArgs) (*client.Session, error) {
 	var answers client.SetupAnswers
+	warnings := stderrFor(jsonOn(cmd), "setup_answers")
 	if a.Setup == "" {
 		answers = client.LoadSetupAnswers(h.Name)
-		printWarning(os.Stderr, answers.Warning)
+		printWarning(warnings, answers.Warning)
 		answers.Apply(&a)
 	}
-	interactive := isTerminal(os.Stdin) && isTerminal(os.Stdout)
+	p := prompts(cmd)
 	for {
-		cctx, cancel := context.WithTimeout(ctx, 60*time.Second)
+		cctx, cancel := context.WithTimeout(cmd.Context(), 60*time.Second)
 		s, err := conn.NewSession(cctx, a)
 		cancel()
 		if q, ok := client.FolderQuestionOf(err); ok && !a.MakeFolder {
-			if !interactive {
+			yes, err := askMakeFolder(p, h.Name, q)
+			if err != nil {
 				return nil, err
 			}
-			yes, aerr := askMakeFolder(ctx, os.Stdin, os.Stdout, h.Name, q)
-			if aerr != nil {
-				return nil, aerr
-			}
 			if !yes {
-				return nil, answeredNo(err)
+				return nil, p.cancel()
+			}
+			if stopped(p.ctx) {
+				return nil, errInterrupted
 			}
 			a.MakeFolder = true
 			continue
@@ -51,56 +48,42 @@ func startSession(ctx context.Context, conn *client.Conn, h client.Host, a clien
 		}
 		past := answers.Past(q)
 		if q.Kept != "" {
-			fmt.Fprintf(os.Stderr, "On %s: %s\n", h.Name, client.CleanPath(q.Kept))
+			note(cmd, "worktree_kept", fmt.Sprintf("On %s: %s", h.Name, client.CleanPath(q.Kept)))
 		}
-		if !interactive {
-			fmt.Fprintln(os.Stderr, skipNote(h.Name, q, past))
+		if !p.on {
+			note(cmd, "setup_skipped", skipNote(h.Name, q, past))
 			a.Setup = api.SetupSkip
 			continue
 		}
-		run, err := askSetup(ctx, os.Stdin, os.Stdout, h.Name, q, past)
+		run, err := askSetup(p, h.Name, q, past)
 		if err != nil {
-			// A signal is no answer: nothing is kept.
 			return nil, err
 		}
-		if stopped(ctx) {
-			// A signal that came with the answer cancels it too.
+		if stopped(p.ctx) {
 			return nil, errInterrupted
 		}
-		if err := rememberAnswer(os.Stderr, h.Name, q, run); err != nil {
+		if err := rememberAnswer(p.ctx, warnings, h.Name, q, run); err != nil {
 			return nil, err
 		}
-		// If the script changes again before the next try, the question
-		// says that it changed after the user trusted it.
 		a, answers = client.AnswerSetup(a, q, run), answers.Answered(q, run)
 	}
 }
 
-// rememberAnswer keeps the user's answer to q on host. A warning about the
-// answers file, such as one that another program broke while the question
-// was open, goes to w. A failure to keep the answer is its error.
-func rememberAnswer(w io.Writer, host string, q client.SetupQuestion, run bool) error {
-	warn, err := client.RememberSetup(host, q.Repo, run, q.Hash)
+// rememberAnswer keeps the hash that the user answered for, and reports a
+// recovered answers file through the caller's human or JSON warning writer.
+// Its owned context also ends at a signal, including one during a lock wait.
+func rememberAnswer(ctx context.Context, w io.Writer, host string, q client.SetupQuestion, run bool) error {
+	sctx, cancel := stopping(ctx)
+	defer cancel()
+	warn, err := client.RememberSetupContext(sctx, host, q.Repo, run, q.Hash)
 	printWarning(w, warn)
 	return err
 }
 
-// printWarning writes a warning about the answers file, if there is one.
 func printWarning(w io.Writer, warn *client.UserError) {
 	if warn != nil {
-		fmt.Fprintf(w, "Warning: %s\nTry: %s\n", warn.Msg, warn.Hint)
+		fmt.Fprintf(w, "Warning: %s\nTry: %s\n", client.CleanLine(warn.Msg), client.CleanLine(warn.Hint))
 	}
-}
-
-// answeredNo is the error of a question that the user answered no: a
-// cancel, with the code cancelled, and the words, the hint and the data of
-// the question's own error.
-func answeredNo(err error) error {
-	var ue *client.UserError
-	if !errors.As(err, &ue) {
-		return err
-	}
-	return &client.UserError{Msg: ue.Msg, Hint: ue.Hint, Data: ue.Data, Code: "cancelled", Kind: client.KindCancelled}
 }
 
 func setupValue(run bool) string {
@@ -110,10 +93,6 @@ func setupValue(run bool) string {
 	return api.SetupSkip
 }
 
-// skipNote says that a setup script is skipped this time, when there is no
-// terminal to ask on, and why, from what the user said before. The
-// repository comes from the host, so it is shown cleaned, or quoted when it
-// holds hidden characters (client.ShowPath).
 func skipNote(host string, q client.SetupQuestion, past client.SetupPast) string {
 	var why string
 	switch past {
@@ -127,30 +106,26 @@ func skipNote(host string, q client.SetupQuestion, past client.SetupPast) string
 	return fmt.Sprintf("Skipping the setup script of %s: %s. Pass --setup to run it.", client.ShowPath(q.Repo), why)
 }
 
-// askSetup asks whether a repository's setup script may run on host. Its
-// first line follows what the user said before. The repository and the
-// script come from the host, so they are shown cleaned, or quoted when they
-// hold hidden characters (client.ShowPath). A signal is no answer, and
-// returns errInterrupted.
-func askSetup(ctx context.Context, in io.Reader, w io.Writer, host string, q client.SetupQuestion, past client.SetupPast) (bool, error) {
+func askSetup(p *prompter, host string, q client.SetupQuestion, past client.SetupPast) (bool, error) {
 	repo, script := client.ShowPath(q.Repo), client.ShowPath(q.Script)
-	switch past {
-	case client.SetupChanged:
-		fmt.Fprintf(w, "The setup script of %s on %s changed after you trusted it:\n\n    %s\n\n", repo, host, script)
-	case client.SetupUnchecked:
-		fmt.Fprintf(w, "You trusted the setup script of %s on %s before this version checked its content:\n\n    %s\n\n", repo, host, script)
-	case client.SetupNotTrusted:
-		fmt.Fprintf(w, "The repository %s on %s has a setup script:\n\n    %s\n\n", repo, host, script)
+	if p.on {
+		switch past {
+		case client.SetupChanged:
+			fmt.Fprintf(p.out, "The setup script of %s on %s changed after you trusted it:\n\n    %s\n\n", repo, host, script)
+		case client.SetupUnchecked:
+			fmt.Fprintf(p.out, "You trusted the setup script of %s on %s before this version checked its content:\n\n    %s\n\n", repo, host, script)
+		case client.SetupNotTrusted:
+			fmt.Fprintf(p.out, "The repository %s on %s has a setup script:\n\n    %s\n\n", repo, host, script)
+		}
+		fmt.Fprintf(p.out, "It runs in the session before the agent, as you, with the session's environment and\nsecrets. Say yes only for a repository you trust. The answer is kept for this\nrepository on %s until the script changes; --setup and --no-setup override it.\n\n", host)
 	}
-	fmt.Fprintf(w, "It runs in the session before the agent, as you, with the session's environment and\nsecrets. Say yes only for a repository you trust. The answer is kept for this\nrepository on %s until the script changes; --setup and --no-setup override it.\n\n", host)
-	return question(ctx, in, w, "Run it?")
+	return p.confirm(qSetupScript, "Run it?", "an answer for the setup script of "+repo)
 }
 
-// askMakeFolder asks whether a new session's missing folder may be made on
-// host. The folder comes from the host, so it is shown cleaned, or quoted
-// when it holds hidden characters (client.ShowPath). A signal is no
-// answer, and returns errInterrupted.
-func askMakeFolder(ctx context.Context, in io.Reader, w io.Writer, host string, q client.FolderQuestion) (bool, error) {
-	fmt.Fprintf(w, "The folder %s does not exist on %s.\n", client.ShowPath(q.Folder), host)
-	return question(ctx, in, w, "Make it?")
+func askMakeFolder(p *prompter, host string, q client.FolderQuestion) (bool, error) {
+	folder := client.ShowPath(q.Folder)
+	if p.on {
+		fmt.Fprintf(p.out, "The folder %s does not exist on %s.\n", folder, host)
+	}
+	return p.confirm(qMakeFolder, "Make it?", fmt.Sprintf("a yes to make the folder %s, which does not exist on %s", folder, host))
 }

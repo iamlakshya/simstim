@@ -31,8 +31,9 @@ The builds are reproducible: `just repro` builds every binary twice from empty c
 
 1. Make sure `main` is green in CI and the end-to-end tests pass (`just e2e`).
 2. Make sure that `.github/tag-signers` on `main` lists your tag key ([set up your tag key](#set-up-your-tag-key)).
-3. In `CHANGELOG.md`, rename `## [Unreleased]` to `## [X.Y.Z] - YYYY-MM-DD`, and add a new empty `## [Unreleased]` above it. The release notes are taken from this section (`scripts/release-notes.sh`), so write them for users.
-4. Commit ("Release X.Y.Z") on a branch, open a pull request, and merge it when CI passes: `main` takes changes only through a pull request ([decision 0023](decisions/0023-protect-main.md)). Then sign a tag on the merged commit with your tag key, check it, and push it. Touch the key when it asks:
+3. Remove each old name whose end has passed: its row in `internal/cli/deprecated.go`, and the code that keeps the old form working. Add an old command name to the synonyms in `internal/cli/errors.go`, so that a user who types it gets "Did you mean" ([CLI spec, section 3](cli-spec.md#3-old-names-and-warnings-c5-c6-c7)). When this release adds a warning, set the release's day in `releaseDays` in the same file: the 12 months of its old forms start that day. Then run `just docs`, because each reference page lists its old names with their end.
+4. In `CHANGELOG.md`, rename `## [Unreleased]` to `## [X.Y.Z] - YYYY-MM-DD`, and add a new empty `## [Unreleased]` above it. The release notes are taken from this section (`scripts/release-notes.sh`), so write them for users.
+5. Commit ("Release X.Y.Z") on a branch, open a pull request, and merge it when CI passes: `main` takes changes only through a pull request ([decision 0023](decisions/0023-protect-main.md)). Then sign a tag on the merged commit with your tag key, check it, and push it. Touch the key when it asks:
 
    ```sh
    git switch main && git pull --ff-only
@@ -41,8 +42,8 @@ The builds are reproducible: `just repro` builds every binary twice from empty c
    git push origin vX.Y.Z
    ```
 
-5. The release workflow checks the tag, then builds, signs and uploads a **draft** release. Check its files and notes, then publish it.
-6. Check one archive by hand:
+6. The release workflow checks the tag, then builds, signs and uploads a **draft** release. Check its files and notes, then publish it.
+7. Check one archive by hand:
 
    ```sh
    ssh-keygen -Y verify -f .github/release-signers -I release -n file -s checksums.txt.sig < checksums.txt

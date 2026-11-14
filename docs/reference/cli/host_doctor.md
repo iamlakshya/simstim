@@ -17,6 +17,7 @@ Checks a host: systemd and linger, the restore unit, terminfo, memory caps, swap
 ```sh
 simstim host doctor my-vps
 simstim host doctor my-vps --fix
+simstim host doctor my-vps --json
 ```
 
 ## Flags
@@ -24,7 +25,7 @@ simstim host doctor my-vps --fix
 | Flag | What it does |
 | --- | --- |
 | `--fix` | offer to fix the problems found, one by one |
-| `--json` | print JSON |
+| `--json` | print JSON for scripts, and ask nothing (see docs/how-to/scripting.md) |
 | `-y`, `--yes` | with `--fix`, apply every fix without asking |
 
 ## Flags from the parent command
@@ -33,5 +34,7 @@ simstim host doctor my-vps --fix
 | --- | --- |
 | `--debug[=<categories>]` | turn on the debug mode, with every category, or with the categories listed: attach, net, memory, launcher, runtime. A list binds only in the = form, such as `--debug=net` |
 | `--debug-file <file>` | write the client's debug records to this file. On its own, it turns on every category (SIMSTIM_DEBUG_FILE does the same) |
+| `--no-color` | print no colour (NO_COLOR does the same) |
+| `--no-input` | ask nothing: a question that needs an answer fails with exit code 4, and names the flag that answers it (SIMSTIM_NO_INPUT=1 does the same) |
 
 Part of [`host`](host.md): add, create, list, test and remove hosts.

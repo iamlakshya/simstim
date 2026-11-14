@@ -1,0 +1,319 @@
+== new box --detach --json --name api --memory-max 256M -- sleep 60
+{
+  "v": 1,
+  "address": "box/api",
+  "agent": "shell",
+  "alive": true,
+  "cols": 80,
+  "created_at": "<created_at>",
+  "cwd": "<cwd>",
+  "host": "box",
+  "host_version": "<host_version>",
+  "id": "<id>",
+  "memory_max": "<memory_max>",
+  "name": "api",
+  "rows": 24,
+  "since": "<since>",
+  "source": "<source>",
+  "state": "<state>"
+}
+== ls --json
+[
+  {
+    "v": 1,
+    "host": "box",
+    "sessions": [
+      {
+        "id": "<id>",
+        "name": "api",
+        "agent": "shell",
+        "cwd": "<cwd>",
+        "state": "<state>",
+        "source": "<source>",
+        "since": "<since>",
+        "created_at": "<created_at>",
+        "last_activity_at": "<last_activity_at>",
+        "last_attached_at": "<last_attached_at>",
+        "alive": true,
+        "memory_max": "<memory_max>",
+        "host_version": "<host_version>",
+        "cols": 80,
+        "rows": 24
+      }
+    ]
+  }
+]
+== ports box/api --json
+{
+  "v": 1,
+  "host": "box",
+  "id": "<id>",
+  "ports": [],
+  "session": "api"
+}
+== doctor --json
+{
+  "v": 1,
+  "checks": [
+    {
+      "name": "ssh",
+      "ok": true,
+      "detail": "<detail>"
+    },
+    {
+      "name": "config.toml",
+      "ok": true,
+      "detail": "<detail>"
+    },
+    {
+      "name": "hosts.toml",
+      "ok": true,
+      "detail": "<detail>"
+    }
+  ],
+  "fixes": []
+}
+== host ls --json
+[
+  {
+    "v": 1,
+    "Labels": null,
+    "Machine": {
+      "Provider": "hosttest",
+      "ID": "<ID>",
+      "User": "",
+      "Image": "",
+      "Template": "",
+      "IdleStop": "",
+      "BusyLease": "",
+      "TokenCommand": "",
+      "Stdin": ""
+    },
+    "Name": "box",
+    "Provider": null,
+    "SSH": "box",
+    "SSHConfig": "",
+    "Secrets": null,
+    "machine": {
+      "id": "<id>",
+      "provider": "hosttest"
+    },
+    "name": "box",
+    "ssh": "box"
+  }
+]
+== host test box --json
+{
+  "v": 1,
+  "connect_ms": "<connect_ms>",
+  "host": "box",
+  "round_trip_ms": "<round_trip_ms>"
+}
+== host restore box --json
+{
+  "v": 1,
+  "host": "box",
+  "results": []
+}
+== host status box --json
+{
+  "v": 1,
+  "host": "box",
+  "id": "<id>",
+  "provider": "hosttest",
+  "state": "<state>"
+}
+== version --json
+{
+  "v": 1,
+  "helper": "<helper>",
+  "protocol": "1.0",
+  "version": "<version>"
+}
+== config keymap --json
+[
+  {
+    "v": 1,
+    "command": "session: new",
+    "keys": [
+      "n"
+    ]
+  },
+  {
+    "v": 1,
+    "command": "session: new with the form",
+    "keys": []
+  },
+  {
+    "v": 1,
+    "command": "session: attach",
+    "keys": [
+      "enter"
+    ]
+  },
+  {
+    "v": 1,
+    "command": "session: preview",
+    "keys": [
+      "space"
+    ]
+  },
+  {
+    "v": 1,
+    "command": "session: rename",
+    "keys": [
+      "r",
+      "f2"
+    ]
+  },
+  {
+    "v": 1,
+    "command": "session: delete",
+    "keys": [
+      "d"
+    ]
+  },
+  {
+    "v": 1,
+    "command": "session: resume",
+    "keys": [
+      "u"
+    ]
+  },
+  {
+    "v": 1,
+    "command": "session: copy attach command",
+    "keys": [
+      "y"
+    ]
+  },
+  {
+    "v": 1,
+    "command": "session: next waiting",
+    "keys": [
+      "w"
+    ]
+  },
+  {
+    "v": 1,
+    "command": "host: open",
+    "keys": [
+      "enter"
+    ]
+  },
+  {
+    "v": 1,
+    "command": "host: add",
+    "keys": [
+      "a"
+    ]
+  },
+  {
+    "v": 1,
+    "command": "host: set up",
+    "keys": [
+      "s"
+    ]
+  },
+  {
+    "v": 1,
+    "command": "host: details",
+    "keys": [
+      "i"
+    ]
+  },
+  {
+    "v": 1,
+    "command": "host: test",
+    "keys": []
+  },
+  {
+    "v": 1,
+    "command": "host: reconnect",
+    "keys": []
+  },
+  {
+    "v": 1,
+    "command": "host: remove",
+    "keys": []
+  },
+  {
+    "v": 1,
+    "command": "view: hosts",
+    "keys": []
+  },
+  {
+    "v": 1,
+    "command": "view: all sessions",
+    "keys": []
+  },
+  {
+    "v": 1,
+    "command": "view: search",
+    "keys": [
+      "/"
+    ]
+  },
+  {
+    "v": 1,
+    "command": "view: toggle ended",
+    "keys": [
+      "alt+e"
+    ]
+  },
+  {
+    "v": 1,
+    "command": "view: shortcuts",
+    "keys": [
+      "?"
+    ]
+  },
+  {
+    "v": 1,
+    "command": "view: commands",
+    "keys": [
+      "ctrl+o"
+    ]
+  },
+  {
+    "v": 1,
+    "command": "<name>: settings",
+    "keys": []
+  },
+  {
+    "v": 1,
+    "command": "<name>: about",
+    "keys": []
+  },
+  {
+    "v": 1,
+    "command": "<name>: quit",
+    "keys": [
+      "q"
+    ]
+  },
+  {
+    "v": 1,
+    "command": "debug: start",
+    "keys": []
+  },
+  {
+    "v": 1,
+    "command": "debug: stop",
+    "keys": []
+  },
+  {
+    "v": 1,
+    "command": "debug: save",
+    "keys": []
+  },
+  {
+    "v": 1,
+    "command": "debug: bundle",
+    "keys": []
+  }
+]
+== errors
+{"v":1,"error":{"code":"host_not_found","kind":"not_found","message":"no host named \"nowhere\"","try":"<name> host add nowhere","exit":3}}
+{"v":1,"error":{"code":"unknown_command","kind":"usage","message":"unknown command \"atach\"","try":"<name> attach --help","exit":2,"suggestions":["attach"]}}
+{"v":1,"error":{"code":"json_needs_detach","kind":"usage","message":"--json needs --detach, because an attached session owns the terminal","try":"<name> new box --json --detach -- htop","exit":2}}

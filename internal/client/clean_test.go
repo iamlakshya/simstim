@@ -221,11 +221,11 @@ func TestAttachEndIsClean(t *testing.T) {
 	a := &attacher{o: AttachOptions{Out: f}, tracker: term.NewTracker()}
 	// The agent's own bytes, hostile ones too, pass unchanged.
 	out := []byte("ok \x1b]52;c;aGk=\x07 \xe2\x80\xae \xc2\x9b2J \x1bc done\r\n")
-	if _, err := a.frame(proto.Frame{Type: proto.TOutput, Payload: proto.EncodeOutput(0, out)}); err != nil {
+	if _, err := a.frame(t.Context(), proto.Frame{Type: proto.TOutput, Payload: proto.EncodeOutput(0, out)}); err != nil {
 		t.Fatal(err)
 	}
 	ended, _ := json.Marshal(proto.Ended{ExitCode: 137, Signal: "killed\x1b]52;c;aGk=\x07\u202e"})
-	done, err := a.frame(proto.Frame{Type: proto.TEnded, Payload: ended})
+	done, err := a.frame(t.Context(), proto.Frame{Type: proto.TEnded, Payload: ended})
 	if !done || err != nil {
 		t.Fatalf("the end frame = %v, %v", done, err)
 	}
@@ -341,10 +341,10 @@ func TestReconnectTitleIsClean(t *testing.T) {
 	defer f.Close()
 	a := &attacher{o: AttachOptions{Out: f}, tracker: term.NewTracker(), key: "box/x\x07\x1b]52;c;aGk=\x07\u202e"}
 	out := []byte("agent \x1b]2;its own title\x07 \x1b]52;c;aGk=\x07 \xc2\x9b2J\r\n")
-	if _, err := a.frame(proto.Frame{Type: proto.TOutput, Payload: proto.EncodeOutput(0, out)}); err != nil {
+	if _, err := a.frame(t.Context(), proto.Frame{Type: proto.TOutput, Payload: proto.EncodeOutput(0, out)}); err != nil {
 		t.Fatal(err)
 	}
-	a.write(a.reconnectTitle())
+	a.write(t.Context(), a.reconnectTitle())
 	got, err := os.ReadFile(f.Name())
 	if err != nil {
 		t.Fatal(err)

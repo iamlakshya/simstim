@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"context"
+
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/iamlakshya/simstim/internal/api"
@@ -37,8 +39,11 @@ func (s *setupAsk) key(m *Model, k tea.KeyPressMsg) tea.Cmd {
 	// that it changed after the user trusted it.
 	r.args, r.answers = client.AnswerSetup(r.args, s.q, run), r.answers.Answered(s.q, run)
 	be, host, repo, hash := m.be, s.host, s.q.Repo, s.q.Hash
-	remember := func() tea.Msg {
-		warn, err := be.RememberSetup(host, repo, run, hash)
+	remember := m.bgCmd(func(ctx context.Context) tea.Msg {
+		if ctx.Err() != nil {
+			return nil
+		}
+		warn, err := be.RememberSetup(ctx, host, repo, run, hash)
 		switch {
 		case err != nil:
 			return opDoneMsg{host: host, err: err}
@@ -46,7 +51,7 @@ func (s *setupAsk) key(m *Model, k tea.KeyPressMsg) tea.Cmd {
 			return setupWarnMsg{warn: warn}
 		}
 		return nil
-	}
+	})
 	return tea.Batch(remember, m.startAgain(r))
 }
 

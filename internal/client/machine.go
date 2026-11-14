@@ -109,7 +109,9 @@ func OpenMachine(h Host) (Lifecycle, error) {
 }
 
 // ForgetHost removes a host from hosts.toml, and its generated SSH config.
-func ForgetHost(name string) error {
+// It runs once the host's machine is gone, so it goes on after a cancel of
+// ctx: a host saved with no machine would be left.
+func ForgetHost(ctx context.Context, name string) error {
 	hosts, err := LoadHosts()
 	if err != nil {
 		return err
@@ -126,7 +128,7 @@ func ForgetHost(name string) error {
 	if !found {
 		return &UserError{Msg: fmt.Sprintf("no host named %q", name), Hint: brand.Name + " host ls", Code: "host_not_found", Kind: KindNotFound}
 	}
-	if err := SaveHosts(out); err != nil {
+	if err := SaveHosts(context.WithoutCancel(ctx), out); err != nil {
 		return err
 	}
 	if err := os.Remove(wrapperPath(Host{Name: name})); err != nil && !errors.Is(err, os.ErrNotExist) {
@@ -158,6 +160,31 @@ func wakeAllowed(ctx context.Context) bool {
 	return !v
 }
 
+type noInputKey struct{}
+
+// WithoutInput returns a context in which nothing asks the user: every
+// connection runs SSH with BatchMode=yes, so that SSH asks for no password,
+// passphrase, host key or touch, and SSH's own messages stay out of the
+// terminal. A command with input off runs in it
+// (docs/contributing/cli-spec.md 6.1).
+func WithoutInput(ctx context.Context) context.Context {
+	return context.WithValue(ctx, noInputKey{}, true)
+}
+
+// InputAllowed reports whether something may ask the user in ctx: SSH, or a
+// command of the user's own, such as a token command.
+func InputAllowed(ctx context.Context) bool {
+	v, _ := ctx.Value(noInputKey{}).(bool)
+	return !v
+}
+
+// NewSSH is the SSH transport to h. It may ask the user (a password, a host
+// key) only when interactive is set and input is allowed in ctx: with
+// input off, it runs with BatchMode=yes.
+func NewSSH(ctx context.Context, h Host, interactive bool) *SSH {
+	return &SSH{Host: h, Interactive: interactive && InputAllowed(ctx)}
+}
+
 // route is how to reach a host: its transport, and the lifecycle of its
 // machine when a provider made it.
 type route struct {
@@ -166,8 +193,9 @@ type route struct {
 }
 
 func routeTo(ctx context.Context, h Host, interactive bool) (route, error) {
+	interactive = interactive && InputAllowed(ctx)
 	if h.Machine == nil {
-		return route{t: &SSH{Host: h, Interactive: interactive}}, nil
+		return route{t: NewSSH(ctx, h, interactive)}, nil
 	}
 	lc, err := OpenMachine(h)
 	if err != nil {

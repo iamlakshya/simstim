@@ -47,8 +47,8 @@ func (m *Model) resumeSelected() tea.Cmd {
 		m.resuming = map[sessKey]bool{}
 	}
 	m.resuming[key] = true
-	c, ctx, be := h.conn, m.ctx, m.be
-	resume := func() tea.Msg {
+	c, be := h.conn, m.be
+	resume := m.bgCmd(func(ctx context.Context) tea.Msg {
 		// The host stops the old holder and its unit, then waits for the start.
 		cctx, cancel := context.WithTimeout(ctx, 90*time.Second)
 		defer cancel()
@@ -58,7 +58,7 @@ func (m *Model) resumeSelected() tea.Cmd {
 		}
 		res, err := c.Resume(cctx, client.ResumeArgs{ID: key.id, Secrets: secrets})
 		return resumedMsg{key: key, res: res, err: err}
-	}
+	})
 	text := fmt.Sprintf("Resuming %s on %s…", s.Name, h.name())
 	if client.CapStopped(*s) && s.MemoryMax > 0 {
 		// The cap that stopped the agent applies again, unless the command

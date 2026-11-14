@@ -65,7 +65,9 @@ func runTokenCommand(ctx context.Context, command string) (string, error) {
 	}
 	var out, errb bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &errb
-	cmd.Stdin = os.Stdin // a keychain or password manager may ask
+	if client.InputAllowed(ctx) {
+		cmd.Stdin = os.Stdin // a keychain or password manager may ask
+	}
 	if err := cmd.Run(); err != nil {
 		return "", &client.UserError{
 			Msg:  fmt.Sprintf("the token command failed: %v: %s", err, provider.Tail(errb.String(), 2)),

@@ -1,0 +1,11 @@
+attach ❯             4 of 4 · checking hosts… · ↑↓ enter esc
+▍ box/needs-you  claude  needs input   40m
+  box/auth-fix   claude  working        2h
+  box/web        shell   idle           5m
+  nuc/tests      codex   idle          26h
+== typed we
+attach ❯ we                            1 of 4 · ↑↓ enter esc
+▍ box/web  shell  idle           5m
+== typed wex
+attach ❯ wex                           0 of 4 · ↑↓ enter esc
+  No session matches.

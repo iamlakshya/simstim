@@ -148,12 +148,7 @@ func argsError(c *cobra.Command, args []string) error {
 		}
 	}
 	if len(args) < required {
-		return &usageError{
-			UserError: &client.UserError{Msg: name + " needs " + strings.Join(want[len(args):required], " "),
-				Hint: helpOf(c), Code: "missing_argument", Kind: client.KindUsage},
-			usage:   strings.TrimSuffix(c.UseLine(), " [flags]"),
-			example: firstExample(c.Example),
-		}
+		return missingArgument(c, strings.Join(want[len(args):required], " "))
 	}
 	takes := "no words"
 	if len(want) > 0 {
@@ -165,6 +160,17 @@ func argsError(c *cobra.Command, args []string) error {
 	}
 	return &client.UserError{Msg: fmt.Sprintf("%s takes %s, and got %d %s", name, takes, len(args), words),
 		Hint: helpOf(c), Code: "extra_argument", Kind: client.KindUsage}
+}
+
+// missingArgument is the error of a command line without a word that the
+// command needs, with the command's usage and its first example. what
+// names the word, such as "<host>".
+func missingArgument(c *cobra.Command, what string) error {
+	return &usageError{
+		UserError: &client.UserError{Msg: shortPath(c) + " needs " + what, Hint: helpOf(c), Code: "missing_argument", Kind: client.KindUsage},
+		usage:     strings.TrimSuffix(c.UseLine(), " [flags]"),
+		example:   firstExample(c.Example),
+	}
 }
 
 // useArgs splits the arguments of a command's Use into the words a user
@@ -211,10 +217,22 @@ func firstExample(ex string) string {
 	return ""
 }
 
+// parseFailed is the annotation of a command whose flags did not parse.
+const parseFailed = "flags-did-not-parse"
+
+// unparsed marks c as a command whose flags did not parse.
+func unparsed(c *cobra.Command) {
+	if c.Annotations == nil {
+		c.Annotations = map[string]string{}
+	}
+	c.Annotations[parseFailed] = "true"
+}
+
 // flagError turns the flag parser's errors into usage errors. A word that
 // is not a command, before a flag that is not the parent's, is an unknown
 // command.
 func flagError(c *cobra.Command, err error) error {
+	unparsed(c)
 	if args := c.Flags().Args(); len(args) > 0 && c.HasAvailableSubCommands() {
 		if aerr := c.ValidateArgs(args); aerr != nil {
 			return aerr //nolint:wrapcheck // the check is guard's own, and returns a UserError

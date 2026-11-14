@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/iamlakshya/simstim/internal/api"
+	"github.com/iamlakshya/simstim/internal/brand"
 	"github.com/iamlakshya/simstim/internal/client"
 )
 
@@ -18,7 +19,7 @@ import (
 // RunDemo opens the launcher on sample data. With empty, it shows the
 // first-run screen instead.
 func RunDemo(ctx context.Context, empty bool) error {
-	return runWith(ctx, newDemoBackend(empty), Options{})
+	return runNamed(ctx, newDemoBackend(empty), Options{}, "the demo", brand.Name+" help demo (shows how to try the demo)")
 }
 
 type demoBackend struct {
@@ -62,13 +63,16 @@ func newDemoBackend(empty bool) *demoBackend {
 	return b
 }
 
-func (b *demoBackend) LoadHosts() ([]client.Host, error) {
+func (b *demoBackend) LoadHosts(context.Context) ([]client.Host, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return append([]client.Host(nil), b.hosts...), nil
 }
 
-func (b *demoBackend) SaveHosts(h []client.Host) error {
+func (b *demoBackend) SaveHosts(ctx context.Context, h []client.Host) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.hosts = append([]client.Host(nil), h...)
@@ -86,8 +90,12 @@ func (b *demoBackend) HelperVersion() string { return "0.1.0" }
 // The demo forgets: it starts the same way every time.
 func (b *demoBackend) Memory() memory                          { return memory{} }
 func (b *demoBackend) Remember(memory)                         {}
+func (b *demoBackend) RememberLast(string, string, string)     {}
 func (b *demoBackend) SetupAnswers(string) client.SetupAnswers { return client.SetupAnswers{} }
-func (b *demoBackend) RememberSetup(string, string, bool, string) (*client.UserError, error) {
+func (b *demoBackend) RememberSetup(ctx context.Context, _, _ string, _ bool, _ string) (*client.UserError, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	return nil, nil
 }
 func (b *demoBackend) Secrets(context.Context, client.Host) (map[string]api.Secret, error) {

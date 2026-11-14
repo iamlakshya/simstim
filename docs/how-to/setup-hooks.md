@@ -83,7 +83,7 @@ simstim new my-server --agent claude --dir ~/src/app --worktree --setup
 simstim new my-server --agent claude --dir ~/src/app --no-setup
 ```
 
-Without a terminal to ask on, for example in a script or with its output in a pipe, `new` skips a script you have not answered for, or one that changed after your yes, and says so. `--no-setup` and a no read no script, so they also start a session whose script cannot run.
+Without a terminal to ask on, for example in a script, with its output in a pipe or with `--no-input`, `new` skips a script you have not answered for, or one that changed after your yes, and says so on stderr. `--no-setup` and a no read no script, so they also start a session whose script cannot run.
 
 ### A changed script asks again
 
@@ -110,6 +110,8 @@ The file holds each no under `hosts`, and each yes under `trusted`, with its has
 If the file does not parse, the client renames it to `setup-trust.json.bad`, warns once, and asks again for each script. When an older `setup-trust.json.bad` is there, the client keeps it, and uses the next free name: `setup-trust.json.bad.1`, then `.bad.2`, with no limit. The warning names the file. If the file breaks while a question waits, keeping your answer moves it aside in the same way, and the warning names it too. Compare the two files, then delete the bad one. If the client cannot rename the file, it keeps no answer until you fix or delete `setup-trust.json`.
 
 Each read and save of the file holds a lock on `setup-trust.json.lock`, so two clients that answer at once keep both answers. While another client holds the lock, a client waits up to 2 seconds. If the lock stays busy, it trusts no script for that start, and says so. An answer is then not kept, and the start stops with an error. Try again a moment later.
+
+If the client cannot read the answers file, it leaves the file in place. It trusts no script from that file and saves no new answer. Check its permissions, then try again. Cancelling a wait or a save keeps no new answer. An answer whose save has already finished stays kept.
 
 ## Your own setup on a host
 

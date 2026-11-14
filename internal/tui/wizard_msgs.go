@@ -29,10 +29,11 @@ func (w *wizard) onMsg(m *Model, msg tea.Msg) tea.Cmd {
 
 // onProbe shows what the probe found, and goes on to the install or the setup.
 func (w *wizard) onProbe(m *Model, msg probeMsg) tea.Cmd {
-	if msg.seq != w.seq {
+	if !w.owns(msg.owner, msg.seq) || w.step != wzTest || !w.run {
 		return nil
 	}
-	w.run, w.cancel = false, nil
+	w.run = false
+	w.finishOp()
 	if msg.err != nil {
 		w.checks[0].state = ckFailed
 		w.err = w.sshErr(msg.err)
@@ -71,10 +72,11 @@ func (w *wizard) onProbe(m *Model, msg probeMsg) tea.Cmd {
 
 // onInstall goes on to the setup once the helper is installed.
 func (w *wizard) onInstall(m *Model, msg installMsg) tea.Cmd {
-	if msg.seq != w.seq {
+	if !w.owns(msg.owner, msg.seq) || w.step != wzInstall || !w.run {
 		return nil
 	}
-	w.run, w.cancel = false, nil
+	w.run = false
+	w.finishOp()
 	if msg.err != nil {
 		w.checks[0].state = ckFailed
 		w.err = w.sshErr(msg.err)
@@ -86,14 +88,15 @@ func (w *wizard) onInstall(m *Model, msg installMsg) tea.Cmd {
 
 // onSetupDone shows the setup's steps and saves the host.
 func (w *wizard) onSetupDone(m *Model, msg setupMsg) tea.Cmd {
-	if msg.seq != w.seq {
+	if !w.owns(msg.owner, msg.seq) || w.step != wzReady || !w.run || w.saved {
 		if msg.conn != nil {
 			return m.dropConn(msg.conn)
 		}
 		return nil
 	}
 	if msg.err != nil {
-		w.run, w.cancel = false, nil
+		w.run = false
+		w.finishOp()
 		w.checks[0].state = ckFailed
 		w.err = w.sshErr(msg.err)
 		return nil
@@ -112,19 +115,23 @@ func (w *wizard) onSetupDone(m *Model, msg setupMsg) tea.Cmd {
 		}
 		w.checks = append(w.checks, c)
 	}
-	return m.saveHosts(w.host, false)
+	w.seq++
+	return m.saveWizardHost(w, w.ctx, w.seq, w.host)
 }
 
 // onSaved adds the saved host to the launcher, then checks its agents.
 func (w *wizard) onSaved(m *Model, msg hostSavedMsg) tea.Cmd {
-	w.run, w.cancel = false, nil
-	if msg.err != nil {
-		w.err = msg.err
+	if !w.owns(msg.owner, msg.seq) || w.step != wzReady || !w.run || w.saved {
 		return nil
 	}
+	w.run = false
+	w.finishOp()
+	if msg.err != nil {
+		w.err = msg.err
+		return m.dropConn(w.takeConn())
+	}
 	w.saved = true
-	conn := w.conn
-	w.conn = nil
+	conn := w.takeConn()
 	cmd := m.addHost(w.host, conn, w.info)
 	if h := m.hostByName(w.host.Name); h != nil {
 		m.openHost(h)

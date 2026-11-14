@@ -27,6 +27,8 @@ So the client first tells a paste from a drag. A drag puts nothing on the clipbo
 
 The client reads every byte that goes to your terminal for clipboard writes, and changes none of them. It reads OSC 52, iTerm2's `Copy` and `CopyToClipboard`, and kitty's clipboard protocol. It keeps the SHA-256 of the last 256 writes for a day, never their text. Writes to the primary selection have a list of their own, so they never fill the clipboard's. It keeps them in one file with mode 0600, `paste-guard.json` in the client's state folder (`~/.local/state/simstim/` unless `XDG_STATE_HOME` is set). It notes each write in a journal beside that file before the session's output reaches your terminal. Every client process on the laptop shares the file. So a path that a session wrote in one terminal is refused in another terminal, and after a restart.
 
+At detach, the client records unfinished clipboard transfers. It then waits up to 2 seconds for pending history to reach the shared file. Cancelling the attach does not cancel that cleanup. A cancelled drop check refuses the upload.
+
 When the file holds 256 writes from the last day, the client refuses every drop until the oldest of them is a day old. If the client cannot read the file, it refuses the drop. If it could not note a write, it refuses every drop for a day.
 
 The guard errs on the side of refusing. Terminals read some sequences in different ways, so it records every way that one of them might read a write. Now and then, it refuses a file that no session wrote. Then copy the file to the host yourself.

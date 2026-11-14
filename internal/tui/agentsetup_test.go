@@ -74,16 +74,18 @@ func (b *fakeBackend) SetupAnswers(host string) client.SetupAnswers {
 // RememberSetup keeps an answer as the client's file does: a yes with its
 // hash, which removes a no, and a no, which removes a yes. It returns the
 // warning of a file that did not parse while the answer was kept, once.
-func (b *fakeBackend) RememberSetup(host, repo string, run bool, hash string) (*client.UserError, error) {
+func (b *fakeBackend) RememberSetup(ctx context.Context, host, repo string, run bool, hash string) (*client.UserError, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	b.record("remember %s %s run=%v hash=%s", host, repo, run, hash)
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	warn := b.rememberWarn
-	b.rememberWarn = nil
-	if b.trust == nil {
-		b.trust = map[string]client.SetupAnswers{}
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
 	s := b.trust[host]
+	s.Refused, s.Trusted, s.Hashes = maps.Clone(s.Refused), maps.Clone(s.Trusted), maps.Clone(s.Hashes)
 	for _, m := range []*map[string]bool{&s.Refused, &s.Trusted} {
 		if *m == nil {
 			*m = map[string]bool{}
@@ -103,7 +105,15 @@ func (b *fakeBackend) RememberSetup(host, repo string, run bool, hash string) (*
 			s.Hashes[repo] = hash
 		}
 	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if b.trust == nil {
+		b.trust = map[string]client.SetupAnswers{}
+	}
 	b.trust[host] = s
+	warn := b.rememberWarn
+	b.rememberWarn = nil
 	return warn, nil
 }
 

@@ -12,7 +12,7 @@ Facts about this repository come from its code on 10 November 2026. Facts about 
 
 - `<name>` is `brand.Name`, today `simstim`. Commands are written as users type them, `simstim …`. Code builds every name from `internal/brand` ([0007](decisions/0007-name-in-one-place.md)). The variable `SIMSTIM_NO_INPUT` is `brand.Env("NO_INPUT")` in code.
 - **Input is on** when stdin, stdout and stderr are all terminals, and the user did not turn input off ([section 6](#6-prompts-pickers-and-input-c4)). Otherwise **input is off**.
-- **The session cache** is the launcher's memory file of [0011](decisions/0011-instant-launcher.md): each host's sessions when last seen, and the session last attached to. Today it is `launcher.json` in the state folder (`internal/tui/memory.go`).
+- **The session cache** is the launcher's memory of [0011](decisions/0011-instant-launcher.md): each host's sessions when last seen, and the session last attached to. Today it is `launcher.json` in the state folder, with the last session in `last.json` beside it (`internal/tui/memory.go`).
 - **An address** names a session: `<host>/<session>`, a bare `<session>`, or `-` ([section 9.2](#92-addresses)).
 - **The end** of an old name is the point after which it stops working ([section 3](#3-old-names-and-warnings-c5-c6-c7)).
 - **A release** is a new minor or major version, such as 0.2.0 after 0.1.2. A patch version is not a release in this spec.
@@ -77,7 +77,7 @@ An old name keeps working for a time, and warns. This section gives the mechanis
 
 ### 3.1 Behaviour
 
-1. One table in `internal/cli/deprecated.go` holds every old form. Each row has the old form, the new form, the kind, the version that adds the warning, and its date. C4 makes the file, with the row of `host ls --json`. Each later task of section 3.2 adds its rows.
+1. One table in `internal/cli/deprecated.go` holds every old form. Each row has the old form, the new form, the kind, the command whose reference page lists it, and the version that adds the warning. The day of that release is in the same file, and the release step sets it, because the 12 months start when users first see the warning. C4 makes the file, with the row of `host ls --json`. Each later task of section 3.2 adds its rows.
 2. When a user types an old form, the command does what the old form did. It also prints one warning on stderr, once per run.
 3. The warning has this form, in yellow when stderr is a terminal:
 
@@ -276,9 +276,9 @@ Rules:
 4. "No hosts yet" exits with 1. A host that the user named and that does not exist exits with 3.
 5. `ErrClosed`, the connection that closed, exits with 1.
 6. The codes that today's helper sends get a kind in the same map as section 5.3. A code takes the kind that the table above gives its meaning, the same kind as the client's own check of the same mistake. `not_found` and `unknown_agent` are `KindNotFound`. `bad_name`, `bad_secret` and `memory_max` are `KindUsage`. `no_folder` and `setup_trust` are `KindNeedsAnswer`, because `new` asks before it makes a folder or runs a setup script. Every other code of today, such as `bad_request`, `exited` and `worktree`, is `KindFailed`.
-7. SIGINT and SIGTERM cancel a command outside an attach: it exits with 130, also when it returns no error, and the client prints the cancel and closes its debug file. Every read that waits for the terminal gives up at the signal, such as the key tester of `doctor keys`, and puts the terminal back. A signal at a question is a cancel, never an answer: the command keeps no answer, and changes nothing more. A signal that comes with the answer wins. A read that cannot be cancelled, as on some Windows consoles, does not keep the command waiting. Inside an attach, Ctrl+C is a byte for the agent ([AGENTS.md](../../AGENTS.md), rule 2).
+7. SIGINT and SIGTERM cancel a command outside an attach: it exits with 130, also when it returns no error, and the client prints the cancel and closes its debug file. Every read that waits for the terminal gives up at the signal, such as the key tester of `doctor keys`, and puts the terminal back. A signal at a question is a cancel, never an answer: the command keeps no answer, and changes nothing more. A signal that comes with the answer wins. Two choke points hold this for every command: the one function that sends a request to a host (`Conn.Call`) sends nothing once the command's context has ended, also when the request waits behind another frame, and the one function that writes `hosts.toml` (`SaveHosts`) writes nothing then. A local fix looks at the cancel before each fix and each file. Only a step that must finish what a change began goes on: `host destroy` forgets a host whose machine it has deleted, and `host create` saves a machine that it has made. A read that cannot be cancelled, as on some Windows consoles, does not keep the command waiting. Inside an attach, Ctrl+C is a byte for the agent ([AGENTS.md](../../AGENTS.md), rule 2).
 8. A `hosts.toml` that does not decode is `KindUsage`, and its message names the file, the line and the column. A file that cannot be read is `KindFailed`.
-9. Until C4 moves the prompts, a prompt with input off reads no answer as no, and exits with 130. C4 makes it exit with 4, as [section 6.2](#62-prompts) says.
+9. A prompt with input off asks nothing. It fails with exit code 4, or takes its default, as [section 6.2](#62-prompts) says.
 
 ### 5.2 `exec`
 
@@ -365,16 +365,18 @@ Input is on when all of these are true:
 3. `SIMSTIM_NO_INPUT` is not set, or is empty, `0` or `false`. Any other value turns input off.
 4. The command was not given `--json` (question C-13).
 
-A prompt never appears when input is off ([clig.dev](https://clig.dev/#interactivity)).
+A prompt never appears when input is off ([clig.dev](https://clig.dev/#interactivity)). The interactive launcher entry points (the root command with no subcommand, `flip` with no session, and `demo`) follow the same check: they fail with exit code 4 when input is off, and with exit code 1 when any of stdin, stdout or stderr is not a terminal. Input off takes precedence even when a stream is not a terminal. Its error is `no_input` with `KindNeedsAnswer`. Their terminal error is `launcher_no_terminal` with `KindFailed`. The `no_terminal` error of attach and terminal tools has `KindUsage` and exit code 2.
+
+The launcher saves the terminal mode before opening its reader. Only one terminal handoff can be pending. Queued user input cannot start a second handoff. It stops the reader and restores that mode before handing the terminal to another command. If that reader cannot restart afterwards, the launcher exits and restores the terminal. Attach and demo open the reader before entering raw mode. They request the first read only after raw mode succeeds. The demo requests another read only after handling the last chunk, so detach leaves no pending read. A diagnostic check opens its reader before sending terminal queries. A busy or failed reader ends the check without sending queries. A reader that stays blocked is recorded and is not closed while its read runs. When a console reports that cancellation succeeded, diagnostic key reads wait at most five seconds for the read to stop.
 
 ### 6.2 Prompts
 
-1. A prompt writes its question to stderr, and reads one line from stdin.
+1. A prompt writes its question to stderr, and reads one line from stdin. Every question reads through one function, `answer` in `internal/cli/answer.go`, which checks for a cancel before the read, while it waits and after the line (rule 7 of section 5.1). At a terminal it puts the terminal in raw mode before it writes the question, reads one key at a time, and reads no further than the end of its line, so what the user typed after it stays for the next question. It reads a paste in blocks, so the last block of a paste can hold keys typed within moments of it, past the end of the line: they stay in the reader for the next question, and an attach does not get them. While it reads, it turns the terminal's bracketed paste on, so a paste of many lines stays text in the line and never gives the answer. On Windows, where a console may show the sequence as text, it does not. It reads through the terminal's one reader, `keyread.For`, which every question and the picker of one run share: on Windows a new reader drops what waits in the console. `keyread.For` saves the terminal's state before it makes the reader, which on Windows changes the console's modes, and each question and the picker put back that saved state when they end. At a terminal, a question never falls back to a plain line read if `keyread.For` or raw mode fails, or if an earlier attach or launcher run left a terminal read that could not be cancelled: it fails instead so a paste cannot answer a confirmation and two readers never share stdin. They end in one order: turn bracketed paste off, restore the terminal, stop the handler of signals, then look once more for a signal. A signal before that last look is a cancel, never an answer.
 2. Every prompt has a flag that answers it, and the prompt table below lists it. There are two exceptions: `--root-step run` on a `shared` host, and a secret or an SSH key for a `shared` host. Only a person at a terminal answers these (isolation spec 14.4.4 and 14.8.5).
 3. A yes or no question shows its default in capitals: `[Y/n]` or `[y/N]` ([Primer](https://github.com/cli/cli/blob/trunk/docs/primer/components/README.md)). Enter takes the default. `y`, `yes`, `n` and `no` work in any case. Any other answer asks again, up to three times, then cancels.
 4. A question about deleting something defaults to no.
 5. A severe action asks for a typed name (G9): `Type box to delete the machine, or press Enter to keep it:`. Only the exact name confirms. Enter keeps the thing. Any other text cancels. `--confirm <name>` gives the name instead.
-6. `esc` or `ctrl+c` at a prompt cancels. A cancel prints `Cancelled. Nothing changed.` on stderr and exits with 130. If an earlier step changed something, the line says what instead.
+6. `esc` or `ctrl+c` at a prompt cancels. `ctrl+c` cancels inside a paste too, as in the picker (section 6.3, rule 6). A paste at a prompt keeps only the characters that a typed key gives. A cancel prints `Cancelled. Nothing changed.` on stderr and exits with 130. If an earlier step changed something, the line says what instead. Each step records its change as it makes it, so a cancel or a signal at any point lists every change before it. A cancel during the fixes of `doctor --fix` says so, and names what was done before it: each fix that ran, and a fix that the cancel stopped part way, by how far it got, such as "removed 1 of 2 generated SSH configs". With `--json`, its data holds each fix as it ended, with each change it made. A signal at a question, with nothing changed, says that a signal ended the command at a question.
 7. When input is off, each prompt does one of two things. The prompt table says which.
    - **Fail.** The command needs the answer. It fails with exit code 4, and its `Try:` line names the flag.
    - **Keep.** The default changes nothing that the user did not ask for. The command takes the default, and says so on stderr with the flag that changes it.
@@ -396,9 +398,11 @@ Try: simstim rm box/auth-fix -y
 | `new`, missing folder | `Make it? [y/N]` | No | `--mkdir` | Fail |
 | `new`, a repository's setup script | `Run it? [y/N]` | No | `--setup-script`, `--no-setup-script` | Keep: skip it, with today's note |
 | `host add` | Install the helper | No | `--yes` | Fail |
+| `host add`, when the host lacks an agent | The setup's checklist of agents, and their logins | None | `--yes`, which offers none | Keep: install nothing. Each agent's line says how to install it |
 | `host add --yes` without `--tier` (H4) | Which tier | None | `--tier` | Fail |
 | `host add --accept` (H20) | Do the host keys match the machine's screen? | No | `--host-key SHA256:…`, once for each key | Fail |
 | `host join` (H20) | Make these changes? | No | `--yes` | Fail |
+| `host destroy`, until C7 makes it an old name of `host rm --destroy` | `Delete the lima machine box, with its disk and every session on it? [y/N]` | No | `-y` | Fail |
 | `host rm` on a created host | The typed name of the machine | Keep it | `--destroy --confirm <host>` | Keep: forget only |
 | `host rm`, purge (H15) | The typed name of the host | Keep it | `--purge --confirm <host>` | Keep: forget only |
 | `host rm`, purge (H15): the agents' logins | `Delete these logins on box? [y/N]` | No | `--delete-logins` | Keep: the logins stay |
@@ -423,10 +427,10 @@ A picker lets the user choose a session when a command needs one and the user na
 2. When input is off, the missing address is the error of [section 4.4](#44-the-frameworks-own-errors), with exit code 2.
 3. The picker draws inline below the command line, never on the alternate screen. It shows at most 10 rows and a filter line.
 4. A row shows `host/session`, the agent, the state and the age.
-5. It starts from the session cache, so it draws at once. It then asks each host for its list in the background, without waking a stopped host, as `ls` does, and updates the rows.
-6. Typing filters the rows by a substring of `host/session`. `↑` and `↓` move. Enter picks. `esc` cancels with exit code 130.
+5. It starts from the session cache, so it draws at once. With an empty cache, it draws one line that says that it looks for sessions. It then asks each host for its list in the background, without waking a stopped host, as `ls` does, and updates the rows. A host that does not answer keeps its cached rows. The answers go to the session cache, as `ls` writes them. The picker stops its questions to the hosts, and waits for them, before the command goes on. It sends the terminal no query, so no reply can reach an attach: its framework runs with no input of its own, and so sends none of its queries, and the picker reads the keys itself. It reads one key at a time, and no further than the key that picks. It reads a paste in blocks, so the last block of a paste can hold keys typed within moments of it. Keys typed before the session's screen appears can still be lost, so the docs say to type after it appears.
+6. Typing filters the rows by a substring of `host/session`. A paste goes into the filter whole, with only the characters that a typed key gives: without its line breaks, its control characters and its hidden characters. A line break in a paste never picks. `↑` and `↓` move. Enter picks. `esc` cancels with exit code 130, and so does a signal or the end of the command's context, also just after a pick. `ctrl+c` cancels too, also inside a paste: a terminal drops `ctrl+c` from what it pastes, so one there comes from the keyboard, and a paste whose end never comes always has a way out.
 7. When it closes, it erases its rows. The command then runs as if the user had typed the address.
-8. With no session on any host, no picker opens. The command fails with exit code 3: `no sessions on any host`, and `Try: simstim new my-vps`, with the first saved host's name.
+8. When the hosts answer with no session, and no host that did not answer has a cached session, the picker closes. The command fails with exit code 3: `no sessions on any host`, and `Try: simstim new my-vps`, with the first saved host's name. When no host answers and nothing is cached, the command fails with the first host's error, with exit code 1.
 9. `rm` still asks its question after the pick.
 
 The picker is `internal/tui/picker.go`, with Bubble Tea v2, the launcher's framework ([0001](decisions/0001-go-and-bubble-tea.md)).
@@ -450,14 +454,14 @@ Every command that prints data or makes something takes `--json` (G10). This tab
 | `show` | A session object | C5 |
 | `new --detach`, `resume --detach` | A session object | C4 |
 | `new --count <n>` | An array: a session object for each session that started, and `{v, name, error}` for each that did not | P1.16 |
-| `ports` | `{v, host, session, ports}`, each port with `port`, `address`, `pid` and `process` (`api.Port`) | C4 |
-| `doctor` | `{v, checks, fixes}`, each fix with `id` and `problem` | C4 |
+| `ports` | `{v, host, session, id, ports}`: `session` is the name and `id` the ID. Each port has `port`, `address`, `pid` and `process` (`api.Port`) | C4 |
+| `doctor` | `{v, checks, fixes}`, each fix with `id` and `problem`. With `--fix -y`, each fix also has `done` or `error`, and a local fix has `changed`: each change it made, such as each file it removed. `--fix` without `-y` fails with exit code 4, because `--json` asks nothing | C4 |
 | `host ls` | An array of host objects, with `v` | today, C4 |
 | `host show` | A host object, with `reachable`, `error` and `info` ([section 11.2](#112-host-show)) | C7 |
 | `host test` | `{v, host, connect_ms, round_trip_ms}` | C4 |
 | `host doctor` | Today's object, with `v` | today, C4 |
 | `host restore` | `{v, host, results}`, each result as `api.RestoreResult` | C4 |
-| `host status` | `{v, host, state}` for a machine of `host create`, or `{v, host, output}` with a provider script's output | C4 |
+| `host status` | `{v, host, state, provider, id}` for a machine of `host create`, or `{v, host, output}` with a provider script's output | C4 |
 | `host alerts` | Today's `{alerts, log}`, with `v` | today, C4 |
 | `host alerts log` | An array of events, each with `v` | today, C4 |
 | `agents ls` | An array of agent rows, each with `v` | today, C4 |
@@ -509,7 +513,9 @@ When a command fails, stdout stays empty, and stderr gets one line (question C-7
 | `try` | The text of the `Try:` line |
 | `exit` | The exit code |
 | `suggestions` | The candidates of section 4.3, when there are any |
-| `data` | The host's `Data`, when it sent some |
+| `data` | The host's `Data`, when it sent some. A cancel during the fixes of `doctor --fix` has `fixes`: each fix as it ended, with what it changed |
+
+A line that does not parse is JSON when it gives `--json` as a flag, before any `--`. A word that is another flag's value is no flag: in `--debug-file --json`, `--json` names the debug file. The same holds for `--no-color`.
 
 A warning is one line before the result or the error:
 
@@ -656,12 +662,12 @@ Try: simstim attach box/1a2b
 
 In an address, a bare word is always a session, also when a host has that name. `attach box` looks for a session named `box`. `debug bundle` and `events` take a host or `<host>/<session>`, not an address. So a bare word there names a host, as `debug bundle` does today.
 
-**The session cache moves.** C5 moves the code of `internal/tui/memory.go` to the new `internal/client/seen.go`, so that the client and the launcher share it. The file stays `launcher.json` in the state folder. It gains `seen`, a map from each host's name to the time of its list. The launcher, `ls` and the steps above write it. Each writer reads the file first, changes only its hosts, and saves through a temporary file and a rename. Each writer's temporary file has its own name, from `os.CreateTemp` in the same folder. Today every writer uses `launcher.json.tmp`, so two writers can rename a half-written file. Two writers at once can still lose one change. The file is a cache: the next list mends a lost list, and the next attach a lost last session.
+**The session cache moves.** C5 moves the code of `internal/tui/memory.go` to the new `internal/client/seen.go`, so that the client and the launcher share it. The file stays `launcher.json` in the state folder. It gains `seen`, a map from each host's name to the time of its list. The launcher, `ls` and the steps above write it. Each writer reads the file first, changes only its hosts, and saves through a temporary file and a rename. Each writer's temporary file has its own name, from `os.CreateTemp` in the same folder, so no writer renames a half-written file. The session last attached to is in `last.json`, a file of its own: only an attach writes it, and the writers of lists never touch it. The cache is advisory. Two writers at once can still lose one change, and the next refresh mends a lost list.
 
 ### 9.3 `attach`
 
 1. Without an address, and with input on, `attach` opens the picker of [section 6.3](#63-pickers).
-2. `attach` needs stdin and stdout to be terminals. Without them it fails with exit code 2: `attach needs a terminal`, and `Try: simstim send box/auth-fix 'text'`.
+2. `attach` needs stdin and stdout to be terminals. Without them it fails with exit code 2: `attach needs a terminal`, and `Try: simstim send box/auth-fix 'text'`. The launcher entry points follow section 6.1 instead.
 3. A host with a provider script and `wake_on_attach` wakes, as today. From isolation task P1, a stopped sandbox wakes too, with `Waking auth-fix on box…` on stderr.
 4. On an ended agent, with input on, it asks `Start claude again in box/auth-fix? [Y/n]`. Yes does what `resume` does, then attaches. No prints why the agent ended, as today's error does, and exits with 130.
 5. With input off, an ended agent fails with exit code 4, and `Try: simstim attach box/auth-fix --restart`.

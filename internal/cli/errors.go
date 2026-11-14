@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -36,11 +37,11 @@ var exitCodes = []ExitCode{
 	{Code: 3, Kind: client.KindNotFound, Meaning: "A named thing does not exist.",
 		Examples: "No host, session, agent, provider, template or secret of that name."},
 	{Code: 4, Kind: client.KindNeedsAnswer, Meaning: "The command needs an answer, and input is off.",
-		Examples: "`setup` without a terminal, and without the flags that answer its questions. `new` without a terminal, for a folder that does not exist on the host."},
+		Examples: "`host add` without `--yes`. `doctor --fix` without `-y`. A new session's folder that does not exist, without `--mkdir`. `setup` without the flags that answer its questions."},
 	{Code: 5, Kind: client.KindRefused, Meaning: "A policy or a tier refuses the action.",
 		Examples: "None in this release."},
 	{Code: 130, Kind: client.KindCancelled, Meaning: "The user or a signal cancelled.",
-		Examples: "The answer no. A question of `host add` or `host destroy` that reads no answer, as in a script. Ctrl+C or SIGTERM outside an attach."},
+		Examples: "The answer no. Esc or Ctrl+C at a question or in the picker. The end of input at a question. Ctrl+C or SIGTERM outside an attach."},
 }
 
 // ExitCodes returns the table of exit codes, for the reference docs.
@@ -77,11 +78,16 @@ func (e *usageError) Unwrap() error { return e.UserError }
 // report is an error as printError shows it.
 type report struct {
 	msg, try       string
+	code           string
 	kind           client.Kind
 	suggestions    []string
 	usage, example string
+	data           json.RawMessage
 	// user is true for a user error, whose message is a sentence.
 	user bool
+	// bare is true for a cancel at a prompt, which prints its one line
+	// alone (cli-spec 6.2, rule 6).
+	bare bool
 }
 
 // describe turns err into its report. cmd is the command that ran, if
@@ -89,9 +95,12 @@ type report struct {
 // and the command line that a suggestion for an unknown name repeats.
 func describe(err error, cmd *cobra.Command) report {
 	var ue *client.UserError
+	var ce *cancelError
 	switch {
+	case errors.As(err, &ce):
+		return report{msg: ce.msg, code: "cancelled", kind: client.KindCancelled, data: ce.data, user: true, bare: true}
 	case errors.As(err, &ue):
-		r := report{msg: ue.Msg, try: ue.Hint, kind: ue.Kind, user: true}
+		r := report{msg: ue.Msg, try: ue.Hint, code: ue.Code, kind: ue.Kind, data: ue.Data, user: true}
 		var u *usageError
 		if errors.As(err, &u) {
 			r.suggestions, r.usage, r.example = u.suggestions, u.usage, u.example
@@ -99,6 +108,9 @@ func describe(err error, cmd *cobra.Command) report {
 		var un *client.UnknownNameError
 		if errors.As(err, &un) && cmd != nil {
 			r.suggestions, r.try = suggestName(cmd, un)
+		}
+		if r.code == "" {
+			r.code = "error"
 		}
 		if r.try == "" {
 			// An older helper, or a host error that came without a hint.
@@ -109,9 +121,9 @@ func describe(err error, cmd *cobra.Command) report {
 		}
 		return r
 	case errors.Is(err, client.ErrClosed):
-		return report{msg: "the connection to the host closed", try: "Run the command again.", user: true}
+		return report{msg: "the connection to the host closed", try: "Run the command again.", code: "closed", user: true}
 	default:
-		return report{msg: err.Error(), try: debugHint}
+		return report{msg: err.Error(), try: debugHint, code: "internal"}
 	}
 }
 
@@ -126,6 +138,10 @@ func helpOf(cmd *cobra.Command) string {
 // print writes the report in the one form of an error, on w
 // (docs/contributing/cli-spec.md 4.1).
 func (r report) print(w io.Writer, colour bool) {
+	if r.bare {
+		fmt.Fprintln(w, client.CleanBlock(r.msg))
+		return
+	}
 	red, blue, bold, reset := "\x1b[31m", "\x1b[34m", "\x1b[1m", "\x1b[0m"
 	if !colour {
 		red, blue, bold, reset = "", "", "", ""
@@ -161,25 +177,42 @@ func (r report) print(w io.Writer, colour bool) {
 // cmd is the command that failed, if any. signalled is true when a signal
 // ended the command, which makes it a cancel.
 func printError(w io.Writer, err error, cmd *cobra.Command, colour, signalled bool) int {
-	r := describe(err, cmd)
-	if signalled {
-		r.kind = client.KindCancelled
-		if !r.user {
-			r.msg, r.try, r.user = "the command stopped, because it got a signal to end", "Run the command again.", true
-		}
-	}
+	r := failure(err, cmd, signalled)
 	r.print(w, colour)
 	return exitCode(r.kind)
 }
 
+// printErrorJSON prints err as one JSON line on w, as a command with --json
+// does (cli-spec 7.4), and returns its exit code.
+func printErrorJSON(w io.Writer, err error, cmd *cobra.Command, signalled bool) int {
+	r := failure(err, cmd, signalled)
+	return r.printJSON(w)
+}
+
+// failure is the report of err. A signal makes it a cancel.
+func failure(err error, cmd *cobra.Command, signalled bool) report {
+	r := describe(err, cmd)
+	if signalled {
+		r.kind = client.KindCancelled
+		if !r.user {
+			r.msg, r.try, r.code, r.user = "the command stopped, because it got a signal to end", "Run the command again.", "cancelled", true
+		}
+	}
+	return r
+}
+
 // finish ends a run: it prints err, if any, and returns the exit code. A
 // signal makes the run a cancel, also when the command returned no error.
-func finish(w io.Writer, err error, cmd *cobra.Command, colour, signalled bool) int {
+// With asJSON the error is one JSON line (cli-spec 7.4).
+func finish(w io.Writer, err error, cmd *cobra.Command, colour, signalled, asJSON bool) int {
 	if err == nil {
 		if !signalled {
 			return 0
 		}
 		err = errSignal
+	}
+	if asJSON {
+		return printErrorJSON(w, err, cmd, signalled)
 	}
 	return printError(w, err, cmd, colour, signalled)
 }

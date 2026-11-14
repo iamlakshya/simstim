@@ -29,7 +29,15 @@ func addDebugFlags(root *cobra.Command) {
 	f.Lookup("debug").NoOptDefVal = diag.CatList
 	f.String("debug-file", "", "write the client's debug records to this `file`. On its own, it turns on every category ("+diag.EnvFile+" does the same)")
 	_ = root.RegisterFlagCompletionFunc("debug", completeCats(diag.AllCats))
-	root.PersistentPreRunE = startDebug
+	root.PersistentPreRunE = func(cmd *cobra.Command, args []string) error {
+		applyNoColor(cmd)
+		if !inputOn(cmd) {
+			// Nothing asks: SSH runs with BatchMode=yes, and keeps its words
+			// out of the terminal (cli-spec 6.1).
+			cmd.SetContext(client.WithoutInput(cmd.Context()))
+		}
+		return startDebug(cmd, args)
+	}
 }
 
 // completeCats completes a list of categories from cats, separated by
@@ -81,7 +89,7 @@ func startDebug(cmd *cobra.Command, args []string) error {
 	}
 	launcher := !cmd.HasParent() || cmd.Name() == "flip" && len(args) == 0
 	if !launcher {
-		fmt.Fprintf(os.Stderr, "debug on: %s\n", tildeHome(path))
+		note(cmd, "debug_on", "debug on: "+tildeHome(path))
 	}
 	return nil
 }
@@ -136,9 +144,9 @@ func debugStartCmd() *cobra.Command {
 				if st.Until != nil {
 					until = clockTime(*st.Until)
 				}
-				fmt.Printf("Debug is on for %s on %s until %s (%s).\n", client.CleanLine(s.Name), h.Name, until, client.CleanLine(strings.Join(st.Categories, ", ")))
-				fmt.Printf("The host writes its records to %s.\n", client.CleanPath(st.File))
-				fmt.Printf("To trace your keys too, attach with --debug. To stop: %s debug stop %s\n", brand.Name, client.CommandTarget(h.Name, s.ID))
+				fmt.Fprintf(os.Stderr, "Debug is on for %s on %s until %s (%s).\n", client.CleanLine(s.Name), h.Name, until, client.CleanLine(strings.Join(st.Categories, ", ")))
+				fmt.Fprintf(os.Stderr, "The host writes its records to %s.\n", client.CleanPath(st.File))
+				fmt.Fprintf(os.Stderr, "To trace your keys too, attach with --debug. To stop: %s debug stop %s\n", brand.Name, client.CommandTarget(h.Name, s.ID))
 				return nil
 			})
 		},
@@ -189,10 +197,10 @@ func debugStopCmd() *cobra.Command {
 					return err
 				}
 				if !st.Stopped {
-					fmt.Printf("Debug was not on for %s on %s.\n", client.CleanLine(s.Name), h.Name)
+					fmt.Fprintf(os.Stderr, "Debug was not on for %s on %s.\n", client.CleanLine(s.Name), h.Name)
 					return nil
 				}
-				fmt.Printf("Debug is off for %s on %s. Its records are in %s on the host.\n", client.CleanLine(s.Name), h.Name, client.CleanPath(st.File))
+				fmt.Fprintf(os.Stderr, "Debug is off for %s on %s. Its records are in %s on the host.\n", client.CleanLine(s.Name), h.Name, client.CleanPath(st.File))
 				return nil
 			})
 		},
@@ -213,7 +221,7 @@ func debugSaveCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				fmt.Printf("Saved the flight recorder of %s: %s on %s (%s).\n", client.CleanLine(s.Name), client.CleanPath(f.Path), h.Name, sizeText(f.Size))
+				fmt.Fprintf(os.Stderr, "Saved the flight recorder of %s: %s on %s (%s).\n", client.CleanLine(s.Name), client.CleanPath(f.Path), h.Name, sizeText(f.Size))
 				return nil
 			})
 		},
@@ -255,7 +263,7 @@ func debugProfileCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				fmt.Printf("Wrote a %s profile of %s: %s on %s (%s).\n", kind, client.CleanLine(s.Name), client.CleanPath(f.Path), h.Name, sizeText(f.Size))
+				fmt.Fprintf(os.Stderr, "Wrote a %s profile of %s: %s on %s (%s).\n", kind, client.CleanLine(s.Name), client.CleanPath(f.Path), h.Name, sizeText(f.Size))
 				return nil
 			})
 		},

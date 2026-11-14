@@ -246,8 +246,8 @@ func (m *Model) askFolders() tea.Cmd {
 		return nil
 	}
 	p.asked = word
-	name, c, ctx := h.name(), h.conn, m.ctx
-	return func() tea.Msg {
+	name, c := h.name(), h.conn
+	return m.bgCmd(func(ctx context.Context) tea.Msg {
 		cctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 		defer cancel()
 		res, err := c.Folders(cctx, word)
@@ -255,7 +255,7 @@ func (m *Model) askFolders() tea.Cmd {
 			return nil
 		}
 		return foldersMsg{host: name, prefix: word, res: res, quick: true}
-	}
+	})
 }
 
 // promptLine draws the prompt: the host or "search", the text with its

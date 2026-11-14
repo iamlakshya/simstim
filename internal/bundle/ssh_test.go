@@ -61,7 +61,7 @@ func TestTheSSHLogLosesWhatSSHKnows(t *testing.T) {
 	}
 	t.Setenv("PATH", bin+":"+os.Getenv("PATH"))
 	h := client.Host{Name: "sshbox", SSH: "sshbox"}
-	if err := client.SaveHosts([]client.Host{h}); err != nil {
+	if err := client.SaveHosts(context.Background(), []client.Host{h}); err != nil {
 		t.Fatal(err)
 	}
 	b := &builder{o: Options{Host: &h, SSH: true}, vals: laptopValues(), res: &Result{}}

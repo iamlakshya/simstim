@@ -1,6 +1,7 @@
 package client
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -60,8 +61,8 @@ type SetupAnswers struct {
 	// Trusted holds each repository that the user said yes for, with a hash
 	// or without one.
 	Trusted map[string]bool
-	// Warning is set when setup-trust.json did not parse. The client then
-	// moved it aside and reads no answers, or could not move it.
+	// Warning is set when setup-trust.json could not be read or did not
+	// parse. No answers are read. Only a file that did not parse moves aside.
 	Warning *UserError
 }
 
@@ -150,13 +151,27 @@ var renameTrust = os.Rename
 // version 1 or from an older client that rewrote the file, moves to Trusted
 // with no hash, unless Trusted has one already. A no in Hosts drops any yes
 // in Trusted, so a no wins. A file that does not parse moves aside (see
-// badTrustFile), and loadTrust returns no answers and a warning. stuck is
-// true when that file could not move: an answer must not write over it.
+// badTrustFileContext), and loadTrust returns no answers and a warning. stuck is
+// true when a file could not be read or moved: an answer must not overwrite it.
 func loadTrust() (f trustFile, warn *UserError, stuck bool) {
+	f, warn, stuck, _ = loadTrustContext(context.Background())
+	return f, warn, stuck
+}
+
+func loadTrustContext(ctx context.Context) (f trustFile, warn *UserError, stuck bool, stopped error) {
+	if err := ctx.Err(); err != nil {
+		return f, nil, false, err
+	}
 	b, err := os.ReadFile(trustPath())
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return f, unreadableTrustFile(err), true, nil
+	}
 	if err == nil && json.Unmarshal(b, &f) != nil {
 		f = trustFile{}
-		warn, stuck = badTrustFile()
+		warn, stuck, stopped = badTrustFileContext(ctx)
+		if stopped != nil {
+			return f, warn, stuck, stopped
+		}
 	}
 	if f.Hosts == nil {
 		f.Hosts = map[string]map[string]bool{}
@@ -177,16 +192,26 @@ func loadTrust() (f trustFile, warn *UserError, stuck bool) {
 		}
 	}
 	f.Version = trustVersion
-	return f, warn, stuck
+	return f, warn, stuck, nil
 }
 
-// badTrustFile moves a setup-trust.json that does not parse to the first
+// unreadableTrustFile leaves an existing file in place when a read fails.
+// A permissions or filesystem error is not a corrupt file to move aside.
+func unreadableTrustFile(err error) *UserError {
+	return &UserError{Msg: "could not read setup-trust.json: " + err.Error() + ". Each setup script asks again, and no answer is kept.",
+		Hint: "Check that you can read " + trustPath() + ", then try again.", Code: "trust_file"}
+}
+
+// badTrustFileContext moves a setup-trust.json that does not parse to the first
 // free name of setup-trust.json.bad, setup-trust.json.bad.1 and so on, so
 // that it never replaces an older one. The names have no limit. It returns
 // the warning that says so, and whether the file could not move: a name
 // that cannot be checked, or a move that fails, leaves it in place.
-func badTrustFile() (warn *UserError, stuck bool) {
+func badTrustFileContext(ctx context.Context) (warn *UserError, stuck bool, stopped error) {
 	for i := 0; ; i++ {
+		if err := ctx.Err(); err != nil {
+			return nil, false, err
+		}
 		bad := trustPath() + ".bad"
 		if i > 0 {
 			bad += "." + strconv.Itoa(i)
@@ -196,14 +221,17 @@ func badTrustFile() (warn *UserError, stuck bool) {
 		case err == nil:
 			continue // keep an older one
 		case !errors.Is(err, fs.ErrNotExist):
-			return stuckTrustFile(fmt.Errorf("check %s: %w", filepath.Base(bad), err)), true
+			return stuckTrustFile(fmt.Errorf("check %s: %w", filepath.Base(bad), err)), true, nil
+		}
+		if err := ctx.Err(); err != nil {
+			return nil, false, err
 		}
 		// The file may be gone already: another client moved it.
 		if err := renameTrust(trustPath(), bad); err != nil && !errors.Is(err, fs.ErrNotExist) {
-			return stuckTrustFile(err), true
+			return stuckTrustFile(err), true, nil
 		}
 		return &UserError{Msg: "could not read setup-trust.json, so each setup script asks again. The old file is now " + filepath.Base(bad) + ".",
-			Hint: "Compare the two files, then delete " + bad + ".", Code: "trust_file"}, false
+			Hint: "Compare the two files, then delete " + bad + ".", Code: "trust_file"}, false, nil
 	}
 }
 
@@ -291,26 +319,15 @@ func setKey[V any](m map[string]V, k string, v V) map[string]V {
 // under its lock. When the lock cannot be taken, it keeps nothing, and
 // returns an error that says why.
 func RememberSetup(host, repo string, run bool, hash string) (warn *UserError, err error) {
-	trustMu.Lock()
-	defer trustMu.Unlock()
-	if err := os.MkdirAll(StateDir(), 0o700); err != nil {
-		return nil, fmt.Errorf("make %s: %w", StateDir(), err)
-	}
-	unlock, err := lockTrust()
-	if err != nil {
-		return nil, trustLockError("the answer is not kept", err)
-	}
-	defer unlock()
-	f, warn, stuck := loadTrust()
-	if stuck {
-		return nil, warn
-	}
-	return warn, saveAnswer(f, host, repo, run, hash)
+	return RememberSetupContext(context.Background(), host, repo, run, hash)
 }
 
-// saveAnswer writes f with the user's answer for repo on host. The caller
-// holds the file's lock, so no other client writes the same temporary file.
-func saveAnswer(f trustFile, host, repo string, run bool, hash string) error {
+// saveAnswerContext writes f with the user's answer for repo on host. The caller
+// holds the file's lock. Only a newly created temporary file is owned here.
+func saveAnswerContext(ctx context.Context, f trustFile, host, repo string, run bool, hash string) error {
+	if err := ctx.Err(); err != nil {
+		return setupTrustStopped(err)
+	}
 	if run {
 		delete(f.Hosts[host], repo)
 		f.trusted(host)[repo] = trustEntry{SHA256: hash, At: time.Now().UTC().Truncate(time.Second)}
@@ -325,12 +342,32 @@ func saveAnswer(f trustFile, host, repo string, run bool, hash string) error {
 	if err != nil {
 		return fmt.Errorf("save the setup answers: %w", err)
 	}
-	tmp := trustPath() + ".tmp"
-	if err := os.WriteFile(tmp, append(b, '\n'), 0o600); err != nil {
-		return fmt.Errorf("write %s: %w", tmp, err)
+	if err := ctx.Err(); err != nil {
+		return setupTrustStopped(err)
 	}
-	if err := os.Rename(tmp, trustPath()); err != nil {
+	tmp, err := os.CreateTemp(filepath.Dir(trustPath()), ".setup-trust-*.tmp")
+	if err != nil {
+		return fmt.Errorf("make a temporary setup answers file: %w", err)
+	}
+	committed := false
+	defer func() {
+		_ = tmp.Close()
+		if !committed {
+			_ = os.Remove(tmp.Name())
+		}
+	}()
+	if _, err := tmp.Write(append(b, '\n')); err != nil {
+		return fmt.Errorf("write %s: %w", tmp.Name(), err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("close %s: %w", tmp.Name(), err)
+	}
+	if err := ctx.Err(); err != nil {
+		return setupTrustStopped(err)
+	}
+	if err := os.Rename(tmp.Name(), trustPath()); err != nil {
 		return fmt.Errorf("save the answer: %w", err)
 	}
+	committed = true
 	return nil
 }

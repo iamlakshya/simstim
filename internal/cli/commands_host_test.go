@@ -25,7 +25,7 @@ func TestHostCommands(t *testing.T) {
 		t.Errorf("host ls = %q", out)
 	}
 	var hosts []client.Host
-	if err := json.Unmarshal([]byte(ok(t, "host", "ls", "--json")), &hosts); err != nil || len(hosts) != 1 || hosts[0].Machine == nil {
+	if err := json.Unmarshal([]byte(okJSON(t, "host", "ls", "--json")), &hosts); err != nil || len(hosts) != 1 || hosts[0].Machine == nil {
 		t.Errorf("host ls --json = %+v, %v", hosts, err)
 	}
 	if out := ok(t, "host", "test", "box"); !strings.HasPrefix(out, "box answers: connect ") {
@@ -38,23 +38,23 @@ func TestHostCommands(t *testing.T) {
 		}
 	}
 	var d client.HostInfo
-	if err := json.Unmarshal([]byte(ok(t, "host", "doctor", "box", "--json")), &d); err != nil || d.Agents["shell"] != "/bin/sh" {
+	if err := json.Unmarshal([]byte(okJSON(t, "host", "doctor", "box", "--json")), &d); err != nil || d.Agents["shell"] != "/bin/sh" {
 		t.Errorf("host doctor --json = %+v, %v", d, err)
 	}
-	if out := ok(t, "host", "restore", "box"); out != "Nothing to restore on box.\n" {
+	if out := okSaid(t, "host", "restore", "box"); out != "Nothing to restore on box.\n" {
 		t.Errorf("host restore = %q", out)
 	}
 	if out := ok(t, "host", "status", "box"); !strings.Contains(out, `"state":"running"`) {
 		t.Errorf("host status = %q", out)
 	}
-	if out := ok(t, "host", "start", "box"); out != "box is running.\n" {
+	if out := okSaid(t, "host", "start", "box"); out != "box is running.\n" {
 		t.Errorf("host start = %q", out)
 	}
-	if out := ok(t, "host", "stop", "box"); !strings.HasPrefix(out, "box is stopped.") {
+	if out := okSaid(t, "host", "stop", "box"); !strings.HasPrefix(out, "box is stopped.") {
 		t.Errorf("host stop = %q", out)
 	}
 	fails(t, "is not an idle time", "host", "idle", "box", "soon")
-	if out := ok(t, "host", "idle", "box", "45m"); out != "Saved, but hosttest hosts do not stop by themselves.\n" {
+	if out := okSaid(t, "host", "idle", "box", "45m"); out != "Saved, but hosttest hosts do not stop by themselves.\n" {
 		t.Errorf("host idle = %q", out)
 	}
 	if h, _ := client.FindHost("box"); h.Machine.IdleStop != "45m" {
@@ -98,14 +98,17 @@ func TestHostDoctorChecksALimaVM(t *testing.T) {
 	}
 	// A VM made before host create closed the path has no hostLoopback.
 	write(`{}`)
-	out := ok(t, "host", "doctor", "box")
-	for _, want := range []string{
-		"  ✕ laptop loopback        box can reach services on your Mac's loopback address\n",
-		"    Try: limactl stop " + inst + ", then limactl edit --set '.networkOpts.hostLoopback = false' " + inst + ", then limactl start " + inst + "\n",
-	} {
-		if !strings.Contains(out, want) {
-			t.Errorf("host doctor lacks %q:\n%s", want, out)
-		}
+	out, hints, err := runApart(t, "host", "doctor", "box")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "  ✕ laptop loopback        box can reach services on your Mac's loopback address\n"
+	if !strings.Contains(out, want) {
+		t.Errorf("host doctor stdout lacks %q:\n%s", want, out)
+	}
+	hint := "    Try: limactl stop " + inst + ", then limactl edit --set '.networkOpts.hostLoopback = false' " + inst + ", then limactl start " + inst + "\n"
+	if !strings.Contains(hints, hint) || strings.Contains(out, hint) {
+		t.Errorf("host doctor needs its hint on stderr: stdout %q, stderr %q, want %q", out, hints, hint)
 	}
 	write(`{"networkOpts":{"hostLoopback":false}}`)
 	if out := ok(t, "host", "doctor", "box"); !strings.Contains(out, "  ✓ laptop loopback        box cannot reach services on your Mac's loopback address\n") {
@@ -125,27 +128,30 @@ func TestHostDoctorChecksALimaVM(t *testing.T) {
 	if err := os.Chtimes(filepath.Join(vmDir, "lima.yaml"), later, later); err != nil {
 		t.Fatal(err)
 	}
-	out = ok(t, "host", "doctor", "box")
-	for _, want := range []string{
-		"  ✕ laptop loopback        the Lima settings of box changed after its VM started, so they apply only after a restart\n",
-		"    Try: limactl stop " + inst + ", then limactl start " + inst + "\n",
-	} {
-		if !strings.Contains(out, want) {
-			t.Errorf("host doctor lacks %q:\n%s", want, out)
-		}
+	out, hints, err = runApart(t, "host", "doctor", "box")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want = "  ✕ laptop loopback        the Lima settings of box changed after its VM started, so they apply only after a restart\n"
+	if !strings.Contains(out, want) {
+		t.Errorf("host doctor stdout lacks %q:\n%s", want, out)
+	}
+	hint = "    Try: limactl stop " + inst + ", then limactl start " + inst + "\n"
+	if !strings.Contains(hints, hint) || strings.Contains(out, hint) {
+		t.Errorf("host doctor needs its hint on stderr: stdout %q, stderr %q, want %q", out, hints, hint)
 	}
 }
 
 func TestHostCommandsWithoutAMachine(t *testing.T) {
 	th := newTestHost(t)
 	script := th.h.Script("provider", `echo "$1 $(cat)" > "$HOME/provider.log"; [ "$1" = status ] && echo '{"state":"running"}'; true`)
-	if err := saveHost(client.Host{Name: "plain", SSH: "box", Provider: &client.Provider{Script: script}}); err != nil {
+	if err := saveHost(context.Background(), client.Host{Name: "plain", SSH: "box", Provider: &client.Provider{Script: script}}); err != nil {
 		t.Fatal(err)
 	}
 	if out := ok(t, "host", "status", "plain"); out != "{\"state\":\"running\"}\n" {
 		t.Errorf("host status = %q", out)
 	}
-	if out := ok(t, "host", "stop", "plain"); out != "plain: stop done.\n" {
+	if out := okSaid(t, "host", "stop", "plain"); out != "plain: stop done.\n" {
 		t.Errorf("host stop = %q", out)
 	}
 	if b, _ := os.ReadFile(filepath.Join(th.h.Home, "provider.log")); !strings.Contains(string(b), `"name":"plain"`) {
@@ -162,18 +168,18 @@ func TestHostRmAndDestroy(t *testing.T) {
 	newTestHost(t)
 	newSession(t, "busy", "sleep", "60")
 	failsWithHint(t, "are working: busy", "--force", "host", "destroy", "box", "--yes")
-	if out := ok(t, "host", "destroy", "box", "--yes", "--force"); !strings.HasPrefix(out, "Deleted the hosttest machine ") {
+	if out := okSaid(t, "host", "destroy", "box", "--yes", "--force"); !strings.HasPrefix(out, "Deleted the hosttest machine ") {
 		t.Errorf("destroy = %q", out)
 	}
 	fails(t, `no host named "box"`, "host", "rm", "box")
-	if err := saveHost(client.Host{Name: "kept", SSH: "box", Machine: &client.Machine{Provider: "lima", ID: "vm1"}}); err != nil {
+	if err := saveHost(context.Background(), client.Host{Name: "kept", SSH: "box", Machine: &client.Machine{Provider: "lima", ID: "vm1"}}); err != nil {
 		t.Fatal(err)
 	}
-	out := ok(t, "host", "rm", "kept")
+	out := okSaid(t, "host", "rm", "kept")
 	if !strings.HasPrefix(out, "Forgot kept.") || !strings.Contains(out, "Its lima machine vm1 is kept.") {
 		t.Errorf("host rm = %q", out)
 	}
-	if out := ok(t, "host", "ls"); !strings.HasPrefix(out, "No hosts yet.") {
+	if out := okSaid(t, "host", "ls"); !strings.HasPrefix(out, "No hosts yet.") {
 		t.Errorf("host ls = %q", out)
 	}
 	fails(t, "no hosts yet", "ls")
@@ -192,7 +198,7 @@ func TestAlertsCommands(t *testing.T) {
 	if !strings.Contains(out, "Alerts on box are on") || !strings.Contains(out, "→ command  cat > "+got) {
 		t.Errorf("alerts set = %q", out)
 	}
-	out = ok(t, "host", "alerts", "test", "box", "--event", "needs_input")
+	out = okSaid(t, "host", "alerts", "test", "box", "--event", "needs_input")
 	if !strings.HasPrefix(out, "Sent a test alert from box:\n  ✓ command") {
 		t.Errorf("alerts test = %q", out)
 	}
@@ -214,40 +220,37 @@ func TestAlertsCommands(t *testing.T) {
 		t.Errorf("alerts set webhook = %q", out)
 	}
 	var both map[string]json.RawMessage
-	if err := json.Unmarshal([]byte(ok(t, "host", "alerts", "box", "--json")), &both); err != nil || both["alerts"] == nil {
+	if err := json.Unmarshal([]byte(okJSON(t, "host", "alerts", "box", "--json")), &both); err != nil || both["alerts"] == nil {
 		t.Errorf("alerts --json = %v", err)
 	}
 	if out := ok(t, "host", "alerts", "log", "box"); !strings.Contains(out, "needs_input") && out != "box has sent no alerts yet.\n" {
 		t.Errorf("alerts log = %q", out)
 	}
 	ok(t, "host", "alerts", "log", "box", "--json", "-n", "3")
-	if out := ok(t, "host", "alerts", "off", "box"); out != "Alerts on box are off: its alerts file is gone.\n" {
+	if out := okSaid(t, "host", "alerts", "off", "box"); out != "Alerts on box are off: its alerts file is gone.\n" {
 		t.Errorf("alerts off = %q", out)
 	}
-	if out := ok(t, "host", "alerts", "off", "box"); out != "Alerts on box were already off.\n" {
+	if out := okSaid(t, "host", "alerts", "off", "box"); out != "Alerts on box were already off.\n" {
 		t.Errorf("alerts off again = %q", out)
 	}
 	fails(t, "the token command failed", "host", "alerts", "set", "box", "--ntfy", "https://ntfy.example.com/t", "--token-cmd", "exit 3")
 }
 
-// stdout runs fn and returns what it printed.
-func stdout(t *testing.T, fn func() error) (string, error) {
+// said runs fn and returns what it said on stderr. It prints no data, so
+// stdout must stay empty.
+func said(t *testing.T, fn func() error) (string, error) {
 	t.Helper()
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatal(err)
+	var err error
+	out, errOut := captureOutput(t, func() { err = fn() })
+	if out != "" {
+		t.Errorf("stdout got %q, which is no data", out)
 	}
-	old := os.Stdout
-	os.Stdout = w
-	out := make(chan string)
-	go func() {
-		b, _ := io.ReadAll(r)
-		out <- string(b)
-	}()
-	err = fn()
-	os.Stdout = old
-	_ = w.Close()
-	return <-out, err
+	return errOut, err
+}
+
+// quietPrompts is a prompter with input off, which asks nothing.
+func quietPrompts(ctx context.Context) *prompter {
+	return &prompter{ctx: ctx, in: strings.NewReader(""), out: io.Discard, path: "<name> test"}
 }
 
 func TestAddHost(t *testing.T) {
@@ -258,7 +261,7 @@ func TestAddHost(t *testing.T) {
 
 	// With no helper on the host, add installs this build's, when it has
 	// one for the host's platform.
-	out, err := stdout(t, func() error { return addHost(ctx, added, true) })
+	out, err := said(t, func() error { return addHost(ctx, quietPrompts(ctx), added, true) })
 	if _, embedded := helpers.For(runtime.GOOS, runtime.GOARCH); runtime.GOOS == "linux" && embedded {
 		if err != nil || !strings.Contains(out, "✓ installed "+brand.HostBinary+" "+client.HelperVersion()) {
 			t.Fatalf("add = %v\n%s", err, out)
@@ -270,7 +273,7 @@ func TestAddHost(t *testing.T) {
 		}
 		// With the helper in place, as a release installs it, add goes on.
 		th.h.Install(client.HelperVersion(), "")
-		if out, err = stdout(t, func() error { return addHost(ctx, added, false) }); err != nil {
+		if out, err = said(t, func() error { return addHost(ctx, quietPrompts(ctx), added, false) }); err != nil {
 			t.Fatalf("add = %v\n%s", err, out)
 		}
 		if !strings.Contains(out, "is already installed") {

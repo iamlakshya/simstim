@@ -1,6 +1,9 @@
 package client
 
-import "time"
+import (
+	"context"
+	"time"
+)
 
 // SetLeasePeriod lets tests renew leases faster. It returns a function that
 // puts the old period back.
@@ -46,6 +49,14 @@ func FlushClipMemory() {
 	}
 	clipMemMu.Unlock()
 	for _, m := range mems {
-		m.flush(10 * time.Second)
+		m.flush(context.Background(), 10*time.Second)
 	}
+}
+
+// SetRequestStage makes f see each stage of a request (requestStage), for
+// the rest of a test. It returns a function that puts the old one back.
+func SetRequestStage(f func(stage string)) func() {
+	old := requestStage
+	requestStage = f
+	return func() { requestStage = old }
 }

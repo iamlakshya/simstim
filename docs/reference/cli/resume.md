@@ -18,6 +18,7 @@ Starts the agent of a session again, in the same session, after the agent ended.
 simstim resume my-vps/app
 simstim resume my-vps/app --memory-max 6G
 simstim resume my-vps/app --secret GITHUB_TOKEN
+simstim resume my-vps/app --detach --json
 ```
 
 ## Flags
@@ -25,6 +26,7 @@ simstim resume my-vps/app --secret GITHUB_TOKEN
 | Flag | What it does |
 | --- | --- |
 | `--detach` | resume it without attaching |
+| `--json` | print JSON for scripts, and ask nothing (see docs/how-to/scripting.md) |
 | `--memory-max <size>` | cap the session's memory from now on: auto, or a size such as 4G (default: the size it had) |
 | `--secret <stringArray>` | pass again a secret that the session started with and that hosts.toml does not give its host (repeatable) |
 
@@ -34,5 +36,7 @@ simstim resume my-vps/app --secret GITHUB_TOKEN
 | --- | --- |
 | `--debug[=<categories>]` | turn on the debug mode, with every category, or with the categories listed: attach, net, memory, launcher, runtime. A list binds only in the = form, such as `--debug=net` |
 | `--debug-file <file>` | write the client's debug records to this file. On its own, it turns on every category (SIMSTIM_DEBUG_FILE does the same) |
+| `--no-color` | print no colour (NO_COLOR does the same) |
+| `--no-input` | ask nothing: a question that needs an answer fails with exit code 4, and names the flag that answers it (SIMSTIM_NO_INPUT=1 does the same) |
 
 See [all commands](_index.md).

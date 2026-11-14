@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -26,11 +27,11 @@ func TestSuggestions(t *testing.T) {
 		{[]string{"list"}, []string{"ls"}, brand.Name + " ls"},
 		{[]string{"run"}, []string{"new"}, help("new")},
 		{[]string{"run", "box"}, []string{"new"}, brand.Name + " new box"},
-		{[]string{"at"}, []string{"attach"}, help("attach")},
+		{[]string{"at"}, []string{"attach"}, brand.Name + " attach"},
 		{[]string{"ssh", "box"}, nil, help("")},
 		{[]string{"kil"}, []string{"kill"}, help("kill")},
 		{[]string{"LS"}, []string{"ls"}, brand.Name + " ls"},
-		{[]string{"Attach"}, []string{"attach"}, help("attach")},
+		{[]string{"Attach"}, []string{"attach"}, brand.Name + " attach"},
 		{[]string{"Attach", "box/s"}, []string{"attach"}, brand.Name + " attach box/s"},
 		{[]string{"x"}, nil, help("")},
 		{[]string{"de"}, []string{"demo", "kill", "debug"}, brand.Name + " demo"},
@@ -105,7 +106,7 @@ func TestErrorsOfTheCommandLine(t *testing.T) {
 		has  []string
 	}{
 		{[]string{"atach", "x"}, 2, []string{`Did you mean "attach"?`, "\nTry: " + brand.Name + " attach x\n"}},
-		{[]string{"attach"}, 2, []string{"attach needs <host>/<session>", "Usage:   " + brand.Name + " attach", "Example: " + brand.Name + " attach my-vps/auth-fix", "Try: " + brand.Name + " attach --help"}},
+		{[]string{"attach"}, 2, []string{"attach needs a session, as <host>/<session>", "Usage:   " + brand.Name + " attach", "Example: " + brand.Name + " attach my-vps/auth-fix", "Try: " + brand.Name + " attach --help"}},
 		{[]string{"kill"}, 2, []string{"Example: " + brand.Name + " kill my-vps/auth-fix"}},
 		{[]string{"host", "ad", "box"}, 2, []string{`host has no command "ad"`, `Did you mean "add"?`, "Try: " + brand.Name + " host add box"}},
 		{[]string{"agents", "instal", "claude"}, 2, []string{`agents has no command "instal"`, "Try: " + brand.Name + " agents install claude"}},
@@ -160,7 +161,7 @@ func TestErrorsOfTheCommandLine(t *testing.T) {
 	if got, code := lineErr(t, "host", "test", "nowhere"); code != 3 || !strings.Contains(got, "Try: "+brand.Name+" host add nowhere") {
 		t.Errorf("host test nowhere = %d:\n%s", code, got)
 	}
-	if err := client.SaveHosts(nil); err != nil {
+	if err := client.SaveHosts(context.Background(), nil); err != nil {
 		t.Fatal(err)
 	}
 	if got, code := lineErr(t, "ls"); code != 1 || !strings.Contains(got, "no hosts yet") {
@@ -247,7 +248,7 @@ func TestNounsAloneShowTheirHelp(t *testing.T) {
 func TestEachHostCodeExitsThroughMain(t *testing.T) {
 	hosttest.New(t)
 	_, tr := withFake(t, nil)
-	if err := client.SaveHosts([]client.Host{{Name: "box", Machine: &client.Machine{Provider: "fake", ID: "fake-box"}}}); err != nil {
+	if err := client.SaveHosts(context.Background(), []client.Host{{Name: "box", Machine: &client.Machine{Provider: "fake", ID: "fake-box"}}}); err != nil {
 		t.Fatal(err)
 	}
 	old := os.Args

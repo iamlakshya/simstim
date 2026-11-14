@@ -126,16 +126,16 @@ func (m *Model) peek() tea.Cmd {
 		return nil
 	}
 	m.preview.inflight = true
-	key, c, ctx := m.preview.key, h.conn, m.ctx
-	return func() tea.Msg {
-		cctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	key, c := m.preview.key, h.conn
+	return m.bgCmd(func(bgCtx context.Context) tea.Msg {
+		cctx, cancel := context.WithTimeout(bgCtx, 10*time.Second)
 		defer cancel()
 		data, cols, rows, err := c.Peek(cctx, key.id, peekBytes)
 		if err != nil {
 			return peekMsg{key: key, err: err}
 		}
 		return peekMsg{key: key, shot: renderScreen(data, cols, rows)}
-	}
+	})
 }
 
 func (m *Model) onPeek(msg peekMsg) {

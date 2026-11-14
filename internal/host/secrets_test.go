@@ -6,7 +6,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"syscall"
 	"testing"
@@ -15,6 +14,7 @@ import (
 	"github.com/iamlakshya/simstim/internal/api"
 	"github.com/iamlakshya/simstim/internal/paths"
 	"github.com/iamlakshya/simstim/internal/ring"
+	"github.com/iamlakshya/simstim/internal/testhome"
 )
 
 const secretValue = "fake-secret-for-tests-0123456789"
@@ -24,11 +24,11 @@ const secretValue = "fake-secret-for-tests-0123456789"
 func secretHome(t *testing.T) {
 	t.Helper()
 	alertHome(t)
-	rt, err := os.MkdirTemp("/tmp", "sec")
+	rt, err := testhome.ShortTempDir("sec")
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { os.RemoveAll(rt) })
+	t.Cleanup(func() { _ = os.RemoveAll(rt) })
 	t.Setenv("XDG_RUNTIME_DIR", rt)
 }
 
@@ -118,7 +118,7 @@ func TestSecretsReachOnlyTheAgent(t *testing.T) {
 	if !strings.Contains(string(manifest), `"secrets": [`) || !strings.Contains(string(manifest), `"OPENAI_API_KEY"`) {
 		t.Errorf("the manifest does not name the secret:\n%s", manifest)
 	}
-	args, err := exec.Command("ps", "-ww", "-o", "args=", "-p", strconv.Itoa(pid)).Output()
+	args, err := ownedProcessArgs(h.cmd.Process)
 	if err != nil || strings.Contains(string(args), secretValue) || !strings.Contains(string(args), "sleep") {
 		t.Errorf("the agent's command line %q (%v)", args, err)
 	}

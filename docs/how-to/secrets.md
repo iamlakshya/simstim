@@ -32,6 +32,8 @@ simstim new my-server --agent claude --secret ANTHROPIC_API_KEY
 
 `--secret` takes one name, and you can repeat it. The command of each runs first, with up to 60 s each, so a password manager can ask you to unlock it.
 
+The command gets your terminal when stdin and stderr are terminals, also when stdout goes to a file, as in `simstim new my-server --detach > out.txt`. Its questions and messages then reach you on stderr. With `--no-input`, `--json` or `SIMSTIM_NO_INPUT` set, it gets no terminal, and a password manager that must ask fails instead ([scripts](scripting.md)).
+
 ## Give a host secrets for every session
 
 In `hosts.toml`, a host's `secrets` lists names that every new session on it gets, from the command line and from the launcher alike:

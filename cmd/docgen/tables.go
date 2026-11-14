@@ -146,7 +146,7 @@ func installTable(b *strings.Builder) {
 func exitCodesPage() []byte {
 	var b strings.Builder
 	b.WriteString(header("Exit codes", "5"))
-	b.WriteString("Every command exits with one of these codes. The code comes from the kind of the error, never from its message, so a script can rely on it. The error itself goes to stderr: `Error:` and the message, then one `Try:` line with the next step.\n\n")
+	b.WriteString("Every command exits with one of these codes. The code comes from the kind of the error, never from its message, so a script can rely on it. The error itself goes to stderr: `Error:` and the message, then one `Try:` line with the next step. With `--json`, it is one JSON line on stderr instead ([scripting](../how-to/scripting.md)).\n\n")
 	b.WriteString("| Code | Kind | Meaning | Examples |\n| --- | --- | --- | --- |\n")
 	for _, e := range cli.ExitCodes() {
 		kind := ""

@@ -61,23 +61,23 @@ func TestExitCodeIgnoresTheMessage(t *testing.T) {
 // A signal makes a run a cancel, also when the command returned nil.
 func TestFinish(t *testing.T) {
 	var b bytes.Buffer
-	if code := finish(&b, nil, nil, false, false); code != 0 || b.Len() != 0 {
+	if code := finish(&b, nil, nil, false, false, false); code != 0 || b.Len() != 0 {
 		t.Errorf("a run without error = %d %q", code, b.String())
 	}
-	if code := finish(&b, nil, nil, false, true); code != 130 || !strings.Contains(b.String(), "Error: the command stopped, because it got a signal to end.") {
+	if code := finish(&b, nil, nil, false, true, false); code != 130 || !strings.Contains(b.String(), "Error: the command stopped, because it got a signal to end.") {
 		t.Errorf("a signal after no error = %d %q", code, b.String())
 	}
 	b.Reset()
 	ue := &client.UserError{Msg: "setup stopped; nothing was changed", Hint: brand.Name + " setup", Code: "cancelled", Kind: client.KindCancelled}
-	if code := finish(&b, errors.New("context canceled"), nil, false, true); code != 130 || !strings.Contains(b.String(), "got a signal") {
+	if code := finish(&b, errors.New("context canceled"), nil, false, true, false); code != 130 || !strings.Contains(b.String(), "got a signal") {
 		t.Errorf("a signal after a plain error = %d %q", code, b.String())
 	}
 	b.Reset()
-	if code := finish(&b, &client.UserError{Msg: "cannot reach box", Hint: "ssh box", Code: "unreachable"}, nil, false, true); code != 130 || !strings.Contains(b.String(), "cannot reach box.") {
+	if code := finish(&b, &client.UserError{Msg: "cannot reach box", Hint: "ssh box", Code: "unreachable"}, nil, false, true, false); code != 130 || !strings.Contains(b.String(), "cannot reach box.") {
 		t.Errorf("a signal keeps a user error's words: %d %q", code, b.String())
 	}
 	b.Reset()
-	if code := finish(&b, ue, nil, false, false); code != 130 || !strings.Contains(b.String(), "setup stopped") {
+	if code := finish(&b, ue, nil, false, false, false); code != 130 || !strings.Contains(b.String(), "setup stopped") {
 		t.Errorf("a cancel = %d %q", code, b.String())
 	}
 }
@@ -182,6 +182,9 @@ func TestGoldenErrors(t *testing.T) {
 	show("needs an answer", &client.UserError{Msg: "setup asks its questions on a terminal", Hint: brand.Name + " setup --host <host> --yes", Code: "answers_needed", Kind: client.KindNeedsAnswer}, nil)
 	show("refused", &client.UserError{Msg: "devbox runs sessions at microvm or stronger, and process is weaker", Hint: brand.Name + " new devbox --wall microvm", Code: "wall_floor", Kind: client.HostKind("wall_floor")}, nil)
 	show("cancelled", &client.UserError{Msg: "cancelled; nothing was deleted", Hint: brand.Name + " host destroy box", Code: "cancelled", Kind: client.KindCancelled}, nil)
+	show("a cancel at a prompt", cancelled(), nil)
+	show("a cancel after a change", cancelled("installed the helper on box", "saved the host box"), nil)
+	show("needs an answer at a prompt", (&prompter{line: []string{"host", "add", "box"}, flagsAt: 3}).needs(qInstallHelper, "a yes to install the helper on box"), nil)
 	show("a host error without a hint", &client.UserError{Msg: "no session abc", Code: "not_found", Kind: client.HostKind("not_found")}, nil)
 	show("closed", client.ErrClosed, nil)
 	show("not a user error", errors.New("read /home/me/hosts.toml: permission denied"), nil)

@@ -32,6 +32,7 @@ var exitProcess = os.Exit
 func idleExit() {
 	EndBridge()
 	stopBridgesDebug("idle")
+	reclaimBridgesUploads()
 	exitProcess(0)
 }
 

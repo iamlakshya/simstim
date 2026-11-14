@@ -44,6 +44,9 @@ func (m *Model) nthSession(n int) int {
 }
 
 func (m *Model) onClick(msg tea.MouseClickMsg) tea.Cmd {
+	if m.transferInputBlocked() {
+		return nil
+	}
 	mouse := msg.Mouse()
 	if mouse.Button != tea.MouseLeft {
 		return nil
@@ -111,6 +114,9 @@ func (m *Model) clickModal(x, y int) tea.Cmd {
 }
 
 func (m *Model) onWheel(msg tea.MouseWheelMsg) tea.Cmd {
+	if m.transferInputBlocked() {
+		return nil
+	}
 	key := map[tea.MouseButton]string{tea.MouseWheelUp: "up", tea.MouseWheelDown: "down"}[msg.Mouse().Button]
 	if key == "" {
 		return nil

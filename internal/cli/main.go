@@ -19,16 +19,22 @@ import (
 func Main() int {
 	ctx, stop := listen()
 	defer stop()
-	cmd, err := Root().ExecuteContextC(withLine(ctx, os.Args[1:]))
+	args := os.Args[1:]
+	cmd, err := Root().ExecuteContextC(withLine(ctx, args))
 	// ctx ends only at a signal.
 	signalled := ctx.Err() != nil
 	if err != nil {
 		client.DebugLog().Warn("the command failed", "err", err)
 	}
 	// The debug files are complete before the process ends.
-	client.StopDebug(os.Stderr)
-	return finish(os.Stderr, err, cmd, colourOn(os.Stderr), signalled)
+	asJSON := jsonAsked(cmd, args)
+	stopDebug(stderrFor(asJSON, "debug_incomplete"))
+	return finish(os.Stderr, err, cmd, colourAsked(cmd, args, os.Stderr), signalled, asJSON)
 }
+
+// stopDebug ends the client's debug run, and writes any warning on its
+// writer. Tests replace it, to make it warn.
+var stopDebug = client.StopDebug
 
 // Root builds the command tree.
 func Root() *cobra.Command {
@@ -41,10 +47,11 @@ func Root() *cobra.Command {
 		SilenceErrors: true,
 		Args:          unknownCommand,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return runHome(cmd.Context())
+			return runHome(cmd)
 		},
 	}
 	root.AddCommand(setupCmd(), hostCmd(), newCmd(), lsCmd(), agentsCmd(), attachCmd(), resumeCmd(), flipCmd(), sendCmd(), killCmd(), renameCmd(), portsCmd(), forwardCmd(), pullCmd(), doctorCmd(), debugCmd(), configCmd(), demoCmd(), versionCmd())
+	addRootFlags(root)
 	addDebugFlags(root)
 	// Cobra adds these two itself when it runs, after guard would have
 	// looked: add them now, so that they get the same errors.
@@ -60,12 +67,20 @@ func Root() *cobra.Command {
 }
 
 func versionCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "version",
-		Short: "Print the version",
-		Args:  cobra.NoArgs,
-		Run: func(*cobra.Command, []string) {
+	var asJSON bool
+	cmd := &cobra.Command{
+		Use:     "version",
+		Short:   "Print the version",
+		Example: "  " + brand.Name + " version\n  " + brand.Name + " version --json",
+		Args:    cobra.NoArgs,
+		RunE: func(*cobra.Command, []string) error {
+			if asJSON {
+				return printJSON(map[string]string{"version": version.Version, "protocol": version.Protocol, "helper": client.HelperVersion()})
+			}
 			fmt.Printf("%s %s (protocol %s, host helper %s)\n", brand.Name, version.Version, version.Protocol, client.HelperVersion())
+			return nil
 		},
 	}
+	addJSON(cmd, &asJSON)
+	return cmd
 }

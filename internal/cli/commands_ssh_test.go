@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/iamlakshya/simstim/internal/brand"
 	"github.com/iamlakshya/simstim/internal/client"
@@ -19,7 +20,7 @@ func TestForward(t *testing.T) {
 	newSession(t, "web", "sleep", "60")
 	fails(t, "listens on no TCP ports yet", "forward", "box/web")
 	fails(t, `"x" is not a port`, "forward", "box/web", "x")
-	out := ok(t, "forward", "box/web", "45678:3000", "3001")
+	out := okSaid(t, "forward", "box/web", "45678:3000", "3001")
 	if !strings.Contains(out, "Forwarding http://localhost:45678 → box:3000\n") || !strings.Contains(out, "Press Ctrl+C to stop.") {
 		t.Errorf("forward = %q", out)
 	}
@@ -40,9 +41,24 @@ func TestForward(t *testing.T) {
 			t.Errorf("forward ran ssh with %q, want %q, a connection of its own, and ClearAllForwardings=no", line, noForwarding)
 		}
 	}
+	// With input off, the forward's ssh asks nothing: it runs with
+	// BatchMode=yes, so an ssh that would ask for a password does not.
+	th.h.Script("ssh", `echo "$@" >> "$HOME/ssh.log"
+for a; do last=$a; done
+case " $* " in
+*" -N "*) case " $* " in *" BatchMode=yes "*) exit 0;; esac; echo "Password: " >&2; sleep 5; exit 255;;
+*" -O "*) exit 0;;
+esac
+exec sh -c "$last"
+`)
+	start := time.Now()
+	_, errOut, err := runApart(t, "forward", "box/web", "45679:3000", "--no-input")
+	if err != nil || strings.Contains(errOut, "Password") || time.Since(start) > 4*time.Second {
+		t.Errorf("forward --no-input asked: %v\n%s", err, errOut)
+	}
 	// A host reached without SSH cannot forward.
 	th.ch.SSH = ""
-	if err := saveHost(th.ch); err != nil {
+	if err := saveHost(context.Background(), th.ch); err != nil {
 		t.Fatal(err)
 	}
 	fails(t, "forward needs SSH", "forward", "box/web", "3000")
@@ -92,7 +108,7 @@ func TestPull(t *testing.T) {
 		t.Fatal(err)
 	}
 	newSession(t, "feat", "sleep", "60") // in the home folder, not a repository
-	out := ok(t, "new", "box", "--detach", "--name", "repo", "--dir", remote, "--", "sleep", "60")
+	out := okSaid(t, "new", "box", "--detach", "--name", "repo", "--dir", remote, "--", "sleep", "60")
 	if !strings.Contains(out, "(repo, shell)") {
 		t.Fatalf("new = %q", out)
 	}
@@ -100,7 +116,7 @@ func TestPull(t *testing.T) {
 	t.Chdir(th.h.Root)
 	fails(t, "not in a git repository", "pull", "box/repo")
 	t.Chdir(local)
-	out = ok(t, "pull", "box/repo")
+	out = okSaid(t, "pull", "box/repo")
 	if !strings.HasPrefix(out, "Fetched feature from repo on box into feature: 1 commits that your current branch does not have.") ||
 		!strings.Contains(out, "The session has 1 files with uncommitted changes") {
 		t.Errorf("pull = %q", out)
@@ -168,7 +184,7 @@ func TestKillNamesTheHostOfAKeptWorktree(t *testing.T) {
 			t.Fatalf("git %v: %v\n%s", args, err, out)
 		}
 	}
-	m := startedRE.FindStringSubmatch(ok(t, "new", "box", "--detach", "--name", "kept", "--dir", repo, "--worktree", "--", "sleep", "60"))
+	m := startedRE.FindStringSubmatch(okSaid(t, "new", "box", "--detach", "--name", "kept", "--dir", repo, "--worktree", "--", "sleep", "60"))
 	if m == nil {
 		t.Fatal("new did not start the session")
 	}
@@ -181,7 +197,7 @@ func TestKillNamesTheHostOfAKeptWorktree(t *testing.T) {
 	}
 	th.h.Script("systemctl", "echo running\n")
 	th.h.Script("systemd-run", "echo 'Failed to connect to bus: No such file or directory' >&2\nexit 1\n")
-	out := ok(t, "kill", "box/"+m[1])
+	out := okSaid(t, "kill", "box/"+m[1])
 	for _, want := range []string{"Kept the worktree ", "could not start git in a scope on box: Failed to connect to bus", "\nTry: " + brand.Name + " host doctor box\n"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("kill printed %q, without %q", out, want)
@@ -224,7 +240,7 @@ func TestKillShowsWhyAWorktreeStays(t *testing.T) {
 			t.Fatalf("git %v: %v\n%s", args, err, out)
 		}
 	}
-	m := startedRE.FindStringSubmatch(ok(t, "new", "box", "--detach", "--name", "bad", "--dir", repo, "--worktree", "--", "sleep", "60"))
+	m := startedRE.FindStringSubmatch(okSaid(t, "new", "box", "--detach", "--name", "bad", "--dir", repo, "--worktree", "--", "sleep", "60"))
 	if m == nil {
 		t.Fatal("new did not start the session")
 	}
@@ -234,7 +250,7 @@ func TestKillShowsWhyAWorktreeStays(t *testing.T) {
 	}
 	_, _ = f.WriteString("[hook \"a=b\"]\n\tcommand = true\n")
 	f.Close()
-	out := ok(t, "kill", "box/"+m[1])
+	out := okSaid(t, "kill", "box/"+m[1])
 	for _, want := range []string{"Kept the worktree ", " on box defines a hook named \"a=b\"", "\nTry: Remove the hook on the host"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("kill printed %q, without %q", out, want)

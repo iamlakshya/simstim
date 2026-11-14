@@ -11,11 +11,12 @@ import (
 
 	"github.com/iamlakshya/simstim/internal/brand"
 	"github.com/iamlakshya/simstim/internal/client"
+	"github.com/iamlakshya/simstim/internal/keyread"
 	"github.com/iamlakshya/simstim/internal/keys"
 )
 
 func doctorCmd() *cobra.Command {
-	var fix, yes bool
+	var fix, yes, asJSON bool
 	cmd := &cobra.Command{
 		Use:   "doctor",
 		Short: "Check this machine and its terminal",
@@ -23,25 +24,46 @@ func doctorCmd() *cobra.Command {
 			"offers to fix what it can: SSH configs it generated for hosts you removed, and\n" +
 			"ControlMaster sockets whose master died. Each fix is shown before it runs.\n" +
 			"`host doctor <name>` checks a host.",
-		Args: unknownCommand,
+		Example: "  " + brand.Name + " doctor\n  " + brand.Name + " doctor --fix\n  " + brand.Name + " doctor --json",
+		Args:    unknownCommand,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			fmt.Println("This computer:")
-			printChecks(os.Stdout, client.LocalChecks())
-			fixes := client.LocalFixes(false, nil)
+			if asJSON && fix && !yes {
+				// With --json nothing is asked, so -y must answer for each fix.
+				return prompts(cmd).needs(qFix, "a yes for each fix")
+			}
+			checks, fixes := client.LocalChecks(), client.LocalFixes(false, nil)
+			if asJSON && fix {
+				res, err := applyAll(fixes, func(ids []string) ([]client.Fix, error) {
+					return applyLocal(cmd.Context(), ids)
+				})
+				if err != nil {
+					return err
+				}
+				fixes = res
+			}
+			if asJSON {
+				if fixes == nil {
+					fixes = []client.Fix{}
+				}
+				return printJSON(map[string]any{"checks": checks, "fixes": fixes})
+			}
+			printf("This computer:\n")
+			printChecks(os.Stdout, os.Stderr, checks)
 			if !fix {
 				for _, f := range fixes {
-					fmt.Printf("  ✕ %s\n", f.Problem)
+					printf("  ✕ %s\n", f.Problem)
 				}
 				if len(fixes) > 0 {
-					fmt.Printf("\nTry: %s doctor --fix\n", brand.Name)
+					say(cmd, "\nTry: %s doctor --fix\n", brand.Name)
 				}
 				return nil
 			}
-			return offerFixes(cmd.Context(), os.Stdin, os.Stdout, fixes, yes, func(ids []string) ([]client.Fix, error) {
-				return client.LocalFixes(true, ids), nil
+			return offerFixes(prompts(cmd), qFix, fixes, yes, func(ids []string) ([]client.Fix, error) {
+				return applyLocal(cmd.Context(), ids)
 			})
 		},
 	}
+	addJSON(cmd, &asJSON)
 	cmd.Flags().BoolVar(&fix, "fix", false, "offer to fix the problems found, one by one")
 	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "with --fix, apply every fix without asking")
 	cmd.AddCommand(&cobra.Command{
@@ -79,17 +101,29 @@ func keyTester(ctx context.Context) error {
 	if err != nil {
 		return &client.UserError{Msg: "bad image paste key: " + err.Error(), Hint: "Fix attach.image_paste_key in the config.", Code: "bad_config", Kind: client.KindUsage}
 	}
-	old, err := term.MakeRaw(fd)
+	if err := keyread.CheckStuck(os.Stdin); err != nil {
+		return terminalReadError(err)
+	}
+	original, err := term.GetState(fd)
 	if err != nil {
+		return fmt.Errorf("read the terminal state: %w", err)
+	}
+	// A Windows reader can change console modes in its factory. Restore the
+	// state from before that factory, after the reader's own cleanup.
+	defer func() { _ = term.Restore(fd, original) }()
+	in, done, err := inputOf(os.Stdin)
+	if err != nil {
+		return err
+	}
+	if _, err := term.MakeRaw(fd); err != nil {
+		done()
 		return fmt.Errorf("put the terminal in raw mode: %w", err)
 	}
-	defer func() { _ = term.Restore(fd, old) }()
 	// Kitty keyboard flags 1|2|4|8|16: report everything, with event types.
 	fmt.Print("\x1b[>31u\x1b[?2004h")
 	defer fmt.Print("\x1b[<u\x1b[?2004l")
-	fmt.Printf("Press keys. %s owns %s (detach) and %s (image paste). Press q twice to quit.\r\n\r\n", brand.DisplayName, dk, pk)
-	in, done := inputOf(os.Stdin)
 	defer done()
+	fmt.Printf("Press keys. %s owns %s (detach) and %s (image paste). Press q twice to quit.\r\n\r\n", brand.DisplayName, dk, pk)
 	sctx, cancel := stopping(ctx)
 	defer cancel()
 	f := keys.New(dk, pk)

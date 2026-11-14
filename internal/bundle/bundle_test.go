@@ -31,9 +31,6 @@ import (
 	"github.com/iamlakshya/simstim/internal/paths"
 )
 
-// The tests in this binary may start it again as a session's holder.
-func TestMain(m *testing.M) { hosttest.Main(m) }
-
 // The private values of the canary test: each must be gone from every
 // file of the bundle.
 const (
@@ -69,7 +66,7 @@ func TestTheBundleHoldsNoCanary(t *testing.T) {
 	t.Setenv("USER", fakeUser)
 	bundle.SetHostname(t, fakeLaptop+".local")
 	ch, _ := h.ClientHost(fakeHost)
-	if err := client.SaveHosts([]client.Host{ch, {Name: "jumpy", SSH: fakeUser + "@jump.example.net:2222"}}); err != nil {
+	if err := client.SaveHosts(context.Background(), []client.Host{ch, {Name: "jumpy", SSH: fakeUser + "@jump.example.net:2222"}}); err != nil {
 		t.Fatal(err)
 	}
 	if err := alerts.Save(paths.AlertsConfig(), api.AlertsConfig{Destinations: []api.AlertDestination{

@@ -1,0 +1,35 @@
+== new: a missing folder (answers "\n")
+The folder /home/dev/src/new-app does not exist on box.
+Make it? [y/N] 
+== new: a setup script (answers "y\n")
+The repository /home/dev/src/app on box has a setup script:
+
+    /home/dev/src/app/.<name>/setup
+
+It runs in the session before the agent, as you, with the session's environment and
+secrets. Say yes only for a repository you trust. The answer is kept for this
+repository on box until the script changes; --setup and --no-setup override it.
+
+Run it? [y/N] 
+== doctor --fix (answers "y\n")
+
+Found 1 to fix:
+
+1. Linger is off.
+   Fix: turn on linger.
+   Runs: loginctl enable-linger me
+   Fix it? [y/N] 
+
+== host destroy (answers "no\n")
+Delete the fake machine fake-box, with its disk and every session on it? [y/N] 
+-> Cancelled. Nothing changed.
+== host add: the helper (answers "n\n")
+Install it? [y/N] 
+-> Cancelled. Nothing changed.
+== three answers that are not one (answers "x\nmaybe\n?\n")
+Install it? [y/N] Type y or n, or press Enter for the answer in capitals.
+Install it? [y/N] Type y or n, or press Enter for the answer in capitals.
+Install it? [y/N] 
+-> Cancelled. Nothing changed.
+== a typed name (answers "box\n")
+Type box to delete the machine, or press Enter to keep it: 

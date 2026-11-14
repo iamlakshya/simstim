@@ -44,32 +44,80 @@ exec sh -c "$last"
 	t.Setenv("PATH", filepath.Join(h.Root, "bin")+":"+os.Getenv("PATH"))
 	t.Setenv("NO_COLOR", "1")
 	t.Setenv("TERM", "xterm-256color")
-	if err := client.SaveHosts([]client.Host{ch}); err != nil {
+	if err := client.SaveHosts(context.Background(), []client.Host{ch}); err != nil {
 		t.Fatal(err)
 	}
 	return &testHost{h: h, ch: ch, tr: tr}
 }
 
-// run runs the command line and returns what it printed.
+// run runs the command line and returns what it printed on stdout: its
+// data. okSaid and runApart give its stderr.
 func run(t *testing.T, args ...string) (string, error) {
 	t.Helper()
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatal(err)
+	out, _, err := runApart(t, args...)
+	return out, err
+}
+
+// runApart runs the command line as Main does, and returns its stdout and
+// its stderr apart.
+func runApart(t *testing.T, args ...string) (string, string, error) {
+	t.Helper()
+	var err error
+	out, errOut := captureOutput(t, func() {
+		root := Root()
+		root.SetArgs(args)
+		err = root.ExecuteContext(withLine(context.Background(), args))
+	})
+	return out, errOut, err
+}
+
+// okSaid runs the command line, fails the test on an error, and returns
+// what it said on stderr: its messages. stdout must be empty.
+func okSaid(t *testing.T, args ...string) string {
+	t.Helper()
+	out, errOut, err := runApart(t, args...)
+	if err != nil || out != "" {
+		t.Fatalf("%s: %v\nstdout %q\nstderr %q", strings.Join(args, " "), err, out, errOut)
 	}
-	old := os.Stdout
-	os.Stdout = w
-	out := make(chan string)
-	go func() {
-		b, _ := io.ReadAll(r)
-		out <- string(b)
-	}()
-	root := Root()
-	root.SetArgs(args)
-	err = root.ExecuteContext(context.Background())
-	os.Stdout = old
-	_ = w.Close()
-	return <-out, err
+	return errOut
+}
+
+// okJSON runs the command line, fails the test on an error, and returns its
+// stdout alone.
+func okJSON(t *testing.T, args ...string) string {
+	t.Helper()
+	out, errOut, err := runApart(t, args...)
+	if err != nil {
+		t.Fatalf("%s: %v\n%s%s", strings.Join(args, " "), err, out, errOut)
+	}
+	return out
+}
+
+// captureOutput runs fn with stdout and stderr each going to a pipe, and
+// returns what each got.
+func captureOutput(t *testing.T, fn func()) (string, string) {
+	t.Helper()
+	pipe := func(f **os.File) (restore func() string) {
+		r, w, err := os.Pipe()
+		if err != nil {
+			t.Fatal(err)
+		}
+		old := *f
+		*f = w
+		got := make(chan string)
+		go func() {
+			b, _ := io.ReadAll(r)
+			got <- string(b)
+		}()
+		return func() string {
+			*f = old
+			_ = w.Close()
+			return <-got
+		}
+	}
+	endOut, endErr := pipe(&os.Stdout), pipe(&os.Stderr)
+	fn()
+	return endOut(), endErr()
 }
 
 // ok runs the command line, fails the test on an error, and returns the output.
@@ -104,7 +152,7 @@ var startedRE = regexp.MustCompile(`Started box/(\w+) \(`)
 // newSession starts a detached session and returns its ID.
 func newSession(t *testing.T, name string, argv ...string) string {
 	t.Helper()
-	out := ok(t, append([]string{"new", "box", "--detach", "--name", name, "--"}, argv...)...)
+	out := okSaid(t, append([]string{"new", "box", "--detach", "--name", name, "--"}, argv...)...)
 	m := startedRE.FindStringSubmatch(out)
 	if m == nil {
 		t.Fatalf("new printed %q", out)
@@ -130,22 +178,22 @@ func TestSessionCommands(t *testing.T) {
 		t.Errorf("ls = %q", out)
 	}
 	var listed []hostSessions
-	if err := json.Unmarshal([]byte(ok(t, "ls", "--json", "--host", "box")), &listed); err != nil || len(listed) != 1 || len(listed[0].Sessions) != 1 || listed[0].Sessions[0].ID != id {
+	if err := json.Unmarshal([]byte(okJSON(t, "ls", "--json", "--host", "box")), &listed); err != nil || len(listed) != 1 || len(listed[0].Sessions) != 1 || listed[0].Sessions[0].ID != id {
 		t.Errorf("ls --json = %+v, %v", listed, err)
 	}
-	if out := ok(t, "send", "box/web", "echo SENT-$((3*3))"); out != "Sent to web on box.\n" {
+	if out := okSaid(t, "send", "box/web", "echo SENT-$((3*3))"); out != "Sent to web on box.\n" {
 		t.Errorf("send = %q", out)
 	}
 	hosttest.WaitFor(t, 5*time.Second, "the sent command's output", func() bool { return strings.Contains(peekOutput(t, id), "SENT-9") })
 	ok(t, "send", "--no-enter", "box/"+id, "echo NOT-YET")
-	if out := ok(t, "rename", "box/"+id, "api"); out != "Renamed web to api on box.\n" {
+	if out := okSaid(t, "rename", "box/"+id, "api"); out != "Renamed web to api on box.\n" {
 		t.Errorf("rename = %q", out)
 	}
 	hosttest.WaitFor(t, 5*time.Second, "the new name", func() bool { return strings.Contains(ok(t, "ls"), " api ") })
-	if out := ok(t, "ports", "box/api"); out != "api on box listens on no TCP ports.\n" {
+	if out := okSaid(t, "ports", "box/api"); out != "api on box listens on no TCP ports.\n" {
 		t.Errorf("ports = %q", out)
 	}
-	if out := ok(t, "kill", "box/api"); out != "Deleted api ("+id+") on box.\n" {
+	if out := okSaid(t, "kill", "box/api"); out != "Deleted api ("+id+") on box.\n" {
 		t.Errorf("kill = %q", out)
 	}
 	if out := ok(t, "ls"); out != "box  no sessions\n" {
@@ -202,7 +250,7 @@ func TestVersionAndConfig(t *testing.T) {
 		t.Errorf("config keymap = %q", out)
 	}
 	var km []map[string]any
-	if err := json.Unmarshal([]byte(ok(t, "config", "keymap", "--json")), &km); err != nil || len(km) == 0 {
+	if err := json.Unmarshal([]byte(okJSON(t, "config", "keymap", "--json")), &km); err != nil || len(km) == 0 {
 		t.Errorf("config keymap --json: %v", err)
 	}
 }

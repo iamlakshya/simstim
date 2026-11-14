@@ -40,7 +40,7 @@ def run(c):
 
 def new(c, envx, *args, stdin=subprocess.DEVNULL):
     r = subprocess.run([c.cli, "new", c.HOST] + list(args), env=envx, stdin=stdin, capture_output=True, text=True, timeout=120)
-    m = re.search(r"Started [^/]+/(\w+)", r.stdout)
+    m = re.search(r"Started [^/]+/(\w+)", r.stderr)  # a confirmation, on stderr
     return (m.group(1) if m else None), r
 
 
@@ -64,7 +64,7 @@ def agent_checks(c):
     if claude.get("installed"):
         # Harmless: an installed agent is reported, and no installer runs.
         r = subprocess.run([c.cli, "agents", "install", "claude", "--host", c.HOST], stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=120)
-        c.ok(r.returncode == 0 and "is already installed on" in r.stdout and "install-claude" not in r.stdout,
+        c.ok(r.returncode == 0 and "is already installed on" in r.stderr and "install-claude" not in r.stdout + r.stderr,
              "agents: install of an installed agent says so and runs nothing")
 
 

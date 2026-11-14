@@ -4,100 +4,94 @@
 <circle cx="22" cy="20" r="6" fill="#FF5F57"/>
 <circle cx="42" cy="20" r="6" fill="#FEBC2E"/>
 <circle cx="62" cy="20" r="6" fill="#28C840"/>
-<text x="40.8" y="74.0" textLength="8.4" fill="#0C4547">⢄</text>
-<text x="49.2" y="74.0" textLength="8.4" fill="#0C5E67">⡠</text>
-<text x="57.6" y="74.0" textLength="8.4" fill="#057989">⠊</text>
-<text x="74.4" y="74.0" textLength="8.4" fill="#0C4547">s</text>
-<text x="82.8" y="74.0" textLength="8.4" fill="#0C4D52">i</text>
-<text x="91.2" y="74.0" textLength="8.4" fill="#0D565C">m</text>
-<text x="99.6" y="74.0" textLength="8.4" fill="#0C5E67">s</text>
-<text x="108.0" y="74.0" textLength="8.4" fill="#0B6772">t</text>
-<text x="116.4" y="74.0" textLength="8.4" fill="#08707E">i</text>
-<text x="124.8" y="74.0" textLength="8.4" fill="#057989">m</text>
+<text x="40.8" y="74.0" textLength="8.4" fill="#656565">⢄</text>
+<text x="49.2" y="74.0" textLength="8.4" fill="#656565">⡠</text>
+<text x="57.6" y="74.0" textLength="8.4" fill="#656565">⠊</text>
+<text x="74.4" y="74.0" textLength="58.8" fill="#656565">simstim</text>
 <text x="150.0" y="74.0" textLength="8.4" fill="#656565">›</text>
 <text x="158.4" y="74.0" textLength="67.2" fill="#656565"> homelab</text>
 <text x="679.2" y="74.0" textLength="33.6" fill="#656565">4ms </text>
 <text x="712.8" y="74.0" textLength="8.4" fill="#656565">·</text>
 <text x="721.2" y="74.0" textLength="100.8" fill="#656565"> 4 sessions </text>
 <text x="822.0" y="74.0" textLength="8.4" fill="#656565">·</text>
-<text x="838.8" y="74.0" textLength="92.4" fill="#825E31">1 needs you</text>
+<text x="830.4" y="74.0" textLength="100.8" fill="#656565"> 1 needs you</text>
 <text x="40.8" y="91.0" textLength="890.4" fill="#656565">──────────────────────────────────────────────────────────────────────────────────────────────────────────</text>
-<text x="40.8" y="125.0" textLength="8.4" fill="#4D776D">▍</text>
+<text x="40.8" y="125.0" textLength="8.4" fill="#656565">▍</text>
 <text x="57.6" y="125.0" textLength="8.4" fill="#656565">1</text>
-<text x="74.4" y="125.0" textLength="8.4" fill="#825E31">●</text>
+<text x="74.4" y="125.0" textLength="8.4" fill="#656565">●</text>
 <text x="91.2" y="125.0" textLength="109.2" fill="#656565">auth-refactor</text>
 <text x="318.0" y="125.0" textLength="50.4" fill="#656565">claude</text>
 <text x="402.0" y="125.0" textLength="75.6" fill="#656565">~/src/app</text>
-<text x="687.6" y="125.0" textLength="109.2" fill="#825E31">needs input  </text>
+<text x="687.6" y="125.0" textLength="109.2" fill="#656565">needs input  </text>
 <text x="822.0" y="125.0" textLength="25.2" fill="#656565">43s</text>
-<text x="864.0" y="125.0" textLength="8.4" fill="#825E31">⣶</text>
-<text x="872.4" y="125.0" textLength="8.4" fill="#825E31">⣾</text>
-<text x="880.8" y="125.0" textLength="8.4" fill="#825E31">⣿</text>
-<text x="889.2" y="125.0" textLength="8.4" fill="#825E31">⣄</text>
-<text x="897.6" y="125.0" textLength="8.4" fill="#825E31">⣀</text>
-<text x="906.0" y="125.0" textLength="8.4" fill="#825E31">⣀</text>
-<text x="914.4" y="125.0" textLength="8.4" fill="#825E31">⣀</text>
-<text x="922.8" y="125.0" textLength="8.4" fill="#825E31">⣀</text>
+<text x="864.0" y="125.0" textLength="8.4" fill="#656565">⣶</text>
+<text x="872.4" y="125.0" textLength="8.4" fill="#656565">⣿</text>
+<text x="880.8" y="125.0" textLength="8.4" fill="#656565">⣿</text>
+<text x="889.2" y="125.0" textLength="8.4" fill="#656565">⣄</text>
+<text x="897.6" y="125.0" textLength="8.4" fill="#656565">⣀</text>
+<text x="906.0" y="125.0" textLength="8.4" fill="#656565">⣀</text>
+<text x="914.4" y="125.0" textLength="8.4" fill="#656565">⣀</text>
+<text x="922.8" y="125.0" textLength="8.4" fill="#656565">⣀</text>
 <text x="57.6" y="142.0" textLength="8.4" fill="#656565">2</text>
-<text x="74.4" y="142.0" textLength="8.4" fill="#4D776D">⠶</text>
+<text x="74.4" y="142.0" textLength="8.4" fill="#656565">⠶</text>
 <text x="91.2" y="142.0" textLength="75.6" fill="#656565">api-tests</text>
 <text x="318.0" y="142.0" textLength="67.2" fill="#656565">codex   </text>
 <text x="402.0" y="142.0" textLength="75.6" fill="#656565">~/src/api</text>
-<text x="687.6" y="142.0" textLength="109.2" fill="#4D776D">working      </text>
+<text x="687.6" y="142.0" textLength="109.2" fill="#656565">working      </text>
 <text x="813.6" y="142.0" textLength="33.6" fill="#656565">  8s</text>
-<text x="864.0" y="142.0" textLength="8.4" fill="#4D776D">⣶</text>
-<text x="872.4" y="142.0" textLength="8.4" fill="#4D776D">⣾</text>
-<text x="880.8" y="142.0" textLength="8.4" fill="#4D776D">⣿</text>
-<text x="889.2" y="142.0" textLength="8.4" fill="#4D776D">⣄</text>
-<text x="897.6" y="142.0" textLength="8.4" fill="#4D776D">⣼</text>
-<text x="906.0" y="142.0" textLength="8.4" fill="#4D776D">⣿</text>
-<text x="914.4" y="142.0" textLength="8.4" fill="#4D776D">⣷</text>
-<text x="922.8" y="142.0" textLength="8.4" fill="#4D776D">⣶</text>
+<text x="864.0" y="142.0" textLength="8.4" fill="#656565">⣶</text>
+<text x="872.4" y="142.0" textLength="8.4" fill="#656565">⣿</text>
+<text x="880.8" y="142.0" textLength="8.4" fill="#656565">⣿</text>
+<text x="889.2" y="142.0" textLength="8.4" fill="#656565">⣄</text>
+<text x="897.6" y="142.0" textLength="8.4" fill="#656565">⣼</text>
+<text x="906.0" y="142.0" textLength="8.4" fill="#656565">⣿</text>
+<text x="914.4" y="142.0" textLength="8.4" fill="#656565">⣷</text>
+<text x="922.8" y="142.0" textLength="8.4" fill="#656565">⣶</text>
 <text x="40.8" y="159.0" textLength="16.8" fill="#656565">──</text>
-<text x="66.0" y="159.0" textLength="67.2" fill="#90E1C6" font-weight="bold">Commands</text>
+<text x="66.0" y="159.0" textLength="67.2" fill="#BFBDB6" font-weight="bold">Commands</text>
 <text x="141.6" y="159.0" textLength="789.6" fill="#656565">──────────────────────────────────────────────────────────────────────────────────────────────</text>
 <rect x="74.4" y="180.0" width="8.4" height="17.0" fill="#BFBDB6"/>
-<text x="57.6" y="193.0" textLength="8.4" fill="#90E1C6" font-weight="bold">❯</text>
-<text x="57.6" y="227.0" textLength="8.4" fill="#90E1C6">▍</text>
+<text x="57.6" y="193.0" textLength="8.4" fill="#BFBDB6" font-weight="bold">❯</text>
+<text x="57.6" y="227.0" textLength="8.4" fill="#BFBDB6">▍</text>
 <text x="74.4" y="227.0" textLength="92.4" fill="#BFBDB6" font-weight="bold">New session</text>
-<text x="906.0" y="227.0" textLength="8.4" fill="#90E1C6" font-weight="bold">n</text>
+<text x="906.0" y="227.0" textLength="8.4" fill="#BFBDB6" font-weight="bold">n</text>
 <text x="74.4" y="244.0" textLength="218.4" fill="#BFBDB6" font-weight="bold">New session, with the form</text>
 <text x="74.4" y="261.0" textLength="117.6" fill="#BFBDB6" font-weight="bold">Attach session</text>
-<text x="872.4" y="261.0" textLength="42.0" fill="#90E1C6" font-weight="bold">enter</text>
+<text x="872.4" y="261.0" textLength="42.0" fill="#BFBDB6" font-weight="bold">enter</text>
 <text x="74.4" y="278.0" textLength="151.2" fill="#BFBDB6" font-weight="bold">Peek at the screen</text>
-<text x="872.4" y="278.0" textLength="42.0" fill="#90E1C6" font-weight="bold">space</text>
+<text x="872.4" y="278.0" textLength="42.0" fill="#BFBDB6" font-weight="bold">space</text>
 <text x="74.4" y="295.0" textLength="117.6" fill="#BFBDB6" font-weight="bold">Rename session</text>
-<text x="906.0" y="295.0" textLength="8.4" fill="#90E1C6" font-weight="bold">r</text>
+<text x="906.0" y="295.0" textLength="8.4" fill="#BFBDB6" font-weight="bold">r</text>
 <text x="74.4" y="312.0" textLength="117.6" fill="#BFBDB6" font-weight="bold">Delete session</text>
-<text x="906.0" y="312.0" textLength="8.4" fill="#90E1C6" font-weight="bold">d</text>
+<text x="906.0" y="312.0" textLength="8.4" fill="#BFBDB6" font-weight="bold">d</text>
 <text x="74.4" y="329.0" textLength="126.0" fill="#656565">Resume session </text>
 <text x="200.4" y="329.0" textLength="8.4" fill="#656565">·</text>
 <text x="208.8" y="329.0" textLength="176.4" fill="#656565"> the agent still runs</text>
-<text x="906.0" y="329.0" textLength="8.4" fill="#90E1C6" font-weight="bold">u</text>
+<text x="906.0" y="329.0" textLength="8.4" fill="#BFBDB6" font-weight="bold">u</text>
 <text x="74.4" y="346.0" textLength="159.6" fill="#BFBDB6" font-weight="bold">Copy attach command</text>
-<text x="906.0" y="346.0" textLength="8.4" fill="#90E1C6" font-weight="bold">y</text>
+<text x="906.0" y="346.0" textLength="8.4" fill="#BFBDB6" font-weight="bold">y</text>
 <text x="74.4" y="363.0" textLength="168.0" fill="#BFBDB6" font-weight="bold">Next waiting session</text>
-<text x="906.0" y="363.0" textLength="8.4" fill="#90E1C6" font-weight="bold">w</text>
+<text x="906.0" y="363.0" textLength="8.4" fill="#BFBDB6" font-weight="bold">w</text>
 <text x="74.4" y="380.0" textLength="84.0" fill="#656565">Open host </text>
 <text x="158.4" y="380.0" textLength="8.4" fill="#656565">·</text>
 <text x="166.8" y="380.0" textLength="184.8" fill="#656565"> the sessions are open</text>
-<text x="872.4" y="380.0" textLength="42.0" fill="#90E1C6" font-weight="bold">enter</text>
+<text x="872.4" y="380.0" textLength="42.0" fill="#BFBDB6" font-weight="bold">enter</text>
 <text x="74.4" y="397.0" textLength="67.2" fill="#BFBDB6" font-weight="bold">Add host</text>
-<text x="906.0" y="397.0" textLength="8.4" fill="#90E1C6" font-weight="bold">a</text>
+<text x="906.0" y="397.0" textLength="8.4" fill="#BFBDB6" font-weight="bold">a</text>
 <text x="74.4" y="414.0" textLength="100.8" fill="#BFBDB6" font-weight="bold">Guided setup</text>
-<text x="906.0" y="414.0" textLength="8.4" fill="#90E1C6" font-weight="bold">s</text>
+<text x="906.0" y="414.0" textLength="8.4" fill="#BFBDB6" font-weight="bold">s</text>
 <text x="74.4" y="431.0" textLength="100.8" fill="#BFBDB6" font-weight="bold">Host details</text>
-<text x="906.0" y="431.0" textLength="8.4" fill="#90E1C6" font-weight="bold">i</text>
+<text x="906.0" y="431.0" textLength="8.4" fill="#BFBDB6" font-weight="bold">i</text>
 <text x="74.4" y="448.0" textLength="75.6" fill="#BFBDB6" font-weight="bold">Test host</text>
 <text x="74.4" y="465.0" textLength="117.6" fill="#BFBDB6" font-weight="bold">Reconnect host</text>
 <text x="74.4" y="482.0" textLength="92.4" fill="#BFBDB6" font-weight="bold">Remove host</text>
 <text x="74.4" y="499.0" textLength="142.8" fill="#BFBDB6" font-weight="bold">Back to the hosts</text>
 <text x="74.4" y="516.0" textLength="100.8" fill="#BFBDB6" font-weight="bold">All sessions</text>
-<text x="57.6" y="550.0" textLength="42.0" fill="#90E1C6">enter</text>
+<text x="24.0" y="550.0" textLength="75.6" fill="#BFBDB6">    enter</text>
 <text x="99.6" y="550.0" textLength="33.6" fill="#656565"> run</text>
-<text x="158.4" y="550.0" textLength="8.4" fill="#90E1C6">↑</text>
-<text x="166.8" y="550.0" textLength="8.4" fill="#90E1C6">↓</text>
+<text x="158.4" y="550.0" textLength="8.4" fill="#BFBDB6">↑</text>
+<text x="166.8" y="550.0" textLength="8.4" fill="#BFBDB6">↓</text>
 <text x="175.2" y="550.0" textLength="42.0" fill="#656565"> move</text>
-<text x="242.4" y="550.0" textLength="25.2" fill="#90E1C6">esc</text>
+<text x="217.2" y="550.0" textLength="50.4" fill="#BFBDB6">   esc</text>
 <text x="267.6" y="550.0" textLength="50.4" fill="#656565"> close</text>
 </svg>
