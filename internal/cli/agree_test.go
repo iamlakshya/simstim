@@ -331,7 +331,7 @@ func TestShowScreenAdversarialAndCancel(t *testing.T) {
 	}
 	_, tr := withFake(t, []client.Session{sess})
 	box := client.Host{Name: "box", Machine: &client.Machine{Provider: "fake", ID: "fake-box"}}
-	if err := client.SaveHosts([]client.Host{box}); err != nil {
+	if err := client.SaveHosts(t.Context(), []client.Host{box}); err != nil {
 		t.Fatal(err)
 	}
 	tr.Screens = map[string][]byte{
@@ -488,7 +488,7 @@ exec sh -c "$last"
 	}
 	clearEvents := func() { _ = os.Remove(eventsFile) }
 
-	if err := client.SaveHosts([]client.Host{{Name: "plain", SSH: "box"}}); err != nil {
+	if err := client.SaveHosts(t.Context(), []client.Host{{Name: "plain", SSH: "box"}}); err != nil {
 		t.Fatal(err)
 	}
 

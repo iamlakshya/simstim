@@ -23,6 +23,8 @@ The command runs with `sh -c` on your laptop. What it prints is the value, less 
 | Bitwarden CLI | `bw get password <item>` |
 | Linux Secret Service | `secret-tool lookup <attribute> <value>` |
 
+Run `simstim config check` after editing a secret. It checks command strings and structured definitions with the same rules as a session start. It reports unknown fields, wrong types, conflicting key spellings and invalid bindings at their original lines. It also checks unused definitions and `secret_tiers`. The check never runs a secret command.
+
 ## Ask for secrets when you start a session
 
 <!-- test: help (needs a host and a secret) -->
@@ -71,3 +73,5 @@ Without it, `resume` fetches nothing, and says which secrets the host asks for. 
 ## After a host restart
 
 When the host restarts, the session comes back without its secrets: nothing on the host has them, and your laptop may be closed. The agent starts anyway. Its terminal says which secrets it lacks, and the launcher shows "started without its secrets" on the session. To get them back, start a new session.
+
+The launcher may keep your last valid display settings after a broken edit. Secret commands still require the current config and permissions. Fix the file before starting or resuming a session that needs them.

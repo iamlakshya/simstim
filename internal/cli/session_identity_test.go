@@ -12,7 +12,6 @@ import (
 	"github.com/iamlakshya/simstim/internal/api"
 	"github.com/iamlakshya/simstim/internal/brand"
 	"github.com/iamlakshya/simstim/internal/client"
-	"github.com/iamlakshya/simstim/internal/tui"
 )
 
 func TestKnownSessionIDNeverFallsBackToName(t *testing.T) {
@@ -55,7 +54,7 @@ func TestIDCommandsValidateBeforeDial(t *testing.T) {
 
 func TestAttachLastAndIDDoNotSelectANameCollision(t *testing.T) {
 	_, tr := fakeBox(t, []client.Session{{ID: "owner123", Name: "legacy_ID", State: api.StateIdle}})
-	tui.RememberLast("box", "legacy_ID", "mine")
+	client.RememberLast("box", "legacy_ID", "mine")
 	for _, args := range [][]string{{"attach", "-"}, {"attach", "--id", "--", "box/legacy_ID"}} {
 		_, errOut, code := mainRun(t, args...)
 		if code != 3 || !strings.Contains(errOut, "no session") {

@@ -2,6 +2,8 @@ package host
 
 import (
 	"encoding/json"
+	"github.com/iamlakshya/simstim/internal/api"
+	"github.com/iamlakshya/simstim/internal/inputtransfer"
 
 	"github.com/iamlakshya/simstim/internal/proto"
 )
@@ -15,6 +17,7 @@ import (
 
 // sessionOps are the bridge's requests that act on a session.
 var sessionOps = map[string]bool{
+	api.SandboxReviewContextOp: true, "inputs.begin": true, inputtransfer.Describe: true, "sandbox.snapshot": true, "exec": true, "spawn": true,
 	"delete": true, "resume": true, "restore": true, "send": true, "peek": true, "rename": true, "kill": true,
 }
 

@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 )
 
@@ -45,7 +46,15 @@ type heldKey struct{ name string }
 
 // heldLock is the lock of a host that a command took. Its unlock sets
 // gone: a context that outlives the lock no longer says that it holds it.
-type heldLock struct{ gone atomic.Bool }
+type heldLock struct {
+	gone      atomic.Bool
+	forgetMu  sync.Mutex
+	forgotten *hostForgetWitness
+	stateOnce sync.Once
+	state     *hostStateLifetime
+	native    *hostOperationFile
+	terminal  atomic.Bool
+}
 
 // LockHost takes the lock of host name for the command kind, such as
 // "host rm", and returns a context that holds it, and the function that
@@ -55,34 +64,66 @@ type heldLock struct{ gone atomic.Bool }
 // that another command holds is the error host_busy, which names the kind
 // of that command. A name that cannot name a host has nothing to lock.
 func LockHost(ctx context.Context, name, kind string) (context.Context, func(), error) {
+	if err := ctx.Err(); err != nil {
+		return ctx, nil, err
+	}
 	path := hostLockPath(name)
 	if path == "" {
 		return ctx, func() {}, nil
 	}
-	if h, ok := ctx.Value(heldKey{name}).(*heldLock); ok && !h.gone.Load() {
+	if held, ok := ctx.Value(heldKey{name}).(*heldLock); ok {
+		if err := held.checkStateOperation(ctx); err != nil {
+			return ctx, nil, err
+		}
+		if held.terminal.Load() {
+			return ctx, nil, hostStateRemovalError("local state retirement needs its existing-only retry path")
+		}
+		if err := held.native.normalHeader(ctx); err != nil {
+			return ctx, nil, err
+		}
 		return ctx, func() {}, nil
 	}
-	f, err := openLock(path, "the host "+name)
-	if err != nil {
-		return ctx, nil, err
+	if ctx.Value(hostMembershipContextKey{}) != nil {
+		return ctx, nil, hostStateRemovalError("a new OP cannot begin inside a membership callback")
 	}
-	if err := takeLock(f); err != nil {
-		f.Close()
+	owned, err := openHostOperationFile(ctx, name)
+	if err != nil {
+		return ctx, nil, wrapHostOperationError(name, path, err)
+	}
+	if err := takeLock(owned.file); err != nil {
+		defer owned.close()
 		if errors.Is(err, errLockTaken) {
-			return ctx, nil, busy(name, path)
+			return ctx, nil, busyHostOperation(name, owned)
 		}
 		return ctx, nil, flockFailed("the host "+name, path, err)
 	}
-	// Who holds it, for the error of another command. The lock itself
-	// never depends on this file.
-	_ = os.WriteFile(path+".who", []byte(kind), 0o600)
-	h := &heldLock{}
-	unlock := func() {
-		h.gone.Store(true)
-		_ = os.Remove(path + ".who")
-		f.Close()
+	held := &heldLock{native: owned}
+	if err := owned.checkAfterTake(ctx, name, kind, held); err != nil {
+		held.gone.Store(true)
+		owned.removeOwnedDiagnostic()
+		owned.close()
+		return ctx, nil, wrapHostOperationError(name, path, err)
 	}
-	return context.WithValue(ctx, heldKey{name}, h), unlock, nil
+	if err := ctx.Err(); err != nil {
+		held.gone.Store(true)
+		if !held.terminal.Load() {
+			owned.removeOwnedDiagnostic()
+		}
+		owned.close()
+		return ctx, nil, err
+	}
+	unlock := sync.OnceFunc(func() {
+		held.gone.Store(true)
+		lifetime := held.stateLifetime()
+		lifetime.beginClose()
+		lifetime.drain()
+		clearHostForgetWitness(held)
+		if !held.terminal.Load() {
+			owned.removeOwnedDiagnostic()
+		}
+		owned.close()
+	})
+	return context.WithValue(ctx, heldKey{name}, held), unlock, nil
 }
 
 // openLock opens the lock file at path, and makes its folder. what names
@@ -143,4 +184,25 @@ func SameMachine(a, b *Machine) bool {
 		return a == b
 	}
 	return a.Provider == b.Provider && a.ID == b.ID && a.Created == b.Created
+}
+
+func (held *heldLock) checkStateOperation(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if held.gone.Load() || held.native == nil {
+		return hostStateRemovalError("the original host operation ended or has no owned descriptor")
+	}
+	return held.native.check(ctx)
+}
+
+func wrapHostOperationError(name, path string, err error) error {
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return err
+	}
+	var user *UserError
+	if errors.As(err, &user) {
+		return err
+	}
+	return lockFailed("the host "+name, path, err)
 }

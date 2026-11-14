@@ -69,6 +69,10 @@ type Agent struct {
 	Memory int64 `json:"memory,omitempty"`
 	// Setup is how to install the agent and log in (setup.go).
 	Setup *Setup `json:"setup,omitempty"`
+	// Secrets is public credential binding metadata for this agent.
+	Secrets []SecretBinding `json:"secrets,omitempty"`
+	// Egress names the first-class HTTPS hosts in the canonical agent data.
+	Egress []string `json:"egress,omitempty"`
 }
 
 // GB is a gigabyte as agents' docs give memory: 10^9 bytes, a little less
@@ -116,9 +120,10 @@ const claudeHooks = `{"hooks":{` +
 // Table is the built-in agent table, checked against each agent's docs in
 // October 2026. First-class agents come first: the launcher lists them in
 // this order.
-var Table = []Agent{
+var Table = withSecretData([]Agent{
 	{
 		Kind: "claude", Title: "Claude Code", Binaries: []string{"claude"},
+		Egress:    []string{"api.anthropic.com", "platform.claude.com", "claude.ai", "claude.com", "sso.claude.com"},
 		Launch:    []string{"claude", "--session-id", "{session_uuid}"},
 		Resume:    []string{"claude", "--resume", "{agent_session_id}"},
 		Continue:  []string{"claude", "--continue"},
@@ -167,6 +172,7 @@ var Table = []Agent{
 	},
 	{
 		Kind: "codex", Title: "Codex", Binaries: []string{"codex"},
+		Egress: []string{"api.openai.com", "chatgpt.com", "auth.openai.com"},
 		// --no-daemon keeps Codex's work inside the session's PTY and cgroup.
 		Launch: []string{"codex", "--no-daemon"},
 		// SESSION_ID is a plain positional argument for clap, so "--" ends
@@ -338,7 +344,7 @@ var Table = []Agent{
 		IDCapture: "none",
 		Support:   Supported, // and through it, any program
 	},
-}
+})
 
 // Find returns the agent with the given kind.
 func Find(kind string) (Agent, bool) {

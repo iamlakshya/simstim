@@ -218,3 +218,29 @@ func secretEnvironment(raw json.RawMessage, want []string) ([]string, error) {
 	}
 	return env, nil
 }
+
+func deliverStart(id string, env map[string]api.Secret, members []api.MemberResumeArgs, allowMissing bool, intent ...*api.SecretDeliveryIntent) error {
+	var delivery *api.SecretDeliveryIntent
+	if len(intent) != 0 && intent[0] != nil {
+		copy := api.CloneSecretDeliveryIntent(*intent[0])
+		delivery = &copy
+	}
+	modern := delivery != nil
+	for _, member := range members {
+		modern = modern || member.SecretDelivery != nil
+	}
+	if members == nil && !allowMissing && !modern {
+		return deliver(id, env)
+	}
+	required := []string{api.FeatureSpawn, api.FeatureSandboxSnapshot}
+	if modern {
+		required = append(required, api.FeatureBoundSecrets)
+	}
+	_, err := HolderRequestWithFeatures(id, "secrets", struct {
+		Env            map[string]api.Secret     `json:"env"`
+		Members        []api.MemberResumeArgs    `json:"members"`
+		AllowMissing   bool                      `json:"allow_missing"`
+		SecretDelivery *api.SecretDeliveryIntent `json:"secret_delivery,omitempty"`
+	}{env, members, allowMissing, delivery}, 5*time.Second, required...)
+	return err
+}

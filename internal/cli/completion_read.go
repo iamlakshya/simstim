@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"syscall"
 
 	"github.com/BurntSushi/toml"
 
@@ -40,7 +41,7 @@ func completeConfigMapKeys(section, toComplete string) []string {
 	}
 	var keys []string
 	for k := range m {
-		if ck := strings.TrimSpace(cleanCompValue(k)); ck != "" && ck == k && strings.HasPrefix(ck, toComplete) {
+		if ck := strings.TrimSpace(cleanCompMapKey(k)); ck != "" && ck == k && strings.HasPrefix(ck, toComplete) {
 			keys = append(keys, ck)
 		}
 	}
@@ -82,15 +83,21 @@ func loadCompletionCache() (client.SessionCache, bool) {
 }
 
 func readCompletionFile(path string) ([]byte, bool) {
-	fi, err := os.Stat(path)
-	if err != nil || !fi.Mode().IsRegular() || fi.Size() > maxCompletionBytes {
-		return nil, false
-	}
-	f, err := os.Open(path)
+	// Opening without a wait also covers a regular file replaced by a FIFO.
+	// The descriptor, rather than an earlier look at its path, is checked.
+	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NONBLOCK, 0)
 	if err != nil {
 		return nil, false
 	}
 	defer f.Close()
+	return readCompletionData(f)
+}
+
+func readCompletionData(f *os.File) ([]byte, bool) {
+	fi, err := f.Stat()
+	if err != nil || !fi.Mode().IsRegular() || fi.Size() > maxCompletionBytes {
+		return nil, false
+	}
 	buf := make([]byte, 0, min(int(fi.Size())+1, maxCompletionBytes+1))
 	var chunk [4096]byte
 	for {
@@ -124,6 +131,15 @@ func cleanASCII(s string, limit int) (string, bool) {
 		}
 	}
 	return s[:min(len(s), limit)], true
+}
+
+// Local map keys are not session names and have no session-name length cap.
+// The bounded source file limits their size. A changed key is never offered.
+func cleanCompMapKey(s string) string {
+	if out, ok := cleanASCII(s, len(s)); ok {
+		return out
+	}
+	return api.CleanText(stripEscapes(s), len(s))
 }
 
 func cleanCompValue(s string) string {

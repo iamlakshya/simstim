@@ -3,11 +3,10 @@ package client
 import (
 	"context"
 	"fmt"
+	"github.com/iamlakshya/simstim/internal/brand"
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/iamlakshya/simstim/internal/brand"
 )
 
 // Machine records the VM, container or sandbox that `host create` made for a
@@ -245,6 +244,9 @@ type route struct {
 }
 
 func routeTo(ctx context.Context, h Host, interactive bool) (route, error) {
+	if err := checkHostTransportAction(ctx, h); err != nil {
+		return route{}, err
+	}
 	interactive = interactive && InputAllowed(ctx)
 	if h.Machine == nil {
 		return route{t: NewSSH(ctx, h, interactive)}, nil
@@ -256,9 +258,15 @@ func routeTo(ctx context.Context, h Host, interactive bool) (route, error) {
 	if err := ensureRunning(ctx, h, lc); err != nil {
 		return route{}, err
 	}
+	if err := checkHostTransportAction(ctx, h); err != nil {
+		return route{}, err
+	}
 	t, err := lc.Transport(ctx, interactive)
 	if err != nil {
 		return route{}, err
+	}
+	if ssh, ok := t.(*SSH); ok {
+		ssh.origin = &h
 	}
 	return route{t: t, lc: lc}, nil
 }
@@ -277,8 +285,14 @@ func HostTransport(ctx context.Context, h Host, interactive bool) (Transport, er
 // ensureRunning asks the provider for the machine's state first, and starts
 // or resumes it when it is stopped: wake on attach.
 func ensureRunning(ctx context.Context, h Host, lc Lifecycle) error {
+	if err := checkHostTransportAction(ctx, h); err != nil {
+		return err
+	}
 	st, err := lc.Status(ctx)
 	if err != nil {
+		return err
+	}
+	if err := checkHostTransportAction(ctx, h); err != nil {
 		return err
 	}
 	switch st {
@@ -294,10 +308,16 @@ func ensureRunning(ctx context.Context, h Host, lc Lifecycle) error {
 	if !wakeAllowed(ctx) {
 		return &UserError{Msg: fmt.Sprintf("%s is %s", h.Name, st), Hint: brand.Name + " host start " + h.Name + " (an attach to one of its sessions starts it too)", Code: "host_stopped"}
 	}
+	if err := checkHostTransportLifecycleWake(ctx, h); err != nil {
+		return err
+	}
 	if st != MachineStarting {
 		if err := lc.Start(ctx); err != nil {
 			return err
 		}
+	}
+	if err := checkHostTransportAction(ctx, h); err != nil {
+		return err
 	}
 	(&SSH{Host: h}).ExitMaster(ctx)
 	return waitReady(ctx, h, lc, 4*time.Minute)
@@ -308,8 +328,14 @@ func waitReady(ctx context.Context, h Host, lc Lifecycle, limit time.Duration) e
 	deadline := time.Now().Add(limit)
 	var last error
 	for time.Now().Before(deadline) {
+		if err := checkHostTransportAction(ctx, h); err != nil {
+			return err
+		}
 		t, err := lc.Transport(ctx, false)
 		if err == nil {
+			if err := checkHostTransportAction(ctx, h); err != nil {
+				return err
+			}
 			pctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 			err = answers(pctx, t)
 			cancel()

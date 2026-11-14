@@ -1,6 +1,7 @@
 package host
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -50,7 +51,19 @@ var unitEnv = brand.Env("UNIT")
 // started: a start that fails stops that very process (stopStarting). The
 // caller releases it.
 func launchHolder(m *Manifest) (*os.Process, error) {
+	if m.Files != nil {
+		if err := seedConnectionAlive(); err != nil {
+			return nil, err
+		}
+	}
+	if err := ValidateManifestStart(m); err != nil {
+		return nil, err
+	}
 	exe, err := holderExecutable()
+	if err != nil {
+		return nil, err
+	}
+	sub, stopSeconds, err := sessionCommand(m)
 	if err != nil {
 		return nil, err
 	}
@@ -71,17 +84,27 @@ func launchHolder(m *Manifest) (*os.Process, error) {
 			// SIGTERM goes to the holder only, which stops its agent itself and
 			// records why; anything left is killed after the timeout.
 			"-p", "KillMode=mixed",
-			"-p", "TimeoutStopSec=15",
+			"-p", "TimeoutStopSec=" + stopSeconds,
 			"-p", "OOMPolicy=continue",
+		}
+		if m.Wall != nil {
+			args = append(args, "-p", "TasksMax=4096")
 		}
 		if m.Limits.MemoryMax > 0 {
 			args = append(args,
 				"-p", fmt.Sprintf("MemoryMax=%d", m.Limits.MemoryMax),
 				"-p", "MemorySwapMax=0")
 		}
-		args = append(args, "--setenv="+unitEnv+"="+unit, exe, "holder", m.ID)
+		args = append(args, "--setenv="+unitEnv+"="+unit, exe, sub, m.ID)
 		from = logSize(m.ID)
-		out, err := exec.CommandContext(context.Background(), "systemd-run", args...).CombinedOutput()
+		command := exec.CommandContext(context.Background(), "systemd-run", args...)
+		var output bytes.Buffer
+		command.Stdout, command.Stderr = &output, &output
+		err := startSessionCommand(m, command)
+		if err == nil {
+			err = command.Wait()
+		}
+		out := output.Bytes()
 		if err != nil {
 			return nil, fmt.Errorf("systemd-run: %w: %s", err, strings.TrimSpace(string(out)))
 		}
@@ -99,13 +122,13 @@ func launchHolder(m *Manifest) (*os.Process, error) {
 	if err != nil {
 		return nil, fmt.Errorf("start the holder: %w", err)
 	}
-	cmd := exec.CommandContext(context.Background(), exe, "holder", m.ID)
+	cmd := exec.CommandContext(context.Background(), exe, sub, m.ID)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = devnull, devnull, devnull
 	cmd.ExtraFiles = []*os.File{lockFile}
 	cmd.Env = append(os.Environ(), holderLockFDEnv+"=3")
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	from = logSize(m.ID)
-	if err := cmd.Start(); err != nil {
+	if err := startSessionCommand(m, cmd); err != nil {
 		lockFile.Close()
 		return nil, fmt.Errorf("start the holder: %w", err)
 	}

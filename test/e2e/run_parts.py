@@ -33,6 +33,16 @@ ALERTS_PATH = re.compile(r"(~/|/)([A-Za-z0-9._+-]+/)*alerts\.toml")
 # that cover it in a temporary home, on every other host. docs/contributing/testing.md lists them too, and
 # test_rules.py checks that each Go test is there.
 SKIPPED = {
+    "sandbox hosts": ("runs a plain SSH login-shell control with an empty agent and generates wrong keys in the laptop root",
+                      ["internal/client.TestEverySSHCommandTurnsOffForwarding", "internal/client.TestChangedKeyStopsTheBridge"]),
+    "session sockets": ("types socket probes and sends the fixture's hook events, which raise alerts",
+                        ["internal/host.TestAFilterInTheGitScopeCannotReachASession", "internal/host.TestAHookReachesOnlyItsOwnSession"]),
+    "host git": ("makes a worktree outside the run folder and deliberately runs the fixture's hooks and filters",
+                 ["internal/host.TestHostGitRunsNoHooks", "internal/host.TestWorktreeSessions"]),
+    "session verbs": ("restarts an ended command and exercises client rm and kill on owned sessions",
+                      ["internal/cli.TestAttachRestartsAnEndedAgent", "internal/cli.TestSessionCommands"]),
+    "host commands": ("runs the explicit helper upgrade command and edits a disposable host entry",
+                      ["internal/cli.TestHostUpgradeWithTheSameHelper", "internal/cli.TestHostSetIdle", "internal/cli.TestHostRmAndDestroy"]),
     "typing": ("types commands and text into a session",
                ["internal/host.TestAttachInputAndResize"]),
     "kitty keys": ("sends kitty keyboard sequences and quit keys to the host's key tester in a session",
@@ -375,7 +385,9 @@ def cleanup(c, created, state):
         import disposable
         more = step("clean up what the checks of the disposable host made", lambda: disposable.cleanup(c, state))
         problems.extend(more if more is not None else ["the clean-up of what the disposable host's checks made did not finish"])
-    if not step("remove the run's folder", lambda: owned.remove_run_dir(c)):
+    if state.get("keep_run_dir"):
+        problems.append("a joined check could not confirm its cleanup, so the nonce-owned run folder stays for inspection")
+    elif not step("remove the run's folder", lambda: owned.remove_run_dir(c)):
         d = owned.run_dir()
         problems.append('the run\'s folder %s is still there. Remove it on the host: [ "$(cat %s/.e2e-run)" = %s ] && rm -rf %s'
                         % (d, d, owned.RUN, d))

@@ -601,6 +601,13 @@ An address names a session: `<host>/<session>`, or `<session>` alone when no oth
 | `simstim debug save <host>/<session>` | Saves the session's recent debug record on the host: the last seconds of its execution trace |
 | `simstim debug profile <host>/<session> cpu\|heap\|goroutine [--for 30s]` | Writes a profile of the session's process on the host. `--for` is for `cpu` only |
 | `simstim debug bundle [<host>\|<host>/<session>] [--ssh]` | Writes one archive of the debug files in the current folder, with private values replaced. Nothing is uploaded |
+| `simstim policy` | Reads or changes sandbox policy |
+| `simstim policy allow [net] <target> [--all \| --host name \| --repo . \| --profile name \| --in address] [--once \| --for 1h] [--dry-run] [--json]` | Adds an allow rule to one layer. Lifetime flags apply only to a session |
+| `simstim policy deny [net] <target> [--all \| --host name \| --repo . \| --profile name \| --in address] [--dry-run] [--json]` | Adds a deny rule to one layer |
+| `simstim policy rm <id or target> [--all \| --host name \| --repo . \| --profile name \| --in address] [--json]` | Removes a rule from one layer |
+| `simstim policy ls [--host name] [--repo .] [--profile name] [--in address] [--json]` | Shows the merged policy and each value's source |
+| `simstim policy check <target> [--host name] [--repo .] [--profile name] [--in address] [--json]` | Explains which rule and layer decides |
+| `simstim policy log --in <address> [--since time] [--follow] [--json]` | Reads a session's policy log |
 | `simstim config path`, `config keymap [--json]` | Prints where the configuration lives, or the launcher's commands and their keys |
 | `simstim config check [--json]` | Reads `config.toml` and `hosts.toml`, and prints each mistake as `file:line: message`, with the nearest known key for an unknown one. Exits with 1 when it finds an error |
 | `simstim demo [--empty]` | The launcher on sample data (nothing connects anywhere) |

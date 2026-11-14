@@ -3,10 +3,9 @@ package client
 import (
 	"context"
 	"fmt"
+	"github.com/iamlakshya/simstim/internal/brand"
 	"slices"
 	"sync"
-
-	"github.com/iamlakshya/simstim/internal/brand"
 )
 
 // TierQuestion asks the user to choose a saved host's first tier. It runs
@@ -91,6 +90,10 @@ func ResolveHostTier(ctx context.Context, h Host) (tier Tier, err error) {
 	if !ts.NeedsAnswer(h.Name) {
 		return ts.Of(h.Name), nil
 	}
+	source, err := captureHostSelectionSource(ctx, h)
+	if err != nil {
+		return TierShared, err
+	}
 	choice, err := questions.choose(ctx, h)
 	if err != nil {
 		return TierShared, err
@@ -102,7 +105,7 @@ func ResolveHostTier(ctx context.Context, h Host) (tier Tier, err error) {
 		return TierShared, &UserError{Msg: "the tier of " + h.Name + " still needs an answer",
 			Hint: brand.Name + " host set " + h.Name + " tier=shared", Code: "needs_answer", Kind: KindNeedsAnswer}
 	}
-	return saveFirstTierAnswer(ctx, h, ts, choice)
+	return saveFirstTierAnswer(ctx, h, ts, choice, source)
 }
 
 // choose serialises terminal questions across hosts too, without retaining
@@ -142,12 +145,15 @@ func tierForQuestion(ctx context.Context, h Host) (Tiers, bool, error) {
 	return ts, true, err
 }
 
-func saveFirstTierAnswer(ctx context.Context, h Host, before Tiers, choice Tier) (Tier, error) {
+func saveFirstTierAnswer(ctx context.Context, h Host, before Tiers, choice Tier, source hostStateSource) (Tier, error) {
 	ctx, unlock, err := LockHost(ctx, h.Name, "choose the host tier")
 	if err != nil {
 		return TierShared, err
 	}
 	defer unlock()
+	if err := withHostMembershipContext(ctx, source.check); err != nil {
+		return TierShared, err
+	}
 	var pinnedKey string
 	if p, err := PinOf(h.Name); err == nil {
 		pinnedKey = p.Fingerprint
@@ -161,7 +167,7 @@ func saveFirstTierAnswer(ctx context.Context, h Host, before Tiers, choice Tier)
 		e, has := ts.Entry(h.Name)
 		if had != has || had && !sameTierEntry(previous, e) {
 			return &UserError{Msg: fmt.Sprintf("the tier or identity of %s changed while its tier question was open, so that answer was not saved", h.Name),
-				Hint: brand.Name + " host show " + h.Name, Code: "host_changed", Kind: KindFailed}
+				Hint: brand.Name + " host show " + h.Name, Code: "host_changed", Kind: KindRefused}
 		}
 		e.Name, e.Tier, e.SetAt = h.Name, choice, nowUTC()
 		e.NeedsAnswer, e.IDChanged = false, false

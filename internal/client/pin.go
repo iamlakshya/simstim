@@ -3,13 +3,12 @@ package client
 import (
 	"context"
 	"fmt"
+	"github.com/iamlakshya/simstim/internal/brand"
 	"os"
 	"regexp"
 	"runtime"
 	"slices"
 	"strings"
-
-	"github.com/iamlakshya/simstim/internal/brand"
 )
 
 // pinArgs are the options that make ssh check the key of the host called
@@ -97,6 +96,9 @@ func PinHostKey(ctx context.Context, h Host, want string, firstUse FirstUse) (Pi
 // pinHostKey is PinHostKey. Without replace, a pin that another client
 // wrote while this one waited for the lock stays, and it must hold want.
 func pinHostKey(ctx context.Context, h Host, want string, firstUse FirstUse, replace bool) (Pin, error) {
+	if attempt, _ := ctx.Value(hostTransportAttemptKey{}).(*hostTransportAttempt); attempt != nil && attempt.kind == hostTransportProvisional {
+		return Pin{}, hostStateRemovalError("a read-only provisional transport cannot publish a host pin")
+	}
 	if !ValidHostName(h.Name) {
 		return Pin{}, &UserError{Msg: fmt.Sprintf("%q cannot name a host", CleanLine(h.Name)), Hint: "Use letters, digits, dots, dashes and underscores, with no dot at the end.", Code: "bad_name", Kind: KindUsage}
 	}
@@ -107,9 +109,19 @@ func pinHostKey(ctx context.Context, h Host, want string, firstUse FirstUse, rep
 	if err != nil {
 		return Pin{}, err
 	}
+	if st == nil {
+		owned, endMutation, err := holdSavedPinMutation(ctx, h, "pin the host key")
+		if err != nil {
+			return Pin{}, err
+		}
+		ctx = owned
+		defer endMutation()
+	}
 	pinStarted(h.Name)
-	if err := migratePinContext(ctx, h.Name); err != nil {
-		return Pin{}, err
+	if st == nil {
+		if err := migratePinContext(ctx, h.Name); err != nil {
+			return Pin{}, err
+		}
 	}
 	unlock, err := lockPin(ctx, h.Name)
 	if err != nil {

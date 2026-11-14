@@ -1,0 +1,20 @@
+[
+  [
+    {"name":"etc","type":"directory","mode":493},
+    {"name":"etc/old","body":"removed by whiteout"},
+    {"name":"etc/keep","body":"preserved"},
+    {"name":"var","type":"directory","mode":493},
+    {"name":"var/old","body":"removed by opacity"},
+    {"name":"target","body":"linked bytes"},
+    {"name":"survivor","type":"hardlink","link":"target"}
+  ],
+  [
+    {"name":"etc/.wh.old"},
+    {"name":"var/new","body":"same layer survives"},
+    {"name":"var/.wh..wh..opq"},
+    {"name":".wh.target"},
+    {"name":"symlink","type":"symlink","link":"../outside"},
+    {"name":"fifo","type":"fifo","mode":384},
+    {"name":"device","type":"character"}
+  ]
+]

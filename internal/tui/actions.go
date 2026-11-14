@@ -91,6 +91,9 @@ func (m *Model) startSessionReady(h *hostConn, r startReq) tea.Cmd {
 		err := offlineErr(h)
 		return func() tea.Msg { return startedMsg{startReq: r, err: err} }
 	}
+	if r.grants == nil {
+		r.grants = client.NewGrantRequest(false, r.args.SSHAgent)
+	}
 	c, be, host, kept, cols, rows := h.conn, m.be, h.host, m.settings, m.width, m.height
 	read := m.beginSettingsRead()
 	return m.bgCmd(func(ctx context.Context) tea.Msg {
@@ -100,7 +103,7 @@ func (m *Model) startSessionReady(h *hostConn, r startReq) tea.Cmd {
 			return startedMsg{startReq: r, err: err, settingsRead: read}
 		}
 		r.args = args
-		cctx, cancel := context.WithTimeout(ctx, 60*time.Second)
+		cctx, cancel := context.WithTimeout(client.WithGrantRequest(ctx, r.grants), 60*time.Second)
 		defer cancel()
 		var warn *client.UserError
 		if r.args.Setup == "" && !r.answered {

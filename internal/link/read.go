@@ -42,6 +42,10 @@ func (s *Session) readFrames(r *bufio.Reader) error {
 	if err := s.readHello(r); err != nil {
 		return err
 	}
+	return s.readContinuation(r)
+}
+
+func (s *Session) readContinuation(r *bufio.Reader) error {
 	for {
 		s.waitRefusals()
 		f, err := s.readFrame(r)
@@ -188,6 +192,12 @@ func (s *Session) onOpen(p []byte) error {
 	if uint64(id) != s.nextPeer {
 		return breach("stream %d was opened, but the next ID of the %s is %d", id, s.side.other(), s.nextPeer)
 	}
+	if s.inputContinuation {
+		if s.inputOpened >= 2 {
+			return breach("input continuation opened more than two streams")
+		}
+		s.inputOpened++
+	}
 	s.nextPeer += 2
 	k, ok := s.admit(p[4:])
 	if !ok {
@@ -196,7 +206,15 @@ func (s *Session) onOpen(p []byte) error {
 		signal(s.wake)
 		return nil
 	}
+	if s.inputContinuation {
+		if s.inputOpened == 1 && k != KindPut || s.inputOpened == 2 && (!s.inputBundleAllowed || k != KindBundle || s.inputMain == nil || !s.inputMain.remoteEOF || s.inputMain.peerGone || s.inputMain.refused) {
+			return breach("input stream kind or half-close order changed")
+		}
+	}
 	st := s.newStream(id, k, append([]byte(nil), p[4:]...))
+	if s.inputContinuation && k == KindPut {
+		s.inputMain = st
+	}
 	s.add(st)
 	s.accepts = append(s.accepts, st)
 	s.acceptQ.wake()

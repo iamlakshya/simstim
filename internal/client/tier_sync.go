@@ -4,10 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/iamlakshya/simstim/internal/brand"
 	"os"
 	"slices"
-
-	"github.com/iamlakshya/simstim/internal/brand"
 )
 
 // WarnFunc receives a client warning with its code, message and Try: hint.
@@ -157,6 +156,11 @@ func noteHostID(ctx context.Context, h Host, gotID string) (changed bool, err er
 	if err := ctx.Err(); err != nil {
 		return false, err
 	}
+	if attempt, _ := ctx.Value(hostTransportAttemptKey{}).(*hostTransportAttempt); attempt != nil {
+		if err := checkHostTransportAttempt(ctx, attempt, h); err != nil {
+			return false, err
+		}
+	}
 	if !ValidHostName(name) {
 		return false, nil
 	}
@@ -211,7 +215,11 @@ func noteHostID(ctx context.Context, h Host, gotID string) (changed bool, err er
 		default:
 			changed = true
 			e.Tier = TierShared
-			e.HostID = gotID
+			// An absent identity cannot erase the last known saved identity.
+			// The accepted read-only connection stays unchecked and cannot bind it.
+			if gotID != "" {
+				e.HostID = gotID
+			}
 			e.IDChanged = true
 			e.SetAt = nowUTC()
 			ts.entries[name] = e

@@ -65,13 +65,13 @@ type Backend interface {
 	Memory() memory
 	Remember(lists map[string]client.HostList)
 	RememberLast(host, id, name string)
-	// Secrets fetches the values of a host's own secrets for a new
-	// session, with the commands of the settings s, which the launcher
-	// holds. It never prompts.
+	// Secrets fetches a new session's host secrets through the current local
+	// source and grant checks. The settings argument is presentation state,
+	// not permission to run its commands. It never prompts.
 	Secrets(ctx context.Context, s client.Settings, h client.Host) (map[string]api.Secret, error)
 	// SessionSecrets fetches the values of the named secrets again, for a
 	// resume of a session that started with them. It never prompts.
-	SessionSecrets(ctx context.Context, s client.Settings, names []string) (map[string]api.Secret, error)
+	SessionSecrets(ctx context.Context, s client.Settings, h client.Host, id string, names []string) (map[string]api.Secret, error)
 	// SetupAnswers and RememberSetup read and keep the user's answers about
 	// repositories' setup scripts on a host. A yes keeps the setup hash of
 	// the question that it answers. RememberSetup's warning says that the
@@ -105,6 +105,9 @@ type Conn interface {
 }
 
 var _ Conn = (*client.Conn)(nil)
+
+// DefaultBackend returns the real client backend with the given onboarding service.
+func DefaultBackend(local onboard.Local) Backend { return realBackend{local: local} }
 
 // realBackend talks to real hosts through package client.
 type realBackend struct {
@@ -187,12 +190,12 @@ func (realBackend) RememberSetup(ctx context.Context, host, repo string, run boo
 	return client.RememberSetupContext(ctx, host, repo, run, hash)
 }
 
-func (realBackend) Secrets(ctx context.Context, s client.Settings, h client.Host) (map[string]api.Secret, error) {
-	return client.FetchSecrets(ctx, s, client.SecretNames(h, nil), false)
+func (realBackend) Secrets(ctx context.Context, _ client.Settings, h client.Host) (map[string]api.Secret, error) {
+	return client.FetchHostSecrets(ctx, h, client.SecretNames(h, nil), false)
 }
 
-func (realBackend) SessionSecrets(ctx context.Context, s client.Settings, names []string) (map[string]api.Secret, error) {
-	return client.FetchSecrets(ctx, s, names, false)
+func (realBackend) SessionSecrets(ctx context.Context, _ client.Settings, h client.Host, id string, names []string) (map[string]api.Secret, error) {
+	return client.FetchSessionSecrets(ctx, h, id, names, false)
 }
 
 func (realBackend) Dial(ctx context.Context, h client.Host) (Conn, error) {

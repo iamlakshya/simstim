@@ -269,7 +269,11 @@ func TestEveryPromptHasARow(t *testing.T) {
 					names = true
 				}
 			}
-			if names && strings.Contains(cells[4], q.flag) && strings.Contains(cells[5], map[bool]string{true: "Keep", false: "Fail"}[q.keep]) {
+			inputOff := map[bool]string{true: "Keep", false: "Fail"}[q.keep]
+			if q.refused {
+				inputOff = "Refuse"
+			}
+			if names && strings.Contains(cells[4], q.flag) && strings.Contains(cells[5], inputOff) {
 				found = true
 			}
 		}
@@ -296,6 +300,12 @@ func TestPromptsWithInputOff(t *testing.T) {
 			continue
 		}
 		var ue *client.UserError
+		if q.refused {
+			if ok || !errors.As(err, &ue) || ue.Kind != client.KindRefused || exitCode(ue.Kind) != 5 || ue.Hint != "Run the command in a terminal, with input on." {
+				t.Errorf("%s: %+v, want a terminal-only refusal with its exact hint", q.cmd, err)
+			}
+			continue
+		}
 		if !errors.As(err, &ue) || ue.Kind != client.KindNeedsAnswer || exitCode(ue.Kind) != 4 || !strings.HasSuffix(ue.Hint, " "+q.flag) {
 			t.Errorf("%s: %+v, want exit code 4 and %s", q.cmd, err, q.flag)
 		}

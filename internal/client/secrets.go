@@ -45,20 +45,31 @@ func SecretNames(h Host, asked []string) []string {
 // on it; without one it gets no input and its messages are dropped. No error
 // holds a value or anything a command printed.
 func FetchSecrets(ctx context.Context, s Settings, names []string, terminal bool) (map[string]api.Secret, error) {
+	view, err := NormaliseSettingsSecrets(s)
+	if err != nil {
+		return nil, err
+	}
 	if len(names) == 0 {
 		return nil, nil
 	}
-	out := make(map[string]api.Secret, len(names))
-	for _, name := range names {
+	commands := make([]string, len(names))
+	for i, name := range names {
+		if name == "SSH_AUTH_SOCK" {
+			return nil, reservedSocketSecretError()
+		}
 		if !secretNameRE.MatchString(name) {
 			return nil, &UserError{Msg: fmt.Sprintf("%q cannot name a secret", name), Hint: "Use letters, digits and underscores, as in OPENAI_API_KEY.", Code: "bad_secret", Kind: KindUsage}
 		}
-		command := strings.TrimSpace(s.Secrets[name])
+		command := view.Commands[name]
 		if command == "" {
 			return nil, &UserError{Msg: fmt.Sprintf("no secret named %s in config.toml", name),
 				Hint: fmt.Sprintf("Add %s = \"<the command that prints it>\" under [secrets] in %s.", name, settingsPath()), Code: "secret_not_found", Kind: KindNotFound}
 		}
-		v, err := runSecret(ctx, name, command, terminal)
+		commands[i] = command
+	}
+	out := make(map[string]api.Secret, len(names))
+	for i, name := range names {
+		v, err := runSecret(ctx, name, commands[i], terminal)
 		if err != nil {
 			return nil, err
 		}
@@ -125,7 +136,11 @@ func (l *limitWriter) Write(p []byte) (int, error) {
 
 // RequireSecrets fails when the host's helper cannot take secrets.
 func (c *Conn) RequireSecrets(a NewArgs) error {
-	if len(a.Secrets) == 0 || c.HasFeature("secrets") {
+	return c.requireSecretFeature(len(a.Secrets) != 0)
+}
+
+func (c *Conn) requireSecretFeature(needed bool) error {
+	if !needed || c.HasFeature("secrets") {
 		return nil
 	}
 	return &UserError{Msg: "the helper on " + c.Host.Name + " is too old for secrets", Hint: brand.Name + " host add " + c.Host.Name + " (updates the helper)", Code: "helper_old"}

@@ -108,6 +108,21 @@ func Read(r *bufio.Reader) (Frame, error) {
 	return Frame{Type: Type(buf[0]), Payload: buf[1:]}, nil
 }
 
+// ReadLimit rejects a declared oversized frame before body allocation.
+func ReadLimit(r *bufio.Reader, limit uint32) (Frame, error) {
+	if limit == 0 || limit > MaxFrame {
+		return Frame{}, ErrFrameTooBig
+	}
+	header, err := r.Peek(4)
+	if err != nil {
+		return Read(r)
+	}
+	if binary.LittleEndian.Uint32(header) > limit {
+		return Frame{}, ErrFrameTooBig
+	}
+	return Read(r)
+}
+
 // Writer writes whole frames. It is safe for concurrent use: one frame at
 // a time, each in a single call to the underlying writer.
 type Writer struct {
@@ -167,8 +182,12 @@ func frame(t Type, payload []byte) ([]byte, error) {
 
 // put writes a frame's bytes, in its turn.
 func (w *Writer) put(buf []byte) error {
-	if _, err := w.w.Write(buf); err != nil {
+	n, err := w.w.Write(buf)
+	if err != nil {
 		return fmt.Errorf("proto: write a frame: %w", err)
+	}
+	if n != len(buf) {
+		return fmt.Errorf("proto: write a frame: %w", io.ErrShortWrite)
 	}
 	return nil
 }
@@ -320,12 +339,14 @@ type Response struct {
 
 // Attach asks to attach to a session.
 type Attach struct {
-	Session string `json:"session"`
-	Cols    int    `json:"cols"`
-	Rows    int    `json:"rows"`
-	XPx     int    `json:"xpx,omitempty"`
-	YPx     int    `json:"ypx,omitempty"`
-	Client  string `json:"client"`
+	// ForwardAgent is the retired forwarding request; current bridges refuse it.
+	ForwardAgent bool   `json:"forward_agent,omitempty"`
+	Session      string `json:"session"`
+	Cols         int    `json:"cols"`
+	Rows         int    `json:"rows"`
+	XPx          int    `json:"xpx,omitempty"`
+	YPx          int    `json:"ypx,omitempty"`
+	Client       string `json:"client"`
 	// LastOffset is the offset after the last byte this client's terminal shows,
 	// or -1 when the terminal has none of this session's output.
 	LastOffset int64 `json:"last_offset"`

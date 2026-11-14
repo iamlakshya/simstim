@@ -5,10 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"maps"
 	"os"
 	"reflect"
-	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -31,6 +29,7 @@ func configCheckCmd() *cobra.Command {
 		Short: "Find mistakes in the config files, each with its file and line",
 		Long: "Reads config.toml and hosts.toml, and prints each mistake on one line, as file:line: message.\n" +
 			"It finds TOML errors, unknown keys, and values of the wrong type or outside their list.\n" +
+			"It checks legacy secret commands and structured definitions with the same rules as a session start.\n" +
 			"It also finds two spellings of one key and machines without a provider or an id.\n" +
 			"It also finds keys, sizes and times that do not parse, and hosts without a usable name or ssh.\n" +
 			"For an unknown key, it names the nearest known key.\n" +
@@ -68,6 +67,9 @@ func configCheckCmd() *cobra.Command {
 // `config check` reports it itself, the launcher shows it in a notice, and
 // the shell's completion of a word prints nothing.
 func warnSettings(cmd *cobra.Command, args []string) {
+	if policyWritesSettings(cmd) {
+		return
+	}
 	launcher := !cmd.HasParent() || cmd.Name() == "flip" && len(args) == 0
 	if launcher || cmd.Name() == cobra.ShellCompRequestCmd || cmd.Name() == cobra.ShellCompNoDescRequestCmd || shortPath(cmd) == "config check" {
 		return
@@ -101,8 +103,8 @@ type configReport struct {
 	OK       bool          `json:"ok"`
 	Files    []checkedFile `json:"files"`
 	Findings []finding     `json:"findings"`
-	// Layers is empty until the isolation plan adds layers (task P1.12).
-	Layers []struct{} `json:"layers"`
+	// Layers names the policy sources for the current folder.
+	Layers []client.LayerDescription `json:"layers"`
 }
 
 // checkedFile is one config file that `config check` looked for.
@@ -127,12 +129,13 @@ type finding struct {
 
 // checkConfig checks each config file.
 func checkConfig() configReport {
-	r := configReport{Findings: []finding{}, Layers: []struct{}{}}
+	r := configReport{Findings: []finding{}, Layers: []client.LayerDescription{}}
 	for _, f := range client.ConfigFiles() {
 		exists, found := checkFile(f)
 		r.Files = append(r.Files, checkedFile{Path: tildeHome(f.Path), Exists: exists})
 		r.Findings = append(r.Findings, found...)
 	}
+	r.addLayers()
 	r.OK = r.count(severityError) == 0
 	return r
 }
@@ -186,6 +189,7 @@ func (r configReport) write(w io.Writer) {
 	default:
 		fmt.Fprintf(w, "%s in %s.\n", strings.Join(found, " and "), countNoun(files, "file"))
 	}
+	writeConfigLayers(w, r.Layers)
 }
 
 // text is the finding on one line: `file:line: message`, with the column
@@ -287,6 +291,9 @@ func (c *checker) table(t map[string]any, typ reflect.Type, p keyPath) {
 	for _, key := range table.Keys {
 		k, name, ft := key.Spelling, key.Name, key.Type
 		if ft == nil {
+			if c.layerUnknownKey(p, k) {
+				continue
+			}
 			things := make([]named, 0, len(table.Fields))
 			for n := range table.Fields {
 				things = append(things, named{n, []string{n}})
@@ -298,8 +305,12 @@ func (c *checker) table(t map[string]any, typ reflect.Type, p keyPath) {
 			c.add(p.add(k), finding{Code: "bad_value", Message: key.Conflict + in(p)})
 			continue
 		}
-		c.value(t[k], ft, p.field(k, name))
+		here := p.field(k, name)
+		if !c.layerForbiddenKey(here) {
+			c.value(t[k], ft, here)
+		}
 	}
+	c.layerTable(t, typ, p)
 }
 
 // value checks v, the value of the key at p, against the Go type t, then
@@ -307,6 +318,10 @@ func (c *checker) table(t map[string]any, typ reflect.Type, p keyPath) {
 func (c *checker) value(v any, t reflect.Type, p keyPath) {
 	if t.Kind() == reflect.Pointer {
 		t = t.Elem()
+	}
+	if t == reflect.TypeFor[client.SecretDefinition]() {
+		c.secretDefinition(v, p)
+		return
 	}
 	_, table := v.(map[string]any)
 	if err := configdata.CheckMapShape(t, table); err != nil {
@@ -323,14 +338,7 @@ func (c *checker) value(v any, t reflect.Type, p keyPath) {
 	case reflect.Slice:
 		ok = c.array(v, t.Elem(), p)
 	case reflect.Map:
-		var m map[string]any
-		if m, ok = v.(map[string]any); ok {
-			for _, k := range slices.Sorted(maps.Keys(m)) {
-				if !isKind(m[k], t.Elem().Kind()) {
-					c.wrongType(p.add(k), m[k], t.Elem())
-				}
-			}
-		}
+		ok = c.configMap(v, t.Elem(), p)
 	default:
 		ok = isKind(v, t.Kind())
 	}

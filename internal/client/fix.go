@@ -42,7 +42,14 @@ func (c *Conn) HostFixes(ctx context.Context, apply bool, ids []string) ([]Fix, 
 // LocalChecks checks this computer: ssh, the config files, and the commands
 // of the secrets. It never runs a secret's command.
 func LocalChecks() []Check {
+	s := LoadSettings()
+	view, validationError := NormaliseSettingsSecrets(s)
 	var out []Check
+	if validationError != nil {
+		out = append(out, fileCheck("config.toml", settingsPath(), &Settings{}))
+		out = append(out, fileCheck("hosts.toml", hostsPath(), &hostsFile{}))
+		return append(out, Check{Name: "secrets", Detail: CleanLine(validationError.Error()), Fix: "fix the secret configuration in " + settingsPath()})
+	}
 	if p, err := exec.LookPath("ssh"); err != nil {
 		out = append(out, Check{Name: "ssh", Detail: "ssh is not on PATH", Fix: "install OpenSSH"})
 	} else {
@@ -53,14 +60,13 @@ func LocalChecks() []Check {
 	}
 	out = append(out, fileCheck("config.toml", settingsPath(), &Settings{}))
 	out = append(out, fileCheck("hosts.toml", hostsPath(), &hostsFile{}))
-	s := LoadSettings()
-	names := make([]string, 0, len(s.Secrets))
-	for k := range s.Secrets {
+	names := make([]string, 0, len(view.Commands))
+	for k := range view.Commands {
 		names = append(names, k)
 	}
 	sort.Strings(names)
 	for _, k := range names {
-		prog := strings.Fields(s.Secrets[k])
+		prog := strings.Fields(view.Commands[k])
 		switch {
 		case len(prog) == 0:
 			out = append(out, Check{Name: "secret " + k, Detail: "it has no command", Fix: "give it a command in " + settingsPath()})
@@ -88,17 +94,29 @@ func isShellWord(w string) bool {
 // fileCheck reads a TOML file into v, through ReadConfigFile, and reports
 // keys it does not know. `config check` says where each mistake is.
 func fileCheck(name, path string, v any) Check {
-	b, err := ReadConfigFile(path)
+	data, err := ReadConfigFile(path)
+	var md toml.MetaData
 	if err == nil {
-		var md toml.MetaData
-		if md, err = decodeConfig(string(b), v); err == nil {
-			return undecoded(name, path, md)
+		md, err = decodeConfig(string(data), v)
+	}
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			if _, linkErr := os.Lstat(path); errors.Is(linkErr, os.ErrNotExist) {
+				return Check{Name: name, OK: true, Detail: "none yet, at " + path}
+			}
+		}
+		return Check{Name: name, Detail: err.Error(), Fix: brand.Name + " config check"}
+	}
+	check := undecoded(name, path, md)
+	if !check.OK {
+		return check
+	}
+	if settings, ok := v.(*Settings); ok {
+		if _, err := NormaliseSettingsSecrets(*settings); err != nil {
+			return Check{Name: name, Detail: CleanLine(err.Error()), Fix: brand.Name + " config check"}
 		}
 	}
-	if errors.Is(err, os.ErrNotExist) {
-		return Check{Name: name, OK: true, Detail: "none yet, at " + path}
-	}
-	return Check{Name: name, Detail: err.Error(), Fix: brand.Name + " config check"}
+	return check
 }
 
 // undecoded is the check of a file that decodes: its unknown keys, if any.

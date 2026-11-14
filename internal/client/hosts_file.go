@@ -14,11 +14,13 @@ import (
 
 // hostFileHooks finish a side-file transaction before releasing its lock.
 type hostFileHooks struct {
-	rollback   func()
-	commit     func()
-	release    func()
-	failure    func(error) error
-	beforeSave func() error
+	membershipGeneration       string
+	membershipSourceGeneration string
+	rollback                   func()
+	commit                     func()
+	release                    func()
+	failure                    func(error) error
+	beforeSave                 func() error
 }
 
 // updateHostsFile reads the saved hosts, lets change make the new list,
@@ -30,7 +32,38 @@ type hostFileHooks struct {
 // before the change and again before the save. rollback, when set, undoes
 // a side file that change put in place before the save failed.
 func updateHostsFile(ctx context.Context, change func([]Host) ([]Host, hostFileHooks, error)) error {
-	unlock, err := lockHostsFile(ctx)
+	return updateHostsFileContext(ctx, func(_ context.Context, hosts []Host) ([]Host, hostFileHooks, error) { return change(hosts) })
+}
+
+// beforeHostsSave runs in updateHostsFile just before the save, and
+// writeHosts saves the list. Tests replace them.
+var (
+	beforeHostsSave              = func() {}
+	writeHosts                   = writeHostsFile
+	writeHostsSelectedGeneration = writeHostsFileGeneration
+)
+
+// failed restores this transaction before describing any retained safety state.
+func (h hostFileHooks) failed(err error) error {
+	if h.rollback != nil {
+		h.rollback()
+	}
+	if h.failure != nil {
+		return h.failure(err)
+	}
+	return err
+}
+
+func writeHostsFile(hosts []Host) error {
+	generation, err := newMembershipGeneration()
+	if err != nil {
+		return fmt.Errorf("make the host membership generation: %w", err)
+	}
+	return writeHostsFileGeneration(hosts, generation)
+}
+
+func updateHostsFileContext(ctx context.Context, change func(context.Context, []Host) ([]Host, hostFileHooks, error)) error {
+	ctx, unlock, err := acquireHostMembershipContext(ctx)
 	if err != nil {
 		return err
 	}
@@ -42,7 +75,7 @@ func updateHostsFile(ctx context.Context, change func([]Host) ([]Host, hostFileH
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	out, hooks, err := change(hosts)
+	out, hooks, err := change(ctx, hosts)
 	if hooks.release != nil {
 		defer hooks.release()
 	}
@@ -61,8 +94,20 @@ func updateHostsFile(ctx context.Context, change func([]Host) ([]Host, hostFileH
 	if err := ctx.Err(); err != nil {
 		return hooks.failed(err)
 	}
-	if err := writeHosts(out); err != nil {
-		return hooks.failed(err)
+	if hooks.membershipGeneration != "" {
+		actual, err := currentMembershipGeneration(ctx)
+		if err != nil || actual != hooks.membershipSourceGeneration {
+			return hooks.failed(hostStateRemovalError("saved hosts changed before the prepared removal committed"))
+		}
+	}
+	var writeErr error
+	if hooks.membershipGeneration != "" {
+		writeErr = writeHostsSelectedGeneration(out, hooks.membershipGeneration)
+	} else {
+		writeErr = writeHosts(out)
+	}
+	if writeErr != nil {
+		return hooks.failed(writeErr)
 	}
 	if hooks.commit != nil {
 		hooks.commit()
@@ -70,28 +115,14 @@ func updateHostsFile(ctx context.Context, change func([]Host) ([]Host, hostFileH
 	return nil
 }
 
-// beforeHostsSave runs in updateHostsFile just before the save, and
-// writeHosts saves the list. Tests replace them.
-var (
-	beforeHostsSave = func() {}
-	writeHosts      = writeHostsFile
-)
-
-// failed restores this transaction before describing any retained safety state.
-func (h hostFileHooks) failed(err error) error {
-	if h.rollback != nil {
-		h.rollback()
+func writeHostsFileGeneration(hosts []Host, generation string) error {
+	if !ValidHostID(generation) {
+		return hostStateRemovalError("the selected host membership generation is invalid")
 	}
-	if h.failure != nil {
-		return h.failure(err)
-	}
-	return err
-}
-
-func writeHostsFile(hosts []Host) error {
 	hosts = slices.Clone(hosts)
 	sort.Slice(hosts, func(i, j int) bool { return hosts[i].Name < hosts[j].Name })
 	var b bytes.Buffer
+	b.WriteString(membershipGenerationPrefix + generation + "\n")
 	fmt.Fprintf(&b, "# Hosts for %s. Edit with `%s host`.\n\n", brand.DisplayName, brand.Name)
 	if err := toml.NewEncoder(&b).Encode(hostsFile{Hosts: hosts}); err != nil {
 		return fmt.Errorf("save the hosts: %w", err)

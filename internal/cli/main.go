@@ -91,7 +91,7 @@ func Root() *cobra.Command {
 			return runHome(cmd)
 		},
 	}
-	root.AddCommand(setupCmd(), hostCmd(), newCmd(), lsCmd(), showCmd(), agentsCmd(), attachCmd(), resumeCmd(), flipCmd(), sendCmd(), rmCmd(), killCmd(), renameCmd(), portsCmd(), forwardCmd(), pullCmd(), doctorCmd(), debugCmd(), configCmd(), demoCmd(), versionCmd())
+	root.AddCommand(setupCmd(), hostCmd(), newCmd(), lsCmd(), showCmd(), agentsCmd(), attachCmd(), resumeCmd(), flipCmd(), sendCmd(), rmCmd(), killCmd(), renameCmd(), portsCmd(), forwardCmd(), pullCmd(), policyCmd(), doctorCmd(), debugCmd(), configCmd(), demoCmd(), versionCmd())
 	root.AddCommand(topics()...)
 	addRootFlags(root)
 	addDebugFlags(root)
@@ -147,6 +147,11 @@ func beforeRun(cmd *cobra.Command, args []string) error {
 	} else {
 		// The launcher and switcher show identity notices in their own chrome.
 		cmd.SetContext(client.WithWarnings(cmd.Context(), nil))
+	}
+	if policyWritesSettings(cmd) {
+		if _, err := client.ReadPolicySettings(); err != nil {
+			return err
+		}
 	}
 	warnSettings(cmd, args)
 	return startDebug(cmd, args)

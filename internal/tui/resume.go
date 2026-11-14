@@ -55,14 +55,15 @@ func (m *Model) resumeSelectedReady() tea.Cmd {
 		m.resuming = map[sessKey]bool{}
 	}
 	m.resuming[key] = true
-	c, be, kept := h.conn, m.be, m.settings
+	c, be, host, kept := h.conn, m.be, h.host, m.settings
+	request := client.NewGrantRequest(false, false)
 	read := m.beginSettingsRead()
 	resume := m.bgCmd(func(ctx context.Context) tea.Msg {
 		settings, read := readSettings(be, kept, read)
 		// The host stops the old holder and its unit, then waits for the start.
-		cctx, cancel := context.WithTimeout(ctx, 90*time.Second)
+		cctx, cancel := context.WithTimeout(client.WithGrantRequest(ctx, request), 90*time.Second)
 		defer cancel()
-		secrets, err := be.SessionSecrets(cctx, settings, names)
+		secrets, err := be.SessionSecrets(cctx, settings, host, key.id, names)
 		if err != nil {
 			return resumedMsg{key: key, err: err, settingsRead: read}
 		}

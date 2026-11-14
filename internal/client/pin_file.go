@@ -4,12 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/iamlakshya/simstim/internal/brand"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
-
-	"github.com/iamlakshya/simstim/internal/brand"
 )
 
 // The pin's file: ~/.config/<name>/ssh/known_hosts-<key>, 0600, where the
@@ -120,6 +119,18 @@ func migratePinContext(ctx context.Context, name string) error {
 	if _, err := os.Lstat(old); err != nil {
 		return nil
 	}
+	saved, err := SavedEntry(name)
+	if err != nil {
+		return err
+	}
+	if saved == nil {
+		return nil
+	}
+	ctx, endMutation, err := holdSavedPinMutation(ctx, *saved, "migrate the saved host pin")
+	if err != nil {
+		return err
+	}
+	defer endMutation()
 	unlock, err := lockPin(ctx, name)
 	if err != nil {
 		if ctx.Err() != nil {

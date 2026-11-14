@@ -63,3 +63,5 @@ Completion reads local files only and never connects to a host, so Tab stays fas
 - Secret names for `--secret` come from `[secrets]` in `config.toml`. Their commands do not run during completion.
 
 Pass `--no-descriptions` to any [`simstim completion`](../reference/cli/completion.md) command if you want values without descriptions.
+
+Completion preserves local secret names in full. Its 4 MiB file limit applies to the open file. Pipes and devices give no values and never wait for input.

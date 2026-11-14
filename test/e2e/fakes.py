@@ -162,3 +162,42 @@ def read(path):
 OWNER = {"e2e-setup-repo/owner.txt": "mine\n", "e2e-pull/owner.txt": "mine\n", "e2e-seq.bin": "mine\n",
          "e2e-alerts.jsonl": "mine\n", ".e2e-setup-exit": "0\n", ".cache/e2e-resume-1": "",
          ".config/client/alerts.toml": "owner = true\n", "data/client/worktrees/e2e-setup-repo/owner.txt": "mine\n"}
+
+
+# The text of `host doctor --fix`, as the client prints it (internal/cli,
+# offerFixes): the checks, the scrollback with the names of full-screen
+# sessions, then each fix in its own block, and its question.
+LINGER = (b"\r\nFound 2 to fix:\r\n\r\n1. Linger is off, so sessions stop when your last login on the host ends.\r\n"
+          b"   Fix: turn linger on.\r\n   Runs: loginctl enable-linger dev\r\n   Fix it? [y/N] ")
+SOCKETS = (b"\r\n2. 1 stale session socket with no session behind them, in /run/user/1000/client/s.\r\n"
+           b"   Fix: remove them; no running session uses them.\r\n   Runs: rm /run/user/1000/client/s/old.sock\r\n   Fix it? [y/N] ")
+SCROLLBACK = b"Full-screen sessions:\r\n  why a stale session socket stays\r\n"
+
+
+class FixTerm:
+    """host doctor --fix at a terminal: it prints a chunk for each read, and
+    ends with code once every question has its answer and no chunk is
+    left."""
+    made = []
+
+    def __init__(self, chunks, code=0):
+        self.chunks, self.buf, self.sent, self.closed, self.code = list(chunks), b"", [], False, code
+        FixTerm.made.append(self)
+
+    def read(self, timeout=0.5):
+        if self.chunks:
+            self.buf += self.chunks.pop(0)
+        return self.buf
+
+    def send(self, b):
+        self.sent.append(b)
+        self.buf += b[:-1] + b"\r\n"
+
+    def exit_code(self, timeout=10):
+        done = not self.chunks and len(self.sent) == self.buf.count(b"Fix it? [y/N] ")
+        return self.code if done else None
+
+    def close(self):
+        self.closed = True
+
+

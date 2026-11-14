@@ -1,27 +1,18 @@
-"""What the e2e run may do on a test host, which is someone else's machine,
-as data: the client's subcommands, the commands on the host, the flags of
-a start, and the keys that a check sends. Each entry has its reason, by
-the five kinds of thing that run.py allows. It is checked twice:
+"""The commands, paths, flags and keys the e2e run may use, as data.
 
-- before it runs: boundary.py asks laptop_refusal, keys_for and
-  host_refusal, on a host that the run did not make, and refuses what is
-  not here (a host command must be an entry's template, each hole filled
-  with a value of its class: a path in the run's folder, an ID, and so on);
-- in the code: allowed_scan.check() reads every e2e module, and
-  test_rules.py fails on a command, a flag or a key that is not here, on an
-  entry that no module uses, and on a code shape that would hide a call
-  from the reading.
+boundary.py enforces these before each owner-host call. allowed_scan reads
+all harness source and rejects unlisted commands, unused entries, hidden
+calls and disposable-only actions outside the authenticated guard. Each
+entry states its ownership rule or why it needs a disposable host.
 """
 import ast, itertools, os, re
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
-# The harness's modules that reach the host or the client: those that run on
-# every host, and those that run only on a disposable host. In the first,
-# what runs inside an `if` of GUARDS runs only on a disposable host too.
-OWNER_MODULES = ["run.py", "run_parts.py", "owned.py", "agent_setup.py"]
-DISPOSABLE_MODULES = ["disposable.py", "disposable_checks.py", "disposable_setup.py", "agent_login.py", "guided_setup.py"]
-# The only modules that start a process; the allow list itself; the fakes.
+# Harness modules and recognised authenticated-disposable guards.
+OWNER_MODULES = ["joined_checks.py", "run.py", "run_parts.py", "owned.py", "agent_setup.py"]
+DISPOSABLE_MODULES = ["disposable.py", "disposable_checks.py", "disposable_setup.py", "agent_login.py", "guided_setup.py",
+                      "host_commands.py", "host_git.py", "sandbox_hosts.py", "session_sockets.py", "session_verbs.py"]
 BOUNDARY = ["boundary.py", "harness.py"]
 SUPPORT = ["allowed.py", "allowed_scan.py", "fakes.py", "login_fakes.py"]
 MODULES = OWNER_MODULES
@@ -32,7 +23,7 @@ GUARDS = {"DISPOSABLE", "c.DISPOSABLE", "R.DISPOSABLE", "state.get('disposable')
 # reads no rc file (owned.program).
 PROGRAM_ENV = '/usr/bin/env -i HOME="$HOME" PATH="$PATH" TERM="$TERM" LANG=C.UTF-8 INPUTRC=/dev/null'
 SHELLS = {"/bin/sh": "/bin/sh", "/bin/bash": "/bin/bash --norc --noprofile"}
-HOLDER_VAR = re.compile(r"[A-Z]+_(?:SOCK|SESSION)")
+HOLDER_VAR = re.compile(r"[A-Z]+_(?:HOOK_SOCK|SOCK|SESSION)")
 
 
 def program(shell, script, wait=False, keep=()):
@@ -54,7 +45,7 @@ def isolated(cmd, allow_holder=False):
     if len(cmd) != 5 or list(cmd[:2]) != ["/bin/sh", "-c"] or cmd[3] != "sh":
         return False
     shells = "|".join(re.escape(v) for v in SHELLS.values())
-    extra = r'(?: \$\{([A-Z]+_(?:SOCK|SESSION))\+"\1=\$\1"\})*' if allow_holder else ""
+    extra = r'(?: \$\{([A-Z]+_(?:HOOK_SOCK|SOCK|SESSION))\+"\1=\$\1"\})*' if allow_holder else ""
     return re.fullmatch(r'(?:exec )?' + re.escape(PROGRAM_ENV) + extra + r' (?:%s) -c "\$1"' % shells, cmd[2]) is not None
 
 
@@ -64,8 +55,6 @@ def isolated(cmd, allow_holder=False):
 GIT_FLAGS = ["-c", "core.hooksPath=/dev/null", "-c", "commit.gpgsign=false", "-c", "tag.gpgsign=false",
              "-c", "core.fsmonitor=false", "-c", "user.name=e2e", "-c", "user.email=e2e@example.com"]
 
-# The five kinds of thing, and the named exceptions. Each reason says why
-# the entry changes nothing that the owner shares, or names the exception.
 START, READ, ATTACH, DELETE, OWN_FOLDER = (
     "1: starts a session of its own, with the run's token in its name",
     "2: only reads",
@@ -77,7 +66,6 @@ HOOKS = " (exception E: the host's own setup and resume hooks run in it, as in e
 STATUS = " (exception F: host doctor runs each agent's --version and status command, which may touch the agent's own files)"
 LOGIN = " (exception H: the helper runs the user's login shell once, for the environment, as at every start and doctor there)"
 
-# The client's subcommands, as the words and flags of an argv list.
 CLIENT = {
     ("new", "--name", "--detach"): START + ": at a terminal, where new prints its own Started line" + HOOKS + LOGIN,
     ("new", "--name", "--detach", "--json"): START + ": owned by the new ID in its JSON" + HOOKS + LOGIN,
@@ -93,8 +81,6 @@ CLIENT = {
     ("pull", "--id", "--into", "mine", "--"): READ + ": refused, as the branch is checked out on the laptop",
 }
 
-# The flags that a start may give new, in a call of start(), start_new,
-# start_on_terminal or start_asked.
 START_FLAGS = {
     "--": START + ": the program that the session runs, after env -i (owned.program)",
     "--dir": START + ": the session starts in a folder of the run's own",
@@ -102,7 +88,6 @@ START_FLAGS = {
     "--setup": START + ": the setup script of the run's own repository runs in the session",
 }
 
-# The keys that a check sends to a client at a terminal.
 SENDS = {
     b"\x1c": ATTACH + ": the detach key, the default one, from the run's own config",
     b"y\r": START + ": the answer to the client's own question about the setup script of the run's repository, at the local terminal",
@@ -133,6 +118,23 @@ DISPOSABLE_ONLY = {
         ("setup",): ONLY + "the guided setup, refused with no terminal, or stopped with Ctrl+C",
         ("setup", "--host", "--agents", "no-such-agent", "--yes"): ONLY + "refused, as the agent is unknown",
         ("setup", "--host", "--agents", "shell", "--yes", "--no-login"): ONLY + "turns on linger, the restore unit and terminfo",
+        ('host', 'show'): ONLY + 'host_commands.py: exercises this exact client command on its owned disposable host or fresh session ID',
+        ('host', 'show', '--json'): ONLY + 'host_commands.py: exercises this exact client command on its owned disposable host or fresh session ID',
+        ('host', 'upgrade'): ONLY + 'host_commands.py: exercises this exact client command on its owned disposable host or fresh session ID',
+        ('host', 'upgrade', '--json'): ONLY + 'host_commands.py: exercises this exact client command on its owned disposable host or fresh session ID',
+        ('host', 'set', 'idl=2h'): ONLY + 'host_commands.py: exercises this exact client command on its owned disposable host or fresh session ID',
+        ('host', 'set'): ONLY + 'host_commands.py: exercises this exact client command on its owned disposable host or fresh session ID',
+        ('host', 'rm', '--destroy', '--no-input'): ONLY + 'host_commands.py: exercises this exact client command on its owned disposable host or fresh session ID',
+        ('host', 'rm'): ONLY + 'host_commands.py: exercises this exact client command on its owned disposable host or fresh session ID',
+        ('host', 'set', 'idle=2h'): ONLY + 'host_commands.py: exercises this exact client command on its owned disposable host or fresh session ID',
+        ('host', 'test', '--no-input'): ONLY + 'sandbox_hosts.py: exercises this exact client command on its owned disposable host or fresh session ID',
+        ('show',): ONLY + 'session_verbs.py: exercises this exact client command on its owned disposable host or fresh session ID',
+        ('show', '--json'): ONLY + 'session_verbs.py: exercises this exact client command on its owned disposable host or fresh session ID',
+        ('attach', '-'): ONLY + 'session_verbs.py: exercises this exact client command on its owned disposable host or fresh session ID',
+        ('rename', 'abcd2345'): ONLY + 'session_verbs.py: exercises this exact client command on its owned disposable host or fresh session ID',
+        ('attach', '--no-input', '--id', '--'): ONLY + 'session_verbs.py: exercises this exact client command on its owned disposable host or fresh session ID',
+        ('rm',): ONLY + 'session_verbs.py: exercises this exact client command on its owned disposable host or fresh session ID',
+        ('rm', '-y'): ONLY + 'session_verbs.py: exercises this exact client command on its owned disposable host or fresh session ID',
     },
     "flags": {
         "--worktree": ONLY + "the client makes a worktree outside the run's folder",
@@ -151,6 +153,11 @@ DISPOSABLE_ONLY = {
         b"\x16": ONLY + "Ctrl+V: the client uploads the test image to the host",
         "<b'y\\r' if yes else b'n\\r'>": ONLY + "a yes only to the fix of the check's own stale socket",
         b"\x03": ONLY + "Ctrl+C at the guided setup's first question, at the local terminal",
+        b'\r': ONLY + 'session_verbs.py: sends this exact check input only to an owned disposable session or an isolated local confirmation',
+        '<probe_line(c, b)>': ONLY + 'session_sockets.py: sends this exact check input only to an owned disposable session or an isolated local confirmation',
+        '<line.encode()>': ONLY + 'session_sockets.py: sends this exact check input only to an owned disposable session or an isolated local confirmation',
+        '<(\'env %s="${%s%%/*}/%s.sock" %s hook notification \\\'{"message":"e2e-cross-hook"}\\\'\\r\' % (hook, hook, b, c.HELPER)).encode()>': ONLY + 'session_sockets.py: sends this exact check input only to an owned disposable session or an isolated local confirmation',
+        '<(\'%s hook notification \\\'{"message":"e2e-own-hook"}\\\'; echo HOOKS-$((40+2))\\r\' % c.HELPER).encode()>': ONLY + 'session_sockets.py: sends this exact check input only to an owned disposable session or an isolated local confirmation',
     },
     "host": {
         '"cat > %s/notify.bin" % owned.run_dir()': ONLY + "the OSC 777 desktop notification bytes, which raise a needs_input alert event",
@@ -177,13 +184,21 @@ DISPOSABLE_ONLY = {
         '(SOCKETS + \'; python3 - "$d"\') % (c.NAME, c.NAME)': ONLY + "reads the stale sockets",
         "'command -v python3 >/dev/null'": ONLY + "reads whether the host has python3",
         "'[ ! -e %s ]' % wt": ONLY + "reads whether the worktree's folder is free",
+        "'rm -f %s/* && cd %s && %s worktree add -q -b e2e-plain %s/plain && %s -C %s/plain status --porcelain >/dev/null' % (marks, repo, base_git(), base, base_git(), base)": ONLY + 'host_git.py: uses this exact fixture command on the disposable host, with token-owned paths or an owned session ID',
+        '\'expected="%s/%s/worktrees/%s/%s-%s"; [ %s = "$expected" ] && [ ! -L "$expected" ] && [ ! -L "$expected/README" ] && [ -f "$expected/README" ] && [ "$(cd -P "$expected" && pwd)" = "$expected" ] && touch -m -d "@$(( $(date +%%s) + 5 ))" "$expected/README"\' % (owned.xdg_sh(\'XDG_DATA_HOME\', \'.local/share\'), c.NAME, os.path.basename(repo), slug, sid, q(cwd))': ONLY + 'host_git.py: uses this exact fixture command on the disposable host, with token-owned paths or an owned session ID',
+        "'systemctl --user is-system-running'": ONLY + 'host_git.py: uses this exact fixture command on the disposable host, with token-owned paths or an owned session ID',
+        "'mkdir %s' % base": ONLY + 'host_git.py: uses this exact fixture command on the disposable host, with token-owned paths or an owned session ID',
+        "'git --version'": ONLY + 'host_git.py: uses this exact fixture command on the disposable host, with token-owned paths or an owned session ID',
+        "'ls %s' % marks": ONLY + 'host_git.py: uses this exact fixture command on the disposable host, with token-owned paths or an owned session ID',
+        "'cat %s/filter 2>/dev/null; true' % marks": ONLY + 'host_git.py: uses this exact fixture command on the disposable host, with token-owned paths or an owned session ID',
+        '\'env=$(tr \\\'\\\\0\\\' \\\'\\\\n\\\' < /proc/%d/environ) || exit 3; printf \\\'%%s\\\\n\\\' "$env" | grep -q \\\'^PATH=\\\' || exit 4; printf \\\'%%s\\\\n\\\' "$env" | sed -n \\\'s/^SSH_AUTH_SOCK=//p\\\'\' % pid': ONLY + 'sandbox_hosts.py: uses this exact fixture command on the disposable host, with token-owned paths or an owned session ID',
+        "'rm -f ' + marker": ONLY + 'session_verbs.py: uses this exact fixture command on the disposable host, with token-owned paths or an owned session ID',
+        '\'mkdir -p %s && %s init --template= -q -b main %s && cd %s && mkdir -p .git/hooks && echo app > README && echo \\\'README filter=e2emark\\\' > .gitattributes && %s add README .gitattributes && %s commit -q -m base && %s config filter.e2emark.clean %s && printf \\\'#!/bin/sh\\\\ntouch %s/fsmonitor\\\\nexit 1\\\\n\\\' > .git/fsmonitor.sh && chmod +x .git/fsmonitor.sh && %s config core.fsmonitor "$PWD/.git/fsmonitor.sh" && %s config hook.e2e.command %s && printf \\\'#!/bin/sh\\\\ntouch %s/post-checkout\\\\n\\\' > .git/hooks/post-checkout && chmod +x .git/hooks/post-checkout && printf \\\'#!/bin/sh\\\\ntouch %s/post-index-change\\\\n\\\' > .git/hooks/post-index-change && chmod +x .git/hooks/post-index-change && printf \\\'#!/bin/sh\\\\ntouch %s/reference-transaction\\\\n\\\' > .git/hooks/reference-transaction && chmod +x .git/hooks/reference-transaction && %s config --add hook.e2e.event post-checkout && %s config --add hook.e2e.event post-index-change && %s config --add hook.e2e.event reference-transaction\' % (marks, git, repo, repo, git, git, git, q(\'cat /proc/self/cgroup >> %s/filter; cat\' % marks), marks, git, git, q(\'touch %s/config-hook\' % marks), marks, marks, marks, git, git, git)': ONLY + "host_git.py: creates exactly the token-owned repository, hooks, filter and markers used by the isolation control",
     },
 }
 
-# The commands on the host, as the source of the call's first argument: the
-# same code, whatever its quotes and spaces (host_key). host_refusal reads
-# each as a template, whose holes HOLES fills.
 HOST = {
+    '"set -e; cd %s; printf \'%s\' > .%s/setup; chmod +x .%s/setup; %s add -A; %s commit -qm change" % (repo, changed, c.NAME, c.NAME, owned.GIT, owned.GIT)': OWN_FOLDER + ": changes only the run's own trusted script, to check the hash and renewed question",
     '"mkdir %s && cat > %s/.e2e-nonce && printf %%s %s > %s/.e2e-run" % (d, d, RUN, d)':
         OWN_FOLDER + ": makes it, with the nonce from stdin and the token in it",
     '\'[ "$(cat %s/.e2e-nonce 2>/dev/null)" = "$(cat)" ]\' % d': READ + ": whether the folder holds the run's nonce, after a lost answer",
@@ -216,13 +231,9 @@ HOST = {
     '"exec 3<&0; systemctl --user show %s | grep -qF -f /dev/fd/3" % shlex.quote(unit)': READ,
 }
 
-# The read of the slice limit: "none" where no start can change it, as the
-# product changes it only where the user's manager has the memory controller.
 SLICE = ('f=/sys/fs/cgroup/user.slice/user-$(id -u).slice/user@$(id -u).service/cgroup.controllers; '
          'if [ -r "$f" ] && grep -qw memory "$f"; then systemctl --user show %s.slice -p MemoryMax --value; else echo none; fi')
 
-# A host's text, as an ID that it makes, a helper version, and a path in the
-# run's folder, with no part that goes up.
 ID = r"[A-Za-z0-9_-]{1,64}"
 VERSION = r"[A-Za-z0-9._-]+"
 PART = r"/(?!\.{1,2}(?:/|$))[A-Za-z0-9._+-]+"
@@ -238,7 +249,7 @@ def holes(c):
             "RUN": q(owned.RUN), "LOCK": q(owned.LOCK), "UNLOCK": q(owned.UNLOCK), "owned.run_dir()": q(owned.run_dir()),
             "owned.GIT": q(owned.GIT), "c.NAME": q(c.NAME), "NAME": q(c.NAME), "c.HELPER": q(c.HELPER) if c.HELPER else "(?!)",
             "sid": ID, "shlex.quote(sid)": ID, "ver": VERSION, "pid": "[0-9]+", "shlex.quote(unit)": r"[A-Za-z0-9@._:-]+",
-            "repo": under, "exit_file": under, "script": "[^']*", "CMDLINES": q(agent_setup.CMDLINES), "SLICE": q(SLICE)}
+            "repo": under, "exit_file": under, "script": "[^']*", "changed": "[^']*", "CMDLINES": q(agent_setup.CMDLINES), "SLICE": q(SLICE)}
 
 
 def template(node, values):
@@ -353,8 +364,7 @@ def client_allowed(args, c=None):
     return False
 
 
-# Exact laptop operations used by the pull check. No later option may
-# override the fixed configuration, and no remote command belongs here.
+# Exact laptop pull operations; later configuration overrides are refused.
 GIT_INIT = (("init", "--template=", "-q"), ("init", "--template=", "-q", "-b", "mine"))
 GIT_LOG = tuple(("log", "--format=%s") + count + (ref,)
                 for count in ((), ("-1",)) for ref in ("e2e-topic", "mine"))
@@ -403,6 +413,41 @@ def laptop_git_refusal(args, c, cwd):
     return "laptop git permits only the run's exact init and log commands"
 
 
+FORWARD_OPTIONS = ["-o", "BatchMode=yes", "-o", "ControlMaster=no", "-o", "ControlPath=none",
+                   "-o", "ForwardX11=no", "-o", "PermitLocalCommand=no", "-o", "GSSAPIDelegateCredentials=no",
+                   "-o", "ClearAllForwardings=yes", "-T"]
+FORWARD_PROBE = "exec \"$SHELL\" -l -i -c 'printf \"__E2E_SOCK__%s__E2E_SOCK__\" \"${SSH_AUTH_SOCK:-}\"'"
+KEY_TYPES = ("ed25519", "ecdsa", "rsa")
+
+
+def fixture_refusal(argv, c):
+    """The exact empty-agent, wrong-key and plain-SSH control operations."""
+    import boundary
+    if c is not boundary.ctx() or not c.DISPOSABLE:
+        return "local SSH fixtures require the canonical authenticated disposable host"
+    if not all(isinstance(word, str) and "\0" not in word for word in argv):
+        return "local SSH fixture arguments must be plain strings"
+    if argv == ["ssh", "-V"]:
+        return None
+    if len(argv) == 4 and argv[:3] == ["ssh-agent", "-D", "-a"]:
+        path = rooted_path(argv[3], c, strict=True)
+        if path and os.path.basename(path) == "agent.sock" and not os.path.lexists(path):
+            return None
+    if len(argv) == 10 and argv[:3] == ["ssh-keygen", "-q", "-t"] and argv[3] in KEY_TYPES \
+            and argv[4:9] == ["-N", "", "-C", "", "-f"]:
+        path = rooted_path(argv[9], c, strict=True)
+        if path and os.path.basename(path) == "wrong_" + argv[3] and not os.path.lexists(path) and not os.path.lexists(path + ".pub"):
+            return None
+    if len(argv) >= 3 and argv[:2] == ["ssh", "-F"]:
+        config = rooted_path(argv[2], c, strict=True)
+        target = c.root.entry.get("ssh")
+        tails = (FORWARD_OPTIONS + ["--", target, FORWARD_PROBE],
+                 FORWARD_OPTIONS + ["-o", "ForwardAgent=no", "--", target, FORWARD_PROBE])
+        if config and os.path.basename(config) == "plain.conf" and os.path.isfile(config) and argv[3:] in tails:
+            return None
+    return "the local SSH fixture is not an exact operation on the run's own files"
+
+
 def laptop_refusal(argv, c, cwd=None):
     """Why argv may not run on the laptop, or None: the client with an entry
     of CLIENT, or isolated git on its own repository. cwd is the actual
@@ -418,6 +463,8 @@ def laptop_refusal(argv, c, cwd=None):
         if not all(isinstance(w, str) and "\0" not in w for w in argv):
             return "laptop git arguments must be strings"
         return None if c.DISPOSABLE else laptop_git_refusal(argv[1 + len(GIT_FLAGS):], c, cwd)
+    if argv[0] in ("ssh", "ssh-agent", "ssh-keygen"):
+        return fixture_refusal(argv, c)
     return "%r is not a program that the run starts on the laptop" % argv[0]
 
 

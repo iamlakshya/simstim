@@ -148,7 +148,7 @@ func (b *demoBackend) Secrets(context.Context, client.Settings, client.Host) (ma
 	return nil, nil
 }
 
-func (b *demoBackend) SessionSecrets(context.Context, client.Settings, []string) (map[string]api.Secret, error) {
+func (b *demoBackend) SessionSecrets(context.Context, client.Settings, client.Host, string, []string) (map[string]api.Secret, error) {
 	return nil, nil
 }
 

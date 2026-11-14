@@ -3,12 +3,11 @@ package client
 import (
 	"context"
 	"fmt"
+	"github.com/iamlakshya/simstim/internal/api"
+	"github.com/iamlakshya/simstim/internal/brand"
 	"os"
 	"os/exec"
 	"strings"
-
-	"github.com/iamlakshya/simstim/internal/api"
-	"github.com/iamlakshya/simstim/internal/brand"
 )
 
 // Session is a session row, as the host reports it.
@@ -83,6 +82,16 @@ func (c *Conn) NewSession(ctx context.Context, a NewArgs) (*Session, error) {
 	if err := CheckSessionName(a.Name); err != nil {
 		return nil, err
 	}
+	if err := CheckRequestedWall(a.Wall); err != nil {
+		return nil, err
+	}
+	ctx, _ = ensureGrantRequest(ctx)
+	if err := checkWallGrantArgs(ctx, a.Wall, a.SSHAgent); err != nil {
+		return nil, err
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	a, err := withMemoryMax(a)
 	if err != nil {
 		return nil, err
@@ -93,12 +102,34 @@ func (c *Conn) NewSession(ctx context.Context, a NewArgs) (*Session, error) {
 	if err := c.needMakeFolder(a); err != nil {
 		return nil, err
 	}
+	ctx, release, err := c.beginGrant(ctx, "new", a.SSHAgent || grantRequestOf(ctx).SSHAgent)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+	// One immutable local layer snapshot supplies both the creation pin
+	// and the actual outgoing arguments for this attempt.
+	a.Layers = api.CloneLayers(a.Layers)
+	a, tier, err := c.prepareNewGrants(ctx, a)
+	if err != nil {
+		return nil, err
+	}
+	if err := recordSecretNames(ctx, c.Host, c.HostID(), tier, a.Secrets); err != nil {
+		return nil, err
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	var s Session
-	if err := c.Call(ctx, "new", a, &s); err != nil {
+	if err := c.callWithSent(ctx, "new", a, &s, release); err != nil {
 		return nil, err
 	}
 	if err := checkSessionID(c.Host.Name, s.ID); err != nil {
 		return nil, err
+	}
+	if a.ID != "" && s.ID != a.ID {
+		return nil, &UserError{Msg: "the helper returned another session's ID",
+			Hint: brand.Name + " host doctor " + ShellWord(c.Host.Name), Code: "protocol"}
 	}
 	return &s, nil
 }

@@ -15,8 +15,8 @@ checks before each call and test_rules.py in the code):
 Before its first start it stops on a host whose alerts are on, or whose
 sessions' slice limit a start would change. Every other check prints a
 SKIP line that names the Go tests that cover it (run_parts.SKIPPED). On a
-disposable host, a container that CI made for the run with `host create
-docker` and marked with the value of E2E_DISPOSABLE, those checks run too
+disposable host made for the run, authenticated by the matching host marker
+and E2E_DISPOSABLE_MARKER, those checks run too
 (disposable*.py, agent_login.py, guided_setup.py). Every client process
 of the run has a root of its own on the laptop (boundary.Root). One run
 at a time on a host: the run takes a lock inside the try, and the finally
@@ -28,7 +28,7 @@ import collections, json, os, re, signal, sys, tempfile, time, traceback, types
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))
 sys.path.insert(0, HERE)
-import allowed, boundary, owned, run_parts  # noqa: E402
+import allowed, boundary, joined_checks, owned, run_parts  # noqa: E402
 
 with open(os.path.join(ROOT, "internal/brand/brand.go")) as _f:
     NAME = re.search(r'^const Name = "(.*)"', _f.read(), re.M).group(1)
@@ -175,6 +175,41 @@ try:
             run_parts.skip("guided setup")
     if os.environ.get("E2E_ONLY") == "guided-setup":
         guided_checks()
+        owned.say("RESULT %d/%d passed" % (sum(results), len(results)))
+        sys.exit(0 if all(results) else 1)
+
+    def sandbox_host_checks():
+        joined_checks.sandbox_host_checks(C, os.environ.get("E2E_ONLY") == "sandbox-hosts")
+    if os.environ.get("E2E_ONLY") == "sandbox-hosts":
+        sandbox_host_checks()
+        owned.say("RESULT %d/%d passed" % (sum(results), len(results)))
+        sys.exit(0 if all(results) else 1)
+
+    def socket_checks():
+        joined_checks.socket_checks(C, os.environ.get("E2E_ONLY") == "session-sockets")
+    if os.environ.get("E2E_ONLY") == "session-sockets":
+        socket_checks()
+        owned.say("RESULT %d/%d passed" % (sum(results), len(results)))
+        sys.exit(0 if all(results) else 1)
+
+    def host_git_checks():
+        joined_checks.host_git_checks(C, os.environ.get("E2E_ONLY") == "host-git")
+    if os.environ.get("E2E_ONLY") == "host-git":
+        host_git_checks()
+        owned.say("RESULT %d/%d passed" % (sum(results), len(results)))
+        sys.exit(0 if all(results) else 1)
+
+    def verbs_checks():
+        joined_checks.verbs_checks(C, os.environ.get("E2E_ONLY") == "session-verbs")
+    if os.environ.get("E2E_ONLY") == "session-verbs":
+        verbs_checks()
+        owned.say("RESULT %d/%d passed" % (sum(results), len(results)))
+        sys.exit(0 if all(results) else 1)
+
+    def host_checks():
+        joined_checks.host_checks(C, os.environ.get("E2E_ONLY") == "host-commands")
+    if os.environ.get("E2E_ONLY") == "host-commands":
+        host_checks()
         owned.say("RESULT %d/%d passed" % (sum(results), len(results)))
         sys.exit(0 if all(results) else 1)
 
@@ -396,6 +431,11 @@ try:
 
     setup_checks()
     guided_checks()
+    sandbox_host_checks()
+    socket_checks()
+    host_git_checks()
+    verbs_checks()
+    host_checks()
     # M. Full screen (roadmap N2): a program on the alternate screen is reported
     #    as full screen, and host doctor says so.
     sid_fs = start("e2e-fullscreen", "/bin/bash", "-c", 'printf "\\033[?1049hFULL"; sleep 600')
@@ -435,7 +475,11 @@ finally:
                 break
         except BaseException:  # noqa: BLE001 - the clean-up must run
             pass
-    R.remove()
+    if state.get("keep_client_root"):
+        R.close_controls(envx)
+        owned.say("CLEAN-UP FAILED: the isolated client root stays for inspection: %s" % R.path)
+    else:
+        R.remove()
     if not clean:
         # A run whose clean-up left something on the host fails, also when
         # every check passed. An exception that ended the run is shown first.

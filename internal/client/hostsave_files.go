@@ -9,6 +9,10 @@ func changeHostFiles(ctx context.Context, c HostChange, hosts []Host, withPin bo
 	if err != nil {
 		return nil, hostFileHooks{}, err
 	}
+	sourceGeneration, generation, err := prepareHostForgetGeneration(ctx, c, hosts)
+	if err != nil {
+		return nil, hostFileHooks{}, err
+	}
 	var pinRollback func()
 	if withPin {
 		publish, err := checkStagedPin(ctx, *c.Now, hosts, st)
@@ -58,6 +62,15 @@ func changeHostFiles(ctx context.Context, c HostChange, hosts []Host, withPin bo
 			}
 			return removeWrappers()
 		}
+	}
+	hooks.membershipGeneration = generation
+	hooks.membershipSourceGeneration = sourceGeneration
+	priorCommit := hooks.commit
+	hooks.commit = func() {
+		if priorCommit != nil {
+			priorCommit()
+		}
+		recordHostForgetWitness(ctx, c, generation)
 	}
 	return out, hooks, nil
 }

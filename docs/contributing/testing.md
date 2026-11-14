@@ -186,6 +186,10 @@ On a disposable host, `test/e2e/agent_login.py` runs `agents login claude`, only
 
 `test/e2e/host_commands.py` checks the host commands. `host show` prints the host's details, and its JSON. `host upgrade` finds the helper that is there already, and changes nothing. `host set` refuses an unknown key, and saves `idle` on a container. `host rm --destroy` with input off fails with exit code 4. At a terminal, `host rm` says what the machine holds, and Enter keeps the machine. `host set` and `host rm` use a throwaway client config with a copy of `hosts.toml`. So they forget the host only in the copy, and never delete a machine. `host upgrade` runs only when this build's helper is on the host already, so the checks change nothing there. To run only these checks, set `E2E_ONLY=host-commands`.
 
+The joined CLI checks use the same process boundary and ownership helpers. Set `E2E_ONLY` to `host-commands`, `host-git`, `sandbox-hosts`, `session-sockets` or `session-verbs` to select one. They run on a disposable host authenticated by the host marker and `E2E_DISPOSABLE_MARKER`. Setting `E2E_DISPOSABLE=1` alone grants no permission. The full suite on an owner host prints each skipped check with its local Go coverage. Selecting one of these suites on an owner host fails clearly.
+
+These checks keep their client config, keys and empty SSH agent under the run's physical laptop root. Starts record fresh IDs. Attaches and client deletes verify those IDs before use. Cleanup deletes by ID through the helper. A failed list or cleanup keeps the relevant fixture and lock for inspection. The trusted-script checks also verify the stored SHA-256 and ask again after a script changes.
+
 ## Benchmarks
 
 The attach pump has benchmarks at each step a byte takes: the host's output ring and screen model (`internal/ring`, `internal/host`), the frames (`internal/proto`), the client's catch-up and mode tracker (`internal/term`), the output frames through the client's attach (`internal/client`), and the input filter (`internal/keys`). `internal/term/termtest` makes the output they use: redraws shaped like a coding agent's, and a transcript that scrolls the screen.

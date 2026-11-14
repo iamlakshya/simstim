@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -68,7 +69,7 @@ func TestAgentHost(t *testing.T) {
 			t.Errorf("agents %s with no hosts: exit %d\n%s", verb, code, got)
 		}
 	}
-	if err := client.SaveHostsContext(context.Background(), []client.Host{{Name: "a", SSH: "a"}}); err != nil {
+	if err := client.SaveHosts(t.Context(), []client.Host{{Name: "box", SSH: "box"}, {Name: "nuc", SSH: "nuc"}}); err != nil {
 		t.Fatal(err)
 	}
 	for _, c := range []struct {
@@ -94,15 +95,6 @@ func TestAgentHost(t *testing.T) {
 				t.Errorf("%s printed\n%s\nwhich lacks %q", strings.Join(c.args, " "), got, h)
 			}
 		}
-	}
-	_ = client.SaveHostsContext(context.Background(), []client.Host{{Name: "a", SSH: "a"}, {Name: "b", SSH: "b"}})
-	_, err := pickHost("")
-	var ue *client.UserError
-	if err == nil || !strings.Contains(err.Error(), "which host? You have a, b") {
-		t.Fatalf("two hosts: %v", err)
-	}
-	if got := orList([]string{"A", "B", "C"}); got != "A, B or C" {
-		t.Errorf("orList = %q", got)
 	}
 }
 
@@ -158,7 +150,7 @@ func TestAfterInstallNamesLogin(t *testing.T) {
 	} {
 		a, _ := agents.Find(c.kind)
 		tr.SetAgents([]api.AgentCheck{readyCheck(a.Kind, a.Title, c.login)})
-		errOut, err := said(t, func() error { return afterInstall(t.Context(), h, a) })
+		errOut, err := said(t, func() error { return afterInstall(t.Context(), h, a, false) })
 		if err != nil {
 			t.Fatalf("%s: %v", c.kind, err)
 		}

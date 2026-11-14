@@ -98,6 +98,7 @@ type worktreeAddArgs struct {
 
 // gitOpRequest is a git operation's request.
 type gitOpRequest struct {
+	Pull *gitPullArgs `json:"pull,omitempty"`
 	// RepoInfoArgs is repo.info's request, the one that the client sends.
 	api.RepoInfoArgs
 	// Add is worktree.add's request.
@@ -121,11 +122,12 @@ func (k *gitOpKind) deadlineFor(req gitOpRequest) time.Duration {
 // gitOpAnswer is a git operation's answer. The child of worktree.add first
 // writes one with Plan alone, before the checkout, and then the answer.
 type gitOpAnswer struct {
-	Error  *proto.Error  `json:"error,omitempty"`
-	Git    *GitInfo      `json:"git,omitempty"`    // worktree.add
-	Repo   *api.RepoInfo `json:"repo,omitempty"`   // repo.info
-	Result string        `json:"result,omitempty"` // worktree.remove: what it did
-	Plan   *GitInfo      `json:"plan,omitempty"`   // worktree.add: what it is about to make
+	Pull   *gitPullResult `json:"pull,omitempty"`
+	Error  *proto.Error   `json:"error,omitempty"`
+	Git    *GitInfo       `json:"git,omitempty"`    // worktree.add
+	Repo   *api.RepoInfo  `json:"repo,omitempty"`   // repo.info
+	Result string         `json:"result,omitempty"` // worktree.remove: what it did
+	Plan   *GitInfo       `json:"plan,omitempty"`   // worktree.add: what it is about to make
 }
 
 // gitOpHint is the next step after a git operation that failed on the host.

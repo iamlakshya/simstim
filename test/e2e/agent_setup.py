@@ -61,9 +61,9 @@ def run(c):
         setup_checks(c, envx, tmp, created, made)
         fix_checks(c, made)
     finally:
-        for s in created:
-            subprocess.run([c.cli, "rm", c.HOST + "/" + s, "-y"], capture_output=True)
-        c.host_rc("rm -rf ~/e2e-setup-repo ~/.e2e-setup-exit ~/.local/share/%s/worktrees/e2e-setup-repo" % c.NAME)
+        # By ID alone, through the helper's rm: an address could reach a
+        # session named like the ID, once the session itself is gone.
+        owned.clean_up(c, created)
         shutil.rmtree(tmp, ignore_errors=True)
 
 
@@ -75,7 +75,7 @@ def run(c):
 # (owned.e2e_name).
 
 
-def start_asked(c, envx, created, name, *args):
+def start_asked(c, envx, created, name, *args, script_changed=False):
     """Starts a session named name with new --detach at a terminal, where
     new asks whether the repository's setup script may run, and answers
     yes. It returns the session's ID, or None, and whether new asked. The
@@ -92,6 +92,9 @@ def start_asked(c, envx, created, name, *args):
     asked, code = False, None
     try:
         asked = bool(t.wait_for(rb"Run it\? \[y/N\]", 60)) and b"has a setup script" in t.buf
+        if script_changed:
+            c.ok(asked and b"changed after you trusted it" in t.buf,
+                 "setup: at a terminal, new asks again and says that the script changed")
         if asked:
             t.send(b"y\r")
         code = t.exit_code(60)
@@ -243,76 +246,82 @@ def setup_checks(c, envx, tmp, created, made=None):
     c.ok(b"AGENT-RAN" in out and b"SETUP-RAN" not in out, "setup: the skipped script did not run")
 
     # On a terminal, new asks; yes runs the script before the program, and is kept.
-    t = c.Term([c.cli, "new", c.HOST, "--dir", "~/e2e-setup-repo", "--name", "e2e-setup-ask", "--detach"] + prog, env=envx)
-    asked = t.wait_for(rb"Run it\? \[y/N\]", 60)
-    c.ok(asked and b"has a setup script" in t.buf, "setup: new asks before it runs an untrusted repository's script")
-    t.send(b"y\r")
-    t.exit_code(60)
-    m = re.search(rb"Started [^/]+/(\w+)", t.buf)
-    if m:
-        sid = m.group(1).decode()
-        created.append(sid)
-        out = screen(c, envx, sid, rb"AGENT-RAN")
-        i, j = out.find(b"SETUP-RAN name=e2e-setup-ask new=0"), out.find(b"AGENT-RAN")
-        if not c.ok(0 <= i < j and b": running " in out, "setup: the trusted script ran in the session's terminal, before the program"):
-            print(out.decode(errors="replace")[-600:])
-    with open(os.path.join(tmp, "state", c.NAME, "setup-trust.json")) as f:
-        trust = json.load(f)
-    kept = [e for r, e in trust.get("trusted", {}).get(c.HOST, {}).items() if r.endswith("/e2e-setup-repo")]
-    c.ok(trust.get("version") == 2 and len(kept) == 1 and re.fullmatch(r"[0-9a-f]{64}", kept[0].get("sha256", "")),
+    name = owned.e2e_name("e2e-setup-ask")
+    sid, asked = start_asked(c, envx, created, name, "--dir", repo, *prog)
+    c.ok(asked, "setup: new asks before it runs an untrusted repository's script")
+    # A start that the check cannot own is a failure, and so is the check of
+    # the script: it fails, and never goes missing from the results.
+    c.ok(sid, "setup: new at a terminal starts a session of its own")
+    out = screen(c, envx, sid, name, rb"AGENT-RAN") if sid else b""
+    i, j = out.find(b"SETUP-RAN name=" + name.encode() + b" new=0"), out.find(b"AGENT-RAN")
+    if not c.ok(sid and 0 <= i < j and b": running " in out, "setup: the trusted script ran in the session's terminal, before the program"):
+        owned.say(owned.safe_text(out[-600:]) if sid else "  no session of its own to attach to")
+    trust = read_text(os.path.join(tmp, "state", c.NAME, "setup-trust.json"))
+    c.ok(asked and trust is not None and base in trust and "true" in trust,
+         "setup: the answer is kept for the repository on the host (%s)" % ("no answer was asked" if not asked else "no setup-trust.json" if trust is None else "read"))
+
+    c.ok(kept_script_hash(trust, c.HOST, base),
          "setup: the answer is kept for the repository on the host, with the hash of its scripts")
 
-    # The answer goes along: a new worktree runs the script with no question.
-    sid, r = new(c, envx, "--dir", "~/e2e-setup-repo", "--name", "e2e-setup-wt", "--worktree", "--detach", *prog)
-    created += [sid] if sid else []
-    c.ok(sid and "Skipping" not in r.stderr, "setup: a kept answer asks nothing")
-    if sid:
-        out = screen(c, envx, sid, rb"AGENT-RAN")
-        c.ok(b"SETUP-RAN name=e2e-setup-wt new=1" in out, "setup: in a new worktree the script runs, and knows the worktree is new")
+    # The answer goes along to a new worktree: the client makes the worktree
+    # outside the run's folder.
+    if c.DISPOSABLE:
+        import disposable_setup
+        disposable_setup.worktree_check(c, envx, created, made if made is not None else [], repo, base, prog, screen)
+    else:
+        run_parts.skip("worktree")
 
-    # A commit that changes the trusted script asks again (spec 19.2): without
-    # a terminal, new skips it with a note; at one, it asks and says why.
-    changed = script.replace("SETUP-RAN", "SETUP-CHANGED")
-    c.host_ssh("set -e; cd ~/e2e-setup-repo; printf '%s' > .%s/setup; chmod +x .%s/setup; "
-               "git add -A; git -c user.name=e2e -c user.email=e2e@example.com commit -qm change" % (changed, c.NAME, c.NAME))
-    sid, r = new(c, envx, "--dir", "~/e2e-setup-repo", "--name", "e2e-setup-changed", "--detach", *prog)
-    created += [sid] if sid else []
-    c.ok(sid and "it changed after you trusted it" in r.stderr, "setup: without a terminal, a changed script is skipped with a note")
-    if sid:
-        out = screen(c, envx, sid, rb"AGENT-RAN")
-        c.ok(b"AGENT-RAN" in out and b"SETUP-CHANGED" not in out, "setup: the changed script did not run")
-    t = c.Term([c.cli, "new", c.HOST, "--dir", "~/e2e-setup-repo", "--name", "e2e-setup-reask", "--detach"] + prog, env=envx)
-    asked = t.wait_for(rb"Run it\? \[y/N\]", 60)
-    c.ok(asked and b"changed after you trusted it" in t.buf, "setup: at a terminal, new asks again and says that the script changed")
-    t.send(b"y\r")
-    t.exit_code(60)
-    m = re.search(rb"Started [^/]+/(\w+)", t.buf)
-    if c.ok(m, "setup: the new yes starts the session"):
-        sid = m.group(1).decode()
-        created.append(sid)
-        out = screen(c, envx, sid, rb"AGENT-RAN")
-        c.ok(b"SETUP-CHANGED name=e2e-setup-reask" in out, "setup: after the new yes, the changed script runs")
+    changed_checks(c, envx, created, repo, script, prog)
 
     # A failing script shows its exit code, and the program still starts.
-    c.host_ssh("echo 7 > ~/.e2e-setup-exit")
-    sid, r = new(c, envx, "--dir", "~/e2e-setup-repo", "--name", "e2e-setup-fail", "--setup-script", "--detach", *prog)
-    created += [sid] if sid else []
-    if c.ok(sid, "setup: --setup-script starts a session (%s)" % r.stderr.strip()):
-        out = screen(c, envx, sid, rb"AGENT-RAN")
-        i, j = out.find(b"exited with 7; the agent starts anyway"), out.find(b"AGENT-RAN")
-        c.ok(0 <= i < j, "setup: a failing script shows its exit code, then the program starts")
-    c.host_rc("rm -f ~/.e2e-setup-exit")
+    c.host_rc('echo 7 > "%s"' % exit_file)
+    name = owned.e2e_name("e2e-setup-fail")
+    sid, out, err = owned.start_new(c, envx, created, name, "--dir", repo, "--setup", *prog)
+    c.ok(sid, "setup: --setup starts a session (%s)" % owned.safe_text(err.strip()[-400:]))
+    out = screen(c, envx, sid, name, rb"AGENT-RAN") if sid else b""
+    i, j = out.find(b"exited with 7; the agent starts anyway"), out.find(b"AGENT-RAN")
+    c.ok(sid and 0 <= i < j, "setup: a failing script shows its exit code, then the program starts")
+    c.host_rc('rm -f "%s"' % exit_file)
 
 
-def fix_checks(c):
-    if c.host_rc("command -v python3 >/dev/null") != 0:
-        print("SKIP fix: the host has no python3 to make a stale socket with")
-        return
-    # The helper's runtime folder: under XDG_RUNTIME_DIR, or in /tmp without one.
-    sock = c.host_ssh("if [ -d \"${XDG_RUNTIME_DIR:-}\" ]; then d=$XDG_RUNTIME_DIR/%s; else d=/tmp/%s-$(id -u); fi; "
-                      "d=$d/s; mkdir -p $d; p=$d/e2estale.sock; "
-                      "python3 -c 'import socket,sys; socket.socket(socket.AF_UNIX).bind(sys.argv[1])' $p; echo $p" % (c.NAME, c.NAME)).stdout.decode().strip()
-    c.ok(c.host_rc("test -S " + sock) == 0, "fix: made a stale socket at " + sock)
+def kept_script_hash(text, host, base):
+    """Whether trust version two kept this host/repository's SHA-256."""
+    try:
+        document = json.loads(text or "null")
+    except ValueError:
+        return False
+    trusted = document.get("trusted", {}) if isinstance(document, dict) else {}
+    entries = trusted.get(host, {}) if isinstance(trusted, dict) else {}
+    kept = [entry for path, entry in entries.items() if isinstance(path, str) and path.endswith("/" + base)
+            and isinstance(entry, dict)] if isinstance(entries, dict) else []
+    return bool(isinstance(document, dict) and type(document.get("version")) is int and document["version"] == 2
+                and len(kept) == 1 and isinstance(kept[0].get("sha256"), str)
+                and re.fullmatch(r"[0-9a-f]{64}", kept[0]["sha256"]))
+
+
+def changed_checks(c, envx, created, repo, script, prog):
+    """A changed trusted script is skipped or asks again before it runs."""
+    changed = script.replace("SETUP-RAN", "SETUP-CHANGED")
+    c.host_ssh("set -e; cd %s; printf '%s' > .%s/setup; chmod +x .%s/setup; %s add -A; %s commit -qm change" %
+               (repo, changed, c.NAME, c.NAME, owned.GIT, owned.GIT))
+    name = owned.e2e_name("e2e-setup-changed")
+    sid, _, err = owned.start_new(c, envx, created, name, "--dir", repo, *prog)
+    c.ok(sid and "it changed after you trusted it" in err,
+         "setup: without a terminal, a changed script is skipped with a note")
+    out = screen(c, envx, sid, name, rb"AGENT-RAN") if sid else b""
+    c.ok(sid and b"AGENT-RAN" in out and b"SETUP-CHANGED" not in out, "setup: the changed script did not run")
+    name = owned.e2e_name("e2e-setup-reask")
+    sid, _ = start_asked(c, envx, created, name, "--dir", repo, *prog, script_changed=True)
+    c.ok(sid, "setup: the new yes starts the session")
+    out = screen(c, envx, sid, name, rb"AGENT-RAN") if sid else b""
+    c.ok(sid and b"SETUP-CHANGED name=" + name.encode() in out,
+         "setup: after the new yes, the changed script runs")
+
+
+def fix_checks(c, made=None):
+    """host doctor --fix at a terminal, with a no to every fix: the e2e run
+    applies no fix on a test host, and makes no socket in the helper's
+    runtime folder. The client then says that it changed nothing."""
     t = c.Term([c.cli, "host", "doctor", c.HOST, "--fix"], env=c.env)
     seen = 0
     try:

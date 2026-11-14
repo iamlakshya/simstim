@@ -3,6 +3,7 @@ package link
 import (
 	"encoding/binary"
 	"fmt"
+	"io"
 
 	"github.com/iamlakshya/simstim/internal/proto"
 	"github.com/iamlakshya/simstim/internal/version"
@@ -26,6 +27,10 @@ func (s *Session) writeLoop() {
 		s.fail(fmt.Errorf("link: send the hello: %w", err))
 		return
 	}
+	s.writeContinuation()
+}
+
+func (s *Session) writeContinuation() {
 	for {
 		select {
 		case <-s.wake:
@@ -37,7 +42,11 @@ func (s *Session) writeLoop() {
 			if len(b) == 0 {
 				break
 			}
-			if _, err := s.conn.Write(b); err != nil {
+			n, err := s.conn.Write(b)
+			if err == nil && n != len(b) {
+				err = io.ErrShortWrite
+			}
+			if err != nil {
 				s.fail(fmt.Errorf("link: write: %w", err))
 				return
 			}

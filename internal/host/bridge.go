@@ -6,6 +6,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/iamlakshya/simstim/internal/agentbridge"
+	"github.com/iamlakshya/simstim/internal/api"
+	"github.com/iamlakshya/simstim/internal/inputtransfer"
+	"github.com/iamlakshya/simstim/internal/secretmem"
 	"io"
 	"log/slog"
 	"net"
@@ -23,10 +27,17 @@ import (
 )
 
 // Features this host helper offers. Clients check them before using a feature.
-var Features = []string{"attach.replay", "upload", "peek", "setup", "rename", "send", "hooks", "restore", "ports", "worktree", "folders", "alerts", "trace"}
+var Features = []string{"attach.replay", "upload", "peek", "setup", "rename", "send", "hooks", "restore", "ports", "worktree", "folders", "alerts", "trace", api.FeatureSandboxReviewContext, api.FeatureSandboxCohort, inputtransfer.Feature, inputtransfer.FinishFeature, api.FeatureExecStream, api.FeatureSpawn, api.FeatureSandboxGroupRM, api.FeatureSandboxSnapshot, "session.id", agentbridge.Feature}
 
 type bridge struct {
-	w *proto.Writer
+	pullClosed  bool
+	pull        *bridgePull
+	ownedOutput OwnedBridgeOutput
+	agents      agentsDiskService
+	images      imageService
+	runtime     runtimeService
+	ctx         context.Context
+	w           *proto.Writer
 	// log takes the bridge's debug lines, while its debug is on
 	// (bridge_debug.go).
 	log *slog.Logger
@@ -36,6 +47,9 @@ type bridge struct {
 	// traced is true while the attach asked for a debug trace of its keys.
 	// Only the loop in RunBridge uses it.
 	traced bool
+
+	attachMu sync.Mutex
+	ended    bool
 
 	mu     sync.Mutex
 	holder net.Conn
@@ -53,6 +67,13 @@ type bridge struct {
 
 // RunBridge serves one client over in and out (the SSH channel's stdio).
 func RunBridge(in io.Reader, out io.Writer) error {
+	return runBridge(in, out, nil)
+}
+
+func runBridge(in io.Reader, out io.Writer, owned OwnedBridgeOutput) (returned error) {
+	if err := secretmem.Protect(); err != nil {
+		return err
+	}
 	r := bufio.NewReaderSize(in, 256<<10)
 	w := proto.NewWriter(out)
 	f, err := proto.Read(r)
@@ -75,19 +96,35 @@ func RunBridge(in io.Reader, out io.Writer) error {
 		_ = w.WriteJSON(proto.TError, proto.Error{Code: "host_id", Message: err.Error(), Hint: "Check " + paths.HostID() + " on the host."})
 		return err
 	}
-	if err := w.WriteJSON(proto.THello, proto.Hello{Magic: proto.Magic, Protocol: version.Protocol, Version: version.Version, Role: "bridge", HostID: hostID, Features: Features}); err != nil {
+	features := Features
+	if owned == nil {
+		features = slices.DeleteFunc(slices.Clone(Features), func(feature string) bool { return feature == api.FeaturePullBundle })
+	}
+	if err := w.WriteJSON(proto.THello, proto.Hello{Magic: proto.Magic, Protocol: version.Protocol, Version: version.Version, Role: "bridge", HostID: hostID, Features: features}); err != nil {
 		return err
 	}
 	lines := diag.NewLines()
-	b := &bridge{w: w, log: slog.New(lines), dbg: bridgeDebug{lines: lines}, uploads: map[uint64]*upload{}}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	b := &bridge{ctx: ctx, ownedOutput: owned, w: w, log: slog.New(lines), dbg: bridgeDebug{lines: lines}, uploads: map[uint64]*upload{}}
 	liveBridges.Store(b, true)
 	defer liveBridges.Delete(b)
 	// An upload that never got its end, as one that its client gave up at
 	// a cancel, leaves nothing when the connection goes.
 	defer b.reclaimUploadsAt(true)
 	defer b.stopDebug("end")
-	defer b.closeHolder()
+	defer b.endAttach()
+	defer func() {
+		cancel()
+		returned = errors.Join(returned, b.agents.close(), b.images.close())
+		b.runtime.close()
+		if owned != nil {
+			_ = owned.Cancel()
+		}
+		b.closePull()
+	}()
 	inside := CheckCaller() != nil // bridge_inside.go
+	firstFrame := true
 	for {
 		f, err := proto.Read(r)
 		if err != nil {
@@ -96,6 +133,8 @@ func RunBridge(in io.Reader, out io.Writer) error {
 			}
 			return err
 		}
+		wasFirst := firstFrame
+		firstFrame = false
 		if inside && b.refuseInside(f) {
 			continue
 		}
@@ -105,6 +144,35 @@ func RunBridge(in io.Reader, out io.Writer) error {
 		case proto.TRequest:
 			var req proto.Request
 			if json.Unmarshal(f.Payload, &req) == nil {
+				if req.Op == "inputs.begin" || req.Op == inputtransfer.Describe {
+					if !wasFirst {
+						err := UserError("bad_request", "inputs require a dedicated connection", "Open a fresh input continuation.")
+						b.reply(req.ID, nil, err)
+						return err
+					}
+					return b.inputs(r, req)
+				}
+				if req.Op == "exec" {
+					if !wasFirst {
+						err := UserError("bad_request", "exec requires a dedicated connection", "Open a fresh connection for exec.")
+						b.reply(req.ID, nil, err)
+						return err
+					}
+					return b.exec(r, req)
+				}
+				if IsPullOp(req.Op) {
+					run, ctx, err := b.preparePull(req)
+					if err != nil {
+						b.replyPull(req.ID, nil, err)
+						continue
+					}
+					if run == nil {
+						continue
+					}
+					liveRequests.Add(1)
+					go func() { defer liveRequests.Add(-1); result, err := run(ctx); b.replyPull(req.ID, result, err) }()
+					continue
+				}
 				liveRequests.Add(1) // EndBridge waits for it
 				go func() {
 					defer liveRequests.Add(-1)
@@ -161,12 +229,68 @@ func (b *bridge) reply(id uint64, v any, err error) {
 
 func (b *bridge) handle(req proto.Request) {
 	switch req.Op {
+	case api.SandboxReviewContextOp:
+		var args api.SandboxSnapshotArgs
+		fields, err := api.JSONObjectFields(req.Args, "id")
+		if err != nil || len(fields) != 1 || !api.ExactJSONFields(req.Args, args) || json.Unmarshal(req.Args, &args) != nil || args.Cohort {
+			b.reply(req.ID, nil, UserError("bad_request", "invalid saved sandbox review request", "Use the original local publication receipt with the current helper."))
+			return
+		}
+		view, err := SavedSandboxReviewContext(b.ctx, args.ID)
+		b.reply(req.ID, view, err)
+	case "sandbox.snapshot":
+		var a api.SandboxSnapshotArgs
+		if err := json.Unmarshal(req.Args, &a); err != nil || !api.ExactJSONFields(req.Args, api.SandboxSnapshotArgs{}) {
+			b.reply(req.ID, nil, UserError("bad_request", "invalid sandbox snapshot request", "Use the current client and helper."))
+			return
+		}
+		if a.Cohort {
+			view, err := SandboxCohortSnapshot(context.Background(), a.ID)
+			b.reply(req.ID, view, err)
+			return
+		}
+		id, err := SandboxPrimaryID(a.ID)
+		if err != nil {
+			b.reply(req.ID, nil, err)
+			return
+		}
+		if alive(id) {
+			if err := checkSessionFeatures(id, 3*time.Second, api.FeatureSpawn, api.FeatureSandboxSnapshot); err != nil {
+				b.reply(req.ID, nil, err)
+				return
+			}
+		}
+		result, err := SandboxSnapshot(a.ID)
+		b.reply(req.ID, result, err)
+		return
+	case "spawn":
+		if err := validateJoinSecretShape(req.Args); err != nil {
+			b.reply(req.ID, nil, err)
+			return
+		}
+		var a api.JoinArgs
+		if err := json.Unmarshal(req.Args, &a); err != nil {
+			b.reply(req.ID, nil, err)
+			return
+		}
+		id, err := SandboxPrimaryID(a.Parent)
+		if err != nil {
+			b.reply(req.ID, nil, err)
+			return
+		}
+		required := []string{api.FeatureSpawn, api.FeatureSandboxSnapshot}
+		if a.SecretDelivery != nil {
+			required = append(required, api.FeatureBoundSecrets)
+		}
+		result, err := HolderRequestWithFeatures(id, "spawn", a, 30*time.Second, required...)
+		b.reply(req.ID, json.RawMessage(result), err)
+		return
 	case "ls":
 		v, err := List()
 		b.reply(req.ID, v, err)
 	case "new":
-		var a NewArgs
-		if err := json.Unmarshal(req.Args, &a); err != nil {
+		a, err := decodeNewArgs(req.Args)
+		if err != nil {
 			b.reply(req.ID, nil, err)
 			return
 		}
@@ -179,12 +303,15 @@ func (b *bridge) handle(req proto.Request) {
 			// "" too: the host refuses the delete when the session has
 			// another. Without it, the delete takes the session whatever
 			// its name.
-			Name *string `json:"name"`
+			Name    *string   `json:"name"`
+			Members *[]string `json:"members,omitempty"`
 		}
 		_ = json.Unmarshal(req.Args, &a)
 		var res DeleteResult
 		var err error
-		if a.Name != nil {
+		if a.Name != nil && a.Members != nil {
+			res, err = DeleteNamedGroup(a.ID, *a.Name, *a.Members)
+		} else if a.Name != nil {
 			res, err = DeleteNamed(a.ID, *a.Name)
 		} else {
 			res, err = Delete(a.ID)
@@ -268,87 +395,9 @@ func (b *bridge) handle(req proto.Request) {
 		v, err := alertsRequest(req.Op, req.Args)
 		b.reply(req.ID, v, err)
 	default:
-		if !b.handleMore(req) && !b.handleDebug(req) {
+		if !b.handleAgentsDisk(req) && !b.handleRuntime(req) && !b.handleImages(req) && !b.handlePull(req) && !b.handleMore(req) && !b.handleDebug(req) {
 			b.reply(req.ID, nil, UserError("unknown_op", "unknown request "+req.Op, "Update the host helper."))
 		}
-	}
-}
-
-func (b *bridge) attach(a proto.Attach) error {
-	b.closeHolder()
-	b.traced = a.Trace != "" && (len(a.Categories) == 0 || slices.Contains(a.Categories, diag.CatAttach))
-	if !validID(a.Session) {
-		return fmt.Errorf("no session %s", a.Session)
-	}
-	d := net.Dialer{Timeout: 3 * time.Second}
-	conn, err := d.DialContext(context.Background(), "unix", paths.Socket(a.Session))
-	if err != nil {
-		return fmt.Errorf("session %s is not running", a.Session)
-	}
-	hw := proto.NewWriter(conn)
-	hr := bufio.NewReaderSize(conn, 256<<10)
-	if err := hw.WriteJSON(proto.THello, proto.Hello{Magic: proto.Magic, Protocol: version.Protocol, Version: version.Version, Role: "bridge"}); err != nil {
-		conn.Close()
-		return err
-	}
-	f, err := proto.Read(hr)
-	if err != nil || f.Type != proto.THello {
-		conn.Close()
-		return errors.New("the session's holder did not answer")
-	}
-	if err := hw.WriteJSON(proto.TAttach, a); err != nil {
-		conn.Close()
-		return err
-	}
-	b.mu.Lock()
-	b.holder, b.hw = conn, hw
-	b.mu.Unlock()
-	go func() {
-		for {
-			f, err := proto.Read(hr)
-			if err != nil {
-				b.mu.Lock()
-				mine := b.holder == conn
-				if mine {
-					b.holder, b.hw = nil, nil
-				}
-				b.mu.Unlock()
-				conn.Close()
-				if mine {
-					_ = b.w.WriteJSON(proto.TError, proto.Error{Code: "session_gone", Message: "the session stopped"})
-				}
-				return
-			}
-			switch f.Type {
-			case proto.TAttached, proto.TOutput, proto.TSnapshot, proto.TEnded, proto.TError:
-				if err := b.w.Write(f.Type, f.Payload); err != nil {
-					conn.Close()
-					return
-				}
-			default:
-				// Other frames from the holder are not for the client.
-			}
-		}
-	}()
-	return nil
-}
-
-func (b *bridge) forward(f proto.Frame) {
-	b.mu.Lock()
-	hw := b.hw
-	b.mu.Unlock()
-	if hw != nil {
-		_ = hw.Write(f.Type, f.Payload)
-	}
-}
-
-func (b *bridge) closeHolder() {
-	b.mu.Lock()
-	c := b.holder
-	b.holder, b.hw = nil, nil
-	b.mu.Unlock()
-	if c != nil {
-		c.Close()
 	}
 }
 

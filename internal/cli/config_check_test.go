@@ -147,7 +147,7 @@ func TestConfigCheckSavedHosts(t *testing.T) {
 		{Name: "e2b", Machine: &client.Machine{Provider: "e2b", ID: "i1x2y3", User: "user", Template: "agents", TokenCommand: "op read op://dev/e2b/key"}},
 		{Name: "e2b-idle", Machine: &client.Machine{Provider: "e2b", ID: "i4x5y6", User: "user", Template: "agents", IdleStop: "never", BusyLease: "2h", Stdin: "stream"}},
 	}
-	if err := client.SaveHosts(hosts); err != nil {
+	if err := client.SaveHosts(t.Context(), hosts); err != nil {
 		t.Fatal(err)
 	}
 	if r := checkConfig(); len(r.Findings) != 0 {

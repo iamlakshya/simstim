@@ -15,6 +15,7 @@ import boundary  # noqa: E402
 import disposable  # noqa: E402
 import disposable_checks as dc  # noqa: E402
 import guided_setup  # noqa: E402
+import host_commands, host_git, sandbox_hosts, session_sockets, session_verbs  # noqa: E402
 import owned as ow  # noqa: E402
 import run_parts as rp  # noqa: E402
 
@@ -194,7 +195,7 @@ class FakeTerm:
 
 class OrchestrationTests(unittest.TestCase):
     """Items 6 and 9.4: run.py and finish() orchestration mutants."""
-    def exec_run_py(self, h):
+    def exec_run_py(self, h, only=None):
         d = tempfile.mkdtemp(prefix="e2e-orch-", dir="/tmp")
         self.addCleanup(shutil.rmtree, d, True)
         with open(os.path.join(os.path.dirname(os.path.dirname(HERE)), "internal/brand/brand.go")) as f:
@@ -211,6 +212,11 @@ class OrchestrationTests(unittest.TestCase):
             (time, "sleep", lambda _s: None),
             (agent_setup, "run", lambda c: h.dc_calls.append("agent_setup")),
             (guided_setup, "run", lambda c: h.dc_calls.append("guided_setup")),
+            (host_commands, "run", lambda c: h.dc_calls.append("host_commands")),
+            (host_git, "run", lambda c: h.dc_calls.append("host_git")),
+            (sandbox_hosts, "run", lambda c: h.dc_calls.append("sandbox_hosts")),
+            (session_sockets, "run", lambda c: h.dc_calls.append("session_sockets")),
+            (session_verbs, "run", lambda c: h.dc_calls.append("session_verbs")),
             (disposable, "debug_check", lambda *a: h.dc_calls.append("debug_check")),
             (disposable, "cleanup", lambda c, state: []),
         ]
@@ -225,6 +231,8 @@ class OrchestrationTests(unittest.TestCase):
                           E2E_DISPOSABLE="1" if h.is_disposable else "",
                           E2E_DISPOSABLE_MARKER=h.marker if h.is_disposable else "")
         os.environ.pop("E2E_ONLY", None)
+        if only:
+            os.environ["E2E_ONLY"] = only
         sys.argv = ["run.py", os.path.join(d, "cli")]
         out = io.StringIO()
         code = None
@@ -261,8 +269,32 @@ class OrchestrationTests(unittest.TestCase):
         code, said = self.exec_run_py(h)
         self.assertEqual(code, 0, said)
         for expected in ("kill", "double_detach", "typing", "keys", "paste", "desktop_notification",
-                         "debug_check", "memory", "resume", "shadow_terminal", "alerts", "guided_setup"):
+                         "debug_check", "memory", "resume", "shadow_terminal", "alerts", "guided_setup",
+                         "host_commands", "host_git", "sandbox_hosts", "session_sockets", "session_verbs"):
             self.assertIn(expected, h.dc_calls, said)
+
+    def test_explicit_mutating_suite_on_owner_fails_before_its_entry_point(self):
+        for suite in ("host-commands", "host-git", "sandbox-hosts", "session-sockets", "session-verbs"):
+            with self.subTest(suite=suite):
+                h = OrchestrationHarness(is_disposable=False)
+                code, said = self.exec_run_py(h, only=suite)
+                self.assertEqual(code, 1, said)
+                self.assertIn(suite + " needs an authenticated disposable host; no check ran", said)
+                self.assertEqual(h.dc_calls, [])
+                self.assertIsNone(h.lock)
+                self.assertIsNone(h.nonce)
+
+    def test_each_selected_disposable_suite_uses_the_canonical_context(self):
+        for suite, module in (("host-commands", "host_commands"), ("host-git", "host_git"),
+                              ("sandbox-hosts", "sandbox_hosts"), ("session-sockets", "session_sockets"),
+                              ("session-verbs", "session_verbs")):
+            with self.subTest(suite=suite):
+                h = OrchestrationHarness(is_disposable=True)
+                code, said = self.exec_run_py(h, only=suite)
+                self.assertEqual(code, 0, said)
+                self.assertEqual(h.dc_calls, [module])
+                self.assertIsNone(h.lock)
+                self.assertIsNone(h.nonce)
 
     def test_run_py_attach_refuses_to_open_terminal_when_exact_fails(self):
         h = OrchestrationHarness(is_disposable=False, shadow_attach=True)

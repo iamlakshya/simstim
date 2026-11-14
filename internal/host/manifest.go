@@ -9,6 +9,7 @@ import (
 
 	"github.com/iamlakshya/simstim/internal/api"
 	"github.com/iamlakshya/simstim/internal/paths"
+	"github.com/iamlakshya/simstim/internal/vmconfig"
 )
 
 // Session states, shown in the client's session list.
@@ -20,11 +21,35 @@ const (
 	StateExited     = api.StateExited
 	StateErrored    = api.StateErrored
 	StateLost       = api.StateLost
+	StateStopped    = api.StateStopped
 )
 
 // Manifest is the record of one session, at ~/.local/state/<name>/sessions/<id>/manifest.json.
 // Readers keep fields they do not know, so v2 can add fields freely.
 type Manifest struct {
+	HostLabel     string                  `json:"host_label,omitempty"`
+	SandboxName   string                  `json:"sandbox_name,omitempty"`
+	SecretState   *api.SessionSecretState `json:"secret_state,omitempty"`
+	Inputs        *api.InputSummary       `json:"inputs,omitempty"`
+	CopiesPending bool                    `json:"copies_pending,omitempty"`
+	// Agents retains the exact canonical installed-agent disk selected for boot.
+	Agents string `json:"agents,omitempty"`
+	// VMNeedV1 is opaque protected storage; the sole codec gates every use.
+	VMNeedV1 json.RawMessage `json:"-"`
+	// AutomaticRestore is protected controller intent, never a client option.
+	AutomaticRestore json.RawMessage `json:"restore_plan_v1,omitempty"`
+	VMCaptureNonce   string          `json:"vm_capture_nonce,omitempty"`
+	Wall             *WallRecord     `json:"wall,omitempty"`
+	Policy           *api.Policy     `json:"policy,omitempty"`
+	Layers           []api.Layer     `json:"layers,omitempty"`
+	Armed            bool            `json:"armed,omitempty"`
+	Guest            *GuestClaims    `json:"guest,omitempty"`
+	Life             *Life           `json:"life,omitempty"`
+	Files            *FilePlan       `json:"files,omitempty"`
+	SSHAgent         bool            `json:"ssh_agent,omitempty"`
+	// SandboxOf is the primary session whose wall and workspace this member uses.
+	SandboxOf      string    `json:"sandbox_of,omitempty"`
+	Task           string    `json:"task,omitempty"`
 	Schema         int       `json:"schema"`
 	ID             string    `json:"id"`
 	Name           string    `json:"name"`
@@ -64,9 +89,14 @@ type Manifest struct {
 	MissingSecrets []string `json:"missing_secrets,omitempty"`
 	// DebugUntil is when the session's debug stops by itself, while
 	// `debug start` has it on (holder_debug.go).
-	DebugUntil *time.Time `json:"debug_until,omitempty"`
+	// Only trusted recorded commit identities, never guest claims.
+	SeedHeads  map[string]string `json:"seed_heads,omitempty"`
+	Pulled     []string          `json:"pulled,omitempty"`
+	DebugUntil *time.Time        `json:"debug_until,omitempty"`
 
-	extra map[string]json.RawMessage
+	launchStarted bool   // actual owned launch fact, never serialised
+	path          string // nonempty only for guest-local manifest files
+	extra         map[string]json.RawMessage
 }
 
 // AgentInfo is the agent part of a manifest.
@@ -120,17 +150,24 @@ type Limits struct {
 
 // Runtime is live process information.
 type Runtime struct {
-	HolderPID    int       `json:"holder_pid,omitempty"`
-	AgentPID     int       `json:"agent_pid,omitempty"`
-	Unit         string    `json:"unit,omitempty"`
-	Socket       string    `json:"socket"`
-	BootID       string    `json:"boot_id,omitempty"`
-	StartedAt    time.Time `json:"started_at,omitempty"`
-	RespawnCount int       `json:"respawn_count"`
+	extra         map[string]json.RawMessage
+	StartEnvelope bool      `json:"start_envelope,omitempty"`
+	Image         string    `json:"image,omitempty"`
+	Label         string    `json:"label,omitempty"`
+	Artefacts     []string  `json:"artefacts,omitempty"`
+	Generation    string    `json:"generation,omitempty"`
+	HolderPID     int       `json:"holder_pid,omitempty"`
+	AgentPID      int       `json:"agent_pid,omitempty"`
+	Unit          string    `json:"unit,omitempty"`
+	Socket        string    `json:"socket"`
+	BootID        string    `json:"boot_id,omitempty"`
+	StartedAt     time.Time `json:"started_at,omitempty"`
+	RespawnCount  int       `json:"respawn_count"`
 }
 
 // Status is the session's state and why.
 type Status struct {
+	Claimed  bool      `json:"claimed,omitempty"`
 	State    string    `json:"state"`
 	Since    time.Time `json:"since"`
 	Source   string    `json:"source,omitempty"`
@@ -150,25 +187,28 @@ type Restart struct {
 
 // UnmarshalJSON keeps unknown fields.
 func (m *Manifest) UnmarshalJSON(b []byte) error {
+	fields, known, err := manifestObject(b)
+	if err != nil {
+		return fmt.Errorf("decode the manifest: %w", err)
+	}
 	type plain Manifest
-	if err := json.Unmarshal(b, (*plain)(m)); err != nil {
+	var decoded plain
+	if err := json.Unmarshal(b, &decoded); err != nil {
 		return fmt.Errorf("decode the manifest: %w", err)
 	}
-	var all map[string]json.RawMessage
-	if err := json.Unmarshal(b, &all); err != nil {
-		return fmt.Errorf("decode the manifest: %w", err)
-	}
-	known := map[string]bool{"schema": true, "id": true, "name": true, "created_at": true, "updated_at": true,
-		"last_activity_at": true, "last_attached_at": true, "host_version": true, "holder_binary": true,
-		"agent": true, "cwd": true, "env": true, "term": true, "limits": true, "runtime": true, "status": true,
-		"labels": true, "restart": true, "git": true, "setup_hook": true, "resume_hook": true, "run_hook": true,
-		"setup_hash": true, "secrets": true, "missing_secrets": true, "debug_until": true}
-	for k := range all {
-		if known[k] {
-			delete(all, k)
+	*m = Manifest(decoded)
+	if raw, ok := fields[vmNeedField]; ok {
+		if err := validateStoredVMNeed(m, raw); err != nil {
+			return err
 		}
 	}
-	m.extra = all
+	for _, name := range known {
+		delete(fields, name)
+	}
+	m.extra = fields
+	if m.VMCaptureNonce != "" && !vmconfig.CaptureNonce(m.VMCaptureNonce) {
+		return fmt.Errorf("decode the manifest: invalid accepted VM capture nonce")
+	}
 	return nil
 }
 
@@ -180,7 +220,7 @@ func (m Manifest) MarshalJSON() ([]byte, error) {
 		return nil, fmt.Errorf("encode the manifest: %w", err)
 	}
 	if len(m.extra) == 0 {
-		return b, nil
+		return appendStoredVMNeed(&m, b)
 	}
 	var all map[string]json.RawMessage
 	if err := json.Unmarshal(b, &all); err != nil {
@@ -193,7 +233,7 @@ func (m Manifest) MarshalJSON() ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("encode the manifest: %w", err)
 	}
-	return out, nil
+	return appendStoredVMNeed(&m, out)
 }
 
 // LoadManifest reads one session's manifest.
@@ -212,11 +252,15 @@ func LoadManifest(id string) (*Manifest, error) {
 // Save writes the manifest atomically.
 func (m *Manifest) Save() error {
 	m.UpdatedAt = time.Now().UTC()
-	b, err := json.MarshalIndent(m, "", "  ")
+	b, err := m.MarshalJSON()
 	if err != nil {
 		return fmt.Errorf("save the manifest of session %s: %w", m.ID, err)
 	}
-	dir := paths.SessionDir(m.ID)
+	file := paths.Manifest(m.ID)
+	if m.path != "" {
+		file = m.path
+	}
+	dir := filepath.Dir(file)
 	if err := paths.EnsurePrivateDir(dir); err != nil {
 		return err
 	}
@@ -234,16 +278,19 @@ func (m *Manifest) Save() error {
 		os.Remove(tmp.Name())
 		return fmt.Errorf("save the manifest of session %s: %w", m.ID, err)
 	}
-	tmp.Close()
-	if err := os.Rename(tmp.Name(), filepath.Join(dir, "manifest.json")); err != nil {
+	if err := closeManifestTemp(tmp); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmp.Name())
+		return fmt.Errorf("close the manifest of session %s: %w", m.ID, err)
+	}
+	if err := os.Rename(tmp.Name(), file); err != nil {
 		// A save that fails again, as each tick tries it, leaves no file.
 		os.Remove(tmp.Name())
 		return fmt.Errorf("save the manifest of session %s: %w", m.ID, err)
 	}
 	// Make the rename itself durable, so a shutdown right after cannot lose it.
-	if d, err := os.Open(dir); err == nil {
-		_ = d.Sync()
-		d.Close()
+	if err := commitManifestDirectory(dir); err != nil {
+		return fmt.Errorf("save the manifest of session %s: %w", m.ID, err)
 	}
 	return nil
 }
@@ -263,3 +310,18 @@ func trimNL(b []byte) []byte {
 	}
 	return b
 }
+
+func LoadManifestFile(path string) (*Manifest, error) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var m Manifest
+	if err := json.Unmarshal(b, &m); err != nil {
+		return nil, err
+	}
+	m.path = path
+	return &m, nil
+}
+
+func (m *Manifest) SaveTo(path string) error { m.path = path; return m.Save() }

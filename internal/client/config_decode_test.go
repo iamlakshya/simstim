@@ -40,7 +40,12 @@ func TestConfigLoadersRejectAliases(t *testing.T) {
 				if tt.file == "config.toml" {
 					s, warning := ReadSettings()
 					message = warning
-					if !reflect.DeepEqual(s, DefaultSettings()) || warning == "" {
+					expected := DefaultSettings()
+					expected.loadErr = s.loadErr
+					if s.loadErr == nil || ValidateSettings(s) == nil {
+						t.Fatal("ambiguous settings lost their global security error")
+					}
+					if !reflect.DeepEqual(s, expected) || warning == "" {
 						t.Fatalf("ambiguous settings loaded as %+v with warning %q", s, warning)
 					}
 				} else {
@@ -82,7 +87,7 @@ func TestConfigLoadersKeepExactNames(t *testing.T) {
 		t.Fatal(err)
 	}
 	s, warning := ReadSettings()
-	if warning != "" || s.UI.Motion != "off" || len(s.Secrets) != 2 || s.Secrets["Token"] != "printf one" || s.Secrets["TOKEN"] != "printf two" {
+	if warning != "" || s.UI.Motion != "off" || len(s.Secrets) != 2 || s.Secrets["Token"].Run != "printf one" || s.Secrets["TOKEN"].Run != "printf two" {
 		t.Fatalf("valid settings changed: %+v, %q", s, warning)
 	}
 	hosts := "[[HOST]]\nName = 'Box'\nSSH = 'one'\nlabels = { Name = 'one', NAME = 'two' }\n[[HOST]]\nNAME = 'box'\nSsh = 'two'\nunknown = { SSH = 'one', Ssh = 'two' }\n"

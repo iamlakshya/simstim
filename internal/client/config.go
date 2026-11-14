@@ -19,11 +19,18 @@ import (
 
 	"github.com/BurntSushi/toml"
 
+	"github.com/iamlakshya/simstim/internal/api"
 	"github.com/iamlakshya/simstim/internal/brand"
 )
 
 // Host is one saved host.
 type Host struct {
+	// WallFloor is the host's actual pinned minimum wall level.
+	WallFloor string `toml:"wall_floor,omitempty"`
+	api.LayerValues
+	// Lock fixes values and denies for every session on this host.
+	Lock *api.LayerValues `toml:"lock,omitempty"`
+
 	// Name names the host in commands, as in `attach <name>/<session>`.
 	Name string `toml:"name"`
 	// SSH says how to reach the host: a Host alias from your SSH config, or
@@ -43,12 +50,34 @@ type Host struct {
 	// Secrets lists secrets from config.toml that every new session on this
 	// host gets, for example ["ANTHROPIC_API_KEY"]. `new --secret` adds more.
 	Secrets []string `toml:"secrets,omitempty"`
+	// Repos lists repositories that may be sent to this host in clone mode.
+	Repos []string `toml:"repos,omitempty"`
+	pool  *bool
+}
+
+// WithPool returns a copy with an explicit automatic-placement pool setting.
+func (h Host) WithPool(inPool bool) Host { v := inPool; h.pool = &v; return h }
+
+// Pool reports the explicit automatic-placement setting, if any.
+func (h Host) Pool() (inPool, set bool) {
+	if h.pool == nil {
+		return false, false
+	}
+	return *h.pool, true
 }
 
 // Settings are the user's preferences, from config.toml. The comments on its
 // fields are the config reference: cmd/docgen turns them into
 // docs/reference/config.md.
 type Settings struct {
+	api.LayerValues
+	// Lock fixes values and denies that narrower layers may not change.
+	Lock *api.LayerValues `toml:"lock,omitempty"`
+	// Profiles names policy layers selected after the repository.
+	Profiles map[string]api.LayerValues `toml:"profiles,omitempty"`
+	// Repos names policy layers by origin, without a scheme or .git.
+	Repos map[string]RepoSettings `toml:"repos,omitempty"`
+
 	// UI holds the launcher's look and feel.
 	UI struct {
 		// Motion turns the launcher's animation on or off: "auto" (off inside
@@ -96,7 +125,11 @@ type Settings struct {
 	// manager read: OPENAI_API_KEY = "op read op://dev/openai/key". A session
 	// gets one only when asked (`new --secret`, or a host's secrets). The
 	// value goes to that session's environment and is never stored.
-	Secrets map[string]string `toml:"secrets"`
+	Secrets map[string]SecretDefinition `toml:"secrets"`
+	// SecretTiers sets the lowest tier that may receive each named secret.
+	// Unlisted names require own; on_hosts is an additional saved-host gate.
+	SecretTiers map[string]string `toml:"secret_tiers,omitempty"`
+	loadErr     error
 }
 
 // DefaultSettings are the settings with nothing in config.toml.
@@ -236,16 +269,7 @@ func SaveHostsContext(ctx context.Context, hosts []Host) error {
 	if err := ctx.Err(); err != nil {
 		return stoppedBefore("save the hosts", err)
 	}
-	unlock, err := lockHostsFile(ctx)
-	if err != nil {
-		return err
-	}
-	defer unlock()
-	beforeHostsSave()
-	if err := ctx.Err(); err != nil {
-		return stoppedBefore("save the hosts", err)
-	}
-	return writeHostsFile(hosts)
+	return saveHostsWithOPAdmission(ctx, hosts)
 }
 
 // SaveHost adds h to the saved hosts, or replaces the host of the same name,
@@ -311,14 +335,14 @@ func FindHost(name string) (Host, error) {
 	}
 }
 
-// hostNameRE is a host's name: letters, digits, dots, dashes and
-// underscores, 63 at most, that start with a letter or a digit and do not
-// end with a dot. Windows drops a dot or a space at the end of a file's
-// name, so "box." would name box's files there.
-var hostNameRE = regexp.MustCompile(`^[A-Za-z0-9](?:[A-Za-z0-9._-]{0,61}[A-Za-z0-9_-])?$`)
-
-// ValidHostName reports whether n can name a host.
-func ValidHostName(n string) bool { return hostNameRE.MatchString(n) }
+// ValidHostName reports whether n can name a saved host.
+func ValidHostName(n string) bool {
+	var state hostNameValidation
+	for _, r := range n {
+		state.Rune(r)
+	}
+	return state.Valid()
+}
 
 // HostFileKey names the files of the host called name: its name in lower
 // case, cut to 32 bytes at most and with no dot or dash at its end, a dash,
@@ -361,31 +385,15 @@ func LoadSettings() Settings {
 // cannot be read or is too large, or "". With a warning, the settings are
 // the defaults alone.
 func ReadSettings() (Settings, string) {
-	var s Settings
-	warning := ""
-	b, err := ReadConfigFile(settingsPath())
-	switch {
-	case errors.Is(err, os.ErrNotExist):
-	case errors.Is(err, ErrConfigTooLarge):
-		warning = "config.toml is larger than 1 MiB, so its settings are not used"
-	case err != nil:
-		warning = "config.toml cannot be read, so its settings are not used"
-	default:
-		if _, err := decodeConfig(string(b), &s); err != nil {
-			// The decoder may have set some keys before it met the error,
-			// in no fixed order: drop them all.
-			s = Settings{}
-			warning = "config.toml has an error, so its settings are not used"
-			if _, line, _ := TOMLWhere(string(b), err); line > 0 {
-				warning = fmt.Sprintf("config.toml has an error on line %d, so its settings are not used", line)
-			}
-			var alias *configAliasError
-			if errors.As(err, &alias) {
-				warning = "config.toml has an error: " + alias.Error() + ", so its settings are not used"
-			}
-		}
+	operation, err := openSettingsOperation(context.Background())
+	if err != nil {
+		return failedSettingsRead(err)
 	}
-	return withDefaults(s), warning
+	settings := operation.settings
+	if err := operation.Close(); err != nil {
+		return failedSettingsRead(settingsOperationFailure(err))
+	}
+	return settings, ""
 }
 
 // withDefaults fills each setting that s leaves empty with its default.

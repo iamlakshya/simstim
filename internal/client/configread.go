@@ -45,6 +45,12 @@ func ReadConfigFile(path string) ([]byte, error) {
 		return nil, fmt.Errorf("read %s: %w", path, err)
 	}
 	defer f.Close()
+	return readOpenConfigFile(path, f)
+}
+
+// readOpenConfigFile is the ONE bounded reader for an already opened config.
+// The retained operation and close-on-return reader use the same code.
+func readOpenConfigFile(path string, f configFile) ([]byte, error) {
 	fi, err := f.Stat()
 	switch {
 	case err != nil:

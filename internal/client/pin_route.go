@@ -4,12 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/iamlakshya/simstim/internal/api"
+	"github.com/iamlakshya/simstim/internal/brand"
 	"io"
 	"regexp"
 	"strings"
-
-	"github.com/iamlakshya/simstim/internal/api"
-	"github.com/iamlakshya/simstim/internal/brand"
 )
 
 // The pin on the way to a host: the first connection pins the key of a
@@ -62,6 +61,9 @@ func notice(ctx context.Context, msg string) {
 // pinRoute pins h's key before the first connection through t, when t is
 // ssh. Docker and E2B hosts have no host key.
 func pinRoute(ctx context.Context, h Host, t Transport, interactive bool) error {
+	if err := checkHostTransportAction(ctx, h); err != nil {
+		return err
+	}
 	s, ok := t.(*SSH)
 	if !ok || s.Host.SSH == "" {
 		return nil
@@ -69,7 +71,7 @@ func pinRoute(ctx context.Context, h Host, t Transport, interactive bool) error 
 	if o, ok := ctx.Value(pinKey{}).(*PinOptions); ok && o != nil {
 		return pinAsAsked(ctx, s.Host, o)
 	}
-	return pinSaved(ctx, s.Host, h, interactive)
+	return pinSaved(ctx, s.Host, h.Machine != nil, interactive)
 }
 
 // pinAsAsked pins h's key as o says. A pin that h has already stays,
@@ -111,14 +113,27 @@ func pinAsAsked(ctx context.Context, h Host, o *PinOptions) error {
 // such as an attach's reconnect, writes nothing to the terminal.
 // h is the SSH route; original is the saved entry that selected that route.
 // A provider's target does not replace the machine's saved CAS identity.
-func pinSaved(ctx context.Context, h, original Host, interactive bool) error {
+func pinSaved(ctx context.Context, h Host, made, interactive bool) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if attempt, _ := ctx.Value(hostTransportAttemptKey{}).(*hostTransportAttempt); attempt != nil && attempt.kind == hostTransportProvisional {
+		saved, err := SavedEntry(h.Name)
+		if err != nil {
+			return err
+		}
+		if saved != nil {
+			return hostStateRemovalError("a provisional read-only transport cannot acquire a saved host pin")
+		}
+		return nil // Still-unsaved reads acquire no saved pin or migration authority.
+	}
+
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 	if !interactive {
 		ctx = quietConnectionNotes(ctx)
 	}
-	made := original.Machine != nil
 	if !ValidHostName(h.Name) {
 		return nil // writeWrapper refuses it: no connection starts
 	}
@@ -149,6 +164,11 @@ func pinSaved(ctx context.Context, h, original Host, interactive bool) error {
 			mode = FirstUseRefuse
 		}
 	}
+	ctx, endMutation, err := holdSavedPinMutation(ctx, h, "pin the saved host key")
+	if err != nil {
+		return err
+	}
+	defer endMutation()
 	p, err := pinHostKey(ctx, h, "", mode, false)
 	var ue *UserError
 	switch {
@@ -163,7 +183,7 @@ func pinSaved(ctx context.Context, h, original Host, interactive bool) error {
 	case err != nil:
 		return err
 	}
-	if err := recordPinnedKey(ctx, original, p.Fingerprint); err != nil {
+	if err := recordPinnedKey(ctx, h, p.Fingerprint); err != nil {
 		return err
 	}
 	if p.Source != PinKept {

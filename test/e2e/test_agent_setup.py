@@ -118,6 +118,12 @@ class Ctx:
         self.ran.append(rm_of(cmd))
         return 0
 
+    def host_ssh(self, cmd, data=None):
+        code = self.host_rc(cmd, data)
+        if code:
+            raise boundary.CalledProcessError(code, cmd)
+        return types.SimpleNamespace(stdout=b"", returncode=code)
+
 
 class Ownership(unittest.TestCase):
     def setUp(self):
@@ -232,7 +238,7 @@ class SetupHost:
     no line of its own. No start makes a worktree."""
     def __init__(self, tail=None):
         self.sessions, self.n, self.ran = {"owner123": "api"}, 0, []
-        self.names = {ow.e2e_name("e2e-setup-" + w) for w in ("skip", "ask", "fail")}
+        self.names = {ow.e2e_name("e2e-setup-" + w) for w in ("skip", "ask", "changed", "reask", "fail")}
         self.tail = tail or (lambda sid, name: b"Started box/owner123 (api, custom). and more\r\n")
 
     def make(self, name):
@@ -250,15 +256,19 @@ class SetupHost:
             assert argv[2] == "box" and "--detach" in argv and "--json" in argv and name in self.names, argv
             assert "--worktree" not in argv, argv
             sid = self.make(name)
+            if name == ow.e2e_name("e2e-setup-changed"):
+                return 0, session(sid, name), note("Skipping: it changed after you trusted it")
             return 0, session(sid, name), note("Skipping the setup script of ~/e2e-setup-repo: ...") if name == ow.e2e_name("e2e-setup-skip") else ""
         raise AssertionError("the check ran %s" % argv)
 
     def Term(self, argv, env=None):
         if argv[1] == "new":
             name = argv[argv.index("--name") + 1]
-            assert argv[2] == "box" and "--detach" in argv and name == ow.e2e_name("e2e-setup-ask"), argv
+            assert argv[2] == "box" and "--detach" in argv and name in (ow.e2e_name("e2e-setup-ask"), ow.e2e_name("e2e-setup-reask")), argv
             sid = self.make(name)
             question = b"The repository ~/e2e-setup-repo on box has a setup script:\r\n\r\n    ~/e2e-setup-repo/.client/setup\r\n\r\nRun it? [y/N] "
+            if name == ow.e2e_name("e2e-setup-reask"):
+                question = b"The script changed after you trusted it. " + question
             return Term(argv, env, [question, self.tail(sid, name)])
         return Term(argv, env, [b"AGENT-RAN\r\n"])
 
@@ -420,43 +430,6 @@ class SetupOnAHost(unittest.TestCase):
         self.assertEqual(sorted(os.listdir(repo)), ["theirs.txt"])
         ow.remove_run_dir(types.SimpleNamespace(host_rc=self.host_rc))
         self.assertEqual(self.owner_files(), self.OWNER)
-
-
-# The text of `host doctor --fix`, as the client prints it (internal/cli,
-# offerFixes): the checks, the scrollback with the names of full-screen
-# sessions, then each fix in its own block, and its question.
-LINGER = (b"\r\nFound 2 to fix:\r\n\r\n1. Linger is off, so sessions stop when your last login on the host ends.\r\n"
-          b"   Fix: turn linger on.\r\n   Runs: loginctl enable-linger dev\r\n   Fix it? [y/N] ")
-SOCKETS = (b"\r\n2. 1 stale session socket with no session behind them, in /run/user/1000/client/s.\r\n"
-           b"   Fix: remove them; no running session uses them.\r\n   Runs: rm /run/user/1000/client/s/old.sock\r\n   Fix it? [y/N] ")
-SCROLLBACK = b"Full-screen sessions:\r\n  why a stale session socket stays\r\n"
-
-
-class FixTerm:
-    """host doctor --fix at a terminal: it prints a chunk for each read, and
-    ends with code once every question has its answer and no chunk is
-    left."""
-    made = []
-
-    def __init__(self, chunks, code=0):
-        self.chunks, self.buf, self.sent, self.closed, self.code = list(chunks), b"", [], False, code
-        FixTerm.made.append(self)
-
-    def read(self, timeout=0.5):
-        if self.chunks:
-            self.buf += self.chunks.pop(0)
-        return self.buf
-
-    def send(self, b):
-        self.sent.append(b)
-        self.buf += b[:-1] + b"\r\n"
-
-    def exit_code(self, timeout=10):
-        done = not self.chunks and len(self.sent) == self.buf.count(b"Fix it? [y/N] ")
-        return self.code if done else None
-
-    def close(self):
-        self.closed = True
 
 
 class Fix(unittest.TestCase):

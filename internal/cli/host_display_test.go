@@ -43,7 +43,12 @@ func TestDoctorFixAndScrollbackDisplayCopies(t *testing.T) {
 	noUnsafeDisplay(t, out+errOut)
 	// connectHost prints setup steps and doctor fields before saving the host.
 	var connect bytes.Buffer
-	_, err := connectHost(context.Background(), &connect, h, func(string) (bool, error) { return true, nil }, &onboard.Log{})
+	was, err := client.SavedEntry(h.Name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = connectHost(t.Context(), &connect, client.HostChange{Kind: "display test", Was: was, Now: &h, Pin: true, Tier: client.TierOwn}, nil,
+		func(string) (bool, error) { return true, nil }, &onboard.Log{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

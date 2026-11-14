@@ -60,7 +60,7 @@ func lockHostsFile(ctx context.Context) (func(), error) {
 		return nil, err
 	}
 	path := hostsPath() + ".lock"
-	f, err := openLock(path, "hosts.toml")
+	f, check, closeLock, err := openHostsMembershipLock(ctx, path)
 	if err != nil {
 		return nil, err
 	}
@@ -70,15 +70,19 @@ func lockHostsFile(ctx context.Context) (func(), error) {
 		switch {
 		case err == nil && ctx.Err() != nil:
 			// The cancel came as the lock was taken.
-			f.Close()
+			closeLock()
 			return nil, ctx.Err()
 		case err == nil:
-			return func() { f.Close() }, nil
+			if err := check(); err != nil {
+				closeLock()
+				return nil, err
+			}
+			return closeLock, nil
 		case !errors.Is(err, errLockTaken):
-			f.Close()
+			closeLock()
 			return nil, flockFailed("hosts.toml", path, err)
 		case time.Since(start) >= hostsWait:
-			f.Close()
+			closeLock()
 			return nil, &UserError{Msg: fmt.Sprintf("another command held %s for %s, so nothing was saved", hostsPath(), hostsWait),
 				Hint: "End that command, such as one stopped with Ctrl+Z, then run this one again.", Code: "hosts_busy"}
 		case !noted && time.Since(start) >= hostsNote:
@@ -90,7 +94,7 @@ func lockHostsFile(ctx context.Context) (func(), error) {
 		hostsFileWaiting()
 		select {
 		case <-ctx.Done():
-			f.Close()
+			closeLock()
 			return nil, ctx.Err()
 		case <-time.After(hostsPoll):
 		}

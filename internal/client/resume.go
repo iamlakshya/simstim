@@ -24,15 +24,85 @@ type ResumeResult = api.ResumeResult
 // (Session.Secrets) into a. A MemoryMax of 0 keeps the size the session
 // asked for before, and MemoryAuto asks for the host's default.
 func (c *Conn) Resume(ctx context.Context, a ResumeArgs) (*ResumeResult, error) {
+	a = cloneResumeValues(a)
+	ctx, request := ensureGrantRequest(ctx)
+	if err := requireRemoteGrantRequest(ctx); err != nil {
+		return nil, err
+	}
+	if err := requireGrantOperation(ctx, grantOpResume); err != nil {
+		return nil, err
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if err := bindRequestTransportSource(ctx, c); err != nil {
+		return nil, err
+	}
 	if !c.HasFeature("resume") {
 		return nil, c.tooOldToResume()
 	}
+	if err := c.RequireSecrets(NewArgs{Secrets: a.Secrets}); err != nil {
+		return nil, err
+	}
+	for _, member := range a.Members {
+		if err := c.requireSecretFeature(len(member.Secrets) != 0); err != nil {
+			return nil, err
+		}
+	}
+	if err := checkUncheckedResumeSelection(ctx, c, nil); err != nil {
+		return nil, err
+	}
+	group, err := c.needsResumeMembers(ctx, a.ID)
+	if err != nil {
+		return nil, err
+	}
+	if group || a.Snapshot != nil || a.Members != nil {
+		request.mu.Lock()
+		before := cloneResumeGrantIntent(request.resume)
+		request.mu.Unlock()
+		names := secretMapNames(a.Secrets)
+		if before != nil {
+			names = before.originalNames
+		}
+		intent, _, err := c.prepareResumeMemberSelection(ctx, a.ID, names, actualResumeNames(a))
+		if err != nil {
+			return nil, err
+		}
+		if a.Snapshot != nil && !sameGrantSnapshot(a.Snapshot, intent.snapshot) {
+			return nil, joinIntentError()
+		}
+		a.Snapshot = cloneGrantSnapshot(intent.snapshot)
+	}
+	ctx, release, err := c.beginGrant(ctx, "resume", false)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+	tier, err := c.checkResumeGrants(ctx, a)
+	if err != nil {
+		return nil, err
+	}
+	if err := recordSecretNames(ctx, c.Host, c.HostID(), tier, a.Secrets); err != nil {
+		return nil, err
+	}
+	for _, member := range a.Members {
+		if err := recordSecretNames(ctx, c.Host, c.HostID(), tier, member.Secrets); err != nil {
+			return nil, err
+		}
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	var r ResumeResult
-	if err := c.Call(ctx, "resume", a, &r); err != nil {
+	if err := c.callWithSent(ctx, "resume", a, &r, release); err != nil {
 		return nil, c.resumeError(err)
 	}
 	if err := checkSessionID(c.Host.Name, r.Session.ID); err != nil {
 		return nil, err
+	}
+	if a.Snapshot != nil && r.Session.ID != a.ID {
+		return nil, &UserError{Msg: "the helper returned another sandbox member after resume",
+			Hint: "List sessions and use the original member's address.", Code: "protocol", Kind: KindRefused}
 	}
 	return &r, nil
 }
@@ -61,6 +131,50 @@ func (c *Conn) tooOldToResume() error {
 // a name that no secret could have. The error shows it quoted, since it
 // comes from the host and could hold escapes for the terminal.
 func ResumeSecrets(h Host, s Session, passed []string) ([]string, error) {
+	return ResumeSecretsContext(context.Background(), h, s, passed)
+}
+
+// ResumeSecretsContext is ResumeSecrets with a context for policy reads
+// and one command's terminal confirmations. Every context-bearing caller
+// must use it rather than dropping that context at the gate.
+func ResumeSecretsContext(ctx context.Context, h Host, s Session, passed []string) ([]string, error) {
+	ctx, _ = ensureGrantRequest(ctx)
+	if err := requireGrantOperation(ctx, grantOpResume); err != nil {
+		return nil, err
+	}
+	names, err := ResumeSecretNames(h, s, passed)
+	if err != nil {
+		return nil, err
+	}
+	if err := bindRequestLocalSource(ctx, h); err != nil {
+		return nil, err
+	}
+	_, hostID, err := grantHostTier(ctx, h)
+	if err != nil {
+		return nil, err
+	}
+	tier, p, err := EffectiveSessionTier(ctx, h, s.ID, hostID)
+	if err != nil {
+		return nil, err
+	}
+	if err := bindLegacyResumeIntent(ctx, h, hostID, s.ID, names, p); err != nil {
+		return nil, err
+	}
+	settings := LoadSettings()
+	if err := allowResumeSecretNames(ctx, h, hostID, tier, settings, names, p); err != nil {
+		return nil, err
+	}
+	if p != nil && p.SSHAgent {
+		if err := allowRequestGrant(ctx, h, hostID, tier, Outbound{Kind: OutboundSSHAgent}, settings); err != nil {
+			return nil, err
+		}
+	}
+	return names, nil
+}
+
+// ResumeSecretNames checks the names a host asks to fetch without reading
+// policy or state. The real fetch and the RPC must still enforce the gate.
+func ResumeSecretNames(h Host, s Session, passed []string) ([]string, error) {
 	own := SecretNames(h, nil)
 	sessName := resumeOneLine(s.Name)
 	hostName := resumeOneLine(h.Name)
@@ -105,14 +219,11 @@ func resumeOneLine(s string) string {
 }
 
 func validResumeAddr(host, id string) (string, bool) {
-	if !ValidHostName(host) || len(id) == 0 || len(id) > 64 || strings.HasPrefix(id, "-") {
+	if !ValidHostName(host) || !api.ValidSessionID(id) {
 		return "", false
 	}
-	if strings.Trim(id, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_") != "" {
-		return "", false
-	}
-	addr := host + "/" + id
-	return addr, ShellWord(addr) == addr
+	address := host + "/" + id
+	return address, ShellWord(address) == address
 }
 
 func resumeHintOrLs(host, hint string) string {

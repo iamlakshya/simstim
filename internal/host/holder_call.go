@@ -157,7 +157,7 @@ func holderPIDAlive(pid int, id string) bool {
 		return false
 	}
 	args, err := holderProcessArgs(pid)
-	return err == nil && len(args) >= 3 && args[1] == "holder" && args[2] == id
+	return err == nil && len(args) >= 3 && (args[1] == "holder" || args[1] == "supervise") && args[2] == id
 }
 
 // noHolderSocket reports whether err says that nothing listens on a

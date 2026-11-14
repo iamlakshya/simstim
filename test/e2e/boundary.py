@@ -71,6 +71,12 @@ def ctx():
     return CTX
 
 
+def require_disposable(c):
+    """Require run.py's marker-verified context, never a caller's flag."""
+    if c is not ctx() or not ctx().DISPOSABLE:
+        raise Refused("this check needs the canonical authenticated disposable host")
+
+
 def inner(cmd):
     """The script that runs cmd after env -i (HOST_ENV), in /bin/sh. cmd goes
     in base64, so the script holds no quote or backslash of cmd's."""
@@ -88,6 +94,10 @@ def on_host(cmd):
 def check_env(c, env):
     if not isinstance(env, dict) or env.get("HOME") != c.root.home:
         raise Refused("a process of the run gets the run's own root, never the user's environment")
+    for key in c.root.dirs:
+        path = env.get(key)
+        if not isinstance(path, str) or allowed.rooted_path(path, c, strict=True) is None:
+            raise Refused("a process of the run needs physical XDG folders inside its own root")
     if not c.DISPOSABLE and env.get(c.NAME.upper() + "_NO_INSTALL") != "1":
         raise Refused("a client on an owner's host must refuse automatic helper installation")
 
@@ -111,6 +121,11 @@ def run(argv, *, timeout, env, cwd=None, data=None):
             cwd = allowed.rooted_path(cwd, c)
             if cwd is None or not _os.path.isdir(cwd):
                 raise Refused("a laptop working directory must stay inside the run's root")
+    if cwd is None:
+        cwd = c.root.path
+    cwd = allowed.rooted_path(cwd, c)
+    if cwd is None or not _os.path.isdir(cwd):
+        raise Refused("a laptop working directory must stay physically inside the run's root")
     why = allowed.laptop_refusal(argv, c, cwd=cwd)
     if why:
         raise Refused(why)
@@ -130,7 +145,7 @@ class Term:
         why = allowed.laptop_refusal(list(argv), c)
         if why:
             raise Refused(why)
-        t = _harness.Term(list(argv), cols=cols, rows=rows, env=env, inherit=False)
+        t = _harness.Term(list(argv), cols=cols, rows=rows, env=env, inherit=False, cwd=c.root.path)
         LIVE.add(t)
         object.__setattr__(self, "_t", t)
         object.__setattr__(self, "_keys", allowed.keys_for(list(argv), c))
@@ -258,16 +273,31 @@ class Root:
             e[self.product.upper() + "_NO_INSTALL"] = "1"
         return e
 
-    def remove(self):
-        """Ends the run's own shared SSH connections, by their sockets in the
-        root, and removes the root. It never fails the run."""
-        d = self.control_dir()
+    def close_controls(self, env):
+        """End only SSH masters whose physical sockets are in this root."""
+        c = ctx()
+        if c.root is not self:
+            raise Refused("control sockets belong to the canonical run's root")
+        check_env(c, env)
+        d = allowed.rooted_path(_os.path.join(env["XDG_CACHE_HOME"], self.product, "cm"), c, strict=True)
+        if d is None:
+            raise Refused("control sockets must stay physically inside the run's root")
         for n in (_os.listdir(d) if _os.path.isdir(d) else []):
+            sock = allowed.rooted_path(_os.path.join(d, n), c, strict=True)
+            if sock is None:
+                raise Refused("a control socket leaves the run's physical root")
             try:
-                _subprocess.run(["ssh", "-o", "ControlPath=" + _os.path.join(d, n), "-O", "exit", "e2e"],
-                                stdin=_subprocess.DEVNULL, capture_output=True, timeout=10, env=self.env())
+                _subprocess.run(["ssh", "-o", "ControlPath=" + sock, "-O", "exit", "e2e"],
+                                stdin=_subprocess.DEVNULL, capture_output=True, timeout=10, env=env, cwd=self.path)
             except (TimeoutExpired, OSError):
                 pass
+
+    def remove(self):
+        """End the run's own shared connections and remove its laptop root."""
+        try:
+            self.close_controls(self.env())
+        except (Refused, OSError):
+            pass
         shutil.rmtree(self.path, ignore_errors=True)
 
     def detach_key_is_the_default(self, config=None):

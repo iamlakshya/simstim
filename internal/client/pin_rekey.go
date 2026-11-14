@@ -3,7 +3,6 @@ package client
 import (
 	"context"
 	"fmt"
-
 	"github.com/iamlakshya/simstim/internal/brand"
 )
 
@@ -33,6 +32,11 @@ func Rekey(ctx context.Context, h Host, want string, confirm func(oldKey, newKey
 		return "", "", err
 	}
 	defer unlockHost()
+	ctx, endMutation, err := holdSavedPinMutation(ctx, h, "host rekey")
+	if err != nil {
+		return "", "", err
+	}
+	defer endMutation()
 	if err := checkRekeyHost(ctx, h); err != nil {
 		return "", "", err
 	}

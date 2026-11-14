@@ -410,6 +410,7 @@ Try: simstim rm box/abcd2345 -y
 | `host set … tier=` to a lower tier (H5) | As isolation spec 9.1 | No | `-y` | Fail |
 | `host set … tier=` to a higher tier (H4) | The typed name of the host | Keep the tier | `--confirm <host>` | Fail |
 | `host rekey` (H3) | The typed name of the host | Keep the pin | `--confirm <host>` | Fail |
+| `policy allow`, `policy deny`, `policy rm`, without a layer (P1.12) | The layer to change | None | `--all` | Fail, with exit code 4 |
 | `--root-step run` on a `shared` host (H7) | The typed name of the host | Keep it | None | Refuse, with exit code 5 (section 5.3) |
 | `new` or `resume` with a secret or an SSH key that `[secret_tiers]` marks `shared`, for a `shared` host (H5) | `Send CLAUDE_LAB to lab? Its owner can read it. [y/N]` | No | None | Refuse, with exit code 5 (section 5.3) |
 | `doctor --fix`, `host doctor --fix` | `Fix it? [y/N]` for each fix | No | `-y` | Fail |

@@ -190,9 +190,13 @@ func breach(format string, a ...any) error {
 
 // Session is one end of a link.
 type Session struct {
-	conn net.Conn
-	side Side
-	opt  Options
+	inputBundleAllowed bool
+	inputMain          *Stream
+	inputContinuation  bool
+	inputOpened        uint8
+	conn               net.Conn
+	side               Side
+	opt                Options
 
 	hello chan struct{} // closed when the other end's hello has passed
 	done  chan struct{} // closed when the link has ended

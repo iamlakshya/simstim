@@ -19,6 +19,14 @@ func init() { Features = append(Features, moreFeatures...) }
 // session. It reports whether it knew the request.
 func (b *bridge) handleMore(req proto.Request) bool {
 	switch req.Op {
+	case "arm":
+		var a api.ArmSecretsArgs
+		if !api.ExactJSONFields(req.Args, (*api.ArmSecretsArgs)(nil)) || json.Unmarshal(req.Args, &a) != nil {
+			b.reply(req.ID, nil, UserError("bad_request", "arm needs exact supported secret arguments", "Use a matching client and the original bound secret names."))
+			return true
+		}
+		result, err := ArmSecrets(a)
+		b.reply(req.ID, json.RawMessage(result), err)
 	case "agents.check":
 		b.reply(req.ID, AgentChecks(), nil)
 	case "doctor.fix":
@@ -31,7 +39,15 @@ func (b *bridge) handleMore(req proto.Request) bool {
 		}
 		b.reply(req.ID, Fixes(a), nil)
 	case "resume":
+		if err := validateResumeInputShape(req.Args); err != nil {
+			b.reply(req.ID, nil, err)
+			return true
+		}
 		var a api.ResumeArgs
+		if err := validateResumeSecretShape(req.Args); err != nil {
+			b.reply(req.ID, nil, err)
+			return true
+		}
 		if err := json.Unmarshal(req.Args, &a); err != nil {
 			b.reply(req.ID, nil, UserError("bad_request", "the resume request is not valid JSON", "Update the client."))
 			return true

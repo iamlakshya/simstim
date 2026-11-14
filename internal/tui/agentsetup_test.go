@@ -126,7 +126,7 @@ func (b *fakeBackend) Secrets(_ context.Context, s client.Settings, h client.Hos
 }
 
 // SessionSecrets fetches the named secrets from the same pretend config.
-func (b *fakeBackend) SessionSecrets(_ context.Context, s client.Settings, names []string) (map[string]api.Secret, error) {
+func (b *fakeBackend) SessionSecrets(_ context.Context, s client.Settings, _ client.Host, _ string, names []string) (map[string]api.Secret, error) {
 	if len(names) == 0 {
 		return nil, nil
 	}

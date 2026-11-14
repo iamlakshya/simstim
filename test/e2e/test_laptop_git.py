@@ -25,6 +25,12 @@ class LaptopGit(unittest.TestCase):
             root=types.SimpleNamespace(path=self.root, home=os.path.join(self.root, "home")))
         self.env = {"HOME": self.c.root.home, "CLIENT_NO_INSTALL": "1", "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
                     "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull}
+        self.c.root.dirs = {key: os.path.join(self.root, folder) for key, folder in
+                            (("XDG_CONFIG_HOME", "config"), ("XDG_STATE_HOME", "state"),
+                             ("XDG_DATA_HOME", "data"), ("XDG_CACHE_HOME", "cache"), ("XDG_RUNTIME_DIR", "runtime"))}
+        for path in self.c.root.dirs.values():
+            os.makedirs(path)
+        self.env.update(self.c.root.dirs)
         old = boundary.CTX
         boundary.CTX = self.c
         self.addCleanup(setattr, boundary, "CTX", old)

@@ -274,6 +274,9 @@ var readPinLocked = func(ctx context.Context, name string, read func()) error {
 
 // lockPinAs is lockPin, exclusive or shared.
 func lockPinAs(ctx context.Context, name string, exclusive bool) (unlock func(), err error) {
+	if err := checkHostPinOrder(ctx); err != nil {
+		return nil, err
+	}
 	path := lockFile(name)
 	if path == "" {
 		return nil, &UserError{Msg: fmt.Sprintf("%q cannot name a host", CleanLine(name)),

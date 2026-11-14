@@ -300,7 +300,12 @@ func TestBrokenSettings(t *testing.T) {
 		}
 		for range 20 {
 			s := LoadSettings()
-			if broken := want != ""; broken != reflect.DeepEqual(s, DefaultSettings()) {
+			expected := DefaultSettings()
+			expected.loadErr = s.loadErr
+			if (want != "") != (s.loadErr != nil) {
+				t.Fatal("warning/default recovery lost its exact read-error barrier")
+			}
+			if broken := want != ""; broken != reflect.DeepEqual(s, expected) {
 				t.Fatalf("%q gives %+v", body, s)
 			}
 		}
@@ -315,8 +320,14 @@ func TestBrokenSettings(t *testing.T) {
 	if w := SettingsWarning(); w != "config.toml cannot be read, so its settings are not used" {
 		t.Errorf("an unreadable config.toml warns %q", w)
 	}
-	if s := LoadSettings(); !reflect.DeepEqual(s, DefaultSettings()) {
+	s := LoadSettings()
+	expected := DefaultSettings()
+	expected.loadErr = s.loadErr
+	if !reflect.DeepEqual(s, expected) {
 		t.Errorf("an unreadable config.toml gives %+v", s)
+	}
+	if s.loadErr == nil || ValidateSettings(s) == nil {
+		t.Fatal("unreadable defaults became successful grant settings")
 	}
 }
 

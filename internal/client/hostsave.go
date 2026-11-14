@@ -93,6 +93,14 @@ func UpdateHosts(ctx context.Context, c HostChange) error {
 	if withPin {
 		defer abortPinStage(ctx, name, st)
 	}
+	if stageErr == nil {
+		var endPublication func()
+		ctx, endPublication, err = withHostPublicationObservation(ctx, c)
+		if err != nil {
+			return err
+		}
+		defer endPublication()
+	}
 	if ValidHostName(name) {
 		var unlock func()
 		ctx, unlock, err = LockHost(ctx, name, c.Kind)
@@ -112,6 +120,14 @@ func UpdateHosts(ctx context.Context, c HostChange) error {
 			return nil, hostFileHooks{}, stageErr
 		})
 	}
+	if ValidHostName(name) {
+		var endMutation func()
+		ctx, endMutation, err = holdHostMutationContext(ctx, name)
+		if err != nil {
+			return err
+		}
+		defer endMutation()
+	}
 	if c.Now != nil {
 		if err := ensureTiersMigrated(ctx); err != nil {
 			return err
@@ -128,8 +144,11 @@ func UpdateHosts(ctx context.Context, c HostChange) error {
 		}
 		defer unlockPin()
 	}
-	return updateHostsFile(ctx, func(hosts []Host) ([]Host, hostFileHooks, error) {
-		return changeHostFiles(ctx, c, hosts, withPin, st)
+	return updateHostsFileContext(ctx, func(locked context.Context, hosts []Host) ([]Host, hostFileHooks, error) {
+		if err := checkHostPublicationObservation(locked, c); err != nil {
+			return nil, hostFileHooks{}, err
+		}
+		return changeHostFiles(locked, c, hosts, withPin, st)
 	})
 }
 

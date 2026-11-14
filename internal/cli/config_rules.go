@@ -28,7 +28,7 @@ var valueChecks = map[string]map[string]func(c *checker, v any, p keyPath){
 		"attach.image_paste_key": attachKey,
 		"sessions.memory_max":    memoryMax,
 		"keymap":                 checkKeymap,
-		"secrets":                checkSecrets,
+		"secret_tiers":           checkSecretTiers,
 	},
 	"hosts.toml": {
 		"host":                    checkHosts,
@@ -116,16 +116,6 @@ func providerName(c *checker, v any, p keyPath) {
 	}
 	if s, _ := v.(string); !slices.Contains(names, s) {
 		c.add(p, finding{Code: "bad_value", Message: fmt.Sprintf("%s must be %s, not %q", ref(p), quoted(names), s)})
-	}
-}
-
-// checkSecrets checks that each secret has a command.
-func checkSecrets(c *checker, v any, p keyPath) {
-	m, _ := v.(map[string]any)
-	for _, k := range slices.Sorted(maps.Keys(m)) {
-		if s, ok := m[k].(string); ok && strings.TrimSpace(s) == "" {
-			c.add(p.add(k), finding{Code: "bad_value", Message: ref(p.add(k)) + " has an empty command"})
-		}
 	}
 }
 

@@ -166,7 +166,7 @@ class Mutants(unittest.TestCase):
 
     def test_item_u_ae_missing_timeout_or_stdin_in_boundary(self):
         self.check_fails(
-            lambda d: self.replace_in(d, "boundary.py", "timeout=10, env=self.env())", "env=self.env())"),
+            lambda d: self.replace_in(d, "boundary.py", "timeout=10, env=env, cwd=self.path)", "env=env, cwd=self.path)"),
             "without timeout=")
         self.check_fails(
             lambda d: self.replace_in(d, "boundary.py", "stdin=_subprocess.DEVNULL, capture_output=True, text=True, timeout=10",

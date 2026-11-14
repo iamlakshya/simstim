@@ -79,6 +79,17 @@ func (st *Stream) Header(v any) error {
 	return nil
 }
 
+// HeaderBytes returns an owned copy for a kind-specific canonical decoder.
+func (st *Stream) HeaderBytes() []byte { return append([]byte(nil), st.header...) }
+
+// PeerWriteClosed reports whether the ordered peer half-close has arrived.
+// Buffered input may remain. A reset or full close is never a valid handoff.
+func (st *Stream) PeerWriteClosed() bool {
+	st.s.mu.Lock()
+	defer st.s.mu.Unlock()
+	return st.remoteEOF && !st.peerGone && !st.refused && !st.closedLocal
+}
+
 // Read reads the bytes that the other end sent. It returns io.EOF after
 // the other end has closed its writes and every byte has been read, and
 // ErrRefused when the other end refused or reset the stream.

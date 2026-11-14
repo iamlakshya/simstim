@@ -41,26 +41,58 @@ func deleteGuarded(id string, name *string) (DeleteResult, error) {
 type DeleteResult = api.DeleteResult
 
 func deleteSession(id string, name *string, res *DeleteResult) error {
+	return deleteSessionDeclared(id, name, nil, res)
+}
+
+func deleteSessionDeclared(id string, name *string, members *[]string, res *DeleteResult) error {
 	if !validID(id) {
 		return UserError("not_found", "no session "+id, "List sessions to find its ID.")
 	}
 	if _, err := os.Stat(paths.SessionDir(id)); err != nil {
 		return UserError("not_found", "no session "+id, "List sessions to find its ID.")
 	}
+	primary := id
+	if m, err := LoadManifest(id); err == nil && m.SandboxOf != "" {
+		var err error
+		primary, err = SandboxPrimaryID(id)
+		if err != nil {
+			return err
+		}
+	}
+	unlock, err := lockSession(primary)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	if primary != id {
+		return deleteChildUnderPrimary(primary, id, name, res)
+	}
+	return deleteLockedGroup(id, name, members, res)
+}
+
+func deleteChildUnderPrimary(primary, id string, name *string, res *DeleteResult) error {
 	unlock, err := lockSession(id)
 	if err != nil {
 		return err
 	}
-	// The folder goes, with the lock's file in it, while the lock holds. A
-	// rename takes the same lock, and writes the manifest before it
-	// answers: under the lock, the manifest's name is the session's name.
 	defer unlock()
-	return deleteLocked(id, name, res)
+	m, err := LoadManifest(id)
+	if err != nil {
+		return err
+	}
+	if m.ID != id || m.SandboxOf != primary {
+		return snapshotChanged()
+	}
+	return deleteLockedGroup(id, name, nil, res)
 }
 
 // deleteLocked is deleteSession for a caller that holds the session's
 // lock, such as a start that fails. A nil name deletes whatever the name.
 func deleteLocked(id string, name *string, res *DeleteResult) error {
+	return deleteLockedGroup(id, name, nil, res)
+}
+
+func deleteLockedGroup(id string, name *string, members *[]string, res *DeleteResult) error {
 	m, merr := LoadManifest(id)
 	if name != nil {
 		switch {
@@ -76,10 +108,23 @@ func deleteLocked(id string, name *string, res *DeleteResult) error {
 				"List the sessions, then delete the one you mean.")
 		}
 	}
+	children, err := checkDeleteMembers(m, members)
+	if err != nil {
+		return err
+	}
 	afterNameCheck(id)
-	if err := stopHolder(id, m); err != nil {
+	var stopErr error
+	if m != nil && m.SandboxOf != "" {
+		stopErr = stopDeletedMember(m)
+	} else {
+		stopErr = stopHolder(id, m)
+	}
+	if err := stopErr; err != nil {
 		return UserError("busy", fmt.Sprintf("the holder of session %s could not be stopped, so it was not deleted: %v", id, err),
 			"Try again in a moment, or check the host with the host doctor.")
+	}
+	if err := removeSavedChildren(id, children); err != nil {
+		return err
 	}
 	unlockFirst, err := lockFirstSave(id, renameWait)
 	if err != nil && !errors.Is(err, os.ErrNotExist) && !sessionGone(id) {

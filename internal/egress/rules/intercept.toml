@@ -1,0 +1,32 @@
+# Classes which always need HTTP visibility. Registry and code host entries
+# reuse presets.toml, even when the active preset does not allow them.
+
+[[classes]]
+host = "*.s3.amazonaws.com"
+kind = "object"
+source = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/VirtualHosting.html"
+
+[[classes]]
+host = "storage.googleapis.com"
+kind = "object"
+source = "https://cloud.google.com/storage/docs/request-endpoints"
+
+[[classes]]
+host = "*.blob.core.windows.net"
+kind = "object"
+source = "https://learn.microsoft.com/en-us/azure/storage/blobs/storage-blob-query-endpoint-srp"
+
+[[classes]]
+host = "api.anthropic.com"
+kind = "model"
+source = "https://platform.claude.com/docs/en/api/overview"
+
+[[classes]]
+host = "api.openai.com"
+kind = "model"
+source = "https://developers.openai.com/api/reference/overview"
+
+[[classes]]
+host = "chatgpt.com"
+kind = "model"
+source = "https://developers.openai.com/codex/auth"

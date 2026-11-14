@@ -14,6 +14,33 @@ func (c *Conn) startError(ctx context.Context, err error) error {
 	if ctx != nil && ctx.Err() != nil {
 		return ctx.Err()
 	}
+	if c.agentOnly {
+		if failure := agentProcessExitFailure(exitCode(waitErr)); failure != nil {
+			return failure
+		}
+	}
+	if source, ok := c.proc.(interface{ agentFailure() error }); ok {
+		if failure := source.agentFailure(); failure != nil {
+			return failure
+		}
+	}
+	if native, ok := c.proc.(interface {
+		nativeSSHDiag() (nativeSSHDiagnosis, int, bool)
+	}); ok {
+		diagnosis, code, complete := native.nativeSSHDiag()
+		if complete && (errors.Is(waitErr, ErrUnreachable) || code < 0) {
+			if code == 255 && diagnosis.stopped {
+				if refusal := hostKeyStopError(c.Host, diagnosis.shownType, diagnosis.shown); refusal != nil {
+					return refusal
+				}
+			}
+			why := sshFailure("", waitErr)
+			if code == 255 && diagnosis.failReason != "" {
+				why = diagnosis.failReason
+			}
+			return &UserError{Msg: fmt.Sprintf("cannot reach %s: %s", c.Host.Name, why), Hint: c.hint, Code: "unreachable"}
+		}
+	}
 	if d, ok := c.proc.(interface{ sshDiag() (string, int) }); ok {
 		sshLog, code := d.sshDiag()
 		if errors.Is(waitErr, ErrUnreachable) || code < 0 {

@@ -71,11 +71,18 @@ type question struct {
 	// ask for: with input off, the command takes it and says so. Otherwise
 	// the command fails with exit code 4, and names flag.
 	keep bool
+	// refused questions need live consent and have no answering flag.
+	refused bool
 }
 
 // The questions that commands ask today. A task that adds a prompt adds its
 // row here, and to the spec's table.
 var (
+	qPolicyAllow   = &question{cmd: "policy allow", flag: "--all"}
+	qPolicyDeny    = &question{cmd: "policy deny", flag: "--all"}
+	qPolicyRm      = &question{cmd: "policy rm", flag: "--all"}
+	qSharedNew     = &question{cmd: "new", flag: "None", refused: true}
+	qSharedResume  = &question{cmd: "resume", flag: "None", refused: true}
 	qInstallHelper = &question{cmd: "host add", flag: "--yes"}
 	qAddAgents     = &question{cmd: "host add", flag: "--yes", keep: true}
 	// qHostKey is ssh's own question about a host key that the user's
@@ -100,7 +107,7 @@ var (
 )
 
 // questions lists every row, for the tests.
-var questions = []*question{qInstallHelper, qAddAgents, qHostKey, qHostTier, qRaiseTier, qRekey, qMakeFolder, qSetupScript, qFix, qHostFix, qSetup, qRmMachine, qDelete, qRestart}
+var questions = []*question{qPolicyAllow, qPolicyDeny, qPolicyRm, qSharedNew, qSharedResume, qInstallHelper, qAddAgents, qHostKey, qHostTier, qRaiseTier, qRekey, qMakeFolder, qSetupScript, qFix, qHostFix, qSetup, qRmMachine, qDelete, qRestart}
 
 // prompter asks a command's questions on stderr, and reads the answers from
 // stdin.
@@ -226,6 +233,10 @@ func (p *prompter) confirm(q *question, text, need string) (bool, error) {
 	if !p.on {
 		if q.keep {
 			return q.def, nil
+		}
+		if q.refused {
+			return false, &client.UserError{Msg: q.cmd + " needs a live terminal answer for this grant",
+				Hint: "Run the command in a terminal, with input on.", Code: "tier_refused", Kind: client.KindRefused}
 		}
 		return false, p.needs(q, need)
 	}

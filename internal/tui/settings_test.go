@@ -2,7 +2,12 @@ package tui
 
 import (
 	"context"
+	"errors"
+	"os"
+	"path/filepath"
 	"slices"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -16,7 +21,7 @@ func keptSettingsFor(be *fakeBackend) client.Settings {
 	s := be.Settings()
 	s.Agents.Inline = true
 	s.Sessions.MemoryMax = "4G"
-	s.Secrets = map[string]string{"TOKEN": "op read op://dev/token"}
+	s.Secrets = map[string]client.SecretDefinition{"TOKEN": {Run: "op read op://dev/token"}}
 	return s
 }
 
@@ -48,7 +53,7 @@ func usedKept(t *testing.T, be *fakeBackend, starts bool) {
 	if len(be.secretsFrom) == 0 {
 		t.Fatal("no secrets were fetched")
 	}
-	if s := be.secretsFrom[len(be.secretsFrom)-1]; s.Secrets["TOKEN"] != "op read op://dev/token" {
+	if s := be.secretsFrom[len(be.secretsFrom)-1]; s.Secrets["TOKEN"].Run != "op read op://dev/token" {
 		t.Errorf("the secrets came from %+v, not the kept settings", s.Secrets)
 	}
 }
@@ -109,19 +114,67 @@ func TestActionsAfterABrokenEdit(t *testing.T) {
 	})
 }
 
-// The real backend fetches secrets with the commands of the settings that
-// it gets, not with those of config.toml, which here has none.
-func TestRealBackendSecretsUseTheSettings(t *testing.T) {
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-	s := client.DefaultSettings()
-	s.Secrets = map[string]string{"TOKEN": "printf t0k"}
-	ctx := context.Background()
-	got, err := realBackend{}.Secrets(ctx, s, client.Host{Name: "box", Secrets: []string{"TOKEN"}})
-	if err != nil || len(got) != 1 {
-		t.Fatalf("Secrets = %v, %v", len(got), err)
+// Kept settings are presentation state. Real secret commands always use the
+// current file and its complete validation barrier, including unused entries.
+func TestRealBackendSecretsUseCurrentAuthorisedSettings(t *testing.T) {
+	root := t.TempDir()
+	for _, key := range []string{"HOME", "USERPROFILE", "XDG_CONFIG_HOME", "XDG_STATE_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME", "XDG_RUNTIME_DIR", "XDG_CONFIG_DIRS", "XDG_DATA_DIRS"} {
+		t.Setenv(key, root)
 	}
-	if got, err = (realBackend{}).SessionSecrets(ctx, s, []string{"TOKEN"}); err != nil || len(got) != 1 {
-		t.Fatalf("SessionSecrets = %v, %v", len(got), err)
+	if err := os.MkdirAll(client.ConfigDir(), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	host := client.Host{Name: "box", SSH: "box", Secrets: []string{"TOKEN"}}
+	if err := client.SaveHosts(t.Context(), []client.Host{host}); err != nil {
+		t.Fatal(err)
+	}
+	hosts, err := client.LoadHosts()
+	if err != nil || len(hosts) != 1 {
+		t.Fatalf("saved hosts: %v, %v", hosts, err)
+	}
+	host = hosts[0]
+	if err := client.SetTierContext(t.Context(), host.Name, client.TierOwn, strings.Repeat("a", 32), ""); err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(root, "stale-command-must-not-run")
+	stale := client.DefaultSettings()
+	stale.Secrets = map[string]client.SecretDefinition{"TOKEN": {Run: "echo stale > " + strconv.Quote(marker)}}
+	for _, row := range []struct {
+		name, text string
+		valid      bool
+	}{
+		{"fresh", "[secrets]\nTOKEN = 'echo current-value'\n", true},
+		{"broken", "[secrets]\nTOKEN = [\n", false},
+		{"unused invalid", "[secrets]\nTOKEN = 'echo current-value'\nUNUSED = {run = 'echo never-run', kind = 'unknown'}\n", false},
+	} {
+		t.Run(row.name, func(t *testing.T) {
+			if err := os.WriteFile(filepath.Join(client.ConfigDir(), "config.toml"), []byte(row.text), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			for _, operation := range []string{"new", "resume"} {
+				ctx := client.WithGrantRequest(t.Context(), client.NewGrantRequest(false, false))
+				var got map[string]api.Secret
+				var err error
+				if operation == "new" {
+					got, err = realBackend{}.Secrets(ctx, stale, host)
+				} else {
+					got, err = realBackend{}.SessionSecrets(ctx, stale, host, "abc234de", []string{"TOKEN"})
+				}
+				if row.valid {
+					if err != nil || len(got) != 1 || got["TOKEN"] != "current-value" {
+						t.Fatalf("%s fresh fetch: %v, %v", operation, got, err)
+					}
+				} else {
+					var user *client.UserError
+					if !errors.As(err, &user) || user.Code != "bad_config" || got != nil {
+						t.Fatalf("%s bypassed current invalid settings: %v, %v", operation, got, err)
+					}
+				}
+				if _, err := os.Stat(marker); !os.IsNotExist(err) {
+					t.Fatalf("%s ran a stale presentation command: %v", operation, err)
+				}
+			}
+		})
 	}
 }
 
@@ -135,7 +188,7 @@ func TestSettingsEditedOutsideTheLauncher(t *testing.T) {
 	hs.key("n", "enter")
 	usedKept(t, hs.be, true)
 	usedKept(t, hs.be, false)
-	if !hs.m.settings.Agents.Inline || hs.m.settings.Secrets["TOKEN"] == "" {
+	if !hs.m.settings.Agents.Inline || hs.m.settings.Secrets["TOKEN"].Run == "" {
 		t.Errorf("the launcher did not keep the new settings: %+v", hs.m.settings)
 	}
 	setFile(hs.be, client.DefaultSettings(), brokenWarning)

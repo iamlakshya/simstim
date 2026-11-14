@@ -2,13 +2,15 @@
 import os, pty, select, struct, fcntl, termios, time, sys, re, signal
 
 class Term:
-    def __init__(self, argv, cols=120, rows=36, env=None, inherit=True):
+    def __init__(self, argv, cols=120, rows=36, env=None, inherit=True, cwd=None):
         # inherit=False: the program gets env alone, none of this process's
         # environment (boundary.term, for every client of the e2e run).
         self.pid, self.fd = pty.fork()
         if self.pid == 0:
             e = dict(os.environ) if inherit else {}
             e.update(env or {})
+            if cwd is not None:
+                os.chdir(cwd)
             os.execvpe(argv[0], argv, e)
         fcntl.ioctl(self.fd, termios.TIOCSWINSZ, struct.pack("HHHH", rows, cols, 0, 0))
         self.buf = b""
