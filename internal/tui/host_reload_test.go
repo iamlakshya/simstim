@@ -15,7 +15,7 @@ func TestReloadOfAReplacedHostClearsTheOldMachine(t *testing.T) {
 	if len(h.sessions) == 0 || h.info == nil || !h.loaded {
 		t.Fatal("the old host was not loaded")
 	}
-	old := h.conn.(*fakeConn)
+	old := unclean(h.conn).(*fakeConn)
 	h.backoff, h.rtts, h.rtt = time.Minute, rttWindow{{at: now, d: time.Second}}, rttSpread{n: 12}
 	changed := client.Host{Name: h.name(), Machine: &client.Machine{Provider: "lima", ID: "replacement", Created: "2"}}
 	replace(hs.be, changed)

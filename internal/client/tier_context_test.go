@@ -173,7 +173,7 @@ func TestPinSavedKeepsBackgroundLockWaitSilent(t *testing.T) {
 	done := make(chan error, 1)
 	go func() {
 		defer close(done)
-		done <- pinSaved(ctx, h, false, false)
+		done <- pinSaved(ctx, h, h, false)
 	}()
 	t.Cleanup(func() {
 		cancel()

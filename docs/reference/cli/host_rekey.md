@@ -7,7 +7,7 @@ title: "simstim host rekey"
 Replace a host's pinned host key, after you confirm.
 
 ```text
-simstim host rekey <name> [flags]
+simstim host rekey <host> [flags]
 ```
 
 Read the host's key again, offering no key and no password, show the pinned key and the new one, and pin the new one after you type the host's name. Run it only when you know why the key changed, such as after you reinstalled the host. Otherwise, do not connect.

@@ -22,7 +22,7 @@ func pinContextOps() []pinContextOp {
 		{"migrate", false, func(ctx context.Context, h Host) error { return migratePinContext(ctx, h.Name) }},
 		{"needs pin", false, func(ctx context.Context, h Host) error { _, err := needsPin(ctx, h); return err }},
 		{"load tiers", false, func(ctx context.Context, h Host) error { _, err := loadTiers(ctx, []Host{h}); return err }},
-		{"saved pin", false, func(ctx context.Context, h Host) error { return pinSaved(ctx, h, false, false) }},
+		{"saved pin", false, func(ctx context.Context, h Host) error { return pinSaved(ctx, h, h, false) }},
 		{"pin host", true, func(ctx context.Context, h Host) error {
 			_, err := pinHostKey(ctx, h, "", FirstUseRefuse, false)
 			return err

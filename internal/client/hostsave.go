@@ -85,10 +85,11 @@ func UpdateHosts(ctx context.Context, c HostChange) error {
 		return badHostNameError(name)
 	}
 	st, err := stageForContext(ctx, name)
-	if err != nil {
+	withPin := c.Now != nil && (c.Pin || st != nil)
+	if err != nil && !withPin {
 		return err
 	}
-	withPin := c.Now != nil && (c.Pin || st != nil)
+	stageErr := err
 	if withPin {
 		defer abortPinStage(ctx, name, st)
 	}
@@ -99,6 +100,17 @@ func UpdateHosts(ctx context.Context, c HostChange) error {
 			return err
 		}
 		defer unlock()
+	}
+	if stageErr != nil {
+		// A retired stage cannot hide a changed saved entry. Compare under
+		// the same file lock before migration or any other side-file write;
+		// an unchanged entry still receives the captured stage's refusal.
+		return updateHostsFile(ctx, func(hosts []Host) ([]Host, hostFileHooks, error) {
+			if _, err := ApplyHostChange(hosts, c); err != nil {
+				return nil, hostFileHooks{}, err
+			}
+			return nil, hostFileHooks{}, stageErr
+		})
 	}
 	if c.Now != nil {
 		if err := ensureTiersMigrated(ctx); err != nil {

@@ -69,7 +69,7 @@ func pinRoute(ctx context.Context, h Host, t Transport, interactive bool) error 
 	if o, ok := ctx.Value(pinKey{}).(*PinOptions); ok && o != nil {
 		return pinAsAsked(ctx, s.Host, o)
 	}
-	return pinSaved(ctx, s.Host, h.Machine != nil, interactive)
+	return pinSaved(ctx, s.Host, h, interactive)
 }
 
 // pinAsAsked pins h's key as o says. A pin that h has already stays,
@@ -109,13 +109,16 @@ func pinAsAsked(ctx context.Context, h Host, o *PinOptions) error {
 // It says where the pin came from in the notes of ctx only for a
 // connection that may use the terminal. A connection in the background,
 // such as an attach's reconnect, writes nothing to the terminal.
-func pinSaved(ctx context.Context, h Host, made, interactive bool) error {
+// h is the SSH route; original is the saved entry that selected that route.
+// A provider's target does not replace the machine's saved CAS identity.
+func pinSaved(ctx context.Context, h, original Host, interactive bool) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 	if !interactive {
 		ctx = quietConnectionNotes(ctx)
 	}
+	made := original.Machine != nil
 	if !ValidHostName(h.Name) {
 		return nil // writeWrapper refuses it: no connection starts
 	}
@@ -160,7 +163,7 @@ func pinSaved(ctx context.Context, h Host, made, interactive bool) error {
 	case err != nil:
 		return err
 	}
-	if err := recordPinnedKey(ctx, h, p.Fingerprint); err != nil {
+	if err := recordPinnedKey(ctx, original, p.Fingerprint); err != nil {
 		return err
 	}
 	if p.Source != PinKept {

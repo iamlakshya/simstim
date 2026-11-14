@@ -133,7 +133,7 @@ simstim host rm my-server
 
 It removes only generated configs that it still owns and that no remaining saved host references. A config that you replaced, or that another host includes, stays. Cancellation before cleanup keeps the pin and configs in place.
 
-If cleanup finishes but saving the host list fails, the host stays saved. Its stored key guard refuses a missing pin. Fix the save error and run `host rm` again.
+Once cleanup begins, it retires the pin first. If removing a generated config or saving the host list fails, the host stays saved and its stored key guard refuses the missing pin. Fix the cleanup or save error and run `host rm` again.
 
 A host that `host create` made also has a machine. At a terminal, `host rm` says what the machine holds, and asks you to type the host's name to delete the machine too. With `--destroy --confirm <host>`, it deletes the machine without the question ([destroy a host](create-a-host.md#destroy-a-host)).
 

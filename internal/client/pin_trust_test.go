@@ -78,6 +78,9 @@ func TestNoHostTextInErrors(t *testing.T) {
 		t.Errorf("the key's connection: %v", err)
 	}
 	// A pinned connection that ssh ends with 255.
+	if err := SaveHostContext(ctx, h); err != nil {
+		t.Fatal(err)
+	}
 	pinFor(t, "box")
 	put(t, dir, "stderr", fakeTry+"Connection closed by 192.0.2.7 port 22\r\n")
 	if _, err := (&SSH{Host: h}).Run(ctx, "true", nil); !errors.As(err, &ue) || quotesHost(ue) || !strings.Contains(ue.Msg, "closed before the key exchange") {

@@ -39,6 +39,8 @@ simstim doctor --fix
 
 The doctor never uses sudo. When a fix needs root, for example linger on some hosts, it prints the command for you to run. `--yes` applies every fix without asking. In a script, or with `--no-input`, `--fix` needs `--yes`, and fails with exit code 4 without it.
 
+Cancellation stops the next repair from starting. Its message lists repairs already completed. An old SSH file counts as generated only when its header identifies the host. A filename or a generic comment is not enough.
+
 ## Common problems
 
 | What you see | Try |

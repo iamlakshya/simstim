@@ -341,7 +341,7 @@ func hostLsCmd() *cobra.Command {
 func hostRekeyCmd() *cobra.Command {
 	var hostKey, confirm string
 	cmd := &cobra.Command{
-		Use:   "rekey <name>",
+		Use:   "rekey <host>",
 		Short: "Replace a host's pinned host key, after you confirm",
 		Long: "Read the host's key again, offering no key and no password, show the pinned key and the new one,\n" +
 			"and pin the new one after you type the host's name. Run it only when you know why the key changed,\n" +

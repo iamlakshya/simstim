@@ -4,15 +4,13 @@ import (
 	"context"
 	"errors"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 )
 
 // Box and box have two generated SSH configs, also on a disk that ignores
 // case, as they have two locks and two records: the forget of Box leaves
-// the config of box. A name that cannot name a host gets a path in the
-// folder all the same.
+// the config of box. A name that cannot name a host gets no path.
 func TestCaseDistinctHostsKeepTheirConfigs(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	home := t.TempDir()
@@ -54,7 +52,7 @@ func TestCaseDistinctHostsKeepTheirConfigs(t *testing.T) {
 	if _, err := os.Stat(wrapperPath(lower)); err != nil {
 		t.Errorf("the forget of Box removed the config of box: %v", err)
 	}
-	if odd := wrapperPath(Host{Name: "../x"}); filepath.Dir(odd) != filepath.Join(ConfigDir(), "ssh") {
+	if odd := wrapperPath(Host{Name: "../x"}); odd != "" {
 		t.Errorf("a name that cannot name a host has the config %s", odd)
 	}
 }

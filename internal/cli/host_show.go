@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -133,10 +134,37 @@ func hostShowObject(d client.HostDetails, err error) map[string]any {
 		obj["try"] = shown(lookHint(d.Host.Name, err))
 	}
 	if d.Info != nil {
-		obj["info"] = d.Info
+		obj["info"] = hostInfoJSON{d.Info}
 		obj["session_count"] = d.Sessions
 	}
 	return obj
+}
+
+// hostInfoJSON keeps the host's data and integer precision while omitting
+// unset fields, as host doctor's JSON does (cli-spec 7.2 and 11.2).
+// RawMessage keeps strings and numbers exact through the outer JSON writer.
+type hostInfoJSON struct{ info *client.HostInfo }
+
+func (h hostInfoJSON) MarshalJSON() ([]byte, error) {
+	raw, err := json.Marshal(h.info)
+	if err != nil {
+		return nil, fmt.Errorf("encode host info: %w", err)
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		return nil, fmt.Errorf("read encoded host info: %w", err)
+	}
+	for key, value := range fields {
+		switch string(value) {
+		case "null", `""`:
+			delete(fields, key)
+		}
+	}
+	out, err := json.Marshal(fields)
+	if err != nil {
+		return nil, fmt.Errorf("encode host info fields: %w", err)
+	}
+	return out, nil
 }
 
 // lookHint is the Try: line of a look at host name that failed: the

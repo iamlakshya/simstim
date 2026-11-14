@@ -29,6 +29,9 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ### Fixed
 
+- Provider SSH routes keep the original saved machine identity for pin checks. Failed host removal retires the pin before config cleanup, and stale saves cannot change a replacement's tier.
+- Host details trim display whitespace. Host JSON omits unset fields while keeping raw data and full integer precision. Legacy host help follows the command grammar.
+- Doctor stops repairs when cancelled and reports what it already changed. It keeps SSH files whose ownership it cannot confirm.
 - Terminal reader tests keep their files and worker cleanup inside the test's clock bubble, including when an assertion fails.
 - The benchmark check compares nested cases separately and reruns them by their exact names, so a confirmation measures every slow case. It refuses samples with conflicting packages or configurations. It stops on any failed build or missing binary, so no package can be left out of the comparison. It prepares and verifies the pinned statistics tool before sampling. Tool preparation stays outside Go modules, so it never adds tool checksums to the repository. It keeps the binaries, raw samples and logs in a new evidence folder on success and failure.
 - The launcher stops and joins tier question readers before a terminal handoff. It starts a fresh reader on return. A cancelled question keeps the host at `shared` until it is answered.

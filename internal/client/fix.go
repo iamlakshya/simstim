@@ -236,8 +236,12 @@ func sshConfigFix() []localFix {
 	if old > 0 {
 		parts = append(parts, fmt.Sprintf("%d under an old file name", old))
 	}
+	problem := fmt.Sprintf("%d generated SSH config(s) that no host uses: %s", len(candidates), strings.Join(parts, ", "))
+	if old == 0 {
+		problem = fmt.Sprintf("%d generated SSH config(s) for hosts you removed", removed)
+	}
 	return []localFix{{Fix: Fix{ID: "ssh-configs",
-		Problem: fmt.Sprintf("%d generated SSH config(s) that no host uses: %s", len(candidates), strings.Join(parts, ", ")),
+		Problem: problem,
 		Action:  "remove them; " + brand.Name + " writes a host's config again when it connects",
 		Command: "rm " + strings.Join(paths, " ")},
 		run: func(ctx context.Context, f *Fix) error {

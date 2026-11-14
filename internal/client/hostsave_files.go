@@ -36,24 +36,27 @@ func changeHostFiles(ctx context.Context, c HostChange, hosts []Host, withPin bo
 		}
 	}
 	if c.Now == nil && ValidHostName(c.name()) {
-		removeWrappers, err := prepareHostWrapperRemoval(ctx, c.name(), out)
-		if err != nil {
-			return nil, hooks, err
-		}
+		removeWrappers, wrapperErr := prepareHostWrapperRemoval(ctx, c.name(), out)
 		hooks.beforeSave = func() error {
 			if err := ctx.Err(); err != nil {
+				return err
+			}
+			// Cleanup starts after the final cancellation gate. Retire the
+			// pin first: a failed socket or wrapper cleanup keeps a retryable
+			// saved entry, but cannot leave it connectable under its old key.
+			if err := forgetPin(c.name()); err != nil {
 				return err
 			}
 			if err := retireMaster(context.WithoutCancel(ctx), *c.Was); err != nil {
 				return err
 			}
-			if err := removeWrappers(); err != nil {
-				return err
-			}
 			if err := ctx.Err(); err != nil {
 				return err
 			}
-			return forgetPin(c.name())
+			if wrapperErr != nil {
+				return wrapperErr
+			}
+			return removeWrappers()
 		}
 	}
 	return out, hooks, nil

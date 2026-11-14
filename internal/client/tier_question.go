@@ -161,7 +161,7 @@ func saveFirstTierAnswer(ctx context.Context, h Host, before Tiers, choice Tier)
 		e, has := ts.Entry(h.Name)
 		if had != has || had && !sameTierEntry(previous, e) {
 			return &UserError{Msg: fmt.Sprintf("the tier or identity of %s changed while its tier question was open, so that answer was not saved", h.Name),
-				Hint: brand.Name + " host show " + h.Name, Code: "host_changed", Kind: KindRefused}
+				Hint: brand.Name + " host show " + h.Name, Code: "host_changed", Kind: KindFailed}
 		}
 		e.Name, e.Tier, e.SetAt = h.Name, choice, nowUTC()
 		e.NeedsAnswer, e.IDChanged = false, false

@@ -20,10 +20,12 @@ const Dot = " · "
 const DetailMax = 200
 
 // CleanDetail is s as the details show it: without control or hidden
-// characters, and at most DetailMax runes. A host sends most of these
-// values, and an agent's own --version output reaches them, so none may
-// reach the terminal as it is (isolation spec 14.15).
-func CleanDetail(s string) string { return api.CleanText(s, DetailMax) }
+// characters or outer whitespace, and at most DetailMax runes. A host sends
+// most of these values, and an agent's own --version output reaches them,
+// so none may reach the terminal as it is (isolation spec 14.15).
+func CleanDetail(s string) string {
+	return strings.TrimSpace(api.CleanText(s, DetailMax))
+}
 
 // Detail is one line of a host's details: a label and its value.
 type Detail struct {

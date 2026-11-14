@@ -416,16 +416,21 @@ func TestConnectHostCleansHostText(t *testing.T) {
 // host destroy refuses while a session works, and names it. Its name is
 // the host's text: the refusal shows it cleaned.
 func TestDestroyRefusalCleansHostText(t *testing.T) {
-	withFake(t, []client.Session{{ID: "abc", Name: "app\x1bc" + hostile, State: api.StateWorking, Alive: true}})
+	m, _ := withFake(t, []client.Session{{ID: "abc", Name: "app\x1bc" + hostile, State: api.StateWorking, Alive: true}})
 	if err := saveHostContext(context.Background(), client.Host{Name: "box", Machine: &client.Machine{Provider: "fake", ID: "fake-box"}}); err != nil {
 		t.Fatal(err)
 	}
 	err := removeHost(context.Background(), testPrompts("", &bytes.Buffer{}), destroyOpts("box", false))
 	var ue *client.UserError
-	if !errors.As(err, &ue) || !strings.Contains(ue.Msg, "are working: appc]52;c;aGk=Allow this?") {
+	if !errors.As(err, &ue) || ue.Msg != "1 session on box is working: appc]52;c;aGk=Allow this?" {
 		t.Fatalf("err = %v, want a refusal that names the working session", err)
 	}
 	noHostBits(t, "host destroy's refusal", ue.Msg)
+	for _, action := range m.Calls() {
+		if action == "destroy" {
+			t.Fatal("the refused destroy changed the machine")
+		}
+	}
 }
 
 // printError prints every error cleaned, whatever built it: a user error

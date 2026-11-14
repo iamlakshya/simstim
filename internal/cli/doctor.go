@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strconv"
@@ -28,6 +29,9 @@ func doctorCmd() *cobra.Command {
 		Example: "  " + brand.Name + " doctor\n  " + brand.Name + " doctor --fix\n  " + brand.Name + " doctor --json",
 		Args:    unknownCommand,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			if stopped(cmd.Context()) {
+				return cancelled()
+			}
 			if asJSON && fix && !yes {
 				// With --json nothing is asked, so -y must answer for each fix.
 				return prompts(cmd).needs(qFix, "a yes for each fix")
@@ -35,6 +39,9 @@ func doctorCmd() *cobra.Command {
 			checks := client.LocalChecks()
 			fixes, err := client.LocalFixesContext(cmd.Context(), false, nil)
 			if err != nil {
+				if errors.Is(err, context.Canceled) {
+					return cancelled()
+				}
 				return err
 			}
 			if asJSON && fix {

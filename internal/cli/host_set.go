@@ -81,8 +81,8 @@ func hostSetCmd() *cobra.Command {
 // hostIdleCmd is the old form of host set <host> idle=<time>.
 func hostIdleCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:     "idle <host> <duration|never>",
-		Short:   "Set how long a created host may idle before it stops (old form of host set idle=)",
+		Use:     "idle <host> <duration>|never",
+		Short:   "Set a created host's idle time (old form of host set)",
 		Hidden:  true,
 		Example: "  " + brand.Name + " host set lima idle=30m",
 		Args:    cobra.ExactArgs(2),
