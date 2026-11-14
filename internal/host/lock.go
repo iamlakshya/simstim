@@ -1,6 +1,7 @@
 package host
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -48,6 +49,13 @@ func sessionGone(id string) bool {
 }
 
 func lockFileWait(id, name string, d time.Duration) (unlock func(), err error) {
+	return lockFileWaitContext(context.Background(), id, name, d)
+}
+
+func lockFileWaitContext(ctx context.Context, id, name string, d time.Duration) (unlock func(), err error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	f, err := os.OpenFile(filepath.Join(paths.SessionDir(id), name), os.O_RDWR|os.O_CREATE, 0o600)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -57,6 +65,10 @@ func lockFileWait(id, name string, d time.Duration) (unlock func(), err error) {
 	}
 	deadline := time.Now().Add(d)
 	for {
+		if err := ctx.Err(); err != nil {
+			f.Close()
+			return nil, err
+		}
 		err := unix.Flock(int(f.Fd()), unix.LOCK_EX|unix.LOCK_NB)
 		switch {
 		case err == nil:
@@ -72,6 +84,11 @@ func lockFileWait(id, name string, d time.Duration) (unlock func(), err error) {
 			return nil, UserError("busy", "session "+id+" is busy: a resume, a restore, a rename or a delete of it runs",
 				"Wait until it ends, then try again.")
 		}
-		time.Sleep(20 * time.Millisecond)
+		timer := time.NewTimer(20 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+		case <-timer.C:
+		}
 	}
 }

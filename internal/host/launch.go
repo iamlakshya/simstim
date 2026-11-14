@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net"
 	"os"
 	"os/exec"
 	"strconv"
@@ -136,9 +135,9 @@ func logSize(id string) int64 {
 func waitSocket(id string, from int64, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
-		d := net.Dialer{Timeout: 200 * time.Millisecond}
-		if c, err := d.DialContext(context.Background(), "unix", paths.Socket(id)); err == nil {
-			c.Close()
+		// The endpoint exists before manifest loading, so a raw connection
+		// proves pending control, not readiness to receive secrets or run.
+		if _, err := HolderRequest(id, "sockets", nil, min(200*time.Millisecond, time.Until(deadline))); err == nil {
 			return nil
 		}
 		// The holder writes an errored status if the agent failed to start.

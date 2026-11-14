@@ -1,6 +1,7 @@
 package host
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"time"
@@ -16,7 +17,7 @@ import (
 // RenameStalled. The rename goes on when RenameStall goes.
 //
 // A test stalls a new holder between its load of the manifest and its
-// listen: it names a file in StartStallEnv, and makes it. The holder writes
+// agent launch: it names a file in StartStallEnv, and makes it. The holder writes
 // its session's ID to that file's name plus ".stalled", and goes on when
 // the file goes, or after 15 s.
 const (
@@ -34,7 +35,7 @@ func init() {
 		_ = os.WriteFile(filepath.Join(paths.SessionDir(id), RenameStalled), nil, 0o600)
 		waitGoneFile(stall, 30*time.Second)
 	}
-	afterHolderLoad = func(id string) {
+	afterHolderLoad = func(ctx context.Context, id string) {
 		stall := os.Getenv(StartStallEnv)
 		if stall == "" {
 			return
@@ -43,7 +44,7 @@ func init() {
 			return
 		}
 		_ = os.WriteFile(stall+".stalled", []byte(id), 0o600)
-		waitGoneFile(stall, 15*time.Second)
+		waitGoneFileContext(ctx, stall, 15*time.Second)
 	}
 }
 
@@ -52,6 +53,27 @@ func waitGoneFile(p string, d time.Duration) {
 	for deadline := time.Now().Add(d); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
 		if _, err := os.Stat(p); err != nil {
 			return
+		}
+	}
+}
+
+// waitGoneFileContext keeps the start stalled at the real post-load boundary,
+// while allowing the pending control owner to cancel that synchronous work.
+func waitGoneFileContext(ctx context.Context, p string, d time.Duration) {
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		if _, err := os.Stat(p); err != nil {
+			return
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-timer.C:
+			return
+		case <-ticker.C:
 		}
 	}
 }

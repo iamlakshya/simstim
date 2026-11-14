@@ -1,6 +1,7 @@
 package host
 
 import (
+	"context"
 	"errors"
 	"os"
 )
@@ -24,9 +25,9 @@ var beforeRenameLock = func(string) {}
 var afterRenameWrite = func(*Holder) {}
 
 // afterHolderLoad runs in a new holder after it loads the manifest, before
-// it listens. The tests of this package stall a start there, and try a
-// rename, which must wait for the start's lock.
-var afterHolderLoad = func(string) {}
+// it launches the agent. The early control endpoint already exists. Tests
+// stall at this same boundary and can observe cancellation without moving it.
+var afterHolderLoad = func(context.Context, string) {}
 
 // rename renames the session to name. It takes the session's lock, saves a
 // copy of the manifest with the new name, and only after a good write

@@ -63,7 +63,8 @@ func Resume(a api.ResumeArgs) (*ResumeResult, error) {
 	if err != nil {
 		return nil, UserError("not_found", "no session "+id, "List sessions to find its ID.")
 	}
-	if alive(id) && m.Status.State != StateExited && m.Status.State != StateErrored {
+	pending := m.Status.State == StateStarting && m.Run.AgentPID == 0
+	if alive(id) && m.Status.State != StateExited && m.Status.State != StateErrored && !pending {
 		name := m.Name
 		if settled, ok := settledRenameName(id); ok {
 			name = settled
@@ -80,9 +81,14 @@ func Resume(a api.ResumeArgs) (*ResumeResult, error) {
 	if _, _, err := resumeArgv(m); err != nil {
 		return nil, err
 	}
+	if pending {
+		if err := stopPendingForResume(id, m); err != nil {
+			return nil, err
+		}
+	}
 	// The session's debug stops with its old holder (holder_debug.go).
 	debugOn := debugUntil(m, alive(id)) != nil
-	if err := stopHolder(id, m); err != nil {
+	if err := stopResumeHolder(id, m, pending); err != nil {
 		return nil, UserError("busy", fmt.Sprintf("the previous holder of session %s could not be stopped: %v", id, err),
 			"Try again in a moment, or check the host with the host doctor.")
 	}

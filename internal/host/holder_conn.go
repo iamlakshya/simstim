@@ -59,45 +59,46 @@ func (h *Holder) serve(conn net.Conn, hookSock bool) {
 func (h *Holder) dispatch(c *hclient, r *bufio.Reader) {
 	for {
 		f, err := proto.Read(r)
-		if err != nil {
+		if err != nil || !h.dispatchFrame(c, f) {
 			return
 		}
-		// The role and peer check (holder_peer.go). A connection with full
-		// access takes the path below, frame for frame as before.
-		if c.access != accessFull {
-			if !h.serveLimited(c, f) {
-				return
-			}
-			continue
-		}
-		switch f.Type {
-		case proto.TAttach:
-			var a proto.Attach
-			if json.Unmarshal(f.Payload, &a) == nil {
-				h.attach(c, a)
-			}
-		case proto.TTrace:
-			c.bridgeRead(f.Payload)
-		case proto.TInput:
-			h.input(c, f.Payload)
-		case proto.TResize:
-			var rz proto.Resize
-			if json.Unmarshal(f.Payload, &rz) == nil {
-				h.resize(c, rz, false)
-			}
-		case proto.TDetach:
-			h.drop(c)
-		case proto.TPing:
-			_ = c.w.Write(proto.TPong, f.Payload)
-		case proto.TRequest:
-			var req proto.Request
-			if json.Unmarshal(f.Payload, &req) == nil {
-				h.request(c, req)
-			}
-		default:
-			// Other frames are not for a holder: ignore them.
-		}
 	}
+}
+
+// dispatchFrame applies the canonical access policy to one already-read frame.
+// Startup handoff must dispatch such a frame once, through this same path.
+func (h *Holder) dispatchFrame(c *hclient, f proto.Frame) bool {
+	if c.access != accessFull {
+		return h.serveLimited(c, f)
+	}
+	switch f.Type {
+	case proto.TAttach:
+		var a proto.Attach
+		if json.Unmarshal(f.Payload, &a) == nil {
+			h.attach(c, a)
+		}
+	case proto.TTrace:
+		c.bridgeRead(f.Payload)
+	case proto.TInput:
+		h.input(c, f.Payload)
+	case proto.TResize:
+		var rz proto.Resize
+		if json.Unmarshal(f.Payload, &rz) == nil {
+			h.resize(c, rz, false)
+		}
+	case proto.TDetach:
+		h.drop(c)
+	case proto.TPing:
+		_ = c.w.Write(proto.TPong, f.Payload)
+	case proto.TRequest:
+		var req proto.Request
+		if json.Unmarshal(f.Payload, &req) == nil {
+			h.request(c, req)
+		}
+	default:
+		// Other frames are not for a holder: ignore them.
+	}
+	return true
 }
 
 func (h *Holder) attach(c *hclient, a proto.Attach) {

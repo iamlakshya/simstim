@@ -89,6 +89,15 @@ func secretsFailed(err error) error {
 // returns them as environment entries for the agent. Any other connection
 // is told the session is starting. It returns nil after the timeout.
 func (h *Holder) awaitSecrets(want []string, timeout time.Duration) []string {
+	if h.startup != nil {
+		env := h.startup.awaitSecrets(want, timeout)
+		if env != nil {
+			h.log.Info("secrets received", "count", len(env))
+		} else if h.startup.ctx.Err() == nil {
+			h.log.Warn("secrets did not arrive, starting without them", "waited", timeout)
+		}
+		return env
+	}
 	ul, ok := h.ln.(*net.UnixListener)
 	if !ok {
 		return nil
@@ -148,17 +157,9 @@ func (h *Holder) readSecrets(conn net.Conn, want []string, deadline time.Time) (
 	if req.Op != "secrets" {
 		return nil, fail("starting", "the session is starting")
 	}
-	var msg secretsMsg
-	if err := json.Unmarshal(req.Args, &msg); err != nil {
-		return nil, fail("bad_request", "the secrets are not valid JSON")
-	}
-	env := make([]string, 0, len(want))
-	for _, k := range want {
-		v, ok := msg.Env[k]
-		if !ok {
-			return nil, fail("bad_request", "the secret "+k+" is missing")
-		}
-		env = append(env, k+"="+string(v))
+	env, err := secretEnvironment(req.Args, want)
+	if err != nil {
+		return nil, fail("bad_request", err.Error())
 	}
 	_ = w.WriteJSON(proto.TResponse, proto.Response{ID: req.ID, OK: true, Result: json.RawMessage(`{"ok":true}`)})
 	return env, nil
@@ -198,4 +199,22 @@ func (h *Holder) secretsBeforeStart(restored bool) {
 		h.m.MissingSecrets = append([]string(nil), want...)
 		h.notes = append(h.notes, missingSecretsNote(want, restored))
 	}
+}
+
+// secretEnvironment selects values only for names from the loaded manifest.
+// Both pending and ordinary secrets readers use this same validation.
+func secretEnvironment(raw json.RawMessage, want []string) ([]string, error) {
+	var msg secretsMsg
+	if err := json.Unmarshal(raw, &msg); err != nil {
+		return nil, errors.New("the secrets are not valid JSON")
+	}
+	env := make([]string, 0, len(want))
+	for _, k := range want {
+		v, ok := msg.Env[k]
+		if !ok {
+			return nil, errors.New("the secret " + k + " is missing")
+		}
+		env = append(env, k+"="+string(v))
+	}
+	return env, nil
 }

@@ -122,22 +122,34 @@ type Holder struct {
 	// its terminal first (start.go).
 	secretEnv []string
 	notes     []string
+	startup   *holderStartup
 	// The debug trace (holder_trace.go), on while a traced client is attached.
 	dbg holderDebug
 }
 
 // RunHolder runs the holder for session id until the session is killed.
 func RunHolder(id string) error {
+	if !validID(id) {
+		return UserError("not_found", "the holder needs a valid session ID", "List sessions to find its ID.")
+	}
 	releaseLock, err := acquireHolderLock(id)
 	if err != nil {
 		return err
 	}
-	defer releaseLock()
-	m, err := LoadManifest(id)
+	pending, err := beginHolderStartup(id)
+	if err != nil {
+		releaseLock()
+		return err
+	}
+	defer pending.finish(releaseLock)
+	m, err := loadStartingManifest(pending.ctx, id)
 	if err != nil {
 		return fmt.Errorf("load manifest: %w", err)
 	}
-	afterHolderLoad(id)
+	afterHolderLoad(pending.ctx, id)
+	if pending.ctx.Err() != nil {
+		return nil
+	}
 	lf, err := openHolderLog(paths.HolderLog(id), holderLogMax)
 	if err != nil {
 		return err
@@ -161,11 +173,11 @@ func RunHolder(id string) error {
 	h.takeUnit()
 	h.log.Info("holder starting", "session", id, "helper", brand.HostBinary, "version", version.Version)
 	restored := wasRestored(m)
-	if err := h.listen(); err != nil {
-		h.log.Error("listen failed", "err", err)
-		return err
-	}
+	pending.prepare(h, restored)
 	h.secretsBeforeStart(restored)
+	if err := pending.beginAgent(); err != nil {
+		return nil
+	}
 	if err := h.start(); err != nil {
 		h.log.Error("agent did not start", "err", err)
 		h.mu.Lock()
@@ -179,14 +191,13 @@ func RunHolder(id string) error {
 	}
 	h.startAlerts(restored)
 	h.startVT()
-	go h.acceptLoop(h.ln, false)
-	go h.acceptLoop(h.hookLn, true)
 	go h.readLoop()
 	go h.waitLoop()
 	go h.tick()
 
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP)
+	pending.activate(h)
 	s := <-sig
 	h.log.Info("stopping on a signal", "signal", s.String())
 	// A signal means the system (or the user's manager) is stopping the
