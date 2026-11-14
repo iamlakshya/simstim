@@ -3,19 +3,20 @@ package e2b
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
-	"syscall"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/iamlakshya/simstim/internal/brand"
 )
@@ -155,15 +156,38 @@ func (f *fakeAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 // fakeEnvd runs commands on this machine behind envd's process service, and
-// checks every request's headers.
+// checks every request's headers. A command outlives its request, as in envd.
+// When the fake shuts down, every command ends with each child it left in its
+// process group, and every handler and bridge ends.
 type fakeEnvd struct {
-	t     *testing.T
+	t   *testing.T
+	srv *httptest.Server
+	// ctx ends when the fake shuts down. It is the base of every request's
+	// context, and it ends every command, bridge and handler.
+	ctx    context.Context
+	stop   context.CancelFunc
+	run    running
+	closed atomic.Bool
+	done   chan struct{}
+	// wait is how long the shutdown may take: shutdownWait, unless a test
+	// of the shutdown itself sets it before it starts a command.
+	wait time.Duration
+	// afterClose, when set, runs in the shutdown once the connections are
+	// closed, before it waits: a test of the shutdown sends requests there.
+	afterClose func()
+
 	mu    sync.Mutex
-	procs map[uint32]*exec.Cmd
+	procs map[uint32]*fakeCmd
 	stdin map[uint32]io.WriteCloser
 	paths []string
 	tags  []string
 	sigs  []string
+	// writing counts the writes to a command's stdin in progress.
+	writing int
+	// wrapperErrs are the wrappers that did not exit well.
+	wrapperErrs []string
+	// failLeadGroup, when set, makes the wrapper fail leadGroup on Unix.
+	failLeadGroup bool
 	// drop, when set, makes Start end the stream right after the start
 	// event, as a dropped connection would.
 	drop bool
@@ -173,6 +197,34 @@ type fakeEnvd struct {
 	bridges []string
 	// home, when set, is HOME for the commands it runs.
 	home string
+	// gate, when set, holds each SendInput call, and the start of each
+	// StreamInput request, until it is closed or a value comes, or the
+	// request ends.
+	gate chan struct{}
+	// parts are the sizes of the SendInput calls, in order.
+	parts []int
+	// failEOF, when set, makes every CloseStdin call fail, as a proxy in
+	// front of envd may.
+	failEOF bool
+	// holdEOF, when set, holds every CloseStdin call until its request ends.
+	holdEOF bool
+	// cutStream, when set, ends a StreamInput request with an error once it
+	// has taken that many bytes of input.
+	cutStream int
+	// stopStream, when set, makes a StreamInput request stop reading once
+	// it has taken that many bytes of input. It keeps the connection until
+	// the request ends, and counts itself in streamStopped while it waits.
+	stopStream    int
+	streamStopped atomic.Int32
+	// wantHTTP2, when set, checks that every request arrives over HTTP/2.
+	wantHTTP2 bool
+	// streamRate, when set, makes a StreamInput request take its body at
+	// that many bytes a second, through a buffer of 1 MiB, as the far end
+	// of a slow link does.
+	streamRate int
+	// pipeGate holds output readers after StartEvent, until a test releases
+	// them or the request ends.
+	pipeGate chan struct{}
 }
 
 // serveBridge runs the bridge in this process, as if it were a command in
@@ -185,12 +237,29 @@ func (f *fakeEnvd) serveBridge(w http.ResponseWriter, remote string, bridge func
 	f.stdin[pid] = inW
 	f.bridges = append(f.bridges, remote)
 	f.mu.Unlock()
+	// The shutdown ends the bridge's input, and this handler's read of its
+	// output, even when the bridge does not stop. When the handler ends, so
+	// do the pipes' other ends.
+	stop := f.onShutdown(func() {
+		_ = inW.CloseWithError(errShutDown)
+		_ = outR.CloseWithError(errShutDown)
+	})
+	defer func() {
+		stop()
+		_ = inW.CloseWithError(errBridgeEnded)
+		_ = outR.CloseWithError(errBridgeEnded)
+	}()
 	w.Header().Set("Content-Type", contentStream)
 	w.WriteHeader(http.StatusOK)
 	fw := &flushWriter{w: w}
 	fw.send(0, map[string]any{"event": map[string]any{"start": map[string]any{"pid": pid}}})
+	ended := f.run.add(fmt.Sprintf("the bridge %d", pid))
 	go func() {
+		defer ended()
 		_ = bridge(inR, outW, remote)
+		// A bridge that ends takes no more input: a SendInput then fails at
+		// once instead of waiting for a reader.
+		_ = inR.CloseWithError(errBridgeEnded)
 		_ = outW.Close()
 	}()
 	buf := make([]byte, 32<<10)
@@ -208,18 +277,17 @@ func (f *fakeEnvd) serveBridge(w http.ResponseWriter, remote string, bridge func
 }
 
 func newFakeEnvd(t *testing.T) (*fakeEnvd, *httptest.Server) {
-	f := &fakeEnvd{t: t, procs: map[uint32]*exec.Cmd{}, stdin: map[uint32]io.WriteCloser{}}
-	srv := httptest.NewServer(f)
+	f := &fakeEnvd{t: t, wait: shutdownWait, done: make(chan struct{}), procs: map[uint32]*fakeCmd{}, stdin: map[uint32]io.WriteCloser{}}
+	f.ctx, f.stop = context.WithCancel(context.Background())
+	f.srv = httptest.NewUnstartedServer(f)
+	f.srv.Config.BaseContext = func(net.Listener) context.Context { return f.ctx }
+	f.srv.Start()
 	t.Cleanup(func() {
-		srv.CloseClientConnections()
-		srv.Close()
-		f.mu.Lock()
-		defer f.mu.Unlock()
-		for _, c := range f.procs {
-			_ = c.Process.Kill()
+		if err := f.shutdown(); err != nil {
+			t.Error(err)
 		}
 	})
-	return f, srv
+	return f, f.srv
 }
 
 func (f *fakeEnvd) Paths() []string {
@@ -248,6 +316,8 @@ func (f *fakeEnvd) check(r *http.Request, stream bool) bool {
 		f.t.Errorf("%s: basic auth user = %q", r.URL.Path, user)
 	case r.Header.Get("E2b-Sandbox-Id") != testID:
 		f.t.Errorf("%s: E2b-Sandbox-Id = %q", r.URL.Path, r.Header.Get("E2b-Sandbox-Id"))
+	case f.wantHTTP2 && r.ProtoMajor != 2:
+		f.t.Errorf("%s: proto = %s, want HTTP/2", r.URL.Path, r.Proto)
 	default:
 		return true
 	}
@@ -255,7 +325,9 @@ func (f *fakeEnvd) check(r *http.Request, stream bool) bool {
 }
 
 func (f *fakeEnvd) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	switch strings.TrimPrefix(r.URL.Path, "/process.Process/") {
+	method := strings.TrimPrefix(r.URL.Path, "/process.Process/")
+	defer f.run.add("the " + method + " handler")()
+	switch method {
 	case "Start":
 		if f.check(r, true) {
 			f.start(w, r)
@@ -289,7 +361,7 @@ func (fw *flushWriter) send(flags byte, v any) {
 func (f *fakeEnvd) start(w http.ResponseWriter, r *http.Request) {
 	_, msg, err := readEnvelope(r.Body)
 	if err != nil {
-		f.t.Errorf("Start: %v", err)
+		f.requestError(r, err)
 		return
 	}
 	var req startRequest
@@ -304,26 +376,38 @@ func (f *fakeEnvd) start(w http.ResponseWriter, r *http.Request) {
 		f.t.Error("Start: no Keepalive-Ping-Interval")
 	}
 	f.mu.Lock()
-	bridge, home := f.bridge, f.home
+	bridge, home, failGroup := f.bridge, f.home, f.failLeadGroup
 	f.mu.Unlock()
 	if bridge != nil && strings.Contains(req.Process.Args[1], " bridge") {
 		f.serveBridge(w, req.Process.Args[1], bridge)
 		return
 	}
-	cmd := exec.Command("/bin/sh", "-c", req.Process.Args[1])
-	if home != "" {
-		cmd.Env = append(os.Environ(), "HOME="+home)
-	}
-	in, _ := cmd.StdinPipe()
-	out, _ := cmd.StdoutPipe()
-	errp, _ := cmd.StderrPipe()
-	if err := cmd.Start(); err != nil {
+	c, err := startWrapped(req.Process.Args[1], home, failGroup)
+	if err != nil {
 		f.t.Errorf("Start: %v", err)
 		return
 	}
-	pid := uint32(cmd.Process.Pid)
+	pid := c.pid()
+	name := fmt.Sprintf("the command %d (%s)", pid, short(req.Process.Args[1]))
+	// envd keeps a command running when its request drops, so only the
+	// shutdown ends it, with every child it left behind, and its input.
+	ended := f.run.add(name)
+	f.onShutdown(func() {
+		c.release()
+		_ = c.stdin.Close()
+	})
+	go func() {
+		defer ended()
+		// The wrapper exits 0. A race or a panic in it gives another status,
+		// with its report in the test's output.
+		if err := c.wrapper.Wait(); err != nil {
+			f.mu.Lock()
+			f.wrapperErrs = append(f.wrapperErrs, fmt.Sprintf("the wrapper of %s: %v", name, err))
+			f.mu.Unlock()
+		}
+	}()
 	f.mu.Lock()
-	f.procs[pid], f.stdin[pid] = cmd, in
+	f.procs[pid], f.stdin[pid] = c, c.stdin
 	f.tags = append(f.tags, req.Tag)
 	drop := f.drop
 	f.mu.Unlock()
@@ -333,8 +417,23 @@ func (f *fakeEnvd) start(w http.ResponseWriter, r *http.Request) {
 	fw.send(0, map[string]any{"event": map[string]any{"start": map[string]any{"pid": pid}}})
 	fw.send(0, map[string]any{"event": map[string]any{"keepalive": map[string]any{}}})
 	if drop {
-		return // the handler returns: the stream ends with no end event
+		// The handler returns: the stream ends with no end event. The
+		// command runs on, and the shutdown still waits for its output.
+		f.drainDropped(name, c)
+		return
 	}
+	f.mu.Lock()
+	pipeGate := f.pipeGate
+	f.mu.Unlock()
+	if pipeGate != nil {
+		select {
+		case <-pipeGate:
+		case <-r.Context().Done():
+			f.drainDropped(name, c)
+			return
+		}
+	}
+	defer f.run.add("the stream of " + name)()
 	var wg sync.WaitGroup
 	pipe := func(rd io.Reader, field string) {
 		defer wg.Done()
@@ -351,33 +450,57 @@ func (f *fakeEnvd) start(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	wg.Add(2)
-	go pipe(out, "stdout")
-	go pipe(errp, "stderr")
+	go pipe(c.stdout, "stdout")
+	go pipe(c.stderr, "stderr")
 	wg.Wait()
-	end := map[string]any{"exited": true}
-	if err := cmd.Wait(); err != nil {
-		var ee *exec.ExitError
-		if errors.As(err, &ee) {
-			if ws, ok := ee.Sys().(syscall.WaitStatus); ok && ws.Signaled() {
-				end = map[string]any{"exitCode": -1, "exited": false, "status": "signal: " + ws.Signal().String()}
-			} else {
-				end["exitCode"] = ee.ExitCode()
-			}
-		}
-	}
-	fw.send(0, map[string]any{"event": map[string]any{"end": end}})
+	c.closeOutput()
+	<-c.ended
+	fw.send(0, map[string]any{"event": map[string]any{"end": endEvent(c.status)}})
 	fw.send(flagEndStream, map[string]any{})
 }
 
-func (f *fakeEnvd) input(pid uint32, data []byte) error {
+func (f *fakeEnvd) drainDropped(name string, c *fakeCmd) {
+	drained := f.run.add("the dropped stream of " + name)
+	go func() {
+		defer drained()
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() { defer wg.Done(); _, _ = io.Copy(io.Discard, c.stdout) }()
+		go func() { defer wg.Done(); _, _ = io.Copy(io.Discard, c.stderr) }()
+		wg.Wait()
+		c.closeOutput()
+	}()
+}
+
+// input writes to a command's stdin, and fails as envd does: not_found for a
+// process that envd does not know, and internal for a write that fails, as
+// to a command that has ended but whose end envd has not passed on yet.
+func (f *fakeEnvd) input(pid uint32, data []byte) *rpcError {
 	f.mu.Lock()
 	in := f.stdin[pid]
 	f.mu.Unlock()
 	if in == nil {
-		return fmt.Errorf("process with pid %d not found", pid)
+		return &rpcError{Code: "not_found", Message: fmt.Sprintf("process with pid %d not found", pid)}
 	}
+	f.mu.Lock()
+	f.writing++
+	f.mu.Unlock()
 	_, err := in.Write(data)
-	return err
+	f.mu.Lock()
+	f.writing--
+	f.mu.Unlock()
+	if err == nil {
+		return nil
+	}
+	return &rpcError{Code: "internal", Message: "error writing to stdin: " + err.Error()}
+}
+
+// status is the HTTP status that envd's Connect protocol gives an error.
+func status(e *rpcError) int {
+	if e.Code == "not_found" {
+		return http.StatusNotFound
+	}
+	return http.StatusInternalServerError
 }
 
 func (f *fakeEnvd) unary(w http.ResponseWriter, r *http.Request) {
@@ -387,40 +510,85 @@ func (f *fakeEnvd) unary(w http.ResponseWriter, r *http.Request) {
 		Signal  string       `json:"signal"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		f.t.Errorf("%s: %v", r.URL.Path, err)
+		f.requestError(r, err)
+		return
 	}
 	pid := req.Process.Pid
-	var err error
+	var failed *rpcError
 	switch strings.TrimPrefix(r.URL.Path, "/process.Process/") {
 	case "SendInput":
-		err = f.input(pid, req.Input.Stdin)
+		f.mu.Lock()
+		gate := f.gate
+		f.parts = append(f.parts, len(req.Input.Stdin))
+		f.mu.Unlock()
+		if gate != nil {
+			select {
+			case <-gate:
+			case <-r.Context().Done():
+			}
+		}
+		failed = f.input(pid, req.Input.Stdin)
 	case "CloseStdin":
 		f.mu.Lock()
-		if in := f.stdin[pid]; in != nil {
+		failEOF, holdEOF := f.failEOF, f.holdEOF
+		if in := f.stdin[pid]; in != nil && !failEOF && !holdEOF {
 			_ = in.Close()
 		}
 		f.mu.Unlock()
+		if holdEOF {
+			<-r.Context().Done()
+			return
+		}
+		if failEOF {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = w.Write([]byte("no healthy upstream\n"))
+			return
+		}
 	case "SendSignal":
 		f.mu.Lock()
 		f.sigs = append(f.sigs, req.Signal)
-		if c := f.procs[pid]; c != nil && req.Signal == "SIGNAL_SIGKILL" {
-			_ = c.Process.Kill()
-		}
+		c := f.procs[pid]
 		f.mu.Unlock()
+		if c != nil && req.Signal == "SIGNAL_SIGKILL" {
+			// As in envd, the command dies first. Then its stdin and output
+			// close, so its stream ends with the end event even while a child
+			// of the command holds them. The child ends at the shutdown.
+			c.kill()
+			select {
+			case <-c.ended:
+			case <-time.After(5 * time.Second):
+			}
+			_ = c.stdin.Close()
+			c.cutOutput()
+		}
 	}
 	w.Header().Set("Content-Type", contentUnary)
-	if err != nil {
-		w.WriteHeader(http.StatusNotFound)
-		_ = json.NewEncoder(w).Encode(rpcError{Code: "not_found", Message: err.Error()})
+	if failed != nil {
+		w.WriteHeader(status(failed))
+		_ = json.NewEncoder(w).Encode(failed)
 		return
 	}
 	_, _ = w.Write([]byte("{}"))
 }
 
 func (f *fakeEnvd) streamInput(w http.ResponseWriter, r *http.Request) {
+	f.mu.Lock()
+	gate, cut, stop, rate := f.gate, f.cutStream, f.stopStream, f.streamRate
+	f.mu.Unlock()
+	if gate != nil {
+		select {
+		case <-gate:
+		case <-r.Context().Done():
+		}
+	}
+	body := io.Reader(r.Body)
+	if rate > 0 {
+		body = rateBody(r.Context(), r.Body, rate, r.ProtoMajor < 2)
+	}
+	taken := 0
 	var pid uint32
 	for {
-		_, msg, err := readEnvelope(r.Body)
+		_, msg, err := readEnvelope(body)
 		if err != nil {
 			break
 		}
@@ -433,10 +601,34 @@ func (f *fakeEnvd) streamInput(w http.ResponseWriter, r *http.Request) {
 		case m.Start != nil:
 			pid = m.Start.Process.Pid
 		case m.Data != nil:
-			if err := f.input(pid, m.Data.Input.Stdin); err != nil {
-				f.t.Errorf("StreamInput: %v", err)
+			if cut > 0 && taken >= cut {
+				// The stream ends with an error part way, as when a link breaks.
+				w.Header().Set("Content-Type", contentStream)
+				w.WriteHeader(http.StatusOK)
+				(&flushWriter{w: w}).send(flagEndStream, map[string]any{"error": rpcError{Code: "unavailable", Message: "the link broke"}})
+				return
+			}
+			if stop > 0 && taken >= stop {
+				f.streamStopped.Add(1)
+				defer f.streamStopped.Add(-1)
+				<-r.Context().Done() // envd reads no more, and keeps the connection
+				return
+			}
+			taken += len(m.Data.Input.Stdin)
+			if failed := f.input(pid, m.Data.Input.Stdin); failed != nil {
+				// A shutdown, or a client that went away, cut the input.
+				// Otherwise envd ends the stream with the error.
+				if !f.stopping(r) {
+					w.Header().Set("Content-Type", contentStream)
+					w.WriteHeader(http.StatusOK)
+					(&flushWriter{w: w}).send(flagEndStream, map[string]any{"error": failed})
+				}
+				return
 			}
 		}
+	}
+	if f.stopping(r) {
+		return
 	}
 	w.Header().Set("Content-Type", contentStream)
 	w.WriteHeader(http.StatusOK)

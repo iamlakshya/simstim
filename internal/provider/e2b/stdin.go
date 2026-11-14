@@ -1,13 +1,9 @@
 package e2b
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
-	"net/http"
 	"sync"
 	"time"
 )
@@ -15,42 +11,64 @@ import (
 // maxPending is how much stdin may wait to be sent before Write blocks.
 const maxPending = 1 << 20
 
+// stallLimit is how long Close waits for the next SendInput call to end. A
+// slow link that still moves the input never reaches it. Tests shorten it.
+var stallLimit = 10 * time.Second
+
+// stallCheck, when set, runs in Close between its look at the progress and
+// its decision. A test uses it to try to make progress there.
+var stallCheck func()
+
 // sendWriter carries stdin in SendInput calls, one at a time and in order,
 // as the E2B SDKs and CLI do. Write only queues the bytes, so keys typed
 // while a call is in flight go together in the next one.
 type sendWriter struct {
-	p *proc
+	p     *proc
+	stall time.Duration
 
-	mu     sync.Mutex
-	cond   *sync.Cond
-	buf    []byte
-	closed bool
-	err    error
-	done   chan struct{}
+	mu       sync.Mutex
+	cond     *sync.Cond
+	buf      []byte
+	closed   bool
+	err      error
+	sentAt   time.Time // when the last SendInput call ended
+	call     string    // the call in flight: SendInput or CloseStdin
+	finished bool      // the loop has ended
+	done     chan struct{}
 }
 
 func newSendWriter(ctx context.Context, p *proc) *sendWriter {
-	w := &sendWriter{p: p, done: make(chan struct{})}
+	w := &sendWriter{p: p, stall: stallLimit, done: make(chan struct{})}
 	w.cond = sync.NewCond(&w.mu)
 	go w.loop(ctx)
 	return w
 }
 
+// Write queues b in parts, so no more than maxPending waits at any time. A
+// large write, such as the whole helper in an upload, then leaves Close only
+// the last part to send.
 func (w *sendWriter) Write(b []byte) (int, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	for len(w.buf) > maxPending && w.err == nil && !w.closed {
-		w.cond.Wait()
+	n := 0
+	for {
+		for len(w.buf) >= maxPending && w.err == nil && !w.closed {
+			w.cond.Wait()
+		}
+		if w.err != nil {
+			return n, w.err
+		}
+		if w.closed {
+			return n, io.ErrClosedPipe
+		}
+		k := min(len(b)-n, maxPending-len(w.buf))
+		w.buf = append(w.buf, b[n:n+k]...)
+		n += k
+		w.cond.Broadcast()
+		if n == len(b) {
+			return n, nil
+		}
 	}
-	if w.err != nil {
-		return 0, w.err
-	}
-	if w.closed {
-		return 0, io.ErrClosedPipe
-	}
-	w.buf = append(w.buf, b...)
-	w.cond.Broadcast()
-	return len(b), nil
 }
 
 // next waits for bytes to send. It returns nil when stdin is closed and
@@ -71,14 +89,23 @@ func (w *sendWriter) next() []byte {
 	return out
 }
 
-// loop sends the input as it comes. ctx lives as long as the process.
+// loop sends the input as it comes. ctx lives as long as the process: its end
+// ends the loop, and a Write or Close that waits.
 func (w *sendWriter) loop(ctx context.Context) {
 	defer close(w.done)
+	defer func() {
+		w.mu.Lock()
+		w.finished = true
+		w.mu.Unlock()
+	}()
+	stop := context.AfterFunc(ctx, func() { w.fail(context.Cause(ctx)) })
+	defer stop()
 	for {
 		b := w.next()
 		if b == nil {
 			break
 		}
+		w.setCall("SendInput")
 		sctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 		err := w.p.e.unary(sctx, "SendInput", sendInputRequest{Process: selector{Pid: w.p.pid}, Input: processInput{Stdin: b}})
 		cancel()
@@ -86,14 +113,22 @@ func (w *sendWriter) loop(ctx context.Context) {
 			w.fail(err)
 			return
 		}
+		w.mu.Lock()
+		w.sentAt = time.Now()
+		w.mu.Unlock()
 	}
 	w.mu.Lock()
 	failed := w.err != nil
 	w.mu.Unlock()
 	if !failed {
+		w.setCall("CloseStdin")
 		sctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 		defer cancel()
-		_ = w.p.e.unary(sctx, "CloseStdin", map[string]selector{"process": {Pid: w.p.pid}})
+		// The command waits for this EOF, so a failure to send it is the
+		// input's failure too.
+		if err := w.p.e.unary(sctx, "CloseStdin", map[string]selector{"process": {Pid: w.p.pid}}); err != nil {
+			w.fail(fmt.Errorf("send the end of the input: %w", err))
+		}
 	}
 }
 
@@ -106,136 +141,62 @@ func (w *sendWriter) fail(err error) {
 	w.cond.Broadcast()
 }
 
-// Close sends what is queued, then EOF.
+// Close sends what is queued, then EOF. It waits as long as the input moves:
+// it gives up only when no SendInput or CloseStdin call ends for w.stall, or
+// when the command's context ends. Its error names the call that stalled.
 func (w *sendWriter) Close() error {
 	w.mu.Lock()
 	w.closed = true
 	w.cond.Broadcast()
 	w.mu.Unlock()
-	select {
-	case <-w.done:
-	case <-time.After(10 * time.Second):
-		w.fail(errors.New("stdin was not sent in time"))
-	}
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	return w.err
-}
-
-// streamWriter carries stdin in one StreamInput request: one envelope for
-// each write, in order, over a single long request.
-type streamWriter struct {
-	p *proc
-	// ctx lives as long as the process; it ends when the process is closed.
-	ctx  context.Context
-	pw   *io.PipeWriter
-	mu   sync.Mutex
-	err  error
-	done chan struct{}
-}
-
-func newStreamWriter(ctx context.Context, p *proc) *streamWriter {
-	pr, pw := io.Pipe()
-	w := &streamWriter{p: p, ctx: ctx, pw: pw, done: make(chan struct{})}
-	go w.run(pr)
-	first := streamInputRequest{Start: &struct {
-		Process selector `json:"process"`
-	}{Process: selector{Pid: p.pid}}}
-	if err := w.send(first); err != nil {
-		w.setErr(err)
-	}
-	return w
-}
-
-func (w *streamWriter) run(pr *io.PipeReader) {
-	defer close(w.done)
-	req, err := w.p.e.request(w.ctx, "StreamInput", pr, true)
-	if err != nil {
-		w.setErr(err)
-		_ = pr.CloseWithError(err)
-		return
-	}
-	resp, err := w.p.e.client().Do(req)
-	if err != nil {
-		w.setErr(fmt.Errorf("envd StreamInput: %w", err))
-		_ = pr.CloseWithError(err)
-		return
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		err := fmt.Errorf("envd StreamInput: %w", responseError(resp))
-		w.setErr(err)
-		_ = pr.CloseWithError(err)
-		return
-	}
+	since := time.Now()
+	t := time.NewTimer(w.stall)
+	defer t.Stop()
 	for {
-		flags, msg, err := readEnvelope(resp.Body)
-		if err != nil {
-			return
+		select {
+		case <-w.done:
+			return w.result()
+		case <-t.C:
 		}
-		if flags&flagEndStream != 0 {
-			if err := endError(msg); err != nil {
-				w.setErr(err)
+		// The look at the progress and the decision are one step, under the
+		// lock that the loop takes for each call that ends, and when it ends.
+		// So a stall is never made from an old look, and an input sent in
+		// full never fails.
+		w.mu.Lock()
+		last := w.sentAt
+		if last.Before(since) {
+			last = since
+		}
+		if stallCheck != nil {
+			stallCheck()
+		}
+		left := w.stall - time.Since(last)
+		if left > 0 || w.finished {
+			w.mu.Unlock()
+			if left <= 0 {
+				return w.result()
 			}
-			return
+			t.Reset(left)
+			continue
 		}
-	}
-}
-
-func (w *streamWriter) setErr(err error) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	if w.err == nil {
-		w.err = err
-	}
-}
-
-func (w *streamWriter) send(m streamInputRequest) error {
-	b, err := json.Marshal(m)
-	if err != nil {
-		return fmt.Errorf("envd StreamInput: encode the input: %w", err)
-	}
-	var buf bytes.Buffer
-	if err := writeEnvelope(&buf, 0, b); err != nil {
+		if w.err == nil {
+			w.err = fmt.Errorf("stdin was not sent in time: no %s call ended for %v", w.call, w.stall)
+		}
+		w.cond.Broadcast()
+		err := w.err
+		w.mu.Unlock()
 		return err
 	}
-	if _, err := w.pw.Write(buf.Bytes()); err != nil {
-		return fmt.Errorf("envd StreamInput: %w", err)
-	}
-	return nil
 }
 
-func (w *streamWriter) Write(b []byte) (int, error) {
+// setCall names the call that the loop makes now, for a stall's error.
+func (w *sendWriter) setCall(name string) {
 	w.mu.Lock()
-	err := w.err
+	w.call = name
 	w.mu.Unlock()
-	if err != nil {
-		return 0, err
-	}
-	for off := 0; off < len(b); off += chunk {
-		end := min(off+chunk, len(b))
-		m := streamInputRequest{Data: &struct {
-			Input processInput `json:"input"`
-		}{Input: processInput{Stdin: b[off:end]}}}
-		if err := w.send(m); err != nil {
-			return off, err
-		}
-	}
-	return len(b), nil
 }
 
-// Close ends the input stream, then sends EOF to the command.
-func (w *streamWriter) Close() error {
-	_ = w.pw.Close()
-	select {
-	case <-w.done:
-	case <-time.After(10 * time.Second):
-	}
-	ctx, cancel := context.WithTimeout(w.ctx, 30*time.Second)
-	defer cancel()
-	if err := w.p.e.unary(ctx, "CloseStdin", map[string]selector{"process": {Pid: w.p.pid}}); err != nil {
-		return err
-	}
+func (w *sendWriter) result() error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	return w.err
