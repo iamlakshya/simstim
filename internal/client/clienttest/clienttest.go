@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -42,7 +43,15 @@ func WriteScript(t testing.TB, path, body string) {
 
 // Transport serves a fake bridge for Start, and answers the probe for Run.
 type Transport struct {
+	// Screens are the bytes that peek returns for each exact session ID.
 	Screens map[string][]byte
+	// NewID overrides every successful new response for hostile-ID fixtures.
+	// Without it the bridge returns distinct legacy IDs fake1, fake2 and so on.
+	NewID string
+	// BridgeStderr makes the owned fake process fail before its hello.
+	BridgeStderr string
+	// Replies overrides successful payloads, including an explicit null.
+	Replies map[string]any
 	// Sessions is what the bridge's ls returns.
 	Sessions []client.Session
 	// Every, if set, makes the transport a client.KeepAliver.
@@ -85,6 +94,7 @@ type Transport struct {
 	remotes  []string
 	pings    int
 	requests []string
+	ops      []string
 }
 
 // Requests lists the ops of the requests that reached the bridge, in
@@ -126,14 +136,6 @@ func (t *Transport) Fail(op string, e *proto.Error) {
 		t.fail = map[string]*proto.Error{}
 	}
 	t.fail[op] = e
-}
-
-// SetSessions changes what the bridge's ls returns, as a session that
-// starts or ends would.
-func (t *Transport) SetSessions(s []client.Session) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	t.Sessions = s
 }
 
 // SetAgents changes what agents.check returns, as an install would.
@@ -266,6 +268,10 @@ func (t *Transport) answer(req proto.Request) proto.Response {
 	sessions := append([]client.Session{}, t.Sessions...)
 	newID := t.NewID
 	reply, overridden := t.Replies[req.Op]
+	answer, answered := t.Answers[req.Op]
+	agents := append([]api.AgentCheck{}, t.Agents...)
+	steps := append([]api.Check(nil), t.Steps...)
+	fixes := append([]api.Fix{}, t.Fixes...)
 	t.mu.Unlock()
 	if fail != nil {
 		return proto.Response{ID: req.ID, Error: fail}
@@ -274,24 +280,18 @@ func (t *Transport) answer(req proto.Request) proto.Response {
 		b, _ := json.Marshal(reply)
 		return proto.Response{ID: req.ID, OK: true, Result: b}
 	}
-	var v any
-	if a, ok := t.Answers[req.Op]; ok {
-		b, _ := json.Marshal(a)
+	if answered {
+		b, _ := json.Marshal(answer)
 		return proto.Response{ID: req.ID, OK: true, Result: b}
 	}
+	var v any
 	switch req.Op {
 	case "ls":
-		t.mu.Lock()
-		sessions := t.Sessions
-		t.mu.Unlock()
-		if sessions == nil {
-			sessions = []client.Session{}
-		}
 		v = sessions
 	case "setup":
 		v = api.SetupResult{Steps: []api.Check{{Name: "linger", OK: true, Detail: "already on"}}}
-		if t.Steps != nil {
-			v = api.SetupResult{Steps: t.Steps}
+		if steps != nil {
+			v = api.SetupResult{Steps: steps}
 		}
 	case "peek":
 		var a struct {
@@ -299,29 +299,60 @@ func (t *Transport) answer(req proto.Request) proto.Response {
 		}
 		_ = json.Unmarshal(req.Args, &a)
 		t.mu.Lock()
-		data := t.Screens[a.ID]
+		data := append([]byte(nil), t.Screens[a.ID]...)
 		t.mu.Unlock()
 		v = map[string]any{"data": data, "cols": 80, "rows": 24}
 	case "doctor":
 		v = api.HostInfo{Distro: "Fake Linux", CPUs: 2, MemTotal: 4 << 30, Agents: map[string]string{"shell": "/bin/sh"}}
 	case "agents.check":
-		t.mu.Lock()
-		agents := append([]api.AgentCheck{}, t.Agents...)
-		t.mu.Unlock()
 		v = agents
 	case "doctor.fix":
 		var a api.FixArgs
 		_ = json.Unmarshal(req.Args, &a)
-		fixes := append([]api.Fix{}, t.Fixes...)
 		for i := range fixes {
 			fixes[i].Done = a.Apply
 		}
 		v = fixes
 	case "new":
-		// A session that runs nothing: the fake only says that it started.
+		// This bridge reports a start without executing an agent. Its list
+		// remains explicit, so tests can model a delayed or concurrent list.
 		var a api.NewArgs
 		_ = json.Unmarshal(req.Args, &a)
-		v = api.SessionInfo{ID: "fake2", Name: a.Name, Agent: a.Agent, State: api.StateStarting, Alive: true}
+		if newID == "" {
+			newID = fmt.Sprintf("fake%d", started)
+		}
+		v = api.SessionInfo{ID: newID, Name: a.Name, Agent: a.Agent, State: api.StateStarting, Alive: true}
+	case "resume":
+		var a api.ResumeArgs
+		_ = json.Unmarshal(req.Args, &a)
+		found := -1
+		for i := range sessions {
+			if sessions[i].ID == a.ID {
+				found = i
+				break
+			}
+		}
+		if found < 0 {
+			return proto.Response{ID: req.ID, Error: &proto.Error{Code: "session_not_found", Message: "no session has that ID"}}
+		}
+		s := sessions[found]
+		if !client.Ended(s) {
+			return proto.Response{ID: req.ID, Error: &proto.Error{Code: "agent_running", Message: "the agent is already running"}}
+		}
+		s.State, s.Alive = api.StateStarting, true
+		s.ExitCode, s.Signal, s.Reason, s.OOM = nil, "", "", false
+		if a.MemoryMax != 0 {
+			s.MemoryMax = a.MemoryMax
+		}
+		t.mu.Lock()
+		for i := range t.Sessions {
+			if t.Sessions[i].ID == a.ID {
+				t.Sessions[i] = s
+				break
+			}
+		}
+		t.mu.Unlock()
+		v = api.ResumeResult{Session: s, Why: "started the agent again"}
 	default:
 		return proto.Response{ID: req.ID, Error: &proto.Error{Code: "unknown_op", Message: "unknown request " + req.Op}}
 	}

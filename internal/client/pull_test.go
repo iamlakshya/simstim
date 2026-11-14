@@ -154,7 +154,7 @@ func TestSessionRepoIgnoresHostGitConfig(t *testing.T) {
 		t.Fatal(err)
 	}
 	gitClean(local, "init", "-q", "-b", "main")
-	sshCmd, err := GitSSHCommand(h)
+	sshCmd, err := GitSSHCommand(t.Context(), h)
 	if err != nil {
 		t.Fatal(err)
 	}
