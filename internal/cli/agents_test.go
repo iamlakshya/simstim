@@ -46,13 +46,13 @@ func TestPickHost(t *testing.T) {
 	if _, err := pickHost(""); err == nil || !strings.Contains(err.Error(), "no hosts") {
 		t.Fatalf("no hosts: %v", err)
 	}
-	if err := client.SaveHosts(context.Background(), []client.Host{{Name: "a", SSH: "a"}}); err != nil {
+	if err := client.SaveHostsContext(context.Background(), []client.Host{{Name: "a", SSH: "a"}}); err != nil {
 		t.Fatal(err)
 	}
 	if h, err := pickHost(""); err != nil || h.Name != "a" {
 		t.Fatalf("one host: %v %v", h, err)
 	}
-	_ = client.SaveHosts(context.Background(), []client.Host{{Name: "a", SSH: "a"}, {Name: "b", SSH: "b"}})
+	_ = client.SaveHostsContext(context.Background(), []client.Host{{Name: "a", SSH: "a"}, {Name: "b", SSH: "b"}})
 	_, err := pickHost("")
 	var ue *client.UserError
 	if err == nil || !strings.Contains(err.Error(), "which host? You have a, b") {

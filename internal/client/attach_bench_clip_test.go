@@ -24,14 +24,15 @@ func BenchmarkAttachOutputFramesWithClipboardWrite(b *testing.B) {
 	agent := termtest.AgentOutput(32 << 10)
 	b.SetBytes(int64(len(agent)))
 	b.ReportAllocs()
+	ctx := b.Context()
 	off := int64(0)
 	for i := 0; b.Loop(); i++ {
 		data := append(append([]byte(nil), agent...), osc52("/tmp/bench/"+strconv.Itoa(i))...)
 		f := proto.Frame{Type: proto.TOutput, Payload: proto.EncodeOutput(off, data)}
-		if _, err := a.frame(f); err != nil {
+		if _, err := a.frame(ctx, f); err != nil {
 			b.Fatal(err)
 		}
 		off += int64(len(data))
 	}
-	mem.flush(10 * 1e9)
+	mem.flush(ctx, 10*1e9)
 }

@@ -26,12 +26,23 @@ func (b *ownerSaveBackend) LoadHosts(ctx context.Context) ([]client.Host, error)
 	return b.Backend.LoadHosts(ctx)
 }
 
-func (b *ownerSaveBackend) SaveHosts(ctx context.Context, hosts []client.Host) error {
+func (b *ownerSaveBackend) UpdateHostsContext(ctx context.Context, c client.HostChange) (warn, err error) {
+	hosts, err := b.LoadHosts(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	out, err := client.ApplyHostChange(hosts, c)
+	if err != nil {
+		return nil, err
+	}
 	b.saves.Add(1)
 	if b.save != nil {
-		return b.save(ctx, hosts)
+		return nil, b.save(ctx, out)
 	}
-	return b.Backend.SaveHosts(ctx, hosts)
+	return saveWizardHost(ctx, b.Backend, c)
 }
 
 func ownerPreparedHost(t *testing.T, m *Model, w *wizard) setupMsg {

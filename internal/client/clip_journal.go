@@ -2,6 +2,7 @@ package client
 
 import (
 	"bytes"
+	"context"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -41,7 +42,7 @@ const journalKinds = "csx"
 // in one write: the first of each list at at, and each next one 1 ns later.
 // A time unsure that is not zero adds the record of a reader that lost
 // track of a write.
-func appendJournal(path string, at time.Time, w *clipWrites) error {
+func appendJournal(ctx context.Context, path string, at time.Time, w *clipWrites) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return fmt.Errorf("make %s: %w", filepath.Dir(path), err)
 	}
@@ -60,7 +61,7 @@ func appendJournal(path string, at time.Time, w *clipWrites) error {
 		b = strconv.AppendInt(b, w.unsure.UnixNano(), 10)
 		b = append(b, '\n')
 	}
-	unlock, err := lockPath(path+".lock", journalWait, false)
+	unlock, err := lockPathContext(ctx, path+".lock", journalWait, false)
 	if err != nil {
 		return err
 	}

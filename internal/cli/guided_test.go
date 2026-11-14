@@ -249,19 +249,19 @@ func TestSetupNeedsATerminalOrFlags(t *testing.T) {
 func TestSetupNamedHost(t *testing.T) {
 	withFake(t, nil)
 	g, _, _ := testGuide(t, context.Background(), guideOpts{}, &guideLocal{}, &clienttest.Transport{}, "", false)
-	h, err := g.namedHost("me@vps.example.com:2222")
-	if err != nil || h.Name != "vps.example.com" || h.SSH != "me@vps.example.com:2222" {
-		t.Fatalf("new host = %+v, %v", h, err)
+	h, was, err := g.namedHost("me@vps.example.com:2222")
+	if err != nil || h.Name != "vps.example.com" || h.SSH != "me@vps.example.com:2222" || was != nil {
+		t.Fatalf("new host = %+v, was %+v, %v", h, was, err)
 	}
 	saved := client.Host{Name: "box", Machine: &client.Machine{Provider: "fake", ID: "fake-box"}}
-	_ = client.SaveHost(context.Background(), saved)
-	if h, err := g.namedHost("box"); err != nil || h.Machine == nil {
-		t.Fatalf("a saved host = %+v, %v", h, err)
+	_ = saveHost(saved)
+	if h, was, err := g.namedHost("box"); err != nil || h.Machine == nil || was == nil || !client.SameEntry(*was, saved) {
+		t.Fatalf("a saved host = %+v, was %+v, %v", h, was, err)
 	}
-	_ = client.SaveHost(context.Background(), client.Host{Name: "vps", SSH: "vps"})
+	_ = saveHost(client.Host{Name: "vps", SSH: "vps"})
 	g.o.name = "vps"
 	var ue *client.UserError
-	if _, err := g.namedHost("me@203.0.113.9"); !errors.As(err, &ue) || !strings.Contains(ue.Msg, "already a host called vps") {
+	if _, _, err := g.namedHost("me@203.0.113.9"); !errors.As(err, &ue) || !strings.Contains(ue.Msg, "already a host called vps") {
 		t.Fatalf("a clash: %v", err)
 	}
 }

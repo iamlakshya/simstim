@@ -58,7 +58,7 @@ exec sh -c "$last"
 	}
 	// A host reached without SSH cannot forward.
 	th.ch.SSH = ""
-	if err := saveHost(context.Background(), th.ch); err != nil {
+	if err := saveHostContext(context.Background(), th.ch); err != nil {
 		t.Fatal(err)
 	}
 	fails(t, "forward needs SSH", "forward", "box/web", "3000")

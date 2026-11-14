@@ -97,7 +97,7 @@ func (p *cmdProc) Wait() error {
 	p.once.Do(func() {
 		err := p.cmd.Wait()
 		var ee *exec.ExitError
-		if errors.As(err, &ee) && p.unreachable != nil && p.unreachable(ee.ExitCode(), p.Stderr()) {
+		if errors.As(err, &ee) && ee.Exited() && p.unreachable != nil && p.unreachable(ee.ExitCode(), p.Stderr()) {
 			err = fmt.Errorf("%w: %w", ErrUnreachable, err)
 		}
 		p.waitErr = err
@@ -133,14 +133,74 @@ func (l *lockedWriter) String() string {
 }
 
 // Start runs remote on the host over ssh -T, for the bridge. Through Command,
-// it forwards nothing: no agent, no X11 display and no port.
+// it forwards nothing: no agent, no X11 display and no port. Its destination
+// ssh writes its own diagnostics to a private -E log file, kept apart from
+// shared stderr.
 func (s *SSH) Start(ctx context.Context, remote string) (Proc, error) {
-	cmd, err := s.Command(ctx, remote, "-T")
+	return s.startWith(ctx, ctx, remote)
+}
+
+func (s *SSH) startWith(lockCtx, procCtx context.Context, remote string) (Proc, error) {
+	logFile, err := newSSHLog()
 	if err != nil {
 		return nil, err
 	}
+	cmd, err := s.command(lockCtx, procCtx, remote, "-T", "-E", logFile.path)
+	if err != nil {
+		logFile.finish()
+		return nil, err
+	}
 	// ssh exits with 255 when it could not reach the host.
-	return CommandProc(cmd, func(code int, _ string) bool { return code == 255 })
+	p, err := CommandProc(cmd, func(code int, _ string) bool { return code == 255 })
+	if err != nil {
+		logFile.finish()
+		return nil, err
+	}
+	return &sshProc{Proc: p, ctx: context.WithoutCancel(lockCtx), host: s.Host, args: cmd.Args, logFile: logFile}, nil
+}
+
+type sshProc struct {
+	ctx context.Context
+	Proc
+	host    Host
+	args    []string
+	logFile *sshLogFile
+
+	once    sync.Once
+	waitErr error
+	code    int
+
+	logMu sync.Mutex
+	log   string
+}
+
+func (p *sshProc) Wait() error {
+	p.once.Do(func() {
+		p.waitErr = p.Proc.Wait()
+		log := p.logFile.finish()
+		p.logMu.Lock()
+		p.log = log
+		p.logMu.Unlock()
+		p.code = exitCode(p.waitErr)
+		if p.host.SSH != "" && ValidHostName(p.host.Name) && !pinned(p.host.Name) {
+			cleanupUnpinnedMaster(p.ctx, p.host, p.args)
+		}
+	})
+	return p.waitErr
+}
+
+func (p *sshProc) Stderr() string {
+	if s := p.Proc.Stderr(); s != "" {
+		return s
+	}
+	p.logMu.Lock()
+	defer p.logMu.Unlock()
+	return p.log
+}
+
+func (p *sshProc) sshDiag() (string, int) {
+	_ = p.Wait()
+	return p.log, p.code
 }
 
 // ReachHint is the ssh command that should work before anything else does.

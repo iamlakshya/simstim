@@ -55,19 +55,24 @@ func pull(ctx context.Context, h client.Host, s *client.Session, into string, fo
 	if cur, _ := gitOut(ctx, "symbolic-ref", "--quiet", "--short", "HEAD"); cur == into {
 		return &client.UserError{Msg: client.CleanLine(into) + " is the branch you have checked out here", Hint: "Pull into another branch with --into, or switch branches first.", Code: "branch_checked_out"}
 	}
-	sshCmd, err := client.GitSSHCommand(h)
+	out, err := client.RunGitFetch(ctx, h, repo.Root, repo.Branch, into, force)
 	if err != nil {
-		return err
-	}
-	git := exec.CommandContext(ctx, "git", client.FetchArgs(h, repo.Root, repo.Branch, into, force)...)
-	git.Env = append(os.Environ(), "GIT_SSH_COMMAND="+sshCmd)
-	out, err := git.CombinedOutput()
-	if err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		var userError *client.UserError
+		if errors.As(err, &userError) {
+			return err
+		}
 		msg := strings.TrimSpace(string(out))
 		if strings.Contains(msg, "non-fast-forward") || strings.Contains(msg, "rejected") {
 			return &client.UserError{Msg: fmt.Sprintf("%s here has commits that %s on %s does not", client.CleanLine(into), client.CleanLine(repo.Branch), h.Name), Hint: "Pull into another branch with --into, or replace it with --force.", Code: "branch_diverged"}
 		}
-		return &client.UserError{Msg: "git fetch failed: " + client.CleanLine(msg), Hint: "Check that ssh " + h.SSH + " works, then run the git fetch yourself.", Code: "fetch_failed"}
+		if msg != "" {
+			msg += ": "
+		}
+		msg += err.Error()
+		return &client.UserError{Msg: "git fetch failed: " + client.CleanLine(msg), Hint: "Check that " + client.SSHCommand(h.SSH) + " works, then run the git fetch yourself.", Code: "fetch_failed"}
 	}
 	ahead, _ := gitOut(ctx, "rev-list", "--count", into, "^HEAD")
 	fmt.Fprintf(os.Stderr, "Fetched %s from %s on %s into %s", shown(repo.Branch), shown(nameOf(*s)), shown(h.Name), shown(into))

@@ -326,7 +326,7 @@ func (m *Model) quickHints(w int) string {
 	}
 	if p.err != nil {
 		msg, _ := errText(p.err)
-		out = sErrHead.Render(glyphFail) + " " + sDanger.Render(sentence(shown(msg)))
+		out = sErrHead.Render(glyphFail) + " " + sDanger.Render(sentence(oneLine(msg)))
 	}
 	return trunc(out, w)
 }

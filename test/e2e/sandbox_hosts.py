@@ -1,7 +1,9 @@
-"""End-to-end checks for hosts you add (isolation spec 14.16). For now there
-is one, test 2: with ForwardAgent naming a throwaway agent in a throwaway
-client SSH config, a session on the host has no SSH_AUTH_SOCK (task H2,
-decision 0034).
+"""End-to-end checks for hosts you add (isolation spec 14.16). There are two.
+Test 2: with ForwardAgent naming a throwaway agent in a throwaway client SSH
+config, a session on the host has no SSH_AUTH_SOCK (task H2, decision 0034).
+Test 3: with a wrong key in the pin of the host, the client refuses to
+connect, with the message of spec 14.14 and exit code 5 (task H3, decision
+0035).
 
 run.py calls run() with its helpers. `E2E_ONLY=sandbox-hosts just e2e` runs
 only these. They use a throwaway client config, state and cache, so the
@@ -14,7 +16,7 @@ the client's generated config and options, forwards that empty agent once,
 on a connection of its own. Naming an agent socket in ForwardAgent needs
 OpenSSH 8.2 or later on this computer.
 """
-import json, os, re, secrets, shutil, subprocess, tempfile, time
+import glob, hashlib, json, os, re, secrets, shutil, subprocess, tempfile, time
 
 
 class Ctx:
@@ -25,6 +27,7 @@ class Ctx:
 
 def run(c):
     forwarding(c)
+    host_key(c)
 
 
 def ssh_version():
@@ -37,6 +40,13 @@ def ssh_version():
 def toml_str(s):
     """s as a TOML basic string. A JSON string is one."""
     return json.dumps(s)
+
+
+def host_file_key(name):
+    """The name of a host's own files, as client.HostFileKey makes it: the
+    name in lower case, cut to 32 characters and with no dot or dash at its
+    end, a dash, and 32 hex characters of SHA-256 over the exact name."""
+    return name.lower()[:32].rstrip(".-") + "-" + hashlib.sha256(name.encode()).hexdigest()[:32]
 
 
 def start_agent(sock):
@@ -254,11 +264,13 @@ def cleanup(c, h, tmp, envx, name, sid, agent, tried):
         c.ok(why is None, "forwarding: the test's session %s is deleted (%s)" % (name, why or "the host lists no such session"))
     wrapper = os.path.join(tmp, "config", c.NAME, "ssh", "config-" + c.HOST)
     if os.path.exists(wrapper):
-        cm = os.path.join(tmp, "cache", c.NAME, "cm", c.CONTROL_PREFIX + "%C")
-        try:
-            run_cmd(["ssh", "-F", wrapper, "-o", "ControlPath=" + cm, "-O", "exit", h["ssh"]], None, 10)
-        except subprocess.TimeoutExpired:
-            pass
+        # Each socket in the throwaway folder is this run's: its name holds
+        # a key of the host and its pin, after the prefix.
+        for cm in glob.glob(os.path.join(tmp, "cache", c.NAME, "cm", c.CONTROL_PREFIX + "*")):
+            try:
+                run_cmd(["ssh", "-F", wrapper, "-o", "ControlPath=" + cm, "-O", "exit", h["ssh"]], None, 10)
+            except subprocess.TimeoutExpired:
+                pass
     if agent:
         agent.terminate()
         agent.wait(5)
@@ -268,3 +280,66 @@ def cleanup(c, h, tmp, envx, name, sid, agent, tried):
     which = "%s/%s" % (c.HOST, sid) if sid else "%s/<its ID from: %s ls --host %s>" % (c.HOST, c.cli, c.HOST)
     print("  %s may still be on %s. Check, and delete it with: %s kill %s. The throwaway config is kept in %s."
           % (name, c.HOST, c.cli, which, tmp))
+
+
+def make_keys(tmp):
+    """Makes a throwaway host key of each usual type in tmp, with HOME there
+    too, so that ssh-keygen writes nothing else. Returns each as "type
+    base64", or [] when ssh-keygen cannot make them. The offline tests
+    replace it."""
+    keys = []
+    for t in ("ed25519", "ecdsa", "rsa"):
+        path = os.path.join(tmp, "wrong_" + t)
+        try:
+            r = subprocess.run(["ssh-keygen", "-q", "-t", t, "-N", "", "-C", "", "-f", path], env=dict(os.environ, HOME=tmp),
+                               stdin=subprocess.DEVNULL, capture_output=True, timeout=60)
+        except (OSError, subprocess.TimeoutExpired):
+            return []
+        if r.returncode != 0:
+            return []
+        keys.append(" ".join(open(path + ".pub").read().split()[:2]))
+    return keys
+
+
+def host_key(c):
+    """Test 3: a pin that holds wrong keys, one of each usual type, so that
+    the host shows none of them. host test must refuse to connect, with the
+    message of spec 14.14 and exit code 5. It runs with a throwaway client
+    config, state and cache, so the user's own pin and shared connection are
+    never used or changed. It starts no session, and changes nothing on the
+    host: the connection stops at the key exchange."""
+    h = c.host_entry()
+    if not h.get("ssh") or (h.get("machine") or {}).get("provider") in ("docker", "e2b"):
+        print("SKIP host key: %s is not reached over SSH" % c.HOST)
+        return
+    tmp = tempfile.mkdtemp(prefix="e2e-key-", dir="/tmp")
+    try:
+        keys = make_keys(tmp)
+        if not keys:
+            print("SKIP host key: ssh-keygen could not make throwaway keys")
+            return
+        cfg = os.path.join(tmp, "config", c.NAME)
+        os.makedirs(os.path.join(cfg, "ssh"), mode=0o700)
+        with open(os.path.join(cfg, "hosts.toml"), "w") as f:
+            f.write("[[host]]\nname = %s\nssh = %s\n" % (toml_str(c.HOST), toml_str(h["ssh"])))
+            if h.get("ssh_config"):
+                f.write("ssh_config = %s\n" % toml_str(os.path.expanduser(h["ssh_config"])))
+        pin = os.path.join(cfg, "ssh", "known_hosts-" + host_file_key(c.HOST))
+        with open(os.open(pin, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w") as f:
+            f.write("# %s pin of the host %s\n" % (c.NAME, c.HOST))  # the pin names its host
+            for k in keys:
+                f.write("%s-%s %s\n" % (c.NAME, c.HOST, k))
+        envx = dict(os.environ, **c.env)
+        envx.update(XDG_CONFIG_HOME=os.path.join(tmp, "config"), XDG_STATE_HOME=os.path.join(tmp, "state"),
+                    XDG_CACHE_HOME=os.path.join(tmp, "cache"))
+        try:
+            code, _, err = run_cmd([c.cli, "host", "test", c.HOST, "--no-input"], envx, 90)
+        except subprocess.TimeoutExpired:
+            c.ok(False, "host key: host test with a wrong pin took more than 90 s")
+            return
+        changed = re.search(r"Error: %s's host key changed: SHA256:\S+ was pinned, and the host shows " % re.escape(c.HOST), err)
+        hint = "Try: If you reinstalled %s: %s host rekey %s. Otherwise, do not connect." % (c.HOST, c.NAME, c.HOST)
+        c.ok(code == 5 and changed and hint in err,
+             "host key: a wrong pin stops the connection with exit code 5 and the changed-key message (exit %d: %s)" % (code, last_line(err)))
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)

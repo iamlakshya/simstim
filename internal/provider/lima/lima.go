@@ -171,10 +171,24 @@ func (Provider) Create(ctx context.Context, req provider.Request) (client.Host, 
 	if idle == "" {
 		idle = DefaultIdleStop
 	}
-	return client.Host{
+	h := client.Host{
 		Name: req.Name, SSH: sshAlias(inst), SSHConfig: in.SSHConfigFile,
 		Machine: &client.Machine{Provider: "lima", ID: inst, IdleStop: idle},
-	}, nil
+	}
+	// Lima's own SSH config checks no host key. The client pins the new
+	// VM's key now, before its first connection (isolation spec 14.7.1).
+	pin, err := pinHostKey(ctx, h)
+	if err != nil {
+		return client.Host{}, discard(ctx, inst, fmt.Sprintf("could not pin the host key of the new VM %s (%v)", inst, err), "run this again")
+	}
+	fmt.Fprintf(out, "  ✓ %s\n", pin.Line())
+	return h, nil
+}
+
+// pinHostKey pins the host key of a new VM on first use: the client made
+// the VM, and nobody else had its key. Tests replace it.
+var pinHostKey = func(ctx context.Context, h client.Host) (client.Pin, error) {
+	return client.PinHostKey(ctx, h, "", client.FirstUseAccept)
 }
 
 // shellLine is args as they would be typed in a shell, for the progress

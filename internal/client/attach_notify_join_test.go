@@ -17,24 +17,24 @@ func TestNotificationQueuesKeepPasteGuardAndUserNotices(t *testing.T) {
 	a.o.Host.Name = "box"
 	prefix := []byte("\x1b]52;c;" + b64(victim))
 	suffix := []byte("\x1b\\OK")
-	a.show(prefix)
+	a.show(t.Context(), prefix)
 	var notices [][]byte
 	for i := range 20 {
 		message := fmt.Sprintf("uploaded file%d.png", i)
-		a.notify(message)
+		a.notify(t.Context(), message)
 		notices = append(notices, []byte("\x1b]777;notify;"+brand.DisplayName+" · box;"+message+"\x1b\\"))
 	}
 	var background [][]byte
 	for i := range maxPendingNotify + 3 {
 		seq := []byte(fmt.Sprintf("\x1b]777;notify;other;background%d\x1b\\", i))
-		a.emitNotify(seq)
+		a.emitNotify(t.Context(), seq)
 		background = append(background, seq)
 	}
 	if got := terminal(); !bytes.Equal(got, prefix) {
 		t.Fatalf("a queued notice changed an unfinished clipboard sequence: %q", got)
 	}
-	a.show(suffix)
-	if !remembersVictim(a.guard) {
+	a.show(t.Context(), suffix)
+	if !remembersVictim(t.Context(), a.guard) {
 		t.Fatal("the notification wrapper bypassed the paste observer")
 	}
 	got := terminal()

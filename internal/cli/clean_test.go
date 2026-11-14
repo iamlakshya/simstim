@@ -361,7 +361,7 @@ func hostileBridge(t *testing.T) *clienttest.Transport {
 // agent install of an agent that is there.
 func TestCommandsCleanHostAnswers(t *testing.T) {
 	hostileBridge(t)
-	if err := client.SaveHosts(context.Background(), []client.Host{{Name: "box", Machine: &client.Machine{Provider: "fake", ID: "fake-box"}}}); err != nil {
+	if err := client.SaveHostsContext(context.Background(), []client.Host{{Name: "box", Machine: &client.Machine{Provider: "fake", ID: "fake-box"}}}); err != nil {
 		t.Fatal(err)
 	}
 	for _, c := range []struct {
@@ -417,10 +417,10 @@ func TestConnectHostCleansHostText(t *testing.T) {
 // the host's text: the refusal shows it cleaned.
 func TestDestroyRefusalCleansHostText(t *testing.T) {
 	withFake(t, []client.Session{{ID: "abc", Name: "app\x1bc" + hostile, State: api.StateWorking, Alive: true}})
-	if err := saveHost(context.Background(), client.Host{Name: "box", Machine: &client.Machine{Provider: "fake", ID: "fake-box"}}); err != nil {
+	if err := saveHostContext(context.Background(), client.Host{Name: "box", Machine: &client.Machine{Provider: "fake", ID: "fake-box"}}); err != nil {
 		t.Fatal(err)
 	}
-	err := destroyHost(context.Background(), testPrompts("", &bytes.Buffer{}), "box", false, true)
+	err := removeHost(context.Background(), testPrompts("", &bytes.Buffer{}), destroyOpts("box", false))
 	var ue *client.UserError
 	if !errors.As(err, &ue) || !strings.Contains(ue.Msg, "are working: appc]52;c;aGk=Allow this?") {
 		t.Fatalf("err = %v, want a refusal that names the working session", err)

@@ -1,6 +1,7 @@
 package client
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -119,10 +120,10 @@ func (m *clipMemory) keepTerms(t []*clipTerm) {
 
 // add remembers writes, to the clipboard or, with sel, to the selection
 // list of Ghostty's reading.
-func (m *clipMemory) add(sel bool, sums ...[32]byte) error {
+func (m *clipMemory) add(ctx context.Context, sel bool, sums ...[32]byte) error {
 	var w clipWrites
 	w.add(0, sel, sums...)
-	return m.addBatch(&w)
+	return m.addBatch(ctx, &w)
 }
 
 // addBatch remembers the writes of one part of the output, in their order.
@@ -133,10 +134,13 @@ func (m *clipMemory) add(sel bool, sums ...[32]byte) error {
 // The times go on from the last write of the process, unless that is more
 // than clipSkew ahead of the clock: the clock moved back, and times ahead
 // of it would make the newest writes look old.
-func (m *clipMemory) addBatch(w *clipWrites) error {
+func (m *clipMemory) addBatch(ctx context.Context, w *clipWrites) error {
 	if w.empty() {
 		return nil
 	}
+	// These hashes describe output already accepted for the terminal. The
+	// journal and its shared saver must outlive the attach that saw them.
+	ctx = context.WithoutCancel(ctx)
 	m.mu.Lock()
 	at := m.now().Round(0)
 	if m.last.After(at.Add(clipSkew)) {
@@ -147,26 +151,28 @@ func (m *clipMemory) addBatch(w *clipWrites) error {
 	}
 	m.last = at.Add(time.Duration(w.size() - 1))
 	m.mu.Unlock()
-	err := appendJournal(m.path, at, w)
+	err := appendJournal(ctx, m.path, at, w)
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.pending.addWrites(w, at)
 	if !m.saving && !clipPauseSave {
 		m.saving, m.fails = true, 0
-		go m.save()
+		// The shared queue outlives this attach. Keep its context on the
+		// active worker only, with the existing bounded merge attempts.
+		go m.save(ctx)
 	}
 	return err
 }
 
 // save merges the queue into the file until the queue is empty. After three
 // failures in a row it stops, and the queue waits for the next write or flush.
-func (m *clipMemory) save() {
+func (m *clipMemory) save(ctx context.Context) {
 	for {
 		time.Sleep(clipBatch)
 		m.mu.Lock()
 		batch := m.pending.clone()
 		m.mu.Unlock()
-		err := m.merge(batch)
+		err := m.merge(ctx, batch)
 		m.mu.Lock()
 		if err == nil {
 			m.fails = 0
@@ -187,17 +193,18 @@ func (m *clipMemory) save() {
 // flush waits, up to wait, until the queue is in the file. An attach calls
 // it at its end, so a write that a session made just before the client
 // exits reaches the other client processes.
-func (m *clipMemory) flush(wait time.Duration) {
-	deadline := time.Now().Add(wait)
+func (m *clipMemory) flush(ctx context.Context, wait time.Duration) {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), wait)
+	defer cancel()
 	for {
 		m.mu.Lock()
 		empty, saving := m.pending.empty(), m.saving
 		if !empty && !saving && !clipPauseSave {
 			m.saving, m.fails = true, 0
-			go m.save()
+			go m.save(context.WithoutCancel(ctx))
 		}
 		m.mu.Unlock()
-		if empty && !saving || time.Now().After(deadline) {
+		if empty && !saving || ctx.Err() != nil {
 			return
 		}
 		time.Sleep(5 * time.Millisecond)
@@ -206,11 +213,11 @@ func (m *clipMemory) flush(wait time.Duration) {
 
 // merge adds a batch of writes, and the journal, to the file, and empties
 // the journal.
-func (m *clipMemory) merge(batch clipSets) error {
+func (m *clipMemory) merge(ctx context.Context, batch clipSets) error {
 	if err := os.MkdirAll(filepath.Dir(m.path), 0o700); err != nil {
 		return fmt.Errorf("make %s: %w", filepath.Dir(m.path), err)
 	}
-	unlock, err := lockPath(m.path+".lock", clipWait, true)
+	unlock, err := lockPathContext(ctx, m.path+".lock", clipWait, true)
 	if err != nil {
 		return err
 	}
@@ -238,8 +245,8 @@ func (m *clipMemory) merge(batch clipSets) error {
 // hashes of the paste's text and of each of its paths. extra are the hashes
 // of writes that have not ended. match is the index in sums of the hash that
 // a session wrote, or -1.
-func (m *clipMemory) check(sums, extra [][32]byte) (why string, match int) {
-	have, err := m.load()
+func (m *clipMemory) check(ctx context.Context, sums, extra [][32]byte) (why string, match int) {
+	have, err := m.load(ctx)
 	if err != nil {
 		return "could not be checked, because the client cannot read its memory of clipboard writes (" + err.Error() + ")", -1
 	}
@@ -271,13 +278,19 @@ func (m *clipMemory) check(sums, extra [][32]byte) (why string, match int) {
 // copies the queue first, without file work under the lock: a write that the
 // goroutine moves from the queue to the file meanwhile is then in the copy,
 // or in the file.
-func (m *clipMemory) load() (clipSets, error) {
+func (m *clipMemory) load(ctx context.Context) (clipSets, error) {
 	m.loads.Add(1)
+	if err := ctx.Err(); err != nil {
+		return clipSets{}, err
+	}
 	m.mu.Lock()
 	have := m.pending.clone()
 	m.mu.Unlock()
 	if clipLoadGap != nil {
 		clipLoadGap()
+	}
+	if err := ctx.Err(); err != nil {
+		return clipSets{}, err
 	}
 	// A memory whose journal cannot take a write would miss writes that
 	// other processes saw: the check fails closed.
@@ -285,7 +298,7 @@ func (m *clipMemory) load() (clipSets, error) {
 		return clipSets{}, err
 	}
 	if _, err := os.Stat(filepath.Dir(m.path)); err == nil {
-		unlock, err := lockPath(m.path+".lock", clipWait, true)
+		unlock, err := lockPathContext(ctx, m.path+".lock", clipWait, true)
 		if err != nil {
 			return clipSets{}, err
 		}
@@ -300,6 +313,9 @@ func (m *clipMemory) load() (clipSets, error) {
 		have.join(file)
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return clipSets{}, fmt.Errorf("read %s: %w", filepath.Dir(m.path), err)
+	}
+	if err := ctx.Err(); err != nil {
+		return clipSets{}, err
 	}
 	have.prune(m.now())
 	return have, nil

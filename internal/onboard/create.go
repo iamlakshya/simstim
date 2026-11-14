@@ -27,7 +27,7 @@ func PowersOffWhenIdle(p string) bool { return p == Lima }
 // made.
 func CheckCreate(p provider.Provider, req provider.Request) error {
 	if !client.ValidHostName(req.Name) {
-		return &client.UserError{Msg: fmt.Sprintf("%q cannot name a host", req.Name), Hint: "Use letters, digits, dots, dashes and underscores.", Code: "bad_name", Kind: client.KindUsage}
+		return &client.UserError{Msg: fmt.Sprintf("%q cannot name a host", req.Name), Hint: "Use letters, digits, dots, dashes and underscores, with no dot at the end.", Code: "bad_name", Kind: client.KindUsage}
 	}
 	if req.IdleStop != "" && req.IdleStop != "never" {
 		if d, err := time.ParseDuration(req.IdleStop); err != nil || d < time.Minute {
@@ -41,7 +41,7 @@ func CheckCreate(p provider.Provider, req provider.Request) error {
 }
 
 // Create makes a machine for a new host with p, and saves the host at once,
-// so that `host destroy` can always find what was made. It does not install
+// so that `host rm --destroy` can always find what was made. It does not install
 // the helper: the caller connects the host next.
 //
 // If ctx ends while the provider works, as when the user presses Ctrl+C,
@@ -49,8 +49,26 @@ func CheckCreate(p provider.Provider, req provider.Request) error {
 // machines after their hosts and no such machine was there before. The
 // error then says what was cleaned up.
 func Create(ctx context.Context, p provider.Provider, req provider.Request) (client.Host, error) {
+	// No host rm of this name runs while the machine is made and saved. A
+	// caller that saves the host again after it, as `host create` and the
+	// guided setup do, holds the lock in ctx through that save too.
+	ctx, unlock, err := client.LockHost(ctx, req.Name, "host create")
+	if err != nil {
+		return client.Host{}, err
+	}
+	defer unlock()
 	if err := CheckCreate(p, req); err != nil {
 		return client.Host{}, err
+	}
+	// A new host starts with no record of an earlier removal. The record
+	// goes before anything is made, so a failure here leaves no machine
+	// that no saved host names.
+	if err := client.ClearRemoval(req.Name); err != nil {
+		var ue *client.UserError
+		if !errors.As(err, &ue) {
+			return client.Host{}, err
+		}
+		return client.Host{}, &client.UserError{Msg: ue.Msg + ", so nothing was made", Hint: ue.Hint, Code: ue.Code}
 	}
 	probe := client.Host{Name: req.Name, Machine: &client.Machine{Provider: p.Name(), ID: provider.MachineName(req.Name)}}
 	fresh := false
@@ -60,12 +78,25 @@ func Create(ctx context.Context, p provider.Provider, req provider.Request) (cli
 			fresh = err == nil && st == client.MachineMissing
 		}
 	}
+	// A provider that pins the new machine's key, as Lima's does, pins it
+	// into a stage, which the save moves to the host's own pin.
+	ctx, abort, err := client.StagePinOwned(ctx, req.Name)
+	if err != nil {
+		return client.Host{}, err
+	}
+	defer abort()
 	h, err := p.Create(ctx, req)
-	if err == nil {
-		// The machine is made: it is saved, also when a cancel came just
-		// now, so that host destroy finds it. The caller's next step sees
-		// the cancel, and lists the machine among the changes.
-		err = client.SaveHost(context.WithoutCancel(ctx), h)
+	if err == nil && h.Machine != nil {
+		// The stamp tells this machine from an earlier one of the same
+		// name.
+		h.Machine.Created = time.Now().UTC().Format(time.RFC3339Nano)
+		// A new host: the save compares with no entry (cli-spec 11.3),
+		// publishes any pin that the provider staged, and records the
+		// provider's tier (isolation spec 14.8.3).
+		if err := client.UpdateHosts(ctx, client.HostChange{Kind: "host create", Now: &h, Pin: true, Tier: client.ProviderTier(p.Name())}); err != nil {
+			return client.Host{}, unsaved(ctx, p, req, h, err)
+		}
+		return h, nil
 	}
 	if err == nil {
 		return h, nil
@@ -92,6 +123,39 @@ func Create(ctx context.Context, p provider.Provider, req provider.Request) (cli
 		stopped.Hint = "Check " + p.Name() + "'s own console for a machine labelled " + req.Name + "."
 	}
 	return client.Host{}, stopped
+}
+
+// unsaved deletes machine h, which Create made but could not save, as a
+// cancel does: no machine stays that no saved host names. Its error says
+// why the save failed, and what became of the machine. When the delete
+// fails too, it names the machine that stays.
+func unsaved(ctx context.Context, p provider.Provider, req provider.Request, h client.Host, saveErr error) error {
+	out := &client.UserError{Msg: saveErr.Error(), Code: "save_failed",
+		Hint: fmt.Sprintf("%s host create %s %s (after you fix the cause)", brand.Name, p.Name(), req.Name)}
+	var ue *client.UserError
+	switch {
+	case ctx.Err() != nil:
+		out = &client.UserError{Msg: fmt.Sprintf("stopped while making %s; nothing was saved", req.Name), Hint: brand.Name + " setup", Code: "cancelled", Kind: client.KindCancelled}
+	case errors.As(saveErr, &ue):
+		kept := *ue
+		out = &kept
+	}
+	// A fresh context: the user's may have ended, and the clean-up must
+	// still run.
+	cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Minute)
+	defer cancel()
+	what := fmt.Sprintf("the %s machine %s", p.Name(), h.Machine.ID)
+	lc, err := p.Open(h)
+	if err == nil {
+		err = lc.Destroy(cctx)
+	}
+	if err != nil {
+		out.Msg = fmt.Sprintf("%s, and %s stays: %v", out.Msg, what, err)
+		out.Hint = "Delete it with " + p.Name() + "'s own tools, then run the command again."
+		return out
+	}
+	out.Msg += ", so " + what + " was deleted again"
+	return out
 }
 
 // SetIdle installs, or with "never" removes, the helper's idle timer on a

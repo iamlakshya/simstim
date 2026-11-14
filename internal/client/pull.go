@@ -15,9 +15,9 @@ import (
 // GitSSHCommand is the ssh command line for GIT_SSH_COMMAND, so git reaches
 // a host the way the client does: through the client's own SSH config and
 // shared connection, with no forwarding.
-func GitSSHCommand(h Host) (string, error) {
+func GitSSHCommand(ctx context.Context, h Host) (string, error) {
 	s := &SSH{Host: h}
-	args, err := s.baseArgs()
+	args, err := s.connArgs(ctx, true)
 	if err != nil {
 		return "", err
 	}
@@ -53,6 +53,12 @@ func SessionRepo(ctx context.Context, h Host, dir string) (RepoInfo, error) {
 	}
 	out, err := s.Run(ctx, RemoteHelper(HelperVersion())+" git-op "+api.GitOpRepoInfo, bytes.NewReader(req))
 	if err != nil {
+		if ctx.Err() != nil {
+			return RepoInfo{}, ctx.Err()
+		}
+		if IsHostKeyError(err) {
+			return RepoInfo{}, err
+		}
 		return RepoInfo{}, &UserError{Msg: fmt.Sprintf("could not ask %s about the repository at %s: %s", h.Name, CleanPath(dir), CleanLine(err.Error())),
 			Hint: brand.Name + " host doctor " + h.Name, Code: "ssh_failed"}
 	}
@@ -122,5 +128,5 @@ func FetchArgs(h Host, root, branch, into string, force bool) []string {
 	if force {
 		spec = "+" + spec
 	}
-	return []string{"fetch", "--no-tags", h.SSH + ":" + root, spec}
+	return []string{"fetch", "--no-tags", "--no-recurse-submodules", "--upload-pack=git-upload-pack", "--", h.SSH + ":" + root, spec}
 }

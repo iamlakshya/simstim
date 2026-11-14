@@ -1,6 +1,6 @@
 # Create a host
 
-`host create` makes a host and sets it up in one step. It starts a VM, a container or a sandbox, installs the helper, and connects. `host destroy` deletes it again. The design and its reasons are in [decision 0013](../contributing/decisions/0013-host-providers.md).
+`host create` makes a host and sets it up in one step. It starts a VM, a container or a sandbox, installs the helper, and connects. `host rm --destroy` deletes it again. The design and its reasons are in [decision 0013](../contributing/decisions/0013-host-providers.md).
 
 | Provider | What you get | How simstim reaches it | Account |
 | --- | --- | --- | --- |
@@ -19,7 +19,7 @@ Creating a host counts as your consent to install the helper on it. `host create
 simstim setup --create lima --name dev --agents claude --yes
 ```
 
-Press Ctrl+C while Lima or Docker makes the machine, and the setup deletes the half-made VM or container, so nothing is left behind. After that, the host is saved: `simstim host destroy dev` deletes it. The launcher's setup (`s`) does the same, and Esc stops it.
+Press Ctrl+C while Lima or Docker makes the machine, and the setup deletes the half-made VM or container, so nothing is left behind. After that, the host is saved: `simstim host rm dev --destroy` deletes it. The launcher's setup (`s`) does the same, and Esc stops it.
 
 ## A local VM with Lima
 
@@ -76,7 +76,7 @@ Two cases need another step, and `host doctor` names it in its Try line:
 
 - The VM powers itself off after 30 minutes with no client connected and no session working. A systemd user timer runs the check every few minutes; no daemon is added.
 - It needs passwordless sudo, which Lima gives. Without it there is no idle stop, and `host doctor` says so.
-- Change the time with `simstim host idle dev 2h`, or turn it off with `simstim host idle dev never`.
+- Change the time with `simstim host set dev idle=2h`, or turn it off with `simstim host set dev idle=never`.
 - Attach to a session, or run `simstim host start dev`, and the VM boots again. Sessions come back after the restart, and each agent resumes its own conversation.
 - The launcher does not start a stopped host when it opens. It shows the host as stopped instead.
 
@@ -138,11 +138,23 @@ What does not work in a container:
 
 ## Destroy a host
 
+<!-- test: help (it deletes the VM) -->
 ```sh
-simstim host destroy dev
+simstim host rm dev
 ```
 
-It asks first. It refuses while a session is working, unless you pass `--force`. It deletes the VM, the container or the sandbox, with its disk, then removes the host from `hosts.toml` and its generated SSH config.
+At a terminal, `host rm` says what the machine holds, such as `It holds 2 sessions.`, and asks you to type the host's name to delete the machine too. Press Enter to keep the machine: `host rm` then only forgets the host, and the machine stays for its provider's own tools. Any other text cancels, and nothing changes.
+
+In a script, name the machine with `--destroy`, and confirm with the host's name:
+
+<!-- test: help (it deletes the VM) -->
+```sh
+simstim host rm dev --destroy --confirm dev
+```
+
+It refuses while a session is working, unless you pass `--force`. It also refuses when the provider cannot tell the machine's state. It refuses, too, when the machine runs and it cannot list the sessions, because one of them may be working. After the typed name, it looks at the machine again, just before the delete. While `host rm` runs, its question included, no other command changes the host. A `host create`, `host set` or another `host rm` of that name fails at once, and says that the host is busy. A command that read the host before, such as `setup --host` or the launcher, then saves nothing, and says that the host changed. It deletes the VM, the container or the sandbox, with its disk, then removes the host from `hosts.toml` and its generated SSH config. If the delete or the forget fails, the host stays saved: run the command again. A machine that its provider no longer has counts as deleted.
+
+`host destroy dev` still works until v0.4.0 and 11 November 2027, whichever comes later. It runs `host rm dev --destroy`, and warns. Its `-y` is now `--confirm dev`.
 
 ## The commands
 
@@ -152,7 +164,8 @@ It asks first. It refuses while a session is working, unless you pass `--force`.
 | `host start <host>` | Starts or resumes it |
 | `host stop <host>` | Stops a VM or container, or pauses a sandbox |
 | `host status <host>` | Asks the provider whether it runs |
-| `host idle <host> <duration>\|never` | Sets the idle time |
-| `host destroy <host>` | Deletes it and forgets it |
+| `host show <host>` | Describes it: the machine, its idle time, and what the host says about itself |
+| `host set <host> idle=<30m\|never>` | Sets the idle time |
+| `host rm <host> --destroy` | Deletes it and forgets it |
 
 Every flag is in [the command reference](../reference/cli/host_create.md).

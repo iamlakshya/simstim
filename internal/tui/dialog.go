@@ -441,6 +441,10 @@ type shellDoneMsg struct {
 
 // openShell hands the terminal to an interactive SSH shell on the host.
 func (m *Model) openShell(h *hostConn) tea.Cmd {
+	return m.withHostTier(h, func() tea.Cmd { return m.openShellReady(h) })
+}
+
+func (m *Model) openShellReady(h *hostConn) tea.Cmd {
 	s := &client.SSH{Host: h.host, Interactive: true}
 	cmd, err := s.Shell(m.ctx)
 	if err != nil {

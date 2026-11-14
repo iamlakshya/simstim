@@ -109,7 +109,11 @@ func (m *Model) disposeModal() tea.Cmd {
 	switch d := m.modal.(type) {
 	case *wizard:
 		d.stop()
-		return m.dropConn(d.takeConn())
+		drop := m.dropConn(d.takeConn())
+		if d.pinScope != nil {
+			return tea.Batch(drop, d.retireOwnedPin(m))
+		}
+		return drop
 	case *guide:
 		m.stopGuide(d)
 	}

@@ -20,10 +20,33 @@ type Backend interface {
 	// anything once ctx has ended, the command's own context: a save that a
 	// cancel came before writes nothing (client.SaveHosts).
 	LoadHosts(ctx context.Context) ([]client.Host, error)
-	SaveHosts(ctx context.Context, hosts []client.Host) error
+	// LoadTiers reads the current policy alongside the saved host snapshot.
+	LoadTiers(ctx context.Context, hosts []client.Host) (client.Tiers, error)
+	// ResolveHostTier asks the foreground question through ctx, then saves it.
+	ResolveHostTier(ctx context.Context, h client.Host) (client.Tier, error)
+	// UpdateHosts saves or forgets one host, as client.UpdateHosts does:
+	// only while its saved entry is still the one that the launcher read,
+	// and while no command holds the lock of the host. A forget also
+	// deletes the record of an unfinished `host rm` of the host, under the
+	// same lock: warn is the error of that clean-up, which does not undo
+	// the forget.
+	UpdateHosts(c client.HostChange) (warn, err error)
 	Settings() client.Settings
 	// Dial opens a background connection. It never prompts.
 	Dial(ctx context.Context, h client.Host) (Conn, error)
+	// StagePin, PinHostKey, SaveHostPin and AbortPin pin a host that the
+	// add-host wizard adds, as host add does: the pin is staged before the
+	// first connection, and saved with the host.
+	StagePin(ctx context.Context, name string) error
+	// PinHostKey pins h's key in its stage: the key that the user's own
+	// settings trust, or the one with the fingerprint want. It never asks:
+	// a key that nothing names fails with *client.UncheckedKeyError.
+	PinHostKey(ctx context.Context, h client.Host, want string) (client.Pin, error)
+	SaveHostPin(h client.Host) error
+	AbortPin(name string)
+	// ForgetHost removes a host from the list, with its pin, under the
+	// pin's lock, as host rm does.
+	ForgetHost(ctx context.Context, name string) error
 	// Probe, Install and HelperSize serve the add-host wizard.
 	Probe(ctx context.Context, h client.Host) (client.Platform, error)
 	Install(ctx context.Context, h client.Host, p client.Platform) error
@@ -71,6 +94,8 @@ type Conn interface {
 	RoundTrip(ctx context.Context) (time.Duration, error)
 	Folders(ctx context.Context, prefix string) (client.FoldersResult, error)
 	AgentChecks(ctx context.Context) ([]client.AgentCheck, error)
+	HostID() string
+	HostIDChanged() bool
 	Done() <-chan struct{}
 	Close()
 }
@@ -96,8 +121,51 @@ func (realBackend) LoadHosts(ctx context.Context) ([]client.Host, error) {
 	return client.LoadHosts()
 }
 
-func (realBackend) SaveHosts(ctx context.Context, h []client.Host) error {
-	return client.SaveHosts(ctx, h)
+func (realBackend) LoadTiers(ctx context.Context, hosts []client.Host) (client.Tiers, error) {
+	return client.LoadTiersContext(ctx, hosts)
+}
+
+func (realBackend) ResolveHostTier(ctx context.Context, h client.Host) (client.Tier, error) {
+	return client.ResolveHostTier(ctx, h)
+}
+
+// UpdateHosts holds the lock of the host from the change through the
+// clean-up of its record, so no command of the host comes between them:
+// the clean-up never deletes the record of a host made again.
+func (b realBackend) UpdateHosts(c client.HostChange) (warn, err error) {
+	return b.UpdateHostsContext(context.Background(), c)
+}
+
+func (realBackend) UpdateHostsContext(ctx context.Context, c client.HostChange) (warn, err error) {
+	name := changedName(c)
+	ctx, unlock, err := client.LockHost(ctx, name, c.Kind)
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
+	if err := client.UpdateHosts(ctx, c); err != nil {
+		return nil, err
+	}
+	if c.Now != nil {
+		return nil, nil
+	}
+	afterLauncherForget(name)
+	return client.ClearRemoval(name), nil
+}
+
+// afterLauncherForget runs between the launcher's forget and the clean-up
+// of its record. Tests try another command there.
+var afterLauncherForget = func(string) {}
+
+// changedName is the name of the host that c changes.
+func changedName(c client.HostChange) string {
+	if c.Now != nil {
+		return c.Now.Name
+	}
+	if c.Was != nil {
+		return c.Was.Name
+	}
+	return ""
 }
 func (realBackend) Settings() client.Settings                 { return client.LoadSettings() }
 func (realBackend) HelperVersion() string                     { return client.HelperVersion() }
@@ -124,11 +192,30 @@ func (realBackend) SessionSecrets(ctx context.Context, names []string) (map[stri
 func (realBackend) Dial(ctx context.Context, h client.Host) (Conn, error) {
 	// Opening the launcher must not boot every stopped VM or resume every
 	// paused sandbox; it says they are stopped instead.
-	c, err := client.Dial(client.WithoutWake(ctx), h, false)
+	c, err := client.Dial(client.WithTierQuestion(client.WithoutWake(ctx), nil), h, false)
 	if err != nil {
 		return nil, err
 	}
 	return c, nil
+}
+
+func (realBackend) StagePin(ctx context.Context, name string) error {
+	return client.StagePin(ctx, name)
+}
+func (realBackend) StagePinOwned(ctx context.Context, name string) (context.Context, func(), error) {
+	return client.StagePinOwned(ctx, name)
+}
+func (realBackend) SaveHostPinContext(ctx context.Context, h client.Host) error {
+	return client.SaveHostPinContext(ctx, h)
+}
+func (realBackend) SaveHostPin(h client.Host) error { return client.SaveHostPin(h) }
+func (realBackend) AbortPin(name string)            { client.AbortPin(name) }
+func (realBackend) ForgetHost(ctx context.Context, name string) error {
+	return client.ForgetHostContext(ctx, name)
+}
+
+func (realBackend) PinHostKey(ctx context.Context, h client.Host, want string) (client.Pin, error) {
+	return client.PinHostKey(client.WithoutInput(ctx), h, want, client.FirstUseRefuse)
 }
 
 // Probe and Install reach the host the way every connection does: the
@@ -164,19 +251,34 @@ func (realBackend) Attach(ctx context.Context, o client.AttachOptions) (client.A
 // connSet tracks every open connection, so quitting closes them all, even
 // one whose dial finishes after the screen has gone.
 type connSet struct {
-	mu        sync.Mutex
-	conns     map[Conn]struct{}
-	unadopted map[Conn]struct{}
-	dropped   map[Conn]struct{}
-	closed    bool
+	mu          sync.Mutex
+	conns       map[Conn]struct{}
+	unadopted   map[Conn]struct{}
+	dropped     map[Conn]struct{}
+	closed      bool
+	cleanup     []func()
+	cleanupDone chan struct{}
 }
 
 func newConnSet() *connSet {
 	return &connSet{
-		conns:     map[Conn]struct{}{},
-		unadopted: map[Conn]struct{}{},
-		dropped:   map[Conn]struct{}{},
+		conns:       map[Conn]struct{}{},
+		cleanupDone: make(chan struct{}),
+		unadopted:   map[Conn]struct{}{},
+		dropped:     map[Conn]struct{}{},
 	}
+}
+
+// onClose keeps cleanup owned even when a command's result is dropped.
+func (s *connSet) onClose(cleanup func()) {
+	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
+		cleanup()
+		return
+	}
+	s.cleanup = append(s.cleanup, cleanup)
+	s.mu.Unlock()
 }
 
 // add records an already-adopted connection c. It closes c and returns false
@@ -262,7 +364,10 @@ func (s *connSet) drop(c Conn) {
 // closeAll closes every connection, in parallel, and refuses new ones.
 func (s *connSet) closeAll() {
 	s.mu.Lock()
+	first := !s.closed
 	s.closed = true
+	cleanup := s.cleanup
+	s.cleanup = nil
 	all := make([]Conn, 0, len(s.conns))
 	for c := range s.conns {
 		all = append(all, c)
@@ -270,12 +375,36 @@ func (s *connSet) closeAll() {
 	clear(s.conns)
 	clear(s.unadopted)
 	s.mu.Unlock()
+	if first {
+		go func() {
+			var wg sync.WaitGroup
+			for _, close := range cleanup {
+				wg.Go(close)
+			}
+			wg.Wait()
+			close(s.cleanupDone)
+		}()
+	}
 	var wg sync.WaitGroup
 	for _, c := range all {
 		wg.Go(c.Close)
 	}
 	wg.Wait()
 }
+
+// pinCleanupGrace stays below the existing 500 ms close-response budget.
+const pinCleanupGrace = 200 * time.Millisecond
+
+// finishCleanup lets lock-free cleanup finish without making Close wait on
+// another command's pin lock. Run joins the rest after restoring the terminal.
+func (s *connSet) finishCleanup() {
+	select {
+	case <-s.cleanupDone:
+	case <-time.After(pinCleanupGrace):
+	}
+}
+
+func (s *connSet) waitCleanup() { <-s.cleanupDone }
 
 func asUserError(err error) (*client.UserError, bool) {
 	var ue *client.UserError

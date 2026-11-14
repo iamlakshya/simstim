@@ -2,12 +2,9 @@ package tui
 
 import (
 	"fmt"
-	"sort"
-	"strings"
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/iamlakshya/simstim/internal/brand"
 	"github.com/iamlakshya/simstim/internal/client"
 )
 
@@ -67,7 +64,9 @@ func removeHostDialog(h client.Host) *confirm {
 			"Its sessions and the helper stay on the host, and keep running.",
 		},
 		danger: true, yes: hint{"enter", "remove"}, no: hint{"esc", "keep"},
-		run: func(m *Model) tea.Cmd { return m.saveHosts(h, true) },
+		// The entry that the dialog showed: a host made again while it
+		// waited is not removed.
+		run: func(m *Model) tea.Cmd { return m.changeHost(client.HostChange{Was: &h}) },
 	}
 }
 
@@ -104,42 +103,31 @@ func (d *details) view(m *Model) string {
 		return ""
 	}
 	field := func(k, v string) string { return sFaint.Render(fit(k, labelW)) + trunc(v, cw-labelW) }
-	route := shown(h.host.SSH)
-	if h.host.SSHConfig != "" {
-		route += sFaint.Render("  with " + shown(h.host.SSHConfig))
-	}
-	body := []string{"", field("Route", route)}
-	if i := h.info; i != nil {
-		sys := []string{}
-		for _, s := range []string{shown(i.Distro), shown(i.Arch), plural(i.CPUs, "CPU", "CPUs"), fmtSize(i.MemTotal), fmtSize(i.DiskFree) + " free"} {
-			if s != "" && !strings.HasPrefix(s, "0 ") {
-				sys = append(sys, s)
+	body := []string{""}
+	// The lines come from the client, as `host show` prints them
+	// (cli-spec 11.2).
+	for _, line := range (client.HostDetails{Host: h.host, Tier: h.tier, IDChanged: h.idChanged, Info: h.info, Sessions: len(h.sessions)}).Lines() {
+		if len(line.Items) == 0 {
+			v := line.Value
+			if line.Note != "" {
+				v += sFaint.Render("  " + line.Note)
 			}
+			body = append(body, field(line.Label, v))
+			continue
 		}
-		var names []string
-		for k := range i.Agents {
-			v := shown(i.AgentVersions[k])
-			k = shown(k)
-			if v != "" {
-				k += " " + v
-			}
-			names = append(names, k)
-		}
-		sort.Strings(names)
-		body = append(body,
-			field("System", strings.Join(sys, dot)),
-			field("Helper", brand.HostBinary+" "+shown(i.Version)))
-		// The agents go on more lines rather than lose their versions.
-		for n, l := range joinWrap(names, cw-labelW) {
+		// A list goes on more lines rather than lose its items, such as
+		// the agents' versions.
+		for n, l := range joinWrap(line.Items, cw-labelW) {
 			k := ""
 			if n == 0 {
-				k = "Agents"
+				k = line.Label
 			}
 			body = append(body, field(k, l))
 		}
-		body = append(body, field("Limits", fmtSize(i.MemoryMax)+" for sessions"+dot+plural(len(h.sessions), "session", "sessions")))
-	} else {
+	}
+	if h.info == nil {
 		msg, _ := errText(h.err)
+		msg = oneLine(msg)
 		if msg == "" {
 			msg = "waiting for the host to answer"
 		}

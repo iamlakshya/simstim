@@ -2,12 +2,17 @@ package onboard
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"runtime"
+	"runtime/debug"
 	"slices"
 	"strings"
 	"testing"
@@ -44,6 +49,11 @@ func (p fakeProvider) Open(client.Host) (client.Lifecycle, error) { return p.m, 
 func newFake(t *testing.T, name string) fakeProvider {
 	t.Helper()
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	// Create clears the record of a removal, which is in the state folder.
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	m := clienttest.NewMachine(client.MachineMissing, &clienttest.Transport{})
 	client.RegisterProvider(name, func(client.Host) (client.Lifecycle, error) { return m, nil })
 	return fakeProvider{name: name, m: m}
@@ -65,6 +75,22 @@ func TestCreateSavesTheHost(t *testing.T) {
 			t.Errorf("%+v: err = %v, want a user error", req, err)
 		}
 	}
+}
+
+// Create, called on its own as the launcher calls it, lets the lock of
+// the host go when it returns. The garbage collector is off, so a lock
+// file that Create forgot to close stays held.
+func TestCreateLetsItsLockGo(t *testing.T) {
+	defer debug.SetGCPercent(debug.SetGCPercent(-1))
+	p := newFake(t, "fake-unlock")
+	if _, err := Create(context.Background(), p, provider.Request{Name: "box", Out: io.Discard}); err != nil {
+		t.Fatal(err)
+	}
+	_, unlock, err := client.LockHost(context.Background(), "box", "host rm")
+	if err != nil {
+		t.Fatalf("the lock after Create: %v", err)
+	}
+	unlock()
 }
 
 func TestStopDeletesAHalfMadeMachine(t *testing.T) {
@@ -210,37 +236,73 @@ func TestSSHWorksNeedsAConfigFolder(t *testing.T) {
 	}
 }
 
-func TestSSHWorks(t *testing.T) {
+// keyedSSH is a fake ssh for SSHWorks that logs each call to argsLog: ssh
+// -G prints a host, the connection that asks the user's settings logs that
+// they trust the host's key, the connection that reads the key writes it,
+// and the login works for the target "ok", and fails for any other.
+func keyedSSH(t *testing.T) (argsLog string) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("the fake ssh is a POSIX shell script")
+	}
+	r := make([]byte, 32)
+	if _, err := rand.Read(r); err != nil {
+		t.Fatal(err)
+	}
+	blob := binary.BigEndian.AppendUint32(nil, uint32(len("ssh-ed25519")))
+	blob = append(blob, "ssh-ed25519"...)
+	blob = binary.BigEndian.AppendUint32(blob, uint32(len(r)))
+	blob = append(blob, r...)
+	sum := sha256.Sum256(blob)
+	key := "ssh-ed25519 " + base64.StdEncoding.EncodeToString(blob)
+	fp := "SHA256:" + base64.RawStdEncoding.EncodeToString(sum[:])
 	bin := t.TempDir()
-	t.Setenv("HOME", t.TempDir())
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-	argsLog := filepath.Join(bin, "args")
-	script := "#!/bin/sh\nprintf '%s\\n' \"$*\" > " + argsLog + "\n" +
+	argsLog = filepath.Join(bin, "args")
+	script := "#!/bin/sh\nprintf '%s\\n' \"$*\" >> " + argsLog + "\n" +
+		"case \" $* \" in *\" -G \"*) printf 'hostname x\\nport 22\\nstricthostkeychecking ask\\n'; exit 0;; esac\n" +
+		"case \" $* \" in *\" LogLevel=DEBUG1 \"*) log=/dev/stderr; prev=; for a; do [ \"$prev\" = -E ] && log=$a; prev=$a; done\n" +
+		"  printf 'debug1: Server host key: ssh-ed25519 " + fp + "\\r\\ndebug1: Authentications that can continue: publickey\\r\\nme@x: Permission denied (publickey).\\r\\n' >> \"$log\"; exit 255;; esac\n" +
+		"case \" $* \" in *\" PreferredAuthentications=none \"*)\n" +
+		"  for a; do case $a in UserKnownHostsFile=*) f=${a#UserKnownHostsFile=};; HostKeyAlias=*) alias=${a#HostKeyAlias=};; esac; done\n" +
+		"  echo \"$alias " + key + "\" >> \"$f\"; echo 'Permission denied (publickey).' >&2; exit 255;; esac\n" +
 		"case \"$*\" in *' -- ok true') exit 0;; esac\n" +
 		"echo 'dev@203.0.113.10: Permission denied (publickey).' >&2\nexit 255\n"
 	if err := os.WriteFile(filepath.Join(bin, "ssh"), []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	return argsLog
+}
+
+// SSHWorks logs in only with a pin of the key that the user's settings
+// trust, as every connection does, and leaves no pin.
+func TestSSHWorks(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	argsLog := keyedSSH(t)
 	s := System{}
 	if err := s.SSHWorks(context.Background(), "ok"); err != nil {
 		t.Fatalf("ok: %v", err)
 	}
-	// It forwards nothing, reads the generated config, and shares no
-	// connection (decision 0034).
-	cfg := filepath.Join(client.ConfigDir(), "ssh", "default")
-	got, _ := os.ReadFile(argsLog)
-	want := "-F " + cfg + " -o BatchMode=yes -o ConnectTimeout=15 -o ForwardAgent=no -o ForwardX11=no -o PermitLocalCommand=no" +
-		" -o GSSAPIDelegateCredentials=no -o ClearAllForwardings=yes -o ControlMaster=no -o ControlPath=none -- ok true\n"
-	if string(got) != want {
-		t.Errorf("ssh ran with\n%q, want\n%q", got, want)
+	// The login checks the pin, forwards nothing, and shares no connection
+	// (decision 0034).
+	b, _ := os.ReadFile(argsLog)
+	lines := strings.Split(strings.TrimSpace(string(b)), "\n")
+	login := lines[len(lines)-1]
+	for _, want := range []string{"-o StrictHostKeyChecking=yes", "-o UserKnownHostsFile=", "-staged-", "-o ForwardAgent=no", "-o ControlPath=none", "-o BatchMode=yes", " -- ok true"} {
+		if !strings.Contains(login, want) {
+			t.Errorf("the login lacks %q: %s", want, login)
+		}
 	}
-	if b, err := os.ReadFile(cfg); err != nil || !strings.Contains(string(b), "\nForwardAgent no\nForwardX11 no\nPermitLocalCommand no\nGSSAPIDelegateCredentials no\n") {
-		t.Errorf("the generated config = %q, %v, want the forwarding block", b, err)
+	files, _ := filepath.Glob(filepath.Join(client.ConfigDir(), "ssh", "*known_hosts*"))
+	configs, _ := filepath.Glob(filepath.Join(client.ConfigDir(), "ssh", "config-*"))
+	if len(files)+len(configs) != 0 {
+		t.Errorf("the check left %q %q", files, configs)
 	}
 	err := s.SSHWorks(context.Background(), "dev@203.0.113.10")
 	var ue *client.UserError
-	if !errors.As(err, &ue) || !strings.Contains(ue.Msg, "Permission denied (publickey)") || ue.Hint != "ssh dev@203.0.113.10 (run it yourself to see what it asks)" {
+	if !errors.As(err, &ue) || !strings.Contains(ue.Msg, "Permission denied") || ue.Hint != "ssh dev@203.0.113.10 (run it yourself to see what it asks)" {
 		t.Fatalf("err = %v", err)
 	}
 	err = s.SSHWorks(context.Background(), "dev@x;y")

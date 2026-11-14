@@ -20,7 +20,7 @@ Type the numbers of the agents to install, such as `2 3`. The setup installs the
 - On a host you have already set up, run `simstim setup --host my-server`.
 - `host add` shows the same checklist, in a terminal, when a first-class or supported agent is missing.
 - In the launcher, the add-host wizard shows it after "ready", and `s` opens the whole setup.
-- For a script, name the agents: `simstim setup --host my-server --agents claude,codex --yes`. Without a terminal, the setup waits for each installer to end, and leaves the logins to you.
+- For a script, name the tier and agents: `simstim setup --host my-server --tier own --agents claude,codex --yes`. Use `own` only when you alone have root ([choose a tier](choose-a-host-tier.md)). Without a terminal, the setup waits for each installer to end, and leaves the logins to you.
 
 ## Install one agent
 

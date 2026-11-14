@@ -215,7 +215,16 @@ func TestGolden(t *testing.T) {
 			hs.key("enter")
 			return hs.m
 		}},
-		{"wizard_install", func(t *testing.T, w, h int) *Model {
+		{"wizard_host_key", func(t *testing.T, w, h int) *Model {
+			be := newFakeBackend()
+			be.pinUnknown = true
+			hs := newHarness(t, be, w, h)
+			hs.key("a")
+			hs.typeText("pi@raspberry")
+			hs.key("enter")
+			return hs.m
+		}},
+		{"wizard_tier", func(t *testing.T, w, h int) *Model {
 			be := newFakeBackend()
 			be.probe = client.Platform{OS: "linux", Arch: "arm64"}
 			hs := newHarness(t, be, w, h)
@@ -224,13 +233,22 @@ func TestGolden(t *testing.T) {
 			hs.key("enter", "enter")
 			return hs.m
 		}},
-		{"wizard_ready", func(t *testing.T, w, h int) *Model {
+		{"wizard_install", func(t *testing.T, w, h int) *Model {
 			be := newFakeBackend()
 			be.probe = client.Platform{OS: "linux", Arch: "arm64"}
 			hs := newHarness(t, be, w, h)
 			hs.key("a")
 			hs.typeText("pi@raspberry")
 			hs.key("enter", "enter", "enter")
+			return hs.m
+		}},
+		{"wizard_ready", func(t *testing.T, w, h int) *Model {
+			be := newFakeBackend()
+			be.probe = client.Platform{OS: "linux", Arch: "arm64"}
+			hs := newHarness(t, be, w, h)
+			hs.key("a")
+			hs.typeText("pi@raspberry")
+			hs.key("enter", "enter", "enter", "enter")
 			return hs.m
 		}},
 	}

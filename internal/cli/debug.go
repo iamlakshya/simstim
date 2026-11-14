@@ -33,6 +33,11 @@ func addDebugFlags(root *cobra.Command) {
 	_ = root.RegisterFlagCompletionFunc("debug", completeCats(diag.AllCats))
 }
 
+// isLauncher reports whether cmd opens the TUI launcher or switcher.
+func isLauncher(cmd *cobra.Command, args []string) bool {
+	return !cmd.HasParent() || cmd.Name() == "flip" && len(args) == 0
+}
+
 // completeCats completes a list of categories from cats, separated by
 // commas: the ones that the list does not name yet, after its last comma.
 func completeCats(cats diag.Cats) cobra.CompletionFunc {
@@ -80,8 +85,7 @@ func startDebug(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	launcher := !cmd.HasParent() || cmd.Name() == "flip" && len(args) == 0
-	if !launcher {
+	if !isLauncher(cmd, args) {
 		note(cmd, "debug_on", "debug on: "+tildeHome(path))
 	}
 	return nil

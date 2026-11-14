@@ -75,6 +75,29 @@ func note(cmd *cobra.Command, code, msg string) {
 	fmt.Fprintln(os.Stderr, msg)
 }
 
+// warningFor returns a client.WarnFunc that writes client warnings (such
+// as a changed host ID) to stderr: as Warning:/Try: lines, or one JSON
+// warning line when asJSON is true.
+func warningFor(asJSON bool) client.WarnFunc {
+	return func(code, msg, hint string) {
+		msg = shown(msg)
+		hint = shown(hint)
+		if asJSON {
+			w := map[string]string{"code": code, "message": msg}
+			if hint != "" {
+				w["try"] = hint
+			}
+			line, _ := json.Marshal(map[string]any{"v": jsonVersion, "warning": w})
+			fmt.Fprintf(os.Stderr, "%s\n", jsonSafe(line))
+			return
+		}
+		fmt.Fprintf(os.Stderr, "Warning: %s\n", msg)
+		if hint != "" {
+			fmt.Fprintf(os.Stderr, "Try: %s\n", hint)
+		}
+	}
+}
+
 // stderrFor is stderr for messages that a part of the client writes by
 // itself, such as the debug file's warning: stderr as it is, or with JSON
 // a writer that turns each message into one warning line with code.
@@ -188,9 +211,10 @@ func valuesOf(v any) map[string]any {
 }
 
 // hostObject is a saved host as `host ls --json` prints it: its keys in
-// snake_case, as hosts.toml names them, and, until the end of the old
-// form, the same keys in Go form too (cli-spec 3.2, question C-9).
-func hostObject(h client.Host) map[string]any {
+// snake_case, as hosts.toml names them, its tier from tiers.toml, and,
+// until the end of the old form, the same keys in Go form too
+// (cli-spec 3.2, question C-9).
+func hostObject(h client.Host, tier client.Tier) map[string]any {
 	obj := map[string]any{}
 	raw, _ := json.Marshal(h)
 	var old map[string]json.RawMessage
@@ -202,6 +226,9 @@ func hostObject(h client.Host) map[string]any {
 		for k, v := range m {
 			obj[k] = v
 		}
+	}
+	if tier.Valid() {
+		obj["tier"] = tier.String()
 	}
 	return obj
 }

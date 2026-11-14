@@ -3,6 +3,7 @@
 package client
 
 import (
+	"fmt"
 	"os"
 	"os/signal"
 	"syscall"
@@ -72,4 +73,23 @@ func ownedDir(d string) bool {
 		return false
 	}
 	return ownerOf(fi) == os.Getuid()
+}
+
+func controlFileOwned(info os.FileInfo) bool {
+	st, ok := info.Sys().(*syscall.Stat_t)
+	return ok && int(st.Uid) == os.Getuid()
+}
+
+// controlScope identifies the physical client root, so isolated roots do
+// not share or retire each other's sockets in the short fallback folder.
+func controlScope() (string, bool) {
+	info, err := os.Stat(ConfigDir())
+	if err != nil || !info.IsDir() {
+		return "", false
+	}
+	st, ok := info.Sys().(*syscall.Stat_t)
+	if !ok || int(st.Uid) != os.Getuid() {
+		return "", false
+	}
+	return fmt.Sprintf("%x:%x", st.Dev, st.Ino), true
 }

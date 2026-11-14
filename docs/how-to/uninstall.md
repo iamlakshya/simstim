@@ -18,6 +18,16 @@ Linger, which `host add` turned on, stays on; `loginctl disable-linger` turns it
 
 ## From the laptop
 
+To forget one host, and keep the rest, run `host rm`. For a host that `host create` made, `--destroy` also deletes its VM, container or sandbox, with every session on it ([destroy a host](create-a-host.md#destroy-a-host)):
+
+<!-- test: help (removes the host) -->
+```sh
+simstim host rm my-server
+simstim host rm dev --destroy --confirm dev
+```
+
+To remove the client and everything it keeps:
+
 <!-- test: skip (removes the client) -->
 ```sh
 rm -f ~/.local/bin/simstim

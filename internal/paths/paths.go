@@ -43,6 +43,9 @@ func AlertsLog() string { return filepath.Join(StateDir(), "alerts.log") }
 // Holders lock it while they read or change it, and while they write the log.
 func AlertsRate() string { return filepath.Join(StateDir(), "alerts.rate") }
 
+// HostID is the host's 32-character hex ID file, created once on first run.
+func HostID() string { return filepath.Join(StateDir(), "host-id") }
+
 // SessionsDir holds one folder per session.
 func SessionsDir() string { return filepath.Join(StateDir(), "sessions") }
 

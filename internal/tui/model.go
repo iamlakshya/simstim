@@ -2,7 +2,6 @@ package tui
 
 import (
 	"context"
-	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -42,11 +41,13 @@ type Options struct {
 
 // Model is the launcher: one list at a time, and the dialogs drawn over it.
 type Model struct {
-	ctx      context.Context
-	be       Backend
-	settings client.Settings
-	now      func() time.Time
-	motion   bool
+	ctx          context.Context
+	cancelTier   context.CancelFunc
+	tierRequests chan tierQuestionRequest
+	be           Backend
+	settings     client.Settings
+	now          func() time.Time
+	motion       bool
 
 	width, height int
 	dark          bool
@@ -125,6 +126,8 @@ type Model struct {
 	bgWG          sync.WaitGroup
 	waiters       atomic.Int32
 	hostSaves     hostSaveCompletions
+	// tierWait lets the fake scheduler recognise an idle question reader.
+	tierWait func(func() tea.Msg) tea.Msg
 }
 
 // renameState is the inline rename of a session row.
@@ -141,8 +144,14 @@ type renameState struct {
 // New builds the launcher. It reads the saved hosts at once; everything
 // that touches the network runs later, in commands.
 func New(ctx context.Context, be Backend, o Options) *Model {
+	// The launcher draws its own screen: a wait of the client, such as for
+	// the lock of hosts.toml, writes nothing on it, and a host-ID change on
+	// Dial surfaces as a toast rather than stderr text.
+	ctx = client.WithWarnings(client.WithNotes(ctx, nil), nil)
+	ctx, cancelTier := context.WithCancel(ctx)
 	m := &Model{
 		ctx: ctx, be: be, now: o.Now, motion: o.Motion,
+		cancelTier: cancelTier, tierRequests: make(chan tierQuestionRequest, 1),
 		width: 80, height: 24, dark: true, focused: true,
 		autoSel:   true,
 		attach:    &client.AttachState{},
@@ -155,19 +164,17 @@ func New(ctx context.Context, be Backend, o Options) *Model {
 			return tea.Tick(d, func(time.Time) tea.Msg { return msg })
 		},
 	}
+	ctx = client.WithTierQuestion(client.WithoutTierLoginPrompt(ctx), m.askHostTier)
+	m.ctx = ctx
 	if m.now == nil {
 		m.now = time.Now
 	}
 	m.epoch, m.revealAt = m.now(), m.now()
 	m.settings = be.Settings()
 	commands = withKeymap(registry(), m.settings.Keymap)
-	hosts, err := be.LoadHosts(ctx)
-	m.loadErr = err
-	sort.SliceStable(hosts, func(i, j int) bool { return hosts[i].Name < hosts[j].Name })
-	for _, h := range hosts {
-		m.hosts = append(m.hosts, &hostConn{host: h})
-	}
+	m.hosts, m.loadErr = loadSavedHosts(ctx, be)
 	m.restore(o.Switcher)
+
 	if d, ok := be.(interface {
 		demoTraces(time.Time) map[sessKey][]time.Time
 	}); ok {
@@ -187,23 +194,6 @@ func New(ctx context.Context, be Backend, o Options) *Model {
 	return m
 }
 
-// Close closes every connection and saves what the launcher saw. Run calls
-// it after the program ends.
-func (m *Model) Close() {
-	m.pauseBg()
-	_ = m.drainHostSaves(true)
-	if w, ok := m.modal.(*wizard); ok {
-		w.stop()
-		w.conn = nil
-	}
-	if g, ok := m.modal.(*guide); ok {
-		m.stopGuide(g) // join cleanup and retain completed saved hosts
-	}
-	m.stopBundle() // a bundle that stops leaves no file
-	m.remember()()
-	m.conns.closeAll()
-}
-
 // Init starts the connections and the timers.
 func (m *Model) Init() tea.Cmd {
 	cmds := []tea.Cmd{
@@ -215,6 +205,7 @@ func (m *Model) Init() tea.Cmd {
 		m.after(latencyEvery, latencyTickMsg{}),
 		m.after(activityEvery, activityTickMsg{}),
 		m.debugOnStart(),
+		m.waitForTierQuestion(),
 	}
 	for _, h := range m.hosts {
 		cmds = append(cmds, m.dial(h))
@@ -354,6 +345,12 @@ func (m *Model) update(msg tea.Msg) tea.Cmd {
 		return nil
 	case opDoneMsg:
 		return m.onOpDone(msg)
+	case tierQuestionRequest:
+		return m.onTierQuestion(msg)
+	case tierQuestionEndedMsg:
+		return m.onTierQuestionEnded(msg)
+	case hostTierResolvedMsg:
+		return m.onHostTierResolved(msg)
 	case setupWarnMsg:
 		return m.toastSetupWarn(msg.warn)
 	case shellDoneMsg:
@@ -371,6 +368,8 @@ func (m *Model) update(msg tea.Msg) tea.Cmd {
 		return m.onAttachEnded(msg)
 	case hostSavedMsg:
 		return m.onHostSaved(msg)
+	case hostReloadedMsg:
+		return m.onHostReloaded(msg)
 	case setupMsg:
 		return m.onSetup(msg)
 	case editorDoneMsg:

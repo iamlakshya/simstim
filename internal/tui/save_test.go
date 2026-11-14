@@ -101,12 +101,13 @@ func TestACancelBeforeSaveHostsWritesNothing(t *testing.T) {
 // client.SaveHosts does.
 func TestTheLaunchersSaveStopsAtACancel(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-	if err := client.SaveHosts(context.Background(), []client.Host{{Name: "kept", SSH: "kept"}}); err != nil {
+	if err := client.SaveHostsContext(context.Background(), []client.Host{{Name: "kept", SSH: "kept"}}); err != nil {
 		t.Fatal(err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if err := (realBackend{}).SaveHosts(ctx, []client.Host{{Name: "new", SSH: "new"}}); !errors.Is(err, context.Canceled) {
+	host := client.Host{Name: "new", SSH: "new"}
+	if _, err := (realBackend{}).UpdateHostsContext(ctx, client.HostChange{Kind: "the launcher", Now: &host}); !errors.Is(err, context.Canceled) {
 		t.Errorf("the launcher's save after a cancel = %v", err)
 	}
 	if _, err := (realBackend{}).LoadHosts(ctx); !errors.Is(err, context.Canceled) {

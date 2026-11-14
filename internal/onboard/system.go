@@ -11,7 +11,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
-	"strings"
 	"time"
 
 	"github.com/iamlakshya/simstim/internal/client"
@@ -124,15 +123,14 @@ func (System) AddSSHHost(lines string) error {
 	return nil
 }
 
-// SSHWorks runs `ssh -o BatchMode=yes target true`: it works only when no
-// password, passphrase or host key question stands in the way. Like every
-// ssh command of the client, it forwards nothing to the host. It reads the
-// user's config through the client's generated one, which turns forwarding
-// off for a ProxyJump hop too, and it has a connection of its own, so it
-// never uses a master that the user's config names.
+// SSHWorks checks that `ssh target true` works only when no password,
+// passphrase or host key question stands in the way. Like every ssh
+// command of the client, it logs in only with a pinned key: the key that
+// the user's own settings trust for target (client.CheckLogin). It reads
+// the user's config through the client's generated one, forwards nothing,
+// and has a connection of its own.
 func (System) SSHWorks(ctx context.Context, target string) error {
-	cfg, err := client.DefaultSSHConfig()
-	if err != nil {
+	if _, err := client.DefaultSSHConfig(); err != nil {
 		var ue *client.UserError
 		if errors.As(err, &ue) {
 			return err
@@ -141,26 +139,22 @@ func (System) SSHWorks(ctx context.Context, target string) error {
 		return &client.UserError{Msg: "cannot write the SSH config that ssh needs: " + err.Error(),
 			Hint: "Make " + dir + " a folder that you can write to, or set XDG_CONFIG_HOME to one.", Code: "ssh_config_write"}
 	}
-	ctx, cancel := context.WithTimeout(ctx, 25*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 90*time.Second)
 	defer cancel()
-	args := slices.Concat([]string{"-F", cfg, "-o", "BatchMode=yes", "-o", "ConnectTimeout=15"},
-		client.NoForwarding(), client.NoPortForwards(), client.OwnConnection(), []string{"--", target, "true"})
-	cmd := exec.CommandContext(ctx, "ssh", args...)
-	cmd.WaitDelay = 2 * time.Second // a child of ssh may hold stderr open
-	var errb bytes.Buffer
-	cmd.Stderr = &errb
-	if err := cmd.Run(); err != nil {
-		msg := provider.Tail(errb.String(), 1)
-		if msg == "" {
-			msg = err.Error()
-		}
-		hint := client.SSHCommand(target) + " (run it yourself to see what it asks)"
-		if strings.Contains(msg, "Host key verification failed") {
-			hint = client.SSHCommand(target) + " (once, by hand: check the key's fingerprint, then answer yes)"
-		}
-		return &client.UserError{Msg: fmt.Sprintf("cannot log in to %s with ssh yet: %s", target, msg), Hint: hint, Code: "unreachable"}
+	err := client.CheckLogin(ctx, target)
+	if err == nil {
+		return nil
 	}
-	return nil
+	hint := client.SSHCommand(target) + " (run it yourself to see what it asks)"
+	if errors.Is(err, client.ErrUnchecked) {
+		return &client.UserError{Msg: fmt.Sprintf("cannot log in to %s with ssh yet: its host key is not in your known_hosts", target),
+			Hint: client.SSHCommand(target) + " (once, by hand: check the key's fingerprint, then answer yes)", Code: "unreachable"}
+	}
+	var ue *client.UserError
+	if errors.As(err, &ue) {
+		return &client.UserError{Msg: fmt.Sprintf("cannot log in to %s with ssh yet: %s", target, ue.Msg), Hint: hint, Code: "unreachable"}
+	}
+	return &client.UserError{Msg: fmt.Sprintf("cannot log in to %s with ssh yet: %v", target, err), Hint: hint, Code: "unreachable"}
 }
 
 // Create makes a host with the provider called kind (see Create). Progress

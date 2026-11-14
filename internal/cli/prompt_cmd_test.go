@@ -35,35 +35,47 @@ func mainRun(t *testing.T, args ...string) (string, string, int) {
 
 // promptingSSH is an ssh that would ask for a password without
 // BatchMode=yes, and writes a line of its own to stderr. It answers the
-// probe as a Linux host without the helper, and reaches nothing else.
-const promptingSSH = `echo "$@" >> "$HOME/ssh.log"
+// probe as a Linux host without the helper, shows a host key that the
+// user's settings trust (keyFake), and reaches nothing else.
+const promptingSSH = `case " $* " in *" -G "*) exit 0;; esac
+echo "$@" >> "$HOME/ssh.log"
 echo "ssh-noise: a banner from ssh" >&2
 case " $* " in *" BatchMode=yes "*) ;; *) echo "Password: " >&2; sleep 5;; esac
 for a; do last=$a; done
 case "$last" in *"uname -sm"*) echo "Linux aarch64"; exit 0;; esac
-exit 255
+` + keyFake + `exit 255
 `
 
-// The second acceptance line of C4: with --no-input, `host add box` fails
-// with exit code 4 and the flag --yes. Input off also means that SSH asks
-// nothing (BatchMode=yes), and that its own words stay off stderr.
+// The second acceptance line of C4, updated for H4's tier question: with
+// --no-input, `host add plain` asks for --tier first, and with --tier set it
+// fails with exit code 4 and the flag --yes. Input off also means that SSH
+// asks nothing (BatchMode=yes), and that its own words stay off stderr.
 func TestHostAddNoInputCommand(t *testing.T) {
 	if _, ok := helpers.For("linux", "arm64"); !ok {
 		t.Skip("this build has no helper for linux/arm64 (run just helpers)")
 	}
 	h := hosttest.New(t)
 	h.Script("ssh", promptingSSH)
+	hostShows(t, h.Home, "trusted") // the user's settings trust the host key: no question
 	t.Setenv("PATH", filepath.Join(h.Root, "bin")+":"+os.Getenv("PATH"))
 	out, errOut, code := mainRun(t, "host", "add", "plain", "--no-input")
-	if code != 4 || out != "" || !strings.Contains(errOut, "Error: host add needs a yes to install the helper on plain, and input is off.") ||
-		!strings.Contains(errOut, "Try: "+brand.Name+" host add plain --no-input --yes") {
+	if code != 4 || out != "" || !strings.Contains(errOut, "Error: host add needs the tier of plain (own, throwaway or shared), and input is off.") ||
+		!strings.Contains(errOut, "Try: "+brand.Name+" host add plain --no-input --tier <tier>") {
 		t.Fatalf("host add --no-input: exit %d\nstdout %q\nstderr %s", code, out, errOut)
+	}
+	out, errOut, code = mainRun(t, "host", "add", "plain", "--tier", "own", "--no-input")
+	if code != 4 || out != "" || !strings.Contains(errOut, "Error: host add needs a yes to install the helper on plain, and input is off.") ||
+		!strings.Contains(errOut, "Try: "+brand.Name+" host add plain --tier own --no-input --yes") {
+		t.Fatalf("host add --tier own --no-input: exit %d\nstdout %q\nstderr %s", code, out, errOut)
 	}
 	if strings.Contains(errOut, "ssh-noise") || strings.Contains(errOut, "Password") {
 		t.Errorf("ssh asked, or its words reached stderr:\n%s", errOut)
 	}
 	if _, err := client.FindHost("plain"); err == nil {
 		t.Error("the host was saved")
+	}
+	if client.HasPin("plain") {
+		t.Error("a host add that failed left a pin") // isolation spec 14.7.1
 	}
 	// Every ssh ran with BatchMode=yes, so none could ask: a test of the
 	// time it took would fail on a busy machine.
@@ -78,24 +90,31 @@ func TestHostAddNoInputCommand(t *testing.T) {
 	}
 
 	// With --json too, stderr gets only JSON lines.
-	if err := client.SaveHosts(context.Background(), []client.Host{{Name: "plain", SSH: "plain"}}); err != nil {
+	if err := client.SaveHostsContext(context.Background(), []client.Host{{Name: "plain", SSH: "plain"}}); err != nil {
 		t.Fatal(err)
 	}
+	pinFor(t, "plain") // no note of a new pin
 	out, errOut, code = mainRun(t, "host", "test", "plain", "--json")
 	if code != 1 || out != "" || strings.Count(errOut, "\n") != 1 || !json.Valid([]byte(errOut)) || strings.Contains(errOut, "Password") {
 		t.Errorf("host test --json: exit %d\nstdout %q\nstderr %q", code, out, errOut)
 	}
 }
 
-// host destroy needs -y with input off.
+// host rm --destroy needs --confirm with input off, and so does its old
+// name, host destroy, which warns and names the new form.
 func TestHostDestroyNoInputCommand(t *testing.T) {
 	withFake(t, nil)
-	if err := saveHost(context.Background(), client.Host{Name: "box", Machine: &client.Machine{Provider: "fake", ID: "fake-box"}}); err != nil {
+	if err := saveHostContext(context.Background(), client.Host{Name: "box", Machine: &client.Machine{Provider: "fake", ID: "fake-box"}}); err != nil {
 		t.Fatal(err)
 	}
-	got, code := lineErr(t, "host", "destroy", "box", "--no-input")
-	if code != 4 || !strings.Contains(got, "Try: "+brand.Name+" host destroy box --no-input -y") {
-		t.Errorf("host destroy --no-input: exit %d\n%s", code, got)
+	for _, args := range [][]string{{"host", "rm", "box", "--destroy", "--no-input"}, {"host", "destroy", "box", "--no-input"}} {
+		out, got, code := mainRun(t, args...)
+		if code != 4 || out != "" || !strings.Contains(got, "Try: "+brand.Name+" host rm box --destroy --confirm box") {
+			t.Errorf("%s: exit %d\n%s", strings.Join(args, " "), code, got)
+		}
+		if old := args[1] == "destroy"; old != strings.Contains(got, `Warning: "host destroy <host>" is now "host rm <host> --destroy"`) {
+			t.Errorf("%s: the warning of the old name:\n%s", strings.Join(args, " "), got)
+		}
 	}
 	if _, err := client.FindHost("box"); err != nil {
 		t.Error("the host was forgotten")
@@ -193,11 +212,11 @@ func TestSetupNoInputCommand(t *testing.T) {
 	hosttest.New(t)
 	got, code := lineErr(t, "setup", "--no-input")
 	if code != 4 || !strings.Contains(got, "Error: setup needs --host or --create, with --yes, to answer its questions, and input is off.") ||
-		!strings.Contains(got, "Try: "+brand.Name+" setup --no-input --host <host> --yes") {
+		!strings.Contains(got, "Try: "+brand.Name+" setup --no-input --host <host> --tier <tier> --yes") {
 		t.Errorf("setup --no-input: exit %d\n%s", code, got)
 	}
 	got, code = lineErr(t, "setup", "--host", "box", "--no-input")
-	if code != 4 || !strings.Contains(got, "Try: "+brand.Name+" setup --host box --no-input --yes") {
+	if code != 4 || !strings.Contains(got, "Try: "+brand.Name+" setup --host box --no-input --tier <tier> --yes") {
 		t.Errorf("setup --host box --no-input: exit %d\n%s", code, got)
 	}
 }
@@ -206,7 +225,7 @@ func TestSetupNoInputCommand(t *testing.T) {
 // terminal, and says how to attach to answer it.
 func TestAgentsInstallNoInput(t *testing.T) {
 	withFake(t, nil)
-	if err := saveHost(context.Background(), client.Host{Name: "box", Machine: &client.Machine{Provider: "fake", ID: "fake-box"}}); err != nil {
+	if err := saveHostContext(context.Background(), client.Host{Name: "box", Machine: &client.Machine{Provider: "fake", ID: "fake-box"}}); err != nil {
 		t.Fatal(err)
 	}
 	term, done := inTerminal(t, "agents", "install", "claude", "--host", "box", "--no-input")

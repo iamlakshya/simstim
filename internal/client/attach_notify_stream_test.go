@@ -158,9 +158,9 @@ func TestNotificationsPreserveC1AndUnicodeAtEverySplit(t *testing.T) {
 				t.Fatal(err)
 			}
 			a := &attacher{o: AttachOptions{Out: f}}
-			a.writeOutput(stream[:cut])
-			a.emitNotify(notice)
-			a.writeOutput(stream[cut:])
+			a.writeOutput(t.Context(), stream[:cut])
+			a.emitNotify(t.Context(), notice)
+			a.writeOutput(t.Context(), stream[cut:])
 			got, err := os.ReadFile(f.Name())
 			_ = f.Close()
 			if err != nil {
@@ -188,11 +188,11 @@ func TestLongControlStringsKeepBoundedNotificationQueue(t *testing.T) {
 		}
 		a := &attacher{o: AttachOptions{Out: f}}
 		data := []byte(intro + strings.Repeat("A", 128<<10))
-		a.writeOutput(data)
+		a.writeOutput(t.Context(), data)
 		var notices [][]byte
 		for i := range maxPendingNotify + 3 {
 			seq := []byte(fmt.Sprintf("\x1b]777;notify;title;notice%d\x1b\\", i))
-			a.emitNotify(seq)
+			a.emitNotify(t.Context(), seq)
 			notices = append(notices, seq)
 		}
 		if len(a.pendingNotify) != maxPendingNotify {
@@ -205,7 +205,7 @@ func TestLongControlStringsKeepBoundedNotificationQueue(t *testing.T) {
 		if !bytes.Equal(mid, data) {
 			t.Fatal("unterminated control string was changed")
 		}
-		a.writeOutput([]byte("\x1b\\OK"))
+		a.writeOutput(t.Context(), []byte("\x1b\\OK"))
 		got, err := os.ReadFile(f.Name())
 		_ = f.Close()
 		if err != nil {

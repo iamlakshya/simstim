@@ -165,8 +165,8 @@ func Attach(ctx context.Context, o AttachOptions) (AttachResult, error) {
 	a.guard = newPasteGuard(clipMemoryAt(clipPath()))
 	// Remember the title, to put it back on detach. While attached the
 	// title is the agent's: the client draws nothing of its own.
-	a.write([]byte("\x1b[22;0t"))
-	a.begin(att, o.State, rows)
+	a.write(ctx, []byte("\x1b[22;0t"))
+	a.begin(ctx, att, o.State, rows)
 
 	runErr := a.loop(ctx)
 
@@ -176,10 +176,11 @@ func Attach(ctx context.Context, o AttachOptions) (AttachResult, error) {
 	a.res.ReaderStuck = a.in.finish()
 	// Put the terminal back exactly as we found it: undo the session's modes,
 	// never with RIS, which would wipe the scrollback.
-	a.write(a.tracker.M.ResetSequence())
-	a.endGuard()
-	a.flushPendingNotify()
-	a.write([]byte("\x1b]9;4;0\x1b\\\x1b[23;0t"))
+	cleanupCtx := context.WithoutCancel(ctx)
+	a.write(cleanupCtx, a.tracker.M.ResetSequence())
+	a.endGuard(cleanupCtx)
+	a.flushPendingNotify(cleanupCtx)
+	a.write(cleanupCtx, []byte("\x1b]9;4;0\x1b\\\x1b[23;0t"))
 
 	o.State.Key, o.State.Offset, o.State.Modes, o.State.Valid = a.key, a.cu.Offset, a.tracker.M, true
 	if a.res.Ended != nil {
@@ -191,17 +192,17 @@ func Attach(ctx context.Context, o AttachOptions) (AttachResult, error) {
 // write sends bytes to the terminal: the client's own, and the session's
 // title and modes that it sends again. The paste guard reads every byte that
 // the terminal gets, and only reads it.
-func (a *attacher) write(b []byte) {
+func (a *attacher) write(ctx context.Context, b []byte) {
 	if len(b) > 0 {
-		a.guard.observe(b)
+		a.guard.observe(ctx, b)
 		_, _ = a.o.Out.Write(b)
 	}
 }
 
 // show sends the session's bytes to the terminal, unchanged, then any
 // notice that waited for the terminal to be between sequences.
-func (a *attacher) show(b []byte) {
-	a.writeOutput(b)
+func (a *attacher) show(ctx context.Context, b []byte) {
+	a.writeOutput(ctx, b)
 }
 
 func (a *attacher) size() (cols, rows, xpx, ypx int) { return termSize(a.o.Out) }
@@ -242,13 +243,13 @@ func (a *attacher) handshake(last int64, cols, rows, xpx, ypx int, reconnect boo
 }
 
 // begin prepares the screen for the bytes that follow.
-func (a *attacher) begin(att proto.Attached, st *AttachState, rows int) {
+func (a *attacher) begin(ctx context.Context, att proto.Attached, st *AttachState, rows int) {
 	a.cu.History(att.Live)
 	if att.Mode == "replay" && st.Valid && st.Key == a.key {
 		// The terminal still shows this session up to st.Offset: put its modes back and continue.
 		a.tracker = &term.Tracker{M: st.Modes}
 		a.cu.Offset = att.From
-		a.write(st.Modes.RestoreSequence())
+		a.write(ctx, st.Modes.RestoreSequence())
 		return
 	}
 	// A full redraw. Keep what is on screen in the scrollback, then start clean.
@@ -258,20 +259,20 @@ func (a *attacher) begin(att proto.Attached, st *AttachState, rows int) {
 	// For "snapshot", a TSnapshot frame redraws the screen as of From, and the
 	// output from From follows; bytes before Live are history and are sanitised.
 	if a.o.Settings.Attach.Scrollback == "clear" {
-		a.write([]byte("\x1b[H\x1b[2J\x1b[3J"))
+		a.write(ctx, []byte("\x1b[H\x1b[2J\x1b[3J"))
 	} else {
-		a.write([]byte(fmt.Sprintf("\x1b[%d;1H%s\x1b[H", rows, strings.Repeat("\n", rows))))
+		a.write(ctx, []byte(fmt.Sprintf("\x1b[%d;1H%s\x1b[H", rows, strings.Repeat("\n", rows))))
 	}
-	a.flushPendingNotify()
+	a.flushPendingNotify(ctx)
 }
 
 // output shows bytes from offset off, skipping any the terminal already has.
-func (a *attacher) output(off int64, data []byte) {
+func (a *attacher) output(ctx context.Context, off int64, data []byte) {
 	show, fresh := a.cu.Feed(off, data)
 	if fresh == nil {
 		return // the terminal already shows it
 	}
-	a.writeOutput(show)
+	a.writeOutput(ctx, show)
 	a.tracker.Feed(fresh)
 }
 
@@ -302,9 +303,9 @@ func (a *attacher) loop(ctx context.Context) error {
 		case <-watch.C:
 			a.watchOthers(ctx, others)
 		case list := <-others:
-			a.notifyOthers(list)
+			a.notifyOthers(ctx, list)
 		case f := <-a.conn.Stream():
-			if done, err := a.frame(f); done || err != nil {
+			if done, err := a.frame(ctx, f); done || err != nil {
 				return err
 			}
 		case b, ok := <-a.inCh:
@@ -380,12 +381,12 @@ func (a *attacher) heartbeat() {
 }
 
 // frame handles one frame from the host. done is true when the attach is over.
-func (a *attacher) frame(f proto.Frame) (done bool, err error) {
+func (a *attacher) frame(ctx context.Context, f proto.Frame) (done bool, err error) {
 	switch f.Type {
 	case proto.TOutput:
 		off, data, err := proto.DecodeOutput(f.Payload)
 		if err == nil {
-			a.output(off, data)
+			a.output(ctx, off, data)
 			if a.tr != nil {
 				a.tr.drawn(off, len(data))
 			}
@@ -393,7 +394,7 @@ func (a *attacher) frame(f proto.Frame) (done bool, err error) {
 	case proto.TSnapshot:
 		// A redraw of the current screen, made by the host's terminal emulator.
 		// It contains no queries, so it goes straight to the terminal.
-		a.show(f.Payload)
+		a.show(ctx, f.Payload)
 		a.tracker.Feed(f.Payload)
 	case proto.TEnded:
 		var e proto.Ended

@@ -64,7 +64,7 @@ func twoHosts(t *testing.T) *hosttest.Transport {
 	t.Helper()
 	th := newTestHost(t)
 	nuc, tr := th.h.ClientHost("nuc")
-	if err := client.SaveHosts(context.Background(), []client.Host{th.ch, nuc}); err != nil {
+	if err := client.SaveHostsContext(context.Background(), []client.Host{th.ch, nuc}); err != nil {
 		t.Fatal(err)
 	}
 	return tr

@@ -66,7 +66,7 @@ func TestTheBundleHoldsNoCanary(t *testing.T) {
 	t.Setenv("USER", fakeUser)
 	bundle.SetHostname(t, fakeLaptop+".local")
 	ch, _ := h.ClientHost(fakeHost)
-	if err := client.SaveHosts(context.Background(), []client.Host{ch, {Name: "jumpy", SSH: fakeUser + "@jump.example.net:2222"}}); err != nil {
+	if err := client.SaveHostsContext(context.Background(), []client.Host{ch, {Name: "jumpy", SSH: fakeUser + "@jump.example.net:2222"}}); err != nil {
 		t.Fatal(err)
 	}
 	if err := alerts.Save(paths.AlertsConfig(), api.AlertsConfig{Destinations: []api.AlertDestination{

@@ -18,10 +18,8 @@ func TestLocalFixes(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("the client shares no SSH connections on Windows, so it has no control sockets to fix")
 	}
-	cfg, cache := t.TempDir(), shortDir(t)
-	t.Setenv("XDG_CONFIG_HOME", cfg)
-	t.Setenv("XDG_CACHE_HOME", cache)
-	if err := SaveHosts(context.Background(), []Host{{Name: "kept", SSH: "kept"}}); err != nil {
+	sshDirs(t)
+	if err := SaveHostsContext(context.Background(), []Host{{Name: "kept", SSH: "kept"}}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := writeWrapper(Host{Name: "kept", SSH: "kept"}); err != nil {
@@ -30,25 +28,24 @@ func TestLocalFixes(t *testing.T) {
 	if _, err := writeWrapper(Host{Name: "gone", SSH: "gone"}); err != nil {
 		t.Fatal(err)
 	}
-	cm := filepath.Join(CacheDir(), "cm")
-	_ = os.MkdirAll(cm, 0o700)
-	live, err := net.Listen("unix", filepath.Join(cm, "live"))
+	unknown := filepath.Join(ConfigDir(), "ssh", "config-user")
+	if err := os.WriteFile(unknown, []byte("# personal config\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	dead := indexedControlFixture(t, Host{Name: "kept", SSH: "kept"}, strings.Repeat("k", 26))
+	livePath := filepath.Join(filepath.Dir(dead), "nf-"+strings.Repeat("b", 40))
+	live, err := net.Listen("unix", livePath)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer live.Close()
-	dead, err := net.Listen("unix", filepath.Join(cm, "dead"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	dead.(*net.UnixListener).SetUnlinkOnClose(false)
-	dead.Close()
+	deadControlSocket(t, dead)
 
 	fixes := LocalFixes(false, nil)
 	if len(fixes) != 2 || fixes[0].ID != "ssh-configs" || fixes[1].ID != "control-sockets" {
 		t.Fatalf("fixes %+v", fixes)
 	}
-	if !strings.HasSuffix(fixes[0].Command, "config-gone") || !strings.HasSuffix(fixes[1].Command, "/dead") {
+	if !strings.HasSuffix(fixes[0].Command, wrapperPath(Host{Name: "gone"})) || !strings.HasSuffix(fixes[1].Command, dead) {
 		t.Fatalf("commands %q %q", fixes[0].Command, fixes[1].Command)
 	}
 	for _, f := range LocalFixes(true, []string{"ssh-configs", "control-sockets"}) {
@@ -58,7 +55,8 @@ func TestLocalFixes(t *testing.T) {
 	}
 	for p, want := range map[string]bool{
 		wrapperPath(Host{Name: "kept"}): true, wrapperPath(Host{Name: "gone"}): false,
-		filepath.Join(cm, "live"): true, filepath.Join(cm, "dead"): false,
+		unknown:  true,
+		livePath: true, dead: false,
 	} {
 		if _, err := os.Stat(p); (err == nil) != want {
 			t.Errorf("%s kept = %v, want %v", p, err == nil, want)
@@ -131,22 +129,16 @@ func TestACancelBetweenTwoFixesStartsNoSecond(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("the client shares no SSH connections on Windows, so it has no control sockets to fix")
 	}
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-	t.Setenv("XDG_CACHE_HOME", shortDir(t))
+	sshDirs(t)
+	kept := Host{Name: "kept", SSH: "kept"}
+	if err := SaveHosts(context.Background(), []Host{kept}); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := writeWrapper(Host{Name: "gone", SSH: "gone"}); err != nil {
 		t.Fatal(err)
 	}
-	cm := filepath.Join(CacheDir(), "cm")
-	if err := os.MkdirAll(cm, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	dead := filepath.Join(cm, "dead")
-	l, err := net.Listen("unix", dead)
-	if err != nil {
-		t.Fatal(err)
-	}
-	l.(*net.UnixListener).SetUnlinkOnClose(false)
-	_ = l.Close()
+	dead := indexedControlFixture(t, kept, strings.Repeat("k", 26))
+	deadControlSocket(t, dead)
 	fixes, err := ApplyLocalFixes(cancelAfterFirst(t), []string{"ssh-configs", "control-sockets"})
 	if !errors.Is(err, context.Canceled) || len(fixes) != 2 {
 		t.Fatalf("a cancel between two fixes: %+v, %v", fixes, err)
@@ -159,6 +151,95 @@ func TestACancelBetweenTwoFixesStartsNoSecond(t *testing.T) {
 	}
 	if _, err := os.Stat(dead); err != nil {
 		t.Errorf("the second fix removed its socket after the cancel: %v", err)
+	}
+}
+
+// doctor --fix removes only the SSH configs that the client generated:
+// those of hosts that are gone, and those under an old file name, which it
+// counts apart. A file that a user made, such as a hand-made config-sandbox,
+// and a file that a saved host's ssh_config names both stay.
+func TestDoctorFixRemovesOnlyGeneratedConfigs(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	dir := filepath.Join(ConfigDir(), "ssh")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	work := filepath.Join(dir, "config-work")
+	box := Host{Name: "box", SSH: "box"}
+	if err := SaveHosts(context.Background(), []Host{box, {Name: "sandbox", SSH: "sandbox"}, {Name: "work", SSH: "work", SSHConfig: work}}); err != nil {
+		t.Fatal(err)
+	}
+	generated := func(name string) string {
+		return wrapperHeader + `"` + name + `". Do not edit; it is rewritten on each run.` + "\n"
+	}
+	files := map[string]string{
+		filepath.Join(dir, "config-sandbox"): "Host sandbox\n    HostName 203.0.113.2\n",
+		work:                                 generated("old") + "Host work\n",
+		filepath.Join(dir, "config-box"):     generated("box"),
+		wrapperPath(Host{Name: "gone"}):      generated("gone"),
+	}
+	for p, text := range files {
+		if err := os.WriteFile(p, []byte(text), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := writeWrapper(box); err != nil {
+		t.Fatal(err)
+	}
+	fixes := LocalFixes(false, nil)
+	if len(fixes) != 1 || fixes[0].Problem != "2 generated SSH config(s) that no host uses: 1 for hosts you removed, 1 under an old file name" {
+		t.Fatalf("fixes %+v", fixes)
+	}
+	LocalFixes(true, []string{"ssh-configs"})
+	for p, want := range map[string]bool{
+		filepath.Join(dir, "config-sandbox"): true, work: true, wrapperPath(box): true,
+		filepath.Join(dir, "config-box"): false, wrapperPath(Host{Name: "gone"}): false,
+	} {
+		if _, err := os.Stat(p); (err == nil) != want {
+			t.Errorf("%s kept = %v, want %v", filepath.Base(p), err == nil, want)
+		}
+	}
+}
+
+// The forget of a host also removes the SSH config that an earlier client
+// generated for it under its name alone, but never a file that a user made
+// under that name.
+func TestTheForgetRemovesTheOldGeneratedConfig(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	box, mine := Host{Name: "box", SSH: "box"}, Host{Name: "mine", SSH: "mine"}
+	if err := SaveHosts(context.Background(), []Host{box, mine}); err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Join(ConfigDir(), "ssh")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	old := filepath.Join(dir, "config-box")
+	made := filepath.Join(dir, "config-mine")
+	if err := os.WriteFile(old, []byte(wrapperHeader+`"box". Do not edit; it is rewritten on each run.`+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(made, []byte("Host mine\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, h := range []Host{box, mine} {
+		if err := UpdateHosts(context.Background(), HostChange{Kind: "host rm", Was: &h}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := os.Stat(old); err == nil {
+		t.Error("the old generated config of box stays")
+	}
+	if _, err := os.Stat(made); err != nil {
+		t.Errorf("the forget removed a file that a user made: %v", err)
 	}
 }
 
@@ -196,4 +277,33 @@ func shortDir(t *testing.T) string {
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(dir) })
 	return dir
+}
+
+// indexedControlFixture uses the same private marker/epoch publication as
+// SSH commands. A basename alone never makes a doctor fixture owned.
+func indexedControlFixture(t *testing.T, h Host, key string) string {
+	t.Helper()
+	base := controlFallbackDir(uint32(os.Getuid()))
+	unlock, err := lockPin(context.Background(), h.Name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	epoch := markControl(base, h.Name, key)
+	unlock()
+	if epoch == "" {
+		t.Fatal("the canonical index did not publish the owned epoch")
+	}
+	return filepath.Join(epoch, "nf-"+strings.Repeat("a", 40))
+}
+
+func deadControlSocket(t *testing.T, path string) {
+	t.Helper()
+	listener, err := net.ListenUnix("unix", &net.UnixAddr{Net: "unix", Name: path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	listener.SetUnlinkOnClose(false)
+	if err := listener.Close(); err != nil {
+		t.Fatal(err)
+	}
 }

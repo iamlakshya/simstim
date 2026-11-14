@@ -38,6 +38,23 @@ jobs:
           for arch in amd64 arm64; do cp vt/zig-out/linux/shadow-vt-$arch internal/client/helpers/vt-linux-$arch; done
       - run: go vet ./...
       - run: go test -race -count=1 ./...
+      - name: Pinned host keys against real localhost SSH servers
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y openssh-server openssh-client
+          pin_home=$(mktemp -d "$RUNNER_TEMP/pin-home.XXXXXX")
+          cleanup() { sudo python3 -c 'import shutil,sys; shutil.rmtree(sys.argv[1])' "$pin_home"; }
+          trap cleanup EXIT
+          mkdir -p "$pin_home/config" "$pin_home/state" "$pin_home/data" "$pin_home/cache" "$pin_home/run" "$pin_home/gnupg" "$pin_home/tmp"
+          chmod 700 "$pin_home/run" "$pin_home/gnupg"
+          sudo env -i PATH="$PATH" HOME="$pin_home" USERPROFILE="$pin_home" \
+            XDG_CONFIG_HOME="$pin_home/config" XDG_STATE_HOME="$pin_home/state" \
+            XDG_DATA_HOME="$pin_home/data" XDG_CACHE_HOME="$pin_home/cache" \
+            XDG_RUNTIME_DIR="$pin_home/run" GNUPGHOME="$pin_home/gnupg" TMPDIR="$pin_home/tmp" \
+            GIT_CONFIG_GLOBAL="$pin_home/gitconfig" GIT_CONFIG_NOSYSTEM=1 \
+            GOCACHE="$pin_home/go-cache" \
+            GOMODCACHE="$(go env GOMODCACHE)" GOTOOLCHAIN=local PIN_SSHD=1 \
+            go test -race -count=3 -run '^TestRealSSHD' ./internal/client
       - name: The link's tests again, over a pipe with no buffer
         env:
           LINK_TEST_PIPE: "1"
@@ -82,7 +99,7 @@ jobs:
 
   docker-host:
     # `host create docker`, then the end-to-end suite against the container,
-    # then `host destroy`: the exec transport, proved live (record 0013).
+    # then `host rm --destroy`: the exec transport, proved live (record 0013).
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -112,7 +129,7 @@ jobs:
         run: python3 test/e2e/run.py bin/client
       - name: Destroy it
         if: always()
-        run: bin/client host destroy ci --yes --force
+        run: bin/client host rm ci --destroy --confirm ci --force
 
   docs-impact:
     # A pull request that changes commands, config, keys or agents must change

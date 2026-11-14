@@ -1,0 +1,24 @@
+
+
+
+
+
+
+
+                            ⣀⡠⠤⢄⡀   ⣀⣀⣀    ⢀⠤⠒⠊⠉⠉⠉⠑⠢⠤⡀
+                        ⢀⡠⠒⠉    ⠈⢑⢔⠉   ⠑⢄⡠⠒⠁       ⣀⢤⣚⣓⣦⣤⣀
+  ── Add a host ─────────────────────────────────────────────── step 2 of 6 ──
+
+    Testing raspberry
+
+    ○ host key    not in your known_hosts
+
+    raspberry shows the host key
+    SHA256:kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk, which your
+    known_hosts does not name. Check it on the machine first:
+
+      ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub
+
+    Pin it only if they match. Every connection then checks it.
+
+    enter pin this key   esc back

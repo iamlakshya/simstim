@@ -23,7 +23,7 @@ func notified(t *testing.T, lists ...[]Session) string {
 	defer f.Close()
 	a := &attacher{o: AttachOptions{Host: Host{Name: "box"}, Session: "mine", Out: f}}
 	for _, l := range lists {
-		a.notifyOthers(l)
+		a.notifyOthers(t.Context(), l)
 	}
 	b, err := os.ReadFile(f.Name())
 	if err != nil {
@@ -142,17 +142,17 @@ func TestNotifyDefersUntilGroundBoundary(t *testing.T) {
 				o:       AttachOptions{Host: Host{Name: "box"}, Session: "mine", Out: f},
 				tracker: term.NewTracker(),
 			}
-			a.notifyOthers([]Session{{ID: "b", Name: "build", State: "working"}})
+			a.notifyOthers(t.Context(), []Session{{ID: "b", Name: "build", State: "working"}})
 
-			a.output(0, tc.part1)
-			a.notifyOthers([]Session{{ID: "b", Name: "build", State: "exited"}})
+			a.output(t.Context(), 0, tc.part1)
+			a.notifyOthers(t.Context(), []Session{{ID: "b", Name: "build", State: "exited"}})
 			if mid, err := os.ReadFile(f.Name()); err != nil {
 				t.Fatal(err)
 			} else if strings.Contains(string(mid), "777;notify") {
 				t.Fatalf("notification emitted mid-sequence (%d bytes)", len(mid))
 			}
 
-			a.output(int64(len(tc.part1)), tc.part2)
+			a.output(t.Context(), int64(len(tc.part1)), tc.part2)
 			gotBytes, err := os.ReadFile(f.Name())
 			if err != nil {
 				t.Fatal(err)
@@ -201,19 +201,19 @@ func TestReconnectControlsRestoreNotificationBoundary(t *testing.T) {
 		key: "box/unsafe\x1b]52;c;YQ\x07\u009c\u202e",
 	}
 	a.outStream.feed([]byte("\x1b]2;unfinished"))
-	finish := a.reconnectNotice()
+	finish := a.reconnectNotice(t.Context())
 	if !a.outStream.ground() {
 		t.Fatal("reconnect controls left the old OSC active")
 	}
-	a.emitNotify([]byte("NOTICE-START"))
+	a.emitNotify(t.Context(), []byte("NOTICE-START"))
 	a.outStream.feed([]byte("\x1b["))
 	finish()
 	if !a.outStream.ground() {
 		t.Fatal("restoring the reconnect title left the old CSI active")
 	}
 	a.outStream.feed([]byte("\x1b]2;unfinished"))
-	a.clearFlash()
-	a.emitNotify([]byte("NOTICE-REPLAY"))
+	a.clearFlash(t.Context())
+	a.emitNotify(t.Context(), []byte("NOTICE-REPLAY"))
 	data, err := os.ReadFile(f.Name())
 	if err != nil {
 		t.Fatal(err)
@@ -240,17 +240,17 @@ func TestRestoredHostTitleDoesNotClaimSafeGround(t *testing.T) {
 	// The old title parser could keep this as an OSC token, although the
 	// ESC P aborts that OSC and leaves an unfinished DCS on the terminal.
 	a.tracker.M.Title = []byte("\x1b]2;title\x1bPqpayload\x07")
-	finish := a.reconnectNotice()
+	finish := a.reconnectNotice(t.Context())
 	finish()
 	if a.outStream.ground() {
 		t.Fatal("restored host bytes were assumed to be a complete control")
 	}
-	a.notify("NOTICE")
+	a.notify(t.Context(), "NOTICE")
 	before, err := os.ReadFile(f.Name())
 	if err != nil || bytes.Contains(before, []byte("777;notify")) {
 		t.Fatalf("notification split restored host title: %v", err)
 	}
-	a.writeOutput([]byte("\x1b\\OK"))
+	a.writeOutput(t.Context(), []byte("\x1b\\OK"))
 	after, err := os.ReadFile(f.Name())
 	if err != nil || !bytes.Contains(after, []byte("777;notify")) {
 		t.Fatalf("notification did not follow completed restored title: %v", err)

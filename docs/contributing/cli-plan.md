@@ -182,7 +182,7 @@ Some isolation tasks depend on tasks of this plan, so their commands use the sha
   - `host upgrade <host>` updates the helper. Today the user runs `host add` again.
   - With `--yes`, `host add` needs `--tier` once the isolation plan adds tiers (H4). Without it, the command fails with exit code 4 and the flag to pass.
 - **Spec:** [cli-spec.md, section 11](cli-spec.md#11-host-commands-c7) and [section 3](cli-spec.md#3-old-names-and-warnings-c5-c6-c7).
-- **Files:** `internal/cli/host.go`, `internal/cli/create.go`, new `internal/cli/host_set.go`, `internal/cli/deprecated.go`, `internal/client/config.go`.
+- **Files:** `internal/cli/host.go`, `internal/cli/create.go`, new `internal/cli/host_set.go`, `internal/cli/host_show.go`, `internal/cli/host_rm.go` and `internal/cli/host_upgrade.go`, `internal/cli/deprecated.go`, and new `internal/client/details.go` (the lines that `host show` and the launcher's host details share) and `internal/client/removal.go` (the record of `host rm`).
 - **Acceptance:** `host set box idle=2h` does what `host idle box 2h` did. `host rm` on a created machine says that it holds 2 sessions. It asks "Type box to delete the machine too, or press Enter to keep it:". `host show box --json` matches the launcher's details.
 - **Tests:** unit tests, golden tests of the prompts, and an end-to-end run against a test host.
 - **Docs:** `docs/how-to/add-a-host.md`, `docs/how-to/create-a-host.md`, `docs/how-to/uninstall.md`, the reference through `just docs`.

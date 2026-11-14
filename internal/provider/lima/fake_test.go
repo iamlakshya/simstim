@@ -1,6 +1,10 @@
 package lima
 
 import (
+	"context"
+	"errors"
+
+	"github.com/iamlakshya/simstim/internal/client"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -129,6 +133,18 @@ func fakeLima(t *testing.T, system string) string {
 	old := goos
 	goos = system
 	t.Cleanup(func() { goos = old })
+	// Stub only the new VM key check, with no SSH or persisted pin.
+	oldPin := pinHostKey
+	pinHostKey = func(_ context.Context, h client.Host) (client.Pin, error) {
+		if err := os.WriteFile(filepath.Join(dir, "pinned"), []byte(h.Name+" "+h.SSH+" "+h.SSHConfig), 0600); err != nil {
+			return client.Pin{}, err
+		}
+		if _, err := os.Stat(filepath.Join(dir, "pin-fails")); err == nil {
+			return client.Pin{}, errors.New("ssh: connect to host 127.0.0.1 port 60022: Connection refused")
+		}
+		return client.Pin{Fingerprint: "SHA256:" + strings.Repeat("A", 43), Type: "ssh-ed25519", Keys: 1, Source: client.PinFirstUse}, nil
+	}
+	t.Cleanup(func() { pinHostKey = oldPin })
 	return dir
 }
 

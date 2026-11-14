@@ -243,16 +243,19 @@ func TestEveryPromptHasARow(t *testing.T) {
 			t.Errorf("%q: no such command", q.cmd)
 			continue
 		}
-		var f string
-		if strings.HasPrefix(q.flag, "--") {
-			if cmd.Flags().Lookup(strings.TrimPrefix(q.flag, "--")) != nil {
-				f = q.flag
+		// A row's flags may be more than one, with their values, as in
+		// "--destroy --confirm <host>".
+		for _, f := range strings.Fields(q.flag) {
+			switch {
+			case strings.HasPrefix(f, "--"):
+				if cmd.Flags().Lookup(strings.TrimPrefix(f, "--")) == nil {
+					t.Errorf("%s: no flag %s", q.cmd, f)
+				}
+			case strings.HasPrefix(f, "-"):
+				if cmd.Flags().ShorthandLookup(strings.TrimPrefix(f, "-")) == nil {
+					t.Errorf("%s: no flag %s", q.cmd, f)
+				}
 			}
-		} else if fl := cmd.Flags().ShorthandLookup(strings.TrimPrefix(q.flag, "-")); fl != nil {
-			f = q.flag
-		}
-		if f == "" {
-			t.Errorf("%s: no flag %s", q.cmd, q.flag)
 		}
 		found := false
 		for _, r := range rows {
@@ -312,7 +315,7 @@ func TestCommandsWithNoInput(t *testing.T) {
 
 	// doctor --fix: each fix needs -y.
 	_ = os.MkdirAll(filepath.Join(client.ConfigDir(), "ssh"), 0o700)
-	_ = os.WriteFile(filepath.Join(client.ConfigDir(), "ssh", "config-gone"), []byte("# generated\n"), 0o600)
+	_ = os.WriteFile(filepath.Join(client.ConfigDir(), "ssh", "config-gone"), generatedSSHFixture("gone"), 0o600)
 	got, code = lineErr(t, "doctor", "--fix", "--no-input")
 	if code != 4 || !strings.Contains(got, "doctor needs a yes for each fix, and input is off") || !strings.Contains(got, "Try: "+brand.Name+" doctor --fix --no-input -y") {
 		t.Errorf("doctor --fix: exit %d\n%s", code, got)
@@ -342,33 +345,6 @@ func TestCommandsWithNoInput(t *testing.T) {
 	t.Setenv(noInputEnv, "1")
 	if _, code = lineErr(t, "doctor", "--fix"); code != 4 {
 		t.Errorf("doctor --fix with %s=1 exits with %d", noInputEnv, code)
-	}
-}
-
-// host destroy needs -y with input off, and leaves the host untouched on
-// no or when input is off.
-func TestHostQuestionsWithInputOff(t *testing.T) {
-	withFake(t, nil)
-	if err := saveHost(context.Background(), client.Host{Name: "box", Machine: &client.Machine{Provider: "fake", ID: "fake-box"}}); err != nil {
-		t.Fatal(err)
-	}
-	p := quietPrompts(context.Background())
-	p.line, p.flagsAt = []string{"host", "destroy", "box"}, 3
-	err := destroyHost(context.Background(), p, "box", false, false)
-	var ue *client.UserError
-	if !errors.As(err, &ue) || ue.Kind != client.KindNeedsAnswer || ue.Hint != brand.Name+" host destroy box -y" {
-		t.Fatalf("destroy with input off: %+v", err)
-	}
-	if _, err := client.FindHost("box"); err != nil {
-		t.Fatal("the host was forgotten")
-	}
-	// A no is a cancel, and nothing changes.
-	var out bytes.Buffer
-	if err := destroyHost(context.Background(), testPrompts("n\n", &out), "box", false, false); !isCancel(err) {
-		t.Fatalf("destroy, no: %v", err)
-	}
-	if !strings.Contains(out.String(), "Delete the fake machine fake-box, with its disk and every session on it? [y/N] ") {
-		t.Fatalf("destroy asked %q", out.String())
 	}
 }
 

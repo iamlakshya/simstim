@@ -44,11 +44,13 @@ exec sh -c "$last"
 
 func TestSSHTransportRoundTrip(t *testing.T) {
 	fakeSSH(t)
+	client.PinForTest(t, "box")
 	clienttest.RoundTrip(t, &client.SSH{Host: client.Host{Name: "box", SSH: "box"}})
 }
 
 func TestSSHTransportUnreachable(t *testing.T) {
 	fakeSSH(t)
+	client.PinForTest(t, "box")
 	s := &client.SSH{Host: client.Host{Name: "box", SSH: "unreachable"}}
 	p, err := s.Start(context.Background(), "true")
 	if err != nil {
@@ -68,6 +70,7 @@ func TestSSHTransportUnreachable(t *testing.T) {
 
 func TestSSHTransportRun(t *testing.T) {
 	fakeSSH(t)
+	client.PinForTest(t, "box")
 	s := &client.SSH{Host: client.Host{Name: "box", SSH: "box"}}
 	out, err := s.Run(context.Background(), "tr a-z A-Z", bytes.NewReader([]byte("hello")))
 	if err != nil || string(out) != "HELLO" {
@@ -80,6 +83,11 @@ func TestDialNotInstalledOverAnyTransport(t *testing.T) {
 	// The fake ssh runs the bridge command locally, where the helper is not
 	// installed: the shell says "not found", which means "install it".
 	h := client.Host{Name: "nowhere-" + filepath.Base(t.TempDir()), SSH: "box"}
+	if err := client.StagePin(context.Background(), h.Name); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { client.AbortPin(h.Name) })
+	client.PinForTest(t, h.Name)
 	_, err := client.Dial(context.Background(), h, false)
 	var ue *client.UserError
 	if !errors.As(err, &ue) || !strings.HasSuffix(ue.Hint, " host add "+h.Name) {
@@ -93,6 +101,7 @@ func TestDialNotInstalledOverAnyTransport(t *testing.T) {
 // when it fails.
 func TestInteractiveStderrIsClean(t *testing.T) {
 	fakeSSH(t)
+	client.PinForTest(t, "box")
 	const remote = `printf 'a\033c b\033]52;c;aGk=\007 c\342\200\256d\342\200\213e\nprompt: ' >&2`
 	for _, tail := range []string{"", "; exit 3"} {
 		f, err := os.CreateTemp(t.TempDir(), "stderr")

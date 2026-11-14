@@ -63,7 +63,8 @@ func hostDoctorCmd() *cobra.Command {
 			"that brings sessions back after a reboot. It warns when the host has less memory than\n" +
 			"an agent's docs ask for. It warns when a program in one session could drive another\n" +
 			"through its socket. For a VM made by host create lima, it checks, on this computer, that\n" +
-			"the VM cannot reach services on this computer's loopback address.\n\n" +
+			"the VM cannot reach services on this computer's loopback address. On this computer, it\n" +
+			"shows the host's pinned host key.\n\n" +
 			"With --fix it offers to fix what it found: sessions that stop when you log out, the start-up\n" +
 			"entry and Ghostty's terminfo. It also fixes a broken current helper link, stale session sockets\n" +
 			"and old helper versions. Each fix is shown and explained before it runs. A fix that needs root\n" +
@@ -89,6 +90,11 @@ func hostDoctorCmd() *cobra.Command {
 			d, err := conn.Doctor(ctx)
 			if err != nil {
 				return err
+			}
+			if c, ok, err := client.PinCheckContext(ctx, h); err != nil {
+				return err
+			} else if ok {
+				d.Checks = append(d.Checks, c) // checked on this computer
 			}
 			if h.Machine != nil {
 				if check := machineChecks[h.Machine.Provider]; check != nil {

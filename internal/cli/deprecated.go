@@ -93,12 +93,26 @@ var oldForms = []oldForm{
 		ID: "rm without -y", Old: `"rm" without -y, with input off`, New: "rm -y", Kind: "behaviour", Cmd: "rm",
 		Version: "0.2.0", Code: "rm_needs_yes", From: `without a terminal, "rm" needs -y`,
 	},
+	{
+		ID: "host idle", Old: "host idle <host> <time>", New: "host set <host> idle=<time>", Kind: "command", Cmd: "host set",
+		Version: "0.2.0", Code: "old_name",
+		Keeps: `"host idle" works`,
+	},
+	{
+		ID: "host destroy", Old: "host destroy <host> [-y] [--force]", New: "host rm <host> --destroy [--confirm <host>] [--force]", Kind: "command", Cmd: "host rm",
+		Version: "0.2.0", Code: "old_name",
+		Says:  `"host destroy <host>" is now "host rm <host> --destroy", and its -y is now --confirm <host>.`,
+		Keeps: `"host destroy" works`,
+	},
 }
 
 // The rows that the commands warn with. The release that removes the row
 // of rm without -y, at its end, sets oldRmWithoutYes to nil: rm with input
 // off and without -y then fails with exit code 4 (question C-10).
 var (
+	// oldHostIdle and oldHostDestroy are the old forms of host set and rm.
+	oldHostIdle    = oldRow("host idle <host> <time>")
+	oldHostDestroy = oldRow("host destroy <host> [-y] [--force]")
 	// oldHostKeys is the row of the Go keys of `host ls --json`.
 	oldHostKeys = oldRow(`the Go keys of "host ls --json"`)
 	// oldKill and oldFlip are the old names of rm -y and attach.

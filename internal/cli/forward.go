@@ -2,7 +2,9 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"strconv"
@@ -133,20 +135,22 @@ func runForward(ctx context.Context, h client.Host, pairs []client.ForwardPair) 
 		return &client.UserError{Msg: fmt.Sprintf("forward needs SSH, and %s is reached through %s", h.Name, h.Target()), Hint: "Forward from inside the host instead, for example with the provider's own port tools.", Code: "needs_ssh"}
 	}
 	s := client.NewSSH(ctx, h, true)
-	c, err := s.Forward(ctx, pairs)
-	if err != nil {
+	var stdin io.Reader
+	if client.InputAllowed(ctx) {
+		stdin = os.Stdin
+	}
+	err := s.RunForward(ctx, pairs, stdin, os.Stdout, os.Stderr, func() {
+		for _, p := range pairs {
+			fmt.Fprintf(os.Stderr, "Forwarding http://localhost:%d → %s:%d\n", p.Local, h.Name, p.Remote)
+		}
+		fmt.Fprintln(os.Stderr, "Press Ctrl+C to stop.")
+	})
+	var ue *client.UserError
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) || errors.As(err, &ue) {
 		return err
 	}
-	for _, p := range pairs {
-		fmt.Fprintf(os.Stderr, "Forwarding http://localhost:%d → %s:%d\n", p.Local, h.Name, p.Remote)
-	}
-	fmt.Fprintln(os.Stderr, "Press Ctrl+C to stop.")
-	if client.InputAllowed(ctx) {
-		c.Stdin = os.Stdin
-	}
-	c.Stdout, c.Stderr = os.Stdout, os.Stderr
-	if err := c.Run(); err != nil && ctx.Err() == nil {
-		return &client.UserError{Msg: "the forward stopped: " + err.Error(), Hint: "Check that the local port is free, then try again.", Code: "forward_failed"}
+	if err != nil {
+		return &client.UserError{Msg: "the forward stopped: " + err.Error(), Hint: "Check that the local port is free, then try again.", Code: "forward_failed", Kind: client.KindFailed}
 	}
 	return nil
 }

@@ -18,6 +18,11 @@ func (m *Model) onKey(k tea.KeyPressMsg) tea.Cmd {
 		return nil
 	}
 	ks := k.String()
+	if ks == "ctrl+c" {
+		if q, ok := m.modal.(*hostTierQuestion); ok {
+			return q.key(m, k)
+		}
+	}
 	if m.quitArmed {
 		// ctrl+c again quits, anything else cancels.
 		m.quitArmed = false

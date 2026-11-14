@@ -183,7 +183,7 @@ func TestPickerRefreshNeverWakes(t *testing.T) {
 		{Name: "cloud", SSH: "cloud", Provider: &client.Provider{Script: script, WakeOnAttach: true}},
 		{Name: "vm", Machine: &client.Machine{Provider: "fake", ID: "fake-vm"}},
 	}
-	if err := client.SaveHosts(context.Background(), hosts); err != nil {
+	if err := client.SaveHostsContext(context.Background(), hosts); err != nil {
 		t.Fatal(err)
 	}
 	cached := []tui.PickRow{{Host: "cloud", Session: client.Session{ID: "cc", Name: "c"}}}

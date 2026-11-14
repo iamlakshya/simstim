@@ -103,3 +103,19 @@ func ValidSessionID(id string) bool {
 	}
 	return true
 }
+
+// BlockMax is the most runes of a block of text from a host, such as an
+// error or what the helper said, that a client draws.
+const BlockMax = 1000
+
+// CleanBlock is s, text of a few lines, cleaned line by line as CleanText
+// cleans, with each line break as one newline, and cut to max runes in
+// all. A tab becomes a space.
+func CleanBlock(s string, max int) string {
+	lines := strings.Split(strings.NewReplacer("\r\n", "\n", "\r", "\n", "\t", " ").Replace(s), "\n")
+	for i, l := range lines {
+		lines[i] = CleanText(l, max)
+	}
+	out := []rune(strings.Join(lines, "\n"))
+	return string(out[:min(len(out), max)])
+}

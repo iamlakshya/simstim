@@ -95,7 +95,7 @@ func (m *Model) runPendingExec(ctx context.Context, in, out *os.File, stuck bool
 	if pe.after != nil {
 		done = pe.after(err)
 	}
-	m.openBg(ctx)
+	m.openBg(m.ctx)
 	return timeFrames(&resumedExecModel{m: m, done: done}), nil
 }
 
@@ -120,7 +120,7 @@ func (m *Model) runPendingAttach(ctx context.Context, in, out *os.File, stuck bo
 		writeAttachEnd(os.Stderr, pa.name, pa.host, res)
 		return nil, nil
 	}
-	m.openBg(ctx)
+	m.openBg(m.ctx)
 	return timeFrames(&resumedModel{m: m, done: attachDoneMsg{host: pa.host, id: pa.id, name: pa.name, res: res, err: err}}), nil
 }
 

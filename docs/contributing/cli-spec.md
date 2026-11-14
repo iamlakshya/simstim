@@ -346,7 +346,7 @@ The isolation spec owns the messages and the hints of its errors. This table own
 | An `ssh` without the fix of CVE-2023-51385, at `ssh-config` | 17.7 | `KindFailed` | 1 |
 | `setup_trust` | 19.2 | `KindNeedsAnswer` | 4 |
 
-The pinned host key lives in `known_hosts-<name>`, and `tiers.toml` keeps a copy of its fingerprint (isolation spec 14.7.1). A changed key is a refusal, as a tier's is.
+The pinned host key lives in `known_hosts-<key>`, where `<key>` is the host's file key, and `tiers.toml` keeps a copy of its fingerprint (isolation spec 14.7.1). A changed key is a refusal, as a tier's is.
 
 ### 5.4 Tests
 
@@ -400,20 +400,20 @@ Try: simstim rm box/abcd2345 -y
 | `new`, a repository's setup script | `Run it? [y/N]` | No | `--setup-script`, `--no-setup-script` | Keep: skip it, with today's note |
 | `host add` | Install the helper | No | `--yes` | Fail |
 | `host add`, when the host lacks an agent | The setup's checklist of agents, and their logins | None | `--yes`, which offers none | Keep: install nothing. Each agent's line says how to install it |
-| `host add --yes` without `--tier` (H4) | Which tier | None | `--tier` | Fail |
+| `host add`, a host key that the user's SSH settings do not trust (H3) | ssh's own question, with the key's fingerprint (isolation spec 14.7.1) | No | `--host-key SHA256:…`, or `--yes`, which pins the key on first use | Fail |
+| `host add` without `--tier` (H4) | Which tier | None | `--tier` | Fail |
 | `host add --accept` (H20) | Do the host keys match the machine's screen? | No | `--host-key SHA256:…`, once for each key | Fail |
 | `host join` (H20) | Make these changes? | No | `--yes` | Fail |
-| `host destroy`, until C7 makes it an old name of `host rm --destroy` | `Delete the lima machine box, with its disk and every session on it? [y/N]` | No | `-y` | Fail |
 | `host rm` on a created host | The typed name of the machine | Keep it | `--destroy --confirm <host>` | Keep: forget only |
 | `host rm`, purge (H15) | The typed name of the host | Keep it | `--purge --confirm <host>` | Keep: forget only |
 | `host rm`, purge (H15): the agents' logins | `Delete these logins on box? [y/N]` | No | `--delete-logins` | Keep: the logins stay |
-| `host set … tier=` to a lower tier (H4) | As isolation spec 9.1 | No | `-y` | Fail |
+| `host set … tier=` to a lower tier (H5) | As isolation spec 9.1 | No | `-y` | Fail |
 | `host set … tier=` to a higher tier (H4) | The typed name of the host | Keep the tier | `--confirm <host>` | Fail |
 | `host rekey` (H3) | The typed name of the host | Keep the pin | `--confirm <host>` | Fail |
 | `--root-step run` on a `shared` host (H7) | The typed name of the host | Keep it | None | Refuse, with exit code 5 (section 5.3) |
 | `new` or `resume` with a secret or an SSH key that `[secret_tiers]` marks `shared`, for a `shared` host (H5) | `Send CLAUDE_LAB to lab? Its owner can read it. [y/N]` | No | None | Refuse, with exit code 5 (section 5.3) |
 | `doctor --fix`, `host doctor --fix` | `Fix it? [y/N]` for each fix | No | `-y` | Fail |
-| `setup` | Each question of the guided setup | | `--yes` with `--host` or `--create` and `--agents` | Fail |
+| `setup` | Each question of the guided setup | | `--yes` with `--host` (and `--tier`) or `--create`, and `--agents` | Fail |
 | A `policy` change without a layer (P1.12) | Which layer | None | A layer flag | Fail (`layer_missing`) |
 | `policy apply` (P2.14) | `Send these changes to 4 sandboxes? [y/N]` | No | `-y` | Fail |
 | `policy learn` (P2.14) | The rules to write, picked from a list | None | `-y`, which writes every rule of the list | Fail |
@@ -457,9 +457,10 @@ Every command that prints data or makes something takes `--json` (G10). This tab
 | `new --count <n>` | An array: a session object for each session that started, and `{v, name, error}` for each that did not | P1.16 |
 | `ports` | `{v, host, session, id, ports}`: `session` is the name and `id` the ID. Each port has `port`, `address`, `pid` and `process` (`api.Port`) | C4 |
 | `doctor` | `{v, checks, fixes}`, each fix with `id` and `problem`. With `--fix -y`, each fix also has `done` or `error`, and a local fix has `changed`: each change it made, such as each file it removed. `--fix` without `-y` fails with exit code 4, because `--json` asks nothing | C4 |
-| `host ls` | An array of host objects, with `v` | today, C4 |
-| `host show` | A host object, with `reachable`, `error` and `info` ([section 11.2](#112-host-show)) | C7 |
+| `host ls` | An array of host objects, each with `v` and `tier` | today, C4, H4 |
+| `host show` | A host object, with `tier`, `host_id_changed`, `reachable`, `error`, `try`, `info` and `session_count` ([section 11.2](#112-host-show)) | C7, H4 |
 | `host test` | `{v, host, connect_ms, round_trip_ms}` | C4 |
+| `host upgrade` | `{v, host, helper, outcome}`. `helper` is this client's helper version, and `outcome` is `unchanged`, `installed` or `reinstalled` ([section 11.4](#114-host-upgrade)) | isolation P4.1 |
 | `host doctor` | Today's object, with `v` | today, C4 |
 | `host restore` | `{v, host, results}`, each result as `api.RestoreResult` | C4 |
 | `host status` | `{v, host, state, provider, id}` for a machine of `host create`, or `{v, host, output}` with a provider script's output | C4 |
@@ -886,8 +887,8 @@ An explicit `host alerts set --events` list must name at least one event. An emp
 2. A key that the build does not have yet is an unknown key.
 3. `idle` on a host that `host create` did not make fails with exit code 2, as `host idle` does today.
 4. `drain` takes a reason of 1 to 200 characters, such as `drain="kernel update"`. `drain=off` removes the mark (isolation spec 14.11.3). The values `on`, `true` and `yes` fail with exit code 2, and `Try: simstim host set box drain="kernel update"`.
-5. Lowering a tier asks first (isolation spec 9.1). `-y` answers.
-6. The command then applies the pairs in the order given. It saves the keys that live on the laptop in one write. A key that lives on the host dials it.
+5. Raising a tier dials the host, checks its pinned host key, and asks for the host's typed name, or takes `--confirm <host>`. Lowering a tier works at once in H4, and asks first from H5 (isolation spec 9.1), where `-y` answers.
+6. The command then applies the pairs in the order given. It saves the keys that live on the laptop in one write. A key that lives on the host dials it. It holds the lock of the host from before it reads the entry until it ends (section 11.3, rule 13).
 7. When one pair fails, the error says which pairs took effect.
 8. Each change prints one line on stderr, such as `box: idle 30m → 2h.`
 9. Without a pair, it fails with exit code 2: `host set needs a setting, such as idle=2h`, and `Try: simstim host show box`.
@@ -896,10 +897,10 @@ An explicit `host alerts set --events` list must name at least one event. An emp
 
 `host show <host> [--json]` describes one host. It is the command of the launcher's host details ([the UX spec, 2.7](ux-spec.md#27-sheets)).
 
-1. It prints the saved entry: the SSH target, labels, the machine, idle, and the names of the host's secrets.
-2. It dials the host for up to 30 seconds, without waking it. It prints the route, the system, the helper's version, the agents with their versions, and the limits.
-3. A host that does not answer is data, not a failure. The command prints the saved part, then `box did not answer: <reason>`, and exits with 0.
-4. `--json` prints the host object of `host ls --json`, with `reachable`, `error` when it did not answer, and `info`, the object that `host doctor --json` prints.
+1. It prints the saved entry: the SSH target, the tier, labels, the machine, idle, and the names of the host's secrets.
+2. It dials the host for up to 30 seconds. It neither wakes the host, nor installs or prunes a helper. A client built with `go install` loads its helpers from this computer's cache first, so it looks for the right helper. It never downloads them. It takes no lock. A missing helper is a reason why the host did not answer, with `Try: simstim host upgrade box`. It prints the route, the system, the helper's version, the agents with their versions, and the limits. It cleans each string that the host sent with `api.CleanText`, and cuts it to 200 runes.
+3. A host that does not answer is data, not a failure. The command prints the saved part, then `box did not answer: <reason>`, and exits with 0. The reason's `Try:` line goes to stderr. A reason without its own, such as a timeout or a closed connection, gets `Try: simstim host doctor box`.
+4. `--json` prints the host object of `host ls --json`, with `reachable`, `error` and `try` when it did not answer, and `info`, the object that `host doctor --json` prints. The `info` keys and values retain the data from the host, without the text view's cleaning or length limit. JSON escapes terminal controls, including bidirectional and zero-width characters, so printing it is safe. Scripts receive the original strings when they decode it. The host object has only its `snake_case` keys: the Go keys are an old form of `host ls` alone. When the host answered, `session_count` counts its sessions, which the launcher shows with the limits. `info` has no `agent_checks`, because the launcher does not ask for them.
 5. The launcher's host details and `host show` use one function in `internal/client`, so they match.
 6. Isolation tasks P1 and H5 add more lines (isolation spec 14.8.6). They add each driver's probe, the levels, the floor, the tier, the room, the health and the names sent to the host.
 
@@ -920,31 +921,41 @@ An explicit `host alerts set --events` list must name at least one event. An emp
    ```
 
 4. Enter keeps that part. A wrong name cancels the whole command, with exit code 130, and nothing changes.
-5. A part named by a flag still needs the typed name, or `--confirm <host>`.
-6. With input off, the command does only what the flags say. `--destroy` or `--purge` without `--confirm <host>` fails with exit code 4, and `Try: simstim host rm box --destroy --confirm box`.
-7. `--confirm` with another name fails with exit code 2.
+5. A part named by a flag still needs the typed name, or `--confirm <host>`. Its question is `Type box to delete the machine, or press Enter to keep it:`. Enter keeps the part that the flag named, so the command then changes nothing, and exits with 130.
+6. With input off, the command does only what the flags say. `--destroy` or `--purge` without `--confirm <host>` fails with exit code 4, and `Try: simstim host rm box --destroy --confirm box`. Without those flags, it does not look at the machine. It says on stderr that the machine stays, with the flags that delete it too.
+7. `--confirm` with another name fails with exit code 2. So does `--confirm` or `--force` without `--destroy`, because each acts only on the delete. An unknown host gets `Try: simstim host ls`, or with `--confirm`, the line with the nearest host in both places.
 8. `--destroy` on a host without a machine fails with exit code 2: `box was not made by host create, so there is no machine to delete`, and `Try: simstim host rm box`.
-9. `--destroy` refuses while a session works, as `host destroy` does today, unless `--force`. The refusal has exit code 1. A running machine whose sessions the client cannot list counts as one where a session works. Today `workingSessions` in `internal/cli/create.go` counts it as idle.
-10. The work goes in this order: purge, destroy, then forget. The client records each part, and each step of isolation spec 14.12, in `~/.local/state/simstim/hosts/<host>/removal.json` when it ends. A failure stops the command with exit code 1, and the host stays saved, so the user can run the command again. A second run skips each recorded step. So it never dials a purged host, which would install the helper again. A machine that its provider no longer has counts as destroyed.
+9. `--destroy` refuses while a session works, as `host destroy` does today, unless `--force`. The refusal has exit code 1. A running machine whose sessions the client cannot list counts as one where a session works. Today `workingSessions` in `internal/cli/create.go` counts it as idle. A machine whose state its provider cannot tell counts the same. With `--destroy`, the refusal comes before the question. Every look happens under the lock of rule 13, `--destroy --confirm`'s too. A question may wait long, so after the typed name the command asks the provider and the host again, just before the delete. As a cheap guard, it also checks that the saved entry is the same, or it changes nothing, with exit code 1. Only a changed provider, ID or `created` stamp counts as a host made again. It refuses when a session works then, or when either check fails. The names of the sessions are cleaned as in section 11.2. The look at the machine never installs or prunes a helper.
+10. The work goes in this order: purge, destroy, then forget. The client records each part, and each step of isolation spec 14.12, in `~/.local/state/simstim/hosts/<host>-<hash>/removal.json` when it ends. The folder holds the name in lower case and a hash of its exact case, so `Box` and `box` keep two records. A failure stops the command with exit code 1, and the host stays saved, so the user can run the command again. The forget removes the generated SSH config before the saved entry, so a failure there keeps the host too. It also removes a config that an earlier client generated under the name alone, when the first line names that exact host and no saved case twin may use the path. A second run skips each recorded step of a purge. So it never dials a purged host, which would install the helper again. The record never decides that a machine is gone: the command always asks the provider. Only a machine that its provider no longer has counts as destroyed. The record then says that an earlier run deleted it. The record names the machine's provider, ID and `created` stamp, the time when `host create` made it. Lima and Docker give each machine of a host the same ID, so the stamp tells them apart. The forget, the last part, deletes the record, and so does the launcher's remove. `host create` deletes it before it makes anything, and refuses when it cannot. A record that cannot be deleted is an error whose `Try:` line names the file.
 11. The command prints what it did and what stays, on stderr. A kept machine gets today's line, which names the provider's own tools.
 12. `host destroy <host>` runs `host rm <host> --destroy`, and warns. Its `-y` becomes `--confirm <host>`, and its `--force` stays.
+13. One rule keeps the commands that change a host apart: each save or forget of a host compares. The command names the saved entry that it read before it began, or none for a new host. Under the lock of `hosts.toml`, the client saves only while the saved entry is still that one, every field and the `created` stamp too. An empty table or list counts as none. Otherwise the command changes nothing, and exits with 1. A host removed, made again or changed meanwhile is `host_changed`. An example is `box changed while setup ran, so it was not saved`, with `Try: simstim host show box (then run the command again)`. A new host whose name another command took meanwhile is `host_exists`. So a removed host never comes back, and a host made again is never overwritten. This covers `host add`, `setup --host`, and the launcher's add, its save after a create and its remove.
+    - A command that works on a machine also holds the lock of the host, from its first step to its end. These are `host create` with its setup, the guided setup's create, and `host set`. `host rm` holds it from its first look through the question to the forget. So nothing is looked at or written outside it. Each save or forget takes the lock for its moment too. No lock is held across a dialog of the launcher or across the add-host wizard.
+    - The lock is a file beside the record of rule 10. A command that finds it taken waits for nothing. It fails at once with `host_busy`, and names the kind of command that holds it, such as `box is busy: host rm changes it`. So a `host create` fails while the question of a `host rm` of that name is open. A context that outlives its lock no longer holds it.
+    - A lock file that cannot be made is `lock_failed`. Its `Try:` line names the nearest folder that exists, to make writable, or the file that stands in the path, to move. A lock that the file system refuses, as on a network disk, asks for a local disk.
+    - Each read, change and save of `hosts.toml` holds one short lock of that file, after the lock of the host. So two commands that change two hosts at once lose no change. A command waits for that lock. After a second it says `Waiting for another command that saves …` on stderr, as a warning with `--json`. After 10 seconds it fails with `hosts_busy`, and Ctrl+C stops the wait as it stops any step. A cancelled command never saves: the client checks for the cancel after it takes the lock, and again just before the save. `host rm` keeps the cancel, with exit code 130, and keeps the code and hint of an error such as `hosts_busy`.
+    - When the save after `host create` fails, the client deletes the machine that it made, so no machine stays that no saved host names. When that delete fails too, the error names the machine and the provider's own tools.
+    - After `host_changed` or `host_exists`, the launcher reads the host again, so its next try compares with the saved entry. A host that the launcher made and could not save stays off its list when the wizard closes. The launcher's forget deletes the record of rule 10 under the same lock of the host.
 
 ### 11.4 `host upgrade`
 
 `host upgrade <host>` updates the helper on one host.
 
 1. It does not start the bridge first. A dial installs a missing helper by itself (`Dial` in `internal/client/conn.go`). From isolation task P4.1, a changed helper stops a dial with `digest_mismatch`. So `host upgrade` reads the host over the transport, as `Probe` in `internal/client/bootstrap.go` does. From P4.1 it also runs the digest check there.
-2. This client's helper is there, and its digest matches: it prints `box has helper 0.1.2 already.` and exits with 0.
+2. This client's helper is there, and its digest matches: it prints `box has helper 0.1.2-1a2b3c4d already.` on stderr, and exits with 0. The version is the helper's, as `version` shows it.
 3. This client's helper is missing, or its digest does not match: it installs the helper, as `host add` does, without the other steps of `host add` and without a question. The verb is the user's yes. Then it dials, with the check of P4.1.
-4. A newer helper on the host, from a newer client, stays. Each client runs its own version of the helper.
+4. A newer helper on the host, from a newer client, stays. Each client runs its own version of the helper. So `host upgrade` never runs the helper's `prune`, which `host add` runs after its install.
 5. Running sessions keep their own process, as today. New sessions use the new helper.
 6. Isolation task H9 adds the runtime files.
 7. A host that does not answer fails with exit code 1.
-8. Isolation task P7.1 adds `--feed`. It also copies the newest malicious-package feed to the host (isolation spec 7.11).
+8. `--json` prints what it did as one object (section 7.1). Its confirmations go to stderr (section 7.5).
+9. Isolation task P7.1 adds `--feed`. It also copies the newest malicious-package feed to the host (isolation spec 7.11).
 
 ### 11.5 `host add --yes` and the tier
 
 Once isolation task H4 adds tiers, `host add --yes` without `--tier` fails with exit code 4, and `Try: simstim host add box --tier own --yes`. A script must name the tier.
+
+A host added by an older client after the tiers migration counts as `shared`. At its next foreground terminal use, the client checks its pinned connection and asks the same tier question. It saves no default answer. Background uses and commands with input off keep `shared` until an explicit answer is saved. `--yes` cannot answer this question. `host set` can record an explicit tier instead.
 
 ### 11.6 Tests
 

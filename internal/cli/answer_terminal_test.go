@@ -196,7 +196,7 @@ func TestACancelDuringHostAddsLastRequestSavesNothing(t *testing.T) {
 func TestASignalAfterTheYesDestroysNothing(t *testing.T) {
 	withSignal(t)
 	m, _ := withFake(t, nil)
-	if err := client.SaveHosts(context.Background(), []client.Host{{Name: "box", Machine: &client.Machine{Provider: "fake", ID: "fake-box"}}}); err != nil {
+	if err := client.SaveHostsContext(context.Background(), []client.Host{{Name: "box", Machine: &client.Machine{Provider: "fake", ID: "fake-box"}}}); err != nil {
 		t.Fatal(err)
 	}
 	in, w, err := os.Pipe()
@@ -204,7 +204,7 @@ func TestASignalAfterTheYesDestroysNothing(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer in.Close()
-	_, _ = w.WriteString("y\n")
+	_, _ = w.WriteString("box\n")
 	_ = w.Close()
 	oldIn := os.Stdin
 	os.Stdin = in
@@ -213,7 +213,7 @@ func TestASignalAfterTheYesDestroysNothing(t *testing.T) {
 	defer cancel()
 	afterAnswer = func(string) { cancel() }
 	p := &prompter{ctx: ctx, in: in, out: io.Discard, on: true}
-	if err := destroyHost(ctx, p, "box", true, false); !errors.Is(err, errInterrupted) {
+	if err := removeHost(ctx, p, rmOpts{name: "box", destroy: true, force: true}); !errors.Is(err, errInterrupted) {
 		t.Errorf("destroyHost = %v, want a cancel", err)
 	}
 	for _, c := range m.Calls() {

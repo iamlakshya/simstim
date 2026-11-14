@@ -3,8 +3,6 @@ package client
 import (
 	"bufio"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -15,6 +13,7 @@ import (
 	"time"
 
 	"github.com/iamlakshya/simstim/internal/brand"
+	"github.com/iamlakshya/simstim/internal/client/helpers"
 	"github.com/iamlakshya/simstim/internal/proto"
 	"github.com/iamlakshya/simstim/internal/version"
 )
@@ -29,7 +28,11 @@ type Conn struct {
 	Host     Host
 	Features []string
 
+	hostID        string
+	hostIDChanged bool
+
 	proc   Proc
+	cancel context.CancelFunc
 	hint   string
 	w      *proto.Writer
 	stdin  io.WriteCloser
@@ -58,20 +61,61 @@ type Conn struct {
 // ErrNotInstalled means the host has no helper of this client's version.
 var ErrNotInstalled = errors.New("the helper is not installed")
 
+// HostID returns the verified host identity from the bridge hello.
+func (c *Conn) HostID() string { return c.hostID }
+
+// HostIDChanged reports a change from the previously saved identity.
+func (c *Conn) HostIDChanged() bool { return c.hostIDChanged }
+
+// startupExitWait bounds the grace after the transport closes its stream.
+var startupExitWait = 500 * time.Millisecond
+
 // Dial starts the bridge on the host and does the hello. For a saved host (one
 // the user added, and so agreed to the helper on), a missing helper of this
 // version is installed first: an upgrade never needs the user.
 //
 // A host that a provider made is asked for its state first, and started or
-// resumed when it is stopped, unless ctx comes from WithoutWake.
+// resumed when it is stopped, unless ctx comes from WithoutWake. In a ctx
+// from WithoutInstall, a missing helper is an error, and nothing is
+// installed or pruned.
 func Dial(ctx context.Context, h Host, interactive bool) (*Conn, error) {
+	if _, err := ResolveHostTier(ctx, h); err != nil {
+		return nil, err
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if !interactive {
+		ctx = quietConnectionNotes(ctx)
+	}
+	if !installAllowed(ctx) {
+		// A client built with go install learns the version of its helper
+		// when it loads the helpers, which only Probe does otherwise. Load
+		// them here, from this computer's cache only, so that the dial
+		// starts the right helper, and never waits on a download. With
+		// nothing cached, the dial goes on with the version it has, and a
+		// missing helper is helper_missing, whose Try: line is host
+		// upgrade, which downloads them.
+		_ = helpers.Cached(version.Version, CacheDir())
+	}
 	r, err := routeTo(ctx, h, interactive)
 	if err != nil {
 		return nil, err
 	}
+	if err := pinRoute(ctx, h, r.t, interactive); err != nil {
+		// A stopped cloud host cannot show its key either: start it first.
+		if !mayWake(ctx, h, err) {
+			return nil, err
+		}
+		if werr := wake(ctx, h); werr != nil {
+			return nil, werr
+		}
+		if err := pinRoute(ctx, h, r.t, interactive); err != nil {
+			return nil, err
+		}
+	}
 	c, err := dial(ctx, h, r)
-	var ue *UserError
-	if err != nil && h.Provider != nil && h.Provider.WakeOnAttach && wakeAllowed(ctx) && errors.As(err, &ue) && strings.HasPrefix(ue.Msg, "cannot reach") {
+	if mayWake(ctx, h, err) {
 		// A stopped cloud host: start it through its provider script, then try again.
 		if werr := wake(ctx, h); werr != nil {
 			return nil, werr
@@ -83,6 +127,9 @@ func Dial(ctx context.Context, h Host, interactive bool) (*Conn, error) {
 	}
 	if _, ferr := FindHost(h.Name); ferr != nil {
 		return nil, &UserError{Msg: fmt.Sprintf("the %s helper is not installed on %s", brand.Name, h.Name), Hint: brand.Name + " host add " + h.Name, Code: "helper_missing"}
+	}
+	if !installAllowed(ctx) {
+		return nil, &UserError{Msg: fmt.Sprintf("the helper %s is not on %s", HelperVersion(), h.Name), Hint: brand.Name + " host upgrade " + h.Name, Code: "helper_missing"}
 	}
 	p, perr := Probe(ctx, r.t)
 	if perr != nil {
@@ -96,6 +143,15 @@ func Dial(ctx context.Context, h Host, interactive bool) (*Conn, error) {
 	return dial(ctx, h, r)
 }
 
+// mayWake reports whether err, from a connection to h, is one that waking
+// h through its provider script may cure: h could not be reached, and its
+// script wakes it on attach.
+func mayWake(ctx context.Context, h Host, err error) bool {
+	var ue *UserError
+	return err != nil && h.Provider != nil && h.Provider.WakeOnAttach && wakeAllowed(ctx) &&
+		errors.As(err, &ue) && strings.HasPrefix(ue.Msg, "cannot reach")
+}
+
 func dial(ctx context.Context, h Host, rt route) (*Conn, error) {
 	remote := RemoteHelper(HelperVersion()) + " bridge"
 	ka, _ := rt.t.(KeepAliver)
@@ -104,20 +160,34 @@ func dial(ctx context.Context, h Host, rt route) (*Conn, error) {
 		// bridge ends itself when the pings stop.
 		remote += fmt.Sprintf(" --idle-exit %d", int(BridgeIdleExit.Seconds()))
 	}
-	// The bridge lives as long as the connection, not as long as this dial:
-	// it keeps ctx's values but not its deadline.
-	proc, err := rt.t.Start(context.WithoutCancel(ctx), remote)
+	// Startup follows the caller until the host sends a valid hello. The
+	// connection then owns the process context, including its cancellation.
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	procCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
+	stopStartup := context.AfterFunc(ctx, cancel)
+	defer stopStartup()
+	started := false
+	defer func() {
+		if !started {
+			cancel()
+		}
+	}()
+	proc, err := dialStart(procCtx, rt.t, remote)
 	if err != nil {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		return nil, err
 	}
 	stdin := proc.Stdin()
-	c := &Conn{Host: h, proc: proc, hint: rt.t.ReachHint(), stdin: stdin, w: proto.NewWriter(stdin),
+	c := &Conn{Host: h, proc: proc, cancel: cancel, hint: rt.t.ReachHint(), stdin: stdin, w: proto.NewWriter(stdin),
 		pending: map[uint64]chan proto.Response{}, stream: make(chan proto.Frame, 4096), done: make(chan struct{}),
 		tr: newConnTrace(ctx)}
 	r := bufio.NewReaderSize(proc.Stdout(), 256<<10)
 	if err := c.w.WriteJSON(proto.THello, proto.Hello{Magic: proto.Magic, Protocol: version.Protocol, Version: version.Version, Role: "client"}); err != nil {
-		c.kill()
-		return nil, c.startError(err)
+		return nil, c.startError(ctx, err)
 	}
 	type res struct {
 		f   proto.Frame
@@ -127,32 +197,52 @@ func dial(ctx context.Context, h Host, rt route) (*Conn, error) {
 	go func() { f, err := proto.Read(r); first <- res{f, err} }()
 	select {
 	case <-ctx.Done():
-		c.kill()
+		c.killStartup()
 		return nil, ctx.Err()
 	case x := <-first:
 		if x.err != nil {
-			c.kill()
-			return nil, c.startError(x.err)
+			if !errors.Is(x.err, io.EOF) {
+				c.kill()
+			}
+			return nil, c.startError(ctx, x.err)
 		}
 		if x.f.Type != proto.THello {
-			c.kill()
+			c.killStartup()
 			return nil, errors.New("unexpected first frame from host")
 		}
 		var hello proto.Hello
 		if err := json.Unmarshal(x.f.Payload, &hello); err != nil {
-			c.kill()
+			c.killStartup()
 			return nil, fmt.Errorf("read the host's hello: %w", err)
 		}
 		if err := hello.Check(version.Protocol); err != nil {
-			c.kill()
+			c.killStartup()
 			return nil, &UserError{Msg: CleanLine(err.Error()), Hint: brand.Name + " host add " + h.Name + " (reinstalls the helper)", Code: "protocol"}
 		}
+		if hello.HostID != "" && !ValidHostID(hello.HostID) {
+			c.killStartup()
+			return nil, &UserError{Msg: fmt.Sprintf("the helper on %s sent an invalid host ID", h.Name), Hint: brand.Name + " host doctor " + h.Name, Code: "protocol"}
+		}
+		changed, err := noteHostID(ctx, h, hello.HostID)
+		if err != nil {
+			c.killStartup()
+			return nil, err
+		}
+		c.hostID = hello.HostID
+		c.hostIDChanged = changed
 		c.Features = hello.Features
 	}
+	stopStartup()
+	if err := ctx.Err(); err != nil {
+		c.killStartup()
+		return nil, err
+	}
+	started = true
 	c.lastRecv.Store(time.Now().UnixNano())
 	go c.readLoop(r)
 	c.startBridgeDebug(ctx)
 	go func() {
+		defer cancel()
 		_ = proc.Wait()
 		c.fail(ErrClosed)
 	}()
@@ -165,20 +255,37 @@ func dial(ctx context.Context, h Host, rt route) (*Conn, error) {
 	return c, nil
 }
 
-func (c *Conn) startError(err error) error {
-	waitErr := c.proc.Wait()
-	msg := strings.TrimSpace(c.proc.Stderr())
-	if strings.Contains(msg, "No such file") || strings.Contains(msg, "not found") {
-		return ErrNotInstalled
-	}
-	if msg == "" {
+// killStartup stops an invalid or cancelled handshake at once. Wait still
+// reaps the transport and releases its private diagnostic files.
+func (c *Conn) killStartup() {
+	c.kill()
+	go func() { _ = c.proc.Wait() }()
+}
+
+// waitStartup lets a transport report its exit after closing stdout. SSH and
+// container transports can close the stream before collecting that status.
+// Killing them first would replace a useful exit code with a local signal.
+func (c *Conn) waitStartup(ctx context.Context) error {
+	_ = c.stdin.Close()
+	done := make(chan error, 1)
+	go func() { done <- c.proc.Wait() }()
+	timer := time.NewTimer(startupExitWait)
+	defer timer.Stop()
+	select {
+	case err := <-done:
 		return err
+	case <-ctx.Done():
+		c.kill()
+		return ctx.Err()
+	case <-timer.C:
+		c.kill()
+		select {
+		case err := <-done:
+			return err
+		case <-ctx.Done():
+			return ctx.Err()
+		}
 	}
-	msg = tailStderr(msg)
-	if errors.Is(waitErr, ErrUnreachable) {
-		return &UserError{Msg: fmt.Sprintf("cannot reach %s: %s", c.Host.Name, msg), Hint: c.hint, Code: "unreachable"}
-	}
-	return &UserError{Msg: fmt.Sprintf("the helper on %s did not start: %s", c.Host.Name, msg), Hint: brand.Name + " host doctor " + c.Host.Name, Code: "helper_failed"}
 }
 
 func (c *Conn) readLoop(r *bufio.Reader) {
@@ -232,10 +339,18 @@ func (c *Conn) fail(err error) {
 	}
 }
 
-func (c *Conn) kill() { c.proc.Kill() }
+func (c *Conn) kill() {
+	if c.cancel != nil {
+		c.cancel()
+	}
+	c.proc.Kill()
+}
 
 // Close ends the connection.
 func (c *Conn) Close() {
+	if c.cancel != nil {
+		defer c.cancel()
+	}
 	_ = c.stdin.Close()
 	select {
 	case <-c.done:
@@ -257,178 +372,4 @@ func (c *Conn) Ping() error {
 		return c.w.Write(proto.TPing, c.tr.t.ping())
 	}
 	return c.w.Write(proto.TPing, nil)
-}
-
-// requestStage is called at stages of a request: "queued", once Call has
-// looked at ctx and is about to wait for its turn to write, and "upload
-// begin", "upload chunk" and "upload end", before each frame of an upload,
-// and "upload sent", once its frames are out. Tests cancel there.
-var requestStage = func(string) {}
-
-// Call sends a request and decodes the result into out. Every request to
-// the host goes through it, and none goes after ctx has ended: what asked
-// for it has stopped, so the host must not act on it. It then returns
-// ctx's error, and writes nothing: also when ctx ends while the request
-// waits behind another frame (proto.Writer.WriteCtx).
-func (c *Conn) Call(ctx context.Context, op string, args any, out any) error {
-	id := c.nextID.Add(1)
-	req := proto.Request{ID: id, Op: op}
-	if args != nil {
-		b, err := json.Marshal(args)
-		if err != nil {
-			return fmt.Errorf("encode the %s request: %w", op, err)
-		}
-		req.Args = b
-	}
-	ch := make(chan proto.Response, 1)
-	c.mu.Lock()
-	if c.err != nil {
-		c.mu.Unlock()
-		return c.err
-	}
-	if err := ctx.Err(); err != nil {
-		c.mu.Unlock()
-		return err
-	}
-	c.pending[id] = ch
-	c.mu.Unlock()
-	requestStage("queued")
-	if err := c.w.WriteJSONCtx(ctx, proto.TRequest, req); err != nil {
-		c.drop(id)
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
-		return ErrClosed
-	}
-	select {
-	case <-ctx.Done():
-		c.mu.Lock()
-		delete(c.pending, id)
-		c.mu.Unlock()
-		return ctx.Err()
-	case resp, ok := <-ch:
-		if !ok {
-			return ErrClosed
-		}
-		if !resp.OK {
-			if resp.Error != nil {
-				return hostErrorOn(c.Host.Name, resp.Error)
-			}
-			return errors.New("the host refused the request")
-		}
-		if out != nil && len(resp.Result) > 0 {
-			if err := json.Unmarshal(resp.Result, out); err != nil {
-				return fmt.Errorf("read the answer to %s: %w", op, err)
-			}
-		}
-		return nil
-	}
-}
-
-// Stream returns attach frames.
-func (c *Conn) Stream() <-chan proto.Frame { return c.stream }
-
-// Send writes a raw frame. With the debug trace on, it records each key.
-func (c *Conn) Send(t proto.Type, p []byte) error {
-	if c.tr != nil && t == proto.TInput {
-		return c.tr.sendKey(c.w, p)
-	}
-	return c.w.Write(t, p)
-}
-
-// SendJSON writes a JSON frame.
-func (c *Conn) SendJSON(t proto.Type, v any) error { return c.w.WriteJSON(t, v) }
-
-// uploadTurn is the turn of whole uploads on c: the host takes one upload
-// at a time from a connection, and drops an unfinished one when the next
-// begins (host's bridge_upload.go).
-func (c *Conn) uploadTurn() chan struct{} {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.uploading == nil {
-		c.uploading = make(chan struct{}, 1)
-	}
-	return c.uploading
-}
-
-// drop forgets the request id, which will get no answer.
-func (c *Conn) drop(id uint64) {
-	c.mu.Lock()
-	delete(c.pending, id)
-	c.mu.Unlock()
-}
-
-// Upload sends a file into a session's paste folder and returns its path
-// on the host. As Call, it sends nothing after ctx has ended. A cancel in
-// the middle stops before the next frame: the host never gets the end of
-// the upload, and reclaims it. Uploads on c take turns, whole: one waits
-// for the one before it, until ctx ends.
-func (c *Conn) Upload(ctx context.Context, session, name string, data []byte) (string, error) {
-	turn := c.uploadTurn()
-	select {
-	case turn <- struct{}{}:
-	case <-ctx.Done():
-		return "", ctx.Err()
-	}
-	defer func() { <-turn }()
-	id := c.nextID.Add(1)
-	ch := make(chan proto.Response, 1)
-	c.mu.Lock()
-	if c.err != nil {
-		c.mu.Unlock()
-		return "", c.err
-	}
-	if err := ctx.Err(); err != nil {
-		c.mu.Unlock()
-		return "", err
-	}
-	c.pending[id] = ch
-	c.mu.Unlock()
-	failed := func() (string, error) {
-		c.drop(id)
-		if ctx.Err() != nil {
-			return "", ctx.Err()
-		}
-		return "", ErrClosed
-	}
-	requestStage("upload begin")
-	if err := c.w.WriteJSONCtx(ctx, proto.TUploadBegin, proto.UploadBegin{ID: id, Session: session, Name: name, Size: int64(len(data))}); err != nil {
-		return failed()
-	}
-	for off := 0; off < len(data); off += 256 << 10 {
-		end := off + 256<<10
-		if end > len(data) {
-			end = len(data)
-		}
-		requestStage("upload chunk")
-		if err := c.w.WriteCtx(ctx, proto.TUploadChunk, proto.EncodeChunk(id, data[off:end])); err != nil {
-			return failed()
-		}
-	}
-	sum := sha256.Sum256(data)
-	requestStage("upload end")
-	if err := c.w.WriteJSONCtx(ctx, proto.TUploadEnd, proto.UploadEnd{ID: id, SHA256: hex.EncodeToString(sum[:])}); err != nil {
-		return failed()
-	}
-	requestStage("upload sent")
-	select {
-	case <-ctx.Done():
-		c.drop(id) // its answer, if one comes, goes nowhere
-		return "", ctx.Err()
-	case resp, ok := <-ch:
-		if !ok {
-			return "", ErrClosed
-		}
-		if !resp.OK {
-			if resp.Error != nil {
-				return "", hostError(resp.Error)
-			}
-			return "", errors.New("upload failed")
-		}
-		var r proto.UploadResult
-		if err := json.Unmarshal(resp.Result, &r); err != nil {
-			return "", fmt.Errorf("read the answer to an upload: %w", err)
-		}
-		return r.Path, nil
-	}
 }

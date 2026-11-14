@@ -9,110 +9,90 @@ import (
 	"testing"
 
 	"github.com/iamlakshya/simstim/internal/brand"
-	"github.com/iamlakshya/simstim/internal/paths"
 	"github.com/iamlakshya/simstim/internal/testhome"
 )
 
-// The sockets of shared connections go in the cache folder when their path
-// fits there. Otherwise they go in the runtime folder, which the tests'
-// home has (testhome): no test uses the shared folder in /tmp. The folder
-// is private, and its socket paths fit.
+// The full temporary bind budget includes the epoch, nf prefix, route
+// hash and OpenSSH suffix. A test owns both candidate locations.
 func TestControlDirFitsASocketPath(t *testing.T) {
+	sshDirs(t)
 	short, err := os.MkdirTemp(testhome.Root(), "c")
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { _ = os.RemoveAll(short) })
 	t.Setenv("XDG_CACHE_HOME", short)
-	if d := controlDir(); d != filepath.Join(short, brand.Name, "cm") {
-		t.Errorf("short cache: %q", d)
+	want := filepath.Join(short, brand.Name, "cm")
+	if len(want)+1+26+1+3+40+17 > 103 {
+		want = controlFallbackDir(uint32(os.Getuid()))
 	}
-
-	long := filepath.Join(t.TempDir(), strings.Repeat("x", 80))
-	t.Setenv("XDG_CACHE_HOME", long)
+	if got := controlDir(); got != want {
+		t.Errorf("short cache: %q, want %q", got, want)
+	}
+	t.Setenv("XDG_CACHE_HOME", filepath.Join(t.TempDir(), strings.Repeat("x", 80)))
 	d := controlDir()
-	if d != filepath.Join(paths.RuntimeDir(), "cm") || !strings.HasPrefix(d, testhome.Root()+"/") {
-		t.Errorf("a long cache: %q, want cm in the runtime folder %s", d, paths.RuntimeDir())
+	if want := controlFallbackDir(uint32(os.Getuid())); d != want {
+		t.Errorf("long cache: %q, want owned fallback %q", d, want)
 	}
-	if len(d)+1+len(controlPrefix)+40 > maxSocketPath {
-		t.Errorf("%q is too long for a socket path", d)
-	}
-	if !privateDir(d) {
-		t.Errorf("%q is not private", d)
+	if !controlFits(d) || !privateDir(d) {
+		t.Errorf("unsafe or over-budget control base %q", d)
 	}
 }
 
-// The runtime folder holds the sockets only when it is safe: the user's,
-// not a link, and not writable by its group or others. Otherwise the
-// sockets go in the next place, never under a folder that someone else
-// controls.
+// The historical runtime test now covers the actual H3 fallback base.
+// Unsafe permissions, links and foreign ownership refuse sharing.
 func TestControlDirWantsASafeRuntimeFolder(t *testing.T) {
-	root, err := os.MkdirTemp(testhome.Root(), "r")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("XDG_RUNTIME_DIR", root)
+	sshDirs(t)
+	base := controlFallbackDir(uint32(os.Getuid()))
 	t.Setenv("XDG_CACHE_HOME", filepath.Join(t.TempDir(), strings.Repeat("x", 80)))
-	last := filepath.Join(root, "last")
-	old := tmpControlDir
-	tmpControlDir = func() string { return last }
-	defer func() { tmpControlDir = old }()
-	runtime, cm := filepath.Join(root, brand.Name), filepath.Join(root, brand.Name, "cm")
 	other := t.TempDir()
 	for _, c := range []struct {
 		name    string
 		make    func() error
-		foreign bool // the runtime folder seems another user's
-		want    string
+		foreign bool
+		safe    bool
 	}{
-		{"private", func() error { return os.Mkdir(runtime, 0o700) }, false, cm},
-		{"world-writable", func() error {
-			if err := os.Mkdir(runtime, 0o700); err != nil {
-				return err
-			}
-			return os.Chmod(runtime, 0o777)
-		}, false, last},
-		{"group-writable", func() error {
-			if err := os.Mkdir(runtime, 0o700); err != nil {
-				return err
-			}
-			return os.Chmod(runtime, 0o770)
-		}, false, last},
-		{"a link", func() error { return os.Symlink(other, runtime) }, false, last},
-		{"world-writable, and no $XDG_RUNTIME_DIR", func() error {
-			// The runtime folder is then <name>-<uid> in the temporary
-			// folder, which another user may have made first.
-			t.Setenv("XDG_RUNTIME_DIR", "")
-			t.Setenv("TMPDIR", root)
-			runtime, cm = paths.RuntimeDir(), filepath.Join(paths.RuntimeDir(), "cm")
-			if err := os.Mkdir(runtime, 0o700); err != nil {
-				return err
-			}
-			return os.Chmod(runtime, 0o777)
-		}, false, last},
-		{"another user's", func() error { return os.Mkdir(runtime, 0o700) }, true, last},
+		{"private", func() error { return os.Mkdir(base, 0700) }, false, true},
+		{"world-writable", func() error { return os.Mkdir(base, 0777) }, false, false},
+		{"group-writable", func() error { return os.Mkdir(base, 0770) }, false, false},
+		{"world-writable without runtime", func() error { t.Setenv("XDG_RUNTIME_DIR", ""); return os.Mkdir(base, 0777) }, false, false},
+		{"a link", func() error { return os.Symlink(other, base) }, false, false},
+		{"another user's", func() error { return os.Mkdir(base, 0700) }, true, false},
 	} {
-		_ = os.RemoveAll(runtime)
-		_ = os.RemoveAll(last)
+		_ = os.RemoveAll(base)
 		if err := c.make(); err != nil {
 			t.Fatal(err)
 		}
+		if strings.HasPrefix(c.name, "world-writable") {
+			if err := os.Chmod(base, 0777); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if c.name == "group-writable" {
+			if err := os.Chmod(base, 0770); err != nil {
+				t.Fatal(err)
+			}
+		}
 		owner := ownerOf
 		if c.foreign {
-			name := filepath.Base(runtime)
-			ownerOf = func(fi os.FileInfo) int {
-				if fi.Name() == name {
+			ownerOf = func(info os.FileInfo) int {
+				if info.Name() == filepath.Base(base) {
 					return os.Getuid() + 1
 				}
-				return owner(fi)
+				return owner(info)
 			}
 		}
 		got := controlDir()
 		ownerOf = owner
-		if got != c.want {
-			t.Errorf("a runtime folder that is %s: %q, want %q", c.name, got, c.want)
+		want := ""
+		if c.safe {
+			want = base
 		}
-		if _, err := os.Lstat(filepath.Join(other, "cm")); err == nil {
-			t.Errorf("a runtime folder that is %s: cm was made through the link", c.name)
+		if got != want {
+			t.Errorf("%s base: %q, want %q", c.name, got, want)
+		}
+		if entries, err := os.ReadDir(other); err != nil || len(entries) != 0 {
+			t.Errorf("followed a link into another directory: %v %v", entries, err)
 		}
 	}
 }

@@ -1,5 +1,5 @@
 // Package provider makes hosts: the VMs, containers and sandboxes that `host
-// create` starts, bootstraps and connects, and `host destroy` deletes. Each
+// create` starts, bootstraps and connects, and `host rm --destroy` deletes. Each
 // provider is a sub-package (lima, docker, e2b). The client reaches their
 // machines through the lifecycle and transport they return. The design is in
 // docs/contributing/decisions/0013-host-providers.md.

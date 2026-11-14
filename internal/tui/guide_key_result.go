@@ -7,12 +7,12 @@ import (
 	"github.com/iamlakshya/simstim/internal/onboard"
 )
 
-type rentKeyFailure struct {
+type rentKeyError struct {
 	*client.UserError
 	cause error
 }
 
-func (e rentKeyFailure) Unwrap() []error { return []error{e.UserError, e.cause} }
+func (e rentKeyError) Unwrap() []error { return []error{e.UserError, e.cause} }
 
 func (g *guide) onRentKey(msg rentKeyMsg) tea.Cmd {
 	if !g.owns(msg.scope) || g.step != gdRentKey || g.run {
@@ -21,7 +21,7 @@ func (g *guide) onRentKey(msg rentKeyMsg) tea.Cmd {
 	g.seq++
 	g.plan.Key, g.err = msg.key, nil
 	if msg.err != nil && msg.key == "" {
-		g.err = rentKeyFailure{
+		g.err = rentKeyError{
 			UserError: &client.UserError{
 				Msg:  "could not make the SSH key: " + msg.err.Error(),
 				Hint: onboard.KeyCommand,

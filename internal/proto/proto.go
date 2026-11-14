@@ -277,6 +277,7 @@ type Hello struct {
 	Protocol string   `json:"protocol"`
 	Version  string   `json:"version"`
 	Role     string   `json:"role"`
+	HostID   string   `json:"host_id,omitempty"`
 	Features []string `json:"features,omitempty"`
 }
 

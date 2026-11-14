@@ -1,6 +1,7 @@
 package client
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -80,11 +81,11 @@ func (g *pasteGuard) markUnsure(until time.Time) { g.part.unsureUntil(until) }
 // the journal cannot take them, every reading lost track of the writes:
 // the guard tries once more to note that alone, and refuses every drop in
 // this process for a day in any case.
-func (g *pasteGuard) flush() {
+func (g *pasteGuard) flush(ctx context.Context) {
 	if g.part.empty() {
 		return
 	}
-	err := g.mem.addBatch(&g.part)
+	err := g.mem.addBatch(ctx, &g.part)
 	g.part.reset()
 	if err == nil {
 		return
@@ -93,33 +94,33 @@ func (g *pasteGuard) flush() {
 	for _, r := range g.readers {
 		r.term.orphanAt = now
 	}
-	_ = g.mem.addBatch(&clipWrites{unsure: now.Add(clipMaxAge)})
+	_ = g.mem.addBatch(ctx, &clipWrites{unsure: now.Add(clipMaxAge)})
 }
 
 // detach ends the guard of an attach: an unfinished kitty transfer counts
 // as a write as far as it went, and the terminal's state of each reading,
 // with the time when it lost track of a write, waits for the next attach
 // in this process.
-func (g *pasteGuard) detach() {
+func (g *pasteGuard) detach(ctx context.Context) {
 	terms := make([]*clipTerm, len(g.readers))
 	for i, r := range g.readers {
 		r.detach()
 		terms[i] = r.term
 	}
-	g.flush()
+	g.flush(ctx)
 	g.mem.keepTerms(terms)
 }
 
 // observe reads bytes on their way to the terminal, with every reading,
 // and notes the writes in them before it returns.
-func (g *pasteGuard) observe(b []byte) {
+func (g *pasteGuard) observe(ctx context.Context, b []byte) {
 	if g == nil {
 		return
 	}
 	for _, r := range g.readers {
 		r.observe(b)
 	}
-	g.flush()
+	g.flush(ctx)
 }
 
 // idle reports whether the client may write bytes of its own to the
@@ -181,7 +182,7 @@ func (d *dropped) close() {
 
 // check opens the files of a drop, or returns the notice that says why the
 // paste goes in as text. text is the paste, and paths its words.
-func (g *pasteGuard) check(text []byte, paths []string) (*dropped, string) {
+func (g *pasteGuard) check(ctx context.Context, text []byte, paths []string) (*dropped, string) {
 	d := &dropped{}
 	for _, p := range paths {
 		f, why := openDropped(p)
@@ -213,7 +214,7 @@ func (g *pasteGuard) check(text []byte, paths []string) (*dropped, string) {
 			sums, names = append(sums, s), append(names, name)
 		}
 	}
-	why, match := g.mem.check(sums, g.inProgress())
+	why, match := g.mem.check(ctx, sums, g.inProgress())
 	if why == "" {
 		return d, ""
 	}

@@ -19,10 +19,10 @@ func (a *attacher) sendUpload(ctx context.Context, name string, data []byte) {
 	defer cancel()
 	path, err := a.conn.Upload(ctx, a.o.Session, name, data)
 	if err != nil {
-		a.notify("upload failed: " + CleanLine(err.Error()))
+		a.notify(ctx, "upload failed: "+CleanLine(err.Error()))
 		return
 	}
-	a.notify(uploadNotice([]string{name}, []int{len(data)}))
+	a.notify(ctx, uploadNotice([]string{name}, []int{len(data)}))
 	a.pasteText([]byte(path + " "))
 }
 
@@ -47,13 +47,13 @@ func (a *attacher) paste(ctx context.Context, p keys.Piece) {
 	}
 	// A paste of the clipboard's text is not a drag, whatever wrote it.
 	if a.pastedFromClipboard(ctx, p.Text) {
-		a.notify(clipboardNotice(files))
+		a.notify(ctx, clipboardNotice(files))
 		_ = a.conn.Send(proto.TInput, p.Raw)
 		return
 	}
-	drop, msg := a.guard.check(p.Text, files)
+	drop, msg := a.guard.check(ctx, p.Text, files)
 	if msg != "" {
-		a.notify(msg)
+		a.notify(ctx, msg)
 		_ = a.conn.Send(proto.TInput, p.Raw)
 		return
 	}
@@ -66,7 +66,7 @@ func (a *attacher) paste(ctx context.Context, p keys.Piece) {
 	// The notice names each file that went up, even when a later one fails.
 	defer func() {
 		if len(names) > 0 {
-			a.notify(uploadNotice(names, sizes))
+			a.notify(ctx, uploadNotice(names, sizes))
 		}
 	}()
 	for i, f := range files {
@@ -80,7 +80,7 @@ func (a *attacher) paste(ctx context.Context, p keys.Piece) {
 		path, err := a.conn.Upload(uctx, a.o.Session, filepath.Base(f), data)
 		cancel()
 		if err != nil {
-			a.notify("upload failed: " + CleanLine(err.Error()))
+			a.notify(ctx, "upload failed: "+CleanLine(err.Error()))
 			_ = a.conn.Send(proto.TInput, p.Raw)
 			return
 		}

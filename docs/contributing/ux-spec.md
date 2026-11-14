@@ -273,7 +273,7 @@ Every dialog is a sheet. It rises from the bottom of the screen over the dimmed 
 | Peek | `space` | The session's last screen, refreshed while the agent runs. ↑↓ move to the next session, and Enter attaches. For an agent that has ended, it shows no memory, and Enter keeps it open. |
 | Commands | `ctrl+o` | The palette: a filter, then every command as plain words ("New session", "Peek at the screen") with its key in cyan. A command that cannot run says why, faint. |
 | Keys | `?` | Every key that works here, in two columns, built from the live registry. It leaves out `?` itself. |
-| Host details | `i` | Route, system, helper, agents with their versions (wrapped under the label when they do not fit), limits; `t` test, `s` shell, `r` reconnect, `x` remove |
+| Host details | `i` | The lines of `host show`, from one function in the client. First come the saved route, labels, machine, idle, provider script and secrets. Then come the system, the helper, the agents with their versions, and the limits. A list, such as the agents, wraps under its label when it does not fit. `t` test, `s` shell, `r` reconnect, `x` remove |
 | Add a host | `a` | The wizard (2.10) |
 | Set up | Enter on the first-run screen, `s` | The guided setup (2.12) |
 
@@ -310,9 +310,9 @@ The agent owns the whole terminal: every row and every column. There is no borde
 `a`, from any screen: a sheet with one step per screen, the step count at the right of its rule. Esc goes back one step. A reply to a closed setup step cannot advance a later setup. A check that times out shows its error and can be tried again.
 
 1. **Where.** A target from `~/.ssh/config` (↑↓ pick, and typing filters), a name, and an optional extra SSH config file.
-2. **Test.** Each check shows the spinner, then `✓` or `✕` with the time it took. A failure shows the error and its next step.
+2. **Test.** Each check shows the spinner, then `✓` or `✕` with the time it took. A failure shows the error and its next step. The first check is the host key, which the wizard pins as `host add` does, before it connects (isolation spec 14.7.1). When your settings do not name the key, the step shows its fingerprint and the command that prints it on the host, with `enter pin this key` and `esc back`.
 3. **Install the helper.** This is the consent screen. It says what is installed and where, what else changes (linger, terminfo), and that nothing listens on the network.
-4. **Ready.** The agents found, the system, and the memory for sessions. The host's sessions are now open behind the sheet. When a first-class or supported agent is missing or not logged in, Enter goes on to the agents. Otherwise it starts a session.
+4. **Ready.** The host is saved with its pin, and Esc waits for that save to finish. The agents found, the system, and the memory for sessions. The host's sessions are now open behind the sheet. When a first-class or supported agent is missing or not logged in, Enter goes on to the agents. Otherwise it starts a session.
 5. **Agents.** The checklist: every agent with an installer, first-class and supported ones first. An installed agent has a green `✓`, a ticked one a cyan `●`, the rest a faint `○`, each with its state. The best-effort agents wait under a fold, `▸ 5 more agents, best effort`, which Enter or Space opens. Space ticks, and Enter installs what is ticked.
 
    ```text
@@ -576,11 +576,12 @@ An address names a session: `<host>/<session>`, or `<session>` alone when no oth
 | `simstim host ls [--json]` | Lists the hosts |
 | `simstim host test <host> [--json]` | Checks that a host answers, and how fast |
 | `simstim host doctor <host> [--fix [--yes]] [--json]` | Checks a host's setup, and with `--fix` fixes what it can |
-| `simstim host rm <host>` | Forgets a host (its sessions keep running) |
+| `simstim host show <host> [--json]` | Describes the saved host and what it says about itself, as the launcher does. |
+| `simstim host set <host> idle=<30m\|never>` | Changes the named idle setting. The old `host idle` form still works and warns. |
+| `simstim host rm <host> [--destroy [--confirm <host>] [--force]]` | Forgets a host. For a created machine it asks for the typed name before deleting it too. `host destroy` remains a warned old form. |
+| `simstim host upgrade <host> [--json]` | Installs this client's helper without the other host-add steps. |
 | `simstim host restore <host> [--all] [--json]` | Starts again the sessions that a host restart stopped (or, with `--all`, a crash) |
 | `simstim host create lima\|docker\|e2b [<name>] [--cpus n] [--memory 8G] [--disk 40G] [--image i] [--template t] [--idle-stop 30m] [--token-command c]` | Makes a host with a provider, installs the helper and connects |
-| `simstim host destroy <host> [--yes] [--force]` | Deletes a created host's VM, container or sandbox, and every session on it |
-| `simstim host idle <host> <duration>\|never` | Sets how long a created host may idle before it stops |
 | `simstim host start\|stop\|status <host>` | Runs the host's provider or provider script. `status` takes `--json` |
 | `simstim host alerts <host> [--json]` | Shows where a host sends alerts, and the last deliveries |
 | `simstim host alerts set <host> [--ntfy url \| --webhook url \| --command c] [--add] [--events e,f] [...]` | Chooses where a host sends alerts, and which ones |

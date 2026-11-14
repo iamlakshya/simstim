@@ -82,10 +82,28 @@ func platformOf(system, machine string) (goos, arch string) {
 	return goos, arch
 }
 
-// Install uploads the helper for p, and the shadow terminal when this build
-// has one, checks each SHA-256 on the host, and moves them into place. It never
-// runs during a background reconnect.
+// Install installs the helper for p (InstallHelper), then removes the old
+// helper versions that nothing uses (Prune). It never runs during a
+// background reconnect.
 func Install(ctx context.Context, s Transport, p Platform) error {
+	if err := InstallHelper(ctx, s, p); err != nil {
+		return err
+	}
+	Prune(ctx, s)
+	return nil
+}
+
+// Prune runs the helper's prune: each install leaves the old versions
+// behind, and the new helper removes those that nothing uses. A failure
+// here never fails the install.
+func Prune(ctx context.Context, s Transport) {
+	_, _ = s.Run(ctx, RemoteHelper(HelperVersion())+" prune", nil)
+}
+
+// InstallHelper uploads the helper for p, and the shadow terminal when this
+// build has one, checks each SHA-256 on the host, and moves them into place.
+// It removes nothing, so a newer client's helper stays (cli-spec 11.4).
+func InstallHelper(ctx context.Context, s Transport, p Platform) error {
 	bin, ok := helpers.For(p.OS, p.Arch)
 	if !ok {
 		return &UserError{
@@ -111,9 +129,6 @@ func Install(ctx context.Context, s Transport, p Platform) error {
 			return err
 		}
 	}
-	// Each install leaves the old versions behind. The new helper removes
-	// those that nothing uses; a failure here never fails the install.
-	_, _ = s.Run(ctx, RemoteHelper(ver)+" prune", nil)
 	return nil
 }
 

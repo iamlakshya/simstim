@@ -107,9 +107,16 @@ func TestSetupAnswerPassesCurrentContextAndHashThroughBackend(t *testing.T) {
 	}}
 	m.modal = ask
 	cmd := ask.key(m, tea.KeyPressMsg{Code: 'y', Text: "y"})
-	finished := make(chan struct{})
-	go func() { executeHandoffCommand(cmd); close(finished) }()
-	call := lifecycleWait(t, entered)
+	ps := newProgStepper(t, m, m)
+	var call setupContextCall
+	finished := ps.stepToGate(cmd, func() bool {
+		select {
+		case call = <-entered:
+			return true
+		default:
+			return false
+		}
+	})
 	if call.ctx != current || call.ctx.Value(handoffContextKey{}) != "kept" || call.host != h.name() || call.repo != ask.q.Repo || call.hash != ask.q.Hash || !call.run {
 		t.Fatalf("the backend lost the current operation or checked hash: %+v", call)
 	}

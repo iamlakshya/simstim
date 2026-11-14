@@ -2,6 +2,7 @@ package client
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"strings"
 
@@ -94,33 +95,33 @@ func notifyAdvance(table vtTable, state uint8, b []byte) uint8 {
 
 // writeOutput writes show byte-for-byte without modification, flushing any
 // deferred OSC 777 notifications at the first ground-state boundary.
-func (a *attacher) writeOutput(show []byte) {
+func (a *attacher) writeOutput(ctx context.Context, show []byte) {
 	if len(a.pendingNotify) == 0 {
 		a.outStream.feed(show)
-		a.write(show)
-		a.writeHeld()
+		a.write(ctx, show)
+		a.writeHeld(ctx)
 		return
 	}
 	start := 0
 	for i, c := range show {
 		a.outStream.step(c)
 		if len(a.pendingNotify) > 0 && a.outStream.ground() {
-			a.write(show[start : i+1])
+			a.write(ctx, show[start:i+1])
 			if a.guard.idle() {
-				a.flushPendingNotify()
+				a.flushPendingNotify(ctx)
 			}
 			start = i + 1
 		}
 	}
 	if start < len(show) {
-		a.write(show[start:])
+		a.write(ctx, show[start:])
 	}
-	a.writeHeld()
+	a.writeHeld(ctx)
 }
 
-func (a *attacher) emitNotify(seq []byte) {
+func (a *attacher) emitNotify(ctx context.Context, seq []byte) {
 	if a.outStream.ground() && a.guard.idle() {
-		a.write(seq)
+		a.write(ctx, seq)
 		return
 	}
 	if len(a.pendingNotify) >= maxPendingNotify {
@@ -129,16 +130,16 @@ func (a *attacher) emitNotify(seq []byte) {
 	a.pendingNotify = append(a.pendingNotify, seq)
 }
 
-func (a *attacher) flushPendingNotify() {
+func (a *attacher) flushPendingNotify(ctx context.Context) {
 	for _, seq := range a.pendingNotify {
-		a.write(seq)
+		a.write(ctx, seq)
 	}
 	a.pendingNotify = a.pendingNotify[:0]
 }
 
 // notifyOthers shows a desktop notification, through the local terminal, when
 // another session on this host starts to need the user or ends.
-func (a *attacher) notifyOthers(list []Session) {
+func (a *attacher) notifyOthers(ctx context.Context, list []Session) {
 	if a.seen == nil {
 		a.seen = map[string]string{}
 		for _, s := range list {
@@ -165,7 +166,7 @@ func (a *attacher) notifyOthers(list []Session) {
 			continue
 		}
 		title := brand.DisplayName + " · " + a.o.Host.Name
-		a.emitNotify([]byte("\x1b]777;notify;" + OSCText(title) + ";" + strings.TrimSpace(OSCText(body)) + "\x1b\\"))
+		a.emitNotify(ctx, []byte("\x1b]777;notify;"+OSCText(title)+";"+strings.TrimSpace(OSCText(body))+"\x1b\\"))
 	}
 }
 
@@ -184,21 +185,21 @@ func oscSafe(s string) string {
 // session keeps every row and column. No such notice is ever dropped. Its
 // text is the client's own, and names every file of a drop, so it is
 // cleaned but not cut. Text from the host in it is cut where it enters.
-func (a *attacher) notify(msg string) {
+func (a *attacher) notify(ctx context.Context, msg string) {
 	title := brand.DisplayName + " · " + a.o.Host.Name
-	a.notice([]byte("\x1b]777;notify;"+OSCText(title)+";"+oscText(msg, len(msg))+"\x1b\\"), true)
+	a.notice(ctx, []byte("\x1b]777;notify;"+OSCText(title)+";"+oscText(msg, len(msg))+"\x1b\\"), true)
 }
 
 // flash shows the reconnect notice on the bottom row: the one thing the
 // client draws while attached, and only while the link is down.
-func (a *attacher) flash(msg string) {
+func (a *attacher) flash(ctx context.Context, msg string) {
 	_, rows, _, _ := a.size()
-	a.write([]byte(fmt.Sprintf("\x1b7\x1b[%d;1H\x1b[2K\x1b[2m %s · %s\x1b[0m\x1b8", rows, brand.DisplayName, msg)))
+	a.write(ctx, []byte(fmt.Sprintf("\x1b7\x1b[%d;1H\x1b[2K\x1b[2m %s · %s\x1b[0m\x1b8", rows, brand.DisplayName, msg)))
 	a.outStream.reset()
 }
 
-func (a *attacher) clearFlash() {
+func (a *attacher) clearFlash(ctx context.Context) {
 	_, rows, _, _ := a.size()
-	a.write([]byte(fmt.Sprintf("\x1b7\x1b[%d;1H\x1b[2K\x1b8", rows)))
+	a.write(ctx, []byte(fmt.Sprintf("\x1b7\x1b[%d;1H\x1b[2K\x1b8", rows)))
 	a.outStream.reset()
 }

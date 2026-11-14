@@ -81,6 +81,7 @@ func (m *Model) resumeAfterExec(msg tea.Msg) tea.Cmd {
 
 func (m *Model) resumeAfterHandoff(after func() tea.Cmd) tea.Cmd {
 	m.clearHandoff()
+	m.retireTierQuestion()
 	m.ticking = false
 	m.preview.inflight = false
 	m.rename = nil
@@ -95,6 +96,7 @@ func (m *Model) resumeAfterHandoff(after func() tea.Cmd) tea.Cmd {
 	completed := m.drainHostSaves(false)
 	cmds := []tea.Cmd{
 		completed,
+		m.waitForTierQuestion(),
 		m.resumeWizard(),
 		m.resumeGuide(),
 		after(),

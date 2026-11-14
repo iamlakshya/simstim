@@ -74,7 +74,7 @@ func TestHintsQuoteTargetsAndPaths(t *testing.T) {
 	if got := s.ReachHint(); got != "ssh 'dev@x;y' (check that this works first)" {
 		t.Errorf("ReachHint = %q", got)
 	}
-	err := sshError(Host{Name: "box", SSH: "-oProxyCommand=sh"}, exitErr255(t), "Permission denied")
+	err := sshError(context.Background(), Host{Name: "box", SSH: "-oProxyCommand=sh"}, exitErr255(t), "Permission denied", "")
 	var ue *UserError
 	if !errors.As(err, &ue) || ue.Hint != "ssh -- -oProxyCommand=sh (check that this works first)" {
 		t.Errorf("sshError = %v", err)

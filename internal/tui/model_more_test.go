@@ -149,15 +149,15 @@ func TestWizard(t *testing.T) {
 	if w.step != wzTest || w.err != nil || len(w.checks) != 3 {
 		t.Fatalf("test step: %v %v %+v", w.step, w.err, w.checks)
 	}
-	hs.key("enter")
+	hs.key("enter", "1")
 	if w.step != wzInstall {
 		t.Fatalf("no consent screen: step %v", w.step)
 	}
-	hs.key("esc")
+	hs.key("esc", "esc")
 	if w.step != wzTest {
 		t.Fatal("esc did not go back")
 	}
-	hs.key("enter", "enter")
+	hs.key("enter", "1", "enter")
 	hasCall(t, be, "install raspberry")
 	if !w.saved || w.step != wzReady {
 		t.Fatalf("not ready: step %v, err %v", w.step, w.err)

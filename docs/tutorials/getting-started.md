@@ -44,9 +44,11 @@ The launcher offers the same setup: run `simstim` with no hosts, and press Enter
 
 For a script, or to skip the questions, answer them with flags:
 
+These examples use `own` for a host where only you have root. Choose `shared` when someone else has root ([host tiers](../how-to/choose-a-host-tier.md)).
+
 <!-- test: help (it changes the host) -->
 ```sh
-simstim setup --host my-server --agents claude,codex --yes --no-login
+simstim setup --host my-server --tier own --agents claude,codex --yes --no-login
 ```
 
 ### Or step by step
@@ -54,7 +56,7 @@ simstim setup --host my-server --agents claude,codex --yes --no-login
 The setup runs commands you can also run yourself. `host add` checks that the host answers, installs the helper, and saves the host:
 
 ```sh
-simstim host add my-server --yes
+simstim host add my-server --tier own --yes
 ```
 
 `--yes` agrees to the helper's install; leave it out to see what it installs first. Then check the host:

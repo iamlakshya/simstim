@@ -41,8 +41,20 @@ func TestGoldenPrompts(t *testing.T) {
 	show("doctor --fix", "y\n", func(p *prompter) error {
 		return offerFixes(p, qFix, sampleFixes[:1], false, func([]string) ([]client.Fix, error) { return nil, nil })
 	})
-	_ = saveHost(context.Background(), client.Host{Name: "box", Machine: &client.Machine{Provider: "fake", ID: "fake-box"}})
-	show("host destroy", "no\n", func(p *prompter) error { return destroyHost(context.Background(), p, "box", false, false) })
+	_ = saveHostContext(context.Background(), client.Host{Name: "box", Machine: &client.Machine{Provider: "fake", ID: "fake-box"}})
+	tr.Sessions = []client.Session{{ID: "abcd2345", Name: "quiet", State: "idle", Alive: true}, {ID: "bcde2345", Name: "notes", State: "idle", Alive: true}}
+	show("host rm --destroy: the machine", "bo\n", func(p *prompter) error {
+		return removeHost(context.Background(), p, rmOpts{name: "box", destroy: true})
+	})
+	oldRekey := rekeyKey
+	defer func() { rekeyKey = oldRekey }()
+	rekeyKey = func(_ context.Context, _ client.Host, _ string, confirm func(string, string) error) (string, string, error) {
+		o, n := "SHA256:"+strings.Repeat("o", 43), "SHA256:"+strings.Repeat("n", 43)
+		return o, n, confirm(o, n)
+	}
+	show("host rekey", "box\n", func(p *prompter) error { return rekeyHost(context.Background(), p, "box", "", "") })
+	show("host rm: the machine, kept", "\n", func(p *prompter) error { return removeHost(context.Background(), p, rmOpts{name: "box"}) })
+	tr.Sessions = nil
 	tr.NoHelper = true
 	show("host add: the helper", "n\n", func(p *prompter) error {
 		var err error
@@ -51,6 +63,16 @@ func TestGoldenPrompts(t *testing.T) {
 			err = addHost(context.Background(), p, client.Host{Name: "new", Machine: &client.Machine{Provider: "fake", ID: "fake-new"}}, false)
 		})
 		return err
+	})
+	show("host add: the tier", "1\n", func(p *prompter) error {
+		_, err := p.askTier("box")
+		return err
+	})
+	_ = saveHostContext(context.Background(), client.Host{Name: "lab", Machine: &client.Machine{Provider: "fake", ID: "fake-lab"}})
+	_ = client.SetTier("lab", client.TierShared, "", "")
+	tr.NoHelper = false
+	show("host set: raise the tier", "lab\n", func(p *prompter) error {
+		return setHostWith(context.Background(), p, p.out, "lab", []string{"tier=own"}, "")
 	})
 	show("three answers that are not one", "x\nmaybe\n?\n", func(p *prompter) error {
 		_, err := p.yesNo("Install it?", false)

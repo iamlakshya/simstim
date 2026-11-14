@@ -247,7 +247,7 @@ func TestSignalsCancel(t *testing.T) {
 	if err := os.WriteFile(script, []byte("#!/bin/sh\ntouch "+started+"\nexec sleep 30\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := client.SaveHosts(context.Background(), []client.Host{{Name: "box", SSH: "box", Provider: &client.Provider{Script: script}}}); err != nil {
+	if err := client.SaveHostsContext(context.Background(), []client.Host{{Name: "box", SSH: "box", Provider: &client.Provider{Script: script}}}); err != nil {
 		t.Fatal(err)
 	}
 	for _, sig := range []os.Signal{syscall.SIGTERM, os.Interrupt} {

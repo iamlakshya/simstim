@@ -78,20 +78,29 @@ type question struct {
 var (
 	qInstallHelper = &question{cmd: "host add", flag: "--yes"}
 	qAddAgents     = &question{cmd: "host add", flag: "--yes", keep: true}
-	qMakeFolder    = &question{cmd: "new", flag: "--mkdir"}
-	qSetupScript   = &question{cmd: "new", flag: "--setup-script", keep: true}
-	qFix           = &question{cmd: "doctor", flag: "-y"}
-	qHostFix       = &question{cmd: "host doctor", flag: "-y"}
-	qDestroy       = &question{cmd: "host destroy", flag: "-y"}
-	qSetup         = &question{cmd: "setup", flag: "--yes"}
+	// qHostKey is ssh's own question about a host key that the user's
+	// known hosts lack: the client lets ssh ask it (isolation spec 14.7.1).
+	qHostKey     = &question{cmd: "host add", flag: "--host-key"}
+	qHostTier    = &question{cmd: "host add", flag: "--tier"}
+	qRaiseTier   = &question{cmd: "host set", flag: "--confirm <host>"}
+	qRekey       = &question{cmd: "host rekey", flag: "--confirm"}
+	qMakeFolder  = &question{cmd: "new", flag: "--mkdir"}
+	qSetupScript = &question{cmd: "new", flag: "--setup-script", keep: true}
+	qFix         = &question{cmd: "doctor", flag: "-y"}
+	qHostFix     = &question{cmd: "host doctor", flag: "-y"}
+	qSetup       = &question{cmd: "setup", flag: "--yes"}
 	// qDelete fails with input off only after the end of its old form:
 	// until then rm deletes and warns (rm.go).
 	qDelete  = &question{cmd: "rm", flag: "-y"}
 	qRestart = &question{cmd: "attach", flag: "--restart", def: true}
+	// qRmMachine is the typed name that host rm asks for, to delete the
+	// machine of a host that `host create` made. With input off, the
+	// machine stays, unless --destroy and --confirm name it.
+	qRmMachine = &question{cmd: "host rm", flag: "--destroy --confirm <host>", keep: true}
 )
 
 // questions lists every row, for the tests.
-var questions = []*question{qInstallHelper, qAddAgents, qMakeFolder, qSetupScript, qFix, qHostFix, qDestroy, qSetup, qDelete, qRestart}
+var questions = []*question{qInstallHelper, qAddAgents, qHostKey, qHostTier, qRaiseTier, qRekey, qMakeFolder, qSetupScript, qFix, qHostFix, qSetup, qRmMachine, qDelete, qRestart}
 
 // prompter asks a command's questions on stderr, and reads the answers from
 // stdin.
@@ -268,6 +277,37 @@ func (p *prompter) yesNo(text string, def bool) (bool, error) {
 			return false, p.cancel()
 		}
 		fmt.Fprintln(p.out, "Type y or n, or press Enter for the answer in capitals.")
+	}
+}
+
+// askTier asks who else has root on host (isolation spec 14.2.1, 14.8.3).
+// It has no default answer: 1/own, 2/shared or 3/throwaway picks the tier,
+// and three other answers cancel.
+func (p *prompter) askTier(host string) (client.Tier, error) {
+	if !p.on {
+		return client.TierUnknown, p.needs(qHostTier, "the tier of "+host+" (own, throwaway or shared)", "--tier", "<tier>")
+	}
+	fmt.Fprintf(p.out, "\nWho else has root on %s?\n", shown(host))
+	fmt.Fprintln(p.out, "  1  Only me                  own")
+	fmt.Fprintln(p.out, "  2  Someone else             shared")
+	fmt.Fprintln(p.out, "  3  A machine for one task   throwaway")
+	for try := 1; ; try++ {
+		a, err := p.ask("Tier (1, 2 or 3): ")
+		if err != nil {
+			return client.TierUnknown, err
+		}
+		switch strings.ToLower(strings.TrimSpace(a)) {
+		case "1", "own":
+			return client.TierOwn, nil
+		case "2", "shared":
+			return client.TierShared, nil
+		case "3", "throwaway":
+			return client.TierThrowaway, nil
+		}
+		if try == 3 {
+			return client.TierUnknown, p.cancel()
+		}
+		fmt.Fprintln(p.out, "Type 1, 2 or 3, or own, shared or throwaway.")
 	}
 }
 

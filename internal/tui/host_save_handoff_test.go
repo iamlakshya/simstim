@@ -32,13 +32,20 @@ func (b *hostSaveTestBackend) LoadHosts(ctx context.Context) ([]client.Host, err
 	return b.fakeBackend.LoadHosts(ctx)
 }
 
-func (b *hostSaveTestBackend) SaveHosts(ctx context.Context, hosts []client.Host) error {
+func (b *hostSaveTestBackend) UpdateHostsContext(ctx context.Context, c client.HostChange) (warn, err error) {
+	if _, err := b.LoadHosts(ctx); err != nil {
+		return nil, err
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	b.saveCalls.Add(1)
 	if b.saveErr != nil {
-		return b.saveErr
+		return nil, b.saveErr
 	}
-	if err := b.fakeBackend.SaveHosts(ctx, hosts); err != nil {
-		return err
+	warn, err = b.fakeBackend.UpdateHostsContext(ctx, c)
+	if err != nil {
+		return warn, err
 	}
 	if b.committed != nil {
 		b.committed <- ctx
@@ -46,7 +53,7 @@ func (b *hostSaveTestBackend) SaveHosts(ctx context.Context, hosts []client.Host
 	if b.holdCancel {
 		<-ctx.Done()
 	}
-	return nil // the write already committed, even if cancellation came later
+	return warn, nil
 }
 
 func (b *hostSaveTestBackend) Dial(ctx context.Context, host client.Host) (Conn, error) {

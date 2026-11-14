@@ -3,21 +3,18 @@ package client
 import (
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"io"
-	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/iamlakshya/simstim/internal/brand"
-	"github.com/iamlakshya/simstim/internal/paths"
 )
 
 // SSH runs the system OpenSSH client for one host. It never edits ~/.ssh/config:
@@ -30,15 +27,28 @@ type SSH struct {
 
 func home() string { h, _ := os.UserHomeDir(); return h }
 
-// wrapperPath is the generated SSH config for one host.
+// wrapperPath is the generated SSH config for one host. Its name carries
+// hostKey, so Box and box never share one.
 func wrapperPath(h Host) string {
-	return filepath.Join(ConfigDir(), "ssh", "config-"+h.Name)
+	if path, ok := loginWrapperPath(h.Name); ok {
+		return path
+	}
+	key := HostFileKey(h.Name)
+	if key == "" {
+		return ""
+	}
+	return filepath.Join(ConfigDir(), "ssh", "config-"+key)
 }
 
 // writeWrapper writes the generated SSH config for h. Order matters, because
 // ssh uses the first value it finds: the client's hardening first, then the
 // host's own config, then the user's, then the system's, then our defaults.
 func writeWrapper(h Host) (string, error) {
+	if !ValidHostName(h.Name) {
+		// Its path would leave the folder, or name another host's file.
+		return "", &UserError{Msg: fmt.Sprintf("%q cannot name a host", CleanLine(h.Name)),
+			Hint: "Fix the host's name in " + hostsPath() + ": letters, digits, dots, dashes and underscores, with no dot at the end.", Code: "bad_name", Kind: KindUsage}
+	}
 	hostConfig := ""
 	if h.SSHConfig != "" {
 		hostConfig = expand(h.SSHConfig)
@@ -96,10 +106,14 @@ func writeConfig(path, what, hostConfig string, defaults bool) (string, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return "", fmt.Errorf("make %s: %w", filepath.Dir(path), err)
 	}
+	hooks, err := loginWrapperWriteHooks(path, what)
+	if err != nil {
+		return "", err
+	}
 	if old, err := os.ReadFile(path); err == nil && string(old) == b.String() {
 		return path, nil
 	}
-	if err := os.WriteFile(path, []byte(b.String()), 0o600); err != nil {
+	if err := writeAtomicFileWithHooks(path, ".ssh-config-*", []byte(b.String()), hooks); err != nil {
 		return path, fmt.Errorf("write the SSH config %s: %w", path, err)
 	}
 	return path, nil
@@ -128,88 +142,18 @@ func systemSSHConfig(goos string, getenv func(string) string) string {
 // sshKnowsFork reports whether this computer's ssh knows the option
 // ForkAfterAuthentication, which OpenSSH 8.7 added. Older versions stop on
 // it, in a config file too. It asks ssh -G once for each run, which
-// connects to nothing. Tests replace it.
-var sshKnowsFork = sync.OnceValue(func() bool {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, "ssh", "-G", "-F", os.DevNull, "-o", "ForkAfterAuthentication=no", "--", "probe.invalid")
-	cmd.WaitDelay = sshWaitDelay
-	return cmd.Run() == nil
-})
+// connects to nothing (sshKnowsOption). When ssh cannot tell, the config
+// leaves the option out: forward still refuses it. Tests replace it.
+var sshKnowsFork = func() bool {
+	ok, err := sshKnowsOption("ForkAfterAuthentication=no")
+	return ok && err == nil
+}
 
 func expand(p string) string {
-	if rest, ok := strings.CutPrefix(p, "~/"); ok {
-		return filepath.Join(home(), rest)
+	if strings.HasPrefix(p, "~/") || filepath.Separator == '\\' && strings.HasPrefix(p, "~\\") {
+		return filepath.Join(home(), p[2:])
 	}
 	return p
-}
-
-// maxSocketPath is the longest socket path that works everywhere: macOS
-// allows 104 bytes with the closing NUL, Linux 108.
-const maxSocketPath = 103
-
-// controlPrefix starts the name of each shared connection's socket. Older
-// clients named their sockets without it, and their masters may still run,
-// with an agent that the user's config forwarded. A master keeps what it
-// forwarded for every session that it serves. So the client never uses one
-// of those: a new name means a new master, which starts with forwarding off
-// (decision 0034).
-const controlPrefix = "nf-"
-
-// ControlDir is the folder of the sockets of shared SSH connections, or ""
-// when the client shares none (controlDir).
-func ControlDir() string {
-	if !controlMaster {
-		return ""
-	}
-	return controlDir()
-}
-
-// tmpControlDir is the last place for the shared connections' sockets: a
-// private folder of our own in /tmp. Tests point it into their own root.
-var tmpControlDir = func() string { return filepath.Join("/tmp", fmt.Sprintf("%s-%d", brand.Name, os.Getuid())) }
-
-// controlDir is the folder for the shared connections' sockets. It is the
-// cache folder when a socket path there fits in maxSocketPath (OpenSSH's %C
-// is 40 characters, after controlPrefix). Otherwise it is "cm" in the runtime folder
-// (paths.RuntimeDir: $XDG_RUNTIME_DIR/<name>, or <name>-<uid> in the
-// temporary folder without it), when that folder is safe (ownedDir: the
-// user's, not a link, and nobody else may write it), and else a private
-// folder of our own in /tmp, whose sticky bit keeps others from moving it:
-// the first whose path fits and that is private once made. It is "" when
-// none can be used safely; the client then shares no connections, which is
-// slower but works.
-func controlDir() string {
-	d := filepath.Join(CacheDir(), "cm")
-	if len(d)+1+len(controlPrefix)+40 <= maxSocketPath {
-		if os.MkdirAll(d, 0o700) != nil {
-			return ""
-		}
-		return d
-	}
-	for _, c := range []struct{ parent, dir string }{
-		{paths.RuntimeDir(), filepath.Join(paths.RuntimeDir(), "cm")},
-		{"", tmpControlDir()},
-	} {
-		if len(c.dir)+1+len(controlPrefix)+40 > maxSocketPath {
-			continue
-		}
-		if c.parent != "" {
-			if err := os.Mkdir(c.parent, 0o700); err != nil && !errors.Is(err, fs.ErrExist) {
-				continue
-			}
-			if !ownedDir(c.parent) {
-				continue
-			}
-		}
-		if err := os.Mkdir(c.dir, 0o700); err != nil && !errors.Is(err, fs.ErrExist) {
-			continue
-		}
-		if privateDir(c.dir) {
-			return c.dir
-		}
-	}
-	return ""
 }
 
 // sshWaitDelay bounds the wait for ssh's output once ssh has ended or was
@@ -270,21 +214,54 @@ func (s *SSH) baseArgs() ([]string, error) { return s.args(true) }
 
 // args are the options of every ssh command for the host. With shared, the
 // command uses the host's shared connection, and starts it when it is not
-// running. Without, it has a connection of its own.
+// running. Without, it has a connection of its own. When the host has a
+// pinned key, ssh checks the key against the pin alone (spec 14.7.1). The
+// shared connection's socket names the saved host and its pin
+// (controlKey): two hosts with different pins, or one host before and
+// after a rekey, never share a master, which checked a key only once.
 func (s *SSH) args(shared bool) ([]string, error) {
+	snap, ok, err := loadPin(s.Host.Name)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return s.argsWith(nil, shared)
+	}
+	return s.argsWith(&snap, shared)
+}
+
+// argsWith is args with the pin snap, read once by the caller, or with no
+// pin when snap is nil.
+func (s *SSH) argsWith(snap *pinSnap, shared bool) ([]string, error) {
+	if snap != nil && snap.staged {
+		shared = false
+	} // an unpublished stage never leaves a reusable master
 	cfg, err := writeWrapper(s.Host)
 	if err != nil {
 		return nil, err
 	}
-	args := append([]string{"-F", cfg}, NoForwarding()...)
+	var pin []string
+	var keys []hostKey
+	if snap != nil {
+		if pin, err = pinArgs(s.Host.Name, snap.path); err != nil {
+			return nil, err
+		}
+		keys = snap.keys
+	}
+	args := slices.Concat([]string{"-F", cfg}, NoForwarding(), pin)
 	d := ""
 	if shared {
 		d = sharedDir()
 	}
+	epoch := ""
+	if d != "" {
+		epoch = markControl(d, s.Host.Name, controlKey(s.Host.Name, keys))
+	}
 	switch {
-	case d != "":
-		args = append(args, "-o", "ControlMaster=auto", "-o", "ControlPath="+filepath.Join(d, controlPrefix+"%C"), "-o", "ControlPersist=600")
-	case !shared || controlMaster:
+	case epoch != "":
+		path := filepath.Join(strings.ReplaceAll(epoch, "%", "%%"), controlName(""))
+		args = append(args, "-o", "ControlMaster=auto", "-o", "ControlPath="+sshPathArg(path, runtime.GOOS), "-o", "ControlPersist=600")
+	default:
 		// A connection of its own, also when no private folder can be
 		// made: the user's own ControlPath could name a master that an
 		// older client started, with the agent forwarded.
@@ -305,22 +282,57 @@ func RemoteHelper(ver string) string {
 // the host. It carries the bridge (Start) and Run, so it clears the port
 // forwards that a config file names.
 func (s *SSH) Command(ctx context.Context, remote string, extra ...string) (*exec.Cmd, error) {
-	args, err := s.baseArgs()
+	return s.command(ctx, ctx, remote, extra...)
+}
+
+func (s *SSH) command(lockCtx, procCtx context.Context, remote string, extra ...string) (*exec.Cmd, error) {
+	args, err := s.connArgs(lockCtx, true)
 	if err != nil {
 		return nil, err
 	}
 	args = append(args, NoPortForwards()...)
 	args = append(args, extra...)
 	args = append(args, "-e", "none", "--", s.Host.SSH, remote)
-	cmd := exec.CommandContext(ctx, "ssh", args...)
+	cmd := exec.CommandContext(procCtx, "ssh", args...)
 	cmd.WaitDelay = sshWaitDelay
 	return cmd, nil
 }
 
-// Run runs a remote command and returns its stdout. The error includes stderr.
-func (s *SSH) Run(ctx context.Context, remote string, stdin io.Reader) ([]byte, error) {
-	cmd, err := s.Command(ctx, remote, "-T")
+// sshLogFile is a private temporary file for the destination ssh's -E log.
+// A ProxyJump hop runs in its own ssh without -E, so its banner and errors
+// go to stderr and never reach this file.
+type sshLogFile struct {
+	dir  string
+	path string
+}
+
+func newSSHLog() (*sshLogFile, error) {
+	dir, err := os.MkdirTemp("", brand.Name+"-ssh-")
 	if err != nil {
+		return nil, fmt.Errorf("make a folder for the ssh log: %w", err)
+	}
+	return &sshLogFile{dir: dir, path: filepath.Join(dir, "ssh.log")}, nil
+}
+
+func (l *sshLogFile) finish() string {
+	if l == nil {
+		return ""
+	}
+	b, _ := os.ReadFile(l.path)
+	_ = os.RemoveAll(l.dir)
+	return string(b)
+}
+
+// Run runs a remote command and returns its stdout. The error includes stderr
+// only when the remote command itself ran and exited with 1..254.
+func (s *SSH) Run(ctx context.Context, remote string, stdin io.Reader) ([]byte, error) {
+	logFile, err := newSSHLog()
+	if err != nil {
+		return nil, err
+	}
+	cmd, err := s.Command(ctx, remote, "-T", "-E", logFile.path)
+	if err != nil {
+		logFile.finish()
 		return nil, err
 	}
 	var out, errb bytes.Buffer
@@ -333,23 +345,71 @@ func (s *SSH) Run(ctx context.Context, remote string, stdin io.Reader) ([]byte, 
 		defer shown.Flush()
 		cmd.Stderr = io.MultiWriter(&errb, shown)
 	}
-	if err := cmd.Run(); err != nil {
-		return out.Bytes(), sshError(s.Host, err, errb.String())
+	runErr := cmd.Run()
+	sshLog := logFile.finish()
+	if s.Host.SSH != "" && ValidHostName(s.Host.Name) && !pinned(s.Host.Name) {
+		cleanupUnpinnedMaster(ctx, s.Host, cmd.Args)
+	}
+	if runErr != nil {
+		return out.Bytes(), sshError(ctx, s.Host, runErr, sshLog, errb.String())
 	}
 	return out.Bytes(), nil
+}
+
+// cleanupUnpinnedMaster retires every indexed socket that an in-flight
+// command may have created while another client forgot the host.
+func cleanupUnpinnedMaster(ctx context.Context, h Host, args []string) {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
+	defer cancel()
+	for i, arg := range args {
+		if i == 0 || args[i-1] != "-o" || !strings.HasPrefix(arg, "ControlPath=") {
+			continue
+		}
+		value := strings.TrimPrefix(arg, "ControlPath=")
+		if strings.HasPrefix(value, `"`) {
+			var err error
+			value, err = strconv.Unquote(value)
+			if err != nil {
+				continue
+			}
+		}
+		if filepath.Base(value) == controlName("") {
+			epoch := strings.ReplaceAll(filepath.Dir(value), "%%", "%")
+			base, token := filepath.Dir(epoch), filepath.Base(epoch)
+			if privateDir(base) && controlKeyRE.MatchString(token) {
+				_ = retireControlEpoch(ctx, base, token)
+			}
+			continue
+		}
+		name, ok := strings.CutSuffix(filepath.Base(value), "-%C")
+		key, keyOK := strings.CutPrefix(name, controlPrefix)
+		dir := strings.ReplaceAll(filepath.Dir(value), "%%", "%")
+		if ok && keyOK && (controlKeyRE.MatchString(key) || legacyControlKeyRE.MatchString(key)) && privateDir(dir) {
+			retireControlKey(ctx, dir, key)
+		}
+	}
+	_ = retireControlsAt(ctx, h.Name)
 }
 
 // ExitMaster stops the ControlMaster for this host. Call it before reconnecting
 // after a network change, because a master on a dead TCP connection hangs new sessions.
 func (s *SSH) ExitMaster(ctx context.Context) {
 	if s.Host.SSH == "" || sharedDir() == "" {
-		return // no master of ours: never stop one that the user's config names
+		return // no master of ours, and no command line to build or file to write
 	}
 	args, err := s.baseArgs()
 	if err != nil {
 		return
 	}
-	args = append(args, "-O", "exit", s.Host.SSH)
+	s.exitWith(ctx, args)
+}
+
+// exitWith stops the master that args, the options of a command, name.
+func (s *SSH) exitWith(ctx context.Context, args []string) {
+	if s.Host.SSH == "" || sharedDir() == "" {
+		return // no master of ours: never stop one that the user's config names
+	}
+	args = append(slices.Clone(args), "-O", "exit", "--", s.Host.SSH)
 	// A master on a dead connection must not hang the reconnect for long.
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
@@ -369,7 +429,7 @@ func (s *SSH) CheckMaster(ctx context.Context) (running bool, pid int) {
 	if err != nil {
 		return false, 0
 	}
-	args = append(args, "-O", "check", s.Host.SSH)
+	args = append(args, "-O", "check", "--", s.Host.SSH)
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "ssh", args...)
@@ -378,30 +438,37 @@ func (s *SSH) CheckMaster(ctx context.Context) (running bool, pid int) {
 	return parseMaster(string(out))
 }
 
-// sshError turns ssh's exit status and stderr into a user error.
-func sshError(h Host, err error, stderr string) error {
-	msg := tailStderr(stderr)
-	var ee *exec.ExitError
-	if ok := asExit(err, &ee); ok && ee.ExitCode() == 255 {
-		if msg == "" {
-			msg = "ssh failed"
-		}
-		return &UserError{Msg: fmt.Sprintf("cannot reach %s: %s", h.Name, msg), Hint: SSHCommand(h.SSH) + " (check that this works first)", Code: "unreachable"}
+// sshError turns ssh's exit status, destination -E log and stderr into a
+// user error. A pin that stopped the connection is a refusal (spec 14.14),
+// read from sshLog alone. Timeout, cancellation and signal death never quote
+// stderr.
+func sshError(ctx context.Context, h Host, err error, sshLog, stderr string) error {
+	if ctx != nil && ctx.Err() != nil {
+		return ctx.Err()
 	}
+	code := exitCode(err)
+	if code == 255 {
+		if ke := hostKeyError(h, sshLog, code); ke != nil {
+			return ke
+		}
+		// ssh's own failure, in words of the client's own (sshFailReason): a
+		// host's banner or message, or a hop's, can reach stderr.
+		return &UserError{Msg: fmt.Sprintf("cannot reach %s: %s", h.Name, sshFailReason(sshLog, stderr, err)), Hint: SSHCommand(h.SSH) + " (check that this works first)", Code: "unreachable"}
+	}
+	if code <= 0 {
+		return &UserError{Msg: fmt.Sprintf("cannot reach %s: %s", h.Name, sshFailure("", err)), Hint: SSHCommand(h.SSH) + " (check that this works first)", Code: "unreachable"}
+	}
+	msg := tailStderr(stderr) // the remote command's own words, at exit 1..254
 	if msg == "" {
 		return err
 	}
 	return fmt.Errorf("%w: %s", err, msg)
 }
 
-func asExit(err error, target **exec.ExitError) bool {
-	return errors.As(err, target)
-}
-
 // Shell builds an interactive ssh command that opens a login shell on the
 // host, with no forwarding.
 func (s *SSH) Shell(ctx context.Context) (*exec.Cmd, error) {
-	args, err := s.baseArgs()
+	args, err := s.connArgs(ctx, true)
 	if err != nil {
 		return nil, err
 	}

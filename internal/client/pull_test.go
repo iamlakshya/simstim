@@ -60,11 +60,11 @@ func TestHostError(t *testing.T) {
 func TestFetchArgs(t *testing.T) {
 	h := Host{Name: "box", SSH: "dev@box"}
 	got := FetchArgs(h, "/home/dev/src/app", "auth-fix", "review/auth-fix", false)
-	want := []string{"fetch", "--no-tags", "dev@box:/home/dev/src/app", "refs/heads/auth-fix:refs/heads/review/auth-fix"}
+	want := []string{"fetch", "--no-tags", "--no-recurse-submodules", "--upload-pack=git-upload-pack", "--", "dev@box:/home/dev/src/app", "refs/heads/auth-fix:refs/heads/review/auth-fix"}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("got %q, want %q", got, want)
 	}
-	if got := FetchArgs(h, "/r", "b", "b", true); got[3] != "+refs/heads/b:refs/heads/b" {
+	if got := FetchArgs(h, "/r", "b", "b", true); got[len(got)-1] != "+refs/heads/b:refs/heads/b" {
 		t.Errorf("force: %q", got[3])
 	}
 }

@@ -34,8 +34,8 @@ simstim doctor --fix
 | | The `current` helper link is broken, so hooks and the restore unit cannot find the helper: points it at the helper in use. |
 | | Session sockets with no session behind them: removes them. |
 | | Old helper versions that nothing uses: removes them, keeping the newest three and every one in use. Each install does this by itself too. |
-| `doctor --fix` | SSH configs generated for hosts you removed: removes them. |
-| | ControlMaster sockets whose SSH master died, which can make connections hang: removes them. |
+| `doctor --fix` | Unreferenced SSH configs it generated: removes them. Configs that you made, replaced or that another saved host uses stay. |
+| | Dead shared SSH sockets named by the current socket root's ownership index: removes them. Unindexed, replaced or live sockets stay. |
 
 The doctor never uses sudo. When a fix needs root, for example linger on some hosts, it prints the command for you to run. `--yes` applies every fix without asking. In a script, or with `--no-input`, `--fix` needs `--yes`, and fails with exit code 4 without it.
 

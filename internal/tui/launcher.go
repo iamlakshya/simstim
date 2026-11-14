@@ -324,6 +324,7 @@ func (m *Model) sessRowView(r sessRow, n int, c sessColumns, selected, withHost 
 		return sBold.Render(hn) + "  " + m.hostState(r.h, c.row-cells(hn)-2)
 	case rowNote:
 		msg, _ := errText(r.h.err)
+		msg = oneLine(msg)
 		if msg == "" {
 			msg = "not ready"
 		}

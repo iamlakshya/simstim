@@ -71,8 +71,10 @@ ssh my-server echo ok
 
 Connect the host. This installs a small helper in your home folder there; nothing listens on the network.
 
+Use `own` when you alone have root. Choose `shared` if someone else has root ([host tiers](../how-to/choose-a-host-tier.md)).
+
 ```sh
-simstim host add my-server --yes
+simstim host add my-server --tier own --yes
 simstim host doctor my-server
 ```
 

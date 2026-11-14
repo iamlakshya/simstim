@@ -175,7 +175,7 @@ func TestErrorsOfTheCommandLine(t *testing.T) {
 	if got, code := lineErr(t, "host", "test", "nowhere"); code != 3 || !strings.Contains(got, "Try: "+brand.Name+" host add nowhere") {
 		t.Errorf("host test nowhere = %d:\n%s", code, got)
 	}
-	if err := client.SaveHosts(context.Background(), nil); err != nil {
+	if err := client.SaveHostsContext(context.Background(), nil); err != nil {
 		t.Fatal(err)
 	}
 	if got, code := lineErr(t, "ls"); code != 1 || !strings.Contains(got, "no hosts yet") {
@@ -262,7 +262,7 @@ func TestNounsAloneShowTheirHelp(t *testing.T) {
 func TestEachHostCodeExitsThroughMain(t *testing.T) {
 	hosttest.New(t)
 	_, tr := withFake(t, nil)
-	if err := client.SaveHosts(context.Background(), []client.Host{{Name: "box", Machine: &client.Machine{Provider: "fake", ID: "fake-box"}}}); err != nil {
+	if err := client.SaveHostsContext(context.Background(), []client.Host{{Name: "box", Machine: &client.Machine{Provider: "fake", ID: "fake-box"}}}); err != nil {
 		t.Fatal(err)
 	}
 	old := os.Args

@@ -8,7 +8,9 @@ cd ~/src/app
 simstim pull my-server/auth-fix
 ```
 
-`pull` asks the host which branch the session's folder has checked out, then runs `git fetch` through the client's own SSH connection, into a branch of the same name here. Neither working tree changes: review the branch, merge it or check it out as you like.
+`pull` asks the host which branch the session's folder has checked out, then runs `git fetch` through the client's own SSH connection, into a branch of the same name here. Neither working tree changes. Review the branch, merge it or check it out as you like.
+
+`pull` checks the pinned key of the session's host. It uses the host and repository reported by that session. A Git URL rewrite or named remote cannot redirect the fetch. The SSH config still selects the connection's port and user.
 
 - `--into review/auth-fix` fetches into another branch name.
 - `pull` stops if the local branch has commits that the session's branch does not. `--force` replaces it.

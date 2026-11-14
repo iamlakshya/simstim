@@ -108,7 +108,7 @@ func tokenEnd(b []byte, end int) bool {
 // Scrub replaces the values that s knows in b, the text of one file.
 func (s *Scrubber) Scrub(b []byte) []byte {
 	for _, pass := range []func([]byte) []byte{s.replaceKeys, s.replaceFingerprints, s.replaceEmails, s.replaceHomes,
-		s.replaceFolders, s.replaceTSNet, s.replaceAddrs, s.replacePhrases, s.replaceTokens} {
+		s.replaceFolders, s.replaceFileKeys, s.replaceTSNet, s.replaceAddrs, s.replacePhrases, s.replaceTokens} {
 		b = pass(b)
 	}
 	return b
@@ -168,8 +168,41 @@ func (s *Scrubber) replaceKeys(b []byte) []byte {
 	return b
 }
 
-// endsName reports whether no letter or digit stands at b[end].
+// startsName and endsName report whether no letter or digit stands next to
+// a name at b[i] or b[end].
+func startsName(b []byte, i int) bool { return i == 0 || !isAlnum(b[i-1]) }
 func endsName(b []byte, end int) bool { return end == len(b) || !isAlnum(b[end]) }
+
+// replaceFileKeys replaces each host's file key (client.HostFileKey),
+// before the rules for tailnets and addresses split a key whose prefix is
+// one of those.
+func (s *Scrubber) replaceFileKeys(b []byte) []byte {
+	for _, k := range s.fileKeys {
+		low := bytes.ToLower(b)
+		if !bytes.Contains(low, k.value) {
+			continue
+		}
+		var out []byte
+		i := 0
+		for {
+			j := bytes.Index(low[i:], k.value)
+			if j < 0 {
+				break
+			}
+			j += i
+			e := j + len(k.value)
+			if startsName(b, j) && endsName(b, e) {
+				out = append(append(out, b[i:j]...), s.fileKeyPh(k)...)
+				i = e
+				continue
+			}
+			out = append(out, b[i:j+1]...)
+			i = j + 1
+		}
+		b = append(out, b[i:]...)
+	}
+	return b
+}
 
 func (s *Scrubber) replaceFingerprints(b []byte) []byte {
 	return replaceRe(b, fingerprintRe, func(_ []byte, m []int) (string, int, bool) {
@@ -439,9 +472,11 @@ func (s *Scrubber) hostPath(core string) (string, bool) {
 	return strings.Join(parts, "/"), changed
 }
 
-// rewritePath writes the home folder of a path as ~: for the file names in
-// a profile.
-func (s *Scrubber) rewritePath(p string) string { return string(s.replaceHomes([]byte(p))) }
+// rewritePath writes the home folder of a path as ~, and replaces any host
+// file key: for the file names in a profile.
+func (s *Scrubber) rewritePath(p string) string {
+	return string(s.replaceFileKeys(s.replaceHomes([]byte(p))))
+}
 
 // holdsHome reports whether b holds a home folder, as bytes: for a saved
 // window, which the bundle does not parse.

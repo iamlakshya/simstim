@@ -4,7 +4,7 @@ Needs: a built client, and a host already added with `host add`.
   E2E_HOST        the host's name in the client (required)
 The product name is read from internal/brand, so nothing here spells it.
 """
-import collections, json, os, re, signal, subprocess, sys, time
+import collections, hashlib, json, os, re, signal, subprocess, sys, time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))
@@ -16,7 +16,10 @@ cli = os.path.abspath(sys.argv[1] if len(sys.argv) > 1 else os.path.join(ROOT, "
 HOST = os.environ.get("E2E_HOST")
 if not HOST:
     sys.exit("set E2E_HOST to the name of a host added with `host add`")
-WRAPPER = os.path.join(os.environ.get("XDG_CONFIG_HOME", os.path.expanduser("~/.config")), NAME, "ssh", "config-" + HOST)
+# The generated SSH config of the host: its name in lower case and a hash
+# of its exact name, so Box and box never share one.
+WRAPPER = os.path.join(os.environ.get("XDG_CONFIG_HOME", os.path.expanduser("~/.config")), NAME, "ssh",
+                       "config-%s-%s" % (HOST.lower()[:32].rstrip(".-"), hashlib.sha256(HOST.encode()).hexdigest()[:32]))
 HELPER = "~/.local/share/%s/bin/current/%s-host" % (NAME, NAME)
 env = {"TERM": "xterm-ghostty", "TERM_PROGRAM": "ghostty", "COLORTERM": "truecolor"}
 results = []
@@ -57,12 +60,6 @@ def host_rc(cmd, data=None):
     """Runs cmd on the host and returns its exit code; data goes to its stdin."""
     return subprocess.run(host_argv(cmd), input=data, capture_output=True).returncode
 
-def control_dir():
-    """The folder of the client's shared SSH connections, as internal/client works it out."""
-    cache = os.environ.get("XDG_CACHE_HOME", "")
-    d = os.path.join(cache if os.path.isabs(cache) else os.path.expanduser("~/.cache"), NAME, "cm")
-    return d if len(d) + 1 + len(CONTROL_PREFIX) + 40 <= 103 else "/tmp/%s-%d" % (NAME, os.getuid())
-
 def drop_link():
     """Ends the client's bridges to HOST, as a network drop would. Over SSH,
     it then ends the shared connection under them. The client's connections
@@ -83,11 +80,17 @@ def drop_link():
         except ProcessLookupError:
             pass
     if machine.get("provider") != "docker":
-        try:
-            subprocess.run(["ssh", "-F", WRAPPER, "-o", "ControlPath=" + os.path.join(control_dir(), CONTROL_PREFIX + "%C"),
-                            "-O", "exit", host_entry()["ssh"]], capture_output=True, timeout=10)
-        except subprocess.TimeoutExpired:
-            pass
+        # The socket's name holds a key of the host and its pin
+        # (internal/client controlKey), so take it from the client's own
+        # command lines.
+        paths = set(m.group(1) for l in ps.splitlines() if mark in l
+                    for m in [re.search(r"ControlPath=(\S*/" + re.escape(CONTROL_PREFIX) + r"\S*)", l)] if m)
+        for path in paths:
+            try:
+                subprocess.run(["ssh", "-F", WRAPPER, "-o", "ControlPath=" + path, "-O", "exit", host_entry()["ssh"]],
+                               capture_output=True, timeout=10)
+            except subprocess.TimeoutExpired:
+                pass
     return pids
 
 def start(name, *argv, flags=()):
@@ -157,6 +160,16 @@ def verbs_checks():
     session_verbs.run(session_verbs.Ctx(cli=cli, HOST=HOST, NAME=NAME, HELPER=HELPER, env=env, ok=ok, Term=Term, host_rc=host_rc))
 if os.environ.get("E2E_ONLY") == "session-verbs":
     verbs_checks()
+    print("RESULT %d/%d passed" % (sum(results), len(results)))
+    sys.exit(0 if all(results) else 1)
+
+# The host commands (host_commands.py). E2E_ONLY=host-commands runs only these.
+import host_commands
+def host_checks():
+    host_commands.run(host_commands.Ctx(cli=cli, HOST=HOST, NAME=NAME, env=env, ok=ok, Term=Term, host_ssh=host_ssh,
+                                        host_rc=host_rc, host_machine=host_machine))
+if os.environ.get("E2E_ONLY") == "host-commands":
+    host_checks()
     print("RESULT %d/%d passed" % (sum(results), len(results)))
     sys.exit(0 if all(results) else 1)
 
@@ -608,6 +621,7 @@ sandbox_host_checks()
 socket_checks()
 host_git_checks()
 verbs_checks()
+host_checks()
 # M. Full screen (roadmap N2): a program on the alternate screen is reported
 #    as full screen, and host doctor says so.
 sid_fs = start("e2e-fullscreen", "/bin/bash", "-c", 'printf "\\033[?1049hFULL"; sleep 600')

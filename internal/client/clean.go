@@ -263,13 +263,21 @@ func CleanBlock(s string) string {
 }
 
 // tailStderr is the end of what a host wrote to stderr, as an error shows
-// it: its last three lines, each one cleaned.
+// it: its last three lines, each one cleaned, with any standalone Try: line
+// dropped so a host cannot impersonate the client's own hint.
 func tailStderr(s string) string {
-	lines := strings.Split(strings.TrimSpace(s), "\n")
-	if len(lines) > 3 {
-		lines = lines[len(lines)-3:]
+	var kept []string
+	for _, l := range strings.Split(strings.TrimSpace(s), "\n") {
+		cl := CleanLine(l)
+		if strings.HasPrefix(strings.ToLower(strings.TrimSpace(cl)), "try:") {
+			continue
+		}
+		kept = append(kept, cl)
 	}
-	return CleanBlock(strings.Join(lines, "\n"))
+	if len(kept) > 3 {
+		kept = kept[len(kept)-3:]
+	}
+	return strings.Join(kept, "\n")
 }
 
 // checkSessionID refuses a session ID in a host's answer that is not one

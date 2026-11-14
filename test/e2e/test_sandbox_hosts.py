@@ -166,5 +166,65 @@ class Cleanup(unittest.TestCase):
         self.assertFalse(os.path.exists(self.tmp))
 
 
+class HostKey(unittest.TestCase):
+    """Test 3, with a fake client and fake keys: only exit code 5 with the
+    changed-key message and its hint passes."""
+    CHANGED = ("Error: box's host key changed: SHA256:%s was pinned, and the host shows SHA256:%s.\n\n"
+               "Try: If you reinstalled box: client host rekey box. Otherwise, do not connect.\n" % ("a" * 43, "b" * 43))
+
+    def check(self, entry, *answers, keys=("ssh-ed25519 AAAA",)):
+        c, fake = Ctx(), Fake(*answers)
+        c.host_entry, c.env = lambda: entry, {}
+        old_run, old_keys = sh.run_cmd, sh.make_keys
+        sh.run_cmd, sh.make_keys = fake, lambda tmp: list(keys)
+        try:
+            with contextlib.redirect_stdout(io.StringIO()) as out:
+                sh.host_key(c)
+        finally:
+            sh.run_cmd, sh.make_keys = old_run, old_keys
+        return c.results, fake.calls, out.getvalue()
+
+    def test_refused(self):
+        results, calls, _ = self.check({"ssh": "box"}, (5, "", self.CHANGED))
+        self.assertEqual([r[0] for r in results], [True], results)
+        self.assertEqual(calls, [["client", "host", "test", "box", "--no-input"]])
+
+    def test_connects_or_fails_otherwise(self):
+        for answer in [(0, "", ""), (1, "", "Error: cannot reach box: Connection refused.\n"), (5, "", "Error: something else.\n"),
+                       (1, "", self.CHANGED), "timeout"]:
+            results, _, _ = self.check({"ssh": "box"}, answer)
+            self.assertEqual([r[0] for r in results], [False], answer)
+
+    def test_pin_file_name(self):
+        """The wrong pin is where the client reads the pin of box
+        (client.HostFileKey), and names box on its first line."""
+        seen = []
+
+        def look(argv, env=None, timeout=60):
+            ssh = os.path.join(env["XDG_CONFIG_HOME"], "client", "ssh")
+            seen.extend(sorted(os.listdir(ssh)))
+            with open(os.path.join(ssh, seen[0])) as f:
+                seen.append(f.readline())
+            return (5, "", self.CHANGED)
+        c = Ctx()
+        c.host_entry, c.env = lambda: {"ssh": "box"}, {}
+        old_run, old_keys = sh.run_cmd, sh.make_keys
+        sh.run_cmd, sh.make_keys = look, lambda tmp: ["ssh-ed25519 AAAA"]
+        try:
+            with contextlib.redirect_stdout(io.StringIO()):
+                sh.host_key(c)
+        finally:
+            sh.run_cmd, sh.make_keys = old_run, old_keys
+        self.assertEqual(seen, ["known_hosts-box-26f8567f2569182294c3fa5b9f9cb227", "# client pin of the host box\n"])
+        self.assertEqual(sh.host_file_key("a" * 31 + ".-x"), "a" * 31 + "-" + __import__("hashlib").sha256(("a" * 31 + ".-x").encode()).hexdigest()[:32])
+        self.assertNotEqual(sh.host_file_key("BOX"), sh.host_file_key("box"))
+
+    def test_skips(self):
+        for entry, keys in [({"ssh": ""}, ("k",)), ({"ssh": "box", "machine": {"provider": "docker"}}, ("k",)), ({"ssh": "box"}, ())]:
+            results, calls, out = self.check(entry, keys=keys)
+            self.assertEqual((results, calls), ([], []), entry)
+            self.assertIn("SKIP host key", out)
+
+
 if __name__ == "__main__":
     unittest.main()

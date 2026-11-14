@@ -38,9 +38,9 @@ var exitCodes = []ExitCode{
 	{Code: 3, Kind: client.KindNotFound, Meaning: "A named thing does not exist.",
 		Examples: "No host, session, agent, provider, template or secret of that name."},
 	{Code: 4, Kind: client.KindNeedsAnswer, Meaning: "The command needs an answer, and input is off.",
-		Examples: "`host add` without `--yes`. `doctor --fix` without `-y`. A new session's folder that does not exist, without `--mkdir`. `setup` without the flags that answer its questions."},
+		Examples: "`host add` without `--yes`, or `--yes` without `--tier`, or without `--host-key` for a host key that your SSH settings do not trust. `host rekey`, or raising a tier in `host set`, without `--confirm`. `doctor --fix` without `-y`. A new session's folder that does not exist, without `--mkdir`. `setup` without the flags that answer its questions."},
 	{Code: 5, Kind: client.KindRefused, Meaning: "A policy or a tier refuses the action.",
-		Examples: "None in this release."},
+		Examples: "A host whose key differs from its pinned host key, or whose pin file is missing. A `--host-key` that the host does not show."},
 	{Code: 130, Kind: client.KindCancelled, Meaning: "The user or a signal cancelled.",
 		Examples: "The answer no. Esc or Ctrl+C at a question or in the picker. The end of input at a question. Ctrl+C or SIGTERM outside an attach."},
 }
@@ -279,9 +279,18 @@ var synonyms = map[string]map[string]string{
 		"status":   "show",
 		"describe": "show",
 		"inspect":  "show",
+		"update":   "host upgrade",
+		"upgrade":  "host upgrade",
 	},
 	"host": {
-		"list": "ls",
+		"list":     "ls",
+		"remove":   "rm",
+		"delete":   "rm",
+		"forget":   "rm",
+		"info":     "show",
+		"details":  "show",
+		"config":   "set",
+		"settings": "set",
 	},
 }
 

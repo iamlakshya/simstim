@@ -83,6 +83,7 @@ var hostKinds = map[string]Kind{
 	"exiting":         KindFailed,
 	"forbidden":       KindRefused,
 	"git_op":          KindFailed,
+	"host_id":         KindFailed,
 	"line_too_long":   KindFailed,
 	"memory_max":      KindUsage,
 	"name_unknown":    KindFailed,

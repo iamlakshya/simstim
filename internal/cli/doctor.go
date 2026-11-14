@@ -21,8 +21,9 @@ func doctorCmd() *cobra.Command {
 		Use:   "doctor",
 		Short: "Check this machine and its terminal",
 		Long: "Checks this computer: ssh, the config files and the secrets' commands. With --fix it\n" +
-			"offers to fix what it can: SSH configs it generated for hosts you removed, and\n" +
-			"ControlMaster sockets whose master died. Each fix is shown before it runs.\n" +
+			"offers to fix what it can: SSH configs it generated that no saved host references,\n" +
+			"and owned ControlMaster sockets whose master died. A saved host's references stay. It\n" +
+			"never removes an SSH config that you made. Each fix is shown before it runs.\n" +
 			"`host doctor <host>` checks a host.",
 		Example: "  " + brand.Name + " doctor\n  " + brand.Name + " doctor --fix\n  " + brand.Name + " doctor --json",
 		Args:    unknownCommand,
@@ -31,7 +32,11 @@ func doctorCmd() *cobra.Command {
 				// With --json nothing is asked, so -y must answer for each fix.
 				return prompts(cmd).needs(qFix, "a yes for each fix")
 			}
-			checks, fixes := client.LocalChecks(), client.LocalFixes(false, nil)
+			checks := client.LocalChecks()
+			fixes, err := client.LocalFixesContext(cmd.Context(), false, nil)
+			if err != nil {
+				return err
+			}
 			if asJSON && fix {
 				res, err := applyAll(fixes, func(ids []string) ([]client.Fix, error) {
 					return applyLocal(cmd.Context(), ids)

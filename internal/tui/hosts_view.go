@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/iamlakshya/simstim/internal/api"
+	"github.com/iamlakshya/simstim/internal/client"
 )
 
 // Hosts.
@@ -126,10 +127,33 @@ func (m *Model) hostSummary(h *hostConn, w int) []seg {
 	if !h.loaded && len(h.sessions) == 0 {
 		return []seg{{"…", sFaint}}
 	}
-	out := []seg{{m.summaryText(h), sFaint}}
+	base := m.summaryText(h)
+	if h.tier.Valid() && h.tier != client.TierOwn {
+		switch {
+		case len(h.sessions) == 0:
+			base = h.tier.String()
+		case cells(base+dot+h.tier.String()) <= w:
+			base += dot + h.tier.String()
+		default:
+			base = h.tier.String()
+		}
+	}
+	out := []seg{{base, sFaint}}
+	if h.idChanged {
+		changed := seg{"host ID changed", sWarning}
+		if cells(base+dot+changed.s) <= w {
+			out = append(out, seg{dot, sFaint}, changed)
+		} else {
+			return []seg{changed}
+		}
+	}
 	if need := needCount(h); need > 0 {
 		needs := seg{fmt.Sprintf("%d needs you", need), sWarning}
-		if cells(out[0].s+dot+needs.s) > w {
+		used := 0
+		for _, s := range out {
+			used += cells(s.s)
+		}
+		if used+cells(dot+needs.s) > w {
 			return []seg{needs}
 		}
 		out = append(out, seg{dot, sFaint}, needs)
@@ -190,10 +214,23 @@ func joinFacts(facts ...string) string {
 	return strings.Join(out, sFaint.Render(dot))
 }
 
-// hostDetail is the line under the hosts: how it is reached, and what it is.
+// hostDetail is the line under the hosts: how it is reached, its tier, and what it is.
 func (m *Model) hostDetail(h *hostConn, cw int) string {
-	parts := []string{"ssh " + shown(h.host.SSH)}
+	target := "ssh " + shown(h.host.SSH)
+	if h.host.SSH == "" {
+		target = shown(h.host.Target())
+	}
+	parts := []string{target}
+	if h.tier.Valid() {
+		parts = append(parts, h.tier.String())
+	}
+	if h.idChanged {
+		parts = append(parts, "host ID changed")
+	}
 	if i := h.info; i != nil {
+		if h.tier == client.TierShared {
+			parts = append(parts, "reported by "+shown(h.name()))
+		}
 		for _, s := range []string{shown(i.Distro), plural(i.CPUs, "CPU", "CPUs")} {
 			if s != "" && !strings.HasPrefix(s, "0 ") {
 				parts = append(parts, s)

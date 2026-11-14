@@ -7,6 +7,7 @@ One task per page. New here? Start with [getting started](../tutorials/getting-s
 | Guide | Task |
 | --- | --- |
 | [Add a host](add-a-host.md) | Connect any host you can reach with SSH, with the guided setup or by hand |
+| [Choose a host's tier](choose-a-host-tier.md) | Record who else has root, and use a separate SSH key for each shared host |
 | [Create a host](create-a-host.md) | Make a host in one step: a local Lima VM, a Docker container for testing, or an E2B sandbox |
 | [Restore after a reboot](restore-after-reboot.md) | Bring sessions back after the host restarts |
 

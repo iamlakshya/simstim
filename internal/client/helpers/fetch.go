@@ -75,6 +75,26 @@ func Fetch(ctx context.Context, version, base, cacheDir string) error {
 	return nil
 }
 
+// Cached loads the helpers for version from cacheDir, where an earlier
+// Fetch left them. It never downloads. It reports whether this build has
+// its helpers now: its own, the cached ones, or ones that Fetch loaded.
+func Cached(version, cacheDir string) bool {
+	if Embedded() {
+		return true
+	}
+	fetchMu.Lock()
+	defer fetchMu.Unlock()
+	if fetched != nil {
+		return true
+	}
+	files, err := readDir(filepath.Join(cacheDir, "helpers", version))
+	if err != nil || len(files) == 0 {
+		return false
+	}
+	fetched = files
+	return true
+}
+
 func readDir(dir string) (map[string][]byte, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {

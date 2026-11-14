@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -25,12 +26,17 @@ func RunDemo(ctx context.Context, empty bool) error {
 type demoBackend struct {
 	mu       sync.Mutex
 	hosts    []client.Host
+	tiers    map[string]client.TierEntry
 	sessions map[string][]client.Session
 	offline  map[string]bool
 }
 
 func newDemoBackend(empty bool) *demoBackend {
-	b := &demoBackend{sessions: map[string][]client.Session{}, offline: map[string]bool{"hetzner-box": true}}
+	b := &demoBackend{
+		tiers:    map[string]client.TierEntry{},
+		sessions: map[string][]client.Session{},
+		offline:  map[string]bool{"hetzner-box": true},
+	}
 	if empty {
 		return b
 	}
@@ -60,6 +66,9 @@ func newDemoBackend(empty bool) *demoBackend {
 			OOM: true, Signal: "killed", ExitCode: new(137), CreatedAt: ago(50 * time.Minute), Since: ago(12 * time.Minute), Alive: true,
 			MemoryCurrent: 1 << 30, MemoryMax: 6 << 30, Cols: 120, Rows: 34},
 	}
+	for _, h := range b.hosts {
+		b.tiers[h.Name] = client.TierEntry{Name: h.Name, Tier: client.TierOwn}
+	}
 	return b
 }
 
@@ -69,14 +78,49 @@ func (b *demoBackend) LoadHosts(context.Context) ([]client.Host, error) {
 	return append([]client.Host(nil), b.hosts...), nil
 }
 
-func (b *demoBackend) SaveHosts(ctx context.Context, h []client.Host) error {
+func (b *demoBackend) LoadTiers(ctx context.Context, hosts []client.Host) (client.Tiers, error) {
 	if err := ctx.Err(); err != nil {
-		return err
+		return client.Tiers{}, err
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	b.hosts = append([]client.Host(nil), h...)
-	return nil
+	for _, h := range hosts {
+		if _, ok := b.tiers[h.Name]; !ok {
+			b.tiers[h.Name] = client.TierEntry{Name: h.Name, Tier: client.TierOwn}
+		}
+	}
+	return client.NewTiers(b.tiers), nil
+}
+
+func (b *demoBackend) ResolveHostTier(ctx context.Context, h client.Host) (client.Tier, error) {
+	ts, err := b.LoadTiers(ctx, []client.Host{h})
+	return ts.Of(h.Name), err
+}
+
+// UpdateHosts changes the demo's hosts in memory. The demo keeps no
+// records of removals, so it warns of nothing.
+func (b *demoBackend) UpdateHosts(c client.HostChange) (warn, err error) {
+	return b.UpdateHostsContext(context.Background(), c)
+}
+
+func (b *demoBackend) UpdateHostsContext(ctx context.Context, c client.HostChange) (warn, err error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	out, err := client.ApplyHostChange(b.hosts, c)
+	if err != nil {
+		return nil, err
+	}
+	b.hosts = out
+	switch {
+	case c.Now == nil && c.Was != nil:
+		delete(b.tiers, c.Was.Name)
+	case c.Now != nil && c.Tier.Valid():
+		b.tiers[c.Now.Name] = client.TierEntry{Name: c.Now.Name, Tier: c.Tier, HostID: c.HostID}
+	}
+	return nil, nil
 }
 
 func (b *demoBackend) Settings() client.Settings {
@@ -113,6 +157,29 @@ func (b *demoBackend) Dial(_ context.Context, h client.Host) (Conn, error) {
 		return nil, &client.UserError{Msg: "cannot reach " + h.Name + ": connection timed out", Hint: "ssh " + h.SSH, Code: "unreachable"}
 	}
 	return &demoConn{be: b, host: h.Name, done: make(chan struct{})}, nil
+}
+
+func (b *demoBackend) StagePin(context.Context, string) error { return nil }
+func (b *demoBackend) AbortPin(string)                        {}
+
+// ForgetHost forgets the host in the demo's list: nothing is written.
+func (b *demoBackend) ForgetHost(_ context.Context, name string) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.hosts = slices.DeleteFunc(b.hosts, func(o client.Host) bool { return o.Name == name })
+	return nil
+}
+
+func (b *demoBackend) PinHostKey(context.Context, client.Host, string) (client.Pin, error) {
+	return client.Pin{Fingerprint: "SHA256:" + strings.Repeat("d", 43), Type: "ssh-ed25519", Keys: 1, Source: client.PinFromKnownHosts}, nil
+}
+
+// SaveHostPin saves the host in the demo's list: nothing is written.
+func (b *demoBackend) SaveHostPin(h client.Host) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.hosts = append(slices.DeleteFunc(b.hosts, func(o client.Host) bool { return o.Name == h.Name }), h)
+	return nil
 }
 
 func (b *demoBackend) Probe(context.Context, client.Host) (client.Platform, error) {
@@ -246,6 +313,10 @@ func (c *demoConn) Folders(_ context.Context, prefix string) (client.FoldersResu
 	}
 	return r, nil
 }
+
+func (c *demoConn) HostID() string { return "" }
+
+func (c *demoConn) HostIDChanged() bool { return false }
 
 func (c *demoConn) Done() <-chan struct{} { return c.done }
 

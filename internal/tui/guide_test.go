@@ -95,6 +95,7 @@ func TestGuideFromTheWelcome(t *testing.T) {
 	// the VM got its idle stop.
 	hasCall(t, be, "install vm")
 	hasCall(t, be, "idle vm")
+	noCall(t, be, "stage ") // the create pinned it, and saved it
 	if w.step != wzReady || !w.saved || w.flow == nil {
 		t.Fatalf("not ready: step %v saved %v flow %v err %v", w.step, w.saved, w.flow != nil, w.err)
 	}
@@ -270,7 +271,7 @@ func TestWizardAgentsOnlyWhenNeeded(t *testing.T) {
 	hs := newHarness(t, be, 80, 24)
 	hs.key("a")
 	hs.typeText("pi")
-	hs.key("enter", "enter")
+	hs.key("enter", "enter", "enter")
 	w := hs.m.modal.(*wizard)
 	if !w.saved || w.wantsAgents() {
 		t.Fatalf("saved %v, wants agents %v", w.saved, w.wantsAgents())
@@ -289,7 +290,7 @@ func TestWizardAgentsSkipAndStop(t *testing.T) {
 	hs := newHarness(t, be, 80, 24)
 	hs.key("a")
 	hs.typeText("pi")
-	hs.key("enter", "enter", "enter")
+	hs.key("enter", "enter", "enter", "enter")
 	w := hs.m.modal.(*wizard)
 	// The fold opens on enter; space ticks a best-effort agent.
 	hs.key("down", "down", "down", "down", "enter")
@@ -333,7 +334,7 @@ func agentsHarness(t *testing.T, w, h int) *harness {
 	hs.m.motion = false
 	hs.key("a")
 	hs.typeText("pi")
-	hs.key("enter", "enter")
+	hs.key("enter", "enter", "enter")
 	return hs
 }
 

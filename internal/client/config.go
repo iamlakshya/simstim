@@ -4,6 +4,8 @@ package client
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,7 +13,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
-	"sort"
 	"strconv"
 	"strings"
 
@@ -193,50 +194,43 @@ func tomlError(path, data string, err error) error {
 	return &UserError{Msg: where + ": " + strings.TrimPrefix(msg, "toml: "), Hint: hint, Code: "bad_config", Kind: KindUsage}
 }
 
-// SaveHosts writes the saved hosts. It is the one function that writes
-// hosts.toml, and it writes nothing once ctx has ended: a cancel that came
-// before the save keeps the file as it was (StoppedError).
-func SaveHosts(ctx context.Context, hosts []Host) error {
+// SaveHosts replaces the saved host list under its file lock. A caller
+// changing one entry uses SaveHost or ForgetHostContext instead, so it
+// cannot overwrite another command's change to a different host.
+func SaveHosts(ctx context.Context, hosts []Host) error { return SaveHostsContext(ctx, hosts) }
+
+// SaveHostsContext replaces the whole list through H3's one locked writer,
+// while preserving cancellation for existing context-bearing callers.
+func SaveHostsContext(ctx context.Context, hosts []Host) error {
 	if err := ctx.Err(); err != nil {
 		return stoppedBefore("save the hosts", err)
 	}
-	sort.Slice(hosts, func(i, j int) bool { return hosts[i].Name < hosts[j].Name })
-	if err := os.MkdirAll(ConfigDir(), 0o700); err != nil {
-		return fmt.Errorf("make %s: %w", ConfigDir(), err)
-	}
-	tmp := hostsPath() + ".tmp"
-	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
-	if err != nil {
-		return fmt.Errorf("save the hosts: %w", err)
-	}
-	fmt.Fprintf(f, "# Hosts for %s. Edit with `%s host`.\n\n", brand.DisplayName, brand.Name)
-	if err := toml.NewEncoder(f).Encode(hostsFile{Hosts: hosts}); err != nil {
-		f.Close()
-		return fmt.Errorf("save the hosts: %w", err)
-	}
-	if err := f.Close(); err != nil {
-		return fmt.Errorf("save the hosts: %w", err)
-	}
-	if err := os.Rename(tmp, hostsPath()); err != nil {
-		return fmt.Errorf("save the hosts: %w", err)
-	}
-	return nil
-}
-
-// SaveHost adds h to the saved hosts, or replaces the host of the same
-// name, through SaveHosts: nothing once ctx has ended.
-func SaveHost(ctx context.Context, h Host) error {
-	hosts, err := LoadHosts()
+	unlock, err := lockHostsFile(ctx)
 	if err != nil {
 		return err
 	}
-	for i := range hosts {
-		if hosts[i].Name == h.Name {
-			hosts[i] = h
-			return SaveHosts(ctx, hosts)
-		}
+	defer unlock()
+	beforeHostsSave()
+	if err := ctx.Err(); err != nil {
+		return stoppedBefore("save the hosts", err)
 	}
-	return SaveHosts(ctx, append(hosts, h))
+	return writeHostsFile(hosts)
+}
+
+// SaveHost adds h to the saved hosts, or replaces the host of the same name,
+// in one locked read, change and write of hosts.toml.
+func SaveHost(h Host) error { return SaveHostContext(context.Background(), h) }
+
+// SaveHostContext changes one saved entry without losing another writer.
+func SaveHostContext(ctx context.Context, h Host) error {
+	if err := ctx.Err(); err != nil {
+		return stoppedBefore("save the hosts", err)
+	}
+	was, err := SavedEntry(h.Name)
+	if err != nil {
+		return err
+	}
+	return UpdateHosts(ctx, HostChange{Kind: "host save", Was: was, Now: &h})
 }
 
 // StoppedError is the error of a change that a cancel or a timeout came
@@ -286,10 +280,34 @@ func FindHost(name string) (Host, error) {
 	}
 }
 
-var hostNameRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$`)
+// hostNameRE is a host's name: letters, digits, dots, dashes and
+// underscores, 63 at most, that start with a letter or a digit and do not
+// end with a dot. Windows drops a dot or a space at the end of a file's
+// name, so "box." would name box's files there.
+var hostNameRE = regexp.MustCompile(`^[A-Za-z0-9](?:[A-Za-z0-9._-]{0,61}[A-Za-z0-9_-])?$`)
 
 // ValidHostName reports whether n can name a host.
 func ValidHostName(n string) bool { return hostNameRE.MatchString(n) }
+
+// HostFileKey names the files of the host called name: its name in lower
+// case, cut to 32 bytes at most and with no dot or dash at its end, a dash,
+// and 32 hex characters (128 bits) of SHA-256 over the exact name. The hash
+// tells apart two names that differ only in case, which a disk that ignores
+// case would take for one file; the name only helps a person read it. Every
+// file of a host's own uses it: its pin, the pin's lock and the pin's
+// temporary files now, and later its SSH config. It is "" for a name that
+// cannot name a host, from which no path is ever built.
+func HostFileKey(name string) string {
+	if !ValidHostName(name) {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(name))
+	p := strings.ToLower(name)
+	if len(p) > 32 {
+		p = p[:32]
+	}
+	return strings.TrimRight(p, ".-") + "-" + hex.EncodeToString(sum[:16])
+}
 
 // LoadSettings reads the settings, with defaults for anything missing.
 func LoadSettings() Settings {

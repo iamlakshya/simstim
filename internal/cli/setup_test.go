@@ -225,7 +225,7 @@ func TestAnsweredNoIsACancel(t *testing.T) {
 	hosttest.New(t)
 	withSignal(t)
 	_, tr := withFake(t, nil)
-	if err := client.SaveHosts(context.Background(), []client.Host{{Name: "box", Machine: &client.Machine{Provider: "fake", ID: "fake-box"}}}); err != nil {
+	if err := client.SaveHostsContext(context.Background(), []client.Host{{Name: "box", Machine: &client.Machine{Provider: "fake", ID: "fake-box"}}}); err != nil {
 		t.Fatal(err)
 	}
 	q, _ := json.Marshal(api.FolderQuestion{Folder: "/x"})

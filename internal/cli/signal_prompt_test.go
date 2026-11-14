@@ -121,7 +121,7 @@ func TestSignalAtAQuestionRestoresTheTerminal(t *testing.T) {
 	hosttest.New(t)
 	for _, sig := range []syscall.Signal{syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP, syscall.SIGQUIT} {
 		_ = os.MkdirAll(filepath.Join(client.ConfigDir(), "ssh"), 0o700)
-		_ = os.WriteFile(filepath.Join(client.ConfigDir(), "ssh", "config-gone"), []byte("# generated\n"), 0o600)
+		_ = os.WriteFile(filepath.Join(client.ConfigDir(), "ssh", "config-gone"), generatedSSHFixture("gone"), 0o600)
 		term, cmd := childOnTerminal(t, "doctor", "--fix")
 		term.WaitFor("Fix it? [y/N] ")
 		time.Sleep(100 * time.Millisecond) // the question reads in raw mode by now
@@ -149,7 +149,7 @@ func TestSignalAtThePickerRestoresTheTerminal(t *testing.T) {
 	h := hosttest.New(t)
 	h.Script("ssh", "exit 255\n")
 	t.Setenv("PATH", filepath.Join(h.Root, "bin")+":"+os.Getenv("PATH"))
-	if err := client.SaveHosts(context.Background(), []client.Host{{Name: "box", SSH: "box"}}); err != nil {
+	if err := client.SaveHostsContext(context.Background(), []client.Host{{Name: "box", SSH: "box"}}); err != nil {
 		t.Fatal(err)
 	}
 	cache := `{"sessions":{"box":[{"id":"zzz","name":"cached-one","agent":"claude","state":"idle","created_at":"2026-11-10T10:00:00Z","alive":true}]}}`

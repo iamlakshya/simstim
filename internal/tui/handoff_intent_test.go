@@ -169,38 +169,12 @@ func TestResumeRetiresEveryTransferIntentBeforeCallbacks(t *testing.T) {
 func TestLateAttachCannotHijackQuitAfterExecHandoff(t *testing.T) {
 	be := newFakeBackend()
 	runs, children := 0, 0
-	withFakeLauncherIO(t, func(*os.File) bool { return true }, func(_ context.Context, pm tea.Model, _ io.Reader, _ io.Writer) error {
+	withFakeLauncherIO(t, func(*os.File) bool { return true }, func(ctx context.Context, pm tea.Model, _ io.Reader, _ io.Writer) error {
 		runs++
-		fr := pm.(*framed)
-		if runs == 1 {
-			m := fr.m.(*Model)
-			x := &funcExec{run: func(*os.File, *os.File) error { children++; return nil }}
-			quit := m.execWithInput(x, func(error) tea.Msg { return editorDoneMsg{} })
-			_ = m.attachTo(&hostConn{host: client.Host{Name: "box", SSH: "box"}}, "late", "late")
-			if quit == nil {
-				t.Fatal("exec did not request exit")
-			}
-			_ = quit()
-		} else if runs == 2 {
-			resumed, ok := fr.m.(*resumedExecModel)
-			if !ok {
-				t.Fatalf("second program=%T", fr.m)
-			}
-			_ = resumed.Init()
-			if resumed.m.pendingAttach != nil || resumed.m.pendingExec != nil {
-				t.Fatal("resume retained another transfer")
-			}
-			cmd := resumed.m.onKey(keyForRune('q'))
-			if cmd == nil {
-				t.Fatal("q did not quit")
-			}
-			if _, ok := cmd().(tea.QuitMsg); !ok {
-				t.Fatal("q did not produce quit")
-			}
-		} else {
-			t.Fatalf("stale attach started a third program: %d", runs)
-		}
-		return nil
+		scenario := &handoffScenarioModel{Model: pm, t: t, phase: runs, exec: true, children: &children}
+		_, err := tea.NewProgram(scenario, tea.WithContext(ctx), tea.WithInput(nil),
+			tea.WithOutput(io.Discard), tea.WithoutSignalHandler()).Run()
+		return err
 	})
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -217,37 +191,12 @@ func TestCleanAttachResumeAllowsOrdinaryQuit(t *testing.T) {
 	be.hosts = []client.Host{{Name: "box", SSH: "box"}}
 	be.state["box"] = &fakeHost{}
 	runs := 0
-	withFakeLauncherIO(t, func(*os.File) bool { return true }, func(_ context.Context, pm tea.Model, _ io.Reader, _ io.Writer) error {
+	withFakeLauncherIO(t, func(*os.File) bool { return true }, func(ctx context.Context, pm tea.Model, _ io.Reader, _ io.Writer) error {
 		runs++
-		fr := pm.(*framed)
-		switch runs {
-		case 1:
-			m := fr.m.(*Model)
-			cmd := m.attachTo(m.hostByName("box"), "s2", "session")
-			if cmd == nil {
-				t.Fatal("attach did not request exit")
-			}
-			_ = cmd()
-		case 2:
-			resumed, ok := fr.m.(*resumedModel)
-			if !ok {
-				t.Fatalf("resume wraps %T", fr.m)
-			}
-			_ = resumed.Init()
-			if resumed.m.handingOff() {
-				t.Fatal("clean attach resume retained its transfer reservation")
-			}
-			cmd := resumed.m.onKey(keyForRune('q'))
-			if cmd == nil {
-				t.Fatal("q was blocked after clean attach")
-			}
-			if _, ok := cmd().(tea.QuitMsg); !ok {
-				t.Fatal("q did not produce quit")
-			}
-		default:
-			t.Fatalf("q was hijacked by a third program: %d", runs)
-		}
-		return nil
+		scenario := &handoffScenarioModel{Model: pm, t: t, phase: runs, exec: false}
+		_, err := tea.NewProgram(scenario, tea.WithContext(ctx), tea.WithInput(nil),
+			tea.WithOutput(io.Discard), tea.WithoutSignalHandler()).Run()
+		return err
 	})
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

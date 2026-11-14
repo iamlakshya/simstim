@@ -434,7 +434,7 @@ func TestOldMeaningsAndBoundsOfHostCreate(t *testing.T) {
 // host idle keeps the time without the spaces that it read past.
 func TestHostIdleSavesTheTrimmedTime(t *testing.T) {
 	hosttest.New(t)
-	if err := client.SaveHosts(context.Background(), []client.Host{{Name: "box", SSH: "box", Machine: &client.Machine{Provider: "docker", ID: "c1"}}}); err != nil {
+	if err := client.SaveHostsContext(context.Background(), []client.Host{{Name: "box", SSH: "box", Machine: &client.Machine{Provider: "docker", ID: "c1"}}}); err != nil {
 		t.Fatal(err)
 	}
 	for in, want := range map[string]string{" 30m ": "30m", "2h": "2h", " Never ": "never"} {
@@ -447,10 +447,10 @@ func TestHostIdleSavesTheTrimmedTime(t *testing.T) {
 		}
 	}
 	// A sandbox says the time that it saved. It does not connect.
-	if err := client.SaveHosts(context.Background(), []client.Host{{Name: "cloud", Machine: &client.Machine{Provider: "e2b", ID: "s1"}}}); err != nil {
+	if err := client.SaveHostsContext(context.Background(), []client.Host{{Name: "cloud", Machine: &client.Machine{Provider: "e2b", ID: "s1"}}}); err != nil {
 		t.Fatal(err)
 	}
-	if out, stderr, code := mainLine(t, "host", "idle", "cloud", " 30m "); code != 0 || out != "" || stderr != "cloud pauses 30m after the last client goes, while no session works.\n" {
+	if out, stderr, code := mainLine(t, "host", "idle", "cloud", " 30m "); code != 0 || out != "" || stderr != warningOf(t, "host idle", "", "")+"cloud: idle 15m → 30m.\ncloud pauses 30m after the last client goes, while no session works.\n" {
 		t.Errorf("host idle cloud ' 30m ' = %d, %q:\n%s", code, out, stderr)
 	}
 }

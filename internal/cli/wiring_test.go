@@ -433,7 +433,7 @@ func TestHostAddChecklistNoInputCommand(t *testing.T) {
 	th := newTestHost(t)
 	th.h.Install(client.HelperVersion(), "")
 	t.Setenv(noInputEnv, "")
-	term, done := inTerminal(t, "host", "add", "added", "box", "--no-input")
+	term, done := inTerminal(t, "host", "add", "added", "box", "--tier", "own", "--no-input")
 	term.WaitFor("Agents:")
 	// An Enter would answer the checklist, if the command asked it.
 	term.Type("\r")

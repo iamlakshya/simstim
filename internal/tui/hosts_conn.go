@@ -57,10 +57,20 @@ func (m *Model) onDialled(msg dialledMsg) tea.Cmd {
 	}
 	h.conn, h.status, h.err, h.backoff = msg.conn, stOnline, nil, 0
 	cmds := []tea.Cmd{m.listSessions(h), m.ping(h), m.doctor(h), m.waitDone(h.name(), h.gen, h.conn)}
+	if msg.conn.HostIDChanged() {
+		h.tier, h.idChanged = client.TierShared, true
+		cmds = append(cmds, m.toastHostIDChanged(h.name()))
+	}
 	if m.previewOpen() && m.preview.key.host == h.name() {
 		cmds = append(cmds, m.peek())
 	}
 	return tea.Batch(cmds...)
+}
+
+func (m *Model) toastHostIDChanged(name string) tea.Cmd {
+	return m.toastNext(toastWarning,
+		name+" answers with a different host ID, so its tier is now shared.",
+		fmt.Sprintf("If it is the same machine: %s host set %s tier=own", brand.Name, name))
 }
 
 // onConnDone notes a lost connection and dials again later.

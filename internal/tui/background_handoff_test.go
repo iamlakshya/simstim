@@ -53,11 +53,17 @@ func (b *handoffBackend) LoadHosts(ctx context.Context) ([]client.Host, error) {
 	return b.fakeBackend.LoadHosts(ctx)
 }
 
-func (b *handoffBackend) SaveHosts(ctx context.Context, hosts []client.Host) error {
-	if err := b.gate(ctx, "save-write"); err != nil {
-		return err
+func (b *handoffBackend) UpdateHostsContext(ctx context.Context, c client.HostChange) (warn, err error) {
+	if _, err := b.LoadHosts(ctx); err != nil {
+		return nil, err
 	}
-	return b.fakeBackend.SaveHosts(ctx, hosts)
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if err := b.gate(ctx, "save-write"); err != nil {
+		return nil, err
+	}
+	return b.fakeBackend.UpdateHostsContext(ctx, c)
 }
 
 func (b *handoffBackend) Probe(ctx context.Context, h client.Host) (client.Platform, error) {
@@ -338,15 +344,17 @@ func TestBackgroundRPCsCancelAndJoinAtAttachHandoff(t *testing.T) {
 			var release sync.Once
 			letGo := func() { release.Do(func() { close(call.release) }) }
 			t.Cleanup(func() { cancel(); letGo() })
-			finished := make(chan struct{})
 			cmd := tc.start(m, h, w)
-			go func() { executeHandoffCommand(cmd); close(finished) }()
+			ps := newProgStepper(t, m, m)
 			var ctx context.Context
-			select {
-			case ctx = <-call.entered:
-			case <-time.After(10 * time.Second):
-				t.Fatal("the request did not reach its gate")
-			}
+			finished := ps.stepToGate(cmd, func() bool {
+				select {
+				case ctx = <-call.entered:
+					return true
+				default:
+					return false
+				}
+			})
 			if ctx.Value(handoffContextKey{}) != "kept" {
 				t.Fatal("the request lost its parent context values")
 			}

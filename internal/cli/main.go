@@ -4,6 +4,7 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"os"
 
@@ -17,10 +18,18 @@ import (
 // Main runs the client with the process's arguments and returns its exit
 // code, which comes from the kind of the error (docs/reference/exit-codes.md).
 func Main() int {
+	if code, handled := client.GitSSHMode(os.Args[1:]); handled {
+		return code
+	}
 	ctx, stop := listen()
 	defer stop()
 	args := os.Args[1:]
-	cmd, err := Root().ExecuteContextC(withLine(ctx, args))
+	// A wait of the client, such as for the lock of hosts.toml, or a
+	// changed host ID, says so on stderr: with --json, as a warning line.
+	wantJSON := jsonAsked(nil, args)
+	run := client.WithNotes(withLine(ctx, args), stderrFor(wantJSON, "waiting"))
+	run = client.WithWarnings(run, warningFor(wantJSON))
+	cmd, err := Root().ExecuteContextC(run)
 	// ctx ends only at a signal.
 	signalled := ctx.Err() != nil
 	asJSON := jsonAsked(cmd, args)
@@ -94,6 +103,19 @@ func beforeRun(cmd *cobra.Command, args []string) error {
 		cmd.SetContext(client.WithoutInput(cmd.Context()))
 	}
 	warnOldFlags(cmd)
+	if !isLauncher(cmd, args) {
+		cmd.SetContext(client.WithNotices(cmd.Context(), stderrFor(jsonOn(cmd), "host_key_pinned")))
+		if inputOn(cmd) {
+			cmd.SetContext(client.WithTierQuestion(cmd.Context(), func(ctx context.Context, h client.Host) (client.Tier, error) {
+				p := prompts(cmd)
+				p.ctx = ctx
+				return p.askTier(h.Name)
+			}))
+		}
+	} else {
+		// The launcher and switcher show identity notices in their own chrome.
+		cmd.SetContext(client.WithWarnings(cmd.Context(), nil))
+	}
 	return startDebug(cmd, args)
 }
 

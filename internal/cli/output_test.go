@@ -14,6 +14,7 @@ import (
 
 	"github.com/iamlakshya/simstim/internal/brand"
 	"github.com/iamlakshya/simstim/internal/client"
+	"github.com/iamlakshya/simstim/internal/client/clienttest"
 	"github.com/iamlakshya/simstim/internal/host/hosttest"
 )
 
@@ -70,6 +71,20 @@ func TestGoldenJSON(t *testing.T) {
 	show("host", "status", "box", "--json")
 	show("version", "--json")
 	show("config", "keymap", "--json")
+
+	// From fixed data: the details of a host that answered and of one that
+	// did not, and what host upgrade did.
+	fixed := func(name string, v any) {
+		out, err := versioned(v)
+		if err != nil {
+			t.Fatal(err)
+		}
+		fmt.Fprintf(&b, "== %s\n%s", name, out)
+	}
+	d := clienttest.HostDetails()
+	fixed("host show box --json", hostShowObject(d, nil))
+	fixed("host show box --json, when box does not answer", hostShowObject(client.HostDetails{Host: d.Host, Tier: d.Tier}, errors.New("cannot reach box")))
+	fixed("host upgrade box --json", upgradeResult{Host: "box", Helper: "0.1.2-1a2b3c4d", Outcome: upgradeInstalled})
 
 	fmt.Fprintf(&b, "== errors\n")
 	for _, args := range [][]string{{"host", "test", "nowhere", "--json"}, {"atach", "box/api", "--json"}, {"new", "box", "--json", "--", "htop"}} {
@@ -157,6 +172,7 @@ func TestCommandsPrintJSON(t *testing.T) {
 		{"ports", "box/web", "--json"},
 		{"doctor", "--json"},
 		{"host", "ls", "--json"},
+		{"host", "show", "box", "--json"},
 		{"host", "status", "box", "--json"},
 		{"host", "test", "box", "--json"},
 		{"host", "doctor", "box", "--json"},

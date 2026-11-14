@@ -130,7 +130,7 @@ func testForeignTrustTemp(t *testing.T, foreign func(*testing.T, string) func())
 			for _, name := range names {
 				observing.known[name] = true
 			}
-			var saveCtx context.Context = ctx
+			saveCtx := ctx
 			if outcome == "cancel-before-rename" {
 				saveCtx = observing
 			}

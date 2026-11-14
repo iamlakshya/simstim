@@ -60,7 +60,7 @@ func TestShowOnAStoppedProviderHost(t *testing.T) {
 			"Permission denied (publickey)", "Try: ssh cloud"},
 	} {
 		h.Script("ssh", "echo \""+c.ssh+"\" >&2; exit 255\n")
-		if err := client.SaveHosts(context.Background(), []client.Host{{Name: "cloud", SSH: "cloud", Provider: &client.Provider{Script: provider(c.state), WakeOnAttach: true}}}); err != nil {
+		if err := client.SaveHostsContext(context.Background(), []client.Host{{Name: "cloud", SSH: "cloud", Provider: &client.Provider{Script: provider(c.state), WakeOnAttach: true}}}); err != nil {
 			t.Fatal(err)
 		}
 		got, code := failsAs(t, "show", "cloud/c")

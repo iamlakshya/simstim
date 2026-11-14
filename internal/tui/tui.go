@@ -68,7 +68,7 @@ func runNamed(ctx context.Context, be Backend, o Options, what, hint string) err
 	o.Motion = motionOn(be.Settings().UI.Motion, os.Getenv)
 	m := New(ctx, be, o)
 	m.handoff = true
-	defer m.Close()
+	defer m.closeAfterProgram()
 	prog := timeFrames(m)
 	resumed := false
 	for {

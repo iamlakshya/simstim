@@ -1,5 +1,7 @@
 package client
 
+import "context"
+
 // maxBackground is how many notices about other sessions wait at most for
 // the terminal. The others are dropped.
 const maxBackground = 8
@@ -13,9 +15,9 @@ type heldNotice struct {
 // notice writes a notice when the terminal is between sequences and
 // characters. Otherwise it holds the notice until the session's output gets
 // there, so the notice never cuts a sequence of the session's.
-func (a *attacher) notice(seq []byte, keep bool) {
+func (a *attacher) notice(ctx context.Context, seq []byte, keep bool) {
 	if a.outStream.ground() && a.guard.idle() {
-		a.write(seq)
+		a.write(ctx, seq)
 		return
 	}
 	if !keep {
@@ -34,14 +36,14 @@ func (a *attacher) notice(seq []byte, keep bool) {
 
 // writeHeld writes the notices that waited, once the terminal is between
 // sequences.
-func (a *attacher) writeHeld() {
+func (a *attacher) writeHeld(ctx context.Context) {
 	if len(a.held) == 0 || !a.outStream.ground() || !a.guard.idle() {
 		return
 	}
 	held := a.held
 	a.held = nil
 	for _, n := range held {
-		a.write(n.seq)
+		a.write(ctx, n.seq)
 	}
 }
 
@@ -51,17 +53,17 @@ func (a *attacher) writeHeld() {
 // state waits for the next attach in this process. Then it writes the
 // notices that still wait, and waits for the clipboard writes to reach the
 // shared file.
-func (a *attacher) endGuard() {
+func (a *attacher) endGuard(ctx context.Context) {
 	if a.guard == nil {
 		return
 	}
 	if a.guard.copying() {
-		a.write([]byte("\x1b]1337;EndCopy\a"))
+		a.write(ctx, []byte("\x1b]1337;EndCopy\a"))
 	}
-	a.guard.detach()
+	a.guard.detach(ctx)
 	for _, n := range a.held {
-		a.write(n.seq)
+		a.write(ctx, n.seq)
 	}
 	a.held = nil
-	a.guard.mem.flush(guardFlushWait)
+	a.guard.mem.flush(ctx, guardFlushWait)
 }

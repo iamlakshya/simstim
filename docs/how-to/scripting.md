@@ -10,7 +10,7 @@ A command asks a question only when input is on: stdin, stdout and stderr are al
 - `--json`.
 - The variable `SIMSTIM_NO_INPUT`, set to anything but an empty value, `0` or `false`.
 
-With input off, a question that the command needs fails with exit code 4. Its `Try:` line is your command with the flag that answers the question, before any `--`. A question whose default changes nothing takes the default, and says so on stderr. SSH asks nothing either: it runs with `BatchMode=yes`, so a host that needs a password or a new host key fails with its SSH error.
+With input off, a question that the command needs fails with exit code 4. Its `Try:` line is your command with the flag that answers the question, before any `--`. A question whose default changes nothing takes the default, and says so on stderr. SSH asks nothing either: it runs with `BatchMode=yes`, so a host that needs a password fails with its SSH error. `host add` pins a host key that your SSH settings do not trust only with `--host-key` or `--yes` ([the host key](add-a-host.md#the-host-key)).
 
 <!-- test: help (a host with no helper yet) -->
 ```sh
@@ -18,22 +18,26 @@ simstim host add my-server --no-input
 ```
 
 ```text
-Error: host add needs a yes to install the helper on my-server, and input is off.
+Error: host add needs the tier of my-server (own, throwaway or shared), and input is off.
 
-Try: simstim host add my-server --no-input --yes
+Try: simstim host add my-server --no-input --tier <tier>
 ```
 
 These are the questions, and the flag that answers each:
 
 | Command | Question | Flag | With input off |
 | --- | --- | --- | --- |
+| `host add` | Who else has root? | `--tier own`, `--tier throwaway` or `--tier shared`, also with `--yes` | Fails with exit code 4 |
 | `host add` | Install the helper? | `--yes` | Fails with exit code 4 |
 | `host add` | Which agents to install, when the host lacks one | `--yes` offers none | Installs nothing |
+| `host add` | ssh's question about a host key that your SSH settings do not trust | `--host-key SHA256:…`, or `--yes` to pin the key on first use | Fails with exit code 4 |
+| `host rekey` | The host's typed name | `--confirm <host>` | Fails with exit code 4 |
 | `new` | Make the folder that does not exist? | `--mkdir` | Fails with exit code 4. Without a terminal and without `--detach`, `new` fails with exit code 2 first |
 | `new` | Run the repository's setup script? | `--setup-script` or `--no-setup-script` | Skips the script, and says so |
 | `doctor --fix`, `host doctor --fix` | Fix it? | `-y` | Fails with exit code 4. With `--json` and `-y`, the JSON holds how each fix ended |
-| `host destroy` | Delete the machine? | `-y` | Fails with exit code 4 |
-| `setup` | Each question of the guided setup | `--yes`, with `--host` or `--create`, and `--agents` | Fails with exit code 4 |
+| `host rm` on a host that `host create` made | Type the host's name to delete the machine too | `--destroy --confirm <host>` | Keeps the machine, forgets the host, and says so. With `--destroy` and without `--confirm`, fails with exit code 4 |
+| `host set` to a higher tier | The host's typed name | `--confirm <host>` | Fails with exit code 4 |
+| `setup` | Each question of the guided setup | `--yes`, with `--host` and `--tier`, or `--create`, and `--agents` | Fails with exit code 4 |
 | `rm` | Delete the session? | `-y` | Deletes, and warns, until v0.4.0 and 11 November 2027, whichever comes later. Then fails with exit code 4 |
 | `attach`, on an agent that has ended | Start the agent again? | `--restart` | At a terminal, fails with exit code 4. Without one, `attach` fails with exit code 2 first: use `resume --detach` |
 
@@ -53,7 +57,7 @@ Esc, Ctrl+C, the end of input, or a signal at a question cancels. The command pr
 
 ## Read JSON
 
-These commands take `--json`: `ls`, `show`, `new --detach`, `resume --detach`, `ports`, `doctor`, `host ls`, `host test`, `host doctor`, `host restore`, `host status`, `host alerts`, `host alerts log`, `agents ls`, `config keymap` and `version`. `new` and `resume` need `--detach` with `--json`, because an attached session owns the terminal.
+These commands take `--json`: `ls`, `show`, `new --detach`, `resume --detach`, `ports`, `doctor`, `host ls`, `host show`, `host upgrade`, `host test`, `host doctor`, `host restore`, `host status`, `host alerts`, `host alerts log`, `agents ls`, `config keymap` and `version`. `new` and `resume` need `--detach` with `--json`, because an attached session owns the terminal.
 
 <!-- test: help (needs a host) -->
 ```sh
@@ -102,7 +106,9 @@ The other commands print these shapes. Each object at the top also has `"v": 1`:
 | `ports` | `host`, `session` (the name), `id`, and `ports`: each with `port`, `address`, `pid` and `process` |
 | `doctor` | `checks`, each with `name`, `ok`, `detail` and `fix`, and `fixes`, each with `id`, `problem`, `action` and `command` |
 | `host ls` | An array of hosts, with the keys of `hosts.toml`: `name`, `ssh`, `ssh_config`, `labels`, `provider`, `machine` and `secrets` |
+| `host show` | One host object, with `reachable`, `error` and `try` when it did not answer, `info` (the raw data that `host doctor --json` prints, with terminal controls escaped) and `session_count` |
 | `host test` | `host`, `connect_ms` and `round_trip_ms` |
+| `host upgrade` | `host`, `helper` and `outcome`: `unchanged` or `installed` |
 | `host restore` | `host`, and `results`: each with `id`, `name`, `action` and `why` |
 | `host status` | `host`, `state`, `provider` and `id` for a host that `host create` made, or `host` and `output` with a provider script's output |
 | `version` | `version`, `protocol` and `helper` |

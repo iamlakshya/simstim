@@ -28,13 +28,16 @@ const (
 // hostConn is one saved host and its background connection. Only Update
 // touches it; the work happens in tea.Cmds that report back with messages.
 type hostConn struct {
-	host     client.Host
-	status   connStatus
-	conn     Conn
-	gen      int // bumped on every dial, so late answers from old connections are dropped
-	err      error
-	sessions []client.Session
-	loaded   bool
+	host      client.Host
+	tier      client.Tier
+	tierUnset bool
+	idChanged bool
+	status    connStatus
+	conn      Conn
+	gen       int // bumped on every dial, so late answers from old connections are dropped
+	err       error
+	sessions  []client.Session
+	loaded    bool
 	// seenAt is when the host's list last arrived, for the session cache,
 	// as the worker that fetched it saw it: a list that the launcher saves
 	// later keeps this time.
@@ -95,6 +98,24 @@ type (
 	refreshTickMsg struct{}
 	latencyTickMsg struct{}
 )
+
+// loadSavedHosts reads the saved hosts and their tiers for New.
+func loadSavedHosts(ctx context.Context, be Backend) ([]*hostConn, error) {
+	hosts, err := be.LoadHosts(ctx)
+	if err != nil {
+		return nil, err
+	}
+	tiers, err := be.LoadTiers(ctx, hosts)
+	if err != nil {
+		return nil, err
+	}
+	sort.SliceStable(hosts, func(i, j int) bool { return hosts[i].Name < hosts[j].Name })
+	out := make([]*hostConn, 0, len(hosts))
+	for _, h := range hosts {
+		out = append(out, &hostConn{host: h, tier: tiers.Of(h.Name), tierUnset: tiers.NeedsAnswer(h.Name), idChanged: tiers.IDChanged(h.Name)})
+	}
+	return out, nil
+}
 
 func (m *Model) hostByName(name string) *hostConn {
 	for _, h := range m.hosts {
@@ -211,7 +232,9 @@ func offline(err error) bool {
 	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, client.ErrClosed) {
 		return true
 	}
-	msg, _ := errText(err)
+	// The whole message, not the text that the launcher draws, which a
+	// long error has cut.
+	msg := err.Error()
 	return strings.HasPrefix(msg, "cannot reach") || strings.Contains(msg, "timed out") ||
 		strings.Contains(msg, "Connection refused") || strings.Contains(msg, "No route to host")
 }
@@ -229,7 +252,7 @@ func (m *Model) reconnect(h *hostConn) tea.Cmd {
 
 // addHost puts a new or changed host in the list. If conn is set, it is a
 // ready connection to adopt, so the host needs no second dial.
-func (m *Model) addHost(host client.Host, conn Conn, info *client.HostInfo) tea.Cmd {
+func (m *Model) addTierHost(host client.Host, tier client.Tier, idChanged bool, conn Conn, info *client.HostInfo) tea.Cmd {
 	h := m.hostByName(host.Name)
 	var cmds []tea.Cmd
 	if h == nil {
@@ -237,17 +260,31 @@ func (m *Model) addHost(host client.Host, conn Conn, info *client.HostInfo) tea.
 		m.hosts = append(m.hosts, h)
 		sort.SliceStable(m.hosts, func(i, j int) bool { return m.hosts[i].name() < m.hosts[j].name() })
 	} else {
+		if !sameRoute(h.host, host) {
+			h.sessions, h.info, h.err = nil, nil, nil
+			h.loaded, h.listing, h.pinging = false, false, false
+			h.backoff, h.rtts, h.rtt = 0, nil, rttSpread{}
+			m.syncSel()
+		}
 		h.host = host
 		if h.conn != nil {
 			cmds = append(cmds, m.dropConn(h.conn))
 			h.conn = nil
 		}
 	}
+	if !tier.Valid() {
+		tier = client.TierShared
+	}
+	h.tier, h.idChanged = tier, idChanged
 	if conn != nil && !m.conns.adopt(conn) {
 		conn = nil
 	}
 	if conn == nil {
 		return tea.Batch(append(cmds, m.dial(h))...)
+	}
+	if conn.HostIDChanged() {
+		h.tier, h.idChanged = client.TierShared, true
+		cmds = append(cmds, m.toastHostIDChanged(h.name()))
 	}
 	h.gen++
 	h.conn, h.status, h.err, h.backoff, h.info = conn, stOnline, nil, 0, info
@@ -258,26 +295,6 @@ func (m *Model) addHost(host client.Host, conn Conn, info *client.HostInfo) tea.
 		cmds = append(cmds, m.doctor(h))
 	}
 	return tea.Batch(cmds...)
-}
-
-// removeHost forgets h here. Its sessions keep running on the host.
-func (m *Model) removeHost(name string) tea.Cmd {
-	for i, h := range m.hosts {
-		if h.name() != name {
-			continue
-		}
-		m.hosts = append(m.hosts[:i], m.hosts[i+1:]...)
-		h.gen++
-		if m.cur == name {
-			m.screen, m.cur = scrHosts, ""
-		}
-		m.syncSel()
-		if h.conn != nil {
-			return m.dropConn(h.conn)
-		}
-		return nil
-	}
-	return nil
 }
 
 // Session order and looks.
@@ -410,4 +427,14 @@ func (m *Model) rememberCreatedHost(host client.Host) {
 // oscText keeps text safe inside an OSC string.
 func oscText(s string) string {
 	return strings.ReplaceAll(shown(s), ";", " ")
+}
+
+// addHost retains the package-local call shape used by lifecycle fixtures.
+// Policy-bearing production saves use addTierHost with their committed tier.
+func (m *Model) addHost(host client.Host, conn Conn, info *client.HostInfo) tea.Cmd {
+	tier, changed := client.TierUnknown, false
+	if h := m.hostByName(host.Name); h != nil {
+		tier, changed = h.tier, h.idChanged
+	}
+	return m.addTierHost(host, tier, changed, conn, info)
 }

@@ -38,6 +38,8 @@ Each record explains one choice: the context, the options and the outcome. Recor
 | [0032](0032-secret-values-in-memory-only.md) | Secret values live only in the memory of the trusted side, never in a file | Proposed |
 | [0033](0033-one-command-grammar.md) | One grammar for the command line: session verbs at the top, a noun and a verb for everything else, and every rule under `policy` | Accepted |
 | [0034](0034-ssh-options-on-the-command-line.md) | The client puts the options that keep a host safe on the `ssh` command line and at the top of its generated config, where they win over the user's own config. It starts with forwarding off (adds to 0003) | Accepted |
+| [0035](0035-pinned-host-keys.md) | Each saved host reached over SSH has a pinned host key in a file of its own, which options on the `ssh` command line check, so the user's config cannot undo it. OpenSSH decides which key the user's own settings trust, and only `host rekey` replaces a pin (applies the rule of 0034) | Proposed |
+| [0036](0036-host-tiers-and-the-grant-gate.md) | Host tiers and identity stay in a separate client file. The client checks each grant before it leaves the laptop | Proposed |
 | [0041](0041-a-signed-tag-release-gate.md) | A release builds only from a tag that a maintainer signed with a hardware key, checked by `main`'s gate against the list of keys on `main`, with the release key in an environment that only the gated job reads (extends 0017) | Proposed |
 
 Write a new record from [the template](template.md).

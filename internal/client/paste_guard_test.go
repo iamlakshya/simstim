@@ -2,6 +2,7 @@ package client
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"math/rand/v2"
 	"os"
@@ -162,20 +163,20 @@ func TestPasteGuardNotices(t *testing.T) {
 	g := newPasteGuard(m)
 	key := mkFile(t, filepath.Join(home, ".ssh", "id_ed25519"))
 	png := mkFile(t, filepath.Join(home, "Desktop", "shot.png"))
-	if _, got := g.check([]byte(key), []string{key}); got != "did not upload ~/.ssh/id_ed25519: it is in ~/.ssh, a private folder. "+
+	if _, got := g.check(t.Context(), []byte(key), []string{key}); got != "did not upload ~/.ssh/id_ed25519: it is in ~/.ssh, a private folder. "+
 		"The paste went in as text. Try: copy the file to the host yourself." {
 		t.Errorf("one file: %q", got)
 	}
-	if _, got := g.check([]byte(png+" "+key), []string{png, key}); !strings.HasPrefix(got, "did not upload 2 files: ~/.ssh/id_ed25519 is in ~/.ssh") {
+	if _, got := g.check(t.Context(), []byte(png+" "+key), []string{png, key}); !strings.HasPrefix(got, "did not upload 2 files: ~/.ssh/id_ed25519 is in ~/.ssh") {
 		t.Errorf("two files: %q", got)
 	}
-	d, got := g.check([]byte(png), []string{png})
+	d, got := g.check(t.Context(), []byte(png), []string{png})
 	if got != "" || len(d.files) != 1 {
 		t.Fatalf("a screenshot: %q", got)
 	}
 	d.close()
-	g.observe([]byte(osc52(png)))
-	if _, got := g.check([]byte(png), []string{png}); got != "did not upload ~/Desktop/shot.png: it is a path that a session put on your "+
+	g.observe(t.Context(), []byte(osc52(png)))
+	if _, got := g.check(t.Context(), []byte(png), []string{png}); got != "did not upload ~/Desktop/shot.png: it is a path that a session put on your "+
 		"clipboard in the last day. The paste went in as text. Try: copy the file to the host yourself." {
 		t.Errorf("a path the session wrote: %q", got)
 	}
@@ -197,7 +198,7 @@ func TestPasteGuardCheckComputesOnce(t *testing.T) {
 	dir := t.TempDir()
 	paths := []string{mkFile(t, filepath.Join(dir, "a.png")), mkFile(t, filepath.Join(dir, "b.png")), mkFile(t, filepath.Join(dir, "c.png"))}
 	sums, loads := keySums.Load(), m.loads.Load()
-	d, why := g.check([]byte(strings.Join(paths, " ")), paths)
+	d, why := g.check(t.Context(), []byte(strings.Join(paths, " ")), paths)
 	if why != "" {
 		t.Fatal(why)
 	}
@@ -342,7 +343,7 @@ func TestPasteGuardLeavesOutputUnchanged(t *testing.T) {
 			typ, payload = proto.TSnapshot, data[off:off+n]
 			a.cu.Offset += int64(n)
 		}
-		if _, err := a.frame(proto.Frame{Type: typ, Payload: payload}); err != nil {
+		if _, err := a.frame(t.Context(), proto.Frame{Type: typ, Payload: payload}); err != nil {
 			t.Fatal(err)
 		}
 		off += n
@@ -350,13 +351,13 @@ func TestPasteGuardLeavesOutputUnchanged(t *testing.T) {
 	if got := terminal(); !bytes.Equal(got, data) {
 		t.Fatalf("the terminal got %d bytes that differ from the session's %d", len(got), len(data))
 	}
-	if !remembersVictim(a.guard) {
+	if !remembersVictim(t.Context(), a.guard) {
 		t.Error("the guard did not see the session's clipboard writes")
 	}
 }
 
-func remembersVictim(g *pasteGuard) bool {
-	why, _ := g.mem.check([][32]byte{must32(keySum(victim))}, nil)
+func remembersVictim(ctx context.Context, g *pasteGuard) bool {
+	why, _ := g.mem.check(ctx, [][32]byte{must32(keySum(victim))}, nil)
 	return why != ""
 }
 
@@ -369,13 +370,13 @@ func TestPasteGuardReadsClientWrites(t *testing.T) {
 	setHome(t)
 	a, _ := testAttacher(t)
 	hidden := []byte("\x1b]2;title\x1b]52;c;" + b64("/tmp/other.pdf") + "\a")
-	a.show(hidden)
+	a.show(t.Context(), hidden)
 	a.tracker.Feed(hidden)
 	if bytes.Contains(a.tracker.M.Title, []byte("]52;")) {
 		t.Fatalf("the title holds a clipboard write: %q", a.tracker.M.Title)
 	}
-	a.write([]byte(osc52(victim)))
-	if !remembersVictim(a.guard) {
+	a.write(t.Context(), []byte(osc52(victim)))
+	if !remembersVictim(t.Context(), a.guard) {
 		t.Error("a clipboard write in the client's own bytes was not seen")
 	}
 }
@@ -388,9 +389,9 @@ func TestNoticesWaitForWholeCharacters(t *testing.T) {
 		a, terminal := testAttacher(t)
 		a.o.Host.Name = "box"
 		for i := range len(char) {
-			a.show([]byte(char[i : i+1]))
+			a.show(t.Context(), []byte(char[i:i+1]))
 			if i < len(char)-1 {
-				a.notify("note")
+				a.notify(t.Context(), "note")
 			}
 		}
 		got := terminal()
@@ -411,7 +412,7 @@ func TestNoticeIsCleanedNotCut(t *testing.T) {
 	setHome(t)
 	a, terminal := testAttacher(t)
 	a.o.Host.Name = "box"
-	a.notify("uploaded \x1b]52;c;QUFB\a" + strings.Repeat("/a/long/path.png (3 bytes), ", 100) + "last.png (3 bytes)")
+	a.notify(t.Context(), "uploaded \x1b]52;c;QUFB\a"+strings.Repeat("/a/long/path.png (3 bytes), ", 100)+"last.png (3 bytes)")
 	got := string(terminal())
 	if strings.Contains(got, "\x1b]52") || strings.Contains(got, "\a") {
 		t.Errorf("the notice holds a control: %q", got)
@@ -425,12 +426,12 @@ func TestNoticesNeverDropUploads(t *testing.T) {
 	setHome(t)
 	a, terminal := testAttacher(t)
 	a.o.Host.Name = "box"
-	a.show([]byte("\x1b[38;2;1"))
+	a.show(t.Context(), []byte("\x1b[38;2;1"))
 	for i := range 20 {
-		a.notify(fmt.Sprintf("uploaded f%d.png (1 bytes)", i))
-		a.notice([]byte(fmt.Sprintf("\x1b]777;notify;t;other%d\x1b\\", i)), false)
+		a.notify(t.Context(), fmt.Sprintf("uploaded f%d.png (1 bytes)", i))
+		a.notice(t.Context(), []byte(fmt.Sprintf("\x1b]777;notify;t;other%d\x1b\\", i)), false)
 	}
-	a.show([]byte(";2;3m"))
+	a.show(t.Context(), []byte(";2;3m"))
 	got := string(terminal())
 	for i := range 20 {
 		if !strings.Contains(got, fmt.Sprintf("uploaded f%d.png", i)) {
@@ -448,11 +449,11 @@ func TestNoticesWaitForGround(t *testing.T) {
 	setHome(t)
 	a, terminal := testAttacher(t)
 	a.o.Host.Name = "box"
-	a.show([]byte("\x1b[38;2;1"))
-	a.notify("first")
-	a.show([]byte(";2;3mtext \xc3"))
-	a.notify("second")
-	a.show([]byte("\xa9 more"))
+	a.show(t.Context(), []byte("\x1b[38;2;1"))
+	a.notify(t.Context(), "first")
+	a.show(t.Context(), []byte(";2;3mtext \xc3"))
+	a.notify(t.Context(), "second")
+	a.show(t.Context(), []byte("\xa9 more"))
 	got := terminal()
 	want := "\x1b[38;2;1;2;3mtext \xc3\xa9 more"
 	if !bytes.HasPrefix(got, []byte(want)) {
@@ -461,7 +462,7 @@ func TestNoticesWaitForGround(t *testing.T) {
 	if rest := string(got[len(want):]); !strings.Contains(rest, "first") || !strings.Contains(rest, "second") {
 		t.Fatalf("the notices did not follow: %q", rest)
 	}
-	a.notify("third")
+	a.notify(t.Context(), "third")
 	if !bytes.HasSuffix(terminal(), []byte("third\x1b\\")) {
 		t.Fatal("a notice in ground waited")
 	}
@@ -477,12 +478,12 @@ func TestPasteGuardReadsBothFromTheStart(t *testing.T) {
 	if len(g.readers) != 2 || g.readers[0].xterm || !g.readers[1].xterm {
 		t.Fatal("the guard does not start with Ghostty's reading and xterm's")
 	}
-	g.observe([]byte("\x1b\u00dd]52;c;" + b64(victim) + "\a"))
-	if why, _ := m.check([][32]byte{sumOf(t, victim)}, nil); why == "" {
+	g.observe(t.Context(), []byte("\x1b\u00dd]52;c;"+b64(victim)+"\a"))
+	if why, _ := m.check(t.Context(), [][32]byte{sumOf(t, victim)}, nil); why == "" {
 		t.Fatal("the xterm reading of ESC, a letter with 0x9D, and ] was not recorded")
 	}
 	// The next attach in the process keeps both readings.
-	g.detach()
+	g.detach(t.Context())
 	if g2 := newPasteGuard(m); len(g2.readers) != 2 || !g2.readers[1].xterm || g2.readers[0].xterm {
 		t.Fatal("the next attach lost the xterm reading")
 	}
@@ -500,14 +501,14 @@ func TestPasteGuardFramesCutAtEveryByte(t *testing.T) {
 			if k == 1 {
 				off = int64(i)
 			}
-			if _, err := a.frame(proto.Frame{Type: proto.TOutput, Payload: proto.EncodeOutput(off, part)}); err != nil {
+			if _, err := a.frame(t.Context(), proto.Frame{Type: proto.TOutput, Payload: proto.EncodeOutput(off, part)}); err != nil {
 				t.Fatal(err)
 			}
 		}
 		if !bytes.Equal(terminal(), data) {
 			t.Fatalf("cut at %d: the terminal got other bytes", i)
 		}
-		if !remembersVictim(a.guard) {
+		if !remembersVictim(t.Context(), a.guard) {
 			t.Fatalf("cut at %d: the write was not recorded", i)
 		}
 	}
@@ -543,11 +544,11 @@ func FuzzPasteGuard(f *testing.F) {
 		r := newTestReader()
 		n := int(step%32) + 1
 		for i := 0; i < len(data); i += n {
-			r.observe(data[i:min(i+n, len(data))])
+			r.observe(t.Context(), data[i:min(i+n, len(data))])
 		}
 		// One whole read gives the same readings, states and writes.
 		w := newTestReader()
-		w.observe(data)
+		w.observe(t.Context(), data)
 		if len(w.readers) != len(r.readers) || len(w.got) != len(r.got) || len(w.sel) != len(r.sel) {
 			t.Fatalf("in parts: %d readings, %d+%d writes; whole: %d readings, %d+%d writes",
 				len(r.readers), len(r.got), len(r.sel), len(w.readers), len(w.got), len(w.sel))

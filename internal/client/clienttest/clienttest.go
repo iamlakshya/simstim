@@ -53,15 +53,27 @@ type Transport struct {
 	Answers map[string]any
 	// Features are the features that the bridge's hello offers.
 	Features []string
+	// HostID is the host ID in the bridge's hello, or a fixed valid ID when
+	// empty and NoHostID is false.
+	HostID string
+	// NoHostID makes the bridge omit host_id in its hello, as an older
+	// helper did.
+	NoHostID bool
 	// Uname is what the probe's uname -sm prints: "Linux aarch64" when empty.
 	Uname string
 	// fail makes the bridge answer a request with an error, by its op.
 	fail map[string]*proto.Error
 	// NoHelper makes the probe answer as a host without the helper.
 	NoHelper bool
+	// Helper, if set, is the one version of the helper on the host. A
+	// bridge of another version does not start, as when its file is
+	// missing, and the probe finds only this one.
+	Helper string
 	// OnRun, if set, gets each command that Run is given, before Run
 	// answers it.
 	OnRun func(remote string)
+	// Steps, if set, is what the bridge's setup returns.
+	Steps []api.Check
 	// OnRequest, if set, gets the op of each request that reaches the
 	// bridge, before the bridge answers it.
 	OnRequest func(op string)
@@ -100,6 +112,14 @@ func (t *Transport) Fail(op string, e *proto.Error) {
 	t.fail[op] = e
 }
 
+// SetSessions changes what the bridge's ls returns, as a session that
+// starts or ends would.
+func (t *Transport) SetSessions(s []client.Session) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.Sessions = s
+}
+
 // SetAgents changes what agents.check returns, as an install would.
 func (t *Transport) SetAgents(a []api.AgentCheck) {
 	t.mu.Lock()
@@ -134,7 +154,7 @@ func (t *Transport) Run(_ context.Context, remote string, stdin io.Reader) ([]by
 		_, _ = io.Copy(io.Discard, stdin)
 	}
 	switch {
-	case strings.Contains(remote, "uname -sm") && t.NoHelper:
+	case strings.Contains(remote, "uname -sm") && (t.NoHelper || !t.has(remote)):
 		return []byte("Linux aarch64\n"), nil
 	case strings.Contains(remote, "uname -sm"):
 		uname := t.Uname
@@ -153,6 +173,9 @@ func (t *Transport) Run(_ context.Context, remote string, stdin io.Reader) ([]by
 // Start serves the fake bridge on the returned process's stdio.
 func (t *Transport) Start(_ context.Context, remote string) (client.Proc, error) {
 	t.record(remote)
+	if !t.has(remote) {
+		return missingProc{}, nil
+	}
 	inR, inW := io.Pipe()
 	outR, outW := io.Pipe()
 	p := &pipeProc{in: inW, out: outR, done: make(chan struct{})}
@@ -174,7 +197,11 @@ func (t *Transport) serve(in io.Reader, out io.Writer) {
 	if err != nil || f.Type != proto.THello {
 		return
 	}
-	_ = w.WriteJSON(proto.THello, proto.Hello{Magic: proto.Magic, Protocol: version.Protocol, Version: version.Version, Role: "bridge", Features: t.Features})
+	hostID := t.HostID
+	if hostID == "" && !t.NoHostID {
+		hostID = "0123456789abcdef0123456789abcdef"
+	}
+	_ = w.WriteJSON(proto.THello, proto.Hello{Magic: proto.Magic, Protocol: version.Protocol, Version: version.Version, Role: "bridge", HostID: hostID, Features: t.Features})
 	for {
 		f, err := proto.Read(r)
 		if err != nil {
@@ -216,13 +243,18 @@ func (t *Transport) answer(req proto.Request) proto.Response {
 	}
 	switch req.Op {
 	case "ls":
+		t.mu.Lock()
 		sessions := t.Sessions
+		t.mu.Unlock()
 		if sessions == nil {
 			sessions = []client.Session{}
 		}
 		v = sessions
 	case "setup":
 		v = api.SetupResult{Steps: []api.Check{{Name: "linger", OK: true, Detail: "already on"}}}
+		if t.Steps != nil {
+			v = api.SetupResult{Steps: t.Steps}
+		}
 	case "doctor":
 		v = api.HostInfo{Distro: "Fake Linux", CPUs: 2, MemTotal: 4 << 30, Agents: map[string]string{"shell": "/bin/sh"}}
 	case "agents.check":
@@ -249,6 +281,26 @@ func (t *Transport) answer(req proto.Request) proto.Response {
 	b, _ := json.Marshal(v)
 	return proto.Response{ID: req.ID, OK: true, Result: b}
 }
+
+// has reports whether the helper that remote names is on the host.
+func (t *Transport) has(remote string) bool {
+	return t.Helper == "" || strings.Contains(remote, "/bin/"+t.Helper+"/")
+}
+
+// missingProc is a bridge whose helper is not on the host: the shell says
+// so, and it ends at once.
+type missingProc struct{}
+
+func (missingProc) Stdin() io.WriteCloser { return nopCloser{} }
+func (missingProc) Stdout() io.Reader     { return strings.NewReader("") }
+func (missingProc) Stderr() string        { return "sh: 1: helper: No such file or directory" }
+func (missingProc) Wait() error           { return errors.New("exit status 127") }
+func (missingProc) Kill()                 {}
+
+type nopCloser struct{}
+
+func (nopCloser) Write(b []byte) (int, error) { return len(b), nil }
+func (nopCloser) Close() error                { return nil }
 
 type pipeProc struct {
 	in   *io.PipeWriter
@@ -282,6 +334,12 @@ type Machine struct {
 	renewed []time.Duration
 	// Busy and Idle are the leases, for LeasedMachine.
 	Busy, Idle time.Duration
+	// DestroyErr, if set, makes Destroy fail with it, and keep the
+	// machine.
+	DestroyErr error
+	// StatusErr, if set, makes Status fail with it, as a provider that
+	// cannot tell the machine's state does.
+	StatusErr error
 }
 
 // NewMachine returns a machine in the given state.
@@ -316,11 +374,14 @@ func (m *Machine) SetState(s string) {
 	m.state = s
 }
 
-// Status reports the state.
+// Status reports the state, or fails with StatusErr.
 func (m *Machine) Status(context.Context) (string, error) {
 	m.call("status")
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if m.StatusErr != nil {
+		return "", m.StatusErr
+	}
 	return m.state, nil
 }
 
@@ -338,9 +399,12 @@ func (m *Machine) Stop(context.Context) error {
 	return nil
 }
 
-// Destroy makes it missing.
+// Destroy makes it missing, or fails with DestroyErr.
 func (m *Machine) Destroy(context.Context) error {
 	m.call("destroy")
+	if m.DestroyErr != nil {
+		return m.DestroyErr
+	}
 	m.SetState(client.MachineMissing)
 	return nil
 }

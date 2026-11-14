@@ -26,6 +26,13 @@ type resumedMsg struct {
 // resume of the session runs, the key does nothing. The row still says
 // that the agent ended until the host has stopped the old holder.
 func (m *Model) resumeSelected() tea.Cmd {
+	if h, s := m.selectedPair(); h != nil && s != nil {
+		return m.withHostTier(h, m.resumeSelectedReady)
+	}
+	return nil
+}
+
+func (m *Model) resumeSelectedReady() tea.Cmd {
 	h, s := m.selectedPair()
 	if s == nil {
 		return nil

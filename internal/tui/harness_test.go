@@ -44,8 +44,13 @@ func newHarness(t *testing.T, be *fakeBackend, w, h int) *harness {
 	m.exec = func(c tea.ExecCommand, fn tea.ExecCallback) tea.Cmd {
 		return func() tea.Msg { return fn(c.Run()) }
 	}
+	m.tierWait = func(wait func() tea.Msg) tea.Msg {
+		be.blocked.Add(1)
+		defer be.blocked.Add(-1)
+		return wait()
+	}
 	hs.m = m
-	t.Cleanup(m.Close)
+	t.Cleanup(m.closeAfterProgram)
 	hs.send(tea.WindowSizeMsg{Width: w, Height: h})
 	hs.do(m.Init())
 	return hs

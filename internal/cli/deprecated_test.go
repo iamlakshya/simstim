@@ -305,7 +305,7 @@ func withoutOld(t *testing.T, ids ...string) {
 // passes a folder after -d then fails loudly (cli-spec 10.4).
 func TestAfterTheEndOfDashD(t *testing.T) {
 	hosttest.New(t)
-	if err := client.SaveHosts(context.Background(), []client.Host{{Name: "box", SSH: "box"}}); err != nil {
+	if err := client.SaveHostsContext(context.Background(), []client.Host{{Name: "box", SSH: "box"}}); err != nil {
 		t.Fatal(err)
 	}
 	withoutOld(t, "new -d")

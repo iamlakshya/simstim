@@ -70,7 +70,12 @@ func RunBridge(in io.Reader, out io.Writer) error {
 		_ = w.WriteJSON(proto.TError, proto.Error{Code: "protocol", Message: err.Error(), Hint: "Update the client."})
 		return err
 	}
-	if err := w.WriteJSON(proto.THello, proto.Hello{Magic: proto.Magic, Protocol: version.Protocol, Version: version.Version, Role: "bridge", Features: Features}); err != nil {
+	hostID, err := HostID()
+	if err != nil {
+		_ = w.WriteJSON(proto.TError, proto.Error{Code: "host_id", Message: err.Error(), Hint: "Check " + paths.HostID() + " on the host."})
+		return err
+	}
+	if err := w.WriteJSON(proto.THello, proto.Hello{Magic: proto.Magic, Protocol: version.Protocol, Version: version.Version, Role: "bridge", HostID: hostID, Features: Features}); err != nil {
 		return err
 	}
 	lines := diag.NewLines()

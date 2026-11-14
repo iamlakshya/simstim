@@ -52,6 +52,13 @@ func (m *Model) newSessionHost() *hostConn {
 }
 
 func (m *Model) openNewSession() tea.Cmd {
+	if h := m.newSessionHost(); h != nil {
+		return m.withHostTier(h, m.openNewSessionReady)
+	}
+	return m.openNewSessionReady()
+}
+
+func (m *Model) openNewSessionReady() tea.Cmd {
 	h := m.newSessionHost()
 	if h == nil {
 		m.backToHosts()
@@ -64,13 +71,17 @@ func (m *Model) openNewSession() tea.Cmd {
 // openSelectedHost is Enter on the hosts list.
 func (m *Model) openSelectedHost() tea.Cmd {
 	if h := m.selectedHost(); h != nil {
-		m.openHost(h)
+		return m.withHostTier(h, func() tea.Cmd { m.openHost(h); return nil })
 	}
 	return nil
 }
 
 // startSession sends "new" to the host h, for the start r.
 func (m *Model) startSession(h *hostConn, r startReq) tea.Cmd {
+	return m.withHostTier(h, func() tea.Cmd { return m.startSessionReady(h, r) })
+}
+
+func (m *Model) startSessionReady(h *hostConn, r startReq) tea.Cmd {
 	r.host = h.name()
 	// A name that looks like an ID fails before any secret is fetched.
 	if err := client.CheckSessionName(r.args.Name); err != nil {
@@ -180,6 +191,13 @@ func (m *Model) showStarted(msg startedMsg) tea.Cmd {
 }
 
 func (m *Model) attachSelected() tea.Cmd {
+	if h, s := m.selectedPair(); h != nil && s != nil {
+		return m.withHostTierContext(m.backgroundContext(), h, m.attachSelectedReady)
+	}
+	return m.attachSelectedReady()
+}
+
+func (m *Model) attachSelectedReady() tea.Cmd {
 	h, s := m.selectedPair()
 	if s == nil {
 		if sessionRows(m.rows()) == 0 {
@@ -248,18 +266,32 @@ func (m *Model) deleteSession(host string, s client.Session) tea.Cmd {
 	})
 }
 
-// saveHosts writes the host list with one host added, replaced or removed,
-// unless the launcher's context ends first: then it writes nothing.
-func (m *Model) saveHosts(host client.Host, remove bool) tea.Cmd {
+// changeHost saves c.Now, or with c.Now nil forgets the host, in the
+// background. c.Was is the entry that the launcher read: when another
+// command changed the host since, such as a host rm, or a host create of
+// the same name, it changes nothing, and fails with host_changed. So a
+// removed host never comes back, and a confirmation that waited never
+// removes a host made again (cli-spec 11.3, rule 13).
+func (m *Model) changeHost(c client.HostChange) tea.Cmd {
 	be := m.be
+	c.Kind = "the launcher"
+	remove := c.Now == nil
+	host := c.Now
+	if remove {
+		host = c.Was
+	}
 	return m.bgCmd(func(ctx context.Context) tea.Msg {
-		hosts, err := be.LoadHosts(ctx)
-		if err != nil {
-			return m.completeHostSave(hostSavedMsg{host: host, remove: remove, err: err})
-		}
-		out := changedHosts(hosts, host, remove)
-		return m.completeHostSave(hostSavedMsg{host: host, remove: remove, err: be.SaveHosts(ctx, out)})
+		// A removed host keeps no record of an unfinished `host rm`. The
+		// removal worked already: a failure of that clean-up is a warning.
+		warn, err := saveWizardHost(ctx, be, c)
+		return m.completeHostSave(hostSavedMsg{host: *host, remove: remove, err: err, warn: warn})
 	})
+}
+
+// hostChanged reports a save refused because its saved entry changed.
+func hostChanged(err error) bool {
+	ue, ok := asUserError(err)
+	return ok && (ue.Code == "host_changed" || ue.Code == "host_exists")
 }
 
 func (m *Model) onHostSaved(msg hostSavedMsg) tea.Cmd {

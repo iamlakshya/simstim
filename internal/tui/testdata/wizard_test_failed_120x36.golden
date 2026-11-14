@@ -23,11 +23,11 @@
 
                                  enter set up   a add a host   ctrl+o commands   ? keys
 
-
   ── Add a host ─────────────────────────────────────────────────────────────────────────────────────── step 2 of 6 ──
 
     Testing box
 
+    ✓ host key    SHA256:kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk pinned, from your known_hosts
     ✕ connect
 
     ✕ Cannot reach box: Permission denied (publickey).

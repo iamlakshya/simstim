@@ -147,7 +147,7 @@ func IdleDoctor() []Check {
 	}
 	if !canPowerOff() {
 		return []Check{{Name: "idle stop", Detail: fmt.Sprintf("set to %s, but there is no passwordless sudo, so the host never powers off", d),
-			Fix: "allow your user `sudo -n systemctl poweroff`, or turn it off: " + brand.Name + " host idle <host> never"}}
+			Fix: "allow your user `sudo -n systemctl poweroff`, or turn it off: " + brand.Name + " host set <host> idle=never"}}
 	}
 	return []Check{{Name: "idle stop", OK: true, Detail: fmt.Sprintf("powers off after %s with no client and no working session", d)}}
 }

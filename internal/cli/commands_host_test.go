@@ -21,7 +21,7 @@ import (
 
 func TestHostCommands(t *testing.T) {
 	th := newTestHost(t)
-	if out := ok(t, "host", "ls"); out != "box              box\n" {
+	if out := ok(t, "host", "ls"); out != "box              own        box\n" {
 		t.Errorf("host ls = %q", out)
 	}
 	var hosts []client.Host
@@ -54,7 +54,8 @@ func TestHostCommands(t *testing.T) {
 		t.Errorf("host stop = %q", out)
 	}
 	fails(t, "is not an idle time", "host", "idle", "box", "soon")
-	if out := okSaid(t, "host", "idle", "box", "45m"); out != "Saved, but hosttest hosts do not stop by themselves.\n" {
+	if out := okSaid(t, "host", "idle", "box", "45m"); !strings.HasSuffix(out, "box: idle never → 45m.\nSaved, but hosttest hosts do not stop by themselves.\n") ||
+		!strings.HasPrefix(out, `Warning: "host idle <host> <time>" is now "host set <host> idle=<time>". "host idle" works until v0.4.0 and `) {
 		t.Errorf("host idle = %q", out)
 	}
 	if h, _ := client.FindHost("box"); h.Machine.IdleStop != "45m" {
@@ -145,7 +146,7 @@ func TestHostDoctorChecksALimaVM(t *testing.T) {
 func TestHostCommandsWithoutAMachine(t *testing.T) {
 	th := newTestHost(t)
 	script := th.h.Script("provider", `echo "$1 $(cat)" > "$HOME/provider.log"; [ "$1" = status ] && echo '{"state":"running"}'; true`)
-	if err := saveHost(context.Background(), client.Host{Name: "plain", SSH: "box", Provider: &client.Provider{Script: script}}); err != nil {
+	if err := saveHostContext(context.Background(), client.Host{Name: "plain", SSH: "box", Provider: &client.Provider{Script: script}}); err != nil {
 		t.Fatal(err)
 	}
 	if out := ok(t, "host", "status", "plain"); out != "{\"state\":\"running\"}\n" {
@@ -157,9 +158,9 @@ func TestHostCommandsWithoutAMachine(t *testing.T) {
 	if b, _ := os.ReadFile(filepath.Join(th.h.Home, "provider.log")); !strings.Contains(string(b), `"name":"plain"`) {
 		t.Errorf("the script got %q", b)
 	}
-	fails(t, "was not made by `host create`", "host", "idle", "plain", "30m")
-	fails(t, "nothing to destroy", "host", "destroy", "plain", "--yes")
-	if out := ok(t, "host", "ls"); !strings.Contains(out, "plain            box") {
+	fails(t, "plain was not made by host create, so it has no idle time", "host", "idle", "plain", "30m")
+	fails(t, "plain was not made by host create, so there is no machine to delete", "host", "destroy", "plain", "--yes")
+	if out := ok(t, "host", "ls"); !strings.Contains(out, "plain            shared     box") && !strings.Contains(out, "plain            own        box") {
 		t.Errorf("host ls = %q", out)
 	}
 }
@@ -167,16 +168,19 @@ func TestHostCommandsWithoutAMachine(t *testing.T) {
 func TestHostRmAndDestroy(t *testing.T) {
 	newTestHost(t)
 	newSession(t, "busy", "sleep", "60")
-	failsWithHint(t, "are working: busy", "--force", "host", "destroy", "box", "--yes")
-	if out := okSaid(t, "host", "destroy", "box", "--yes", "--force"); !strings.HasPrefix(out, "Deleted the hosttest machine ") {
+	failsWithHint(t, "1 session on box is working: busy", "--force", "host", "destroy", "box", "--yes")
+	if out := okSaid(t, "host", "destroy", "box", "--yes", "--force"); !strings.Contains(out, "\nDeleted the hosttest machine ") || !strings.HasSuffix(out, "\nForgot box.\n") {
 		t.Errorf("destroy = %q", out)
 	}
 	fails(t, `no host named "box"`, "host", "rm", "box")
-	if err := saveHost(context.Background(), client.Host{Name: "kept", SSH: "box", Machine: &client.Machine{Provider: "lima", ID: "vm1"}}); err != nil {
+	// With input off, rm forgets a created host and keeps its machine. It
+	// does not look at the machine, so no provider runs.
+	if err := saveHostContext(context.Background(), client.Host{Name: "kept", SSH: "box", Machine: &client.Machine{Provider: "lima", ID: "vm1"}}); err != nil {
 		t.Fatal(err)
 	}
 	out := okSaid(t, "host", "rm", "kept")
-	if !strings.HasPrefix(out, "Forgot kept.") || !strings.Contains(out, "Its lima machine vm1 is kept.") {
+	if !strings.HasPrefix(out, "Input is off, so host rm keeps the lima machine vm1.") ||
+		!strings.HasSuffix(out, "Forgot kept. The lima machine vm1 stays, with its sessions and the helper: delete it with lima's own tools.\n") {
 		t.Errorf("host rm = %q", out)
 	}
 	if out := okSaid(t, "host", "ls"); !strings.HasPrefix(out, "No hosts yet.") {
@@ -289,4 +293,7 @@ func TestAddHost(t *testing.T) {
 		t.Errorf("the host was not saved: %+v, %v", h, err)
 	}
 	fails(t, "cannot name a host", "host", "add", "bad name")
+	// Windows drops a dot at the end of a file name: box. would share the
+	// files of box.
+	failsWithHint(t, "cannot name a host", "with no dot at the end", "host", "add", "box.", "me@box.example")
 }

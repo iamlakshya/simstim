@@ -38,7 +38,7 @@ func outerAction(m *Model, action string) tea.Cmd {
 	case "editor":
 		return m.openSettings()
 	case "shell":
-		return m.openShell(&hostConn{host: client.Host{Name: "box", SSH: "box"}})
+		return m.openShell(m.hostByName("box"))
 	case "keygen":
 		g := &guide{step: gdRentKey}
 		m.modal = g
@@ -48,22 +48,57 @@ func outerAction(m *Model, action string) tea.Cmd {
 	}
 }
 
+type interactiveActionReadyMsg struct{}
+
 type outerCommandModel struct {
 	tea.Model
-	model   *Model
-	action  string
-	started <-chan struct{}
-	t       *testing.T
+	model                             *Model
+	action                            string
+	started                           <-chan struct{}
+	t                                 *testing.T
+	begun                             bool
+	accepted                          *pendingExec
+	reservations, quits, tierResolved int
 }
 
-func (m outerCommandModel) Init() tea.Cmd {
-	cmd := outerAction(m.model, m.action)
-	if m.model.pendingExec == nil {
-		m.t.Error("interactive command bypassed the outer handoff")
-		return tea.Quit
-	}
-	first := func() tea.Msg { <-m.started; return cmd() }
+func (m *outerCommandModel) Init() tea.Cmd {
+	first := func() tea.Msg { <-m.started; return interactiveActionReadyMsg{} }
 	return tea.Batch(m.Model.Init(), first)
+}
+
+func (m *outerCommandModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	var cmd tea.Cmd
+	if _, ok := msg.(interactiveActionReadyMsg); ok {
+		if m.begun {
+			m.t.Error("interactive action started twice")
+		}
+		m.begun = true
+		cmd = outerAction(m.model, m.action)
+	} else {
+		if _, ok := msg.(hostTierResolvedMsg); ok {
+			m.tierResolved++
+		}
+		_, cmd = m.Model.Update(msg)
+	}
+	if pe := m.model.pendingExec; pe != nil {
+		if m.accepted == nil {
+			m.accepted = pe
+			m.reservations++
+		} else if pe != m.accepted {
+			m.t.Error("interactive reservation changed before handoff")
+		}
+	}
+	return m, cmd
+}
+
+func (m *outerCommandModel) observeQuit(_ tea.Model, msg tea.Msg) tea.Msg {
+	if _, ok := msg.(tea.QuitMsg); ok {
+		m.quits++
+		if m.accepted == nil || m.model.pendingExec != m.accepted || m.reservations != 1 || m.model.pendingAttach != nil || m.model.jacking != nil {
+			m.t.Error("interactive quit did not retain its one actual outer reservation")
+		}
+	}
+	return msg
 }
 
 func TestInteractiveCommandsUseOuterTerminalHandoff(t *testing.T) {
@@ -79,7 +114,7 @@ func TestInteractiveCommandsUseOuterTerminalHandoff(t *testing.T) {
 					script += "exit 7\n"
 				}
 				h.Script("fake-editor", script)
-				h.Script("ssh", script)
+				h.Script("ssh", execSSHFixture(t, script))
 				h.Script("ssh-keygen", script)
 				t.Setenv("EDITOR", filepath.Join(h.Root, "bin", "fake-editor"))
 				t.Setenv("VISUAL", "")
@@ -116,7 +151,14 @@ func TestInteractiveCommandsUseOuterTerminalHandoff(t *testing.T) {
 					runs++
 					m := outerModel(pm)
 					if runs == 1 {
-						_, err := tea.NewProgram(outerCommandModel{Model: pm, model: m, action: action, started: first.entered, t: t}, tea.WithContext(ctx), tea.WithInput(in), tea.WithOutput(out), tea.WithoutSignalHandler()).Run()
+						driver := &outerCommandModel{Model: pm, model: m, action: action, started: first.entered, t: t}
+						_, err := tea.NewProgram(driver, tea.WithContext(ctx), tea.WithInput(in), tea.WithOutput(out), tea.WithoutSignalHandler(), tea.WithFilter(driver.observeQuit)).Run()
+						if !driver.begun || driver.reservations != 1 || driver.quits != 1 {
+							t.Errorf("interactive handoff: begun=%v reservations=%d quits=%d", driver.begun, driver.reservations, driver.quits)
+						}
+						if action == "shell" && driver.tierResolved != 1 {
+							t.Errorf("shell processed %d tier results, want one", driver.tierResolved)
+						}
 						first.mu.Lock()
 						reading, closes := first.reading, first.closes
 						first.mu.Unlock()
@@ -137,7 +179,7 @@ func TestInteractiveCommandsUseOuterTerminalHandoff(t *testing.T) {
 
 					return err
 				}
-				if err := runWith(ctx, newFakeBackend(), Options{}); err != nil {
+				if err := runWith(ctx, execOwnedBackend(t), Options{}); err != nil {
 					t.Fatalf("ordinary command result ended launcher: %v", err)
 				}
 				if ctx.Err() != nil || runs != 2 || opens.Load() != 2 {
