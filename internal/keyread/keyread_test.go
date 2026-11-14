@@ -359,10 +359,9 @@ func unstick(f *os.File) {
 // second call, and For makes no second reader of the file.
 func TestReleaseStopsTheReadFirst(t *testing.T) {
 	for _, cancels := range []bool{true, false} {
-		f := tempFile(t)
 		synctest.Test(t, func(t *testing.T) {
+			f := tempFile(t)
 			src := newHeld(cancels)
-			defer src.letGo()
 			opens := 0
 			old := Open
 			Open = func(io.Reader) (cancelreader.CancelReader, error) { opens++; return src, nil }
@@ -371,6 +370,28 @@ func TestReleaseStopsTheReadFirst(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			var releaseDone chan struct{}
+			t.Cleanup(func() {
+				// Capture the worker before letting its held Read return.
+				r.mu.Lock()
+				readDone := r.readDone
+				r.mu.Unlock()
+				src.letGo()
+				if releaseDone != nil {
+					<-releaseDone
+				}
+				if readDone != nil {
+					<-readDone
+				}
+				// Release can move the worker's channel into its stuck record.
+				readersMu.Lock()
+				stuckDone := r.stuckDone
+				readersMu.Unlock()
+				if stuckDone != nil {
+					<-stuckDone
+				}
+				unstick(f) // Release and its physical Read have both ended.
+			})
 			ctx, cancel := context.WithCancel(context.Background())
 			go func() {
 				<-src.entered
@@ -381,7 +402,9 @@ func TestReleaseStopsTheReadFirst(t *testing.T) {
 			}
 			var returned atomic.Bool
 			var got error
+			releaseDone = make(chan struct{})
 			go func() {
+				defer close(releaseDone)
 				got = Release(f)
 				returned.Store(true)
 			}()
@@ -418,9 +441,6 @@ func TestReleaseStopsTheReadFirst(t *testing.T) {
 				t.Errorf("cancel works %v: For kept the file %v", cancels, kept)
 			}
 		})
-		if !cancels {
-			unstick(f) // its read has ended now
-		}
 	}
 }
 

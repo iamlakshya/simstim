@@ -17,17 +17,20 @@ Connect a host. The ssh target is a Host from your SSH config, or user@host. It 
 ```sh
 simstim host add my-vps
 simstim host add my-vps dev@203.0.113.10
+simstim host add my-vps --tier own --yes
 ```
 
 ## Flags
 
 | Flag | What it does |
 | --- | --- |
+| `--host-key <fingerprint>` | the SHA256 fingerprint of the host's key, as ssh-keygen -lf prints it on the host: the key to pin |
 | `--label <list>` | labels as key=value, for example provider=gcp,region=eu |
 | `--provider-script <string>` | a script that starts and stops the host (see examples/providers) |
 | `--ssh-config <string>` | an extra SSH config file to include |
+| `--tier <string>` | who else has root on the host: own, throwaway or shared |
 | `--wake` | start the host through its provider script when it does not answer |
-| `-y`, `--yes` | answer yes to every question: install the helper, and offer no agents to install |
+| `-y`, `--yes` | answer yes to every question: install the helper, pin its first host key, and offer no agents to install (needs `--tier`) |
 
 ## Flags from the parent command
 

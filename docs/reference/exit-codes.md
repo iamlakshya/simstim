@@ -13,8 +13,8 @@ Every command exits with one of these codes. The code comes from the kind of the
 | 1 | `failed` | The command could not do its job. | A host did not answer. The helper failed. No hosts yet. A connection that closed. An error that is not a user error. |
 | 2 | `usage` | The command line or a config file is wrong. | An unknown command or flag. A missing or extra argument. A bad value. Two flags that conflict. A name that matches two sessions. A `hosts.toml` that does not decode. |
 | 3 | `not_found` | A named thing does not exist. | No host, session, agent, provider, template or secret of that name. |
-| 4 | `needs_answer` | The command needs an answer, and input is off. | `host add` without `--yes`. `doctor --fix` without `-y`. A new session's folder that does not exist, without `--mkdir`. `setup` without the flags that answer its questions. |
-| 5 | `refused` | A policy or a tier refuses the action. | None in this release. |
+| 4 | `needs_answer` | The command needs an answer, and input is off. | `host add` without `--yes`, or `--yes` without `--tier`, or without `--host-key` for a host key that your SSH settings do not trust. `host rekey`, or raising a tier in `host set`, without `--confirm`. `doctor --fix` without `-y`. A new session's folder that does not exist, without `--mkdir`. `setup` without the flags that answer its questions. |
+| 5 | `refused` | A policy or a tier refuses the action. | A host whose key differs from its pinned host key, or whose pin file is missing. A `--host-key` that the host does not show. |
 | 130 | `cancelled` | The user or a signal cancelled. | The answer no. Esc or Ctrl+C at a question or in the picker. The end of input at a question. Ctrl+C or SIGTERM outside an attach. |
 
 The shell gives 128 plus the number of the signal that ended a program, so Ctrl+C outside an attach gives 130. SIGTERM gives 130 too, because both cancel.

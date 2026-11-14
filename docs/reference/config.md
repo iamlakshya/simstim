@@ -45,4 +45,5 @@ The hosts you added. `host add` writes it, and you can edit it by hand. Each hos
 | `machine.busy_lease` | string | Sets how long an E2B sandbox keeps running after the last client goes, while a session is working (60m by default). |
 | `machine.token_command` | string | Prints the E2B API key, for example a read from your keychain. It is used when E2B_API_KEY is not set and the E2B CLI is not logged in. The key is never written down. |
 | `machine.stdin` | string | Says how keys reach an E2B sandbox: "send" (one request for each chunk, the default) or "stream" (one long request; not yet proved on E2B's servers). |
+| `machine.created` | string | Is when `host create` made the machine, as an RFC 3339 time. Lima and Docker give each machine of a host the same name, so this tells them apart for the record of an unfinished `host rm`. |
 | `secrets` | array of string | Lists secrets from config.toml that every new session on this host gets, for example ["ANTHROPIC_API_KEY"]. `new --secret` adds more. |
