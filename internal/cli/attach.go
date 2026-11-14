@@ -148,7 +148,7 @@ func restartAgent(ctx context.Context, cmd *cobra.Command, f found, restart bool
 			return nil, declined(f.host, *f.s)
 		}
 	}
-	res, now, err := resumeRacing(ctx, f, client.ResumeArgs{}, nil, secretTerminal(cmd))
+	res, now, err := resumeWithGrants(ctx, cmd, f, client.ResumeArgs{}, nil)
 	if now != nil {
 		say(cmd, "Another client started the agent of %s on %s again first, so this attaches.\n", shown(nameOf(*now)), shown(f.host.Name))
 		return now, nil

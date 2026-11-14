@@ -19,6 +19,7 @@ var now = time.Date(2026, 10, 15, 12, 0, 0, 0, time.UTC)
 
 // fakeHost is the state of one pretend host, shared by its connections.
 type fakeHost struct {
+	grantErr error
 	sessions []client.Session
 	info     client.HostInfo
 	screens  map[string][]byte

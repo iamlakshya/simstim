@@ -45,29 +45,50 @@ func (m *Model) resumeSelectedReady() tea.Cmd {
 	if !h.online() {
 		return m.toastErr(offlineErr(h))
 	}
-	names, err := client.ResumeSecrets(h.host, *s, nil)
-	if err != nil {
-		// The host names the secrets: one that hosts.toml does not give it
-		// needs the command line, where the user names it too.
-		return m.toastErr(err)
-	}
 	if m.resuming == nil {
 		m.resuming = map[sessKey]bool{}
 	}
 	m.resuming[key] = true
-	c, be, host, kept := h.conn, m.be, h.host, m.settings
+	c, be, originalHost, originalSession, kept := h.conn, m.be, h.host, *s, m.settings
 	request := client.NewGrantRequest(false, false)
 	read := m.beginSettingsRead()
 	resume := m.bgCmd(func(ctx context.Context) tea.Msg {
 		settings, read := readSettings(be, kept, read)
+		if _, err := client.ReadPolicySettings(); err != nil {
+			return resumedMsg{key: key, err: err, settingsRead: read}
+		}
 		// The host stops the old holder and its unit, then waits for the start.
 		cctx, cancel := context.WithTimeout(client.WithGrantRequest(ctx, request), 90*time.Second)
 		defer cancel()
-		secrets, err := be.SessionSecrets(cctx, settings, host, key.id, names)
+		var plan client.ResumePolicyPlan
+		if planner, ok := unclean(c).(interface {
+			PlanResumePolicy(context.Context, string) (client.ResumePolicyPlan, error)
+		}); ok {
+			var err error
+			plan, err = planner.PlanResumePolicy(cctx, key.id)
+			if err != nil {
+				return resumedMsg{key: key, err: err, settingsRead: read}
+			}
+		}
+		effectiveNames, err := client.ResumePlanSecretNames(originalHost, originalSession, nil, plan)
 		if err != nil {
 			return resumedMsg{key: key, err: err, settingsRead: read}
 		}
-		res, err := c.Resume(cctx, client.ResumeArgs{ID: key.id, Secrets: secrets})
+		if err := c.CheckResumeGrants(cctx, key.id, effectiveNames); err != nil {
+			return resumedMsg{key: key, err: err, settingsRead: read}
+		}
+		if planner, ok := unclean(c).(interface {
+			CheckResumePolicyBeforeFetch(context.Context, string, client.ResumePolicyPlan) error
+		}); ok {
+			if err := planner.CheckResumePolicyBeforeFetch(cctx, key.id, plan); err != nil {
+				return resumedMsg{key: key, err: err, settingsRead: read}
+			}
+		}
+		secrets, err := be.SessionSecrets(cctx, settings, originalHost, key.id, effectiveNames)
+		if err != nil {
+			return resumedMsg{key: key, err: err, settingsRead: read}
+		}
+		res, err := c.Resume(cctx, client.ResumeArgs{ID: key.id, Secrets: secrets, Layers: plan.Layers})
 		return resumedMsg{key: key, res: res, err: err, settingsRead: read}
 	})
 	name, host := shown(s.Name), shown(h.name())

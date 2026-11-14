@@ -27,22 +27,7 @@ func (p *JSONProjection) stringIterator(span JSONSpan) (jsonStringIterator, erro
 }
 
 func (p *JSONProjection) WalkString(span JSONSpan, visit func(rune) error) error {
-	iterator, err := p.stringIterator(span)
-	if err != nil {
-		return err
-	}
-	for {
-		r, err := iterator.next()
-		if err == io.EOF {
-			return nil
-		}
-		if err != nil {
-			return err
-		}
-		if err := visit(r); err != nil {
-			return err
-		}
-	}
+	return p.WalkStringSpans(span, func(r rune, _ JSONSpan) error { return visit(r) })
 }
 
 func (p *JSONProjection) StringEqual(span JSONSpan, want string) (bool, error) {

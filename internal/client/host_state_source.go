@@ -76,6 +76,15 @@ func captureHostStateSource(ctx context.Context, hosts []Host, migrate bool) (ho
 		if err := fileReference.CheckFile(root, filepath.Base(path), file, 0600); err != nil {
 			return source, err
 		}
+		// Preserve the original validated TOML, including tables this typed
+		// client does not own. Initialisation adds only the canonical marker.
+		document, err := io.ReadAll(io.NewSectionReader(file, 0, fileReference.Size))
+		if err != nil {
+			return source, err
+		}
+		if err := fileReference.CheckFile(root, filepath.Base(path), file, 0600); err != nil {
+			return source, err
+		}
 		if err := file.Close(); err != nil {
 			closed = true
 			return source, err
@@ -88,7 +97,7 @@ func captureHostStateSource(ctx context.Context, hosts []Host, migrate bool) (ho
 		if err := ctx.Err(); err != nil {
 			return source, err
 		}
-		if err := writeHostsSelectedGeneration(hosts, generation); err != nil {
+		if err := writeHostsSelectedDocumentGeneration(document, generation); err != nil {
 			return source, err
 		}
 	} else if err := fileReference.CheckFile(root, filepath.Base(path), file, 0600); err != nil {

@@ -1,6 +1,7 @@
 package egress
 
 import (
+	"context"
 	"encoding/base64"
 	"fmt"
 	"io"
@@ -177,40 +178,22 @@ func (s *requestSecretSnapshot) withTripwireSentinels(values []api.Secret) (*req
 }
 
 func requestCredentialValue(kind, user string, value api.Secret) (api.Secret, bool) {
-	var result string
+	var field CredentialFieldValidator
+	field.Reset(context.Background(), kind, uint64(len(user)))
+	if _, err := field.WriteString(string(value)); err != nil {
+		return "", false
+	}
+	if _, err := field.Finish(); err != nil {
+		return "", false
+	}
 	switch kind {
 	case "raw":
-		result = string(value)
+		return value, true
 	case "bearer":
-		padding := false
-		characters := false
-		for i := range len(value) {
-			b := value[i]
-			if b == '=' {
-				padding = true
-				continue
-			}
-			if padding || !(b >= 'A' && b <= 'Z' || b >= 'a' && b <= 'z' || b >= '0' && b <= '9' || strings.ContainsRune("-._~+/", rune(b))) {
-				return "", false
-			}
-			characters = true
-		}
-		if !characters {
-			return "", false
-		}
-		result = "Bearer " + string(value)
+		return api.Secret("Bearer " + string(value)), true
 	case "basic":
-		result = "Basic " + base64.StdEncoding.EncodeToString([]byte(user+":"+string(value)))
+		return api.Secret("Basic " + base64.StdEncoding.EncodeToString([]byte(user+":"+string(value)))), true
 	default:
 		return "", false
 	}
-	if strings.Trim(result, " \t") != result {
-		return "", false
-	}
-	for i := range len(result) {
-		if result[i] < 0x20 && result[i] != '\t' || result[i] == 0x7f {
-			return "", false
-		}
-	}
-	return api.Secret(result), true
 }

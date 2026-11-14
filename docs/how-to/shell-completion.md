@@ -65,3 +65,5 @@ Completion reads local files only and never connects to a host, so Tab stays fas
 Pass `--no-descriptions` to any [`simstim completion`](../reference/cli/completion.md) command if you want values without descriptions.
 
 Completion preserves local secret names in full. Its 4 MiB file limit applies to the open file. Pipes and devices give no values and never wait for input.
+
+`policy rm` completes rule IDs from local all-session, host, repository and profile layers. Each ID shows its target. Profile completion uses the same config schema. Neither runs a command or connects to a host.

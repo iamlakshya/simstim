@@ -1,0 +1,197 @@
+package client
+
+import (
+	"context"
+	"encoding/json"
+	"slices"
+
+	"github.com/iamlakshya/simstim/internal/api"
+)
+
+var sandboxDeliveryReceiptFields = []string{"version", "revision", "previous", "creation", "publication", "operation", "scope", "allowed_names", "supplied_names", "missing_names", "state"}
+var sandboxInputOperationFields = []string{"version", "revision", "previous", "creation", "operation", "scope", "nonce", "digest", "summary_hash", "selection_hash"}
+var sandboxReceiptScopeFields = []string{"host", "source", "host_id", "member_id", "root_id", "run_generation", "backend_generation"}
+
+// sandboxReceiptSpans retain offsets in the caller's SAME locked snapshot.
+// They are only grammar inputs. In particular, State/Allowed must go to the
+// complete canonical P23 WithSources inspector before any FD semantic claim.
+// Source likewise remains the one engine Source witness, never a native token.
+type sandboxReceiptSpans struct {
+	Scope, Source, State, Allowed api.JSONSpan
+	Future                        bool
+}
+
+func projectSandboxReceiptSpans(ctx context.Context, p *api.JSONProjection, span api.JSONSpan, schema int, delivery bool) (sandboxReceiptSpans, error) {
+	var result sandboxReceiptSpans
+	if span.End == 0 {
+		return result, nil
+	}
+	if schema != 4 {
+		return result, badSandboxStateContext(ctx)
+	}
+	known := sandboxInputOperationFields
+	if delivery {
+		known = sandboxDeliveryReceiptFields
+	}
+	var version api.JSONSpan
+	err := p.Object(span, known, func(field api.JSONField) error {
+		if field.Known < 0 {
+			result.Future = true
+			return nil
+		}
+		switch known[field.Known] {
+		case "version":
+			version = field.Value
+		case "scope":
+			result.Scope = field.Value
+		case "allowed_names":
+			result.Allowed = field.Value
+		case "state":
+			result.State = field.Value
+		}
+		return nil
+	})
+	if err != nil {
+		return result, err
+	}
+	var encoded [19]byte
+	n := 0
+	err = p.WalkEncoded(version, func(part []byte) error {
+		if len(part) > len(encoded)-n {
+			return badSandboxStateContext(ctx)
+		}
+		n += copy(encoded[n:], part)
+		return nil
+	})
+	if err != nil {
+		return result, err
+	}
+	v, err := sandboxLineageVersion(encoded[:n])
+	if err != nil {
+		return result, err
+	}
+	if v > 1 || result.Future {
+		result.Future = true
+		return result, ctx.Err()
+	}
+	err = p.Object(result.Scope, sandboxReceiptScopeFields, func(field api.JSONField) error {
+		if field.Known < 0 {
+			result.Future = true
+		} else if field.Known == 1 {
+			result.Source = field.Value
+		}
+		return nil
+	})
+	if err == nil && !result.Future && (result.Source.End == 0 || delivery && (result.State.End == 0 || result.Allowed.End == 0)) {
+		err = badSandboxStateContext(ctx)
+	}
+	return result, err
+}
+
+func decodeSandboxReceiptsContext(ctx context.Context, raw json.RawMessage, schema int, row *SandboxPolicy) error {
+	p, err := api.NewJSONBytesProjection(ctx, raw)
+	if err != nil {
+		return err
+	}
+	root, err := p.ObjectRoot()
+	if err != nil {
+		return err
+	}
+	var receipt, operation api.JSONSpan
+	err = p.Object(root, []string{"delivery_receipt", "input_operation"}, func(field api.JSONField) error {
+		if field.Known == 0 {
+			receipt = field.Value
+		} else if field.Known == 1 {
+			operation = field.Value
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	if receipt.End != 0 {
+		shape, err := projectSandboxReceiptSpans(ctx, p, receipt, schema, true)
+		if err != nil {
+			return err
+		}
+		row.futureDeliveryReceipt = shape.Future
+		if !shape.Future {
+			var decoded sandboxDeliveryReceipt
+			if err := decodeContextJSON(ctx, row.deliveryReceiptRaw, &decoded); err != nil {
+				return err
+			}
+			if decoded.Scope.Source.validate() != nil || decoded.State == nil || !decoded.State.Supported() {
+				row.futureDeliveryReceipt = true
+			} else {
+				if err := validateSandboxDeliveryReceipt(ctx, &decoded); err != nil {
+					return err
+				}
+				if !decoded.Scope.matchesPolicy(row) || decoded.Creation != row.request || !slices.Equal(decoded.Allowed, localSandboxNames(row)) || !sandboxReceiptMatchesDelivery(row, &decoded) {
+					return sandboxReceiptError()
+				}
+				row.deliveryReceipt = cloneSandboxDeliveryReceipt(&decoded)
+			}
+		}
+	}
+	if operation.End != 0 {
+		shape, err := projectSandboxReceiptSpans(ctx, p, operation, schema, false)
+		if err != nil {
+			return err
+		}
+		row.futureInputOperation = shape.Future
+		if !shape.Future {
+			var decoded sandboxInputOperation
+			if err := decodeContextJSON(ctx, row.inputOperationRaw, &decoded); err != nil {
+				return err
+			}
+			if decoded.Scope.Source.validate() != nil {
+				row.futureInputOperation = true
+			} else {
+				if err := validateSandboxInputOperation(ctx, &decoded); err != nil {
+					return err
+				}
+				if !decoded.Scope.matchesPolicy(row) || decoded.Creation != row.request {
+					return sandboxReceiptError()
+				}
+				row.inputOperation = cloneSandboxInputOperation(&decoded)
+			}
+		}
+	}
+	return ctx.Err()
+}
+
+// Original is the row's canonical LOCAL allowed-name span (secrets or known
+// lineage), not a host/cohort list. Both comparisons retain only cursor spans.
+func validateSandboxReceiptAllowedSpans(ctx context.Context, p *api.JSONProjection, receipt, original api.JSONSpan) error {
+	a, err := deliveryNamesCursor(p, receipt)
+	if err != nil {
+		return err
+	}
+	b, err := deliveryNamesCursor(p, original)
+	if err != nil {
+		return err
+	}
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		x, xok, err := a.next()
+		if err != nil {
+			return err
+		}
+		y, yok, err := b.next()
+		if err != nil {
+			return err
+		}
+		if xok != yok {
+			return sandboxReceiptError()
+		}
+		if !xok {
+			return nil
+		}
+		order, err := p.CompareStrings(x, y)
+		if err != nil || order != 0 {
+			return sandboxReceiptError()
+		}
+	}
+}

@@ -1,5 +1,4 @@
-// Package process probes the host features needed by the process wall.
-// The complete sandbox runtime is installed by the process driver separately.
+// Package process builds a wall with private namespaces, mounts, Landlock and seccomp.
 package process
 
 import (
@@ -25,18 +24,17 @@ type smokeResult struct {
 	Error   string `json:"error,omitempty"`
 }
 
-// Probe checks the process wall's prerequisites in a child. It reports the
-// runtime as unavailable until a complete process Driver is built in.
+// Probe checks the process wall through the static launcher in a child.
 func Probe(ctx context.Context) wall.Probe {
 	return probe(ctx, localSystem())
 }
 
 func probe(ctx context.Context, sys probeSystem) wall.Probe {
 	p := wall.Probe{Driver: "process", Level: wall.Process, Facts: map[string]string{
-		"kernel": sys.kernel, "runtime_available": "false", "userns": "false", "seccomp": "false",
+		"kernel": sys.kernel, "runtime_available": "true", "userns": "false", "seccomp": "false",
 		"landlock_abi": "0", "apparmor_userns": "false", "prerequisite_ready": "false",
 	}}
-	p.Fix = "Use a helper release with the process sandbox runtime."
+	p.Fix = "Run host prepare for this host."
 	if err := ctx.Err(); err != nil {
 		p.Reason = "process wall probe was cancelled"
 		return p
@@ -70,7 +68,10 @@ func prerequisites(p wall.Probe) wall.Probe {
 	switch {
 	case p.Facts["userns"] != "true":
 		p.Reason = "a child could not make user and mount namespaces and mount tmpfs"
-		p.Fix = "Ask the host's owner to allow unprivileged user namespaces."
+		p.Fix = "Run host prepare for this host."
+		if p.Facts["apparmor_userns"] == "true" {
+			p.Facts["root_blocker"] = "apparmor_userns"
+		}
 	case p.Facts["landlock_abi"] == "0":
 		p.Reason = "the host has no usable Landlock ABI"
 		p.Fix = "Enable Landlock in the host's Linux kernel."
@@ -79,7 +80,9 @@ func prerequisites(p wall.Probe) wall.Probe {
 		p.Fix = "Enable seccomp filters in the host's Linux kernel."
 	default:
 		p.Facts["prerequisite_ready"] = "true"
-		p.Reason = "the process sandbox runtime is not built into this helper"
+		p.OK = true
+		p.Reason = ""
+		p.Fix = ""
 	}
 	return p
 }

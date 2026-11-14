@@ -54,14 +54,33 @@ func Resume(a api.ResumeArgs) (*ResumeResult, error) {
 	}
 	// A second resume of the session, such as a key pressed twice, would
 	// stop the first's new holder, or save over its manifest.
-	unlock, err := lockSession(id)
+	primary, err := SandboxPrimaryID(id)
+	if err != nil {
+		return nil, err
+	}
+	unlock, err := lockSession(primary)
 	if err != nil {
 		return nil, err
 	}
 	defer unlock()
-	m, err := LoadManifest(id)
+	m, err := LoadManifest(primary)
 	if err != nil {
 		return nil, UserError("not_found", "no session "+id, "List sessions to find its ID.")
+	}
+	if a.Snapshot != nil || len(a.Members) > 0 || primary != id {
+		return resumeBundleLocked(id, a, m)
+	}
+	if err := validateResumeInputs(m, a.Inputs); err != nil {
+		return nil, err
+	}
+	if m.Wall != nil {
+		children, err := SandboxMembers(primary)
+		if err != nil {
+			return nil, err
+		}
+		if len(children) > 0 {
+			return nil, UserError("sandbox_changed", "this sandbox needs a complete member resume", "Read its complete snapshot and use a current client before resuming.")
+		}
 	}
 	pending := m.Status.State == StateStarting && m.Run.AgentPID == 0
 	if alive(id) && m.Status.State != StateExited && m.Status.State != StateErrored && !pending {
@@ -72,8 +91,15 @@ func Resume(a api.ResumeArgs) (*ResumeResult, error) {
 		return nil, UserError("agent_running", "the agent of "+name+" still runs",
 			"Attach to it. To start it again, quit the agent first, then resume the session.")
 	}
+	delivery, err := prepareResumeSecretDelivery(m, a.SecretDelivery, a.Secrets)
+	if err != nil {
+		return nil, err
+	}
 	secrets, err := resumeSecrets(m.Secrets, a.Secrets)
 	if err != nil {
+		return nil, err
+	}
+	if err := checkManifestUnwalled(m); err != nil {
 		return nil, err
 	}
 	// A command that resumeArgv refuses stops nothing. startAgain checks
@@ -100,6 +126,9 @@ func Resume(a api.ResumeArgs) (*ResumeResult, error) {
 	if m, err = LoadManifest(id); err != nil {
 		return nil, UserError("not_found", "no session "+id, "List sessions to find its ID.")
 	}
+	if _, err := prepareResumeSecretDelivery(m, delivery, secrets); err != nil {
+		return nil, err
+	}
 	if err := reconcileUnsavedLocked(m); err != nil {
 		return nil, UserError("start_failed", err.Error(), "Check the session log with the host doctor.")
 	}
@@ -109,8 +138,13 @@ func Resume(a api.ResumeArgs) (*ResumeResult, error) {
 	case a.MemoryMax < 0:
 		m.Limits.MemoryAsked = 0
 	}
+	if err := validateResumeInputs(m, a.Inputs); err != nil {
+		return nil, err
+	}
+	m.HostLabel = a.HostLabel
+	m.Inputs = CloneInputSummary(a.Inputs)
 	m.Run.RespawnCount = 0
-	_, why, err := startAgain(m, again{label: resumedLabel, reason: "started again by a resume", secrets: secrets})
+	_, why, err := startAgain(m, again{label: resumedLabel, reason: "started again by a resume", secrets: secrets, secretDelivery: delivery})
 	var refused *proto.Error
 	switch {
 	case errors.As(err, &refused) && refused.Code == dangerRefused:
@@ -121,7 +155,11 @@ func Resume(a api.ResumeArgs) (*ResumeResult, error) {
 	if mm := waitStarted(id, time.Second); mm != nil {
 		m = mm
 	}
-	return &ResumeResult{Session: infoFrom(m, alive(id)), Why: why, DebugStopped: debugOn}, nil
+	result := &ResumeResult{Session: publicationInfoFrom(m, alive(id)), Why: why, DebugStopped: debugOn}
+	if err := checkSecretPublicationResponse(result); err != nil {
+		return nil, err
+	}
+	return result, nil
 }
 
 // resumeSecrets checks the secrets that a resume brings, and returns those

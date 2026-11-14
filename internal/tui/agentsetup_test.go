@@ -117,7 +117,7 @@ func (b *fakeBackend) RememberSetup(ctx context.Context, host, repo string, run 
 	return warn, nil
 }
 
-func (b *fakeBackend) Secrets(_ context.Context, s client.Settings, h client.Host) (map[string]api.Secret, error) {
+func (b *fakeBackend) Secrets(_ context.Context, s client.Settings, h client.Host, _ []string) (map[string]api.Secret, error) {
 	b.record("secrets %s", h.Name)
 	b.mu.Lock()
 	defer b.mu.Unlock()

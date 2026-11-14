@@ -22,6 +22,18 @@ const HostBinary = Name + "-host"
 // VTBinary is the name of the shadow-terminal helper on each host.
 const VTBinary = Name + "-vt"
 
+// UsernsBinary is the static namespace launcher installed beside the helper.
+const UsernsBinary = "userns"
+
+// Repo is the project's repository on GitHub, as owner/name. It follows the
+// module path.
+const Repo = "iamlakshya/" + Name
+
+// ReleasesURL is the folder of the project's releases. The files of a
+// release are under ReleasesURL + "/download/v<version>/", and every URL in
+// a release manifest points there (isolation spec 14.9.1).
+const ReleasesURL = "https://github.com/" + Repo + "/releases"
+
 // UnitPrefix starts the name of each session's systemd unit.
 const UnitPrefix = Name + "-s-"
 

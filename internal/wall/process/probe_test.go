@@ -38,7 +38,7 @@ func TestProbePrerequisites(t *testing.T) {
 		ready  string
 		reason string
 	}{
-		{"ready runtime absent", func(*probeSystem) {}, "true", "the process sandbox runtime is not built into this helper"},
+		{"ready runtime", func(*probeSystem) {}, "true", ""},
 		{"old kernel", func(s *probeSystem) { s.kernel = "5.12.9" }, "false", "the process wall needs Linux 5.13 or later"},
 		{"invalid kernel", func(s *probeSystem) { s.kernel = "unknown" }, "false", "the process wall needs Linux 5.13 or later"},
 		{"other OS", func(s *probeSystem) { s.os = "darwin" }, "false", "the process wall needs Linux"},
@@ -52,7 +52,7 @@ func TestProbePrerequisites(t *testing.T) {
 			sys := fakeSystem(nil)
 			tt.change(&sys)
 			p := probe(context.Background(), sys)
-			if p.OK || p.Driver != "process" || p.Level != wall.Process || p.Facts["prerequisite_ready"] != tt.ready || p.Reason != tt.reason || p.Fix == "" {
+			if p.OK != (tt.ready == "true") || p.Driver != "process" || p.Level != wall.Process || p.Facts["prerequisite_ready"] != tt.ready || p.Reason != tt.reason || (!p.OK && p.Fix == "") || (p.OK && p.Fix != "") {
 				t.Errorf("probe: %+v", p)
 			}
 		})
@@ -66,7 +66,7 @@ func TestProbeUsesSmokeRatherThanSysctl(t *testing.T) {
 		"/proc/sys/user/max_user_namespaces":                     "0\n",
 	}
 	p := probe(context.Background(), fakeSystem(files))
-	if p.Facts["prerequisite_ready"] != "true" || p.Facts["apparmor_userns"] != "true" || p.Facts["max_user_namespaces"] != "0" {
+	if !p.OK || p.Facts["prerequisite_ready"] != "true" || p.Facts["apparmor_userns"] != "true" || p.Facts["max_user_namespaces"] != "0" {
 		t.Errorf("successful smoke lost to sysctl: %+v", p)
 	}
 	files["/proc/sys/user/max_user_namespaces"] = "100000\n"

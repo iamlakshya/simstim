@@ -2,6 +2,8 @@ package api
 
 // WallProbe is one driver's probe, as the client sees it.
 type WallProbe struct {
+	// CanPrepare permits explicit client-pinned first construction; it is not compatibility readiness.
+	CanPrepare bool `json:"can_prepare,omitempty"`
 	Driver  string            `json:"driver"`
 	Level   string            `json:"level"`
 	OK      bool              `json:"ok"`

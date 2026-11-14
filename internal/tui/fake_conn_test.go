@@ -229,3 +229,23 @@ func (c *fakeConn) Close() {
 		close(c.done)
 	}
 }
+
+func (c *fakeConn) CheckNewGrants(ctx context.Context, _ []string, _ bool) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	c.be.mu.Lock()
+	defer c.be.mu.Unlock()
+	c.be.calls = append(c.be.calls, "grants:"+c.name)
+	return c.be.state[c.name].grantErr
+}
+
+func (c *fakeConn) CheckResumeGrants(ctx context.Context, id string, _ []string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	c.be.mu.Lock()
+	defer c.be.mu.Unlock()
+	c.be.calls = append(c.be.calls, "resume-grants:"+c.name+"/"+id)
+	return c.be.state[c.name].grantErr
+}

@@ -156,7 +156,7 @@ func TestRealBackendSecretsUseCurrentAuthorisedSettings(t *testing.T) {
 				var got map[string]api.Secret
 				var err error
 				if operation == "new" {
-					got, err = realBackend{}.Secrets(ctx, stale, host)
+					got, err = realBackend{}.Secrets(ctx, stale, host, []string{"TOKEN"})
 				} else {
 					got, err = realBackend{}.SessionSecrets(ctx, stale, host, "abc234de", []string{"TOKEN"})
 				}

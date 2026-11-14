@@ -50,6 +50,9 @@ func restoreOne(id, boot string, all bool) (RestoreResult, bool) {
 	if err != nil {
 		return RestoreResult{}, false
 	}
+	if m.SandboxOf != "" {
+		return RestoreResult{}, false
+	}
 	r := RestoreResult{ID: id, Name: m.Name}
 	unlock, err := lockSession(id)
 	if err != nil {
@@ -70,7 +73,7 @@ func restoreOne(id, boot string, all bool) (RestoreResult, bool) {
 	}
 	r.Name = m.Name
 	switch {
-	case m.Status.State == StateExited || m.Status.State == StateErrored:
+	case m.Ended():
 		r.Action, r.Why = "skipped", "the agent had ended"
 	case m.Restart.Policy != "resume":
 		r.Action, r.Why = "skipped", "restart policy is "+m.Restart.Policy
@@ -98,6 +101,9 @@ func restoreOne(id, boot string, all bool) (RestoreResult, bool) {
 // again says why a session's agent starts again: restore after a host
 // restart, or the user's resume (resume.go).
 type again struct {
+	members        []api.MemberResumeArgs
+	allowMissing   bool
+	secretDelivery *api.SecretDeliveryIntent
 	// label records when, so that the new holder can tell which:
 	// restoredLabel or resumedLabel.
 	label string
@@ -115,6 +121,9 @@ type again struct {
 // conversation in its folder". The caller reconciles any legacy rename
 // before applying memory and restore-attempt changes.
 func startAgain(m *Manifest, a again) (argv []string, why string, err error) {
+	if err := ValidateManifestStart(m); err != nil {
+		return nil, "", err
+	}
 	argv, why, err = resumeArgv(m)
 	if err != nil {
 		return nil, why, err
@@ -123,6 +132,10 @@ func startAgain(m *Manifest, a again) (argv []string, why string, err error) {
 	m.Agent.Argv = argv
 	m.Env = withHookSocket(m.Env, m.ID)
 	m.RunHook = resumeHook(m)
+	if m.Wall == nil && a.secretDelivery != nil {
+		m.SecretState = initialSecretState(a.secretDelivery)
+	}
+	applySessionIdentity(m)
 	m.Run.BootID = BootID()
 	// The old processes are gone. The new holder records its own.
 	m.Run.HolderPID, m.Run.AgentPID, m.Run.Unit = 0, 0, ""
@@ -135,6 +148,7 @@ func startAgain(m *Manifest, a again) (argv []string, why string, err error) {
 	delete(m.Labels, resumedLabel)
 	m.Labels = withLabel(m.Labels, a.label, now.Format(time.RFC3339Nano))
 	m.Status = Status{State: StateStarting, Since: now, Reason: a.reason + ": " + why}
+	m.Run.StartEnvelope = a.allowMissing || a.members != nil || a.secretDelivery != nil
 	if err := m.Save(); err != nil {
 		return argv, why, err
 	}
@@ -162,7 +176,7 @@ func startAgain(m *Manifest, a again) (argv []string, why string, err error) {
 		}
 		return argv, why, err
 	}
-	if err := deliver(m.ID, a.secrets); err != nil {
+	if err := deliverStart(m.ID, a.secrets, a.members, a.allowMissing, a.secretDelivery); err != nil {
 		// The new holder waits for its secrets. It stops first, so that its
 		// agent never starts without them, as after a failed start.
 		if serr := stopStarting(m, proc); serr != nil {
@@ -176,6 +190,12 @@ func startAgain(m *Manifest, a again) (argv []string, why string, err error) {
 	}
 	if proc != nil {
 		_ = proc.Release()
+	}
+	if m.Wall != nil {
+		if _, err := waitBoot(m.ID); err != nil {
+			return argv, why, err
+		}
+		return argv, why, nil
 	}
 	// The holder answers on its socket before it starts the agent, as New
 	// knows too: wait for the start before saying it worked.

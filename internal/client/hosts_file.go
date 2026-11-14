@@ -14,6 +14,7 @@ import (
 
 // hostFileHooks finish a side-file transaction before releasing its lock.
 type hostFileHooks struct {
+	document                   []byte
 	membershipGeneration       string
 	membershipSourceGeneration string
 	rollback                   func()
@@ -38,9 +39,10 @@ func updateHostsFile(ctx context.Context, change func([]Host) ([]Host, hostFileH
 // beforeHostsSave runs in updateHostsFile just before the save, and
 // writeHosts saves the list. Tests replace them.
 var (
-	beforeHostsSave              = func() {}
-	writeHosts                   = writeHostsFile
-	writeHostsSelectedGeneration = writeHostsFileGeneration
+	beforeHostsSave                      = func() {}
+	writeHosts                           = writeHostsFile
+	writeHostsSelectedGeneration         = writeHostsFileGeneration
+	writeHostsSelectedDocumentGeneration = writeHostsDocumentGeneration
 )
 
 // failed restores this transaction before describing any retained safety state.
@@ -101,7 +103,12 @@ func updateHostsFileContext(ctx context.Context, change func(context.Context, []
 		}
 	}
 	var writeErr error
-	if hooks.membershipGeneration != "" {
+	if hooks.document != nil {
+		if hooks.membershipGeneration == "" {
+			return hooks.failed(hostStateRemovalError("the policy document has no selected membership generation"))
+		}
+		writeErr = writeHostsSelectedDocumentGeneration(hooks.document, hooks.membershipGeneration)
+	} else if hooks.membershipGeneration != "" {
 		writeErr = writeHostsSelectedGeneration(out, hooks.membershipGeneration)
 	} else {
 		writeErr = writeHosts(out)
@@ -122,10 +129,9 @@ func writeHostsFileGeneration(hosts []Host, generation string) error {
 	hosts = slices.Clone(hosts)
 	sort.Slice(hosts, func(i, j int) bool { return hosts[i].Name < hosts[j].Name })
 	var b bytes.Buffer
-	b.WriteString(membershipGenerationPrefix + generation + "\n")
 	fmt.Fprintf(&b, "# Hosts for %s. Edit with `%s host`.\n\n", brand.DisplayName, brand.Name)
 	if err := toml.NewEncoder(&b).Encode(hostsFile{Hosts: hosts}); err != nil {
 		return fmt.Errorf("save the hosts: %w", err)
 	}
-	return writeAtomicFile(hostsPath(), ".hosts.toml-*", b.Bytes())
+	return writeHostsSelectedDocumentGeneration(b.Bytes(), generation)
 }

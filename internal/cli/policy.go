@@ -55,7 +55,7 @@ func (f *policyLayerFlags) mutation(cmd *cobra.Command) error {
 		return nil
 	}
 	if !inputOn(cmd) {
-		return &client.UserError{Msg: "choose which layer gets the policy change", Hint: "Pass --in, --profile, --repo, --host or --all.", Code: "layer_missing", Kind: client.KindNeedsAnswer}
+		return &client.UserError{Msg: "choose which layer gets the policy change", Hint: prompts(cmd).withFlags("--all"), Code: "layer_missing", Kind: client.KindNeedsAnswer}
 	}
 	answer, err := prompts(cmd).ask("Layer (all, host NAME, repo PATH, profile NAME, or in SESSION): ")
 	if err != nil {

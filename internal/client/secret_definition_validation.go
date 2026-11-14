@@ -1,55 +1,24 @@
 package client
 
-import "unicode"
-
-type secretNameIssue uint8
-
-const (
-	secretNameOK secretNameIssue = iota
-	secretNameInvalid
-	secretNameReserved
+import (
+	"github.com/iamlakshya/simstim/internal/api"
+	"unicode"
 )
 
-// These value states retain no input text. Reset them with a zero assignment.
-// The final-definition visitor and ordinary normaliser feed the same runes.
-type secretNameValidation struct {
-	seen, invalid, different bool
-	position                 uint8
-}
+// Client spellings alias the sole lower API grammar used by host/env and
+// final-definition visitors. The reservation policy remains caller-selected.
+type secretNameIssue = api.SecretNameIssue
 
-// Rune consumes one decoded name scalar without retaining its text.
-func (s *secretNameValidation) Rune(r rune) {
-	const reserved = "SSH_AUTH_SOCK"
-	letter := r >= 'A' && r <= 'Z' || r >= 'a' && r <= 'z' || r == '_'
-	if !letter && (!s.seen || r < '0' || r > '9') {
-		s.invalid = true
-	}
-	s.seen = true
-	if int(s.position) >= len(reserved) || r != rune(reserved[s.position]) {
-		s.different = true
-	}
-	if int(s.position) <= len(reserved) {
-		s.position++
-	}
-}
+const (
+	secretNameOK       = api.SecretNameOK
+	secretNameInvalid  = api.SecretNameInvalid
+	secretNameReserved = api.SecretNameReserved
+)
 
-// Check applies the name grammar and the definition-only socket reservation.
-func (s secretNameValidation) Check(allowSocket bool) secretNameIssue {
-	if !s.seen || s.invalid {
-		return secretNameInvalid
-	}
-	if !allowSocket && !s.different && int(s.position) == len("SSH_AUTH_SOCK") {
-		return secretNameReserved
-	}
-	return secretNameOK
-}
+type secretNameValidation = api.SecretNameValidator
 
 func checkSecretName(name string, allowSocket bool) secretNameIssue {
-	var state secretNameValidation
-	for _, r := range name {
-		state.Rune(r)
-	}
-	return state.Check(allowSocket)
+	return api.CheckSecretName(name, allowSocket)
 }
 
 type secretRunValidation struct{ nonspace, nul bool }

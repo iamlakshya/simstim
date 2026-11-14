@@ -144,7 +144,7 @@ func (b *demoBackend) RememberSetup(ctx context.Context, _, _ string, _ bool, _ 
 	}
 	return nil, nil
 }
-func (b *demoBackend) Secrets(context.Context, client.Settings, client.Host) (map[string]api.Secret, error) {
+func (b *demoBackend) Secrets(context.Context, client.Settings, client.Host, []string) (map[string]api.Secret, error) {
 	return nil, nil
 }
 
@@ -359,4 +359,19 @@ func (b *demoBackend) Reconnect(ctx context.Context, h client.Host) (Conn, error
 func (b *demoBackend) Settings() client.Settings {
 	s, _ := b.ReadSettings()
 	return s
+}
+
+func (c *demoConn) CheckNewGrants(ctx context.Context, names []string, sshAgent bool) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if sshAgent || len(names) > 0 {
+		return &client.UserError{Msg: "the demo cannot receive real grants",
+			Hint: "Open a saved host to use secrets or an SSH agent.", Code: "grant_refused", Kind: client.KindRefused}
+	}
+	return nil
+}
+
+func (c *demoConn) CheckResumeGrants(ctx context.Context, _ string, names []string) error {
+	return c.CheckNewGrants(ctx, names, false)
 }

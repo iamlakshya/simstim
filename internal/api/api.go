@@ -25,6 +25,9 @@ const ReasonChildOOM = "a process in this session ran out of memory and was stop
 
 // NewArgs describes a session to start.
 type NewArgs struct {
+	// Inputs and Environment come from one sealed local start selection.
+	Inputs         *InputSummary         `json:"inputs,omitempty"`
+	Environment    *SessionEnvironment   `json:"environment,omitempty"`
 	HostLabel      string                `json:"host_label,omitempty"`
 	SecretDelivery *SecretDeliveryIntent `json:"secret_delivery,omitempty"`
 	Task           string                `json:"task,omitempty"`
@@ -96,6 +99,13 @@ type NewArgs struct {
 
 // SessionInfo is one row of the session list.
 type SessionInfo struct {
+	CopiesPending bool      `json:"copies_pending,omitempty"`
+	Workspace     string    `json:"workspace,omitempty"`
+	Claimed       bool      `json:"claimed,omitempty"`
+	Wall          *WallInfo `json:"wall,omitempty"`
+	Armed         bool      `json:"armed,omitempty"`
+	SandboxOf     string    `json:"sandbox_of,omitempty"`
+	Task          string    `json:"task,omitempty"`
 	// Explicit coherent publications alone carry run/public-state context.
 	RunGeneration  string                `json:"run_generation,omitempty"`
 	SecretSummary  *SessionSecretSummary `json:"secret_summary,omitempty"`
@@ -139,6 +149,9 @@ type SessionInfo struct {
 // session, after the agent ended: the "resume" request. A helper that can
 // do it offers the feature "resume".
 type ResumeArgs struct {
+	// Inputs and Environment come from one sealed local start selection.
+	Inputs         *InputSummary         `json:"inputs,omitempty"`
+	Environment    *SessionEnvironment   `json:"environment,omitempty"`
 	HostLabel      string                `json:"host_label,omitempty"`
 	SecretDelivery *SecretDeliveryIntent `json:"secret_delivery,omitempty"`
 	// Layers and proposal answers come only from the approved local resume

@@ -6,6 +6,8 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ### Added
 
+- Completion on the real `policy rm` command lists rule IDs and targets from every local config layer. Profile names use the same config schema. Both stay local and quiet, including when another command holds a host lock.
+
 - Policy commands read and change rules in all-session, host, repository, profile and session layers. File changes preserve unrelated keys. Dry runs change nothing. `config check` reports the current folder's layers and their sources.
 
 - Shell completion fills in hosts, sessions and agents. Host names come from `hosts.toml`, with each target beside its name. Session addresses use `host/name` from the last list that the launcher, picker or `ls` saw. They use `host/id` when a name is duplicated, contains terminal controls or could identify another session. Lists older than a minute show their age. `--agent`, `agents install`, `--secret`, `host create`, `host set` and `debug profile` complete their values too. Completion reads local files and never connects to a host. A signal ends completion with code 130 and no error text. An empty request or invalid flags return no values and disable file completion. File path flags retain their file completion. The reference now includes `completion` for bash, zsh, fish and PowerShell ([shell completion](docs/how-to/shell-completion.md)).

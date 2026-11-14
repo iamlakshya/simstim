@@ -239,43 +239,20 @@ func (p *JSONProjection) WalkEncoded(span JSONSpan, visit func([]byte) error) er
 }
 
 func (p *JSONProjection) Array(span JSONSpan, visit func(JSONSpan) error) error {
-	if err := p.validSpan(span); err != nil {
+	values, err := p.Values(span)
+	if err != nil {
 		return err
-	}
-	c := p.cursor(span.Start)
-	if err := c.expect('['); err != nil {
-		return err
-	}
-	if err := c.space(); err != nil {
-		return err
-	}
-	if b, _ := c.peek(); b == ']' {
-		c.pos++
-		return c.ending(span.End)
 	}
 	for {
-		if err := c.space(); err != nil {
-			return err
-		}
-		start := c.pos
-		if err := c.value(); err != nil {
-			return err
-		}
-		if err := visit(JSONSpan{start, c.pos}); err != nil {
-			return err
-		}
-		if err := c.space(); err != nil {
-			return err
-		}
-		b, err := c.take()
+		value, more, err := values.Next()
 		if err != nil {
 			return err
 		}
-		if b == ']' {
-			return c.ending(span.End)
+		if !more {
+			return nil
 		}
-		if b != ',' {
-			return ErrJSONProjection
+		if err := visit(value); err != nil {
+			return err
 		}
 	}
 }

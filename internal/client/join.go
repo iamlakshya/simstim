@@ -73,6 +73,7 @@ func (c *Conn) reserveJoin(ctx context.Context, a api.JoinArgs, intent *joinGran
 		}
 		if p := intent.creation; p != nil {
 			child := cloneSandboxPolicy(p)
+			clearSandboxReceiptMetadata(child)
 			child.SessionID, child.SSHAgent = id, false
 			child.Ceiling = min(tier, p.Ceiling)
 			child.CreatedAt, child.request = time.Now().UTC(), token

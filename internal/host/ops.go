@@ -177,23 +177,11 @@ func New(a NewArgs) (_ *SessionInfo, err error) {
 // agent from the table that it runs, if any; known is true when the caller
 // named that agent.
 func pickAgent(a NewArgs) (argv []string, kind string, agent agents.Agent, known bool, err error) {
-	kind = a.Agent
-	agent, known = agents.Find(a.Agent)
-	switch {
-	case len(a.Argv) > 0:
-		argv = a.Argv
-		if kind == "" {
-			kind = "custom"
-		}
-	case known:
-		argv = agent.Launch
-	case a.Agent == "":
-		agent, _ = agents.Find("shell")
-		argv, kind = agent.Launch, "shell"
-	default:
-		return nil, "", agent, known, UserError("unknown_agent", fmt.Sprintf("unknown agent %q", a.Agent), "Pick one of the listed agents, or pass a command.")
+	selected, err := agents.ResolveStart(a.Agent, a.Argv)
+	if err != nil {
+		return nil, "", agents.Agent{}, false, UserError("unknown_agent", err.Error(), "Pick one of the listed agents, or pass a command.")
 	}
-	return argv, kind, agent, known, nil
+	return selected.Argv, selected.Kind, selected.Agent, selected.Known, nil
 }
 
 // sessionEnv returns the agent's environment: the login environment, the

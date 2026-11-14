@@ -7,6 +7,7 @@ import (
 	"maps"
 	"strings"
 
+	"github.com/iamlakshya/simstim/internal/api"
 	"github.com/iamlakshya/simstim/internal/proto"
 )
 
@@ -35,7 +36,7 @@ func envInputError(code, message, hint string, kind Kind) error {
 func checkEnvironmentName(name string, configured map[string]bool) error {
 	// Reuse the existing canonical variable-name grammar. A Definition
 	// migration must update this shared validator, never create a second one.
-	if !secretNameRE.MatchString(name) {
+	if api.CheckSecretName(name, true) != api.SecretNameOK {
 		return envInputError("bad_env", "an environment entry has an invalid name", "Use a variable name containing letters, digits and underscores, starting with a letter or underscore.", KindUsage)
 	}
 	if name == "SSH_AUTH_SOCK" {

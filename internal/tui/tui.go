@@ -39,6 +39,9 @@ func Run(ctx context.Context) error { return RunWith(ctx, Options{}) }
 
 // RunWith opens the launcher with options; Motion is set from the settings.
 func RunWith(ctx context.Context, o Options) error {
+	if localGitSourceInit != nil {
+		return localGitSourceInit
+	}
 	return runWith(ctx, DefaultBackend(o.Local), o)
 }
 

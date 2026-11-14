@@ -27,7 +27,7 @@ func localSystem() probeSystem {
 			kernel += string(byte(c))
 		}
 	}
-	return probeSystem{os: runtime.GOOS, kernel: kernel, readFile: os.ReadFile, landlock: landlockABI, smoke: namespaceSmoke}
+	return probeSystem{os: runtime.GOOS, kernel: kernel, readFile: os.ReadFile, landlock: landlockABI, smoke: launcherSmoke}
 }
 
 func landlockABI() int {

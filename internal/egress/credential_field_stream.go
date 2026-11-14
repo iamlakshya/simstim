@@ -62,46 +62,69 @@ func (v *CredentialFieldValidator) Write(input []byte) (int, error) {
 		return 0, errCredentialField
 	}
 	for i, b := range input {
-		if err := v.check(); err != nil {
+		if err := v.byte(b); err != nil {
 			return i, err
-		}
-		if v.bytes == ^uint64(0) {
-			v.err = errCredentialField
-			return i, v.err
-		}
-		v.bytes++
-		if !v.seen {
-			v.first = b
-			v.seen = true
-		}
-		v.last = b
-		switch v.kind {
-		case 1:
-			if b < 0x20 && b != '\t' || b == 0x7f {
-				v.err = errCredentialField
-				return i, v.err
-			}
-		case 2:
-			if b == '=' {
-				v.padding = true
-				continue
-			}
-			valid := b >= 'A' && b <= 'Z' || b >= 'a' && b <= 'z' || b >= '0' && b <= '9'
-			switch b {
-			case '-', '.', '_', '~', '+', '/':
-				valid = true
-			}
-			if v.padding || !valid {
-				v.err = errCredentialField
-				return i, v.err
-			}
-			v.characters = true
-		case 3:
-			// Basic encodes these bytes. Caller-side value/shape validation
-			// remains separate; do not add a new raw-value restriction here.
 		}
 	}
 	return len(input), v.check()
+}
+
+// WriteString checks the same bytes without copying an owned full value.
+// It retains neither the string nor a view into its storage.
+func (v *CredentialFieldValidator) WriteString(input string) (int, error) {
+	if err := v.check(); err != nil {
+		return 0, err
+	}
+	if v.finished {
+		return 0, errCredentialField
+	}
+	for i := range len(input) {
+		if err := v.byte(input[i]); err != nil {
+			return i, err
+		}
+	}
+	return len(input), v.check()
+}
+
+func (v *CredentialFieldValidator) byte(b byte) error {
+	if err := v.check(); err != nil {
+		return err
+	}
+	if v.bytes == ^uint64(0) {
+		v.err = errCredentialField
+		return v.err
+	}
+	v.bytes++
+	if !v.seen {
+		v.first = b
+		v.seen = true
+	}
+	v.last = b
+	switch v.kind {
+	case 1:
+		if b < 0x20 && b != '\t' || b == 0x7f {
+			v.err = errCredentialField
+			return v.err
+		}
+	case 2:
+		if b == '=' {
+			v.padding = true
+			return nil
+		}
+		valid := b >= 'A' && b <= 'Z' || b >= 'a' && b <= 'z' || b >= '0' && b <= '9'
+		switch b {
+		case '-', '.', '_', '~', '+', '/':
+			valid = true
+		}
+		if v.padding || !valid {
+			v.err = errCredentialField
+			return v.err
+		}
+		v.characters = true
+	case 3:
+		// Basic encodes these bytes; caller value/shape restrictions stay separate.
+	}
+	return nil
 }
 
 // Finish returns the exact formatted byte count, including its scheme prefix.

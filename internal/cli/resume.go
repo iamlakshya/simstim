@@ -9,6 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/iamlakshya/simstim/internal/api"
 	"github.com/iamlakshya/simstim/internal/brand"
 	"github.com/iamlakshya/simstim/internal/client"
 )
@@ -35,6 +36,9 @@ func resumeCmd() *cobra.Command {
 		Args:              cobra.ExactArgs(1),
 		ValidArgsFunction: completeSessionArg,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if _, err := client.ReadPolicySettings(); err != nil {
+				return err
+			}
 			if err := beforeAttach(cmd, asJSON, detach); err != nil {
 				return err
 			}
@@ -87,6 +91,9 @@ type resumed struct {
 // the resume, the agent runs too. passed names the secrets that the user
 // passed.
 func resumeSession(cmd *cobra.Command, target string, a client.ResumeArgs, passed []string) (resumed, error) {
+	if _, err := client.ReadPolicySettings(); err != nil {
+		return resumed{}, err
+	}
 	var r resumed
 	addr, err := resolveAddress(cmd, target, false)
 	if err != nil {
@@ -94,10 +101,10 @@ func resumeSession(cmd *cobra.Command, target string, a client.ResumeArgs, passe
 	}
 	err = addr.open(cmd.Context(), cmd, func(ctx context.Context, f found) error {
 		r.host, r.s = f.host, *f.s
-		if !client.Ended(*f.s) {
+		if !client.Ended(*f.s) && f.s.State != api.StateStopped {
 			return nil
 		}
-		res, now, rerr := resumeRacing(ctx, f, a, passed, secretTerminal(cmd))
+		res, now, rerr := resumeWithGrants(ctx, cmd, f, a, passed)
 		if now != nil {
 			r.s = *now
 			return nil
@@ -106,6 +113,21 @@ func resumeSession(cmd *cobra.Command, target string, a client.ResumeArgs, passe
 		return rerr
 	})
 	return r, err
+}
+
+func resumeWithGrants(ctx context.Context, cmd *cobra.Command, f found, a client.ResumeArgs, passed []string) (*client.ResumeResult, *client.Session, error) {
+	if _, err := client.ReadPolicySettings(); err != nil {
+		return nil, nil, err
+	}
+	cmd.SetContext(client.WithGrantRequest(ctx, client.NewGrantRequest(false, false)))
+	var res *client.ResumeResult
+	var running *client.Session
+	err := grantQuestions(cmd, func(ctx context.Context) error {
+		var err error
+		res, running, err = resumeRacing(ctx, f, a, passed, secretTerminal(cmd))
+		return err
+	})
+	return res, running, err
 }
 
 // beforeResume runs in resumeFound just before the host's resume. Tests
@@ -159,12 +181,23 @@ func refusedRow(ctx context.Context, f found, err error) (*client.Session, bool)
 // hosts.toml gives the host, and those that the user passed. terminal lets
 // a secret's command ask on the terminal.
 func resumeFound(ctx context.Context, f found, a client.ResumeArgs, passed []string, terminal bool) (*client.ResumeResult, error) {
-	names, err := client.ResumeSecrets(f.host, *f.s, passed)
+	plan, err := f.conn.PlanResumePolicy(ctx, f.s.ID)
 	if err != nil {
 		return nil, err
 	}
+	a.Layers = plan.Layers
+	names, err := client.ResumePlanSecretNames(f.host, *f.s, passed, plan)
+	if err != nil {
+		return nil, err
+	}
+	if err := f.conn.CheckResumeGrants(ctx, f.s.ID, names); err != nil {
+		return nil, err
+	}
+	if err := f.conn.CheckResumePolicyBeforeFetch(ctx, f.s.ID, plan); err != nil {
+		return nil, err
+	}
 	// A password manager may want a touch, so the secrets get their own time.
-	a.Secrets, err = client.FetchSecrets(ctx, client.LoadSettings(), names, terminal)
+	a.Secrets, err = client.FetchSessionSecrets(ctx, f.host, f.s.ID, names, terminal)
 	if err != nil {
 		return nil, err
 	}

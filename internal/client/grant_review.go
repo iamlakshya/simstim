@@ -12,6 +12,7 @@ type reviewGrantIntent struct {
 	hostID, sessionID string
 	sent, missing     []string
 	creation          *SandboxPolicy
+	receiptRevision   string
 }
 
 // NewReviewGrantRequest prepares local reads for one pulled-file review.
@@ -59,6 +60,12 @@ func FetchReviewSecrets(ctx context.Context, original Host, id string, actuallyS
 	tier, creation, err := EffectiveSessionTier(ctx, original, id, hostID)
 	if err != nil {
 		return nil, err
+	}
+	if creation != nil && (creation.FutureLineage || creation.FutureDelivery || creation.futureDeliveryReceipt) {
+		return nil, reviewAuthorityError()
+	}
+	if creation != nil && (creation.DeliveryIntent != nil || creation.deliveryReceipt != nil) {
+		return fetchAcknowledgedReviewSecrets(ctx, original, id, sent, notSent, terminal)
 	}
 	names := make([]string, 0, len(sent))
 	for _, name := range sent {

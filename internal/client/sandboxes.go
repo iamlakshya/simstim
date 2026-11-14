@@ -31,27 +31,35 @@ type SandboxPolicy struct {
 	CreatedAt      time.Time
 	// CreationWall and Exposed are immutable local creation facts. A host
 	// reply never supplies them. Schema1 creations decode as unwalled.
-	CreationWall string
-	Exposed      []string
-	request      string
-	wallIntent   json.RawMessage
-	lineage      *sandboxLineage
-	lineageRaw   json.RawMessage
-	deliveryRaw  json.RawMessage
+	CreationWall          string
+	Exposed               []string
+	request               string
+	wallIntent            json.RawMessage
+	lineage               *sandboxLineage
+	lineageRaw            json.RawMessage
+	deliveryRaw           json.RawMessage
+	deliveryReceipt       *sandboxDeliveryReceipt
+	inputOperation        *sandboxInputOperation
+	deliveryReceiptRaw    json.RawMessage
+	inputOperationRaw     json.RawMessage
+	futureDeliveryReceipt bool
+	futureInputOperation  bool
 }
 
 type savedSandbox struct {
-	PolicySources  json.RawMessage `json:"policy_sources,omitempty"`
-	SessionID      string          `json:"session_id"`
-	HostID         string          `json:"host_id,omitempty"`
-	Ceiling        string          `json:"ceiling"`
-	SSHAgent       bool            `json:"ssh_agent,omitempty"`
-	Secrets        []string        `json:"secrets,omitempty"`
-	CreatedAt      time.Time       `json:"created_at"`
-	Request        string          `json:"request"`
-	WallIntent     json.RawMessage `json:"wall_intent,omitempty"`
-	Lineage        json.RawMessage `json:"lineage,omitempty"`
-	DeliveryIntent json.RawMessage `json:"delivery_intent,omitempty"`
+	PolicySources   json.RawMessage `json:"policy_sources,omitempty"`
+	SessionID       string          `json:"session_id"`
+	HostID          string          `json:"host_id,omitempty"`
+	Ceiling         string          `json:"ceiling"`
+	SSHAgent        bool            `json:"ssh_agent,omitempty"`
+	Secrets         []string        `json:"secrets,omitempty"`
+	CreatedAt       time.Time       `json:"created_at"`
+	Request         string          `json:"request"`
+	WallIntent      json.RawMessage `json:"wall_intent,omitempty"`
+	Lineage         json.RawMessage `json:"lineage,omitempty"`
+	DeliveryIntent  json.RawMessage `json:"delivery_intent,omitempty"`
+	DeliveryReceipt json.RawMessage `json:"delivery_receipt,omitempty"`
+	InputOperation  json.RawMessage `json:"input_operation,omitempty"`
 }
 
 type sandboxFile struct {
@@ -134,7 +142,7 @@ func decodeSandboxContext(ctx context.Context, id string, raw json.RawMessage, s
 	if err := ctx.Err(); err != nil {
 		return SandboxPolicy{}, err
 	}
-	fields, err := sandboxObjectContext(ctx, raw, "session_id", "host_id", "ceiling", "ssh_agent", "secrets", "created_at", "request", "wall_intent", "policy_sources", "lineage", "delivery_intent")
+	fields, err := sandboxObjectContext(ctx, raw, "session_id", "host_id", "ceiling", "ssh_agent", "secrets", "created_at", "request", "wall_intent", "policy_sources", "lineage", "delivery_intent", "delivery_receipt", "input_operation")
 	if err != nil {
 		return SandboxPolicy{}, err
 	}
@@ -191,13 +199,16 @@ func decodeSandboxContext(ctx context.Context, id string, raw json.RawMessage, s
 			}
 		}
 	}
-	out := SandboxPolicy{deliveryRaw: slices.Clone(fields["delivery_intent"]), FutureLineage: future, lineageRaw: slices.Clone(fields["lineage"]), PolicySources: slices.Clone(p.PolicySources), SessionID: id, HostID: p.HostID, Ceiling: tier, SSHAgent: p.SSHAgent,
+	out := SandboxPolicy{deliveryReceiptRaw: slices.Clone(p.DeliveryReceipt), inputOperationRaw: slices.Clone(p.InputOperation), deliveryRaw: slices.Clone(fields["delivery_intent"]), FutureLineage: future, lineageRaw: slices.Clone(fields["lineage"]), PolicySources: slices.Clone(p.PolicySources), SessionID: id, HostID: p.HostID, Ceiling: tier, SSHAgent: p.SSHAgent,
 		Secrets: slices.Clone(p.Secrets), CreatedAt: p.CreatedAt, request: p.Request,
 		CreationWall: intent.Level, Exposed: slices.Clone(intent.Exposed), wallIntent: slices.Clone(p.WallIntent), lineage: lineage}
 	if fields["delivery_intent"] != nil {
 		if err := decodeSandboxDeliveryContext(ctx, raw, schema, &out); err != nil {
 			return SandboxPolicy{}, badSandboxStateContext(ctx)
 		}
+	}
+	if err := decodeSandboxReceiptsContext(ctx, raw, schema, &out); err != nil {
+		return SandboxPolicy{}, err
 	}
 	if err := ctx.Err(); err != nil {
 		return SandboxPolicy{}, err
@@ -234,6 +245,9 @@ func reserveSandbox(ctx context.Context, h Host, p SandboxPolicy) error {
 		}
 		if p.DeliveryIntent != nil && f.schema != 4 {
 			return &UserError{Msg: "the bound delivery schema barrier has not been committed", Hint: "Prepare the original sealed delivery plan before reading values.", Code: "grant_scope", Kind: KindRefused}
+		}
+		if p.deliveryReceipt != nil || p.inputOperation != nil || p.deliveryReceiptRaw != nil || p.inputOperationRaw != nil || p.futureDeliveryReceipt || p.futureInputOperation {
+			return sandboxReceiptError()
 		}
 		var fields map[string]json.RawMessage
 		if old, ok := f.sessions[p.SessionID]; ok {

@@ -65,6 +65,13 @@ func (e *PullReviewError) Unwrap() error { return e.Failure }
 // PullSandbox fetches a sandbox's bundle into quarantine, reviews it as data
 // and moves exactly one local branch only after every required consent.
 func (c *Conn) PullSandbox(ctx context.Context, id string, options PullOptions) (*SandboxPullResult, error) {
+	if readLiteral := options.ReadSecrets; readLiteral != nil {
+		options.ReadSecrets = func(attempt context.Context) ([][]byte, error) {
+			return combinedPullReviewValues(attempt, func(local context.Context) ([]api.Secret, error) {
+				return c.ReviewPublicStandIns(local, id)
+			}, readLiteral)
+		}
+	}
 	return pullSandbox(ctx, c, c.Host.Name, id, options)
 }
 

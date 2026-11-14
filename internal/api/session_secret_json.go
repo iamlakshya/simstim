@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"reflect"
+	"slices"
 	"strings"
 )
 
@@ -17,6 +18,27 @@ func ExactJSONFields(raw []byte, shape any) bool {
 	}
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	return exactSecretStateValue(decoder, reflect.TypeOf(shape))
+}
+
+// ExactJSONFieldNames returns owned, sorted field names from the same DTO
+// descriptor used by ExactJSONFields. Streaming projections can build their
+// finite schema once per inspection without copying a second field grammar.
+// It validates no source, value, grant or provenance.
+func ExactJSONFieldNames(shape any) []string {
+	if shape == nil {
+		return nil
+	}
+	kind := reflect.TypeOf(shape)
+	for kind.Kind() == reflect.Pointer {
+		kind = kind.Elem()
+	}
+	fields := secretStateFields(kind)
+	names := make([]string, 0, len(fields))
+	for name := range fields {
+		names = append(names, name)
+	}
+	slices.Sort(names)
+	return names
 }
 
 func exactSecretStateValue(decoder *json.Decoder, shape reflect.Type) bool {

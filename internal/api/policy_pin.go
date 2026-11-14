@@ -14,9 +14,11 @@ import (
 // session values. Laptop repository/profile values refresh from local config.
 // It carries no host tier, secret value or exposure approval.
 type PolicySourcePin struct {
-	Layers    []LayerRef         `json:"layers"`
-	Session   LayerValues        `json:"session"`
-	Resources *PolicyResourcePin `json:"resources,omitempty"`
+	// ClientInputs is local source-expression provenance, never an RPC field.
+	ClientInputs *PolicyClientInputsPin `json:"client_inputs,omitempty"`
+	Layers       []LayerRef             `json:"layers"`
+	Session      LayerValues            `json:"session"`
+	Resources    *PolicyResourcePin     `json:"resources,omitempty"`
 }
 
 // PolicyResourcePin preserves a resource ceiling resolved at creation. It is
@@ -85,6 +87,11 @@ func DecodePolicySourcePin(raw json.RawMessage) (*PolicySourcePin, error) {
 }
 
 func validatePolicyPin(pin *PolicySourcePin) error {
+	if pin.ClientInputs != nil {
+		if err := pin.ClientInputs.Validate(); err != nil {
+			return err
+		}
+	}
 	if r := pin.Resources; r != nil {
 		// ParseSize uses this same positive range. A raw integer must not
 		// bypass its upper bound or turn the ceiling into an unlimited value.

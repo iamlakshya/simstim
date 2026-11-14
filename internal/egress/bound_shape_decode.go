@@ -9,6 +9,9 @@ import (
 )
 
 func decodePublicSecretShape(ctx context.Context, name string, public *api.SecretShape, policy sentinelPunctuationPolicy) (sentinelShape, error) {
+	if _, err := symbolicPublicShapeMetrics(ctx, name, public, policy); err != nil {
+		return sentinelShape{}, err
+	}
 	shape := sentinelShape{Prefix: public.Prefix}
 	unicodeClasses := make(map[sentinelClass]string)
 	for _, slot := range public.Slots {

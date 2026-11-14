@@ -15,9 +15,9 @@ type grantContextBackend struct {
 	id      string
 }
 
-func (b *grantContextBackend) Secrets(ctx context.Context, s client.Settings, h client.Host) (map[string]api.Secret, error) {
+func (b *grantContextBackend) Secrets(ctx context.Context, s client.Settings, h client.Host, names []string) (map[string]api.Secret, error) {
 	b.fetches = append(b.fetches, ctx)
-	return b.Backend.Secrets(ctx, s, h)
+	return b.Backend.Secrets(ctx, s, h, names)
 }
 
 func (b *grantContextBackend) SessionSecrets(ctx context.Context, s client.Settings, h client.Host, id string, names []string) (map[string]api.Secret, error) {

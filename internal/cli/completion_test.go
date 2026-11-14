@@ -18,6 +18,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 
+	"github.com/iamlakshya/simstim/internal/api"
 	"github.com/iamlakshya/simstim/internal/brand"
 	"github.com/iamlakshya/simstim/internal/client"
 	"github.com/iamlakshya/simstim/internal/diag"
@@ -33,11 +34,13 @@ func isolateCompletionEnv(t *testing.T) (cfgDir, stateDir string) {
 	t.Setenv("XDG_DATA_HOME", filepath.Join(base, "data"))
 	t.Setenv("XDG_CACHE_HOME", filepath.Join(base, "cache"))
 	t.Setenv("XDG_RUNTIME_DIR", filepath.Join(base, "run"))
+	t.Setenv("XDG_CONFIG_DIRS", filepath.Join(base, "config-dirs"))
+	t.Setenv("XDG_DATA_DIRS", filepath.Join(base, "data-dirs"))
 	t.Setenv("GNUPGHOME", filepath.Join(base, "gnupg"))
 	t.Setenv("GIT_CONFIG_GLOBAL", filepath.Join(base, "gitconfig"))
 	t.Setenv("BASH_COMP_DEBUG_FILE", "")
 	t.Setenv(diag.EnvFile, "")
-	for _, d := range []string{"config", "state", "data", "cache", "run", "gnupg"} {
+	for _, d := range []string{"config", "state", "data", "cache", "run", "config-dirs", "data-dirs", "gnupg"} {
 		if err := os.MkdirAll(filepath.Join(base, d), 0o700); err != nil {
 			t.Fatal(err)
 		}
@@ -304,7 +307,12 @@ id = "m-1"
 	if err := os.WriteFile(filepath.Join(cfgDir, "hosts.toml"), []byte(hostsTOML), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	configTOML := fmt.Sprintf("[secrets]\nOPENAI_API_KEY = %q\n", trapScript)
+	configTOML := fmt.Sprintf(`[secrets]
+OPENAI_API_KEY = %q
+[profiles.review]
+[network]
+allow = ["policy.example.org"]
+`, trapScript)
 	if err := os.WriteFile(filepath.Join(cfgDir, "config.toml"), []byte(configTOML), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -347,6 +355,8 @@ id = "m-1"
 		{"debug", "profile", ""},
 		{"agents", "install", ""},
 		{"new", "box", "--secret", ""},
+		{"new", "box", "--profile", ""},
+		{"policy", "rm", ""},
 	}
 	for _, q := range queries {
 		root := Root()
@@ -372,7 +382,12 @@ id = "m-1"
 		case "new":
 			if len(q) > 2 {
 				want = "OPENAI_API_KEY"
+				if q[2] == "--profile" {
+					want = "review"
+				}
 			}
+		case "policy":
+			want = api.RuleID(api.Rule{Layer: api.LayerAll, Door: api.DoorNet, Allow: true, Target: "policy.example.org"})
 		case "host":
 			if len(q) > 3 {
 				want = "idle="

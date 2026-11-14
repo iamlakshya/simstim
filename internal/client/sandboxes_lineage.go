@@ -134,6 +134,8 @@ func cloneSandboxPolicy(p *SandboxPolicy) *SandboxPolicy {
 	q := *p
 	q.PolicySources, q.wallIntent, q.lineageRaw = slices.Clone(p.PolicySources), slices.Clone(p.wallIntent), slices.Clone(p.lineageRaw)
 	q.deliveryRaw = slices.Clone(p.deliveryRaw)
+	q.deliveryReceiptRaw, q.inputOperationRaw = slices.Clone(p.deliveryReceiptRaw), slices.Clone(p.inputOperationRaw)
+	q.deliveryReceipt, q.inputOperation = cloneSandboxDeliveryReceipt(p.deliveryReceipt), cloneSandboxInputOperation(p.inputOperation)
 	if p.DeliveryIntent != nil {
 		v := api.CloneSecretDeliveryIntent(*p.DeliveryIntent)
 		q.DeliveryIntent = &v

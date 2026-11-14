@@ -22,6 +22,9 @@ func Main() int {
 	if code, handled := client.GitSSHMode(os.Args[1:]); handled {
 		return code
 	}
+	if localGitSourceInit != nil {
+		return finish(os.Stderr, localGitSourceInit, nil, false, false, jsonAsked(nil, os.Args[1:]))
+	}
 	ctx, stop := listen()
 	defer stop()
 	if os.Getenv(brand.Env("NO_INSTALL")) == "1" {

@@ -91,20 +91,67 @@ func (m *Model) startSessionReady(h *hostConn, r startReq) tea.Cmd {
 		err := offlineErr(h)
 		return func() tea.Msg { return startedMsg{startReq: r, err: err} }
 	}
-	if r.grants == nil {
-		r.grants = client.NewGrantRequest(false, r.args.SSHAgent)
-	}
-	c, be, host, kept, cols, rows := h.conn, m.be, h.host, m.settings, m.width, m.height
+	c, be, originalHost, kept, cols, rows := h.conn, m.be, h.host, m.settings, m.width, m.height
 	read := m.beginSettingsRead()
 	return m.bgCmd(func(ctx context.Context) tea.Msg {
 		settings, read := readSettings(be, kept, read)
+		if _, err := client.ReadPolicySettings(); err != nil {
+			return startedMsg{startReq: r, err: err, settingsRead: read}
+		}
 		args, err := client.SessionArgs(r.args, cols, rows, settings)
 		if err != nil {
 			return startedMsg{startReq: r, err: err, settingsRead: read}
 		}
 		r.args = args
-		cctx, cancel := context.WithTimeout(client.WithGrantRequest(ctx, r.grants), 60*time.Second)
+		cctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 		defer cancel()
+		if planner, ok := unclean(c).(interface {
+			PrepareNewPolicy(context.Context, client.NewArgs) (client.NewArgs, error)
+		}); ok {
+			r.args, err = planner.PrepareNewPolicy(cctx, r.args)
+			if err != nil {
+				return startedMsg{startReq: r, err: err, settingsRead: read}
+			}
+		}
+		if planner, ok := unclean(c).(interface {
+			ResolveNewWall(context.Context, client.NewArgs) (client.NewArgs, error)
+		}); ok {
+			r.args, err = planner.ResolveNewWall(cctx, r.args)
+			if err != nil {
+				return startedMsg{startReq: r, err: err, settingsRead: read}
+			}
+		} else if r.args.Wall != "" {
+			return startedMsg{startReq: r, err: &client.UserError{Msg: "this host connection cannot select a wall",
+				Hint: "Update the client and host helper, then try again.", Code: "wall_helper_old"}, settingsRead: read}
+		}
+		if r.grants == nil {
+			level := r.args.Wall
+			if level == "" {
+				level = "none"
+			}
+			r.grants, err = client.NewWallGrantRequest(false, r.args.SSHAgent, level, nil)
+			if err != nil {
+				return startedMsg{startReq: r, err: err, settingsRead: read}
+			}
+		}
+		cctx = client.WithGrantRequest(cctx, r.grants)
+		effectiveNames := client.SecretNames(originalHost, nil)
+		if len(r.args.Layers) > 0 {
+			effectiveNames, err = client.PolicySecretNames(r.args.Layers)
+			if err != nil {
+				return startedMsg{startReq: r, err: err, settingsRead: read}
+			}
+		}
+		if err := c.CheckNewGrants(cctx, effectiveNames, r.args.SSHAgent); err != nil {
+			return startedMsg{startReq: r, err: err, settingsRead: read}
+		}
+		if planner, ok := unclean(c).(interface {
+			CheckNewPolicyGrants(context.Context, []api.Layer) error
+		}); ok {
+			if err := planner.CheckNewPolicyGrants(cctx, r.args.Layers); err != nil {
+				return startedMsg{startReq: r, err: err, settingsRead: read}
+			}
+		}
 		var warn *client.UserError
 		if r.args.Setup == "" && !r.answered {
 			answers := be.SetupAnswers(r.host)
@@ -114,7 +161,7 @@ func (m *Model) startSessionReady(h *hostConn, r startReq) tea.Cmd {
 		// One fetch of the secrets for each start. A question about the
 		// start keeps them for the start after the answer.
 		if r.args.Secrets == nil {
-			secrets, err := be.Secrets(cctx, settings, host)
+			secrets, err := be.Secrets(cctx, settings, originalHost, effectiveNames)
 			if err != nil {
 				return startedMsg{startReq: r, err: err, warn: warn, settingsRead: read}
 			}

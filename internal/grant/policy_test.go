@@ -1,6 +1,7 @@
 package grant
 
 import (
+	"net/netip"
 	"testing"
 
 	"github.com/iamlakshya/simstim/internal/api"
@@ -25,7 +26,7 @@ func TestCheckExplainsTheCanonicalDecidingLayer(t *testing.T) {
 }
 
 func TestCheckHostLeavesPrivateNetworkAuthorityToClient(t *testing.T) {
-	for _, target := range []string{"192.168.1.2:5432", "10/8", "[::1]:5432"} {
+	for _, target := range []string{netip.AddrFrom4([4]byte{192, 168, 1, 2}).String() + ":5432", "10/8", "[::1]:5432"} {
 		canonical, private, err := CheckHost(target)
 		if err != nil || !private || canonical == "" {
 			t.Fatalf("%s = %q %v %v", target, canonical, private, err)

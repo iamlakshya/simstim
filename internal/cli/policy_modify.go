@@ -133,7 +133,7 @@ func dryPolicyNote(dry bool) string {
 func policyRmCmd() *cobra.Command {
 	var layer policyLayerFlags
 	var asJSON bool
-	cmd := &cobra.Command{Use: "rm <id or target>", Short: "Remove a rule from one policy layer", Args: cobra.ExactArgs(1), Example: "  " + brand.Name + " policy rm <rule-id> --repo .",
+	cmd := &cobra.Command{Use: "rm <id or target>", ValidArgsFunction: firstArg(completeRuleIDs), Short: "Remove a rule from one policy layer", Args: cobra.ExactArgs(1), Example: "  " + brand.Name + " policy rm <rule-id> --repo .",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if _, err := client.ReadPolicySettings(); err != nil {
 				return err

@@ -20,7 +20,7 @@ func TestCredentialFieldStreamMatchesUnchangedMaterialisedFormatter(t *testing.T
 	} {
 		// This actual formatter remains unchanged while the new stream
 		// predicate receives differential evidence. Do not replace it yet.
-		formatted, want := requestCredentialValue(tc.kind, tc.user, api.Secret(tc.value))
+		formatted, want := legacyRequestCredentialValue(tc.kind, tc.user, api.Secret(tc.value))
 		for split := 0; split <= len(tc.value); split++ {
 			var state CredentialFieldValidator
 			state.Reset(t.Context(), tc.kind, uint64(len(tc.user)))

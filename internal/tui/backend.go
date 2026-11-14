@@ -68,7 +68,7 @@ type Backend interface {
 	// Secrets fetches a new session's host secrets through the current local
 	// source and grant checks. The settings argument is presentation state,
 	// not permission to run its commands. It never prompts.
-	Secrets(ctx context.Context, s client.Settings, h client.Host) (map[string]api.Secret, error)
+	Secrets(ctx context.Context, s client.Settings, originalHost client.Host, effectiveNames []string) (map[string]api.Secret, error)
 	// SessionSecrets fetches the values of the named secrets again, for a
 	// resume of a session that started with them. It never prompts.
 	SessionSecrets(ctx context.Context, s client.Settings, h client.Host, id string, names []string) (map[string]api.Secret, error)
@@ -86,6 +86,10 @@ type Backend interface {
 
 // Conn is one connection to a host. *client.Conn satisfies it.
 type Conn interface {
+	// CheckNewGrants checks selected names before the backend fetches values.
+	CheckNewGrants(ctx context.Context, names []string, sshAgent bool) error
+	// CheckResumeGrants checks current creation authority before a resume fetch.
+	CheckResumeGrants(ctx context.Context, id string, names []string) error
 	Sessions(ctx context.Context) ([]client.Session, error)
 	NewSession(ctx context.Context, a client.NewArgs) (*client.Session, error)
 	Resume(ctx context.Context, a client.ResumeArgs) (*client.ResumeResult, error)
@@ -190,8 +194,8 @@ func (realBackend) RememberSetup(ctx context.Context, host, repo string, run boo
 	return client.RememberSetupContext(ctx, host, repo, run, hash)
 }
 
-func (realBackend) Secrets(ctx context.Context, _ client.Settings, h client.Host) (map[string]api.Secret, error) {
-	return client.FetchHostSecrets(ctx, h, client.SecretNames(h, nil), false)
+func (realBackend) Secrets(ctx context.Context, _ client.Settings, originalHost client.Host, effectiveNames []string) (map[string]api.Secret, error) {
+	return client.FetchHostSecrets(ctx, originalHost, effectiveNames, false)
 }
 
 func (realBackend) SessionSecrets(ctx context.Context, _ client.Settings, h client.Host, id string, names []string) (map[string]api.Secret, error) {

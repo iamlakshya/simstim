@@ -458,5 +458,9 @@ func completeSecrets(_ *cobra.Command, _ []string, toComplete string) ([]string,
 }
 
 func completeProfiles(_ *cobra.Command, _ []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-	return completeConfigMapKeys("profiles", toComplete), cobra.ShellCompDirectiveNoFileComp
+	metadata, ok := completionPolicyMetadata(false)
+	if !ok {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	return completionProfileNames(metadata.Profiles, toComplete), cobra.ShellCompDirectiveNoFileComp
 }
