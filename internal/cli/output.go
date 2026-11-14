@@ -186,13 +186,16 @@ func sessionRef(s client.Session, list []client.Session) string {
 // empty string, a zero time or null (cli-spec 7.2, rule 6).
 func valuesOf(v any) map[string]any {
 	raw, _ := json.Marshal(v)
-	var obj map[string]any
-	_ = json.Unmarshal(raw, &obj)
-	for k, val := range obj {
-		switch val {
-		case nil, "", "0001-01-01T00:00:00Z":
-			delete(obj, k)
+	var values map[string]json.RawMessage
+	_ = json.Unmarshal(raw, &values)
+	obj := make(map[string]any, len(values))
+	for key, value := range values {
+		switch string(bytes.TrimSpace(value)) {
+		case "null", `""`, `"0001-01-01T00:00:00Z"`:
+			continue
 		}
+		// Preserve encoded integers and nested data without a float64 pass.
+		obj[key] = value
 	}
 	return obj
 }

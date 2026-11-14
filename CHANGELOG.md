@@ -20,6 +20,7 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ### Fixed
 
+- Session JSON keeps integer values exact, including large memory sizes.
 - The terminal cleanup test counts open file names without looking up descriptors that can close during the count. It still checks that held reads keep their terminal open and that cleanup leaves no open file behind.
 - Tests of concurrent uploads let a second upload reach the held chunk. The test hook no longer makes the uploads take turns itself.
 - Reader and launcher tests check handoff before held cleanup ends. Missing input demand fails at its context deadline. They also cover failed raw mode and the prompt policy after a guided install. A whitespace editor command that crashes fails its test without stopping the other checks.
