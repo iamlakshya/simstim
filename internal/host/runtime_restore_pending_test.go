@@ -23,6 +23,7 @@ import (
 func slowPendingRestore(t *testing.T) (id, stall string, firstPID int) {
 	t.Helper()
 	hosttest.New(t)
+	observeHolders(t)
 	s := start(t, "a", "sleep", "60")
 	crash(t, s.ID)
 	m := manifest(t, s.ID)
@@ -152,6 +153,7 @@ func TestSlowRestoredHolderPendingOwnership(t *testing.T) {
 
 	t.Run("persist failure stops pending holder", func(t *testing.T) {
 		hosttest.New(t)
+		observeHolders(t)
 		s := start(t, "a", "sleep", "60")
 		crash(t, s.ID)
 		m := manifest(t, s.ID)

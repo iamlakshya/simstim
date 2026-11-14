@@ -9,6 +9,7 @@ import (
 	"github.com/iamlakshya/simstim/internal/client"
 	"github.com/iamlakshya/simstim/internal/host"
 	"github.com/iamlakshya/simstim/internal/paths"
+	"github.com/iamlakshya/simstim/internal/testhome"
 )
 
 // A test host's folders are its own, the sockets of shared SSH
@@ -20,7 +21,7 @@ func TestATestHostsSocketFits(t *testing.T) {
 	for _, linked := range []bool{false, true} {
 		if linked {
 			long := filepath.Join(t.TempDir(), strings.Repeat("x", 40))
-			links, err := os.MkdirTemp("/tmp", "l")
+			links, err := testhome.ShortTempDir("l")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -38,11 +39,12 @@ func TestATestHostsSocketFits(t *testing.T) {
 		if resolved, err := filepath.EvalSymlinks(h.Root); err != nil || resolved != h.Root {
 			t.Errorf("the test host's folder %s is not as its links resolve it: %s, %v", h.Root, resolved, err)
 		}
-		for _, d := range []string{paths.StateDir(), paths.ConfigDir(), paths.RuntimeDir(), client.ControlDir()} {
+		for _, d := range []string{paths.StateDir(), paths.ConfigDir(), paths.RuntimeDir()} {
 			if !strings.HasPrefix(d, h.Root+"/") {
 				t.Errorf("linked %v: %s is not in the test host's folder %s", linked, d, h.Root)
 			}
 		}
+		testhome.CheckSocketDir(t, client.ControlDir())
 		if s := paths.Socket(host.NewID()); len(s) > 103 {
 			t.Errorf("linked %v: a session's socket %s has %d bytes, more than 103", linked, s, len(s))
 		}

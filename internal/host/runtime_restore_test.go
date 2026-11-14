@@ -365,6 +365,7 @@ func waitRuns(t *testing.T, path string, n int) {
 // holder to finish starting.
 func TestASlowRestoredHolderIsKept(t *testing.T) {
 	hosttest.New(t)
+	observeHolders(t)
 	s := start(t, "slow", "sleep", "60")
 	crash(t, s.ID)
 	m := manifest(t, s.ID)
@@ -391,7 +392,7 @@ func TestASlowRestoredHolderIsKept(t *testing.T) {
 		t.Fatalf("the restore of a slow holder: %+v (late: %v)", res, late)
 	}
 	waitState(t, s.ID, host.StateWorking)
-	if !holderRuns(t, s.ID) {
+	if !namedHolderRuns(t, s.ID) {
 		t.Fatal("the restored holder was stopped")
 	}
 
@@ -412,7 +413,7 @@ func TestASlowRestoredHolderIsKept(t *testing.T) {
 	if len(res) != 1 || res[0].Action != "failed" || !strings.Contains(res[0].Why, "and its holder may still start") {
 		t.Fatalf("restore slower than restoreWait: %+v", res)
 	}
-	if !holderRuns(t, s.ID) {
+	if !namedHolderRuns(t, s.ID) {
 		t.Fatal("the restored holder slower than restoreWait was stopped")
 	}
 	_ = os.Remove(stall)

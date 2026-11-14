@@ -14,8 +14,8 @@ import (
 // folder in /tmp. On Windows it shares none.
 func TestTheTestsHaveAHomeOfTheirOwn(t *testing.T) {
 	dirs := []string{StateDir(), ConfigDir(), CacheDir(), paths.RuntimeDir()}
-	if controlMaster {
-		dirs = append(dirs, ControlDir())
-	}
 	testhome.Check(t, dirs...)
+	if controlMaster {
+		testhome.CheckSocketDir(t, ControlDir())
+	}
 }

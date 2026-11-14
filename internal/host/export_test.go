@@ -2,6 +2,8 @@ package host
 
 // Hooks for the tests of package host_test.
 var (
+	// StartHolder lets tests observe only children this launch created.
+	StartHolder = &startHolder
 	// AfterNameCheck is afterNameCheck, for a test that tries a rename
 	// inside a guarded delete's lock.
 	AfterNameCheck = &afterNameCheck

@@ -138,7 +138,7 @@ func startAgain(m *Manifest, a again) (argv []string, why string, err error) {
 	if err := m.Save(); err != nil {
 		return argv, why, err
 	}
-	proc, err := launchHolder(m)
+	proc, err := startHolder(m)
 	if err != nil && a.label == restoredLabel && (proc != nil || m.Run.Unit != "") {
 		// A restored holder never waits for secrets (secretsBeforeStart),
 		// so it cannot start its agent without them. A slow one, as at a

@@ -29,6 +29,7 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ### Fixed
 
+- Tests keep shared SSH control sockets in a directory owned by their run. Holder lifetime checks inspect only children they launched.
 - Provider SSH routes keep the original saved machine identity for pin checks. Failed host removal retires the pin before config cleanup, and stale saves cannot change a replacement's tier.
 - Host details trim display whitespace. Host JSON omits unset fields while keeping raw data and full integer precision. Legacy host help follows the command grammar.
 - Doctor stops repairs when cancelled and reports what it already changed. It keeps SSH files whose ownership it cannot confirm.

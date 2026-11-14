@@ -14,7 +14,7 @@ import (
 func TestTheTestsHaveAHomeOfTheirOwn(t *testing.T) {
 	dirs := []string{client.StateDir(), client.ConfigDir(), client.CacheDir(), paths.RuntimeDir()}
 	if d := client.ControlDir(); d != "" || runtime.GOOS != "windows" {
-		dirs = append(dirs, d) // the sockets of shared SSH connections
+		testhome.CheckSocketDir(t, d) // the run owns this separate bounded control root
 	}
 	testhome.Check(t, dirs...)
 }

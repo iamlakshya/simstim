@@ -126,6 +126,31 @@ func TestProviderPinKeepsItsOriginalSavedCASIdentity(t *testing.T) {
 	}
 }
 
+func TestProviderPinUpdatesTheOriginalSavedMachine(t *testing.T) {
+	dir := fakeSSH(t)
+	key := newKey(t, "ssh-ed25519")
+	put(t, dir, "trust-log", trustLog(key, "unknown"))
+	shows(t, dir, key)
+	h := Host{Name: "vm", Machine: &Machine{Provider: "pintest", ID: "vm", Created: "1"}}
+	if err := SaveHosts(t.Context(), []Host{h}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := HostTransport(t.Context(), h, true); err != nil {
+		t.Fatalf("pin the saved machine through its provider route: %v", err)
+	}
+	if saved, err := FindHost(h.Name); err != nil || !SameEntry(saved, h) {
+		t.Fatalf("pin observation replaced the saved machine with its SSH route: %+v, %v", saved, err)
+	}
+	tiers, err := readTiersFile()
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry, ok := tiers.Entry(h.Name)
+	if !ok || entry.Key != key.Fingerprint() {
+		t.Fatalf("the saved machine did not receive its observed pin: %+v", entry)
+	}
+}
+
 func TestStaleTierEntryRefusesBeforeSSHWithoutMaskingCancellation(t *testing.T) {
 	dir := fakeSSH(t)
 	h := Host{Name: "box", SSH: "box.example"}

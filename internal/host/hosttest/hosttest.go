@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"github.com/iamlakshya/simstim/internal/brand"
+	"github.com/iamlakshya/simstim/internal/client"
 	"github.com/iamlakshya/simstim/internal/host"
 	"github.com/iamlakshya/simstim/internal/paths"
 	"github.com/iamlakshya/simstim/internal/testhome"
@@ -79,6 +80,20 @@ func Main(m *testing.M) {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
+	controlsDone, err := configureControls()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		done()
+		os.Exit(1)
+	}
+	if code, handled := client.GitSSHMode(os.Args[1:]); handled {
+		if err := controlsDone(); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			code = 1
+		}
+		done()
+		os.Exit(code)
+	}
 	flag.Parse()
 	// Child processes write their coverage where this binary writes its
 	// own, so `go test -cover` counts the code that holders run too.
@@ -86,6 +101,10 @@ func Main(m *testing.M) {
 		_ = os.Setenv("GOCOVERDIR", f.Value.String())
 	}
 	code := m.Run()
+	if err := controlsDone(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		code = 1
+	}
 	done()
 	os.Exit(ExitCode(code))
 }
@@ -110,15 +129,29 @@ type Host struct {
 // the end of the test every session is deleted and its holder waited for.
 func New(t testing.TB) *Host {
 	t.Helper()
+	if !testhome.SocketDirActive() {
+		done, err := configureControls()
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() {
+			if err := done(); err != nil {
+				t.Error(err)
+			}
+		})
+	}
 	root := shortTempDir(t)
 	h := &Host{Root: root, Home: filepath.Join(root, "home"), t: t}
 	run := filepath.Join(root, "run")
-	for _, d := range []string{h.Home, run} {
+	for _, d := range []string{h.Home, run, filepath.Join(root, "config-dirs"), filepath.Join(root, "data-dirs")} {
 		if err := os.MkdirAll(d, 0o700); err != nil {
 			t.Fatal(err)
 		}
 	}
 	t.Setenv("HOME", h.Home)
+	t.Setenv("USERPROFILE", h.Home)
+	t.Setenv("XDG_CONFIG_DIRS", filepath.Join(root, "config-dirs"))
+	t.Setenv("XDG_DATA_DIRS", filepath.Join(root, "data-dirs"))
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(h.Home, ".config"))
 	t.Setenv("XDG_DATA_HOME", filepath.Join(h.Home, ".local", "share"))
 	t.Setenv("XDG_STATE_HOME", filepath.Join(h.Home, ".local", "state"))
@@ -269,6 +302,18 @@ func (h *Host) HolderLog(id string) string {
 // cleanup stops every session as `rm` does, and waits for each holder to
 // exit, so that none outlives the test and each writes its coverage.
 func (h *Host) cleanup() {
+	// Later Setenv cleanups may have restored PATH already. Keep this
+	// host's own fixture tools available until its sessions are gone.
+	oldPath := os.Getenv("PATH")
+	if err := os.Setenv("PATH", filepath.Join(h.Root, "bin")+string(os.PathListSeparator)+systemPath()); err != nil {
+		h.t.Error(err)
+	}
+	defer func() {
+		if err := os.Setenv("PATH", oldPath); err != nil {
+			h.t.Error(err)
+		}
+	}()
+
 	entries, _ := os.ReadDir(paths.SessionsDir())
 	for _, e := range entries {
 		id := e.Name()

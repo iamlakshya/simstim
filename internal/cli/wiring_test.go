@@ -272,9 +272,25 @@ func TestACancelDuringTheFixesSaysWhatWasFixed(t *testing.T) {
 		}
 		t.Setenv("XDG_CACHE_HOME", short) // a socket's path in it must be short
 		gone := writeFixWrapper(t, "gone")
-		cm := filepath.Join(client.CacheDir(), "cm")
-		_ = os.MkdirAll(cm, 0o700)
-		dead := filepath.Join(cm, "dead")
+		controlHost := client.Host{Name: "control-fixture", SSH: "control-fixture.invalid"}
+		if err := client.SaveHostsContext(context.Background(), []client.Host{controlHost}); err != nil {
+			t.Fatal(err)
+		}
+		pinFor(t, controlHost.Name)
+		cmd, err := (&client.SSH{Host: controlHost}).Command(context.Background(), "true")
+		if err != nil {
+			t.Fatal(err)
+		}
+		var pattern string
+		for _, arg := range cmd.Args {
+			if strings.HasPrefix(arg, "ControlPath=") {
+				pattern = strings.TrimPrefix(arg, "ControlPath=")
+			}
+		}
+		if pattern == "" || pattern == "none" || !strings.Contains(pattern, "%C") {
+			t.Fatalf("canonical controller did not publish an indexed control path: %q", cmd.Args)
+		}
+		dead := strings.ReplaceAll(pattern, "%C", strings.Repeat("a", 40))
 		l, err := net.Listen("unix", dead)
 		if err != nil {
 			t.Fatal(err)

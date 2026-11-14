@@ -22,9 +22,6 @@ import (
 
 // The tests in this binary may start it again as a session's holder.
 func TestMain(m *testing.M) {
-	if code, handled := client.GitSSHMode(os.Args[1:]); handled {
-		os.Exit(code)
-	}
 	hosttest.Main(m)
 }
 

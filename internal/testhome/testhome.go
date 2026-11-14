@@ -35,6 +35,17 @@ const marker = ".testhome"
 // session's socket in the runtime folder is shorter.
 var maxRoot = 103 - len("/home/.cache/") - len(brand.Name) - len("/cm/nf-") - 40
 
+// The runner owns this original base. A test may later move TMPDIR through
+// a long symlink while its new sockets must stay within the same owned run.
+var initialTempBase = os.TempDir()
+
+func shortBase(prefix string) string {
+	if base, err := filepath.EvalSymlinks(initialTempBase); err == nil && len(base)+1+len(prefix)+compactSuffixLen <= maxRoot {
+		return initialTempBase
+	}
+	return "/tmp"
+}
+
 // Main runs the tests in a home of their own, removes it, and exits with
 // the tests' code. Call it from TestMain.
 func Main(m *testing.M) {
@@ -154,7 +165,7 @@ func trusted(root string) bool {
 		return false
 	}
 	parent := filepath.Dir(root)
-	for _, tmp := range []string{os.TempDir(), "/tmp"} {
+	for _, tmp := range []string{os.TempDir(), initialTempBase, "/tmp"} {
 		if dir, err := filepath.EvalSymlinks(tmp); err == nil && dir == parent {
 			return true
 		}
@@ -222,12 +233,12 @@ func goFolders() map[string]string {
 // tempDir makes a new temporary folder th… with a short path, whose
 // sockets fit (maxRoot). A long temporary folder, as macOS gives, makes
 // way for /tmp. Windows has no such limit.
-func tempDir() (string, error) { return tempDirIn("", "/tmp", "th") }
+func tempDir() (string, error) { return tempDirIn("", shortBase("th"), "th") }
 
 // ShortTempDir makes a new temporary folder, named prefix and a number,
 // with a path short enough for the sockets that a test makes in it, as the
 // tests' home has (maxRoot). The caller removes it.
-func ShortTempDir(prefix string) (string, error) { return tempDirIn("", "/tmp", prefix) }
+func ShortTempDir(prefix string) (string, error) { return tempDirIn("", shortBase(prefix), prefix) }
 
 // tempDirIn makes the folder in base, or else in short. It measures the
 // path with its symlinks resolved, as it returns it: /tmp on macOS is

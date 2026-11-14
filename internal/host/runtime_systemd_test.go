@@ -49,7 +49,8 @@ echo $! > "$units/$unit"
 	h.Script("systemctl", `units=`+units+`
 case "$2" in
 is-system-running) echo running ;;
-stop) `+stop+` ;;
+stop) if [ ! -f "$units/$3" ]; then exit 0; fi
+	`+stop+` ;;
 show) if kill -0 "$(cat "$units/$3" 2>/dev/null)" 2>/dev/null; then echo active; else echo inactive; fi ;;
 *) exit 0 ;;
 esac
@@ -106,7 +107,10 @@ func TestAFailedDeliveryStopsTheUnit(t *testing.T) {
 			}
 			_ = syscall.Kill(pid, syscall.SIGKILL)
 			if err := hosttest.Reap(pid, 5*time.Second); err != nil {
-				t.Error(err)
+				t.Fatal(err)
+			}
+			if err := os.Remove(filepath.Join(units, host.UnitName(id))); err != nil {
+				t.Fatal(err)
 			}
 		}
 	}
@@ -125,6 +129,11 @@ func TestTheHolderRecordsTheUnitThatSystemdRunNames(t *testing.T) {
 	}
 	_, _ = host.HolderRequest(s.ID, "kill", nil, 3*time.Second)
 	if err := hosttest.Reap(pid, 10*time.Second); err != nil {
+		t.Fatal(err)
+	}
+	// Reap proved the owned fixture child has exited. Retire its manager
+	// record before cleanup, so the fixture never signals a recycled PID.
+	if err := os.Remove(filepath.Join(units, host.UnitName(s.ID))); err != nil {
 		t.Fatal(err)
 	}
 	if m := manifest(t, s.ID); m.Run.Unit != host.UnitName(s.ID) {

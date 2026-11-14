@@ -3,9 +3,7 @@ package host_test
 import (
 	"errors"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"syscall"
 	"testing"
@@ -194,6 +192,7 @@ func TestARenameDuringAResume(t *testing.T) {
 // and would start its agent later and save into the deleted folder.
 func TestAFailedDeliveryOfSecretsStopsTheHolder(t *testing.T) {
 	hosttest.New(t)
+	observeHolders(t)
 	old := *host.Deliver
 	t.Cleanup(func() { *host.Deliver = old })
 	var id string
@@ -219,6 +218,7 @@ func TestAFailedDeliveryOfSecretsStopsTheHolder(t *testing.T) {
 // and save into the deleted folder.
 func TestAHolderThatWillNotStopKeepsTheSession(t *testing.T) {
 	hosttest.New(t)
+	observeHolders(t)
 	oldDeliver, oldSignal, oldWait := *host.Deliver, *host.SignalHolder, *host.StopWait
 	t.Cleanup(func() { *host.Deliver, *host.SignalHolder, *host.StopWait = oldDeliver, oldSignal, oldWait })
 	var id string
@@ -233,8 +233,7 @@ func TestAHolderThatWillNotStopKeepsTheSession(t *testing.T) {
 	pids := holderPIDs(t, id)
 	t.Cleanup(func() {
 		for _, pid := range pids {
-			_ = syscall.Kill(pid, syscall.SIGKILL)
-			_ = hosttest.Reap(pid, 5*time.Second)
+			killObservedHolder(t, pid)
 		}
 	})
 	var pe *proto.Error
@@ -255,6 +254,7 @@ func TestAHolderThatWillNotStopKeepsTheSession(t *testing.T) {
 // failed to deliver its secrets then deletes its session.
 func TestAHolderThatIgnoresSIGTERMIsKilled(t *testing.T) {
 	hosttest.New(t)
+	observeHolders(t)
 	oldDeliver, oldSignal, oldWait := *host.Deliver, *host.SignalHolder, *host.StopWait
 	t.Cleanup(func() { *host.Deliver, *host.SignalHolder, *host.StopWait = oldDeliver, oldSignal, oldWait })
 	var id string
@@ -285,6 +285,7 @@ func TestAHolderThatIgnoresSIGTERMIsKilled(t *testing.T) {
 // its session.
 func TestAHolderThatAnswersLateIsStopped(t *testing.T) {
 	hosttest.New(t)
+	observeHolders(t)
 	oldWait := *host.StartWait
 	t.Cleanup(func() { *host.StartWait = oldWait })
 	stall := filepath.Join(t.TempDir(), "start-stall")
@@ -366,6 +367,7 @@ func TestAHolderThatStartsItsAgentLateIsStopped(t *testing.T) {
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			hosttest.New(t)
+			observeHolders(t)
 			oldWait, oldLate := *host.StartWait, *host.LateStart
 			t.Cleanup(func() { *host.StartWait, *host.LateStart = oldWait, oldLate })
 			stall := filepath.Join(t.TempDir(), "start-stall")
@@ -415,27 +417,4 @@ func TestANameThatIsTheIDOfASession(t *testing.T) {
 	if err := host.Rename(s.ID, "newnewid"); err != nil {
 		t.Errorf("a rename to an ID that no session has: %v", err)
 	}
-}
-
-// namedHolderRuns reports whether a holder process of session id runs.
-func namedHolderRuns(t *testing.T, id string) bool {
-	t.Helper()
-	return len(holderPIDs(t, id)) > 0
-}
-
-// holderPIDs lists the holder processes of session id.
-func holderPIDs(t *testing.T, id string) []int {
-	t.Helper()
-	out, err := exec.CommandContext(t.Context(), "ps", "-A", "-o", "pid=,args=").Output()
-	if err != nil {
-		t.Fatal(err)
-	}
-	var pids []int
-	for _, line := range strings.Split(string(out), "\n") {
-		pid, args, _ := strings.Cut(strings.TrimSpace(line), " ")
-		if n, err := strconv.Atoi(pid); err == nil && strings.HasSuffix(strings.TrimSpace(args), " holder "+id) {
-			pids = append(pids, n)
-		}
-	}
-	return pids
 }

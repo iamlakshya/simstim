@@ -3,6 +3,7 @@ package host_test
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/iamlakshya/simstim/internal/api"
@@ -36,15 +37,24 @@ func TestTheHolderRecordsItsUnitBeforeItsFirstSave(t *testing.T) {
 		t.Errorf("after a start and an end: run %+v", m.Run)
 	}
 
+	// Keep the manager fixture alive for the recorded synthetic unit. The
+	// direct launch above has already checked UnitEnv without that fixture.
+	units := fakeSystemd(t, h, true)
+
 	// The agent's program is gone, so the agent cannot start: the save of
 	// the failed start holds the unit too.
 	if err := os.Remove(agent); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := host.Resume(api.ResumeArgs{ID: s.ID}); err == nil {
-		t.Fatal("a resume whose agent cannot start succeeded")
+	if _, err := host.Resume(api.ResumeArgs{ID: s.ID}); err == nil || !strings.Contains(err.Error(), "agent.sh") {
+		t.Fatalf("the resume did not report its missing agent: %v", err)
 	}
 	if m := manifest(t, s.ID); m.Run.Unit != unit || m.Status.State != host.StateErrored {
 		t.Errorf("after a start that failed: run %+v, status %+v", m.Run, m.Status)
+	}
+	// This fixture has no remaining service once its failed holder exits.
+	// Retire the fake manager record rather than signal an old numeric PID.
+	if err := os.Remove(filepath.Join(units, unit)); err != nil {
+		t.Fatal(err)
 	}
 }
