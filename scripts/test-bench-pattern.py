@@ -92,8 +92,8 @@ class ConfirmationTests(unittest.TestCase):
         self.assertEqual(self.match(self.pattern(["Literal/[dot].+ 1ns"])),
                          {"BenchmarkLiteral/[dot].+"})
 
-    def script_run(self, collision=None, default_output=False, **settings):
-        with tempfile.TemporaryDirectory(dir=self.root) as folder:
+    def script_run(self, collision=None, default_output=False, repository=False, inside_module_tmp=False, **settings):
+        with tempfile.TemporaryDirectory(dir=self.root) as folder, tempfile.TemporaryDirectory(prefix="bench-script-tmp-") as outside_tmp:
             root = Path(folder)
             (root / "scripts").mkdir()
             for package in PACKAGES:
@@ -102,6 +102,11 @@ class ConfirmationTests(unittest.TestCase):
             for name in ("bench.sh", "bench-pattern.py"):
                 shutil.copyfile(ROOT / name, root / "scripts" / name)
             evidence = root / "evidence"
+            repository_before = {}
+            if repository:
+                (root / "go.mod").write_text("module example.invalid/source-repository\n\ngo 1.26\n")
+                (root / "go.sum").write_text("example.invalid/existing v1.0.0 h1:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=\n")
+                repository_before = {name: (root / name).read_bytes() for name in ("go.mod", "go.sum")}
             protected = root / "protected"
             marker = "existing evidence must stay"
             if collision:
@@ -126,7 +131,9 @@ fi
 ''',
                 "go": r'''case "$1" in
 env)
-    if [ "$2" = GOSUMDB ]; then
+    if [ "$2" = GOMOD ]; then
+        "$BENCH_REAL_GO" env GOMOD
+    elif [ "$2" = GOSUMDB ]; then
         if [ "${BENCH_STATS_FAIL_PHASE:-}" = sumdb ]; then echo off; else echo sum.golang.org; fi
     else
         printf '{}\n'
@@ -135,6 +142,11 @@ env)
 mod)
     [ "$2" = download ] && [ "$3" = -json ] && [ "$4" = 'golang.org/x/perf@v0.0.0-20260929162123-406019bb8b68' ] || exit 1
     printf 'download\n' >>"$BENCH_TOOL_LOG"
+    actual_module=$("$BENCH_REAL_GO" env GOMOD)
+    if [ -n "$actual_module" ] && [ "$actual_module" != /dev/null ]; then
+        # Real Go may save sums for an explicit download in a module.
+        printf '# unexpected tool checksum write\n' >>"${actual_module%/go.mod}/go.sum"
+    fi
     if [ "${BENCH_STATS_FAIL_PHASE:-}" = download ]; then echo 'fixture module preparation failed' >&2; exit 42; fi
     printf '{"Path":"golang.org/x/perf","Version":"v0.0.0-20260929162123-406019bb8b68","Sum":"h1:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=","GoModSum":"h1:BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB="}\n'
     ;;
@@ -202,6 +214,27 @@ printf 'compare\n' >>"$BENCH_STATS_LOG"
 again=0
 for arg in "$@"; do case "$arg" in *again-base.txt) again=1;; esac; done
 printf 'sec/op\n'
+if [ "${BENCH_OPPOSING_NESTED_CHANGES:-}" = 1 ]; then
+    projection=
+    while [ "$#" -gt 0 ]; do
+        if [ "$1" = -row ]; then projection=${2:-}; fi
+        shift
+    done
+    # These two cases have equal pooled means and opposite real changes.
+    # The projection contract must retain the slow configuration.
+    if [ "$projection" = .name ]; then
+        printf 'C1TranslateFrames 2ns 2ns +0.00%% (p=1.000 n=12)\n'
+    elif [ "$projection" = .fullname ]; then
+        printf 'C1TranslateFrames/C1/4096 1ns 2ns +100.00%% (p=0.000 n=6)\n'
+        if [ "$again" = 0 ]; then
+            printf 'C1TranslateFrames/C1/65536 3ns 2ns -33.33%% (p=0.000 n=6)\n'
+        fi
+    else
+        echo 'fixture statistics projection is unsupported' >&2
+        exit 42
+    fi
+    exit 0
+fi
 if [ "$again" = 0 ]; then
     printf 'C1TranslateFrames/C1/65536 1ns 2ns +25.00%% (p=0.000 n=2)\n'
 else
@@ -211,6 +244,17 @@ fi
                 "wrapper": r'''out=$(mktemp)
 trap 'rm -f "$out"' EXIT
 "$BENCH_FIXTURE" "$@" -test.benchtime 1x >"$out"
+case "$0:${BENCH_SAMPLE_COLLISION:-}" in
+    */bin-head/client.test:package)
+        sed 's,^pkg: .*,pkg: example.invalid/other-package,' "$out" >"$out.changed" ;;
+    */bin-head/client.test:cpu)
+        sed 's/^cpu: .*/cpu: conflicting processor/' "$out" >"$out.changed" ;;
+    */bin-head/client.test:runtime)
+        sed 's/^\(Benchmark[^[:space:]]*\)-[0-9][0-9]*/\1-999/' "$out" >"$out.changed" ;;
+    */bin-head/client.test:custom)
+        awk '/^Benchmark/ && !changed {print "mode: conflicting"; changed=1} {print}' "$out" >"$out.changed" ;;
+esac
+if [ -f "$out.changed" ]; then mv "$out.changed" "$out"; fi
 printf '%s\n' "$0" >>"$BENCH_MATRIX_LOG"
 printf '=== invocation ===\n' >>"$BENCH_LOG"
 cat "$out" >>"$BENCH_LOG"
@@ -233,7 +277,9 @@ cat "$out"
                                BENCH_STATS_LOG=str(stats), BENCH_TOOL_LOG=str(tools),
                                BENCH_STATS_FIXTURE=str(root / "bin/stats"), BENCH_WORKTREE_LOG=str(worktrees),
                                BENCH_OUTPUT_DIR=str(evidence), BENCH_ROUNDS="1", BENCH_AGAIN_ROUNDS="2",
-                               BENCH_MAX="15", **settings)
+                               BENCH_MAX="15", BENCH_REAL_GO=shutil.which("go"), **settings)
+            if not inside_module_tmp:
+                env["TMPDIR"] = outside_tmp
             if default_output:
                 env.pop("BENCH_OUTPUT_DIR")
             result = subprocess.run(["bash", "scripts/bench.sh", "fixture"], cwd=root, env=env,
@@ -262,7 +308,9 @@ cat "$out"
                 "stats": stats.read_text().splitlines() if stats.exists() else [],
                 "tools": tools.read_text().splitlines() if tools.exists() else [],
                 "worktrees": worktrees.read_text().splitlines() if worktrees.exists() else [],
-                "temporary_root": str(root / "state/tmp"),
+                "temporary_root": env["TMPDIR"],
+                "repository_before": repository_before,
+                "repository_after": {name: (root / name).read_bytes() for name in repository_before},
                 "worktrees_removed": all(not Path(path).exists() for path in worktrees.read_text().splitlines()) if worktrees.exists() else True,
                 "evidence_files": files,
                 "evidence_executables": executable,
@@ -399,6 +447,69 @@ cat "$out"
         self.assertIn("all-base.txt", run["evidence_files"])
         self.assertIn("again-head.txt", run["evidence_files"])
         self.assertEqual(len(run["evidence_executables"]), 12)
+
+
+    @unittest.skipUnless(shutil.which("bash"), "the benchmark script needs Bash")
+    def test_tool_preparation_keeps_the_real_repository_module_files(self):
+        run = self.script_run(repository=True)
+        result = run["result"]
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(run["repository_after"], run["repository_before"])
+        self.assertEqual(run["evidence_files"]["tool-module-context.txt"], b"/dev/null\n")
+        self.assertEqual(run["tools"], ["download", "install", "buildinfo", "help"])
+        self.assertEqual(len(run["builds"]), 12)
+        self.assertEqual(len(run["runs"]), 36)
+
+    @unittest.skipUnless(shutil.which("bash"), "the benchmark script needs Bash")
+    def test_temporary_root_inside_a_module_is_refused_without_changes(self):
+        run = self.script_run(repository=True, inside_module_tmp=True)
+        self.assert_no_samples(run)
+        self.assertEqual(run["repository_after"], run["repository_before"])
+        self.assertEqual(run["tools"], [])
+        self.assertEqual(run["builds"], [])
+        self.assertEqual(run["worktrees"], [])
+        self.assert_durable_status(run)
+        self.assertIn("temporary tool directory is inside a Go module", run["result"].stderr)
+        self.assertIn("set TMPDIR", run["result"].stderr)
+
+
+    @unittest.skipUnless(shutil.which("bash"), "the benchmark script needs Bash")
+    def test_opposing_nested_changes_still_confirm_the_slow_case(self):
+        run = self.script_run(BENCH_OPPOSING_NESTED_CHANGES="1")
+        result = run["result"]
+        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("slower than the base by more than 15% in both runs", result.stdout)
+        self.assertEqual(len(run["builds"]), 12)
+        self.assertEqual(len(run["runs"]), 36)
+        self.assertEqual(len(run["stats"]), 2)
+        self.assert_durable_status(run)
+        first_table = run["evidence_files"]["all-stat.txt"].decode()
+        self.assertIn("C1TranslateFrames/C1/4096 1ns 2ns +100.00%", first_table)
+        self.assertIn("C1TranslateFrames/C1/65536 3ns 2ns -33.33%", first_table)
+        for output in run["runs"][:2 * len(PACKAGES)]:
+            self.assertTrue(NESTED <= names(output))
+        for output in run["runs"][2 * len(PACKAGES):]:
+            self.assertEqual(names(output), {"BenchmarkC1TranslateFrames/C1/4096"})
+        coverage = json.loads(run["evidence_files"]["all-coverage.json"])
+        self.assertEqual(len(coverage["cases"]), 17)
+
+    @unittest.skipUnless(shutil.which("bash"), "the benchmark script needs Bash")
+    def test_conflicting_package_or_configuration_stops_comparison(self):
+        for collision in ("package", "cpu", "runtime", "custom"):
+            with self.subTest(collision=collision):
+                run = self.script_run(BENCH_SAMPLE_COLLISION=collision)
+                result = run["result"]
+                self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertEqual(len(run["builds"]), 12)
+                self.assertEqual(len(run["runs"]), 12)
+                self.assertEqual(run["stats"], [])
+                self.assertIn("conflicting package or configuration", result.stderr)
+                self.assertIn("sample identities could not be compared safely", result.stderr)
+                self.assertIn("Try:", result.stderr)
+                self.assert_durable_status(run)
+                self.assertIn("all-base.txt", run["evidence_files"])
+                self.assertIn("all-head.txt", run["evidence_files"])
+
 
 
 if __name__ == "__main__":

@@ -30,7 +30,7 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ### Fixed
 
-- The benchmark check reruns nested cases by their exact names, so a confirmation measures every slow case. It stops on any failed build or missing binary, so no package can be left out of the comparison. It prepares and verifies the pinned statistics tool before sampling. It keeps the binaries, raw samples and logs in a new evidence folder on success and failure.
+- The benchmark check compares nested cases separately and reruns them by their exact names, so a confirmation measures every slow case. It refuses samples with conflicting packages or configurations. It stops on any failed build or missing binary, so no package can be left out of the comparison. It prepares and verifies the pinned statistics tool before sampling. Tool preparation stays outside Go modules, so it never adds tool checksums to the repository. It keeps the binaries, raw samples and logs in a new evidence folder on success and failure.
 - The launcher stops and joins tier question readers before a terminal handoff. It starts a fresh reader on return. A cancelled question keeps the host at `shared` until it is answered.
 
 - Cancelling an attach keeps the clipboard history needed by the paste guard. Clipboard memory checks honour cancellation and refuse an unchecked drop. Terminal output stays byte for byte.

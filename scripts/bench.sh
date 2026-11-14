@@ -132,10 +132,22 @@ PY
 
 # All tool preparation and integrity checks finish before a benchmark is
 # built or sampled. Comparison later uses this exact executable directly.
-prepare_stats
+stats_bin="$evidence/tools/benchstat"
+work=$(mktemp -d "${TMPDIR:-/tmp}/bench-work.XXXXXXXXXX")
+mkdir -m 0700 "$work/tool-prepare"
+(
+    cd "$work/tool-prepare"
+    export GOWORK=off
+    if ! actual_module=$(go env GOMOD) || [ "$actual_module" != /dev/null ]; then
+        echo "bench: the temporary tool directory is inside a Go module or cannot be checked." >&2
+        echo "Try: set TMPDIR to a writable directory outside every Go module, then run this check again." >&2
+        exit 1
+    fi
+    printf '%s\n' "$actual_module" >"$evidence/tool-module-context.txt"
+    prepare_stats
+)
 go version >"$evidence/go-version.txt"
 go env -json GOOS GOARCH GOHOSTOS GOHOSTARCH CGO_ENABLED GOFLAGS GOSUMDB GOPROXY >"$evidence/go-env.json"
-work=$(mktemp -d "${TMPDIR:-/tmp}/bench-work.XXXXXXXXXX")
 git worktree add --detach "$work/base" "$base" >/dev/null 2>"$evidence/base-worktree.stderr" || {
     cat "$evidence/base-worktree.stderr" >&2
     echo "bench: no commit $base" >&2
@@ -219,7 +231,49 @@ measure() { # measure <rounds> <benchmarks> <out prefix>
 }
 
 compare() { # compare <out prefix>: prints benchstat's tables, and writes the slow benchmarks' rows to <out prefix>-slow.txt
-    "$stats_bin" -table '' -row .name base="$1-base.txt" head="$1-head.txt" >"$1-stat.txt"
+    # A full name must keep one package and machine configuration. Otherwise
+    # a single row would pool unrelated samples and could hide a slowdown.
+    if ! python3 -I - "$1-base.txt" "$1-head.txt" >"$1-coverage.json" <<'PYCOVERAGE'
+from collections import Counter
+import json, pathlib, re, sys
+owners = {}
+counts = {}
+for side, path in zip(("base", "head"), sys.argv[1:]):
+    configuration = {}
+    samples = Counter()
+    for line in pathlib.Path(path).read_text().splitlines():
+        metadata = re.fullmatch(r"([a-z][a-z0-9_-]*):[ \t]*(.*)", line)
+        if metadata:
+            key, value = metadata.groups()
+            if value:
+                configuration[key] = value
+            else:
+                configuration.pop(key, None)
+        elif line.startswith("Benchmark"):
+            if any(not configuration.get(key) for key in ("pkg", "goos", "goarch")):
+                raise SystemExit("benchmark samples are missing package or platform metadata")
+            full_name = line.split()[0]
+            suffix = re.fullmatch(r"(.+)-(\d+)", full_name)
+            name, cpus = (suffix[1], int(suffix[2])) if suffix else (full_name, 1)
+            identity = (tuple(sorted(configuration.items())), cpus)
+            if name in owners and owners[name] != identity:
+                raise SystemExit("benchmark name has conflicting package or configuration: " + name)
+            owners[name] = identity
+            samples[name] += 1
+    if not samples:
+        raise SystemExit("benchmark input has no samples: " + pathlib.Path(path).name)
+    counts[side] = samples
+cases = [{"name": name, "configuration": dict(identity[0]), "runtime_cpus": identity[1],
+          "samples": {side: sample_counts[name] for side, sample_counts in counts.items()}}
+         for name, identity in sorted(owners.items())]
+print(json.dumps({"cases": cases}))
+PYCOVERAGE
+    then
+        echo "bench: benchmark sample identities could not be compared safely." >&2
+        echo "Try: keep each benchmark name in one package and configuration on both sides, then run this check again." >&2
+        return 1
+    fi
+    "$stats_bin" -table '' -row .fullname base="$1-base.txt" head="$1-head.txt" >"$1-stat.txt"
     cat "$1-stat.txt"
     python3 -I - "$1-stat.txt" "$max" >"$1-slow.txt" <<'PY'
 import re, sys
