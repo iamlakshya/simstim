@@ -5,12 +5,12 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"strconv"
-	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
+
+	"github.com/iamlakshya/simstim/internal/client"
 )
 
 // Old names and their warnings (docs/contributing/cli-spec.md 3). An old
@@ -22,44 +22,13 @@ import (
 // added only while its row is here, so removing the row removes the old
 // form.
 
-// oldForm is one row of the table of old forms.
-type oldForm struct {
-	// ID names a row that the code looks up, such as "new -d", as the table
-	// of cli-spec 3.2 writes the old form.
-	ID string
-	// Old and New are the old form and the new one, as the user types them.
-	Old, New string
-	// Kind is what changed: "command", "flag", "short flag", "behaviour",
-	// "value", "JSON key" or "keymap name".
-	Kind string
-	// Cmd is the command whose reference page lists the old form, such as
-	// "host ls". It is "" for the root.
-	Cmd string
-	// Version is the release that adds the warning, such as "0.2.0". Its
-	// day is in releaseDays.
-	Version string
-	// Code names the warning in machine output.
-	Code string
-	// Says is the warning's first sentence. It is `"<old>" is now "<new>".`
-	// when empty.
-	Says string
-	// Keeps says what works until the end. It is `"<old>" works` when empty.
-	Keeps string
-	// Note says more about the old form, for the reference.
-	Note string
-	// From, for a behaviour that changes at the end, says what holds from
-	// then, without its full stop, such as `without a terminal, "rm" needs
-	// -y`. The warning is then that sentence with the end.
-	From string
-}
+type oldForm = client.OldForm
 
 // releaseDays holds the day of each release that adds a warning, as
 // 2006-01-02. The 12 months of an old form start on the day of its release,
 // when users first see the warning. The release step of
 // docs/contributing/releasing.md sets the day of a new release here.
-var releaseDays = map[string]string{
-	"0.2.0": "2026-11-11",
-}
+var releaseDays = client.ReleaseDays
 
 // oldForms is every old form that still works. Each task of cli-spec 3.2
 // adds its rows. Tests change it to see what a release does after an end.
@@ -104,6 +73,7 @@ var oldForms = []oldForm{
 		Says:  `"host destroy <host>" is now "host rm <host> --destroy", and its -y is now --confirm <host>.`,
 		Keeps: `"host destroy" works`,
 	},
+	*client.OldKeymapPreview,
 }
 
 // The rows that the commands warn with. The release that removes the row
@@ -120,7 +90,13 @@ var (
 	oldFlip = oldRow("flip")
 	// oldRmWithoutYes is rm that deletes with input off and without -y.
 	oldRmWithoutYes = oldRow(`"rm" without -y, with input off`)
+	// oldKeymapPreview is the old [keymap] name of session: peek.
+	oldKeymapPreview = oldRow(`[keymap] "session: preview"`)
 )
+
+func init() {
+	client.OldKeymapPreview = oldKeymapPreview
+}
 
 // oldRow is the row of the old form old.
 func oldRow(old string) *oldForm {
@@ -132,15 +108,9 @@ func oldRow(old string) *oldForm {
 	panic("deprecated.go: no row for " + old)
 }
 
-// end is the release and the day of the old form's end: two releases, and
-// 12 months, after the release that adds its warning.
-func (o oldForm) end() (string, time.Time) {
-	day, err := time.Parse(time.DateOnly, releaseDays[o.Version])
-	if err != nil {
-		panic("deprecated.go: release " + o.Version + " of " + o.Old + " has no day in releaseDays")
-	}
-	return twoReleasesAfter(o.Version), day.AddDate(1, 0, 0)
-}
+var twoReleasesAfter = client.TwoReleasesAfter
+
+var oldInstallForce = oldRow("agents install --force")
 
 // oldNamesOf lists the old names of the command c that still work, such
 // as "kill" for rm. A suggestion counts them as names of c, so a word near
@@ -167,54 +137,16 @@ func OldNames(path string) []OldName {
 	var out []OldName
 	for _, o := range oldForms {
 		if o.Cmd == path {
-			version, day := o.end()
+			version, day := o.End()
 			out = append(out, OldName{Old: o.Old, New: o.New, Until: fmt.Sprintf("v%s and %s, whichever comes later", version, day.Format("2 January 2006")), Note: o.Note})
 		}
 	}
 	return out
 }
 
-// twoReleasesAfter is the version two releases after v. A release is a new
-// minor or major version, so 0.2.0 gives 0.4.0.
-func twoReleasesAfter(v string) string {
-	parts := strings.Split(strings.TrimPrefix(v, "v"), ".")
-	if len(parts) < 2 {
-		panic("deprecated.go: " + v + " is not a version")
-	}
-	minor, err := strconv.Atoi(parts[1])
-	if err != nil {
-		panic("deprecated.go: " + v + " is not a version")
-	}
-	return parts[0] + "." + strconv.Itoa(minor+2) + ".0"
-}
-
-// says is the warning's first sentence.
-func (o oldForm) says() string {
-	switch {
-	case o.Says != "":
-		return o.Says
-	case o.From != "":
-		return sentence(o.From)
-	}
-	return fmt.Sprintf("%q is now %q.", o.Old, o.New)
-}
-
-// warning is the whole warning, without "Warning:".
-func (o oldForm) warning() string {
-	version, day := o.end()
-	if o.From != "" {
-		return fmt.Sprintf("%s from v%s and %s, whichever comes later.", o.From, version, day.Format("2 January 2006"))
-	}
-	keeps := o.Keeps
-	if keeps == "" {
-		keeps = fmt.Sprintf("%q works", o.Old)
-	}
-	return fmt.Sprintf("%s %s until v%s and %s, whichever comes later.", o.says(), keeps, version, day.Format("2 January 2006"))
-}
-
-// warnOld prints the warning of an old form on the stderr of cmd, once per
-// run: one line, in yellow when stderr has colour, or one JSON line with
-// --json. It prints nothing during shell completion.
+// warnOld prints the warning of an old form on stderr, once per run: one
+// line, in yellow when stderr has colour, or one JSON line with --json. It
+// prints nothing during shell completion.
 func warnOld(cmd *cobra.Command, o *oldForm) {
 	if cmd.Name() == cobra.ShellCompRequestCmd || cmd.Name() == cobra.ShellCompNoDescRequestCmd {
 		return
@@ -231,9 +163,9 @@ func warnOld(cmd *cobra.Command, o *oldForm) {
 	w := cmd.ErrOrStderr()
 	line := commandLine(cmd)
 	if jsonAsked(cmd, line) {
-		version, day := o.end()
+		version, day := o.End()
 		line, _ := json.Marshal(map[string]any{"v": jsonVersion, "warning": map[string]string{
-			"code": o.Code, "message": o.says(), "old": o.Old, "new": o.New,
+			"code": o.Code, "message": o.FirstSentence(), "old": o.Old, "new": o.New,
 			"until_version": version, "until_date": day.Format(time.DateOnly),
 		}})
 		fmt.Fprintf(w, "%s\n", jsonSafe(line))
@@ -244,7 +176,7 @@ func warnOld(cmd *cobra.Command, o *oldForm) {
 
 // oldWarning is the one line of the warning, in yellow with colour.
 func oldWarning(o *oldForm, colour bool) string {
-	line := "Warning: " + o.warning()
+	line := "Warning: " + o.Warning()
 	if colour {
 		return "\x1b[33m" + line + "\x1b[0m"
 	}

@@ -71,15 +71,6 @@ func resolveAddress(cmd *cobra.Command, word string, strict bool) (address, erro
 	return lookupBare(cmd, word, strict)
 }
 
-// sessionArg is the address that the command line names, or, with none,
-// the session that the user picks (cli-spec 6.3).
-func sessionArg(cmd *cobra.Command, args []string, strict bool) (address, error) {
-	if len(args) > 0 {
-		return resolveAddress(cmd, args[0], strict)
-	}
-	return pickSession(cmd, "<host>/<session>")
-}
-
 // lastAddress is the address "-": the session last attached to. Only a
 // host that is no longer saved changes the error. Any other, such as a
 // hosts.toml that does not decode, stays as it is.
@@ -408,8 +399,13 @@ func (a address) find(cmd *cobra.Command, list []client.Session) (*client.Sessio
 	if !a.byID {
 		return findIn(cmd, list, a.ref, a.host.Name)
 	}
-	if s := byID(list, a.ref); s != nil {
+	s, err := resolveIDIn(list, a.ref, a.host.Name)
+	if err == nil {
 		return s, nil
+	}
+	var ue *client.UserError
+	if !errors.As(err, &ue) || ue.Code != "session_not_found" {
+		return nil, err
 	}
 	msg := a.gone
 	if msg == "" {
@@ -432,7 +428,7 @@ func byID(list []client.Session, id string) *client.Session {
 // withSession finds the session that word names, an address, dials its
 // host, and runs fn with the session, within 60 seconds.
 func withSession(cmd *cobra.Command, word string, fn func(context.Context, client.Host, *client.Conn, *client.Session) error) error {
-	a, err := resolveAddress(cmd, word, false)
+	a, err := sessionArg(cmd, []string{word}, false)
 	if err != nil {
 		return err
 	}

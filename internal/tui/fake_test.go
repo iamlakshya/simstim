@@ -52,29 +52,33 @@ type fakeHost struct {
 
 // fakeBackend pretends to be SSH, the hosts and the terminal.
 type fakeBackend struct {
-	mu        sync.Mutex
-	hosts     []client.Host
-	tiers     map[string]client.TierEntry
-	tiersErr  error
-	state     map[string]*fakeHost
-	conns     []*fakeConn
-	dials     map[string]int
-	calls     []string
-	saved     [][]client.Host
-	known     []string
-	probe     client.Platform
-	probeErr  error
-	installed bool
-	attach    client.AttachResult
-	attachErr error
-	attached  []client.AttachOptions
-	blocked   *atomic.Int64 // goroutines waiting in Done
-	mem       memory        // what the launcher remembers between runs
-	saves     int
-	secrets   map[string]api.Secret // a host's own secrets, for every start
-	secretErr error
-	trust     map[string]client.SetupAnswers // answers about setup scripts, by host
-	trustWarn *client.UserError              // the answers' file did not parse
+	settingsWarn, detachKey string
+	settings                *client.Settings
+	newArgs                 []client.NewArgs
+	secretsFrom             []client.Settings
+	mu                      sync.Mutex
+	hosts                   []client.Host
+	tiers                   map[string]client.TierEntry
+	tiersErr                error
+	state                   map[string]*fakeHost
+	conns                   []*fakeConn
+	dials                   map[string]int
+	calls                   []string
+	saved                   [][]client.Host
+	known                   []string
+	probe                   client.Platform
+	probeErr                error
+	installed               bool
+	attach                  client.AttachResult
+	attachErr               error
+	attached                []client.AttachOptions
+	blocked                 *atomic.Int64 // goroutines waiting in Done
+	mem                     memory        // what the launcher remembers between runs
+	saves                   int
+	secrets                 map[string]api.Secret // a host's own secrets, for every start
+	secretErr               error
+	trust                   map[string]client.SetupAnswers // answers about setup scripts, by host
+	trustWarn               *client.UserError              // the answers' file did not parse
 	// rememberWarn is the warning of the next answer: the file did not
 	// parse when the answer was kept.
 	rememberWarn *client.UserError
@@ -114,6 +118,7 @@ type fakeBackend struct {
 	beforeInstall func(client.Host)
 	updateErr     error
 	resolveTier   func(context.Context, client.Host) (client.Tier, error)
+	retire        func(context.Context, client.Host) error
 }
 
 func newFakeBackend() *fakeBackend {
@@ -234,9 +239,17 @@ func (b *fakeBackend) UpdateHostsContext(ctx context.Context, c client.HostChang
 }
 
 func (b *fakeBackend) Settings() client.Settings {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.settings != nil {
+		return *b.settings
+	}
 	var s client.Settings
 	s.UI.Motion = "off"
 	s.Attach.DetachKey = "ctrl+\\"
+	if b.detachKey != "" {
+		s.Attach.DetachKey = b.detachKey
+	}
 	return s
 }
 
@@ -276,6 +289,19 @@ func (b *fakeBackend) Dial(ctx context.Context, h client.Host) (Conn, error) {
 	c := &fakeConn{be: b, name: h.Name, hostID: id, idChanged: changed, done: make(chan struct{})}
 	b.conns = append(b.conns, c)
 	return c, nil
+}
+
+func (b *fakeBackend) Reconnect(ctx context.Context, h client.Host) (Conn, error) {
+	b.record("reconnect %s", h.Name)
+	b.mu.Lock()
+	retire := b.retire
+	b.mu.Unlock()
+	if retire != nil {
+		if err := retire(ctx, h); err != nil {
+			return nil, err
+		}
+	}
+	return b.Dial(ctx, h)
 }
 
 // conn is the newest connection to a host.
@@ -418,3 +444,10 @@ func (b *fakeBackend) ResolveHostTier(ctx context.Context, h client.Host) (clien
 func (c *fakeConn) HostID() string { return c.hostID }
 
 func (c *fakeConn) HostIDChanged() bool { return c.idChanged }
+
+func (b *fakeBackend) ReadSettings() (client.Settings, string) {
+	s := b.Settings()
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return s, b.settingsWarn
+}

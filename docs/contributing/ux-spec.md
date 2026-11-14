@@ -20,7 +20,7 @@ simstim has two kinds of screen, with opposite rules:
 
 ## 1. Principles
 
-1. **One job per screen.** Pick a host, then pick or start a session. Each screen is one list in one column. There are no sidebars, split panes, permanent previews or dashboards.
+1. **One job per screen.** Pick a host, then pick or start a session. Each screen is one list in one column. There are no sidebars, split panes, permanent peek panes or dashboards.
 2. **The session owns the terminal.** Once you attach, every row and column belongs to the agent. The client shows only two things of its own: the reconnect notice while the link is down, and system notifications (OSC 777), which draw nothing on the screen.
 3. **A signal, not a box.** No frame round the list. The look is a cyan accent, braille traces of each session's output, rules instead of boxes, and sheets that rise from the bottom. It reads like a console tuned to your sessions.
 4. **The terminal's own colours.** Every colour is a palette slot or the terminal's default, so simstim matches your theme. Fixed RGB is kept for the brand gradient.
@@ -561,23 +561,23 @@ An address names a session: `<host>/<session>`, or `<session>` alone when no oth
 | `simstim` | Opens the launcher |
 | **Sessions** | |
 | `simstim new <host> [--agent claude] [-C ~/src/app [--mkdir]] [--name x] [--worktree [--base ref]] [--secret NAME] [--memory-max 4G] [--inline] [--setup-script \| --no-setup-script] [--detach [--json]] [-- <command>…]` | Starts a session, and attaches unless `--detach`. `-C` is the short form of `--dir` |
-| `simstim attach [<address>] [--restart]` | Attaches directly. `a` is its alias. Without an address and with input on, it opens the picker. A stopped host with a provider script wakes first. On an ended agent it asks to start it again; `--restart` answers yes. |
+| `simstim attach [<address>] [--restart] [--id]` | Attaches directly. `a` is its alias. Without an address and with input on, it opens the picker. A stopped host with a provider script wakes first. On an ended agent it asks to start it again; `--restart` answers yes. |
 | `simstim resume <address> [--memory-max 4G] [--secret NAME] [--detach [--json]]` | Starts an ended agent again in its session and attaches unless `--detach`. On a running agent it attaches, or with `--detach` says that it runs. The old memory cap stays unless a new one is named. |
 | `simstim ls [<host>] [--host h] [--json]` | Lists sessions on every host or one host, with their state, its source and why an agent ended. |
-| `simstim show [<address>] [--json]` | Describes one session and the command that attaches to it. Without an address and with input on, it opens the picker. |
+| `simstim show [<address>] [--screen] [--json]` | Describes one session and the command that attaches to it. `--screen` prints its last screen as plain text, or adds the lines to JSON. Without an address and with input on, it opens the picker. |
 | `simstim rm [<address>] [-y]` | Stops and removes a session, keeping a worktree that has work. It asks first and opens the picker without an address. `delete` is an alias. The old `kill` and `flip` names still work and warn. |
 | `simstim rename <address> <name>` | Renames a session |
 | `simstim send <address> <text> [--no-enter]` | Types text into a session without attaching, then presses Enter |
 | `simstim ports <address> [--json]` | Lists the ports a session listens on |
 | `simstim forward <address> [<port>…]` | Forwards a session's ports to localhost, until Ctrl+C |
-| `simstim pull <address> [--into <branch>] [--force]` | Brings a session's branch into the git repository in the current folder |
+| `simstim pull <address> [--into <branch>] [--force] [--id]` | Brings a session's branch into the git repository in the current folder |
 | **Hosts** | |
 | `simstim host add <name> [<ssh-target>] [--ssh-config f] [--label k=v] [--provider-script s --wake] [--yes]` | Connects a host: probe, consent, install, setup and doctor, and with input on the agent checklist when an agent is missing |
 | `simstim host ls [--json]` | Lists the hosts |
-| `simstim host test <host> [--json]` | Checks that a host answers, and how fast |
+| `simstim host test <host> [--reconnect] [--json]` | Checks that a host answers, and how fast. `--reconnect` first retires its shared SSH connection |
 | `simstim host doctor <host> [--fix [--yes]] [--json]` | Checks a host's setup, and with `--fix` fixes what it can |
 | `simstim host show <host> [--json]` | Describes the saved host and what it says about itself, as the launcher does. |
-| `simstim host set <host> idle=<30m\|never>` | Changes the named idle setting. The old `host idle` form still works and warns. |
+| `simstim host set <host> <key>=<value>... [--confirm <host>]` | Changes idle stop or the host tier. Raising a tier needs the typed host name. The old `host idle` form still works and warns. |
 | `simstim host rm <host> [--destroy [--confirm <host>] [--force]]` | Forgets a host. For a created machine it asks for the typed name before deleting it too. `host destroy` remains a warned old form. |
 | `simstim host upgrade <host> [--json]` | Installs this client's helper without the other host-add steps. |
 | `simstim host restore <host> [--all] [--json]` | Starts again the sessions that a host restart stopped (or, with `--all`, a crash) |
@@ -588,7 +588,8 @@ An address names a session: `<host>/<session>`, or `<session>` alone when no oth
 | `simstim host alerts test <host> [--event e]`, `host alerts log <host> [--lines n] [--json]`, `host alerts off <host>` | Sends a test alert, shows the last deliveries, or turns alerts off |
 | **Agents** | |
 | `simstim agents ls [--json]` | Lists the agent table, with how each agent installs |
-| `simstim agents install <agent> [--host h] [--reinstall]` | Installs an agent on a host with its vendor's installer, in a session you watch |
+| `simstim agents install <agent> [<host>] [--host h] [--reinstall]` | Installs an agent on a host with its vendor's installer, in a session you watch |
+| `simstim agents login <agent> [<host>] [--host h] [--json]` | Starts the agent's own login, or attaches to its existing login session. With input off it names the exact session instead |
 | **Setup and help** | |
 | `simstim setup [--host h \| --create lima\|docker\|e2b] [--name n] [--agents a,b] [--yes] [--no-login]` | The guided setup: where agents run, the host, the agent checklist, the installs and the logins, then the first session's command |
 | `simstim doctor [--fix [--yes]]` | Checks this computer: ssh, the config files and the secrets' commands |
@@ -601,6 +602,7 @@ An address names a session: `<host>/<session>`, or `<session>` alone when no oth
 | `simstim debug profile <host>/<session> cpu\|heap\|goroutine [--for 30s]` | Writes a profile of the session's process on the host. `--for` is for `cpu` only |
 | `simstim debug bundle [<host>\|<host>/<session>] [--ssh]` | Writes one archive of the debug files in the current folder, with private values replaced. Nothing is uploaded |
 | `simstim config path`, `config keymap [--json]` | Prints where the configuration lives, or the launcher's commands and their keys |
+| `simstim config check [--json]` | Reads `config.toml` and `hosts.toml`, and prints each mistake as `file:line: message`, with the nearest known key for an unknown one. Exits with 1 when it finds an error |
 | `simstim demo [--empty]` | The launcher on sample data (nothing connects anywhere) |
 | `simstim version [--json]`, `completion bash\|zsh\|fish\|powershell` | Housekeeping |
 | `simstim help [<command>]`, `help concepts`, `help exit-codes` | The help of a command, the words that the tool uses, or the exit codes |
@@ -650,6 +652,8 @@ ssh = "atlas-dev"           # a Host from ~/.ssh/config, used as is
 labels = { provider = "homelab" }
 # provider = { script = "~/.config/simstim/providers/gcp.sh" }
 ```
+
+`simstim config check` finds the mistakes in both files ([CLI spec, section 13](cli-spec.md#13-config-check-c9)). A `config.toml` that does not decode, or cannot be read, stops no command: each one prints one warning with the line, and uses the defaults. The launcher shows the warning as a notice. After an edit in its settings editor that breaks the file, the launcher keeps the settings it had. A `hosts.toml` that does not decode stops each command that reads it, with exit code 2.
 
 ## 8. Not built yet
 

@@ -6,6 +6,7 @@ package cli
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 
 	"github.com/spf13/cobra"
@@ -23,7 +24,23 @@ func Main() int {
 	}
 	ctx, stop := listen()
 	defer stop()
+	if os.Getenv(brand.Env("NO_INSTALL")) == "1" {
+		ctx = client.WithoutInstall(ctx)
+	}
 	args := os.Args[1:]
+	completion := completionArgs(args)
+	if completion {
+		if len(args) == 1 {
+			_, _ = fmt.Fprintln(os.Stdout, ":4")
+			return 0
+		}
+		restore, ok := quietCompletionErrors()
+		if !ok {
+			_, _ = fmt.Fprintln(os.Stdout, ":4")
+			return 0
+		}
+		defer restore()
+	}
 	// A wait of the client, such as for the lock of hosts.toml, or a
 	// changed host ID, says so on stderr: with --json, as a warning line.
 	wantJSON := jsonAsked(nil, args)
@@ -32,6 +49,15 @@ func Main() int {
 	cmd, err := Root().ExecuteContextC(run)
 	// ctx ends only at a signal.
 	signalled := ctx.Err() != nil
+	if completion || isCompletionRequest(cmd) {
+		if signalled {
+			return exitCode(client.KindCancelled)
+		}
+		if err != nil {
+			return exitCode(client.KindFailed)
+		}
+		return 0
+	}
 	asJSON := jsonAsked(cmd, args)
 	// A run that ended before its command ran, as -v does, still warns
 	// about the old forms that it used.
@@ -82,6 +108,7 @@ func Root() *cobra.Command {
 	// looked: add them now, so that they get the same errors and help.
 	root.InitDefaultHelpCmd()
 	root.InitDefaultCompletionCmd()
+	wireCompletion(root)
 	teach(root)
 	for _, c := range root.Commands() {
 		if c.Name() == "help" {
@@ -93,9 +120,14 @@ func Root() *cobra.Command {
 }
 
 // beforeRun runs before every command: it applies --no-color and input
-// off, warns about the old forms that the command line used, then turns on
-// the debug mode that it asks for.
+// off, warns about the old forms that the command line used and of a
+// config.toml that cannot be used, then turns on the debug mode that it
+// asks for.
 func beforeRun(cmd *cobra.Command, args []string) error {
+	if isCompletionRequest(cmd) {
+		cmd.Root().SetErr(io.Discard)
+		return nil
+	}
 	applyNoColor(cmd)
 	if !inputOn(cmd) {
 		// Nothing asks: SSH runs with BatchMode=yes, and keeps its words
@@ -116,6 +148,7 @@ func beforeRun(cmd *cobra.Command, args []string) error {
 		// The launcher and switcher show identity notices in their own chrome.
 		cmd.SetContext(client.WithWarnings(cmd.Context(), nil))
 	}
+	warnSettings(cmd, args)
 	return startDebug(cmd, args)
 }
 

@@ -26,31 +26,41 @@ Type the numbers of the agents to install, such as `2 3`. The setup installs the
 
 <!-- test: help (it runs an installer on the host) -->
 ```sh
-simstim agents install claude --host my-server
+simstim agents install claude my-server
 ```
 
 The client:
 
 1. Checks the host. If the agent is already installed, it says where and stops. `--reinstall` runs the installer again, for example to update the agent.
 2. Prints the install command and the vendor page it comes from.
-3. Starts a session named `install-claude` that runs the command, and attaches to it. Answer the installer's questions there. Detach with `ctrl+\` at any time; the installer keeps running, and `simstim attach my-server/install-claude` brings you back.
-4. When the installer ends, checks the host again and says how to log in.
+3. Starts a session named `install-claude` that runs the command, and attaches to it. Answer the installer's questions there. Detach with the key shown in the instructions. The default is `ctrl+\`, and `attach.detach_key` changes it. The installer keeps running. Use the printed session ID with `simstim attach --id -- my-server/k3v7qa2m` to return to that exact installer.
+4. When the installer ends, checks the host again and names the command that logs in: `Next, log in: simstim agents login claude my-server`.
 
-With one host, `--host` is not needed. `simstim agents ls` lists every agent and its install command, and [the agent reference](../reference/agents.md#install-and-log-in) lists each command's source.
+With one host, you can leave out the host. With more than one, the command names them and fails. `--host my-server` works too, in place of the second word. `simstim agents ls` lists every agent and its install command, and [the agent reference](../reference/agents.md#install-and-log-in) lists each command's source.
 
 ## Log in
 
-Each agent logs in its own way. Run its login in a session, and follow its prompts: most print a link to open in your browser and ask for the code it shows.
+Each agent logs in its own way. `agents login` starts the agent's own login in a session on the host, and attaches to it:
 
-<!-- test: skip (it starts a login, and --help would go to the agent) -->
+<!-- test: help (it starts a login on the host) -->
 ```sh
-simstim new my-server -- claude auth login
-simstim new my-server -- codex login --device-auth
+simstim agents login claude my-server
 ```
 
-For an agent whose first start is its login, such as Antigravity CLI, start the agent: `simstim new my-server --agent antigravity`.
+Follow the agent's prompts in the session. Most print a link to open in your browser, and ask for the code it shows. The client:
 
-An agent that takes an API key instead, such as Aider, can get it from your laptop at the start of each session: see [pass secrets to a session](secrets.md).
+1. Checks the host. The agent must be installed, and a login shell must find it.
+2. When a `login-claude` session already runs on the host, attaches to it, and says so.
+3. Otherwise, starts a session named `login-claude` that runs the agent's login, such as `claude auth login` or `codex login --device-auth`, and attaches to it. An agent whose first start is its login, such as Antigravity CLI, starts as itself. The session gets no secret.
+4. When you leave the session, checks the login again and prints the agent's line, as `host doctor` does. If you detached and the login still runs, the client says how to attach to it again.
+
+Detach with the detach key, `ctrl+\` unless you changed `attach.detach_key` in `config.toml`. The client names the session by its ID, such as `my-server/k3v7qa2m`, because two logins that start at the same moment share the name `login-claude`.
+
+The login runs again also when the agent is logged in, for example to change the account. The agent writes its credentials on the host. simstim never reads, stores or passes them.
+
+Without a terminal, or with `--no-input`, the command starts the login and does not attach. It prints `Started my-server/k3v7qa2m. Attach to finish the login: simstim attach --id -- my-server/k3v7qa2m`, and exits with 0. With `--json`, it prints the session as JSON instead, with `"started": true`, or `false` when the login already ran ([scripting](scripting.md#read-json)).
+
+An agent that takes an API key instead, such as Aider, has no login of its own. `agents login aider` says which variables it reads. Pass the key from your laptop at the start of each session: see [pass secrets to a session](secrets.md).
 
 ## Check the agents
 
@@ -65,10 +75,11 @@ simstim host doctor my-server
 Agents:
   ✓ Claude Code      /home/me/.local/bin/claude, logged in (`claude auth status` says so)
   ! Codex            /home/me/.local/bin/codex, not logged in (`codex login status` says not)
-    Try: simstim new my-server -- codex login --device-auth
+    Try: simstim agents login codex my-server
   ✕ opencode         /home/me/.opencode/bin/opencode is not on PATH in a login shell
     Try: on the host, add it to PATH: echo 'export PATH="/home/me/.opencode/bin:$PATH"' >> ~/.profile
   ? Antigravity CLI  /home/me/.local/bin/agy, login unknown (the agent has no status command or credentials file to read)
+    Try: if it asks you to log in: simstim agents login antigravity my-server
 ```
 
 | Mark | Meaning |

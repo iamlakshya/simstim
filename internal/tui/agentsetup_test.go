@@ -117,21 +117,23 @@ func (b *fakeBackend) RememberSetup(ctx context.Context, host, repo string, run 
 	return warn, nil
 }
 
-func (b *fakeBackend) Secrets(_ context.Context, h client.Host) (map[string]api.Secret, error) {
+func (b *fakeBackend) Secrets(_ context.Context, s client.Settings, h client.Host) (map[string]api.Secret, error) {
 	b.record("secrets %s", h.Name)
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	b.secretsFrom = append(b.secretsFrom, s)
 	return b.secrets, b.secretErr
 }
 
 // SessionSecrets fetches the named secrets from the same pretend config.
-func (b *fakeBackend) SessionSecrets(_ context.Context, names []string) (map[string]api.Secret, error) {
+func (b *fakeBackend) SessionSecrets(_ context.Context, s client.Settings, names []string) (map[string]api.Secret, error) {
 	if len(names) == 0 {
 		return nil, nil
 	}
 	b.record("secrets %v", names)
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	b.secretsFrom = append(b.secretsFrom, s)
 	if b.secretErr != nil {
 		return nil, b.secretErr
 	}

@@ -32,7 +32,8 @@ func resumeCmd() *cobra.Command {
 			"  " + brand.Name + " resume my-vps/auth-fix --memory-max 6G\n" +
 			"  " + brand.Name + " resume my-vps/auth-fix --secret GITHUB_TOKEN\n" +
 			"  " + brand.Name + " resume my-vps/auth-fix --detach --json",
-		Args: cobra.ExactArgs(1),
+		Args:              cobra.ExactArgs(1),
+		ValidArgsFunction: completeSessionArg,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := beforeAttach(cmd, asJSON, detach); err != nil {
 				return err

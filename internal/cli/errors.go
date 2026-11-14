@@ -8,6 +8,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/spf13/cobra"
 
@@ -32,7 +33,7 @@ type ExitCode struct {
 var exitCodes = []ExitCode{
 	{Code: 0, Meaning: "Done.", Examples: "A command did its job. Help printed. An attach ended with a detach, or with the agent's end."},
 	{Code: 1, Kind: client.KindFailed, Meaning: "The command could not do its job.",
-		Examples: "A host did not answer. The helper failed. No hosts yet. A connection that closed. An error that is not a user error."},
+		Examples: "A host did not answer. The helper failed. No hosts yet. A connection that closed. `config check` found an error. An error that is not a user error."},
 	{Code: 2, Kind: client.KindUsage, Meaning: "The command line or a config file is wrong.",
 		Examples: "An unknown command or flag. A missing or extra argument. A bad value. Two flags that conflict. A name that matches two sessions. A `hosts.toml` that does not decode."},
 	{Code: 3, Kind: client.KindNotFound, Meaning: "A named thing does not exist.",
@@ -78,6 +79,15 @@ type usageError struct {
 }
 
 func (e *usageError) Unwrap() error { return e.UserError }
+
+// quietError is the error of a command that has already said what went
+// wrong on stdout, such as a check that printed its findings. It sets the
+// exit code, and finish prints nothing more.
+type quietError struct {
+	*client.UserError
+}
+
+func (e *quietError) Unwrap() error { return e.UserError }
 
 // report is an error as printError shows it.
 type report struct {
@@ -208,6 +218,23 @@ func (r report) print(w io.Writer, colour bool) {
 	fmt.Fprintf(w, "\n%sTry:%s %s\n", blue, reset, shown(r.try))
 }
 
+// didYouMean is the line of suggestions, or "" with none: `Did you mean
+// "attach"?`, or `Did you mean one of these: "bash", "zsh"?`.
+func didYouMean(suggestions []string) string {
+	q := make([]string, len(suggestions))
+	for i, s := range suggestions {
+		q[i] = fmt.Sprintf("%q", client.CleanLine(s))
+	}
+	switch len(q) {
+	case 0:
+		return ""
+	case 1:
+		return "Did you mean " + q[0] + "?"
+	default:
+		return "Did you mean one of these: " + strings.Join(q, ", ") + "?"
+	}
+}
+
 // printError prints err with its next step on w, and returns its exit code.
 // cmd is the command that failed, if any. signalled is true when a signal
 // ended the command, which makes it a cancel.
@@ -238,13 +265,18 @@ func failure(err error, cmd *cobra.Command, signalled bool) report {
 
 // finish ends a run: it prints err, if any, and returns the exit code. A
 // signal makes the run a cancel, also when the command returned no error.
-// With asJSON the error is one JSON line (cli-spec 7.4).
+// With asJSON the error is one JSON line (cli-spec 7.4). A quietError
+// prints nothing, because its command has said it all.
 func finish(w io.Writer, err error, cmd *cobra.Command, colour, signalled, asJSON bool) int {
 	if err == nil {
 		if !signalled {
 			return 0
 		}
 		err = errSignal
+	}
+	var q *quietError
+	if errors.As(err, &q) && !signalled {
+		return exitCode(q.Kind)
 	}
 	if asJSON {
 		return printErrorJSON(w, err, cmd, signalled)
@@ -323,11 +355,23 @@ func suggest(typed string, things []named, prefix bool) []string {
 	if low == "" {
 		return nil
 	}
-	runes := len([]rune(low))
+	runes := utf8.RuneCountInString(low)
 	short := runes <= 2
 	most := 2
 	if runes <= 4 {
 		most = 1
+	}
+	// A word more than two runes longer than every name is neither near one
+	// nor its start. Leave it at that: its distances would cost time in step
+	// with its length, and a config file may hold a very long key.
+	longest := 0
+	for _, t := range things {
+		for _, a := range t.answers {
+			longest = max(longest, utf8.RuneCountInString(strings.ToLower(a)))
+		}
+	}
+	if runes > longest+most {
+		return nil
 	}
 	type candidate struct {
 		name string

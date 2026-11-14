@@ -91,9 +91,15 @@ func (m *Model) startSessionReady(h *hostConn, r startReq) tea.Cmd {
 		err := offlineErr(h)
 		return func() tea.Msg { return startedMsg{startReq: r, err: err} }
 	}
-	r.args = client.TerminalArgs(r.args, m.width, m.height)
-	c, be, host := h.conn, m.be, h.host
+	c, be, host, kept, cols, rows := h.conn, m.be, h.host, m.settings, m.width, m.height
+	read := m.beginSettingsRead()
 	return m.bgCmd(func(ctx context.Context) tea.Msg {
+		settings, read := readSettings(be, kept, read)
+		args, err := client.SessionArgs(r.args, cols, rows, settings)
+		if err != nil {
+			return startedMsg{startReq: r, err: err, settingsRead: read}
+		}
+		r.args = args
 		cctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 		defer cancel()
 		var warn *client.UserError
@@ -105,14 +111,14 @@ func (m *Model) startSessionReady(h *hostConn, r startReq) tea.Cmd {
 		// One fetch of the secrets for each start. A question about the
 		// start keeps them for the start after the answer.
 		if r.args.Secrets == nil {
-			secrets, err := be.Secrets(cctx, host)
+			secrets, err := be.Secrets(cctx, settings, host)
 			if err != nil {
-				return startedMsg{startReq: r, err: err, warn: warn}
+				return startedMsg{startReq: r, err: err, warn: warn, settingsRead: read}
 			}
 			r.args.Secrets = secrets
 		}
 		s, err := c.NewSession(cctx, r.args)
-		return startedMsg{startReq: r, s: s, err: err, warn: warn}
+		return startedMsg{startReq: r, s: s, err: err, warn: warn, settingsRead: read}
 	})
 }
 
@@ -221,10 +227,10 @@ func (m *Model) copyAttach() tea.Cmd {
 		return nil
 	}
 	addr := h.name() + "/" + s.ID
-	if client.ShellWord(addr) != addr {
+	if !api.ValidSessionID(s.ID) || client.ShellWord(addr) != addr {
 		return m.toastErr(&client.UserError{Msg: "the address of this session cannot go in a command", Hint: brand.Name + " ls", Code: "bad_address", Kind: client.KindUsage})
 	}
-	text := brand.Name + " attach " + addr
+	text := brand.Name + " attach --id -- " + addr
 	return tea.Batch(tea.SetClipboard(text), m.toast(toastSuccess, "Copied: "+text+"."))
 }
 

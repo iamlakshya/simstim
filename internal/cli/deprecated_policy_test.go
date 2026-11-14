@@ -20,7 +20,7 @@ import (
 // (docs/contributing/cli-spec.md 3.3).
 func TestOldFormsEnd(t *testing.T) {
 	for _, o := range oldForms {
-		version, day := o.end()
+		version, day := o.End()
 		major, minor, _ := strings.Cut(o.Version, ".")
 		m, _ := strconv.Atoi(strings.Split(minor, ".")[0])
 		if want := major + "." + strconv.Itoa(m+2) + ".0"; version != want {
@@ -46,7 +46,7 @@ func TestOldFormsEnd(t *testing.T) {
 	releaseDays["9.9.0"] = "2030-01-31"
 	defer delete(releaseDays, "9.9.0")
 	o := oldForm{Old: "kill", New: "rm", Version: "9.9.0"}
-	if got := o.warning(); got != `"kill" is now "rm". "kill" works until v9.11.0 and 31 January 2031, whichever comes later.` {
+	if got := o.Warning(); got != `"kill" is now "rm". "kill" works until v9.11.0 and 31 January 2031, whichever comes later.` {
 		t.Errorf("warning = %q", got)
 	}
 	if olds := OldNames("host ls"); len(olds) != 1 || !strings.HasPrefix(olds[0].Until, "v0.4.0 and ") {
@@ -64,7 +64,7 @@ func TestWarnOld(t *testing.T) {
 		warnOld(cmd, oldHostKeys)
 		warnOld(cmd, oldHostKeys)
 	})
-	_, day := oldHostKeys.end()
+	_, day := oldHostKeys.End()
 	if strings.Count(errOut, "Warning: ") != 1 || !strings.Contains(errOut, "The old keys print until v0.4.0 and "+day.Format("2 January 2006")+", whichever comes later.") {
 		t.Errorf("warned %q", errOut)
 	}

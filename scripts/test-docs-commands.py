@@ -19,7 +19,8 @@ exist.
 import os, re, shlex, subprocess, sys, tempfile
 
 root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-name = re.search(r'^const Name = "(.*)"', open(os.path.join(root, "internal/brand/brand.go")).read(), re.M).group(1)
+with open(os.path.join(root, "internal/brand/brand.go")) as brand_file:
+    name = re.search(r'^const Name = "(.*)"', brand_file.read(), re.M).group(1)
 binary = os.path.abspath(sys.argv[1] if len(sys.argv) > 1 else os.path.join(root, "bin", name))
 host = os.environ.get("DOCS_HOST", "")
 target = os.environ.get("DOCS_HOST_TARGET", host)
@@ -57,7 +58,11 @@ def run(cmd, env):
 def check_help(cmd, env):
     args = shlex.split(cmd)
     args[0] = binary
-    return subprocess.run(args + ["--help"], env=env, capture_output=True, text=True, timeout=30)
+    # After --, Cobra treats --help as a positional word for the command.
+    # Insert it before that marker so a help-only check cannot run an action.
+    at = args.index("--") if "--" in args else len(args)
+    args.insert(at, "--help")
+    return subprocess.run(args, env=env, capture_output=True, text=True, timeout=30)
 
 def main():
     tmp = tempfile.mkdtemp()
@@ -93,4 +98,5 @@ def main():
     print(f"docs commands: {ran} run, {helped} checked with --help, {skipped} blocks skipped, {len(failed)} failed")
     sys.exit(1 if failed else 0)
 
-main()
+if __name__ == "__main__":
+    main()

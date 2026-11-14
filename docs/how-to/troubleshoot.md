@@ -49,8 +49,8 @@ Cancellation stops the next repair from starting. Its message lists repairs alre
 | Asked for a password every time | Load your key into an SSH agent, or use a key without a passphrase for this host. |
 | A key does nothing in the agent | `simstim doctor keys` shows what your terminal sends. Some terminals keep keys for themselves. |
 | Typing in a session lags now and then | Look at the round trip in the launcher. Two numbers with the second in yellow, such as `31/100ms`, mean an uneven link. Some keys then wait much longer than the first number says. That points to the network, such as Wi-Fi or a VPN. [Tracing typing lag](../contributing/debug-trace.md) shows where a key waits. |
-| An agent is "not installed" | `simstim agents install <agent> --host my-server` runs its installer in a session ([install agents](install-agents.md)). An agent installed by hand must be on your `PATH` in a login shell. |
-| An agent asks you to log in | Run its own login in a session; `host doctor` prints the command. |
+| An agent is "not installed" | `simstim agents install <agent> my-server` runs its installer in a session ([install agents](install-agents.md)). An agent installed by hand must be on your `PATH` in a login shell. |
+| An agent asks you to log in | `simstim agents login <agent> my-server` runs its own login in a session. `host doctor` prints the command. |
 | Sessions stop when you log out | Linger is off: `host doctor` says so, and `host doctor --fix` turns it on. |
 | The screen looks wrong after attaching | Detach and attach again. If it stays wrong, open an issue with your terminal's name and version. |
 | A session `ended (out of memory)` | The session's memory cap stopped the agent. Resume it in the same session: `simstim resume my-server/app`, or `u` in the launcher. Claude Code and Codex pick up the same conversation. `--memory-max 4G` gives it a bigger cap ([memory](memory.md#when-the-cap-stops-an-agent)). |

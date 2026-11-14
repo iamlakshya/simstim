@@ -6,11 +6,13 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"slices"
 	"strings"
 	"testing"
 
+	"github.com/iamlakshya/simstim/internal/brand"
 	"github.com/iamlakshya/simstim/internal/testhome"
 )
 
@@ -254,7 +256,7 @@ func TestLocalChecks(t *testing.T) {
 	for _, c := range LocalChecks() {
 		got[c.Name] = c
 	}
-	if c := got["config.toml"]; c.OK || !strings.Contains(c.Detail, "ui.motoin") {
+	if c := got["config.toml"]; c.OK || !strings.Contains(c.Detail, "ui.motoin") || c.Fix != brand.Name+" config check" {
 		t.Errorf("config.toml: %+v", c)
 	}
 	if c := got["hosts.toml"]; !c.OK {
@@ -265,6 +267,70 @@ func TestLocalChecks(t *testing.T) {
 	}
 	if c := got["secret B_KEY"]; !c.OK {
 		t.Errorf("B_KEY: %+v", c)
+	}
+	if err := os.WriteFile(hostsPath(), []byte("[[host]]\nname =\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if c := fileCheck("hosts.toml", hostsPath(), &hostsFile{}); c.OK || c.Fix != brand.Name+" config check" {
+		t.Errorf("broken hosts.toml: %+v", c)
+	}
+}
+
+// A config.toml that does not decode gives the defaults alone, and one
+// warning with its line. An unknown key decodes, and gives none.
+func TestBrokenSettings(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	_ = os.MkdirAll(ConfigDir(), 0o700)
+	if w := SettingsWarning(); w != "" {
+		t.Errorf("no config.toml warns: %q", w)
+	}
+	// Every table but [attach] is good. The decoder visits the tables in no
+	// fixed order, so each load could keep some of them: none may stay.
+	good := "[ui]\nmotion = \"off\"\n[agents]\ninline = true\n[sessions]\nmemory_max = \"4G\"\n[keymap]\n\"session: delete\" = \"x\"\n[secrets]\nA = \"x\"\n"
+	for body, want := range map[string]string{
+		good + "[attach]\ndetach_key = \"ctrl+]\"\nscrollback = \n":     "config.toml has an error on line 13, so its settings are not used",
+		good + "[attach]\ndetach_key = \"ctrl+]\"\nscrollback = true\n": "config.toml has an error on line 13, so its settings are not used",
+		good + "[attach]\nmotoin = \"off\"\n":                           "",
+	} {
+		if err := os.WriteFile(settingsPath(), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if w := SettingsWarning(); w != want {
+			t.Errorf("%q warns %q, want %q", body, w, want)
+		}
+		for range 20 {
+			s := LoadSettings()
+			if broken := want != ""; broken != reflect.DeepEqual(s, DefaultSettings()) {
+				t.Fatalf("%q gives %+v", body, s)
+			}
+		}
+	}
+	// A config.toml that cannot be read warns too.
+	if err := os.Remove(settingsPath()); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(settingsPath(), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if w := SettingsWarning(); w != "config.toml cannot be read, so its settings are not used" {
+		t.Errorf("an unreadable config.toml warns %q", w)
+	}
+	if s := LoadSettings(); !reflect.DeepEqual(s, DefaultSettings()) {
+		t.Errorf("an unreadable config.toml gives %+v", s)
+	}
+}
+
+// The idle time of a machine, by the rule of `host idle`: trimmed, never in
+// any case, or a duration of a minute or more.
+func TestCheckIdleTime(t *testing.T) {
+	for s, ok := range map[string]bool{"never": true, "1m": true, "60s": true, "2h": true, "59s": false, "0s": false, "-5m": false, "5x": false, "": false, "Never": true, " NEVER ": true, " 30m ": true, "never ever": false} {
+		if err := CheckIdleTime(s); (err == nil) != ok {
+			t.Errorf("CheckIdleTime(%q) = %v", s, err)
+		}
+	}
+	var ue *UserError
+	if err := CheckIdleTime("30s"); !errors.As(err, &ue) || ue.Kind != KindUsage || ue.Hint == "" {
+		t.Errorf("CheckIdleTime(30s) = %#v", err)
 	}
 }
 

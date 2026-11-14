@@ -123,10 +123,12 @@ func (b *demoBackend) UpdateHostsContext(ctx context.Context, c client.HostChang
 	return nil, nil
 }
 
-func (b *demoBackend) Settings() client.Settings {
+// ReadSettings gives no warning: the demo runs on sample data, and its own
+// command warns of a broken config.toml before it starts.
+func (b *demoBackend) ReadSettings() (client.Settings, string) {
 	s := client.LoadSettings()
 	s.Keymap = nil
-	return s
+	return s, ""
 }
 
 func (b *demoBackend) HelperVersion() string { return "0.1.0" }
@@ -142,11 +144,11 @@ func (b *demoBackend) RememberSetup(ctx context.Context, _, _ string, _ bool, _ 
 	}
 	return nil, nil
 }
-func (b *demoBackend) Secrets(context.Context, client.Host) (map[string]api.Secret, error) {
+func (b *demoBackend) Secrets(context.Context, client.Settings, client.Host) (map[string]api.Secret, error) {
 	return nil, nil
 }
 
-func (b *demoBackend) SessionSecrets(context.Context, []string) (map[string]api.Secret, error) {
+func (b *demoBackend) SessionSecrets(context.Context, client.Settings, []string) (map[string]api.Secret, error) {
 	return nil, nil
 }
 
@@ -348,4 +350,13 @@ func (b *demoBackend) demoTraces(now time.Time) map[sessKey][]time.Time {
 		}
 	}
 	return out
+}
+
+func (b *demoBackend) Reconnect(ctx context.Context, h client.Host) (Conn, error) {
+	return b.Dial(ctx, h)
+}
+
+func (b *demoBackend) Settings() client.Settings {
+	s, _ := b.ReadSettings()
+	return s
 }

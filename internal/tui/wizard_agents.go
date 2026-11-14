@@ -6,6 +6,8 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/iamlakshya/simstim/internal/api"
+	"github.com/iamlakshya/simstim/internal/brand"
 	"github.com/iamlakshya/simstim/internal/client"
 	"github.com/iamlakshya/simstim/internal/onboard"
 )
@@ -42,6 +44,7 @@ type (
 		seq   int
 		s     *client.Session
 		err   error
+		settingsRead
 	}
 )
 
@@ -104,7 +107,10 @@ func (w *wizard) onAgentChecks(m *Model, msg agentChecksMsg) tea.Cmd {
 		w.flow = onboard.NewFlow(w.host.Name, msg.checks, nil)
 		return nil
 	}
-	w.flow.Done(msg.act, msg.checks, msg.ended)
+	if err := w.flow.Done(msg.act, msg.checks, msg.ended); err != nil {
+		w.err = err
+		return nil
+	}
 	l := w.flow.Line(msg.act.Agent.Kind)
 	w.last = &l
 	var cmd tea.Cmd
@@ -220,13 +226,18 @@ func (w *wizard) runAct(m *Model) tea.Cmd {
 	}
 	ctx, seq := w.beginAgentOp(m)
 	w.starting, w.err = true, nil
-	a := client.TerminalArgs(w.act.Args, m.width, m.height)
-	c := h.conn
-	return m.bgCmd(func(context.Context) tea.Msg {
-		cctx, cancel := context.WithTimeout(ctx, 60*time.Second)
+	c, be, kept, args, cols, rows := h.conn, m.be, m.settings, w.act.Args, m.width, m.height
+	read := m.beginSettingsRead()
+	return m.bgCmdFrom(ctx, func(actionCtx context.Context) tea.Msg {
+		settings, read := readSettings(be, kept, read)
+		a, err := client.SessionArgs(args, cols, rows, settings)
+		if err != nil {
+			return actStartedMsg{owner: w, seq: seq, err: err, settingsRead: read}
+		}
+		cctx, cancel := context.WithTimeout(actionCtx, 60*time.Second)
 		defer cancel()
 		s, err := c.NewSession(cctx, a)
-		return actStartedMsg{owner: w, seq: seq, s: s, err: err}
+		return actStartedMsg{owner: w, seq: seq, s: s, err: err, settingsRead: read}
 	})
 }
 
@@ -239,6 +250,11 @@ func (w *wizard) onActStarted(m *Model, msg actStartedMsg) tea.Cmd {
 	h := m.hostByName(w.host.Name)
 	if msg.err != nil || msg.s == nil || h == nil {
 		w.err = msg.err
+		return nil
+	}
+	if !api.ValidSessionID(msg.s.ID) {
+		w.err = &client.UserError{Msg: "the host sent a session ID that is not valid",
+			Hint: brand.Name + " host doctor " + client.ShellWord(w.host.Name), Code: "bad_session_id"}
 		return nil
 	}
 	h.sessions = append(h.sessions, *msg.s)

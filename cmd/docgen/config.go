@@ -49,6 +49,10 @@ func configPage(repo string) ([]byte, error) {
 	var b strings.Builder
 	b.WriteString(header("Configuration", "2"))
 	fmt.Fprintf(&b, "%s reads two files from `~/.config/%s/` (or `$XDG_CONFIG_HOME/%s/`). `%s config path` prints where they are.\n\n", brand.DisplayName, brand.Name, brand.Name, brand.Name)
+	fmt.Fprintf(&b, "`%s config check` reads both files, and prints each mistake with its file and line. "+
+		"It finds TOML errors, unknown keys, values of the wrong type or outside their list, and hosts without a usable name or `ssh`. "+
+		"For an unknown key, it names the nearest known key. "+
+		"A `hosts.toml` that does not decode stops every command that reads it. A `config.toml` that does not decode, or cannot be read, stops nothing: each command warns, and uses the defaults. The launcher shows the warning as a notice.\n\n", brand.Name)
 	b.WriteString("## config.toml\n\nYour preferences. Every key is optional; a missing key takes its default.\n\n")
 	table(&b, settings, true)
 	b.WriteString("\n## hosts.toml\n\nThe hosts you added. `host add` writes it, and you can edit it by hand. Each host is a `[[host]]` table.\n\n")

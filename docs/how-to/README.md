@@ -39,6 +39,7 @@ One task per page. New here? Start with [getting started](../tutorials/getting-s
 | Guide | Task |
 | --- | --- |
 | [Change keys](rebind-keys.md) | Rebind the launcher's keys and the detach key |
+| [Shell completion](shell-completion.md) | Complete commands, flags, saved hosts, cached sessions and agents in your shell |
 | [Use in scripts](scripting.md) | Ask nothing, read JSON and exit codes, and keep data apart from messages |
 
 ## Install and remove

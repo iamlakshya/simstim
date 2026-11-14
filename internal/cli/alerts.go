@@ -23,7 +23,8 @@ func hostAlertsCmd() *cobra.Command {
 		Example: "  " + brand.Name + " host alerts my-vps\n" +
 			"  " + brand.Name + " host alerts set my-vps --ntfy https://ntfy.sh/<your-topic>\n" +
 			"  " + brand.Name + " host alerts test my-vps",
-		Args: cobra.ExactArgs(1),
+		Args:              cobra.ExactArgs(1),
+		ValidArgsFunction: completeHostArg,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return withHost(cmd.Context(), args[0], func(ctx context.Context, h client.Host, conn *client.Conn) error {
 				info, err := conn.Alerts(ctx)
@@ -90,7 +91,8 @@ func alertsSetCmd() *cobra.Command {
 			"  " + brand.Name + " host alerts set my-vps --add \\\n" +
 			"    --command 'notify-send \"$" + brand.Env("SUMMARY") + "\"'\n" +
 			"  " + brand.Name + " host alerts set my-vps --delay 30s --min-turn 5m",
-		Args: cobra.ExactArgs(1),
+		Args:              cobra.ExactArgs(1),
+		ValidArgsFunction: completeHostArg,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, add, err := f.config(cmd)
 			if err != nil {
@@ -178,10 +180,11 @@ func (f *alertsSetFlags) config(cmd *cobra.Command) (client.AlertsConfig, bool, 
 func alertsTestCmd() *cobra.Command {
 	var event string
 	cmd := &cobra.Command{
-		Use:     "test <host>",
-		Short:   "Send a test alert to every destination now, and say what each did",
-		Example: "  " + brand.Name + " host alerts test my-vps",
-		Args:    cobra.ExactArgs(1),
+		Use:               "test <host>",
+		Short:             "Send a test alert to every destination now, and say what each did",
+		Example:           "  " + brand.Name + " host alerts test my-vps",
+		Args:              cobra.ExactArgs(1),
+		ValidArgsFunction: completeHostArg,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return withHost(cmd.Context(), args[0], func(ctx context.Context, h client.Host, conn *client.Conn) error {
 				res, err := conn.TestAlerts(ctx, event)
@@ -214,10 +217,11 @@ func alertsLogCmd() *cobra.Command {
 	var n int
 	var asJSON bool
 	cmd := &cobra.Command{
-		Use:     "log <host>",
-		Short:   "Show the host's last alert deliveries, and why any were not sent",
-		Example: "  " + brand.Name + " host alerts log my-vps",
-		Args:    cobra.ExactArgs(1),
+		Use:               "log <host>",
+		Short:             "Show the host's last alert deliveries, and why any were not sent",
+		Example:           "  " + brand.Name + " host alerts log my-vps",
+		Args:              cobra.ExactArgs(1),
+		ValidArgsFunction: completeHostArg,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return withHost(cmd.Context(), args[0], func(ctx context.Context, h client.Host, conn *client.Conn) error {
 				log, err := conn.AlertsLog(ctx, n)
@@ -247,10 +251,11 @@ func alertsLogCmd() *cobra.Command {
 
 func alertsOffCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:     "off <host>",
-		Short:   "Turn alerts off on a host: remove its alerts file",
-		Example: "  " + brand.Name + " host alerts off my-vps",
-		Args:    cobra.ExactArgs(1),
+		Use:               "off <host>",
+		Short:             "Turn alerts off on a host: remove its alerts file",
+		Example:           "  " + brand.Name + " host alerts off my-vps",
+		Args:              cobra.ExactArgs(1),
+		ValidArgsFunction: completeHostArg,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return withHost(cmd.Context(), args[0], func(ctx context.Context, h client.Host, conn *client.Conn) error {
 				removed, err := conn.AlertsOff(ctx)

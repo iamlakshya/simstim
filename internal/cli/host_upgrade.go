@@ -38,8 +38,9 @@ func hostUpgradeCmd() *cobra.Command {
 			"starting the helper, installs the helper, then connects. It asks nothing: the command is\n" +
 			"your yes. It removes no helper, so a newer client's helper stays. Running sessions keep\n" +
 			"their own helper, and new sessions use this one.",
-		Example: "  " + brand.Name + " host upgrade my-vps\n  " + brand.Name + " host upgrade my-vps --json",
-		Args:    cobra.ExactArgs(1),
+		Example:           "  " + brand.Name + " host upgrade my-vps\n  " + brand.Name + " host upgrade my-vps --json",
+		Args:              cobra.ExactArgs(1),
+		ValidArgsFunction: completeHostArg,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			h, err := client.FindHost(args[0])
 			if err != nil {

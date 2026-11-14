@@ -42,7 +42,8 @@ func newCmd() *cobra.Command {
 			"  " + brand.Name + " new my-vps --agent claude --memory-max 6G\n" +
 			"  " + brand.Name + " new my-vps --detach -- htop\n" +
 			"  " + brand.Name + " new my-vps --agent claude --detach --json",
-		Args: oneHost,
+		Args:              oneHost,
+		ValidArgsFunction: completeNewHost,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := beforeAttach(cmd, asJSON, detach); err != nil {
 				return err
@@ -85,6 +86,9 @@ func newCmd() *cobra.Command {
 			}
 			cancel()
 			s, err := startSession(cmd, conn, h, a)
+			if err == nil {
+				err = checkSessionID(h.Name, s.ID)
+			}
 			if err != nil {
 				conn.Close()
 				return err
@@ -168,10 +172,11 @@ func oneHost(c *cobra.Command, args []string) error {
 
 func renameCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:     "rename <host>/<session> <name>",
-		Short:   "Rename a session",
-		Example: "  " + brand.Name + " rename my-vps/auth-fix login-fix",
-		Args:    cobra.ExactArgs(2),
+		Use:               "rename <host>/<session> <name>",
+		Short:             "Rename a session",
+		Example:           "  " + brand.Name + " rename my-vps/auth-fix login-fix",
+		Args:              cobra.ExactArgs(2),
+		ValidArgsFunction: completeSessionArg,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name := strings.TrimSpace(args[1])
 			if name == "" {
@@ -267,7 +272,7 @@ func printSessions(all []hostSessions) {
 	stateW := 12
 	for _, r := range results {
 		for _, s := range r.Sessions {
-			stateW = max(stateW, len([]rune(stateLabel(s))))
+			stateW = max(stateW, len([]rune(shown(stateLabel(s)))))
 		}
 	}
 	for _, r := range results {
@@ -290,10 +295,11 @@ func lsCmd() *cobra.Command {
 	var hostName string
 	var asJSON bool
 	cmd := &cobra.Command{
-		Use:     "ls [<host>]",
-		Short:   "List sessions on every host, or on one",
-		Example: "  " + brand.Name + " ls\n  " + brand.Name + " ls my-vps --json",
-		Args:    cobra.MaximumNArgs(1),
+		Use:               "ls [<host>]",
+		Short:             "List sessions on every host, or on one",
+		Example:           "  " + brand.Name + " ls\n  " + brand.Name + " ls my-vps --json",
+		Args:              cobra.MaximumNArgs(1),
+		ValidArgsFunction: completeLsHost,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			hosts, err := client.LoadHosts()
 			if err != nil {
@@ -366,10 +372,11 @@ func age(t time.Time) string {
 func sendCmd() *cobra.Command {
 	var noEnter bool
 	cmd := &cobra.Command{
-		Use:     "send <host>/<session> <text>",
-		Short:   "Type text into a session without attaching, then press Enter",
-		Example: "  " + brand.Name + " send my-vps/auth-fix \"run the tests and fix what fails\"",
-		Args:    cobra.ExactArgs(2),
+		Use:               "send <host>/<session> <text>",
+		Short:             "Type text into a session without attaching, then press Enter",
+		Example:           "  " + brand.Name + " send my-vps/auth-fix \"run the tests and fix what fails\"",
+		Args:              cobra.ExactArgs(2),
+		ValidArgsFunction: completeSessionArg,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return withSession(cmd, args[0], func(ctx context.Context, h client.Host, conn *client.Conn, s *client.Session) error {
 				if err := conn.SendText(ctx, s.ID, args[1], !noEnter); err != nil {

@@ -425,7 +425,7 @@ func TestCopyAttachCommand(t *testing.T) {
 	}
 	hs.do(cmd)
 	// By host/ID: a name can mean another session (cli-spec 9.2).
-	hasToast(t, hs.m, "Copied: "+brand.Name+" attach atlas-dev/s4.")
+	hasToast(t, hs.m, "Copied: "+brand.Name+" attach --id -- atlas-dev/s4.")
 }
 
 func TestSearchEveryHost(t *testing.T) {

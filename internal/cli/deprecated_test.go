@@ -169,7 +169,7 @@ func TestTheEndOfEachOldForm(t *testing.T) {
 			continue
 		}
 		minor, _ := strconv.Atoi(m[2])
-		v, d := o.end()
+		v, d := o.End()
 		if want := m[1] + "." + strconv.Itoa(minor+2) + ".0"; v != want {
 			t.Errorf("%q ends at %s, want %s", o.ID, v, want)
 		}

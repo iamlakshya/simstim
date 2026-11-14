@@ -41,14 +41,17 @@ type hostConn struct {
 	// seenAt is when the host's list last arrived, for the session cache,
 	// as the worker that fetched it saw it: a list that the launcher saves
 	// later keeps this time.
-	seenAt    time.Time
-	rtts      rttWindow // the round trips of the last minute (rtt.go)
-	rtt       rttSpread // their spread, as the launcher shows it
-	info      *client.HostInfo
-	backoff   time.Duration
-	listing   bool
-	pinging   bool
-	doctoring bool
+	seenAt     time.Time
+	rtts       rttWindow // the round trips of the last minute (rtt.go)
+	rtt        rttSpread // their spread, as the launcher shows it
+	info       *client.HostInfo
+	backoff    time.Duration
+	listing    bool
+	pinging    bool
+	doctoring  bool
+	needRetire bool
+	dialCancel context.CancelFunc
+	dialSerial chan struct{}
 	// changes counts local edits to the list (a new, renamed or deleted
 	// session). A list asked for before the latest edit is stale.
 	changes int
@@ -61,10 +64,11 @@ func (h *hostConn) online() bool { return h.status == stOnline && h.conn != nil 
 // Messages from the connection commands.
 type (
 	dialledMsg struct {
-		name string
-		gen  int
-		conn Conn
-		err  error
+		name      string
+		gen       int
+		conn      Conn
+		err       error
+		reconnect bool
 	}
 	connDoneMsg struct {
 		name string
@@ -128,22 +132,56 @@ func (m *Model) hostByName(name string) *hostConn {
 
 // dial starts a background connection to h.
 func (m *Model) dial(h *hostConn) tea.Cmd {
+	return m.dialWith(h, nil, false)
+}
+
+func (m *Model) dialWith(h *hostConn, drop Conn, manual bool) tea.Cmd {
+	if h.dialCancel != nil {
+		h.dialCancel()
+	}
+	ctx, cancel := context.WithCancel(m.backgroundContext())
+	h.dialCancel = cancel
+	if h.dialSerial == nil {
+		h.dialSerial = make(chan struct{}, 1)
+	}
 	h.gen++
 	h.status = stConnecting
 	h.listing, h.pinging, h.doctoring = false, false, false
-	h.rtts, h.rtt = nil, rttSpread{} // a new connection starts its own round trips
-	gen, host, be, set := h.gen, h.host, m.be, m.conns
-	return m.bgCmd(func(bgCtx context.Context) tea.Msg {
-		dctx, cancel := context.WithTimeout(bgCtx, 30*time.Second)
-		defer cancel()
-		c, err := dialClean(dctx, be, host)
+	h.rtts, h.rtt = nil, rttSpread{}
+	gen, host, retire, be, set, serial := h.gen, h.host, h.needRetire, m.be, m.conns, h.dialSerial
+	return m.bgCmdFrom(ctx, func(bgCtx context.Context) tea.Msg {
+		// The set retains drop until this command starts or Close retires it.
+		if drop != nil {
+			set.drop(drop)
+		}
+		select {
+		case serial <- struct{}{}:
+			defer func() { <-serial }()
+		case <-bgCtx.Done():
+			return nil
+		}
+		if bgCtx.Err() != nil {
+			return nil
+		}
+		dctx, finish := context.WithTimeout(bgCtx, 30*time.Second)
+		defer finish()
+		var c Conn
+		var err error
+		if retire {
+			c, err = be.Reconnect(dctx, host)
+			if err == nil && c != nil {
+				c = cleanConn{c}
+			}
+		} else {
+			c, err = dialClean(dctx, be, host)
+		}
 		if err == nil && c != nil {
 			if bgCtx.Err() != nil || !set.addUnadopted(c) {
 				c.Close()
 				return nil
 			}
 		}
-		return dialledMsg{name: host.Name, gen: gen, conn: c, err: err}
+		return dialledMsg{name: host.Name, gen: gen, conn: c, err: err, reconnect: manual}
 	})
 }
 
@@ -229,6 +267,9 @@ func nextBackoff(d time.Duration) time.Duration {
 // offline reports whether err means the host could not be reached at all,
 // as opposed to reached but not ready.
 func offline(err error) bool {
+	if ue, ok := asUserError(err); ok && ue.Code == "reconnect_failed" {
+		return false
+	}
 	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, client.ErrClosed) {
 		return true
 	}
@@ -239,21 +280,27 @@ func offline(err error) bool {
 		strings.Contains(msg, "Connection refused") || strings.Contains(msg, "No route to host")
 }
 
-// reconnect drops h's connection, if any, and dials again now.
+// reconnect closes h's bridge and shared SSH connection, if any, and dials a
+// fresh connection now.
 func (m *Model) reconnect(h *hostConn) tea.Cmd {
-	var cmds []tea.Cmd
-	if h.conn != nil {
-		cmds = append(cmds, m.dropConn(h.conn))
-		h.conn = nil
+	if h == nil {
+		return nil
 	}
+	old := h.conn
+	h.conn = nil
+	h.info = nil
+	h.needRetire = true
 	h.backoff = 0
-	return tea.Batch(append(cmds, m.dial(h))...)
+	return m.dialWith(h, old, true)
 }
 
 // addHost puts a new or changed host in the list. If conn is set, it is a
 // ready connection to adopt, so the host needs no second dial.
 func (m *Model) addTierHost(host client.Host, tier client.Tier, idChanged bool, conn Conn, info *client.HostInfo) tea.Cmd {
 	h := m.hostByName(host.Name)
+	if h != nil && h.dialCancel != nil {
+		h.dialCancel()
+	}
 	var cmds []tea.Cmd
 	if h == nil {
 		h = &hostConn{host: host}
@@ -279,6 +326,7 @@ func (m *Model) addTierHost(host client.Host, tier client.Tier, idChanged bool, 
 	if conn != nil && !m.conns.adopt(conn) {
 		conn = nil
 	}
+	h.needRetire = false
 	if conn == nil {
 		return tea.Batch(append(cmds, m.dial(h))...)
 	}

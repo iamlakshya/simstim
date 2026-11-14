@@ -52,16 +52,10 @@ func cliPages(pages map[string][]byte) error {
 	return nil
 }
 
-// visible lists a command's subcommands that a user can run. It leaves out
-// Cobra's own completion command, which Root() adds so that it gets the
-// client's errors: its help is Cobra's, and the reference does not
-// document it yet (docs/contributing/cli-spec.md 14.5).
+// visible lists a command's subcommands that a user can run.
 func visible(c *cobra.Command) []*cobra.Command {
 	var out []*cobra.Command
 	for _, sub := range c.Commands() {
-		if !c.HasParent() && sub.Name() == "completion" {
-			continue
-		}
 		// Cobra counts its help command as not available, but the root
 		// help lists it, so the reference does too.
 		if sub.IsAvailableCommand() && !cli.IsTopic(sub) || !c.HasParent() && sub.Name() == "help" {
@@ -86,7 +80,11 @@ func commandPage(c *cobra.Command) string {
 		b.WriteString(prose(c.Long) + "\n\n")
 	}
 	if ex := dedent(c.Example); ex != "" {
-		fmt.Fprintf(&b, "## Examples\n\n```sh\n%s\n```\n\n", ex)
+		language := "sh"
+		if shortPath(c) == "completion powershell" {
+			language = "powershell"
+		}
+		fmt.Fprintf(&b, "## Examples\n\n```%s\n%s\n```\n\n", language, ex)
 	}
 	if t := flagTable(c.NonInheritedFlags()); t != "" {
 		b.WriteString("## Flags\n\n" + t + "\n")

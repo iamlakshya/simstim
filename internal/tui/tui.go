@@ -65,7 +65,8 @@ func runNamed(ctx context.Context, be Backend, o Options, what, hint string) err
 	if !isTerminal(in) || !isTerminal(out) || !isTerminal(os.Stderr) {
 		return &client.UserError{Msg: what + " needs a terminal", Hint: hint, Code: "launcher_no_terminal", Kind: client.KindFailed}
 	}
-	o.Motion = motionOn(be.Settings().UI.Motion, os.Getenv)
+	s, _ := be.ReadSettings()
+	o.Motion = motionOn(s.UI.Motion, os.Getenv)
 	m := New(ctx, be, o)
 	m.handoff = true
 	defer m.closeAfterProgramContext(ctx)
@@ -271,6 +272,7 @@ func (f *funcExec) Run() (err error) {
 }
 
 type pendingAttach struct {
+	settingsRead
 	opts           client.AttachOptions
 	host, id, name string
 }
@@ -302,16 +304,18 @@ func (m *Model) attachTo(h *hostConn, id, name string) tea.Cmd {
 	save := m.remember()
 	var res client.AttachResult
 	var aerr error
+	read := m.beginSettingsRead()
 	be, ctx, host := m.be, m.ctx, h.name()
 	save = func(sessions func()) func() {
 		return func() { sessions(); be.RememberLast(host, id, name) }
 	}(save)
 	if m.handoff {
 		save()
-		m.pendingAttach = &pendingAttach{opts: o, host: host, id: id, name: name}
+		m.pendingAttach = &pendingAttach{opts: o, host: host, id: id, name: name, settingsRead: read}
 		return m.quitForHandoff()
 	}
 	x := &funcExec{run: func(in, out *os.File) error {
+		o.Settings, read = readSettings(be, o.Settings, read)
 		o.In, o.Out = in, out
 		res, aerr = be.Attach(ctx, o)
 		return nil
@@ -320,7 +324,7 @@ func (m *Model) attachTo(h *hostConn, id, name string) tea.Cmd {
 		if aerr != nil {
 			err = aerr
 		}
-		return attachDoneMsg{host: host, id: id, name: name, res: res, err: err}
+		return attachDoneMsg{host: host, id: id, name: name, res: res, err: err, settingsRead: read}
 	}))
 }
 

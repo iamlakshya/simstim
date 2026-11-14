@@ -79,6 +79,12 @@ var startupExitWait = 500 * time.Millisecond
 // from WithoutInstall, a missing helper is an error, and nothing is
 // installed or pruned.
 func Dial(ctx context.Context, h Host, interactive bool) (*Conn, error) {
+	return dialWithPreparation(ctx, h, interactive, nil)
+}
+
+// dialWithPreparation retains this parent's complete actual Dial body.
+// The final H5 composition adds original Source guards in the SAME body.
+func dialWithPreparation(ctx context.Context, h Host, interactive bool, beforeStart func(context.Context, Transport) error) (*Conn, error) {
 	if _, err := ResolveHostTier(ctx, h); err != nil {
 		return nil, err
 	}
@@ -111,6 +117,11 @@ func Dial(ctx context.Context, h Host, interactive bool) (*Conn, error) {
 			return nil, werr
 		}
 		if err := pinRoute(ctx, h, r.t, interactive); err != nil {
+			return nil, err
+		}
+	}
+	if beforeStart != nil {
+		if err := beforeStart(ctx, r.t); err != nil {
 			return nil, err
 		}
 	}

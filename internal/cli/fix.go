@@ -37,10 +37,10 @@ func offerFixes(p *prompter, q *question, fixes []api.Fix, yes bool, apply func(
 		f = cleanFix(f)
 		fmt.Fprintf(w, "\n%d. %s.\n", i+1, sentenceCase(f.Problem))
 		if f.Manual {
-			fmt.Fprintf(w, "   This one is yours to do: %s.\n   Run: %s\n", f.Action, f.Command)
+			fmt.Fprintf(w, "   This one is yours to do: %s.\n   Run: %s\n", shown(f.Action), shown(f.Command))
 			continue
 		}
-		fmt.Fprintf(w, "   Fix: %s.\n   Runs: %s\n", f.Action, f.Command)
+		fmt.Fprintf(w, "   Fix: %s.\n   Runs: %s\n", shown(f.Action), shown(f.Command))
 		ok := yes
 		if !ok {
 			var err error
@@ -75,10 +75,10 @@ func offerFixes(p *prompter, q *question, fixes []api.Fix, yes bool, apply func(
 		f = cleanFix(f)
 		switch {
 		case f.Done:
-			fmt.Fprintf(w, "✓ fixed: %s\n", f.Problem)
+			fmt.Fprintf(w, "✓ fixed: %s\n", shown(f.Problem))
 		case f.Error != "":
 			failed++
-			fmt.Fprintf(w, "✕ not fixed: %s\n    %s\n", f.Problem, f.Error)
+			fmt.Fprintf(w, "✕ not fixed: %s\n    %s\n", shown(f.Problem), shown(f.Error))
 		}
 	}
 	if failed > 0 {
@@ -177,9 +177,9 @@ func printChecks(rows, hints io.Writer, checks []api.Check) {
 		if !c.OK {
 			mark = "✕"
 		}
-		fmt.Fprintf(rows, "  %s %-22s %s\n", mark, c.Name, c.Detail)
+		fmt.Fprintf(rows, "  %s %-22s %s\n", mark, shown(c.Name), shown(c.Detail))
 		if !c.OK && c.Fix != "" {
-			fmt.Fprintf(hints, "    Try: %s\n", c.Fix)
+			fmt.Fprintf(hints, "    Try: %s\n", shown(c.Fix))
 		}
 	}
 }

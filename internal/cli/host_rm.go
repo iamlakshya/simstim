@@ -39,8 +39,9 @@ func hostRmCmd() *cobra.Command {
 			"holds, and asks you to type the host's name to delete it too. --destroy deletes it: it\n" +
 			"needs the typed name, or --confirm with the host's name. It refuses while a session is\n" +
 			"working, unless you pass --force.",
-		Example: "  " + brand.Name + " host rm my-vps\n  " + brand.Name + " host rm lima --destroy --confirm lima",
-		Args:    cobra.ExactArgs(1),
+		Example:           "  " + brand.Name + " host rm my-vps\n  " + brand.Name + " host rm lima --destroy --confirm lima",
+		Args:              cobra.ExactArgs(1),
+		ValidArgsFunction: completeHostArg,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			o.name, o.confirmed = args[0], cmd.Flags().Changed("confirm")
 			return removeHost(cmd.Context(), prompts(cmd), o)

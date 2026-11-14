@@ -172,7 +172,7 @@ func (g *guide) inSession(h client.Host, f *onboard.Flow, a onboard.Action) erro
 		return err
 	}
 	if g.tty {
-		fmt.Fprintf(g.out, "It runs in the session %s on %s. Answer it there; ctrl+\\ leaves it running.\n", a.Args.Name, h.Name)
+		fmt.Fprintf(g.out, "It runs in the session %s on %s. Answer it there; %s leaves it running.\n", shown(a.Args.Name), shown(h.Name), shown(client.LoadSettings().Attach.DetachKey))
 	}
 	id, ended, err := g.session(h, a)
 	if err != nil {
@@ -183,7 +183,9 @@ func (g *guide) inSession(h client.Host, f *onboard.Flow, a onboard.Action) erro
 		return err
 	}
 	a.Session = id
-	f.Done(a, checks, ended)
+	if err := f.Done(a, checks, ended); err != nil {
+		return err
+	}
 	fmt.Fprintln(g.out)
 	printLine(g.out, f.Line(a.Agent.Kind))
 	return nil

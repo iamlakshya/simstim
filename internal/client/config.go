@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"runtime"
 	"strconv"
@@ -147,19 +148,42 @@ func StateDir() string {
 func hostsPath() string    { return filepath.Join(ConfigDir(), "hosts.toml") }
 func settingsPath() string { return filepath.Join(ConfigDir(), "config.toml") }
 
-// LoadHosts reads the saved hosts. A file that cannot be read is an
-// error of the file system. A file that does not decode is the user's to
-// fix: a usage error that says where.
-func LoadHosts() ([]Host, error) {
-	b, err := os.ReadFile(hostsPath())
-	if errors.Is(err, os.ErrNotExist) {
-		return nil, nil
+// ConfigFile is one of the client's config files.
+type ConfigFile struct {
+	// Name is the file's name, such as "config.toml".
+	Name string
+	// Path is where the file lives.
+	Path string
+	// Type is the struct that the file decodes into. Its TOML tags are the
+	// file's known keys.
+	Type reflect.Type
+}
+
+// ConfigFiles lists the config files: config.toml, then hosts.toml.
+// `config path` prints their paths, and `config check` reads them.
+func ConfigFiles() []ConfigFile {
+	return []ConfigFile{
+		{Name: "config.toml", Path: settingsPath(), Type: reflect.TypeFor[Settings]()},
+		{Name: "hosts.toml", Path: hostsPath(), Type: reflect.TypeFor[hostsFile]()},
 	}
-	if err != nil {
-		return nil, fmt.Errorf("read %s: %w", hostsPath(), err)
+}
+
+// LoadHosts reads the saved hosts, through ReadConfigFile. A file that
+// cannot be read is an error of the file system. One that is not a regular
+// file, or is too large, cannot be used, and says so. A file that does not
+// decode is the user's to fix: a usage error that says where.
+func LoadHosts() ([]Host, error) {
+	b, err := ReadConfigFile(hostsPath())
+	switch {
+	case errors.Is(err, os.ErrNotExist):
+		return nil, nil
+	case errors.Is(err, ErrNotAFile), errors.Is(err, ErrConfigTooLarge):
+		return nil, &UserError{Msg: hostsPath() + " cannot be used: " + err.Error(), Hint: brand.Name + " config check", Code: "config_unusable"}
+	case err != nil:
+		return nil, err
 	}
 	var f hostsFile
-	if _, err := toml.Decode(string(b), &f); err != nil {
+	if _, err := decodeConfig(string(b), &f); err != nil {
 		return nil, tomlError(hostsPath(), string(b), err)
 	}
 	return f.Hosts, nil
@@ -169,10 +193,11 @@ func LoadHosts() ([]Host, error) {
 // the TOML package gives only in its text.
 var tomlLine = regexp.MustCompile(`^toml: line (\d+)`)
 
-// tomlError is the usage error of a TOML file that does not decode, with
-// the line and column of the mistake.
-func tomlError(path, data string, err error) error {
-	msg, line, col := err.Error(), 0, 0
+// TOMLWhere reads the error of a TOML file that does not decode: what went
+// wrong, and its line and column, or 0 when the error gives none. data is
+// the file's text.
+func TOMLWhere(data string, err error) (msg string, line, col int) {
+	msg = err.Error()
 	var pe toml.ParseError
 	if errors.As(err, &pe) {
 		msg, line, col = pe.Message, pe.Position.Line, pe.Position.Col
@@ -186,12 +211,18 @@ func tomlError(path, data string, err error) error {
 			col = len(lines[line-1]) - len(strings.TrimLeft(lines[line-1], " \t")) + 1
 		}
 	}
-	where, hint := path, "Fix "+path+"."
+	return strings.TrimPrefix(msg, "toml: "), line, col
+}
+
+// tomlError is the usage error of a TOML file that does not decode, with
+// the line and column of the mistake (docs/contributing/cli-spec.md 13.4).
+func tomlError(path, data string, err error) error {
+	msg, line, col := TOMLWhere(data, err)
+	where := path
 	if line > 0 {
 		where = fmt.Sprintf("%s, line %d, column %d", path, line, col)
-		hint = fmt.Sprintf("Fix line %d of %s.", line, path)
 	}
-	return &UserError{Msg: where + ": " + strings.TrimPrefix(msg, "toml: "), Hint: hint, Code: "bad_config", Kind: KindUsage}
+	return &UserError{Msg: where + ": " + msg, Hint: brand.Name + " config check", Code: "bad_config", Kind: KindUsage}
 }
 
 // SaveHosts replaces the saved host list under its file lock. A caller
@@ -309,10 +340,56 @@ func HostFileKey(name string) string {
 	return strings.TrimRight(p, ".-") + "-" + hex.EncodeToString(sum[:16])
 }
 
-// LoadSettings reads the settings, with defaults for anything missing.
+// SettingsWarning is the warning of a config.toml that does not decode or
+// cannot be read, or "" when it decodes or does not exist. LoadSettings
+// then gives the defaults (docs/contributing/cli-spec.md 13.4).
+func SettingsWarning() string {
+	_, w := ReadSettings()
+	return w
+}
+
+// LoadSettings reads the settings, with defaults for anything missing. A
+// config.toml that does not decode, or cannot be read, gives the defaults
+// alone, and the CLI and the launcher warn of it (SettingsWarning).
 func LoadSettings() Settings {
+	s, _ := ReadSettings()
+	return s
+}
+
+// ReadSettings reads config.toml once, through ReadConfigFile, for its
+// settings and its warning: the warning of a file that does not decode,
+// cannot be read or is too large, or "". With a warning, the settings are
+// the defaults alone.
+func ReadSettings() (Settings, string) {
 	var s Settings
-	_, _ = toml.DecodeFile(settingsPath(), &s)
+	warning := ""
+	b, err := ReadConfigFile(settingsPath())
+	switch {
+	case errors.Is(err, os.ErrNotExist):
+	case errors.Is(err, ErrConfigTooLarge):
+		warning = "config.toml is larger than 1 MiB, so its settings are not used"
+	case err != nil:
+		warning = "config.toml cannot be read, so its settings are not used"
+	default:
+		if _, err := decodeConfig(string(b), &s); err != nil {
+			// The decoder may have set some keys before it met the error,
+			// in no fixed order: drop them all.
+			s = Settings{}
+			warning = "config.toml has an error, so its settings are not used"
+			if _, line, _ := TOMLWhere(string(b), err); line > 0 {
+				warning = fmt.Sprintf("config.toml has an error on line %d, so its settings are not used", line)
+			}
+			var alias *configAliasError
+			if errors.As(err, &alias) {
+				warning = "config.toml has an error: " + alias.Error() + ", so its settings are not used"
+			}
+		}
+	}
+	return withDefaults(s), warning
+}
+
+// withDefaults fills each setting that s leaves empty with its default.
+func withDefaults(s Settings) Settings {
 	d := DefaultSettings()
 	if s.UI.Motion == "" {
 		s.UI.Motion = d.UI.Motion

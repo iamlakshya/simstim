@@ -32,7 +32,7 @@ func TestHostCommands(t *testing.T) {
 		t.Errorf("host test = %q", out)
 	}
 	out := ok(t, "host", "doctor", "box")
-	for _, want := range []string{"box: ", "systemd user manager", "runtime folder", "Agents:", "✕ Claude Code      not installed", "Try: " + brand.Name + " agents install claude --host box"} {
+	for _, want := range []string{"box: ", "systemd user manager", "runtime folder", "Agents:", "✕ Claude Code      not installed", "Try: " + brand.Name + " agents install claude box"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("host doctor lacks %q:\n%s", want, out)
 		}
@@ -284,7 +284,7 @@ func TestAddHost(t *testing.T) {
 			t.Errorf("add = %q", out)
 		}
 	}
-	for _, want := range []string{"Connecting to added (box)…", "✓ connected in ", "✕ restore after restart: no systemd user manager", "Agents:", "--host added", "added is ready."} {
+	for _, want := range []string{"Connecting to added (box)…", "✓ connected in ", "✕ restore after restart: no systemd user manager", "Agents:", "agents install claude added", "added is ready."} {
 		if !strings.Contains(out, want) {
 			t.Errorf("add lacks %q:\n%s", want, out)
 		}

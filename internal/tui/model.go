@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/colorprofile"
 	uv "github.com/charmbracelet/ultraviolet"
 
+	"github.com/iamlakshya/simstim/internal/brand"
 	"github.com/iamlakshya/simstim/internal/client"
 	"github.com/iamlakshya/simstim/internal/onboard"
 )
@@ -37,17 +38,21 @@ type Options struct {
 	// Local is the guided setup's view of this computer. The command tree
 	// passes one that knows its providers.
 	Local onboard.Local
+	// After schedules delayed messages; tests replace it to run without wall-clock ticks.
+	After func(time.Duration, tea.Msg) tea.Cmd
 }
 
 // Model is the launcher: one list at a time, and the dialogs drawn over it.
 type Model struct {
-	ctx          context.Context
-	cancelTier   context.CancelFunc
-	tierRequests chan tierQuestionRequest
-	be           Backend
-	settings     client.Settings
-	now          func() time.Time
-	motion       bool
+	ctx                context.Context
+	cancelTier         context.CancelFunc
+	tierRequests       chan tierQuestionRequest
+	be                 Backend
+	settings           client.Settings
+	now                func() time.Time
+	motion             bool
+	settingsWarned     string
+	settingsGeneration uint64
 
 	width, height int
 	dark          bool
@@ -165,11 +170,14 @@ func New(ctx context.Context, be Backend, o Options) *Model {
 	}
 	ctx = m.launcherContext(ctx)
 	m.ctx = ctx
+	if o.After != nil {
+		m.after = o.After
+	}
 	if m.now == nil {
 		m.now = time.Now
 	}
 	m.epoch, m.revealAt = m.now(), m.now()
-	m.settings = be.Settings()
+	m.settings, m.settingsWarned = be.ReadSettings()
 	commands = withKeymap(registry(), m.settings.Keymap)
 	m.hosts, m.loadErr = loadSavedHosts(ctx, be)
 	m.restore(o.Switcher)
@@ -205,6 +213,7 @@ func (m *Model) Init() tea.Cmd {
 		m.after(activityEvery, activityTickMsg{}),
 		m.debugOnStart(),
 		m.waitForTierQuestion(),
+		m.keymapOnStart(),
 	}
 	for _, h := range m.hosts {
 		cmds = append(cmds, m.dial(h))
@@ -213,6 +222,9 @@ func (m *Model) Init() tea.Cmd {
 		msg, hint := errText(m.loadErr)
 		m.toasts.push(m.now(), toastError, sentence(msg), hint)
 		cmds = append(cmds, m.after(toastErrorLife, toastTickMsg{}))
+	}
+	if m.settingsWarned != "" {
+		cmds = append(cmds, m.toastNext(toastWarning, m.settingsWarned+".", brand.Name+" config check"))
 	}
 	return tea.Batch(append(cmds, m.startTimers())...)
 }
@@ -240,13 +252,14 @@ type (
 		s        *client.Session
 		err      error
 		warn     *client.UserError // the answers about setup scripts did not parse
+		settingsRead
 	}
 	attachDoneMsg struct {
 		host, id, name string
 		res            client.AttachResult
 		err            error
+		settingsRead
 	}
-	settingsMsg struct{ s client.Settings }
 	sshHostsMsg struct{ hosts []string }
 )
 
@@ -254,7 +267,9 @@ type (
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	before, modal, scr, cur, armed := m.sel, m.modal, m.screen, m.cur, m.quitArmed
 	selIdx, hostSel := m.selIdx, m.hostSel
-	cmd := m.update(msg)
+	// An action that read config.toml brings the settings first, so that
+	// what it leads to, such as an attach, uses them.
+	cmd := tea.Batch(m.settingsOf(msg), m.update(msg))
 	if m.sel != before {
 		cmd = tea.Batch(cmd, m.schedulePreview())
 	}
@@ -374,9 +389,7 @@ func (m *Model) update(msg tea.Msg) tea.Cmd {
 	case editorDoneMsg:
 		return m.onEditorDone(msg)
 	case settingsMsg:
-		m.settings = msg.s
-		commands = withKeymap(registry(), m.settings.Keymap)
-		return nil
+		return m.onSettings(msg)
 	case sshHostsMsg:
 		return m.onSSHHosts(msg)
 	}
@@ -418,16 +431,6 @@ func (m *Model) onAttachEnded(msg attachDoneMsg) tea.Cmd {
 		cmd = tea.Batch(cmd, w.afterAttach(m, msg))
 	}
 	return cmd
-}
-
-// onEditorDone reloads the settings after the editor closes.
-func (m *Model) onEditorDone(msg editorDoneMsg) tea.Cmd {
-	be := m.be
-	reload := func() tea.Msg { return settingsMsg{be.Settings()} }
-	if msg.err != nil {
-		return tea.Batch(reload, m.toastErr(msg.err))
-	}
-	return reload
 }
 
 // onSSHHosts keeps the hosts from the SSH config, for the add-host wizard.

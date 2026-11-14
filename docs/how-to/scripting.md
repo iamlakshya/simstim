@@ -51,11 +51,23 @@ Opening the launcher, running `flip` with no session, or running `demo` also nee
 
 If the terminal's reader cannot restart after an editor, a shell or key creation, the launcher exits and restores the terminal. Its error says how to continue in a new terminal. Diagnostic key reads also end when cancellation claims success but the read stays blocked. A terminal check refuses a busy or failed reader before sending queries. The session picker gives a terminal recovery hint. Key creation and editor processes use the command context, so cancellation stops them. Failed key creation gives its command in the recovery hint. A check after an install uses SSH without prompts if an earlier terminal read remains blocked.
 
-`agents install` with input off starts the installer in a session, and does not attach to it. The command says how to attach and answer the installer's questions.
+When a script already has a session ID, pass `--id` to `attach` or `pull`. Put `--` before the target. The command then checks that exact ID. If it has gone, it fails instead of choosing a session with the same name. A picked session and `attach -` use the same exact lookup. `attach --id` without a target fails with exit code 2.
+
+<!-- test: help (needs a session and a terminal) -->
+```sh
+simstim attach --id -- my-server/1a2b3c4d
+simstim pull --id --into review/app -- my-server/1a2b3c4d
+```
+
+Set `SIMSTIM_NO_INSTALL=1` when connections must never install a missing host helper. A missing helper then fails with `helper_missing` and a hint to run `host upgrade`. Other values keep the usual behaviour. This guard affects automatic installation during a connection. An explicit command that installs or upgrades a helper still needs the user's usual agreement.
+
+`agents install` with input off starts the installer in a session, and does not attach to it. The command says how to attach and answer the installer's questions. `agents login` does the same with the agent's login, and exits with 0.
 
 Esc, Ctrl+C, the end of input, or a signal at a question cancels. The command prints `Cancelled. Nothing changed.`, or what it did before the cancel, and exits with 130.
 
 ## Read JSON
+
+JSON keeps integer sizes exact, including values above 2 to the power of 53. Use an integer type when reading them.
 
 These commands take `--json`: `ls`, `show`, `new --detach`, `resume --detach`, `ports`, `doctor`, `host ls`, `host show`, `host upgrade`, `host test`, `host doctor`, `host restore`, `host status`, `host alerts`, `host alerts log`, `agents ls`, `config keymap` and `version`. `new` and `resume` need `--detach` with `--json`, because an attached session owns the terminal.
 
@@ -96,7 +108,7 @@ A session that `new --detach --json` starts prints as one object, with its `host
 }
 ```
 
-The `address` is always the host and the session's ID, never its name. A name can change, or come to mean another session, before your script uses it. An ID cannot.
+The `address` is always the host and the session's ID, never its name. A name can change, or come to mean another session, before your script uses it. An ID cannot. `show --screen --json` adds `screen`, an array of plain-text lines for the session's last screen.
 
 The other commands print these shapes. Each object at the top also has `"v": 1`:
 
@@ -161,6 +173,7 @@ These old forms work today:
 | `kill <address>` | `rm <address> -y` |
 | `flip [<address>]` | `attach [<address>]` |
 | `rm` with input off and without `-y`, which deletes | `rm -y`. After the end, `rm` without `-y` fails with exit code 4 |
+| `[keymap] "session: preview"` | `"session: peek"` |
 | The Go keys of `host ls --json` | The same keys in `snake_case` |
 
 Each works until v0.4.0 and 11 November 2027, whichever comes later. `host ls --json` printed each host's keys as `Name`, `SSH` and `SSHConfig`. It now prints them in `snake_case` too, as `name`, `ssh` and `ssh_config`. Both forms print until v0.4.0 and 11 November 2027, whichever comes later. The 12 months start on the day of the release that adds the warning. Move your scripts to the `snake_case` keys. `host ls --json` prints the warning on every run, also when you have no hosts, so that a script learns of the change before it needs it.

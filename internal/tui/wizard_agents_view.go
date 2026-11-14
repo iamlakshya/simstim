@@ -3,7 +3,9 @@ package tui
 import (
 	"fmt"
 
+	"github.com/iamlakshya/simstim/internal/api"
 	"github.com/iamlakshya/simstim/internal/brand"
+	"github.com/iamlakshya/simstim/internal/client"
 	"github.com/iamlakshya/simstim/internal/onboard"
 )
 
@@ -74,7 +76,7 @@ func (w *wizard) runView(m *Model, cw int) (string, []string, []hint) {
 	}
 	body = append(body, wrap(text, cw)...)
 	body = append(body, "", "  "+sAccent.Render(trunc(cmd, cw-2)), "")
-	for _, l := range wrap("ctrl+\\ leaves the session running, and comes back here.", cw) {
+	for _, l := range wrap(api.CleanText(client.LoadSettings().Attach.DetachKey, 64)+" leaves the session running, and comes back here.", cw) {
 		body = append(body, sFaint.Render(l))
 	}
 	hints := []hint{{"enter", "run it"}, {"s", "skip"}, {"esc", "stop"}}

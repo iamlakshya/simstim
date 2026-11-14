@@ -42,6 +42,7 @@ func WriteScript(t testing.TB, path, body string) {
 
 // Transport serves a fake bridge for Start, and answers the probe for Run.
 type Transport struct {
+	Screens map[string][]byte
 	// Sessions is what the bridge's ls returns.
 	Sessions []client.Session
 	// Every, if set, makes the transport a client.KeepAliver.
@@ -99,6 +100,21 @@ func (t *Transport) Remotes() []string {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	return append([]string(nil), t.remotes...)
+}
+
+// Ops lists the op of each request that the bridge received, in order,
+// such as "agents.check" or "new".
+func (t *Transport) Ops() []string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return append([]string(nil), t.ops...)
+}
+
+// SetSessions changes what the bridge's ls returns.
+func (t *Transport) SetSessions(s []client.Session) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.Sessions = s
 }
 
 // Fail makes the bridge answer every request of op with e, an error such
@@ -178,7 +194,15 @@ func (t *Transport) Start(_ context.Context, remote string) (client.Proc, error)
 	}
 	inR, inW := io.Pipe()
 	outR, outW := io.Pipe()
-	p := &pipeProc{in: inW, out: outR, done: make(chan struct{})}
+	p := &pipeProc{in: inW, out: outR, done: make(chan struct{}), stderr: t.BridgeStderr}
+	if t.BridgeStderr != "" {
+		go func() {
+			defer close(p.done)
+			_ = outW.Close()
+			_, _ = io.Copy(io.Discard, inR)
+		}()
+		return p, nil
+	}
 	go func() {
 		defer close(p.done)
 		t.serve(inR, outW)
@@ -231,10 +255,24 @@ func (t *Transport) serve(in io.Reader, out io.Writer) {
 
 func (t *Transport) answer(req proto.Request) proto.Response {
 	t.mu.Lock()
+	t.ops = append(t.ops, req.Op)
+	started := 0
+	for _, op := range t.ops {
+		if op == "new" {
+			started++
+		}
+	}
 	fail := t.fail[req.Op]
+	sessions := append([]client.Session{}, t.Sessions...)
+	newID := t.NewID
+	reply, overridden := t.Replies[req.Op]
 	t.mu.Unlock()
 	if fail != nil {
 		return proto.Response{ID: req.ID, Error: fail}
+	}
+	if overridden {
+		b, _ := json.Marshal(reply)
+		return proto.Response{ID: req.ID, OK: true, Result: b}
 	}
 	var v any
 	if a, ok := t.Answers[req.Op]; ok {
@@ -255,6 +293,15 @@ func (t *Transport) answer(req proto.Request) proto.Response {
 		if t.Steps != nil {
 			v = api.SetupResult{Steps: t.Steps}
 		}
+	case "peek":
+		var a struct {
+			ID string `json:"id"`
+		}
+		_ = json.Unmarshal(req.Args, &a)
+		t.mu.Lock()
+		data := t.Screens[a.ID]
+		t.mu.Unlock()
+		v = map[string]any{"data": data, "cols": 80, "rows": 24}
 	case "doctor":
 		v = api.HostInfo{Distro: "Fake Linux", CPUs: 2, MemTotal: 4 << 30, Agents: map[string]string{"shell": "/bin/sh"}}
 	case "agents.check":
@@ -303,14 +350,15 @@ func (nopCloser) Write(b []byte) (int, error) { return len(b), nil }
 func (nopCloser) Close() error                { return nil }
 
 type pipeProc struct {
-	in   *io.PipeWriter
-	out  *io.PipeReader
-	done chan struct{}
+	in     *io.PipeWriter
+	out    *io.PipeReader
+	done   chan struct{}
+	stderr string
 }
 
 func (p *pipeProc) Stdin() io.WriteCloser { return p.in }
 func (p *pipeProc) Stdout() io.Reader     { return p.out }
-func (p *pipeProc) Stderr() string        { return "" }
+func (p *pipeProc) Stderr() string        { return p.stderr }
 func (p *pipeProc) Wait() error           { <-p.done; return nil }
 func (p *pipeProc) Kill() {
 	_ = p.in.CloseWithError(errors.New("killed"))

@@ -101,7 +101,11 @@ func (m *Model) readActivity() tea.Cmd {
 		if err != nil {
 			return nil
 		}
-		return activityMsg{key: key, text: activityLine(renderScreen(data, cols, rows))}
+		shot, err := renderScreenContext(cctx, data, cols, rows)
+		if err != nil {
+			return nil
+		}
+		return activityMsg{key: key, text: activityLine(shot)}
 	})
 }
 

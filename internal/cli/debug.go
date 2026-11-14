@@ -20,8 +20,8 @@ import (
 // --debug-file, and the commands that start and stop the debug of a
 // running session, save its recent debug record, and write its profiles.
 
-// addDebugFlags adds the global debug flags to root. They turn on the
-// client's debug before any command runs.
+// addDebugFlags adds the global debug flags to root. startDebug turns on
+// the client's debug before any command runs.
 func addDebugFlags(root *cobra.Command) {
 	f := root.PersistentFlags()
 	addList(f, new([]string), "debug", "turn on the debug mode, with every category, or with the `categories` listed: "+
@@ -46,8 +46,8 @@ func completeCats(cats diag.Cats) cobra.CompletionFunc {
 		have := diag.CatsOf(strings.Split(prefix, ","))
 		var out []string
 		for _, c := range cats.List() {
-			if !have.Has(c) {
-				out = append(out, prefix+c)
+			if cand := prefix + c; !have.Has(c) && strings.HasPrefix(cand, toComplete) {
+				out = append(out, cand)
 			}
 		}
 		return out, cobra.ShellCompDirectiveNoFileComp | cobra.ShellCompDirectiveNoSpace
@@ -95,7 +95,7 @@ func startDebug(cmd *cobra.Command, args []string) error {
 func tildeHome(p string) string {
 	if home, err := os.UserHomeDir(); err == nil && home != "" {
 		if rest, ok := strings.CutPrefix(p, home+string(filepath.Separator)); ok {
-			return "~/" + rest
+			return "~/" + filepath.ToSlash(rest)
 		}
 	}
 	return p
@@ -125,7 +125,8 @@ func debugStartCmd() *cobra.Command {
 			"for every attached client, until debug stop or the time limit. A second debug start sets a new end.",
 		Example: "  " + brand.Name + " debug start my-vps/auth-fix\n" +
 			"  " + brand.Name + " debug start my-vps/auth-fix --for 8h --only memory",
-		Args: cobra.ExactArgs(1),
+		Args:              cobra.ExactArgs(1),
+		ValidArgsFunction: completeSessionArg,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if d < time.Second || d > api.DebugForMax {
 				return &client.UserError{Msg: "--for: " + d.String() + " is not between 1s and 24h", Hint: "Pass a time such as 30m or 8h.", Code: "bad_value", Kind: client.KindUsage}
@@ -186,11 +187,12 @@ func clockTime(t time.Time) string {
 
 func debugStopCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:     "stop <host>/<session>",
-		Short:   "Turn off the debug of a session at once",
-		Long:    "Turns off the debug of a session at once, and the host side of each traced attach.",
-		Example: "  " + brand.Name + " debug stop my-vps/auth-fix",
-		Args:    cobra.ExactArgs(1),
+		Use:               "stop <host>/<session>",
+		Short:             "Turn off the debug of a session at once",
+		Long:              "Turns off the debug of a session at once, and the host side of each traced attach.",
+		Example:           "  " + brand.Name + " debug stop my-vps/auth-fix",
+		Args:              cobra.ExactArgs(1),
+		ValidArgsFunction: completeSessionArg,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return withSession(cmd, args[0], func(ctx context.Context, h client.Host, conn *client.Conn, s *client.Session) error {
 				st, err := conn.DebugStop(ctx, s.ID)
@@ -214,8 +216,9 @@ func debugSaveCmd() *cobra.Command {
 		Short: "Save the session's recent debug record, just after a lag",
 		Long: "While the session's runtime category is on, the session's process on the host keeps the newest\n" +
 			"10 s or so of Go's execution trace. This saves that window to a file on the host, for go tool trace.",
-		Example: "  " + brand.Name + " debug save my-vps/auth-fix",
-		Args:    cobra.ExactArgs(1),
+		Example:           "  " + brand.Name + " debug save my-vps/auth-fix",
+		Args:              cobra.ExactArgs(1),
+		ValidArgsFunction: completeSessionArg,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return withSession(cmd, args[0], func(ctx context.Context, h client.Host, conn *client.Conn, s *client.Session) error {
 				f, err := conn.DebugSave(ctx, s.ID)
@@ -270,11 +273,15 @@ func debugProfileCmd() *cobra.Command {
 		},
 	}
 	addFor(cmd, &d, diag.ProfileDefault, "cpu only: how long the profile runs, up to 5m")
-	cmd.ValidArgsFunction = func(_ *cobra.Command, args []string, _ string) ([]string, cobra.ShellCompDirective) {
-		if len(args) == 1 {
-			return []string{diag.ProfileCPU, diag.ProfileHeap, diag.ProfileGoroutine}, cobra.ShellCompDirectiveNoFileComp
+	cmd.ValidArgsFunction = func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		switch len(args) {
+		case 0:
+			return completeSessions(cmd, args, toComplete)
+		case 1:
+			return completeFixed(diag.ProfileCPU, diag.ProfileHeap, diag.ProfileGoroutine)(cmd, args, toComplete)
+		default:
+			return nil, cobra.ShellCompDirectiveNoFileComp
 		}
-		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
 	return cmd
 }

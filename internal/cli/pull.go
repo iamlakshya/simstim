@@ -17,13 +17,16 @@ import (
 func pullCmd() *cobra.Command {
 	var into string
 	var force bool
+	var byID bool
 	cmd := &cobra.Command{
 		Use:   "pull <host>/<session>",
 		Short: "Bring a session's branch into the git repository you are in",
 		Long: "Fetches the branch that the session's folder has checked out, over your SSH connection, into a branch\n" +
-			"of the repository in the current folder: the same name, or --into. It changes neither working tree.",
-		Example: "  " + brand.Name + " pull my-vps/auth-fix\n  " + brand.Name + " pull my-vps/auth-fix --into review/auth-fix",
-		Args:    cobra.ExactArgs(1),
+			"of the repository in the current folder: the same name, or --into. It changes neither working tree.\n" +
+			"With --id, the target is an exact session ID and never falls back to a name.",
+		Example:           "  " + brand.Name + " pull my-vps/auth-fix\n  " + brand.Name + " pull my-vps/auth-fix --into review/auth-fix",
+		Args:              cobra.ExactArgs(1),
+		ValidArgsFunction: completeSessionArg,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := gitHere(cmd.Context(), "rev-parse", "--show-toplevel"); err != nil {
 				return &client.UserError{Msg: "this folder is not in a git repository", Hint: "Run pull again in your clone of the repository.", Code: "not_a_repo"}
@@ -35,6 +38,7 @@ func pullCmd() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&into, "into", "", "the local branch to fetch into (default: the session's branch name)")
 	addForce(cmd, &force, "move the local branch even when the fetch is not a fast-forward")
+	cmd.Flags().BoolVar(&byID, "id", false, "resolve the target only as a session ID, never as a name")
 	return cmd
 }
 
@@ -77,7 +81,7 @@ func pull(ctx context.Context, h client.Host, s *client.Session, into string, fo
 	ahead, _ := gitOut(ctx, "rev-list", "--count", into, "^HEAD")
 	fmt.Fprintf(os.Stderr, "Fetched %s from %s on %s into %s", shown(repo.Branch), shown(nameOf(*s)), shown(h.Name), shown(into))
 	if ahead != "" && ahead != "0" {
-		fmt.Fprintf(os.Stderr, ": %s commits that your current branch does not have", ahead)
+		fmt.Fprintf(os.Stderr, ": %s commits that your current branch does not have", shown(ahead))
 	}
 	fmt.Fprintln(os.Stderr, ".")
 	if repo.Dirty > 0 {

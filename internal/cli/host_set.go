@@ -28,6 +28,11 @@ type hostSetting struct {
 	key string
 	// about says what it is, and which values it takes, for the help.
 	about string
+	// prefix is true for a family of keys such as label., which completes
+	// without = and may appear more than once.
+	prefix bool
+	// values are the fixed values that shell completion offers for key.
+	values []string
 	// check reads the value for h, and returns it as it is kept, or a
 	// usage error.
 	check func(h client.Host, value string) (string, error)
@@ -50,9 +55,9 @@ type hostSetting struct {
 // have is unknown (cli-spec 11.1, rule 2).
 var hostSettings = []hostSetting{
 	{key: "idle", about: "how long a host that `host create` made may idle before it stops. It takes a\n" +
-		"time of a minute or more, such as 30m or 2h, or never.", check: checkIdle, now: idleNow, save: func(h *client.Host, v string) { h.Machine.IdleStop = v }, apply: applyIdleSetting},
+		"time of a minute or more, such as 30m or 2h, or never.", values: []string{"never"}, check: checkIdle, now: idleNow, save: func(h *client.Host, v string) { h.Machine.IdleStop = v }, apply: applyIdleSetting},
 	{key: "tier", about: "who else has root on the host: own, throwaway or shared. Lowering works at once.\n" +
-		"Raising connects to check the pinned host key, and asks for the host's typed name.", check: checkTier, current: tierNowContext, where: "in tiers.toml", apply: applyTierSetting},
+		"Raising connects to check the pinned host key, and asks for the host's typed name.", values: []string{"own", "throwaway", "shared"}, check: checkTier, current: tierNowContext, where: "in tiers.toml", apply: applyTierSetting},
 }
 
 func hostSetCmd() *cobra.Command {
@@ -69,7 +74,8 @@ func hostSetCmd() *cobra.Command {
 		Long:  strings.Join(long, "\n\n"),
 		Example: "  " + brand.Name + " host set lima idle=2h\n  " + brand.Name + " host set lima idle=never\n  " +
 			brand.Name + " host set my-vps tier=shared\n  " + brand.Name + " host set my-vps tier=own --confirm my-vps",
-		Args: cobra.MinimumNArgs(1),
+		Args:              cobra.MinimumNArgs(1),
+		ValidArgsFunction: completeHostSetArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return setHostWith(cmd.Context(), prompts(cmd), os.Stderr, args[0], args[1:], confirm)
 		},

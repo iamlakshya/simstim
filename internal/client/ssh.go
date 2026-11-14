@@ -432,9 +432,7 @@ func (s *SSH) CheckMaster(ctx context.Context) (running bool, pid int) {
 	args = append(args, "-O", "check", "--", s.Host.SSH)
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "ssh", args...)
-	cmd.WaitDelay = sshWaitDelay
-	out, _ := cmd.CombinedOutput()
+	out, _ := masterCommand(ctx, args).CombinedOutput()
 	return parseMaster(string(out))
 }
 

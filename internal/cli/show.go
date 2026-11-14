@@ -14,28 +14,35 @@ import (
 	"github.com/iamlakshya/simstim/internal/api"
 	"github.com/iamlakshya/simstim/internal/brand"
 	"github.com/iamlakshya/simstim/internal/client"
+	"github.com/iamlakshya/simstim/internal/tui"
 )
 
 // show describes one session (docs/contributing/cli-spec.md 9.6).
 
 func showCmd() *cobra.Command {
-	var asJSON bool
+	var asJSON, screen bool
 	cmd := &cobra.Command{
 		Use:   "show [<host>/<session>|-]",
-		Short: "Describe a session",
-		Long: "Prints everything about one session, one line for each detail that it has. Without a session, and\n" +
-			"at a terminal, it lets you pick one from a list. It does not wake a stopped host.",
+		Short: "Describe one session: its agent, state, folder and the command that attaches to it",
+		Long: "Prints everything about one session, one line for each detail that it has. With --screen, it prints\n" +
+			"the session's last screen as plain text instead, or adds it as screen with --json. Without a session,\n" +
+			"and at a terminal, it lets you pick one from a list. It does not wake a stopped host.",
 		Example: "  " + brand.Name + " show my-vps/auth-fix\n" +
+			"  " + brand.Name + " show my-vps/auth-fix --screen\n" +
 			"  " + brand.Name + " show auth-fix --json   # the host is found when the name is unique\n" +
 			"  " + brand.Name + " show -                 # the last session you attached to",
-		Args: cobra.MaximumNArgs(1),
+		Args:              cobra.MaximumNArgs(1),
+		ValidArgsFunction: completeSessionArg,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			a, err := sessionArg(cmd, args, false)
 			if err != nil {
 				return err
 			}
 			// Describing a session is no reason to start a machine.
-			err = a.open(client.WithoutWake(cmd.Context()), cmd, func(_ context.Context, f found) error {
+			err = a.open(client.WithoutWake(cmd.Context()), cmd, func(ctx context.Context, f found) error {
+				if screen {
+					return showScreen(ctx, f, asJSON)
+				}
 				if asJSON {
 					return printJSON(sessionObject(f.host.Name, *f.s))
 				}
@@ -45,8 +52,40 @@ func showCmd() *cobra.Command {
 			return stoppedHost(cmd.Context(), a.host, err)
 		},
 	}
+	cmd.Flags().BoolVar(&screen, "screen", false, "print the session's last screen as plain text, or add it as screen with --json")
 	addJSON(cmd, &asJSON)
 	return cmd
+}
+
+// showScreen prints f's last screen as plain text, or adds it to the session
+// object with --json (docs/contributing/cli-spec.md 9.6).
+func showScreen(ctx context.Context, f found, asJSON bool) error {
+	if !f.s.Alive {
+		return &client.UserError{
+			Msg:  fmt.Sprintf("%s on %s has no screen, because the session's process on the host has stopped", shown(nameOf(*f.s)), f.host.Name),
+			Hint: sessionCommand(f.host.Name, f.s.ID, "resume"),
+			Code: "session_gone",
+		}
+	}
+	pctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	data, cols, rows, err := f.conn.Peek(pctx, f.s.ID, tui.PeekBytes)
+	if err != nil {
+		return err
+	}
+	lines, err := tui.ScreenLinesContext(pctx, data, cols, rows)
+	if err != nil {
+		return err
+	}
+	if asJSON {
+		obj := sessionObject(f.host.Name, *f.s)
+		obj["screen"] = lines
+		return printJSON(obj)
+	}
+	for _, l := range lines {
+		printf("%s\n", l)
+	}
+	return nil
 }
 
 // detail is one line of show: a label, and the value.

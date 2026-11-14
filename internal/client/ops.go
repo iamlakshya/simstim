@@ -20,14 +20,41 @@ type HostInfo = api.HostInfo
 // NewArgs describes a new session.
 type NewArgs = api.NewArgs
 
-// TerminalArgs fills the terminal identity of a new session from this terminal.
+// TerminalArgs fills the terminal identity of a new session from this
+// terminal, and its inline mode from config.toml.
 func TerminalArgs(a NewArgs, cols, rows int) NewArgs {
+	a = terminalArgs(a, cols, rows)
+	a.Inline = a.Inline || LoadSettings().Agents.Inline
+	return a
+}
+
+// SessionArgs fills a new session's terminal identity from this terminal,
+// and what it takes from the settings from s, not from config.toml: its
+// inline mode, and its memory cap when a names none. The launcher passes
+// the settings that it holds, which an edit that breaks config.toml does
+// not replace.
+func SessionArgs(a NewArgs, cols, rows int, s Settings) (NewArgs, error) {
+	a = terminalArgs(a, cols, rows)
+	a.Inline = a.Inline || s.Agents.Inline
+	if a.MemoryMax == 0 {
+		n, err := SettingsMemoryMax(s)
+		if err != nil {
+			return a, err
+		}
+		a.MemoryMax = n
+		if n == 0 {
+			a.MemoryMax = MemoryAuto
+		}
+	}
+	return a, nil
+}
+
+func terminalArgs(a NewArgs, cols, rows int) NewArgs {
 	a.Term = os.Getenv("TERM")
 	a.ColorTerm = os.Getenv("COLORTERM")
 	a.TermProgram = os.Getenv("TERM_PROGRAM")
 	a.TermProgramVersion = os.Getenv("TERM_PROGRAM_VERSION")
 	a.Cols, a.Rows = cols, rows
-	a.Inline = a.Inline || LoadSettings().Agents.Inline
 	return a
 }
 

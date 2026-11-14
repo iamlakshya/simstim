@@ -124,10 +124,19 @@ jobs:
           cp vt/zig-out/linux/shadow-vt-amd64 internal/client/helpers/vt-linux-amd64
           CGO_ENABLED=0 go build -trimpath -o bin/client .
       - name: Create a host in a container
-        run: bin/client host create docker ci
+        run: |
+          bin/client host create docker ci
+          m=$(openssl rand -hex 16)
+          echo "E2E_DISPOSABLE_MARKER=$m" >> "$GITHUB_ENV"
+          cid=$(python3 -c 'import glob, os, tomllib; f = open(glob.glob(os.environ["XDG_CONFIG_HOME"] + "/*/hosts.toml")[0], "rb"); print(tomllib.load(f)["host"][0]["machine"]["id"])')
+          printf '%s\n' "$m" | docker exec -u 0 -i "$cid" sh -c 'cat > /etc/e2e-disposable'
       - name: End-to-end tests against it
         env:
           E2E_HOST: ci
+          # The container is made for this run, and destroyed after it: the
+          # checks of a disposable host, which type into sessions and change
+          # a host's shared state, run here too.
+          E2E_DISPOSABLE: "1"
         run: python3 test/e2e/run.py bin/client
       - name: Destroy it
         if: always()

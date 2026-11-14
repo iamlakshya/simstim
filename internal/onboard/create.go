@@ -29,9 +29,9 @@ func CheckCreate(p provider.Provider, req provider.Request) error {
 	if !client.ValidHostName(req.Name) {
 		return &client.UserError{Msg: fmt.Sprintf("%q cannot name a host", req.Name), Hint: "Use letters, digits, dots, dashes and underscores, with no dot at the end.", Code: "bad_name", Kind: client.KindUsage}
 	}
-	if req.IdleStop != "" && req.IdleStop != "never" {
-		if d, err := time.ParseDuration(req.IdleStop); err != nil || d < time.Minute {
-			return &client.UserError{Msg: fmt.Sprintf("%q is not an idle time", req.IdleStop), Hint: "Use a duration of a minute or more, such as 30m or 2h, or never.", Code: "bad_value", Kind: client.KindUsage}
+	if req.IdleStop != "" {
+		if err := client.CheckIdleTime(req.IdleStop); err != nil {
+			return err
 		}
 	}
 	if _, err := client.FindHost(req.Name); err == nil {

@@ -19,6 +19,7 @@ type resumedMsg struct {
 	key sessKey
 	res *client.ResumeResult
 	err error
+	settingsRead
 }
 
 // resumeSelected starts the selected session's agent again, with the cap
@@ -54,17 +55,19 @@ func (m *Model) resumeSelectedReady() tea.Cmd {
 		m.resuming = map[sessKey]bool{}
 	}
 	m.resuming[key] = true
-	c, be := h.conn, m.be
+	c, be, kept := h.conn, m.be, m.settings
+	read := m.beginSettingsRead()
 	resume := m.bgCmd(func(ctx context.Context) tea.Msg {
+		settings, read := readSettings(be, kept, read)
 		// The host stops the old holder and its unit, then waits for the start.
 		cctx, cancel := context.WithTimeout(ctx, 90*time.Second)
 		defer cancel()
-		secrets, err := be.SessionSecrets(cctx, names)
+		secrets, err := be.SessionSecrets(cctx, settings, names)
 		if err != nil {
-			return resumedMsg{key: key, err: err}
+			return resumedMsg{key: key, err: err, settingsRead: read}
 		}
 		res, err := c.Resume(cctx, client.ResumeArgs{ID: key.id, Secrets: secrets})
-		return resumedMsg{key: key, res: res, err: err}
+		return resumedMsg{key: key, res: res, err: err, settingsRead: read}
 	})
 	name, host := shown(s.Name), shown(h.name())
 	text := fmt.Sprintf("Resuming %s on %s…", name, host)

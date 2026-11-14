@@ -2,6 +2,7 @@ package client
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -84,21 +85,30 @@ func isShellWord(w string) bool {
 	return false
 }
 
-// fileCheck reads a TOML file into v, and reports keys it does not know.
+// fileCheck reads a TOML file into v, through ReadConfigFile, and reports
+// keys it does not know. `config check` says where each mistake is.
 func fileCheck(name, path string, v any) Check {
-	md, err := toml.DecodeFile(path, v)
-	switch {
-	case os.IsNotExist(err):
-		return Check{Name: name, OK: true, Detail: "none yet, at " + path}
-	case err != nil:
-		return Check{Name: name, Detail: err.Error(), Fix: "fix the file " + path}
+	b, err := ReadConfigFile(path)
+	if err == nil {
+		var md toml.MetaData
+		if md, err = decodeConfig(string(b), v); err == nil {
+			return undecoded(name, path, md)
+		}
 	}
+	if errors.Is(err, os.ErrNotExist) {
+		return Check{Name: name, OK: true, Detail: "none yet, at " + path}
+	}
+	return Check{Name: name, Detail: err.Error(), Fix: brand.Name + " config check"}
+}
+
+// undecoded is the check of a file that decodes: its unknown keys, if any.
+func undecoded(name, path string, md toml.MetaData) Check {
 	if keys := md.Undecoded(); len(keys) > 0 {
-		var ks []string
+		ks := make([]string, 0, len(keys))
 		for _, k := range keys {
 			ks = append(ks, k.String())
 		}
-		return Check{Name: name, Detail: "unknown keys: " + strings.Join(ks, ", "), Fix: "check their spelling against the configuration reference"}
+		return Check{Name: name, Detail: "unknown keys: " + strings.Join(ks, ", "), Fix: brand.Name + " config check"}
 	}
 	return Check{Name: name, OK: true, Detail: path}
 }

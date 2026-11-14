@@ -77,6 +77,7 @@ func (c *fakeConn) NewSession(_ context.Context, a client.NewArgs) (*client.Sess
 	}
 	c.be.mu.Lock()
 	defer c.be.mu.Unlock()
+	c.be.newArgs = append(c.be.newArgs, a)
 	h := c.host()
 	if h.newErr != nil {
 		return nil, h.newErr

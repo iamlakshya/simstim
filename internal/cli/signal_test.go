@@ -46,6 +46,9 @@ func TestMainInAChild(t *testing.T) {
 		return
 	}
 	scene := os.Getenv(mainSceneEnv)
+	if scene == "completion-signal" {
+		completionSignalScene()
+	}
 	code := 0
 	ok := t.Run("main", func(t *testing.T) {
 		if scene == "cleanup-fails" {

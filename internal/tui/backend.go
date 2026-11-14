@@ -16,6 +16,8 @@ import (
 // SSH, the host helper and attach. The real one wraps package client. Tests
 // use a fake, so every screen can be checked without SSH.
 type Backend interface {
+	// Reconnect retires the owned shared connection and opens a fresh bridge.
+	Reconnect(context.Context, client.Host) (Conn, error)
 	// LoadHosts and SaveHosts read and write the saved hosts. Neither does
 	// anything once ctx has ended, the command's own context: a save that a
 	// cancel came before writes nothing (client.SaveHosts).
@@ -32,6 +34,7 @@ type Backend interface {
 	// the forget.
 	UpdateHosts(c client.HostChange) (warn, err error)
 	Settings() client.Settings
+	ReadSettings() (client.Settings, string)
 	// Dial opens a background connection. It never prompts.
 	Dial(ctx context.Context, h client.Host) (Conn, error)
 	// StagePin, PinHostKey, SaveHostPin and AbortPin pin a host that the
@@ -63,11 +66,12 @@ type Backend interface {
 	Remember(lists map[string]client.HostList)
 	RememberLast(host, id, name string)
 	// Secrets fetches the values of a host's own secrets for a new
-	// session. It never prompts.
-	Secrets(ctx context.Context, h client.Host) (map[string]api.Secret, error)
+	// session, with the commands of the settings s, which the launcher
+	// holds. It never prompts.
+	Secrets(ctx context.Context, s client.Settings, h client.Host) (map[string]api.Secret, error)
 	// SessionSecrets fetches the values of the named secrets again, for a
 	// resume of a session that started with them. It never prompts.
-	SessionSecrets(ctx context.Context, names []string) (map[string]api.Secret, error)
+	SessionSecrets(ctx context.Context, s client.Settings, names []string) (map[string]api.Secret, error)
 	// SetupAnswers and RememberSetup read and keep the user's answers about
 	// repositories' setup scripts on a host. A yes keeps the setup hash of
 	// the question that it answers. RememberSetup's warning says that the
@@ -173,6 +177,8 @@ func (realBackend) Memory() memory                            { return client.Lo
 func (realBackend) Remember(lists map[string]client.HostList) { client.RememberLists(lists) }
 func (realBackend) RememberLast(host, id, name string)        { client.RememberLast(host, id, name) }
 
+func (realBackend) ReadSettings() (client.Settings, string) { return client.ReadSettings() }
+
 func (realBackend) SetupAnswers(host string) client.SetupAnswers {
 	return client.LoadSetupAnswers(host)
 }
@@ -181,12 +187,12 @@ func (realBackend) RememberSetup(ctx context.Context, host, repo string, run boo
 	return client.RememberSetupContext(ctx, host, repo, run, hash)
 }
 
-func (realBackend) Secrets(ctx context.Context, h client.Host) (map[string]api.Secret, error) {
-	return client.FetchSecrets(ctx, client.LoadSettings(), client.SecretNames(h, nil), false)
+func (realBackend) Secrets(ctx context.Context, s client.Settings, h client.Host) (map[string]api.Secret, error) {
+	return client.FetchSecrets(ctx, s, client.SecretNames(h, nil), false)
 }
 
-func (realBackend) SessionSecrets(ctx context.Context, names []string) (map[string]api.Secret, error) {
-	return client.FetchSecrets(ctx, client.LoadSettings(), names, false)
+func (realBackend) SessionSecrets(ctx context.Context, s client.Settings, names []string) (map[string]api.Secret, error) {
+	return client.FetchSecrets(ctx, s, names, false)
 }
 
 func (realBackend) Dial(ctx context.Context, h client.Host) (Conn, error) {
@@ -412,4 +418,12 @@ func asUserError(err error) (*client.UserError, bool) {
 		return ue, true
 	}
 	return nil, false
+}
+
+func (realBackend) Reconnect(ctx context.Context, h client.Host) (Conn, error) {
+	c, _, err := client.Reconnect(client.WithoutWake(ctx), h, false)
+	if err != nil {
+		return nil, err
+	}
+	return c, nil
 }

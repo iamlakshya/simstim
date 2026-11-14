@@ -48,6 +48,7 @@ allow+="$more_allow"
 # --history checks every version of every file in every commit, plus the
 # commit messages: run it before the repository goes public.
 if [ "${1:-}" = "--history" ]; then
+    bash scripts/source-files.sh --tracked --require-git >/dev/null
     fail=0
     tmp=$(mktemp -d)
     trap 'rm -rf "$tmp"' EXIT
@@ -88,13 +89,18 @@ if [ "${1:-}" = "--history" ]; then
     exit 0
 fi
 
+files=$(mktemp)
+trap 'rm -f "$files"' EXIT
+bash scripts/source-files.sh --tracked >"$files"
 fail=0
-while IFS= read -r file; do
-    [ -f "$file" ] || continue
-    grep -I -q . "$file" 2>/dev/null || continue # binary or empty
+checked=0
+while IFS= read -r -d '' file; do
+    case "$file" in go.sum | vt/build.zig.zon | scripts/check-private.sh) continue ;; esac
+    grep -I -q . "./$file" 2>/dev/null || continue # binary or empty
+    checked=$((checked + 1))
     # Remove the allowed forms first, so a line with one of them and a real
     # hit still fails.
-    text=$(sed -E "s#${allow}##g" "$file")
+    text=$(sed -E "s#${allow}##g" "./$file")
     for p in "${patterns[@]}"; do
         hits=$(printf '%s\n' "$text" | grep -n -E -- "$p" || true)
         if [ -n "$hits" ]; then
@@ -103,7 +109,12 @@ while IFS= read -r file; do
             fail=1
         fi
     done
-done < <(git ls-files --cached | grep -v -E '^(go\.sum|vt/build\.zig\.zon|scripts/check-private\.sh)$')
+done <"$files"
+if [ "$checked" -eq 0 ]; then
+    echo "Error: the private-detail check selected no text files." >&2
+    echo "Try: use a complete source tree, then run the check again." >&2
+    exit 2
+fi
 
 if [ "$fail" -ne 0 ]; then
     echo

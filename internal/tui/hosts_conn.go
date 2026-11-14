@@ -11,6 +11,21 @@ import (
 	"github.com/iamlakshya/simstim/internal/client"
 )
 
+// HostOnline reports whether host name currently holds a live background connection.
+func (m *Model) HostOnline(name string) bool {
+	h := m.hostByName(name)
+	return h != nil && h.online()
+}
+
+// HostFailed reports whether host name is in the failed state and returns its error.
+func (m *Model) HostFailed(name string) (bool, error) {
+	h := m.hostByName(name)
+	if h == nil || h.status != stFailed {
+		return false, nil
+	}
+	return true, h.err
+}
+
 // onConn handles the connection messages.
 func (m *Model) onConn(msg tea.Msg) tea.Cmd {
 	switch msg := msg.(type) {
@@ -50,11 +65,16 @@ func (m *Model) onDialled(msg dialledMsg) tea.Cmd {
 			h.status = stOffline
 		}
 		h.backoff = nextBackoff(h.backoff)
-		return m.after(h.backoff, redialMsg{name: h.name(), gen: h.gen})
+		retry := m.after(h.backoff, redialMsg{name: h.name(), gen: h.gen})
+		if msg.reconnect {
+			return tea.Batch(m.toastErr(msg.err), retry)
+		}
+		return retry
 	}
 	if msg.conn != nil && !m.conns.adopt(msg.conn) {
 		return nil
 	}
+	h.needRetire = false
 	h.conn, h.status, h.err, h.backoff = msg.conn, stOnline, nil, 0
 	cmds := []tea.Cmd{m.listSessions(h), m.ping(h), m.doctor(h), m.waitDone(h.name(), h.gen, h.conn)}
 	if msg.conn.HostIDChanged() {

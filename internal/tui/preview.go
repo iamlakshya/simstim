@@ -2,20 +2,20 @@ package tui
 
 import (
 	"context"
-	"io"
 	"strings"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/charmbracelet/x/vt"
 
 	"github.com/iamlakshya/simstim/internal/api"
 )
 
-// peekBytes is how much of a session's newest output the preview reads.
-const peekBytes = 64 << 10
+// PeekBytes is how much of a session's newest output a screen peek reads.
+const PeekBytes = 64 << 10
+
+const peekBytes = PeekBytes
 
 // previewState is the preview of the selected session.
 type previewState struct {
@@ -134,7 +134,8 @@ func (m *Model) peek() tea.Cmd {
 		if err != nil {
 			return peekMsg{key: key, err: err}
 		}
-		return peekMsg{key: key, shot: renderScreen(data, cols, rows)}
+		shot, err := renderScreenContext(cctx, data, cols, rows)
+		return peekMsg{key: key, shot: shot, err: err}
 	})
 }
 
@@ -161,56 +162,11 @@ type screenShot struct {
 // renderScreen runs bytes through a terminal emulator of the session's size.
 // The bytes are the tail of the session's output, so the first few may be the
 // end of a cut sequence; the emulator shrugs those off.
-func renderScreen(data []byte, cols, rows int) (shot *screenShot) {
-	// A preview is never worth a crash: odd bytes give an empty screen.
-	defer func() {
-		if recover() != nil {
-			shot = &screenShot{blank: true}
-		}
-	}()
-	if cols <= 0 || cols > 1000 {
-		cols = 80
-	}
-	if rows <= 0 || rows > 500 {
-		rows = 24
-	}
-	emu := vt.NewEmulator(cols, rows)
-	// The emulator answers terminal queries through a pipe. Drain it, so a
-	// query in the output cannot block the write.
-	done := make(chan struct{})
-	pw, _ := emu.InputPipe().(*io.PipeWriter)
-	if pw != nil {
-		go func() {
-			_, _ = io.Copy(io.Discard, emu)
-			close(done)
-		}()
-	} else {
-		data = stripQueries(data)
-		close(done)
-	}
-	_, _ = emu.Write(data)
-	if pw != nil {
-		_ = pw.Close()
-	}
-	<-done
-
-	shot = &screenShot{blank: true}
-	for y := range rows {
-		line := make(uv.Line, cols)
-		for x := range cols {
-			if c := emu.CellAt(x, y); c != nil {
-				line[x] = *c
-			} else {
-				line[x] = uv.EmptyCell
-			}
-		}
-		shot.lines = append(shot.lines, line)
-		if strings.TrimSpace(line.String()) != "" {
-			shot.bottom, shot.blank = y, false
-		}
-	}
-	if pos := emu.CursorPosition(); !emu.CursorHidden() && pos.Y > shot.bottom && pos.Y < rows {
-		shot.bottom = pos.Y
+func renderScreen(data []byte, cols, rows int) *screenShot {
+	cols, rows = normalizeScreenSize(cols, rows)
+	shot, err := renderScreenContext(context.Background(), data, cols, rows)
+	if err != nil || shot == nil {
+		return &screenShot{lines: make([]uv.Line, rows), blank: true}
 	}
 	return shot
 }

@@ -75,6 +75,9 @@ func (m *Model) removeHost(name string) tea.Cmd {
 		if h.name() != name {
 			continue
 		}
+		if h.dialCancel != nil {
+			h.dialCancel()
+		}
 		m.hosts = append(m.hosts[:i], m.hosts[i+1:]...)
 		h.gen++
 		if m.cur == name {

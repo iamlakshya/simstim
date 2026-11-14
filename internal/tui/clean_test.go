@@ -270,7 +270,7 @@ func TestCopiedCommandIsInert(t *testing.T) {
 	hs.key("enter")
 	_, cmd := hs.m.Update(keyMsg("y"))
 	hs.do(cmd)
-	hasToast(t, hs.m, "Copied: "+brand.Name+" attach atlas-dev/s4.")
+	hasToast(t, hs.m, "Copied: "+brand.Name+" attach --id -- atlas-dev/s4.")
 }
 
 // TestRememberedListDropsInvalidIDs checks a list from the launcher's

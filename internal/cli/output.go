@@ -65,7 +65,8 @@ func say(cmd *cobra.Command, format string, a ...any) {
 
 // note prints a note that a script may need, such as a step that the
 // command skipped, on stderr: one line, or with --json one JSON line, as a
-// warning with code.
+// warning with code. The message may hold a host's error, so it prints
+// cleaned.
 func note(cmd *cobra.Command, code, msg string) {
 	msg = shownNote(msg)
 	if cmd != nil && jsonOn(cmd) {
@@ -73,7 +74,7 @@ func note(cmd *cobra.Command, code, msg string) {
 		fmt.Fprintf(os.Stderr, "%s\n", jsonSafe(line))
 		return
 	}
-	fmt.Fprintln(os.Stderr, msg)
+	fmt.Fprintln(os.Stderr, shown(msg))
 }
 
 // warningFor returns a client.WarnFunc that writes client warnings (such
@@ -168,7 +169,7 @@ func versioned(v any) ([]byte, error) {
 		return nil, fmt.Errorf("write JSON: %w", err)
 	}
 	out.WriteByte('\n')
-	return out.Bytes(), nil
+	return jsonSafe(out.Bytes()), nil
 }
 
 // withV puts "v": 1 first in an object. Any other value stays as it is.
@@ -200,13 +201,16 @@ func sessionObject(host string, s client.Session) map[string]any {
 // empty string, a zero time or null (cli-spec 7.2, rule 6).
 func valuesOf(v any) map[string]any {
 	raw, _ := json.Marshal(v)
-	var obj map[string]any
-	_ = json.Unmarshal(raw, &obj)
-	for k, val := range obj {
-		switch val {
-		case nil, "", "0001-01-01T00:00:00Z":
-			delete(obj, k)
+	var values map[string]json.RawMessage
+	_ = json.Unmarshal(raw, &values)
+	obj := make(map[string]any, len(values))
+	for key, value := range values {
+		switch string(bytes.TrimSpace(value)) {
+		case "null", `""`, `"0001-01-01T00:00:00Z"`:
+			continue
 		}
+		// Preserve encoded integers and nested data without a float64 pass.
+		obj[key] = value
 	}
 	return obj
 }
@@ -275,17 +279,15 @@ type errorJSON struct {
 }
 
 // printJSON writes the report as one JSON line on w, and returns its exit
-// code.
+// code. Any text of the report may be a host's, or hold a host's: its code,
+// its message, its Try: line, its suggestions and its data. Each prints
+// encoded with unsafe runes escaped, keeping the exact decoded values.
 func (r report) printJSON(w io.Writer) int {
 	code := exitCode(r.kind)
-	var data json.RawMessage
-	if json.Valid(r.data) {
-		data = r.data
-	}
 	line, _ := json.Marshal(struct {
 		V     int       `json:"v"`
 		Error errorJSON `json:"error"`
-	}{jsonVersion, errorJSON{Code: r.code, Kind: r.kind.String(), Message: r.msg, Try: r.try, Exit: code, Suggestions: r.suggestions, Data: data}})
+	}{jsonVersion, errorJSON{Code: r.code, Kind: r.kind.String(), Message: r.msg, Try: r.try, Exit: code, Suggestions: r.suggestions, Data: validJSONData(r.data)}})
 	fmt.Fprintf(w, "%s\n", jsonSafe(line))
 	return code
 }

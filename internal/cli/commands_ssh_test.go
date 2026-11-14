@@ -107,6 +107,14 @@ func TestPull(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(remote, "c.txt"), []byte("c\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	// Host-side git config (fsmonitor, uploadpack hook) must not run when pull queries or fetches.
+	probeMarker := filepath.Join(th.h.Root, "gitconfig-ran")
+	th.h.Script("git-probe", "echo ran > '"+probeMarker+"'\nexit 1\n")
+	probeBin := filepath.Join(th.h.Root, "bin", "git-probe")
+	hostCfg := "[core]\n\tfsmonitor = " + probeBin + "\n[uploadpack]\n\tpackObjectsHook = " + probeBin + "\n"
+	if err := os.WriteFile(filepath.Join(th.h.Home, ".gitconfig"), []byte(hostCfg), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	newSession(t, "feat", "sleep", "60") // in the home folder, not a repository
 	out := okSaid(t, "new", "box", "--detach", "--name", "repo", "--dir", remote, "--", "sleep", "60")
 	if !strings.Contains(out, "(repo, shell)") {
@@ -120,6 +128,9 @@ func TestPull(t *testing.T) {
 	if !strings.HasPrefix(out, "Fetched feature from repo on box into feature: 1 commits that your current branch does not have.") ||
 		!strings.Contains(out, "The session has 1 files with uncommitted changes") {
 		t.Errorf("pull = %q", out)
+	}
+	if _, err := os.Stat(probeMarker); !os.IsNotExist(err) {
+		t.Errorf("pull executed host .gitconfig hook (%v)", err)
 	}
 	if got := gitc(local, "log", "--format=%s", "-1", "feature"); got != "work" {
 		t.Errorf("the local feature branch is at %q", got)
@@ -265,6 +276,7 @@ func TestKillShowsWhyAWorktreeStays(t *testing.T) {
 // runGit runs git in dir as a test user.
 func runGit(dir string, args ...string) (string, error) {
 	cmd := exec.Command("git", append([]string{"-C", dir, "-c", "user.name=Test", "-c", "user.email=test@example.com", "-c", "commit.gpgsign=false"}, args...)...)
+	cmd.Env = append(os.Environ(), "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=/dev/null")
 	out, err := cmd.CombinedOutput()
 	return strings.TrimSpace(string(out)), err
 }

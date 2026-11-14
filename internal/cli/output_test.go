@@ -50,12 +50,30 @@ func masked(out string) string {
 // host, against a golden file. The values that change from run to run are
 // masked; every key, and the shape around it, is the command's own.
 func TestGoldenJSON(t *testing.T) {
-	newTestHost(t)
+	th := newTestHost(t)
+	fakeClaude(t, th) // for agents login
+	// Fix both starts to the same cap, even on systems without /proc.
+	if err := os.WriteFile(filepath.Join(client.ConfigDir(), "config.toml"), []byte("[sessions]\nmemory_max = '256M'\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	var b strings.Builder
 	show := func(args ...string) {
 		out, errOut, err := runApart(t, args...)
 		if err != nil {
 			t.Fatalf("%s: %v\n%s", args, err, errOut)
+		}
+		if args[0] == "new" || args[0] == "agents" {
+			var row client.Session
+			if err := json.Unmarshal([]byte(out), &row); err != nil {
+				t.Fatal(err)
+			}
+			if row.MemoryMax != 256<<20 {
+				t.Fatalf("fixture cap = %d, want 256 MiB", row.MemoryMax)
+			}
+		}
+		// An address that uses the ID shows <id> in its place.
+		if m := regexp.MustCompile(`(?m)^\s*"id": "([a-z0-9]+)",?$`).FindStringSubmatch(out); m != nil {
+			out = strings.ReplaceAll(out, `"box/`+m[1]+`"`, `"box/<id>"`)
 		}
 		fmt.Fprintf(&b, "== %s\n%s", strings.Join(args, " "), masked(out))
 	}
@@ -71,6 +89,7 @@ func TestGoldenJSON(t *testing.T) {
 	show("host", "status", "box", "--json")
 	show("version", "--json")
 	show("config", "keymap", "--json")
+	show("agents", "login", "claude", "box", "--json")
 
 	// From fixed data: the details of a host that answered and of one that
 	// did not, and what host upgrade did.

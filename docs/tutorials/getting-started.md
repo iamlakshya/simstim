@@ -65,7 +65,7 @@ simstim host add my-server --tier own --yes
 simstim host test my-server
 ```
 
-[Install an agent](../how-to/install-agents.md) has the rest: `agents install`, and each agent's login.
+[Install an agent](../how-to/install-agents.md) has the rest: `agents install`, and `agents login` for the agent's own login.
 
 ## 3. Start a session
 

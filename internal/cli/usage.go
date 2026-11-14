@@ -26,6 +26,10 @@ func guard(root *cobra.Command) {
 	walk = func(c *cobra.Command) {
 		switch {
 		case c.HasSubCommands() && !c.Runnable():
+			if c.Annotations == nil {
+				c.Annotations = map[string]string{}
+			}
+			c.Annotations[groupCommand] = "true"
 			c.Args = unknownCommand
 			c.RunE = func(c *cobra.Command, _ []string) error { return c.Help() }
 		case c.Args != nil:
@@ -236,6 +240,9 @@ func firstExample(ex string) string {
 
 // parseFailed is the annotation of a command whose flags did not parse.
 const parseFailed = "flags-did-not-parse"
+
+// groupCommand marks a command that only groups subcommands and prints help.
+const groupCommand = "group-command"
 
 // unparsed marks c as a command whose flags did not parse.
 func unparsed(c *cobra.Command) {

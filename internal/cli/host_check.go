@@ -18,26 +18,33 @@ import (
 // restore, and the provider's start, stop and status.
 
 func hostTestCmd() *cobra.Command {
-	var asJSON bool
+	var asJSON, reconnect bool
 	cmd := &cobra.Command{
-		Use:     "test <host>",
-		Short:   "Check that a host answers, and how fast",
-		Example: "  " + brand.Name + " host test my-vps\n  " + brand.Name + " host test my-vps --json",
-		Args:    cobra.ExactArgs(1),
+		Use:               "test <host>",
+		Short:             "Check that a host answers, and how fast",
+		Example:           "  " + brand.Name + " host test my-vps\n  " + brand.Name + " host test my-vps --reconnect\n  " + brand.Name + " host test my-vps --json",
+		Args:              cobra.ExactArgs(1),
+		ValidArgsFunction: completeHostArg,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			h, err := client.FindHost(args[0])
 			if err != nil {
 				return err
 			}
-			start := time.Now()
 			ctx, cancel := context.WithTimeout(cmd.Context(), 30*time.Second)
 			defer cancel()
-			conn, err := client.Dial(ctx, h, true)
+			var conn *client.Conn
+			var connect time.Duration
+			if reconnect {
+				conn, connect, err = client.Reconnect(ctx, h, true)
+			} else {
+				start := time.Now()
+				conn, err = client.Dial(ctx, h, true)
+				connect = time.Since(start)
+			}
 			if err != nil {
 				return err
 			}
 			defer conn.Close()
-			connect := time.Since(start)
 			rt, err := conn.RoundTrip(ctx)
 			if err != nil {
 				return err
@@ -49,6 +56,7 @@ func hostTestCmd() *cobra.Command {
 			return nil
 		},
 	}
+	cmd.Flags().BoolVar(&reconnect, "reconnect", false, "close the shared SSH connection first, then test a new one")
 	addJSON(cmd, &asJSON)
 	return cmd
 }
@@ -69,8 +77,9 @@ func hostDoctorCmd() *cobra.Command {
 			"entry and Ghostty's terminfo. It also fixes a broken current helper link, stale session sockets\n" +
 			"and old helper versions. Each fix is shown and explained before it runs. A fix that needs root\n" +
 			"is printed for you.",
-		Example: "  " + brand.Name + " host doctor my-vps\n  " + brand.Name + " host doctor my-vps --fix\n  " + brand.Name + " host doctor my-vps --json",
-		Args:    cobra.ExactArgs(1),
+		Example:           "  " + brand.Name + " host doctor my-vps\n  " + brand.Name + " host doctor my-vps --fix\n  " + brand.Name + " host doctor my-vps --json",
+		Args:              cobra.ExactArgs(1),
+		ValidArgsFunction: completeHostArg,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if asJSON && fix && !yes {
 				// With --json nothing is asked, so -y must answer for each fix.
@@ -162,11 +171,12 @@ func hostFixesJSON(ctx context.Context, conn *client.Conn, h client.Host, d clie
 func hostRestoreCmd() *cobra.Command {
 	var all, asJSON bool
 	cmd := &cobra.Command{
-		Use:     "restore <host>",
-		Short:   "Start again the sessions that a host restart stopped",
-		Long:    "Starts again the sessions that a host restart stopped. The host also does this when it starts.",
-		Example: "  " + brand.Name + " host restore my-vps\n  " + brand.Name + " host restore my-vps --all --json",
-		Args:    cobra.ExactArgs(1),
+		Use:               "restore <host>",
+		Short:             "Start again the sessions that a host restart stopped",
+		Long:              "Starts again the sessions that a host restart stopped. The host also does this when it starts.",
+		Example:           "  " + brand.Name + " host restore my-vps\n  " + brand.Name + " host restore my-vps --all --json",
+		Args:              cobra.ExactArgs(1),
+		ValidArgsFunction: completeHostArg,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			h, err := client.FindHost(args[0])
 			if err != nil {
@@ -204,11 +214,12 @@ func hostRestoreCmd() *cobra.Command {
 func hostProviderCmd(action, short, long string) *cobra.Command {
 	var asJSON bool
 	cmd := &cobra.Command{
-		Use:     action + " <host>",
-		Short:   short,
-		Long:    long,
-		Example: "  " + brand.Name + " host " + action + " my-vps",
-		Args:    cobra.ExactArgs(1),
+		Use:               action + " <host>",
+		Short:             short,
+		Long:              long,
+		Example:           "  " + brand.Name + " host " + action + " my-vps",
+		Args:              cobra.ExactArgs(1),
+		ValidArgsFunction: completeHostArg,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			h, err := client.FindHost(args[0])
 			if err != nil {

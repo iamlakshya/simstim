@@ -20,10 +20,11 @@ import (
 func portsCmd() *cobra.Command {
 	var asJSON bool
 	cmd := &cobra.Command{
-		Use:     "ports <host>/<session>",
-		Short:   "List the TCP ports a session's processes listen on",
-		Example: "  " + brand.Name + " ports my-vps/auth-fix\n  " + brand.Name + " ports my-vps/auth-fix --json",
-		Args:    cobra.ExactArgs(1),
+		Use:               "ports <host>/<session>",
+		Short:             "List the TCP ports a session's processes listen on",
+		Example:           "  " + brand.Name + " ports my-vps/auth-fix\n  " + brand.Name + " ports my-vps/auth-fix --json",
+		Args:              cobra.ExactArgs(1),
+		ValidArgsFunction: completeSessionArg,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return withSession(cmd, args[0], func(ctx context.Context, h client.Host, conn *client.Conn, s *client.Session) error {
 				ports, err := conn.Ports(ctx, s.ID)
@@ -58,8 +59,9 @@ func forwardCmd() *cobra.Command {
 		Long: "Forwards ports from the host to 127.0.0.1 on this machine, through an SSH connection of its own,\n" +
 			"until you press Ctrl+C. Write local:remote to use another local port. Nothing is exposed beyond this machine.\n" +
 			"It refuses to start when your SSH config has a RemoteForward, a Tunnel or ForkAfterAuthentication yes for the host.",
-		Example: "  " + brand.Name + " forward my-vps/auth-fix 3000\n  " + brand.Name + " forward my-vps/auth-fix 8080:3000",
-		Args:    cobra.MinimumNArgs(1),
+		Example:           "  " + brand.Name + " forward my-vps/auth-fix 3000\n  " + brand.Name + " forward my-vps/auth-fix 8080:3000",
+		Args:              cobra.MinimumNArgs(1),
+		ValidArgsFunction: completeSessionArg,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			var h client.Host
 			var pairs []client.ForwardPair

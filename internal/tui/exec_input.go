@@ -108,6 +108,7 @@ func (m *Model) runPendingAttach(ctx context.Context, in, out *os.File, stuck bo
 	if stuck {
 		return nil, stuckLauncherAttachError(pa)
 	}
+	pa.opts.Settings, pa.settingsRead = readSettings(m.be, pa.opts.Settings, pa.settingsRead)
 	pa.opts.In, pa.opts.Out = in, out
 	res, err := m.be.Attach(ctx, pa.opts)
 	if ctx.Err() != nil {
@@ -121,7 +122,7 @@ func (m *Model) runPendingAttach(ctx context.Context, in, out *os.File, stuck bo
 		return nil, nil
 	}
 	m.openBg(m.launcherContext(ctx))
-	return timeFrames(&resumedModel{m: m, done: attachDoneMsg{host: pa.host, id: pa.id, name: pa.name, res: res, err: err}}), nil
+	return timeFrames(&resumedModel{m: m, done: attachDoneMsg{host: pa.host, id: pa.id, name: pa.name, res: res, err: err, settingsRead: pa.settingsRead}}), nil
 }
 
 // handingOff reserves one terminal transfer while its input stop is pending.

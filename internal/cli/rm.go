@@ -30,7 +30,8 @@ func rmCmd() *cobra.Command {
 			"  " + brand.Name + " rm my-vps/auth-fix -y   # no question, as in a script\n" +
 			"  " + brand.Name + " rm auth-fix             # the host is found when the name is unique\n" +
 			"  " + brand.Name + " rm                      # pick one from a list",
-		Args: cobra.MaximumNArgs(1),
+		Args:              cobra.MaximumNArgs(1),
+		ValidArgsFunction: completeSessionArg,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// An address without a host must be sure: a host that did not
 			// answer may have a session of the same name (cli-spec 9.2).

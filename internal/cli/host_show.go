@@ -30,8 +30,9 @@ func hostShowCmd() *cobra.Command {
 		Long: "Describe one host, as the launcher's host details do: the saved entry, then what the host\n" +
 			"says about itself. It does not start a stopped host. A host that does not answer is not a\n" +
 			"failure: show prints the saved part, then why.",
-		Example: "  " + brand.Name + " host show my-vps\n  " + brand.Name + " host show my-vps --json",
-		Args:    cobra.ExactArgs(1),
+		Example:           "  " + brand.Name + " host show my-vps\n  " + brand.Name + " host show my-vps --json",
+		Args:              cobra.ExactArgs(1),
+		ValidArgsFunction: completeHostArg,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			h, err := client.FindHost(args[0])
 			if err != nil {

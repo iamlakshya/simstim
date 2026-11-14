@@ -56,7 +56,8 @@ func hostCreateCmd() *cobra.Command {
 			"what is installed, and where, is printed. The name defaults to the provider's name.",
 		Example: "  " + brand.Name + " host create lima\n  " + brand.Name + " host create docker test --image debian:stable-slim\n  " +
 			brand.Name + " host create e2b cloud --template " + e2b.DefaultTemplate,
-		Args: cobra.RangeArgs(1, 2),
+		Args:              cobra.RangeArgs(1, 2),
+		ValidArgsFunction: firstArg(completeProviders),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			p, err := findProvider(args[0])
 			if err != nil {

@@ -17,6 +17,29 @@ func TestRemotePath(t *testing.T) {
 	}
 }
 
+// SessionArgs takes the inline mode and the memory cap from the settings
+// that it gets, and config.toml plays no part.
+func TestSessionArgs(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	s := DefaultSettings()
+	s.Agents.Inline = true
+	s.Sessions.MemoryMax = "4G"
+	a, err := SessionArgs(NewArgs{Agent: "claude"}, 100, 30, s)
+	if err != nil || !a.Inline || a.MemoryMax != 4<<30 || a.Cols != 100 || a.Rows != 30 {
+		t.Errorf("SessionArgs = %+v, %v", a, err)
+	}
+	if a, _ := SessionArgs(NewArgs{MemoryMax: 1 << 30}, 80, 24, s); a.MemoryMax != 1<<30 {
+		t.Errorf("a cap of its own became %d", a.MemoryMax)
+	}
+	if a, _ := SessionArgs(NewArgs{}, 80, 24, DefaultSettings()); a.MemoryMax != MemoryAuto || a.Inline {
+		t.Errorf("the defaults give %+v", a)
+	}
+	s.Sessions.MemoryMax = "4X"
+	if _, err := SessionArgs(NewArgs{}, 80, 24, s); err == nil {
+		t.Error("a bad memory_max passed")
+	}
+}
+
 func TestNeedMakeFolder(t *testing.T) {
 	c := &Conn{Host: Host{Name: "old"}}
 	if err := c.needMakeFolder(NewArgs{}); err != nil {

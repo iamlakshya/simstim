@@ -127,10 +127,10 @@ func debugCommands() []*command {
 		return need(m)
 	}
 	return []*command{
-		{noun: "debug", verb: "start", short: "start debug", why: need, run: (*Model).debugStart},
-		{noun: "debug", verb: "stop", short: "stop debug", why: stop, run: (*Model).debugStop},
-		{noun: "debug", verb: "save", short: "save the flight recorder", why: need, run: (*Model).debugSave},
-		{noun: "debug", verb: "bundle", short: "write a debug bundle", why: need, run: (*Model).debugBundle},
+		{noun: "debug", verb: "start", short: "start debug", cli: "debug start", why: need, run: (*Model).debugStart},
+		{noun: "debug", verb: "stop", short: "stop debug", cli: "debug stop", why: stop, run: (*Model).debugStop},
+		{noun: "debug", verb: "save", short: "save the flight recorder", cli: "debug save", why: need, run: (*Model).debugSave},
+		{noun: "debug", verb: "bundle", short: "write a debug bundle", cli: "debug bundle", why: need, run: (*Model).debugBundle},
 	}
 }
 

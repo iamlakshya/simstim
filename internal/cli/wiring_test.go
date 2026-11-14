@@ -471,7 +471,7 @@ func TestHostAddChecklistNoInputCommand(t *testing.T) {
 		t.Fatalf("host add --no-input: %v\n%s", err, term.Output())
 	}
 	out := string(term.WaitFor("added is ready."))
-	if strings.Contains(out, "Type the numbers") || !strings.Contains(out, "--host added") {
+	if strings.Contains(out, "Type the numbers") || !strings.Contains(out, "agents install claude added") {
 		t.Errorf("host add --no-input at a terminal offered the checklist:\n%s", out)
 	}
 }

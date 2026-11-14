@@ -436,6 +436,8 @@ A picker lets the user choose a session when a command needs one and the user na
 
 The picker is `internal/tui/picker.go`, with Bubble Tea v2, the launcher's framework ([0001](decisions/0001-go-and-bubble-tea.md)).
 
+A session ID from a host uses the existing legacy rule of 1 to 64 ASCII letters, digits, underscores or dashes. Every action validates the raw ID before caching it, attaching or writing an ID hint. A control or hidden character makes it invalid. Onboarding completion rejects a missing or invalid ID before changing checks, notes or its action queue. Its CLI and TUI drivers stop on that error.
+
 ### 6.4 Tests
 
 - Unit tests with a fake terminal: yes, no, the default, three bad answers, `esc`, and a typed name that does not match.
@@ -467,6 +469,7 @@ Every command that prints data or makes something takes `--json` (G10). This tab
 | `host alerts` | Today's `{alerts, log}`, with `v` | today, C4 |
 | `host alerts log` | An array of events, each with `v` | today, C4 |
 | `agents ls` | An array of agent rows, each with `v` | today, C4 |
+| `agents login` | A session object, with `started`: `true` when the command started the login, `false` for a login that already ran. Its `address` is always `host/id`, and the host's text in it is cleaned. It never attaches ([section 12.3](#123-agents-login)) | C8 |
 | `config keymap` | An array of `{v, command, keys}` | today, C4 |
 | `config check` | The report of [section 13.5](#135-output-and-exit-codes) | C9 |
 | `version` | `{v, version, protocol, helper}` | C4 |
@@ -520,6 +523,8 @@ When a command fails, stdout stays empty, and stderr gets one line (question C-7
 | `data` | The host's `Data`, when it sent some. A cancel during the fixes of `doctor --fix` has `fixes`: each fix as it ended, with what it changed |
 
 A line that does not parse is JSON when it gives `--json` as a flag, before any `--`. A word that is another flag's value is no flag: in `--debug-file --json`, `--json` names the debug file. The same holds for `--no-color`.
+
+The host error conversion makes its message and hint one clean display line, as section 4.1 requires. JSON encoding preserves those derived strings exactly. Other payload fields, including the keys and values of `data`, keep their decoded values. Every JSON path physically escapes control and hidden characters, including C1, bidirectional, zero-width and tag characters. The encoder never removes them from data or merges distinct keys. Human output cleans only display copies.
 
 A warning is one line before the result or the error:
 
@@ -997,11 +1002,14 @@ Their sessions change the host's own installs and login files, which no sandbox 
 3. The command dials the host and checks the agent. An agent that is not installed fails with exit code 1, and `Try: simstim agents install claude box`.
 4. When a session named `login-<agent>` runs on the host, the command attaches to it, and says so. With two such sessions, it attaches to the newer. Two clients that start a login at the same moment can still make two sessions.
 5. Otherwise it starts a session named `login-<agent>`. The session runs `Setup.Login`, or the agent itself when `Setup.Login` is the agent's first binary, as `onboard.LoginCommand` decides today. The session gets no secret.
-6. With input on, the command attaches. When the user leaves, by a detach or at the end, it checks the login as `host doctor` does. It prints the agent's line with its mark: ✓, !, ? or ✕.
-7. If the login still runs after a detach, it prints `The login keeps running. Attach again: simstim attach box/login-claude`.
-8. With input off, it starts the session and prints `Started box/login-claude. Attach to finish the login: simstim attach box/login-claude` on stderr. It exits with 0, as `agents install` does today.
+6. With input on, the command attaches. The text before the attach names the detach key of `config.toml`. When the user leaves, by a detach or at the end, it checks the login as `host doctor` does. It prints the agent's line with its mark: ✓, !, ? or ✕. The line's title is the agent table's, and the host's path and reason print cleaned.
+7. After a detach, it asks the host whether the session still runs, because a login can end while the client checks. If it runs, the agent's line has no `Try:`, and the command prints `The login keeps running. Attach again: simstim attach --id -- box/k3v7qa2m`. If it ended, the line keeps its `Try:`. A check that fails after a detach says so, prints the same attach line, and exits with 0, because an attach that ended with a detach is done (section 5.1).
+8. With input off, it starts the session and prints `Started box/k3v7qa2m. Attach to finish the login: simstim attach --id -- box/k3v7qa2m` on stderr. It exits with 0, as `agents install` does today. For a login that runs, it prints `The login of Claude Code already runs in box/k3v7qa2m.` and the same attach step.
 9. The client never reads, stores or passes the agent's credentials. The agent writes them on the host, in the files of `Setup.LoginFiles`.
 10. A walled session never sees those files (isolation spec 7.3). From isolation task P1.8, when the host's floor is above `none`, the command adds one note. The note says that a walled session needs a token in `[secrets]`, such as `CLAUDE_CODE_OAUTH_TOKEN` from `claude setup-token`.
+11. Every address that the command prints uses the session's ID, never its name, because two logins that start at the same moment share the name. The client checks the ID that the host sent before it prints it: 1 to 64 letters, digits, `-` or `_`. Any other ID fails with exit code 1.
+12. `--json` starts the login without attaching, or finds the one that runs, and prints its session object ([section 7.1](#71-which-commands-print-json)), with `started`: `true` when the command started it. Its `address` uses the ID too. Unsafe runes are physically escaped in JSON. Its decoded keys and values stay exact, as section 7.4 requires.
+13. The login runs again also when the agent is logged in, for example to change the account.
 
 `onboard.LoginCommand` then returns `simstim agents login <agent> <host>`. The hints of `host doctor`, `agents install` and the guided setup use it.
 
@@ -1020,43 +1028,51 @@ Their sessions change the host's own installs and login files, which no sandbox 
 
 A file that does not exist is not a finding. The report says `none yet`.
 
+The check opens a file once, and asks the open file what it is. It reads a regular file only, and at most 1 MiB of it, whatever size the file reports. It takes a key of at most 64 parts, and a value of at most 64 levels of arrays and inline tables. The full names of all keys, with the tables that hold them, may add up to 8 MiB, because the TOML package keeps a string of each. A file past a limit is a finding, so that a file cannot make the check slow. These limits are a choice of this project. The time and the memory of the check grow with the size of the file, and no faster.
+
 ### 13.2 What it checks
 
 | Check | Severity | Code | Task |
 | --- | --- | --- | --- |
+| A file that cannot be read, or that is not a regular file, such as a FIFO or a device | error | `unreadable` | C9 |
+| A file larger than 1 MiB, a key of more than 64 parts, a value of more than 64 levels, or full names of keys that add up to more than 8 MiB | error | `too_large` | C9 |
 | TOML syntax | error | `toml_syntax` | C9 |
 | A key that the file's struct does not know, with suggestions from the keys of that table | error | `unknown_key` | C9 |
 | A value of the wrong type | error | `wrong_type` | C9 |
+| Two spellings that match one known key or table, such as `motion` and `Motion` | error | `bad_value` | C9 |
+| A `[host.machine]` without a provider or a non-empty `id` | error | `bad_value` | C9 |
 | A value outside its list, such as `ui.motion` or `attach.scrollback` | error | `bad_value` | C9 |
-| A size that `api.ParseMemoryMax` refuses, or a duration that does not parse | error | `bad_value` | C9 |
-| A `[keymap]` name that is not a launcher command, or a key that does not parse | error | `bad_value` | C9 |
+| A size that `api.ParseMemoryMax` refuses, or a duration that does not parse. An `idle_stop` takes the rule of `host idle`: a minute or more, or `never` | error | `bad_value` | C9 |
+| A `[keymap]` name that is not a launcher command, or a key that does not parse or that the launcher never matches | error | `bad_value` | C9 |
 | A secret with an empty command | error | `bad_value` | C9 |
-| A host name that `ValidHostName` refuses, two hosts with one name, or an empty `ssh` | error | `bad_host` | C9 |
+| A host name that `ValidHostName` refuses, or two hosts with one name | error | `bad_host` | C9 |
+| A host that the client reaches with SSH and an empty or missing `ssh`. A host with a `[machine]` needs none: its provider reaches it, Docker and E2B without SSH, and Lima through the Host of Lima's own SSH config | error | `bad_host` | C9 |
 | An old name of section 3 | warning | `old_name` | C9 |
 | A key that a layer may not hold (isolation spec 8.2) | error | `layer_key` | P1.12 |
 | A rule that names a host that is not saved | error | `host_unknown` | H19 |
 | `sandbox.host` in the layer for all sessions, or in `[lock]` | error | `host_rule_layer` | H19 |
 
-The known keys come from the TOML tags of `client.Settings` and `client.Host`, read with `reflect`, as `cmd/docgen` reads them for the reference. `[keymap]` and `[secrets]` are free maps: their keys are checked by the rows above.
+The known keys come from the TOML tags of `client.Settings` and `client.Host`, read with `reflect`, as `cmd/docgen` reads them for the reference. A key matches its field as the TOML package matches it: exactly, or else in any case (`decode.go` in BurntSushi/toml v1.6.0). So `[UI]` with `Motion` is no finding. Two spellings that match one field are an error, even when their values agree. The report names both spellings and the line of the second key in sorted order. This rule does not fold host names or the keys of free maps. A finding names the key as the file spells it, and the rules above know it by its field. `[keymap]` and `[secrets]` are free maps: their keys are checked by the rows above.
 
 ### 13.3 Lines
 
 A syntax error carries its line and column in `toml.ParseError.Position` (`error.go` in BurntSushi/toml v1.6.0). `toml.MetaData` has no exported position for a key (`meta.go` in v1.6.0), so `config check` finds the line itself:
 
-1. It finds the header of the key's table.
-2. It takes the first line under it that sets the key's last part.
-3. A key in an inline table, or in a dotted form, gets the line of its table.
-4. When the scan finds nothing, the finding has no line.
+1. A small lexer reads the file once. It knows basic and literal strings on one line or several, comments, arrays and inline tables. So quotes in a comment or in another string start nothing. It skips a byte order mark, and reads the escapes of a quoted key, as the TOML package does.
+2. It records the line of each header, of each element of an array of tables, and of each key, with every part of a dotted key.
+3. A key in an inline table gets its own line, also when the table spans lines, as TOML 1.1 allows. An inline table in an array is an element of an array of tables, with the line of its `{`.
+4. When a key has no line that the lexer recorded, the finding has no line.
 
 ### 13.4 What other commands do with a broken file
 
-- A syntax error in `hosts.toml` stops a command, as `LoadHosts` does today, with exit code 2 and `Try: simstim config check`.
-- A syntax error in `config.toml` does not stop a command. Today `LoadSettings` ignores it without a word. After C9, the command prints one warning, `config.toml has an error on line 4, so its settings are not used`, then goes on with the defaults. From isolation task P1.12, `config.toml` holds locks, policy layers and secrets. Then a syntax error in it stops each command that writes or sends them, with exit code 2 and `Try: simstim config check`. These are `new`, `resume`, `fork`, `image pull` and each `policy` command that writes or sends layers. `policy lockdown` still runs (isolation spec 8.2, rule 4). `ls` and `attach` keep the warning, send no layers and arm no secrets.
+- Every command reads `config.toml` and `hosts.toml` as `config check` does: once, regular files only, and at most 1 MiB. So a FIFO or a device never makes a command wait.
+- A syntax error or two aliases of one field in `hosts.toml` stops a command, as `LoadHosts` does today, with exit code 2 and `Try: simstim config check`. A `hosts.toml` that is not a regular file, or is larger than 1 MiB, stops it with exit code 1 and the same `Try:` line.
+- A `config.toml` that does not decode, with a syntax error or a value of the wrong type, does not stop a command. Neither does one that cannot be read. Two aliases of one known field also discard the file, with a warning that names both spellings and their table. The loaders reject these aliases before they choose any setting or host route. Unknown keys and free map keys keep their existing rules. Today `LoadSettings` ignores it without a word. After C9, the command prints one warning, `config.toml has an error on line 4, so its settings are not used`, or `config.toml cannot be read, so its settings are not used`. Then it goes on with the defaults, for every setting. The launcher shows the warning as a notice at its start. After an edit in its settings editor that breaks the file, the launcher keeps the settings that it had, and says so with the same warning. Each action that uses the settings reads the file again. An attach uses the new detach and image paste keys and scrollback. A start uses the new inline mode, memory cap and secrets. A resume uses the new commands for secrets. An install or login also reads it. A good read gives the new settings, also after an edit in another window, and the launcher keeps them. A changed `ui.motion` takes effect at that read, or after the settings editor closes. The launcher applies only its latest requested read. An older action or editor reload cannot replace newer settings or restore an obsolete warning. A file that cannot be used gives the settings that the launcher holds, and the warning, once until a good read. From isolation task P1.12, `config.toml` holds locks, policy layers and secrets. Then a syntax error in it stops each command that writes or sends them, with exit code 2 and `Try: simstim config check`. These are `new`, `resume`, `fork`, `image pull` and each `policy` command that writes or sends layers. `policy lockdown` still runs (isolation spec 8.2, rule 4). `ls` and `attach` keep the warning, send no layers and arm no secrets.
 - An unknown key stops nothing. `doctor` reports it as today, and adds `Try: simstim config check`.
 
 ### 13.5 Output and exit codes
 
-The report goes to stdout. Each finding is one line in the GNU form `file:line: message` ([GNU](https://www.gnu.org/prep/standards/html_node/Errors.html)), with `warning:` before the message of a warning. Paths start with `~` for the home folder.
+The report goes to stdout. Each finding is one line in the GNU form `file:line: message` ([GNU](https://www.gnu.org/prep/standards/html_node/Errors.html)), with `warning:` before the message of a warning. A TOML syntax error also has its column, in the GNU form `file:line:column: message`. Paths start with `~` for the home folder. These abbreviated paths use forward slashes on every platform.
 
 ```text
 ~/.config/simstim/config.toml:4: unknown key "motoin" in [ui]. Did you mean "motion"?
@@ -1087,9 +1103,13 @@ Layers for ~/src/app:
 {"v": 1, "ok": false,
  "files": [{"path": "~/.config/simstim/config.toml", "exists": true}],
  "findings": [{"path": "~/.config/simstim/config.toml", "line": 4, "severity": "error", "code": "unknown_key",
-               "message": "unknown key \"motoin\" in [ui]", "suggestions": ["motion"]}],
+               "message": "unknown key \"motoin\" in [ui]", "suggestions": ["motion"]},
+              {"path": "~/.config/simstim/hosts.toml", "line": 2, "column": 7, "severity": "error", "code": "toml_syntax",
+               "message": "expected value but found '\\n' instead"}],
  "layers": []}
 ```
+
+A finding has `line` when the line is known, and `column` for a TOML syntax error only. A `message` has no full stop at its end.
 
 ### 13.6 Tests
 

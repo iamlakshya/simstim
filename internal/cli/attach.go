@@ -31,6 +31,9 @@ func attachEnded(ctx context.Context, h client.Host, id, name string) (bool, err
 }
 
 func attachSession(ctx context.Context, h client.Host, id, name string) (ended, stuck bool, err error) {
+	if err := checkSessionID(h.Name, id); err != nil {
+		return false, false, err
+	}
 	if !isTerminal(os.Stdin) || !isTerminal(os.Stdout) {
 		return false, false, &client.UserError{Msg: "attach needs a terminal", Hint: "Run it from a terminal, not a pipe.", Code: "no_terminal", Kind: client.KindUsage}
 	}
@@ -44,8 +47,9 @@ func attachSession(ctx context.Context, h client.Host, id, name string) (ended, 
 	if err != nil {
 		return false, res.ReaderStuck, err
 	}
+	// The name is the host's text, and prints cleaned.
 	if res.Ended != nil {
-		fmt.Fprint(os.Stderr, endMessage(name, h.Name, id, res.Ended))
+		fmt.Fprint(os.Stderr, endMessage(shown(name), h.Name, id, res.Ended))
 	} else {
 		fmt.Fprintf(os.Stderr, "\r\nDetached. %s keeps running on %s.\n", name, shown(h.Name))
 	}
@@ -53,24 +57,27 @@ func attachSession(ctx context.Context, h client.Host, id, name string) (ended, 
 }
 
 func attachCmd() *cobra.Command {
-	var restart bool
+	var restart, byID bool
 	cmd := &cobra.Command{
 		Use:     "attach [<host>/<session>|-]",
 		Aliases: []string{"a"},
 		Short:   "Attach to a session",
 		Long: "Attaches this terminal to a session. A stopped host that its provider script can start wakes first.\n" +
 			"When the session's agent has ended, attach asks to start it again, as resume does. --restart\n" +
-			"answers yes. The host may be left out when no other host has a session of that name.",
+			"answers yes. The host may be left out when no other host has a session of that name.\n" +
+			"With --id, name the host and exact session ID. A missing ID never becomes a session name.",
 		Example: "  " + brand.Name + " attach my-vps/auth-fix\n" +
 			"  " + brand.Name + " attach -          # the last session you attached to\n" +
 			"  " + brand.Name + " attach auth-fix   # the host is found when the name is unique\n" +
 			"  " + brand.Name + " attach            # pick one from a list",
-		Args: cobra.MaximumNArgs(1),
+		Args:              cobra.MaximumNArgs(1),
+		ValidArgsFunction: completeSessionArg,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runAttach(cmd, args, restart)
 		},
 	}
 	addRestart(cmd, &restart)
+	cmd.Flags().BoolVar(&byID, "id", false, "resolve the target only as a session ID, never as a name")
 	return cmd
 }
 
@@ -87,6 +94,11 @@ func addRestart(cmd *cobra.Command, p *bool) {
 // and no host wakes for nothing. On an ended agent it asks to start the
 // agent again, and then does what resume does.
 func runAttach(cmd *cobra.Command, args []string, restart bool) error {
+	if boolFlag(cmd, "id") {
+		if _, _, err := idArgument(cmd, args); err != nil {
+			return err
+		}
+	}
 	if len(args) > 0 && (!isTerminal(os.Stdin) || !isTerminal(os.Stdout)) {
 		// No lookup comes first, so the hint repeats the address only when
 		// it means one session as it is.
@@ -234,7 +246,7 @@ func pickRefresh(hosts []client.Host, cached []tui.PickRow) func(context.Context
 				continue
 			}
 			answered = true
-			for _, s := range r.Sessions {
+			for _, s := range validSessionRows(r.Sessions) {
 				rows = append(rows, tui.PickRow{Host: r.Host, Session: s})
 			}
 		}

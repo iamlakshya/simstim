@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -156,6 +157,22 @@ func forgetAbsentHost(ctx context.Context, name string) error {
 }
 
 func retireMaster(ctx context.Context, h Host) error { return retireControls(ctx, h.Name) }
+
+// CheckIdleTime checks how long a machine may idle before it stops, by the
+// one rule that every idle time shares (the CLI's parseIdle, for `host
+// idle` and `host create --idle-stop`): the value is trimmed, "never" in
+// any case turns the stop off, and any other value is a Go duration of a
+// minute or more. `config check` and the start of a host use it.
+func CheckIdleTime(s string) error {
+	t := strings.TrimSpace(s)
+	if strings.EqualFold(t, "never") {
+		return nil
+	}
+	if d, err := time.ParseDuration(t); err != nil || d < time.Minute {
+		return &UserError{Msg: fmt.Sprintf("%q is not an idle time", s), Hint: "Use a duration of a minute or more, such as 30m or 2h, or never.", Code: "bad_value", Kind: KindUsage}
+	}
+	return nil
+}
 
 // Target says how h is reached, for messages: its SSH target, or its
 // provider and machine.

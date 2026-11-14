@@ -142,7 +142,7 @@ func TestSetupWithFlags(t *testing.T) {
 		"Creating box with fake…", "✓ created the fake machine fake-box",
 		"[x] Claude Code", "[x] Codex", "To install: Codex.",
 		"Codex (1 of 1), with its vendor's installer",
-		"Done. box is ready.", "! Codex", "Try: " + brand.Name + " new box -- codex login --device-auth",
+		"Done. box is ready.", "! Codex", "Try: " + brand.Name + " agents login codex box",
 		brand.Name + " new box --agent claude",
 	} {
 		if !strings.Contains(out.String(), want) {
@@ -179,7 +179,7 @@ func TestSetupStepByStep(t *testing.T) {
 		"Type the numbers to install",
 		"Claude Code is not logged in. Its login:",
 		"Log in now? [Y/n]",
-		"Skipped. Later: " + brand.Name + " new box -- codex login --device-auth",
+		"Skipped. Later: " + brand.Name + " agents login codex box",
 		"✓ Claude Code", "Done. box is ready.",
 	} {
 		if !strings.Contains(out.String(), want) {

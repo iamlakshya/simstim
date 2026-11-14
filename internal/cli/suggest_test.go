@@ -183,7 +183,8 @@ func TestErrorsOfTheCommandLine(t *testing.T) {
 	}
 }
 
-// A hosts.toml that does not decode is the user's to fix, and says where.
+// A hosts.toml that does not decode is the user's to fix: it says where,
+// and that config check finds each mistake.
 // One that cannot be read is a failure.
 func TestBrokenHostsFile(t *testing.T) {
 	hosttest.New(t)
@@ -200,7 +201,7 @@ func TestBrokenHostsFile(t *testing.T) {
 			t.Fatal(err)
 		}
 		got, code := lineErr(t, "host", "ls")
-		if code != 2 || !strings.Contains(got, where) || !strings.Contains(got, "Try: Fix line ") {
+		if code != 2 || !strings.Contains(got, where) || !strings.Contains(got, "Try: "+brand.Name+" config check\n") {
 			t.Errorf("%q gives %d:\n%s", body, code, got)
 		}
 	}
