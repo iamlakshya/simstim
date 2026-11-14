@@ -53,6 +53,10 @@ The E2B provider's tests use fakes of E2B's API and of envd, the daemon in each 
 
 After SIGKILL, the fake keeps buffered stdout and stderr before ending the command's stream. Its readers drain only bytes ready now. Each stream keeps at most 1 MiB from that drain. A child that keeps writing cannot hold the drain open.
 
+Cancellation tests also cover a command that has ended before its input reader fails. Cancellation during error selection must keep the input error, its hint and any stderr.
+
+Command error tests also split more than 8 KiB of stderr across different event boundaries. `Run` keeps the final diagnostic in its own fixed byte ring. `Start` keeps the existing head of stderr and does not allocate that ring. Tests check the final three lines, a multibyte character at the ring boundary, the retained size and concurrent reads.
+
 Some parts need Linux: ports and idle stop read `/proc`, and memory caps need systemd. Their tests read a fake `/proc` instead (`procRoot`). The memory cap's tests use a fake `/proc/meminfo`, cgroup tree (`cgroupRoot`) and `systemctl`. Tests that need the shadow terminal skip when it is not built. Its Go side is also tested with a fake child, a shell script that echoes every frame.
 
 ## Coverage

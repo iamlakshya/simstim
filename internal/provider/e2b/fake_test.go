@@ -188,6 +188,10 @@ type fakeEnvd struct {
 	wrapperErrs []string
 	// failLeadGroup, when set, makes the wrapper fail leadGroup on Unix.
 	failLeadGroup bool
+	// writeGone, when set, answers a failed write with not_found, as envd
+	// does once it has passed on the command's end. By default it answers
+	// internal, as envd does before.
+	writeGone bool
 	// drop, when set, makes Start end the stream right after the start
 	// event, as a dropped connection would.
 	drop bool
@@ -222,6 +226,21 @@ type fakeEnvd struct {
 	// that many bytes a second, through a buffer of 1 MiB, as the far end
 	// of a slow link does.
 	streamRate int
+	// byTag, starting, killedTags and sigReqs track commands by their Start
+	// tag and record SendSignal selectors.
+	byTag           map[string]*fakeCmd
+	starting        map[string]chan struct{}
+	killedTags      map[string]bool
+	sigReqs         []signalRequest
+	startHeaderGate chan struct{}
+	startGate       chan struct{}
+	inStartGate     atomic.Bool
+	// killGate, when set, holds each SendSignal call, before the signal,
+	// until it is closed or the request ends.
+	killGate chan struct{}
+	// endGate, when set, holds each command's end event until it is closed
+	// or the request ends.
+	endGate chan struct{}
 	// pipeGate holds output readers after StartEvent, until a test releases
 	// them or the request ends.
 	pipeGate chan struct{}
@@ -377,13 +396,40 @@ func (f *fakeEnvd) start(w http.ResponseWriter, r *http.Request) {
 	}
 	f.mu.Lock()
 	bridge, home, failGroup := f.bridge, f.home, f.failLeadGroup
+	f.tags = append(f.tags, req.Tag)
+	if f.killedTags[req.Tag] {
+		f.mu.Unlock()
+		return
+	}
+	ready := make(chan struct{})
+	if f.starting == nil {
+		f.starting = map[string]chan struct{}{}
+	}
+	f.starting[req.Tag] = ready
 	f.mu.Unlock()
+	finishStart := func(c *fakeCmd) (killed bool, drop bool, headerGate, startGate chan struct{}) {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		delete(f.starting, req.Tag)
+		if c != nil {
+			pid := c.pid()
+			f.procs[pid], f.stdin[pid] = c, c.stdin
+			if f.byTag == nil {
+				f.byTag = map[string]*fakeCmd{}
+			}
+			f.byTag[req.Tag] = c
+		}
+		close(ready)
+		return f.killedTags[req.Tag], f.drop, f.startHeaderGate, f.startGate
+	}
 	if bridge != nil && strings.Contains(req.Process.Args[1], " bridge") {
+		finishStart(nil)
 		f.serveBridge(w, req.Process.Args[1], bridge)
 		return
 	}
 	c, err := startWrapped(req.Process.Args[1], home, failGroup)
 	if err != nil {
+		finishStart(nil)
 		f.t.Errorf("Start: %v", err)
 		return
 	}
@@ -406,14 +452,39 @@ func (f *fakeEnvd) start(w http.ResponseWriter, r *http.Request) {
 			f.mu.Unlock()
 		}
 	}()
-	f.mu.Lock()
-	f.procs[pid], f.stdin[pid] = c, c.stdin
-	f.tags = append(f.tags, req.Tag)
-	drop := f.drop
-	f.mu.Unlock()
+	killed, drop, headerGate, startGate := finishStart(c)
+	if killed {
+		c.kill()
+		select {
+		case <-c.ended:
+		case <-time.After(5 * time.Second):
+		}
+		_ = c.stdin.Close()
+		c.closeOutput()
+		return
+	}
+	if headerGate != nil {
+		select {
+		case <-headerGate:
+		case <-r.Context().Done():
+			f.drainDropped(name, c)
+			return
+		}
+	}
 	w.Header().Set("Content-Type", contentStream)
 	w.WriteHeader(http.StatusOK)
 	fw := &flushWriter{w: w}
+	if startGate != nil {
+		fw.send(0, map[string]any{"event": map[string]any{"keepalive": map[string]any{}}})
+		f.inStartGate.Store(true)
+		defer f.inStartGate.Store(false)
+		select {
+		case <-startGate:
+		case <-r.Context().Done():
+			f.drainDropped(name, c)
+			return
+		}
+	}
 	fw.send(0, map[string]any{"event": map[string]any{"start": map[string]any{"pid": pid}}})
 	fw.send(0, map[string]any{"event": map[string]any{"keepalive": map[string]any{}}})
 	if drop {
@@ -455,6 +526,15 @@ func (f *fakeEnvd) start(w http.ResponseWriter, r *http.Request) {
 	wg.Wait()
 	c.closeOutput()
 	<-c.ended
+	f.mu.Lock()
+	endGate := f.endGate
+	f.mu.Unlock()
+	if endGate != nil {
+		select {
+		case <-endGate:
+		case <-r.Context().Done():
+		}
+	}
 	fw.send(0, map[string]any{"event": map[string]any{"end": endEvent(c.status)}})
 	fw.send(flagEndStream, map[string]any{})
 }
@@ -488,9 +568,13 @@ func (f *fakeEnvd) input(pid uint32, data []byte) *rpcError {
 	_, err := in.Write(data)
 	f.mu.Lock()
 	f.writing--
+	gone := f.writeGone
 	f.mu.Unlock()
 	if err == nil {
 		return nil
+	}
+	if gone {
+		return &rpcError{Code: "not_found", Message: fmt.Sprintf("process with pid %d not found", pid)}
 	}
 	return &rpcError{Code: "internal", Message: "error writing to stdin: " + err.Error()}
 }
@@ -547,7 +631,36 @@ func (f *fakeEnvd) unary(w http.ResponseWriter, r *http.Request) {
 	case "SendSignal":
 		f.mu.Lock()
 		f.sigs = append(f.sigs, req.Signal)
+		f.sigReqs = append(f.sigReqs, signalRequest{Process: req.Process, Signal: req.Signal})
+		gate := f.killGate
+		f.mu.Unlock()
+		if gate != nil {
+			select {
+			case <-gate:
+			case <-r.Context().Done():
+			}
+		}
+		f.mu.Lock()
+		if pid == 0 && req.Process.Tag != "" {
+			if wait := f.starting[req.Process.Tag]; wait != nil {
+				f.mu.Unlock()
+				select {
+				case <-wait:
+				case <-r.Context().Done():
+				}
+				f.mu.Lock()
+			}
+		}
 		c := f.procs[pid]
+		if c == nil && req.Process.Tag != "" {
+			c = f.byTag[req.Process.Tag]
+			if c == nil && req.Signal == "SIGNAL_SIGKILL" {
+				if f.killedTags == nil {
+					f.killedTags = map[string]bool{}
+				}
+				f.killedTags[req.Process.Tag] = true
+			}
+		}
 		f.mu.Unlock()
 		if c != nil && req.Signal == "SIGNAL_SIGKILL" {
 			// As in envd, the command dies first. Then its stdin and output
