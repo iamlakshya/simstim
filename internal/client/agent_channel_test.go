@@ -289,7 +289,9 @@ func bindChannelFixture(t *testing.T, h Host, scope agentbridge.Scope, source *c
 	if transport.combineHello && conn.agentReader.Buffered() == 0 {
 		t.Fatal("fixture did not put the second hello in the retained buffer")
 	}
-	a, err := bindAgentConn(ctx, conn, scope, source.path, nil)
+	mode := agentModeForTest(t)
+	parent := generatedAgentChannelParent(t, ctx, h, conn)
+	a, err := bindAgentConn(ctx, conn, scope, source.path, nil, mode, parent)
 	if err != nil {
 		conn.Close()
 		t.Fatal(err)

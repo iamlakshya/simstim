@@ -28,7 +28,7 @@ func dialAttach(ctx context.Context, h Host, session string, interactive bool) (
 		conn.Close()
 		return nil, nil, err
 	}
-	if policy == nil || !policy.SSHAgent {
+	if policy == nil || policy.FutureLineage || policy.FutureDelivery || !policy.SSHAgent {
 		return conn, nil, nil
 	}
 	agent, err := prepareAttachedAgent(ctx, conn, session, interactive)

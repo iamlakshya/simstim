@@ -31,7 +31,11 @@ type newPublicationWitness struct {
 }
 
 func newPublicationContext(base, owned context.Context, c *Conn, p *newSecretPlan, a NewArgs) (context.Context, error) {
-	if p == nil || p.intent == nil {
+	if p == nil {
+		return owned, nil
+	}
+	owned = context.WithValue(owned, newPlanPublicationKey{}, p)
+	if p.intent == nil {
 		return owned, nil
 	}
 	source, err := captureHostStateSourceWitness(owned, c)

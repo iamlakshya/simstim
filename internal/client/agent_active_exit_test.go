@@ -55,7 +55,9 @@ func TestAgentRawExitRevokesExistingStreamsBeforeTransportAndDiagnostics(t *test
 		t.Fatal(err)
 	}
 	defer func() { release(); conn.Close() }()
-	a, err := bindAgentConn(ctx, conn, scope, source.path, nil)
+	mode := agentModeForTest(t)
+	parent := generatedAgentChannelParent(t, ctx, h, conn)
+	a, err := bindAgentConn(ctx, conn, scope, source.path, nil, mode, parent)
 	if err != nil {
 		t.Fatal(err)
 	}

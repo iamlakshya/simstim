@@ -221,7 +221,7 @@ func (h *Holder) input(c *hclient, p []byte) {
 	d := h.al.d
 	h.mu.Unlock()
 	noteTyping(d, p)
-	if _, err := h.ptmx.Write(p); err != nil {
+	if _, err := h.writePTY(p); err != nil {
 		h.log.Warn("pty write failed", "err", err)
 	}
 	lt.key(c, len(p))
@@ -246,7 +246,11 @@ func (h *Holder) resize(c *hclient, rz proto.Resize, force bool) {
 	}
 	h.noteClamp(asked, rz)
 	h.log.Debug("resize", diag.CatKey, diag.CatAttach, "cols", rz.Cols, "rows", rz.Rows, "force", force)
-	_ = pty.Setsize(h.ptmx, &pty.Winsize{Cols: clampCols(rz.Cols), Rows: clampRows(rz.Rows), X: clamp16(rz.XPx), Y: clamp16(rz.YPx)})
+	if h.vmTerm != nil {
+		_ = h.vmTerm.Resize(rz)
+	} else {
+		_ = pty.Setsize(h.ptmx, &pty.Winsize{Cols: clampCols(rz.Cols), Rows: clampRows(rz.Rows), X: clamp16(rz.XPx), Y: clamp16(rz.YPx)})
+	}
 	h.mu.Lock()
 	h.scr.resize(rz.Cols, rz.Rows) // the screen model has a smaller cap of its own
 	vt := h.vt
@@ -254,7 +258,10 @@ func (h *Holder) resize(c *hclient, rz proto.Resize, force bool) {
 	if vt != nil {
 		vt.Resize(rz.Cols, rz.Rows, rz.XPx, rz.YPx)
 	}
-	if force {
+	if force && h.vmTerm != nil {
+		_ = h.vmTerm.Signal(uint32(unix.SIGWINCH))
+	}
+	if force && h.vmTerm == nil {
 		// Make the agent repaint even when the size did not change.
 		if pgrp, err := unix.IoctlGetInt(h.fd, unix.TIOCGPGRP); err == nil && pgrp > 0 {
 			_ = unix.Kill(-pgrp, unix.SIGWINCH)

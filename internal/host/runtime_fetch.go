@@ -70,10 +70,11 @@ func (s *runtimeService) fetchRegistered(a runtimecache.RuntimeRequest, requestI
 		return result, err
 	}
 
-	store, err := runtimecache.Open(paths.ArtefactsDir())
+	publication, store, err := openRuntimeProductionStore(ctx)
 	if err != nil {
 		return result, err
 	}
+	defer publication.close()
 	defer store.Close()
 	for _, item := range a.Manifest.Items {
 		if err := store.Fetch(ctx, item, runtimecache.HTTPClient(), func(p *runtimecache.Part) {
@@ -90,6 +91,9 @@ func (s *runtimeService) fetchRegistered(a runtimecache.RuntimeRequest, requestI
 	if err := commitRuntime(ctx, store, a.Manifest, a.ImageDefaults); err != nil {
 		return result, err
 	}
+	if err := s.rememberRuntime(ctx, a.Manifest); err != nil {
+		return result, err
+	}
 	return s.status(ctx, a)
 }
 
@@ -98,7 +102,11 @@ func (s *runtimeService) status(ctx context.Context, a runtimecache.RuntimeReque
 	if err := runtimeValidateWithImageDefaults(a.Manifest, a.ImageDefaults); err != nil {
 		return result, err
 	}
-	store, err := runtimecache.OpenReadOnly(paths.ArtefactsDir())
+	owner, err := placementForCall()
+	if err != nil {
+		return result, err
+	}
+	store, err := runtimecache.OpenHostReadOnly(ctx, paths.ArtefactsDir(), owner.domain())
 	if errors.Is(err, os.ErrNotExist) {
 		for _, it := range a.Manifest.Items {
 			result.Items = append(result.Items, api.RuntimeFile{Kind: it.Kind, Name: it.Name, SHA256: it.SHA256, Size: it.Size})
@@ -128,6 +136,9 @@ func (s *runtimeService) status(ctx context.Context, a runtimecache.RuntimeReque
 		result.Items = append(result.Items, api.RuntimeFile{Kind: it.Kind, Name: it.Name, SHA256: it.SHA256, Size: it.Size, Present: present})
 	}
 	if !active && allPresent {
+		if err := s.rememberRuntime(ctx, a.Manifest); err != nil {
+			return result, err
+		}
 		result.Drivers = runtimeDrivers(a.Manifest)
 	}
 	s.mu.Lock()

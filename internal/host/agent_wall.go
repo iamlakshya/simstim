@@ -16,8 +16,7 @@ func checkRequestedWall(level string) error {
 	case "", "none":
 		return nil
 	case "auto", "process", "gvisor", "microvm":
-		return UserError("wall_unsupported", "this helper cannot start the requested wall yet",
-			"Use a helper that supports sandbox starts, or explicitly choose an unwalled session.")
+		return nil
 	default:
 		return UserError("bad_wall", "the requested wall is not a known level",
 			"Choose auto, none, process, gvisor or microvm.")

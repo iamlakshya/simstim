@@ -107,6 +107,10 @@ func execInput(ctx context.Context, stdin io.Reader, environment []string, limit
 		}
 	}
 	if err := runErr; err != nil {
+		var missing *exec.Error
+		if errors.As(err, &missing) && errors.Is(missing.Err, exec.ErrNotFound) {
+			return nil, &client.UserError{Msg: name + " is not installed, or not on your PATH", Hint: install, Code: "tool_missing"}
+		}
 		if ctx.Err() != nil {
 			return out.Bytes(), fmt.Errorf("%s %s: %w", name, firstWord(args), ctx.Err())
 		}

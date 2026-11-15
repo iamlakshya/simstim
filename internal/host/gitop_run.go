@@ -99,6 +99,7 @@ func EndBridge() {
 	// the write only fails.
 	signal.Ignore(syscall.SIGPIPE)
 	StopGitOps()
+	endAgentBridges() // only reusable library actors register here
 	for end := time.Now().Add(requestDrain); liveRequests.Load() > 0 && time.Now().Before(end); {
 		time.Sleep(20 * time.Millisecond)
 	}

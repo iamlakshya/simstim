@@ -89,7 +89,7 @@ func TestFutureLineageRefusesDerivationAndAgentButKeepsZeroValueWake(t *testing.
 	if _, err := c.JoinSecretNames(WithGrantRequest(t.Context(), NewGrantRequest(false, false)), p.SessionID); err == nil {
 		t.Fatal("future lineage derived a child")
 	}
-	if err := c.checkAgentPolicy(t.Context(), p.SessionID); err == nil {
+	if err := c.checkAgentPolicy(t.Context(), p.SessionID, agentModeForTest(t).inspector); err == nil {
 		t.Fatal("future lineage admitted an agent capability")
 	}
 	var resumes int

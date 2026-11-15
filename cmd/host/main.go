@@ -67,6 +67,10 @@ var commands = map[string]func(args []string) error{
 }
 
 func main() {
+	// This closed process boundary owns raw stdio until immediate exit.
+	if len(os.Args) >= 2 && os.Args[1] == "bridge-agent" {
+		os.Exit(host.RunAgentBridgeProcess(os.Stdin, os.Stdout))
+	}
 	if len(os.Args) < 2 {
 		fmt.Fprintf(os.Stderr, usage, brand.HostBinary)
 		os.Exit(2)

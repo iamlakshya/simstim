@@ -43,7 +43,7 @@ func RunArgs(container, host, image string) []string {
 const addUser = `id -u ` + DefaultUser + ` >/dev/null 2>&1 || useradd -m -s /bin/bash ` + DefaultUser
 
 // Create starts the container and gives it a user like a VM's.
-func (Provider) Create(ctx context.Context, req provider.Request) (_ client.Host, returned error) {
+func (Provider) Create(ctx context.Context, req provider.Request) (result client.Host, returned error) {
 	scope, err := client.HostCreationSourceScopeContext(ctx)
 	if err != nil {
 		return client.Host{}, err
@@ -54,12 +54,33 @@ func (Provider) Create(ctx context.Context, req provider.Request) (_ client.Host
 	frame := &dockerSourceBirth{scope: scope, request: scope.Request()}
 	ctx = context.WithValue(ctx, dockerSourceBirthKey{}, frame)
 	frame.ctx = ctx
+	defer func() {
+		returned = errors.Join(returned, frame.metadata.Close())
+		locator := ""
+		if frame.locator != nil {
+			locator = frame.locator.endpoint
+			returned = errors.Join(returned, frame.locator.close())
+		}
+		if returned != nil && frame.attempted {
+			if result.Machine == nil {
+				result = freezeBirthHost(frame.partial)
+			}
+			returned = provider.RetainedCreation(result, frame.runID, locator, returned)
+		}
+	}()
+	metadata, err := client.OpenProviderSourceMetadata(ctx)
+	if err != nil {
+		return client.Host{}, err
+	}
+	frame.metadata = metadata
 	locator, err := captureSourceLocator(ctx)
 	if err != nil {
 		return client.Host{}, err
 	}
 	frame.locator = &locator
-	defer func() { returned = errors.Join(returned, locator.close()) }()
+	if err := locator.checkInspector(ctx); err != nil {
+		return client.Host{}, err
+	}
 	out := req.Out
 	if out == nil {
 		out = io.Discard
@@ -74,7 +95,7 @@ func (Provider) Create(ctx context.Context, req provider.Request) (_ client.Host
 		return client.Host{}, err
 	}
 	if st != "" {
-		return client.Host{}, &client.UserError{Msg: "Docker already has a container called " + c, Hint: "Pick another name, or remove the container with docker rm -f " + c + ".", Code: "instance_exists"}
+		return client.Host{}, &client.UserError{Msg: "Docker already has a container called " + c, Hint: "Inspect it on the selected original Docker endpoint, or choose another name.", Code: "instance_exists"}
 	}
 	image := req.Image
 	if image == "" {
@@ -82,11 +103,13 @@ func (Provider) Create(ctx context.Context, req provider.Request) (_ client.Host
 	}
 	args := RunArgs(c, req.Name, image)
 	fmt.Fprintf(out, "  Starting the container: docker %s\n", strings.Join(args, " "))
+	frame.partial = client.Host{Name: req.Name, Machine: &client.Machine{Provider: "docker", ID: c, User: DefaultUser, Image: image}}
+	frame.attempted = true
 	runID, err := locator.exec(ctx, args...)
+	frame.runID = strings.TrimSpace(string(runID))
 	if err != nil {
 		return client.Host{}, err
 	}
-	frame.runID = strings.TrimSpace(string(runID))
 	user := DefaultUser
 	if _, err := locator.exec(ctx, "exec", "-u", "0", strings.TrimSpace(string(runID)), "sh", "-c", addUser); err != nil {
 		fmt.Fprintf(out, "  Note: could not add the user %q (%v), so sessions run as root.\n", DefaultUser, err)

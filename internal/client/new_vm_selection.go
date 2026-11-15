@@ -59,6 +59,55 @@ func (c *Conn) PrepareNewVM(ctx context.Context, a NewArgs, intent string) (*VMN
 	if err := bindRequestTransportSource(ctx, c); err != nil {
 		return nil, err
 	}
+	if err := requireGrantOperation(ctx, grantOpNew); err != nil {
+		return nil, err
+	}
+	r := grantRequestOf(ctx)
+	operation, err := r.borrowNewSettings(ctx)
+	if err != nil {
+		return nil, err
+	}
+	r.mu.Lock()
+	beforeVM, beforeIntent := r.preparedVM, r.preparedVMIntent
+	r.mu.Unlock()
+	if beforeVM != nil {
+		if beforeIntent != intent {
+			return nil, grantOperationError()
+		}
+		if _, err := beforeVM.EncodedFor(c); err != nil {
+			return nil, err
+		}
+		if _, err := validateNewVMPlan(ctx, a, beforeVM); err != nil {
+			return nil, err
+		}
+		if err := c.CheckVMFirstPrepareV1(ctx, beforeVM.Need(), intent); err != nil {
+			return nil, err
+		}
+		return beforeVM, nil
+	}
+	settings, err := operation.Settings(ctx)
+	if err != nil {
+		return nil, err
+	}
+	tier, hid, err := grantHostTier(ctx, c.Host)
+	if err != nil {
+		return nil, err
+	}
+	if hid != c.HostID() {
+		return nil, grantIdentityError(c.Host)
+	}
+	if err := allowRequestGrant(ctx, c.Host, hid, tier, Outbound{Kind: OutboundSilentUpgrade}, settings); err != nil {
+		return nil, err
+	}
+	if a.Wall != "microvm" {
+		return nil, vmPrepareUnavailable()
+	}
+	if err := checkWallGrantArgs(ctx, a.Wall, a.SSHAgent); err != nil {
+		return nil, err
+	}
+	if err := bindRequestTransportSource(ctx, c); err != nil {
+		return nil, err
+	}
 	options, err := ResolveNewVMOptions(a, intent)
 	if err != nil {
 		return nil, err
@@ -70,6 +119,16 @@ func (c *Conn) PrepareNewVM(ctx context.Context, a NewArgs, intent string) (*VMN
 	if err := bindRequestTransportSource(ctx, c); err != nil {
 		return nil, err
 	}
+	if err := operation.Revalidate(ctx); err != nil {
+		return nil, err
+	}
+	r.mu.Lock()
+	if r.preparationClosed || r.preparedVM != nil {
+		r.mu.Unlock()
+		return nil, grantOperationError()
+	}
+	r.preparedVM, r.preparedVMIntent = plan, intent
+	r.mu.Unlock()
 	return plan, nil
 }
 

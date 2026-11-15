@@ -106,7 +106,7 @@ func TestAgentProjectionUnselectedRetainsNoStringsAndStillChecksLineage(t *testi
 			t.Fatal(err)
 		}
 		p, field := projectionSingleRowSpans(t, raw)
-		facts, err := projectAgentRow(p, field.Value, field.Name, 3, false)
+		facts, err := projectAgentRow(t.Context(), p, field.Value, field.Name, 3, false)
 		if err != nil || facts.HostID != "" || facts.CreationWall != "" || facts.FutureLineage != (version == 2) {
 			t.Fatalf("unselected strings retained or validation facts lost: %+v %v", facts, err)
 		}
@@ -122,7 +122,7 @@ func TestAgentProjectionSelectedStringsOwnTheirBytes(t *testing.T) {
 		t.Fatal(err)
 	}
 	p, field := projectionSingleRowSpans(t, input)
-	facts, err := projectAgentRow(p, field.Value, field.Name, 2, true)
+	facts, err := projectAgentRow(t.Context(), p, field.Value, field.Name, 2, true)
 	if err != nil {
 		t.Fatal(err)
 	}

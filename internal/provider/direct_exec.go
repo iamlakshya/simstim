@@ -37,6 +37,9 @@ func resolveProviderEnvironment(name string, environment []string) (string, erro
 		}
 		info, err := os.Stat(name)
 		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				return "", &exec.Error{Name: name, Err: exec.ErrNotFound}
+			}
 			return "", err
 		}
 		if !info.Mode().IsRegular() || runtime.GOOS != "windows" && info.Mode().Perm()&0111 == 0 {
@@ -72,7 +75,7 @@ func resolveProviderEnvironment(name string, environment []string) (string, erro
 		}
 		return candidate, nil
 	}
-	return "", fmt.Errorf("the fixed provider executable is unavailable")
+	return "", &exec.Error{Name: name, Err: exec.ErrNotFound}
 }
 
 // runProviderEnvironment is the explicit-environment branch of the SAME

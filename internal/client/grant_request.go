@@ -15,16 +15,20 @@ import (
 // GrantRequest keeps one command's intent and terminal answers on the
 // laptop. Reuse it only for retries of that same logical session start.
 type GrantRequest struct {
-	Untrusted          bool
-	SSHAgent           bool
-	purpose            grantPurpose
-	operation          grantOperation
-	operationUntrusted bool
-	newIntent          *newGrantIntent
-	legacyResume       *legacyResumeGrantIntent
-	resumeGroup        bool
-	review             *reviewGrantIntent
-	newSecrets         *newSecretPlan
+	Untrusted           bool
+	SSHAgent            bool
+	purpose             grantPurpose
+	operation           grantOperation
+	operationUntrusted  bool
+	newIntent           *newGrantIntent
+	legacyResume        *legacyResumeGrantIntent
+	resumeGroup         bool
+	review              *reviewGrantIntent
+	newSecrets          *newSecretPlan
+	preparationSettings *settingsOperation
+	preparationClosed   bool
+	preparedVM          *VMNeedPlanV1
+	preparedVMIntent    string
 
 	recordMu  sync.Mutex
 	selection *grantSelectionSource

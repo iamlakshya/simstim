@@ -132,7 +132,7 @@ func registerKnownFlags(c *cobra.Command, fs *pflag.FlagSet, alertEvents []strin
 		case "idle-stop":
 			fn = completeFixed("never")
 		case "format":
-			fn = completeFixed("json", "slack", "discord")
+			fn = completeFixed("json", "slack", "discord", "otlp")
 		case "events":
 			fn = completeCommaFixed(alertEvents...)
 		case "event":

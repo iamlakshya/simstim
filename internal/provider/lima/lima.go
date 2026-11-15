@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -70,11 +71,25 @@ type instance struct {
 
 // find returns the instance called name, or nil when there is none.
 func find(ctx context.Context, name string) (*instance, error) {
-	out, err := provider.Exec(ctx, install, "limactl", "list", "--json")
+	out, err := limaExec(ctx, "list", "--json")
 	if err != nil {
 		return nil, err
 	}
-	return parseList(out, name)
+	in, err := parseList(out, name)
+	if err != nil {
+		return nil, err
+	}
+	if frame, _ := ctx.Value(limaSourceBirthKey{}).(*limaSourceBirth); frame != nil && in != nil {
+		if frame.ctx != ctx || frame.locator == nil || in.Dir != filepath.Join(frame.locator.source.Path, name) {
+			return nil, plainSourceUnknown()
+		}
+		if frame.instancePin != nil {
+			if err := frame.instancePin.Revalidate(); err != nil {
+				return nil, err
+			}
+		}
+	}
+	return in, nil
 }
 
 // parseList reads the NDJSON of `limactl list --json`: one object per line.
@@ -131,7 +146,7 @@ func gib(bytes int64) string {
 
 // Create makes and starts the VM, and returns the host that reaches it
 // through Lima's ssh.config.
-func (Provider) Create(ctx context.Context, req provider.Request) (_ client.Host, returned error) {
+func (Provider) Create(ctx context.Context, req provider.Request) (result client.Host, returned error) {
 	scope, err := client.HostCreationSourceScopeContext(ctx)
 	if err != nil {
 		return client.Host{}, err
@@ -142,9 +157,22 @@ func (Provider) Create(ctx context.Context, req provider.Request) (_ client.Host
 	frame := &limaSourceBirth{scope: scope, request: scope.Request()}
 	ctx = context.WithValue(ctx, limaSourceBirthKey{}, frame)
 	frame.ctx = ctx
+	locator, err := captureLimaSourceLocator()
+	if err != nil {
+		return client.Host{}, err
+	}
+	frame.locator = locator
+	frame.home = locator.source.Path
 	defer func() {
 		if frame.inspection != nil {
 			returned = errors.Join(returned, frame.inspection.Close())
+		}
+		returned = errors.Join(returned, frame.instancePin.Close(), locator.close())
+		if returned != nil && frame.attempted {
+			if result.Machine == nil {
+				result = freezeBirthHost(frame.partial)
+			}
+			returned = provider.RetainedCreation(result, frame.partial.Machine.ID, frame.home, returned)
 		}
 	}()
 	out := req.Out
@@ -158,7 +186,7 @@ func (Provider) Create(ctx context.Context, req provider.Request) (_ client.Host
 	if in, err := find(ctx, inst); err != nil {
 		return client.Host{}, err
 	} else if in != nil {
-		return client.Host{}, &client.UserError{Msg: "Lima already has an instance called " + inst, Hint: "Pick another name, or delete the instance with limactl delete " + inst + ".", Code: "instance_exists"}
+		return client.Host{}, &client.UserError{Msg: "Lima already has an instance called " + inst, Hint: "Inspect it on the selected original Lima locator, or choose another name.", Code: "instance_exists"}
 	}
 	if goos != "darwin" {
 		fmt.Fprintf(out, "  ! Lima with QEMU cannot stop %s from reaching this machine's loopback services.\n", req.Name)
@@ -166,10 +194,20 @@ func (Provider) Create(ctx context.Context, req provider.Request) (_ client.Host
 	}
 	args := CreateArgs(inst, req, goos)
 	fmt.Fprintf(out, "  Creating the VM: limactl %s\n", shellLine(args))
-	if _, err := provider.Exec(ctx, install, "limactl", args...); err != nil {
+	frame.partial = client.Host{Name: req.Name, Machine: &client.Machine{Provider: "lima", ID: inst}}
+	frame.attempted = true
+	if _, err := limaExec(ctx, args...); err != nil {
 		return client.Host{}, err
 	}
 	frame.created = true
+	instanceSource, instancePin, err := provider.CaptureSourceConfigPinned(filepath.Join(locator.source.Path, inst))
+	if err != nil {
+		return client.Host{}, err
+	}
+	if instanceSource.Role != client.MachineConfigExisting {
+		return client.Host{}, errors.Join(plainSourceUnknown(), instancePin.Close())
+	}
+	frame.instanceSource, frame.instancePin = instanceSource, instancePin
 	if goos == "darwin" {
 		if err := checkClosed(ctx, inst); err != nil {
 			return client.Host{}, err
@@ -184,6 +222,9 @@ func (Provider) Create(ctx context.Context, req provider.Request) (_ client.Host
 	}
 	if in == nil || in.SSHConfigFile == "" {
 		return client.Host{}, fmt.Errorf("limactl did not report the SSH config of %s", inst)
+	}
+	if in.Dir != frame.instanceSource.Path || in.SSHConfigFile != filepath.Join(in.Dir, "ssh.config") {
+		return client.Host{}, plainSourceUnknown()
 	}
 	idle := req.IdleStop
 	if idle == "" {
@@ -226,18 +267,10 @@ func shellLine(args []string) string {
 	return strings.Join(q, " ")
 }
 
-// discard deletes a VM that Create made but cannot hand over, so that no
-// VM is left that no host names. The error says what went wrong, and hint
-// what to try next.
+// discard reports a failed creation without deleting by a reusable name.
+// The caller retains the actual partial resource and original native locator.
 func discard(ctx context.Context, inst, problem, hint string) error {
-	if _, err := provider.Exec(ctx, install, "limactl", "delete", "--force", inst); err != nil {
-		return &client.UserError{
-			Msg:  fmt.Sprintf("%s, and host create could not delete it: %v", problem, err),
-			Hint: "limactl delete --force " + inst + ", then " + hint,
-			Code: "lima_vm",
-		}
-	}
-	return &client.UserError{Msg: problem + ", so host create deleted it", Hint: hint, Code: "lima_vm"}
+	return &client.UserError{Msg: problem + "; the VM is retained for inspection", Hint: "Inspect the exact VM on its original Lima locator before retrying; " + hint, Code: "lima_vm"}
 }
 
 // sshAlias is the Host that Lima's ssh.config defines for an instance.
@@ -290,7 +323,7 @@ func (v *vm) Start(ctx context.Context) error {
 
 // Stop shuts the VM down. Its disk stays.
 func (v *vm) Stop(ctx context.Context) error {
-	_, err := provider.Exec(ctx, install, "limactl", "stop", v.inst)
+	_, err := limaExec(ctx, "stop", v.inst)
 	return err
 }
 
@@ -300,7 +333,7 @@ func (v *vm) Destroy(ctx context.Context) error {
 	if err != nil || in == nil {
 		return err
 	}
-	_, err = provider.Exec(ctx, install, "limactl", "delete", "--force", v.inst)
+	_, err = limaExec(ctx, "delete", "--force", v.inst)
 	return err
 }
 

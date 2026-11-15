@@ -58,6 +58,8 @@ type Event struct {
 	Time     string  `json:"time"` // RFC 3339, UTC
 	ExitCode *int    `json:"exit_code,omitempty"`
 	Signal   string  `json:"signal,omitempty"`
+	// Reason identifies the cause of a sandbox or health event.
+	Reason string `json:"reason,omitempty"`
 	// Detail is the agent's question. It is sent only when the config turns
 	// it on, because it can hold code.
 	Detail  string `json:"detail,omitempty"`
@@ -109,7 +111,7 @@ func summary(ev Event) string {
 		if ev.Turn >= time.Second {
 			s += " (" + shortDuration(ev.Turn) + ")"
 		}
-	case Exited:
+	case Exited, Ended:
 		s = on + " ended"
 	case Failed:
 		s = on + " failed (" + exitText(ev) + ")"
@@ -126,6 +128,19 @@ func summary(ev Event) string {
 		s = name + " started on " + ev.Host
 	case Restored:
 		s = name + " was restored on " + ev.Host + " after a restart"
+	case SandboxReady:
+		s = on + " is ready"
+	case SandboxStopped:
+		s = on + " stopped"
+		if ev.Reason != "" {
+			s += " (" + ev.Reason + ")"
+		}
+	case SandboxError:
+		s = on + " could not run its sandbox"
+	case HealthDegraded:
+		s = ev.Host + " has a health problem"
+	case HealthRecovered:
+		s = ev.Host + " recovered from its health problem"
 	case Test:
 		return "Test alert from " + ev.Host
 	default:
@@ -172,6 +187,7 @@ func (ev Event) env() []string {
 		{"TIME", ev.Time},
 		{"SUMMARY", ev.Summary},
 		{"SIGNAL", ev.Signal},
+		{"REASON", ev.Reason},
 		{"DETAIL", ev.Detail},
 	}
 	if ev.ExitCode != nil {

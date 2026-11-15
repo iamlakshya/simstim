@@ -95,6 +95,11 @@ func runBridge(in io.Reader, out io.Writer, owned OwnedBridgeOutput) (returned e
 		_ = w.WriteJSON(proto.TError, proto.Error{Code: "protocol", Message: err.Error(), Hint: "Update the client."})
 		return err
 	}
+	if hello.Role == agentbridge.Role {
+		err := UserError("ssh_agent_refused", "the ordinary bridge cannot accept an agent-only role", "Use the separate fixed agent bridge entrypoint.")
+		_ = w.WriteJSON(proto.TError, err)
+		return err
+	}
 	hostID, err := HostID()
 	if err != nil {
 		_ = w.WriteJSON(proto.TError, proto.Error{Code: "host_id", Message: err.Error(), Hint: "Check " + paths.HostID() + " on the host."})
@@ -102,7 +107,9 @@ func runBridge(in io.Reader, out io.Writer, owned OwnedBridgeOutput) (returned e
 	}
 	features := Features
 	if owned == nil {
-		features = slices.DeleteFunc(slices.Clone(Features), func(feature string) bool { return feature == api.FeaturePullBundle || feature == api.FeaturePullRepositories })
+		features = slices.DeleteFunc(slices.Clone(Features), func(feature string) bool {
+			return feature == api.FeaturePullBundle || feature == api.FeaturePullRepositories
+		})
 	}
 	if err := w.WriteJSON(proto.THello, proto.Hello{Magic: proto.Magic, Protocol: version.Protocol, Version: version.Version, Role: "bridge", HostID: hostID, Features: features}); err != nil {
 		return err
@@ -278,12 +285,21 @@ func (b *bridge) handle(req proto.Request) {
 		v, err := List()
 		b.reply(req.ID, v, err)
 	case "new":
+		if err := CheckCaller(); err != nil {
+			b.reply(req.ID, nil, err)
+			return
+		}
 		a, err := decodeNewArgs(req.Args)
 		if err != nil {
 			b.reply(req.ID, nil, err)
 			return
 		}
-		v, err := New(a)
+		ctx, err := b.newRequestContext(req, a)
+		if err != nil {
+			b.reply(req.ID, nil, err)
+			return
+		}
+		v, err := NewContext(ctx, a)
 		b.reply(req.ID, v, err)
 	case "delete":
 		var a struct {

@@ -141,10 +141,6 @@ func InspectSource(ctx context.Context, h client.Host, environment []string) (_ 
 	if err != nil {
 		return nil, err
 	}
-	endpoint, parseErr := url.Parse(source.Endpoint)
-	if parseErr != nil || endpoint.Scheme != "unix" && endpoint.Scheme != "npipe" {
-		return nil, sourceUnknown()
-	}
 	if source.Config.Role == client.MachineConfigUnused {
 		return nil, sourceUnknown()
 	}
@@ -209,12 +205,12 @@ func (l dockerSourceLocator) receipt(ctx context.Context, h client.Host, id stri
 		return nil, err
 	}
 	h.Machine.Source = source
-	engineRaw, err := l.exec(ctx, "info", "--format", "{{json .ID}}")
+	engineRaw, err := l.inspectExec(ctx, "info", "--format", "{{json .ID}}")
 	var engine string
 	if err != nil || json.Unmarshal(engineRaw, &engine) != nil || engine != l.engine {
 		return nil, sourceUnknown()
 	}
-	raw, err := l.exec(ctx, "container", "inspect", source.ResourceID, "--format", sharingTemplate())
+	raw, err := l.inspectExec(ctx, "container", "inspect", source.ResourceID, "--format", sharingTemplate())
 	if err != nil {
 		return nil, err
 	}
@@ -227,4 +223,42 @@ func (l dockerSourceLocator) receipt(ctx context.Context, h client.Host, id stri
 		return nil, err
 	}
 	return source, pin.Close()
+}
+
+func (l dockerSourceLocator) inspectExec(ctx context.Context, args ...string) ([]byte, error) {
+	frame, _ := ctx.Value(dockerSourceBirthKey{}).(*dockerSourceBirth)
+	if frame == nil || frame.ctx != ctx || frame.metadata == nil {
+		return nil, sourceUnknown()
+	}
+	if err := frame.scope.CheckContext(ctx); err != nil {
+		return nil, err
+	}
+	if err := l.pin.Revalidate(); err != nil {
+		return nil, err
+	}
+	environment, err := frame.metadata.Environment(ctx)
+	if err != nil {
+		return nil, err
+	}
+	data, err := provider.ExecMetadata(ctx, environment, 4<<20, install, "docker", l.args(args...)...)
+	if err != nil {
+		return nil, err
+	}
+	if err := frame.metadata.Revalidate(ctx); err != nil {
+		return nil, err
+	}
+	return data, frame.scope.CheckContext(ctx)
+}
+
+// checkInspector proves before any write that the SAME explicit original
+// locator works under the future read-only inspector role. Remote transports
+// are not blanket-refused by scheme. An unrepresentable TLS/auth locator fails
+// this actual read with no container side effect rather than failing at use.
+func (l dockerSourceLocator) checkInspector(ctx context.Context) error {
+	raw, err := l.inspectExec(ctx, "info", "--format", "{{json .ID}}")
+	var engine string
+	if err != nil || json.Unmarshal(raw, &engine) != nil || engine != l.engine {
+		return &client.UserError{Code: "source_locator", Msg: "the selected Docker locator cannot be rechecked through its fixed original endpoint and configuration", Hint: "Select an explicit Docker locator with all required local configuration available before creating the host. No container was started.", Kind: client.KindRefused}
+	}
+	return nil
 }

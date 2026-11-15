@@ -120,7 +120,7 @@ func TestLoginWrapperMalformedHostLeavesTheDestinationAlone(t *testing.T) {
 	if err := os.WriteFile(scope.base, body, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := writeConfig(scope.base, `host "unterminated`, "", true); !errors.Is(err, strconv.ErrSyntax) {
+	if _, err := writeConfig(scope.base, `host "unterminated`, "", true, true); !errors.Is(err, strconv.ErrSyntax) {
 		t.Fatalf("malformed host config did not report its parse failure: %v", err)
 	}
 	scope.cleanup(ctx)

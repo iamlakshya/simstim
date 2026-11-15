@@ -104,7 +104,7 @@ func (h *Holder) request(c *hclient, req proto.Request) {
 			data = append(data, '\r')
 		}
 		noteTyping(d, data)
-		if _, err := h.ptmx.Write(data); err != nil {
+		if _, err := h.writePTY(data); err != nil {
 			reply(nil, &proto.Error{Code: "write", Message: err.Error()})
 			return
 		}

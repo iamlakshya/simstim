@@ -120,7 +120,7 @@ func alertsSetCmd() *cobra.Command {
 	fl := cmd.Flags()
 	fl.StringVar(&f.ntfy, "ntfy", "", "send to this ntfy topic (https://ntfy.sh/<topic> or your own server)")
 	fl.StringVar(&f.webhook, "webhook", "", "POST to this web address")
-	fl.StringVar(&f.format, "format", "", "the webhook's body: json (the event), slack or discord")
+	fl.StringVar(&f.format, "format", "", "the webhook's body: json (the event), slack, discord or otlp")
 	fl.StringVar(&f.command, "command", "", "run this command line on the host, with the event on stdin and in the environment")
 	addTokenCommand(cmd, &f.tokenCommand, "run this here and use its output as the ntfy token (it is never printed)")
 	if liveOld("host alerts set --token-cmd") {

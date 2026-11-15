@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/iamlakshya/simstim/internal/client"
+	"github.com/iamlakshya/simstim/internal/provider"
 )
 
 // fakeLimactl acts as limactl for one Mac or Linux machine. It keeps each
@@ -69,12 +70,13 @@ list)
     nest="\"nestedVirtualization\":$nest,"
     if [ -f "$FAKE_DIR/edited" ] && [ -f "$FAKE_DIR/after-edit-list-incomplete" ]; then nest=; fi
     nets=; if [ -f "$FAKE_DIR/networks-json" ]; then nets=",\"networks\":$(cat "$FAKE_DIR/networks-json")"; fi
-    printf '{"name":"%s","status":"%s","dir":"%s/%s","vmType":"%s","sshConfigFile":"%s/%s/ssh.config","cpus":2,"config":{%s"networkOpts":{"hostLoopback":%s}%s}}\n' \
-      "$i" "$(cat "$f")" "$FAKE_DIR" "$i" "$vm" "$FAKE_DIR" "$i" "$nest" "$loop" "$nets"
+    printf '{"name":"%s","status":"%s","dir":"%s/%s","vmType":"%s","sshConfigFile":"%s/%s/ssh.config","cpus":2,"config":{"plain":true,%s"networkOpts":{"hostLoopback":%s}%s}}\n' \
+      "$i" "$(cat "$f")" "${LIMA_HOME:-$FAKE_DIR}" "$i" "$vm" "${LIMA_HOME:-$FAKE_DIR}" "$i" "$nest" "$loop" "$nets"
   done ;;
 create)
   for a; do case $a in --name=*) n=${a#--name=} ;; esac; done
-  mkdir -p "$FAKE_DIR/$n"
+  mkdir -p "${LIMA_HOME:-$FAKE_DIR}/$n"
+  printf 'plain: true\n' > "${LIMA_HOME:-$FAKE_DIR}/$n/lima.yaml"
   for a; do case $a in
     '--set=.networkOpts.hostLoopback = false') touch "$FAKE_DIR/closed-$n" ;;
     --nested-virt) touch "$FAKE_DIR/nested-$n" ;;
@@ -89,7 +91,7 @@ edit)
   done
   touch "$FAKE_DIR/edited" ;;
 start)
-  d=$FAKE_DIR/$n
+  d=${LIMA_HOME:-$FAKE_DIR}/$n
   mkdir -p "$d"
   if [ -f "$FAKE_DIR/refuse-nesting" ] && { [ -f "$FAKE_DIR/nested-$n" ] || [ -f "$FAKE_DIR/override-nested" ]; }; then
     if [ -f "$FAKE_DIR/refuse-late" ]; then
@@ -124,13 +126,18 @@ func fakeLima(t *testing.T, system string) string {
 	if runtime.GOOS == "windows" {
 		t.Skip("the fake limactl is a POSIX shell script")
 	}
-	dir := t.TempDir()
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(filepath.Join(dir, "limactl"), []byte(fakeLimactl), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("FAKE_DIR", dir)
-	t.Setenv("LIMA_HOME", "")
+	t.Setenv("LIMA_HOME", dir)
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	old := goos
 	goos = system
 	t.Cleanup(func() { goos = old })
@@ -197,3 +204,41 @@ func verbs(cs [][]string) []string {
 func called(cs [][]string, args ...string) bool {
 	return slices.ContainsFunc(cs, func(c []string) bool { return slices.Equal(c, args) })
 }
+
+// fixtureCreate exercises the real closed creation scope against owned fake
+// provider files only; it is not a VM/provider runtime witness.
+func fixtureCreate(t *testing.T, ctx context.Context, req provider.Request) (client.Host, error) {
+	t.Helper()
+	owned, release, err := client.BeginHostCreationContext(ctx, provider.CreationSourceRequest("lima", req))
+	if err != nil {
+		return client.Host{}, err
+	}
+	defer release()
+	if err := client.CheckHostCreationRemovalContext(owned, req.Name); err != nil {
+		return client.Host{}, err
+	}
+	if err := client.StartHostCreationContext(owned); err != nil {
+		return client.Host{}, err
+	}
+	result, err := Provider{}.Create(owned, req)
+	var partial *provider.CreationFailure
+	if errors.As(err, &partial) {
+		if partial.Host.Name != req.Name || partial.Host.Machine == nil || partial.Host.Machine.Provider != "lima" || partial.Host.Machine.ID != provider.MachineName(req.Name) || partial.Locator == "" {
+			t.Fatal("creation failure lost its actual original resource/fate")
+		}
+		if result.Machine == nil || result.Machine.ID != partial.Host.Machine.ID {
+			t.Fatal("partial return differs from preserved original resource")
+		}
+	}
+	return result, err
+}
+
+func retainedCreationCause(err error) error {
+	var partial *provider.CreationFailure
+	if errors.As(err, &partial) {
+		return partial.Cause
+	}
+	return err
+}
+
+const retainedHintPrefix = "Inspect the exact VM on its original Lima locator before retrying; "

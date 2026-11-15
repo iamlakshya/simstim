@@ -19,6 +19,7 @@ const (
 )
 
 type agentNativeLog struct {
+	shutdown    agentShutdownBudget
 	mu          sync.Mutex
 	control     sync.Mutex
 	changed     chan struct{}
@@ -353,6 +354,7 @@ func (l *agentNativeLog) recordFailure(err error, stopping bool) {
 	if err == nil {
 		return
 	}
+	l.shutdownBudget().start(time.Now())
 	l.control.Lock()
 	if l.failure == nil && (!l.closed.Load() || stopping) {
 		l.failure = err

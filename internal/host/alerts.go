@@ -22,6 +22,12 @@ type holderAlerts struct {
 // startAlerts starts the session's alert dispatcher and raises started, or
 // restored when restore brought the session back after a host restart.
 func (h *Holder) startAlerts(restored bool) {
+	if h.guest != nil {
+		h.mu.Lock()
+		h.al.agent, h.al.workSince = StateWorking, time.Now()
+		h.mu.Unlock()
+		return
+	}
 	home, _ := os.UserHomeDir()
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -73,11 +79,13 @@ func (h *Holder) alertEvent(kind string) alerts.Event {
 // not come here: it sends its own alert (alertMemory). The caller holds h.mu.
 func (h *Holder) alertState(prev, next string) {
 	a := &h.al
-	if a.d == nil {
+	if a.d == nil && h.ev == nil {
 		return
 	}
 	now := time.Now()
-	a.d.StateChanged()
+	if a.d != nil {
+		a.d.StateChanged()
+	}
 	if prev == StateWorking && !a.workSince.IsZero() {
 		a.worked += now.Sub(a.workSince)
 		a.workSince = time.Time{}
@@ -88,13 +96,13 @@ func (h *Holder) alertState(prev, next string) {
 	case StateNeedsInput:
 		ev := h.alertEvent(alerts.NeedsInput)
 		ev.Detail = h.question()
-		a.d.Notify(ev)
+		h.notify(ev)
 	case StateIdle:
 		// The dispatcher drops a turn shorter than min_turn.
 		if a.worked > 0 {
 			ev := h.alertEvent(alerts.TurnDone)
 			ev.Turn = a.worked
-			a.d.Notify(ev)
+			h.notify(ev)
 		}
 		a.worked = 0
 	}

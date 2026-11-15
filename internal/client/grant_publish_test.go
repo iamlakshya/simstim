@@ -167,7 +167,7 @@ func TestRequestedWallCannotFallBackToAnUnwalledNew(t *testing.T) {
 func TestAgentSocketSecretStopsAllCommandsBeforeAnyValueIsFetched(t *testing.T) {
 	isolateH5GrantHome(t)
 	marker := filepath.Join(t.TempDir(), "must-not-run")
-	settings := Settings{Secrets: map[string]string{"API_KEY": "touch " + ShellWord(marker) + "; printf generated-fixture", "SSH_AUTH_SOCK": "printf forbidden-socket"}}
+	settings := Settings{Secrets: map[string]SecretDefinition{"API_KEY": {Run: "touch " + ShellWord(marker) + "; printf generated-fixture"}, "SSH_AUTH_SOCK": {Run: "printf forbidden-socket"}}}
 	_, err := FetchSecrets(t.Context(), settings, []string{"API_KEY", "SSH_AUTH_SOCK"}, false)
 	var ue *UserError
 	if !errors.As(err, &ue) || ue.Code != "bad_secret" {

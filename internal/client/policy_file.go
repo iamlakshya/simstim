@@ -62,7 +62,7 @@ func ChangeFilePolicy(ctx context.Context, layer FileLayer, rule api.Rule, remov
 			remove = target
 		}
 	}
-	if rule.Once || !rule.Until.IsZero() || rule.Mode != "" {
+	if rule.Once || !rule.Until.IsZero() || rule.Mode != "" || len(rule.Tools) != 0 {
 		return out, &UserError{Msg: "file layers cannot hold once, duration or tool grants", Hint: "Use --in <host>/<session> for a temporary grant.", Code: "layer_key", Kind: KindUsage}
 	}
 	if !dryRun {

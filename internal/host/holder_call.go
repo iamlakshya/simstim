@@ -37,7 +37,16 @@ func HolderRequest(id, op string, args any, timeout time.Duration) (json.RawMess
 // holderRequest is HolderRequest. ready, when it is not nil, reads the
 // holder's hello before the request goes, and can stop it with an error.
 func holderRequest(id, op string, args any, timeout time.Duration, ready func(proto.Hello) error) (json.RawMessage, error) {
-	l, hello, err := dialSessionHolder(id, timeout)
+	return holderRequestSocket(paths.Socket(id), op, args, timeout, ready)
+}
+
+// HolderRequestAt uses the same holder protocol at the guest init's fixed private socket.
+func HolderRequestAt(sock, op string, args any, timeout time.Duration) (json.RawMessage, error) {
+	return holderRequestSocket(sock, op, args, timeout, nil)
+}
+
+func holderRequestSocket(sock, op string, args any, timeout time.Duration, ready func(proto.Hello) error) (json.RawMessage, error) {
+	l, hello, err := dialHolderSocket(sock, timeout)
 	if err != nil {
 		return nil, err
 	}
@@ -86,11 +95,15 @@ type holderLine struct {
 // dialSessionHolder connects to the holder of session id, and trades hellos with
 // it. The connection ends after timeout.
 func dialSessionHolder(id string, timeout time.Duration) (*holderLine, proto.Hello, error) {
+	return dialHolderSocket(paths.Socket(id), timeout)
+}
+
+func dialHolderSocket(sock string, timeout time.Duration) (*holderLine, proto.Hello, error) {
 	var hello proto.Hello
 	d := net.Dialer{Timeout: timeout}
-	c, err := d.DialContext(context.Background(), "unix", paths.Socket(id))
+	c, err := d.DialContext(context.Background(), "unix", sock)
 	if err != nil {
-		return nil, hello, fmt.Errorf("reach the holder of session %s: %w", id, err)
+		return nil, hello, fmt.Errorf("reach the controlled holder socket: %w", err)
 	}
 	_ = c.SetDeadline(time.Now().Add(timeout))
 	l := &holderLine{c: c, w: proto.NewWriter(c), r: bufio.NewReader(c)}

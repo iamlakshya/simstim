@@ -9,6 +9,7 @@ import (
 
 	"github.com/iamlakshya/simstim/internal/api"
 	"github.com/iamlakshya/simstim/internal/paths"
+	"github.com/iamlakshya/simstim/internal/supply"
 	"github.com/iamlakshya/simstim/internal/vmconfig"
 )
 
@@ -36,6 +37,9 @@ type Manifest struct {
 	Agents string `json:"agents,omitempty"`
 	// VMNeedV1 is opaque protected storage; the sole codec gates every use.
 	VMNeedV1 json.RawMessage `json:"-"`
+	// RuntimeManifest retains original client runtime data. Only the private
+	// operation/startup issuer can project it into execution authority.
+	RuntimeManifest *supply.Manifest `json:"runtime_manifest,omitempty"`
 	// AutomaticRestore is protected controller intent, never a client option.
 	AutomaticRestore json.RawMessage `json:"restore_plan_v1,omitempty"`
 	VMCaptureNonce   string          `json:"vm_capture_nonce,omitempty"`

@@ -6,6 +6,10 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ### Added
 
+- SSH agent forwarding uses a dedicated helper entry with bounded identity frames and owned endpoint recovery. Incomplete cleanup keeps its ownership witnesses and reports a resource refusal.
+
+- Alert webhooks accept `--format otlp` and send lifecycle logs to the collector endpoint you name. Sandbox and health events use the existing alert settings and noise limits.
+
 - GitHub repository creation, gists, visibility changes, workflow writes, runner registration and collaborator changes require an explicit network path grant. The existing request permit also checks that grant during policy changes.
 
 - A bundle pull can select one protected repository with --repo. Full-history retries keep that same repository and its seed history.

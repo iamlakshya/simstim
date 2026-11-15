@@ -58,7 +58,7 @@ func startReservedSessionWithOperation(m *Manifest, secrets map[string]api.Secre
 		m.SandboxName = m.Name
 	}
 	applySessionIdentity(m)
-	if err := m.Save(); err != nil {
+	if err := saveReservedManifest(operation, m); err != nil {
 		return nil, err
 	}
 	logSkippedCopies(id, m.Git)

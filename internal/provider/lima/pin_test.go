@@ -19,7 +19,7 @@ import (
 func TestCreatePinsTheHostKey(t *testing.T) {
 	dir := fakeLima(t, "linux")
 	var out bytes.Buffer
-	h, err := Provider{}.Create(context.Background(), provider.Request{Name: "dev", Out: &out})
+	h, err := fixtureCreate(t, context.Background(), provider.Request{Name: "dev", Out: &out})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -33,19 +33,19 @@ func TestCreatePinsTheHostKey(t *testing.T) {
 	}
 }
 
-// A VM whose key cannot be pinned is deleted, so that no VM is left that no
-// host names.
-func TestCreateDeletesAVMWithoutAPin(t *testing.T) {
+// A failed pin retains the actual VM and records its original locator; it
+// never deletes another instance through a reusable ambient name.
+func TestCreateRetainsAVMWithoutAPin(t *testing.T) {
 	dir := fakeLima(t, "linux")
 	set(t, dir, "pin-fails")
-	_, err := Provider{}.Create(context.Background(), provider.Request{Name: "dev"})
+	_, err := fixtureCreate(t, context.Background(), provider.Request{Name: "dev"})
 	var ue *client.UserError
 	inst := provider.MachineName("dev")
-	if !errors.As(err, &ue) || !strings.HasPrefix(ue.Msg, "could not pin the host key of the new VM "+inst) ||
-		!strings.HasSuffix(ue.Msg, "so host create deleted it") || ue.Hint != "run this again" {
+	if !errors.As(retainedCreationCause(err), &ue) || !strings.HasPrefix(ue.Msg, "could not pin the host key of the new VM "+inst) ||
+		!strings.HasSuffix(ue.Msg, "; the VM is retained for inspection") || ue.Hint != retainedHintPrefix+"run this again" {
 		t.Fatalf("create = %#v", err)
 	}
-	if cs := calls(t, dir); !slices.Equal(verbs(cs), []string{"create", "start", "delete"}) {
+	if cs := calls(t, dir); !slices.Equal(verbs(cs), []string{"create", "start"}) {
 		t.Errorf("limactl calls: %q", cs)
 	}
 }

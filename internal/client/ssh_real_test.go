@@ -192,7 +192,7 @@ func TestNoControlFolderIgnoresTheUsersControlPath(t *testing.T) {
 // master still stays for its 10 minutes.
 func TestNothingForksAfterAuthentication(t *testing.T) {
 	userSSH := realSSH(t)
-	if !sshKnowsFork() {
+	if !sshKnowsFork(t.Context()) {
 		t.Skip("OpenSSH before 8.7 has no ForkAfterAuthentication")
 	}
 	writeFile(t, filepath.Join(userSSH, "config"), "ForkAfterAuthentication yes\nHost jump.invalid\n    ForkAfterAuthentication yes\n")

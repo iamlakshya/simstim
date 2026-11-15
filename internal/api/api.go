@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"time"
+
+	"github.com/iamlakshya/simstim/internal/supply"
 )
 
 // Session states.
@@ -26,6 +28,8 @@ const ReasonChildOOM = "a process in this session ran out of memory and was stop
 
 // NewArgs describes a session to start.
 type NewArgs struct {
+	// Runtime is DATA selected by the same private original client plan.
+	Runtime *supply.Manifest `json:"runtime,omitempty"`
 	// VMNeedV1 is accepted only from the same locally sealed authenticated plan.
 	VMNeedV1 json.RawMessage `json:"vm_need_v1,omitempty"`
 	// Inputs and Environment come from one sealed local start selection.

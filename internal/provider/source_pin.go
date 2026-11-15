@@ -178,6 +178,60 @@ func sameSourceConfigIdentity(file *os.File, expected string) error {
 	return nil
 }
 
+// ObserveCreatedDirectory is only a native metadata transition under a held
+// selected-absent parent. It creates nothing and grants no birth/sharing fact.
+// A closed provider may keep the new directory pinned across its actual Create.
+func (p *SourceConfigPin) ObserveCreatedDirectory() (_ client.MachineConfigSource, _ *SourceConfigPin, err error) {
+	if p == nil {
+		return client.MachineConfigSource{}, nil, fmt.Errorf("the original configuration parent is unavailable")
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.closed || p.source.Role != client.MachineConfigAbsent {
+		return client.MachineConfigSource{}, nil, fmt.Errorf("the original configuration was not an owned absent selection")
+	}
+	parent, err := pinSourceConfigDirectory(filepath.Dir(p.source.Path))
+	if err != nil {
+		return client.MachineConfigSource{}, nil, err
+	}
+	if err = errors.Join(sameSourceConfigIdentity(parent, p.source.ParentID), parent.Close()); err != nil {
+		return client.MachineConfigSource{}, nil, err
+	}
+	source, pin, err := CaptureSourceConfigPinned(p.source.Path)
+	if err != nil {
+		return client.MachineConfigSource{}, nil, err
+	}
+	if source.Role != client.MachineConfigExisting || source.Path != p.source.Path {
+		return client.MachineConfigSource{}, nil, errors.Join(fmt.Errorf("the created configuration leaves its original selected parent"), pin.Close())
+	}
+	parent, err = pinSourceConfigDirectory(filepath.Dir(p.source.Path))
+	if err != nil {
+		return client.MachineConfigSource{}, nil, errors.Join(err, pin.Close())
+	}
+	if err = errors.Join(sameSourceConfigIdentity(parent, p.source.ParentID), parent.Close()); err != nil {
+		return client.MachineConfigSource{}, nil, errors.Join(err, pin.Close())
+	}
+	return source, pin, nil
+}
+
+// RevalidateParent retains the original selected-absent parent witness even
+// after the closed provider has observed its newly created child directory.
+func (p *SourceConfigPin) RevalidateParent() (err error) {
+	if p == nil {
+		return fmt.Errorf("the original selected configuration parent is unavailable")
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.closed || p.source.Role != client.MachineConfigAbsent {
+		return fmt.Errorf("the original selected configuration parent is closed or unknown")
+	}
+	parent, err := pinSourceConfigDirectory(filepath.Dir(p.source.Path))
+	if err != nil {
+		return err
+	}
+	return errors.Join(sameSourceConfigIdentity(parent, p.source.ParentID), parent.Close())
+}
+
 // Revalidate reacquires the SAME native path/object/absence witness. A changed
 // source is an error, not renewal of the old fact by a matching host name.
 func (p *SourceConfigPin) Revalidate() error {

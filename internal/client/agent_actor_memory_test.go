@@ -91,7 +91,7 @@ func runAgentMemoryClient(cfg agentMemoryConfig) error {
 			if failure == nil {
 				for range 32 {
 					check, stop := context.WithTimeout(operation.ctx, 2*time.Second)
-					failure = actor.conn.checkLiveAgentGrant(check, actor.scope.Session, actor.target)
+					failure = actor.checkLiveGrant(check, actor.scope.Session, actor.target)
 					if failure == nil {
 						checks++
 						failure = actor.Ping(check)

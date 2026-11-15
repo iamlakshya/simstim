@@ -17,7 +17,7 @@ func capturedOrphanConfig(t *testing.T) (ownedSSHConfig, localFix) {
 		t.Fatal(err)
 	}
 	path := wrapperPath(Host{Name: "old"})
-	if _, err := writeConfig(path, `host "old"`, "", true); err != nil {
+	if _, err := writeConfig(path, `host "old"`, "", true, true); err != nil {
 		t.Fatal(err)
 	}
 	candidate, ok := snapshotGeneratedSSHConfig(path)

@@ -33,7 +33,9 @@ func sourceRefused() error {
 	return sourceError("this folder overlaps files that a sandbox can write", "Pull the work into a separate trusted repository first.")
 }
 
-func sourceBeneath(name, root string) bool {
+// Beneath compares already resolved ordinary paths without changing their spelling.
+// All source and program planners share this same containment predicate.
+func Beneath(name, root string) bool {
 	if root == filepath.VolumeName(root)+string(filepath.Separator) {
 		return strings.HasPrefix(name, root)
 	}
@@ -42,7 +44,7 @@ func sourceBeneath(name, root string) bool {
 
 func checkSourcePath(roots []sourceRoot, name string, children bool) error {
 	for _, root := range roots {
-		if sourceBeneath(name, root.name) || children && root.direct && sourceBeneath(root.name, name) {
+		if Beneath(name, root.name) || children && root.direct && Beneath(root.name, name) {
 			return sourceRefused()
 		}
 	}

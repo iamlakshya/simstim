@@ -344,7 +344,7 @@ func TestBaseArgsHaveThePin(t *testing.T) {
 				t.Errorf("%s: %s %d times in %q", name, o, n, a)
 			}
 		}
-		known, _ := sshKnowsOption("KnownHostsCommand=none")
+		known, _ := sshKnowsOptionContext(ctx, "KnownHostsCommand=none")
 		if got := slices.Contains(a, "KnownHostsCommand=none"); got != known {
 			t.Errorf("%s: KnownHostsCommand=none is there: %v, and ssh knows it: %v", name, got, known)
 		}
@@ -362,10 +362,10 @@ func TestThePinWinsOverTheConfig(t *testing.T) {
 	undo := "StrictHostKeyChecking no\nUserKnownHostsFile /dev/null\nGlobalKnownHostsFile /tmp/global\nVerifyHostKeyDNS yes\n" +
 		"UpdateHostKeys yes\nHostKeyAlias other\nNoHostAuthenticationForLocalhost yes\nCheckHostIP yes\n" +
 		"LogLevel QUIET\nFingerprintHash md5\n"
-	if ok, _ := sshKnowsOption("KnownHostsCommand=none"); ok {
+	if ok, _ := sshKnowsOptionContext(t.Context(), "KnownHostsCommand=none"); ok {
 		undo += "KnownHostsCommand /bin/echo\n"
 	}
-	if ok, _ := sshKnowsOption("NoHostAuthenticationForProxyCommand=no"); ok {
+	if ok, _ := sshKnowsOptionContext(t.Context(), "NoHostAuthenticationForProxyCommand=no"); ok {
 		undo += "NoHostAuthenticationForProxyCommand yes\n"
 	}
 	inc := writeFile(t, filepath.Join(userSSH, "included"), "Host *\n"+undo)

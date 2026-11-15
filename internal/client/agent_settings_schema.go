@@ -38,7 +38,10 @@ type agentSchema struct {
 }
 
 func newAgentSchema() (*agentSchema, error) {
-	if MaxConfigSize != configdata.MaxFileSize || MaxConfigSize != tomlinspect.MaxInput {
+	if MaxConfigSize != configdata.MaxFileSize {
+		return nil, errAgentSettingsSchema
+	}
+	if MaxConfigSize != tomlinspect.MaxInput {
 		return nil, errAgentSettingsSchema
 	}
 	for _, name := range tierNames {

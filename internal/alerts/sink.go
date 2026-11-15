@@ -50,6 +50,9 @@ func newSink(d api.AlertDestination, e sinkEnv) sink {
 	case "ntfy":
 		return &ntfySink{d: d, client: e.client}
 	default:
+		if d.Format == "otlp" {
+			return &otlpSink{d: d, client: e.client}
+		}
 		return &webhookSink{d: d, client: e.client}
 	}
 }
@@ -136,6 +139,11 @@ func deliver(ctx context.Context, s sink, ev Event, wait time.Duration) (string,
 
 // post sends one HTTP request and checks the answer.
 func post(client *http.Client, req *http.Request) error {
+	return postChecked(client, req, nil)
+}
+
+// postChecked also checks a successful protocol response when check is set.
+func postChecked(client *http.Client, req *http.Request, check func([]byte) error) error {
 	req.Header.Set("User-Agent", brand.HostBinary+"/"+version.Version)
 	resp, err := client.Do(req)
 	if err != nil {
@@ -148,6 +156,9 @@ func post(client *http.Client, req *http.Request) error {
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
 	if resp.StatusCode/100 == 2 {
+		if check != nil {
+			return check(body)
+		}
 		return nil
 	}
 	return &statusError{code: resp.StatusCode, body: oneLine(string(body), 200)}

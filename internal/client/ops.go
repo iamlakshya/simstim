@@ -88,7 +88,7 @@ func (c *Conn) NewSession(ctx context.Context, a NewArgs) (*Session, error) {
 		return nil, err
 	}
 	ctx, _ = ensureGrantRequest(ctx)
-	if newPlanOf(ctx) == nil && (a.SecretDelivery != nil || len(a.VMNeedV1) != 0) {
+	if newPlanOf(ctx) == nil && (a.SecretDelivery != nil || len(a.VMNeedV1) != 0 || a.Runtime != nil) {
 		return nil, grantOperationError()
 	}
 	if err := checkWallGrantArgs(ctx, a.Wall, a.SSHAgent); err != nil {

@@ -69,6 +69,10 @@ func CloneManifest(m Manifest) Manifest {
 		m.Git = &copy
 	}
 	m.Files = CloneFilePlan(m.Files)
+	if m.RuntimeManifest != nil {
+		copy := cloneSelectedRuntime(*m.RuntimeManifest)
+		m.RuntimeManifest = &copy
+	}
 	m.VMNeedV1 = slices.Clone(m.VMNeedV1)
 	m.AutomaticRestore = slices.Clone(m.AutomaticRestore)
 	m.extra = maps.Clone(m.extra)

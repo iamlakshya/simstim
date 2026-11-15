@@ -50,6 +50,24 @@ A webhook address is a secret: anyone who has it can post to your channel. It st
 
 If your service needs a header, such as `Authorization`, add it to the alerts file by hand, under `headers`.
 
+For an OpenTelemetry collector, use `--format otlp` and give the full OTLP/HTTP
+logs endpoint. The host sends one log record for each alert:
+
+```sh
+simstim host alerts set my-vps --webhook http://localhost:4318/v1/logs --format otlp
+simstim host alerts test my-vps
+```
+
+The body follows [OTLP's JSON encoding](https://opentelemetry.io/docs/specs/otlp/#json-protobuf-encoding).
+The record carries the event name, session and reason as attributes, and the
+summary as its body. Detail stays off unless you enable it. Collector rejections
+appear in the delivery log. The same destination checks, delay and noise limits
+apply. Nothing is sent until you name a destination.
+
+You can select `sandbox_ready`, `sandbox_stopped`, `sandbox_error`,
+`health_degraded` and `health_recovered` in `events`. A run stopped by its time
+limit carries `reason = "max_run"`. These events do not change the default list.
+
 ## Set up a command
 
 A command runs on the host with `sh -c`, in your home folder and your login environment. It gets the event as one line of JSON on stdin, and as environment variables:

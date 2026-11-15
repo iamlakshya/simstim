@@ -85,6 +85,10 @@ func gitArgs(dir string, hooks []string, args ...string) []string {
 	return slices.Concat(gitSafe, off, []string{"-C", dir}, args)
 }
 
+// SafeGitArgs applies the one existing canonical non-executing Git policy in dir.
+// Guest-owned fixed commands use the same event data as host Git operations.
+func SafeGitArgs(dir string, args ...string) []string { return gitArgs(dir, nil, args...) }
+
 // git runs git with args in the folder dir, and returns what it printed.
 // Only the commands of a git operation call it, in its child (gitop.go).
 // Each command first reads the hooks that git's config defines, which runs

@@ -20,6 +20,7 @@ import (
 // operation/retry. Only its owner releases it, after owned resource cleanup.
 type SessionOperation struct {
 	automaticBoot *AutomaticBootOperationV1
+	newRequest    *newRequestWitnessV1
 	id            string
 	native        *sessionFileLease
 	ownerContext  context.Context

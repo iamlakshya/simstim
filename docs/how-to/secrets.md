@@ -79,3 +79,8 @@ The launcher may keep your last valid display settings after a broken edit. Secr
 For a grant that needs live consent, the launcher asks with no as its default. Some grants require the exact saved host name. Enter never approves a yes or no question. A cancelled or replaced question cannot approve later work. The answer applies only to that operation.
 
 The launcher and start notes label only known exposed credentials as exposed. Bound credentials keep their delivery mode. Missing, future or incomplete delivery metadata is shown as unknown. These labels grant no access and never arm a credential.
+
+The SSH agent channel uses a dedicated helper process. It checks the bounded
+identity hello before opening the channel. Detach revokes its owned endpoint
+and active connections. If cleanup cannot finish, the helper reports a resource
+refusal and keeps the ownership witnesses for a later checked recovery.

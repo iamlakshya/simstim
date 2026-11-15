@@ -9,12 +9,18 @@ import (
 
 type limaSourceBirthKey struct{}
 type limaSourceBirth struct {
-	ctx        context.Context
-	scope      *client.HostCreationSourceScope
-	request    client.HostCreationRequest
-	created    bool
-	inspection *provider.SourceInspection
-	result     client.Host
+	ctx            context.Context
+	scope          *client.HostCreationSourceScope
+	request        client.HostCreationRequest
+	created        bool
+	attempted      bool
+	home           string
+	partial        client.Host
+	locator        *limaSourceLocator
+	instancePin    *provider.SourceConfigPin
+	instanceSource client.MachineConfigSource
+	inspection     *provider.SourceInspection
+	result         client.Host
 }
 
 func init() {
@@ -40,6 +46,12 @@ func observeSourceBirth(ctx context.Context, scope *client.HostCreationSourceSco
 	if err := scope.CheckContext(ctx); err != nil {
 		return nil, err
 	}
+	if err := frame.locator.check(ctx, false); err != nil {
+		return nil, err
+	}
+	if err := frame.instancePin.Revalidate(); err != nil {
+		return nil, err
+	}
 	if err := frame.inspection.Config.Revalidate(); err != nil {
 		return nil, err
 	}
@@ -55,6 +67,9 @@ func observeSourceBirth(ctx context.Context, scope *client.HostCreationSourceSco
 		return nil, err
 	}
 	if err := scope.CheckContext(ctx); err != nil {
+		return nil, err
+	}
+	if err := frame.locator.check(ctx, false); err != nil {
 		return nil, err
 	}
 	return client.CloneMachineSource(frame.result.Machine.Source), nil

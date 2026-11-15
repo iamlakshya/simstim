@@ -47,8 +47,8 @@ func TestHostStateReadMigratesExistingLegacyMembership(t *testing.T) {
 		t.Fatal(err)
 	}
 	h := Host{Name: "box", SSH: "legacy.example"}
-	if _, found, err := LoadSandboxPolicy(t.Context(), h, "abcd2345"); err != nil || found {
-		t.Fatalf("a pure current local read failed on a valid legacy membership: found=%v, %v", found, err)
+	if found, err := LoadSandboxPolicy(t.Context(), h, "abcd2345"); err != nil || found != nil {
+		t.Fatalf("a pure current local read failed on a valid legacy membership: found=%v, %v", found != nil, err)
 	}
 	generation, err := currentMembershipGeneration(t.Context())
 	if err != nil || !ValidHostID(generation) {

@@ -131,6 +131,9 @@ type memRead struct {
 // startMemory finds the unit's cgroup folder and its "max" count, when
 // the agent starts.
 func (h *Holder) startMemory() {
+	if h.guest != nil {
+		return
+	}
 	h.mem.dir = unitCgroupDir(h.id)
 	if h.mem.dir != "" {
 		h.mem.hits = readKeyed(filepath.Join(h.mem.dir, "memory.events"))["max"]

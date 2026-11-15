@@ -32,6 +32,7 @@ func (h *Holder) step() {
 	if !h.exited {
 		h.updateStatus()
 	}
+	h.ev.status(h.id, h.m.Status)
 	dirty := h.dirty
 	h.dirty = false
 	var snapshot savedCopy

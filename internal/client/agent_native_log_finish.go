@@ -37,13 +37,15 @@ func (l *agentNativeLog) FinishScan(scan func(io.Reader) error) (agentNativeLogS
 }
 
 func (l *agentNativeLog) finish(scan func(io.Reader) error) (agentNativeLogSummary, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*sshWaitDelay)
+	ctx, cancel := l.shutdownBudget().context(context.Background(), 2*sshWaitDelay)
 	defer cancel()
 	l.releaseStartupWriter()
 	select {
 	case <-l.done:
 	case <-time.After(sshWaitDelay):
 		l.fail(agentNativeLogError("the native log writer did not finish"))
+	case <-ctx.Done():
+		l.fail(agentNativeLogError("the native log writer exceeded the original shutdown deadline"))
 	}
 	type diagnostic struct {
 		summary agentNativeLogSummary
@@ -129,7 +131,7 @@ func (l *agentNativeLog) Close() error {
 	if l == nil {
 		return nil
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), sshWaitDelay)
+	ctx, cancel := l.shutdownBudget().context(context.Background(), sshWaitDelay)
 	defer cancel()
 	return l.closeContext(ctx)
 }

@@ -102,7 +102,7 @@ func TestWrapperReplacementKeepsAnOpenedSnapshot(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer f.Close()
-	if _, err := writeConfig(path, `host "box"`, "/another/config", true); err != nil {
+	if _, err := writeConfig(path, `host "box"`, "/another/config", true, true); err != nil {
 		t.Fatal(err)
 	}
 	snapshot, err := io.ReadAll(f)
@@ -127,7 +127,7 @@ func TestForgetKeepsACaseTwinsWrappers(t *testing.T) {
 		t.Fatal(err)
 	}
 	legacy := oldWrapperPath(h.Name)
-	if _, err := writeConfig(legacy, `host "box"`, "", true); err != nil {
+	if _, err := writeConfig(legacy, `host "box"`, "", true, true); err != nil {
 		t.Fatal(err)
 	}
 	before, err := os.ReadFile(legacy)

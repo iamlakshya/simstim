@@ -9,7 +9,6 @@ import (
 	"runtime"
 	"sync"
 
-	"github.com/iamlakshya/simstim/internal/paths"
 	"github.com/iamlakshya/simstim/internal/proto"
 	"github.com/iamlakshya/simstim/internal/runtimecache"
 	"github.com/iamlakshya/simstim/internal/supply"
@@ -20,9 +19,10 @@ const runtimeProcessTransfers = 16
 var runtimeSlots = make(chan struct{}, runtimeProcessTransfers)
 
 type runtimeOwnedPart struct {
-	part   *runtimecache.Part
-	store  *runtimecache.Store
-	digest string
+	part        *runtimecache.Part
+	store       *runtimecache.Store
+	digest      string
+	publication *runtimePublication
 }
 type runtimeJob struct {
 	ctx       context.Context
@@ -32,11 +32,12 @@ type runtimeJob struct {
 }
 
 type runtimeService struct {
-	mu        sync.Mutex
-	parts     map[string]*runtimeOwnedPart
-	jobs      map[string]*runtimeJob
-	downloads map[string]*runtimecache.Part
-	closed    bool
+	mu         sync.Mutex
+	parts      map[string]*runtimeOwnedPart
+	jobs       map[string]*runtimeJob
+	downloads  map[string]*runtimecache.Part
+	closed     bool
+	selections map[string]*selectedRuntimeReceiptV1
 }
 
 func (s *runtimeService) close() {
@@ -47,10 +48,13 @@ func (s *runtimeService) close() {
 		job.cancel()
 	}
 	for token, part := range s.parts {
-		part.part.Close()
-		part.store.Close()
+		_ = part.close()
 		delete(s.parts, token)
 		<-runtimeSlots
+	}
+	for key, receipt := range s.selections {
+		_ = receipt.Close()
+		delete(s.selections, key)
 	}
 }
 
@@ -79,6 +83,10 @@ func (s *runtimeService) reserve() error {
 }
 
 func (s *runtimeService) begin(a runtimecache.RuntimeInstall) (runtimecache.RuntimePart, error) {
+	return s.beginContext(context.Background(), a)
+}
+
+func (s *runtimeService) beginContext(ctx context.Context, a runtimecache.RuntimeInstall) (runtimecache.RuntimePart, error) {
 	var result runtimecache.RuntimePart
 	if err := CheckCaller(); err != nil {
 		return result, err
@@ -113,26 +121,28 @@ func (s *runtimeService) begin(a runtimecache.RuntimeInstall) (runtimecache.Runt
 			<-runtimeSlots
 		}
 	}()
-	store, err := runtimecache.Open(paths.ArtefactsDir())
+	publication, store, err := openRuntimeProductionStore(ctx)
 	if err != nil {
 		return result, err
 	}
-	part, err := store.Begin(item)
+	part, err := store.BeginContext(publication.ctx, item)
 	if err != nil {
 		store.Close()
+		_ = publication.close()
 		return result, err
 	}
 	var nonce [16]byte
 	if _, err := rand.Read(nonce[:]); err != nil {
 		part.Close()
 		store.Close()
+		_ = publication.close()
 		return result, fmt.Errorf("name runtime transfer: %w", err)
 	}
 	result.Part = hex.EncodeToString(nonce[:])
 	if s.parts == nil {
 		s.parts = map[string]*runtimeOwnedPart{}
 	}
-	s.parts[result.Part] = &runtimeOwnedPart{part: part, store: store, digest: item.SHA256}
+	s.parts[result.Part] = &runtimeOwnedPart{part: part, store: store, digest: item.SHA256, publication: publication}
 	release = false
 	return result, nil
 }
@@ -143,7 +153,7 @@ func (s *runtimeService) install(ctx context.Context, a runtimecache.RuntimeInst
 	}
 	switch a.Action {
 	case "begin":
-		return s.begin(a)
+		return s.beginContext(ctx, a)
 	case "commit":
 		if a.Manifest == nil {
 			return nil, fmt.Errorf("runtime commit has no client manifest")
@@ -151,12 +161,16 @@ func (s *runtimeService) install(ctx context.Context, a runtimecache.RuntimeInst
 		if err := runtimeValidatePublication(*a.Manifest, a.ImageDefaults); err != nil {
 			return nil, err
 		}
-		store, err := runtimecache.Open(paths.ArtefactsDir())
+		publication, store, err := openRuntimeProductionStore(ctx)
 		if err != nil {
 			return nil, err
 		}
+		defer publication.close()
 		defer store.Close()
-		return nil, commitRuntime(ctx, store, *a.Manifest, a.ImageDefaults)
+		if err := commitRuntime(ctx, store, *a.Manifest, a.ImageDefaults); err != nil {
+			return nil, err
+		}
+		return nil, s.rememberRuntime(ctx, *a.Manifest)
 	case "write", "finish", "abort":
 		s.mu.Lock()
 		if a.Action == "abort" {
@@ -175,8 +189,7 @@ func (s *runtimeService) install(ctx context.Context, a runtimecache.RuntimeInst
 			err := own.part.WriteAt(a.Data, a.Offset)
 			if err != nil {
 				delete(s.parts, a.Part)
-				own.part.Close()
-				own.store.Close()
+				_ = own.close()
 				<-runtimeSlots
 			}
 			s.mu.Unlock()
@@ -184,7 +197,7 @@ func (s *runtimeService) install(ctx context.Context, a runtimecache.RuntimeInst
 		}
 		delete(s.parts, a.Part)
 		s.mu.Unlock()
-		defer func() { own.part.Close(); own.store.Close(); <-runtimeSlots }()
+		defer func() { _ = own.close(); <-runtimeSlots }()
 		if a.Action == "finish" {
 			return nil, own.part.Finish(ctx)
 		}

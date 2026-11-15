@@ -73,6 +73,12 @@ func (c *Conn) startCall(ctx context.Context, op string, args any) (uint64, chan
 	c.pending[id] = ch
 	c.mu.Unlock()
 	requestStage("queued")
+	if plan, _ := ctx.Value(newPlanPublicationKey{}).(*newSecretPlan); plan != nil {
+		if err := plan.markPublicationAttempt(); err != nil {
+			c.drop(id)
+			return 0, nil, err
+		}
+	}
 	if err := c.w.WriteJSONCtx(ctx, proto.TRequest, req); err != nil {
 		c.drop(id)
 		if ctx.Err() != nil {

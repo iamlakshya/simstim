@@ -20,7 +20,6 @@ import (
 	"github.com/iamlakshya/simstim/internal/brand"
 	"github.com/iamlakshya/simstim/internal/paths"
 	"github.com/iamlakshya/simstim/internal/proto"
-	"github.com/iamlakshya/simstim/internal/version"
 )
 
 // UserError is an error with a code and a suggested next step.
@@ -70,113 +69,8 @@ func expandHome(p string) string {
 }
 
 // New starts a session and returns its row.
-func New(a NewArgs) (_ *SessionInfo, err error) {
-	if err := checkName(a.Name); err != nil {
-		return nil, err
-	}
-	if err := checkMemoryMax(a.MemoryMax); err != nil {
-		return nil, err
-	}
-	argv, kind, agent, known, err := pickAgent(a)
-	if err != nil {
-		return nil, err
-	}
-	cwd := expandHome(a.Cwd)
-	missing, err := checkFolder(cwd, a.Worktree)
-	if err != nil {
-		return nil, err
-	}
-	secrets, err := checkSecrets(a.Secrets)
-	if err != nil {
-		return nil, err
-	}
-	login, err := LoginEnv(15 * time.Second)
-	if err != nil {
-		login = os.Environ()
-	}
-	id := unusedID()
-	// Find the agent before anything is asked or made. A missing agent
-	// leaves nothing behind: no folder, no worktree and no branch.
-	inline := a.Inline && known && len(a.Argv) == 0 && agent.Inline.Has()
-	env, term := sessionEnv(a, id, login, agent, inline)
-	if a.Environment != nil {
-		env, term, err = resolvedUnwalledEnv(a, id, login, agent, inline, initialSecretState(a.SecretDelivery), secrets)
-		if err != nil {
-			return nil, err
-		}
-	}
-	argv, hooks, sessionUUID := agentArgv(argv, a, agent, known, inline)
-	if _, err := lookPath(argv[0], envValue(env, "PATH")); err != nil {
-		return nil, UserError("agent_missing", argv[0]+" is not installed on this host", "Install it on the host, then try again.")
-	}
-	if len(missing) > 0 {
-		if !a.MakeFolder {
-			return nil, folderQuestion(cwd)
-		}
-		if err := makeFolders(cwd); err != nil {
-			return nil, err
-		}
-		// A start that fails after this point removes the new folders again,
-		// unless it kept its session.
-		defer func() { removeFoldersAfter(err, id, missing) }()
-	}
-	var gi *GitInfo
-	if a.Worktree {
-		n := a.Name
-		if strings.TrimSpace(n) == "" {
-			n = filepath.Base(cwd)
-		}
-		gi, err = makeWorktree(cwd, n, id, a.Base)
-		if err != nil {
-			return nil, err
-		}
-		cwd = gi.Worktree
-	}
-	sessHooks, err := setupHooks(a, cwd, gi)
-	if err != nil {
-		return nil, err
-	}
-	name := strings.TrimSpace(a.Name)
-	if name == "" {
-		name = folderName(cwd)
-	}
-	asked := max(a.MemoryMax, 0)
-	now := time.Now().UTC()
-	m := &Manifest{
-		Schema: 1, ID: id, Name: name, CreatedAt: now, HostVersion: version.Version,
-		Agent: AgentInfo{Kind: kind, Argv: argv},
-		Cwd:   cwd, Env: env,
-		Term:    TermInfo{Term: term, Cols: a.Cols, Rows: a.Rows},
-		Limits:  Limits{MemoryMax: sessionMemoryMax(asked), MemoryAsked: asked},
-		Run:     Runtime{Socket: paths.Socket(id), BootID: BootID()},
-		Status:  Status{State: StateStarting, Since: now},
-		Restart: Restart{Policy: "resume", MaxAttempts: 3},
-	}
-	m.Git = gi
-	m.Secrets = secrets
-	m.SetupHook, m.ResumeHook, m.SetupHash = sessHooks.setup, sessHooks.resume, sessHooks.hash
-	m.RunHook = m.SetupHook
-	if len(a.Argv) > 0 {
-		// A restore or a resume runs the user's own command again, unless
-		// the agent resumes its own session by ID (resumeArgv).
-		m.Agent.Command = slices.Clone(argv)
-	}
-	if known {
-		m.Agent.ResumeArgv = agent.Resume
-		m.Agent.ContinueArgv = agent.Continue
-		m.Agent.Hooks = hooks
-		if inline {
-			m.Agent.Inline = agent.Inline.Args
-		}
-		// The agent gets the ID only through its command. A command of the
-		// user's own passes it only with the {session_uuid} placeholder, and
-		// a resume by an ID that the agent never got would find nothing.
-		if agent.IDCapture == "choose" && passesID(argv, sessionUUID) {
-			m.Agent.AgentSessionID = sessionUUID
-			m.Agent.IDSource = "chosen"
-		}
-	}
-	return startSession(m, a.Secrets, strings.TrimSpace(a.Name) == "")
+func New(a NewArgs) (*SessionInfo, error) {
+	return NewContext(context.Background(), a)
 }
 
 // pickAgent returns the command a new session runs and its kind, and the

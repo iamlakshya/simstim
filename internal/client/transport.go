@@ -84,6 +84,7 @@ type cmdProc struct {
 	stdout      io.Reader
 	stderr      lockedWriter
 	unreachable func(code int, stderr string) bool
+	agentStderr *ownedAgentStderr
 
 	once    sync.Once
 	waitErr error
@@ -96,6 +97,18 @@ func (p *cmdProc) Stderr() string        { return p.stderr.String() }
 func (p *cmdProc) Wait() error {
 	p.once.Do(func() {
 		err := p.cmd.Wait()
+		if p.agentStderr != nil {
+			p.agentStderr.rawError = err
+			p.agentStderr.exitedAt = time.Now()
+			p.agentStderr.budget.start(p.agentStderr.exitedAt)
+			close(p.agentStderr.rawDone)
+			copyErr := p.agentStderr.finish()
+			p.agentStderr.finishError = copyErr
+			close(p.agentStderr.finished)
+			if copyErr != nil {
+				err = errors.Join(err, copyErr)
+			}
+		}
 		var ee *exec.ExitError
 		if errors.As(err, &ee) && ee.Exited() && p.unreachable != nil && p.unreachable(ee.ExitCode(), p.Stderr()) {
 			err = fmt.Errorf("%w: %w", ErrUnreachable, err)
@@ -170,13 +183,25 @@ func (s *SSH) startWith(lockCtx, procCtx context.Context, remote string) (Proc, 
 		defer nativeProgram.Close()
 	}
 	// ssh exits with 255 when it could not reach the host.
-	p, err := CommandProc(cmd, func(code int, _ string) bool { return code == 255 })
+	var p Proc
+	if s.bindingCollector != nil {
+		p, err = commandAgentProc(cmd, func(code int, _ string) bool { return code == 255 }, stderrLines())
+	} else {
+		p, err = CommandProc(cmd, func(code int, _ string) bool { return code == 255 })
+	}
 	release()
 	if err != nil {
 		logFile.finish()
 		return nil, err
 	}
-	wrapped := &sshProc{Proc: p, rawDone: make(chan struct{}), ctx: context.WithoutCancel(lockCtx), host: s.Host, args: cmd.Args, logFile: logFile}
+	rawDone := make(chan struct{})
+	if raw, ok := p.(*cmdProc); ok && raw.agentStderr != nil {
+		rawDone = raw.agentStderr.rawDone
+		if logFile.agent != nil {
+			raw.agentStderr.budget = logFile.agent.shutdownBudget()
+		}
+	}
+	wrapped := &sshProc{Proc: p, rawDone: rawDone, ctx: context.WithoutCancel(lockCtx), host: s.Host, args: cmd.Args, logFile: logFile}
 	if s.bindingCollector != nil {
 		if err := s.bindingCollector.attachOwner(wrapped, procCtx, nativeProgram); err != nil {
 			wrapped.Kill()
@@ -209,7 +234,10 @@ func (p *sshProc) Wait() error {
 	p.once.Do(func() {
 		p.waitErr = p.Proc.Wait()
 		if p.rawDone != nil {
-			close(p.rawDone)
+			raw, actual := p.Proc.(*cmdProc)
+			if !actual || raw.agentStderr == nil || raw.agentStderr.rawDone != p.rawDone {
+				close(p.rawDone)
+			}
 		}
 		log := ""
 		var diagnosis nativeSSHDiagnosis
@@ -265,10 +293,23 @@ func (p *sshProc) agentFailure() error {
 	if p.logFile != nil && p.logFile.agent != nil && p.rawDone != nil {
 		select {
 		case <-p.rawDone:
-			if failure := agentProcessExitFailure(exitCode(p.waitErr)); failure != nil {
+			var exitErr error
+			if raw, ok := p.Proc.(*cmdProc); ok && raw.agentStderr != nil {
+				if observed, ready := raw.observedAgentExit(); ready {
+					exitErr = observed
+				}
+			} else {
+				exitErr = p.waitErr
+			}
+			if failure := agentProcessExitFailure(exitCode(exitErr)); failure != nil {
 				return failure
 			}
 		default:
+		}
+	}
+	if raw, ok := p.Proc.(*cmdProc); ok && raw.agentStderr != nil {
+		if err := raw.agentStderr.failure(); err != nil {
+			return err
 		}
 	}
 	if p.logFile != nil && p.logFile.agent != nil {

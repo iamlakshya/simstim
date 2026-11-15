@@ -84,7 +84,11 @@ type Frame struct {
 var ErrFrameTooBig = errors.New("proto: frame too big")
 
 // Read reads one frame.
-func Read(r *bufio.Reader) (Frame, error) {
+func Read(r *bufio.Reader) (Frame, error) { return ReadFrom(r) }
+
+// ReadFrom uses the canonical frame decoder without requiring read-ahead.
+// Startup control uses it to associate native ancillary data with one frame.
+func ReadFrom(r io.Reader) (Frame, error) {
 	var hdr [4]byte
 	if _, err := io.ReadFull(r, hdr[:]); err != nil {
 		// io.EOF here is the clean end of the stream, which callers test for
@@ -167,6 +171,9 @@ func (w *Writer) WriteCtx(ctx context.Context, t Type, payload []byte) error {
 	}
 	return w.put(buf)
 }
+
+// EncodeFrame returns the canonical bytes of one frame. The caller owns the buffer.
+func EncodeFrame(t Type, payload []byte) ([]byte, error) { return frame(t, payload) }
 
 // frame is the bytes of one frame of type t.
 func frame(t Type, payload []byte) ([]byte, error) {
@@ -292,12 +299,15 @@ func DecodeChunk(p []byte) (uint64, []byte, error) {
 
 // Hello is the first frame each way.
 type Hello struct {
-	Magic    string   `json:"magic"`
-	Protocol string   `json:"protocol"`
-	Version  string   `json:"version"`
-	Role     string   `json:"role"`
-	HostID   string   `json:"host_id,omitempty"`
-	Features []string `json:"features,omitempty"`
+	// StartupNonce correlates a single native OP loan on this connection.
+	// It is not permission or an execution receipt.
+	StartupNonce string   `json:"startup_nonce,omitempty"`
+	Magic        string   `json:"magic"`
+	Protocol     string   `json:"protocol"`
+	Version      string   `json:"version"`
+	Role         string   `json:"role"`
+	HostID       string   `json:"host_id,omitempty"`
+	Features     []string `json:"features,omitempty"`
 }
 
 // Check reports whether h is a compatible peer.

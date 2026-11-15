@@ -12,6 +12,7 @@ import (
 // agentModeResources owns the one directory and reusable inspection slab for
 // an actual attached-agent lifetime. Construction creates only the directory.
 type agentModeResources struct {
+	shutdown  agentShutdownBudget
 	mu        sync.Mutex
 	ctx       context.Context
 	cancel    context.CancelFunc
@@ -128,6 +129,9 @@ func (m *agentModeResources) close(ctx context.Context) error {
 	if m == nil {
 		return nil
 	}
+	bounded, stop := m.shutdown.context(ctx, 0)
+	defer stop()
+	ctx = bounded
 	m.mu.Lock()
 	m.closed = true
 	m.cancel()

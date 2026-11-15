@@ -9,6 +9,14 @@ import (
 // Unsaved explicit/staged pin operations retain their existing stage contract;
 // this helper never fabricates saved membership or promotes that stage.
 func holdSavedPinMutation(ctx context.Context, h Host, kind string) (context.Context, func(), error) {
+	// A provider's actual SSH route is not its saved machine identity.
+	// Only the private original route context may supply this expectation.
+	if origin, _ := ctx.Value(sshOriginKey{}).(*Host); origin != nil {
+		if origin.Name != h.Name {
+			return ctx, nil, grantIdentityError(h)
+		}
+		h = *origin
+	}
 	if err := ctx.Err(); err != nil {
 		return ctx, nil, err
 	}

@@ -49,7 +49,7 @@ func (a sourceAuthority) metadataScope(name string) error {
 		if canonical, e := filepath.EvalSymlinks(home); e == nil {
 			home = canonical
 		}
-		if sourceBeneath(home, name) {
+		if Beneath(home, name) {
 			return metadataRefused()
 		}
 	}
@@ -58,7 +58,7 @@ func (a sourceAuthority) metadataScope(name string) error {
 		return err
 	}
 	for _, root := range roots {
-		if sourceBeneath(name, root.name) || sourceBeneath(root.name, name) {
+		if Beneath(name, root.name) || Beneath(root.name, name) {
 			return metadataRefused()
 		}
 	}
@@ -86,7 +86,7 @@ func (v *seedView) gitDirectory(dir string) error {
 	if err := v.authority.metadataScope(dir); err != nil {
 		return err
 	}
-	if dir != v.source && sourceBeneath(v.source, dir) {
+	if dir != v.source && Beneath(v.source, dir) {
 		return metadataRefused()
 	}
 	v.add(dir)
@@ -176,7 +176,7 @@ func (v *seedView) objectRoot(name string) error {
 	if err = v.authority.metadataScope(name); err != nil {
 		return err
 	}
-	if sourceBeneath(v.source, name) {
+	if Beneath(v.source, name) {
 		return metadataRefused()
 	}
 	directory := pin.roots[len(pin.roots)-1]

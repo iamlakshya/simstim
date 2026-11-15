@@ -17,6 +17,7 @@ import (
 // newSecretPlan keeps original LOCAL selection, definitions and fetched values
 // within one request. Public args, host rows and receipt metadata cannot mint it.
 type newSecretPlan struct {
+	aborting, attempted, retired     bool
 	mu                               sync.Mutex
 	closed, busy, fetched, published bool
 	conn                             *Conn
@@ -28,6 +29,7 @@ type newSecretPlan struct {
 	intent                           *api.SecretDeliveryIntent
 	values                           map[string]api.Secret
 	vm                               *VMNeedPlanV1
+	runtime                          *newRuntimeSelection
 }
 
 // PrepareNewSecrets seals actual selected local agent/names/modes/bindings and
@@ -36,11 +38,12 @@ type newSecretPlan struct {
 // A microvm requires the actual same-connection pre-value Need builder result.
 func (c *Conn) PrepareNewSecrets(ctx context.Context, a NewArgs, vm ...*VMNeedPlanV1) (_ NewArgs, err error) {
 	r := grantRequestOf(ctx)
-	if len(a.Secrets) != 0 {
-		return a, grantOperationError()
-	}
+
 	if r == nil || len(vm) > 1 {
 		return a, grantOperationError()
+	}
+	if err := requireGrantOperation(ctx, grantOpNew); err != nil {
+		return a, err
 	}
 	if err := checkWallGrantArgs(ctx, a.Wall, a.SSHAgent); err != nil {
 		return a, err
@@ -54,16 +57,13 @@ func (c *Conn) PrepareNewSecrets(ctx context.Context, a NewArgs, vm ...*VMNeedPl
 	if before != nil {
 		return before.arguments(ctx, c, a)
 	}
-	operation, err := openSettingsOperation(ctx)
+	if len(a.Secrets) != 0 {
+		return a, grantOperationError()
+	}
+	operation, err := r.borrowNewSettings(ctx)
 	if err != nil {
 		return a, err
 	}
-	keep := false
-	defer func() {
-		if !keep {
-			err = errors.Join(err, operation.Close())
-		}
-	}()
 	settings, err := operation.Settings(ctx)
 	if err != nil {
 		return a, err
@@ -129,12 +129,24 @@ func (c *Conn) PrepareNewSecrets(ctx context.Context, a NewArgs, vm ...*VMNeedPl
 		owned := api.CloneSecretDeliveryIntent(intent)
 		plan.intent = &owned
 	}
+	if a.Wall == "gvisor" {
+		plan.runtime, err = c.prepareNewRuntime(ctx, settings, a.Wall)
+		if err != nil {
+			return a, err
+		}
+	}
 	if a.Wall == "microvm" {
 		if len(vm) != 1 || vm[0] == nil {
 			return a, vmPrepareUnavailable()
 		}
 		if _, err := vm[0].EncodedFor(c); err != nil {
 			return a, err
+		}
+		r.mu.Lock()
+		expectedVM := r.preparedVM
+		r.mu.Unlock()
+		if expectedVM != vm[0] {
+			return a, vmPrepareUnavailable()
 		}
 		plan.vm = vm[0]
 		limit, err := validateNewVMPlan(ctx, a, vm[0])
@@ -203,7 +215,6 @@ func (c *Conn) PrepareNewSecrets(ctx context.Context, a NewArgs, vm ...*VMNeedPl
 		}
 		r.newSecrets = plan
 		r.mu.Unlock()
-		keep = true
 		return plan.arguments(owned, c, a)
 	}
 	return a, grantOperationError()
@@ -212,7 +223,7 @@ func (c *Conn) PrepareNewSecrets(ctx context.Context, a NewArgs, vm ...*VMNeedPl
 func (p *newSecretPlan) arguments(ctx context.Context, c *Conn, a NewArgs) (NewArgs, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if p.closed || p.published || p.conn != c || !p.selection.matchesAgentSelection(a.Agent, a.Argv) || !reflect.DeepEqual(p.layers, a.Layers) {
+	if p.closed || p.aborting || p.retired || p.published || p.conn != c || !p.selection.matchesAgentSelection(a.Agent, a.Argv) || !reflect.DeepEqual(p.layers, a.Layers) {
 		return a, grantOperationError()
 	}
 	if err := p.operation.Revalidate(ctx); err != nil {
@@ -234,6 +245,15 @@ func (p *newSecretPlan) arguments(ctx context.Context, c *Conn, a NewArgs) (NewA
 		return a, grantOperationError()
 	}
 	a.HostLabel = p.header.HostLabel
+	if p.runtime != nil {
+		manifest, err := p.runtime.forArgs(ctx, c, a.Runtime)
+		if err != nil {
+			return a, err
+		}
+		a.Runtime = manifest
+	} else if a.Runtime != nil {
+		return a, grantOperationError()
+	}
 	a.ID = p.creation.SessionID
 	if p.intent != nil {
 		intent := api.CloneSecretDeliveryIntent(*p.intent)
@@ -258,7 +278,7 @@ func (p *newSecretPlan) arguments(ctx context.Context, c *Conn, a NewArgs) (NewA
 
 func (p *newSecretPlan) fetch(ctx context.Context, h Host, names []string, terminal bool) (_ map[string]api.Secret, err error) {
 	p.mu.Lock()
-	if p.closed || p.busy || p.published || !SameEntry(h, p.selection.host) || !sameCanonicalSelectedNames(names, p.selection.names) {
+	if p.closed || p.aborting || p.retired || p.busy || p.published || !SameEntry(h, p.selection.host) || !sameCanonicalSelectedNames(names, p.selection.names) {
 		p.mu.Unlock()
 		return nil, grantOperationError()
 	}
@@ -296,24 +316,30 @@ func (r *GrantRequest) Close() error {
 		return nil
 	}
 	r.mu.Lock()
-	p := r.newSecrets
+	p, operation := r.newSecrets, r.preparationSettings
 	r.mu.Unlock()
-	if p == nil {
-		return nil
+	if p != nil {
+		p.mu.Lock()
+		defer p.mu.Unlock()
+		if p.closed {
+			return nil
+		}
+		if p.busy {
+			return agentModeResourceError()
+		}
 	}
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if p.closed {
-		return nil
+	if operation != nil {
+		if err := operation.Close(); err != nil {
+			return err
+		}
 	}
-	if p.busy {
-		return agentModeResourceError()
+	r.mu.Lock()
+	r.preparationClosed = true
+	r.mu.Unlock()
+	if p != nil {
+		p.closed = true
+		p.values = nil
 	}
-	if err := p.operation.Close(); err != nil {
-		return err
-	}
-	p.closed = true
-	p.values = nil
 	return nil
 }
 
@@ -346,7 +372,7 @@ func newPlanOf(ctx context.Context) *newSecretPlan {
 func (p *newSecretPlan) beginPublication() error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if p.closed || p.busy || p.published {
+	if p.closed || p.aborting || p.retired || p.busy || p.published {
 		return grantOperationError()
 	}
 	p.busy = true

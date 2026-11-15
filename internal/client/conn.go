@@ -179,7 +179,13 @@ func (c *Conn) watchProcess() {
 // closeAgentTransport interrupts only this connection's owned process and
 // pipes. A link reader can call it without recursively joining itself.
 func (c *Conn) closeAgentTransport() error {
-	c.agentStopTime.Do(func() { c.agentStoppedAt = time.Now() })
+	c.agentStopTime.Do(func() {
+		at := time.Now()
+		if source, ok := c.proc.(*sshProc); ok {
+			at = source.revokeAgentAt(at)
+		}
+		c.agentStoppedAt = at
+	})
 	c.kill()
 	if output, ok := c.proc.Stdout().(io.Closer); ok {
 		_ = output.Close()

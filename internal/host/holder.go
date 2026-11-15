@@ -20,6 +20,7 @@ import (
 	"github.com/iamlakshya/simstim/internal/agents"
 	"github.com/iamlakshya/simstim/internal/brand"
 	"github.com/iamlakshya/simstim/internal/diag"
+	"github.com/iamlakshya/simstim/internal/guestpty"
 	"github.com/iamlakshya/simstim/internal/paths"
 	"github.com/iamlakshya/simstim/internal/proto"
 	"github.com/iamlakshya/simstim/internal/ring"
@@ -58,12 +59,15 @@ func (c *hclient) close() {
 
 // Holder owns one session: its PTY, output ring, socket and manifest.
 type Holder struct {
-	id   string
-	log  *slog.Logger
-	ln   net.Listener
-	ptmx *os.File
-	fd   int
-	cmd  *exec.Cmd
+	guest  *GuestHolder
+	ev     *guestEvents
+	vmTerm *guestpty.Terminal
+	id     string
+	log    *slog.Logger
+	ln     net.Listener
+	ptmx   *os.File
+	fd     int
+	cmd    *exec.Cmd
 	// hookLn is the hook socket's listener. peerCheck is true when the
 	// holder checks where each peer runs (holder_peer.go).
 	hookLn    net.Listener
@@ -131,6 +135,9 @@ type Holder struct {
 func RunHolder(id string) error {
 	if !validID(id) {
 		return UserError("not_found", "the holder needs a valid session ID", "List sessions to find its ID.")
+	}
+	if files, guestMode := guestHolder(); guestMode {
+		return runGuestHolder(id, files)
 	}
 	releaseLock, err := acquireHolderLock(id)
 	if err != nil {
@@ -208,6 +215,9 @@ func RunHolder(id string) error {
 }
 
 func (h *Holder) start() error {
+	if h.vmTerm != nil {
+		return h.startVMTerminal()
+	}
 	m := h.m
 	if len(m.Agent.Argv) == 0 {
 		return errors.New("no command to run")
@@ -274,7 +284,7 @@ func (h *Holder) readLoop() {
 	defer close(h.readDone)
 	buf := make([]byte, 64<<10)
 	for {
-		n, err := h.ptmx.Read(buf)
+		n, err := h.readPTY(buf)
 		if n > 0 {
 			h.output(buf[:n])
 		}
@@ -332,8 +342,17 @@ func (h *Holder) output(data []byte) {
 }
 
 func (h *Holder) waitLoop() {
-	err := h.cmd.Wait()
-	newKills, snap := h.reap()
+	var err error
+	var remote proto.Ended
+	if h.vmTerm != nil {
+		remote, err = h.vmTerm.Wait()
+	} else {
+		err = h.cmd.Wait()
+	}
+	newKills, snap := false, int64(0)
+	if h.vmTerm == nil {
+		newKills, snap = h.reap()
+	}
 	if snap > 0 {
 		h.goSnapshot(snap)
 	}
@@ -345,6 +364,12 @@ func (h *Holder) waitLoop() {
 	case <-time.After(time.Second):
 	}
 	ended, killed := endOf(err)
+	if h.vmTerm != nil {
+		ended = remote
+		if err != nil {
+			ended.ExitCode = 125
+		}
+	}
 	// New kills and a SIGKILL: the cap stopped the agent. New kills without
 	// one: it stopped other processes, which no tick has claimed yet.
 	ended.OOM = killed && newKills
@@ -353,6 +378,7 @@ func (h *Holder) waitLoop() {
 	h.mu.Lock()
 	h.exited = true
 	h.ended = ended
+	h.ev.ended(h.id, ended)
 	if h.stopping {
 		// The holder stopped the agent because the system is stopping: keep
 		// the session's state, so it is restored after the restart.

@@ -36,17 +36,17 @@ func generatedHostTransportConn(h Host, hostID string, features ...string) *Conn
 		route: route{t: &hostStateGeneratedTransport{}}, done: make(chan struct{})}
 }
 
-func bindGeneratedHostStateFixture(t *testing.T, ctx context.Context, h Host, hostID string) *Conn {
+func bindGeneratedHostStateFixture(t *testing.T, ctx context.Context, h Host, hostID string, features ...string) *Conn {
 	t.Helper()
 	o, _ := ctx.Value(hostStateObservationKey{}).(*HostStateObservation)
 	held, _ := ctx.Value(heldKey{h.Name}).(*heldLock)
 	if o == nil || held == nil {
 		t.Fatal("generated stamp fixture needs the actual native state/OP scope")
 	}
-	c := generatedHostTransportConn(h, hostID)
+	c := generatedHostTransportConn(h, hostID, features...)
 	stamp := &hostTransportStamp{kind: hostTransportSaved, host: o.prospective, source: o.source,
 		stateDir: StateDir(), hostsPath: hostsPath(), parent: held.native.parent, op: held.native.reference,
-		conn: c, proc: c.proc, transport: c.route.t, hostID: hostID}
+		conn: c, proc: c.proc, transport: c.route.t, hostID: hostID, features: append([]string(nil), features...)}
 	if o.role == hostStateRegistration {
 		stamp.kind, stamp.registration = hostTransportRegistration, o
 	}
@@ -55,4 +55,24 @@ func bindGeneratedHostStateFixture(t *testing.T, ctx context.Context, h Host, ho
 		t.Fatal(err)
 	}
 	return c
+}
+
+// This is generated lower state/transport provenance, deliberately NOT a
+// native SSH/crypto proof. The channel fixtures already provide a verified
+// token only to isolate publication, revocation and byte/lifetime behaviour.
+func generatedAgentChannelParent(t *testing.T, ctx context.Context, h Host, channel *Conn) *Conn {
+	t.Helper()
+	owned, unlock, err := LockHost(ctx, h.Name, "channel parent fixture")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer unlock()
+	observation, err := ObserveHostStateContext(owned, h, channel.HostID())
+	if err != nil {
+		t.Fatal(err)
+	}
+	owned = WithHostStateObservation(owned, observation)
+	parent := bindGeneratedHostStateFixture(t, owned, h, channel.HostID(), channel.Features...)
+	t.Cleanup(func() { parent.fail(ErrClosed) })
+	return parent
 }

@@ -7,12 +7,15 @@ import (
 
 type dockerSourceBirthKey struct{}
 type dockerSourceBirth struct {
-	ctx     context.Context
-	scope   *client.HostCreationSourceScope
-	request client.HostCreationRequest
-	locator *dockerSourceLocator
-	runID   string
-	result  client.Host
+	ctx       context.Context
+	scope     *client.HostCreationSourceScope
+	request   client.HostCreationRequest
+	locator   *dockerSourceLocator
+	runID     string
+	result    client.Host
+	attempted bool
+	partial   client.Host
+	metadata  *client.ProviderSourceMetadata
 }
 
 func init() {
@@ -36,6 +39,9 @@ func observeSourceBirth(ctx context.Context, scope *client.HostCreationSourceSco
 		return nil, sourceUnknown()
 	}
 	if err := scope.CheckContext(ctx); err != nil {
+		return nil, err
+	}
+	if err := frame.metadata.Revalidate(ctx); err != nil {
 		return nil, err
 	}
 	if err := frame.locator.pin.Revalidate(); err != nil {

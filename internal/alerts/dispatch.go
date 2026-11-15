@@ -119,6 +119,7 @@ type Dispatcher struct {
 
 	mu      sync.Mutex
 	closed  bool
+	events  eventBuffer
 	sent    map[string]time.Time // when each kind last went out
 	pending func() bool          // stops the waiting needs_input
 }
@@ -153,6 +154,7 @@ func (d *Dispatcher) Notify(ev Event) {
 	}
 	ev.at = d.o.Clock.Now()
 	ev.gen = d.gen.Load()
+	d.publishEvent(ev)
 	select {
 	case d.in <- ev:
 	default:
@@ -184,6 +186,7 @@ func (d *Dispatcher) Close(wait time.Duration) {
 	close(d.quit)
 	d.mu.Lock()
 	d.closed = true
+	d.closeEventsLocked()
 	if d.pending != nil {
 		d.pending()
 	}

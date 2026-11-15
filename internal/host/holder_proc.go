@@ -9,8 +9,6 @@ import (
 	"strings"
 	"syscall"
 	"time"
-
-	"github.com/iamlakshya/simstim/internal/brand"
 )
 
 // kill stops the agent's whole process group, then the holder.
@@ -23,7 +21,10 @@ func (h *Holder) stop(reason string, system bool) {
 	exited := h.exited
 	h.stopping = system
 	h.mu.Unlock()
-	if !exited && h.cmd != nil && h.cmd.Process != nil {
+	if !exited && h.vmTerm != nil {
+		h.stopVMTerminal()
+	}
+	if !exited && h.vmTerm == nil && h.cmd != nil && h.cmd.Process != nil {
 		pid := h.cmd.Process.Pid
 		_ = syscall.Kill(-pid, syscall.SIGHUP)
 		deadline := time.Now().Add(3 * time.Second)
@@ -125,8 +126,14 @@ func (h *Holder) write(c savedCopy, last bool) (bool, error) {
 		c = h.copyForSave()
 		h.mu.Unlock()
 	}
-	if err := c.m.Save(); err != nil {
-		return true, err
+	var saveErr error
+	if h.guest != nil {
+		saveErr = c.m.SaveTo(h.guest.Manifest)
+	} else {
+		saveErr = c.m.Save()
+	}
+	if saveErr != nil {
+		return true, saveErr
 	}
 	h.saved = c.n
 	return true, nil
@@ -135,6 +142,9 @@ func (h *Holder) write(c savedCopy, last bool) (bool, error) {
 // takeUnit records the unit that the holder runs in, when it knows one
 // (holderUnit), in its manifest.
 func (h *Holder) takeUnit() {
+	if h.guest != nil {
+		return
+	}
 	if u := holderUnit(h.id); u != "" {
 		h.m.Run.Unit = u
 	}
@@ -237,11 +247,10 @@ const snapshotLines = 5000
 // startVT starts the shadow terminal that sits next to this binary. Without it
 // the holder still works: new clients get the raw ring instead of a snapshot.
 func (h *Holder) startVT() {
-	exe, err := os.Executable()
+	path, err := h.vtPath()
 	if err != nil {
 		return
 	}
-	path := filepath.Join(filepath.Dir(exe), brand.VTBinary)
 	if _, err := os.Stat(path); err != nil {
 		h.log.Info("no shadow terminal, new clients get the raw output", "path", path)
 		return
@@ -249,7 +258,7 @@ func (h *Holder) startVT() {
 	h.ptyOut = make(chan []byte, 256)
 	go func() {
 		for b := range h.ptyOut {
-			_, _ = h.ptmx.Write(b)
+			_, _ = h.writePTY(b)
 		}
 	}()
 	h.mu.Lock()

@@ -71,7 +71,7 @@ func pinRoute(ctx context.Context, h Host, t Transport, interactive bool) error 
 	if o, ok := ctx.Value(pinKey{}).(*PinOptions); ok && o != nil {
 		return pinAsAsked(ctx, s.Host, o)
 	}
-	return pinSaved(ctx, s.Host, h.Machine != nil, interactive)
+	return pinSaved(s.policyContext(ctx), s.Host, h, interactive)
 }
 
 // pinAsAsked pins h's key as o says. A pin that h has already stays,
@@ -113,7 +113,8 @@ func pinAsAsked(ctx context.Context, h Host, o *PinOptions) error {
 // such as an attach's reconnect, writes nothing to the terminal.
 // h is the SSH route; original is the saved entry that selected that route.
 // A provider's target does not replace the machine's saved CAS identity.
-func pinSaved(ctx context.Context, h Host, made, interactive bool) error {
+func pinSaved(ctx context.Context, h, original Host, interactive bool) error {
+	made := original.Machine != nil
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -164,7 +165,7 @@ func pinSaved(ctx context.Context, h Host, made, interactive bool) error {
 			mode = FirstUseRefuse
 		}
 	}
-	ctx, endMutation, err := holdSavedPinMutation(ctx, h, "pin the saved host key")
+	ctx, endMutation, err := holdSavedPinMutation(ctx, original, "pin the saved host key")
 	if err != nil {
 		return err
 	}
@@ -183,7 +184,7 @@ func pinSaved(ctx context.Context, h Host, made, interactive bool) error {
 	case err != nil:
 		return err
 	}
-	if err := recordPinnedKey(ctx, h, p.Fingerprint); err != nil {
+	if err := recordPinnedKey(ctx, original, p.Fingerprint); err != nil {
 		return err
 	}
 	if p.Source != PinKept {
