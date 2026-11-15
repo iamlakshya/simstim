@@ -19,6 +19,9 @@ import (
 // Feature is required before fetching values or publishing input bytes.
 const Feature = "session-inputs-v1"
 
+// PrimaryPolicyFeature gates exact selected-primary policy verification, including absence.
+const PrimaryPolicyFeature = "input-primary-policy-v1"
+
 // HelperMode is a closed current-helper mode, never an arbitrary command.
 const HelperMode = "wall-input-v1"
 
@@ -50,6 +53,8 @@ type Header struct {
 // Control contains only trusted supervisor choices. The actual encoded ctl
 // request must fit its existing64KiB bound before the helper is launched.
 type Control struct {
+	// PrimaryRepository comes only from the protected original FilePlan.
+	PrimaryRepository string `json:"primary_repository,omitempty"`
 	Scope
 	CopyMax   int64    `json:"copy_max"`
 	SeedMax   int64    `json:"seed_max"`

@@ -44,6 +44,8 @@ Installed by the client into `~/.local/share/simstim/bin/<version>/`, with a `cu
 | `doctor` | Checks linger, cgroups, terminfo, agents on `PATH` and the disk, and prints fixes | Seconds |
 | `restore [--all]` | Respawns sessions after a reboot with each agent's resume command. A user unit, `<name>-restore.service`, runs it at boot. | Run at boot, then exit |
 
+The bridge's sandbox capability request gathers fresh host facts and probes the registered drivers. A driver's `can_prepare` reports verified construction inputs. Its `ok` field reports compatibility readiness. Starting a VM still needs the original operation and VM Need.
+
 ### 2.3 Session status
 
 The process exit sets the ended state. While the agent runs, `Holder.agentState` checks these signals in order; the first match wins:
@@ -119,6 +121,20 @@ Codex's launch, resume and continue commands include `--no-daemon`, so its work 
 
 5. The holder forks the PTY at the client's size and runs the agent's `launch_argv`. It starts the vt child, and opens its sockets.
 6. The client attaches at once (3.3).
+
+Walled starts keep one operation lock from the reserved session through the
+ready acknowledgement. The parent lends that same open description on the
+early control connection. Start delivery uses that connection too. Automatic
+restore uses the same handoff and preserves its selected controller and members.
+The borrower closes its own copy after the durable ready record and port
+reconciliation. The parent closes its copy after the acknowledgement.
+
+The service manager path uses its native private socket. Startup follows the
+returned job, first invocation and live helper handle. A managed helper uses
+`Type=exec` with literal arguments on supported managers, including systemd 252.
+Without a user manager, the original child object owns the helper lifetime.
+Pending cancellation joins that original owner before cleanup can remove the
+session. Uncertain cleanup retains the owner, lock and storage.
 
 ### 3.3 Attach
 
@@ -342,3 +358,18 @@ For a host you add yourself, if OpenSSH can reach it, simstim can. [The connecti
 | VS Code Remote, Zed | — | The login-shell environment resolution. Uploading a versioned server over SSH. |
 
 Policy requests use the host bridge and the session's supervisor. A helper upgrade does not upgrade a running supervisor. Stop and resume a session before adding HTTP method constraints if its supervisor lacks that feature. Programs inside a session cannot use the bridge to read or change sandbox policies.
+
+A walled supervisor owns its native holder lease and opens its early control socket before constructing a runtime. The original outside operation loan and selected start envelope travel on one connection. A VM prepare then binds the actual Start connection to the original protected Need and accepts one exact guest echo. Saved identifiers and expected configuration are data, and cannot issue that operation.
+
+A dedicated command or input continuation starts from its accepted parent
+connection. It keeps that connection's original membership Source and route.
+Its network handshake holds no host publication lock. Short checks before
+startup and after the hello require the same Source, host identity and native
+state references. A later saved host entry cannot replace those facts.
+
+A managed native SSH transport retains its provider's read-only instance and
+configuration pins through the actual command wait. It remains an SSH transport
+for key pinning. This extra restriction grants no membership, cleanup or root
+authority. Config readers share the same active native scope; an ended scope
+cannot open a replacement source. The derived Lima locator name is checked
+against the same complete local secret namespace before use.

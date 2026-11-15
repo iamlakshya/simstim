@@ -60,10 +60,16 @@ type Event struct {
 	Signal   string  `json:"signal,omitempty"`
 	// Reason identifies the cause of a sandbox or health event.
 	Reason string `json:"reason,omitempty"`
+	// ExitFrom marks the producer of exit details, separately from native facts.
+	ExitFrom string `json:"exit_from,omitempty"`
+	// Claimed is true when the event itself is a guest claim.
+	Claimed bool `json:"claimed,omitempty"`
 	// Detail is the agent's question. It is sent only when the config turns
 	// it on, because it can hold code.
-	Detail  string `json:"detail,omitempty"`
-	Summary string `json:"summary"`
+	Detail string `json:"detail,omitempty"`
+	// DetailFrom marks who wrote Detail. It never grants authority.
+	DetailFrom string `json:"detail_from,omitempty"`
+	Summary    string `json:"summary"`
 
 	// Turn is how long the agent worked, for turn_done. It is not sent.
 	Turn time.Duration `json:"-"`
@@ -74,6 +80,7 @@ type Event struct {
 	at   time.Time // when the holder raised it
 	gen  uint64    // the session's state generation when it was raised
 	test bool      // raised by the test command
+	seq  uint64    // this dispatcher's accepted-notification sequence
 }
 
 // ends reports whether the event is the session's end: exited, failed, or an
@@ -91,7 +98,11 @@ func (ev Event) Text() string {
 	if ev.Detail == "" {
 		return ev.Summary
 	}
-	return ev.Summary + "\n\n" + ev.Detail
+	detail := ev.Detail
+	if ev.DetailFrom == FromGuest {
+		detail = "The sandbox says:\n" + detail
+	}
+	return ev.Summary + "\n\n" + detail
 }
 
 // summary builds the event's one-line human description, such as
@@ -122,6 +133,13 @@ func summary(ev Event) string {
 		if ev.Usage != "" {
 			s += " (" + ev.Usage + ")"
 		}
+	case DiskFull:
+		s = on + " stopped for disk protection"
+		if ev.Usage != "" {
+			s += " (" + ev.Usage + ")"
+		}
+	case LinkSilent:
+		s = on + " has a silent guest init"
 	case EgressBlocked:
 		s = on + " was blocked by its network policy"
 	case Started:
@@ -146,6 +164,9 @@ func summary(ev Event) string {
 	default:
 		s = on + ": " + ev.Event
 	}
+	if ev.Claimed {
+		s += " (claimed)"
+	}
 	if ev.test {
 		s = "Test: " + s
 	}
@@ -153,11 +174,15 @@ func summary(ev Event) string {
 }
 
 func exitText(ev Event) string {
+	claimed := ""
+	if ev.ExitFrom == FromGuest {
+		claimed = "claimed "
+	}
 	switch {
 	case ev.Signal != "":
-		return "signal: " + ev.Signal
+		return claimed + "signal: " + ev.Signal
 	case ev.ExitCode != nil:
-		return "exit " + strconv.Itoa(*ev.ExitCode)
+		return claimed + "exit " + strconv.Itoa(*ev.ExitCode)
 	}
 	return "no exit code"
 }
@@ -192,6 +217,15 @@ func (ev Event) env() []string {
 	}
 	if ev.ExitCode != nil {
 		vars = append(vars, [2]string{"EXIT_CODE", strconv.Itoa(*ev.ExitCode)})
+	}
+	if ev.ExitFrom != "" {
+		vars = append(vars, [2]string{"EXIT_FROM", ev.ExitFrom})
+	}
+	if ev.DetailFrom != "" {
+		vars = append(vars, [2]string{"DETAIL_FROM", ev.DetailFrom})
+	}
+	if ev.Claimed {
+		vars = append(vars, [2]string{"CLAIMED", "1"})
 	}
 	out := make([]string, 0, len(vars))
 	for _, kv := range vars {

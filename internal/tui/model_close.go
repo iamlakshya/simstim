@@ -34,8 +34,8 @@ func (m *Model) close(ctx context.Context) {
 	}
 	m.stopBundle()
 	m.remember()()
+	m.grantOwners.releaseAll(ctx)
 	m.conns.closeAll()
-	m.grantOwners.releaseAll()
 	m.conns.finishCleanup()
 }
 

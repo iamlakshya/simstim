@@ -26,6 +26,10 @@ const secretsWait = 30 * time.Second
 // session's secrets, and returns them. It returns nil when the session has
 // none, when restore started it, after the wait, and once ctx ends.
 func (s *Supervisor) awaitSecrets(ctx context.Context) map[string]string {
+	if s.originalStart!=nil {
+		if s.m.Inputs!=nil && !host.WasRestored(s.m) && s.startupInput==nil{return s.awaitInputStartup(ctx)}
+		values:=s.originalStart.values;s.originalStart.values=nil;return values
+	}
 	if s.m.Inputs != nil && !host.WasRestored(s.m) {
 		return s.awaitInputStartup(ctx)
 	}

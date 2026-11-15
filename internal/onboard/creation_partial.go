@@ -31,7 +31,7 @@ func partialCreationResult(ctx context.Context, actual client.Host, cause error)
 	if actual.Machine != nil {
 		what = fmt.Sprintf("%s resource %q for host %q", client.CleanLine(actual.Machine.Provider), client.CleanLine(actual.Machine.ID), client.CleanLine(actual.Name))
 	}
-	out.Msg = fmt.Sprintf("%v; the provider returned %s, which may remain. Nothing was saved, bound or automatically deleted", cause, what)
+	out.Msg = fmt.Sprintf("%v; the provider returned %s, which may remain. Saving and automatic deletion have not been confirmed", cause, what)
 	if ctx.Err() != nil {
 		out.Msg += "; the creation caller also ended"
 	}

@@ -78,6 +78,22 @@ func resolveProviderEnvironment(name string, environment []string) (string, erro
 	return "", &exec.Error{Name: name, Err: exec.ErrNotFound}
 }
 
+// CommandEnvironment prepares a streaming provider command through the SAME
+// native resolver and explicit environment used by metadata and creation. The
+// caller owns source admission, command IO, cancellation, wait and cleanup.
+func CommandEnvironment(ctx context.Context, environment []string, name string, args ...string) (*exec.Cmd, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	resolved, err := resolveProviderEnvironment(name, environment)
+	if err != nil {
+		return nil, err
+	}
+	command := exec.CommandContext(ctx, resolved, args...)
+	command.Env = slices.Clone(environment)
+	return command, nil
+}
+
 // runProviderEnvironment is the explicit-environment branch of the SAME
 // provider executor. StartProcess selects its exact resolved native path on
 // Windows too; os/exec's hidden extension search cannot change the selection.

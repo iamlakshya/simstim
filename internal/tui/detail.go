@@ -41,6 +41,7 @@ func (m *Model) sessionDetail(h *hostConn, s client.Session, cw int, withHost bo
 		note = capNote
 	}
 	facts := []string{where, mem, shown(s.ID)}
+	if summary:=forwardSummary(s.Forwards);summary!=""{facts=append(facts,summary)}
 	if s.Task != "" {
 		facts = append(facts, "task: "+shown(s.Task))
 	}
@@ -48,7 +49,7 @@ func (m *Model) sessionDetail(h *hostConn, s client.Session, cw int, withHost bo
 		return detail
 	}
 	empty := func(p string) bool { return p == "" }
-	head := slices.DeleteFunc([]string{where, sessionWallLevel(s), mem}, empty)
+	head := slices.DeleteFunc([]string{where, sessionWallLevel(s), mem, forwardSummary(s.Forwards)}, empty)
 	tail := slices.DeleteFunc([]string{shown(s.ID)}, empty)
 	if !h.loaded {
 		tail = append(tail, "last seen before this run")

@@ -11,7 +11,6 @@ import (
 	"unicode/utf8"
 
 	"github.com/iamlakshya/simstim/internal/agents"
-	"github.com/iamlakshya/simstim/internal/api"
 )
 
 // A request keeps only public capability names after inspection. Its body is
@@ -52,42 +51,7 @@ func (m *modelRequest) require(feature string) {
 }
 
 func (m *modelRequest) refusal(engine *Engine, permit *Permit, mode evalMode) string {
-	if engine.modelGuard(m.request) == nil {
-		return "model path"
-	}
-	features := slices.Clone(m.features)
-	if m.search && engine.preset == api.PresetLocked && !slices.Contains(features, "web_search") {
-		features = append(features, "web_search")
-	}
-	engine.ledger.mu.Lock()
-	defer engine.ledger.mu.Unlock()
-	if !engine.validPermit(permit, mode) {
-		return "model policy"
-	}
-	check := mode
-	if mode == evalReserve {
-		check = evalPrecheck
-	}
-	if permit != nil && permit.committed && check == evalPrecheck {
-		check = evalModelPrecheck
-	}
-	// All required names are checked and acquired under one ledger ownership.
-	// Refusal cannot leave a partial set reserved on the connected permit.
-	for _, feature := range features {
-		if !engine.modelToolAllowedLocked(m.request, feature, permit, check) {
-			return feature
-		}
-	}
-	if mode == evalReserve {
-		reserve := evalReserve
-		if permit != nil && permit.committed {
-			reserve = evalModelReserve
-		}
-		for _, feature := range features {
-			engine.modelToolAllowedLocked(m.request, feature, permit, reserve)
-		}
-	}
-	return ""
+	return engine.admitModelRequest(m, permit, false, mode)
 }
 
 func (m *modelRequest) inspect(body []byte, websocket bool) error {
@@ -98,7 +62,7 @@ func (m *modelRequest) inspect(body []byte, websocket bool) error {
 	}
 	decoder := json.NewDecoder(bytes.NewReader(body))
 	decoder.UseNumber()
-	scan := modelJSONScan{decoder: decoder, request: m}
+	scan := modelJSONScan{decoder: decoder, request: m, websocket: websocket}
 	root, err := scan.value(false, false, 0)
 	if err != nil || root.kind != '{' {
 		return errors.New("invalid model JSON")
@@ -113,17 +77,20 @@ func (m *modelRequest) inspect(body []byte, websocket bool) error {
 }
 
 type modelJSONValue struct {
-	kind      byte
-	text      string
-	typeName  string
-	remote    bool
-	sourceURL bool
-	nonempty  bool
+	kind           byte
+	text           string
+	typeName       string
+	remote         bool
+	unsupportedURI bool
+	hasURL         bool
+	sourceURL      bool
+	nonempty       bool
 }
 
 type modelJSONScan struct {
-	decoder *json.Decoder
-	request *modelRequest
+	decoder   *json.Decoder
+	request   *modelRequest
+	websocket bool
 }
 
 // Token traversal does not materialise a second JSON tree. Object keys are
@@ -136,13 +103,13 @@ func (s *modelJSONScan) value(content, tool bool, depth int) (modelJSONValue, er
 	}
 	switch value := token.(type) {
 	case string:
-		return modelJSONValue{kind: 's', text: value, remote: modelRemoteURL(value), nonempty: value != ""}, nil
+		return modelJSONValue{kind: 's', text: value, remote: modelRemoteURL(value), unsupportedURI: modelUnsupportedURI(value), nonempty: value != ""}, nil
 	case json.Delim:
 		if value == '[' {
 			result := modelJSONValue{kind: '['}
 			for s.decoder.More() {
 				result.nonempty = true
-				if _, err := s.value(content, tool, depth+1); err != nil {
+				if _, err := s.value(content, false, depth+1); err != nil {
 					return modelJSONValue{}, err
 				}
 			}
@@ -155,6 +122,7 @@ func (s *modelJSONScan) value(content, tool bool, depth int) (modelJSONValue, er
 		result := modelJSONValue{kind: '{'}
 		seen := make(map[string]bool)
 		var sourceURL, imageURL, fileURL, hasType, invalidType bool
+		var sourceBad, imageBad, fileBad bool
 		for s.decoder.More() {
 			keyToken, err := s.decoder.Token()
 			if err != nil {
@@ -165,7 +133,15 @@ func (s *modelJSONScan) value(content, tool bool, depth int) (modelJSONValue, er
 				return modelJSONValue{}, errors.New("ambiguous model JSON key")
 			}
 			seen[key], result.nonempty = true, true
-			child, err := s.value(content || depth == 0 && (key == "messages" || key == "input"), depth == 0 && key == "tools", depth+1)
+			if depth == 0 && s.websocket && key == "response" {
+				return modelJSONValue{}, errors.New("unsupported model WebSocket envelope")
+			}
+			var child modelJSONValue
+			if depth == 0 && key == "tools" {
+				child, err = s.tools(depth + 1)
+			} else {
+				child, err = s.value(content || depth == 0 && (key == "messages" || key == "input" || key == "system"), false, depth+1)
+			}
 			if err != nil {
 				return modelJSONValue{}, err
 			}
@@ -178,12 +154,17 @@ func (s *modelJSONScan) value(content, tool bool, depth int) (modelJSONValue, er
 				}
 			case "source":
 				sourceURL = child.sourceURL
+				sourceBad = child.unsupportedURI
 			case "image_url":
 				imageURL = child.remote
+				imageBad = child.unsupportedURI || child.kind != 's' && (child.kind != '{' || !child.hasURL)
 			case "file_url":
 				fileURL = child.remote
+				fileBad = child.unsupportedURI || child.kind != 's' && (child.kind != '{' || !child.hasURL)
 			case "url":
 				result.remote = child.remote
+				result.hasURL = true
+				result.unsupportedURI = child.unsupportedURI || child.kind != 's'
 			case "mcp_servers":
 				if depth == 0 && child.nonempty {
 					s.request.require("mcp")
@@ -195,6 +176,9 @@ func (s *modelJSONScan) value(content, tool bool, depth int) (modelJSONValue, er
 			return modelJSONValue{}, err
 		}
 		result.sourceURL = result.typeName == "url"
+		if content && ((result.typeName == "image" || result.typeName == "document") && sourceBad || (result.typeName == "input_image" || result.typeName == "image_url") && imageBad || result.typeName == "input_file" && fileBad) {
+			return modelJSONValue{}, errors.New("unsupported model content URL")
+		}
 		if content && ((result.typeName == "image" || result.typeName == "document") && sourceURL ||
 			(result.typeName == "input_image" || result.typeName == "image_url") && imageURL || result.typeName == "input_file" && fileURL) {
 			s.request.require("url_content")

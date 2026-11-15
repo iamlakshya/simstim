@@ -1996,7 +1996,7 @@ The rule of this phase: **the laptop holds the digests, the hosts hold the bytes
 ### P7.2 Decoys
 
 - **Goal:** spec 21.7: decoy credential files in the sandbox's home, from data, whose values are tripwires in the egress process (`secret_misuse`, 10.8). Each decoy takes only a form that its tool does not read by default. Each decoy is in the docs, and `[sandbox] decoys = false` (8.3) turns them off. No source measures decoys in a sandbox, but canary keys caught a real CI breach, and worms check the keys that they find ([facts](../research/build-facts.md#7-later-phases)).
-- **Files:** new `internal/guest/decoys.go`, new `internal/guest/decoys.toml` (data), new `internal/supervisor/decoys.go` (the values), `internal/egress/secrets.go` (the tripwires, and the class rule for the decoys' hosts).
+- **Files:** new `internal/guest/decoys.go`, new `internal/proto/decoys.toml` (shared data), new `internal/supervisor/decoys.go` (the values), `internal/egress/secrets.go` (the tripwires, and the class rule for the decoys' hosts).
 - **Acceptance:** a decoy's value sent to any host is refused and raises `secret_misuse`, also on a decoy's host that the policy refuses. The quiet test of spec 21.7 shows that the default image's tools send no decoy by themselves. `[sandbox] decoys = false` writes no decoy.
 - **Tests:** the tests of spec 21.7, with the quiet test and a manual TruffleHog check.
 - **Docs:** `docs/how-to/sandboxes.md` (each decoy), `docs/explanation/security.md`.

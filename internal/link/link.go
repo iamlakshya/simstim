@@ -40,6 +40,7 @@ const (
 	KindRPort  Kind = "rport"  // one connection from the guest to a laptop port
 	KindAgent  Kind = "agent"  // one SSH agent connection from the guest
 	KindSFTP   Kind = "sftp"   // one SFTP session of an editor
+	KindEvents Kind = "events" // one read-only event stream on a dedicated outer carrier
 	KindGet    Kind = "get"    // one file copied out of the guest
 	KindLayer  Kind = "layer"  // the guest's root as a tar stream, for image save
 )

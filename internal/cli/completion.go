@@ -137,7 +137,7 @@ func registerKnownFlags(c *cobra.Command, fs *pflag.FlagSet, alertEvents []strin
 			fn = completeCommaFixed(alertEvents...)
 		case "event":
 			fn = completeFixed(append([]string{alerts.Test}, alertEvents...)...)
-		case "debug-file", "ssh-config", "provider-script":
+		case "debug-file", "ssh-config", "provider-script", "env-file", "seed":
 			fn = completeLocalFiles
 		}
 		if fn != nil {

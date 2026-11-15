@@ -101,7 +101,7 @@ func TestHTTPMethodEncodedRequestValidatesFinalTrailersBeforeEOF(t *testing.T) {
 			}
 		}}
 		guarded := &proxyRequestBody{reader: body, request: request, declared: map[string]bool{"X-Checksum": true}, chunked: true}
-		decoded, _, err := decodeHTTPBody(guarded, "deflate")
+		decoded, _, err := decodeHTTPBody(guarded, http.Header{"Content-Encoding": {"deflate"}})
 		if err != nil {
 			t.Fatal(err)
 		}

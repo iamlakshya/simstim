@@ -70,6 +70,7 @@ func compileRule(r api.Rule) (compiledRule, error) {
 		rCopy.Target = formatCompiledTarget(cr)
 		id = api.RuleID(rCopy)
 	}
+	cr.door = r.Door
 	cr.id = id
 	cr.methods = methods
 	cr.tools = tools

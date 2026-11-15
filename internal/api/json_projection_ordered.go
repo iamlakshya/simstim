@@ -12,11 +12,12 @@ func (p *JSONProjection) OrderedStrings(span JSONSpan) (OrderedJSONStrings, erro
 func (i *OrderedJSONStrings) Next() (JSONSpan, bool, error) { return i.state.next() }
 
 type OrderedJSONFields struct {
-	c        jsonCursor
-	end      int64
-	previous JSONSpan
-	first    bool
-	done     bool
+	c         jsonCursor
+	end       int64
+	previous  JSONSpan
+	first     bool
+	done      bool
+	unordered bool // duplicate/order facts supplied by an actual same-store index
 }
 
 // OrderedFields is an opt-in stored-format rule. Ordinary JSON objects
@@ -58,7 +59,7 @@ func (i *OrderedJSONFields) Next() (JSONField, bool, error) {
 		return JSONField{}, false, err
 	}
 	name := JSONSpan{Start: start, End: i.c.pos}
-	if !i.first {
+	if !i.first && !i.unordered {
 		order, err := i.c.p.CompareStrings(i.previous, name)
 		if err != nil || order >= 0 {
 			if err != nil {

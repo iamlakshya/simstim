@@ -66,12 +66,31 @@ func (s *sandbox) launchRunner(ctx context.Context, files *bootFiles, subuid boo
 	}
 	bootSpec := wall.Spec{ID: s.spec.ID, SessionDir: s.spec.SessionDir, MemoryMax: s.spec.MemoryMax, CPUs: s.spec.CPUs, DiskMax: s.spec.DiskMax, VM: s.spec.VM}
 	plan := runnerPlan{Version: 1, Spec: bootSpec, BootUntil: until, SessionDirect: direct, UIDMode: s.uid}
+	controller, err := newNativeRunnerControl(control, bootSpec)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	var config *protectedBootConfig
+	if s.driver.kind == firecrackerBackend {
+		config, err = prepareFirecrackerConfig(ctx, s.spec)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		defer config.Close()
+	}
 	inherited := []*os.File{files.vmm, files.kernel, files.tools, files.image, files.agents, files.helper, rawChild, controlChild}
 	grants := []jail.FileRuleV1{{FD: 3, Role: jail.FileProgramV1, Mode: 0o111, Access: jail.Read | jail.Exec}}
 	for fd := 4; fd <= 7; fd++ {
 		grants = append(grants, jail.FileRuleV1{FD: fd, Role: jail.FileDataV1, Mode: 0o444, Access: jail.Read})
 	}
-	command, err := jail.Command(ctx, jail.Spec{Argv: []string{"/proc/self/fd/8", "chv-run"}, Files: inherited, FileRulesV1: grants, Subuid: subuid, Net: jail.NetNone, Seccomp: jail.ProfileVMM, Binds: []jail.Bind{{Path: vmDataDir(s.spec), Write: true}, {Path: "/dev/kvm", Write: true}, {Path: "/dev/urandom"}}, Rules: []jail.PathRule{{Path: vmDataDir(s.spec), Access: jail.Connect}}})
+	binds := []jail.Bind{{Path: vmDataDir(s.spec), Write: true}, {Path: "/dev/kvm", Write: true}, {Path: "/dev/urandom"}}
+	if config != nil {
+		if err := config.check(); err != nil {
+			return nil, nil, nil, err
+		}
+		binds = append(binds, jail.Bind{Path: config.path})
+	}
+	command, err := jail.Command(ctx, jail.Spec{Argv: []string{"/proc/self/fd/8", "chv-run"}, Files: inherited, FileRulesV1: grants, Subuid: subuid, Net: jail.NetNone, Seccomp: jail.ProfileVMM, Binds: binds, Rules: []jail.PathRule{{Path: vmDataDir(s.spec), Access: jail.Connect}}})
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -106,5 +125,5 @@ func (s *sandbox) launchRunner(ctx context.Context, files *bootFiles, subuid boo
 	}
 	stdin.Close()
 	failed = false
-	return raw, newRunnerControl(control), command, nil
+	return raw, controller, command, nil
 }

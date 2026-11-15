@@ -267,8 +267,10 @@ func TestScriptingDocsDescribeTerminalCheckFirst(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
-		"Without a terminal and without `--detach`, `new` fails with exit code 2 first",
-		"`new` and `resume` without `--detach` attach too, so they fail in the same way, before any lookup, and start or resume nothing.",
+		"Without a terminal and without `--detach`, `new` without a command fails with exit code 2 first",
+		"`new` without a command and `resume` without `--detach` attach too, so they fail in the same way, before any lookup, and start or resume nothing.",
+		"A command after `new --` runs through sandbox `exec` without a terminal and returns its status.",
+		"`new --count` also starts without attaching.",
 	} {
 		if !strings.Contains(string(scripting), want) {
 			t.Errorf("docs/how-to/scripting.md missing %q", want)

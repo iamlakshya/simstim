@@ -36,9 +36,13 @@ func policyAddCmd(allow bool) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			canonical, _, err := grant.CheckHost(target)
-			if err != nil {
-				return policyUsage("invalid network target: "+client.CleanLine(err.Error()), "Pass a host, IP address or CIDR, with an optional port or path.", "bad_target")
+			canonical:=target
+			if door==api.DoorPort {
+				if _,err:=api.ParsePortTarget(target);err!=nil{return policyUsage("invalid exact port","Name one decimal port from 1 to 65535.","bad_port")}
+				if layer.in=="" || once || len(tools)!=0 || !allow && cmd.Flags().Changed("for"){return policyUsage("port rules need a supported session scope","Use --in with one exact port, without --once or --tools.","bad_port")}
+			}else{
+				canonical,_,err=grant.CheckHost(target)
+				if err!=nil{return policyUsage("invalid network target: "+client.CleanLine(err.Error()),"Pass a host, IP address or CIDR, with an optional port or path.","bad_target")}
 			}
 			selectedTools, err := api.CanonicalModelTools(tools)
 			if err != nil {
@@ -93,7 +97,7 @@ func policyAddCmd(allow bool) *cobra.Command {
 			}
 			return withSession(cmd, layer.in, func(ctx context.Context, h client.Host, c *client.Conn, s *client.Session) error {
 				if allow {
-					if err := grantQuestions(cmd, func(ctx context.Context) error { return c.CheckPolicyGrant(ctx, s.ID, canonical) }); err != nil {
+					if err := grantQuestions(cmd, func(ctx context.Context) error { if door==api.DoorPort{return c.CheckPortPolicyGrant(ctx,s.ID)};return c.CheckPolicyGrant(ctx, s.ID, canonical) }); err != nil {
 						return err
 					}
 				}

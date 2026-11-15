@@ -50,6 +50,27 @@ func uniquePreviousMachineSource(hosts []Host, name string) (*Host, error) {
 // Bulk replacement has no creation-token consumer. A public copied Machine
 // DTO may preserve exact original provenance, never introduce or retarget it.
 func checkGenericHostMachineSources(before, after []Host) error {
+	counts := make(map[string]int, len(after))
+	relevant := make(map[string]bool)
+	for i := range before {
+		if hostMachineSource(&before[i]) != nil {
+			relevant[before[i].Name] = true
+		}
+	}
+	for i := range after {
+		counts[after[i].Name]++
+		if hostMachineSource(&after[i]) != nil {
+			relevant[after[i].Name] = true
+		}
+	}
+	for name := range relevant {
+		if counts[name] == 0 {
+			return hostStateRemovalError("bulk replacement cannot omit a source-bearing host; use its actual forget transaction")
+		}
+		if counts[name] != 1 {
+			return hostStateRemovalError("bulk replacement cannot duplicate a machine-source host name")
+		}
+	}
 	for i := range after {
 		previous, err := uniquePreviousMachineSource(before, after[i].Name)
 		if err != nil {

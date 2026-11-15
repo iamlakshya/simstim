@@ -34,7 +34,7 @@ var (
 
 // startNew starts a VM that Create made. When Lima refuses nested
 // virtualisation, it turns nesting off and starts the VM once more. If that
-// fails, it deletes the VM, which no host names yet.
+// fails, it retains the VM and reports the original locator.
 func startNew(ctx context.Context, out io.Writer, host, inst string) error {
 	fmt.Fprintf(out, "  Starting it: limactl start %s\n", inst)
 	err := startVM(ctx, inst)

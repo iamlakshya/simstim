@@ -79,6 +79,11 @@ func find(ctx context.Context, name string) (*instance, error) {
 	if err != nil {
 		return nil, err
 	}
+	if saved, _ := ctx.Value(limaSavedSourceKey{}).(*limaSavedSource); saved != nil && in != nil {
+		if saved.ctx != ctx || saved.owner == nil || in.Name != saved.owner.inst || in.Dir != saved.owner.source.Config.Path || in.SSHConfigFile != filepath.Join(in.Dir, "ssh.config") {
+			return nil, plainSourceUnknown()
+		}
+	}
 	if frame, _ := ctx.Value(limaSourceBirthKey{}).(*limaSourceBirth); frame != nil && in != nil {
 		if frame.ctx != ctx || frame.locator == nil || in.Dir != filepath.Join(frame.locator.source.Path, name) {
 			return nil, plainSourceUnknown()
@@ -276,33 +281,25 @@ func discard(ctx context.Context, inst, problem, hint string) error {
 // sshAlias is the Host that Lima's ssh.config defines for an instance.
 func sshAlias(inst string) string { return "lima-" + inst }
 
-// Open returns the lifecycle of a VM this provider made.
+// Open returns the lifecycle bound to the original instance directory.
 func (Provider) Open(h client.Host) (client.Lifecycle, error) {
-	return &vm{h: h, inst: h.Machine.ID}, nil
+	if h.Machine == nil || h.Machine.Provider != "lima" {
+		return nil, plainSourceUnknown()
+	}
+	source, err := client.NormaliseMachineSource("lima", h.Machine.Source)
+	if err != nil {
+		return nil, err
+	}
+	if source.ResourceID != h.Machine.ID || filepath.Base(source.Config.Path) != source.ResourceID {
+		return nil, plainSourceUnknown()
+	}
+	return &vm{h: freezeBirthHost(h), inst: source.ResourceID, source: source}, nil
 }
 
 type vm struct {
-	h    client.Host
-	inst string
-	// last is what Status last read while the VM was running, so that
-	// Transport need not ask again.
-	last *instance
-}
-
-// Status maps Lima's status to the client's machine states.
-func (v *vm) Status(ctx context.Context) (string, error) {
-	in, err := find(ctx, v.inst)
-	if err != nil {
-		return "", err
-	}
-	if in == nil {
-		return client.MachineMissing, nil
-	}
-	st := state(in.Status)
-	if st == client.MachineRunning {
-		v.last = in
-	}
-	return st, nil
+	h      client.Host
+	inst   string
+	source *client.MachineSourceProvenance
 }
 
 func state(s string) string {
@@ -311,46 +308,7 @@ func state(s string) string {
 		return client.MachineRunning
 	case "Installing", "":
 		return client.MachineStarting
-	default: // Stopped, Broken, Uninitialized: start tries again
+	default:
 		return client.MachineStopped
 	}
-}
-
-// Start boots the VM and returns when Lima says SSH works.
-func (v *vm) Start(ctx context.Context) error {
-	return startVM(ctx, v.inst)
-}
-
-// Stop shuts the VM down. Its disk stays.
-func (v *vm) Stop(ctx context.Context) error {
-	_, err := limaExec(ctx, "stop", v.inst)
-	return err
-}
-
-// Destroy deletes the VM and its disk.
-func (v *vm) Destroy(ctx context.Context) error {
-	in, err := find(ctx, v.inst)
-	if err != nil || in == nil {
-		return err
-	}
-	_, err = limaExec(ctx, "delete", "--force", v.inst)
-	return err
-}
-
-// Transport is the system ssh, through the client's generated config, which
-// includes Lima's ssh.config. The config is read again on each start,
-// because Lima may pick a new local port.
-func (v *vm) Transport(ctx context.Context, interactive bool) (client.Transport, error) {
-	h := v.h
-	in := v.last
-	if in == nil {
-		in, _ = find(ctx, v.inst)
-	}
-	if in != nil && in.SSHConfigFile != "" {
-		h.SSHConfig = in.SSHConfigFile
-	}
-	if h.SSH == "" {
-		h.SSH = sshAlias(v.inst)
-	}
-	return &client.SSH{Host: h, Interactive: interactive}, nil
 }

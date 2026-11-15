@@ -38,7 +38,8 @@ func (s *Server) admitSecretHTTPRequest(scope *originRequest, req *http.Request,
 	}
 	kind, _, _ := httpClass(scope.request.Host)
 	mode := evalReserve
-	if kind == "model" {
+	_, push := gitPushHTTPRoute(scope.request)
+	if kind == "model" || push {
 		mode = evalPrecheck
 	} // The complete body is checked before any model-host lease is reserved.
 	decision = engine.evaluateModelNetwork(scope.request, scope.permit, mode)

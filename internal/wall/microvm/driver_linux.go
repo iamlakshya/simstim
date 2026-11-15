@@ -42,12 +42,32 @@ type Options struct {
 	Mkfs       string
 }
 
-// Driver constructs Cloud Hypervisor walls. Registration describes available
+// Driver constructs one selected microvm backend. Registration describes available
 // code; Probe separately requires verified runtime and successful boot evidence.
-type Driver struct{ options Options }
+type Driver struct {
+	options Options
+	kind    backendKind
+}
 
 // New binds real host dependencies without creating a VM or changing a host.
 func New(options Options) (*Driver, error) {
+	return newDriver(options, cloudHypervisorBackend)
+}
+
+// NewForDriver selects one compiled backend. It cannot choose runtime bytes,
+// grant admission or substitute host inventory for the original client plan.
+func NewForDriver(name string, options Options) (*Driver, error) {
+	switch name {
+	case "chv":
+		return newDriver(options, cloudHypervisorBackend)
+	case "firecracker":
+		return newDriver(options, firecrackerBackend)
+	default:
+		return nil, fmt.Errorf("the microvm backend %q is unknown", name)
+	}
+}
+
+func newDriver(options Options, kind backendKind) (*Driver, error) {
 	if options.Facts == nil {
 		return nil, fmt.Errorf("the microvm driver needs canonical host capability facts")
 	}
@@ -70,18 +90,18 @@ func New(options Options) (*Driver, error) {
 		options.Images = paths.ImagesDir()
 	}
 	if options.Evidence == "" {
-		options.Evidence = filepath.Join(paths.StateDir(), "chv-boot")
+		options.Evidence = filepath.Join(paths.StateDir(), kind.name()+"-boot")
 	}
 	for _, path := range []string{options.Artefacts, options.Images, options.Evidence} {
 		if !filepath.IsAbs(path) || filepath.Clean(path) != path {
 			return nil, fmt.Errorf("microvm host dependencies need absolute clean paths")
 		}
 	}
-	return &Driver{options: options}, nil
+	return &Driver{options: options, kind: kind}, nil
 }
 
-// Name is the stable Cloud Hypervisor driver name.
-func (d *Driver) Name() string { return "chv" }
+// Name is the stable selected backend name.
+func (d *Driver) Name() string { return d.kind.name() }
 
 // Level is the microvm wall level.
 func (d *Driver) Level() wall.Level { return wall.MicroVM }
@@ -97,12 +117,12 @@ func (d *Driver) Probe(ctx context.Context) wall.Probe {
 		return result
 	}
 	if facts.OS != "linux" || facts.Arch != "amd64" && facts.Arch != "arm64" {
-		result.Reason = "Cloud Hypervisor needs Linux on amd64 or arm64"
+		result.Reason = d.kind.label() + " needs Linux on amd64 or arm64"
 		return result
 	}
 	if !api.SupportsMicroVMKernel(d.Name(), facts.Kernel) {
-		result.Reason = "this host kernel is below the supported Cloud Hypervisor floor"
-		result.Fix = "Use a supported Linux kernel from version 6.8."
+		result.Reason = "this host kernel is outside the supported " + d.kind.label() + " kernels"
+		result.Fix = "Use a host kernel supported by this backend."
 		return result
 	}
 	if !facts.KVM.Usable {
@@ -151,15 +171,15 @@ func (d *Driver) Probe(ctx context.Context) wall.Probe {
 		return result
 	}
 	for _, record := range records {
-		if err := validateBootRuntime(record.Manifest, facts.Arch); err != nil {
+		if err := d.kind.validateRuntime(record.Manifest, facts.Arch); err != nil {
 			continue
 		}
-		vmm, ok := record.Manifest.Find(supply.KindVMM, "cloud-hypervisor", facts.Arch)
-		if !ok || supply.Below(vmm.Version, "54.0") {
+		vmm, ok := record.Manifest.Find(supply.KindVMM, d.kind.vmmName(), facts.Arch)
+		if !ok || supply.Below(vmm.Version, d.kind.minimumVersion()) {
 			continue
 		}
 		valid := true
-		for _, selector := range bootRoles {
+		for _, selector := range d.kind.roles() {
 			item, ok := record.Manifest.Find(selector.Kind, selector.Name, facts.Arch)
 			if !ok {
 				valid = false
@@ -191,7 +211,7 @@ func (d *Driver) Probe(ctx context.Context) wall.Probe {
 		return result
 	}
 	if result.Reason == "" {
-		result.Reason = "the cache has no complete verified Cloud Hypervisor boot runtime"
+		result.Reason = "the cache has no complete verified " + d.kind.label() + " boot runtime"
 		result.Fix = "Install this client's runtime with host upgrade."
 	}
 	return result
@@ -218,9 +238,9 @@ func (d *Driver) RuntimeCompatibility(manifest supply.Manifest) (api.RuntimeDriv
 		return api.RuntimeDriver{}, false
 	}
 	defer store.Close()
-	for _, selector := range bootRoles {
+	for _, selector := range d.kind.roles() {
 		item, ok := manifest.Find(selector.Kind, selector.Name, facts.Arch)
-		if !ok || selector.Kind == supply.KindVMM && supply.Below(item.Version, "54.0") {
+		if !ok || selector.Kind == supply.KindVMM && supply.Below(item.Version, d.kind.minimumVersion()) {
 			return api.RuntimeDriver{}, false
 		}
 		file, err := store.OpenItem(ctx, item)
@@ -229,7 +249,12 @@ func (d *Driver) RuntimeCompatibility(manifest supply.Manifest) (api.RuntimeDriv
 		}
 		file.Close()
 	}
-	return api.RuntimeDriver{Name: d.Name(), Arch: facts.Arch, KernelMin: "6.8", Verified: true}, true
+	result := api.RuntimeDriver{Name: d.Name(), Arch: facts.Arch, KernelMin: "6.8", Verified: true}
+	if d.kind == firecrackerBackend {
+		result.KernelMin = "5.10"
+		result.KernelSeries = []string{"5.10", "6.1", "6.18"}
+	}
+	return result, true
 }
 
 func uidMode(facts api.CapProbe) string {
@@ -242,7 +267,7 @@ func uidMode(facts api.CapProbe) string {
 // Prepare stores a new host-owned VM specification; it formats no existing
 // disk and starts no process. The caller supplies a private session folder.
 func (d *Driver) Prepare(ctx context.Context, spec wall.Spec) (wall.Sandbox, error) {
-	if err := validateVMSpec(spec); err != nil {
+	if err := d.validateSpec(spec); err != nil {
 		return nil, err
 	}
 	facts, err := d.options.Facts(ctx)
@@ -264,10 +289,10 @@ func (d *Driver) Build(ctx context.Context, spec wall.Spec) (wall.Sandbox, error
 		return nil, fmt.Errorf("building a microvm needs its validated trusted expected plan")
 	}
 	spec = expected
-	if err := validateVMSpec(spec); err != nil {
+	if err := d.validateSpec(spec); err != nil {
 		return nil, err
 	}
-	if _, err := readVMRecord(spec.SessionDir); errors.Is(err, os.ErrNotExist) {
+	if _, err := readVMRecordFor(spec.SessionDir, d.kind); errors.Is(err, os.ErrNotExist) {
 		return d.Prepare(ctx, spec)
 	} else if err != nil {
 		return nil, err
@@ -278,7 +303,7 @@ func (d *Driver) Build(ctx context.Context, spec wall.Spec) (wall.Sandbox, error
 // Open reconstructs the saved stopped sandbox. It never accepts a saved PID
 // or attaches ownership to a process that this driver did not start.
 func (d *Driver) Open(ctx context.Context, sessionDir string) (wall.Sandbox, error) {
-	record, err := readVMRecord(sessionDir)
+	record, err := readVMRecordFor(sessionDir, d.kind)
 	if err != nil {
 		return nil, err
 	}
@@ -292,7 +317,7 @@ func (d *Driver) Open(ctx context.Context, sessionDir string) (wall.Sandbox, err
 	if record.DiskMax != spec.DiskMax {
 		return nil, fmt.Errorf("opening a microvm cannot resize its existing session disk")
 	}
-	if err := validateVMSpec(spec); err != nil {
+	if err := d.validateSpec(spec); err != nil {
 		return nil, err
 	}
 	facts, err := d.options.Facts(ctx)
@@ -321,7 +346,14 @@ func validateVMSpec(spec wall.Spec) error {
 			return fmt.Errorf("the VM private socket path is too long or contains VMM option characters")
 		}
 	}
-	need := vmneed.NeedV1{BootV1: *spec.VM, Driver: "chv", CPUs: spec.CPUs, DiskMax: spec.DiskMax}
+	kind, err := backendForSpec(spec)
+	if err != nil {
+		return err
+	}
+	if len(spec.Mounts) != 0 {
+		return fmt.Errorf("a microvm cannot attach host folders")
+	}
+	need := vmneed.NeedV1{BootV1: *spec.VM, Driver: kind.name(), CPUs: spec.CPUs, DiskMax: spec.DiskMax}
 	if err := need.Validate(runtime.GOARCH); err != nil {
 		return err
 	}
@@ -331,6 +363,17 @@ func validateVMSpec(spec wall.Spec) error {
 	}
 	if spec.MemoryMax != budget.Limit {
 		return fmt.Errorf("the microvm unit cap differs from its guest RAM plus the canonical reserve")
+	}
+	return nil
+}
+
+func (d *Driver) validateSpec(spec wall.Spec) error {
+	if err := validateVMSpec(spec); err != nil {
+		return err
+	}
+	kind, err := backendForSpec(spec)
+	if err != nil || kind != d.kind {
+		return fmt.Errorf("the selected VMM differs from this driver's original boot plan")
 	}
 	return nil
 }

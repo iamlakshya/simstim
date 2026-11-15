@@ -19,9 +19,10 @@ type startReq struct {
 	// the start after an answer does not fetch them again.
 	args client.NewArgs
 	// grants belongs to this logical start, including its setup retries.
-	grants     *client.GrantRequest
-	vm         *client.VMNeedPlanV1
-	wallIntent string
+	grants       *client.GrantRequest
+	vm           *client.VMNeedPlanV1
+	wallIntent   string
+	inputOptions *client.NewInputOptions
 	// answered is true once the start has read the user's answers about
 	// setup scripts into args. A start after an answer keeps the answers
 	// it has, with the new one in them. answers are those answers, so a

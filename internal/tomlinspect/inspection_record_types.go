@@ -16,8 +16,9 @@ type BindingRecord struct {
 	UserBytes, HeaderBytes uint64
 }
 type HostRecord struct {
-	BindingID               uint64
-	WholeSpan, InteriorSpan Span
+	BindingID                          uint64
+	WholeSpan, InteriorSpan, ValueSpan Span
+	ReferenceID                        uint64
 }
 type SlotRecord struct {
 	Kind, Width uint8

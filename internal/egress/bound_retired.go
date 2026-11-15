@@ -58,7 +58,7 @@ func validatedRetiredPrimary(ctx context.Context, name string, public api.Retire
 }
 
 func sameRetiredPrimary(a, b registeredRetired) bool {
-	return a.sentinel == b.sentinel && a.identity == b.identity && a.rule == b.rule && sameSecretShape(a.shape, b.shape) && sameRegistryBinding(a.binding, b.binding)
+	return publicAliasFacts(publicEntryRetired, publicEntryRetired, false, false, a.sentinel == b.sentinel, a.identity == b.identity, a.rule == b.rule && sameSecretShape(a.shape, b.shape), sameRegistryBinding(a.binding, b.binding))
 }
 
 func appendRetiredPrimary(entries map[string][]registeredRetired, name string, entry registeredRetired) error {

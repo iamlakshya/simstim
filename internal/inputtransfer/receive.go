@@ -309,6 +309,7 @@ func EncodeControl(control Control) ([]byte, error) {
 	if err := control.Scope.validate(); err != nil {
 		return nil, err
 	}
+	if control.PrimaryRepository!="" && !api.InputRepoName(control.PrimaryRepository) {return nil,protocol("invalid protected primary repository")}
 	if control.CopyMax <= 0 || control.SeedMax <= 0 {
 		return nil, protocol("input control requires positive trusted limits")
 	}
@@ -332,14 +333,15 @@ func DecodeControl(input *bufio.Reader) (Control, error) {
 		return Control{}, err
 	}
 	var control Control
-	allowed := []string{"session", "nonce", "digest", "copy_max", "seed_max", "protected"}
+	allowed := []string{"session", "nonce", "digest", "copy_max", "seed_max", "protected", "primary_repository"}
+	required:=allowed[:len(allowed)-1]
 	if frame.Type != proto.TEvent {
 		return control, protocol("missing trusted input control prefix")
 	}
-	if _, err = decodeObject(frame.Payload, &control, allowed, allowed); err != nil {
+	if _, err = decodeObject(frame.Payload, &control, allowed, required); err != nil {
 		return control, err
 	}
-	if err = control.Scope.validate(); err != nil || control.CopyMax <= 0 || control.SeedMax <= 0 {
+	if err = control.Scope.validate(); err != nil || control.CopyMax <= 0 || control.SeedMax <= 0 || control.PrimaryRepository!="" && !api.InputRepoName(control.PrimaryRepository) {
 		return control, protocol("invalid trusted input control prefix")
 	}
 	if err = ValidateProtected(control.Protected); err != nil {

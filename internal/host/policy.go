@@ -23,10 +23,19 @@ func ApplyPolicyAdd(layers []api.Layer, a api.PolicyAddArgs) (api.Policy, []api.
 	if door == "" {
 		door = api.DoorNet
 	}
-	if door != api.DoorNet {
-		return api.Policy{}, nil, api.Rule{}, UserError("bad_door", fmt.Sprintf("unsupported door %q", door), "Pass net, or omit --door.")
+	if door != api.DoorNet && door != api.DoorPush && door != api.DoorPort {
+		return api.Policy{}, nil, api.Rule{}, UserError("bad_door", fmt.Sprintf("unsupported door %q", door), "Pass net or push, or omit --door for net.")
 	}
-	norm, err := egress.ValidateRuleTarget(a.Target)
+	var norm string
+	var err error
+	if door == api.DoorPush {
+		norm, err = egress.CanonicalPushTarget(a.Target)
+	} else if door==api.DoorPort {
+		_,err=api.ParsePortTarget(a.Target);norm=a.Target
+		if err!=nil || a.Methods!=nil || len(a.Tools)!=0 || a.Mode!="" || a.Once || !a.Allow && !a.Until.IsZero(){return api.Policy{},nil,api.Rule{},UserError("bad_port","a port rule needs one exact decimal port without methods, tools, mode or once","Pass a port from 1 to 65535 and a supported session allowance.")}
+	} else {
+		norm, err = egress.ValidateRuleTarget(a.Target)
+	}
 	if err != nil {
 		return api.Policy{}, nil, api.Rule{}, err
 	}
@@ -70,7 +79,7 @@ func ApplyPolicyAdd(layers []api.Layer, a api.PolicyAddArgs) (api.Policy, []api.
 			if err != nil {
 				return api.Policy{}, nil, api.Rule{}, err
 			}
-			if match {
+			if match && !(old.Allow && old.Once && r.Allow && r.Once) {
 				continue
 			}
 			kept = append(kept, old)
@@ -225,6 +234,9 @@ func dispatchPolicyOp(op string, rawArgs json.RawMessage) (any, error) {
 				return nil, UserError("bad_request", "invalid policy.add arguments", "Update the client.")
 			}
 			var features []string
+			if args.Door == api.DoorPush {
+				features = append(features, api.FeaturePolicyPush)
+			}
 			if args.Methods != nil {
 				features = append(features, api.FeatureHTTPMethods)
 			}

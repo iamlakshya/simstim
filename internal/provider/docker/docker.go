@@ -11,7 +11,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os/exec"
 	"strings"
 
 	"github.com/iamlakshya/simstim/internal/brand"
@@ -125,38 +124,29 @@ func (Provider) Create(ctx context.Context, req provider.Request) (result client
 	return client.RecordHostMachineSourceBirthContext(ctx, host)
 }
 
-// inspect returns the container's state, or "" when there is no container.
-func inspect(ctx context.Context, c string) (string, error) {
-	out, err := provider.Exec(ctx, install, "docker", "inspect", "-f", "{{.State.Status}}", c)
-	if err != nil {
-		if msg := strings.ToLower(err.Error()); strings.Contains(msg, "no such object") || strings.Contains(msg, "no such container") {
-			return "", nil
-		}
-		return "", err
-	}
-	return strings.TrimSpace(string(out)), nil
-}
-
-// Open returns the lifecycle of a container this provider made.
+// Open returns the lifecycle bound to the original engine and resource.
 func (Provider) Open(h client.Host) (client.Lifecycle, error) {
+	if h.Machine == nil || h.Machine.Provider != "docker" {
+		return nil, sourceUnknown()
+	}
+	source, err := client.NormaliseMachineSource("docker", h.Machine.Source)
+	if err != nil {
+		return nil, err
+	}
+	if source.Config.Role == client.MachineConfigUnused {
+		return nil, sourceUnknown()
+	}
 	user := h.Machine.User
 	if user == "" {
 		user = "root"
 	}
-	return &container{name: h.Machine.ID, user: user}, nil
+	return &container{host: freezeBirthHost(h), source: source, user: user}, nil
 }
 
 type container struct {
-	name, user string
-}
-
-// Status maps Docker's state to the client's machine states.
-func (c *container) Status(ctx context.Context) (string, error) {
-	st, err := inspect(ctx, c.name)
-	if err != nil {
-		return "", err
-	}
-	return state(st), nil
+	host   client.Host
+	source *client.MachineSourceProvenance
+	user   string
 }
 
 func state(s string) string {
@@ -167,44 +157,9 @@ func state(s string) string {
 		return client.MachineStarting
 	case "", "removing":
 		return client.MachineMissing
-	default: // created, exited, paused, dead
+	default:
 		return client.MachineStopped
 	}
-}
-
-// Start starts or unpauses the container.
-func (c *container) Start(ctx context.Context) error {
-	st, err := inspect(ctx, c.name)
-	if err != nil {
-		return err
-	}
-	verb := "start"
-	if st == "paused" {
-		verb = "unpause"
-	}
-	_, err = provider.Exec(ctx, install, "docker", verb, c.name)
-	return err
-}
-
-// Stop stops the container. Its files stay; its sessions end.
-func (c *container) Stop(ctx context.Context) error {
-	_, err := provider.Exec(ctx, install, "docker", "stop", "-t", "5", c.name)
-	return err
-}
-
-// Destroy deletes the container and its files.
-func (c *container) Destroy(ctx context.Context) error {
-	st, err := inspect(ctx, c.name)
-	if err != nil || st == "" {
-		return err
-	}
-	_, err = provider.Exec(ctx, install, "docker", "rm", "-f", c.name)
-	return err
-}
-
-// Transport is `docker exec -i` into the container.
-func (c *container) Transport(context.Context, bool) (client.Transport, error) {
-	return &Transport{Container: c.name, User: c.user}, nil
 }
 
 // Transport runs commands in a container with `docker exec -i`: no TTY, so
@@ -212,6 +167,7 @@ func (c *container) Transport(context.Context, bool) (client.Transport, error) {
 // daemon kills the command it ran, and only that command.
 type Transport struct {
 	Container, User string
+	saved           *container
 }
 
 func (t *Transport) args(remote string) []string {
@@ -231,13 +187,24 @@ func unreachable(_ int, stderr string) bool {
 
 // Start runs remote in the container.
 func (t *Transport) Start(ctx context.Context, remote string) (client.Proc, error) {
-	cmd := exec.CommandContext(ctx, "docker", t.args(remote)...)
-	return client.CommandProc(cmd, unreachable)
+	cmd, closeSource, err := t.command(ctx, remote)
+	if err != nil {
+		return nil, err
+	}
+	process, err := client.CommandProc(cmd, unreachable)
+	if err != nil {
+		return nil, errors.Join(err, closeSource())
+	}
+	return &dockerSourceProc{Proc: process, closeSource: closeSource}, nil
 }
 
 // Run runs remote in the container to its end and returns its stdout.
-func (t *Transport) Run(ctx context.Context, remote string, stdin io.Reader) ([]byte, error) {
-	cmd := exec.CommandContext(ctx, "docker", t.args(remote)...)
+func (t *Transport) Run(ctx context.Context, remote string, stdin io.Reader) (_ []byte, returned error) {
+	cmd, closeSource, err := t.command(ctx, remote)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { returned = errors.Join(returned, closeSource()) }()
 	var out, errb bytes.Buffer
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = stdin, &out, &errb
 	if err := cmd.Run(); err != nil {
@@ -252,5 +219,10 @@ func (t *Transport) Run(ctx context.Context, remote string, stdin io.Reader) ([]
 
 // ReachHint is the docker command that should work first.
 func (t *Transport) ReachHint() string {
+	if t.saved != nil {
+		source := t.saved.source
+		return fmt.Sprintf("docker --host %s --config %s exec -it -u %s %s sh (check that this works first)",
+			client.ShellWord(source.Endpoint), client.ShellWord(source.Config.Path), client.ShellWord(t.User), source.ResourceID)
+	}
 	return fmt.Sprintf("docker exec -it -u %s %s sh (check that this works first)", t.User, t.Container)
 }

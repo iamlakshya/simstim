@@ -2,6 +2,57 @@
 
 A session is one agent, or one shell, that runs on a host and keeps running when you leave. These commands find a session, attach to it, describe it and delete it. The launcher does the same with keys: run `simstim` with no arguments.
 
+## Bring files and variables
+
+```sh
+simstim new my-server --wall process --seed . -- make test
+simstim new my-server --wall process --copy ./settings.json:/work/settings.json --env MODE=test
+simstim new my-server --wall process --env-file .env --env MODE=check
+```
+
+`--seed` sends the laptop repository's selected commit into `/work/<basename>`.
+Repeat it for more repositories. `--seed-dirty` captures one prospective commit
+from the original dirty tree. It reuses that capture through review and transfer.
+An explicit `--dir` selects the host repository as the primary. Otherwise the
+first laptop seed is primary, or the sandbox starts with a scratch workspace.
+
+`--copy` copies a laptop file to its guest path. `--env NAME=VALUE` keeps the value
+literal; `--env NAME` reads that name from the laptop. `--env-file` reads literal
+entries from a file. These flags keep their encounter order. They cannot select
+configured secret names; use `--secret` for those.
+
+The command and launcher keep one request through setup and folder questions.
+Cancelling a start ends its active attempt before releasing its preparation.
+An approval cannot survive into another start. If a request may already have
+been sent, its record stays: check the host's sessions before trying again.
+
+## Start several sessions
+
+```sh
+simstim new my-server --name job --count 4 --detach --json
+```
+
+`--count` starts independent sessions, named `job-1` to `job-4`. Each goes through
+the same admission and grant checks as a single start. An approval for one start
+cannot approve another. A refused start leaves the other sessions running.
+`--count` always starts without attaching, so `--detach` is optional. Without
+`--name`, the names start with `session`.
+
+With `--json`, stdout has one array. Each item describes the session that started
+or carries its name and error. The command returns the first error's exit code.
+When no session starts, stdout stays empty and the command reports that error.
+
+## Run a command in a script
+
+```sh
+simstim new my-server --wall process -- make test
+```
+
+Without a terminal, a command after `--` runs through sandbox `exec`. Its stdout
+and stderr stay separate, and `new` returns its exit code. The command runs once.
+The sandbox stops after the command and keeps its work for `pull`. This needs a
+helper with sandbox exec. It never runs the command on the host outside the wall.
+
 ## Name a session
 
 A command that acts on one session takes its address. An address has one of three forms:
@@ -99,6 +150,24 @@ app on my-server
 ```
 
 The state says where the client learnt it, and why an agent ended, such as `errored (exit code 3, from process)`. A detail that the state does not say has its own line, such as the reason of a start that failed. `--screen` prints the session's last screen as plain text, with no escape sequences, as `space` in the launcher peeks at it. With `--json`, `show` prints the session as one object, with `host`, `address` and every field that has a value, and `--screen` adds `screen` as an array of lines. [Use in scripts](scripting.md) has its keys. Without a session, at a terminal, `show` opens the list of sessions. It never starts a stopped host. When a provider script says that the host is stopped, `show` says so, and names `simstim host start`.
+
+## Read events
+
+```sh
+simstim events my-server
+simstim events my-server/app --follow
+simstim events --follow --json
+```
+
+`events` reads recent events from one session, one host or every saved host.
+`--follow` keeps reading as events happen. It uses the existing host connection,
+without polling or starting a stopped host. JSON output has one versioned event
+on each line. A slow reader ends with an error, so a gap is never silent.
+
+The stream includes state changes, requests for input, finished turns, program
+ends, held network requests, classifier approvals and sandbox lifecycle events.
+The event stream works without an alert destination. The alert delay and noise
+limits do not delay this local stream. Agent questions stay out of its detail.
 
 ## List sessions
 

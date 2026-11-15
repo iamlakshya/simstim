@@ -53,6 +53,11 @@ func (e *Engine) httpHostRules(host string, port int) []compiledRule {
 
 func (e *Engine) permitsIntercept(host string, port int) bool {
 	rules := e.httpHostRules(host, port)
+	for _, request := range e.pushHTTPWitnesses(host, port, e.now()) {
+		if e.evaluateHTTP(request, nil, evalPrecheck).Allow {
+			return true
+		}
+	}
 	methods := dnsCandidateMethods(rules)
 	for _, path := range dnsCandidatePaths(rules) {
 		if path == "" {
@@ -125,6 +130,11 @@ func (e *Engine) precheckResolvedAddr(host string, addr netip.Addr, port int) bo
 	collect(e.locks)
 	for _, layer := range e.layers {
 		collect(layer.rules)
+	}
+	for _, request := range e.pushHTTPWitnesses(host, port, at) {
+		if e.evaluateHTTP(request, nil, evalPrecheck).Allow && e.evaluateAddrRequest(addr, port, nil, evalPrecheck, &request) {
+			return true
+		}
 	}
 	methods := dnsCandidateMethods(rules)
 	requiresHTTP := e.requiresHTTPWitness(host, port)

@@ -62,6 +62,10 @@ jobs:
           echo "APP_NAME=$(sed -n 's/^const Name = "\(.*\)"/\1/p' internal/brand/brand.go)" >> "$GITHUB_ENV"
           echo "MODULE=$(sed -n 's/^module //p' go.mod)" >> "$GITHUB_ENV"
           scripts/release-notes.sh "$TAG" > "$RUNNER_TEMP/notes.md"
+      - name: Build both guest kernels with the pinned builder
+        # The build script verifies the signed Debian snapshot metadata and
+        # every source input against guest/supply.lock. It starts no guest.
+        run: guest/build.sh --only-kernels all
       - uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
         with:
           distribution: goreleaser
@@ -77,6 +81,28 @@ jobs:
           # repository exists; until then the cask is built into dist/ and
           # not pushed.
           HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+      - name: Boot-test the native guest when this runner has KVM access
+        # An absent device leaves the hardware check for an authorised test
+        # host. Do not change the runner's device permissions.
+        run: |
+          if [ -r /dev/kvm ] && [ -w /dev/kvm ]; then
+            guest/boot-test.sh
+          else
+            echo "No KVM access; guest boot checks remain for an authorised test host."
+          fi
+      - name: Check the uploaded runtime files before uploading the release manifest
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          manifest=internal/client/helpers/release-manifest.json
+          dir=$(mktemp -d)
+          assets=$(go run ./cmd/supply assets "$manifest")
+          for asset in $assets; do
+            gh release download "$TAG" --pattern "$asset" --dir "$dir"
+          done
+          go run ./cmd/supply check -require-guest -require-vmm -vmm build/vmm -url "https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG" -dir "$dir" "$manifest"
+          gh release upload "$TAG" "$manifest"
       - name: Sign the checksums with the release SSH key
         # install.sh checks this signature with ssh-keygen, which every host
         # with OpenSSH has; the public key is .github/release-signers.

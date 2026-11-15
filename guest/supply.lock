@@ -22,6 +22,13 @@ ref = "v54.1"
 commit = "74aeae19cb1ee2c44d33796b0e4e95e1a68e94dd"
 watch = "github"
 
+[[pin]]
+name = "firecracker"
+repo = "firecracker-microvm/firecracker"
+ref = "v1.18.0"
+commit = "eaf83bb718a559d324613d566eaf776b31a62340"
+watch = "github"
+
 [kernel]
 version = "6.18.63"
 released = 2026-11-10
@@ -51,3 +58,15 @@ eol = 2027-01-06
 amd64 = { url = "https://github.com/cloud-hypervisor/cloud-hypervisor/releases/download/v54.1/cloud-hypervisor-static", sha256 = "f9ffb9646783233d1f0fb09e77db1fca66499d1041e63bc011b90683c0d49933", size = 7344872 }
 arm64 = { url = "https://github.com/cloud-hypervisor/cloud-hypervisor/releases/download/v54.1/cloud-hypervisor-static-aarch64", sha256 = "96ef17679a4a75be8eefa1956dd645a57f7974ec50565090ea9298f9bbb761ad", size = 5824616 }
 source = { url = "https://github.com/cloud-hypervisor/cloud-hypervisor/releases/download/v54.1/cloud-hypervisor-v54.1.tar.xz", sha256 = "7f030190ea1d47c45d1a6eff02b94378987091cf60c2462ee0a6105e5dfdb78a", size = 33472980 }
+
+# Architecture pins cover upstream archives. The release mirrors only their
+# raw Firecracker executable and hashes that extracted file in the manifest.
+# eol is the upstream minimum support date, a conservative release bound.
+[[vmm]]
+name = "firecracker"
+version = "1.18.0"
+released = 2026-11-09
+eol = 2027-05-09
+amd64 = { url = "https://github.com/firecracker-microvm/firecracker/releases/download/v1.18.0/firecracker-v1.18.0-x86_64.tgz", sha256 = "1ac8eec866dd5eea14efecf6323e22b23eea24054545338a5b34bc5bca6623cd", size = 7606252 }
+arm64 = { url = "https://github.com/firecracker-microvm/firecracker/releases/download/v1.18.0/firecracker-v1.18.0-aarch64.tgz", sha256 = "2a6130ff0338901ff9d7fbd73ce046c6b1c6123889dc84a34d678aa53bd0c0c2", size = 7438783 }
+source = { url = "https://github.com/firecracker-microvm/firecracker/archive/refs/tags/v1.18.0.tar.gz", sha256 = "89f02fe6867edcf0a0154305d5533a611e48eaa99ba11d24aa2f076492bef615", size = 11631021 }

@@ -10,12 +10,14 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"runtime"
 	"time"
 
 	"github.com/iamlakshya/simstim/internal/proto"
+	fc "github.com/iamlakshya/simstim/internal/wall/firecracker/backend"
 )
 
-func (s *runnerServer) serve(ctx context.Context, socket string) {
+func (s *runnerServer) serve(ctx context.Context, socket string, owner *ownedVMMEndpoint, fcControl *fc.Client) {
 	scanner := bufio.NewScanner(s.conn)
 	scanner.Buffer(make([]byte, 4096), 4096)
 	for scanner.Scan() {
@@ -30,7 +32,7 @@ func (s *runnerServer) serve(ctx context.Context, socket string) {
 		if request.ID == 0 {
 			reply.Error = "private VMM control needs a request ID"
 		} else {
-			state, err := vmmAPI(ctx, socket, request.Op)
+			state, err := ownedVMMAPI(ctx, socket, request.Op, owner, fcControl)
 			if err != nil {
 				reply.Error = err.Error()
 			} else {
@@ -43,7 +45,31 @@ func (s *runnerServer) serve(ctx context.Context, socket string) {
 	}
 }
 
+func ownedVMMAPI(ctx context.Context, socket, operation string, owner *ownedVMMEndpoint, fcControl *fc.Client) (string, error) {
+	if err := owner.live(); err != nil {
+		return "", err
+	}
+	if fcControl != nil {
+		switch operation {
+		case "state":
+			return fcControl.State(ctx)
+		case "power-button":
+			if runtime.GOARCH != "amd64" {
+				return "", fmt.Errorf("use the guest control stream to stop this Firecracker VM")
+			}
+			return "", fcControl.PowerButton(ctx)
+		default:
+			return "", fmt.Errorf("VMM API operation is not allowed")
+		}
+	}
+	return vmmAPIWithOwner(ctx, socket, operation, owner)
+}
+
 func vmmAPI(ctx context.Context, socket, operation string) (string, error) {
+	return vmmAPIWithOwner(ctx, socket, operation, nil)
+}
+
+func vmmAPIWithOwner(ctx context.Context, socket, operation string, owner *ownedVMMEndpoint) (string, error) {
 	method, path := http.MethodGet, "/api/v1/vm.info"
 	switch operation {
 	case "state":
@@ -56,6 +82,9 @@ func vmmAPI(ctx context.Context, socket, operation string) (string, error) {
 	requestCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	transport := &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+		if owner != nil {
+			return owner.dial(ctx, socket)
+		}
 		return (&net.Dialer{}).DialContext(ctx, "unix", socket)
 	}, DisableCompression: true}
 	defer transport.CloseIdleConnections()

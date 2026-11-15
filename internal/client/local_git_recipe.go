@@ -56,6 +56,9 @@ func localGitRecipe(args []string) bool {
 			len(args) == 7 && slices.Equal(args[1:4], []string{"--no-deref", "-m", "pull reviewed session work"}) &&
 				localGitRef(args[4]) && api.ValidGitOID(args[5]) && api.ValidGitOID(args[6])
 	case "config":
+		if slices.Equal(args, []string{"config", "--no-includes", "--null", "--file=-", "--list"}) {
+			return true
+		}
 		return len(args) == 5 && args[1] == "--no-includes" && args[2] == "--null" &&
 			strings.HasPrefix(args[3], "--blob=") && api.ValidGitOID(strings.TrimPrefix(args[3], "--blob=")) && args[4] == "--list"
 	case "diff-tree":

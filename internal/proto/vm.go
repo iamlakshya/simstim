@@ -17,6 +17,7 @@ type VMStartV1 struct {
 // CtlVMPrepareArgs establishes workspace/state before the canonical seed.
 // StateFiles/CaptureNonce keep the existing family plan/current-run fields.
 type CtlVMPrepareArgs struct {
+	Correlation *VMPrepareCorrelationV1 `json:"correlation"`
 	Session      string    `json:"session"`
 	VM           VMStartV1 `json:"vm"`
 	StateFiles   []string  `json:"state_files"`
@@ -26,6 +27,7 @@ type CtlVMPrepareArgs struct {
 // CtlVMPrepareResult reports only the applied guest contract, never a host
 // fact or readiness claim from an ordinary inherited-socket guest.
 type CtlVMPrepareResult struct {
+	Correlation *VMPrepareCorrelationV1 `json:"correlation"`
 	GuestABI string `json:"guest_abi"`
 }
 
@@ -38,4 +40,15 @@ type GuestMemoryV1 struct {
 	Current int64             `json:"current"`
 	Max     int64             `json:"max"`
 	Events  map[string]uint64 `json:"events"`
+}
+
+// VMPrepareCorrelationV1 is bounded data projected from the actual native
+// boot receipt. Its values cannot construct a receipt, grant or VM owner.
+// The same original connection consumes it once and echoes the exact tuple.
+type VMPrepareCorrelationV1 struct {
+	Version int `json:"v"`
+	Session string `json:"session"`
+	Generation string `json:"generation"`
+	NeedSHA256 string `json:"need_sha256"`
+	Nonce string `json:"nonce"`
 }

@@ -50,6 +50,12 @@ func (g *Init) request(w *proto.Writer, req proto.Request) {
 		}
 	}
 	switch req.Op {
+	case proto.CtlPortsV1:
+		reply(g.portClaims(),nil)
+	case proto.CtlReverseStartV1:
+		reply(struct{}{},g.startReverse(req.Args))
+	case proto.CtlReverseStopV1:
+		reply(struct{}{},g.stopReverse(req.Args))
 	case inputtransfer.CtlPrepare:
 		err := g.prepareInputs(req.Args)
 		reply(struct{}{}, err)
@@ -73,7 +79,7 @@ func (g *Init) request(w *proto.Writer, req proto.Request) {
 	case proto.CtlMemberStore:
 		reply(struct{}{}, g.storePreparedMember(req.Args))
 	case proto.CtlGuestCapabilities:
-		reply(proto.CtlGuestFeatures{Version: 1, Features: []string{proto.GuestSessionPrepareV1, proto.GuestMemberPrepareV1, inputtransfer.Feature, api.FeatureBoundSecrets}}, nil)
+		reply(proto.CtlGuestFeatures{Version: 1, Features: []string{proto.GuestSessionPrepareV1, proto.GuestMemberPrepareV1, inputtransfer.Feature, inputtransfer.PrimaryPolicyFeature, api.FeatureBoundSecrets}}, nil)
 	case proto.CtlPrepare:
 		result, err := g.prepareController(req.Args)
 		reply(result, err)

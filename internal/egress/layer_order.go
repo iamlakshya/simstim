@@ -44,7 +44,7 @@ func compilePolicyLayers(pol api.Policy) ([]compiledLayer, error) {
 		if !seen[ref] {
 			return nil, badLayerOrder()
 		}
-		if rule.Door != "" && rule.Door != api.DoorNet {
+		if rule.Door != "" && rule.Door != api.DoorNet && rule.Door != api.DoorPush {
 			continue
 		}
 		compiled, err := compileRule(rule)
@@ -77,7 +77,7 @@ func legacyPolicyLayers(pol api.Policy) ([]compiledLayer, error) {
 		if _, err := canonicalRuleMethods(rule); err != nil {
 			return nil, err
 		}
-		if rule.Door != "" && rule.Door != api.DoorNet {
+		if rule.Door != "" && rule.Door != api.DoorNet && rule.Door != api.DoorPush {
 			continue
 		}
 		compiled, err := compileRule(rule)

@@ -2,6 +2,7 @@ package client
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -11,7 +12,12 @@ import (
 // RunForward runs a port forward with cleaned terminal diagnostics. It calls
 // onStart only after checking the pin and SSH configuration and preparing a
 // private destination log, before ssh starts writing to stdout or stderr.
-func (s *SSH) RunForward(ctx context.Context, pairs []ForwardPair, stdin io.Reader, stdout, stderr io.Writer, onStart func()) error {
+func (s *SSH) RunForward(ctx context.Context, pairs []ForwardPair, stdin io.Reader, stdout, stderr io.Writer, onStart func()) (returned error) {
+	ctx, finishNative, err := s.beginNativeSource(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { returned = errors.Join(returned, finishNative()) }()
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -52,10 +58,30 @@ func (s *SSH) RunForward(ctx context.Context, pairs []ForwardPair, stdin io.Read
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	locked, release, err := s.beginSSHStart(ctx, "forward")
+	if err != nil {
+		return err
+	}
+	defer release()
+	if err := s.checkNativeSourceScope(locked); err != nil {
+		return err
+	}
 	if onStart != nil {
 		onStart()
 	}
-	runErr := cmd.Run()
+	if grantRequestOf(locked) != nil {
+		if err := bindRequestLocalSource(locked, s.entryHost()); err != nil {
+			return err
+		}
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	runErr := cmd.Start()
+	release()
+	if runErr == nil {
+		runErr = cmd.Wait()
+	}
 	log := logFile.finish()
 	logFile = nil
 	if ctx.Err() != nil {

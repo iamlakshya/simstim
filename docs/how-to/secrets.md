@@ -84,3 +84,9 @@ The SSH agent channel uses a dedicated helper process. It checks the bounded
 identity hello before opening the channel. Detach revokes its owned endpoint
 and active connections. If cleanup cannot finish, the helper reports a resource
 refusal and keeps the ownership witnesses for a later checked recovery.
+
+A positively known original legacy unwalled session can have no public
+stand-ins. Pull review still checks freshly read local secret values. An
+incomplete modern receipt keeps the pulled work in quarantine.
+
+Saved public receipt metadata is checked as a whole. Current, minted and retired stand-ins must keep the original local name domain, bindings and token formats. Inconsistent metadata stops review before a fetch. Unknown future metadata is preserved for other sessions, but cannot authorise a selected review.

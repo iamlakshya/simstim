@@ -67,6 +67,17 @@ var errStopped = &proto.Error{Code: "stopped", Message: "the host stopped the se
 
 // Supervisor holds one walled session's trusted state.
 type Supervisor struct {
+	reverseForwards map[string]*reverseForward
+	portMu sync.Mutex
+	portListeners map[int]*portForward
+	portsClosed bool
+	maxRun *maxRunTimer
+	bootOwner *host.OwnedSupervisorLease
+	originalStart *originalStartup
+	originalReaderStarted bool
+	cancelLifetime context.CancelCauseFunc
+	vmStartConnection net.Conn
+	vmCorrelation *proto.VMPrepareCorrelationV1
 	fileWG sync.WaitGroup
 	fileTransfers map[*fileTransfer]struct{}
 	fileTransfersClosed bool
@@ -172,13 +183,13 @@ func runSupervisorMode(owner context.Context, id string, operation *host.Session
 	if err := secretmem.Protect(); err != nil {
 		return err
 	}
-	lifetime, cancelLifetime := context.WithCancel(owner)
-	defer cancelLifetime()
-	release, err := host.AcquireSupervisorLease(id)
+	lifetime, cancelLifetime := context.WithCancelCause(owner)
+	defer cancelLifetime(context.Canceled)
+	owned, err := host.AcquireOwnedSupervisorLease(lifetime,id)
 	if err != nil {
 		return wallError("cannot claim the supervisor process", err)
 	}
-	defer release()
+	defer owned.Close()
 	m, err := host.LoadManifest(id)
 	if err != nil {
 		return &proto.Error{Code: "not_found", Message: "the supervisor cannot read session " + id + ": " + err.Error(),
@@ -198,38 +209,20 @@ func runSupervisorMode(owner context.Context, id string, operation *host.Session
 		return execRefusal("a sandbox member cannot launch a separate supervisor")
 	}
 	var automatic *host.AutomaticRestorePlan
-	if operation != nil {
-		if !operation.Valid(id) || operation.AutomaticBoot() == nil {
-			return pullChanged()
-		}
-		automatic, err = host.ValidateAutomaticRestore(m)
-		if err != nil {
-			return err
-		}
-	} else if len(m.AutomaticRestore) > 0 {
-		return &proto.Error{Code: "restore_plan", Message: "this sandbox needs its closed automatic controller entrypoint", Hint: "Use the current helper's canonical restore command."}
-	}
+	if operation!=nil {return execRefusal("a supplied operation cannot replace the original outside startup loan")}
 	lf, err := os.OpenFile(paths.SupervisorLog(id), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
 		return &proto.Error{Code: "start_failed", Message: "the supervisor cannot open its log: " + err.Error(),
 			Hint: "Check the host's free space and the session's folder, then resume the session."}
 	}
 	defer lf.Close()
-	s := &Supervisor{automatic: automatic, bootOperation: operation, runtimeCleaned: make(chan struct{}), loadedName: m.Name, lifetime: lifetime, id: id, m: m, log: slog.New(slog.NewTextHandler(lf, nil)), quit: make(chan string, 1), stop: make(chan struct{}, 1),
+	s := &Supervisor{bootOwner:owned,cancelLifetime:cancelLifetime,automatic: automatic, bootOperation: operation, runtimeCleaned: make(chan struct{}), loadedName: m.Name, lifetime: lifetime, id: id, m: m, log: slog.New(slog.NewTextHandler(lf, nil)), quit: make(chan string, 1), stop: make(chan struct{}, 1),
 		sig: make(chan os.Signal, 1), peerCheck: host.PeerCheck(id)}
-	generation, err := newRunToken()
-	if err != nil {
-		return wallError("cannot make the sandbox run identity", err)
-	}
+	defer func(){returned=errors.Join(returned,s.finishOriginalStartup(s.closeSandbox()))}()
+	generation:=owned.Generation()
+	if generation=="" {return execRefusal("the actual supervisor lease has no live generation")}
 	s.generation = generation
 	s.runToken = generation + "/" + id
-	if err := s.loadSavedMembers(); err != nil {
-		return err
-	}
-	s.retainedSecrets, err = collectSavedSecretState(lifetime, *m, s.knownMembers)
-	if err != nil {
-		return err
-	}
 	defer func() { returned = errors.Join(returned, s.closeLateInput()) }()
 	notifySignals(s.sig)
 	defer stopSignals(s.sig)
@@ -251,6 +244,36 @@ func runSupervisorMode(owner context.Context, id string, operation *host.Session
 	s.rec = record{phase: host.LifeBooting, bootBy: now().Add(wait)}
 	snap := s.snapshot()
 	s.mu.Unlock()
+	// Publish only the actual early boot owner and listener before receiving
+	// the original outside loan. No resource factory runs ahead of that line.
+	if err:=s.listen();err!=nil{return s.failed(host.EndBoot,err)}
+	if err:=s.save(&snap,false);err!=nil{return s.failed(host.EndBoot,err)}
+	if m.Wall.Driver!=driverPlain {
+		operation,err=s.awaitOriginalLoan(lifetime)
+		if err!=nil{return s.failed(host.EndBoot,err)}
+		s.bootOperation=operation
+		m,err=operation.LoadContext(lifetime)
+		if err!=nil{return s.failed(host.EndBoot,err)}
+		s.m=m
+		checked,checkErr:=host.VMRunContextLocked(lifetime,operation,owned)
+		if checkErr!=nil{return s.failed(host.EndBoot,checkErr)}
+		s.lifetime=checked
+		if operation.AutomaticBoot()!=nil {
+			s.automatic,err=host.ValidateAutomaticRestore(m)
+			if err!=nil{return s.failed(host.EndBoot,err)}
+		} else if len(m.AutomaticRestore)!=0 {return s.failed(host.EndBoot,execRefusal("this original startup has no received automatic operation"))}
+	}
+	if err:=s.loadSavedMembers();err!=nil{return s.failed(host.EndBoot,err)}
+	s.retainedSecrets,err=collectSavedSecretState(s.lifetimeContext(),*m,s.knownMembers)
+	if err!=nil{return s.failed(host.EndBoot,err)}
+	if s.originalStart!=nil {
+		if err:=s.receiveOriginalStart(s.lifetimeContext());err!=nil{return s.failed(host.EndBoot,err)}
+		if m.Inputs!=nil && !host.WasRestored(m){
+			values:=s.awaitInputStartup(s.lifetimeContext())
+			if s.startupErr!=nil{return s.failed(host.EndBoot,s.startupErr)}
+			s.originalStart.values=values
+		}
+	}
 	agentsReceipt, err := s.prepareBootAgents(s.lifetimeContext())
 	if err != nil {
 		return s.failed(host.EndBoot, err)
@@ -270,17 +293,6 @@ func runSupervisorMode(owner context.Context, id string, operation *host.Session
 	s.mu.Lock()
 	s.sb = sb
 	s.mu.Unlock()
-	defer func() {
-		stopErr := s.stopDiskWatcherV1()
-		closeErr := s.closeDiskResourcesV1()
-		returned = errors.Join(returned, stopErr, closeErr)
-	}()
-	if err := s.listen(); err != nil {
-		return s.failed(host.EndBoot, errors.Join(err, s.closeSandbox()))
-	}
-	if err := s.save(&snap, false); err != nil {
-		return s.failed(host.EndBoot, errors.Join(err, s.closeSandbox()))
-	}
 	if err := s.boot(sb); err != nil {
 		// Every end runs the sandbox's cleanup: a boot that failed or that
 		// a stop cut short too.
@@ -296,9 +308,6 @@ func runSupervisorMode(owner context.Context, id string, operation *host.Session
 			return s.failed(host.EndBoot, errors.Join(err, s.closeSandbox()))
 		}
 		agentsReceipt = nil
-	}
-	if operation != nil {
-		operation.Close() // all actual selected children and ready commit completed
 	}
 	s.wg.Add(3)
 	go s.acceptGuestStreams()
@@ -351,6 +360,11 @@ func (s *Supervisor) started(res proto.CtlStartResult, missing []string) error {
 	s.mu.Unlock()
 	if err := s.save(&snapshot, false); err != nil {
 		return err
+	}
+	if s.primary==nil && s.automatic==nil {
+		if err:=s.startMaxRun();err!=nil{return err}
+		if err:=s.commitOriginalReady();err!=nil{return err}
+		s.raise(s.alertEvent(alerts.SandboxReady))
 	}
 	s.raise(s.alertEvent(kind))
 	s.registerLaunch()

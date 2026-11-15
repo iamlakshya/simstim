@@ -14,7 +14,21 @@ const (
 // barrier to its typed result. DNS witnesses, CONNECT eligibility and actual
 // requests must agree on this same effective method/path decision.
 func (e *Engine) evaluateHTTP(request Request, permit *Permit, mode evalMode) Decision {
-	decision := e.evaluate(request, permit, mode)
+	if e.ledger == nil {
+		return Decision{Rule: "invalid"}
+	}
+	e.ledger.mu.Lock()
+	defer e.ledger.mu.Unlock()
+	return e.evaluateHTTPLocked(request, permit, mode)
+}
+
+func (e *Engine) evaluateHTTPLocked(request Request, permit *Permit, mode evalMode) Decision {
+	decision := e.evaluateLocked(request, permit, mode)
+	if !decision.Allow && decision.unmatched {
+		if pushed := e.pushHTTPAllowanceLocked(request, permit, mode); pushed.Allow {
+			decision = pushed
+		}
+	}
 	if !decision.Allow {
 		return decision
 	}

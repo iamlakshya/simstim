@@ -157,8 +157,8 @@ func (s *Server) proxyHTTPRequest(w http.ResponseWriter, req *http.Request, hdr 
 		writeInspectedError(w, brand.Name+": bound request protocol is unsupported. Try: send a complete uncompressed request with matching helpers.", entry.Status)
 		return
 	}
-	if req.Body != nil && req.Body != http.NoBody {
-		body, decoded, err := decodeHTTPBody(req.Body, req.Header.Get("Content-Encoding"))
+	{
+		body, decoded, err := decodeHTTPBody(req.Body, req.Header)
 		if err != nil {
 			if ctx.Err() != nil {
 				refuseCancelled()
@@ -180,7 +180,7 @@ func (s *Server) proxyHTTPRequest(w http.ResponseWriter, req *http.Request, hdr 
 			req.Header.Del("Content-Length")
 			req.ContentLength = -1
 		}
-		if secrets != nil {
+		if secrets != nil && req.Body != nil && req.Body != http.NoBody {
 			req.Body = &secretRequestTrailerBody{reader: req.Body, request: req, secrets: secrets}
 		}
 	}
@@ -188,6 +188,14 @@ func (s *Server) proxyHTTPRequest(w http.ResponseWriter, req *http.Request, hdr 
 	if modelFailure != "" {
 		entry.Status, entry.Rule = http.StatusForbidden, "model:"+modelFailure
 		writeModelRefusal(w, model, s.modelRefusalLine(model, modelFailure))
+		if req.Body != nil {
+			_ = req.Body.Close()
+		}
+		return
+	}
+	if failure := s.preparePushHTTPRequest(scope, req); failure != "" {
+		entry.Status, entry.Rule = http.StatusForbidden, "service:"+failure
+		writeInspectedError(w, brand.Name+": this Git push is not allowed. Try: grant this repository and push only to the session branch prefix over HTTPS.", entry.Status)
 		if req.Body != nil {
 			_ = req.Body.Close()
 		}

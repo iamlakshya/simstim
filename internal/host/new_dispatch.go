@@ -27,14 +27,18 @@ func NewContext(ctx context.Context, args NewArgs) (*SessionInfo, error) {
 	if err := checkName(args.Name); err != nil {
 		return nil, err
 	}
+	original := args
+	args,err=PrepareRepositoryNewArgs(args)
+	if err!=nil{return nil,err}
 	if err := checkRequestedWall(args.Wall); err != nil {
 		return nil, err
 	}
+	if err:=validateChosenWall(args);err!=nil{return nil,err}
 	if args.Wall == "auto" {
 		return nil, UserError("wall_unavailable", "the requested wall has not been resolved by its original client", "Choose the admitted wall through the current client before starting the sandbox.")
 	}
 	if args.Wall == "" && WallDriver != "" {
-		return newWalled(ctx, args, WallDriver)
+		return newWalled(ctx, args, WallDriver, original)
 	}
 	switch args.Wall {
 	case "", "none":
@@ -43,22 +47,21 @@ func NewContext(ctx context.Context, args NewArgs) (*SessionInfo, error) {
 		}
 		return newUnwalled(ctx, args)
 	case "process":
-		return newWalled(ctx, args, "process")
+		return newWalled(ctx, args, "process", original)
 	case "gvisor":
 		if args.Runtime == nil {
 			return nil, UserError("wall_unavailable", "gvisor needs the original authenticated runtime manifest", "Prepare the runtime through the same original client request.")
 		}
-		return newWalled(ctx, args, "gvisor")
+		return newWalled(ctx, args, "gvisor", original)
 	case "microvm":
 		need, err := vmneed.DecodeV1(args.VMNeedV1, runtime.GOARCH)
 		if err != nil {
 			return nil, vmNeedError("microvm needs a supported original client Need")
 		}
-		// The next producer cut must supply the native BootOwnerV1 on the
-		// same early startup line before this selected driver can construct.
-		// Keep this real missing producer explicit; never select inventory or
-		// fall through to ordinary/process startup.
-		return nil, UserError("wall_unavailable", "the selected "+need.Driver+" startup has no admitted native boot owner", "Use a helper with the complete native startup loan and original Need producer.")
+		// The original captured request admits this decoded driver under its
+		// reserved OP. H15's real parent then loans the SAME operation to the
+		// owned early supervisor before any resource can construct.
+		return newWalled(ctx,args,need.Driver,original)
 	}
 	return nil, UserError("bad_wall", "the selected wall is unknown", "Choose none, process, gvisor or microvm.")
 }

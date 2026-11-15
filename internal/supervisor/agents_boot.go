@@ -5,28 +5,25 @@ import (
 	"slices"
 
 	"github.com/iamlakshya/simstim/internal/host"
-	"github.com/iamlakshya/simstim/internal/wall"
 )
 
 // prepareBootAgents is reached only before the actual sandbox factory. Every
 // authenticated client boot pins its exact protected selected agents bytes.
 // Only the separately issued automatic operation can call the host producer.
 func (s *Supervisor) prepareBootAgents(ctx context.Context) (*host.InstalledAgentsReceiptV1, error) {
-	if s.m.Wall == nil || s.m.Wall.Driver != "chv" {
+	if s.m.Wall == nil || s.m.Wall.Driver != "chv" && s.m.Wall.Driver != "firecracker" {
 		return nil, nil
 	}
+	if _,err:=s.protectedVMDriver();err!=nil{return nil,err}
+	if s.bootOperation==nil{return nil,execRefusal("the agents image has no original borrowed boot operation")}
 	if authority := s.bootOperation.AutomaticBoot(); authority != nil {
 		return host.PrepareAutomaticAgentsV1(ctx, authority, s.publishAutomaticAgents)
 	}
-	spec, ok := wall.ExpectedSpec(ctx)
-	if !ok || spec.VM == nil || spec.ID != s.id || s.m.Agents != "" && s.m.Agents != spec.VM.Agents.SHA256 {
-		return nil, execRefusal("the exact client agents selection differs from its protected boot plan")
-	}
-	return host.PinInstalledAgentsV1(ctx, spec.VM.Agents)
+	return host.PinOriginalBootAgentsV1(ctx)
 }
 
 func (s *Supervisor) publishAutomaticAgents(edit *host.AgentsRefreshV1) error {
-	checked, err := edit.ExpectedContextV1()
+	checked, err := edit.PublicationContextV1()
 	if err != nil {
 		return err
 	}
@@ -36,9 +33,13 @@ func (s *Supervisor) publishAutomaticAgents(edit *host.AgentsRefreshV1) error {
 		return err
 	}
 	var snapshot host.Manifest
-	return s.writeManifestChange(&snapshot, false, nil, nil, edit.ApplyV1, func(saved *host.Manifest) {
+	if err:=s.writeManifestChange(&snapshot, false, nil, nil, edit.ApplyV1, func(saved *host.Manifest) {
 		s.m.Agents = saved.Agents
 		s.m.VMNeedV1 = slices.Clone(saved.VMNeedV1)
-		s.lifetime = checked
-	})
+	});err!=nil{return err}
+	if err:=edit.CommitProtectedV1(checked);err!=nil{return err}
+	committed,err:=edit.ExpectedContextV1()
+	if err!=nil{return err}
+	s.lifetime=committed
+	return nil
 }

@@ -375,6 +375,8 @@ func (s *Supervisor) acceptGuestStreams() {
 			return
 		}
 		switch st.Kind() {
+		case link.KindRPort:
+			s.forwardReverseStream(st)
 		case link.KindEgress:
 			select {
 			case egressSem <- struct{}{}:

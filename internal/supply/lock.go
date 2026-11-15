@@ -292,6 +292,8 @@ func validateVMM(v LockVMM, pins map[string]LockPin) error {
 		return fmt.Errorf("guest/supply.lock: [[vmm]] name %q is invalid", v.Name)
 	case !cleanVersion(v.Version):
 		return fmt.Errorf("guest/supply.lock: [[vmm]] %s version %q is not a clean release version", v.Name, v.Version)
+	case v.Name == FirecrackerName && Below(v.Version, "1.18.0"):
+		return fmt.Errorf("guest/supply.lock: Firecracker release pin %s is below 1.18.0", v.Version)
 	case !isDate(v.ReleasedDate()):
 		return fmt.Errorf("guest/supply.lock: [[vmm]] %s needs released as YYYY-MM-DD", v.Name)
 	case !isDate(v.EOLDate()):
@@ -315,6 +317,9 @@ func validateVMM(v LockVMM, pins map[string]LockPin) error {
 	}
 	if !hex64.MatchString(v.Source.SHA256) {
 		return fmt.Errorf("guest/supply.lock: [[vmm]] %s source sha256 %q is not 64 lower-case hex digits", v.Name, v.Source.SHA256)
+	}
+	if v.Source.Size <= 0 {
+		return fmt.Errorf("guest/supply.lock: [[vmm]] %s source needs size > 0", v.Name)
 	}
 	if err := checkPinAgreement("[[vmm]] "+v.Name, v.Name, v.Version, pins); err != nil {
 		return err

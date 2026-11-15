@@ -176,7 +176,7 @@ func dialObserved(ctx, callerContext context.Context, h Host, rt route, transpor
 		remote = RemoteHelper(HelperVersion()) + " bridge-agent"
 	}
 	ka, _ := rt.t.(KeepAliver)
-	if ka != nil && !rt.agentOnly {
+	if ka != nil && !rt.agentOnly && !eventsDial(ctx) && !inputContinuationDial(ctx) {
 		// This transport does not end the bridge when the client goes, so the
 		// bridge ends itself when the pings stop.
 		remote += fmt.Sprintf(" --idle-exit %d", int(BridgeIdleExit.Seconds()))
@@ -303,13 +303,18 @@ func dialObserved(ctx, callerContext context.Context, h Host, rt route, transpor
 		c.agentReader = r
 		return c, nil
 	}
-	go c.readLoop(r)
-	c.startBridgeDebug(callerContext)
-	if ka != nil {
-		go c.keepAlive(ka.KeepAlive())
+	if exclusiveContinuationDial(callerContext) {
+		c.execReader=r
+		c.execReadDone=make(chan struct{})
+		if ka!=nil && execDial(callerContext) {c.execAlive=ka.KeepAlive()}
+	} else {
+		go c.readLoop(r)
+		c.startBridgeDebug(callerContext)
+		if ka!=nil {go c.keepAlive(ka.KeepAlive())}
 	}
-	if l, ok := rt.lc.(Leaser); ok {
-		go keepLease(context.WithoutCancel(callerContext), c, l, leasePeriod)
+	if l,ok:=rt.lc.(Leaser);ok {
+		c.leaser=l
+		if !exclusiveContinuationDial(callerContext) {go keepLease(context.WithoutCancel(callerContext),c,l,leasePeriod)}
 	}
 	return c, nil
 }
@@ -332,6 +337,12 @@ func checkHostTransportWake(ctx context.Context, attempt *hostTransportAttempt, 
 func acceptTransportHelloIdentity(ctx context.Context, attempt *hostTransportAttempt, h Host, hostID string) (bool, error) {
 	if err := checkHostTransportAttempt(ctx, attempt, h); err != nil {
 		return false, err
+	}
+	if attempt.continuation != nil {
+		if hostID != attempt.continuation.parent.HostID() || !ValidHostID(hostID) {
+			return false, grantIdentityError(h)
+		}
+		return false, nil
 	}
 	switch attempt.kind {
 	case hostTransportSaved:

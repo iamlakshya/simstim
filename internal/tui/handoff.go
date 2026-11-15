@@ -35,7 +35,7 @@ func (m *Model) pauseBg() {
 	}
 	m.bgMu.Unlock()
 	m.bgWG.Wait()
-	m.grantOwners.releaseAll()
+	m.grantOwners.releaseAll(m.ctx)
 	m.conns.dropUnadopted()
 }
 

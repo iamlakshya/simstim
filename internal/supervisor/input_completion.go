@@ -92,7 +92,7 @@ func (s *Supervisor) finishInput(ctx context.Context, input *startupInput, guest
 }
 func (s *Supervisor) recoverInputFinish(ctx context.Context, begin inputtransfer.BeginArgs) error {
 	s.mu.Lock()
-	input := s.lateInput
+	input := s.retainedInputLocked(begin.Scope,begin.RunGeneration)
 	valid := s.rec.phase == host.LifeRunning && begin.RunGeneration == s.generation && input != nil && input.runGeneration == s.generation && input.scope == begin.Scope && begin.Summary != nil && input.summary.Equal(*begin.Summary) && s.m.Inputs != nil && s.m.Inputs.Equal(input.summary) && s.m.Run.Generation == s.generation
 	s.mu.Unlock()
 	if !valid || input.completion == nil || !input.completion.canRecover() {
@@ -122,12 +122,13 @@ func (s *Supervisor) recoverInputFinish(ctx context.Context, begin inputtransfer
 }
 func (s *Supervisor) closeLateInput() error {
 	s.mu.Lock()
-	input := s.lateInput
+	first,late:=s.startupInput,s.lateInput
 	s.mu.Unlock()
-	if input != nil && input.completion != nil {
-		return input.completion.cleanup()
+	var result error
+	for index,input:=range []*startupInput{first,late} {
+		if input!=nil && input.completion!=nil && (index==0 || input!=first){result=errors.Join(result,input.completion.cleanup())}
 	}
-	return nil
+	return result
 }
 
 func (s *Supervisor) inputGuestStatus(ctx context.Context, input *startupInput) (inputtransfer.StatusResult, error) {
@@ -176,7 +177,7 @@ func (s *Supervisor) describeInputOperation(raw []byte) (*inputtransfer.Describe
 		return nil, inputFailure("invalid original input operation identity")
 	}
 	s.mu.Lock()
-	input := s.lateInput
+	input := s.retainedInputLocked(args.Scope,args.RunGeneration)
 	valid := s.rec.phase == host.LifeRunning && args.RunGeneration == s.generation && input != nil && input.runGeneration == s.generation && input.scope == args.Scope && s.m.Inputs != nil && s.m.Inputs.Equal(input.summary) && s.m.Run.Generation == s.generation
 	var summary *api.InputSummary
 	if valid {

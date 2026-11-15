@@ -80,10 +80,13 @@ func (l *limaSourceLocator) close() error {
 }
 
 // limaExec uses the original native locator for EVERY command in the private
-// creation frame. Ordinary saved lifecycle calls keep their existing path.
+// creation frame, or the actual saved operation's pinned original instance.
 func limaExec(ctx context.Context, args ...string) ([]byte, error) {
 	frame, _ := ctx.Value(limaSourceBirthKey{}).(*limaSourceBirth)
 	if frame == nil {
+		if saved, _ := ctx.Value(limaSavedSourceKey{}).(*limaSavedSource); saved != nil {
+			return saved.exec(ctx, args...)
+		}
 		return provider.Exec(ctx, install, "limactl", args...)
 	}
 	if frame.ctx != ctx || frame.locator == nil {

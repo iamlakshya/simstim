@@ -32,7 +32,7 @@ These are the questions, and the flag that answers each:
 | `host add` | Which agents to install, when the host lacks one | `--yes` offers none | Installs nothing |
 | `host add` | ssh's question about a host key that your SSH settings do not trust | `--host-key SHA256:…`, or `--yes` to pin the key on first use | Fails with exit code 4 |
 | `host rekey` | The host's typed name | `--confirm <host>` | Fails with exit code 4 |
-| `new` | Make the folder that does not exist? | `--mkdir` | Fails with exit code 4. Without a terminal and without `--detach`, `new` fails with exit code 2 first |
+| `new` | Make the folder that does not exist? | `--mkdir` | Fails with exit code 4. Without a terminal and without `--detach`, `new` without a command fails with exit code 2 first |
 | `new` | Run the repository's setup script? | `--setup-script` or `--no-setup-script` | Skips the script, and says so |
 | `doctor --fix`, `host doctor --fix` | Fix it? | `-y` | Fails with exit code 4. With `--json` and `-y`, the JSON holds how each fix ended |
 | `host rm` on a host that `host create` made | Type the host's name to delete the machine too | `--destroy --confirm <host>` | Keeps the machine, forgets the host, and says so. With `--destroy` and without `--confirm`, fails with exit code 4 |
@@ -43,7 +43,7 @@ These are the questions, and the flag that answers each:
 
 At a terminal, `attach`, `show` and `rm` with no session open a short list of your sessions to pick from. It shows the sessions that it saw last at once, then asks the hosts. Type to filter it, then press Enter, or Esc to cancel. Type to the session after its screen appears: keys typed before that can be lost. With input off, these commands need the session, and fail with exit code 2 without one. When the hosts answer with no session, they fail with exit code 3, and when no host answers, with the host's error and exit code 1.
 
-`attach` needs a terminal. In a script it fails with exit code 2 before it looks for the session, so it opens no connection and wakes no host. `new` and `resume` without `--detach` attach too, so they fail in the same way, before any lookup, and start or resume nothing. Use `--detach` in a script. `doctor keys` and `doctor terminal` fail the same way without a terminal.
+`attach` needs a terminal. In a script it fails with exit code 2 before it looks for the session, so it opens no connection and wakes no host. `new` without a command and `resume` without `--detach` attach too, so they fail in the same way, before any lookup, and start or resume nothing. Use `--detach` for a background session. A command after `new --` runs through sandbox `exec` without a terminal and returns its status. `new --count` also starts without attaching. `doctor keys` and `doctor terminal` fail the same way without a terminal.
 
 A script can leave out a session's host when no other host has a session of that name, as in `simstim send app 'text'`. `-` is the session last attached to. [Work with sessions](sessions.md) has the rules. When two hosts have a session of that name, the command fails with exit code 2, so a script that must not guess names the host.
 
@@ -69,7 +69,7 @@ Esc, Ctrl+C, the end of input, or a signal at a question cancels. The command pr
 
 JSON keeps integer sizes exact, including values above 2 to the power of 53. Use an integer type when reading them.
 
-These commands take `--json`: `ls`, `show`, `new --detach`, `resume --detach`, `ports`, `doctor`, `host ls`, `host show`, `host upgrade`, `host test`, `host doctor`, `host restore`, `host status`, `host alerts`, `host alerts log`, `agents ls`, `config keymap` and `version`. `new` and `resume` need `--detach` with `--json`, because an attached session owns the terminal.
+These commands take `--json`: `ls`, `show`, `new --detach`, `new --count`, `resume --detach`, `events`, `ports`, `doctor`, `host ls`, `host show`, `host upgrade`, `host test`, `host doctor`, `host restore`, `host status`, `host alerts`, `host alerts log`, `agents ls`, `config keymap` and `version`. `new` and `resume` need `--detach` with `--json`, because an attached session owns the terminal. `new --count` always detaches and prints one array. `events` prints one object per line.
 
 <!-- test: help (needs a host) -->
 ```sh

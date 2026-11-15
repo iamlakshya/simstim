@@ -94,18 +94,44 @@ func (m *Model) startSessionReady(h *hostConn, r startReq) tea.Cmd {
 	c, be, originalHost, kept, cols, rows := h.conn, m.be, h.host, m.settings, m.width, m.height
 	read := m.beginSettingsRead()
 	return m.bgCmd(func(ctx context.Context) (message tea.Msg) {
-		defer func() { message = m.finishStartGrant(message) }()
+		defer func() { message = m.finishStartGrant(ctx, message) }()
 		settings, read := readSettings(be, kept, read)
 		if _, err := client.ReadPolicySettings(); err != nil {
 			return startedMsg{startReq: r, err: err, settingsRead: read}
 		}
-		args, err := client.SessionArgs(r.args, cols, rows, settings)
+		hostClone := r.args.Cwd != ""
+		if r.grants == nil {
+			r.wallIntent = r.args.Wall
+			r.grants = client.NewGrantRequest(false, r.args.SSHAgent)
+			m.grantOwners.add(r.grants)
+		}
+		cctx, cancel := context.WithTimeout(client.WithGrantRequest(ctx, r.grants), 60*time.Second)
+		defer cancel()
+		endAttempt, err := m.grantOwners.begin(r.grants, cctx, cancel)
+		if err != nil {
+			return startedMsg{startReq: r, err: err, settingsRead: read}
+		}
+		defer endAttempt()
+		args, err := client.PrepareNewSessionArgs(cctx, r.args, cols, rows)
 		if err != nil {
 			return startedMsg{startReq: r, err: err, settingsRead: read}
 		}
 		r.args = args
-		cctx, cancel := context.WithTimeout(ctx, 60*time.Second)
-		defer cancel()
+		if r.inputOptions == nil {
+			options := startInputOptions(r.args, hostClone)
+			r.inputOptions = &options
+		}
+		if !r.inputOptions.HostClone {
+			r.args.Cwd = ""
+		}
+		if planner, ok := unclean(c).(interface {
+			PrepareNewInputPolicy(context.Context, client.NewArgs, client.NewInputOptions) (client.NewArgs, error)
+		}); ok {
+			r.args, err = planner.PrepareNewInputPolicy(cctx, r.args, *r.inputOptions)
+			if err != nil {
+				return startedMsg{startReq: r, err: err, settingsRead: read}
+			}
+		}
 		if planner, ok := unclean(c).(interface {
 			PrepareNewPolicy(context.Context, client.NewArgs) (client.NewArgs, error)
 		}); ok {
@@ -113,9 +139,6 @@ func (m *Model) startSessionReady(h *hostConn, r startReq) tea.Cmd {
 			if err != nil {
 				return startedMsg{startReq: r, err: err, settingsRead: read}
 			}
-		}
-		if r.grants == nil {
-			r.wallIntent = r.args.Wall
 		}
 		if planner, ok := unclean(c).(interface {
 			ResolveNewWall(context.Context, client.NewArgs) (client.NewArgs, error)
@@ -128,18 +151,21 @@ func (m *Model) startSessionReady(h *hostConn, r startReq) tea.Cmd {
 			return startedMsg{startReq: r, err: &client.UserError{Msg: "this host connection cannot select a wall",
 				Hint: "Update the client and host helper, then try again.", Code: "wall_helper_old"}, settingsRead: read}
 		}
-		if r.grants == nil {
-			level := r.args.Wall
-			if level == "" {
-				level = "none"
-			}
-			r.grants, err = client.NewWallGrantRequest(false, r.args.SSHAgent, level, nil)
+		level := r.args.Wall
+		if level == "" {
+			level = "none"
+		}
+		if err := r.grants.BindNewWall(cctx, level, nil); err != nil {
+			return startedMsg{startReq: r, err: err, settingsRead: read}
+		}
+		if planner, ok := unclean(c).(interface {
+			PrepareNewInputs(context.Context, client.NewArgs) (client.NewArgs, error)
+		}); ok {
+			r.args, err = planner.PrepareNewInputs(cctx, r.args)
 			if err != nil {
 				return startedMsg{startReq: r, err: err, settingsRead: read}
 			}
-			m.grantOwners.add(r.grants)
 		}
-		cctx = client.WithGrantRequest(cctx, r.grants)
 		if r.args.Wall == "microvm" && r.vm == nil {
 			planner, ok := unclean(c).(interface {
 				PrepareNewVM(context.Context, client.NewArgs, string) (*client.VMNeedPlanV1, error)

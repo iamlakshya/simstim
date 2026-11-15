@@ -12,16 +12,15 @@ type VMSpec = vmneed.BootV1
 
 type expectedSpecKey struct{}
 
-// WithExpectedSpec carries a freshly validated canonical trusted Need plan.
-// The host obtains it from the authenticated client or its protected trusted
-// manifest recording that Need, including automatic restore. VM-writable
-// layout, boot evidence and cache claims cannot supply it. No FD is serialised.
+// WithExpectedSpec carries an independent plan-data projection. It creates no
+// operation, native boot owner or execution authority. Actual runtime consumers
+// still require their original authenticated host receipt and native binding.
 func WithExpectedSpec(ctx context.Context, spec Spec) context.Context {
 	return context.WithValue(ctx, expectedSpecKey{}, cloneExpectedSpec(spec))
 }
 
-// ExpectedSpec returns a copy of that trusted plan. A driver's saved VM-data
-// layout cannot create execution authority after a restart.
+// ExpectedSpec returns independent plan data. A copied context, saved layout
+// or caller-provided spec cannot issue the original native host boot receipt.
 func ExpectedSpec(ctx context.Context) (Spec, bool) {
 	spec, ok := ctx.Value(expectedSpecKey{}).(Spec)
 	return cloneExpectedSpec(spec), ok
@@ -31,6 +30,12 @@ func cloneExpectedSpec(spec Spec) Spec {
 	spec.Mounts = slices.Clone(spec.Mounts)
 	spec.StateDirs = slices.Clone(spec.StateDirs)
 	spec.StateFiles = slices.Clone(spec.StateFiles)
+	if spec.RuntimeManifest != nil {
+		manifest := *spec.RuntimeManifest
+		manifest.Items = slices.Clone(manifest.Items)
+		manifest.Advisories = slices.Clone(manifest.Advisories)
+		spec.RuntimeManifest = &manifest
+	}
 	if spec.VM != nil {
 		vm := spec.VM.Clone()
 		spec.VM = &vm

@@ -244,6 +244,29 @@ func (s *managedSource) Revalidate(ctx context.Context) error {
 	}
 	return s.revalidate(ctx)
 }
+
+// CheckDestinations uses the SAME frozen additive restrictions and complete
+// live inventory for a local copy's exact targets, with fresh provider checks.
+func (s *managedSource) CheckDestinations(ctx context.Context, names []string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return managedUnknown()
+	}
+	if err := s.revalidate(ctx); err != nil {
+		return err
+	}
+	checker, ok := s.LocalGitSource.(interface {
+		CheckDestinations(context.Context, []string) error
+	})
+	if !ok {
+		return managedUnknown()
+	}
+	if err := checker.CheckDestinations(ctx, names); err != nil {
+		return err
+	}
+	return s.revalidate(ctx)
+}
 func (s *managedSource) Close() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

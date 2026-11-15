@@ -9,6 +9,10 @@ import (
 )
 
 func encodeLocalPolicySources(a NewArgs) (json.RawMessage, error) {
+	return encodeLocalPolicySourcesWithInputs(a, nil)
+}
+
+func encodeLocalPolicySourcesWithInputs(a NewArgs, inputs *api.PolicyClientInputsPin) (json.RawMessage, error) {
 	// A legacy creation with no selected local layers gets no fabricated pin.
 	if len(a.Layers) == 0 {
 		return nil, nil
@@ -44,7 +48,7 @@ func encodeLocalPolicySources(a NewArgs) (json.RawMessage, error) {
 		return nil, err
 	}
 	copyLimit := min(localCopy, checkedCopy)
-	pin, err := api.PinPolicySourcesWithResources(a.Layers, api.PolicyResourcePin{Version: 1, PullMax: limit, CPMax: &copyLimit})
+	pin, err := api.PinPolicySourcesWithClientInputs(a.Layers, api.PolicyResourcePin{Version: 1, PullMax: limit, CPMax: &copyLimit}, inputs)
 	if err != nil {
 		return nil, policySourceStateError()
 	}

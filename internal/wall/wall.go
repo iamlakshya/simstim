@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/iamlakshya/simstim/internal/files"
+	"github.com/iamlakshya/simstim/internal/supply"
 )
 
 // Driver builds walls of one level on this host.
@@ -59,11 +60,14 @@ type ImageRef struct {
 
 // Spec describes the sandbox to prepare.
 type Spec struct {
-	VM         *VMSpec
-	ID         string
-	SessionDir string
-	Image      *ImageRef
-	Mounts     []Mount
+	// RuntimeManifest is cloned plan data. The original native boot owner
+	// separately supplies execution authority and held role selection.
+	RuntimeManifest *supply.Manifest
+	VM              *VMSpec
+	ID              string
+	SessionDir      string
+	Image           *ImageRef
+	Mounts          []Mount
 	// StateDirs are validated directory-backed runtime paths under /home/agent.
 	// The agent table's public list includes both folders and files.
 	StateDirs []string

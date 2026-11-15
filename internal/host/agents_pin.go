@@ -21,6 +21,27 @@ func PinInstalledAgentsV1(ctx context.Context, expected supply.ContentRef) (rece
 	if err != nil {
 		return nil, err
 	}
+	return pinInstalledAgentsPublicationV1(expected, publication)
+}
+
+// PinOriginalBootAgentsV1 pins only the agent image from this actual original
+// boot receipt. A raw ContentRef or expected-spec context cannot issue it.
+func PinOriginalBootAgentsV1(ctx context.Context) (*InstalledAgentsReceiptV1, error) {
+	receipt := OriginalVMNeedFromContext(ctx)
+	if receipt == nil || receipt.need == nil {
+		return nil, vmNeedError("the agents image has no original native boot selection")
+	}
+	publication, err := beginBootAssetPublication(ctx, receipt.boot)
+	if err != nil {
+		return nil, err
+	}
+	return pinInstalledAgentsPublicationV1(receipt.need.Agents, publication)
+}
+
+func pinInstalledAgentsPublicationV1(expected supply.ContentRef, publication *runtimePublication) (receipt *InstalledAgentsReceiptV1, returned error) {
+	if publication == nil {
+		return nil, agentsBuildFailure("the pinned agents image has no original native publication")
+	}
 	receipt = &InstalledAgentsReceiptV1{publication: publication, done: make(chan struct{})}
 	owned := receipt
 	defer func() {
@@ -29,6 +50,7 @@ func PinInstalledAgentsV1(ctx context.Context, expected supply.ContentRef) (rece
 			receipt = nil
 		}
 	}()
+	var err error
 	receipt.store, err = image.OpenHostExisting(publication.ctx, paths.ImagesDir(), publication.owner.domain())
 	if err != nil {
 		return receipt, err

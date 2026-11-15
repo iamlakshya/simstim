@@ -80,6 +80,10 @@ func (g *pullGit) moduleValues(ctx context.Context, oid string) ([][]byte, error
 	if err != nil {
 		return nil, &UserError{Msg: "the changed .gitmodules cannot be parsed safely", Hint: "Fix .gitmodules in the session and pull again.", Code: "pull_modules", Kind: KindRefused}
 	}
+	return gitConfigValues(data), nil
+}
+
+func gitConfigValues(data []byte) [][]byte {
 	var values [][]byte
 	for _, entry := range bytes.Split(data, []byte{0}) {
 		if len(entry) == 0 {
@@ -91,7 +95,7 @@ func (g *pullGit) moduleValues(ctx context.Context, oid string) ([][]byte, error
 		}
 		values = append(values, bytes.Clone(value))
 	}
-	return values, nil
+	return values
 }
 
 func addedPatchLines(data []byte) []byte {

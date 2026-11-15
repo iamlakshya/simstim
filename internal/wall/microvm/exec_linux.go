@@ -6,9 +6,11 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"runtime"
 
 	"github.com/iamlakshya/simstim/internal/supply"
+	fc "github.com/iamlakshya/simstim/internal/wall/firecracker/backend"
 	"golang.org/x/sys/unix"
 )
 
@@ -33,7 +35,11 @@ func RunVMMExec(in io.Reader) error {
 	if err := helperUID(plan.UIDMode); err != nil {
 		return err
 	}
-	vmm, _ := plan.Spec.VM.Runtime.Find(supply.KindVMM, "cloud-hypervisor", plan.Spec.VM.Image.Arch)
+	kind, err := backendForSpec(plan.Spec)
+	if err != nil {
+		return err
+	}
+	vmm, _ := plan.Spec.VM.Runtime.Find(supply.KindVMM, kind.vmmName(), plan.Spec.VM.Image.Arch)
 	kernel, _ := plan.Spec.VM.Runtime.Find(supply.KindKernel, "guest", plan.Spec.VM.Image.Arch)
 	program := os.NewFile(3, "VMM-exec")
 	guestKernel := os.NewFile(4, "guest-kernel")
@@ -44,7 +50,12 @@ func RunVMMExec(in io.Reader) error {
 		return err
 	}
 	api, vsock := vmSocketPaths(vmDataDir(plan.Spec))
-	args, _, err := bootCommand(bootSpec{Runtime: plan.Spec.VM.Runtime, Image: plan.Spec.VM.Image, Paths: bootPaths{VMM: "/proc/self/fd/3", Kernel: "/proc/self/fd/4", Tools: "/proc/self/fd/5", Image: "/proc/self/fd/6", Agents: "/proc/self/fd/7", Session: "/proc/self/fd/8", API: api, Vsock: vsock}, GuestRAM: plan.Spec.VM.GuestRAM, CPUs: plan.Spec.CPUs, SessionDirect: plan.SessionDirect})
+	var args []string
+	if kind == firecrackerBackend {
+		args, _, _, err = fc.Command(plan.Spec, fc.Paths{VMM: "/proc/self/fd/3", Kernel: "/proc/self/fd/4", Tools: "/proc/self/fd/5", Image: "/proc/self/fd/6", Agents: "/proc/self/fd/7", Session: "/proc/self/fd/8", Config: filepath.Join(plan.Spec.SessionDir, firecrackerConfigName), API: api, Vsock: vsock})
+	} else {
+		args, _, err = bootCommand(bootSpec{Runtime: plan.Spec.VM.Runtime, Image: plan.Spec.VM.Image, Paths: bootPaths{VMM: "/proc/self/fd/3", Kernel: "/proc/self/fd/4", Tools: "/proc/self/fd/5", Image: "/proc/self/fd/6", Agents: "/proc/self/fd/7", Session: "/proc/self/fd/8", API: api, Vsock: vsock}, GuestRAM: plan.Spec.VM.GuestRAM, CPUs: plan.Spec.CPUs, SessionDirect: plan.SessionDirect})
+	}
 	if err != nil {
 		return err
 	}
@@ -66,7 +77,7 @@ func RunVMMExec(in io.Reader) error {
 	}
 	reader.Close()
 	if err := unix.Exec(args[0], args, []string{"LANG=C", "LC_ALL=C", "TZ=UTC"}); err != nil {
-		return fmt.Errorf("execute pinned Cloud Hypervisor: %w", err)
+		return fmt.Errorf("execute pinned %s: %w", kind.label(), err)
 	}
 	return nil
 }

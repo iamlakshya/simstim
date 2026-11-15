@@ -120,7 +120,7 @@ func checkHostMachineSourceBirthPublication(ctx context.Context, change HostChan
 	defer o.mu.Unlock()
 	birth := o.creation.sourceBirth
 	if birth == nil || !birth.bound || birth.consumed || !o.creation.bound || birth.scope != o.creation.sourceScope || change.Now.machineSourceBirth != birth ||
-		!SameMachine(birth.result.Machine, change.Now.Machine) || !reflect.DeepEqual(birth.result.Machine.Source, change.Now.Machine.Source) {
+		!SameEntry(birth.result, *change.Now) {
 		return hostStateRemovalError("the machine-source birth token is missing, changed or already consumed")
 	}
 	return ctx.Err()

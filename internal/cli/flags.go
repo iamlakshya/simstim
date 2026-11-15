@@ -64,6 +64,12 @@ func addDetach(cmd *cobra.Command, p *bool, usage string) {
 	shared(cmd.Flags(), "detach")
 }
 
+// addCount adds the number of independent sessions to start.
+func addCount(cmd *cobra.Command, p *int, usage string) {
+	cmd.Flags().IntVar(p, "count", 1, usage)
+	shared(cmd.Flags(), "count")
+}
+
 // addMemoryMax adds --memory-max, the memory cap of one session.
 func addMemoryMax(cmd *cobra.Command, p *string, usage string) {
 	cmd.Flags().StringVar(p, "memory-max", "", usage)

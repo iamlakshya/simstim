@@ -23,16 +23,22 @@ type localReviewValuePlan struct {
 	view       SecretConfigView
 }
 
-// ReviewPublicStandIns returns only previously acknowledged public metadata.
-// It executes no command or RPC. Neither a row nor a later remote context can
-// add a public stand-in to this original local publication receipt.
+// ReviewPublicStandIns returns original acknowledged public metadata, or an
+// empty set positively proved by the original pre-wall schema. It executes no
+// command or RPC. A row or later remote context cannot add a public stand-in.
 func (c *Conn) ReviewPublicStandIns(ctx context.Context, id string) ([]api.Secret, error) {
 	p, err := getSandboxReceiptPolicyContext(ctx, c, id)
 	if err != nil {
 		return nil, err
 	}
-	if p == nil || p.futureDeliveryReceipt || p.deliveryReceipt == nil {
+	if p == nil || p.futureDeliveryReceipt {
 		return nil, reviewAuthorityError()
+	}
+	if p.deliveryReceipt == nil {
+		if err := c.checkOriginalLegacyNonePublicSet(ctx, id, p); err != nil {
+			return nil, err
+		}
+		return []api.Secret{}, ctx.Err()
 	}
 	r := p.deliveryReceipt
 	if err := validateSandboxDeliveryReceipt(ctx, r); err != nil {

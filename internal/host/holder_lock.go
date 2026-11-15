@@ -52,36 +52,11 @@ func openHolderLockForLaunch(id string) (*os.File, error) {
 // acquireHolderLock claims or adopts holder.lock for the lifetime of
 // RunHolder, setting close-on-exec so no child process inherits it.
 func acquireHolderLock(id string) (func(), error) {
-	if os.Getenv(holderLockFDEnv) == "3" {
-		_ = os.Unsetenv(holderLockFDEnv)
-		unix.CloseOnExec(3)
-		return func() {
-			_ = unix.Flock(3, unix.LOCK_UN)
-			_ = unix.Close(3)
-		}, nil
-	}
-	fd, err := unix.Open(holderLockPath(id), unix.O_RDWR|unix.O_CREAT|unix.O_CLOEXEC, 0o600)
+	owner, err := AcquireOwnedSupervisorLease(context.Background(), id)
 	if err != nil {
-		return nil, fmt.Errorf("open holder lock: %w", err)
+		return nil, err
 	}
-	deadline := time.Now().Add(500 * time.Millisecond)
-	for {
-		err := unix.Flock(fd, unix.LOCK_EX|unix.LOCK_NB)
-		switch {
-		case err == nil:
-			return func() {
-				_ = unix.Flock(fd, unix.LOCK_UN)
-				_ = unix.Close(fd)
-			}, nil
-		case !errors.Is(err, unix.EWOULDBLOCK):
-			_ = unix.Close(fd)
-			return nil, fmt.Errorf("lock holder: %w", err)
-		case !time.Now().Before(deadline):
-			_ = unix.Close(fd)
-			return nil, fmt.Errorf("a holder already runs for session %s", id)
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
+	return owner.Close, nil
 }
 
 // holderLockHeld reports whether a holder process currently holds

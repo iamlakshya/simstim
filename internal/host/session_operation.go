@@ -20,6 +20,8 @@ import (
 // operation/retry. Only its owner releases it, after owned resource cleanup.
 type SessionOperation struct {
 	automaticBoot *AutomaticBootOperationV1
+	originalBoot  *originalBootV1
+	startup       *startupLaunchV1
 	newRequest    *newRequestWitnessV1
 	id            string
 	native        *sessionFileLease
@@ -218,11 +220,14 @@ func (o *SessionOperation) CloseWithError() error {
 			o.cancel()
 		}
 		o.gate.Unlock()
+		if o.startup != nil {
+			o.closeErr = errors.Join(o.closeErr, o.startup.Close())
+		}
 		o.readers.Wait()
 		if o.native == nil {
 			o.closeErr = memberError("the operation has no native descriptor owner")
 		} else {
-			o.closeErr = o.native.Close()
+			o.closeErr = errors.Join(o.closeErr, o.native.Close())
 		}
 	})
 	return o.closeErr

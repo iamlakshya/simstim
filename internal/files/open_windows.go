@@ -14,6 +14,12 @@ import (
 // openRegularFile uses root-relative native handles and never reparses a path
 // component. It is the same no-follow regular-file operation as Unix openat.
 func openRegularFile(root *os.Root, name string) (*os.File, error) {
+	return openRegularAccess(root, name, false)
+}
+func openRegularWriteFile(root *os.Root, name string) (*os.File, error) {
+	return openRegularAccess(root, name, true)
+}
+func openRegularAccess(root *os.Root, name string, writable bool) (*os.File, error) {
 	current, err := root.Open(".")
 	if err != nil {
 		return nil, err
@@ -35,7 +41,11 @@ func openRegularFile(root *os.Root, name string) (*os.File, error) {
 		}
 		var next windows.Handle
 		var status windows.IO_STATUS_BLOCK
-		err = windows.NtCreateFile(&next, windows.FILE_GENERIC_READ, &attrs, &status, nil, 0, windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE, windows.FILE_OPEN, options, 0, 0)
+		access := uint32(windows.FILE_GENERIC_READ)
+		if writable && index == len(parts)-1 {
+			access |= windows.FILE_GENERIC_WRITE
+		}
+		err = windows.NtCreateFile(&next, access, &attrs, &status, nil, 0, windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE, windows.FILE_OPEN, options, 0, 0)
 		closeErr := current.Close()
 		if err != nil {
 			var native windows.NTStatus

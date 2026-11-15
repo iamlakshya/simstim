@@ -79,7 +79,7 @@ func CheckRuleAddition(policy api.Policy, proposed api.Rule) error {
 			if err != nil {
 				return err
 			}
-			if match {
+			if match && !(old.Allow && old.Once && proposed.Allow && proposed.Once) {
 				continue
 			}
 		}
@@ -143,6 +143,12 @@ func canonicalIdentityRule(rule api.Rule) (api.Rule, error) {
 			return api.Rule{}, err
 		}
 		rule.Target = target
+	}
+	if rule.Door==api.DoorPort {
+		if _,err:=api.ParsePortTarget(rule.Target);err!=nil || rule.Mode!="" || rule.Once || rule.Methods!=nil || len(rule.Tools)!=0 {return api.Rule{},&proto.Error{Code:"bad_port",Message:"the port rule is not exact and supported",Hint:"Use one decimal port without methods, tools, mode or once."}}
+	}
+	if rule.Door == api.DoorPush {
+		return canonicalPushRule(rule)
 	}
 	return rule, nil
 }

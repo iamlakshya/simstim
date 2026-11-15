@@ -22,6 +22,8 @@ type bridgeCopyRoute struct {
 	once    sync.Once
 }
 
+func init() { Features = append(Features, proto.FeatureFileTransferV1, "cp") }
+
 func (r *bridgeCopyRoute) close() {
 	if r != nil {
 		r.once.Do(func() {

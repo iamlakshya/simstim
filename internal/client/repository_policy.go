@@ -21,15 +21,18 @@ func (c *Conn) prepareRepositoryPolicy(ctx context.Context, a NewArgs) (NewArgs,
 		}
 		return a, err
 	}
-	if !c.HasFeature(api.RepositoryPolicyFeature) {
-		return a, c.grantHelperOld("check repository policy before fetching secrets")
-	}
-	file := info.Policy
+	return c.prepareRepositoryPolicyFile(ctx, a, info.Policy)
+}
+
+func (c *Conn) prepareRepositoryPolicyFile(ctx context.Context, a NewArgs, file *api.RepositoryPolicy) (NewArgs, error) {
 	if file == nil {
 		a.RepositoryPolicy = nil
 		a.GrantHash = ""
 		a.GrantAnswers = nil
 		return a, nil
+	}
+	if !c.HasFeature(api.RepositoryPolicyFeature) {
+		return a, c.grantHelperOld("check repository policy before fetching secrets")
 	}
 	if a.GrantHash != file.Hash {
 		answers, found, err := LoadGrantAnswers(ctx, c.Host.Name, file.Repo, file.Hash)
@@ -42,6 +45,7 @@ func (c *Conn) prepareRepositoryPolicy(ctx context.Context, a NewArgs) (NewArgs,
 	}
 	layer, notes, err := egress.PrepareRepositoryLayer(file, egress.RepositoryBroader(a.Layers), a.GrantHash, a.GrantAnswers)
 	copy := *file
+	copy.Proposals = api.CloneLayers([]api.Layer{{Rules: file.Proposals}})[0].Rules
 	copy.Layer = layer
 	copy.Notes = append(slices.Clone(file.Notes), notes...)
 	a.RepositoryPolicy = &copy

@@ -89,7 +89,8 @@ func validatePublicSessionEntries(state *api.SessionSecretState) error {
 			return invalidPublicSessionState()
 		}
 		if mode == api.SecretModeExposed {
-			if _, exists := state.Intent.Binds[name]; exists || public.Sentinel != "" || public.Shape != nil || public.Identity != "" {
+			_, hasBinding := state.Intent.Binds[name]
+			if !publicExposedFacts(hasBinding, public.Sentinel == "", public.Shape == nil, public.Identity == "") {
 				return invalidPublicSessionState()
 			}
 			continue
@@ -120,7 +121,7 @@ func validatePublicSessionEntries(state *api.SessionSecretState) error {
 		}
 		if previous != "" {
 			other := state.Primary[previous]
-			if other.Sentinel != public.Sentinel || other.Identity != public.Identity || other.Armed != public.Armed || !reflect.DeepEqual(other.Shape, public.Shape) || !sameRegistryBinding(bindings[previous], canonical) {
+			if !publicAliasFacts(publicEntryPrimary, publicEntryPrimary, other.Armed, public.Armed, other.Sentinel == public.Sentinel, other.Identity == public.Identity, reflect.DeepEqual(other.Shape, public.Shape), sameRegistryBinding(bindings[previous], canonical)) {
 				return invalidPublicSessionState()
 			}
 		}

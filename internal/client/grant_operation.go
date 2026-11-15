@@ -44,6 +44,9 @@ func requireGrantOperation(ctx context.Context, op grantOperation) error {
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if err := r.lifetimeErrorLocked(); err != nil {
+		return err
+	}
 	if r.operation != grantOpUnset && r.operation != op {
 		return grantOperationError()
 	}

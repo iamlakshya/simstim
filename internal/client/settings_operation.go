@@ -120,7 +120,10 @@ func (o *settingsOperation) checkLocked(ctx context.Context) error {
 	if err := o.ctx.Err(); err != nil {
 		return err
 	}
-	return o.snapshot.check()
+	if err := o.snapshot.check(); err != nil {
+		return err
+	}
+	return ctx.Err()
 }
 
 // Settings borrows the operation's actual decoded values. Callers must not
@@ -172,4 +175,25 @@ func (o *settingsOperation) Close() error {
 	o.settings = Settings{}
 	o.ctx = nil
 	return err
+}
+
+// This is called ONLY before a newly opened operation is published on R.
+// Acquisition obeyed the actual attempt deadline. The retained FD's owner
+// follows the original logical request, while each borrow still checks its
+// current caller deadline before and after source IO. Neither context is new.
+func (o *settingsOperation) retainRequestLifetime(attempt, lifetime context.Context) error {
+	if o == nil || lifetime == nil {
+		return errAgentSettingsChanged
+	}
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if err := o.checkLocked(attempt); err != nil {
+		return err
+	}
+	if err := lifetime.Err(); err != nil {
+		return err
+	}
+	o.ctx = lifetime
+	o.snapshot.ctx = lifetime
+	return attempt.Err()
 }

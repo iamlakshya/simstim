@@ -14,7 +14,7 @@ func (c *Conn) checkLayerGrants(ctx context.Context, tier Tier, layers []api.Lay
 }
 
 func (c *Conn) allowLayerGrants(ctx context.Context, tier Tier, layers []api.Layer, record bool) error {
-	settings, err := ReadPolicySettings()
+	settings, err := requestPolicySettings(ctx)
 	if err != nil {
 		return err
 	}

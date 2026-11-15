@@ -18,6 +18,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/iamlakshya/simstim/internal/supply"
 )
 
 // releaseKey matches the key in an allowed-signers line: its type and its
@@ -113,7 +115,7 @@ func serveRelease(t *testing.T, version string, tamper bool, key string) *httpte
 	var bundle bytes.Buffer
 	zw := gzip.NewWriter(&bundle)
 	tw := tar.NewWriter(zw)
-	for name, body := range map[string]string{"host-linux-amd64": "HOST", "vt-linux-amd64": "VT"} {
+	for name, body := range map[string]string{"host-linux-amd64": "HOST", "vt-linux-amd64": "VT", supply.FileName: `{"release":"9.9.9","items":[],"advisories":[]}`} {
 		_ = tw.WriteHeader(&tar.Header{Name: name, Mode: 0o755, Size: int64(len(body)), Typeflag: tar.TypeReg})
 		_, _ = tw.Write([]byte(body))
 	}
@@ -176,6 +178,9 @@ func TestFetchVerifiesAndCaches(t *testing.T) {
 	if b, ok := VT("linux", "amd64"); !ok || string(b) != "VT" {
 		t.Fatalf("vt = %q, %v", b, ok)
 	}
+	if b, ok := Manifest(); !ok || !bytes.Contains(b, []byte(`"release":"9.9.9"`)) {
+		t.Fatalf("signed bundle manifest = %q, %v", b, ok)
+	}
 	if Version() == "" || len(Platforms()) != 1 {
 		t.Errorf("version %q, platforms %v", Version(), Platforms())
 	}
@@ -184,6 +189,9 @@ func TestFetchVerifiesAndCaches(t *testing.T) {
 	srv.Close()
 	if err := Fetch(context.Background(), "9.9.9", srv.URL, cache); err != nil {
 		t.Fatalf("from the cache: %v", err)
+	}
+	if b, ok := Manifest(); !ok || !bytes.Contains(b, []byte(`"release":"9.9.9"`)) {
+		t.Fatalf("cached signed bundle manifest = %q, %v", b, ok)
 	}
 }
 

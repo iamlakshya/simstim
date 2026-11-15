@@ -6,6 +6,7 @@ import (
 	"compress/gzip"
 	"compress/zlib"
 	"io"
+	"net/http"
 	"strings"
 	"testing"
 )
@@ -45,7 +46,7 @@ func TestHTTPCompressionCanonicalBodyAndUnsupportedEncodings(t *testing.T) {
 			if wire != "gzip" {
 				wire = "deflate"
 			}
-			body, changed, err := decodeHTTPBody(io.NopCloser(bytes.NewReader(encoded)), wire)
+			body, changed, err := decodeHTTPBody(io.NopCloser(bytes.NewReader(encoded)), http.Header{"Content-Encoding": {wire}})
 			if err != nil || !changed {
 				t.Fatalf("decode setup: changed=%v, %v", changed, err)
 			}
@@ -57,7 +58,7 @@ func TestHTTPCompressionCanonicalBodyAndUnsupportedEncodings(t *testing.T) {
 		})
 	}
 	for _, encoding := range []string{"br", "gzip, gzip", "gzip, identity", "compress"} {
-		if _, _, err := decodeHTTPBody(io.NopCloser(strings.NewReader("not decoded")), encoding); err == nil {
+		if _, _, err := decodeHTTPBody(io.NopCloser(strings.NewReader("not decoded")), http.Header{"Content-Encoding": {encoding}}); err == nil {
 			t.Fatalf("unsupported encoding accepted: %q", encoding)
 		}
 	}
@@ -70,7 +71,7 @@ func (repeatBodyByte) Read(p []byte) (int, error) { clear(p); return len(p), nil
 func TestHTTPCompressionEnforcesTheActual64MiBLimit(t *testing.T) {
 	for _, size := range []int64{maxDecodedHTTPBody, maxDecodedHTTPBody + 1} {
 		encoded := encodedBodyFixture(t, "gzip", io.LimitReader(repeatBodyByte{}, size))
-		body, _, err := decodeHTTPBody(io.NopCloser(bytes.NewReader(encoded)), "gzip")
+		body, _, err := decodeHTTPBody(io.NopCloser(bytes.NewReader(encoded)), http.Header{"Content-Encoding": {"gzip"}})
 		if err != nil {
 			t.Fatal(err)
 		}

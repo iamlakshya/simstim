@@ -13,6 +13,8 @@ import (
 type agentSandboxPolicy struct {
 	FutureLineage  bool
 	FutureDelivery bool
+	FutureReceipt  bool
+	FutureInput    bool
 	HostID         string
 	Ceiling        Tier
 	SSHAgent       bool
@@ -46,6 +48,12 @@ func projectAgentSandboxPolicy(ctx context.Context, source io.ReaderAt, size int
 	if err != nil {
 		return nil, agentProjectionError(ctx, err)
 	}
+	return projectAgentSandboxPolicyProjection(ctx, p, host, id, nil)
+}
+
+// The combined inspector supplies its ONE source-bound projection and visits
+// receipt metadata for every row before any selected facts can be used.
+func projectAgentSandboxPolicyProjection(ctx context.Context, p *api.JSONProjection, host, id string, visit func(api.JSONSpan, api.JSONSpan, int, *agentSandboxPolicy) error) (*agentSandboxPolicy, error) {
 	root, err := p.ObjectRoot()
 	if err != nil {
 		return nil, agentProjectionError(ctx, err)
@@ -89,6 +97,11 @@ func projectAgentSandboxPolicy(ctx context.Context, source io.ReaderAt, size int
 		facts, err := projectAgentRow(ctx, p, field.Value, field.Name, schema, wanted)
 		if err != nil {
 			return err
+		}
+		if visit != nil {
+			if err := visit(field.Value, field.Name, schema, &facts); err != nil {
+				return err
+			}
 		}
 		if wanted {
 			copy := facts

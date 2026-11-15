@@ -268,6 +268,16 @@ func failure(err error, cmd *cobra.Command, signalled bool) report {
 // With asJSON the error is one JSON line (cli-spec 7.4). A quietError
 // prints nothing, because its command has said it all.
 func finish(w io.Writer, err error, cmd *cobra.Command, colour, signalled, asJSON bool) int {
+	if result, ok := execExit(err); ok {
+		if cause := execCause(err, result); cause != nil {
+			if asJSON {
+				_ = printErrorJSON(w, cause, cmd, false)
+			} else {
+				_ = printError(w, cause, cmd, colour, false)
+			}
+		}
+		return result.code
+	}
 	if err == nil {
 		if !signalled {
 			return 0

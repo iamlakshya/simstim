@@ -28,7 +28,7 @@ import (
 // stream, and refuses the rest (spec 6.3 and 10.4).
 
 // Features are what the supervisor offers in its hello (spec 10.5).
-var Features = []string{api.FeatureSandboxCohort, inputtransfer.Feature, inputtransfer.FinishFeature, "wall", host.SavedRenameFeature, api.FeatureExecStream, api.FeatureSpawn, api.FeatureSandboxSnapshot, api.FeaturePullBundle, api.FeaturePullOutputProgress, api.FeatureBoundSecrets}
+var Features = []string{api.FeatureSandboxCohort, inputtransfer.Feature, inputtransfer.PrimaryPolicyFeature, inputtransfer.FinishFeature, "wall", host.SavedRenameFeature, api.FeatureExecStream, api.FeatureSpawn, api.FeatureSandboxSnapshot, api.FeaturePullBundle, api.FeaturePullOutputProgress, api.FeatureBoundSecrets}
 
 // listenHint is the hint of an error of the session's socket.
 const listenHint = "Check the host's runtime folder ($XDG_RUNTIME_DIR) and its free space, then resume the session."
@@ -221,6 +221,7 @@ func (s *Supervisor) serve(conn net.Conn) {
 			}
 			continue
 		}
+		if s.reverseFrame(c,r,f,wasFirst){return}
 		if s.uploadFrame(c, r, f, wasFirst) {
 			return
 		}
@@ -301,6 +302,7 @@ func (s *Supervisor) request(c *client, f proto.Frame) bool {
 	if json.Unmarshal(f.Payload, &req) != nil {
 		return false
 	}
+	if s.portRequest(c,req){return true}
 	if s.armRequest(c, req) {
 		return true
 	}
@@ -323,7 +325,7 @@ func (s *Supervisor) request(c *client, f proto.Frame) bool {
 		}
 		if len(req.Args) > 0 {
 			if !api.ExactJSONFields(req.Args, infoArgs) || json.Unmarshal(req.Args, &infoArgs) != nil {
-				c.reply(req.ID, nil, secretIntentFailure())
+				c.reply(req.ID, nil, toProtoErr(secretIntentFailure()))
 				return true
 			}
 		}

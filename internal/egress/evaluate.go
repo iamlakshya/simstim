@@ -3,6 +3,8 @@ package egress
 import (
 	"net/netip"
 	"time"
+
+	"github.com/iamlakshya/simstim/internal/api"
 )
 
 // DecideWithPermit reserves the grant chosen for one flow.
@@ -32,6 +34,22 @@ func (e *Engine) RevalidateAddr(addr netip.Addr, port int, p *Permit) bool {
 }
 
 func (e *Engine) evaluate(req Request, p *Permit, mode evalMode) Decision {
+	if e.ledger == nil {
+		return Decision{Rule: "invalid"}
+	}
+	e.ledger.mu.Lock()
+	defer e.ledger.mu.Unlock()
+	return e.evaluateLocked(req, p, mode)
+}
+
+// evaluateLocked is the SAME canonical matcher under an existing transaction.
+// This permits full model admission to precheck and acquire without exposing
+// a partially reserved capability/network request to DNS or another caller.
+func (e *Engine) evaluateLocked(req Request, p *Permit, mode evalMode) Decision {
+	door := req.door
+	if door == "" {
+		door = api.DoorNet
+	}
 	host, err := NormaliseHost(req.Host)
 	if err != nil || req.Port < 1 || req.Port > 65535 || e.ledger == nil {
 		return Decision{Rule: "invalid"}
@@ -50,8 +68,6 @@ func (e *Engine) evaluate(req Request, p *Permit, mode evalMode) Decision {
 	}
 	addr, addrErr := netip.ParseAddr(host)
 	isIP := addrErr == nil
-	e.ledger.mu.Lock()
-	defer e.ledger.mu.Unlock()
 	if !e.validPermit(p, mode) {
 		return Decision{Rule: "invalid"}
 	}
@@ -62,7 +78,16 @@ func (e *Engine) evaluate(req Request, p *Permit, mode evalMode) Decision {
 	}
 	for _, layer := range e.layers {
 		allow, denied := e.choose(layer.rules, p, mode, func(r compiledRule) bool {
-			return (!req.withoutModelTools || !r.allow || len(r.tools) == 0) && matchesRuleMethod(r, method) && e.matchesLocked(r, host, addr, isIP, req.Port, path, at)
+			if compiledDoor(r) != door {
+				return false
+			}
+			if req.withoutModelTools && r.allow && r.once && len(r.tools) != 0 {
+				priority, available := e.oncePriority(r, p, mode)
+				if !available || priority == 2 {
+					return false
+				}
+			}
+			return matchesRuleMethod(r, method) && e.matchesLocked(r, host, addr, isIP, req.Port, path, at)
 		})
 		if denied != nil {
 			match := denied.ref
@@ -73,6 +98,9 @@ func (e *Engine) evaluate(req Request, p *Permit, mode evalMode) Decision {
 			match := allow.ref
 			return Decision{Allow: true, Rule: string(layer.kind) + ":" + allow.id, RuleID: allow.id, Target: formatCompiledTarget(*allow), Match: &match}
 		}
+	}
+	if door != api.DoorNet {
+		return Decision{Rule: "push:ungranted"}
 	}
 	for _, r := range e.agentRules {
 		if matchesRuleMethod(r, method) && e.matchesLocked(r, host, addr, isIP, req.Port, path, at) {

@@ -60,7 +60,7 @@ func notice(ctx context.Context, msg string) {
 
 // pinRoute pins h's key before the first connection through t, when t is
 // ssh. Docker and E2B hosts have no host key.
-func pinRoute(ctx context.Context, h Host, t Transport, interactive bool) error {
+func pinRoute(ctx context.Context, h Host, t Transport, interactive bool) (returned error) {
 	if err := checkHostTransportAction(ctx, h); err != nil {
 		return err
 	}
@@ -68,6 +68,11 @@ func pinRoute(ctx context.Context, h Host, t Transport, interactive bool) error 
 	if !ok || s.Host.SSH == "" {
 		return nil
 	}
+	ctx, finishNative, err := s.beginNativeSource(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { returned = errors.Join(returned, finishNative()) }()
 	if o, ok := ctx.Value(pinKey{}).(*PinOptions); ok && o != nil {
 		return pinAsAsked(ctx, s.Host, o)
 	}
@@ -229,6 +234,9 @@ func needsPin(ctx context.Context, h Host) (bool, error) {
 // removed from hosts.toml is refused too.
 func (s *SSH) connArgs(ctx context.Context, shared bool) ([]string, error) {
 	ctx = s.policyContext(ctx)
+	if err := s.checkNativeSourceScope(ctx); err != nil {
+		return nil, err
+	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}

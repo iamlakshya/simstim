@@ -8,18 +8,24 @@ import (
 	"github.com/iamlakshya/simstim/internal/client"
 )
 
-// Resolve the actual wall before creating H5's immutable local intent and
-// before a password manager can fetch a refused secret.
-func prepareWallStart(cmd *cobra.Command, c *client.Conn, h client.Host, a client.NewArgs, untrusted bool, secrets, expose []string) (client.NewArgs, *client.GrantRequest, error) {
+// prepareWallStart binds policy, wall, inputs and values to the same request.
+// Every actual preparation step owns its original bounded cleanup deadline.
+func prepareWallStart(cmd *cobra.Command, c *client.Conn, h client.Host, a client.NewArgs, request *client.GrantRequest, options client.NewInputOptions, secrets, expose []string) (client.NewArgs, error) {
 	var err error
-	a, err = c.PrepareNewPolicy(cmd.Context(), a)
-	if err != nil {
-		return a, nil, err
-	}
 	intent := a.Wall
-	a, err = c.ResolveNewWall(cmd.Context(), a)
-	if err != nil {
-		return a, nil, err
+	if err = newStartStep(cmd, func(ctx context.Context) error {
+		a, err = c.PrepareNewInputPolicy(ctx, a, options)
+		if err != nil {
+			return err
+		}
+		a, err = c.PrepareNewPolicy(ctx, a)
+		if err != nil {
+			return err
+		}
+		a, err = c.ResolveNewWall(ctx, a)
+		return err
+	}); err != nil {
+		return a, err
 	}
 	if message := client.PolicyWallNote(h, a.Layers); message != "" {
 		note(cmd, "wall_floor_raised", message)
@@ -28,45 +34,49 @@ func prepareWallStart(cmd *cobra.Command, c *client.Conn, h client.Host, a clien
 	if level == "" {
 		level = "none"
 	}
-	request, err := client.NewWallGrantRequest(untrusted, a.SSHAgent, level, expose)
-	if err != nil {
-		return a, nil, err
+	if err = request.BindNewWall(cmd.Context(), level, expose); err != nil {
+		return a, err
 	}
-	cmd.SetContext(client.WithGrantRequest(cmd.Context(), request))
+	if err = newStartStep(cmd, func(ctx context.Context) error { a, err = c.PrepareNewInputs(ctx, a); return err }); err != nil {
+		return a, err
+	}
 	var vm *client.VMNeedPlanV1
-	if a.Wall == "microvm" {
-		vm, err = c.PrepareNewVM(cmd.Context(), a, intent)
-		if err != nil {
-			return a, request, err
+	if err = newStartStep(cmd, func(ctx context.Context) error {
+		if a.Wall == "microvm" {
+			vm, err = c.PrepareNewVM(ctx, a, intent)
+			if err != nil {
+				return err
+			}
 		}
-	}
-	if vm != nil {
-		a, err = c.PrepareNewSecrets(cmd.Context(), a, vm)
-	} else {
-		a, err = c.PrepareNewSecrets(cmd.Context(), a)
-	}
-	if err != nil {
-		return a, request, err
+		if vm != nil {
+			a, err = c.PrepareNewSecrets(ctx, a, vm)
+		} else {
+			a, err = c.PrepareNewSecrets(ctx, a)
+		}
+		return err
+	}); err != nil {
+		return a, err
 	}
 	layerSecrets, err := client.PolicySecretNames(a.Layers)
 	if err != nil {
-		return a, request, err
+		return a, err
 	}
 	effective := h
 	effective.Secrets = nil
 	names := client.SecretNames(effective, append(append(append([]string(nil), layerSecrets...), secrets...), expose...))
-	err = grantQuestions(cmd, func(ctx context.Context) error {
-		if err := c.CheckNewGrants(ctx, names, a.SSHAgent); err != nil {
+	err = grantQuestions(cmd, func(context.Context) error {
+		return newStartStep(cmd, func(ctx context.Context) error {
+			if err := c.CheckNewGrants(ctx, names, a.SSHAgent); err != nil {
+				return err
+			}
+			if err := c.CheckNewPolicyGrants(ctx, a.Layers); err != nil {
+				return err
+			}
+			a.Secrets, err = client.FetchHostSecrets(ctx, h, names, secretTerminal(cmd))
 			return err
-		}
-		if err := c.CheckNewPolicyGrants(ctx, a.Layers); err != nil {
-			return err
-		}
-		var err error
-		a.Secrets, err = client.FetchHostSecrets(ctx, h, names, secretTerminal(cmd))
-		return err
+		})
 	})
-	return a, request, err
+	return a, err
 }
 
 // These notes end before attach starts. The attach pump owns all attached

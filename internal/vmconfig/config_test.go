@@ -9,7 +9,7 @@ import (
 )
 
 func validVMPrepare() proto.CtlVMPrepareArgs {
-	return proto.CtlVMPrepareArgs{Session: "abcdefgh", VM: proto.VMStartV1{Version: 1, System: "reset", StateDirs: []string{".claude/projects"}}, StateFiles: []string{".claude.json"}, CaptureNonce: strings.Repeat("a", 32)}
+	return proto.CtlVMPrepareArgs{Session: "abcdefgh", VM: proto.VMStartV1{Version: 1, System: "reset", StateDirs: []string{".claude/projects"}}, StateFiles: []string{".claude.json"}, CaptureNonce: strings.Repeat("a", 32), Correlation: &proto.VMPrepareCorrelationV1{Version:1,Session:"abcdefgh",Generation:strings.Repeat("b",32),NeedSHA256:strings.Repeat("c",64),Nonce:strings.Repeat("d",32)}}
 }
 
 func TestVMPrepareRejectsUnsafeStateAndReusedNonceBeforeEffects(t *testing.T) {

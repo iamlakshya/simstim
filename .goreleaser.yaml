@@ -9,6 +9,12 @@ before:
     - sh -c 'for arch in amd64 arm64; do CGO_ENABLED=0 GOOS=linux GOARCH=$arch go build -trimpath -ldflags "-s -w -X {{ .Env.MODULE }}/internal/version.Version={{ .Version }}" -o internal/client/helpers/host-linux-$arch ./cmd/host; done'
     # The shadow terminal (Zig 0.17), embedded next to the host helpers.
     - sh -c 'cd vt && zig build linux && cd .. && for arch in amd64 arm64; do cp vt/zig-out/linux/shadow-vt-$arch internal/client/helpers/vt-linux-$arch; done'
+    # Pack this release's helpers into the prepared tools image and verity tree.
+    - guest/build.sh --only-tools all
+    # Mirror the pinned VMMs and their source, then embed their actual raw
+    # file digests with the helpers. The release job checks the uploaded files.
+    - scripts/mirror-vmm.sh {{ .Version }}
+    - go run ./cmd/supply write -release {{ .Version }} -guest build/guest -require-guest -vmm build/vmm -require-vmm internal/client/helpers
     # Man pages and shell completions, from the command tree.
     - go run ./cmd/docgen -out build/reference -man build/man -completions build/completions
 
@@ -38,7 +44,7 @@ archives:
     ids: [cli]
     formats: [tar.gz]
     name_template: "{{ .Env.APP_NAME }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
-    files: [LICENSE, NOTICE, README.md, build/man/*, build/completions/*]
+    files: [LICENSE, NOTICE, third-party-licences/*, README.md, build/man/*, build/completions/*]
   # The host helpers and shadow terminals the client embeds, for a client
   # built with go install, which fetches this bundle (internal/client/helpers).
   - id: helpers
@@ -46,18 +52,35 @@ archives:
     formats: [tar.gz]
     name_template: "helpers_{{ .Version }}"
     files:
+      - LICENSE
+      - NOTICE
+      - third-party-licences/*
       - src: internal/client/helpers/host-linux-*
         strip_parent: true
       - src: internal/client/helpers/vt-linux-*
+        strip_parent: true
+      - src: internal/client/helpers/release-manifest.json
         strip_parent: true
   - id: host
     ids: [host]
     formats: [tar.gz]
     name_template: "{{ .Env.APP_NAME }}-host_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
-    files: [LICENSE, NOTICE]
+    files: [LICENSE, NOTICE, third-party-licences/*]
 
 checksum:
   name_template: checksums.txt
+  extra_files:
+    - glob: internal/client/helpers/host-linux-amd64
+      name_template: "{{ .Env.APP_NAME }}-host-linux-amd64"
+    - glob: internal/client/helpers/host-linux-arm64
+      name_template: "{{ .Env.APP_NAME }}-host-linux-arm64"
+    - glob: internal/client/helpers/vt-linux-amd64
+      name_template: "{{ .Env.APP_NAME }}-vt-linux-amd64"
+    - glob: internal/client/helpers/vt-linux-arm64
+      name_template: "{{ .Env.APP_NAME }}-vt-linux-arm64"
+    - glob: build/guest/assets/*
+    - glob: build/vmm/assets/*
+    - glob: internal/client/helpers/release-manifest.json
 
 sboms:
   - artifacts: archive
@@ -81,6 +104,18 @@ signs:
 release:
   draft: true
   prerelease: auto
+  # Upload the manifest only after the workflow checks these raw files.
+  extra_files:
+    - glob: internal/client/helpers/host-linux-amd64
+      name_template: "{{ .Env.APP_NAME }}-host-linux-amd64"
+    - glob: internal/client/helpers/host-linux-arm64
+      name_template: "{{ .Env.APP_NAME }}-host-linux-arm64"
+    - glob: internal/client/helpers/vt-linux-amd64
+      name_template: "{{ .Env.APP_NAME }}-vt-linux-amd64"
+    - glob: internal/client/helpers/vt-linux-arm64
+      name_template: "{{ .Env.APP_NAME }}-vt-linux-arm64"
+    - glob: build/guest/assets/*
+    - glob: build/vmm/assets/*
 
 # The Homebrew cask is always built into dist/. It is pushed to the tap only
 # when the HOMEBREW_TAP_TOKEN secret is set (docs: going public).

@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"slices"
 	"strings"
-	"time"
 
 	"github.com/iamlakshya/simstim/internal/agents"
 	"github.com/iamlakshya/simstim/internal/api"
@@ -310,7 +309,7 @@ func (s *Supervisor) guestABI(got string) bool {
 	if s.m.Wall != nil && s.m.Wall.Driver == driverPlain {
 		return got == proto.GuestPlainTestV1
 	}
-	if s.m.Wall != nil && s.m.Wall.Driver == "chv" {
+	if s.m.Wall != nil && (s.m.Wall.Driver == "chv" || s.m.Wall.Driver == "firecracker") {
 		return got == proto.GuestOwnedPTYV2
 	}
 	return got == proto.GuestPTY1000V1

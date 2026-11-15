@@ -9,6 +9,7 @@ import (
 // DenyPolicy adds a session deny through the existing canonical policy.add
 // operation. Revocation needs no allowance or host-tier confirmation.
 func (c *Conn) DenyPolicy(ctx context.Context, a api.PolicyAddArgs) (api.Rule, error) {
+	if a.Door==api.DoorPort{return c.changePortPolicy(ctx,a,false)}
 	var out api.Rule
 	if _, err := ReadPolicySettings(); err != nil {
 		return out, err

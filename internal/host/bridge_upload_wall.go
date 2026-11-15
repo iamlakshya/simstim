@@ -21,8 +21,9 @@ func (b *bridge) prepareWalledUpload(begin proto.UploadBegin) (*upload, int64, e
 	if err != nil || m.ID != begin.Session {
 		return nil, 0, UserError("not_found", "the upload's session record is unavailable", "List the sessions and choose an existing session.")
 	}
+	if begin.Directory && (begin.Path=="" || begin.Size!=0 || begin.Replace) { return nil,0,UserError("cp_path","invalid empty-directory upload declaration","Name one explicit guest directory without replacement or file bytes.") }
 	if m.Wall == nil {
-		if begin.Path != "" || begin.Replace {
+		if begin.Path != "" || begin.Replace || begin.Directory {
 			return nil, 0, UserError("not_walled", "explicit file destinations need a sandbox", "Start a walled session before copying files.")
 		}
 		return nil, MaxUpload, nil
@@ -42,7 +43,7 @@ func (b *bridge) prepareWalledUpload(begin proto.UploadBegin) (*upload, int64, e
 		return nil, 0, UserError("sandbox_stopped", "the sandbox is unavailable for an upload", "Resume the session, then upload the file again.")
 	}
 	required := []string{"put"}
-	if begin.Path != "" || begin.Replace {
+	if begin.Path != "" || begin.Replace || begin.Directory {
 		required = append(required, proto.FeatureFileTransferV1)
 	}
 	if err := requireSupervisorFeatures(hello, required...); err != nil {

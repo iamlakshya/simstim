@@ -121,6 +121,7 @@ func (s *Supervisor) closeRecord(kind, reason string) {
 		s.raiseError()
 	}
 	s.m.Status = s.endStatus()
+	if kind==host.EndStop {ev:=s.alertEvent(alerts.SandboxStopped);ev.Reason=reason;s.raise(ev)}
 }
 
 // endStatus is the session's last status, from the record. Its

@@ -15,11 +15,19 @@ func (c *Conn) ResolveNewWall(ctx context.Context, a NewArgs) (NewArgs, error) {
 	if err := ValidateWallRequest(a.Wall, a.Downgrade); err != nil {
 		return a, err
 	}
-	operation, err := openSettingsOperation(ctx)
+	var operation *settingsOperation
+	var err error
+	if request := grantRequestOf(ctx); request != nil {
+		operation, err = request.borrowNewSettings(ctx)
+	} else {
+		operation, err = openSettingsOperation(ctx)
+		if err == nil {
+			defer operation.Close()
+		}
+	}
 	if err != nil {
 		return a, err
 	}
-	defer operation.Close()
 	if _, err := operation.Settings(ctx); err != nil {
 		return a, err
 	}

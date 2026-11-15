@@ -3,7 +3,6 @@ package supervisor
 import (
 	"bufio"
 	"bytes"
-	"context"
 	"encoding/json"
 	"errors"
 	"math"
@@ -50,7 +49,7 @@ func (s *Supervisor) servePendingInputs(c *client, reader *bufio.Reader, request
 		return err
 	}
 	root := s.owner()
-	if begin.Session != root.id || begin.Summary == nil || len(begin.Summary.Repositories) != 0 {
+	if begin.Session != root.id || begin.Summary == nil || !begin.FinishOnly && len(begin.Summary.Repositories) != 0 {
 		return inputFailure("pending copies need their fresh copy-only declaration")
 	}
 	ctx, cancel := phaseclock.WithDeadline(root.lifetimeContext(), now().Add(inputHandshakeLimit))

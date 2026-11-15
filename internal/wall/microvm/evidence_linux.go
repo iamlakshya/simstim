@@ -30,14 +30,18 @@ type bootEvidence struct {
 }
 
 func evidenceKey(manifest supply.Manifest, facts api.CapProbe, identity string) (string, error) {
-	if err := validateBootRuntime(manifest, facts.Arch); err != nil {
+	return evidenceKeyFor(cloudHypervisorBackend, manifest, facts, identity)
+}
+
+func evidenceKeyFor(kind backendKind, manifest supply.Manifest, facts api.CapProbe, identity string) (string, error) {
+	if err := kind.validateRuntime(manifest, facts.Arch); err != nil {
 		return "", err
 	}
 	if facts.Kernel == "" || identity == "" {
 		return "", fmt.Errorf("the host kernel identity is missing")
 	}
 	items := make([]supply.Item, 0, 3)
-	for _, selector := range bootRoles {
+	for _, selector := range kind.roles() {
 		item, ok := manifest.Find(selector.Kind, selector.Name, facts.Arch)
 		if !ok {
 			return "", fmt.Errorf("the microvm runtime is missing %s", selector.Kind)
@@ -65,7 +69,7 @@ func (d *Driver) checkBootEvidence(manifest supply.Manifest, facts api.CapProbe)
 	if err != nil {
 		return err
 	}
-	key, err := evidenceKey(manifest, facts, identity)
+	key, err := evidenceKeyFor(d.kind, manifest, facts, identity)
 	if err != nil {
 		return err
 	}
@@ -104,7 +108,7 @@ func (d *Driver) recordBoot(ctx context.Context, manifest supply.Manifest, facts
 	if err != nil {
 		return err
 	}
-	key, err := evidenceKey(manifest, facts, identity)
+	key, err := evidenceKeyFor(d.kind, manifest, facts, identity)
 	if err != nil {
 		return err
 	}

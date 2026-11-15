@@ -34,7 +34,9 @@ var WallDriver string
 // from a fixed base, never from the login environment (spec 4.2). The
 // login environment only finds the agent's binary, which the guest then
 // runs by its full path.
-func newWalled(ctx context.Context, a NewArgs, driver string) (_ *SessionInfo, err error) {
+func newWalled(ctx context.Context, a NewArgs, driver string, original NewArgs) (_ *SessionInfo, err error) {
+	microVM:=driver=="chv" || driver=="firecracker"
+	if microVM && len(a.Mounts)>0{return nil,UserError("wall_mount","host folder mounts cannot enter a microvm","Use declared laptop inputs or copy files into its workspace.")}
 	intent, secrets, err := PrepareSecretDelivery(a.SecretDelivery, a.Secrets, driver != "plain", nil)
 	if err != nil {
 		return nil, err
@@ -70,9 +72,10 @@ func newWalled(ctx context.Context, a NewArgs, driver string) (_ *SessionInfo, e
 	}
 	// The login environment only finds the binary, as New does. It never
 	// reaches the guest.
-	login, err := LoginEnv(15 * time.Second)
-	if err != nil {
-		login = os.Environ()
+	var login []string
+	if !microVM {
+		login,err=LoginEnv(15*time.Second)
+		if err!=nil {return nil,UserError("agent_missing","cannot resolve the current host executable environment","Check the host login environment, then try again.")}
 	}
 	reservation, err := reserveSessionID(a.ID)
 	if err != nil {
@@ -86,18 +89,24 @@ func newWalled(ctx context.Context, a NewArgs, driver string) (_ *SessionInfo, e
 	defer func() { reservation.close(); operation.Close() }()
 	id := reservation.id
 	inline := a.Inline && known && len(a.Argv) == 0 && agent.Inline.Has()
+	if microVM {argv=vmCommand(argv)}
+	argv,err=SandboxShellCommand(a,policy,argv)
+	if err!=nil{return nil,err}
 	argv, hooks, sessionUUID := agentArgv(argv, a, agent, known, inline)
-	bin, err := lookPath(argv[0], envValue(login, "PATH"))
-	if err != nil {
-		return nil, UserError("agent_missing", argv[0]+" is not installed on this host", "Install it on the host, then try again.")
+	bin:=argv[0]
+	pathDirs:=[]string{"/opt/agents/bin"}
+	if !microVM {
+		bin,err=lookPath(argv[0],envValue(login,"PATH"))
+		if err!=nil{return nil,UserError("agent_missing",argv[0]+" is not installed on this host","Install it on the host, then try again.")}
+		bin,err=filepath.EvalSymlinks(bin)
+		if err!=nil{return nil,UserError("agent_missing","cannot resolve the agent executable","Reinstall the agent on this host, then try again.")}
+		argv[0]=bin;pathDirs=agentDirs(bin,envValue(login,"PATH"))
 	}
-	bin, err = filepath.EvalSymlinks(bin)
-	if err != nil {
-		return nil, UserError("agent_missing", "cannot resolve the agent executable", "Reinstall the agent on this host, then try again.")
-	}
-	argv[0] = bin
 	var filePlan *FilePlan
-	pathDirs := agentDirs(bin, envValue(login, "PATH"))
+	if microVM {
+		state,e:=allAgentState();if e!=nil{return nil,e}
+		filePlan=&FilePlan{State:state}
+	}
 	if driver == "process" || driver == "gvisor" {
 		home, e := os.UserHomeDir()
 		if e != nil {
@@ -170,11 +179,10 @@ func newWalled(ctx context.Context, a NewArgs, driver string) (_ *SessionInfo, e
 		Policy:  &policy, Layers: layers,
 	}
 	m.HostLabel = a.HostLabel
+	m.Wall.Floor,m.Wall.DowngradedFrom=a.Floor,a.DowngradedFrom
+	if microVM {m.Wall.Level="microvm";m.Wall.Reason="runs in its own guest kernel"}
 	m.SecretState = initialSecretState(intent)
 	m.Run.StartEnvelope = intent != nil
-	if err := ValidateManifestStart(m); err != nil {
-		return nil, err
-	}
 	if len(a.Argv) > 0 {
 		m.Agent.Command = slices.Clone(argv)
 	}
@@ -197,12 +205,11 @@ func newWalled(ctx context.Context, a NewArgs, driver string) (_ *SessionInfo, e
 		m.Wall.Level = driver
 		m.Wall.Reason = "shares the host kernel"
 	}
-	if err := admitReservedRuntime(ctx, operation, m, a); err != nil {
+	if err := admitReservedRuntime(ctx, operation, m, original); err != nil {
 		return nil, err
 	}
-	if driver == "process" || driver == "gvisor" {
-		m.Wall.Level = driver
-		m.Wall.Reason = "shares the host kernel"
+	if err:=ValidateManifestStart(m);err!=nil{return nil,err}
+	if driver=="process" || driver=="gvisor" || microVM {
 		var seed Seed
 		var e error
 		if !laptopPrimary {
@@ -239,7 +246,14 @@ func newWalled(ctx context.Context, a NewArgs, driver string) (_ *SessionInfo, e
 			return nil, UserError("wall_setup", p.Reason, brand.Name+" host prepare <host>")
 		}
 	}
-	if driver == "process" || driver == "gvisor" {
+	if microVM {
+		probe,err:=CapabilityProbe(ctx,"")
+		if err!=nil{return nil,err}
+		available:=false
+		for _,candidate:=range probe.Walls {if candidate.Driver==driver && candidate.Level=="microvm" && (candidate.OK || candidate.CanPrepare){available=true;break}}
+		if !available{return nil,UserError("wall_unavailable","the original selected microvm driver is not currently runnable","Run the host doctor and prepare this exact selected driver before starting again.")}
+	}
+	if driver=="process" || driver=="gvisor" || microVM {
 		if err := seedConnectionAlive(); err != nil {
 			return nil, err
 		}

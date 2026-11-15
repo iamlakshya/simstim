@@ -70,6 +70,10 @@ var loadPresets = sync.OnceValues(func() ([]compiledRule, error) {
 
 // Request describes a network flow or HTTP request to evaluate against policy.
 type Request struct {
+	door              api.Door // internal typed dimension; network callers leave it empty
+	scheme            string
+	query             string // immutable query of an inspected HTTP request
+	forceQuery        bool
 	withoutModelTools bool // internal probe through the same policy matcher
 	Host              string
 	Port              int
@@ -96,6 +100,7 @@ type Decision struct {
 }
 
 type compiledRule struct {
+	door       api.Door
 	ref        api.LayerRef
 	id         string
 	allow      bool

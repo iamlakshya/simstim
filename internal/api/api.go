@@ -106,6 +106,8 @@ type NewArgs struct {
 
 // SessionInfo is one row of the session list.
 type SessionInfo struct {
+	// Forwards is display-only state from the actual live supervisor.
+	Forwards []PortForwardInfo `json:"forwards,omitempty"`
 	CopiesPending bool      `json:"copies_pending,omitempty"`
 	Workspace     string    `json:"workspace,omitempty"`
 	Claimed       bool      `json:"claimed,omitempty"`
@@ -259,6 +261,9 @@ func (r RestoreResult) Text() string {
 
 // Port is a TCP port a session's processes listen on.
 type Port struct {
+	Claimed bool `json:"claimed,omitempty"`
+	Granted bool `json:"granted,omitempty"`
+	Reverse bool `json:"reverse,omitempty"`
 	Port    int    `json:"port"`
 	Address string `json:"address"`
 	PID     int    `json:"pid"`

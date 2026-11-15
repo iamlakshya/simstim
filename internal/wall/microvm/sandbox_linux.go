@@ -51,7 +51,7 @@ var _ wall.Driver = (*Driver)(nil)
 var _ wall.Sandbox = (*sandbox)(nil)
 
 func newSandbox(driver *Driver, spec wall.Spec, lease *os.File, mode string, owner context.Context) *sandbox {
-	return &sandbox{driver: driver, spec: spec, lease: lease, uid: mode, owner: owner, done: make(chan struct{}), exit: wall.Exit{Code: -1}}
+	return &sandbox{driver: driver, spec: cloneBindingSpec(spec), lease: lease, uid: mode, owner: owner, done: make(chan struct{}), exit: wall.Exit{Code: -1}}
 }
 
 func (s *sandbox) Start(ctx context.Context) (net.Conn, error) {
@@ -185,12 +185,13 @@ func (s *sandbox) Start(ctx context.Context) (net.Conn, error) {
 		s.Wait()
 		return nil, ctx.Err()
 	}
+	ownedConnection := &ownedGuestLink{Conn: checked}
 	s.mu.Lock()
-	s.connection = checked
+	s.connection = ownedConnection
 	s.helloChecked = true
 	s.bootFacts = facts
 	s.mu.Unlock()
-	return checked, nil
+	return ownedConnection, nil
 }
 
 func (s *sandbox) startFailed(err error) error {
@@ -361,7 +362,7 @@ func (s *sandbox) Destroy() error {
 	lease := s.lease
 	s.mu.Unlock()
 	if lease == nil {
-		lease, err = acquireVMLease(ctx, root)
+		lease, err = acquireVMLeaseFor(ctx, root, s.driver.kind)
 		if err != nil {
 			return err
 		}
@@ -370,7 +371,7 @@ func (s *sandbox) Destroy() error {
 	if err := jail.RemoveAll(ctx, vmDataDir(s.spec)); err != nil {
 		return err
 	}
-	if err := root.Remove(vmSpecName); err != nil && !os.IsNotExist(err) {
+	if err := root.Remove(s.driver.kind.name() + ".json"); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("remove microvm specification: %w", err)
 	}
 	s.releaseLease()

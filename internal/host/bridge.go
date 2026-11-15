@@ -27,7 +27,7 @@ import (
 )
 
 // Features this host helper offers. Clients check them before using a feature.
-var Features = []string{"attach.replay", "upload", "peek", "setup", "rename", "send", "hooks", "restore", "ports", "worktree", "folders", "alerts", "trace", api.FeatureSandboxReviewContext, api.FeatureSandboxCohort, inputtransfer.Feature, inputtransfer.FinishFeature, api.FeatureExecStream, api.FeatureSpawn, api.FeatureSandboxGroupRM, api.FeatureSandboxSnapshot, "session.id", agentbridge.Feature}
+var Features = []string{"attach.replay", "upload", "peek", "setup", "rename", "send", "hooks", "restore", "ports", "worktree", "folders", "alerts", "trace", api.FeatureSandboxReviewContext, api.FeatureSandboxCohort, inputtransfer.Feature, inputtransfer.PrimaryPolicyFeature, inputtransfer.FinishFeature, api.FeatureExecStream, api.FeatureSpawn, api.FeatureSandboxGroupRM, api.FeatureSandboxSnapshot, "session.id", agentbridge.Feature}
 
 type bridge struct {
 	copyMu                             sync.Mutex
@@ -156,6 +156,10 @@ func runBridge(in io.Reader, out io.Writer, owned OwnedBridgeOutput) (returned e
 		case proto.TRequest:
 			var req proto.Request
 			if json.Unmarshal(f.Payload, &req) == nil {
+				if req.Op=="port.reverse" {
+					if !wasFirst {err:=UserError("bad_request","reverse forwarding needs a dedicated connection","Open a fresh reverse continuation.");b.reply(req.ID,nil,err);return err}
+					return b.reverse(r,req)
+				}
 				if req.Op == "inputs.begin" || req.Op == inputtransfer.Describe {
 					if !wasFirst {
 						err := UserError("bad_request", "inputs require a dedicated connection", "Open a fresh input continuation.")
@@ -400,7 +404,7 @@ func (b *bridge) handle(req proto.Request) {
 		v, err := alertsRequest(req.Op, req.Args)
 		b.reply(req.ID, v, err)
 	default:
-		if !b.handleCopy(req) && !b.handlePolicy(req) && !b.handleAgentsDisk(req) && !b.handleRuntime(req) && !b.handleImages(req) && !b.handlePull(req) && !b.handleMore(req) && !b.handleDebug(req) {
+		if !b.handlePorts(req) && !b.handleSandbox(req) && !b.handleCopy(req) && !b.handlePolicy(req) && !b.handleAgentsDisk(req) && !b.handleRuntime(req) && !b.handleImages(req) && !b.handlePull(req) && !b.handleMore(req) && !b.handleDebug(req) {
 			b.reply(req.ID, nil, UserError("unknown_op", "unknown request "+req.Op, "Update the host helper."))
 		}
 	}

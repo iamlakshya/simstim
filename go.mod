@@ -15,6 +15,7 @@ require (
 	github.com/charmbracelet/x/vt v0.1.0
 	github.com/creack/pty v1.1.24
 	github.com/elastic/go-seccomp-bpf v1.6.0
+	github.com/godbus/dbus/v5 v5.2.2
 	github.com/klauspost/compress v1.20.1
 	github.com/landlock-lsm/go-landlock v0.11.0
 	github.com/muesli/cancelreader v0.2.2

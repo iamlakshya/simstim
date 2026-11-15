@@ -21,8 +21,17 @@ func requireRemoteGrantRequest(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if r := grantRequestOf(ctx); r != nil && requestGrantPurpose(r) != grantRemote {
-		return grantPurposeError()
+	if r := grantRequestOf(ctx); r != nil {
+		r.mu.Lock()
+		lifetimeErr := r.lifetimeErrorLocked()
+		purpose := r.purpose
+		r.mu.Unlock()
+		if lifetimeErr != nil {
+			return lifetimeErr
+		}
+		if purpose != grantRemote {
+			return grantPurposeError()
+		}
 	}
 	return nil
 }

@@ -40,6 +40,8 @@ const EmptyInputHash = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b
 
 // InputRepository describes one laptop bundle cloned under /work/Name.
 type InputRepository struct {
+	// Policy is the raw checked file at this exact selected commit, primary only.
+	Policy *RepositoryPolicy `json:"policy,omitempty"`
 	Name         string `json:"name"`
 	SourceBranch string `json:"source_branch,omitempty"`
 	Commit       string `json:"commit"`
@@ -75,7 +77,7 @@ type SessionInputs struct {
 // primary workspace. All mutable slices are cloned before a publication gate.
 func (p SessionInputs) Canonical() SessionInputs {
 	p.Files = slices.Clone(p.Files)
-	p.Repositories = slices.Clone(p.Repositories)
+	p.Repositories = CloneInputRepositories(p.Repositories)
 	slices.SortFunc(p.Files, func(a, b InputFile) int { return strings.Compare(a.Path, b.Path) })
 	return p
 }
@@ -121,7 +123,7 @@ func (p SessionInputs) Validate(copyMax, seedMax int64) error {
 		}
 	}
 	seen := make(map[string]bool, len(p.Repositories))
-	for _, repo := range p.Repositories {
+	for index, repo := range p.Repositories {
 		if !InputRepoName(repo.Name) || seen[repo.Name] || repo.Size <= 0 || !inputDigest(repo.SHA256) || !ValidGitOID(repo.Commit) {
 			return bad("invalid or duplicate input repository")
 		}
@@ -130,6 +132,9 @@ func (p SessionInputs) Validate(copyMax, seedMax int64) error {
 		}
 		if !inputText(repo.SourceBranch) || !inputText(repo.Origin) || repo.Size > seedMax {
 			return bad("input repositories exceed seed_max or contain invalid metadata")
+		}
+		if policy:=repo.Policy;policy!=nil {
+			if index!=0 || !ValidPolicyHash(policy.Hash) || policy.Layer.Kind!=LayerRepo || policy.Layer.Source!=SourceRepositoryFile || policy.Layer.Name!=policy.Repo || policy.Layer.ReviewedHash!="" {return bad("input policy is not the raw checked primary file")}
 		}
 		seen[repo.Name] = true
 	}
@@ -179,7 +184,7 @@ type InputSummary struct {
 func (s InputSummary) Equal(other InputSummary) bool {
 	return s.Version == other.Version && s.Nonce == other.Nonce && s.Digest == other.Digest &&
 		s.FileCount == other.FileCount && s.CopyBytes == other.CopyBytes && s.Identity == other.Identity &&
-		slices.Equal(s.Repositories, other.Repositories)
+		slices.EqualFunc(s.Repositories,other.Repositories,func(a,b InputRepository)bool{return a.Equal(b)})
 }
 
 func (p SessionInputs) summary() InputSummary {
@@ -200,7 +205,7 @@ func (p SessionInputs) Summary(copyMax, seedMax int64) (InputSummary, error) {
 	result := p.summary()
 	digest, err := p.Digest()
 	result.Digest = digest
-	result.Repositories = append([]InputRepository(nil), p.Repositories...)
+	result.Repositories = CloneInputRepositories(p.Repositories)
 	return result, err
 }
 

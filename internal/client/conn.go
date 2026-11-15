@@ -35,6 +35,14 @@ type Conn struct {
 	agentStoppedAt time.Time
 	agentClose     sync.Once
 
+	execReader *bufio.Reader
+	execReadDone chan struct{}
+	execReadOnce sync.Once
+	execBusy atomic.Int64
+	leaseMu sync.Mutex
+	leaser Leaser
+	execAlive time.Duration
+
 	proc   Proc
 	cancel context.CancelFunc
 	hint   string
@@ -197,6 +205,14 @@ func (c *Conn) closeAgentTransport() error {
 
 // Close ends the connection.
 func (c *Conn) Close() {
+	if c.execReader!=nil {
+		c.kill()
+		if output,ok:=c.proc.Stdout().(io.Closer);ok {_ = output.Close()}
+		_ = c.stdin.Close()
+		c.fail(ErrClosed)
+		// The actual mux/pump owner marks readDone only AFTER its read joins.
+		return
+	}
 	if c.agentOnly {
 		c.agentClose.Do(func() {
 			_ = c.closeAgentTransport()

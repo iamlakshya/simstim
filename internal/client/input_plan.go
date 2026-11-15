@@ -188,6 +188,11 @@ func buildSessionInputPlan(ctx context.Context, selection inputPlanSelection) (_
 		if err != nil {
 			return nil, err
 		}
+		if selected != nil {
+			// ONLY the original laptop primary owns this exact committed file.
+			// Keep the raw decoded policy; proposal answers stay in NewArgs.
+			seed.declaration.Policy = api.CloneRepositoryPolicy(selected.policy)
+		}
 		plan.seeds[seed.declaration.Name] = seed
 		plan.seedOrder = append(plan.seedOrder, seed)
 		plan.plan.Repositories = append(plan.plan.Repositories, seed.declaration)
@@ -229,9 +234,7 @@ func (p *SessionInputPlan) Summary() (api.InputSummary, error) {
 		return api.InputSummary{}, &UserError{Code: "inputs_closed", Msg: "the local input plan is closed",
 			Hint: "Prepare the local inputs again.", Kind: KindFailed}
 	}
-	result := p.summary
-	result.Repositories = slices.Clone(result.Repositories)
-	return result, nil
+	return p.summary.Clone(), nil
 }
 
 // Environment returns the already validated ordinary environment. The actual
@@ -275,7 +278,7 @@ func (p *SessionInputPlan) withSources(ctx context.Context, publish func(api.Ses
 		},
 		Repository: func(ctx context.Context, repository api.InputRepository, out io.Writer) error {
 			seed := p.seeds[repository.Name]
-			if seed == nil || seed.declaration != repository {
+			if seed == nil || !seed.declaration.Equal(repository) {
 				return copyInputError("seed_changed", "the source no longer matches the sealed repository declaration")
 			}
 			return seed.write(ctx, out, p.seedMax)

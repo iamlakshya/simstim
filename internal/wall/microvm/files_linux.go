@@ -49,7 +49,7 @@ func (d *Driver) openBootFiles(ctx context.Context, spec wall.Spec) (files *boot
 		return files, err
 	}
 	defer store.Close()
-	for _, role := range bootRoles {
+	for _, role := range d.kind.roles() {
 		item, ok := spec.VM.Runtime.Find(role.Kind, role.Name, spec.VM.Image.Arch)
 		if !ok {
 			return files, fmt.Errorf("client runtime is missing %s", role.Kind)

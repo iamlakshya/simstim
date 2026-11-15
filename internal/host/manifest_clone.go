@@ -13,7 +13,7 @@ func CloneManifest(m Manifest) Manifest {
 	m.SecretState = api.CloneSessionSecretState(m.SecretState)
 	if m.Inputs != nil {
 		copy := *m.Inputs
-		copy.Repositories = slices.Clone(copy.Repositories)
+		copy.Repositories = api.CloneInputRepositories(copy.Repositories)
 		m.Inputs = &copy
 	}
 	m.Env = slices.Clone(m.Env)

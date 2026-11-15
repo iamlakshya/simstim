@@ -17,8 +17,11 @@ func PrepareRepositoryNewArgs(a NewArgs) (NewArgs, error) {
 			return a, UserError("bad_request", "new may carry only laptop policy sources", "Let the host read the repository policy file.")
 		}
 	}
-	if a.Inputs != nil && len(a.Inputs.Repositories) > 0 && a.Cwd == "" {
-		return a, nil
+	if a.Inputs!=nil {
+		for index,repository:=range a.Inputs.Repositories {
+			if repository.Policy!=nil && (a.Cwd!="" || index!=0) {return a,UserError("bad_request","only the original laptop primary may declare repository policy","Prepare the selected primary policy and inputs again.")}
+		}
+		if len(a.Inputs.Repositories)>0 && a.Cwd=="" {return prepareLaptopPrimaryPolicy(a)}
 	}
 	info, err := repositorySourceInfo(a.Cwd)
 	if err != nil {

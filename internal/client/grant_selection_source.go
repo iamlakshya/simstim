@@ -53,6 +53,9 @@ func bindGrantSelectionSource(ctx context.Context, host string, source hostState
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if err := r.lifetimeErrorLocked(); err != nil {
+		return err
+	}
 	if r.selection == nil {
 		r.selection = &grantSelectionSource{host: host, source: source}
 		return nil

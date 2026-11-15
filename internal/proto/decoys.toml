@@ -1,0 +1,35 @@
+# These files are inert with the default image's unconfigured tools.
+# Every new row must have the same default-use and recording-egress tests.
+version = 1
+
+[[decoy]]
+name = "aws"
+path = ".aws/credentials"
+sources = ["https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-files.html", "https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_identifiers.html"]
+hosts = ["sts.amazonaws.com", "sts.*.amazonaws.com"]
+template = "[prod-admin]\naws_access_key_id = {{access_key}}\naws_secret_access_key = {{secret_key}}\n"
+
+[[decoy.values]]
+name = "access_key"
+prefix = "AKIA"
+length = 20
+alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"
+
+[[decoy.values]]
+name = "secret_key"
+prefix = ""
+length = 40
+alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789/+"
+
+[[decoy]]
+name = "git"
+path = ".git-credentials"
+sources = ["https://git-scm.com/docs/git-credential-store", "https://github.blog/engineering/platform-security/behind-githubs-new-authentication-token-formats/"]
+hosts = ["github.com", "api.github.com"]
+template = "https://deploy:{{token}}@github.com\n"
+
+[[decoy.values]]
+name = "token"
+prefix = "ghp_"
+length = 40
+alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"

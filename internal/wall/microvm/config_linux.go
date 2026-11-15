@@ -35,12 +35,16 @@ type savedVM struct {
 }
 
 func readVMRecord(dir string) (savedVM, error) {
+	return readVMRecordFor(dir, cloudHypervisorBackend)
+}
+
+func readVMRecordFor(dir string, kind backendKind) (savedVM, error) {
 	root, err := cachefs.OpenPrivateRoot(dir, false)
 	if err != nil {
 		return savedVM{}, err
 	}
 	defer root.Close()
-	file, err := cachefs.OpenFile(root, vmSpecName, os.O_RDONLY, 0o600)
+	file, err := cachefs.OpenFile(root, kind.name()+".json", os.O_RDONLY, 0o600)
 	if err != nil {
 		return savedVM{}, err
 	}
@@ -74,7 +78,7 @@ func (d *Driver) prepare(ctx context.Context, spec wall.Spec, create bool, mode 
 		return nil, err
 	}
 	defer root.Close()
-	lease, err := acquireVMLease(ctx, root)
+	lease, err := acquireVMLeaseFor(ctx, root, d.kind)
 	if err != nil {
 		return nil, err
 	}
@@ -96,7 +100,12 @@ func (d *Driver) prepare(ctx context.Context, spec wall.Spec, create bool, mode 
 }
 
 func acquireVMLease(ctx context.Context, root *os.Root) (*os.File, error) {
-	lease, err := cachefs.OpenFile(root, "chv.lock", os.O_CREATE|os.O_RDWR, 0o600)
+	return acquireVMLeaseFor(ctx, root, cloudHypervisorBackend)
+}
+
+func acquireVMLeaseFor(ctx context.Context, root *os.Root, kind backendKind) (*os.File, error) {
+	name := kind.name() + ".lock"
+	lease, err := cachefs.OpenFile(root, name, os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
 		return nil, err
 	}
@@ -122,7 +131,7 @@ func acquireVMLease(ctx context.Context, root *os.Root) (*os.File, error) {
 		case <-timer.C:
 		}
 	}
-	if _, err := cachefs.ValidateFile(root, "chv.lock", lease, 0o600); err != nil {
+	if _, err := cachefs.ValidateFile(root, name, lease, 0o600); err != nil {
 		lease.Close()
 		return nil, err
 	}
@@ -130,7 +139,12 @@ func acquireVMLease(ctx context.Context, root *os.Root) (*os.File, error) {
 }
 
 func writeVMSpec(root *os.Root, spec wall.Spec, mode string) error {
-	if _, err := root.Lstat(vmSpecName); err == nil {
+	kind, err := backendForSpec(spec)
+	if err != nil {
+		return err
+	}
+	recordName := kind.name() + ".json"
+	if _, err := root.Lstat(recordName); err == nil {
 		return fmt.Errorf("this session already has a microvm specification")
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("inspect microvm specification: %w", err)
@@ -146,7 +160,7 @@ func writeVMSpec(root *os.Root, spec wall.Spec, mode string) error {
 	if _, err := rand.Read(nonce[:]); err != nil {
 		return fmt.Errorf("name microvm specification: %w", err)
 	}
-	name := ".chv-" + hex.EncodeToString(nonce[:])
+	name := "." + kind.name() + "-" + hex.EncodeToString(nonce[:])
 	file, err := cachefs.OpenFile(root, name, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 	if err != nil {
 		return err
@@ -158,7 +172,7 @@ func writeVMSpec(root *os.Root, spec wall.Spec, mode string) error {
 	if err := errors.Join(writeErr, syncErr, closeErr); err != nil {
 		return fmt.Errorf("write microvm specification: %w", err)
 	}
-	if err := root.Rename(name, vmSpecName); err != nil {
+	if err := root.Rename(name, recordName); err != nil {
 		return fmt.Errorf("publish microvm specification: %w", err)
 	}
 	dir, err := root.Open(".")

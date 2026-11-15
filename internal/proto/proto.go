@@ -397,6 +397,8 @@ type Resize struct {
 
 // Ended reports that the agent exited.
 type Ended struct {
+	// Claimed identifies an end reported inside the guest, never a native exit.
+	Claimed bool `json:"claimed,omitempty"`
 	ExitCode int    `json:"exit_code"`
 	Signal   string `json:"signal,omitempty"`
 	OOM      bool   `json:"oom,omitempty"`
@@ -404,6 +406,8 @@ type Ended struct {
 
 // UploadBegin starts an upload of a file into a session's paste folder.
 type UploadBegin struct {
+	// Directory is one exact empty folder with an explicit guest Path.
+	Directory bool `json:"directory,omitempty"`
 	// Path and Replace are used only after file-transfer-v1 negotiation.
 	Path    string `json:"path,omitempty"`
 	Replace bool   `json:"replace,omitempty"`

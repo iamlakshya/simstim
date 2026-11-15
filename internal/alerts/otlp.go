@@ -20,6 +20,7 @@ import (
 type otlpValue struct {
 	String *string `json:"stringValue,omitempty"`
 	Int    *string `json:"intValue,omitempty"`
+	Bool   *bool   `json:"boolValue,omitempty"`
 }
 
 type otlpAttribute struct {
@@ -47,13 +48,23 @@ func otlpBody(ev Event) ([]byte, error) {
 	if ev.Signal != "" {
 		attrs = append(attrs, otlpString("process.exit.signal", ev.Signal))
 	}
+	if ev.ExitFrom != "" {
+		attrs = append(attrs, otlpString("event.exit_from", ev.ExitFrom))
+	}
+	if ev.DetailFrom != "" {
+		attrs = append(attrs, otlpString("event.detail_from", ev.DetailFrom))
+	}
+	if ev.Claimed {
+		claimed := true
+		attrs = append(attrs, otlpAttribute{Key: "event.claimed", Value: otlpValue{Bool: &claimed}})
+	}
 	if ev.ExitCode != nil {
 		code := strconv.Itoa(*ev.ExitCode)
 		attrs = append(attrs, otlpAttribute{Key: "process.exit.code", Value: otlpValue{Int: &code}})
 	}
 	severity, level := 9, "INFO"
 	switch ev.Event {
-	case Failed, OOM, SandboxError, HealthDegraded:
+	case Failed, OOM, SandboxError, HealthDegraded, DiskFull, LinkSilent:
 		severity, level = 17, "ERROR"
 	}
 	text := ev.Text()

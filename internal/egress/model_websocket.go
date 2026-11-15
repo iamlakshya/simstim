@@ -15,11 +15,12 @@ func (s *Server) inspectModelWebSocket(scope *originRequest, handshake *modelReq
 	if opcode >= webSocketClose {
 		return input, nil
 	}
+	current := handshake
 	refuse := func(feature string) (io.ReadCloser, error) {
 		s.emitAudit(s.formatAudit(AuditEntry{Host: scope.request.Host, Port: scope.request.Port,
 			Mode: "intercept", Method: scope.request.Method, Path: scope.request.Path,
-			Status: 403, Decision: "deny", Rule: "model:" + feature}))
-		return nil, modelWebSocketRefusal{line: s.modelRefusalLine(handshake, feature)}
+			Status: 403, Decision: "deny", Rule: s.modelAuditRule(current, feature)}))
+		return nil, modelWebSocketRefusal{line: s.modelRefusalLine(current, feature)}
 	}
 	if opcode != 1 {
 		return refuse("model text message")
@@ -29,6 +30,7 @@ func (s *Server) inspectModelWebSocket(scope *originRequest, handshake *modelReq
 		return refuse("complete model JSON")
 	}
 	model := &modelRequest{request: handshake.request, guard: handshake.guard, webSocket: true}
+	current = model
 	if err := model.inspect(body, true); err != nil {
 		clear(body)
 		return refuse("model request type")

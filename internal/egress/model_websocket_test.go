@@ -53,7 +53,7 @@ func modelUpgradeOrigin(writer http.ResponseWriter, request *http.Request) (net.
 
 func TestModelWebSocketSharesFramingAndRefusesWholeMessageWithSafe1008(t *testing.T) {
 	const allowed = `{"type":"response.create","tools":[{"type":"function","name":"local"}],"input":[]}`
-	const refused = `{"type":"response.create","tools":[{"type":"mcp","server_url":"https://example.com"}],"input":[]}`
+	const refused = `{"type":"response.create","tools":[{"type":"code_interpreter"}],"input":[]}`
 	originResult := make(chan error, 1)
 	f := newModelHTTPFixture(t, "codex", api.Policy{Preset: api.PresetLocked}, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		conn, buffer, err := modelUpgradeOrigin(w, r)
@@ -93,7 +93,7 @@ func TestModelWebSocketSharesFramingAndRefusesWholeMessageWithSafe1008(t *testin
 		t.Fatal(err)
 	}
 	closeFrame, err := wsReadTestFrame(reader)
-	if err != nil || closeFrame.opcode != 8 || len(closeFrame.payload) < 2 || binary.BigEndian.Uint16(closeFrame.payload[:2]) != 1008 || len(closeFrame.payload) > 125 || !utf8.Valid(closeFrame.payload[2:]) || !strings.Contains(string(closeFrame.payload[2:]), "may not use mcp") {
+	if err != nil || closeFrame.opcode != 8 || len(closeFrame.payload) < 2 || binary.BigEndian.Uint16(closeFrame.payload[:2]) != 1008 || len(closeFrame.payload) > 125 || !utf8.Valid(closeFrame.payload[2:]) || (!strings.Contains(string(closeFrame.payload[2:]), "code_interpreter") || !strings.Contains(string(closeFrame.payload[2:]), "Try:")) {
 		t.Fatalf("unsafe model refusal close: %+v, %v", closeFrame, err)
 	}
 	select {
@@ -106,7 +106,7 @@ func TestModelWebSocketSharesFramingAndRefusesWholeMessageWithSafe1008(t *testin
 	}
 	found := false
 	for _, audit := range f.env.waitAudits(t, 1) {
-		if audit.Decision == "deny" && audit.Rule == "model:mcp" {
+		if audit.Decision == "deny" && strings.HasPrefix(audit.Rule, "model:code_execution/") && strings.Contains(audit.Rule, "code_interpreter") {
 			found = true
 		}
 	}

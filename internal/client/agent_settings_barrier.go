@@ -41,6 +41,7 @@ type agentSettingsBarrier struct {
 	ctx             context.Context
 	mode            agentSettingsMode
 	snapshot        *agentSettingsSnapshot
+	scope           *agentMetadataScope
 	validated, used bool
 }
 
@@ -56,6 +57,14 @@ func (b *agentSettingsBarrier) check() error {
 	}
 	if err := b.snapshot.check(); err != nil {
 		return agentSettingsFailure(err)
+	}
+	if b.scope != nil {
+		if b.scope.settings != b.snapshot || b.scope.mode != b.mode {
+			return validatedConfigScopeError()
+		}
+		if err := b.scope.check(b.ctx); err != nil {
+			return err
+		}
 	}
 	b.used = true
 	return nil

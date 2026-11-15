@@ -44,6 +44,8 @@ const heartbeatEvery = 5 * time.Second
 
 // Init is the guest init of one sandbox.
 type Init struct {
+	portWG sync.WaitGroup
+	reversePorts map[string]*reverseListener
 	copySlots       chan struct{}
 	fileWG          sync.WaitGroup
 	lifetime        context.Context
@@ -169,6 +171,8 @@ func (g *Init) Serve() {
 			continue
 		}
 		switch st.Kind() {
+		case link.KindPort:
+			g.acceptPort(st)
 		case link.KindCtl:
 			go g.serveCtl(st)
 		case link.KindGet:
@@ -227,6 +231,7 @@ func (g *Init) end() {
 		if g.vm != nil {
 			g.vm.beginStop()
 		}
+		g.stopPorts()
 		g.stopInputs()
 		g.stopBundles()
 		g.stopExecs()

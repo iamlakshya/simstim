@@ -97,10 +97,14 @@ func (f policyLayerFlags) file(ctx context.Context) (client.FileLayer, error) {
 }
 
 func policyTarget(args []string) (api.Door, string, error) {
-	if len(args) == 2 && args[0] != string(api.DoorNet) {
-		return "", "", policyUsage(fmt.Sprintf("the %q door is not available in this version", client.CleanLine(args[0])), "Pass net, or leave the door out.", "bad_door")
+	door := api.DoorNet
+	if len(args) == 2 {
+		door = api.Door(args[0])
 	}
-	return api.DoorNet, args[len(args)-1], nil
+	if door != api.DoorNet && door != api.DoorPort {
+		return "", "", policyUsage(fmt.Sprintf("the %q door is not available in this version", client.CleanLine(string(door))), "Pass net or port, or leave the door out for net.", "bad_door")
+	}
+	return door, args[len(args)-1], nil
 }
 
 func policyUntil(value string, now time.Time) (time.Time, error) {

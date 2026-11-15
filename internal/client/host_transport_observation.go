@@ -44,13 +44,14 @@ type hostTransportStamp struct {
 }
 
 type hostTransportAttempt struct {
-	kind        hostTransportKind
-	host        Host
-	observation *HostStateObservation
-	op          *heldLock
-	priorID     string
-	active      atomic.Bool
-	finished    atomic.Bool
+	kind         hostTransportKind
+	host         Host
+	observation  *HostStateObservation
+	op           *heldLock
+	priorID      string
+	continuation *hostTransportExpectation
+	active       atomic.Bool
+	finished     atomic.Bool
 }
 
 func beginHostTransportObservation(ctx context.Context, h Host) (context.Context, func(), *hostTransportAttempt, error) {
@@ -164,6 +165,9 @@ func finishHostTransportObservation(ctx context.Context, attempt *hostTransportA
 		c.proc == nil || c.route.t == nil ||
 		c.HostID() != "" && !ValidHostID(c.HostID()) || !liveHostTransportConn(c) {
 		return hostStateRemovalError("the accepted hello has no exact original transport attempt")
+	}
+	if attempt.continuation != nil {
+		return finishHostContinuationObservation(ctx, attempt, c)
 	}
 	stamp := &hostTransportStamp{kind: attempt.kind, host: attempt.host, stateDir: StateDir(), hostsPath: hostsPath(),
 		conn: c, proc: c.proc, transport: c.route.t, hostID: c.HostID(), priorID: attempt.priorID, idChanged: c.hostIDChanged, agentOnly: c.agentOnly, features: slices.Clone(c.Features)}
@@ -311,6 +315,9 @@ func checkHostTransportAttempt(ctx context.Context, attempt *hostTransportAttemp
 		!SameEntry(attempt.host, h) || ctx.Value(hostMembershipContextKey{}) != nil || ctx.Value(hostMutationContextKey{}) != nil ||
 		ctx.Value(hostForgetMembershipKey{}) != nil || ctx.Value(hostStateInspectionKey{}) != nil || ctx.Value(hostTerminalInspectionKey{}) != nil {
 		return hostStateRemovalError("the transport action has no same active unfinished original attempt")
+	}
+	if attempt.continuation != nil {
+		return attempt.continuation.check(ctx, h)
 	}
 	if attempt.kind == hostTransportProvisional {
 		saved, err := SavedEntry(h.Name)

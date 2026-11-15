@@ -28,7 +28,17 @@ helpers:
         CGO_ENABLED=0 GOOS=linux GOARCH=$arch go build -trimpath -ldflags '{{ldflags}}' \
             -o {{helpers}}/host-linux-$arch ./cmd/host
     done
+    {{just_executable()}} _manifest
     ls -l {{helpers}}
+
+# Write the release manifest from the helpers and any prepared VMM inputs.
+_manifest:
+    go run ./cmd/supply write -release '{{version}}' -guest build/guest -vmm build/vmm {{helpers}}
+
+# Download and verify the pinned VMMs, without starting them.
+mirror-vmm:
+    scripts/mirror-vmm.sh '{{version}}'
+    {{just_executable()}} _manifest
 
 # Build the shadow terminal (vt/, Zig 0.17) for every host platform, into the client's embed folder.
 vt:
@@ -51,6 +61,7 @@ vt:
     for arch in amd64 arm64; do
         cp vt/zig-out/linux/shadow-vt-$arch {{helpers}}/vt-linux-$arch
     done
+    {{just_executable()}} _manifest
     ls -l {{helpers}}/vt-linux-*
 
 # Build the shadow terminal if Zig 0.17 is installed; otherwise say so and go on
@@ -72,8 +83,18 @@ _vt-if-zig:
         {{just_executable()}} vt
     fi
 
+# Build the kernel and tools image with the pinned builder (ARCH=amd64, arm64 or all).
+guest *args: helpers vt
+    guest/build.sh {{args}}
+    {{just_executable()}} _manifest
+
+# Boot the built guest under the pinned Cloud Hypervisor (Linux with KVM).
+guest-boot *args:
+    guest/boot-test.sh --print-console {{args}}
+
 # Build the helpers, then the client for this machine, into ./bin.
 build: helpers _vt-if-zig
+    {{just_executable()}} _manifest
     mkdir -p bin
     CGO_ENABLED=0 go build -trimpath -ldflags '{{ldflags}}' -o bin/{{name}} .
     cp {{helpers}}/host-linux-amd64 bin/{{name}}-host-linux-amd64

@@ -5,7 +5,9 @@ package supervisor
 import "github.com/iamlakshya/simstim/internal/host"
 
 func (s *Supervisor) prepareVMResources() (sandbox, error) {
-	factory, err := host.CloudHypervisorResourcesWithPublisherV1(s.publishVMReferences)
+	driver,err:=s.protectedVMDriver()
+	if err!=nil{return nil,err}
+	factory, err := host.MicroVMResourcesWithPublisherV1(driver,s.publishVMReferences)
 	if err != nil {
 		return nil, err
 	}

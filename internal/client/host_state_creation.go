@@ -29,6 +29,7 @@ type hostCreationReservation struct {
 	sourceBirth           *hostMachineSourceBirth
 	sourceRecordAttempted bool
 	sourceProducerEntered bool
+	finished              atomic.Bool
 }
 
 // BeginHostCreationContext owns only an empty key stage and the actual OP.
@@ -112,6 +113,11 @@ func BeginHostCreationContext(ctx context.Context, request HostCreationRequest) 
 		abort()
 		return ctx, nil, err
 	}
+	if err := bindHostCreationHeldOperation(owned, observation); err != nil {
+		abort()
+		unlock()
+		return ctx, nil, err
+	}
 	release := sync.OnceFunc(func() {
 		// No membership lease is held here. The exact old abort cannot remove
 		// a new connect/setup stage which superseded this provider stage.
@@ -190,11 +196,7 @@ func BindHostCreationResultContext(ctx context.Context, result Host) (Host, erro
 			return err
 		}
 		if o.creation.bound {
-			if !SameEntry(o.prospective, result) {
-				return hostStateRemovalError("the creation attempt already bound another result")
-			}
-			result = cloneObservationHost(o.prospective)
-			return nil
+			return hostStateRemovalError("the actual creation result was already bound once")
 		}
 		result = cloneObservationHost(result)
 		result.Machine.Created = time.Now().UTC().Format(time.RFC3339Nano)

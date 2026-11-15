@@ -12,16 +12,20 @@ func (r *GrantRequest) borrowNewSettings(ctx context.Context) (*settingsOperatio
 		return nil, grantOperationError()
 	}
 	r.mu.Lock()
-	if r.preparationClosed {
+	if err := r.lifetimeErrorLocked(); err != nil {
 		r.mu.Unlock()
-		return nil, grantOperationError()
+		return nil, err
 	}
 	if r.preparationSettings != nil {
 		operation := r.preparationSettings
 		r.mu.Unlock()
 		return operation, operation.Revalidate(ctx)
 	}
+	lifetime := r.requestContext
 	r.mu.Unlock()
+	if lifetime == nil {
+		return nil, grantOperationError()
+	}
 	operation, err := openSettingsOperation(ctx)
 	if err != nil {
 		return nil, err
@@ -34,11 +38,15 @@ func (r *GrantRequest) borrowNewSettings(ctx context.Context) (*settingsOperatio
 		return nil, errors.Join(err, operation.Close())
 	}
 	r.mu.Lock()
-	if r.preparationClosed {
+	if r.preparationClosed || r.ending {
 		r.mu.Unlock()
 		return nil, errors.Join(grantOperationError(), operation.Close())
 	}
 	if r.preparationSettings == nil {
+		if err := operation.retainRequestLifetime(ctx, lifetime); err != nil {
+			r.mu.Unlock()
+			return nil, errors.Join(err, operation.Close())
+		}
 		r.preparationSettings = operation
 		r.mu.Unlock()
 		return operation, nil

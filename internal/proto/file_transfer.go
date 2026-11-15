@@ -11,6 +11,7 @@ const FileTransferChunkMaxV1 = 1 << 20
 
 // FilePutHeaderV1 opens one put stream. An empty Path selects the paste folder.
 type FilePutHeaderV1 struct {
+	Directory bool `json:"directory,omitempty"`
 	Version int    `json:"v"`
 	Name    string `json:"name"`
 	Size    int64  `json:"size"`

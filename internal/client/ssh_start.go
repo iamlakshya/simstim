@@ -2,6 +2,7 @@ package client
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"sync"
@@ -54,6 +55,12 @@ func (s *SSH) beginSSHStart(ctx context.Context, kind string) (context.Context, 
 		release()
 		return ctx, nil, (HostChange{Kind: kind, Was: &expected, Now: &expected}).changed(saved)
 	}
+	if grantRequestOf(ctx) != nil {
+		if err := bindRequestLocalSource(ctx, expected); err != nil {
+			release()
+			return ctx, nil, err
+		}
+	}
 	// The canonical pin path rejects an absent entry without an owned stage.
 	// It never turns a removed host's orphan pin into a connection.
 	return ctx, release, nil
@@ -62,7 +69,12 @@ func (s *SSH) beginSSHStart(ctx context.Context, kind string) (context.Context, 
 // RunShell gives a login shell the supplied terminal streams. It checks the
 // current saved host and environment when the shell actually starts, and
 // releases the host lock before waiting for the shell to end.
-func (s *SSH) RunShell(ctx context.Context, stdin io.Reader, stdout, stderr io.Writer) error {
+func (s *SSH) RunShell(ctx context.Context, stdin io.Reader, stdout, stderr io.Writer) (returned error) {
+	ctx, finishNative, err := s.beginNativeSource(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { returned = errors.Join(returned, finishNative()) }()
 	ctx, release, err := s.beginSSHStart(ctx, "shell")
 	if err != nil {
 		return err

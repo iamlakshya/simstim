@@ -85,8 +85,9 @@ func (s *Supervisor) applyLivePolicyAdd(a api.PolicyAddArgs) (*api.Rule, *proto.
 	s.m.Policy, s.m.Layers = &pol, layers
 	snap := s.snapshot()
 	s.mu.Unlock()
-	_ = s.save(&snap, false)
-	s.audit.write("rule", map[string]any{"op": "add", "id": rule.ID, "allow": rule.Allow, "target": rule.Target, "once": rule.Once})
+	if err:=s.save(&snap,false);err!=nil{s.failPolicySave(ep);return nil,toProtoErr(err)}
+	if err:=s.reconcilePorts();err!=nil{return nil,toProtoErr(err)}
+	s.audit.write("rule", map[string]any{"op": "add", "id": rule.ID, "allow": rule.Allow, "target": rule.Target, "once": rule.Once, "door": rule.Door, "mode": rule.Mode, "tools": rule.Tools, "methods": rule.Methods, "grant_id": rule.GrantID, "until": rule.Until})
 	return &rule, nil
 }
 
@@ -111,7 +112,8 @@ func (s *Supervisor) applyLivePolicyRm(a api.PolicyRmArgs) (int, *proto.Error) {
 	s.m.Policy, s.m.Layers = &pol, layers
 	snap := s.snapshot()
 	s.mu.Unlock()
-	_ = s.save(&snap, false)
+	if err:=s.save(&snap,false);err!=nil{s.failPolicySave(ep);return 0,toProtoErr(err)}
+	if err:=s.reconcilePorts();err!=nil{return 0,toProtoErr(err)}
 	s.audit.write("rule", map[string]any{"op": "rm", "id": a.ID, "target": a.Target, "removed": removed})
 	return removed, nil
 }

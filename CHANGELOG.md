@@ -6,6 +6,56 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ### Added
 
+- Managed Lima SSH transports retain their original native configuration restriction through key checks, command startup and the owned process wait. Port forwards recheck the saved request Source at their physical start.
+
+- The sandbox guide lists each decoy credential, its inactive form and how to turn decoys off.
+
+- Sandbox forwarding grants exact guest loopback ports through private host sockets. Reverse forwarding exposes one chosen laptop loopback service to an own-host sandbox and ends its guest listener with the connection. Port claims and actual forwards stay separate in the launcher.
+
+- Sandboxes hold decoy credential files, and a use of one raises an alert. `[sandbox] decoys = false` turns them off.
+
+- Terminal and setup retries retain the original settings descriptor across individual network attempts. Ending the logical request blocks late answers and new work while resource cleanup remains retryable.
+
+- Exact repository push grants use the existing ledger, inspect every observed receive-pack command prefix and leave discovery grants unspent.
+
+- Failed native host creation reports retained resources and their original locators. A missing Docker command keeps its installation hint. Saved Docker actions keep the original engine, configuration and container ID. Saved Lima lifecycle commands keep their original home and instance.
+
+- Release builds create the shared guest kernel and verified tools image for both architectures, with the kernel source and configs. The guest build uses the locked Debian builder and signed package snapshot. Reproducibility checks include the guest assets.
+
+- New-session inputs use the original accepted host Source and one retained local settings operation. Their first payload writes a current-run receipt before bytes leave, and completion clears only that exact receipt. A no-wake retry can finish an acknowledged input operation without reading or resending laptop files.
+
+- `new --count` starts independently admitted sessions and reports partial failures in one JSON array. Without a terminal, `new -- <command>` runs through sandbox exec, returns the command's status and keeps the stopped sandbox's work.
+
+- New sessions accept laptop seeds, copied files and ordered environment flags. Policy, wall, inputs and secret values use one retained request through setup questions. Cancelling the command or launcher joins that attempt before aborting unused preparation and closing it. Uncertain writes keep their record.
+
+- `events --follow` reads session events over the existing host connection. JSON events use one versioned object per line. Event delivery is independent of alert destinations and their delay.
+
+- Dedicated command and input continuations keep the original accepted host Source while releasing the host publication lock during their network handshake. A changed host cannot acquire that continuation.
+
+- New-session input preparation retains the original settings source, selected primary policy and capture across questions. Laptop copy expressions stay in the local policy record.
+
+- Walled startup retains the original native operation through selected input delivery and durable readiness. Both MicroVM drivers use the protected Need selection and the actual engine connection for guest preparation.
+
+- Walled startup retains its original operation lock through launch, start delivery and readiness. Automatic restore borrows the same native lock. Failed or uncertain cleanup keeps the original owner and session storage until its lifetime has joined.
+
+- Both VM backends can enter the released helper's disk, runner and execution stages. Private stage commands refuse path arguments.
+
+- Sandbox boots enter the helper's real guest init. The sandbox guide explains wall selection and Firecracker's supported kernels and file boundary.
+
+- Sandbox capability reports keep verified VM construction inputs separate from compatibility readiness. The bridge reads current host facts through the same bounded collector.
+
+- Walled supervisors share the holder's memory warning, peer checks and rotating guest log writer. VM waits retain native failures, and released disk resources prevent a later start.
+
+- The protected VM resource selector chooses the actual Cloud Hypervisor or Firecracker backend and keeps the existing manifest writer.
+
+- Sandbox alerts retain guest state, exit and detail provenance in text, JSON, command variables and OTLP logs. The dispatcher settles real accepted work within the caller's budget. Disk, heartbeat and lifecycle events use the specified defaults and existing host limits.
+
+- Pull review recognises a strictly known original legacy unwalled public set as empty, then still checks fresh local secret values. Missing modern receipts remain incomplete.
+
+- `cp` copies files and folders into and out of a running sandbox, with an original local size ceiling, rooted path checks and a review before files land on the laptop. Incoming file bytes stay anonymous in the Linux guest until publication.
+
+- Releases pin Firecracker 1.18.0 for both architectures and mirror its checked raw executables, source and notices. The client's embedded release manifest carries the actual file digests. Release checks refuse missing files and known-bad pins.
+
 - SSH agent forwarding uses a dedicated helper entry with bounded identity frames and owned endpoint recovery. Incomplete cleanup keeps its ownership witnesses and reports a resource refusal.
 
 - Alert webhooks accept `--format otlp` and send lifecycle logs to the collector endpoint you name. Sandbox and health events use the existing alert settings and noise limits.
@@ -27,6 +77,8 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 - The launcher asks for scoped grants while the original operation stays alive. Yes or no questions default to no. Typed host approval requires the exact name. Cancel, closing the launcher or handing off the terminal stops the wait and cannot approve a later request.
 
 - The launcher opens session policy and its log from the palette. It can allow or revoke a rule and stop a sandbox while keeping its work. Closing a sheet cancels its pending work. Late results cannot replace another sheet or another host connection.
+
+- Firecracker's MMIO backend shares VM disk and process ownership with Cloud Hypervisor. Native startup binding checks the original VMM handle and guest connection without recovering a saved PID.
 
 - Firecracker boot configuration and private control use the canonical VM plan, fixed devices and one owned connection. Driver selection keeps the existing boot format and checks each VMM's CPU and version limits.
 
@@ -77,6 +129,14 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 - `agents install --force` is now `--reinstall`. `--force` still works until v0.4.0 and 11 November 2027, whichever comes later, and warns.
 
 ### Fixed
+
+- Validate complete public secret receipt metadata through the same source inspection, including unordered maps, prior stand-ins and unsupported future data.
+
+- Register the internal egress child and keep compressed-trailer tests on the complete header decoder.
+
+- Model API admission checks the complete upload before connecting and reserves network and tool grants together. It reads every content encoding field, keeps live one-use grants independent, and refuses malformed tools, URLs and upgrades.
+
+- Native VM binding refuses a closed guest stream even when its process still runs and unread data remains queued.
 
 - VM cleanup keeps its original process owner and resource leases after an uncertain wait. It refuses deletion until physical exit is proved and retains earlier cleanup errors.
 

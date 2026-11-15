@@ -6,10 +6,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"sync"
 	"time"
 
+	"github.com/iamlakshya/simstim/internal/proto"
 	"github.com/iamlakshya/simstim/internal/wall"
 )
 
@@ -23,11 +25,24 @@ type runnerExit struct {
 	Error  string `json:"error,omitempty"`
 }
 type runnerMessage struct {
-	Kind  string      `json:"kind"`
-	ID    uint64      `json:"id,omitempty"`
-	State string      `json:"state,omitempty"`
-	Error string      `json:"error,omitempty"`
-	Exit  *runnerExit `json:"exit,omitempty"`
+	Kind    string      `json:"kind"`
+	ID      uint64      `json:"id,omitempty"`
+	State   string      `json:"state,omitempty"`
+	Error   string      `json:"error,omitempty"`
+	Exit    *runnerExit `json:"exit,omitempty"`
+	Session string      `json:"session,omitempty"`
+	Driver  string      `json:"driver,omitempty"`
+}
+
+type runnerAncillaryReader interface {
+	io.Reader
+	takeControl() proto.UnixControlV1
+	Close() error
+}
+
+type runnerNativeProof interface {
+	acceptReady(runnerMessage, *proto.UnixControlV1) error
+	Close() error
 }
 
 type runnerControl struct {
@@ -41,69 +56,105 @@ type runnerControl struct {
 	readyOnce, closeOnce sync.Once
 	exit                 wall.Exit
 	gotReady, gotExit    bool
+	input                io.Reader
+	ancillary            runnerAncillaryReader
+	native               runnerNativeProof
 }
 
 func newRunnerControl(conn net.Conn) *runnerControl {
-	c := &runnerControl{conn: conn, encoder: json.NewEncoder(conn), callGate: make(chan struct{}, 1), reply: make(chan runnerMessage, 1), ready: make(chan struct{}), done: make(chan struct{}), exit: wall.Exit{Code: -1}}
+	return startRunnerControl(conn, conn, nil, nil)
+}
+
+func startRunnerControl(conn net.Conn, input io.Reader, ancillary runnerAncillaryReader, native runnerNativeProof) *runnerControl {
+	c := &runnerControl{conn: conn, input: input, ancillary: ancillary, native: native, encoder: json.NewEncoder(conn), callGate: make(chan struct{}, 1), reply: make(chan runnerMessage, 1), ready: make(chan struct{}), done: make(chan struct{}), exit: wall.Exit{Code: -1}}
 	go c.read()
 	return c
 }
 
 func (c *runnerControl) read() {
 	defer close(c.done)
-	scanner := bufio.NewScanner(c.conn)
+	if c.ancillary != nil {
+		defer c.ancillary.Close()
+	}
+	if c.native != nil {
+		defer c.native.Close()
+	}
+	scanner := bufio.NewScanner(c.input)
 	scanner.Buffer(make([]byte, 4096), 64<<10)
 	for scanner.Scan() {
-		var message runnerMessage
-		decoder := json.NewDecoder(bytes.NewReader(scanner.Bytes()))
-		decoder.DisallowUnknownFields()
-		if err := decoder.Decode(&message); err != nil {
-			c.fail(fmt.Errorf("invalid private VMM control reply: %w", err))
+		var control proto.UnixControlV1
+		if c.ancillary != nil {
+			control = c.ancillary.takeControl()
+		}
+		if err := c.acceptMessage(scanner.Bytes(), &control); err != nil {
+			control.Close()
+			c.fail(err)
 			return
 		}
-		switch message.Kind {
-		case "ready":
-			if c.gotReady {
-				c.fail(fmt.Errorf("duplicate private VMM ready reply"))
-				return
-			}
-			c.gotReady = true
-			c.readyOnce.Do(func() { close(c.ready) })
-		case "reply":
-			c.mu.Lock()
-			wanted := c.pending
-			c.mu.Unlock()
-			if message.ID == wanted && wanted != 0 {
-				select {
-				case c.reply <- message:
-				default:
-					c.fail(fmt.Errorf("duplicate private VMM control reply"))
-					return
-				}
-			}
-		case "exit":
-			if message.Exit == nil || c.gotExit {
-				c.fail(fmt.Errorf("private VMM exit reply is missing its result"))
-				return
-			}
-			c.gotExit = true
-			exit := wall.Exit{Code: message.Exit.Code, Signal: message.Exit.Signal}
-			if message.Exit.Error != "" {
-				exit.Err = fmt.Errorf("VMM exited: %s", message.Exit.Error)
-			}
-			c.mu.Lock()
-			c.exit = exit
-			c.mu.Unlock()
-		default:
-			c.fail(fmt.Errorf("unknown private VMM control reply"))
-			return
-		}
+		control.Close()
 	}
 	if err := scanner.Err(); err != nil {
 		c.fail(fmt.Errorf("read private VMM control: %w", err))
 	} else if !c.gotExit {
 		c.fail(fmt.Errorf("the VMM runner ended without its owned process result"))
 	}
+}
+
+func (c *runnerControl) acceptMessage(data []byte, control *proto.UnixControlV1) error {
+	var message runnerMessage
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&message); err != nil {
+		return fmt.Errorf("invalid private VMM control reply: %w", err)
+	}
+	var more any
+	if err := decoder.Decode(&more); err != io.EOF {
+		return fmt.Errorf("private VMM control has trailing data")
+	}
+	if message.Kind != "ready" && len(control.Files) != 0 {
+		return fmt.Errorf("private VMM descriptors arrived outside their ready frame")
+	}
+	switch message.Kind {
+	case "ready":
+		if c.gotReady {
+			return fmt.Errorf("duplicate private VMM ready reply")
+		}
+		if c.native != nil {
+			if err := c.native.acceptReady(message, control); err != nil {
+				return err
+			}
+		} else if len(control.Files) != 0 {
+			return fmt.Errorf("private VMM ready has no native descriptor consumer")
+		}
+		c.gotReady = true
+		c.readyOnce.Do(func() { close(c.ready) })
+	case "reply":
+		c.mu.Lock()
+		wanted := c.pending
+		c.mu.Unlock()
+		if message.ID == wanted && wanted != 0 {
+			select {
+			case c.reply <- message:
+			default:
+				return fmt.Errorf("duplicate private VMM control reply")
+			}
+		}
+	case "exit":
+		if message.Exit == nil || c.gotExit {
+			return fmt.Errorf("private VMM exit reply is missing its result")
+		}
+		c.gotExit = true
+		exit := wall.Exit{Code: message.Exit.Code, Signal: message.Exit.Signal}
+		if message.Exit.Error != "" {
+			exit.Err = fmt.Errorf("VMM exited: %s", message.Exit.Error)
+		}
+		c.mu.Lock()
+		c.exit = exit
+		c.mu.Unlock()
+	default:
+		return fmt.Errorf("unknown private VMM control reply")
+	}
+	return nil
 }
 
 func (c *runnerControl) fail(err error) {

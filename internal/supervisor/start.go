@@ -40,6 +40,7 @@ func (s *Supervisor) startGuest(ctx context.Context, sb sandbox, secrets map[str
 	if err != nil {
 		return err
 	}
+	if err:=s.retainVMStart(ctx,sb,conn);err!=nil{_ = conn.Close();return err}
 	s.link = link.New(conn, link.Supervisor, link.Options{})
 	st, err := s.link.Open(ctx, link.KindCtl, nil)
 	if err != nil {

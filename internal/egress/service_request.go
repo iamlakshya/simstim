@@ -13,9 +13,20 @@ import (
 type serviceRequest struct {
 	request   Request
 	pathGrant bool
+	pushRepo  string
+	discovery bool
 }
 
 func (service *serviceRequest) allowed(engine *Engine, permit *Permit) bool {
+	if service.pushRepo != "" {
+		mode, pushPermit := evalRevalidate, permit
+		if service.discovery {
+			mode, pushPermit = evalPrecheck, nil
+		}
+		if !engine.evaluatePush(service.pushRepo, pushPermit, mode, service.request.Now).Allow {
+			return false
+		}
+	}
 	decision := engine.evaluateHTTP(service.request, permit, evalRevalidate)
 	return decision.Allow && (!service.pathGrant || explicitPathAllowance(decision))
 }

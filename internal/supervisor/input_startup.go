@@ -49,6 +49,7 @@ func (s *Supervisor) awaitInputStartup(ctx context.Context) map[string]string {
 	stop := context.AfterFunc(ctx, func() { _ = listener.SetDeadline(now()) })
 	defer stop()
 	var values map[string]string
+	if s.originalStart!=nil {needValues=false;values=s.originalStart.values;s.originalStart.values=nil}
 	for needValues || s.startupInput == nil {
 		conn, err := listener.Accept()
 		if err != nil {

@@ -26,6 +26,7 @@ func startSession(cmd *cobra.Command, conn *client.Conn, h client.Host, a client
 	p := prompts(cmd)
 	for {
 		cctx, cancel := context.WithTimeout(cmd.Context(), 60*time.Second)
+		recordNewStartBudget(cmd.Context(), cctx)
 		s, err := conn.NewSession(cctx, a)
 		cancel()
 		if q, ok := client.FolderQuestionOf(err); ok && !a.MakeFolder {

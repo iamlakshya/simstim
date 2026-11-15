@@ -18,6 +18,8 @@ import (
 
 const copyListMetadataMax = 1 << 20
 
+func init() { Features = append(Features, proto.FeatureFileTransferV1, "cp") }
+
 type copyFileProgress struct {
 	size, offset int64
 	done         bool
@@ -130,7 +132,13 @@ func (s *Supervisor) copyGuest(ctx context.Context, header proto.FileGetHeaderV1
 		return nil, copyRefusal("cp_too_big", "the guest copy differs from its declared byte count")
 	}
 	if result.Error != nil {
-		return nil, copyRefusal(result.Error.Code, "the guest refused the selected ordinary copy path")
+		code := result.Error.Code
+		switch code {
+		case "cp_path", "cp_git", "cp_exists", "cp_too_big", "cp_changed", "cp_policy":
+		default:
+			code = "cp_path"
+		}
+		return nil, copyRefusal(code, "the guest refused the selected ordinary copy path")
 	}
 	return data, ctx.Err()
 }
@@ -224,7 +232,7 @@ func (s *Supervisor) copyRead(ctx context.Context, c *client, raw json.RawMessag
 		file = plan.files[selected]
 	}
 	c.copyMu.Unlock()
-	if file == nil || file.done || args.Offset != file.offset || args.Offset > file.size {
+	if file == nil || file.done || args.Offset != file.offset || args.Offset > file.size || args.MaxBytes > plan.limit {
 		return proto.CopyReadResultV1{}, copyRefusal("cp_path", "the read differs from this connection's original copy listing")
 	}
 	data, err := s.copyGuest(ctx, proto.FileGetHeaderV1{Version: proto.FileTransferVersionV1, Path: selected, Offset: args.Offset, MaxBytes: args.MaxBytes})

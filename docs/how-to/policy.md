@@ -89,3 +89,32 @@ simstim policy allow api.openai.com --in box/auth-fix --tools web_search,files -
 ```
 
 Tools apply only to session allowances. They cannot appear on a deny or a wider file layer. `--once` and `--for` keep their existing lifetime rules. An older helper refuses a tools allowance, including its dry run. Ordinary allowances keep their existing IDs.
+
+## Local input preparation
+
+A new session keeps one local settings snapshot through policy questions,
+input preparation and secret fetching. Changing that file ends the preparation.
+A laptop seed uses the policy from its selected commit. A dirty seed keeps one
+private prospective commit for both the policy check and the bundle capture.
+Only the primary repository selects the sandbox policy.
+
+Local copy expressions and their original working directory stay on the client.
+They are saved with the original local policy selection, rather than sent as
+policy paths to the host.
+
+The client retains only the current input operation receipt after an uncertain
+transfer. A completion retry checks that original receipt against the same
+supervisor run. It can finish the acknowledged operation without reading
+laptop files or sending the payload again. An incomplete or changed operation
+keeps its receipt and reports the uncertainty.
+
+A laptop primary seed requires a helper and guest that verify the policy from
+its exact selected commit, including when that commit has no policy file.
+Terminal defaults, environment values and copy expressions use the same retained
+local settings operation. A configured secret name cannot enter through ordinary
+terminal metadata or environment lookup.
+
+Setup and folder questions keep the original settings descriptor between
+network attempts. Each attempt keeps its existing deadline. Ending the logical
+request blocks late answers and new work, including while resource cleanup is
+still finishing. A retry cannot renew a changed settings source.

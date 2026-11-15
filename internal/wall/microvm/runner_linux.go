@@ -18,6 +18,7 @@ import (
 	"syscall"
 
 	"github.com/iamlakshya/simstim/internal/cachefs"
+	fc "github.com/iamlakshya/simstim/internal/wall/firecracker/backend"
 	"golang.org/x/sys/unix"
 )
 
@@ -35,6 +36,10 @@ func RunVMHelper(in io.Reader) error {
 		return fmt.Errorf("unknown microvm runner version")
 	}
 	if err := validateVMSpec(plan.Spec); err != nil {
+		return err
+	}
+	kind, err := backendForSpec(plan.Spec)
+	if err != nil {
 		return err
 	}
 	if err := helperUID(plan.UIDMode); err != nil {
@@ -84,6 +89,8 @@ func RunVMHelper(in io.Reader) error {
 	command.Env = []string{"LANG=C", "LC_ALL=C", "TZ=UTC"}
 	command.Stdout = os.Stderr
 	command.Stderr = os.Stderr
+	createdFD := -1
+	command.SysProcAttr = &syscall.SysProcAttr{PidFD: &createdFD}
 	stdin, err := command.StdinPipe()
 	if err != nil {
 		return err
@@ -95,6 +102,13 @@ func RunVMHelper(in io.Reader) error {
 	if err != nil {
 		return fmt.Errorf("start owned VMM execution helper: %w", err)
 	}
+	if createdFD < 0 {
+		command.Process.Kill()
+		command.Wait()
+		return fmt.Errorf("the VMM child has no native creation handle")
+	}
+	owner := &ownedVMMEndpoint{fd: createdFD, pid: command.Process.Pid, uid: uint32(os.Geteuid())}
+	defer func() { cancel(); _ = owner.close() }()
 	// The child now holds its exact mapped copies. The trusted runner needs
 	// no program, runtime-read or disk capability while it relays/control-dials.
 	for _, file := range files {
@@ -122,7 +136,7 @@ func RunVMHelper(in io.Reader) error {
 			cancelConnect()
 		}
 	}()
-	guest, err := ConnectGuest(connectCtx, vsock)
+	guest, err := connectGuest(connectCtx, vsock, owner.dial, pauseVMConnect)
 	if err != nil {
 		cancel()
 		exit := waitOwnedExit(exitObserved, ended)
@@ -130,12 +144,25 @@ func RunVMHelper(in io.Reader) error {
 		return fmt.Errorf("connect owned guest vsock: %w", err)
 	}
 	defer guest.Close()
-	if err := server.send(runnerMessage{Kind: "ready"}); err != nil {
+	var fcControl *fc.Client
+	if kind == firecrackerBackend {
+		apiConnection, err := owner.connectAPI(connectCtx, api)
+		if err == nil {
+			fcControl, err = fc.NewClient(apiConnection)
+		}
+		if err != nil {
+			cancel()
+			waitOwnedExit(exitObserved, ended)
+			return fmt.Errorf("connect original Firecracker control endpoint: %w", err)
+		}
+		defer fcControl.Close()
+	}
+	if err := server.sendNativeReady(plan.Spec.ID, kind.name(), owner, guest); err != nil {
 		cancel()
 		waitOwnedExit(exitObserved, ended)
 		return err
 	}
-	go server.serve(ctx, api)
+	go server.serve(ctx, api, owner, fcControl)
 	go func() { _, _ = io.Copy(guest, raw); guest.Close() }()
 	go func() { _, _ = io.Copy(raw, guest); raw.Close() }()
 	exit := waitOwnedExit(exitObserved, ended)

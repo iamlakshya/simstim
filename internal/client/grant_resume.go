@@ -20,6 +20,9 @@ func (c *Conn) CheckResumeGrants(ctx context.Context, id string, names []string)
 	if err := bindRequestTransportSource(ctx, c); err != nil {
 		return err
 	}
+	if err := c.checkNoPendingInputResume(ctx, id); err != nil {
+		return err
+	}
 	if err := checkUncheckedResumeSelection(ctx, c, nil); err != nil {
 		return err
 	}

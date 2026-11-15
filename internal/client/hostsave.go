@@ -73,7 +73,12 @@ func SavedEntry(name string) (*Host, error) {
 // nothing when they differ. A forget removes the host's generated SSH
 // config first: when that fails, the host is still saved, so the command
 // can run again.
-func UpdateHosts(ctx context.Context, c HostChange) error {
+func UpdateHosts(ctx context.Context, c HostChange) (failure error) {
+	defer func() {
+		if failure != nil {
+			EndHostCreationAttemptContext(ctx)
+		}
+	}()
 	if err := ctx.Err(); err != nil {
 		return err
 	}

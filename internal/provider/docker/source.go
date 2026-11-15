@@ -74,7 +74,10 @@ func captureSourceLocator(ctx context.Context) (locator dockerSourceLocator, ret
 			contextName = strings.TrimSpace(string(raw))
 		}
 		raw, err := provider.ExecEnvironment(ctx, locator.environment, install, "docker", "--config", source.Path, "context", "inspect", contextName, "--format", "{{json .Endpoints.docker.Host}}")
-		if err != nil || json.Unmarshal(raw, &endpoint) != nil {
+		if err != nil {
+			return locator, sourceReadFailure(err)
+		}
+		if json.Unmarshal(raw, &endpoint) != nil {
 			return locator, sourceUnknown()
 		}
 	}
@@ -89,7 +92,10 @@ func captureSourceLocator(ctx context.Context) (locator dockerSourceLocator, ret
 	}
 	locator.endpoint = endpoint
 	raw, err := locator.exec(ctx, "info", "--format", "{{json .ID}}")
-	if err != nil || json.Unmarshal(raw, &locator.engine) != nil || locator.engine == "" {
+	if err != nil {
+		return locator, sourceReadFailure(err)
+	}
+	if json.Unmarshal(raw, &locator.engine) != nil || locator.engine == "" {
 		return locator, sourceUnknown()
 	}
 	if err := pin.Revalidate(); err != nil {
@@ -97,6 +103,14 @@ func captureSourceLocator(ctx context.Context) (locator dockerSourceLocator, ret
 	}
 	complete = true
 	return locator, nil
+}
+
+func sourceReadFailure(err error) error {
+	var unavailable *client.UserError
+	if errors.As(err, &unavailable) && unavailable.Code == "tool_missing" {
+		return err
+	}
+	return sourceUnknown()
 }
 
 func (l *dockerSourceLocator) close() error {

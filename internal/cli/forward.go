@@ -42,7 +42,21 @@ func portsCmd() *cobra.Command {
 					return nil
 				}
 				for _, p := range ports {
-					printf("%-6d %-16s %s (pid %d)\n", p.Port, shown(p.Address), shown(p.Process), p.PID)
+					var facts []string
+					if p.Claimed {
+						facts = append(facts, "claimed")
+					}
+					if p.Granted {
+						facts = append(facts, "granted")
+					}
+					if p.Reverse {
+						facts = append(facts, "reverse")
+					}
+					label := ""
+					if len(facts) > 0 {
+						label = " [" + strings.Join(facts, ", ") + "]"
+					}
+					printf("%-6d %-16s %s (pid %d)%s\n", p.Port, shown(p.Address), shown(p.Process), p.PID, label)
 				}
 				return nil
 			})
@@ -53,23 +67,61 @@ func portsCmd() *cobra.Command {
 }
 
 func forwardCmd() *cobra.Command {
-	return &cobra.Command{
+	var reverse string
+	cmd := &cobra.Command{
 		Use:   "forward <host>/<session> [<port>…]",
-		Short: "Forward a session's ports to localhost: all, or those you name",
-		Long: "Forwards ports from the host to 127.0.0.1 on this machine, through an SSH connection of its own,\n" +
-			"until you press Ctrl+C. Write local:remote to use another local port. Nothing is exposed beyond this machine.\n" +
-			"It refuses to start when your SSH config has a RemoteForward, a Tunnel or ForkAfterAuthentication yes for the host.",
-		Example:           "  " + brand.Name + " forward my-vps/auth-fix 3000\n  " + brand.Name + " forward my-vps/auth-fix 8080:3000",
+		Short: "Forward chosen session ports, or one laptop port in reverse",
+		Long: "Forwards the named session ports to 127.0.0.1 on this machine until Ctrl+C.\n" +
+			"Write local:guest to choose another local port. A sandbox forward grants that exact guest port\n" +
+			"and uses a private Unix socket on the host. With no port, a sandbox lists its claimed ports and asks.\n" +
+			"Use --reverse laptop[:guest] to reach one laptop loopback service from a sandbox on an own host.\n" +
+			"SSH forwards refuse RemoteForward, Tunnel and ForkAfterAuthentication yes in the host's SSH config.",
+		Example:           "  " + brand.Name + " forward my-vps/auth-fix 3000\n  " + brand.Name + " forward my-vps/auth-fix 8080:3000\n  " + brand.Name + " forward my-vps/auth-fix --reverse 5432",
 		Args:              cobra.MinimumNArgs(1),
 		ValidArgsFunction: completeSessionArg,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if reverse != "" {
+				return runReverseForward(cmd, args, reverse)
+			}
 			var h client.Host
 			var pairs []client.ForwardPair
 			err := withSession(cmd, args[0], func(ctx context.Context, hh client.Host, conn *client.Conn, s *client.Session) error {
 				h = hh
-				var err error
-				pairs, err = forwardPairs(ctx, conn, h, s, args[1:])
-				return err
+				creation, err := client.LoadSandboxPolicy(ctx, h, s.ID)
+				if err != nil {
+					return err
+				}
+				// The saved local creation can only require a stronger route.
+				// A host row cannot turn a known sandbox into a host TCP forward.
+				walled := s.Wall != nil || creation != nil && creation.CreationWall != "" && creation.CreationWall != "none"
+				want := args[1:]
+				if walled {
+					if h.SSH == "" {
+						return &client.UserError{Msg: "sandbox forwarding needs SSH", Hint: "Choose a host reached through SSH.", Code: "needs_ssh", Kind: client.KindRefused}
+					}
+					if len(want) == 0 {
+						selected, err := selectForwardPort(cmd, conn, h, s)
+						if err != nil {
+							return err
+						}
+						want = []string{strconv.Itoa(selected)}
+					}
+					say(cmd, "Note: sandbox pages at localhost share cookies with other local apps. Use http://%s.localhost:<port> or a separate browser profile.\n", s.ID)
+				}
+				pairs, err = forwardPairs(ctx, conn, h, s, want)
+				if err != nil {
+					return err
+				}
+				if walled {
+					for index := range pairs {
+						socket, err := conn.GrantPort(ctx, s.ID, pairs[index].Remote)
+						if err != nil {
+							return err
+						}
+						pairs[index].RemoteSocket = socket
+					}
+				}
+				return nil
 			})
 			if err != nil {
 				return err
@@ -77,6 +129,11 @@ func forwardCmd() *cobra.Command {
 			return runForward(cmd.Context(), h, pairs)
 		},
 	}
+	cmd.Flags().StringVar(&reverse, "reverse", "", "Make one laptop port[:guest port] available inside an own-host sandbox")
+	_ = cmd.RegisterFlagCompletionFunc("reverse", func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	})
+	return cmd
 }
 
 // sessionPorts asks a host for the ports that the session id listens on.
@@ -112,7 +169,7 @@ func forwardPairs(ctx context.Context, conn *client.Conn, h client.Host, s *clie
 		}
 		lp, err1 := strconv.Atoi(l)
 		rp, err2 := strconv.Atoi(r)
-		if err1 != nil || err2 != nil {
+		if err1 != nil || err2 != nil || lp < 1 || lp > 65535 || rp < 1 || rp > 65535 {
 			return nil, notAPort(h.Name, s, w)
 		}
 		if !ok && !free(ctx, lp) {

@@ -153,6 +153,10 @@ func RefreshPolicyLayers(h Host, saved []api.Layer) ([]api.Layer, error) {
 	if err != nil {
 		return nil, err
 	}
+	return refreshPolicyLayers(settings, h, saved)
+}
+
+func refreshPolicyLayers(settings Settings, h Host, saved []api.Layer) ([]api.Layer, error) {
 	next := slices.Clone(saved)
 	for i, l := range next {
 		switch l.Kind {

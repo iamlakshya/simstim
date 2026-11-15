@@ -25,8 +25,11 @@ type GrantRequest struct {
 	resumeGroup         bool
 	review              *reviewGrantIntent
 	newSecrets          *newSecretPlan
+	newInputs           *newInputPreparation
 	preparationSettings *settingsOperation
 	preparationClosed   bool
+	ending              bool
+	requestContext      context.Context
 	preparedVM          *VMNeedPlanV1
 	preparedVMIntent    string
 
@@ -65,7 +68,13 @@ func WithGrantRequest(ctx context.Context, r *GrantRequest) context.Context {
 	if r == nil {
 		r = NewGrantRequest(false, false)
 	}
-	return context.WithValue(ctx, grantRequestKey{}, r)
+	bound := context.WithValue(ctx, grantRequestKey{}, r)
+	r.mu.Lock()
+	if r.requestContext == nil {
+		r.requestContext = bound
+	}
+	r.mu.Unlock()
+	return bound
 }
 
 func grantRequestOf(ctx context.Context) *GrantRequest {
@@ -103,6 +112,10 @@ func ConfirmGrant(ctx context.Context, err error) (context.Context, error) {
 			Hint: "Run the command again in a terminal.", Code: "grant_confirmation", Kind: KindRefused}
 	}
 	q.request.mu.Lock()
+	if err := q.request.lifetimeErrorLocked(); err != nil {
+		q.request.mu.Unlock()
+		return ctx, err
+	}
 	if q.scope.purpose != q.request.purpose {
 		q.request.mu.Unlock()
 		return ctx, grantPurposeError()
@@ -129,6 +142,10 @@ func allowRequestGrant(ctx context.Context, h Host, hostID string, tier Tier, o 
 	}
 	key := grantScope{host: h.Name, hostID: hostID, tier: tier, kind: o.Kind, name: o.Name, purpose: requestGrantPurpose(r), operation: requestGrantOperation(r)}
 	r.mu.Lock()
+	if err := r.lifetimeErrorLocked(); err != nil {
+		r.mu.Unlock()
+		return err
+	}
 	o.Confirmed = r.confirmed[key]
 	r.mu.Unlock()
 	err := Allow(h, tier, o, settings)

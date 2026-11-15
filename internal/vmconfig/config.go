@@ -28,6 +28,10 @@ func Validate(a proto.CtlVMPrepareArgs) (Plan, error) {
 	if err := plan.Validate(); err != nil {
 		return Plan{}, configError("the VM state plan is invalid: " + err.Error())
 	}
+	if correlation:=a.Correlation;correlation!=nil {
+		if correlation.Version!=1 || correlation.Session!=a.Session || !CaptureNonce(correlation.Generation) || !api.ValidPolicyHash(correlation.NeedSHA256) || !CaptureNonce(correlation.Nonce) {return Plan{},configError("the original VM prepare correlation is invalid")}
+		copy:=*correlation;a.Correlation=&copy
+	}
 	a.VM.StateDirs = append([]string(nil), a.VM.StateDirs...)
 	a.StateFiles = append([]string(nil), a.StateFiles...)
 	return Plan{Args: a, State: plan}, nil

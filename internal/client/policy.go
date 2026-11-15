@@ -51,6 +51,7 @@ func (c *Conn) CheckPolicyGrant(ctx context.Context, id, target string) error {
 // AllowPolicy adds a network rule to the session layer. It holds H5's host
 // policy ownership through the final gate and the actual initial frame write.
 func (c *Conn) AllowPolicy(ctx context.Context, a api.PolicyAddArgs) (api.Rule, error) {
+	if a.Door==api.DoorPort{return c.changePortPolicy(ctx,a,true)}
 	var out api.Rule
 	if _, err := ReadPolicySettings(); err != nil {
 		return out, err

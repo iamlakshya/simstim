@@ -13,7 +13,9 @@ import (
 func (s *Supervisor) prepareStoppedVMResources() (sandbox, error) {
 	// Existing protected references must already cover this recorded Need.
 	// The operation may not publish a new ordinary session/Life record.
-	factory, err := host.CloudHypervisorResourcesWithPublisherV1(func(ctx context.Context, spec wall.Spec) error {
+	driver,err:=s.protectedVMDriver()
+	if err!=nil{return nil,err}
+	factory, err := host.MicroVMResourcesWithPublisherV1(driver,func(ctx context.Context, spec wall.Spec) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}

@@ -44,7 +44,10 @@ func (s *Supervisor) applyInputPhase(ctx context.Context, input *startupInput, a
 	defer input.carrier.Close()
 	stop := context.AfterFunc(ctx, func() { _ = input.carrier.Close() })
 	defer stop()
-	if err := s.requireInputGuestMode(handshake, args == nil); err != nil {
+	s.mu.Lock()
+	primaryPolicy:=len(input.summary.Repositories)>0 && s.m.Files!=nil && s.m.Files.Seed.Laptop && s.m.Files.Seed.Repo==input.summary.Repositories[0].Name
+	s.mu.Unlock()
+	if err := s.requireInputGuestMode(handshake, args == nil,primaryPolicy); err != nil {
 		return err
 	}
 	spool, err := os.CreateTemp(paths.SessionDir(s.id), ".input-declarations-")
@@ -61,7 +64,7 @@ func (s *Supervisor) applyInputPhase(ctx context.Context, input *startupInput, a
 	defer func() {
 		// A late operation with verified sender EOF retains exactly this
 		// owner for idempotent Finish recovery, including a new CLI process.
-		if args == nil && receipt.canRecover() {
+		if receipt.canRecover() {
 			return
 		}
 		returned = errors.Join(returned, receipt.cleanup())
@@ -80,6 +83,9 @@ func (s *Supervisor) applyInputPhase(ctx context.Context, input *startupInput, a
 		return err
 	}
 	control := inputtransfer.Control{Scope: input.scope, CopyMax: input.copyMax, SeedMax: input.seedMax, Protected: protected}
+	s.mu.Lock()
+	if len(input.summary.Repositories)>0 && s.m.Files!=nil && s.m.Files.Seed.Laptop && s.m.Files.Seed.Repo==input.summary.Repositories[0].Name {control.PrimaryRepository=s.m.Files.Seed.Repo}
+	s.mu.Unlock()
 	var prepared *proto.CtlStartArgs
 	if args != nil {
 		copy := *args
@@ -221,7 +227,7 @@ func (s *Supervisor) protectedInputPaths() ([]string, error) {
 func (s *Supervisor) requireInputGuest(ctx context.Context) error {
 	return s.requireInputGuestMode(ctx, false)
 }
-func (s *Supervisor) requireInputGuestMode(ctx context.Context, detached bool) error {
+func (s *Supervisor) requireInputGuestMode(ctx context.Context, detached bool, primaryPolicy ...bool) error {
 	var result proto.CtlGuestFeatures
 	request := s.ctl.request
 	if detached {
@@ -230,7 +236,7 @@ func (s *Supervisor) requireInputGuestMode(ctx context.Context, detached bool) e
 	if err := request(ctx, proto.CtlGuestCapabilities, struct{}{}, &result); err != nil {
 		return err
 	}
-	if result.Version != 1 || !slices.Contains(result.Features, inputtransfer.Feature) {
+	if result.Version != 1 || !slices.Contains(result.Features, inputtransfer.Feature) || len(primaryPolicy)>0 && primaryPolicy[0] && !slices.Contains(result.Features,inputtransfer.PrimaryPolicyFeature) {
 		return inputFailure("the actual guest cannot apply the complete declared inputs")
 	}
 	return nil

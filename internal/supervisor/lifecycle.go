@@ -45,8 +45,9 @@ type endFacts struct {
 // closes the record.
 func (s *Supervisor) wait() {
 	ended := make(chan struct{})
+	var ownedWaitErr error
 	go func() {
-		_ = s.sb.Wait()
+		ownedWaitErr = s.sb.Wait()
 		close(ended)
 	}()
 	var kind, reason string
@@ -65,6 +66,11 @@ func (s *Supervisor) wait() {
 		s.ending()
 		s.stopGuest(systemGrace, ended)
 		kind, reason = host.EndSystem, "stopped with the host"
+	case <-s.maxRunDone():
+		s.markStopIntent()
+		s.ending()
+		s.stopGuest(systemGrace,ended)
+		kind,reason=host.EndStop,"max_run"
 	case <-s.stop:
 		s.markStopIntent()
 		s.ending()
@@ -107,6 +113,9 @@ func (s *Supervisor) wait() {
 		s.raiseDiskFailure()
 	}
 	cleanupErr := s.closeSandbox()
+	<-ended // Cleanup must join the original waiter before accepting its result.
+	cleanupErr=errors.Join(cleanupErr,ownedWaitErr)
+	if cleanupErr!=nil {natural=false;kind,reason=host.EndSandbox,cleanupErr.Error()}
 	// The owned exit can win the select before its final ctl event is read.
 	// Drain that reader before deciding whether a capture is ready.
 	if s.ctl != nil {
@@ -159,6 +168,9 @@ func (s *Supervisor) stopGuest(grace time.Duration, ended <-chan struct{}) {
 // kills each process that it can tie to the sandbox, and waits for the
 // sandbox's end. It may run more than once.
 func (s *Supervisor) closeSandbox() (cleanupErr error) {
+	s.stopMaxRun()
+	s.closePortListeners(true)
+	s.closeReverseForwards()
 	s.closeFileTransfers()
 	defer func() {
 		s.stopEgress()
@@ -308,6 +320,7 @@ func (s *Supervisor) watchBeat() {
 		s.log.Warn("the guest init is silent", "for", linkSilent)
 		s.audit.write("link_silent", nil)
 		s.raise(s.alertEvent(alerts.LinkSilent))
+		ev:=s.alertEvent(alerts.HealthDegraded);ev.Reason="heartbeat_silent";s.raise(ev)
 	}
 }
 

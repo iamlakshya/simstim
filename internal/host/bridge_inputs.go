@@ -39,11 +39,13 @@ func (b *bridge) inputs(r *bufio.Reader, req proto.Request) error {
 		b.reply(req.ID, nil, err)
 		return err
 	}
-	m, err := LoadManifest(begin.Session)
-	if err != nil {
-		b.reply(req.ID, nil, err)
-		return err
-	}
+	initial:=!describe && !begin.FinishOnly && begin.Summary==nil
+	var m *Manifest
+	var line *holderLine
+	var hello proto.Hello
+	var err error
+	if initial {m,line,hello,err=waitInitialInputHolder(b.ctx,begin)} else {m,err=LoadManifest(begin.Session)}
+	if err!=nil {b.reply(req.ID,nil,err);return err}
 	if m.Wall == nil {
 		err = UserError("not_walled", "this session has no sandbox for input", "Use shell for the deprecated unwalled terminal, or start a walled session.")
 		b.reply(req.ID, nil, err)
@@ -54,13 +56,11 @@ func (b *bridge) inputs(r *bufio.Reader, req proto.Request) error {
 		b.reply(req.ID, nil, err)
 		return err
 	}
-	line, hello, err := dialSessionHolder(begin.Session, 10*time.Second)
-	if err != nil {
-		b.reply(req.ID, nil, err)
-		return err
-	}
+	if line==nil {line,hello,err=dialSessionHolder(begin.Session,10*time.Second)}
+	if err!=nil {b.reply(req.ID,nil,err);return err}
 	defer line.c.Close()
 	required := []string{inputtransfer.Feature}
+	if m.Inputs!=nil && len(m.Inputs.Repositories)>0 && m.Files!=nil && m.Files.Seed.Laptop && m.Files.Seed.Repo==m.Inputs.Repositories[0].Name {required=append(required,inputtransfer.PrimaryPolicyFeature)}
 	if describe || begin.FinishOnly {
 		required = append(required, inputtransfer.FinishFeature)
 	}

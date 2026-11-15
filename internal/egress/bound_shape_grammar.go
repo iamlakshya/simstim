@@ -63,92 +63,13 @@ func savedShapeAlphabets(name string, shape sentinelShape, size int) ([]string, 
 }
 
 func walkSavedShape(ctx context.Context, name string, program *syntax.Prog, alphabets []string, prefix int, firstBoundary, lastBoundary bool) error {
-	start := savedShapePosition{pc: uint32(program.Start), boundary: firstBoundary} //nolint:gosec // G115: validated finite program Start is nonnegative
-	frontier := []savedShapePosition{start}
-	seen := map[savedShapePosition]bool{start: true}
-	sourceClasses := make(map[uint32]string)
-	push := func(position savedShapePosition) bool {
-		if seen[position] {
-			return true
+	store := &typedSavedShapeWalk{seen: make(map[savedShapePosition]bool)}
+	return walkSavedShapeWith(ctx, name, program, len(alphabets), prefix, firstBoundary, lastBoundary, func(offset int) (string, error) {
+		if offset < 0 || offset >= len(alphabets) {
+			return "", sentinelFailure(name, "saved grammar offset is invalid")
 		}
-		if len(seen) >= maxSentinelRegexWork {
-			return false
-		}
-		seen[position] = true
-		frontier = append(frontier, position)
-		return true
-	}
-	for len(frontier) > 0 {
-		if err := sentinelContext(ctx, name); err != nil {
-			return err
-		}
-		position := frontier[len(frontier)-1]
-		frontier = frontier[:len(frontier)-1]
-		if int(position.pc) >= len(program.Inst) {
-			return sentinelFailure(name, "saved grammar instruction is invalid")
-		}
-		instruction := &program.Inst[position.pc]
-		next := position
-		next.pc = instruction.Out
-		switch instruction.Op {
-		case syntax.InstMatch:
-			if position.offset == len(alphabets) && (!position.need || position.boundary || lastBoundary) {
-				return nil
-			}
-			continue
-		case syntax.InstAlt, syntax.InstAltMatch:
-			other := position
-			other.pc = instruction.Arg
-			if !push(other) {
-				return sentinelFailure(name, "saved grammar exhausted bounded format analysis")
-			}
-		case syntax.InstCapture, syntax.InstNop:
-		case syntax.InstEmptyWidth:
-			required := syntax.EmptyOp(instruction.Arg)
-			if !savedShapeAssertion(alphabets, position.offset, required) {
-				continue
-			}
-			if required&(syntax.EmptyWordBoundary|syntax.EmptyNoWordBoundary) != 0 {
-				next.boundary = true
-			}
-		case syntax.InstRune, syntax.InstRune1:
-			if position.offset == len(alphabets) || position.need && !position.boundary {
-				continue
-			}
-			alphabet := sourceClasses[position.pc]
-			if alphabet == "" {
-				var err error
-				alphabet, err = sentinelInstructionAlphabet(name, instruction)
-				if err != nil {
-					return err
-				}
-				sourceClasses[position.pc] = alphabet
-			}
-			provided := alphabets[position.offset]
-			narrowed := false
-			if position.offset < prefix {
-				if len(provided) != 1 || !instruction.MatchRune(rune(provided[0])) {
-					continue
-				}
-			} else if provided != alphabet {
-				if provided != savedWordProjection(alphabet, true) && provided != savedWordProjection(alphabet, false) {
-					continue
-				}
-				narrowed = true
-			}
-			next.offset++
-			next.need = narrowed && !position.boundary
-			next.boundary = false
-		case syntax.InstFail:
-			continue
-		default:
-			return sentinelFailure(name, "saved grammar instruction is unsupported")
-		}
-		if !push(next) {
-			return sentinelFailure(name, "saved grammar exhausted bounded format analysis")
-		}
-	}
-	return sentinelFailure(name, "supplied saved shape is not a pinned grammar path")
+		return alphabets[offset], nil
+	}, store)
 }
 
 func savedWordProjection(alphabet string, word bool) string {

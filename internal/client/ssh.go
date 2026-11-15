@@ -3,6 +3,7 @@ package client
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -24,6 +25,7 @@ type SSH struct {
 	Host Host
 	// origin retains the original saved provider entry on this computer.
 	origin           *Host
+	nativeSource     SSHNativeSourceOpener
 	ownConnection    bool
 	bindingCollector *agentBindingCollector
 	// Interactive allows prompts (passwords, host keys, FIDO touches).
@@ -139,7 +141,12 @@ func (s *SSH) argsContext(ctx context.Context, shared bool) ([]string, error) {
 	return s.argsWithContext(ctx, &snap, shared)
 }
 
-func (s *SSH) argsWithContext(ctx context.Context, snap *pinSnap, shared bool) ([]string, error) {
+func (s *SSH) argsWithContext(ctx context.Context, snap *pinSnap, shared bool) (_ []string, returned error) {
+	ctx, finishNative, err := s.beginNativeSource(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { returned = errors.Join(returned, finishNative()) }()
 	ctx = s.policyContext(ctx)
 	if snap != nil && snap.staged {
 		shared = false
@@ -195,6 +202,9 @@ func (s *SSH) Command(ctx context.Context, remote string, extra ...string) (*exe
 }
 
 func (s *SSH) command(lockCtx, procCtx context.Context, remote string, extra ...string) (*exec.Cmd, error) {
+	if err := s.checkNativeSourceScope(lockCtx); err != nil {
+		return nil, err
+	}
 	args, err := s.connArgs(lockCtx, !s.ownConnection)
 	if err != nil {
 		return nil, err
@@ -250,7 +260,12 @@ func (l *sshLogFile) finish() string {
 
 // Run runs a remote command and returns its stdout. The error includes stderr
 // only when the remote command itself ran and exited with 1..254.
-func (s *SSH) Run(ctx context.Context, remote string, stdin io.Reader) ([]byte, error) {
+func (s *SSH) Run(ctx context.Context, remote string, stdin io.Reader) (_ []byte, returned error) {
+	ctx, finishNative, err := s.beginNativeSource(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { returned = errors.Join(returned, finishNative()) }()
 	ctx, release, err := s.beginSSHStart(ctx, "SSH command")
 	if err != nil {
 		return nil, err
@@ -400,6 +415,9 @@ func sshError(ctx context.Context, h Host, err error, sshLog, stderr string) err
 // Shell builds an interactive ssh command that opens a login shell on the
 // host, with no forwarding.
 func (s *SSH) Shell(ctx context.Context) (*exec.Cmd, error) {
+	if err := s.checkNativeSourceScope(ctx); err != nil {
+		return nil, err
+	}
 	args, err := s.connArgs(ctx, true)
 	if err != nil {
 		return nil, err

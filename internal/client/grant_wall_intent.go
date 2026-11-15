@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"fmt"
+	"reflect"
 )
 
 // wallGrantIntent is immutable after construction. Host RPCs never carry
@@ -16,6 +17,16 @@ type wallGrantIntent struct {
 // intent. Resolve and confirm the actual wall before calling this function
 // or fetching values. Reuse the returned pointer only for this start's retries.
 func NewWallGrantRequest(untrusted, sshAgent bool, resolvedWall string, exposeNames []string) (*GrantRequest, error) {
+	intent, err := makeWallGrantIntent(sshAgent, resolvedWall, exposeNames)
+	if err != nil {
+		return nil, err
+	}
+	r := NewGrantRequest(untrusted, sshAgent)
+	r.wall = intent
+	return r, nil
+}
+
+func makeWallGrantIntent(sshAgent bool, resolvedWall string, exposeNames []string) (*wallGrantIntent, error) {
 	switch resolvedWall {
 	case "none", "process", "gvisor", "microvm":
 	default:
@@ -33,9 +44,38 @@ func NewWallGrantRequest(untrusted, sshAgent bool, resolvedWall string, exposeNa
 		}
 		intent.exposed[name] = true
 	}
-	r := NewGrantRequest(untrusted, sshAgent)
+	return intent, nil
+}
+
+// BindNewWall seals the resolved wall on the SAME request that retained the
+// original settings and input primary. Existing answers cannot change scope.
+func (r *GrantRequest) BindNewWall(ctx context.Context, resolvedWall string, exposeNames []string) error {
+	if r == nil || grantRequestOf(ctx) != r {
+		return grantOperationError()
+	}
+	if err := requireGrantOperation(ctx, grantOpNew); err != nil {
+		return err
+	}
+	intent, err := makeWallGrantIntent(r.SSHAgent, resolvedWall, exposeNames)
+	if err != nil {
+		return err
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.preparationClosed {
+		return grantOperationError()
+	}
+	if r.wall != nil {
+		if reflect.DeepEqual(r.wall, intent) {
+			return nil
+		}
+		return grantOperationError()
+	}
+	if r.newIntent != nil || r.newSecrets != nil || len(r.confirmed) != 0 || len(r.recorded) != 0 {
+		return grantOperationError()
+	}
 	r.wall = intent
-	return r, nil
+	return ctx.Err()
 }
 
 func checkWallGrantArgs(ctx context.Context, actual string, sshAgent bool) error {

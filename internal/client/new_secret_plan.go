@@ -71,7 +71,7 @@ func (c *Conn) PrepareNewSecrets(ctx context.Context, a NewArgs, vm ...*VMNeedPl
 	if _, err := NormaliseSettingsSecrets(settings); err != nil {
 		return a, err
 	}
-	selection, err := selectNewAgentSecrets(settings, c.Host, a, a.Layers)
+	selection, err := selectPreparedNewAgent(ctx, settings, c, a)
 	if err != nil {
 		return a, err
 	}
@@ -181,7 +181,7 @@ func (c *Conn) PrepareNewSecrets(ctx context.Context, a NewArgs, vm ...*VMNeedPl
 		if idErr != nil {
 			return a, idErr
 		}
-		sources, sourceErr := encodeLocalPolicySources(a)
+		sources, sourceErr := encodeRequestPolicySources(owned, a)
 		if sourceErr != nil {
 			return a, sourceErr
 		}
@@ -292,6 +292,24 @@ func (p *newSecretPlan) fetch(ctx context.Context, h Host, names []string, termi
 	if err := bindRequestLocalSource(ctx, h); err != nil {
 		return nil, err
 	}
+	if input := newInputPreparationOf(ctx); input != nil {
+		input.mu.Lock()
+		err := input.discovery.revalidatePrimaryPolicy(ctx)
+		if err == nil {
+			err = input.revalidateInputFacts(ctx)
+		}
+		input.mu.Unlock()
+		if err != nil {
+			return nil, err
+		}
+	}
+	p.mu.Lock()
+	if p.fetched {
+		values := maps.Clone(p.values)
+		p.mu.Unlock()
+		return values, nil
+	}
+	p.mu.Unlock()
 	values, err := FetchSecrets(ctx, settings, names, terminal)
 	if err != nil {
 		return nil, err
@@ -316,7 +334,8 @@ func (r *GrantRequest) Close() error {
 		return nil
 	}
 	r.mu.Lock()
-	p, operation := r.newSecrets, r.preparationSettings
+	r.ending = true
+	p, operation, inputs := r.newSecrets, r.preparationSettings, r.newInputs
 	r.mu.Unlock()
 	if p != nil {
 		p.mu.Lock()
@@ -327,6 +346,9 @@ func (r *GrantRequest) Close() error {
 		if p.busy {
 			return agentModeResourceError()
 		}
+	}
+	if err := inputs.close(); err != nil {
+		return err
 	}
 	if operation != nil {
 		if err := operation.Close(); err != nil {

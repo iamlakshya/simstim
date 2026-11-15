@@ -39,6 +39,13 @@ func EnsureInstalledAgentsV1(ctx context.Context) (receipt *InstalledAgentsRecei
 	if err != nil {
 		return nil, err
 	}
+	return ensureInstalledAgentsPublicationV1(publication)
+}
+
+func ensureInstalledAgentsPublicationV1(publication *runtimePublication) (receipt *InstalledAgentsReceiptV1, returned error) {
+	if publication == nil {
+		return nil, agentsBuildFailure("the installed agents producer has no original native publication")
+	}
 	receipt = &InstalledAgentsReceiptV1{publication: publication, done: make(chan struct{})}
 	owned := receipt
 	defer func() {

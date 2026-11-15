@@ -58,6 +58,9 @@ func startReservedSessionWithOperation(m *Manifest, secrets map[string]api.Secre
 		m.SandboxName = m.Name
 	}
 	applySessionIdentity(m)
+	if m.Wall != nil {
+		m.Run.StartEnvelope = true
+	}
 	if err := saveReservedManifest(operation, m); err != nil {
 		return nil, err
 	}
@@ -68,6 +71,9 @@ func startReservedSessionWithOperation(m *Manifest, secrets map[string]api.Secre
 		}
 	}
 	m.launchStarted = false
+	if m.Wall != nil {
+		return startOwnedReservedSession(m, secrets, reservation, operation)
+	}
 	reservation.launched = m.Files == nil
 	proc, err := startHolder(m)
 	if m.launchStarted || proc != nil || m.Run.Unit != "" {

@@ -153,7 +153,18 @@ func (s *SSH) Start(ctx context.Context, remote string) (Proc, error) {
 	return s.startWith(ctx, ctx, remote)
 }
 
-func (s *SSH) startWith(lockCtx, procCtx context.Context, remote string) (Proc, error) {
+func (s *SSH) startWith(lockCtx, procCtx context.Context, remote string) (_ Proc, returned error) {
+	procCtx, finishNative, err := s.beginNativeSource(procCtx)
+	if err != nil {
+		return nil, err
+	}
+	nativeOwned := true
+	defer func() {
+		if nativeOwned {
+			returned = errors.Join(returned, finishNative())
+		}
+	}()
+	lockCtx = withMatchingNativeSource(lockCtx, procCtx)
 	lockCtx, release, err := s.beginSSHStart(lockCtx, "connect")
 	if err != nil {
 		return nil, err
@@ -201,12 +212,12 @@ func (s *SSH) startWith(lockCtx, procCtx context.Context, remote string) (Proc, 
 			raw.agentStderr.budget = logFile.agent.shutdownBudget()
 		}
 	}
-	wrapped := &sshProc{Proc: p, rawDone: rawDone, ctx: context.WithoutCancel(lockCtx), host: s.Host, args: cmd.Args, logFile: logFile}
+	nativeOwned = false
+	wrapped := &sshProc{nativeFinish: finishNative, Proc: p, rawDone: rawDone, ctx: context.WithoutCancel(lockCtx), host: s.Host, args: cmd.Args, logFile: logFile}
 	if s.bindingCollector != nil {
 		if err := s.bindingCollector.attachOwner(wrapped, procCtx, nativeProgram); err != nil {
 			wrapped.Kill()
-			_ = wrapped.Wait()
-			return nil, err
+			return nil, errors.Join(err, wrapped.Wait())
 		}
 	}
 	return wrapped, nil
@@ -219,10 +230,11 @@ type sshProc struct {
 	args    []string
 	logFile *sshLogFile
 
-	once    sync.Once
-	rawDone chan struct{}
-	waitErr error
-	code    int
+	once         sync.Once
+	rawDone      chan struct{}
+	waitErr      error
+	nativeFinish func() error
+	code         int
 
 	logMu            sync.Mutex
 	log              string
@@ -232,6 +244,11 @@ type sshProc struct {
 
 func (p *sshProc) Wait() error {
 	p.once.Do(func() {
+		defer func() {
+			if p.nativeFinish != nil {
+				p.waitErr = errors.Join(p.waitErr, p.nativeFinish())
+			}
+		}()
 		p.waitErr = p.Proc.Wait()
 		if p.rawDone != nil {
 			raw, actual := p.Proc.(*cmdProc)

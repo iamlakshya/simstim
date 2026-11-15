@@ -2,7 +2,6 @@ package host
 
 import (
 	"path"
-	"slices"
 
 	"github.com/iamlakshya/simstim/internal/api"
 	"github.com/iamlakshya/simstim/internal/brand"
@@ -15,7 +14,7 @@ func CloneInputSummary(summary *api.InputSummary) *api.InputSummary {
 		return nil
 	}
 	copy := *summary
-	copy.Repositories = slices.Clone(summary.Repositories)
+	copy.Repositories = api.CloneInputRepositories(summary.Repositories)
 	return &copy
 }
 

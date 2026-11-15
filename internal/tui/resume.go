@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -54,8 +55,13 @@ func (m *Model) resumeSelectedReady() tea.Cmd {
 	request := client.NewGrantRequest(false, false)
 	m.grantOwners.add(request)
 	read := m.beginSettingsRead()
-	resume := m.bgCmd(func(ctx context.Context) tea.Msg {
-		defer func() { _ = m.grantOwners.release(request) }()
+	resume := m.bgCmd(func(ctx context.Context) (message tea.Msg) {
+		defer func() {
+			if result, ok := message.(resumedMsg); ok {
+				result.err = errors.Join(result.err, m.grantOwners.release(ctx, request))
+				message = result
+			}
+		}()
 		settings, read := readSettings(be, kept, read)
 		if _, err := client.ReadPolicySettings(); err != nil {
 			return resumedMsg{key: key, err: err, settingsRead: read}
@@ -63,6 +69,11 @@ func (m *Model) resumeSelectedReady() tea.Cmd {
 		// The host stops the old holder and its unit, then waits for the start.
 		cctx, cancel := context.WithTimeout(client.WithGrantRequest(ctx, request), 90*time.Second)
 		defer cancel()
+		endAttempt, err := m.grantOwners.begin(request, cctx, cancel)
+		if err != nil {
+			return resumedMsg{key: key, err: err, settingsRead: read}
+		}
+		defer endAttempt()
 		var plan client.ResumePolicyPlan
 		if planner, ok := unclean(c).(interface {
 			PlanResumePolicy(context.Context, string) (client.ResumePolicyPlan, error)

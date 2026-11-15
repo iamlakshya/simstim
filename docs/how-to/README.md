@@ -25,9 +25,11 @@ One task per page. New here? Start with [getting started](../tutorials/getting-s
 | Guide | Task |
 | --- | --- |
 | [Work with sessions](sessions.md) | Attach, describe and delete a session, and leave out its host when the name is unique |
+| [Choose a sandbox wall](sandboxes.md) | Check host support and select a session's isolation level |
 | [Worktrees](worktrees.md) | Give each task its own git worktree and branch |
 | [Setup hooks](setup-hooks.md) | Prepare each new session or worktree with the repository's own script |
 | [Bring work to your laptop](pull.md) | Fetch a session's branch into your own clone |
+| [Copy files in and out](copy-files.md) | Copy reviewed files and folders between this computer and a running sandbox |
 | [Ports](ports.md) | Open a web server that runs in a session |
 | [Paste images](image-paste.md) | Paste a screenshot into a remote agent |
 | [Keep your scrollback](scrollback.md) | Start agents inline, so your terminal keeps the conversation |

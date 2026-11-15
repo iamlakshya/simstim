@@ -6,9 +6,11 @@ import "slices"
 // that its agent uses. Source names the evidence for this baseline; recordings
 // remain a separate release check and are never manufactured by unit tests.
 type ModelGuard struct {
-	Wire      string   `json:"wire"`
-	Hosts     []string `json:"hosts"`
-	Paths     []string `json:"paths"`
+	Wire  string   `json:"wire"`
+	Hosts []string `json:"hosts"`
+	Paths []string `json:"paths"`
+	// Files lists exact method/authority/path upload endpoints.
+	Files     []string `json:"files,omitempty"`
 	Tools     []string `json:"tools"`
 	Search    []string `json:"search,omitempty"`
 	WebSocket bool     `json:"websocket,omitempty"`
@@ -21,6 +23,7 @@ type ModelGuard struct {
 var modelData = map[string]ModelGuard{
 	"claude": {
 		Wire: "anthropic-messages", Hosts: []string{"api.anthropic.com"},
+		Files:  []string{"POST api.anthropic.com/v1/files"},
 		Paths:  []string{"POST /v1/messages", "POST /v1/messages/count_tokens"},
 		Tools:  []string{"custom", "computer_20250124", "text_editor_20250124", "bash_20250124"},
 		Search: []string{"web_search_20250305", "web_search_20260209", "web_search_20260318"},
@@ -28,6 +31,7 @@ var modelData = map[string]ModelGuard{
 	},
 	"codex": {
 		Wire: "openai-responses", Hosts: []string{"api.openai.com", "chatgpt.com"},
+		Files:  []string{"POST api.openai.com/v1/files"},
 		Paths:  []string{"POST /v1/responses", "GET /v1/responses", "GET /v1/models", "POST /backend-api/codex/responses", "GET /backend-api/codex/responses", "GET /backend-api/codex/models"},
 		Tools:  []string{"function", "custom", "computer", "local_shell"},
 		Search: []string{"web_search", "web_search_2025_08_26"}, WebSocket: true,
@@ -54,6 +58,7 @@ func cloneModelGuard(input *ModelGuard) *ModelGuard {
 	output := *input
 	output.Hosts, output.Paths = slices.Clone(input.Hosts), slices.Clone(input.Paths)
 	output.Tools, output.Search = slices.Clone(input.Tools), slices.Clone(input.Search)
+	output.Files = slices.Clone(input.Files)
 	return &output
 }
 

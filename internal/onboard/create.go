@@ -44,13 +44,10 @@ func CheckCreate(p provider.Provider, req provider.Request) error {
 // so that `host rm --destroy` can always find what was made. It does not install
 // the helper: the caller connects the host next.
 //
-// If ctx ends before the provider returns a machine, Create deletes the
-// machine it had begun to make only when the provider names machines after
-// their hosts and no such machine was there before. If the provider returns
-// a machine but its initial save fails, bounded cleanup deletes that exact
-// machine before the host lock is released. The error says what was cleaned
-// up. A host whose initial save committed stays saved if later preparation
-// stops; cancellation permits no further host write.
+// Provider results and stored provenance alone never authorise cleanup. A
+// failed binding/save retains and reports the exact returned resource. Only an
+// actual closed native producer capability could authorise original-locator
+// cleanup; the current historical birth token supplies no such capability.
 func Create(ctx context.Context, p provider.Provider, req provider.Request) (client.Host, error) {
 	ctx, release, err := client.BeginHostCreationContext(ctx, CreationRequest(p, req))
 	if err != nil {
@@ -68,6 +65,7 @@ func Create(ctx context.Context, p provider.Provider, req provider.Request) (cli
 	if err := client.StartHostCreationContext(ctx); err != nil {
 		return client.Host{}, err
 	}
+	defer client.EndHostCreationAttemptContext(ctx)
 	h, err := p.Create(ctx, req)
 	if err == nil {
 		if err := validateCreationResult(p, req, h); err != nil {
@@ -77,14 +75,14 @@ func Create(ctx context.Context, p provider.Provider, req provider.Request) (cli
 		}
 		bound, bindErr := client.BindHostCreationResultContext(ctx, h)
 		if bindErr != nil {
-			return client.Host{}, unsaved(ctx, p, req, h, bindErr)
+			return h, unsaved(ctx, p, req, h, bindErr)
 		}
 		h = bound
 		// A new host: the save compares with no entry (cli-spec 11.3),
 		// publishes any pin that the provider staged, and records the
 		// provider's tier (isolation spec 14.8.3).
 		if err := client.UpdateHosts(ctx, client.HostChange{Kind: "host create", Now: &h, Pin: true, Tier: client.ProviderTier(p.Name())}); err != nil {
-			return client.Host{}, unsaved(ctx, p, req, h, err)
+			return h, unsaved(ctx, p, req, h, err)
 		}
 		return h, nil
 	}
@@ -105,37 +103,11 @@ func Create(ctx context.Context, p provider.Provider, req provider.Request) (cli
 	return client.Host{}, stopped
 }
 
-// unsaved deletes machine h, which Create made but could not save, as a
-// cancel does: no machine stays that no saved host names. Its error says
-// why the save failed, and what became of the machine. When the delete
-// fails too, it names the machine that stays.
+// unsaved retains the exact resource after a failed binding/save. Neither the
+// raw returned Host nor historical Source data is a native cleanup capability.
 func unsaved(ctx context.Context, p provider.Provider, req provider.Request, h client.Host, saveErr error) error {
-	out := &client.UserError{Msg: saveErr.Error(), Code: "save_failed",
-		Hint: fmt.Sprintf("%s host create %s %s (after you fix the cause)", brand.Name, p.Name(), req.Name)}
-	var ue *client.UserError
-	switch {
-	case ctx.Err() != nil:
-		out = &client.UserError{Msg: fmt.Sprintf("stopped while making %s; nothing was saved", req.Name), Hint: brand.Name + " setup", Code: "cancelled", Kind: client.KindCancelled}
-	case errors.As(saveErr, &ue):
-		kept := *ue
-		out = &kept
-	}
-	// A fresh context: the user's may have ended, and the clean-up must
-	// still run.
-	cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Minute)
-	defer cancel()
-	what := fmt.Sprintf("the %s machine %s", p.Name(), h.Machine.ID)
-	lc, err := p.Open(h)
-	if err == nil {
-		err = lc.Destroy(cctx)
-	}
-	if err != nil {
-		out.Msg = fmt.Sprintf("%s, and %s stays: %v", out.Msg, what, err)
-		out.Hint = "Delete it with " + p.Name() + "'s own tools, then run the command again."
-		return out
-	}
-	out.Msg += ", so " + what + " was deleted again"
-	return out
+	client.EndHostCreationAttemptContext(ctx)
+	return partialCreationResult(ctx, h, saveErr)
 }
 
 // SetIdle installs, or with "never" removes, the helper's idle timer on a

@@ -42,6 +42,9 @@ func sessionPIDs(unit bool, agentPID int) []int {
 	return pids
 }
 
+// GuestListeningPorts returns only descendant listener claims in this network namespace.
+func GuestListeningPorts()[]Port{return listeningPorts(descendants(os.Getpid()))}
+
 // listeningPorts finds TCP listening sockets that belong to the given processes.
 func listeningPorts(pids []int) []Port {
 	owner := map[string]int{} // socket inode -> pid

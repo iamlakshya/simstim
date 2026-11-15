@@ -27,7 +27,7 @@ type HelpGroup struct {
 // command adds it here. P1.8 adds Policy with its first command, because an
 // empty group would print its title.
 var helpGroups = []HelpGroup{
-	{ID: "sessions", Title: "Sessions", Commands: []string{"new", "attach", "resume", "ls", "show", "stop", "rm", "rename", "send", "ports", "forward", "pull"}},
+	{ID: "sessions", Title: "Sessions", Commands: []string{"new", "attach", "resume", "ls", "show", "stop", "rm", "rename", "send", "ports", "forward", "pull", "cp", "events"}},
 	{ID: "hosts", Title: "Hosts", Commands: []string{"host"}},
 	{ID: "policy", Title: "Policy", Commands: []string{"policy"}},
 	{ID: "agents", Title: "Agents", Commands: []string{"agents"}},

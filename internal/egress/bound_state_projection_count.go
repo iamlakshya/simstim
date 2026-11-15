@@ -13,13 +13,14 @@ type PublicStateCountSink interface {
 	Entry() error
 	Binding() error
 	Host() error
+	Slot() error
 }
 
 // PublicStateProjectionSchema holds only finite names derived from the sole
 // API DTO descriptors. Construct it once INSIDE the complete inspection, so
 // startup accounting includes it. It retains no source, state or permission.
 type PublicStateProjectionSchema struct {
-	state, intent, binding, retired []string
+	state, intent, binding, retired, primary, minted, shape, slot []string
 }
 
 // NewPublicStateProjectionSchema derives the same names as ExactJSONFields.
@@ -30,6 +31,10 @@ func NewPublicStateProjectionSchema() PublicStateProjectionSchema {
 		intent:  api.ExactJSONFieldNames((*api.SecretDeliveryIntent)(nil)),
 		binding: api.ExactJSONFieldNames((*api.SecretBind)(nil)),
 		retired: api.ExactJSONFieldNames((*api.RetiredPrimarySecretState)(nil)),
+		primary: api.ExactJSONFieldNames((*api.PublicSecretState)(nil)),
+		minted:  api.ExactJSONFieldNames((*api.PublicMintedSecretState)(nil)),
+		shape:   api.ExactJSONFieldNames((*api.SecretShape)(nil)),
+		slot:    api.ExactJSONFieldNames((*api.SecretShapeSlot)(nil)),
 	}
 }
 
@@ -64,10 +69,10 @@ func projectedStateCountFields(p *api.JSONProjection, span api.JSONSpan, fields 
 	return values, projectedOpaqueError(err)
 }
 
-func projectedIntentCountFields(p *api.JSONProjection, span api.JSONSpan, fields []string) (version, binds api.JSONSpan, err error) {
+func projectedIntentCountFields(p *api.JSONProjection, span api.JSONSpan, fields []string) (version, modes, binds api.JSONSpan, err error) {
 	null, err := projectedNull(p, span)
 	if err != nil || null {
-		return version, binds, err
+		return version, modes, binds, err
 	}
 	err = p.Object(span, fields, func(field api.JSONField) error {
 		if field.Known < 0 {
@@ -79,21 +84,23 @@ func projectedIntentCountFields(p *api.JSONProjection, span api.JSONSpan, fields
 		case "binds":
 			binds = field.Value
 		case "modes":
-			// Modes/domain consistency is a separate required semantic check.
+			modes = field.Value
 		default:
 			return errProjectedStateOpaque
 		}
 		return nil
 	})
-	return version, binds, projectedOpaqueError(err)
+	return version, modes, binds, projectedOpaqueError(err)
 }
 
+// This raw pass counts physical occurrences. The admitted grouped index
+// decides exact duplicate equality before Validate can authorise a known DTO.
 func projectedStoredMap(p *api.JSONProjection, span api.JSONSpan, visit func(api.JSONField) error) error {
 	null, err := projectedNull(p, span)
 	if err != nil || null {
 		return err
 	}
-	fields, err := p.OrderedFields(span)
+	fields, err := p.Fields(span)
 	if err != nil {
 		return projectedOpaqueError(err)
 	}
@@ -109,6 +116,7 @@ func projectedStoredMap(p *api.JSONProjection, span api.JSONSpan, visit func(api
 			return err
 		}
 	}
+
 }
 
 func projectedStoredArray(p *api.JSONProjection, span api.JSONSpan, visit func(api.JSONSpan) error) error {
@@ -177,7 +185,7 @@ func (s PublicStateProjectionSchema) countRetired(p *api.JSONProjection, span ap
 	if err != nil || null {
 		return err
 	}
-	var binding api.JSONSpan
+	var binding, shape api.JSONSpan
 	err = p.Object(span, s.retired, func(field api.JSONField) error {
 		if field.Known < 0 {
 			return errProjectedStateOpaque
@@ -185,7 +193,9 @@ func (s PublicStateProjectionSchema) countRetired(p *api.JSONProjection, span ap
 		switch s.retired[field.Known] {
 		case "binding":
 			binding = field.Value
-		case "sentinel", "shape", "identity":
+		case "shape":
+			shape = field.Value
+		case "sentinel", "identity":
 			// These still require the complete canonical per-entry validation.
 		default:
 			return errProjectedStateOpaque
@@ -195,12 +205,15 @@ func (s PublicStateProjectionSchema) countRetired(p *api.JSONProjection, span ap
 	if err != nil {
 		return projectedOpaqueError(err)
 	}
+	if err := s.countShape(p, shape, counter); err != nil {
+		return err
+	}
 	return s.countBinding(p, binding, counter)
 }
 
 // Count visits one known stored state's actual records in the SAME retained
-// JSON source. Stored maps use the existing canonical ordered-map contract;
-// public wire objects do not acquire that rule. Complete root validation and
+// JSON source. Input map order does not change support or semantics.
+// Numeric descriptors supply canonical lookup without materialising keys. Complete root validation and
 // unchanged source epoch are preconditions. Success counts quota inputs only;
 // every canonical semantic/domain/alias check is still mandatory afterwards.
 func (s PublicStateProjectionSchema) Count(ctx context.Context, p *api.JSONProjection, span api.JSONSpan, counter PublicStateCountSink) error {
@@ -221,7 +234,7 @@ func (s PublicStateProjectionSchema) Count(ctx context.Context, p *api.JSONProje
 	if version != api.SessionSecretStateV1 {
 		return errProjectedStateOpaque
 	}
-	intentVersion, binds, err := projectedIntentCountFields(p, fields.intent, s.intent)
+	intentVersion, modes, binds, err := projectedIntentCountFields(p, fields.intent, s.intent)
 	if err != nil {
 		return err
 	}
@@ -232,7 +245,12 @@ func (s PublicStateProjectionSchema) Count(ctx context.Context, p *api.JSONProje
 	if intent != api.SecretDeliveryIntentV1 {
 		return errProjectedStateOpaque
 	}
-	if err := projectedStoredMap(p, fields.primary, func(api.JSONField) error { return counter.Entry() }); err != nil {
+	for _, mapSpan := range []api.JSONSpan{modes, binds, fields.primary, fields.minted, fields.retired} {
+		if err := s.countMapIndex(p, mapSpan, counter); err != nil {
+			return err
+		}
+	}
+	if err := projectedStoredMap(p, fields.primary, func(field api.JSONField) error { return s.countPublicEntry(p, field.Value, s.primary, counter) }); err != nil {
 		return err
 	}
 	if err := projectedStoredMap(p, binds, func(field api.JSONField) error {
@@ -244,7 +262,7 @@ func (s PublicStateProjectionSchema) Count(ctx context.Context, p *api.JSONProje
 		return err
 	}
 	if err := projectedStoredMap(p, fields.minted, func(field api.JSONField) error {
-		return projectedStoredArray(p, field.Value, func(api.JSONSpan) error { return counter.Entry() })
+		return projectedStoredArray(p, field.Value, func(value api.JSONSpan) error { return s.countPublicEntry(p, value, s.minted, counter) })
 	}); err != nil {
 		return err
 	}
@@ -258,4 +276,69 @@ func (s PublicStateProjectionSchema) Count(ctx context.Context, p *api.JSONProje
 // inside its actual StateCounter callback. No declared/wire count is accepted.
 func CountProjectedSessionSecretState(ctx context.Context, p *api.JSONProjection, span api.JSONSpan, counter PublicStateCountSink) error {
 	return NewPublicStateProjectionSchema().Count(ctx, p, span, counter)
+}
+
+// Shape slots are physical state records too. Counting just credential rows
+// undercharges states with many compact runs, even though each entry may
+// remain below the unchanged control-format limit.
+func (s PublicStateProjectionSchema) countShape(p *api.JSONProjection, span api.JSONSpan, counter PublicStateCountSink) error {
+	null, err := projectedNull(p, span)
+	if err != nil || null {
+		return err
+	}
+	var slots api.JSONSpan
+	err = p.Object(span, s.shape, func(field api.JSONField) error {
+		if field.Known < 0 {
+			return errProjectedStateOpaque
+		}
+		if s.shape[field.Known] == "slots" {
+			slots = field.Value
+		}
+		return nil
+	})
+	if err != nil {
+		return projectedOpaqueError(err)
+	}
+	return projectedStoredArray(p, slots, func(api.JSONSpan) error { return counter.Slot() })
+}
+
+func (s PublicStateProjectionSchema) countPublicEntry(p *api.JSONProjection, span api.JSONSpan, fields []string, counter PublicStateCountSink) error {
+	if err := counter.Entry(); err != nil {
+		return err
+	}
+	null, err := projectedNull(p, span)
+	if err != nil || null {
+		return err
+	}
+	var shape api.JSONSpan
+	err = p.Object(span, fields, func(field api.JSONField) error {
+		if field.Known < 0 {
+			return errProjectedStateOpaque
+		}
+		if fields[field.Known] == "shape" {
+			shape = field.Value
+		}
+		if fields[field.Known] == "authority" {
+			return counter.Host()
+		}
+		return nil
+	})
+	if err != nil {
+		return projectedOpaqueError(err)
+	}
+	return s.countShape(p, shape, counter)
+}
+
+// Each present source map owns one binding-layout descriptor and one
+// host-layout name/value descriptor per visited key. These are physical
+// records in the SAME grouped tree, not a second map or declared quota.
+func (s PublicStateProjectionSchema) countMapIndex(p *api.JSONProjection, span api.JSONSpan, counter PublicStateCountSink) error {
+	null, err := projectedNull(p, span)
+	if err != nil || null {
+		return err
+	}
+	if err := counter.Binding(); err != nil {
+		return err
+	}
+	return projectedStoredMap(p, span, func(api.JSONField) error { return counter.Host() })
 }

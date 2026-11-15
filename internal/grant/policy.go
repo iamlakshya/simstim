@@ -16,6 +16,9 @@ import (
 // is valid syntax; the client's grant gate decides whether its host may get it.
 func CheckHost(raw string) (string, bool, error) { return nettarget.Classify(raw) }
 
+// CheckPushTarget delegates exact repository scope to the sole policy engine.
+func CheckPushTarget(raw string) (string, error) { return egress.CanonicalPushTarget(raw) }
+
 // MergeLayers delegates to the single canonical merge used by the supervisor.
 func MergeLayers(layers []api.Layer) (api.Policy, []api.Layer, error) {
 	return egress.MergeLayers(layers)

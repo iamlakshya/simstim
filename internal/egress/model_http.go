@@ -11,8 +11,10 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"unicode/utf8"
 
 	"github.com/iamlakshya/simstim/internal/agents"
+	"github.com/iamlakshya/simstim/internal/api"
 	"github.com/iamlakshya/simstim/internal/brand"
 )
 
@@ -30,20 +32,46 @@ func (s *Server) prepareModelHTTPRequest(scope *originRequest, request *http.Req
 	if err != nil || model.webSocket && (!guard.WebSocket || !strings.HasSuffix(scope.request.Path, "/responses")) {
 		return model, "model WebSocket protocol"
 	}
-	model.file = request.Method == http.MethodPost && scope.request.Path == "/v1/files"
+	if !model.webSocket {
+		for name := range request.Header {
+			if strings.EqualFold(name, "Upgrade") {
+				return model, "model WebSocket protocol"
+			}
+		}
+		if webSocketHeaderToken(request.Header, "Connection", "upgrade") {
+			return model, "model WebSocket protocol"
+		}
+	}
+	model.file = slices.Contains(guard.Files, request.Method+" "+scope.request.Host+scope.request.Path)
 	if model.file {
 		model.require("files")
 	} else if !slices.Contains(guard.Paths, request.Method+" "+scope.request.Path) || strings.Contains(scope.request.Path, "/batches") || request.Method == http.MethodGet && strings.HasSuffix(scope.request.Path, "/responses") && !model.webSocket {
 		return model, "model path"
 	}
-	if !model.file && !model.webSocket && request.Method == http.MethodPost {
+	if request.Method == http.MethodGet {
+		input := request.Body
+		if input == nil {
+			input = http.NoBody
+		}
+		body, err := readModelBody(input)
+		if err != nil || len(body) != 0 {
+			clear(body)
+			return model, "model GET body"
+		}
+		request.Body = http.NoBody
+		request.ContentLength = 0
+		request.Header.Del("Content-Length")
+	}
+	if !model.webSocket && request.Method == http.MethodPost {
 		body, err := readModelBody(request.Body)
 		if err != nil {
 			return model, "complete model JSON"
 		}
-		if err := model.inspect(body, false); err != nil {
-			clear(body)
-			return model, "model request type"
+		if !model.file {
+			if err := model.inspect(body, false); err != nil {
+				clear(body)
+				return model, "model request type"
+			}
 		}
 		request.Body = newModelBody(body)
 		request.ContentLength = int64(len(body))
@@ -82,13 +110,7 @@ func (s *Server) installModelRequest(scope *originRequest, model *modelRequest) 
 	scope.mu.Lock()
 	reserved := scope.reserved
 	scope.mu.Unlock()
-	before := scope.permit.checkpoint()
-	if !reserved && !engine.evaluateModelNetwork(scope.request, scope.permit, evalReserve).Allow {
-		scope.permit.rollback(before)
-		return fmt.Errorf("model policy")
-	}
-	if feature := model.refusal(engine, scope.permit, evalReserve); feature != "" {
-		scope.permit.rollback(before)
+	if feature := engine.admitModelRequest(model, scope.permit, !reserved, evalReserve); feature != "" {
 		return fmt.Errorf("%s", feature)
 	}
 	scope.mu.Lock()
@@ -117,7 +139,23 @@ func (s *Server) modelRefusalLine(model *modelRequest, feature string) string {
 	if display := model.display[feature]; display != "" {
 		name = cleanAuditText(display, s.scrubber.snapshot(), 96)
 	}
-	return fmt.Sprintf("%s: %s may not use %s at %s. Try: %s", brand.Name, ref, name, model.request.Host, hint)
+	line := fmt.Sprintf("%s: %s may not use %s at %s. Try: %s", brand.Name, ref, name, model.request.Host, hint)
+	if model.webSocket && len(line) > 123 {
+		shortHint := "Try: use a supported model request."
+		if slices.Contains(api.ModelToolNames(), feature) {
+			shortHint = "Try: grant " + feature + " in this session's policy."
+		}
+		suffix := " blocked. " + shortHint
+		budget := 123 - len(suffix)
+		if len(name) > budget {
+			name = name[:budget]
+			for !utf8.ValidString(name) {
+				name = name[:len(name)-1]
+			}
+		}
+		line = name + suffix
+	}
+	return line
 }
 
 func writeModelRefusal(writer http.ResponseWriter, model *modelRequest, line string) {

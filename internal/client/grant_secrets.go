@@ -10,8 +10,12 @@ import (
 
 // FetchHostSecrets checks every grant before any secret command runs.
 // A shared-host question returns to the caller, which owns terminal input.
-func FetchHostSecrets(ctx context.Context, h Host, names []string, terminal bool) (map[string]api.Secret, error) {
+func FetchHostSecrets(ctx context.Context, h Host, names []string, terminal bool) (_ map[string]api.Secret, returned error) {
+	standalone := grantRequestOf(ctx) == nil
 	ctx, request := ensureGrantRequest(ctx)
+	if standalone {
+		defer func() { returned = errors.Join(returned, request.Close()) }()
+	}
 	if err := requireGrantOperation(ctx, grantOpNew); err != nil {
 		return nil, err
 	}
@@ -35,7 +39,10 @@ func FetchHostSecrets(ctx context.Context, h Host, names []string, terminal bool
 	if err := bindNewGrantIntent(ctx, h, hostID, names, newFetchAgentIntent(grantRequestOf(ctx))); err != nil {
 		return nil, err
 	}
-	settings := LoadSettings()
+	settings, err := newOperationSettings(ctx)
+	if err != nil {
+		return nil, err
+	}
 	if newFetchAgentIntent(request) {
 		if err := allowRequestGrant(ctx, h, hostID, tier, Outbound{Kind: OutboundSSHAgent}, settings); err != nil {
 			return nil, err
@@ -49,6 +56,9 @@ func FetchHostSecrets(ctx context.Context, h Host, names []string, terminal bool
 	}
 	if plan := newPlanOf(ctx); plan != nil {
 		return plan.fetch(ctx, h, names, terminal)
+	}
+	if inputs := newInputPreparationOf(ctx); inputs != nil {
+		return inputs.fetchUnwalled(ctx, h, names, terminal)
 	}
 	return FetchSecrets(ctx, settings, names, terminal)
 }

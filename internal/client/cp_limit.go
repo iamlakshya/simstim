@@ -13,7 +13,8 @@ func copyPolicyUnknown() error {
 
 // copyLimit consumes the SAME original approved resource pin. Current remote
 // policy can only narrow it. It performs no laptop file read, pending clear,
-// settings reload, value command or receipt renewal.
+// settings reload, value command or receipt renewal. A pin-only creation row
+// is not an acknowledged operation and grants no laptop-byte access.
 func (c *Conn) copyLimit(ctx context.Context, id string, current *api.Policy, operation *settingsOperation) (int64, error) {
 	if operation == nil {
 		return 0, copyPolicyUnknown()
@@ -28,7 +29,7 @@ func (c *Conn) copyLimit(ctx context.Context, id string, current *api.Policy, op
 	if err != nil {
 		return 0, err
 	}
-	if p == nil || p.FutureLineage || len(p.PolicySources) == 0 {
+	if p == nil || p.FutureLineage || p.futureDeliveryReceipt || p.deliveryReceipt == nil || len(p.PolicySources) == 0 {
 		return 0, copyPolicyUnknown()
 	}
 	pin, err := api.DecodePolicySourcePin(p.PolicySources)

@@ -4,7 +4,6 @@ import (
 	"context"
 	"time"
 
-	"github.com/iamlakshya/simstim/internal/agentbridge"
 	"github.com/iamlakshya/simstim/internal/proto"
 )
 
@@ -47,20 +46,7 @@ func (c *Conn) checkAgentGrant(ctx context.Context, session, target string, sett
 }
 
 func (c *Conn) checkAgentPolicy(ctx context.Context, session string, settings *agentSettingsInspector) error {
-	tier, policy, err := effectiveAgentSessionTier(ctx, c.Host, session, c.HostID())
-	if err != nil {
-		return err
-	}
-	if policy == nil || !policy.SSHAgent || policy.CreationWall != "none" || policy.HostID == "" || policy.HostID != c.HostID() {
-		return grantIdentityError(c.Host)
-	}
-	if !c.HasFeature(agentbridge.Feature) {
-		return c.grantHelperOld("share an agent with one session")
-	}
-	if err := settings.allow(ctx, c.Host, tier, Outbound{Kind: OutboundSSHAgent}); err != nil {
-		return err
-	}
-	return nil
+	return settings.allowSession(ctx, c, session)
 }
 
 func (c *Conn) checkLiveAgentGrant(ctx context.Context, session, target string, settings *agentSettingsInspector) error {

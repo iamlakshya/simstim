@@ -23,7 +23,7 @@ func validatedMintedShape(ctx context.Context, name string, public api.PublicMin
 	if err != nil {
 		return sentinelShape{}, err
 	}
-	if !validRegistryNonce(public.Identity) || public.Rule == "" || public.Shape == nil || public.Shape.Rule != public.Rule || !slices.Contains(canonical.Hosts, public.Authority) {
+	if !publicMintedFacts(validRegistryNonce(public.Identity), public.Rule != "", public.Shape != nil, public.Shape != nil && public.Shape.Rule == public.Rule, slices.Contains(canonical.Hosts, public.Authority)) {
 		return sentinelShape{}, registryIntentError()
 	}
 	shape, err := restoreSecretShape(ctx, name, api.PublicSecretState{Mode: api.SecretModeBound, Sentinel: public.Sentinel, Shape: public.Shape}, "", bindingPunctuationPolicy(canonical))

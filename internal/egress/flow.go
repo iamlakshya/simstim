@@ -103,6 +103,9 @@ func flowAllowed(eng *Engine, dialer *Dialer, f activeFlow) bool {
 	if f.check != nil {
 		return f.check(eng, dialer)
 	}
+	if f.request.Path == "" && eng.hasPushInspectionHost(f.request.Host, f.request.Port) {
+		return false
+	}
 	if !eng.revalidateFlow(f.request, f.permit).Allow {
 		return false
 	}

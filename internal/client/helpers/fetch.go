@@ -17,6 +17,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/iamlakshya/simstim/internal/supply"
 )
 
 // ReleaseSigners are the keys that sign releases' checksums.txt, as
@@ -231,7 +233,8 @@ func untar(bundle []byte) (map[string][]byte, error) {
 	return files, nil
 }
 
-// isHelper is true for a host helper's or a shadow terminal's file name.
+// isHelper accepts the helper files and the manifest from the same signed
+// release bundle. The client needs that manifest's runtime digests as well.
 func isHelper(name string) bool {
-	return strings.HasPrefix(name, "host-") || strings.HasPrefix(name, "vt-")
+	return name == supply.FileName || strings.HasPrefix(name, "host-") || strings.HasPrefix(name, "vt-")
 }

@@ -64,7 +64,10 @@ func (c *Conn) newGrantTier(ctx context.Context, names []string, sshAgent bool) 
 	if err := bindNewGrantIntent(ctx, c.Host, c.HostID(), names, sshAgent || r.SSHAgent); err != nil {
 		return tier, ceiling, err
 	}
-	settings := LoadSettings()
+	settings, err := newOperationSettings(ctx)
+	if err != nil {
+		return tier, ceiling, err
+	}
 	if err := c.checkCreationCapability(ctx, tier, settings, names); err != nil {
 		return tier, ceiling, err
 	}
@@ -129,7 +132,7 @@ func (c *Conn) prepareNewGrants(ctx context.Context, a NewArgs) (NewArgs, Tier, 
 			return a, tier, &UserError{Msg: "could not make a session ID", Hint: "Try the command again.", Code: "session_id"}
 		}
 		creationWall, exposed := creationGrantFacts(ctx)
-		sources, err := encodeLocalPolicySources(a)
+		sources, err := encodeRequestPolicySources(ctx, a)
 		if err != nil {
 			return a, tier, err
 		}

@@ -27,6 +27,9 @@ func (c *Conn) PlanResumePolicy(ctx context.Context, id string) (ResumePolicyPla
 	if err := bindRequestTransportSource(ctx, c); err != nil {
 		return ResumePolicyPlan{}, err
 	}
+	if err := c.checkNoPendingInputResume(ctx, id); err != nil {
+		return ResumePolicyPlan{}, err
+	}
 	settings, err := ReadPolicySettings()
 	if err != nil {
 		return ResumePolicyPlan{}, err

@@ -2,6 +2,7 @@ package client
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"github.com/iamlakshya/simstim/internal/api"
 	"github.com/iamlakshya/simstim/internal/brand"
@@ -80,14 +81,18 @@ func (c *Conn) Sessions(ctx context.Context) ([]Session, error) {
 
 // NewSession starts a session. Unless a names a memory cap, the session gets
 // the one in config.toml.
-func (c *Conn) NewSession(ctx context.Context, a NewArgs) (*Session, error) {
+func (c *Conn) NewSession(ctx context.Context, a NewArgs) (_ *Session, returned error) {
 	if err := CheckSessionName(a.Name); err != nil {
 		return nil, err
 	}
 	if err := CheckRequestedWall(a.Wall); err != nil {
 		return nil, err
 	}
-	ctx, _ = ensureGrantRequest(ctx)
+	standalone := grantRequestOf(ctx) == nil
+	ctx, request := ensureGrantRequest(ctx)
+	if standalone {
+		defer func() { returned = errors.Join(returned, request.Close()) }()
+	}
 	if newPlanOf(ctx) == nil && (a.SecretDelivery != nil || len(a.VMNeedV1) != 0 || a.Runtime != nil) {
 		return nil, grantOperationError()
 	}
@@ -98,6 +103,16 @@ func (c *Conn) NewSession(ctx context.Context, a NewArgs) (*Session, error) {
 		return nil, err
 	}
 	var err error
+	if inputs := newInputPreparationOf(ctx); inputs != nil {
+		inputs.mu.Lock()
+		a, err = inputs.inputArguments(ctx, a)
+		inputs.mu.Unlock()
+		if err != nil {
+			return nil, err
+		}
+	} else if a.Inputs != nil || a.Environment != nil {
+		return nil, grantOperationError()
+	}
 	if plan := newPlanOf(ctx); plan != nil {
 		a, err = plan.arguments(ctx, c, a)
 	} else {
@@ -143,6 +158,7 @@ func (c *Conn) NewSession(ctx context.Context, a NewArgs) (*Session, error) {
 			return nil, err
 		}
 	}
+	a.Layers = api.ProjectClientInputSources(a.Layers)
 	if plan != nil {
 		if err := plan.beginPublication(); err != nil {
 			return nil, err
@@ -157,7 +173,7 @@ func (c *Conn) NewSession(ctx context.Context, a NewArgs) (*Session, error) {
 		return nil, err
 	}
 	var s Session
-	if err := c.callWithSent(ctx, "new", a, &s, release); err != nil {
+	if err := c.callNewWithInputs(baseContext, ctx, a, &s, release); err != nil {
 		return nil, err
 	}
 	if err := checkSessionID(c.Host.Name, s.ID); err != nil {

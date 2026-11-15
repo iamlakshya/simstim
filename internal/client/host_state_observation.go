@@ -216,6 +216,9 @@ func (o *HostStateObservation) checkOwner(ctx context.Context) error {
 			return op.checkStateOperation(ctx)
 		}
 	case hostStateCreation:
+		if o.creation != nil && o.creation.finished.Load() {
+			return hostStateRemovalError("the original provider creation attempt reached its terminal fate")
+		}
 		if o.creation == nil || o.creation.stage == nil || o.creation.stage.st == nil {
 			return hostStateRemovalError("the creation reservation has no actual owned empty-stage handle")
 		}

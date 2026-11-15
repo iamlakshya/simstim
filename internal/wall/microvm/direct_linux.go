@@ -32,6 +32,15 @@ type DirectResult struct {
 }
 
 func sessionDirect(spec wall.Spec) (bool, error) {
+	kind, err := backendForSpec(spec)
+	if err != nil {
+		return false, err
+	}
+	if kind == firecrackerBackend {
+		// The pinned Firecracker block API uses buffered Sync IO. It has no
+		// direct-IO flag and cannot reuse Cloud Hypervisor's direct-IO proof.
+		return false, nil
+	}
 	root, err := cachefs.OpenPrivateRoot(spec.SessionDir, false)
 	if err != nil {
 		return false, err

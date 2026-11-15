@@ -64,11 +64,19 @@ func ResolvePolicyStart(ctx context.Context, h Host, dir, profile string, sessio
 // wall resolution, grant checks or secret fetches. Repeating it keeps the
 // session flags and origin-section names while observing newly added locks.
 func (c *Conn) PrepareNewPolicy(ctx context.Context, a NewArgs) (NewArgs, error) {
-	settings, err := ReadPolicySettings()
+	settings, err := newOperationSettings(ctx)
 	if err != nil {
 		return a, err
 	}
-	if len(a.Layers) == 0 {
+	inputs := newInputPreparationOf(ctx)
+	if inputs != nil {
+		inputs.mu.Lock()
+		a, err = inputs.policyArguments(ctx, a)
+		inputs.mu.Unlock()
+		if err != nil {
+			return a, err
+		}
+	} else if len(a.Layers) == 0 {
 		values := api.LayerValues{Sandbox: api.SandboxValues{Mounts: slices.Clone(a.Mounts), Include: slices.Clone(a.Include), Secrets: secretMapNames(a.Secrets)}}
 		if a.Wall != "" {
 			wall := a.Wall
@@ -81,16 +89,18 @@ func (c *Conn) PrepareNewPolicy(ctx context.Context, a NewArgs) (NewArgs, error)
 		a.Layers = start.Layers
 		a.RepositoryPolicy = start.RepositoryPolicy
 	} else {
-		layers, err := RefreshPolicyLayers(c.Host, a.Layers)
+		layers, err := refreshPolicyLayers(settings, c.Host, a.Layers)
 		if err != nil {
 			return a, err
 		}
 		a.Layers = layers
 	}
-	var repoErr error
-	a, repoErr = c.prepareRepositoryPolicy(ctx, a)
-	if repoErr != nil {
-		return a, repoErr
+	if inputs == nil {
+		var repoErr error
+		a, repoErr = c.prepareRepositoryPolicy(ctx, a)
+		if repoErr != nil {
+			return a, repoErr
+		}
 	}
 	if err := c.CheckHTTPMethodFeature(StartPolicyLayers(a)); err != nil {
 		return a, err

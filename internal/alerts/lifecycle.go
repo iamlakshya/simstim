@@ -1,7 +1,7 @@
 package alerts
 
 // Sandbox and host health event kinds use the same dispatcher and noise limits
-// as session events. None of them adds a destination or enables delivery.
+// as session events. They send only to destinations the user already named.
 const (
 	SandboxReady    = "sandbox_ready"
 	SandboxStopped  = "sandbox_stopped"
@@ -12,4 +12,5 @@ const (
 
 func init() {
 	Kinds = append(Kinds, SandboxReady, SandboxStopped, SandboxError, HealthDegraded, HealthRecovered)
+	DefaultEvents = append(DefaultEvents, SandboxReady, SandboxStopped, SandboxError, HealthDegraded, HealthRecovered)
 }

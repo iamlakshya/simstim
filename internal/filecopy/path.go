@@ -55,6 +55,9 @@ func GuestPath(name string) (top, relative string, err error) {
 	if strings.HasPrefix(name, "~/") {
 		name = "/home/agent/" + strings.TrimPrefix(name, "~/")
 	}
+	if len(name) > 1 && strings.HasSuffix(name, "/") {
+		name = strings.TrimSuffix(name, "/")
+	}
 	if !path.IsAbs(name) || path.Clean(name) != name {
 		return "", "", failure("cp_path", "the sandbox copy path must be absolute or start with ~/")
 	}

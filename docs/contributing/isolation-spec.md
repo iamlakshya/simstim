@@ -1576,6 +1576,7 @@ type ModelGuard struct {
     Wire      string   `json:"wire"`                // "anthropic-messages", "openai-responses" or "openai-chat"
     Hosts     []string `json:"hosts"`               // "api.anthropic.com"
     Paths     []string `json:"paths"`               // "POST /v1/messages"
+    Files     []string `json:"files,omitempty"`     // "POST api.anthropic.com/v1/files", exact upload endpoints
     Tools     []string `json:"tools"`               // tools[].type values that pass, such as "custom"
     Search    []string `json:"search,omitempty"`    // web search types, refused under the locked preset
     WebSocket bool     `json:"websocket,omitempty"` // the agent may use WebSocket mode on a listed path
@@ -5864,7 +5865,7 @@ A decoy is a fake credential file in a sandbox's home. No tool needs its value, 
 - A tool can send a decoy by itself, which raises a false alarm. The rules and tests below bound this.
 - A targeted attacker can read the public list and skip the decoys. That costs no more than having no decoys.
 
-**The data.** `internal/guest/decoys.toml` lists each decoy, with a source link. A row has these fields:
+**The data.** `internal/proto/decoys.toml` lists each decoy, with a source link. The guest and image capture share this one low-level table, so neither imports the other. A row has these fields:
 
 - The name, and the path in the home of `agent`.
 - A template for the file.

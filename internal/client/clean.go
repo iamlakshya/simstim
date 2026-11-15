@@ -152,6 +152,9 @@ func CleanSession(s Session) Session {
 	s.Signal, s.Unit, s.HostVersion = CleanLine(s.Signal), CleanLine(s.Unit), CleanLine(s.HostVersion)
 	s.MissingSecrets = cleanLines(s.MissingSecrets, CleanLine)
 	s.Secrets = cleanLines(s.Secrets, CleanLine)
+	s.Forwards=slices.Clone(s.Forwards)
+	s.Forwards=slices.DeleteFunc(s.Forwards,func(forward api.PortForwardInfo)bool{return forward.Port<1 || forward.Port>65535})
+	if len(s.Forwards)>64{s.Forwards=s.Forwards[:64]}
 	return s
 }
 

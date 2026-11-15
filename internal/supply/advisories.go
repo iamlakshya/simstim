@@ -26,9 +26,14 @@ import (
 // v30.0 and v31.0, below every pin. The other Ghostty advisories name app
 // versions that the laptop_terminal entry's Before of 1.4.0 already covers,
 // or library fixes that the shadow terminal's pin already holds (spec
-// 19.1). Firecracker gets its entries when P6.2 pins it. A guest kernel
+// 19.1). The Firecracker entries also conservatively cover fixed older
+// branches: the driver floor is 1.17.0 and the release pin is 1.18.0. A guest kernel
 // advisory is added when it covers the current kernel pin.
 var knownBad = []Advisory{
+	{ID: "GHSA-48ww-rqpp-2mgm", Kind: AdvisoryVMM, Name: FirecrackerName, Before: "1.17.0", Severity: "high", CVSS: 7.5, Published: "2026-11-04",
+		URL: "https://github.com/firecracker-microvm/firecracker/security/advisories/GHSA-48ww-rqpp-2mgm"},
+	{ID: "GHSA-776c-mpj7-jm3r", Kind: AdvisoryVMM, Name: FirecrackerName, Before: "1.15.1", Severity: "high", Published: "2026-04-07",
+		URL: "https://github.com/firecracker-microvm/firecracker/security/advisories/GHSA-776c-mpj7-jm3r"},
 	{ID: "GHSA-3r3x-6hgg-2m38", Kind: AdvisoryVMM, Name: "cloud-hypervisor", Before: "54.1", Severity: "high", CVSS: 8.9, Published: "2026-11-11",
 		URL: "https://github.com/cloud-hypervisor/cloud-hypervisor/security/advisories/GHSA-3r3x-6hgg-2m38"},
 	{ID: "GHSA-f47p-p25q-83rh", Kind: AdvisoryVMM, Name: "cloud-hypervisor", Before: "51.2", Severity: "high", CVSS: 8.9, Published: "2026-05-14",

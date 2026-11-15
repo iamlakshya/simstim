@@ -185,6 +185,7 @@ func (s *Supervisor) apply(p []byte) {
 		// events, valid or not, never hide a silence.
 		s.mu.Lock()
 		s.lastBeat = now()
+		if s.silent {s.silent=false;ev:=s.alertEvent(alerts.HealthRecovered);ev.Reason="heartbeat_resumed";s.raise(ev)}
 		s.mu.Unlock()
 	case proto.EventStatus:
 		s.claimStatus(c)
@@ -216,6 +217,7 @@ func (s *Supervisor) claimStatus(c claim) {
 	g.State, g.Source, g.Reason, g.FullScreen, g.At = c.state, c.source, c.reason, c.fullScreen, t.UTC()
 	s.dirty = true
 	if prev != c.state {
+		ev:=s.alertEvent(alerts.StateChanged);ev.Claimed=true;ev.Reason=c.state;ev.Summary="state changed to "+c.state+" (claimed)";s.raise(ev)
 		s.turn.change(prev, c.state, t)
 		if s.al != nil {
 			s.al.StateChanged()

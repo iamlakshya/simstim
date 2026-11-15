@@ -20,23 +20,57 @@ type runtimePublication struct {
 	watchStop  sync.Once
 	releaseErr error
 	activity   sync.Mutex
+	bootOwner  *originalBootV1
+	startup    *SessionOperation
 }
 
 // beginRuntimePublication admits this current helper before cache roots/parts
 // exist. Its reservation outlives every owned descriptor and partial cleanup.
 func beginRuntimePublication(ctx context.Context) (*runtimePublication, error) {
-	if err := CheckCaller(); err != nil {
+	return beginRuntimePublicationKind(ctx, "publish", nil, nil)
+}
+
+func beginStartupPublication(ctx context.Context, operation *SessionOperation) (*runtimePublication, error) {
+	if operation == nil || operation.native == nil || operation.native.borrowed || !operation.Valid(operation.Primary()) {
+		return nil, sessionLeaseError("the startup placement has no original owning operation")
+	}
+	return beginRuntimePublicationKind(ctx, "start", nil, operation)
+}
+
+func beginBootAssetPublication(ctx context.Context, boot *originalBootV1) (*runtimePublication, error) {
+	if err := checkBootPublisher(boot); err != nil {
 		return nil, err
+	}
+	return beginRuntimePublicationKind(ctx, "publish", boot, nil)
+}
+
+func beginAutomaticAgentsPublication(ctx context.Context, boot *originalBootV1) (*runtimePublication, error) {
+	if boot == nil || boot.operation == nil || boot.owner == nil || boot.operation.originalBoot != boot || boot.loan.Purpose != "automatic" || boot.operation.AutomaticBoot() == nil || !boot.owner.Valid(boot.loan.Primary) {
+		return nil, automaticRestoreError()
+	}
+	return beginRuntimePublicationKind(ctx, "publish", boot, nil)
+}
+
+func beginRuntimePublicationKind(ctx context.Context, kind string, boot *originalBootV1, startup *SessionOperation) (*runtimePublication, error) {
+	if boot == nil {
+		if err := CheckCaller(); err != nil {
+			return nil, err
+		}
+	} else if err := checkBootPublisher(boot); err != nil {
+		return nil, err
+	}
+	if ctx == nil {
+		return nil, placementError("the original publisher has no owner context")
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	operation, err := beginPlacementOperation(ctx, "publish")
+	operation, err := beginPlacementOperation(ctx, kind)
 	if err != nil {
 		return nil, err
 	}
 	owned, cancel := context.WithCancelCause(ctx)
-	publication := &runtimePublication{ctx: owned, cancel: cancel, owner: operation.owner, operation: operation, stop: make(chan struct{}), watched: make(chan struct{})}
+	publication := &runtimePublication{ctx: owned, cancel: cancel, owner: operation.owner, operation: operation, stop: make(chan struct{}), watched: make(chan struct{}), bootOwner: boot, startup: startup}
 	go publication.watch()
 	return publication, nil
 }
@@ -58,12 +92,12 @@ func (p *runtimePublication) watch() {
 				if p.ctx.Err() != nil {
 					return context.Cause(p.ctx)
 				}
-				if err := CheckCaller(); err != nil {
+				if err := p.checkCaller(); err != nil {
 					return err
 				}
 				return p.owner.withControl(p.ctx, func(control *placementControl) error {
 					if control.Drain != "" {
-						return UserError("draining", "purge cancelled this runtime publisher", "Finish the current removal before trying another runtime install.")
+						return UserError("draining", "purge cancelled this runtime or startup operation", "Finish the current removal before trying another runtime install.")
 					}
 					if current, ok := control.Active[p.operation.token]; !ok || current != p.operation.record {
 						return placementError("the runtime publish reservation changed identity")
@@ -89,7 +123,7 @@ func (p *runtimePublication) gate(ctx context.Context, publish func() error) err
 	}
 	p.activity.Lock()
 	defer p.activity.Unlock()
-	if err := CheckCaller(); err != nil {
+	if err := p.checkCaller(); err != nil {
 		return err
 	}
 	if p == nil || p.operation == nil {
@@ -122,3 +156,20 @@ func (p *runtimePublication) close() error {
 }
 
 func (p *runtimePublication) stopWatching() { p.watchStop.Do(func() { close(p.stop) }); <-p.watched }
+
+func checkBootPublisher(boot *originalBootV1) error {
+	if boot == nil || boot.owner == nil || boot.operation == nil || boot.operation.originalBoot != boot ||
+		!boot.owner.Valid(boot.loan.Primary) || !boot.operation.Valid(boot.loan.Primary) {
+		return vmNeedError("the asset publisher lost its actual native boot owner")
+	}
+	return nil
+}
+func (p *runtimePublication) checkCaller() error {
+	if p != nil && p.bootOwner != nil {
+		return checkBootPublisher(p.bootOwner)
+	}
+	if p != nil && p.startup != nil && (!p.startup.Valid(p.startup.Primary()) || p.startup.ownerContext == nil || p.startup.ownerContext.Err() != nil) {
+		return sessionLeaseError("the original startup placement owner ended")
+	}
+	return CheckCaller()
+}

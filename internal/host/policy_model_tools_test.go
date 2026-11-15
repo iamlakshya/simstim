@@ -17,19 +17,19 @@ func TestModelToolRegrantKeepsExactSetAndFreshLeaseInstance(t *testing.T) {
 	}
 	args.Tools = []string{"files", "mcp"}
 	_, secondLayers, second, err := ApplyPolicyAdd(firstLayers, args)
-	if err != nil || len(secondLayers) != 1 || len(secondLayers[0].Rules) != 1 || second.ID != first.ID || second.GrantID == first.GrantID {
-		t.Fatalf("exact-set regrant did not refresh one lease: %+v, %v", second, err)
+	if err != nil || len(secondLayers) != 1 || len(secondLayers[0].Rules) != 2 || second.ID != first.ID || second.GrantID == first.GrantID {
+		t.Fatalf("exact-set once grant did not append a fresh lease: %+v, %v", second, err)
 	}
 	if firstLayers[0].Rules[0].GrantID != first.GrantID {
 		t.Fatal("regrant mutated the prior trusted layer")
 	}
 	args.Tools = []string{"mcp"}
 	policy, thirdLayers, third, err := ApplyPolicyAdd(secondLayers, args)
-	if err != nil || third.ID == second.ID || len(policy.Rules) != 2 {
+	if err != nil || third.ID == second.ID || len(policy.Rules) != 3 {
 		t.Fatalf("a different exact capability set replaced prior authority: %+v, %v", policy.Rules, err)
 	}
 	remaining, _, removed, err := ApplyPolicyRm(thirdLayers, api.PolicyRmArgs{ID: second.ID})
-	if err != nil || removed != 1 || len(remaining.Rules) != 1 || !reflect.DeepEqual(remaining.Rules[0].Tools, []string{"mcp"}) {
+	if err != nil || removed != 2 || len(remaining.Rules) != 1 || !reflect.DeepEqual(remaining.Rules[0].Tools, []string{"mcp"}) {
 		t.Fatalf("ID removal crossed a capability-set boundary: %+v, removed=%d, %v", remaining.Rules, removed, err)
 	}
 }

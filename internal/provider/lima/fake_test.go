@@ -45,6 +45,8 @@ import (
 // Lines that start with # in the copied files are the testdata's notes,
 // which limactl never prints.
 const fakeLimactl = `#!/bin/sh
+FAKE_DIR=${0%/*}
+printf '%s\n' "${LIMA_HOME-}" >> "$FAKE_DIR/home-log"
 for a; do printf '%s\037' "$a"; done >> "$FAKE_DIR/log"
 printf '\n' >> "$FAKE_DIR/log"
 cmd=$1; shift
@@ -70,8 +72,10 @@ list)
     nest="\"nestedVirtualization\":$nest,"
     if [ -f "$FAKE_DIR/edited" ] && [ -f "$FAKE_DIR/after-edit-list-incomplete" ]; then nest=; fi
     nets=; if [ -f "$FAKE_DIR/networks-json" ]; then nets=",\"networks\":$(cat "$FAKE_DIR/networks-json")"; fi
+    listed_home=${LIMA_HOME:-$FAKE_DIR}
+    if [ -f "$FAKE_DIR/listed-home" ]; then listed_home=$(cat "$FAKE_DIR/listed-home"); fi
     printf '{"name":"%s","status":"%s","dir":"%s/%s","vmType":"%s","sshConfigFile":"%s/%s/ssh.config","cpus":2,"config":{"plain":true,%s"networkOpts":{"hostLoopback":%s}%s}}\n' \
-      "$i" "$(cat "$f")" "${LIMA_HOME:-$FAKE_DIR}" "$i" "$vm" "${LIMA_HOME:-$FAKE_DIR}" "$i" "$nest" "$loop" "$nets"
+      "$i" "$(cat "$f")" "$listed_home" "$i" "$vm" "$listed_home" "$i" "$nest" "$loop" "$nets"
   done ;;
 create)
   for a; do case $a in --name=*) n=${a#--name=} ;; esac; done
@@ -136,8 +140,9 @@ func fakeLima(t *testing.T, system string) string {
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("FAKE_DIR", dir)
 	t.Setenv("LIMA_HOME", dir)
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	for _, key := range []string{"HOME", "USERPROFILE", "XDG_CONFIG_HOME", "XDG_CACHE_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME", "XDG_RUNTIME_DIR"} {
+		t.Setenv(key, t.TempDir())
+	}
 	old := goos
 	goos = system
 	t.Cleanup(func() { goos = old })

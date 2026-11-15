@@ -48,6 +48,11 @@ func (e *Engine) evaluateDNS(host string, at time.Time) dnsHostVerdict {
 	out := dnsHostVerdict{unknown: e.unknown}
 	for _, port := range ports {
 		portAllowed := false
+		for _, request := range e.pushHTTPWitnesses(host, port, at) {
+			if e.evaluateHTTP(request, nil, evalPrecheck).Allow {
+				portAllowed = true
+			}
+		}
 		requiresHTTP := e.requiresHTTPWitness(host, port)
 		for _, path := range paths {
 			if path == "" && requiresHTTP {

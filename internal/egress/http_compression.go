@@ -8,7 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"strings"
+	"net/http"
 )
 
 const maxDecodedHTTPBody = 64 << 20
@@ -21,13 +21,16 @@ type decodedHTTPBody struct {
 	finishErr error
 }
 
-func decodeHTTPBody(body io.ReadCloser, encoding string) (io.ReadCloser, bool, error) {
-	encoding = strings.ToLower(strings.TrimSpace(encoding))
-	if encoding == "" || encoding == "identity" {
+func decodeHTTPBody(body io.ReadCloser, header http.Header) (io.ReadCloser, bool, error) {
+	encoding, err := httpContentEncoding(header)
+	if err != nil {
+		return nil, false, err
+	}
+	if body == nil || body == http.NoBody || encoding == "" {
+		clearHTTPContentEncoding(header)
 		return body, false, nil
 	}
 	var reader io.ReadCloser
-	var err error
 	switch encoding {
 	case "gzip":
 		reader, err = gzip.NewReader(body)
@@ -48,6 +51,7 @@ func decodeHTTPBody(body io.ReadCloser, encoding string) (io.ReadCloser, bool, e
 	if err != nil {
 		return nil, false, fmt.Errorf("decode HTTP body: %w", err)
 	}
+	clearHTTPContentEncoding(header)
 	return &decodedHTTPBody{reader: reader, original: body, remaining: maxDecodedHTTPBody}, true, nil
 }
 

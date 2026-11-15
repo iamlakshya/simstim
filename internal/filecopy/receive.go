@@ -69,7 +69,7 @@ func temporary(root *os.Root) (*os.File, string, error) {
 		return nil, "", err
 	}
 	name := ".cp-" + hex.EncodeToString(random[:])
-	file, err := root.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+	file, err := root.OpenFile(name, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0600)
 	return file, name, err
 }
 
@@ -114,19 +114,11 @@ func ReceiveFile(ctx context.Context, root *os.Root, relative string, size int64
 	} else if !errors.Is(statErr, os.ErrNotExist) {
 		return statErr
 	}
-	file, temp, err := temporary(parent)
+	file, publish, cleanup, err := newStage(parent)
 	if err != nil {
 		return err
 	}
-	closed := false
-	defer func() {
-		if !closed {
-			err = errors.Join(err, file.Close())
-		}
-		if removeErr := parent.Remove(temp); !errors.Is(removeErr, os.ErrNotExist) {
-			err = errors.Join(err, removeErr)
-		}
-	}()
+	defer func() { err = errors.Join(err, cleanup()) }()
 	hash := sha256.New()
 	n, err := io.CopyN(io.MultiWriter(file, hash), contextReader{ctx, input}, size)
 	if err != nil || n != size {
@@ -146,21 +138,11 @@ func ReceiveFile(ctx context.Context, root *os.Root, relative string, size int64
 	if err = file.Sync(); err != nil {
 		return err
 	}
-	err = file.Close()
-	closed = true
-	if err != nil {
-		return err
-	}
 	if err = ctx.Err(); err != nil {
 		return err
 	}
-	if replace {
-		return parent.Rename(temp, leaf)
-	}
-	// Link is an atomic create-if-absent. A file planted after preflight is
-	// never replaced, and a planted final symlink is never followed.
-	if err = parent.Link(temp, leaf); errors.Is(err, os.ErrExist) {
-		return failure("cp_exists", "a copy destination appeared before publication")
-	}
-	return err
+	// The stage owns its live descriptor until cleanup. In the Linux guest,
+	// publication links that exact anonymous inode; no helper-owned name is
+	// exposed while bytes arrive or left behind when the helper dies.
+	return publish(leaf, replace)
 }

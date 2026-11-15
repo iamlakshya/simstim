@@ -6,8 +6,9 @@ import (
 	"github.com/iamlakshya/simstim/internal/api"
 )
 
-// The acknowledged public getter runs first. A missing original receipt never
-// reaches the fresh literal-value command plan. Both closures bind the SAME
+// The original public getter runs first. Only a positively known legacy None
+// empty set can continue without a receipt; modern missing metadata refuses.
+// Both closures bind the SAME
 // selected Conn/host/session, and neither receives names from a remote row.
 func combinedPullReviewValues(ctx context.Context, public func(context.Context) ([]api.Secret, error), literal func(context.Context) ([][]byte, error)) ([][]byte, error) {
 	standIns, err := public(ctx)

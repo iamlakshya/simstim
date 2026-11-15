@@ -62,7 +62,7 @@ func canonicalHTTPRequest(req *http.Request, hdr StreamHeader, scheme string) (R
 	req.Host = req.URL.Host
 	req.Header.Del("Host")
 	req.RequestURI = ""
-	return Request{Host: hdr.Host, Port: hdr.Port, Method: req.Method, Path: path}, nil
+	return Request{Host: hdr.Host, Port: hdr.Port, Method: req.Method, Path: path, query: req.URL.RawQuery, scheme: scheme, forceQuery: req.URL.ForceQuery}, nil
 }
 
 func validateInspectedFraming(req *http.Request) error {

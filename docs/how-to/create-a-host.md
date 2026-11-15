@@ -19,7 +19,7 @@ Creating a host counts as your consent to install the helper on it. `host create
 simstim setup --create lima --name dev --agents claude --yes
 ```
 
-Press Ctrl+C while Lima or Docker makes the machine, and the setup deletes the half-made VM or container, so nothing is left behind. After that, the host is saved: `simstim host rm dev --destroy` deletes it. The launcher's setup (`s`) does the same, and Esc stops it.
+Ctrl+C stops setup, and Esc stops the launcher's setup (`s`). If Lima or Docker creation may have begun, an interrupted or failed attempt can leave a machine behind. The error keeps the original resource and locator when they are known. Inspect that exact attempt with the provider's tools before retrying. After the host is saved, `simstim host rm dev --destroy` deletes it.
 
 ## A local VM with Lima
 
@@ -36,7 +36,7 @@ Press Ctrl+C while Lima or Docker makes the machine, and the setup deletes the h
 3. It installs the helper, turns on linger, and sets up idle stop. The first time, with the image download, this took about a minute on an Apple silicon Mac.
 4. Install your agents in the VM, from a shell there (`limactl shell simstim-dev`), then start a session: `simstim new dev --agent claude`.
 
-simstim reaches the VM with the system `ssh` and Lima's generated `ssh.config`, which its own generated config includes. Your `~/.ssh/config` is never changed.
+simstim reaches the VM with the system `ssh` and Lima's generated `ssh.config`, which its own generated config includes. Your `~/.ssh/config` is never changed. Saved Lima lifecycle commands keep the original instance folder and `LIMA_HOME`. A different current `LIMA_HOME`, or a replacement instance at the same path, cannot select another VM.
 
 ### Your Mac's loopback services
 
@@ -45,8 +45,8 @@ Lima lets a VM reach the services on your Mac's loopback address, `127.0.0.1`, t
 On a Mac, `host create lima` closes this path:
 
 - It makes the VM with Apple's Virtualization framework (Lima's `vz`), and sets Lima's `networkOpts.hostLoopback` to false. The VM then cannot connect to your Mac's loopback services.
-- Lima's `~/.lima/_config/override.yaml` wins over these settings. Before the VM first starts, `host create` checks them again. If the file keeps the path open, `host create` deletes the new VM and tells you which settings to remove from the file. It does the same when `default.yaml` or `override.yaml` gives every VM a `user-v2` network, which Lima cannot run with the path closed, and it names that network.
-- It also asks Lima for nested virtualisation, which later sandboxes need to run a VM inside the VM. macOS allows it on Apple M3 or later, with macOS 15 or later. On another Mac, Lima refuses it when the VM starts. `host create` then turns it off, starts the VM again, and says that the host gets no microvm sandboxes. If the VM still does not start, `host create` deletes it, because no host names it yet. If `override.yaml` sets `nestedVirtualization: true`, the change has no effect: `host create` deletes the VM and tells you to remove that setting from the file.
+- Lima's `~/.lima/_config/override.yaml` wins over these settings. Before the VM first starts, `host create` checks them again. If the file keeps the path open, `host create` retains the new VM and tells you which settings to remove from the file. It does the same when `default.yaml` or `override.yaml` gives every VM a `user-v2` network, which Lima cannot run with the path closed, and it names that network.
+- It also asks Lima for nested virtualisation, which later sandboxes need to run a VM inside the VM. macOS allows it on Apple M3 or later, with macOS 15 or later. On another Mac, Lima refuses it when the VM starts. `host create` then turns it off, starts the VM again, and says that the host gets no microvm sandboxes. If the VM still does not start, `host create` retains it and reports the original locator. If `override.yaml` sets `nestedVirtualization: true`, the change has no effect: `host create` retains the VM and tells you to remove that setting from the file.
 
 On Linux, Lima runs the VM with QEMU, which cannot close the path. `host create` and `host doctor` warn you about this. Run untrusted work on a remote host instead.
 
@@ -82,7 +82,7 @@ Two cases need another step, and `host doctor` names it in its Try line:
 
 ## A container, for testing
 
-The Docker provider is experimental. It proves the exec transport, and it runs in CI.
+The Docker provider is experimental. It proves the exec transport, and it runs in CI. Before starting a container, creation checks that its fixed original endpoint and configuration reach the same Docker engine under the later read-only inspection role. An endpoint that needs unavailable authentication or TLS settings stops before a container starts. Saved Docker actions use that same engine, pinned configuration and immutable container ID. Changing the current Docker context does not select a different machine. If the original container is gone, a later container with the same name stays untouched.
 
 ```sh
 simstim host create docker test

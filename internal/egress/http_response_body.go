@@ -38,6 +38,10 @@ func prepareHTTPResponse(response *http.Response, method string) error {
 		return nil
 	}
 	if method == http.MethodHead || response.StatusCode == http.StatusNoContent || response.StatusCode == http.StatusNotModified || response.Body == http.NoBody {
+		if _, err := httpContentEncoding(response.Header); err != nil {
+			return err
+		}
+		clearHTTPContentEncoding(response.Header)
 		return nil
 	}
 	if len(declared) != 0 {
@@ -46,7 +50,7 @@ func prepareHTTPResponse(response *http.Response, method string) error {
 		response.Header.Del("Content-Length")
 		response.ContentLength = -1
 	}
-	body, decoded, err := decodeHTTPBody(response.Body, response.Header.Get("Content-Encoding"))
+	body, decoded, err := decodeHTTPBody(response.Body, response.Header)
 	if err != nil {
 		return err
 	}

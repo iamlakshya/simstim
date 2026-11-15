@@ -33,6 +33,16 @@ func TestModelRequestTypesAndNestedProviderFetches(t *testing.T) {
 		refusal           string
 	}{
 		{"function union schema", "codex", `{"tools":[{"type":"function","parameters":{"type":["object","null"]}}]}`, api.PresetLocked, nil, ""},
+		{"null tools", "codex", `{"tools":null}`, api.PresetLocked, nil, ""},
+		{"tools string", "codex", `{"tools":"mcp"}`, api.PresetOpen, nil, "parse"},
+		{"tools object", "codex", `{"tools":{"type":"mcp"}}`, api.PresetOpen, nil, "parse"},
+		{"tool scalar", "codex", `{"tools":[123]}`, api.PresetOpen, nil, "parse"},
+		{"tool string", "codex", `{"tools":["mcp"]}`, api.PresetOpen, nil, "parse"},
+		{"nested tools", "codex", `{"tools":[[{"type":"function"}]]}`, api.PresetOpen, nil, "parse"},
+		{"system document", "claude", `{"system":[{"type":"document","source":{"type":"url","url":"https://example.com/a"}}]}`, api.PresetLocked, nil, "url_content"},
+		{"relative content URL", "codex", `{"input":[{"type":"input_image","image_url":"//example.com/a"}]}`, api.PresetOpen, []string{"url_content"}, "parse"},
+		{"other URI scheme", "codex", `{"input":[{"type":"input_file","file_url":"ftp://example.com/a"}]}`, api.PresetOpen, []string{"url_content"}, "parse"},
+		{"object URL relative", "codex", `{"input":[{"type":"input_image","image_url":{"url":"//example.com/a"}}]}`, api.PresetOpen, nil, "parse"},
 		{"client tool", "claude", `{"tools":[{"name":"local"}],"messages":[]}`, api.PresetLocked, nil, ""},
 		{"unknown dated tool", "claude", `{"tools":[{"type":"new_server_tool_20990101"}]}`, api.PresetOpen, nil, "parse"},
 		{"web fetch", "claude", `{"tools":[{"type":"web_fetch_20260318"}]}`, api.PresetOpen, nil, "web_fetch"},
