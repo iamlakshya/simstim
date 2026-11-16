@@ -5,6 +5,8 @@ version: 2
 before:
   hooks:
     - go mod tidy -diff
+    # Static process launcher and its canonical compiled syscall policy.
+    - cmd/userns/build.sh
     # The client embeds the host helpers, so build them first.
     - sh -c 'for arch in amd64 arm64; do CGO_ENABLED=0 GOOS=linux GOARCH=$arch go build -trimpath -ldflags "-s -w -X {{ .Env.MODULE }}/internal/version.Version={{ .Version }}" -o internal/client/helpers/host-linux-$arch ./cmd/host; done'
     # The shadow terminal (Zig 0.17), embedded next to the host helpers.
@@ -59,13 +61,20 @@ archives:
         strip_parent: true
       - src: internal/client/helpers/vt-linux-*
         strip_parent: true
+      - src: internal/client/helpers/userns-linux-*
+        strip_parent: true
       - src: internal/client/helpers/release-manifest.json
         strip_parent: true
   - id: host
     ids: [host]
     formats: [tar.gz]
     name_template: "{{ .Env.APP_NAME }}-host_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
-    files: [LICENSE, NOTICE, third-party-licences/*]
+    files:
+      - LICENSE
+      - NOTICE
+      - third-party-licences/*
+      - src: internal/client/helpers/userns-linux-{{ .Arch }}
+        dst: userns
 
 checksum:
   name_template: checksums.txt
@@ -78,6 +87,10 @@ checksum:
       name_template: "{{ .Env.APP_NAME }}-vt-linux-amd64"
     - glob: internal/client/helpers/vt-linux-arm64
       name_template: "{{ .Env.APP_NAME }}-vt-linux-arm64"
+    - glob: internal/client/helpers/userns-linux-amd64
+      name_template: "{{ .Env.APP_NAME }}-userns-linux-amd64"
+    - glob: internal/client/helpers/userns-linux-arm64
+      name_template: "{{ .Env.APP_NAME }}-userns-linux-arm64"
     - glob: build/guest/assets/*
     - glob: build/vmm/assets/*
     - glob: internal/client/helpers/release-manifest.json
@@ -114,6 +127,10 @@ release:
       name_template: "{{ .Env.APP_NAME }}-vt-linux-amd64"
     - glob: internal/client/helpers/vt-linux-arm64
       name_template: "{{ .Env.APP_NAME }}-vt-linux-arm64"
+    - glob: internal/client/helpers/userns-linux-amd64
+      name_template: "{{ .Env.APP_NAME }}-userns-linux-amd64"
+    - glob: internal/client/helpers/userns-linux-arm64
+      name_template: "{{ .Env.APP_NAME }}-userns-linux-arm64"
     - glob: build/guest/assets/*
     - glob: build/vmm/assets/*
 

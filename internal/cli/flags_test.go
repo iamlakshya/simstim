@@ -15,7 +15,6 @@ import (
 	"github.com/iamlakshya/simstim/internal/brand"
 	"github.com/iamlakshya/simstim/internal/client"
 	"github.com/iamlakshya/simstim/internal/diag"
-	"github.com/iamlakshya/simstim/internal/host/hosttest"
 	"github.com/iamlakshya/simstim/internal/provider"
 )
 
@@ -149,7 +148,7 @@ func parsed(t *testing.T, name string, line ...string) *pflag.Flag {
 // Every list of names takes a repeated flag and commas, and the two are the
 // same (cli-spec 10.3).
 func TestListsTakeARepeatedFlagAndCommas(t *testing.T) {
-	hosttest.New(t)
+	newTestHome(t)
 	for _, c := range []struct {
 		line []string
 		flag string
@@ -343,7 +342,7 @@ func (recorder) Open(client.Host) (client.Lifecycle, error) { return nil, errors
 // gets.
 func withRecorder(t *testing.T) *provider.Request {
 	t.Helper()
-	hosttest.New(t)
+	newTestHome(t)
 	got := &provider.Request{}
 	old := providers
 	providers = append(slices.Clone(providers), recorder{got})
@@ -433,7 +432,7 @@ func TestOldMeaningsAndBoundsOfHostCreate(t *testing.T) {
 
 // host idle keeps the time without the spaces that it read past.
 func TestHostIdleSavesTheTrimmedTime(t *testing.T) {
-	hosttest.New(t)
+	newTestHome(t)
 	if err := client.SaveHostsContext(context.Background(), []client.Host{{Name: "box", SSH: "box", Machine: &client.Machine{Provider: "docker", ID: "c1"}}}); err != nil {
 		t.Fatal(err)
 	}
@@ -458,7 +457,7 @@ func TestHostIdleSavesTheTrimmedTime(t *testing.T) {
 // A name in a list that the flag took more than once is fixed in the use
 // where the user typed it.
 func TestTheTryLineFixesANameInARepeatedList(t *testing.T) {
-	hosttest.New(t)
+	newTestHome(t)
 	for _, c := range []struct {
 		args []string
 		try  string
@@ -476,7 +475,7 @@ func TestTheTryLineFixesANameInARepeatedList(t *testing.T) {
 
 // new takes one host before "--" (isolation spec 14.14).
 func TestNewTakesOneHost(t *testing.T) {
-	hosttest.New(t)
+	newTestHome(t)
 	for _, c := range []struct {
 		args []string
 		want string

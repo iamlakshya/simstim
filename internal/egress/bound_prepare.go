@@ -147,11 +147,13 @@ func prepareBoundRegistry(ctx context.Context, state *memberState) (*preparedIni
 	metadata := state.metadata
 	metadata.Secrets = nil
 	metadata.AgentKinds = slices.Clone(state.kinds)
+	metadata.Decoys = api.CloneDecoyTripwires(state.decoys)
 	base, err := prepareInitialState(metadata)
 	if err != nil {
 		return nil, err
 	}
 	state.metadata, state.kinds = base.state.metadata, base.state.kinds
+	state.decoys, state.decoyClasses = base.state.decoys, base.state.decoyClasses
 	for name, secret := range state.secrets {
 		if secret.bound != nil {
 			if err := checkSavedPrefix(name, secret.bound.shape.Prefix); err != nil {
@@ -185,6 +187,10 @@ func prepareBoundRegistry(ctx context.Context, state *memberState) (*preparedIni
 		return nil, err
 	}
 	state.requestView, err = state.requestView.withTripwireSentinels(slices.Sorted(maps.Keys(registrySentinels(state))))
+	if err != nil {
+		return nil, err
+	}
+	state.requestView, err = state.requestView.withDecoyTripwires(state.decoys)
 	if err != nil {
 		return nil, err
 	}

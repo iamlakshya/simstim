@@ -1,0 +1,125 @@
+{
+  "upstream_commit": "7a675ac66a1e2357abdaa6cccedabcd3cce9aa5c",
+  "files": [
+    {
+      "path": "runsc/BUILD",
+      "before_sha256": "2f453819582fe1e40684d72be3d86d36bd962526bf65d0f42a1f05f1a6aa7ad5",
+      "after_sha256": "bfead14b8de254f4e49471f8a08bcfe1f7e806c772196427ca01fa1a04c4c785",
+      "mode": 420
+    },
+    {
+      "path": "runsc/cmd/sandboxsetup/BUILD",
+      "before_sha256": "afa1a679ec6fa1d0cb2ff24166811db32dc8991bddd89af72801708c36722333",
+      "after_sha256": "d000ed17b2296e884e57b511601e4e5e3cba83199454f6a965db70208c3efbf1",
+      "mode": 420
+    },
+    {
+      "path": "runsc/cmd/sandboxsetup/caps.go",
+      "before_sha256": "be0855411f51d0a2eff3ec09da4567c369839fb08d4712073a8f7b35f4b57d9d",
+      "after_sha256": "d5b3b3b833fff2cca83db88a93975cade9816990c7ef601df61cab17a601de26",
+      "mode": 420
+    },
+    {
+      "path": "runsc/cmd/sandboxsetup/caps_unsafe.go",
+      "before_sha256": "68bade83654784b1c59d6976858589fc4b4a55d637094a888b207e9bf35f8ce2",
+      "after_sha256": "70017cbc30c1dd2c8ef1c343909c8de8e012e1d3a3dd49defc7a7645211d3f5e",
+      "mode": 420
+    },
+    {
+      "path": "runsc/cmd/sandboxsetup/process.go",
+      "before_sha256": "bc068f720b67811686ff182c775dd739f0b848885d7091924bcd75154c9423cf",
+      "after_sha256": "67b246c6b4b272d39083fd85c4f98018a73906fea199638a90fa6d53f2f000d0",
+      "mode": 420
+    },
+    {
+      "path": "runsc/cmd/sentry/BUILD",
+      "before_sha256": "3291575c495ef9fc1721736ce868fdf8c47bb3c5b315896c791c531e3f33b4e8",
+      "after_sha256": "9241b145dd9bc94e661f300a3bbb9881074659195eae7160df5e81d284439b6e",
+      "mode": 420
+    },
+    {
+      "path": "runsc/cmd/sentry/sentry_main.go",
+      "before_sha256": "9137aab7d5f277350f8c11ff622712d200d130af38181c2fc542e7e42e258250",
+      "after_sha256": "d5cda87e4e7fb228dbdc3bd134c06d949ec4d5df02410bbd431194be67604b92",
+      "mode": 420
+    },
+    {
+      "path": "runsc/fdparking/fdparking.c",
+      "before_sha256": "23811478b25e7de655c2f4f0b173b09670577fcfdcc1d0388c5eddea2f658e50",
+      "after_sha256": "3fd07ad952a40ab1834d4998da344b381a28639817a3ba98de8047f3d97bef83",
+      "mode": 420
+    },
+    {
+      "path": "runsc/gofer/fs/BUILD",
+      "before_sha256": "81c9a2fa3661c6583d78d33fd221084a47e55e39467c5dfcf8c9e2c9196b12c9",
+      "after_sha256": "6ac66d455b2361906ef5d20aa0378a948cb0c198acd7a437ca4be4313bd75e10",
+      "mode": 420
+    },
+    {
+      "path": "runsc/gofer/fs/lisafs.go",
+      "before_sha256": "c60aab7f0492e3424317902e95ea51e0b8dce04c0f4a527b9d2ce7384c533fce",
+      "after_sha256": "da0c7771215f26d2ded45d2799ba78018a4f7c7dce26d3e268248808ffa3ae3c",
+      "mode": 420
+    },
+    {
+      "path": "runsc/hostguard/BUILD",
+      "before_sha256": null,
+      "after_sha256": "501b75612a1b70304acf5d8b49e67c8a0ecd5100bfcacef2a72035998f22d4bf",
+      "mode": 420
+    },
+    {
+      "path": "runsc/hostguard/entry_linux_amd64.s",
+      "before_sha256": null,
+      "after_sha256": "043e6f2b56ce3e5c19883dd0a4f6d0d835bebf355853a44ce0ab60a9832c69c3",
+      "mode": 420
+    },
+    {
+      "path": "runsc/hostguard/entry_linux_arm64.s",
+      "before_sha256": null,
+      "after_sha256": "af8af012557f01b9d09ced5beee365d95dbed0132811bd34941cf22737594424",
+      "mode": 420
+    },
+    {
+      "path": "runsc/hostguard/hostguard.go",
+      "before_sha256": null,
+      "after_sha256": "dd98c900ff41e8e1108b0356d08c1903385c65bf221e078ce85ce073b206fed2",
+      "mode": 420
+    },
+    {
+      "path": "runsc/hostguard/hostguard_test.go",
+      "before_sha256": null,
+      "after_sha256": "942f9ccb72c740bca52cb2395a5cc13f8ae19c3e0f6b7cfe1bdcc0d0c1bc19a0",
+      "mode": 420
+    },
+    {
+      "path": "runsc/main.go",
+      "before_sha256": "0c9c42752301679f8dd0f426a44a903080d538c3de456f67063e64832ce45dc8",
+      "after_sha256": "42cc8318e67b74bf8c5a52720ccdb8982bbab67f2c8935e71657f93f202c6178",
+      "mode": 420
+    },
+    {
+      "path": "runsc/prewarmer/prewarmer.c",
+      "before_sha256": "c7bce249be1b5f8cefd948db5b8467b9551292dfbbe12c136abef9aa16512a3c",
+      "after_sha256": "4d2ce371c19678f76f0ec0e724cd61f276d4234edad0e2254bc444fc9faca21b",
+      "mode": 420
+    },
+    {
+      "path": "runsc/procumounter/procumounter.c",
+      "before_sha256": "af499f1f3d6d627bb7bbe1965455ca4d1bae5b3ea44b20936d88e691b1d26da0",
+      "after_sha256": "eae8f10404148e82f6bbdea3d20cecac88515e8eef1a1536b222f581fcbe7900",
+      "mode": 420
+    },
+    {
+      "path": "runsc/sandbox/BUILD",
+      "before_sha256": "304d8eadbef09045d69ab5063d01e084376fbd6b2fdb0bf75d6e2b622a156e72",
+      "after_sha256": "65f80eac2de7b7aab57aecad722c0d7548f48c65e0505d2906ebff0f6c334963",
+      "mode": 420
+    },
+    {
+      "path": "runsc/sandbox/sandbox.go",
+      "before_sha256": "aa0f97e0f6632f5cc26afe0cce4e4aaa5893693a343ee6143cfca04503ed1167",
+      "after_sha256": "9dd7e9b73dde605d53b3c4bb8bd065fdbc8841d52d479ef567c3cc0abbb41c51",
+      "mode": 420
+    }
+  ]
+}

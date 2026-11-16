@@ -1,0 +1,400 @@
+--- a/runsc/BUILD
++++ b/runsc/BUILD
+@@ -12,0 +13 @@
++    gc_linkopts = ["-E=gvisor.dev/gvisor/runsc/hostguard.entry"],
+@@ -21,0 +23 @@
++        "//runsc/hostguard",
+@@ -41,0 +44 @@
++        "//runsc/hostguard",
+@@ -64,0 +68 @@
++    gc_linkopts = ["-E=gvisor.dev/gvisor/runsc/hostguard.entry"],
+@@ -72,0 +77 @@
++        "//runsc/hostguard",
+--- a/runsc/cmd/sandboxsetup/BUILD
++++ b/runsc/cmd/sandboxsetup/BUILD
+@@ -26,0 +27 @@
++        "//runsc/hostguard",
+--- a/runsc/cmd/sandboxsetup/caps.go
++++ b/runsc/cmd/sandboxsetup/caps.go
+@@ -23,0 +24 @@
++	"gvisor.dev/gvisor/runsc/hostguard"
+@@ -66 +67,3 @@
+-	if err := newCaps.Apply(capability.CAPS | capability.BOUNDS | capability.AMBS); err != nil {
++	err = newCaps.Apply(capability.CAPS | capability.BOUNDS | capability.AMBS)
++	hostguard.MustDisable()
++	if err != nil {
+--- a/runsc/cmd/sandboxsetup/caps_unsafe.go
++++ b/runsc/cmd/sandboxsetup/caps_unsafe.go
+@@ -18,0 +19 @@
++	"gvisor.dev/gvisor/runsc/hostguard"
+@@ -114,0 +116 @@
++	defer hostguard.MustDisable()
+@@ -144 +146,3 @@
+-	if _, _, errno := syscall.AllThreadsSyscall6(unix.SYS_CAPSET, uintptr(unsafe.Pointer(&capsetHdr)), uintptr(unsafe.Pointer(&capsetData[0])), 0, 0, 0, 0); errno != 0 {
++	_, _, errno := syscall.AllThreadsSyscall6(unix.SYS_CAPSET, uintptr(unsafe.Pointer(&capsetHdr)), uintptr(unsafe.Pointer(&capsetData[0])), 0, 0, 0, 0)
++	hostguard.MustDisable()
++	if errno != 0 {
+--- a/runsc/cmd/sandboxsetup/process.go
++++ b/runsc/cmd/sandboxsetup/process.go
+@@ -29,0 +30 @@
++	"gvisor.dev/gvisor/runsc/hostguard"
+@@ -65,0 +67 @@
++	hostguard.MustDisable()
+@@ -68,0 +71 @@
++	hostguard.MustDisable()
+--- a/runsc/cmd/sentry/BUILD
++++ b/runsc/cmd/sentry/BUILD
+@@ -11,0 +12 @@
++    gc_linkopts = ["-E=gvisor.dev/gvisor/runsc/hostguard.entry"],
+@@ -16,0 +18 @@
++        "//runsc/hostguard",
+@@ -24,0 +27 @@
++    gc_linkopts = ["-E=gvisor.dev/gvisor/runsc/hostguard.entry"],
+@@ -34,0 +38 @@
++        "//runsc/hostguard",
+@@ -88,0 +93 @@
++        "//runsc/hostguard",
+@@ -102,0 +108 @@
++        "//runsc/hostguard",
+--- a/runsc/cmd/sentry/sentry_main.go
++++ b/runsc/cmd/sentry/sentry_main.go
+@@ -20,0 +21 @@
++	"gvisor.dev/gvisor/runsc/hostguard"
+@@ -23,0 +25 @@
++	hostguard.MustDisable()
+--- a/runsc/fdparking/fdparking.c
++++ b/runsc/fdparking/fdparking.c
+@@ -176,0 +177,5 @@
++  // Protect the process before parsing argv, environment or donated input.
++  if (sys5(__NR_prctl, PR_SET_DUMPABLE, 0, 0, 0, 0) != 0 ||
++      sys5(__NR_prctl, PR_GET_DUMPABLE, 0, 0, 0, 0) != 0) {
++    sys_exit(125);
++  }
+--- a/runsc/gofer/fs/BUILD
++++ b/runsc/gofer/fs/BUILD
+@@ -21,0 +22 @@
++        "//runsc/hostguard",
+--- a/runsc/gofer/fs/lisafs.go
++++ b/runsc/gofer/fs/lisafs.go
+@@ -41,0 +42 @@
++	"gvisor.dev/gvisor/runsc/hostguard"
+@@ -98,0 +100,3 @@
++// Set before serving requests, while the original procfs is still available.
++var singleOwnerV1 bool
++
+@@ -101,0 +106,5 @@
++	var err error
++	singleOwnerV1, err = hostguard.SingleMappedRoot()
++	if err != nil {
++		return err
++	}
+@@ -937,0 +947,6 @@
++	if singleOwnerV1 {
++		if uid != 1000 || gid != 1000 {
++			return -1, unix.EINVAL
++		}
++		uid, gid = 0, 0
++	}
+@@ -960,0 +976 @@
++			hostguard.MustDisable()
+@@ -970,0 +987 @@
++			hostguard.MustDisable()
+@@ -981,0 +999 @@
++			hostguard.MustDisable()
+@@ -989,0 +1008 @@
++			hostguard.MustDisable()
+@@ -1008,0 +1028,6 @@
++		if singleOwnerV1 {
++			if group != 1000 {
++				return -1, unix.EINVAL
++			}
++			gids[i] = 0
++		}
+@@ -1061 +1086,3 @@
+-	if err := unix.Setgroups(gids); err != nil {
++	groupErr := unix.Setgroups(gids)
++	hostguard.MustDisable()
++	if err := groupErr; err != nil {
+@@ -1489,0 +1517,6 @@
++		if singleOwnerV1 {
++			if uid != 1000 {
++				return unix.EINVAL
++			}
++			u = 0
++		}
+@@ -1492,0 +1526,6 @@
++		if singleOwnerV1 {
++			if gid != 1000 {
++				return unix.EINVAL
++			}
++			g = 0
++		}
+@@ -1500,0 +1540,8 @@
++	}
++	if singleOwnerV1 {
++		if stat.Uid == 0 {
++			stat.Uid = 1000
++		}
++		if stat.Gid == 0 {
++			stat.Gid = 1000
++		}
+--- /dev/null
++++ b/runsc/hostguard/BUILD
+@@ -0,0 +1,16 @@
++load("//tools:defs.bzl", "go_library", "go_test")
++
++package(default_applicable_licenses = ["//:license"])
++
++go_library(
++    name = "hostguard",
++    srcs = ["hostguard.go", "entry_linux_amd64.s", "entry_linux_arm64.s"],
++    visibility = ["//runsc:__subpackages__"],
++    deps = ["@org_golang_x_sys//unix:go_default_library"],
++)
++
++go_test(
++    name = "hostguard_test",
++    srcs = ["hostguard_test.go"],
++    embed = [":hostguard"],
++)
+--- /dev/null
++++ b/runsc/hostguard/entry_linux_amd64.s
+@@ -0,0 +1,28 @@
++// Copyright 2026 The gVisor Authors.
++// SPDX-License-Identifier: Apache-2.0
++
++#include "textflag.h"
++
++// This is the ELF entry, selected by the release target's Go linker -E.
++// Nothing has parsed configuration or run a Go package initialiser yet.
++TEXT ·entry(SB),NOSPLIT|NOFRAME,$0
++	MOVQ $157, AX // Linux amd64 prctl
++	MOVQ $4, DI   // PR_SET_DUMPABLE
++	XORQ SI, SI
++	XORQ DX, DX
++	XORQ R10, R10
++	XORQ R8, R8
++	SYSCALL
++	TESTQ AX, AX
++	JNE failed
++	MOVQ $157, AX
++	MOVQ $3, DI // PR_GET_DUMPABLE
++	SYSCALL
++	TESTQ AX, AX
++	JNE failed
++	JMP _rt0_amd64_linux(SB)
++failed:
++	MOVQ $231, AX // exit_group
++	MOVQ $125, DI
++	SYSCALL
++	JMP failed
+--- /dev/null
++++ b/runsc/hostguard/entry_linux_arm64.s
+@@ -0,0 +1,25 @@
++// Copyright 2026 The gVisor Authors.
++// SPDX-License-Identifier: Apache-2.0
++
++#include "textflag.h"
++
++// Preserve the initial stack and enter the ordinary Go runtime only once the
++// mm is private. The static release binaries use this as their ELF entry.
++TEXT ·entry(SB),NOSPLIT|NOFRAME,$0
++	MOVD $167, R8 // Linux arm64 prctl
++	MOVD $4, R0   // PR_SET_DUMPABLE
++	MOVD ZR, R1
++	MOVD ZR, R2
++	MOVD ZR, R3
++	MOVD ZR, R4
++	SVC $0
++	CBNZ R0, failed
++	MOVD $3, R0 // PR_GET_DUMPABLE
++	SVC $0
++	CBNZ R0, failed
++	JMP _rt0_arm64_linux(SB)
++failed:
++	MOVD $94, R8 // exit_group
++	MOVD $125, R0
++	SVC $0
++	JMP failed
+--- /dev/null
++++ b/runsc/hostguard/hostguard.go
+@@ -0,0 +1,113 @@
++// Copyright 2026 The gVisor Authors.
++// SPDX-License-Identifier: Apache-2.0
++
++// Package hostguard protects the trusted host runtime before it reads guest
++// configuration. It grants neither a namespace nor an additional host identity.
++package hostguard
++
++import (
++	"fmt"
++	"io"
++	"os"
++	"strconv"
++	"strings"
++
++	"golang.org/x/sys/unix"
++)
++
++// Disable clears and verifies the mm's dumpability. Credential changes and
++// exec must be followed by this before configuration or guest input is read.
++func Disable() error {
++	if err := unix.Prctl(unix.PR_SET_DUMPABLE, 0, 0, 0, 0); err != nil {
++		return fmt.Errorf("protect runtime memory: %w", err)
++	}
++	value, err := unix.PrctlRetInt(unix.PR_GET_DUMPABLE, 0, 0, 0, 0)
++	if err != nil || value != 0 {
++		return fmt.Errorf("runtime memory protection did not remain active: %v", err)
++	}
++	return nil
++}
++
++// MustDisable terminates before any further guest-data processing if the
++// kernel cannot retain memory protection after a credential change.
++func MustDisable() {
++	if Disable() != nil {
++		_, _ = unix.Write(2, []byte("the runtime cannot retain private process memory\n"))
++		os.Exit(125)
++	}
++}
++
++// SingleMappedRoot recognises the real, effective AND saved zero identities
++// in an existing one-ID user namespace. Malformed native maps never become a
++// false result followed by an unsafe ordinary-root fallback.
++func SingleMappedRoot() (bool, error) {
++	uid, err := readMap("/proc/self/uid_map")
++	if err != nil {
++		return false, err
++	}
++	gid, err := readMap("/proc/self/gid_map")
++	if err != nil {
++		return false, err
++	}
++	single := len(uid) == 1 && len(gid) == 1 && uid[0][0] == 0 && gid[0][0] == 0 && uid[0][2] == 1 && gid[0][2] == 1
++	if !single {
++		return false, nil
++	}
++	ruid, euid, suid := unix.Getresuid()
++	rgid, egid, sgid := unix.Getresgid()
++	if ruid != 0 || euid != 0 || suid != 0 || rgid != 0 || egid != 0 || sgid != 0 {
++		return false, fmt.Errorf("the single mapped namespace is not real, effective and saved root")
++	}
++	return true, nil
++}
++
++func readMap(name string) ([][3]uint64, error) {
++	file, err := os.Open(name)
++	if err != nil {
++		return nil, fmt.Errorf("open native identity map: %w", err)
++	}
++	defer file.Close()
++	data, err := io.ReadAll(io.LimitReader(file, 16385))
++	if err != nil {
++		return nil, fmt.Errorf("read native identity map: %w", err)
++	}
++	return parseMap(string(data))
++}
++
++func parseMap(text string) ([][3]uint64, error) {
++	if len(text) == 0 || len(text) > 16384 || !strings.HasSuffix(text, "\n") {
++		return nil, fmt.Errorf("invalid native identity map size or record ending")
++	}
++	for _, value := range []byte(text) {
++		if value != ' ' && value != '\t' && value != '\n' && (value < '0' || value > '9') {
++			return nil, fmt.Errorf("invalid native identity map grammar")
++		}
++	}
++	var rows [][3]uint64
++	for _, line := range strings.Split(strings.TrimSuffix(text, "\n"), "\n") {
++		fields := strings.Fields(line)
++		if len(fields) != 3 {
++			return nil, fmt.Errorf("invalid native identity map record")
++		}
++		var row [3]uint64
++		for index, field := range fields {
++			value, err := strconv.ParseUint(field, 10, 32)
++			if err != nil || strconv.FormatUint(value, 10) != field {
++				return nil, fmt.Errorf("invalid native identity map number")
++			}
++			row[index] = value
++		}
++		if row[2] == 0 || row[0]+row[2] > 1<<32-1 || row[1]+row[2] > 1<<32-1 {
++			return nil, fmt.Errorf("invalid native identity map range")
++		}
++		for _, old := range rows {
++			for _, index := range []int{0, 1} {
++				if row[index] < old[index]+old[2] && old[index] < row[index]+row[2] {
++					return nil, fmt.Errorf("overlapping native identity map ranges")
++				}
++			}
++		}
++		rows = append(rows, row)
++	}
++	return rows, nil
++}
+--- /dev/null
++++ b/runsc/hostguard/hostguard_test.go
+@@ -0,0 +1,16 @@
++package hostguard
++
++import "testing"
++
++func TestNativeMapGrammar(t *testing.T) {
++	for _, text := range []string{"         0          0          1\n", "0 0 4294967295\n", "0 1000 1\n1 2000 8\n"} {
++		if _, err := parseMap(text); err != nil {
++			t.Fatal("a valid kernel map was refused", text, err)
++		}
++	}
++	for _, text := range []string{"", "0 0 1", "0 0 0\n", "00 0 1\n", "0 0 +1\n", "0 0 4294967296\n", "1 0 4294967295\n", "0 0 1\n0 2 1\n", "0 0 1\n1 0 1\n", "0 0 1\n\n", "0\u00a00 1\n"} {
++		if _, err := parseMap(text); err == nil {
++			t.Fatal("an invalid map acquired single-owner authority", text)
++		}
++	}
++}
+--- a/runsc/main.go
++++ b/runsc/main.go
+@@ -23,0 +24 @@
++	"gvisor.dev/gvisor/runsc/hostguard"
+@@ -31,0 +33 @@
++	hostguard.MustDisable()
+--- a/runsc/prewarmer/prewarmer.c
++++ b/runsc/prewarmer/prewarmer.c
+@@ -216,0 +217,5 @@
++  // Protect the process before parsing argv, environment or donated input.
++  if (sys5(__NR_prctl, PR_SET_DUMPABLE, 0, 0, 0, 0) != 0 ||
++      sys5(__NR_prctl, PR_GET_DUMPABLE, 0, 0, 0, 0) != 0) {
++    sys_exit(125);
++  }
+--- a/runsc/procumounter/procumounter.c
++++ b/runsc/procumounter/procumounter.c
+@@ -27,0 +28 @@
++#include <linux/prctl.h>  // PR_SET_DUMPABLE and PR_GET_DUMPABLE.
+@@ -82,0 +84,5 @@
++  // Protect the process before parsing argv, environment or donated input.
++  if (sys3(__NR_prctl, PR_SET_DUMPABLE, 0, 0) != 0 ||
++      sys3(__NR_prctl, PR_GET_DUMPABLE, 0, 0) != 0) {
++    sys_exit(125);
++  }
+--- a/runsc/sandbox/BUILD
++++ b/runsc/sandbox/BUILD
+@@ -32,0 +33 @@
++        "//runsc/hostguard",
+--- a/runsc/sandbox/sandbox.go
++++ b/runsc/sandbox/sandbox.go
+@@ -67,0 +68 @@
++	"gvisor.dev/gvisor/runsc/hostguard"
+@@ -1444,3 +1445,11 @@
+-				// Map nobody in the new namespace to nobody in the parent namespace.
+-				s.UID = nobody
+-				s.GID = nobody
++				mappedRoot, err := hostguard.SingleMappedRoot()
++				if err != nil {
++					return err
++				}
++				if !mappedRoot {
++					// Ordinary rootful execution retains its original mapping.
++					s.UID = nobody
++					s.GID = nobody
++				}
++				// The single mapped parent retains UID/GID 0; only its nested
++				// Sentry identity is nobody. No host identity is added.

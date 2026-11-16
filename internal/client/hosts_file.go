@@ -19,6 +19,7 @@ type hostFileHooks struct {
 	membershipSourceGeneration string
 	rollback                   func()
 	commit                     func()
+	observeCommit              func() error
 	release                    func()
 	failure                    func(error) error
 	beforeSave                 func() error
@@ -126,6 +127,9 @@ func updateHostsFileContext(ctx context.Context, change func(context.Context, []
 	}
 	if hooks.commit != nil {
 		hooks.commit()
+	}
+	if hooks.observeCommit != nil {
+		return hooks.observeCommit() // Already committed: report uncertainty, never roll back.
 	}
 	return nil
 }

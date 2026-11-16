@@ -12,6 +12,10 @@ The Firecracker backend uses the canonical version 1 VM Need. Its JSON keeps the
 
 The selected runtime contains one VMM, the guest kernel and the tools image. Firecracker must be at least version 1.17.0. Release builds pin version 1.18.0 or later. The Cloud Hypervisor compatibility functions keep their existing limits and role checks.
 
+Runtime copies always seal writes, growth, shrinkage and further seals. Creation first requests the newer memfd execution controls. Only an unsupported flag or seal can select the older kernel form. Permission and policy failures remain failures. The final VMM still has mode `0111`. Its checked descriptor must name a read only mount before execution. An execution seal alone does not freeze read permission bits.
+
+The same byte checker accepts gVisor executables at mode `0555`. Their readable mode preserves companion discovery and loading. The signed runtime still has to contain the complete companion set from one build. A sealed readable file does not establish NoDump. Each patched gVisor entry point and its native caller must establish that property before configuration or secret input.
+
 The Firecracker configuration has no network device, metadata service, snapshot or balloon. It uses the default MMIO transport. It does not pass `--enable-pci` or disable the VMM's seccomp filter. The tools, image and agents disks are read only. The session disk is writable. Their order keeps the two dm-verity tables bound to `/dev/vda` and `/dev/vdb`.
 
 The guest memory is the requested whole number of MiB. The host unit also needs the canonical reserve. Configuration rejects a different unit cap. The KVM path of Firecracker 1.18.0 permits up to 32 vCPUs on both architectures. Odd counts are valid with SMT disabled. The [machine configuration source](https://github.com/firecracker-microvm/firecracker/blob/v1.18.0/src/vmm/src/vmm_config/machine_config.rs) and [resource tests](https://github.com/firecracker-microvm/firecracker/blob/v1.18.0/src/vmm/src/resources.rs) define these limits.

@@ -22,6 +22,7 @@ func (s *Supervisor) startGuest(ctx context.Context, sb sandbox, secrets map[str
 	if ctx.Err() != nil {
 		return wallError("the boot ended before the sandbox started", ctx.Err())
 	}
+	if err:=s.prepareBootDecoys(ctx);err!=nil{return err}
 	modern := s.modernSecretStartup()
 	var environment secretEnvironment
 	if modern {
@@ -47,6 +48,7 @@ func (s *Supervisor) startGuest(ctx context.Context, sb sandbox, secrets map[str
 		return wallError("the sandbox's guest init did not answer", err)
 	}
 	s.ctl = newCtl(s, st)
+	if err:=s.requireDecoyGuest(ctx);err!=nil{return err}
 	if err := s.checkControllerPrepare(ctx); err != nil {
 		return err
 	}
@@ -77,6 +79,7 @@ func (s *Supervisor) startGuest(ctx context.Context, sb sandbox, secrets map[str
 		m.Term.Cols, m.Term.Rows = host.CapTerm(orDefault(m.Term.Cols, 80), orDefault(m.Term.Rows, 24))
 	}
 	s.mu.Unlock()
+	s.bootDecoyArgs(&args)
 	if s.capture != nil {
 		plan, err := host.SandboxStatePlan(m)
 		if err != nil {

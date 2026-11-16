@@ -7,7 +7,7 @@ import (
 	"github.com/iamlakshya/simstim/internal/api"
 )
 
-func projectedTier(p *api.JSONProjection, span api.JSONSpan) (Tier, error) {
+func projectedTier(p jsonValueProjection, span api.JSONSpan) (Tier, error) {
 	var value [9]byte // Longest accepted result is "throwaway".
 	n, phase := 0, 0
 	err := p.WalkString(span, func(r rune) error {
@@ -38,7 +38,7 @@ func projectedTier(p *api.JSONProjection, span api.JSONSpan) (Tier, error) {
 	return tier, nil
 }
 
-func projectedSecretName(p *api.JSONProjection, span api.JSONSpan) error {
+func projectedSecretName(p jsonValueProjection, span api.JSONSpan) error {
 	first := true
 	err := p.WalkString(span, func(r rune) error {
 		letter := r >= 'A' && r <= 'Z' || r >= 'a' && r <= 'z' || r == '_'
@@ -57,7 +57,7 @@ func projectedSecretName(p *api.JSONProjection, span api.JSONSpan) error {
 	return nil
 }
 
-func projectedOptionalBoolean(p *api.JSONProjection, span api.JSONSpan) (bool, error) {
+func projectedOptionalBoolean(p jsonValueProjection, span api.JSONSpan) (bool, error) {
 	if span.End == 0 {
 		return false, nil
 	}
@@ -73,7 +73,7 @@ func projectedOptionalBoolean(p *api.JSONProjection, span api.JSONSpan) (bool, e
 	return false, badSandboxState()
 }
 
-func projectAgentRow(ctx context.Context, p *api.JSONProjection, span, key api.JSONSpan, schema int, selected bool) (agentSandboxPolicy, error) {
+func projectAgentRow(ctx context.Context, p jsonValueProjection, span, key api.JSONSpan, schema int, selected bool) (agentSandboxPolicy, error) {
 	known := []string{"session_id", "host_id", "ceiling", "ssh_agent", "secrets", "created_at", "request", "wall_intent", "policy_sources", "lineage", "delivery_intent"}
 	var fields [11]api.JSONSpan
 	var facts agentSandboxPolicy
@@ -159,7 +159,7 @@ func projectAgentRow(ctx context.Context, p *api.JSONProjection, span, key api.J
 	return facts, nil
 }
 
-func projectedCreationWall(p *api.JSONProjection, span api.JSONSpan, selected bool) (string, bool, error) {
+func projectedCreationWall(p jsonValueProjection, span api.JSONSpan, selected bool) (string, bool, error) {
 	var fields [2]api.JSONSpan
 	err := p.Object(span, []string{"level", "exposed"}, func(field api.JSONField) error {
 		if field.Known >= 0 {

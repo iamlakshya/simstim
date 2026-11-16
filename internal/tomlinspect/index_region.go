@@ -1,9 +1,13 @@
 package tomlinspect
 
-const metadataRegionSlots = 4
+const (
+	metadataRegionSlots = 5
+	objectRegionSlot    = 4
+)
 
-// Slot zero is the live TOML graph. The three other slots are the current
+// Slot zero is the live TOML graph. Slots one to three are the current
 // public-state relations, current symbolic runs and current grammar.
+// Slot four is a transient object-name index, retired before its visitor.
 // This private physical layer grants no source/role/permission capability.
 type regionOwner struct {
 	quota              uint64

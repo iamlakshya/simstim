@@ -67,6 +67,14 @@ var errStopped = &proto.Error{Code: "stopped", Message: "the host stopped the se
 
 // Supervisor holds one walled session's trusted state.
 type Supervisor struct {
+	bootDecoysPrepared bool
+	bootDecoyFiles *proto.DecoyFilesV1
+	bootDecoyTripwires []api.DecoyTripwire
+	decoyUsed bool
+	observerMu sync.Mutex
+	observersClosed bool
+	observerLines map[*host.StartupLineV1]struct{}
+	observerWG sync.WaitGroup
 	reverseForwards map[string]*reverseForward
 	portMu sync.Mutex
 	portListeners map[int]*portForward
@@ -232,7 +240,7 @@ func runSupervisorMode(owner context.Context, id string, operation *host.Session
 	// Alert commands run in the supervisor's own environment, never the
 	// agent's, which is the guest's (docs/how-to/alerts.md). Under systemd,
 	// that is the user manager's environment.
-	s.al = alerts.New(alerts.Options{Env: os.Environ(), Dir: homeDir(), Logger: s.log})
+	s.al = alerts.New(alerts.Options{Env: os.Environ(), Dir: homeDir(), Logger: s.log, PublishEvent:s.audit.writeEvent})
 	// The record begins before the socket listens, and is saved after it:
 	// New waits for the socket, then reads the record, and dials the
 	// socket to see that the supervisor still runs (host.waitBoot).
@@ -274,6 +282,7 @@ func runSupervisorMode(owner context.Context, id string, operation *host.Session
 			s.originalStart.values=values
 		}
 	}
+	if err:=s.prepareBootDecoys(s.lifetimeContext());err!=nil{return s.failed(host.EndBoot,err)}
 	agentsReceipt, err := s.prepareBootAgents(s.lifetimeContext())
 	if err != nil {
 		return s.failed(host.EndBoot, err)
@@ -379,6 +388,7 @@ func (s *Supervisor) started(res proto.CtlStartResult, missing []string) error {
 // the claims too: claims change in place. The caller holds s.mu.
 func (s *Supervisor) snapshot() host.Manifest {
 	m := host.CloneManifest(*s.m)
+	if s.decoyUsed && s.rec.phase==host.LifeRunning && m.Status.Source!=host.SrcMemory {m.Status.Reason="decoy used"}
 	if m.Guest != nil {
 		g := *m.Guest
 		m.Guest = &g

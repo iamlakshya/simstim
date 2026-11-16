@@ -134,6 +134,40 @@ class SourceCheckTests(unittest.TestCase):
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
         self.assertIn("public.txt:", result.stdout)
 
+    def test_public_systemd_units_and_template_tokens_are_not_emails(self):
+        root = self.archive()
+        self.write("public.txt", "\n".join((
+            "/etc/systemd/system/user@1001.service.d/50-@BRAND@-delegate.conf",
+            "/etc/systemd/system/user@@UID@.service.d/50-@BRAND@-delegate.conf",
+            "/etc/.@BRAND@-subid-lock.XXXXXXXX",
+            "/etc/modprobe.d/50-@BRAND@-vsock.conf",
+        )) + "\n", root)
+        result = self.run_check(root, "check-private.sh")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_email_domains_still_fail_next_to_public_template_syntax(self):
+        root = self.archive()
+        for address in (
+            "build.bot+tag" + "@" + "sub-zone.contact.test",
+            "operator" + "@" + "x.contact.test",
+            "a" + "@" + "contact.test",
+        ):
+            for suffix in ("", "/next", ".", ". See the contact.", ", next", "--next"):
+                with self.subTest(address=address, suffix=suffix):
+                    self.write("public.txt", "/etc/systemd/system/user@1001.service.d "
+                               "@BRAND@ " + address + suffix + "\n", root)
+                    result = self.run_check(root, "check-private.sh")
+                    self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+                    self.assertIn("public.txt:", result.stdout)
+
+    def test_public_template_syntax_does_not_hide_other_private_details(self):
+        root = self.archive()
+        self.write("public.txt", "/etc/systemd/system/user@1001.service.d "
+                   "/home/" + "private-account" + "/work\n", root)
+        result = self.run_check(root, "check-private.sh")
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("public.txt:", result.stdout)
+
     def test_archive_go_and_python_size_limits_still_apply(self):
         for name in ("internal/long.go", "test/e2e/long.py"):
             with self.subTest(name=name):

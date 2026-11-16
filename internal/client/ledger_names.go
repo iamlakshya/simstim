@@ -139,7 +139,7 @@ func projectedLedgerName(p *api.JSONProjection, kind OutboundKind, span api.JSON
 			return badGrantStateError(grantsFileName)
 		}
 		return nil
-	case OutboundRepo:
+	case OutboundRepo, OutboundPush, OutboundPublicPush:
 		var state canonicalRepoState
 		if err := p.WalkString(span, func(r rune) error {
 			if !state.add(r) {
@@ -150,6 +150,23 @@ func projectedLedgerName(p *api.JSONProjection, kind OutboundKind, span api.JSON
 			return err
 		}
 		if !state.valid() {
+			return badGrantStateError(grantsFileName)
+		}
+		return nil
+	case OutboundRootRun:
+		var value [64]byte
+		count := 0
+		if err := p.WalkString(span, func(r rune) error {
+			if r > 127 || count == len(value) {
+				return badGrantStateError(grantsFileName)
+			}
+			value[count] = byte(r)
+			count++
+			return nil
+		}); err != nil {
+			return err
+		}
+		if !validSandboxReceiptDigest(string(value[:count])) {
 			return badGrantStateError(grantsFileName)
 		}
 		return nil

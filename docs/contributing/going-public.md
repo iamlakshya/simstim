@@ -14,6 +14,8 @@ The repository went public on 15 October 2026. This page records the preparation
 
 Run `just public-check` before a public-readiness review. Then read the README and the docs home once more as a stranger would.
 
+The email check matches a complete domain. Public systemd unit names and template tokens are not email addresses. A private email or path on the same line still fails the check.
+
 The name, private-detail, history, secret, licence, workflow and docs checks inspect the local checkout. The Scorecard step instead queries the hosted repository using a GitHub token (`GITHUB_TOKEN`, `GITHUB_AUTH_TOKEN` or `gh auth login`); it does not score unpushed local edits. It requires selected checks to meet their thresholds, including 9 of 10 for Pinned-Dependencies because of the SLSA exception, not a perfect overall score.
 
 An empty, incomplete or malformed Scorecard report fails. Every required check must appear once and meet its threshold; a failed Scorecard command also fails the run even if it prints a complete report. `python3 scripts/test-scorecard-check.py` tests these cases offline, and runs in both `just test` and CI's required `test` job. The regression suite needs no GitHub token or hosted Scorecard access.

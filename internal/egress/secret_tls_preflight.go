@@ -7,8 +7,6 @@ import (
 	"net"
 	"net/http"
 	"time"
-
-	"github.com/iamlakshya/simstim/internal/proto"
 )
 
 type rawSecretDestinationKey struct{}
@@ -23,9 +21,10 @@ func originalSecretDestination(ctx context.Context, fallback string) string {
 type opaqueTLSKey struct{}
 type opaqueTLSHello struct{ raw []byte }
 
-func (s *Server) checkSecretDestination(ctx context.Context, original string) *proto.Error {
+func (s *Server) checkSecretDestination(ctx context.Context, original string) *requestSecretFailure {
 	if err := s.policyMu.LockContext(ctx); err != nil {
-		return memberError("cancelled", "destination admission was cancelled", "Retry after the approved operation finishes.")
+		detail := memberError("cancelled", "destination admission was cancelled", "Retry after the approved operation finishes.")
+		return &requestSecretFailure{requestFailureDetail: detail, detail: detail, status: http.StatusForbidden}
 	}
 	defer s.policyMu.Unlock()
 	return s.checkSecretDestinationLocked(original)
@@ -59,7 +58,7 @@ func (s *Server) preflightOpaqueTLS(ctx context.Context, conn net.Conn, reader i
 	entry.Rule = "tls:client_hello"
 	if err == nil {
 		if refusal := s.checkSecretDestination(ctx, hello.RawServerName); refusal != nil {
-			entry.Rule = refusal.Code
+			entry.Rule, entry.Secret = refusal.auditRule(), refusal.decoy
 		} else if err = CheckClientHello(hello, hdr.Host); err == nil {
 			return context.WithValue(ctx, opaqueTLSKey{}, &opaqueTLSHello{raw: hello.Raw}), nil
 		} else if errors.Is(err, ErrECH) {

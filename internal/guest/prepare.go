@@ -31,6 +31,7 @@ func (g *Init) prepareSession(a *proto.CtlStartArgs) error {
 	if err := g.restoreState(*a); err != nil {
 		return err
 	}
+	if err:=g.applyBootDecoys(g.lifetime,a.Decoys);err!=nil{return err}
 	if err := g.memberProxyEnv(a, true); err != nil {
 		return err
 	}

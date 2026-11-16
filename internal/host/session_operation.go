@@ -22,6 +22,7 @@ type SessionOperation struct {
 	automaticBoot *AutomaticBootOperationV1
 	originalBoot  *originalBootV1
 	startup       *startupLaunchV1
+	restartMemory *restartMemoryAdmissionV1
 	newRequest    *newRequestWitnessV1
 	id            string
 	native        *sessionFileLease

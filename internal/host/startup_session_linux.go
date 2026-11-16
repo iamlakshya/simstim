@@ -46,14 +46,6 @@ func startOwnedReservedSession(m *Manifest, secrets map[string]api.Secret, reser
 	return &info, nil
 }
 
-func initialDelivery(m *Manifest) *api.SecretDeliveryIntent {
-	if m.SecretState == nil {
-		return nil
-	}
-	copy := api.CloneSecretDeliveryIntent(m.SecretState.Intent)
-	return &copy
-}
-
 // startOwnedSessionOperation is shared by actual New, Resume and automatic
 // Restore producers while their ONE original parent operation remains held.
 // It has no raw-manifest boot overload and never starts an ordinary fallback.

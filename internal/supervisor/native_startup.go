@@ -39,6 +39,7 @@ func (s *Supervisor) awaitOriginalLoan(ctx context.Context) (*host.SessionOperat
 		conn, err := listener.Accept()
 		if err != nil { return nil, wallError("the original outside startup loan did not arrive", err) }
 		operation, line, err := s.readOriginalLoan(ctx, conn, deadline)
+		if errors.Is(err,errEventObserverAccepted){continue}
 		if err == nil {
 			s.originalStart = &originalStartup{line:line, readDone:make(chan struct{})}
 			return operation,nil
@@ -65,6 +66,13 @@ func (s *Supervisor) readOriginalLoan(ctx context.Context, conn net.Conn, deadli
 	if err=line.WriteFrame(proto.THello,proto.Hello{Magic:proto.Magic,Protocol:version.Protocol,Version:version.Version,Role:"supervisor",Features:Features,StartupNonce:nonce});err!=nil{return nil,nil,err}
 	frame,err=line.ReadFrame()
 	if err!=nil{return nil,nil,err}
+	var observerRequest proto.Request
+	if frame.Type==proto.TRequest && api.ExactJSONFields(frame.Payload,proto.Request{}) && json.Unmarshal(frame.Payload,&observerRequest)==nil && observerRequest.ID!=0 && observerRequest.Op=="events.watch" {
+		if err=line.RejectAncillary();err!=nil{return nil,nil,err}
+		if err=s.startEventObserver(conn,line,observerRequest);err!=nil{return nil,nil,err}
+		retained=true
+		return nil,nil,errEventObserverAccepted
+	}
 	operation,err:=s.bootOwner.AcceptStartupLoan(ctx,line,frame)
 	if err!=nil{return nil,nil,err}
 	var request proto.Request
@@ -149,6 +157,7 @@ func (s *Supervisor) commitOriginalReady() error {
 // finishOriginalStartup runs after actual runtime cleanup. The borrowed OP and
 // holder lease close before any cancellation ACK; physical reader join is real.
 func (s *Supervisor) finishOriginalStartup(cleanup error) error {
+	cleanup=errors.Join(cleanup,s.closeEventObservers())
 	if s.bootOperation!=nil{cleanup=errors.Join(cleanup,s.bootOperation.CloseWithError())}
 	if s.bootOwner!=nil{cleanup=errors.Join(cleanup,s.bootOwner.CloseWithError())}
 	start:=s.originalStart

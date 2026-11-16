@@ -29,7 +29,11 @@ func (c *regionComparison) compare(a, b numericKey) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	if !i.outer.stateActive || i.outer.stateID != c.stateID || i.outer.comparing || c.compareKeys == nil {
+	valid := i.outer.stateActive && i.outer.stateID == c.stateID
+	if c.kind == relationObjectNames {
+		valid = i.outer.object.active && i.outer.object.id == c.stateID
+	}
+	if !valid || i.outer.comparing || c.kind != relationObjectNames && c.compareKeys == nil || c.kind == relationObjectNames && nilInterface(i.outer.object.comparer) {
 		return 0, i.scopeFailure(ErrIndexInvariant)
 	}
 	// Host grouping and its lower-bound sentinel are physical invariants,
@@ -53,7 +57,23 @@ func (c *regionComparison) compare(a, b numericKey) (int, error) {
 	}
 	i.outer.comparing = true
 	defer func() { i.outer.comparing = false }()
-	order, err := c.compareKeys(uint64(a.first), uint64(a.second), uint64(b.first), uint64(b.second))
+	var order int
+	if c.kind == relationObjectNames {
+		if a.first != 1 || b.first != 1 {
+			return 0, i.scopeFailure(ErrIndexCorrupt)
+		}
+		left, err := objectName(c.h, c.stateID, uint64(a.second))
+		if err != nil {
+			return 0, err
+		}
+		right, err := objectName(c.h, c.stateID, uint64(b.second))
+		if err != nil {
+			return 0, err
+		}
+		order, err = i.outer.object.comparer.CompareObjectNames(left, right)
+	} else {
+		order, err = c.compareKeys(uint64(a.first), uint64(a.second), uint64(b.first), uint64(b.second))
+	}
 	if err != nil {
 		return 0, i.scopeFailure(err)
 	}
@@ -70,7 +90,7 @@ func (s *StateRegion) NewTree(kind RelationKind, compare func(uint64, uint64, ui
 	if err = i.metadataWriteAllowed(); err != nil {
 		return Tree{}, err
 	}
-	if kind < RelationSentinel || kind > RelationHosts || compare == nil {
+	if i.outer.object.active || i.outer.object.pending.id != 0 || kind < RelationSentinel || kind > RelationHosts || compare == nil {
 		return Tree{}, i.scopeFailure(ErrIndexInvariant)
 	}
 	which := byte(kind - 1)

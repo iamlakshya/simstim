@@ -87,6 +87,18 @@ var loadHTTPClasses = sync.OnceValues(func() (httpClassData, error) {
 })
 
 func matchesServiceHost(rule compiledRule, host string) bool {
+	if rule.classPattern != "" {
+		want, got := strings.Split(rule.classPattern, "."), strings.Split(host, ".")
+		if len(want) != len(got) {
+			return false
+		}
+		for index, label := range want {
+			if got[index] == "" || label != "*" && label != got[index] {
+				return false
+			}
+		}
+		return true
+	}
 	if rule.wildcard {
 		return len(host) > len(rule.host)+1 && strings.HasSuffix(host, "."+rule.host)
 	}
@@ -97,6 +109,23 @@ func matchesServiceHost(rule compiledRule, host string) bool {
 // object storage. This is not an allow rule. User grants and splice exceptions
 // still use the canonical target parser unchanged.
 func compileServiceHost(raw string) (compiledRule, error) {
+	if strings.Contains(raw, "*") && !strings.HasPrefix(raw, "*.") {
+		labels := strings.Split(raw, ".")
+		wildcards := 0
+		for _, label := range labels {
+			if label == "*" {
+				wildcards++
+			} else if strings.Contains(label, "*") {
+				return compiledRule{}, errors.New("service class needs one complete wildcard label")
+			}
+		}
+		probe := strings.Replace(raw, "*", "class-probe", 1)
+		canonical, err := NormaliseHost(probe)
+		if err != nil || canonical != probe || wildcards != 1 {
+			return compiledRule{}, errors.New("service class needs canonical literal labels")
+		}
+		return compiledRule{classPattern: raw}, nil
+	}
 	base, wildcard := strings.CutPrefix(raw, "*.")
 	host, err := NormaliseHost(base)
 	if err != nil || host != base || isNumericAddr(host) {

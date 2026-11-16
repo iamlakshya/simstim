@@ -5889,7 +5889,7 @@ The AWS CLI uses the profile `default` unless a command names another ([AWS](htt
 4. The egress process treats a decoy value as a sentinel (7.3). A decoy in a URL, a header or a DNS name of any flow refuses the flow. On an intercepted host, the egress process also checks the first 1 MiB of each request body. It matches the raw value and its base64 forms (21.3).
 5. The egress process intercepts flows to a decoy's `hosts`, as a class rule (7.2), even when the policy refuses the host. The egress process reads the request line and the headers, checks them, and then applies the policy's decision. Without this, a key check to a refused host shows only its name.
 6. A match raises `secret_misuse` (10.8) with the detail "decoy aws, sent to sts.amazonaws.com". It writes the audit line `decoy`, and refuses the flow. The row shows "decoy used" in red. The session keeps running, and the user decides whether to stop it.
-7. Decoys exist only in walled sessions. `[sandbox] decoys = false` in any layer writes none and registers none.
+7. Decoys exist only in walled sessions. `[sandbox] decoys = false` in any layer writes none and registers none. Locks are checked first. A conflicting setting refuses the whole policy with `policy_locked`, before generation or file writes. Among valid layers, a later `true` cannot revive an earlier `false`.
 
 **Inputs.** `[sandbox] decoys` (8.3). `docs/how-to/sandboxes.md` lists each decoy.
 

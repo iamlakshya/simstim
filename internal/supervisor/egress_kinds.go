@@ -13,6 +13,7 @@ import (
 // setPublicInitial stores only exact trusted initial metadata before its first
 // write. It is a finite wire-size projection, never a second policy engine.
 func (c *egressCtl) setPublicInitial(args egress.InitArgs) {
+	args.Decoys=nil // Only the private applied engine retains generated values.
 	args.Secrets = nil
 	args.Policy = api.ClonePolicy(args.Policy)
 	args.AgentKinds = slices.Clone(args.AgentKinds)

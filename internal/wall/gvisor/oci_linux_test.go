@@ -17,10 +17,13 @@ func TestOCIUsesFreshHomeAndOnlyTypedProcessMounts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !oci.Root.Readonly || oci.Root.Path != "rootfs" || oci.Process.Terminal || !oci.Process.NoNewPrivileges || oci.Process.User.UID != 0 || len(oci.Linux.Namespaces) != 0 {
+	if !oci.Root.Readonly || oci.Root.Path != "rootfs" || oci.Process.Terminal || !oci.Process.NoNewPrivileges || oci.Process.User.UID != 1000 || oci.Process.User.GID != 1000 || len(oci.Linux.Namespaces) != 0 {
 		t.Fatalf("unsafe OCI boundary: %+v", oci)
 	}
 	for _, mount := range oci.Mounts {
+		if (mount.Destination == "/home/agent" || mount.Destination == "/run") && (!slices.Contains(mount.Options, "uid=1000") || !slices.Contains(mount.Options, "gid=1000")) {
+			t.Fatal("private writable filesystem does not belong to the virtual guest user", mount)
+		}
 		if mount.Destination == "/home/agent" && (mount.Type != "tmpfs" || !slices.Contains(mount.Options, "mode=700")) {
 			t.Fatal("home is not fresh", mount)
 		}

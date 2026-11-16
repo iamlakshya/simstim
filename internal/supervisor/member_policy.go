@@ -116,9 +116,11 @@ func (s *Supervisor) sessionFeatures() []string {
 	root := s.owner()
 	root.mu.Lock()
 	ready := root.memberReady
+	events:=root.al!=nil
 	bound := ready && root.m != nil && root.m.SecretState != nil && root.m.SecretState.Supported()
 	root.mu.Unlock()
 	features := slices.Clone(Features)
+	if !events{features=slices.DeleteFunc(features,func(feature string)bool{return feature==api.FeatureEvents})}
 	if !ready {
 		features = slices.DeleteFunc(features, func(feature string) bool { return feature == api.FeatureSpawn || feature == api.FeatureSandboxSnapshot })
 	}

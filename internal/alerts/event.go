@@ -51,13 +51,17 @@ type Session struct {
 
 // Event is one thing that happened to a session, as destinations get it.
 type Event struct {
-	V        int     `json:"v"`
-	Event    string  `json:"event"`
-	Host     string  `json:"host"`
-	Session  Session `json:"session"`
-	Time     string  `json:"time"` // RFC 3339, UTC
-	ExitCode *int    `json:"exit_code,omitempty"`
-	Signal   string  `json:"signal,omitempty"`
+	V       int     `json:"v"`
+	Event   string  `json:"event"`
+	Host    string  `json:"host"`
+	Session Session `json:"session"`
+	Time    string  `json:"time"` // RFC 3339, UTC
+	// Stream and Sequence identify this native publisher's records for replay
+	// deduplication. They are data identifiers, never permission or lineage.
+	Stream   string `json:"stream,omitempty"`
+	Sequence uint64 `json:"sequence,omitempty"`
+	ExitCode *int   `json:"exit_code,omitempty"`
+	Signal   string `json:"signal,omitempty"`
 	// Reason identifies the cause of a sandbox or health event.
 	Reason string `json:"reason,omitempty"`
 	// ExitFrom marks the producer of exit details, separately from native facts.
@@ -140,6 +144,8 @@ func summary(ev Event) string {
 		}
 	case LinkSilent:
 		s = on + " has a silent guest init"
+	case SecretMisuse:
+		s = on + " had a blocked credential misuse"
 	case EgressBlocked:
 		s = on + " was blocked by its network policy"
 	case Started:

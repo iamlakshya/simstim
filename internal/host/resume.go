@@ -41,7 +41,12 @@ type ResumeResult = api.ResumeResult
 // It keeps the session's ID, name, folder, worktree and manifest. The cap
 // is the size asked for now, else the size the session asked for before,
 // else the host's default.
-func Resume(a api.ResumeArgs) (*ResumeResult, error) {
+func Resume(a api.ResumeArgs) (*ResumeResult, error) {return ResumeContext(context.Background(),a)}
+
+// ResumeContext retains the actual caller and one original primary OP through native restart and cleanup.
+func ResumeContext(ctx context.Context,a api.ResumeArgs) (*ResumeResult,error){
+	if ctx==nil{return nil,UserError("bad_request","resume has no original caller lifetime","Start it through the original client request.")}
+	if err:=ctx.Err();err!=nil{return nil,err}
 	id := a.ID
 	if !validID(id) {
 		return nil, UserError("not_found", "no session "+id, "List sessions to find its ID.")
@@ -54,21 +59,16 @@ func Resume(a api.ResumeArgs) (*ResumeResult, error) {
 	}
 	// A second resume of the session, such as a key pressed twice, would
 	// stop the first's new holder, or save over its manifest.
-	primary, err := SandboxPrimaryID(id)
-	if err != nil {
-		return nil, err
-	}
-	unlock, err := lockSession(primary)
-	if err != nil {
-		return nil, err
-	}
-	defer unlock()
-	m, err := LoadManifest(primary)
+	operation,err:=BeginSessionOperation(ctx,id,renameWait)
+	if err!=nil{return nil,err}
+	defer operation.Close()
+	primary:=operation.Primary()
+	m,err:=operation.LoadContext(ctx)
 	if err != nil {
 		return nil, UserError("not_found", "no session "+id, "List sessions to find its ID.")
 	}
 	if a.Snapshot != nil || len(a.Members) > 0 || primary != id {
-		return resumeBundleLocked(id, a, m)
+		return resumeBundleLocked(id,a,m,operation)
 	}
 	if err := validateResumeInputs(m, a.Inputs); err != nil {
 		return nil, err
@@ -99,9 +99,8 @@ func Resume(a api.ResumeArgs) (*ResumeResult, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := checkManifestUnwalled(m); err != nil {
-		return nil, err
-	}
+	if err:=validateRestartWall(m);err!=nil{return nil,err}
+	if err:=admitRestartMemoryV1(ctx,operation,a.MemoryMax);err!=nil{return nil,err}
 	// A command that resumeArgv refuses stops nothing. startAgain checks
 	// it again, after the old holder's last save.
 	if _, _, err := resumeArgv(m); err != nil {
@@ -113,6 +112,8 @@ func Resume(a api.ResumeArgs) (*ResumeResult, error) {
 		}
 	}
 	environmentPreview := CloneManifest(*m)
+	if err:=ApplyResumeLayers(&environmentPreview,a.Layers);err!=nil{return nil,err}
+	if err:=ApplyRepositoryResume(&environmentPreview,a);err!=nil{return nil,err}
 	if err := prepareResumeEnvironment(&environmentPreview, a.Environment); err != nil {
 		return nil, err
 	}
@@ -127,7 +128,7 @@ func Resume(a api.ResumeArgs) (*ResumeResult, error) {
 			"Try again in a moment, or check the host with the host doctor.")
 	}
 	// The old holder saves the manifest a last time as it stops.
-	if m, err = LoadManifest(id); err != nil {
+	if m, err = operation.LoadContext(ctx); err != nil {
 		return nil, UserError("not_found", "no session "+id, "List sessions to find its ID.")
 	}
 	if _, err := prepareResumeSecretDelivery(m, delivery, secrets); err != nil {
@@ -145,13 +146,15 @@ func Resume(a api.ResumeArgs) (*ResumeResult, error) {
 	if err := validateResumeInputs(m, a.Inputs); err != nil {
 		return nil, err
 	}
+	if err:=ApplyResumeLayers(m,a.Layers);err!=nil{return nil,err}
+	if err:=ApplyRepositoryResume(m,a);err!=nil{return nil,err}
 	if err := prepareResumeEnvironment(m, a.Environment); err != nil {
 		return nil, err
 	}
 	m.HostLabel = a.HostLabel
 	m.Inputs = CloneInputSummary(a.Inputs)
 	m.Run.RespawnCount = 0
-	_, why, err := startAgain(m, again{label: resumedLabel, reason: "started again by a resume", secrets: secrets, secretDelivery: delivery})
+	_, why, err := startAgain(m, again{operation:operation,label: resumedLabel, reason: "started again by a resume", secrets: secrets, secretDelivery: delivery})
 	var refused *proto.Error
 	switch {
 	case errors.As(err, &refused) && refused.Code == dangerRefused:

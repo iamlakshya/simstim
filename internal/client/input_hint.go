@@ -28,7 +28,7 @@ func HasAnyPendingSessionInputReceipt(ctx context.Context, original Host) (bool,
 			return err
 		}
 		var fields [3]api.JSONSpan
-		if err := projection.Object(root, []string{"schema", "host", "sessions"}, func(field api.JSONField) error {
+		if err := walkInputHintFields(projection, root, []string{"schema", "host", "sessions"}, func(field api.JSONField) error {
 			if field.Known >= 0 {
 				fields[field.Known] = field.Value
 			}
@@ -54,28 +54,44 @@ func HasAnyPendingSessionInputReceipt(ctx context.Context, original Host) (bool,
 		if err != nil || !matches {
 			return badSandboxStateContext(ctx)
 		}
-		return projection.Object(fields[2], nil, func(row api.JSONField) error {
+		return walkInputHintFields(projection, fields[2], nil, func(row api.JSONField) error {
 			if err := ctx.Err(); err != nil {
 				return err
 			}
 			if err := projectedSessionID(projection, row.Name); err != nil {
 				return err
 			}
-			return projection.Object(row.Value, []string{"input_operation"}, func(field api.JSONField) error {
-				if field.Known < 0 {
-					return nil
+			return walkInputHintFields(projection, row.Value, []string{"input_operation"}, func(field api.JSONField) error {
+				if field.Known >= 0 {
+					found = true
 				}
-				shape, err := projectSandboxReceiptSpans(ctx, projection, field.Value, schema, false)
-				if err != nil {
-					return err
-				}
-				if shape.Future {
-					return futureSandboxReceiptError()
-				}
-				found = true
 				return nil
 			})
 		})
 	})
 	return found, err
+}
+
+// Raw source-order cursors only detect a marker. They grant no duplicate,
+// receipt or semantic validation result. The actual Finish path repeats its
+// complete canonical checks before any operation. Unknown row bodies are
+// scanned once, without the ordinary Object cursor's dense duplicate pass.
+func walkInputHintFields(p *api.JSONProjection, span api.JSONSpan, known []string, visit func(api.JSONField) error) error {
+	fields, err := p.Fields(span)
+	if err != nil {
+		return err
+	}
+	for {
+		field, more, err := fields.Next()
+		if err != nil || !more {
+			return err
+		}
+		field.Known, err = p.KnownName(field.Name, known)
+		if err != nil {
+			return err
+		}
+		if err := visit(field); err != nil {
+			return err
+		}
+	}
 }

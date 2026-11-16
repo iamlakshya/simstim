@@ -27,6 +27,7 @@ import (
 	"github.com/iamlakshya/simstim/internal/host"
 	"github.com/iamlakshya/simstim/internal/link"
 	"github.com/iamlakshya/simstim/internal/proto"
+ "github.com/iamlakshya/simstim/internal/secretmem"
 )
 
 // RootEnv names a folder that stands for the sandbox's root, for the
@@ -44,6 +45,8 @@ const heartbeatEvery = 5 * time.Second
 
 // Init is the guest init of one sandbox.
 type Init struct {
+	decoysApplied bool
+	decoyGeneration *proto.DecoyFilesV1
 	portWG sync.WaitGroup
 	reversePorts map[string]*reverseListener
 	copySlots       chan struct{}
@@ -112,6 +115,7 @@ func Run(args ...string) error {
 		}
 		return vmError("unknown versioned guest init argument")
 	}
+	if err:=secretmem.Protect();err!=nil{return vmError("the guest init cannot protect its private control input")}
 	dnsSocks, dnsErr := claimInheritedDNSSockets()
 	f := os.NewFile(linkFD, "link")
 	if f == nil {

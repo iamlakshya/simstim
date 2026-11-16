@@ -27,6 +27,8 @@ simstim host doctor box --json
 
 The sandbox checks report each driver's result and the reason for a refusal. Access to `/dev/kvm` alone does not make a microvm available. The host also needs the supported kernel and architecture, a usable namespace jail, cgroup v2, the systemd user manager and verified runtime files.
 
+Use [host preparation](give-a-host-the-root-step.md) to review optional root steps. `host prepare --root-step print` writes the exact script for the host's owner. It runs nothing with root access.
+
 An installed runtime and a successful boot check are separate facts. The runtime must match this client's signed release. A completed boot check applies to those runtime bytes, that host boot, that kernel and that helper. Downloading files does not prove that they boot.
 
 Update an older helper with:
@@ -67,4 +69,12 @@ The files use mode 0600. Each cold start makes new values. A fork's children get
 
 The AWS CLI selects `default` unless you choose another profile. Git reads this file through its `store` helper. Selecting `prod-admin` or enabling that helper can therefore raise an alert. Set `[sandbox] decoys = false` to write no decoy files and register no decoy tripwires.
 
+A valid opt out in any layer keeps decoys off, even when a later layer sets `true`. A setting that conflicts with a policy lock refuses the start with `policy_locked`. The refused start creates no decoy files or tripwires.
+
 Definitions and formats: [AWS profiles](https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-files.html), [AWS identifiers](https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_identifiers.html), [Git credential storage](https://git-scm.com/docs/git-credential-store) and [GitHub token formats](https://github.blog/engineering/platform-security/behind-githubs-new-authentication-token-formats/).
+
+Decoy checks use the existing network audit. An observable use is refused and recorded as `decoy`, with the decoy's name and the destination. The session keeps running. The proxy checks URLs, headers and DNS names, plus the first 1 MiB of each intercepted request body. It checks raw values and standard base64 values embedded at all three byte alignments. Other allowed TLS flows still splice. The proxy cannot inspect their encrypted bodies.
+
+Decoy hosts use local inspection even when a network rule denies them. Their DNS answer may name the session's existing synthetic route. This opens no origin connection and grants no network access. The usual network and address rules still decide whether a clean request may leave.
+
+The decoy choice applies at the next start. A live policy update keeps the current generation and its tripwires, including redaction. Turning decoys on live does not create files or values in a running session. Network and deny changes still apply at once.

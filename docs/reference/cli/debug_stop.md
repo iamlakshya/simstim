@@ -7,7 +7,7 @@ title: "simstim debug stop"
 Turn off the debug of a session at once.
 
 ```text
-simstim debug stop <host>/<session>
+simstim debug stop <host>/<session> [flags]
 ```
 
 Turns off the debug of a session at once, and the host side of each traced attach.

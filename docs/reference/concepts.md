@@ -9,6 +9,16 @@ The words that simstim uses, and what each one means. `simstim help concepts` pr
 
 | Word | Meaning |
 | --- | --- |
+| layer | One source of settings and rules. Narrower layers override broader ones. |
+| profile | A named policy layer selected after repository sections. |
+| rule | An allow or deny for one door and destination. |
+| door | A controlled way through a sandbox wall, such as the network. |
+| preset | A built-in network policy: locked, balanced or open. |
+| sandbox | A session workspace behind a wall with explicit grants. |
+| wall | The boundary around a sandbox. |
+| level | The wall strength: none, process, gvisor or microvm. |
+| floor | The minimum wall level saved for a host. |
+| tier | The laptop's limit on what a host may receive. |
 | host | The Linux machine, VM or container that runs sessions. |
 | helper | The program on each host that runs its sessions. |
 | session | A terminal on a host, which keeps running when you leave. |

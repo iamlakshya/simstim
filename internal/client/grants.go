@@ -77,6 +77,16 @@ func canonicalGrantName(kind OutboundKind, name string) (string, error) {
 		return "", nil
 	case OutboundRepo:
 		return NormalizeRepo(name)
+	case OutboundPush, OutboundPublicPush:
+		if !canonicalLedgerRepo(name) {
+			return "", badRepoError("push ledger identity is not canonical")
+		}
+		return name, nil
+	case OutboundRootRun:
+		if !validSandboxReceiptDigest(name) {
+			return "", rootStepError("the root-step ledger needs its exact script hash")
+		}
+		return name, nil
 	case OutboundAlertToken:
 		if !ValidAlertGrantLabel(name) {
 			return "", &UserError{
@@ -90,7 +100,7 @@ func canonicalGrantName(kind OutboundKind, name string) (string, error) {
 	default:
 		return "", &UserError{
 			Msg:  "grant kind is not tracked in the grant ledger",
-			Hint: "Record only secret, ssh-agent, ssh-key, alert-token, repo or paste grants.",
+			Hint: "Record a recognised credential, repository, push, root-step or paste grant.",
 			Code: "bad_grant",
 			Kind: KindUsage,
 		}
@@ -98,7 +108,7 @@ func canonicalGrantName(kind OutboundKind, name string) (string, error) {
 }
 
 func validStoredGrantName(kind OutboundKind, name string) bool {
-	if kind == OutboundRepo {
+	if kind == OutboundRepo || kind == OutboundPush || kind == OutboundPublicPush {
 		return canonicalLedgerRepo(name)
 	}
 	canonical, err := canonicalGrantName(kind, name)
@@ -162,25 +172,6 @@ func encodeGrantsFile(f grantsFile) ([]byte, error) {
 		return nil, err
 	}
 	return append(b, '\n'), nil
-}
-
-func grantKindRank(k OutboundKind) int {
-	switch k {
-	case OutboundSecret:
-		return 1
-	case OutboundSSHAgent:
-		return 2
-	case OutboundSSHKey:
-		return 3
-	case OutboundAlertToken:
-		return 4
-	case OutboundRepo:
-		return 5
-	case OutboundPaste:
-		return 6
-	default:
-		return 99
-	}
 }
 
 func compareLedgerRecords(a, b GrantRecord) int {

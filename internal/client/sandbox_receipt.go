@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"encoding/hex"
+	"errors"
 	"reflect"
 	"slices"
 
@@ -98,10 +99,17 @@ func validateSandboxReceiptHeader(version int, revision, previous, creation, ope
 	return nil
 }
 
-func (s sandboxReceiptScope) validate() error {
+func (s sandboxReceiptScope) validateFields() error {
 	if !ValidHostName(s.Host) || !ValidHostID(s.HostID) || !api.ValidSessionID(s.MemberID) || !api.ValidSessionID(s.RootID) ||
 		!ValidHostID(s.RunGeneration) || s.BackendGeneration != "" && !ValidHostID(s.BackendGeneration) {
 		return sandboxReceiptError()
+	}
+	return nil
+}
+
+func (s sandboxReceiptScope) validate() error {
+	if err := s.validateFields(); err != nil {
+		return err
 	}
 	return s.Source.validate()
 }
@@ -126,6 +134,22 @@ func validateSandboxReceiptNames(ctx context.Context, names []string) error {
 }
 
 func validateSandboxDeliveryReceipt(ctx context.Context, r *sandboxDeliveryReceipt) error {
+	if err := validateSandboxDeliveryReceiptKnownData(ctx, r); err != nil {
+		if errors.Is(err, errSandboxReceiptStateFuture) {
+			return futureSandboxReceiptError()
+		}
+		return err
+	}
+	return r.Scope.Source.validate()
+}
+
+// Known v1 fields keep their meaning when an outer extension is unknown.
+// This is data validation only; Source support and actual Source checks remain
+// separate. A genuinely unsupported public-state DTO stays opaque.
+func validateSandboxDeliveryReceiptKnownData(ctx context.Context, r *sandboxDeliveryReceipt) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if r == nil {
 		return sandboxReceiptError()
 	}
@@ -135,13 +159,19 @@ func validateSandboxDeliveryReceipt(ctx context.Context, r *sandboxDeliveryRecei
 	if !ValidHostID(r.Publication) || r.Scope.BackendGeneration == "" {
 		return sandboxReceiptError()
 	}
-	if err := r.Scope.validate(); err != nil {
+	if err := r.Scope.validateFields(); err != nil {
 		return err
 	}
 	for _, names := range [][]string{r.Allowed, r.Supplied, r.Missing} {
 		if err := validateSandboxReceiptNames(ctx, names); err != nil {
 			return err
 		}
+	}
+	if r.State == nil || !r.State.Supported() {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		return errSandboxReceiptStateFuture
 	}
 	local := make(map[string]bool, len(r.Allowed))
 	for _, name := range r.Allowed {
@@ -176,13 +206,23 @@ func validateSandboxDeliveryReceipt(ctx context.Context, r *sandboxDeliveryRecei
 }
 
 func validateSandboxInputOperation(ctx context.Context, r *sandboxInputOperation) error {
+	if err := validateSandboxInputOperationKnownData(ctx, r); err != nil {
+		return err
+	}
+	return r.Scope.Source.validate()
+}
+
+func validateSandboxInputOperationKnownData(ctx context.Context, r *sandboxInputOperation) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if r == nil {
 		return sandboxReceiptError()
 	}
 	if err := validateSandboxReceiptHeader(r.Version, r.Revision, r.Previous, r.Creation, r.Operation); err != nil {
 		return err
 	}
-	if err := r.Scope.validate(); err != nil {
+	if err := r.Scope.validateFields(); err != nil {
 		return err
 	}
 	if !r.Nonce.Valid() || !validSandboxReceiptDigest(r.Digest) || !validSandboxReceiptDigest(r.SummaryHash) || !validSandboxReceiptDigest(r.SelectionHash) {

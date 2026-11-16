@@ -44,7 +44,7 @@ func decodeSandboxDeliveryContext(ctx context.Context, raw json.RawMessage, sche
 	return ctx.Err()
 }
 
-func deliveryAllowedSpan(p *api.JSONProjection, secrets, lineage api.JSONSpan, knownLineage bool) (api.JSONSpan, error) {
+func deliveryAllowedSpan(p jsonValueProjection, secrets, lineage api.JSONSpan, knownLineage bool) (api.JSONSpan, error) {
 	if !knownLineage {
 		return secrets, nil
 	}
@@ -58,7 +58,7 @@ func deliveryAllowedSpan(p *api.JSONProjection, secrets, lineage api.JSONSpan, k
 	return allowed, err
 }
 
-func retainProjectedString(p *api.JSONProjection, span api.JSONSpan) (string, error) {
+func retainProjectedString(p jsonValueProjection, span api.JSONSpan) (string, error) {
 	var kept strings.Builder
 	err := p.WalkString(span, func(r rune) error { _, err := kept.WriteRune(r); return err })
 	return kept.String(), err
@@ -93,7 +93,7 @@ func commitSandboxBoundSchema(ctx context.Context, h Host) error {
 	})
 }
 
-func deliveryExposedSpan(p *api.JSONProjection, wall api.JSONSpan) (api.JSONSpan, error) {
+func deliveryExposedSpan(p jsonValueProjection, wall api.JSONSpan) (api.JSONSpan, error) {
 	if wall.End == 0 {
 		return api.JSONSpan{}, nil
 	}

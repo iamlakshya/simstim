@@ -12,7 +12,7 @@ import (
 
 // One JSON adapter feeds P23's same incremental validators. It does not
 // implement another header, format or authority grammar.
-func projectSandboxBind(ctx context.Context, p *api.JSONProjection, span api.JSONSpan, retain bool) (api.SecretBind, error) {
+func projectSandboxBind(ctx context.Context, p jsonValueProjection, span api.JSONSpan, retain bool) (api.SecretBind, error) {
 	var fields [3]api.JSONSpan
 	var out api.SecretBind
 	err := p.Object(span, []string{"hosts", "header", "format"}, func(field api.JSONField) error {
@@ -73,7 +73,7 @@ func projectSandboxBind(ctx context.Context, p *api.JSONProjection, span api.JSO
 	return out, ctx.Err()
 }
 
-func projectBindingString(p *api.JSONProjection, span api.JSONSpan, validator io.Writer, retain bool) (string, error) {
+func projectBindingString(p jsonValueProjection, span api.JSONSpan, validator io.Writer, retain bool) (string, error) {
 	var kept strings.Builder
 	var encoded [utf8.UTFMax]byte
 	err := p.WalkString(span, func(r rune) error {

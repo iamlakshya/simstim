@@ -25,6 +25,12 @@ func checkBackingBindPairs(binds []bind, files []*os.File, load func() ([]backin
 			continue
 		}
 		for j, child := range binds {
+			// An anonymous supplied object has no host directory entry. Its
+			// exact duplicate aliases are still checked by the ordinary native
+			// identity checker; only pathname topology is inapplicable here.
+			if child.AnonymousV1 {
+				continue
+			}
 			if i == j || parent.Write == child.Write {
 				continue
 			}

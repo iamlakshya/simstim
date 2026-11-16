@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"net"
 	"os"
-	"path/filepath"
 	"sync"
 	"syscall"
 	"time"
@@ -50,7 +49,7 @@ func (s *sandbox) Start(ctx context.Context) (net.Conn, error) {
 	if err := ctx.Err(); err != nil {
 		return fail(err)
 	}
-	runtime, err := s.driver.openRuntime(ctx)
+	runtime, err := s.driver.openRuntime(s.owner)
 	if err != nil {
 		return fail(err)
 	}
@@ -60,7 +59,7 @@ func (s *sandbox) Start(ctx context.Context) (net.Conn, error) {
 	}
 	// The issuer checks the complete signed companion closure; this boundary
 	// independently rechecks the exact open main executable's bytes.
-	if err := supply.CheckOpenContext(ctx, runtime.item, runtime.program); err != nil {
+	if err := supply.CheckSealedRuntime(runtime.item, runtime.program); err != nil {
 		return fail(errors.Join(runtimeFileError("runsc", err), runtime.Close()))
 	}
 	s.version = runtime.item.Version
@@ -68,9 +67,27 @@ func (s *sandbox) Start(ctx context.Context) (net.Conn, error) {
 	if err != nil {
 		return fail(errors.Join(err, runtime.Close()))
 	}
-	if err = s.storage.bundle(s.spec, plan, s.smoke); err != nil {
+	plan, mountFiles, err := process.CaptureMountPlanV1(ctx, plan)
+	if err != nil {
 		return fail(errors.Join(err, runtime.Close()))
 	}
+	defer func() {
+		for _, file := range mountFiles {
+			_ = file.Close()
+		}
+	}()
+	if err = s.storage.bundle(s.spec, plan, mountFiles, s.smoke); err != nil {
+		return fail(errors.Join(err, runtime.Close()))
+	}
+	storageBinds, err := s.storage.commandBindsV1()
+	if err != nil {
+		return fail(errors.Join(err, runtime.Close()))
+	}
+	defer func() {
+		for _, bound := range storageBinds {
+			_ = bound.File.Close()
+		}
+	}()
 	fds, err := unix.Socketpair(unix.AF_UNIX, unix.SOCK_STREAM|unix.SOCK_CLOEXEC, 0)
 	if err != nil {
 		return fail(errors.Join(err, runtime.Close()))
@@ -91,10 +108,6 @@ func (s *sandbox) Start(ctx context.Context) (net.Conn, error) {
 		return fail(errors.Join(err, runtime.Close()))
 	}
 	defer log.Close()
-	binds := []jail.Bind{{Path: filepath.Join(s.spec.SessionDir, "gvisor", "bundle")}, {Path: filepath.Join(s.spec.SessionDir, "gvisor", "runsc"), Write: true}}
-	for _, m := range plan {
-		binds = append(binds, jail.Bind{Path: m.Host, Write: m.Write})
-	}
 	execution, cancel := context.WithCancel(s.owner)
 	interrupted := make(chan struct{})
 	stopStartup := context.AfterFunc(ctx, func() { cancel(); close(interrupted) })
@@ -107,8 +120,8 @@ func (s *sandbox) Start(ctx context.Context) (net.Conn, error) {
 		})
 	}
 	defer joinStartup()
-	commandSpec := jail.Spec{Argv: runArguments(filepath.Join(runtimeRoot(), "runsc"), s.spec.SessionDir, s.spec.ID, 3), Env: []string{"PATH=/usr/bin:/bin", "LANG=C", "LC_ALL=C", "TZ=UTC"}, Net: jail.NetNone, Files: []*os.File{theirs}, Binds: binds}
-	command, err := s.driver.options.Command(execution, CommandRequest{Spec: commandSpec, Mounts: plan, Executables: runtime.executables, Log: log})
+	commandSpec := jail.Spec{Argv: CommandArgumentsV1(s.spec.SessionDir, s.spec.ID), Env: CommandEnvironmentV1(), Net: jail.NetNone, Files: []*os.File{theirs}, Binds: storageBinds}
+	command, err := s.driver.options.Command(execution, CommandRequest{Spec: commandSpec, Mounts: plan, MountFiles: mountFiles, Executables: runtime.executables, Log: log})
 	if err == nil && command == nil {
 		err = fmt.Errorf("gvisor namespace owner returned no owned command")
 	}

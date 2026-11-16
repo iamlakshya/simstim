@@ -40,6 +40,7 @@ type Carried struct {
 var CarriedFiles = []Carried{
 	{KindHelper, brand.HostBinary, "host-linux-"},
 	{KindVT, brand.VTBinary, "vt-linux-"},
+	{KindUserns,brand.UsernsBinary,"userns-linux-"},
 }
 
 // File is the name of the build's file for an architecture.

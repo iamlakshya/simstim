@@ -67,6 +67,7 @@ type inspectionState struct {
 	gridOpened, frontierOpened               bool
 	frontierLength                           uint64
 	countActive                              bool
+	object                                   objectInspectionState
 }
 
 func (i *Inspector) scopeFailure(err error) error {

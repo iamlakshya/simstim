@@ -14,7 +14,7 @@ type agentPolicyRowValidity struct {
 	sshAgent       bool
 }
 
-func projectedBoundedBytes(p *api.JSONProjection, span api.JSONSpan, value []byte) (int, error) {
+func projectedBoundedBytes(p jsonValueProjection, span api.JSONSpan, value []byte) (int, error) {
 	// Callers supply only existing semantic bounds for IDs and wall names.
 	n := 0
 	err := p.WalkString(span, func(r rune) error {
@@ -27,7 +27,7 @@ func projectedBoundedBytes(p *api.JSONProjection, span api.JSONSpan, value []byt
 	return n, err
 }
 
-func projectedSessionID(p *api.JSONProjection, span api.JSONSpan) error {
+func projectedSessionID(p jsonValueProjection, span api.JSONSpan) error {
 	var value [32]byte
 	n, err := projectedBoundedBytes(p, span, value[:])
 	if err != nil || !api.ValidSessionID(string(value[:n])) {
@@ -36,7 +36,7 @@ func projectedSessionID(p *api.JSONProjection, span api.JSONSpan) error {
 	return nil
 }
 
-func projectedHostID(p *api.JSONProjection, span api.JSONSpan, selected bool) (string, bool, error) {
+func projectedHostID(p jsonValueProjection, span api.JSONSpan, selected bool) (string, bool, error) {
 	if span.End == 0 {
 		return "", false, nil
 	}

@@ -53,11 +53,15 @@ func (c *checker) layerTable(t map[string]any, typ reflect.Type, p keyPath) {
 		}
 		if err := egress.ValidateLayerValues(values); err != nil {
 			message := err.Error()
+			code := "bad_value"
 			var pe *proto.Error
 			if errors.As(err, &pe) {
 				message = pe.Message
+				if pe.Code == "release_age_invalid" || pe.Code == "package_level_invalid" {
+					code = pe.Code
+				}
 			}
-			c.add(here, finding{Code: "bad_value", Message: strings.TrimSuffix(message, ".")})
+			c.add(here, finding{Code: code, Message: strings.TrimSuffix(message, ".")})
 		}
 	}
 }

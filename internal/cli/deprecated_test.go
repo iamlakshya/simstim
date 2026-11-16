@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"os"
-	"path/filepath"
 	"regexp"
 	"slices"
 	"strconv"
@@ -17,7 +16,6 @@ import (
 
 	"github.com/iamlakshya/simstim/internal/brand"
 	"github.com/iamlakshya/simstim/internal/client"
-	"github.com/iamlakshya/simstim/internal/host/hosttest"
 )
 
 // warningOf is the warning of the old form id, without colour, with old
@@ -304,7 +302,7 @@ func withoutOld(t *testing.T, ids ...string) {
 // After its end, -d is the short form of --detach. A script that still
 // passes a folder after -d then fails loudly (cli-spec 10.4).
 func TestAfterTheEndOfDashD(t *testing.T) {
-	hosttest.New(t)
+	newTestHome(t)
 	if err := client.SaveHostsContext(context.Background(), []client.Host{{Name: "box", SSH: "box"}}); err != nil {
 		t.Fatal(err)
 	}
@@ -358,50 +356,10 @@ func TestAfterTheEndTheOldFormsFail(t *testing.T) {
 	}
 }
 
-// new -d <folder> starts the session in that folder, as it did, and warns.
-func TestNewWithTheOldDashD(t *testing.T) {
-	th := newTestHost(t)
-	dir := filepath.Join(th.h.Home, "proj")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	out, stderr, code := mainLine(t, "new", "box", "-d", dir, "--detach", "--name", "old-d", "--", "sleep", "60")
-	m := startedRE.FindStringSubmatch(stderr)
-	if code != 0 || m == nil || !strings.HasPrefix(stderr, warningOf(t, "new -d", "", "")) || strings.Count(stderr, "Warning:") != 1 {
-		t.Fatalf("new -d = %d, %q:\n%s", code, out, stderr)
-	}
-	if _, stderr, code := mainLine(t, "new", "box", "--setup", "--no-setup", "--detach"); code != 2 || !strings.Contains(stderr, "Error: --setup-script and --no-setup-script cannot go together.") {
-		t.Errorf("new box --setup --no-setup = %d:\n%s", code, stderr)
-	}
-	var list []hostSessions
-	if err := json.Unmarshal([]byte(ok(t, "ls", "--json")), &list); err != nil {
-		t.Fatal(err)
-	}
-	want, err := filepath.EvalSymlinks(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var found []string
-	for _, r := range list {
-		for _, s := range r.Sessions {
-			if s.ID == m[1] {
-				found = append(found, s.Cwd)
-			}
-		}
-	}
-	if len(found) != 1 {
-		t.Fatalf("ls shows session %s %d times: %+v", m[1], len(found), list)
-	}
-	got, err := filepath.EvalSymlinks(found[0])
-	if err != nil || got != want {
-		t.Errorf("the session runs in %q (%v), want %q", found[0], err, want)
-	}
-}
-
 // An error about a hidden flag that keeps an old short form names it as
 // the user typed it, as -d, never as --d.
 func TestErrorsNameTheOldShortForm(t *testing.T) {
-	hosttest.New(t)
+	newTestHome(t)
 	for _, c := range []struct {
 		args []string
 		want string
@@ -420,7 +378,7 @@ func TestErrorsNameTheOldShortForm(t *testing.T) {
 // After its end, an old flag gets the unknown-flag error, and "Did you
 // mean" names the new flag (cli-spec 3.1, rule 8).
 func TestAnEndedOldFlagNamesTheNewOne(t *testing.T) {
-	hosttest.New(t)
+	newTestHome(t)
 	withoutOld(t)
 	old := flagSynonyms
 	flagSynonyms = map[string]map[string]string{

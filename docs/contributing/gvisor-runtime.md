@@ -1,5 +1,19 @@
 # gVisor runtime ownership
 
+The supervisor uses one process filesystem preparer for process and gvisor
+walls. It preserves the same typed grants, legacy program path, cache and kept
+state plan, capture generation and complete private-session disk accounting.
+The gvisor factory first requires the accepted outside native operation and
+matches its original runtime, primary identity, cap and state projection.
+Copying a manifest or an expected-spec context supplies no such receipt.
+
+The host's actual gvisor constructor fixes the runtime issuer, storage domain
+and command owner. New runtime storage uses Prepare; an existing private layout
+uses Open with the same current original context. Layout bytes never choose
+execution pins. Closing factory resources calls the actual driver's prepared
+release, which refuses a live or uncertain init. Process Close keeps its
+existing metadata-only meaning.
+
 The gvisor driver uses the process wall's mount and kept-state plan. It writes
 an OCI bundle with a fresh home and system folders mounted read-only. The bundle
 has no hooks, caller environment, image root or OCI user namespace.

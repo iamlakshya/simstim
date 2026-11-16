@@ -326,7 +326,7 @@ Each command started over envd has a tag of its own. A dropped request does not 
 
 Each provider is a package under `internal/provider` (`lima`, `docker`, `e2b`). It creates a machine, and for a host it made, gives a lifecycle: status, start or resume, stop or pause, destroy, and a transport. `hosts.toml` records the provider and the machine's ID in the host's `[host.machine]` table.
 
-- **Create:** make the machine, save the host, then the normal add: probe, install the helper (showing what and where), set up linger and terminfo, and connect.
+- **Create:** make the machine, save the host, then the normal add: probe, install the helper (showing what and where), set up linger and terminfo, and connect. The client keeps the original creation operation through registration and setup.
 - **Wake on attach:** before it dials, the client asks the provider for the machine's state. If it is stopped or paused, the client starts or resumes it (`limactl start`, `docker start`, `POST /v2/sandboxes/{id}/connect`), waits until a command runs, reads the address again, then dials. The launcher does not wake hosts by itself; attaching does. Provider scripts keep working as before.
 - **Idle stop, VMs:** a systemd user timer runs `<helper> idle check` every few minutes. With no client connected (no bridge running) and no session working for the idle time (30 minutes by default), it runs `sudo -n systemctl poweroff`. No credential is kept on the host. A new boot starts the count again.
 - **Idle stop, sandboxes:** a lease. While any client is connected, it renews the sandbox's timeout every minute: 60 minutes while a session works, 15 when none does. When nobody renews it, the sandbox pauses with its memory.
@@ -373,3 +373,6 @@ for key pinning. This extra restriction grants no membership, cleanup or root
 authority. Config readers share the same active native scope; an ended scope
 cannot open a replacement source. The derived Lima locator name is checked
 against the same complete local secret namespace before use.
+
+The host bridge transfers its input and output files to private helper children. Each child has one byte-copying role. Cancelling I/O closes its private socket and stops the original child; waiting joins that child. Input frames preserve every byte, including the final bytes before EOF.
+An uncertain child exit triggers cancellation before waiting. The native observation error remains in the result.

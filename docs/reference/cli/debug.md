@@ -7,7 +7,7 @@ title: "simstim debug"
 Record why a session goes wrong: debug files, profiles and traces.
 
 ```text
-simstim debug
+simstim debug [flags]
 ```
 
 The debug mode records what the client and the host helper do, into files on each side. Nothing listens and nothing is uploaded. `--debug` turns it on for one command. These commands work on a running session, from any terminal, with no restart. See docs/how-to/debug-a-session.md.

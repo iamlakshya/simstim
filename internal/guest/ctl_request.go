@@ -79,7 +79,7 @@ func (g *Init) request(w *proto.Writer, req proto.Request) {
 	case proto.CtlMemberStore:
 		reply(struct{}{}, g.storePreparedMember(req.Args))
 	case proto.CtlGuestCapabilities:
-		reply(proto.CtlGuestFeatures{Version: 1, Features: []string{proto.GuestSessionPrepareV1, proto.GuestMemberPrepareV1, inputtransfer.Feature, inputtransfer.PrimaryPolicyFeature, api.FeatureBoundSecrets}}, nil)
+		reply(proto.CtlGuestFeatures{Version: 1, Features: []string{proto.GuestSessionPrepareV1, proto.GuestMemberPrepareV1, proto.FeatureDecoyFilesV1, inputtransfer.Feature, inputtransfer.PrimaryPolicyFeature, api.FeatureBoundSecrets}}, nil)
 	case proto.CtlPrepare:
 		result, err := g.prepareController(req.Args)
 		reply(result, err)

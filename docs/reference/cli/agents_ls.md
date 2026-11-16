@@ -32,4 +32,4 @@ simstim agents ls --json
 | `--no-color` | print no colour (NO_COLOR does the same) |
 | `--no-input` | ask nothing: a question that needs an answer fails with exit code 4, and names the flag that answers it (SIMSTIM_NO_INPUT=1 does the same) |
 
-Part of [`agents`](agents.md): list the agents, and install one on a host.
+Part of [`agents`](agents.md): list the agents, install one on a host, and log in to it.

@@ -96,15 +96,16 @@ func prepareResumeEnvironment(m *Manifest, environment *api.SessionEnvironment) 
 	if len(argv) == 0 {
 		return UserError("bad_env", "the resume command has no executable", "Select the original supported command before resuming.")
 	}
-	login, err := LoginEnv(15 * time.Second)
-	if err != nil {
-		return UserError("bad_env", "the current runtime environment cannot be prepared", "Check the host login environment before resuming.")
-	}
 	agent, _ := agents.Find(m.Agent.Kind)
 	inline := len(m.Agent.Inline) > 0 && agent.Inline.Has()
 	args := NewArgs{Term: m.Term.Term, Environment: environment}
 	var env []string
 	var term string
+	if m.Wall!=nil && (m.Wall.Driver=="chv" || m.Wall.Driver=="firecracker"){
+		env,term,err=resolvedWalledEnv(args,m.ID,[]string{"/opt/agents/bin"},agent,inline,m.SecretState,m.Secrets)
+	}else{
+		login,loginErr:=LoginEnv(15*time.Second)
+		if loginErr!=nil{return UserError("bad_env","the current runtime environment cannot be prepared","Check the host login environment before resuming.")}
 	if m.Wall != nil {
 		bin := argv[0]
 		if !filepath.IsAbs(bin) {
@@ -123,6 +124,7 @@ func prepareResumeEnvironment(m *Manifest, environment *api.SessionEnvironment) 
 		if err == nil {
 			env, err = withSSHAgentSocket(env, m.ID, m.SSHAgent)
 		}
+	}
 	}
 	if err != nil {
 		return err

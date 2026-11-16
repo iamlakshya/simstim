@@ -2,7 +2,6 @@ package cli
 
 import (
 	"bytes"
-	"context"
 	"regexp"
 	"strings"
 	"testing"

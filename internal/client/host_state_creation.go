@@ -29,6 +29,7 @@ type hostCreationReservation struct {
 	sourceBirth           *hostMachineSourceBirth
 	sourceRecordAttempted bool
 	sourceProducerEntered bool
+	committed             *hostCreationCommittedSource
 	finished              atomic.Bool
 }
 

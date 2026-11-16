@@ -57,7 +57,7 @@ func cloneMemberState(input *memberState) (*memberState, error) {
 	if json.Unmarshal(raw, &metadata) != nil {
 		return nil, memberError("bad_request", "invalid egress state metadata", "Retry with matching helpers.")
 	}
-	output := &memberState{version: MemberRegistryV2, metadata: metadata, kinds: slices.Clone(input.kinds), generation: input.generation, secrets: make(map[string]registeredSecret, len(input.secrets)), sourceKinds: cloneStartupSources(input.sourceKinds), retired: cloneRetiredPrimaries(input.retired)}
+	output := &memberState{version: MemberRegistryV2, metadata: metadata, kinds: slices.Clone(input.kinds), generation: input.generation, secrets: make(map[string]registeredSecret, len(input.secrets)), sourceKinds: cloneStartupSources(input.sourceKinds), retired: cloneRetiredPrimaries(input.retired), decoys: api.CloneDecoyTripwires(input.decoys), decoyClasses: slices.Clone(input.decoyClasses)}
 	for name, old := range input.secrets {
 		secret := old
 		secret.history = slices.Clone(old.history)

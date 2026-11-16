@@ -100,23 +100,24 @@ type Decision struct {
 }
 
 type compiledRule struct {
-	door       api.Door
-	ref        api.LayerRef
-	id         string
-	allow      bool
-	host       string
-	wildcard   bool
-	isNumeric  bool
-	prefix     netip.Prefix
-	port       int // 0 means default: 443 on allow, any port on deny
-	path       string
-	pathPrefix bool
-	tools      []string
-	methods    *[]string
-	once       bool
-	until      time.Time
-	grantID    string
-	slot       *onceSlot
+	classPattern string // class-only whole-label wildcard, never a network rule
+	door         api.Door
+	ref          api.LayerRef
+	id           string
+	allow        bool
+	host         string
+	wildcard     bool
+	isNumeric    bool
+	prefix       netip.Prefix
+	port         int // 0 means default: 443 on allow, any port on deny
+	path         string
+	pathPrefix   bool
+	tools        []string
+	methods      *[]string
+	once         bool
+	until        time.Time
+	grantID      string
+	slot         *onceSlot
 }
 
 type compiledLayer struct {

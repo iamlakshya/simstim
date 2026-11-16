@@ -39,6 +39,8 @@ type memberState struct {
 	requestView    *requestSecretSnapshot
 	sourceKinds    map[string][]string
 	retired        map[string][]registeredRetired
+	decoys         []api.DecoyTripwire
+	decoyClasses   []compiledRule
 }
 
 type preparedInitial struct {
@@ -92,6 +94,7 @@ func (state *memberState) initialArgs() (InitArgs, error) {
 	}
 	a := state.metadata
 	a.AgentKinds = slices.Clone(a.AgentKinds)
+	a.Decoys = api.CloneDecoyTripwires(state.decoys)
 	a.Secrets = make(map[string]string, len(state.secrets))
 	for name, secret := range state.secrets {
 		if secret.identity != legacyExposedIdentity {
@@ -133,7 +136,11 @@ func prepareInitialState(a InitArgs) (*preparedInitial, error) {
 			owned.AgentKinds = append(owned.AgentKinds, kind)
 		}
 	}
-	state := &memberState{version: MemberRegistryV1, metadata: owned, kinds: kinds, secrets: make(map[string]registeredSecret, len(owned.Secrets))}
+	decoys, classes, err := prepareDecoyInput(owned.Decoys, owned.Policy)
+	if err != nil {
+		return nil, err
+	}
+	state := &memberState{version: MemberRegistryV1, metadata: owned, kinds: kinds, secrets: make(map[string]registeredSecret, len(owned.Secrets)), decoys: decoys, decoyClasses: classes}
 	for name, value := range owned.Secrets {
 		secret := api.Secret(value)
 		if err := checkRegistryValue(name, secret); err != nil {
@@ -142,6 +149,7 @@ func prepareInitialState(a InitArgs) (*preparedInitial, error) {
 		state.secrets[name] = registeredSecret{value: secret, identity: legacyExposedIdentity}
 	}
 	state.metadata.Secrets = nil
+	state.metadata.Decoys = nil
 	complete, err := state.initialArgs()
 	if err != nil {
 		return nil, err
@@ -168,7 +176,17 @@ func prepareInitialState(a InitArgs) (*preparedInitial, error) {
 		}
 		return nil, memberError(code, "invalid egress network policy", "Check the network rules, methods and complete layer order before retrying.")
 	}
-	scrubber := NewScrubber(complete.Secrets)
+	if len(state.decoys) != 0 {
+		view, err := newRequestSecretSnapshot(nil)
+		if err != nil {
+			return nil, err
+		}
+		state.requestView, err = view.withDecoyTripwires(state.decoys)
+		if err != nil {
+			return nil, err
+		}
+	}
+	scrubber := NewScrubber(decoyScrubValues(complete.Secrets, state.decoys))
 	return &preparedInitial{state: state, engine: engine, redaction: scrubber.snapshot(), dnsMode: mode}, nil
 }
 

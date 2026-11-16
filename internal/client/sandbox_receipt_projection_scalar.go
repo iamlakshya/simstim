@@ -6,7 +6,7 @@ import (
 	"github.com/iamlakshya/simstim/internal/api"
 )
 
-func receiptProjectionString(p *api.JSONProjection, span api.JSONSpan) (nonempty bool, err error) {
+func receiptProjectionString(p jsonValueProjection, span api.JSONSpan) (nonempty bool, err error) {
 	if span.End == 0 {
 		return false, nil
 	}
@@ -18,7 +18,7 @@ func receiptProjectionString(p *api.JSONProjection, span api.JSONSpan) (nonempty
 	return nonempty, err
 }
 
-func receiptProjectionInteger(p *api.JSONProjection, span api.JSONSpan, unsigned bool) (int64, error) {
+func receiptProjectionInteger(p jsonValueProjection, span api.JSONSpan, unsigned bool) (int64, error) {
 	if span.End == 0 {
 		return 0, nil
 	}
@@ -45,14 +45,14 @@ func receiptProjectionInteger(p *api.JSONProjection, span api.JSONSpan, unsigned
 	return strconv.ParseInt(string(bytes[:n]), 10, 64)
 }
 
-func receiptProjectionBoolean(p *api.JSONProjection, span api.JSONSpan) (bool, error) {
+func receiptProjectionBoolean(p jsonValueProjection, span api.JSONSpan) (bool, error) {
 	if span.End == 0 {
 		return false, nil
 	}
 	return projectedOptionalBoolean(p, span)
 }
 
-func receiptProjectionHexValue(p *api.JSONProjection, span api.JSONSpan, size int) (valid bool, err error) {
+func receiptProjectionHexValue(p jsonValueProjection, span api.JSONSpan, size int) (valid bool, err error) {
 	valid = true
 	n := 0
 	err = p.WalkString(span, func(r rune) error {
@@ -69,7 +69,7 @@ func receiptProjectionHexValue(p *api.JSONProjection, span api.JSONSpan, size in
 	}
 	return valid && n == size, nil
 }
-func receiptProjectionHex(p *api.JSONProjection, span api.JSONSpan, size int) error {
+func receiptProjectionHex(p jsonValueProjection, span api.JSONSpan, size int) error {
 	valid, err := receiptProjectionHexValue(p, span, size)
 	if err != nil {
 		return err
@@ -80,7 +80,7 @@ func receiptProjectionHex(p *api.JSONProjection, span api.JSONSpan, size int) er
 	return nil
 }
 
-func receiptProjectionNames(p *api.JSONProjection, span api.JSONSpan, semantic bool) error {
+func receiptProjectionNames(p jsonValueProjection, span api.JSONSpan, semantic bool) error {
 	if span.End == 0 {
 		if semantic {
 			return sandboxReceiptError()
@@ -134,7 +134,7 @@ func receiptProjectionNames(p *api.JSONProjection, span api.JSONSpan, semantic b
 // This projects the SAME historical Source DTO's scalar metadata. It never
 // parses a native identity or constructs a Reference/checked Source. The root
 // identity is only tested for the exact nonempty predicate in Reference.Known.
-func projectReceiptSource(p *api.JSONProjection, span api.JSONSpan) (future bool, err error) {
+func projectReceiptSource(p jsonValueProjection, span api.JSONSpan) (future bool, err error) {
 	var fields [5]api.JSONSpan
 	err = p.Object(span, hostStateSourceWitnessFields, func(f api.JSONField) error {
 		if f.Known < 0 {

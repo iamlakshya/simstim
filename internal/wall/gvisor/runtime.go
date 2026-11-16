@@ -14,6 +14,15 @@ var requiredRoles = []string{"runsc", "gvisor_sentry", "gvisor-sentry-prewarmer"
 
 func runtimeRoot() string { return path.Join("/opt", brand.Name, "runtime", "gvisor") }
 
+// RuntimeTargetV1 is the fixed target of one signed executable role. This
+// path is only layout data; its original checked descriptor grants the mount.
+func RuntimeTargetV1(name string) string {
+	if name == "runsc" {
+		return path.Join(runtimeRoot(), "runsc")
+	}
+	return path.Join(runtimeRoot(), "gvisor-bin", name)
+}
+
 func runtimeItems(manifest supply.Manifest) ([]supply.Item, error) {
 	return RuntimeItemsV1(manifest, runtime.GOARCH)
 }
@@ -27,6 +36,9 @@ func RuntimeItemsV1(manifest supply.Manifest, arch string) ([]supply.Item, error
 	main, ok := manifest.Find(supply.KindGvisor, "runsc", arch)
 	if !ok || supply.Below(main.Version, "release-20261102.0") {
 		return nil, failure("runtime_missing", "the client runtime lacks its pinned runsc release", nil)
+	}
+	if main.Version != NativeBuildVersionV1 || main.Released != "2026-11-02" {
+		return nil, failure("runtime_missing", "the client runtime lacks the supported patched gvisor companion build", nil)
 	}
 	var items []supply.Item
 	for _, name := range requiredRoles {

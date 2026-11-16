@@ -52,7 +52,7 @@ func (b *bridge) handleMore(req proto.Request) bool {
 			b.reply(req.ID, nil, UserError("bad_request", "the resume request is not valid JSON", "Update the client."))
 			return true
 		}
-		v, err := Resume(a)
+		v, err := ResumeContext(b.ctx,a)
 		b.reply(req.ID, v, err)
 	default:
 		return false

@@ -35,6 +35,11 @@ func lockDown(c *setup, rs *ruleset, progs [][]bpf.RawInstruction) error {
 	if err := dropCaps(); err != nil {
 		return err
 	}
+	// Credential changes can reset dumpability. Keep the early clear and
+	// reassert it after the final identity change, before any child starts.
+	if err := unix.Prctl(unix.PR_SET_DUMPABLE, 0, 0, 0, 0); err != nil {
+		return failure("cannot clear the dumpable flag after identity changes: "+err.Error(), "Report this as a bug.")
+	}
 	if err := rs.enforce(); err != nil {
 		return err
 	}

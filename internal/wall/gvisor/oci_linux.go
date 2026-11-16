@@ -59,7 +59,7 @@ func makeOCI(spec wall.Spec, plan []wall.Mount, smoke bool) (ociSpec, error) {
 		args = []string{"/usr/bin/true"}
 	}
 	result := ociSpec{Version: "1.2.1", Root: ociRoot{Path: "rootfs", Readonly: true},
-		Process: ociProcess{User: ociUser{}, Args: args, Env: []string{"HOME=/home/agent", "PATH=/usr/local/bin:/usr/bin:/bin", "LANG=C.UTF-8", "LC_ALL=C.UTF-8", "TZ=UTC"}, Cwd: "/work", NoNewPrivileges: true},
+		Process: ociProcess{User: ociUser{UID: 1000, GID: 1000}, Args: args, Env: []string{"HOME=/home/agent", "PATH=/usr/local/bin:/usr/bin:/bin", "LANG=C.UTF-8", "LC_ALL=C.UTF-8", "TZ=UTC"}, Cwd: "/work", NoNewPrivileges: true},
 		Linux:   ociLinux{Namespaces: []ociNamespace{}},
 		Mounts: []ociMount{
 			{Destination: "/proc", Type: "proc", Source: "proc", Options: []string{"nosuid", "nodev", "noexec"}},
@@ -67,8 +67,8 @@ func makeOCI(spec wall.Spec, plan []wall.Mount, smoke bool) (ociSpec, error) {
 			{Destination: "/dev/pts", Type: "devpts", Source: "devpts", Options: []string{"nosuid", "noexec", "newinstance", "ptmxmode=0666", "mode=0620"}},
 			{Destination: "/dev/shm", Type: "tmpfs", Source: "shm", Options: []string{"nosuid", "nodev", "noexec", "mode=1777"}},
 			{Destination: "/tmp", Type: "tmpfs", Source: "tmpfs", Options: []string{"nosuid", "nodev", "mode=1777"}},
-			{Destination: "/run", Type: "tmpfs", Source: "tmpfs", Options: []string{"nosuid", "nodev", "mode=755"}},
-			{Destination: "/home/agent", Type: "tmpfs", Source: "tmpfs", Options: []string{"nosuid", "nodev", "mode=700"}},
+			{Destination: "/run", Type: "tmpfs", Source: "tmpfs", Options: []string{"nosuid", "nodev", "mode=755", "uid=1000", "gid=1000"}},
+			{Destination: "/home/agent", Type: "tmpfs", Source: "tmpfs", Options: []string{"nosuid", "nodev", "mode=700", "uid=1000", "gid=1000"}},
 		},
 	}
 	if smoke {
@@ -98,5 +98,16 @@ func makeOCI(spec wall.Spec, plan []wall.Mount, smoke bool) (ociSpec, error) {
 }
 
 func runArguments(executable, session, id string, linkFD int) []string {
-	return []string{executable, "--root", filepath.Join(session, "gvisor", "runsc"), "--network=none", "--directfs=false", "--ignore-cgroups", "--host-uds=none", "--sidecar-release-enforcement-policy=ALWAYS", "run", "--bundle", filepath.Join(session, "gvisor", "bundle"), "--pass-fd", fmt.Sprintf("%d:3", linkFD), id}
+	return []string{executable, "--root", filepath.Join(session, "gvisor", "runsc"), "--platform=systrap", "--network=none", "--directfs=false", "--ignore-cgroups", "--host-uds=none", "--sidecar-release-enforcement-policy=ALWAYS", "run", "--bundle", filepath.Join(session, "gvisor", "bundle"), "--pass-fd", fmt.Sprintf("%d:3", linkFD), id}
+}
+
+// CommandArgumentsV1 returns the one production command of the original
+// namespace owner. The authenticated receipt separately authorises its use.
+func CommandArgumentsV1(session, id string) []string {
+	return runArguments(path.Join(runtimeRoot(), "runsc"), session, id, 3)
+}
+
+// CommandEnvironmentV1 excludes ambient sidecar overrides and release skips.
+func CommandEnvironmentV1() []string {
+	return []string{"PATH=/usr/bin:/bin", "LANG=C", "LC_ALL=C", "TZ=UTC"}
 }

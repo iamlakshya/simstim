@@ -27,6 +27,7 @@ import (
 
 // Spec says how to confine one command.
 type Spec struct {
+	gvisorV1    bool // only CommandGvisorV1 selects this closed bootstrap purpose
 	Argv        []string
 	Env         []string     // the command's whole environment, and nothing else
 	Subuid      bool         // run as a subuid when /etc/subuid gives a range and newuidmap exists
@@ -68,6 +69,10 @@ const (
 // through ordinary symbolic links, but never through /proc's magic links.
 // With a user namespace, a bound folder does not show the mounts below it.
 type Bind struct {
+	// File is an optional already-owned native source. Path is then only its
+	// fixed target inside the private mount namespace. Command captures this
+	// SAME descriptor; it never opens Path as new host authority.
+	File  *os.File
 	Path  string // absolute and clean
 	Write bool   // read and write, or else read-only
 }
@@ -125,6 +130,9 @@ func check(s Spec) (checked, error) {
 	if !knownProfile(s.Seccomp) {
 		return c, failure("unknown seccomp profile "+quote(string(s.Seccomp)),
 			"Name one of vmm, converter, git or egress in Spec.Seccomp.")
+	}
+	if s.Seccomp == profileGvisorV1 && !s.gvisorV1 {
+		return c, failure("the gvisor bootstrap profile has no dedicated command owner", "Use the original host gvisor factory.")
 	}
 	if s.Net != NetNone && s.Net != NetHost {
 		return c, failure("unknown network mode", "Use NetNone or NetHost in Spec.Net.")
@@ -187,6 +195,9 @@ func checkBinds(in []Bind) ([]Bind, error) {
 	// Parents first, so that a path inside another bound folder lands on it.
 	slices.SortFunc(out, func(a, b Bind) int { return strings.Compare(a.Path, b.Path) })
 	for i, b := range out {
+		if b.File != nil && !fileOpen(b.File) {
+			return nil, failure("a supplied bind source is closed", "Keep the original source capability open until Command captures it.")
+		}
 		p := b.Path
 		if !path.IsAbs(p) || path.Clean(p) != p {
 			return nil, failure("the bound path "+quote(p)+" is not absolute and clean",
@@ -247,7 +258,7 @@ func mergeRules(in []PathRule) []PathRule {
 
 func knownProfile(p Profile) bool {
 	switch p {
-	case ProfileVMM, ProfileConverter, ProfileGit, ProfileEgress:
+	case ProfileVMM, ProfileConverter, ProfileGit, ProfileEgress, profileGvisorV1:
 		return true
 	default:
 		return false
@@ -277,7 +288,16 @@ type mode struct {
 // and the git jail cannot run: git changes file modes by path, such as
 // chmod of .git/config.lock, which such a jail refuses.
 func choose(s Spec, userns bool, abi int, sub func() (subID, bool)) (mode, error) {
+	if s.gvisorV1 {
+		if !userns || s.Subuid || s.Net != NetNone || s.Seccomp != profileGvisorV1 {
+			return mode{}, failure("the gvisor purpose needs its private user, mount and PID namespaces", "Prepare user namespaces on this Linux host.")
+		}
+		return mode{userns: true}, nil
+	}
 	if !userns {
+		if slices.ContainsFunc(s.Binds, func(b Bind) bool { return b.File != nil }) {
+			return mode{}, failure("supplied fixed-target binds need a private user and mount namespace", "Use the actual namespace probe before selecting this command purpose.")
+		}
 		if s.Seccomp == ProfileGit {
 			return mode{}, failure("the git jail needs a user namespace: git changes file modes by path, "+
 				"which a jail without one refuses",

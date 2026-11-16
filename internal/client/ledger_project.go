@@ -79,7 +79,7 @@ func ledgerCount(p *api.JSONProjection, span api.JSONSpan) (int, error) {
 	return int(n), nil
 }
 func ledgerKind(p *api.JSONProjection, span api.JSONSpan) (OutboundKind, error) {
-	for _, kind := range []OutboundKind{OutboundSecret, OutboundSSHAgent, OutboundSSHKey, OutboundAlertToken, OutboundRepo, OutboundPaste} {
+	for _, kind := range []OutboundKind{OutboundSecret, OutboundSSHAgent, OutboundSSHKey, OutboundAlertToken, OutboundRepo, OutboundPaste, OutboundPush, OutboundPublicPush, OutboundRootRun} {
 		equal, err := p.StringEqual(span, string(kind))
 		if err != nil {
 			return "", err

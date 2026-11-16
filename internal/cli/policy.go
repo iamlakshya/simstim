@@ -101,8 +101,8 @@ func policyTarget(args []string) (api.Door, string, error) {
 	if len(args) == 2 {
 		door = api.Door(args[0])
 	}
-	if door != api.DoorNet && door != api.DoorPort {
-		return "", "", policyUsage(fmt.Sprintf("the %q door is not available in this version", client.CleanLine(string(door))), "Pass net or port, or leave the door out for net.", "bad_door")
+	if door != api.DoorNet && door != api.DoorPort && door != api.DoorPush {
+		return "", "", policyUsage(fmt.Sprintf("the %q door is not available in this version", client.CleanLine(string(door))), "Pass net, port or push, or leave the door out for net.", "bad_door")
 	}
 	return door, args[len(args)-1], nil
 }

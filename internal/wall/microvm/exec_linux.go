@@ -49,6 +49,11 @@ func RunVMMExec(in io.Reader) error {
 	if err := supply.CheckSealedRuntime(kernel, guestKernel); err != nil {
 		return err
 	}
+	for _, file := range []*os.File{program, guestKernel} {
+		if err := requireReadOnlyRuntimeMount(file); err != nil {
+			return err
+		}
+	}
 	api, vsock := vmSocketPaths(vmDataDir(plan.Spec))
 	var args []string
 	if kind == firecrackerBackend {
@@ -78,6 +83,20 @@ func RunVMMExec(in io.Reader) error {
 	reader.Close()
 	if err := unix.Exec(args[0], args, []string{"LANG=C", "LC_ALL=C", "TZ=UTC"}); err != nil {
 		return fmt.Errorf("execute pinned %s: %w", kind.label(), err)
+	}
+	return nil
+}
+
+// A read-only open does not stop fchmod or a writable procfd reopen. The
+// namespace init replaces each selected handle through its own read-only
+// bind mount. Require that mount before an unmodified VMM inherits the files.
+func requireReadOnlyRuntimeMount(file *os.File) error {
+	var stat unix.Statfs_t
+	if err := unix.Fstatfs(int(file.Fd()), &stat); err != nil {
+		return fmt.Errorf("inspect runtime descriptor mount: %w", err)
+	}
+	if stat.Flags&unix.ST_RDONLY == 0 {
+		return fmt.Errorf("runtime execution needs its checked read-only descriptor mount")
 	}
 	return nil
 }

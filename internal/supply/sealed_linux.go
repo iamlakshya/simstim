@@ -15,9 +15,11 @@ import (
 
 const runtimeSeals = unix.F_SEAL_WRITE | unix.F_SEAL_GROW | unix.F_SEAL_SHRINK | unix.F_SEAL_SEAL
 
-// SealRuntime copies one manifest-authorised VMM or kernel into a fresh sealed
+// SealRuntime copies one manifest-authorised runtime into a fresh sealed
 // descriptor. It retains the public artefact's bytes and checks them through
 // the canonical reader. VMM copies are execute-only for the NoDump contract.
+// gVisor executables keep their readable mode. Their patched entry points and
+// native caller must establish NoDump before configuration or secret input.
 func SealRuntime(ctx context.Context, item Item, source *os.File) (sealed *os.File, returned error) {
 	if err := validateSealedRuntimeItem(item); err != nil {
 		return nil, err
@@ -31,13 +33,7 @@ func SealRuntime(ctx context.Context, item Item, source *os.File) (sealed *os.Fi
 	if _, err := source.Seek(0, 0); err != nil {
 		return nil, fmt.Errorf("rewind source runtime: %w", err)
 	}
-	flags := unix.MFD_CLOEXEC | unix.MFD_ALLOW_SEALING
-	if item.Kind == KindVMM {
-		flags |= unix.MFD_EXEC
-	} else {
-		flags |= unix.MFD_NOEXEC_SEAL
-	}
-	fd, err := unix.MemfdCreate("runtime-"+item.Kind, flags)
+	fd, err := createRuntimeMemfd(item.Kind, unix.MemfdCreate)
 	if err != nil {
 		return nil, fmt.Errorf("create runtime copy: %w", err)
 	}
@@ -50,16 +46,10 @@ func SealRuntime(ctx context.Context, item Item, source *os.File) (sealed *os.Fi
 	if _, err := io.Copy(file, io.LimitReader(&runtimeContextReader{ctx: ctx, reader: source}, item.Size+1)); err != nil {
 		return nil, fmt.Errorf("copy runtime bytes: %w", err)
 	}
-	mode := os.FileMode(0o444)
-	seals := runtimeSeals
-	if item.Kind == KindVMM {
-		mode = 0o111
-		seals |= unix.F_SEAL_EXEC
-	}
-	if err := file.Chmod(mode); err != nil {
+	if err := file.Chmod(sealedRuntimeMode(item.Kind)); err != nil {
 		return nil, fmt.Errorf("set runtime copy mode: %w", err)
 	}
-	if _, err := unix.FcntlInt(file.Fd(), unix.F_ADD_SEALS, seals); err != nil {
+	if err := sealRuntimeMemfd(file.Fd(), item.Kind, unix.FcntlInt); err != nil {
 		return nil, fmt.Errorf("seal runtime bytes: %w", err)
 	}
 	if err := CheckSealedRuntime(item, file); err != nil {
@@ -75,8 +65,10 @@ func SealRuntime(ctx context.Context, item Item, source *os.File) (sealed *os.Fi
 }
 
 // CheckSealedRuntime permits an unlinked descriptor only after proving its
-// complete seals, exact mode and canonical manifest size/SHA-256. CheckOpen
-// retains its regular linked-file rules unchanged.
+// immutable byte seals, exact mode and canonical manifest size/SHA-256.
+// Execution separately requires read-only mount projection. The execution
+// seal, where available, protects execute bits but does not freeze read bits.
+// CheckOpen retains its regular linked-file rules unchanged.
 func CheckSealedRuntime(item Item, file *os.File) error {
 	if err := validateSealedRuntimeItem(item); err != nil {
 		return err
@@ -92,12 +84,8 @@ func CheckSealedRuntime(item Item, file *os.File) error {
 	if err := unix.Fstat(int(file.Fd()), &stat); err != nil {
 		return fmt.Errorf("inspect sealed runtime inode: %w", err)
 	}
-	mode := os.FileMode(0o444)
+	mode := sealedRuntimeMode(item.Kind)
 	required := runtimeSeals
-	if item.Kind == KindVMM {
-		mode = 0o111
-		required |= unix.F_SEAL_EXEC
-	}
 	seals, err := unix.FcntlInt(file.Fd(), unix.F_GET_SEALS, 0)
 	if err != nil {
 		return fmt.Errorf("read runtime seals: %w", err)
@@ -136,8 +124,8 @@ func validateSealedRuntimeItem(item Item) error {
 	if item.Arch != runtime.GOARCH {
 		return fmt.Errorf("the sealed runtime architecture differs from this host")
 	}
-	if item.Kind != KindVMM && item.Kind != KindKernel {
-		return fmt.Errorf("only a VMM or guest kernel uses a sealed runtime copy")
+	if !runtimeExecutableKind(item.Kind) && item.Kind != KindKernel {
+		return fmt.Errorf("only a VMM, gVisor executable or guest kernel uses a sealed runtime copy")
 	}
 	if err := item.validate(); err != nil {
 		return err
@@ -146,6 +134,17 @@ func validateSealedRuntimeItem(item Item) error {
 		return fmt.Errorf("runtime size cannot include its excess-byte check")
 	}
 	return nil
+}
+
+func sealedRuntimeMode(kind string) os.FileMode {
+	switch kind {
+	case KindVMM:
+		return 0o111
+	case KindGvisor:
+		return 0o555
+	default:
+		return 0o444
+	}
 }
 
 type runtimeContextReader struct {

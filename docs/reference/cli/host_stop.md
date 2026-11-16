@@ -7,7 +7,7 @@ title: "simstim host stop"
 Stop the host through its provider or provider script.
 
 ```text
-simstim host stop <host>
+simstim host stop <host> [flags]
 ```
 
 Stops the host through its provider or provider script. A VM's sessions stop too, and a sandbox's are paused.

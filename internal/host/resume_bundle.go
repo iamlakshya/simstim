@@ -49,7 +49,9 @@ func checkedResumeValues(want []string, got map[string]api.Secret) (map[string]a
 
 // resumeBundleLocked is called with one canonical PRIMARY op.lock. It never
 // reacquires it, and completes all ID/argv/value checks before stopping anyone.
-func resumeBundleLocked(original string, a api.ResumeArgs, root *Manifest) (*ResumeResult, error) {
+func resumeBundleLocked(original string,a api.ResumeArgs,root *Manifest,operation *SessionOperation)(*ResumeResult,error){
+	if err:=validateRestartWall(root);err!=nil{return nil,err}
+	if operation==nil || !operation.Valid(root.ID){return nil,snapshotChanged()}
 	if err := CheckSandboxSnapshotLocked(original, root.ID, a.Snapshot); err != nil {
 		return nil, err
 	}
@@ -114,6 +116,7 @@ func resumeBundleLocked(original string, a api.ResumeArgs, root *Manifest) (*Res
 	if err := validateResumeInputs(&preview, a.Inputs); err != nil {
 		return nil, err
 	}
+	if err:=admitRestartMemoryV1(operation.ownerContext,operation,a.MemoryMax);err!=nil{return nil,err}
 	debugOn := debugUntil(root, alive(root.ID)) != nil
 	if err := stopHolder(root.ID, root); err != nil {
 		return nil, UserError("busy", "the previous sandbox owner could not be stopped", "Wait for its owned cleanup before resuming.")
@@ -121,7 +124,7 @@ func resumeBundleLocked(original string, a api.ResumeArgs, root *Manifest) (*Res
 	if oldHolderRuns(root.ID) {
 		return nil, UserError("busy", "the previous sandbox owner still runs", "Wait for its cleanup before resuming.")
 	}
-	root, err = LoadManifest(root.ID)
+	root, err = operation.LoadContext(operation.ownerContext)
 	if err != nil {
 		return nil, err
 	}
@@ -159,7 +162,7 @@ func resumeBundleLocked(original string, a api.ResumeArgs, root *Manifest) (*Res
 	for _, child := range children {
 		members = append(members, api.MemberResumeArgs{ID: child.ID, Secrets: childValues[child.ID], SecretDelivery: childDeliveries[child.ID]})
 	}
-	_, why, err := startAgain(root, again{label: resumedLabel, reason: "sandbox sessions started again", secrets: primaryValues, secretDelivery: delivery, members: members, allowMissing: true})
+	_, why, err := startAgain(root, again{operation:operation,label: resumedLabel, reason: "sandbox sessions started again", secrets: primaryValues, secretDelivery: delivery, members: members, allowMissing: true})
 	if err != nil {
 		return nil, UserError("start_failed", "the complete sandbox could not start: "+err.Error(), "Check the supervisor log before trying again.")
 	}

@@ -31,6 +31,8 @@ const (
 // whole of the agent's environment: the trusted side made it from a fixed
 // base, never from the host's login environment (spec 4.2).
 type CtlStartArgs struct {
+	// Decoys is private ephemeral cold-start data, never a saved row or label.
+	Decoys *DecoyFilesV1 `json:"decoys,omitempty"`
 	// PreparedClaim consumes one run-owned member preparation, once.
 	PreparedClaim string `json:"prepared_claim,omitempty"`
 	// SecretModes is nil for legacy startup and explicit even when empty.

@@ -24,7 +24,7 @@ func (t projectedTime) marshalJSON() ([]byte, error) {
 // compactProjectedTime keeps the historical Go nanosecond precision while
 // walking arbitrary fractional runs. The source bytes are never rewritten.
 // All accepted RFC3339 core spellings fit this temporary validation buffer.
-func compactProjectedTime(p *api.JSONProjection, span api.JSONSpan, compact *[64]byte) (int, error) {
+func compactProjectedTime(p jsonValueProjection, span api.JSONSpan, compact *[64]byte) (int, error) {
 	n := 0
 	fraction, digits := false, 0
 	err := p.WalkEncoded(span, func(piece []byte) error {
@@ -49,7 +49,7 @@ func compactProjectedTime(p *api.JSONProjection, span api.JSONSpan, compact *[64
 	})
 	return n, err
 }
-func readProjectedTime(p *api.JSONProjection, span api.JSONSpan) (projectedTime, error) {
+func readProjectedTime(p jsonValueProjection, span api.JSONSpan) (projectedTime, error) {
 	var compact [64]byte
 	n, err := compactProjectedTime(p, span, &compact)
 	if err != nil {

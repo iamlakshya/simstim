@@ -45,7 +45,7 @@ func (h *Inspection) CountState(source int, span Span, visit func(StateCounter) 
 	if err != nil {
 		return StateCharge{}, err
 	}
-	if !i.outer.tomlDone || source != 1 || span.End <= span.Start || visit == nil || i.outer.stateActive || i.outer.entryActive || i.outer.countActive || i.outer.pendingState.id != 0 {
+	if !i.outer.tomlDone || i.outer.object.active || i.outer.object.pending.id != 0 || source != 1 || span.End <= span.Start || visit == nil || i.outer.stateActive || i.outer.entryActive || i.outer.countActive || i.outer.pendingState.id != 0 {
 		return StateCharge{}, i.scopeFailure(ErrIndexInvariant)
 	}
 	if err := h.CheckSpan(source, span); err != nil {
@@ -137,7 +137,7 @@ func (h *Inspection) CountEntry(parent StateCharge, span Span, visit func(EntryC
 	if err != nil {
 		return EntryCharge{}, err
 	}
-	if !i.outer.stateActive || parent.owner != i || parent.epoch != h.epoch || parent.id != i.outer.stateID || span.End <= span.Start || visit == nil || i.outer.entryActive || i.outer.pendingEntry.id != 0 || i.outer.countActive {
+	if !i.outer.stateActive || i.outer.object.active || i.outer.object.pending.id != 0 || parent.owner != i || parent.epoch != h.epoch || parent.id != i.outer.stateID || span.End <= span.Start || visit == nil || i.outer.entryActive || i.outer.pendingEntry.id != 0 || i.outer.countActive {
 		return EntryCharge{}, i.scopeFailure(ErrIndexInvariant)
 	}
 	if err := h.CheckSpan(i.outer.stateSource, span); err != nil {

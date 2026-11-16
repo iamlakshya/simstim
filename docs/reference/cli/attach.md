@@ -12,7 +12,7 @@ simstim attach [<host>/<session>|-] [flags]
 
 **Aliases:** `a`
 
-Attaches this terminal to a session. A stopped host that its provider script can start wakes first. When the session's agent has ended, attach asks to start it again, as resume does. `--restart` answers yes. The host may be left out when no other host has a session of that name.
+Attaches this terminal to a session. A stopped host that its provider script can start wakes first. When the session's agent has ended, attach asks to start it again, as resume does. `--restart` answers yes. The host may be left out when no other host has a session of that name. With `--id`, name the host and exact session ID. A missing ID never becomes a session name.
 
 ## Examples
 
@@ -27,6 +27,7 @@ simstim attach            # pick one from a list
 
 | Flag | What it does |
 | --- | --- |
+| `--id` | resolve the target only as a session ID, never as a name |
 | `--restart` | when the agent has ended, start it again without asking |
 
 ## Flags from the parent command

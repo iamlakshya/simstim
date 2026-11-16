@@ -75,7 +75,9 @@ func parseDNSQuery(raw []byte) (dnsQuery, error) {
 	rawName := q.Name.String()
 	host, err := NormaliseHost(rawName)
 	if err != nil {
-		return dnsQuery{}, fmt.Errorf("normalise DNS query host %q: %w", rawName, err)
+		// Preserve only the fully framed question for pre-policy tripwires;
+		// its malformed hostname never acquires routing or DNS authority.
+		return dnsQuery{header: hdr, question: q}, fmt.Errorf("normalise DNS query host: %w", err)
 	}
 	if isNumericAddr(host) {
 		return dnsQuery{}, fmt.Errorf("%w: numeric IP literal %q in DNS query", errDNSQuery, rawName)

@@ -29,6 +29,7 @@ type startupLoanV1 struct {
 }
 
 type originalBootV1 struct {
+	gvisorIssued bool // guarded by owner.mu; one physical userspace-kernel start per accepted loan
 	owner        *OwnedSupervisorLease
 	operation    *SessionOperation
 	line         *StartupLineV1

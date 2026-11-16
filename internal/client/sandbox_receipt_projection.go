@@ -15,7 +15,7 @@ type receiptRowProjection struct {
 	id, hostID, request, names, wall, lineage, delivery api.JSONSpan
 }
 
-func projectAgentSandboxReceipts(ctx context.Context, p *api.JSONProjection, rowSpan, rowKey api.JSONSpan, schema int, facts *agentSandboxPolicy, validateState func(state, allowed api.JSONSpan) error, checkNames func(original, receipt api.JSONSpan) error, withRelations sandboxReceiptRelationPhase) error {
+func projectAgentSandboxReceipts(ctx context.Context, p jsonValueProjection, rowSpan, rowKey api.JSONSpan, schema int, facts *agentSandboxPolicy, validateState func(state, allowed api.JSONSpan) error, checkNames func(original, receipt api.JSONSpan) error, withRelations sandboxReceiptRelationPhase) error {
 	known := []string{"session_id", "host_id", "request", "secrets", "wall_intent", "lineage", "delivery_intent", "delivery_receipt", "input_operation"}
 	var values [9]api.JSONSpan
 	if err := p.Object(rowSpan, known, func(f api.JSONField) error {
@@ -45,9 +45,9 @@ func projectAgentSandboxReceipts(ctx context.Context, p *api.JSONProjection, row
 	return ctx.Err()
 }
 
-func projectKnownSandboxReceipt(ctx context.Context, p *api.JSONProjection, span, rowKey api.JSONSpan, schema int, row receiptRowProjection, facts *agentSandboxPolicy, delivery bool, validateState func(api.JSONSpan, api.JSONSpan) error, checkNames func(api.JSONSpan, api.JSONSpan) error, withRelations sandboxReceiptRelationPhase) (bool, error) {
+func projectKnownSandboxReceipt(ctx context.Context, p jsonValueProjection, span, rowKey api.JSONSpan, schema int, row receiptRowProjection, facts *agentSandboxPolicy, delivery bool, validateState func(api.JSONSpan, api.JSONSpan) error, checkNames func(api.JSONSpan, api.JSONSpan) error, withRelations sandboxReceiptRelationPhase) (bool, error) {
 	shape, err := projectSandboxReceiptSpans(ctx, p, span, schema, delivery)
-	if err != nil || shape.Future {
+	if err != nil || shape.Version > 1 {
 		return shape.Future, err
 	}
 	known := sandboxInputOperationFields
@@ -99,18 +99,16 @@ func projectKnownSandboxReceipt(ctx context.Context, p *api.JSONProjection, span
 	if err != nil {
 		return false, err
 	}
-	if sourceFuture {
-		return true, nil
-	}
+	stateFuture := false
 	if delivery {
 		if validateState == nil {
 			return false, sandboxReceiptError()
 		}
 		if err := validateState(shape.State, shape.Allowed); err != nil {
-			if errors.Is(err, errSandboxReceiptStateFuture) {
-				return true, nil
+			if !errors.Is(err, errSandboxReceiptStateFuture) {
+				return false, err
 			}
-			return false, err
+			stateFuture = true
 		}
 	}
 	if err := projectReceiptHeader(p, fields, delivery); err != nil {
@@ -132,7 +130,7 @@ func projectKnownSandboxReceipt(ctx context.Context, p *api.JSONProjection, span
 				return false, err
 			}
 		}
-		return false, ctx.Err()
+		return shape.Future || sourceFuture, ctx.Err()
 	}
 	for _, i := range []int{7, 8, 9} {
 		if err := receiptProjectionNames(p, fields[i], true); err != nil {
@@ -148,6 +146,9 @@ func projectKnownSandboxReceipt(ctx context.Context, p *api.JSONProjection, span
 	}
 	if err := checkNames(original, shape.Allowed); err != nil {
 		return false, err
+	}
+	if stateFuture {
+		return true, ctx.Err()
 	}
 	state, err := receiptStateSpans(p, shape.State)
 	if err != nil {
@@ -172,10 +173,10 @@ func projectKnownSandboxReceipt(ctx context.Context, p *api.JSONProjection, span
 	if err != nil {
 		return false, err
 	}
-	return false, ctx.Err()
+	return shape.Future || sourceFuture, ctx.Err()
 }
 
-func projectReceiptHeader(p *api.JSONProjection, fields [11]api.JSONSpan, delivery bool) error {
+func projectReceiptHeader(p jsonValueProjection, fields [11]api.JSONSpan, delivery bool) error {
 	for _, i := range []int{1, 3} {
 		if err := receiptProjectionHex(p, fields[i], 32); err != nil {
 			return err
@@ -216,7 +217,7 @@ func projectReceiptHeader(p *api.JSONProjection, fields [11]api.JSONSpan, delive
 	return sandboxReceiptError()
 }
 
-func projectReceiptScope(p *api.JSONProjection, scope [7]api.JSONSpan, row receiptRowProjection, key api.JSONSpan, facts *agentSandboxPolicy, delivery bool) error {
+func projectReceiptScope(p jsonValueProjection, scope [7]api.JSONSpan, row receiptRowProjection, key api.JSONSpan, facts *agentSandboxPolicy, delivery bool) error {
 	var host [63]byte
 	n, err := projectedBoundedBytes(p, scope[0], host[:])
 	if err != nil {

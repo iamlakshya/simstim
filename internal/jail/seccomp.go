@@ -106,10 +106,26 @@ func policy(p Profile, n NetMode, landlockMode bool) seccomp.Policy {
 	} else {
 		checks = append(checks, seccomp.NameWithConditions{Name: "socket", Conditions: other})
 	}
-	checks = append(checks, seccomp.NameWithConditions{Name: "clone", Conditions: seccomp.ArgumentConditions{
-		{Argument: 0, Operation: seccomp.BitsSet, Value: cloneNewFlags},
-	}})
 	names := slices.Clone(refused)
+	if p == profileGvisorV1 && !landlockMode {
+		// Only the closed, namespaced gvisor purpose can bootstrap a nested
+		// runtime. The outer PID 1 has no capabilities. The command receives
+		// bootstrap capabilities only in a child user namespace, so they
+		// cannot reach that PID 1 or an ancestor's mounts and processes.
+		names = slices.DeleteFunc(names, func(name string) bool {
+			switch name {
+			case "unshare", "setns", "mount", "umount2", "pivot_root", "move_mount", "open_tree", "fsopen", "fsmount", "fsconfig", "fspick", "mount_setattr",
+				"ptrace", "process_vm_readv", "process_vm_writev", "pidfd_getfd", "userfaultfd":
+				return true
+			default:
+				return false
+			}
+		})
+	} else {
+		checks = append(checks, seccomp.NameWithConditions{Name: "clone", Conditions: seccomp.ArgumentConditions{
+			{Argument: 0, Operation: seccomp.BitsSet, Value: cloneNewFlags},
+		}})
+	}
 	if landlockMode {
 		names = append(names, "setsid", "setpgid")
 		names = append(names, pathMeta...)

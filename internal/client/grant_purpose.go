@@ -9,6 +9,8 @@ type grantPurpose uint8
 const (
 	grantRemote grantPurpose = iota
 	grantLocalReview
+	grantLocalForge
+	grantLocalRoot
 )
 
 func requestGrantPurpose(r *GrantRequest) grantPurpose {
@@ -37,6 +39,6 @@ func requireRemoteGrantRequest(ctx context.Context) error {
 }
 
 func grantPurposeError() error {
-	return &UserError{Msg: "this local review request cannot send values or publish session changes",
-		Hint: "Start a separate session command with its own grant request.", Code: "grant_purpose", Kind: KindRefused}
+	return &UserError{Msg: "this local request belongs to another permission purpose",
+		Hint: "Start a separate command with its own purpose and grant request.", Code: "grant_purpose", Kind: KindRefused}
 }

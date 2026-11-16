@@ -347,6 +347,9 @@ func (r *GrantRequest) Close() error {
 			return agentModeResourceError()
 		}
 	}
+	if err := r.closeLocalPurposeResources(); err != nil {
+		return err
+	}
 	if err := inputs.close(); err != nil {
 		return err
 	}

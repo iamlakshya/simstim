@@ -92,6 +92,11 @@ type secretWebSocketClient struct {
 func (r *secretWebSocketClient) Read(p []byte) (int, error) {
 	n, err := r.reader.Read(p)
 	if errors.Is(err, errRequestSecretStreamMisuse) {
+		var decoy *decoyStreamUse
+		if errors.As(err, &decoy) {
+			name := decoy.name
+			r.secrets.decoy.Store(&name)
+		}
 		r.secrets.misuse.Store(true)
 	}
 	return n, err

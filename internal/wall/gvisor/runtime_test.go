@@ -14,7 +14,7 @@ func runtimeManifest(t *testing.T) supply.Manifest {
 	t.Helper()
 	m := supply.Manifest{Release: "v0.0.0", Runtime: "gvisor-fixture", Advisories: []supply.Advisory{}}
 	for _, name := range requiredRoles {
-		item := supply.NewItem(supply.KindGvisor, name, "release-20261102.0-1a2b3c4d", runtime.GOARCH, []byte("fixture "+name), brand.ReleasesURL+"/download/v0.0.0/"+name)
+		item := supply.NewItem(supply.KindGvisor, name, NativeBuildVersionV1, runtime.GOARCH, []byte("fixture "+name), brand.ReleasesURL+"/download/v0.0.0/"+name)
 		item.Released = "2026-11-02"
 		m.Items = append(m.Items, item)
 	}
@@ -73,5 +73,17 @@ func TestGvisorRuntimeDoesNotAcceptOtherArchitecture(t *testing.T) {
 	}
 	if _, err := RuntimeItemsV1(m, other); err == nil {
 		t.Fatal("wrong architecture supplied runtime closure")
+	}
+}
+
+func TestGvisorRuntimeRefusesUnpatchedAndUnrelatedDistributionBuilds(t *testing.T) {
+	for _, version := range []string{"release-20261102.0", "release-20261102.0-1a2b3c4d", "release-20261103.0"} {
+		manifest := runtimeManifest(t)
+		for index := range manifest.Items {
+			manifest.Items[index].Version = version
+		}
+		if _, err := RuntimeItemsV1(manifest, runtime.GOARCH); err == nil {
+			t.Fatal("a release label supplied the missing patched native contract", version)
+		}
 	}
 }

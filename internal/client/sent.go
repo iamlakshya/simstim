@@ -26,12 +26,12 @@ type sentTotal struct {
 	last  time.Time
 }
 
-// SentDetails shows five grant kinds, including never for those with no
+// SentDetails shows recorded grant kinds, including never for those with no
 // active record. Removed records and other host identities are excluded.
 // It uses names and counts only, with no secret or credential values.
 func SentDetails(h Host, hostID string, records []GrantRecord) []Detail {
-	kinds := []OutboundKind{OutboundSecret, OutboundSSHAgent, OutboundSSHKey, OutboundRepo, OutboundPaste}
-	labels := []string{"secret", "ssh agent", "ssh keys", "repos", "pastes"}
+	kinds := []OutboundKind{OutboundSecret, OutboundSSHAgent, OutboundSSHKey, OutboundRepo, OutboundPaste, OutboundPush, OutboundPublicPush, OutboundRootRun}
+	labels := []string{"secret", "ssh agent", "ssh keys", "repos", "pastes", "push grants", "public push grants", "root steps"}
 	totals := map[OutboundKind]map[string]sentTotal{}
 	for _, r := range records {
 		if r.HostName != h.Name || r.RemovedAt != nil || r.Count <= 0 || hostID != "" && r.HostID != hostID {
@@ -69,7 +69,7 @@ func SentDetails(h Host, hostID string, records []GrantRecord) []Detail {
 				rows[i].Value = fmt.Sprintf("%d %s", v.count, sentPlural(v.count, "image", "images"))
 			case OutboundSSHAgent:
 				rows[i].Value = sentTimes(v)
-			case OutboundRepo:
+			case OutboundRepo, OutboundPush, OutboundPublicPush:
 				rows[i].Items = append(rows[i].Items, CleanDetail(name))
 			default:
 				rows[i].Items = append(rows[i].Items, CleanDetail(name)+"  "+sentTimes(v))

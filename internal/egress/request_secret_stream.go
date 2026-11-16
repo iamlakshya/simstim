@@ -291,7 +291,11 @@ func (r *requestSecretStreamReader) Read(output []byte) (int, error) {
 		}
 		matched, wait := s.front()
 		if matched {
-			return written, s.finish(errRequestSecretStreamMisuse)
+			var failure error = errRequestSecretStreamMisuse
+			if s.low < len(s.view.tripwireLabels) && s.view.tripwireLabels[s.low] != "" {
+				failure = &decoyStreamUse{name: s.view.tripwireLabels[s.low]}
+			}
+			return written, s.finish(failure)
 		}
 		if wait {
 			if written != 0 {

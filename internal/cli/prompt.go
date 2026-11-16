@@ -95,6 +95,7 @@ var (
 	qSetupScript = &question{cmd: "new", flag: "--setup-script", keep: true}
 	qFix         = &question{cmd: "doctor", flag: "-y"}
 	qHostFix     = &question{cmd: "host doctor", flag: "-y"}
+	qRootStep    = &question{cmd: "host prepare", flag: "--root-step run"}
 	qSetup       = &question{cmd: "setup", flag: "--yes"}
 	// qDelete fails with input off only after the end of its old form:
 	// until then rm deletes and warns (rm.go).
@@ -107,7 +108,7 @@ var (
 )
 
 // questions lists every row, for the tests.
-var questions = []*question{qPolicyAllow, qPolicyDeny, qPolicyRm, qSharedNew, qSharedResume, qInstallHelper, qAddAgents, qHostKey, qHostTier, qRaiseTier, qRekey, qMakeFolder, qSetupScript, qFix, qHostFix, qSetup, qRmMachine, qDelete, qRestart}
+var questions = []*question{qPolicyAllow, qPolicyDeny, qPolicyRm, qSharedNew, qSharedResume, qInstallHelper, qAddAgents, qHostKey, qHostTier, qRaiseTier, qRekey, qMakeFolder, qSetupScript, qFix, qHostFix, qRootStep, qSetup, qRmMachine, qDelete, qRestart}
 
 // prompter asks a command's questions on stderr, and reads the answers from
 // stdin.

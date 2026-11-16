@@ -7,7 +7,7 @@ title: "simstim help"
 Show the help of a command or a topic.
 
 ```text
-simstim help [<command>]
+simstim help [<command>] [flags]
 ```
 
 ## Examples

@@ -48,7 +48,7 @@ func (s *Server) ServeFlow(ctx context.Context, conn net.Conn, hdr StreamHeader)
 	defer finish()
 	if refusal := s.checkSecretDestination(ctx, originalSecretDestination(ctx, hdr.Host)); refusal != nil {
 		_ = conn.Close()
-		entry := s.formatAudit(AuditEntry{Host: hdr.Host, Port: hdr.Port, Rule: refusal.Code, Status: http.StatusForbidden, Decision: "deny"})
+		entry := s.formatAudit(AuditEntry{Host: decoyAuditDestination(hdr.Host, refusal), Port: hdr.Port, Rule: refusal.auditRule(), Secret: refusal.decoy, Status: http.StatusForbidden, Decision: "deny"})
 		s.emitAudit(entry)
 		return entry
 	}
@@ -89,7 +89,7 @@ func (s *Server) serveExplicit(ctx context.Context, conn net.Conn, hdr StreamHea
 	if req.Method == http.MethodConnect {
 		if refusal := s.checkSecretDestination(ctx, req.RequestURI); refusal != nil {
 			down, _ := writeHTTPStatus(conn, http.StatusForbidden, "Forbidden", brand.Name+": "+refusal.Message+". Try: "+refusal.Hint)
-			return s.formatAudit(AuditEntry{Host: hdr.Host, Port: hdr.Port, Mode: "explicit", Method: req.Method, Status: http.StatusForbidden, Down: down, Rule: refusal.Code, Decision: "deny"})
+			return s.formatAudit(AuditEntry{Host: decoyAuditDestination(hdr.Host, refusal), Port: hdr.Port, Mode: "explicit", Method: req.Method, Status: http.StatusForbidden, Down: down, Rule: refusal.auditRule(), Secret: refusal.decoy, Decision: "deny"})
 		}
 		return s.serveConnect(ctx, conn, tail, hdr, p)
 	}

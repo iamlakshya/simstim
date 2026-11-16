@@ -31,7 +31,7 @@ func (s *Server) admitSecretHTTPRequest(scope *originRequest, req *http.Request,
 	if failure != nil {
 		return requestSecretPlan{}, Decision{}, failure
 	}
-	if snapshot != nil {
+	if state := s.currentMembers(); snapshot != nil && state != nil && state.version == MemberRegistryV2 {
 		if err := s.markSecretCarrierInspectedLocked(req.Context(), hdr); err != nil {
 			return requestSecretPlan{}, Decision{}, requestSecretRefusal(http.StatusForbidden, "secret_lifetime")
 		}
@@ -52,7 +52,7 @@ func (s *Server) admitSecretHTTPRequest(scope *originRequest, req *http.Request,
 	if !scope.track() {
 		return requestSecretPlan{}, Decision{}, requestSecretRefusal(http.StatusForbidden, "cancelled")
 	}
-	if snapshot != nil {
+	if state := s.currentMembers(); snapshot != nil && state != nil && state.version == MemberRegistryV2 {
 		authority := net.JoinHostPort(scope.request.Host, strconv.Itoa(scope.request.Port))
 		if err := scope.tagSecretNamesLocked(s.boundSecretNamesLocked(authority)); err != nil {
 			return requestSecretPlan{}, Decision{}, requestSecretRefusal(http.StatusForbidden, "secret_lifetime")

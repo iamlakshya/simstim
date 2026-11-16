@@ -15,6 +15,8 @@ import (
 	"time"
 
 	"github.com/iamlakshya/simstim/internal/cachefs"
+	"github.com/iamlakshya/simstim/internal/files"
+	"github.com/iamlakshya/simstim/internal/jail"
 	"github.com/iamlakshya/simstim/internal/wall"
 	"golang.org/x/sys/unix"
 )
@@ -128,7 +130,28 @@ func (s *runtimeStorage) lock(ctx context.Context) error {
 	return nil
 }
 
-func (s *runtimeStorage) bundle(spec wall.Spec, plan []wall.Mount, smoke bool) error {
+func (s *runtimeStorage) bundle(spec wall.Spec, plan []wall.Mount, sources []*os.File, smoke bool) error {
+	if len(plan) != len(sources) {
+		return fmt.Errorf("the gvisor bundle lost its captured mount vector")
+	}
+	captured := make(map[string]*os.File, len(plan))
+	for index, mount := range plan {
+		file := sources[index]
+		if file == nil {
+			return fmt.Errorf("the gvisor bundle has no captured mount capability")
+		}
+		identity, err := files.Identity(file)
+		if err != nil || identity != mount.Identity || identity == "" {
+			return errors.Join(fmt.Errorf("the gvisor bundle mount differs from its captured source"), err)
+		}
+		if old := captured[mount.Host]; old != nil {
+			oldIdentity, err := files.Identity(old)
+			if err != nil || oldIdentity != identity {
+				return errors.Join(fmt.Errorf("the gvisor mount path has conflicting captured identities"), err)
+			}
+		}
+		captured[mount.Host] = file
+	}
 	oci, err := makeOCI(spec, plan, smoke)
 	if err != nil {
 		return err
@@ -155,7 +178,11 @@ func (s *runtimeStorage) bundle(spec wall.Spec, plan []wall.Mount, smoke bool) e
 		name := strings.TrimPrefix(mount.Destination, "/")
 		directory := true
 		if mount.Type == "bind" {
-			info, err := os.Lstat(mount.Source)
+			source := captured[mount.Source]
+			if source == nil {
+				return fmt.Errorf("the gvisor bundle references an uncaptured mount source")
+			}
+			info, err := source.Stat()
 			if err != nil {
 				return err
 			}
@@ -197,6 +224,31 @@ func (s *runtimeStorage) bundle(spec wall.Spec, plan []wall.Mount, smoke bool) e
 		return err
 	}
 	return bundle.Rename("config.json.new", "config.json")
+}
+
+// commandBindsV1 opens beneath the original retained runtime root. Path text
+// names the fixed targets only; these same capabilities supply the mounts.
+func (s *runtimeStorage) commandBindsV1() (binds []jail.Bind, returned error) {
+	defer func() {
+		if returned != nil {
+			for _, bound := range binds {
+				returned = errors.Join(returned, bound.File.Close())
+			}
+			binds = nil
+		}
+	}()
+	for _, name := range []string{"bundle", "runsc"} {
+		file, err := s.root.Open(name)
+		if err != nil {
+			return binds, err
+		}
+		binds = append(binds, jail.Bind{Path: filepath.Join(s.dir, "gvisor", name), File: file, Write: name == "runsc"})
+		info, err := file.Stat()
+		if err != nil || !info.IsDir() {
+			return binds, errors.Join(fmt.Errorf("the gvisor control root is not its owned directory"), err)
+		}
+	}
+	return binds, nil
 }
 
 func (s *runtimeStorage) log() (*os.File, error) {

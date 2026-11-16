@@ -13,7 +13,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/iamlakshya/simstim/internal/brand"
-	"github.com/iamlakshya/simstim/internal/host/hosttest"
 )
 
 // eachCommand calls fn for every command under root, root included, hidden
@@ -82,7 +81,7 @@ func helpOutput(t *testing.T, args ...string) string {
 }
 
 func TestGoldenHelp(t *testing.T) {
-	hosttest.New(t)
+	newTestHome(t)
 	var b strings.Builder
 	for _, args := range [][]string{{"--help"}, {"help", "concepts"}} {
 		b.WriteString("== " + strings.Join(args, " ") + "\n" + helpOutput(t, args...))
@@ -106,7 +105,7 @@ func TestGoldenHelp(t *testing.T) {
 // The root help lists its groups in order, each with its commands in the
 // order of helpGroups, and its topics by name.
 func TestRootHelpGroups(t *testing.T) {
-	hosttest.New(t)
+	newTestHome(t)
 	out := helpOutput(t, "--help")
 	at := 0
 	for _, g := range HelpGroups() {
@@ -140,7 +139,7 @@ func TestRootHelpGroups(t *testing.T) {
 // help exit-codes prints the table that printError reads, and the topics
 // also print as commands of their own.
 func TestHelpExitCodes(t *testing.T) {
-	hosttest.New(t)
+	newTestHome(t)
 	out := helpOutput(t, "help", "exit-codes")
 	for _, e := range ExitCodes() {
 		line := regexp.MustCompile(`(?m)^` + strconv.Itoa(e.Code) + ` +` + regexp.QuoteMeta(e.Kind.String()+" "))

@@ -15,7 +15,7 @@ func (s *Server) needsHTTPInspection(hdr StreamHeader) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	constrained := s.currentEngine().hasInspectionRule(hdr.Host, hdr.Port)
+	constrained := s.currentEngine().hasInspectionRule(hdr.Host, hdr.Port) || s.decoyHost(hdr.Host, hdr.Port)
 	if spliceOnly {
 		if constrained {
 			return false, errors.New("splice-only host cannot satisfy a method or path rule")
@@ -28,7 +28,7 @@ func (s *Server) needsHTTPInspection(hdr StreamHeader) (bool, error) {
 func (s *Server) serveInspectedFlow(ctx context.Context, conn net.Conn, reader io.Reader, hdr StreamHeader, connect bool, cause error) AuditEntry {
 	entry := AuditEntry{Host: hdr.Host, Port: hdr.Port, Mode: "intercept", Method: "CONNECT",
 		Status: http.StatusForbidden, Rule: "policy:inspection", Decision: "deny"}
-	if cause != nil || !s.currentEngine().permitsIntercept(hdr.Host, hdr.Port) {
+	if cause != nil || !s.currentEngine().permitsIntercept(hdr.Host, hdr.Port) && !s.decoyHost(hdr.Host, hdr.Port) {
 		if connect {
 			entry.Down, _ = writeHTTPStatus(conn, http.StatusForbidden, "Forbidden", RefusalLine(s.sessionRef(), hdr.Host, hdr.Port))
 		}

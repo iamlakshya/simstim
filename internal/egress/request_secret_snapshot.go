@@ -33,6 +33,8 @@ type requestSecretSnapshot struct {
 	authorities       map[string][]int
 	credentialHeaders map[string]bool
 	tripwires         []api.Secret
+	tripwireLabels    []string               // metadata aligned with the SAME sorted tripwire union
+	decoyView         *requestSecretSnapshot // same matcher input, no credential variants
 }
 type requestSecretRawView struct {
 	Target, Authority string
@@ -48,7 +50,11 @@ type requestSecretPlan struct {
 	replacements      []requestSecretReplacement
 	names, identities []string
 }
+type requestFailureDetail = proto.Error
+
 type requestSecretFailure struct {
+	*requestFailureDetail
+	decoy  string
 	status int
 	detail *proto.Error
 }
@@ -71,7 +77,8 @@ func requestSecretRefusal(status int, code string) *requestSecretFailure {
 	if status == http.StatusUnauthorized {
 		message, hint = "session credentials are not armed", "Attach from the trusted client to arm configured credentials. Re-mint server-issued credentials or start a fresh session."
 	}
-	return &requestSecretFailure{status: status, detail: &proto.Error{Code: code, Message: message, Hint: hint}}
+	detail := &proto.Error{Code: code, Message: message, Hint: hint}
+	return &requestSecretFailure{requestFailureDetail: detail, status: status, detail: detail}
 }
 
 func newRequestSecretSnapshot(entries []requestBoundSecret) (*requestSecretSnapshot, error) {
@@ -168,12 +175,25 @@ func (s *requestSecretSnapshot) withTripwireSentinels(values []api.Secret) (*req
 			return nil, err
 		}
 	}
+	labels := make(map[api.Secret]string)
+	for index, value := range s.tripwires {
+		if index < len(s.tripwireLabels) && s.tripwireLabels[index] != "" {
+			labels[value] = s.tripwireLabels[index]
+		}
+	}
 	output := *s
 	output.tripwires = make([]api.Secret, 0, len(seen))
 	for value := range seen {
 		output.tripwires = append(output.tripwires, value)
 	}
 	sort.Slice(output.tripwires, func(i, j int) bool { return output.tripwires[i] < output.tripwires[j] })
+	output.tripwireLabels = nil
+	if len(labels) != 0 {
+		output.tripwireLabels = make([]string, len(output.tripwires))
+		for index, value := range output.tripwires {
+			output.tripwireLabels[index] = labels[value]
+		}
+	}
 	return &output, nil
 }
 

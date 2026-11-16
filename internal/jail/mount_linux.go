@@ -29,6 +29,12 @@ const dirMode = 0o755
 // from /oldroot, then makes that the root and drops the rest. Nothing
 // reaches the host: every mount is private first.
 func buildRoot(binds []bind, fds []int, execs []execMount, execFDs []int, sub bool) error {
+	return buildRootWithFileRulesV1(binds, fds, execs, execFDs, sub, nil)
+}
+
+// buildRootWithFileRulesV1 keeps the original graph/target/alias verifier and
+// projects readonly inherited files only after the final graph is verified.
+func buildRootWithFileRulesV1(binds []bind, fds []int, execs []execMount, execFDs []int, sub bool, fileRules []pinnedFileRuleV1) error {
 	old := unix.Umask(0)
 	defer unix.Umask(old)
 	root := -1
@@ -84,6 +90,9 @@ func buildRoot(binds []bind, fds []int, execs []execMount, execFDs []int, sub bo
 		return err
 	}
 	if err := plan.verify(root, rootStat.Dev, finalTargets); err != nil {
+		return err
+	}
+	if err := projectReadonlyFileRulesV1(root, rootStat.Dev, fileRules); err != nil {
 		return err
 	}
 	return runMountSteps([]func() error{

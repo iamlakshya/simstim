@@ -99,6 +99,8 @@ func (m *Model) sessionNow(h *hostConn, s client.Session) (string, []hint) {
 		return glyph.st.Render(glyph.s) + " " + label.st.Render(endWhy(s)), endedSteps(h, s)
 	}
 	switch a := m.activity[sessKey{h.name(), s.ID}]; {
+	case decoyNotice(s):
+		return sDanger.Render("● decoy used"),nil
 	case s.State == api.StateNeedsInput && s.Reason != "":
 		return sWarning.Render("● " + shown(s.Reason)), nil
 	case len(s.MissingSecrets) > 0:

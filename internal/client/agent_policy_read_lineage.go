@@ -4,7 +4,7 @@ import "github.com/iamlakshya/simstim/internal/api"
 
 // Project both known and future lineage without materialising names or
 // unknown bodies. Every unrelated row uses the same version grammar.
-func projectedSandboxLineage(p *api.JSONProjection, span, secrets, key api.JSONSpan, schema int, validity agentPolicyRowValidity) (bool, error) {
+func projectedSandboxLineage(p jsonValueProjection, span, secrets, key api.JSONSpan, schema int, validity agentPolicyRowValidity) (bool, error) {
 	if span.End == 0 {
 		return false, nil
 	}

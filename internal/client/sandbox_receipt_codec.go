@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"slices"
 
 	"github.com/iamlakshya/simstim/internal/api"
@@ -19,9 +20,10 @@ var sandboxReceiptScopeFields = []string{"host", "source", "host_id", "member_id
 type sandboxReceiptSpans struct {
 	Scope, Source, State, Allowed api.JSONSpan
 	Future                        bool
+	Version                       int64
 }
 
-func projectSandboxReceiptSpans(ctx context.Context, p *api.JSONProjection, span api.JSONSpan, schema int, delivery bool) (sandboxReceiptSpans, error) {
+func projectSandboxReceiptSpans(ctx context.Context, p jsonValueProjection, span api.JSONSpan, schema int, delivery bool) (sandboxReceiptSpans, error) {
 	var result sandboxReceiptSpans
 	if span.End == 0 {
 		return result, nil
@@ -70,7 +72,8 @@ func projectSandboxReceiptSpans(ctx context.Context, p *api.JSONProjection, span
 	if err != nil {
 		return result, err
 	}
-	if v > 1 || result.Future {
+	result.Version = v
+	if v > 1 {
 		result.Future = true
 		return result, ctx.Err()
 	}
@@ -82,7 +85,7 @@ func projectSandboxReceiptSpans(ctx context.Context, p *api.JSONProjection, span
 		}
 		return nil
 	})
-	if err == nil && !result.Future && (result.Source.End == 0 || delivery && (result.State.End == 0 || result.Allowed.End == 0)) {
+	if err == nil && (result.Source.End == 0 || delivery && (result.State.End == 0 || result.Allowed.End == 0)) {
 		err = badSandboxStateContext(ctx)
 	}
 	return result, err
@@ -115,20 +118,23 @@ func decodeSandboxReceiptsContext(ctx context.Context, raw json.RawMessage, sche
 			return err
 		}
 		row.futureDeliveryReceipt = shape.Future
-		if !shape.Future {
+		if shape.Version == 1 {
 			var decoded sandboxDeliveryReceipt
 			if err := decodeContextJSON(ctx, row.deliveryReceiptRaw, &decoded); err != nil {
 				return err
 			}
-			if decoded.Scope.Source.validate() != nil || decoded.State == nil || !decoded.State.Supported() {
-				row.futureDeliveryReceipt = true
-			} else {
-				if err := validateSandboxDeliveryReceipt(ctx, &decoded); err != nil {
-					return err
-				}
-				if !decoded.Scope.matchesPolicy(row) || decoded.Creation != row.request || !slices.Equal(decoded.Allowed, localSandboxNames(row)) || !sandboxReceiptMatchesDelivery(row, &decoded) {
-					return sandboxReceiptError()
-				}
+			knownErr := validateSandboxDeliveryReceiptKnownData(ctx, &decoded)
+			if knownErr != nil && !errors.Is(knownErr, errSandboxReceiptStateFuture) {
+				return knownErr
+			}
+			if !decoded.Scope.matchesPolicy(row) || decoded.Creation != row.request || !slices.Equal(decoded.Allowed, localSandboxNames(row)) {
+				return sandboxReceiptError()
+			}
+			if knownErr == nil && !sandboxReceiptMatchesDelivery(row, &decoded) {
+				return sandboxReceiptError()
+			}
+			row.futureDeliveryReceipt = row.futureDeliveryReceipt || knownErr != nil || decoded.Scope.Source.validate() != nil
+			if !row.futureDeliveryReceipt {
 				row.deliveryReceipt = cloneSandboxDeliveryReceipt(&decoded)
 			}
 		}
@@ -139,20 +145,19 @@ func decodeSandboxReceiptsContext(ctx context.Context, raw json.RawMessage, sche
 			return err
 		}
 		row.futureInputOperation = shape.Future
-		if !shape.Future {
+		if shape.Version == 1 {
 			var decoded sandboxInputOperation
 			if err := decodeContextJSON(ctx, row.inputOperationRaw, &decoded); err != nil {
 				return err
 			}
-			if decoded.Scope.Source.validate() != nil {
-				row.futureInputOperation = true
-			} else {
-				if err := validateSandboxInputOperation(ctx, &decoded); err != nil {
-					return err
-				}
-				if !decoded.Scope.matchesPolicy(row) || decoded.Creation != row.request {
-					return sandboxReceiptError()
-				}
+			if err := validateSandboxInputOperationKnownData(ctx, &decoded); err != nil {
+				return err
+			}
+			if !decoded.Scope.matchesPolicy(row) || decoded.Creation != row.request {
+				return sandboxReceiptError()
+			}
+			row.futureInputOperation = row.futureInputOperation || decoded.Scope.Source.validate() != nil
+			if !row.futureInputOperation {
 				row.inputOperation = cloneSandboxInputOperation(&decoded)
 			}
 		}
@@ -162,7 +167,7 @@ func decodeSandboxReceiptsContext(ctx context.Context, raw json.RawMessage, sche
 
 // Original is the row's canonical LOCAL allowed-name span (secrets or known
 // lineage), not a host/cohort list. Both comparisons retain only cursor spans.
-func validateSandboxReceiptAllowedSpans(ctx context.Context, p *api.JSONProjection, receipt, original api.JSONSpan) error {
+func validateSandboxReceiptAllowedSpans(ctx context.Context, p jsonValueProjection, receipt, original api.JSONSpan) error {
 	a, err := deliveryNamesCursor(p, receipt)
 	if err != nil {
 		return err

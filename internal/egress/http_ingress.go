@@ -314,7 +314,7 @@ func (s *Server) serveIntercept(ctx context.Context, conn net.Conn, reader io.Re
 		return s.formatAudit(entry)
 	}
 	if refusal := s.checkSecretDestination(ctx, hello.RawServerName); refusal != nil {
-		entry.Rule = refusal.Code
+		entry.Rule, entry.Secret = refusal.auditRule(), refusal.decoy
 		return s.formatAudit(entry)
 	}
 	if err := CheckClientHello(hello, hdr.Host); err != nil {
@@ -337,7 +337,7 @@ func (s *Server) serveIntercept(ctx context.Context, conn net.Conn, reader io.Re
 		return s.formatAudit(entry)
 	}
 	_ = conn.SetReadDeadline(time.Time{})
-	if !s.currentEngine().permitsIntercept(hdr.Host, hdr.Port) {
+	if !s.currentEngine().permitsIntercept(hdr.Host, hdr.Port) && !s.decoyHost(hdr.Host, hdr.Port) {
 		return s.formatAudit(entry)
 	}
 	if client.ConnectionState().NegotiatedProtocol == "h2" {

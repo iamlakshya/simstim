@@ -15,6 +15,13 @@ func prepareAttachedAgent(ctx context.Context, probe *Conn, session string, inte
 	if err != nil {
 		return nil, err
 	}
+	return prepareAttachedAgentMode(ctx, probe, session, interactive, mode)
+}
+
+func prepareAttachedAgentMode(ctx context.Context, probe *Conn, session string, interactive bool, mode *agentModeResources) (prepared *attachedAgent, err error) {
+	if mode == nil || mode.inspector == nil {
+		return nil, agentModeResourceError()
+	}
 	keepMode := false
 	defer func() {
 		if !keepMode {

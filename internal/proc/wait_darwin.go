@@ -15,9 +15,21 @@ import (
 // else. It watches the child with kqueue, which reaps nothing. ok is false
 // when pid is not a child, or is reaped already.
 func AwaitStatus(pid int) (ws syscall.WaitStatus, ok bool) {
+	ws, ok, _ = AwaitStatusError(pid)
+	return ws, ok
+}
+
+// AwaitStatusError is AwaitStatus with its native observation error retained.
+// A false result never proves exit or permits an owner to reap before it has
+// revoked I/O and dealt with the original, still-unreaped child.
+func AwaitStatusError(pid int) (ws syscall.WaitStatus, ok bool, err error) {
+	if pid <= 0 {
+		return 0, false, unix.EINVAL
+	}
+
 	kq, err := unix.Kqueue()
 	if err != nil {
-		return pollStatus(pid)
+		return pollStatusError(pid)
 	}
 	defer unix.Close(kq)
 	change := []unix.Kevent_t{{Ident: uint64(pid), Filter: unix.EVFILT_PROC, //nolint:gosec // G115: a PID is not negative
@@ -29,30 +41,30 @@ func AwaitStatus(pid int) (ws syscall.WaitStatus, ok bool) {
 		case errors.Is(err, unix.EINTR):
 			continue
 		case err != nil:
-			return pollStatus(pid)
+			return pollStatusError(pid)
 		case n > 0 && ev[0].Flags&unix.EV_ERROR != 0:
 			// The watch failed, as for a child that exited before it
 			// began (ESRCH): its status waits, unreaped. The event's data
 			// is the error, not a status.
-			return pollStatus(pid)
+			return pollStatusError(pid)
 		case n > 0:
-			return syscall.WaitStatus(ev[0].Data), true //nolint:gosec // G115: the wait status fits
+			return syscall.WaitStatus(ev[0].Data), true, nil //nolint:gosec // G115: the wait status fits
 		}
 	}
 }
 
-// pollStatus waits for the child pid's exit with waitid, which reaps
+// pollStatusError waits for the child pid's exit with waitid, which reaps
 // nothing with WNOWAIT, and returns its status.
-func pollStatus(pid int) (syscall.WaitStatus, bool) {
+func pollStatusError(pid int) (syscall.WaitStatus, bool, error) {
 	for {
 		ws, exited, err := peekStatus(pid)
 		switch {
 		case errors.Is(err, unix.EINTR):
 			continue
 		case err != nil:
-			return 0, false
+			return 0, false, err
 		case exited:
-			return ws, true
+			return ws, true, nil
 		}
 		time.Sleep(20 * time.Millisecond)
 	}

@@ -1,9 +1,7 @@
 package cli
 
 import (
-	"context"
 	"encoding/json"
-	"errors"
 	"os"
 	"path/filepath"
 	"slices"
@@ -12,7 +10,6 @@ import (
 
 	"github.com/iamlakshya/simstim/internal/client"
 	"github.com/iamlakshya/simstim/internal/diag"
-	"github.com/iamlakshya/simstim/internal/host/hosttest"
 )
 
 // A word of the form of an ID, with a digit, finds a session by its ID
@@ -75,7 +72,7 @@ func TestAWordOfAnIDsFormIsAnID(t *testing.T) {
 // A --json anywhere before "--" gets the JSON error line, also when the
 // parser stops at a mistake before it or after it.
 func TestJSONErrorWhereverJSONIs(t *testing.T) {
-	hosttest.New(t)
+	newTestHome(t)
 	for _, args := range [][]string{
 		{"version", "--bogus", "--json"},
 		{"version", "--json", "--bogus"},
@@ -108,29 +105,10 @@ func TestJSONErrorWhereverJSONIs(t *testing.T) {
 	}
 }
 
-// new --detach --json needs no list of the host's sessions: its address
-// is host/ID. A list that would fail changes nothing, and nothing warns.
-func TestNewDetachJSONNeedsNoList(t *testing.T) {
-	newTestHost(t)
-	old := listSessions
-	listSessions = func(context.Context, *client.Conn) ([]client.Session, error) {
-		return nil, errors.New("the list broke")
-	}
-	defer func() { listSessions = old }()
-	out, errOut, err := runApart(t, "new", "box", "--detach", "--json", "--name", "api", "--", "sleep", "60")
-	var s map[string]any
-	if err != nil || json.Unmarshal([]byte(out), &s) != nil {
-		t.Fatalf("%v\nstdout %q\nstderr %q", err, out, errOut)
-	}
-	if s["address"] != "box/"+s["id"].(string) || errOut != "" {
-		t.Errorf("stdout %s\nstderr %q", out, errOut)
-	}
-}
-
 // With --json, debug announces itself as a JSON line, whether --debug,
 // --debug-file or the variable turns it on.
 func TestDebugAnnouncementsAreJSON(t *testing.T) {
-	hosttest.New(t)
+	newTestHome(t)
 	file := filepath.Join(t.TempDir(), "debug.jsonl")
 	for _, c := range []struct {
 		env  string
@@ -158,48 +136,10 @@ func TestDebugAnnouncementsAreJSON(t *testing.T) {
 	}
 }
 
-// Data goes to stdout, and every message to stderr, for each command that
-// prints a line of its own when it has no data (cli-spec 7.5).
-func TestStreamsOfEachCommand(t *testing.T) {
-	hosttest.New(t)
-	if out, errOut, err := runApart(t, "host", "ls"); err != nil || out != "" || !strings.HasPrefix(errOut, "No hosts yet.") {
-		t.Errorf("host ls with no hosts: %v\nstdout %q\nstderr %q", err, out, errOut)
-	}
-	newTestHost(t)
-	newSession(t, "api", "sleep", "60")
-	for _, c := range []struct {
-		args []string
-		said string
-	}{
-		{[]string{"ports", "box/api"}, "api on box listens on no TCP ports.\n"},
-		{[]string{"host", "restore", "box"}, "Nothing to restore on box.\n"},
-		{[]string{"host", "alerts", "log", "box"}, "box has sent no alerts yet.\n"},
-	} {
-		out, errOut, err := runApart(t, c.args...)
-		if err != nil || out != "" || errOut != c.said {
-			t.Errorf("%s: %v\nstdout %q\nstderr %q", c.args, err, out, errOut)
-		}
-	}
-	_ = os.MkdirAll(filepath.Join(client.ConfigDir(), "ssh"), 0o700)
-	_ = os.WriteFile(filepath.Join(client.ConfigDir(), "ssh", "config-gone"), generatedSSHFixture(), 0o600)
-	out, errOut, err := runApart(t, "doctor")
-	if err != nil || !strings.Contains(out, "This computer:") || !strings.Contains(out, "✕ 1 generated SSH config") || strings.Contains(out, "Try:") ||
-		!strings.Contains(errOut, "Try: ") {
-		t.Errorf("doctor: %v\nstdout %q\nstderr %q", err, out, errOut)
-	}
-	// A failed check's own Try: line is a message too: with no ssh on
-	// PATH, the row is on stdout and its Try: line on stderr.
-	t.Setenv("PATH", t.TempDir())
-	out, errOut, err = runApart(t, "doctor")
-	if err != nil || !strings.Contains(out, "✕ ssh") || strings.Contains(out, "Try:") || !strings.Contains(errOut, "Try: install OpenSSH") {
-		t.Errorf("doctor with a failed check: %v\nstdout %q\nstderr %q", err, out, errOut)
-	}
-}
-
 // --fix --json needs -y, which answers for every fix: with it, the fixes
 // run, and the JSON holds how each ended.
 func TestFixWithJSON(t *testing.T) {
-	hosttest.New(t)
+	newTestHome(t)
 	gone := filepath.Join(client.ConfigDir(), "ssh", "config-gone")
 	_ = os.MkdirAll(filepath.Dir(gone), 0o700)
 	_ = os.WriteFile(gone, generatedSSHFixture(), 0o600)
@@ -223,27 +163,23 @@ func TestFixWithJSON(t *testing.T) {
 	}
 }
 
-// A secret's command gets the terminal when input is not turned off, and
-// stdin and stderr are terminals, also when stdout goes to a file.
-func TestSecretTerminal(t *testing.T) {
-	t.Setenv(noInputEnv, "")
-	term := hosttest.NewTerminal(t, 80, 10)
-	_, pw, _ := os.Pipe()
-	oldIn, oldOut, oldErr := os.Stdin, os.Stdout, os.Stderr
-	defer func() { os.Stdin, os.Stdout, os.Stderr = oldIn, oldOut, oldErr }()
-	os.Stdin, os.Stdout, os.Stderr = term.TTY, pw, term.TTY
-	root := Root()
-	cmd, _, _ := root.Find([]string{"new"})
-	if !secretTerminal(cmd) {
-		t.Error("no terminal for a secret, with stdout in a file")
+func TestLocalCommandsKeepTheirStreams(t *testing.T) {
+	newTestHome(t)
+	if out, errOut, err := runApart(t, "host", "ls"); err != nil || out != "" || !strings.HasPrefix(errOut, "No hosts yet.") {
+		t.Errorf("host ls with no hosts: %v\nstdout %q\nstderr %q", err, out, errOut)
 	}
-	_ = cmd.ParseFlags([]string{"--no-input"})
-	if secretTerminal(cmd) {
-		t.Error("a terminal for a secret, with --no-input")
+	_ = os.MkdirAll(filepath.Join(client.ConfigDir(), "ssh"), 0o700)
+	_ = os.WriteFile(filepath.Join(client.ConfigDir(), "ssh", "config-gone"), generatedSSHFixture(), 0o600)
+	out, errOut, err := runApart(t, "doctor")
+	if err != nil || !strings.Contains(out, "This computer:") || !strings.Contains(out, "✕ 1 generated SSH config") || strings.Contains(out, "Try:") ||
+		!strings.Contains(errOut, "Try: ") {
+		t.Errorf("doctor: %v\nstdout %q\nstderr %q", err, out, errOut)
 	}
-	cmd, _, _ = Root().Find([]string{"new"})
-	os.Stdin = pw
-	if secretTerminal(cmd) {
-		t.Error("a terminal for a secret, with stdin from a pipe")
+	// A failed check's own Try: line is a message too: with no ssh on
+	// PATH, the row is on stdout and its Try: line on stderr.
+	t.Setenv("PATH", t.TempDir())
+	out, errOut, err = runApart(t, "doctor")
+	if err != nil || !strings.Contains(out, "✕ ssh") || strings.Contains(out, "Try:") || !strings.Contains(errOut, "Try: install OpenSSH") {
+		t.Errorf("doctor with a failed check: %v\nstdout %q\nstderr %q", err, out, errOut)
 	}
 }

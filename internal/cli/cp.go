@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"path"
+	pathpkg "path"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -201,7 +201,7 @@ func copyAddress(value string) (address, guest string, remote bool, err error) {
 		}
 		return "", "", false, err
 	}
-	guest = path.Join(top, relative)
+	guest = pathpkg.Join(top, relative)
 	if trailing {
 		guest += "/"
 	}

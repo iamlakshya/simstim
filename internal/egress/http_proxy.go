@@ -58,12 +58,18 @@ func (s *Server) proxyHTTPRequest(w http.ResponseWriter, req *http.Request, hdr 
 			defer func() { <-s.httpSem }()
 			if scope != nil {
 				scope.stopIO()
+				if req.Body != nil && req.Body != http.NoBody {
+					_ = req.Body.Close()
+				}
 				if scope.measured != nil {
 					entry.Up, entry.Down = scope.measured.up.Load(), scope.measured.down.Load()
 				}
 			}
 			if secrets != nil && secrets.misuse.Load() {
 				entry.Status, entry.Rule, entry.Decision = http.StatusForbidden, "secret_misuse", "deny"
+				if name := secrets.decoy.Load(); name != nil {
+					entry.Rule, entry.Secret = "decoy", *name
+				}
 			}
 			formatted := s.formatAudit(entry)
 			result.set(formatted)
@@ -122,9 +128,14 @@ func (s *Server) proxyHTTPRequest(w http.ResponseWriter, req *http.Request, hdr 
 	defer scope.releaseResponseWriter()
 	stopClient := scope.watchClientCancellation(req.Context())
 	defer stopClient()
+	if failure := s.prepareDecoyHTTPPrefix(scope, req, original, scheme); failure != nil {
+		entry.Status, entry.Rule, entry.Secret = failure.status, failure.auditRule(), failure.decoy
+		writeInspectedError(w, brand.Name+": "+failure.detail.Message+". Try: "+failure.detail.Hint, entry.Status)
+		return
+	}
 	plan, decision, failure := s.admitSecretHTTPRequest(scope, req, original, hdr, scheme)
 	if failure != nil {
-		entry.Status, entry.Rule = failure.status, failure.detail.Code
+		entry.Status, entry.Rule, entry.Secret = failure.status, failure.auditRule(), failure.decoy
 		writeInspectedError(w, brand.Name+": "+failure.detail.Message+". Try: "+failure.detail.Hint, entry.Status)
 		return
 	}

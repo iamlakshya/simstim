@@ -24,6 +24,7 @@ type boundHTTPSecretState struct {
 	active    bool
 	webSocket bool
 	misuse    atomic.Bool
+	decoy     atomic.Pointer[string]
 }
 
 func (s *Server) prepareBoundHTTPSecrets(scope *originRequest, req *http.Request, plan requestSecretPlan) (*boundHTTPSecrets, error) {

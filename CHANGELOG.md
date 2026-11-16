@@ -6,6 +6,34 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ### Added
 
+- CLI tests separate Unix host and terminal fixtures from portable command, file and fake-transport checks. Windows keeps its own isolated test home and child cleanup checks.
+
+- The private-detail check distinguishes public systemd unit names and template tokens from email addresses. Email addresses beside those forms still fail.
+
+- Builds carry and install the real static process namespace launcher with its checked fixed descriptor protocol and compiled syscall policy. Guest init protects its control input after the fixed executable transition.
+
+- The gVisor host factory binds its original native boot owner, signed patched companion closure and captured filesystem descriptors. Its virtual guest keeps UID and GID 1000.
+
+- Decoy values use the existing egress tripwire, local denied-host inspection and audit path. Intercepted request bodies check a bounded prefix before origin access, and live policy updates retain the applied start generation.
+
+- Host preparation shows optional root steps with the exact script and undo instructions. Runs keep their original host identity and a history of uncertain attempts.
+
+- Positive repository push grants use local forge visibility checks and distinct consent for public repositories.
+
+- Every cold sandbox start creates a private decoy generation through its fixed-account helper. Generated files stay out of retained state, and the existing egress audit reports blocked use without stopping the session. Decoy policy changes apply on the next start.
+
+- Runtime descriptors project through private read only mounts before execution. Runtime byte seals support older kernels and the complete gVisor companion set.
+
+- Bridge helper cleanup retains native child observation errors. An unverified exit cancels I/O and stops the original child before the actual wait.
+
+- Host creation keeps its original operation while registering and setting up the newly saved host.
+
+- Resume and automatic restore retain one original native operation through protected restart publication and readiness. Process and gVisor memory changes use the original request admission; VM restarts keep their recorded Need and cap.
+
+- Bridge input cancellation stops and joins the actual reader process. Private input chunks preserve raw bytes and inherited file flags.
+
+- Decoy opt outs keep policy locks. A conflicting value refuses the start before any decoy side effect.
+
 - Managed Lima SSH transports retain their original native configuration restriction through key checks, command startup and the owned process wait. Port forwards recheck the saved request Source at their physical start.
 
 - The sandbox guide lists each decoy credential, its inactive form and how to turn decoys off.
@@ -65,8 +93,6 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 - A bundle pull can select one protected repository with --repo. Full-history retries keep that same repository and its seed history.
 
 - `policy allow --tools` grants named model capabilities for one session and exact model host. It takes repeated or comma-separated names. Empty sets and wider layers fail. Dry runs use the same canonical rule identity and helper feature gate as real changes. Shell completion uses the same capability table. Alert event values also come from their canonical event table.
-
-- `policy allow --tools` grants named model capabilities for one session and exact model host. It takes repeated or comma-separated names. Empty sets and wider layers fail. Dry runs use the same canonical rule identity and helper feature gate as real changes.
 
 - Secret badges and start notes use the compact delivery summary. Bound credentials are no longer labelled exposed. Missing or incomplete metadata stays unknown. Displaying a session changes no credential or permission.
 
@@ -129,6 +155,12 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 - `agents install --force` is now `--reinstall`. `--force` still works until v0.4.0 and 11 November 2027, whichever comes later, and warns.
 
 ### Fixed
+
+- The client starts correctly when registering the old agent reinstall flag. Package-manager config errors keep their specific code and source line.
+
+- Event watches use the native audit for real fast-failure replay and preserve live stream boundaries. Failed persistence, incomplete records and unexpected connection ends report a gap instead of silently succeeding. Native bridge IO is cancelled and joined through its actual owners.
+
+- Decoy opt-outs stay disabled across valid policy layers. Lock conflicts refuse startup before generation or file writes.
 
 - Validate complete public secret receipt metadata through the same source inspection, including unordered maps, prior stand-ins and unsupported future data.
 

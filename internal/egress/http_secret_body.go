@@ -74,6 +74,10 @@ func (b *secretRequestTrailerBody) Read(p []byte) (int, error) {
 			return n, errResponseRegistry
 		}
 		if refusal := view.checkRequestSecretTrailers(b.request.Trailer, b.secrets.authority); refusal != nil {
+			if refusal.decoy != "" {
+				name := refusal.decoy
+				b.secrets.decoy.Store(&name)
+			}
 			b.secrets.misuse.Store(true)
 			return n, errSecretTrailerMisuse
 		}

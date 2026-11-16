@@ -43,20 +43,22 @@ const (
 // setup is what a stage needs. It reaches each stage on a pipe. Its
 // descriptor numbers are the same in every stage.
 type setup struct {
-	FilesV1Version int                `json:"files_v1_version,omitempty"`
-	FileRulesV1    []pinnedFileRuleV1 `json:"file_rules_v1,omitempty"`
-	Argv           []string           `json:"argv"`
-	ExecFD         int                `json:"exec_fd,omitempty"` // Argv[0] is /proc/self/fd/<ExecFD>, one of Files
-	Binds          []bind             `json:"binds,omitempty"`
-	Rules          []rule             `json:"rules,omitempty"`
-	Net            NetMode            `json:"net"`
-	Seccomp        Profile            `json:"seccomp"`
-	Files          int                `json:"files"`               // inherited files, from fd 3
-	StatusFD       int                `json:"status_fd,omitempty"` // init says here how the command ended
-	SyncFD         int                `json:"sync_fd,omitempty"`   // init or remove waits here for outer's ID maps
-	Userns         bool               `json:"userns,omitempty"`    // the jail has namespaces
-	Sub            *subID             `json:"sub,omitempty"`       // run the command as a subuid
-	Remove         string             `json:"remove,omitempty"`    // the folder that the remove stage removes
+	GvisorV1Version int                `json:"gvisor_v1_version,omitempty"`
+	BindsV1Version  int                `json:"binds_v1_version,omitempty"`
+	FilesV1Version  int                `json:"files_v1_version,omitempty"`
+	FileRulesV1     []pinnedFileRuleV1 `json:"file_rules_v1,omitempty"`
+	Argv            []string           `json:"argv"`
+	ExecFD          int                `json:"exec_fd,omitempty"` // Argv[0] is /proc/self/fd/<ExecFD>, one of Files
+	Binds           []bind             `json:"binds,omitempty"`
+	Rules           []rule             `json:"rules,omitempty"`
+	Net             NetMode            `json:"net"`
+	Seccomp         Profile            `json:"seccomp"`
+	Files           int                `json:"files"`               // inherited files, from fd 3
+	StatusFD        int                `json:"status_fd,omitempty"` // init says here how the command ended
+	SyncFD          int                `json:"sync_fd,omitempty"`   // init or remove waits here for outer's ID maps
+	Userns          bool               `json:"userns,omitempty"`    // the jail has namespaces
+	Sub             *subID             `json:"sub,omitempty"`       // run the command as a subuid
+	Remove          string             `json:"remove,omitempty"`    // the folder that the remove stage removes
 }
 
 // Test hooks: whether a user namespace works, the Landlock ABI, and how the
@@ -84,6 +86,9 @@ func Init() {
 	initDone.Store(true)
 	if len(os.Args) < 2 || os.Args[0] != argv0 {
 		return
+	}
+	if err := unix.Prctl(unix.PR_SET_DUMPABLE, 0, 0, 0, 0); err != nil {
+		os.Exit(stageFailed(failure("cannot protect the jail before reading its set-up: "+err.Error(), "Check this host's process confinement support.")))
 	}
 	os.Exit(runStage(os.Args[1:]))
 }
@@ -134,6 +139,12 @@ func Command(ctx context.Context, s Spec) (*Cmd, error) {
 	if len(fileRules) != 0 {
 		set.FilesV1Version = 1
 	}
+	if slices.ContainsFunc(p.binds, func(b bind) bool { return b.SuppliedV1 }) {
+		set.BindsV1Version = 1
+	}
+	if s.gvisorV1 {
+		set.GvisorV1Version = 1
+	}
 	b, err := json.Marshal(set)
 	if err != nil {
 		p.close()
@@ -146,6 +157,10 @@ func Command(ctx context.Context, s Spec) (*Cmd, error) {
 		stage = stageOuter
 	case m.userns:
 		attr = namespaces(s.Net, true, initCaps)
+		if s.gvisorV1 {
+			attr.UidMappings = []syscall.SysProcIDMap{{ContainerID: 0, HostID: os.Getuid(), Size: 1}}
+			attr.GidMappings = []syscall.SysProcIDMap{{ContainerID: 0, HostID: os.Getgid(), Size: 1}}
+		}
 		attr.Setsid = true
 	}
 	cmd := exec.CommandContext(context.WithoutCancel(ctx), self)

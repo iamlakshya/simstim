@@ -16,7 +16,6 @@ import (
 
 	"github.com/iamlakshya/simstim/internal/brand"
 	"github.com/iamlakshya/simstim/internal/client"
-	"github.com/iamlakshya/simstim/internal/host/hosttest"
 )
 
 var update = flag.Bool("update", false, "rewrite the golden files in testdata")
@@ -107,37 +106,11 @@ func TestErrorsAreCleaned(t *testing.T) {
 	if bytes.ContainsAny(b.Bytes(), "\x1b\x07") || !strings.Contains(b.String(), "no session c]52;c;aGk=x.") {
 		t.Errorf("printed %q", b.String())
 	}
-	hosttest.New(t)
+	newTestHome(t)
 	// The word that cleaning changed is not repeated in a command.
 	got, _ := lineErr(t, "atach", "box/a\x1bcb")
 	if strings.Contains(got, "\x1b") || !strings.Contains(got, "Try: "+brand.Name+" attach --help\n") {
 		t.Errorf("printed %q", got)
-	}
-}
-
-func TestColourOn(t *testing.T) {
-	tty := hosttest.NewTerminal(t, 80, 24).TTY
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer r.Close()
-	defer w.Close()
-	for _, c := range []struct {
-		f             *os.File
-		noColor, term string
-		want          bool
-	}{
-		{tty, "", "xterm-256color", true},
-		{w, "", "xterm-256color", false},
-		{tty, "1", "xterm-256color", false},
-		{tty, "", "dumb", false},
-	} {
-		t.Setenv("NO_COLOR", c.noColor)
-		t.Setenv("TERM", c.term)
-		if got := colourOn(c.f); got != c.want {
-			t.Errorf("colourOn(tty %v, NO_COLOR=%q, TERM=%q) = %v", c.f == tty, c.noColor, c.term, got)
-		}
 	}
 }
 
@@ -163,9 +136,8 @@ func lineErr(t *testing.T, args ...string) (string, int) {
 	code := printError(&b, err, cmd, false, false)
 	return b.String(), code
 }
-
 func TestGoldenErrors(t *testing.T) {
-	hosttest.New(t)
+	newTestHome(t)
 	var b strings.Builder
 	show := func(name string, err error, cmd *cobra.Command) {
 		for _, colour := range []bool{false, true} {
@@ -204,7 +176,6 @@ func TestGoldenErrors(t *testing.T) {
 		t.Errorf("the errors differ from %s (run go test ./internal/cli -run TestGoldenErrors -update, and read the diff):\n%s", golden, got)
 	}
 }
-
 func TestShellWord(t *testing.T) {
 	for in, want := range map[string]string{
 		"box/auth-fix": "box/auth-fix", "a b": "'a b'", "it's": `'it'\''s'`, "": "''", "--dir=~/x": "'--dir=~/x'",
@@ -215,7 +186,6 @@ func TestShellWord(t *testing.T) {
 		}
 	}
 }
-
 func TestUseArgs(t *testing.T) {
 	for use, want := range map[string]string{
 		"attach <host>/<session>|-":           "<host>/<session> or -",
@@ -253,7 +223,6 @@ func TestEveryCommandWithAnArgumentHasAnExample(t *testing.T) {
 	}
 	walk(Root())
 }
-
 func captureStderr(t *testing.T, fn func() int) (string, int) {
 	t.Helper()
 	t.Setenv("NO_COLOR", "1")
@@ -268,4 +237,21 @@ func captureStderr(t *testing.T, fn func() int) (string, int) {
 	_ = w.Close()
 	b, _ := io.ReadAll(r)
 	return string(b), code
+}
+
+// A pipe never enables colour, with or without the terminal environment.
+func TestColourOnPipe(t *testing.T) {
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	defer w.Close()
+	for _, c := range []struct{ noColor, term string }{{"", "xterm-256color"}, {"1", "xterm-256color"}, {"", "dumb"}} {
+		t.Setenv("NO_COLOR", c.noColor)
+		t.Setenv("TERM", c.term)
+		if colourOn(w) {
+			t.Errorf("colour on a pipe with NO_COLOR=%q, TERM=%q", c.noColor, c.term)
+		}
+	}
 }

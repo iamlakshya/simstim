@@ -17,6 +17,7 @@ import (
 
 // sessionOps are the bridge's requests that act on a session.
 var sessionOps = map[string]bool{
+	"events.watch":true,
 	"port.grant":true,"port.reverse":true,"ports":true,"ports.view":true,
 	"sandbox.probe": true,
 	"policy.ls": true, "policy.add": true, "policy.rm": true, "policy.log": true,

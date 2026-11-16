@@ -71,6 +71,7 @@ func resolveLayerValues(layers []api.Layer) (api.LayerValues, []api.ValueOrigin,
 	}
 	var merged api.LayerValues
 	origins := map[string]api.ValueOrigin{}
+	var decoysOff *api.Layer
 	for i, l := range layers {
 		for key, value := range valuesMap(l.LayerValues) {
 			if lock, ok := fixed[key]; ok && i > lock.at && !reflect.DeepEqual(lock.value.Interface(), value.Interface()) {
@@ -82,7 +83,18 @@ func resolveLayerValues(layers []api.Layer) (api.LayerValues, []api.ValueOrigin,
 				return api.LayerValues{}, nil, nil, err
 			}
 		}
+		if decoysOff == nil && l.Sandbox.Decoys != nil && !*l.Sandbox.Decoys {
+			copy := l
+			decoysOff = &copy
+		}
 		mergeLayerValues(&merged, l, origins)
+	}
+	// The global opt-out cannot silently override a final true fixed lock,
+	// including an earlier disabling source. Reject the complete policy.
+	if decoysOff != nil {
+		if lock, ok := fixed["sandbox.decoys"]; ok && lock.value.Elem().Bool() {
+			return api.LayerValues{}, nil, nil, layerError(*decoysOff, "sandbox.decoys", lock.lock)
+		}
 	}
 	_ = visitValues(reflect.ValueOf(&merged).Elem(), "", func(key string, dst reflect.Value) error {
 		if lock, ok := fixed[key]; ok {

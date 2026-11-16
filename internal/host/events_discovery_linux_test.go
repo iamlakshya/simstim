@@ -90,3 +90,27 @@ func TestEventsDiscoveryRejectsReplacementOfOriginalRoot(t *testing.T) {
 		t.Fatal("a replacement directory renewed the original native watch")
 	}
 }
+
+func TestEventsDiscoveryObservesFirstRuntimeRootWithoutCreatingIt(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
+	if err := os.MkdirAll(paths.StateDir(), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	d, err := OpenEventsDiscovery()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	if _, err := os.Lstat(paths.RuntimeDir()); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("read-only discovery created the runtime root: %v", err)
+	}
+	if err := os.Mkdir(paths.RuntimeDir(), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	if err := d.Next(ctx); err != nil {
+		t.Fatal(err)
+	}
+}

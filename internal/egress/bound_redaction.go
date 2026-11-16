@@ -32,6 +32,13 @@ func registryRedaction(state *memberState) (*auditSecrets, error) {
 			values = append(values, namedValue{name, entry.sentinel})
 		}
 	}
+	for _, tripwire := range state.decoys {
+		for _, value := range tripwire.Values {
+			for _, form := range decoyValueForms(value) {
+				values = append(values, namedValue{"decoy " + tripwire.Name, form})
+			}
+		}
+	}
 	sort.SliceStable(values, func(i, j int) bool {
 		if len(values[i].value) != len(values[j].value) {
 			return len(values[i].value) > len(values[j].value)

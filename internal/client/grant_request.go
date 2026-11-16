@@ -24,6 +24,11 @@ type GrantRequest struct {
 	legacyResume        *legacyResumeGrantIntent
 	resumeGroup         bool
 	review              *reviewGrantIntent
+	push                *pushGrantIntent
+	forge               *localForgePlan
+	root                *rootStepIntent
+	rootExecution       *rootStepExecution
+	metadataMode        *agentModeResources
 	newSecrets          *newSecretPlan
 	newInputs           *newInputPreparation
 	preparationSettings *settingsOperation
@@ -137,8 +142,8 @@ func allowRequestGrant(ctx context.Context, h Host, hostID string, tier Tier, o 
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if purpose := requestGrantPurpose(r); purpose != grantRemote && (purpose != grantLocalReview || o.Kind != OutboundSecret) {
-		return grantPurposeError()
+	if err := requirePurposeOutbound(ctx, r, o); err != nil {
+		return err
 	}
 	key := grantScope{host: h.Name, hostID: hostID, tier: tier, kind: o.Kind, name: o.Name, purpose: requestGrantPurpose(r), operation: requestGrantOperation(r)}
 	r.mu.Lock()
@@ -158,6 +163,16 @@ func allowRequestGrant(ctx context.Context, h Host, hostID string, tier Tier, o 
 				local := *q.Err
 				local.Msg = fmt.Sprintf("reading %s on this computer to review pulled files needs a terminal answer", o.Name)
 				local.Hint = "Run the pull command in an interactive terminal to review these local values."
+				copy.Err = &local
+			}
+			q = &copy
+		} else if key.purpose == grantLocalForge && o.Kind == OutboundSecret {
+			copy := *q
+			copy.Prompt = fmt.Sprintf("Read %s on this computer to check this repository's visibility?", o.Name)
+			if q.Err != nil {
+				local := *q.Err
+				local.Msg = "reading this local forge credential needs its own terminal answer"
+				local.Hint = "Run the exact push request in an interactive terminal."
 				copy.Err = &local
 			}
 			q = &copy
@@ -245,10 +260,10 @@ func recordRequestGrant(ctx context.Context, h Host, hostID string, tier Tier, o
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if err := requireRemoteGrantRequest(ctx); err != nil {
+	r := grantRequestOf(ctx)
+	if err := requirePurposeRecord(ctx, r, o); err != nil {
 		return err
 	}
-	r := grantRequestOf(ctx)
 	if r == nil {
 		return RecordGrantContext(ctx, h, hostID, o)
 	}

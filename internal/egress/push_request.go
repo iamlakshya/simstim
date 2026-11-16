@@ -108,7 +108,7 @@ func newPushBody(prefix []byte, tail io.ReadCloser) *pushBody {
 }
 
 func (body *pushBody) Format(state fmt.State, _ rune) {
-	_, _ = io.WriteString(state, "<Git push body redacted>")
+	_, _ = io.WriteString(state, "<inspected request prefix redacted>")
 }
 func (body *pushBody) Read(output []byte) (int, error) { return body.reader.Read(output) }
 func (body *pushBody) Close() error {

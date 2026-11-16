@@ -58,7 +58,14 @@ func startReservedSessionWithOperation(m *Manifest, secrets map[string]api.Secre
 		m.SandboxName = m.Name
 	}
 	applySessionIdentity(m)
-	if m.Wall != nil {
+	nativeWall := m.Wall != nil
+	if m.Wall != nil && m.Wall.Driver == "plain" {
+		if m.Wall.Level != "none" {
+			return nil, sessionLeaseError("the explicit no-wall test driver has an inconsistent level")
+		}
+		nativeWall = false
+	}
+	if nativeWall {
 		m.Run.StartEnvelope = true
 	}
 	if err := saveReservedManifest(operation, m); err != nil {
@@ -71,7 +78,7 @@ func startReservedSessionWithOperation(m *Manifest, secrets map[string]api.Secre
 		}
 	}
 	m.launchStarted = false
-	if m.Wall != nil {
+	if nativeWall {
 		return startOwnedReservedSession(m, secrets, reservation, operation)
 	}
 	reservation.launched = m.Files == nil

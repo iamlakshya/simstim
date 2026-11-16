@@ -190,6 +190,8 @@ func (s *Supervisor) protectedInputPaths() ([]string, error) {
 	m := host.CloneManifest(*s.m)
 	s.mu.Unlock()
 	protected := []string{"/opt/agents", "/.tools", "/.persist"}
+	decoys,err:=proto.DecoyPaths();if err!=nil{return nil,err}
+	for _,name:=range decoys{protected=append(protected,host.GuestHome+"/"+name)}
 	if m.Files != nil {
 		for _, mount := range slices.Concat(m.Files.Mounts, m.Files.Installs) {
 			protected = append(protected, mount.Guest)

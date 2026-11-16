@@ -2,6 +2,7 @@ package supervisor
 
 import (
 	"context"
+	"errors"
 	"net"
 	"os"
 	"path/filepath"
@@ -15,8 +16,8 @@ import (
 	"github.com/iamlakshya/simstim/internal/wall/process"
 )
 
-// processSandbox adapts the public runtime to the supervisor's existing
-// ownership contract. A failed Start cleans itself before returning an error.
+// processSandbox adapts the process-filesystem runtimes to the supervisor's
+// existing state capture and factory-owned disk resource contract.
 type processSandbox struct {
 	wall.Sandbox
 	capture *files.Capture
@@ -42,18 +43,44 @@ func (s processSandbox) CleanExit() bool {
 
 func prepareProcess(m *host.Manifest) (sandbox, error) { return prepareProcessMode(m, false) }
 
-func prepareProcessMode(m *host.Manifest, headless bool) (sandbox, error) {
+func prepareProcessMode(m *host.Manifest, headless bool) (_ sandbox, returned error) {
+	spec, capture, err := prepareProcessFilesystem(m, headless)
+	if err != nil {
+		return nil, err
+	}
+	prepared := false
+	defer func() {
+		if !prepared && capture != nil {
+			returned = errors.Join(returned, capture.Close())
+		}
+	}()
+	sb, err := (process.Driver{}).Prepare(context.Background(), spec)
+	if err != nil {
+		return nil, err
+	}
+	disk, err := processDiskResourcesV1(spec)
+	if err != nil {
+		return nil, err
+	}
+	prepared = true
+	return processSandbox{Sandbox: sb, capture: capture, disk: disk}, nil
+}
+
+// prepareProcessFilesystem is the ONE per-start process/gvisor file plan.
+// It preserves the legacy PATH branch, canonical cache/state merge and owned
+// capture generation. The caller owns a successful capture; failure closes it.
+func prepareProcessFilesystem(m *host.Manifest, headless bool) (_ wall.Spec, capture *files.Capture, returned error) {
 	helper, err := os.Executable()
 	if err != nil {
-		return nil, wallError("cannot find the supervisor helper", err)
+		return wall.Spec{}, nil, wallError("cannot find the supervisor helper", err)
 	}
 	dir, err := filepath.EvalSymlinks(paths.SessionDir(m.ID))
 	if err != nil {
-		return nil, wallError("cannot resolve this session's private folder", err)
+		return wall.Spec{}, nil, wallError("cannot resolve this session's private folder", err)
 	}
 	workspace := filepath.Join(dir, "work")
 	if err = os.MkdirAll(workspace, 0700); err != nil {
-		return nil, wallError("cannot make sandbox workspace", err)
+		return wall.Spec{}, nil, wallError("cannot make sandbox workspace", err)
 	}
 	mounts := []wall.Mount{{Host: workspace, Guest: "/work", Write: true}}
 	plan, err := host.SandboxStatePlan(m)
@@ -61,7 +88,7 @@ func prepareProcessMode(m *host.Manifest, headless bool) (sandbox, error) {
 		plan, err = files.StatePlan{}, nil
 	}
 	if err != nil {
-		return nil, err
+		return wall.Spec{}, nil, err
 	}
 	// Own a per-start plan, so removing keep at the next start is effective.
 	hadFilePlan := m.Files != nil
@@ -74,14 +101,14 @@ func prepareProcessMode(m *host.Manifest, headless bool) (sandbox, error) {
 		copy.Files = &host.FilePlan{State: plan}
 	}
 	m = &copy
-	capture, err := prepareFileCapture(m)
+	capture, err = prepareFileCapture(m)
 	if err != nil {
-		return nil, err
+		return wall.Spec{}, nil, err
 	}
-	prepared := false
 	defer func() {
-		if !prepared && capture != nil {
-			_ = capture.Close()
+		if returned != nil && capture != nil {
+			returned = errors.Join(returned, capture.Close())
+			capture = nil
 		}
 	}()
 	if hadFilePlan {
@@ -114,20 +141,11 @@ func prepareProcessMode(m *host.Manifest, headless bool) (sandbox, error) {
 	if m.Policy != nil && m.Policy.Sandbox.DiskMax != nil {
 		spec.DiskMax, err = api.ParseSize(*m.Policy.Sandbox.DiskMax)
 		if err != nil || spec.DiskMax < 0 {
-			return nil, diskFailure("disk_measure", "the process sandbox.disk_max cannot be used")
+			return wall.Spec{}, capture, diskFailure("disk_measure", "the process sandbox.disk_max cannot be used")
 		}
 	}
 
-	sb, err := (process.Driver{}).Prepare(context.Background(), spec)
-	if err != nil {
-		return nil, err
-	}
-	disk, err := processDiskResourcesV1(spec)
-	if err != nil {
-		return nil, err
-	}
-	prepared = true
-	return processSandbox{Sandbox: sb, capture: capture, disk: disk}, nil
+	return spec, capture, nil
 }
 
 func processPath(env []string) string {

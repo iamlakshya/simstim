@@ -84,19 +84,25 @@ func hostCreateCmd() *cobra.Command {
 }
 
 func createHost(ctx context.Context, p provider.Provider, req provider.Request) error {
-	// The lock of the host, from the checks through every save, the last
-	// one of the setup too: no host rm of this name runs meanwhile.
-	ctx, unlock, err := client.LockHost(ctx, req.Name, "host create")
+	// Creation owns the absent-name role and its actual OP before any provider
+	// call. A bare lock cannot manufacture that role for an unsaved name.
+	ctx, release, err := client.BeginHostCreationContext(ctx, onboard.CreationRequest(p, req))
 	if err != nil {
 		return err
 	}
-	defer unlock()
+	defer release()
 	if err := onboard.CheckCreate(p, req); err != nil {
 		return err
 	}
 	fmt.Fprintf(os.Stderr, "Creating %s with %s…\n", req.Name, p.Name())
 	start := time.Now()
 	h, err := onboard.Create(ctx, p, req)
+	if err != nil {
+		return err
+	}
+	// The SDK's same-writer commit, not the returned Host value, supplies the
+	// saved-purpose continuation. Keep its original live OP through setup.
+	ctx, err = client.ContinueHostCreationContext(ctx)
 	if err != nil {
 		return err
 	}

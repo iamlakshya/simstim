@@ -36,6 +36,9 @@ func (c *Conn) WatchEvents(ctx context.Context, a api.EventsWatchArgs, receive f
 		return err
 	}
 	defer raw.Close()
+	// Pre-carrier errors still join this synchronous response-read owner.
+	// On success later defers close/join the actual carrier before this mark.
+	defer raw.execReadFinished()
 	if !ValidHostID(c.HostID()) || raw.HostID() != c.HostID() || !sameExecTransportSource(c, raw) {
 		return grantIdentityError(c.Host)
 	}
@@ -103,7 +106,17 @@ func (c *Conn) WatchEvents(ctx context.Context, a api.EventsWatchArgs, receive f
 	if stream.Kind() != link.KindEvents {
 		return eventsProtocol("the helper opened another stream instead of events")
 	}
-	return readEvents(ctx, stream, a.ID, receive)
+	return readEventStream(ctx, stream, a.ID, receive)
+}
+
+func readEventStream(ctx context.Context, stream *link.Stream, id string, receive func(alerts.Event) error) error {
+	if err := readEvents(ctx, stream, id, receive); err != nil {
+		return err
+	}
+	if !stream.PeerWriteClosed() {
+		return eventsProtocol("the event connection ended before its final stream frame")
+	}
+	return nil
 }
 
 func readEvents(ctx context.Context, input io.Reader, id string, receive func(alerts.Event) error) error {
@@ -128,16 +141,9 @@ func readEvents(ctx context.Context, input io.Reader, id string, receive func(al
 			}
 			return eventsProtocol("the event stream ended with an incomplete or oversized record")
 		}
-		var ev alerts.Event
-		if json.Unmarshal(line, &ev) != nil || ev.V != 1 || !alerts.IsStreamKind(ev.Event) {
-			return eventsProtocol("the helper sent an invalid or unsupported event")
-		}
-		if _, err := time.Parse(time.RFC3339Nano, ev.Time); err != nil {
-			return eventsProtocol("the helper sent an event without a valid time")
-		}
-		hostEvent := ev.Event == alerts.HealthDegraded || ev.Event == alerts.HealthRecovered
-		if (!api.ValidSessionID(ev.Session.ID) && !(hostEvent && ev.Session.ID == "")) || id != "" && ev.Session.ID != id {
-			return eventsProtocol("the event stream changed its session target")
+		ev, err := alerts.DecodeStreamEvent(line, id)
+		if err != nil {
+			return eventsProtocol(err.Error())
 		}
 		if err := ctx.Err(); err != nil {
 			return err

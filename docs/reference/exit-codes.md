@@ -10,7 +10,7 @@ Every command exits with one of these codes. The code comes from the kind of the
 | Code | Kind | Meaning | Examples |
 | --- | --- | --- | --- |
 | 0 |  | Done. | A command did its job. Help printed. An attach ended with a detach, or with the agent's end. |
-| 1 | `failed` | The command could not do its job. | A host did not answer. The helper failed. No hosts yet. A connection that closed. An error that is not a user error. |
+| 1 | `failed` | The command could not do its job. | A host did not answer. The helper failed. No hosts yet. A connection that closed. `config check` found an error. An error that is not a user error. |
 | 2 | `usage` | The command line or a config file is wrong. | An unknown command or flag. A missing or extra argument. A bad value. Two flags that conflict. A name that matches two sessions. A `hosts.toml` that does not decode. |
 | 3 | `not_found` | A named thing does not exist. | No host, session, agent, provider, template or secret of that name. |
 | 4 | `needs_answer` | The command needs an answer, and input is off. | `host add` without `--yes`, or `--yes` without `--tier`, or without `--host-key` for a host key that your SSH settings do not trust. `host rekey`, or raising a tier in `host set`, without `--confirm`. `doctor --fix` without `-y`. A new session's folder that does not exist, without `--mkdir`. `setup` without the flags that answer its questions. |

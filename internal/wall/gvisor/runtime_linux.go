@@ -42,6 +42,14 @@ func (d *Driver) openRuntime(ctx context.Context) (owned *Runtime, returned erro
 		if err != nil {
 			return nil, runtimeFileError(item.Name, err)
 		}
+		sealed, sealErr := supply.SealRuntime(ctx, item, file)
+		if err := errors.Join(sealErr, file.Close()); err != nil {
+			if sealed != nil {
+				err = errors.Join(err, sealed.Close())
+			}
+			return nil, runtimeFileError(item.Name, err)
+		}
+		file = sealed
 		target := path.Join(runtimeRoot(), "gvisor-bin", item.Name)
 		if item.Name == "runsc" {
 			owned.program, owned.item = file, item

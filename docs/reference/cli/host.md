@@ -7,7 +7,7 @@ title: "simstim host"
 Add, create, list, test and remove hosts.
 
 ```text
-simstim host
+simstim host [flags]
 ```
 
 ## Examples
@@ -35,6 +35,7 @@ simstim host ls
 | [`host create`](host_create.md) | Make a host with lima, docker or e2b, and connect it |
 | [`host doctor`](host_doctor.md) | Check a host's setup, and with `--fix` fix what it can |
 | [`host ls`](host_ls.md) | List hosts |
+| [`host prepare`](host_prepare.md) | Probe a host and show its optional root steps |
 | [`host rekey`](host_rekey.md) | Replace a host's pinned host key, after you confirm |
 | [`host restore`](host_restore.md) | Start again the sessions that a host restart stopped |
 | [`host rm`](host_rm.md) | Forget a host, or delete a created machine |

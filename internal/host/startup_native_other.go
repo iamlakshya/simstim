@@ -49,3 +49,7 @@ func (launch *startupLaunchV1) Close() error { return nil }
 func startOwnedReservedSession(*Manifest, map[string]api.Secret, *sessionReservation, *SessionOperation) (*SessionInfo, error) {
 	return nil, UserError("wall_unavailable", "native sandbox startup requires a supported Linux host", "Choose a supported Linux host.")
 }
+
+func startOwnedSessionOperation(context.Context, *SessionOperation, map[string]api.Secret, []api.MemberResumeArgs, bool, *api.SecretDeliveryIntent) (*Manifest, *startupLaunchV1, error) {
+	return nil, nil, UserError("wall_unavailable", "native sandbox startup requires a supported Linux host", "Choose a supported Linux host.")
+}

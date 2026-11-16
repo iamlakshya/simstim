@@ -4,7 +4,7 @@ import "github.com/iamlakshya/simstim/internal/api"
 
 type receiptPublicStateSpans struct{ generation, modes, binds api.JSONSpan }
 
-func receiptStateSpans(p *api.JSONProjection, span api.JSONSpan) (receiptPublicStateSpans, error) {
+func receiptStateSpans(p jsonValueProjection, span api.JSONSpan) (receiptPublicStateSpans, error) {
 	var out receiptPublicStateSpans
 	var intent api.JSONSpan
 	known := api.ExactJSONFieldNames((*api.SessionSecretState)(nil))
@@ -54,7 +54,7 @@ type sandboxReceiptRelationPhase func(sandboxReceiptRelationPlan, func(sandboxRe
 
 // Only finite span descriptors cross into the SAME counted temporary index.
 // The complete canonical State validator has already closed its region.
-func makeReceiptRelationPlan(p *api.JSONProjection, state receiptPublicStateSpans, row receiptRowProjection, supplied, missing api.JSONSpan) (sandboxReceiptRelationPlan, bool, error) {
+func makeReceiptRelationPlan(p jsonValueProjection, state receiptPublicStateSpans, row receiptRowProjection, supplied, missing api.JSONSpan) (sandboxReceiptRelationPlan, bool, error) {
 	var plan sandboxReceiptRelationPlan
 	plan.Groups[receiptStateBinds], plan.Groups[receiptSupplied], plan.Groups[receiptMissing] = state.binds, supplied, missing
 	if row.delivery.End != 0 {
@@ -103,7 +103,7 @@ func makeReceiptRelationPlan(p *api.JSONProjection, state receiptPublicStateSpan
 	return plan, wallNone, nil
 }
 
-func receiptArrayCount(p *api.JSONProjection, span api.JSONSpan) (uint64, error) {
+func receiptArrayCount(p jsonValueProjection, span api.JSONSpan) (uint64, error) {
 	values, err := p.Values(span)
 	if err != nil {
 		return 0, err
@@ -124,7 +124,7 @@ func receiptArrayCount(p *api.JSONProjection, span api.JSONSpan) (uint64, error)
 // Raw source-order map cursor plus SAME-index lookups gives bounded/log-index
 // relations for arbitrary JSON map ordering. No ordered-map assumption, body
 // allocation, per-name source restart, dense fallback or second tree.
-func checkIndexedReceiptRelations(p *api.JSONProjection, state receiptPublicStateSpans, originalDelivery, wallNone bool, supplied, missing, allowed api.JSONSpan, lookup sandboxReceiptRelationLookup) error {
+func checkIndexedReceiptRelations(p jsonValueProjection, state receiptPublicStateSpans, originalDelivery, wallNone bool, supplied, missing, allowed api.JSONSpan, lookup sandboxReceiptRelationLookup) error {
 	if lookup == nil {
 		return sandboxReceiptError()
 	}
@@ -237,7 +237,7 @@ func checkIndexedReceiptRelations(p *api.JSONProjection, state receiptPublicStat
 
 // Hosts and finite binding scalars already passed canonical binding grammar.
 // This is exact typed tuple equality only, not another binding validator.
-func projectReceiptBindEqual(p *api.JSONProjection, a, b api.JSONSpan) (bool, error) {
+func projectReceiptBindEqual(p jsonValueProjection, a, b api.JSONSpan) (bool, error) {
 	known := api.ExactJSONFieldNames((*api.SecretBind)(nil))
 	var left, right [3]api.JSONSpan
 	collect := func(span api.JSONSpan, out *[3]api.JSONSpan) error {

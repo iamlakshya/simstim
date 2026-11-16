@@ -49,7 +49,17 @@ func metadataRecordWidth(layout byte) int {
 		return 0
 	}
 }
-func (i *Inspector) recordLimit(layout byte) uint64 {
+func (i *Inspector) recordLimit(slot uint16, layout byte) uint64 {
+	if slot == objectRegionSlot {
+		switch layout {
+		case layoutBinding:
+			return 1
+		case layoutHost:
+			return i.outer.object.fields
+		default:
+			return 0
+		}
+	}
 	switch layout {
 	case layoutEntry:
 		return i.outer.stateCounts.entries

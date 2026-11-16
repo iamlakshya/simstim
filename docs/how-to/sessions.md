@@ -169,6 +169,14 @@ ends, held network requests, classifier approvals and sandbox lifecycle events.
 The event stream works without an alert destination. The alert delay and noise
 limits do not delay this local stream. Agent questions stay out of its detail.
 
+The host retains prepared event records in the session's existing native audit.
+This lets a watch read a fast start failure after its supervisor has exited.
+Live and replayed records keep one stream identity and exact sequence number,
+so duplicates can be removed without treating a directory as an event. Recent
+history is bounded. An unreadable or incomplete source ends with an error.
+`--follow` stays connected through session stops and later starts until you
+interrupt it.
+
 ## List sessions
 
 ```sh

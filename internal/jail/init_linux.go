@@ -65,7 +65,11 @@ func startCommand(c *setup, env []string) (int, error) {
 	if err != nil {
 		return 0, stepFailed("cannot open this program", "Report this as a bug.", err)
 	}
-	defer func() { _ = unix.Close(helper) }()
+	defer func() {
+		if helper >= 0 {
+			_ = unix.Close(helper)
+		}
+	}()
 	if c.SyncFD > 0 {
 		if err := awaitMaps(c.SyncFD); err != nil {
 			return 0, err
@@ -80,13 +84,20 @@ func startCommand(c *setup, env []string) (int, error) {
 		return 0, err
 	}
 	err = verifyRules(c, fds)
+	var fileRules []pinnedFileRuleV1
+	if err == nil {
+		fileRules, err = readonlyStageRulesV1(c)
+	}
+	if err == nil {
+		err = checkReadonlyBindAliasesV1(c, fds, fileRules)
+	}
 	if err == nil && c.Userns {
 		var execs []execMount
 		var execFDs []int
 		execs, execFDs, err = execMounts(c, fds)
 		cwd, _ := os.Getwd()
 		if err == nil {
-			err = buildRoot(c.Binds, fds, execs, execFDs, c.Sub != nil)
+			err = buildRootWithFileRulesV1(c.Binds, fds, execs, execFDs, c.Sub != nil, fileRules)
 		}
 		// buildRoot leaves the process in "/", if cwd is gone inside the jail.
 		if err == nil && cwd != "" {
@@ -116,6 +127,15 @@ func startCommand(c *setup, env []string) (int, error) {
 	if err := lockDown(c, rs, progs); err != nil {
 		return 0, err
 	}
+	if err := verifyInitPrivateStateV1(); err != nil {
+		return 0, err
+	}
+	// The enforced ruleset now owns its inode grants. PID 1 must not keep
+	// a raw helper capability while an untrusted command begins execution.
+	if err := unix.Close(helper); err != nil {
+		return 0, stepFailed("cannot close the init helper capability", "Retain the original jail owner and inspect its setup.", err)
+	}
+	helper = -1
 	return startExec(c, env)
 }
 
@@ -187,12 +207,25 @@ func startExec(c *setup, env []string) (int, error) {
 	extra[c.Files] = r
 	files := append([]*os.File{os.Stdin, os.Stdout, os.Stderr}, extra...)
 	//nolint:gosec // G702: this program starts itself again
+	attr := &syscall.SysProcAttr{Pdeathsig: unix.SIGKILL}
+	if c.GvisorV1Version == 1 {
+		attr = gvisorExecNamespacesV1()
+	}
 	p, err := os.StartProcess(self, []string{argv0, fileRulesStageV1(stageExec, c), strconv.Itoa(3 + c.Files)},
-		&os.ProcAttr{Env: env, Files: files, Sys: &syscall.SysProcAttr{Pdeathsig: unix.SIGKILL}})
-	_ = r.Close()
+		&os.ProcAttr{Env: env, Files: files, Sys: attr})
 	if err != nil {
+		closeErr := closeInitInheritedV1(extra)
 		_ = w.Close()
-		return 0, stepFailed("cannot start the jail's command", "Read the error above.", err)
+		return 0, stepFailed("cannot start the jail's command", "Read the error above.", errors.Join(err, closeErr))
+	}
+	// Only the trusted child stage exists; it is blocked on its setup pipe.
+	// Close the parent's copies through these exact wrappers before releasing
+	// that child. No raw Files/bind/rule capability remains reachable via PID 1.
+	if closeErr := closeInitInheritedV1(extra); closeErr != nil {
+		_ = w.Close()
+		_ = p.Kill()
+		_, waitErr := p.Wait()
+		return 0, stepFailed("cannot close the init's setup capabilities before command release", "Retain the original jail owner and inspect its descriptor setup.", errors.Join(closeErr, waitErr))
 	}
 	next := *c
 	next.StatusFD, next.SyncFD, next.Sub = 0, 0, nil

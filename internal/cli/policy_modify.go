@@ -19,7 +19,7 @@ func policyDenyCmd() *cobra.Command  { return policyAddCmd(false) }
 
 func policyAddCmd(allow bool) *cobra.Command {
 	var layer policyLayerFlags
-	var once, dryRun, asJSON bool
+	var once, dryRun, asJSON, publicPush bool
 	var duration time.Duration
 	var tools []string
 	verb := "deny"
@@ -36,13 +36,28 @@ func policyAddCmd(allow bool) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			canonical:=target
-			if door==api.DoorPort {
-				if _,err:=api.ParsePortTarget(target);err!=nil{return policyUsage("invalid exact port","Name one decimal port from 1 to 65535.","bad_port")}
-				if layer.in=="" || once || len(tools)!=0 || !allow && cmd.Flags().Changed("for"){return policyUsage("port rules need a supported session scope","Use --in with one exact port, without --once or --tools.","bad_port")}
-			}else{
-				canonical,_,err=grant.CheckHost(target)
-				if err!=nil{return policyUsage("invalid network target: "+client.CleanLine(err.Error()),"Pass a host, IP address or CIDR, with an optional port or path.","bad_target")}
+			if door == api.DoorPush {
+				if !allow {
+					return policyUsage("this command supports positive push allowances", "Use policy allow push with --in, or revoke an existing rule with policy rm.", "bad_push")
+				}
+				return runPositivePushPolicy(cmd, layer, target, publicPush, once, dryRun, asJSON, duration)
+			}
+			if publicPush {
+				return policyUsage("--public belongs to a push allowance", "Use policy allow push <repository> --in <host>/<session> --public.", "bad_push")
+			}
+			canonical := target
+			if door == api.DoorPort {
+				if _, err := api.ParsePortTarget(target); err != nil {
+					return policyUsage("invalid exact port", "Name one decimal port from 1 to 65535.", "bad_port")
+				}
+				if layer.in == "" || once || len(tools) != 0 || !allow && cmd.Flags().Changed("for") {
+					return policyUsage("port rules need a supported session scope", "Use --in with one exact port, without --once or --tools.", "bad_port")
+				}
+			} else {
+				canonical, _, err = grant.CheckHost(target)
+				if err != nil {
+					return policyUsage("invalid network target: "+client.CleanLine(err.Error()), "Pass a host, IP address or CIDR, with an optional port or path.", "bad_target")
+				}
 			}
 			selectedTools, err := api.CanonicalModelTools(tools)
 			if err != nil {
@@ -97,7 +112,12 @@ func policyAddCmd(allow bool) *cobra.Command {
 			}
 			return withSession(cmd, layer.in, func(ctx context.Context, h client.Host, c *client.Conn, s *client.Session) error {
 				if allow {
-					if err := grantQuestions(cmd, func(ctx context.Context) error { if door==api.DoorPort{return c.CheckPortPolicyGrant(ctx,s.ID)};return c.CheckPolicyGrant(ctx, s.ID, canonical) }); err != nil {
+					if err := grantQuestions(cmd, func(ctx context.Context) error {
+						if door == api.DoorPort {
+							return c.CheckPortPolicyGrant(ctx, s.ID)
+						}
+						return c.CheckPolicyGrant(ctx, s.ID, canonical)
+					}); err != nil {
 						return err
 					}
 				}
@@ -137,6 +157,7 @@ func policyAddCmd(allow bool) *cobra.Command {
 	layer.add(cmd)
 	addDryRun(cmd, &dryRun, "show the rule without writing or sending a mutation")
 	if allow {
+		cmd.Flags().BoolVar(&publicPush, "public", false, "acknowledge that this exact repository push publishes to a public repository")
 		addList(cmd.Flags(), &tools, "tools", "allow model capabilities for this session: a comma-separated list, or the flag again")
 		cmd.Flags().BoolVar(&once, "once", false, "allow one matching flow, at session scope")
 		addFor(cmd, &duration, 0, "keep a session rule for a duration, such as 1h")

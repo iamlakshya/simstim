@@ -101,6 +101,14 @@ func (s *requestSecretSnapshot) scanRequestSecretTripwires(request *http.Request
 			if failure := s.tripwire(key, true); failure != nil {
 				return failure
 			}
+			// A named bound-header exemption can never exempt a decoy.
+			if s.decoyView != nil {
+				for _, value := range values {
+					if failure := s.decoyView.tripwireHeaderValueStage(value, stage); failure != nil {
+						return failure
+					}
+				}
+			}
 			if index, ok := protected[key]; ok {
 				entry := s.entries[index]
 				if entry.kind == "bearer" {

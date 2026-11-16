@@ -28,7 +28,7 @@ func hostCmd() *cobra.Command {
 		hostProviderCmd("start", "Start the host through its provider or provider script", ""),
 		hostProviderCmd("stop", "Stop the host through its provider or provider script",
 			"Stops the host through its provider or provider script. A VM's sessions stop too, and a sandbox's are paused."),
-		hostProviderCmd("status", "Ask the provider or provider script whether the host is running", ""))
+		hostProviderCmd("status", "Ask the provider or provider script whether the host is running", ""), hostPrepareCmd())
 	return cmd
 }
 

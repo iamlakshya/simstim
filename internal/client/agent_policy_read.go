@@ -6,6 +6,7 @@ import (
 	"io"
 
 	"github.com/iamlakshya/simstim/internal/api"
+	"github.com/iamlakshya/simstim/internal/tomlinspect"
 )
 
 // agentSandboxPolicy deliberately cannot stand in for the full policy or
@@ -21,26 +22,58 @@ type agentSandboxPolicy struct {
 	CreationWall   string
 }
 
-func readAgentSandboxPolicy(ctx context.Context, h Host, id string) (*agentSandboxPolicy, error) {
+func readAgentSandboxPolicy(ctx context.Context, h Host, id string) (found *agentSandboxPolicy, returned error) {
+	mode, err := newAgentModeResources(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { returned = errors.Join(returned, mode.closeInactive()) }()
+	return readAgentSandboxPolicyWithMode(ctx, h, id, mode)
+}
+
+// Both preliminary attach facts and later live grants borrow the actual
+// agent mode's ONE backing/slab. No raw dense map pass precedes that scope.
+func readAgentSandboxPolicyWithMode(ctx context.Context, h Host, id string, mode *agentModeResources) (found *agentSandboxPolicy, returned error) {
 	if err := checkSessionID(h.Name, id); err != nil {
 		return nil, err
 	}
 	if !ValidHostName(h.Name) {
 		return nil, badHostNameError(h.Name)
 	}
-	var found *agentSandboxPolicy
-	err := withAgentPolicySnapshot(ctx, h, func(source io.ReaderAt, size int64, exists bool) error {
-		if !exists {
-			return nil
-		}
-		var err error
-		found, err = projectAgentSandboxPolicy(ctx, source, size, h.Name, id)
-		return err
-	})
-	if err != nil {
-		return nil, err
+	if mode == nil || mode.inspector == nil || mode.inspector.engine == nil {
+		return nil, agentModeResourceError()
 	}
-	return found, nil
+	snapshot, err := openAgentSettingsSnapshot(ctx)
+	if err != nil {
+		return nil, agentSettingsFailure(err)
+	}
+	defer func() { returned = errors.Join(returned, snapshot.close()) }()
+	err = withHostStateReadContext(ctx, h, func(owned context.Context) error {
+		return withStateTransaction(owned, []string{"hosts", HostFileKey(h.Name)}, "sandboxes.json", false, false, func(tx *stateFileTxn) error {
+			if !tx.view().Exists {
+				return nil
+			}
+			scope, err := newAgentMetadataScope(mode, snapshot, tx)
+			if err != nil {
+				return err
+			}
+			defer scope.close()
+			err = mode.inspector.engine.WithSources(scope.ctx, scope.descriptors(), func(inspection *tomlinspect.Inspection) error {
+				defer scope.finishCachedWork()
+				if err := inspection.InspectTOML(0, &mode.inspector.visitor); err != nil {
+					return err
+				}
+				var err error
+				found, err = inspectAgentSandboxPolicies(inspection, h.Name, id)
+				return err
+			})
+			if err != nil {
+				return agentSettingsFailure(err)
+			}
+			return scope.check(scope.ctx)
+		})
+	})
+	return found, err
 }
 
 func projectAgentSandboxPolicy(ctx context.Context, source io.ReaderAt, size int64, host, id string) (*agentSandboxPolicy, error) {
@@ -53,7 +86,7 @@ func projectAgentSandboxPolicy(ctx context.Context, source io.ReaderAt, size int
 
 // The combined inspector supplies its ONE source-bound projection and visits
 // receipt metadata for every row before any selected facts can be used.
-func projectAgentSandboxPolicyProjection(ctx context.Context, p *api.JSONProjection, host, id string, visit func(api.JSONSpan, api.JSONSpan, int, *agentSandboxPolicy) error) (*agentSandboxPolicy, error) {
+func projectAgentSandboxPolicyProjection(ctx context.Context, p jsonValueProjection, host, id string, visit func(api.JSONSpan, api.JSONSpan, int, *agentSandboxPolicy) error) (*agentSandboxPolicy, error) {
 	root, err := p.ObjectRoot()
 	if err != nil {
 		return nil, agentProjectionError(ctx, err)
@@ -127,7 +160,7 @@ func agentProjectionError(ctx context.Context, err error) error {
 
 // effectiveAgentSessionTier reads only the facts needed by explicit agent
 // admission. Publication callers retain their fresh HostLock ownership.
-func effectiveAgentSessionTier(ctx context.Context, h Host, id, hostID string) (Tier, *agentSandboxPolicy, error) {
+func effectiveAgentSessionTier(ctx context.Context, h Host, id, hostID string, mode *agentModeResources) (Tier, *agentSandboxPolicy, error) {
 	tier, savedID, err := grantHostTier(ctx, h)
 	if err != nil {
 		return TierUnknown, nil, err
@@ -135,7 +168,7 @@ func effectiveAgentSessionTier(ctx context.Context, h Host, id, hostID string) (
 	if savedID != "" && savedID != hostID {
 		return TierUnknown, nil, grantIdentityError(h)
 	}
-	policy, err := readAgentSandboxPolicy(ctx, h, id)
+	policy, err := readAgentSandboxPolicyWithMode(ctx, h, id, mode)
 	if err != nil {
 		return TierUnknown, nil, err
 	}

@@ -9,7 +9,7 @@ import (
 func TrackedGrantKind(k OutboundKind) bool {
 	switch k {
 	case OutboundSecret, OutboundSSHAgent, OutboundSSHKey,
-		OutboundAlertToken, OutboundRepo, OutboundPaste:
+		OutboundAlertToken, OutboundRepo, OutboundPaste, OutboundPush, OutboundPublicPush, OutboundRootRun:
 		return true
 	default:
 		return false

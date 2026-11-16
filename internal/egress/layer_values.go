@@ -6,7 +6,6 @@ import (
 	"net/url"
 	"reflect"
 	"slices"
-	"strconv"
 	"strings"
 	"time"
 
@@ -25,14 +24,16 @@ func ValidateLayerValues(values api.LayerValues) error {
 		}
 		if v.Kind() == reflect.String {
 			s := v.String()
+			if handled, err := validatePackageManagerValue(key, s); handled {
+				return err
+			}
 			choices := map[string][]string{
 				"sandbox.wall":   {"auto", "none", "process", "gvisor", "microvm"},
 				"sandbox.preset": {"locked", "balanced", "open"},
 				"sandbox.system": {"reset", "keep"}, "sandbox.paste": {"media", "any"},
-				"sandbox.package_managers": {"guarded", "strict", "off"},
-				"network.unknown":          {"ask", "deny", "allow", "classify"},
-				"classifier.judge":         {"none", "model", "command"},
-				"classifier.unsure":        {"ask", "deny"}, "classifier.max_scope": {"once", "session"},
+				"network.unknown":   {"ask", "deny", "allow", "classify"},
+				"classifier.judge":  {"none", "model", "command"},
+				"classifier.unsure": {"ask", "deny"}, "classifier.max_scope": {"once", "session"},
 			}
 			if allowed, found := choices[key]; found && !slices.Contains(allowed, s) {
 				return badLayerValue(key, "must be "+strings.Join(allowed, ", "))
@@ -55,11 +56,6 @@ func ValidateLayerValues(values api.LayerValues) error {
 				d, err := time.ParseDuration(s)
 				if err != nil || d <= 0 || key == "sandbox.stop_grace" && d > time.Minute {
 					return badLayerValue(key, "needs a positive duration (stop_grace is at most 60s)")
-				}
-			case "network.min_release_age":
-				n, err := strconv.Atoi(strings.TrimSuffix(s, "d"))
-				if err != nil || n < 0 || !strings.HasSuffix(s, "d") {
-					return badLayerValue(key, "needs whole days, such as 7d")
 				}
 			case "classifier.endpoint":
 				if s != "" {
@@ -145,6 +141,11 @@ func mergeLayerValues(dst *api.LayerValues, l api.Layer, origins map[string]api.
 		}
 		switch v.Kind() {
 		case reflect.Pointer:
+			// A valid-layer decoy opt-out cannot be revived by a narrower
+			// scalar. Lock validation remains in the one resolver.
+			if key == "sandbox.decoys" && !old.IsNil() && !old.Elem().Bool() {
+				return nil
+			}
 			if key == "sandbox.wall" && !old.IsNil() {
 				rank := map[string]int{"auto": 0, "none": 0, "process": 1, "gvisor": 2, "microvm": 3}
 				if rank[old.Elem().String()] > rank[v.Elem().String()] {

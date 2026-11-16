@@ -33,8 +33,8 @@ simstim host alerts set my-vps --delay 30s --min-turn 5m
 | `--command <string>` | run this command line on the host, with the event on stdin and in the environment |
 | `--delay <duration>` | how long needs_input waits before it is sent (default 10s) |
 | `--detail` | add the agent's question to needs_input (it can hold code) |
-| `--events <list>` | the events to send, such as failed,oom: needs_input, turn_done, exited, failed, oom, memory, started, restored |
-| `--format <string>` | the webhook's body: json (the event), slack or discord |
+| `--events <list>` | the events to send, such as failed,oom: needs_input, turn_done, exited, failed, oom, memory, started, restored, egress_blocked, sandbox_ready, sandbox_stopped, sandbox_error, health_degraded, health_recovered, disk_full, link_silent, secret_misuse |
+| `--format <string>` | the webhook's body: json (the event), slack, discord or otlp |
 | `--min-turn <duration>` | the shortest turn that sends turn_done (default 1m) |
 | `--ntfy <string>` | send to this ntfy topic (`https://ntfy.sh/<topic>` or your own server) |
 | `--token-command <string>` | run this here and use its output as the ntfy token (it is never printed) |

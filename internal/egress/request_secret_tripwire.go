@@ -91,13 +91,13 @@ func (s *requestSecretSnapshot) tripwireProjectionStage(text string, fold, basic
 		if fold {
 			projection = strings.ToLower(projection)
 		}
-		for _, value := range s.tripwires {
+		for index, value := range s.tripwires {
 			needle := string(value)
 			if fold {
 				needle = strings.ToLower(needle)
 			}
 			if strings.Contains(projection, needle) {
-				return requestSecretRefusal(http.StatusForbidden, "secret_misuse")
+				return s.tripwireRefusal(index)
 			}
 		}
 		if basic && len(text) >= 6 && strings.EqualFold(text[:6], "Basic ") {

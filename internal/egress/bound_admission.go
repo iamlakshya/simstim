@@ -3,15 +3,13 @@ package egress
 import (
 	"maps"
 	"slices"
-
-	"github.com/iamlakshya/simstim/internal/proto"
 )
 
 // Main owns the same registry gate across this view, pure tripwire, canonical
 // policy precheck, credential pin/401, reservation and real owner tagging.
 func (s *Server) requestSecretViewLocked() *requestSecretSnapshot {
 	state := s.currentMembers()
-	if state == nil || state.version != MemberRegistryV2 {
+	if state == nil {
 		return nil
 	}
 	return state.requestView
@@ -64,13 +62,13 @@ func (state *memberState) hasSecretResource(name, authority string) bool {
 // This public-stand-in-only precheck has no named-header exemption. Main
 // calls it on the original DNS/SNI/authority before resolution or origin IO,
 // while holding the same gate as the existing canonical policy admission.
-func (s *Server) checkSecretDestinationLocked(raw string) *proto.Error {
+func (s *Server) checkSecretDestinationLocked(raw string) *requestSecretFailure {
 	view := s.requestSecretViewLocked()
 	if view == nil {
 		return nil
 	}
 	if failure := view.tripwire(raw, true); failure != nil {
-		return failure.detail
+		return failure
 	}
 	return nil
 }

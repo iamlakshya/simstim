@@ -15,13 +15,15 @@ import (
 // bind is a Bind as the stages see it: what Command pinned, and the
 // descriptor that holds it.
 type bind struct {
-	Path  string `json:"path"`
-	Write bool   `json:"write,omitempty"`
-	Kind  kind   `json:"kind"`
-	Dev   uint64 `json:"dev"`
-	Ino   uint64 `json:"ino"`
-	FD    int    `json:"fd"`
-	Real  string `json:"real"` // the path that Command resolved
+	SuppliedV1  bool   `json:"supplied_v1,omitempty"`
+	AnonymousV1 bool   `json:"anonymous_v1,omitempty"`
+	Path        string `json:"path"`
+	Write       bool   `json:"write,omitempty"`
+	Kind        kind   `json:"kind"`
+	Dev         uint64 `json:"dev"`
+	Ino         uint64 `json:"ino"`
+	FD          int    `json:"fd"`
+	Real        string `json:"real"` // the path that Command resolved
 }
 
 // rule is a PathRule as the stages see it. FD 0 means the stage's own
@@ -93,21 +95,35 @@ func pin(c checked, files int) (pinned, error) {
 	}
 	var lines [][]devIno
 	for _, b := range c.binds {
-		fd, err := openPath(unix.AT_FDCWD, b.Path, unix.RESOLVE_NO_MAGICLINKS)
-		if err != nil {
-			return fail(pinError("cannot bind "+quote(b.Path),
-				"Make the path exist on the host, or leave it out of Spec.Binds.", err))
+		var owned *os.File
+		var err error
+		if b.File != nil {
+			owned, err = captureFile(b.File, "supplied bind", "Keep the same original supplied source open until Command captures it.")
+		} else {
+			var fd int
+			fd, err = openPath(unix.AT_FDCWD, b.Path, unix.RESOLVE_NO_MAGICLINKS)
+			if err == nil {
+				owned = os.NewFile(uintptr(fd), b.Path)
+			}
 		}
-		p.files = append(p.files, os.NewFile(uintptr(fd), b.Path))
+		if err != nil {
+			return fail(pinError("cannot bind "+quote(b.Path), "Keep the selected original source available.", err))
+		}
+		p.files = append(p.files, owned)
+		fd := int(owned.Fd())
 		real, err := os.Readlink("/proc/self/fd/" + strconv.Itoa(fd))
-		if err == nil && strings.HasSuffix(real, " (deleted)") {
+		anonymous := false
+		if err == nil && b.File != nil {
+			anonymous, err = checkSuppliedBindV1(fd, b.Write, real)
+		}
+		if err == nil && strings.HasSuffix(real, " (deleted)") && !anonymous {
 			err = errors.New("it was deleted")
 		}
 		if err != nil {
 			return fail(failure("cannot bind "+quote(b.Path)+": "+err.Error(),
 				"Make the path exist on the host, or leave it out of Spec.Binds."))
 		}
-		if why := forbidden(real, hide); why != "" {
+		if why := forbidden(real, hide); !anonymous && why != "" {
 			return fail(failure("a jail cannot bind "+quote(b.Path)+", which is "+why,
 				"Bind only the folders and files that the command needs."))
 		}
@@ -115,13 +131,16 @@ func pin(c checked, files int) (pinned, error) {
 		if err := unix.Fstat(fd, &st); err != nil {
 			return fail(failure("cannot bind "+quote(b.Path)+": "+err.Error(), "Report this as a bug."))
 		}
-		line, err := lineage(fd, real)
+		line := []devIno{{st.Dev, st.Ino}}
+		if !anonymous {
+			line, err = lineage(fd, real)
+		}
 		if err != nil {
 			return fail(pinError("cannot read the folders above "+quote(b.Path),
 				"Check that no other program moves the path while jail.Command runs.", err))
 		}
 		lines = append(lines, line)
-		p.binds = append(p.binds, bind{Path: b.Path, Write: b.Write,
+		p.binds = append(p.binds, bind{SuppliedV1: b.File != nil, AnonymousV1: anonymous, Path: b.Path, Write: b.Write,
 			Kind: kindOf(st.Mode), Dev: st.Dev, Ino: st.Ino, FD: base + len(p.files) - 1, Real: real})
 	}
 	if err := checkAliases(p.binds, lines); err != nil {
@@ -302,7 +321,13 @@ func checkAliases(binds []bind, lines [][]devIno) error {
 func reopen(binds []bind) ([]int, error) {
 	fds := make([]int, 0, len(binds))
 	for _, b := range binds {
-		fd, err := openPath(unix.AT_FDCWD, b.Path, unix.RESOLVE_NO_MAGICLINKS)
+		fd := -1
+		var err error
+		if b.SuppliedV1 {
+			fd, err = unix.FcntlInt(uintptr(b.FD), unix.F_DUPFD_CLOEXEC, 3)
+		} else {
+			fd, err = openPath(unix.AT_FDCWD, b.Path, unix.RESOLVE_NO_MAGICLINKS)
+		}
 		var st unix.Stat_t
 		if err == nil {
 			err = unix.Fstat(fd, &st)
@@ -310,7 +335,17 @@ func reopen(binds []bind) ([]int, error) {
 		if err == nil && (st.Dev != b.Dev || st.Ino != b.Ino) {
 			err = errors.New("it names another file than when jail.Command pinned it")
 		}
-		if err == nil {
+		if err == nil && b.SuppliedV1 {
+			var anonymous bool
+			var now string
+			now, err = os.Readlink("/proc/self/fd/" + strconv.Itoa(fd))
+			if err == nil {
+				anonymous, err = checkSuppliedBindV1(fd, b.Write, now)
+			}
+			if err == nil && anonymous != b.AnonymousV1 {
+				err = errors.New("the supplied bind changed anonymous object class")
+			}
+		} else if err == nil {
 			err = samePath(fd, b.Real)
 		}
 		if err != nil {

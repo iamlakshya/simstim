@@ -7,7 +7,7 @@ title: "simstim host alerts off"
 Turn alerts off on a host: remove its alerts file.
 
 ```text
-simstim host alerts off <host>
+simstim host alerts off <host> [flags]
 ```
 
 ## Examples

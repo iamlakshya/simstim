@@ -149,13 +149,23 @@ func (s *Server) AnswerDNS(ctx context.Context, raw []byte) []byte {
 
 	q, err := parseDNSQuery(raw)
 	if err != nil {
+		if q.question.Name.Length != 0 {
+			if refusal := s.checkSecretDestination(ctx, q.question.Name.String()); refusal != nil {
+				packet, _ := packDNSResponse(q, dnsmessage.RCodeRefused, nil)
+				s.emitAudit(s.formatAudit(AuditEntry{Host: decoyAuditDestination(q.question.Name.String(), refusal), Mode: "dns", Method: "DNS", Status: http.StatusForbidden, Rule: refusal.auditRule(), Secret: refusal.decoy, Decision: "deny"}))
+				return packet
+			}
+		}
 		return classifyDNSQueryError(raw)
 	}
 
 	if refusal := s.checkSecretDestination(ctx, q.question.Name.String()); refusal != nil {
 		packet, _ := packDNSResponse(q, dnsmessage.RCodeRefused, nil)
-		s.emitAudit(s.formatAudit(AuditEntry{Host: q.host, Mode: "dns", Method: "DNS", Status: http.StatusForbidden, Rule: refusal.Code, Decision: "deny"}))
+		s.emitAudit(s.formatAudit(AuditEntry{Host: decoyAuditDestination(q.host, refusal), Mode: "dns", Method: "DNS", Status: http.StatusForbidden, Rule: refusal.auditRule(), Secret: refusal.decoy, Decision: "deny"}))
 		return packet
+	}
+	if s.decoyHost(q.host, 443) {
+		return answerSyntheticDNS(synth, q, dnsHostVerdict{allowedPorts: []int{443}})
 	}
 	eng = s.currentEngine()
 	verdict := eng.evaluateDNS(q.host, s.now())

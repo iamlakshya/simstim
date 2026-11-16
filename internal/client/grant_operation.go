@@ -15,6 +15,8 @@ const (
 	grantOpNew
 	grantOpJoin
 	grantOpResume
+	grantOpPush
+	grantOpRootStep
 )
 
 type newGrantIntent struct {

@@ -76,5 +76,8 @@ func changeHostFiles(ctx context.Context, c HostChange, hosts []Host, withPin bo
 		recordHostForgetWitness(ctx, c, generation)
 		recordHostMachineSourceBirthCommit(ctx, c)
 	}
+	if observation, _ := ctx.Value(hostStateObservationKey{}).(*HostStateObservation); observation != nil && observation.role == hostStateCreation && c.Was == nil && c.Now != nil {
+		hooks.observeCommit = func() error { return recordHostCreationCommittedSource(ctx, observation, c, out) }
+	}
 	return out, hooks, nil
 }

@@ -10,14 +10,13 @@ import (
 
 	"github.com/iamlakshya/simstim/internal/brand"
 	"github.com/iamlakshya/simstim/internal/client"
-	"github.com/iamlakshya/simstim/internal/host/hosttest"
 	"github.com/iamlakshya/simstim/internal/proto"
 )
 
 // The whole list of suggestions, and the Try: line, for words that are
 // not commands (docs/contributing/cli-spec.md 4.3).
 func TestSuggestions(t *testing.T) {
-	hosttest.New(t)
+	newTestHome(t)
 	help := func(c string) string { return strings.TrimSpace(brand.Name+" "+c) + " --help" }
 	for _, c := range []struct {
 		args []string
@@ -75,7 +74,7 @@ func TestSuggestions(t *testing.T) {
 // The Try: line fixes the word that the parser found, where the user typed
 // it, and not an earlier word that looks the same.
 func TestTheTryLineFixesTheWordWhereItIs(t *testing.T) {
-	hosttest.New(t)
+	newTestHome(t)
 	for _, c := range []struct {
 		args []string
 		try  string
@@ -92,7 +91,6 @@ func TestTheTryLineFixesTheWordWhereItIs(t *testing.T) {
 		}
 	}
 }
-
 func TestSynonymsNameRealCommands(t *testing.T) {
 	root := Root()
 	for parent, words := range synonyms {
@@ -109,7 +107,8 @@ func TestSynonymsNameRealCommands(t *testing.T) {
 // The acceptance lines of task C2 (docs/contributing/cli-plan.md), and the
 // errors of names that do not exist.
 func TestErrorsOfTheCommandLine(t *testing.T) {
-	newTestHost(t)
+	newTestHome(t)
+	fakeBox(t, nil)
 	for _, c := range []struct {
 		args []string
 		code int
@@ -183,70 +182,9 @@ func TestErrorsOfTheCommandLine(t *testing.T) {
 	}
 }
 
-// A hosts.toml that does not decode is the user's to fix: it says where,
-// and that config check finds each mistake.
-// One that cannot be read is a failure.
-func TestBrokenHostsFile(t *testing.T) {
-	hosttest.New(t)
-	path := filepath.Join(client.ConfigDir(), "hosts.toml")
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	for body, where := range map[string]string{
-		"[[host]]\nname = \"box\"\nssh = \n":             "hosts.toml, line 3, column 7: expected value",
-		"[[host]]\n  name = 1\n":                         "hosts.toml, line 2, column 3: incompatible types",
-		"[[host]]\nname = \"box\"\nlabels = { a = 1 }\n": "hosts.toml, line 3, column 1: incompatible types",
-	} {
-		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		got, code := lineErr(t, "host", "ls")
-		if code != 2 || !strings.Contains(got, where) || !strings.Contains(got, "Try: "+brand.Name+" config check\n") {
-			t.Errorf("%q gives %d:\n%s", body, code, got)
-		}
-	}
-	if os.Geteuid() == 0 {
-		t.Skip("root reads any file")
-	}
-	if err := os.Chmod(path, 0); err != nil {
-		t.Fatal(err)
-	}
-	if got, code := lineErr(t, "host", "ls"); code != 1 || !strings.Contains(got, "permission denied") || !strings.Contains(got, "debug bundle") {
-		t.Errorf("an unreadable hosts.toml gives %d:\n%s", code, got)
-	}
-}
-
-// A host's codes exit with the kind of the 5.1 table, through Main, the
-// same as the client's own checks of the same mistakes.
-func TestHostCodesExitThroughMain(t *testing.T) {
-	newTestHost(t)
-	id := newSession(t, "s", "sleep", "60")
-	old := os.Args
-	defer func() { os.Args = old }()
-	for _, c := range []struct {
-		args []string
-		code int
-		has  string
-	}{
-		{[]string{"new", "box", "--agent", "nosuch", "--detach"}, 3, `unknown agent "nosuch"`},
-		{[]string{"rename", "box/" + id, " "}, 2, "a name is needed"},
-		{[]string{"new", "box", "--memory-max", "1M", "--detach"}, 2, "--memory-max"},
-		{[]string{"new", "box", "--dir", "/no/such/folder", "--detach"}, 4, "does not exist"},
-		{[]string{"host", "rm", "nowhere"}, 3, "no host named"},
-		{[]string{"atach"}, 2, "unknown command"},
-		{[]string{"config", "path"}, 0, ""},
-	} {
-		os.Args = append([]string{"client"}, c.args...)
-		got, code := captureStderr(t, Main)
-		if code != c.code || !strings.Contains(got, c.has) {
-			t.Errorf("Main %q = %d, want %d:\n%s", c.args, code, c.code, got)
-		}
-	}
-}
-
 // A noun alone prints its help and exits with 0, and doctor alone runs.
 func TestNounsAloneShowTheirHelp(t *testing.T) {
-	hosttest.New(t)
+	newTestHome(t)
 	for _, args := range [][]string{{"host"}, {"agents"}, {"config"}, {"debug"}, {"completion"}} {
 		out, err := run(t, args...)
 		if err != nil || !strings.Contains(out, "Available Commands:") {
@@ -261,7 +199,7 @@ func TestNounsAloneShowTheirHelp(t *testing.T) {
 // Each code that a host sends for a request that is otherwise right exits
 // through Main with the kind of the 5.1 table.
 func TestEachHostCodeExitsThroughMain(t *testing.T) {
-	hosttest.New(t)
+	newTestHome(t)
 	_, tr := withFake(t, nil)
 	if err := client.SaveHostsContext(context.Background(), []client.Host{{Name: "box", Machine: &client.Machine{Provider: "fake", ID: "fake-box"}}}); err != nil {
 		t.Fatal(err)
@@ -281,13 +219,23 @@ func TestEachHostCodeExitsThroughMain(t *testing.T) {
 	}
 }
 
-// A hint names the session that the command found by host/ID, not by the
-// words that the user typed, which a shell would need quoted.
-func TestHintsQuoteWhatTheUserTyped(t *testing.T) {
-	newTestHost(t)
-	id := newSession(t, "a b", "sleep", "60")
-	got, code := lineErr(t, "forward", "box/a b", "x;y")
-	if want := "\nTry: " + brand.Name + " forward box/" + id + " 3000\n"; code != 2 || !strings.Contains(got, want) {
-		t.Errorf("forward = %d:\n%s\nwant %q", code, got, want)
+func TestBrokenHostsFile(t *testing.T) {
+	newTestHome(t)
+	path := filepath.Join(client.ConfigDir(), "hosts.toml")
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for body, where := range map[string]string{
+		"[[host]]\nname = \"box\"\nssh = \n":             "hosts.toml, line 3, column 7: expected value",
+		"[[host]]\n  name = 1\n":                         "hosts.toml, line 2, column 3: incompatible types",
+		"[[host]]\nname = \"box\"\nlabels = { a = 1 }\n": "hosts.toml, line 3, column 1: incompatible types",
+	} {
+		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		got, code := lineErr(t, "host", "ls")
+		if code != 2 || !strings.Contains(got, where) || !strings.Contains(got, "Try: "+brand.Name+" config check\n") {
+			t.Errorf("%q gives %d:\n%s", body, code, got)
+		}
 	}
 }

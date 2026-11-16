@@ -5,6 +5,7 @@ package guest
 import (
 	"context"
 	"log/slog"
+	"net"
 	"os"
 	"os/exec"
 	"os/signal"

@@ -64,6 +64,7 @@ func (s *Supervisor) planSavedMembers(ctx context.Context, values map[string]map
 		}
 		child := s.memberSupervisor(m)
 		args := proto.CtlStartArgs{RunToken: child.runToken, Session: child.id, Agent: m.Agent.Kind, Argv: slices.Clone(m.Agent.Argv), Env: slices.Clone(m.Env), Cwd: s.m.Cwd, Cols: m.Term.Cols, Rows: m.Term.Rows, Hooks: slices.Clone(m.Agent.Hooks), Restored: true}
+		s.bootDecoyArgs(&args)
 		shellStartArgs(m, &args)
 		environment, err := s.restoredSecretEnvironment(ctx, child, secretValues(values[child.id]))
 		if err != nil {

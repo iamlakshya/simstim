@@ -13,6 +13,13 @@ func (c *Conn) beginGrant(ctx context.Context, kind string, sensitive bool) (con
 	if err := requireRemoteGrantRequest(ctx); err != nil {
 		return ctx, nil, err
 	}
+	return c.beginGrantSource(ctx, kind, sensitive)
+}
+
+func (c *Conn) beginGrantSource(ctx context.Context, kind string, sensitive bool) (context.Context, func(), error) {
+	if c == nil || c.agentOnly {
+		return ctx, nil, grantOperationError()
+	}
 	ctx, unlock, err := LockHost(ctx, c.Host.Name, kind)
 	if err != nil {
 		return ctx, nil, err

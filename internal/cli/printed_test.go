@@ -256,7 +256,7 @@ func TestATryLineRunsAsWritten(t *testing.T) {
 // another session. Sessions A and B have names that clean to the same
 // text, so A's name, cleaned, is B's.
 func TestParserSuggestionsNameNoOtherSession(t *testing.T) {
-	newTestHost(t)
+	newTestHome(t)
 	list := trickyList()
 	a, aName, bName := "a2a2a2a2", "auth\u202e", "auth"
 	for _, args := range [][]string{

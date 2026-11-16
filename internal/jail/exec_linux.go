@@ -27,6 +27,11 @@ func runExec(c *setup, env []string) error {
 	// Never unlocked: the Landlock layer holds for this thread, which runs
 	// execve.
 	runtime.LockOSThread()
+	if c.GvisorV1Version == 1 {
+		if err := prepareGvisorBootstrapV1(); err != nil {
+			return err
+		}
+	}
 	rs, err := commandRules(c)
 	if err != nil {
 		return err

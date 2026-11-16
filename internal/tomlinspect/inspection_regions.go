@@ -19,7 +19,7 @@ func (h *Inspection) BeginState(token StateCharge) (*StateRegion, error) {
 		return nil, err
 	}
 	p := i.outer.pendingState
-	if !i.outer.tomlDone || i.outer.stateActive || i.outer.countActive || token.owner != i || token.epoch != h.epoch || token.id == 0 || token.id != p.id {
+	if !i.outer.tomlDone || i.outer.object.active || i.outer.object.pending.id != 0 || i.outer.stateActive || i.outer.countActive || token.owner != i || token.epoch != h.epoch || token.id == 0 || token.id != p.id {
 		return nil, i.scopeFailure(ErrIndexInvariant)
 	}
 	charge, err := statePhysicalCharge(p.counts)
@@ -69,7 +69,7 @@ func (s *StateRegion) Close() error {
 	if err != nil {
 		return err
 	}
-	if i.outer.entryActive || i.outer.pendingEntry.id != 0 || i.outer.countActive {
+	if i.outer.object.active || i.outer.object.pending.id != 0 || i.outer.entryActive || i.outer.pendingEntry.id != 0 || i.outer.countActive {
 		return i.scopeFailure(ErrIndexInvariant)
 	}
 	if err = i.outer.regions.retire(i.outer.books[1].ref); err != nil {
@@ -90,7 +90,7 @@ func (s *StateRegion) BeginEntry(token EntryCharge) (*EntryRegion, error) {
 		return nil, err
 	}
 	p := i.outer.pendingEntry
-	if i.outer.entryActive || i.outer.countActive || token.owner != i || token.epoch != s.h.epoch || token.parent != s.id || token.id == 0 || token.id != p.id || p.parent != s.id {
+	if i.outer.object.active || i.outer.object.pending.id != 0 || i.outer.entryActive || i.outer.countActive || token.owner != i || token.epoch != s.h.epoch || token.parent != s.id || token.id == 0 || token.id != p.id || p.parent != s.id {
 		return nil, i.scopeFailure(ErrIndexInvariant)
 	}
 	charges, err := entryPhysicalCharge(p.counts)
@@ -170,7 +170,15 @@ func (e *EntryRegion) FinishEntry() error { return e.Close() }
 // multiplier of historical source size or an address-space-max fallback.
 // Failure for a correct legal source is a bound/implementation defect.
 func (i *Inspector) installCharge(global, runs, grammar uint64) error {
-	pages, err := chargeSum(i.outer.tomlBound, global, runs, grammar)
+	object := uint64(0)
+	if i.outer.object.active {
+		var err error
+		object, err = objectPhysicalCharge(i.outer.object.fields)
+		if err != nil {
+			return i.scopeFailure(err)
+		}
+	}
+	pages, err := chargeSum(i.outer.tomlBound, global, runs, grammar, object)
 	if err != nil {
 		return i.scopeFailure(err)
 	}

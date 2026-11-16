@@ -115,10 +115,11 @@ func InstallHelper(ctx context.Context, s Transport, p Platform) error {
 	files := []struct {
 		name string
 		data []byte
-	}{{brand.VTBinary, nil}, {brand.HostBinary, bin}}
+	}{{brand.VTBinary, nil},{brand.UsernsBinary,nil}, {brand.HostBinary, bin}}
 	if vt, ok := helpers.VT(p.OS, p.Arch); ok {
 		files[0].data = vt
 	}
+	if launcher,ok:=helpers.Userns(p.OS,p.Arch);ok{files[1].data=launcher}
 	ver := HelperVersion()
 	for i, f := range files {
 		if f.data == nil {

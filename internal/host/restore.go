@@ -45,7 +45,8 @@ func Restore(all bool) []RestoreResult {
 // restoreOne looks at one session for Restore, under the session's lock.
 // It reports false for a session to leave out of the results: one whose
 // holder runs, or one without a manifest.
-func restoreOne(id, boot string, all bool) (RestoreResult, bool) {
+func restoreOne(id,boot string,all bool)(RestoreResult,bool){
+	if err:=CheckCaller();err!=nil{return RestoreResult{ID:id,Action:"failed",Why:err.Error()},true}
 	m, err := LoadManifest(id)
 	if err != nil {
 		return RestoreResult{}, false
@@ -54,14 +55,11 @@ func restoreOne(id, boot string, all bool) (RestoreResult, bool) {
 		return RestoreResult{}, false
 	}
 	r := RestoreResult{ID: id, Name: m.Name}
-	unlock, err := lockSession(id)
-	if err != nil {
-		r.Action, r.Why = "skipped", "a resume, a restore or a delete of it runs"
-		return r, true
-	}
-	defer unlock()
-	// Read it again under the lock: a resume may have changed it.
-	if m, err = LoadManifest(id); err != nil {
+	operation,err:=BeginSessionOperation(context.Background(),id,renameWait)
+	if err!=nil {r.Action,r.Why="skipped","a resume, a restore or a delete of it runs";return r,true}
+	defer operation.Close()
+	// Read through the same retained native source after ownership.
+	if m,err=operation.Load();err!=nil {
 		return RestoreResult{}, false
 	}
 	if holderPendingOrAlive(id, m) || oldHolderRuns(id) {
@@ -71,9 +69,17 @@ func restoreOne(id, boot string, all bool) (RestoreResult, bool) {
 		r.Action, r.Why = "failed", err.Error()
 		return r, true
 	}
-	r.Name = m.Name
+	r.Name=m.Name
+	if err:=validateRestartWall(m);err!=nil{r.Action,r.Why="failed",err.Error();return r,true}
+	var selection *AutomaticRestoreSelection
+	if m.Wall!=nil && m.Wall.Driver!="plain" {
+		selection,err=SelectAutomaticRestore(m)
+		if err!=nil{r.Action,r.Why="failed",err.Error();return r,true}
+	}
+	wanted:=!m.Ended()
+	if selection!=nil{wanted=selection.PrimaryWanted || len(selection.MemberIDs)>0}
 	switch {
-	case m.Ended():
+	case !wanted:
 		r.Action, r.Why = "skipped", "the agent had ended"
 	case m.Restart.Policy != "resume":
 		r.Action, r.Why = "skipped", "restart policy is "+m.Restart.Policy
@@ -82,8 +88,9 @@ func restoreOne(id, boot string, all bool) (RestoreResult, bool) {
 	case m.Restart.MaxAttempts > 0 && m.Run.RespawnCount >= m.Restart.MaxAttempts:
 		r.Action, r.Why = "skipped", fmt.Sprintf("already restored %d times", m.Run.RespawnCount)
 	default:
+		if err:=admitRestartMemoryV1(operation.ownerContext,operation,0);err!=nil{r.Action,r.Why="failed",err.Error();return r,true}
 		m.Run.RespawnCount++
-		argv, why, err := startAgain(m, again{label: restoredLabel, reason: "restored after a host restart"})
+		argv,why,err:=startAgain(m,again{operation:operation,automatic:selection,label:restoredLabel,reason:"restored after a host restart",allowMissing:true})
 		r.Argv = argv
 		if err != nil {
 			r.Action, r.Why = "failed", err.Error()
@@ -101,6 +108,8 @@ func restoreOne(id, boot string, all bool) (RestoreResult, bool) {
 // again says why a session's agent starts again: restore after a host
 // restart, or the user's resume (resume.go).
 type again struct {
+	operation *SessionOperation
+	automatic *AutomaticRestoreSelection
 	members        []api.MemberResumeArgs
 	allowMissing   bool
 	secretDelivery *api.SecretDeliveryIntent
@@ -124,9 +133,9 @@ func startAgain(m *Manifest, a again) (argv []string, why string, err error) {
 	if err := ValidateManifestStart(m); err != nil {
 		return nil, "", err
 	}
-	argv, why, err = resumeArgv(m)
-	if err != nil {
-		return nil, why, err
+	if a.automatic!=nil && !a.automatic.PrimaryWanted {argv=slices.Clone(m.Agent.Argv);why="restored its selected sandbox members"}else{
+		argv,why,err=resumeArgv(m)
+		if err!=nil{return nil,why,err}
 	}
 	dropUnusableID(m)
 	m.Agent.Argv = argv
@@ -139,18 +148,32 @@ func startAgain(m *Manifest, a again) (argv []string, why string, err error) {
 	m.Run.BootID = BootID()
 	// The old processes are gone. The new holder records its own.
 	m.Run.HolderPID, m.Run.AgentPID, m.Run.Unit = 0, 0, ""
-	m.Limits.MemoryMax = sessionMemoryMax(m.Limits.MemoryAsked)
+	if a.operation!=nil {if err:=applyAdmittedRestartMemoryV1(a.operation,m);err!=nil{return nil,why,err}}else{m.Limits.MemoryMax=sessionMemoryMax(m.Limits.MemoryAsked)}
 	// To the nanosecond: the holder compares it with the last start, which
 	// can be in the same second. The other label goes: after a restore
 	// that failed to start the agent, a resume must not look like one.
 	now := time.Now().UTC()
+	if a.label==resumedLabel {m.AutomaticRestore=nil}
 	delete(m.Labels, restoredLabel)
 	delete(m.Labels, resumedLabel)
 	m.Labels = withLabel(m.Labels, a.label, now.Format(time.RFC3339Nano))
 	m.Status = Status{State: StateStarting, Since: now, Reason: a.reason + ": " + why}
 	m.Run.StartEnvelope = a.allowMissing || a.members != nil || a.secretDelivery != nil
-	if err := m.Save(); err != nil {
-		return argv, why, err
+	if a.automatic!=nil {if err:=PinAutomaticRestore(m,a.automatic);err!=nil{return argv,why,err}}
+	if a.operation!=nil {
+		if err:=saveRestartManifestV1(a.operation,m);err!=nil{return argv,why,err}
+	}else if err:=m.Save();err!=nil{return argv,why,err}
+	if m.Wall!=nil && m.Wall.Driver!="plain" {
+		if a.operation==nil{return argv,why,sessionLeaseError("the real walled restart has no original owning operation")}
+		if a.automatic!=nil {if err:=prepareAutomaticBootOperationV1(a.operation);err!=nil{return argv,why,err}}
+		delivery:=a.secretDelivery
+		if delivery==nil{delivery=initialDelivery(m)}
+		started,launch,startErr:=startOwnedSessionOperation(a.operation.ownerContext,a.operation,a.secrets,a.members,a.allowMissing,delivery)
+		if launch!=nil{startErr=errors.Join(startErr,launch.Close())}
+		if startErr!=nil{return argv,why,startErr}
+		if started==nil{return argv,why,sessionLeaseError("the original restart returned no durable native readiness")}
+		*m=*started
+		return argv,why,nil
 	}
 	proc, err := startHolder(m)
 	if err != nil && a.label == restoredLabel && (proc != nil || m.Run.Unit != "") {
@@ -334,10 +357,8 @@ func resumeArgv(m *Manifest) ([]string, string, error) {
 	default:
 		argv = append([]string(nil), m.Agent.Argv...)
 	}
-	for i, s := range argv {
-		if s == "$SHELL" {
-			argv[i] = LoginShell()
-		}
+	if m.Wall!=nil && (m.Wall.Driver=="chv" || m.Wall.Driver=="firecracker"){argv=vmCommand(argv)}else{
+		for i,s:=range argv{if s=="$SHELL"{argv[i]=LoginShell()}}
 	}
 	argv = withOptions(argv, m.Agent.Hooks, m.Agent.Inline)
 	for _, sp := range agent.Dangers(argv) {

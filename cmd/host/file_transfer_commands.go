@@ -6,6 +6,7 @@ import (
 )
 
 func init() {
+	commands[guest.DecoyHelperMode]=guest.RunDecoyHelper
 	commands[inputtransfer.HelperMode] = guest.RunInputHelper
 	commands[inputtransfer.HelperApplyMode] = guest.RunInputApplyHelper
 	commands[guest.PutHelperMode] = guest.RunPutHelper

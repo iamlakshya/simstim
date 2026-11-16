@@ -1,5 +1,11 @@
 package alerts
 
+import (
+	"crypto/rand"
+	"encoding/hex"
+	"sync"
+)
+
 // Stream-only event kinds do not select an alert destination.
 const (
 	StateChanged    = "state_changed"
@@ -21,10 +27,17 @@ func IsStreamKind(kind string) bool {
 	return false
 }
 
-const eventHistory = 128
+// EventHistoryLimit bounds both live snapshots and native audit replay.
+const EventHistoryLimit = 128
+
+const eventHistory = EventHistoryLimit
 const eventWatchers = 8
 
 type eventBuffer struct {
+	publish  sync.Mutex
+	stream   string
+	next     uint64
+	failure  error
 	history  []Event
 	watchers map[*EventWatch]bool
 }
@@ -50,6 +63,12 @@ func (d *Dispatcher) WatchEvents(follow bool) *EventWatch {
 	watch.Events = watch.queue
 	for _, ev := range d.events.history {
 		watch.Snapshot = append(watch.Snapshot, copyStreamEvent(ev))
+	}
+	if d.events.failure != nil {
+		watch.failure = d.events.failure
+		watch.closed = true
+		close(watch.queue)
+		return watch
 	}
 	if !follow || d.closed {
 		watch.closed = true
@@ -95,22 +114,55 @@ func copyStreamEvent(ev Event) Event {
 	return ev
 }
 
-func (d *Dispatcher) publishEvent(ev Event) {
+func (d *Dispatcher) publishEvent(ev Event) error {
 	switch ev.Event {
 	case Exited, Failed:
 		ev.Event = Ended
 	}
 	if !IsStreamKind(ev.Event) {
-		return
+		return nil
 	}
 	// Streaming is independent of alert destinations and their ten-second
 	// needs_input delay. Detail is private and stays off on this channel.
 	ev = prepare(ev, d.o.Host, &Settings{})
 	ev = copyStreamEvent(ev)
+	d.events.publish.Lock()
+	defer d.events.publish.Unlock()
+	d.mu.Lock()
+	if d.closed {
+		d.mu.Unlock()
+		return nil
+	}
+	if d.events.failure != nil {
+		err := d.events.failure
+		d.mu.Unlock()
+		return err
+	}
+	if d.events.stream == "" {
+		var token [16]byte
+		if _, err := rand.Read(token[:]); err != nil {
+			d.failEventsLocked(&Error{Msg: "the native event stream could not obtain an identity", Hint: "Run events again after checking the supervisor log."})
+			failure := d.events.failure
+			d.mu.Unlock()
+			return failure
+		}
+		d.events.stream = hex.EncodeToString(token[:])
+	}
+	d.events.next++
+	ev.Stream, ev.Sequence = d.events.stream, d.events.next
+	d.mu.Unlock()
+	if d.o.PublishEvent != nil {
+		if err := d.o.PublishEvent(copyStreamEvent(ev)); err != nil {
+			d.mu.Lock()
+			d.failEventsLocked(err)
+			d.mu.Unlock()
+			return err
+		}
+	}
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if d.closed {
-		return
+		return nil
 	}
 	if len(d.events.history) == eventHistory {
 		copy(d.events.history, d.events.history[1:])
@@ -126,6 +178,17 @@ func (d *Dispatcher) publishEvent(ev Event) {
 			delete(d.events.watchers, watch)
 			close(watch.queue)
 		}
+	}
+	return nil
+}
+
+func (d *Dispatcher) failEventsLocked(err error) {
+	d.events.failure = err
+	for watch := range d.events.watchers {
+		watch.failure = err
+		watch.closed = true
+		close(watch.queue)
+		delete(d.events.watchers, watch)
 	}
 }
 

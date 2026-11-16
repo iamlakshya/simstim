@@ -110,7 +110,7 @@ func oldRow(old string) *oldForm {
 
 var twoReleasesAfter = client.TwoReleasesAfter
 
-var oldInstallForce = oldRow("agents install --force")
+var oldInstallForce = oldRow("--force")
 
 // oldNamesOf lists the old names of the command c that still work, such
 // as "kill" for rm. A suggestion counts them as names of c, so a word near

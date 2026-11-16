@@ -4,14 +4,12 @@ import (
 	"errors"
 	"io"
 	"os"
-	"regexp"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/iamlakshya/simstim/internal/api"
 	"github.com/iamlakshya/simstim/internal/client"
-	"github.com/iamlakshya/simstim/internal/host/hosttest"
 	"github.com/iamlakshya/simstim/internal/proto"
 )
 
@@ -68,26 +66,6 @@ func TestPrintSessionsKeepsColumns(t *testing.T) {
 	}
 	if a, b := strings.Index(lines[0], "/srv/app"), strings.Index(lines[1], "/srv/api"); a != b {
 		t.Fatalf("the folders do not line up:\n%s\n%s", lines[0], lines[1])
-	}
-}
-
-// Through a real host: an agent that exits with a code, and one that a
-// signal kills. ls says why each ended, and attach says what to try, while
-// their holders still answer.
-func TestLsSaysWhyAnAgentEnded(t *testing.T) {
-	newTestHost(t)
-	crash := newSession(t, "crash", "/bin/sh", "-c", "exit 3")
-	shot := newSession(t, "shot", "/bin/sh", "-c", "kill -KILL $$")
-	want := []*regexp.Regexp{
-		regexp.MustCompile(crash + `\s+crash\s+.*errored \(exit code 3\)`),
-		regexp.MustCompile(shot + `\s+shot\s+.*errored \(killed\)`),
-	}
-	hosttest.WaitFor(t, 10*time.Second, "ls to say why both agents ended", func() bool {
-		out := ok(t, "ls")
-		return want[0].MatchString(out) && want[1].MatchString(out)
-	})
-	if out := ok(t, "show", "box/crash"); !strings.Contains(out, "errored (exit code 3, from ") {
-		t.Errorf("show box/crash:\n%s", out)
 	}
 }
 

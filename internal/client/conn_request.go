@@ -59,6 +59,11 @@ func (c *Conn) startCall(ctx context.Context, op string, args any) (uint64, chan
 			return 0, nil, err
 		}
 	}
+	if push, _ := ctx.Value(pushPublicationKey{}).(*pushPublicationWitness); push != nil {
+		if err := push.beforeRequest(ctx, c, req, args); err != nil {
+			return 0, nil, err
+		}
+	}
 	ch := make(chan proto.Response, 1)
 	c.mu.Lock()
 	if c.err != nil {

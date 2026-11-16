@@ -275,6 +275,7 @@ func (s *Supervisor) startEgress(ctx context.Context, secrets map[string]string)
 	ep.ctl = newEgressCtl(ctx, s, ctlSt, ep)
 	kinds := host.MemberAgentKinds(s.m, s.knownMembers)
 	initArgs := egress.InitArgs{
+		Decoys:api.CloneDecoyTripwires(s.bootDecoyTripwires),
 		AgentKinds: kinds,
 		SessionID:  s.id,
 		SessionRef: ref,

@@ -2,6 +2,7 @@ package client
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/iamlakshya/simstim/internal/proto"
@@ -14,7 +15,7 @@ type agentReady struct {
 
 // dialAttach leaves the ordinary terminal connection unforwarded. Optional
 // agent preparation owns another, nonshared connection with its own reader.
-func dialAttach(ctx context.Context, h Host, session string, interactive bool) (*Conn, *attachedAgent, error) {
+func dialAttach(ctx context.Context, h Host, session string, interactive bool) (connection *Conn, prepared *attachedAgent, returned error) {
 	if err := checkSessionID(h.Name, session); err != nil {
 		return nil, nil, err
 	}
@@ -22,7 +23,21 @@ func dialAttach(ctx context.Context, h Host, session string, interactive bool) (
 	if err != nil {
 		return nil, nil, err
 	}
-	_, policy, err := effectiveAgentSessionTier(ctx, h, session, conn.HostID())
+	mode, err := newAgentModeResources(ctx)
+	if err != nil {
+		conn.Close()
+		return nil, nil, err
+	}
+	defer func() {
+		if mode != nil {
+			if err := mode.closeInactive(); err != nil {
+				conn.Close()
+				connection, prepared = nil, nil
+				returned = errors.Join(returned, err)
+			}
+		}
+	}()
+	_, policy, err := effectiveAgentSessionTier(ctx, h, session, conn.HostID(), mode)
 	if err != nil {
 		conn.Close()
 		return nil, nil, err
@@ -30,7 +45,11 @@ func dialAttach(ctx context.Context, h Host, session string, interactive bool) (
 	if policy == nil || policy.FutureLineage || policy.FutureDelivery || !policy.SSHAgent {
 		return conn, nil, nil
 	}
-	agent, err := prepareAttachedAgent(ctx, conn, session, interactive)
+	// Transfer this same real mode to preparation; it owns cleanup on
+	// failure and the resulting attached agent owns it on success.
+	ownedMode := mode
+	mode = nil
+	agent, err := prepareAttachedAgentMode(ctx, conn, session, interactive, ownedMode)
 	if err != nil {
 		conn.Close()
 		return nil, nil, err

@@ -11,7 +11,6 @@ import (
 	"github.com/spf13/pflag"
 
 	"github.com/iamlakshya/simstim/internal/brand"
-	"github.com/iamlakshya/simstim/internal/host/hosttest"
 )
 
 // The text of the help: examples, words, placeholders and width
@@ -249,7 +248,7 @@ func TestUsePlaceholders(t *testing.T) {
 // Every command's help fits a terminal of helpWidth columns, the root's
 // and the topics' too.
 func TestHelpFitsTheWidth(t *testing.T) {
-	hosttest.New(t)
+	newTestHome(t)
 	eachCommand(Root(), func(c *cobra.Command) {
 		out := helpOutput(t, append(strings.Fields(shortPath(c)), "--help")...)
 		for _, l := range strings.Split(out, "\n") {
@@ -297,7 +296,7 @@ func TestDisplayed(t *testing.T) {
 // A topic takes no words, as help <topic> does not: an extra word fails
 // with exit code 2.
 func TestTopicsTakeNoWords(t *testing.T) {
-	hosttest.New(t)
+	newTestHome(t)
 	for _, args := range [][]string{{"concepts", "extra"}, {"help", "concepts", "extra"}, {"exit-codes", "x"}} {
 		if got, code := lineErr(t, args...); code != 2 {
 			t.Errorf("%s exits with %d:\n%s", strings.Join(args, " "), code, got)
@@ -325,7 +324,7 @@ func TestTopicProseIsShared(t *testing.T) {
 // The address concept describes the forms all session commands share.
 // Each command resolves - by the last session's ID, before any host is dialled.
 func TestAddressConceptIsTrue(t *testing.T) {
-	hosttest.New(t)
+	newTestHome(t)
 	var line string
 	for _, c := range Concepts() {
 		if c.Word == "address" {

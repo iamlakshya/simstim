@@ -29,13 +29,16 @@ simstim attach my-vps/auth-fix      # go back to a session
 | [`attach`](attach.md) | Attach to a session |
 | [`resume`](resume.md) | Start a session's agent again after it ended, and attach to it |
 | [`ls`](ls.md) | List sessions on every host, or on one |
-| [`show`](show.md) | Describe a session |
+| [`show`](show.md) | Describe one session: its agent, state, folder and the command that attaches to it |
+| [`stop`](stop.md) | Stop a sandbox and keep its work and conversation |
 | [`rm`](rm.md) | Delete a session, after a question |
 | [`rename`](rename.md) | Rename a session |
 | [`send`](send.md) | Type text into a session without attaching, then press Enter |
 | [`ports`](ports.md) | List the TCP ports a session's processes listen on |
-| [`forward`](forward.md) | Forward a session's ports to localhost: all, or those you name |
+| [`forward`](forward.md) | Forward chosen session ports, or one laptop port in reverse |
 | [`pull`](pull.md) | Bring a session's branch into the git repository you are in |
+| [`cp`](cp.md) | Copy files between this computer and a running sandbox |
+| [`events`](events.md) | Read recent session events, or follow them as they happen |
 
 ## Hosts
 
@@ -51,6 +54,7 @@ simstim attach my-vps/auth-fix      # go back to a session
 | [`host create`](host_create.md) | Make a host with lima, docker or e2b, and connect it |
 | [`host doctor`](host_doctor.md) | Check a host's setup, and with `--fix` fix what it can |
 | [`host ls`](host_ls.md) | List hosts |
+| [`host prepare`](host_prepare.md) | Probe a host and show its optional root steps |
 | [`host rekey`](host_rekey.md) | Replace a host's pinned host key, after you confirm |
 | [`host restore`](host_restore.md) | Start again the sessions that a host restart stopped |
 | [`host rm`](host_rm.md) | Forget a host, or delete a created machine |
@@ -62,12 +66,25 @@ simstim attach my-vps/auth-fix      # go back to a session
 | [`host test`](host_test.md) | Check that a host answers, and how fast |
 | [`host upgrade`](host_upgrade.md) | Install this client's helper on a host |
 
+## Policy
+
+| Command | What it does |
+| --- | --- |
+| [`policy`](policy.md) | Read and change sandbox policy at any layer |
+| [`policy allow`](policy_allow.md) | Add an allow rule at one policy layer |
+| [`policy check`](policy_check.md) | Explain which rule and layer decides a destination |
+| [`policy deny`](policy_deny.md) | Add an deny rule at one policy layer |
+| [`policy log`](policy_log.md) | Read one session's network decisions |
+| [`policy ls`](policy_ls.md) | Show the merged policy and each value's layer |
+| [`policy rm`](policy_rm.md) | Remove a rule from one policy layer |
+
 ## Agents
 
 | Command | What it does |
 | --- | --- |
-| [`agents`](agents.md) | List the agents, and install one on a host |
-| [`agents install`](agents_install.md) | Install an agent on a host with its official installer |
+| [`agents`](agents.md) | List the agents, install one on a host, and log in to it |
+| [`agents install`](agents_install.md) | Install an agent on a host with its vendor's installer, in a session you can watch |
+| [`agents login`](agents_login.md) | Start an agent's own login on a host, in a session you can answer |
 | [`agents ls`](agents_ls.md) | List the agents in the agent table, with how each one installs |
 
 ## Setup and help
@@ -85,10 +102,16 @@ simstim attach my-vps/auth-fix      # go back to a session
 | [`debug start`](debug_start.md) | Turn on the debug of a running session, for 30 minutes or `--for` |
 | [`debug stop`](debug_stop.md) | Turn off the debug of a session at once |
 | [`config`](config.md) | Show the configuration |
+| [`config check`](config_check.md) | Find mistakes in the config files, each with its file and line |
 | [`config keymap`](config_keymap.md) | Print the launcher's commands and their keys |
 | [`config path`](config_path.md) | Print where the configuration lives |
 | [`demo`](demo.md) | Try the launcher with sample data (nothing connects anywhere) |
 | [`version`](version.md) | Print the version |
+| [`completion`](completion.md) | Print the shell completion script for bash, zsh, fish or PowerShell |
+| [`completion bash`](completion_bash.md) | Print the completion script for bash |
+| [`completion fish`](completion_fish.md) | Print the completion script for fish |
+| [`completion powershell`](completion_powershell.md) | Print the completion script for PowerShell |
+| [`completion zsh`](completion_zsh.md) | Print the completion script for zsh |
 | [`help`](help.md) | Show the help of a command or a topic |
 
 ## Help topics

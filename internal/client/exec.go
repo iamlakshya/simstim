@@ -41,6 +41,9 @@ func (c *Conn) RunExec(ctx context.Context, a api.ExecArgs, in *os.File, stdout,
 		return 125, err
 	}
 	defer raw.Close()
+	// Until the carrier starts, this function owns the synchronous response
+	// reader. Later carrier/link defers join before this final reader mark.
+	defer raw.execReadFinished()
 	if !ValidHostID(c.HostID()) || raw.HostID() != c.HostID() || !sameExecTransportSource(c, raw) {
 		return 125, &UserError{Msg: "the host identity changed before exec", Hint: "Check the saved host identity and reconnect.", Code: "host_id_changed", Kind: KindRefused}
 	}

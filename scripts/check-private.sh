@@ -25,8 +25,9 @@ patterns=(
     '(^|[^0-9.])100\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\.[0-9]{1,3}\.[0-9]{1,3}($|[^0-9.])'
     # Tailnet names.
     '[A-Za-z0-9-]+\.ts\.net'
-    # Email addresses.
-    '[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}'
+    # Email addresses have complete DNS labels. A leading hyphen is not
+    # a domain, and a match cannot stop before another domain component.
+    '[A-Za-z0-9._%+-]+@[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?)*\.[A-Za-z]{2,}($|[^A-Za-z0-9.]|\.($|[^A-Za-z0-9]))'
 )
 more_allow=""
 if [ -f private/deny.txt ]; then

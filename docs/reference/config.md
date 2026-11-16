@@ -7,12 +7,18 @@ weight: 2
 
 simstim reads two files from `~/.config/simstim/` (or `$XDG_CONFIG_HOME/simstim/`). `simstim config path` prints where they are.
 
+`simstim config check` reads both files, and prints each mistake with its file and line. It finds TOML errors, unknown keys, values of the wrong type or outside their list, and hosts without a usable name or `ssh`. For an unknown key, it names the nearest known key. A `hosts.toml` that does not decode stops every command that reads it. A `config.toml` that does not decode, or cannot be read, stops nothing: each command warns, and uses the defaults. The launcher shows the warning as a notice.
+
 ## config.toml
 
 Your preferences. Every key is optional; a missing key takes its default.
 
 | Key | Type | Default | What it does |
 | --- | --- | --- | --- |
+| `images.fetch` | string | `"auto"` | Is auto, host or laptop. Auto uses the host when it can reach the release, then falls back to the laptop once if that fetch fails. Host downloads on the host. Laptop copies checked files from here. |
+| `lock` | value | — | Fixes values and denies that narrower layers may not change. |
+| `profiles` | table | — | Names policy layers selected after the repository. |
+| `repos` | table | — | Names policy layers by origin, without a scheme or .git. |
 | `ui.motion` | string | `"auto"` | Turns the launcher's animation on or off: "auto" (off inside SSH sessions, Emacs and JetBrains terminals, and with NO_COLOR or TERM=dumb), "on" or "off". |
 | `attach.detach_key` | string | `"ctrl+\"` | Leaves the session and keeps it running. Press it twice to send it to the agent. |
 | `attach.image_paste_key` | string | `"ctrl+v"` | Uploads the image on the clipboard to the host and pastes its path. Without an image, the key goes to the agent. |
@@ -21,6 +27,7 @@ Your preferences. Every key is optional; a missing key takes its default.
 | `sessions.memory_max` | string | `"auto"` | Caps the memory of each new session, with everything it starts. "auto" gives the host's default: its memory minus a reserve for the system. A size is a number and a unit in powers of 1024, such as "512M", "4G", "4GiB" or "1.5G", from 256M. A host lowers a size above its limit for all sessions together to that limit. `new --memory-max` sets it for one session. |
 | `keymap` | table | — | Rebinds launcher commands by name ("session: delete"). A value is a key, a list of keys, or "" to unbind. `config keymap` lists the names. |
 | `secrets` | table | — | Names environment variables for sessions, each with a command that prints its value on this computer, such as a keychain or password manager read: OPENAI_API_KEY = "op read op://dev/openai/key". A session gets one only when asked (`new --secret`, or a host's secrets). The value goes to that session's environment and is never stored. |
+| `secret_tiers` | table | — | Sets the lowest tier that may receive each named secret. Unlisted names require own; on_hosts is an additional saved-host gate. |
 
 ## hosts.toml
 
@@ -28,6 +35,8 @@ The hosts you added. `host add` writes it, and you can edit it by hand. Each hos
 
 | Key | Type | What it does |
 | --- | --- | --- |
+| `wall_floor` | string | Is the host's actual pinned minimum wall level. |
+| `lock` | value | Fixes values and denies for every session on this host. |
 | `name` | string | Names the host in commands, as in `attach <name>/<session>`. |
 | `ssh` | string | Says how to reach the host: a Host alias from your SSH config, or user@host[:port]. |
 | `ssh_config` | string | Adds an SSH config file to read as well, for example a repo's own. |
@@ -46,4 +55,6 @@ The hosts you added. `host add` writes it, and you can edit it by hand. Each hos
 | `machine.token_command` | string | Prints the E2B API key, for example a read from your keychain. It is used when E2B_API_KEY is not set and the E2B CLI is not logged in. The key is never written down. |
 | `machine.stdin` | string | Says how keys reach an E2B sandbox: "send" (one request for each chunk, the default) or "stream" (one long request; not yet proved on E2B's servers). |
 | `machine.created` | string | Is when `host create` made the machine, as an RFC 3339 time. Lima and Docker give each machine of a host the same name, so this tells them apart for the record of an unfinished `host rm`. |
+| `machine.source` | value | Binds closed-create resource/locator provenance; current sharing is inspected separately. |
 | `secrets` | array of string | Lists secrets from config.toml that every new session on this host gets, for example ["ANTHROPIC_API_KEY"]. `new --secret` adds more. |
+| `repos` | array of string | Lists repositories that may be sent to this host in clone mode. |

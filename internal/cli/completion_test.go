@@ -7,11 +7,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"slices"
 	"strconv"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
 
@@ -509,18 +507,8 @@ func TestCompletionSanitizesUntrustedStrings(t *testing.T) {
 func TestCompletionCorruptAndUnreadableFiles(t *testing.T) {
 	cfgDir, stateDir := isolateCompletionEnv(t)
 
-	checkEmpty := func(label string) {
-		t.Helper()
-		for _, q := range [][]string{{"host", "show", ""}, {"attach", ""}, {"new", "box", "--secret", ""}} {
-			items, dir, errOut := execComplete(t, nil, cobra.ShellCompRequestCmd, q...)
-			if len(items) != 0 || dir != cobra.ShellCompDirectiveNoFileComp || errOut != "" {
-				t.Fatalf("%s (%v): items=%v dir=%d stderr=%q", label, q, items, dir, errOut)
-			}
-		}
-	}
-
 	// 1. Missing files.
-	checkEmpty("missing")
+	checkEmptyCompletion(t, "missing")
 
 	// 2. Syntax errors in TOML and JSON.
 	for path, bad := range map[string]string{
@@ -532,7 +520,7 @@ func TestCompletionCorruptAndUnreadableFiles(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	checkEmpty("corrupt")
+	checkEmptyCompletion(t, "corrupt")
 
 	// 3. Broken hosts.toml still allows cached session completion from launcher.json.
 	validCache := `{"sessions":{"box":[{"id":"abcd2345","name":"ok","agent":"claude","state":"working"}]}}`
@@ -551,7 +539,7 @@ func TestCompletionCorruptAndUnreadableFiles(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	checkEmpty("oversized")
+	checkEmptyCompletion(t, "oversized")
 
 	// 5. Directories where files should be.
 	for _, p := range []string{filepath.Join(cfgDir, "hosts.toml"), filepath.Join(cfgDir, "config.toml"), filepath.Join(stateDir, "launcher.json")} {
@@ -560,38 +548,8 @@ func TestCompletionCorruptAndUnreadableFiles(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	checkEmpty("directory")
+	checkEmptyCompletion(t, "directory")
 
-	// 6. Unreadable files and FIFOs on Unix.
-	if runtime.GOOS != "windows" {
-		for _, p := range []string{filepath.Join(cfgDir, "hosts.toml"), filepath.Join(cfgDir, "config.toml"), filepath.Join(stateDir, "launcher.json")} {
-			_ = os.RemoveAll(p)
-			if err := syscall.Mkfifo(p, 0o600); err != nil {
-				t.Fatal(err)
-			}
-		}
-		done := make(chan struct{})
-		go func() {
-			defer close(done)
-			checkEmpty("fifo")
-		}()
-		select {
-		case <-done:
-		case <-time.After(2 * time.Second):
-			t.Fatal("completion blocked on a FIFO")
-		}
-
-		if os.Geteuid() != 0 {
-			for _, p := range []string{filepath.Join(cfgDir, "hosts.toml"), filepath.Join(cfgDir, "config.toml"), filepath.Join(stateDir, "launcher.json")} {
-				_ = os.RemoveAll(p)
-				if err := os.WriteFile(p, []byte("x"), 0o000); err != nil {
-					t.Fatal(err)
-				}
-				t.Cleanup(func() { _ = os.Chmod(p, 0o600) })
-			}
-			checkEmpty("unreadable")
-		}
-	}
 }
 
 // Old names never appear in completion and write nothing to stderr, even when
@@ -771,6 +729,16 @@ func BenchmarkCompleteSessions(b *testing.B) {
 		items, _ := completeSessions(nil, nil, "")
 		if len(items) != 1000 {
 			b.Fatalf("got %d items, want 1000", len(items))
+		}
+	}
+}
+
+func checkEmptyCompletion(t *testing.T, label string) {
+	t.Helper()
+	for _, q := range [][]string{{"host", "show", ""}, {"attach", ""}, {"new", "box", "--secret", ""}} {
+		items, dir, errOut := execComplete(t, nil, cobra.ShellCompRequestCmd, q...)
+		if len(items) != 0 || dir != cobra.ShellCompDirectiveNoFileComp || errOut != "" {
+			t.Fatalf("%s (%v): items=%v dir=%d stderr=%q", label, q, items, dir, errOut)
 		}
 	}
 }

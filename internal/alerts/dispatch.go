@@ -33,16 +33,19 @@ func (realClock) AfterFunc(d time.Duration, f func()) func() bool {
 
 // Options configure a Dispatcher. Each zero field takes its default.
 type Options struct {
-	Path      string        // the alerts file: paths.AlertsConfig()
-	Host      string        // the host's name in events: the hostname
-	Env       []string      // the environment of command destinations: this process's
-	Dir       string        // the working folder of command destinations: the home folder
-	Logger    *slog.Logger  // where problems are logged: nowhere
-	Clock     Clock         // the real clock
-	Limiter   Limiter       // the host-wide limit: a FileLimiter at paths.AlertsRate()
-	Log       *DeliveryLog  // the delivery log at paths.AlertsLog()
-	HTTP      *http.Client  // NewHTTPClient()
-	RetryWait time.Duration // how long to wait before the one retry: 2 s
+	// PublishEvent appends a prepared, redacted event to the native audit owner.
+	// It grants no authority and must not call back into this dispatcher.
+	PublishEvent func(Event) error
+	Path         string        // the alerts file: paths.AlertsConfig()
+	Host         string        // the host's name in events: the hostname
+	Env          []string      // the environment of command destinations: this process's
+	Dir          string        // the working folder of command destinations: the home folder
+	Logger       *slog.Logger  // where problems are logged: nowhere
+	Clock        Clock         // the real clock
+	Limiter      Limiter       // the host-wide limit: a FileLimiter at paths.AlertsRate()
+	Log          *DeliveryLog  // the delivery log at paths.AlertsLog()
+	HTTP         *http.Client  // NewHTTPClient()
+	RetryWait    time.Duration // how long to wait before the one retry: 2 s
 }
 
 func (o *Options) fill() {
@@ -151,14 +154,17 @@ func New(o Options) *Dispatcher {
 	return d
 }
 
-// Notify queues an event. It never blocks.
+// Notify queues destination delivery without waiting for a destination. The
+// native audit append, when configured, precedes stream publication.
 func (d *Dispatcher) Notify(ev Event) {
 	if d.muted.Load() {
 		return
 	}
 	ev.at = d.o.Clock.Now()
 	ev.gen = d.gen.Load()
-	d.publishEvent(ev)
+	if err := d.publishEvent(ev); err != nil {
+		d.o.Logger.Warn("event persistence failed", "error", err)
+	}
 	d.mu.Lock()
 	if d.closed {
 		d.mu.Unlock()

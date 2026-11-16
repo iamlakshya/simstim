@@ -21,6 +21,10 @@ type eventDirectory struct {
 	root      *os.Root
 	file      *os.File
 	reference cachefs.Reference
+	ancestor  bool
+	identity  os.FileInfo
+	onlyName  string
+	watch     int
 }
 
 // EventsDiscovery owns read-only native notifications on the original private
@@ -56,7 +60,7 @@ func OpenEventsDiscovery() (*EventsDiscovery, error) {
 		_ = unix.Close(fd)
 		return nil, eventsDiscoveryError("the session discovery descriptor is unavailable")
 	}
-	for _, path := range []string{paths.StateDir(), paths.RuntimeDir()} {
+	for _, path := range []string{paths.StateDir()} {
 		if err := d.addDirectory(path); err != nil {
 			return nil, errors.Join(err, d.Close())
 		}
@@ -73,12 +77,7 @@ func eventsDiscoveryError(message string) error {
 
 func (d *EventsDiscovery) addDirectory(path string) error {
 	if pin, exists := d.directories[path]; exists {
-		current, err := cachefs.OpenPrivateRoot(path, false)
-		if err != nil {
-			return err
-		}
-		defer current.Close()
-		return pin.reference.CheckRoot(current)
+		return checkEventDirectory(path, pin)
 	}
 	root, err := cachefs.OpenPrivateRoot(path, false)
 	if err != nil {
@@ -96,7 +95,7 @@ func (d *EventsDiscovery) addDirectory(path string) error {
 	}
 	// The kernel follows this owned descriptor, never a later replacement at
 	// path. IN_ONLYDIR checks the descriptor's object in the same system call.
-	_, err = unix.InotifyAddWatch(d.native, fmt.Sprintf("/proc/self/fd/%d", file.Fd()), unix.IN_ONLYDIR|unix.IN_CREATE|unix.IN_DELETE|unix.IN_MOVED_FROM|unix.IN_MOVED_TO|unix.IN_CLOSE_WRITE|unix.IN_ATTRIB|unix.IN_MOVE_SELF|unix.IN_DELETE_SELF)
+	watch, err := unix.InotifyAddWatch(d.native, fmt.Sprintf("/proc/self/fd/%d", file.Fd()), unix.IN_ONLYDIR|unix.IN_CREATE|unix.IN_DELETE|unix.IN_MOVED_FROM|unix.IN_MOVED_TO|unix.IN_CLOSE_WRITE|unix.IN_ATTRIB|unix.IN_MOVE_SELF|unix.IN_DELETE_SELF)
 	if err != nil {
 		_ = file.Close()
 		_ = root.Close()
@@ -107,25 +106,27 @@ func (d *EventsDiscovery) addDirectory(path string) error {
 		_ = root.Close()
 		return err
 	}
-	d.directories[path] = eventDirectory{root: root, file: file, reference: reference}
+	d.directories[path] = eventDirectory{root: root, file: file, reference: reference, watch: watch}
 	return nil
 }
 
 func (d *EventsDiscovery) refresh() error {
+	if err := d.addDirectory(paths.RuntimeDir()); err != nil {
+		if !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		if err := d.addAncestor(filepath.Dir(paths.RuntimeDir()), filepath.Base(paths.RuntimeDir())); err != nil {
+			return err
+		}
+	}
 	for _, path := range []string{paths.SessionsDir(), filepath.Join(paths.RuntimeDir(), "s")} {
 		if err := d.addDirectory(path); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return err
 		}
 	}
 	for path, pin := range d.directories {
-		current, err := cachefs.OpenPrivateRoot(path, false)
-		if err != nil {
+		if err := checkEventDirectory(path, pin); err != nil {
 			return err
-		}
-		err = pin.reference.CheckRoot(current)
-		closeErr := current.Close()
-		if err != nil || closeErr != nil {
-			return errors.Join(err, closeErr)
 		}
 	}
 	return nil
@@ -166,40 +167,50 @@ func (d *EventsDiscovery) Next(ctx context.Context) error {
 		}
 	}()
 	buffer := make([]byte, 64<<10)
-	n, err := d.file.Read(buffer)
-	if ctx.Err() != nil {
-		return ctx.Err()
-	}
-	if err != nil {
-		return fmt.Errorf("read session discovery: %w", err)
-	}
-	for offset := 0; offset < n; {
-		if n-offset < unix.SizeofInotifyEvent {
-			return eventsDiscoveryError("the native session notification is incomplete")
+	for {
+		n, err := d.file.Read(buffer)
+		if ctx.Err() != nil {
+			return ctx.Err()
 		}
-		mask := binary.NativeEndian.Uint32(buffer[offset+4:])
-		size := int(binary.NativeEndian.Uint32(buffer[offset+12:]))
-		if size > n-offset-unix.SizeofInotifyEvent {
-			return eventsDiscoveryError("the native session notification exceeds its read")
+		if err != nil {
+			return fmt.Errorf("read session discovery: %w", err)
 		}
-		if mask&(unix.IN_Q_OVERFLOW|unix.IN_MOVE_SELF|unix.IN_DELETE_SELF|unix.IN_IGNORED) != 0 {
-			return eventsDiscoveryError("session discovery lost events or an original directory changed")
+		relevant := false
+		for offset := 0; offset < n; {
+			if n-offset < unix.SizeofInotifyEvent {
+				return eventsDiscoveryError("the native session notification is incomplete")
+			}
+			mask := binary.NativeEndian.Uint32(buffer[offset+4:])
+			watch := int(int32(binary.NativeEndian.Uint32(buffer[offset:])))
+			size := int(binary.NativeEndian.Uint32(buffer[offset+12:]))
+			if size > n-offset-unix.SizeofInotifyEvent {
+				return eventsDiscoveryError("the native session notification exceeds its read")
+			}
+			if mask&(unix.IN_Q_OVERFLOW|unix.IN_MOVE_SELF|unix.IN_DELETE_SELF|unix.IN_IGNORED) != 0 {
+				return eventsDiscoveryError("session discovery lost events or an original directory changed")
+			}
+			if d.relevantChange(watch, buffer[offset+unix.SizeofInotifyEvent:offset+unix.SizeofInotifyEvent+size]) {
+				relevant = true
+			}
+			offset += unix.SizeofInotifyEvent + size
 		}
-		offset += unix.SizeofInotifyEvent + size
-	}
-	d.gate.Lock()
-	defer d.gate.Unlock()
-	if d.closed {
-		if err := ctx.Err(); err != nil {
-			return err
+		if !relevant {
+			continue
 		}
-		return os.ErrClosed
+		d.gate.Lock()
+		defer d.gate.Unlock()
+		if d.closed {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			return os.ErrClosed
+		}
+		err = d.refresh()
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		return err
 	}
-	err = d.refresh()
-	if ctx.Err() != nil {
-		return ctx.Err()
-	}
-	return err
 }
 
 // Close closes and joins the actual native reader before releasing its roots.

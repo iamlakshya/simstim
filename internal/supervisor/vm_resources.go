@@ -57,6 +57,7 @@ func (s *Supervisor) protectedVMDriver() (string,error) {
 
 func (s *Supervisor) sandboxForRun() (sandbox,error) {
 	if s.m.Wall==nil{return nil,execRefusal("the supervisor has no selected wall")}
+	if s.m.Wall.Driver=="gvisor" {return prepareGVisor(s.lifetimeContext(),s.m)}
 	if s.m.Wall.Driver!="chv" && s.m.Wall.Driver!="firecracker" {
 		return sandboxFor(s.m)
 	}

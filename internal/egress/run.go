@@ -50,6 +50,8 @@ type InitArgs struct {
 	DNS        string            `json:"dns,omitempty"`
 	Policy     api.Policy        `json:"policy"`
 	Secrets    map[string]string `json:"secrets,omitempty"`
+	// Decoys is private trusted-start tripwire input, never public state.
+	Decoys []api.DecoyTripwire `json:"decoys,omitempty"`
 }
 
 // InitResult carries only public trust material out of the egress process.

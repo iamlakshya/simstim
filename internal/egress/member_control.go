@@ -99,6 +99,9 @@ func (s *Server) replaceControlPolicy(raw []byte) error {
 	if state == nil {
 		return memberError("bad_request", "egress is not initialised", "Initialise egress before replacing its policy.")
 	}
+	// Decoys are a cold-start setting. Keep this process's applied flag
+	// while the network/classifier policy changes through the real path.
+	args.Policy = state.withAppliedDecoyPolicy(args.Policy)
 	if state.version == MemberRegistryV2 {
 		ctx, cancel := s.controlMutationContext()
 		defer cancel()

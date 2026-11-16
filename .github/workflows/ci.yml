@@ -31,6 +31,7 @@ jobs:
           version: 0.17.0
       - name: Build the host helpers and the shadow terminal (the client embeds them)
         run: |
+          cmd/userns/build.sh
           for arch in amd64 arm64; do
             CGO_ENABLED=0 GOOS=linux GOARCH=$arch go build -trimpath -o internal/client/helpers/host-linux-$arch ./cmd/host
           done
@@ -119,6 +120,7 @@ jobs:
       - name: Build the client, with the host helper and the shadow terminal
         run: |
           echo "XDG_CONFIG_HOME=$RUNNER_TEMP/config" >> "$GITHUB_ENV"
+          cmd/userns/build.sh
           CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o internal/client/helpers/host-linux-amd64 ./cmd/host
           (cd vt && zig build linux)
           cp vt/zig-out/linux/shadow-vt-amd64 internal/client/helpers/vt-linux-amd64
@@ -211,6 +213,7 @@ jobs:
           go-version-file: go.mod
       - name: Build the host helpers (the client embeds them)
         run: |
+          cmd/userns/build.sh
           for arch in amd64 arm64; do
             CGO_ENABLED=0 GOOS=linux GOARCH=$arch go build -o internal/client/helpers/host-linux-$arch ./cmd/host
           done

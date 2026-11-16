@@ -49,6 +49,8 @@ SSH control sockets use a separate short directory owned by the test run. The ha
 
 ## The host in unit tests
 
+CLI tests keep command parsing, fake transports and file-only checks in common files. Tests that start a host helper, a shell fixture or a pseudo-terminal use files with a Unix build constraint. Split mixed files and mixed cases so Windows keeps their portable assertions. Its test binary uses `testhome.Isolate` too, and joins each child before cleanup.
+
 Most of the host helper runs in the unit tests, on the machine that runs them, with no SSH and no systemd. The package `internal/host/hosttest` sets it up, and it works on macOS and Linux:
 
 - `hosttest.New(t)` points `$HOME`, the XDG folders and `$SHELL` at a new temporary folder for the rest of the test, and leaves only the system's programs on `$PATH`, so no agent you installed runs in a test. At the end, it deletes every session and waits for each holder to exit.

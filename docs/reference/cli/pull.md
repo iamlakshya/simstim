@@ -10,7 +10,7 @@ Bring a session's branch into the git repository you are in.
 simstim pull <host>/<session> [flags]
 ```
 
-Fetches the branch that the session's folder has checked out, over your SSH connection, into a branch of the repository in the current folder: the same name, or `--into`. It changes neither working tree.
+Fetches the branch that the session's folder has checked out, over your SSH connection, into a branch of the repository in the current folder: the same name, or `--into`. It changes neither working tree. With `--id`, the target is an exact session ID and never falls back to a name.
 
 ## Examples
 
@@ -24,6 +24,7 @@ simstim pull my-vps/auth-fix --into review/auth-fix
 | Flag | What it does |
 | --- | --- |
 | `--force` | go on although work is lost: move the local branch even when the fetch is not a fast-forward |
+| `--id` | resolve the target only as a session ID, never as a name |
 | `--into <string>` | the local branch to fetch into (default: the session's branch name) |
 
 ## Flags from the parent command

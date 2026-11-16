@@ -30,20 +30,10 @@ func BeginAutomaticBootOperation(ctx context.Context, id string, wait time.Durat
 	if err != nil {
 		return nil, err
 	}
-	m, err := operation.Load()
-	if err == nil && m.ID == id {
-		_, err = ValidateAutomaticRestore(m)
-	} else if err == nil {
-		err = automaticRestoreError()
-	}
-	if err == nil {
-		err = ctx.Err()
-	}
-	if err != nil {
+	if err := prepareAutomaticBootOperationV1(operation); err != nil {
 		operation.Close()
 		return nil, err
 	}
-	operation.automaticBoot = &AutomaticBootOperationV1{operation: operation, plan: bytes.Clone(m.AutomaticRestore)}
 	return operation, nil
 }
 

@@ -90,6 +90,7 @@ type Executable struct {
 type CommandRequest struct {
 	Spec        jail.Spec
 	Mounts      []wall.Mount
+	MountFiles  []*os.File
 	Executables []Executable
 	Log         *os.File
 }

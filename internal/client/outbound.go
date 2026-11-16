@@ -35,6 +35,8 @@ const (
 	OutboundPrivateNet OutboundKind = "private-net"
 	OutboundFloor      OutboundKind = "floor"
 	OutboundTemplate   OutboundKind = "template"
+	OutboundPush       OutboundKind = "push"
+	OutboundPublicPush OutboundKind = "public-push"
 )
 
 // Valid reports whether k is one of the defined OutboundKind values.
@@ -43,7 +45,7 @@ func (k OutboundKind) Valid() bool {
 	case OutboundSecret, OutboundSSHAgent, OutboundSSHKey, OutboundAlertToken,
 		OutboundRepo, OutboundForward, OutboundPaste, OutboundReverseForward,
 		OutboundPool, OutboundDefaultHost, OutboundRootRun, OutboundSilentUpgrade,
-		OutboundNet, OutboundPrivateNet, OutboundFloor, OutboundTemplate:
+		OutboundNet, OutboundPrivateNet, OutboundFloor, OutboundTemplate, OutboundPush, OutboundPublicPush:
 		return true
 	default:
 		return false
@@ -180,6 +182,11 @@ func allowWithValidatedConfig(h Host, t Tier, o Outbound, s *Settings, view *Sec
 		return allowAlertToken(h, t, o)
 	case OutboundRepo:
 		return allowRepo(h, t, o)
+	case OutboundPush, OutboundPublicPush:
+		if !canonicalLedgerRepo(o.Name) {
+			return badRepoError("push needs its exact canonical repository identity")
+		}
+		return allowCanonicalRepo(h, t, o.Name)
 	case OutboundForward:
 		return allowCleanOptionalName(o, "port forward")
 	case OutboundPaste:
@@ -368,13 +375,18 @@ func allowRepo(h Host, t Tier, o Outbound) error {
 	if err != nil {
 		return err
 	}
+	return allowCanonicalRepo(h, t, normRepo)
+}
+
+func allowCanonicalRepo(h Host, t Tier, normRepo string) error {
 	if t == TierOwn || t == TierThrowaway {
 		return nil
 	}
 	hName := hostDisplayName(h)
 	matched := false
 	for _, pat := range h.Repos {
-		if _, _, err := ValidateRepoPattern(pat); err != nil {
+		prefix, wildcard, err := ValidateRepoPattern(pat)
+		if err != nil {
 			return &UserError{
 				Msg:  fmt.Sprintf("hosts.toml: invalid repository pattern in repos of %s: %s", hName, err.Error()),
 				Hint: fmt.Sprintf("Fix repos for %s in %s.", hName, hostsPath()),
@@ -382,7 +394,7 @@ func allowRepo(h Host, t Tier, o Outbound) error {
 				Kind: KindUsage,
 			}
 		}
-		if MatchRepoPattern(pat, normRepo) {
+		if matchCanonicalRepoPattern(canonicalRepo(prefix), wildcard, canonicalRepo(normRepo)) {
 			matched = true
 		}
 	}

@@ -124,8 +124,17 @@ func ObserveHostRegistrationContext(ctx context.Context, c HostChange) (*HostSta
 	if err := sameStage(c.Now.Name, binding.st); err != nil {
 		return nil, err
 	}
+	prior, _ := ctx.Value(hostStateObservationKey{}).(*HostStateObservation)
 	var observation *HostStateObservation
 	err := withHostMembershipContext(ctx, func(locked context.Context) error {
+		if prior != nil {
+			if (prior.role != hostStateSaved && prior.role != hostStateRead) || prior.name != c.Now.Name || c.Was == nil || !SameEntry(prior.prospective, *c.Was) {
+				return hostStateRemovalError("registration cannot borrow another original publication context")
+			}
+			if err := prior.checkMembership(locked); err != nil {
+				return err
+			}
+		}
 		hosts, err := LoadHosts()
 		if err != nil {
 			return err
@@ -134,9 +143,14 @@ func ObserveHostRegistrationContext(ctx context.Context, c HostChange) (*HostSta
 		if c.Was == nil && i >= 0 || c.Was != nil && (i < 0 || !SameEntry(hosts[i], *c.Was)) {
 			return hostStateRemovalError("saved hosts changed before the registration observation")
 		}
-		source, err := captureHostStateSource(locked, hosts, true)
-		if err != nil {
-			return err
+		var source hostStateSource
+		if prior != nil {
+			source = prior.source // Actual committed/original source, never refreshed around old data.
+		} else {
+			source, err = captureHostStateSource(locked, hosts, true)
+			if err != nil {
+				return err
+			}
 		}
 		observation = &HostStateObservation{role: hostStateRegistration, name: c.Now.Name, key: HostFileKey(c.Now.Name), stateDir: StateDir(),
 			hostsPath: hostsPath(), source: source, prospective: cloneObservationHost(*c.Now), stage: binding}

@@ -36,7 +36,7 @@ func (i *Inspector) appendMetadata(slot uint16, layout byte, raw []byte) (uint64
 	}
 	defer i.outer.regions.leave(book.ref)
 	state := &book.classes[layout]
-	if uint64(state.count) >= i.recordLimit(layout) || state.count == ^uint32(0) {
+	if uint64(state.count) >= i.recordLimit(slot, layout) || state.count == ^uint32(0) {
 		return 0, i.scopeFailure(ErrIndexInvariant)
 	}
 	state.count++

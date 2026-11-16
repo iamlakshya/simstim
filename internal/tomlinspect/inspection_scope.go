@@ -58,7 +58,7 @@ func (i *Inspector) WithSources(ctx context.Context, sources []MetadataSource, v
 		if err == nil {
 			err = i.outer.regions.failure
 		}
-		if err == nil && (!i.outer.tomlDone || i.outer.stateActive || i.outer.entryActive || i.outer.pendingState.id != 0 || i.outer.pendingEntry.id != 0 || i.outer.countActive) {
+		if err == nil && (!i.outer.tomlDone || i.outer.object.active || i.outer.object.pending.id != 0 || i.outer.stateActive || i.outer.entryActive || i.outer.pendingState.id != 0 || i.outer.pendingEntry.id != 0 || i.outer.countActive) {
 			err = ErrIndexInvariant
 		}
 		if err == nil {

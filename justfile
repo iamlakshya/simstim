@@ -21,7 +21,7 @@ setup:
     scripts/setup.sh
 
 # Build the host helpers for every host platform, into the client's embed folder.
-helpers:
+helpers: userns
     #!/usr/bin/env sh
     set -eu
     for arch in amd64 arm64; do
@@ -30,6 +30,10 @@ helpers:
     done
     {{just_executable()}} _manifest
     ls -l {{helpers}}
+
+# Build the fixed static namespace launcher for both Linux host architectures.
+userns:
+    cmd/userns/build.sh
 
 # Write the release manifest from the helpers and any prepared VMM inputs.
 _manifest:

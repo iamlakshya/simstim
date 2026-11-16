@@ -15,7 +15,7 @@ type sandboxDeliveryContext struct {
 
 // This is the one stored envelope grammar for full and bounded readers.
 // Binding scalar semantics come only from the canonical P23 validators.
-func projectSandboxDelivery(ctx context.Context, p *api.JSONProjection, span, allowed, exposed api.JSONSpan, schema int, row sandboxDeliveryContext, retain bool) (*api.SecretDeliveryIntent, bool, error) {
+func projectSandboxDelivery(ctx context.Context, p jsonValueProjection, span, allowed, exposed api.JSONSpan, schema int, row sandboxDeliveryContext, retain bool) (*api.SecretDeliveryIntent, bool, error) {
 	if span.End == 0 {
 		return nil, false, nil
 	}
@@ -174,7 +174,7 @@ type deliveryNames struct {
 	empty    bool
 }
 
-func deliveryNamesCursor(p *api.JSONProjection, span api.JSONSpan) (deliveryNames, error) {
+func deliveryNamesCursor(p jsonValueProjection, span api.JSONSpan) (deliveryNames, error) {
 	if span.End == 0 {
 		return deliveryNames{empty: true}, nil
 	}

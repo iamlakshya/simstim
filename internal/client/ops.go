@@ -172,6 +172,11 @@ func (c *Conn) NewSession(ctx context.Context, a NewArgs) (_ *Session, returned 
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	if a.Wall != "" && a.Wall != "none" {
+		if err := NoteSandboxStarted(ctx, c.Host, c.HostID()); err != nil {
+			return nil, err
+		}
+	}
 	var s Session
 	if err := c.callNewWithInputs(baseContext, ctx, a, &s, release); err != nil {
 		return nil, err
