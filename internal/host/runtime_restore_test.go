@@ -13,6 +13,7 @@ import (
 	"github.com/iamlakshya/simstim/internal/api"
 	"github.com/iamlakshya/simstim/internal/host"
 	"github.com/iamlakshya/simstim/internal/host/hosttest"
+	"github.com/iamlakshya/simstim/internal/paths"
 )
 
 // crash kills a session's holder, as a crash or a power cut would.
@@ -119,6 +120,58 @@ func TestRestoreResumesTheAgentsOwnSession(t *testing.T) {
 	}
 	if res[0].Argv[1] != "--resume" || res[0].Argv[2] != m.Agent.AgentSessionID || res[0].Argv[3] != "--settings" {
 		t.Errorf("argv = %q: resume its own session, with the hooks again", res[0].Argv)
+	}
+}
+
+// A restore and a resume check the agent's command before it runs. An
+// older helper kept any ID from a hook. An ID without the agent's form
+// enters no command, so the agent continues its latest conversation. The
+// session drops that ID, and the holder's log says why. A command that
+// turns the agent's own approvals off, which the user did not type, does
+// not run. The resume says why, with a hint, and the restore reports a
+// failure with the hint. Neither changes the session.
+func TestStartAgainChecksTheAgentsCommand(t *testing.T) {
+	h := hosttest.New(t)
+	fakeClaude(t, h, "exec sleep 60")
+	s, err := host.New(host.NewArgs{Agent: "claude", Name: "app", Cwd: "~"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	crash(t, s.ID)
+	m := manifest(t, s.ID)
+	m.Agent.AgentSessionID, m.Agent.IDSource = "--settings=/tmp/x.json", "hook"
+	if err := m.Save(); err != nil {
+		t.Fatal(err)
+	}
+	if r := resume(t, api.ResumeArgs{ID: s.ID}); r.Why != "continued the latest conversation in its folder" {
+		t.Errorf("resume: %s", r.Why)
+	}
+	// The manifest has the command of the latest start, and no ID.
+	if a := manifest(t, s.ID).Agent; len(a.Argv) != 4 || a.Argv[1] != "--continue" || a.Argv[2] != "--settings" ||
+		slices.Contains(a.Argv, "--settings=/tmp/x.json") || a.AgentSessionID != "" {
+		t.Errorf("the agent started again with %q, and the ID %q", a.Argv, a.AgentSessionID)
+	}
+	log, err := os.ReadFile(paths.HolderLog(s.ID))
+	if err != nil || !strings.Contains(string(log), `msg="saved session ID not used"`) || !strings.Contains(string(log), `id="--settings=/tmp/x.json"`) {
+		t.Errorf("the holder's log does not say why the ID was dropped (%v):\n%s", err, log)
+	}
+
+	crash(t, s.ID)
+	m = manifest(t, s.ID)
+	m.Agent.ContinueArgv = append(m.Agent.ContinueArgv, "--permission-mode", "bypassPermissions")
+	m.Run.BootID = "a boot before"
+	if err := m.Save(); err != nil {
+		t.Fatal(err)
+	}
+	resumeFails(t, api.ResumeArgs{ID: s.ID}, "danger_refused")
+	res := host.Restore(false)
+	if len(res) != 1 || res[0].Action != "failed" || !strings.Contains(res[0].Why, `"--permission-mode bypassPermissions"`) ||
+		res[0].Hint == "" || !strings.Contains(res[0].Text(), "    Try: "+res[0].Hint+"\n") {
+		t.Fatalf("restore = %+v, want a failure that names the argument, with a hint", res)
+	}
+	if mm := manifest(t, s.ID); mm.Status.State != m.Status.State || mm.Status.Reason != m.Status.Reason ||
+		!slices.Equal(mm.Agent.Argv, m.Agent.Argv) || mm.Run.BootID != m.Run.BootID {
+		t.Errorf("a refused start changed the session: status %+v, argv %q, boot %s", mm.Status, mm.Agent.Argv, mm.Run.BootID)
 	}
 }
 

@@ -74,9 +74,11 @@ Agent knowledge is data in `internal/agents`, shipped with the host helper. Ther
 | `resume`, `continue` | `claude --resume {agent_session_id}`, `claude --continue` |
 | `id_capture` | `choose` (we pick the ID), `hook`, `scan` or `none` |
 | `hooks` | Extra arguments that make the agent report status and its session ID. `SessionStart` calls `simstim-host hook session-start`, because the ID changes on `/clear`. |
+| `id_pattern` | The form of the agent's session IDs, a UUID. The holder keeps an ID from a hook only when it matches, and a restore or a resume checks a saved ID again. |
+| `danger_flags`, `danger_text` | `--dangerously-skip-permissions`, `--permission-mode!=default\|manual\|plan`, `bypassPermissions`: arguments that turn the agent's own approvals off, some only with certain values. The text check also reads the keys and strings of a JSON or TOML value. A restore or a resume refuses a command with one, unless the session's own command holds the same argument with the same values. |
 | screen rules | A TOML file per agent in `internal/agents/rules` |
 
-Codex's launch, resume and continue commands include `--no-daemon`, so its work stays inside the session. There is no separate `quirks` field. The current agent table is in [the generated reference](../reference/agents.md).
+Codex's launch, resume and continue commands include `--no-daemon`, so its work stays inside the session. Its resume command puts `--` before the session ID, so the ID cannot be read as a flag. There is no separate `quirks` field. The current agent table is in [the generated reference](../reference/agents.md).
 
 ## 3. Flows
 
@@ -200,7 +202,7 @@ Triggers: the detach key, closing the tab, `simstim kill` from elsewhere, or SIG
 2. For each manifest whose `boot_id` differs from the current boot and whose holder is gone, restore skips ended sessions, sessions without the `resume` restart policy and sessions at their retry limit. For the others it:
    1. counts the restore attempt against the retry limit;
    2. starts a new holder in its `cwd`;
-   3. runs `resume_argv` with the stored `agent_session_id`. Without a usable resume command and ID, it runs the session's own `command`, then `continue_argv`, or finally the previous command as a fresh start.
+   3. runs `resume_argv` with the stored `agent_session_id`. The ID must match the agent's `id_pattern`, or the host must have chosen it. Restore drops any other ID and writes why in the session's `holder.log`. A `resume_argv` that an older helper saved without its `--` gets the agent's current one. Without a usable resume command and ID, it runs the session's own `command`, then `continue_argv`, or finally the previous command as a fresh start. Restore refuses a command with an argument from `danger_flags` or `danger_text` that the session's own `command` does not hold. It then starts no holder, and reports the session as failed, with a hint.
 3. The old screen is not saved and restored across a reboot. The new holder starts a new output ring and shadow terminal.
 4. The session is marked `restored`. A turn that was running when the host went down is not resumed.
 
