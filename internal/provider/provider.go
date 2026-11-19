@@ -75,10 +75,29 @@ func ExecInput(ctx context.Context, stdin io.Reader, install string, name string
 		if ctx.Err() != nil {
 			return out.Bytes(), fmt.Errorf("%s %s: %w", name, firstWord(args), ctx.Err())
 		}
-		return out.Bytes(), fmt.Errorf("%s %s: %w: %s", name, firstWord(args), err, Tail(errb.String(), 3))
+		return out.Bytes(), &ExecError{
+			Msg:    fmt.Sprintf("%s %s: %v: %s", name, firstWord(args), err, Tail(errb.String(), 3)),
+			Stderr: errb.String(),
+			Err:    err,
+		}
 	}
 	return out.Bytes(), nil
 }
+
+// ExecError is a provider tool that failed. Its message ends with the last
+// lines of the tool's stderr, cleaned by Tail. Stderr keeps all of it, as
+// the tool wrote it, for a caller that looks for a known message. A caller
+// that shows Stderr cleans it first.
+type ExecError struct {
+	Msg    string
+	Stderr string
+	Err    error
+}
+
+func (e *ExecError) Error() string { return e.Msg }
+
+// Unwrap returns the error of the run, such as an *exec.ExitError.
+func (e *ExecError) Unwrap() error { return e.Err }
 
 // Tail is the last n non-empty lines of s, joined by "; ". s is what a
 // command wrote to stderr, often a host's own text, and errors show it: so

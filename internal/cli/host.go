@@ -18,6 +18,7 @@ import (
 	"github.com/iamlakshya/simstim/internal/client"
 	"github.com/iamlakshya/simstim/internal/client/helpers"
 	"github.com/iamlakshya/simstim/internal/onboard"
+	"github.com/iamlakshya/simstim/internal/provider/lima"
 )
 
 func hostCmd() *cobra.Command {
@@ -285,9 +286,11 @@ func hostDoctorCmd() *cobra.Command {
 		Long: "Checks a host: systemd and linger, the restore unit, terminfo, memory caps, swap, the\n" +
 			"session sockets and the agents. It warns when the host has less memory than an agent's\n" +
 			"docs ask for, and when a program in one session could drive another through its\n" +
-			"socket. With --fix it offers to fix linger, the restore unit, Ghostty's terminfo, a\n" +
-			"broken current helper link, stale session sockets and old helper versions. Each fix is\n" +
-			"shown and explained before it runs; one that needs root is printed for you.",
+			"socket. For a VM made by host create lima, it also checks, on this computer, that the\n" +
+			"VM cannot reach services on this computer's loopback address. With --fix it offers to\n" +
+			"fix linger, the restore unit, Ghostty's terminfo, a broken current helper link, stale\n" +
+			"session sockets and old helper versions. Each fix is shown and explained before it\n" +
+			"runs; one that needs root is printed for you.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			h, err := client.FindHost(args[0])
@@ -304,6 +307,11 @@ func hostDoctorCmd() *cobra.Command {
 			d, err := conn.Doctor(ctx)
 			if err != nil {
 				return err
+			}
+			if h.Machine != nil {
+				if check := machineChecks[h.Machine.Provider]; check != nil {
+					d.Checks = append(d.Checks, check(ctx, h))
+				}
 			}
 			if d.AgentChecks, err = conn.AgentChecks(ctx); err != nil {
 				return err
@@ -328,6 +336,12 @@ func hostDoctorCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&fix, "fix", false, "offer to fix the problems found, one by one")
 	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "with --fix, apply every fix without asking")
 	return cmd
+}
+
+// machineChecks are the doctor's checks that run on this computer, for a
+// host that a provider made, by the provider's name.
+var machineChecks = map[string]func(context.Context, client.Host) api.Check{
+	lima.Provider{}.Name(): lima.LoopbackCheck,
 }
 
 // printJSON prints v as JSON. Values from a host stay as the host sent
