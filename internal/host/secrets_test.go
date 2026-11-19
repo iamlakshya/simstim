@@ -55,7 +55,7 @@ func secretHolder(t *testing.T, argv ...string) *Holder {
 	if err := h.listen(); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { h.ln.Close() })
+	t.Cleanup(h.closeSockets)
 	return h
 }
 

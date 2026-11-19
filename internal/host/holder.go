@@ -11,7 +11,6 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
-	"path/filepath"
 	"sync"
 	"syscall"
 	"time"
@@ -47,6 +46,7 @@ type hclient struct {
 	once     sync.Once
 	done     chan struct{}
 	tr       clientTrace // the debug trace of this attach (holder_trace.go)
+	access   access      // what this connection may do (holder_peer.go)
 }
 
 func (c *hclient) close() {
@@ -64,6 +64,10 @@ type Holder struct {
 	ptmx *os.File
 	fd   int
 	cmd  *exec.Cmd
+	// hookLn is the hook socket's listener. peerCheck is true when the
+	// holder checks where each peer runs (holder_peer.go).
+	hookLn    net.Listener
+	peerCheck bool
 
 	mu        sync.Mutex
 	m         *Manifest
@@ -153,13 +157,13 @@ func RunHolder(id string) error {
 		h.m.Status = Status{State: StateErrored, Since: time.Now().UTC(), ExitCode: &code, Reason: err.Error()}
 		h.mu.Unlock()
 		_ = h.m.Save()
-		h.ln.Close()
-		os.Remove(paths.Socket(id))
+		h.closeSockets()
 		return err
 	}
 	h.startAlerts(restored)
 	h.startVT()
-	go h.acceptLoop()
+	go h.acceptLoop(h.ln, false)
+	go h.acceptLoop(h.hookLn, true)
 	go h.readLoop()
 	go h.waitLoop()
 	go h.tick()
@@ -172,28 +176,6 @@ func RunHolder(id string) error {
 	// session, for example at shutdown. The agent did not end by itself, so the
 	// session stays eligible for restore after the restart.
 	h.stop("stopped with the host", true)
-	return nil
-}
-
-func (h *Holder) listen() error {
-	sock := paths.Socket(h.id)
-	if err := paths.EnsurePrivateDir(filepath.Dir(sock)); err != nil {
-		return err
-	}
-	if err := paths.EnsurePrivateDir(filepath.Dir(filepath.Dir(sock))); err != nil {
-		return err
-	}
-	_ = os.Remove(sock)
-	var lc net.ListenConfig
-	ln, err := lc.Listen(context.Background(), "unix", sock)
-	if err != nil {
-		return fmt.Errorf("listen on the session's socket: %w", err)
-	}
-	if err := os.Chmod(sock, 0o600); err != nil {
-		ln.Close()
-		return fmt.Errorf("make the session's socket private: %w", err)
-	}
-	h.ln = ln
 	return nil
 }
 

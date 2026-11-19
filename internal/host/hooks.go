@@ -52,7 +52,7 @@ func shellQuote(s string) string {
 // to the session's holder and always exits quickly and cleanly, so a hook can
 // never slow down or break the agent.
 func RunHook(event string, args []string) {
-	sock := os.Getenv(brand.Env("SOCK"))
+	sock := hookSocket()
 	if sock == "" {
 		return
 	}
@@ -82,7 +82,7 @@ func RunHook(event string, args []string) {
 	_ = conn.SetDeadline(time.Now().Add(time.Second))
 	w := proto.NewWriter(conn)
 	r := bufio.NewReader(conn)
-	if w.WriteJSON(proto.THello, proto.Hello{Magic: proto.Magic, Protocol: version.Protocol, Version: version.Version, Role: "hook"}) != nil {
+	if w.WriteJSON(proto.THello, proto.Hello{Magic: proto.Magic, Protocol: version.Protocol, Version: version.Version, Role: roleHook}) != nil {
 		return
 	}
 	if f, err := proto.Read(r); err != nil || f.Type != proto.THello {
@@ -91,6 +91,33 @@ func RunHook(event string, args []string) {
 	ev, _ := json.Marshal(HookEvent{Event: event, Payload: payload})
 	_ = w.WriteJSON(proto.TRequest, proto.Request{ID: 1, Op: "hook", Args: ev})
 	_, _ = proto.Read(r)
+}
+
+// hookSocket is the socket that a hook sends its event to: the hook socket
+// that the agent's environment names. A session that an older helper
+// started names only its session socket. Its holder is that older helper
+// too, and takes hook events there. A new holder never does: a resume or a
+// restore gives the session the hook socket first (withHookSocket).
+func hookSocket() string {
+	if sock := os.Getenv(brand.Env("HOOK_SOCK")); sock != "" {
+		return sock
+	}
+	return os.Getenv(brand.Env("SOCK"))
+}
+
+// withHookSocket returns env, a session's environment, naming only the hook
+// socket of session id. An older helper named the session socket instead.
+// A restore or a resume starts a new holder, which serves hooks only on the
+// hook socket.
+func withHookSocket(env []string, id string) []string {
+	sock, hook := brand.Env("SOCK")+"=", brand.Env("HOOK_SOCK")+"="
+	out := make([]string, 0, len(env)+1)
+	for _, kv := range env {
+		if !strings.HasPrefix(kv, sock) && !strings.HasPrefix(kv, hook) {
+			out = append(out, kv)
+		}
+	}
+	return append(out, hook+paths.HookSocket(id))
 }
 
 // applyHook updates the holder's view of the session from a hook event.

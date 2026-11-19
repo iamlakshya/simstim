@@ -14,17 +14,19 @@ import (
 	"github.com/iamlakshya/simstim/internal/version"
 )
 
-func (h *Holder) acceptLoop() {
+// acceptLoop serves each connection to ln, the session socket or, when
+// hookSock is true, the hook socket.
+func (h *Holder) acceptLoop(ln net.Listener, hookSock bool) {
 	for {
-		conn, err := h.ln.Accept()
+		conn, err := ln.Accept()
 		if err != nil {
 			return
 		}
-		go h.serve(conn)
+		go h.serve(conn, hookSock)
 	}
 }
 
-func (h *Holder) serve(conn net.Conn) {
+func (h *Holder) serve(conn net.Conn, hookSock bool) {
 	c := &hclient{conn: conn, w: proto.NewWriter(conn), out: make(chan outFrame, clientQueue), done: make(chan struct{})}
 	defer func() {
 		h.drop(c)
@@ -40,13 +42,33 @@ func (h *Holder) serve(conn net.Conn) {
 		_ = c.w.WriteJSON(proto.TError, proto.Error{Code: "protocol", Message: "incompatible client"})
 		return
 	}
+	var refused *proto.Error
+	if c.access, refused = h.accessOf(conn, hookSock, hello.Role); refused != nil {
+		h.log.Warn("refused a connection", "role", hello.Role, "hook_socket", hookSock)
+		_ = c.w.WriteJSON(proto.TError, refused)
+		return
+	}
 	if err := c.w.WriteJSON(proto.THello, proto.Hello{Magic: proto.Magic, Protocol: version.Protocol, Version: version.Version, Role: "holder"}); err != nil {
 		return
 	}
+	h.dispatch(c, r)
+}
+
+// dispatch serves the frames of one connection after its hello, as its
+// access allows, until the connection ends or a refusal closes it.
+func (h *Holder) dispatch(c *hclient, r *bufio.Reader) {
 	for {
 		f, err := proto.Read(r)
 		if err != nil {
 			return
+		}
+		// The role and peer check (holder_peer.go). A connection with full
+		// access takes the path below, frame for frame as before.
+		if c.access != accessFull {
+			if !h.serveLimited(c, f) {
+				return
+			}
+			continue
 		}
 		switch f.Type {
 		case proto.TAttach:

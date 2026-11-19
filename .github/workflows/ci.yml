@@ -55,6 +55,8 @@ jobs:
         run: python3 scripts/test-scorecard-check.py
       - name: End-to-end cleanup tests (offline)
         run: python3 test/e2e/test_sandbox_hosts.py
+      - name: Offline tests of the session sockets' end-to-end probe
+        run: python3 test/e2e/test_session_sockets.py
       - name: No Go source file over 500 lines
         run: scripts/check-size.sh
       - name: Generated docs are current

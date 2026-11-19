@@ -91,6 +91,7 @@ func RunBridge(in io.Reader, out io.Writer) error {
 	defer liveBridges.Delete(b)
 	defer b.stopDebug("end")
 	defer b.closeHolder()
+	inside := CheckCaller() != nil // bridge_inside.go
 	for {
 		f, err := proto.Read(r)
 		if err != nil {
@@ -98,6 +99,9 @@ func RunBridge(in io.Reader, out io.Writer) error {
 				return nil
 			}
 			return err
+		}
+		if inside && b.refuseInside(f) {
+			continue
 		}
 		switch f.Type {
 		case proto.TPing:

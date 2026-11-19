@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/iamlakshya/simstim/internal/proto"
+	"github.com/iamlakshya/simstim/internal/version"
 )
 
 func (h *Holder) request(c *hclient, req proto.Request) {
@@ -52,7 +53,17 @@ func (h *Holder) request(c *hclient, req proto.Request) {
 		unit, pid := h.m.Run.Unit != "", h.m.Run.AgentPID
 		h.mu.Unlock()
 		reply(listeningPorts(sessionPIDs(unit, pid)), nil)
+	case "sockets":
+		// What the doctor reads (doctor_sockets.go): whether this holder
+		// checks its peers. A holder from before the check does not know
+		// this op.
+		reply(socketsState{PeerCheck: h.peerCheck, Version: version.Version}, nil)
 	case "hook":
+		// Hooks reach the hook socket only (spec 10.4).
+		if c.access != accessHook {
+			reply(nil, errNoHooksHere)
+			return
+		}
 		var ev HookEvent
 		if json.Unmarshal(req.Args, &ev) == nil {
 			h.mu.Lock()

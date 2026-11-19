@@ -26,6 +26,7 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 ### Security
 
 - The client no longer forwards your SSH agent, X11 or a local command to any host, even when your `~/.ssh/config` asks for it. `forward` still forwards the ports you name. The port forwards that your SSH config names no longer come up with the client's connections, except with `forward`. The client also no longer delegates your Kerberos credentials, and a `ProxyJump` hop gets the same settings. `forward` now has a connection of its own, and refuses to start when your config has a `RemoteForward`, a `Tunnel` or `ForkAfterAuthentication yes` for the host ([decision 0034](docs/contributing/decisions/0034-ssh-options-on-the-command-line.md)).
+- A program in one session can no longer type into, attach to or stop another session through its socket, or through the host helper. A program that it starts outside its session still can, for example with `systemd-run --user --scope`, or by moving itself through a `cgroup.procs` file that you own. Sandboxes will close that gap. Agents' hooks use a socket that accepts only hook events. The check needs a systemd user manager on the host. Without one, as on a Docker host, only the hook socket's limits apply. A session that an older helper started keeps its older holder, without the check, until you resume it. So does a session that started while the host had no systemd user manager. `host doctor` reports the session sockets as weak in both cases ([security model](docs/explanation/security.md)).
 
 ## [0.1.2] - 2026-10-17
 

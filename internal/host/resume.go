@@ -48,6 +48,9 @@ func Resume(a api.ResumeArgs) (*ResumeResult, error) {
 	if err := checkMemoryMax(a.MemoryMax); err != nil {
 		return nil, err
 	}
+	if err := CheckCaller(); err != nil {
+		return nil, err
+	}
 	// A second resume of the session, such as a key pressed twice, would
 	// stop the first's new holder, or save over its manifest.
 	unlock, err := lockSession(id)
@@ -138,6 +141,7 @@ func stopHolder(id string, m *Manifest) {
 		killHolder(m.Run.HolderPID)
 	}
 	os.Remove(paths.Socket(id))
+	os.Remove(paths.HookSocket(id))
 }
 
 // killHolder stops a holder that did not stop when asked: SIGTERM first,
