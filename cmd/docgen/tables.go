@@ -142,11 +142,13 @@ func installTable(b *strings.Builder) {
 	}
 }
 
-// exitCodesPage lists the exit codes, from the table that the client uses.
+// exitCodesPage lists the exit codes, from the table that the client uses,
+// with the prose of help exit-codes. It holds the table of CLI spec 5.1
+// only: P1.13 adds that of 5.2, the codes of exec, with exec.
 func exitCodesPage() []byte {
 	var b strings.Builder
 	b.WriteString(header("Exit codes", "5"))
-	b.WriteString("Every command exits with one of these codes. The code comes from the kind of the error, never from its message, so a script can rely on it. The error itself goes to stderr: `Error:` and the message, then one `Try:` line with the next step. With `--json`, it is one JSON line on stderr instead ([scripting](../how-to/scripting.md)).\n\n")
+	fmt.Fprintf(&b, "%s `%s help exit-codes` prints the same table. [Scripting](../how-to/scripting.md) shows the JSON line.\n\n", prose(cli.ExitCodesIntro), brand.Name)
 	b.WriteString("| Code | Kind | Meaning | Examples |\n| --- | --- | --- | --- |\n")
 	for _, e := range cli.ExitCodes() {
 		kind := ""
@@ -155,8 +157,39 @@ func exitCodesPage() []byte {
 		}
 		fmt.Fprintf(&b, "| %d | %s | %s | %s |\n", e.Code, kind, e.Meaning, e.Examples)
 	}
-	b.WriteString("\nThe shell reports a process that a signal ended as 128 plus the signal's number, so Ctrl+C outside an attach gives 130. The client gives 130 for SIGTERM too, because both are a cancel.\n")
+	b.WriteString("\n" + prose(cli.ExitCodesOutro) + "\n")
 	return []byte(b.String())
+}
+
+// conceptsPage lists the words that the tool uses, from the list that help
+// concepts prints, with its prose.
+func conceptsPage() []byte {
+	var b strings.Builder
+	b.WriteString(header("Concepts", "6"))
+	fmt.Fprintf(&b, "%s `%s help concepts` prints the same list.\n\n", prose(cli.ConceptsIntro), brand.Name)
+	b.WriteString("| Word | Meaning |\n| --- | --- |\n")
+	for _, c := range cli.Concepts() {
+		fmt.Fprintf(&b, "| %s | %s |\n", cell(c.Word), cell(sentence(c.Meaning)))
+	}
+	return []byte(b.String())
+}
+
+// topicPages adds a page for each help topic, <topic>.md
+// (docs/contributing/cli-spec.md 8.3). A topic without a page here fails
+// the run.
+func topicPages(pages map[string][]byte) error {
+	builders := map[string]func() []byte{"concepts": conceptsPage, "exit-codes": exitCodesPage}
+	for _, c := range root().Commands() {
+		if !cli.IsTopic(c) {
+			continue
+		}
+		page, ok := builders[c.Name()]
+		if !ok {
+			return fmt.Errorf("the help topic %q has no reference page.\nTry: add a page for it to topicPages in cmd/docgen", c.Name())
+		}
+		pages[c.Name()+".md"] = page()
+	}
+	return nil
 }
 
 // indexPage is the reference section's home.
@@ -169,6 +202,7 @@ func indexPage() []byte {
 	b.WriteString("- [Keys](keymap.md): the launcher's commands and keys.\n")
 	b.WriteString("- [Agents](agents.md): the agent table.\n")
 	b.WriteString("- [Exit codes](exit-codes.md): what each exit code means.\n")
+	b.WriteString("- [Concepts](concepts.md): the words that the tool uses.\n")
 	return []byte(b.String())
 }
 

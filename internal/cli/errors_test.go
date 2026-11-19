@@ -217,12 +217,14 @@ func TestShellWord(t *testing.T) {
 
 func TestUseArgs(t *testing.T) {
 	for use, want := range map[string]string{
+		"attach <host>/<session>|-":           "<host>/<session> or -",
 		"attach <host>/<session> | -":         "<host>/<session> or -",
-		"rename <host>/<session> <new-name>":  "<host>/<session>,<new-name>",
-		"bundle [<host> | <host>/<session>]":  "[<host> | <host>/<session>]",
-		"new <host> [-- command…]":            "<host>,[-- command…]",
+		"rename <host>/<session> <name>":      "<host>/<session>,<name>",
+		"bundle [<host>|<host>/<session>]":    "[<host>|<host>/<session>]",
+		"new <host> [-- <command>…]":          "<host>,[-- <command>…]",
+		"idle <host> <duration>|never":        "<host>,<duration> or never",
 		"ls":                                  "",
-		"profile <host>/<session> cpu|heap|x": "<host>/<session>,cpu|heap|x",
+		"profile <host>/<session> cpu|heap|x": "<host>/<session>,cpu or heap or x",
 	} {
 		if got := strings.Join(useArgs(use), ","); got != want {
 			t.Errorf("useArgs(%q) = %q, want %q", use, got, want)

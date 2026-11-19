@@ -44,9 +44,7 @@ func TestPageName(t *testing.T) {
 // The generator writes every page, leaves no page of a removed command, and
 // gives the same bytes on a second run.
 func TestRunIsStable(t *testing.T) {
-	if err := os.Chdir("../.."); err != nil {
-		t.Fatal(err)
-	}
+	t.Chdir("../..")
 	dir := t.TempDir()
 	stale := filepath.Join(dir, "cli", "gone.md")
 	if err := os.MkdirAll(filepath.Dir(stale), 0o755); err != nil {
@@ -69,11 +67,39 @@ func TestRunIsStable(t *testing.T) {
 	if second := snapshot(t, dir); second != first {
 		t.Error("a second run changed the pages")
 	}
-	for _, f := range []string{"config.md", "keymap.md", "agents.md", "exit-codes.md", "cli/_index.md", "cli/host_add.md"} {
+	for _, f := range []string{"config.md", "keymap.md", "agents.md", "exit-codes.md", "concepts.md", "cli/_index.md", "cli/host_add.md"} {
 		b, err := os.ReadFile(filepath.Join(dir, f))
 		if err != nil || !strings.Contains(string(b), "Do not edit by hand") {
 			t.Errorf("%s: missing or not marked generated", f)
 		}
+	}
+	// Every command's page has an example (docs/contributing/cli-spec.md
+	// 8.2), and the index groups the commands as the root help does.
+	cli, _ := filepath.Glob(filepath.Join(dir, "cli", "*.md"))
+	for _, f := range cli {
+		if b, _ := os.ReadFile(f); !strings.Contains(string(b), "\n## Examples\n\n```sh\n") {
+			t.Errorf("%s has no example", filepath.Base(f))
+		}
+	}
+	index, _ := os.ReadFile(filepath.Join(dir, "cli", "_index.md"))
+	at := 0
+	for _, h := range []string{"## Sessions\n", "## Hosts\n", "## Agents\n", "## Setup and help\n", "## Help topics\n", "](../concepts.md)", "](../exit-codes.md)"} {
+		i := strings.Index(string(index[at:]), h)
+		if i < 0 {
+			t.Fatalf("the index has no %q after byte %d:\n%s", h, at, index)
+		}
+		at += i
+	}
+	if b, _ := os.ReadFile(filepath.Join(dir, "cli", "attach.md")); !strings.Contains(string(b), "\n**Aliases:** `a`\n") {
+		t.Errorf("attach.md does not show its alias:\n%s", b)
+	}
+	// The index and the root's man page say what the command does alone,
+	// as the root help's usage line does.
+	if !strings.Contains(string(index), "With no command, "+brand.Name+" opens the launcher") {
+		t.Errorf("the index does not say that the command alone opens the launcher:\n%s", index)
+	}
+	if b, _ := os.ReadFile(filepath.Join(man, brand.Name+".1")); !strings.Contains(string(b), "opens the launcher") {
+		t.Errorf("the root's man page does not say that the command alone opens the launcher:\n%s", b)
 	}
 	if m, _ := filepath.Glob(filepath.Join(man, "*.1")); len(m) < 10 {
 		t.Errorf("%d man pages", len(m))
@@ -101,9 +127,7 @@ func snapshot(t *testing.T, dir string) string {
 // links between them, so they stay on the site under any base.
 func TestSitePages(t *testing.T) {
 	if _, err := os.Stat("go.mod"); err != nil {
-		if err := os.Chdir("../.."); err != nil {
-			t.Fatal(err)
-		}
+		t.Chdir("../..")
 	}
 	out := filepath.Join(t.TempDir(), "src")
 	if err := sitePages("docs", out, "https://github.com/o/r", "https://docs.example.org/dev/"); err != nil {
@@ -148,9 +172,7 @@ func TestSitePages(t *testing.T) {
 
 func TestResolve(t *testing.T) {
 	if _, err := os.Stat("go.mod"); err != nil {
-		if err := os.Chdir("../.."); err != nil {
-			t.Fatal(err)
-		}
+		t.Chdir("../..")
 	}
 	pages := map[string]string{"docs/how-to/install.md": "/how-to/install/", "docs/README.md": "/docs/", "README.md": "/", "CHANGELOG.md": "/project/changelog/"}
 	for _, c := range []struct{ dest, src, url, want string }{

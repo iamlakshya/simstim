@@ -18,7 +18,7 @@ import (
 
 // The debug mode (decision 0025): the global flags --debug and
 // --debug-file, and the commands that start and stop the debug of a
-// running session, save its flight recorder, and write its profiles.
+// running session, save its recent debug record, and write its profiles.
 
 // addDebugFlags adds the global debug flags to root. They turn on the
 // client's debug before any command runs.
@@ -107,10 +107,12 @@ func tildeHome(p string) string {
 func debugCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "debug",
-		Short: "Record why a session goes wrong: debug in a running session, profiles and the flight recorder",
+		Short: "Record why a session goes wrong: debug files, profiles and traces",
 		Long: "The debug mode records what the client and the host helper do, into files on each side.\n" +
 			"Nothing listens and nothing is uploaded. --debug turns it on for one command. These commands work\n" +
 			"on a running session, from any terminal, with no restart. See docs/how-to/debug-a-session.md.",
+		Example: "  " + brand.Name + " debug start my-vps/auth-fix\n" +
+			"  " + brand.Name + " debug bundle my-vps/auth-fix",
 	}
 	cmd.AddCommand(debugStartCmd(), debugStopCmd(), debugSaveCmd(), debugProfileCmd(), debugBundleCmd())
 	return cmd
@@ -121,9 +123,9 @@ func debugStartCmd() *cobra.Command {
 	var only string
 	cmd := &cobra.Command{
 		Use:   "start <host>/<session>",
-		Short: "Turn on the debug of a running session, for 30 minutes or the time that --for gives",
-		Long: "The session's holder records the host's categories, attach, memory and runtime, for every\n" +
-			"attached client, until debug stop or the time limit. A second debug start sets a new end.",
+		Short: "Turn on the debug of a running session, for 30 minutes or --for",
+		Long: "The session's process on the host records the host's categories, attach, memory and runtime,\n" +
+			"for every attached client, until debug stop or the time limit. A second debug start sets a new end.",
 		Example: "  " + brand.Name + " debug start my-vps/auth-fix\n" +
 			"  " + brand.Name + " debug start my-vps/auth-fix --for 8h --only memory",
 		Args: cobra.ExactArgs(1),
@@ -187,7 +189,8 @@ func clockTime(t time.Time) string {
 func debugStopCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:     "stop <host>/<session>",
-		Short:   "Turn off the debug of a session at once, and the host side of each traced attach",
+		Short:   "Turn off the debug of a session at once",
+		Long:    "Turns off the debug of a session at once, and the host side of each traced attach.",
 		Example: "  " + brand.Name + " debug stop my-vps/auth-fix",
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -210,9 +213,9 @@ func debugStopCmd() *cobra.Command {
 func debugSaveCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "save <host>/<session>",
-		Short: "Save the last seconds of the session's flight recorder, just after a lag",
-		Long: "While the session's runtime category is on, its holder keeps the newest 10 s or so of Go's\n" +
-			"execution trace. This saves that window to a file on the host, for go tool trace.",
+		Short: "Save the session's recent debug record, just after a lag",
+		Long: "While the session's runtime category is on, the session's process on the host keeps the newest\n" +
+			"10 s or so of Go's execution trace. This saves that window to a file on the host, for go tool trace.",
 		Example: "  " + brand.Name + " debug save my-vps/auth-fix",
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -221,7 +224,7 @@ func debugSaveCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				fmt.Fprintf(os.Stderr, "Saved the flight recorder of %s: %s on %s (%s).\n", client.CleanLine(s.Name), client.CleanPath(f.Path), h.Name, sizeText(f.Size))
+				fmt.Fprintf(os.Stderr, "Saved the recent debug record of %s: %s on %s (%s).\n", client.CleanLine(s.Name), client.CleanPath(f.Path), h.Name, sizeText(f.Size))
 				return nil
 			})
 		},
@@ -232,7 +235,7 @@ func debugProfileCmd() *cobra.Command {
 	var d time.Duration
 	cmd := &cobra.Command{
 		Use:   "profile <host>/<session> cpu|heap|goroutine",
-		Short: "Write a profile of the session's holder on the host, for go tool pprof",
+		Short: "Write a profile of the session's process, for go tool pprof",
 		Example: "  " + brand.Name + " debug profile my-vps/auth-fix cpu --for 1m\n" +
 			"  " + brand.Name + " debug profile my-vps/auth-fix heap",
 		Args: cobra.ExactArgs(2),

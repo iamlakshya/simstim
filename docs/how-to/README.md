@@ -15,6 +15,7 @@ One task per page. New here? Start with [getting started](../tutorials/getting-s
 | Guide | Task |
 | --- | --- |
 | [Install agents](install-agents.md) | Pick agents from a checklist, or install one with its own installer, then log in |
+| [Use with coding agents](use-with-agents.md) | Give an agent a short project snippet and the command help |
 | [Pass secrets](secrets.md) | Give a session an API key from your keychain or password manager, never stored |
 | [Use with coding agents](use-with-agents.md) | Tell a coding agent how your project uses the tool: a snippet for `AGENTS.md`, and the docs in Markdown |
 
@@ -50,4 +51,4 @@ One task per page. New here? Start with [getting started](../tutorials/getting-s
 | Guide | Task |
 | --- | --- |
 | [Troubleshoot](troubleshoot.md) | Find out what is wrong, and fix it |
-| [Debug a session](debug-a-session.md) | Record why a session goes wrong: debug files, profiles and the flight recorder |
+| [Debug a session](debug-a-session.md) | Record why a session goes wrong: debug files, profiles and traces |

@@ -13,8 +13,8 @@ simstim ports <host>/<session> [flags]
 ## Examples
 
 ```sh
-simstim ports my-vps/web
-simstim ports my-vps/web --json
+simstim ports my-vps/auth-fix
+simstim ports my-vps/auth-fix --json
 ```
 
 ## Flags

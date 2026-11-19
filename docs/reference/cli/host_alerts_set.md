@@ -16,9 +16,12 @@ Writes the host's alerts file (mode 0600). A destination flag replaces the file'
 
 ```sh
 simstim host alerts set my-vps --ntfy https://ntfy.sh/<your-topic>
-simstim host alerts set my-vps --ntfy https://ntfy.example.com/agents --token-cmd 'security find-generic-password -s ntfy -w'
-simstim host alerts set my-vps --add --webhook https://hooks.slack.com/services/… --format slack --events failed,oom
-simstim host alerts set my-vps --add --command 'notify-send "$SIMSTIM_SUMMARY"'
+simstim host alerts set my-vps --ntfy https://ntfy.example.com/agents \
+  --token-cmd 'security find-generic-password -s ntfy -w'
+simstim host alerts set my-vps --add --format slack --events failed,oom \
+  --webhook https://hooks.slack.com/services/…
+simstim host alerts set my-vps --add \
+  --command 'notify-send "$SIMSTIM_SUMMARY"'
 simstim host alerts set my-vps --delay 30s --min-turn 5m
 ```
 
@@ -46,4 +49,4 @@ simstim host alerts set my-vps --delay 30s --min-turn 5m
 | `--no-color` | print no colour (NO_COLOR does the same) |
 | `--no-input` | ask nothing: a question that needs an answer fails with exit code 4, and names the flag that answers it (SIMSTIM_NO_INPUT=1 does the same) |
 
-Part of [`host alerts`](host_alerts.md): show where a host sends alerts about its sessions, and the last deliveries.
+Part of [`host alerts`](host_alerts.md): show where a host sends alerts, and the last deliveries.

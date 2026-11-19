@@ -7,7 +7,7 @@ title: "simstim host add"
 Connect a host: check it, install the helper, prepare it.
 
 ```text
-simstim host add <name> [ssh-target] [flags]
+simstim host add <name> [<ssh-target>] [flags]
 ```
 
 Connect a host. The ssh target is a Host from your SSH config, or user@host. It defaults to the name. `--ssh-config` adds an extra SSH config file, for example a repo's own.

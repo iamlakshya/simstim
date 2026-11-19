@@ -10,6 +10,8 @@ Stop a session and remove it.
 simstim kill <host>/<session>
 ```
 
+**Aliases:** `rm`, `delete`
+
 ## Examples
 
 ```sh

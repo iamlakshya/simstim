@@ -7,7 +7,7 @@ title: "simstim host test"
 Check that a host answers, and how fast.
 
 ```text
-simstim host test <name> [flags]
+simstim host test <host> [flags]
 ```
 
 ## Examples

@@ -23,7 +23,7 @@ func doctorCmd() *cobra.Command {
 		Long: "Checks this computer: ssh, the config files and the secrets' commands. With --fix it\n" +
 			"offers to fix what it can: SSH configs it generated for hosts you removed, and\n" +
 			"ControlMaster sockets whose master died. Each fix is shown before it runs.\n" +
-			"`host doctor <name>` checks a host.",
+			"`host doctor <host>` checks a host.",
 		Example: "  " + brand.Name + " doctor\n  " + brand.Name + " doctor --fix\n  " + brand.Name + " doctor --json",
 		Args:    unknownCommand,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -67,19 +67,21 @@ func doctorCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&fix, "fix", false, "offer to fix the problems found, one by one")
 	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "with --fix, apply every fix without asking")
 	cmd.AddCommand(&cobra.Command{
-		Use:   "terminal",
-		Short: "Ask this terminal what it supports (keys, colours, synchronized output…)",
-		Args:  cobra.NoArgs,
-		RunE:  func(cmd *cobra.Command, _ []string) error { return terminalProbe(cmd.Context()) },
+		Use:     "terminal",
+		Short:   "Ask this terminal what it supports: keys, colours and more",
+		Example: "  " + brand.Name + " doctor terminal",
+		Args:    cobra.NoArgs,
+		RunE:    func(cmd *cobra.Command, _ []string) error { return terminalProbe(cmd.Context()) },
 	})
 	cmd.AddCommand(&cobra.Command{
 		Use:   "keys",
-		Short: "Show every key as the terminal sends it, and which keys " + brand.DisplayName + " keeps",
+		Short: "Show each key as the terminal sends it, and the client's own keys",
 		Long: "Turns on the kitty keyboard protocol, then prints each key press as bytes.\n" +
 			"To check the path to a host, start a session that runs the same tester there:\n" +
 			"  " + brand.Name + " new <host> -- " + brand.HostBinary + " keytest",
-		Args: cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error { return keyTester(cmd.Context()) },
+		Example: "  " + brand.Name + " doctor keys",
+		Args:    cobra.NoArgs,
+		RunE:    func(cmd *cobra.Command, _ []string) error { return keyTester(cmd.Context()) },
 	})
 	return cmd
 }

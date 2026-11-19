@@ -7,7 +7,7 @@ title: "simstim host start"
 Start the host through its provider or provider script.
 
 ```text
-simstim host start <name>
+simstim host start <host>
 ```
 
 ## Examples

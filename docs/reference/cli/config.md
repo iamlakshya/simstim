@@ -10,6 +10,13 @@ Show the configuration.
 simstim config
 ```
 
+## Examples
+
+```sh
+simstim config path
+simstim config keymap
+```
+
 ## Flags from the parent command
 
 | Flag | What it does |
@@ -23,7 +30,7 @@ simstim config
 
 | Command | What it does |
 | --- | --- |
-| [`config keymap`](config_keymap.md) | Print every home-screen command and its keys (rebind them under [keymap] in config.toml) |
+| [`config keymap`](config_keymap.md) | Print the launcher's commands and their keys |
 | [`config path`](config_path.md) | Print where the configuration lives |
 
 See [all commands](_index.md).

@@ -41,23 +41,23 @@ Did you mean "add"?
 == attach, colour false, exit 2
 Error: attach needs a session, as <host>/<session>.
 
-Usage:   <name> attach [<host>/<session> | -]
+Usage:   <name> attach [<host>/<session>|-]
 Example: <name> attach my-vps/auth-fix
 
 Try: <name> attach --help
 == attach, colour true, exit 2
 [1m[31mError:[0m attach needs a session, as <host>/<session>.
 
-Usage:   <name> attach [<host>/<session> | -]
+Usage:   <name> attach [<host>/<session>|-]
 Example: <name> attach my-vps/auth-fix
 
 [34mTry:[0m <name> attach --help
 == rename a b c, colour false, exit 2
-Error: rename takes <host>/<session> <new-name>, and got 3 words.
+Error: rename takes <host>/<session> <name>, and got 3 words.
 
 Try: <name> rename --help
 == rename a b c, colour true, exit 2
-[1m[31mError:[0m rename takes <host>/<session> <new-name>, and got 3 words.
+[1m[31mError:[0m rename takes <host>/<session> <name>, and got 3 words.
 
 [34mTry:[0m <name> rename --help
 == new box --detatch, colour false, exit 2

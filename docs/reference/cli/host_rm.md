@@ -7,7 +7,7 @@ title: "simstim host rm"
 Forget a host (its sessions keep running).
 
 ```text
-simstim host rm <name>
+simstim host rm <host>
 ```
 
 ## Examples

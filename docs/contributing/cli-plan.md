@@ -116,7 +116,7 @@ Some isolation tasks depend on tasks of this plan, so their commands use the sha
   - `--json` on every command that prints data or makes something: `new --detach`, `resume --detach`, `ports`, `doctor`, `host test`, `host restore`, `host status` and `version`. Field names follow question C-5. With `--json`, an error is one JSON line on stderr (question C-7).
   - Data goes to stdout, and messages, confirmations, progress and warnings to stderr. Spinners only at a terminal. Colour follows `NO_COLOR`, `TERM=dumb` and `--no-color`.
 - **Spec:** [cli-spec.md, section 6](cli-spec.md#6-prompts-pickers-and-input-c4), [section 7](cli-spec.md#7-machine-output-c4) and [section 3](cli-spec.md#3-old-names-and-warnings-c5-c6-c7).
-- **Files:** new `internal/cli/prompt.go`, new `internal/tui/picker.go`, `internal/cli/session.go`, `internal/cli/resume.go`, `internal/cli/host.go`, `internal/cli/create.go`, `internal/cli/doctor.go`, `internal/cli/main.go` (`version`), new `internal/cli/deprecated.go` (the table of spec 3, with its first row).
+- **Files:** new `internal/cli/prompt.go`, new `internal/tui/picker.go`, `internal/cli/session.go`, `internal/cli/resume.go`, `internal/cli/host.go`, `internal/cli/create.go`, `internal/cli/doctor.go`, `internal/cli/main.go` (`version`), new `internal/cli/deprecated.go` (the table of spec 3, with its first row), with `OldNames`, which reads that table, and `cmd/docgen`, which shows each old name on the reference page of its new command.
 - **Acceptance:**
   - `new box --detach --json` prints one JSON object with `id`, `name`, `host` and `"v": 1`, and nothing else on stdout.
   - With `--no-input`, `host add box` fails with exit code 4 and the flag `--yes`.
@@ -146,7 +146,7 @@ Some isolation tasks depend on tasks of this plan, so their commands use the sha
   - `attach a` finds `box/a` when no other host has a session named `a`. Two matches fail with both full names.
   - `TestTopLevel` passes, with `kill` and `flip` hidden ([CLI spec, 2.3](cli-spec.md#23-tests)).
 - **Tests:** unit tests for the address rules, golden tests of the prompts, and end-to-end runs of `rm`, `attach` and `show`.
-- **Docs:** the README's first-session path, new `docs/how-to/sessions.md`, [the UX spec](ux-spec.md), the reference through `just docs`. The line `Describe one: simstim show <host>/<session> --json` in the snippet of `docs/how-to/use-with-agents.md` ([CLI spec, 16.1](cli-spec.md#161-what-the-docs-site-publishes)).
+- **Docs:** the README's first-session path, new `docs/how-to/sessions.md`, [the UX spec](ux-spec.md), the reference through `just docs`. The line `Describe one: simstim show <host>/<session> --json` in the snippet of `docs/how-to/use-with-agents.md` ([CLI spec, 16.1](cli-spec.md#161-what-the-docs-site-publishes)). The `address` line of `help concepts` (`concepts` in `internal/cli/topics.go`) says that only `attach` and `flip` take `-`. Widen it once every verb takes `-`. `TestTopLevel` skips the help topics with `IsTopic`: they are hidden commands that run.
 - **CHANGELOG:** Changed. "`rm` deletes a session, and asks first. `kill` still works for now, and warns. `attach` wakes a stopped session and offers to restart an ended agent. `show` describes one session. You can leave out the host when a session's name is unique."
 - **Depends on:** C4.
 - **Questions:** C-1, C-3, C-4, C-10.
@@ -164,7 +164,7 @@ Some isolation tasks depend on tasks of this plan, so their commands use the sha
   - `new --setup` and `--no-setup` become `--setup-script` and `--no-setup-script`, so that "setup" names only the guided setup.
   - `-n` is `--name` everywhere. `host alerts log -n` becomes `--lines` alone, with a warned alias.
 - **Spec:** [cli-spec.md, section 10](cli-spec.md#10-flags-c6) and [section 3](cli-spec.md#3-old-names-and-warnings-c5-c6-c7).
-- **Files:** `internal/cli/session.go`, `internal/cli/alerts.go`, `internal/cli/create.go`, `internal/cli/agents.go`, `internal/cli/guided.go`, new `internal/cli/flags.go` (shared list and size parsers), `internal/cli/deprecated.go` (the warned aliases).
+- **Files:** `internal/cli/session.go`, `internal/cli/alerts.go`, `internal/cli/create.go`, `internal/cli/agents.go`, `internal/cli/guided.go`, new `internal/cli/flags.go` (shared list and size parsers), `internal/cli/deprecated.go` (the warned aliases), and `cmd/docgen`, whose pages show the old flags through `cli.OldNames`.
 - **Acceptance:** each old form works and warns once. A test fails when two commands give one short flag two meanings.
 - **Tests:** unit tests for the parsers and the aliases.
 - **Docs:** the reference through `just docs`, and every how-to guide that shows an old form.

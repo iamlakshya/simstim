@@ -7,7 +7,7 @@ title: "simstim rename"
 Rename a session.
 
 ```text
-simstim rename <host>/<session> <new-name>
+simstim rename <host>/<session> <name>
 ```
 
 ## Examples

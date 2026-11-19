@@ -16,7 +16,7 @@ func hostAlertsCmd() *cobra.Command {
 	var asJSON bool
 	cmd := &cobra.Command{
 		Use:   "alerts <host>",
-		Short: "Show where a host sends alerts about its sessions, and the last deliveries",
+		Short: "Show where a host sends alerts, and the last deliveries",
 		Long: "A host can tell you when a session needs you, finishes a long turn or fails, with the laptop shut.\n" +
 			"It sends events to destinations you name: an ntfy topic, a webhook or a command on the host.\n" +
 			"Nothing is sent until you name one. See docs/how-to/alerts.md.",
@@ -83,9 +83,12 @@ func alertsSetCmd() *cobra.Command {
 			"unless you add --add. With no destination flag, only the settings you give change.\n" +
 			"--token-cmd runs a command here, such as a keychain read, and sends what it prints as the ntfy token.",
 		Example: "  " + brand.Name + " host alerts set my-vps --ntfy https://ntfy.sh/<your-topic>\n" +
-			"  " + brand.Name + " host alerts set my-vps --ntfy https://ntfy.example.com/agents --token-cmd 'security find-generic-password -s ntfy -w'\n" +
-			"  " + brand.Name + " host alerts set my-vps --add --webhook https://hooks.slack.com/services/… --format slack --events failed,oom\n" +
-			"  " + brand.Name + " host alerts set my-vps --add --command 'notify-send \"$" + brand.Env("SUMMARY") + "\"'\n" +
+			"  " + brand.Name + " host alerts set my-vps --ntfy https://ntfy.example.com/agents \\\n" +
+			"    --token-cmd 'security find-generic-password -s ntfy -w'\n" +
+			"  " + brand.Name + " host alerts set my-vps --add --format slack --events failed,oom \\\n" +
+			"    --webhook https://hooks.slack.com/services/…\n" +
+			"  " + brand.Name + " host alerts set my-vps --add \\\n" +
+			"    --command 'notify-send \"$" + brand.Env("SUMMARY") + "\"'\n" +
 			"  " + brand.Name + " host alerts set my-vps --delay 30s --min-turn 5m",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
