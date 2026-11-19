@@ -42,6 +42,25 @@ type screenModel struct {
 // main screen of a second emulator, which keeps one line too.
 const screenScrollback = 1
 
+// screenMaxCols and screenMaxRows cap the screen model's size, which is
+// smaller than the terminal's own cap (maxTermCols by maxTermRows). vt keeps
+// over 200 bytes for each cell, so a model of 4096 by 4096 held 3.6 GiB,
+// and 7.2 GiB with the alternate screen on, in the holder. That counts
+// against the session's memory cap. At 1000 by 500 it holds 113 MiB, and
+// 227 MiB with the alternate screen on. The launcher's preview uses the
+// same cap (internal/tui/preview.go).
+//
+// A larger terminal still gets its full size in the PTY and the shadow
+// terminal. The model then shows the agent's output laid out at 1000 by
+// 500: a line wider than 1000 columns wraps, and a full-screen program's
+// rows below row 500 land on the last row. So the status rules can miss or
+// misread the screen there. The hooks, the agent's OSC reports and the
+// output's timing still set the status.
+const (
+	screenMaxCols = 1000
+	screenMaxRows = 500
+)
+
 // Sequences that the model writes to its own emulators. No terminal draws
 // these emulators, so none of these bytes reach the user's terminal.
 var (
@@ -58,6 +77,7 @@ func newScreenModel(cols, rows int) *screenModel {
 	if rows <= 0 {
 		rows = 24
 	}
+	cols, rows = min(cols, screenMaxCols), min(rows, screenMaxRows)
 	m := &screenModel{e: newScreenEmulator(cols, rows)}
 	m.off = m.e == nil
 	m.rt.shared, m.rt.mainShared = freshShared, freshShared
@@ -192,6 +212,7 @@ func (m *screenModel) resize(cols, rows int) {
 			m.off = true
 		}
 	}()
+	cols, rows = min(cols, screenMaxCols), min(rows, screenMaxRows)
 	m.e.Resize(cols, rows)
 	if m.alt != nil {
 		m.alt.Resize(cols, rows)

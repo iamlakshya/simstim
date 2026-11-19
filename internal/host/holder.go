@@ -216,14 +216,8 @@ func (h *Holder) start() error {
 	// Secrets go into the agent's environment and nowhere else.
 	cmd.Env = append(append([]string(nil), m.Env...), h.secretEnv...)
 	cmd.Dir = m.Cwd
-	cols, rows := m.Term.Cols, m.Term.Rows
-	if cols <= 0 {
-		cols = 80
-	}
-	if rows <= 0 {
-		rows = 24
-	}
-	ptmx, err := pty.StartWithSize(cmd, &pty.Winsize{Cols: clamp16(cols), Rows: clamp16(rows)})
+	cols, rows := h.startSize()
+	ptmx, err := pty.StartWithSize(cmd, &pty.Winsize{Cols: clampCols(cols), Rows: clampRows(rows)})
 	cmd.Env, h.secretEnv = nil, nil // the agent has its copy; the holder keeps none
 	if err != nil {
 		return fmt.Errorf("start %s in a terminal: %w", argv[0], err)

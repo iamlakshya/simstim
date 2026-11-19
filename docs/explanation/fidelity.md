@@ -14,7 +14,7 @@ The last column distinguishes automated checks, manual checks, documented limits
 | Synchronized output (mode 2026) | Passed through, so no flicker | Fixture |
 | Mouse, focus, bracketed paste | Passed through, and reset on detach | `x/vt` baseline after detach |
 | Terminal queries (DA, XTVERSION, OSC 10/11, kitty query) | Live queries reach every attached terminal, and replies from all attached clients reach the PTY. Historical queries are removed during replay. With no client attached, the vt child answers supported queries from its own state and configured defaults; it does not cache client replies. | Fixture with no client |
-| Resize | The newest attach or any attached client's input frame makes it leader. Only the leader's resize frames change the PTY size. Every attach forces SIGWINCH. Replies and mouse events also change the leader. | Manual, two devices |
+| Resize | The newest attach or any attached client's input frame makes it leader. Only the leader's resize frames change the PTY size. The host caps the size at 4096 columns and 2048 rows. Every attach forces SIGWINCH. Replies and mouse events also change the leader. | Manual, two devices |
 | Kitty graphics, sixel | Passed through while attached. **Not** restored on reattach. This is a known limit. | Documented |
 | Added delay per keystroke | Target: under 1 ms on the client | Performance overlay |
 

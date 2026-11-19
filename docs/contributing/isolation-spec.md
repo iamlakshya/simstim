@@ -3777,10 +3777,11 @@ The research of 10 November 2026 checked the facts that the build depends on ([b
     - **Recommended:** (a), as the owner decided on 11 November 2026. A libghostty-vt tag gives each later bump a name that P0.9 can compare. Patches on an old commit need a review at each bump ([build facts](../research/build-facts.md#61-ghostty-and-its-advisories)).
 
 76. **How large may a terminal be?** GHSA-jqr7 says to cap the columns, and names no number. Ghostty itself allows 65535.
-    - (a) 4096 columns and 4096 rows.
-    - (b) 65535, Ghostty's own limit.
-    - (c) 1024.
-    - **Recommended:** (a), as the project's own choice. A screen 7,680 pixels wide with cells 6 pixels wide holds 1,280 columns, so 4096 leaves room for any real window (19.1).
+    - (a) 4096 columns and 2048 rows for the PTY and the shadow terminal, and at most 1000 columns and 500 rows for the holder's Go screen model.
+    - (b) 4096 columns and 4096 rows for all three.
+    - (c) 65535, Ghostty's own limit.
+    - (d) 1024.
+    - **Recommended:** (a), as the project's own choice, made in P0.1. A screen 7,680 pixels wide with cells 6 pixels wide holds 1,280 columns, so 4096 leaves room for any real window. Rows are taller than columns are wide, so 2048 rows leave room too. P0.1 measured the cost (19.1). The shadow terminal at 4096 by 4096 held 629 MiB with its 10,000 lines of scrollback full and the alternate screen on, and 488 MiB at 4096 by 2048. The Go screen model at 4096 by 4096 held 3.6 GiB, and 7.2 GiB on the alternate screen. At 1000 by 500 it holds 113 MiB, and 227 MiB on the alternate screen. The launcher's preview uses the same 1000 by 500.
 
 77. **How does the host run git in an unwalled session's repository?** The session can write the repository's config. `git status` can run a filter that the config names.
     - (a) With `-c core.fsmonitor=false -c core.hooksPath=/dev/null` only.
@@ -4395,13 +4396,16 @@ Section 3.2 lists the holes that exist today, whatever the wall. This section sp
 | `internal/host/vt_test.go` | The version prefix `0.17.` and its skip message |
 | `.goreleaser.yaml`, `CONTRIBUTING.md`, `scripts/repro.sh`, `scripts/test-install.sh`, `scripts/time-to-agent.sh` | Each mention of Zig 0.16 |
 
-**The size cap.** The cap is 4096 columns and 4096 rows. This is the project's own choice: Ghostty allows 65535, and GHSA-jqr7 names no number ([question 76](#15-open-questions)).
+**The size cap.** The cap is 4096 columns and 2048 rows. The holder's Go screen model has a smaller cap of its own, 1000 columns and 500 rows. These are the project's own choices: Ghostty allows 65535, and GHSA-jqr7 names no number ([question 76](#15-open-questions)).
 
-- A new `clampTerm(n int) uint16` in `internal/host/vt.go` maps a value below 1 to 1, and a value above 4096 to 4096.
-- It replaces `clamp16` for columns and rows in the PTY size at the holder's start (`holder.go`) and in the resize (`holder_conn.go`). It also replaces it in the size frames to the shadow terminal (`vt.go`, `vt_child.go`). Pixel sizes keep `clamp16`.
-- The holder clamps a size once, where it reads it: `Term` at its start, and each `TResize`. The PTY, the Go screen model (`newScreenModel` and `screenModel.resize` in `screen.go`), the shadow terminal and the manifest all get that size.
-- The shadow terminal applies the same cap itself, in `vt/src/main.zig`, to `--cols`, `--rows` and each resize message. So a size that reaches it by another path cannot pass the cap.
-- A clamped size writes one debug line to the holder's log: `resize clamped`, with the size asked for and the size set.
+- The rows cap is 2048 because of the shadow terminal's memory. P0.1 measured its largest resident size on Linux arm64, with libghostty-vt 1.0.0. At 4096 by 4096, it held 143 MiB on the main screen and 284 MiB with the alternate screen on. With its 10,000 lines of scrollback full as well, it held 629 MiB. At 4096 by 2048, the same case held 488 MiB, under 512 MiB.
+- A new `clampCols(n int) uint16` in `internal/host/vt.go` maps a value below 1 to 1, and a value above 4096 to 4096. A new `clampRows(n int) uint16` does the same with 2048.
+- They replace `clamp16` for columns and rows in the PTY size at the holder's start (`holder.go`) and in the resize (`holder_conn.go`). They also replace it in the size frames to the shadow terminal (`vt.go`, `vt_child.go`). Pixel sizes keep `clamp16`.
+- The holder clamps a size once, where it reads it: `Term` at its start, and each `TResize`. The PTY, the shadow terminal and the manifest all get that size. So the session's row, `peek` and `list` report it. The VT keeps the clamped size for its next child, and `spawn` clamps `--cols` and `--rows` again as a guard.
+- The Go screen model (`newScreenModel` and `screenModel.resize` in `screen.go`) takes at most 1000 columns and 500 rows. Its emulator keeps over 200 bytes for each cell, so at 4096 by 4096 it held 3.6 GiB in the holder, and 7.2 GiB on the alternate screen. That counts against the session's memory cap. The launcher's preview uses the same cap (`internal/tui/preview.go`).
+- For a terminal larger than 1000 by 500, the model shows the agent's output laid out at 1000 by 500. A line wider than 1000 columns wraps, and a full-screen program's rows below row 500 land on the last row. So the status rules can miss or misread the screen there. The hooks, the agent's OSC reports and the output's timing still set the status.
+- The shadow terminal applies the same caps itself, in `vt/src/main.zig`, to `--cols`, `--rows` and each resize message. So a size that reaches it by another path cannot pass them.
+- A clamped size writes one line at INFO to the holder's log (`holder.log`): `resize clamped`, with the size asked for and the size set.
 
 **Errors.**
 
@@ -4409,12 +4413,14 @@ Section 3.2 lists the holes that exist today, whatever the wall. This section sp
 | --- | --- | --- |
 | `just vt`, `just build` or the vt tests with another Zig | The shadow terminal needs Zig 0.17.0, and this machine has 0.16.0. | `just setup`, which puts the pinned Zig into `.tools/` |
 
+`just vt` fails with this message. `just build` prints it as a note and goes on without the shadow terminal. It also removes the old build of it, `internal/client/helpers/vt-linux-*`, so the client never embeds an old pin. The vt tests skip with it. They also skip when the binary that they would use says, in its `--version`, that it is built from another Ghostty commit than the one that `vt/build.zig.zon` pins.
+
 **Tests.**
 
-1. Unit tests of `clampTerm`: -1, 0, 1, 80, 4096, 4097, 65535 and the largest `int`.
-2. A holder test: a `TResize` of 65535 by 65535 sets the PTY, the Go screen model and the shadow terminal to 4096 by 4096. So does a start whose `Term` is 65535 by 65535.
-3. A test of the shadow terminal: `--cols 65535` starts it at 4096 columns.
-4. The replay fixtures of `TestVT` and the fidelity fixtures of `test/ttyshot` pass with the new pin.
+1. Unit tests of `clampCols` and `clampRows`: -1, 0, 1, 80, 2048, 2049, 4096, 4097, 65535 and the largest `int`.
+2. A holder test: a `TResize` of 65535 by 65535 sets the PTY and the shadow terminal to 4096 by 2048, and the Go screen model to 1000 by 500. A start whose `Term` is 65535 by 50 runs at 4096 by 50, and the saved manifest, the session's row, `peek` and `list` say 4096 by 50. A start with one number only, 65535 by 0 or 0 by 65535, runs at 4096 by 24 or 80 by 2048, and the manifest, the row and `peek` say so. A start with no size keeps "no size" in the manifest. `holder.log` has the `resize clamped` line.
+3. A test of the shadow terminal: `--cols 65535 --rows 70000` starts it at 4096 by 2048, and so do a resize and a snapshot of 65535 by 65535.
+4. `TestVTSnapshotFixtures` and `TestVTSnapshotCases` in `internal/host` pass with the new pin.
 5. In the pull request: the compare API answers "ahead" or "identical" for each of the four fix commits against the new pin. From P0.9 on, the watch job checks this each day.
 
 ### 19.2 Setup trust tied to the script's content (P0.6)

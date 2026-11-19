@@ -435,7 +435,7 @@ Checked on 10 November 2026. Spec 20.7 to 20.9 and questions 30, 38 and 42 use t
 
 Checked on 10 November 2026. The spec uses these facts in sections 3.2, 19.1 and 19.5.
 
-- The shadow terminal pins Ghostty commit `ad97d331` (14 October 2026) in `vt/build.zig.zon`, with Zig 0.16.0.
+- The shadow terminal pins Ghostty commit `ad97d331` (14 October 2026) in `vt/build.zig.zon`, with Zig 0.16.0. On 11 November 2026, P0.1 (spec 19.1) moved the pin to `vt-1.0.0` (`0fa3d577`) and the build to Zig 0.17.0.
 - Ghostty published four advisories that affect libghostty-vt, the library that the shadow terminal embeds. GitHub published the first three on 27 October 2026 ([repository advisories](https://api.github.com/repos/ghostty-org/ghostty/security-advisories)):
 
 | Advisory | What | Affected | Fix | The pin `ad97d331` |
@@ -447,11 +447,11 @@ Checked on 10 November 2026. The spec uses these facts in sections 3.2, 19.1 and
 
 - The fixes are [PR 14856](https://github.com/ghostty-org/ghostty/pull/14856) and [PR 14857](https://github.com/ghostty-org/ghostty/pull/14857), merged on 26 October 2026.
 - The compare API shows the pin "behind" both `e257bb45` and `0af5c9e55`, and "ahead" of `65ff54c6` (`https://api.github.com/repos/ghostty-org/ghostty/compare/<fix>...ad97d331`).
-- UNVERIFIED: that `vt-1.0.0` also holds `65ff54c6` and `44c4c8f5`. P0.1 checks all four fixes with the compare API.
+- `vt-1.0.0` holds all four fixes. On 11 November 2026, for P0.1, the compare API answered "ahead" for `e257bb45`, `0af5c9e55`, `65ff54c6` and `44c4c8f5` against its commit `0fa3d577` (`https://api.github.com/repos/ghostty-org/ghostty/compare/<fix>...0fa3d577a5614150ff8e2c152de5fb9d5c6d2dec`).
 - `e257bb45` and `0af5c9e55` are on diverged lines, so neither commit holds the other. `v1.4.0` (27 October 2026) and `vt-1.0.0` (6 November 2026, commit `0fa3d577`) hold both. `vt-1.0.0` is the first libghostty-vt release ([PR 15126](https://github.com/ghostty-org/ghostty/pull/15126): "The first tag will be `vt-1.0.0`").
 - The fix commits and both tags need Zig 0.17. `build.zig.zon` at `vt-1.0.0` says `minimum_zig_version = "0.17.0"`, and `src/build/zig.zig` matches the major and minor version only. Zig 0.17.0 shipped on 1 October 2026 ([Zig downloads](https://ziglang.org/download/index.json)).
 - The shadow terminal sets `max_scrollback_lines = 10_000` (`vt/src/main.zig`). That is the set-up of GHSA-qjfx, but the pin already has its fix. No source says whether 10,000 lines makes GHSA-w9q4 harder to reach.
-- Ghostty has no limit of 4096 columns. `CellCountInt` is `u16`, and `Capacity.maxCols` clamps to its largest value, 65535 (`src/terminal/page.zig` at `v1.4.0`). GHSA-jqr7 says "cap the number of columns" and gives no number. So a cap of 4096 is this project's own choice ([question 76](../contributing/isolation-spec.md#15-open-questions)).
+- Ghostty has no limit of 4096 columns. `CellCountInt` is `u16`, and `Capacity.maxCols` clamps to its largest value, 65535 (`src/terminal/page.zig` at `v1.4.0`). GHSA-jqr7 says "cap the number of columns" and gives no number. So a cap of 4096 is this project's own choice ([question 76](../contributing/isolation-spec.md#15-open-questions)). P0.1 measured the memory at that size and capped rows at 2048 (spec 19.1).
 
 **Where the advisories are listed.**
 
