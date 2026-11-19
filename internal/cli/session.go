@@ -83,7 +83,8 @@ func newCmd() *cobra.Command {
 				return err
 			}
 			if detach {
-				fmt.Printf("Started %s/%s (%s, %s).\n", h.Name, s.ID, s.Name, s.Agent)
+				d := client.CleanSession(*s)
+				fmt.Printf("Started %s/%s (%s, %s).\n", h.Name, d.ID, d.Name, d.Agent)
 				return nil
 			}
 			return attach(cmd.Context(), h, s.ID, s.Name)
@@ -117,6 +118,7 @@ func attachEnded(ctx context.Context, h client.Host, id, name string) (bool, err
 		return false, &client.UserError{Msg: "attach needs a terminal", Hint: "Run it from a terminal, not a pipe."}
 	}
 	tui.RememberLast(h.Name, id, name)
+	name = client.CleanLine(name) // the host's own text, from here only printed
 	res, err := client.Attach(ctx, client.AttachOptions{
 		Host: h, Session: id, Settings: client.LoadSettings(), Interactive: true,
 	})
@@ -223,9 +225,10 @@ func killCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				fmt.Printf("Deleted %s (%s) on %s.\n", s.Name, s.ID, h.Name)
-				if res.Worktree != "" {
-					fmt.Println(strings.ToUpper(res.Worktree[:1]) + res.Worktree[1:] + ".")
+				d := client.CleanSession(*s)
+				fmt.Printf("Deleted %s (%s) on %s.\n", d.Name, d.ID, h.Name)
+				if w := client.CleanPath(res.Worktree); w != "" {
+					fmt.Println(strings.ToUpper(w[:1]) + w[1:] + ".")
 				}
 				return nil
 			})
@@ -243,7 +246,7 @@ func renameCmd() *cobra.Command {
 				if err := conn.RenameSession(ctx, s.ID, args[1]); err != nil {
 					return err
 				}
-				fmt.Printf("Renamed %s to %s on %s.\n", s.Name, args[1], h.Name)
+				fmt.Printf("Renamed %s to %s on %s.\n", client.CleanLine(s.Name), args[1], h.Name)
 				return nil
 			})
 		},
@@ -287,8 +290,13 @@ func listAll(ctx context.Context, hosts []client.Host) []hostSessions {
 
 // printSessions prints one line for each session, by host. The state column
 // is as wide as its longest state, so a cause such as "(out of memory)"
-// keeps the columns after it in line.
-func printSessions(results []hostSessions) {
+// keeps the columns after it in line. What a host sent is cleaned first
+// (api.CleanText). The JSON keeps the host's own values.
+func printSessions(all []hostSessions) {
+	results := make([]hostSessions, len(all))
+	for i, r := range all {
+		results[i] = hostSessions{Host: r.Host, Sessions: client.CleanSessions(r.Sessions), Error: client.CleanLine(r.Error)}
+	}
 	sort.Slice(results, func(i, j int) bool { return results[i].Host < results[j].Host })
 	stateW := 12
 	for _, r := range results {
@@ -380,7 +388,7 @@ func sendCmd() *cobra.Command {
 				if err := conn.SendText(ctx, s.ID, args[1], !noEnter); err != nil {
 					return err
 				}
-				fmt.Printf("Sent to %s on %s.\n", s.Name, h.Name)
+				fmt.Printf("Sent to %s on %s.\n", client.CleanLine(s.Name), h.Name)
 				return nil
 			})
 		},

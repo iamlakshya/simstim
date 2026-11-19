@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/iamlakshya/simstim/internal/api"
 	"github.com/iamlakshya/simstim/internal/brand"
 	"github.com/iamlakshya/simstim/internal/client"
 )
@@ -197,7 +198,7 @@ func (b *builder) fill(ctx context.Context, now time.Time) error {
 func (b *builder) put(name string, data []byte) error {
 	out, why := b.prepare(name, data)
 	if why != "" {
-		b.res.Left = append(b.res.Left, Left{Name: name, Why: why})
+		b.res.Left = append(b.res.Left, Left{Name: printable(name), Why: why})
 		return nil
 	}
 	return b.a.add(name, out)
@@ -249,11 +250,11 @@ func (b *builder) hostFiles(ctx context.Context) error {
 			return fmt.Errorf("read the host's files: %w", err)
 		}
 		if err := checkEntryName(f.Path); err != nil || !strings.HasPrefix(f.Path, "host/") || i >= maxHostFiles {
-			b.res.Left = append(b.res.Left, Left{Name: fmt.Sprintf("%q", f.Path), Why: "the host gave a name that is not a plain path under host/, or too many files"})
+			b.res.Left = append(b.res.Left, Left{Name: fmt.Sprintf("%+q", f.Path), Why: "the host gave a name that is not a plain path under host/, or too many files"})
 			continue
 		}
 		if total >= maxHostBytes {
-			b.res.Left = append(b.res.Left, Left{Name: f.Path, Why: fmt.Sprintf("the host's files reached the bundle's limit of %d MiB", maxHostBytes>>20)})
+			b.res.Left = append(b.res.Left, Left{Name: printable(f.Path), Why: fmt.Sprintf("the host's files reached the bundle's limit of %d MiB", maxHostBytes>>20)})
 			continue
 		}
 		data, hidden, err := b.conn.DebugReadFile(ctx, f, min(maxFile, maxHostBytes-total))
@@ -265,7 +266,7 @@ func (b *builder) hostFiles(ctx context.Context) error {
 				Hint: brand.Name + " debug bundle" + target(b.o) + "   (try again)"}
 		}
 		if err != nil {
-			b.res.Left = append(b.res.Left, Left{Name: f.Path, Why: "the host could not send it: " + printable(err.Error())})
+			b.res.Left = append(b.res.Left, Left{Name: printable(f.Path), Why: "the host could not send it: " + printable(err.Error())})
 			continue
 		}
 		total += int64(len(data))
@@ -280,16 +281,9 @@ func (b *builder) hostFiles(ctx context.Context) error {
 	return nil
 }
 
-// printable is text from the host with each character that a terminal
-// could take as a control code turned into ?.
-func printable(s string) string {
-	return strings.Map(func(r rune) rune {
-		if r < ' ' || r == 0x7f || r >= 0x80 && r < 0xa0 {
-			return '?'
-		}
-		return r
-	}, s)
-}
+// printable is text from the host, cleaned to print (api.CleanText), as
+// the client prints every text that a host sends.
+func printable(s string) string { return api.CleanText(s, 4096) }
 
 // pick finds a session by its ID, or by a name that only it has.
 func pick(list []client.Session, ref, host string) (client.Session, error) {

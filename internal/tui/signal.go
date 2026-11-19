@@ -132,12 +132,13 @@ func activityLine(s *screenShot) string {
 		return ""
 	}
 	for y := s.bottom; y >= 0 && y < len(s.lines); y-- {
+		// The line is what the session printed: it is cleaned to draw.
 		text := strings.TrimSpace(strings.Map(func(r rune) rune {
 			if r >= 0x2500 && r <= 0x257F { // box drawing
 				return ' '
 			}
 			return r
-		}, s.lines[y].String()))
+		}, client.CleanLine(s.lines[y].String())))
 		text = strings.Join(strings.Fields(text), " ")
 		if text == "" || chrome.MatchString(text) {
 			continue

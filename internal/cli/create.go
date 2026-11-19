@@ -116,7 +116,7 @@ func applyIdle(ctx context.Context, h client.Host) error {
 	if err != nil {
 		return err
 	}
-	fmt.Printf("  ✓ idle stop: %s\n", out)
+	fmt.Printf("  ✓ idle stop: %s\n", client.CleanLine(out)) // the host's own words
 	return nil
 }
 
@@ -194,7 +194,7 @@ func workingSessions(ctx context.Context, h client.Host, lc client.Lifecycle) []
 	var out []string
 	for _, s := range sessions {
 		if s.Alive && (s.State == api.StateWorking || s.State == api.StateStarting) {
-			out = append(out, s.Name)
+			out = append(out, client.CleanLine(s.Name)) // the host's text, only printed
 		}
 	}
 	sort.Strings(out)

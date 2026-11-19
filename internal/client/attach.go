@@ -221,7 +221,7 @@ func (a *attacher) handshake(last int64, cols, rows, xpx, ypx int, reconnect boo
 			case proto.TError:
 				var pe proto.Error
 				_ = json.Unmarshal(f.Payload, &pe)
-				return proto.Attached{}, &UserError{Msg: pe.Message, Hint: pe.Hint}
+				return proto.Attached{}, hostError(&pe)
 			default:
 				// Other frames before the answer are ignored.
 			}
@@ -387,6 +387,8 @@ func (a *attacher) frame(f proto.Frame) (done bool, err error) {
 	case proto.TEnded:
 		var e proto.Ended
 		_ = json.Unmarshal(f.Payload, &e)
+		// The signal's name is drawn, in the notice at the end of an attach.
+		e.Signal = CleanLine(e.Signal)
 		a.res.Ended = &e
 		return true, nil
 	case proto.TError:
@@ -396,7 +398,7 @@ func (a *attacher) frame(f proto.Frame) (done bool, err error) {
 			a.res.Ended = &proto.Ended{ExitCode: -1}
 			return true, nil
 		}
-		return true, &UserError{Msg: pe.Message, Hint: pe.Hint}
+		return true, hostError(&pe)
 	default:
 		// Other frames need nothing from an attached client.
 	}

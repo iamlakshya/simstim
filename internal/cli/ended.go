@@ -17,6 +17,7 @@ import (
 // endMessage is what attach prints when the agent of the session id ended,
 // with the step to try next when there is one.
 func endMessage(name, host, id string, e *proto.Ended) string {
+	name = client.CleanLine(name)
 	if e.ExitCode == -1 {
 		return fmt.Sprintf("\r\nThe session %s on %s stopped.\n", name, host)
 	}
@@ -24,10 +25,10 @@ func endMessage(name, host, id string, e *proto.Ended) string {
 	if e.OOM {
 		why = "out of memory"
 	} else if e.Signal != "" {
-		why = e.Signal
+		why = client.CleanLine(e.Signal)
 	}
 	s := fmt.Sprintf("\r\nThe session %s on %s ended (%s).\n", name, host, why)
-	if hint := client.EndHint(e, host+"/"+id); hint != "" {
+	if hint := client.EndHint(e, client.CommandTarget(host, id)); hint != "" {
 		s += "\nTry: " + hint + "\n"
 	}
 	return s
@@ -74,7 +75,8 @@ func endCause(s client.Session) string {
 // with the same step after the memory cap (client.EndHint). Otherwise the
 // step is a resume, as in the launcher. After a clean exit it also offers
 // a delete, and for a lost agent the restore of every lost session.
-func endedError(h client.Host, s client.Session) error {
+func endedError(h client.Host, row client.Session) error {
+	s := client.CleanSession(row) // only drawn: the message and its step
 	why := endCause(s)
 	if why == "" && s.ExitCode != nil {
 		why = fmt.Sprintf("exit code %d", *s.ExitCode)
@@ -83,7 +85,7 @@ func endedError(h client.Host, s client.Session) error {
 	if why != "" {
 		msg += " (" + why + ")"
 	}
-	ref := h.Name + "/" + s.ID
+	ref := client.CommandTarget(h.Name, row.ID)
 	resume := brand.Name + " resume " + ref
 	hint := client.SessionEndHint(s, ref)
 	switch {

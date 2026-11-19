@@ -48,12 +48,27 @@ func TestNotifyOthers(t *testing.T) {
 	}
 	got := notified(t, first, next)
 	title := brand.DisplayName + " · box"
-	want := "\x1b]777;notify;" + title + ";api needs you: Allow  rm -rf? \x1b\\" +
+	want := "\x1b]777;notify;" + title + ";api needs you: Allow  rm -rf?\x1b\\" +
 		"\x1b]777;notify;" + title + ";build ended\x1b\\"
 	if got != want {
 		t.Errorf("notifications = %q, want %q", got, want)
 	}
 	if strings.Contains(got, "this one") {
 		t.Error("the attached session was notified")
+	}
+}
+
+// TestNotifyCleansHostText checks that a notification carries no control,
+// bidirectional, zero-width or tag character that a host sent, so a session
+// cannot end the notification early and write to the clipboard.
+func TestNotifyCleansHostText(t *testing.T) {
+	first := []Session{{ID: "a", Name: "api", State: "working"}}
+	next := []Session{{ID: "a", Name: "api\u202egnp.exe", State: "needs_input",
+		Reason: "ok\x1b\\\x1b]52;c;aGk=\x07\u009d52;c;aGk=\u009c\u200b\U000e0041"}}
+	got := notified(t, first, next)
+	title := brand.DisplayName + " · box"
+	want := "\x1b]777;notify;" + title + ";apignp.exe needs you: ok\\]52 c aGk=52 c aGk=\x1b\\"
+	if got != want {
+		t.Errorf("notification = %q, want %q", got, want)
 	}
 }

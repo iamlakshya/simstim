@@ -80,11 +80,13 @@ func ExecInput(ctx context.Context, stdin io.Reader, install string, name string
 	return out.Bytes(), nil
 }
 
-// Tail is the last n non-empty lines of s, joined by "; ".
+// Tail is the last n non-empty lines of s, joined by "; ". s is what a
+// command wrote to stderr, often a host's own text, and errors show it: so
+// each line is cleaned (client.CleanLine).
 func Tail(s string, n int) string {
 	var lines []string
 	for _, l := range strings.Split(strings.TrimSpace(s), "\n") {
-		if l = strings.TrimSpace(l); l != "" {
+		if l = strings.TrimSpace(client.CleanLine(l)); l != "" {
 			lines = append(lines, l)
 		}
 	}

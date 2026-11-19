@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -151,7 +152,7 @@ func connectHost(ctx context.Context, w io.Writer, h client.Host, consent func(q
 	if err != nil {
 		return nil, err
 	}
-	for _, s := range res.Steps {
+	for _, s := range client.CleanChecks(res.Steps) {
 		mark := "✓"
 		if !s.OK {
 			mark = "✕"
@@ -165,13 +166,13 @@ func connectHost(ctx context.Context, w io.Writer, h client.Host, consent func(q
 	if err != nil {
 		return nil, err
 	}
-	step("✓ %s, %d CPUs, %.1f GiB, %.1f GiB of it for sessions", d.Distro, d.CPUs, float64(d.MemTotal)/(1<<30), float64(d.MemoryMax)/(1<<30))
+	step("✓ %s, %d CPUs, %.1f GiB, %.1f GiB of it for sessions", client.CleanLine(d.Distro), d.CPUs, float64(d.MemTotal)/(1<<30), float64(d.MemoryMax)/(1<<30))
 	checks, _ := conn.AgentChecks(dctx)
 	if err := client.SaveHost(h); err != nil {
 		return nil, err
 	}
 	log.Add("saved the host %s", h.Name)
-	return checks, nil
+	return client.CleanAgentChecks(checks), nil
 }
 
 func confirm(q string) bool {
@@ -310,6 +311,7 @@ func hostDoctorCmd() *cobra.Command {
 			if asJSON {
 				return printJSON(d)
 			}
+			d = client.CleanHostInfo(d) // what the host sent, cleaned to print
 			fmt.Printf("%s: %s (%s/%s), %d CPUs, %.1f GiB, %.1f GiB free disk, helper %s\n", h.Name, d.Distro, d.OS, d.Arch, d.CPUs,
 				float64(d.MemTotal)/(1<<30), float64(d.DiskFree)/(1<<30), d.Version)
 			printChecks(os.Stdout, d.Checks)
@@ -328,10 +330,16 @@ func hostDoctorCmd() *cobra.Command {
 	return cmd
 }
 
+// printJSON prints v as JSON. Values from a host stay as the host sent
+// them, with the characters that a terminal could act on escaped (jsonSafe).
 func printJSON(v any) error {
-	enc := json.NewEncoder(os.Stdout)
+	var b bytes.Buffer
+	enc := json.NewEncoder(&b)
 	enc.SetIndent("", "  ")
 	if err := enc.Encode(v); err != nil {
+		return fmt.Errorf("write JSON: %w", err)
+	}
+	if _, err := os.Stdout.Write(jsonSafe(b.Bytes())); err != nil {
 		return fmt.Errorf("write JSON: %w", err)
 	}
 	return nil
@@ -362,9 +370,7 @@ func hostRestoreCmd() *cobra.Command {
 			if len(res) == 0 {
 				fmt.Printf("Nothing to restore on %s.\n", h.Name)
 			}
-			for _, r := range res {
-				fmt.Print(r.Text())
-			}
+			printRestore(os.Stdout, res)
 			return nil
 		},
 	}

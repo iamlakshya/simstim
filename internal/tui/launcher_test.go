@@ -20,13 +20,13 @@ func TestMemoryOpensWhereYouLeftOff(t *testing.T) {
 	be := labBackend()
 	be.mem = memory{
 		Sessions: map[string][]client.Session{"gcp-dev": be.state["gcp-dev"].sessions},
-		Last:     &lastSession{Host: "gcp-dev", ID: "g1", Name: "bench"},
+		Last:     &lastSession{Host: "gcp-dev", ID: "g6", Name: "bench"},
 	}
 	m := New(context.Background(), be, Options{Now: func() time.Time { return now }})
 	if m.screen != scrSessions || m.cur != "gcp-dev" {
 		t.Fatalf("opened on %v %q, want gcp-dev's sessions", m.screen, m.cur)
 	}
-	if s := m.selected(); s == nil || s.ID != "g1" {
+	if s := m.selected(); s == nil || s.ID != "g6" {
 		t.Fatalf("selected %v before any host answered, want the last session", s)
 	}
 	m.width, m.height = 80, 24
@@ -35,11 +35,11 @@ func TestMemoryOpensWhereYouLeftOff(t *testing.T) {
 	}
 
 	hs := newHarness(t, be, 80, 24)
-	if hs.m.sel != (sessKey{"gcp-dev", "g1"}) {
+	if hs.m.sel != (sessKey{"gcp-dev", "g6"}) {
 		t.Fatalf("after the host answered the selection moved to %v", hs.m.sel)
 	}
 	hs.key("enter")
-	if len(be.attached) != 1 || be.attached[0].Session != "g1" {
+	if len(be.attached) != 1 || be.attached[0].Session != "g6" {
 		t.Fatal("Enter did not take you straight back in")
 	}
 }
@@ -66,7 +66,7 @@ func TestQuickOpen(t *testing.T) {
 		t.Fatalf("3 opened %q", hs.m.cur)
 	}
 	hs.key("1")
-	if len(hs.be.attached) != 1 || hs.be.attached[0].Session != "g1" {
+	if len(hs.be.attached) != 1 || hs.be.attached[0].Session != "g6" {
 		t.Fatalf("1 attached %+v", hs.be.attached)
 	}
 	if !strings.Contains(plainScreen(hs.m), "1 "+glyphSpinStill+" bench") {

@@ -31,6 +31,9 @@ func (c *Conn) Resume(ctx context.Context, a ResumeArgs) (*ResumeResult, error) 
 	if err := c.Call(ctx, "resume", a, &r); err != nil {
 		return nil, c.resumeError(err)
 	}
+	if err := checkSessionID(c.Host.Name, r.Session.ID); err != nil {
+		return nil, err
+	}
 	return &r, nil
 }
 
@@ -63,8 +66,8 @@ func ResumeSecrets(h Host, s Session, passed []string) ([]string, error) {
 	for _, n := range s.Secrets {
 		switch {
 		case !secretNameRE.MatchString(n):
-			return nil, &UserError{Msg: fmt.Sprintf("%s on %s asks for a secret named %q, which is not a name", s.Name, h.Name, n),
-				Hint: fmt.Sprintf("%s kill %s/%s, then start a new session", brand.Name, h.Name, s.ID)}
+			return nil, &UserError{Msg: fmt.Sprintf("%s on %s asks for a secret named %+q, which is not a name", CleanLine(s.Name), h.Name, n),
+				Hint: fmt.Sprintf("%s kill %s, then start a new session", brand.Name, CommandTarget(h.Name, s.ID))}
 		case slices.Contains(own, n), slices.Contains(passed, n):
 			names = append(names, n)
 		default:
@@ -76,7 +79,7 @@ func ResumeSecrets(h Host, s Session, passed []string) ([]string, error) {
 	}
 	flags := "--secret " + strings.Join(missing, " --secret ")
 	return nil, &UserError{
-		Msg:  fmt.Sprintf("%s on %s asks for secrets that hosts.toml does not give %s: %s", s.Name, h.Name, h.Name, strings.Join(missing, ", ")),
-		Hint: fmt.Sprintf("%s resume %s/%s %s   (passes them, if you trust %s with them)", brand.Name, h.Name, s.ID, flags, h.Name),
+		Msg:  fmt.Sprintf("%s on %s asks for secrets that hosts.toml does not give %s: %s", CleanLine(s.Name), h.Name, h.Name, strings.Join(missing, ", ")),
+		Hint: fmt.Sprintf("%s resume %s %s   (passes them, if you trust %s with them)", brand.Name, CommandTarget(h.Name, s.ID), flags, h.Name),
 	}
 }
