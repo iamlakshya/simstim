@@ -412,7 +412,7 @@ Five records already exist in this branch: 0029 to 0032 for this plan, and 0033,
 | [0031](decisions/0031-the-egress-process-is-not-a-relay.md) | Proposed, in this branch | A sandbox's egress process on the user's own host is not a relay | P1.7, P2.12, H16 | 24 |
 | [0032](decisions/0032-secret-values-in-memory-only.md) | Proposed, in this branch | Secret values live only in the memory of the trusted side | P2.2, P2.3, P2.13 | 25 |
 | [0033](decisions/0033-one-command-grammar.md) | Accepted | One grammar for the command line: session verbs at the top, a noun and a verb for everything else, and every rule under `policy` | P1.8, P1.12 and every task that adds a command | none |
-| `0034-ssh-options-on-the-command-line.md` | New, in H2 | The client puts the options that keep a host safe on the `ssh` command line, where they win over the user's own config. It starts with forwarding. | H2 | 40 |
+| `0034-ssh-options-on-the-command-line.md` | Accepted, in H2 | The client puts the options that keep a host safe on the `ssh` command line, where they win over the user's own config. It starts with forwarding. | H2 | 40 |
 | `0035-pinned-host-keys.md` | New, in H3 | Saved hosts pin their host key on the command line, under the rule of 0034 | H3 | none |
 | `0036-host-tiers-and-the-grant-gate.md` | New, in H4 | Host tiers in `tiers.toml`, one grant gate on the laptop, `shared` for E2B, and the SSH agent only for `own` hosts | H4, then H5 | 32, 33, 34 |
 | `0037-the-root-step.md` | New, in H7 | The root step: the sandbox probe as its input, one optional script, and sudo in the user's terminal. It bends "setup needs no root". | H7 | 4, 29 |
@@ -431,14 +431,16 @@ These tasks need no wall, and they help every session. H2 goes first ([question 
 ### H2 Turn off forwarding on every connection
 
 - **Goal:** close today's gap. A `ForwardAgent yes` in the user's SSH config no longer reaches any host. The client puts its own options on the `ssh` command line, where they win over every config file (spec 3.2 and 14.8.5).
-- **Files:** `internal/client/ssh.go` (`baseArgs`, `Command`, `Shell`, `Forward`), `internal/client/pull.go` (`GitSSHCommand`), `internal/client/transport.go` (`SSH.Start`), new `test/e2e/sandbox_hosts.py` (run with `E2E_ONLY=sandbox-hosts`), `test/e2e/run.py`, new `docs/contributing/decisions/0034-ssh-options-on-the-command-line.md`, `docs/contributing/decisions/README.md`.
+- **Files:** `internal/client/ssh.go` (`writeWrapper`, `controlDir`, `baseArgs`, `Command`, `Shell`), new `internal/client/ssh_forward.go` (`Forward`), `internal/client/ssh_debug.go`, `internal/client/pull.go` (`GitSSHCommand`), `internal/client/transport.go` (`SSH.Start`), `internal/onboard/system.go` (`SSHWorks`), new `test/e2e/sandbox_hosts.py` (run with `E2E_ONLY=sandbox-hosts`), `test/e2e/run.py`, new `docs/contributing/decisions/0034-ssh-options-on-the-command-line.md`, `docs/contributing/decisions/README.md`.
 - **Acceptance:**
-  - Every `ssh` command has `-o ForwardAgent=no -o ForwardX11=no -o PermitLocalCommand=no`.
+  - Every `ssh` command has `-o ForwardAgent=no -o ForwardX11=no -o PermitLocalCommand=no -o GSSAPIDelegateCredentials=no`.
+  - Every generated config starts with the same four settings and `ClearAllForwardings yes`, so a `ProxyJump` hop gets them too.
   - Every connection but `forward` also has `-o ClearAllForwardings=yes`: the bridge, `Run`, `Shell` and the `git` command of `pull`.
   - `forward` still forwards its ports. `SSH.Forward` keeps its own `-L` options and has `-o ClearAllForwardings=no`, so `ClearAllForwardings yes` in `~/.ssh/config` cannot clear them.
-  - `forward` refuses to start when the user's config adds a `RemoteForward` for the host (spec 14.8.5).
-- **Tests:** unit tests of the arguments in `internal/client` and in `internal/cli/commands_ssh_test.go`. End-to-end test 2: with `ForwardAgent yes` in a throwaway client SSH config, a session on the host has no `SSH_AUTH_SOCK`.
-- **Docs:** `docs/explanation/security.md` (agent forwarding). Section 7.5 of `docs/research/connectivity-and-providers.md` gets a note: H2 takes its forwarding options only, and the multiplexing options stay as today (`ControlMaster=auto`). The record 0034.
+  - `forward` has a connection of its own, and refuses to start when the user's config adds a `RemoteForward` or a `Tunnel` for the host, or sets `ForkAfterAuthentication yes` (spec 14.8.5).
+  - The shared master's socket has a new name, so no session uses a master that an older client started.
+- **Tests:** unit tests of the arguments in `internal/client` and in `internal/cli/commands_ssh_test.go`. End-to-end test 2: with `ForwardAgent` naming a throwaway agent in a throwaway client SSH config, a session on the host has no `SSH_AUTH_SOCK`.
+- **Docs:** `docs/explanation/security.md` (agent forwarding), `SECURITY.md`. Section 7.5 of `docs/research/connectivity-and-providers.md` gets a note: H2 takes its forwarding options only, and the multiplexing options stay as today (`ControlMaster=auto`). The record 0034.
 - **CHANGELOG:** Security. "The client no longer forwards your SSH agent, X11 or a local command to any host, even when your `~/.ssh/config` asks for it. `forward` still forwards the ports you name."
 - **Depends on:** nothing. It adds the record 0034.
 - **Questions:** [40](isolation-spec.md#15-open-questions).

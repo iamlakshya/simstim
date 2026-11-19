@@ -27,7 +27,7 @@ func TestControlDirFitsASocketPath(t *testing.T) {
 	if d == "" {
 		t.Fatal("no control folder for a long cache path")
 	}
-	if len(d)+1+40 > maxSocketPath {
+	if len(d)+1+len(controlPrefix)+40 > maxSocketPath {
 		t.Errorf("%q is too long for a socket path", d)
 	}
 	if !privateDir(d) {

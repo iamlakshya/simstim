@@ -33,13 +33,21 @@ def host_machine():
     """The [host.machine] table of a host made by `host create`, or {}."""
     return host_entry().get("machine") or {}
 
+# What the client puts on every ssh command line that runs something on the
+# host (decision 0034, internal/client/ssh.go).
+NO_FORWARDING = ["-o", "ForwardAgent=no", "-o", "ForwardX11=no", "-o", "PermitLocalCommand=no",
+                 "-o", "GSSAPIDelegateCredentials=no", "-o", "ClearAllForwardings=yes"]
+# The start of the name of each shared connection's socket (controlPrefix).
+CONTROL_PREFIX = "nf-"
+
 def host_argv(cmd):
     """The command that runs cmd on the host, the way the client reaches it."""
     h = host_entry()
     machine = h.get("machine") or {}
     if machine.get("provider") == "docker":  # made by `host create docker`: no SSH
         return ["docker", "exec", "-i", "-u", machine.get("user", "root"), machine["id"], "sh", "-c", cmd]
-    return ["ssh", "-F", WRAPPER, "-o", "BatchMode=yes", h["ssh"], cmd]
+    # Forward nothing to the host, as the client does (decision 0034).
+    return ["ssh", "-F", WRAPPER, "-o", "BatchMode=yes", *NO_FORWARDING, h["ssh"], cmd]
 
 def host_ssh(cmd, data=None):
     """Runs cmd on the host, and fails the suite if it fails."""
@@ -53,7 +61,7 @@ def control_dir():
     """The folder of the client's shared SSH connections, as internal/client works it out."""
     cache = os.environ.get("XDG_CACHE_HOME", "")
     d = os.path.join(cache if os.path.isabs(cache) else os.path.expanduser("~/.cache"), NAME, "cm")
-    return d if len(d) + 1 + 40 <= 103 else "/tmp/%s-%d" % (NAME, os.getuid())
+    return d if len(d) + 1 + len(CONTROL_PREFIX) + 40 <= 103 else "/tmp/%s-%d" % (NAME, os.getuid())
 
 def drop_link():
     """Ends the client's bridges to HOST, as a network drop would. Over SSH,
@@ -76,7 +84,7 @@ def drop_link():
             pass
     if machine.get("provider") != "docker":
         try:
-            subprocess.run(["ssh", "-F", WRAPPER, "-o", "ControlPath=" + os.path.join(control_dir(), "%C"),
+            subprocess.run(["ssh", "-F", WRAPPER, "-o", "ControlPath=" + os.path.join(control_dir(), CONTROL_PREFIX + "%C"),
                             "-O", "exit", host_entry()["ssh"]], capture_output=True, timeout=10)
         except subprocess.TimeoutExpired:
             pass
@@ -111,6 +119,16 @@ def guided_checks():
     guided_setup.run(guided_setup.Ctx(cli=cli, HOST=HOST, NAME=NAME, env=env, ok=ok, Term=Term))
 if os.environ.get("E2E_ONLY") == "guided-setup":
     guided_checks()
+    print("RESULT %d/%d passed" % (sum(results), len(results)))
+    sys.exit(0 if all(results) else 1)
+
+# Hosts you add (sandbox_hosts.py). E2E_ONLY=sandbox-hosts runs only these.
+import sandbox_hosts
+def sandbox_host_checks():
+    sandbox_hosts.run(sandbox_hosts.Ctx(cli=cli, HOST=HOST, NAME=NAME, env=env, ok=ok, host_ssh=host_ssh,
+                                        host_entry=host_entry, CONTROL_PREFIX=CONTROL_PREFIX))
+if os.environ.get("E2E_ONLY") == "sandbox-hosts":
+    sandbox_host_checks()
     print("RESULT %d/%d passed" % (sum(results), len(results)))
     sys.exit(0 if all(results) else 1)
 
@@ -536,6 +554,7 @@ if saved:
 
 setup_checks()
 guided_checks()
+sandbox_host_checks()
 # M. Full screen (roadmap N2): a program on the alternate screen is reported
 #    as full screen, and host doctor says so.
 sid_fs = start("e2e-fullscreen", "/bin/bash", "-c", 'printf "\\033[?1049hFULL"; sleep 600')

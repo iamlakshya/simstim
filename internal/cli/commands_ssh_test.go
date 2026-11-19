@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -21,6 +22,19 @@ func TestForward(t *testing.T) {
 	log, _ := os.ReadFile(filepath.Join(th.h.Home, "ssh.log"))
 	if !strings.Contains(string(log), "-N -o ExitOnForwardFailure=yes -L 127.0.0.1:45678:127.0.0.1:3000 -L 127.0.0.1:") {
 		t.Errorf("ssh was run with %q", log)
+	}
+	// forward turns off every other forwarding, and keeps its own ports: it
+	// does not clear the forwards, which would clear its -L options too. It
+	// has a connection of its own, and reads ssh -G first.
+	lines := sshLines(t, th)
+	if len(lines) != 2 || !strings.Contains(lines[0], " -G -- box") {
+		t.Errorf("forward ran ssh %d times, want ssh -G, then the forward: %q", len(lines), lines)
+	}
+	for _, line := range lines {
+		if !strings.Contains(line, noForwarding+" ") || strings.Contains(line, noPorts) ||
+			!strings.Contains(line, " -o ControlMaster=no -o ControlPath=none ") || !strings.Contains(line, " -o ClearAllForwardings=no ") {
+			t.Errorf("forward ran ssh with %q, want %q, a connection of its own, and ClearAllForwardings=no", line, noForwarding)
+		}
 	}
 	// A host reached without SSH cannot forward.
 	th.ch.SSH = ""
@@ -90,6 +104,36 @@ func TestPull(t *testing.T) {
 	gitc(local, "checkout", "-q", "feature")
 	fails(t, "is the branch you have checked out here", "pull", "box/repo")
 	fails(t, "is not in a git repository", "pull", "box/feat")
+	// Each ssh that pull runs, its own and the fetch's, forwards nothing.
+	lines := sshLines(t, th)
+	if !slices.ContainsFunc(lines, func(l string) bool { return strings.Contains(l, "upload-pack") }) {
+		t.Errorf("the fetch did not use the client's ssh: %q", lines)
+	}
+	for _, line := range lines {
+		if !strings.Contains(line, noForwarding+" ") || !strings.Contains(line, noPorts+" ") {
+			t.Errorf("pull ran ssh with %q, want %q and %q", line, noForwarding, noPorts)
+		}
+	}
+}
+
+// The options of decision 0034, as the fake ssh logs them.
+const (
+	noForwarding = "-o ForwardAgent=no -o ForwardX11=no -o PermitLocalCommand=no -o GSSAPIDelegateCredentials=no"
+	noPorts      = "-o ClearAllForwardings=yes"
+)
+
+// sshLines returns each command line that the fake ssh ran. It fails the
+// test when ssh did not run.
+func sshLines(t *testing.T, th *testHost) []string {
+	t.Helper()
+	b, err := os.ReadFile(filepath.Join(th.h.Home, "ssh.log"))
+	if err != nil || len(b) == 0 {
+		t.Fatalf("ssh did not run: %v", err)
+	}
+	// The client asks ssh once which options it knows, with no host and
+	// no connection. That run may land in any test's log.
+	return slices.DeleteFunc(strings.Split(strings.TrimSpace(string(b)), "\n"),
+		func(l string) bool { return strings.HasSuffix(l, " -- probe.invalid") })
 }
 
 // runGit runs git in dir as a test user.
