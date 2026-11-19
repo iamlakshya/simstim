@@ -6,7 +6,7 @@ Thank you for your interest. The project is young, so open an issue before a lar
 
 On macOS or Linux (amd64 or arm64), install Go 1.21 or newer, git and OpenSSH first. Go 1.21 is the bootstrap minimum, not the build toolchain: with automatic toolchain downloads enabled (`GOTOOLCHAIN=auto`), Go downloads the version pinned in [go.mod](go.mod), currently Go 1.26.11.
 
-You also need bash, curl, tar (with gzip and xz support), and either `sha256sum` or `shasum`. These download, unpack and check the tools. Install Python 3 for the documentation checks and end-to-end tests. Then, from your checkout, run:
+You also need bash, curl, tar (with gzip and xz support), and either `sha256sum` or `shasum`. These download, unpack and check the tools. Install Python 3.11 or later for the script tests, the documentation checks and the end-to-end tests. Then, from your checkout, run:
 
 ```sh
 scripts/setup.sh

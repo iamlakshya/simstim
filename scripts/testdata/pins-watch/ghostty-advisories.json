@@ -1,0 +1,460 @@
+[
+ {
+  "ghsa_id": "GHSA-jqr7-69mm-v35h",
+  "cve_id": null,
+  "html_url": "https://github.com/ghostty-org/ghostty/security/advisories/GHSA-jqr7-69mm-v35h",
+  "summary": "Crash when narrowing a very wide page in libghostty-vt",
+  "severity": "medium",
+  "cvss_severities": {
+   "cvss_v3": {
+    "vector_string": "CVSS:3.1/AV:L/AC:L/PR:N/UI:R/S:U/C:N/I:N/A:H",
+    "score": 5.5
+   }
+  },
+  "state": "published",
+  "published_at": "2026-10-27T16:42:18Z",
+  "vulnerabilities": [
+   {
+    "package": {
+     "ecosystem": "other",
+     "name": "libghostty-vt"
+    },
+    "vulnerable_version_range": "main from d7bb4b863 up to but not including 0af5c9e55",
+    "patched_versions": "main at 0af5c9e55"
+   }
+  ]
+ },
+ {
+  "ghsa_id": "GHSA-2r63-vmw6-3m3c",
+  "cve_id": null,
+  "html_url": "https://github.com/ghostty-org/ghostty/security/advisories/GHSA-2r63-vmw6-3m3c",
+  "summary": "Crafted directory names can send arbitrary escape sequences via zsh shell integration",
+  "severity": "medium",
+  "cvss_severities": {
+   "cvss_v3": {
+    "vector_string": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:N/I:L/A:N",
+    "score": 4.3
+   }
+  },
+  "state": "published",
+  "published_at": "2026-10-27T16:41:31Z",
+  "vulnerabilities": [
+   {
+    "package": {
+     "ecosystem": "other",
+     "name": "ghostty"
+    },
+    "vulnerable_version_range": "<= 1.3.1",
+    "patched_versions": "1.4.0"
+   }
+  ]
+ },
+ {
+  "ghsa_id": "GHSA-w9q4-5jvv-mcv4",
+  "cve_id": null,
+  "html_url": "https://github.com/ghostty-org/ghostty/security/advisories/GHSA-w9q4-5jvv-mcv4",
+  "summary": "Memory corruption when clearing the screen prunes the cursor page",
+  "severity": "medium",
+  "cvss_severities": {
+   "cvss_v3": {
+    "vector_string": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:N/I:N/A:H",
+    "score": 6.5
+   }
+  },
+  "state": "published",
+  "published_at": "2026-10-27T16:41:39Z",
+  "vulnerabilities": [
+   {
+    "package": {
+     "ecosystem": "other",
+     "name": "ghostty"
+    },
+    "vulnerable_version_range": ">= 1.0.0, <= 1.3.1",
+    "patched_versions": "1.4.0"
+   },
+   {
+    "package": {
+     "ecosystem": "other",
+     "name": "libghostty-vt"
+    },
+    "vulnerable_version_range": "< e257bb45e6d4d61c14eacdc717be89c6110f99ff",
+    "patched_versions": "e257bb45e6d4d61c14eacdc717be89c6110f99ff"
+   }
+  ]
+ },
+ {
+  "ghsa_id": "GHSA-hp9c-qp4q-cpw3",
+  "cve_id": null,
+  "html_url": "https://github.com/ghostty-org/ghostty/security/advisories/GHSA-hp9c-qp4q-cpw3",
+  "summary": "Crash via zero-sized pane layouts in tmux control mode",
+  "severity": "medium",
+  "cvss_severities": {
+   "cvss_v3": {
+    "vector_string": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:N/I:N/A:H",
+    "score": 6.5
+   }
+  },
+  "state": "published",
+  "published_at": "2026-10-27T16:41:34Z",
+  "vulnerabilities": [
+   {
+    "package": {
+     "ecosystem": "other",
+     "name": "ghostty"
+    },
+    "vulnerable_version_range": ">= 1.3.0, <= 1.3.1",
+    "patched_versions": "1.4.0"
+   }
+  ]
+ },
+ {
+  "ghsa_id": "GHSA-qjfx-r533-6vx3",
+  "cve_id": null,
+  "html_url": "https://github.com/ghostty-org/ghostty/security/advisories/GHSA-qjfx-r533-6vx3",
+  "summary": "Use-after-free when scrollback line limit prunes the cursor page",
+  "severity": "medium",
+  "cvss_severities": {
+   "cvss_v3": {
+    "vector_string": "CVSS:3.1/AV:N/AC:H/PR:N/UI:R/S:U/C:N/I:N/A:H",
+    "score": 5.3
+   }
+  },
+  "state": "published",
+  "published_at": "2026-10-27T16:42:20Z",
+  "vulnerabilities": [
+   {
+    "package": {
+     "ecosystem": "other",
+     "name": "libghostty-vt"
+    },
+    "vulnerable_version_range": ">= 5b2d3b7df184b8395519baa235ee9539e2fb1a9b, < 65ff54c67df3d55e3ebf4dd31c7afa93c4cfb922",
+    "patched_versions": "65ff54c67df3d55e3ebf4dd31c7afa93c4cfb922"
+   }
+  ]
+ },
+ {
+  "ghsa_id": "GHSA-3r5j-c6rj-xq2v",
+  "cve_id": null,
+  "html_url": "https://github.com/ghostty-org/ghostty/security/advisories/GHSA-3r5j-c6rj-xq2v",
+  "summary": "Unbounded memory growth via repeated Kitty clipboard aliases",
+  "severity": "low",
+  "cvss_severities": {
+   "cvss_v3": {
+    "vector_string": "CVSS:3.1/AV:N/AC:H/PR:N/UI:R/S:U/C:N/I:N/A:L",
+    "score": 3.1
+   }
+  },
+  "state": "published",
+  "published_at": "2026-10-27T16:42:21Z",
+  "vulnerabilities": [
+   {
+    "package": {
+     "ecosystem": "other",
+     "name": "libghostty-vt"
+    },
+    "vulnerable_version_range": ">= 7a940ec02830fcd39f94ea9a28974c2a82d96486, < 44c4c8f55d49e124f19492402a993978949f1326",
+    "patched_versions": "44c4c8f55d49e124f19492402a993978949f1326"
+   }
+  ]
+ },
+ {
+  "ghsa_id": "GHSA-v8cw-fg4j-jcc4",
+  "cve_id": null,
+  "html_url": "https://github.com/ghostty-org/ghostty/security/advisories/GHSA-v8cw-fg4j-jcc4",
+  "summary": "Dragged text bypasses paste protection on macOS",
+  "severity": "medium",
+  "cvss_severities": {
+   "cvss_v3": {
+    "vector_string": "CVSS:3.1/AV:N/AC:H/PR:N/UI:R/S:U/C:L/I:L/A:L",
+    "score": 5.0
+   }
+  },
+  "state": "published",
+  "published_at": "2026-10-27T16:41:38Z",
+  "vulnerabilities": [
+   {
+    "package": {
+     "ecosystem": "other",
+     "name": "ghostty"
+    },
+    "vulnerable_version_range": ">= 1.1.0, <= 1.3.1",
+    "patched_versions": "1.4.0"
+   }
+  ]
+ },
+ {
+  "ghsa_id": "GHSA-mfw9-xcr3-7gfp",
+  "cve_id": null,
+  "html_url": "https://github.com/ghostty-org/ghostty/security/advisories/GHSA-mfw9-xcr3-7gfp",
+  "summary": "Links detected in terminal output can lead to arbitrary command execution on macOS",
+  "severity": "medium",
+  "cvss_severities": {
+   "cvss_v3": {
+    "vector_string": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:L/I:L/A:L",
+    "score": 6.3
+   }
+  },
+  "state": "published",
+  "published_at": "2026-10-27T16:41:36Z",
+  "vulnerabilities": [
+   {
+    "package": {
+     "ecosystem": "other",
+     "name": "ghostty"
+    },
+    "vulnerable_version_range": "<= 1.3.1",
+    "patched_versions": "1.4.0"
+   }
+  ]
+ },
+ {
+  "ghsa_id": "GHSA-hcr9-7hcr-mjm8",
+  "cve_id": null,
+  "html_url": "https://github.com/ghostty-org/ghostty/security/advisories/GHSA-hcr9-7hcr-mjm8",
+  "summary": "Crash via out of bounds scroll region in tmux control mode",
+  "severity": "medium",
+  "cvss_severities": {
+   "cvss_v3": {
+    "vector_string": "CVSS:3.1/AV:N/AC:H/PR:N/UI:R/S:U/C:N/I:N/A:H",
+    "score": 5.3
+   }
+  },
+  "state": "published",
+  "published_at": "2026-10-27T16:41:33Z",
+  "vulnerabilities": [
+   {
+    "package": {
+     "ecosystem": "other",
+     "name": "ghostty"
+    },
+    "vulnerable_version_range": ">= 1.3.0, <= 1.3.1",
+    "patched_versions": "1.4.0"
+   }
+  ]
+ },
+ {
+  "ghsa_id": "GHSA-4hwh-wx3w-3fqg",
+  "cve_id": null,
+  "html_url": "https://github.com/ghostty-org/ghostty/security/advisories/GHSA-4hwh-wx3w-3fqg",
+  "summary": "Carriage returns in pasted text bypass paste protection",
+  "severity": "medium",
+  "cvss_severities": {
+   "cvss_v3": {
+    "vector_string": "CVSS:3.1/AV:N/AC:H/PR:N/UI:R/S:U/C:L/I:L/A:L",
+    "score": 5.0
+   }
+  },
+  "state": "published",
+  "published_at": "2026-10-27T16:41:32Z",
+  "vulnerabilities": [
+   {
+    "package": {
+     "ecosystem": "other",
+     "name": "ghostty"
+    },
+    "vulnerable_version_range": "<= 1.3.1",
+    "patched_versions": "1.4.0"
+   }
+  ]
+ },
+ {
+  "ghsa_id": "GHSA-mxqx-236q-wrv7",
+  "cve_id": null,
+  "html_url": "https://github.com/ghostty-org/ghostty/security/advisories/GHSA-mxqx-236q-wrv7",
+  "summary": "Control characters in filenames can execute different commands than confirmed on macOS",
+  "severity": "medium",
+  "cvss_severities": {
+   "cvss_v3": {
+    "vector_string": "CVSS:3.1/AV:N/AC:H/PR:N/UI:R/S:U/C:L/I:L/A:L",
+    "score": 5.0
+   }
+  },
+  "state": "published",
+  "published_at": "2026-10-27T16:41:37Z",
+  "vulnerabilities": [
+   {
+    "package": {
+     "ecosystem": "other",
+     "name": "ghostty"
+    },
+    "vulnerable_version_range": ">= 1.2.0, <= 1.3.1",
+    "patched_versions": "1.4.0"
+   }
+  ]
+ },
+ {
+  "ghsa_id": "GHSA-mhff-mv4q-fp63",
+  "cve_id": null,
+  "html_url": "https://github.com/ghostty-org/ghostty/security/advisories/GHSA-mhff-mv4q-fp63",
+  "summary": "Kitty graphics protocol: DoS, integer overflows, resource leaks",
+  "severity": "medium",
+  "cvss_severities": {
+   "cvss_v3": {
+    "vector_string": null,
+    "score": null
+   }
+  },
+  "state": "published",
+  "published_at": "2026-10-27T16:41:40Z",
+  "vulnerabilities": [
+   {
+    "package": {
+     "ecosystem": "other",
+     "name": "ghostty"
+    },
+    "vulnerable_version_range": "<= 1.3.1",
+    "patched_versions": "1.4.0"
+   }
+  ]
+ },
+ {
+  "ghsa_id": "GHSA-cw69-wm67-5pv8",
+  "cve_id": null,
+  "html_url": "https://github.com/ghostty-org/ghostty/security/advisories/GHSA-cw69-wm67-5pv8",
+  "summary": "Crafted OSC 8 hyperlinks can lead to arbitrary command execution on macOS",
+  "severity": "medium",
+  "cvss_severities": {
+   "cvss_v3": {
+    "vector_string": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:L/I:L/A:L",
+    "score": 6.3
+   }
+  },
+  "state": "published",
+  "published_at": "2026-10-27T16:41:41Z",
+  "vulnerabilities": [
+   {
+    "package": {
+     "ecosystem": "other",
+     "name": "ghostty"
+    },
+    "vulnerable_version_range": "<= 1.3.1",
+    "patched_versions": "1.4.0"
+   }
+  ]
+ },
+ {
+  "ghsa_id": "GHSA-4jxv-xgrp-5m3r",
+  "cve_id": "CVE-2026-26982",
+  "html_url": "https://github.com/ghostty-org/ghostty/security/advisories/GHSA-4jxv-xgrp-5m3r",
+  "summary": "Arbitrary command execution via control characters in paste and drag-and-drop operations",
+  "severity": "medium",
+  "cvss_severities": {
+   "cvss_v3": {
+    "vector_string": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:L/I:L/A:L",
+    "score": 6.3
+   }
+  },
+  "state": "published",
+  "published_at": "2026-03-09T16:08:59Z",
+  "vulnerabilities": [
+   {
+    "package": {
+     "ecosystem": "",
+     "name": "ghostty"
+    },
+    "vulnerable_version_range": "<= 1.2.3",
+    "patched_versions": "1.3.0"
+   }
+  ]
+ },
+ {
+  "ghsa_id": "GHSA-q9fg-cpmh-c78x",
+  "cve_id": null,
+  "html_url": "https://github.com/ghostty-org/ghostty/security/advisories/GHSA-q9fg-cpmh-c78x",
+  "summary": "Ghostty can be used as a vector for privilege escalation from other vulnerable or malicious sources",
+  "severity": "low",
+  "cvss_severities": {
+   "cvss_v3": {
+    "vector_string": null,
+    "score": null
+   }
+  },
+  "state": "published",
+  "published_at": "2025-09-15T16:55:51Z",
+  "vulnerabilities": [
+   {
+    "package": {
+     "ecosystem": "ghostty",
+     "name": "Ghostty"
+    },
+    "vulnerable_version_range": "< 1.2.0",
+    "patched_versions": "1.2.0"
+   }
+  ]
+ },
+ {
+  "ghsa_id": "GHSA-98wc-794w-gjx3",
+  "cve_id": null,
+  "html_url": "https://github.com/ghostty-org/ghostty/security/advisories/GHSA-98wc-794w-gjx3",
+  "summary": "File descriptors leaked to shell",
+  "severity": "low",
+  "cvss_severities": {
+   "cvss_v3": {
+    "vector_string": null,
+    "score": null
+   }
+  },
+  "state": "published",
+  "published_at": "2025-01-30T22:01:36Z",
+  "vulnerabilities": [
+   {
+    "package": {
+     "ecosystem": "ghostty",
+     "name": "Ghostty"
+    },
+    "vulnerable_version_range": "<= 1.0.1",
+    "patched_versions": "1.1.0"
+   }
+  ]
+ },
+ {
+  "ghsa_id": "GHSA-hfg5-8q2c-crhc",
+  "cve_id": null,
+  "html_url": "https://github.com/ghostty-org/ghostty/security/advisories/GHSA-hfg5-8q2c-crhc",
+  "summary": "The file created by `write_*_file` actions have global read permissions",
+  "severity": "low",
+  "cvss_severities": {
+   "cvss_v3": {
+    "vector_string": "CVSS:3.1/AV:L/AC:L/PR:N/UI:R/S:U/C:L/I:N/A:N",
+    "score": 3.3
+   }
+  },
+  "state": "published",
+  "published_at": "2024-12-31T21:01:01Z",
+  "vulnerabilities": [
+   {
+    "package": {
+     "ecosystem": "ghostty",
+     "name": "Ghostty"
+    },
+    "vulnerable_version_range": "1.0.0",
+    "patched_versions": "1.0.1"
+   }
+  ]
+ },
+ {
+  "ghsa_id": "GHSA-5hcq-3j4q-4v6p",
+  "cve_id": "CVE-2024-56803",
+  "html_url": "https://github.com/ghostty-org/ghostty/security/advisories/GHSA-5hcq-3j4q-4v6p",
+  "summary": "Improper handling of window title sequences can lead to arbitrary command execution",
+  "severity": "medium",
+  "cvss_severities": {
+   "cvss_v3": {
+    "vector_string": null,
+    "score": null
+   }
+  },
+  "state": "published",
+  "published_at": "2024-12-31T21:00:41Z",
+  "vulnerabilities": [
+   {
+    "package": {
+     "ecosystem": "ghostty",
+     "name": "Ghostty"
+    },
+    "vulnerable_version_range": "1.0.0",
+    "patched_versions": "1.0.1"
+   }
+  ]
+ }
+]

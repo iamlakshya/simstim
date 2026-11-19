@@ -95,6 +95,55 @@ Use an up-to-date [GitHub CLI](https://cli.github.com/manual/gh_attestation_veri
 gh attestation verify "$archive" --repo iamlakshya/simstim
 ```
 
+## Advisories for pins outside package ecosystems
+
+Dependabot and govulncheck watch the Go modules, the npm packages and the actions. Some pins have no package ecosystem, so no scanner matches an advisory to them. The Ghostty commit of the shadow terminal is one: its advisories have free-text commit ranges, and they are in neither OSV nor GitHub's advisory database ([build facts](../research/build-facts.md#61-ghostty-and-its-advisories)).
+
+The pins watch (`.github/workflows/pins-watch.yml`) checks these pins every day. It also runs on demand, and on pull requests that change a pin, the watch's script, its tests, its verdicts or its workflow. [Spec 19.5](isolation-spec.md#195-the-watch-job-for-pins-p09) has its rules.
+
+| Pin | Where it is |
+| --- | --- |
+| The Ghostty commit | The URL of the `ghostty` dependency in `vt/build.zig.zon`, in the form `…/archive/<commit>.tar.gz` |
+| Each guest pin | A `[[pin]]` entry of `guest/supply.lock`, with its name, repository, tag and commit |
+
+For each pin on GitHub, `scripts/pins-watch.py`, with its code in `scripts/pinswatch/`, first checks that the pin's commit is in its repository. Then it reads the repository's own advisories. When a range names commits, the script asks GitHub's compare API whether the pin holds each fix. When a range names release versions, the script finds the release tags, and asks whether the pin holds a patched release. It also asks OSV about every pin by its commit. A pin with `watch = "osv"` gets the OSV check only. The daily run also runs govulncheck for the Go toolchain of `go.mod` and the modules.
+
+The job fails in each of these cases:
+
+- **A pin is in an advisory's range.** The pin lacks the advisory's fix, or a patched release. Move the pin past the fix: `vt/README.md` says how for Ghostty. If the advisory does not apply to the way the project uses the pin, record a verdict instead.
+- **An advisory's range cannot be read.** The range is outside the grammar of spec 19.5, it holds a character that is not printable ASCII, or it names a commit or a tag that the repository does not have. Or the pin is older than the first affected release, and no patched release reaches it. Check the advisory by hand against the pin's commit, then record a verdict.
+- **A pin's commit or ref is wrong.** The commit is not in the pin's repository, or the `ref` of a `guest/supply.lock` pin names another commit. Correct the pin.
+- **A file is bad.** `vt/build.zig.zon` has no Ghostty commit in the expected form, or `guest/supply.lock` or `scripts/pins-watch-reviewed.toml` breaks its rules. Or one of these files is not UTF-8 text. The message names the problem.
+- **An API call fails.** The job never passes on a partial read. Run it again later.
+- **govulncheck finds a vulnerability** in the Go toolchain or a module, on the daily run. Update the toolchain or the module, as for the same finding in CI.
+
+On the daily run, a separate job opens an issue for each finding and for each advisory that cannot be read. It skips a problem when one of its own open issues already has the same title. It counts only issues that `github-actions[bot]` opened with the label `dependencies`, so an issue that someone else opens cannot silence a problem. A finding's title is `pins-watch: <pin> is in <advisory>`. An unread advisory's title is `pins-watch: <pin> cannot be checked against <advisory>`. Both get the labels `dependencies` and `needs triage`. Only this job may write to the repository's issues.
+
+A run on your machine needs no token. It makes about 20 calls to GitHub, and GitHub allows 60 calls an hour without a token. If you hit that limit, wait for the hour to end, or set `GITHUB_TOKEN` to a fine-grained token with no permissions. The script sends it to `api.github.com` only, and it follows no redirect to another host.
+
+```sh
+python3 scripts/pins-watch.py
+```
+
+### Verdicts
+
+A verdict records what a person found when they checked one advisory against one pin commit. It goes in `scripts/pins-watch-reviewed.toml`:
+
+```toml
+[[verdict]]
+advisory = "GHSA-3r5j-c6rj-xq2v"
+pin = "ghostty"
+commit = "<the pin's 40-character commit>"
+verdict = "fixed"     # "fixed" or "not-affected"
+why = "The pin holds 44c4c8f5."
+```
+
+A verdict silences the advisory for that commit only. When the pin moves, the watch checks the new commit again, and each advisory needs a new verdict if it still fails. A verdict may name the advisory by its GHSA ID, by its CVE ID, or by an alias that OSV gives. Say in `why` what you checked, so that a reviewer can check it too.
+
+### The time to answer an advisory
+
+A release ships within 7 days of an advisory's publication. It carries the advisory's entry in the release manifest's list of known-bad versions, and a fixed pin where one exists ([spec 20.9](isolation-spec.md#209-known-bad-versions-p46)). The rule covers an advisory of severity high or critical (CVSS 7.0 or more), and any advisory whose range holds a pin of the current release. The 7 days are the project's own choice ([question 42](isolation-spec.md#15-open-questions)). The nearest outside norm is the linux-distros list, whose members release a fix within 10 days of a public issue.
+
 ## Why one action is pinned by tag
 
 Every action in the workflows is pinned to a full commit SHA, except the SLSA generator (`slsa-framework/slsa-github-generator`), which the release job calls by tag. The generator checks how it was called, and a provenance file made from a SHA reference does not verify. OpenSSF Scorecard counts this one reference against Pinned-Dependencies (9 of 10), which `just public-check` accepts.

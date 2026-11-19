@@ -1,0 +1,44 @@
+{
+ "ad97d331459a0762f7aea5f56fe86748e03b860f": {},
+ "0fa3d577a5614150ff8e2c152de5fb9d5c6d2dec": {},
+ "3e38e284ca593b601fb70e877c3155fedf42e2e5": {
+  "vulns": [
+   {
+    "id": "CVE-2026-26982",
+    "summary": "Ghostty affected by arbitrary command execution via control characters in paste and drag-and-drop operations",
+    "aliases": [
+     "GHSA-4jxv-xgrp-5m3r"
+    ],
+    "modified": "2026-10-28T02:30:46.674718712Z",
+    "published": "2026-03-09T21:14:27.693Z",
+    "severity": [
+     {
+      "type": "CVSS_V3",
+      "score": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:L/I:L/A:L"
+     }
+    ],
+    "affected": [
+     {
+      "ranges": [
+       {
+        "type": "GIT",
+        "repo": "https://github.com/ghostty-org/ghostty",
+        "events": [
+         {
+          "introduced": "0"
+         },
+         {
+          "fixed": "703d11c642a96af9e54b55b04f131bf3888948a9"
+         },
+         {
+          "fixed": "fe7427ed2a1a02aef85495b384cfb8f11ee5efc9"
+         }
+        ]
+       }
+      ]
+     }
+    ]
+   }
+  ]
+ }
+}

@@ -1,0 +1,13 @@
+# Verdicts for scripts/pins-watch.py (spec 19.5 of docs/contributing/isolation-spec.md).
+#
+# A person writes a verdict after checking one advisory against one pin by
+# hand. It silences that advisory, or its unread range, for that commit only.
+# When the pin moves to a new commit, the watch checks it again, and an old
+# verdict no longer counts. docs/contributing/releasing.md says when to write one.
+#
+# [[verdict]]
+# advisory = "GHSA-3r5j-c6rj-xq2v"
+# pin = "ghostty"                    # the name in vt/build.zig.zon ("ghostty") or guest/supply.lock
+# commit = "<40 hex>"                # the verdict holds for this commit only
+# verdict = "fixed"                  # "fixed" or "not-affected"
+# why = "The pin holds 44c4c8f5."
