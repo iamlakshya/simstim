@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"sync"
 	"syscall"
 	"time"
@@ -28,6 +29,7 @@ type sandbox struct {
 	storage      *runtimeStorage
 	cmd          *exec.Cmd
 	pidfd        int
+	copy         *CopyOwnerV1
 	link         *net.UnixConn
 	exited       chan struct{}
 	closed       bool
@@ -47,7 +49,7 @@ func newSandbox(spec wall.Spec) (wall.Sandbox, error) {
 
 // Start owns every descriptor and partial child before returning. The caller's
 // context bounds the start, while the sandbox outlives a successful start.
-func (s *sandbox) Start(ctx context.Context) (net.Conn, error) {
+func (s *sandbox) Start(ctx context.Context) (_ net.Conn, returned error) {
 	s.lifeMu.Lock()
 	defer s.lifeMu.Unlock()
 	s.mu.Lock()
@@ -107,8 +109,26 @@ func (s *sandbox) Start(ctx context.Context) (net.Conn, error) {
 	}
 	defer reader.Close()
 	defer writer.Close()
-	extra := []*os.File{reader, theirs, root}
+	copyOwner, copyChild, err := copyControlV1(s)
+	if err != nil {
+		link.Close()
+		return nil, setupError("cannot create original copy controller", err)
+	}
+	defer copyChild.Close()
+	startedCopy := false
+	defer func() {
+		if !startedCopy {
+			returned = errors.Join(returned, copyOwner.native.nativeExit())
+		}
+	}()
+	extra := []*os.File{reader, theirs, root, copyChild}
 	req := Request{V: RequestVersion, Mounts: []MountRequest{}}
+	factoryStages := map[string]*copyMountNativeV1{}
+	placement, placementErr := copyPlacementV3(s.spec.SessionDir, plan)
+	if placementErr != nil {
+		link.Close()
+		return nil, setupError("cannot exclude private copy storage from guest sources", placementErr)
+	}
 	for _, m := range plan {
 		var f *os.File
 		var e error
@@ -118,17 +138,52 @@ func (s *sandbox) Start(ctx context.Context) (net.Conn, error) {
 			f, e = pinSource(m.Host)
 		}
 		if e != nil {
-			for _, f := range extra[3:] {
+			for _, f := range extra[4:] {
 				f.Close()
 			}
 			link.Close()
 			return nil, setupError("cannot pin sandbox mount", e)
 		}
 		extra = append(extra, f)
-		req.Mounts = append(req.Mounts, MountRequest{FD: len(extra) + 2, Guest: m.Guest, Write: m.Write})
+		record := MountRequest{FD: len(extra) + 2, Guest: m.Guest, Write: m.Write}
+		info, inspectErr := f.Stat()
+		if inspectErr != nil {
+			for _, file := range extra[4:] {
+				_ = file.Close()
+			}
+			link.Close()
+			return nil, setupError("inspect original copy mount", inspectErr)
+		}
+		if placement && m.Write && info.IsDir() {
+			stage, stageExtra, stageErr := prepareCopyMountV3(s.storage.root, f)
+			if errors.Is(stageErr, unix.EXDEV) {
+				req.Mounts = append(req.Mounts, record)
+				continue
+			}
+			if stageErr != nil {
+				for _, file := range extra[4:] {
+					_ = file.Close()
+				}
+				link.Close()
+				return nil, setupError("prepare original factory staging", stageErr)
+			}
+			factoryStages[m.Guest] = stage
+			copyOwner.native.mounts[uint32(len(req.Mounts))] = stage
+			extra = append(extra, stageExtra)
+			record.StageFD = len(extra) + 2
+			record.StageName = stage.ownedName
+		}
+		req.Mounts = append(req.Mounts, record)
+	}
+	sort.Slice(req.Mounts, func(i, j int) bool { return req.Mounts[i].Guest < req.Mounts[j].Guest })
+	copyOwner.native.mounts = make(map[uint32]*copyMountNativeV1)
+	for i, mount := range req.Mounts {
+		if stage := factoryStages[mount.Guest]; stage != nil {
+			copyOwner.native.mounts[uint32(i)] = stage
+		}
 	}
 	defer func() {
-		for _, f := range extra[3:] {
+		for _, f := range extra[4:] {
 			f.Close()
 		}
 	}()
@@ -173,6 +228,8 @@ func (s *sandbox) Start(ctx context.Context) (net.Conn, error) {
 		return nil, setupError("cannot start static namespace launcher", err)
 	}
 	s.cmd, s.link, s.transferDone = cmd, link, make(chan struct{})
+	s.copy = copyOwner
+	startedCopy = true
 	s.mu.Unlock()
 	go s.reap(cmd)
 	var transferOnce sync.Once
@@ -190,6 +247,7 @@ func (s *sandbox) Start(ctx context.Context) (net.Conn, error) {
 	abort := func(cause error) (net.Conn, error) {
 		writer.Close()
 		link.Close()
+		copyOwner.native.interrupt()
 		killErr := s.Kill()
 		finishTransfer()
 		result := s.Wait()
@@ -219,56 +277,24 @@ func (s *sandbox) Start(ctx context.Context) (net.Conn, error) {
 		return abort(ctx.Err())
 	}
 	_ = link.SetReadDeadline(time.Time{})
+	resources := make(chan error, 1)
+	if deadline, ok := ctx.Deadline(); ok {
+		_ = copyOwner.native.conn.SetReadDeadline(deadline)
+	}
+	go func() { resources <- receiveCopyResourcesV1(copyOwner, req) }()
+	select {
+	case err = <-resources:
+		if err != nil {
+			return abort(err)
+		}
+	case <-ctx.Done():
+		copyOwner.native.interrupt()
+		<-resources
+		return abort(ctx.Err())
+	}
+	_ = copyOwner.native.conn.SetReadDeadline(time.Time{})
 	finishTransfer()
 	return link, nil
-}
-
-func (s *sandbox) adoptInit(conn *net.UnixConn) error {
-	data := make([]byte, 1)
-	control := make([]byte, unix.CmsgSpace(4))
-	n, oob, flags, _, err := conn.ReadMsgUnix(data, control)
-	if err != nil {
-		return fmt.Errorf("receive namespace-init ownership: %w", err)
-	}
-	msgs, err := unix.ParseSocketControlMessage(control[:oob])
-	if err != nil {
-		return fmt.Errorf("parse namespace-init ownership: %w", err)
-	}
-	var received []int
-	for _, m := range msgs {
-		fds, e := unix.ParseUnixRights(&m)
-		if e != nil {
-			for _, fd := range received {
-				unix.Close(fd)
-			}
-			return fmt.Errorf("parse namespace-init descriptor: %w", e)
-		}
-		received = append(received, fds...)
-	}
-	if n != 1 || data[0] != 'P' || flags&(unix.MSG_CTRUNC|unix.MSG_TRUNC) != 0 || len(received) != 1 {
-		for _, fd := range received {
-			unix.Close(fd)
-		}
-		return fmt.Errorf("invalid namespace-init ownership message")
-	}
-	fd := received[0]
-	unix.CloseOnExec(fd)
-	// Verify this is a pidfd without delivering a signal. The launcher cannot
-	// substitute a file, mount descriptor or arbitrary open socket.
-	if err = signalInit(fd, 0, nil, 0); err != nil && !errors.Is(err, unix.ESRCH) {
-		unix.Close(fd)
-		return fmt.Errorf("validate namespace-init pidfd: %w", err)
-	}
-	s.mu.Lock()
-	s.pidfd = fd
-	// Ownership is published before the acknowledgement. Kill and reap use
-	// this same lock, so neither can release or overlook an acknowledged init.
-	_, err = conn.Write([]byte{'A'})
-	s.mu.Unlock()
-	if err != nil {
-		return fmt.Errorf("acknowledge namespace-init ownership: %w", err)
-	}
-	return nil
 }
 
 func (s *sandbox) reap(cmd *exec.Cmd) {
@@ -303,7 +329,6 @@ func (s *sandbox) reap(cmd *exec.Cmd) {
 			s.pidfd = -1
 		}
 	}
-	s.closed = s.pidfd < 0
 	s.result = wall.Exit{Err: errors.Join(s.result.Err, err, cleanupErr)}
 	if cmd.ProcessState != nil {
 		s.result.Code = cmd.ProcessState.ExitCode()
@@ -311,6 +336,21 @@ func (s *sandbox) reap(cmd *exec.Cmd) {
 			s.result.Signal = ws.Signal().String()
 		}
 	}
+	copyOwner := s.copy
+	canReleaseCopy := s.pidfd < 0
+	s.mu.Unlock()
+	var copyErr error
+	if copyOwner != nil {
+		if canReleaseCopy {
+			copyErr = copyOwner.native.nativeExit()
+		} else {
+			copyOwner.native.interrupt()
+			copyErr = setupError("preserve copy resources until original init exit is proven", nil)
+		}
+	}
+	s.mu.Lock()
+	s.result.Err = errors.Join(s.result.Err, copyErr)
+	s.closed = s.pidfd < 0 && copyErr == nil
 	close(s.exited)
 	s.mu.Unlock()
 }
@@ -373,6 +413,9 @@ func (s *sandbox) Kill() error {
 			s.result.Err = errors.Join(s.result.Err, closeErr)
 		default:
 		}
+	}
+	if s.copy != nil {
+		s.copy.native.interrupt()
 	}
 	// Before the acknowledged transfer the outer launcher owns the blocked
 	// child. Closing its link refuses activation and its own cleanup kills it.

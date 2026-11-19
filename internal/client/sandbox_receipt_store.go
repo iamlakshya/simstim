@@ -175,6 +175,9 @@ func changeSandboxReceiptRow(ctx context.Context, file *sandboxFile, intent *san
 	if _, err := decodeSandboxContext(ctx, before.SessionID, encoded, 4); err != nil {
 		return err
 	}
+	if err := checkSandboxLineageSchemaPromotion(ctx, file); err != nil {
+		return err
+	}
 	file.schema, file.root["schema"] = 4, json.RawMessage("4")
 	file.sessions[before.SessionID] = encoded
 	return ctx.Err()

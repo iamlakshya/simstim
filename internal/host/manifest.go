@@ -28,6 +28,9 @@ const (
 // Manifest is the record of one session, at ~/.local/state/<name>/sessions/<id>/manifest.json.
 // Readers keep fields they do not know, so v2 can add fields freely.
 type Manifest struct {
+	// Placement is advisory original New request metadata, never capacity or boot authority.
+	PlacedBy      string                  `json:"placed_by,omitempty"`
+	PlaceReason   string                  `json:"place_reason,omitempty"`
 	HostLabel     string                  `json:"host_label,omitempty"`
 	SandboxName   string                  `json:"sandbox_name,omitempty"`
 	SecretState   *api.SessionSecretState `json:"secret_state,omitempty"`
@@ -142,6 +145,9 @@ type TermInfo struct {
 
 // Limits are the resource caps of the session.
 type Limits struct {
+	// Declared is the complete unit reservation of a walled primary. It
+	// includes the canonical VM reserve once. A member adds no reservation.
+	Declared   int64 `json:"declared,omitempty"`
 	MemoryHigh int64 `json:"memory_high,omitempty"`
 	// MemoryMax is the memory cap that the session's unit got at its last
 	// start, in bytes.

@@ -116,7 +116,7 @@ func resumeBundleLocked(original string,a api.ResumeArgs,root *Manifest,operatio
 	if err := validateResumeInputs(&preview, a.Inputs); err != nil {
 		return nil, err
 	}
-	if err:=admitRestartMemoryV1(operation.ownerContext,operation,a.MemoryMax);err!=nil{return nil,err}
+	if err:=admitRestartMemoryRequestV1(operation.ownerContext,operation,a);err!=nil{return nil,err}
 	debugOn := debugUntil(root, alive(root.ID)) != nil
 	if err := stopHolder(root.ID, root); err != nil {
 		return nil, UserError("busy", "the previous sandbox owner could not be stopped", "Wait for its owned cleanup before resuming.")
@@ -164,6 +164,7 @@ func resumeBundleLocked(original string,a api.ResumeArgs,root *Manifest,operatio
 	}
 	_, why, err := startAgain(root, again{operation:operation,label: resumedLabel, reason: "sandbox sessions started again", secrets: primaryValues, secretDelivery: delivery, members: members, allowMissing: true})
 	if err != nil {
+		if refused:=restartRefusal(err);refused!=nil{return nil,refused}
 		return nil, UserError("start_failed", "the complete sandbox could not start: "+err.Error(), "Check the supervisor log before trying again.")
 	}
 	selected, err := LoadManifest(original)

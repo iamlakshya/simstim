@@ -109,6 +109,8 @@ CI builds the site on every push and keeps it as an artifact named `docs-site`. 
 - no built page links to GitHub for a page the site hosts.
 - `llms.txt` lists every page of `pages.json` once, each with a description, and each copy that it names exists (`scripts/check-llms-txt.py`). Each copy has its source's title and text, with code exactly as it is. Each link leads where `cmd/docgen` sends the source's link, and its relative links lead to other copies or to images. lychee checks the copies' links too. A page needs a first paragraph for its description.
 
+The source-selection harness (`scripts/test-source-checks.py`) stubs the semantic docs checks, including the `llms.txt` checker, so its tests focus on file selection. `scripts/test-check-llms-txt.py` tests the real checker separately.
+
 ## Images
 
 Screenshots and recordings come from scripts, never by hand. `just screenshots` runs the `demo` command, where nothing connects anywhere, inside `test/ttyshot`:

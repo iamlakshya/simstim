@@ -17,7 +17,11 @@ func NewContext(ctx context.Context, args NewArgs) (*SessionInfo, error) {
 	if err := CheckCaller(); err != nil {
 		return nil, err
 	}
-	ctx, args, err := captureNewRequest(ctx, args)
+	args, err := preparePlacementAuditNewV1(args)
+	if err != nil {
+		return nil, err
+	}
+	ctx, args, err = captureNewRequest(ctx, args)
 	if err != nil {
 		return nil, err
 	}
@@ -28,12 +32,17 @@ func NewContext(ctx context.Context, args NewArgs) (*SessionInfo, error) {
 		return nil, err
 	}
 	original := args
-	args,err=PrepareRepositoryNewArgs(args)
-	if err!=nil{return nil,err}
+	args, err = PrepareRepositoryNewArgs(args)
+	if err != nil {
+		return nil, err
+	}
+	args.Placement = api.ClonePlacementV1(original.Placement)
 	if err := checkRequestedWall(args.Wall); err != nil {
 		return nil, err
 	}
-	if err:=validateChosenWall(args);err!=nil{return nil,err}
+	if err := validateChosenWall(args); err != nil {
+		return nil, err
+	}
 	if args.Wall == "auto" {
 		return nil, UserError("wall_unavailable", "the requested wall has not been resolved by its original client", "Choose the admitted wall through the current client before starting the sandbox.")
 	}
@@ -61,7 +70,7 @@ func NewContext(ctx context.Context, args NewArgs) (*SessionInfo, error) {
 		// The original captured request admits this decoded driver under its
 		// reserved OP. H15's real parent then loans the SAME operation to the
 		// owned early supervisor before any resource can construct.
-		return newWalled(ctx,args,need.Driver,original)
+		return newWalled(ctx, args, need.Driver, original)
 	}
 	return nil, UserError("bad_wall", "the selected wall is unknown", "Choose none, process, gvisor or microvm.")
 }

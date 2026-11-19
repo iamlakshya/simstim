@@ -66,7 +66,9 @@ var closeImageMetadata = func(file *os.File) error { return file.Close() }
 func ownershipError(what string) error {
 	return &proto.Error{Code: "image_ownership", Message: "cannot prove image store ownership: " + what, Hint: "Keep the reported files and inspect the image store before retrying the purge."}
 }
-func stageLeaf(name string) bool { return nonceLeaf(name, ".image-stage-") }
+func stageLeaf(name string) bool {
+	return nonceLeaf(name, ".image-stage-") || nonceLeaf(name, "incoming/.image-stage-")
+}
 func nonceLeaf(name, prefix string) bool {
 	suffix := strings.TrimPrefix(name, prefix)
 	return strings.HasPrefix(name, prefix) && len(suffix) == 32 && supply.IsHex64(suffix+suffix)

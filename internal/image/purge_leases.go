@@ -45,7 +45,7 @@ func (s *Store) purgeOwnedLeases(ctx context.Context, report *PurgeReport) error
 			report.Left = append(report.Left, PurgeLeft{"ownership/" + name, err.Error()})
 			continue
 		}
-		if role, _ := leaseRole(receipt.Path); role != "platform" && role != "incoming" {
+		if role, _ := leaseRole(receipt.Path); role != "platform" && role != "incoming" && role != "saved-alias" && role != "saved-pending" {
 			// P35 retires agents leases only after its objects and references.
 			// Adding a resource role never authorises this image-only collector.
 			continue

@@ -158,6 +158,7 @@ func Command(ctx context.Context, s Spec) (*Cmd, error) {
 	case m.userns:
 		attr = namespaces(s.Net, true, initCaps)
 		if s.gvisorV1 {
+			attr.Pdeathsig = unix.SIGKILL
 			attr.UidMappings = []syscall.SysProcIDMap{{ContainerID: 0, HostID: os.Getuid(), Size: 1}}
 			attr.GidMappings = []syscall.SysProcIDMap{{ContainerID: 0, HostID: os.Getgid(), Size: 1}}
 		}

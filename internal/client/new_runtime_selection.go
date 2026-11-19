@@ -65,7 +65,24 @@ func (c *Conn) prepareNewRuntime(ctx context.Context, settings Settings, level s
 	if err := bindRequestTransportSource(ctx, c); err != nil {
 		return nil, err
 	}
-	return &newRuntimeSelection{conn: c, hostID: hid, source: c.hostTransport.source, manifest: cloneNewRuntimeManifest(request.Manifest), items: slices.Clone(items)}, nil
+	// Reuse the actual delivery-completion reader against this ORIGINAL
+	// retained signed request. Inventory cannot select another expectation,
+	// and no delivery claim alone issues physical compatibility readiness.
+	if _, err := runtimeReady(ctx, c, request); err != nil {
+		return nil, err
+	}
+	if err := bindRequestTransportSource(ctx, c); err != nil {
+		return nil, err
+	}
+	selected := &newRuntimeSelection{conn: c, hostID: hid, source: c.hostTransport.source, manifest: cloneNewRuntimeManifest(request.Manifest), items: slices.Clone(items)}
+	physical, err := c.capProbeForSelectedRuntime(ctx, selected)
+	if err != nil {
+		return nil, err
+	}
+	if err := c.checkRunnableWall("gvisor", physical); err != nil {
+		return nil, err
+	}
+	return selected, nil
 }
 
 func (p *newRuntimeSelection) forArgs(ctx context.Context, c *Conn, current *supply.Manifest) (*supply.Manifest, error) {

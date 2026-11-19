@@ -15,6 +15,16 @@ import (
 // production begins only after actual jail Start. Both operations share the
 // same bounded result, cancellation and whole-owned-jail cleanup machinery.
 func runConverterJail(ctx context.Context, spec jail.Spec, produce func(io.Writer) error) ([]byte, error) {
+	return runConverterJailOutput(ctx, spec, produce, func(input io.Reader) ([]byte, error) {
+		data, err := io.ReadAll(io.LimitReader(input, image.MaxManifest+1))
+		if int64(len(data)) > image.MaxManifest {
+			return nil, fmt.Errorf("jailed converter result exceeds its bound")
+		}
+		return data, err
+	})
+}
+
+func runConverterJailOutput(ctx context.Context, spec jail.Spec, produce func(io.Writer) error, readOutput func(io.Reader) ([]byte, error)) ([]byte, error) {
 	operation, cancel := context.WithCancel(ctx)
 	defer cancel()
 	command, err := jail.Command(operation, spec)
@@ -44,7 +54,10 @@ func runConverterJail(ctx context.Context, spec jail.Spec, produce func(io.Write
 	}
 	read := make(chan readResult, 1)
 	go func() {
-		data, err := io.ReadAll(io.LimitReader(output, image.MaxManifest+1))
+		data, err := readOutput(output)
+		if err != nil {
+			cancel()
+		}
 		output.Close()
 		read <- readResult{data, err}
 	}()
@@ -62,9 +75,6 @@ func runConverterJail(ctx context.Context, spec jail.Spec, produce func(io.Write
 	}
 	if sourceErr != nil {
 		return result.data, sourceErr
-	}
-	if int64(len(result.data)) > image.MaxManifest {
-		return nil, fmt.Errorf("jailed converter result exceeds its bound")
 	}
 	return result.data, errors.Join(waitErr, result.err)
 }

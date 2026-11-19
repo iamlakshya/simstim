@@ -125,6 +125,11 @@ func prepareImage(ctx context.Context, c *Conn, text string, options ImageOption
 	if err != nil {
 		return image.Record{}, err
 	}
+	if !resolve {
+		if saved, known, err := ensureSavedImage(ctx, c, text, arch); known || err != nil {
+			return saved, err
+		}
+	}
 	resolved, err := resolveImage(ctx, text, arch, resolve, options)
 	if err != nil {
 		return image.Record{}, err
@@ -210,7 +215,7 @@ func pinImage(ctx context.Context, request *image.Request, options ImageOptions)
 	return updateImageLock(ctx, func(lock *image.Lock) error {
 		index := -1
 		for i := range lock.Images {
-			if lock.Images[i].Ref == request.Ref {
+			if lock.Images[i].Ref == request.Ref && lock.Images[i].HostID == "" {
 				index = i
 				break
 			}
@@ -221,9 +226,6 @@ func pinImage(ctx context.Context, request *image.Request, options ImageOptions)
 			runtimeLine(options.Progress, "Pinned %s to %s\n", CleanLine(request.Ref), request.Digest)
 		}
 		pin := &lock.Images[index]
-		if pin.HostID != "" {
-			return &UserError{Msg: "this image belongs to the host that saved it", Hint: "Use that host.", Code: "image_elsewhere", Kind: HostKind("image_elsewhere")}
-		}
 		if pin.Digest != request.Digest {
 			if !options.Update {
 				return &UserError{Msg: fmt.Sprintf("%s now points at %s, and images.lock pins %s", CleanLine(request.Ref), request.Digest, pin.Digest), Hint: "Run image pull with --update after checking the new image.", Code: "image_moved", Kind: HostKind("image_moved")}
@@ -250,7 +252,7 @@ func recordImageRoot(ctx context.Context, host string, request image.Request, re
 	return updateImageLock(ctx, func(lock *image.Lock) error {
 		for i := range lock.Images {
 			pin := &lock.Images[i]
-			if pin.Ref != request.Ref {
+			if pin.Ref != request.Ref || pin.HostID != "" {
 				continue
 			}
 			if pin.Digest != request.Digest {

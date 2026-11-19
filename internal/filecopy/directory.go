@@ -27,7 +27,7 @@ func MakeDirectory(ctx context.Context, root *os.Root, relative string, input io
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	opened, err := directory(root, relative, true)
+	opened, err := OpenDirectoryRoot(root, relative, true)
 	if err != nil {
 		return err
 	}

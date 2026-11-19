@@ -181,6 +181,14 @@ func saveReservedManifest(operation *SessionOperation, m *Manifest) error {
 		if len(m.VMNeedV1) != 0 || m.RuntimeManifest != nil {
 			return newRuntimeError("a raw manifest cannot issue runtime authority")
 		}
+		if isWalledMemoryV1(m) {
+			return withPlacement(operation.ownerContext, false, func(*placementControl) error {
+				if err := admitNewMemoryLockedV1(operation.ownerContext, operation, m); err != nil {
+					return err
+				}
+				return operation.saveNewManifest(m)
+			}, false)
+		}
 		return operation.saveNewManifest(m)
 	}
 	witness.mu.Lock()
@@ -207,6 +215,9 @@ func saveReservedManifest(operation *SessionOperation, m *Manifest) error {
 			return err
 		}
 		if err := operation.native.check(operation.ownerContext); err != nil {
+			return err
+		}
+		if err := admitNewMemoryLockedV1(operation.ownerContext, operation, m); err != nil {
 			return err
 		}
 		return operation.saveNewManifest(m)

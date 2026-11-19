@@ -15,8 +15,10 @@ const (
 	grantOpNew
 	grantOpJoin
 	grantOpResume
+	grantOpFreshChild
 	grantOpPush
 	grantOpRootStep
+	grantOpImageSave
 )
 
 type newGrantIntent struct {
@@ -41,7 +43,7 @@ func requireGrantOperation(ctx context.Context, op grantOperation) error {
 		return err
 	}
 	r := grantRequestOf(ctx)
-	if r == nil || op < grantOpNew || op > grantOpResume {
+	if r == nil || op < grantOpNew || op > grantOpFreshChild {
 		return grantOperationError()
 	}
 	r.mu.Lock()

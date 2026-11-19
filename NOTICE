@@ -47,7 +47,9 @@ Projects whose designs informed this one:
   The complete licence is in LICENSES/MPL-2.0.txt. The pinned x/net library
   handles public suffix matching. The ancestor index adds only negative boundaries.
 
-- internal/egress/rules/minted.json: three finite credential-family patterns
+- internal/egress/rules/minted.json: three finite model credential families.
+  internal/egress/rules/minted-services.json: 21 finite GitHub, GitLab, npm and
+  PyPI credential families. These response patterns are
   derived from gitleaks v8.30.1, commit 83d9cd684c87d95d656c1458ef04895a7f1cbd8e
   (https://github.com/gitleaks/gitleaks/blob/83d9cd684c87d95d656c1458ef04895a7f1cbd8e/config/gitleaks.toml).
   This is a derived network-response subset. File and line allowlists,
@@ -117,3 +119,10 @@ The source patch under third_party/gvisor derives from gVisor commit
 7a675ac66a1e2357abdaa6cccedabcd3cce9aa5c and retains its Apache-2.0 licence.
 Its licence is the repository's LICENSE. Runtime binaries keep this notice
 and their upstream licence when the release builder distributes them.
+
+- internal/egress/rules/confusables-15.0.0.txt.gz: the complete confusable
+  prototype data comes from Unicode 15.0.0
+  (https://www.unicode.org/Public/security/15.0.0/confusables.txt),
+  Copyright 1991-2022 Unicode, Inc. The matching skeleton follows UTS #39
+  revision 26. The gzip representation preserves every original raw byte.
+  The complete Unicode licence is in LICENSES/Unicode-3.0.txt.

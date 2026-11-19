@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path"
 	"time"
 
 	"github.com/iamlakshya/simstim/internal/cachefs"
@@ -165,6 +166,11 @@ func (s *Store) recoverPublication(ctx context.Context, receipt *imageOwnership)
 		if err := s.syncDir("."); err != nil {
 			return err
 		}
+		if parent := path.Dir(receipt.Leaf); parent != "." {
+			if err := s.syncDir(parent); err != nil {
+				return err
+			}
+		}
 		receipt.Leaf = target
 		return s.writeOwnership(*receipt)
 	})
@@ -197,8 +203,31 @@ func (s *Store) existingOwned(ctx context.Context, request Request) (Record, err
 	if current.Arch != request.Arch {
 		return Record{}, badLayer("stored image architecture differs")
 	}
-	if err := rootCheck(request, current); err != nil {
+	projected, err := projectSavedSelection(request, current)
+	if err != nil {
 		return Record{}, err
+	}
+	if err := rootCheck(request, projected); err != nil {
+		return Record{}, err
+	}
+	if current.SavedHost != nil {
+		file, err := s.regular(request.PlatformDigest[7:]+"/rootfs.img", os.O_RDONLY, 0o444)
+		if err != nil {
+			return Record{}, err
+		}
+		checked := s.checkSavedDescriptor(ctx, projected, file)
+		if err := errors.Join(checked, file.Close()); err != nil {
+			return Record{}, err
+		}
+		current.UsedAt = time.Now().UTC()
+		if !owned {
+			return Record{}, ownershipError("a saved root cannot use unreceipted legacy metadata")
+		}
+		if err := s.replaceOwnedMetadata(ctx, &receipt, current); err != nil {
+			return Record{}, err
+		}
+		projected.UsedAt = current.UsedAt
+		return projected, nil
 	}
 	current.Digest = request.Digest
 	current.Ref = request.Ref

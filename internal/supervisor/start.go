@@ -6,6 +6,7 @@ import (
 	"github.com/iamlakshya/simstim/internal/host"
 	"github.com/iamlakshya/simstim/internal/link"
 	"github.com/iamlakshya/simstim/internal/proto"
+	"github.com/iamlakshya/simstim/internal/wall/process"
 )
 
 // startGuest builds and starts the sandbox, opens the ctl stream, and
@@ -22,7 +23,12 @@ func (s *Supervisor) startGuest(ctx context.Context, sb sandbox, secrets map[str
 	if ctx.Err() != nil {
 		return wallError("the boot ended before the sandbox started", ctx.Err())
 	}
-	if err:=s.prepareBootDecoys(ctx);err!=nil{return err}
+	if err := s.prepareBootDecoys(ctx); err != nil {
+		return err
+	}
+	if err := s.prepareBootPackageSettings(ctx); err != nil {
+		return err
+	}
 	modern := s.modernSecretStartup()
 	var environment secretEnvironment
 	if modern {
@@ -41,14 +47,30 @@ func (s *Supervisor) startGuest(ctx context.Context, sb sandbox, secrets map[str
 	if err != nil {
 		return err
 	}
-	if err:=s.retainVMStart(ctx,sb,conn);err!=nil{_ = conn.Close();return err}
+	if err := s.retainVMStart(ctx, sb, conn); err != nil {
+		_ = conn.Close()
+		return err
+	}
+	if runtime, ok := sb.(processSandbox); ok {
+		owner, err := process.NativeCopyOwnerV1(runtime.Sandbox, conn)
+		if err != nil {
+			_ = conn.Close()
+			return err
+		}
+		s.processCopy = owner
+	}
 	s.link = link.New(conn, link.Supervisor, link.Options{})
 	st, err := s.link.Open(ctx, link.KindCtl, nil)
 	if err != nil {
 		return wallError("the sandbox's guest init did not answer", err)
 	}
 	s.ctl = newCtl(s, st)
-	if err:=s.requireDecoyGuest(ctx);err!=nil{return err}
+	if err := s.requireDecoyGuest(ctx); err != nil {
+		return err
+	}
+	if err := s.requirePackageManagerGuest(ctx); err != nil {
+		return err
+	}
 	if err := s.checkControllerPrepare(ctx); err != nil {
 		return err
 	}
@@ -80,6 +102,9 @@ func (s *Supervisor) startGuest(ctx context.Context, sb sandbox, secrets map[str
 	}
 	s.mu.Unlock()
 	s.bootDecoyArgs(&args)
+	if err := s.bootPackageSettingsArgs(&args); err != nil {
+		return err
+	}
 	if s.capture != nil {
 		plan, err := host.SandboxStatePlan(m)
 		if err != nil {
@@ -127,6 +152,9 @@ func (s *Supervisor) startGuest(ctx context.Context, sb sandbox, secrets map[str
 	}
 	if !s.guestABI(res.GuestABI) {
 		return execRefusal("the guest PTY ownership schema does not match this runtime")
+	}
+	if err := s.markPackageSettingsInstalled(); err != nil {
+		return err
 	}
 	s.mu.Lock()
 	s.launched = true // actual start ACK, before optional boot certification

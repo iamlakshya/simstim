@@ -14,10 +14,11 @@ import (
 // A lineage belongs only to this laptop. Structural host answers never
 // create one. Schema3 prevents older readers from ignoring its limits.
 type sandboxLineage struct {
-	Version int64    `json:"version"`
-	Parent  string   `json:"parent"`
-	Root    string   `json:"root"`
-	Allowed []string `json:"allowed_names"`
+	Version      int64    `json:"version"`
+	Parent       string   `json:"parent"`
+	Root         string   `json:"root"`
+	Allowed      []string `json:"allowed_names"`
+	SelectedKind string   `json:"selected_kind,omitempty"`
 }
 
 func decodeSandboxLineage(id string, raw json.RawMessage, schema int, sshAgent bool) (*sandboxLineage, bool, error) {
@@ -31,42 +32,16 @@ func decodeSandboxLineageContext(ctx context.Context, id string, raw json.RawMes
 	if raw == nil {
 		return nil, false, nil
 	}
-	if schema != 3 && schema != 4 || sshAgent {
-		return nil, false, badSandboxStateContext(ctx)
-	}
-	fields, err := sandboxObjectContext(ctx, raw, "version", "parent", "root", "allowed_names")
+	p, err := api.NewJSONBytesProjection(ctx, raw)
 	if err != nil {
 		return nil, false, err
 	}
-	version, err := sandboxLineageVersion(bytes.TrimSpace(fields["version"]))
+	span, err := p.ObjectRoot()
 	if err != nil {
 		return nil, false, err
 	}
-	if version > 1 {
-		return nil, true, nil
-	}
-	var l sandboxLineage
-	l.Version = version
-	if json.Unmarshal(fields["parent"], &l.Parent) != nil || json.Unmarshal(fields["root"], &l.Root) != nil ||
-		!api.ValidSessionID(l.Parent) || !api.ValidSessionID(l.Root) || l.Parent == id || l.Root == id {
-		return nil, false, badSandboxStateContext(ctx)
-	}
-	if bytes.Equal(bytes.TrimSpace(fields["allowed_names"]), []byte("null")) ||
-		json.Unmarshal(fields["allowed_names"], &l.Allowed) != nil || l.Allowed == nil {
-		return nil, false, badSandboxStateContext(ctx)
-	}
-	if err := ctx.Err(); err != nil {
-		return nil, false, err
-	}
-	for i, name := range l.Allowed {
-		if err := ctx.Err(); err != nil {
-			return nil, false, err
-		}
-		if !secretNameRE.MatchString(name) || name == "SSH_AUTH_SOCK" || i > 0 && l.Allowed[i-1] >= name {
-			return nil, false, badSandboxStateContext(ctx)
-		}
-	}
-	return &l, false, nil
+	value, future, _, err := projectSandboxLineageData(p, span, schema, sshAgent, func(field api.JSONSpan) (bool, error) { return p.StringEqual(field, id) }, true)
+	return value, future, err
 }
 
 // The full decoder and bounded projector share this exact version grammar.
@@ -85,7 +60,7 @@ func sameSandboxLineage(a, b *sandboxLineage) bool {
 	if a == nil || b == nil {
 		return a == nil && b == nil
 	}
-	return a.Version == b.Version && a.Parent == b.Parent && a.Root == b.Root && slices.Equal(a.Allowed, b.Allowed)
+	return a.Version == b.Version && a.Parent == b.Parent && a.Root == b.Root && a.SelectedKind == b.SelectedKind && slices.Equal(a.Allowed, b.Allowed)
 }
 
 func localSandboxRoot(p *SandboxPolicy) string {
@@ -184,6 +159,9 @@ func validateLineageReservationContext(ctx context.Context, f *sandboxFile, chil
 	}
 	if child.lineage == nil {
 		return nil
+	}
+	if child.lineage.Version == 2 {
+		return validateFreshLineageReservationContext(ctx, f, &child)
 	}
 	if child.lineage.Version != 1 {
 		return futureLineageError()

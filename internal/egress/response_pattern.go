@@ -14,8 +14,9 @@ const responsePatternWindow = 170
 type responseMintRule struct{ ID, Expression string }
 
 type responseRuleSnapshot struct {
-	rules []responseRuleProgram
-	first [256]bool
+	rules  []responseRuleProgram
+	first  [256]bool
+	window int
 }
 type responseRuleProgram struct {
 	id      string
@@ -29,7 +30,16 @@ type responseRuleProgram struct {
 var errResponseRules = errors.New("invalid finite response credential rules. Try: update matching helpers")
 
 func newResponseRuleSnapshot(rules []responseMintRule) (*responseRuleSnapshot, error) {
-	snapshot := new(responseRuleSnapshot)
+	return newResponseRuleSnapshotWithinWindow(rules, responsePatternWindow)
+}
+
+// Only the pinned service loader adds the larger source-derived finite window.
+// Arbitrary custom grammars continue through the original170-byte constructor.
+func newResponseRuleSnapshotWithinWindow(rules []responseMintRule, window int) (*responseRuleSnapshot, error) {
+	if window != responsePatternWindow && window != responseServicePatternWindow {
+		return nil, errResponseRules
+	}
+	snapshot := &responseRuleSnapshot{window: window}
 	seen := make(map[string]bool, len(rules))
 	for _, rule := range rules {
 		if rule.ID == "" || seen[rule.ID] {
@@ -40,8 +50,8 @@ func newResponseRuleSnapshot(rules []responseMintRule) (*responseRuleSnapshot, e
 		if err != nil || ast.MaxCap() != 1 || !responseLeadingCapture(ast) {
 			return nil, errResponseRules
 		}
-		maximum, ok := responseASCIIWidth(ast)
-		if !ok || maximum == 0 || maximum >= responsePatternWindow {
+		maximum, ok := responseASCIIWidthWithinWindow(ast, window)
+		if !ok || maximum == 0 || maximum >= window {
 			return nil, errResponseRules
 		}
 		compiled, err := regexp.Compile(rule.Expression)
@@ -131,6 +141,10 @@ func responseNullable(node *syntax.Regexp) bool {
 }
 
 func responseASCIIWidth(node *syntax.Regexp) (int, bool) {
+	return responseASCIIWidthWithinWindow(node, responsePatternWindow)
+}
+
+func responseASCIIWidthWithinWindow(node *syntax.Regexp, window int) (int, bool) {
 	switch node.Op {
 	case syntax.OpEmptyMatch, syntax.OpBeginLine, syntax.OpEndLine, syntax.OpBeginText, syntax.OpEndText, syntax.OpWordBoundary, syntax.OpNoWordBoundary:
 		return 0, true
@@ -152,12 +166,12 @@ func responseASCIIWidth(node *syntax.Regexp) (int, bool) {
 		}
 		return 1, true
 	case syntax.OpCapture, syntax.OpQuest:
-		return responseASCIIWidth(node.Sub[0])
+		return responseASCIIWidthWithinWindow(node.Sub[0], window)
 	case syntax.OpConcat:
 		total := 0
 		for _, sub := range node.Sub {
-			n, ok := responseASCIIWidth(sub)
-			if !ok || n >= responsePatternWindow-total {
+			n, ok := responseASCIIWidthWithinWindow(sub, window)
+			if !ok || n >= window-total {
 				return 0, false
 			}
 			total += n
@@ -166,7 +180,7 @@ func responseASCIIWidth(node *syntax.Regexp) (int, bool) {
 	case syntax.OpAlternate:
 		maximum := 0
 		for _, sub := range node.Sub {
-			n, ok := responseASCIIWidth(sub)
+			n, ok := responseASCIIWidthWithinWindow(sub, window)
 			if !ok {
 				return 0, false
 			}
@@ -174,11 +188,11 @@ func responseASCIIWidth(node *syntax.Regexp) (int, bool) {
 		}
 		return maximum, true
 	case syntax.OpRepeat:
-		if node.Max < 0 || node.Max >= responsePatternWindow {
+		if node.Max < 0 || node.Max >= window {
 			return 0, false
 		}
-		n, ok := responseASCIIWidth(node.Sub[0])
-		if !ok || n != 0 && node.Max >= (responsePatternWindow+n-1)/n {
+		n, ok := responseASCIIWidthWithinWindow(node.Sub[0], window)
+		if !ok || n != 0 && node.Max >= (window+n-1)/n {
 			return 0, false
 		}
 		return n * node.Max, true

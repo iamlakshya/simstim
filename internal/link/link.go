@@ -410,6 +410,9 @@ func (s *Session) fail(err error) {
 		return
 	}
 	s.closed, s.err = true, err
+	for _, stream := range s.streams {
+		stream.notifyDone()
+	}
 	close(s.done)
 	s.mu.Unlock()
 	s.closeTransport()

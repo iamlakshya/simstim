@@ -22,6 +22,8 @@ type Backend interface {
 	// anything once ctx has ended, the command's own context: a save that a
 	// cancel came before writes nothing (client.SaveHosts).
 	LoadHosts(ctx context.Context) ([]client.Host, error)
+	// ResolveHost selects a current saved UI target without dialing or grants.
+	ResolveHost(ctx context.Context, selected string) (client.Host, error)
 	// LoadTiers reads the current policy alongside the saved host snapshot.
 	LoadTiers(ctx context.Context, hosts []client.Host) (client.Tiers, error)
 	// ResolveHostTier asks the foreground question through ctx, then saves it.
@@ -86,6 +88,8 @@ type Backend interface {
 
 // Conn is one connection to a host. *client.Conn satisfies it.
 type Conn interface {
+	// CheckSavedSource is readonly; a NEW start may reconnect before NewR.
+	CheckSavedSource(ctx context.Context) error
 	// CheckNewGrants checks selected names before the backend fetches values.
 	CheckNewGrants(ctx context.Context, names []string, sshAgent bool) error
 	// CheckResumeGrants checks current creation authority before a resume fetch.

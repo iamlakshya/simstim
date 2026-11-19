@@ -33,7 +33,10 @@ func saveRestartManifestV1(operation *SessionOperation, next *Manifest) error {
 		return err
 	}
 	return operation.withCurrentRead(ctx, func(owned context.Context) error {
-		return withPlacement(owned, false, func(_ *placementControl) (failure error) {
+		return withPlacement(owned, restartMemoryAllowsDrainV1(operation), func(control *placementControl) (failure error) {
+			if err := checkRestartMemoryPublicationV1(operation, control); err != nil {
+				return err
+			}
 			original, err := cachefs.OpenFile(operation.native.root, "manifest.json", os.O_RDONLY, 0o600)
 			if err != nil {
 				return err
@@ -60,6 +63,13 @@ func saveRestartManifestV1(operation *SessionOperation, next *Manifest) error {
 			}
 			if err := reference.CheckFile(operation.native.root, "manifest.json", original, 0o600); err != nil {
 				return err
+			}
+			vacant, err := reserveRestartMemoryLockedV1(owned, operation, next)
+			if err != nil {
+				return err
+			}
+			if vacant != nil {
+				defer func() { failure = errors.Join(failure, vacant.Close()) }()
 			}
 			if err := consumeRestartMemoryV1(operation, &before, next); err != nil {
 				return err

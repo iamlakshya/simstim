@@ -74,6 +74,8 @@ type Request struct {
 	scheme            string
 	query             string // immutable query of an inspected HTTP request
 	forceQuery        bool
+	servicePathOnly   bool // internal required endpoint authority, never a public grant
+	classifierProbe   bool // read-only source-host check through the same matcher
 	withoutModelTools bool // internal probe through the same policy matcher
 	Host              string
 	Port              int
@@ -130,16 +132,17 @@ type compiledLayer struct {
 // Engine evaluates network flows against locks, merged layers, the agent's
 // Egress hosts and the active preset (spec 7.2 and 8.2).
 type Engine struct {
-	now         func() time.Time
-	modelGuards []agents.ModelGuard
-	agentKind   string
-	agentRules  []compiledRule
-	balanced    []compiledRule
-	preset      api.Preset
-	unknown     api.Unknown
-	locks       []compiledRule
-	layers      []compiledLayer // narrowest first
-	ledger      *onceLedger
+	now             func() time.Time
+	modelGuards     []agents.ModelGuard
+	agentKind       string
+	agentRules      []compiledRule
+	balanced        []compiledRule
+	preset          api.Preset
+	unknown         api.Unknown
+	classifierNames classifierNameIndex
+	locks           []compiledRule
+	layers          []compiledLayer // narrowest first
+	ledger          *onceLedger
 }
 
 // NewEngine builds a policy engine for agentKind from a merged Policy.
@@ -169,7 +172,7 @@ func newEngineWithAgentRules(agentKind string, agentRules []compiledRule, pol ap
 	if err != nil {
 		return nil, &proto.Error{Code: "bad_request", Message: err.Error(), Hint: "Pass --preset locked, balanced or open."}
 	}
-	unknown, err := api.ParseUnknown(string(pol.Unknown))
+	unknown, err := configuredUnknown(pol)
 	if err != nil {
 		return nil, &proto.Error{Code: "bad_request", Message: err.Error(), Hint: "Set network.unknown to ask, deny, allow or classify."}
 	}
@@ -193,6 +196,12 @@ func newEngineWithAgentRules(agentKind string, agentRules []compiledRule, pol ap
 		ledger:     newOnceLedger(),
 	}
 	eng.ledger.syncPolicy(eng)
+	if eng.unknown == api.UnknownClassify {
+		eng.classifierNames, err = buildClassifierNameIndex(eng)
+		if err != nil {
+			return nil, err
+		}
+	}
 	return eng, nil
 }
 

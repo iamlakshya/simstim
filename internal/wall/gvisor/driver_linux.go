@@ -148,8 +148,15 @@ func (d *Driver) prepare(ctx context.Context, spec wall.Spec, existing bool) (wa
 	return &sandbox{driver: d, spec: spec, owner: ctx, storage: storage, done: make(chan struct{}), exit: wall.Exit{Code: -1}}, nil
 }
 
-func (d *Driver) Probe(ctx context.Context) wall.Probe {
-	p := wall.Probe{Driver: d.Name(), Level: d.Level(), Facts: map[string]string{"platform": "systrap"}}
+// ConstructionProbeV1 reports supported construction facts without executing
+// an installed runtime or asserting physical readiness. The original selected
+// runtime purpose separately owns the bounded smoke command.
+func ConstructionProbeV1(ctx context.Context) wall.Probe {
+	p := wall.Probe{Driver: "gvisor", Level: wall.GVisor, Facts: map[string]string{"platform": "systrap"}}
+	if err := ctx.Err(); err != nil {
+		p.Reason, p.Fix = err.Error(), "Run the sandbox probe again."
+		return p
+	}
 	if runtime.GOARCH != "amd64" && runtime.GOARCH != "arm64" {
 		p.Reason = "gvisor needs Linux amd64 or arm64"
 		p.Fix = "Use a supported Linux host."
@@ -168,26 +175,34 @@ func (d *Driver) Probe(ctx context.Context) wall.Probe {
 		p.Fix = "Update the host kernel."
 		return p
 	}
+	p.CanPrepare = true
+	p.Reason = "physical gvisor readiness needs this connection's original delivered runtime"
+	p.Fix = "Prepare the selected signed runtime, then run its physical probe on the same connection."
+	return p
+}
+
+func (d *Driver) Probe(ctx context.Context) wall.Probe {
+	p := ConstructionProbeV1(ctx)
+	if !p.CanPrepare {
+		return p
+	}
+	spec, ok := wall.ExpectedSpec(ctx)
+	if !ok || spec.ID != "gvisorprobe" || spec.Root != wall.Reset || spec.Image != nil || spec.VM != nil {
+		return p
+	}
+	// These are the factory's private native-purpose projections. A supplied
+	// Spec alone cannot obtain either the original runtime or its host domain.
+	if _, err := d.options.ExpectedRuntime(ctx); err != nil {
+		p.Reason, p.Fix = err.Error(), "Prepare the selected runtime on the same authenticated connection."
+		return p
+	}
+	if _, err := d.options.Domain(ctx); err != nil {
+		p.Reason, p.Fix = err.Error(), "Retain the original host account and physical probe owner."
+		return p
+	}
 	probe, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	dir, err := os.MkdirTemp("", "gvisor-probe-")
-	if err != nil {
-		p.Reason = err.Error()
-		p.Fix = "Check the host's private temporary storage."
-		return p
-	}
-	helper, err := os.Executable()
-	if err != nil {
-		os.RemoveAll(dir)
-		p.Reason = err.Error()
-		p.Fix = "Reinstall the host helper."
-		return p
-	}
-	spec := wall.Spec{ID: "gvisorprobe", SessionDir: dir, Helper: filepath.Dir(helper), Root: wall.Reset}
 	storage, err := prepareStorage(probe, spec, false)
-	if err != nil {
-		err = errors.Join(err, os.RemoveAll(dir))
-	}
 	if err == nil {
 		s := &sandbox{driver: d, spec: spec, owner: probe, storage: storage, done: make(chan struct{}), exit: wall.Exit{Code: -1}, smoke: true}
 		_, err = s.Start(probe)
@@ -200,9 +215,6 @@ func (d *Driver) Probe(ctx context.Context) wall.Probe {
 		}
 		cleanupErr := s.Destroy()
 		err = errors.Join(err, cleanupErr)
-		if cleanupErr == nil {
-			err = errors.Join(err, os.RemoveAll(dir))
-		}
 		p.Version = s.version
 	}
 	if err != nil {
@@ -214,7 +226,7 @@ func (d *Driver) Probe(ctx context.Context) wall.Probe {
 		}
 		return p
 	}
-	p.OK = true
+	p.OK, p.Reason, p.Fix = true, "", ""
 	return p
 }
 

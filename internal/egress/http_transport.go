@@ -96,7 +96,7 @@ func (r *originRequest) allowed(eng *Engine, dialer *Dialer) bool {
 	if model != nil && model.refusal(eng, r.permit, evalRevalidate) != "" {
 		return false
 	}
-	if service != nil && !service.allowed(eng, r.permit) {
+	if service != nil && !service.allowedAtState(eng, r.permit, r.s.currentMembers()) {
 		return false
 	}
 	if !reserved {

@@ -38,6 +38,7 @@ type preparedMember struct {
 
 func cloneMemberArgs(a proto.CtlStartArgs) proto.CtlStartArgs {
 	a.Decoys=proto.CloneDecoyFilesV1(a.Decoys)
+	a.PackageManagers = proto.ClonePackageManagersV1(a.PackageManagers)
 	a.Argv, a.Env = slices.Clone(a.Argv), slices.Clone(a.Env)
 	a.Hooks, a.Missing, a.StateFiles = slices.Clone(a.Hooks), slices.Clone(a.Missing), slices.Clone(a.StateFiles)
 	a.Secrets, a.SecretModes = maps.Clone(a.Secrets), maps.Clone(a.SecretModes)
@@ -199,6 +200,14 @@ func (g *Init) projectMember(a *proto.CtlStartArgs, primary bool) error {
 		}
 	}
 	if err:=g.checkBootDecoys(a.Decoys);err!=nil{return err}
+	if err := g.checkBootPackageSettings(a.PackageManagers); err != nil {
+		return err
+	}
+	packageEnv, err := PackageManagerEnvironment(a.PackageManagers, a.Env)
+	if err != nil {
+		return err
+	}
+	a.Env = packageEnv
 	env, err := g.childTrustEnv(a.Env, a.Agent)
 	if err != nil {
 		return err

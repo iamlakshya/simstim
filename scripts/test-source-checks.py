@@ -62,7 +62,7 @@ class SourceCheckTests(unittest.TestCase):
         self.write("main.go", "package main\n")
         self.write("README.md", "# Public source\n")
         self.write("docs/reference/agents.md", "# Agents\n")
-        for name in ("test-docs-commands.py", "check-site-links.py"):
+        for name in ("test-docs-commands.py", "check-site-links.py", "check-llms-txt.py"):
             self.write("scripts/" + name, "raise SystemExit(0)\n")
         self.write("scripts/docs-site.sh", "#!/bin/sh\nexit 0\n", executable=True)
         self.git(self.seed, "init", "--quiet", "--template=")

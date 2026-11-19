@@ -146,15 +146,23 @@ func cleanLines(list []string, clean func(string) string) []string {
 // CleanSession is a copy of a session row to draw, with every string that
 // the host sent cleaned. Requests use the row as the host sent it.
 func CleanSession(s Session) Session {
+	s.Wall = cleanWallInfoV1(s.Wall)
+	s.PackageManagers = proto.ClonePackageManagersV1(s.PackageManagers)
+	if proto.ValidatePackageManagersV1(s.PackageManagers) != nil {
+		s.PackageManagers = nil
+	}
 	s.ID, s.Name, s.Agent = CleanLine(s.ID), CleanLine(s.Name), CleanLine(s.Agent)
 	s.Cwd = CleanPath(s.Cwd)
 	s.State, s.Source, s.Reason = CleanLine(s.State), CleanLine(s.Source), CleanLine(s.Reason)
+	s.PlacedBy, s.PlaceReason = CleanLine(s.PlacedBy), CleanLine(s.PlaceReason)
 	s.Signal, s.Unit, s.HostVersion = CleanLine(s.Signal), CleanLine(s.Unit), CleanLine(s.HostVersion)
 	s.MissingSecrets = cleanLines(s.MissingSecrets, CleanLine)
 	s.Secrets = cleanLines(s.Secrets, CleanLine)
-	s.Forwards=slices.Clone(s.Forwards)
-	s.Forwards=slices.DeleteFunc(s.Forwards,func(forward api.PortForwardInfo)bool{return forward.Port<1 || forward.Port>65535})
-	if len(s.Forwards)>64{s.Forwards=s.Forwards[:64]}
+	s.Forwards = slices.Clone(s.Forwards)
+	s.Forwards = slices.DeleteFunc(s.Forwards, func(forward api.PortForwardInfo) bool { return forward.Port < 1 || forward.Port > 65535 })
+	if len(s.Forwards) > 64 {
+		s.Forwards = s.Forwards[:64]
+	}
 	return s
 }
 

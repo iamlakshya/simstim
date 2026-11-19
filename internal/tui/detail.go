@@ -40,8 +40,11 @@ func (m *Model) sessionDetail(h *hostConn, s client.Session, cw int, withHost bo
 		// The cap stopped another process in the session, not the agent.
 		note = capNote
 	}
-	facts := []string{where, mem, shown(s.ID)}
-	if summary:=forwardSummary(s.Forwards);summary!=""{facts=append(facts,summary)}
+	origin := liveSavedImageLabel(h, s)
+	facts := []string{where, origin, mem, shown(s.ID)}
+	if summary := forwardSummary(s.Forwards); summary != "" {
+		facts = append(facts, summary)
+	}
 	if s.Task != "" {
 		facts = append(facts, "task: "+shown(s.Task))
 	}
@@ -49,7 +52,7 @@ func (m *Model) sessionDetail(h *hostConn, s client.Session, cw int, withHost bo
 		return detail
 	}
 	empty := func(p string) bool { return p == "" }
-	head := slices.DeleteFunc([]string{where, sessionWallLevel(s), mem, forwardSummary(s.Forwards)}, empty)
+	head := slices.DeleteFunc([]string{where, sessionWallLevel(s), origin, mem, forwardSummary(s.Forwards)}, empty)
 	tail := slices.DeleteFunc([]string{shown(s.ID)}, empty)
 	if !h.loaded {
 		tail = append(tail, "last seen before this run")
@@ -100,7 +103,7 @@ func (m *Model) sessionNow(h *hostConn, s client.Session) (string, []hint) {
 	}
 	switch a := m.activity[sessKey{h.name(), s.ID}]; {
 	case decoyNotice(s):
-		return sDanger.Render("● decoy used"),nil
+		return sDanger.Render("● decoy used"), nil
 	case s.State == api.StateNeedsInput && s.Reason != "":
 		return sWarning.Render("● " + shown(s.Reason)), nil
 	case len(s.MissingSecrets) > 0:

@@ -30,6 +30,8 @@ type GrantRequest struct {
 	rootExecution       *rootStepExecution
 	metadataMode        *agentModeResources
 	newSecrets          *newSecretPlan
+	freshChild          *freshChildPlan
+	imageSave           *imageSaveOperation
 	newInputs           *newInputPreparation
 	preparationSettings *settingsOperation
 	preparationClosed   bool

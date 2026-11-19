@@ -15,7 +15,7 @@ import (
 	"github.com/iamlakshya/simstim/internal/api"
 	"github.com/iamlakshya/simstim/internal/files"
 	"github.com/iamlakshya/simstim/internal/proto"
-	"github.com/iamlakshya/simstim/internal/sandbox"
+	sandboxpolicy "github.com/iamlakshya/simstim/internal/sandbox"
 	"github.com/iamlakshya/simstim/internal/wall"
 )
 
@@ -119,7 +119,7 @@ func TestCacheDropAndRotationCannotEvadePrivateSessionDiskCap(t *testing.T) {
 	}
 	no, yes := false, true
 	for _, selection := range []api.SandboxValues{{KeepCaches: &no, Caches: []string{".cache/tool"}}, {KeepCaches: &yes, Caches: []string{".cache/rotated"}}} {
-		plan, err := sandbox.CacheStatePlan(files.StatePlan{Files: []string{".agent/state.sqlite"}}, &selection)
+		plan, err := sandboxpolicy.CacheStatePlan(files.StatePlan{Files: []string{".agent/state.sqlite"}}, &selection)
 		if err != nil {
 			t.Fatal(err)
 		}

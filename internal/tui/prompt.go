@@ -51,16 +51,7 @@ func (m *Model) openSearch() tea.Cmd {
 }
 
 func (m *Model) openQuickStart() tea.Cmd {
-	if m.prompt != nil {
-		m.prompt.stopFolders()
-	}
-	h := m.newSessionHost()
-	if h == nil {
-		m.backToHosts()
-		return m.toast(toastInfo, "Choose a host, then press n.")
-	}
-	m.prompt = &promptState{mode: promptNew, host: h.name(), in: newInput("", m.defaultAgent(h)+" ~/folder name"), at: m.now()}
-	return nil
+	return m.resolveNewHost("", newHostQuick, nil, client.NewArgs{}, false)
 }
 
 // agentsOn lists the agents a host has, the shell last.

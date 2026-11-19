@@ -83,6 +83,7 @@ func runMicroVM() error {
 	}
 	log := slog.New(slog.NewTextHandler(os.Stderr, nil))
 	g := New(conn, "", log)
+	g.packageSettingsRequired = true
 	lifetime, stop := context.WithCancel(context.Background())
 	defer stop()
 	vm := &vmRuntime{init: g, files: fs, ctx: lifetime, cancel: stop, ptys: map[string]*vmPTY{}}
@@ -92,6 +93,7 @@ func runMicroVM() error {
 		_ = fs.close()
 		return err
 	}
+	fs.copyNativeOwner=vm.connection // Only the verified real native initializer can issue copy mount resources.
 	g.vm = vm
 	g.reaper = becomeSubreaper(log)
 	if !g.reaper {

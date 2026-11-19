@@ -80,17 +80,20 @@ func (s *Supervisor) acceptLoop() {
 
 // client is one connection to the session's socket.
 type client struct {
-	copyMu     sync.Mutex
-	copyBusy   bool
-	copyPlan   *copyReadPlan
-	pullMu     sync.Mutex
-	pull       *host.PullRPC
-	pullClosed bool
-	conn       net.Conn
-	full       bool   // the peer may do everything (host.FullPeer)
-	hello      []byte // the client's hello, which the holder gets too
-	wmu        sync.Mutex
-	w          *proto.Writer
+	imageSaveMu     sync.Mutex
+	imageSave       *imageSaveJobV1
+	imageSaveClosed bool
+	copyMu          sync.Mutex
+	copyBusy        bool
+	copyPlan        *copyReadPlan
+	pullMu          sync.Mutex
+	pull            *host.PullRPC
+	pullClosed      bool
+	conn            net.Conn
+	full            bool   // the peer may do everything (host.FullPeer)
+	hello           []byte // the client's hello, which the holder gets too
+	wmu             sync.Mutex
+	w               *proto.Writer
 	// writeWait bounds one output frame. writeErr prevents a second frame
 	// from following a partially written first frame.
 	writeWait time.Duration
@@ -161,6 +164,7 @@ func (c *client) close() {
 			close(c.done)
 		}
 		c.conn.Close()
+		c.closeImageSaveV1()
 		c.closePull()
 		c.gmu.Lock()
 		gs, watch := c.gs, c.watch
@@ -220,15 +224,20 @@ func (s *Supervisor) serve(conn net.Conn) {
 			}
 			continue
 		}
-		if f.Type==proto.TRequest {
+		if f.Type == proto.TRequest {
 			var request proto.Request
-			if json.Unmarshal(f.Payload,&request)==nil && request.Op=="events.watch" {
-				if !wasFirst {c.reply(request.ID,nil,toProtoErr(execRefusal("events need a dedicated connection")));return}
-				_ = s.serveEvents(c,r,request)
+			if json.Unmarshal(f.Payload, &request) == nil && request.Op == "events.watch" {
+				if !wasFirst {
+					c.reply(request.ID, nil, toProtoErr(execRefusal("events need a dedicated connection")))
+					return
+				}
+				_ = s.serveEvents(c, r, request)
 				return
 			}
 		}
-		if s.reverseFrame(c,r,f,wasFirst){return}
+		if s.reverseFrame(c, r, f, wasFirst) {
+			return
+		}
 		if s.uploadFrame(c, r, f, wasFirst) {
 			return
 		}

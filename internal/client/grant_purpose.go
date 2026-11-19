@@ -11,6 +11,7 @@ const (
 	grantLocalReview
 	grantLocalForge
 	grantLocalRoot
+	grantImageSave
 )
 
 func requestGrantPurpose(r *GrantRequest) grantPurpose {

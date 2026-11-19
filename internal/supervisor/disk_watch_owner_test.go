@@ -90,12 +90,12 @@ func TestAuxiliaryDiskCleanupPreservesActualAgentRunAndNamespace(t *testing.T) {
 	before, _ := json.Marshal(actual)
 	owner, cancel := context.WithCancelCause(context.Background())
 	s := &Supervisor{m: actual, sb: runtime, lifetime: owner, generation: "private-auxiliary", bootContextGeneration: "private-auxiliary", bootCancel: cancel}
-	g := &stoppedGuest{s: s, sb: runtime, m: host.CloneManifest(*actual), cancel: func() { cancel(context.Canceled) }, logClose: func() error { return nil }}
 	old := saveManifest
 	t.Cleanup(func() { saveManifest = old })
 	writes := 0
 	saveManifest = func(*host.Manifest) error { writes++; return errors.New("auxiliary operation must not publish") }
-	if err := g.Close(); err != nil {
+	cancel(context.Canceled)
+	if err := s.closeSandbox(); err != nil {
 		t.Fatal(err)
 	}
 	after, _ := json.Marshal(actual)

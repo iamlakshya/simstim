@@ -30,6 +30,7 @@ type NeedV1 struct {
 
 // Clone copies the mutable vectors without changing any trusted metadata.
 func (b BootV1) Clone() BootV1 {
+	b.Image = b.Image.Clone()
 	b.Runtime.Items = slices.Clone(b.Runtime.Items)
 	b.Runtime.Advisories = slices.Clone(b.Runtime.Advisories)
 	return b

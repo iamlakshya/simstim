@@ -1,6 +1,7 @@
 package host
 
 import (
+	"bytes"
 	"encoding/json"
 
 	"github.com/iamlakshya/simstim/internal/api"
@@ -11,7 +12,7 @@ import (
 // in this file, a new session's secrets (secrets.go), its missing folder
 // (folders.go), trust in a repository's setup script (setup.go), and the
 // resume of a session whose agent ended (resume.go).
-var moreFeatures = []string{"agents.check", "doctor.fix", "secrets", "mkdir", "setup.trust", "resume"}
+var moreFeatures = []string{"facts", "agents.check", "doctor.fix", "secrets", "mkdir", "setup.trust", "resume"}
 
 func init() { Features = append(Features, moreFeatures...) }
 
@@ -19,6 +20,18 @@ func init() { Features = append(Features, moreFeatures...) }
 // session. It reports whether it knew the request.
 func (b *bridge) handleMore(req proto.Request) bool {
 	switch req.Op {
+	case "host.facts":
+		var args struct{}
+		raw := req.Args
+		if len(raw) == 0 {
+			raw = json.RawMessage(`{}`)
+		}
+		if !bytes.HasPrefix(bytes.TrimSpace(raw), []byte("{")) || !api.ExactJSONFields(raw, args) || json.Unmarshal(raw, &args) != nil {
+			b.reply(req.ID, nil, UserError("bad_request", "host facts need an exact empty object", "Use a matching current client to request host facts."))
+			return true
+		}
+		result, err := HostFacts(b.ctx)
+		b.reply(req.ID, result, err)
 	case "arm":
 		var a api.ArmSecretsArgs
 		if !api.ExactJSONFields(req.Args, (*api.ArmSecretsArgs)(nil)) || json.Unmarshal(req.Args, &a) != nil {
@@ -52,7 +65,7 @@ func (b *bridge) handleMore(req proto.Request) bool {
 			b.reply(req.ID, nil, UserError("bad_request", "the resume request is not valid JSON", "Update the client."))
 			return true
 		}
-		v, err := ResumeContext(b.ctx,a)
+		v, err := ResumeContext(b.ctx, a)
 		b.reply(req.ID, v, err)
 	default:
 		return false

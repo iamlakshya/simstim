@@ -25,5 +25,6 @@ func (g *Init) decodeMember(data []byte) (proto.CtlStartArgs, error) {
 	if err == nil {
 		err = validateMemberSecretModeWire(data, args)
 	}
+	if err == nil { err = validatePackageManagerWire(data, args) }
 	return args, err
 }

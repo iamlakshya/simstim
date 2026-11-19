@@ -80,6 +80,9 @@ func (manager *nativeUserManagerV1) startSupervisor(ctx context.Context, m *Mani
 	var job dbus.ObjectPath
 	var call *dbus.Call
 	err = admission.gate(ctx, func() error {
+		if err := checkStartingMemoryLockedV1(ctx, admission.startup, m); err != nil {
+			return err
+		}
 		manager.events.markDispatched()
 		_ = manager.connection.SetWriteDeadline(time.Now().Add(5 * time.Second))
 		defer manager.connection.SetWriteDeadline(time.Time{})

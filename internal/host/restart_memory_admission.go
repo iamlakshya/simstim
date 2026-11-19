@@ -11,18 +11,45 @@ import (
 )
 
 type restartMemoryAdmissionV1 struct {
-	operation *SessionOperation
-	before    Limits
-	after     Limits
-	need      []byte
-	runtime   []byte
-	used      bool
+	operation    *SessionOperation
+	before       Limits
+	after        Limits
+	need         []byte
+	runtime      []byte
+	used         bool
+	restore      bool
+	policyMemory *string
+	checkPolicy  bool
 }
 
 // admitRestartMemoryV1 captures the actual outside request under the SAME OP
 // and placement gate before stop or publication. Prospective Manifest values
 // cannot issue this admission. Zero preserves the protected cap and intent.
-func admitRestartMemoryV1(ctx context.Context, operation *SessionOperation, requested int64) error {
+func admitRestartMemoryV1(ctx context.Context, operation *SessionOperation, requested int64, fresh ...[]api.Layer) error {
+	if len(fresh) > 1 {
+		return memberError("the restart supplied more than one original layer vector")
+	}
+	var layers []api.Layer
+	if len(fresh) == 1 {
+		layers = api.CloneLayers(fresh[0])
+	}
+	return admitRestartMemoryPurposeV1(ctx, operation, requested, layers, nil, false)
+}
+
+// This actual manual caller supplies its original Args. Only size policy
+// inputs are copied; no secret values enter the private memory receipt.
+func admitRestartMemoryRequestV1(ctx context.Context, operation *SessionOperation, args api.ResumeArgs) error {
+	return admitRestartMemoryPurposeV1(ctx, operation, args.MemoryMax, nil, captureRestartSizeRequestV1(args), false)
+}
+
+// Only the actual automatic restore controller calls this private producer.
+// It skips the specified drain precheck, never installation/purge identity,
+// native accounting, the original OP or the final atomic writer.
+func admitRestoreMemoryV1(ctx context.Context, operation *SessionOperation) error {
+	return admitRestartMemoryPurposeV1(ctx, operation, 0, nil, nil, true)
+}
+
+func admitRestartMemoryPurposeV1(ctx context.Context, operation *SessionOperation, requested int64, layers []api.Layer, request *restartSizeRequestV1, restore bool) error {
 	if ctx == nil || operation == nil || operation.native == nil || operation.native.borrowed || !operation.Valid(operation.Primary()) {
 		return sessionLeaseError("restart memory has no original owning operation")
 	}
@@ -32,7 +59,7 @@ func admitRestartMemoryV1(ctx context.Context, operation *SessionOperation, requ
 	if requested < 0 && requested != api.MemoryAuto {
 		return UserError("memory_max", "the restart memory request is not a supported size or auto", "Choose auto or a supported explicit memory size.")
 	}
-	return withPlacement(ctx, false, func(_ *placementControl) error {
+	return withPlacement(ctx, restore, func(_ *placementControl) error {
 		current, err := operation.LoadContext(ctx)
 		if err != nil {
 			return err
@@ -43,22 +70,21 @@ func admitRestartMemoryV1(ctx context.Context, operation *SessionOperation, requ
 		if err := ValidateManifestStart(current); err != nil {
 			return err
 		}
-		budget := DefaultMemoryMax()
-		if budget <= 0 {
-			return UserError("memory_max", "the host's exact session memory budget is unavailable", "Inspect the host's memory facts before restarting this session.")
+		preview, err := restartSizePreviewV1(current, layers, request)
+		if err != nil {
+			return err
 		}
-		after := current.Limits
-		switch {
-		case requested == api.MemoryAuto:
-			after.MemoryMax, after.MemoryAsked = budget, 0
-		case requested > 0:
-			after.MemoryMax, after.MemoryAsked = requested, requested
+		after, err := restartLimitsForRequestV1(current, &preview, requested, restore)
+		if err != nil {
+			return err
 		}
-		if after.MemoryMax <= 0 || after.MemoryMax > budget {
-			return UserError("memory_max", "the exact requested restart cap exceeds the host's admitted session budget", "Choose a smaller explicit size, or resize the host before restarting.")
-		}
-		if len(current.VMNeedV1) != 0 && !reflect.DeepEqual(after, current.Limits) {
-			return vmNeedError("a VM memory change needs a fresh authenticated client Need before restart")
+		if isWalledMemoryV1(current) {
+			// This is only a prospective replacement check. The current
+			// canonical reservation remains intact and every other start still
+			// counts it until the old native owner has physically ended.
+			if _, err := memoryRoomLockedV1(ctx, operation, after.Declared); err != nil {
+				return err
+			}
 		}
 		runtime, err := json.Marshal(current.RuntimeManifest)
 		if err != nil {
@@ -72,7 +98,14 @@ func admitRestartMemoryV1(ctx context.Context, operation *SessionOperation, requ
 		if err := operation.native.check(ctx); err != nil {
 			return err
 		}
-		operation.restartMemory = &restartMemoryAdmissionV1{operation: operation, before: current.Limits, after: after, need: bytes.Clone(current.VMNeedV1), runtime: runtime}
+		operation.restartMemory = &restartMemoryAdmissionV1{operation: operation, before: current.Limits, after: after, need: bytes.Clone(current.VMNeedV1), runtime: runtime, restore: restore}
+		if request != nil {
+			operation.restartMemory.checkPolicy = true
+			if preview.Policy != nil && preview.Policy.Sandbox.Memory != nil {
+				value := *preview.Policy.Sandbox.Memory
+				operation.restartMemory.policyMemory = &value
+			}
+		}
 		return nil
 	}, false)
 }
@@ -98,8 +131,17 @@ func consumeRestartMemoryV1(operation *SessionOperation, before, after *Manifest
 		!bytes.Equal(receipt.need, before.VMNeedV1) || !bytes.Equal(receipt.runtime, runtime) {
 		return sessionLeaseError("the restart memory writer differs from its original admitted request")
 	}
+	if receipt.checkPolicy {
+		var memory *string
+		if after.Policy != nil {
+			memory = after.Policy.Sandbox.Memory
+		}
+		if !reflect.DeepEqual(memory, receipt.policyMemory) {
+			return sessionLeaseError("the restart size policy changed after its original request admission")
+		}
+	}
 	budget := DefaultMemoryMax()
-	if budget <= 0 || receipt.after.MemoryMax <= 0 || receipt.after.MemoryMax > budget {
+	if isWalledMemoryV1(after) && (budget <= 0 || receipt.after.MemoryMax <= 0 || receipt.after.MemoryMax > budget || receipt.after.Declared != receipt.after.MemoryMax) {
 		return UserError("memory_max", "the admitted restart cap no longer fits this host's session budget", "Inspect the host memory and prepare the restart again.")
 	}
 	receipt.used = true

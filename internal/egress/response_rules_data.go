@@ -19,7 +19,13 @@ var responseMintedData string
 // metadata/oracles atomically. A retained source label never authenticates edits.
 const responseMintedDataSHA256 = "936f8f8063899ba607ebb2c415af2e46f6df0a5aeec9f4a1c1546f432531f902"
 
-var pinnedResponseRuleSnapshot = sync.OnceValues(func() (*responseRuleSnapshot, error) { return parsePinnedResponseRules(responseMintedData) })
+var pinnedResponseRuleSnapshot = sync.OnceValues(func() (*responseRuleSnapshot, error) {
+	model, err := parsePinnedResponseRules(responseMintedData)
+	if err != nil {
+		return nil, err
+	}
+	return appendPinnedServiceResponseRules(model, responseServiceMintedData)
+})
 
 func parsePinnedResponseRules(raw string) (*responseRuleSnapshot, error) {
 	digest := sha256.Sum256([]byte(raw))

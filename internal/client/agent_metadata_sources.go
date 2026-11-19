@@ -30,7 +30,17 @@ type agentMetadataSource struct {
 }
 
 func newAgentMetadataScope(mode *agentModeResources, settings *agentSettingsSnapshot, tx *stateFileTxn) (*agentMetadataScope, error) {
-	if mode == nil || settings == nil || tx == nil || settings.size < 0 || settings.size > MaxConfigSize {
+	return newGuardedJSONMetadataScope(mode, settings, tx, "sandboxes.json")
+}
+
+func newAgentLedgerMetadataScope(mode *agentModeResources, settings *agentSettingsSnapshot, tx *stateFileTxn) (*agentMetadataScope, error) {
+	return newGuardedJSONMetadataScope(mode, settings, tx, grantsFileName)
+}
+
+// Only the two closed domain wrappers supply these literal filenames. The
+// metadata encoding role grants no sandbox, ledger or outbound authority.
+func newGuardedJSONMetadataScope(mode *agentModeResources, settings *agentSettingsSnapshot, tx *stateFileTxn, name string) (*agentMetadataScope, error) {
+	if mode == nil || settings == nil || tx == nil || tx.name != name || settings.size < 0 || settings.size > MaxConfigSize {
 		return nil, agentModeResourceError()
 	}
 	if err := requireHostMembershipContext(tx.ctx); err != nil {
@@ -52,7 +62,7 @@ func newAgentMetadataScope(mode *agentModeResources, settings *agentSettingsSnap
 	scope.sources[0] = &agentMetadataSource{scope: scope, kind: tomlinspect.MetadataSettings, reader: settings.reader, size: settings.size}
 	// This is the actual guarded aggregate file size, not a new four-MiB
 	// aggregate cap. Per-state semantic spans remain checked by one parser.
-	scope.sources[1] = &agentMetadataSource{scope: scope, kind: tomlinspect.MetadataSandboxJSON, reader: view.ReaderAt, size: view.Size}
+	scope.sources[1] = &agentMetadataSource{scope: scope, kind: tomlinspect.MetadataStateJSON, reader: view.ReaderAt, size: view.Size}
 	scope.active.Store(true)
 	if err := scope.check(scope.ctx); err != nil {
 		scope.close()
@@ -104,7 +114,7 @@ func (s *agentMetadataSource) Check(ctx context.Context) error {
 	if s == nil || s.scope == nil {
 		return agentModeResourceError()
 	}
-	if s.kind != tomlinspect.MetadataSettings && s.kind != tomlinspect.MetadataSandboxJSON {
+	if s.kind != tomlinspect.MetadataSettings && s.kind != tomlinspect.MetadataStateJSON {
 		return agentModeResourceError()
 	}
 	return s.scope.check(ctx)

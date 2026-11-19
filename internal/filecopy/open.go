@@ -15,7 +15,7 @@ func OpenDirectory(root *os.Root, relative string) (*os.File, error) {
 			return nil, err
 		}
 	}
-	held, err := directory(root, relative, false)
+	held, err := OpenDirectoryRoot(root, relative, false)
 	if err != nil {
 		return nil, err
 	}

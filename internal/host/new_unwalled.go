@@ -104,6 +104,9 @@ func newUnwalled(ctx context.Context, a NewArgs) (_ *SessionInfo, err error) {
 		Status:  Status{State: StateStarting, Since: now},
 		Restart: Restart{Policy: "resume", MaxAttempts: 3},
 	}
+	if err := applyPlacementAuditNewV1(m, a.Placement); err != nil {
+		return nil, err
+	}
 	m.Git = gi
 	m.HostLabel, m.Task, m.SSHAgent = a.HostLabel, a.Task, a.SSHAgent
 	m.Secrets = secrets

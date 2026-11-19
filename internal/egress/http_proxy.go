@@ -214,7 +214,7 @@ func (s *Server) proxyHTTPRequest(w http.ResponseWriter, req *http.Request, hdr 
 	}
 	if failure := s.prepareServiceHTTPRequest(scope, req); failure != "" {
 		entry.Status, entry.Rule = http.StatusForbidden, "service:"+failure
-		writeInspectedError(w, brand.Name+": this service operation is not allowed. Try: allow its exact write path and method for this session.", entry.Status)
+		writeInspectedError(w, brand.Name+": this service operation is not allowed. Try: send a supported complete JSON request and allow its exact write path and method for this session.", entry.Status)
 		if req.Body != nil {
 			_ = req.Body.Close()
 		}

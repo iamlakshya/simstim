@@ -57,7 +57,7 @@ func (c *Conn) ResolveNewWall(ctx context.Context, a NewArgs) (NewArgs, error) {
 		return a, err
 	}
 	if choice.Level != "none" {
-		if err := c.checkRunnableWall(choice.Level, probe); err != nil {
+		if err := c.checkNewWallConstruction(choice.Level, probe); err != nil {
 			return a, err
 		}
 	}
@@ -92,6 +92,21 @@ func (c *Conn) checkWallSelectionSource(ctx context.Context, level string) (Tier
 		return TierUnknown, grantIdentityError(c.Host)
 	}
 	return min(tiers.Of(c.Host.Name), requestCeiling(ctx, tiers.Of(c.Host.Name))), nil
+}
+
+// A locally chosen gVisor level may reach its actual pre-value runtime
+// preparation from verified construction facts. This is not physical OK:
+// prepareNewRuntime requires its private post-delivery probe before values.
+// Display/BestWallLevel, stored floors and the final runnable check stay exact.
+func (c *Conn) checkNewWallConstruction(level string, probe api.CapProbe) error {
+	if level == "gvisor" {
+		for _, candidate := range probe.Walls {
+			if candidate.Driver == "gvisor" && candidate.Level == level && candidate.CanPrepare {
+				return nil
+			}
+		}
+	}
+	return c.checkRunnableWall(level, probe)
 }
 
 func (c *Conn) checkRunnableWall(level string, probe api.CapProbe) error {

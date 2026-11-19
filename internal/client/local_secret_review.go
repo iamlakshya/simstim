@@ -185,22 +185,26 @@ func (p *localReviewValuePlan) checkLocal(ctx context.Context) error {
 // This read-only saved path works while the sandbox is stopped. It neither
 // starts an export helper nor wakes/arms the sandbox or creates a receipt.
 func (p *localReviewValuePlan) restrictSavedContext(ctx context.Context) error {
-	c := p.connection
+	return restrictSavedDeliveryContext(ctx, p.connection, p.creation, p.receipt)
+}
+
+// This is a read-only restriction, not a value purpose or a name grant.
+// Both callers already own their distinct local selection and permission.
+func restrictSavedDeliveryContext(ctx context.Context, c *Conn, creation *SandboxPolicy, r *sandboxDeliveryReceipt) error {
 	if !c.HasFeature(api.FeatureSandboxReviewContext) {
 		return c.grantHelperOld("read saved sandbox context without starting it")
 	}
 	var raw json.RawMessage
-	if err := c.Call(ctx, api.SandboxReviewContextOp, api.SandboxSnapshotArgs{ID: p.creation.SessionID}, &raw); err != nil {
+	if err := c.Call(ctx, api.SandboxReviewContextOp, api.SandboxSnapshotArgs{ID: creation.SessionID}, &raw); err != nil {
 		return err
 	}
-	view, err := api.DecodeSandboxCohort(raw, p.creation.SessionID)
+	view, err := api.DecodeSandboxCohort(raw, creation.SessionID)
 	if err != nil {
 		return reviewAuthorityError()
 	}
 	if err := egress.ValidateSavedPublicSessionState(view.SecretState); err != nil {
 		return reviewAuthorityError()
 	}
-	r := p.receipt
 	if view.Snapshot.Primary != r.Scope.RootID || view.RunGeneration != r.Scope.RunGeneration || view.SecretState.Generation != r.Scope.BackendGeneration {
 		return reviewAuthorityError()
 	}

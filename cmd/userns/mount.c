@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: Apache-2.0 */
 #include "launcher.h"
+#include "copy.h"
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
@@ -14,11 +15,12 @@
 #include <sys/syscall.h>
 #include <unistd.h>
 #include "policy.h"
+#include "copy.h"
 
 static bool beneath(const char *p,const char *base) {
     size_t n=strlen(base);return !strncmp(p,base,n) && (!p[n] || p[n]=='/');
 }
-static bool valid_path(const char *p) {
+bool valid_guest_path(const char *p) {
     if (!p || p[0]!='/' || !p[1] || strlen(p)>=PATH_MAX || p[strlen(p)-1]=='/') return false;
     for (const char *s=p;*s;++s) {
         if ((unsigned char)*s<32 || (unsigned char)*s==127) return false;
@@ -47,15 +49,19 @@ void validate_sources(const struct request *r) {
         int type;socklen_t n=sizeof(type);
         if (getsockopt(4,SOL_SOCKET,SO_TYPE,&type,&n) || type!=SOCK_STREAM) fail("link fd 4 is not a stream socket");
     }
+    if (!r->probe && r->version>=2) {
+        int type;socklen_t n=sizeof(type);
+        if (getsockopt(6,SOL_SOCKET,SO_TYPE,&type,&n) || type!=SOCK_STREAM) fail("copy fd 6 is not its private stream");
+    }
     /* Sort once rather than scan every pair in a large valid request. */
     struct mount_request *sorted=r->mounts;
     if (r->count>1) qsort(sorted,r->count,sizeof(*sorted),compare_guest);
-    int *fds=malloc((r->count ? r->count : 1)*sizeof(*fds));
+    int *fds=malloc((r->count ? r->count*2 : 1)*sizeof(*fds));size_t fd_count=0;
     if (!fds) fail("allocate descriptor validation");
     for (size_t i=0;i<r->count;++i) {
         const struct mount_request *m=&r->mounts[i];
-        if (!valid_path(m->guest)) fail("non-canonical mount destination");
-        const char *hidden[]={"/proc","/dev","/run","/root","/sys","/etc/passwd","/etc/group","/etc/hosts","/etc/resolv.conf",NULL};
+        if (!valid_guest_path(m->guest) || (r->version>=2 && m->fd<7)) fail("non-canonical mount destination or reserved source fd");
+        const char *hidden[]={"/.copy-staging","/proc","/dev","/run","/root","/sys","/etc/passwd","/etc/group","/etc/hosts","/etc/resolv.conf",NULL};
         for (size_t j=0;hidden[j];++j) if (beneath(m->guest,hidden[j])) fail("mount destination replaces a private system path");
         if (!strcmp(m->guest,"/etc") || !strcmp(m->guest,"/home") || !strcmp(m->guest,"/home/agent")) fail("mount replaces private configuration or home");
         const char *readonly[]={"/usr","/bin","/sbin","/lib","/lib64",HELPER_DIR,NULL};
@@ -65,11 +71,23 @@ void validate_sources(const struct request *r) {
             struct prefix_key key={m->guest,(size_t)(slash-m->guest)};
             if (bsearch(&key,r->mounts,r->count,sizeof(*r->mounts),compare_prefix)) fail("overlapping launcher mount");
         }
-        fds[i]=m->fd;
+        fds[fd_count++]=m->fd;
         if (fstat(m->fd,&st) || !(S_ISREG(st.st_mode) || S_ISDIR(st.st_mode))) fail("mount source is not a pinned regular file or directory");
+        if (r->version>=2 && m->stage_fd) {
+            if (!m->write || !S_ISDIR(st.st_mode)) fail("private copy stage has no writable directory source");
+            if (m->stage_fd<7 || !m->stage_name || strlen(m->stage_name)!=38 || strncmp(m->stage_name,".copy-",6)) fail("writable mount has no original factory stage");
+            for (size_t j=6;j<38;++j) if (!((m->stage_name[j]>='0' && m->stage_name[j]<='9') || (m->stage_name[j]>='a' && m->stage_name[j]<='f'))) fail("invalid factory stage identity");
+            struct stat held,named;
+            int parent=openat(m->stage_fd,"..",O_PATH|O_DIRECTORY|O_NOFOLLOW|O_CLOEXEC);
+            if (parent<0 || fstat(m->stage_fd,&held) || fstatat(parent,m->stage_name,&named,AT_SYMLINK_NOFOLLOW) || !S_ISDIR(held.st_mode) || held.st_uid!=getuid() || (held.st_mode&07777)!=0700 || held.st_dev!=named.st_dev || held.st_ino!=named.st_ino) fail("factory stage lost its captured cleanup parent");
+            close(parent);
+            if (!copy_same_mount(m->fd,m->stage_fd)) fail("private copy stage is not on its original mount");
+            for (size_t j=0;j<r->count;++j) if (copy_contains(r->mounts[j].fd,m->stage_fd)) fail("guest source reaches private factory copy staging");
+            fds[fd_count++]=m->stage_fd;
+        } else if (m->stage_fd || (m->stage_name && m->stage_name[0])) fail("unexpected private stage on non-writable-directory mount");
     }
-    if (r->count>1) qsort(fds,r->count,sizeof(*fds),compare_fd);
-    for (size_t i=1;i<r->count;++i) if (fds[i]==fds[i-1]) fail("duplicate launcher source descriptor");
+    if (fd_count>1) qsort(fds,fd_count,sizeof(*fds),compare_fd);
+    for (size_t i=1;i<fd_count;++i) if (fds[i]==fds[i-1]) fail("duplicate launcher source descriptor");
     free(fds);
 }
 /* Walk only the fresh tmpfs. No target component is ever followed through a
@@ -127,7 +145,7 @@ static void directory(int root,const char *path,mode_t mode) {
     if (fchmodat(root,path+1,mode,0)) fail("protect private directory");
     close(fd);
 }
-int build_root(const struct request *r) {
+int build_root(const struct request *r,int copy_channel) {
     if (mount(NULL,"/",NULL,MS_REC|MS_PRIVATE,NULL)) fail("make mount namespace private");
     int fs=(int)syscall(SYS_fsopen,"tmpfs",FSOPEN_CLOEXEC);
     if (fs<0 || syscall(SYS_fsconfig,fs,FSCONFIG_CMD_CREATE,NULL,NULL,0)) fail("create detached tmpfs root");
@@ -156,6 +174,7 @@ int build_root(const struct request *r) {
     file(root,"/etc/group","agent:x:1000:\n");
     file(root,"/etc/hosts","127.0.0.1 localhost\n::1 localhost\n");
     file(root,"/etc/resolv.conf","nameserver 127.0.0.53\n");
+    if (copy_channel>=0) copy_prepare(root,r,copy_channel);
     return root;
 }
 void enter_root(int root) {

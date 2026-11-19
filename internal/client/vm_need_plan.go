@@ -75,7 +75,7 @@ func (c *Conn) PrepareVMNeedV1(ctx context.Context, options VMNeedOptionsV1) (*V
 	}
 	// Re-read the CLIENT lock after first-conversion recording. Do not promote
 	// the preceding host response's root hash directly into execution authority.
-	resolved, err := resolveImage(ctx, options.Image, arch, false, ImageOptions{Arch: arch})
+	imageRequest, err := c.imageRequestForNeedV1(ctx, options.Image, arch)
 	if err != nil {
 		return nil, err
 	}
@@ -83,7 +83,7 @@ func (c *Conn) PrepareVMNeedV1(ctx context.Context, options VMNeedOptionsV1) (*V
 	if err != nil {
 		return nil, err
 	}
-	need := vmneed.NeedV1{BootV1: vmneed.BootV1{Version: 1, GuestRAM: options.GuestRAM, Runtime: runtime, Image: resolved.request, Agents: agents.Content}, Driver: "chv", CPUs: options.CPUs, DiskMax: options.DiskMax}
+	need := vmneed.NeedV1{BootV1: vmneed.BootV1{Version: 1, GuestRAM: options.GuestRAM, Runtime: runtime, Image: imageRequest, Agents: agents.Content}, Driver: "chv", CPUs: options.CPUs, DiskMax: options.DiskMax}
 	if err := c.CheckVMFirstPrepareV1(ctx, need, options.Intent); err != nil {
 		return nil, err
 	}

@@ -15,7 +15,7 @@ import (
 )
 
 func newCmd() *cobra.Command {
-	var agent, dir, name, base, memoryMax, wallLevel, profile, preset, task string
+	var agent, dir, name, base, memoryMax, wallLevel, profile, preset, task, inside, imageRef string
 	var detach, worktree, inline, setup, noSetup, mkdir, asJSON, downgrade, untrusted, sshAgent bool
 	var secrets, expose, mounts, include, sets, allow, deny, seeds, copies []string
 	var seedDirty bool
@@ -23,7 +23,7 @@ func newCmd() *cobra.Command {
 	var count int
 	var batch []map[string]any
 	cmd := &cobra.Command{
-		Use:   "new <host> [-- <command>…]",
+		Use:   "new [<host>|-] [-- <command>…]",
 		Short: "Start a session on a host, and attach to it",
 		Long: "Starts one session and attaches. --detach leaves it running. --count starts independent sessions\n" +
 			"without attaching. Without a terminal, a command after -- runs through sandbox exec and returns\n" +
@@ -34,7 +34,7 @@ func newCmd() *cobra.Command {
 			"  " + brand.Name + " new my-vps --agent claude --memory-max 6G\n" +
 			"  " + brand.Name + " new my-vps --detach -- htop\n" +
 			"  " + brand.Name + " new my-vps --agent claude --detach --json",
-		Args:              oneHost,
+		Args:              optionalNewHost,
 		ValidArgsFunction: completeNewHost,
 		RunE: func(cmd *cobra.Command, args []string) (runErr error) {
 			if _, err := client.ReadPolicySettings(); err != nil {
@@ -42,6 +42,12 @@ func newCmd() *cobra.Command {
 			}
 			if strings.ContainsAny(task, "\r\n") {
 				return policyUsage("--task must be one line", "Describe the work on one line.", "bad_task")
+			}
+			if cmd.Flags().Changed("in") {
+				if err := client.CheckSessionName(name); err != nil {
+					return err
+				}
+				return runFreshMemberNew(cmd, args, inside, agent, name, task, detach, asJSON)
 			}
 			execArgv := nonTerminalNewCommand(cmd, args, detach)
 			if err := beforeAttach(cmd, asJSON, detach || len(execArgv) > 0 && !asJSON); err != nil {
@@ -57,7 +63,7 @@ func newCmd() *cobra.Command {
 			if err := client.ValidateWallRequest(requestedWall, downgrade); err != nil {
 				return err
 			}
-			h, err := client.FindHost(args[0])
+			h, err := selectedNewHost(cmd, args)
 			if err != nil {
 				return err
 			}
@@ -115,6 +121,9 @@ func newCmd() *cobra.Command {
 			if requestedWall != "" {
 				values.Sandbox.Wall = &requestedWall
 			}
+			if cmd.Flags().Changed("image") {
+				values.Sandbox.Image = &imageRef
+			}
 			if cmd.Flags().Changed("preset") {
 				values.Sandbox.Preset = &preset
 			}
@@ -169,6 +178,7 @@ func newCmd() *cobra.Command {
 	f.StringVarP(&dir, "dir", "C", "~", "the folder on the host")
 	f.BoolVar(&mkdir, "mkdir", false, "make the folder on the host if it does not exist, without asking")
 	addName(cmd, &name, "a name for the session (default: the folder name)")
+	addIn(cmd, &inside, "start a fresh agent in this host's existing sandbox session")
 	addDetach(cmd, &detach, "start it without attaching")
 	addCount(cmd, &count, "start this many sessions without attaching, named <name>-1 to <name>-<count>")
 	f.BoolVarP(&worktree, "worktree", "w", false, "give the session its own git worktree and branch")
@@ -177,6 +187,7 @@ func newCmd() *cobra.Command {
 	addMemoryMax(cmd, &memoryMax, "cap the session's memory: auto, or a `size` such as 4G (default: sessions.memory_max in config.toml)")
 	addSecret(cmd, &secrets, "pass secrets from config.toml's [secrets] into the session's environment, such as A,B, or the flag again")
 	f.StringVar(&wallLevel, "wall", "none", "the wall: auto (the host floor), none, process, gvisor or microvm")
+	f.StringVar(&imageRef, "image", "", "the pinned image or an image saved on this host")
 	f.BoolVar(&downgrade, "downgrade", false, "run this start below the floor, with an explicit --wall level")
 	f.StringArrayVar(&expose, "expose", nil, "explicitly expose a named secret in the session (repeatable)")
 	f.StringArrayVar(&mounts, "mount", nil, "grant a host folder to the sandbox, read-only by default (repeatable)")

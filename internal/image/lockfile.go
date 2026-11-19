@@ -21,7 +21,7 @@ type Lock struct {
 	Images  []Pin `toml:"image"`
 }
 
-// Pin records manifest authority resolved on the laptop, never a host digest.
+// Pin records registry authority or a root saved on its original host.
 type Pin struct {
 	Ref       string        `toml:"ref"`
 	Digest    string        `toml:"digest"`
@@ -49,19 +49,28 @@ func (l *Lock) validate() error {
 	}
 	seen := map[string]bool{}
 	for _, pin := range l.Images {
-		if _, err := ParseReference(pin.Ref); err != nil {
+		key := pin.Ref
+		if pin.HostID != "" {
+			if !ValidSaveRef(pin.Ref) || len(pin.HostID) != 32 || !supply.IsHex64(pin.HostID+pin.HostID) || len(pin.Platforms) != 1 || pin.SignedBy != "" || pin.Policy != "" {
+				return fmt.Errorf("images.lock has an invalid saved image pin")
+			}
+			key = pin.HostID + "\x00" + pin.Ref
+		} else if _, err := ParseReference(pin.Ref); err != nil {
 			return err
 		}
-		if seen[pin.Ref] || !ValidDigest(pin.Digest) || pin.PinnedAt.IsZero() {
+		if seen[key] || !ValidDigest(pin.Digest) || pin.PinnedAt.IsZero() {
 			return fmt.Errorf("images.lock has an invalid or repeated image pin")
 		}
-		seen[pin.Ref] = true
+		seen[key] = true
 		arches := map[string]bool{}
 		for _, platform := range pin.Platforms {
 			if arches[platform.Arch] || platform.Arch != "amd64" && platform.Arch != "arm64" || !ValidDigest(platform.Digest) {
 				return fmt.Errorf("images.lock has an invalid platform pin")
 			}
 			arches[platform.Arch] = true
+			if pin.HostID != "" && (platform.Digest != pin.Digest || platform.RootHash == "" || platform.DataBlocks <= 0 || platform.SignedBy != "" || platform.Policy != "") {
+				return fmt.Errorf("images.lock has an invalid saved image platform")
+			}
 			if (platform.RootHash == "") != (platform.DataBlocks == 0) || platform.RootHash != "" && !supply.IsHex64(platform.RootHash) || platform.DataBlocks < 0 || platform.DataBlocks > MaxUncompressed/4096 {
 				return fmt.Errorf("images.lock has an invalid root check")
 			}
@@ -84,28 +93,8 @@ func UpdateLock(ctx context.Context, dir string, change func(*Lock) error) error
 		return err
 	}
 	defer lease.Close()
-	lock := Lock{Version: 1}
-	file, err := s.regular("images.lock", os.O_RDONLY, 0o600)
-	if err == nil {
-		data, readErr := io.ReadAll(io.LimitReader(file, MaxManifest+1))
-		file.Close()
-		if readErr != nil {
-			return readErr
-		}
-		if int64(len(data)) > MaxManifest {
-			return fmt.Errorf("images.lock exceeds 4 MiB")
-		}
-		metadata, err := toml.Decode(string(data), &lock)
-		if err != nil {
-			return fmt.Errorf("read images.lock: %w", err)
-		}
-		if len(metadata.Undecoded()) != 0 {
-			return fmt.Errorf("images.lock has unknown fields")
-		}
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return err
-	}
-	if err := lock.validate(); err != nil {
+	lock, err := readClientLock(s)
+	if err != nil {
 		return err
 	}
 	if err := change(&lock); err != nil {
@@ -115,7 +104,7 @@ func UpdateLock(ctx context.Context, dir string, change func(*Lock) error) error
 		return err
 	}
 	var data bytes.Buffer
-	fmt.Fprintf(&data, "# Written by %s. Image manifest digests are client-owned pins.\n", brand.Name)
+	fmt.Fprintf(&data, "# Written by %s. Image digests are client-owned pins.\n", brand.Name)
 	if err := toml.NewEncoder(&data).Encode(lock); err != nil {
 		return err
 	}
@@ -150,4 +139,32 @@ func UpdateLock(ctx context.Context, dir string, change func(*Lock) error) error
 	}
 	defer folder.Close()
 	return cachefs.SyncDirectory(folder)
+}
+
+func readClientLock(s *Store) (Lock, error) {
+	lock := Lock{Version: 1}
+	file, err := s.regular("images.lock", os.O_RDONLY, 0o600)
+	if err == nil {
+		data, readErr := io.ReadAll(io.LimitReader(file, MaxManifest+1))
+		file.Close()
+		if readErr != nil {
+			return Lock{}, readErr
+		}
+		if int64(len(data)) > MaxManifest {
+			return Lock{}, fmt.Errorf("images.lock exceeds 4 MiB")
+		}
+		metadata, err := toml.Decode(string(data), &lock)
+		if err != nil {
+			return Lock{}, fmt.Errorf("read images.lock: %w", err)
+		}
+		if len(metadata.Undecoded()) != 0 {
+			return Lock{}, fmt.Errorf("images.lock has unknown fields")
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return Lock{}, err
+	}
+	if err := lock.validate(); err != nil {
+		return Lock{}, err
+	}
+	return lock, nil
 }

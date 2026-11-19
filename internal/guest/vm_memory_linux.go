@@ -95,7 +95,7 @@ func (m *vmMemory) configure() error {
 // member supplies the actual clone3CgroupFD boundary before any1000child
 // runs. The one P113runner still owns Start/signal/unreapedwait/cleanup.
 func (m *vmMemory) member(attr *syscall.SysProcAttr, id string, role vmCommandRole) (*os.File, error) {
-	if !api.ValidSessionID(id) || role != vmAgentCommand && role != vmSeedCommand && role != vmDockerCommand {
+	if !api.ValidSessionID(id) || role != vmAgentCommand && role != vmSeedCommand && role != vmDockerCommand && role!=vmFileCommitCommand {
 		return nil, vmError("the guest memory member or role is invalid")
 	}
 	root, err := os.OpenRoot(filepath.Join(m.root, "agents"))

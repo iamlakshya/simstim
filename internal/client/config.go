@@ -29,6 +29,10 @@ type Host struct {
 	machineSourceBirth *hostMachineSourceBirth `toml:"-" json:"-"`
 	// WallFloor is the host's actual pinned minimum wall level.
 	WallFloor string `toml:"wall_floor,omitempty"`
+	// Place controls this host's automatic-placement pool and local features.
+	Place HostPlacement `toml:"place,omitempty"`
+	// Prepared records the last observed preparation facts; it grants no start.
+	Prepared *PreparedHost `toml:"prepared,omitempty"`
 	api.LayerValues
 	// Lock fixes values and denies for every session on this host.
 	Lock *api.LayerValues `toml:"lock,omitempty"`
@@ -58,10 +62,13 @@ type Host struct {
 }
 
 // WithPool returns a copy with an explicit automatic-placement pool setting.
-func (h Host) WithPool(inPool bool) Host { v := inPool; h.pool = &v; return h }
+func (h Host) WithPool(inPool bool) Host { v := inPool; h.Place.Pool, h.pool = &v, nil; return h }
 
 // Pool reports the explicit automatic-placement setting, if any.
 func (h Host) Pool() (inPool, set bool) {
+	if h.Place.Pool != nil {
+		return *h.Place.Pool, true
+	}
 	if h.pool == nil {
 		return false, false
 	}
@@ -72,6 +79,8 @@ func (h Host) Pool() (inPool, set bool) {
 // fields are the config reference: cmd/docgen turns them into
 // docs/reference/config.md.
 type Settings struct {
+	// Placement selects the order and wake policy of new auto.
+	Placement PlacementSettings `toml:"placement"`
 	// Images selects how runtime files and images reach a host.
 	Images struct {
 		// Fetch is auto, host or laptop. Auto uses the host when it can reach
@@ -145,6 +154,7 @@ type Settings struct {
 // DefaultSettings are the settings with nothing in config.toml.
 func DefaultSettings() Settings {
 	var s Settings
+	s.Placement = PlacementSettings{Strategy: "spread", Wake: "ask"}
 	s.Images.Fetch = "auto"
 	s.UI.Motion = "auto"
 	s.Attach.DetachKey = "ctrl+\\"
@@ -400,6 +410,12 @@ func ReadSettings() (Settings, string) {
 // withDefaults fills each setting that s leaves empty with its default.
 func withDefaults(s Settings) Settings {
 	d := DefaultSettings()
+	if s.Placement.Strategy == "" {
+		s.Placement.Strategy = d.Placement.Strategy
+	}
+	if s.Placement.Wake == "" {
+		s.Placement.Wake = d.Placement.Wake
+	}
 	if s.Images.Fetch == "" {
 		s.Images.Fetch = d.Images.Fetch
 	}

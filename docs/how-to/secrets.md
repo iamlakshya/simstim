@@ -90,3 +90,9 @@ stand-ins. Pull review still checks freshly read local secret values. An
 incomplete modern receipt keeps the pulled work in quarantine.
 
 Saved public receipt metadata is checked as a whole. Current, minted and retired stand-ins must keep the original local name domain, bindings and token formats. Inconsistent metadata stops review before a fetch. Unknown future metadata is preserved for other sessions, but cannot authorise a selected review.
+
+On an intercepted bound host, response credential matching also covers the pinned
+GitHub, GitLab, npm and PyPI token families. A match becomes a new stand-in on the
+same exact host, after its public receipt is saved. The value stays in memory.
+The finite matcher preserves response delimiters and ignores file-scanner entropy
+and ignore markers. It does not recognise every possible credential format.

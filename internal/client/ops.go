@@ -82,6 +82,7 @@ func (c *Conn) Sessions(ctx context.Context) ([]Session, error) {
 // NewSession starts a session. Unless a names a memory cap, the session gets
 // the one in config.toml.
 func (c *Conn) NewSession(ctx context.Context, a NewArgs) (_ *Session, returned error) {
+	a.Placement = api.ClonePlacementV1(a.Placement)
 	if err := CheckSessionName(a.Name); err != nil {
 		return nil, err
 	}

@@ -52,20 +52,7 @@ func (m *Model) newSessionHost() *hostConn {
 }
 
 func (m *Model) openNewSession() tea.Cmd {
-	if h := m.newSessionHost(); h != nil {
-		return m.withHostTier(h, m.openNewSessionReady)
-	}
-	return m.openNewSessionReady()
-}
-
-func (m *Model) openNewSessionReady() tea.Cmd {
-	h := m.newSessionHost()
-	if h == nil {
-		m.backToHosts()
-		return m.toast(toastInfo, "Choose a host, then press n.")
-	}
-	m.modal = newSessionDialog(m, h)
-	return nil
+	return m.resolveNewHost("", newHostForm, nil, client.NewArgs{}, false)
 }
 
 // openSelectedHost is Enter on the hosts list.
@@ -91,6 +78,13 @@ func (m *Model) startSessionReady(h *hostConn, r startReq) tea.Cmd {
 		err := offlineErr(h)
 		return func() tea.Msg { return startedMsg{startReq: r, err: err} }
 	}
+	if r.grants == nil && r.args.Secrets == nil && !r.answered && r.vm == nil && r.inputOptions == nil {
+		return m.prepareNewStartSource(h, r)
+	}
+	return m.startSessionWithSource(h, r)
+}
+
+func (m *Model) startSessionWithSource(h *hostConn, r startReq) tea.Cmd {
 	c, be, originalHost, kept, cols, rows := h.conn, m.be, h.host, m.settings, m.width, m.height
 	read := m.beginSettingsRead()
 	return m.bgCmd(func(ctx context.Context) (message tea.Msg) {

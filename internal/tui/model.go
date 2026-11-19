@@ -115,6 +115,7 @@ type Model struct {
 	// again continues from the byte the terminal already shows.
 	attach    *client.AttachState
 	lastAgent map[string]string
+	newHost   newHostLookup
 	resuming  map[sessKey]bool // the sessions whose resume runs (resume.go)
 	conns     *connSet
 	dbg       launcherDebug // what the debug commands turned on (debug.go)
@@ -315,8 +316,12 @@ func (m *Model) update(msg tea.Msg) tea.Cmd {
 	case activityTickMsg:
 		return tea.Batch(m.after(activityEvery, activityTickMsg{}), m.readActivity())
 	case tea.KeyPressMsg:
+		if m.newHostLookupKey(msg.String()) {
+			return nil
+		}
 		return m.onKey(msg)
 	case tea.MouseClickMsg:
+		m.cancelNewHostLookup()
 		return m.onClick(msg)
 	case tea.MouseWheelMsg:
 		return m.onWheel(msg)
@@ -374,6 +379,14 @@ func (m *Model) update(msg tea.Msg) tea.Cmd {
 		return m.onAttachEnded(msg)
 	case hostSavedMsg:
 		return m.onHostSaved(msg)
+	case newStartSourceMsg:
+		return m.onNewStartSource(msg)
+	case newStartDialledMsg:
+		return m.onNewStartDialled(msg)
+	case newHostResolvedMsg:
+		return m.onNewHostResolved(msg)
+	case newHostTierResolvedMsg:
+		return m.onNewHostTierResolved(msg)
 	case hostReloadedMsg:
 		return m.onHostReloaded(msg)
 	case setupMsg:

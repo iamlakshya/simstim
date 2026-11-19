@@ -47,6 +47,10 @@ func FormatAudit(e AuditEntry, sc *Scrubber, now time.Time) AuditEntry {
 	if e.Decision == "" {
 		e.Decision = "deny"
 	}
+	// This labels an already-decided flow; it supplies no policy authority.
+	if e.Decision == "allow" && e.Rule == "unknown:allow" {
+		e.Decision = "allow-unknown"
+	}
 	return e
 }
 

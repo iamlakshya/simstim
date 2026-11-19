@@ -209,6 +209,9 @@ func (s *Store) readRecord(hex string) (Record, error) {
 		return record, err
 	}
 	defer file.Close()
+	if err := s.checkSavedRecord(record, file); err != nil {
+		return record, err
+	}
 	info, err := Inspect(file)
 	if err != nil {
 		return record, err
@@ -284,11 +287,15 @@ func (s *Store) Remove(ctx context.Context, digest string, refs References) erro
 
 // Prune keeps references, release defaults, recent use and recent arrival.
 func (s *Store) Prune(ctx context.Context, refs References, defaults func() (map[string]bool, error), now time.Time) ([]string, error) {
+	pending, err := s.reapSavedPending(ctx, now, false)
+	if err != nil {
+		return nil, err
+	}
 	records, err := s.List(ctx)
 	if err != nil {
 		return nil, err
 	}
-	removed := []string{}
+	removed := append([]string{}, pending.Removed...)
 	for _, record := range records {
 		lease, err := s.lock(ctx, record.PlatformDigest[7:]+".lock", false)
 		if err != nil {

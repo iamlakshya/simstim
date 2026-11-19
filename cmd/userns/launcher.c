@@ -1,6 +1,8 @@
 /* SPDX-License-Identifier: Apache-2.0
  * The only executable transition is the fixed guest init after confinement. */
 #include "launcher.h"
+#include "copy.h"
+#include <linux/sched.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <grp.h>
@@ -69,11 +71,13 @@ void close_setup_fds(void) {
     struct rlimit limit;if (getrlimit(RLIMIT_NOFILE,&limit)) fail("read descriptor limit");
     for (rlim_t fd=6;fd<limit.rlim_cur;++fd) close((int)fd);
 }
-static void child(struct request *r,int gate) {
+static void child(struct request *r,int gate,int copy_channel) {
     if (prctl(PR_SET_PDEATHSIG,SIGKILL,0,0,0)) fail("arm namespace-init parent death");
     char token;
     if (read(gate,&token,1)!=1 || token!='G') fail("launcher ended before namespace activation");
-    int root=build_root(r);
+    if (copy_channel>=0) close(6); /* Only the outer owner receives copy commands. */
+    int root=build_root(r,copy_channel);
+    if (copy_channel>=0) close(copy_channel);
     bring_up_loopback();
     int udp=-1,tcp=-1;
     if (r->dns) {udp=dns_socket(SOCK_DGRAM);tcp=dns_socket(SOCK_STREAM);}
@@ -139,6 +143,7 @@ int main(int argc,char **argv) {
     refuse_tracer();
     struct request r={0};read_request(&r);validate_sources(&r);
     uid_t uid=getuid();gid_t gid=getgid();
+    int proc=open("/proc",O_PATH|O_DIRECTORY|O_CLOEXEC);if (proc<0) fail("pin genuine proc for original native owner");
     if (unshare(CLONE_NEWUSER)) fail("make outer user namespace");
     map("/proc/self/uid_map",0,uid);
     /* Drop the inherited host supplementary groups while the fresh outer
@@ -149,11 +154,17 @@ int main(int argc,char **argv) {
     if (groups<0 || write(groups,"deny\n",5)!=5 || close(groups)) fail("deny group changes in outer namespace");
     map("/proc/self/gid_map",0,gid);
     if (prctl(PR_SET_DUMPABLE,0,0,0,0)) fail("clear dumpability after namespace mapping");
-    if (unshare(CLONE_NEWNS|CLONE_NEWPID|CLONE_NEWNET|CLONE_NEWIPC|CLONE_NEWUTS|CLONE_NEWCGROUP)) fail("make private namespaces");
+    if (unshare(CLONE_NEWNS|(r.version==1 ? CLONE_NEWPID:0)|CLONE_NEWNET|CLONE_NEWIPC|CLONE_NEWUTS|CLONE_NEWCGROUP)) fail("make private namespaces");
     if (sethostname("sandbox",7)) fail("set private hostname");
     int gate[2];if (pipe2(gate,O_CLOEXEC)) fail("make namespace activation pipe");
-    pid_t pid=fork();if (pid<0) fail("fork namespace init");
-    if (!pid) {close(gate[1]);child(&r,gate[0]);}
+    int copy_channel[2]={-1,-1};
+    if (r.version>=2 && !r.probe && socketpair(AF_UNIX,SOCK_SEQPACKET|SOCK_CLOEXEC,0,copy_channel)) fail("make original child copy-resource channel");
+    pid_t pid;
+    if (r.version>=2) {struct clone_args clone={.flags=CLONE_NEWPID,.exit_signal=SIGCHLD};pid=(pid_t)syscall(SYS_clone3,&clone,sizeof(clone));}
+    else pid=fork();
+    if (pid<0) fail("create owned namespace init");
+    if (!pid) {close(gate[1]);if (copy_channel[0]>=0) close(copy_channel[0]);child(&r,gate[0],copy_channel[1]);}
+    if (copy_channel[1]>=0) close(copy_channel[1]);
     close(gate[0]);
     int pidfd=(int)syscall(SYS_pidfd_open,pid,0);
     if (pidfd<0) {kill(pid,SIGKILL);waitpid(pid,NULL,0);fail("pin owned namespace init");}
@@ -162,16 +173,19 @@ int main(int argc,char **argv) {
     if (!r.probe) wait_ack(pidfd,pid);
     if (stopping || write(gate[1],"G",1)!=1) syscall(SYS_pidfd_send_signal,pidfd,SIGKILL,NULL,0);
     close(4);close(5);
-    for (size_t i=0;i<r.count;++i) close(r.mounts[i].fd);
     int status=0;
-    for (;;) {
+    if (copy_channel[0]>=0) {
+        struct copy_owner owner={0};copy_capture(&owner,&r,copy_channel[0],pidfd,proc);close(copy_channel[0]);
+        status=copy_serve(&owner,pidfd,pid,&stopping);copy_release(&owner);close(6);
+    } else for (;;) {
         if (stopping) syscall(SYS_pidfd_send_signal,pidfd,SIGKILL,NULL,0);
         pid_t got=waitpid(pid,&status,0);
         if (got==pid) break;
         if (got<0 && errno==EINTR) continue;
         syscall(SYS_pidfd_send_signal,pidfd,SIGKILL,NULL,0);fail("reap namespace init");
     }
-    close(gate[1]);close(pidfd);
+    for (size_t i=0;i<r.count;++i) {close(r.mounts[i].fd);if (r.mounts[i].stage_fd) close(r.mounts[i].stage_fd);}
+    close(proc);close(gate[1]);close(pidfd);
     if (WIFEXITED(status)) return WEXITSTATUS(status);
     return WIFSIGNALED(status) ? 128+WTERMSIG(status) : 1;
 }

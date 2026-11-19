@@ -14,14 +14,15 @@ import (
 )
 
 type fakeConn struct {
-	hostID    string
-	idChanged bool
-	be        *fakeBackend
-	name      string
-	done      chan struct{}
-	mu        sync.Mutex
-	waits     int64
-	closed    bool
+	hostID         string
+	idChanged      bool
+	be             *fakeBackend
+	name           string
+	done           chan struct{}
+	mu             sync.Mutex
+	waits          int64
+	closed         bool
+	savedSourceErr error
 }
 
 func (c *fakeConn) isClosed() bool {

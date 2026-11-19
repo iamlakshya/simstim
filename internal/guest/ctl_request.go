@@ -41,6 +41,9 @@ func (g *Init) request(w *proto.Writer, req proto.Request) {
 		}
 		_ = w.WriteJSON(proto.TResponse, resp)
 	}
+	if g.imageSaveControlV1(req, reply) {
+		return
+	}
 	if g.vm != nil {
 		var err error
 		finish, err = g.vm.controlOperation()
@@ -51,11 +54,11 @@ func (g *Init) request(w *proto.Writer, req proto.Request) {
 	}
 	switch req.Op {
 	case proto.CtlPortsV1:
-		reply(g.portClaims(),nil)
+		reply(g.portClaims(), nil)
 	case proto.CtlReverseStartV1:
-		reply(struct{}{},g.startReverse(req.Args))
+		reply(struct{}{}, g.startReverse(req.Args))
 	case proto.CtlReverseStopV1:
-		reply(struct{}{},g.stopReverse(req.Args))
+		reply(struct{}{}, g.stopReverse(req.Args))
 	case inputtransfer.CtlPrepare:
 		err := g.prepareInputs(req.Args)
 		reply(struct{}{}, err)
@@ -79,7 +82,7 @@ func (g *Init) request(w *proto.Writer, req proto.Request) {
 	case proto.CtlMemberStore:
 		reply(struct{}{}, g.storePreparedMember(req.Args))
 	case proto.CtlGuestCapabilities:
-		reply(proto.CtlGuestFeatures{Version: 1, Features: []string{proto.GuestSessionPrepareV1, proto.GuestMemberPrepareV1, proto.FeatureDecoyFilesV1, inputtransfer.Feature, inputtransfer.PrimaryPolicyFeature, api.FeatureBoundSecrets}}, nil)
+		reply(proto.CtlGuestFeatures{Version: 1, Features: g.imageSaveGuestFeaturesV1([]string{proto.GuestSessionPrepareV1, proto.GuestMemberPrepareV1, proto.FeatureDecoyFilesV1, proto.FeaturePackageManagersV1, inputtransfer.Feature, inputtransfer.PrimaryPolicyFeature, api.FeatureBoundSecrets})}, nil)
 	case proto.CtlPrepare:
 		result, err := g.prepareController(req.Args)
 		reply(result, err)

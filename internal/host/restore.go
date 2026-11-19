@@ -88,7 +88,7 @@ func restoreOne(id,boot string,all bool)(RestoreResult,bool){
 	case m.Restart.MaxAttempts > 0 && m.Run.RespawnCount >= m.Restart.MaxAttempts:
 		r.Action, r.Why = "skipped", fmt.Sprintf("already restored %d times", m.Run.RespawnCount)
 	default:
-		if err:=admitRestartMemoryV1(operation.ownerContext,operation,0);err!=nil{r.Action,r.Why="failed",err.Error();return r,true}
+		if err:=admitRestoreMemoryV1(operation.ownerContext,operation);err!=nil{r.Action,r.Why="failed",err.Error();return r,true}
 		m.Run.RespawnCount++
 		argv,why,err:=startAgain(m,again{operation:operation,automatic:selection,label:restoredLabel,reason:"restored after a host restart",allowMissing:true})
 		r.Argv = argv

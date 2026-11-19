@@ -89,6 +89,7 @@ func (s *Supervisor) applyInputPhase(ctx context.Context, input *startupInput, a
 	var prepared *proto.CtlStartArgs
 	if args != nil {
 		copy := *args
+		copy.PackageManagers = proto.ClonePackageManagersV1(args.PackageManagers)
 		copy.Argv, copy.Hooks, copy.Secrets, copy.SecretModes, copy.Missing = nil, nil, nil, nil, nil
 		copy.RunToken, copy.Shell = "", ""
 		copy.DefaultShell = false
@@ -192,6 +193,10 @@ func (s *Supervisor) protectedInputPaths() ([]string, error) {
 	protected := []string{"/opt/agents", "/.tools", "/.persist"}
 	decoys,err:=proto.DecoyPaths();if err!=nil{return nil,err}
 	for _,name:=range decoys{protected=append(protected,host.GuestHome+"/"+name)}
+	packages, err := proto.PackageManagerPaths(); if err != nil {
+		return nil, err
+	}
+	for _, name := range packages { protected = append(protected, host.GuestHome+"/"+name) }
 	if m.Files != nil {
 		for _, mount := range slices.Concat(m.Files.Mounts, m.Files.Installs) {
 			protected = append(protected, mount.Guest)

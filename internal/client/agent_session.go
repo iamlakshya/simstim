@@ -161,7 +161,7 @@ func (a *attachedAgent) Activate(ctx context.Context) error {
 	if err := checkLocalSSHAgentPath(a.target); err != nil {
 		return abort(err)
 	}
-	if err := RecordGrantContext(ctx, a.parent.Host, a.parent.HostID(), Outbound{Kind: OutboundSSHAgent}); err != nil {
+	if err := RecordGrantContext(context.WithValue(ctx, agentLedgerModeKey{}, a.mode), a.parent.Host, a.parent.HostID(), Outbound{Kind: OutboundSSHAgent}); err != nil {
 		return abort(err)
 	}
 	// Correctly scoped streams can wait, bounded by their sixteen slots.

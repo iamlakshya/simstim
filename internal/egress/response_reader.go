@@ -114,6 +114,13 @@ func (r *responseCredentialReader) finish(err error) error {
 	return err
 }
 
+func (r *responseCredentialReader) patternWindow() int {
+	if r.rules == nil {
+		return responsePatternWindow
+	}
+	return r.rules.window
+}
+
 func (r *responseCredentialReader) refresh() error {
 	if err := r.ctx.Err(); err != nil {
 		return err
@@ -129,7 +136,7 @@ func (r *responseCredentialReader) refresh() error {
 	if snapshot != nil {
 		r.maxEcho = max(r.maxEcho, snapshot.maxBytes)
 	}
-	if r.maxEcho > (int(^uint(0)>>1)-responsePatternWindow-responseReadBuffer)/2 {
+	if r.maxEcho > (int(^uint(0)>>1)-r.patternWindow()-responseReadBuffer)/2 {
 		return errResponseBounds
 	}
 	return nil
@@ -157,7 +164,7 @@ func (r *responseCredentialReader) readMore() error {
 	// A second echo may begin at the first span's last byte and extend a
 	// full maxEcho. Two spans plus finite pattern context suffice to decide
 	// every crossing before the first span is released.
-	budget := 2*r.maxEcho + responsePatternWindow + responseReadBuffer
+	budget := 2*r.maxEcho + r.patternWindow() + responseReadBuffer
 	want := min(responseReadBuffer, budget-remaining)
 	if want <= 0 {
 		return errResponseBounds

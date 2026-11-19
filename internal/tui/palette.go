@@ -166,24 +166,8 @@ func registry() []*command {
 		{noun: "session", verb: "policy", cli: "policy ls", keys: []binding{{"p", onSessions}}, why: needSession, run: (*Model).openPolicy},
 		{noun: "session", verb: "policy log", cli: "policy log", why: needSession, run: (*Model).openPolicyLog},
 		{noun: "session", verb: "stop", cli: "stop", why: needSession, run: (*Model).stopSelected},
-		{noun: "session", verb: "new", short: "new session", cli: "new", keys: []binding{{"n", anywhere}},
-			why: func(m *Model) string {
-				h := m.newSessionHost()
-				switch {
-				case h == nil:
-					return "choose a host first"
-				case h.status == stOffline || h.status == stFailed:
-					return shown(h.name()) + " is offline"
-				}
-				return ""
-			},
-			run: (*Model).openQuickStart},
-		{noun: "session", verb: "new with the form", short: "new session, with the form", cli: "new", why: func(m *Model) string {
-			if m.newSessionHost() == nil {
-				return "choose a host first"
-			}
-			return ""
-		}, run: (*Model).openNewSession},
+		{noun: "session", verb: "new", short: "new session", cli: "new", keys: []binding{{"n", anywhere}}, run: (*Model).openQuickStart},
+		{noun: "session", verb: "new with the form", short: "new session, with the form", cli: "new", run: (*Model).openNewSession},
 		{noun: "session", verb: "attach", cli: "attach", keys: []binding{{"enter", onSessions}},
 			why: func(m *Model) string {
 				if m.screen == scrSessions && m.selected() == nil && sessionRows(m.rows()) == 0 {

@@ -60,6 +60,9 @@ func (s *Supervisor) prepareController(ctx context.Context, args proto.CtlStartA
 	if json.Unmarshal(raw, &result) != nil || result.Version != 1 || !s.guestABI(result.GuestABI) {
 		return execRefusal("the guest controller preparation schema does not match this runtime")
 	}
+	if err := s.markPackageSettingsInstalled(); err != nil {
+		return err
+	}
 	if err := s.restoreSavedMembers(ctx, s.memberValues); err != nil {
 		return err
 	}

@@ -31,6 +31,8 @@ type Provider struct {
 	// WakeOnAttach starts the host through the script when it does not answer
 	// and you attach or start a session.
 	WakeOnAttach bool `toml:"wake_on_attach,omitempty"`
+	// Cost is free or paid when automatic placement wakes this script.
+	Cost string `toml:"cost,omitempty"`
 }
 
 // ProviderStatus is the answer to the status action.

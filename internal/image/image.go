@@ -35,26 +35,29 @@ type Layer struct {
 
 // Request carries client-owned pins. RootHash is an optional check value.
 type Request struct {
-	Ref            string `json:"ref"`
-	Digest         string `json:"digest"`
-	PlatformDigest string `json:"platform_digest"`
-	Arch           string `json:"arch"`
-	RootHash       string `json:"root_hash,omitempty"`
-	DataBlocks     int64  `json:"data_blocks,omitempty"`
-	Transfer       string `json:"transfer,omitempty"`
+	Ref            string       `json:"ref"`
+	Digest         string       `json:"digest"`
+	PlatformDigest string       `json:"platform_digest"`
+	Arch           string       `json:"arch"`
+	RootHash       string       `json:"root_hash,omitempty"`
+	DataBlocks     int64        `json:"data_blocks,omitempty"`
+	Transfer       string       `json:"transfer,omitempty"`
+	SavedHost      *SavedHostV1 `json:"saved_host,omitempty"`
 }
 
 // Record is host-owned metadata outside every guest's writable filesystem.
 type Record struct {
-	Ref            string    `json:"ref"`
-	Digest         string    `json:"digest"`
-	PlatformDigest string    `json:"platform_digest"`
-	Arch           string    `json:"arch"`
-	RootHash       string    `json:"root_hash"`
-	DataBlocks     int64     `json:"data_blocks"`
-	Size           int64     `json:"size"`
-	ConvertedAt    time.Time `json:"converted_at"`
-	UsedAt         time.Time `json:"used_at"`
+	Ref            string       `json:"ref"`
+	Digest         string       `json:"digest"`
+	PlatformDigest string       `json:"platform_digest"`
+	Arch           string       `json:"arch"`
+	RootHash       string       `json:"root_hash"`
+	DataBlocks     int64        `json:"data_blocks"`
+	Size           int64        `json:"size"`
+	ConvertedAt    time.Time    `json:"converted_at"`
+	UsedAt         time.Time    `json:"used_at"`
+	SavedHost      *SavedHostV1 `json:"saved_host,omitempty"`
+	SavedAliases   []string     `json:"saved_aliases,omitempty"`
 }
 
 // Install is a bounded phase of a connection-owned laptop transfer.
@@ -92,6 +95,9 @@ func ValidDigest(s string) bool { return len(s) == 71 && s[:7] == "sha256:" && s
 
 // Validate checks request authority before filesystem or registry operations.
 func (r Request) Validate() error {
+	if r.SavedHost != nil {
+		return validateSavedRequest(r)
+	}
 	if r.Transfer != "" && !supply.IsHex64(r.Transfer+r.Transfer) {
 		return badLayer("invalid image transfer identifier")
 	}
@@ -118,6 +124,9 @@ func (r Request) Validate() error {
 // A reply never changes the OCI digest pin.
 func CheckRecord(request Request, record Record) error {
 	if err := request.Validate(); err != nil {
+		return err
+	}
+	if err := checkSavedSelection(request, record); err != nil {
 		return err
 	}
 	if record.Ref != request.Ref || record.Digest != request.Digest || record.PlatformDigest != request.PlatformDigest || record.Arch != request.Arch || !supply.IsHex64(record.RootHash) || record.DataBlocks <= 0 || record.DataBlocks > MaxUncompressed/4096 || record.Size != convertedBound(record.DataBlocks*4096) {

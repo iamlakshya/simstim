@@ -22,6 +22,7 @@ type runtimePublication struct {
 	activity   sync.Mutex
 	bootOwner  *originalBootV1
 	startup    *SessionOperation
+	imageSave  *ImageSaveSource
 }
 
 // beginRuntimePublication admits this current helper before cache roots/parts
@@ -165,6 +166,9 @@ func checkBootPublisher(boot *originalBootV1) error {
 	return nil
 }
 func (p *runtimePublication) checkCaller() error {
+	if p != nil && p.imageSave != nil {
+		return p.imageSave.Check(p.ctx)
+	}
 	if p != nil && p.bootOwner != nil {
 		return checkBootPublisher(p.bootOwner)
 	}

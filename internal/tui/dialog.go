@@ -44,9 +44,13 @@ type newSession struct {
 	wall         string
 	downgrade    bool
 	host         string
+	selector     string
+	sourceHost   client.Host
+	defaultHost  string
+	choosingHost bool
 	choices      []agentChoice
 	ai           int
-	field        int // 0 agent, 1 folder, 2 name, 3 worktree, 4 command (only for "other")
+	field        int // 0 agent, 1 folder, 2 name, 3 worktree, 4 command, 5 wall, 6 host
 	command      input
 	folder       input
 	name         input
@@ -89,7 +93,8 @@ const otherAgent = "other…"
 
 func newSessionDialog(m *Model, h *hostConn) *newSession {
 	d := &newSession{
-		host:    h.name(),
+		host:     h.name(),
+		selector: h.name(), sourceHost: h.host,
 		choices: agentChoices(h.info),
 		command: newInput("", "a command, for example aider --model sonnet"),
 		folder:  newInput("~", "~"),
@@ -133,9 +138,9 @@ func (d *newSession) paste(s string) {
 // order is the sequence Tab moves through; the command field exists only for "other".
 func (d *newSession) order() []int {
 	if d.agent() == otherAgent {
-		return []int{0, 4, 1, 2, 3, 5}
+		return []int{0, 4, 1, 2, 3, 5, 6}
 	}
-	return []int{0, 1, 2, 3, 5}
+	return []int{0, 1, 2, 3, 5, 6}
 }
 
 func (d *newSession) step(n int) {
@@ -223,6 +228,8 @@ func (d *newSession) key(m *Model, k tea.KeyPressMsg) tea.Cmd {
 		d.command.key(k)
 	case 5:
 		d.wallKey(ks)
+	case 6:
+		return m.chooseNewSessionHost(d, ks)
 	case 3:
 		switch ks {
 		case "left", "h":
@@ -239,11 +246,6 @@ func (d *newSession) key(m *Model, k tea.KeyPressMsg) tea.Cmd {
 // submit starts the session the form describes; attach is false for a
 // start in the background.
 func (d *newSession) submit(m *Model, attach bool) tea.Cmd {
-	h := m.hostByName(d.host)
-	if h == nil {
-		m.modal = nil
-		return nil
-	}
 	folder := strings.TrimSpace(d.folder.value())
 	if folder == "" {
 		folder = "~"
@@ -258,9 +260,7 @@ func (d *newSession) submit(m *Model, attach bool) tea.Cmd {
 		// exec replaces the shell, so the command is the session's process.
 		a.Agent, a.Argv = "", []string{"/bin/sh", "-c", "exec " + c}
 	}
-	d.stopFolders()
-	d.starting, d.err = true, nil
-	return m.startSession(h, startReq{args: a, attach: attach, form: d})
+	return m.submitNewSessionHost(d, a, attach)
 }
 
 // agentKey moves through the agents: arrows and h l, space, or a letter,
@@ -311,7 +311,7 @@ func (d *newSession) view(m *Model) string {
 		"",
 		label(3, "Worktree")+d.worktreeRow(),
 		label(5, "Wall")+d.wallRow(m, fw),
-		sFaint.Render(fit("Host", labelW))+shown(d.host),
+		label(6, "Host")+d.hostRow(m, fw),
 		"",
 	)
 	switch {

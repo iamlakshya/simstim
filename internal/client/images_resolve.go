@@ -77,11 +77,8 @@ func knownImageRequest(ctx context.Context, text, arch string) (image.Request, b
 	known := false
 	err := updateImageLock(ctx, func(lock *image.Lock) error {
 		for _, pin := range lock.Images {
-			if pin.Ref != text {
+			if pin.Ref != text || pin.HostID != "" {
 				continue
-			}
-			if pin.HostID != "" {
-				return &UserError{Msg: "this image was saved on one host", Hint: "Use it on the host that made it.", Code: "image_elsewhere", Kind: HostKind("image_elsewhere")}
 			}
 			for _, platform := range pin.Platforms {
 				if platform.Arch == arch {
@@ -120,11 +117,8 @@ func pinnedImageReference(ctx context.Context, text string, parsed image.Referen
 	lookup := text
 	err := updateImageLock(ctx, func(lock *image.Lock) error {
 		for _, pin := range lock.Images {
-			if pin.Ref != text {
+			if pin.Ref != text || pin.HostID != "" {
 				continue
-			}
-			if pin.HostID != "" {
-				return &UserError{Msg: "this image was saved on one host", Hint: "Use it on the host that made it.", Code: "image_elsewhere", Kind: HostKind("image_elsewhere")}
 			}
 			lookup = registryPinnedReference(parsed, pin.Digest)
 			break

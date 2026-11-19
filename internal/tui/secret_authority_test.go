@@ -49,7 +49,7 @@ func TestStartSecretRequestSurvivesOnlyItsOwnFolderRetry(t *testing.T) {
 	hs.m.be, h.conn = backend, connection
 	hs.be.secrets = map[string]api.Secret{}
 	request := startReq{args: client.NewArgs{Agent: "shell", Cwd: "~/src/new-app"}}
-	first, ok := hs.m.startSessionReady(h, request)().(startedMsg)
+	first, ok := startResult(t, hs.m, hs.m.startSessionReady(h, request))
 	if !ok {
 		t.Fatal("first actual start lost its result")
 	}
@@ -70,7 +70,7 @@ func TestStartSecretRequestSurvivesOnlyItsOwnFolderRetry(t *testing.T) {
 	}
 	retry := first.startReq
 	retry.args.MakeFolder = true
-	second, ok := hs.m.startSessionReady(h, retry)().(startedMsg)
+	second, ok := startResult(t, hs.m, hs.m.startSessionReady(h, retry))
 	if !ok || second.err != nil || second.s == nil || second.grants != first.grants {
 		t.Fatalf("folder retry lost its original request: %+v", second)
 	}
@@ -83,7 +83,7 @@ func TestStartSecretRequestSurvivesOnlyItsOwnFolderRetry(t *testing.T) {
 	if held {
 		t.Fatal("the completed logical start retained its input owner")
 	}
-	fresh, ok := hs.m.startSessionReady(h, request)().(startedMsg)
+	fresh, ok := startResult(t, hs.m, hs.m.startSessionReady(h, request))
 	if !ok || fresh.grants == nil || fresh.grants == first.grants || len(backend.fetches) != 2 {
 		t.Fatal("another logical start reused the previous request or values")
 	}
@@ -116,7 +116,7 @@ func TestResumeSecretFetchKeepsActualHostSessionAndContext(t *testing.T) {
 func TestProgramPauseReleasesADroppedStartQuestion(t *testing.T) {
 	hs := folderLab(t)
 	host := hs.m.hostByName("atlas-dev")
-	result, ok := hs.m.startSessionReady(host, startReq{args: client.NewArgs{Agent: "shell", Cwd: "~/src/new-app"}})().(startedMsg)
+	result, ok := startResult(t, hs.m, hs.m.startSessionReady(host, startReq{args: client.NewArgs{Agent: "shell", Cwd: "~/src/new-app"}}))
 	if !ok {
 		t.Fatal("the real start produced no result")
 	}

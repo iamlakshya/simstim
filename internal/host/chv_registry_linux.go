@@ -153,6 +153,9 @@ func expectedVM(ctx context.Context, sessionDir string) (wall.Spec, error) {
 	if !validID(spec.ID) || spec.SessionDir != paths.SessionDir(spec.ID) || sessionDir != "" && spec.SessionDir != sessionDir {
 		return wall.Spec{}, UserError("vm_expected", "the expected microvm plan names another session", "Start the session again with its original client-authorised identity.")
 	}
+	if err := checkOriginalSavedImageNeedV1(ctx, spec); err != nil {
+		return wall.Spec{}, err
+	}
 	return spec, nil
 }
 

@@ -335,7 +335,7 @@ func (r *GrantRequest) Close() error {
 	}
 	r.mu.Lock()
 	r.ending = true
-	p, operation, inputs := r.newSecrets, r.preparationSettings, r.newInputs
+	p, operation, inputs, fresh, imageSave := r.newSecrets, r.preparationSettings, r.newInputs, r.freshChild, r.imageSave
 	r.mu.Unlock()
 	if p != nil {
 		p.mu.Lock()
@@ -346,6 +346,12 @@ func (r *GrantRequest) Close() error {
 		if p.busy {
 			return agentModeResourceError()
 		}
+	}
+	if err := fresh.close(); err != nil {
+		return err
+	}
+	if err := imageSave.close(); err != nil {
+		return err
 	}
 	if err := r.closeLocalPurposeResources(); err != nil {
 		return err

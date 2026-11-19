@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/iamlakshya/simstim/internal/api"
+	"github.com/iamlakshya/simstim/internal/guest"
 	"github.com/iamlakshya/simstim/internal/host"
 	"github.com/iamlakshya/simstim/internal/memberenv"
 	"github.com/iamlakshya/simstim/internal/phaseclock"
@@ -46,8 +47,10 @@ func trustedMemberStore(a proto.CtlStartArgs, hasCA bool, proxy string) (*truste
 			bound[name] = api.Secret(value)
 		}
 	}
-	env := slices.Clone(a.Env)
-	var err error
+	env, err := guest.PackageManagerEnvironment(a.PackageManagers, a.Env)
+	if err != nil {
+		return nil, err
+	}
 	if hasCA {
 		env, err = memberenv.Trust(env, a.Agent, filepath.Join(host.GuestRunDir(), "ca.pem"), filepath.Join(host.GuestRunDir(), "ca-bundle.pem"))
 		if err != nil {

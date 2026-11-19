@@ -29,9 +29,31 @@ simstim policy rm <rule-id> --repo .
 ```
 
 `policy ls` names each rule's layer and end time, the values and their origins,
-and every lock. `policy check` names the deciding rule and layer. Before the
-unknown-site features arrive, unknown flows are refused even when the stored
-unknown action is `ask`, `allow` or `classify`.
+and every lock. `policy check` names the deciding rule and layer. An actually
+configured unknown action decides only a flow which no rule covers, including
+an otherwise open preset fallback. Named rules, locks, agent hosts and matched
+preset entries still decide first. A legacy policy with no unknown setting
+keeps its old preset behaviour; the merged built-in `ask` is a real setting.
+
+An explicit `network.unknown = "allow"` opens uncovered DNS hosts and public IP literals.
+Its audit decision is `allow-unknown`. It does not open a refused range or the
+host's own address, and it does not become a numeric exception for private or
+shared addresses. The `open` preset without that explicit unknown action keeps
+its existing refusal of unnamed IP literals. First-host alert delivery is
+still being completed.
+
+With `network.unknown = "classify"`, uncovered flows first meet the fixed
+destination checks. They refuse unnamed IP addresses, the listed exfiltration
+domains and random-looking labels of at least 40 bytes. The starting randomness
+threshold is 3.5 bits per byte; it has not been measured against real traffic.
+Canonical A-labels are decoded for confusable comparison with currently
+allowed hosts. This uses the complete Unicode 15.0.0 data and UTS #39 revision
+26, matching the normalisation tables active under the pinned toolchain. A
+comparison never consumes a lease or overrides a deny, method limit or expiry.
+It is not the newer Unicode algorithm; changing versions needs a matching
+data and normalisation update.
+Other uncovered flows still refuse while the hold and judge paths are being
+completed. This fixed stage is not a completed `ask` or judge implementation.
 
 Only session allows take `--once` or `--for`. `--once` permits one flow; two
 flows that arrive together cannot both claim it. A timed rule ends at its
@@ -118,3 +140,30 @@ Setup and folder questions keep the original settings descriptor between
 network attempts. Each attempt keeps its existing deadline. Ending the logical
 request blocks late answers and new work, including while resource cleanup is
 still finishing. A retry cannot renew a changed settings source.
+
+## Service write boundaries
+
+A broad GitHub host allowance keeps protected service writes closed. File-content writes need an explicit branch under `<name>/<session-id>/`; a missing branch selects the repository's default and stays closed. Git reference writes use `refs/heads/<name>/<session-id>/`. Own-prefix API ref deletion follows the usual network policy. Merges, pull-request merges, asynchronous merges, upstream sync and branch renames need a path grant for their actual endpoint.
+
+An explicit path allowance can open a protected API write outside that prefix. Its normal method restriction still applies. An omitted method restriction keeps its existing unrestricted meaning. Locks and denies still win. Invalid or unsupported request shapes are refused before a lease or origin connection, even with a path grant. Workflow, visibility and other service barriers compose with the ref boundary.
+
+Only the required endpoint lease is acquired first, so a broad host grant cannot hide it or spend another once grant for the same request. Removing or expiring that endpoint allowance closes its protected request without falling back to a broad host permission.
+
+API permissions can authorise a commit to a public repository. The local public-repository acknowledgement applies to repository push grants. Treat an API write-path grant as authority for the operation it names. The ordinary TLS splice boundary still limits which requests the proxy can observe.
+
+GitHub GraphQL requests use their selected operation, resolved variables and defaults, aliases, fragments and conditional selections. The seven specified ref-moving mutations follow the same namespace and explicit endpoint rules as REST. Opaque ref or pull-request IDs do not prove a session branch; those writes need an endpoint grant. A malformed or unresolvable guarded mutation is refused before a lease or origin, including invalid string escapes. Other mutation names keep their ordinary policy rules.
+
+Repeated fragments are classified once within the selected request and its variables. They share no permission across requests. Unicode scalar, fixed-pair, UTF-8 and block-string input forms use the same branch check. Unsupported transport or request envelopes stay closed even with a path allowance.
+
+Listed token-creation and rotation endpoints on GitHub, GitLab and OpenAI need
+an explicit endpoint allowance when the exact host is bound to a secret. This
+also covers anonymous requests to that bound host. A broad host allowance does
+not open these endpoints. The existing model path checks, method restrictions,
+locks and denies still apply. Retired bindings retain the same protection.
+
+Discord webhook paths and Telegram bot paths need an explicit endpoint
+allowance, including reads and custom methods. Writes to Pastebin need one too;
+its `GET` and `HEAD` requests keep ordinary network policy. These hosts are
+inspected even after a broad host allowance. The endpoint's normal method
+restriction applies, and an omitted method restriction retains its unrestricted
+meaning. The same original permit handles both endpoint and network authority.

@@ -7,6 +7,7 @@ import "context"
 func (m *Model) Close() { m.close(m.ctx) }
 
 func (m *Model) close(ctx context.Context) {
+	m.cancelNewHostLookup()
 	if m.cancelTier != nil {
 		m.cancelTier()
 	}

@@ -30,6 +30,9 @@ import (
 // The tests of this binary start it again as a guest init and a holder,
 // under the test driver.
 func TestMain(m *testing.M) {
+	if caBoundaryEgressChild() {
+		return
+	}
 	guest.SetPlainHolderSpawnerForTest(func() (*syscall.SysProcAttr, error) { return &syscall.SysProcAttr{}, nil })
 	if len(os.Args) >= 2 {
 		switch os.Args[1] {

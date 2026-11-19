@@ -2,7 +2,6 @@ package host
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"sort"
@@ -11,7 +10,6 @@ import (
 
 	"github.com/iamlakshya/simstim/internal/api"
 	"github.com/iamlakshya/simstim/internal/paths"
-	"github.com/iamlakshya/simstim/internal/proto"
 )
 
 // The user's resume: the agent of a session starts again in the same
@@ -100,7 +98,7 @@ func ResumeContext(ctx context.Context,a api.ResumeArgs) (*ResumeResult,error){
 		return nil, err
 	}
 	if err:=validateRestartWall(m);err!=nil{return nil,err}
-	if err:=admitRestartMemoryV1(ctx,operation,a.MemoryMax);err!=nil{return nil,err}
+	if err:=admitRestartMemoryRequestV1(ctx,operation,a);err!=nil{return nil,err}
 	// A command that resumeArgv refuses stops nothing. startAgain checks
 	// it again, after the old holder's last save.
 	if _, _, err := resumeArgv(m); err != nil {
@@ -155,10 +153,10 @@ func ResumeContext(ctx context.Context,a api.ResumeArgs) (*ResumeResult,error){
 	m.Inputs = CloneInputSummary(a.Inputs)
 	m.Run.RespawnCount = 0
 	_, why, err := startAgain(m, again{operation:operation,label: resumedLabel, reason: "started again by a resume", secrets: secrets, secretDelivery: delivery})
-	var refused *proto.Error
+	refused:=restartRefusal(err)
 	switch {
-	case errors.As(err, &refused) && refused.Code == dangerRefused:
-		return nil, refused // resumeArgv refused the command, with its own hint
+	case refused!=nil:
+		return nil, refused // Preserve final admission data and command refusal hints.
 	case err != nil:
 		return nil, UserError("start_failed", err.Error(), "Check the session log with the host doctor.")
 	}

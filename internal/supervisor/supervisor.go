@@ -17,7 +17,6 @@ package supervisor
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log/slog"
 	"net"
 	"os"
@@ -38,6 +37,7 @@ import (
 	"github.com/iamlakshya/simstim/internal/secretmem"
 	"github.com/iamlakshya/simstim/internal/version"
 	"github.com/iamlakshya/simstim/internal/vmconfig"
+	"github.com/iamlakshya/simstim/internal/wall/process"
 )
 
 // bootTimeout bounds the sandbox's start, from its build to the agent's.
@@ -67,88 +67,96 @@ var errStopped = &proto.Error{Code: "stopped", Message: "the host stopped the se
 
 // Supervisor holds one walled session's trusted state.
 type Supervisor struct {
-	bootDecoysPrepared bool
-	bootDecoyFiles *proto.DecoyFilesV1
-	bootDecoyTripwires []api.DecoyTripwire
-	decoyUsed bool
-	observerMu sync.Mutex
-	observersClosed bool
-	observerLines map[*host.StartupLineV1]struct{}
-	observerWG sync.WaitGroup
-	reverseForwards map[string]*reverseForward
-	portMu sync.Mutex
-	portListeners map[int]*portForward
-	portsClosed bool
-	maxRun *maxRunTimer
-	bootOwner *host.OwnedSupervisorLease
-	originalStart *originalStartup
-	originalReaderStarted bool
-	cancelLifetime context.CancelCauseFunc
-	vmStartConnection net.Conn
-	vmCorrelation *proto.VMPrepareCorrelationV1
-	fileWG sync.WaitGroup
-	fileTransfers map[*fileTransfer]struct{}
-	fileTransfersClosed bool
-	diskWatcher           *diskWatcherV1
-	sandboxStartAttempted bool
-	bootCancel            context.CancelCauseFunc
-	bootContextGeneration string
-	diskFailure           error
-	diskAlerted           bool
-	lateInput             *startupInput
-	bootBudget            *activeBootBudget
-	storeBatch            *trustedStoreBatch
-	memberStores          map[string]bool
-	memberBootPlans       []memberBootPlan
-	startupInput          *startupInput
-	startupErr            error
-	runtimeCleaned        chan struct{}
-	runtimeCleanup        sync.Once
-	runtimeCleanupErr     error
-	memberValues          map[string]map[string]string
-	startupSecrets        *startupSecretInput
-	retainedSecrets       *api.SessionSecretState
-	automatic             *host.AutomaticRestorePlan
-	bootOperation         *host.SessionOperation
-	knownMembers          []*host.Manifest
-	terminalABI           string
-	vmPlan                *vmconfig.Plan
-	eg                    *egressProc
-	polMu                 sync.Mutex
-	egressStarted         bool
-	egressStopping        bool
-	memberReady           bool
-	loadedName            string
-	firstSaved            bool
-	lifetime              context.Context
-	generation            string
-	runToken              string
-	launched              bool
-	launches              map[string]*Supervisor
-	expected              map[string]bool
-	memberFault           bool
-	stopIntent            bool // controller Stop/System, separate from natural exit
-	savedMembers          []*host.Manifest
-	primary               *Supervisor
-	members               map[string]*Supervisor
-	membersMu             sync.Mutex
-	spawnMu               sync.Mutex
-	capture               *files.Capture
-	captureReady          string
-	captureFailed         bool
-	id                    string
-	log                   *slog.Logger
-	audit                 *auditLog
-	sb                    sandbox
-	link                  *link.Session
-	ctl                   *ctlConn
-	ln                    net.Listener
-	peerCheck             bool
-	al                    *alerts.Dispatcher
-	stop                  chan struct{}
-	quit                  chan string    // a reason to stop, from a kill
-	sig                   chan os.Signal // a stop with the host
-	wg                    sync.WaitGroup
+	imageSaveMu                  sync.Mutex
+	imageSaves                   map[*imageSaveJobV1]struct{}
+	imageSavesClosed             bool
+	processCopy                  *process.CopyOwnerV1
+	bootPackageSettingsPrepared  bool
+	bootPackageSettings          *proto.PackageManagersV1
+	bootPackageSettingsGuest     bool
+	bootPackageSettingsInstalled bool
+	bootDecoysPrepared           bool
+	bootDecoyFiles               *proto.DecoyFilesV1
+	bootDecoyTripwires           []api.DecoyTripwire
+	decoyUsed                    bool
+	observerMu                   sync.Mutex
+	observersClosed              bool
+	observerLines                map[*host.StartupLineV1]struct{}
+	observerWG                   sync.WaitGroup
+	reverseForwards              map[string]*reverseForward
+	portMu                       sync.Mutex
+	portListeners                map[int]*portForward
+	portsClosed                  bool
+	maxRun                       *maxRunTimer
+	bootOwner                    *host.OwnedSupervisorLease
+	originalStart                *originalStartup
+	originalReaderStarted        bool
+	cancelLifetime               context.CancelCauseFunc
+	vmStartConnection            net.Conn
+	vmCorrelation                *proto.VMPrepareCorrelationV1
+	fileWG                       sync.WaitGroup
+	fileTransfers                map[*fileTransfer]struct{}
+	fileTransfersClosed          bool
+	diskWatcher                  *diskWatcherV1
+	sandboxStartAttempted        bool
+	bootCancel                   context.CancelCauseFunc
+	bootContextGeneration        string
+	diskFailure                  error
+	diskAlerted                  bool
+	lateInput                    *startupInput
+	bootBudget                   *activeBootBudget
+	storeBatch                   *trustedStoreBatch
+	memberStores                 map[string]bool
+	memberBootPlans              []memberBootPlan
+	startupInput                 *startupInput
+	startupErr                   error
+	runtimeCleaned               chan struct{}
+	runtimeCleanup               sync.Once
+	runtimeCleanupErr            error
+	memberValues                 map[string]map[string]string
+	startupSecrets               *startupSecretInput
+	retainedSecrets              *api.SessionSecretState
+	automatic                    *host.AutomaticRestorePlan
+	bootOperation                *host.SessionOperation
+	knownMembers                 []*host.Manifest
+	terminalABI                  string
+	vmPlan                       *vmconfig.Plan
+	eg                           *egressProc
+	polMu                        sync.Mutex
+	egressStarted                bool
+	egressStopping               bool
+	memberReady                  bool
+	loadedName                   string
+	firstSaved                   bool
+	lifetime                     context.Context
+	generation                   string
+	runToken                     string
+	launched                     bool
+	launches                     map[string]*Supervisor
+	expected                     map[string]bool
+	memberFault                  bool
+	stopIntent                   bool // controller Stop/System, separate from natural exit
+	savedMembers                 []*host.Manifest
+	primary                      *Supervisor
+	members                      map[string]*Supervisor
+	membersMu                    sync.Mutex
+	spawnMu                      sync.Mutex
+	capture                      *files.Capture
+	captureReady                 string
+	captureFailed                bool
+	id                           string
+	log                          *slog.Logger
+	audit                        *auditLog
+	sb                           sandbox
+	link                         *link.Session
+	ctl                          *ctlConn
+	ln                           net.Listener
+	peerCheck                    bool
+	al                           *alerts.Dispatcher
+	stop                         chan struct{}
+	quit                         chan string    // a reason to stop, from a kill
+	sig                          chan os.Signal // a stop with the host
+	wg                           sync.WaitGroup
 
 	mu       sync.Mutex
 	m        *host.Manifest // the trusted manifest
@@ -193,7 +201,7 @@ func runSupervisorMode(owner context.Context, id string, operation *host.Session
 	}
 	lifetime, cancelLifetime := context.WithCancelCause(owner)
 	defer cancelLifetime(context.Canceled)
-	owned, err := host.AcquireOwnedSupervisorLease(lifetime,id)
+	owned, err := host.AcquireOwnedSupervisorLease(lifetime, id)
 	if err != nil {
 		return wallError("cannot claim the supervisor process", err)
 	}
@@ -217,18 +225,22 @@ func runSupervisorMode(owner context.Context, id string, operation *host.Session
 		return execRefusal("a sandbox member cannot launch a separate supervisor")
 	}
 	var automatic *host.AutomaticRestorePlan
-	if operation!=nil {return execRefusal("a supplied operation cannot replace the original outside startup loan")}
+	if operation != nil {
+		return execRefusal("a supplied operation cannot replace the original outside startup loan")
+	}
 	lf, err := os.OpenFile(paths.SupervisorLog(id), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
 		return &proto.Error{Code: "start_failed", Message: "the supervisor cannot open its log: " + err.Error(),
 			Hint: "Check the host's free space and the session's folder, then resume the session."}
 	}
 	defer lf.Close()
-	s := &Supervisor{bootOwner:owned,cancelLifetime:cancelLifetime,automatic: automatic, bootOperation: operation, runtimeCleaned: make(chan struct{}), loadedName: m.Name, lifetime: lifetime, id: id, m: m, log: slog.New(slog.NewTextHandler(lf, nil)), quit: make(chan string, 1), stop: make(chan struct{}, 1),
+	s := &Supervisor{bootOwner: owned, cancelLifetime: cancelLifetime, automatic: automatic, bootOperation: operation, runtimeCleaned: make(chan struct{}), loadedName: m.Name, lifetime: lifetime, id: id, m: m, log: slog.New(slog.NewTextHandler(lf, nil)), quit: make(chan string, 1), stop: make(chan struct{}, 1),
 		sig: make(chan os.Signal, 1), peerCheck: host.PeerCheck(id)}
-	defer func(){returned=errors.Join(returned,s.finishOriginalStartup(s.closeSandbox()))}()
-	generation:=owned.Generation()
-	if generation=="" {return execRefusal("the actual supervisor lease has no live generation")}
+	defer func() { returned = errors.Join(returned, s.finishOriginalStartup(s.closeSandbox())) }()
+	generation := owned.Generation()
+	if generation == "" {
+		return execRefusal("the actual supervisor lease has no live generation")
+	}
 	s.generation = generation
 	s.runToken = generation + "/" + id
 	defer func() { returned = errors.Join(returned, s.closeLateInput()) }()
@@ -240,7 +252,7 @@ func runSupervisorMode(owner context.Context, id string, operation *host.Session
 	// Alert commands run in the supervisor's own environment, never the
 	// agent's, which is the guest's (docs/how-to/alerts.md). Under systemd,
 	// that is the user manager's environment.
-	s.al = alerts.New(alerts.Options{Env: os.Environ(), Dir: homeDir(), Logger: s.log, PublishEvent:s.audit.writeEvent})
+	s.al = alerts.New(alerts.Options{Env: os.Environ(), Dir: homeDir(), Logger: s.log, PublishEvent: s.audit.writeEvent})
 	// The record begins before the socket listens, and is saved after it:
 	// New waits for the socket, then reads the record, and dials the
 	// socket to see that the supervisor still runs (host.waitBoot).
@@ -254,35 +266,66 @@ func runSupervisorMode(owner context.Context, id string, operation *host.Session
 	s.mu.Unlock()
 	// Publish only the actual early boot owner and listener before receiving
 	// the original outside loan. No resource factory runs ahead of that line.
-	if err:=s.listen();err!=nil{return s.failed(host.EndBoot,err)}
-	if err:=s.save(&snap,false);err!=nil{return s.failed(host.EndBoot,err)}
-	if m.Wall.Driver!=driverPlain {
-		operation,err=s.awaitOriginalLoan(lifetime)
-		if err!=nil{return s.failed(host.EndBoot,err)}
-		s.bootOperation=operation
-		m,err=operation.LoadContext(lifetime)
-		if err!=nil{return s.failed(host.EndBoot,err)}
-		s.m=m
-		checked,checkErr:=host.VMRunContextLocked(lifetime,operation,owned)
-		if checkErr!=nil{return s.failed(host.EndBoot,checkErr)}
-		s.lifetime=checked
-		if operation.AutomaticBoot()!=nil {
-			s.automatic,err=host.ValidateAutomaticRestore(m)
-			if err!=nil{return s.failed(host.EndBoot,err)}
-		} else if len(m.AutomaticRestore)!=0 {return s.failed(host.EndBoot,execRefusal("this original startup has no received automatic operation"))}
+	if err := s.listen(); err != nil {
+		return s.failed(host.EndBoot, err)
 	}
-	if err:=s.loadSavedMembers();err!=nil{return s.failed(host.EndBoot,err)}
-	s.retainedSecrets,err=collectSavedSecretState(s.lifetimeContext(),*m,s.knownMembers)
-	if err!=nil{return s.failed(host.EndBoot,err)}
-	if s.originalStart!=nil {
-		if err:=s.receiveOriginalStart(s.lifetimeContext());err!=nil{return s.failed(host.EndBoot,err)}
-		if m.Inputs!=nil && !host.WasRestored(m){
-			values:=s.awaitInputStartup(s.lifetimeContext())
-			if s.startupErr!=nil{return s.failed(host.EndBoot,s.startupErr)}
-			s.originalStart.values=values
+	if err := s.save(&snap, false); err != nil {
+		return s.failed(host.EndBoot, err)
+	}
+	if m.Wall.Driver != driverPlain {
+		operation, err = s.awaitOriginalLoan(lifetime)
+		if err != nil {
+			return s.failed(host.EndBoot, err)
+		}
+		s.bootOperation = operation
+		m, err = operation.LoadContext(lifetime)
+		if err != nil {
+			return s.failed(host.EndBoot, err)
+		}
+		s.m = m
+		checked, checkErr := host.VMRunContextLocked(lifetime, operation, owned)
+		if checkErr != nil {
+			return s.failed(host.EndBoot, checkErr)
+		}
+		checked, checkErr = host.CaptureImageSaveBoot(checked)
+		if checkErr != nil {
+			return s.failed(host.EndBoot, checkErr)
+		}
+		s.lifetime = checked
+		if operation.AutomaticBoot() != nil {
+			s.automatic, err = host.ValidateAutomaticRestore(m)
+			if err != nil {
+				return s.failed(host.EndBoot, err)
+			}
+		} else if len(m.AutomaticRestore) != 0 {
+			return s.failed(host.EndBoot, execRefusal("this original startup has no received automatic operation"))
 		}
 	}
-	if err:=s.prepareBootDecoys(s.lifetimeContext());err!=nil{return s.failed(host.EndBoot,err)}
+	if err := s.loadSavedMembers(); err != nil {
+		return s.failed(host.EndBoot, err)
+	}
+	s.retainedSecrets, err = collectSavedSecretState(s.lifetimeContext(), *m, s.knownMembers)
+	if err != nil {
+		return s.failed(host.EndBoot, err)
+	}
+	if s.originalStart != nil {
+		if err := s.receiveOriginalStart(s.lifetimeContext()); err != nil {
+			return s.failed(host.EndBoot, err)
+		}
+		if m.Inputs != nil && !host.WasRestored(m) {
+			values := s.awaitInputStartup(s.lifetimeContext())
+			if s.startupErr != nil {
+				return s.failed(host.EndBoot, s.startupErr)
+			}
+			s.originalStart.values = values
+		}
+	}
+	if err := s.prepareBootDecoys(s.lifetimeContext()); err != nil {
+		return s.failed(host.EndBoot, err)
+	}
+	if err := s.prepareBootPackageSettings(s.lifetimeContext()); err != nil {
+		return s.failed(host.EndBoot, err)
+	}
 	agentsReceipt, err := s.prepareBootAgents(s.lifetimeContext())
 	if err != nil {
 		return s.failed(host.EndBoot, err)
@@ -370,9 +413,13 @@ func (s *Supervisor) started(res proto.CtlStartResult, missing []string) error {
 	if err := s.save(&snapshot, false); err != nil {
 		return err
 	}
-	if s.primary==nil && s.automatic==nil {
-		if err:=s.startMaxRun();err!=nil{return err}
-		if err:=s.commitOriginalReady();err!=nil{return err}
+	if s.primary == nil && s.automatic == nil {
+		if err := s.startMaxRun(); err != nil {
+			return err
+		}
+		if err := s.commitOriginalReady(); err != nil {
+			return err
+		}
 		s.raise(s.alertEvent(alerts.SandboxReady))
 	}
 	s.raise(s.alertEvent(kind))
@@ -386,37 +433,6 @@ func (s *Supervisor) started(res proto.CtlStartResult, missing []string) error {
 // snapshot is a copy of the trusted manifest, to save or send after the
 // caller lets s.mu go, with the record of the run as its Life. It copies
 // the claims too: claims change in place. The caller holds s.mu.
-func (s *Supervisor) snapshot() host.Manifest {
-	m := host.CloneManifest(*s.m)
-	if s.decoyUsed && s.rec.phase==host.LifeRunning && m.Status.Source!=host.SrcMemory {m.Status.Reason="decoy used"}
-	if m.Guest != nil {
-		g := *m.Guest
-		m.Guest = &g
-	}
-	m.Life = s.rec.life()
-	return m
-}
-
-// save writes m, a copy of the trusted manifest, unless the last save has
-// been made. After it, Delete may remove the session's folder at any
-// moment, and a late save would bring it back.
-func (s *Supervisor) save(m *host.Manifest, last bool) error {
-	s.saveMu.Lock()
-	defer s.saveMu.Unlock()
-	return s.saveLocked(m, last)
-}
-
-func (s *Supervisor) saveLocked(m *host.Manifest, last bool) error {
-	if s.closed {
-		return nil
-	}
-	if err := s.writeLive(m, last); err != nil {
-		s.log.Warn("manifest not saved", "err", err)
-		return fmt.Errorf("save the trusted manifest: %w", err)
-	}
-	return nil
-}
-
 // tick saves the trusted manifest when it changed, reads the unit's memory
 // and watches the guest init's heartbeat, once a second, until the link
 // ends.

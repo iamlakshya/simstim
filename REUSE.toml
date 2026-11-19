@@ -2,6 +2,13 @@
 # (https://reuse.software). `just public-check` runs `reuse lint` on it.
 version = 1
 
+# Complete confusable prototype data from Unicode 15.0.0; see NOTICE.
+[[annotations]]
+path = "internal/egress/rules/confusables-15.0.0.txt.gz"
+precedence = "override"
+SPDX-FileCopyrightText = "1991-2022 Unicode, Inc."
+SPDX-License-Identifier = "Unicode-3.0"
+
 [[annotations]]
 path = "**"
 precedence = "aggregate"

@@ -123,6 +123,10 @@ func (g *Init) servePut(st *link.Stream) {
 			return
 		}
 	}
+	if handled,err:=g.ownedVMFilePut(ctx,st,header);handled {
+		if err!=nil{g.putReply(st,"",err)}else{g.putReply(st,path.Join(top,relative),nil)}
+		return
+	}
 	executable, err := g.helperExecutable()
 	if err != nil {
 		g.putReply(st, "", err)

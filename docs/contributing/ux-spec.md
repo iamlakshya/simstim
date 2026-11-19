@@ -234,7 +234,9 @@ Enter attaches the selected result, and Esc closes the search. On a result whose
 
 ### 2.6 Quick start
 
-`n` opens the prompt line for a new session on the host in play. The whole session is one line: `claude ~/src/app auth`.
+`n` first resolves the effective default host in every launcher view. It opens the full new-session form for that host. The environment override wins over the saved default, then the only eligible non-shared host. A restored last-session view does not override this choice. A configured default that is invalid, shared, stale or unreadable shows its error and hint; it never selects another host.
+
+When there is no default, `n` keeps the quick start for the current usable host. That host must still be saved and online. The whole session is one line: `claude ~/src/app auth`.
 
 ```text
     claude  codex  opencode  shell   ~/src/api/  ~/src/app/
@@ -268,7 +270,7 @@ Every dialog is a sheet. It rises from the bottom of the screen over the dimmed 
 
 | Sheet | Opens on | What it holds |
 | --- | --- | --- |
-| New session | `ctrl+f` in the quick start, or the palette | Agent (the chosen one lit while the row has focus), folder with completion from the host, name, and worktree. "other…" runs any command you type. |
+| New session | `n` with an effective default, `ctrl+f` in the quick start, or the palette | Agent (the chosen one lit while the row has focus), folder with completion from the host, name, worktree, wall and host. The Host row changes only this start; left and right choose a saved host. "other…" runs any command you type. |
 | Delete | `d` | Red rule and title: "Delete api-tests?", what stops and what stays. For an agent that has ended, only what it removes. `simstim rm` asks with the same lines (`client.DeleteLines`). |
 | Peek | `space` | The session's last screen, refreshed while the agent runs. ↑↓ move to the next session, and Enter attaches. For an agent that has ended, it shows no memory, and Enter keeps it open. |
 | Commands | `ctrl+o` | The palette: a filter, then every command as plain words ("New session", "Peek at the screen") with its key in cyan. A command that cannot run says why, faint. |
@@ -276,6 +278,8 @@ Every dialog is a sheet. It rises from the bottom of the screen over the dimmed 
 | Host details | `i` | The lines of `host show`, from one function in the client. First come the saved route, labels, machine, idle, provider script and secrets. Then come the system, the helper, the agents with their versions, and the limits. A list, such as the agents, wraps under its label when it does not fit. `t` test, `s` shell, `r` reconnect, `x` remove |
 | Add a host | `a` | The wizard (2.10) |
 | Set up | Enter on the first-run screen, `s` | The guided setup (2.12) |
+
+The new-session form marks an automatic host choice as `default`. Selecting another Host row makes that an explicit choice for this start and leaves the saved default unchanged. The form checks its default or explicit saved entry again before starting. If that choice changed, it asks the user to choose again. Escape cancels a pending local host selection; a late result cannot open a form or start a session.
 
 A click outside the palette, the peek, the host details or a confirm closes it.
 
@@ -338,7 +342,7 @@ The agent owns the whole terminal: every row and every column. There is no borde
 - **Where you left off.** The launcher opens on the sessions of the host you last attached to, with that session selected. `simstim` then Enter takes you back in.
 - **At once.** It draws the sessions it remembers before any host answers.
 - **Numbers.** 1–9 open the row with that number.
-- **Search and quick start.** `/` finds a session on any host; `n` starts one from a single line.
+- **Search and new sessions.** `/` finds a session on any host. `n` opens the form for the effective default, or keeps the single-line quick start when there is no default and the current host is usable.
 - **The mouse.** Click a row to select it, and click the selected row to open it. The wheel moves the selection, and a click on a palette row runs it.
 - **The tab title** counts the sessions that need you: `● 1 · simstim · homelab`.
 - **When nobody is looking.** If a session starts to need you while the terminal is in the background, the launcher sends a desktop notification.
@@ -396,7 +400,7 @@ These keys work in the launcher. You can rebind any key in `config.toml`, and `s
 | `enter`, `l`, `→` | Hosts | Open the host's sessions |
 | `esc`, `h`, `←` | Sessions | Back to the hosts |
 | `enter` | Sessions | Attach, or open the quick start on an empty list. On a session whose agent has ended, open its last screen. |
-| `n` | Anywhere | Quick start on the host in play |
+| `n` | Anywhere | New-session form on the effective default; quick start on the current usable host only when no default exists |
 | `/` | Anywhere | Search every host |
 | `space` | Sessions | Peek at the screen |
 | `r`, `f2` | Sessions | Rename |
@@ -556,11 +560,15 @@ The root help groups the commands as this table does: Sessions, Hosts, Agents, a
 
 An address names a session: `<host>/<session>`, or `<session>` alone when no other host has a session of that name, or `-` for the last session attached to ([CLI spec, section 9.2](cli-spec.md#92-addresses)).
 
+A new session without a host uses `SIMSTIM_DEFAULT_HOST`, then the saved choice of `host default`, then the only eligible non-shared host. `new -` uses the still-saved host of the last attached session. A shared host cannot be the default. The launcher uses the same local resolver, and its last-session cache grants no permission to start work. Changing the Host row changes only that form's target. Every start still uses its actual accepted host connection and current checks.
+
+`host default <host>` sets the saved choice, `host default` prints it, and `host default --clear` clears it. Local host selection reads no room estimate and starts or wakes no machine. The chosen host still admits or refuses the actual session.
+
 | Command | Does |
 | --- | --- |
 | `simstim` | Opens the launcher |
 | **Sessions** | |
-| `simstim new <host> [--agent claude] [-C ~/src/app [--mkdir]] [--name x] [--worktree [--base ref]] [--secret NAME] [--memory-max 4G] [--inline] [--setup-script \| --no-setup-script] [--detach [--json]] [-- <command>…]` | Starts a session, and attaches unless `--detach`. `-C` is the short form of `--dir` |
+| `simstim new [<host>|-] [--agent claude] [-C ~/src/app [--mkdir]] [--name x] [--worktree [--base ref]] [--secret NAME] [--memory-max 4G] [--inline] [--setup-script \| --no-setup-script] [--detach [--json]] [-- <command>…]` | Starts a session, and attaches unless `--detach`. `-C` is the short form of `--dir` |
 | `simstim attach [<address>] [--restart] [--id]` | Attaches directly. `a` is its alias. Without an address and with input on, it opens the picker. A stopped host with a provider script wakes first. On an ended agent it asks to start it again; `--restart` answers yes. |
 | `simstim resume <address> [--memory-max 4G] [--secret NAME] [--detach [--json]]` | Starts an ended agent again in its session and attaches unless `--detach`. On a running agent it attaches, or with `--detach` says that it runs. The old memory cap stays unless a new one is named. |
 | `simstim ls [<host>] [--host h] [--json]` | Lists sessions on every host or one host, with their state, its source and why an agent ended. |

@@ -16,6 +16,9 @@ func (s *Store) Cached(ctx context.Context, request Request) (CacheStatus, error
 	if err := request.Validate(); err != nil {
 		return CacheStatus{}, err
 	}
+	if err := s.checkSavedRequestDomain(request); err != nil {
+		return CacheStatus{}, err
+	}
 	if request.Transfer != "" {
 		return CacheStatus{}, badLayer("a cached image check cannot name a transfer")
 	}
@@ -59,6 +62,9 @@ func (s *Store) OpenImageExisting(ctx context.Context, request Request) (file *o
 	if err := request.Validate(); err != nil {
 		return nil, nil, record, err
 	}
+	if err := s.checkSavedRequestDomain(request); err != nil {
+		return nil, nil, record, err
+	}
 	if request.Transfer != "" {
 		return nil, nil, record, badLayer("an existing image open cannot name a transfer")
 	}
@@ -83,6 +89,10 @@ func (s *Store) OpenImageExisting(ctx context.Context, request Request) (file *o
 	if record.Arch != request.Arch {
 		return nil, nil, record, badLayer("stored image architecture differs from the client request")
 	}
+	record, err = projectSavedSelection(request, record)
+	if err != nil {
+		return nil, nil, record, err
+	}
 	if err := rootCheck(request, record); err != nil {
 		return nil, nil, record, err
 	}
@@ -94,6 +104,9 @@ func (s *Store) OpenImageExisting(ctx context.Context, request Request) (file *o
 	}
 	info, err := Inspect(file)
 	if err != nil {
+		return file, nil, record, err
+	}
+	if err := s.checkSavedDescriptor(ctx, record, file); err != nil {
 		return file, nil, record, err
 	}
 	if info.RootHash != record.RootHash || info.DataBlocks != record.DataBlocks || info.Size != record.Size {

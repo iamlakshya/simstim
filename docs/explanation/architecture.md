@@ -26,6 +26,16 @@ One static Go binary.
 | Clipboard | Reads images from the local clipboard. Rewrites dropped file paths. The paste guard refuses private files, and paths that the session put on the clipboard. |
 | Capability probe | One batch of terminal queries at start-up, cached per terminal. It drives simstim's own screens and `doctor`. |
 
+Placement policy keeps local pool membership and feature labels in `host.place`.
+Its candidate filter uses versioned facts from the original accepted host Source.
+Unknown accounting gives no room. A microvm's need includes its whole unit reserve.
+Ranking compares wake class, pressure and spread penalties, preference, cached
+image, round trip, room, sandbox count and host name, in that order.
+
+These facts and labels are selection metadata. They reserve nothing and cannot
+start a sandbox. The selected host checks its current native reservations again
+under its placement lock before a start.
+
 ### 2.2 Host: `simstim-host` and `simstim-vt`
 
 Installed by the client into `~/.local/share/simstim/bin/<version>/`, with a `current` link. After each install, the new helper removes the versions nothing uses (`simstim-host prune`, and the same rule in `host doctor --fix`): it keeps the newest three, the current one, any that a session or a process of the user runs from or a unit file names, and any installed in the last hour.
@@ -376,3 +386,21 @@ against the same complete local secret namespace before use.
 
 The host bridge transfers its input and output files to private helper children. Each child has one byte-copying role. Cancelling I/O closes its private socket and stops the original child; waiting joins that child. Input frames preserve every byte, including the final bytes before EOF.
 An uncertain child exit triggers cancellation before waiting. The native observation error remains in the result.
+
+Live package manager settings come from the supervisor's installed cold-start plan. Session lists do not derive installed settings from a newer policy. Stopped, older or unreachable supervisors report no installed plan. The client validates and owns its display copy.
+
+Process file copies retain their staging directories under the original factory's protected session storage. Guest sources cannot contain that storage. The factory checks original mount identity before it offers atomic replacement. A source on another mount has no persistent copy producer yet. The fresh root keeps its separate masked stage.
+
+Local grant updates stream the existing approval record through the request's parser and index. Unknown metadata stays byte-identical. Unsorted rows use the existing ordering and keep equal rows stable. Duplicate fields fail before the replacement is published. The index closes before the protected file is replaced. After full validation, the writer copies the original root around the grants array. For an existing selected row, it replaces only three validated value spans. Those spans belong to the same parser, source and inspection generation.
+
+Host facts use a versioned metadata schema. Known bits distinguish an unavailable reading from zero. Memory and disk counts use bytes; pressure readings use percentages. These fields grant no session membership or runtime authority.
+
+A saved-image boot keeps the local client pin as a typed part of its original Need. The protected boot owner checks the same saved selection against its actual host domain. The image store separately opens the existing original root, retains its native lease, and verifies the ownership receipt, complete file digest and verity metadata. A projected spec or matching identifier cannot issue that native root.
+
+Image save retains one normal supervisor connection for save, review pages, keep and drop. Its complete review is read in bounded pages from the same original pending save token; page requests never reopen the root or recapture settings. The actual running owner captures a fresh protected primary operation, its original native start connection, public sentinels and cold-start decoys. The guest pins the original merged root and overlay upper before pivot, including the detached reset upper. One bounded immutable advisory changes vector is paged over the existing control protocol. The guest can hide a change from this advisory list, so the saved root remains hostile; host exclusions and secret scanning inspect its whole stream independently. The same reservation supplies its root tar on the existing layer stream. Cancellation joins that exact export before roots or the protected operation close. A failed cancellation retains the source until the same original VMM has positive native exit evidence. No terminal stream is inspected.
+
+The JSON cursor scans ordinary ASCII in its existing read window. It keeps each byte's cancellation check, cursor advance and cache accounting in the original order. Escapes, controls and non-ASCII keep the existing scalar branches.
+
+Frame encoding checks the payload length before adding the type or header sizes. The existing frame limit and wire bytes stay the same. A payload beyond that limit is refused before any transport write.
+
+Placement descriptions use a closed versioned advisory record. Requests own their copy. The description supplies no native source, operation, Need, capacity reservation or start permission.

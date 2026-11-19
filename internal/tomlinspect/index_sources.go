@@ -5,12 +5,15 @@ import (
 	"io"
 )
 
-// MetadataSettings and MetadataSandboxJSON identify the actual retained
-// settings snapshot and guarded sandbox transaction source respectively.
-// They are accounting roles, never caller-selected input or authority caps.
+// MetadataSettings and MetadataStateJSON identify the actual retained TOML
+// snapshot and guarded JSON transaction encoding. Closed domain producers
+// also bind the actual filename; these roles grant no domain or authority.
 const (
-	MetadataSettings    uint8 = 1
-	MetadataSandboxJSON uint8 = 2
+	MetadataSettings  uint8 = 1
+	MetadataStateJSON uint8 = 2
+	// MetadataSandboxJSON is the original spelling of this JSON encoding
+	// role. Domain-specific producers still bind their actual transaction.
+	MetadataSandboxJSON = MetadataStateJSON
 )
 
 // MetadataSource borrows one actual source for a complete inspection. Main

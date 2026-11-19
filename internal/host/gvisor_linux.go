@@ -26,8 +26,8 @@ import (
 // runtime closure and its retained host storage domain to the actual jail.
 // It takes no caller-selected owners, callbacks, namespace policy or runtime.
 func NewGvisorDriver() (wall.Driver, error) {
-	driver, err := gvisor.New(gvisor.Options{ExpectedRuntime: ExpectedOriginalRuntime,
-		Domain: OriginalBootDomain, Command: commandGvisorOriginalV1})
+	driver, err := gvisor.New(gvisor.Options{ExpectedRuntime: gvisorExpectedRuntimeV1,
+		Domain: gvisorNativeDomainV1, Command: commandGvisorOriginalV1})
 	if err != nil {
 		return nil, err
 	}
@@ -39,7 +39,27 @@ type originalGvisorDriverV1 struct{ driver *gvisor.Driver }
 func (*originalGvisorDriverV1) Name() string      { return "gvisor" }
 func (*originalGvisorDriverV1) Level() wall.Level { return wall.GVisor }
 func (d *originalGvisorDriverV1) Probe(ctx context.Context) wall.Probe {
-	return d.driver.Probe(ctx)
+	purpose := gvisorProbeFromContextV1(ctx)
+	if purpose == nil {
+		return gvisor.ConstructionProbeV1(ctx)
+	}
+	probe := d.driver.Probe(ctx)
+	if probe.OK {
+		if err := purpose.check(ctx); err != nil {
+			probe.OK, probe.Reason, probe.Fix = false, err.Error(), "Retain the same native account and selected runtime before probing again."
+		} else {
+			key, err := selectedRuntimeKey(purpose.selected.manifest)
+			if err != nil {
+				probe.OK, probe.Reason, probe.Fix = false, err.Error(), "Prepare the original signed runtime again."
+			} else {
+				if probe.Facts == nil {
+					probe.Facts = map[string]string{}
+				}
+				probe.Facts["runtime_manifest"] = key
+			}
+		}
+	}
+	return probe
 }
 func (d *originalGvisorDriverV1) Prepare(ctx context.Context, spec wall.Spec) (wall.Sandbox, error) {
 	if _, err := checkOriginalGvisorSpecV1(ctx, spec); err != nil {
@@ -151,7 +171,17 @@ func commandGvisorOriginalV1(ctx context.Context, request gvisor.CommandRequest)
 	if !ok {
 		return nil, vmNeedError("gvisor has no current original filesystem projection")
 	}
-	receipt, err := checkOriginalGvisorSpecV1(ctx, spec)
+	var receipt *OriginalVMNeed
+	var err error
+	purpose := gvisorProbeFromContextV1(ctx)
+	if purpose != nil {
+		err = purpose.check(ctx)
+		if err == nil && !reflect.DeepEqual(spec, purpose.spec) {
+			err = newRuntimeError("the physical probe changed its native purpose plan")
+		}
+	} else {
+		receipt, err = checkOriginalGvisorSpecV1(ctx, spec)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -162,7 +192,7 @@ func commandGvisorOriginalV1(ctx context.Context, request gvisor.CommandRequest)
 		len(request.Mounts) != len(request.MountFiles) || len(request.Spec.Binds) != 2 || request.Log == nil {
 		return nil, vmNeedError("the gvisor command escaped its closed native boot plan")
 	}
-	manifest, err := ExpectedOriginalRuntime(ctx)
+	manifest, err := gvisorExpectedRuntimeV1(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -195,10 +225,19 @@ func commandGvisorOriginalV1(ctx context.Context, request gvisor.CommandRequest)
 		}
 		binds = append(binds, jail.Bind{Path: mount.Host, File: file, Write: mount.Write})
 	}
-	if err := receipt.boot.operation.withCurrentRead(ctx, func(context.Context) error {
-		return checkGvisorControlFilesV1(receipt, spec, request)
-	}); err != nil {
-		return nil, err
+	if purpose != nil {
+		if err := checkGvisorControlFilesV1(purpose.root, spec, request); err != nil {
+			return nil, err
+		}
+		if err := purpose.check(ctx); err != nil {
+			return nil, err
+		}
+	} else {
+		if err := receipt.boot.operation.withCurrentRead(ctx, func(context.Context) error {
+			return checkGvisorControlFilesV1(receipt.boot.operation.native.root, spec, request)
+		}); err != nil {
+			return nil, err
+		}
 	}
 	binds, err = coalesceGvisorBindsV1(binds)
 	if err != nil {
@@ -213,6 +252,18 @@ func commandGvisorOriginalV1(ctx context.Context, request gvisor.CommandRequest)
 		return nil, err
 	}
 	command.Stdout, command.Stderr = request.Log, request.Log
+	if purpose != nil {
+		probe := &probeGvisorCommandV1{Cmd: command, purpose: purpose, ctx: ctx, cancel: cancel}
+		purpose.mu.Lock()
+		if purpose.closed || purpose.command != nil {
+			purpose.mu.Unlock()
+			cancel()
+			return nil, errors.Join(newRuntimeError("the physical probe already owns a native command"), command.Start())
+		}
+		purpose.command = probe
+		purpose.mu.Unlock()
+		return probe, nil
+	}
 	return &originalGvisorCommandV1{Cmd: command, ctx: ctx, receipt: receipt, spec: spec, cancel: cancel}, nil
 }
 
@@ -256,8 +307,7 @@ func (command *originalGvisorCommandV1) Wait() error {
 	return err
 }
 
-func checkGvisorControlFilesV1(receipt *OriginalVMNeed, spec wall.Spec, request gvisor.CommandRequest) error {
-	root := receipt.boot.operation.native.root
+func checkGvisorControlFilesV1(root *os.Root, spec wall.Spec, request gvisor.CommandRequest) error {
 	for index, name := range []string{"bundle", "runsc"} {
 		bound := request.Spec.Binds[index]
 		if bound.Path != filepath.Join(spec.SessionDir, "gvisor", name) || bound.Write != (name == "runsc") || bound.File == nil {

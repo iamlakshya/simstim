@@ -3,15 +3,15 @@ package cli
 import (
 	"context"
 	"fmt"
-	"os"
 
 	"github.com/iamlakshya/simstim/internal/client"
+	"github.com/iamlakshya/simstim/internal/image"
 	"github.com/spf13/cobra"
 )
 
 func imageCmd() *cobra.Command {
-	command := &cobra.Command{Use: "image", Short: "List, pull and remove microvm root images"}
-	command.AddCommand(imageListCmd(), imagePullCmd(), imageRemoveCmd())
+	command := &cobra.Command{Use: "image", Short: "List, pull, save and remove microvm root images"}
+	command.AddCommand(imageListCmd(), imagePullCmd(), imageSaveCmd(), imageRemoveCmd())
 	return command
 }
 
@@ -36,6 +36,7 @@ func imageListCmd() *cobra.Command {
 			Arch     string `json:"arch"`
 			RootHash string `json:"root_hash"`
 			Size     int64  `json:"size"`
+			MadeOn   string `json:"made_on,omitempty"`
 		}
 		rows := []row{}
 		for _, host := range hosts {
@@ -45,7 +46,17 @@ func imageListCmd() *cobra.Command {
 					return err
 				}
 				for _, record := range records {
-					rows = append(rows, row{Host: host.Name, Ref: client.CleanLine(record.Ref), Digest: client.CleanLine(record.PlatformDigest), Arch: client.CleanLine(record.Arch), RootHash: client.CleanLine(record.RootHash), Size: record.Size})
+					madeOn := ""
+					if record.SavedHost != nil {
+						if c.HostIDChanged() {
+							return &client.UserError{Code: "image_protocol", Kind: client.KindFailed, Msg: "the saved image is not on the accepted host identity", Hint: "Check the host identity, then run image ls again."}
+						}
+						if err := (image.SaveResult{Image: record, HostID: c.HostID()}).Validate(record.Ref, c.HostID()); err != nil {
+							return err
+						}
+						madeOn = host.Name
+					}
+					rows = append(rows, row{Host: host.Name, Ref: client.CleanLine(record.Ref), Digest: client.CleanLine(record.PlatformDigest), Arch: client.CleanLine(record.Arch), RootHash: client.CleanLine(record.RootHash), Size: record.Size, MadeOn: madeOn})
 				}
 				return nil
 			}); err != nil {
@@ -56,7 +67,11 @@ func imageListCmd() *cobra.Command {
 			return printJSON(rows)
 		}
 		for _, record := range rows {
-			fmt.Printf("%s\t%s\t%s\t%s\t%d bytes\n", record.Host, record.Ref, record.Digest, record.Arch, record.Size)
+			fmt.Printf("%s\t%s\t%s\t%s\t%d bytes", record.Host, record.Ref, record.Digest, record.Arch, record.Size)
+			if record.MadeOn != "" {
+				fmt.Printf("\tmade on %s", client.CleanLine(record.MadeOn))
+			}
+			fmt.Println()
 		}
 		return nil
 	}}
@@ -77,7 +92,7 @@ func imagePullCmd() *cobra.Command {
 			}
 		}
 		return withImageHost(cmd.Context(), args[1], func(ctx context.Context, _ client.Host, c *client.Conn) error {
-			record, err := client.PullImage(ctx, c, args[0], client.ImageOptions{Mode: mode, Update: update, Progress: os.Stderr})
+			record, err := client.PullImage(ctx, c, args[0], client.ImageOptions{Mode: mode, Update: update, Progress: stderrFor(asJSON, "image_progress")})
 			if err != nil {
 				return err
 			}

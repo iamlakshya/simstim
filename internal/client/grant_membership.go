@@ -32,6 +32,15 @@ func sameGrantNames(a, b []string) bool {
 }
 
 func cloneGrantHost(h Host) Host {
+	h.Place.Features, h.Place.Mandatory = slices.Clone(h.Place.Features), slices.Clone(h.Place.Mandatory)
+	if h.Place.Pool != nil {
+		pool := *h.Place.Pool
+		h.Place.Pool = &pool
+	}
+	if h.Prepared != nil {
+		prepared := *h.Prepared
+		h.Prepared = &prepared
+	}
 	h.LayerValues = api.CloneLayerValues(h.LayerValues)
 	if h.Lock != nil {
 		values := api.CloneLayerValues(*h.Lock)

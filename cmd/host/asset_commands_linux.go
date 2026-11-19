@@ -35,14 +35,14 @@ func closedConverterUnit(value string) bool {
 }
 
 func runImageGuardianClosed(args []string) error {
-	if len(args) != 2 || !closedImageCount(args[0]) || !closedConverterUnit(args[1]) {
+	if len(args) != 2 || (!closedImageCount(args[0]) && args[0] != host.SavedRootConverterMode) || !closedConverterUnit(args[1]) {
 		return assetEntryError()
 	}
 	return host.RunImageGuardian(args)
 }
 
 func runImageConvertClosed(args []string) error {
-	if len(args) != 1 || !closedImageCount(args[0]) {
+	if len(args) != 1 || (!closedImageCount(args[0]) && args[0] != host.SavedRootConverterMode) {
 		return assetEntryError()
 	}
 	return host.RunImageConvert(args, os.Stdin, os.Stdout)

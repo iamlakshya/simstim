@@ -33,12 +33,16 @@ func (v *vmFiles) ownedDirectory(root *os.Root, name string, mode os.FileMode, u
 type vmMounted struct{ target string }
 
 type vmFiles struct {
-	base    string
-	root    string
-	ops     vmMountOps
-	mounts  []vmMounted
-	pivoted bool
-	back    bool
+	imageSaveRoot, imageSaveUpper *os.Root
+	copyNativeOwner               *vmInitConnection
+	copyMounts                    map[string]*vmCopyMountV1
+	copyStageRoots                []vmCopyStageRootV1
+	base                          string
+	root                          string
+	ops                           vmMountOps
+	mounts                        []vmMounted
+	pivoted                       bool
+	back                          bool
 }
 
 func newVMFiles(base string, ops vmMountOps) *vmFiles {
@@ -159,7 +163,10 @@ func (v *vmFiles) overlay(system string, sudo bool) error {
 		flags |= unix.MS_NOSUID
 	}
 	data := "lowerdir=" + v.boot("mnt/image") + ",upperdir=" + filepath.Join(upperBase, "upper") + ",workdir=" + filepath.Join(upperBase, "work")
-	return v.mount("overlay", v.root, "overlay", flags, data)
+	if err := v.mount("overlay", v.root, "overlay", flags, data); err != nil {
+		return err
+	}
+	return v.captureImageSaveRootsV1(upperBase)
 }
 
 func (v *vmFiles) pivotInto() error {
@@ -204,7 +211,7 @@ func (v *vmFiles) pivotBack() error {
 }
 
 func (v *vmFiles) close() error {
-	var result error
+	result := errors.Join(v.closeImageSaveRootsV1(), v.closeCopyMountsV1())
 	for i := len(v.mounts) - 1; i >= 0; i-- {
 		target := v.mounts[i].target
 		if v.pivoted {

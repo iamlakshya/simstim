@@ -62,10 +62,16 @@ func TestLayerPlanningAndTierGatePrecedeLauncherSecretFetch(t *testing.T) {
 			}
 			var trace []string
 			be := &layerPlanningBackend{fakeBackend: labBackend(), trace: &trace}
+			// This is saved host data, so the resolver and model read the same
+			// original entry before policy narrowing removes its inherited name.
+			for i := range be.hosts {
+				if be.hosts[i].Name == "atlas-dev" {
+					be.hosts[i].Secrets = []string{"INHERITED"}
+				}
+			}
 			m := New(t.Context(), be, Options{})
 			t.Cleanup(m.Close)
 			h := m.hostByName("atlas-dev")
-			h.host.Secrets = []string{"INHERITED"}
 			base, err := be.Dial(t.Context(), h.host)
 			if err != nil {
 				t.Fatal(err)
@@ -78,7 +84,10 @@ func TestLayerPlanningAndTierGatePrecedeLauncherSecretFetch(t *testing.T) {
 			m.conns.add(planner)
 			h.conn, h.status = cleanConn{planner}, stOnline
 			tier := m.startSession(h, startReq{args: client.NewArgs{Agent: "shell"}})().(hostTierResolvedMsg)
-			result := m.onHostTierResolved(tier)().(startedMsg)
+			result, ok := startResult(t, m, m.onHostTierResolved(tier))
+			if !ok {
+				t.Fatal("the actual new start returned no result")
+			}
 			if refuse {
 				if !errors.Is(result.err, blocked) || be.fetches != 0 {
 					t.Fatalf("refusal fetched values: %v, %d", result.err, be.fetches)

@@ -5,13 +5,16 @@ package guest
 import "syscall"
 
 // vmCommandCredentials narrows the ONE ordinary runner's prepared credentials.
-// Only the closed Docker operation may inherit actual guest PID1/root. Seed
+// Only fixed private Docker and file-publication entry roles may begin as guest root. The file publisher drops to1000 before destination IO. Seed
 // has no Docker socket group even when the later interactive agent may use it.
 func vmCommandCredentials(role vmCommandRole, docker bool, attr *syscall.SysProcAttr) error {
 	if attr == nil || attr.Pdeathsig != syscall.SIGKILL {
 		return vmError("the VM command has no fixed parent-death credential boundary")
 	}
 	switch role {
+	case vmFileCommitCommand:
+		if attr.Credential!=nil{return vmError("the private publisher did not begin in its original root descriptor owner")}
+		return nil
 	case vmDockerCommand:
 		if !docker || attr.Credential != nil {
 			return vmError("the guest-root daemon is not the explicit Docker operation")

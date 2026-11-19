@@ -34,6 +34,7 @@ These are the questions, and the flag that answers each:
 | `host rekey` | The host's typed name | `--confirm <host>` | Fails with exit code 4 |
 | `new` | Make the folder that does not exist? | `--mkdir` | Fails with exit code 4. Without a terminal and without `--detach`, `new` without a command fails with exit code 2 first |
 | `new` | Run the repository's setup script? | `--setup-script` or `--no-setup-script` | Skips the script, and says so |
+| `image save` | Save the listed changes that can run code at login or at start? | `--allow-flagged` | Fails with `image_flagged` |
 | `doctor --fix`, `host doctor --fix` | Fix it? | `-y` | Fails with exit code 4. With `--json` and `-y`, the JSON holds how each fix ended |
 | `host rm` on a host that `host create` made | Type the host's name to delete the machine too | `--destroy --confirm <host>` | Keeps the machine, forgets the host, and says so. With `--destroy` and without `--confirm`, fails with exit code 4 |
 | `host set` to a higher tier | The host's typed name | `--confirm <host>` | Fails with exit code 4 |
@@ -69,7 +70,7 @@ Esc, Ctrl+C, the end of input, or a signal at a question cancels. The command pr
 
 JSON keeps integer sizes exact, including values above 2 to the power of 53. Use an integer type when reading them.
 
-These commands take `--json`: `ls`, `show`, `new --detach`, `new --count`, `resume --detach`, `events`, `ports`, `doctor`, `host ls`, `host show`, `host upgrade`, `host test`, `host doctor`, `host restore`, `host status`, `host alerts`, `host alerts log`, `agents ls`, `config keymap` and `version`. `new` and `resume` need `--detach` with `--json`, because an attached session owns the terminal. `new --count` always detaches and prints one array. `events` prints one object per line.
+These commands take `--json`: `image ls`, `image pull`, `image save`, `ls`, `show`, `new --detach`, `new --count`, `resume --detach`, `events`, `ports`, `doctor`, `host ls`, `host show`, `host upgrade`, `host test`, `host doctor`, `host restore`, `host status`, `host alerts`, `host alerts log`, `agents ls`, `config keymap` and `version`. `new` and `resume` need `--detach` with `--json`, because an attached session owns the terminal. `new --count` always detaches and prints one array. `events` prints one object per line.
 
 <!-- test: help (needs a host) -->
 ```sh
@@ -83,6 +84,7 @@ The JSON follows these rules, so a script keeps working from one release to the 
 - stdout gets one JSON value and nothing else, with one newline at its end.
 - Each top-level object, and each object of a top-level array, has `"v": 1`.
 - Keys are in `snake_case`. A map of your own data, such as a host's `labels`, keeps your keys.
+- Terminal controls and hidden characters are escaped. Decoding the JSON keeps the exact original keys and values.
 - A value that is not set is left out, and is never `null`. Two outputs keep their older form until the end of their old form: the sessions in `ls --json` give a zero time, `0001-01-01T00:00:00Z`, for a time that is not set, and the old keys of `host ls --json` give `null` for an empty value.
 - A new release may add keys. It never renames a key or changes its type or its meaning, so ignore the keys you do not know.
 
@@ -156,7 +158,7 @@ fi
 
 stdout gets data only: lists, details and JSON. Everything else goes to stderr: confirmations such as `Deleted app (abcd2345) on my-server.`, progress, warnings, questions and errors. A line that says that there is no data, such as `No hosts yet.` or `Nothing to restore on my-server.`, goes to stderr too. So `simstim ls > sessions.txt` writes only the list. To read the ID of a session that you start, use `new --detach --json`: the line `Started my-server/abcd2345` is a message, on stderr.
 
-Colour and progress lines appear only on a terminal. Colour is also off with `--no-color`, with `NO_COLOR` set to any value, and with `TERM=dumb`. With `--json`, every line on stderr is JSON: warnings and notes, such as `debug on` or a skipped setup script, come as `{"v":1,"warning":{"code":…,"message":…}}`.
+Colour and progress lines appear only on a terminal. Colour is also off with `--no-color`, with `NO_COLOR` set to any value, and with `TERM=dumb`. With `--json`, every line on stderr is JSON: warnings and notes, such as `debug on` or a skipped setup script, come as `{"v":1,"warning":{"code":…,"message":…}}`. Image pin and transfer messages use the warning code `image_progress`.
 
 ## Old names
 

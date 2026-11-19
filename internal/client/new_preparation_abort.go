@@ -11,8 +11,11 @@ func (r *GrantRequest) Abort(ctx context.Context) (bool, error) {
 		return false, nil
 	}
 	r.mu.Lock()
-	plan := r.newSecrets
+	plan, fresh := r.newSecrets, r.freshChild
 	r.mu.Unlock()
+	if fresh != nil {
+		return fresh.abort(ctx)
+	}
 	if plan == nil || plan.creation == nil {
 		return false, nil
 	}

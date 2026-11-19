@@ -24,7 +24,7 @@ func hostCmd() *cobra.Command {
 			"  " + brand.Name + " host ls",
 	}
 	cmd.AddCommand(hostAddCmd(), hostLsCmd(), hostShowCmd(), hostSetCmd(), hostRmCmd(), hostRekeyCmd(), hostTestCmd(), hostDoctorCmd(), hostUpgradeCmd(), hostRestoreCmd(), hostAlertsCmd(),
-		hostCreateCmd(), hostDestroyCmd(), hostIdleCmd(),
+		hostCreateCmd(), hostDestroyCmd(), hostIdleCmd(), hostDefaultCmd(),
 		hostProviderCmd("start", "Start the host through its provider or provider script", ""),
 		hostProviderCmd("stop", "Stop the host through its provider or provider script",
 			"Stops the host through its provider or provider script. A VM's sessions stop too, and a sandbox's are paused."),

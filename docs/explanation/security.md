@@ -43,3 +43,33 @@ A laptop seed reads repository policy from the commit selected for the bundle. O
 Walled sandboxes hold fake credentials in two inert files: an AWS `prod-admin` profile and Git's credential-store file, without enabling that helper. Each cold start makes fresh random values. A request carrying one is refused and raises `secret_misuse`; the session keeps running. Decoys also trigger on their named credential hosts when normal policy refuses the host. `[sandbox] decoys = false` disables the files and tripwires. Decoys do not replace other controls: targeted code can avoid these public paths, and no measurement establishes their false-alarm rate in a developer sandbox.
 
 Decoy credentials have no binding, arming or grant authority. Their values stay in the trusted start's memory and the fixed guest files. Public session metadata and receipts contain none of those values. A tripwire refusal uses the existing audit and alert path; it does not stop the session. If the destination itself contains a decoy, the audit omits that destination rather than recording a case-folded fake value.
+
+The classifier's fixed destination checks run only after actual policy leaves
+a flow uncovered. They are a first filter, not a wall or a claim about a
+domain's safety. Webhook and bot path barriers also apply after a broad host
+allowance, using the ordinary endpoint grant transaction. The remaining
+classifier facts, holds and judge paths are separate
+work. Raw Unicode host input keeps the existing refusal; canonical A-labels
+keep their existing parser contract.
+
+The confusable-name check uses the complete Unicode 15.0.0 prototype mapping
+and the skeleton algorithm of UTS #39 revision 26. That version matches the
+normalisation data active under the pinned toolchain. It does not claim the
+newer bidirectional skeleton algorithm. Its comparison index grants nothing:
+each hit rechecks the original policy matcher before the fixed refusal.
+
+An explicit unknown-site `allow` may open an otherwise uncovered public IP
+literal. Address safety remains independent: the current refused-range and
+own-host checks still run before the checked physical dial. This fallback
+does not create a numeric grant for private, link-local or shared ranges.
+Changing the live policy revalidates both prospective and active flows.
+
+The unknown action follows actual scalar presence. An explicit `ask` or
+`deny` therefore restricts an uncovered DNS flow even under the `open` preset.
+It never replaces a matched named rule or a lock. Legacy policies which omit
+the setting keep their old preset fallback; no diagnostic rule label supplies
+permission or setting presence.
+
+Saved-image lookup reads an alias tied to one host ID from the laptop's `images.lock`. It rechecks the original accepted host selection before publishing that image's digest. Another host receives no saved-image digest. A missing saved root never falls back to a registry. The protected VM Need carries the saved origin to the original host store, which still checks its native ownership receipt and the root bytes.
+
+Placement labels in a session row are advisory. Human display cleans a copy, and JSON keeps the original host metadata. These labels never choose the host or approve a start.

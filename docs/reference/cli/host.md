@@ -33,6 +33,7 @@ simstim host ls
 | [`host add`](host_add.md) | Connect a host: check it, install the helper, prepare it |
 | [`host alerts`](host_alerts.md) | Show where a host sends alerts, and the last deliveries |
 | [`host create`](host_create.md) | Make a host with lima, docker or e2b, and connect it |
+| [`host default`](host_default.md) | Show or choose the default host for new sessions |
 | [`host doctor`](host_doctor.md) | Check a host's setup, and with `--fix` fix what it can |
 | [`host ls`](host_ls.md) | List hosts |
 | [`host prepare`](host_prepare.md) | Probe a host and show its optional root steps |

@@ -6,6 +6,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/iamlakshya/simstim/internal/cachefs"
 )
@@ -34,6 +35,12 @@ func (s *Store) PurgeOwned(ctx context.Context, refs References) (PurgeReport, e
 	if err := s.generation.CheckRoot(s.root); err != nil {
 		return report, err
 	}
+	pending, err := s.reapSavedPending(ctx, time.Now().UTC(), true)
+	if err != nil {
+		return report, err
+	}
+	report.Removed = append(report.Removed, pending.Removed...)
+	report.Left = append(report.Left, pending.Left...)
 	names, err := directoryEntries(s.root)
 	if err != nil {
 		return report, err

@@ -7,6 +7,7 @@ import (
 	"os"
 	"path"
 	"strings"
+	"time"
 
 	"github.com/iamlakshya/simstim/internal/cachefs"
 	"github.com/iamlakshya/simstim/internal/proto"
@@ -25,7 +26,14 @@ func OpenHost(ctx context.Context, dir string, domain cachefs.Domain, gate Publi
 	if gate == nil {
 		return nil, imageDomainError("host image publication has no final admission gate")
 	}
-	return openDomainStore(ctx, dir, domain, gate, true)
+	store, err := openDomainStore(ctx, dir, domain, gate, true)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := store.reapSavedPending(ctx, time.Now().UTC(), false); err != nil {
+		return nil, errors.Join(err, store.Close())
+	}
+	return store, nil
 }
 
 // OpenHostExisting anchors existing storage for this exact host domain. It
@@ -173,6 +181,12 @@ func leaseRole(name string) (string, bool) {
 	}
 	if strings.HasSuffix(name, ".lock") {
 		key := strings.TrimSuffix(name, ".lock")
+		if strings.HasPrefix(key, "pending-save-") && validPendingSaveID(strings.TrimPrefix(key, "pending-save-")) {
+			return "saved-pending", true
+		}
+		if strings.HasPrefix(key, "saved-") && supply.IsHex64(strings.TrimPrefix(key, "saved-")) {
+			return "saved-alias", true
+		}
 		if supply.IsHex64(key) {
 			return "platform", true
 		}

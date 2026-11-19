@@ -395,6 +395,7 @@ Try: simstim rm box/abcd2345 -y
 | Command | Question | Default | Flag | Input off |
 | --- | --- | --- | --- | --- |
 | `cp` | Copy the listed files that can run code or expose session data? | No | `--allow-flagged` | Fail with `cp_flagged` |
+| `image save` | Save the image with these reviewed changes? | No | `--allow-flagged` | Fail with `image_flagged` |
 | `rm` | `Delete auth-fix on box?` with what stops and what stays | No | `-y` | Fail, after the end of section 3 |
 | `attach` on an ended agent | `Start claude again in auth-fix on box? [Y/n]` | Yes | `--restart` | Fail |
 | `new`, missing folder | `Make it? [y/N]` | No | `--mkdir` | Fail |

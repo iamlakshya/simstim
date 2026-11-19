@@ -52,6 +52,7 @@ simstim attach my-vps/auth-fix      # go back to a session
 | [`host alerts set`](host_alerts_set.md) | Choose where a host sends alerts, and which ones |
 | [`host alerts test`](host_alerts_test.md) | Send a test alert to every destination now, and say what each did |
 | [`host create`](host_create.md) | Make a host with lima, docker or e2b, and connect it |
+| [`host default`](host_default.md) | Show or choose the default host for new sessions |
 | [`host doctor`](host_doctor.md) | Check a host's setup, and with `--fix` fix what it can |
 | [`host ls`](host_ls.md) | List hosts |
 | [`host prepare`](host_prepare.md) | Probe a host and show its optional root steps |

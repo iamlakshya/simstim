@@ -3,7 +3,6 @@ package filecopy
 import (
 	"context"
 	"crypto/rand"
-	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"io"
@@ -12,9 +11,9 @@ import (
 	"strings"
 )
 
-// directory opens each directory relative to the held root. It rejects every
+// OpenDirectoryRoot opens each directory relative to the held root. It rejects every
 // symlink before opening, including links that would stay inside os.Root.
-func directory(root *os.Root, name string, create bool) (*os.Root, error) {
+func OpenDirectoryRoot(root *os.Root, name string, create bool) (*os.Root, error) {
 	current, err := root.OpenRoot(".")
 	if err != nil {
 		return nil, err
@@ -101,7 +100,7 @@ func ReceiveFile(ctx context.Context, root *os.Root, relative string, size int64
 	if err := Relative(relative); err != nil {
 		return err
 	}
-	parent, err := directory(root, path.Dir(relative), true)
+	parent, err := OpenDirectoryRoot(root, path.Dir(relative), true)
 	if err != nil {
 		return err
 	}
@@ -119,28 +118,7 @@ func ReceiveFile(ctx context.Context, root *os.Root, relative string, size int64
 		return err
 	}
 	defer func() { err = errors.Join(err, cleanup()) }()
-	hash := sha256.New()
-	n, err := io.CopyN(io.MultiWriter(file, hash), contextReader{ctx, input}, size)
-	if err != nil || n != size {
-		return errors.Join(failure("cp_too_big", "the copied file differs from its listed size"), err)
-	}
-	var extra [1]byte
-	more, endErr := (contextReader{ctx, input}).Read(extra[:])
-	if more != 0 || !errors.Is(endErr, io.EOF) {
-		return errors.Join(failure("cp_too_big", "the copied file sends bytes beyond its listed size"), endErr)
-	}
-	if hex.EncodeToString(hash.Sum(nil)) != strings.ToLower(digest) {
-		return failure("cp_changed", "the copied file differs from its checked digest")
-	}
-	if err = file.Chmod(0644); err != nil {
-		return err
-	}
-	if err = file.Sync(); err != nil {
-		return err
-	}
-	if err = ctx.Err(); err != nil {
-		return err
-	}
+	if err=ReceivePreparedStage(ctx,file,size,digest,input);err!=nil{return err}
 	// The stage owns its live descriptor until cleanup. In the Linux guest,
 	// publication links that exact anonymous inode; no helper-owned name is
 	// exposed while bytes arrive or left behind when the helper dies.

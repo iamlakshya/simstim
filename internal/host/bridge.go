@@ -30,6 +30,8 @@ import (
 var Features = []string{"attach.replay", "upload", "peek", "setup", "rename", "send", "hooks", "restore", "ports", "worktree", "folders", "alerts", "trace", api.FeatureSandboxReviewContext, api.FeatureSandboxCohort, inputtransfer.Feature, inputtransfer.PrimaryPolicyFeature, inputtransfer.FinishFeature, api.FeatureExecStream, api.FeatureSpawn, api.FeatureSandboxGroupRM, api.FeatureSandboxSnapshot, "session.id", agentbridge.Feature}
 
 type bridge struct {
+	imageSaveRelays                    map[string]*imageSaveRelayV1
+	imageSaveClosed                    bool
 	copyMu                             sync.Mutex
 	copyBusy, copyClosed, copyWatching bool
 	copyRoute                          *bridgeCopyRoute
@@ -77,8 +79,12 @@ func RunBridge(in io.Reader, out io.Writer) error {
 
 func runBridge(in io.Reader, out io.Writer, owned OwnedBridgeOutput, inputs ...OwnedBridgeInput) (returned error) {
 	var ownedInput OwnedBridgeInput
-	if len(inputs)>1{return UserError("bridge_io","the bridge has more than one input owner","Use one original process-owned reader.")}
-	if len(inputs)==1{ownedInput=inputs[0]}
+	if len(inputs) > 1 {
+		return UserError("bridge_io", "the bridge has more than one input owner", "Use one original process-owned reader.")
+	}
+	if len(inputs) == 1 {
+		ownedInput = inputs[0]
+	}
 	if err := secretmem.Protect(); err != nil {
 		return err
 	}
@@ -112,11 +118,11 @@ func runBridge(in io.Reader, out io.Writer, owned OwnedBridgeOutput, inputs ...O
 	features := Features
 	if owned == nil {
 		features = slices.DeleteFunc(slices.Clone(Features), func(feature string) bool {
-			return feature == api.FeaturePullBundle || feature == api.FeaturePullRepositories
+			return feature == api.FeaturePullBundle || feature == api.FeaturePullRepositories || feature == proto.FeatureImageSave
 		})
 	}
-	if ownedInput==nil || owned==nil {
-		features=slices.DeleteFunc(slices.Clone(features),func(feature string)bool{return feature==api.FeatureEvents || feature==api.FeatureReversePortsV1})
+	if ownedInput == nil || owned == nil {
+		features = slices.DeleteFunc(slices.Clone(features), func(feature string) bool { return feature == api.FeatureEvents || feature == api.FeatureReversePortsV1 })
 	}
 	if err := w.WriteJSON(proto.THello, proto.Hello{Magic: proto.Magic, Protocol: version.Protocol, Version: version.Version, Role: "bridge", HostID: hostID, Features: features}); err != nil {
 		return err
@@ -124,7 +130,7 @@ func runBridge(in io.Reader, out io.Writer, owned OwnedBridgeOutput, inputs ...O
 	lines := diag.NewLines()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	b := &bridge{ctx: ctx, ownedInput:ownedInput,ownedOutput: owned, w: w, log: slog.New(lines), dbg: bridgeDebug{lines: lines}, uploads: map[uint64]*upload{}}
+	b := &bridge{ctx: ctx, ownedInput: ownedInput, ownedOutput: owned, w: w, log: slog.New(lines), dbg: bridgeDebug{lines: lines}, uploads: map[uint64]*upload{}}
 	liveBridges.Store(b, true)
 	defer liveBridges.Delete(b)
 	// An upload that never got its end, as one that its client gave up at
@@ -134,9 +140,11 @@ func runBridge(in io.Reader, out io.Writer, owned OwnedBridgeOutput, inputs ...O
 	defer b.endAttach()
 	defer func() {
 		cancel()
-		returned = errors.Join(returned, b.agents.close(), b.images.close())
+		returned = errors.Join(returned, b.closeImageSavesV1(), b.agents.close(), b.images.close())
 		b.runtime.close()
-		if ownedInput!=nil {_ = ownedInput.Cancel()}
+		if ownedInput != nil {
+			_ = ownedInput.Cancel()
+		}
 		if owned != nil {
 			_ = owned.Cancel()
 		}
@@ -164,13 +172,21 @@ func runBridge(in io.Reader, out io.Writer, owned OwnedBridgeOutput, inputs ...O
 		case proto.TRequest:
 			var req proto.Request
 			if json.Unmarshal(f.Payload, &req) == nil {
-				if req.Op=="events.watch" {
-					if !wasFirst {err:=UserError("bad_request","events need a dedicated connection","Open a fresh event continuation.");b.reply(req.ID,nil,err);return err}
-					return b.events(r,req)
+				if req.Op == "events.watch" {
+					if !wasFirst {
+						err := UserError("bad_request", "events need a dedicated connection", "Open a fresh event continuation.")
+						b.reply(req.ID, nil, err)
+						return err
+					}
+					return b.events(r, req)
 				}
-				if req.Op=="port.reverse" {
-					if !wasFirst {err:=UserError("bad_request","reverse forwarding needs a dedicated connection","Open a fresh reverse continuation.");b.reply(req.ID,nil,err);return err}
-					return b.reverse(r,req)
+				if req.Op == "port.reverse" {
+					if !wasFirst {
+						err := UserError("bad_request", "reverse forwarding needs a dedicated connection", "Open a fresh reverse continuation.")
+						b.reply(req.ID, nil, err)
+						return err
+					}
+					return b.reverse(r, req)
 				}
 				if req.Op == "inputs.begin" || req.Op == inputtransfer.Describe {
 					if !wasFirst {
@@ -187,6 +203,12 @@ func runBridge(in io.Reader, out io.Writer, owned OwnedBridgeOutput, inputs ...O
 						return err
 					}
 					return b.exec(r, req)
+				}
+				if IsImageSaveOperationV1(req.Op) {
+					if err := b.forwardImageSaveV1(req); err != nil {
+						b.reply(req.ID, nil, err)
+					}
+					continue
 				}
 				if IsPullOp(req.Op) {
 					run, ctx, err := b.preparePull(req)

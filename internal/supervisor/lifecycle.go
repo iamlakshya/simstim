@@ -69,8 +69,8 @@ func (s *Supervisor) wait() {
 	case <-s.maxRunDone():
 		s.markStopIntent()
 		s.ending()
-		s.stopGuest(systemGrace,ended)
-		kind,reason=host.EndStop,"max_run"
+		s.stopGuest(systemGrace, ended)
+		kind, reason = host.EndStop, "max_run"
 	case <-s.stop:
 		s.markStopIntent()
 		s.ending()
@@ -114,8 +114,11 @@ func (s *Supervisor) wait() {
 	}
 	cleanupErr := s.closeSandbox()
 	<-ended // Cleanup must join the original waiter before accepting its result.
-	cleanupErr=errors.Join(cleanupErr,ownedWaitErr)
-	if cleanupErr!=nil {natural=false;kind,reason=host.EndSandbox,cleanupErr.Error()}
+	cleanupErr = errors.Join(cleanupErr, ownedWaitErr)
+	if cleanupErr != nil {
+		natural = false
+		kind, reason = host.EndSandbox, cleanupErr.Error()
+	}
 	// The owned exit can win the select before its final ctl event is read.
 	// Drain that reader before deciding whether a capture is ready.
 	if s.ctl != nil {
@@ -169,6 +172,7 @@ func (s *Supervisor) stopGuest(grace time.Duration, ended <-chan struct{}) {
 // sandbox's end. It may run more than once.
 func (s *Supervisor) closeSandbox() (cleanupErr error) {
 	s.stopMaxRun()
+	s.cancelImageSavesV1()
 	s.closePortListeners(true)
 	s.closeReverseForwards()
 	s.closeFileTransfers()
@@ -197,7 +201,7 @@ func (s *Supervisor) closeSandbox() (cleanupErr error) {
 	}
 	// An unstarted factory owns only prepared leases and metadata pins.
 	// Release those non-destructively, after any watcher has joined.
-	return errors.Join(cleanupErr, s.closeDiskResourcesV1())
+	return errors.Join(cleanupErr, s.joinImageSavesV1(), s.closeDiskResourcesV1())
 }
 
 // finish closes the record with the run's end, makes the session's last
@@ -320,7 +324,9 @@ func (s *Supervisor) watchBeat() {
 		s.log.Warn("the guest init is silent", "for", linkSilent)
 		s.audit.write("link_silent", nil)
 		s.raise(s.alertEvent(alerts.LinkSilent))
-		ev:=s.alertEvent(alerts.HealthDegraded);ev.Reason="heartbeat_silent";s.raise(ev)
+		ev := s.alertEvent(alerts.HealthDegraded)
+		ev.Reason = "heartbeat_silent"
+		s.raise(ev)
 	}
 }
 

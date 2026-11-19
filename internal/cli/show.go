@@ -46,7 +46,11 @@ func showCmd() *cobra.Command {
 				if asJSON {
 					return printJSON(sessionObject(f.host.Name, *f.s))
 				}
-				printf("%s", describeSession(f.host.Name, *f.s))
+				hostID := f.conn.HostID()
+				if f.conn.HostIDChanged() {
+					hostID = ""
+				}
+				printf("%s", describeSession(f.host.Name, *f.s, hostID))
 				return nil
 			})
 			return stoppedHost(cmd.Context(), a.host, err)
@@ -98,10 +102,14 @@ type detail struct{ label, value string }
 // The name is in the title. The state line says where the state came from
 // and why the agent ended, so a field that it says faithfully has no line
 // of its own. The size joins the columns and the rows.
-func describeSession(host string, s client.Session) string {
+func describeSession(host string, s client.Session, acceptedHostID ...string) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s on %s\n", shown(nameOf(s)), shown(host))
-	for _, d := range sessionDetails(s) {
+	details := sessionDetails(s)
+	if len(acceptedHostID) == 1 {
+		details = append(details, savedImageDetail(host, acceptedHostID[0], s)...)
+	}
+	for _, d := range details {
 		fmt.Fprintf(&b, "  %-15s %s\n", d.label, shown(d.value))
 	}
 	fmt.Fprintf(&b, "  %-15s %s\n", "Attach", sessionCommand(host, s.ID, "attach"))
@@ -141,6 +149,7 @@ func sessionDetails(s client.Session) []detail {
 	add("Unit", s.Unit)
 	add("Memory cap", showSize(s.MemoryMax))
 	add("Memory used", showSize(s.MemoryCurrent))
+	add("Packages", showPackages(s))
 	add("Host helper", s.HostVersion)
 	if s.Cols > 0 && s.Rows > 0 {
 		add("Size", fmt.Sprintf("%d×%d", s.Cols, s.Rows))

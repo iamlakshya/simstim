@@ -27,7 +27,7 @@ import (
 	"github.com/iamlakshya/simstim/internal/host"
 	"github.com/iamlakshya/simstim/internal/link"
 	"github.com/iamlakshya/simstim/internal/proto"
- "github.com/iamlakshya/simstim/internal/secretmem"
+	"github.com/iamlakshya/simstim/internal/secretmem"
 )
 
 // RootEnv names a folder that stands for the sandbox's root, for the
@@ -45,48 +45,52 @@ const heartbeatEvery = 5 * time.Second
 
 // Init is the guest init of one sandbox.
 type Init struct {
-	decoysApplied bool
-	decoyGeneration *proto.DecoyFilesV1
-	portWG sync.WaitGroup
-	reversePorts map[string]*reverseListener
-	copySlots       chan struct{}
-	fileWG          sync.WaitGroup
-	lifetime        context.Context
-	cancelLifetime  context.CancelFunc
-	preparedMembers map[string]*preparedMember
-	secretStores    *secretStoreOwnership
-	inputs          *inputPhase
-	inputStart      *proto.CtlStartArgs
-	inputEnv        []string
-	vm              vmHooks
-	sessionPrepared bool
-	bundles         map[string]*bundleOperation
-	dnsErr          error
-	proxy           *Proxy
-	dns             *DNS
-	dnsSocks        DNSSockets
-	owned           map[*execRun]struct{}
-	commandHolds    int
-	caReady         bool
-	members         map[string]*holderProc
-	memberStarts    map[string]bool
-	primary         string
-	pendingBoot     int
-	bootAdmission   bool // pending transaction ready, not an invented member
-	execs           map[string]*execRun
-	execEnv         []string
-	execCwd         string
-	stateFiles      []string
-	captureNonce    string
-	stateSession    string
-	cleanStop       bool
-	seedArgs        *proto.CtlSeedArgs
-	seedDone        chan error
-	seedStreams     chan *link.Stream
-	seedTaken       bool
-	root            string
-	log             *slog.Logger
-	sess            *link.Session
+	imageSaves              map[string]*imageSaveGuestV1
+	packageSettingsRequired bool // set only by the actual closed walled constructors
+	packageSettingsPhase    packageSettingsPhase
+	packageSettingsPlan     *proto.PackageManagersV1
+	decoysApplied           bool
+	decoyGeneration         *proto.DecoyFilesV1
+	portWG                  sync.WaitGroup
+	reversePorts            map[string]*reverseListener
+	copySlots               chan struct{}
+	fileWG                  sync.WaitGroup
+	lifetime                context.Context
+	cancelLifetime          context.CancelFunc
+	preparedMembers         map[string]*preparedMember
+	secretStores            *secretStoreOwnership
+	inputs                  *inputPhase
+	inputStart              *proto.CtlStartArgs
+	inputEnv                []string
+	vm                      vmHooks
+	sessionPrepared         bool
+	bundles                 map[string]*bundleOperation
+	dnsErr                  error
+	proxy                   *Proxy
+	dns                     *DNS
+	dnsSocks                DNSSockets
+	owned                   map[*execRun]struct{}
+	commandHolds            int
+	caReady                 bool
+	members                 map[string]*holderProc
+	memberStarts            map[string]bool
+	primary                 string
+	pendingBoot             int
+	bootAdmission           bool // pending transaction ready, not an invented member
+	execs                   map[string]*execRun
+	execEnv                 []string
+	execCwd                 string
+	stateFiles              []string
+	captureNonce            string
+	stateSession            string
+	cleanStop               bool
+	seedArgs                *proto.CtlSeedArgs
+	seedDone                chan error
+	seedStreams             chan *link.Stream
+	seedTaken               bool
+	root                    string
+	log                     *slog.Logger
+	sess                    *link.Session
 
 	// reaper is true for the guest init of a sandbox (Run): on Linux it is
 	// a child subreaper, and its end reaps every child that it has
@@ -115,7 +119,9 @@ func Run(args ...string) error {
 		}
 		return vmError("unknown versioned guest init argument")
 	}
-	if err:=secretmem.Protect();err!=nil{return vmError("the guest init cannot protect its private control input")}
+	if err := secretmem.Protect(); err != nil {
+		return vmError("the guest init cannot protect its private control input")
+	}
 	dnsSocks, dnsErr := claimInheritedDNSSockets()
 	f := os.NewFile(linkFD, "link")
 	if f == nil {
@@ -132,6 +138,7 @@ func Run(args ...string) error {
 	// reads its output.
 	host.KeepOnBrokenPipe()
 	g := New(conn, os.Getenv(RootEnv), slog.New(slog.NewTextHandler(os.Stderr, nil)))
+	g.packageSettingsRequired = true
 	g.setInheritedDNS(dnsSocks, dnsErr)
 	g.reaper = becomeSubreaper(g.log)
 	// A stop, from the test driver or as the supervisor dies
@@ -179,6 +186,8 @@ func (g *Init) Serve() {
 			g.acceptPort(st)
 		case link.KindCtl:
 			go g.serveCtl(st)
+		case link.KindLayer:
+			g.acceptImageSaveLayerV1(st)
 		case link.KindGet:
 			g.acceptCopy(st)
 		case link.KindPut:
@@ -238,6 +247,13 @@ func (g *Init) end() {
 		g.stopPorts()
 		g.stopInputs()
 		g.stopBundles()
+		if err := g.stopImageSavesV1(); err != nil {
+			clean = false
+			g.log.Error("original image export cleanup failed", "err", err)
+			if original, ok := g.vm.(interface{ setError(error) }); ok {
+				original.setError(err)
+			}
+		}
 		g.stopExecs()
 		g.fileWG.Wait()
 		if g.vm != nil {

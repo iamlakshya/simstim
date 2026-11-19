@@ -114,10 +114,13 @@ static struct mount_request mount_record(struct parser *p) {
         if (!strcmp(key,"fd")) {bit=1;m.fd=(int)number(p);}
         else if (!strcmp(key,"guest")) {bit=2;m.guest=string(p);}
         else if (!strcmp(key,"write")) {bit=4;m.write=boolean(p);}
+        else if (!strcmp(key,"stage_fd")) {bit=8;m.stage_fd=(int)number(p);}
+        else if (!strcmp(key,"stage_name")) {bit=16;m.stage_name=string(p);}
         else fail("unknown launcher mount field");
         free(key);if (seen&bit) fail("duplicate launcher mount field");seen|=bit;
     } while (another(p,'}'));
-    if (seen!=7 || m.fd<6) fail("missing launcher mount field or reserved descriptor");
+    m.stage_fields=seen&24;
+    if ((seen&7)!=7 || m.fd<6) fail("missing launcher mount field or reserved descriptor");
     return m;
 }
 static void mounts(struct parser *p, struct request *r) {
@@ -157,6 +160,10 @@ void read_request(struct request *r) {
         free(key);if (seen&bit) fail("duplicate launcher request field");seen|=bit;
     } while (another(&p,'}'));
     space(&p);
-    if (p.p!=p.end || seen!=15 || r->version!=1 || (r->probe && (r->count || r->dns))) fail("unsupported or incomplete launcher request");
+    if (p.p!=p.end || seen!=15 || (r->version!=1 && r->version!=2) || (r->probe && (r->count || r->dns))) fail("unsupported or incomplete launcher request");
+    for (size_t i=0;i<r->count;++i) {
+        struct mount_request *mount=&r->mounts[i];
+        if ((r->version==1 && mount->stage_fields) || (r->version==2 && mount->stage_fields!=24)) fail("incomplete versioned stage fields");
+    }
     free(data);
 }

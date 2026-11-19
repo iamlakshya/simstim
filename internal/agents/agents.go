@@ -11,6 +11,8 @@ import (
 	"slices"
 	"strings"
 	"sync"
+
+	"github.com/iamlakshya/simstim/internal/api"
 )
 
 // Agent describes one agent CLI.
@@ -78,6 +80,9 @@ type Agent struct {
 	// not a size for one process. The host doctor warns when a host has less.
 	// In October 2026, the docs of opencode and Antigravity CLI named none.
 	Memory int64 `json:"memory,omitempty"`
+	// Size is optional per-sandbox size data. Memory above remains the agent
+	// documentation's minimum MACHINE memory and never supplies this default.
+	Size *api.SandboxSize `json:"size,omitempty"`
 	// Setup is how to install the agent and log in (setup.go).
 	Setup *Setup `json:"setup,omitempty"`
 	// TokenHint describes a separate credential with limited permissions and spending.
@@ -88,6 +93,16 @@ type Agent struct {
 	ModelGuard *ModelGuard `json:"model_guard,omitempty"`
 	// Egress names the first-class HTTPS hosts in the canonical agent data.
 	Egress []string `json:"egress,omitempty"`
+}
+
+// SandboxSize returns an owned copy of this agent's per-sandbox size data.
+// Nil lets the canonical resolver use its 2-CPU, 4-GiB fallback.
+func (a Agent) SandboxSize() *api.SandboxSize {
+	if a.Size == nil {
+		return nil
+	}
+	size := *a.Size
+	return &size
 }
 
 // GB is a gigabyte as agents' docs give memory: 10^9 bytes, a little less

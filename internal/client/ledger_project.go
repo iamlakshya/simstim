@@ -18,10 +18,13 @@ type projectedLedgerRow struct {
 	kind           OutboundKind
 	rank, count    int
 	first, last    projectedTime
+	firstSpan      api.JSONSpan
+	lastSpan       api.JSONSpan
+	countSpan      api.JSONSpan
 	removed        bool
 }
 
-func ledgerEmptyString(p *api.JSONProjection, span api.JSONSpan) (ledgerString, error) {
+func ledgerEmptyString(p ledgerValueProjection, span api.JSONSpan) (ledgerString, error) {
 	out := ledgerString{span: span, empty: span.End == 0}
 	if out.empty {
 		return out, nil
@@ -37,7 +40,7 @@ func ledgerEmptyString(p *api.JSONProjection, span api.JSONSpan) (ledgerString, 
 	out.empty, err = p.StringEqual(span, "")
 	return out, err
 }
-func ledgerHostID(p *api.JSONProjection, value ledgerString) error {
+func ledgerHostID(p ledgerValueProjection, value ledgerString) error {
 	if value.empty {
 		return nil
 	}
@@ -58,7 +61,7 @@ func ledgerHostID(p *api.JSONProjection, value ledgerString) error {
 	}
 	return nil
 }
-func ledgerCount(p *api.JSONProjection, span api.JSONSpan) (int, error) {
+func ledgerCount(p ledgerValueProjection, span api.JSONSpan) (int, error) {
 	var n uint64
 	maxInt := uint64(^uint(0) >> 1)
 	err := p.WalkEncoded(span, func(piece []byte) error {
@@ -78,7 +81,7 @@ func ledgerCount(p *api.JSONProjection, span api.JSONSpan) (int, error) {
 	}
 	return int(n), nil
 }
-func ledgerKind(p *api.JSONProjection, span api.JSONSpan) (OutboundKind, error) {
+func ledgerKind(p ledgerValueProjection, span api.JSONSpan) (OutboundKind, error) {
 	for _, kind := range []OutboundKind{OutboundSecret, OutboundSSHAgent, OutboundSSHKey, OutboundAlertToken, OutboundRepo, OutboundPaste, OutboundPush, OutboundPublicPush, OutboundRootRun} {
 		equal, err := p.StringEqual(span, string(kind))
 		if err != nil {
@@ -90,7 +93,7 @@ func ledgerKind(p *api.JSONProjection, span api.JSONSpan) (OutboundKind, error) 
 	}
 	return "", badGrantStateError(grantsFileName)
 }
-func projectLedgerRow(p *api.JSONProjection, span api.JSONSpan) (projectedLedgerRow, error) {
+func projectLedgerRow(p ledgerValueProjection, span api.JSONSpan) (projectedLedgerRow, error) {
 	var row projectedLedgerRow
 	row.span = span
 	var fields [8]api.JSONSpan
@@ -130,10 +133,12 @@ func projectLedgerRow(p *api.JSONProjection, span api.JSONSpan) (projectedLedger
 	if err := projectedLedgerName(p, row.kind, fields[3]); err != nil {
 		return row, err
 	}
+	row.firstSpan = fields[4]
 	row.first, err = readProjectedTime(p, fields[4])
 	if err != nil {
 		return row, err
 	}
+	row.lastSpan = fields[5]
 	row.last, err = readProjectedTime(p, fields[5])
 	if err != nil {
 		return row, err
@@ -141,6 +146,7 @@ func projectLedgerRow(p *api.JSONProjection, span api.JSONSpan) (projectedLedger
 	if row.first.instant.IsZero() || row.last.instant.IsZero() || row.last.instant.Before(row.first.instant) || !row.first.marshalable() || !row.last.marshalable() {
 		return row, badGrantStateError(grantsFileName)
 	}
+	row.countSpan = fields[6]
 	row.count, err = ledgerCount(p, fields[6])
 	if err != nil {
 		return row, err
@@ -163,7 +169,7 @@ func projectLedgerRow(p *api.JSONProjection, span api.JSONSpan) (projectedLedger
 	}
 	return row, nil
 }
-func compareLedgerString(p *api.JSONProjection, a, b ledgerString) (int, error) {
+func compareLedgerString(p ledgerValueProjection, a, b ledgerString) (int, error) {
 	if a.empty {
 		if b.empty {
 			return 0, nil
@@ -175,7 +181,7 @@ func compareLedgerString(p *api.JSONProjection, a, b ledgerString) (int, error) 
 	}
 	return p.CompareStrings(a.span, b.span)
 }
-func compareProjectedRows(p *api.JSONProjection, a, b projectedLedgerRow) (int, error) {
+func compareProjectedRows(p ledgerValueProjection, a, b projectedLedgerRow) (int, error) {
 	for _, pair := range [][2]ledgerString{{a.host, b.host}, {a.id, b.id}} {
 		order, err := compareLedgerString(p, pair[0], pair[1])
 		if err != nil || order != 0 {
@@ -203,7 +209,7 @@ func compareProjectedRows(p *api.JSONProjection, a, b projectedLedgerRow) (int, 
 
 // compareLedgerText compares an encoded field to a bounded trusted host/ID.
 // It never materialises an unrelated record's string.
-func compareLedgerText(p *api.JSONProjection, value ledgerString, want string) (int, error) {
+func compareLedgerText(p ledgerValueProjection, value ledgerString, want string) (int, error) {
 	if value.empty {
 		if want == "" {
 			return 0, nil
@@ -236,7 +242,7 @@ func compareLedgerText(p *api.JSONProjection, value ledgerString, want string) (
 	}
 	return order, nil
 }
-func compareRowToNewAgent(p *api.JSONProjection, row projectedLedgerRow, h Host, hostID string, first time.Time) (int, error) {
+func compareRowToNewAgent(p ledgerValueProjection, row projectedLedgerRow, h Host, hostID string, first time.Time) (int, error) {
 	order, err := compareLedgerText(p, row.host, h.Name)
 	if err != nil || order != 0 {
 		return order, err
@@ -260,7 +266,7 @@ func compareRowToNewAgent(p *api.JSONProjection, row projectedLedgerRow, h Host,
 	}
 	return row.first.instant.Compare(first), nil
 }
-func ledgerRowMatchesAgent(p *api.JSONProjection, row projectedLedgerRow, h Host, hostID string) (bool, error) {
+func ledgerRowMatchesAgent(p ledgerValueProjection, row projectedLedgerRow, h Host, hostID string) (bool, error) {
 	if row.kind != OutboundSSHAgent || row.removed || !row.name.empty {
 		return false, nil
 	}
@@ -273,7 +279,7 @@ func ledgerRowMatchesAgent(p *api.JSONProjection, row projectedLedgerRow, h Host
 }
 
 type projectedLedger struct {
-	p             *api.JSONProjection
+	p             ledgerValueProjection
 	root, rows    api.JSONSpan
 	selected      projectedLedgerRow
 	found, sorted bool
@@ -285,6 +291,10 @@ func projectLedger(ctx context.Context, source io.ReaderAt, size int64, h Host, 
 	if err != nil {
 		return nil, err
 	}
+	return projectLedgerProjection(ctx, p, h, hostID)
+}
+
+func projectLedgerProjection(ctx context.Context, p ledgerValueProjection, h Host, hostID string) (*projectedLedger, error) {
 	root, err := p.ObjectRoot()
 	if err != nil {
 		return nil, err

@@ -2,7 +2,35 @@
 
 A session is one agent, or one shell, that runs on a host and keeps running when you leave. These commands find a session, attach to it, describe it and delete it. The launcher does the same with keys: run `simstim` with no arguments.
 
+## Choose a default host
+
+```sh
+simstim host default my-server
+simstim new --agent claude
+simstim new - --agent codex
+simstim host default --clear
+```
+
+`new` without a host uses `SIMSTIM_DEFAULT_HOST`, then the saved default.
+With neither set, it uses the only saved host that is not shared. When more
+than one host qualifies, name the host or choose a default. A shared host
+needs its name on that start and cannot be a default.
+
+`new -` uses the host of the last session you attached to. It checks that the
+host is still saved. A command still goes after `--`, including when the host
+is omitted. `host default` prints the saved choice; `--clear` removes it.
+
 ## Bring files and variables
+
+Choose a pinned image, or one saved on the selected host, with `--image`:
+
+```sh
+simstim new my-server --wall microvm --image devtools
+```
+
+The image goes through the same policy layers as the other sandbox settings.
+Profiles and locked values still apply. `new --in` keeps its sandbox's image
+and refuses `--image`.
 
 ```sh
 simstim new my-server --wall process --seed . -- make test
@@ -41,6 +69,16 @@ cannot approve another. A refused start leaves the other sessions running.
 With `--json`, stdout has one array. Each item describes the session that started
 or carries its name and error. The command returns the first error's exit code.
 When no session starts, stdout stays empty and the command reports that error.
+
+## Start another member in a sandbox
+
+```sh
+simstim new my-server --in app --agent codex --detach
+```
+
+`--in` starts a fresh member in the selected running sandbox. It keeps that sandbox's wall, files, policy and resource limits. The member uses this computer's current local secret selection; it does not borrow the parent's selection. Its own approval and complete start acknowledgement must match before the client records the start.
+
+Use `--agent`, `--name`, `--task`, `--detach` or a command after `--`. Flags that change the sandbox require a new sandbox. The session after `--in` may be a name, an ID or an address on the same host.
 
 ## Run a command in a script
 
@@ -150,6 +188,8 @@ app on my-server
 ```
 
 The state says where the client learnt it, and why an agent ended, such as `errored (exit code 3, from process)`. A detail that the state does not say has its own line, such as the reason of a start that failed. `--screen` prints the session's last screen as plain text, with no escape sequences, as `space` in the launcher peeks at it. With `--json`, `show` prints the session as one object, with `host`, `address` and every field that has a value, and `--screen` adds `screen` as an array of lines. [Use in scripts](scripting.md) has its keys. Without a session, at a terminal, `show` opens the list of sessions. It never starts a stopped host. When a provider script says that the host is stopped, `show` says so, and names `simstim host start`.
+
+The `Packages` row describes the package manager settings installed at the current sandbox start, such as `guarded, 7 days`. A policy edit can change the registry gate at once. The settings inside the sandbox keep their original age until the next start. `show` reports unknown when no live installed plan is available; it does not replace it with current policy or defaults.
 
 ## Read events
 

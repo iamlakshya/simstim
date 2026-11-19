@@ -52,6 +52,8 @@ type Stream struct {
 	dropped     bool   // that reset dropped bytes that waited here
 	writeShut   bool   // this end writes no more
 	closedLocal bool   // Close was called
+	done        chan struct{}
+	doneClosed  bool
 	rdl, wdl    time.Time
 	readQ       waitq // Reads that wait
 	writeQ      waitq // a Write that waits
@@ -243,6 +245,7 @@ func (st *Stream) Close() error {
 		return net.ErrClosed
 	}
 	st.closedLocal, st.writeShut = true, true
+	st.notifyDone()
 	// Nobody reads these bytes now. Their credit goes back, so that an
 	// other end that still writes is not stuck.
 	st.consume(st.in.len())
@@ -349,6 +352,7 @@ func (s *Session) remove(st *Stream) {
 		return
 	}
 	st.gone = true
+	st.notifyDone()
 	delete(s.streams, st.id)
 	s.count[ownerOf(st.id)]--
 	if st.queued {

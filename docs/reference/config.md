@@ -15,6 +15,7 @@ Your preferences. Every key is optional; a missing key takes its default.
 
 | Key | Type | Default | What it does |
 | --- | --- | --- | --- |
+| `placement` | PlacementSettings | — | Selects the order and wake policy of new auto. |
 | `images.fetch` | string | `"auto"` | Is auto, host or laptop. Auto uses the host when it can reach the release, then falls back to the laptop once if that fetch fails. Host downloads on the host. Laptop copies checked files from here. |
 | `lock` | value | — | Fixes values and denies that narrower layers may not change. |
 | `profiles` | table | — | Names policy layers selected after the repository. |
@@ -36,6 +37,8 @@ The hosts you added. `host add` writes it, and you can edit it by hand. Each hos
 | Key | Type | What it does |
 | --- | --- | --- |
 | `wall_floor` | string | Is the host's actual pinned minimum wall level. |
+| `place` | HostPlacement | Controls this host's automatic-placement pool and local features. |
+| `prepared` | value | Records the last observed preparation facts; it grants no start. |
 | `lock` | value | Fixes values and denies for every session on this host. |
 | `name` | string | Names the host in commands, as in `attach <name>/<session>`. |
 | `ssh` | string | Says how to reach the host: a Host alias from your SSH config, or user@host[:port]. |
@@ -44,6 +47,7 @@ The hosts you added. `host add` writes it, and you can edit it by hand. Each hos
 | `[provider]` | table | Names a script that starts and stops the host. Optional. |
 | `provider.script` | string | Names a program that starts, stops and reports on the host. It gets the action as its argument and a JSON job on stdin (see examples/providers). |
 | `provider.wake_on_attach` | boolean | Starts the host through the script when it does not answer and you attach or start a session. |
+| `provider.cost` | string | Is free or paid when automatic placement wakes this script. |
 | `[machine]` | table | Records the VM, container or sandbox that `host create` made for this host. Hosts you added yourself have none. |
 | `machine.provider` | string | Names the provider that made the machine: "lima", "docker" or "e2b". |
 | `machine.id` | string | Names the machine as the provider knows it: the Lima instance, the Docker container, or the E2B sandbox ID. |

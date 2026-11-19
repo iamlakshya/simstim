@@ -29,6 +29,9 @@ func randomName() (string, error) {
 
 // Prepare fetches anonymously by the client's exact pins and publishes once.
 func (s *Store) Prepare(ctx context.Context, request Request, registry *Registry, convert Converter, progress ...func(Progress)) (returnedRecord Record, returned error) {
+	if request.SavedHost != nil {
+		return Record{}, saveFailure("image_saved", "a saved root can only be opened from its original host store")
+	}
 	if err := s.requireWritableHost(); err != nil {
 		return Record{}, err
 	}
@@ -285,6 +288,9 @@ func checkBlob(file *os.File, layer Layer) error {
 
 // CheckDocuments checks copied manifest bytes against both client pins.
 func CheckDocuments(request Request, documents map[string][]byte) ([]Layer, error) {
+	if request.SavedHost != nil {
+		return nil, saveFailure("image_saved", "a saved root has no registry manifest or transferable layers")
+	}
 	if err := request.Validate(); err != nil {
 		return nil, err
 	}

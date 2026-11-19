@@ -53,6 +53,8 @@ type fakeHost struct {
 
 // fakeBackend pretends to be SSH, the hosts and the terminal.
 type fakeBackend struct {
+	// A test may use the actual local resolver; unset has no automatic target.
+	resolveHost             func(context.Context, string) (client.Host, error)
 	settingsWarn, detachKey string
 	settings                *client.Settings
 	newArgs                 []client.NewArgs

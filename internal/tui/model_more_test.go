@@ -18,7 +18,7 @@ import (
 
 func TestPalette(t *testing.T) {
 	hs := home(t, 80, 24)
-	hs.key("down") // aws-gpu, offline
+	hs.m.openHost(hs.m.hostByName("aws-gpu"))
 	hs.key("ctrl+o")
 	p, ok := hs.m.modal.(*palette)
 	if !ok {
@@ -26,18 +26,32 @@ func TestPalette(t *testing.T) {
 	}
 	hs.typeText("session new")
 	items := p.items(hs.m)
-	if len(items) == 0 || items[0].c.name() != "session: new" || items[0].reason != "aws-gpu is offline" {
-		t.Fatalf("first item %+v", items)
-	}
-	if !strings.Contains(plainScreen(hs.m), "New session · aws-gpu is offline") {
-		t.Fatalf("the command does not say why it cannot run:\n%s", plainScreen(hs.m))
+	if len(items) == 0 || items[0].c.name() != "session: new" || items[0].reason != "" {
+		t.Fatalf("default lookup was blocked by an unrelated offline host: %+v", items)
 	}
 	hs.key("enter")
-	if hs.m.modal == nil {
+	if hs.m.modal != nil || hs.m.prompt != nil {
+		t.Fatal("a missing default on an offline context opened a start")
+	}
+	hasToast(t, hs.m, "aws-gpu is offline.")
+
+	// Availability and a disabled command's open palette remain checked
+	// independently: host-open cannot run while a sessions view is open.
+	hs.key("ctrl+o")
+	hs.typeText("host open")
+	p = hs.m.modal.(*palette)
+	items = p.items(hs.m)
+	if len(items) == 0 || items[0].c.name() != "host: open" || items[0].reason != "the sessions are open" || !strings.Contains(plainScreen(hs.m), "Open host · the sessions are open") {
+		t.Fatalf("the palette lost its disabled-command reason: %+v", items)
+	}
+	hs.key("enter")
+	if hs.m.modal != p {
 		t.Fatal("a disabled command closed the palette")
 	}
-	hasToast(t, hs.m, "Not available: aws-gpu is offline.")
-	hs.key("esc", "up", "enter", "ctrl+o")
+	hasToast(t, hs.m, "Not available: the sessions are open.")
+	hs.key("esc", "esc")
+	hs.m.hostSel = 0
+	hs.key("enter", "ctrl+o")
 	hs.typeText("toggle ended")
 	hs.key("enter")
 	if hs.m.modal != nil || !hs.m.hideExited {

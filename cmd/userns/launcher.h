@@ -7,12 +7,15 @@
 #include <stdint.h>
 #include <sys/types.h>
 #define REQUEST_LIMIT (4U * 1024U * 1024U)
-struct mount_request { int fd; char *guest; bool write; };
+struct mount_request { int fd,stage_fd; char *guest,*stage_name; bool write; unsigned stage_fields; };
 struct request { unsigned version; bool probe, dns; size_t count, capacity; struct mount_request *mounts; };
 _Noreturn void fail(const char *what);
+struct msghdr;
+struct cmsghdr;
+struct cmsghdr *native_control_next(struct msghdr *message,size_t *cursor);
 void read_request(struct request *request);
 void validate_sources(const struct request *request);
-int build_root(const struct request *request);
+int build_root(const struct request *request,int copy_channel);
 void enter_root(int root);
 void bring_up_loopback(void);
 void enter_agent_user(void);

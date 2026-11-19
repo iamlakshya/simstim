@@ -14,7 +14,7 @@ import (
 )
 
 // RequestVersion is the newest namespace-launcher format emitted by this helper.
-const RequestVersion = 1
+const RequestVersion = 2
 
 // MaxRequestBytes is the launcher's control-message bound.
 const MaxRequestBytes = 4 << 20
@@ -23,15 +23,19 @@ const MaxRequestBytes = 4 << 20
 // Descriptor flags are private to the launcher. Open-file-description flags
 // are never changed, since the supervisor still owns the original descriptor.
 type MountRequest struct {
-	FD    int    `json:"fd"`
-	Guest string `json:"guest"`
-	Write bool   `json:"write"`
+	FD          int    `json:"fd"`
+	Guest       string `json:"guest"`
+	Write       bool   `json:"write"`
+	StageFD     int    `json:"stage_fd"`
+	StageName   string `json:"stage_name"`
+	stageFields uint8
 }
 
 // Request is the only input to the static launcher. It cannot select a program,
 // its arguments, an environment, a namespace, or a security policy.
-// fd3 carries this request, fd4 the link, fd5 the empty root, and fd6 onwards
-// the mount sources. The final guest receives the link on fd3.
+// fd3 carries this request, fd4 the link and fd5 the empty root. V2 reserves
+// fd6 for its original private copy owner; mount sources start at7. V1
+// compatibility starts mounts at6. The final guest receives only the link on3.
 type Request struct {
 	V      int            `json:"v"`
 	Probe  bool           `json:"probe"`
@@ -64,9 +68,11 @@ func DecodeRequest(r io.Reader) (Request, error) {
 			}
 			for dec.More() {
 				var m MountRequest
-				e = decodeObject(dec, map[string]func() error{
+				e = decodeObjectOptional(dec, map[string]func() error{
 					"fd": func() error { return decodeInteger(dec, &m.FD) }, "guest": func() error { return decodeString(dec, &m.Guest) }, "write": func() error { return decodeBoolean(dec, &m.Write) },
-				})
+					"stage_fd":   func() error { m.stageFields |= 1; return decodeInteger(dec, &m.StageFD) },
+					"stage_name": func() error { m.stageFields |= 2; return decodeString(dec, &m.StageName) },
+				}, map[string]bool{"stage_fd": true, "stage_name": true})
 				if e != nil {
 					return e
 				}
@@ -84,10 +90,18 @@ func DecodeRequest(r io.Reader) (Request, error) {
 	if err = req.Validate(); err != nil {
 		return Request{}, err
 	}
+	for _, mount := range req.Mounts {
+		if req.V == 2 && mount.stageFields != 3 {
+			return Request{}, fmt.Errorf("V2 mount lacks explicit original stage roles")
+		}
+	}
 	return req, nil
 }
 
 func decodeObject(d *json.Decoder, fields map[string]func() error) error {
+	return decodeObjectOptional(d, fields, nil)
+}
+func decodeObjectOptional(d *json.Decoder, fields map[string]func() error, optional map[string]bool) error {
 	tok, err := d.Token()
 	if err != nil || tok != json.Delim('{') {
 		return fmt.Errorf("launcher request needs an object")
@@ -111,8 +125,10 @@ func decodeObject(d *json.Decoder, fields map[string]func() error) error {
 	if _, err = d.Token(); err != nil {
 		return fmt.Errorf("close launcher object: %w", err)
 	}
-	if len(seen) != len(fields) {
-		return fmt.Errorf("launcher object lacks a required field")
+	for field := range fields {
+		if !seen[field] && !optional[field] {
+			return fmt.Errorf("launcher object lacks a required field")
+		}
 	}
 	return nil
 }
@@ -125,7 +141,7 @@ func (r Request) Validate() error {
 	fds := map[int]bool{}
 	guests := map[string]bool{}
 	for _, m := range r.Mounts {
-		if m.FD < 6 || int64(m.FD) > 2147483647 || fds[m.FD] || guests[m.Guest] || !validGuest(m.Guest) {
+		if m.FD < 6 || r.V >= 2 && m.FD < 7 || int64(m.FD) > 2147483647 || fds[m.FD] || guests[m.Guest] || !validGuest(m.Guest) {
 			return fmt.Errorf("invalid or repeated launcher mount")
 		}
 		if m.Write {
@@ -134,6 +150,22 @@ func (r Request) Validate() error {
 					return fmt.Errorf("writable system mount refused")
 				}
 			}
+		}
+		if r.V == 1 && (m.stageFields != 0 || m.StageFD != 0 || m.StageName != "") || r.V == 2 && m.stageFields != 0 && m.stageFields != 3 {
+			return fmt.Errorf("incomplete versioned private stage")
+		}
+		if m.StageFD != 0 {
+			if !m.Write || m.StageFD < 7 || int64(m.StageFD) > 2147483647 || fds[m.StageFD] || m.StageFD == m.FD || len(m.StageName) != 38 || !strings.HasPrefix(m.StageName, ".copy-") {
+				return fmt.Errorf("invalid original factory stage")
+			}
+			for _, digit := range m.StageName[6:] {
+				if !(digit >= '0' && digit <= '9' || digit >= 'a' && digit <= 'f') {
+					return fmt.Errorf("invalid private stage identity")
+				}
+			}
+			fds[m.StageFD] = true
+		} else if m.StageName != "" {
+			return fmt.Errorf("private stage name has no original descriptor")
 		}
 		fds[m.FD] = true
 		guests[m.Guest] = true
@@ -164,7 +196,7 @@ func validGuest(p string) bool {
 			return false
 		}
 	}
-	for _, reserved := range []string{"/proc", "/dev", "/run", "/root", "/sys", "/etc/passwd", "/etc/group", "/etc/hosts", "/etc/resolv.conf"} {
+	for _, reserved := range []string{"/.copy-staging", "/proc", "/dev", "/run", "/root", "/sys", "/etc/passwd", "/etc/group", "/etc/hosts", "/etc/resolv.conf"} {
 		if p == reserved || strings.HasPrefix(p, reserved+"/") {
 			return false
 		}
@@ -177,6 +209,23 @@ func (r Request) MarshalJSON() ([]byte, error) {
 	type plain Request
 	if r.Mounts == nil {
 		r.Mounts = []MountRequest{}
+	}
+	if r.V == 1 {
+		type legacyMount struct {
+			FD    int    `json:"fd"`
+			Guest string `json:"guest"`
+			Write bool   `json:"write"`
+		}
+		mounts := make([]legacyMount, 0, len(r.Mounts))
+		for _, m := range r.Mounts {
+			mounts = append(mounts, legacyMount{m.FD, m.Guest, m.Write})
+		}
+		return json.Marshal(struct {
+			V      int           `json:"v"`
+			Probe  bool          `json:"probe"`
+			DNS    bool          `json:"dns"`
+			Mounts []legacyMount `json:"mounts"`
+		}{r.V, r.Probe, r.DNS, mounts})
 	}
 	return json.Marshal(plain(r))
 }

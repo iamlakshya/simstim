@@ -156,7 +156,9 @@ func infoFrom(m *Manifest, alive bool) SessionInfo {
 			st.Reason = "the session's holder stopped"
 		}
 	}
+	placedBy, placeReason := placementAuditInfoV1(m)
 	return SessionInfo{
+		PlacedBy: placedBy, PlaceReason: placeReason,
 		CopiesPending: m.CopiesPending, ID: m.ID, Name: m.Name, Task: m.Task, SandboxOf: m.SandboxOf, Agent: m.Agent.Kind, Cwd: m.Cwd, Workspace: workspaceMode(m),
 		State: st.State, Source: st.Source, Since: st.Since, Reason: st.Reason, ExitCode: st.ExitCode, Signal: st.Signal, OOM: st.OOM,
 		CreatedAt: m.CreatedAt, LastActivityAt: m.LastActivityAt, LastAttachedAt: m.LastAttachedAt,
@@ -164,6 +166,6 @@ func infoFrom(m *Manifest, alive bool) SessionInfo {
 		HostVersion: m.HostVersion, Cols: m.Term.Cols, Rows: m.Term.Rows, MissingSecrets: m.MissingSecrets,
 		Secrets: m.Secrets, SecretSummary: secretSummaryFrom(m), FullScreen: st.FullScreen && alive,
 		DebugUntil: debugUntil(m, alive),
-		Wall:       wallInfo(m.Wall), Claimed: st.Claimed, Armed: m.Armed,
+		Wall:       wallInfoForManifestV1(m), Claimed: st.Claimed, Armed: m.Armed,
 	}
 }

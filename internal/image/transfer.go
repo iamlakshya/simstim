@@ -37,6 +37,9 @@ func (s *Store) Begin(request Request) (*Transfer, error) {
 // BeginContext admits a new transfer through the caller's operation and the
 // platform's exact domain lease before creating its private incoming directory.
 func (s *Store) BeginContext(ctx context.Context, request Request) (*Transfer, error) {
+	if request.SavedHost != nil {
+		return nil, saveFailure("image_saved", "a saved root cannot be transferred from another machine")
+	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}

@@ -8,11 +8,17 @@ type hostNameValidation struct {
 	length  uint8
 	invalid bool
 	lastDot bool
+	auto    bool
 }
 
 func (v *hostNameValidation) Rune(r rune) {
 	if v.invalid {
 		return
+	}
+	if v.length == 0 {
+		v.auto = r == 'a'
+	} else if v.auto {
+		v.auto = v.length < 4 && r == rune("auto"[v.length])
 	}
 	alphanumeric := r >= 'A' && r <= 'Z' || r >= 'a' && r <= 'z' || r >= '0' && r <= '9'
 	if v.length == 63 || !alphanumeric && (v.length == 0 || r != '.' && r != '-' && r != '_') {
@@ -23,4 +29,6 @@ func (v *hostNameValidation) Rune(r rune) {
 	v.lastDot = r == '.'
 }
 
-func (v hostNameValidation) Valid() bool { return v.length != 0 && !v.invalid && !v.lastDot }
+func (v hostNameValidation) Valid() bool {
+	return v.length != 0 && !v.invalid && !v.lastDot && !(v.auto && v.length == 4)
+}

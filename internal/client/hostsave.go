@@ -210,6 +210,12 @@ func entryOf(h Host) Host {
 	if len(h.Secrets) == 0 {
 		h.Secrets = nil
 	}
+	if len(h.Place.Features) == 0 {
+		h.Place.Features = nil
+	}
+	if len(h.Place.Mandatory) == 0 {
+		h.Place.Mandatory = nil
+	}
 	return h
 }
 

@@ -15,11 +15,19 @@ func (s *Supervisor) request(c *client, f proto.Frame) bool {
 	if json.Unmarshal(f.Payload, &req) != nil {
 		return false
 	}
-	if s.portRequest(c,req){return true}
+	if s.portRequest(c, req) {
+		return true
+	}
+	if s.packageSettingsRequest(c, req) {
+		return true
+	}
 	if s.armRequest(c, req) {
 		return true
 	}
 	if s.copyRequest(c, req) {
+		return true
+	}
+	if s.imageSaveRequestV1(c, req) {
 		return true
 	}
 	if s.pullRequest(c, req) {

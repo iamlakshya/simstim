@@ -103,7 +103,7 @@ func canonicalLedgerRepo(value string) bool {
 	return state.valid()
 }
 
-func projectedLedgerName(p *api.JSONProjection, kind OutboundKind, span api.JSONSpan) error {
+func projectedLedgerName(p ledgerValueProjection, kind OutboundKind, span api.JSONSpan) error {
 	if span.End == 0 {
 		if kind == OutboundSSHAgent || kind == OutboundPaste {
 			return nil

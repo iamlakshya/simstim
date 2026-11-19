@@ -106,7 +106,7 @@ func preflightTarget(root *os.Root, target Target, replace bool) (err error) {
 		if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
 			return failure("cp_path", "a laptop copy destination traverses a link or non-directory")
 		}
-		next, err := directory(current, part, false)
+		next, err := OpenDirectoryRoot(current, part, false)
 		if err != nil {
 			return err
 		}
@@ -126,7 +126,7 @@ func (b *Batch) ensureDirectories(name string) error {
 	}
 	slices.Reverse(pending)
 	for _, name := range pending {
-		parent, err := directory(b.root, path.Dir(name), false)
+		parent, err := OpenDirectoryRoot(b.root, path.Dir(name), false)
 		if err != nil {
 			return err
 		}
@@ -148,7 +148,7 @@ func (b *Batch) ensureDirectories(name string) error {
 		if err != nil {
 			return err
 		}
-		opened, err := directory(b.root, name, false)
+		opened, err := OpenDirectoryRoot(b.root, name, false)
 		if err != nil {
 			return err
 		}
@@ -173,7 +173,7 @@ func (b *Batch) Stage(ctx context.Context, target Target, input io.Reader) (err 
 	if err := b.ensureDirectories(path.Dir(target.Path)); err != nil {
 		return err
 	}
-	parent, err := directory(b.root, path.Dir(target.Path), false)
+	parent, err := OpenDirectoryRoot(b.root, path.Dir(target.Path), false)
 	if err != nil {
 		return err
 	}
@@ -222,7 +222,7 @@ func directoryIdentity(root *os.Root) (identity string, err error) {
 // Reopen one exact owned stage at a time, keeping descriptor use independent
 // of the permitted10000 entries. Every parent and file is checked by native ID.
 func (b *Batch) openStaged(stage *stagedFile, writable bool) (_ *os.Root, _ *os.File, err error) {
-	parent, err := directory(b.root, path.Dir(stage.target.Path), false)
+	parent, err := OpenDirectoryRoot(b.root, path.Dir(stage.target.Path), false)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -394,7 +394,7 @@ func (b *Batch) Close() (err error) {
 	if !b.committed {
 		for index := len(b.created) - 1; index >= 0; index-- {
 			name := b.created[index]
-			parent, openErr := directory(b.root, path.Dir(name), false)
+			parent, openErr := OpenDirectoryRoot(b.root, path.Dir(name), false)
 			if openErr != nil {
 				err = errors.Join(err, openErr)
 				continue

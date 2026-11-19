@@ -142,7 +142,12 @@ func (launch *startupLaunchV1) startChild(ctx context.Context, m *Manifest, exec
 	command.Env = append(supervisorLaunchEnv(""), holderLockFDEnv+"=3")
 	command.ExtraFiles = []*os.File{lock}
 	command.SysProcAttr = &syscall.SysProcAttr{Setsid: true, PidFD: &pidfd}
-	if err := launch.placement.gate(ctx, func() error { return startSessionCommand(m, command) }); err != nil {
+	if err := launch.placement.gate(ctx, func() error {
+		if err := checkStartingMemoryLockedV1(ctx, launch.operation, m); err != nil {
+			return err
+		}
+		return startSessionCommand(m, command)
+	}); err != nil {
 		return err
 	}
 	launch.command, launch.started = command, true

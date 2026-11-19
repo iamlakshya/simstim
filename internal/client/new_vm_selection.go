@@ -27,7 +27,7 @@ func ResolveNewVMOptions(a NewArgs, intent string) (VMNeedOptionsV1, error) {
 	}
 	var defaults *api.SandboxSize
 	if agent, known := agents.Find(selected.Kind); known {
-		defaults = &api.SandboxSize{Memory: agent.Memory}
+		defaults = agent.SandboxSize()
 	}
 	size, err := api.ResolveSandboxSize(policy.Sandbox, nil, defaults)
 	if err != nil {

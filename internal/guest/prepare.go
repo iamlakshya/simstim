@@ -12,6 +12,17 @@ import (
 )
 
 func (g *Init) prepareSession(a *proto.CtlStartArgs) error {
+	if err := g.validateBootPackageSettings(a.PackageManagers); err != nil {
+		return err
+	}
+	if err := g.validatePackageStateFiles(a.PackageManagers, a.StateFiles); err != nil {
+		return err
+	}
+	env, err := PackageManagerEnvironment(a.PackageManagers, a.Env)
+	if err != nil {
+		return err
+	}
+	a.Env = env
 	if g.vm == nil {
 		if err := paths.EnsurePrivateDir(g.path(host.GuestRunDir())); err != nil {
 			return err
@@ -32,6 +43,9 @@ func (g *Init) prepareSession(a *proto.CtlStartArgs) error {
 		return err
 	}
 	if err:=g.applyBootDecoys(g.lifetime,a.Decoys);err!=nil{return err}
+	if err := g.applyBootPackageSettings(g.lifetime, a.PackageManagers); err != nil {
+		return err
+	}
 	if err := g.memberProxyEnv(a, true); err != nil {
 		return err
 	}
@@ -79,6 +93,9 @@ func decodeControllerPrepare(raw []byte) (proto.CtlPrepareArgs, error) {
 	}
 	if json.Unmarshal(raw, &args) != nil || args.Version != 1 || !api.ValidSessionID(args.Start.Session) || args.Start.PendingMembers <= 0 || args.Start.RunToken != "" || len(args.Start.Argv) != 0 || len(args.Start.Hooks) != 0 || len(args.Start.Secrets) != 0 {
 		return args, execError("controller preparation cannot launch or expose an agent")
+	}
+	if err := validatePackageManagerWire(fields["start"], args.Start); err != nil {
+		return args, err
 	}
 	return args, nil
 }

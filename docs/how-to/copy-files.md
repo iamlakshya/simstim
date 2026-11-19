@@ -19,7 +19,9 @@ A trailing slash selects a destination folder. A folder at a new destination kee
 
 One command copies at most `sandbox.cp_max` (256 MiB by default), with at most 10,000 entries. Choose a smaller folder when its listing is too large. Laptop links, special files, dot-dot paths and Git metadata stop a copy. Links and special files listed in the sandbox are skipped and named.
 
-An existing file needs `-f` or `--force` to replace it. Returned files use mode 0644, and folders use 0755. Incoming file bytes stay anonymous in the Linux guest until publication, so an interrupted receiver leaves no temporary filename there.
+An existing file needs `-f` or `--force` to replace it. Returned files use mode 0644, and folders use 0755. Incoming file bytes stay outside the destination until checked. VM copies use a private stage on the same writable mount and publish through the fixed account helper. An interrupted receiver leaves no temporary name in the destination.
+
+Process copies keep private staging outside shared writable folders. A destination on another mount needs its own supported private stage; the copy refuses when that placement is unavailable.
 
 Files that can change a command, an agent's settings or CI need a review. Read the listed files in the sandbox first. A live terminal can confirm the copy, or an explicit choice can use:
 

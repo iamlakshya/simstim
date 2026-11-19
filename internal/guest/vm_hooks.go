@@ -18,6 +18,7 @@ const (
 	vmAgentCommand vmCommandRole = iota
 	vmSeedCommand
 	vmDockerCommand
+	vmFileCommitCommand
 )
 
 // vmHooks is the Linux VM producer in the ONE ordinary guest engine. It

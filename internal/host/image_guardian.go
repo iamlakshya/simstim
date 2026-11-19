@@ -23,6 +23,10 @@ func RunImageGuardian(args []string) error {
 		return fmt.Errorf("image guardian needs a descriptor count and scope name")
 	}
 	count, err := strconv.Atoi(args[0])
+	saved := args[0] == savedRootConverterMode
+	if saved {
+		count, err = 0, nil
+	}
 	if err != nil || count < 0 || count > image.MaxLayers {
 		return fmt.Errorf("invalid image descriptor count")
 	}
@@ -38,6 +42,9 @@ func RunImageGuardian(args []string) error {
 		defer files[i].Close()
 	}
 	var scope imageScopeInfo
+	if saved {
+		return serveSavedRootGuardian(ctx, unit, files[0], files[1], os.Stdin, os.Stdout)
+	}
 	return imageGuardian(ctx, files, unit, func(ctx context.Context, unit string) error {
 		var err error
 		scope, err = imageAttachScope(ctx, unit)

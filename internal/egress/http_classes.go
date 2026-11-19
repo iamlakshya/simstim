@@ -153,5 +153,19 @@ func httpClass(host string) (kind string, spliceOnly bool, err error) {
 			return class.Kind, false, nil
 		}
 	}
+	barriers, err := loadServiceBarriers()
+	if err != nil {
+		return "", false, err
+	}
+	for _, barrier := range barriers {
+		if !barrier.classifier {
+			continue
+		}
+		for _, guarded := range barrier.Hosts {
+			if guarded == host {
+				return "service", false, nil
+			}
+		}
+	}
 	return "", false, nil
 }

@@ -1,5 +1,11 @@
 # Testing
 
+The link stream lifecycle tests exercise the existing socket-pair and
+`LINK_TEST_PIPE` transports. A full close, reset or session end must notify an
+owned waiter without reading or changing a byte. A request write half-close
+must leave that notification open and preserve every response byte. Observing
+the notification does not change the frame format or the attach stream.
+
 Every change keeps the tests green, and every bug fix adds the test that would have caught it.
 
 | Command | What it runs | Where |
@@ -15,6 +21,8 @@ Every change keeps the tests green, and every bug fix adds the test that would h
 | `just test-install` | `install.sh` against a local, signed snapshot release | Needs GoReleaser and Zig |
 
 ## Quality bars
+
+The complete Unicode mapping source is deterministically compressed. The loader bounds decompression and checks the encoded bytes, exact original size and SHA-256 before the same 6,311-row parser. Normal whitespace and source gates stay enabled.
 
 These are the project's quality expectations, with tools to check them locally and in CI. Not every CI job is a required branch-protection check. [Decision 0023](decisions/0023-protect-main.md) lists the checks required to merge into `main`.
 
@@ -47,9 +55,13 @@ These are the project's quality expectations, with tools to check them locally a
 
 SSH control sockets use a separate short directory owned by the test run. The harness checks its owner, mode and inode. It keeps the full connection epoch, route hash and temporary bind suffix within the socket path limit. It never uses the client's shared fallback directory. The home and every XDG directory stay isolated too.
 
+The certificate persistence fixture starts its own egress child over descriptor 3. Its test environment uses an empty root pool and refuses DNS lookups and origin connections. Disk cleanup tests call the current sandbox cleanup and check that it preserves the original manifest without publishing.
+
 ## The host in unit tests
 
 CLI tests keep command parsing, fake transports and file-only checks in common files. Tests that start a host helper, a shell fixture or a pseudo-terminal use files with a Unix build constraint. Split mixed files and mixed cases so Windows keeps their portable assertions. Its test binary uses `testhome.Isolate` too, and joins each child before cleanup.
+
+Fresh-member CLI checks reject sandbox-changing flags before host or input work. An in-memory stopped lifecycle checks same-host routing without starting a transport or waking the host. Child command checks keep attachment flags outside its literal arguments. The client factory tests cover the original request and the actual acknowledgement writer.
 
 Most of the host helper runs in the unit tests, on the machine that runs them, with no SSH and no systemd. The package `internal/host/hosttest` sets it up, and it works on macOS and Linux:
 

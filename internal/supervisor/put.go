@@ -85,7 +85,10 @@ func (s *Supervisor) uploadFrame(c *client, reader *bufio.Reader, frame proto.Fr
 		c.reply(begin.ID, nil, uploadRefusal("invalid dedicated upload declaration"))
 		return true
 	}
-	if begin.Directory && (begin.Path=="" || begin.Size!=0 || begin.Replace) { c.reply(begin.ID,nil,uploadRefusal("invalid empty-directory upload")); return true }
+	if begin.Directory && (begin.Path == "" || begin.Size != 0 || begin.Replace) {
+		c.reply(begin.ID, nil, uploadRefusal("invalid empty-directory upload"))
+		return true
+	}
 	ctx, finish, err := s.owner().beginFileTransfer(c)
 	if err != nil {
 		c.reply(begin.ID, nil, toProtoErr(err))
@@ -142,7 +145,7 @@ func (s *Supervisor) uploadFrame(c *client, reader *bufio.Reader, frame proto.Fr
 	watch := make(chan struct{})
 	go func() { defer close(watch); _, _ = reader.ReadByte(); cancel() }()
 	defer func() { _ = c.conn.Close(); <-watch }()
-	header := proto.FilePutHeaderV1{Version: proto.FileTransferVersionV1, Name: host.NewID() + "-" + begin.Name, Directory:begin.Directory, Size: begin.Size, SHA256: end.SHA256, Path: begin.Path, Replace: begin.Replace}
+	header := proto.FilePutHeaderV1{Version: proto.FileTransferVersionV1, Name: host.NewID() + "-" + begin.Name, Directory: begin.Directory, Size: begin.Size, SHA256: end.SHA256, Path: begin.Path, Replace: begin.Replace}
 	target, err := s.putFile(ctx, spool, header)
 	if err == nil {
 		event := "paste"
@@ -212,6 +215,12 @@ func (s *Supervisor) putFile(ctx context.Context, file *os.File, header proto.Fi
 	expected := header.Path
 	if expected == "" {
 		expected = path.Join(host.GuestRunDir(), "paste", header.SHA256[:12]+"-"+header.Name)
+	}
+	if header.Path != "" && !header.Directory && s.owner().processCopy != nil {
+		if _, err := file.Seek(0, io.SeekStart); err != nil {
+			return "", err
+		}
+		return s.owner().processCopy.Receive(ctx, header, file)
 	}
 	stream, err := s.link.Open(ctx, link.KindPut, header)
 	if err != nil {

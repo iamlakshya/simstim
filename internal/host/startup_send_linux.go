@@ -73,6 +73,9 @@ func (launch *startupLaunchV1) sendOperationLoan(ctx context.Context) (failure e
 		if err := launch.operation.native.check(ctx); err != nil {
 			return err
 		}
+		if err := launch.checkNativeMemoryV1(ctx, m); err != nil {
+			return err
+		}
 		return launch.line.writeLoan(proto.Request{ID: 1, Op: startupLoanOperationV1, Args: args}, file)
 	}); err != nil {
 		return err
@@ -182,6 +185,9 @@ func (launch *startupLaunchV1) deliverStart(ctx context.Context, env map[string]
 		if err := launch.operation.native.check(ctx); err != nil {
 			return err
 		}
+		if err := launch.checkNativeMemoryV1(ctx, launch.manifest); err != nil {
+			return err
+		}
 		return launch.line.WriteFrame(proto.TRequest, proto.Request{ID: 2, Op: "secrets", Args: args})
 	}); err != nil {
 		return err
@@ -218,6 +224,9 @@ func (launch *startupLaunchV1) waitReady(ctx context.Context) (*Manifest, error)
 	if m.Life == nil || m.Life.Started.IsZero() || m.Run.Generation != ack.Generation || m.Run.HolderPID != launch.nativePeer().pid ||
 		!validOriginalReadyNeed(launch.manifest, m) || !reflect.DeepEqual(m.RuntimeManifest, launch.manifest.RuntimeManifest) {
 		return nil, sessionLeaseError("the durable ready record differs from this original native supervisor")
+	}
+	if err := launch.checkNativeMemoryV1(ctx, m); err != nil {
+		return nil, err
 	}
 	launch.ready = true
 	return m, nil

@@ -34,6 +34,13 @@ func ConvertImage(ctx context.Context, layers []image.Layer, files []*os.File, o
 }
 
 func convertScoped(ctx context.Context, operation converterOperation, plan []byte, files []*os.File, out *os.File, completed *imageGuardianFrame) (returned error) {
+	return convertScopedWithSource(ctx, operation, plan, files, out, completed, nil, nil)
+}
+
+func convertScopedWithSource(ctx context.Context, operation converterOperation, plan []byte, files []*os.File, out *os.File, completed *imageGuardianFrame, source func(context.Context, io.Writer) error, review func([]byte) error) (returned error) {
+	if (operation == convertSavedRoot) != (source != nil) || (operation == convertSavedRoot) != (review != nil) {
+		return fmt.Errorf("the closed converter operation has an invalid source producer")
+	}
 	helper, err := os.Open("/proc/self/exe")
 	if err != nil {
 		return fmt.Errorf("pin image helper: %w", err)
@@ -74,9 +81,14 @@ func convertScoped(ctx context.Context, operation converterOperation, plan []byt
 	waited := false
 	var owned imageScopeInfo
 	var watch *imageScopeWatch
+	var frameReaderDone <-chan struct{}
 	defer func() {
 		input.Close()
 		cancel()
+		if frameReaderDone != nil {
+			_ = output.Close()
+			<-frameReaderDone
+		}
 		cleanupErr := cleanupImageScope(unit, owned)
 		if !waited {
 			<-wait
@@ -89,7 +101,12 @@ func convertScoped(ctx context.Context, operation converterOperation, plan []byt
 			returned = errors.Join(returned, cleanupErr)
 		}
 	}()
-	frames := imageGuardianFrames(output)
+	var frames <-chan imageFrameResult
+	if source != nil {
+		frames, frameReaderDone = imageSaveGuardianFrames(execution, output)
+	} else {
+		frames = imageGuardianFrames(output)
+	}
 	ready, err := nextImageGuardianFrame(ctx, frames)
 	if err != nil {
 		cancel()
@@ -111,7 +128,27 @@ func convertScoped(ctx context.Context, operation converterOperation, plan []byt
 	if err := sendConverterPlan(input, plan); err != nil {
 		return err
 	}
-	done, frameErr := nextImageGuardianFrame(ctx, frames)
+	var done imageGuardianFrame
+	var frameErr error
+	if source != nil {
+		early, sourceErr := sendSavedRootStream(execution, cancel, input, frames, source)
+		if sourceErr != nil {
+			return sourceErr
+		}
+		if early != nil {
+			done, frameErr = early.frame, early.err
+		} else {
+			done, frameErr = nextImageGuardianFrame(ctx, frames)
+		}
+	} else {
+		done, frameErr = nextImageGuardianFrame(ctx, frames)
+	}
+	for frameErr == nil && done.Phase == "review" && review != nil {
+		if err := review(done.Output); err != nil {
+			return err
+		}
+		done, frameErr = nextImageGuardianFrame(ctx, frames)
+	}
 	var evidence imageOOMEvidence
 	if ctx.Err() == nil {
 		evidence = watch.outcome(ctx)
@@ -127,6 +164,11 @@ func convertScoped(ctx context.Context, operation converterOperation, plan []byt
 	waitErr := <-wait
 	waited = true
 	if err := conversionTransportOutcome(ctx.Err(), done, frameErr, waitErr, evidence, diagnostic.String()); err != nil {
+		if source != nil && ctx.Err() == nil {
+			if refusal := savedRootOutcomeFailure(done.Output); refusal != nil {
+				return errors.Join(refusal, err)
+			}
+		}
 		return err
 	}
 	*completed = done

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/iamlakshya/simstim/internal/supply"
+	"github.com/iamlakshya/simstim/internal/proto"
 )
 
 // Session states.
@@ -28,6 +29,8 @@ const ReasonChildOOM = "a process in this session ran out of memory and was stop
 
 // NewArgs describes a session to start.
 type NewArgs struct {
+	// Placement is original client selection metadata, never admission proof.
+	Placement *PlacementV1 `json:"placement,omitempty"`
 	// Runtime is DATA selected by the same private original client plan.
 	Runtime *supply.Manifest `json:"runtime,omitempty"`
 	// VMNeedV1 is accepted only from the same locally sealed authenticated plan.
@@ -106,6 +109,10 @@ type NewArgs struct {
 
 // SessionInfo is one row of the session list.
 type SessionInfo struct {
+	PlacedBy    string `json:"placed_by,omitempty"`
+	PlaceReason string `json:"place_reason,omitempty"`
+	// PackageManagers is the actual live installed start plan, never a current-policy reconstruction.
+	PackageManagers *proto.PackageManagersV1 `json:"package_managers,omitempty"`
 	// Forwards is display-only state from the actual live supervisor.
 	Forwards []PortForwardInfo `json:"forwards,omitempty"`
 	CopiesPending bool      `json:"copies_pending,omitempty"`

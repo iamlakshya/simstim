@@ -126,7 +126,7 @@ func (c *jsonCursor) stringValue() error {
 		return err
 	}
 	for {
-		b, err := c.take()
+		b, err := c.stringByteRun()
 		if err != nil {
 			return err
 		}

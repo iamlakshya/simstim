@@ -16,6 +16,9 @@ import (
 // RunImageConvert is the internal descriptor-only entry point for the jail.
 // It receives no host path, registry login or network authority.
 func RunImageConvert(args []string, in io.Reader, out io.Writer) error {
+	if len(args) == 1 && args[0] == savedRootConverterMode {
+		return runSavedRootConvert(in, out)
+	}
 	if len(args) != 1 {
 		return fmt.Errorf("image-convert needs a layer descriptor count")
 	}

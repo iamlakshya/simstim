@@ -88,6 +88,9 @@ func commitSandboxBoundSchema(ctx context.Context, h Host) error {
 		if file.schema == 4 {
 			return errStateNoChange
 		}
+		if err := checkSandboxLineageSchemaPromotion(ctx, file); err != nil {
+			return err
+		}
 		file.schema, file.root["schema"] = 4, json.RawMessage("4")
 		return ctx.Err()
 	})

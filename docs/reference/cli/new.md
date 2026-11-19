@@ -7,7 +7,7 @@ title: "simstim new"
 Start a session on a host, and attach to it.
 
 ```text
-simstim new <host> [-- <command>…] [flags]
+simstim new [<host>|-] [-- <command>…] [flags]
 ```
 
 Starts one session and attaches. `--detach` leaves it running. `--count` starts independent sessions without attaching. Without a terminal, a command after -- runs through sandbox exec and returns its exit code. Its completed sandbox stops and keeps its work for pull.
@@ -39,6 +39,8 @@ simstim new my-vps --agent claude --detach --json
 | `--env <string>` | set a guest variable as NAME=VALUE, or read NAME from this computer |
 | `--env-file <string>` | read literal guest variables from a local file |
 | `--expose <stringArray>` | explicitly expose a named secret in the session (repeatable) |
+| `--image <string>` | the pinned image or an image saved on this host |
+| `--in <string>` | start a fresh agent in this host's existing sandbox session |
 | `--include <stringArray>` | copy a regular source file into the sandbox's clone (repeatable) |
 | `--inline` | start the agent in its inline mode, so your terminal keeps its scrollback (see agents.inline in config.toml) |
 | `--json` | print JSON for scripts, and ask nothing (see docs/how-to/scripting.md) |

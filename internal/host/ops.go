@@ -204,6 +204,7 @@ func List() ([]SessionInfo, error) {
 			reconcileForList(id, m)
 			info := infoFrom(m, alive(id))
 			livePortView(&info)
+			livePackageSettings(&info)
 			mu.Lock()
 			out = append(out, info)
 			mu.Unlock()

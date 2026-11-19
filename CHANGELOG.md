@@ -6,6 +6,52 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ### Added
 
+- Starting records retain the original advisory placement description. Session output owns a bounded, cleaned display copy without granting start rights.
+
+- Placement request and display metadata use a closed versioned schema and owned copies. The descriptions grant no capacity or start rights.
+
+- Host selection has typed pool and feature settings, requirements parsing, Source-bound fact filters and deterministic ranking. These checks grant no reservation or start permission.
+
+- Image lists and live session details show a saved image's origin from the protected boot selection on the current host.
+
+- The launcher's `n` action offers the named default host first in every view and checks the accepted source before creating a new request.
+
+- `image save` collects the selected session's current local values, reviews paged changes from the original running VM source, and keeps or drops the prepared same-host root. Export omits generated state and preserves file and directory attributes for review.
+
+- Internal streams expose a stable lifetime signal at full closure or reset, without changing half-close or wire bytes.
+
+- Hosts report resource facts and cached sandbox diagnostics through the existing bridge. The observer requires existing native ownership and creates no host state.
+
+- Saved image selections retain their original host and verified root through the existing store, local pin lock and original VM request.
+
+- `new` can resolve an omitted host from a named default, the environment, the last host or a sole saved host. `host default` updates the named default through the current local membership.
+
+- New sessions accept `--image` through the existing policy layers and locks. `new --in` refuses the flag before work.
+
+- Host facts have versioned data types with explicit known bits, byte units and pressure percentages.
+
+- Classify mode compares confusable names with the existing rule authority using pinned Unicode 15 data.
+
+- Classify mode checks fixed exfiltration destinations, numeric addresses and complete long labels. Webhook and paste service paths share the existing endpoint admission rules.
+
+- `new --in` starts a fresh member with its own local secret approval inside the existing sandbox.
+
+- Process copy publishers create their private stages under the original protected session directory and check the source mount before binding it.
+
+- Selected gVisor starts probe the delivered runtime before fetching private values. Cached physical results retain their native owner and exact runtime identity.
+
+- Walled starts verify the original supervisor has its exact native memory cap and zero swap before lending private boot rights.
+
+- Walled sessions reserve their declared memory cap before starting. Restarts check that cap against current host room before publishing the new start.
+
+- VM copies validate bytes in a private stage on the original writable mount, then publish through the fixed account helper.
+
+- Bound service credentials stay blocked at token mint endpoints, and streamed responses detect the added service token formats.
+
+- GitHub service rules check REST and GraphQL reference writes against the same protected branch policy before sending credentials.
+
+- Session lists and `show` report the package manager settings installed at the current sandbox start. A later policy change does not replace that plan.
+
 - CLI tests separate Unix host and terminal fixtures from portable command, file and fake-transport checks. Windows keeps its own isolated test home and child cleanup checks.
 
 - The private-detail check distinguishes public systemd unit names and template tokens from email addresses. Email addresses beside those forms still fail.
@@ -127,6 +173,8 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ### Changed
 
+- Supervisor manifest publication and process-init ownership have dedicated files with their existing lifetime protocol unchanged.
+
 - VM process and disk ownership now use one shared implementation. Cloud Hypervisor keeps its existing entry points.
 
 - The launcher checks current local permissions before fetching secrets for a start or resume. A broken config cannot run commands from settings kept for display. One request retains its exact permissions through setup retries.
@@ -155,6 +203,34 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 - `agents install --force` is now `--reinstall`. `--force` still works until v0.4.0 and 11 November 2027, whichever comes later, and warns.
 
 ### Fixed
+
+- The complete Unicode mapping source uses a deterministic compressed representation with exact encoded and decoded integrity checks. The original corpus and rule semantics stay unchanged.
+
+- JSON escaping reserves the existing input length without unchecked capacity addition, preserving exact output and the unchanged-input fast path.
+
+- Frame writers check the payload cap before adding encoded lengths. Empty and maximum-sized frames keep the same wire bytes.
+
+- Projected JSON string scans reuse existing windows for ordinary ASCII while preserving every cancellation check and cache update.
+
+- Image export checks the canonical path for known values before producing labels, diagnostics or file output.
+
+- Pending image cleanup retains exact native leases through review and retires only matching expired objects. Changed and unknown parts remain untouched.
+
+- Host facts recheck the saved entry as well as its generation and original source around the reply.
+
+- Explicit unknown-destination actions retain their canonical order before the legacy open fallback.
+
+- Unknown-allow policy permits uncovered public literal addresses while retaining the static address and physical host checks. HTTP audit records identify the fallback.
+
+- CLI tests cover `new --in` flag refusal, same-host routing and literal command hints.
+
+- Approval record updates preserve opaque metadata and stably order unsorted rows through the same parser and index. Output uses validated spans from that same source and inspection.
+
+- JSON image pulls emit structured progress on stderr.
+
+- Test fixtures use the actual cleanup and isolated certificate boundary helpers, retain one copy of the guest DNS cases and preserve the intended memory policy inputs.
+
+- The source-selection test fixture includes the required `llms.txt` checker stub.
 
 - The client starts correctly when registering the old agent reinstall flag. Package-manager config errors keep their specific code and source line.
 

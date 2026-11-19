@@ -177,7 +177,7 @@ func EncodeFrame(t Type, payload []byte) ([]byte, error) { return frame(t, paylo
 
 // frame is the bytes of one frame of type t.
 func frame(t Type, payload []byte) ([]byte, error) {
-	if len(payload)+1 > MaxFrame {
+	if len(payload) > MaxFrame-1 {
 		return nil, ErrFrameTooBig
 	}
 	buf := make([]byte, 5+len(payload))
@@ -398,7 +398,7 @@ type Resize struct {
 // Ended reports that the agent exited.
 type Ended struct {
 	// Claimed identifies an end reported inside the guest, never a native exit.
-	Claimed bool `json:"claimed,omitempty"`
+	Claimed  bool   `json:"claimed,omitempty"`
 	ExitCode int    `json:"exit_code"`
 	Signal   string `json:"signal,omitempty"`
 	OOM      bool   `json:"oom,omitempty"`

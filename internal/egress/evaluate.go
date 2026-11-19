@@ -81,6 +81,9 @@ func (e *Engine) evaluateLocked(req Request, p *Permit, mode evalMode) Decision 
 			if compiledDoor(r) != door {
 				return false
 			}
+			if req.servicePathOnly && r.allow && r.path == "" {
+				return false
+			}
 			if req.withoutModelTools && r.allow && r.once && len(r.tools) != 0 {
 				priority, available := e.oncePriority(r, p, mode)
 				if !available || priority == 2 {
@@ -102,12 +105,43 @@ func (e *Engine) evaluateLocked(req Request, p *Permit, mode evalMode) Decision 
 	if door != api.DoorNet {
 		return Decision{Rule: "push:ungranted"}
 	}
+	if req.servicePathOnly {
+		return Decision{Rule: "service:path"}
+	}
 	for _, r := range e.agentRules {
 		if matchesRuleMethod(r, method) && e.matchesLocked(r, host, addr, isIP, req.Port, path, at) {
 			return Decision{Allow: true, Rule: r.id, RuleID: r.id, Target: formatCompiledTarget(r), Match: &r.ref}
 		}
 	}
-	return e.decidePreset(host, addr, isIP, req.Port, path, at)
+	decision := e.decidePreset(host, addr, isIP, req.Port, path, at)
+	if decision.unmatched {
+		switch e.unknown {
+		case api.UnknownAsk:
+			return Decision{Rule: "unknown:ask", unmatched: true}
+		case api.UnknownDeny:
+			return Decision{Rule: "unknown:deny", unmatched: true}
+		case api.UnknownAllow:
+			if !isIP {
+				return Decision{Allow: true, Rule: "unknown:allow", unmatched: true}
+			}
+		}
+	}
+	if decision.unmatched && isIP && e.unknown == api.UnknownAllow {
+		// Ordinary fallback opens only an already-public literal. Private,
+		// embedded-private and special ranges retain explicit numeric grants.
+		// The physical dial separately checks its current own-host addresses.
+		if _, public := new(Dialer).CheckAddr(addr, req.Port, nil); public {
+			return Decision{Allow: true, Rule: "unknown:allow", unmatched: true}
+		}
+		return Decision{Rule: "unknown:address", unmatched: true}
+	}
+	if decision.unmatched && e.unknown == api.UnknownClassify && !req.classifierProbe {
+		decision = fixedClassifierDecision(host, isIP)
+		if decision.unmatched {
+			return e.classifyConfusableLocked(req, host)
+		}
+	}
+	return decision
 }
 
 func (e *Engine) validPermit(p *Permit, mode evalMode) bool {

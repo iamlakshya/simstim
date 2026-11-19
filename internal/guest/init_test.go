@@ -329,6 +329,9 @@ func TestTheGuestInitSurvivesABrokenOutputPipe(t *testing.T) {
 	pidf := filepath.Join(h.Root, "init-pipe-agent.pid")
 	env := []string{"HOME=" + host.GuestHome, "PATH=/usr/bin:/bin", brand.Env("HOOK_SOCK") + "=" + host.GuestHookSocket(), "TERM=xterm-256color"}
 	resp := request(proto.CtlStart, proto.CtlStartArgs{
+		// This legacy broken-pipe lifecycle fixture installs no package files.
+		// Its explicit supported off plan preserves the real constructor guard.
+		PackageManagers: &proto.PackageManagersV1{Version: 1, Mode: "off", MinReleaseAge: "7d", StartedAt: "2026-11-15T12:00:00Z"},
 		Session: testID,
 		Argv:    []string{"/bin/sh", "-c", "trap '' HUP TERM; echo $$ > '" + pidf + "'; exec sleep 300"},
 		Env:     env,

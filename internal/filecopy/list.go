@@ -45,7 +45,7 @@ func List(ctx context.Context, root *os.Root, relative string, maxEntries int) (
 			return nil, false, err
 		}
 	}
-	parent, err := directory(root, path.Dir(relative), false)
+	parent, err := OpenDirectoryRoot(root, path.Dir(relative), false)
 	if err != nil {
 		return nil, false, err
 	}
@@ -58,7 +58,7 @@ func List(ctx context.Context, root *os.Root, relative string, maxEntries int) (
 	if !info.IsDir() {
 		return []Entry{entry(leaf, info)}, false, nil
 	}
-	selected, err := directory(parent, leaf, false)
+	selected, err := OpenDirectoryRoot(parent, leaf, false)
 	if err != nil {
 		return nil, false, err
 	}
@@ -90,7 +90,7 @@ func List(ctx context.Context, root *os.Root, relative string, maxEntries int) (
 				name := path.Join(prefix, item.Name())
 				result = append(result, entry(name, info))
 				if info.IsDir() {
-					next, err := directory(current, item.Name(), false)
+					next, err := OpenDirectoryRoot(current, item.Name(), false)
 					if err != nil {
 						return err
 					}
@@ -135,7 +135,7 @@ func WriteChunk(ctx context.Context, root *os.Root, relative string, offset, max
 	if err := Relative(relative); err != nil {
 		return 0, err
 	}
-	parent, err := directory(root, path.Dir(relative), false)
+	parent, err := OpenDirectoryRoot(root, path.Dir(relative), false)
 	if err != nil {
 		return 0, err
 	}

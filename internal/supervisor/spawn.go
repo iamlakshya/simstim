@@ -92,6 +92,9 @@ func (s *Supervisor) spawn(a api.JoinArgs) (*api.SessionInfo, error) {
 	go child.acceptLoop()
 	args := proto.CtlStartArgs{RunToken: child.runToken, Session: child.id, Agent: child.m.Agent.Kind, Argv: slices.Clone(child.m.Agent.Argv), Env: slices.Clone(child.m.Env), Cwd: parent.Cwd, Cols: child.m.Term.Cols, Rows: child.m.Term.Rows, Hooks: slices.Clone(child.m.Agent.Hooks)}
 	root.bootDecoyArgs(&args)
+	if err := root.bootPackageSettingsArgs(&args); err != nil {
+		return nil, err
+	}
 	shellStartArgs(child.m, &args)
 	// P22 owns atomic member needs/value installation before the guest receives
 	// sentinels. This call uses its one canonical egress process and engine.

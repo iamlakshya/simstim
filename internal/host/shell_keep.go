@@ -29,6 +29,10 @@ func SandboxStatePlan(m *Manifest) (files.StatePlan, error) {
 	plan,err:=sandbox.CacheStatePlan(kept,values)
 	if err!=nil{return files.StatePlan{},err}
 	paths,err:=proto.DecoyPaths();if err!=nil{return files.StatePlan{},err}
+	packages, err := proto.PackageManagerPaths(); if err != nil {
+		return files.StatePlan{}, err
+	}
+	paths = append(paths, packages...)
 	return files.ExcludeGeneratedHomeState(plan,paths)
 }
 

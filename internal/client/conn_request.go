@@ -64,6 +64,17 @@ func (c *Conn) startCall(ctx context.Context, op string, args any) (uint64, chan
 			return 0, nil, err
 		}
 	}
+	fresh, _ := ctx.Value(freshChildPublicationKey{}).(*freshChildPublicationWitness)
+	if fresh != nil {
+		if err := fresh.beforeRequest(ctx, c, req, args); err != nil {
+			return 0, nil, err
+		}
+	}
+	if imageSave, _ := ctx.Value(imageSavePublicationKey{}).(*imageSaveOperation); imageSave != nil {
+		if err := imageSave.beforeRequest(ctx, c, req, args); err != nil {
+			return 0, nil, err
+		}
+	}
 	ch := make(chan proto.Response, 1)
 	c.mu.Lock()
 	if c.err != nil {
@@ -84,6 +95,12 @@ func (c *Conn) startCall(ctx context.Context, op string, args any) (uint64, chan
 			return 0, nil, err
 		}
 	}
+	if fresh != nil {
+		if err := fresh.plan.markPublicationAttempt(); err != nil {
+			c.drop(id)
+			return 0, nil, err
+		}
+	}
 	if err := c.w.WriteJSONCtx(ctx, proto.TRequest, req); err != nil {
 		c.drop(id)
 		if ctx.Err() != nil {
@@ -93,6 +110,9 @@ func (c *Conn) startCall(ctx context.Context, op string, args any) (uint64, chan
 	}
 	if witness != nil {
 		witness.wroteRequest(c, id)
+	}
+	if fresh != nil {
+		fresh.wroteRequest(c, id)
 	}
 	return id, ch, nil
 }
@@ -128,6 +148,11 @@ func (c *Conn) awaitCallResult(ctx context.Context, op string, id uint64, ch cha
 		}
 		if witness, _ := ctx.Value(newPublicationKey{}).(*newPublicationWitness); witness != nil {
 			if err := witness.afterResponse(ctx, c, resp, out); err != nil {
+				return err
+			}
+		}
+		if fresh, _ := ctx.Value(freshChildPublicationKey{}).(*freshChildPublicationWitness); fresh != nil {
+			if err := fresh.afterResponse(ctx, c, resp, out); err != nil {
 				return err
 			}
 		}
