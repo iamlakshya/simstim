@@ -228,7 +228,7 @@ Triggers: the detach key, closing the tab, `simstim kill` from elsewhere, or SIG
 
 ## 4. Protocol
 
-- **Framing:** `u32` little-endian length, `u8` type, payload. Control payloads are JSON; `input` and `output` payloads are raw bytes. Every frame has a size limit.
+- **Framing:** `u32` little-endian length, `u8` type, payload. Control payloads are JSON; `input` and `output` payloads are raw bytes. Every frame has a size limit. Writers reject an oversized payload before adding type or header sizes. They write no partial frame.
 - **Hello first, both ways:** `{magic, protocol: "1.0", features: […], version}`.
 - **Compatibility:** message types are append-only. A peer ignores unknown types. A missing feature degrades with a clear message.
 - **Bridge to client:**

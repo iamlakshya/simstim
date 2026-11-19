@@ -63,6 +63,7 @@ The JSON follows these rules, so a script keeps working from one release to the 
 - stdout gets one JSON value and nothing else, with one newline at its end.
 - Each top-level object, and each object of a top-level array, has `"v": 1`.
 - Keys are in `snake_case`. A map of your own data, such as a host's `labels`, keeps your keys.
+- Terminal controls and hidden characters are escaped. Decoding the JSON keeps the exact original keys and values.
 - A value that is not set is left out, and is never `null`. Two outputs keep their older form until the end of their old form: the sessions in `ls --json` give a zero time, `0001-01-01T00:00:00Z`, for a time that is not set, and the old keys of `host ls --json` give `null` for an empty value.
 - A new release may add keys. It never renames a key or changes its type or its meaning, so ignore the keys you do not know.
 

@@ -155,7 +155,7 @@ func (w *Writer) WriteCtx(ctx context.Context, t Type, payload []byte) error {
 
 // frame is the bytes of one frame of type t.
 func frame(t Type, payload []byte) ([]byte, error) {
-	if len(payload)+1 > MaxFrame {
+	if len(payload) > MaxFrame-1 {
 		return nil, ErrFrameTooBig
 	}
 	buf := make([]byte, 5+len(payload))

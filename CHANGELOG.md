@@ -20,6 +20,9 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ### Fixed
 
+- Frame writers reject oversized payloads before adding header sizes, preserving the protocol limit and writing no partial frame.
+- JSON escaping avoids unchecked allocation arithmetic and keeps decoded host data exact.
+
 - Session JSON keeps integer values exact, including large memory sizes.
 - The terminal cleanup test counts open file names without looking up descriptors that can close during the count. It still checks that held reads keep their terminal open and that cleanup leaves no open file behind.
 - Tests of concurrent uploads let a second upload reach the held chunk. The test hook no longer makes the uploads take turns itself.

@@ -85,7 +85,7 @@ func jsonSafe(b []byte) []byte {
 			continue
 		}
 		if out == nil {
-			out = append(make([]byte, 0, len(b)+32), b[:i]...)
+			out = append(make([]byte, 0, len(b)), b[:i]...)
 		}
 		if r > 0xffff {
 			hi, lo := utf16.EncodeRune(r)
