@@ -97,6 +97,10 @@ func (b *syncBuffer) String() string {
 func TestGuidedSetupStopsBeforeQuestionWhenInstallerReaderStuck(t *testing.T) {
 	th := newTestHost(t)
 	term := hosttest.NewTerminal(t, 90, 30)
+	gate := installInputGate(t, th.h.Home)
+	ctx, cancel := context.WithCancel(t.Context())
+	ended := make(chan struct{})
+	started := false
 
 	oldIn, oldOut, oldErr := os.Stdin, os.Stdout, os.Stderr
 	os.Stdin, os.Stdout, os.Stderr = term.TTY, term.TTY, term.TTY
@@ -106,14 +110,19 @@ func TestGuidedSetupStopsBeforeQuestionWhenInstallerReaderStuck(t *testing.T) {
 		return sr, nil
 	})
 	t.Cleanup(func() {
+		cancel()
+		_, _ = gate.WriteString("done\n")
 		sr.letGo()
+		if started {
+			<-ended
+		}
 		_ = keyread.Release(term.TTY)
 		restoreAttachReader()
 		os.Stdin, os.Stdout, os.Stderr = oldIn, oldOut, oldErr
 	})
 
 	var out syncBuffer
-	g := newGuide(context.Background(), guideOpts{}, &guideLocal{})
+	g := newGuide(ctx, guideOpts{}, &guideLocal{})
 	g.in, g.out, g.tty = term.TTY, &out, true
 	g.p = &prompter{ctx: g.ctx, in: term.TTY, out: &out, on: true, path: brand.Name + " setup"}
 	g.checks = func(client.Host) ([]api.AgentCheck, error) {
@@ -128,12 +137,14 @@ func TestGuidedSetupStopsBeforeQuestionWhenInstallerReaderStuck(t *testing.T) {
 	}, g.log)
 	for i := range f.Items {
 		if f.Items[i].Agent.Kind == "codex" {
-			f.Items[i].Agent.Setup.Install = "echo INSTALLED_LOCAL_CODEX"
+			f.Items[i].Agent.Setup.Install = "IFS= read -r step < " + shellWord(gate.Name()) + "; echo INSTALLED_LOCAL_CODEX"
 		}
 	}
 
 	done := make(chan error, 1)
+	started = true
 	go func() {
+		defer close(ended)
 		done <- g.agents(th.ch, f)
 	}()
 
@@ -144,7 +155,18 @@ func TestGuidedSetupStopsBeforeQuestionWhenInstallerReaderStuck(t *testing.T) {
 	})
 	term.Type("2\r")
 
-	<-sr.entered
+	// The installer cannot exit before the reader has actually blocked.
+	// A fast command can otherwise finish before Attach schedules its input.
+	select {
+	case <-sr.entered:
+	case err := <-done:
+		t.Fatalf("guided installer ended before its input reader started: %v", err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("guided installer never began its attached input read")
+	}
+	if _, err := gate.WriteString("done\n"); err != nil {
+		t.Fatal(err)
+	}
 
 	var err error
 	select {

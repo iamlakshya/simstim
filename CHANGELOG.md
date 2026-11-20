@@ -20,6 +20,8 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ### Fixed
 
+- The guided setup test now holds its fixture installer until the terminal reader starts. Fast installers cannot bypass the blocked reader case or leave the test waiting for a read that never began.
+
 - Developer setup uses the exact Go toolchain pinned in the repository, including inside the devcontainer. Failed setup tests print their full diagnostic output.
 - Helper archives accept only the supported helper file names. Cache writes stay inside an opened directory even when an existing entry is a link.
 - Shadow terminal frames reject lengths that exceed their wire field or overflow the host's header arithmetic. Rejected profiles keep the previous profile and report an error.

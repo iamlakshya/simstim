@@ -37,6 +37,8 @@ These are the project's quality expectations, with tools to check them locally a
 
 ## Unit and golden tests
 
+An installer fixture that checks a blocked terminal reader waits for that read before it exits. Use an owned gate rather than a fast command or a sleep. Release the gate and join the guide before restoring the terminal files.
+
 - **Screens** are golden files in `internal/tui/testdata`, at 60×20, 80×24 and 120×36, with motion off. A golden test fails on any change of text or layout. Run it with `-update` only when the change is meant, and read the diff.
 - **Colour** is tested separately in `internal/tui/theme_test.go`: each screen is rendered as a truecolour, 256-colour, 16-colour, `NO_COLOR` and no-terminal profile would receive it, and every fixed colour must keep a contrast of 3:1 on dark and light backgrounds.
 - **Model tests** (`internal/tui/model_test.go`) drive the launcher with keys against a fake backend, and check what it asks the backend to do.
