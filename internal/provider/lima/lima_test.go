@@ -498,7 +498,7 @@ func TestCreateReportsOtherStartFailures(t *testing.T) {
 // When the start again fails, the VM, which no host names, is deleted.
 func TestCreateDeletesAVMThatDoesNotStartAgain(t *testing.T) {
 	inst := provider.MachineName("dev")
-	again := brand.Name + " host create lima dev   (to try again)"
+	again := brand.Name + " host create lima dev (to try again)"
 	refused := []string{"refuse-nesting", "refuse-stderr=start-exiting.stderr", "refuse-ha=ha-no-device.log"}
 	for _, tc := range []struct {
 		name         string

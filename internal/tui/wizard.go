@@ -62,6 +62,7 @@ type wizard struct {
 	err    error
 	run    bool
 	seq    int
+	ctx    context.Context
 	cancel context.CancelFunc
 	conn   Conn
 	info   *client.HostInfo
@@ -81,30 +82,32 @@ type wizard struct {
 // Wizard results.
 type (
 	probeMsg struct {
-		seq  int
-		p    client.Platform
-		err  error
-		took time.Duration
+		owner *wizard
+		seq   int
+		p     client.Platform
+		err   error
+		took  time.Duration
 	}
 	installMsg struct {
-		seq  int
-		err  error
-		took time.Duration
+		owner *wizard
+		seq   int
+		err   error
+		took  time.Duration
 	}
 	setupMsg struct {
-		seq  int
-		conn Conn
-		res  client.SetupResult
-		info client.HostInfo
-		err  error
-		took time.Duration
+		owner *wizard
+		seq   int
+		conn  Conn
+		res   client.SetupResult
+		info  client.HostInfo
+		err   error
+		took  time.Duration
 	}
 )
 
 func (m *Model) openWizard() tea.Cmd {
 	m.modal = newWizard()
-	be := m.be
-	return func() tea.Msg { return sshHostsMsg{be.SSHConfigHosts()} }
+	return m.loadSSHHosts()
 }
 
 func newWizard() *wizard {
@@ -152,15 +155,6 @@ func (w *wizard) matches() []string {
 		}
 	}
 	return out
-}
-
-func (w *wizard) stop() {
-	w.seq++
-	w.run = false
-	if w.cancel != nil {
-		w.cancel()
-		w.cancel = nil
-	}
 }
 
 func (w *wizard) key(m *Model, k tea.KeyPressMsg) tea.Cmd {
@@ -212,10 +206,11 @@ func (w *wizard) back(m *Model) tea.Cmd {
 		return w.agentBack(m)
 	}
 	w.stop()
+	drop := m.dropConn(w.takeConn())
 	switch {
 	case w.made && !w.saved:
 		m.modal = nil
-		return m.addHost(w.host, nil, nil)
+		return tea.Batch(drop, m.addHost(w.host, nil, nil))
 	case w.step == wzWhere && w.prev != nil:
 		m.modal = w.prev
 	case w.step == wzWhere || w.saved:
@@ -225,7 +220,7 @@ func (w *wizard) back(m *Model) tea.Cmd {
 	default:
 		w.step, w.err, w.checks = wzWhere, nil, nil
 	}
-	return nil
+	return drop
 }
 
 func (w *wizard) whereKey(m *Model, k tea.KeyPressMsg) tea.Cmd {
@@ -276,11 +271,11 @@ func (w *wizard) submit(m *Model) tea.Cmd {
 	w.err = nil
 	switch {
 	case target == "":
-		w.err = &client.UserError{Msg: "an SSH target is needed", Hint: "Type a Host from ~/.ssh/config, or user@host."}
+		w.err = &client.UserError{Msg: "an SSH target is needed", Hint: "Type a Host from ~/.ssh/config, or user@host.", Code: "missing_value", Kind: client.KindUsage}
 	case !client.ValidHostName(name):
-		w.err = &client.UserError{Msg: fmt.Sprintf("%q cannot name a host", name), Hint: "Use letters, digits, dots, dashes and underscores."}
+		w.err = &client.UserError{Msg: fmt.Sprintf("%q cannot name a host", name), Hint: "Use letters, digits, dots, dashes and underscores.", Code: "bad_name", Kind: client.KindUsage}
 	case m.hostByName(name) != nil:
-		w.err = &client.UserError{Msg: "there is already a host named " + name, Hint: "Pick another name, or remove " + name + " first."}
+		w.err = &client.UserError{Msg: "there is already a host named " + name, Hint: "Pick another name, or remove " + name + " first.", Code: "host_exists"}
 	}
 	if w.err != nil {
 		return nil
@@ -298,7 +293,7 @@ func (w *wizard) cliHint() string {
 	if w.host.SSHConfig != "" {
 		s += " --ssh-config " + w.host.SSHConfig
 	}
-	return s + "   (it can ask for passwords)"
+	return s + " (it can ask for passwords)"
 }
 
 // sshErr explains a failed SSH step. The wizard cannot show SSH's prompts,
@@ -306,74 +301,70 @@ func (w *wizard) cliHint() string {
 func (w *wizard) sshErr(err error) error {
 	msg, hint := errText(err)
 	if offline(err) || strings.Contains(msg, "Permission denied") || strings.Contains(msg, "Host key") || hint == "" {
-		return &client.UserError{Msg: msg, Hint: w.cliHint()}
+		return &client.UserError{Msg: msg, Hint: w.cliHint(), Code: "ssh_failed"}
 	}
 	return err
-}
-
-func (w *wizard) begin(m *Model) (context.Context, int) {
-	w.stop()
-	w.run = true
-	ctx, cancel := context.WithCancel(m.ctx)
-	w.cancel = cancel
-	return ctx, w.seq
 }
 
 func (w *wizard) probe(m *Model) tea.Cmd {
 	w.step, w.err = wzTest, nil
 	w.checks = []check{{name: "connect", state: ckRunning}}
-	ctx, seq := w.begin(m)
+	ctx, seq, cleanup := w.begin(m)
 	be, h, clock := m.be, w.host, m.now
-	return func() tea.Msg {
+	return tea.Batch(cleanup, m.bgCmd(func(context.Context) tea.Msg {
 		start := clock()
 		cctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 		defer cancel()
 		p, err := be.Probe(cctx, h)
-		return probeMsg{seq: seq, p: p, err: err, took: clock().Sub(start)}
-	}
+		return probeMsg{owner: w, seq: seq, p: p, err: err, took: clock().Sub(start)}
+	}))
 }
 
 func (w *wizard) install(m *Model) tea.Cmd {
-	w.err = nil
+	w.step, w.err = wzInstall, nil
 	w.checks = []check{{name: "install", state: ckRunning, detail: "uploading " + brand.HostBinary}}
-	ctx, seq := w.begin(m)
+	ctx, seq, cleanup := w.begin(m)
 	be, h, p, clock := m.be, w.host, w.plat, m.now
-	return func() tea.Msg {
+	return tea.Batch(cleanup, m.bgCmd(func(context.Context) tea.Msg {
 		start := clock()
 		cctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 		defer cancel()
 		err := be.Install(cctx, h, p)
-		return installMsg{seq: seq, err: err, took: clock().Sub(start)}
-	}
+		return installMsg{owner: w, seq: seq, err: err, took: clock().Sub(start)}
+	}))
 }
 
 // setup connects, prepares the host, reads its facts and saves it.
 func (w *wizard) setup(m *Model) tea.Cmd {
 	w.step, w.err = wzReady, nil
 	w.checks = []check{{name: "prepare", state: ckRunning, detail: "linger, terminfo"}}
-	ctx, seq := w.begin(m)
+	ctx, seq, cleanup := w.begin(m)
 	be, h, set, clock := m.be, w.host, m.conns, m.now
 	idle := w.made && h.Machine != nil && onboard.PowersOffWhenIdle(h.Machine.Provider)
-	return func() tea.Msg {
+	return tea.Batch(cleanup, m.bgCmd(func(context.Context) tea.Msg {
 		start := clock()
-		cctx, cancel := context.WithTimeout(ctx, 90*time.Second)
+		cctx, cancel := wizardSetupContext(ctx)
 		defer cancel()
 		c, err := dialClean(cctx, be, h)
 		if err != nil {
-			return setupMsg{seq: seq, err: err}
+			return setupMsg{owner: w, seq: seq, err: err}
 		}
-		if !set.add(c) {
+		if cctx.Err() != nil {
+			c.Close()
+			return setupMsg{owner: w, seq: seq, err: cctx.Err()}
+		}
+		if !set.addUnadopted(c) {
 			return nil
 		}
 		res, err := c.Setup(cctx)
 		if err != nil {
 			set.drop(c)
-			return setupMsg{seq: seq, err: err}
+			return setupMsg{owner: w, seq: seq, err: err}
 		}
 		info, err := c.Doctor(cctx)
 		if err != nil {
 			set.drop(c)
-			return setupMsg{seq: seq, err: err}
+			return setupMsg{owner: w, seq: seq, err: err}
 		}
 		if idle {
 			st := api.Check{Name: "idle stop", OK: true}
@@ -384,6 +375,10 @@ func (w *wizard) setup(m *Model) tea.Cmd {
 			st.Detail = client.CleanLine(st.Detail) // the host's own words
 			res.Steps = append(res.Steps, st)
 		}
-		return setupMsg{seq: seq, conn: c, res: res, info: info, took: clock().Sub(start)}
-	}
+		if cctx.Err() != nil {
+			set.drop(c)
+			return setupMsg{owner: w, seq: seq, err: cctx.Err()}
+		}
+		return setupMsg{owner: w, seq: seq, conn: c, res: res, info: info, took: clock().Sub(start)}
+	}))
 }

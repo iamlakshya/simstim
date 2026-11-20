@@ -3,8 +3,6 @@ package host
 import (
 	"bufio"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -27,17 +25,6 @@ import (
 // Features this host helper offers. Clients check them before using a feature.
 var Features = []string{"attach.replay", "upload", "peek", "setup", "rename", "send", "hooks", "restore", "ports", "worktree", "folders", "alerts", "trace"}
 
-// MaxUpload is the largest file a client may upload.
-const MaxUpload = 16 << 20
-
-type upload struct {
-	session string
-	name    string
-	size    int64
-	f       *os.File
-	n       int64
-}
-
 type bridge struct {
 	w *proto.Writer
 	// log takes the bridge's debug lines, while its debug is on
@@ -50,14 +37,18 @@ type bridge struct {
 	// Only the loop in RunBridge uses it.
 	traced bool
 
-	mu      sync.Mutex
-	holder  net.Conn
-	hw      *proto.Writer
-	uploads map[uint64]*upload
-	hashes  map[uint64]interface {
-		Write([]byte) (int, error)
-		Sum([]byte) []byte
-	}
+	mu     sync.Mutex
+	holder net.Conn
+	hw     *proto.Writer
+
+	// umu guards uploads, the uploads that have begun and not ended, the
+	// files of each, and uploadsDone, whether the bridge takes no more
+	// (bridge_upload.go). uploadsWG counts every tracked upload until its
+	// disk cleanup or finalisation has finished.
+	umu         sync.Mutex
+	uploads     map[uint64]*upload
+	uploadsDone bool
+	uploadsWG   sync.WaitGroup
 }
 
 // RunBridge serves one client over in and out (the SSH channel's stdio).
@@ -83,12 +74,12 @@ func RunBridge(in io.Reader, out io.Writer) error {
 		return err
 	}
 	lines := diag.NewLines()
-	b := &bridge{w: w, log: slog.New(lines), dbg: bridgeDebug{lines: lines}, uploads: map[uint64]*upload{}, hashes: map[uint64]interface {
-		Write([]byte) (int, error)
-		Sum([]byte) []byte
-	}{}}
+	b := &bridge{w: w, log: slog.New(lines), dbg: bridgeDebug{lines: lines}, uploads: map[uint64]*upload{}}
 	liveBridges.Store(b, true)
 	defer liveBridges.Delete(b)
+	// An upload that never got its end, as one that its client gave up at
+	// a cancel, leaves nothing when the connection goes.
+	defer b.reclaimUploadsAt(true)
 	defer b.stopDebug("end")
 	defer b.closeHolder()
 	inside := CheckCaller() != nil // bridge_inside.go
@@ -109,7 +100,11 @@ func RunBridge(in io.Reader, out io.Writer) error {
 		case proto.TRequest:
 			var req proto.Request
 			if json.Unmarshal(f.Payload, &req) == nil {
-				go b.serve(req)
+				liveRequests.Add(1) // EndBridge waits for it
+				go func() {
+					defer liveRequests.Add(-1)
+					b.serve(req)
+				}()
 			}
 		case proto.TAttach:
 			var a proto.Attach
@@ -360,89 +355,6 @@ func safeName(n string) string {
 		s = s[len(s)-80:]
 	}
 	return s
-}
-
-func (b *bridge) uploadBegin(p []byte) {
-	var u proto.UploadBegin
-	if err := json.Unmarshal(p, &u); err != nil {
-		return
-	}
-	fail := func(err error) { b.reply(u.ID, nil, err) }
-	if !validID(u.Session) {
-		fail(UserError("not_found", "no session "+u.Session, ""))
-		return
-	}
-	if u.Size < 0 || u.Size > MaxUpload {
-		fail(UserError("too_big", "the file is larger than 16 MiB", ""))
-		return
-	}
-	dir := paths.PasteDir(u.Session)
-	if err := paths.EnsurePrivateDir(dir); err != nil {
-		fail(err)
-		return
-	}
-	cleanOld(dir, 24*time.Hour)
-	f, err := os.CreateTemp(dir, ".upload-*")
-	if err != nil {
-		fail(err)
-		return
-	}
-	b.mu.Lock()
-	b.uploads[u.ID] = &upload{session: u.Session, name: safeName(u.Name), size: u.Size, f: f}
-	b.hashes[u.ID] = sha256.New()
-	b.mu.Unlock()
-}
-
-func (b *bridge) uploadChunk(p []byte) {
-	id, data, err := proto.DecodeChunk(p)
-	if err != nil {
-		return
-	}
-	b.mu.Lock()
-	u := b.uploads[id]
-	h := b.hashes[id]
-	b.mu.Unlock()
-	if u == nil {
-		return
-	}
-	u.n += int64(len(data))
-	if u.n > MaxUpload {
-		return
-	}
-	_, _ = u.f.Write(data)
-	_, _ = h.Write(data)
-}
-
-func (b *bridge) uploadEnd(p []byte) {
-	var e proto.UploadEnd
-	if err := json.Unmarshal(p, &e); err != nil {
-		return
-	}
-	b.mu.Lock()
-	u := b.uploads[e.ID]
-	h := b.hashes[e.ID]
-	delete(b.uploads, e.ID)
-	delete(b.hashes, e.ID)
-	b.mu.Unlock()
-	if u == nil {
-		b.reply(e.ID, nil, UserError("upload", "unknown upload", ""))
-		return
-	}
-	u.f.Close()
-	sum := hex.EncodeToString(h.Sum(nil))
-	if u.n != u.size || !strings.EqualFold(sum, e.SHA256) {
-		os.Remove(u.f.Name())
-		b.reply(e.ID, nil, UserError("upload", "the upload was damaged in transit", "Try again."))
-		return
-	}
-	final := filepath.Join(filepath.Dir(u.f.Name()), sum[:12]+"-"+u.name)
-	if err := os.Rename(u.f.Name(), final); err != nil {
-		b.reply(e.ID, nil, err)
-		return
-	}
-	_ = os.Chmod(final, 0o600)
-	b.note("upload", int(u.n))
-	b.reply(e.ID, proto.UploadResult{Path: final}, nil)
 }
 
 func cleanOld(dir string, age time.Duration) {

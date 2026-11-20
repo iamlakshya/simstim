@@ -24,7 +24,7 @@ func TestTheDebugBundle(t *testing.T) {
 	ok(t, "debug", "start", "box/dbg", "--for", "1m", "--only", "memory")
 	dir := t.TempDir()
 	t.Chdir(dir)
-	out := ok(t, "debug", "bundle", "box/dbg", "--ssh")
+	out := okSaid(t, "debug", "bundle", "box/dbg", "--ssh")
 	for _, want := range []string{"Wrote ", ".tar.gz (", "README.txt", "replaced.txt", "host/doctor.json",
 		"host/sessions/" + id + "/debug.jsonl", "host/sessions/" + id + "/debug/heap-", "In the archive, it replaced ",
 		"Not gathered: no ssh -v log: box is reached through its provider, not SSH.",
@@ -33,7 +33,7 @@ func TestTheDebugBundle(t *testing.T) {
 			t.Errorf("debug bundle box/dbg lacks %q:\n%s", want, out)
 		}
 	}
-	out = ok(t, "debug", "bundle")
+	out = okSaid(t, "debug", "bundle")
 	if !strings.Contains(out, "laptop/doctor.txt") || strings.Contains(out, "host/") {
 		t.Errorf("debug bundle of the laptop:\n%s", out)
 	}

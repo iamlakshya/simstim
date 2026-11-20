@@ -13,17 +13,18 @@ import (
 	"time"
 
 	"github.com/iamlakshya/simstim/internal/brand"
+	"github.com/iamlakshya/simstim/internal/testhome"
 )
 
 // peerListener listens on a Unix socket in a new folder, and returns it
 // with its path.
 func peerListener(t *testing.T) (net.Listener, string) {
 	t.Helper()
-	dir, err := os.MkdirTemp("/tmp", "peer")
+	dir, err := testhome.ShortTempDir("peer")
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { os.RemoveAll(dir) })
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
 	sock := filepath.Join(dir, "s.sock")
 	ln, err := net.Listen("unix", sock)
 	if err != nil {

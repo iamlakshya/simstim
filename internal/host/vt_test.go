@@ -510,10 +510,12 @@ func TestVTQueries(t *testing.T) {
 		t.Fatalf("answered while answering is off: %q", w)
 	}
 
-	v.SetProfile(VTProfile{
+	if err := v.SetProfile(VTProfile{
 		DA1: []int{62, 22, 52}, XTVersion: "ghostty 1.3.1",
 		Foreground: "#cdd6f4", Background: "#1e1e2e", ColorScheme: "dark",
-	})
+	}); err != nil {
+		t.Fatal(err)
+	}
 	v.AnswerQueries(true)
 	v.Resize(80, 24, 800, 480)
 	q := "\x1b[c\x1b[>c\x1b[>q\x1b[?u\x1b[>5u\x1b[?u\x1b]10;?\x1b\\\x1b]11;?\x07\x1b[6n\x1b[14t\x1b[18t\x1b[?996n\x1b]7501;?\x1b\\"
@@ -764,7 +766,7 @@ func TestVTCapsItsSize(t *testing.T) {
 	// size sends the frames, then asks for a dump, and returns its size.
 	size := func(frames ...[]byte) (cols, rows int) {
 		t.Helper()
-		for _, f := range append(frames, vtFrame(vtFrameDump, []byte{0, 0, 0, 0})) {
+		for _, f := range append(frames, encodedVTFrame(t, vtFrameDump, []byte{0, 0, 0, 0})) {
 			if _, err := in.Write(f); err != nil {
 				t.Fatal(err)
 			}
@@ -791,7 +793,7 @@ func TestVTCapsItsSize(t *testing.T) {
 	sizeFrame := func(kind byte, cols, rows uint16, extra ...byte) []byte {
 		p := binary.LittleEndian.AppendUint16(nil, cols)
 		p = binary.LittleEndian.AppendUint16(p, rows)
-		return vtFrame(kind, append(p, extra...))
+		return encodedVTFrame(t, kind, append(p, extra...))
 	}
 
 	if cols, rows := size(); cols != 4096 || rows != 2048 {

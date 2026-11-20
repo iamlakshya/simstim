@@ -43,7 +43,7 @@ func agentsLsCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().BoolVar(&asJSON, "json", false, "print JSON")
+	addJSON(cmd, &asJSON)
 	return cmd
 }
 
@@ -61,13 +61,16 @@ func agentsInstallCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			a, ok := agents.Find(args[0])
 			if !ok || a.Setup == nil || a.Setup.Install == "" {
-				return &client.UserError{Msg: fmt.Sprintf("there is no install command for %q", args[0]), Hint: brand.Name + " agents ls"}
+				return &client.UnknownNameError{
+					UserError: &client.UserError{Msg: fmt.Sprintf("there is no install command for %q", args[0]), Hint: brand.Name + " agents ls", Code: "agent_not_found", Kind: client.KindNotFound},
+					Name:      args[0], Known: installable(),
+				}
 			}
 			h, err := pickHost(hostName)
 			if err != nil {
 				return err
 			}
-			return installAgent(cmd.Context(), h, a, force)
+			return installAgent(cmd.Context(), h, a, force, inputOn(cmd))
 		},
 	}
 	cmd.Flags().StringVar(&hostName, "host", "", "the host (needed when you have more than one)")
@@ -75,10 +78,21 @@ func agentsInstallCmd() *cobra.Command {
 	return cmd
 }
 
+// installable lists the agents that agents install can install.
+func installable() []string {
+	all := agents.Installable()
+	out := make([]string, len(all))
+	for i, a := range all {
+		out[i] = a.Kind
+	}
+	return out
+}
+
 // pickHost is the named host, or the only one.
 func pickHost(name string) (client.Host, error) {
 	if name != "" {
-		return client.FindHost(name)
+		h, err := client.FindHost(name)
+		return h, fromFlag(err, "host")
 	}
 	hosts, err := client.LoadHosts()
 	if err != nil {
@@ -86,7 +100,7 @@ func pickHost(name string) (client.Host, error) {
 	}
 	switch len(hosts) {
 	case 0:
-		return client.Host{}, &client.UserError{Msg: "no hosts yet", Hint: brand.Name + " host add <name>"}
+		return client.Host{}, &client.UserError{Msg: "no hosts yet", Hint: brand.Name + " host add <name>", Code: "no_hosts"}
 	case 1:
 		return hosts[0], nil
 	}
@@ -94,10 +108,13 @@ func pickHost(name string) (client.Host, error) {
 	for i, h := range hosts {
 		names[i] = h.Name
 	}
-	return client.Host{}, &client.UserError{Msg: "which host? You have " + strings.Join(names, ", "), Hint: "Add --host <name>."}
+	return client.Host{}, &client.UserError{Msg: "which host? You have " + strings.Join(names, ", "), Hint: "Add --host <name>.", Code: "host_needed", Kind: client.KindUsage}
 }
 
-func installAgent(ctx context.Context, h client.Host, a agents.Agent, force bool) error {
+// installAgent runs an agent's installer in a session on h. With attachOK,
+// which input on gives, it attaches, so the user answers the installer.
+// Otherwise it starts the session, and says how to attach to it.
+func installAgent(ctx context.Context, h client.Host, a agents.Agent, force, attachOK bool) error {
 	cctx, cancel := context.WithTimeout(ctx, 90*time.Second)
 	defer cancel()
 	conn, err := client.Dial(cctx, h, true)
@@ -111,13 +128,13 @@ func installAgent(ctx context.Context, h client.Host, a agents.Agent, force bool
 	}
 	if c, ok := findCheck(checks, a.Kind); ok && c.Installed && !force {
 		conn.Close()
-		fmt.Printf("%s is already installed on %s, at %s.\n", a.Title, h.Name, client.CleanPath(c.Path))
-		printAgentChecks(os.Stdout, h.Name, []api.AgentCheck{c})
-		fmt.Printf("\nTo run its installer again, for example to update it, add --force.\n")
+		fmt.Fprintf(os.Stderr, "%s is already installed on %s, at %s.\n", a.Title, h.Name, client.CleanPath(c.Path))
+		printAgentChecks(os.Stderr, h.Name, []api.AgentCheck{c})
+		fmt.Fprintf(os.Stderr, "\nTo run its installer again, for example to update it, add --force.\n")
 		return nil
 	}
-	fmt.Printf("Installing %s on %s with its vendor's installer:\n\n    %s\n\n", a.Title, h.Name, a.Setup.Install)
-	fmt.Printf("It comes from %s.\nIt runs in a session, so you see its output and can answer its questions.\n\n", a.Setup.Source)
+	fmt.Fprintf(os.Stderr, "Installing %s on %s with its vendor's installer:\n\n    %s\n\n", a.Title, h.Name, a.Setup.Install)
+	fmt.Fprintf(os.Stderr, "It comes from %s.\nIt runs in a session, so you see its output and can answer its questions.\n\n", a.Setup.Source)
 	cols, rows := termSize()
 	args := client.TerminalArgs(onboard.InstallArgs(a), cols, rows)
 	s, err := conn.NewSession(cctx, args)
@@ -125,27 +142,27 @@ func installAgent(ctx context.Context, h client.Host, a agents.Agent, force bool
 	if err != nil {
 		return err
 	}
-	if !isTerminal(os.Stdin) || !isTerminal(os.Stdout) {
+	if !attachOK {
 		target := client.CommandTarget(h.Name, s.ID)
-		fmt.Printf("Started %s. Attach to answer its questions: %s attach %s\n", target, brand.Name, target)
+		fmt.Fprintf(os.Stderr, "Started %s. Attach to answer its questions: %s attach %s\n", target, brand.Name, target)
 		return nil
 	}
-	ended, err := attachEnded(ctx, h, s.ID, s.Name)
+	ended, stuck, err := attachSession(ctx, h, s.ID, s.Name)
 	if err != nil {
 		return err
 	}
 	if !ended {
-		fmt.Printf("The installer keeps running. When it is done, run `%s host doctor %s`.\n", brand.Name, h.Name)
+		fmt.Fprintf(os.Stderr, "The installer keeps running. When it is done, run `%s host doctor %s`.\n", brand.Name, h.Name)
 		return nil
 	}
-	return afterInstall(ctx, h, a)
+	return afterInstall(ctx, h, a, !stuck)
 }
 
 // afterInstall checks the agent again and says how to log in.
-func afterInstall(ctx context.Context, h client.Host, a agents.Agent) error {
+func afterInstall(ctx context.Context, h client.Host, a agents.Agent, interactive bool) error {
 	cctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
-	conn, err := client.Dial(cctx, h, true)
+	conn, err := client.Dial(cctx, h, interactive)
 	if err != nil {
 		return err
 	}
@@ -157,12 +174,12 @@ func afterInstall(ctx context.Context, h client.Host, a agents.Agent) error {
 	c, ok := findCheck(checks, a.Kind)
 	if !ok || !c.Installed {
 		return &client.UserError{Msg: fmt.Sprintf("%s is still not installed on %s", a.Title, h.Name),
-			Hint: "Read the installer's output above, or see " + a.Setup.Source}
+			Hint: "See " + a.Setup.Source + ", or read the installer's output above.", Code: "install_failed"}
 	}
-	fmt.Println()
-	printAgentChecks(os.Stdout, h.Name, []api.AgentCheck{c})
+	fmt.Fprintln(os.Stderr)
+	printAgentChecks(os.Stderr, h.Name, []api.AgentCheck{c})
 	if c.Login != api.LoginYes {
-		fmt.Printf("\nNext, log in to %s with its own login, in a session on %s:\n\n    %s\n", a.Title, h.Name, loginCommand(h.Name, a))
+		fmt.Fprintf(os.Stderr, "\nNext, log in to %s with its own login, in a session on %s:\n\n    %s\n", a.Title, h.Name, loginCommand(h.Name, a))
 	}
 	return nil
 }

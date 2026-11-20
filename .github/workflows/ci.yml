@@ -38,6 +38,10 @@ jobs:
           for arch in amd64 arm64; do cp vt/zig-out/linux/shadow-vt-$arch internal/client/helpers/vt-linux-$arch; done
       - run: go vet ./...
       - run: go test -race -count=1 ./...
+      - name: The link's tests again, over a pipe with no buffer
+        env:
+          LINK_TEST_PIPE: "1"
+        run: go test -race -count=1 ./internal/link
       - name: Coverage of internal/ without the launcher (70 % or more)
         run: scripts/cover.sh 70
       - name: Cross-build the client
@@ -59,6 +63,14 @@ jobs:
         run: python3 test/e2e/test_session_sockets.py
       - name: Pins watch tests (offline, with recorded answers)
         run: python3 scripts/test-pins-watch.py
+      - name: Benchmark confirmation matcher tests (offline)
+        run: python3 scripts/test-bench-pattern.py
+      - name: The release job's signed-tag gate, in a temporary repository
+        run: scripts/test-verify-tag.sh
+      - name: End-to-end cleanup tests of host git (offline)
+        run: python3 test/e2e/test_host_git.py
+      - name: llms.txt checker tests (offline)
+        run: python3 scripts/test-check-llms-txt.py
       - name: No Go source file over 500 lines
         run: scripts/check-size.sh
       - name: Generated docs are current
@@ -156,7 +168,7 @@ jobs:
         with:
           go-version-file: go.mod
       - name: Unit tests of the portable packages
-        run: go test -count=1 ./internal/client/... ./internal/keys/... ./internal/term/... ./internal/ring/... ./internal/proto/... ./internal/agents/... ./internal/api/...
+        run: go test -count=1 ./internal/client/... ./internal/keys/... ./internal/keyread/... ./internal/term/... ./internal/ring/... ./internal/proto/... ./internal/agents/... ./internal/api/... ./internal/testhome/...
       - name: Build the client
         run: go build -o client.exe .
 

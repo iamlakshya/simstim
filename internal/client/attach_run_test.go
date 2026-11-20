@@ -27,9 +27,6 @@ import (
 	"github.com/iamlakshya/simstim/internal/paths"
 )
 
-// The tests in this binary may start it again as a session's holder.
-func TestMain(m *testing.M) { hosttest.Main(m) }
-
 // rawReady is what the client writes once the terminal is in raw mode: it
 // saves the window title. Keys typed before it would be cooked.
 const rawReady = "\x1b[22;0t"
@@ -479,7 +476,7 @@ func TestAttachFailures(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer f.Close()
-	if _, err := client.Attach(ctx, client.AttachOptions{Host: r.ch, Session: id, Settings: client.DefaultSettings(), In: f, Out: f}); err == nil || !strings.Contains(err.Error(), "raw mode") {
+	if _, err := client.Attach(ctx, client.AttachOptions{Host: r.ch, Session: id, Settings: client.DefaultSettings(), In: f, Out: f}); err == nil || !strings.Contains(err.Error(), "terminal state") {
 		t.Errorf("attach without a terminal = %v", err)
 	}
 }

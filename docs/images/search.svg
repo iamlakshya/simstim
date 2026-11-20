@@ -4,79 +4,71 @@
 <circle cx="22" cy="20" r="6" fill="#FF5F57"/>
 <circle cx="42" cy="20" r="6" fill="#FEBC2E"/>
 <circle cx="62" cy="20" r="6" fill="#28C840"/>
-<text x="40.8" y="74.0" textLength="8.4" fill="#0E7C7B" font-weight="bold">⢄</text>
-<text x="49.2" y="74.0" textLength="8.4" fill="#0EAFBB" font-weight="bold">⡠</text>
-<text x="57.6" y="74.0" textLength="8.4" fill="#00E5FF" font-weight="bold">⠊</text>
-<text x="74.4" y="74.0" textLength="8.4" fill="#0E7C7B" font-weight="bold">s</text>
-<text x="82.8" y="74.0" textLength="8.4" fill="#0E8D90" font-weight="bold">i</text>
-<text x="91.2" y="74.0" textLength="8.4" fill="#0F9EA5" font-weight="bold">m</text>
-<text x="99.6" y="74.0" textLength="8.4" fill="#0EAFBB" font-weight="bold">s</text>
-<text x="108.0" y="74.0" textLength="8.4" fill="#0BC1D1" font-weight="bold">t</text>
-<text x="116.4" y="74.0" textLength="8.4" fill="#06D3E8" font-weight="bold">i</text>
-<text x="124.8" y="74.0" textLength="8.4" fill="#00E5FF" font-weight="bold">m</text>
+<text x="40.8" y="74.0" textLength="8.4" fill="#BFBDB6" font-weight="bold">⢄</text>
+<text x="49.2" y="74.0" textLength="8.4" fill="#BFBDB6" font-weight="bold">⡠</text>
+<text x="57.6" y="74.0" textLength="8.4" fill="#BFBDB6" font-weight="bold">⠊</text>
+<text x="74.4" y="74.0" textLength="58.8" fill="#BFBDB6" font-weight="bold">simstim</text>
 <text x="150.0" y="74.0" textLength="8.4" fill="#656565">›</text>
 <text x="166.8" y="74.0" textLength="50.4" fill="#BFBDB6" font-weight="bold">search</text>
 <text x="847.2" y="74.0" textLength="84.0" fill="#656565">every host</text>
 <text x="40.8" y="91.0" textLength="890.4" fill="#656565">──────────────────────────────────────────────────────────────────────────────────────────────────────────</text>
-<text x="40.8" y="125.0" textLength="8.4" fill="#90E1C6">▍</text>
+<text x="40.8" y="125.0" textLength="8.4" fill="#BFBDB6">▍</text>
 <text x="49.2" y="125.0" textLength="25.2" fill="#BFBDB6"> 1 </text>
-<text x="74.4" y="125.0" textLength="8.4" fill="#F9AF4F">●</text>
+<text x="74.4" y="125.0" textLength="8.4" fill="#BFBDB6">●</text>
 <text x="91.2" y="125.0" textLength="16.8" fill="#BFBDB6" font-weight="bold">au</text>
-<text x="108.0" y="125.0" textLength="8.4" fill="#90E1C6" font-weight="bold" text-decoration="underline">t</text>
+<text x="108.0" y="125.0" textLength="8.4" fill="#BFBDB6" font-weight="bold" text-decoration="underline">t</text>
 <text x="116.4" y="125.0" textLength="25.2" fill="#BFBDB6" font-weight="bold">h-r</text>
-<text x="141.6" y="125.0" textLength="8.4" fill="#90E1C6" font-weight="bold" text-decoration="underline">e</text>
+<text x="141.6" y="125.0" textLength="8.4" fill="#BFBDB6" font-weight="bold" text-decoration="underline">e</text>
 <text x="150.0" y="125.0" textLength="50.4" fill="#BFBDB6" font-weight="bold">factor</text>
-<text x="200.4" y="125.0" textLength="487.2" fill="#BFBDB6">              claude    homelab:~/src/app                 </text>
-<text x="687.6" y="125.0" textLength="109.2" fill="#F9AF4F">needs input  </text>
-<text x="796.8" y="125.0" textLength="67.2" fill="#BFBDB6">   43s  </text>
-<text x="864.0" y="125.0" textLength="8.4" fill="#F9AF4F">⣶</text>
-<text x="872.4" y="125.0" textLength="8.4" fill="#F9AF4F">⣾</text>
-<text x="880.8" y="125.0" textLength="8.4" fill="#F9AF4F">⣿</text>
-<text x="889.2" y="125.0" textLength="8.4" fill="#F9AF4F">⣄</text>
-<text x="897.6" y="125.0" textLength="8.4" fill="#F9AF4F">⣀</text>
-<text x="906.0" y="125.0" textLength="8.4" fill="#F9AF4F">⣀</text>
-<text x="914.4" y="125.0" textLength="8.4" fill="#F9AF4F">⣀</text>
-<text x="922.8" y="125.0" textLength="8.4" fill="#F9AF4F">⣀</text>
+<text x="200.4" y="125.0" textLength="663.6" fill="#BFBDB6">              claude    homelab:~/src/app                 needs input     43s  </text>
+<text x="864.0" y="125.0" textLength="8.4" fill="#BFBDB6">⣶</text>
+<text x="872.4" y="125.0" textLength="8.4" fill="#BFBDB6">⣿</text>
+<text x="880.8" y="125.0" textLength="8.4" fill="#BFBDB6">⣿</text>
+<text x="889.2" y="125.0" textLength="8.4" fill="#BFBDB6">⣄</text>
+<text x="897.6" y="125.0" textLength="8.4" fill="#BFBDB6">⣀</text>
+<text x="906.0" y="125.0" textLength="8.4" fill="#BFBDB6">⣀</text>
+<text x="914.4" y="125.0" textLength="8.4" fill="#BFBDB6">⣀</text>
+<text x="922.8" y="125.0" textLength="8.4" fill="#BFBDB6">⣀</text>
 <text x="57.6" y="142.0" textLength="8.4" fill="#656565">2</text>
-<text x="74.4" y="142.0" textLength="8.4" fill="#90E1C6">⠶</text>
+<text x="74.4" y="142.0" textLength="8.4" fill="#BFBDB6">⠶</text>
 <text x="91.2" y="142.0" textLength="16.8" fill="#BFBDB6" font-weight="bold">da</text>
-<text x="108.0" y="142.0" textLength="8.4" fill="#90E1C6" font-weight="bold" text-decoration="underline">t</text>
+<text x="108.0" y="142.0" textLength="8.4" fill="#BFBDB6" font-weight="bold" text-decoration="underline">t</text>
 <text x="116.4" y="142.0" textLength="42.0" fill="#BFBDB6" font-weight="bold">a-pip</text>
-<text x="158.4" y="142.0" textLength="8.4" fill="#90E1C6" font-weight="bold" text-decoration="underline">e</text>
+<text x="158.4" y="142.0" textLength="8.4" fill="#BFBDB6" font-weight="bold" text-decoration="underline">e</text>
 <text x="166.8" y="142.0" textLength="33.6" fill="#BFBDB6" font-weight="bold">line</text>
 <text x="318.0" y="142.0" textLength="67.2" fill="#656565">gemini  </text>
 <text x="402.0" y="142.0" textLength="151.2" fill="#656565">gcp-dev:~/pipeline</text>
-<text x="687.6" y="142.0" textLength="109.2" fill="#90E1C6">working      </text>
+<text x="553.2" y="142.0" textLength="260.4" fill="#BFBDB6">                working        </text>
 <text x="813.6" y="142.0" textLength="33.6" fill="#656565">  6s</text>
-<text x="864.0" y="142.0" textLength="8.4" fill="#90E1C6">⣶</text>
-<text x="872.4" y="142.0" textLength="8.4" fill="#90E1C6">⣾</text>
-<text x="880.8" y="142.0" textLength="8.4" fill="#90E1C6">⣿</text>
-<text x="889.2" y="142.0" textLength="8.4" fill="#90E1C6">⣄</text>
-<text x="897.6" y="142.0" textLength="8.4" fill="#90E1C6">⣼</text>
-<text x="906.0" y="142.0" textLength="8.4" fill="#90E1C6">⣿</text>
-<text x="914.4" y="142.0" textLength="8.4" fill="#90E1C6">⣷</text>
-<text x="922.8" y="142.0" textLength="8.4" fill="#90E1C6">⣶</text>
+<text x="864.0" y="142.0" textLength="8.4" fill="#BFBDB6">⣶</text>
+<text x="872.4" y="142.0" textLength="8.4" fill="#BFBDB6">⣿</text>
+<text x="880.8" y="142.0" textLength="8.4" fill="#BFBDB6">⣿</text>
+<text x="889.2" y="142.0" textLength="8.4" fill="#BFBDB6">⣄</text>
+<text x="897.6" y="142.0" textLength="8.4" fill="#BFBDB6">⣼</text>
+<text x="906.0" y="142.0" textLength="8.4" fill="#BFBDB6">⣿</text>
+<text x="914.4" y="142.0" textLength="8.4" fill="#BFBDB6">⣷</text>
+<text x="922.8" y="142.0" textLength="8.4" fill="#BFBDB6">⣶</text>
 <text x="57.6" y="159.0" textLength="8.4" fill="#656565">3</text>
-<text x="74.4" y="159.0" textLength="8.4" fill="#90E1C6">⠶</text>
+<text x="74.4" y="159.0" textLength="8.4" fill="#BFBDB6">⠶</text>
 <text x="91.2" y="159.0" textLength="33.6" fill="#BFBDB6" font-weight="bold">api-</text>
-<text x="124.8" y="159.0" textLength="16.8" fill="#90E1C6" font-weight="bold" text-decoration="underline">te</text>
+<text x="124.8" y="159.0" textLength="16.8" fill="#BFBDB6" font-weight="bold" text-decoration="underline">te</text>
 <text x="141.6" y="159.0" textLength="25.2" fill="#BFBDB6" font-weight="bold">sts</text>
 <text x="318.0" y="159.0" textLength="67.2" fill="#656565">codex   </text>
 <text x="402.0" y="159.0" textLength="142.8" fill="#656565">homelab:~/src/api</text>
-<text x="687.6" y="159.0" textLength="109.2" fill="#90E1C6">working      </text>
+<text x="544.8" y="159.0" textLength="268.8" fill="#BFBDB6">                 working        </text>
 <text x="813.6" y="159.0" textLength="33.6" fill="#656565">  8s</text>
-<text x="864.0" y="159.0" textLength="8.4" fill="#90E1C6">⣶</text>
-<text x="872.4" y="159.0" textLength="8.4" fill="#90E1C6">⣾</text>
-<text x="880.8" y="159.0" textLength="8.4" fill="#90E1C6">⣿</text>
-<text x="889.2" y="159.0" textLength="8.4" fill="#90E1C6">⣄</text>
-<text x="897.6" y="159.0" textLength="8.4" fill="#90E1C6">⣼</text>
-<text x="906.0" y="159.0" textLength="8.4" fill="#90E1C6">⣿</text>
-<text x="914.4" y="159.0" textLength="8.4" fill="#90E1C6">⣷</text>
-<text x="922.8" y="159.0" textLength="8.4" fill="#90E1C6">⣶</text>
+<text x="864.0" y="159.0" textLength="8.4" fill="#BFBDB6">⣶</text>
+<text x="872.4" y="159.0" textLength="8.4" fill="#BFBDB6">⣿</text>
+<text x="880.8" y="159.0" textLength="8.4" fill="#BFBDB6">⣿</text>
+<text x="889.2" y="159.0" textLength="8.4" fill="#BFBDB6">⣄</text>
+<text x="897.6" y="159.0" textLength="8.4" fill="#BFBDB6">⣼</text>
+<text x="906.0" y="159.0" textLength="8.4" fill="#BFBDB6">⣿</text>
+<text x="914.4" y="159.0" textLength="8.4" fill="#BFBDB6">⣷</text>
+<text x="922.8" y="159.0" textLength="8.4" fill="#BFBDB6">⣶</text>
 <text x="57.6" y="176.0" textLength="8.4" fill="#656565">4</text>
 <text x="74.4" y="176.0" textLength="8.4" fill="#656565">○</text>
 <text x="91.2" y="176.0" textLength="58.8" fill="#BFBDB6" font-weight="bold">docs-si</text>
-<text x="150.0" y="176.0" textLength="16.8" fill="#90E1C6" font-weight="bold" text-decoration="underline">te</text>
+<text x="150.0" y="176.0" textLength="16.8" fill="#BFBDB6" font-weight="bold" text-decoration="underline">te</text>
 <text x="318.0" y="176.0" textLength="67.2" fill="#656565">opencode</text>
 <text x="402.0" y="176.0" textLength="151.2" fill="#656565">homelab:~/src/docs</text>
 <text x="687.6" y="176.0" textLength="109.2" fill="#656565">idle         </text>
@@ -90,9 +82,9 @@
 <text x="914.4" y="176.0" textLength="8.4" fill="#656565">⣀</text>
 <text x="922.8" y="176.0" textLength="8.4" fill="#656565">⣀</text>
 <text x="57.6" y="193.0" textLength="8.4" fill="#656565">5</text>
-<text x="74.4" y="193.0" textLength="8.4" fill="#7FD962">✓</text>
+<text x="74.4" y="193.0" textLength="8.4" fill="#BFBDB6">✓</text>
 <text x="91.2" y="193.0" textLength="16.8" fill="#BFBDB6" font-weight="bold">no</text>
-<text x="108.0" y="193.0" textLength="16.8" fill="#90E1C6" font-weight="bold" text-decoration="underline">te</text>
+<text x="108.0" y="193.0" textLength="16.8" fill="#BFBDB6" font-weight="bold" text-decoration="underline">te</text>
 <text x="124.8" y="193.0" textLength="8.4" fill="#BFBDB6" font-weight="bold">s</text>
 <text x="318.0" y="193.0" textLength="67.2" fill="#656565">shell   </text>
 <text x="402.0" y="193.0" textLength="75.6" fill="#656565">homelab:~</text>
@@ -106,8 +98,8 @@
 <text x="906.0" y="193.0" textLength="8.4" fill="#656565">⣀</text>
 <text x="914.4" y="193.0" textLength="8.4" fill="#656565">⣀</text>
 <text x="922.8" y="193.0" textLength="8.4" fill="#656565">⣀</text>
-<text x="57.6" y="227.0" textLength="8.4" fill="#F9AF4F">●</text>
-<text x="66.0" y="227.0" textLength="201.6" fill="#F9AF4F"> Do you want to proceed?</text>
+<text x="57.6" y="227.0" textLength="8.4" fill="#BFBDB6">●</text>
+<text x="66.0" y="227.0" textLength="537.6" fill="#BFBDB6"> Do you want to proceed?                                        </text>
 <text x="603.6" y="227.0" textLength="84.0" fill="#656565">~/src/app </text>
 <text x="687.6" y="227.0" textLength="8.4" fill="#656565">·</text>
 <text x="696.0" y="227.0" textLength="151.2" fill="#656565"> 612 MiB of 8 GiB </text>
@@ -115,14 +107,14 @@
 <text x="855.6" y="227.0" textLength="75.6" fill="#656565"> k2v7m4qa</text>
 <text x="40.8" y="516.0" textLength="890.4" fill="#656565">──────────────────────────────────────────────────────────────────────────────────────────────────────────</text>
 <rect x="150.0" y="520.0" width="8.4" height="17.0" fill="#BFBDB6"/>
-<text x="57.6" y="533.0" textLength="50.4" fill="#90E1C6">search</text>
-<text x="116.4" y="533.0" textLength="8.4" fill="#90E1C6" font-weight="bold">❯</text>
+<text x="24.0" y="533.0" textLength="92.4" fill="#BFBDB6">    search </text>
+<text x="116.4" y="533.0" textLength="8.4" fill="#BFBDB6" font-weight="bold">❯</text>
 <text x="124.8" y="533.0" textLength="25.2" fill="#BFBDB6"> te</text>
-<text x="57.6" y="550.0" textLength="42.0" fill="#90E1C6">enter</text>
+<text x="24.0" y="550.0" textLength="75.6" fill="#BFBDB6">    enter</text>
 <text x="99.6" y="550.0" textLength="58.8" fill="#656565"> attach</text>
-<text x="183.6" y="550.0" textLength="8.4" fill="#90E1C6">↑</text>
-<text x="192.0" y="550.0" textLength="8.4" fill="#90E1C6">↓</text>
+<text x="183.6" y="550.0" textLength="8.4" fill="#BFBDB6">↑</text>
+<text x="192.0" y="550.0" textLength="8.4" fill="#BFBDB6">↓</text>
 <text x="200.4" y="550.0" textLength="42.0" fill="#656565"> move</text>
-<text x="267.6" y="550.0" textLength="25.2" fill="#90E1C6">esc</text>
+<text x="242.4" y="550.0" textLength="50.4" fill="#BFBDB6">   esc</text>
 <text x="292.8" y="550.0" textLength="50.4" fill="#656565"> close</text>
 </svg>

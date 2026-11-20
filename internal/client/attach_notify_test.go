@@ -19,7 +19,7 @@ func notified(t *testing.T, lists ...[]Session) string {
 	defer f.Close()
 	a := &attacher{o: AttachOptions{Host: Host{Name: "box"}, Session: "mine", Out: f}}
 	for _, l := range lists {
-		a.notifyOthers(l)
+		a.notifyOthers(t.Context(), l)
 	}
 	b, err := os.ReadFile(f.Name())
 	if err != nil {

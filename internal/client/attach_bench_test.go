@@ -24,10 +24,11 @@ func BenchmarkAttachOutputFrames(b *testing.B) {
 	data := termtest.AgentOutput(32 << 10)
 	b.SetBytes(int64(len(data)))
 	b.ReportAllocs()
+	ctx := b.Context()
 	off := int64(0)
 	for b.Loop() {
 		f := proto.Frame{Type: proto.TOutput, Payload: proto.EncodeOutput(off, data)}
-		if _, err := a.frame(f); err != nil {
+		if _, err := a.frame(ctx, f); err != nil {
 			b.Fatal(err)
 		}
 		off += int64(len(data))

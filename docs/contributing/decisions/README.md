@@ -20,7 +20,7 @@ Each record explains one choice: the context, the options and the outcome. Recor
 | [0014](0014-code-layout.md) | Code layout: thin mains, an importable command tree, black-box tests under test/ | Accepted |
 | [0015](0015-docs-toolchain.md) | Docs toolchain: Hugo with Hextra, a Diátaxis docs folder and generated reference (its toolchain replaced by 0022) | Accepted |
 | [0016](0016-public-repo-layout.md) | Public repo layout: full community files at the root, GitHub config in .github/, private material out | Accepted |
-| [0017](0017-release-signatures.md) | Release signatures that any machine with OpenSSH can check | Accepted |
+| [0017](0017-release-signatures.md) | Release signatures that any machine with OpenSSH can check (extended by 0041, proposed) | Accepted |
 | [0018](0018-feature-set.md) | The feature set: what we build now, next and later (its Now list extended by 0025) | Accepted |
 | [0019](0019-alerts-and-hooks.md) | Alerts and event hooks run on the host (its once-a-minute rule for a session's end replaced by 0026, which also adds the event `memory`) | Accepted |
 | [0020](0020-guided-setup.md) | A guided setup: one command and one sheet, over one engine | Accepted |
@@ -38,5 +38,6 @@ Each record explains one choice: the context, the options and the outcome. Recor
 | [0032](0032-secret-values-in-memory-only.md) | Secret values live only in the memory of the trusted side, never in a file | Proposed |
 | [0033](0033-one-command-grammar.md) | One grammar for the command line: session verbs at the top, a noun and a verb for everything else, and every rule under `policy` | Accepted |
 | [0034](0034-ssh-options-on-the-command-line.md) | The client puts the options that keep a host safe on the `ssh` command line and at the top of its generated config, where they win over the user's own config. It starts with forwarding off (adds to 0003) | Accepted |
+| [0041](0041-a-signed-tag-release-gate.md) | A release builds only from a tag that a maintainer signed with a hardware key, checked by `main`'s gate against the list of keys on `main`, with the release key in an environment that only the gated job reads (extends 0017) | Proposed |
 
 Write a new record from [the template](template.md).

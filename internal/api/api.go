@@ -52,10 +52,16 @@ type NewArgs struct {
 	// for this start; the host never writes them down (host/secrets.go).
 	Secrets map[string]Secret `json:"secrets,omitempty"`
 	// Setup says whether the repository's setup script runs: SetupRun,
-	// SetupSkip, or "" to follow SetupTrust, the user's answers for this
-	// host by repository (host/setup.go).
-	Setup      string          `json:"setup,omitempty"`
+	// SetupSkip, or "" to follow the user's answers for this host by
+	// repository (host/setup.go).
+	Setup string `json:"setup,omitempty"`
+	// SetupTrust holds the user's refusals, as false: those repositories'
+	// scripts do not run. An older client also sends true for a yes, which
+	// a helper now ignores.
 	SetupTrust map[string]bool `json:"setup_trust,omitempty"`
+	// SetupHashes holds, by repository, the setup hash that the user
+	// trusted. The scripts run only while their content has that hash.
+	SetupHashes map[string]string `json:"setup_hashes,omitempty"`
 }
 
 // SessionInfo is one row of the session list.
@@ -195,6 +201,11 @@ type Port struct {
 type DeleteResult struct {
 	Deleted  bool   `json:"deleted"`
 	Worktree string `json:"worktree,omitempty"`
+	// WorktreeCode and WorktreeHint come with a Worktree note when an error
+	// kept the worktree, such as git_scope: the error's code, and what to
+	// try. An older helper sends neither.
+	WorktreeCode string `json:"worktree_code,omitempty"`
+	WorktreeHint string `json:"worktree_hint,omitempty"`
 }
 
 // FoldersResult is what the new-session dialog completes folders from.

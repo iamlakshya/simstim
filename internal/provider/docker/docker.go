@@ -53,7 +53,7 @@ func (Provider) Create(ctx context.Context, req provider.Request) (client.Host, 
 		return client.Host{}, err
 	}
 	if st != "" {
-		return client.Host{}, &client.UserError{Msg: "Docker already has a container called " + c, Hint: "docker rm -f " + c + "   (if you no longer need it), or choose another name"}
+		return client.Host{}, &client.UserError{Msg: "Docker already has a container called " + c, Hint: "Pick another name, or remove the container with docker rm -f " + c + ".", Code: "instance_exists"}
 	}
 	image := req.Image
 	if image == "" {
@@ -190,7 +190,7 @@ func (t *Transport) Run(ctx context.Context, remote string, stdin io.Reader) ([]
 	if err := cmd.Run(); err != nil {
 		msg := provider.Tail(errb.String(), 3)
 		if unreachable(0, errb.String()) {
-			return out.Bytes(), &client.UserError{Msg: fmt.Sprintf("cannot reach the container %s: %s", t.Container, msg), Hint: t.ReachHint()}
+			return out.Bytes(), &client.UserError{Msg: fmt.Sprintf("cannot reach the container %s: %s", t.Container, msg), Hint: t.ReachHint(), Code: "unreachable"}
 		}
 		return out.Bytes(), fmt.Errorf("%w: %s", err, msg)
 	}
@@ -199,5 +199,5 @@ func (t *Transport) Run(ctx context.Context, remote string, stdin io.Reader) ([]
 
 // ReachHint is the docker command that should work first.
 func (t *Transport) ReachHint() string {
-	return fmt.Sprintf("docker exec -it -u %s %s sh   (check that this works first)", t.User, t.Container)
+	return fmt.Sprintf("docker exec -it -u %s %s sh (check that this works first)", t.User, t.Container)
 }

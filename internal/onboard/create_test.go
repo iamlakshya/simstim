@@ -240,7 +240,15 @@ func TestSSHWorks(t *testing.T) {
 	}
 	err := s.SSHWorks(context.Background(), "dev@203.0.113.10")
 	var ue *client.UserError
-	if !errors.As(err, &ue) || !strings.Contains(ue.Msg, "Permission denied (publickey)") || !strings.Contains(ue.Hint, "ssh dev@203.0.113.10") {
+	if !errors.As(err, &ue) || !strings.Contains(ue.Msg, "Permission denied (publickey)") || ue.Hint != "ssh dev@203.0.113.10 (run it yourself to see what it asks)" {
 		t.Fatalf("err = %v", err)
+	}
+	err = s.SSHWorks(context.Background(), "dev@x;y")
+	if !errors.As(err, &ue) || ue.Hint != "ssh 'dev@x;y' (run it yourself to see what it asks)" {
+		t.Fatalf("a target with a ; = %v", err)
+	}
+	err = s.SSHWorks(context.Background(), "-oProxyCommand=sh")
+	if !errors.As(err, &ue) || ue.Hint != "ssh -- -oProxyCommand=sh (run it yourself to see what it asks)" {
+		t.Fatalf("a target with a leading dash = %v", err)
 	}
 }

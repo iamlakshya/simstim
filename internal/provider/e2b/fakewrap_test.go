@@ -10,7 +10,6 @@ import (
 	"strings"
 	"sync"
 	"syscall"
-	"testing"
 )
 
 // The fake envd runs each command under a wrapper: this test binary, started
@@ -23,16 +22,6 @@ const (
 	wrapperEnv       = "E2B_TEST_FAKE_ENVD_WRAPPER"
 	failLeadGroupEnv = "E2B_TEST_FAKE_ENVD_FAIL_PGID"
 )
-
-func TestMain(m *testing.M) {
-	if os.Getenv(wrapperEnv) != "" {
-		// The fake sets atexit_sleep_ms=0 in the wrapper's GORACE, so the
-		// race detector reports a race, with exit status 66, but does not
-		// sleep a second at exit.
-		os.Exit(runWrapper(os.Args[1:]))
-	}
-	os.Exit(m.Run())
-}
 
 // runWrapper is the wrapper's main. Its stdin, stdout and stderr go to the
 // command. File 3 carries its report to the fake, file 4 the fake's orders,

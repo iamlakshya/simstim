@@ -20,7 +20,7 @@ simstim runs coding agents in sessions on hosts you reach with SSH. Sessions kee
 | [`agents`](agents.md) | List the agents, and install one on a host |
 | [`agents install`](agents_install.md) | Install an agent on a host with its vendor's installer, in a session you can watch |
 | [`agents ls`](agents_ls.md) | List the agents in the agent table, with how each one installs |
-| [`attach`](attach.md) | Attach to a session (detach with Ctrl+\\); - is the last one |
+| [`attach`](attach.md) | Attach to a session (detach with Ctrl+\\); - is the last one, and without one you pick from a list |
 | [`config`](config.md) | Show the configuration |
 | [`config keymap`](config_keymap.md) | Print every home-screen command and its keys (rebind them under [keymap] in config.toml) |
 | [`config path`](config_path.md) | Print where the configuration lives |
@@ -71,3 +71,5 @@ simstim runs coding agents in sessions on hosts you reach with SSH. Sessions kee
 | --- | --- |
 | `--debug[=<categories>]` | turn on the debug mode, with every category, or with the categories listed: attach, net, memory, launcher, runtime. A list binds only in the = form, such as `--debug=net` |
 | `--debug-file <file>` | write the client's debug records to this file. On its own, it turns on every category (SIMSTIM_DEBUG_FILE does the same) |
+| `--no-color` | print no colour (NO_COLOR does the same) |
+| `--no-input` | ask nothing: a question that needs an answer fails with exit code 4, and names the flag that answers it (SIMSTIM_NO_INPUT=1 does the same) |

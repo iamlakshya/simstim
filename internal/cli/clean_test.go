@@ -7,6 +7,7 @@ import (
 	"errors"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -15,6 +16,7 @@ import (
 	"github.com/iamlakshya/simstim/internal/brand"
 	"github.com/iamlakshya/simstim/internal/client"
 	"github.com/iamlakshya/simstim/internal/client/clienttest"
+	"github.com/iamlakshya/simstim/internal/host/hosttest"
 	"github.com/iamlakshya/simstim/internal/proto"
 	"github.com/iamlakshya/simstim/internal/provider"
 )
@@ -42,7 +44,7 @@ func TestLsCleansHostText(t *testing.T) {
 		}},
 		{Host: "far", Error: "cannot reach far: " + hostile},
 	}
-	out, _ := stdout(t, func() error { printSessions(results); return nil })
+	out, _ := captureOutput(t, func() { printSessions(results) })
 	noHostBits(t, "ls", out)
 	for _, want := range []string{"a1[2J", "appgnp.exe", "/srv/app\n", "lost (]52;c;aGk=Allow this?)", "far  ◌ cannot reach far: ]52;c;aGk=Allow this?"} {
 		if !strings.Contains(out, want) {
@@ -66,7 +68,7 @@ func TestOfferFixesCleansHostText(t *testing.T) {
 	fixes := []api.Fix{{ID: "x\u200b", Problem: "linger is off" + hostile, Action: "turn on\x1b[2J linger", Command: "loginctl\u202e enable-linger me"}}
 	var out bytes.Buffer
 	var asked []string
-	err := offerFixes(strings.NewReader("y\n"), &out, fixes, false, func(ids []string) ([]api.Fix, error) {
+	err := offerFixes(testPrompts("y\n", &out), qFix, fixes, false, func(ids []string) ([]api.Fix, error) {
 		asked = ids
 		res := append([]api.Fix(nil), fixes...)
 		res[0].Error = "it failed: " + hostile
@@ -98,21 +100,21 @@ func TestSessionCommandsCleanHostText(t *testing.T) {
 			t.Errorf("%s does not show the name %q:\n%s", what, shown, out)
 		}
 	}
-	out := ok(t, "new", "box", "--detach", "--name", name, "--", "/bin/sh", "-c", "exec sleep 60")
+	out := okSaid(t, "new", "box", "--detach", "--name", name, "--", "/bin/sh", "-c", "exec sleep 60")
 	check("new --detach", out)
 	id := startedRE.FindStringSubmatch(out)[1]
-	check("ports", ok(t, "ports", "box/"+id))
-	check("send", ok(t, "send", "box/"+id, "true", "--no-enter"))
-	out = ok(t, "debug", "start", "box/"+id, "--for", "10m")
+	check("ports", okSaid(t, "ports", "box/"+id))
+	check("send", okSaid(t, "send", "box/"+id, "true", "--no-enter"))
+	out = okSaid(t, "debug", "start", "box/"+id, "--for", "10m")
 	check("debug start", out)
 	if !strings.Contains(out, "debug stop box/"+id) {
 		t.Errorf("debug start names the session by its name, which is not the one shown:\n%s", out)
 	}
-	check("debug stop", ok(t, "debug", "stop", "box/"+id))
-	check("kill", ok(t, "kill", "box/"+id))
+	check("debug stop", okSaid(t, "debug", "stop", "box/"+id))
+	check("kill", okSaid(t, "kill", "box/"+id))
 
 	id = newSession(t, name, "/bin/sh", "-c", "exec sleep 60")
-	check("rename", ok(t, "rename", "box/"+id, "plain"))
+	check("rename", okSaid(t, "rename", "box/"+id, "plain"))
 
 	id = newSession(t, name, "/bin/sh", "-c", "sleep 1; exit 2")
 	agentEnded(t, id)
@@ -122,16 +124,20 @@ func TestSessionCommandsCleanHostText(t *testing.T) {
 		t.Fatalf("attach to an ended agent = %v", err)
 	}
 	check("attach to an ended agent", ue.Msg)
-	check("resume", ok(t, "resume", "box/"+id, "--detach"))
+	check("resume", okSaid(t, "resume", "box/"+id, "--detach"))
 }
 
 // A question about a path from the host shows it cleaned, or quoted when
 // it holds hidden characters, so the user sees them before answering.
 func TestQuestionsShowHostPaths(t *testing.T) {
 	var out bytes.Buffer
-	askSetup(strings.NewReader("n\n"), &out, "box", client.SetupQuestion{
-		Repo: "/home/dev/src/app\x1b]52;c;aGk=\x07\u202e", Script: "/home/dev/src/app/.setup\u200b"})
-	askMakeFolder(strings.NewReader("n\n"), &out, "box", client.FolderQuestion{Folder: "/home/dev/src/mi\u200cnd"})
+	q := client.SetupQuestion{Repo: "/home/dev/src/app\x1b]52;c;aGk=\x07\u202e", Script: "/home/dev/src/app/.setup\u200b"}
+	// Each wording of the setup question, and the note without a terminal.
+	for _, past := range []client.SetupPast{client.SetupNotTrusted, client.SetupChanged, client.SetupUnchecked} {
+		_, _ = askSetup(testPrompts("n\n", &out), "box", q, past)
+		out.WriteString(skipNote("box", q, past) + "\n")
+	}
+	_, _ = askMakeFolder(testPrompts("n\n", &out), "box", client.FolderQuestion{Folder: "/home/dev/src/mi\u200cnd"})
 	noHostBits(t, "the questions", out.String())
 	for _, want := range []string{`"/home/dev/src/app\x1b]52;c;aGk=\a\u202e"`, `"/home/dev/src/app/.setup\u200b"`, `"/home/dev/src/mi\u200cnd"`} {
 		if !strings.Contains(out.String(), want) {
@@ -139,7 +145,7 @@ func TestQuestionsShowHostPaths(t *testing.T) {
 		}
 	}
 	out.Reset()
-	askMakeFolder(strings.NewReader("n\n"), &out, "box", client.FolderQuestion{Folder: "/home/dev/src/new-app"})
+	_, _ = askMakeFolder(testPrompts("n\n", &out), "box", client.FolderQuestion{Folder: "/home/dev/src/new-app"})
 	if !strings.Contains(out.String(), "The folder /home/dev/src/new-app does not exist") {
 		t.Errorf("a clean folder is quoted:\n%s", out.String())
 	}
@@ -166,10 +172,9 @@ func TestAlertsCleanHostText(t *testing.T) {
 		Config: &client.AlertsConfig{Events: []string{"needs_input\x07"}, Delay: "10s\u200b", MinTurn: "60s",
 			Destinations: []client.AlertDestination{{Type: "command", Run: "notify\x1b]52;c;aGk=\x07", Events: []string{hostile}},
 				{Type: "ntfy", URL: "https://ntfy.sh/x\u202e", TokenFile: "~/t\u200b"}}}}
-	out, _ := stdout(t, func() error {
+	out, _ := captureOutput(t, func() {
 		printAlerts("box", info)
 		printAlertLog([]client.AlertLogEntry{{Event: "needs_input", Session: "app" + hostile, Type: "command", Error: hostile}})
-		return nil
 	})
 	noHostBits(t, "host alerts", out)
 	if !strings.Contains(out, "notify]52;c;aGk=") || !strings.Contains(out, "app]52;c;aGk=A") {
@@ -203,7 +208,8 @@ func TestAgentChecksCleanHostText(t *testing.T) {
 // terminal could act on or that hides text.
 func TestPrintJSONEscapesHostText(t *testing.T) {
 	v := map[string]string{"reason": "a\u009b2Jb\u202ec\u200bd\U000e0041e\x1b]52;c;x\x07f\x7fg\u00e9h\u2028"}
-	out, err := stdout(t, func() error { return printJSON(v) })
+	var err error
+	out, _ := captureOutput(t, func() { err = printJSON(v) })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -216,9 +222,12 @@ func TestPrintJSONEscapesHostText(t *testing.T) {
 	if !strings.Contains(out, `\u009b`) || !strings.Contains(out, `\udb40\udc41`) || !strings.Contains(out, "\u00e9") {
 		t.Errorf("printJSON = %q", out)
 	}
-	var back map[string]string
-	if err := json.Unmarshal([]byte(out), &back); err != nil || back["reason"] != v["reason"] {
-		t.Fatalf("printJSON decodes to %q, %v, want the host's own value", back["reason"], err)
+	var back struct {
+		V      int    `json:"v"`
+		Reason string `json:"reason"`
+	}
+	if err := json.Unmarshal([]byte(out), &back); err != nil || back.V != 1 || back.Reason != v["reason"] {
+		t.Fatalf("printJSON decodes to %+v, %v, want v=1 and the host's own value", back, err)
 	}
 	clean := []byte("{\n  \"a\": \"caf\u00e9 \u2192 ok\"\n}\n")
 	if got := jsonSafe(clean); &got[0] != &clean[0] {
@@ -239,7 +248,7 @@ func TestPrintedCommandsNameTheID(t *testing.T) {
 		}
 	}
 	id := newSession(t, name, "/bin/sh", "-c", "exec sleep 60")
-	out := ok(t, "debug", "start", "box/"+id, "--for", "10m")
+	out := okSaid(t, "debug", "start", "box/"+id, "--for", "10m")
 	stop := out[strings.LastIndex(out, "To stop: "):]
 	if stop != "To stop: "+brand.Name+" debug stop box/"+id+"\n" {
 		t.Errorf("debug start = %q", stop)
@@ -263,11 +272,70 @@ func TestPrintedCommandsNameTheID(t *testing.T) {
 	}
 }
 
+// A clean filter in the session's repository writes the OSC 52 clipboard
+// sequence and more to stderr, and fails. git's error, which pull prints,
+// passes the cleaner: the text arrives, without its control bytes.
+func TestPullCleansAFiltersError(t *testing.T) {
+	hosttest.SkipOnGit254(t)
+	th := newTestHost(t)
+	th.h.Install(client.HelperVersion(), "")
+	remote := filepath.Join(th.h.Home, "src", "app")
+	if err := os.MkdirAll(remote, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	git := func(dir string, args ...string) {
+		t.Helper()
+		if out, err := runGit(dir, args...); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	for name, body := range map[string]string{"README": "app\n", ".gitattributes": "README filter=evil\n"} {
+		if err := os.WriteFile(filepath.Join(remote, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	git(remote, "init", "-q", "-b", "main")
+	git(remote, "add", "README", ".gitattributes")
+	git(remote, "commit", "-q", "-m", "first")
+	said := filepath.Join(th.h.Root, "said")
+	filter := filepath.Join(th.h.Root, "evil.sh")
+	if err := os.WriteFile(said, []byte("fatal: "+hostile), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filter, []byte("#!/bin/sh\ncat "+said+" >&2\nexit 1\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	git(remote, "config", "filter.evil.clean", filter)
+	git(remote, "config", "filter.evil.required", "true")
+	// A new time, so that git status reads the file through the filter.
+	later := time.Now().Add(10 * time.Second)
+	if err := os.Chtimes(filepath.Join(remote, "README"), later, later); err != nil {
+		t.Fatal(err)
+	}
+	m := startedRE.FindStringSubmatch(okSaid(t, "new", "box", "--detach", "--name", "evil", "--dir", remote, "--", "sleep", "60"))
+	if m == nil {
+		t.Fatal("new did not start the session")
+	}
+	local := t.TempDir()
+	git(local, "init", "-q", "-b", "main")
+	t.Chdir(local)
+	_, err := run(t, "pull", "box/"+m[1])
+	var ue *client.UserError
+	if !errors.As(err, &ue) || !strings.Contains(ue.Msg, "fatal: ]52;c;aGk=Allow this?") || ue.Hint == "" {
+		t.Fatalf("pull = %v, want git's error with the filter's text, cleaned", err)
+	}
+	noHostBits(t, "pull's error", ue.Msg+"\n"+ue.Hint)
+}
+
 // pull's two early refusals print the session's name and its branch, both
 // the host's text, as plain text: a session with no branch, and a branch
 // that is checked out here.
 func TestPullRefusalsCleanHostText(t *testing.T) {
-	newTestHost(t)
+	// pull asks the helper about the repository (git-op repo.info), which
+	// git 2.54 may not count the changes of.
+	hosttest.SkipOnGit254(t)
+	th := newTestHost(t)
+	th.h.Install(client.HelperVersion(), "")
 	git := func(dir string, args ...string) {
 		t.Helper()
 		cmd := exec.CommandContext(context.Background(), "git", args...)
@@ -285,7 +353,7 @@ func TestPullRefusalsCleanHostText(t *testing.T) {
 		git(dir, "commit", "-q", "--allow-empty", "-m", "one")
 	}
 	t.Chdir(local)
-	out := ok(t, "new", "box", "--detach", "--name", "app"+hostile, "--dir", remote, "--", "/bin/sh", "-c", "exec sleep 60")
+	out := okSaid(t, "new", "box", "--detach", "--name", "app"+hostile, "--dir", remote, "--", "/bin/sh", "-c", "exec sleep 60")
 	id := startedRE.FindStringSubmatch(out)[1]
 	refusal := func(what, want string) {
 		t.Helper()
@@ -327,7 +395,7 @@ func hostileBridge(t *testing.T) *clienttest.Transport {
 // agent install of an agent that is there.
 func TestCommandsCleanHostAnswers(t *testing.T) {
 	hostileBridge(t)
-	if err := client.SaveHosts([]client.Host{{Name: "box", Machine: &client.Machine{Provider: "fake", ID: "fake-box"}}}); err != nil {
+	if err := client.SaveHosts(context.Background(), []client.Host{{Name: "box", Machine: &client.Machine{Provider: "fake", ID: "fake-box"}}}); err != nil {
 		t.Fatal(err)
 	}
 	for _, c := range []struct {
@@ -342,7 +410,8 @@ func TestCommandsCleanHostAnswers(t *testing.T) {
 		{[]string{"agents", "install", "claude", "--host", "box"}, "at /usr/bin/claude]52;c;aGk=Allow this?."},
 	} {
 		what := strings.Join(c.args, " ")
-		out, err := run(t, c.args...)
+		out, errOut, err := runApart(t, c.args...)
+		out += errOut // Every emitted host value is checked, on either stream.
 		var ue *client.UserError
 		if errors.As(err, &ue) {
 			noHostBits(t, what+"'s error", ue.Msg+ue.Hint)
@@ -363,9 +432,10 @@ func TestConnectHostCleansHostText(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	out, err := stdout(t, func() error {
-		return createHost(context.Background(), p, provider.Request{Name: "box", Out: os.Stdout})
+	out, errOut := captureOutput(t, func() {
+		err = createHost(context.Background(), p, provider.Request{Name: "box", Out: os.Stderr})
 	})
+	out += errOut
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -381,10 +451,10 @@ func TestConnectHostCleansHostText(t *testing.T) {
 // the host's text: the refusal shows it cleaned.
 func TestDestroyRefusalCleansHostText(t *testing.T) {
 	withFake(t, []client.Session{{ID: "abc", Name: "app\x1bc" + hostile, State: api.StateWorking, Alive: true}})
-	if err := saveHost(client.Host{Name: "box", Machine: &client.Machine{Provider: "fake", ID: "fake-box"}}); err != nil {
+	if err := saveHost(context.Background(), client.Host{Name: "box", Machine: &client.Machine{Provider: "fake", ID: "fake-box"}}); err != nil {
 		t.Fatal(err)
 	}
-	err := destroyHost(context.Background(), "box", false, true)
+	err := destroyHost(context.Background(), testPrompts("", &bytes.Buffer{}), "box", false, true)
 	var ue *client.UserError
 	if !errors.As(err, &ue) || !strings.Contains(ue.Msg, "are working: appc]52;c;aGk=Allow this?") {
 		t.Fatalf("err = %v, want a refusal that names the working session", err)
@@ -398,17 +468,9 @@ func TestDestroyRefusalCleansHostText(t *testing.T) {
 func TestPrintErrorCleansEveryError(t *testing.T) {
 	printed := func(err error) string {
 		t.Helper()
-		f, ferr := os.CreateTemp(t.TempDir(), "stderr")
-		if ferr != nil {
-			t.Fatal(ferr)
-		}
-		old := os.Stderr
-		os.Stderr = f
-		printError(err)
-		os.Stderr = old
-		_ = f.Close()
-		b, _ := os.ReadFile(f.Name())
-		return string(b)
+		var b strings.Builder
+		printError(&b, err, nil, false, false)
+		return b.String()
 	}
 	out := printed(&client.UserError{Msg: "made here: \x1bc" + hostile + "\nline two" + hostile, Hint: "do\x1b]52;c;aGk=\x07 this"})
 	noHostBits(t, "a user error", out)

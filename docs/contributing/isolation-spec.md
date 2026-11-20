@@ -476,11 +476,14 @@ var Opener = map[Kind]Side{
     KindEgress: Guest, KindDNS: Guest, KindRPort: Guest, KindAgent: Guest,
 }
 
-// Options bound a link.
+// Options bound a link. Both ends use the same Window.
 type Options struct {
-    Window     uint32 // credit for each stream, 256 KiB by default
-    MaxStreams int    // open streams at once, 1024 by default
-    MaxHeader  int    // the JSON header of an open, 4 KiB by default
+    Window               uint32 // credit for each stream, each way, 64 KiB by default
+    MaxSupervisorStreams int    // streams that the supervisor opened, open at once, 32 by default
+    MaxGuestStreams      int    // streams that the guest opened, open at once, 96 by default
+    MaxHeader            int    // the JSON header of an open, 4 KiB by default
+    HelloTimeout         time.Duration // the wait for the other end's hello, 10 s by default
+    Opener               map[Kind]Side // replaces the Opener table, for other links (10.5)
 }
 
 // Session is one end of a link.
@@ -508,7 +511,16 @@ func (st *Stream) CloseWrite() error
 
 Each stream has its own credit window, so a large download on an `egress` stream never holds back `holder` output. The writer of the link sends the frames of streams in turn, and `holder` and `ctl` streams go first when several wait.
 
-**The numbers are targets (P1.2).** The window of 256 KiB starts from yamux's initial stream window ([yamux](https://github.com/hashicorp/yamux/blob/master/const.go), master, October 2026). The limits of 1,024 streams and a 4 KiB header are this project's own bounds, with no outside source. P1.2's benchmark passes 1 GiB through a socket pair for each window from 64 KiB to 1 MiB. P1.2 sets the default to the smallest window within 10 % of the best throughput, and records the numbers in its pull request. The 100 MiB/s on one core of section 12 is a target, not a pass mark.
+**Memory.** A hostile guest can make the supervisor hold only a fixed number of bytes for each link, heap counted:
+
+- A stream copies the bytes that it receives into one buffer of at most a window. Small frames therefore cost no more memory than large ones.
+- `Write` queues at most a window for each stream, in a buffer of the same kind. The writer copies a frame's bytes when it sends them.
+- The streams of each side count apart. A guest that has opened all of its 96 streams cannot stop the supervisor from opening its own 32, such as `holder` and `ctl`.
+- With the defaults, a link holds at most 8 MiB that the other end sent and 8 MiB that waits to be sent: 128 streams of 64 KiB each way. That is 16 MiB for each link, inside the supervisor's budget of 20.10. The link's own buffers, for the frame that it reads and the frames that it writes, add less than 1 MiB.
+
+**Close.** `Close` sends the bytes that wait, then a close with code 0. It returns without an error only once the connection has written every batch that holds the stream's bytes and its close. It waits for 5 s, or until the write deadline when one is set. When the other end has not taken every byte by then, `Close` sends code 2 instead, so that the other end's reads fail, and returns an error. When the bytes and the close still wait for the connection, `Close` returns an error too, and they go when the connection takes them. When the other end closes the stream both ways first, the bytes that wait here are dropped, and `Close` returns nil, because that end asked to read no more. When the other end resets the stream with code 2 and so drops bytes that wait here, `Close` returns `ErrRefused`. A `Close` after the link has failed returns the link's error when bytes of the stream were lost with it, waiting or in a batch that the connection never finished. A stream never ends with a clean end of file after bytes were dropped. A stream counts against its side's limit, and its open waits in memory, until the writer hands its close to the connection.
+
+**The numbers are the project's choice (P1.2, [question 110](#15-open-questions)).** The window of 64 KiB and the limits of 96 and 32 streams keep the supervisor inside its budget. The 4 KiB header and the 10 s hello wait are this project's own bounds too, with no outside source. P1.2's benchmark passed 1 GiB through a socket pair for each window from 64 KiB to 1 MiB, and 64 KiB was far above the 100 MiB/s on one core of section 12. That target is not a pass mark.
 
 ### 5.3 `internal/supervisor`
 
@@ -1266,6 +1278,7 @@ A lower `network.min_release_age` reaches the gate of a running session at once 
 | `~/.local/state/<name>/grants.json` | Laptop | The client | The grant ledger: names, never values (14.8.6) |
 | `~/.local/state/<name>/grant-trust.json` | Laptop | The client | The user's answers to a repository file's proposals, by host, repository and the file's SHA-256 |
 | `~/.local/state/<name>/setup-trust.json` | Laptop | The client | Setup trust, now by the script's SHA-256 (P0.6) |
+| `~/.local/state/<name>/setup-trust.json.lock` | Laptop | The client | The lock that each read, recovery and save of `setup-trust.json` holds (19.2) |
 | `~/.config/<name>/images.lock` | Laptop | The client (P3) | Image references and their digests, with each first conversion's root hash as a check value (20.8) |
 | `.<name>/sandbox.toml` | Repository | The repository's authors | Narrowing rules and proposals. Untrusted. |
 | `<SessionDir>/manifest.json` | Host | The supervisor | The sandbox's layers, its merged policy, its level, and its secret names and modes |
@@ -1788,6 +1801,9 @@ Each error has a message and a `Try:` line ([style](style.md)). The host sends a
 | `sandbox_busy` | auth-fix on devbox is starting or stopping. | Wait a moment, then try again |
 | `setup_outside` | The setup script of ~/src/app, .simstim/setup, points outside the repository, so it cannot run. | Make `.simstim/setup` a file in the repository, or start with `--no-setup-script` (19.2) |
 | `git_scope` | Could not start git in a scope on devbox: Failed to connect to bus. | `simstim host doctor devbox` (19.3) |
+| `git_hooks` | git's config in ~/src/app on devbox defines a hook named "a=b", which the helper cannot turn off. | Remove the hook on the host with `git config --remove-section 'hook.<name>'` (19.3) |
+| `git_timeout` | git ran longer than 1m0s in repo.info on devbox, so the helper stopped it. | A filter of the repository may hang: check them with `git config --show-origin --get-regexp '^filter[.]'` (19.3) |
+| `git_version` | git 2.54.1 on devbox runs the hooks that a repository's config defines, and has no switch that turns them all off, so the helper does not run it in a repository. | Update git on the host to 2.55 or later (19.3) |
 | `unpulled` | auth-fix has 3 commits that you have not pulled. | `simstim pull devbox/auth-fix`, or `simstim rm devbox/auth-fix --force` |
 | `pull_flagged` | The work changes files that run code on your laptop or in CI: `.github/workflows/ci.yml`, `.claude/settings.json`. | Review them with `git diff <base> refs/simstim/sessions/devbox/<id>/…`, then `simstim pull devbox/auth-fix --allow-flagged` |
 | `mount_microvm` | microvm sandboxes cannot share a folder in this version. | `simstim pull`, or `simstim cp` |
@@ -1856,7 +1872,7 @@ In the guest, a refused flow gets a 403 whose body is one line: `simstim: api.ex
 
 ## 10. Protocol changes
 
-Frame types and fields are append-only ([architecture, 4](../explanation/architecture.md#4-protocol)). The protocol's major version stays `1`. A peer ignores a type it does not know, and a new feature waits for its flag in the hello. This section lists every change to the protocol. A row may point to the subsection of section 14 that specifies it.
+Frame types and fields are append-only ([architecture, 4](../explanation/architecture.md#4-protocol)). The protocol's major version stays `1`. A peer ignores a type it does not know, and a new feature waits for its flag in the hello. A link between a supervisor and its guest init is the exception: both ends run one version, and a type that a link does not carry closes it (10.1). This section lists every change to the protocol. A row may point to the subsection of section 14 that specifies it.
 
 ### 10.1 New frame types
 
@@ -1866,18 +1882,23 @@ These four travel on a link. Between the client and the bridge, they carry only 
 | --- | --- | --- |
 | `TStreamOpen` | `0x50` | u32 stream ID (little-endian), then the JSON header: `{"kind":"egress", …}` |
 | `TStreamData` | `0x51` | u32 stream ID, then the bytes |
-| `TStreamClose` | `0x52` | u32 stream ID, then u8: 0 both ways, 1 the sender's writes only, 2 refused |
+| `TStreamClose` | `0x52` | u32 stream ID, then u8: 0 both ways, 1 the sender's writes only, 2 refused or reset (5.2, **Close**) |
 | `TStreamWindow` | `0x53` | u32 stream ID, then u32 bytes of new credit |
 
-The supervisor gives odd stream IDs and the guest gives even ones, so both can open at once. A link starts with `THello` both ways: role `supervisor` or `guest`, and the helper's version. The supervisor refuses a guest of another version (6.9).
+A frame on a link is at most 64 KiB: its type byte and payload, the cap of 5.3. So a data frame carries at most 65,531 bytes.
 
-**A hostile peer.** Each stream starts with `Window` bytes of credit each way (5.2), and only `TStreamWindow` adds more. A side closes the whole link when the other side breaks one of these rules:
+The supervisor gives odd stream IDs and the guest gives even ones, so both can open at once. Each side's IDs are consecutive: the supervisor's first is 1 and the guest's first is 2, and each next ID is the last plus 2. A link starts with `THello` both ways: role `supervisor` or `guest`, and the helper's version. A hello is at most 4 KiB. A side ends the link when the other side's hello has not come within `HelloTimeout`. The supervisor refuses a guest of another version (6.9).
 
-- an open whose ID has the wrong parity, or is not above the last ID that side opened
-- a frame for an ID that was never opened, or data after the sender's own close
+**A hostile peer.** Each stream starts with `Window` bytes of credit each way (5.2), and only `TStreamWindow` adds more. Credit counts from when its frame goes, not from when the receiver queues it. A side closes the whole link when the other side breaks one of these rules:
+
+- an open whose ID is not that side's last ID plus 2
+- a frame for an ID that was never opened: ID 0, an ID of the other side from its next ID on, or an ID of this side whose open it has not sent, even when this side has opened that stream. An open counts as sent once the writer hands its batch to the connection, because the other end can read the open and answer it before the write returns. For the same reason, a stream's slot is free once its close goes to the connection.
+- data after the sender's own close
 - data beyond the credit that the receiver gave, or credit that would pass the largest u32
+- a frame over 64 KiB, an empty frame, a stream frame too short for its fields, or a close code above 2
+- a frame of any type but the four above, after the hello. Both ends run one version (6.9), so neither needs to skip a type that it does not know. The supervisor parses only link frames (5.3).
 
-A frame for a stream that the receiver has closed is dropped, because the sender may not have seen the close yet. A header above `MaxHeader`, a kind that the side may not open, and an open past `MaxStreams` close only that stream, with code 2 (refused). The supervisor raises `sandbox_error` when it closes a link.
+A frame for a stream that the receiver has closed is dropped, because the sender may not have seen the close yet. IDs are consecutive, so an ID below the next one that is not open belongs to such a stream. A header above `MaxHeader`, a header that is not a JSON object with a `kind`, a kind that the side may not open, a second `ctl`, and an open past the opener's stream limit close only that stream, with code 2 (refused). When the refusals that wait reach the opener's stream limit, the receiver reads no more frames until its writer has sent them. A burst of refused opens never closes the link. A stream's end never gets weaker: after code 2, a later close with code 0 or 1 changes nothing, and the stream stays refused or reset. The supervisor raises `sandbox_error` when it closes a link.
 
 ### 10.2 Stream headers
 
@@ -1976,6 +1997,8 @@ New bridge ops. The bridge serves the ops of section 14 in a new `internal/host/
 | `cp.list`, `cp.read`, `checkpoints`, `rewind`, `image.save`, `image.keep`, `image.drop` | `cp`, `rewind`, `image.save` | The bridge passes these to the session's supervisor, from P5 | 10.4, 21.1 to 21.3 |
 
 **Ops that stream.** `exec`, `events.watch` and `port.reverse` go on after their answer, and so do the `sftp` and `port` channels of `ssh-proxy` (17.7). Each such op takes a bridge connection of its own, through the same SSH control connection. After the op's `TResponse`, that connection carries only the op's streams, in the frames and under the rules of 10.1. The host side opens each stream with an odd ID, and its header names the kind: `exec`, `rport`, `sftp`, `port` or `events`. The bridge passes the frames between the client and the supervisor unchanged, and serves `events` itself. When the client closes a stream, the supervisor closes the guest's stream, and kills an `exec` command.
+
+**A gap for the task that builds this (P1.9, P1.13 or P1.16, whichever comes first).** The `Opener` table of 5.2 does not fit these connections. Here the host side opens `rport` streams, which only the guest opens on a link, and the kind `events` is not in the table. `internal/link` takes `Options.Opener` for this. That task gives this connection its own table, and its own stream limits, and checks that the bridge passes the frames of a client of another version, which 10.1 does not allow on a link.
 
 The helper never runs a root step, so no bridge op does (14.4.1). The client builds the root step and runs it through `ssh -t … sudo` (14.4).
 
@@ -4008,6 +4031,14 @@ The review of this spec on 11 November 2026 raised these choices. The text alrea
      - (b) Refuse `.env` only, as 7.6 said before.
      - **Recommended:** (a), as 7.6 takes it. These files often hold secrets, a refused file costs the user one copy by hand, and by custom the three names left out hold no secret.
 
+### From the review of P1.2, 11 November 2026
+
+110. **How much may a guest make the supervisor hold through the link?** Each stream's window, and the number of streams, bound what a hostile guest can make the supervisor keep: the bytes that the guest sent and nobody read yet, and the bytes that wait for the guest's credit. The supervisor's budget is 24 MiB (20.10).
+     - (a) A window of 64 KiB, at most 96 streams that the guest opened and 32 that the supervisor opened, counted apart. At most 8 MiB received and 8 MiB queued: 16 MiB for each link, heap counted.
+     - (b) A window of 256 KiB, as yamux starts with, and 1,024 streams for both sides together: 256 MiB received and 256 MiB queued for each link.
+     - (c) A window of 128 KiB and 64 streams, 48 of them for the guest: also 16 MiB for each link, with fewer flows.
+     - **Recommended:** (a), a project choice, as 5.2 and 10.1 take it. It fits the supervisor's budget with room for its other parts. P1.2's benchmark found 64 KiB far above the 100 MiB/s on one core of section 12. 96 streams leave room for an agent's parallel downloads. P1.15's npm and pnpm fixtures check that they are enough. (b) lets one guest take a quarter of a 1 GiB session's memory, or the host. A guest that holds all its streams in (b) also stops the supervisor's own opens.
+
 ### Decided by the design
 
 The research raised four more questions, and the design answers them, so they are not open. No wall has a guest network card, and all egress goes through the egress process (7.2, decision [0029](decisions/0029-a-sandbox-per-session.md)). The client embeds the release manifest, so the runtime needs no rollback floor, key or expiry of its own (14.9.1, 14.11.2). The supervisor dials into the guest, so no trusted-side process listens where a guest can connect (G7, decision [0030](decisions/0030-local-sockets-do-not-listen.md)). The names of these files follow the roadmap.
@@ -4469,19 +4500,28 @@ Section 3.2 lists the holes that exist today, whatever the wall. This section sp
 2. For each script, it takes the hex SHA-256 of its bytes, or the word `none` when the script is absent.
 3. The setup hash is the hex SHA-256 of the text `v2\nsetup <hex or none>\nresume <hex or none>\nstop <hex or none>\n`.
 4. A script that leaves the top level through a symlink cannot run. `os.Root` refuses it, and the start fails with `setup_outside`.
+5. An absolute symlink fails in the same way, even when it points inside the top level: `os.Root` refuses every absolute link.
+6. A symlink out of the top level to nothing, or to a file that is not executable, counts as absent, because it could not run.
+7. An executable script that the host cannot open or read fails the start with `setup_unreadable`, because its content cannot be checked. So does a top level that `os.OpenRoot` cannot open, such as a folder of mode 0111: a script in it can still run by its path, so what it holds is unknown.
 
 The hash covers `stop` from P0.6, although only P1.11 runs it. This is a project choice: P1.11 then changes no hash, so no repository asks again when it lands. Until P1.11, a change to `stop` alone also asks again.
 
-**What the host does.** For a repository that has a script, the first rule that matches decides:
+**What the host does.** For a repository that has a script, the first rule that matches decides. Any of the three scripts counts, `stop` too:
 
 1. `NewArgs.Setup` is `run` or `skip`: as today.
 2. `NewArgs.SetupTrust[repo]` is false: the repository's scripts do not run, as today.
 3. `NewArgs.SetupHashes[repo]` equals the setup hash: they run.
 4. Otherwise the host returns `setup_trust`, with a `SetupQuestion` that carries the setup hash.
 
+`skip` and a refusal decide before the host reads any script. So they also win over `setup_outside` and `setup_unreadable`, and a start with `--no-setup-script` or a refusal never fails on a script. `run` reads the scripts, and fails on them.
+
 The host checks the hash just before it starts the script, and runs the script by its path, so `$0` and the files beside it work as today. A process that changes the script between the check and the start already runs as the user, and could change the host's own hooks instead (N5). So the hash guards against content that changed since the yes, not against such a process.
 
 The trusted manifest keeps the setup hash in a new field, `SetupHash`. The host computes it at each start that runs the repository's scripts, also when `NewArgs.Setup` is `run`. Before a respawn, after a restore or a resume, the host computes the hash again, at the top level of the session's folder (`Cwd`). When it differs, the host skips the repository's `resume` script and runs the host's own hook, as for a repository that is not trusted. It writes one line to the session's log: "skipped the resume script of <repo>: it changed after the start".
+
+- The session's resume hook is the repository's script when its folder is `.<name>`. Any other hook is the host's own, and the host never checks it. The path of the host's own hooks depends on `XDG_CONFIG_HOME` at that moment, so a comparison with that path is not the test.
+- A session whose manifest has no `SetupHash`, such as one that started before P0.6, skips the repository's `resume` script at each respawn. Its log line ends "the session kept no setup hash to check it against". A new session runs the script again.
+- When the host cannot read the scripts at a respawn, such as a script that now leads outside the top level, it skips the `resume` script too. Its log line ends "could not check it: " and the reason.
 
 **Types.**
 
@@ -4506,6 +4546,7 @@ SetupHash string `json:"setup_hash,omitempty"`
 }
 ```
 
+- Each read, recovery and save of the file holds an exclusive lock on `setup-trust.json.lock`, beside it. The client takes it with the file lock of P0.5 (`flock` on Unix, `LockFileEx` on Windows), and waits for it up to 2 s, the wait of the clipboard memory's lock. So two client processes never lose each other's answers, and never move the same broken file aside. A lock that the client cannot take in time fails closed. A read then trusts no repository, and warns. An answer is not kept, and its start fails with the error.
 - `hosts` keeps the shape of version 1, and holds refusals only. An older client reads it, and keeps refusing.
 - `trusted` holds each yes, with the setup hash and the time.
 - A yes removes the repository from `hosts`. A no removes it from `trusted`.
@@ -4515,9 +4556,17 @@ SetupHash string `json:"setup_hash,omitempty"`
 - A `false` stays in `hosts`.
 - A `true` becomes an entry in `trusted` with an empty `sha256`: "asked, no hash". The client sends no hash for it, so the next start asks once.
 - An older client that writes the file drops `trusted`. The new client then asks again for those repositories. No path runs a script without a yes.
-- A file that does not parse becomes `setup-trust.json.bad`, and the client starts with an empty file.
+- A file that does not parse becomes `setup-trust.json.bad`, and the client starts with an empty file. When `setup-trust.json.bad` exists, the file takes the first free name of `setup-trust.json.bad.1`, `setup-trust.json.bad.2` and so on, with no limit, so that it never replaces the copy that an earlier warning named. An error other than "does not exist" when the client checks a name leaves the file in place, as below.
+- When the file breaks after the client read the answers, such as while a question waits, keeping the answer moves it aside in the same way. The answer starts a new file, and the caller gets the warning apart from any failure to save. The CLI prints it, and the launcher shows it as a notice.
+- When the file that does not parse cannot move, the client reads no answers, and each script asks. An answer then fails with the warning, so that it never writes over the file.
 
-**The question.** The client words it from what it holds. With no entry for the repository, the question is as today. With an entry in `trusted`, it starts: "The setup script of <repo> on <host> changed after you trusted it." A yes goes into the file with the question's hash. The client then starts again with `SetupHashes[repo]` set to that hash, not with `--setup-script`. So a script that changes again between the question and the start asks again.
+**The question.** The client words it from what it holds:
+
+- With no entry in `trusted` for the repository, or a question with no hash, the question is as today.
+- With an entry whose `sha256` is not empty and differs from the question's hash, it starts: "The setup script of <repo> on <host> changed after you trusted it."
+- With an entry whose `sha256` is empty, from version 1 or from an older helper, the client cannot know whether the script changed. The question starts: "You trusted the setup script of <repo> on <host> before this version checked its content."
+
+The note without a terminal gives the same reason. A yes goes into the file with the question's hash. The client then starts again with `SetupHashes[repo]` set to that hash, not with `--setup-script`. So a script that changes again between the question and the start asks again.
 
 When the question has no hash, the helper is older. The client then answers as today, with `Setup` set to `run` or `skip` for this start.
 
@@ -4526,61 +4575,99 @@ When the question has no hash, the helper is older. The client then answers as t
 | Code | Message | Try |
 | --- | --- | --- |
 | `setup_trust`, after a change | The setup script of ~/src/app on box changed after you trusted it. | Pass `--setup-script` to run it, or `--no-setup-script` to start without it. The launcher asks. |
-| `setup_outside` | The setup script of ~/src/app, .simstim/setup, points outside the repository, so it cannot run. | Make `.simstim/setup` a file in the repository, or start with `--no-setup-script` |
+| `setup_outside` | The setup script of ~/src/app, .simstim/setup, points outside the repository, so it cannot run. | Make `.simstim/setup` a file in the repository, or start with `--no-setup-script`. The launcher offers to start without the repository's scripts, with `Setup` set to `skip`. |
+| `setup_unreadable` | Could not read the setup script of ~/src/app, .simstim/setup: permission denied. | Let your user on the host read `.simstim/setup`, or start with `--no-setup-script`. The launcher offers to start without the repository's scripts. |
+| `setup_unreadable`, for the top level | Could not read the folder ~/src/app, so the setup scripts of ~/src/app cannot be checked: permission denied. | Let your user on the host read the folder ~/src/app, or start with `--no-setup-script`. The launcher offers to start without the repository's scripts. |
 | A file that does not parse (a warning) | Could not read setup-trust.json, so each setup script asks again. The old file is now setup-trust.json.bad. | Compare the two files, then delete `setup-trust.json.bad` |
+| A file that does not parse and cannot move (a warning, and the error of an answer) | Could not read setup-trust.json, and could not move it aside: permission denied. Each setup script asks again, and no answer is kept. | Fix or delete `setup-trust.json` |
+| The file's lock is busy past the wait (a warning when reading) | Could not lock setup-trust.json, so no setup script is trusted this time: … another client process holds the lock. | Another client is reading or saving setup answers. Wait a moment, then try again. |
+| The file's lock is busy past the wait (the error of an answer) | Could not lock setup-trust.json, so the answer is not kept: … another client process holds the lock. | Another client is reading or saving setup answers. Wait a moment, then try again. |
 
 **Tests.**
 
-1. `setupHash`: setup only, resume only, both, neither, a symlink inside the repository, a symlink out of it (`setup_outside`), and a file that is not executable.
-2. The host's order: one case for each rule above.
-3. The file: version 1 to version 2, a round trip, a rewrite through the version 1 struct, and a file that does not parse.
-4. The question: the wording for a changed script, and the fallback for a question without a hash.
+1. `setupHash`: setup only, resume only, stop only, all three, none, a symlink inside the repository, a symlink out of it (`setup_outside`), an absolute symlink that points inside, a symlink out to nothing or to a file that is not executable, a file that is not executable, and an executable file that cannot be read (`setup_unreadable`).
+2. The host's order: one case for each rule above. `--no-setup-script` and a refusal read no script.
+3. The file: version 1 to version 2, a round trip, a rewrite through the version 1 struct, a file that does not parse, one that does not parse while `setup-trust.json.bad` exists, and one that cannot move. Several client processes that save different answers at once lose none, and leave valid JSON. While another holds the lock past the wait, a read trusts nothing and an answer is not kept.
+4. The question: the wording for a changed script, for a yes with no hash, and the fallback for a question without a hash. In the launcher, `setup_outside` offers to start without the scripts.
 5. A restore after the `resume` script changed: the script is skipped, and the log has its line. A session that started with `--setup-script` runs an unchanged script at a restore.
 6. End to end: trust a script, commit a change to it, then `new` asks at a terminal, and skips with a note without one.
 
 ### 19.3 Safe copies and host git (P0.7)
 
-**Copies.** `copyWorktreeInclude(root, wt)` in `internal/host/worktree.go` copies the files that `.worktreeinclude` lists from the repository into a new worktree. It never follows a symlink out of either folder:
+**Copies.** `copyWorktreeInclude(root, wt)` in `internal/host/worktree_copy.go` copies the files that `.worktreeinclude` lists from the repository into a new worktree. A session can write the repository, so the copy treats it as hostile. It never follows a symlink out of either folder, never blocks on a special file, and reads a bounded list:
 
 1. It opens both folders with `os.OpenRoot` ([Go 1.24](https://go.dev/doc/go1.24)).
-2. It reads `.worktreeinclude` through the repository's root, only when that is a regular file.
-3. Each line that is not empty and not a comment is a pattern for `fs.Glob` on the root's `FS()`. A pattern that is not a valid `io/fs` path, such as `../x` or `/etc/x`, is skipped.
-4. For each match, it calls `Lstat` through the root, and copies only a regular file. A symlink is skipped, and so is a path that leaves the root.
+2. It reads `.worktreeinclude` through the repository's root, only when that is a regular file. It reads at most 64 KiB, through `io.LimitReader`, and at most 1000 patterns. Over either limit, it skips the whole file, with one skipped entry. Both limits are project choices.
+3. Each line that is not empty and not a comment is a pattern. One leading `/` anchors it to the top level, as in `.gitignore`, and the copy removes it. A pattern that is then not a valid `io/fs` path is skipped, before any cleaning: `../x`, `//etc/x`, `./.env` and `config/../.env` are. The copy matches each pattern as `fs.Glob` would, one folder at a time. A folder that the walk cannot enter, such as a symlink that leaves the root, is a skipped entry with its reason, where `fs.Glob` would leave it out without a word.
+4. For each match, it calls `Lstat` through the root, and copies only a regular file. A symlink is skipped, and so is a path that leaves the root. It opens the file with `O_RDONLY|O_NONBLOCK`, so that a FIFO swapped in after the `Lstat` cannot block it. Then it checks with `Stat` on the open file that the file is regular and is the one that `Lstat` saw (`os.SameFile`). It reads `.worktreeinclude` in the same way.
 5. It makes missing folders with the worktree root's `MkdirAll` (0700, [Go 1.25](https://go.dev/doc/go1.25)). Then it writes through that root with `O_CREATE|O_EXCL`. So it never replaces a file that the worktree has, and never writes through a symlink there. The copy keeps the source's permission bits.
-6. It returns each skipped entry with its reason, and the start goes on. `makeWorktree` runs before `startSession` makes the session's folder. So the start writes one line for each skipped entry to the session's log once that folder exists.
+6. It returns each skipped entry with its reason, and the start goes on. `makeWorktree` runs before `startSession` makes the session's folder. So the start writes one line for each skipped entry to the session's log once that folder exists, before the holder starts. It writes through the log's own turnover (`openHolderLog`). Every warning of a start goes to the log before the holder opens it, the warning that the slice has no memory limit too. So the log has one writer while the holder runs, and the report of a failed start reads only the lines that the holder wrote after them.
 
 **What git can run.** The host runs git in repositories that an unwalled session can write. These are the worktree, and the main repository's `.git`, which the worktree shares. A repository's config can name commands that git runs:
 
 - `core.fsmonitor` names a hook command that `status` runs ([git config](https://git-scm.com/docs/git-config#Documentation/git-config.txt-corefsmonitor)).
-- Hooks run on index writes and ref changes, such as `post-index-change` and `reference-transaction`, and `post-checkout` runs at `worktree add` ([githooks](https://git-scm.com/docs/githooks)).
-- A `filter.<driver>.clean` or `process` command runs when git hashes a work tree file. `status` does this for a file whose stat data changed: `ce_compare_data` in [read-cache.c](https://github.com/git/git/blob/master/read-cache.c) calls `index_fd` in [object-file.c](https://github.com/git/git/blob/master/object-file.c), which applies the filters (master, November 2026). This is source reading. UNVERIFIED by test: test 3 below checks it.
+- Hook scripts in the hooks folder run on index writes and ref changes, such as `post-index-change` and `reference-transaction`, and `post-checkout` runs at `worktree add` ([githooks](https://git-scm.com/docs/githooks)).
+- From git 2.54, the config itself defines hooks: `hook.<name>.command` with `hook.<name>.event` ([git-hook](https://git-scm.com/docs/git-hook)). `core.hooksPath` only moves the folder of hook scripts, so it does not stop these.
+- A `filter.<driver>.clean` or `process` command runs when git hashes a work tree file. `status` does this for a file whose stat data changed: `ce_compare_data` in [read-cache.c](https://github.com/git/git/blob/master/read-cache.c) calls `index_fd` in [object-file.c](https://github.com/git/git/blob/master/object-file.c), which applies the filters (master, November 2026). Test 3 checks this, and it holds for Apple Git 2.50.1, Debian's git 2.47.3, and Alpine's git 2.54.1 and 2.56.1.
 
-`-c core.fsmonitor=false -c core.hooksPath=/dev/null` turns off the first two. No option turns off every filter, so the two options alone do not cover `status`. A filter that the bridge starts runs outside every session's unit, where the peer check of P0.2 does not hold it (10.4).
+These options turn off the first three:
+
+- `-c core.fsmonitor=false` and `-c core.hooksPath=/dev/null`.
+- `-c hook.<event>.enabled=false` for each of the 28 events of githooks(5), as of git 2.54.0 and unchanged up to 2.56.1. From git 2.55, this switch turns off every hook of an event, also the hooks that a config defines ([git-hook](https://git-scm.com/docs/git-hook)).
+- As a second guard, before each git command, the helper reads `git config -z --name-only --get-regexp '^hook\..*\.command$'`, which runs nothing, and adds `-c hook.<name>.enabled=false` for each name. When that read fails, or a name holds `=` or a control character, which a `-c` option cannot carry, git runs nothing, and the error is `git_hooks`.
+
+Git before 2.54 has no hooks in a config, so the first two options cover it, and from git 2.55 the switch of each event covers them all. Git 2.54 has no switch for an event, so only the second guard would stand. But a session can add a hook to the config between the read and the command, and that hook runs. That race cannot be closed on git 2.54. So the helper refuses git 2.54.x, with `git_version` and the hint to update git to 2.55 or later, just before its first git command that can fire a hook: the checkout of `worktree.add`, `worktree.remove`, `worktree.discard`, and the `git status` of `repo.info`. A step that fires no hook still runs there: `repo.info` without its count runs only `rev-parse`, `symbolic-ref` and `config`, so a new session without a worktree still starts. A version that the helper cannot read is refused in the same way.
+
+No option turns off every filter, so the options alone do not cover `status`. A filter that the bridge starts runs outside every session's unit, where the peer check of P0.2 does not hold it (10.4).
 
 **Host git.** So the helper runs git as follows ([question 77](#15-open-questions)):
 
-1. Every git command of the helper gets `-c core.fsmonitor=false -c core.hooksPath=/dev/null`, through `git()` in `internal/host/worktree.go`.
+1. Every git command of the helper gets the options above, through `git()` in `internal/host/git.go`.
 2. Each operation on a repository runs as one child, `<helper> git-op <op>`, with a JSON request on stdin and a JSON answer on stdout. The operations are `worktree.add`, `worktree.remove`, `worktree.discard` and `repo.info`. `copyWorktreeInclude` runs no git, so it stays in the parent.
 3. With a systemd user manager, the helper starts that child with `systemd-run --user --scope --quiet --collect --slice=<name>.slice --unit=<name>-git-<8 hex>.scope` ([systemd-run](https://www.freedesktop.org/software/systemd/man/latest/systemd-run.html)). git, and every command that git starts, then sits under `<name>.slice`. There the peer check treats it as a session's process (10.4).
 4. Without a systemd user manager, the child runs without a scope. The peer check there is the weaker role check (10.4), so a filter gains nothing that a session's own process lacks.
-5. `SessionRepo` in `internal/client/pull.go` runs `<helper> git-op repo.info` over SSH, in place of its shell line. The answer has the top folder, the main repository's folder from `--git-common-dir`, the branch and the count of changed files. From P1.12, it also has the URL of the `origin` remote, which picks the repository's sections (6.1, step 3). `repoOf` in `internal/host/setup.go` uses the same operation, so setup trust stays keyed by the main repository's folder.
+5. The choice fails closed. The host has no user manager when its socket, `$XDG_RUNTIME_DIR/systemd/private` (or `/run/user/<uid>/systemd/private`), is missing. When the socket exists, the helper believes only a whole answer of `systemctl --user is-system-running` within 5 seconds, whose output closed: exit code 0 and `running`, or exit code 1 and `degraded` or `starting`, for a scope, or exit code 1 and `offline`, for no manager. Anything else is `git_scope`, and git does not run: the deadline, output that did not close once systemctl ended, whatever its exit code, another exit code, or another state, such as `initializing`, `maintenance` or `stopping`. A state printed before a failure counts for nothing. The 5 seconds are a project choice.
+6. Each operation has a deadline: 10 minutes for `worktree.add`, whose checkout can download large files, as Git LFS does, and 1 minute for the others. Both are project choices. The request carries the deadline (`deadline_ms`), which may only shorten the operation's own, and the child keeps it itself, so it holds also when the bridge that started the child has gone. At the deadline, the child kills the git command that runs, answers `git_timeout`, and then stops its scope with `systemctl --user stop <unit>`, or kills its own process group, which holds git and its filters. It ignores SIGPIPE, so an answer that no one reads does not end it before that. The parent leads the child into a process group of its own, and waits 15 seconds more for the answer. When none comes, it stops the scope and kills the group itself. When the bridge's connection ends, or its idle limit ends it, the bridge stops every git operation that it still runs, in the same way (`StopGitOps`). After that, the process starts no `worktree.add`. It then waits up to 1 minute, a project choice, for its requests to end, before it exits (`EndBridge`). So a start whose add it stopped removes the half-made worktree first. From then on it ignores SIGPIPE, so a reply to the client that has gone does not end it before that.
+7. Before its checkout, `worktree.add` writes the worktree and the branch that it is about to make, as a first line of its answer. When the add fails after that line, as when it runs past its deadline, a filter fails, or `StopGitOps` stops it, the helper removes them with `worktree.discard`, in a scope of its own, within 30 seconds, a project choice. So that the removal takes nothing that was there before, the add refuses to start when the folder or the branch is already there. `worktree.discard` also removes a folder that git does not know as a worktree yet, when it lies in the helper's own worktrees folder. Only a branch that git says does not exist counts as gone: any other failure, such as a config that `git_hooks` refuses, keeps it. When the removal fails, the error says where the worktree and the branch stay, and how to remove them: one shell line, with each path quoted, that removes even a locked worktree (`git worktree remove --force --force`), prunes git's record of it, and deletes the branch. After a dropped connection, no one reads that error, and `git worktree list` in the repository shows what stays.
+8. `SessionRepo` in `internal/client/pull.go` runs `<helper> git-op repo.info` over SSH, in place of its shell line. The answer has the top folder, the main repository's folder from `--git-common-dir`, the branch and, when the request asks with `changes`, the count of changed files. `pull` asks. `repoOf` does not, so a new session runs no `git status`. From P1.12, the answer also has the URL of the `origin` remote, which picks the repository's sections (6.1, step 3). `repoOf` in `internal/host/setup.go` uses the same operation, so setup trust stays keyed by the main repository's folder. When `repoOf` fails after `worktree.add`, the start removes the new worktree. If that fails too, the error says where the worktree stays.
+9. When the start asks about a setup script, it first removes the worktree that it made. When that removal fails, the question still comes, and its `SetupQuestion.Kept` says where the worktree stays, and how to remove it. The CLI and the launcher show it.
+10. A delete whose worktree an error kept, such as `git_scope`, or a failure inside `worktree.remove`, such as `git_hooks`, sends the error's code and hint with its note (`DeleteResult.WorktreeCode` and `WorktreeHint`). The client puts the host's name in the note. The CLI prints the hint, and the launcher shows the note as a warning, with the hint under it.
+11. The host doctor has a line, "git scope". With a user manager, it runs `systemd-run --user --scope --quiet --collect --slice=<name>.slice true` and reports whether that works.
 
 Walled sessions follow 7.1: the host runs no git in a folder that a sandbox can write. Their seed runs in a `git` jail (6.1).
 
-**Errors.** The errors of today keep their messages: `no_git`, `not_a_repo`, `bad_base` and `worktree`.
+**Errors.** The errors of today keep their messages: `no_git`, `not_a_repo`, `bad_base` and `worktree`. The helper does not know the client's name for the host, so it says "on this host", and the client puts the host's name in its place.
 
 | Code | Message | Try |
 | --- | --- | --- |
 | `git_scope` | Could not start git in a scope on box: Failed to connect to bus. | `simstim host doctor box` |
+| `git_hooks` | git's config in ~/src/app on box defines a hook named "a=b", which the helper cannot turn off. | Remove the hook on the host with `git config --remove-section 'hook.<name>'` |
+| `git_timeout` | git ran longer than 1m0s in repo.info on box, so the helper stopped it. | A filter of the repository may hang: check them with `git config --show-origin --get-regexp '^filter[.]'` |
+| `git_version` | git 2.54.1 on box runs the hooks that a repository's config defines, and has no switch that turns them all off, so the helper does not run it in a repository. | Update git on the host to 2.55 or later |
 
 **Tests.**
 
-1. Copies: an entry of `.worktreeinclude` that is a symlink to a file outside the repository copies nothing. Nor does an entry under a symlinked folder that leaves it, the pattern `../x`, or an entry whose destination in the worktree is a symlink. A regular `.env` copies, with its mode, also into a folder that the worktree lacks. A `.worktreeinclude` that is itself a symlink is ignored.
-2. Arguments: every git command line starts with the two options. With a fake `systemd-run` on `PATH`, each operation runs once through it, with `--scope` and `--slice=<name>.slice`.
-3. With real git, in Linux CI, a fixture repository sets `core.fsmonitor`, two hooks and a clean filter. The hooks are `post-index-change` and `reference-transaction`, and each of the four writes a marker file. After `worktree.remove`, no marker from the fsmonitor or a hook exists, and the filter's marker shows whether `status` ran it.
-4. End to end, on a test host with a systemd user manager, the clean filter of test 3 records `/proc/self/cgroup`. That path lies under `<name>.slice`.
+1. Copies: an entry of `.worktreeinclude` that is a symlink to a file outside the repository copies nothing. Nor does an entry under a symlinked folder that leaves it, as a plain path or as a glob, the patterns `../x`, `./.env` and `config/../.env`, an entry whose destination in the worktree is a symlink, or an entry whose folder in the worktree is a symlink out of it. Each comes back with its reason. A regular `.env` copies, with its mode, also into a folder that the worktree lacks, and so does `/anchored.env`. A `.worktreeinclude` that is itself a symlink is ignored. A sparse `.worktreeinclude` of 64 GiB, or one of 1001 patterns, is skipped whole. A FIFO swapped in after the `Lstat`, of `.worktreeinclude` or of a listed file, does not block the copy.
+2. Arguments: every git command line starts with the options, and each one turns off the hook that the repository's config defines. With a fake `systemd-run` on `PATH`, each operation runs once through it, with `--scope` and `--slice=<name>.slice`. With a fake `systemctl`, a probe that fails or gives a state that is not known runs no git.
+3. With real git, a fixture repository sets `core.fsmonitor`, three hook scripts, a hook in its config and a clean filter. The hook scripts are `post-checkout`, `post-index-change` and `reference-transaction`, and the config's hook has those three events. Each writes a marker file. After `worktree.add` and `worktree.remove`, no marker from the fsmonitor or a hook exists, and the filter's marker does. Plain git on the same fixture runs each of them, the config's hook from git 2.54. CI runs it on Linux, and it ran on the versions above.
+4. End to end, on a test host with a systemd user manager, the clean filter of test 3 records `/proc/self/cgroup`. That path lies under `<name>.slice`. A run on such a host where the filter did not run fails.
 5. `pull` of an unwalled session still prints the branch and the count of changed files.
 6. `repo.info` in two worktrees of one repository names the same main folder, so both use one setup-trust answer.
+7. A filter that sleeps past the deadline is stopped, with its scope, and the operation fails with `git_timeout`.
+8. A fake git that says it is 2.54.1 is refused for each step that fires hooks, and 2.53.0 and 2.55.0 are not. On a real git 2.54, `worktree.add` is refused, and no hook of the config runs.
+9. A probe that prints `offline` and then hangs, or prints `running` and exits with 3, is `git_scope`, and no git runs.
+10. A smudge filter that sleeps past the deadline of `worktree.add`: the worktree and the branch are gone afterwards. When the removal fails, the error names them.
+11. A trust question after a removal that failed carries `Kept`. A delete whose worktree `git_scope` kept prints the host's name and the doctor's hint, through the CLI.
+12. The start writes nothing to a holder's log once the holder runs, and the holder's turnover keeps every line. A failed answer write of git-op has a hint.
+13. The end-to-end test removes one path only: the folder that its own `mktemp -d` returned. The product's `kill` removes the session's worktree. The run's sessions count as gone only when `ls --json` shows the host without an `error`, and none of them. After a `new` without a clear answer, it waits up to 90 seconds for the session to appear, and deletes it. Otherwise it keeps everything, and says where. Offline, `test/e2e/test_host_git.py` checks this with a fake host.
+14. A bridge that dies while an add's smudge filter sleeps: git and the filter end at the deadline all the same. `StopGitOps` stops a running operation at once.
+15. A probe that prints `offline` and exits with 1, while a process that it left keeps its output open, is `git_scope`, and no git runs.
+16. A smudge filter that adds a hook named `a=b` to the config during the checkout, and hangs: the removal after the deadline reports the branch and the path that stay. The printed command removes a locked worktree whose path has a space and a quote.
+17. A delete whose `worktree.remove` meets a hook named `a=b` prints the host's name and the hint, through the CLI. The launcher shows a kept worktree as a warning with its hint.
+18. An add whose required smudge filter fails removes its branch. An add whose folder or branch is already there refuses to start, and both stay.
+19. A connection that ends during an add's checkout: `EndBridge` returns only after the start removed the worktree and its branch, and no add starts after it. The idle exit stops git too. A reply after `EndBridge` to an output that no one reads does not end the process. `branchMissing` outside a repository is an error.
+20. With 10.4: a clean filter that a repository plants runs in the git scope, and from there tries to attach to another session, type into it, send to it and kill it. The holder's peer check refuses each, and the session is untouched. Linux only: the fake `systemd-run` places its process in a fake `/proc`, and each child where its parent is.
+21. With P0.4: a required clean filter that writes OSC 52 to stderr and fails makes `pull` print git's error, with the filter's text, through the client's cleaner. Every host text that `parseRepoInfo` returns, its message, its hint and the session's folder, passes the cleaner.
 
 ### 19.4 Lima VMs (P0.8)
 
@@ -5145,25 +5232,35 @@ The supervisor also opens the tools image, the user's image and the agents disk,
 
 ### 20.7 A signed-tag release gate (P4.4)
 
-**Behaviour.** `release.yml` builds only from an annotated tag that a key in `.github/tag-signers` signed. That file comes from the protected `main` branch, never from the tag. The maintainer's tag key is a hardware `sk-ssh-ed25519` key ([question 30](#15-open-questions)).
+**Behaviour.** `release.yml` builds only from an annotated tag that a key in `.github/tag-signers` signed. That file comes from the protected `main` branch, never from the tag. So does the gate itself: the job runs `main`'s copy of `scripts/verify-tag.sh`, so a tag cannot bring its own gate. The maintainer's tag key is a hardware `sk-ssh-ed25519` key ([question 30](#15-open-questions)).
 
-**The steps,** in `scripts/verify-tag.sh`, which the release job runs before any build step:
+**The steps.** The release job runs them before any build step. Step 1 is in `release.yml`, and the rest are in `scripts/verify-tag.sh`:
 
-1. `actions/checkout` is pinned by SHA, at v6.0.2 or later, with `fetch-depth: 0`. Before v6.0.2 it could turn an annotated tag into a lightweight one. The job pins v7.0.1 today.
-2. The script checks that `git --version` is 2.34 or later, and that `ssh -V` is OpenSSH 8.8 or later. Git's notes warn against 8.7.
-3. It runs `git fetch --force origin main "+refs/tags/$TAG:refs/tags/$TAG"`.
-4. It checks that `git cat-file -t "$TAG"` says `tag`. A lightweight tag fails here.
-5. It runs `git show origin/main:.github/tag-signers > "$RUNNER_TEMP/signers"`.
-6. It runs `git -c gpg.ssh.allowedSignersFile="$RUNNER_TEMP/signers" verify-tag "$TAG"`.
-7. It checks that `git rev-parse "$TAG^{commit}"` equals `git rev-parse HEAD`, so the job builds the commit that it verified. Then it checks that `git merge-base --is-ancestor "$TAG^{commit}" origin/main` succeeds, so the tagged commit is on `main`.
+1. `actions/checkout` is pinned by SHA, at v6.0.2 or later, with `fetch-depth: 0`. Before v6.0.2 it could turn an annotated tag into a lightweight one. The job pins v7.0.1 today. The gate fetches the tag again, so it does not rely on the checkout's copy. After the checkout, the job runs `git fetch --force origin +refs/heads/main:refs/remotes/origin/main`. It writes `git show refs/remotes/origin/main:scripts/verify-tag.sh` to a file under `$RUNNER_TEMP`, and runs that copy with `bash`. It never runs the tagged commit's copy. Both fetches use no token, on purpose. This repository is public, and a token in the gate would be one more secret that a tag's run can reach. A private fork must give the gate's fetch a read-only token, and remove it before the build.
+2. The script checks that it has one argument, the tag, and that the tag's name does not start with `-`. `git tag` cannot make such a tag, so the hint deletes it by its full ref. It checks that `git --version` is 2.34 or later, and that `ssh -V` is OpenSSH 8.8 or later. Git's notes warn against 8.7.
+3. It runs `git fetch --force origin "+refs/heads/main:refs/remotes/origin/main" "+refs/tags/$TAG:refs/tags/$TAG"`. The full refspec for `main` updates `origin/main` whatever the clone's fetch settings are.
+4. It checks that `git cat-file -t "refs/tags/$TAG"` says `tag`. A lightweight tag fails here.
+5. It runs `git show "refs/remotes/origin/main:.github/tag-signers" > "$dir/signers"`, in a temporary folder under `$RUNNER_TEMP`. Each line that is not a comment or blank must be a hardware key for git signatures: `<principal> namespaces="git" sk-ssh-ed25519@openssh.com <key> [<comment>]`, or the same with `sk-ecdsa-sha2-nistp256@openssh.com`. A line with another kind of key, no namespace or more options fails.
+6. It runs `git -c gpg.ssh.program=ssh-keygen -c gpg.ssh.allowedSignersFile="$dir/signers" verify-tag "refs/tags/$TAG"`. The pin keeps any git config from naming another program. Only an SSH signature counts. The last signature block of the tag must be `-----BEGIN SSH SIGNATURE-----`. Otherwise git checks it against the runner's own GPG keys. Then the script checks that the `tag` line of `git cat-file tag "refs/tags/$TAG"` names `$TAG`. So the signed tag of an older release cannot pass under a new name.
+7. It checks that the tag names a commit, and that `git rev-parse "refs/tags/$TAG^{commit}"` equals `git rev-parse HEAD`. So the job builds the commit that it verified. Then it checks that `git merge-base --is-ancestor "refs/tags/$TAG^{commit}" refs/remotes/origin/main` succeeds, so the tagged commit is on `main`.
 8. Any failure stops the job before the first build step.
+
+GoReleaser builds the tag that the gate checked: `release.yml` sets `GORELEASER_CURRENT_TAG` to the pushed tag. Without it, GoReleaser picks the highest version among the tags on the commit, which may be another, unsigned tag.
 
 **`.github/tag-signers`.** One line for each maintainer's key, in the allowed signers format: `<email> namespaces="git" sk-ssh-ed25519@openssh.com AAAA… <comment>`. The job needs no hardware key to check a signature.
 
-**The limit.** On a tag push, the job checks out the tagged commit. The workflow file probably comes from that commit too (UNVERIFIED: GitHub's docs do not say so in these words). So a tag on a commit that changes `release.yml` could skip the gate. Two settings close this, and `docs/contributing/releasing.md` lists both:
+**The release environment.** The release job names the environment `release`. The release key (`RELEASE_SSH_KEY`) and the tap token (`HOMEBREW_TAP_TOKEN`) are secrets of that environment, never of the repository. A deployment rule lets only tags that match `v*` use it. The owner sets this up by hand, with a new release key, because GitHub never shows a secret again. The rotation has two steps, so that `install.sh` and the client can always check the latest release. First the new public key is listed beside the old one, and a release signed by the new key ships. Then a later pull request removes the old key (`docs/contributing/releasing.md`). Until then, the job reads the repository's secret.
+
+**The limit.** On a tag push, the job checks out the tagged commit. The workflow file probably comes from that commit too (UNVERIFIED: GitHub's docs do not say so in these words). This leaves two ways around the gate:
+
+- A tag on a commit that changes `release.yml` itself. The gate's script comes from `main`, so a change to it alone changes nothing.
+- A tag on a commit from before the gate, such as the commit of 0.1.2. That commit's `release.yml` has no gate, and the tag can be lightweight or unsigned. Its job does not name the release environment, so it reads an empty release key. GoReleaser still makes a draft release with `GITHUB_TOKEN`, and cosign signs its checksums with the workflow's identity, which the cosign check in `releasing.md` accepts. Then the step that signs with the release key fails, and the job stops. So the draft has no `checksums.txt.sig`, no attestation and no provenance. `install.sh` and the client's download of helpers refuse a release without that signature.
+
+Three settings narrow these, and `docs/contributing/releasing.md` lists them:
 
 - A tag ruleset on `refs/tags/v*` that lets only the owner create, move or delete those tags.
 - Branch protection on `main`, so that commits reach it only through reviewed pull requests.
+- The release environment, which holds the release secrets, with no copy at the repository level.
 
 Step 7 catches a tag on an unreviewed branch by mistake. It does not stop a person who can change the workflow in the tagged commit.
 
@@ -5171,22 +5268,43 @@ Step 7 catches a tag on an unreviewed branch by mistake. It does not stop a pers
 
 | When | Message | Try |
 | --- | --- | --- |
-| A lightweight tag | `release: v0.6.0 is a lightweight tag, and a release needs a signed annotated tag.` | `git tag -s v0.6.0 -m v0.6.0`, then push the tag again |
-| No good signature | `release: v0.6.0 is not signed by a key in .github/tag-signers on main.` | Sign it with your key from that file. Add a new key to the file through a pull request first. |
+| No argument | `release: verify-tag.sh needs one argument, the tag to check.` | Pass the tag, as in `verify-tag.sh v0.6.0` |
+| No gate on `main` | `release: cannot read scripts/verify-tag.sh from main. The gate fetches with no token, so it needs a public repository.` | Run the release job again. If it fails again, check that `main` has the script. A private fork must give the gate's fetch a read-only token, and remove it before the build. |
+| A name that starts with `-` | `release: -v1 starts with "-", and git tag cannot make a tag with that name.` | Delete it by its full ref, with `git push --delete origin refs/tags/-v1` and `git update-ref -d refs/tags/-v1`, then choose a release tag name that starts with `v` |
+| A lightweight tag | `release: v0.6.0 is a lightweight tag, and a release needs a signed annotated tag.` | `git tag -s -f -m v0.6.0 -- v0.6.0 <commit>`, then `git push --force origin refs/tags/v0.6.0`. The hint names the commit that the tag names now. It quotes each value for the shell, because a tag name may hold `;`, `$(…)`, quotes or a leading `-`. |
+| A bad line in the list | `release: line 3 of .github/tag-signers on main is not a hardware key with namespaces="git".` | Fix the line through a pull request |
+| No good signature | `release: v0.6.0 is not signed by a key in .github/tag-signers on main.` | Sign it with your key from that file, as for a lightweight tag. If your key is new, add it to the file through a pull request first. |
+| An old signed tag under a new name | `release: v0.6.0 is a signed tag made for v0.5.0, under another name.` | If you did not push it, delete it and find out who did. Otherwise, the commands of a lightweight tag, with the commit that the tag names now. |
+| Not a commit | `release: v0.6.0 does not name a commit.` | Tag a commit that is on `main` |
 | Not on main | `release: the commit of v0.6.0 is not on main.` | Tag a commit that is on `main` |
-| A moved tag | `release: v0.6.0 now names another commit than the one this job checked out.` | Run the release job again for the tag |
-| Old tools | `release: the runner has OpenSSH 8.7, and the check needs 8.8 or later.` | Pin a newer runner image in `release.yml` |
+| A moved tag | `release: v0.6.0 now names another commit than the one this job checked out.` | The push that moved the tag starts its own release run, which checks the tag again. Use that run. |
+| Old tools | `release: the runner has OpenSSH 8.7, and the check needs 8.8 or later.` The same for git before 2.34. | Pin a newer runner image in `release.yml` |
+| No list on `main` | `release: main has no .github/tag-signers, so no key may sign a release.` | Add the file to `main` through a pull request, with the line of your tag key |
+| No temporary folder | `release: cannot make a temporary folder in /home/runner/work/_temp.` | Run the release job again |
+| The fetch fails | `release: cannot fetch main and v0.6.0 from origin. The gate fetches with no token, so it needs a public repository.` | Run the release job again. If it fails again, check that the tag v0.6.0 still exists. A private fork must give the gate's fetch a read-only token, and remove it before the build. |
 
-**Tests.** `scripts/test-verify-tag.sh`, which CI runs on each pull request. It makes a temporary repository and an ed25519 key with no passphrase, and runs `scripts/verify-tag.sh` on these tags:
+**Tests.** `scripts/test-verify-tag.sh`, which CI runs on each pull request. It makes a temporary repository and ed25519 keys with no passphrase. Each run of the gate is in a checkout made as `actions/checkout` makes it: fetched from origin, detached at the tag, with no local `main`. Most cases run the gate's step as `release.yml` has it, which runs `main`'s copy. The test cannot make a hardware key, so `main`'s copy also takes plain ed25519 keys. Cases that run the shipped gate check the hardware rule. The test checks these:
 
+- The gate is the release job's first step after the checkout. The job names the release environment, and the GoReleaser step sets `GORELEASER_CURRENT_TAG` from the pushed tag.
 - A tag signed by a listed key passes.
-- An unsigned annotated tag fails, and a lightweight tag fails.
-- A tag signed by a key that is not listed fails.
+- An unsigned annotated tag and a lightweight tag each fail. The hint for a lightweight tag names its commit.
+- A tag whose last block is a PGP signature fails, and so does one with an SSH block before that PGP block. A stand-in `gpg` on `PATH` calls every signature good.
+- A tag signed by a key that is not listed fails. It also fails when a git config names a stand-in `ssh-keygen` that calls every signature good.
 - A tag whose own commit adds its key to `.github/tag-signers` fails, because the file comes from `main`.
+- A tag whose own commit replaces `scripts/verify-tag.sh` with `exit 0` fails, because the job runs `main`'s copy.
 - A tag on a commit that is not on `main` fails.
 - A tag that names another commit than `HEAD` fails.
+- The signed tag of an older release, under a new name, fails.
+- A tag that origin does not have fails. An origin that refuses the fetch, as a private repository refuses a fetch with no token, fails at the step's fetch and at the gate's fetch, and each message says that the gate needs a public repository.
+- A tag whose name starts with `-` fails with a hint to delete it. The two printed commands, run with the real git, delete it.
+- A runner with git 2.33 or OpenSSH 8.7 fails. Stand-ins on `PATH` print those versions.
+- No argument, no temporary folder, and a signed tag of a tree each fail with a message and a hint.
+- The shipped gate refuses a plain key on `main`'s list. A line with no namespace, another namespace or `cert-authority` fails.
+- The gate fetches `main` again on its own: a key that `main` drops after the checkout no longer signs.
+- A tag fails when `.github/tag-signers` on `main` lists no keys, or when `main` has no `.github/tag-signers`.
+- The repository's own `.github/tag-signers` passes the shipped gate's line check.
 
-The test never pushes a tag.
+The test never pushes a tag. Its origin is a local repository.
 
 ### 20.8 Image policy (P4.5)
 
@@ -5308,7 +5426,7 @@ Admission counts the size plus the reserve. The reserve is "the VMM overhead" of
 | The VMM, without guest RAM | Reserve | 16 MiB | Cloud Hypervisor's CI asserts 10 MiB or less for a 512 MiB guest. The other 6 MiB, for more vCPUs, four disks and vsock, is a target. |
 | Page tables for guest RAM, the VMM's and KVM's | Reserve | size / 256 | Computed: 8 bytes for each 4 KiB page, in two tables. cgroup v2 charges both, as `pagetables` and `sec_pagetables`. Huge pages make it much smaller. |
 | The sealed copies of the VMM and the kernel (20.5) | Reserve | 24 MiB | Their sizes, about 19 MiB at v54.0 and kernel 6.18. Counted on every host, so the reservation does not depend on the file system. |
-| The supervisor | Reserve | 24 MiB | Target |
+| The supervisor | Reserve | 24 MiB | Target. Of it, the link to the guest holds at most 16 MiB of streams when the guest is hostile, 8 MiB that the guest sent and 8 MiB that waits to be sent, and less than 1 MiB of its own buffers (5.2, [question 110](#15-open-questions)). An idle link holds far less. |
 | The egress process | Reserve | 40 MiB | Target. The research's estimate of 10 to 20 MiB is UNVERIFIED. |
 | Host page cache from disk reads | Reserve | 0 | Every disk has `direct=on` (20.3). cgroup v2 charges page cache to the unit that reads it. |
 | Margin: socket buffers, kernel stacks and short peaks | Reserve | 24 MiB | Target |

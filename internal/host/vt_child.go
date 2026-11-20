@@ -18,7 +18,7 @@ import (
 
 // start reads the history and starts a child that is fed it. It is used
 // for the first child and for each restart.
-func (v *VT) start() error {
+func (v *VT) start() (returned error) {
 	v.mu.Lock()
 	if v.closed {
 		v.mu.Unlock()
@@ -38,7 +38,12 @@ func (v *VT) start() error {
 	c, err := v.spawn(cols, rows)
 
 	v.mu.Lock()
-	defer v.mu.Unlock()
+	defer func() {
+		v.mu.Unlock()
+		if returned != nil && c != nil {
+			c.stopUnstarted()
+		}
+	}()
 	pending := v.pending
 	v.collecting = false
 	v.pending = nil
@@ -56,13 +61,19 @@ func (v *VT) start() error {
 	v.fed = max(v.fed, end)
 
 	// The size and profile come first, so the history lays out as it did.
-	c.push(v.resizeFrame())
+	if err := c.pushFrame(v.resizeFrame()); err != nil {
+		return err
+	}
 	if v.profile != nil {
-		c.push(vtFrame(vtFrameProfile, v.profile))
+		if err := c.pushFrame(vtFrame(vtFrameProfile, v.profile)); err != nil {
+			return err
+		}
 	}
 	for p := hist; len(p) > 0; {
 		n := min(len(p), vtChunk)
-		c.push(vtFrame(vtFrameData, p[:n]))
+		if err := c.pushFrame(vtFrame(vtFrameData, p[:n])); err != nil {
+			return err
+		}
 		p = p[n:]
 	}
 	// Then what arrived while the history was read, after its end.
@@ -75,7 +86,9 @@ func (v *VT) start() error {
 			}
 			d = d[skip:]
 		}
-		c.push(vtFrame(vtFrameData, d))
+		if err := c.pushFrame(vtFrame(vtFrameData, d)); err != nil {
+			return err
+		}
 	}
 	// The history raised its events once already, so they are dropped
 	// until the child has caught up. Its queries were answered then too,
@@ -83,9 +96,13 @@ func (v *VT) start() error {
 	if len(hist) > 0 {
 		c.muted = true
 		c.waiters[vtFrameSync] = append(c.waiters[vtFrameSync], nil)
-		c.push(vtFrame(vtFrameSync, nil))
+		if err := c.pushFrame(vtFrame(vtFrameSync, nil)); err != nil {
+			return err
+		}
 	}
-	c.push(v.queriesFrame())
+	if err := c.pushFrame(v.queriesFrame()); err != nil {
+		return err
+	}
 	v.child = c
 	return nil
 }
@@ -113,12 +130,14 @@ func (v *VT) spawn(cols, rows int) (*vtChild, error) {
 		return nil, fmt.Errorf("start the shadow terminal %s: %w. Try: reinstall the host helper", v.opt.Path, err)
 	}
 	c := &vtChild{
-		cmd:     cmd,
-		stdin:   stdin,
-		started: time.Now(),
-		wake:    make(chan struct{}, 1),
-		gone:    make(chan struct{}),
-		waiters: map[byte][]chan vtReply{},
+		cmd:        cmd,
+		stdin:      stdin,
+		started:    time.Now(),
+		wake:       make(chan struct{}, 1),
+		gone:       make(chan struct{}),
+		writerDone: make(chan struct{}),
+		readerDone: make(chan struct{}),
+		waiters:    map[byte][]chan vtReply{},
 	}
 	go v.writeLoop(c)
 	go v.readLoop(c, stdout)
@@ -127,6 +146,7 @@ func (v *VT) spawn(cols, rows int) (*vtChild, error) {
 
 // writeLoop sends queued frames to the child's stdin.
 func (v *VT) writeLoop(c *vtChild) {
+	defer close(c.writerDone)
 	w := bufio.NewWriterSize(c.stdin, 64<<10)
 	for {
 		v.mu.Lock()
@@ -167,6 +187,7 @@ func (v *VT) writeLoop(c *vtChild) {
 
 // readLoop handles the child's frames until it exits, then restarts it.
 func (v *VT) readLoop(c *vtChild, stdout io.Reader) {
+	defer close(c.readerDone)
 	r := bufio.NewReaderSize(stdout, 64<<10)
 	var err error
 	for {
@@ -267,7 +288,7 @@ func (v *VT) restart(wait time.Duration) {
 	}
 }
 
-func (v *VT) resizeFrame() []byte {
+func (v *VT) resizeFrame() ([]byte, error) {
 	var p [8]byte
 	binary.LittleEndian.PutUint16(p[0:], clampCols(v.cols))
 	binary.LittleEndian.PutUint16(p[2:], clampRows(v.rows))
@@ -276,12 +297,22 @@ func (v *VT) resizeFrame() []byte {
 	return vtFrame(vtFrameResize, p[:])
 }
 
-func (v *VT) queriesFrame() []byte {
+func (v *VT) queriesFrame() ([]byte, error) {
 	on := byte(0)
 	if v.answering {
 		on = 1
 	}
 	return vtFrame(vtFrameQueries, []byte{on})
+}
+
+// pushFrame refuses an encoding error before queueing. VT.mu is held.
+func (c *vtChild) pushFrame(f []byte, err error) error {
+	if err != nil {
+		c.kill()
+		return err
+	}
+	c.push(f)
+	return nil
 }
 
 // push queues a frame for the writer. VT.mu is held.
@@ -315,13 +346,34 @@ func (c *vtChild) kill() {
 	}
 }
 
-// vtFrame encodes one frame.
-func vtFrame(kind byte, payload []byte) []byte {
-	f := make([]byte, 5+len(payload))
+// stopUnstarted joins both workers after a refused startup. VT.mu is not held.
+func (c *vtChild) stopUnstarted() {
+	_ = c.stdin.Close()
+	c.kill()
+	<-c.gone // the process is reaped; readerDone joins waiter cleanup
+	<-c.readerDone
+	<-c.writerDone
+}
+
+// vtFrameSize checks the wire length and header arithmetic before allocation.
+func vtFrameSize(n int) (int, error) {
+	if n < 0 || uint64(n) > math.MaxUint32 || n > math.MaxInt-5 {
+		return 0, fmt.Errorf("shadow terminal payload size %d cannot fit a frame. Try: use a smaller terminal profile", n)
+	}
+	return 5 + n, nil
+}
+
+// vtFrame encodes one frame without truncating its wire length.
+func vtFrame(kind byte, payload []byte) ([]byte, error) {
+	size, err := vtFrameSize(len(payload))
+	if err != nil {
+		return nil, err
+	}
+	f := make([]byte, size)
 	f[0] = kind
-	binary.LittleEndian.PutUint32(f[1:], uint32(len(payload))) //nolint:gosec // G115: a payload is one PTY read, a chunk of vtChunk or a small control frame, far below 4 GiB
+	binary.LittleEndian.PutUint32(f[1:], uint32(len(payload))) //nolint:gosec // G115: vtFrameSize checked the uint32 wire length and host int bound.
 	copy(f[5:], payload)
-	return f
+	return f, nil
 }
 
 // clamp16 is n as a uint16: a negative n is 0, and a larger one the largest.

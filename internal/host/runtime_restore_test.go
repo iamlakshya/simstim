@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/iamlakshya/simstim/internal/api"
+	"github.com/iamlakshya/simstim/internal/brand"
 	"github.com/iamlakshya/simstim/internal/host"
 	"github.com/iamlakshya/simstim/internal/host/hosttest"
 	"github.com/iamlakshya/simstim/internal/paths"
@@ -288,6 +289,63 @@ func TestOwnCommandComesBack(t *testing.T) {
 				waitRuns(t, runs, n)
 			}
 		})
+	}
+}
+
+// A restore after the repository's resume script changed skips the script,
+// and the session's log says so. The scripts ran at the start because the
+// user trusted their content: the manifest keeps that setup hash. An
+// unchanged script runs before the agent as before.
+func TestRestoreSkipsAChangedResumeScript(t *testing.T) {
+	h := hosttest.New(t)
+	dir := repo(t, h)
+	resume := filepath.Join(dir, "."+brand.Name, "resume")
+	writeResume := func(word string) {
+		writeFile(t, resume, "#!/bin/sh\necho "+word+` >> "$HOME/resume-ran"`+"\n")
+		if err := os.Chmod(resume, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeResume("one")
+	agentRan, resumeRan := filepath.Join(h.Home, "agent-ran"), filepath.Join(h.Home, "resume-ran")
+	s, err := host.New(host.NewArgs{Cwd: "~/src/app", Setup: api.SetupRun,
+		Argv: []string{"/bin/sh", "-c", `echo up >> "$HOME/agent-ran"; exec sleep 60`}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := manifest(t, s.ID)
+	if m.ResumeHook != resume || len(m.SetupHash) != 64 {
+		t.Fatalf("the manifest keeps the resume script %q and the setup hash %q", m.ResumeHook, m.SetupHash)
+	}
+	waitRuns(t, agentRan, 1)
+
+	restore := func() {
+		t.Helper()
+		crash(t, s.ID)
+		m := manifest(t, s.ID)
+		m.Run.BootID = "a boot before"
+		if err := m.Save(); err != nil {
+			t.Fatal(err)
+		}
+		if res := host.Restore(false); len(res) != 1 || res[0].Action != "restored" {
+			t.Fatalf("restore = %+v", res)
+		}
+	}
+	// Unchanged: the resume script runs before the agent.
+	restore()
+	waitRuns(t, agentRan, 2)
+	if b, _ := os.ReadFile(resumeRan); string(b) != "one\n" {
+		t.Fatalf("the unchanged resume script ran %q", b)
+	}
+	// Changed: the agent comes back, and the script does not run.
+	writeResume("two")
+	restore()
+	waitRuns(t, agentRan, 3)
+	if b, _ := os.ReadFile(resumeRan); string(b) != "one\n" {
+		t.Errorf("the changed resume script ran: %q", b)
+	}
+	if want := "skipped the resume script of " + dir + ": it changed after the start"; !strings.Contains(h.HolderLog(s.ID), want) {
+		t.Errorf("the session's log does not say %q:\n%s", want, h.HolderLog(s.ID))
 	}
 }
 

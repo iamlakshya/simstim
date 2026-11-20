@@ -1,10 +1,8 @@
 package cli
 
 import (
-	"bufio"
-	"bytes"
 	"context"
-	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -18,7 +16,6 @@ import (
 	"github.com/iamlakshya/simstim/internal/client"
 	"github.com/iamlakshya/simstim/internal/client/helpers"
 	"github.com/iamlakshya/simstim/internal/onboard"
-	"github.com/iamlakshya/simstim/internal/provider/lima"
 )
 
 func hostCmd() *cobra.Command {
@@ -39,6 +36,8 @@ func hostAddCmd() *cobra.Command {
 		Short: "Connect a host: check it, install the helper, prepare it",
 		Long: "Connect a host. The ssh target is a Host from your SSH config, or user@host.\n" +
 			"It defaults to the name. --ssh-config adds an extra SSH config file, for example a repo's own.",
+		Example: "  " + brand.Name + " host add my-vps" + "\n" +
+			"  " + brand.Name + " host add my-vps dev@203.0.113.10",
 		Args: cobra.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			h := client.Host{Name: args[0], SSH: args[0], SSHConfig: sshConfig}
@@ -56,42 +55,83 @@ func hostAddCmd() *cobra.Command {
 				}
 			}
 			if !client.ValidHostName(h.Name) {
-				return &client.UserError{Msg: fmt.Sprintf("%q cannot name a host", h.Name), Hint: "Use letters, digits, dots, dashes and underscores."}
+				return &client.UserError{Msg: fmt.Sprintf("%q cannot name a host", h.Name), Hint: "Use letters, digits, dots, dashes and underscores.", Code: "bad_name", Kind: client.KindUsage}
 			}
-			return addHost(cmd.Context(), h, yes)
+			return addHost(cmd.Context(), prompts(cmd), h, yes)
 		},
 	}
 	cmd.Flags().StringVar(&sshConfig, "ssh-config", "", "an extra SSH config file to include")
 	cmd.Flags().StringVar(&label, "label", "", "labels, for example provider=gcp,region=eu")
-	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "install the helper without asking")
+	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "install the helper without asking, and offer no agents to install")
 	cmd.Flags().StringVar(&providerScript, "provider-script", "", "a script that starts and stops the host (see examples/providers)")
 	cmd.Flags().BoolVar(&wake, "wake", false, "start the host through its provider script when it does not answer")
 	return cmd
 }
 
-func addHost(ctx context.Context, h client.Host, yes bool) error {
-	consent := func(q string) (bool, error) { return yes || confirm(q), nil }
-	checks, err := connectHost(ctx, os.Stdout, h, consent, nil)
+// hostAddGuide changes the guide that host add offers agents with. Tests
+// replace its sessions and its checks.
+var hostAddGuide = func(*guide) {}
+
+// addHost connects h and saves it. Its progress goes to stderr. Unless yes,
+// it asks p before it installs the helper, and with input on it offers the
+// agents that the host lacks, as setup does.
+func addHost(ctx context.Context, p *prompter, h client.Host, yes bool) error {
+	consent := installConsent(ctx, p, h, yes)
+	// connectHost records each change in p's log as it makes it, so a
+	// cancel at any point after it says so.
+	checks, err := connectHost(ctx, os.Stderr, h, consent, p.changes())
 	if err != nil {
+		if isCancel(err) || ctx.Err() != nil {
+			return p.cancelOf(err)
+		}
 		return err
 	}
 	if checks != nil {
-		fmt.Println("\nAgents:")
-		printAgentChecks(os.Stdout, h.Name, checks)
+		fmt.Fprintln(os.Stderr, "\nAgents:")
+		printAgentChecks(os.Stderr, h.Name, checks)
 	}
-	// In a terminal, offer the agents the host lacks, as setup does.
-	if !yes && isTerminal(os.Stdin) && isTerminal(os.Stdout) {
-		f := onboard.NewFlow(h.Name, checks, nil)
+	if !yes && p.asks(qAddAgents) {
+		// The flow records each install in p's log as it makes it.
+		f := onboard.NewFlow(h.Name, checks, p.changes())
 		f.NoLogin = true
 		if f.Missing() {
 			g := newGuide(ctx, guideOpts{}, nil)
+			g.in, g.out, g.p, g.tty, g.log = p.in, p.out, p, p.on, p.changes()
+			hostAddGuide(g)
 			if err := g.agents(h, f); err != nil {
+				if isCancel(err) || errors.Is(err, context.Canceled) || ctx.Err() != nil {
+					// The host is saved, maybe its helper and some agents
+					// installed: the cancel says so (cli-spec 6.2, rule 6).
+					return p.cancelOf(err)
+				}
 				return err
 			}
 		}
 	}
-	fmt.Printf("\n%s is ready. Start a session with `%s new %s --agent claude`, or run `%s`.\n", h.Name, brand.Name, h.Name, brand.Name)
+	fmt.Fprintf(os.Stderr, "\n%s is ready. Start a session with `%s new %s --agent claude`, or run `%s`.\n", h.Name, brand.Name, h.Name, brand.Name)
 	return nil
+}
+
+// installConsent is host add's question before it installs the helper on
+// h: yes answers it. A cancel of ctx that came with the yes, after the
+// question saw its answer, installs nothing.
+func installConsent(ctx context.Context, p *prompter, h client.Host, yes bool) func(q string) (bool, error) {
+	return func(q string) (bool, error) {
+		if yes {
+			return true, nil
+		}
+		ok, err := p.confirm(qInstallHelper, q, "a yes to install the helper on "+h.Name)
+		switch {
+		case err != nil:
+			return false, err
+		case !ok:
+			return false, p.cancel()
+		case stopped(ctx):
+			// A signal that came with the yes: install nothing.
+			return false, errInterrupted
+		}
+		return true, nil
+	}
 }
 
 // connectHost checks a host, installs the helper after consent says yes,
@@ -117,7 +157,7 @@ func connectHost(ctx context.Context, w io.Writer, h client.Host, consent func(q
 	if !p.Installed {
 		bin, ok := helpers.For(p.OS, p.Arch)
 		if !ok {
-			return nil, &client.UserError{Msg: fmt.Sprintf("no helper for %s/%s in this build", p.OS, p.Arch), Hint: "Linux hosts on amd64 and arm64 are supported."}
+			return nil, &client.UserError{Msg: fmt.Sprintf("no helper for %s/%s in this build", p.OS, p.Arch), Hint: "Use a Linux host on amd64 or arm64.", Code: "no_helper"}
 		}
 		fmt.Fprintf(w, "\n%s needs a small helper on the host to keep sessions alive.\n", brand.DisplayName)
 		fmt.Fprintf(w, "    What   %s %s, %.1f MB, SHA-256 checked\n", brand.HostBinary, client.HelperVersion(), float64(len(bin))/1e6)
@@ -129,7 +169,7 @@ func connectHost(ctx context.Context, w io.Writer, h client.Host, consent func(q
 			return nil, err
 		}
 		if !ok {
-			return nil, &client.UserError{Msg: "cancelled; nothing was installed", Hint: brand.Name + " host add " + h.Name}
+			return nil, &client.UserError{Msg: "cancelled; nothing was installed", Hint: brand.Name + " host add " + h.Name, Code: "cancelled", Kind: client.KindCancelled}
 		}
 		ictx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 		err = client.Install(ictx, s, p)
@@ -169,36 +209,38 @@ func connectHost(ctx context.Context, w io.Writer, h client.Host, consent func(q
 	}
 	step("✓ %s, %d CPUs, %.1f GiB, %.1f GiB of it for sessions", client.CleanLine(d.Distro), d.CPUs, float64(d.MemTotal)/(1<<30), float64(d.MemoryMax)/(1<<30))
 	checks, _ := conn.AgentChecks(dctx)
-	if err := client.SaveHost(h); err != nil {
+	// A cancel that came during the checks saves nothing (SaveHost).
+	if err := client.SaveHost(ctx, h); err != nil {
 		return nil, err
 	}
 	log.Add("saved the host %s", h.Name)
 	return client.CleanAgentChecks(checks), nil
 }
 
-func confirm(q string) bool {
-	fmt.Printf("%s [y/N] ", q)
-	line, _ := bufio.NewReader(os.Stdin).ReadString('\n')
-	line = strings.ToLower(strings.TrimSpace(line))
-	return line == "y" || line == "yes"
-}
-
 func hostLsCmd() *cobra.Command {
 	var asJSON bool
 	cmd := &cobra.Command{
-		Use:   "ls",
-		Short: "List hosts",
-		Args:  cobra.NoArgs,
-		RunE: func(*cobra.Command, []string) error {
+		Use:     "ls",
+		Short:   "List hosts",
+		Example: "  " + brand.Name + " host ls\n  " + brand.Name + " host ls --json",
+		Args:    cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
 			hosts, err := client.LoadHosts()
 			if err != nil {
 				return err
 			}
 			if asJSON {
-				return printJSON(hosts)
+				// Each host has its keys in snake_case, and in Go form until
+				// the end of the old form.
+				warnOld(cmd, oldHostKeys)
+				objs := make([]map[string]any, len(hosts))
+				for i, h := range hosts {
+					objs[i] = hostObject(h)
+				}
+				return printJSON(objs)
 			}
 			if len(hosts) == 0 {
-				fmt.Printf("No hosts yet. Add one with `%s host add <name>`.\n", brand.Name)
+				say(cmd, "No hosts yet. Add one with `%s host add <name>`.\n", brand.Name)
 				return nil
 			}
 			for _, h := range hosts {
@@ -211,19 +253,24 @@ func hostLsCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().BoolVar(&asJSON, "json", false, "print JSON")
+	addJSON(cmd, &asJSON)
 	return cmd
 }
 
 func hostRmCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "rm <name>",
-		Short: "Forget a host (its sessions keep running)",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(_ *cobra.Command, args []string) error {
+		Use:     "rm <name>",
+		Short:   "Forget a host (its sessions keep running)",
+		Example: "  " + brand.Name + " host rm my-vps",
+		Args:    cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
 			hosts, err := client.LoadHosts()
 			if err != nil {
 				return err
+			}
+			names := make([]string, 0, len(hosts))
+			for _, h := range hosts {
+				names = append(names, h.Name)
 			}
 			out := hosts[:0]
 			var gone *client.Host
@@ -235,186 +282,17 @@ func hostRmCmd() *cobra.Command {
 				out = append(out, h)
 			}
 			if gone == nil {
-				return &client.UserError{Msg: fmt.Sprintf("no host named %q", args[0]), Hint: brand.Name + " host ls"}
-			}
-			if err := client.SaveHosts(out); err != nil {
-				return err
-			}
-			fmt.Printf("Forgot %s. Its sessions and the helper stay on the host.\n", args[0])
-			if m := gone.Machine; m != nil {
-				fmt.Printf("Its %s machine %s is kept. `host destroy` would have deleted it; now delete it with %s's own tools.\n", m.Provider, m.ID, m.Provider)
-			}
-			return nil
-		},
-	}
-}
-
-func hostTestCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "test <name>",
-		Short: "Check that a host answers, and how fast",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			h, err := client.FindHost(args[0])
-			if err != nil {
-				return err
-			}
-			start := time.Now()
-			ctx, cancel := context.WithTimeout(cmd.Context(), 30*time.Second)
-			defer cancel()
-			conn, err := client.Dial(ctx, h, true)
-			if err != nil {
-				return err
-			}
-			defer conn.Close()
-			connect := time.Since(start)
-			rt, err := conn.RoundTrip(ctx)
-			if err != nil {
-				return err
-			}
-			fmt.Printf("%s answers: connect %s, round trip %s\n", h.Name, connect.Round(time.Millisecond), rt.Round(time.Millisecond))
-			return nil
-		},
-	}
-}
-
-func hostDoctorCmd() *cobra.Command {
-	var asJSON, fix, yes bool
-	cmd := &cobra.Command{
-		Use:   "doctor <name>",
-		Short: "Check a host's setup, and with --fix fix what it can",
-		Long: "Checks a host: systemd and linger, the restore unit, terminfo, memory caps, swap, the\n" +
-			"session sockets and the agents. It warns when the host has less memory than an agent's\n" +
-			"docs ask for, and when a program in one session could drive another through its\n" +
-			"socket. For a VM made by host create lima, it also checks, on this computer, that the\n" +
-			"VM cannot reach services on this computer's loopback address. With --fix it offers to\n" +
-			"fix linger, the restore unit, Ghostty's terminfo, a broken current helper link, stale\n" +
-			"session sockets and old helper versions. Each fix is shown and explained before it\n" +
-			"runs; one that needs root is printed for you.",
-		Args: cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			h, err := client.FindHost(args[0])
-			if err != nil {
-				return err
-			}
-			ctx, cancel := context.WithTimeout(cmd.Context(), 60*time.Second)
-			defer cancel()
-			conn, err := client.Dial(ctx, h, true)
-			if err != nil {
-				return err
-			}
-			defer conn.Close()
-			d, err := conn.Doctor(ctx)
-			if err != nil {
-				return err
-			}
-			if h.Machine != nil {
-				if check := machineChecks[h.Machine.Provider]; check != nil {
-					d.Checks = append(d.Checks, check(ctx, h))
+				return &client.UnknownNameError{
+					UserError: &client.UserError{Msg: fmt.Sprintf("no host named %q", args[0]), Hint: brand.Name + " host ls", Code: "host_not_found", Kind: client.KindNotFound},
+					Name:      args[0], Known: names,
 				}
 			}
-			if d.AgentChecks, err = conn.AgentChecks(ctx); err != nil {
+			if err := client.SaveHosts(cmd.Context(), out); err != nil {
 				return err
 			}
-			if asJSON {
-				return printJSON(d)
-			}
-			d = client.CleanHostInfo(d) // what the host sent, cleaned to print
-			fmt.Printf("%s: %s (%s/%s), %d CPUs, %.1f GiB, %.1f GiB free disk, helper %s\n", h.Name, d.Distro, d.OS, d.Arch, d.CPUs,
-				float64(d.MemTotal)/(1<<30), float64(d.DiskFree)/(1<<30), d.Version)
-			printChecks(os.Stdout, d.Checks)
-			fmt.Println("Agents:")
-			printAgentChecks(os.Stdout, h.Name, d.AgentChecks)
-			printScrollback(ctx, conn)
-			if !fix {
-				return nil
-			}
-			return fixHost(cmd.Context(), conn, h, yes)
-		},
-	}
-	cmd.Flags().BoolVar(&asJSON, "json", false, "print JSON")
-	cmd.Flags().BoolVar(&fix, "fix", false, "offer to fix the problems found, one by one")
-	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "with --fix, apply every fix without asking")
-	return cmd
-}
-
-// machineChecks are the doctor's checks that run on this computer, for a
-// host that a provider made, by the provider's name.
-var machineChecks = map[string]func(context.Context, client.Host) api.Check{
-	lima.Provider{}.Name(): lima.LoopbackCheck,
-}
-
-// printJSON prints v as JSON. Values from a host stay as the host sent
-// them, with the characters that a terminal could act on escaped (jsonSafe).
-func printJSON(v any) error {
-	var b bytes.Buffer
-	enc := json.NewEncoder(&b)
-	enc.SetIndent("", "  ")
-	if err := enc.Encode(v); err != nil {
-		return fmt.Errorf("write JSON: %w", err)
-	}
-	if _, err := os.Stdout.Write(jsonSafe(b.Bytes())); err != nil {
-		return fmt.Errorf("write JSON: %w", err)
-	}
-	return nil
-}
-
-func hostRestoreCmd() *cobra.Command {
-	var all bool
-	cmd := &cobra.Command{
-		Use:   "restore <name>",
-		Short: "Start again the sessions a host restart stopped (the host also does this at boot)",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			h, err := client.FindHost(args[0])
-			if err != nil {
-				return err
-			}
-			ctx, cancel := context.WithTimeout(cmd.Context(), 2*time.Minute)
-			defer cancel()
-			conn, err := client.Dial(ctx, h, true)
-			if err != nil {
-				return err
-			}
-			defer conn.Close()
-			res, err := conn.Restore(ctx, all)
-			if err != nil {
-				return err
-			}
-			if len(res) == 0 {
-				fmt.Printf("Nothing to restore on %s.\n", h.Name)
-			}
-			printRestore(os.Stdout, res)
-			return nil
-		},
-	}
-	cmd.Flags().BoolVar(&all, "all", false, "also restart sessions whose holder crashed without a host restart")
-	return cmd
-}
-
-func hostProviderCmd(action, short string) *cobra.Command {
-	return &cobra.Command{
-		Use:   action + " <name>",
-		Short: short,
-		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			h, err := client.FindHost(args[0])
-			if err != nil {
-				return err
-			}
-			ctx, cancel := context.WithTimeout(cmd.Context(), 10*time.Minute)
-			defer cancel()
-			if h.Machine != nil {
-				return machineAction(ctx, h, action)
-			}
-			out, err := client.RunProvider(ctx, h, action)
-			if err != nil {
-				return err
-			}
-			if s := strings.TrimSpace(string(out)); s != "" {
-				fmt.Println(s)
-			} else {
-				fmt.Printf("%s: %s done.\n", h.Name, action)
+			say(cmd, "Forgot %s. Its sessions and the helper stay on the host.\n", args[0])
+			if m := gone.Machine; m != nil {
+				say(cmd, "Its %s machine %s is kept. `host destroy` would have deleted it; now delete it with %s's own tools.\n", m.Provider, m.ID, m.Provider)
 			}
 			return nil
 		},

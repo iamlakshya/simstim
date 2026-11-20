@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Checks the docs: generated pages are current, Markdown lint, British
-# spelling, plain English, links, and that no page sends a reader to GitHub
-# for a page the site hosts. --external also checks links to other sites
-# (slow; CI runs it on main and weekly).
+# spelling, plain English, links, that no page sends a reader to GitHub
+# for a page the site hosts, and the docs for agents (llms.txt and the
+# Markdown copies). --external also checks links to other sites (slow; CI
+# runs it on main and weekly).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -40,10 +41,14 @@ go build -o "$ref/$name" . && python3 scripts/test-docs-commands.py "$ref/$name"
 
 step "Site build and internal links"
 scripts/docs-site.sh dev /
-lychee --offline --no-progress --root-dir "$PWD/build/site/public" 'build/site/public/**/*.html' || fail=1
+# The pages, and the Markdown copies of the docs for agents.
+lychee --offline --no-progress --root-dir "$PWD/build/site/public" 'build/site/public/**/*.html' 'build/site/public/**/*.md' || fail=1
 
 step "Links between hosted pages stay on the site"
 python3 scripts/check-site-links.py build/site/public site/src/generated/pages.json "https://$(sed -n 's/^module //p' go.mod)" || fail=1
+
+step "Docs for agents: llms.txt and the Markdown copies"
+python3 scripts/check-llms-txt.py build/site/public site/src/generated/pages.json || fail=1
 
 if $external; then
     step "External links"

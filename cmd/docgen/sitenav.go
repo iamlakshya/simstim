@@ -14,13 +14,15 @@ import (
 
 // A tab of the site: a part of the docs with its own sidebar (decision
 // 0022). Prefixes are the addresses that belong to it; Links maps a group's
-// label to its index page, for the breadcrumbs.
+// label to its index page, for the breadcrumbs. An optional tab is the
+// section "Optional" of llms.txt, which an agent may skip.
 type tab struct {
 	Label    string            `json:"label"`
 	Link     string            `json:"link"`
 	Prefixes []string          `json:"prefixes"`
 	Items    []item            `json:"items"`
 	Links    map[string]string `json:"links"`
+	optional bool
 }
 
 // item is an entry of a sidebar, in Starlight's form: a page (Slug) or a
@@ -79,6 +81,7 @@ func sidebar(docs string, pages map[string]string) ([]tab, error) {
 			at("docs/reference/config.md", "Configuration"),
 			at("docs/reference/keymap.md", "Keys"),
 			at("docs/reference/agents.md", "Agents"),
+			at("docs/reference/exit-codes.md", "Exit codes"),
 			at("examples/providers/README.md", "Provider scripts"),
 		},
 		Links: map[string]string{"Commands": "/reference/cli/"},
@@ -109,7 +112,8 @@ func sidebar(docs string, pages map[string]string) ([]tab, error) {
 			{Label: "Research notes", Collapsed: true, Items: append([]item{at("docs/research/README.md", "All notes")}, research.items("docs/research", pages, nil)...)},
 			{Label: "Community", Items: []item{at("GOVERNANCE.md", "Governance"), at("MAINTAINERS.md", "Maintainers"), at("CODE_OF_CONDUCT.md", "Code of conduct")}},
 		},
-		Links: map[string]string{"Contribute": "/contributing/", "Decision records": "/contributing/decisions/", "Research notes": "/research/"},
+		Links:    map[string]string{"Contribute": "/contributing/", "Decision records": "/contributing/decisions/", "Research notes": "/research/"},
+		optional: true, // the contributing docs, the research notes and the project pages
 	}
 	tabs := []tab{docsTab, refTab, projectTab}
 	return tabs, checkSidebar(tabs, pages)

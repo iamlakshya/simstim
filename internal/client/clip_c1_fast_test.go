@@ -54,8 +54,8 @@ func TestPasteGuardUnicodeSpansStillRecordClipboardWrites(t *testing.T) {
 	} {
 		for cut := range len(write) + 1 {
 			r := newTestReader()
-			r.observe([]byte(prefix + write[:cut]))
-			r.observe([]byte(write[cut:] + prefix))
+			r.observe(t.Context(), []byte(prefix+write[:cut]))
+			r.observe(t.Context(), []byte(write[cut:]+prefix))
 			if !r.seen(victim) {
 				t.Fatalf("Unicode output hid a clipboard write at split %d: %q", cut, write)
 			}

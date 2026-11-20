@@ -68,7 +68,7 @@ func TestCreateThenDestroy(t *testing.T) {
 	wrapper := filepath.Join(client.ConfigDir(), "ssh", "config-box")
 	_ = os.MkdirAll(filepath.Dir(wrapper), 0o700)
 	_ = os.WriteFile(wrapper, []byte("# generated\n"), 0o600)
-	if err := destroyHost(ctx, "box", false, true); err != nil {
+	if err := destroyHost(ctx, quietPrompts(ctx), "box", false, true); err != nil {
 		t.Fatal(err)
 	}
 	if !slices.Contains(m.Calls(), "destroy") {
@@ -87,10 +87,10 @@ func TestDestroyRefusesWhileASessionWorks(t *testing.T) {
 		{ID: "a", Name: "quiet", State: api.StateIdle, Alive: true},
 		{ID: "b", Name: "busy", State: api.StateWorking, Alive: true},
 	})
-	if err := saveHost(client.Host{Name: "box", Machine: &client.Machine{Provider: "fake", ID: "fake-box"}}); err != nil {
+	if err := saveHost(context.Background(), client.Host{Name: "box", Machine: &client.Machine{Provider: "fake", ID: "fake-box"}}); err != nil {
 		t.Fatal(err)
 	}
-	err := destroyHost(context.Background(), "box", false, true)
+	err := destroyHost(context.Background(), quietPrompts(context.Background()), "box", false, true)
 	var ue *client.UserError
 	if !errors.As(err, &ue) || !strings.Contains(ue.Msg, "busy") || strings.Contains(ue.Msg, "quiet") || !strings.Contains(ue.Hint, "--force") {
 		t.Fatalf("err = %v, want a refusal that names the working session", err)
@@ -98,7 +98,7 @@ func TestDestroyRefusesWhileASessionWorks(t *testing.T) {
 	if slices.Contains(m.Calls(), "destroy") {
 		t.Fatal("destroyed while a session was working")
 	}
-	if err := destroyHost(context.Background(), "box", true, true); err != nil {
+	if err := destroyHost(context.Background(), quietPrompts(context.Background()), "box", true, true); err != nil {
 		t.Fatal(err)
 	}
 	if !slices.Contains(m.Calls(), "destroy") {
@@ -108,10 +108,10 @@ func TestDestroyRefusesWhileASessionWorks(t *testing.T) {
 
 func TestDestroyNeedsACreatedHost(t *testing.T) {
 	withFake(t, nil)
-	if err := saveHost(client.Host{Name: "mine", SSH: "me@example.com"}); err != nil {
+	if err := saveHost(context.Background(), client.Host{Name: "mine", SSH: "me@example.com"}); err != nil {
 		t.Fatal(err)
 	}
-	err := destroyHost(context.Background(), "mine", false, true)
+	err := destroyHost(context.Background(), quietPrompts(context.Background()), "mine", false, true)
 	var ue *client.UserError
 	if !errors.As(err, &ue) || !strings.Contains(ue.Hint, "host rm mine") {
 		t.Fatalf("err = %v", err)

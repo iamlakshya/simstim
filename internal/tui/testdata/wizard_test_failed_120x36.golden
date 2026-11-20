@@ -31,6 +31,6 @@
     ✕ connect
 
     ✕ Cannot reach box: Permission denied (publickey).
-    → simstim host add box   (it can ask for passwords)
+    → simstim host add box (it can ask for passwords)
 
     enter try again   esc back

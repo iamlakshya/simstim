@@ -65,7 +65,7 @@ func Exec(ctx context.Context, install string, name string, args ...string) ([]b
 // ExecInput is Exec with stdin.
 func ExecInput(ctx context.Context, stdin io.Reader, install string, name string, args ...string) ([]byte, error) {
 	if _, err := exec.LookPath(name); err != nil {
-		return nil, &client.UserError{Msg: name + " is not installed, or not on your PATH", Hint: install}
+		return nil, &client.UserError{Msg: name + " is not installed, or not on your PATH", Hint: install, Code: "tool_missing"}
 	}
 	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Stdin = stdin

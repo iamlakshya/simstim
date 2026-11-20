@@ -132,7 +132,7 @@ func (Provider) Create(ctx context.Context, req provider.Request) (client.Host, 
 	if in, err := find(ctx, inst); err != nil {
 		return client.Host{}, err
 	} else if in != nil {
-		return client.Host{}, &client.UserError{Msg: "Lima already has an instance called " + inst, Hint: "limactl delete " + inst + "   (if you no longer need it), or choose another name"}
+		return client.Host{}, &client.UserError{Msg: "Lima already has an instance called " + inst, Hint: "Pick another name, or delete the instance with limactl delete " + inst + ".", Code: "instance_exists"}
 	}
 	if goos != "darwin" {
 		fmt.Fprintf(out, "  ! Lima with QEMU cannot stop %s from reaching this machine's loopback services.\n", req.Name)
@@ -186,9 +186,10 @@ func discard(ctx context.Context, inst, problem, hint string) error {
 		return &client.UserError{
 			Msg:  fmt.Sprintf("%s, and host create could not delete it: %v", problem, err),
 			Hint: "limactl delete --force " + inst + ", then " + hint,
+			Code: "lima_vm",
 		}
 	}
-	return &client.UserError{Msg: problem + ", so host create deleted it", Hint: hint}
+	return &client.UserError{Msg: problem + ", so host create deleted it", Hint: hint, Code: "lima_vm"}
 }
 
 // sshAlias is the Host that Lima's ssh.config defines for an instance.

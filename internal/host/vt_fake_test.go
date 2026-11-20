@@ -69,8 +69,8 @@ func childFrames(t *testing.T, log string, n int) []string {
 }
 
 func TestVTFramesWithAFakeChild(t *testing.T) {
-	bell := vtFrame(vtFrameEvent, []byte(`{"type":"bell","value":-1}`))
-	reply := vtFrame(vtFrameWrite, []byte("\x1b[?62;22c"))
+	bell := encodedVTFrame(t, vtFrameEvent, []byte(`{"type":"bell","value":-1}`))
+	reply := encodedVTFrame(t, vtFrameWrite, []byte("\x1b[?62;22c"))
 	path, log := fakeVT(t, bell, reply)
 	var mu sync.Mutex
 	var events []VTEvent
@@ -91,7 +91,9 @@ func TestVTFramesWithAFakeChild(t *testing.T) {
 	v.Resize(120, 40, 960, 640)
 	v.Resize(0, 40, 0, 0) // ignored
 	v.AnswerQueries(true)
-	v.SetProfile(VTProfile{XTVersion: "test 1.0"})
+	if err := v.SetProfile(VTProfile{XTVersion: "test 1.0"}); err != nil {
+		t.Fatal(err)
+	}
 	if err := v.sync(); err != nil {
 		t.Fatal(err)
 	}

@@ -113,7 +113,7 @@ func TestEndedErrorSaysWhatToTry(t *testing.T) {
 	}
 	lost := client.Session{ID: "c3", Name: "pair", State: api.StateLost, Reason: "the host restarted"}
 	if err := endedError(h, lost); !errors.As(err, &ue) || ue.Msg != "the session pair on box ended (the host restarted)" ||
-		!strings.Contains(ue.Hint, " resume box/c3   (") || !strings.Contains(ue.Hint, "host restore box --all") {
+		!strings.Contains(ue.Hint, " resume box/c3, or ") || !strings.Contains(ue.Hint, "host restore box --all") {
 		t.Fatalf("endedError = %+v", err)
 	}
 }

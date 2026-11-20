@@ -19,10 +19,13 @@ import (
 	"time"
 )
 
-// ReleaseSigner is the key that signs every release's checksums.txt, as an
-// allowed-signers line for ssh-keygen. It is the same as
+// ReleaseSigners are the keys that sign releases' checksums.txt, as
+// allowed-signers lines for ssh-keygen, one line for each key. A signature by
+// any of them passes. During a key rotation the new key is listed beside the
+// old one, until a release that the new key signed ships
+// (docs/contributing/releasing.md). It is the same list as
 // .github/release-signers and install.sh's; a test keeps them equal.
-const ReleaseSigner = `release namespaces="file" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGyv3BRbYeIpUvqwia5q4CuqngP+aUzouWZ8x73U2LOy`
+const ReleaseSigners = `release namespaces="file" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGyv3BRbYeIpUvqwia5q4CuqngP+aUzouWZ8x73U2LOy`
 
 // fetched holds helpers downloaded from a release, for a client built
 // without them (go install).
@@ -63,12 +66,30 @@ func Fetch(ctx context.Context, version, base, cacheDir string) error {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("cache helpers: %w", err)
 	}
+	if err := cacheHelpers(dir, files); err != nil {
+		return err
+	}
+	fetched = files
+	return nil
+}
+
+// cacheHelpers confines every write to the opened cache, including when a
+// previous cache entry is a link. Names come from the finite helper set.
+func cacheHelpers(dir string, files map[string][]byte) error {
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		return fmt.Errorf("open the helper cache: %w", err)
+	}
+	defer root.Close()
 	for name, b := range files {
-		if err := os.WriteFile(filepath.Join(dir, name), b, 0o600); err != nil {
+		leaf, ok := helperLeaf(name)
+		if !ok {
+			return fmt.Errorf("cache helpers: unexpected file name %q", name)
+		}
+		if err := root.WriteFile(leaf, b, 0o600); err != nil {
 			return fmt.Errorf("cache helpers: %w", err)
 		}
 	}
-	fetched = files
 	return nil
 }
 
@@ -141,8 +162,8 @@ func httpGet(ctx context.Context, url string) ([]byte, error) {
 	return b, nil
 }
 
-// signer is the allowed-signers line; tests replace it.
-var signer = ReleaseSigner
+// trusted holds the allowed-signers lines; tests replace it.
+var trusted = ReleaseSigners
 
 // verifySignature checks checksums.txt against its SSH signature with
 // ssh-keygen, which every machine with OpenSSH has.
@@ -153,7 +174,7 @@ func verifySignature(ctx context.Context, sums, sig []byte) error {
 	}
 	defer os.RemoveAll(dir)
 	signers, sigFile := filepath.Join(dir, "signers"), filepath.Join(dir, "sig")
-	if err := os.WriteFile(signers, []byte(signer+"\n"), 0o600); err != nil {
+	if err := os.WriteFile(signers, []byte(trusted+"\n"), 0o600); err != nil {
 		return fmt.Errorf("verify the release: %w", err)
 	}
 	if err := os.WriteFile(sigFile, sig, 0o600); err != nil {
@@ -182,6 +203,7 @@ func untar(bundle []byte) (map[string][]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open the helper bundle: %w", err)
 	}
+	defer zr.Close()
 	tr := tar.NewReader(zr)
 	files := map[string][]byte{}
 	for {
@@ -192,8 +214,11 @@ func untar(bundle []byte) (map[string][]byte, error) {
 		if err != nil {
 			return nil, fmt.Errorf("read the helper bundle: %w", err)
 		}
-		name := filepath.Base(h.Name)
-		if h.Typeflag != tar.TypeReg || !isHelper(name) {
+		if h.Typeflag != tar.TypeReg || !filepath.IsLocal(h.Name) || strings.Contains(h.Name, `\`) {
+			continue
+		}
+		name, ok := helperLeaf(filepath.Base(h.Name))
+		if !ok {
 			continue
 		}
 		b, err := io.ReadAll(io.LimitReader(tr, 64<<20))
@@ -210,5 +235,22 @@ func untar(bundle []byte) (map[string][]byte, error) {
 
 // isHelper is true for a host helper's or a shadow terminal's file name.
 func isHelper(name string) bool {
-	return strings.HasPrefix(name, "host-") || strings.HasPrefix(name, "vt-")
+	_, ok := helperLeaf(name)
+	return ok
+}
+
+// helperLeaf returns a canonical cache name, never an archive path.
+func helperLeaf(name string) (string, bool) {
+	switch name {
+	case "host-linux-amd64":
+		return "host-linux-amd64", true
+	case "host-linux-arm64":
+		return "host-linux-arm64", true
+	case "vt-linux-amd64":
+		return "vt-linux-amd64", true
+	case "vt-linux-arm64":
+		return "vt-linux-arm64", true
+	default:
+		return "", false
+	}
 }

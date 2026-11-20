@@ -11,6 +11,7 @@ import (
 
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/iamlakshya/simstim/internal/api"
 	"github.com/iamlakshya/simstim/internal/client"
 )
 
@@ -123,6 +124,12 @@ func TestGolden(t *testing.T) {
 			hs := home(t, w, h)
 			hs.key("/")
 			hs.typeText("te")
+			return hs.m
+		}},
+		{"setup_skip", func(t *testing.T, w, h int) *Model {
+			hs := home(t, w, h)
+			hs.be.state["atlas-dev"].setupErr = api.CodeSetupOutside
+			hs.key("n", "enter")
 			return hs.m
 		}},
 		{"new_session_error", func(t *testing.T, w, h int) *Model {

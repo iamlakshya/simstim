@@ -83,7 +83,7 @@ To start an agent instead, name it. This opens the session in your terminal stra
 simstim new my-server --agent claude --dir ~/src/app
 ```
 
-If the folder does not exist on the host yet, `new` asks whether to make it. `--mkdir` makes it without asking, and the launcher asks the same question.
+If the folder does not exist on the host yet, `new` asks whether to make it. `--mkdir` makes it without asking, and the launcher asks the same question. In a script, `new` cannot ask, so it fails with exit code 4 and names `--mkdir`.
 
 While you are attached, the agent owns your terminal: its keys, colours and scrollback are its own. Press **Ctrl+\\** to detach. The session keeps running.
 

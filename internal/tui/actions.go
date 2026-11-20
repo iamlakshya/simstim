@@ -7,6 +7,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/iamlakshya/simstim/internal/api"
 	"github.com/iamlakshya/simstim/internal/brand"
 	"github.com/iamlakshya/simstim/internal/client"
 )
@@ -19,19 +20,19 @@ func (m *Model) op(h *hostConn, ok string, fn func(context.Context, Conn) error)
 		}
 		return m.toastErr(offlineErr(h))
 	}
-	name, c, ctx := h.name(), h.conn, m.ctx
-	return func() tea.Msg {
+	name, c := h.name(), h.conn
+	return m.bgCmd(func(ctx context.Context) tea.Msg {
 		cctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 		defer cancel()
 		return opDoneMsg{host: name, ok: ok, err: fn(cctx, c)}
-	}
+	})
 }
 
 func offlineErr(h *hostConn) error {
 	if h.status == stConnecting {
-		return &client.UserError{Msg: "still connecting to " + h.name(), Hint: "Wait a moment, then try again."}
+		return &client.UserError{Msg: "still connecting to " + h.name(), Hint: "Wait a moment, then try again.", Code: "connecting"}
 	}
-	return &client.UserError{Msg: h.name() + " is offline", Hint: fmt.Sprintf("%s host test %s", brand.Name, h.name())}
+	return &client.UserError{Msg: h.name() + " is offline", Hint: fmt.Sprintf("%s host test %s", brand.Name, h.name()), Code: "offline"}
 }
 
 // newSessionHost picks the host for "session: new": the host in play, or
@@ -75,44 +76,67 @@ func (m *Model) startSession(h *hostConn, r startReq) tea.Cmd {
 		return func() tea.Msg { return startedMsg{startReq: r, err: err} }
 	}
 	r.args = client.TerminalArgs(r.args, m.width, m.height)
-	c, ctx, be, host := h.conn, m.ctx, m.be, h.host
-	return func() tea.Msg {
+	c, be, host := h.conn, m.be, h.host
+	return m.bgCmd(func(ctx context.Context) tea.Msg {
 		cctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 		defer cancel()
-		if r.args.Setup == "" {
-			r.args.SetupTrust = be.SetupTrust(r.host)
+		var warn *client.UserError
+		if r.args.Setup == "" && !r.answered {
+			answers := be.SetupAnswers(r.host)
+			answers.Apply(&r.args)
+			r.answered, r.answers, warn = true, answers, answers.Warning
 		}
 		// One fetch of the secrets for each start. A question about the
 		// start keeps them for the start after the answer.
 		if r.args.Secrets == nil {
 			secrets, err := be.Secrets(cctx, host)
 			if err != nil {
-				return startedMsg{startReq: r, err: err}
+				return startedMsg{startReq: r, err: err, warn: warn}
 			}
 			r.args.Secrets = secrets
 		}
 		s, err := c.NewSession(cctx, r.args)
-		return startedMsg{startReq: r, s: s, err: err}
-	}
+		return startedMsg{startReq: r, s: s, err: err, warn: warn}
+	})
 }
 
-// onStarted shows how a start went, in the form or the quick-start line that
-// waits for it, or opens the host's question about it. After esc, nothing
-// waits: the launcher asks nothing, and does not attach to the session.
+// onStarted shows how a start went, and a warning about the user's answers
+// about setup scripts, when they could not be read.
 func (m *Model) onStarted(msg startedMsg) tea.Cmd {
+	cmd := m.showStarted(msg)
+	if w := msg.warn; w != nil {
+		return tea.Batch(m.toastSetupWarn(w), cmd)
+	}
+	return cmd
+}
+
+// showStarted shows how a start went, in the form or the quick-start line
+// that waits for it, or opens the host's question about it. After esc,
+// nothing waits: the launcher asks nothing, and does not attach to the
+// session.
+func (m *Model) showStarted(msg startedMsg) tea.Cmd {
 	d, p := m.waiting(msg.startReq)
 	waited := d != nil || p != nil
 	if q, ok := client.FolderQuestionOf(msg.err); ok && !msg.args.MakeFolder {
 		if waited {
+			cleanup := m.disposeModal()
 			m.modal = &makeFolderAsk{startReq: msg.startReq, q: q}
+			return cleanup
 		}
 		return nil
 	}
 	if q, ok := client.SetupQuestionOf(msg.err); ok {
 		if waited {
+			cleanup := m.disposeModal()
 			m.modal = &setupAsk{startReq: msg.startReq, q: q}
+			return cleanup
 		}
 		return nil
+	}
+	if ue, ok := setupCannotRun(msg.err); ok && msg.args.Setup != api.SetupSkip && waited {
+		cleanup := m.disposeModal()
+		m.modal = &setupSkipAsk{startReq: msg.startReq, err: ue}
+		return cleanup
 	}
 	if msg.err != nil {
 		if d != nil {
@@ -193,52 +217,53 @@ func (m *Model) deleteSession(host string, s client.Session) tea.Cmd {
 	if !h.online() {
 		return m.toastErr(offlineErr(h))
 	}
-	id, c, ctx := s.ID, h.conn, m.ctx
-	return func() tea.Msg {
+	id, c := s.ID, h.conn
+	return m.bgCmd(func(ctx context.Context) tea.Msg {
 		cctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 		defer cancel()
 		res, err := c.Delete(cctx, id)
 		ok := fmt.Sprintf("Deleted %s on %s.", s.Name, host)
-		if res.Worktree != "" {
-			ok += " " + sentence(res.Worktree)
+		note, hint := client.WorktreeNote(host, res)
+		if note != "" {
+			ok += " " + sentence(note)
+		}
+		if hint != "" {
+			// An error kept the worktree: a warning, with what to try.
+			return opDoneMsg{host: host, warn: ok, hint: hint, err: err, drop: id}
 		}
 		return opDoneMsg{host: host, ok: ok, err: err, drop: id}
-	}
+	})
 }
 
-// saveHosts writes the host list with one host added, replaced or removed.
+// saveHosts writes the host list with one host added, replaced or removed,
+// unless the launcher's context ends first: then it writes nothing.
 func (m *Model) saveHosts(host client.Host, remove bool) tea.Cmd {
 	be := m.be
-	return func() tea.Msg {
-		hosts, err := be.LoadHosts()
+	return m.bgCmd(func(ctx context.Context) tea.Msg {
+		hosts, err := be.LoadHosts(ctx)
 		if err != nil {
-			return hostSavedMsg{host: host, remove: remove, err: err}
+			return m.completeHostSave(hostSavedMsg{host: host, remove: remove, err: err})
 		}
-		out := hosts[:0]
-		for _, h := range hosts {
-			if h.Name != host.Name {
-				out = append(out, h)
-			}
-		}
-		if !remove {
-			out = append(out, host)
-		}
-		return hostSavedMsg{host: host, remove: remove, err: be.SaveHosts(out)}
-	}
+		out := changedHosts(hosts, host, remove)
+		return m.completeHostSave(hostSavedMsg{host: host, remove: remove, err: be.SaveHosts(ctx, out)})
+	})
 }
 
 func (m *Model) onHostSaved(msg hostSavedMsg) tea.Cmd {
-	if w, ok := m.modal.(*wizard); ok && !msg.remove {
-		return w.onMsg(m, msg)
+	if msg.owner == nil || msg.completion != nil {
+		var ok bool
+		msg, ok = m.hostSaves.acknowledge(msg)
+		if !ok {
+			return nil
+		}
 	}
-	if msg.err != nil {
-		return m.toastErr(msg.err)
+	if msg.owner != nil {
+		if w, ok := m.modal.(*wizard); ok && w.owns(msg.owner, msg.seq) && w.step == wzReady && w.run && !w.saved {
+			return w.onSaved(m, msg)
+		}
+		return nil
 	}
-	if msg.remove {
-		return tea.Batch(m.removeHost(msg.host.Name),
-			m.toast(toastSuccess, fmt.Sprintf("Forgot %s. Its sessions and the helper stay on the host.", msg.host.Name)))
-	}
-	return nil
+	return m.applyHostSaved(msg)
 }
 
 // testHost measures the round trip to h.
@@ -246,8 +271,8 @@ func (m *Model) testHost(h *hostConn) tea.Cmd {
 	if !h.online() {
 		return m.toastErr(offlineErr(h))
 	}
-	name, c, ctx := h.name(), h.conn, m.ctx
-	return func() tea.Msg {
+	name, c := h.name(), h.conn
+	return m.bgCmd(func(ctx context.Context) tea.Msg {
 		cctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 		defer cancel()
 		d, err := c.RoundTrip(cctx)
@@ -255,5 +280,5 @@ func (m *Model) testHost(h *hostConn) tea.Cmd {
 			return opDoneMsg{host: name, err: err}
 		}
 		return opDoneMsg{host: name, ok: fmt.Sprintf("%s answers in %s.", name, fmtLatency(d))}
-	}
+	})
 }

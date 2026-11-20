@@ -167,7 +167,7 @@ Triggers: the detach key, closing the tab, `simstim kill` from elsewhere, or SIG
 1. The input filter sees Ctrl+V in any encoding: legacy `0x16`, kitty CSI u (with lock bits masked and event types), or modifyOtherKeys.
 2. The client reads the local clipboard. On macOS this takes about 20 µs warm.
    - If it holds no image, the key is passed through unchanged.
-3. If it holds an image (16 MiB at most), the client uploads it over the bridge. The holder stores it under the session's `paste/` folder, mode 0700, and deletes it after 24 hours.
+3. If it holds an image (16 MiB at most), the client uploads it over the bridge. The holder stores it under the session's `paste/` folder, mode 0700, and deletes it after 24 hours. An upload whose end never comes, as one that a cancel stopped, leaves nothing: the bridge removes its part when the connection closes, also when a bridge ends itself after its client went quiet, when the connection begins another upload, and after two minutes with no frame of it. So the client sends one upload at a time on a connection: the next waits until the last one has its answer.
 4. The client sends the remote path as one bracketed paste. Claude Code, Codex, Gemini CLI, opencode and Amp all attach an image when you paste its path. So no agent needs special code.
 5. **Dropped files:** a bracketed paste is rewritten only when every token in it is an existing local file. Each file is uploaded, and its path replaced with the remote one.
 6. **The paste guard:** before a drop uploads, the client checks each file.
@@ -221,14 +221,15 @@ Triggers: the detach key, closing the tab, `simstim kill` from elsewhere, or SIG
 
 ### 3.10 Worktrees, hooks, ports and providers
 
-- **Worktree:** `new --worktree` runs `git worktree add -b <name>/<slug>-<id>` from the base (default `HEAD`) into `~/.local/share/<name>/worktrees/<repo>/`, locks it, and copies the files listed in `.worktreeinclude`. Delete removes it and its branch only when it has no changes and no new commits; otherwise it keeps it and says so.
+- **Worktree:** `new --worktree` runs `git worktree add -b <name>/<slug>-<id>` from the base (default `HEAD`) into `~/.local/share/<name>/worktrees/<repo>/`, locks it, and copies the regular files listed in `.worktreeinclude`, through `os.Root`, so no symbolic link leads the copy out of either folder. Delete removes it and its branch only when it has no changes and no new commits. Otherwise it keeps it and says so.
+- **Host git:** each git command of the helper starts with `-c core.fsmonitor=false -c core.hooksPath=/dev/null` and `-c hook.<event>.enabled=false` for each event of githooks(5). It also adds `-c hook.<name>.enabled=false` for each hook that the repository's config defines, which it reads first with `git config --get-regexp`. Each step on a repository (`worktree.add`, `worktree.remove`, `worktree.discard`, `repo.info`) runs in a child, `<name>-host git-op <step>`, with JSON on its stdin and stdout, and a deadline. With a systemd user manager, the child runs in a scope under `<name>.slice`, so a filter that a session sets in the repository runs there too. When the helper cannot tell whether the manager runs, the step fails and runs no git. `pull` runs `git-op repo.info` over SSH ([worktrees](../how-to/worktrees.md#how-the-host-runs-git)).
 - **Setup and resume hooks:** an executable `.<name>/setup` in the repository (or `~/.config/<name>/hooks/setup` on the host) runs in the session's terminal before the agent; `resume` runs before a respawn. A repository's hooks run only after the user trusts that repository on that host: the client asks once and keeps the answer. A failing hook is reported, not fatal ([setup hooks](../how-to/setup-hooks.md)).
 - **Ports:** the holder lists TCP listening sockets owned by the session's processes (its cgroup, or the agent's descendants). `forward` runs `ssh -N -L 127.0.0.1:…` for them.
 - **Providers:** a host may name a script that starts, stops and reports on it (JSON on stdin). With `--wake`, a host that does not answer is started first. See `examples/providers`.
 
 ## 4. Protocol
 
-- **Framing:** `u32` little-endian length, `u8` type, payload. Control payloads are JSON; `input` and `output` payloads are raw bytes. Every frame has a size limit.
+- **Framing:** `u32` little-endian length, `u8` type, payload. Control payloads are JSON; `input` and `output` payloads are raw bytes. Every frame has a size limit. Writers reject an oversized payload before adding type or header sizes. They write no partial frame.
 - **Hello first, both ways:** `{magic, protocol: "1.0", features: […], version}`.
 - **Compatibility:** message types are append-only. A peer ignores unknown types. A missing feature degrades with a clear message.
 - **Bridge to client:**
@@ -243,6 +244,14 @@ Triggers: the detach key, closing the tab, `simstim kill` from elsewhere, or SIG
   - Each client's output queue holds at most 4096 frames, not a fixed number of bytes.
   - When the queue fills, the holder closes that client's connection. On reconnect, the client catches up by offset if the ring still has it; otherwise it gets a snapshot, or the ring if a snapshot is unavailable.
   - Queueing output for a slow client does not block the PTY reader.
+- **Streams** (`internal/link`, for sandboxes): one connection between a sandbox's supervisor and its guest init carries many streams. No session uses it yet, and its frames do not travel between the client and a host yet, so sessions do not change.
+  - Four frames carry them. Each payload starts with a `u32` stream ID: `TStreamOpen` (`0x50`) with a JSON header that names the stream's kind, `TStreamData` (`0x51`) with bytes, `TStreamClose` (`0x52`) with one byte (`0` both ways, `1` the sender's writes only, `2` refused or reset), and `TStreamWindow` (`0x53`) with a `u32` of more credit.
+  - The link starts with a hello each way, with the role `supervisor` or `guest`, within 10 s. The supervisor refuses a guest of another helper version.
+  - The supervisor gives odd stream IDs, and the guest even ones. Each side's IDs are consecutive. Each kind has one side that may open it.
+  - Each stream has its own credit each way, 64 KiB at the start. The reader gives more as it reads. So a stream that nobody reads stops only its own writer. The writer sends one frame of each waiting stream in turn, and `holder` and `ctl` streams go first.
+  - Close sends the bytes that wait, then the close, and succeeds only once the connection has written them. When the other end has not taken them after 5 s, Close resets the stream, so the other end's reads fail rather than end cleanly, and Close returns an error.
+  - Memory has a fixed bound. A stream holds at most a window each way, copied into one buffer, whatever the sizes of its frames. The guest may open 96 streams and the supervisor 32, counted apart. So a guest can make the supervisor hold at most 16 MiB for each link.
+  - A frame is at most 64 KiB. An end that breaks a rule, such as data beyond the credit, an ID that was never opened, or a frame type that a link does not carry, loses the whole link. An open of a kind that the sender may not open, a header over 4 KiB, or an open past the opener's stream limit is refused alone.
 - **Leader rule:** the newest attach becomes leader. Any `input` frame from an attached client then makes that client leader, including terminal replies and mouse events. Only the leader's resize frames change the PTY size; typing does not itself apply a size. There is no `take_size` message. When the leader disconnects, no replacement is chosen until another attach or input frame.
 
 ## 5. Terminal fidelity contract
@@ -258,7 +267,7 @@ The contract has its own page: [the fidelity contract](fidelity.md).
 | `~/.config/simstim/config.toml` | Settings and keymap overrides, with a JSON Schema |
 | `~/.config/simstim/hosts.toml` | Saved hosts: name, SSH target, labels, optional provider block |
 | `~/.config/simstim/ssh/hosts.conf` | Generated SSH blocks for hosts added in simstim. Included by the wrapper. |
-| `~/.cache/simstim/cm/nf-%C` | ControlMaster sockets. The path is kept under 86 bytes because of macOS. The `nf-` prefix keeps the client off masters that older clients started ([decision 0034](../contributing/decisions/0034-ssh-options-on-the-command-line.md)). |
+| `~/.cache/simstim/cm/nf-%C` | ControlMaster sockets. Each path fits the system's socket limit. The `nf-` prefix keeps the client off masters that older clients started ([decision 0034](../contributing/decisions/0034-ssh-options-on-the-command-line.md)). When the cache path is too long, the sockets go in `cm` of the runtime folder (`$XDG_RUNTIME_DIR/simstim`, or `simstim-<uid>` in the temporary folder without it), when that folder is the user's, is not a link and nobody else may write it. Else they go in a private `/tmp/simstim-<uid>`. |
 | `~/.cache/simstim/helpers/<version>/` | Host helpers fetched from the release, for a client built with `go install` |
 | `~/.local/state/simstim/` | Logs, and each session's last byte offset |
 | `~/.local/state/simstim/debug/` | The client's debug files, while `--debug` is on (0700; [debug a session](../how-to/debug-a-session.md)) |

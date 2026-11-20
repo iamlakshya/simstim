@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/iamlakshya/simstim/internal/brand"
+	"github.com/iamlakshya/simstim/internal/paths"
 )
 
 // SSH runs the system OpenSSH client for one host. It never edits ~/.ssh/config:
@@ -42,7 +43,7 @@ func writeWrapper(h Host) (string, error) {
 	if h.SSHConfig != "" {
 		hostConfig = expand(h.SSHConfig)
 		if _, err := os.Stat(hostConfig); err != nil {
-			return "", &UserError{Msg: fmt.Sprintf("the SSH config %s for host %s is missing", hostConfig, h.Name), Hint: brand.Name + " host edit " + h.Name}
+			return "", &UserError{Msg: fmt.Sprintf("the SSH config %s for host %s is missing", hostConfig, h.Name), Hint: "Make the file, or change the ssh_config of " + h.Name + " in hosts.toml.", Code: "ssh_config_missing", Kind: KindUsage}
 		}
 	}
 	return writeConfig(wrapperPath(h), fmt.Sprintf("host %q", h.Name), hostConfig, true)
@@ -155,11 +156,29 @@ const maxSocketPath = 103
 // (decision 0034).
 const controlPrefix = "nf-"
 
+// ControlDir is the folder of the sockets of shared SSH connections, or ""
+// when the client shares none (controlDir).
+func ControlDir() string {
+	if !controlMaster {
+		return ""
+	}
+	return controlDir()
+}
+
+// tmpControlDir is the last place for the shared connections' sockets: a
+// private folder of our own in /tmp. Tests point it into their own root.
+var tmpControlDir = func() string { return filepath.Join("/tmp", fmt.Sprintf("%s-%d", brand.Name, os.Getuid())) }
+
 // controlDir is the folder for the shared connections' sockets. It is the
 // cache folder when a socket path there fits in maxSocketPath (OpenSSH's %C
-// is 40 characters, after controlPrefix), and otherwise a private folder of
-// our own in /tmp. It is "" when neither can be used safely; the client
-// then shares no connections, which is slower but works.
+// is 40 characters, after controlPrefix). Otherwise it is "cm" in the runtime folder
+// (paths.RuntimeDir: $XDG_RUNTIME_DIR/<name>, or <name>-<uid> in the
+// temporary folder without it), when that folder is safe (ownedDir: the
+// user's, not a link, and nobody else may write it), and else a private
+// folder of our own in /tmp, whose sticky bit keeps others from moving it:
+// the first whose path fits and that is private once made. It is "" when
+// none can be used safely; the client then shares no connections, which is
+// slower but works.
 func controlDir() string {
 	d := filepath.Join(CacheDir(), "cm")
 	if len(d)+1+len(controlPrefix)+40 <= maxSocketPath {
@@ -168,14 +187,29 @@ func controlDir() string {
 		}
 		return d
 	}
-	d = filepath.Join("/tmp", fmt.Sprintf("%s-%d", brand.Name, os.Getuid()))
-	if err := os.Mkdir(d, 0o700); err != nil && !errors.Is(err, fs.ErrExist) {
-		return ""
+	for _, c := range []struct{ parent, dir string }{
+		{paths.RuntimeDir(), filepath.Join(paths.RuntimeDir(), "cm")},
+		{"", tmpControlDir()},
+	} {
+		if len(c.dir)+1+len(controlPrefix)+40 > maxSocketPath {
+			continue
+		}
+		if c.parent != "" {
+			if err := os.Mkdir(c.parent, 0o700); err != nil && !errors.Is(err, fs.ErrExist) {
+				continue
+			}
+			if !ownedDir(c.parent) {
+				continue
+			}
+		}
+		if err := os.Mkdir(c.dir, 0o700); err != nil && !errors.Is(err, fs.ErrExist) {
+			continue
+		}
+		if privateDir(c.dir) {
+			return c.dir
+		}
 	}
-	if !privateDir(d) {
-		return ""
-	}
-	return d
+	return ""
 }
 
 // sshWaitDelay bounds the wait for ssh's output once ssh has ended or was
@@ -352,7 +386,7 @@ func sshError(h Host, err error, stderr string) error {
 		if msg == "" {
 			msg = "ssh failed"
 		}
-		return &UserError{Msg: fmt.Sprintf("cannot reach %s: %s", h.Name, msg), Hint: fmt.Sprintf("ssh %s   (check that this works first)", h.SSH)}
+		return &UserError{Msg: fmt.Sprintf("cannot reach %s: %s", h.Name, msg), Hint: SSHCommand(h.SSH) + " (check that this works first)", Code: "unreachable"}
 	}
 	if msg == "" {
 		return err

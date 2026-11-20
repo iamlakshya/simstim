@@ -84,7 +84,7 @@ func readSplit(t *testing.T, name, out, text string, want bool) {
 	check := func(how string, parts ...string) {
 		r := newTestReader()
 		for _, p := range parts {
-			r.observe([]byte(p))
+			r.observe(t.Context(), []byte(p))
 		}
 		if got := r.seen(text) || r.orphaned(); got != want {
 			t.Errorf("%s, %s: refused = %v, want %v", name, how, got, want)
@@ -210,10 +210,10 @@ func TestClipReaderReadsWrites(t *testing.T) {
 // C1: kitty reads write nothing, so they cannot stand for a write.
 func TestClipReaderKittyReadsAreNotWrites(t *testing.T) {
 	r := newTestReader()
-	r.observe([]byte(osc52(victim)))
+	r.observe(t.Context(), []byte(osc52(victim)))
 	n := len(r.got)
 	for range 16 {
-		r.observe([]byte("\x1b]5522;type=read;Lg==\x1b\\"))
+		r.observe(t.Context(), []byte("\x1b]5522;type=read;Lg==\x1b\\"))
 	}
 	if len(r.got) != n {
 		t.Fatalf("kitty reads recorded %d writes", len(r.got)-n)
@@ -223,7 +223,7 @@ func TestClipReaderKittyReadsAreNotWrites(t *testing.T) {
 // An empty write records nothing, so it moves no entry's time.
 func TestClipReaderEmptyWrites(t *testing.T) {
 	r := newTestReader()
-	r.observe([]byte(osc52("   \n ") + "\x1b]52;c;\a" + "\x1b]1337;CopyToClipboard\a\x1b]1337;EndCopy\a"))
+	r.observe(t.Context(), []byte(osc52("   \n ")+"\x1b]52;c;\a"+"\x1b]1337;CopyToClipboard\a\x1b]1337;EndCopy\a"))
 	if len(r.got) != 0 {
 		t.Fatalf("empty writes recorded %d hashes", len(r.got))
 	}
@@ -262,7 +262,7 @@ func TestClipReaderIdle(t *testing.T) {
 		{osc52(victim), true},
 	} {
 		r := newTestReader()
-		r.observe([]byte(c.out))
+		r.observe(t.Context(), []byte(c.out))
 		if r.idle() != c.idle {
 			t.Errorf("after %q: idle = %v, want %v", c.out, r.idle(), c.idle)
 		}
@@ -360,18 +360,18 @@ func TestClipReaderKittyAcrossDetach(t *testing.T) {
 	m, _ := testMemory(t)
 	data := b64(victim)
 	first := newPasteGuard(m)
-	first.observe([]byte("\x1b]5522;type=write\x1b\\\x1b]5522;type=wdata:mime=dGV4dC9wbGFpbg==;" + data[:20] + "\x1b\\"))
-	first.detach()
+	first.observe(t.Context(), []byte("\x1b]5522;type=write\x1b\\\x1b]5522;type=wdata:mime=dGV4dC9wbGFpbg==;"+data[:20]+"\x1b\\"))
+	first.detach(t.Context())
 	second := newPasteGuard(m)
-	second.observe([]byte("\x1b]5522;type=wdata:mime=dGV4dC9wbGFpbg==;" + data[20:] + "\x1b\\\x1b]5522;type=wdata\x1b\\"))
-	m.flush(5 * time.Second)
-	if why, match := m.check([][32]byte{sumOf(t, victim)}, nil); match != 0 {
+	second.observe(t.Context(), []byte("\x1b]5522;type=wdata:mime=dGV4dC9wbGFpbg==;"+data[20:]+"\x1b\\\x1b]5522;type=wdata\x1b\\"))
+	m.flush(t.Context(), 5*time.Second)
+	if why, match := m.check(t.Context(), [][32]byte{sumOf(t, victim)}, nil); match != 0 {
 		t.Fatalf("a transfer across a detach was missed: %q", why)
 	}
 	if second.orphaned() {
 		t.Error("the next attach in the process took its data for an orphan")
 	}
-	fresh := newClipReader(m.add, m.now, nil)
+	fresh := newClipReader(recordClipMemory(t.Context(), m), m.now, nil)
 	fresh.observe([]byte("\x1b]5522;type=wdata:mime=dGV4dC9wbGFpbg==;" + data[20:] + "\x1b\\"))
 	if !fresh.orphaned() {
 		t.Error("data with no transfer in a new process was not an orphan")
@@ -394,7 +394,7 @@ func TestClipReaderSelections(t *testing.T) {
 		{"\x1b]1337;Copy=:" + b64(victim) + "\a", false},
 	} {
 		r := newTestReader()
-		r.observe([]byte(c.out))
+		r.observe(t.Context(), []byte(c.out))
 		if c.sel && (len(r.got) != 0 || len(r.sel) == 0) || !c.sel && (len(r.got) == 0 || len(r.sel) != 0) {
 			t.Errorf("%q: %d clipboard and %d selection hashes", c.out, len(r.got), len(r.sel))
 		}
@@ -405,14 +405,14 @@ func TestClipReaderSelections(t *testing.T) {
 // write before it ages out on time.
 func TestClipReaderEmptyWritesRenewNothing(t *testing.T) {
 	m, clock := testMemory(t)
-	r := newClipReader(m.add, m.now, nil)
+	r := newClipReader(recordClipMemory(t.Context(), m), m.now, nil)
 	r.observe([]byte(osc52(victim)))
 	for range 3 {
 		clock.add(9 * time.Hour)
 		r.observe([]byte("\x1b]52;c;\a\x1b]52;c;" + b64("  \n") + "\a"))
 	}
-	m.flush(5 * time.Second)
-	if why, _ := m.check([][32]byte{sumOf(t, victim)}, nil); why != "" {
+	m.flush(t.Context(), 5*time.Second)
+	if why, _ := m.check(t.Context(), [][32]byte{sumOf(t, victim)}, nil); why != "" {
 		t.Fatalf("27 hours after the write, with empty writes since: %q", why)
 	}
 }
@@ -422,7 +422,7 @@ func TestClipReaderEmptyWritesRenewNothing(t *testing.T) {
 func TestClipReaderMixedSelections(t *testing.T) {
 	for _, sel := range []string{"pc", "px", "sx0", "s", "ps"} {
 		r := newTestReader()
-		r.observe([]byte("\x1b]52;" + sel + ";" + b64(victim) + "\a"))
+		r.observe(t.Context(), []byte("\x1b]52;"+sel+";"+b64(victim)+"\a"))
 		if len(r.got) == 0 || len(r.sel) == 0 {
 			t.Errorf("%q: %d clipboard and %d selection hashes, want both", sel, len(r.got), len(r.sel))
 		}
@@ -444,7 +444,7 @@ func TestClipReaderBothReadingsOf9C(t *testing.T) {
 // the reader lose track of the write, for a day, and the data still counts.
 func TestClipReaderLongSelection(t *testing.T) {
 	r := newTestReader()
-	r.observe([]byte("\x1b]52;" + strings.Repeat("c", 17) + ";" + b64(victim) + "\a"))
+	r.observe(t.Context(), []byte("\x1b]52;"+strings.Repeat("c", 17)+";"+b64(victim)+"\a"))
 	if !r.orphaned() {
 		t.Error("a selection of 17 letters did not make the reader unsure")
 	}
@@ -452,7 +452,7 @@ func TestClipReaderLongSelection(t *testing.T) {
 		t.Error("the data after a long selection was not recorded")
 	}
 	r = newTestReader()
-	r.observe([]byte("\x1b]52;" + strings.Repeat("c", 16) + ";" + b64(victim) + "\a"))
+	r.observe(t.Context(), []byte("\x1b]52;"+strings.Repeat("c", 16)+";"+b64(victim)+"\a"))
 	if r.orphaned() || !r.seen(victim) {
 		t.Error("a selection of 16 letters was not read")
 	}
@@ -512,13 +512,13 @@ func TestClipReaderKittyManyStreams(t *testing.T) {
 // and records them all again then, so a commit a day later still counts.
 func TestClipReaderKittyLateCommit(t *testing.T) {
 	m, clock := testMemory(t)
-	r := newClipReader(m.add, m.now, nil)
+	r := newClipReader(recordClipMemory(t.Context(), m), m.now, nil)
 	r.observe([]byte("\x1b]5522;type=write\x1b\\\x1b]5522;type=wdata:mime=dGV4dC9wbGFpbg==;" + b64(victim) +
 		"\x1b\\\x1b]5522;type=wdata:mime=dGV4dC9odG1s;" + b64("<p>hi</p>") + "\x1b\\"))
 	clock.add(25 * time.Hour)
 	r.observe([]byte("\x1b]5522;type=wdata\x1b\\"))
-	m.flush(5 * time.Second)
-	if why, _ := m.check([][32]byte{sumOf(t, victim)}, nil); why == "" {
+	m.flush(t.Context(), 5*time.Second)
+	if why, _ := m.check(t.Context(), [][32]byte{sumOf(t, victim)}, nil); why == "" {
 		t.Fatal("a stream was forgotten before the commit that put it on the clipboard")
 	}
 }

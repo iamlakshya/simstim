@@ -21,11 +21,11 @@ func (a *attacher) reconnect(ctx context.Context) (detached bool, err error) {
 	since := diag.Now()
 	DebugLog().Debug("connection lost", diag.CatKey, diag.CatNet, "reason", reason)
 	go a.ssh.masterState(context.WithoutCancel(ctx), "drop")
-	a.write(a.reconnectTitle())
+	a.write(ctx, a.reconnectTitle())
 	defer func() {
-		a.write([]byte("\x1b]9;4;0\x1b\\\x1b[23;0t"))
+		a.write(ctx, []byte("\x1b]9;4;0\x1b\\\x1b[23;0t"))
 		if len(a.tracker.M.Title) > 0 {
-			a.write(a.tracker.M.Title) // for terminals without a title stack
+			a.write(ctx, a.tracker.M.Title) // for terminals without a title stack
 		}
 	}()
 	banner := time.After(bannerAfter)
@@ -62,7 +62,7 @@ func (a *attacher) waitToRetry(ctx context.Context, banner, retry <-chan time.Ti
 	for {
 		select {
 		case <-banner:
-			a.flash("connection lost · reconnecting · keys are not sent · " + a.o.Settings.Attach.DetachKey + " to leave")
+			a.flash(ctx, "connection lost · reconnecting · keys are not sent · "+a.o.Settings.Attach.DetachKey+" to leave")
 		case b, ok := <-a.inCh:
 			if !ok {
 				return true
@@ -74,6 +74,7 @@ func (a *attacher) waitToRetry(ctx context.Context, banner, retry <-chan time.Ti
 				}
 			}
 			_ = a.filter.Flush()
+			a.in.ask()
 			return false // a key press: try again now
 		case <-retry:
 			return false
@@ -103,11 +104,11 @@ func (a *attacher) tryReconnect(ctx context.Context) (done bool, err error) {
 	if err != nil {
 		return errors.As(err, &ue), err
 	}
-	a.clearFlash()
+	a.clearFlash(ctx)
 	if att.Mode == "replay" {
 		a.cu.History(att.Live)
 	} else {
-		a.begin(att, &AttachState{}, rows)
+		a.begin(ctx, att, &AttachState{}, rows)
 	}
 	a.res.Missed += att.Live - before
 	return true, nil

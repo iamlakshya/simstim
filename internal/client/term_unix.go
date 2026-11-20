@@ -44,6 +44,15 @@ func watchResize(_ *os.File) (<-chan struct{}, func()) {
 // controlMaster reports whether this OpenSSH can share connections.
 const controlMaster = true
 
+// ownerOf is the id of the user who owns fi, or -1. Tests fake it, as if a
+// folder were another user's.
+var ownerOf = func(fi os.FileInfo) int {
+	if st, ok := fi.Sys().(*syscall.Stat_t); ok {
+		return int(st.Uid)
+	}
+	return -1
+}
+
 // privateDir reports whether d is a real folder (not a link) that only this
 // user owns and can open, so nobody else can plant or read sockets in it.
 func privateDir(d string) bool {
@@ -51,6 +60,16 @@ func privateDir(d string) bool {
 	if err != nil || !fi.IsDir() || fi.Mode().Perm() != 0o700 {
 		return false
 	}
-	st, ok := fi.Sys().(*syscall.Stat_t)
-	return ok && int(st.Uid) == os.Getuid()
+	return ownerOf(fi) == os.Getuid()
+}
+
+// ownedDir reports whether d is a real folder (not a link) that this user
+// owns, and that neither its group nor others may write: nobody else can
+// move or replace a folder in it.
+func ownedDir(d string) bool {
+	fi, err := os.Lstat(d)
+	if err != nil || !fi.IsDir() || fi.Mode().Perm()&0o022 != 0 {
+		return false
+	}
+	return ownerOf(fi) == os.Getuid()
 }

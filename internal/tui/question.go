@@ -17,10 +17,16 @@ type startReq struct {
 	host string
 	// args are what to start. They keep the secrets of the start, so that
 	// the start after an answer does not fetch them again.
-	args   client.NewArgs
-	attach bool
-	form   *newSession  // the form that started it, or nil
-	line   *promptState // the quick-start line that started it, or nil
+	args client.NewArgs
+	// answered is true once the start has read the user's answers about
+	// setup scripts into args. A start after an answer keeps the answers
+	// it has, with the new one in them. answers are those answers, so a
+	// question can say what the user said before.
+	answered bool
+	answers  client.SetupAnswers
+	attach   bool
+	form     *newSession  // the form that started it, or nil
+	line     *promptState // the quick-start line that started it, or nil
 }
 
 // waiting returns the form or the quick-start line that started r, while it
@@ -42,7 +48,7 @@ func (m *Model) startAgain(r startReq) tea.Cmd {
 	h := m.hostByName(r.host)
 	if h == nil {
 		m.cancelStart(r)
-		return m.toastErr(&client.UserError{Msg: "the host " + r.host + " is no longer in the list", Hint: "Add the host again, then start the session."})
+		return m.toastErr(&client.UserError{Msg: "the host " + r.host + " is no longer in the list", Hint: "Add the host again, then start the session.", Code: "host_not_found", Kind: client.KindNotFound})
 	}
 	m.modal = nil
 	if r.form != nil {

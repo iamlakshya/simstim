@@ -8,12 +8,12 @@ package proto
 
 import (
 	"bufio"
+	"context"
 	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
-	"sync"
 
 	"github.com/iamlakshya/simstim/internal/brand"
 )
@@ -54,6 +54,24 @@ const (
 	TUploadBegin Type = 0x40
 	TUploadChunk Type = 0x41
 	TUploadEnd   Type = 0x42
+
+	// The stream frames carry many streams over one link (package link).
+	// Their payloads are binary and start with a u32 stream ID,
+	// little-endian. They never travel between the client and a host's
+	// bridge outside an op that streams.
+
+	// TStreamOpen opens a stream: the ID, then a JSON header that names the
+	// stream's kind.
+	TStreamOpen Type = 0x50
+	// TStreamData carries a stream's bytes: the ID, then the bytes.
+	TStreamData Type = 0x51
+	// TStreamClose closes a stream: the ID, then one byte. 0 closes both
+	// ways, 1 the sender's writes only, and 2 refuses or resets the
+	// stream.
+	TStreamClose Type = 0x52
+	// TStreamWindow gives credit: the ID, then a u32 of more bytes that
+	// the sender of the frame will take on that stream.
+	TStreamWindow Type = 0x53
 )
 
 // Frame is one decoded frame.
@@ -90,26 +108,65 @@ func Read(r *bufio.Reader) (Frame, error) {
 	return Frame{Type: Type(buf[0]), Payload: buf[1:]}, nil
 }
 
-// Writer writes whole frames. It is safe for concurrent use.
+// Writer writes whole frames. It is safe for concurrent use: one frame at
+// a time, each in a single call to the underlying writer.
 type Writer struct {
-	mu sync.Mutex
-	w  io.Writer
+	// turn holds a token while a frame is written. A writer that waits for
+	// its turn with a context can give up at the context's end.
+	turn chan struct{}
+	w    io.Writer
 }
 
 // NewWriter wraps w.
-func NewWriter(w io.Writer) *Writer { return &Writer{w: w} }
+func NewWriter(w io.Writer) *Writer { return &Writer{w: w, turn: make(chan struct{}, 1)} }
 
 // Write writes one frame in a single call to the underlying writer.
 func (w *Writer) Write(t Type, payload []byte) error {
-	if len(payload)+1 > MaxFrame {
-		return ErrFrameTooBig
+	buf, err := frame(t, payload)
+	if err != nil {
+		return err
+	}
+	w.turn <- struct{}{}
+	defer func() { <-w.turn }()
+	return w.put(buf)
+}
+
+// WriteCtx writes one frame as Write does, unless ctx ends first: while it
+// waits for its turn behind another frame, and when its turn has come, it
+// gives up with ctx's error and writes nothing. Once a frame has begun, it
+// goes out whole.
+func (w *Writer) WriteCtx(ctx context.Context, t Type, payload []byte) error {
+	buf, err := frame(t, payload)
+	if err != nil {
+		return err
+	}
+	select {
+	case w.turn <- struct{}{}:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	defer func() { <-w.turn }()
+	// The turn and the end of ctx may have come together: the end wins.
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return w.put(buf)
+}
+
+// frame is the bytes of one frame of type t.
+func frame(t Type, payload []byte) ([]byte, error) {
+	if len(payload) > MaxFrame-1 {
+		return nil, ErrFrameTooBig
 	}
 	buf := make([]byte, 5+len(payload))
 	binary.LittleEndian.PutUint32(buf, uint32(len(payload)+1)) //nolint:gosec // G115: the length is at most MaxFrame, checked above
 	buf[4] = byte(t)
 	copy(buf[5:], payload)
-	w.mu.Lock()
-	defer w.mu.Unlock()
+	return buf, nil
+}
+
+// put writes a frame's bytes, in its turn.
+func (w *Writer) put(buf []byte) error {
 	if _, err := w.w.Write(buf); err != nil {
 		return fmt.Errorf("proto: write a frame: %w", err)
 	}
@@ -123,6 +180,15 @@ func (w *Writer) WriteJSON(t Type, v any) error {
 		return fmt.Errorf("proto: encode a frame: %w", err)
 	}
 	return w.Write(t, b)
+}
+
+// WriteJSONCtx marshals v and writes it as one frame, as WriteCtx does.
+func (w *Writer) WriteJSONCtx(ctx context.Context, t Type, v any) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return fmt.Errorf("proto: encode a frame: %w", err)
+	}
+	return w.WriteCtx(ctx, t, b)
 }
 
 // Output frames carry the absolute offset of their first byte.

@@ -10,23 +10,32 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/iamlakshya/simstim/internal/api"
 	"github.com/iamlakshya/simstim/internal/brand"
 	"github.com/iamlakshya/simstim/internal/client"
 )
 
 func portsCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "ports <host>/<session>",
-		Short: "List the TCP ports a session's processes listen on",
-		Args:  cobra.ExactArgs(1),
+	var asJSON bool
+	cmd := &cobra.Command{
+		Use:     "ports <host>/<session>",
+		Short:   "List the TCP ports a session's processes listen on",
+		Example: "  " + brand.Name + " ports my-vps/web\n  " + brand.Name + " ports my-vps/web --json",
+		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return withSession(cmd.Context(), args[0], func(ctx context.Context, h client.Host, conn *client.Conn, s *client.Session) error {
 				ports, err := conn.Ports(ctx, s.ID)
 				if err != nil {
 					return err
 				}
+				if asJSON {
+					if ports == nil {
+						ports = []api.Port{}
+					}
+					return printJSON(map[string]any{"host": h.Name, "session": s.Name, "id": s.ID, "ports": ports})
+				}
 				if len(ports) == 0 {
-					fmt.Printf("%s on %s listens on no TCP ports.\n", client.CleanLine(s.Name), h.Name)
+					say(cmd, "%s on %s listens on no TCP ports.\n", client.CleanLine(s.Name), h.Name)
 					return nil
 				}
 				printPorts(os.Stdout, ports)
@@ -34,6 +43,8 @@ func portsCmd() *cobra.Command {
 			})
 		},
 	}
+	addJSON(cmd, &asJSON)
+	return cmd
 }
 
 func forwardCmd() *cobra.Command {
@@ -79,7 +90,7 @@ func forwardPairs(ctx context.Context, conn *client.Conn, h client.Host, s *clie
 		}
 	}
 	if len(want) == 0 {
-		return nil, &client.UserError{Msg: fmt.Sprintf("%s on %s listens on no TCP ports yet", client.CleanLine(s.Name), h.Name), Hint: "Start the dev server in the session, or give the port."}
+		return nil, &client.UserError{Msg: fmt.Sprintf("%s on %s listens on no TCP ports yet", client.CleanLine(s.Name), h.Name), Hint: "Start the dev server in the session, or give the port.", Code: "no_ports"}
 	}
 	pairs := make([]client.ForwardPair, 0, len(want))
 	for _, w := range want {
@@ -90,7 +101,7 @@ func forwardPairs(ctx context.Context, conn *client.Conn, h client.Host, s *clie
 		lp, err1 := strconv.Atoi(l)
 		rp, err2 := strconv.Atoi(r)
 		if err1 != nil || err2 != nil {
-			return nil, &client.UserError{Msg: fmt.Sprintf("%q is not a port or local:remote pair", w), Hint: brand.Name + " forward " + target + " 3000"}
+			return nil, &client.UserError{Msg: fmt.Sprintf("%q is not a port or local:remote pair", w), Hint: brand.Name + " forward " + shellWord(target) + " 3000", Code: "bad_value", Kind: client.KindUsage}
 		}
 		if !ok && !free(ctx, lp) {
 			lp = freePort(ctx)
@@ -100,23 +111,27 @@ func forwardPairs(ctx context.Context, conn *client.Conn, h client.Host, s *clie
 	return pairs, nil
 }
 
-// runForward forwards the pairs through ssh until Ctrl+C.
+// runForward forwards the pairs through ssh until Ctrl+C. With input off,
+// ssh asks nothing, and does not get the terminal.
 func runForward(ctx context.Context, h client.Host, pairs []client.ForwardPair) error {
 	if h.SSH == "" {
-		return &client.UserError{Msg: fmt.Sprintf("forward needs SSH, and %s is reached through %s", h.Name, h.Target()), Hint: "Forward from inside the host instead, for example with the provider's own port tools."}
+		return &client.UserError{Msg: fmt.Sprintf("forward needs SSH, and %s is reached through %s", h.Name, h.Target()), Hint: "Forward from inside the host instead, for example with the provider's own port tools.", Code: "needs_ssh"}
 	}
-	s := &client.SSH{Host: h, Interactive: true}
+	s := client.NewSSH(ctx, h, true)
 	c, err := s.Forward(ctx, pairs)
 	if err != nil {
 		return err
 	}
 	for _, p := range pairs {
-		fmt.Printf("Forwarding http://localhost:%d → %s:%d\n", p.Local, h.Name, p.Remote)
+		fmt.Fprintf(os.Stderr, "Forwarding http://localhost:%d → %s:%d\n", p.Local, h.Name, p.Remote)
 	}
-	fmt.Println("Press Ctrl+C to stop.")
-	c.Stdin, c.Stdout, c.Stderr = os.Stdin, os.Stdout, os.Stderr
+	fmt.Fprintln(os.Stderr, "Press Ctrl+C to stop.")
+	if client.InputAllowed(ctx) {
+		c.Stdin = os.Stdin
+	}
+	c.Stdout, c.Stderr = os.Stdout, os.Stderr
 	if err := c.Run(); err != nil && ctx.Err() == nil {
-		return &client.UserError{Msg: "the forward stopped: " + err.Error(), Hint: "Check that the local port is free, then try again."}
+		return &client.UserError{Msg: "the forward stopped: " + err.Error(), Hint: "Check that the local port is free, then try again.", Code: "forward_failed"}
 	}
 	return nil
 }

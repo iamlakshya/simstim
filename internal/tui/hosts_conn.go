@@ -52,8 +52,11 @@ func (m *Model) onDialled(msg dialledMsg) tea.Cmd {
 		h.backoff = nextBackoff(h.backoff)
 		return m.after(h.backoff, redialMsg{name: h.name(), gen: h.gen})
 	}
+	if msg.conn != nil && !m.conns.adopt(msg.conn) {
+		return nil
+	}
 	h.conn, h.status, h.err, h.backoff = msg.conn, stOnline, nil, 0
-	cmds := []tea.Cmd{m.listSessions(h), m.ping(h), m.doctor(h), waitDone(h.name(), h.gen, h.conn)}
+	cmds := []tea.Cmd{m.listSessions(h), m.ping(h), m.doctor(h), m.waitDone(h.name(), h.gen, h.conn)}
 	if m.previewOpen() && m.preview.key.host == h.name() {
 		cmds = append(cmds, m.peek())
 	}
@@ -68,9 +71,11 @@ func (m *Model) onConnDone(msg connDoneMsg) tea.Cmd {
 	}
 	old := h.conn
 	h.conn, h.status, h.rtts, h.rtt = nil, stOffline, nil, rttSpread{}
+	h.listing, h.pinging, h.doctoring = false, false, false
 	h.err = &client.UserError{
 		Msg:  "lost the connection to " + h.name(),
 		Hint: fmt.Sprintf("%s host test %s", brand.Name, h.name()),
+		Code: "closed",
 	}
 	h.backoff = nextBackoff(h.backoff)
 	return tea.Batch(m.dropConn(old), m.after(h.backoff, redialMsg{name: h.name(), gen: h.gen}))
@@ -132,7 +137,11 @@ func (m *Model) onLatency(msg latencyMsg) tea.Cmd {
 // onDoctor keeps a host's facts, for the details and the new-session form.
 func (m *Model) onDoctor(msg doctorMsg) tea.Cmd {
 	h := m.hostByName(msg.name)
-	if h == nil || h.gen != msg.gen || msg.err != nil {
+	if h == nil || h.gen != msg.gen {
+		return nil
+	}
+	h.doctoring = false
+	if msg.err != nil {
 		return nil
 	}
 	info := msg.info

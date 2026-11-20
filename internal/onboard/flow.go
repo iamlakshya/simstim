@@ -124,14 +124,21 @@ func (f *Flow) Toggle(i int) {
 // Choose ticks the agents in a comma-separated list, the value of --agents.
 // "shell", which is always there, and "none" install nothing.
 func (f *Flow) Choose(list string) error {
-	for _, k := range strings.Split(list, ",") {
+	for item, k := range strings.Split(list, ",") {
 		k = strings.TrimSpace(k)
 		if k == "" || k == "none" || k == "shell" {
 			continue
 		}
 		i := slices.IndexFunc(f.Items, func(it Item) bool { return it.Agent.Kind == k })
 		if i < 0 {
-			return &client.UserError{Msg: fmt.Sprintf("there is no agent called %q to install", k), Hint: brand.Name + " agents ls   (the first column names each agent)"}
+			known := make([]string, len(f.Items))
+			for j, it := range f.Items {
+				known[j] = it.Agent.Kind
+			}
+			return &client.UnknownNameError{
+				UserError: &client.UserError{Msg: fmt.Sprintf("there is no agent called %q to install", k), Hint: brand.Name + " agents ls (the first column names each agent)", Code: "agent_not_found", Kind: client.KindNotFound},
+				Name:      k, Known: known, Item: item,
+			}
 		}
 		f.Items[i].Chosen = true
 	}

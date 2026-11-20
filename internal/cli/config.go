@@ -21,6 +21,11 @@ func configCmd() *cobra.Command {
 		RunE: func(*cobra.Command, []string) error {
 			entries := tui.Keymap(client.LoadSettings())
 			if asJSON {
+				for i := range entries {
+					if entries[i].Keys == nil {
+						entries[i].Keys = []string{} // a command of the palette only: a list, never null
+					}
+				}
 				return printJSON(entries)
 			}
 			for _, e := range entries {
@@ -33,7 +38,7 @@ func configCmd() *cobra.Command {
 			return nil
 		},
 	}
-	keymap.Flags().BoolVar(&asJSON, "json", false, "print JSON")
+	addJSON(keymap, &asJSON)
 	cmd.AddCommand(keymap, &cobra.Command{
 		Use:   "path",
 		Short: "Print where the configuration lives",

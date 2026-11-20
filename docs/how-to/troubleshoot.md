@@ -35,12 +35,14 @@ simstim doctor --fix
 | `doctor --fix` | SSH configs generated for hosts you removed: removes them. |
 | | ControlMaster sockets whose SSH master died, which can make connections hang: removes them. |
 
-The doctor never uses sudo. When a fix needs root, for example linger on some hosts, it prints the command for you to run. `--yes` applies every fix without asking.
+The doctor never uses sudo. When a fix needs root, for example linger on some hosts, it prints the command for you to run. `--yes` applies every fix without asking. In a script, or with `--no-input`, `--fix` needs `--yes`, and fails with exit code 4 without it.
 
 ## Common problems
 
 | What you see | Try |
 | --- | --- |
+| `input_read` in a JSON error | The client could not read a remote command's input. Fix the local input source, then run the command again. |
+| `input_send` in a JSON error | The client could not send all the input to the sandbox. Check the sandbox with `host status`, then retry the command. |
 | `cannot reach my-server` | Run `ssh my-server true`. If that fails, the problem is in SSH, not here. |
 | Asked for a password every time | Load your key into an SSH agent, or use a key without a passphrase for this host. |
 | A key does nothing in the agent | `simstim doctor keys` shows what your terminal sends. Some terminals keep keys for themselves. |

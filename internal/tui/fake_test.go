@@ -36,8 +36,13 @@ type fakeHost struct {
 	dialErr  error
 	newErr   error
 	// setupRepo is a repository with a setup script: a start there asks,
-	// unless it is answered.
-	setupRepo string
+	// unless the user refused it, or trusted setupHash, the setup hash of
+	// its scripts. An empty setupHash is an older helper, which sends no
+	// hash.
+	setupRepo, setupHash string
+	// setupErr is the code of a start whose script cannot run, such as
+	// setup_outside: every start fails with it, unless it skips the scripts.
+	setupErr string
 	// missing is a folder that does not exist: a start there asks, unless
 	// it says to make the folder.
 	missing string
@@ -72,16 +77,33 @@ type fakeBackend struct {
 	saves     int
 	secrets   map[string]api.Secret // a host's own secrets, for every start
 	secretErr error
-	trust     map[string]map[string]bool // answers about setup scripts, by host and repository
-	local     *fakeLocal                 // the guided setup's computer (guide_fake_test.go)
+	trust     map[string]client.SetupAnswers // answers about setup scripts, by host
+	trustWarn *client.UserError              // the answers' file did not parse
+	// rememberWarn is the warning of the next answer: the file did not
+	// parse when the answer was kept.
+	rememberWarn *client.UserError
+	local        *fakeLocal // the guided setup's computer (guide_fake_test.go)
 	// attachHook runs during each attach, with the lock held: what the
 	// user does in the session.
-	attachHook func(client.AttachOptions)
+	attachHook       func(client.AttachOptions)
+	dialHook         func(context.Context, client.Host)
+	doctorHook       func(context.Context, string)
+	rememberLastHook func(host, id, name string)
+	// deleted, when set, is what a delete says, for any session.
+	deleted *client.DeleteResult
 	// debugFile is the launcher's own debug file while its debug is on
 	// (debug_test.go).
 	debugFile string
 	// bundleGate, when set, holds a bundle until it closes.
 	bundleGate chan struct{}
+	// loadGate, when set, holds LoadHosts until it closes, and loading
+	// closes when LoadHosts waits there. loadCtx is the context that the
+	// last LoadHosts got. saveGate, saving and saveCtx do the same for
+	// SaveHosts.
+	loadGate, loading chan struct{}
+	loadCtx           context.Context
+	saveGate, saving  chan struct{}
+	saveCtx           context.Context
 }
 
 func newFakeBackend() *fakeBackend {
@@ -100,13 +122,34 @@ func (b *fakeBackend) callList() []string {
 	return append([]string(nil), b.calls...)
 }
 
-func (b *fakeBackend) LoadHosts() ([]client.Host, error) {
+func (b *fakeBackend) LoadHosts(ctx context.Context) ([]client.Host, error) {
+	b.mu.Lock()
+	b.loadCtx = ctx
+	b.mu.Unlock()
+	if b.loadGate != nil {
+		close(b.loading)
+		<-b.loadGate
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return append([]client.Host(nil), b.hosts...), nil
 }
 
-func (b *fakeBackend) SaveHosts(h []client.Host) error {
+// SaveHosts saves as the real one does: nothing once ctx has ended.
+func (b *fakeBackend) SaveHosts(ctx context.Context, h []client.Host) error {
+	b.mu.Lock()
+	b.saveCtx = ctx
+	b.mu.Unlock()
+	if b.saveGate != nil {
+		close(b.saving)
+		<-b.saveGate
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.hosts = append([]client.Host(nil), h...)
@@ -123,7 +166,13 @@ func (b *fakeBackend) Settings() client.Settings {
 
 func (b *fakeBackend) HelperVersion() string { return "0.1.0-test" }
 
-func (b *fakeBackend) Dial(_ context.Context, h client.Host) (Conn, error) {
+func (b *fakeBackend) Dial(ctx context.Context, h client.Host) (Conn, error) {
+	b.mu.Lock()
+	hook := b.dialHook
+	b.mu.Unlock()
+	if hook != nil {
+		hook(ctx, h)
+	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.dials[h.Name]++
@@ -184,11 +233,23 @@ func (b *fakeBackend) Memory() memory {
 	return b.mem
 }
 
+// Remember writes the sessions, as the real one does: never the last
+// session.
 func (b *fakeBackend) Remember(mem memory) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	b.mem = mem
+	b.mem.Sessions = mem.Sessions
 	b.saves++
+}
+
+func (b *fakeBackend) RememberLast(host, id, name string) {
+	b.mu.Lock()
+	b.mem.Last = &lastSession{Host: host, ID: id, Name: name}
+	hook := b.rememberLastHook
+	b.mu.Unlock()
+	if hook != nil {
+		hook(host, id, name)
+	}
 }
 
 func (b *fakeBackend) Attach(_ context.Context, o client.AttachOptions) (client.AttachResult, error) {
@@ -257,6 +318,9 @@ func (c *fakeConn) NewSession(_ context.Context, a client.NewArgs) (*client.Sess
 	if a.Setup != "" {
 		c.be.record("new %s setup=%s", c.name, a.Setup)
 	}
+	if len(a.SetupHashes) > 0 {
+		c.be.record("new %s setup_hashes=%v", c.name, a.SetupHashes)
+	}
 	if a.MakeFolder {
 		c.be.record("new %s mkdir %s", c.name, a.Cwd)
 	}
@@ -270,9 +334,16 @@ func (c *fakeConn) NewSession(_ context.Context, a client.NewArgs) (*client.Sess
 		data, _ := json.Marshal(client.FolderQuestion{Folder: "/home/dev/" + strings.TrimPrefix(h.missing, "~/")})
 		return nil, &client.UserError{Msg: "the folder does not exist", Code: api.CodeNoFolder, Data: data}
 	}
-	if _, known := a.SetupTrust[h.setupRepo]; h.setupRepo != "" && a.Setup == "" && !known {
-		data, _ := json.Marshal(client.SetupQuestion{Repo: h.setupRepo, Script: h.setupRepo + "/.setup"})
+	// The order of the host: the override, a refusal, the trusted hash.
+	run, known := a.SetupTrust[h.setupRepo]
+	refused := known && !run
+	if h.setupRepo != "" && a.Setup == "" && !refused && (h.setupHash == "" || a.SetupHashes[h.setupRepo] != h.setupHash) {
+		data, _ := json.Marshal(client.SetupQuestion{Repo: h.setupRepo, Script: h.setupRepo + "/.setup", Hash: h.setupHash})
 		return nil, &client.UserError{Msg: "the repository has a setup script", Code: api.CodeSetupTrust, Data: data}
+	}
+	if h.setupErr != "" && a.Setup != api.SetupSkip {
+		return nil, &client.UserError{Msg: "the setup script of /home/dev/src/app, .x/setup, points outside the repository, so it cannot run",
+			Hint: "Make .x/setup a file in the repository, or start with --no-setup.", Code: h.setupErr}
 	}
 	name := a.Name
 	if name == "" {
@@ -317,6 +388,9 @@ func (c *fakeConn) Delete(_ context.Context, id string) (client.DeleteResult, er
 			if s.Name == "api-tests" {
 				res.Worktree = "kept the worktree ~/src/api-tests: it has uncommitted changes"
 			}
+			if c.be.deleted != nil {
+				res = *c.be.deleted
+			}
 			return res, nil
 		}
 	}
@@ -335,7 +409,16 @@ func (c *fakeConn) RenameSession(_ context.Context, id, name string) error {
 	return nil
 }
 
-func (c *fakeConn) Doctor(context.Context) (client.HostInfo, error) {
+func (c *fakeConn) Doctor(ctx context.Context) (client.HostInfo, error) {
+	c.be.mu.Lock()
+	hook := c.be.doctorHook
+	c.be.mu.Unlock()
+	if hook != nil {
+		hook(ctx, c.name)
+	}
+	if err := ctx.Err(); err != nil {
+		return client.HostInfo{}, err
+	}
 	c.be.mu.Lock()
 	defer c.be.mu.Unlock()
 	return c.host().info, nil

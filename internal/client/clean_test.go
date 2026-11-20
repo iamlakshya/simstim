@@ -221,11 +221,11 @@ func TestAttachEndIsClean(t *testing.T) {
 	a := &attacher{o: AttachOptions{Out: f}, tracker: term.NewTracker()}
 	// The agent's own bytes, hostile ones too, pass unchanged.
 	out := []byte("ok \x1b]52;c;aGk=\x07 \xe2\x80\xae \xc2\x9b2J \x1bc done\r\n")
-	if _, err := a.frame(proto.Frame{Type: proto.TOutput, Payload: proto.EncodeOutput(0, out)}); err != nil {
+	if _, err := a.frame(t.Context(), proto.Frame{Type: proto.TOutput, Payload: proto.EncodeOutput(0, out)}); err != nil {
 		t.Fatal(err)
 	}
 	ended, _ := json.Marshal(proto.Ended{ExitCode: 137, Signal: "killed\x1b]52;c;aGk=\x07\u202e"})
-	done, err := a.frame(proto.Frame{Type: proto.TEnded, Payload: ended})
+	done, err := a.frame(t.Context(), proto.Frame{Type: proto.TEnded, Payload: ended})
 	if !done || err != nil {
 		t.Fatalf("the end frame = %v, %v", done, err)
 	}
@@ -297,7 +297,7 @@ func TestCleanWriter(t *testing.T) {
 // ASCII, with a step to try. Go's %q would keep U+034F, which hides.
 func TestParseRepoInfoEscapesHostText(t *testing.T) {
 	for _, out := range []string{"/r\nfeature\u034f\nnot-a-number\u034f\n", "x\u034f\x1b]52;c;aGk=\x07"} {
-		_, err := parseRepoInfo(out)
+		_, err := parseRepoInfo(Host{Name: "box"}, "/r", []byte(out))
 		var ue *UserError
 		if !errors.As(err, &ue) || ue.Hint == "" {
 			t.Fatalf("parseRepoInfo(%q) = %v, want a user error with a step", out, err)
@@ -305,6 +305,26 @@ func TestParseRepoInfoEscapesHostText(t *testing.T) {
 		for _, r := range ue.Msg {
 			if r < 0x20 || r > 0x7e {
 				t.Errorf("parseRepoInfo(%q) = %q, which holds %U", out, ue.Msg, r)
+			}
+		}
+	}
+}
+
+// TestParseRepoInfoCleansHostErrors checks that each error of the host's
+// answer that pull prints, its message and its hint, and the session's
+// folder, pass the cleaner: a repository's filter writes what git says.
+func TestParseRepoInfoCleansHostErrors(t *testing.T) {
+	const osc52 = "\x1b]52;c;aGk=\x07"
+	for _, code := range []string{"git", "worktree", api.CodeGitScope, api.CodeGitTimeout, "not_a_repo", "no_git"} {
+		e, _ := json.Marshal(map[string]any{"error": map[string]string{"code": code, "message": "fatal: " + osc52 + "x", "hint": "try " + osc52}})
+		_, err := parseRepoInfo(Host{Name: "box"}, "/r"+osc52, e)
+		var ue *UserError
+		if !errors.As(err, &ue) {
+			t.Fatalf("%s: %v", code, err)
+		}
+		for _, s := range []string{ue.Msg, ue.Hint} {
+			if strings.ContainsAny(s, "\x1b\x07") {
+				t.Errorf("%s: %q holds a control character", code, s)
 			}
 		}
 	}
@@ -321,10 +341,10 @@ func TestReconnectTitleIsClean(t *testing.T) {
 	defer f.Close()
 	a := &attacher{o: AttachOptions{Out: f}, tracker: term.NewTracker(), key: "box/x\x07\x1b]52;c;aGk=\x07\u202e"}
 	out := []byte("agent \x1b]2;its own title\x07 \x1b]52;c;aGk=\x07 \xc2\x9b2J\r\n")
-	if _, err := a.frame(proto.Frame{Type: proto.TOutput, Payload: proto.EncodeOutput(0, out)}); err != nil {
+	if _, err := a.frame(t.Context(), proto.Frame{Type: proto.TOutput, Payload: proto.EncodeOutput(0, out)}); err != nil {
 		t.Fatal(err)
 	}
-	a.write(a.reconnectTitle())
+	a.write(t.Context(), a.reconnectTitle())
 	got, err := os.ReadFile(f.Name())
 	if err != nil {
 		t.Fatal(err)

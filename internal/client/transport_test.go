@@ -13,6 +13,7 @@ import (
 
 	"github.com/iamlakshya/simstim/internal/client"
 	"github.com/iamlakshya/simstim/internal/client/clienttest"
+	"github.com/iamlakshya/simstim/internal/testhome"
 )
 
 // fakeSSH puts an ssh on PATH that runs the remote command locally, or
@@ -33,7 +34,12 @@ exec sh -c "$last"
 	}
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	// A short cache, in the tests' own root: a socket's path in it fits.
+	cache, err := os.MkdirTemp(testhome.Root(), "c")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("XDG_CACHE_HOME", cache)
 }
 
 func TestSSHTransportRoundTrip(t *testing.T) {
@@ -55,7 +61,7 @@ func TestSSHTransportUnreachable(t *testing.T) {
 	if p.Stderr() == "" {
 		t.Fatal("stderr was not kept")
 	}
-	if got := s.ReachHint(); got != "ssh unreachable   (check that this works first)" {
+	if got := s.ReachHint(); got != "ssh unreachable (check that this works first)" {
 		t.Fatalf("hint = %q", got)
 	}
 }

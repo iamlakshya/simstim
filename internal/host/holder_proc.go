@@ -194,7 +194,9 @@ func (h *Holder) startVT() {
 		return
 	}
 	if tp != "" {
-		vt.SetProfile(VTProfile{XTVersion: strings.TrimSpace(tp + " " + tpv)})
+		if err := vt.SetProfile(VTProfile{XTVersion: strings.TrimSpace(tp + " " + tpv)}); err != nil {
+			h.log.Warn("shadow terminal profile was refused", "err", err)
+		}
 	}
 	vt.AnswerQueries(true) // no client yet
 	h.mu.Lock()

@@ -280,12 +280,13 @@ func checkSessionID(host, id string) error {
 		return nil
 	}
 	return &UserError{Msg: fmt.Sprintf("%s answered with a session ID that is not one: %+q", host, CleanLine(id)),
-		Hint: brand.Name + " host add " + host + "   (reinstalls the helper)"}
+		Hint: brand.Name + " host add " + host + " (reinstalls the helper)", Code: "protocol"}
 }
 
 // hostError is the error that a host sent in its answer, cleaned to draw.
 // Its code and its data stay as the host sent them, for the client to act
-// on. A question in its data is cleaned where it is drawn (ShowPath).
+// on, and its kind comes from its code (HostKind). A question in its data
+// is cleaned where it is drawn (ShowPath).
 func hostError(e *proto.Error) *UserError {
-	return &UserError{Msg: CleanLine(e.Message), Hint: CleanLine(e.Hint), Code: e.Code, Data: e.Data}
+	return &UserError{Msg: CleanLine(e.Message), Hint: CleanLine(e.Hint), Code: e.Code, Kind: HostKind(e.Code), Data: e.Data}
 }

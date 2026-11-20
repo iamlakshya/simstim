@@ -67,7 +67,7 @@ func (realBackend) StopDebug() error {
 	var warn bytes.Buffer
 	client.StopDebug(&warn)
 	if msg, hint, ok := strings.Cut(strings.TrimSpace(warn.String()), "\nTry: "); ok {
-		return &client.UserError{Msg: strings.TrimPrefix(msg, "Warning: "), Hint: hint}
+		return &client.UserError{Msg: strings.TrimPrefix(msg, "Warning: "), Hint: hint, Code: "debug_warning"}
 	}
 	return nil
 }
@@ -152,7 +152,7 @@ func debugConnOf(h *hostConn) (debugConn, error) {
 	dc, ok := unclean(h.conn).(debugConn)
 	if !ok {
 		return nil, &client.UserError{Msg: "the connection to " + h.name() + " has no debug mode",
-			Hint: brand.Name + " host add " + h.name() + "   (updates the helper)"}
+			Hint: brand.Name + " host add " + h.name() + " (updates the helper)", Code: "helper_old"}
 	}
 	return dc, nil
 }
@@ -166,17 +166,17 @@ func (m *Model) debugStart() tea.Cmd {
 	if err != nil {
 		return m.toastErr(err)
 	}
-	name, ctx := h.name(), m.ctx
+	name := h.name()
 	if s == nil {
-		return func() tea.Msg {
+		return m.bgCmd(func(ctx context.Context) tea.Msg {
 			cctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 			defer cancel()
 			_, err := dc.StartConnDebug(cctx, diag.AllCats)
 			return debugDoneMsg{ok: "Debug is on for the launcher and its connection to " + name + ".", err: err, started: &sessKey{host: name}}
-		}
+		})
 	}
 	key, sname := sessKey{name, s.ID}, s.Name
-	return func() tea.Msg {
+	return m.bgCmd(func(ctx context.Context) tea.Msg {
 		cctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 		defer cancel()
 		st, err := dc.DebugStart(cctx, key.id, diag.HostCats, api.DebugFor)
@@ -185,7 +185,7 @@ func (m *Model) debugStart() tea.Cmd {
 			until = " until " + st.Until.Local().Format("15:04")
 		}
 		return debugDoneMsg{ok: fmt.Sprintf("Debug is on for the launcher, and for %s on %s%s.", sname, name, until), err: err, started: &key}
-	}
+	})
 }
 
 // onDebugStarted turns on the launcher's own debug, once the host's side
@@ -258,12 +258,11 @@ func (m *Model) debugOp(host string, fn func(context.Context, debugConn) error) 
 	if err != nil {
 		return m.toastErr(err)
 	}
-	ctx := m.ctx
-	return func() tea.Msg {
+	return m.bgCmd(func(ctx context.Context) tea.Msg {
 		cctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 		defer cancel()
 		return debugDoneMsg{err: fn(cctx, dc)}
-	}
+	})
 }
 
 // debugSave saves the flight recorder's window of the launcher, while its
@@ -273,23 +272,23 @@ func (m *Model) debugSave() tea.Cmd {
 	h, s := m.debugTarget()
 	var cmds []tea.Cmd
 	if be.DebugFile() != "" {
-		cmds = append(cmds, func() tea.Msg {
+		cmds = append(cmds, m.bgCmd(func(context.Context) tea.Msg {
 			p, err := be.SaveFlight()
 			return debugDoneMsg{ok: "Saved the launcher's flight recorder:", path: p, err: err}
-		})
+		}))
 	}
 	if s != nil {
 		dc, err := debugConnOf(h)
 		if err != nil {
 			return tea.Batch(append(cmds, m.toastErr(err))...)
 		}
-		name, id, sname, ctx := h.name(), s.ID, s.Name, m.ctx
-		cmds = append(cmds, func() tea.Msg {
+		name, id, sname := h.name(), s.ID, s.Name
+		cmds = append(cmds, m.bgCmd(func(ctx context.Context) tea.Msg {
 			cctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 			defer cancel()
 			f, err := dc.DebugSave(cctx, id)
 			return debugDoneMsg{ok: fmt.Sprintf("Saved the flight recorder of %s on %s:", sname, name), path: client.CleanPath(f.Path), err: err}
-		})
+		}))
 	}
 	if len(cmds) == 0 {
 		return m.toastNext(toastInfo, "Nothing to save: no debug and no session.", "Run debug: start first.")

@@ -186,11 +186,13 @@ type vtChunkAt struct {
 
 // vtChild is one run of the shadow terminal process.
 type vtChild struct {
-	cmd     *exec.Cmd
-	stdin   io.WriteCloser
-	started time.Time
-	wake    chan struct{}
-	gone    chan struct{} // closed when the process has exited
+	cmd        *exec.Cmd
+	stdin      io.WriteCloser
+	started    time.Time
+	wake       chan struct{}
+	gone       chan struct{} // closed when the process has exited
+	writerDone chan struct{}
+	readerDone chan struct{}
 
 	// Guarded by VT.mu.
 	queue   [][]byte // frames waiting for the writer
@@ -261,7 +263,11 @@ func (v *VT) Feed(off int64, p []byte) {
 	}
 	for len(p) > 0 {
 		n := min(len(p), vtChunk)
-		c.push(vtFrame(vtFrameData, p[:n]))
+		if err := c.pushFrame(vtFrame(vtFrameData, p[:n])); err != nil {
+			c.dropped = true
+			v.log.Warn("shadow terminal rejected output", "err", err)
+			return
+		}
 		p = p[n:]
 	}
 }
@@ -277,7 +283,9 @@ func (v *VT) Resize(cols, rows, xpx, ypx int) {
 	defer v.mu.Unlock()
 	v.cols, v.rows, v.xpx, v.ypx = cols, rows, xpx, ypx
 	if v.child != nil {
-		v.child.push(v.resizeFrame())
+		if err := v.child.pushFrame(v.resizeFrame()); err != nil {
+			v.log.Warn("shadow terminal rejected resize", "err", err)
+		}
 	}
 }
 
@@ -320,22 +328,29 @@ func (v *VT) AnswerQueries(on bool) {
 	defer v.mu.Unlock()
 	v.answering = on
 	if v.child != nil {
-		v.child.push(v.queriesFrame())
+		if err := v.child.pushFrame(v.queriesFrame()); err != nil {
+			v.log.Warn("shadow terminal rejected query control", "err", err)
+		}
 	}
 }
 
 // SetProfile sets what the shadow terminal reports while it answers queries.
-func (v *VT) SetProfile(p VTProfile) {
+func (v *VT) SetProfile(p VTProfile) error {
 	b, err := json.Marshal(p)
 	if err != nil {
-		return
+		return fmt.Errorf("encode the shadow terminal profile: %w", err)
+	}
+	frame, err := vtFrame(vtFrameProfile, b)
+	if err != nil {
+		return err
 	}
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	v.profile = b
 	if v.child != nil {
-		v.child.push(vtFrame(vtFrameProfile, b))
+		v.child.push(frame)
 	}
+	return nil
 }
 
 // Close stops the shadow terminal for good.
@@ -386,6 +401,10 @@ func (v *VT) sync() error {
 // It also returns the stream offset the child has been fed up to when it
 // gets the request.
 func (v *VT) request(kind byte, payload []byte, timeout time.Duration) ([]byte, int64, error) {
+	frame, err := vtFrame(kind, payload)
+	if err != nil {
+		return nil, 0, err
+	}
 	ch := make(chan vtReply, 1)
 	v.mu.Lock()
 	c := v.child
@@ -395,7 +414,7 @@ func (v *VT) request(kind byte, payload []byte, timeout time.Duration) ([]byte, 
 	}
 	fed := v.fed
 	c.waiters[kind] = append(c.waiters[kind], ch)
-	c.push(vtFrame(kind, payload))
+	c.push(frame)
 	v.mu.Unlock()
 
 	t := time.NewTimer(timeout)

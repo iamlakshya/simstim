@@ -93,7 +93,9 @@ func (e *inputError) withTail(tail string) error {
 	if tail == "" {
 		return e
 	}
-	return &inputError{UserError: &client.UserError{Msg: e.Msg + ": " + tail, Hint: e.Hint}, err: e.err}
+	userErr := *e.UserError
+	userErr.Msg += ": " + tail
+	return &inputError{UserError: &userErr, err: e.err}
 }
 
 func firstErr(errs ...error) error {
@@ -137,6 +139,7 @@ func (p *proc) send(ctx context.Context, stdin io.Reader) {
 				UserError: &client.UserError{
 					Msg:  fmt.Sprintf("cannot read the input of a command for the sandbox %s: %v", p.e.SandboxID, src.err),
 					Hint: "run the command again",
+					Code: "input_read",
 				},
 				err: src.err,
 			})
@@ -168,6 +171,7 @@ func (p *proc) send(ctx context.Context, stdin io.Reader) {
 		UserError: &client.UserError{
 			Msg:  fmt.Sprintf("cannot send the input of a command to the sandbox %s: %v", p.e.SandboxID, err),
 			Hint: p.e.ReachHint(),
+			Code: "input_send",
 		},
 		err: err,
 	})

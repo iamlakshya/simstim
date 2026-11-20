@@ -38,7 +38,7 @@ func findProvider(name string) (provider.Provider, error) {
 		}
 		names = append(names, p.Name())
 	}
-	return nil, &client.UserError{Msg: fmt.Sprintf("no provider called %q", name), Hint: "Use one of: " + strings.Join(names, ", ")}
+	return nil, &client.UserError{Msg: fmt.Sprintf("no provider called %q", name), Hint: "Use one of: " + strings.Join(names, ", ") + ".", Code: "provider_not_found", Kind: client.KindNotFound}
 }
 
 // powersOffWhenIdle reports whether a provider's machines stop themselves
@@ -66,7 +66,7 @@ func hostCreateCmd() *cobra.Command {
 			if len(args) == 2 {
 				req.Name = args[1]
 			}
-			req.Out = os.Stdout
+			req.Out = os.Stderr
 			return createHost(cmd.Context(), p, req)
 		},
 	}
@@ -85,30 +85,33 @@ func createHost(ctx context.Context, p provider.Provider, req provider.Request) 
 	if err := onboard.CheckCreate(p, req); err != nil {
 		return err
 	}
-	fmt.Printf("Creating %s with %s…\n", req.Name, p.Name())
+	fmt.Fprintf(os.Stderr, "Creating %s with %s…\n", req.Name, p.Name())
 	start := time.Now()
 	h, err := onboard.Create(ctx, p, req)
 	if err != nil {
 		return err
 	}
-	fmt.Printf("  ✓ created %s %s in %s\n\n", h.Machine.Provider, h.Machine.ID, time.Since(start).Round(time.Second))
-	if err := addHost(ctx, h, true); err != nil {
+	fmt.Fprintf(os.Stderr, "  ✓ created %s %s in %s\n\n", h.Machine.Provider, h.Machine.ID, time.Since(start).Round(time.Second))
+	// Making the host counts as the yes to its helper, so nothing is asked.
+	if err := addHost(ctx, &prompter{ctx: ctx, out: os.Stderr}, h, true); err != nil {
 		return &client.UserError{
 			Msg:  fmt.Sprintf("%s was created, but setting it up failed: %v", h.Name, err),
-			Hint: brand.Name + " host doctor " + h.Name + "   (or " + brand.Name + " host destroy " + h.Name + ")",
+			Hint: brand.Name + " host doctor " + h.Name + ", or " + brand.Name + " host destroy " + h.Name,
+			Code: "setup_failed",
 		}
 	}
 	if powersOffWhenIdle(h.Machine.Provider) {
 		if err := applyIdle(ctx, h); err != nil {
-			fmt.Printf("  ✕ idle stop: %v\n", err)
+			fmt.Fprintf(os.Stderr, "  ✕ idle stop: %v\n", err)
 		}
 	}
-	fmt.Printf("Created %s in %s.\n", h.Name, time.Since(start).Round(time.Second))
+	fmt.Fprintf(os.Stderr, "Created %s in %s.\n", h.Name, time.Since(start).Round(time.Second))
 	return nil
 }
 
-// saveHost adds h to hosts.toml, or replaces the host of the same name.
-func saveHost(h client.Host) error { return client.SaveHost(h) }
+// saveHost adds h to hosts.toml, or replaces the host of the same name,
+// unless ctx has ended.
+func saveHost(ctx context.Context, h client.Host) error { return client.SaveHost(ctx, h) }
 
 // applyIdle installs (or removes) the helper's idle timer on a VM.
 func applyIdle(ctx context.Context, h client.Host) error {
@@ -116,7 +119,7 @@ func applyIdle(ctx context.Context, h client.Host) error {
 	if err != nil {
 		return err
 	}
-	fmt.Printf("  ✓ idle stop: %s\n", client.CleanLine(out)) // the host's own words
+	fmt.Fprintf(os.Stderr, "  ✓ idle stop: %s\n", client.CleanLine(out)) // the host's own words
 	return nil
 }
 
@@ -127,9 +130,10 @@ func hostDestroyCmd() *cobra.Command {
 		Short: "Delete a host made by `host create`: its VM, container or sandbox, and every session on it",
 		Long: "Delete the machine behind a host, then forget the host. It asks first, and refuses while a\n" +
 			"session is working unless you pass --force.",
-		Args: cobra.ExactArgs(1),
+		Example: "  " + brand.Name + " host destroy lima",
+		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return destroyHost(cmd.Context(), args[0], force, yes)
+			return destroyHost(cmd.Context(), prompts(cmd), args[0], force, yes)
 		},
 	}
 	cmd.Flags().BoolVar(&force, "force", false, "destroy it even while a session is working")
@@ -137,13 +141,15 @@ func hostDestroyCmd() *cobra.Command {
 	return cmd
 }
 
-func destroyHost(ctx context.Context, name string, force, yes bool) error {
+// destroyHost deletes the machine behind the host name, after a yes to p,
+// and forgets the host.
+func destroyHost(ctx context.Context, p *prompter, name string, force, yes bool) error {
 	h, err := client.FindHost(name)
 	if err != nil {
 		return err
 	}
 	if h.Machine == nil {
-		return &client.UserError{Msg: name + " was not made by `host create`, so there is nothing to destroy", Hint: brand.Name + " host rm " + name + "   (forgets it)"}
+		return &client.UserError{Msg: name + " was not made by `host create`, so there is nothing to destroy", Hint: brand.Name + " host rm " + name + " (forgets it)", Code: "not_created"}
 	}
 	lc, err := client.OpenMachine(h)
 	if err != nil {
@@ -153,13 +159,24 @@ func destroyHost(ctx context.Context, name string, force, yes bool) error {
 		if working := workingSessions(ctx, h, lc); len(working) > 0 {
 			return &client.UserError{
 				Msg:  fmt.Sprintf("%d session(s) on %s are working: %s", len(working), name, strings.Join(working, ", ")),
-				Hint: brand.Name + " host destroy " + name + " --force   (stops them too)",
+				Hint: brand.Name + " host destroy " + name + " --force (stops them too)",
+				Code: "sessions_working",
 			}
 		}
 	}
 	what := fmt.Sprintf("the %s machine %s", h.Machine.Provider, h.Machine.ID)
-	if !yes && !confirm(fmt.Sprintf("Delete %s, with its disk and every session on it?", what)) {
-		return &client.UserError{Msg: "cancelled; nothing was deleted", Hint: brand.Name + " host destroy " + name}
+	if !yes {
+		ok, err := p.confirm(qDestroy, fmt.Sprintf("Delete %s, with its disk and every session on it?", what), "a yes to delete "+what)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return p.cancel()
+		}
+		if stopped(ctx) {
+			// A signal that came with the yes: delete nothing.
+			return errInterrupted
+		}
 	}
 	dctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
@@ -167,10 +184,10 @@ func destroyHost(ctx context.Context, name string, force, yes bool) error {
 		return err
 	}
 	(&client.SSH{Host: h}).ExitMaster(ctx)
-	if err := client.ForgetHost(name); err != nil {
+	if err := client.ForgetHost(ctx, name); err != nil {
 		return err
 	}
-	fmt.Printf("Deleted %s and forgot %s.\n", what, name)
+	fmt.Fprintf(p.out, "Deleted %s and forgot %s.\n", what, name)
 	return nil
 }
 
@@ -205,31 +222,33 @@ func hostIdleCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "idle <name> <duration|never>",
 		Short: "Set how long a created host may idle before it stops, for example 30m, or never",
-		Args:  cobra.ExactArgs(2),
+		Example: "  " + brand.Name + " host idle lima 30m" + "\n" +
+			"  " + brand.Name + " host idle lima never",
+		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			h, err := client.FindHost(args[0])
 			if err != nil {
 				return err
 			}
 			if h.Machine == nil {
-				return &client.UserError{Msg: h.Name + " was not made by `host create`", Hint: "Idle stop needs a host made by " + brand.Name + " host create."}
+				return &client.UserError{Msg: h.Name + " was not made by `host create`", Hint: "Use a host made by " + brand.Name + " host create.", Code: "not_created"}
 			}
 			if args[1] != "never" {
 				if d, err := time.ParseDuration(args[1]); err != nil || d < time.Minute {
-					return &client.UserError{Msg: fmt.Sprintf("%q is not an idle time", args[1]), Hint: "Use a duration of a minute or more, such as 30m or 2h, or never."}
+					return &client.UserError{Msg: fmt.Sprintf("%q is not an idle time", args[1]), Hint: "Use a duration of a minute or more, such as 30m or 2h, or never.", Code: "bad_value", Kind: client.KindUsage}
 				}
 			}
 			h.Machine.IdleStop = args[1]
-			if err := saveHost(h); err != nil {
+			if err := saveHost(cmd.Context(), h); err != nil {
 				return err
 			}
 			switch {
 			case powersOffWhenIdle(h.Machine.Provider):
 				return applyIdle(cmd.Context(), h)
 			case h.Machine.Provider == "e2b":
-				fmt.Printf("%s pauses %s after the last client goes, while no session works.\n", h.Name, args[1])
+				say(cmd, "%s pauses %s after the last client goes, while no session works.\n", h.Name, args[1])
 			default:
-				fmt.Printf("Saved, but %s hosts do not stop by themselves.\n", h.Machine.Provider)
+				say(cmd, "Saved, but %s hosts do not stop by themselves.\n", h.Machine.Provider)
 			}
 			return nil
 		},
@@ -248,13 +267,13 @@ func machineAction(ctx context.Context, h client.Host, action string) error {
 		if _, err := client.HostTransport(ctx, h, true); err != nil {
 			return err
 		}
-		fmt.Printf("%s is running.\n", h.Name)
+		fmt.Fprintf(os.Stderr, "%s is running.\n", h.Name)
 	case "stop":
 		if err := lc.Stop(ctx); err != nil {
 			return err
 		}
 		(&client.SSH{Host: h}).ExitMaster(ctx)
-		fmt.Printf("%s is stopped. Attaching to one of its sessions starts it again.\n", h.Name)
+		fmt.Fprintf(os.Stderr, "%s is stopped. Attaching to one of its sessions starts it again.\n", h.Name)
 	default:
 		st, err := lc.Status(ctx)
 		if err != nil {

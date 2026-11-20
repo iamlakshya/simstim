@@ -19,7 +19,7 @@ var sampleFixes = []api.Fix{
 func TestOfferFixesAsksForEach(t *testing.T) {
 	var out bytes.Buffer
 	var asked []string
-	err := offerFixes(strings.NewReader("y\nn\n"), &out, sampleFixes, false, func(ids []string) ([]api.Fix, error) {
+	err := offerFixes(testPrompts("y\nn\n", &out), qFix, sampleFixes, false, func(ids []string) ([]api.Fix, error) {
 		asked = ids
 		res := append([]api.Fix(nil), sampleFixes...)
 		res[0].Done = true
@@ -49,7 +49,7 @@ func TestOfferFixesAsksForEach(t *testing.T) {
 
 func TestOfferFixesYesAndFailures(t *testing.T) {
 	var out bytes.Buffer
-	err := offerFixes(strings.NewReader(""), &out, sampleFixes, true, func(ids []string) ([]api.Fix, error) {
+	err := offerFixes(testPrompts("", &out), qFix, sampleFixes, true, func(ids []string) ([]api.Fix, error) {
 		if strings.Join(ids, ",") != "linger,sockets" {
 			t.Fatalf("applied %v", ids)
 		}
@@ -67,14 +67,14 @@ func TestOfferFixesYesAndFailures(t *testing.T) {
 	}
 
 	out.Reset()
-	if err := offerFixes(strings.NewReader("\n\n"), &out, sampleFixes, false, func([]string) ([]api.Fix, error) {
+	if err := offerFixes(testPrompts("\n\n", &out), qFix, sampleFixes, false, func([]string) ([]api.Fix, error) {
 		t.Fatal("applied with no yes")
 		return nil, nil
 	}); err != nil || !strings.Contains(out.String(), "Nothing was changed.") {
 		t.Fatalf("no answers: %v\n%s", err, out.String())
 	}
 	out.Reset()
-	if err := offerFixes(nil, &out, nil, false, nil); err != nil || !strings.Contains(out.String(), "Nothing to fix.") {
+	if err := offerFixes(testPrompts("", &out), qFix, nil, false, nil); err != nil || !strings.Contains(out.String(), "Nothing to fix.") {
 		t.Fatalf("nothing to fix: %v %q", err, out.String())
 	}
 }

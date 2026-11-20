@@ -114,7 +114,7 @@ Agent authentication stays with the agent on the host. simstim does not provide 
 
 | Task | Start here |
 | --- | --- |
-| List sessions or attach from a script | `simstim ls --json`, `simstim attach my-vps/first` |
+| List sessions or attach from a script | [Scripts](docs/how-to/scripting.md), `simstim ls --json`, `simstim attach my-vps/first` |
 | Work on a separate branch | [Worktrees](docs/how-to/worktrees.md) |
 | Bring the remote branch home | [Pull a session's branch](docs/how-to/pull.md) |
 | See or forward a development port | [Ports](docs/how-to/ports.md) |

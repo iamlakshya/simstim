@@ -90,7 +90,8 @@ func Install(ctx context.Context, s Transport, p Platform) error {
 	if !ok {
 		return &UserError{
 			Msg:  fmt.Sprintf("this build has no %s helper for %s/%s", brand.Name, p.OS, p.Arch),
-			Hint: "Linux hosts on amd64 and arm64 are supported. Build with `just build` to embed the helpers.",
+			Hint: "Use a Linux host on amd64 or arm64, or run `just build` to embed the helpers.",
+			Code: "no_helper",
 		}
 	}
 	files := []struct {

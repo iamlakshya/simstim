@@ -47,7 +47,8 @@ type pendingRequest struct {
 	start int64
 }
 
-// liveBridges are the bridges that serve now, for stopBridgesDebug.
+// liveBridges are the bridges that serve now, for stopBridgesDebug and
+// reclaimBridgesUploads.
 var liveBridges sync.Map
 
 // stopBridgesDebug ends the debug of every bridge in this process, before

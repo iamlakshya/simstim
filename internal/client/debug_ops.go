@@ -25,7 +25,8 @@ func (c *Conn) needDebug() error {
 	}
 	return &UserError{
 		Msg:  fmt.Sprintf("the host helper on %s is too old for the debug mode", c.Host.Name),
-		Hint: brand.Name + " host add " + c.Host.Name + "   (updates the helper)",
+		Hint: brand.Name + " host add " + c.Host.Name + " (updates the helper)",
+		Code: "helper_old",
 	}
 }
 
@@ -41,7 +42,8 @@ func (c *Conn) callDebug(ctx context.Context, op string, args, out any) error {
 	if errors.As(err, &ue) && ue.Code == "unknown_op" {
 		return &UserError{
 			Msg:  "this session started before the helper on " + c.Host.Name + " was updated, so it has no debug mode yet",
-			Hint: "Debug works once the session starts again, for example after the host restarts.",
+			Hint: "Start debug again after the session starts again, such as after the host restarts.",
+			Code: "session_old",
 		}
 	}
 	return err

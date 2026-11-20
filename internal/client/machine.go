@@ -97,19 +97,21 @@ func RegisterProvider(name string, open func(Host) (Lifecycle, error)) {
 // OpenMachine returns the lifecycle of the machine behind h.
 func OpenMachine(h Host) (Lifecycle, error) {
 	if h.Machine == nil {
-		return nil, &UserError{Msg: h.Name + " was not made by `host create`", Hint: brand.Name + " host rm " + h.Name + "   (forgets a host you added)"}
+		return nil, &UserError{Msg: h.Name + " was not made by `host create`", Hint: brand.Name + " host rm " + h.Name + " (forgets a host you added)", Code: "not_created"}
 	}
 	providersMu.RLock()
 	open := providers[h.Machine.Provider]
 	providersMu.RUnlock()
 	if open == nil {
-		return nil, &UserError{Msg: fmt.Sprintf("%s was made by the %q provider, which this build does not know", h.Name, h.Machine.Provider), Hint: brand.Name + " update"}
+		return nil, &UserError{Msg: fmt.Sprintf("%s was made by the %q provider, which this build does not know", h.Name, h.Machine.Provider), Hint: "Install a release of " + brand.Name + " that knows the provider.", Code: "unknown_provider"}
 	}
 	return open(h)
 }
 
 // ForgetHost removes a host from hosts.toml, and its generated SSH config.
-func ForgetHost(name string) error {
+// It runs once the host's machine is gone, so it goes on after a cancel of
+// ctx: a host saved with no machine would be left.
+func ForgetHost(ctx context.Context, name string) error {
 	hosts, err := LoadHosts()
 	if err != nil {
 		return err
@@ -124,9 +126,9 @@ func ForgetHost(name string) error {
 		out = append(out, h)
 	}
 	if !found {
-		return &UserError{Msg: fmt.Sprintf("no host named %q", name), Hint: brand.Name + " host ls"}
+		return &UserError{Msg: fmt.Sprintf("no host named %q", name), Hint: brand.Name + " host ls", Code: "host_not_found", Kind: KindNotFound}
 	}
-	if err := SaveHosts(out); err != nil {
+	if err := SaveHosts(context.WithoutCancel(ctx), out); err != nil {
 		return err
 	}
 	if err := os.Remove(wrapperPath(Host{Name: name})); err != nil && !errors.Is(err, os.ErrNotExist) {
@@ -158,6 +160,31 @@ func wakeAllowed(ctx context.Context) bool {
 	return !v
 }
 
+type noInputKey struct{}
+
+// WithoutInput returns a context in which nothing asks the user: every
+// connection runs SSH with BatchMode=yes, so that SSH asks for no password,
+// passphrase, host key or touch, and SSH's own messages stay out of the
+// terminal. A command with input off runs in it
+// (docs/contributing/cli-spec.md 6.1).
+func WithoutInput(ctx context.Context) context.Context {
+	return context.WithValue(ctx, noInputKey{}, true)
+}
+
+// InputAllowed reports whether something may ask the user in ctx: SSH, or a
+// command of the user's own, such as a token command.
+func InputAllowed(ctx context.Context) bool {
+	v, _ := ctx.Value(noInputKey{}).(bool)
+	return !v
+}
+
+// NewSSH is the SSH transport to h. It may ask the user (a password, a host
+// key) only when interactive is set and input is allowed in ctx: with
+// input off, it runs with BatchMode=yes.
+func NewSSH(ctx context.Context, h Host, interactive bool) *SSH {
+	return &SSH{Host: h, Interactive: interactive && InputAllowed(ctx)}
+}
+
 // route is how to reach a host: its transport, and the lifecycle of its
 // machine when a provider made it.
 type route struct {
@@ -166,8 +193,9 @@ type route struct {
 }
 
 func routeTo(ctx context.Context, h Host, interactive bool) (route, error) {
+	interactive = interactive && InputAllowed(ctx)
 	if h.Machine == nil {
-		return route{t: &SSH{Host: h, Interactive: interactive}}, nil
+		return route{t: NewSSH(ctx, h, interactive)}, nil
 	}
 	lc, err := OpenMachine(h)
 	if err != nil {
@@ -203,11 +231,12 @@ func ensureRunning(ctx context.Context, h Host, lc Lifecycle) error {
 	case MachineMissing:
 		return &UserError{
 			Msg:  fmt.Sprintf("the %s machine of %s (%s) is gone", h.Machine.Provider, h.Name, h.Machine.ID),
-			Hint: brand.Name + " host destroy " + h.Name + "   (forgets it)",
+			Hint: brand.Name + " host destroy " + h.Name + " (forgets it)",
+			Code: "machine_gone",
 		}
 	}
 	if !wakeAllowed(ctx) {
-		return &UserError{Msg: fmt.Sprintf("%s is %s", h.Name, st), Hint: brand.Name + " host start " + h.Name + "   (or attach to one of its sessions)"}
+		return &UserError{Msg: fmt.Sprintf("%s is %s", h.Name, st), Hint: brand.Name + " host start " + h.Name + " (an attach to one of its sessions starts it too)", Code: "host_stopped"}
 	}
 	if st != MachineStarting {
 		if err := lc.Start(ctx); err != nil {
@@ -242,5 +271,6 @@ func waitReady(ctx context.Context, h Host, lc Lifecycle, limit time.Duration) e
 	return &UserError{
 		Msg:  fmt.Sprintf("%s did not answer within %s of starting: %v", h.Name, limit, last),
 		Hint: brand.Name + " host status " + h.Name,
+		Code: "start_timeout",
 	}
 }
