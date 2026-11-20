@@ -36,6 +36,29 @@ func TestParserSplitsSequences(t *testing.T) {
 	}
 }
 
+// A terminal ends an OSC string at any ESC. So a title cannot hide a second
+// sequence, such as a clipboard write that the client would send again.
+func TestOSCEndsAtAnyEsc(t *testing.T) {
+	toks := collect("\x1b]2;t", "\x1b]52;c;QUFB\x07x\x1b]0;u\x1b[1m")
+	var raw []string
+	for _, tk := range toks {
+		raw = append(raw, string(tk.Raw))
+	}
+	want := []string{"\x1b]2;t", "\x1b]52;c;QUFB\x07", "x", "\x1b]0;u", "\x1b[1m"}
+	if strings.Join(raw, "|") != strings.Join(want, "|") {
+		t.Fatalf("raw = %q, want %q", raw, want)
+	}
+	tr := NewTracker()
+	tr.Feed([]byte("\x1b]2;t\x1b]52;c;QUFB\x07"))
+	if got := string(tr.M.Title); got != "\x1b]2;t\x1b\\" {
+		t.Errorf("title = %q, want the title alone, ended with ST", got)
+	}
+	// An ESC at the end of a part may start ST: the parser waits for the next.
+	if toks := collect("\x1b]2;t\x1b"); len(toks) != 0 {
+		t.Errorf("an OSC string that may go on became %q", toks[0].Raw)
+	}
+}
+
 // The parser must never lose or reorder bytes, whatever the chunking.
 func TestParserPreservesBytes(t *testing.T) {
 	rng := rand.New(rand.NewSource(7))

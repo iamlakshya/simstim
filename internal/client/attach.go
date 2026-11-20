@@ -83,6 +83,11 @@ type attacher struct {
 	// dropped says why the attach dropped its connection, for the debug
 	// mode: "" when the connection closed by itself.
 	dropped string
+	guard   *pasteGuard  // reads every byte to the terminal for clipboard writes, and checks drops
+	held    []heldNotice // notices that wait until the terminal is between sequences
+	// clipUnread says that the paste guard could not read the clipboard in
+	// this attach, which its debug log said once.
+	clipUnread bool
 }
 
 // Attach connects to a session and runs it in this terminal until the user
@@ -161,6 +166,10 @@ func Attach(ctx context.Context, o AttachOptions) (AttachResult, error) {
 		}
 	}()
 
+	// The paste guard takes the terminal's state that the last attach in
+	// this process left only now, when nothing more can fail before the
+	// detach gives it back.
+	a.guard = newPasteGuard(clipMemoryAt(clipPath()))
 	// Remember the title, to put it back on detach. While attached the
 	// title is the agent's: the client draws nothing of its own.
 	a.write([]byte("\x1b[22;0t"))
@@ -179,6 +188,7 @@ func Attach(ctx context.Context, o AttachOptions) (AttachResult, error) {
 	// Put the terminal back exactly as we found it: undo the session's modes,
 	// never with RIS, which would wipe the scrollback.
 	a.write(a.tracker.M.ResetSequence())
+	a.endGuard()
 	a.write([]byte("\x1b]9;4;0\x1b\\\x1b[23;0t"))
 	_ = xterm.Restore(a.fd, old)
 	_ = cr.Close()
@@ -190,10 +200,21 @@ func Attach(ctx context.Context, o AttachOptions) (AttachResult, error) {
 	return a.res, runErr
 }
 
+// write sends bytes to the terminal: the client's own, and the session's
+// title and modes that it sends again. The paste guard reads every byte that
+// the terminal gets, and only reads it.
 func (a *attacher) write(b []byte) {
 	if len(b) > 0 {
+		a.guard.observe(b)
 		_, _ = a.o.Out.Write(b)
 	}
+}
+
+// show sends the session's bytes to the terminal, unchanged, then any
+// notice that waited for the terminal to be between sequences.
+func (a *attacher) show(b []byte) {
+	a.write(b)
+	a.writeHeld()
 }
 
 func (a *attacher) size() (cols, rows, xpx, ypx int) { return termSize(a.o.Out) }
@@ -261,7 +282,7 @@ func (a *attacher) output(off int64, data []byte) {
 	if fresh == nil {
 		return // the terminal already shows it
 	}
-	a.write(show)
+	a.show(show)
 	a.tracker.Feed(fresh)
 }
 
@@ -382,7 +403,7 @@ func (a *attacher) frame(f proto.Frame) (done bool, err error) {
 	case proto.TSnapshot:
 		// A redraw of the current screen, made by the host's terminal emulator.
 		// It contains no queries, so it goes straight to the terminal.
-		a.write(f.Payload)
+		a.show(f.Payload)
 		a.tracker.Feed(f.Payload)
 	case proto.TEnded:
 		var e proto.Ended

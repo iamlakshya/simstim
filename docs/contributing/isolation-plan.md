@@ -171,6 +171,7 @@ Spec section 15 has each question in full, with its options: [open questions](is
 | 106 | Does the purge's question about agent logins default to yes on a `shared` host? | No, as for every question that deletes something. `--delete-logins` answers yes, and a `shared` host gets a warning. | H15 |
 | 107 | How does the client find the repository's sections for a host folder that `--dir` names? | From the folder's `origin`, which the host reads with `repo.info`. `new` names the sections, and later starts use the names that the trusted manifest keeps. | P1.12 |
 | 108 | Should session units lose access to the user manager's bus and to `/sys/fs/cgroup`? | No, not before walls (G5). The peer check stays a speed bump, and its docs say so. | P0.2 |
+| 109 | Should the paste guard also refuse `.env.local` and the other `.env.*` files? | Yes: `.env` and every `.env.*` except `.env.example`, `.env.sample` and `.env.template`. | P0.5 |
 
 ## Order
 
@@ -183,7 +184,7 @@ Build the tasks from top to bottom. Every task named under "Depends on" is above
 | 3 | P0.2 | A hook socket of its own, and a peer check on the holder's socket | 0 | 0030 | 23, 108 | M |
 | 4 | P0.3 | Check an agent's session ID before it enters a command | 0 | none | none | S |
 | 5 | P0.4 | Clean every string that a host sends before the client draws it | 0 | none | none | S |
-| 6 | P0.5 | A paste guard | 0 | none | 96 | S |
+| 6 | P0.5 | A paste guard | 0 | none | 96, 109 | S |
 | 7 | P0.6 | Tie setup trust to the script's content | 0 | none | 94 | S |
 | 8 | P0.7 | Safe copies and safer git on the trusted side | 0 | P0.2 | 77 | M |
 | 9 | P0.8 | Lima VMs that cannot reach the laptop's loopback | 0 | none | 37, 78 | S |
@@ -531,7 +532,7 @@ These tasks need no wall, and they help every session. H2 goes first ([question 
 - **Docs:** `docs/how-to/image-paste.md`.
 - **CHANGELOG:** Security. "A paste no longer uploads a file whose path the session itself put on your clipboard, nor files under `~/.ssh`, `~/.aws` and other private folders. A notice names each uploaded file."
 - **Depends on:** nothing.
-- **Questions:** [96](isolation-spec.md#15-open-questions).
+- **Questions:** [96](isolation-spec.md#15-open-questions), [109](isolation-spec.md#15-open-questions).
 - **Effort:** S.
 
 ### P0.6 Tie setup trust to the script's content

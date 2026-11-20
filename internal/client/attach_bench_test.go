@@ -2,6 +2,7 @@ package client
 
 import (
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/iamlakshya/simstim/internal/proto"
@@ -10,15 +11,16 @@ import (
 )
 
 // The client end of the attach pump: an output frame from the host is
-// decoded, trimmed to what the terminal lacks, written to the terminal, and
-// fed to the mode tracker.
+// decoded, trimmed to what the terminal lacks, read by the paste guard,
+// written to the terminal, and fed to the mode tracker.
 func BenchmarkAttachOutputFrames(b *testing.B) {
 	out, err := os.OpenFile(os.DevNull, os.O_WRONLY, 0)
 	if err != nil {
 		b.Fatal(err)
 	}
 	defer out.Close()
-	a := &attacher{o: AttachOptions{Out: out}, tracker: term.NewTracker()}
+	mem := clipMemoryAt(filepath.Join(b.TempDir(), "paste-guard.json"))
+	a := &attacher{o: AttachOptions{Out: out}, tracker: term.NewTracker(), guard: newPasteGuard(mem)}
 	data := termtest.AgentOutput(32 << 10)
 	b.SetBytes(int64(len(data)))
 	b.ReportAllocs()

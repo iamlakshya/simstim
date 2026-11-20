@@ -7,7 +7,7 @@ Every change keeps the tests green, and every bug fix adds the test that would h
 | `just test` | Go unit tests with the race detector, plus offline tests of the public-readiness checker, of the end-to-end cleanup, of the end-to-end probe of the session sockets and of the pins watch | Needs Python 3.11 or later |
 | `just cover` | The unit tests' coverage, which must stay at 70 % or more | Anywhere |
 | `go test ./internal/tui -run TestGolden -update` | Rewrites the golden screens after an intended change; review the diff | Anywhere |
-| `just fuzz` | Fuzzes the input filter, the frame reader, the holder's hook handler and the text cleaner for 30 s each (`just fuzz 5m` for longer) | Anywhere |
+| `just fuzz` | Fuzzes the input filter, the frame reader, the holder's hook handler, the text cleaner and the paste guard's reader for 30 s each (`just fuzz 5m` for longer) | Anywhere |
 | `just lint` | `go vet`, the strict golangci-lint set, and the name, private-detail, script and file-size checks | Anywhere |
 | `just e2e` | The end-to-end suite against a real host | Needs a test host |
 | `just screenshots` | The README images, drawn from `demo` | Anywhere |
@@ -31,6 +31,7 @@ These are the project's quality expectations, with tools to check them locally a
 | Race-free tests, and 70 % or more coverage of `internal/` without the launcher | `go test -race`, `just cover` |
 | The frame reader and the input filter never lose a byte | fuzz targets (`just fuzz`) |
 | No hook can put an agent session ID without the agent's form into a resume command | a fuzz target (`just fuzz`) |
+| The paste guard finds the same clipboard writes in output that frames cut anywhere as in the whole output | a fuzz target (`just fuzz`) |
 | The attach pump is no slower than before | benchmarks (`just bench`), on every pull request |
 
 ## Unit and golden tests
