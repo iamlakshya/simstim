@@ -20,6 +20,7 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ### Fixed
 
+- Developer setup uses the exact Go toolchain pinned in the repository, including inside the devcontainer. Failed setup tests print their full diagnostic output.
 - Helper archives accept only the supported helper file names. Cache writes stay inside an opened directory even when an existing entry is a link.
 - Shadow terminal frames reject lengths that exceed their wire field or overflow the host's header arithmetic. Rejected profiles keep the previous profile and report an error.
 - Remote command input errors keep their code, kind and structured data when diagnostic output is added. JSON errors distinguish an input that could not be read from one that could not be sent.

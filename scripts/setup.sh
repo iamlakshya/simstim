@@ -8,7 +8,7 @@
 # it with go install, which checks the module's sum), and links them into
 # .tools/bin.
 # The justfile puts .tools/bin first on its PATH. Go itself comes from go.mod:
-# any Go 1.21 or newer downloads the pinned toolchain on first use.
+# any Go 1.21 or newer downloads that exact toolchain on first use.
 #
 #   scripts/setup.sh --only node,typos   only these tools, and no build (CI)
 set -euo pipefail
@@ -34,6 +34,11 @@ sha256() {
 command -v go >/dev/null 2>&1 || die "Go is not installed. Try: install Go from https://go.dev/dl, then run this again."
 command -v git >/dev/null 2>&1 || die "git is not installed."
 command -v ssh >/dev/null 2>&1 || die "OpenSSH is not installed; the tool and its tests need it."
+
+# Images may set GOTOOLCHAIN=local. Build and test with the repository's pin.
+toolchain=$(awk '$1 == "toolchain" { print $2; exit }' go.mod)
+[ -n "$toolchain" ] || die "go.mod has no toolchain pin. Try: restore its toolchain line."
+export GOTOOLCHAIN="$toolchain"
 
 tools=.tools
 mkdir -p "$tools/bin" "$tools/dl"
@@ -96,7 +101,7 @@ just build
 log=$(mktemp)
 if ! go test -count=1 ./... >"$log" 2>&1; then
     say ""
-    grep -E -- '--- FAIL|^FAIL|panic:' "$log" >&2 || tail -40 "$log" >&2
+    cat "$log" >&2
     rm -f "$log"
     die "a test failed; the lines above say which. Run it again with go test -run <name> -v."
 fi
