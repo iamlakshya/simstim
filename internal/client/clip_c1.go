@@ -1,6 +1,7 @@
 package client
 
 import (
+	"bytes"
 	"encoding/binary"
 	"unicode/utf8"
 )
@@ -35,10 +36,16 @@ func c1At(b []byte) (c1 bool, n int, ok bool) {
 }
 
 // c1Index is the index of the first C1 control in b, or of a character
-// that the end of b cuts, or -1. It passes ASCII 8 bytes at a time, and
-// whole characters one at a time, so output with no C1 control costs one
-// pass.
+// that the end of b cuts, or -1. Complete UTF-8 without C2 uses bulk checks.
+// Other spans pass ASCII 8 bytes at a time and complete characters one at
+// a time.
 func c1Index(b []byte) int {
+	// A complete UTF-8 span can encode a C1 control only after C2.
+	// Other valid text needs no per-rune translation check. Keep partial
+	// characters and invalid bytes on the original scanner below.
+	if bytes.IndexByte(b, 0xC2) < 0 && utf8.Valid(b) {
+		return -1
+	}
 	for i := 0; i < len(b); {
 		for i+8 <= len(b) && binary.LittleEndian.Uint64(b[i:])&0x8080808080808080 == 0 {
 			i += 8
