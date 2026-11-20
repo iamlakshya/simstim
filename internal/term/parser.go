@@ -4,6 +4,8 @@
 // replayed history. It never changes live bytes.
 package term
 
+import "bytes"
+
 // Kind is the kind of a token.
 type Kind int
 
@@ -50,10 +52,12 @@ func (ps *Parser) Feed(p []byte, fn func(Token)) {
 		}
 	}
 	for i < len(b) {
-		if b[i] != 0x1b {
-			i++
-			continue
+		next := bytes.IndexByte(b[i:], 0x1b)
+		if next < 0 {
+			i = len(b)
+			break
 		}
+		i += next
 		n, tok, ok := parseEsc(b[i:])
 		if !ok {
 			if len(b)-i > maxSeq {
