@@ -32,7 +32,8 @@ func (f *makeFolderAsk) view(m *Model) string {
 	if h := m.hostByName(f.host); h != nil {
 		folder = homePath(h, folder)
 	}
-	body := make([]string, 1, 8) // a blank line first
+	folder = client.ShowPath(folder) // from the host
+	body := make([]string, 1, 8)     // a blank line first
 	body = append(body, wrap("The folder "+folder+" does not exist on "+f.host+".", w-4)...)
 	body = append(body, "")
 	body = append(body, wrap("Make it, with any missing folders above it, and start the session there?", w-4)...)

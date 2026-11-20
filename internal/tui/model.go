@@ -118,9 +118,12 @@ type Model struct {
 // renameState is the inline rename of a session row.
 type renameState struct {
 	key  sessKey
-	old  string
+	old  string // the name as the host sent it; the field shows it cleaned
 	in   input
 	busy bool
+	// edited is true once a key changed the field. Until then, Enter keeps
+	// the host's name, hidden characters and all.
+	edited bool
 }
 
 // New builds the launcher. It reads the saved hosts at once; everything

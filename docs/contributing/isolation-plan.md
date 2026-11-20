@@ -138,7 +138,7 @@ Spec section 15 has each question in full, with its options: [open questions](is
 | 73 | What counts against `network.model_budget` when an answer reports no usage? | An estimate: the bytes of the request and of the answer, divided by 4. | P2.16 |
 | 74 | How strict are the package manager settings by default? | `guarded`: release ages, no npm-family install scripts, and the Go settings. `strict` adds no source builds for pip and uv, and the `untrusted` profile uses it. | P2.8 |
 | 75 | Which Ghostty commit does the shadow terminal pin, and with which Zig? | The tag `vt-1.0.0`, and Zig 0.17.0 for the whole build. The owner decided. | P0.1 |
-| 76 | How large may a terminal be? | 4096 columns and 4096 rows, the project's own choice. | P0.1 |
+| 76 | How large may a terminal be? | 4096 columns and 2048 rows, and at most 1000 by 500 for the holder's Go screen model, the project's own choice. | P0.1 |
 | 77 | How does the host run git in an unwalled session's repository? | With hooks and fsmonitor off, and each operation in a scope under `<name>.slice`. | P0.7 |
 | 78 | How does `host create lima` find out whether the Mac can run a VM inside its VM? | It asks Lima, which asks Apple. On a refusal, it turns nesting off and starts again. | P0.8 |
 | 79 | The root step adds no package, but default server images lack `acl` and `uidmap`. What then? | Keep the rule: `kvm-group` alone, jails without a subuid, and `host show` names the packages. P3.7 tests a `systemd-tmpfiles` ACL. | H7, P1.3, P3.3, P3.7 |
@@ -170,6 +170,7 @@ Spec section 15 has each question in full, with its options: [open questions](is
 | 105 | May a Mac host's Lima host agent listen on a TCP port on the Mac's loopback? | Yes, in a new record that names the Mac host as the one exception to 0030, unless Lima can serve SSH on a Unix socket. H21 waits for the owner's yes. | H21 |
 | 106 | Does the purge's question about agent logins default to yes on a `shared` host? | No, as for every question that deletes something. `--delete-logins` answers yes, and a `shared` host gets a warning. | H15 |
 | 107 | How does the client find the repository's sections for a host folder that `--dir` names? | From the folder's `origin`, which the host reads with `repo.info`. `new` names the sections, and later starts use the names that the trusted manifest keeps. | P1.12 |
+| 108 | Should session units lose access to the user manager's bus and to `/sys/fs/cgroup`? | No, not before walls (G5). The peer check stays a speed bump, and its docs say so. | P0.2 |
 
 ## Order
 
@@ -179,7 +180,7 @@ Build the tasks from top to bottom. Every task named under "Depends on" is above
 | --- | --- | --- | --- | --- | --- | --- |
 | 1 | H2 | Turn off forwarding on every connection | 0 | 0034 (here) | 40 | S |
 | 2 | P0.1 | Bump the shadow terminal's Ghostty pin, and cap terminal sizes | 0 | none | 75, 76 | S |
-| 3 | P0.2 | A hook socket of its own, and a peer check on the holder's socket | 0 | 0030 | 23 | M |
+| 3 | P0.2 | A hook socket of its own, and a peer check on the holder's socket | 0 | 0030 | 23, 108 | M |
 | 4 | P0.3 | Check an agent's session ID before it enters a command | 0 | none | none | S |
 | 5 | P0.4 | Clean every string that a host sends before the client draws it | 0 | none | none | S |
 | 6 | P0.5 | A paste guard | 0 | none | 96 | S |
@@ -412,7 +413,7 @@ Five records already exist in this branch: 0029 to 0032 for this plan, and 0033,
 | [0031](decisions/0031-the-egress-process-is-not-a-relay.md) | Proposed, in this branch | A sandbox's egress process on the user's own host is not a relay | P1.7, P2.12, H16 | 24 |
 | [0032](decisions/0032-secret-values-in-memory-only.md) | Proposed, in this branch | Secret values live only in the memory of the trusted side | P2.2, P2.3, P2.13 | 25 |
 | [0033](decisions/0033-one-command-grammar.md) | Accepted | One grammar for the command line: session verbs at the top, a noun and a verb for everything else, and every rule under `policy` | P1.8, P1.12 and every task that adds a command | none |
-| `0034-ssh-options-on-the-command-line.md` | New, in H2 | The client puts the options that keep a host safe on the `ssh` command line, where they win over the user's own config. It starts with forwarding. | H2 | 40 |
+| `0034-ssh-options-on-the-command-line.md` | Accepted, in H2 | The client puts the options that keep a host safe on the `ssh` command line, where they win over the user's own config. It starts with forwarding. | H2 | 40 |
 | `0035-pinned-host-keys.md` | New, in H3 | Saved hosts pin their host key on the command line, under the rule of 0034 | H3 | none |
 | `0036-host-tiers-and-the-grant-gate.md` | New, in H4 | Host tiers in `tiers.toml`, one grant gate on the laptop, `shared` for E2B, and the SSH agent only for `own` hosts | H4, then H5 | 32, 33, 34 |
 | `0037-the-root-step.md` | New, in H7 | The root step: the sandbox probe as its input, one optional script, and sudo in the user's terminal. It bends "setup needs no root". | H7 | 4, 29 |
@@ -431,14 +432,16 @@ These tasks need no wall, and they help every session. H2 goes first ([question 
 ### H2 Turn off forwarding on every connection
 
 - **Goal:** close today's gap. A `ForwardAgent yes` in the user's SSH config no longer reaches any host. The client puts its own options on the `ssh` command line, where they win over every config file (spec 3.2 and 14.8.5).
-- **Files:** `internal/client/ssh.go` (`baseArgs`, `Command`, `Shell`, `Forward`), `internal/client/pull.go` (`GitSSHCommand`), `internal/client/transport.go` (`SSH.Start`), new `test/e2e/sandbox_hosts.py` (run with `E2E_ONLY=sandbox-hosts`), `test/e2e/run.py`, new `docs/contributing/decisions/0034-ssh-options-on-the-command-line.md`, `docs/contributing/decisions/README.md`.
+- **Files:** `internal/client/ssh.go` (`writeWrapper`, `controlDir`, `baseArgs`, `Command`, `Shell`), new `internal/client/ssh_forward.go` (`Forward`), `internal/client/ssh_debug.go`, `internal/client/pull.go` (`GitSSHCommand`), `internal/client/transport.go` (`SSH.Start`), `internal/onboard/system.go` (`SSHWorks`), new `test/e2e/sandbox_hosts.py` (run with `E2E_ONLY=sandbox-hosts`), `test/e2e/run.py`, new `docs/contributing/decisions/0034-ssh-options-on-the-command-line.md`, `docs/contributing/decisions/README.md`.
 - **Acceptance:**
-  - Every `ssh` command has `-o ForwardAgent=no -o ForwardX11=no -o PermitLocalCommand=no`.
+  - Every `ssh` command has `-o ForwardAgent=no -o ForwardX11=no -o PermitLocalCommand=no -o GSSAPIDelegateCredentials=no`.
+  - Every generated config starts with the same four settings and `ClearAllForwardings yes`, so a `ProxyJump` hop gets them too.
   - Every connection but `forward` also has `-o ClearAllForwardings=yes`: the bridge, `Run`, `Shell` and the `git` command of `pull`.
   - `forward` still forwards its ports. `SSH.Forward` keeps its own `-L` options and has `-o ClearAllForwardings=no`, so `ClearAllForwardings yes` in `~/.ssh/config` cannot clear them.
-  - `forward` refuses to start when the user's config adds a `RemoteForward` for the host (spec 14.8.5).
-- **Tests:** unit tests of the arguments in `internal/client` and in `internal/cli/commands_ssh_test.go`. End-to-end test 2: with `ForwardAgent yes` in a throwaway client SSH config, a session on the host has no `SSH_AUTH_SOCK`.
-- **Docs:** `docs/explanation/security.md` (agent forwarding). Section 7.5 of `docs/research/connectivity-and-providers.md` gets a note: H2 takes its forwarding options only, and the multiplexing options stay as today (`ControlMaster=auto`). The record 0034.
+  - `forward` has a connection of its own, and refuses to start when the user's config adds a `RemoteForward` or a `Tunnel` for the host, or sets `ForkAfterAuthentication yes` (spec 14.8.5).
+  - The shared master's socket has a new name, so no session uses a master that an older client started.
+- **Tests:** unit tests of the arguments in `internal/client` and in `internal/cli/commands_ssh_test.go`. End-to-end test 2: with `ForwardAgent` naming a throwaway agent in a throwaway client SSH config, a session on the host has no `SSH_AUTH_SOCK`.
+- **Docs:** `docs/explanation/security.md` (agent forwarding), `SECURITY.md`. Section 7.5 of `docs/research/connectivity-and-providers.md` gets a note: H2 takes its forwarding options only, and the multiplexing options stay as today (`ControlMaster=auto`). The record 0034.
 - **CHANGELOG:** Security. "The client no longer forwards your SSH agent, X11 or a local command to any host, even when your `~/.ssh/config` asks for it. `forward` still forwards the ports you name."
 - **Depends on:** nothing. It adds the record 0034.
 - **Questions:** [40](isolation-spec.md#15-open-questions).
@@ -446,15 +449,16 @@ These tasks need no wall, and they help every session. H2 goes first ([question 
 
 ### P0.1 Bump the shadow terminal's Ghostty pin, and cap terminal sizes
 
-- **Goal:** the shadow terminal pins Ghostty's tag `vt-1.0.0`, which holds the fixes `e257bb45` ([GHSA-w9q4-5jvv-mcv4](https://github.com/ghostty-org/ghostty/security/advisories/GHSA-w9q4-5jvv-mcv4)) and `0af5c9e55` ([GHSA-jqr7-69mm-v35h](https://github.com/ghostty-org/ghostty/security/advisories/GHSA-jqr7-69mm-v35h)), and the build moves to Zig 0.17.0. The host caps a terminal size from a client at 4096 columns and rows, not 65535 (spec 3.2 and 19.1, [build facts](../research/build-facts.md#61-ghostty-and-its-advisories)).
-- **Files:** the files of the Zig table in spec 19.1: `vt/`, `justfile`, `scripts/tools.lock`, the two workflows, `internal/host/vt_test.go`, `.goreleaser.yaml`, `CONTRIBUTING.md` and three script comments. `internal/host/holder.go`, `internal/host/holder_conn.go`, `internal/host/vt.go` and `internal/host/vt_child.go` (a new `clampTerm` in place of `clamp16` for columns and rows), and `vt/src/main.zig` (the same cap).
+- **Goal:** the shadow terminal pins Ghostty's tag `vt-1.0.0`, which holds the fixes `e257bb45` ([GHSA-w9q4-5jvv-mcv4](https://github.com/ghostty-org/ghostty/security/advisories/GHSA-w9q4-5jvv-mcv4)) and `0af5c9e55` ([GHSA-jqr7-69mm-v35h](https://github.com/ghostty-org/ghostty/security/advisories/GHSA-jqr7-69mm-v35h)), and the build moves to Zig 0.17.0. The host caps a terminal size from a client at 4096 columns and 2048 rows, not 65535, and its Go screen model at 1000 by 500 (spec 3.2 and 19.1, [build facts](../research/build-facts.md#61-ghostty-and-its-advisories)).
+- **Files:** the files of the Zig table in spec 19.1: `vt/`, `justfile`, `scripts/tools.lock`, the two workflows, `internal/host/vt_test.go`, `.goreleaser.yaml`, `CONTRIBUTING.md` and three script comments. `internal/host/holder.go`, `internal/host/holder_conn.go`, `internal/host/vt.go` and `internal/host/vt_child.go` (new `clampCols` and `clampRows` in place of `clamp16` for columns and rows), `internal/host/screen.go` (the screen model's own cap), and `vt/src/main.zig` (the same caps).
 - **Acceptance:**
   - `just vt` builds with Zig 0.17.0, and prints the note of spec 19.1 with another Zig.
   - The compare API answers "ahead" or "identical" for `e257bb45`, `0af5c9e55`, `65ff54c6` and `44c4c8f5` against the new pin. The pull request quotes the four answers.
-  - The replay fixtures pass. A resize to 65535 columns sets 4096, in the PTY, the Go screen model and the shadow terminal. So does a start at 65535 columns.
-- **Tests:** the tests of spec 19.1: `clampTerm`, the holder's resize, the shadow terminal's `--cols`, the vt tests and the fidelity fixtures in `test/ttyshot`.
+  - The replay fixtures pass. A resize to 65535 by 65535 sets 4096 by 2048 in the PTY and the shadow terminal, and 1000 by 500 in the Go screen model. A start at 65535 columns runs at 4096, and the manifest says so.
+  - `just build` with another Zig removes an old build of the shadow terminal, and the vt tests never run one.
+- **Tests:** the tests of spec 19.1: `clampCols` and `clampRows`, the holder's resize and start, the shadow terminal's `--cols` and `--rows`, the vt tests, and `TestVTSnapshotFixtures` and `TestVTSnapshotCases` in `internal/host`.
 - **Docs:** `vt/README.md` (the pin, the advisories, and Zig 0.17.0), `CONTRIBUTING.md` (Zig 0.17).
-- **CHANGELOG:** Fixed. "The shadow terminal now uses libghostty-vt 1.0.0. It fixes one advisory in which terminal output could corrupt its memory, and one in which a very wide terminal could crash it when narrowed. The host caps a terminal size from a client at 4096 columns and rows. Building the shadow terminal now needs Zig 0.17.0."
+- **CHANGELOG:** Fixed. "The shadow terminal now uses libghostty-vt 1.0.0. It fixes one advisory in which terminal output could corrupt its memory, and one in which a very wide terminal could crash it when narrowed. The host caps a terminal size from a client at 4096 columns and 2048 rows. Building the shadow terminal now needs Zig 0.17.0."
 - **Depends on:** nothing.
 - **Questions:** [75](isolation-spec.md#15-open-questions), [76](isolation-spec.md#15-open-questions).
 - **Effort:** S.
@@ -480,7 +484,7 @@ These tasks need no wall, and they help every session. H2 goes first ([question 
 - **Docs:** `docs/explanation/security.md`.
 - **CHANGELOG:** Security. "A program in one session can no longer type into, attach to or stop another session through its socket. A program that it starts outside its session still can. Sandboxes close that gap. Agents' hooks use a socket that accepts only hook events."
 - **Depends on:** [0030](decisions/0030-local-sockets-do-not-listen.md): the hook socket is a Unix socket, which does not listen on the host.
-- **Questions:** [23](isolation-spec.md#15-open-questions).
+- **Questions:** [23](isolation-spec.md#15-open-questions), [108](isolation-spec.md#15-open-questions).
 - **Effort:** M.
 
 ### P0.3 Check an agent's session ID before it enters a command
@@ -566,7 +570,7 @@ These tasks need no wall, and they help every session. H2 goes first ([question 
 ### P0.8 Lima VMs that cannot reach the laptop's loopback
 
 - **Goal:** `host create lima` sets `networkOpts.hostLoopback: false` on macOS. It turns on nested virtualisation for phase 3 where Lima's own check passes (spec 11 and 19.4).
-- **Files:** `internal/provider/lima/lima.go` (`CreateArgs` with the OS, `parseLimaVersion`, the start again without nested virtualisation, and `LoopbackCheck`), `internal/cli/host.go` (`hostDoctorCmd` adds the check), `internal/provider/lima/testdata/`.
+- **Files:** `internal/provider/lima/lima.go` (`CreateArgs` with the OS), `version.go` (`parseLimaVersion`), `nested.go` (the start again without nested virtualisation), `loopback.go` (`LoopbackCheck`, and the check before the first start), `internal/provider/provider.go` (`ExecError`, which keeps a tool's whole stderr), `internal/cli/host.go` (`hostDoctorCmd` adds the check), `internal/provider/lima/testdata/`.
 - **Acceptance:**
   - On a Mac, a new VM cannot connect to a test server on the Mac's loopback address (spec 19.4, test 5, by hand).
   - `limactl` before 2.3.0 is refused with the hint of spec 19.4.
@@ -582,7 +586,7 @@ These tasks need no wall, and they help every session. H2 goes first ([question 
 ### P0.9 Watch pins that no package ecosystem covers
 
 - **Goal:** a daily workflow fails, and opens an issue, when a pin is in an advisory's range (spec 19.5, [build facts](../research/build-facts.md#61-ghostty-and-its-advisories)).
-- **Files:** new `.github/workflows/pins-watch.yml`, new `guest/supply.lock` (the header of spec 19.5, and no pin yet), new `scripts/pins-watch.py`, new `scripts/pins-watch-reviewed.toml`, new `scripts/test-pins-watch.py` and `scripts/testdata/pins-watch/`, `justfile` and `.github/workflows/ci.yml` (run the test). The script reads the Ghostty commit from `vt/build.zig.zon` and each pin of `guest/supply.lock`. It reads each repository's advisories, tests commit ancestry, and asks OSV by commit. The job also runs `govulncheck` for the Go toolchain and modules.
+- **Files:** new `.github/workflows/pins-watch.yml`, new `guest/supply.lock` (the header of spec 19.5, and no pin yet), new `scripts/pins-watch.py` and its code in new `scripts/pinswatch/`, new `scripts/pins-watch-reviewed.toml`, new `scripts/test-pins-watch.py` with its tests in `scripts/pinswatch/tests/`, and `scripts/testdata/pins-watch/`, `justfile` and `.github/workflows/ci.yml` (run the test). The script reads the Ghostty commit from `vt/build.zig.zon` and each pin of `guest/supply.lock`. It reads each repository's advisories, tests commit ancestry, and asks OSV by commit. The job also runs `govulncheck` for the Go toolchain and modules.
 - **Acceptance:** with the old Ghostty pin restored on a branch, the job fails and names GHSA-w9q4-5jvv-mcv4 and GHSA-jqr7-69mm-v35h, and not GHSA-qjfx-r533-6vx3. An advisory that the script cannot read fails the job until a verdict names it. Actions are pinned by SHA, the permissions are those of spec 19.5, and zizmor passes.
 - **Tests:** the tests of spec 19.5, offline, with recorded answers.
 - **Docs:** `docs/contributing/releasing.md`.

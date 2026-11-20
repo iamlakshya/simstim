@@ -185,6 +185,12 @@ func TestTransportRun(t *testing.T) {
 	if _, err := tr.Run(context.Background(), "echo oops >&2; exit 3", nil); err == nil || !strings.Contains(err.Error(), "oops") {
 		t.Fatalf("a failing command: %v", err)
 	}
+	// What the command writes to stderr is the host's text: the error keeps
+	// it cleaned, ESC c and OSC 52 and hidden characters gone.
+	_, err = tr.Run(context.Background(), `printf 'a\033c b\033]52;c;aGk=\007 c\342\200\256d\342\200\213e\n' >&2; exit 3`, nil)
+	if err == nil || !strings.Contains(err.Error(), "ac b]52;c;aGk= cde") || strings.ContainsAny(err.Error(), "\x1b\x07\u202e\u200b") {
+		t.Fatalf("a failing command with a hostile stderr: %q", err)
+	}
 	if h := tr.ReachHint(); !strings.Contains(h, "docker exec -it -u user") {
 		t.Fatal(h)
 	}

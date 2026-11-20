@@ -80,6 +80,7 @@ func Doctor() HostInfo {
 			info.Checks = append(info.Checks, AgentMemoryChecks(info.Agents, info.MemTotal, info.MemoryMax)...)
 		}
 	}
+	info.Checks = append(info.Checks, socketsCheck(sd, weakHolders()))
 	gt := HasTerminfo("xterm-ghostty")
 	info.Checks = append(info.Checks, Check{Name: "Ghostty terminfo", OK: gt,
 		Detail: map[bool]string{true: "xterm-ghostty is installed", false: "xterm-ghostty is missing; sessions fall back to xterm-256color"}[gt],

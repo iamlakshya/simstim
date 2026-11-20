@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -17,6 +18,7 @@ import (
 	"github.com/iamlakshya/simstim/internal/client"
 	"github.com/iamlakshya/simstim/internal/client/helpers"
 	"github.com/iamlakshya/simstim/internal/onboard"
+	"github.com/iamlakshya/simstim/internal/provider/lima"
 )
 
 func hostCmd() *cobra.Command {
@@ -151,7 +153,7 @@ func connectHost(ctx context.Context, w io.Writer, h client.Host, consent func(q
 	if err != nil {
 		return nil, err
 	}
-	for _, s := range res.Steps {
+	for _, s := range client.CleanChecks(res.Steps) {
 		mark := "✓"
 		if !s.OK {
 			mark = "✕"
@@ -165,13 +167,13 @@ func connectHost(ctx context.Context, w io.Writer, h client.Host, consent func(q
 	if err != nil {
 		return nil, err
 	}
-	step("✓ %s, %d CPUs, %.1f GiB, %.1f GiB of it for sessions", d.Distro, d.CPUs, float64(d.MemTotal)/(1<<30), float64(d.MemoryMax)/(1<<30))
+	step("✓ %s, %d CPUs, %.1f GiB, %.1f GiB of it for sessions", client.CleanLine(d.Distro), d.CPUs, float64(d.MemTotal)/(1<<30), float64(d.MemoryMax)/(1<<30))
 	checks, _ := conn.AgentChecks(dctx)
 	if err := client.SaveHost(h); err != nil {
 		return nil, err
 	}
 	log.Add("saved the host %s", h.Name)
-	return checks, nil
+	return client.CleanAgentChecks(checks), nil
 }
 
 func confirm(q string) bool {
@@ -281,11 +283,14 @@ func hostDoctorCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "doctor <name>",
 		Short: "Check a host's setup, and with --fix fix what it can",
-		Long: "Checks a host: systemd and linger, the restore unit, terminfo, memory caps, swap and the\n" +
-			"agents. It warns when the host has less memory than an agent's docs ask for. With\n" +
-			"--fix it offers to fix linger, the restore unit, Ghostty's terminfo, a broken current\n" +
-			"helper link, stale session sockets and old helper versions. Each fix is shown and\n" +
-			"explained before it runs; one that needs root is printed for you.",
+		Long: "Checks a host: systemd and linger, the restore unit, terminfo, memory caps, swap, the\n" +
+			"session sockets and the agents. It warns when the host has less memory than an agent's\n" +
+			"docs ask for, and when a program in one session could drive another through its\n" +
+			"socket. For a VM made by host create lima, it also checks, on this computer, that the\n" +
+			"VM cannot reach services on this computer's loopback address. With --fix it offers to\n" +
+			"fix linger, the restore unit, Ghostty's terminfo, a broken current helper link, stale\n" +
+			"session sockets and old helper versions. Each fix is shown and explained before it\n" +
+			"runs; one that needs root is printed for you.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			h, err := client.FindHost(args[0])
@@ -303,12 +308,18 @@ func hostDoctorCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			if h.Machine != nil {
+				if check := machineChecks[h.Machine.Provider]; check != nil {
+					d.Checks = append(d.Checks, check(ctx, h))
+				}
+			}
 			if d.AgentChecks, err = conn.AgentChecks(ctx); err != nil {
 				return err
 			}
 			if asJSON {
 				return printJSON(d)
 			}
+			d = client.CleanHostInfo(d) // what the host sent, cleaned to print
 			fmt.Printf("%s: %s (%s/%s), %d CPUs, %.1f GiB, %.1f GiB free disk, helper %s\n", h.Name, d.Distro, d.OS, d.Arch, d.CPUs,
 				float64(d.MemTotal)/(1<<30), float64(d.DiskFree)/(1<<30), d.Version)
 			printChecks(os.Stdout, d.Checks)
@@ -327,10 +338,22 @@ func hostDoctorCmd() *cobra.Command {
 	return cmd
 }
 
+// machineChecks are the doctor's checks that run on this computer, for a
+// host that a provider made, by the provider's name.
+var machineChecks = map[string]func(context.Context, client.Host) api.Check{
+	lima.Provider{}.Name(): lima.LoopbackCheck,
+}
+
+// printJSON prints v as JSON. Values from a host stay as the host sent
+// them, with the characters that a terminal could act on escaped (jsonSafe).
 func printJSON(v any) error {
-	enc := json.NewEncoder(os.Stdout)
+	var b bytes.Buffer
+	enc := json.NewEncoder(&b)
 	enc.SetIndent("", "  ")
 	if err := enc.Encode(v); err != nil {
+		return fmt.Errorf("write JSON: %w", err)
+	}
+	if _, err := os.Stdout.Write(jsonSafe(b.Bytes())); err != nil {
 		return fmt.Errorf("write JSON: %w", err)
 	}
 	return nil
@@ -361,9 +384,7 @@ func hostRestoreCmd() *cobra.Command {
 			if len(res) == 0 {
 				fmt.Printf("Nothing to restore on %s.\n", h.Name)
 			}
-			for _, r := range res {
-				fmt.Printf("%-10s %-20s %-9s %s\n", r.ID, r.Name, r.Action, r.Why)
-			}
+			printRestore(os.Stdout, res)
 			return nil
 		},
 	}

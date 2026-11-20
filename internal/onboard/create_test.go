@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -188,10 +189,34 @@ func TestSystemSSH(t *testing.T) {
 	}
 }
 
+// When the generated SSH config cannot be written, SSHWorks says which
+// folder to fix, and runs no ssh.
+func TestSSHWorksNeedsAConfigFolder(t *testing.T) {
+	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
+		t.Skip("needs a folder that this user cannot write to")
+	}
+	cfg := t.TempDir()
+	if err := os.Chmod(cfg, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(cfg, 0o700) })
+	t.Setenv("XDG_CONFIG_HOME", cfg)
+	t.Setenv("PATH", t.TempDir()) // no ssh at all
+	err := System{}.SSHWorks(context.Background(), "ok")
+	var ue *client.UserError
+	dir := filepath.Join(client.ConfigDir(), "ssh")
+	if !errors.As(err, &ue) || !strings.Contains(ue.Msg, "cannot write the SSH config") || !strings.Contains(ue.Hint, dir) {
+		t.Fatalf("err = %v, want a user error whose hint names %s", err, dir)
+	}
+}
+
 func TestSSHWorks(t *testing.T) {
 	bin := t.TempDir()
-	script := "#!/bin/sh\nfor a; do last=$a; done\n" +
-		"case \"$*\" in *BatchMode=yes*' -- ok true') exit 0;; esac\n" +
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	argsLog := filepath.Join(bin, "args")
+	script := "#!/bin/sh\nprintf '%s\\n' \"$*\" > " + argsLog + "\n" +
+		"case \"$*\" in *' -- ok true') exit 0;; esac\n" +
 		"echo 'dev@203.0.113.10: Permission denied (publickey).' >&2\nexit 255\n"
 	if err := os.WriteFile(filepath.Join(bin, "ssh"), []byte(script), 0o755); err != nil {
 		t.Fatal(err)
@@ -200,6 +225,18 @@ func TestSSHWorks(t *testing.T) {
 	s := System{}
 	if err := s.SSHWorks(context.Background(), "ok"); err != nil {
 		t.Fatalf("ok: %v", err)
+	}
+	// It forwards nothing, reads the generated config, and shares no
+	// connection (decision 0034).
+	cfg := filepath.Join(client.ConfigDir(), "ssh", "default")
+	got, _ := os.ReadFile(argsLog)
+	want := "-F " + cfg + " -o BatchMode=yes -o ConnectTimeout=15 -o ForwardAgent=no -o ForwardX11=no -o PermitLocalCommand=no" +
+		" -o GSSAPIDelegateCredentials=no -o ClearAllForwardings=yes -o ControlMaster=no -o ControlPath=none -- ok true\n"
+	if string(got) != want {
+		t.Errorf("ssh ran with\n%q, want\n%q", got, want)
+	}
+	if b, err := os.ReadFile(cfg); err != nil || !strings.Contains(string(b), "\nForwardAgent no\nForwardX11 no\nPermitLocalCommand no\nGSSAPIDelegateCredentials no\n") {
+		t.Errorf("the generated config = %q, %v, want the forwarding block", b, err)
 	}
 	err := s.SSHWorks(context.Background(), "dev@203.0.113.10")
 	var ue *client.UserError

@@ -99,7 +99,9 @@ func (m *Model) onPaste(text string) tea.Cmd {
 		m.prompt.in.insert(text)
 		return nil
 	case m.rename != nil:
+		before := m.rename.in.value()
 		m.rename.in.insert(text)
+		m.rename.edited = m.rename.edited || m.rename.in.value() != before
 		return nil
 	}
 	id := strings.TrimSpace(text)
@@ -126,7 +128,7 @@ func (m *Model) startRename() tea.Cmd {
 	if s == nil {
 		return nil
 	}
-	m.rename = &renameState{key: sessKey{h.name(), s.ID}, old: s.Name, in: newInput(s.Name, "a name")}
+	m.rename = &renameState{key: sessKey{h.name(), s.ID}, old: s.Name, in: newInput(client.CleanLine(s.Name), "a name")}
 	return nil
 }
 
@@ -142,7 +144,7 @@ func (m *Model) renameKey(k tea.KeyPressMsg) tea.Cmd {
 	case "enter":
 		name := strings.TrimSpace(r.in.value())
 		h := m.hostByName(r.key.host)
-		if name == "" || name == r.old || h == nil {
+		if name == "" || name == r.old || !r.edited || h == nil {
 			m.rename = nil
 			return nil
 		}
@@ -153,11 +155,13 @@ func (m *Model) renameKey(k tea.KeyPressMsg) tea.Cmd {
 				h.sessions[i].Name = name // show it now; the next list confirms it
 			}
 		}
-		id, old := r.key.id, r.old
+		id, old := r.key.id, client.CleanLine(r.old)
 		return m.op(h, fmt.Sprintf("Renamed %s to %s on %s.", old, name, h.name()), func(ctx context.Context, c Conn) error {
 			return c.RenameSession(ctx, id, name)
 		})
 	}
+	before := r.in.value()
 	r.in.key(k)
+	r.edited = r.edited || r.in.value() != before
 	return nil
 }

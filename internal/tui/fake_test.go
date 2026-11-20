@@ -47,6 +47,8 @@ type fakeHost struct {
 	resumeErr error
 	// debugErr is what a debug start says, if it fails (debug_test.go).
 	debugErr error
+	// folders are more folders that the host suggests (clean_test.go).
+	folders []string
 }
 
 // fakeBackend pretends to be SSH, the hosts and the terminal.
@@ -222,6 +224,9 @@ func (c *fakeConn) host() *fakeHost {
 
 func (c *fakeConn) Folders(_ context.Context, prefix string) (client.FoldersResult, error) {
 	all := []string{"~/src/api/", "~/src/app/", "~/notes/"}
+	c.be.mu.Lock()
+	all = append(all, c.host().folders...)
+	c.be.mu.Unlock()
 	r := client.FoldersResult{Recent: []string{"~/src/app"}, Repos: []string{"~/src/api", "~/src/app"}}
 	for _, p := range all {
 		if prefix != "" && strings.HasPrefix(p, prefix) {
@@ -569,7 +574,7 @@ func labBackend() *fakeBackend {
 			Agents:        map[string]string{"claude": "/usr/local/bin/claude", "codex": "/usr/local/bin/codex", "opencode": "/usr/bin/opencode", "shell": "/usr/bin/zsh"},
 			AgentVersions: map[string]string{"claude": "2.1.3", "codex": "0.46.0", "opencode": "1.0.12"}},
 		sessions: []client.Session{
-			{ID: "s1", Name: "docs-pass", Agent: "opencode", Cwd: "/home/dev/src/docs", State: api.StateExited, ExitCode: code(0), Since: ago(3 * time.Hour), CreatedAt: ago(5 * time.Hour)},
+			{ID: "s5", Name: "docs-pass", Agent: "opencode", Cwd: "/home/dev/src/docs", State: api.StateExited, ExitCode: code(0), Since: ago(3 * time.Hour), CreatedAt: ago(5 * time.Hour)},
 			{ID: "s2", Name: "notes", Agent: "shell", Cwd: "/home/dev", State: api.StateIdle, Since: ago(time.Hour), CreatedAt: ago(26 * time.Hour), Alive: true},
 			{ID: "s3", Name: "api-tests", Agent: "codex", Cwd: "/home/dev/src/api", State: api.StateWorking, Since: ago(14 * time.Second), CreatedAt: ago(40 * time.Minute), Alive: true},
 			{ID: "s4", Name: "auth-refactor", Agent: "claude", Cwd: "/home/dev/src/app", State: api.StateNeedsInput, Since: ago(2 * time.Minute), CreatedAt: ago(time.Hour),
@@ -591,7 +596,7 @@ func labBackend() *fakeBackend {
 		latency: 41 * time.Millisecond,
 		info:    client.HostInfo{Distro: "Ubuntu 24.04", Arch: "amd64", CPUs: 8, MemTotal: 32 << 30, MemoryMax: 30431772672, Agents: map[string]string{"gemini": "/usr/bin/gemini", "shell": "/bin/bash"}},
 		sessions: []client.Session{
-			{ID: "g1", Name: "bench", Agent: "gemini", Cwd: "/srv/bench", State: api.StateWorking, Since: ago(5 * time.Minute), CreatedAt: ago(2 * time.Hour), Alive: true},
+			{ID: "g6", Name: "bench", Agent: "gemini", Cwd: "/srv/bench", State: api.StateWorking, Since: ago(5 * time.Minute), CreatedAt: ago(2 * time.Hour), Alive: true},
 			{ID: "g2", Name: "scratch", Agent: "shell", Cwd: "/tmp", State: api.StateExited, ExitCode: code(1), Since: ago(50 * time.Hour), CreatedAt: ago(60 * time.Hour)},
 		},
 	}

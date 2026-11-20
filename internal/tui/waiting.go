@@ -22,9 +22,10 @@ func (m *Model) nextWaiting() tea.Cmd {
 			if s.State != api.StateNeedsInput {
 				continue
 			}
-			msg := s.Name + " on " + h.name() + " needs you"
-			if s.Reason != "" {
-				msg += ": " + s.Reason
+			d := shown(s)
+			msg := d.Name + " on " + h.name() + " needs you"
+			if d.Reason != "" {
+				msg += ": " + d.Reason
 			}
 			all = append(all, waiting{h, sessKey{h.name(), s.ID}, msg})
 		}

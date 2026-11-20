@@ -668,8 +668,11 @@ type Policy struct {
 
 // CleanText removes C0 and C1 controls, DEL, bidirectional controls,
 // zero-width characters and Unicode tag characters from s, and cuts it
-// to max runes. Every string that a host or a guest sends goes through it
-// before it is drawn or stored.
+// to max runes. The client draws every string that a host or a guest
+// sends through it. It cleans a copy to draw, and keeps the raw value in
+// memory and in the requests that go back. JSON output escapes these
+// characters instead, and keeps the values. A folder suggestion that the
+// cleaning would change is dropped, not offered.
 func CleanText(s string, max int) string
 ```
 
@@ -1501,11 +1504,21 @@ ProxyEnv map[string]string `json:"proxy_env,omitempty"`
 // "chosen") needs no match. Without a pattern, the host keeps no other ID.
 IDPattern string `json:"id_pattern,omitempty"`
 // DangerFlags are arguments that turn the agent's own approvals off. The
-// host refuses a command with one unless the user typed the command.
+// host refuses a command with one unless the user typed that argument:
+// the same argument, with the same values, in the session's own command.
+// "--flag" is a switch. "--flag=*" takes one value, any value.
+// "--flag=a|b" takes one value and counts only with one of these, and
+// "--flag!=a|b" with any value but these. "--flag=..." takes a list of
+// values, up to the next argument that starts with "-". A value is joined
+// with "=", joined to a short flag, or the next argument. The value "{}"
+// stands for a JSON object.
 DangerFlags []string `json:"danger_flags,omitempty"`
 // DangerText is text that makes any argument dangerous, such as
 // "bypassPermissions" inside a --settings value. The host checks it as it
-// checks DangerFlags.
+// checks DangerFlags. It checks the argument as written, and the keys and
+// strings that it decodes to: a JSON object, or a key=value override
+// whose value is TOML. "key!=a|b" is that key with any value but these,
+// and "key=*" is that key with any value.
 DangerText []string `json:"danger_text,omitempty"`
 // StateDirs are folders, or single files, under the home that a resume
 // needs. A sandbox keeps them across starts, and nothing else in the home.
@@ -1556,15 +1569,19 @@ Values for the first-class agents:
 | `Secrets` | `ANTHROPIC_API_KEY` in `x-api-key`, prefix `sk-ant-api03-` (UNVERIFIED: no source in build facts, and P2.3's manual check confirms it). `ANTHROPIC_AUTH_TOKEN` in `Authorization: Bearer`. `CLAUDE_CODE_OAUTH_TOKEN` in `Authorization: Bearer`, prefix `sk-ant-oat01-` (the header is UNVERIFIED, 7.3). | `OPENAI_API_KEY` in `Authorization: Bearer`, with the `Store` command `codex login --with-api-key`. `CODEX_API_KEY` in the same header, for `codex exec`. |
 | `CAEnv` | `NODE_EXTRA_CA_CERTS` | `CODEX_CA_CERTIFICATE`, `SSL_CERT_FILE` |
 | `IDPattern` | a UUID: `^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$` | a UUID, as above: Codex makes UUIDv7 IDs |
-| `DangerFlags` | `--dangerously-skip-permissions`, `--allow-dangerously-skip-permissions`, `--permission-mode=bypassPermissions` | `--dangerously-bypass-approvals-and-sandbox`, `--yolo`, `--dangerously-bypass-hook-trust`, `--approve-for-me`, `--not-so-yolo`, `--profile`, `-p` |
-| `DangerText` | `bypassPermissions`, which also catches `--permission-mode bypassPermissions` and a `--settings` value | `danger-full-access`, `approval_policy`, `sandbox_mode`, which catch `-s danger-full-access` and `-c` values |
+| `DangerFlags` | `--dangerously-skip-permissions`, `--allow-dangerously-skip-permissions`, `--permission-mode!=default\|manual\|plan` (every other mode, `acceptEdits`, `auto`, `dontAsk` or `bypassPermissions`, changes what runs without a prompt), `--allowedTools=...`, `--allowed-tools=...` and `--add-dir=...` (each takes a list), `--plugin-dir=*`, `--plugin-url=*` (a plugin can bring hooks), and `--settings!={}` (a path to a settings file, which no check can read) | `--dangerously-bypass-approvals-and-sandbox`, `--yolo`, `--dangerously-bypass-hook-trust`, `--approve-for-me`, `--not-so-yolo`, `--profile=*`, `-p=*`, `-a=never`, `--ask-for-approval=never`, `--add-dir=*` and `--search`, which widen what the agent may do without a prompt, and `--enable=web_search\|web_search_request` (`--enable FEATURE` is `-c features.FEATURE=true`: `FeatureToggles` in `cli/src/main.rs`) |
+| `DangerText` | `bypassPermissions`, `defaultMode!=default\|manual\|plan`, `permissionMode!=default\|manual\|plan` (a subagent in `--agents`), `permissions.allow`, `additionalDirectories` (the settings form of `--add-dir`), `PermissionRequest` and `PreToolUse` (hooks that can approve a tool call), and `autoAllowBashIfSandboxed!=false` and `sandbox.enabled!=false` (sandboxed Bash runs without a prompt, and the first is true by default). They catch `--permission-mode bypassPermissions`, and the decoded values of `--settings` and `--agents`. | `danger-full-access`, `approval_policy`, `sandbox_mode`, `approvals_reviewer`, `default_permissions`, `permissions=*`, `permissions.`, `profile=*`, `sandbox_workspace_write`, and the `-c` forms of the flags: `web_search!=disabled\|cached\|false` (`--search` sets `web_search="live"`, and the default is `cached`), `web_search_request!=false` (a legacy toggle for `live`) and `hooks.state` (where hook trust is kept). They catch `-s danger-full-access`, and the keys of `-c` with their values decoded as TOML. |
 | `StateDirs` | `.claude/projects` | `.codex/sessions`, `.codex/archived_sessions`, and the file `.codex/state_5.sqlite`, which holds thread names. Whether a resume by ID needs the file is UNVERIFIED. P2.17 checks it, as a manual check for the owner if it needs a prompt, and drops the file if not. |
 | `InstallDirs` | `.local/share/claude` | none: the binary's folder is enough |
 | `ProjectFiles` | `.claude/`, `CLAUDE.md`, `.mcp.json` | `AGENTS.md`, `.codex/` |
 | `Fork` | `claude --resume {agent_session_id} --fork-session` ([CLI reference](https://code.claude.com/docs/en/cli-reference)) | `codex --no-daemon fork {agent_session_id}`: a unit test in Codex keeps `--no-daemon` before `fork` |
 | `ModelGuard` | wire `anthropic-messages` on `api.anthropic.com`. Paths and tool types from recordings (P2.4). `Search` holds the `web_search_*` type that Claude Code's WebSearch uses. | wire `openai-responses` on `api.openai.com` and `chatgpt.com`, with `WebSocket` on. Paths and tool types from recordings (P2.4). |
 
-The values come from each agent's docs or source on 10 November 2026 ([build facts](../research/build-facts.md#1-agent-data)). A list of flags cannot see a settings file: Claude Code also starts in bypass mode from `permissions.defaultMode` in the user's settings. In a sandbox the home is new at each start (7.1), so no such file stays. `Egress` leaves three kinds of host out on purpose. `downloads.claude.ai` is the updater, and agents do not update in a sandbox ([question 21](#15-open-questions)). `mcp-proxy.anthropic.com` serves claude.ai connectors, which a rule can grant. The telemetry hosts are optional. Both agents read the proxy variables themselves, and neither runs on Node. Claude Code's `LoginFiles` also gain `~/.config/anthropic/`, where a keyless Console sign-in keeps its profile (P2.17).
+The values come from each agent's docs or source on 10 November 2026 ([build facts](../research/build-facts.md#1-agent-data)). A list of flags cannot see a settings file. So `--settings` with a path is refused, but Claude Code also starts in bypass mode from `permissions.defaultMode` in the user's own settings. In a sandbox the home is new at each start (7.1), so no such file stays.
+
+`DangerFlags` and `DangerText` are a deny list. They catch a bug in the table, an old manifest, or a flag that a helper of another version wrote. They cannot list every spelling in every version of an agent, and until phase 1 the agent can write the manifest that the check reads, so the check is not a wall. Each new version of an agent needs its flags checked again, by the watch of P0.9 or a step of the release.
+
+`Egress` leaves three kinds of host out on purpose. `downloads.claude.ai` is the updater, and agents do not update in a sandbox ([question 21](#15-open-questions)). `mcp-proxy.anthropic.com` serves claude.ai connectors, which a rule can grant. The telemetry hosts are optional. Both agents read the proxy variables themselves, and neither runs on Node. Claude Code's `LoginFiles` also gain `~/.config/anthropic/`, where a keyless Console sign-in keeps its profile (P2.17).
 
 The agent table also gets a hint for each agent about a low-value token that a `shared` host may get, such as a token from `claude setup-token` (14.2.3). The size of a sandbox for each agent is data there too ([question 14](#15-open-questions)).
 
@@ -1926,9 +1943,9 @@ The supervisor serves `paths.Socket(id)` with the holder's protocol. It answers 
 
 `TUploadBegin`, `TUploadChunk` and `TUploadEnd` are now accepted on the session socket too, for walled sessions (feature `put`).
 
-The holder of an unwalled session (P0.2) checks the peer of each connection that it accepts. The wait for secrets at its start (`awaitSecrets` in `internal/host/secrets.go`) checks it too. It reads `SO_PEERCRED`, whose credentials are those of the peer at `connect` time ([unix(7)](https://man7.org/linux/man-pages/man7/unix.7.html)), then `/proc/<pid>/cgroup`. Where the kernel has `SO_PEERPIDFD` (Linux 6.5, [kernelnewbies](https://kernelnewbies.org/Linux_6.5)), the holder also gets a pidfd. After it reads the cgroup, it checks with `pidfd_send_signal(pidfd, 0)` that the same process still lives. So a reused pid cannot pass. A peer whose cgroup path lies under `<name>.slice` gets only `hello` and `ping`, and the error `forbidden` for anything else. That slice holds every session's unit and the git scopes of 19.3. A peer whose cgroup the holder cannot read counts as inside. The check holds a session's own processes, not what they start elsewhere. A process in a session can still ask the systemd user manager, cron or `ssh` to start a process outside `<name>.slice`. That process passes the check (N5). Only a wall closes this gap (G5). Hooks use the new hook socket, `paths.HookSocket(id)`, which accepts only the role `hook` and the op `hook`. It also accepts only a peer whose cgroup is the session's own unit, `<prefix><id>.service`, or lies below it. So one session cannot send hook events to another.
+The holder of an unwalled session (P0.2) checks the peer of each connection that it accepts. The wait for secrets at its start (`awaitSecrets` in `internal/host/secrets.go`) checks it too. It reads `SO_PEERCRED`, whose credentials are those of the peer at `connect` time ([unix(7)](https://man7.org/linux/man-pages/man7/unix.7.html)), then `/proc/<pid>/cgroup`. Where the kernel has `SO_PEERPIDFD` (Linux 6.5, [kernelnewbies](https://kernelnewbies.org/Linux_6.5)), the holder also gets a pidfd. After it reads the cgroup, it checks with `pidfd_send_signal(pidfd, 0)` that the same process still lives. So a reused pid cannot pass. A peer whose cgroup path lies under `<name>.slice` gets only `hello` and `ping`, and the error `forbidden` for anything else. That slice holds every session's unit and the git scopes of 19.3. A peer whose cgroup the holder cannot read counts as inside. So does a peer of another user, root included, and a peer whose cgroup file has no path below the root. cgroup v1 shows `/` for a process that is exiting, and an unused v2 hierarchy shows `0::/` beside it. The session socket takes no `hook` events. The helper reads its own cgroup the same way, in one shared check. When it runs inside a session, or on Linux cannot read or parse its own cgroup file, it refuses every act on a session with `forbidden`. In the bridge, that is `attach` and the requests `delete`, `resume`, `restore`, `send`, `peek`, `rename` and `kill`. Among the helper's commands, it is `rm` and `restore`. A cgroup namespace can show a process in a session's unit at `/`. So where the user has a systemd user manager, the helper also refuses when its cgroup namespace is not the manager's, which it reads through the peer of the manager's private socket in `/run/user/<uid>/systemd/`, and when its own cgroup file has no path below the root. Without this check, the helper would stop and remove sessions through the systemd user manager. The check holds a session's own processes, not what they start elsewhere. A process in a session can still ask the systemd user manager (`systemd-run --user --scope`), cron or `ssh` to start a process outside `<name>.slice`, or move itself out of the slice by writing its pid to a `cgroup.procs` file that the user owns. That process passes the check (N5). Only a wall closes this gap (G5). Hooks use the new hook socket, `paths.HookSocket(id)`, at `h/<id>.sock` in the runtime folder, beside `s/<id>.sock`. Its path is as long as the session socket's, so it fits wherever that fits. It accepts only the role `hook` and the op `hook`. With the peer check, it refuses a peer in another session's unit, in a git scope, or whose cgroup the holder cannot read. It accepts a peer in the session's own unit, `<prefix><id>.service`, or below it, where the folder right after `<name>.slice` is that unit. It also accepts a peer outside every session, which could do more on the session socket. So one session cannot send hook events to another.
 
-**Without a systemd user manager,** sessions have no unit, so the holder cannot tell a session's process from another process of the user. It keeps the role check alone: the hook socket accepts only `hook`, and the agent's environment names only the hook socket. Any process of the user can still dial a session socket. `host doctor` reports the check "session sockets" as weak there, with the hint to run sessions under systemd's user manager.
+**Without a systemd user manager,** sessions have no unit, so the holder cannot tell a session's process from another process of the user. It keeps the role check alone: the hook socket accepts only `hook`, and the agent's environment names only the hook socket. Any process of the user can still dial a session socket. `host doctor` reports the check "session sockets" as weak there, with the hint to run sessions under systemd's user manager. With a user manager, the doctor asks each running holder, with the op `sockets`, whether it checks its peers. It reports the check as weak, with the hint to resume them, while a holder runs without it. That is a holder from before P0.2, which does not know the op, whatever files lie beside it. It is also a holder that started without a systemd user manager, and still runs after the manager came back. Each keeps its state until a resume or a restore starts a new holder.
 
 ### 10.5 Bridge ops, features and hello
 
@@ -2778,10 +2795,16 @@ All checks call `client.Allow`, which returns a `*client.UserError` with a hint.
 `SSH.baseArgs` also turns off forwarding for every host, whatever its tier:
 
 ```text
--o ForwardAgent=no -o ForwardX11=no -o PermitLocalCommand=no
+-o ForwardAgent=no -o ForwardX11=no -o PermitLocalCommand=no -o GSSAPIDelegateCredentials=no
 ```
 
-Every connection but that of `forward` also adds `-o ClearAllForwardings=yes`: the bridge, `Run`, `Shell` and the `git` command of `pull`. So a shared master never holds a forward from a config file. `SSH.Forward` keeps its own `-L` options, and adds `-o ClearAllForwardings=no`, so that the user's config cannot clear them. Before it starts, it reads `ssh -G`. It refuses when the user's config adds a `RemoteForward` for the host, because `forward` opens only the ports that the user names. This fix ships first, on its own, as task H2 ([question 40](#15-open-questions)).
+The generated config starts with the same four settings and `ClearAllForwardings yes`, before its first `Include`. A `ProxyJump` hop is a second `ssh` that reads the generated config through `-F` but gets none of the `-o` options, so the hop forwards nothing either, and opens none of the forwards or the tunnel of a config. `forward` keeps its ports, because its command line says `ClearAllForwardings=no`, and ssh reads the command line first. The guided setup's first check (`SSHWorks`), which runs before a host is saved, uses a generated config of its own with the same first lines. Each generated config includes the system's SSH config last, because ssh skips it when `-F` names another file: `/etc/ssh/ssh_config`, or `%ProgramData%\ssh\ssh_config` on Windows.
+
+Every connection but that of `forward` also adds `-o ClearAllForwardings=yes`: the bridge, `Run`, `Shell`, the `git` command of `pull`, the debug bundle's commands and `SSHWorks`. So a shared master never holds a forward from a config file. The shared master's socket has a name that older clients did not use (`nf-%C`), so no session uses a master that an older client started with the agent forwarded. When the client cannot make a private folder for that socket, every connection is one of its own, so the user's own `ControlPath` never names the master, and the client neither stops nor checks a master. `SSHWorks` and the debug bundle's log connect with `-o ControlMaster=no -o ControlPath=none`.
+
+`SSH.Forward` has a connection of its own (`-o ControlMaster=no -o ControlPath=none`), so its forwards end when it ends and never enter the shared master. It keeps its own `-L` options, and adds `-o ClearAllForwardings=no`, so that the user's config cannot clear them. Before it starts, it reads `ssh -G` with its own options. It refuses when the user's config adds a `RemoteForward` or a `Tunnel` for the host, because `forward` opens only the ports that the user names. It refuses `ForkAfterAuthentication yes`, which would leave the forward running in the background after `forward` ends. OpenSSH 8.7 added `ForkAfterAuthentication`. OpenSSH 8.0 to 8.6, which the client supports, reject the option on the command line and in a config file. So the client asks ssh once with `ssh -G`, which connects to nothing, whether it knows the option. Where it does, the generated config's first lines also say `ForkAfterAuthentication no`, so neither the host nor a hop goes to the background. A ControlPersist master still does, because ssh sets that for itself. Where it does not, the line is left out, and the check of `forward` stays. It also refuses when it cannot read every line that `ssh -G` prints, because a line that it cannot read hides the lines after it. Each `ssh -G` waits at most 2 s for its output after ssh ends or is stopped. This fix ships first, on its own, as task H2 ([question 40](#15-open-questions)).
+
+An option on the command line wins only where ssh keeps the first value. List options, such as `SendEnv` and the forwards, add to a list in the order that ssh reads them. They need a clearing option, such as `ClearAllForwardings`, or a line at the end of the generated config ([0034](decisions/0034-ssh-options-on-the-command-line.md)).
 
 The user's config can also send the laptop's environment to the host's sshd, where the host's root can read it. For a host below `own`, the generated config ends with `SendEnv -*` and `SendEnv LANG LC_*`. These clear every `SendEnv` of the user's and the system's config. A `SetEnv` value can name a variable of the laptop. So the client refuses to connect to such a host while `ssh -G` shows a `setenv` line. H5 adds both.
 
@@ -3371,7 +3394,7 @@ The bridge serves the new requests in a new `bridge_sandbox.go`, as `handleMore`
 - `BuildRootScript`: one golden script and undo script for each mix of steps in `internal/client/testdata/root/`. It refuses `root`, `a b`, `$(id)`, `-x`, a name of 33 characters and a uid of 0. No script contains `$USER`. The SHA-256 is stable.
 - `RunRoot`'s quoting: a fuzz test that any text survives the single quotes unchanged.
 - `RootStepsFor` and the default mode: a table of probes, tiers and histories.
-- `SSH.baseArgs`: the forwarding options are always there. The pin options are there when `known_hosts-<name>` exists. A missing pin file stops a host whose `key` is in `tiers.toml`. `ClearAllForwardings=yes` is on every connection but `Forward`, which has `ClearAllForwardings=no` and refuses a `RemoteForward` from the config. A host below `own` gets `SendEnv -*`, and a `setenv` line stops it.
+- `SSH.baseArgs`: the forwarding options are always there. The pin options are there when `known_hosts-<name>` exists. A missing pin file stops a host whose `key` is in `tiers.toml`. The generated config starts with the forwarding options and `ClearAllForwardings yes`, and a `ProxyJump` hop reads them. `ClearAllForwardings=yes` is on every connection but `Forward`. `Forward` has `ClearAllForwardings=no` and a connection of its own, and refuses a `RemoteForward`, a `Tunnel` or `ForkAfterAuthentication yes` from the config. The shared master's socket is `nf-%C`. A host below `own` gets `SendEnv -*`, and a `setenv` line stops it.
 - `PinHostKey`: known hosts files with plain, hashed and `[host]:port` entries, `@cert-authority` and `@revoked` lines, and with none. A `--host-key` that differs from the known hosts. The connection of step 3 offers no key.
 - `Allow`: every kind of outbound item against every tier, with and without `[secret_tiers]`.
 - `LoadTiers`: the migration, and a host with no entry after it.
@@ -3388,7 +3411,7 @@ The bridge serves the new requests in a new `bridge_sandbox.go`, as `handleMore`
 **End-to-end tests:** a new `test/e2e/sandbox_hosts.py`, run with `E2E_ONLY=sandbox-hosts`. Test hosts are other people's machines: the suite never uses `--root-step run` unless the host's owner sets `E2E_ROOT=run`.
 
 1. `host add --tier own --root-step print --yes`: the probe block prints, the root script prints with its SHA-256, and nothing changes outside the user's home.
-2. With `ForwardAgent yes` in a throwaway client SSH config, a session on the host has no `SSH_AUTH_SOCK`.
+2. With `ForwardAgent` naming a throwaway agent in a throwaway client SSH config, a session on the host has no `SSH_AUTH_SOCK`.
 3. With a wrong key in `known_hosts-<name>`, the client refuses to connect, with the message of section 14.14.
 4. A `shared` host never gets an `own`-tier secret: the start is refused, and `env` on the host lacks it.
 5. With images through the laptop, each file arrives and checks. A file changed on the way is deleted.
@@ -3601,7 +3624,7 @@ This is the only full list. Each question has its options and a recommended defa
 42. **How fast does the project answer an advisory for the VMM, the kernel or Ghostty?**
     - (a) A fixed time.
     - (b) Best effort.
-    - **Recommended:** (a): a release within 7 days, with the known-bad list (P4.6) in that release. It covers an advisory with a CVSS score of 7.0 or more, and any advisory whose range holds a current pin (20.9). The 7 days are a project choice. The nearest outside norm is the linux-distros list, whose members release a fix within 10 days of a public issue ([distros](https://oss-security.openwall.org/wiki/mailing-lists/distros)).
+    - **Recommended:** (a): a release within 7 days, with the known-bad list (P4.6) in that release. It covers an advisory of severity high or critical (CVSS 7.0 or more), and any advisory whose range holds a current pin (20.9). The 7 days are a project choice. The nearest outside norm is the linux-distros list, whose members release a fix within 10 days of a public issue ([distros](https://oss-security.openwall.org/wiki/mailing-lists/distros)).
 
 ### Policy, shells and the classifier
 
@@ -3771,10 +3794,11 @@ The research of 10 November 2026 checked the facts that the build depends on ([b
     - **Recommended:** (a), as the owner decided on 11 November 2026. A libghostty-vt tag gives each later bump a name that P0.9 can compare. Patches on an old commit need a review at each bump ([build facts](../research/build-facts.md#61-ghostty-and-its-advisories)).
 
 76. **How large may a terminal be?** GHSA-jqr7 says to cap the columns, and names no number. Ghostty itself allows 65535.
-    - (a) 4096 columns and 4096 rows.
-    - (b) 65535, Ghostty's own limit.
-    - (c) 1024.
-    - **Recommended:** (a), as the project's own choice. A screen 7,680 pixels wide with cells 6 pixels wide holds 1,280 columns, so 4096 leaves room for any real window (19.1).
+    - (a) 4096 columns and 2048 rows for the PTY and the shadow terminal, and at most 1000 columns and 500 rows for the holder's Go screen model.
+    - (b) 4096 columns and 4096 rows for all three.
+    - (c) 65535, Ghostty's own limit.
+    - (d) 1024.
+    - **Recommended:** (a), as the project's own choice, made in P0.1. A screen 7,680 pixels wide with cells 6 pixels wide holds 1,280 columns, so 4096 leaves room for any real window. Rows are taller than columns are wide, so 2048 rows leave room too. P0.1 measured the cost (19.1). The shadow terminal at 4096 by 4096 held 629 MiB with its 10,000 lines of scrollback full and the alternate screen on, and 488 MiB at 4096 by 2048. The Go screen model at 4096 by 4096 held 3.6 GiB, and 7.2 GiB on the alternate screen. At 1000 by 500 it holds 113 MiB, and 227 MiB on the alternate screen. The launcher's preview uses the same 1000 by 500.
 
 77. **How does the host run git in an unwalled session's repository?** The session can write the repository's config. `git status` can run a filter that the config names.
     - (a) With `-c core.fsmonitor=false -c core.hooksPath=/dev/null` only.
@@ -3964,6 +3988,11 @@ The review of this spec on 11 November 2026 raised these choices. The text alrea
      - (b) As (a), and the client also keeps the `origin` of each host folder in its state folder. When it changes, `new` asks at a terminal, and fails with exit code 4 without one.
      - (c) A host folder gets the sections of a repository only when `new --repo <name>` names it. Without the flag, `new` applies no section, and says so.
      - **Recommended:** (a), as 6.1 step 3 takes it. The repository's own file (6.1, step 4) and setup trust (19.2) already trust the host's working tree. A process that writes that tree runs as the login user, which N5 leaves out. (b) adds a store and a question for the same gap. (c) makes each `--dir` session name its repository twice.
+108. **Should session units lose access to the user manager's bus and to `/sys/fs/cgroup`?** The peer check of 10.4 holds a session's own processes only. A process in a session can still ask the user manager to start a process outside `<name>.slice`, stop a session's unit with `systemctl --user`, or move itself out of the slice through a `cgroup.procs` file that the user owns.
+     - (a) Do nothing until walls hold sessions (G5). The docs say that the check is a speed bump, not a wall.
+     - (b) Hide only the bus: give session units their own `DBUS_SESSION_BUS_ADDRESS`, and no `XDG_RUNTIME_DIR/bus`.
+     - (c) Hide both, as an opt-in: (b), plus `InaccessiblePaths=` or `ProtectControlGroups=` and a private mount namespace through the unit's properties.
+     - **Recommended:** (a). Agents and their tools use `systemctl --user` and user timers in a session, and (b) or (c) would break them. The mount properties of (c) may need user namespaces or root on some distributions, which ties into question 4 and the root step of H7. Each would also need a test on each target distribution. Walls close the gap for every session at once.
 
 ### Decided by the design
 
@@ -4389,13 +4418,16 @@ Section 3.2 lists the holes that exist today, whatever the wall. This section sp
 | `internal/host/vt_test.go` | The version prefix `0.17.` and its skip message |
 | `.goreleaser.yaml`, `CONTRIBUTING.md`, `scripts/repro.sh`, `scripts/test-install.sh`, `scripts/time-to-agent.sh` | Each mention of Zig 0.16 |
 
-**The size cap.** The cap is 4096 columns and 4096 rows. This is the project's own choice: Ghostty allows 65535, and GHSA-jqr7 names no number ([question 76](#15-open-questions)).
+**The size cap.** The cap is 4096 columns and 2048 rows. The holder's Go screen model has a smaller cap of its own, 1000 columns and 500 rows. These are the project's own choices: Ghostty allows 65535, and GHSA-jqr7 names no number ([question 76](#15-open-questions)).
 
-- A new `clampTerm(n int) uint16` in `internal/host/vt.go` maps a value below 1 to 1, and a value above 4096 to 4096.
-- It replaces `clamp16` for columns and rows in the PTY size at the holder's start (`holder.go`) and in the resize (`holder_conn.go`). It also replaces it in the size frames to the shadow terminal (`vt.go`, `vt_child.go`). Pixel sizes keep `clamp16`.
-- The holder clamps a size once, where it reads it: `Term` at its start, and each `TResize`. The PTY, the Go screen model (`newScreenModel` and `screenModel.resize` in `screen.go`), the shadow terminal and the manifest all get that size.
-- The shadow terminal applies the same cap itself, in `vt/src/main.zig`, to `--cols`, `--rows` and each resize message. So a size that reaches it by another path cannot pass the cap.
-- A clamped size writes one debug line to the holder's log: `resize clamped`, with the size asked for and the size set.
+- The rows cap is 2048 because of the shadow terminal's memory. P0.1 measured its largest resident size on Linux arm64, with libghostty-vt 1.0.0. At 4096 by 4096, it held 143 MiB on the main screen and 284 MiB with the alternate screen on. With its 10,000 lines of scrollback full as well, it held 629 MiB. At 4096 by 2048, the same case held 488 MiB, under 512 MiB.
+- A new `clampCols(n int) uint16` in `internal/host/vt.go` maps a value below 1 to 1, and a value above 4096 to 4096. A new `clampRows(n int) uint16` does the same with 2048.
+- They replace `clamp16` for columns and rows in the PTY size at the holder's start (`holder.go`) and in the resize (`holder_conn.go`). They also replace it in the size frames to the shadow terminal (`vt.go`, `vt_child.go`). Pixel sizes keep `clamp16`.
+- The holder clamps a size once, where it reads it: `Term` at its start, and each `TResize`. The PTY, the shadow terminal and the manifest all get that size. So the session's row, `peek` and `list` report it. The VT keeps the clamped size for its next child, and `spawn` clamps `--cols` and `--rows` again as a guard.
+- The Go screen model (`newScreenModel` and `screenModel.resize` in `screen.go`) takes at most 1000 columns and 500 rows. Its emulator keeps over 200 bytes for each cell, so at 4096 by 4096 it held 3.6 GiB in the holder, and 7.2 GiB on the alternate screen. That counts against the session's memory cap. The launcher's preview uses the same cap (`internal/tui/preview.go`).
+- For a terminal larger than 1000 by 500, the model shows the agent's output laid out at 1000 by 500. A line wider than 1000 columns wraps, and a full-screen program's rows below row 500 land on the last row. So the status rules can miss or misread the screen there. The hooks, the agent's OSC reports and the output's timing still set the status.
+- The shadow terminal applies the same caps itself, in `vt/src/main.zig`, to `--cols`, `--rows` and each resize message. So a size that reaches it by another path cannot pass them.
+- A clamped size writes one line at INFO to the holder's log (`holder.log`): `resize clamped`, with the size asked for and the size set.
 
 **Errors.**
 
@@ -4403,12 +4435,14 @@ Section 3.2 lists the holes that exist today, whatever the wall. This section sp
 | --- | --- | --- |
 | `just vt`, `just build` or the vt tests with another Zig | The shadow terminal needs Zig 0.17.0, and this machine has 0.16.0. | `just setup`, which puts the pinned Zig into `.tools/` |
 
+`just vt` fails with this message. `just build` prints it as a note and goes on without the shadow terminal. It also removes the old build of it, `internal/client/helpers/vt-linux-*`, so the client never embeds an old pin. The vt tests skip with it. They also skip when the binary that they would use says, in its `--version`, that it is built from another Ghostty commit than the one that `vt/build.zig.zon` pins.
+
 **Tests.**
 
-1. Unit tests of `clampTerm`: -1, 0, 1, 80, 4096, 4097, 65535 and the largest `int`.
-2. A holder test: a `TResize` of 65535 by 65535 sets the PTY, the Go screen model and the shadow terminal to 4096 by 4096. So does a start whose `Term` is 65535 by 65535.
-3. A test of the shadow terminal: `--cols 65535` starts it at 4096 columns.
-4. The replay fixtures of `TestVT` and the fidelity fixtures of `test/ttyshot` pass with the new pin.
+1. Unit tests of `clampCols` and `clampRows`: -1, 0, 1, 80, 2048, 2049, 4096, 4097, 65535 and the largest `int`.
+2. A holder test: a `TResize` of 65535 by 65535 sets the PTY and the shadow terminal to 4096 by 2048, and the Go screen model to 1000 by 500. A start whose `Term` is 65535 by 50 runs at 4096 by 50, and the saved manifest, the session's row, `peek` and `list` say 4096 by 50. A start with one number only, 65535 by 0 or 0 by 65535, runs at 4096 by 24 or 80 by 2048, and the manifest, the row and `peek` say so. A start with no size keeps "no size" in the manifest. `holder.log` has the `resize clamped` line.
+3. A test of the shadow terminal: `--cols 65535 --rows 70000` starts it at 4096 by 2048, and so do a resize and a snapshot of 65535 by 65535.
+4. `TestVTSnapshotFixtures` and `TestVTSnapshotCases` in `internal/host` pass with the new pin.
 5. In the pull request: the compare API answers "ahead" or "identical" for each of the four fix commits against the new pin. From P0.9 on, the watch job checks this each day.
 
 ### 19.2 Setup trust tied to the script's content (P0.6)
@@ -4541,13 +4575,16 @@ Walled sessions follow 7.1: the host runs no git in a folder that a sandbox can 
 **`host create lima`.**
 
 1. It runs `limactl --version`, and reads `limactl version <x.y.z>`. It refuses a version below 2.3.0.
-2. On macOS, `CreateArgs` adds `--vm-type=vz`, `--set=.networkOpts.hostLoopback = false` and `--nested-virt`. The explicit `vz` wins over a `vmType` in the user's `$LIMA_HOME/_config/default.yaml`.
+2. On macOS, `CreateArgs` adds `--vm-type=vz`, `--set=.networkOpts.hostLoopback = false` and `--nested-virt`. The explicit `vz` wins over a `vmType` in the user's `$LIMA_HOME/_config/default.yaml`. Lima's `$LIMA_HOME/_config/override.yaml` wins over both arguments ([defaults.go](https://github.com/lima-vm/lima/blob/v2.3.0/pkg/limayaml/defaults.go)). So, after `limactl create` and before the first start, the client reads the new instance from `limactl list --json`. If it is not `vz` with `config.networkOpts.hostLoopback` false, the client deletes it with `limactl delete --force` and stops with the error below. Lima's `vz` driver also refuses `hostLoopback` false with a `user-v2` network, which `default.yaml` or `override.yaml` can give every VM ([vz_driver_darwin.go](https://github.com/lima-vm/lima/blob/v2.3.0/pkg/driver/vz/vz_driver_darwin.go)). A network is `user-v2` when its mode is `user-v2` once Lima has filled in its defaults: when no network in `$LIMA_HOME/_config/networks.yaml` has mode `user-v2` and a gateway, Lima puts its own `user-v2` network in place of any entry called `user-v2` ([config.go](https://github.com/lima-vm/lima/blob/v2.3.0/pkg/networks/config.go)). So the client also deletes a VM whose `config.networks` holds such a network, and its Try names the file that adds it.
 3. On Linux, Lima uses QEMU, which refuses the option. `CreateArgs` adds none of the three, and the client prints the warning below.
 4. It starts the VM. When the start fails with one of Lima's two nested-virtualisation messages, the client runs `limactl edit --tty=false --set '.nestedVirtualization = false' <instance>`, and starts again. It prints: "This Mac cannot run a VM inside a VM, so box gets no microvm sandboxes." Any other failure is reported as today.
+5. The client looks for the message in the stderr of `limactl start` and in the instance's `ha.stderr.log`. Lima's host agent sends the event that ends `limactl start`, then removes `ha.pid`, and only then logs the message ([hostagent.go](https://github.com/lima-vm/lima/blob/v2.3.0/pkg/hostagent/hostagent.go), [main.go](https://github.com/lima-vm/lima/blob/v2.3.0/cmd/limactl/main.go)). So the client reads the log again until it holds a fatal line, or the process in `ha.pid` has ended, or for 1 s after `ha.pid` has gone, and for 10 s at most. The times are project choices.
+6. After the edit, the client reads the instance again, and starts again only when that read works and shows `config.nestedVirtualization` false. If it is still true, because `override.yaml` sets it, the client does not start again. It deletes the VM and stops with the error below. So does a read that fails, that is not JSON, that leaves out the field, or that leaves out the instance.
+7. If the edit or the second start fails, the client deletes the VM, which no host names yet, and stops with the error below.
 
 So Lima decides nested virtualisation with Apple's own check, not with the chip's name ([question 78](#15-open-questions)).
 
-**`host doctor` on a Lima host.** The client reads the instance from `limactl list --json`. The check "laptop loopback" passes when `vmType` is `vz` and `config.networkOpts.hostLoopback` is false. A missing field counts as true, which is Lima's default (section 11). Otherwise it warns, also for an instance made before P0.8. The check runs on the laptop: `LoopbackCheck` in `internal/provider/lima/lima.go`, which `hostDoctorCmd` adds to the host's checks.
+**`host doctor` on a Lima host.** The client reads the instance from `limactl list --json`. The check "laptop loopback" passes when `vmType` is `vz` and `config.networkOpts.hostLoopback` is false. A missing field counts as true, which is Lima's default (section 11). Otherwise it warns, also for an instance made before P0.8. `limactl list --json` gives the settings that Lima loads now, but a running VM keeps the network that it started with ([vm_darwin.go](https://github.com/lima-vm/lima/blob/v2.3.0/pkg/driver/vz/vm_darwin.go)). So when the instance runs, and its `lima.yaml`, `$LIMA_HOME/_config/default.yaml` or `override.yaml`, or the `_config` folder, is newer than its `ha.pid` (or its `ha.sock`), the check does not pass. It warns that the settings apply only after a restart, in either direction. When the loaded settings close the path, the Try is a restart. When they open it, the warning adds that they let the VM reach the loopback services, and the Try is the one that closes the path, which ends with a restart. When the instance runs and has neither file, it warns the same way. When the instance's own `lima.yaml`, read with a YAML parser, sets `networkOpts.hostLoopback: false` but the loaded value is true, `override.yaml` sets it, and the Try names that file. When the VM has a `user-v2` network, the Try first removes that network, and names the file that lists it: the VM's own `lima.yaml`, `override.yaml` or `default.yaml`. The check runs on the laptop: `LoopbackCheck` in `internal/provider/lima/loopback.go`, which `hostDoctorCmd` adds to the host's checks.
 
 **Errors.**
 
@@ -4557,22 +4594,44 @@ So Lima decides nested virtualisation with Apple's own check, not with the chip'
 | No version | Could not read the version of limactl from "limactl: command failed". | `limactl --version` |
 | Loopback open (a doctor warning) | box can reach services on your Mac's loopback address. | `limactl stop <instance>`, then `limactl edit --set '.networkOpts.hostLoopback = false' <instance>`, then `limactl start <instance>` |
 | On Linux (a warning at create) | Lima with QEMU cannot stop box from reaching this machine's loopback services. | Run untrusted work on a remote host: `simstim host add` |
+| Lima before 2.3.0, on Linux | Lima 2.2.1 is too old for host create: it needs 2.3.0 or later. | Update Lima (`https://lima-vm.io/docs/installation/`), then run this again. |
+| A VM on QEMU (a doctor warning) | Lima with QEMU cannot stop box from reaching this machine's loopback services. | On Linux: run untrusted work on a remote host: `simstim host add`. On macOS: `simstim host destroy box`, then `simstim host create lima box` |
+| `override.yaml` keeps the path open (macOS, before the first start) | Lima made `<instance>` with networkOpts.hostLoopback true, which lets it reach services on your Mac's loopback address, so host create deleted it. With `vmType: qemu`, the message says "vmType qemu". | Remove `vmType` and `networkOpts.hostLoopback` from `~/.lima/_config/override.yaml` (or `$LIMA_HOME/_config/override.yaml`), then run this again. |
+| `override.yaml` keeps nesting on after the edit | Lima's override.yaml keeps nested virtualisation on for `<instance>`, which this Mac cannot run, so host create deleted it. | Remove `nestedVirtualization` from `~/.lima/_config/override.yaml` (or `$LIMA_HOME/_config/override.yaml`), then run this again. |
+| Settings changed while the VM runs (a doctor warning) | the Lima settings of box changed after its VM started, so they apply only after a restart. | `limactl stop <instance>`, then `limactl start <instance>` |
+| Settings changed while the VM runs, and they open the path (a doctor warning) | the Lima settings of box changed after its VM started, so they apply only after a restart, and they let box reach services on your Mac's loopback address. | The Try of "Loopback open", or of "`override.yaml` opens the path" |
+| A `user-v2` network (macOS, before the first start) | Lima gives `<instance>` the user-v2 network `<network>`, which cannot go with networkOpts.hostLoopback false, so host create deleted it. | Remove the network `{lima: <network>}` from networks in `$LIMA_HOME/_config/default.yaml` (the file that lists it, or both `default.yaml` and `override.yaml` when neither does), then run this again. |
+| The read after the edit fails, or is not JSON | could not read `<instance>` from limactl after the edit (`<error>`), so host create deleted it. | `simstim host create lima box` (to try again) |
+| The read after the edit leaves out `nestedVirtualization` | limactl did not say whether nested virtualisation is off for `<instance>`, so host create deleted it. | `simstim host create lima box` (to try again) |
+| The list after the edit leaves out the VM | limactl did not list `<instance>` after the edit, so host create deleted it. | `simstim host create lima box` (to try again) |
+| An open VM with a `user-v2` network (a doctor warning) | As for "Loopback open" | Remove the network `{lima: <network>}` from networks in `<file>`, then the Try of "Loopback open" or of "`override.yaml` opens the path" |
+| `override.yaml` opens the path (a doctor warning) | box can reach services on your Mac's loopback address. | Remove `networkOpts.hostLoopback` from `~/.lima/_config/override.yaml` (or `$LIMA_HOME/_config/override.yaml`), then `limactl stop <instance>`, then `limactl start <instance>` |
+| The edit fails | Lima could not turn nested virtualisation off for `<instance>` (`<error>`), so host create deleted it. | `simstim host create lima box` (to try again) |
+| The second start fails | `<instance>` did not start without nested virtualisation either (`<error>`), so host create deleted it. | `simstim host create lima box` (to try again) |
+| The delete fails, after a create error above that deletes the VM | That error's message without its end, then: and host create could not delete it: `<error>`. | `limactl delete --force <instance>`, then that error's Try |
 
 **Tests.**
 
 1. `CreateArgs` for `darwin` and `linux`, against golden argument lists in `testdata`.
-2. `parseLimaVersion`: `limactl version 2.3.0`, `2.2.1`, `2.10.0`, `2.3.0-rc.1`, and text that is not a version.
-3. The start again: a fake `limactl` fails its first start with each recorded message, then succeeds. The client edits once and starts once more.
+2. `parseLimaVersion`: `limactl version 2.3.0`, `2.2.1` (too old), `2.10.0`, `2.3.0-rc.1` (too old: a pre-release comes before its release), and text that is not a version. A build from a commit after the tag, such as `2.3.0-5-g1a2b3c4`, counts as the tag's version. So does build metadata: `.m`, which Lima's Makefile adds for a changed tree, and `+...`, which a packager may add. So `2.3.0.m`, `2.3.0+brew` and `2.3.0-5-g1a2b3c4.m` pass.
+3. The start again: a fake `limactl` refuses every start while nesting is on, with each message in `ha.stderr.log`, once in its own stderr, and once logged after `limactl start` returns. The client edits once, then starts once more, in that order. Until a Mac records them, the files are written from Lima 2.3.0's source, and the pull request says so.
 4. `LoopbackCheck`: recorded `limactl list --json` lines with `hostLoopback` false, true and absent, and one with `vmType: qemu`.
 5. By hand on a Mac, as Lima's own test does ([vz-host-loopback.bats](https://github.com/lima-vm/lima/blob/v2.3.0/hack/bats/extras/vz-host-loopback.bats)), start a listener on the Mac's `127.0.0.1`. A connection from a new VM to `host.lima.internal` and that port is refused.
+6. The override: a fake `limactl` that lists the new VM with `hostLoopback` true, or with `vmType: qemu`, makes the client delete it before any start.
+7. A failed edit and a failed second start each delete the VM. So do an `override.yaml` that keeps nesting on after the edit, and a read after the edit that fails, is not JSON, leaves out `nestedVirtualization`, or lists nothing or only another VM. None of these starts again. A failed delete gives the Try that deletes it.
+8. The doctor on a running VM whose settings changed after its `ha.pid`: closed now (it was open), open now (it was closed), and a change of `default.yaml`, of `override.yaml` or of the `_config` folder. None passes, and each warning says that the settings apply only after a restart. A stopped VM passes, because its next start reads the change.
+9. The doctor's Try names `override.yaml` when the VM's own `lima.yaml` closes the path and the loaded value opens it, with `lima.yaml` in block form, in JSON form, with a quoted key and with `False`. Without that file's setting, the check passes.
+10. The written files in `testdata` keep to Lima's source: no "Shutting down" line in `start-*.stderr`, and all nine fields in each `events.Status`.
+11. A `user-v2` network from `default.yaml`, a network of mode `user-v2` from `override.yaml`, and `user-v2` from neither file each delete the VM before it starts, with the Try that names the file. So does an entry called `user-v2` that `networks.yaml` gives mode `shared` with no other `user-v2` network, because Lima puts its own `user-v2` network in its place. A network of mode `shared` starts.
+12. The doctor's Try for an open VM with a `user-v2` network removes the network first, and names `default.yaml` or the VM's own `lima.yaml`, before the Try that closes the path.
 
 ### 19.5 The watch job for pins (P0.9)
 
 **Why.** CI already runs `govulncheck` for Go. Nothing watches the Ghostty commit, and later the VMM, the kernel and `runsc`. The Ghostty advisories are in neither OSV nor GitHub's global database ([build facts](../research/build-facts.md#61-ghostty-and-its-advisories)).
 
-**The pins.** `scripts/pins-watch.py` reads:
+**The pins.** `scripts/pins-watch.py` runs the code in `scripts/pinswatch/`. It reads:
 
-- The Ghostty commit, from the URL of `.ghostty` in `vt/build.zig.zon`, which has the form `…/archive/<40 hex>.tar.gz`. Its repository is `ghostty-org/ghostty`.
+- The Ghostty commit, from the URL of the active `.ghostty` dependency in `vt/build.zig.zon`, which has the form `…/archive/<40 hex>.tar.gz`. A declaration or a `.url` inside a `//` comment does not count. Its repository is `ghostty-org/ghostty`.
 - Each `[[pin]]` of `guest/supply.lock`. P0.9 makes the file with its header and no pin. Later tasks add their entries: the kernel, erofs-utils and the VMM (P3.1, for its boot test), `runsc` (P6.1) and Firecracker (P6.2).
 
 ```toml
@@ -4585,22 +4644,59 @@ version = 1
 # ref = "v54.0"                                # the tag, for people
 # commit = "<40 hex>"                          # the commit of ref, which the build uses
 # watch = "github"                             # "github": advisories and ancestry. "osv": OSV only.
+# tag = "v{version}"                           # optional: the tag of a release, for advisories that name versions
 ```
 
-`name`, `ref` and `commit` are needed. `repo` is needed when `watch` is `github`, the default. The script ignores keys that it does not know, so later tasks may add fields such as `url` and `sha256`. Section 20.1 adds named tables of build inputs to the same file. The watch job reads only the `[[pin]]` entries.
+`name`, `ref` and `commit` are needed. A `ref` is printable ASCII with no space, as a tag name is. `repo` is needed when `watch` is `github`, the default. `tag` gives the form of the project's release tags, with `{version}` in the place of the version. Its default is `v{version}`. The script ignores keys that it does not know, so later tasks may add fields such as `url` and `sha256`. Section 20.1 adds named tables of build inputs to the same file. The watch job reads only the `[[pin]]` entries.
 
 **The check.** For Ghostty, and for each pin with `watch = "github"`:
 
-1. Read `GET /repos/<repo>/security-advisories?state=published&per_page=100`, every page ([repository advisories](https://docs.github.com/en/rest/security-advisories/repository-advisories)).
-2. In each entry of an advisory's `vulnerabilities`, take each hex string of 7 to 40 characters from `vulnerable_version_range` and `patched_versions`.
-3. A hash in the range that follows `>=`, `from` or `since` is an introduced commit. A hash that follows `<` or `up to but not including`, and each hash in `patched_versions`, is a fix. A hash in any other form, such as after `<=`, makes the advisory unread.
-4. "A reaches the pin" means that `GET /repos/<repo>/compare/<A>...<pin>` answers `ahead` or `identical`.
-5. An entry affects the pin when none of its fixes reaches the pin, and one of its introduced commits does, or it names none.
-6. An advisory with no hash in any entry is "unread" for a commit pin.
+1. Check that the pin's commit is in its repository, with `GET /repos/<repo>/commits/<commit>`. For a pin of `guest/supply.lock`, check also that its `ref` is a tag that names that commit. Each failure is an error with a `Try:` line, never an unread advisory.
+2. Read `GET /repos/<repo>/security-advisories?state=published&per_page=100`, every page ([repository advisories](https://docs.github.com/en/rest/security-advisories/repository-advisories)).
+3. Read each entry of an advisory's `vulnerabilities`, with the original text of its `vulnerable_version_range` and `patched_versions`. The script cleans and shortens text only to print it. An entry with a hex string of 7 to 40 characters in either field goes by the hash rule. Any other entry goes by the tag rule below. Both rules read their fields by the grammar below, which is the one rule for what the watch reads.
+4. The hash rule splits the range into intervals at each `or` or `||`. An interval's introduced commit is the hash after `>=`, `from` or `since`. Its fix is the hash after `<` or `up to but not including`. An interval may have at most one of each.
+5. A hash in `patched_versions` is a fix too. When the range has one interval, it is a fix of that interval. When the range has more, each hash in `patched_versions` must be the fix of one of them, or the entry is unread.
+6. "A reaches the pin" means that `GET /repos/<repo>/compare/<A>...<pin>` answers `ahead` or `identical`. A compare that answers 404 or 422 names a commit that the repository does not know. The script tests every fix of an interval before it calls the entry unread for that reason, because another fix may reach the pin.
+7. The pin lies in an interval when none of its fixes reaches the pin, and its introduced commit does, or it names none. The pin lies outside an interval when one of its fixes reaches the pin, or when its introduced commit does not. An entry affects the pin when the pin lies in any of its intervals. Each interval counts on its own: a fix of one interval never clears the pin from another.
+8. An advisory is a finding when one of its entries affects the pin. Otherwise it is unread when one of its entries is unread, or when it has no entry. Entries with hashes go first, because they name the exact fix.
 
-For every pin, the Ghostty commit included, the script also sends `POST https://api.osv.dev/v1/query` with `{"commit": "<pin>"}`. Each answer is a finding. This covers the entries that have a CVE and a `GIT` range. A pin with `watch = "osv"` gets this step only.
+**The grammar.** It is an allow-list. Each field may hold printable ASCII only (U+0020 to U+007E). Any other character makes the entry unread, such as a line break, a tab, a no-break space, a zero-width space, a combining mark or a variation selector. The field must then split completely into the tokens below, with plain spaces between them. Words match in any case. A word ends where no letter or digit follows. Any other token makes the entry unread, such as `|`, `!`, `>`, `<=`, `not`, `and`, `after`, a parenthesis, or a version in a hash rule's range. The watch never picks out the tokens that it knows and skips the rest.
 
-The job also runs `govulncheck` at the version that CI pins. It checks the Go toolchain of `go.mod` and the modules.
+```text
+hash rule
+  range       = interval *( [","] separator interval )
+  separator   = "or" / "||"
+  interval    = [ "main" ] bound *( [","] bound )
+  bound       = introduced / fix
+  introduced  = ( ">=" / "from" / "since" ) [ "commit" ] hash
+  fix         = ( "<" / "up to but not including" ) [ "commit" ] hash
+  patched     = [ item *( "," item ) ]
+  item        = [ "main" "at" ] hash
+  hash        = 7 to 40 hex digits
+
+tag rule
+  range       = vbound *( "," vbound )
+  vbound      = [ ">=" / "<=" / "<" / "=" ] version
+  patched     = [ version *( "," version ) ]
+  version     = 1*digit 1*3( "." 1*digit )
+```
+
+In the tag rule, a range has at most one lower bound: a `vbound` with `>=`, `=` or no operator.
+
+**The tag rule.** An entry with no hash names release versions, not commits. The script reads it through the project's release tags:
+
+1. Both fields must follow the tag rule of the grammar above. So `patched_versions` is empty, or holds plain versions, such as `1.4.0`, with commas between them and no empty element.
+2. Each version maps to a tag by the entry's package. For Ghostty, the package `ghostty` maps to `v<version>`, and `libghostty-vt` maps to `vt-<version>`. Any other package makes the entry unread. A pin of `guest/supply.lock` uses its `tag` form for every package.
+3. The script resolves each tag with `GET /repos/<repo>/git/ref/tags/<tag>`, and follows an annotated tag to its commit. It never gives a bare name to the compare API, where a branch of the same name could match.
+4. When a patched release reaches the pin, the entry does not affect it.
+5. When none does, the entry affects the pin if the range has no lower bound, or if the pin holds the lowest affected release. Otherwise the entry is unread. The lower bound alone never clears a pin, because a commit between two releases can hold the bug.
+6. A tag that does not exist makes the entry unread.
+
+With the advisories of 11 November 2026, every Ghostty advisory reads at both pins of this plan. At `vt-1.0.0`, none affects the pin. At `ad97d331`, eleven are findings: GHSA-w9q4-5jvv-mcv4, GHSA-jqr7-69mm-v35h, and nine advisories with no hash that release 1.4.0 fixed.
+
+For every pin, the Ghostty commit included, the script also sends `POST https://api.osv.dev/v1/query` with `{"commit": "<pin>"}`. Each answer is a finding. This covers the entries that have a CVE and a `GIT` range. A pin with `watch = "osv"` gets this step only. An OSV entry whose ID or alias names an advisory that the repository's list already found is not reported twice.
+
+The daily run also runs `govulncheck` at the version that CI pins. It checks the Go toolchain of `go.mod` and the modules. CI runs it on each pull request, so the watch does not.
 
 **Verdicts.** A person may record a verdict for one advisory and one pin commit in `scripts/pins-watch-reviewed.toml`:
 
@@ -4613,39 +4709,58 @@ verdict = "fixed"     # "fixed" or "not-affected"
 why = "The pin holds 44c4c8f5."
 ```
 
-A verdict silences a finding, or an unread advisory, for that commit only. A new pin commit is checked again.
+A verdict silences a finding, or an unread advisory, for that commit only. A new pin commit is checked again. A verdict matches an advisory by its GHSA ID, by its CVE ID, or by an alias that OSV gives.
 
 **The job.** `.github/workflows/pins-watch.yml`:
 
-- It runs on `schedule` (`cron: "23 5 * * *"`), on `workflow_dispatch`, and on pull requests that change `vt/build.zig.zon`, `go.mod`, `guest/supply.lock`, `scripts/pins-watch.py`, `scripts/pins-watch-reviewed.toml` or the workflow.
+- It runs on `schedule` (`cron: "23 5 * * *"`) and on `workflow_dispatch`. It runs on pull requests that change `vt/build.zig.zon`, `guest/supply.lock`, `scripts/pins-watch.py`, `scripts/pinswatch/`, `scripts/test-pins-watch.py`, `scripts/testdata/pins-watch/`, `scripts/pins-watch-reviewed.toml` or the workflow. The govulncheck job does not run on pull requests.
 - It pins each action by its commit SHA, sets `persist-credentials: false`, and passes zizmor.
-- It has `permissions: contents: read`. Only a separate job that runs on `schedule` has `issues: write`, and only that job opens issues.
-- It sends `GITHUB_TOKEN` to the API, for the rate limit.
-- It fails when a pin is affected, when an advisory is unread, and when an API call fails. It never passes on a partial read.
-- On a scheduled run with findings, it opens one issue for each pin and advisory that no open issue names in its title. The title is `pins-watch: <pin> is in <advisory>`, and the labels are `dependencies` and `needs triage`. The body has the advisory's link, its severity, the range as text, the pin's commit and the next step.
+- It has `permissions: contents: read`. Only a separate job that runs on `schedule` has `issues: write`, and only that job opens issues. That job runs the check again, instead of reading the first job's output.
+- It sends `GITHUB_TOKEN` to `api.github.com` only, for the rate limit. It follows no redirect to another host, and a redirect never carries the token. A run on a laptop needs no token.
+- It fails when a pin is affected, when an advisory is unread, when a pin's commit or ref is wrong, when a file that it reads is bad or is not UTF-8 text, and when an API call fails. It never passes on a partial read.
+- On a scheduled run, it opens one issue for each finding and each unread advisory, unless one of its own open issues has the same title. It lists only the open issues that `github-actions[bot]` opened with the label `dependencies`, and compares the whole title. Outsiders cannot set labels, so an issue that someone else opens cannot silence a finding.
+- The title of a finding's issue is `pins-watch: <pin> is in <advisory>`. The title of an unread advisory's issue is `pins-watch: <pin> cannot be checked against <advisory>`. The labels are `dependencies` and `needs triage`. The body has the advisory's link, its severity, the range as text, the pin's commit and the next step. The range and the severity are code, and an OSV severity must be a CVSS vector.
 
 The job reports every severity. [Question 42](#15-open-questions) sets how fast a release follows.
 
-**Errors.** Each message of the script ends with a `Try:` line.
+**Errors.** Each message of the script ends with a `Try:` line. The script cleans every message before it prints it, and before it writes a workflow annotation, so outside text never prints raw. That covers a ref, a tag, a field of an advisory and the text of an API's answer.
 
 | When | Message | Try |
 | --- | --- | --- |
 | A pin is affected | ghostty (ad97d331) is in GHSA-w9q4-5jvv-mcv4: it lacks the fix e257bb45. | Move the pin past e257bb45 (vt/README.md), or record a verdict in scripts/pins-watch-reviewed.toml |
-| An unread advisory | Cannot read the range of GHSA-xxxx-xxxx-xxxx for ghostty: "1.0.0 to 1.3.1". | Check it by hand, then record a verdict for commit ad97d331 in scripts/pins-watch-reviewed.toml |
+| A pin lacks a patched release | ghostty (ad97d331) is in GHSA-2r63-vmw6-3m3c: it lacks the release v1.4.0. | Move the pin past the release v1.4.0 (vt/README.md), or record a verdict in scripts/pins-watch-reviewed.toml |
+| An unread advisory | Cannot read the range of GHSA-xxxx-xxxx-xxxx for ghostty: "1.0.0 to 1.3.1": it is not a plain version range. | Check it by hand, then record a verdict for commit ad97d331 in scripts/pins-watch-reviewed.toml |
 | An API failure | Could not read the advisories of ghostty-org/ghostty: HTTP 403. | Run the job again later. Locally, set GITHUB_TOKEN. |
+| A pin commit that the repository does not know | ghostty: the commit 11111111 is not in ghostty-org/ghostty. | Check the URL of the ghostty dependency in vt/build.zig.zon |
+| A ref that names another commit | guest/supply.lock: the ref "v54.0" of the pin "chv" is the commit 22222222, not 11111111. | Set commit to the commit of its ref, or fix the ref |
 | No Ghostty commit | Could not find the Ghostty commit in vt/build.zig.zon. | Keep the dependency's URL in the form …/archive/<commit>.tar.gz |
 | A bad lock file | guest/supply.lock: the pin "chv" has no commit. | Add the 40-character commit of its ref |
+| A file that is not UTF-8 | guest/supply.lock: cannot read it: it is not UTF-8 text. | Save the file as UTF-8 |
+| A bad argument | pins-watch: argument --root: expected one argument. | python3 scripts/pins-watch.py --help |
 
-**Tests.** `scripts/test-pins-watch.py` runs offline, from recorded answers in `scripts/testdata/pins-watch/`. `just test` and CI run it.
+**Tests.** `scripts/test-pins-watch.py` runs offline, from recorded answers in `scripts/testdata/pins-watch/`. `just test` and CI run it. It runs the tests in `scripts/pinswatch/tests/`, one file for each group, and builds each checkout from fixtures. One test parses the repository's own pin files, and nothing more, so a real pin or verdict does not break the tests.
 
-1. The old pin `ad97d331`: findings for GHSA-w9q4-5jvv-mcv4 and GHSA-jqr7-69mm-v35h, and none for GHSA-qjfx-r533-6vx3 and GHSA-3r5j-c6rj-xq2v.
-2. The commit of `vt-1.0.0`: no finding.
-3. An advisory with no hash: unread, and the job fails.
+1. The old pin `ad97d331`: findings for GHSA-w9q4-5jvv-mcv4 and GHSA-jqr7-69mm-v35h, and for the nine advisories with no hash that release 1.4.0 fixed. None for GHSA-qjfx-r533-6vx3, GHSA-3r5j-c6rj-xq2v and the five advisories with no hash that an older release fixed.
+2. The commit of `vt-1.0.0`: no finding and no unread advisory, so the job passes with no verdict.
+3. An advisory whose range is neither hashes nor plain versions: unread, and the job fails.
 4. A verdict for that advisory and the pin's commit: the job passes. The same verdict for another commit: it fails.
 5. An OSV answer with one entry: a finding.
-6. An API answer of 403: the job fails.
+6. An API answer of 403: the job fails. So does a cut answer.
 7. A `supply.lock` pin without `commit` fails. A pin with an unknown key passes.
 8. A range `<= <pin commit>`: the advisory is unread, and the job fails.
+9. GHSA-jqr7-69mm-v35h's range, reworded: `main from commit d7bb4b863 up to but not including 0af5c9e55` is a finding. `introduced in d7bb4b863, fixed in 0af5c9e55`, `d7bb4b863..0af5c9e55`, `starting with d7bb4b863, before 0af5c9e55`, `≥ d7bb4b863, < 0af5c9e55` and the forms with `>` and `after` are unread. None passes.
+10. A range of 216 characters is read whole.
+11. A `.ghostty` declaration or a `.url` inside a comment does not count.
+12. A redirect to another host is refused, and a redirect never carries the token.
+13. The tag rule: a pin older than the lowest affected release is unread, not clear. A missing tag and an unknown package are unread. A version-only `libghostty-vt` entry resolves the tag `vt-<version>`. A tag or a ref that names a blob or a tree is refused, with a `Try:` line.
+14. An issue that someone else opened, or one with another title, does not stop the job's own issue.
+15. The range `>= A, < B, or >= C, < D`, with A, B and C in the pin and D not: a finding. The fix B of the first interval does not clear the pin from the second.
+16. `up to but not including <hash>` with a zero-width space, U+034F or U+FE0F in it or next to it: unread, and it never clears a pin.
+17. A patched list `,1.4.0`, `1.4.0,` or `1.4.0,,1.3.0`: unread.
+18. `guest/supply.lock`, `scripts/pins-watch-reviewed.toml` or `vt/build.zig.zon` that is not UTF-8 text: an error with a `Try:` line.
+19. `< bbbbbbb | >= ccccccc` and `!>= aaaaaaa`: unread, with exit 1, though each would clear the pin if the watch skipped the unknown token.
+20. A ref with a character that is not printable ASCII, such as U+034F: an error with a `Try:` line.
+21. A ref of `bad`, a line break and `::warning::injected`, or one with a terminal control: no raw workflow command and no terminal control on stdout or stderr.
 
 **Acceptance.** On a branch that restores `ad97d331`, the pull request's run fails, and names GHSA-w9q4-5jvv-mcv4 and GHSA-jqr7-69mm-v35h.
 
@@ -5149,7 +5264,7 @@ The embedded `trusted_root.json` comes from the Sigstore public instance, and ea
 
 Each runtime entry of the release manifest therefore also has `released`, the upstream release date.
 
-**The 7-day rule.** A release with the new entry, and with a fixed pin where one exists, ships within 7 days of an advisory's publication. The rule covers an advisory of `severity` `high`, and any advisory whose range holds a pin of the current release. The 7 days are a project choice. The nearest outside norm is the linux-distros list's 10 days ([build facts 6](../research/build-facts.md#6-pins-advisories-and-signatures)). `pins-watch` (P0.9) finds the advisories, and `docs/contributing/releasing.md` states the rule.
+**The 7-day rule.** A release with the new entry, and with a fixed pin where one exists, ships within 7 days of an advisory's publication. The rule covers an advisory of severity high or critical (CVSS 7.0 or more), and any advisory whose range holds a pin of the current release. The 7 days are a project choice. The nearest outside norm is the linux-distros list's 10 days ([build facts 6](../research/build-facts.md#6-pins-advisories-and-signatures)). `pins-watch` (P0.9) finds the advisories, and `docs/contributing/releasing.md` states the rule.
 
 **Errors.**
 

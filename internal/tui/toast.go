@@ -4,6 +4,8 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+
+	"github.com/iamlakshya/simstim/internal/client"
 )
 
 type toastKind int
@@ -43,6 +45,8 @@ func lifeOf(k toastKind) time.Duration {
 // push adds a toast. A repeat of a visible one extends it instead. A toast
 // with a step to try lasts as long as an error, so there is time to read it.
 func (t *toastStack) push(now time.Time, kind toastKind, text, hint string) {
+	// A toast can hold what a host sent: a name, a path, an error.
+	text, hint = client.CleanLine(text), client.CleanLine(hint)
 	life := lifeOf(kind)
 	if hint != "" {
 		life = toastErrorLife

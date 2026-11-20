@@ -93,9 +93,9 @@ func TestCompleteCategories(t *testing.T) {
 // another terminal, and refuse what they cannot do.
 func TestTheDebugCommands(t *testing.T) {
 	newTestHost(t)
-	newSession(t, "dbg", "/bin/sh", "-c", "exec sleep 60")
+	id := newSession(t, "dbg", "/bin/sh", "-c", "exec sleep 60")
 	out := ok(t, "debug", "start", "box/dbg", "--for", "10m", "--only", "memory,runtime")
-	for _, want := range []string{"Debug is on for dbg on box until ", "(memory, runtime)", "~/.local/state/", "debug stop box/dbg"} {
+	for _, want := range []string{"Debug is on for dbg on box until ", "(memory, runtime)", "~/.local/state/", "debug stop box/" + id} {
 		if !strings.Contains(out, want) {
 			t.Errorf("debug start lacks %q:\n%s", want, out)
 		}

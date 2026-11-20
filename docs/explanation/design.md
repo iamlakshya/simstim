@@ -74,11 +74,11 @@ Ranked. Use them to settle trade-offs.
 
 | Risk | Mitigation |
 | --- | --- |
-| libghostty-vt has no stable API and no tags | Pin one Ghostty commit. Keep the interface tiny (bytes in, resize, snapshot, events out). Run it in its own process. Replay tests on every bump. |
+| libghostty-vt is young: its first release, 1.0.0, came in November 2026 | Pin one release tag. Keep the interface tiny (bytes in, resize, snapshot, events out). Run it in its own process. Replay tests on every bump. |
 | Agents change their signals and flags often | Keep agent knowledge as data. Show the source of each status in the UI. Test against recorded fixtures. |
 | A terminal or agent update breaks fidelity | The fixture suite and `doctor keys` catch it. Pin and test before release. |
 | Provider tunnels drop sessions (IAP after 1 hour idle, EICE at 1 hour, Cloudflare on edge restart) | Auto-reconnect with replay. Warn about each recipe's limit in the host details view. |
 | Scope creep towards a multiplexer or an agent UI | Principles 1 and 4, and the non-goals. |
 | Clean-room and licence mistakes | No code or assets from closed tools, ever. Attribution in NOTICE for anything taken from open projects. A review before going public ([going public](../contributing/going-public.md)). |
 | Bus factor of one | Small code base, data-driven agent table, good tests, plain docs. |
-| A compromised host attacks the client through escape sequences | Attach only to hosts you trust, and use your terminal's clipboard and link controls. There is no untrusted-host output filter. SSH agent forwarding is off by default. See the [security model](security.md). |
+| A compromised host attacks the client through escape sequences | Attach only to hosts you trust, and use your terminal's clipboard and link controls. There is no untrusted-host output filter. SSH agent forwarding is always off, whatever your SSH config says. See the [security model](security.md). |

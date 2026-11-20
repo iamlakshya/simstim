@@ -16,7 +16,7 @@ Any terminal program runs in a session (`simstim new <host> -- <command>`). The 
 | Agent | `--agent` | Support | Program | Starts with | Resumes with | Status from | Inline mode |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | Claude Code | `claude` | first-class | `claude` | `claude --session-id {session_uuid}` | `claude --resume {agent_session_id}` | hooks, screen rules | `CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN=1` |
-| Codex | `codex` | first-class | `codex` | `codex --no-daemon` | `codex --no-daemon resume {agent_session_id}` | hooks, screen rules | `--no-alt-screen` |
+| Codex | `codex` | first-class | `codex` | `codex --no-daemon` | `codex --no-daemon resume -- {agent_session_id}` | hooks, screen rules | `--no-alt-screen` |
 | opencode | `opencode` | supported | `opencode` | `opencode` | `opencode -s {agent_session_id}` | screen rules | — |
 | Antigravity CLI | `antigravity` | supported | `agy` | `agy` | `agy --conversation {agent_session_id}` | output | — |
 | Gemini CLI | `gemini` | best-effort | `gemini` | `gemini --session-id {session_uuid}` | `gemini --resume {agent_session_id}` | screen rules | — |
@@ -27,6 +27,20 @@ Any terminal program runs in a session (`simstim new <host> -- <command>`). The 
 | Shell | `shell` | supported | `$SHELL` | `$SHELL -l` | `$SHELL -l` | output | — |
 
 **Inline mode** is how an agent draws in the terminal's normal screen, so your terminal keeps its scrollback. `new --inline`, or `agents.inline` in [the configuration](config.md), starts agents that have one this way; see [keep your scrollback](../how-to/scrollback.md).
+
+## Session IDs and approvals
+
+A restore or a resume gives the agent's own session ID to its resume command ([what comes back](../how-to/restore-after-reboot.md#what-comes-back)). The agent's hook can report a new ID, for example after `/clear`. The host uses an ID only when it has the agent's form below, or when the host chose the ID itself. It checks an ID when a hook reports it, and again before each resume, so it also checks an ID that an older helper saved. So a hook cannot add a flag to the resume command. Without a usable ID, a session with a command of its own runs that command again. Any other session runs the agent's continue command. The session's `holder.log` says why the host did not use an ID.
+
+A restore or a resume also refuses a command that turns the agent's own approvals off, unless the session's own command holds the same argument, with the same values. So `--allowedTools Read` that you typed does not allow `--allowedTools Bash`. The table lists these arguments:
+
+- A flag alone, such as `--yolo`, is a switch. `--flag=*` takes one value, any value. `--flag=a|b` takes one value and counts only with one of these, and `--flag!=a|b` with any value but these. `--flag=...` takes a list of values, up to the next argument that starts with `-`. A value can follow `=`, follow a short flag directly, or be the next argument. `{}` stands for a JSON object, so `--settings!={}` refuses a path to a settings file, which the host cannot read.
+- A text counts in any argument, in upper or lower case. The host also decodes an argument that is a JSON object, or a `key=value` override with a TOML value, and checks the keys and strings inside. So an escape such as `\u0062` cannot hide a text. `key!=a|b` is that key with any value but these, and `key=*` is that key with any value.
+
+| Agent | Session ID form | Flags | Text |
+| --- | --- | --- | --- |
+| Claude Code | `^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$` | `--dangerously-skip-permissions`, `--allow-dangerously-skip-permissions`, `--permission-mode!=default\|manual\|plan`, `--allowedTools=...`, `--allowed-tools=...`, `--add-dir=...`, `--plugin-dir=*`, `--plugin-url=*`, `--settings!={}` | `bypassPermissions`, `defaultMode!=default\|manual\|plan`, `permissionMode!=default\|manual\|plan`, `permissions.allow`, `additionalDirectories`, `PermissionRequest`, `PreToolUse`, `autoAllowBashIfSandboxed!=false`, `sandbox.enabled!=false` |
+| Codex | `^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$` | `--dangerously-bypass-approvals-and-sandbox`, `--yolo`, `--dangerously-bypass-hook-trust`, `--approve-for-me`, `--not-so-yolo`, `--profile=*`, `-p=*`, `-a=never`, `--ask-for-approval=never`, `--add-dir=*`, `--search`, `--enable=web_search\|web_search_request` | `danger-full-access`, `approval_policy`, `sandbox_mode`, `approvals_reviewer`, `default_permissions`, `permissions=*`, `permissions.`, `profile=*`, `sandbox_workspace_write`, `web_search!=disabled\|cached\|false`, `web_search_request!=false`, `hooks.state` |
 
 ## Install and log in
 

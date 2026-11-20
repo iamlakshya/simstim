@@ -125,11 +125,28 @@ func (System) AddSSHHost(lines string) error {
 }
 
 // SSHWorks runs `ssh -o BatchMode=yes target true`: it works only when no
-// password, passphrase or host key question stands in the way.
+// password, passphrase or host key question stands in the way. Like every
+// ssh command of the client, it forwards nothing to the host. It reads the
+// user's config through the client's generated one, which turns forwarding
+// off for a ProxyJump hop too, and it has a connection of its own, so it
+// never uses a master that the user's config names.
 func (System) SSHWorks(ctx context.Context, target string) error {
+	cfg, err := client.DefaultSSHConfig()
+	if err != nil {
+		var ue *client.UserError
+		if errors.As(err, &ue) {
+			return err
+		}
+		dir := filepath.Join(client.ConfigDir(), "ssh")
+		return &client.UserError{Msg: "cannot write the SSH config that ssh needs: " + err.Error(),
+			Hint: "Make " + dir + " a folder that you can write to, or set XDG_CONFIG_HOME to one."}
+	}
 	ctx, cancel := context.WithTimeout(ctx, 25*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=15", "--", target, "true")
+	args := slices.Concat([]string{"-F", cfg, "-o", "BatchMode=yes", "-o", "ConnectTimeout=15"},
+		client.NoForwarding(), client.NoPortForwards(), client.OwnConnection(), []string{"--", target, "true"})
+	cmd := exec.CommandContext(ctx, "ssh", args...)
+	cmd.WaitDelay = 2 * time.Second // a child of ssh may hold stderr open
 	var errb bytes.Buffer
 	cmd.Stderr = &errb
 	if err := cmd.Run(); err != nil {

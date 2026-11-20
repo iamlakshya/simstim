@@ -10,8 +10,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"runtime"
 	"strings"
 
+	"github.com/iamlakshya/simstim/internal/brand"
 	"github.com/iamlakshya/simstim/internal/client"
 	"github.com/iamlakshya/simstim/internal/provider"
 )
@@ -29,6 +31,9 @@ const (
 	DefaultIdleStop = "30m"
 )
 
+// goos is the operating system of this computer. Tests change it.
+var goos = runtime.GOOS
+
 // Provider makes Lima VMs.
 type Provider struct{}
 
@@ -39,11 +44,22 @@ func (Provider) Name() string { return "lima" }
 type instance struct {
 	Name          string `json:"name"`
 	Status        string `json:"status"`
+	Dir           string `json:"dir"`
+	VMType        string `json:"vmType"`
 	SSHConfigFile string `json:"sshConfigFile"`
 	SSHLocalPort  int    `json:"sshLocalPort"`
 	CPUs          int    `json:"cpus"`
 	Memory        int64  `json:"memory"`
 	Disk          int64  `json:"disk"`
+	Config        *struct {
+		NestedVirtualization *bool `json:"nestedVirtualization"`
+		NetworkOpts          struct {
+			HostLoopback *bool `json:"hostLoopback"`
+		} `json:"networkOpts"`
+		Networks []struct {
+			Lima string `json:"lima"`
+		} `json:"networks"`
+	} `json:"config"`
 }
 
 // find returns the instance called name, or nil when there is none.
@@ -78,10 +94,13 @@ func parseList(out []byte, name string) (*instance, error) {
 	return nil, nil
 }
 
-// CreateArgs are the limactl arguments that make the VM. --plain turns off
-// the home-folder mount and the forwarding of every guest port to this
-// machine.
-func CreateArgs(inst string, req provider.Request) []string {
+// CreateArgs are the limactl arguments that make the VM on the operating
+// system named system, as runtime.GOOS names it. --plain turns off the
+// home-folder mount and the forwarding of every guest port to this machine.
+// On macOS, --vm-type=vz wins over any vmType in the user's default.yaml so
+// that hostLoopback can close the loopback path, and --nested-virt asks Lima
+// to run Apple's own nesting check when the VM starts.
+func CreateArgs(inst string, req provider.Request, system string) []string {
 	cpus, mem, disk := req.CPUs, req.MemoryGiB, req.DiskGiB
 	if cpus <= 0 {
 		cpus = DefaultCPUs
@@ -92,8 +111,11 @@ func CreateArgs(inst string, req provider.Request) []string {
 	if disk <= 0 {
 		disk = DefaultDiskGiB
 	}
-	return []string{"create", "--tty=false", "--name=" + inst, "--plain",
-		fmt.Sprintf("--cpus=%d", cpus), fmt.Sprintf("--memory=%d", mem), fmt.Sprintf("--disk=%d", disk), Template}
+	args := []string{"create", "--tty=false", "--name=" + inst, "--plain"}
+	if system == "darwin" {
+		args = append(args, "--vm-type=vz", "--set=.networkOpts.hostLoopback = false", "--nested-virt")
+	}
+	return append(args, fmt.Sprintf("--cpus=%d", cpus), fmt.Sprintf("--memory=%d", mem), fmt.Sprintf("--disk=%d", disk), Template)
 }
 
 // Create makes and starts the VM, and returns the host that reaches it
@@ -103,19 +125,30 @@ func (Provider) Create(ctx context.Context, req provider.Request) (client.Host, 
 	if out == nil {
 		out = io.Discard
 	}
+	if err := checkVersion(ctx); err != nil {
+		return client.Host{}, err
+	}
 	inst := provider.MachineName(req.Name)
 	if in, err := find(ctx, inst); err != nil {
 		return client.Host{}, err
 	} else if in != nil {
 		return client.Host{}, &client.UserError{Msg: "Lima already has an instance called " + inst, Hint: "limactl delete " + inst + "   (if you no longer need it), or choose another name"}
 	}
-	args := CreateArgs(inst, req)
-	fmt.Fprintf(out, "  Creating the VM: limactl %s\n", strings.Join(args, " "))
+	if goos != "darwin" {
+		fmt.Fprintf(out, "  ! Lima with QEMU cannot stop %s from reaching this machine's loopback services.\n", req.Name)
+		fmt.Fprintf(out, "    Try: run untrusted work on a remote host: %s host add\n", brand.Name)
+	}
+	args := CreateArgs(inst, req, goos)
+	fmt.Fprintf(out, "  Creating the VM: limactl %s\n", shellLine(args))
 	if _, err := provider.Exec(ctx, install, "limactl", args...); err != nil {
 		return client.Host{}, err
 	}
-	fmt.Fprintf(out, "  Starting it: limactl start %s\n", inst)
-	if _, err := provider.Exec(ctx, install, "limactl", "start", "--tty=false", inst); err != nil {
+	if goos == "darwin" {
+		if err := checkClosed(ctx, inst); err != nil {
+			return client.Host{}, err
+		}
+	}
+	if err := startNew(ctx, out, req.Name, inst); err != nil {
 		return client.Host{}, err
 	}
 	in, err := find(ctx, inst)
@@ -133,6 +166,29 @@ func (Provider) Create(ctx context.Context, req provider.Request) (client.Host, 
 		Name: req.Name, SSH: sshAlias(inst), SSHConfig: in.SSHConfigFile,
 		Machine: &client.Machine{Provider: "lima", ID: inst, IdleStop: idle},
 	}, nil
+}
+
+// shellLine is args as they would be typed in a shell, for the progress
+// lines.
+func shellLine(args []string) string {
+	q := make([]string, len(args))
+	for i, a := range args {
+		q[i] = client.ShellQuote(a)
+	}
+	return strings.Join(q, " ")
+}
+
+// discard deletes a VM that Create made but cannot hand over, so that no
+// VM is left that no host names. The error says what went wrong, and hint
+// what to try next.
+func discard(ctx context.Context, inst, problem, hint string) error {
+	if _, err := provider.Exec(ctx, install, "limactl", "delete", "--force", inst); err != nil {
+		return &client.UserError{
+			Msg:  fmt.Sprintf("%s, and host create could not delete it: %v", problem, err),
+			Hint: "limactl delete --force " + inst + ", then " + hint,
+		}
+	}
+	return &client.UserError{Msg: problem + ", so host create deleted it", Hint: hint}
 }
 
 // sshAlias is the Host that Lima's ssh.config defines for an instance.
@@ -180,8 +236,7 @@ func state(s string) string {
 
 // Start boots the VM and returns when Lima says SSH works.
 func (v *vm) Start(ctx context.Context) error {
-	_, err := provider.Exec(ctx, install, "limactl", "start", "--tty=false", v.inst)
-	return err
+	return startVM(ctx, v.inst)
 }
 
 // Stop shuts the VM down. Its disk stays.

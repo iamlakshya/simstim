@@ -76,9 +76,41 @@ func agentsPage() []byte {
 		fmt.Fprintf(&b, "| %s | `%s` | %s | `%s` | `%s` | %s | %s | %s |\n", a.Title, a.Kind, a.Support, strings.Join(a.Binaries, "`, `"), strings.Join(a.Launch, " "), resume, status, inline)
 	}
 	b.WriteString("\n**Inline mode** is how an agent draws in the terminal's normal screen, so your terminal keeps its scrollback. `new --inline`, or `agents.inline` in [the configuration](config.md), starts agents that have one this way; see [keep your scrollback](../how-to/scrollback.md).\n")
+	approvalsTable(&b)
 	installTable(&b)
 	b.WriteString("\nTo add an agent, add a row to the table and, if it has them, screen rules in `internal/agents/rules/`. See [the contributing guide](../../CONTRIBUTING.md).\n")
 	return []byte(b.String())
+}
+
+// approvalsTable lists the form of each agent's session IDs, and the
+// arguments that turn its own approvals off.
+func approvalsTable(b *strings.Builder) {
+	b.WriteString("\n## Session IDs and approvals\n\n")
+	b.WriteString("A restore or a resume gives the agent's own session ID to its resume command ([what comes back](../how-to/restore-after-reboot.md#what-comes-back)). The agent's hook can report a new ID, for example after `/clear`. The host uses an ID only when it has the agent's form below, or when the host chose the ID itself. It checks an ID when a hook reports it, and again before each resume, so it also checks an ID that an older helper saved. So a hook cannot add a flag to the resume command. Without a usable ID, a session with a command of its own runs that command again. Any other session runs the agent's continue command. The session's `holder.log` says why the host did not use an ID.\n\n")
+	b.WriteString("A restore or a resume also refuses a command that turns the agent's own approvals off, unless the session's own command holds the same argument, with the same values. So `--allowedTools Read` that you typed does not allow `--allowedTools Bash`. The table lists these arguments:\n\n")
+	b.WriteString("- A flag alone, such as `--yolo`, is a switch. `--flag=*` takes one value, any value. `--flag=a|b` takes one value and counts only with one of these, and `--flag!=a|b` with any value but these. `--flag=...` takes a list of values, up to the next argument that starts with `-`. A value can follow `=`, follow a short flag directly, or be the next argument. `{}` stands for a JSON object, so `--settings!={}` refuses a path to a settings file, which the host cannot read.\n")
+	b.WriteString("- A text counts in any argument, in upper or lower case. The host also decodes an argument that is a JSON object, or a `key=value` override with a TOML value, and checks the keys and strings inside. So an escape such as `\\u0062` cannot hide a text. `key!=a|b` is that key with any value but these, and `key=*` is that key with any value.\n\n")
+	b.WriteString("| Agent | Session ID form | Flags | Text |\n| --- | --- | --- | --- |\n")
+	for _, a := range agents.Table {
+		if a.IDPattern == "" && len(a.DangerFlags) == 0 && len(a.DangerText) == 0 {
+			continue
+		}
+		fmt.Fprintf(b, "| %s | %s | %s | %s |\n", a.Title, codeList([]string{a.IDPattern}), codeList(a.DangerFlags), codeList(a.DangerText))
+	}
+}
+
+// codeList writes items as code, separated by commas, or a dash for none.
+func codeList(items []string) string {
+	var out []string
+	for _, s := range items {
+		if s != "" {
+			out = append(out, "`"+strings.ReplaceAll(s, "|", "\\|")+"`")
+		}
+	}
+	if len(out) == 0 {
+		return "—"
+	}
+	return strings.Join(out, ", ")
 }
 
 // installTable lists each agent's install command and how a host tells that

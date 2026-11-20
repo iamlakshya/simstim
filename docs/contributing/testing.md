@@ -4,10 +4,10 @@ Every change keeps the tests green, and every bug fix adds the test that would h
 
 | Command | What it runs | Where |
 | --- | --- | --- |
-| `just test` | Go unit tests with the race detector, plus offline public-readiness checker regression tests | Needs Python 3 |
+| `just test` | Go unit tests with the race detector, plus offline tests of the public-readiness checker, of the end-to-end cleanup, of the end-to-end probe of the session sockets and of the pins watch | Needs Python 3.11 or later |
 | `just cover` | The unit tests' coverage, which must stay at 70 % or more | Anywhere |
 | `go test ./internal/tui -run TestGolden -update` | Rewrites the golden screens after an intended change; review the diff | Anywhere |
-| `just fuzz` | Fuzzes the input filter and the frame reader for 30 s each (`just fuzz 5m` for longer) | Anywhere |
+| `just fuzz` | Fuzzes the input filter, the frame reader, the holder's hook handler and the text cleaner for 30 s each (`just fuzz 5m` for longer) | Anywhere |
 | `just lint` | `go vet`, the strict golangci-lint set, and the name, private-detail, script and file-size checks | Anywhere |
 | `just e2e` | The end-to-end suite against a real host | Needs a test host |
 | `just screenshots` | The README images, drawn from `demo` | Anywhere |
@@ -30,6 +30,7 @@ These are the project's quality expectations, with tools to check them locally a
 | No known vulnerability in the code we call, and no dead code | govulncheck, deadcode (`just vulncheck`) |
 | Race-free tests, and 70 % or more coverage of `internal/` without the launcher | `go test -race`, `just cover` |
 | The frame reader and the input filter never lose a byte | fuzz targets (`just fuzz`) |
+| No hook can put an agent session ID without the agent's form into a resume command | a fuzz target (`just fuzz`) |
 | The attach pump is no slower than before | benchmarks (`just bench`), on every pull request |
 
 ## Unit and golden tests
@@ -98,6 +99,10 @@ It covers start, attach and detach, resize, byte-exact output, replay after a dr
 
 `test/e2e/guided_setup.py` checks the guided setup: `setup --host <host> --agents shell --yes --no-login` connects the host, shows the checklist, installs nothing, asks nothing, and ends with the summary and the first session's command; `setup` without a terminal or flags, or with an unknown agent, refuses before it changes anything; and Ctrl+C at the first question stops it and says nothing was changed. It uses a throwaway client config with a copy of `hosts.toml`. To run only these checks, set `E2E_ONLY=guided-setup`.
 
+`test/e2e/sandbox_hosts.py` checks hosts you add ([isolation spec, 14.16](isolation-spec.md#1416-tests)). For now it has one check: with `ForwardAgent` naming a throwaway agent in a throwaway client SSH config, a session on the host has no `SSH_AUTH_SOCK`. The agent holds no keys, and your own agent is never forwarded. To show that the check can fail, plain `ssh` with the same config, and without the client's options, forwards that empty agent once. The check needs OpenSSH 8.2 or later on your computer. It skips a host that is not reached over SSH, and a host whose sshd forwards no agent even to plain `ssh`. A read of the session's environment that fails is a failure. Each run starts a session with a name of its own. It passes its cleanup only when the host confirms that the session is gone. A timeout, a failed command or an error for the host fails the cleanup, keeps the throwaway folder and prints the command to delete the session by hand. `test/e2e/test_sandbox_hosts.py` tests that cleanup offline, and `just test` runs it. To run only these checks, set `E2E_ONLY=sandbox-hosts`.
+
+`test/e2e/session_sockets.py` checks the session sockets. It starts two sessions of its own. From a shell in the first, the helper's bridge asks to type into the second session, to show its screen, to delete it and to attach to it, and each request must get `forbidden`. Where the host has `python3`, a script in the first session also dials the second session's socket itself, and must get `forbidden`. A hook in the first session reaches its own session, and not the second. Nothing reaches the second session's terminal. On a host without a systemd user manager, such as a Docker host, it checks only that `host doctor` reports the sockets as weak. It reads that from the doctor's own line about the user manager, so sessions that an older helper started do not skip the checks. `test/e2e/test_session_sockets.py` tests the probe offline, against a fake terminal that echoes each typed line, and `just test` runs it. To run only these checks, set `E2E_ONLY=session-sockets`.
+
 ## Benchmarks
 
 The attach pump has benchmarks at each step a byte takes: the host's output ring and screen model (`internal/ring`, `internal/host`), the frames (`internal/proto`), the client's catch-up and mode tracker (`internal/term`), the output frames through the client's attach (`internal/client`), and the input filter (`internal/keys`). `internal/term/termtest` makes the output they use: redraws shaped like a coding agent's, and a transcript that scrolls the screen.
@@ -119,6 +124,8 @@ The screen model is the slowest step, and it is slower when the output scrolls. 
 ## Vulnerabilities and dead code
 
 `just vulncheck` runs govulncheck, which reports known vulnerabilities only in code the project calls, and deadcode, which fails on any function that neither the program nor a test reaches. CI runs both on every push.
+
+The pins watch also runs govulncheck each day, so a new advisory shows up without a push. It checks the pins that no package ecosystem covers, such as the shadow terminal's Ghostty commit ([releasing](releasing.md#advisories-for-pins-outside-package-ecosystems)). `scripts/test-pins-watch.py` runs its tests offline, from `scripts/pinswatch/tests/`, with API answers recorded in `scripts/testdata/pins-watch/`.
 
 ## Time to first agent
 

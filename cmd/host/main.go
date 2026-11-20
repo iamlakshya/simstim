@@ -207,12 +207,16 @@ func runHook(args []string) error {
 }
 
 func runRestore(args []string) error {
+	// Restore starts sessions again: not from inside a session.
+	if err := host.CheckCaller(); err != nil {
+		return err
+	}
 	res := host.Restore(hasFlag(args, "--all"))
 	if hasFlag(args, "--json") {
 		return printJSON(res)
 	}
 	for _, r := range res {
-		fmt.Printf("%-10s %-20s %-9s %s\n", r.ID, r.Name, r.Action, r.Why)
+		fmt.Print(r.Text())
 	}
 	return nil
 }

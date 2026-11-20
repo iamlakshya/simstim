@@ -3,6 +3,7 @@ package host_test
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -37,8 +38,10 @@ func TestSessionLifecycle(t *testing.T) {
 	if m.Run.HolderPID == 0 || m.Run.AgentPID == 0 || m.Run.Socket != paths.Socket(s.ID) || m.HolderBinary == "" {
 		t.Errorf("the holder did not record itself: %+v", m.Run)
 	}
-	if fi, err := os.Stat(paths.Socket(s.ID)); err != nil || fi.Mode().Perm() != 0o600 {
-		t.Fatalf("socket: %v, %v", fi, err)
+	for _, sock := range []string{paths.Socket(s.ID), paths.HookSocket(s.ID)} {
+		if fi, err := os.Stat(sock); err != nil || fi.Mode().Perm() != 0o600 {
+			t.Fatalf("socket %s: %v, %v", sock, fi, err)
+		}
 	}
 
 	res, err := host.Delete(s.ID)
@@ -50,6 +53,11 @@ func TestSessionLifecycle(t *testing.T) {
 	}
 	if _, err := os.Stat(paths.SessionDir(s.ID)); !os.IsNotExist(err) {
 		t.Fatalf("the session's folder is still there: %v", err)
+	}
+	for _, sock := range []string{paths.Socket(s.ID), paths.HookSocket(s.ID)} {
+		if _, err := os.Stat(sock); !os.IsNotExist(err) {
+			t.Errorf("socket %s is still there: %v", sock, err)
+		}
 	}
 	if list, _ := host.List(); len(list) != 0 {
 		t.Fatalf("list after delete = %+v", list)
@@ -202,10 +210,14 @@ func TestShellIsTheDefaultAgent(t *testing.T) {
 		t.Errorf("an unknown TERM falls back to xterm-256color, got %q", m.Term.Term)
 	}
 	env := strings.Join(m.Env, "\n")
-	for _, want := range []string{"TERM=xterm-256color", "COLORTERM=truecolor", "TERM_PROGRAM=TestTerm", brand.Env("SESSION") + "=" + s.ID, brand.Env("SOCK") + "=" + paths.Socket(s.ID)} {
+	for _, want := range []string{"TERM=xterm-256color", "COLORTERM=truecolor", "TERM_PROGRAM=TestTerm", brand.Env("SESSION") + "=" + s.ID, brand.Env("HOOK_SOCK") + "=" + paths.HookSocket(s.ID)} {
 		if !strings.Contains(env, want) {
 			t.Errorf("the agent's environment lacks %s", want)
 		}
+	}
+	// It names only the hook socket, never the session socket.
+	if strings.Contains(env, brand.Env("SOCK")+"=") || strings.Contains(env, paths.Socket(s.ID)) {
+		t.Errorf("the agent's environment names the session socket:\n%s", env)
 	}
 	send(t, s.ID, "echo SHELL-$((6*7)) $"+brand.Env("SESSION"))
 	waitOutput(t, s.ID, "SHELL-42 "+s.ID)
@@ -314,13 +326,44 @@ func TestStopWithTheHost(t *testing.T) {
 	if m.Status.State == host.StateExited || m.Status.State == host.StateErrored || m.Status.Source != "system" {
 		t.Fatalf("a session stopped with the host must stay restorable: %+v", m.Status)
 	}
-	if _, err := os.Stat(paths.Socket(s.ID)); !os.IsNotExist(err) {
-		t.Errorf("the socket is still there: %v", err)
+	for _, sock := range []string{paths.Socket(s.ID), paths.HookSocket(s.ID)} {
+		if _, err := os.Stat(sock); !os.IsNotExist(err) {
+			t.Errorf("socket %s is still there: %v", sock, err)
+		}
 	}
 }
 
 // A holder that is slow to exit must not write its manifest again after
 // Delete removed the session's folder.
+// The test process itself runs in a session's unit, as when a contributor
+// runs the tests in a shell session on a host. The fixture still starts,
+// deletes and cleans up its sessions, and gives the process back its own
+// membership after its cleanup.
+func TestTheFixtureWorksInsideASession(t *testing.T) {
+	uid := os.Getuid()
+	inside := []byte(fmt.Sprintf("0::/user.slice/user-%d.slice/user@%d.service/%s/%s\n", uid, uid, brand.Slice, host.UnitName("zzzz2222")))
+	self, ns := host.SelfCgroup, host.CgroupNamespaces
+	host.SelfCgroup = func() ([]byte, error) { return inside, nil }
+	host.CgroupNamespaces = func() (string, string, error) { return "cgroup:[1]", "cgroup:[1]", nil }
+	t.Cleanup(func() { host.SelfCgroup, host.CgroupNamespaces = self, ns })
+	if host.CheckCaller() == nil {
+		t.Fatal("the stand-in membership is not inside a session")
+	}
+	// The fixture's cleanup reports a delete that fails, so the subtest
+	// passes only when it deleted the session that it left.
+	t.Run("fixture", func(t *testing.T) {
+		hosttest.New(t)
+		s := start(t, "deleted", "sleep", "60")
+		if _, err := host.Delete(s.ID); err != nil {
+			t.Fatalf("delete in the fixture: %v", err)
+		}
+		start(t, "left", "sleep", "60")
+	})
+	if host.CheckCaller() == nil {
+		t.Error("after the fixture, the process does not have its own membership back")
+	}
+}
+
 func TestDeletedSessionStaysDeleted(t *testing.T) {
 	h := hosttest.New(t)
 	// Under the race detector, each holder pauses for a second as it exits:

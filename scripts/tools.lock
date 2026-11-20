@@ -13,10 +13,10 @@ gitleaks 8.30.1 darwin-arm64 b40ab0ae55c505963e365f271a8d3846efbc170aa17f2607f13
 gitleaks 8.30.1 darwin-amd64 dfe101a4db2255fc85120ac7f3d25e4342c3c20cf749f2c20a18081af1952709 https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_darwin_x64.tar.gz
 gitleaks 8.30.1 linux-amd64 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz
 gitleaks 8.30.1 linux-arm64 e4a487ee7ccd7d3a7f7ec08657610aa3606637dab924210b3aee62570fb4b080 https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_arm64.tar.gz
-zig 0.16.0 darwin-arm64 b23d70deaa879b5c2d486ed3316f7eaa53e84acf6fc9cc747de152450d401489 https://ziglang.org/download/0.16.0/zig-aarch64-macos-0.16.0.tar.xz
-zig 0.16.0 darwin-amd64 0387557ed1877bc6a2e1802c8391953baddba76081876301c522f52977b52ba7 https://ziglang.org/download/0.16.0/zig-x86_64-macos-0.16.0.tar.xz
-zig 0.16.0 linux-amd64 70e49664a74374b48b51e6f3fdfbf437f6395d42509050588bd49abe52ba3d00 https://ziglang.org/download/0.16.0/zig-x86_64-linux-0.16.0.tar.xz
-zig 0.16.0 linux-arm64 ea4b09bfb22ec6f6c6ceac57ab63efb6b46e17ab08d21f69f3a48b38e1534f17 https://ziglang.org/download/0.16.0/zig-aarch64-linux-0.16.0.tar.xz
+zig 0.17.0 darwin-arm64 b607e9b9234790a008116ae5bdb71c6243b84b9fb42a53a9e70fde41c06c536a https://ziglang.org/download/0.17.0/zig-aarch64-macos-0.17.0.tar.xz
+zig 0.17.0 darwin-amd64 4f9a1c5269aa17ebda5e6d3c2b89d6cbf36f7d2b22a0306e9ab98f25f95529c6 https://ziglang.org/download/0.17.0/zig-x86_64-macos-0.17.0.tar.xz
+zig 0.17.0 linux-amd64 1cbe9df9f27e6b78d14ccbca43b6703a404ef79ef1c463de901d7f088d4e2026 https://ziglang.org/download/0.17.0/zig-x86_64-linux-0.17.0.tar.xz
+zig 0.17.0 linux-arm64 9e8d11661d4ae3bd57702a3832781e23ad151dde5798e16a5ccd503f65234ff8 https://ziglang.org/download/0.17.0/zig-aarch64-linux-0.17.0.tar.xz
 just 1.58.0 darwin-arm64 50ae3e996c974a0bf32ea7d10f495070df33f1b43e0616b2769e3d4821ed8f48 https://github.com/casey/just/releases/download/1.58.0/just-1.58.0-aarch64-apple-darwin.tar.gz
 just 1.58.0 darwin-amd64 9a09cfef66aaa79da58203970103a0684307716caaabd3e9844cacc4dc0f4023 https://github.com/casey/just/releases/download/1.58.0/just-1.58.0-x86_64-apple-darwin.tar.gz
 just 1.58.0 linux-amd64 4a5cc2f53e6f0f8c59092a6cc38291eb729d46a7dd95d3ae582008881b84931d https://github.com/casey/just/releases/download/1.58.0/just-1.58.0-x86_64-unknown-linux-musl.tar.gz

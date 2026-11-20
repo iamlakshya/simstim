@@ -25,6 +25,7 @@ func offerFixes(in io.Reader, w io.Writer, fixes []api.Fix, yes bool, apply func
 	answers := bufio.NewReader(in)
 	var chosen []string
 	for i, f := range fixes {
+		f = cleanFix(f)
 		fmt.Fprintf(w, "\n%d. %s.\n", i+1, sentenceCase(f.Problem))
 		if f.Manual {
 			fmt.Fprintf(w, "   This one is yours to do: %s.\n   Run: %s\n", f.Action, f.Command)
@@ -46,6 +47,7 @@ func offerFixes(in io.Reader, w io.Writer, fixes []api.Fix, yes bool, apply func
 	fmt.Fprintln(w)
 	failed := 0
 	for _, f := range res {
+		f = cleanFix(f)
 		switch {
 		case f.Done:
 			fmt.Fprintf(w, "✓ fixed: %s\n", f.Problem)
@@ -58,6 +60,14 @@ func offerFixes(in io.Reader, w io.Writer, fixes []api.Fix, yes bool, apply func
 		return &client.UserError{Msg: fmt.Sprintf("%d of %d fixes failed", failed, len(chosen)), Hint: "Read each one's reason above; a fix that needs root says which command to run."}
 	}
 	return nil
+}
+
+// cleanFix cleans the text of a fix from a host, to print. Its ID stays as
+// the host sent it, for the request that applies the fix.
+func cleanFix(f api.Fix) api.Fix {
+	f.Problem, f.Action, f.Error = client.CleanLine(f.Problem), client.CleanLine(f.Action), client.CleanLine(f.Error)
+	f.Command = client.CleanPath(f.Command) // the longer limit of a path, for a long command
+	return f
 }
 
 // ask asks a yes-or-no question; anything but yes is no.

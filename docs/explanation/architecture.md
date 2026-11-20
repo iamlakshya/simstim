@@ -38,7 +38,7 @@ Installed by the client into `~/.local/share/simstim/bin/<version>/`, with a `cu
 | `simstim-vt` (internal) | The shadow terminal: a static Zig program on libghostty-vt (source in `vt/`). A child of the holder, fed every output byte; it makes snapshots for new clients and answers terminal queries while no client is attached. Restarted on a crash from the ring. | The session |
 | `attach <id>` | Raw fallback: bridges a plain `ssh -t` to one holder, for any SSH client | One attach |
 | `ls --json`, `watch --json` | Reads manifests and probes holders in parallel. `watch` streams status events as NDJSON. | Seconds, or one client |
-| `hook <event>` | Called by agent hooks. Forwards the event to the session's holder (its socket is in the agent's environment). | Milliseconds |
+| `hook <event>` | Called by agent hooks. Forwards the event to the session's holder, on the hook socket that the agent's environment names. | Milliseconds |
 | `keytest` | Prints every key it receives; run inside a session, it proves keys cross the whole path unchanged | One test |
 | `kill`, `rm` | Stops the session's whole cgroup. Removes the manifest and the worktree when it is safe. | Seconds |
 | `doctor` | Checks linger, cgroups, terminfo, agents on `PATH` and the disk, and prints fixes | Seconds |
@@ -74,9 +74,11 @@ Agent knowledge is data in `internal/agents`, shipped with the host helper. Ther
 | `resume`, `continue` | `claude --resume {agent_session_id}`, `claude --continue` |
 | `id_capture` | `choose` (we pick the ID), `hook`, `scan` or `none` |
 | `hooks` | Extra arguments that make the agent report status and its session ID. `SessionStart` calls `simstim-host hook session-start`, because the ID changes on `/clear`. |
+| `id_pattern` | The form of the agent's session IDs, a UUID. The holder keeps an ID from a hook only when it matches, and a restore or a resume checks a saved ID again. |
+| `danger_flags`, `danger_text` | `--dangerously-skip-permissions`, `--permission-mode!=default\|manual\|plan`, `bypassPermissions`: arguments that turn the agent's own approvals off, some only with certain values. The text check also reads the keys and strings of a JSON or TOML value. A restore or a resume refuses a command with one, unless the session's own command holds the same argument with the same values. |
 | screen rules | A TOML file per agent in `internal/agents/rules` |
 
-Codex's launch, resume and continue commands include `--no-daemon`, so its work stays inside the session. There is no separate `quirks` field. The current agent table is in [the generated reference](../reference/agents.md).
+Codex's launch, resume and continue commands include `--no-daemon`, so its work stays inside the session. Its resume command puts `--` before the session ID, so the ID cannot be read as a flag. There is no separate `quirks` field. The current agent table is in [the generated reference](../reference/agents.md).
 
 ## 3. Flows
 
@@ -102,7 +104,8 @@ Codex's launch, resume and continue commands include `--no-daemon`, so its work 
    - `TERM=xterm-ghostty` (or `xterm-256color` if the terminfo is missing);
    - `COLORTERM=truecolor`;
    - the client's `TERM_PROGRAM` and its version;
-   - `SIMSTIM_SESSION`.
+   - `SIMSTIM_SESSION`;
+   - `SIMSTIM_HOOK_SOCK`, the session's hook socket. It names no other socket.
 4. It writes the manifest. It gives `simstim.slice` the limit of all sessions together: the host's memory minus a reserve for the system. It does that only when the slice lacks the limit, and the running sessions use less than it. Then it starts the holder:
 
    ```text
@@ -114,7 +117,7 @@ Codex's launch, resume and continue commands include `--no-daemon`, so its work 
 
    The session's `MemoryMax` is the same limit, or the session's own `memory_max` when that is smaller ([0024](../contributing/decisions/0024-memory-cap.md)).
 
-5. The holder forks the PTY at the client's size and runs the agent's `launch_argv`. It starts the vt child, and opens its socket.
+5. The holder forks the PTY at the client's size and runs the agent's `launch_argv`. It starts the vt child, and opens its sockets.
 6. The client attaches at once (3.3).
 
 ### 3.3 Attach
@@ -199,7 +202,7 @@ Triggers: the detach key, closing the tab, `simstim kill` from elsewhere, or SIG
 2. For each manifest whose `boot_id` differs from the current boot and whose holder is gone, restore skips ended sessions, sessions without the `resume` restart policy and sessions at their retry limit. For the others it:
    1. counts the restore attempt against the retry limit;
    2. starts a new holder in its `cwd`;
-   3. runs `resume_argv` with the stored `agent_session_id`. Without a usable resume command and ID, it runs the session's own `command`, then `continue_argv`, or finally the previous command as a fresh start.
+   3. runs `resume_argv` with the stored `agent_session_id`. The ID must match the agent's `id_pattern`, or the host must have chosen it. Restore drops any other ID and writes why in the session's `holder.log`. A `resume_argv` that an older helper saved without its `--` gets the agent's current one. Without a usable resume command and ID, it runs the session's own `command`, then `continue_argv`, or finally the previous command as a fresh start. Restore refuses a command with an argument from `danger_flags` or `danger_text` that the session's own `command` does not hold. It then starts no holder, and reports the session as failed, with a hint.
 3. The old screen is not saved and restored across a reboot. The new holder starts a new output ring and shadow terminal.
 4. The session is marked `restored`. A turn that was running when the host went down is not resumed.
 
@@ -220,7 +223,8 @@ Triggers: the detach key, closing the tab, `simstim kill` from elsewhere, or SIG
   - `hosts.info`, `ls`, `watch`/`event`, `new`, `kill`, `rename`;
   - `upload.begin`/`upload.chunk`/`upload.end`;
   - `attach`, `detach`, `input`, `resize`, `output{offset}`, `snapshot` (VT bytes that redraw the screen; output from `Attached.From` follows).
-- **Holder socket:** the same `attach` family, plus `info`, `subscribe`, `hook`, `set_meta` and `kill`. While a client traces its attach, a `trace` frame goes before each key.
+- **Holder socket:** the same `attach` family, plus `info`, `subscribe`, `set_meta` and `kill`. Hook events go to the hook socket. While a client traces its attach, a `trace` frame goes before each key. With a systemd user manager, a program inside any session gets only `hello` and `ping` there, and `forbidden` for the rest ([security model](security.md)).
+- **Hook socket:** one for each session. It accepts only the role `hook` and the op `hook`. With a systemd user manager, a hook from another session gets `forbidden`.
 - **Debug** ([0025](../contributing/decisions/0025-debug-mode.md)), behind the feature `debug`: `debug.start`, `debug.stop`, `debug.profile` and `debug.save`. For the bundle, `debug.collect` lists the host's files. `debug.read` sends 1 MiB of one listed file at a time, by its name in the list, never by a path.
 - **Back-pressure:**
   - Each client's output queue holds at most 4096 frames, not a fixed number of bytes.
@@ -241,7 +245,7 @@ The contract has its own page: [the fidelity contract](fidelity.md).
 | `~/.config/simstim/config.toml` | Settings and keymap overrides, with a JSON Schema |
 | `~/.config/simstim/hosts.toml` | Saved hosts: name, SSH target, labels, optional provider block |
 | `~/.config/simstim/ssh/hosts.conf` | Generated SSH blocks for hosts added in simstim. Included by the wrapper. |
-| `~/.cache/simstim/cm/%C` | ControlMaster sockets. The path is kept under 86 bytes because of macOS. |
+| `~/.cache/simstim/cm/nf-%C` | ControlMaster sockets. The path is kept under 86 bytes because of macOS. The `nf-` prefix keeps the client off masters that older clients started ([decision 0034](../contributing/decisions/0034-ssh-options-on-the-command-line.md)). |
 | `~/.cache/simstim/helpers/<version>/` | Host helpers fetched from the release, for a client built with `go install` |
 | `~/.local/state/simstim/` | Logs, and each session's last byte offset |
 | `~/.local/state/simstim/debug/` | The client's debug files, while `--debug` is on (0700; [debug a session](../how-to/debug-a-session.md)) |
@@ -255,6 +259,7 @@ The contract has its own page: [the fidelity contract](fidelity.md).
 | `~/.local/state/simstim/sessions/<id>/` | `manifest.json`, `paste/` (0700), `holder.log` (turned over at 1 MiB), and while debug is on, `debug.jsonl` and `debug/` (0700) with profiles and saved windows ([debug a session](../how-to/debug-a-session.md)) |
 | `~/.local/state/simstim/debug/` | The bridges' debug files, while a client with debug on is connected (0700) |
 | `$XDG_RUNTIME_DIR/simstim/s/<id>.sock` | Holder sockets, 0600. Falls back to `/tmp/simstim-<uid>` (0700, owner checked) without linger. |
+| `$XDG_RUNTIME_DIR/simstim/h/<id>.sock` | Hook sockets, 0600, in a 0700 folder. Each path is as long as its session socket's, so it fits wherever that fits. The agent's environment names its own as `SIMSTIM_HOOK_SOCK`. |
 | `~/.local/share/simstim/worktrees/<repo>/<slug>-<id>` | Worktrees per task |
 | `~/.config/simstim/alerts.toml` | Where alerts go: commands, ntfy topics, webhooks (0600; [alerts](../how-to/alerts.md)) |
 | `~/.local/state/simstim/alerts.log` | Each alert's delivery, as JSON lines; turned over at 1 MiB |

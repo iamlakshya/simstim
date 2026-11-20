@@ -145,11 +145,11 @@ fn writeRows(w: *std.Io.Writer, top: vt.Pin, bottom: vt.Pin) Error!bool {
 
 /// Writes rows cell by cell: text, SGR styles and OSC 8 hyperlinks.
 ///
-/// Ghostty's own VT formatter is not used for the text. At the pinned
-/// commit it writes skipped cells (after a tab, say) as spaces in the
-/// style of the cell before them, so a background colour or an underline
-/// spreads; and it takes a row that holds only background colour for an
-/// empty row, which moves every row after it.
+/// Ghostty's own VT formatter is not used for the text. At commit
+/// ad97d331, the pin before libghostty-vt 1.0.0, it wrote skipped cells
+/// (after a tab, say) as spaces in the style of the cell before them, so a
+/// background colour or an underline spread. It also took a row that held
+/// only background colour for an empty row, which moved every row after it.
 ///
 /// - Blank cells inside a row are skipped with CUF, so they stay empty.
 /// - A soft-wrapped row is written to its last column with no line break,
@@ -339,12 +339,12 @@ fn linkEql(a: ?RowEncoder.Link, b: ?RowEncoder.Link) bool {
 pub fn cellStyle(pin: vt.Pin, cell: *const vt.Cell) vt.Style {
     return switch (cell.content_tag) {
         .codepoint, .codepoint_grapheme => pin.style(cell),
-        .bg_color_palette => .{ .bg_color = .{ .palette = cell.content.color_palette.data } },
-        .bg_color_rgb => .{ .bg_color = .{ .rgb = .{
+        .bg_color_palette => .{ .bg_color = .palette(cell.content.color_palette.data) },
+        .bg_color_rgb => .{ .bg_color = .rgb(.{
             .r = cell.content.color_rgb.r,
             .g = cell.content.color_rgb.g,
             .b = cell.content.color_rgb.b,
-        } } },
+        }) },
     };
 }
 
@@ -495,11 +495,12 @@ fn skipMode(comptime mode: vt.Mode) bool {
 
 /// Every mode that differs from its default, then the mouse modes.
 pub fn writeModes(term: *const vt.Terminal, w: *std.Io.Writer) Error!void {
-    inline for (@typeInfo(vt.Mode).@"enum".fields) |field| {
-        const mode: vt.Mode = @enumFromInt(field.value);
+    const info = @typeInfo(vt.Mode).@"enum";
+    inline for (info.field_names, info.field_values) |name, value| {
+        const mode: vt.Mode = @fromBackingInt(@intCast(value));
         if (comptime !skipMode(mode)) {
             const current = term.modes.get(mode);
-            if (current != @field(term.modes.default, field.name)) {
+            if (current != @field(term.modes.default, name)) {
                 try writeMode(w, mode, current);
             }
         }
@@ -524,7 +525,7 @@ pub fn writeModes(term: *const vt.Terminal, w: *std.Io.Writer) Error!void {
 }
 
 fn writeMode(w: *std.Io.Writer, mode: vt.Mode, on: bool) Error!void {
-    const tag: vt.modes.ModeTag = @bitCast(@intFromEnum(mode));
+    const tag: vt.modes.ModeTag = @bitCast(@backingInt(mode));
     try w.print("\x1b[{s}{d}{s}", .{
         if (tag.ansi) "" else "?",
         tag.value,

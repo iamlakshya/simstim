@@ -84,6 +84,12 @@ func RuntimeDir() string {
 // Socket is the holder socket of one session.
 func Socket(id string) string { return filepath.Join(RuntimeDir(), "s", id+".sock") }
 
+// HookSocket is the hook socket of one session. Its holder accepts only hook
+// events on it, and it is the only socket the agent's environment names. Its
+// path has the same length as Socket's, so that it fits wherever the session
+// socket fits: Linux allows 107 bytes, macOS 103.
+func HookSocket(id string) string { return filepath.Join(RuntimeDir(), "h", id+".sock") }
+
 // BinDir is where versioned helpers are installed.
 func BinDir() string { return filepath.Join(DataDir(), "bin") }
 

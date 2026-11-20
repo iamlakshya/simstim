@@ -201,9 +201,10 @@ func NeedsLogin(it Item) bool {
 func (f *Flow) Done(a Action, checks []api.AgentCheck, ended bool) {
 	f.update(checks)
 	it := f.item(a.Agent.Kind)
-	session := f.Host + "/" + a.Args.Name
+	// A command names the session by its ID, or quoted (client.CommandTarget).
+	session := client.CommandTarget(f.Host, a.Args.Name)
 	if a.Session != "" {
-		session = f.Host + "/" + a.Session
+		session = client.CommandTarget(f.Host, a.Session)
 	}
 	switch a.Kind {
 	case ActInstall:

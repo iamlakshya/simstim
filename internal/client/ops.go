@@ -30,11 +30,12 @@ func TerminalArgs(a NewArgs, cols, rows int) NewArgs {
 	return a
 }
 
-// Sessions lists a host's sessions.
+// Sessions lists a host's sessions, as the host sent them, without a row
+// whose ID is not a session ID (ValidSessions).
 func (c *Conn) Sessions(ctx context.Context) ([]Session, error) {
 	var out []Session
 	err := c.Call(ctx, "ls", nil, &out)
-	return out, err
+	return ValidSessions(c.Host.Name, out), err
 }
 
 // NewSession starts a session. Unless a names a memory cap, the session gets
@@ -52,6 +53,9 @@ func (c *Conn) NewSession(ctx context.Context, a NewArgs) (*Session, error) {
 	}
 	var s Session
 	if err := c.Call(ctx, "new", a, &s); err != nil {
+		return nil, err
+	}
+	if err := checkSessionID(c.Host.Name, s.ID); err != nil {
 		return nil, err
 	}
 	return &s, nil

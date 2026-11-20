@@ -132,7 +132,8 @@ func (l *lockedWriter) String() string {
 	return l.b.String()
 }
 
-// Start runs remote on the host over ssh -T, for the bridge.
+// Start runs remote on the host over ssh -T, for the bridge. Through Command,
+// it forwards nothing: no agent, no X11 display and no port.
 func (s *SSH) Start(ctx context.Context, remote string) (Proc, error) {
 	cmd, err := s.Command(ctx, remote, "-T")
 	if err != nil {

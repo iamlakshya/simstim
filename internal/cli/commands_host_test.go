@@ -10,10 +10,13 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/iamlakshya/simstim/internal/brand"
 	"github.com/iamlakshya/simstim/internal/client"
 	"github.com/iamlakshya/simstim/internal/client/helpers"
+	"github.com/iamlakshya/simstim/internal/host/hosttest"
+	"github.com/iamlakshya/simstim/internal/provider/lima"
 )
 
 func TestHostCommands(t *testing.T) {
@@ -58,6 +61,79 @@ func TestHostCommands(t *testing.T) {
 		t.Errorf("idle stop saved as %q", h.Machine.IdleStop)
 	}
 	_ = th
+}
+
+// The doctor adds the loopback check of a Lima VM, on this computer. The
+// test machine stands in for the VM: a fake limactl lists it, and the test
+// machine's provider gets the check that the doctor keeps for "lima".
+func TestHostDoctorChecksALimaVM(t *testing.T) {
+	th := newTestHost(t)
+	if out := ok(t, "host", "doctor", "box"); strings.Contains(out, lima.LoopbackName) {
+		t.Errorf("host doctor checked the loopback of a host that is not a Lima VM:\n%s", out)
+	}
+	limaCheck := machineChecks["lima"]
+	if limaCheck == nil {
+		t.Fatalf("host doctor has no check for the provider %q: %v", "lima", machineChecks)
+	}
+	machineChecks[hosttest.Provider] = limaCheck
+	t.Cleanup(func() { delete(machineChecks, hosttest.Provider) })
+	list := filepath.Join(th.h.Root, "limactl-list.json")
+	th.h.Script("limactl", `[ "$1" = list ] && cat "`+list+`"`)
+	inst := th.ch.Machine.ID
+	// The VM's folder, with the ha.pid that its host agent wrote at its start.
+	vmDir := filepath.Join(th.h.Root, "lima", "vm")
+	if err := os.MkdirAll(vmDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(vmDir, "ha.pid"), []byte("1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	quoted, _ := json.Marshal(vmDir)
+	write := func(config string) {
+		t.Helper()
+		line := `{"name":"` + inst + `","status":"Running","dir":` + string(quoted) + `,"vmType":"vz","config":` + config + "}\n"
+		if err := os.WriteFile(list, []byte(line), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// A VM made before host create closed the path has no hostLoopback.
+	write(`{}`)
+	out := ok(t, "host", "doctor", "box")
+	for _, want := range []string{
+		"  ✕ laptop loopback        box can reach services on your Mac's loopback address\n",
+		"    Try: limactl stop " + inst + ", then limactl edit --set '.networkOpts.hostLoopback = false' " + inst + ", then limactl start " + inst + "\n",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("host doctor lacks %q:\n%s", want, out)
+		}
+	}
+	write(`{"networkOpts":{"hostLoopback":false}}`)
+	if out := ok(t, "host", "doctor", "box"); !strings.Contains(out, "  ✓ laptop loopback        box cannot reach services on your Mac's loopback address\n") {
+		t.Errorf("host doctor on a closed VM:\n%s", out)
+	}
+	var d client.HostInfo
+	if err := json.Unmarshal([]byte(ok(t, "host", "doctor", "box", "--json")), &d); err != nil || len(d.Checks) == 0 ||
+		d.Checks[len(d.Checks)-1].Name != lima.LoopbackName || !d.Checks[len(d.Checks)-1].OK {
+		t.Errorf("host doctor --json = %+v, %v", d.Checks, err)
+	}
+	// The VM's lima.yaml changed after its start: the running VM keeps the
+	// setting it started with.
+	later := time.Now().Add(time.Hour)
+	if err := os.WriteFile(filepath.Join(vmDir, "lima.yaml"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(filepath.Join(vmDir, "lima.yaml"), later, later); err != nil {
+		t.Fatal(err)
+	}
+	out = ok(t, "host", "doctor", "box")
+	for _, want := range []string{
+		"  ✕ laptop loopback        the Lima settings of box changed after its VM started, so they apply only after a restart\n",
+		"    Try: limactl stop " + inst + ", then limactl start " + inst + "\n",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("host doctor lacks %q:\n%s", want, out)
+		}
+	}
 }
 
 func TestHostCommandsWithoutAMachine(t *testing.T) {

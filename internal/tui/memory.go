@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/iamlakshya/simstim/internal/api"
 	"github.com/iamlakshya/simstim/internal/client"
 )
 
@@ -98,10 +99,14 @@ func (m *Model) restore(switcher bool) {
 	m.mem = m.be.Memory()
 	for _, h := range m.hosts {
 		if list := m.mem.Sessions[h.name()]; len(list) > 0 {
-			h.sessions = append([]client.Session(nil), list...)
+			// An older version kept rows as the host sent them.
+			h.sessions = client.ValidSessions(h.name(), list)
 		}
 	}
 	last := m.mem.Last
+	if last != nil && !api.ValidSessionID(last.ID) {
+		m.mem.Last, last = nil, nil // no request could name it
+	}
 	if last == nil || switcher || m.hostByName(last.Host) == nil {
 		return
 	}

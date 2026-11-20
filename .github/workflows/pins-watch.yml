@@ -1,0 +1,90 @@
+name: Pins watch
+
+# Pins that no package ecosystem covers: the Ghostty commit of the shadow
+# terminal and the pins of guest/supply.lock, checked each day against each
+# project's own advisories and OSV. The daily run also checks the Go toolchain
+# and modules with govulncheck. Spec 19.5 of docs/contributing/isolation-spec.md
+# has the rules, and docs/contributing/releasing.md says what to do with a
+# finding.
+
+on:
+  schedule:
+    - cron: "23 5 * * *"
+  workflow_dispatch:
+  # A pull request runs the check only when it changes a pin or the watch
+  # itself. CI runs govulncheck on every pull request already.
+  pull_request:
+    paths:
+      - vt/build.zig.zon
+      - guest/supply.lock
+      - scripts/pins-watch.py
+      - scripts/pinswatch/**
+      - scripts/test-pins-watch.py
+      - scripts/testdata/pins-watch/**
+      - scripts/pins-watch-reviewed.toml
+      - .github/workflows/pins-watch.yml
+
+# Each job asks for what it needs, and nothing more by default.
+permissions: {}
+
+concurrency:
+  group: pins-watch-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  pins:
+    # Fails when a pin is in an advisory's range, when an advisory's range
+    # cannot be read, or when an API call fails.
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Check the pins against their advisories
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # for the rate limit: it reads public data only
+        run: python3 scripts/pins-watch.py
+
+  govulncheck:
+    # Known vulnerabilities in the Go toolchain of go.mod and the modules, at
+    # the govulncheck version that CI pins. A new advisory shows up without a
+    # push.
+    if: ${{ github.event_name != 'pull_request' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Known vulnerabilities in the code we call
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.1.4 ./...
+
+  issues:
+    # The only job that may write, and only on the daily run. It checks the
+    # pins again, then opens one issue for each finding and each advisory that
+    # cannot be read, unless one of its own open issues has that title. It
+    # fails only when it cannot do that.
+    needs: [pins]
+    if: ${{ !cancelled() && github.event_name == 'schedule' && needs.pins.result == 'failure' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: write # to open an issue for each problem
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Open an issue for each new problem
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python3 scripts/pins-watch.py --open-issues

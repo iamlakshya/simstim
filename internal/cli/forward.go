@@ -26,12 +26,10 @@ func portsCmd() *cobra.Command {
 					return err
 				}
 				if len(ports) == 0 {
-					fmt.Printf("%s on %s listens on no TCP ports.\n", s.Name, h.Name)
+					fmt.Printf("%s on %s listens on no TCP ports.\n", client.CleanLine(s.Name), h.Name)
 					return nil
 				}
-				for _, p := range ports {
-					fmt.Printf("%-6d %-16s %s (pid %d)\n", p.Port, p.Address, p.Process, p.PID)
-				}
+				printPorts(os.Stdout, ports)
 				return nil
 			})
 		},
@@ -42,8 +40,9 @@ func forwardCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "forward <host>/<session> [port…]",
 		Short: "Forward a session's ports to localhost (all of them if none are given)",
-		Long: "Forwards ports from the host to 127.0.0.1 on this machine, through your SSH connection,\n" +
-			"until you press Ctrl+C. Write local:remote to use another local port. Nothing is exposed beyond this machine.",
+		Long: "Forwards ports from the host to 127.0.0.1 on this machine, through an SSH connection of its own,\n" +
+			"until you press Ctrl+C. Write local:remote to use another local port. Nothing is exposed beyond this machine.\n" +
+			"It refuses to start when your SSH config has a RemoteForward, a Tunnel or ForkAfterAuthentication yes for the host.",
 		Example: "  " + brand.Name + " forward my-vps/web 3000\n  " + brand.Name + " forward my-vps/web 8080:3000",
 		Args:    cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -80,7 +79,7 @@ func forwardPairs(ctx context.Context, conn *client.Conn, h client.Host, s *clie
 		}
 	}
 	if len(want) == 0 {
-		return nil, &client.UserError{Msg: fmt.Sprintf("%s on %s listens on no TCP ports yet", s.Name, h.Name), Hint: "Start the dev server in the session, or give the port."}
+		return nil, &client.UserError{Msg: fmt.Sprintf("%s on %s listens on no TCP ports yet", client.CleanLine(s.Name), h.Name), Hint: "Start the dev server in the session, or give the port."}
 	}
 	pairs := make([]client.ForwardPair, 0, len(want))
 	for _, w := range want {

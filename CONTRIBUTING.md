@@ -6,7 +6,7 @@ Thank you for your interest. The project is young, so open an issue before a lar
 
 On macOS or Linux (amd64 or arm64), install Go 1.21 or newer, git and OpenSSH first. Go 1.21 is the bootstrap minimum, not the build toolchain: with automatic toolchain downloads enabled (`GOTOOLCHAIN=auto`), Go downloads the version pinned in [go.mod](go.mod), currently Go 1.26.11.
 
-You also need bash, curl, tar (with gzip and xz support), and either `sha256sum` or `shasum`. These download, unpack and check the tools. Install Python 3 for the documentation checks and end-to-end tests. Then, from your checkout, run:
+You also need bash, curl, tar (with gzip and xz support), and either `sha256sum` or `shasum`. These download, unpack and check the tools. Install Python 3.11 or later for the script tests, the documentation checks and the end-to-end tests. Then, from your checkout, run:
 
 ```sh
 scripts/setup.sh
@@ -15,7 +15,7 @@ export PATH="$PWD/.tools/bin:$PATH"
 
 The script cannot change your shell's PATH; the `export` makes the installed `just` available in that shell. Or call `.tools/bin/just` directly.
 
-It puts pinned versions of just, golangci-lint, GoReleaser, gitleaks, Zig 0.16, and the docs tools (Node and pnpm for the site, typos, Vale, lychee) into `.tools/` (git-ignored), checks each download's SHA-256 against [scripts/tools.lock](scripts/tools.lock), then builds and tests once. Go tools built from source use Go's module checksums. The justfile puts `.tools/bin` first on its PATH. Or open the repo in its [devcontainer](.devcontainer/devcontainer.json), which runs the same script.
+It puts pinned versions of just, golangci-lint, GoReleaser, gitleaks, Zig 0.17, and the docs tools (Node and pnpm for the site, typos, Vale, lychee) into `.tools/` (git-ignored), checks each download's SHA-256 against [scripts/tools.lock](scripts/tools.lock), then builds and tests once. Go tools built from source use Go's module checksums. The justfile puts `.tools/bin` first on its PATH. Or open the repo in its [devcontainer](.devcontainer/devcontainer.json), which runs the same script.
 
 ```sh
 just build   # host helpers, the shadow terminal, then the client, into ./bin

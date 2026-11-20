@@ -2,7 +2,6 @@ package client
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/iamlakshya/simstim/internal/brand"
 )
@@ -35,25 +34,15 @@ func (a *attacher) notifyOthers(list []Session) {
 		default:
 			continue
 		}
-		title := brand.DisplayName + " · " + a.o.Host.Name
-		a.write([]byte("\x1b]777;notify;" + oscSafe(title) + ";" + oscSafe(body) + "\x1b\\"))
+		a.notify(body)
 	}
-}
-
-func oscSafe(s string) string {
-	return strings.Map(func(r rune) rune {
-		if r < 0x20 || r == 0x7f || r == ';' {
-			return ' '
-		}
-		return r
-	}, s)
 }
 
 // notify raises a system notification (OSC 777). It draws nothing on the
 // screen, so the session keeps every row and column.
 func (a *attacher) notify(msg string) {
 	title := brand.DisplayName + " · " + a.o.Host.Name
-	a.write([]byte("\x1b]777;notify;" + oscSafe(title) + ";" + oscSafe(msg) + "\x1b\\"))
+	a.write([]byte("\x1b]777;notify;" + OSCText(title) + ";" + OSCText(msg) + "\x1b\\"))
 }
 
 // flash shows the reconnect notice on the bottom row: the one thing the

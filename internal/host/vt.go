@@ -46,7 +46,34 @@ const (
 	// vtStableAfter is how long a child must live for its restart delay
 	// to start again from the shortest.
 	vtStableAfter = time.Minute
+	// maxTermCols and maxTermRows are the largest terminal that the host
+	// gives an agent: its PTY and the shadow terminal. A client that asks
+	// for more gets this. The numbers are the project's own choice: Ghostty
+	// allows 65535, and its advisory GHSA-jqr7-69mm-v35h names apps that
+	// take a terminal size from a remote client, without a number. At 4096
+	// by 2048, the shadow terminal holds under 512 MiB, even with its
+	// 10,000 lines of scrollback full and the alternate screen on. With
+	// 4096 rows it held 629 MiB. vt/src/main.zig applies the same caps.
+	maxTermCols = 4096
+	maxTermRows = 2048
 )
+
+// clampCols is n as a terminal's columns: a value below 1 is 1, and a
+// value above maxTermCols is maxTermCols.
+func clampCols(n int) uint16 {
+	return uint16(min(max(n, 1), maxTermCols))
+}
+
+// clampRows is n as a terminal's rows: a value below 1 is 1, and a value
+// above maxTermRows is maxTermRows.
+func clampRows(n int) uint16 {
+	return uint16(min(max(n, 1), maxTermRows))
+}
+
+// capTerm is a terminal size within maxTermCols by maxTermRows.
+func capTerm(cols, rows int) (int, int) {
+	return int(clampCols(cols)), int(clampRows(rows))
+}
 
 // vtBackoff is the wait before each restart after a crash, in order. The
 // last one repeats, so a child that always crashes on the same output tries
@@ -190,6 +217,7 @@ func StartVT(opt VTOptions) (*VT, error) {
 	if opt.Rows <= 0 {
 		opt.Rows = 24
 	}
+	opt.Cols, opt.Rows = capTerm(opt.Cols, opt.Rows)
 	v := &VT{opt: opt, log: opt.Log, maxBehind: vtMaxBehind, done: make(chan struct{}), cols: opt.Cols, rows: opt.Rows}
 	if v.log == nil {
 		v.log = slog.New(slog.DiscardHandler)
@@ -244,6 +272,7 @@ func (v *VT) Resize(cols, rows, xpx, ypx int) {
 	if cols <= 0 || rows <= 0 {
 		return
 	}
+	cols, rows = capTerm(cols, rows)
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	v.cols, v.rows, v.xpx, v.ypx = cols, rows, xpx, ypx
@@ -266,8 +295,9 @@ func (v *VT) Snapshot(cols, rows, maxLines int, timeout time.Duration) (snap []b
 		return nil, 0, fmt.Errorf("snapshot size %dx%d is not valid. Try: send the terminal size", cols, rows)
 	}
 	var p [8]byte
-	binary.LittleEndian.PutUint16(p[0:], clamp16(cols))
-	binary.LittleEndian.PutUint16(p[2:], clamp16(rows))
+	cols, rows = capTerm(cols, rows)
+	binary.LittleEndian.PutUint16(p[0:], clampCols(cols))
+	binary.LittleEndian.PutUint16(p[2:], clampRows(rows))
 	binary.LittleEndian.PutUint32(p[4:], clamp32(maxLines))
 	v.mu.Lock()
 	v.cols, v.rows = cols, rows

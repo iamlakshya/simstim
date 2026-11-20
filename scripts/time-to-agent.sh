@@ -8,7 +8,7 @@
 #   scripts/time-to-agent.sh <ssh target> [ssh config] [agent]
 #
 # On the host it installs the snapshot's helper next to any others, starts
-# one session and kills it again. Needs goreleaser and Zig 0.16.
+# one session and kills it again. Needs goreleaser and Zig 0.17.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 

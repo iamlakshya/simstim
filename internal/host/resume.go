@@ -11,6 +11,7 @@ import (
 
 	"github.com/iamlakshya/simstim/internal/api"
 	"github.com/iamlakshya/simstim/internal/paths"
+	"github.com/iamlakshya/simstim/internal/proto"
 )
 
 // The user's resume: the agent of a session starts again in the same
@@ -48,6 +49,9 @@ func Resume(a api.ResumeArgs) (*ResumeResult, error) {
 	if err := checkMemoryMax(a.MemoryMax); err != nil {
 		return nil, err
 	}
+	if err := CheckCaller(); err != nil {
+		return nil, err
+	}
 	// A second resume of the session, such as a key pressed twice, would
 	// stop the first's new holder, or save over its manifest.
 	unlock, err := lockSession(id)
@@ -67,6 +71,11 @@ func Resume(a api.ResumeArgs) (*ResumeResult, error) {
 	if err != nil {
 		return nil, err
 	}
+	// A command that resumeArgv refuses stops nothing. startAgain checks
+	// it again, after the old holder's last save.
+	if _, _, err := resumeArgv(m); err != nil {
+		return nil, err
+	}
 	// The session's debug stops with its old holder (holder_debug.go).
 	debugOn := debugUntil(m, alive(id)) != nil
 	stopHolder(id, m)
@@ -82,7 +91,11 @@ func Resume(a api.ResumeArgs) (*ResumeResult, error) {
 	}
 	m.Run.RespawnCount = 0
 	_, why, err := startAgain(m, again{label: resumedLabel, reason: "started again by a resume", secrets: secrets})
-	if err != nil {
+	var refused *proto.Error
+	switch {
+	case errors.As(err, &refused) && refused.Code == dangerRefused:
+		return nil, refused // resumeArgv refused the command, with its own hint
+	case err != nil:
 		return nil, UserError("start_failed", err.Error(), "Check the session log with the host doctor.")
 	}
 	if mm := waitStarted(id, time.Second); mm != nil {
@@ -138,6 +151,7 @@ func stopHolder(id string, m *Manifest) {
 		killHolder(m.Run.HolderPID)
 	}
 	os.Remove(paths.Socket(id))
+	os.Remove(paths.HookSocket(id))
 }
 
 // killHolder stops a holder that did not stop when asked: SIGTERM first,
