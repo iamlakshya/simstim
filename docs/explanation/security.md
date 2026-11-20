@@ -2,6 +2,8 @@
 
 What the tool does to keep your hosts and your laptop safe, and what it leaves to you. It is part of [the architecture](architecture.md); to report a problem, see [SECURITY.md](../../SECURITY.md).
 
+Downloaded helper archives select only the supported helper and shadow terminal file names. Cache writes use an opened directory as their boundary, so an existing link cannot redirect a write outside it. Shadow terminal frames check their wire length and header arithmetic before allocation. An oversized profile is refused without replacing the previous one.
+
 **Rules:**
 
 - **Nothing new listens on a host.** sshd is the only door, or, for a host made with `host create docker` or `e2b`, the provider's own authenticated exec API (Docker's socket, E2B's envd). There is no relay and no telemetry. Only a network port counts as listening: private Unix sockets and VM sockets do not, and nothing on the trusted side listens for a guest ([0030](../contributing/decisions/0030-local-sockets-do-not-listen.md)).
