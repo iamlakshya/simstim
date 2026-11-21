@@ -20,46 +20,48 @@ import (
 )
 
 type sandbox struct {
-	retirementMu         sync.Mutex
-	retirements          map[*os.File]*microVMFileRetirementV2
-	retirementDiagnostic error
-	preparationClosing   bool
-	dataRemoved          bool
-	bootCustody          *bootFileCustodyV2
-	driver               *Driver
-	spec                 wall.Spec
-	uid                  string
-	owner                context.Context
-	lease                *os.File
-	leaseMu              sync.Mutex
-	leaseCloseErr        error
-	preparedRoot         *os.Root
-	rootCloseErr         error
-	preparationErr       error
-	preparedFiles        []*os.File
-	fileCloseErr         error
-	agentsLease          io.Closer
-	agentsCloseMu        sync.Mutex
-	mu                   sync.Mutex
-	destroyMu            sync.Mutex
-	reapMu               sync.Mutex
-	started, destroyed   bool
-	destroying           bool
-	preparedReleased     bool
-	forced               bool
-	command              ownedVMProcess
-	physicalExit         bool
-	cancel               context.CancelFunc
-	connection           net.Conn
-	control              *runnerControl
-	done                 chan struct{}
-	exit                 wall.Exit
-	log                  byteTail
-	logDone              chan struct{}
-	helloChecked         bool
-	bootFacts            api.CapProbe
-	snapshotDisk         *snapshotDiskOwnerV1
-	partialSlotOwners    []interface{ Close() error }
+	retirementMu           sync.Mutex
+	retirements            map[*os.File]*microVMFileRetirementV2
+	retirementDiagnostic   error
+	runtimeLeaseDiagnostic error // bounded actual original phase/lease report
+	bootFileDiagnostic     error // report-only snapshot from the SAME boot-file owner
+	preparationClosing     bool
+	dataRemoved            bool
+	bootCustody            *bootFileCustodyV2
+	driver                 *Driver
+	spec                   wall.Spec
+	uid                    string
+	owner                  context.Context
+	lease                  *os.File
+	leaseMu                sync.Mutex
+	leaseCloseErr          error
+	preparedRoot           *os.Root
+	rootCloseErr           error
+	preparationErr         error
+	preparedFiles          []*os.File
+	fileCloseErr           error
+	agentsLease            io.Closer
+	agentsCloseMu          sync.Mutex
+	mu                     sync.Mutex
+	destroyMu              sync.Mutex
+	reapMu                 sync.Mutex
+	started, destroyed     bool
+	destroying             bool
+	preparedReleased       bool
+	forced                 bool
+	command                ownedVMProcess
+	physicalExit           bool
+	cancel                 context.CancelFunc
+	connection             net.Conn
+	control                *runnerControl
+	done                   chan struct{}
+	exit                   wall.Exit
+	log                    byteTail
+	logDone                chan struct{}
+	helloChecked           bool
+	bootFacts              api.CapProbe
+	snapshotDisk           *snapshotDiskOwnerV1
+	partialSlotOwners      []interface{ Close() error }
 }
 
 var _ wall.Driver = (*Driver)(nil)
@@ -134,9 +136,6 @@ func (s *sandbox) Start(ctx context.Context) (_ net.Conn, returned error) {
 	_, err = s.driver.prepareDisk(ctx, vmDataDir(s.spec), s.spec.DiskMax, subuid, helper)
 	helper.Close()
 	if err != nil {
-		return nil, s.startFailed(err)
-	}
-	if err := s.captureSnapshotDiskV1(ctx); err != nil {
 		return nil, s.startFailed(err)
 	}
 	files, err := s.driver.openBootFiles(ctx, s.spec)
@@ -343,7 +342,9 @@ func (s *sandbox) releaseAgentsLease() error {
 	}
 	// Close may need the original native creation to settle. Keep that exact
 	// owner on failure, and never hold the main mutex across its physical join.
-	if err := lease.Close(); err != nil {
+	err := lease.Close()
+	s.captureRuntimeLeaseDiagnosticsV4(lease)
+	if err != nil {
 		return err
 	}
 	s.mu.Lock()

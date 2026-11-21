@@ -11,7 +11,6 @@ import (
 
 	"github.com/iamlakshya/simstim/internal/cachefs"
 	"github.com/iamlakshya/simstim/internal/supply"
-	"golang.org/x/sys/unix"
 )
 
 // OpenHostExecution is the explicit original boot owner's existing-store
@@ -52,20 +51,15 @@ func (s *Store) PrepareRuntime(ctx context.Context, item supply.Item) (*supply.V
 				owner, err = supply.PrepareRuntime(ctx, item, file)
 				return err
 			}
-			var fs unix.Statfs_t
-			if err := unix.Fstatfs(int(file.Fd()), &fs); err != nil {
-				return err
-			}
-			if fs.Flags&unix.ST_RDONLY != 0 {
-				owner, err = supply.PrepareRuntime(ctx, item, file)
-				return err
-			}
 			artifacts, err := cachefs.OpenPrivateChild(s.root, "sha256", false)
 			if err != nil {
 				return err
 			}
 			defer artifacts.Close()
-			modes, err := cachefs.OpenPrivateChild(s.root, "execmode", true)
+			modes, err := cachefs.OpenPrivateChild(s.root, "execmode", false)
+			if errors.Is(err, os.ErrNotExist) {
+				modes, err = cachefs.OpenPrivateChild(s.root, "execmode", true)
+			}
 			if err != nil {
 				return err
 			}
@@ -74,7 +68,8 @@ func (s *Store) PrepareRuntime(ctx context.Context, item supply.Item) (*supply.V
 			return err
 		})
 	})
-	// The actual caller adopts this partial owner before its error branch.
+	// A partial actual owner belongs to the original factory caller even on
+	// error. That caller adopts it before branching and owns ordered cleanup.
 	return owner, err
 }
 

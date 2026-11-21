@@ -2,6 +2,8 @@
 
 The original worktree creator records its directory's native filesystem handle while that new directory is still open. It records the filesystem type, filesystem identity, opaque handle type and bounded handle bytes. The directory remains open until creation finishes. This record is separate from Git's branch, tip and administrative paths.
 
+The kernel observation lives in `internal/fsbirth`. This small package contains only finite data, native capture and comparison. It has no runtime, operation, cleanup subject or ownership constructor. Resource-specific code must still capture it at that resource's actual creation, preserve its own protected record and hold its original cleanup descriptors. Sharing the observation never lets one resource's record authorise another resource's deletion.
+
 On Linux, ext4, XFS and Btrfs can supply this handle. The creator obtains it through its actual directory descriptor, with filesystem checks before and after. It does not open a file by handle, request a privilege or derive ownership from a timestamp. An unsupported filesystem leaves the field absent. Worktree use can continue, but that absence grants no cleanup authority.
 
 Before purge takes cleanup custody, it opens the worktree through its checked original parent and compares a fresh native generation with the creation record. A different generation is preserved. Old records without this field are preserved. Unknown versions and future fields grant no mutation authority. Force skips work-loss questions only. It cannot upgrade an old record or a replacement directory.

@@ -53,6 +53,12 @@ func beginAutomaticAgentsPublication(ctx context.Context, boot *originalBootV1) 
 }
 
 func beginRuntimePublicationKind(ctx context.Context, kind string, boot *originalBootV1, startup *SessionOperation) (*runtimePublication, error) {
+	return beginRuntimePublicationLifetimeV1(ctx, ctx, kind, boot, startup)
+}
+
+// The operation context still cancels native construction. A successful
+// selected receipt alone retains the SAME accepted service's parent lifetime.
+func beginRuntimePublicationLifetimeV1(ctx, lifetime context.Context, kind string, boot *originalBootV1, startup *SessionOperation) (*runtimePublication, error) {
 	if boot == nil {
 		if err := CheckCaller(); err != nil {
 			return nil, err
@@ -60,8 +66,11 @@ func beginRuntimePublicationKind(ctx context.Context, kind string, boot *origina
 	} else if err := checkBootPublisher(boot); err != nil {
 		return nil, err
 	}
-	if ctx == nil {
+	if ctx == nil || lifetime == nil {
 		return nil, placementError("the original publisher has no owner context")
+	}
+	if err := lifetime.Err(); err != nil {
+		return nil, err
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -76,7 +85,7 @@ func beginRuntimePublicationKind(ctx context.Context, kind string, boot *origina
 	if err != nil {
 		return nil, err
 	}
-	owned, cancel := context.WithCancelCause(ctx)
+	owned, cancel := context.WithCancelCause(lifetime)
 	publication := &runtimePublication{ctx: context.WithValue(owned, publicationSourceContextV1{}, operation), cancel: cancel, owner: operation.owner, operation: operation, stop: make(chan struct{}), watched: make(chan struct{}), bootOwner: boot, startup: startup}
 	go publication.watch()
 	return publication, nil

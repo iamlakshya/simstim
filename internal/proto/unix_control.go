@@ -16,7 +16,8 @@ type UnixCredentialsV1 struct {
 
 // UnixControlV1 owns every descriptor materialised by one native receive.
 // The receiver must validate exact roles and frame association before transfer.
-// On a receive error the helper closes all descriptors before returning.
+// Legacy receive errors close all descriptors. The retained variant instead
+// keeps actual failed objects for its original resource owner's first Close.
 type UnixControlV1 struct {
 	Files       []*os.File
 	Credentials *UnixCredentialsV1

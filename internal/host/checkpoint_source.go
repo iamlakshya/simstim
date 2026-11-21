@@ -149,6 +149,25 @@ func (source *CheckpointSourceV1) WithBackend(ctx context.Context, run func(chec
 		source.mu.Unlock()
 		return checkpointSourceErrorV1("the actual checkpoint backend binding ended")
 	}
+	if binding.HasSubordinateCheckpointBackendV3() {
+		defer source.mu.Unlock()
+		// The new actual actor layout must not hide old login-owned pairs.
+		// A later migration needs this SAME original OP and real producers.
+		if _, err := source.operation.native.root.Lstat("checkpoints"); err == nil {
+			return UserError("checkpoint_migration", "the original session has legacy checkpoint storage beside its subordinate VM root", "Keep the original session and checkpoint files for a supported storage migration.")
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		return binding.WithSubordinateCheckpointBackendV3(ctx, source.connection, *need, func(backend checkpoint.BackendV1) error {
+			if err := source.check(ctx); err != nil {
+				return err
+			}
+			if err := run(backend, need.DiskMax); err != nil {
+				return err
+			}
+			return source.check(ctx)
+		})
+	}
 	if binding.HasSlotCheckpointBackendV1() {
 		defer source.mu.Unlock()
 		return binding.WithBackendV1(ctx, source.connection, *need, func(backend checkpoint.BackendV1) error {

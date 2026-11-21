@@ -87,7 +87,9 @@ func Main(m *testing.M) {
 	// A helper that this binary stands in for, reached through a fake
 	// ssh, serves the bridge.
 	if len(os.Args) >= 2 && os.Args[1] == "bridge" {
-		if err := host.RunBridge(host.BridgeInput(os.Stdin, os.Args[2:]), os.Stdout); err != nil {
+		err := host.RunBridge(host.BridgeInput(os.Stdin, os.Args[2:]), os.Stdout)
+		host.EndBridge()
+		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}

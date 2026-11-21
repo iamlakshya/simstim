@@ -132,6 +132,9 @@ func runBridge(in io.Reader, out io.Writer, owned OwnedBridgeOutput, inputs ...O
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	b := &bridge{ctx: ctx, hostID: hostID, ownedInput: ownedInput, ownedOutput: owned, w: w, log: slog.New(lines), dbg: bridgeDebug{lines: lines}, uploads: map[uint64]*upload{}}
+	if err := b.runtime.bindConnectionV1(ctx); err != nil {
+		return err
+	}
 	liveBridges.Store(b, true)
 	defer liveBridges.Delete(b)
 	// An upload that never got its end, as one that its client gave up at

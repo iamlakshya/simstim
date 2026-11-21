@@ -301,9 +301,17 @@ func (s *Server) serveHTTP1(ctx context.Context, conn net.Conn, reader io.Reader
 }
 
 func (s *Server) serveIntercept(ctx context.Context, conn net.Conn, reader io.Reader, hdr StreamHeader, connect bool) AuditEntry {
+	return s.serveInterceptWithH2Hooks(ctx, conn, reader, hdr, connect, physicalH2HooksError())
+}
+
+func (s *Server) serveInterceptWithH2Hooks(ctx context.Context, conn net.Conn, reader io.Reader, hdr StreamHeader, connect bool, hookError error) AuditEntry {
+	entry := AuditEntry{Host: hdr.Host, Port: hdr.Port, Mode: "intercept", Method: "TLS", Status: http.StatusForbidden, Rule: "tls:client_hello", Decision: "deny"}
+	if hookError != nil {
+		entry.Rule, entry.Reason = "http2:toolchain", hookError.Error()
+		return s.formatAudit(entry)
+	}
 	ctx, _, endTunnel := s.httpTunnel(ctx, conn)
 	defer endTunnel()
-	entry := AuditEntry{Host: hdr.Host, Port: hdr.Port, Mode: "intercept", Method: "TLS", Status: http.StatusForbidden, Rule: "tls:client_hello", Decision: "deny"}
 	if connect {
 		if _, err := io.WriteString(conn, "HTTP/1.1 200 Connection Established\r\n\r\n"); err != nil {
 			return s.formatAudit(entry)

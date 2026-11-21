@@ -30,6 +30,16 @@ type vmmExecPhaseV1 struct {
 	ctx                      context.Context
 	session, driver          string
 	childAccepted, completed bool
+	readonly                 bool
+	attached                 bool
+	disk                     *os.File
+	diskParent               *os.File
+	snapshotOwner            *snapshotDiskOwnerV1
+	controller               *runnerControl
+	parentRetirement         *microVMFileRetirementV2
+	diskRetirement           *microVMFileRetirementV2
+	readerRetirement         *microVMFileRetirementV2
+	writerRetirement         *microVMFileRetirementV2
 }
 
 func newVMMExecPhaseV1(ctx context.Context, command *jail.Cmd, source *supply.ExecModeLeaseV1, program *os.File, control net.Conn, session, driver string) (*vmmExecPhaseV1, error) {
@@ -48,22 +58,22 @@ func newVMMExecPhaseV1(ctx context.Context, command *jail.Cmd, source *supply.Ex
 		return nil, err
 	}
 	phase := &vmmExecPhaseV1{command: command, source: source, program: program, control: local, reader: reader, writer: writer, ctx: ctx, session: session, driver: driver}
-	if err := command.RetainVMMExecLeaseV1(source); err != nil {
-		reader.Close()
-		writer.Close()
-		return nil, err
+	readonly, err := source.ReadonlyOriginalV1(ctx)
+	phase.readonly = readonly
+	if err != nil {
+		return phase, err
 	}
+	if err := command.RetainVMMExecLeaseV1(source); err != nil {
+		return phase, err
+	}
+	phase.attached = true
 	abort := func(err error) (*vmmExecPhaseV1, error) {
-		return nil, errors.Join(err, command.SettleVMMUnstartedV1(source))
+		return phase, errors.Join(err, command.SettleVMMUnstartedV1(source))
 	}
 	if err := command.RetainVMMFinalBoundaryV1(source, reader, writer); err != nil {
-		reader.Close()
-		writer.Close()
 		return abort(err)
 	}
 	if err := command.BindVMMExecControlV1(source, local); err != nil {
-		reader.Close()
-		writer.Close()
 		return abort(err)
 	}
 	return phase, nil
@@ -72,6 +82,9 @@ func newVMMExecPhaseV1(ctx context.Context, command *jail.Cmd, source *supply.Ex
 func (phase *vmmExecPhaseV1) acceptExecChild(message runnerMessage, control *proto.UnixControlV1) error {
 	phase.mu.Lock()
 	defer phase.mu.Unlock()
+	if phase.readonly {
+		return fmt.Errorf("the original read-only init creates no final exec child")
+	}
 	if phase.completed || phase.childAccepted || message.Session != phase.session || message.Driver != phase.driver || len(control.Files) != 1 {
 		return fmt.Errorf("VMM final child is duplicate, late or from another original mode phase")
 	}
@@ -93,10 +106,12 @@ func (phase *vmmExecPhaseV1) run(ctx context.Context, controller *runnerControl)
 	}
 	// The actual final helper is now adopted and has both native roles. No
 	// parent writer is closed at Cmd.Start or an intermediate helper exec.
-	if err := phase.writer.Close(); err != nil {
+	if err := phase.closePhaseWriterV1(); err != nil {
 		return err
 	}
-	phase.writer = nil
+	if phase.readonly {
+		return phase.runReadonlyV1(ctx, controller)
+	}
 	if err := phase.command.ArmVMMExecModeV1(ctx, phase.source); err != nil {
 		return err
 	}
@@ -112,7 +127,7 @@ func (phase *vmmExecPhaseV1) run(ctx context.Context, controller *runnerControl)
 	phase.mu.Lock()
 	phase.completed = true
 	phase.mu.Unlock()
-	return phase.reader.Close()
+	return phase.closePhaseReaderV1()
 }
 
 // settleNoFuture is used only by the original engine's physical cleanup.
@@ -124,20 +139,40 @@ func (phase *vmmExecPhaseV1) settleNoFuture(ctx context.Context) error {
 	}
 	phase.work.Lock()
 	defer phase.work.Unlock()
+	if !phase.attached {
+		if err := phase.command.DisableUnstartedVMMV1(); err != nil {
+			return err
+		}
+		if err := phase.closePhaseWriterV1(); err != nil {
+			return err
+		}
+		if err := phase.closePhaseReaderV1(); err != nil {
+			return err
+		}
+		return phase.source.Close()
+	}
 	phase.mu.Lock()
 	completed := phase.completed
 	phase.mu.Unlock()
 	if completed {
+		if phase.readonly {
+			if err := phase.command.CheckVMMReadonlyPhysicalV1(ctx, phase.source); err != nil {
+				return err
+			}
+			if err := phase.closeReadonlyDiskV1(); err != nil {
+				return err
+			}
+		}
+		if err := phase.closePhaseReaderV1(); err != nil {
+			return err
+		}
 		return phase.source.Close()
 	}
 	if err := phase.command.WaitVMMNoFutureExecV1(ctx, phase.source); err != nil {
 		return err
 	}
-	if phase.writer != nil {
-		if err := phase.writer.Close(); err != nil {
-			return err
-		}
-		phase.writer = nil
+	if err := phase.closePhaseWriterV1(); err != nil {
+		return err
 	}
 	if err := phase.command.FinishVMMExecModeV1(ctx, phase.source); err != nil {
 		return err
@@ -145,7 +180,18 @@ func (phase *vmmExecPhaseV1) settleNoFuture(ctx context.Context) error {
 	phase.mu.Lock()
 	phase.completed = true
 	phase.mu.Unlock()
-	return errors.Join(phase.reader.Close(), phase.source.Close())
+	if phase.readonly {
+		if err := phase.command.CheckVMMReadonlyPhysicalV1(ctx, phase.source); err != nil {
+			return err
+		}
+		if err := phase.closeReadonlyDiskV1(); err != nil {
+			return err
+		}
+	}
+	if err := phase.closePhaseReaderV1(); err != nil {
+		return err
+	}
+	return phase.source.Close()
 }
 
 func (c *runnerControl) attachModePhaseV1(phase *vmmExecPhaseV1) error {
@@ -162,6 +208,14 @@ func (c *runnerControl) attachModePhaseV1(phase *vmmExecPhaseV1) error {
 	reader.mode = phase
 	reader.modeMu.Unlock()
 	c.mode = phase
+	phase.controller = c
+	if phase.readonly {
+		proof, ok := c.native.(*receivedVMMProof)
+		if !ok {
+			return fmt.Errorf("the original read-only phase has another native readiness owner")
+		}
+		proof.readonly = phase
+	}
 	return nil
 }
 

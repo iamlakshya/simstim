@@ -75,7 +75,7 @@ func TestGvisorForkReceiverRejectsEverySubstitutedBackingRole(t *testing.T) {
 				t.Fatal(err)
 			}
 			if err := owner.checkMountsLockedV2(); err == nil {
-				t.Fatal("a same-name work/home/state replacement passed original native backing checks")
+				t.Fatal("a same-name work, home or state replacement passed original native backing checks")
 			}
 		})
 	}

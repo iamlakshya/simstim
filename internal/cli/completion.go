@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"slices"
 	"strings"
@@ -24,9 +25,6 @@ import (
 
 // compNow is the clock of session completion, for "seen 5m ago". Tests set it.
 var compNow = time.Now
-
-// doorWords are the policy door names (cli-spec 14.2, P1.12).
-var doorWords = []string{"net", "push", "mount", "secret", "ssh-key", "port", "paste", "device"}
 
 // isCompletionRequest reports whether cmd is Cobra's hidden completion
 // command (__complete or __completeNoDesc).
@@ -103,6 +101,8 @@ func registerKnownFlags(c *cobra.Command, fs *pflag.FlagSet, alertEvents []strin
 		switch f.Name {
 		case "host":
 			fn = completeHosts
+		case "in":
+			fn = completeInFlag
 		case "agent":
 			fn = completeAgents
 		case "agents":
@@ -115,8 +115,6 @@ func registerKnownFlags(c *cobra.Command, fs *pflag.FlagSet, alertEvents []strin
 			fn = completeCommaFixed(api.ModelToolNames()...)
 		case "profile":
 			fn = completeProfiles
-		case "door":
-			fn = completeDoorWords
 		case "wall":
 			fn = completeFixed("auto", "none", "process", "gvisor", "microvm")
 		case "tier":
@@ -159,7 +157,6 @@ var (
 	completeHostArg    = firstArg(completeHosts)
 	completeSessionArg = firstArg(completeSessions)
 	completeAgents     = completeAgentSlice(agents.Table)
-	completeDoorWords  = completeFixed(doorWords...)
 )
 
 func completeLsHost(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
@@ -351,8 +348,8 @@ func completeAgentList(_ *cobra.Command, _ []string, toComplete string) ([]strin
 	return completeCommaFixed(items...)(nil, nil, toComplete)
 }
 
-func completeHosts(_ *cobra.Command, _ []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-	hosts, ok := loadCompletionHosts()
+func completeHosts(cmd *cobra.Command, _ []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	hosts, ok := loadCompletionHosts(completionContext(cmd))
 	if !ok {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
@@ -365,26 +362,35 @@ func completeHosts(_ *cobra.Command, _ []string, toComplete string) ([]string, c
 	return out, cobra.ShellCompDirectiveNoFileComp
 }
 
-func completeSessions(_ *cobra.Command, _ []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-	cache, ok := loadCompletionCache()
+func completeSessions(cmd *cobra.Command, _ []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	cache, ok := loadCompletionCache(completionContext(cmd))
 	if !ok || len(cache.Sessions) == 0 {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
 	now := compNow()
 	var out []string
-	for _, hn := range completionHostNames(cache) {
+	for _, hn := range completionHostNames(cache, completionContext(cmd)) {
+		if completionContext(cmd).Err() != nil {
+			return nil, cobra.ShellCompDirectiveNoFileComp
+		}
 		out = appendHostSessions(out, hn, cache.Sessions[hn], cache.Seen[hn], now, toComplete)
 	}
 	return out, cobra.ShellCompDirectiveNoFileComp
 }
 
-func completionHostNames(cache client.SessionCache) []string {
-	if hosts, ok := loadCompletionHosts(); ok {
+func completionHostNames(cache client.SessionCache, contexts ...context.Context) []string {
+	if completionReadContext(contexts).Err() != nil {
+		return nil
+	}
+	if hosts, ok := loadCompletionHosts(contexts...); ok {
 		names := make([]string, len(hosts))
 		for i, h := range hosts {
 			names[i] = h.Name
 		}
 		return names
+	}
+	if completionReadContext(contexts).Err() != nil {
+		return nil
 	}
 	var names []string
 	for hn := range cache.Sessions {
@@ -436,6 +442,9 @@ func appendHostSessions(out []string, hn string, list []client.Session, seen, no
 }
 
 func sessionCompDesc(s client.Session, stale string) string {
+	// The common state formatter cleans control bytes. Remove complete
+	// escape sequences first so their printable tails cannot survive it.
+	s.State, s.Signal, s.Reason = stripEscapes(s.State), stripEscapes(s.Signal), stripEscapes(s.Reason)
 	var parts []string
 	for _, p := range []string{cleanCompDesc(s.Agent), cleanCompDesc(stateLabel(s)), stale} {
 		if p != "" {
@@ -456,12 +465,12 @@ func seenAge(d time.Duration) string {
 	}
 }
 
-func completeSecrets(_ *cobra.Command, _ []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-	return completeConfigMapKeys("secrets", toComplete), cobra.ShellCompDirectiveNoFileComp
+func completeSecrets(cmd *cobra.Command, _ []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	return completeConfigMapKeys("secrets", toComplete, completionContext(cmd)), cobra.ShellCompDirectiveNoFileComp
 }
 
-func completeProfiles(_ *cobra.Command, _ []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-	metadata, ok := completionPolicyMetadata(false)
+func completeProfiles(cmd *cobra.Command, _ []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	metadata, ok := completionPolicyMetadata(false, completionContext(cmd))
 	if !ok {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}

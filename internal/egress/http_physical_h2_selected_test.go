@@ -18,6 +18,7 @@ import (
 
 type physicalPendingWrite struct {
 	id      uint32
+	length  uint32
 	release chan struct{}
 }
 type physicalPendingWriter struct {
@@ -31,14 +32,14 @@ type physicalPendingWriter struct {
 func (w *physicalPendingWriter) Write(payload []byte) (int, error) {
 	reader := bytes.NewReader(payload)
 	framer := http2.NewFramer(io.Discard, reader)
-	var data uint32
+	var data, length uint32
 	for reader.Len() >= 9 {
 		header, err := framer.ReadFrameHeader()
 		if err != nil {
 			break
 		}
 		if header.Type == http2.FrameData {
-			data = header.StreamID
+			data, length = header.StreamID, header.Length
 			break
 		}
 		if int(header.Length) > reader.Len() {
@@ -55,7 +56,7 @@ func (w *physicalPendingWriter) Write(payload []byte) (int, error) {
 	if gate {
 		release := make(chan struct{})
 		select {
-		case w.pending <- physicalPendingWrite{id: data, release: release}:
+		case w.pending <- physicalPendingWrite{id: data, length: length, release: release}:
 		case <-w.ctx.Done():
 			return 0, w.ctx.Err()
 		}
@@ -100,12 +101,12 @@ func TestPhysicalH2SelectedNativeWritesStayOwnedAndDroppedFlowCreditSupportsLate
 		if stream.id == 2*rounds+1 {
 			body = `{"usage":{"total_tokens":7}}`
 		}
-		_, err = io.WriteString(w, body)
+		_, err = w.Write([]byte(body))
 		stream.completionEvidence(err == nil && r.Context().Err() == nil)
 	}))
 	base := &http.Server{Handler: handler, MaxHeaderBytes: maxHTTPHeaderBytes + physicalH2TokenOverhead, HTTP2: &http.HTTP2Config{MaxConcurrentStreams: maxActiveFlows, MaxReadFrameSize: physicalH2OriginalFrameLimit, MaxDecoderHeaderTableSize: physicalH2OriginalTableLimit}}
 	server := &http2.Server{NewWriteScheduler: func() http2.WriteScheduler {
-		return &physicalH2Scheduler{WriteScheduler: http2.NewRandomWriteScheduler(), owner: conn.owner}
+		return &physicalH2Scheduler{WriteScheduler: newPhysicalH2RoundRobin(), owner: conn.owner}
 	}}
 	served := make(chan struct{})
 	go func() {
@@ -170,6 +171,7 @@ func TestPhysicalH2SelectedNativeWritesStayOwnedAndDroppedFlowCreditSupportsLate
 	var block bytes.Buffer
 	encoder := hpack.NewEncoder(&block)
 	fields := []hpack.HeaderField{{Name: ":method", Value: "POST"}, {Name: ":scheme", Value: "https"}, {Name: ":path", Value: "/v1/responses"}, {Name: ":authority", Value: "reader.example.test"}}
+	var discarded uint32
 	for round := 0; round < rounds; round++ {
 		id := uint32(2*round + 1)
 		view.mu.Lock()
@@ -190,11 +192,15 @@ func TestPhysicalH2SelectedNativeWritesStayOwnedAndDroppedFlowCreditSupportsLate
 		case <-time.After(5 * time.Second):
 			t.Fatal("selected DATA never reached the original native writer; discarded connection credit was lost")
 		}
+		var release sync.Once
+		t.Cleanup(func() { release.Do(func() { close(pending.release) }) })
 		if pending.id != id {
 			t.Fatal("native writer ownership changed")
 		}
-		var release sync.Once
-		t.Cleanup(func() { release.Do(func() { close(pending.release) }) })
+		if pending.length != 16<<10 {
+			t.Fatal("original selected DATA did not retain its complete 16KiB connection credit", pending.length)
+		}
+		discarded += pending.length
 		stream.invalidate()
 		waitHTTPState(t, func() bool {
 			stream.owner.mu.Lock()
@@ -231,6 +237,9 @@ func TestPhysicalH2SelectedNativeWritesStayOwnedAndDroppedFlowCreditSupportsLate
 				t.Fatal("original native reset missing")
 			}
 		}
+	}
+	if discarded <= 65535 {
+		t.Fatal("native discarded selections did not exceed the original connection window")
 	}
 	id := uint32(2*rounds + 1)
 	if err := writer.WriteHeaders(http2.HeadersFrameParam{StreamID: id, BlockFragment: physicalH2Fields(t, encoder, &block, fields), EndHeaders: true, EndStream: true}); err != nil {

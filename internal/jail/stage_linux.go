@@ -163,7 +163,20 @@ func outer(c *setup, env []string) int {
 	if err != nil {
 		return stageFailed(err)
 	}
-	if err := reportVMMCreationV1(c, stageOuter, cmd.Process, createdFD); err != nil {
+	reportFD := createdFD
+	var readonlyCreation *os.File
+	if c.VMMExecV1 != nil && c.VMMExecV1.ReadonlyInit && createdFD >= 0 {
+		readonlyCreation = os.NewFile(uintptr(createdFD), "original-readonly-init-creation")
+		reportFD, err = unix.FcntlInt(readonlyCreation.Fd(), unix.F_DUPFD_CLOEXEC, 3)
+		if err != nil {
+			setupW.Close()
+			cmd.Process.Kill()
+			cmd.Wait()
+			return stageFailed(err)
+		}
+		defer readonlyCreation.Close()
+	}
+	if err := reportVMMCreationV1(c, stageOuter, cmd.Process, reportFD); err != nil {
 		_ = setupW.Close()
 		_ = cmd.Process.Kill()
 		waitErr := cmd.Wait()
@@ -182,6 +195,9 @@ func outer(c *setup, env []string) int {
 		_ = cmd.Process.Kill()
 		_ = cmd.Wait()
 		return stageFailed(failure("the jail's init ended during set-up", "Read the error above."))
+	}
+	if readonlyCreation != nil {
+		return finishReadonlyOuterV1(c, cmd, readonlyCreation, extra, syncW, sigs)
 	}
 	if err := finishVMMCreatorV1(c, stageOuter, extra); err != nil {
 		_ = cmd.Process.Kill()
@@ -276,6 +292,21 @@ func mapIDs(ctx context.Context, s *subID, pid int) error {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	p := strconv.Itoa(pid)
+	if s != nil && s.SubUID == -1 {
+		if s.UID != os.Getuid() || s.GID != os.Getgid() || s.SubGID <= 0 || s.SubGID == s.GID || s.NewUIDMap != "" || s.NewGIDMap == "" {
+			return vmmModeFailureV1("the actual login-UID/two-GID admission changed before mapping")
+		}
+		// The kernel permits the creator's single own-UID mapping. The
+		// second group still needs the genuine configured map helper.
+		if err := os.WriteFile("/proc/"+p+"/uid_map", []byte("0 "+strconv.Itoa(s.UID)+" 1\n"), 0o600); err != nil {
+			return stepFailed("cannot map the original login UID", "Retain the original command and check this host's user namespace support.", err)
+		}
+		out, err := exec.CommandContext(ctx, s.NewGIDMap, p, "0", strconv.Itoa(s.GID), "1", "1", strconv.Itoa(s.SubGID), "1").CombinedOutput()
+		if err != nil {
+			return failure("cannot map the original two groups: "+strings.TrimSpace(string(out)+" "+err.Error()), "Check this user's actual range in /etc/subgid and newgidmap, then retry.")
+		}
+		return nil
+	}
 	for _, m := range []struct {
 		prog     string
 		id, sub  int

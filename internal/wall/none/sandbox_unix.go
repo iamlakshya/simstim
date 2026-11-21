@@ -9,41 +9,42 @@ import (
 	"net"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"sync"
 	"syscall"
 	"time"
 
 	"github.com/iamlakshya/simstim/internal/api"
 	"github.com/iamlakshya/simstim/internal/cachefs"
+	"github.com/iamlakshya/simstim/internal/fsbirth"
 	"github.com/iamlakshya/simstim/internal/link"
-	"github.com/iamlakshya/simstim/internal/paths"
 	"github.com/iamlakshya/simstim/internal/proc"
 	"github.com/iamlakshya/simstim/internal/wall"
 )
 
 type sandbox struct {
-	spec                            wall.Spec
-	mu                              sync.Mutex
-	life                            sync.Mutex
-	root                            *os.Root
-	rootRef                         cachefs.Reference
-	runtimeParent, runtime          *os.Root
-	runtimeRef                      cachefs.Reference
-	created                         os.FileInfo
-	cmd                             *exec.Cmd
-	connection                      net.Conn
-	pidfd                           int
-	observed                        chan struct{}
-	status                          syscall.WaitStatus
-	known                           bool
-	observeErr                      error
-	killErr                         error
-	started, closed, reaped, forced bool
-	released                        bool
-	handed                          bool
-	live                            *LiveOwnerV1
-	result                          wall.Exit
+	spec                             wall.Spec
+	mu                               sync.Mutex
+	life                             sync.Mutex
+	root                             *os.Root
+	rootRef                          cachefs.Reference
+	runtimeParent, runtime           *os.Root
+	runtimeRef                       cachefs.Reference
+	runtimeParentRef                 cachefs.Reference
+	runtimeBirth, runtimeParentBirth *fsbirth.DataV2
+	created                          os.FileInfo
+	cmd                              *exec.Cmd
+	connection                       net.Conn
+	pidfd                            int
+	observed                         chan struct{}
+	status                           syscall.WaitStatus
+	known                            bool
+	observeErr                       error
+	killErr                          error
+	started, closed, reaped, forced  bool
+	released                         bool
+	handed                           bool
+	live                             *LiveOwnerV1
+	result                           wall.Exit
 }
 
 func newSandbox(ctx context.Context, spec wall.Spec) (_ wall.Sandbox, returned error) {
@@ -62,39 +63,6 @@ func newSandbox(ctx context.Context, spec wall.Spec) (_ wall.Sandbox, returned e
 	return s, nil
 }
 
-func (s *sandbox) prepareRuntime() error {
-	base, err := paths.OpenPrivateRuntimeDir()
-	if err != nil {
-		return err
-	}
-	defer base.Close()
-	if err := cachefs.MakePrivateDir(base, "g"); err != nil {
-		return err
-	}
-	parent, err := cachefs.OpenPrivateChild(base, "g", false)
-	if err != nil {
-		return err
-	}
-	s.runtimeParent = parent
-	path := filepath.Join(parent.Name(), s.spec.ID)
-	if len(filepath.Join(path, "holder-"+s.spec.ID+".sock")) > paths.MaxUnixSocketPath {
-		return failure("the unwalled holder's runtime socket path is too long", nil)
-	}
-	if err := parent.Mkdir(s.spec.ID, 0700); err != nil {
-		return failure("an earlier unwalled runtime still owns its private folder", err)
-	}
-	s.created, err = parent.Lstat(s.spec.ID)
-	if err != nil {
-		return err
-	}
-	s.runtime, err = cachefs.OpenPrivateChild(parent, s.spec.ID, false)
-	if err != nil {
-		return err
-	}
-	s.runtimeRef, err = cachefs.CaptureRoot(s.runtime)
-	return err
-}
-
 func (s *sandbox) Start(ctx context.Context) (_ net.Conn, returned error) {
 	s.life.Lock()
 	defer s.life.Unlock()
@@ -107,7 +75,7 @@ func (s *sandbox) Start(ctx context.Context) (_ net.Conn, returned error) {
 	if err := errors.Join(ctx.Err(), s.rootRef.CheckRoot(s.root)); err != nil {
 		return nil, err
 	}
-	if err := s.prepareRuntime(); err != nil {
+	if err := s.prepareRuntime(ctx); err != nil {
 		return nil, errors.Join(err, s.releaseRuntime())
 	}
 	complete := false

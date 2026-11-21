@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -96,12 +97,15 @@ func (f policyLayerFlags) file(ctx context.Context) (client.FileLayer, error) {
 	}
 }
 
+// policyTargetDoors is shared by the actual parser and its completion metadata.
+var policyTargetDoors = []api.Door{api.DoorNet, api.DoorPush, api.DoorSSHKey, api.DoorPort}
+
 func policyTarget(args []string) (api.Door, string, error) {
 	door := api.DoorNet
 	if len(args) == 2 {
 		door = api.Door(args[0])
 	}
-	if door != api.DoorNet && door != api.DoorPort && door != api.DoorPush && door != api.DoorSSHKey {
+	if !slices.Contains(policyTargetDoors, door) {
 		return "", "", policyUsage(fmt.Sprintf("the %q door is not available in this version", client.CleanLine(string(door))), "Pass net, port, push or ssh-key, or leave the door out for net.", "bad_door")
 	}
 	return door, args[len(args)-1], nil

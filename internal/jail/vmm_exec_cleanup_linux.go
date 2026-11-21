@@ -21,6 +21,23 @@ func (c *Cmd) SettleVMMUnstartedV1(source *supply.ExecModeLeaseV1) error {
 		return err
 	}
 	c.mu.Lock()
+	already := c.phase == phaseFailed && !c.owned && c.cmd != nil && c.cmd.Process == nil
+	if already {
+		c.mu.Unlock()
+		owner.mu.Lock()
+		proved := owner.noCreation && owner.noFuture
+		owner.mu.Unlock()
+		if !proved {
+			return vmmModeFailureV1("the failed command has no original no-creation proof")
+		}
+		if err := c.FinishVMMExecModeV1(context.WithoutCancel(c.ctx), source); err != nil {
+			return err
+		}
+		c.mu.Lock()
+		c.physical = true
+		c.mu.Unlock()
+		return nil
+	}
 	if c.phase != phaseNew || c.owned || c.cmd == nil || c.cmd.Process != nil {
 		c.mu.Unlock()
 		return vmmModeFailureV1("the VMM creation may already exist; retain its original owner")
@@ -70,6 +87,13 @@ func (c *Cmd) WaitVMMNoFutureExecV1(ctx context.Context, source *supply.ExecMode
 	if owner.rootNamespace && owner.namespaceRootProved {
 		namespaceInit = owner.root
 	}
+	if namespaceInit == nil && owner.readonly && owner.readonlyGroup != nil {
+		if err := owner.readonlyGroup.closedExceptCreatorV1(); err != nil {
+			return err
+		}
+		owner.noFuture, owner.readonlyPhysicalClosed = true, true
+		return nil
+	}
 	if namespaceInit == nil {
 		return vmmModeFailureV1("the original namespace creation lifetime is still unknown")
 	}
@@ -111,6 +135,9 @@ func (c *Cmd) settleVMMNoFutureBeforeWaitV1() error {
 		return err
 	}
 	if err := c.FinishVMMExecModeV1(ctx, owner.source); err != nil {
+		return err
+	}
+	if err := owner.closeReadonlyLifetimeV1(); err != nil {
 		return err
 	}
 	return owner.closeNativeActorsV1()
@@ -160,6 +187,9 @@ func (c *Cmd) CheckVMMNativeSenderV1(source *supply.ExecModeLeaseV1, conn *net.U
 func (owner *vmmExecOwnerV1) checkPhysicalClosedV1() error {
 	owner.mu.Lock()
 	defer owner.mu.Unlock()
+	if owner.readonlyPhysicalClosed {
+		return nil
+	}
 	if owner.noCreation {
 		return nil
 	}
@@ -174,12 +204,34 @@ func (owner *vmmExecOwnerV1) checkPhysicalClosedV1() error {
 	if owner.rootNamespace && owner.namespaceRootProved {
 		namespaceInit = owner.root
 	}
+	if namespaceInit == nil && owner.readonly && owner.readonlyGroup != nil {
+		if err := owner.readonlyGroup.closedExceptCreatorV1(); err != nil {
+			return err
+		}
+		owner.readonlyPhysicalClosed = true
+		return nil
+	}
 	if namespaceInit == nil {
 		return vmmModeFailureV1("the original physical namespace-init creation is still unknown")
 	}
 	ready, err = ownedPIDFDReady(int(namespaceInit.process.Fd()), 0)
 	if err != nil || !ready {
 		return errors.Join(err, vmmModeFailureV1("the original VMM namespace-init creation has not physically exited"))
+	}
+	if owner.readonly {
+		for _, actor := range owner.actors {
+			ready, err := ownedPIDFDReady(int(actor.process.Fd()), 0)
+			if err != nil || !ready {
+				return errors.Join(err, vmmModeFailureV1("an original read-only control actor has not physically exited"))
+			}
+		}
+		if owner.readonlyGroup == nil {
+			return vmmModeFailureV1("the original read-only cgroup proof is missing")
+		}
+		if err := owner.readonlyGroup.closedExceptCreatorV1(); err != nil {
+			return err
+		}
+		owner.readonlyPhysicalClosed = true
 	}
 	return nil
 }

@@ -99,6 +99,10 @@ func (s *Supervisor) startGuest(ctx context.Context, sb sandbox, secrets map[str
 			_ = conn.Close()
 			return err
 		}
+		if err := s.publishNoneDirectoryCreationV1(ctx, receipt, owner); err != nil {
+			_ = conn.Close()
+			return err
+		}
 	}
 	s.link = link.New(conn, link.Supervisor, link.Options{})
 	st, err := s.link.Open(ctx, link.KindCtl, nil)

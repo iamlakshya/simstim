@@ -190,6 +190,7 @@ func git2(t *testing.T, dir string, args ...string) string {
 
 // startGitOpsAgain undoes StopGitOps for the tests that follow.
 func startGitOpsAgain() {
+	reopenNoneCustodyForTestV1()
 	liveGitOpsMu.Lock()
 	gitOpsStopped = false
 	liveGitOpsMu.Unlock()

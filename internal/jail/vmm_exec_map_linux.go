@@ -33,7 +33,7 @@ func retainVMMExecStageV1(c *setup, argv *[]string) (returned error) {
 		copies = append(copies, copyFD)
 	}
 	for index, copyFD := range copies {
-		target := 11 + index
+		target := 12 + index
 		if err := closeVMMConsumedSlotV1(c, target, copies); err != nil {
 			return err
 		}

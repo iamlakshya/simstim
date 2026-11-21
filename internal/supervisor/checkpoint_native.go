@@ -47,7 +47,7 @@ func (s *Supervisor) nativeCheckpointLaneV1(client *client, scope *nativeStopSco
 			client.reply(request.ID, nil, toProtoErr(execRefusal("the original Snapshot source is not a native microvm")))
 			return
 		}
-		own, err := scope.native.OriginalAccountModeV1(ctx, actual.Sandbox, scope.connection)
+		own, err := scope.native.RunningAccountModeForWarmV1(ctx, actual.Sandbox, scope.connection, scope.owner, operation, scope.line)
 		if err != nil {
 			client.reply(request.ID, nil, toProtoErr(err))
 			return

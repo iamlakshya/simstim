@@ -246,9 +246,12 @@ func (owner *purgeAttemptCodeV2) Check(ctx context.Context) error {
 // These are public native bootstrap roles, not OP or session Source loans.
 // Their original code factory must still bind a real child before private use.
 type purgeAttemptCodeLoanV2 struct {
+	mu                                            sync.Mutex
+	issuer                                        *purgeAttemptCodeLoanV2
+	retirement                                    purgeNativeRetirementsV4
+	closed                                        bool
 	creator                                       *purgeAttemptCodeV2
 	OriginalCode, CopiedCode, ParentPidfd, Cancel *os.File
-	once                                          sync.Once
 	closeErr                                      error
 }
 
@@ -262,22 +265,19 @@ func (owner *purgeAttemptCodeV2) borrowForOriginalExecV1(ctx context.Context) (r
 		return nil, err
 	}
 	loan := &purgeAttemptCodeLoanV2{creator: owner}
+	loan.issuer = loan
 	owner.loans[loan] = struct{}{}
 	complete := false
 	defer func() {
 		if !complete {
-			var closeErr error
-			for _, file := range []*os.File{loan.OriginalCode, loan.CopiedCode, loan.ParentPidfd, loan.Cancel} {
-				if file != nil {
-					if err := file.Close(); !errors.Is(err, os.ErrClosed) {
-						closeErr = errors.Join(closeErr, err)
-					}
-				}
-			}
-			returned = errors.Join(returned, closeErr)
-			if closeErr != nil {
+			files := []*os.File{loan.OriginalCode, loan.CopiedCode, loan.ParentPidfd, loan.Cancel}
+			closed := loan.retirement.closeFilesV4(files)
+			native := loan.retirement.checkFilesV4(files)
+			returned = errors.Join(returned, closed, native)
+			if native != nil {
 				result = loan
 			} else {
+				loan.closed = true
 				delete(owner.loans, loan)
 			}
 		}
@@ -310,19 +310,39 @@ func (loan *purgeAttemptCodeLoanV2) Close() error {
 	if loan == nil {
 		return nil
 	}
-	loan.once.Do(func() {
-		for _, file := range []*os.File{loan.OriginalCode, loan.CopiedCode, loan.ParentPidfd, loan.Cancel} {
-			if file != nil {
-				if err := file.Close(); !errors.Is(err, os.ErrClosed) {
-					loan.closeErr = errors.Join(loan.closeErr, err)
-				}
-			}
-		}
-		if loan.creator != nil {
-			loan.creator.mu.Lock()
-			delete(loan.creator.loans, loan)
-			loan.creator.mu.Unlock()
-		}
-	})
-	return loan.closeErr
+	loan.mu.Lock()
+	defer loan.mu.Unlock()
+	if loan.issuer != loan || loan.creator == nil {
+		return placementError("the original code loan lost its actual factory")
+	}
+	files := []*os.File{loan.OriginalCode, loan.CopiedCode, loan.ParentPidfd, loan.Cancel}
+	closed := loan.retirement.closeFilesV4(files)
+	native := loan.retirement.checkFilesV4(files)
+	if native == nil && !loan.closed {
+		loan.creator.mu.Lock()
+		delete(loan.creator.loans, loan)
+		loan.creator.mu.Unlock()
+		loan.closed = true
+	}
+	loan.closeErr = loan.retirement.diagnosticsV4()
+	return errors.Join(closed, native, loan.closeErr)
+}
+
+func (loan *purgeAttemptCodeLoanV2) checkNativeRetiredV3(ctx context.Context) error {
+	if loan == nil || ctx == nil {
+		return placementError("the original code-loan retirement is absent")
+	}
+	loan.mu.Lock()
+	defer loan.mu.Unlock()
+	if loan.issuer != loan || loan.creator == nil || !loan.closed {
+		return placementError("the original code factory still owns an unknown native loan")
+	}
+	return loan.retirement.checkFilesV4([]*os.File{loan.OriginalCode, loan.CopiedCode, loan.ParentPidfd, loan.Cancel})
+}
+
+func (loan *purgeAttemptCodeLoanV2) CloseDiagnosticsV3() error {
+	if loan == nil {
+		return nil
+	}
+	return loan.retirement.diagnosticsV4()
 }

@@ -86,6 +86,7 @@ func policyLogCmd() *cobra.Command {
 	}
 	addIn(cmd, &target, "the session whose decisions to read")
 	cmd.Flags().StringVar(&door, "door", "net", "the door to read (net)")
+	_ = cmd.RegisterFlagCompletionFunc("door", completeFixed("net"))
 	cmd.Flags().StringVar(&since, "since", "", "read from a timestamp or a duration such as 1h")
 	cmd.Flags().StringVar(&by, "by", "", "read classifier decisions only")
 	addFollow(cmd, &follow, "poll the host's audit log for new decisions")

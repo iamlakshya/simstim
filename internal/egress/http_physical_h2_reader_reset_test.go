@@ -6,6 +6,8 @@ import (
 	"crypto/x509"
 	"io"
 	"net"
+	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -129,8 +131,11 @@ func TestPhysicalH2PolicyWakeWaitsForOriginalContinuationAndKeepsDictionary(t *t
 		t.Fatal("private reset crossed the original CONTINUATION boundary")
 	}
 	var decoded []hpack.HeaderField
+	var private []hpack.HeaderField
 	decoder := hpack.NewDecoder(physicalH2OriginalTableLimit, func(field hpack.HeaderField) {
-		if field.Name != physicalH2TokenHeader {
+		if field.Name == strings.ToLower(physicalH2TokenHeader) {
+			private = append(private, field)
+		} else {
 			decoded = append(decoded, field)
 		}
 	})
@@ -142,6 +147,15 @@ func TestPhysicalH2PolicyWakeWaitsForOriginalContinuationAndKeepsDictionary(t *t
 			if err := decoder.Close(); err != nil {
 				t.Fatal(err)
 			}
+			if len(private) != 1 || !private[0].Sensitive {
+				t.Fatal("original header block lost its one never-indexed private binding")
+			}
+			request := &http.Request{Header: make(http.Header)}
+			request.Header.Set(physicalH2TokenHeader, private[0].Value)
+			bound, err := conn.owner.key.consume(request)
+			if err != nil || bound != all[index].id || len(request.Header.Values(physicalH2TokenHeader)) != 0 {
+				t.Fatal("private binding no longer belongs to the original connection and stream", err)
+			}
 			if len(decoded) != len(fields) {
 				t.Fatal("original dictionary lost a header")
 			}
@@ -151,6 +165,7 @@ func TestPhysicalH2PolicyWakeWaitsForOriginalContinuationAndKeepsDictionary(t *t
 				}
 			}
 			decoded = nil
+			private = nil
 		}
 	}
 }

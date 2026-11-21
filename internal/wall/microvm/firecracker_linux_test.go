@@ -104,9 +104,12 @@ func TestFirecrackerConfigRejectsReplacementAndCancelledPublication(t *testing.T
 	if err := os.Symlink(outside, path); err != nil {
 		t.Fatal(err)
 	}
-	if config, err := prepareFirecrackerConfig(t.Context(), spec); err == nil {
-		config.Close()
-		t.Fatal("generated data replaced or followed a planted symlink")
+	config, refusal := prepareFirecrackerConfig(t.Context(), spec)
+	if config == nil || refusal == nil {
+		t.Fatal("generated data replaced/followed a symlink or lost its actual partial owner")
+	}
+	if err := config.Close(); err != nil {
+		t.Fatal(err)
 	}
 	if data, err := os.ReadFile(outside); err != nil || string(data) != "preserve other data" {
 		t.Fatal("a refused publication changed another file", err)
@@ -116,9 +119,12 @@ func TestFirecrackerConfigRejectsReplacementAndCancelledPublication(t *testing.T
 	}
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
-	if config, err := prepareFirecrackerConfig(ctx, spec); err == nil {
-		config.Close()
-		t.Fatal("a cancelled publication succeeded")
+	config, refusal = prepareFirecrackerConfig(ctx, spec)
+	if config == nil || refusal == nil {
+		t.Fatal("a cancelled publication succeeded or lost its actual partial owner")
+	}
+	if err := config.Close(); err != nil {
+		t.Fatal(err)
 	}
 	entries, err := os.ReadDir(spec.SessionDir)
 	if err != nil || len(entries) != 0 {

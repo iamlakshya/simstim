@@ -18,6 +18,7 @@ import (
 	"syscall"
 
 	"github.com/iamlakshya/simstim/internal/cachefs"
+	"github.com/iamlakshya/simstim/internal/jail"
 	fc "github.com/iamlakshya/simstim/internal/wall/firecracker/backend"
 	"golang.org/x/sys/unix"
 )
@@ -25,6 +26,13 @@ import (
 // RunVMHelper owns the VMM and its private Unix endpoints inside the canonical
 // jail. It relays raw guest bytes and exposes only state/power-button control.
 func RunVMHelper(in io.Reader) error {
+	readonly, err := jail.CaptureVMMReadonlyControlStageV1()
+	if err != nil {
+		return err
+	}
+	if readonly != nil {
+		return runReadonlyVMControlV1(readonly)
+	}
 	if err := helperNoDump(); err != nil {
 		return err
 	}
@@ -287,9 +295,10 @@ func removeOwnSocket(path string) error {
 }
 
 type runnerServer struct {
-	conn    net.Conn
-	encoder *json.Encoder
-	mu      sync.Mutex
+	readonlyDisk *readonlyControlDiskV2 // only the captured original C-created B
+	conn         net.Conn
+	encoder      *json.Encoder
+	mu           sync.Mutex
 }
 
 func newRunnerServer(conn net.Conn) *runnerServer {
@@ -298,6 +307,9 @@ func newRunnerServer(conn net.Conn) *runnerServer {
 func (s *runnerServer) send(message runnerMessage) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.readonlyDisk != nil && message.Kind == "reply" {
+		return s.sendReadonlyDiskReplyV2(message)
+	}
 	if err := s.encoder.Encode(message); err != nil {
 		return fmt.Errorf("send private VMM reply: %w", err)
 	}

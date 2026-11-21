@@ -147,41 +147,6 @@ GITHUB_TOKEN = "echo never-run"
 	}
 }
 
-// syntheticFutureRoot adds a hidden-free test subcommand that exercises the
-// isolation flags and positional completers scheduled for H4/H10/H14/H19/P1.12
-// to test their existing fixed-value completers through Cobra's __complete.
-func syntheticFutureRoot() *cobra.Command {
-	root := Root()
-	fullHostSettings := []hostSetting{
-		{key: "idle", values: []string{"never"}},
-		{key: "label.", prefix: true},
-		{key: "tier", values: []string{"own", "throwaway", "shared"}},
-		{key: "floor", values: []string{"none", "process", "gvisor", "microvm"}},
-		{key: "drain", values: []string{"off"}},
-	}
-	fut := &cobra.Command{Use: "_spec14"}
-	doorCmd := &cobra.Command{Use: "door <word>", Args: cobra.ExactArgs(1), ValidArgsFunction: firstArg(completeDoorWords), RunE: func(*cobra.Command, []string) error { return nil }}
-	hsetCmd := &cobra.Command{
-		Use:  "hset <host> <pair>...",
-		Args: cobra.MinimumNArgs(1),
-		ValidArgsFunction: func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-			if len(args) == 0 {
-				return completeHosts(cmd, args, toComplete)
-			}
-			return completeHostSettings(fullHostSettings)(cmd, args, toComplete)
-		},
-		RunE: func(*cobra.Command, []string) error { return nil },
-	}
-	flagsCmd := &cobra.Command{Use: "flags", RunE: func(*cobra.Command, []string) error { return nil }}
-	for _, f := range []string{"profile", "door", "wall", "tier", "preset", "root-step", "images"} {
-		flagsCmd.Flags().String(f, "", f)
-	}
-	fut.AddCommand(doorCmd, hsetCmd, flagsCmd)
-	root.AddCommand(fut)
-	wireKnownFlagCompletions(root)
-	return root
-}
-
 // Golden test of __complete for current values and reusable fixed-value completers.
 func TestGoldenCompletion(t *testing.T) {
 	cfgDir, stateDir := isolateCompletionEnv(t)
@@ -193,7 +158,6 @@ func TestGoldenCompletion(t *testing.T) {
 
 	cases := []struct {
 		title string
-		fut   bool
 		noDsc bool
 		args  []string
 	}{
@@ -206,35 +170,34 @@ func TestGoldenCompletion(t *testing.T) {
 		{title: "14.2 setup --agents comma list", args: []string{"setup", "--agents", "claude,co"}},
 		{title: "14.2 host set keys (current build)", args: []string{"host", "set", "vm", ""}},
 		{title: "14.2 host set value (current build)", args: []string{"host", "set", "vm", "idle="}},
-		{title: "14.2 host set keys (with isolation keys)", fut: true, args: []string{"_spec14", "hset", "vm", "idle=2h", ""}},
-		{title: "14.2 host set tier values", fut: true, args: []string{"_spec14", "hset", "vm", "tier="}},
-		{title: "14.2 host set floor values", fut: true, args: []string{"_spec14", "hset", "vm", "floor="}},
-		{title: "14.2 host set drain values", fut: true, args: []string{"_spec14", "hset", "vm", "drain="}},
+		{title: "14.2 host set keys after idle", args: []string{"host", "set", "vm", "idle=2h", ""}},
+		{title: "14.2 host set tier values", args: []string{"host", "set", "vm", "tier="}},
+		{title: "14.2 live policy allow doors", args: []string{"policy", "allow", ""}},
+		{title: "14.2 live policy log door", args: []string{"policy", "log", "--door", ""}},
 		{title: "14.2 --debug categories", args: []string{"ls", "--debug=attach,"}},
 		{title: "14.2 debug profile kind", args: []string{"debug", "profile", "atlas/auth-fix", ""}},
 		{title: "14.2 debug bundle host or session", args: []string{"debug", "bundle", ""}},
 		{title: "14.2 completion shells", args: []string{"completion", ""}},
-		{title: "14.2 door words (P1.12)", fut: true, args: []string{"_spec14", "door", ""}},
-		{title: "14.2 --profile (P1.12)", fut: true, args: []string{"_spec14", "flags", "--profile", ""}},
-		{title: "14.2 --wall", fut: true, args: []string{"_spec14", "flags", "--wall", ""}},
-		{title: "14.2 --tier", fut: true, args: []string{"_spec14", "flags", "--tier", ""}},
-		{title: "14.2 --preset", fut: true, args: []string{"_spec14", "flags", "--preset", ""}},
-		{title: "14.2 --root-step", fut: true, args: []string{"_spec14", "flags", "--root-step", ""}},
-		{title: "14.2 --images", fut: true, args: []string{"_spec14", "flags", "--images", ""}},
+		{title: "14.2 current host commands in help", args: []string{"help", "host", ""}},
+		{title: "14.2 concepts help topic", args: []string{"help", "con"}},
+		{title: "14.2 exit code help topic", args: []string{"help", "exit"}},
+		{title: "14.2 session flag", args: []string{"policy", "ls", "--in", ""}},
+		{title: "14.2 --profile", args: []string{"new", "box", "--profile", ""}},
+		{title: "14.2 --wall", args: []string{"new", "box", "--wall", ""}},
+		{title: "14.2 --tier", args: []string{"host", "add", "box", "--tier", ""}},
+		{title: "14.2 --preset", args: []string{"new", "box", "--preset", ""}},
+		{title: "14.2 --root-step", args: []string{"host", "prepare", "box", "--root-step", ""}},
+		{title: "14.2 --images", args: []string{"host", "prepare", "box", "--images", ""}},
 		{title: "14.2 --secret", args: []string{"new", "box", "--secret", ""}},
 	}
 
 	var b strings.Builder
 	for _, tc := range cases {
-		var r *cobra.Command
-		if tc.fut {
-			r = syntheticFutureRoot()
-		}
 		cmd := cobra.ShellCompRequestCmd
 		if tc.noDsc {
 			cmd = cobra.ShellCompNoDescRequestCmd
 		}
-		items, dir, errOut := execComplete(t, r, cmd, tc.args...)
+		items, dir, errOut := execComplete(t, nil, cmd, tc.args...)
 		if errOut != "" {
 			t.Errorf("%s wrote to stderr: %q", tc.title, errOut)
 		}
@@ -335,6 +298,16 @@ allow = ["policy.example.org"]
 		t.Fatal(err)
 	}
 	defer unlock()
+	// Acquiring the real OP may initialise the legacy membership marker.
+	// Baseline AFTER that fixture setup, before any completion request.
+	baseline, err := os.ReadFile(filepath.Join(cfgDir, "hosts.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.HasSuffix(baseline, []byte(hostsTOML)) {
+		t.Fatal("the fixture OP changed more than the canonical membership marker")
+	}
+	hostsTOML = string(baseline)
 	holdCompletionHostsFileLock(t)
 	defer client.ShortenHostsWait(200 * time.Millisecond)()
 
@@ -612,9 +585,10 @@ func TestCompletionCommandTreeWiring(t *testing.T) {
 		}
 	}
 
-	localFileFlags := map[string]bool{"debug-file": true, "ssh-config": true, "provider-script": true, "key": true}
+	localFileFlags := map[string]bool{"debug-file": true, "ssh-config": true, "provider-script": true, "key": true, "env-file": true, "seed": true}
 	valueFlags := map[string]bool{
-		"host": true, "agent": true, "agents": true, "create": true, "secret": true,
+		"host": true, "in": true, "agent": true, "agents": true, "create": true, "secret": true,
+		"profile": true, "door": true, "wall": true, "tier": true, "preset": true, "root-step": true, "images": true,
 		"debug": true, "only": true, "memory-max": true, "idle-stop": true,
 		"format": true, "events": true, "event": true,
 	}
@@ -624,7 +598,7 @@ func TestCompletionCommandTreeWiring(t *testing.T) {
 		if c.Hidden {
 			return
 		}
-		use := c.Use
+		use := positionalCompletionUse(c)
 		needsArgComp := strings.Contains(use, "<host>") ||
 			strings.Contains(use, "<host>/<session>") ||
 			strings.Contains(use, "<agent>") ||
@@ -741,4 +715,23 @@ func checkEmptyCompletion(t *testing.T, label string) {
 			t.Fatalf("%s (%v): items=%v dir=%d stderr=%q", label, q, items, dir, errOut)
 		}
 	}
+}
+
+// A placeholder after an actual value flag belongs to that flag's completer,
+// not ValidArgsFunction. This keeps no-argument log/refuse commands covered.
+func positionalCompletionUse(cmd *cobra.Command) string {
+	var positional []string
+	words := strings.Fields(cmd.Use)
+	for i := 0; i < len(words); i++ {
+		word := strings.Trim(words[i], "[]")
+		if strings.HasPrefix(word, "--") {
+			name, _, hasValue := strings.Cut(strings.TrimPrefix(word, "--"), "=")
+			if flag := cmd.Flags().Lookup(name); flag != nil && flag.Value.Type() != "bool" && !hasValue {
+				i++
+			}
+			continue
+		}
+		positional = append(positional, word)
+	}
+	return strings.Join(positional, " ")
 }

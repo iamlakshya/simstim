@@ -432,6 +432,10 @@ func withSession(cmd *cobra.Command, word string, fn func(context.Context, clien
 	if err != nil {
 		return err
 	}
+	return withResolvedSession(cmd, a, fn)
+}
+
+func withResolvedSession(cmd *cobra.Command, a address, fn func(context.Context, client.Host, *client.Conn, *client.Session) error) error {
 	return a.open(cmd.Context(), cmd, func(ctx context.Context, f found) error {
 		ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 		defer cancel()

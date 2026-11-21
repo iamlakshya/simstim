@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"os"
 	"testing"
 
@@ -19,9 +20,12 @@ func completionSignalScene() {
 }
 func TestCompletionMainHandlesAnEmptyRequest(t *testing.T) {
 	for _, name := range []string{cobra.ShellCompRequestCmd, cobra.ShellCompNoDescRequestCmd} {
-		cmd, stderr := childWithoutTerminal(t, "", name)
-		if code := exitOf(t, cmd); code != 0 || stderr.Len() != 0 {
-			t.Errorf("%s exit=%d stderr=%q", name, code, stderr.String())
+		command, _ := childCommand("", name)
+		var stdout, stderr bytes.Buffer
+		command.Stdout, command.Stderr = &stdout, &stderr
+		cmd := startChild(t, command)
+		if code := exitOf(t, cmd); code != 0 || stderr.Len() != 0 || stdout.String() != ":4\n" {
+			t.Errorf("%s exit=%d stdout=%q stderr=%q", name, code, stdout.String(), stderr.String())
 		}
 	}
 }

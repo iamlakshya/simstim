@@ -16,10 +16,10 @@ import (
 // corroboration, never a replacement for the original pinned cgroup events.
 func (owner *imageNativeGuardianV1) retainManagerScopeV1(ctx context.Context, scope imageScopeInfo) error {
 	manager, err := openNativeUserManagerV1(ctx)
+	owner.manager = manager // Adopt cleanup-only partial objects before errors.
 	if err != nil {
 		return err
 	}
-	owner.manager = manager
 	var unitPath dbus.ObjectPath
 	if err := manager.bus.Object("org.freedesktop.systemd1", systemdManagerPath).CallWithContext(ctx, systemdManagerInterface+".GetUnit", 0, owner.unit).Store(&unitPath); err != nil {
 		return err

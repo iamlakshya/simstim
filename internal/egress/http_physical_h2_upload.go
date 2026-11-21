@@ -147,6 +147,12 @@ func (c *physicalH2UploadConn) observe(payload []byte) error {
 		}
 		if c.remaining != 0 {
 			count := min(len(payload), int(c.remaining))
+			if count == 0 {
+				// A successful write may end exactly at the native frame
+				// header. Retain its original payload/padding state until
+				// another successful prefix actually supplies those bytes.
+				return nil
+			}
 			if c.frame.Type == http2.FrameData {
 				if c.bodyStream == 0 || c.frame.StreamID != c.bodyStream {
 					return errPhysicalH2Binding

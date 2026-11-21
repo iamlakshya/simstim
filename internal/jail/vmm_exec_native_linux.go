@@ -41,7 +41,7 @@ func readVMMNativeMessageV1(data []byte) (vmmNativeMessageV1, error) {
 		return message, vmmModeFailureV1("the original native creation record is malformed")
 	}
 	message = vmmNativeMessageV1{data[8], data[9], binary.LittleEndian.Uint32(data[12:])}
-	if message.kind < vmmModeEnterV1 || message.kind > vmmModeNoFutureV1 || message.stage < vmmStageOuterV1 || message.stage > vmmStageRunnerV1 || message.localPID == 0 {
+	if message.kind < vmmModeEnterV1 || message.kind > vmmReadonlyDiskAdoptedV1 || message.stage < vmmStageOuterV1 || message.stage > vmmStageRunnerV1 || message.localPID == 0 {
 		return message, vmmModeFailureV1("the native creation record has another closed phase")
 	}
 	return message, nil

@@ -9,6 +9,7 @@ import (
 	"os"
 	"reflect"
 	"runtime"
+	"slices"
 	"sync"
 
 	"github.com/iamlakshya/simstim/internal/brand"
@@ -19,15 +20,18 @@ import (
 )
 
 type heldRuntimeItemV1 struct {
-	item     supply.Item
-	file     *os.File
-	released bool
+	item           supply.Item
+	file           *os.File
+	released       bool
+	closeAttempted bool
+	closeFacts     supply.FileCloseFactsV1
 }
 
 // selectedRuntimeReceiptV1 is issued only by this bridge's actual successful
 // runtime delivery/status request. All selected original role descriptors stay
 // held through the protected request writer and connection lifetime.
 type selectedRuntimeReceiptV1 struct {
+	issuer        *runtimeService // immutable actual producer; no copied carrier can set it
 	closeMu       sync.Mutex
 	mu            sync.RWMutex
 	fileMu        sync.Mutex
@@ -42,8 +46,8 @@ type selectedRuntimeReceiptV1 struct {
 }
 
 func cloneSelectedRuntime(manifest supply.Manifest) supply.Manifest {
-	manifest.Items = append([]supply.Item(nil), manifest.Items...)
-	manifest.Advisories = append([]supply.Advisory(nil), manifest.Advisories...)
+	manifest.Items = slices.Clone(manifest.Items)
+	manifest.Advisories = slices.Clone(manifest.Advisories)
 	return manifest
 }
 
@@ -51,7 +55,7 @@ func cloneImageDefaults(defaults *[]supply.Item) *[]supply.Item {
 	if defaults == nil {
 		return nil
 	}
-	cloned := append([]supply.Item(nil), (*defaults)...)
+	cloned := slices.Clone(*defaults)
 	return &cloned
 }
 
@@ -79,7 +83,7 @@ func (s *runtimeService) selectedRuntime(expected supply.Manifest) (*selectedRun
 	s.mu.Lock()
 	receipt, closed := s.selections[key], s.closed
 	s.mu.Unlock()
-	if closed || receipt == nil {
+	if closed || receipt == nil || receipt.issuer != s {
 		return nil, newRuntimeError("this authenticated connection has no original held runtime selection")
 	}
 	actual, err := receipt.inventory(context.Background())
@@ -104,6 +108,12 @@ func (s *runtimeService) rememberRuntimeWithDefaults(ctx context.Context, manife
 		return err
 	}
 	defer done()
+	connection, request, release, err := s.selectionContextV1(ctx)
+	if err != nil {
+		return err
+	}
+	defer release()
+	ctx = request
 	unlock, err := s.lockRuntimeSelectionV1(ctx)
 	if err != nil {
 		return err
@@ -129,13 +139,28 @@ func (s *runtimeService) rememberRuntimeWithDefaults(ctx context.Context, manife
 		return newRuntimeError("the authenticated runtime connection has ended")
 	}
 	if existing != nil {
-		return existing.retainImageDefaults(ctx, defaults)
+		if existing.issuer != s {
+			return newRuntimeError("the original runtime receipt has another actual issuer")
+		}
+		if !existing.producerEndedV1() {
+			return existing.retainImageDefaults(ctx, defaults)
+		}
+		if err := s.retireEndedSelectionV1(key, existing); err != nil {
+			return err
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if err := connection.Err(); err != nil {
+			return err
+		}
 	}
-	publication, err := beginRuntimePublication(ctx)
+	publication, err := beginRuntimePublicationLifetimeV1(ctx, connection, "publish", nil, nil)
 	if err != nil {
 		return err
 	}
 	receipt := &selectedRuntimeReceiptV1{
+		issuer:        s,
 		manifest:      cloneSelectedRuntime(manifest),
 		imageDefaults: cloneImageDefaults(defaults),
 		publication:   publication,
@@ -147,17 +172,17 @@ func (s *runtimeService) rememberRuntimeWithDefaults(ctx context.Context, manife
 			failure = errors.Join(failure, cleanup)
 			if cleanup != nil {
 				s.mu.Lock()
-				s.selectionPending = receipt
+				s.selectionPending, s.selectionPendingKey = receipt, ""
 				s.mu.Unlock()
 			}
 		}
 	}()
-	receipt.store, err = runtimecache.OpenHostReadOnly(publication.ctx, paths.ArtefactsDir(), publication.owner.domain())
+	receipt.store, err = runtimecache.OpenHostReadOnly(ctx, paths.ArtefactsDir(), publication.owner.domain())
 	if err != nil {
 		return err
 	}
 	for _, item := range receipt.manifest.Items {
-		file, err := receipt.store.OpenItem(publication.ctx, item)
+		file, err := receipt.store.OpenItem(ctx, item)
 		if err != nil {
 			return err
 		}
@@ -167,15 +192,18 @@ func (s *runtimeService) rememberRuntimeWithDefaults(ctx context.Context, manife
 		return err
 	}
 	s.mu.Lock()
-	if s.closed {
+	if s.closed || ctx.Err() != nil || connection.Err() != nil {
 		s.mu.Unlock()
-		return newRuntimeError("the authenticated runtime connection ended before selection publication")
+		return errors.Join(ctx.Err(), connection.Err(), newRuntimeError("the authenticated runtime request/connection ended before selection publication"))
 	}
 	if s.selections == nil {
 		s.selections = map[string]*selectedRuntimeReceiptV1{}
 	}
 	if current := s.selections[key]; current != nil {
 		s.mu.Unlock()
+		if current.issuer != s {
+			return newRuntimeError("the current runtime receipt belongs to another issuer")
+		}
 		return current.retainImageDefaults(ctx, defaults)
 	}
 	s.selections[key], retained = receipt, true
@@ -293,11 +321,17 @@ func (receipt *selectedRuntimeReceiptV1) Close() error {
 		if held.file == nil || held.released {
 			continue
 		}
-		err := held.file.Close()
-		held.released = true // This exact os.File is unusable after Close, including on error.
-		if err != nil {
-			receipt.closeErr = err
-			return err
+		if !held.closeAttempted {
+			held.closeAttempted = true
+			held.closeFacts = supply.CloseFileOnceV1(held.file)
+			held.released = held.closeFacts.Retired
+			if err := errors.Join(held.closeFacts.Diagnostic, held.closeFacts.Unknown); err != nil {
+				receipt.closeErr = err
+				return err
+			}
+		}
+		if held.closeFacts.Unknown != nil {
+			return held.closeFacts.Unknown
 		}
 	}
 	if receipt.store != nil {

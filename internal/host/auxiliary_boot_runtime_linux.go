@@ -222,7 +222,7 @@ func (boot *AuxiliaryBootV1) Close() error {
 			boot.closeErr = errors.Join(boot.closeErr, boot.diskParent.Close())
 		}
 		if boot.candidate != nil {
-			boot.closeErr = errors.Join(boot.closeErr, boot.candidate.line.Close(), boot.candidate.peer.Close(), boot.candidate.manager.Close())
+			boot.closeErr = errors.Join(boot.closeErr, boot.candidate.Close())
 		}
 		if boot.operation != nil {
 			boot.closeErr = errors.Join(boot.closeErr, boot.operation.CloseWithError())
@@ -232,4 +232,11 @@ func (boot *AuxiliaryBootV1) Close() error {
 		}
 	})
 	return boot.closeErr
+}
+
+func (boot *AuxiliaryBootV1) ManagerCloseDiagnosticsV4() error {
+	if boot == nil || boot.candidate == nil {
+		return nil
+	}
+	return boot.candidate.CloseDiagnosticsV4()
 }

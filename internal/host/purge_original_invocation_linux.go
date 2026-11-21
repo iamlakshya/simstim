@@ -221,10 +221,10 @@ func (owner *purgeAttemptExecV1) checkRetainedCreationV3(ctx context.Context) er
 	}
 	owner.mu.Lock()
 	defer owner.mu.Unlock()
-	if owner.closed || !owner.admissionSent || owner.start == nil || owner.command == nil || owner.command.Process != owner.process || owner.process == nil || owner.peer == nil || owner.peer.pid != owner.process.Pid || owner.peer.identity == nil || owner.creation == nil || owner.creationFD < 0 || int(owner.creation.Fd()) != owner.creationFD || owner.code == nil || owner.loan == nil || owner.loan.creator != owner.code {
+	if owner.closed || !owner.admissionSent || owner.start == nil || owner.scope == nil || owner.command == nil || owner.command.Process != owner.process || owner.process == nil || owner.peer == nil || owner.peer.pid != owner.process.Pid || owner.peer.identity == nil || owner.creation == nil || owner.creationFD < 0 || int(owner.creation.Fd()) != owner.creationFD || owner.code == nil || owner.loan == nil || owner.loan.creator != owner.code {
 		return placementError("the continuation has no actual originally admitted fixed creation")
 	}
-	if err := errors.Join(ctx.Err(), CheckCaller(), owner.start.checkRetainedSpecV3(ctx), owner.peer.checkLive(), unix.PidfdSendSignal(int(owner.creation.Fd()), 0, nil, 0)); err != nil {
+	if err := errors.Join(ctx.Err(), CheckCaller(), owner.start.checkRetainedSpecV3(ctx), owner.scope.checkLiveV3(ctx), owner.peer.checkLive(), unix.PidfdSendSignal(int(owner.creation.Fd()), 0, nil, 0)); err != nil {
 		return err
 	}
 	owner.code.mu.Lock()

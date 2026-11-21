@@ -4,6 +4,7 @@ package jail
 
 import (
 	"context"
+	"encoding/hex"
 	"errors"
 	"net"
 	"os"
@@ -16,10 +17,12 @@ import (
 // Serialized layout is correlation only. The original Cmd channel and native
 // creation chain must adopt every stage before that stage can release a child.
 type vmmExecSetupV1 struct {
-	Version   int `json:"version"`
-	LeaseFD   int `json:"lease_fd"`
-	WriterFD  int `json:"writer_fd"`
-	ControlFD int `json:"control_fd"`
+	ReadonlyInit  bool   `json:"readonly_init,omitempty"`
+	ReadonlyNonce string `json:"readonly_nonce,omitempty"`
+	Version       int    `json:"version"`
+	LeaseFD       int    `json:"lease_fd"`
+	WriterFD      int    `json:"writer_fd"`
+	ControlFD     int    `json:"control_fd"`
 }
 
 const vmmRunnerMarkerV1 = "--original-vmm-native-stage-v1"
@@ -54,7 +57,7 @@ func checkVMMFileRulesStageV1(stage string, c *setup) (string, error) {
 		normal = stageExecFilesV1
 	}
 	if normal == "" {
-		if c.VMMExecV1 != nil {
+		if c.VMMExecV1 != nil || c.ReadonlyVMMInitV1 != nil {
 			return "", vmmModeFailureV1("a generic stage cannot consume a private VMM mode source")
 		}
 		return stage, nil
@@ -76,8 +79,18 @@ func checkVMMLayoutMetadataV1(c *setup) error {
 	}
 	value := c.VMMExecV1
 	base := 5 + c.Files + len(c.Binds) + len(pinnedRules(c.Rules))
-	if value.Version != 1 || value.LeaseFD != base || value.WriterFD != base+1 || value.ControlFD != base+2 || c.Files != 8 || c.InitLeaseV1Version != 0 || c.ControllerPublicV1 != nil || c.PublicationLeaseV1 != nil || c.GvisorV1Version != 0 || !c.Userns || c.Net != NetNone || c.Seccomp != ProfileVMM || c.ExecFD != 8 || len(c.Argv) != 2 || c.Argv[0] != "/proc/self/fd/8" || c.Argv[1] != "chv-run" {
+	if value.Version != 2 || value.LeaseFD != base || value.WriterFD != base+1 || value.ControlFD != base+2 || c.Files != 9 || c.InitLeaseV1Version != 0 || c.ControllerPublicV1 != nil || c.PublicationLeaseV1 != nil || c.GvisorV1Version != 0 || !c.Userns || c.Net != NetNone || c.Seccomp != ProfileVMM || c.ExecFD != 8 || len(c.Argv) != 2 || c.Argv[0] != "/proc/self/fd/8" || c.Argv[1] != "chv-run" {
 		return vmmModeFailureV1("the private VMM stage has another fixed purpose or native layout")
+	}
+	if value.ReadonlyInit {
+		if c.Sub == nil || len(value.ReadonlyNonce) != 32 || !validReadonlyNonceV1(value.ReadonlyNonce) {
+			return vmmModeFailureV1("the read-only init lost its actual two-map source correlation")
+		}
+		if c.ReadonlyVMMInitV1 == nil {
+			return vmmModeFailureV1("the read-only init lost its original selected plan")
+		}
+	} else if value.ReadonlyNonce != "" || c.ReadonlyVMMInitV1 != nil {
+		return vmmModeFailureV1("a writable phase cannot consume read-only init metadata")
 	}
 	return nil
 }
@@ -304,7 +317,7 @@ func captureVMMRunnerStageV1() error {
 	if err := unix.Prctl(unix.PR_SET_DUMPABLE, 0, 0, 0, 0); err != nil {
 		return err
 	}
-	value := &vmmExecSetupV1{Version: 1, LeaseFD: 11, WriterFD: 12, ControlFD: 13}
+	value := &vmmExecSetupV1{Version: 2, LeaseFD: 12, WriterFD: 13, ControlFD: 14}
 	if err := checkVMMStageCapabilitiesV1(value); err != nil {
 		return err
 	}
@@ -335,7 +348,7 @@ func captureVMMRunnerStageV1() error {
 	if err != nil {
 		return err
 	}
-	stage := &VMMExecLeaseStageV1{program: info, lease: os.NewFile(11, "original-vmm-stage-lease"), writer: os.NewFile(12, "original-vmm-stage-sentinel"), control: os.NewFile(13, "original-vmm-stage-creation")}
+	stage := &VMMExecLeaseStageV1{program: info, lease: os.NewFile(12, "original-vmm-stage-lease"), writer: os.NewFile(13, "original-vmm-stage-sentinel"), control: os.NewFile(14, "original-vmm-stage-creation")}
 	capturedVMMRunnerV1.Lock()
 	defer capturedVMMRunnerV1.Unlock()
 	if capturedVMMRunnerV1.stage != nil {
@@ -422,4 +435,9 @@ func closeVMMInitInheritedV1(c *setup, extra []*os.File) error {
 		result = errors.Join(result, file.Close())
 	}
 	return result
+}
+
+func validReadonlyNonceV1(value string) bool {
+	decoded, err := hex.DecodeString(value)
+	return err == nil && len(decoded) == 16
 }

@@ -41,14 +41,21 @@ func (owner *vmmExecOwnerV1) readNativeV1() {
 				owner.nativeErr = err
 			}
 			owner.mu.Unlock()
+			_ = owner.killReadonlyActorV1(unix.SIGKILL)
 			owner.runnerOnce.Do(func() { close(owner.runnerReady) })
 			_ = owner.closeHostV1()
 			return
 		}
-		if _, err = host.Write([]byte{0xa6}); err != nil {
+		if raw[8] >= vmmReadonlyControlParentV1 {
+			err = owner.replyReadonlyNativeV1(raw[8])
+		} else {
+			_, err = host.Write([]byte{0xa6})
+		}
+		if err != nil {
 			owner.mu.Lock()
 			owner.nativeErr = err
 			owner.mu.Unlock()
+			_ = owner.killReadonlyActorV1(unix.SIGKILL)
 			owner.runnerOnce.Do(func() { close(owner.runnerReady) })
 			_ = owner.closeHostV1()
 			return
@@ -87,6 +94,9 @@ func (owner *vmmExecOwnerV1) acceptNativeV1(message vmmNativeMessageV1, control 
 	}
 	if namespace[len(namespace)-1] != int(message.localPID) {
 		return vmmModeFailureV1("the stage record differs from its actual creation namespace task")
+	}
+	if message.kind >= vmmReadonlyControlParentV1 {
+		return owner.acceptReadonlyNativeV1(message, actor, control)
 	}
 	switch message.kind {
 	case vmmModeEnterV1:
@@ -261,6 +271,9 @@ func (c *Cmd) WaitVMMProjectionV1(ctx context.Context, source *supply.ExecModeLe
 	if err != nil {
 		return err
 	}
+	if owner.readonly {
+		return c.waitReadonlyProjectionV1(ctx, owner)
+	}
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
@@ -329,6 +342,9 @@ func (c *Cmd) ArmVMMExecModeV1(ctx context.Context, source *supply.ExecModeLease
 	}
 	owner.mu.Lock()
 	defer owner.mu.Unlock()
+	if owner.readonly {
+		return vmmModeFailureV1("a read-only init source cannot arm a chmod phase")
+	}
 	if !owner.projection || owner.armed || owner.final == nil || owner.runner == nil || owner.nativeErr != nil {
 		return vmmModeFailureV1("the original helper chain has no last readonly projection proof")
 	}

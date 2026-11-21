@@ -15,6 +15,8 @@ import (
 type OrdinaryPurgePreparationV2 struct {
 	mu                  sync.Mutex
 	owner               *ordinaryHolderCaptureV2
+	decision            *PurgeCohortDecisionLoanV3
+	decisionReady       bool
 	next                uint64
 	quiesced, restored  bool
 	transferred, closed bool
@@ -38,6 +40,15 @@ func (preparation *OrdinaryPurgePreparationV2) checkOriginalV2(ctx context.Conte
 		return sessionLeaseError("the original active ordinary preparation ended")
 	}
 	owner := preparation.owner
+	if preparation.decision != nil {
+		if !preparation.decisionReady || preparation.decision.operation != operation || preparation.decision.owner == nil {
+			return sessionLeaseError("the ordinary preparation has no completed original cohort admission")
+		}
+		first, err := preparation.decision.owner.FirstDecisionV3(ctx)
+		if err != nil || first != 0 {
+			return errors.Join(sessionLeaseError("the active ordinary cohort is no longer awaiting its global decision"), err)
+		}
+	}
 	if operation != owner.operation || operation.native == nil || operation.native.borrowed || !operation.Valid(operation.Primary()) || owner.stopSent || owner.settled || owner.closed || owner.restored == nil || owner.holder == nil || owner.line == nil || owner.peer == nil || owner.origin == nil || owner.main == nil || owner.joined == nil {
 		return sessionLeaseError("the active ordinary preparation lost its same original operation")
 	}
@@ -143,6 +154,18 @@ func (preparation *OrdinaryPurgePreparationV2) restoreV2(ctx context.Context, op
 		return sessionLeaseError("the original ordinary restoration has no request lifetime")
 	}
 	owner := preparation.owner
+	if preparation.decision != nil {
+		first, err := preparation.decision.owner.ProposeAbortV3(context.Background())
+		if err != nil {
+			return err
+		}
+		if first == PurgeCohortCommitByteV3 {
+			return sessionLeaseError("the original native cohort committed before restoration; retain its physical stop")
+		}
+		if first != PurgeCohortAbortByteV3 {
+			return sessionLeaseError("the original ordinary restoration has no native cohort abort")
+		}
+	}
 	requestErr := preparation.requestV2(ctx, ordinaryPurgeRestoreV2)
 	// The original native peer loan remains open while closing only the
 	// physical transport cancels its already-owned restoration handler.
@@ -167,6 +190,9 @@ func (preparation *OrdinaryPurgePreparationV2) CommitStop(ctx context.Context, o
 	}
 	preparation.mu.Lock()
 	defer preparation.mu.Unlock()
+	if preparation.decision != nil {
+		return preparation.joinCohortStopV3(ctx, operation)
+	}
 	if err := preparation.checkOriginalV2(ctx, operation); err != nil {
 		return nil, err
 	}
@@ -207,7 +233,7 @@ func (preparation *OrdinaryPurgePreparationV2) Close() error {
 		// outstanding cleanup. Close is never post-stop release permission.
 		return sessionLeaseError("the ordinary preparation retains its dispatched native stop and cleanup")
 	}
-	if !preparation.owner.pauseSent {
+	if !preparation.owner.pauseSent && preparation.decision == nil {
 		// The same producer records the physical quiesce send boundary. A
 		// partial/unused capture cannot have paused its original subject.
 		err := preparation.owner.Close()
@@ -220,8 +246,16 @@ func (preparation *OrdinaryPurgePreparationV2) Close() error {
 	if !preparation.restored {
 		return err
 	}
+	if closeErr := preparation.owner.Close(); closeErr != nil {
+		return errors.Join(err, closeErr)
+	}
+	if preparation.decision != nil {
+		if closeErr := preparation.decision.Close(); closeErr != nil {
+			return errors.Join(err, closeErr)
+		}
+	}
 	preparation.closed = true
-	return errors.Join(err, preparation.owner.Close())
+	return err
 }
 
 func (preparation *OrdinaryPurgePreparationV2) checkRestoredV2(ctx context.Context, operation *SessionOperation) error {

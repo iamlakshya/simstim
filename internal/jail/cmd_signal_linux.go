@@ -24,16 +24,18 @@ func (c *Cmd) watch() {
 // subsequent cleanup uses only the exact creation pidfd. This makes no claim
 // about a descendant that escaped that group or its namespace.
 func (c *Cmd) killGroup() error {
+	readonlyErr := c.killReadonlyInitV1(unix.SIGKILL)
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if !c.reaped && c.owned {
 		err := c.signalOwnedLocked(unix.SIGKILL)
 		if err != nil {
-			c.lifecycleErr = errors.Join(c.lifecycleErr, err)
-			return err
+			c.lifecycleErr = errors.Join(c.lifecycleErr, readonlyErr, err)
+			return errors.Join(readonlyErr, err)
 		}
 	}
-	return nil
+	c.lifecycleErr = errors.Join(c.lifecycleErr, readonlyErr)
+	return readonlyErr
 }
 
 // signalOwnedLocked checks current child ownership through the creation
@@ -84,6 +86,7 @@ func (c *Cmd) Signal(sig os.Signal) error {
 	if !ok {
 		return failure("a jail takes only a syscall.Signal", "Pass a signal such as syscall.SIGTERM.")
 	}
+	readonlyErr := c.killReadonlyInitV1(s)
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	switch {
@@ -91,7 +94,7 @@ func (c *Cmd) Signal(sig os.Signal) error {
 		c.abortOnce.Do(func() { close(c.abort) })
 		return nil
 	case (c.phase == phaseRunning || c.phase == phaseWaiting || c.phase == phaseUncertain) && !c.reaped:
-		err := c.signalOwnedLocked(s)
+		err := errors.Join(readonlyErr, c.signalOwnedLocked(s))
 		if err != nil {
 			c.lifecycleErr = errors.Join(c.lifecycleErr, err)
 			return stepFailed("cannot signal the jail", "Check that the jail still runs.", err)

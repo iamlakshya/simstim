@@ -19,12 +19,6 @@ import (
 	"golang.org/x/net/http2/hpack"
 )
 
-func physicalModelRawGuest(t *testing.T, fixture *httpLifetimeFixture, gate <-chan struct{}) (*http2.Framer, <-chan physicalH2TestEvent) {
-	t.Helper()
-	writer, events, _ := physicalModelRawGuestConn(t, fixture, gate)
-	return writer, events
-}
-
 func physicalModelRawGuestConn(t *testing.T, fixture *httpLifetimeFixture, gate <-chan struct{}) (*http2.Framer, <-chan physicalH2TestEvent, net.Conn) {
 	t.Helper()
 	transport := fixture.client.Transport.(*http.Transport)
@@ -126,7 +120,7 @@ func TestPhysicalHTTP2PolicyRetiresQueuedZeroWindowRefusalAndKeepsSiblingThrough
 	gate := make(chan struct{})
 	openGate := sync.OnceFunc(func() { close(gate) })
 	t.Cleanup(openGate)
-	writer, events := physicalModelRawGuest(t, fixture, gate)
+	writer, events, native := physicalModelRawGuestConn(t, fixture, gate)
 	// Ensure the read gate opens before that helper joins its native reader.
 	t.Cleanup(openGate)
 	var block bytes.Buffer
@@ -173,7 +167,17 @@ func TestPhysicalHTTP2PolicyRetiresQueuedZeroWindowRefusalAndKeepsSiblingThrough
 	}
 	updated := make(chan struct{})
 	kept := onceTestPolicy(t, api.PresetLocked, api.Rule{Allow: false, Target: "api.openai.com/v1/responses"})
-	go func() { fixture.env.call(t, CtlPolicyUpdate, PolicyUpdateArgs{Policy: kept}); close(updated) }()
+	go func() { defer close(updated); fixture.env.call(t, CtlPolicyUpdate, PolicyUpdateArgs{Policy: kept}) }()
+	t.Cleanup(func() {
+		openGate()
+		once.Do(func() { close(release) })
+		_ = native.Close()
+		select {
+		case <-updated:
+		case <-time.After(5 * time.Second):
+			t.Error("original full-control-budget policy caller did not join after owned teardown")
+		}
+	})
 	waitHTTPState(t, func() bool { stream.owner.mu.Lock(); defer stream.owner.mu.Unlock(); return stream.resetRequested }, "the original policy cancellation's own stream reset")
 	select {
 	case <-updated:

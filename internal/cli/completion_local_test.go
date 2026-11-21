@@ -126,7 +126,7 @@ func TestCompletionOpensWithoutWaitingAndChecksTheSameFile(t *testing.T) {
 	})
 	ast.Inspect(open, func(node ast.Node) bool {
 		if call, ok := node.(*ast.CallExpr); ok {
-			if id, ok := call.Fun.(*ast.Ident); ok && id.Name == "readCompletionData" && len(call.Args) == 1 {
+			if id, ok := call.Fun.(*ast.Ident); ok && id.Name == "readCompletionData" && len(call.Args) == 2 {
 				if id, ok := call.Args[0].(*ast.Ident); ok && id.Name == "f" {
 					reads++
 				}

@@ -20,8 +20,10 @@ import (
 
 func isTerminal(f *os.File) bool { return term.IsTerminal(int(f.Fd())) }
 
-func termSize() (int, int) {
-	c, r, err := term.GetSize(int(os.Stdout.Fd()))
+func termSize() (int, int) { return termSizeOf(os.Stdout) }
+
+func termSizeOf(out *os.File) (int, int) {
+	c, r, err := term.GetSize(int(out.Fd()))
 	if err != nil {
 		return 80, 24
 	}

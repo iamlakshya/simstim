@@ -58,6 +58,7 @@ func (s *runtimeService) closeRuntimeServiceV1() error {
 	defer s.closeMu.Unlock()
 	s.mu.Lock()
 	s.closed = true
+	cancelConnection := s.cancelConnection
 	if s.closeDone == nil {
 		s.closeDone = make(chan struct{})
 	}
@@ -74,6 +75,9 @@ func (s *runtimeService) closeRuntimeServiceV1() error {
 		jobs = append(jobs, retainedJob{token, job, queued})
 	}
 	s.mu.Unlock()
+	if cancelConnection != nil {
+		cancelConnection()
+	}
 	var result error
 	for _, retained := range jobs {
 		if retained.queued {

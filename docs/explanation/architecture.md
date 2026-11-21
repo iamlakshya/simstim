@@ -381,6 +381,9 @@ Policy requests use the host bridge and the session's supervisor. A helper upgra
 
 A walled supervisor owns its native holder lease and opens its early control socket before constructing a runtime. The original outside operation loan and selected start envelope travel on one connection. A VM prepare then binds the actual Start connection to the original protected Need and accepts one exact guest echo. Saved identifiers and expected configuration are data, and cannot issue that operation.
 
+Running fork and checkpoint workers retain the actual accepted native operation, original sender and physical connection. They recheck those original owners after later control frames arrive. Startup account checks remain limited to the pending ready publication.
+A cancelled snapshot transfer keeps the same descriptor reader until the original transfer and cancellation replies have both joined, in either arrival order. The cancellation reply supplies no new operation.
+
 A dedicated command or input continuation starts from its accepted parent
 connection. It keeps that connection's original membership Source and route.
 Its network handshake holds no host publication lock. Short checks before

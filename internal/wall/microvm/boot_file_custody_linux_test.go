@@ -107,3 +107,65 @@ func TestBootFileCustodyRefusesUnknownNativeBorrowerV2(t *testing.T) {
 		t.Fatal("unknown native closure touched its borrowed file", err)
 	}
 }
+
+// Root supplies a genuine filesystem whose concrete first Close returns a
+// late error. This test never injects a callback, errno or retirement result.
+func TestBootFileDiagnosticsSurviveActualRetirementAndCustodyRemovalV2(t *testing.T) {
+	path := os.Getenv("VM_REAL_LATE_CLOSE_FILE")
+	if path == "" {
+		t.Skip("Root must admit the real native late-close fixture")
+	}
+	unfilteredRetirementFixtureV2(t)
+	if !filepath.IsAbs(path) || filepath.Clean(path) != path {
+		t.Fatal("the admitted real close fixture path is invalid")
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	files := &bootFiles{tools: file}
+	sandbox := &sandbox{}
+	if err := sandbox.adoptBootFilesV2(files); err != nil {
+		t.Fatal(err)
+	}
+	first := sandbox.releaseBootFilesV2()
+	if first == nil || files.retirements[file] == nil || !files.retirements[file].retired {
+		t.Fatal("fixture did not produce a genuine retired first-close error", first)
+	}
+	if !errors.Is(sandbox.PreparedCloseDiagnosticsV2(), first) {
+		t.Fatal("failed cleanup erased its original diagnostic")
+	}
+	if err := sandbox.releaseBootFilesV2(); err != nil || sandbox.bootCustody != nil {
+		t.Fatal("actual retired retry did not finish its original custody", err)
+	}
+	if !errors.Is(sandbox.PreparedCloseDiagnosticsV2(), first) {
+		t.Fatal("successful physical cleanup erased the first I/O outcome")
+	}
+	if err := sandbox.releaseBootFilesV2(); err != nil || !errors.Is(sandbox.PreparedCloseDiagnosticsV2(), first) {
+		t.Fatal("later cleanup changed the retained first outcome", err)
+	}
+}
+
+func TestBootFileDiagnosticsNeverGrantUnknownRetirementV2(t *testing.T) {
+	unfilteredRetirementFixtureV2(t)
+	file, err := os.Create(filepath.Join(t.TempDir(), "already-closed"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatal(err)
+	}
+	files := &bootFiles{tools: file}
+	sandbox := &sandbox{}
+	if err := sandbox.adoptBootFilesV2(files); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		if err := sandbox.releaseBootFilesV2(); err == nil || sandbox.bootCustody == nil || files.tools != file {
+			t.Fatal("a report-only diagnostic granted unknown cleanup", err)
+		}
+		if !errors.Is(sandbox.PreparedCloseDiagnosticsV2(), os.ErrClosed) {
+			t.Fatal("actual unknown-close diagnostic was lost")
+		}
+	}
+}

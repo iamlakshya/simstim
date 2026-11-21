@@ -48,6 +48,9 @@ func deleteSessionDeclared(id string, name *string, members *[]string, res *Dele
 	if !validID(id) {
 		return UserError("not_found", "no session "+id, "List sessions to find its ID.")
 	}
+	if hasRetainedNoneDeleteV1(id) {
+		return deleteNonePrimaryV1(id, name, members, res)
+	}
 	if _, err := os.Stat(paths.SessionDir(id)); err != nil {
 		return UserError("not_found", "no session "+id, "List sessions to find its ID.")
 	}

@@ -34,7 +34,8 @@ func RunAuxiliaryGuestV1(primary string) (returned error) {
 	defer cancel()
 	manager, err := openNativeUserManagerV1(lifetime)
 	if err != nil {
-		return err
+		diagnostic, unknown := retireNativeManagerV4(context.Background(), manager)
+		return errors.Join(err, diagnostic, unknown)
 	}
 	if err := checkAuxiliarySelfMembershipV1(lifetime, manager, primary, 0); err != nil {
 		return errors.Join(err, manager.Close())
@@ -66,10 +67,12 @@ func RunAuxiliaryGuestV1(primary string) (returned error) {
 		return err
 	}
 	candidate, err := PrepareAuxiliaryBootCandidateV1(lifetime, primary, connection)
+	if candidate != nil {
+		defer func() { returned = errors.Join(returned, candidate.Close(), candidate.CloseDiagnosticsV4()) }()
+	}
 	if err != nil {
 		return errors.Join(err, connection.Close())
 	}
-	defer func() { returned = errors.Join(returned, candidate.Close()) }()
 	_ = candidate.line.SetDeadline(time.Now().Add(20 * time.Second))
 	frame, err := candidate.ReadFrame()
 	if err != nil {
@@ -138,5 +141,16 @@ func (candidate *AuxiliaryBootCandidateV1) Close() error {
 	if candidate == nil {
 		return nil
 	}
-	return errors.Join(candidate.line.Close(), candidate.peer.Close(), candidate.manager.Close())
+	candidate.closeOnce.Do(func() {
+		candidate.closed.Store(true)
+		candidate.closeErr = errors.Join(candidate.line.Close(), candidate.peer.Close(), closeNativeManagerResourceV4(candidate.manager, candidate.primary, &candidate.managerDiagnostic))
+	})
+	return candidate.closeErr
+}
+
+func (candidate *AuxiliaryBootCandidateV1) CloseDiagnosticsV4() error {
+	if candidate == nil {
+		return nil
+	}
+	return candidate.managerDiagnostic
 }

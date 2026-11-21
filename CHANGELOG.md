@@ -4,6 +4,76 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ## [Unreleased]
 
+- Refuse interception before reading requests when the build lacks the pinned HTTP/2 scheduler hooks.
+
+- Schedule ready HTTP/2 streams in deterministic rounds while retaining original control priority, flow credit and native write ownership.
+
+- Keep HTTP/2 upload accounting intact when a native write ends at the frame header before its padding or body bytes arrive.
+
+- Run read-only VM checkpoint writes through the original subordinate control actor.
+
+- Admit original read-only VMM execution with the login UID and two genuinely mapped groups.
+
+- Clear the original read-only init capabilities on every native Go thread before control creation.
+
+- Keep the first native descriptor-close result for private cleanup. Manager connections join their actual I/O before closing, including cancellation and EOF.
+
+- Report manager cleanup diagnostics separately from native resource retirement, so a known retired object does not keep an operation parked.
+
+- Keep partial native manager setup under its original cleanup owner and reject operational or managerless fallback use.
+
+- Advance native manager cleanup only from its original retirement facts while preserving the original I/O outcome separately.
+
+- Keep purge creator, scope and code-loan cleanup tied to the original native wait and first descriptor-close facts.
+
+- Keep unwalled metadata resources when their first native close cannot be confirmed, including an already-closed Root. Report close diagnostics separately from known physical retirement.
+
+- Retain the original unwalled runtime-directory transaction through a failed capture or unconfirmed root close, and keep its diagnostics in the original operation result.
+
+- Preserve the original rejected native cleanup owner's close report before unwalled stop cleanup retires that owner.
+
+- Keep selected-shell grant questions and secret-command diagnostics on the launcher's restored terminal files.
+
+- Send the original read-only VM control replies with their required native disk witness.
+
+- Run the launcher's session-shell and lockdown actions through the real CLI implementations. Keep the selected shell's original host Source, settings and tier through dials, grants and reconnects.
+
+- Keep original native phase close diagnostics after safe cleanup retries.
+
+- Retain partial generated boot-config files through the original VM cleanup owner and preserve their close diagnostics.
+
+- Retain the real subordinate-opened session disk through the original read-only VMM and snapshot lifetime, with the current nine-file initial layout.
+
+- Join the helper's original unwalled cleanup owners before normal or idle exit, and keep their operation lock through an unresolved native stop.
+
+- Share the bounded native filesystem-generation observer between actual resource creators. The observation stays data; each resource still needs its own original creation, operation and cleanup subject.
+
+- Cleanly stopped unwalled sessions can be removed through a fresh storage operation. Persistent runtime cleanup checks the original creator's native filesystem generation and preserves unknown or unsupported directories.
+
+- Keep an unwalled deletion's original operation and roots when metadata capture fails after runtime cleanup. A retry uses the same retained transaction.
+
+- Keep the original copied removal child unreaped until its native manager scope adoption settles. Cancellation and disconnect retain the same transaction; admission requires live scope membership, and cleanup requires the original group to be empty.
+
+- Retain the same unstarted removal scope when initial native cleanup fails. A retry observes its original closed descriptors before releasing the code factory.
+
+- Add one bounded native decision queue for a purge's prepared monitors. They observe the same first commit or abort without consuming it; a subject's timeout cannot independently choose between kill and thaw.
+
+- Ordinary purge holders can retain the original shared native decision through parent loss and physically join their own terminal resources. Restoration completes only after their native monitor handles and readers close.
+
+- Preserve the original boot-file I/O diagnostic after successful physical cleanup.
+
+- Keep runtime selections alive through their original connection after a completed transfer, and retain failed native cleanup before any replacement.
+
+- Retain the original native snapshot reader until both its transfer and cancellation replies have joined.
+
+- Complete cached session values for `--in`, supported policy doors and help topics from the actual commands. Stop local completion reads on cancellation.
+
+- Follow nested existing ProxyJump routes during invitation acceptance, including SSH URI jump entries, while retaining the original source and separate pinned projections.
+
+- Report an original preparation cleanup I/O failure after the actual runtime, process and unit have safely joined.
+
+- Keep running fork and checkpoint workers bound to their actual accepted native operation while the control connection reads later frames.
+
 - Retain the original fixed-test runtime, placement and native parent until cleanup finishes; keep partial factory owners available after errors.
 - Drain failed image publication through its captured original boot placement before retiring the operation and holder.
 - Keep fixed-test cleanup custody until both the original transient unit and its native cgroup are absent.

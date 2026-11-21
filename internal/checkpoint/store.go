@@ -20,6 +20,7 @@ const diskName = "disk.img"
 // caller retains and closes its original disk, session root and disk root.
 type Store struct {
 	mu                           sync.Mutex
+	actorRootV3                  bool // strict current-actor VM-root storage; never native authority
 	session, diskRoot, entries   *os.Root
 	sessionRef, diskRootRef      cachefs.Reference
 	entriesRef, diskRef          cachefs.Reference
@@ -92,7 +93,11 @@ func (s *Store) checkOwned(ctx context.Context, owner func(context.Context) erro
 	if err := errors.Join(s.sessionRef.CheckRoot(s.session), s.diskRootRef.CheckRoot(s.diskRoot), s.entriesRef.CheckRoot(s.entries), s.diskRef.CheckCreatedFile(s.diskRoot, diskName, s.disk, 0o600)); err != nil {
 		return failure("the original checkpoint roots or disk changed", err)
 	}
-	if err := checkNamedRoot(s.session, "vm", s.diskRoot); err != nil {
+	if s.actorRootV3 {
+		if s.session != s.diskRoot {
+			return failure("the original actor changed its single rooted storage topology", nil)
+		}
+	} else if err := checkNamedRoot(s.session, "vm", s.diskRoot); err != nil {
 		return failure("the original disk folder changed identity", err)
 	}
 	return checkNamedRoot(s.session, "checkpoints", s.entries)
@@ -145,7 +150,11 @@ func (s *Store) Close() error {
 	if s.ownedDisk != nil {
 		ownedErr = s.ownedDisk.Close()
 	}
-	if err := errors.Join(s.entries.Close(), ownedErr); err != nil {
+	var entriesErr error
+	if s.entries != nil {
+		entriesErr = s.entries.Close()
+	}
+	if err := errors.Join(entriesErr, ownedErr); err != nil {
 		s.closeErr = failure("cannot close the original checkpoint folder", err)
 		return s.closeErr
 	}

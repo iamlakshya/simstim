@@ -285,6 +285,9 @@ values and the pending isolation level separately from the applied run.
 
 ## Pause session allowances
 
+The launcher's **Policy: lockdown** palette action runs the same restrictive
+`policy lockdown` command against the same saved hosts.
+
 Use `policy lockdown` to apply the locked preset and refuse unknown destinations
 on saved hosts. Limit it to one host with `--host`:
 

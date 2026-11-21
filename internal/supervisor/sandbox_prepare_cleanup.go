@@ -1,6 +1,9 @@
 package supervisor
 
-import "time"
+import (
+	"errors"
+	"time"
+)
 
 // Adopt an actual returned object before checking the constructor error. This
 // retains its original cleanup stack and creates no replacement runtime.
@@ -37,10 +40,17 @@ func (s *Supervisor) closeSandboxPrepareRuntimeV1(runtime sandbox, attempted boo
 		// runtime and borrowed OP. A failed or uncertain native destruction
 		// never becomes an acknowledgement or a background replacement owner.
 		for {
-			if err := owned.Destroy(); err == nil {
+			err := owned.Destroy()
+			diagnostic := sandboxPrepareCloseDiagnosticsV2(runtime)
+			if diagnostic != nil {
+				s.mu.Lock()
+				s.prepareCleanupDiagnostic = diagnostic
+				s.mu.Unlock()
+			}
+			if err == nil {
 				return
 			} else if s.log != nil {
-				s.log.Warn("fixed test retains its original destruction owner", "err", err)
+				s.log.Warn("fixed test retains its original destruction owner", "err", errors.Join(err, diagnostic))
 			}
 			time.Sleep(100 * time.Millisecond)
 		}

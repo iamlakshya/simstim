@@ -27,7 +27,7 @@ func policyAddCmd(allow bool) *cobra.Command {
 	if allow {
 		verb = "allow"
 	}
-	cmd := &cobra.Command{Use: verb + " [net] <target>", Short: "Add an " + verb + " rule at one policy layer", Args: func(cmd *cobra.Command, args []string) error {
+	cmd := &cobra.Command{Use: verb + " [net] <target>", ValidArgsFunction: completePolicyTargetDoor, Short: "Add an " + verb + " rule at one policy layer", Args: func(cmd *cobra.Command, args []string) error {
 		if requestID != "" {
 			if len(args) != 0 {
 				return policyUsage("a held answer takes no target argument", "Use --request with --in and the original request ID, without a target.", "flags_conflict")

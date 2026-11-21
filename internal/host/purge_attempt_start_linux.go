@@ -20,6 +20,7 @@ import (
 // There is no command, argv, environment or expected-file setter.
 type purgeAttemptStartV2 struct {
 	creator *purgeAttemptExecV1
+	scope   *purgeAttemptScopeV3
 	command *exec.Cmd
 	attrs   *syscall.SysProcAttr
 	argv    []string
@@ -44,6 +45,11 @@ func newPurgeAttemptStartV2(creator *purgeAttemptExecV1) (*purgeAttemptStartV2, 
 	command.Dir, command.Env, command.ExtraFiles = dir, slices.Clone(environment), slices.Clone(files)
 	attrs := &syscall.SysProcAttr{Setsid: true, PidFD: &creator.creationFD}
 	command.SysProcAttr = attrs
+	hold, err := newPurgeAttemptReapV3(creator, command)
+	if err != nil {
+		return nil, err
+	}
+	creator.reap = hold
 	return &purgeAttemptStartV2{creator: creator, command: command, attrs: attrs, argv: slices.Clone(command.Args), env: environment, dir: dir, files: files}, nil
 }
 
@@ -55,8 +61,15 @@ func (start *purgeAttemptStartV2) checkRetainedSpecV3(ctx context.Context) error
 	if owner.start != start || owner.command != command || command.Path != "/proc/self/fd/4" || !slices.Equal(command.Args, start.argv) || len(start.argv) != 2 || start.argv[0] != "/proc/self/fd/4" || start.argv[1] != "purge-attempt-v2" || command.Dir != start.dir || command.Env == nil || !slices.Equal(command.Env, start.env) || !slices.Equal(command.ExtraFiles, start.files) || command.SysProcAttr != start.attrs || !reflect.DeepEqual(*start.attrs, syscall.SysProcAttr{Setsid: true, PidFD: &owner.creationFD}) || command.Stdin != nil || command.Stdout != nil || command.Stderr != nil || command.Cancel != nil || command.WaitDelay != 0 {
 		return placementError("the original closed purge command changed before or after its actual Start")
 	}
-	if len(start.files) != 4 || start.files[0] != owner.loan.OriginalCode || start.files[1] != owner.loan.CopiedCode || start.files[2] != owner.loan.ParentPidfd || start.files[3] != owner.loan.Cancel {
+	if owner.reap == nil || owner.reap.owner != owner || owner.reap.command != command || len(start.files) < 4 || len(start.files) > 5 || start.files[0] != owner.loan.OriginalCode || start.files[1] != owner.loan.CopiedCode || start.files[2] != owner.loan.ParentPidfd || start.files[3] != owner.loan.Cancel {
 		return placementError("the actual purge start changed its original native bootstrap objects")
+	}
+	if owner.scope == nil {
+		if start.scope != nil || len(start.files) != 4 || owner.process != nil {
+			return placementError("the original start has no native scope role")
+		}
+	} else if start.scope != owner.scope || owner.scope.owner != owner || owner.scope.adoption == nil || len(start.files) != 5 || start.files[4] != owner.scope.adoption {
+		return placementError("the original start changed its native adoption role")
 	}
 	return ctx.Err()
 }
@@ -94,7 +107,23 @@ func (start *purgeAttemptStartV2) startActualV2(ctx context.Context) error {
 	if err := start.checkFrozenV2(ctx); err != nil {
 		return err
 	}
-	if err := ctx.Err(); err != nil {
+	if owner.scope != nil {
+		return placementError("the SAME fixed Start already selected an actual scope")
+	}
+	scope, err := newPurgeAttemptScopeV3(ctx, owner)
+	// Retain the SAME constructor, including any unready native objects,
+	// BEFORE handling its error. No replacement scope may be constructed.
+	if scope != nil {
+		owner.scope, start.scope = scope, scope
+		if scope.adoption != nil {
+			start.files = append(start.files, scope.adoption)
+			start.command.ExtraFiles = slices.Clone(start.files)
+		}
+	}
+	if err != nil {
+		return err
+	}
+	if err := errors.Join(ctx.Err(), ordinaryJoinLatchV1(scope.adoption, false), start.checkFrozenV2(ctx)); err != nil {
 		return err
 	}
 	if err := start.command.Start(); err != nil {
@@ -104,9 +133,12 @@ func (start *purgeAttemptStartV2) startActualV2(ctx context.Context) error {
 	if owner.creationFD >= 0 {
 		owner.creation = os.NewFile(uintptr(owner.creationFD), "actual-atomic-purge-creation-pidfd")
 	}
-	owner.waitDone = make(chan struct{})
-	go func() { owner.waitErr = start.command.Wait(); close(owner.waitDone) }()
-	return start.checkFrozenV2(ctx)
+	if err := owner.reap.beginOriginalWaitV3(); err != nil {
+		return err
+	}
+	// Cancellation after Start cannot unwind the unreaped reservation before
+	// the SAME manager transaction settles. Request cancellation resumes later.
+	return start.checkFrozenV2(context.Background())
 }
 
 func (owner *purgeAttemptExecV1) checkJoinedCreationV2() error {

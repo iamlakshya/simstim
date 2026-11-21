@@ -188,6 +188,9 @@ func (launch *startupLaunchV1) response(ctx context.Context, requestID uint64, l
 		if launch.line.prepareCursor != nil && !api.ExactJSONFields(frame.Payload, response) {
 			return nil, sessionLeaseError("the original preparation response has unknown or duplicate fields")
 		}
+		if launch.line.prepareCursor != nil && response.OK && response.Error != nil {
+			return nil, sessionLeaseError("the original preparation response mixed success and failure")
+		}
 		consumed = true
 		if live && launch.line.prepareCursor != nil {
 			if err := launch.check(ctx); err != nil {

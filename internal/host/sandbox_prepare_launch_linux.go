@@ -156,9 +156,16 @@ func (launch *startupLaunchV1) cancelSandboxPrepareV1(ctx context.Context) error
 	if err := launch.drainSandboxPrepareRepliesV1(ctx); err != nil {
 		return err
 	}
-	if _, err := launch.response(ctx, 4, false); err != nil {
+	raw, err := launch.response(ctx, 4, false)
+	if err != nil {
 		return err
 	}
+	diagnostic, err := decodeSandboxPrepareCleanupDiagnosticV1(raw)
+	if err != nil {
+		launch.prepareFailed = true
+		return err
+	}
+	launch.prepareCleanupDiagnostic = diagnostic
 	launch.cleanupConfirmed = true
 	return nil
 }

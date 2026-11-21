@@ -69,6 +69,9 @@ func (owner *OwnedSupervisorLease) AcceptWarmOperationV1(ctx context.Context, li
 	if err := errors.Join(peer.CheckSender(sender), checkBorrowedFlockV1(file, sender), native.check(ctx)); err != nil {
 		return fail(err)
 	}
+	origin := &warmIncomingOriginV1{owner: owner, operation: operation, native: native, line: line, peer: peer, sender: sender, state: state}
+	origin.issuer = origin
+	operation.warmIncoming = origin
 	return operation, nil
 }
 

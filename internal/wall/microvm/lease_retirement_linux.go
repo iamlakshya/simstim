@@ -38,7 +38,7 @@ func (s *sandbox) closeOwnedDescriptorV2(file *os.File) (bool, error) {
 func (s *sandbox) PreparedCloseDiagnosticsV2() error {
 	s.retirementMu.Lock()
 	defer s.retirementMu.Unlock()
-	return s.retirementDiagnostic
+	return errors.Join(s.retirementDiagnostic, s.bootFileDiagnostic, s.runtimeLeaseDiagnostic)
 }
 
 func (s *sandbox) releaseLease() error {

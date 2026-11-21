@@ -36,7 +36,16 @@ func adoptRawPurgeAttemptImageV2() (result *purgeAttemptImageV2, returned error)
 	// The creator must prove the supported unreadable static ELF/credential
 	// class before REAL Start; 0100 alone is not a pre-Go protection proof.
 	// Explicit protection is the first raw-boundary action here.
-	if err := secretmem.Protect(); err != nil {
+	protectionErr := secretmem.Protect()
+	// Public lifetime custody only. The actual original starter validated and
+	// froze this fifth inherited role before REAL Start. Do not let a parent
+	// death, cancellation, image error or bootstrap EOF release this PID while
+	// its manager adoption transaction may still contain the numeric PID.
+	unix.CloseOnExec(purgeAttemptAdoptionFDV3)
+	adoption := os.NewFile(uintptr(purgeAttemptAdoptionFDV3), "actual-original-purge-adoption-settlement")
+	adoptionErr := waitPurgeAttemptAdoptionV3(adoption)
+	adoptionCloseErr := adoption.Close()
+	if err := errors.Join(protectionErr, adoptionErr, adoptionCloseErr); err != nil {
 		return nil, err
 	}
 	state, err := secretmem.Inspect()

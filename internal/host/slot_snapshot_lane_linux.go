@@ -97,18 +97,12 @@ func (warm *WarmResumeV1) captureSlotSnapshotV1(ctx context.Context, operation *
 	if err := owner.line.WriteFrame(proto.TRequest, request); err != nil {
 		return nil, false, err
 	}
-	cancelled := make(chan error, 1)
-	stop := context.AfterFunc(ctx, func() { cancelled <- warm.writeWarmControlV1(5, proto.NativeWarmCancelV1) })
-	defer func() {
-		if !stop() {
-			returned = errors.Join(returned, <-cancelled)
-		}
-	}()
-	frame, err := owner.line.ReadFrame()
+	wait := beginWarmTransferWaitV1(ctx, warm, request.ID)
+	defer func() { returned = errors.Join(returned, wait.closeV1()) }()
+	frame, response, err := wait.readV1()
 	if err != nil {
 		return nil, false, err
 	}
-	var response proto.Response
 	if frame.Type != proto.TResponse || !api.ExactJSONFields(frame.Payload, response) || json.Unmarshal(frame.Payload, &response) != nil || response.ID != request.ID {
 		return nil, false, errors.Join(rewindFailureV1("the Snapshot transfer returned another original request"), owner.line.RejectAncillary())
 	}

@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"os/exec"
 	"regexp"
 	"runtime"
@@ -104,7 +103,7 @@ func runSecret(ctx context.Context, name, command string, terminal bool) (api.Se
 	cmd.Stdout = &limitWriter{w: &stdout, n: maxSecret}
 	cmd.Stderr = io.Discard
 	if terminal {
-		cmd.Stdin, cmd.Stderr = os.Stdin, os.Stderr
+		cmd.Stdin, cmd.Stderr = commandTerminalFilesV1(ctx)
 	}
 	cmd.WaitDelay = time.Second
 	hint := fmt.Sprintf("Run the command of %s from config.toml yourself, to see what it says.", name)

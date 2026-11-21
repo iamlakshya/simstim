@@ -13,6 +13,7 @@ import (
 	"slices"
 	"strconv"
 	"sync"
+	"time"
 
 	"github.com/iamlakshya/simstim/internal/api"
 	"golang.org/x/sys/unix"
@@ -22,27 +23,34 @@ import (
 // Creation is not native hello acceptance, transaction or session authority.
 // The real purpose receiver must select this object before observing a hello.
 type purgeAttemptExecV1 struct {
-	mu            sync.Mutex
-	code          *purgeAttemptCodeV2
-	start         *purgeAttemptStartV2
-	creation      *os.File
-	creationFD    int
-	loan          *purgeAttemptCodeLoanV2
-	command       *exec.Cmd
-	process       *os.Process
-	argv          []string
-	peer          *nativeStartupPeerV1
-	directory     *os.File
-	line          *StartupLineV1
-	args          api.PurgeArgs
-	waitDone      chan struct{}
-	waitErr       error
-	stopCancel    func() bool
-	cancelDone    chan struct{}
-	cancelOnce    sync.Once
-	cancelErr     error
-	admissionSent bool // Set only at the actual private admission send, never by a setter.
-	closed        bool
+	retirement     purgeNativeRetirementsV4
+	closeErr       error
+	retiredCommand *exec.Cmd
+	retiredState   *os.ProcessState
+	mu             sync.Mutex
+	code           *purgeAttemptCodeV2
+	start          *purgeAttemptStartV2
+	reap           *purgeAttemptReapV3
+	scope          *purgeAttemptScopeV3
+	creation       *os.File
+	creationFD     int
+	loan           *purgeAttemptCodeLoanV2
+	command        *exec.Cmd
+	process        *os.Process
+	argv           []string
+	peer           *nativeStartupPeerV1
+	directory      *os.File
+	line           *StartupLineV1
+	connection     *net.UnixConn
+	args           api.PurgeArgs
+	waitDone       chan struct{}
+	waitErr        error
+	stopCancel     func() bool
+	cancelDone     chan struct{}
+	cancelOnce     sync.Once
+	cancelErr      error
+	admissionSent  bool // Set only at the actual private admission send, never by a setter.
+	closed         bool
 }
 
 func startPurgeAttemptExecV1(ctx context.Context, code *purgeAttemptCodeV2, args api.PurgeArgs) (result *purgeAttemptExecV1, returned error) {
@@ -88,11 +96,17 @@ func startPurgeAttemptExecV1(ctx context.Context, code *purgeAttemptCodeV2, args
 	if err != nil {
 		return nil, err
 	}
+	owner.peer = &nativeStartupPeerV1{pid: owner.process.Pid, uid: uint32(os.Getuid()), pidfd: peerFD}
 	process, err := os.OpenRoot("/proc/" + strconv.Itoa(owner.process.Pid))
-	if err != nil {
-		return nil, errors.Join(err, unix.Close(peerFD))
+	if process != nil {
+		owner.peer.proc = process
 	}
-	owner.peer = &nativeStartupPeerV1{pid: owner.process.Pid, uid: uint32(os.Getuid()), pidfd: peerFD, proc: process}
+	if err != nil {
+		return nil, err
+	}
+	if err := owner.scope.adoptOriginalV3(); err != nil {
+		return nil, err
+	}
 	owner.cancelDone = make(chan struct{})
 	owner.stopCancel = context.AfterFunc(ctx, func() { defer close(owner.cancelDone); _ = owner.cancelRequestV2() })
 	if err := owner.checkCreatorV1(ctx); err != nil {
@@ -105,10 +119,10 @@ func startPurgeAttemptExecV1(ctx context.Context, code *purgeAttemptCodeV2, args
 // This is the mandatory public creation gate before the purpose receiver
 // accepts the copy's native code, namespace and current sender observations.
 func (owner *purgeAttemptExecV1) checkCreatorLockedV1(ctx context.Context) error {
-	if owner == nil || ctx == nil || owner.closed || owner.code == nil || owner.loan == nil || owner.loan.creator != owner.code || owner.command == nil || owner.process == nil || owner.command.Process != owner.process || owner.peer == nil || owner.peer.pid != owner.process.Pid || owner.waitDone == nil || owner.directory == nil || owner.start == nil || owner.start.creator != owner || owner.creation == nil || owner.creationFD < 0 {
+	if owner == nil || ctx == nil || owner.closed || owner.code == nil || owner.loan == nil || owner.loan.creator != owner.code || owner.command == nil || owner.process == nil || owner.command.Process != owner.process || owner.peer == nil || owner.peer.pid != owner.process.Pid || owner.waitDone == nil || owner.directory == nil || owner.start == nil || owner.start.creator != owner || owner.scope == nil || owner.reap == nil || owner.creation == nil || owner.creationFD < 0 {
 		return placementError("the pending purge hello has no original code factory and actual native creation")
 	}
-	if err := errors.Join(ctx.Err(), owner.start.checkFrozenV2(ctx), owner.peer.checkLive(), owner.code.directoryRef.matchesRoot(owner.code.directory), checkCreatedHelperArgumentsV1(owner.peer, owner.argv)); err != nil {
+	if err := errors.Join(ctx.Err(), owner.start.checkFrozenV2(ctx), owner.scope.checkLiveV3(ctx), owner.peer.checkLive(), owner.code.directoryRef.matchesRoot(owner.code.directory), checkCreatedHelperArgumentsV1(owner.peer, owner.argv)); err != nil {
 		return err
 	}
 	actual, err := owner.directory.Stat()
@@ -144,17 +158,25 @@ func (owner *purgeAttemptExecV1) connectOriginalV1(ctx context.Context) error {
 	}
 	path := fmt.Sprintf("/proc/self/fd/%d/attempt.sock", owner.directory.Fd())
 	connection, err := (&net.Dialer{}).DialContext(ctx, "unix", path)
+	if connection != nil {
+		owner.connection = connection.(*net.UnixConn)
+	}
 	if err != nil {
 		return err
 	}
 	line, err := NewNativeStartupLineV1(connection)
+	if line != nil {
+		owner.line = line
+	}
 	if err != nil {
-		return errors.Join(err, connection.Close())
+		return err
+	}
+	if err := line.attachNativeRetirementV4(owner.retirement.descriptorOwnerV4()); err != nil {
+		return err
 	}
 	if err := owner.checkCreatorLockedV1(ctx); err != nil {
-		return errors.Join(err, line.Close())
+		return err
 	}
-	owner.line = line
 	return nil
 }
 
@@ -189,7 +211,7 @@ func (owner *purgeAttemptExecV1) Close() error {
 	owner.mu.Lock()
 	defer owner.mu.Unlock()
 	if owner.closed {
-		return nil
+		return errors.Join(owner.closeErr, owner.checkRetiredLockedV4())
 	}
 	if owner.stopCancel != nil && !owner.stopCancel() {
 		<-owner.cancelDone
@@ -198,7 +220,12 @@ func (owner *purgeAttemptExecV1) Close() error {
 		return err
 	}
 	if owner.line != nil {
-		_ = owner.line.conn.Close()
+		_ = owner.line.SetDeadline(time.Now())
+	}
+	if owner.scope != nil && owner.process != nil && !owner.scope.notified {
+		if err := owner.scope.finishUnsubmittedV3(); err != nil {
+			return err
+		}
 	}
 	if owner.waitDone != nil {
 		if owner.admissionSent {
@@ -216,22 +243,83 @@ func (owner *purgeAttemptExecV1) Close() error {
 			return err
 		}
 	}
-	var failure error
-	if owner.line != nil {
-		failure = errors.Join(failure, owner.line.Close())
+	var diagnostics error
+	if owner.scope != nil {
+		diagnostics = errors.Join(diagnostics, owner.scope.closeAfterCreationV3())
+		if native := owner.scope.checkNativeRetiredV3(context.Background()); native != nil {
+			return errors.Join(diagnostics, native)
+		}
 	}
-	if owner.peer != nil {
-		failure = errors.Join(failure, owner.peer.Close())
+	// Freeze the real wait receipt before retiring its original pidfd.
+	owner.retiredCommand = owner.command
+	if owner.command != nil {
+		owner.retiredState = owner.command.ProcessState
 	}
-	if owner.creation != nil {
-		failure = errors.Join(failure, owner.creation.Close())
+	diagnostics = errors.Join(diagnostics, owner.retirement.closeStartupLineV4(owner.line), owner.retirement.closeConnectionV4(owner.connection), owner.retirement.closePeerV4(owner.peer), owner.retirement.closeFilesV4([]*os.File{owner.creation, owner.directory}))
+	if owner.loan != nil {
+		diagnostics = errors.Join(diagnostics, owner.loan.Close())
 	}
-	if owner.directory != nil {
-		failure = errors.Join(failure, owner.directory.Close())
+	owner.closeErr = errors.Join(owner.closeErr, diagnostics)
+	native := owner.checkRetiredLockedV4()
+	if native == nil {
+		owner.closed = true
+	}
+	return errors.Join(owner.closeErr, native)
+}
+
+func (owner *purgeAttemptExecV1) checkRetiredLockedV4() error {
+	if owner.code == nil {
+		return placementError("the original attempt has no same actual code factory")
+	}
+	if owner.process == nil {
+		if owner.waitDone != nil || owner.creation != nil || owner.command != nil && owner.command.Process != nil {
+			return placementError("the unused attempt has unknown actual child creation")
+		}
+	} else {
+		if owner.start == nil || owner.start.creator != owner || owner.loan == nil || owner.loan.creator != owner.code {
+			return placementError("the original attempt has no same actual fixed creator retirement")
+		}
+		if owner.retiredCommand != owner.command || owner.command == nil || owner.command.Process != owner.process || owner.retiredState == nil || owner.command.ProcessState != owner.retiredState || owner.retiredState.Pid() != owner.process.Pid {
+			return placementError("the original attempt retirement lost its actual Cmd.Wait receipt")
+		}
+		select {
+		case <-owner.waitDone:
+		default:
+			return placementError("the original attempt Wait is not physically joined")
+		}
+	}
+	var scope error
+	if owner.scope != nil {
+		scope = owner.scope.checkNativeRetiredV3(context.Background())
+	}
+	var loan error
+	if owner.loan != nil {
+		loan = owner.loan.checkNativeRetiredV3(context.Background())
+	}
+	return errors.Join(scope, owner.retirement.checkStartupLineV4(owner.line), owner.retirement.checkConnectionV4(owner.connection), owner.retirement.checkPeerV4(owner.peer), owner.retirement.checkFilesV4([]*os.File{owner.creation, owner.directory}), loan)
+}
+
+func (owner *purgeAttemptExecV1) checkNativeRetiredV3(ctx context.Context) error {
+	if owner == nil || ctx == nil {
+		return placementError("the original attempt retirement is absent")
+	}
+	owner.mu.Lock()
+	defer owner.mu.Unlock()
+	return owner.checkRetiredLockedV4()
+}
+
+func (owner *purgeAttemptExecV1) CloseDiagnosticsV3() error {
+	if owner == nil {
+		return nil
+	}
+	owner.mu.Lock()
+	defer owner.mu.Unlock()
+	var scope, loan error
+	if owner.scope != nil {
+		scope = owner.scope.CloseDiagnosticsV3()
 	}
 	if owner.loan != nil {
-		failure = errors.Join(failure, owner.loan.Close())
+		loan = owner.loan.CloseDiagnosticsV3()
 	}
-	owner.closed = true
-	return failure
+	return errors.Join(owner.closeErr, owner.retirement.diagnosticsV4(), scope, loan)
 }

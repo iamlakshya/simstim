@@ -59,24 +59,10 @@ func resolveExplicitJoinedRouteV1(ctx context.Context, lease *InviteAcceptance, 
 	if jump == "" || jump == "none" {
 		return nil, routeSourceErrorV1("the selected existing config has no ProxyJump route for this invite name")
 	}
-	var hops []explicitRouteHopV1
-	for _, item := range strings.Split(jump, ",") {
-		if len(hops) >= 8 {
-			return nil, routeSourceErrorV1("the explicit ProxyJump chain exceeds eight bastions")
-		}
-		hop, err := resolveExplicitRouteHopV1(ctx, route, item)
-		if err != nil {
-			return nil, err
-		}
-		if nested := firstValueV1(hop.values, "proxyjump"); nested != "" && nested != "none" {
-			return nil, routeSourceErrorV1("nested per-bastion ProxyJump must be written as one explicit ordered ProxyJump chain for this join")
-		}
-		for _, prior := range hops {
-			if prior.logical == hop.logical {
-				return nil, routeSourceErrorV1("the explicit ProxyJump chain repeats a bastion")
-			}
-		}
-		hops = append(hops, hop)
+	resolved := 0
+	hops, err := resolveExplicitRouteChainV1(ctx, route, jump, map[string]bool{}, &resolved)
+	if err != nil {
+		return nil, err
 	}
 	// Re-resolve the exact original closure. No changed projection is adopted.
 	again, _, err := sshG(ctx, []string{"-F", route.wrapper, "-o", "BatchMode=yes"}, route.logical)
@@ -98,7 +84,11 @@ func resolveExplicitRouteHopV1(ctx context.Context, source *explicitRouteSourceV
 	if strings.ContainsAny(item, "%$\r\n\x00 \\'") {
 		return hop, routeSourceErrorV1("a ProxyJump target has unsupported dynamic or command syntax")
 	}
-	parsed, err := url.Parse("ssh://" + item)
+	uri := item
+	if !strings.HasPrefix(uri, "ssh://") {
+		uri = "ssh://" + uri
+	}
+	parsed, err := url.Parse(uri)
 	if err != nil || parsed.Hostname() == "" || parsed.Path != "" || parsed.RawQuery != "" || parsed.Fragment != "" {
 		return hop, routeSourceErrorV1("a ProxyJump target is malformed")
 	}
@@ -189,4 +179,44 @@ func routeResolverAtomV1(value string) bool {
 		}
 	}
 	return true
+}
+
+// Native OpenSSH supplies a comma prefix as -J when it spawns the last
+// bastion. That prefix overrides the later bastion's own ProxyJump. Only the
+// first unprefixed bastion consults its own setting. Host matching remains
+// entirely native, against the same frozen supported source.
+func resolveExplicitRouteChainV1(ctx context.Context, source *explicitRouteSourceV1, expression string, stack map[string]bool, resolved *int) ([]explicitRouteHopV1, error) {
+	items := strings.Split(expression, ",")
+	if len(items) > 8 {
+		return nil, routeSourceErrorV1("the explicit ProxyJump chain exceeds eight bastions")
+	}
+	var hops []explicitRouteHopV1
+	for index, item := range items {
+		if *resolved >= 8 {
+			return nil, routeSourceErrorV1("the nested ProxyJump chain exceeds eight bastions")
+		}
+		*resolved++
+		hop, err := resolveExplicitRouteHopV1(ctx, source, item)
+		if err != nil {
+			return nil, err
+		}
+		if index == 0 {
+			key := strings.ToLower(hop.logical) + "\x00" + hop.user + "\x00" + strconv.Itoa(int(hop.port))
+			if stack[key] {
+				return nil, routeSourceErrorV1("the original nested ProxyJump route has a cycle")
+			}
+			stack[key] = true
+			nested := strings.TrimSpace(firstValueV1(hop.values, "proxyjump"))
+			if nested != "" && nested != "none" {
+				prefix, err := resolveExplicitRouteChainV1(ctx, source, nested, stack, resolved)
+				if err != nil {
+					return nil, err
+				}
+				hops = append(hops, prefix...)
+			}
+			delete(stack, key)
+		}
+		hops = append(hops, hop)
+	}
+	return hops, nil
 }

@@ -114,6 +114,7 @@ func checkNoneColdRestartWriterV1(ctx context.Context, operation *SessionOperati
 		return err
 	}
 	next.Run.Generation = hex.EncodeToString(epoch[:])
+	next.NoneDirectoryCreation = nil
 	next.Life = &Life{Phase: LifeBooting, BootBy: time.Now().UTC().Add(time.Minute)}
 	return nil
 }

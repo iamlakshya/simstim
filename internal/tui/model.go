@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"os"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -40,6 +41,10 @@ type Options struct {
 	Local onboard.Local
 	// After schedules delayed messages; tests replace it to run without wall-clock ticks.
 	After func(time.Duration, tea.Msg) tea.Cmd
+	// SessionShell runs the shared CLI shell command after terminal handoff.
+	SessionShell SessionShellRunner
+	// PolicyLockdown runs the real restrictive CLI action after handoff.
+	PolicyLockdown func(context.Context, *os.File, *os.File) error
 }
 
 // Model is the launcher: one list at a time, and the dialogs drawn over it.
@@ -52,6 +57,8 @@ type Model struct {
 	grantOwners        grantOwners
 	selectedOwners     selectedNewOwners
 	selectedNew        *newSelectedStart
+	sessionShell       SessionShellRunner
+	policyLockdown     func(context.Context, *os.File, *os.File) error
 	be                 Backend
 	settings           client.Settings
 	now                func() time.Time
@@ -160,7 +167,7 @@ func New(ctx context.Context, be Backend, o Options) *Model {
 	// Dial surfaces as a toast rather than stderr text.
 	ctx, cancelTier := context.WithCancel(ctx)
 	m := &Model{
-		ctx: ctx, be: be, now: o.Now, motion: o.Motion,
+		ctx: ctx, be: be, sessionShell: o.SessionShell, policyLockdown: o.PolicyLockdown, now: o.Now, motion: o.Motion,
 		cancelTier: cancelTier, tierRequests: make(chan tierQuestionRequest, 1),
 		grantRequests: make(chan grantQuestionRequest, 1),
 		width:         80, height: 24, dark: true, focused: true,

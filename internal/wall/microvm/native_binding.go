@@ -21,6 +21,32 @@ type nativeBindingVerifierV1 interface {
 	sessionID() string
 }
 
+// LocalCurrentCopyVMMV1 is corroborating native evidence borrowed only from
+// the original local engine. It grants no outside Source, S-unit target,
+// freeze or stop authority. The genuine outside factory separately binds
+// this SAME live VMM to its actual current Source and original unit issuer.
+type LocalCurrentCopyVMMV1 interface {
+	WithVMMFilesV1(context.Context, func(pidfd, socket *os.File) error) error
+}
+
+type nativeLocalCurrentCopyVMMV1 interface {
+	withLocalCurrentCopyVMMV1(context.Context, net.Conn, vmneed.NeedV1, func(LocalCurrentCopyVMMV1) error) error
+}
+
+// WithLocalCurrentCopyVMMV1 lends the actual local runner's original VMM
+// birth handle and SAME guest endpoint once on a distinct authenticated
+// native creator lane. Existing local disk2 and slot Source16 are unchanged.
+func (b *NativeBindingV1) WithLocalCurrentCopyVMMV1(ctx context.Context, connection net.Conn, expected vmneed.NeedV1, use func(LocalCurrentCopyVMMV1) error) error {
+	if b == nil || b.verifier == nil || ctx == nil || use == nil {
+		return fmt.Errorf("the local current copy has no original native VMM binding")
+	}
+	owner, ok := b.verifier.(nativeLocalCurrentCopyVMMV1)
+	if !ok {
+		return fmt.Errorf("the original runtime has no local current-copy VMM producer")
+	}
+	return owner.withLocalCurrentCopyVMMV1(ctx, connection, expected, use)
+}
+
 type nativeSnapshotDiskV1 interface {
 	withSnapshotDiskV1(context.Context, net.Conn, vmneed.NeedV1, func(*os.Root, *os.Root, *os.File) error) error
 }

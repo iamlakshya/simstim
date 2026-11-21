@@ -163,9 +163,24 @@ func registry() []*command {
 		return needSession(m)
 	}
 	return append([]*command{
-		{noun: "session", verb: "policy", cli: "policy ls", keys: []binding{{"p", onSessions}}, why: needSession, run: (*Model).openPolicy},
-		{noun: "session", verb: "policy log", cli: "policy log", why: needSession, run: (*Model).openPolicyLog},
+		{noun: "session", verb: "policy", cli: "policy ls --in", keys: []binding{{"p", onSessions}}, why: needSession, run: (*Model).openPolicy},
+		{noun: "session", verb: "policy log", cli: "policy log --in", why: needSession, run: (*Model).openPolicyLog},
 		{noun: "session", verb: "stop", cli: "stop", why: needSession, run: (*Model).stopSelected},
+		{noun: "session", verb: "shell", cli: "shell", why: func(m *Model) string {
+			if why := needSession(m); why != "" {
+				return why
+			}
+			if m.sessionShell == nil {
+				return "session shells are unavailable in this view"
+			}
+			return ""
+		}, run: (*Model).openSessionShell},
+		{noun: "policy", verb: "lockdown", cli: "policy lockdown", why: func(m *Model) string {
+			if m.policyLockdown == nil {
+				return "lockdown is unavailable in this view"
+			}
+			return ""
+		}, run: (*Model).runPolicyLockdown},
 		{noun: "session", verb: "new", short: "new session", cli: "new", keys: []binding{{"n", anywhere}}, run: (*Model).openQuickStart},
 		{noun: "session", verb: "new with the form", short: "new session, with the form", cli: "new", run: (*Model).openNewSession},
 		{noun: "session", verb: "attach", cli: "attach", keys: []binding{{"enter", onSessions}},

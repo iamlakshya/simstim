@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"slices"
@@ -14,30 +15,33 @@ import (
 
 // completionPolicyMetadata reads local bytes only. The shared decoder and
 // merger supply names and stable IDs without selecting a repository or host.
-func completionPolicyMetadata(withHosts bool) (client.PolicyCompletionMetadata, bool) {
-	settings, ok := optionalCompletionPolicyFile("config.toml")
+func completionPolicyMetadata(withHosts bool, contexts ...context.Context) (client.PolicyCompletionMetadata, bool) {
+	settings, ok := optionalCompletionPolicyFile("config.toml", contexts...)
 	if !ok {
 		return client.PolicyCompletionMetadata{}, false
 	}
 	hosts := ""
 	if withHosts {
-		hosts, ok = optionalCompletionPolicyFile("hosts.toml")
+		hosts, ok = optionalCompletionPolicyFile("hosts.toml", contexts...)
 		if !ok {
 			return client.PolicyCompletionMetadata{}, false
 		}
 	}
 	metadata, err := client.DecodePolicyCompletionMetadata(settings, hosts)
-	return metadata, err == nil
+	return metadata, err == nil && completionReadContext(contexts).Err() == nil
 }
 
-func optionalCompletionPolicyFile(name string) (string, bool) {
+func optionalCompletionPolicyFile(name string, contexts ...context.Context) (string, bool) {
 	path := filepath.Join(client.ConfigDir(), name)
-	data, ok := readCompletionFile(path)
+	data, ok := readCompletionFile(path, contexts...)
 	if ok {
 		return string(data), true
 	}
 	// Missing input is an empty layer. Existing unusable input stays an error.
 	// Lstat never opens the replacement path, including a FIFO or device.
+	if completionReadContext(contexts).Err() != nil {
+		return "", false
+	}
 	_, err := os.Lstat(path)
 	return "", os.IsNotExist(err)
 }
@@ -53,8 +57,8 @@ func completionProfileNames(names []string, prefix string) []string {
 	return slices.Compact(out)
 }
 
-func completeRuleIDs(_ *cobra.Command, _ []string, prefix string) ([]string, cobra.ShellCompDirective) {
-	metadata, ok := completionPolicyMetadata(true)
+func completeRuleIDs(cmd *cobra.Command, _ []string, prefix string) ([]string, cobra.ShellCompDirective) {
+	metadata, ok := completionPolicyMetadata(true, completionContext(cmd))
 	if !ok {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
@@ -73,4 +77,17 @@ func completionRuleRows(rules []api.Rule, prefix string) []string {
 	// stable hash must never choose one arbitrary configured rule for the user.
 	slices.Sort(out)
 	return slices.Compact(out)
+}
+
+func completePolicyTargetDoor(cmd *cobra.Command, args []string, prefix string) ([]string, cobra.ShellCompDirective) {
+	if len(args) != 0 || completionContext(cmd).Err() != nil {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	var values []string
+	for _, door := range policyTargetDoors {
+		if strings.HasPrefix(string(door), prefix) {
+			values = append(values, string(door))
+		}
+	}
+	return values, cobra.ShellCompDirectiveNoFileComp
 }

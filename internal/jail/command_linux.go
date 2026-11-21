@@ -46,6 +46,7 @@ const (
 type setup struct {
 	ControllerPublicV1  *mappedControllerPublicV1 `json:"controller_public_v1,omitempty"`
 	PublicationLeaseV1  *publicationLeaseSetupV1  `json:"publication_lease_v1,omitempty"`
+	ReadonlyVMMInitV1   *VMMReadonlyInitPlanV1    `json:"readonly_vmm_init_v1,omitempty"`
 	VMMExecV1           *vmmExecSetupV1           `json:"vmm_exec_v1,omitempty"`
 	InitLeaseV1Version  int                       `json:"init_lease_v1_version,omitempty"`
 	InitLeaseFDV1       int                       `json:"init_lease_fd_v1,omitempty"`
@@ -99,6 +100,9 @@ var initDone atomic.Bool
 func Init() {
 	initDone.Store(true)
 	if len(os.Args) < 2 || os.Args[0] != argv0 {
+		if err := captureVMMReadonlyControlStageV1(); err != nil {
+			os.Exit(stageFailed(err))
+		}
 		if err := captureVMMRunnerStageV1(); err != nil {
 			os.Exit(stageFailed(err))
 		}
@@ -365,6 +369,23 @@ func lookupSubID() (subID, bool) {
 		return subID{}, false
 	}
 	return subID{UID: uid, GID: gid, SubUID: su, SubGID: sg, NewUIDMap: nu, NewGIDMap: ng}, true
+}
+
+// Only the actual original read-only VMM source calls this admission. It
+// retains the login UID and requires a real distinct configured second GID.
+// SubUID -1 denotes this closed single-UID map; it is never a generic fallback.
+func lookupReadonlyLoginMapV1() (subID, error) {
+	uid, gid := os.Getuid(), os.Getgid()
+	name := ""
+	if u, err := user.LookupId(strconv.Itoa(uid)); err == nil {
+		name = u.Username
+	}
+	sg, found := rangeIn(subgidFile, name, uid)
+	ng, err := exec.LookPath("newgidmap")
+	if !found || sg <= 0 || sg == gid || err != nil {
+		return subID{}, vmmModeFailureV1("read-only login-UID execution requires a genuine distinct subordinate group and newgidmap")
+	}
+	return subID{UID: uid, GID: gid, SubUID: -1, SubGID: sg, NewGIDMap: ng}, nil
 }
 
 func rangeIn(file, name string, id int) (int, bool) {

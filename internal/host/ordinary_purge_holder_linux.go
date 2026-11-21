@@ -33,30 +33,138 @@ func (h *Holder) serveOrdinaryPurgeRequestsV2(line *StartupLineV1, state ordinar
 	if err != nil {
 		return
 	}
-	defer joinPeer()
 	var pause *ownedMainPauseV2
+	var cohort *ordinaryHolderCohortV3
 	committed, completed := false, false
 	defer func() {
-		if committed || completed {
-			return
+		// The restoration receipt is last: the actual header reader is
+		// already joined by its later defer, then the native peer watcher
+		// and both decision descriptors physically close here.
+		joinPeer()
+		for cohort != nil {
+			if err := cohort.Close(); err == nil {
+				break
+			}
+			time.Sleep(10 * time.Millisecond)
 		}
-		// EOF, cancellation and original-parent death cancel this existing
-		// reversible operation. They supply no signal or cleanup authority.
+		if completed {
+			for completeOrdinaryRestorationV2(restored) != nil {
+				time.Sleep(10 * time.Millisecond)
+			}
+		}
+	}()
+	// This producer may finish only by its actual restoration or physical
+	// join. A global COMMIT remains authoritative after parent/stream loss.
+	finish := func() {
+		for cohort != nil {
+			first, err := cohort.abortV3()
+			if err != nil || first == purgeCohortPendingV3 {
+				time.Sleep(10 * time.Millisecond)
+				continue
+			}
+			if first == purgeCohortCommitV3 {
+				if pause == nil || pause.CheckPaused(context.Background()) != nil {
+					time.Sleep(10 * time.Millisecond)
+					continue
+				}
+				committed = true
+				for ordinaryJoinLatchV1(joined, true) != nil {
+					h.commitOrdinaryStopV1(line, 0, state, joined)
+					if ordinaryJoinLatchV1(joined, true) != nil {
+						time.Sleep(10 * time.Millisecond)
+					}
+				}
+				return
+			}
+			if first == purgeCohortAbortV3 {
+				break
+			}
+		}
 		for pause != nil {
 			if err := pause.Restore(context.Background()); err == nil {
 				break
 			}
 			time.Sleep(10 * time.Millisecond)
 		}
-		_ = completeOrdinaryRestorationV2(restored)
+		completed = true
+	}
+	defer func() {
+		if !committed && !completed {
+			finish()
+		}
 	}()
 	_ = line.SetDeadline(time.Time{})
-	for id := uint64(2); id != 0; id++ {
-		actual, operation, err := h.readOrdinaryControlRequestV2(line, id)
-		if err != nil || actual != state || ctx.Err() != nil {
+	type nextRequest struct {
+		state     ordinaryStopStateV1
+		operation string
+		err       error
+	}
+	requests := make(chan nextRequest, 1)
+	continueRead := make(chan struct{})
+	stopRead := make(chan struct{})
+	readerDone := make(chan struct{})
+	go func() {
+		defer close(readerDone)
+		for id := uint64(2); id != 0; id++ {
+			actual, operation, err := h.readOrdinaryControlRequestV2(line, id)
+			select {
+			case requests <- nextRequest{actual, operation, err}:
+			case <-stopRead:
+				return
+			}
+			if err != nil {
+				return
+			}
+			// Admission reads its two actual native loans on this same line
+			// while the header reader is physically held here.
+			select {
+			case <-continueRead:
+			case <-stopRead:
+				return
+			}
+		}
+	}()
+	defer func() { close(stopRead); _ = line.conn.Close(); <-readerDone }()
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	for id := uint64(2); id != 0; {
+		if cohort != nil {
+			first, err := cohort.firstV3()
+			if err != nil {
+				time.Sleep(10 * time.Millisecond)
+				continue
+			}
+			if first != purgeCohortPendingV3 {
+				finish()
+				return
+			}
+		}
+		var request nextRequest
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			continue
+		case request = <-requests:
+		}
+		if request.err != nil || request.state != state || ctx.Err() != nil {
 			return
 		}
-		switch operation {
+		switch request.operation {
+		case ordinaryPurgeBindCohortV3:
+			if cohort != nil || pause != nil || ownUnit(h.id) != "" {
+				return
+			}
+			h.mu.Lock()
+			managed := h.m.Run.Unit != ""
+			h.mu.Unlock()
+			if managed {
+				return
+			}
+			cohort, err = receiveOrdinaryHolderCohortV3(line, id, state)
+			if err != nil {
+				return
+			}
 		case ordinaryPurgeCheckV2:
 			if err := h.ordinary.native.check(ctx); err != nil {
 				return
@@ -65,9 +173,6 @@ func (h *Holder) serveOrdinaryPurgeRequestsV2(line *StartupLineV1, state ordinar
 				return
 			}
 		case ordinaryPurgeQuiesceV2:
-			// A managed holder freezes with its unit. Its distinct outside
-			// restorer must be joined before whole-unit freeze is enabled.
-			// This bounded producer never presents a main pause as that claim.
 			if pause != nil || ownUnit(h.id) != "" {
 				return
 			}
@@ -86,16 +191,17 @@ func (h *Holder) serveOrdinaryPurgeRequestsV2(line *StartupLineV1, state ordinar
 				return
 			}
 		case ordinaryPurgeRestoreV2:
-			if pause != nil && pause.Restore(ctx) != nil {
-				return
+			finish()
+			if completed {
+				_ = h.writeOrdinaryStateV1(line, id, state)
 			}
-			if completeOrdinaryRestorationV2(restored) != nil {
-				return
-			}
-			completed = true
-			_ = h.writeOrdinaryStateV1(line, id, state)
 			return
 		case ordinaryStopCommitV1:
+			if cohort != nil {
+				// Bound monitors accept only the first native cohort packet.
+				// A stream commit cannot choose or arm a local decision.
+				return
+			}
 			if pause == nil || pause.CheckPaused(ctx) != nil {
 				return
 			}
@@ -106,6 +212,12 @@ func (h *Holder) serveOrdinaryPurgeRequestsV2(line *StartupLineV1, state ordinar
 			return
 		}
 		if err := h.writeOrdinaryStateV1(line, id, state); err != nil {
+			return
+		}
+		id++
+		select {
+		case continueRead <- struct{}{}:
+		case <-ctx.Done():
 			return
 		}
 	}

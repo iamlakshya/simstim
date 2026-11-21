@@ -19,6 +19,7 @@ import (
 	"github.com/godbus/dbus/v5"
 
 	"github.com/iamlakshya/simstim/internal/cachefs"
+	"github.com/iamlakshya/simstim/internal/supply"
 )
 
 const systemdManagerInterface = "org.freedesktop.systemd1.Manager"
@@ -29,21 +30,28 @@ const systemdManagerPath = dbus.ObjectPath("/org/freedesktop/systemd1")
 // nativeUserManagerV1 owns the direct native manager peer. It never resolves
 // an ambient session bus, broker name, environment address or CLI subprocess.
 type nativeUserManagerV1 struct {
-	ctx        context.Context
-	cancel     context.CancelFunc
-	root       *os.Root
-	rootPath   string
-	rootRef    cachefs.Reference
-	socketRef  os.FileInfo
-	connection *net.UnixConn
-	peer       *nativeStartupPeerV1
-	bus        *dbus.Conn
-	events     managerStartupEventsV1
-	once       sync.Once
-	closeErr   error
+	ctx               context.Context
+	cancel            context.CancelFunc
+	root              *os.Root
+	rootPath          string
+	rootRef           cachefs.Reference
+	socketRef         os.FileInfo
+	connection        *nativeManagerTransportV1
+	retirement        nativeStartupRetirementsV1
+	peer              *nativeStartupPeerV1
+	bus               *dbus.Conn
+	events            managerStartupEventsV1
+	once              sync.Once
+	closeMu           sync.Mutex
+	resourceMu        sync.RWMutex
+	closeErr          error
+	setupComplete     bool
+	directory         *os.File
+	directoryOriginal *os.File
+	directoryClose    *supply.FileCloseFactsV1
 }
 
-func openNativeUserManagerV1(ctx context.Context) (_ *nativeUserManagerV1, failure error) {
+func openNativeUserManagerV1(ctx context.Context) (result *nativeUserManagerV1, failure error) {
 	if ctx == nil {
 		return nil, sessionLeaseError("the native manager has no original owner lifetime")
 	}
@@ -56,7 +64,15 @@ func openNativeUserManagerV1(ctx context.Context) (_ *nativeUserManagerV1, failu
 	manager := &nativeUserManagerV1{ctx: lifetime, cancel: cancel, root: root, rootPath: path}
 	defer func() {
 		if failure != nil {
-			failure = errors.Join(failure, manager.Close())
+			diagnostic, unknown := retireNativeManagerV4(context.Background(), manager)
+			failure = errors.Join(failure, diagnostic, unknown)
+			if unknown != nil {
+				result = manager
+			} else {
+				// The failed setup and its first I/O diagnostic remain errors,
+				// but every original resource has positive native retirement.
+				result = nil
+			}
 		}
 	}()
 	manager.rootRef, err = cachefs.CaptureRoot(root)
@@ -76,35 +92,40 @@ func openNativeUserManagerV1(ctx context.Context) (_ *nativeUserManagerV1, failu
 	if err != nil {
 		return nil, err
 	}
+	manager.directory, manager.directoryOriginal = directory, directory
 	dialPath := fmt.Sprintf("/proc/self/fd/%d/systemd/private", directory.Fd())
 	conn, err := (&net.Dialer{}).DialContext(ctx, "unix", dialPath)
-	err = errors.Join(err, directory.Close())
+	if conn != nil {
+		manager.connection = newNativeManagerTransportV1(conn.(*net.UnixConn), manager.retirement.descriptorOwnerV4())
+	} // Own it before a late directory-close error.
+	facts := supply.CloseFileOnceV1(directory)
+	manager.directoryClose = &facts
+	if facts.Retired {
+		manager.directory = nil
+	}
+	err = errors.Join(err, facts.Diagnostic, facts.Unknown)
 	if err != nil {
-		if conn != nil {
-			_ = conn.Close()
-		}
 		return nil, err
 	}
-	manager.connection = conn.(*net.UnixConn)
-	manager.peer, err = pinOutsideStartupPeer(conn)
+	err = manager.captureOriginalPeerV4()
 	if err != nil {
 		return nil, err
 	}
-	if err := manager.checkNativeManager(); err != nil {
+	if err := manager.checkNativeManagerPeerV1(); err != nil {
 		return nil, err
 	}
 	manager.events.wake = make(chan struct{}, 1)
 	done := make(chan struct{})
-	stop := context.AfterFunc(ctx, func() { defer close(done); _ = conn.SetDeadline(time.Now()) })
+	stop := context.AfterFunc(ctx, func() { defer close(done); _ = manager.connection.SetDeadline(time.Now()) })
 	defer func() {
 		if !stop() {
 			<-done
 		}
 	}()
 	if deadline, ok := ctx.Deadline(); ok {
-		_ = conn.SetDeadline(deadline)
+		_ = manager.connection.SetDeadline(deadline)
 	}
-	manager.bus, err = dbus.NewConn(conn, dbus.WithContext(lifetime), dbus.WithIncomingInterceptor(manager.events.observe))
+	manager.bus, err = dbus.NewConn(manager.connection, dbus.WithContext(lifetime), dbus.WithIncomingInterceptor(manager.events.observe))
 	if err != nil {
 		return nil, err
 	}
@@ -116,18 +137,31 @@ func openNativeUserManagerV1(ctx context.Context) (_ *nativeUserManagerV1, failu
 	if err := manager.bus.Object("org.freedesktop.systemd1", systemdManagerPath).CallWithContext(ctx, systemdManagerInterface+".Subscribe", 0).Err; err != nil {
 		return nil, err
 	}
-	if err := manager.checkNativeManager(); err != nil {
+	if err := manager.checkNativeManagerPeerV1(); err != nil {
 		return nil, err
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	_ = conn.SetDeadline(time.Time{})
+	_ = manager.connection.SetDeadline(time.Time{})
+	manager.setupComplete = true
 	return manager, nil
 }
 
 func (manager *nativeUserManagerV1) checkNativeManager() error {
-	if manager == nil || manager.ctx == nil || manager.ctx.Err() != nil || manager.root == nil || manager.peer == nil {
+	if manager == nil || !manager.setupComplete {
+		return sessionLeaseError("the original manager setup is incomplete; its retained object is cleanup-only")
+	}
+	return manager.checkNativeManagerPeerV1()
+}
+
+func (manager *nativeUserManagerV1) checkNativeManagerPeerV1() error {
+	if manager == nil {
+		return sessionLeaseError("the original native user manager ended")
+	}
+	manager.resourceMu.RLock()
+	defer manager.resourceMu.RUnlock()
+	if manager == nil || manager.ctx == nil || manager.ctx.Err() != nil || manager.root == nil || manager.peer == nil || manager.connection == nil || manager.connection.isClosingV1() {
 		return sessionLeaseError("the original native user manager ended")
 	}
 	if err := manager.peer.Check(); err != nil {
@@ -247,19 +281,60 @@ func (manager *nativeUserManagerV1) Close() error {
 	if manager == nil {
 		return nil
 	}
+	manager.closeMu.Lock()
+	defer manager.closeMu.Unlock()
+	manager.resourceMu.Lock()
+	defer manager.resourceMu.Unlock()
 	manager.once.Do(func() {
-		manager.cancel()
+		// The wrapper was installed before NewConn. A library EOF or
+		// cancellation therefore uses the SAME first-close resource owner.
 		if manager.bus != nil {
 			manager.closeErr = errors.Join(manager.closeErr, manager.bus.Close())
 		} else if manager.connection != nil {
 			manager.closeErr = errors.Join(manager.closeErr, manager.connection.Close())
 		}
-		if manager.peer != nil {
-			manager.closeErr = errors.Join(manager.closeErr, manager.peer.Close())
+		if manager.cancel != nil {
+			manager.cancel()
 		}
-		if manager.root != nil {
-			manager.closeErr = errors.Join(manager.closeErr, manager.root.Close())
+		manager.closeErr = errors.Join(manager.closeErr, manager.retirement.closePeerV4(manager.peer))
+		if manager.directory != nil && manager.directoryClose == nil {
+			manager.directoryOriginal = manager.directory
+			facts := supply.CloseFileOnceV1(manager.directory)
+			manager.directoryClose = &facts
 		}
+		if manager.directoryClose != nil {
+			manager.closeErr = errors.Join(manager.closeErr, manager.directoryClose.Diagnostic, nativeManagerDirectoryRetirementV1(manager))
+			if manager.directoryClose.Retired && manager.directoryClose.Unknown == nil {
+				manager.directory = nil
+			}
+		}
+		manager.closeErr = errors.Join(manager.closeErr, manager.retirement.closeRootsV4([]*os.Root{manager.root}))
 	})
-	return manager.closeErr
+	return errors.Join(manager.closeErr, manager.checkNativeRetiredV3(context.Background()))
+}
+
+// This is resource retirement of this SAME original manager object. It is
+// never operational admission or permission to observe/start/stop a unit.
+func (manager *nativeUserManagerV1) checkNativeRetiredV3(ctx context.Context) error {
+	if manager == nil || ctx == nil {
+		return sessionLeaseError("the original manager native retirement is absent")
+	}
+	var transport error
+	if manager.connection != nil {
+		transport = manager.connection.checkNativeRetiredV1()
+	}
+	return errors.Join(ctx.Err(), transport, nativeManagerDirectoryRetirementV1(manager), manager.retirement.checkPeerV4(manager.peer), manager.retirement.checkRootsV4([]*os.Root{manager.root}))
+}
+
+func (manager *nativeUserManagerV1) CloseDiagnosticsV3() error {
+	if manager == nil {
+		return nil
+	}
+	manager.closeMu.Lock()
+	defer manager.closeMu.Unlock()
+	var directory error
+	if manager.directoryClose != nil {
+		directory = manager.directoryClose.Diagnostic
+	}
+	return errors.Join(manager.closeErr, directory, manager.retirement.diagnosticsV4())
 }

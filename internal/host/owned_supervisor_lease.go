@@ -29,6 +29,12 @@ type OwnedSupervisorLease struct {
 	once           sync.Once
 	closeErr       error
 	prepareCleanup *SandboxPrepareParentCleanupV1
+	managerCleanup interface {
+		Close() error
+		checkNativeRetiredV3(context.Context) error
+		CloseDiagnosticsV3() error
+	}
+	managerDiagnostic error
 }
 
 // AcquireOwnedSupervisorLease claims the existing holder lock before any
@@ -120,12 +126,23 @@ func (owner *OwnedSupervisorLease) CloseWithError() error {
 			owner.cancel()
 		}
 		owner.mu.Lock()
-		defer owner.mu.Unlock()
-		if owner.pending != nil {
-			owner.closeErr = errors.Join(owner.closeErr, owner.pending.peer.Close())
+		pending, native, managerCleanup := owner.pending, owner.native, owner.managerCleanup
+		owner.mu.Unlock()
+		if managerCleanup != nil {
+			closed := managerCleanup.Close()
+			unknown := managerCleanup.checkNativeRetiredV3(context.Background())
+			owner.mu.Lock()
+			if owner.managerDiagnostic == nil {
+				owner.managerDiagnostic = errors.Join(closed, managerCleanup.CloseDiagnosticsV3())
+			}
+			owner.mu.Unlock()
+			owner.closeErr = errors.Join(owner.closeErr, unknown)
 		}
-		if owner.native != nil {
-			owner.closeErr = errors.Join(owner.closeErr, owner.native.Close())
+		if pending != nil {
+			owner.closeErr = errors.Join(owner.closeErr, pending.peer.Close())
+		}
+		if native != nil {
+			owner.closeErr = errors.Join(owner.closeErr, native.Close())
 		}
 	})
 	return owner.closeErr
@@ -153,4 +170,13 @@ func (owner *OwnedSupervisorLease) IsSandboxPrepareBootV1() bool {
 	defer owner.mu.Unlock()
 	return owner.startup != nil && owner.startup.owner == owner && owner.startup.operation != nil &&
 		owner.startup.operation.originalBoot == owner.startup && owner.startup.operation.IsSandboxPrepareBootV1()
+}
+
+func (owner *OwnedSupervisorLease) ManagerCleanupDiagnosticsV4() error {
+	if owner == nil {
+		return nil
+	}
+	owner.mu.Lock()
+	defer owner.mu.Unlock()
+	return owner.managerDiagnostic
 }

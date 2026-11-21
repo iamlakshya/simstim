@@ -12,6 +12,9 @@ func checkHostTransportAction(ctx context.Context, h Host) error {
 		_, err := captureHostStateObservation(ctx, h)
 		return err
 	}
+	if restriction, _ := ctx.Value(hostTransportRestrictionKey{}).(*hostTransportRestrictionV1); restriction != nil {
+		return restriction.expected.check(ctx, h)
+	}
 	return ctx.Err()
 }
 

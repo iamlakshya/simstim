@@ -11,7 +11,7 @@ func (s *sandbox) releaseOriginalEvidenceV1() error {
 	command, started, physical := s.command, s.started, s.physicalExit
 	s.mu.Unlock()
 	if !started {
-		return nil
+		return s.closePartialSlotOwnersV1()
 	}
 	if !physical {
 		return fmt.Errorf("the original runtime has no positive native closure for final evidence release")

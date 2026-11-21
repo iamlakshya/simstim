@@ -1222,6 +1222,14 @@ The isolation plan adds palette commands (isolation spec 9.4), each with its com
 | policy: lockdown | `policy lockdown` | P2.14 |
 | session: fork | `fork <host>/<session>` | P5 |
 
+The session-shell action uses the same shell runner as the CLI, with its exact
+selected session ID and actual terminal files. It retains the original accepted
+host connection. Later dials, grants and reconnects check that connection's saved
+Source, held settings and host tier before using the original route. A removed
+and re-added host, changed configuration or ended parent makes that action fail;
+it never resolves a new host under the old selection. This restriction grants
+no new permission. The ordinary CLI path keeps its existing behaviour.
+
 ### 15.3 How the code keeps them in step
 
 1. Each entry of the palette's registry in `internal/tui/palette.go` gets one of two fields: `cli`, the command path such as `host show`, or `launcherOnly`, the reason.

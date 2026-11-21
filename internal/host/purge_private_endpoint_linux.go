@@ -3,6 +3,7 @@
 package host
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net"
@@ -17,28 +18,36 @@ import (
 // This endpoint owns only its original listener creation and anchored socket
 // leaf. A connected process still needs current SCM/code/creation checks.
 type purgePrivateEndpointV2 struct {
-	root       *os.Root
-	directory  *os.File
-	reference  cachefs.Reference
-	listener   *net.UnixListener
-	socket     os.FileInfo
-	socketFile *os.File
-	closed     bool
-	closeErr   error
-	leaf       string
-	path       string
+	issuer          *purgePrivateEndpointV2
+	retirement      purgeNativeRetirementsV4
+	cleanupComplete bool
+	root            *os.Root
+	directory       *os.File
+	reference       cachefs.Reference
+	listener        *net.UnixListener
+	socket          os.FileInfo
+	socketFile      *os.File
+	closed          bool
+	closeErr        error
+	leaf            string
+	path            string
 }
 
-func newPurgePrivateEndpointV2() (_ *purgePrivateEndpointV2, returned error) {
+func newPurgePrivateEndpointV2() (result *purgePrivateEndpointV2, returned error) {
 	nonce, err := footprintNonce()
 	if err != nil {
 		return nil, err
 	}
 	endpoint := &purgePrivateEndpointV2{leaf: ".pg-" + nonce[:16]}
+	endpoint.issuer = endpoint
 	complete := false
 	defer func() {
 		if !complete {
-			returned = errors.Join(returned, endpoint.Close())
+			closeErr := endpoint.Close()
+			returned = errors.Join(returned, closeErr)
+			if closeErr != nil {
+				result = endpoint
+			}
 		}
 	}()
 	endpoint.root, err = cachefs.OpenPrivateRoot(paths.RuntimeDir(), false)
@@ -116,51 +125,59 @@ func (endpoint *purgePrivateEndpointV2) Close() error {
 	if endpoint == nil {
 		return nil
 	}
-	if endpoint.closed {
-		if err := observeOriginalPurgeDescriptorCloseV3([]*os.File{endpoint.socketFile, endpoint.directory}, []*os.Root{endpoint.root}); err != nil {
-			return err
-		}
-		return nil
+	if endpoint.issuer != endpoint {
+		return sessionLeaseError("the private endpoint has no original native creator")
 	}
-	if endpoint.listener != nil {
-		if err := endpoint.listener.Close(); err != nil && !errors.Is(err, net.ErrClosed) {
-			return err
+	if !endpoint.cleanupComplete {
+		listenerErr := endpoint.retirement.closeListenerV4(endpoint.listener)
+		if native := endpoint.retirement.checkListenerV4(endpoint.listener); native != nil {
+			return errors.Join(listenerErr, native)
 		}
-	}
-	if endpoint.root != nil && endpoint.socket != nil {
-		if endpoint.socketFile == nil {
-			return sessionLeaseError("the original private purge socket has no retained native creation")
-		}
-		actual, err := endpoint.socketFile.Stat()
-		_, _, _, links, known := footprintIdentity(actual)
-		if err != nil || !known || !os.SameFile(actual, endpoint.socket) {
-			return errors.Join(sessionLeaseError("the original private purge socket lost its native identity"), err)
-		}
-		current, err := endpoint.root.Lstat(endpoint.leaf)
-		if err == nil && os.SameFile(current, endpoint.socket) {
-			if err := endpoint.root.Remove(endpoint.leaf); err != nil {
+		if endpoint.root != nil && endpoint.socket != nil {
+			if endpoint.socketFile == nil {
+				return sessionLeaseError("the original private purge socket has no retained native creation")
+			}
+			actual, err := endpoint.socketFile.Stat()
+			_, _, _, links, known := footprintIdentity(actual)
+			if err != nil || !known || !os.SameFile(actual, endpoint.socket) {
+				return errors.Join(sessionLeaseError("the original private purge socket lost its native identity"), err)
+			}
+			current, err := endpoint.root.Lstat(endpoint.leaf)
+			if err == nil && os.SameFile(current, endpoint.socket) {
+				if err := endpoint.root.Remove(endpoint.leaf); err != nil {
+					return err
+				}
+			} else if errors.Is(err, os.ErrNotExist) && links == 0 {
+				// The SAME still-open original socket proves the prior unlink.
+			} else {
+				return errors.Join(sessionLeaseError("the actual private endpoint unlink is unknown or replaced"), err)
+			}
+			if err := syncCapturedDirectory(endpoint.root); err != nil {
 				return err
 			}
-		} else if errors.Is(err, os.ErrNotExist) && links == 0 {
-			// SAME original socket descriptor proves the earlier real unlink.
-		} else if err != nil {
-			return errors.Join(sessionLeaseError("the original private purge socket unlink remains unknown"), err)
-		} else if err == nil {
-			return sessionLeaseError("preserved a replaced private purge control socket")
 		}
-		if err := syncCapturedDirectory(endpoint.root); err != nil {
-			return err
-		}
+		endpoint.cleanupComplete = true
 	}
-	if endpoint.socketFile != nil {
-		endpoint.closeErr = errors.Join(endpoint.closeErr, endpoint.socketFile.Close())
+	closedFiles := endpoint.retirement.closeFilesV4([]*os.File{endpoint.socketFile, endpoint.directory})
+	closedRoots := endpoint.retirement.closeRootsV4([]*os.Root{endpoint.root})
+	native := endpoint.checkNativeRetiredV3(context.Background())
+	if native == nil {
+		endpoint.closed = true
 	}
-	if endpoint.directory != nil {
-		endpoint.closeErr = errors.Join(endpoint.closeErr, endpoint.directory.Close())
+	endpoint.closeErr = endpoint.retirement.diagnosticsV4()
+	return errors.Join(closedFiles, closedRoots, native, endpoint.closeErr)
+}
+
+func (endpoint *purgePrivateEndpointV2) checkNativeRetiredV3(ctx context.Context) error {
+	if endpoint == nil || ctx == nil || endpoint.issuer != endpoint || !endpoint.cleanupComplete {
+		return sessionLeaseError("the private endpoint has no original physically completed cleanup")
 	}
-	if endpoint.root != nil {
-		endpoint.closeErr = errors.Join(endpoint.closeErr, endpoint.root.Close())
+	return errors.Join(ctx.Err(), endpoint.retirement.checkListenerV4(endpoint.listener), endpoint.retirement.checkFilesV4([]*os.File{endpoint.socketFile, endpoint.directory}), endpoint.retirement.checkRootsV4([]*os.Root{endpoint.root}))
+}
+
+func (endpoint *purgePrivateEndpointV2) CloseDiagnosticsV3() error {
+	if endpoint == nil {
+		return nil
 	}
-	endpoint.closed = true
-	return endpoint.closeErr
+	return endpoint.retirement.diagnosticsV4()
 }

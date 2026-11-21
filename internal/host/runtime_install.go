@@ -21,6 +21,7 @@ var runtimeSlots = make(chan struct{}, runtimeProcessTransfers)
 type runtimeOwnedPart struct {
 	mu          sync.Mutex
 	closing     bool
+	inventory   bool // actual read-only status owner; never a writer/publication grant
 	slot        bool
 	part        *runtimecache.Part
 	store       *runtimecache.Store
@@ -40,18 +41,21 @@ type runtimeJob struct {
 }
 
 type runtimeService struct {
-	active           sync.WaitGroup
-	closeMu          sync.Mutex
-	owned            map[*runtimeOwnedPart]struct{}
-	selectionGate    chan struct{}
-	selectionPending *selectedRuntimeReceiptV1
-	mu               sync.Mutex
-	parts            map[string]*runtimeOwnedPart
-	jobs             map[string]*runtimeJob
-	downloads        map[string]*runtimecache.Part
-	closed           bool
-	closeDone        chan struct{}
-	selections       map[string]*selectedRuntimeReceiptV1
+	connection          context.Context
+	cancelConnection    context.CancelFunc
+	active              sync.WaitGroup
+	closeMu             sync.Mutex
+	owned               map[*runtimeOwnedPart]struct{}
+	selectionGate       chan struct{}
+	selectionPending    *selectedRuntimeReceiptV1
+	selectionPendingKey string
+	mu                  sync.Mutex
+	parts               map[string]*runtimeOwnedPart
+	jobs                map[string]*runtimeJob
+	downloads           map[string]*runtimecache.Part
+	closed              bool
+	closeDone           chan struct{}
+	selections          map[string]*selectedRuntimeReceiptV1
 }
 
 func (s *runtimeService) close() error {
@@ -100,6 +104,9 @@ func (s *runtimeService) beginContext(ctx context.Context, a runtimecache.Runtim
 	}
 	defer done()
 	if err := s.retryRuntimeOwnersV1(); err != nil {
+		return result, err
+	}
+	if err := s.retryRuntimeSelectionAdmissionV1(ctx); err != nil {
 		return result, err
 	}
 	if err := CheckCaller(); err != nil {

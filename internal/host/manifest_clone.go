@@ -10,6 +10,7 @@ import (
 // CloneManifest owns mutable DTO/source/opaque data without a JSON roundtrip.
 // Policy data delegates to the one canonical API clone.
 func CloneManifest(m Manifest) Manifest {
+	m.NoneDirectoryCreation = slices.Clone(m.NoneDirectoryCreation)
 	if m.NoneCleanup != nil {
 		copy := *m.NoneCleanup
 		m.NoneCleanup = &copy

@@ -103,12 +103,16 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Error: unknown command %q\n", os.Args[1])
 		os.Exit(1)
 	}
-	if err := run(os.Args[2:]); err != nil {
+	err := run(os.Args[2:])
+	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		var pe *proto.Error
 		if errors.As(err, &pe) && pe.Hint != "" {
 			fmt.Fprintf(os.Stderr, "\nTry: %s\n", pe.Hint)
 		}
+	}
+	host.WaitForNoneCustodyV1()
+	if err != nil {
 		os.Exit(1)
 	}
 }

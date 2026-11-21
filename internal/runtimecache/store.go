@@ -14,12 +14,13 @@ import (
 // Store is an owned directory held open for the lifetime of its operations.
 // All entries are addressed relative to its anchored descriptor.
 type Store struct {
-	root      *os.Root
-	readOnly  bool
-	execution bool // native execution metadata purpose; never a wire grant
-	lockInfo  os.FileInfo
-	gate      PublicationGate
-	domain    cachefs.Domain
+	pendingMode *runtimeModeProvisionV1
+	root        *os.Root
+	readOnly    bool
+	execution   bool // native execution metadata purpose; never a wire grant
+	lockInfo    os.FileInfo
+	gate        PublicationGate
+	domain      cachefs.Domain
 	// Private fault hooks let package tests witness transaction boundaries.
 	beforePartSync    func(*os.File) error
 	afterLink         func()
@@ -74,7 +75,18 @@ func openStoreDomain(ctx context.Context, dir string, create bool, domain cachef
 }
 
 // Close releases the anchored directory. Its active parts must be closed first.
-func (s *Store) Close() error { return s.root.Close() }
+func (s *Store) Close() error {
+	if s == nil {
+		return nil
+	}
+	if s.pendingMode != nil {
+		if err := s.pendingMode.Close(); err != nil {
+			return err
+		}
+		s.pendingMode = nil
+	}
+	return s.root.Close()
+}
 
 func (s *Store) openRegular(name string, mode fs.FileMode) (*os.File, error) {
 	return s.openRegularFlags(name, mode, os.O_RDONLY)

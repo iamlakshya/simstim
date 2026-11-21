@@ -106,6 +106,7 @@ func EndBridge() {
 	// A bounded RPC failure cannot drop the actual original prepare worker
 	// while native construction, destruction or cleanup is still uncertain.
 	waitSandboxPrepareRequestsV1()
+	WaitForNoneCustodyV1()
 }
 
 // gitOp runs one git operation in its child, within the operation's

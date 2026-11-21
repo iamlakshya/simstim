@@ -28,6 +28,8 @@ type receivedVMMProof struct {
 	spec          wall.Spec
 	pidfd, socket *os.File
 	ready, closed bool
+	readonly      *vmmExecPhaseV1
+	origin        *localLaunchOriginV1
 }
 
 func cloneBindingSpec(spec wall.Spec) wall.Spec {
@@ -47,17 +49,31 @@ func (p *receivedVMMProof) acceptReady(message runnerMessage, control *proto.Uni
 	if err != nil {
 		return err
 	}
-	if p.ready || p.closed || message.Session != p.session || message.Driver != kind.name() || len(control.Files) != 2 || control.Credentials == nil {
+	if p.ready || p.closed || p.pidfd != nil || p.socket != nil || message.Session != p.session || message.Driver != kind.name() || len(control.Files) != 2 || control.Credentials == nil {
 		return fmt.Errorf("private VMM readiness has no exact original descriptor roles and session")
 	}
-	if err := checkNativeVMMPair(control.Files[0], control.Files[1]); err != nil {
+	if p.readonly != nil {
+		if err := p.readonly.command.CheckVMMReadonlyPeerV1(p.readonly.source, p.readonly.control, control); err != nil {
+			return err
+		}
+	} else if err := checkNativeVMMPair(control.Files[0], control.Files[1]); err != nil {
 		return err
 	}
 	files, err := control.DetachFilesV1()
 	if err != nil {
 		return err
 	}
-	p.pidfd, p.socket, p.ready = files[0], files[1], true
+	// Adopt detached actual handles BEFORE any fallible origin binding.
+	p.pidfd, p.socket = files[0], files[1]
+	if p.origin != nil {
+		if p.readonly != nil {
+			return fmt.Errorf("the readonly source cannot adopt a normal launch origin")
+		}
+		if err := p.origin.bindReadyV1(p.pidfd, p.socket); err != nil {
+			return err
+		}
+	}
+	p.ready = true
 	return nil
 }
 
@@ -66,6 +82,9 @@ func (p *receivedVMMProof) check() error {
 	defer p.mu.Unlock()
 	if !p.ready || p.closed {
 		return fmt.Errorf("the engine has no live original VMM descriptor pair")
+	}
+	if p.readonly != nil {
+		return p.readonly.command.CheckVMMReadonlyPairV1(p.readonly.source, p.pidfd, p.socket)
 	}
 	return checkNativeVMMPair(p.pidfd, p.socket)
 }

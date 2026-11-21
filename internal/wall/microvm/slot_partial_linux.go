@@ -5,13 +5,17 @@ package microvm
 import "errors"
 
 func (binding *slotSandboxBinding) closeOrKeepSlotOwnerV1(owner interface{ Close() error }) error {
+	return binding.sandbox.closeOrKeepNativeOwnerV1(owner)
+}
+
+func (s *sandbox) closeOrKeepNativeOwnerV1(owner interface{ Close() error }) error {
 	if owner == nil {
 		return nil
 	}
 	if err := owner.Close(); err != nil {
-		binding.sandbox.mu.Lock()
-		binding.sandbox.partialSlotOwners = append(binding.sandbox.partialSlotOwners, owner)
-		binding.sandbox.mu.Unlock()
+		s.mu.Lock()
+		s.partialSlotOwners = append(s.partialSlotOwners, owner)
+		s.mu.Unlock()
 		return err
 	}
 	return nil

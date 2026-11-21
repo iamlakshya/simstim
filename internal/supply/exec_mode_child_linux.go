@@ -26,6 +26,9 @@ func CheckArmedVMMExecModeV1(ctx context.Context, item Item, program, lease *os.
 }
 
 func checkVMMExecModeChild(ctx context.Context, item Item, program, lease *os.File, mode os.FileMode, armed bool) (execModeIntent, unix.Stat_t, unix.Stat_t, error) {
+	return checkVMMExecModeChildShape(ctx, item, program, lease, mode, armed, true)
+}
+func checkVMMExecModeChildShape(ctx context.Context, item Item, program, lease *os.File, mode os.FileMode, armed, requireNonce bool) (execModeIntent, unix.Stat_t, unix.Stat_t, error) {
 	var value execModeIntent
 	var p, l unix.Stat_t
 	if err := ctx.Err(); err != nil {
@@ -81,7 +84,7 @@ func checkVMMExecModeChild(ctx context.Context, item Item, program, lease *os.Fi
 	if err := compareVerity(item, got); err != nil {
 		return value, p, l, err
 	}
-	if _, err := hex.DecodeString(value.Nonce); err != nil || len(value.Nonce) != 32 {
+	if _, err := hex.DecodeString(value.Nonce); requireNonce && (err != nil || len(value.Nonce) != 32) {
 		return value, p, l, fmt.Errorf("VMM mode stage has an invalid original phase nonce")
 	}
 	return value, p, l, ctx.Err()
@@ -157,6 +160,9 @@ func (lease *ExecModeLeaseV1) checkRecord(ctx context.Context, record ExecModeRe
 	if record.Phase != phase {
 		return fmt.Errorf("VMM mode record arrived in another native phase")
 	}
+	if state.readonly && phase != ExecModeProjectionV1 {
+		return fmt.Errorf("the original read-only source cannot accept an armed record")
+	}
 	if phase == ExecModeProjectionV1 && state.armed || phase == ExecModeArmedV1 && !state.armed {
 		return fmt.Errorf("VMM mode source has another actual state")
 	}
@@ -170,7 +176,11 @@ func (lease *ExecModeLeaseV1) checkRecord(ctx context.Context, record ExecModeRe
 	if err := unix.Fstat(int(state.guard.lock.Fd()), &l); err != nil {
 		return err
 	}
-	if record.ProgramDev != uint64(p.Dev) || record.ProgramIno != uint64(p.Ino) || record.LeaseDev != uint64(l.Dev) || record.LeaseIno != uint64(l.Ino) || hex.EncodeToString(record.Nonce[:]) != state.guard.intent.Nonce || hex.EncodeToString(record.FSVerity[:]) != state.guard.item.FSVerity {
+	nonce := state.guard.intent.Nonce
+	if state.readonly {
+		nonce = hex.EncodeToString(state.readonlyNonce[:])
+	}
+	if record.ProgramDev != uint64(p.Dev) || record.ProgramIno != uint64(p.Ino) || record.LeaseDev != uint64(l.Dev) || record.LeaseIno != uint64(l.Ino) || hex.EncodeToString(record.Nonce[:]) != nonce || hex.EncodeToString(record.FSVerity[:]) != state.guard.item.FSVerity {
 		return fmt.Errorf("VMM mode record differs from the original native capabilities")
 	}
 	return nil

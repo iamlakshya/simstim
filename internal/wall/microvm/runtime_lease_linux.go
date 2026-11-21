@@ -18,16 +18,17 @@ import (
 // mode phase settles through its SAME Cmd before any runtime or image lease
 // is released. Failed proof retains the complete stack for a later retry.
 type bootRuntimeLeaseV1 struct {
-	mu           sync.Mutex
-	agents       io.Closer
-	runtime      []*supply.VerifiedRuntime
-	phases       []*vmmExecPhaseV1
-	image        io.Closer
-	runtimeStore *runtimecache.Store
-	imageStore   *image.Store
-	runtimeFiles []*os.File
-	retirements  map[*os.File]*microVMFileRetirementV2
-	diagnostics  error
+	mu              sync.Mutex
+	agents          io.Closer
+	runtime         []*supply.VerifiedRuntime
+	phases          []*vmmExecPhaseV1
+	image           io.Closer
+	runtimeStore    *runtimecache.Store
+	imageStore      *image.Store
+	runtimeFiles    []*os.File
+	retirements     map[*os.File]*microVMFileRetirementV2
+	diagnostics     error
+	phaseDiagnostic error
 }
 
 func (lease *bootRuntimeLeaseV1) Close() error {
@@ -36,11 +37,13 @@ func (lease *bootRuntimeLeaseV1) Close() error {
 	}
 	lease.mu.Lock()
 	defer lease.mu.Unlock()
+	defer lease.capturePhaseDiagnosticsV4()
 	for _, phase := range lease.phases {
 		if err := phase.settleNoFuture(context.WithoutCancel(phase.ctx)); err != nil {
 			return err
 		}
 	}
+	lease.capturePhaseDiagnosticsV4()
 	lease.phases = nil
 	if lease.retirements == nil {
 		lease.retirements = map[*os.File]*microVMFileRetirementV2{}

@@ -17,6 +17,10 @@ type hostTransportExpectation struct {
 // network startup. The original Source is checked immediately before Start,
 // and a new short actual OP revalidates it after the exact Hello arrives.
 func dialHostContinuation(ctx context.Context, parent *Conn) (*Conn, error) {
+	return dialHostContinuationPrepared(ctx, parent, nil)
+}
+
+func dialHostContinuationPrepared(ctx context.Context, parent *Conn, beforeStart func(context.Context, Transport) error) (*Conn, error) {
 	if ctx == nil || parent == nil || parent.agentOnly || parent.hostTransport == nil ||
 		parent.hostTransport.kind != hostTransportSaved || !ValidHostID(parent.HostID()) || parent.HostIDChanged() {
 		return nil, sandboxReceiptError()
@@ -55,6 +59,17 @@ func dialHostContinuation(ctx context.Context, parent *Conn) (*Conn, error) {
 	bound := context.WithValue(startup, hostTransportAttemptKey{}, attempt)
 	route := parent.route
 	route.lc = nil
+	if beforeStart != nil {
+		if err := expected.check(ctx, parent.Host); err != nil {
+			return nil, err
+		}
+		if err := beforeStart(bound, route.t); err != nil {
+			return nil, err
+		}
+		if err := expected.check(ctx, parent.Host); err != nil {
+			return nil, err
+		}
+	}
 	return dialObserved(bound, ctx, parent.Host, route, attempt)
 }
 
@@ -68,7 +83,10 @@ func (e *hostTransportExpectation) check(ctx context.Context, h Host) error {
 	}
 	// Existing canonical membership acquisition lasts only for this check.
 	// No host OP or released heldKey is required or manufactured here.
-	return withHostMembershipContext(ctx, e.stamp.source.check)
+	if err := withHostMembershipContext(ctx, e.stamp.source.check); err != nil {
+		return err
+	}
+	return checkHostRestrictionV1(ctx, h, e.stamp)
 }
 
 func finishHostContinuationObservation(ctx context.Context, attempt *hostTransportAttempt, child *Conn) error {

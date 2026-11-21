@@ -124,7 +124,7 @@ func startCommand(c *setup, env []string) (int, error) {
 		execs, execFDs, err = execMounts(c, fds)
 		cwd, _ := os.Getwd()
 		if err == nil {
-			err = buildRootWithFileRulesV1(c.Binds, fds, execs, execFDs, c.Sub != nil, fileRules)
+			err = buildRootWithFileRulesV1(c.Binds, fds, execs, execFDs, c.Sub != nil && !readonlyLoginUIDV1(c), fileRules)
 		}
 		// buildRoot leaves the process in "/", if cwd is gone inside the jail.
 		if err == nil && cwd != "" {
@@ -152,6 +152,9 @@ func startCommand(c *setup, env []string) (int, error) {
 				c.gvisorCommonScope = nil
 			}
 		}()
+	}
+	if c.VMMExecV1 != nil && c.VMMExecV1.ReadonlyInit {
+		return 0, runVMMReadonlyInitV1(c, &helper)
 	}
 	rs, err := initRules(c, helper)
 	if err != nil {

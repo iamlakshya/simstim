@@ -40,6 +40,7 @@ type StoppedSessionV1 struct {
 	stopSent, settled, closed bool
 	holderHanded              bool // only the same bound Cold's actual native dispatch consumes it
 	mu                        sync.Mutex
+	managerDiagnostic         error
 }
 
 // StopSessionForOperationV1 stops only the actual current supported supervisor
@@ -119,7 +120,7 @@ func captureSupportedSupervisorPurposeV1(ctx context.Context, operation *Session
 	}()
 	owner.manager, err = openNativeUserManagerV1(ctx)
 	if err != nil {
-		if !(errors.Is(err, os.ErrNotExist) && inspect == proto.NativeResumeInspectV1 && IsNoneSupervisor(saved)) {
+		if !(owner.manager == nil && errors.Is(err, os.ErrNotExist) && inspect == proto.NativeResumeInspectV1 && IsNoneSupervisor(saved)) {
 			return nil, err
 		}
 	}
@@ -326,7 +327,14 @@ func (owner *StoppedSessionV1) Close() error {
 		failure = errors.Join(failure, owner.invocation.Close())
 	}
 	if owner.manager != nil {
-		failure = errors.Join(failure, owner.manager.Close())
+		failure = errors.Join(failure, closeNativeManagerResourceV4(owner.manager, owner.operation.Primary(), &owner.managerDiagnostic))
 	}
 	return failure
+}
+
+func (owner *StoppedSessionV1) ManagerCloseDiagnosticsV4() error {
+	if owner == nil {
+		return nil
+	}
+	return owner.managerDiagnostic
 }

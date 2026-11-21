@@ -32,6 +32,9 @@ type Manifest struct {
 	ForkBranchOf string `json:"fork_branch_of,omitempty"`
 	ForkPending  bool   `json:"fork_pending,omitempty"`
 	Checkpoints  string `json:"checkpoints_status,omitempty"`
+	// NoneDirectoryCreation retains opaque actual-creator DATA only. It
+	// grants no runtime, restart, stopped subject or directory permission.
+	NoneDirectoryCreation json.RawMessage `json:"none_directory_creation_v1,omitempty"`
 	// Preparation is accounting data; its original bridge/native issuer is
 	// separate. It never authorises stop, artifact access, boot or capacity.
 	ResumePreparation *ResumePreparationV1 `json:"resume_preparation_v1,omitempty"`

@@ -25,6 +25,8 @@ type StoppedNoneSessionV1 struct {
 	mu                         sync.Mutex
 	operation                  *SessionOperation
 	warm                       *WarmResumeV1
+	rejectedCold               *ColdResumeV1 // cleanup only, never an N5 authority
+	rejectedDiagnostic         error
 	completion                 *os.File
 	operationFile              *os.File
 	boot                       string
@@ -32,11 +34,7 @@ type StoppedNoneSessionV1 struct {
 	committed, settled, closed bool
 }
 
-// Only actual unresolved original objects enter this custody set. A row or a
-// later lookup cannot remove them or turn them into a stopped/cold source.
-var noneStopUncertainCustodyV1 sync.Map
-
-func StopNoneSessionForOperationV1(ctx context.Context, operation *SessionOperation) (_ *StoppedNoneSessionV1, returned error) {
+func StopNoneSessionForOperationV1(ctx context.Context, operation *SessionOperation) (result *StoppedNoneSessionV1, returned error) {
 	if ctx == nil || operation == nil || operation.native == nil || operation.native.borrowed || !operation.Valid(operation.Primary()) {
 		return nil, sessionLeaseError("the unwalled stop has no original owning operation")
 	}
@@ -47,31 +45,41 @@ func StopNoneSessionForOperationV1(ctx context.Context, operation *SessionOperat
 	if !NoneSupervisorShapeV1(manifest) || !auxiliaryBootIDV1(BootID()) || manifest.Run.BootID != BootID() || manifest.Run.Generation == "" {
 		return nil, sessionLeaseError("the N5 stop source is not an original unwalled supervisor")
 	}
+	source := &StoppedNoneSessionV1{operation: operation, boot: BootID()}
+	source.self = source
+	if err := source.bindCustodyV1(); err != nil {
+		return nil, err
+	}
+	complete := false
+	defer func() {
+		if !complete {
+			closeErr := source.Close()
+			returned = errors.Join(returned, source.CloseDiagnosticsV4())
+			if closeErr != nil {
+				result = source
+				returned = errors.Join(returned, closeErr)
+			}
+		}
+	}()
 	warm, cold, err := InspectResumeForOperationV1(ctx, operation)
+	source.warm, source.rejectedCold = warm, cold
 	if err != nil {
 		return nil, err
 	}
 	if cold != nil {
-		return nil, errors.Join(sessionLeaseError("the unwalled stop needs its original live creator"), cold.Close())
+		return nil, sessionLeaseError("the unwalled stop needs its original live creator")
 	}
 	if warm == nil || warm.owner == nil {
 		return nil, sessionLeaseError("the original unwalled creator is unavailable")
 	}
 	if !slices.Contains(warm.owner.features, proto.FeatureNoneStopCompletionV1) {
-		return nil, errors.Join(UserError("helper_old", "the original unwalled supervisor cannot produce native stop completion", "Use its original helper or restore it after a real host restart before stopping it."), warm.Close())
+		return nil, UserError("helper_old", "the original unwalled supervisor cannot produce native stop completion", "Use its original helper or restore it after a real host restart before stopping it.")
 	}
 	file, err := operation.native.duplicateLockedFile(ctx)
 	if err != nil {
-		return nil, errors.Join(err, warm.Close())
+		return nil, err
 	}
-	source := &StoppedNoneSessionV1{operation: operation, warm: warm, operationFile: file, boot: BootID()}
-	source.self = source
-	complete := false
-	defer func() {
-		if !complete {
-			returned = errors.Join(returned, source.Close())
-		}
-	}()
+	source.operationFile = file
 	owner := warm.owner
 	owner.mu.Lock()
 	args := proto.NativeStopArgsV1{Version: 1, Primary: operation.Primary(), Nonce: owner.state.Nonce}
@@ -175,7 +183,7 @@ func (source *StoppedNoneSessionV1) checkNativeAfterRemovalV1(ctx context.Contex
 	}
 	source.mu.Lock()
 	defer source.mu.Unlock()
-	if source.closed || !source.settled || !source.committed || source.operation != operation || operation == nil || !operation.active.Load() || source.warm == nil || source.warm.owner == nil || !auxiliaryBootIDV1(source.boot) || source.boot != BootID() {
+	if source.closed || source.rejectedCold != nil || !source.settled || !source.committed || source.operation != operation || operation == nil || !operation.active.Load() || source.warm == nil || source.warm.owner == nil || !auxiliaryBootIDV1(source.boot) || source.boot != BootID() {
 		return sessionLeaseError("the original N5 completion source ended")
 	}
 	owner := source.warm.owner
@@ -195,7 +203,7 @@ func (source *StoppedNoneSessionV1) Check(ctx context.Context, operation *Sessio
 	}
 	source.mu.Lock()
 	defer source.mu.Unlock()
-	if source.closed || !source.committed || !source.settled || operation == nil || source.operation != operation || operation.native == nil || operation.native.borrowed || !operation.Valid(operation.Primary()) || source.warm == nil || source.warm.owner == nil || source.operationFile == nil || source.completion == nil || !auxiliaryBootIDV1(source.boot) || source.boot != BootID() {
+	if source.closed || source.rejectedCold != nil || !source.committed || !source.settled || operation == nil || source.operation != operation || operation.native == nil || operation.native.borrowed || !operation.Valid(operation.Primary()) || source.warm == nil || source.warm.owner == nil || source.operationFile == nil || source.completion == nil || !auxiliaryBootIDV1(source.boot) || source.boot != BootID() {
 		return sessionLeaseError("the original N5 unwalled stop source ended or changed")
 	}
 	owner := source.warm.owner
@@ -234,8 +242,16 @@ func (source *StoppedNoneSessionV1) Close() error {
 		if source.warm != nil && source.warm.owner != nil && source.warm.owner.line != nil {
 			_ = source.warm.owner.line.Close()
 		}
-		noneStopUncertainCustodyV1.Store(source, struct{}{})
 		return sessionLeaseError("the original unwalled stop and SAME operation remain retained because physical completion or loan closure is uncertain")
+	}
+	// A refused inspection may still return its actual partial Cold owner.
+	// It remains cleanup-only and must settle before this stop releases OP.
+	if source.rejectedCold != nil {
+		if err := source.rejectedCold.Close(); err != nil {
+			return err
+		}
+		source.rejectedDiagnostic = errors.Join(source.rejectedDiagnostic, source.rejectedCold.CloseDiagnosticsV4())
+		source.rejectedCold = nil
 	}
 	var err error
 	if source.warm != nil {
@@ -257,6 +273,17 @@ func (source *StoppedNoneSessionV1) Close() error {
 	}
 	if err == nil {
 		source.closed = true
+		source.releaseCustodyV1()
 	}
 	return err
+}
+
+// Report data from the SAME rejected cleanup owner grants no N5 or Cold role.
+func (source *StoppedNoneSessionV1) CloseDiagnosticsV4() error {
+	if source == nil || source.self != source {
+		return nil
+	}
+	source.mu.Lock()
+	defer source.mu.Unlock()
+	return errors.Join(source.rejectedDiagnostic, source.rejectedCold.CloseDiagnosticsV4())
 }

@@ -53,34 +53,36 @@ claude,codex
 
 === 14.2 host set keys (current build) (host set vm ) ===
 idle=
+tier=
+label.
+drain=
 :6
 
 === 14.2 host set value (current build) (host set vm idle=) ===
 idle=never
 :4
 
-=== 14.2 host set keys (with isolation keys) (_spec14 hset vm idle=2h ) ===
-label.
+=== 14.2 host set keys after idle (host set vm idle=2h ) ===
 tier=
-floor=
+label.
 drain=
 :6
 
-=== 14.2 host set tier values (_spec14 hset vm tier=) ===
+=== 14.2 host set tier values (host set vm tier=) ===
 tier=own
 tier=throwaway
 tier=shared
 :4
 
-=== 14.2 host set floor values (_spec14 hset vm floor=) ===
-floor=none
-floor=process
-floor=gvisor
-floor=microvm
+=== 14.2 live policy allow doors (policy allow ) ===
+net
+push
+ssh-key
+port
 :4
 
-=== 14.2 host set drain values (_spec14 hset vm drain=) ===
-drain=off
+=== 14.2 live policy log door (policy log --door ) ===
+net
 :4
 
 === 14.2 --debug categories (ls --debug=attach,) ===
@@ -114,23 +116,52 @@ powershell	Print the completion script for PowerShell
 zsh	Print the completion script for zsh
 :4
 
-=== 14.2 door words (P1.12) (_spec14 door ) ===
-net
-push
-mount
-secret
-ssh-key
-port
-paste
-device
+=== 14.2 current host commands in help (help host ) ===
+add	Connect a host: check it, install the helper, prepare it
+alerts	Show where a host sends alerts, and the last deliveries
+create	Make a host with lima, docker or e2b, and connect it
+default	Show or choose the default host for new sessions
+doctor	Check a host's setup, and with --fix fix what it can
+invite	Make a public invite for a machine to prepare itself
+join	Prepare this machine from a laptop invite on standard input
+leave	Undo this machine's original root-owned join ledger
+ls	List hosts
+prepare	Probe a host, prepare its runtime and test its sandbox wall
+rekey	Replace a host's pinned host key, after you confirm
+restore	Start again the sessions that a host restart stopped
+rm	Forget a host, or delete a created machine
+set	Change a host's settings, such as idle or tier
+show	Describe a host
+start	Start the host through its provider or provider script
+status	Ask the provider or provider script whether the host is running
+stop	Stop the host through its provider or provider script
+test	Check that a host answers, and how fast
+upgrade	Install this client's helper on a host
 :4
 
-=== 14.2 --profile (P1.12) (_spec14 flags --profile ) ===
+=== 14.2 concepts help topic (help con) ===
+concepts	The words that this tool uses
+config	Show the configuration
+:4
+
+=== 14.2 exit code help topic (help exit) ===
+exit-codes	What each exit code means
+:4
+
+=== 14.2 session flag (policy ls --in ) ===
+atlas/auth-fix	claude, working
+atlas/efgh2345	codex, idle
+atlas/ijkl2345	claude, needs input
+box/web	opencode, errored (exit code 1, a process hit the cap), seen 5m ago
+box/qrst2345	shell, exited, seen 5m ago
+:4
+
+=== 14.2 --profile (new box --profile ) ===
 review
 untrusted
 :4
 
-=== 14.2 --wall (_spec14 flags --wall ) ===
+=== 14.2 --wall (new box --wall ) ===
 auto
 none
 process
@@ -138,25 +169,25 @@ gvisor
 microvm
 :4
 
-=== 14.2 --tier (_spec14 flags --tier ) ===
+=== 14.2 --tier (host add box --tier ) ===
 own
 throwaway
 shared
 :4
 
-=== 14.2 --preset (_spec14 flags --preset ) ===
+=== 14.2 --preset (new box --preset ) ===
 locked
 balanced
 open
 :4
 
-=== 14.2 --root-step (_spec14 flags --root-step ) ===
+=== 14.2 --root-step (host prepare box --root-step ) ===
 run
 print
 skip
 :4
 
-=== 14.2 --images (_spec14 flags --images ) ===
+=== 14.2 --images (host prepare box --images ) ===
 auto
 host
 laptop

@@ -18,6 +18,7 @@ import (
 	"github.com/iamlakshya/simstim/internal/brand"
 	"github.com/iamlakshya/simstim/internal/paths"
 	"github.com/iamlakshya/simstim/internal/proto"
+	"github.com/iamlakshya/simstim/internal/runtimecache"
 	"github.com/iamlakshya/simstim/internal/supply"
 	"github.com/iamlakshya/simstim/internal/testhome"
 	"github.com/iamlakshya/simstim/internal/version"
@@ -255,7 +256,10 @@ func TestSandboxPrepareSameConnectionImageDefaultsNeverFallBackToStore(t *testin
 	// defaultImageRequest MUST refuse rather than falling back to Store.ImageDefaults.
 	bNoDefaults := &bridge{ctx: ctx, hostID: "0123456789abcdef0123456789abcdef"}
 	t.Cleanup(func() { bNoDefaults.runtime.close() })
-	if err := bNoDefaults.runtime.rememberRuntime(ctx, gvisorManifest); err != nil {
+	if err := bNoDefaults.runtime.bindConnectionV1(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := bNoDefaults.runtime.status(ctx, runtimecache.RuntimeRequest{Manifest: gvisorManifest}); err != nil {
 		t.Fatal(err)
 	}
 	receiptNoDefaults, err := bNoDefaults.runtime.selectedRuntime(gvisorManifest)
@@ -275,7 +279,10 @@ func TestSandboxPrepareSameConnectionImageDefaultsNeverFallBackToStore(t *testin
 	// returns the exact release default image pin, and rejects conflicting updates.
 	bWithDefaults := &bridge{ctx: ctx, hostID: "0123456789abcdef0123456789abcdef"}
 	t.Cleanup(func() { bWithDefaults.runtime.close() })
-	if err := bWithDefaults.runtime.rememberRuntimeWithDefaults(ctx, gvisorManifest, &imageDefaults); err != nil {
+	if err := bWithDefaults.runtime.bindConnectionV1(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := bWithDefaults.runtime.status(ctx, runtimecache.RuntimeRequest{Manifest: gvisorManifest, ImageDefaults: &imageDefaults}); err != nil {
 		t.Fatal(err)
 	}
 	receiptWithDefaults, err := bWithDefaults.runtime.selectedRuntime(gvisorManifest)

@@ -26,9 +26,10 @@ type VerifiedRuntime struct {
 
 // PrepareRuntime borrows the original owned store descriptor. A kernel with
 // matching fs-verity uses that same inode; otherwise it uses a sealed copy.
-// A VMM retains the execute-only sealed projection required by NoDump, even
-// after successful source measurement. Direct readable VMM execution remains
-// an unresolved specification boundary, not a claimed completed route.
+// This compatibility entry retains the VMM's execute-only sealed projection.
+// The original-store mode entry separately binds writable final-exec leases or
+// the closed actual two-map read-only direct-init source. No copy is a claim of
+// completion for original-inode execution.
 func PrepareRuntime(ctx context.Context, item Item, source *os.File) (*VerifiedRuntime, error) {
 	return prepareRuntime(ctx, item, source, nativeVerityCalls())
 }

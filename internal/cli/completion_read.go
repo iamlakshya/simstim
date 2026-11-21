@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -26,8 +27,8 @@ const (
 	compDescMax        = 200
 )
 
-func completeConfigMapKeys(section, toComplete string) []string {
-	b, ok := readCompletionFile(filepath.Join(client.ConfigDir(), "config.toml"))
+func completeConfigMapKeys(section, toComplete string, contexts ...context.Context) []string {
+	b, ok := readCompletionFile(filepath.Join(client.ConfigDir(), "config.toml"), contexts...)
 	if !ok {
 		return nil
 	}
@@ -46,11 +47,14 @@ func completeConfigMapKeys(section, toComplete string) []string {
 		}
 	}
 	slices.Sort(keys)
+	if completionReadContext(contexts).Err() != nil {
+		return nil
+	}
 	return keys
 }
 
-func loadCompletionHosts() ([]client.Host, bool) {
-	b, ok := readCompletionFile(filepath.Join(client.ConfigDir(), "hosts.toml"))
+func loadCompletionHosts(contexts ...context.Context) ([]client.Host, bool) {
+	b, ok := readCompletionFile(filepath.Join(client.ConfigDir(), "hosts.toml"), contexts...)
 	if !ok {
 		return nil, false
 	}
@@ -67,11 +71,11 @@ func loadCompletionHosts() ([]client.Host, bool) {
 		}
 	}
 	slices.SortFunc(out, func(a, b client.Host) int { return strings.Compare(a.Name, b.Name) })
-	return out, true
+	return out, completionReadContext(contexts).Err() == nil
 }
 
-func loadCompletionCache() (client.SessionCache, bool) {
-	b, ok := readCompletionFile(filepath.Join(client.StateDir(), "launcher.json"))
+func loadCompletionCache(contexts ...context.Context) (client.SessionCache, bool) {
+	b, ok := readCompletionFile(filepath.Join(client.StateDir(), "launcher.json"), contexts...)
 	if !ok {
 		return client.SessionCache{}, false
 	}
@@ -79,10 +83,14 @@ func loadCompletionCache() (client.SessionCache, bool) {
 	if json.Unmarshal(b, &c) != nil {
 		return client.SessionCache{}, false
 	}
-	return c, true
+	return c, completionReadContext(contexts).Err() == nil
 }
 
-func readCompletionFile(path string) ([]byte, bool) {
+func readCompletionFile(path string, contexts ...context.Context) ([]byte, bool) {
+	ctx := completionReadContext(contexts)
+	if ctx.Err() != nil {
+		return nil, false
+	}
 	// Opening without a wait also covers a regular file replaced by a FIFO.
 	// The descriptor, rather than an earlier look at its path, is checked.
 	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NONBLOCK, 0)
@@ -90,10 +98,14 @@ func readCompletionFile(path string) ([]byte, bool) {
 		return nil, false
 	}
 	defer f.Close()
-	return readCompletionData(f)
+	return readCompletionData(f, ctx)
 }
 
-func readCompletionData(f *os.File) ([]byte, bool) {
+func readCompletionData(f *os.File, contexts ...context.Context) ([]byte, bool) {
+	ctx := completionReadContext(contexts)
+	if ctx.Err() != nil {
+		return nil, false
+	}
 	fi, err := f.Stat()
 	if err != nil || !fi.Mode().IsRegular() || fi.Size() > maxCompletionBytes {
 		return nil, false
@@ -101,6 +113,9 @@ func readCompletionData(f *os.File) ([]byte, bool) {
 	buf := make([]byte, 0, min(int(fi.Size())+1, maxCompletionBytes+1))
 	var chunk [4096]byte
 	for {
+		if ctx.Err() != nil {
+			return nil, false
+		}
 		n, rerr := f.Read(chunk[:])
 		if n > 0 {
 			if len(buf)+n > maxCompletionBytes {
@@ -109,6 +124,9 @@ func readCompletionData(f *os.File) ([]byte, bool) {
 			buf = append(buf, chunk[:n]...)
 		}
 		if errors.Is(rerr, io.EOF) {
+			if ctx.Err() != nil {
+				return nil, false
+			}
 			return buf, true
 		}
 		if rerr != nil {
@@ -216,4 +234,11 @@ func skipControlString(r []rune, j int, bel bool) int {
 		}
 	}
 	return len(r)
+}
+
+func completionReadContext(contexts []context.Context) context.Context {
+	if len(contexts) != 0 && contexts[0] != nil {
+		return contexts[0]
+	}
+	return context.Background()
 }

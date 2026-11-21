@@ -78,49 +78,83 @@ func TestPhysicalH2UploadCutsCountOnlyTheOriginalCheckedOriginBodyPrefix(t *test
 		}()
 		return client, nil
 	}
-	for cut := 0; cut <= len(wire); cut++ {
-		expected.Store(int64(cut))
-		ctx, cancel := context.WithCancel(t.Context())
-		request := httptest.NewRequest("POST", "https://api.openai.com:443/v1/responses", bytes.NewBufferString(body)).WithContext(ctx)
-		canonical, err := canonicalHTTPRequest(request, StreamHeader{Via: "explicit", Host: "api.openai.com", Port: 443}, "https")
-		if err != nil {
-			t.Fatal(err)
+	for _, fragmented := range []bool{false, true} {
+		for cut := 0; cut <= len(wire); cut++ {
+			expected.Store(int64(cut))
+			ctx, cancel := context.WithCancel(t.Context())
+			request := httptest.NewRequest("POST", "https://api.openai.com:443/v1/responses", bytes.NewBufferString(body)).WithContext(ctx)
+			canonical, err := canonicalHTTPRequest(request, StreamHeader{Via: "explicit", Host: "api.openai.com", Port: 443}, "https")
+			if err != nil {
+				t.Fatal(err)
+			}
+			scope := &originRequest{s: server, request: canonical, scheme: "https", permit: server.currentEngine().NewPermit(), ctx: ctx, cancel: cancel}
+			if !scope.track() {
+				t.Fatal("original request could not register its real flow")
+			}
+			model, refusal := server.prepareModelHTTPRequest(scope, request)
+			if refusal != "" || model == nil || model.usage == nil {
+				t.Fatal("actual model guard did not admit the original request", refusal)
+			}
+			owned := context.WithValue(ctx, originRequestKey{}, scope)
+			raw, err := server.dialHTTPRequest(owned, "tcp", "api.openai.com:443")
+			if err != nil {
+				t.Fatal(err)
+			}
+			actual := tls.Client(raw, &tls.Config{MinVersion: tls.VersionTLS12, NextProtos: []string{http2.NextProtoTLS}, RootCAs: roots, ServerName: "api.openai.com"})
+			if err := actual.HandshakeContext(ctx); err != nil {
+				t.Fatal(err)
+			}
+			observer, err := newPhysicalH2UploadConn(scope, model.usage, actual)
+			if err != nil {
+				t.Fatal("actual native connection/turn provenance failed", err)
+			}
+			t.Cleanup(func() {
+				_ = observer.Close()
+				model.usage.FinishV1(false)
+				scope.close()
+			})
+			if !fragmented {
+				if count, err := observer.Write(wire[:cut]); err != nil || count != cut {
+					t.Fatalf("upload cut%d did not cross the actual checked TLS origin: %d %v", cut, count, err)
+				}
+			} else {
+				position := 0
+				// The peer still waits for the complete chosen prefix. Empty
+				// writes between these boundaries must retain the same partial
+				// frame and cannot count its header or padding as body bytes.
+				for _, boundary := range []int{len(http2.ClientPreface), len(http2.ClientPreface) + 9, dataStart - 1, dataStart, cut} {
+					if boundary <= position || boundary > cut {
+						continue
+					}
+					if count, err := observer.Write(nil); err != nil || count != 0 {
+						t.Fatalf("upload cut%d empty write changed original pending frame state: %d %v", cut, count, err)
+					}
+					if count, err := observer.Write(wire[position:boundary]); err != nil || count != boundary-position {
+						t.Fatalf("upload cut%d fragmented native prefix failed at%d: %d %v", cut, boundary, count, err)
+					}
+					position = boundary
+				}
+				if cut == 0 {
+					if count, err := observer.Write(nil); err != nil || count != 0 {
+						t.Fatalf("empty original upload changed its successful prefix: %d %v", count, err)
+					}
+				}
+				if position != cut {
+					t.Fatal("fragmented original upload lost its chosen prefix")
+				}
+			}
+			result := <-read
+			if result.err != nil || !bytes.Equal(result.prefix, wire[:cut]) {
+				t.Fatal("original native origin received another plaintext prefix", result.err)
+			}
+			_ = observer.Close() // native-write observation joins before the original turn ends
+			completion := model.usage.FinishV1(false)
+			prefix := max(0, min(cut-dataStart, len(body)))
+			estimate, _ := modelUsageEstimateV1(uint64(prefix), 0)
+			if !completion.Estimated || completion.Counts.Requests != 1 || completion.Counts.TotalTokens != estimate {
+				t.Fatalf("upload cut%d charged inspected/read-ahead/framing/padding bytes", cut)
+			}
+			scope.close()
 		}
-		scope := &originRequest{s: server, request: canonical, scheme: "https", permit: server.currentEngine().NewPermit(), ctx: ctx, cancel: cancel}
-		if !scope.track() {
-			t.Fatal("original request could not register its real flow")
-		}
-		model, refusal := server.prepareModelHTTPRequest(scope, request)
-		if refusal != "" || model == nil || model.usage == nil {
-			t.Fatal("actual model guard did not admit the original request", refusal)
-		}
-		owned := context.WithValue(ctx, originRequestKey{}, scope)
-		raw, err := server.dialHTTPRequest(owned, "tcp", "api.openai.com:443")
-		if err != nil {
-			t.Fatal(err)
-		}
-		actual := tls.Client(raw, &tls.Config{MinVersion: tls.VersionTLS12, NextProtos: []string{http2.NextProtoTLS}, RootCAs: roots, ServerName: "api.openai.com"})
-		if err := actual.HandshakeContext(ctx); err != nil {
-			t.Fatal(err)
-		}
-		observer, err := newPhysicalH2UploadConn(scope, model.usage, actual)
-		if err != nil {
-			t.Fatal("actual native connection/turn provenance failed", err)
-		}
-		if count, err := observer.Write(wire[:cut]); err != nil || count != cut {
-			t.Fatalf("upload cut%d did not cross the actual checked TLS origin: %d %v", cut, count, err)
-		}
-		result := <-read
-		if result.err != nil || !bytes.Equal(result.prefix, wire[:cut]) {
-			t.Fatal("original native origin received another plaintext prefix", result.err)
-		}
-		_ = observer.Close() // native-write observation joins before the original turn ends
-		completion := model.usage.FinishV1(false)
-		prefix := max(0, min(cut-dataStart, len(body)))
-		estimate, _ := modelUsageEstimateV1(uint64(prefix), 0)
-		if !completion.Estimated || completion.Counts.Requests != 1 || completion.Counts.TotalTokens != estimate {
-			t.Fatalf("upload cut%d charged inspected/read-ahead/framing/padding bytes", cut)
-		}
-		scope.close()
 	}
 }

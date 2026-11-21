@@ -60,7 +60,7 @@ func TestVMMOuterReceiptCannotBeIssuedBeforeActualCreationV1(t *testing.T) {
 }
 
 func TestVMMOuterIssuerRefusesInheritedEnvironmentV1(t *testing.T) {
-	command := &Cmd{files: make([]*os.File, 8), cmd: &exec.Cmd{Path: self, Args: []string{argv0, stageOuterVMMV1, strconv.Itoa(11)}, Env: nil, SysProcAttr: &syscall.SysProcAttr{Setsid: true}}}
+	command := &Cmd{files: make([]*os.File, 9), cmd: &exec.Cmd{Path: self, Args: []string{argv0, stageOuterVMMV1, strconv.Itoa(12)}, Env: nil, SysProcAttr: &syscall.SysProcAttr{Setsid: true}}}
 	if err := checkVMMOuterCommandV1(command, -1, false); err == nil {
 		t.Fatal("nil inherited environment entered the exact empty-env self-exec issuer")
 	}

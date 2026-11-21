@@ -15,7 +15,7 @@ import (
 // checked root. Closing either owner cannot revoke the other's description.
 // This supplies no execution authority: reservation and NEW native activation
 // still pass the existing artifact, accounting and private startup-loan checks.
-func captureAuxiliaryVacancyFromStoppedV1(ctx context.Context, operation *SessionOperation, stopped *StoppedSessionV1) (_ *auxiliaryVacancyV1, returned error) {
+func captureAuxiliaryVacancyFromStoppedV1(ctx context.Context, operation *SessionOperation, stopped *StoppedSessionV1) (partial *auxiliaryVacancyV1, returned error) {
 	if err := stopped.Check(ctx, operation); err != nil {
 		return nil, err
 	}
@@ -50,8 +50,13 @@ func captureAuxiliaryVacancyFromStoppedV1(ctx context.Context, operation *Sessio
 	complete := false
 	defer func() {
 		if !complete {
-			returned = errors.Join(returned, result.Close())
+			cleanup := result.Close()
+			returned = errors.Join(returned, cleanup, result.CloseDiagnosticsV4())
+			if cleanup != nil {
+				partial = result
+			}
 		}
+
 	}()
 	if err := errors.Join(holder.check(ctx), operation.native.rootRef.CheckRoot(holder.root)); err != nil {
 		return nil, err

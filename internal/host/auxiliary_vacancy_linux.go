@@ -33,13 +33,14 @@ type auxiliaryVacancyV1 struct {
 	reservation           *AuxiliaryReservationV1
 	once                  sync.Once
 	closeErr              error
+	managerDiagnostic     error
 }
 
 func auxiliaryUnavailableV1(message string) error {
 	return UserError("auxiliary_unavailable", message, "Keep the original stopped operation and resources; use the current native owner to finish or repair this sandbox before retrying.")
 }
 
-func captureAuxiliaryVacancyV1(ctx context.Context, operation *SessionOperation) (_ *auxiliaryVacancyV1, returned error) {
+func captureAuxiliaryVacancyV1(ctx context.Context, operation *SessionOperation) (partial *auxiliaryVacancyV1, returned error) {
 	if ctx == nil || operation == nil || operation.native == nil || operation.native.borrowed || !operation.Valid(operation.Primary()) {
 		return nil, auxiliaryUnavailableV1("the auxiliary source has no original owning session operation")
 	}
@@ -81,14 +82,19 @@ func captureAuxiliaryVacancyV1(ctx context.Context, operation *SessionOperation)
 		return nil, err
 	}
 	manager, err := openNativeUserManagerV1(ctx)
+	result := &auxiliaryVacancyV1{operation: operation, holder: holder, manager: manager, primary: UnitName(operation.Primary()), boot: boot, need: bytes.Clone(snapshot.VMNeedV1)}
+	defer func() {
+		if !complete {
+			cleanup := result.Close()
+			returned = errors.Join(returned, cleanup, result.CloseDiagnosticsV4())
+			if cleanup != nil {
+				partial = result
+			}
+		}
+	}()
 	if err != nil {
 		return nil, errors.Join(auxiliaryUnavailableV1("whole-unit absence has no authenticated native manager lifetime"), err)
 	}
-	defer func() {
-		if !complete {
-			returned = errors.Join(returned, manager.Close())
-		}
-	}()
 	auxiliary, err := AuxUnitNameV1(operation.Primary())
 	if err != nil {
 		return nil, err
@@ -97,7 +103,8 @@ func captureAuxiliaryVacancyV1(ctx context.Context, operation *SessionOperation)
 	if err != nil {
 		return nil, err
 	}
-	result := &auxiliaryVacancyV1{operation: operation, holder: holder, manager: manager, primary: UnitName(operation.Primary()), auxiliary: auxiliary, boot: boot, need: bytes.Clone(snapshot.VMNeedV1), runtime: bytes.Clone(runtime)}
+	result.auxiliary = auxiliary
+	result.runtime = bytes.Clone(runtime)
 	if err := result.Check(ctx); err != nil {
 		return nil, err
 	}
@@ -205,7 +212,7 @@ func (vacancy *auxiliaryVacancyV1) Close() error {
 		vacancy.mu.Lock()
 		defer vacancy.mu.Unlock()
 		if vacancy.manager != nil {
-			vacancy.closeErr = errors.Join(vacancy.closeErr, vacancy.manager.Close())
+			vacancy.closeErr = errors.Join(vacancy.closeErr, closeNativeManagerResourceV4(vacancy.manager, vacancy.operation.Primary(), &vacancy.managerDiagnostic))
 		}
 		if vacancy.holder != nil {
 			vacancy.closeErr = errors.Join(vacancy.closeErr, vacancy.holder.Close())
@@ -215,4 +222,11 @@ func (vacancy *auxiliaryVacancyV1) Close() error {
 		vacancy.transferred = true
 	})
 	return vacancy.closeErr
+}
+
+func (vacancy *auxiliaryVacancyV1) CloseDiagnosticsV4() error {
+	if vacancy == nil {
+		return nil
+	}
+	return vacancy.managerDiagnostic
 }

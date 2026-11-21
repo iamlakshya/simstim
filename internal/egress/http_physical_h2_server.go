@@ -80,6 +80,15 @@ func (c *physicalH2Conn) joinPhysicalH2() {
 // Serve the same inherited, established TLS stream through the pinned public
 // HTTP2 server and its original native writer. No listening socket is opened.
 func servePhysicalHTTP2(ctx context.Context, actual *tls.Conn, handler http.Handler) error {
+	return servePhysicalHTTP2WithHooks(ctx, actual, handler, physicalH2HooksError())
+}
+
+func servePhysicalHTTP2WithHooks(ctx context.Context, actual *tls.Conn, handler http.Handler, hookError error) error {
+	// Refuse before touching TLS, parsing credentials or invoking a handler.
+	// A missing hook is never a reason to run a different HTTP protocol.
+	if hookError != nil {
+		return hookError
+	}
 	if ctx == nil || actual == nil || handler == nil {
 		return errPhysicalH2Binding
 	}
@@ -113,7 +122,7 @@ func servePhysicalHTTP2(ctx context.Context, actual *tls.Conn, handler http.Hand
 	// callback; the standard server exposes no equivalent hook. The module
 	// remains pinned and uses the same original HTTP2 settings above.
 	h2 := &http2.Server{NewWriteScheduler: func() http2.WriteScheduler {
-		return &physicalH2Scheduler{WriteScheduler: http2.NewRandomWriteScheduler(), owner: conn.owner}
+		return &physicalH2Scheduler{WriteScheduler: newPhysicalH2RoundRobin(), owner: conn.owner}
 	}}
 	h2.ServeConn(&physicalH2NativeTLSView{Conn: conn, owner: conn.owner}, &http2.ServeConnOpts{Context: ctx, BaseConfig: server, Handler: server.Handler})
 	_ = conn.Close()

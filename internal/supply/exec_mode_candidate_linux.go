@@ -23,14 +23,17 @@ type execModeCandidate struct {
 	lease                    *ExecModeLeaseV1
 	closed                   bool
 	closing                  bool
+	readonly                 bool
+	pendingGuard             *RuntimeModeGuard
 }
 
 // PrepareRuntimeWithModeV1 consumes actual anchored store capabilities, not a
 // pathname or public DTO. The runtimecache owner supplies its checked original
 // domain/transaction. This verifies DATA only; actual Need/OP, native Cmd and
 // private projection/final-exec issuers remain the boot authority.
-// Native read-only artifact mounts retain the strict sealed VMM route. That
-// compatibility boundary remains an explicit open specification decision.
+// A measured read-only artifact retains its same inode. Its opaque source can
+// attach only to the closed original two-map direct-init producer. The native
+// source itself grants no boot, map, helper, peer or final-exec authority.
 func PrepareRuntimeWithModeV1(ctx context.Context, item Item, source *os.File, artifacts, modes, store *os.Root, domain cachefs.Domain) (*VerifiedRuntime, error) {
 	if item.Kind != KindVMM {
 		return PrepareRuntime(ctx, item, source)
@@ -57,9 +60,6 @@ func PrepareRuntimeWithModeV1(ctx context.Context, item Item, source *os.File, a
 	writable, err := modeMountWritable(source)
 	if err != nil {
 		return nil, err
-	}
-	if !writable {
-		return PrepareRuntime(ctx, item, source)
 	}
 	if artifacts == nil || modes == nil || store == nil {
 		return nil, fmt.Errorf("writable direct runtime lacks its original guarded store roots")
@@ -122,7 +122,7 @@ func PrepareRuntimeWithModeV1(ctx context.Context, item Item, source *os.File, a
 		modesCopy.Close()
 		return nil, err
 	}
-	candidate := &execModeCandidate{artifacts: artifactsCopy, modes: modesCopy, store: storeCopy, artifactRef: a, modeRootRef: m, storeRef: s, lockRef: lockRef, domain: domain, item: item, program: file}
+	candidate := &execModeCandidate{artifacts: artifactsCopy, modes: modesCopy, store: storeCopy, artifactRef: a, modeRootRef: m, storeRef: s, lockRef: lockRef, domain: domain, item: item, program: file, readonly: !writable}
 	returned = true
 	return &VerifiedRuntime{file: file, item: item, mode: candidate}, nil
 }
@@ -140,6 +140,15 @@ func (candidate *execModeCandidate) checkProgram(ctx context.Context) error {
 	info, err := modeArtifactInfo(candidate.artifacts, candidate.item, candidate.program)
 	if err != nil {
 		return err
+	}
+	if candidate.readonly {
+		writable, err := modeMountWritable(candidate.program)
+		if err != nil {
+			return err
+		}
+		if writable || info.Mode() != 0o555 {
+			return fmt.Errorf("the original read-only runtime changed its mount or mode")
+		}
 	}
 	if info.Mode() != 0o555 && info.Mode() != 0o111 {
 		return fmt.Errorf("direct runtime candidate lost its native mode")
@@ -231,10 +240,18 @@ func (candidate *execModeCandidate) tryBegin(ctx context.Context) (*ExecModeLeas
 	if err != nil {
 		return nil, err
 	}
+	candidate.pendingGuard = guard
 	lease, err := newExecModeLeaseV1(ctx, guard, candidate.program)
+	if lease != nil {
+		candidate.lease = lease
+		candidate.pendingGuard = nil
+	}
 	if err != nil {
-		guard.Close()
-		return nil, err
+		if lease != nil {
+			return lease, err
+		}
+		cleanup := guard.Close()
+		return nil, errors.Join(err, cleanup)
 	}
 	// Only the ORIGINAL per-artifact OFD remains locked. No store lock is
 	// retained while projections, helpers, callbacks or final exec run.
@@ -251,6 +268,14 @@ func (candidate *execModeCandidate) close() error {
 			return err
 		}
 	}
+	if candidate.pendingGuard != nil {
+		if err := candidate.pendingGuard.Close(); err != nil {
+			return err
+		}
+		candidate.pendingGuard = nil
+	}
+	// Roots receive no errno retirement inference. Retry each SAME actual
+	// root API in order, retaining every failure and remaining borrower.
 	for _, root := range []**os.Root{&candidate.artifacts, &candidate.modes, &candidate.store} {
 		if *root == nil {
 			continue

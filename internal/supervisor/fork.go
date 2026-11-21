@@ -153,6 +153,9 @@ func (s *Supervisor) copyForkBatchV1(ctx context.Context, scope *nativeStopScope
 	if err := scope.checkCurrentV1(ctx); err != nil {
 		return err
 	}
+	scope.mu.Lock()
+	operation := scope.operation
+	scope.mu.Unlock()
 	root := s.owner()
 	selected := root.member(job.selected)
 	if selected == nil {
@@ -217,7 +220,7 @@ func (s *Supervisor) copyForkBatchV1(ctx context.Context, scope *nativeStopScope
 			return execRefusal("the original fork VM has no native disk owner")
 		}
 		actual := runtime.(vmRuntime)
-		own, err := scope.native.OriginalAccountModeV1(ctx, actual.Sandbox, scope.connection)
+		own, err := scope.native.RunningAccountModeForWarmV1(ctx, actual.Sandbox, scope.connection, scope.owner, operation, scope.line)
 		if err != nil {
 			return err
 		}

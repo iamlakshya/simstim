@@ -69,6 +69,7 @@ var errStopped = &proto.Error{Code: "stopped", Message: "the host stopped the se
 // Supervisor holds one walled session's trusted state.
 type Supervisor struct {
 	prepareDestroyOnce           sync.Once
+	prepareCleanupDiagnostic     error // report only; never native cleanup permission
 	requests                     requestLifetimesV1
 	bootAgentsCustody            bootAgentsCustodyV1
 	traceUpperMu                 sync.Mutex
@@ -279,6 +280,7 @@ func runSupervisorMode(owner context.Context, id string, operation *host.Session
 	// A cleanup record belongs only to the previous physical run. Clear it
 	// before the first boot save, even when the next startup fails.
 	s.m.NoneCleanup = nil
+	s.m.NoneDirectoryCreation = nil
 	defer func() { returned = errors.Join(returned, s.closeLateInput()) }()
 	notifySignals(s.sig)
 	defer stopSignals(s.sig)

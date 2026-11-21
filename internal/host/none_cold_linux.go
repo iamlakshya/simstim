@@ -35,13 +35,15 @@ type NoneColdResumeV1 struct {
 	originalBytes         []byte
 	sameBoot, published   bool
 	memberIDs             []string
+	directoryCleanup      *noneDirectoryCleanupV1
+	managerDiagnostic     error
 }
 
 func noneColdRoleV1(m *Manifest) bool {
 	return NoneSupervisorShapeV1(m)
 }
 
-func captureNoneColdResumeV1(ctx context.Context, p *bridgeResumePreparationV1) (_ *NoneColdResumeV1, returned error) {
+func captureNoneColdResumeV1(ctx context.Context, p *bridgeResumePreparationV1) (partial *NoneColdResumeV1, returned error) {
 	if ctx == nil || p == nil || p.bridge == nil || p.operation == nil || !p.active.Load() || p.bridge.ctx == nil || p.bridge.ctx.Err() != nil {
 		return nil, resumePreparationErrorV1("the None continuation has no actual original prepare request")
 	}
@@ -73,12 +75,25 @@ func captureNoneColdResumeV1(ctx context.Context, p *bridgeResumePreparationV1) 
 	var result *NoneColdResumeV1
 	defer func() {
 		if !complete {
-			returned = errors.Join(returned, holder.Close())
+			cleanup := holder.Close()
+			var managerDiagnostic error
 			if manager != nil {
-				returned = errors.Join(returned, manager.Close())
+				diagnostic, unknown := retireNativeManagerV4(context.Background(), manager)
+				managerDiagnostic = diagnostic
+				returned = errors.Join(returned, diagnostic)
+				cleanup = errors.Join(cleanup, unknown)
 			}
 			if result != nil && result.metadata != nil {
-				returned = errors.Join(returned, result.metadata.Close())
+				cleanup = errors.Join(cleanup, result.metadata.Close())
+			}
+			returned = errors.Join(returned, cleanup)
+			if cleanup != nil {
+				if result == nil {
+					result = &NoneColdResumeV1{operation: operation, preparation: p, holder: holder, manager: manager, source: CloneManifest(*before), boot: boot, sameBoot: sameBoot}
+					result.self = result
+				}
+				result.managerDiagnostic = managerDiagnostic
+				partial = result
 			}
 		}
 	}()
@@ -86,7 +101,7 @@ func captureNoneColdResumeV1(ctx context.Context, p *bridgeResumePreparationV1) 
 		return nil, err
 	}
 	manager, err = openNativeUserManagerV1(ctx)
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
+	if err != nil && (manager != nil || !errors.Is(err, os.ErrNotExist)) {
 		return nil, err
 	}
 	if sameBoot {
@@ -231,6 +246,11 @@ func (cold *NoneColdResumeV1) Close() error {
 			return err
 		}
 	}
+	if cold.directoryCleanup != nil {
+		if err := cold.directoryCleanup.Close(); err != nil {
+			return err
+		}
+	}
 	if err := cold.restoreUnstartedMetadataV1(); err != nil {
 		return err
 	}
@@ -247,7 +267,7 @@ func (cold *NoneColdResumeV1) Close() error {
 		err = errors.Join(err, cold.holder.Close())
 	}
 	if cold.manager != nil {
-		err = errors.Join(err, cold.manager.Close())
+		err = errors.Join(err, closeNativeManagerResourceV4(cold.manager, cold.operation.Primary(), &cold.managerDiagnostic))
 	}
 	if err == nil {
 		cold.closed = true
@@ -368,6 +388,9 @@ func (cold *NoneColdResumeV1) Resume(ctx context.Context, operation *SessionOper
 	cold.bound = true
 	operation.gate.Unlock()
 	cold.mu.Unlock()
+	if err := cold.cleanupPreviousNoneDirectoryV1(ctx); err != nil {
+		return nil, err
+	}
 	root.HostLabel = args.HostLabel
 	root.Run.RespawnCount = 0
 	_, why, err := startAgain(root, again{operation: operation, label: resumedLabel, reason: "unwalled sessions started again", secrets: primary, secretDelivery: delivery, members: members, allowMissing: true})
@@ -386,3 +409,10 @@ func (cold *NoneColdResumeV1) Resume(ctx context.Context, operation *SessionOper
 }
 
 func recordedNoneNamesV1(names []string) []string { return append([]string{}, names...) }
+
+func (cold *NoneColdResumeV1) CloseDiagnosticsV4() error {
+	if cold == nil {
+		return nil
+	}
+	return errors.Join(cold.managerDiagnostic, cold.directoryCleanup.closeDiagnosticsV1())
+}

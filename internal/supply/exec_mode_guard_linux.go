@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"sync"
 
 	"github.com/iamlakshya/simstim/internal/cachefs"
 	"golang.org/x/sys/unix"
@@ -20,12 +21,15 @@ var ErrRuntimeModeBusy = errors.New("runtime artifact has a pending final exec")
 // claim. It is short-lived for readers and retained through final exec for a
 // direct VMM. Its original RO lock OFD must not be replaced by projection.
 type RuntimeModeGuard struct {
-	artifacts, modes *os.Root
-	item             Item
-	metadata         *os.File
-	lock             *os.File
-	intent           execModeIntent
-	closed           bool
+	closeMu                          sync.Mutex
+	metadataAttempted, lockAttempted bool
+	metadataClose, lockClose         FileCloseFactsV1
+	artifacts, modes                 *os.Root
+	item                             Item
+	metadata                         *os.File
+	lock                             *os.File
+	intent                           execModeIntent
+	closed                           bool
 }
 
 // TryRuntimeModeGuard joins an EXISTING store-issued mode fence. A missing
@@ -171,20 +175,42 @@ func (guard *RuntimeModeGuard) checkImmutable(ctx context.Context, file *os.File
 // Close releases a reader guard. Direct-exec owners use the stricter phase
 // owner instead, which cannot drop this fence with future execs outstanding.
 func (guard *RuntimeModeGuard) Close() error {
-	if guard == nil || guard.closed {
+	if guard == nil {
 		return nil
 	}
-	guard.closed = true
-	var err error
-	if guard.metadata != nil {
-		err = errors.Join(err, guard.metadata.Close())
-		guard.metadata = nil
+	guard.closeMu.Lock()
+	defer guard.closeMu.Unlock()
+	if guard.closed {
+		return nil
 	}
-	if guard.lock != nil {
-		err = errors.Join(err, guard.lock.Close())
-		guard.lock = nil
+	var result error
+	if guard.metadata != nil && !guard.metadataAttempted {
+		guard.metadataAttempted = true
+		guard.metadataClose = CloseFileOnceV1(guard.metadata)
+		result = errors.Join(result, guard.metadataClose.Diagnostic)
 	}
-	return err
+	if guard.lock != nil && !guard.lockAttempted {
+		guard.lockAttempted = true
+		guard.lockClose = CloseFileOnceV1(guard.lock)
+		result = errors.Join(result, guard.lockClose.Diagnostic)
+	}
+	result = errors.Join(result, guard.metadataClose.Unknown, guard.lockClose.Unknown)
+	guard.closed = (guard.metadata == nil || guard.metadataClose.Retired) && (guard.lock == nil || guard.lockClose.Retired)
+	return result
+}
+
+// Provision only the EXISTING per-artifact registry from an actual verified
+// installation, before cache metadata may become read-only. It issues no Cmd,
+// map, role or execution authority. Caller owns the returned guard on errors.
+func EnsureRuntimeModeIntentV1(ctx context.Context, artifacts, modes *os.Root, item Item) (*RuntimeModeGuard, error) {
+	guard, err := createRuntimeModeGuard(ctx, artifacts, modes, item)
+	if err != nil {
+		return guard, err
+	}
+	if err := guard.Recover(ctx); err != nil {
+		return guard, err
+	}
+	return guard, nil
 }
 
 func createRuntimeModeGuard(ctx context.Context, artifacts, modes *os.Root, item Item) (*RuntimeModeGuard, error) {

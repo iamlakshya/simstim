@@ -16,3 +16,5 @@ func (*StoppedNoneSessionV1) Close() error { return nil }
 func (*StoppedNoneSessionV1) checkNativeAfterRemovalV1(context.Context, *SessionOperation) error {
 	return sessionLeaseError("the original native unwalled stop producer is unavailable")
 }
+
+func (*StoppedNoneSessionV1) CloseDiagnosticsV4() error { return nil }

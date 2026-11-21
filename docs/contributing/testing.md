@@ -39,6 +39,14 @@ must still finish during the wait. Caller cancellation reports incomplete
 cleanup and retains the same native owners; it does not undo the published
 policy or manufacture completion by closing a permitted carrier.
 
+HTTP interception currently requires the exact Go 1.26.11 toolchain and the
+unreplaced `golang.org/x/net` version 0.62.0. Its public legacy server exposes
+the native ownership hooks. The Go 1.27 wrapper ignores those hooks, so an
+unsupported build refuses before parsing requests or forwarding credentials.
+It gives a build hint and does not fall back to another HTTP protocol.
+Upgrading requires a supported replacement for those hooks and fresh native
+ownership, scheduler and resource qualification.
+
 | Command | What it runs | Where |
 | --- | --- | --- |
 | `just test` | Go unit tests with the race detector, then the tests of `internal/link` again over a pipe with no buffer (`LINK_TEST_PIPE=1`), plus offline tests of the public-readiness checker, of the end-to-end cleanup, of the end-to-end probe of the session sockets and of the pins watch, of the release's signed-tag gate in a temporary repository (`scripts/test-verify-tag.sh`), of the cleanup of `test/e2e/host_git.py`, and of the `llms.txt` check | Needs Python 3.11 or later. The gate's test skips without git 2.34 and OpenSSH 8.8, except in CI |

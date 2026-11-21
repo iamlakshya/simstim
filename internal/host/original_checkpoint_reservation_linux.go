@@ -22,7 +22,7 @@ func (receipt *OriginalVMNeed) SendCheckpointReservationLoanV2(ctx context.Conte
 	if ctx == nil || receipt == nil || OriginalVMNeedFromContext(ctx) != receipt || owner == nil || owner.native == nil || operation == nil || line == nil || receipt.boot == nil || receipt.boot.owner != owner || receipt.need == nil || operation.native == nil || !operation.native.borrowed || !operation.Valid(owner.native.id) || !owner.Valid(operation.Primary()) || !owner.StartupCommittedV1() {
 		return false, vmNeedError("the Snapshot loan has no original receipt, owner and borrowed outside operation")
 	}
-	if err := errors.Join(owner.native.rootRef.CheckRoot(operation.native.root), owner.CheckWarmSenderV1(line), receipt.CheckRunningNativeV1(ctx, connection)); err != nil {
+	if err := errors.Join(owner.native.rootRef.CheckRoot(operation.native.root), owner.CheckWarmOperationV1(ctx, line, operation), receipt.CheckRunningNativeV1(ctx, connection)); err != nil {
 		return false, err
 	}
 	var result proto.NativeCheckpointReservationResultV2
@@ -40,7 +40,7 @@ func (receipt *OriginalVMNeed) SendCheckpointReservationLoanV2(ctx context.Conte
 			if len(files) != proto.NativeCheckpointReservationRoleCountV2 {
 				return vmNeedError("the original slot Snapshot producer supplied another fixed role layout")
 			}
-			if err := errors.Join(owner.CheckWarmSenderV1(line), operation.native.check(ctx), receipt.CheckRunningNativeV1(ctx, connection)); err != nil {
+			if err := errors.Join(owner.CheckWarmOperationV1(ctx, line, operation), operation.native.check(ctx), receipt.CheckRunningNativeV1(ctx, connection)); err != nil {
 				return err
 			}
 			raw, err := json.Marshal(response)

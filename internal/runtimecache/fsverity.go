@@ -24,7 +24,8 @@ func (s *Store) installVerityLocked(ctx context.Context, item supply.Item) error
 	if err != nil {
 		return err
 	}
-	if _, err := supply.InstallRuntimeVerity(ctx, item, file); err != nil {
+	enabled, err := supply.InstallRuntimeVerity(ctx, item, file)
+	if err != nil {
 		return err
 	}
 	current, err := s.root.Lstat("sha256/" + item.SHA256)
@@ -33,6 +34,9 @@ func (s *Store) installVerityLocked(ctx context.Context, item supply.Item) error
 	}
 	if err := file.Sync(); err != nil {
 		return fmt.Errorf("sync installed runtime verity: %w", err)
+	}
+	if enabled && item.Kind == supply.KindVMM && !s.readOnly {
+		return s.provisionInstalledVMMV1(ctx, item)
 	}
 	return nil
 }

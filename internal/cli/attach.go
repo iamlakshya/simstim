@@ -31,10 +31,14 @@ func attachEnded(ctx context.Context, h client.Host, id, name string) (bool, err
 }
 
 func attachSession(ctx context.Context, h client.Host, id, name string) (ended, stuck bool, err error) {
+	return attachSessionFiles(ctx, h, id, name, os.Stdin, os.Stdout)
+}
+
+func attachSessionFiles(ctx context.Context, h client.Host, id, name string, in, out *os.File) (ended, stuck bool, err error) {
 	if err := checkSessionID(h.Name, id); err != nil {
 		return false, false, err
 	}
-	if !isTerminal(os.Stdin) || !isTerminal(os.Stdout) {
+	if !isTerminal(in) || !isTerminal(out) {
 		return false, false, &client.UserError{Msg: "attach needs a terminal", Hint: "Run it from a terminal, not a pipe.", Code: "no_terminal", Kind: client.KindUsage}
 	}
 	client.RememberLast(h.Name, id, name)
@@ -42,7 +46,7 @@ func attachSession(ctx context.Context, h client.Host, id, name string) (ended, 
 	// session's own bytes pass as they are.
 	name = shown(name)
 	res, err := client.Attach(ctx, client.AttachOptions{
-		Host: h, Session: id, Settings: client.LoadSettings(), Interactive: true,
+		Host: h, Session: id, Settings: client.LoadSettings(), Interactive: true, In: in, Out: out,
 	})
 	if err != nil {
 		return false, res.ReaderStuck, err
@@ -275,7 +279,7 @@ func flipCmd() *cobra.Command {
 			if err := checkLauncher(cmd, "the switcher", brand.Name+" flip <host>/<session>, or "+brand.Name+" ls"); err != nil {
 				return err
 			}
-			return tui.RunWith(cmd.Context(), tui.Options{Switcher: true, Local: onboard.System{Providers: providers}})
+			return tui.RunWith(cmd.Context(), tui.Options{Switcher: true, Local: onboard.System{Providers: providers}, SessionShell: runLauncherSessionShell, PolicyLockdown: runLauncherPolicyLockdown})
 		},
 	}
 	addRestart(cmd, &restart)

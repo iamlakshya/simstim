@@ -33,6 +33,11 @@ func Dial(ctx context.Context, h Host, interactive bool) (*Conn, error) {
 // actual route after pin acceptance. It cannot select another route or cause
 // a Source refresh. Ordinary Dial supplies no preparation.
 func dialWithPreparation(ctx context.Context, h Host, interactive bool, beforeStart func(context.Context, Transport) error) (*Conn, error) {
+	// A selected launcher action may only narrow this dial to its actual
+	// accepted parent. Check before tier resolution, route lookup or auth.
+	if c, restricted, err := restrictedHostDialV1(ctx, h, beforeStart); restricted {
+		return c, err
+	}
 	if observation, _ := ctx.Value(hostStateObservationKey{}).(*HostStateObservation); observation != nil && observation.role == hostStateRegistration {
 		// The real add owns prospective Now while original Was is still saved.
 		// Its explicit add choice is distinct from resolving Was as though Now

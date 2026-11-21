@@ -62,6 +62,12 @@ func (s *runtimeService) fetchRegistered(a runtimecache.RuntimeRequest, requestI
 		return result, err
 	}
 
+	if err := s.retryRuntimeOwnersV1(); err != nil {
+		return result, err
+	}
+	if err := s.retryRuntimeSelectionAdmissionV1(ctx); err != nil {
+		return result, err
+	}
 	owner := &runtimeOwnedPart{}
 	s.mu.Lock()
 	job.resource = owner
@@ -89,14 +95,45 @@ func (s *runtimeService) fetchRegistered(a runtimecache.RuntimeRequest, requestI
 	if err := commitRuntime(ctx, store, a.Manifest, a.ImageDefaults); err != nil {
 		return result, err
 	}
+	// Commit checked every original named blob and its real durability. Close
+	// that SAME delivery owner before issuing the connection-held receipt.
+	if err := owner.close(); err != nil {
+		return result, err
+	}
 	if err := s.rememberRuntimeWithDefaults(ctx, a.Manifest, a.ImageDefaults); err != nil {
 		return result, err
 	}
-	return s.status(ctx, a)
+	result = runtimeStatusV1(a)
+	for _, it := range a.Manifest.Items {
+		result.Items = append(result.Items, api.RuntimeFile{Kind: it.Kind, Name: it.Name, SHA256: it.SHA256, Size: it.Size, Present: true})
+	}
+	result.Drivers = runtimeDrivers(a.Manifest)
+	return result, nil
 }
 
-func (s *runtimeService) status(ctx context.Context, a runtimecache.RuntimeRequest) (api.RuntimeStatus, error) {
-	result := api.RuntimeStatus{Runtime: a.Manifest.Runtime, Drivers: []api.RuntimeDriver{}, Items: []api.RuntimeFile{}, Transfers: []api.RuntimeTransfer{}}
+func runtimeStatusV1(a runtimecache.RuntimeRequest) api.RuntimeStatus {
+	return api.RuntimeStatus{Runtime: a.Manifest.Runtime, Drivers: []api.RuntimeDriver{}, Items: []api.RuntimeFile{}, Transfers: []api.RuntimeTransfer{}}
+}
+
+func (s *runtimeService) status(ctx context.Context, a runtimecache.RuntimeRequest) (result api.RuntimeStatus, returned error) {
+	done, err := s.enterRuntimeV1()
+	if err != nil {
+		return api.RuntimeStatus{}, err
+	}
+	defer done()
+	result = runtimeStatusV1(a)
+	_, request, release, err := s.selectionContextV1(ctx)
+	if err != nil {
+		return result, err
+	}
+	defer release()
+	ctx = request
+	if err := s.retryRuntimeOwnersV1(); err != nil {
+		return result, err
+	}
+	if err := s.retryRuntimeSelectionAdmissionV1(ctx); err != nil {
+		return result, err
+	}
 	if err := runtimeValidateWithImageDefaults(a.Manifest, a.ImageDefaults); err != nil {
 		return result, err
 	}
@@ -104,7 +141,13 @@ func (s *runtimeService) status(ctx context.Context, a runtimecache.RuntimeReque
 	if err != nil {
 		return result, err
 	}
+	inventory, err := s.newRuntimeInventoryOwnerV1()
+	if err != nil {
+		return result, err
+	}
+	defer func() { returned = errors.Join(returned, s.finishRuntimeOwnerV1(inventory)) }()
 	store, err := runtimecache.OpenHostReadOnly(ctx, paths.ArtefactsDir(), owner.domain())
+	inventory.store = store
 	if errors.Is(err, os.ErrNotExist) {
 		for _, it := range a.Manifest.Items {
 			result.Items = append(result.Items, api.RuntimeFile{Kind: it.Kind, Name: it.Name, SHA256: it.SHA256, Size: it.Size})
@@ -114,10 +157,7 @@ func (s *runtimeService) status(ctx context.Context, a runtimecache.RuntimeReque
 	if err != nil {
 		return result, err
 	}
-	defer store.Close()
-	s.mu.Lock()
-	active := len(s.parts)+len(s.jobs)+len(s.owned) > 0 || s.selectionPending != nil
-	s.mu.Unlock()
+	active := s.runtimeWritersActiveV1()
 	allPresent := true
 	for _, it := range a.Manifest.Items {
 		var present bool
@@ -132,6 +172,11 @@ func (s *runtimeService) status(ctx context.Context, a runtimecache.RuntimeReque
 		}
 		allPresent = allPresent && present
 		result.Items = append(result.Items, api.RuntimeFile{Kind: it.Kind, Name: it.Name, SHA256: it.SHA256, Size: it.Size, Present: present})
+	}
+	// No successful selection can precede a failed inventory close. Failure
+	// retains this exact owner/slot; the next admission retries it first.
+	if err := s.finishRuntimeOwnerV1(inventory); err != nil {
+		return result, err
 	}
 	if !active && allPresent {
 		if err := s.rememberRuntimeWithDefaults(ctx, a.Manifest, a.ImageDefaults); err != nil {

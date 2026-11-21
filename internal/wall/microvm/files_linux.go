@@ -23,6 +23,8 @@ type bootFiles struct {
 	runtimeStore                              *runtimecache.Store
 	imageStore                                *image.Store
 	diagnostics                               error
+	configDiagnostic                          error // bounded snapshot from this SAME config owner
+	config                                    *protectedBootConfig
 	vmmOwner                                  *supply.VerifiedRuntime // SAME original physical runtime owner
 	runtimeOwners                             []*supply.VerifiedRuntime
 	borrowedRuntime                           bool
@@ -54,6 +56,14 @@ func (f *bootFiles) close() error {
 	}
 	if err := closeMicroVMRuntimeOwnersV2(&f.runtimeOwners, &f.runtimeFiles, f.retirements, &f.diagnostics); err != nil {
 		return err
+	}
+	if f.config != nil {
+		err := f.config.Close()
+		f.configDiagnostic = f.config.diagnosticsV3()
+		if err != nil {
+			return err
+		}
+		f.config = nil
 	}
 	if f.imageLease != nil {
 		if err := f.imageLease.Close(); err != nil {

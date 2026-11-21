@@ -26,30 +26,32 @@ import (
 // Its original unreaped child or first managed activation stays owned through
 // handoff, start delivery, readiness and synchronous failure cleanup.
 type startupLaunchV1 struct {
-	buildingDone      chan struct{}
-	operation         *SessionOperation
-	placement         *runtimePublication
-	manifest          *Manifest
-	executable        os.FileInfo
-	argv              []string
-	manager           *nativeUserManagerV1
-	unit              *nativeUnitActivationV1
-	command           *exec.Cmd
-	child             *nativeStartupPeerV1
-	line              *StartupLineV1
-	hello             proto.Hello
-	started           bool
-	loanSent          bool
-	ready             bool
-	exited            bool
-	readFailed        bool
-	cleanupConfirmed  bool
-	mu                sync.Mutex
-	once              sync.Once
-	closeErr          error
-	preparePending    uint8 // only original fixed prepare request IDs 1, 2, 3 and 5
-	prepareFailed     bool
-	prepareCancelSent bool
+	buildingDone             chan struct{}
+	operation                *SessionOperation
+	placement                *runtimePublication
+	manifest                 *Manifest
+	executable               os.FileInfo
+	argv                     []string
+	manager                  *nativeUserManagerV1
+	unit                     *nativeUnitActivationV1
+	command                  *exec.Cmd
+	child                    *nativeStartupPeerV1
+	line                     *StartupLineV1
+	hello                    proto.Hello
+	started                  bool
+	loanSent                 bool
+	ready                    bool
+	exited                   bool
+	readFailed               bool
+	cleanupConfirmed         bool
+	mu                       sync.Mutex
+	once                     sync.Once
+	closeErr                 error
+	preparePending           uint8 // only original fixed prepare request IDs 1, 2, 3 and 5
+	prepareFailed            bool
+	prepareCancelSent        bool
+	prepareCleanupDiagnostic error // private result DATA, never cleanup confirmation
+	managerDiagnostic        error
 }
 
 func launchSupervisorOperation(ctx context.Context, operation *SessionOperation) (_ *startupLaunchV1, failure error) {
@@ -111,8 +113,7 @@ func launchSupervisorOperation(ctx context.Context, operation *SessionOperation)
 	// The manager's actual lifetime is this scoped launch, not the shorter
 	// caller deadline. Cancellation cannot destroy an unresolved native owner.
 	launch.manager, err = openNativeUserManagerV1(ctx)
-	if errors.Is(err, os.ErrNotExist) {
-		launch.manager = nil
+	if errors.Is(err, os.ErrNotExist) && launch.manager == nil {
 		if err := launch.startChild(ctx, m, origin.executable, origin.executableRef, argv); err != nil {
 			return launch, err
 		}
@@ -392,7 +393,7 @@ func (launch *startupLaunchV1) Close() error {
 			launch.closeErr = errors.Join(launch.closeErr, launch.child.Close())
 		}
 		if launch.manager != nil {
-			launch.closeErr = errors.Join(launch.closeErr, launch.manager.Close())
+			launch.closeErr = errors.Join(launch.closeErr, closeNativeManagerResourceV4(launch.manager, launch.operation.Primary(), &launch.managerDiagnostic))
 		}
 		if launch.command != nil && launch.ready && !launch.exited {
 			launch.closeErr = errors.Join(launch.closeErr, launch.command.Process.Release())
@@ -428,4 +429,11 @@ func (launch *startupLaunchV1) waitOriginalCommand() error {
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
+}
+
+func (launch *startupLaunchV1) ManagerCloseDiagnosticsV4() error {
+	if launch == nil {
+		return nil
+	}
+	return launch.managerDiagnostic
 }

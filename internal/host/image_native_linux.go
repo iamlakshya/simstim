@@ -42,6 +42,7 @@ type imageNativeGuardianV1 struct {
 	birth                                    uint64
 	groupRef, parentRef                      os.FileInfo
 	started, noCreation, planReleased, bound bool
+	managerDiagnostic                        error
 }
 
 func newImageNativeGuardianV1(ctx context.Context, command *exec.Cmd, helper *os.File, unit string) (*imageNativeGuardianV1, error) {
@@ -340,7 +341,7 @@ func (owner *imageNativeGuardianV1) closeV1() error {
 			result = errors.Join(result, owner.manager.bus.Object("org.freedesktop.systemd1", systemdManagerPath).CallWithContext(cleanup, systemdManagerInterface+".UnrefUnit", 0, owner.unit).Err)
 			cancel()
 		}
-		result = errors.Join(result, owner.manager.Close())
+		result = errors.Join(result, closeNativeManagerResourceV4(owner.manager, "", &owner.managerDiagnostic))
 	}
 	for _, file := range []*os.File{owner.process, owner.task, owner.group, owner.parent, owner.events, owner.kill} {
 		if file != nil {
@@ -444,4 +445,11 @@ func (owner *imageNativeGuardianV1) checkOriginalGroupV1() error {
 		return imageNativeFailureV1("the original image scope moved from its captured controlled parent")
 	}
 	return nil
+}
+
+func (owner *imageNativeGuardianV1) ManagerCloseDiagnosticsV4() error {
+	if owner == nil {
+		return nil
+	}
+	return owner.managerDiagnostic
 }

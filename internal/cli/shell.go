@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"slices"
 
 	"github.com/spf13/cobra"
@@ -13,7 +14,14 @@ import (
 	"github.com/iamlakshya/simstim/internal/client"
 )
 
-func shellCmd() *cobra.Command {
+func shellCmd() *cobra.Command { return shellCommand(nil) }
+
+type shellCommandSelection struct {
+	address address
+	in, out *os.File
+}
+
+func shellCommand(selected *shellCommandSelection) *cobra.Command {
 	var forceNew, detach, asJSON bool
 	var name string
 	cmd := &cobra.Command{
@@ -29,10 +37,14 @@ func shellCmd() *cobra.Command {
 			if err := client.CheckSessionName(name); err != nil {
 				return err
 			}
-			if err := beforeAttach(cmd, asJSON, detach); err != nil {
+			in, out := os.Stdin, os.Stdout
+			if selected != nil {
+				in, out = selected.in, selected.out
+			}
+			if err := beforeAttachFiles(cmd, asJSON, detach, in, out); err != nil {
 				return err
 			}
-			return withSession(cmd, args[0], func(ctx context.Context, h client.Host, conn *client.Conn, parent *client.Session) (returned error) {
+			run := func(ctx context.Context, h client.Host, conn *client.Conn, parent *client.Session) (returned error) {
 				local, err := client.LoadSandboxPolicy(ctx, h, parent.ID)
 				if err != nil {
 					return err
@@ -68,7 +80,8 @@ func shellCmd() *cobra.Command {
 							return nil
 						}
 						conn.Close()
-						return attach(cmd.Context(), h, candidate.ID, candidate.Name)
+						_, _, err = attachSessionFiles(cmd.Context(), h, candidate.ID, candidate.Name, in, out)
+						return err
 					}
 				}
 				original := cmd.Context()
@@ -82,7 +95,7 @@ func shellCmd() *cobra.Command {
 				bound := client.WithGrantRequest(ctx, request)
 				cmd.SetContext(context.WithValue(bound, newStartCleanupKey{}, cleanup))
 				defer func() { returned = errors.Join(returned, cleanup.finish()); cmd.SetContext(original) }()
-				cols, lines := termSize()
+				cols, lines := termSizeOf(out)
 				var shell *client.Session
 				if unwalled {
 					chosen := name
@@ -123,8 +136,13 @@ func shellCmd() *cobra.Command {
 					return nil
 				}
 				conn.Close()
-				return attach(original, h, shell.ID, shell.Name)
-			})
+				_, _, err = attachSessionFiles(original, h, shell.ID, shell.Name, in, out)
+				return err
+			}
+			if selected != nil {
+				return withResolvedSession(cmd, selected.address, run)
+			}
+			return withSession(cmd, args[0], run)
 		},
 	}
 	cmd.Flags().BoolVar(&forceNew, "new", false, "start a new shell even when one already runs")

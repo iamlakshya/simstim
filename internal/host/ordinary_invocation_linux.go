@@ -17,13 +17,15 @@ import (
 // Ordinary systemd-run uses Type=simple. Its authenticated live invocation
 // is captured separately from the walled Type=exec creation protocol.
 type ordinaryInvocationV1 struct {
-	manager       *nativeUserManagerV1
-	peer          *nativeStartupPeerV1
-	path          dbus.ObjectPath
-	unit, primary string
-	activation    ordinaryActivationV1
-	cgroup        *os.File
-	maximum       int64
+	manager           *nativeUserManagerV1
+	peer              *nativeStartupPeerV1
+	path              dbus.ObjectPath
+	unit, primary     string
+	activation        ordinaryActivationV1
+	cgroup            *os.File
+	maximum           int64
+	managerDiagnostic error
+	retirement        nativeStartupRetirementsV1
 }
 type ordinaryActivationV1 struct {
 	id, controlGroup, kind string
@@ -31,7 +33,7 @@ type ordinaryActivationV1 struct {
 	pid                    uint32
 }
 
-func captureOrdinaryInvocationV1(ctx context.Context, owner *ordinaryHolderCaptureV2) (_ *ordinaryInvocationV1, returned error) {
+func captureOrdinaryInvocationV1(ctx context.Context, owner *ordinaryHolderCaptureV2) (partial *ordinaryInvocationV1, returned error) {
 	data, err := owner.peer.proc.ReadFile("cgroup")
 	if err != nil {
 		return nil, err
@@ -51,16 +53,24 @@ func captureOrdinaryInvocationV1(ctx context.Context, owner *ordinaryHolderCaptu
 		return nil, owner.peer.checkLive()
 	}
 	manager, err := openNativeUserManagerV1(ctx)
-	if err != nil {
+	if manager == nil {
 		return nil, err
 	}
 	result := &ordinaryInvocationV1{manager: manager, peer: owner.peer, primary: owner.operation.Primary(), unit: unit, maximum: owner.source.Limits.MemoryMax}
 	complete := false
 	defer func() {
 		if !complete {
-			returned = errors.Join(returned, result.Close())
+			cleanup := result.Close()
+			returned = errors.Join(returned, cleanup, result.CloseDiagnosticsV4())
+			if cleanup != nil {
+				partial = result
+			}
 		}
+
 	}()
+	if err != nil {
+		return nil, err
+	}
 	if err := manager.bus.Object("org.freedesktop.systemd1", systemdManagerPath).CallWithContext(ctx, systemdManagerInterface+".GetUnitByPID", 0, uint32(owner.peer.pid)).Store(&result.path); err != nil {
 		return nil, err
 	}
@@ -151,7 +161,7 @@ func (invocation *ordinaryInvocationV1) Check(ctx context.Context) error {
 	}
 	original, originalErr := invocation.cgroup.Stat()
 	current, currentErr := fresh.Stat()
-	closed := fresh.Close()
+	closed := invocation.retirement.closeFilesV4([]*os.File{fresh})
 	if originalErr != nil || currentErr != nil || !os.SameFile(original, current) {
 		return errors.Join(sessionLeaseError("the actual ordinary cgroup object was replaced"), originalErr, currentErr, closed)
 	}
@@ -204,12 +214,37 @@ func (invocation *ordinaryInvocationV1) Close() error {
 	if invocation == nil {
 		return nil
 	}
-	var failure error
-	if invocation.cgroup != nil {
-		failure = errors.Join(failure, invocation.cgroup.Close())
-	}
+	// Each actual descriptor is closed once through its retained first facts.
+	// A diagnostic remains on this owner; only native uncertainty keeps it.
+	_ = invocation.retirement.closeFilesV4([]*os.File{invocation.cgroup})
 	if invocation.manager != nil {
-		failure = errors.Join(failure, invocation.manager.Close())
+		_ = closeNativeManagerResourceV4(invocation.manager, invocation.primary, &invocation.managerDiagnostic)
 	}
-	return failure
+	return invocation.checkNativeRetiredV3(context.Background())
+}
+
+func (invocation *ordinaryInvocationV1) checkNativeRetiredV3(ctx context.Context) error {
+	if invocation == nil || ctx == nil {
+		return sessionLeaseError("the original ordinary invocation retirement is absent")
+	}
+	var manager error
+	if invocation.manager != nil {
+		manager = invocation.manager.checkNativeRetiredV3(ctx)
+	}
+	return errors.Join(ctx.Err(), invocation.retirement.checkFilesV4([]*os.File{invocation.cgroup}), invocation.retirement.checkAllRetiredV4(), manager)
+}
+
+func (invocation *ordinaryInvocationV1) CloseDiagnosticsV3() error {
+	if invocation == nil {
+		return nil
+	}
+	var manager error
+	if invocation.manager != nil {
+		manager = invocation.manager.CloseDiagnosticsV3()
+	}
+	return errors.Join(invocation.managerDiagnostic, manager, invocation.retirement.diagnosticsV4())
+}
+
+func (invocation *ordinaryInvocationV1) CloseDiagnosticsV4() error {
+	return invocation.CloseDiagnosticsV3()
 }

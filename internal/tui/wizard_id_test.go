@@ -17,8 +17,8 @@ func TestWizardRejectsRawSessionIDsBeforeCaching(t *testing.T) {
 			hs := home(t, 80, 24)
 			h := hs.m.hostByName("atlas-dev")
 			before := len(h.sessions)
-			w := &wizard{host: client.Host{Name: "atlas-dev"}, seq: 1}
-			cmd := w.onActStarted(hs.m, actStartedMsg{seq: 1, s: &client.Session{ID: id, Name: "install"}})
+			w := &wizard{host: client.Host{Name: "atlas-dev"}, seq: 1, step: wzRun, agentPart: agentPart{starting: true}}
+			cmd := w.onActStarted(hs.m, actStartedMsg{owner: w, seq: 1, s: &client.Session{ID: id, Name: "install"}})
 			var ue *client.UserError
 			if cmd != nil || !errors.As(w.err, &ue) || ue.Code != "bad_session_id" {
 				t.Fatalf("bad ID reached attach or no clear error: %v, %v", cmd, w.err)
@@ -37,8 +37,8 @@ func TestWizardStopsWhenCompletionHasNoValidSession(t *testing.T) {
 		_ = f.Choose("claude")
 		a := f.Next()
 		a.Session = id
-		w := &wizard{host: client.Host{Name: "atlas-dev"}, seq: 1, step: wzRun, agentPart: agentPart{flow: f, act: a}}
-		cmd := w.onAgentChecks(hs.m, agentChecksMsg{seq: 1, act: a})
+		w := &wizard{host: client.Host{Name: "atlas-dev"}, seq: 1, step: wzRun, saved: true, agentPart: agentPart{flow: f, act: a, checking: true}}
+		cmd := w.onAgentChecks(hs.m, agentChecksMsg{owner: w, seq: 1, act: a})
 		var ue *client.UserError
 		if cmd != nil || !errors.As(w.err, &ue) || ue.Code != "bad_session_id" || w.last != nil || w.act.Session != id || f.Next().Agent.Kind != a.Agent.Kind {
 			t.Fatalf("completion continued: %v, %v", cmd, w.err)

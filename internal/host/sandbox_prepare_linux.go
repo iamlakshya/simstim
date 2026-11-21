@@ -105,11 +105,18 @@ func (b *bridge) runSandboxPreparePlatformV1(ctx context.Context, _ time.Time, w
 			break
 		}
 		if b.log != nil {
-			b.log.Warn("fixed test retains its original native cleanup owner", "session", m.ID, "err", stopErr)
+			diagnostic := error(nil)
+			if launch != nil {
+				diagnostic = launch.prepareCleanupDiagnostic
+			}
+			b.log.Warn("fixed test retains its original native cleanup owner", "session", m.ID, "err", errors.Join(stopErr, diagnostic))
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
 	b.joinSandboxPrepareDirectoryCleanupV1(operation, reservation)
+	if launch != nil && launch.prepareCleanupDiagnostic != nil {
+		return api.SandboxPrepareResultV1{}, sandboxBootError("the sandbox test boot reported a cleanup I/O failure: "+errors.Join(bootErr, launch.prepareCleanupDiagnostic).Error(), defaultHint)
+	}
 	if bootErr != nil {
 		return api.SandboxPrepareResultV1{}, wrapSandboxBootError(bootErr, defaultHint)
 	}

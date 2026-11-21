@@ -3,12 +3,14 @@
 package jail
 
 import (
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"net"
 	"os"
 	"strconv"
 	"sync"
+	"syscall"
 
 	"github.com/iamlakshya/simstim/internal/proto"
 	"github.com/iamlakshya/simstim/internal/supply"
@@ -42,7 +44,25 @@ type vmmExecOwnerV1 struct {
 	runnerOnce                               sync.Once
 	projection, armed, finalProved, noFuture bool
 	rootNamespace                            bool
-	subUID, subGID                           uint32
+	readonly                                 bool
+	readonlyPlan                             *VMMReadonlyInitPlanV1
+	readonlyControlTerminal                  bool
+	readonlyControlDone                      chan struct{}
+	readonlyProjectionReady                  chan struct{}
+	readonlyDiskSent                         bool
+	readonlyParent                           *os.File // borrowed original prepared VM-directory anchor
+	readonlyDiskParent                       *os.File // borrowed from SAME received phase owner
+	readonlyDisk                             *os.File // borrowed from SAME phase owner
+	readonlyDiskAdopted                      bool
+	readonlyParentApproved                   bool
+	readonlyGroup                            *readonlyVMMGroupV1
+	readonlyPhysicalClosed                   bool
+	readonlyCodeCloseAttempted               bool
+	readonlyCodeClose                        supply.FileCloseFactsV1
+	readonlyContinued                        bool
+	subUID, subGID                           uint32 // actual execution IDs, independent of mapping admission
+	readonlyLoginUID                         bool
+	readonlyMapSubGID                        uint32
 }
 
 type vmmExecActorV1 struct {
@@ -56,21 +76,21 @@ type vmmExecActorV1 struct {
 }
 
 // RetainVMMExecLeaseV1 binds an opaque store lease to this exact unstarted VMM
-// Cmd, its original program, fixed helper code and complete eight-slot purpose.
+// Cmd, its original program, fixed helper code and complete nine-slot purpose.
 func (c *Cmd) RetainVMMExecLeaseV1(source *supply.ExecModeLeaseV1) error {
 	if c == nil || source == nil {
 		return vmmModeFailureV1("the original VMM Cmd or mode source is missing")
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.phase != phaseNew || c.modeExecV1 != nil || c.publicationLeaseV1 != nil || c.gvisorOuter != nil || c.slotSourceV1 != nil || len(c.files) != 8 || c.cmd == nil || c.cmd.Process != nil || c.cmd.Path != self {
+	if c.phase != phaseNew || c.modeExecV1 != nil || c.publicationLeaseV1 != nil || c.gvisorOuter != nil || c.slotSourceV1 != nil || len(c.files) != 9 || c.cmd == nil || c.cmd.Process != nil || c.cmd.Path != self {
 		return vmmModeFailureV1("the mode source cannot attach to this command purpose or lifetime")
 	}
 	var set setup
 	if err := json.Unmarshal(c.setup, &set); err != nil {
 		return err
 	}
-	if !set.Userns || set.Net != NetNone || set.Seccomp != ProfileVMM || set.ExecFD != 8 || len(set.Argv) != 2 || set.Argv[0] != "/proc/self/fd/8" || set.Argv[1] != "chv-run" || set.Files != 8 || set.VMMExecV1 != nil || set.PublicationLeaseV1 != nil || set.ControllerPublicV1 != nil {
+	if !set.Userns || set.Net != NetNone || set.Seccomp != ProfileVMM || set.ExecFD != 8 || len(set.Argv) != 2 || set.Argv[0] != "/proc/self/fd/8" || set.Argv[1] != "chv-run" || set.Files != 9 || set.VMMExecV1 != nil || set.PublicationLeaseV1 != nil || set.ControllerPublicV1 != nil {
 		return vmmModeFailureV1("the mode source needs the original closed namespace VMM runner")
 	}
 	if err := source.CheckProgramV1(c.ctx, c.files[0]); err != nil {
@@ -86,15 +106,25 @@ func (c *Cmd) RetainVMMExecLeaseV1(source *supply.ExecModeLeaseV1) error {
 		code.Close()
 		return errors.Join(err, actualErr, vmmModeFailureV1("the VMM runner has another actual helper executable"))
 	}
-	lease, err := source.RetainForJailV1(c.ctx)
+	readonly, err := source.ReadonlyOriginalV1(c.ctx)
 	if err != nil {
 		code.Close()
 		return err
 	}
+	if readonly && set.Sub == nil {
+		// Only this actual opaque original source may admit the distinct
+		// login-UID/two-GID route. A Spec or UIDMode cannot select a map.
+		mapped, err := lookupReadonlyLoginMapV1()
+		if err != nil {
+			code.Close()
+			return err
+		}
+		set.Sub = &mapped
+	}
+
 	pair, err := unix.Socketpair(unix.AF_UNIX, unix.SOCK_SEQPACKET|unix.SOCK_CLOEXEC, 0)
 	if err != nil {
 		code.Close()
-		lease.Close()
 		return err
 	}
 	hostFile := os.NewFile(uintptr(pair[0]), "original-vmm-creation-host")
@@ -103,7 +133,6 @@ func (c *Cmd) RetainVMMExecLeaseV1(source *supply.ExecModeLeaseV1) error {
 	closeErr := hostFile.Close()
 	if err != nil || closeErr != nil {
 		code.Close()
-		lease.Close()
 		child.Close()
 		if value != nil {
 			value.Close()
@@ -114,7 +143,6 @@ func (c *Cmd) RetainVMMExecLeaseV1(source *supply.ExecModeLeaseV1) error {
 	if !ok {
 		value.Close()
 		code.Close()
-		lease.Close()
 		child.Close()
 		return vmmModeFailureV1("the original creation channel is not Unix")
 	}
@@ -122,26 +150,73 @@ func (c *Cmd) RetainVMMExecLeaseV1(source *supply.ExecModeLeaseV1) error {
 		host.Close()
 		child.Close()
 		code.Close()
-		lease.Close()
 		return err
 	}
-	owner := &vmmExecOwnerV1{source: source, program: c.files[0], code: code, lease: lease, host: host, child: child, runnerReady: make(chan struct{}), finalReady: make(chan struct{}), nativeDone: make(chan struct{}), rootNamespace: set.Sub == nil}
+	owner := &vmmExecOwnerV1{source: source, program: c.files[0], code: code, host: host, child: child, runnerReady: make(chan struct{}), finalReady: make(chan struct{}), nativeDone: make(chan struct{}), rootNamespace: set.Sub == nil, readonly: readonly, readonlyControlDone: make(chan struct{}), readonlyProjectionReady: make(chan struct{})}
 	owner.subUID, owner.subGID = uint32(os.Getuid()), uint32(os.Getgid())
 	if set.Sub != nil {
-		owner.subUID, owner.subGID = uint32(set.Sub.SubUID), uint32(set.Sub.SubGID)
+		if readonly && set.Sub.SubUID == -1 {
+			owner.readonlyLoginUID = true
+			owner.readonlyMapSubGID = uint32(set.Sub.SubGID)
+		} else {
+			owner.subUID, owner.subGID = uint32(set.Sub.SubUID), uint32(set.Sub.SubGID)
+		}
+		if readonly && !owner.readonlyLoginUID {
+			owner.readonlyMapSubGID = owner.subGID
+		}
 	}
-	owner.layout = vmmExecSetupV1{Version: 1, LeaseFD: 5 + len(c.files) + len(c.pins), WriterFD: 6 + len(c.files) + len(c.pins), ControlFD: 7 + len(c.files) + len(c.pins)}
+	owner.layout = vmmExecSetupV1{ReadonlyInit: readonly, Version: 2, LeaseFD: 5 + len(c.files) + len(c.pins), WriterFD: 6 + len(c.files) + len(c.pins), ControlFD: 7 + len(c.files) + len(c.pins)}
+	if readonly {
+		owner.readonlyParent = c.files[8]
+		var parent unix.Stat_t
+		if err := unix.Fstat(int(owner.readonlyParent.Fd()), &parent); err != nil || len(c.binds) == 0 || c.binds[0].Kind != kindDir || !c.binds[0].Write || uint64(parent.Dev) != c.binds[0].Dev || uint64(parent.Ino) != c.binds[0].Ino {
+			host.Close()
+			child.Close()
+			code.Close()
+			return errors.Join(err, vmmModeFailureV1("the original read-only parent differs from the actual pinned VM bind"))
+		}
+		if err := owner.checkReadonlyParentV2(owner.readonlyParent); err != nil {
+			host.Close()
+			child.Close()
+			code.Close()
+			return err
+		}
+		nonce, err := source.ReadonlyNonceV1(c.ctx)
+		if err != nil {
+			host.Close()
+			child.Close()
+			code.Close()
+			return err
+		}
+		owner.layout.ReadonlyNonce = hex.EncodeToString(nonce[:])
+	}
 	set.VMMExecV1 = &owner.layout
 	encoded, err := json.Marshal(set)
 	if err != nil {
 		host.Close()
 		child.Close()
 		code.Close()
-		lease.Close()
 		return err
 	}
+	// Borrow the actual source LAST. No later allocation/marshal error can
+	// orphan its one original loan count before the Cmd owns the lender.
+	lease, err := source.RetainForJailV1(c.ctx)
+	if err != nil {
+		host.Close()
+		child.Close()
+		code.Close()
+		return err
+	}
+	owner.lease = lease
 	c.setup, c.modeExecV1 = encoded, owner
-	c.cmd.Args[1] = vmmFileRulesStageV1(c.cmd.Args[1], &set)
+	if owner.readonlyLoginUID {
+		// The SAME actual Cmd now creates its original outside mapper A.
+		// Its C still receives all original atomic creation/native checks.
+		c.cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+		c.cmd.Args[1] = stageOuterVMMV1
+	} else {
+		c.cmd.Args[1] = vmmFileRulesStageV1(c.cmd.Args[1], &set)
+	}
 	return nil
 }
 
@@ -347,22 +422,30 @@ func (owner *vmmExecOwnerV1) releaseV1() error {
 		return nil
 	}
 	owner.released = true
-	files := []*os.File{owner.writer, owner.reader, owner.lease, owner.code, owner.child}
+	keepLifetime := owner.readonly && owner.nativeStarted && !owner.noFuture
+	files := []*os.File{owner.writer, owner.reader, owner.lease, owner.child}
+	if !keepLifetime {
+		files = append(files, owner.code)
+		owner.code = nil
+	}
 	if owner.outerCreator != nil {
 		for _, file := range owner.outerCreator.namespaces {
 			files = append(files, file)
 		}
 	}
-	owner.writer, owner.reader, owner.lease, owner.code, owner.child = nil, nil, nil, nil, nil
+	owner.writer, owner.reader, owner.lease, owner.child = nil, nil, nil, nil
 	host := owner.host
 	started := owner.nativeStarted
 	owner.mu.Unlock()
 	var result error
-	if host != nil {
+	if host != nil && !keepLifetime {
 		result = errors.Join(result, owner.closeHostV1())
 	}
-	if started {
+	if started && !keepLifetime {
 		<-owner.nativeDone
+	}
+	if !started && owner.readonlyGroup != nil {
+		result = errors.Join(result, owner.readonlyGroup.Close())
 	}
 	for _, file := range files {
 		if file != nil {

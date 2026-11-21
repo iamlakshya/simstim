@@ -25,9 +25,19 @@ import (
 // noInputEnv is the variable that turns input off.
 var noInputEnv = brand.Env("NO_INPUT")
 
+// The selected-shell adapter binds these actual restored files. This carries
+// no answer or grant: input policy and the live question still apply.
+type promptTerminalKey struct{}
+type promptTerminalFiles struct{ in, out *os.File }
+
 // inputOn reports whether cmd may ask: stdin, stdout and stderr are
 // terminals, and the user did not turn input off.
 func inputOn(cmd *cobra.Command) bool {
+	if cmd != nil && cmd.Context() != nil {
+		if files, ok := cmd.Context().Value(promptTerminalKey{}).(promptTerminalFiles); ok {
+			return !inputOff(cmd) && isTerminal(files.in) && isTerminal(files.out)
+		}
+	}
 	return !inputOff(cmd) && isTerminal(os.Stdin) && isTerminal(os.Stdout) && isTerminal(os.Stderr)
 }
 
@@ -48,7 +58,9 @@ func envTurnsInputOff(v string) bool { return v != "" && v != "0" && v != "false
 // stderr are terminals. stdout may go to a file. The command's stderr then
 // reaches the user's.
 func secretTerminal(cmd *cobra.Command) bool {
-	return !inputOff(cmd) && isTerminal(os.Stdin) && isTerminal(os.Stderr)
+	input, inputOK := cmd.InOrStdin().(*os.File)
+	diagnostic, diagnosticOK := cmd.ErrOrStderr().(*os.File)
+	return !inputOff(cmd) && inputOK && diagnosticOK && isTerminal(input) && isTerminal(diagnostic)
 }
 
 // boolFlag is the value of a bool flag of cmd, or false when cmd has none.
@@ -151,8 +163,14 @@ type prompter struct {
 // An old name's line is in its new form, so that a Try: line teaches it.
 func prompts(cmd *cobra.Command) *prompter {
 	line := newForm(cmd, commandLine(cmd))
-	return &prompter{ctx: cmd.Context(), in: os.Stdin, out: os.Stderr, on: inputOn(cmd),
+	p := &prompter{ctx: cmd.Context(), in: os.Stdin, out: os.Stderr, on: inputOn(cmd),
 		line: line, flagsAt: flagsAt(cmd, line), path: cmd.CommandPath(), help: helpOf(cmd)}
+	if p.ctx != nil {
+		if files, ok := p.ctx.Value(promptTerminalKey{}).(promptTerminalFiles); ok {
+			p.in, p.out = files.in, files.out
+		}
+	}
+	return p
 }
 
 // withFlags is p's command line with flags added before any "--", as a

@@ -69,3 +69,15 @@ Completion preserves local secret names in full. Its 4 MiB file limit applies to
 `policy rm` completes rule IDs from local all-session, host, repository and profile layers. Each ID shows its target. Profile completion uses the same config schema. Neither runs a command or connects to a host.
 
 `policy allow --tools` completes capability names from the same fixed table that validates an allowance. Comma-separated lists keep their earlier selections and do not offer them twice.
+
+Session-valued `--in` flags use the same cached addresses as `attach`. With an
+explicit host, `new <host> --in` offers only that host's cached sessions.
+`policy allow` and `policy deny` complete the doors accepted by those commands.
+`policy log --door` offers only `net`.
+
+Cancellation stops local file completion without returning partial values. Each
+read keeps the original descriptor, checks cancellation between bounded reads,
+and keeps the existing four-MiB limit. It takes no host or cache lock.
+
+`help` completes the current command tree, including help topics such as
+`concepts` and `exit-codes`. Old hidden command names are not offered.

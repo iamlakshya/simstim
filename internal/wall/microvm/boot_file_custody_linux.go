@@ -110,7 +110,16 @@ func (s *sandbox) releaseBootFilesV2() error {
 	if custody.command != nil && !custody.command.PhysicalExitV1() {
 		return fmt.Errorf("%w; Try: retain its actual command and join physical cleanup", errBootFilesBorrowedV2)
 	}
-	if err := custody.files.close(); err != nil {
+	err := custody.files.close()
+	// Preserve the actual diagnostic even after successful retry removes the
+	// custody pointer. This snapshot grants no native closure or I/O success.
+	custody.files.closeMu.Lock()
+	diagnostic := errors.Join(custody.files.diagnostics, custody.files.configDiagnostic)
+	custody.files.closeMu.Unlock()
+	s.retirementMu.Lock()
+	s.bootFileDiagnostic = diagnostic
+	s.retirementMu.Unlock()
+	if err != nil {
 		return err
 	}
 	s.mu.Lock()

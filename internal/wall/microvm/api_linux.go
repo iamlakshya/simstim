@@ -19,7 +19,7 @@ import (
 
 func (s *runnerServer) serve(ctx context.Context, socket string, owner *ownedVMMEndpoint, fcControl *fc.Client) {
 	scanner := bufio.NewScanner(s.conn)
-	scanner.Buffer(make([]byte, 4096), 4096)
+	scanner.Buffer(make([]byte, 4096), checkpointActorFrameV3)
 	for scanner.Scan() {
 		if ctx.Err() != nil {
 			return
@@ -31,6 +31,8 @@ func (s *runnerServer) serve(ctx context.Context, socket string, owner *ownedVMM
 		reply := runnerMessage{Kind: "reply", ID: request.ID}
 		if request.ID == 0 {
 			reply.Error = "private VMM control needs a request ID"
+		} else if request.Op == "checkpoint_v3" {
+			reply.Checkpoint = s.checkpointOperationV3(ctx, request.Checkpoint)
 		} else {
 			state, err := ownedVMMAPI(ctx, socket, request.Op, owner, fcControl)
 			if err != nil {

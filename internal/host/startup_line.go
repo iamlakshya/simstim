@@ -23,6 +23,9 @@ type startupCredentials struct {
 // frame, read failure or close also closes every materialised descriptor.
 // This transport supplies no startup or execution authority by itself.
 type StartupLineV1 struct {
+	nativeRetirement    *nativeDescriptorRetirementsV1
+	receiveRetention    *proto.UnixControlRetentionV1
+	nativeReadStarted   bool
 	prepareCursor       *sandboxPrepareFrameCursorV1
 	preparePoison       bool
 	nativePeer          *nativeStartupPeerV1
@@ -62,6 +65,7 @@ func (line *StartupLineV1) ReadFrame() (proto.Frame, error) {
 	line.readMu.Lock()
 	defer line.readMu.Unlock()
 	line.mu.Lock()
+	line.nativeReadStarted = true
 	resuming := line.prepareCursor != nil && line.prepareCursor.active
 	if line.closed || line.preparePoison || len(line.files) != 0 && !resuming {
 		err := line.closeAncillaryLocked()
@@ -107,6 +111,8 @@ func (input startupFrameInput) Read(data []byte) (int, error) {
 	snapshot := line.snapshotLoan
 	reservation := line.snapshotReservation
 	startupReservation := line.slotStartupPending != nil
+	retention := line.receiveRetention
+	line.nativeReadStarted = true
 	line.mu.Unlock()
 	if (snapshot && reservation) || (startupReservation && (snapshot || reservation)) {
 		return 0, sessionLeaseError("the native reader has incompatible closed role classes")
@@ -115,7 +121,17 @@ func (input startupFrameInput) Read(data []byte) (int, error) {
 	var files []*os.File
 	var cred *startupCredentials
 	var err error
-	if startupReservation {
+	if retention != nil {
+		if startupReservation {
+			n, files, cred, err = receiveSlotReservedStartupRetainedV4(line.conn, data, retention)
+		} else if reservation {
+			n, files, cred, err = receiveSlotSnapshotReservationRetainedV4(line.conn, data, retention)
+		} else if snapshot {
+			n, files, cred, err = receiveSlotSnapshotRetainedV4(line.conn, data, retention)
+		} else {
+			n, files, cred, err = receiveStartupAncillaryRetainedBoundV4(line.conn, data, line.loanFiles, retention)
+		}
+	} else if startupReservation {
 		n, files, cred, err = receiveSlotReservedStartupAncillaryV2(line.conn, data)
 	} else if reservation {
 		n, files, cred, err = receiveSlotSnapshotReservationAncillaryV2(line.conn, data)
@@ -192,12 +208,7 @@ func (line *StartupLineV1) takeLoanFile() (*os.File, startupCredentials, error) 
 }
 
 func (line *StartupLineV1) closeAncillaryLocked() error {
-	var failure error
-	for _, file := range line.files {
-		if file != nil {
-			failure = errors.Join(failure, file.Close())
-		}
-	}
+	failure := closeStartupReceivedFilesV4(line.nativeRetirement, line.files)
 	line.files, line.cred = nil, nil
 	return failure
 }
@@ -265,12 +276,20 @@ type startupOrdinaryInput struct{ line *StartupLineV1 }
 func (input startupOrdinaryInput) Read(data []byte) (int, error) {
 	input.line.readMu.Lock()
 	defer input.line.readMu.Unlock()
-	n, files, _, failure := receiveStartupAncillary(input.line.conn, data)
-	for _, file := range files {
-		if file != nil {
-			failure = errors.Join(failure, file.Close())
-		}
+	line := input.line
+	line.mu.Lock()
+	line.nativeReadStarted = true
+	retention, retirement := line.receiveRetention, line.nativeRetirement
+	line.mu.Unlock()
+	var n int
+	var files []*os.File
+	var failure error
+	if retention != nil {
+		n, files, _, failure = receiveStartupAncillaryRetainedBoundV4(line.conn, data, 1, retention)
+	} else {
+		n, files, _, failure = receiveStartupAncillary(line.conn, data)
 	}
+	failure = errors.Join(failure, closeStartupReceivedFilesV4(retirement, files))
 	if len(files) != 0 {
 		failure = errors.Join(failure, sessionLeaseError("unexpected native descriptors after startup"))
 	}

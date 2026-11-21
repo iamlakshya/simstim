@@ -14,6 +14,7 @@ import (
 
 	"github.com/iamlakshya/simstim/internal/jail"
 	"github.com/iamlakshya/simstim/internal/nitrodev"
+	"github.com/iamlakshya/simstim/internal/supply"
 	"github.com/iamlakshya/simstim/internal/wall"
 	"golang.org/x/sys/unix"
 )
@@ -43,18 +44,43 @@ func socketPair() (net.Conn, *os.File, error) {
 }
 
 func (s *sandbox) launchRunner(ctx context.Context, files *bootFiles, subuid bool, until time.Time) (rawResult net.Conn, controlResult *runnerControl, commandResult *jail.Cmd, returned error) {
+	if files.vmmOwner == nil {
+		return nil, nil, nil, fmt.Errorf("VMM launch lost its original verified runtime owner")
+	}
+	modeSource, err := files.vmmOwner.BeginExecMode(ctx)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	readonly := false
+	if modeSource != nil {
+		readonly, err = modeSource.ReadonlyOriginalV1(ctx)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+	}
 	s.mu.Lock()
 	owner := s.snapshotDisk
 	s.mu.Unlock()
+	if owner == nil {
+		return nil, nil, nil, fmt.Errorf("VMM launch lost its actual original disk owner")
+	}
+	if readonly {
+		// This is the SAME pre-chown parent descriptor, never S opening the
+		// subordinate disk. B's genuine native receive supplies that disk.
+		return s.launchRunnerWithDiskV1(ctx, files, owner.diskParent, subuid, until, modeSource)
+	}
+	if err := owner.capture(ctx); err != nil {
+		return nil, nil, nil, err
+	}
 	returned = owner.borrow(ctx, func(_ *os.Root, _ *os.Root, disk *os.File) error {
 		var err error
-		rawResult, controlResult, commandResult, err = s.launchRunnerWithDiskV1(ctx, files, disk, subuid, until)
+		rawResult, controlResult, commandResult, err = s.launchRunnerWithDiskV1(ctx, files, disk, subuid, until, modeSource)
 		return err
 	})
 	return
 }
 
-func (s *sandbox) launchRunnerWithDiskV1(ctx context.Context, files *bootFiles, disk *os.File, subuid bool, until time.Time) (rawResult net.Conn, controlResult *runnerControl, commandResult *jail.Cmd, returned error) {
+func (s *sandbox) launchRunnerWithDiskV1(ctx context.Context, files *bootFiles, disk *os.File, subuid bool, until time.Time, modeSource *supply.ExecModeLeaseV1) (rawResult net.Conn, controlResult *runnerControl, commandResult *jail.Cmd, returned error) {
 	raw, rawChild, err := socketPair()
 	if err != nil {
 		return nil, nil, nil, err
@@ -87,30 +113,33 @@ func (s *sandbox) launchRunnerWithDiskV1(ctx context.Context, files *bootFiles, 
 	var config *protectedBootConfig
 	if s.driver.kind.isFirecracker() {
 		config, err = prepareFirecrackerConfig(ctx, s.spec)
+		files.config = config // Adopt the actual partial owner BEFORE handling error.
 		if err != nil {
 			return nil, nil, nil, err
 		}
-		defer config.Close()
-	}
-	if files.vmmOwner == nil {
-		return nil, nil, nil, fmt.Errorf("VMM launch lost its original verified runtime owner")
-	}
-	modeSource, err := files.vmmOwner.BeginExecMode(ctx)
-	if err != nil {
-		return nil, nil, nil, err
 	}
 	var modePhase *vmmExecPhaseV1
 	inherited := runnerFilesWithDiskV1(files, disk, rawChild, controlChild)
 	programMode := os.FileMode(0o111)
+	readonly := false
 	if modeSource != nil {
 		programMode = 0o555
 		plan.Version = 2
+		readonly, err = modeSource.ReadonlyOriginalV1(ctx)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		if readonly {
+			plan.Version = 3
+		}
 	}
 	grants := []jail.FileRuleV1{{FD: 3, Role: jail.FileProgramV1, Mode: programMode, Access: jail.Read | jail.Exec}}
 	for fd := 4; fd <= 7; fd++ {
 		grants = append(grants, jail.FileRuleV1{FD: fd, Role: jail.FileDataV1, Mode: 0o444, Access: jail.Read})
 	}
-	grants = append(grants, jail.FileRuleV1{FD: 11, Role: jail.FileDataV1, Mode: 0o600, Access: jail.Read | jail.Write})
+	if !readonly {
+		grants = append(grants, jail.FileRuleV1{FD: 11, Role: jail.FileDataV1, Mode: 0o600, Access: jail.Read | jail.Write})
+	}
 	binds := []jail.Bind{{Path: vmDataDir(s.spec), Write: true}, {Path: "/dev/urandom"}}
 	if s.driver.kind == nitroBackend {
 		device, err := nitrodev.Open()
@@ -135,7 +164,13 @@ func (s *sandbox) launchRunnerWithDiskV1(ctx context.Context, files *bootFiles, 
 	started := false
 	defer func() {
 		if !started && modePhase != nil {
-			if settleErr := command.SettleVMMUnstartedV1(modeSource); settleErr != nil {
+			var settleErr error
+			if modePhase.attached {
+				settleErr = command.SettleVMMUnstartedV1(modeSource)
+			} else {
+				settleErr = command.DisableUnstartedVMMV1()
+			}
+			if settleErr != nil {
 				commandResult = command
 				returned = errors.Join(returned, settleErr)
 			}
@@ -143,11 +178,23 @@ func (s *sandbox) launchRunnerWithDiskV1(ctx context.Context, files *bootFiles, 
 	}()
 	if modeSource != nil {
 		modePhase, err = newVMMExecPhaseV1(ctx, command, modeSource, files.vmm, control, s.spec.ID, s.driver.kind.name())
-		if err != nil {
-			return nil, nil, nil, err
+		if modePhase != nil {
+			modePhase.snapshotOwner = s.snapshotDisk
+			if retainErr := s.retainVMMModePhaseV1(modePhase); retainErr != nil {
+				return nil, nil, command, errors.Join(err, retainErr)
+			}
 		}
-		if err := s.retainVMMModePhaseV1(modePhase); err != nil {
-			return nil, nil, nil, err
+		if err != nil {
+			return nil, nil, command, err
+		}
+		if readonly {
+			original, err := readonlyInitPlanV1(plan)
+			if err != nil {
+				return nil, nil, nil, err
+			}
+			if err := command.BindVMMReadonlyInitPlanV1(modeSource, original); err != nil {
+				return nil, nil, nil, err
+			}
 		}
 		if err := controller.attachModePhaseV1(modePhase); err != nil {
 			return nil, nil, nil, err
@@ -158,6 +205,13 @@ func (s *sandbox) launchRunnerWithDiskV1(ctx context.Context, files *bootFiles, 
 		return nil, nil, nil, err
 	}
 	defer stdin.Close()
+	var origin *localLaunchOriginV1
+	if !readonly {
+		origin, err = s.captureLocalLaunchOriginV1(ctx, plan, files, disk, command, stdin, controller, config)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+	}
 	reader, writer, err := os.Pipe()
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("open bounded VMM diagnostic pipe: %w", err)
@@ -179,7 +233,13 @@ func (s *sandbox) launchRunnerWithDiskV1(ctx context.Context, files *bootFiles, 
 	writer.Close()
 	s.logDone = make(chan struct{})
 	go func() { defer close(s.logDone); _, _ = io.Copy(&s.log, reader); reader.Close() }()
-	if err := json.NewEncoder(stdin).Encode(plan); err != nil {
+	var planErr error
+	if readonly {
+		planErr = json.NewEncoder(stdin).Encode(plan)
+	} else {
+		planErr = origin.sendPlanV1()
+	}
+	if err := planErr; err != nil {
 		stdin.Close()
 		command.Signal(os.Kill)
 		// The sandbox retains and reaps this exact child, including a failed
@@ -188,7 +248,13 @@ func (s *sandbox) launchRunnerWithDiskV1(ctx context.Context, files *bootFiles, 
 	}
 	stdin.Close()
 	if modePhase != nil {
-		if err := modePhase.run(ctx, controller); err != nil {
+		phaseContext := ctx
+		if readonly {
+			var stop context.CancelFunc
+			phaseContext, stop = context.WithDeadline(ctx, until)
+			defer stop()
+		}
+		if err := modePhase.run(phaseContext, controller); err != nil {
 			_ = command.Signal(os.Kill)
 			// SAME actual Cmd/source retains an uncertain armed fence until
 			// original physical whole-source cleanup proves no future exec.

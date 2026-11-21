@@ -24,6 +24,10 @@ func (c *Conn) beginGrantSource(ctx context.Context, kind string, sensitive bool
 	if err != nil {
 		return ctx, nil, err
 	}
+	if err := checkHostRestrictionV1(ctx, c.Host, c.hostTransport); err != nil {
+		unlock()
+		return ctx, nil, err
+	}
 	if err := checkTransportBeforeTierMigration(ctx, c); err != nil {
 		unlock()
 		return ctx, nil, err

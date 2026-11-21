@@ -36,6 +36,21 @@ func EnableUnixCredentialsV1(conn *net.UnixConn) error {
 // Call it from the sole physical reader from byte zero; keep the ordinary
 // protocol decoder and validate native descriptor roles at its actual consumer.
 func ReceiveUnixControlV1(conn *net.UnixConn, data []byte, maxDescriptors int) (n int, control UnixControlV1, failure error) {
+	return receiveUnixControlV1(conn, data, maxDescriptors, nil)
+}
+
+// ReceiveUnixControlRetainedV1 uses the same decoder and exact bound. Only
+// its error cleanup differs: the actual materialised batch is retained before
+// any Close, so its concrete owner can obtain first native retirement facts.
+// Successful controls keep their existing witness/DetachFilesV1 lifetime.
+func ReceiveUnixControlRetainedV1(conn *net.UnixConn, data []byte, maxDescriptors int, retention *UnixControlRetentionV1) (n int, control UnixControlV1, failure error) {
+	if retention == nil {
+		return 0, control, errors.New("owned native receive has no original resource retention")
+	}
+	return receiveUnixControlV1(conn, data, maxDescriptors, retention)
+}
+
+func receiveUnixControlV1(conn *net.UnixConn, data []byte, maxDescriptors int, retention *UnixControlRetentionV1) (n int, control UnixControlV1, failure error) {
 	if conn == nil || maxDescriptors < 0 || maxDescriptors > maxUnixControlDescriptorsV1 {
 		return 0, control, errors.New("native control has no bounded original Unix receiver")
 	}
@@ -65,7 +80,11 @@ func ReceiveUnixControlV1(conn *net.UnixConn, data []byte, maxDescriptors int) (
 		failure = newUnixReceiveWitnessV1(conn, &control)
 	}
 	if failure != nil {
-		failure = errors.Join(failure, control.Close())
+		if retention != nil {
+			retention.retainFailedV1(&control)
+		} else {
+			failure = errors.Join(failure, control.Close())
+		}
 	}
 	return n, control, failure
 }

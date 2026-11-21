@@ -349,20 +349,28 @@ func boolFlagAsked(fs *pflag.FlagSet, args []string, name string) bool {
 // (cli-spec 9.3, rule 2). So a script without a terminal opens no
 // connection, and starts or resumes no session.
 func beforeAttach(cmd *cobra.Command, asJSON, detach bool) error {
+	return beforeAttachFiles(cmd, asJSON, detach, os.Stdin, os.Stdout)
+}
+
+func beforeAttachFiles(cmd *cobra.Command, asJSON, detach bool, in, out *os.File) error {
 	switch {
 	case detach:
 		return nil
 	case asJSON:
 		return needsDetach(cmd)
 	}
-	return attachNeedsATerminal(cmd)
+	return attachNeedsTerminalFiles(cmd, in, out)
 }
 
 // attachNeedsATerminal is the error of new or resume without --detach when
 // stdin or stdout is not a terminal, or nil. Its Try: line puts --detach
 // before any "--".
 func attachNeedsATerminal(cmd *cobra.Command) error {
-	if isTerminal(os.Stdin) && isTerminal(os.Stdout) {
+	return attachNeedsTerminalFiles(cmd, os.Stdin, os.Stdout)
+}
+
+func attachNeedsTerminalFiles(cmd *cobra.Command, in, out *os.File) error {
+	if isTerminal(in) && isTerminal(out) {
 		return nil
 	}
 	return &client.UserError{

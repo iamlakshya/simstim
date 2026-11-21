@@ -20,6 +20,8 @@ import (
 // SessionOperation retains the canonical primary op.lock across a complete
 // operation/retry. Only its owner releases it, after owned resource cleanup.
 type SessionOperation struct {
+	noneStop                 *StoppedNoneSessionV1
+	warmIncoming             *warmIncomingOriginV1
 	sandboxPrepareCleanup    *sandboxPrepareCleanupV1
 	noneCold                 *NoneColdResumeV1
 	noneMigration            *legacyNoneMigrationV1
@@ -252,6 +254,15 @@ func (o *SessionOperation) CloseWithError() error {
 	if o == nil {
 		return nil
 	}
+	// Pair closing admission with the actual N5 binder under this SAME gate.
+	// An unresolved source retains the OP; callers cannot close it via error.
+	o.gate.Lock()
+	if o.noneStop != nil {
+		o.gate.Unlock()
+		return sessionLeaseError("the actual original None stop still retains this operation")
+	}
+	o.active.Store(false)
+	o.gate.Unlock()
 	o.once.Do(func() {
 		o.gate.Lock()
 		o.active.Store(false)

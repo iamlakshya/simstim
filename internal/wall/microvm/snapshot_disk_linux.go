@@ -28,11 +28,13 @@ type snapshotDiskOwnerV1 struct {
 	session, vm       *os.Root
 	sessionRef, vmRef cachefs.Reference
 	disk              *os.File
-	diskParent        *os.File // same actual VM directory, retained before native disk open
+	diskParent        *os.File // same actual VM-directory O_PATH anchor
+	sessionParent     *os.File // actual native anchor construction owner, retained before open
 	diskRef           cachefs.Reference
 	lease             *os.File // borrowed from the same prepared runtime
 	leaseName         string
 	bytes             int64
+	readonly          *vmmExecPhaseV1 // SAME original phase; received disk is borrowed
 }
 
 func pinSnapshotDiskRootsV1(session *os.Root, lease *os.File, kind backendKind, bytes int64) (*snapshotDiskOwnerV1, error) {
@@ -60,25 +62,46 @@ func pinSnapshotDiskRootsV1(session *os.Root, lease *os.File, kind backendKind, 
 	if !named.IsDir() || named.Mode()&os.ModeSymlink != 0 {
 		return owner, fmt.Errorf("the original VM disk parent is not its actual child directory")
 	}
-	owner.vm, err = root.OpenRoot("vm")
+	owner.sessionParent, err = root.Open(".")
 	if err != nil {
 		return owner, err
 	}
-	// Adopt the actual child Root BEFORE private-mode/reference validation.
-	owner.vmRef, err = cachefs.CaptureRoot(owner.vm)
-	if err != nil {
+	fd, openErr := unix.Openat2(int(owner.sessionParent.Fd()), "vm", &unix.OpenHow{Flags: unix.O_PATH | unix.O_DIRECTORY | unix.O_CLOEXEC, Resolve: unix.RESOLVE_BENEATH | unix.RESOLVE_NO_SYMLINKS | unix.RESOLVE_NO_MAGICLINKS})
+	if fd >= 0 {
+		owner.diskParent = os.NewFile(uintptr(fd), "original-pinned-VM-parent")
+	}
+	if openErr != nil {
+		return owner, openErr
+	}
+	// This native O_PATH anchor grants no login read/search access. A prior
+	// subuid boot may already own it; only the later actual RO source can use
+	// that case. Normal capture still requires the strict login-owned root.
+	var native unix.Stat_t
+	if err := unix.Fstat(fd, &native); err != nil {
 		return owner, err
 	}
-	actual, err := owner.vm.Stat(".")
-	if err != nil || !os.SameFile(named, actual) {
-		return owner, errors.Join(fmt.Errorf("the actual VM disk parent changed while it was pinned"), err)
+	if native.Uid == uint32(os.Geteuid()) {
+		owner.vm, err = root.OpenRoot("vm")
+		if err != nil {
+			return owner, err
+		}
+		owner.vmRef, err = cachefs.CaptureRoot(owner.vm)
+		if err != nil {
+			return owner, err
+		}
 	}
-	return owner, owner.checkRoots()
+	return owner, owner.checkPinnedParentV2()
 }
 
 func (owner *snapshotDiskOwnerV1) checkRoots() error {
-	if owner == nil || owner.session == nil || owner.vm == nil || owner.lease == nil {
+	if owner == nil || owner.session == nil || owner.lease == nil {
 		return fmt.Errorf("the original VM disk owner has no retained native roots")
+	}
+	if owner.readonly != nil {
+		return owner.checkReadonlyRootsV2()
+	}
+	if owner.vm == nil {
+		return fmt.Errorf("the normal disk has no login-owned rooted parent")
 	}
 	if err := errors.Join(owner.sessionRef.CheckRoot(owner.session), owner.vmRef.CheckRoot(owner.vm)); err != nil {
 		return err
@@ -135,15 +158,18 @@ func (owner *snapshotDiskOwnerV1) capture(ctx context.Context) error {
 	if err != nil || owner.diskRef.Size != owner.bytes {
 		return errors.Join(fmt.Errorf("the original VM disk differs from its admitted size or private role"), err)
 	}
-	return errors.Join(ctx.Err(), owner.checkDisk())
+	return errors.Join(ctx.Err(), owner.checkDisk(ctx))
 }
 
-func (owner *snapshotDiskOwnerV1) checkDisk() error {
+func (owner *snapshotDiskOwnerV1) checkDisk(ctx context.Context) error {
 	if err := owner.checkRoots(); err != nil {
 		return err
 	}
 	if owner.disk == nil {
 		return fmt.Errorf("the original VM session disk descriptor is absent")
+	}
+	if owner.readonly != nil {
+		return owner.readonly.checkSnapshotDiskV2(ctx)
 	}
 	// Live VMM writes legitimately change mtime. Native inode, single-link
 	// ownership, mode, fixed length and anchored leaf identity must still hold.
@@ -169,11 +195,11 @@ func (owner *snapshotDiskOwnerV1) borrow(ctx context.Context, run func(*os.Root,
 	owner.borrowers.Add(1)
 	owner.mu.Unlock()
 	defer owner.borrowers.Done()
-	if err := errors.Join(ctx.Err(), owner.checkDisk()); err != nil {
+	if err := errors.Join(ctx.Err(), owner.checkDisk(ctx)); err != nil {
 		return err
 	}
 	result := run(owner.session, owner.vm, owner.disk)
-	return errors.Join(result, ctx.Err(), owner.checkDisk())
+	return errors.Join(result, ctx.Err(), owner.checkDisk(ctx))
 }
 
 // close is called only after the actual native child has physically exited,
@@ -188,7 +214,7 @@ func (owner *snapshotDiskOwnerV1) close() error {
 		owner.closing = true
 		owner.mu.Unlock()
 		owner.borrowers.Wait()
-		if owner.disk != nil {
+		if owner.disk != nil && owner.readonly == nil {
 			owner.closeErr = errors.Join(owner.closeErr, owner.disk.Close())
 		}
 		if owner.diskParent != nil {
@@ -196,6 +222,9 @@ func (owner *snapshotDiskOwnerV1) close() error {
 		}
 		if owner.vm != nil {
 			owner.closeErr = errors.Join(owner.closeErr, owner.vm.Close())
+		}
+		if owner.sessionParent != nil {
+			owner.closeErr = errors.Join(owner.closeErr, owner.sessionParent.Close())
 		}
 		if owner.session != nil {
 			owner.closeErr = errors.Join(owner.closeErr, owner.session.Close())

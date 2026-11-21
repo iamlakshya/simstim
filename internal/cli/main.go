@@ -116,6 +116,7 @@ func Root() *cobra.Command {
 	for _, c := range root.Commands() {
 		if c.Name() == "help" {
 			c.Args = helpArgs
+			c.ValidArgsFunction = completeHelpArgs
 		}
 	}
 	guard(root)

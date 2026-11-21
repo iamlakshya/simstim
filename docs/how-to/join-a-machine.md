@@ -53,7 +53,7 @@ That config must resolve `workbox` to an ordered `ProxyJump` chain. The existing
 
 The client checks the complete `Include` closure before resolving it. It resolves frozen copies and stores separate projections for the bastions and the invited account. Later connections require the original source files, identities and public-key pins to remain unchanged. The generated configs do not read later user or system includes. Run a fresh invite after intentionally changing the route.
 
-This path currently accepts ordinary `Host`, static `Include` and ordered `ProxyJump` entries. It refuses `Match`, executable `ProxyCommand`, `KnownHostsCommand` and `LocalCommand` before resolving anything. Write nested jump settings as one ordered chain. Ordinary host addition keeps its existing SSH config behaviour.
+This path currently accepts ordinary `Host`, static `Include` and ordered `ProxyJump` entries. It refuses `Match`, executable `ProxyCommand`, `KnownHostsCommand` and `LocalCommand` before resolving anything. Nested jump settings follow OpenSSH’s order. The complete resolved route may contain at most eight bastions. Ordinary host addition keeps its existing SSH config behaviour.
 
 A reply expires with its invite. A malformed field, changed check character or unknown code version stops before any host registration or pin. The generated SSH files have an internal `joined_ssh` ownership reference in `hosts.toml`. Keep that reference and those files unchanged. `host rm` can then remove only this client's original generated files; an edited or replaced file stops that cleanup.
 

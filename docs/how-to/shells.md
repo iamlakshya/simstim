@@ -7,3 +7,10 @@ The shell shares the sandbox's files and network policy. It uses the image's log
 At `none`, the command starts a host shell in the session's folder through the ordinary new-session request and its current local grants. It creates no wall and inherits no SSH signer or private source permission from a row.
 
 Work written in a sandbox still reaches the laptop through `pull` and its review. Opening a shell does not make those files trusted on the laptop.
+
+In the launcher, select the session and choose **Session: shell** in the palette.
+It uses the same command and restored terminal as the CLI. The exact selected
+session ID stays fixed. If the host's saved identity, settings or tier changes
+during that action, reconnect and choose the session again.
+Live grant questions and password-manager diagnostics use that same terminal.
+Input turned off still refuses a question that needs a live answer.

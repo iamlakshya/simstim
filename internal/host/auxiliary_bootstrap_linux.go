@@ -14,6 +14,7 @@ import (
 	"os"
 	"runtime"
 	"sync"
+	"sync/atomic"
 
 	"github.com/godbus/dbus/v5"
 	"github.com/iamlakshya/simstim/internal/api"
@@ -41,13 +42,17 @@ type auxiliaryLoanV1 struct {
 // holder OFD pair, matching new native cap/membership and protected reservation
 // can produce an AuxiliaryBootV1 from it.
 type AuxiliaryBootCandidateV1 struct {
-	primary string
-	line    *StartupLineV1
-	peer    *nativeStartupPeerV1
-	manager *nativeUserManagerV1
-	nonce   string
-	used    bool
-	mu      sync.Mutex
+	primary           string
+	line              *StartupLineV1
+	peer              *nativeStartupPeerV1
+	manager           *nativeUserManagerV1
+	nonce             string
+	used              bool
+	mu                sync.Mutex
+	closed            atomic.Bool
+	closeOnce         sync.Once
+	closeErr          error
+	managerDiagnostic error
 }
 
 // AuxiliaryBootV1 belongs only to this NEW native closed auxiliary helper.
@@ -79,28 +84,36 @@ type AuxiliaryBootV1 struct {
 	closeErr               error
 }
 
-func PrepareAuxiliaryBootCandidateV1(ctx context.Context, primary string, connection net.Conn) (_ *AuxiliaryBootCandidateV1, returned error) {
+func PrepareAuxiliaryBootCandidateV1(ctx context.Context, primary string, connection net.Conn) (partial *AuxiliaryBootCandidateV1, returned error) {
 	if ctx == nil || !validID(primary) || ctx.Err() != nil {
 		return nil, auxiliaryUnavailableV1("the auxiliary candidate has no original owner lifetime or primary")
 	}
 	manager, err := openNativeUserManagerV1(ctx)
-	if err != nil {
-		return nil, err
-	}
+	candidate := &AuxiliaryBootCandidateV1{primary: primary, manager: manager}
 	complete := false
 	defer func() {
 		if !complete {
-			returned = errors.Join(returned, manager.Close())
+			cleanup := candidate.Close()
+			returned = errors.Join(returned, cleanup, candidate.CloseDiagnosticsV4())
+			if cleanup != nil {
+				partial = candidate
+			}
 		}
+
 	}()
+	if err != nil {
+		return nil, err
+	}
 	if err := checkAuxiliarySelfMembershipV1(ctx, manager, primary, 0); err != nil {
 		return nil, err
 	}
 	line, err := newAuxiliaryStartupLineV1(connection)
+	candidate.line = line
 	if err != nil {
 		return nil, err
 	}
 	peer, err := pinUnverifiedNativeHelperPeerV1(connection)
+	candidate.peer = peer
 	if err != nil {
 		return nil, errors.Join(err, line.Close())
 	}
@@ -109,35 +122,39 @@ func PrepareAuxiliaryBootCandidateV1(ctx context.Context, primary string, connec
 		return nil, errors.Join(err, peer.Close(), line.Close())
 	}
 	complete = true
-	return &AuxiliaryBootCandidateV1{primary: primary, line: line, peer: peer, manager: manager, nonce: hex.EncodeToString(nonce[:])}, nil
+	candidate.nonce = hex.EncodeToString(nonce[:])
+	return candidate, nil
 }
 func (candidate *AuxiliaryBootCandidateV1) Challenge() string {
-	if candidate == nil {
+	if candidate == nil || candidate.closed.Load() || candidate.line == nil || candidate.peer == nil || candidate.manager == nil || candidate.nonce == "" {
 		return ""
 	}
 	return candidate.nonce
 }
 func (candidate *AuxiliaryBootCandidateV1) ReadFrame() (proto.Frame, error) {
-	if candidate == nil {
+	if candidate == nil || candidate.closed.Load() || candidate.line == nil || candidate.peer == nil || candidate.manager == nil || candidate.nonce == "" {
 		return proto.Frame{}, auxiliaryUnavailableV1("the auxiliary candidate is absent")
 	}
 	return candidate.line.ReadFrame()
 }
 func (candidate *AuxiliaryBootCandidateV1) WriteFrame(kind proto.Type, value any) error {
-	if candidate == nil {
+	if candidate == nil || candidate.closed.Load() || candidate.line == nil || candidate.peer == nil || candidate.manager == nil || candidate.nonce == "" {
 		return auxiliaryUnavailableV1("the auxiliary candidate is absent")
 	}
 	return candidate.line.WriteFrame(kind, value)
 }
 
 func (candidate *AuxiliaryBootCandidateV1) Accept(ctx context.Context, frame proto.Frame) (_ *AuxiliaryBootV1, returned error) {
-	if candidate == nil || ctx == nil {
+	if candidate == nil || ctx == nil || candidate.closed.Load() || candidate.line == nil || candidate.peer == nil || candidate.manager == nil || candidate.nonce == "" {
 		return nil, auxiliaryUnavailableV1("the auxiliary loan has no original candidate")
 	}
 	candidate.mu.Lock()
 	defer candidate.mu.Unlock()
-	if candidate.used {
+	if candidate.closed.Load() || candidate.used {
 		return nil, auxiliaryUnavailableV1("the original auxiliary loan was already consumed")
+	}
+	if err := candidate.manager.checkNativeManager(); err != nil {
+		return nil, err
 	}
 	candidate.used = true
 	var request proto.Request

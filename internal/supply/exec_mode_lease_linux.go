@@ -24,6 +24,10 @@ type execModeStateV1 struct {
 	writer                  *os.File // parent-only intent writer, never inherited
 	armed, restored, closed bool
 	loans                   int
+	readonly                bool
+	readonlyNonce           [16]byte
+	writerAttempted         bool
+	writerClose             FileCloseFactsV1
 }
 
 func newExecModeLeaseV1(ctx context.Context, guard *RuntimeModeGuard, program *os.File) (*ExecModeLeaseV1, error) {
@@ -37,11 +41,30 @@ func newExecModeLeaseV1(ctx context.Context, guard *RuntimeModeGuard, program *o
 	if err != nil {
 		return nil, err
 	}
-	if !writable {
-		return nil, fmt.Errorf("a read-only artifact mount cannot enter a direct mode phase")
+	if writable {
+		if err := chmodModeArtifact(guard.metadata, 0o555); err != nil {
+			return nil, err
+		}
+	} else {
+		info, err := guard.metadata.Stat()
+		if err != nil || info.Mode() != 0o555 {
+			return nil, errors.Join(err, fmt.Errorf("the original read-only runtime is not unchanged0555"))
+		}
 	}
-	if err := chmodModeArtifact(guard.metadata, 0o555); err != nil {
-		return nil, err
+	if !writable {
+		state := &execModeStateV1{guard: guard, program: program, readonly: true}
+		if _, err := rand.Read(state.readonlyNonce[:]); err != nil {
+			return nil, err
+		}
+		lease := &ExecModeLeaseV1{state: state}
+		if err := lease.CheckProgramV1(ctx, program); err != nil {
+			cleanup := lease.Close()
+			if cleanup != nil {
+				return lease, errors.Join(err, cleanup)
+			}
+			return nil, err
+		}
+		return lease, nil
 	}
 	writer, err := cachefs.OpenFile(guard.modes, modeLeaseName(guard.item), os.O_RDWR, 0o600)
 	if err != nil {
@@ -61,9 +84,12 @@ func newExecModeLeaseV1(ctx context.Context, guard *RuntimeModeGuard, program *o
 		writer.Close()
 		return nil, err
 	}
-	lease := &ExecModeLeaseV1{state: &execModeStateV1{guard: guard, program: program, writer: writer}}
+	lease := &ExecModeLeaseV1{state: &execModeStateV1{guard: guard, program: program, writer: writer, readonly: !writable}}
 	if err := lease.CheckProgramV1(ctx, program); err != nil {
-		lease.Close()
+		cleanup := lease.Close()
+		if cleanup != nil {
+			return lease, errors.Join(err, cleanup)
+		}
 		return nil, err
 	}
 	return lease, nil
@@ -86,7 +112,7 @@ func (state *execModeStateV1) checkProgram(ctx context.Context, program *os.File
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if state.closed || state.guard == nil || state.program == nil || program == nil {
+	if state.closed || state.guard == nil || state.guard.closed || state.guard.lock == nil || state.guard.metadata == nil || state.program == nil || program == nil {
 		return fmt.Errorf("native mode source is closed")
 	}
 	a, err := state.program.Stat()
@@ -175,6 +201,9 @@ func (lease *ExecModeLeaseV1) ArmV1(ctx context.Context) error {
 	if err := state.checkProgram(ctx, state.program); err != nil {
 		return err
 	}
+	if state.readonly {
+		return fmt.Errorf("an original read-only source cannot enter a chmod phase")
+	}
 	if state.armed || state.restored || state.loans == 0 {
 		return fmt.Errorf("native mode phase was not retained for its original private Cmd")
 	}
@@ -210,7 +239,7 @@ func (lease *ExecModeLeaseV1) RestoreFinalV1(ctx context.Context) error {
 		return fmt.Errorf("native mode source is closed")
 	}
 	if state.restored {
-		return nil
+		return state.closeNativeFilesV1()
 	}
 	if err := ctx.Err(); err != nil {
 		return err
@@ -225,22 +254,42 @@ func (lease *ExecModeLeaseV1) RestoreFinalV1(ctx context.Context) error {
 	if err := state.checkHeldIntent(info.Mode()); err != nil {
 		return err
 	}
-	if err := chmodModeArtifact(state.guard.metadata, 0o555); err != nil {
-		return err
+	if !state.readonly {
+		if err := chmodModeArtifact(state.guard.metadata, 0o555); err != nil {
+			return err
+		}
+	} else if info.Mode() != 0o555 {
+		return fmt.Errorf("the original read-only runtime changed mode before final release")
 	}
-	if err := state.program.Sync(); err != nil {
-		return err
+	if !state.readonly {
+		if err := state.program.Sync(); err != nil {
+			return err
+		}
 	}
-	state.guard.intent.Armed = false
-	if err := writeExecModeIntent(ctx, state.guard.intent, state.guard.modes, state.guard.item, state.writer); err != nil {
-		return err
+	if !state.readonly {
+		state.guard.intent.Armed = false
+		if err := writeExecModeIntent(ctx, state.guard.intent, state.guard.modes, state.guard.item, state.writer); err != nil {
+			return err
+		}
 	}
 	state.restored = true
 	// End the actual mode fence NOW, never at VM shutdown. Program ownership
 	// remains with VerifiedRuntime through its existing physical boot lifetime.
-	err = errors.Join(state.writer.Close(), state.guard.Close())
-	state.writer = nil
-	return err
+	return state.closeNativeFilesV1()
+}
+
+func (state *execModeStateV1) closeNativeFilesV1() error {
+	var returned error
+	if state.writer != nil && !state.writerAttempted {
+		state.writerAttempted = true
+		state.writerClose = CloseFileOnceV1(state.writer)
+		returned = errors.Join(returned, state.writerClose.Diagnostic)
+	}
+	returned = errors.Join(returned, state.writerClose.Unknown)
+	if state.guard != nil {
+		returned = errors.Join(returned, state.guard.Close())
+	}
+	return returned
 }
 
 func (lease *ExecModeLeaseV1) Close() error {
@@ -253,17 +302,67 @@ func (lease *ExecModeLeaseV1) Close() error {
 	if state.closed {
 		return nil
 	}
-	if state.armed && !state.restored {
+	if (state.armed || state.readonly && state.loans != 0) && !state.restored {
 		return ErrExecModePending
 	}
-	state.closed = true
-	var err error
-	if state.writer != nil {
-		err = state.writer.Close()
-		state.writer = nil
-	}
-	if state.guard != nil {
-		err = errors.Join(err, state.guard.Close())
+	err := state.closeNativeFilesV1()
+	if (state.writer == nil || state.writerClose.Retired) && (state.guard == nil || state.guard.closed) {
+		state.closed = true
 	}
 	return err
+}
+
+// ReadonlyOriginalV1 reports only this opaque source's checked native origin.
+// Layout metadata and a caller flag cannot create this source class.
+func (lease *ExecModeLeaseV1) ReadonlyOriginalV1(ctx context.Context) (bool, error) {
+	if lease == nil || lease.state == nil {
+		return false, fmt.Errorf("native original runtime source is missing")
+	}
+	state := lease.state
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	if err := state.checkProgram(ctx, state.program); err != nil {
+		return false, err
+	}
+	writable, err := modeMountWritable(state.program)
+	if err != nil {
+		return false, err
+	}
+	if state.readonly && writable {
+		return false, fmt.Errorf("the original read-only runtime mount changed")
+	}
+	return state.readonly, nil
+}
+
+// OriginalItemV1 is a copy of the SAME checked owner's immutable item data.
+// It neither selects an item nor constructs a source or execution authority.
+func (lease *ExecModeLeaseV1) OriginalItemV1(ctx context.Context) (Item, error) {
+	if lease == nil || lease.state == nil {
+		return Item{}, fmt.Errorf("native original runtime source is missing")
+	}
+	state := lease.state
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	if err := state.checkProgram(ctx, state.program); err != nil {
+		return Item{}, err
+	}
+	return state.guard.item, nil
+}
+
+// ReadonlyNonceV1 is correlation data from the SAME actual immutable source.
+// It cannot issue a source; native Cmd/creation/code proof remains mandatory.
+func (lease *ExecModeLeaseV1) ReadonlyNonceV1(ctx context.Context) ([16]byte, error) {
+	if lease == nil || lease.state == nil {
+		return [16]byte{}, fmt.Errorf("native original runtime source is missing")
+	}
+	state := lease.state
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	if !state.readonly {
+		return [16]byte{}, fmt.Errorf("the original source is not read-only")
+	}
+	if err := state.checkProgram(ctx, state.program); err != nil {
+		return [16]byte{}, err
+	}
+	return state.readonlyNonce, nil
 }

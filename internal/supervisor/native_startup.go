@@ -415,6 +415,12 @@ func (s *Supervisor) finishOriginalStartup(cleanup error) error {
 			time.Sleep(100 * time.Millisecond)
 		}
 	}
+	var prepareReply proto.Response
+	if prepare && request != 0 && cleanup == nil {
+		var replyErr error
+		prepareReply, replyErr = s.sandboxPrepareCleanupReplyV1(request)
+		cleanup = errors.Join(cleanup, replyErr)
+	}
 	if s.bootOperation != nil {
 		cleanup = errors.Join(cleanup, s.bootOperation.CloseWithError())
 	}
@@ -436,7 +442,13 @@ func (s *Supervisor) finishOriginalStartup(cleanup error) error {
 		start.mu.Unlock()
 	}
 	if request != 0 && cleanup == nil {
-		cleanup = start.line.WriteFrame(proto.TResponse, proto.Response{ID: request, OK: true})
+		reply := proto.Response{ID: request, OK: true}
+		if prepare {
+			reply = prepareReply
+		}
+		if cleanup == nil {
+			cleanup = start.line.WriteFrame(proto.TResponse, reply)
+		}
 	}
 	cleanup = errors.Join(cleanup, start.line.Close())
 	for prepare && cleanup != nil {
