@@ -119,7 +119,7 @@ func TestErrorsOfTheCommandLine(t *testing.T) {
 		{[]string{"completion", "bash", "extra"}, 2, []string{"completion bash takes no words, and got 1 word"}},
 		{[]string{"new", "box", "--detatch"}, 2, []string{"new has no flag --detatch", `Did you mean "--detach"?`, "Try: " + brand.Name + " new box --detach"}},
 		{[]string{"new", "--dir"}, 2, []string{"--dir needs a value", "Try: " + brand.Name + " new --help"}},
-		{[]string{"rename", "a", "b", "c"}, 2, []string{"rename takes <host>/<session> <new-name>, and got 3 words"}},
+		{[]string{"rename", "a", "b", "c"}, 2, []string{"rename takes <host>/<session> <name>, and got 3 words"}},
 		{[]string{"attach", "boxe/auth-fix"}, 3, []string{`no host named "boxe"`, `Did you mean "box"?`, "Try: " + brand.Name + " attach box/auth-fix"}},
 		{[]string{"attach", "bx/auth-fix"}, 3, []string{`no host named "bx"`, "Try: " + brand.Name + " host add bx"}},
 		{[]string{"new", "bo", "--name", "bo"}, 3, []string{`Did you mean "box"?`, "Try: " + brand.Name + " new box --name bo"}},

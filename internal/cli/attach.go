@@ -51,9 +51,12 @@ func attachSession(ctx context.Context, h client.Host, id, name string) (ended, 
 
 func attachCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:     "attach [<host>/<session> | -]",
+		Use:     "attach [<host>/<session>|-]",
 		Aliases: []string{"a"},
-		Short:   "Attach to a session (detach with Ctrl+\\); - is the last one, and without one you pick from a list",
+		Short:   "Attach to a session",
+		Long: "Shows the session in this terminal, as the agent draws it. The detach key, Ctrl+\\ unless\n" +
+			"config.toml names another, leaves it, and the session keeps running. The address - is the\n" +
+			"last session that you attached to. Without an address, you pick a session from a list.",
 		Example: "  " + brand.Name + " attach my-vps/auth-fix\n" +
 			"  " + brand.Name + " attach -   # the last session you attached to\n" +
 			"  " + brand.Name + " attach     # pick one from a list",
@@ -164,9 +167,11 @@ func pickRefresh(hosts []client.Host, cached []tui.PickRow) func(context.Context
 
 func flipCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "flip [<host>/<session>]",
-		Short: "Switch sessions quickly: the session list of every host, then attach",
-		Args:  cobra.MaximumNArgs(1),
+		Use:   "flip [<host>/<session>|-]",
+		Short: "Switch sessions: pick from the sessions of every host, and attach",
+		Example: "  " + brand.Name + " flip\n" +
+			"  " + brand.Name + " flip my-vps/auth-fix   # attach at once, as attach does",
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) == 1 {
 				return attachCmd().RunE(cmd, args)

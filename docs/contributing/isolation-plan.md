@@ -942,7 +942,7 @@ At the end of phase 1, `simstim new box --wall process` runs a session in a sand
   - `new --in <s> --agent codex` in a Claude Code sandbox starts Codex with no restart, and the Claude Code session keeps running. `new --in <s> --wall none` is a usage error (spec 6.11).
   - `exec` keeps stdout and stderr apart. A client that closes its side kills the command (spec 10.2 and 10.5).
 - **Tests:** unit tests, golden tests of the rows, and end-to-end runs of `shell` and `exec` on a process wall.
-- **Docs:** new `docs/how-to/shells.md`, the reference through `just docs`, `docs/contributing/ux-spec.md`.
+- **Docs:** new `docs/how-to/shells.md`, the reference through `just docs`, `docs/contributing/ux-spec.md`. Add the table of [CLI spec 5.2](cli-spec.md#52-exec), the codes of `exec`, to `help exit-codes` and to `docs/reference/exit-codes.md` (`exitCodesText` in `internal/cli/topics.go` and `exitCodesPage` in `cmd/docgen`).
 - **CHANGELOG:** Added. "`shell` opens a terminal in the same sandbox as the agent, and `exec` runs one command there."
 - **Depends on:** P1.4, P1.5, P1.8.
 - **Questions:** [47](isolation-spec.md#15-open-questions), [48](isolation-spec.md#15-open-questions), [93](isolation-spec.md#15-open-questions).

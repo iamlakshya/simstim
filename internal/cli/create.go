@@ -49,8 +49,8 @@ func powersOffWhenIdle(p string) bool { return onboard.PowersOffWhenIdle(p) }
 func hostCreateCmd() *cobra.Command {
 	var req provider.Request
 	cmd := &cobra.Command{
-		Use:   "create <provider> [name]",
-		Short: "Make a new host with a provider (lima, docker, e2b), install the helper and connect",
+		Use:   "create <provider> [<name>]",
+		Short: "Make a host with lima, docker or e2b, and connect it",
 		Long: "Make a host and set it up in one step: a local Lima VM, a Docker container (experimental),\n" +
 			"or an E2B sandbox. Creating a host counts as consent to install the helper on it;\n" +
 			"what is installed, and where, is printed. The name defaults to the provider's name.",
@@ -126,8 +126,8 @@ func applyIdle(ctx context.Context, h client.Host) error {
 func hostDestroyCmd() *cobra.Command {
 	var force, yes bool
 	cmd := &cobra.Command{
-		Use:   "destroy <name>",
-		Short: "Delete a host made by `host create`: its VM, container or sandbox, and every session on it",
+		Use:   "destroy <host>",
+		Short: "Delete a created host: its machine and every session on it",
 		Long: "Delete the machine behind a host, then forget the host. It asks first, and refuses while a\n" +
 			"session is working unless you pass --force.",
 		Example: "  " + brand.Name + " host destroy lima",
@@ -220,8 +220,8 @@ func workingSessions(ctx context.Context, h client.Host, lc client.Lifecycle) []
 
 func hostIdleCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "idle <name> <duration|never>",
-		Short: "Set how long a created host may idle before it stops, for example 30m, or never",
+		Use:   "idle <host> <duration>|never",
+		Short: "Set how long a created host may idle before it stops",
 		Example: "  " + brand.Name + " host idle lima 30m" + "\n" +
 			"  " + brand.Name + " host idle lima never",
 		Args: cobra.ExactArgs(2),

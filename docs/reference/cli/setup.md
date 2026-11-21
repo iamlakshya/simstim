@@ -18,7 +18,7 @@ Without a terminal, name the host with `--host` or `--create`, and pass `--yes`.
 
 ```sh
 simstim setup
-simstim setup --host my-server --agents claude,codex
+simstim setup --host my-vps --agents claude,codex
 simstim setup --create lima --agents claude --yes --no-login
 ```
 

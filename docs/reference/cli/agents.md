@@ -10,6 +10,13 @@ List the agents, and install one on a host.
 simstim agents
 ```
 
+## Examples
+
+```sh
+simstim agents ls
+simstim agents install claude --host my-vps
+```
+
 ## Flags from the parent command
 
 | Flag | What it does |
@@ -23,7 +30,7 @@ simstim agents
 
 | Command | What it does |
 | --- | --- |
-| [`agents install`](agents_install.md) | Install an agent on a host with its vendor's installer, in a session you can watch |
+| [`agents install`](agents_install.md) | Install an agent on a host with its official installer |
 | [`agents ls`](agents_ls.md) | List the agents in the agent table, with how each one installs |
 
 See [all commands](_index.md).

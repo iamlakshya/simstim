@@ -7,7 +7,7 @@ title: "simstim host status"
 Ask the provider or provider script whether the host is running.
 
 ```text
-simstim host status <name> [flags]
+simstim host status <host> [flags]
 ```
 
 ## Examples

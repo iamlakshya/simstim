@@ -1,0 +1,80 @@
+== --help
+Run any coding agent on any host, and use it as if it ran here
+
+Usage:
+  <name>            opens the launcher
+  <name> [command]
+
+Examples:
+  <name> setup                       # connect a host, step by step
+  <name> new my-vps --agent claude   # start an agent, and attach to it
+  <name> attach my-vps/auth-fix      # go back to a session
+
+Sessions:
+  new         Start a session on a host, and attach to it
+  attach      Attach to a session
+  resume      Start a session's agent again after it ended, and attach to it
+  ls          List sessions on every host
+  kill        Stop a session and remove it
+  rename      Rename a session
+  send        Type text into a session without attaching, then press Enter
+  ports       List the TCP ports a session's processes listen on
+  forward     Forward a session's ports to localhost: all, or those you name
+  pull        Bring a session's branch into the git repository you are in
+  flip        Switch sessions: pick from the sessions of every host, and attach
+
+Hosts:
+  host        Add, create, list, test and remove hosts
+
+Agents:
+  agents      List the agents, and install one on a host
+
+Setup and help:
+  setup       Set up step by step: a host, its agents, and their logins
+  doctor      Check this machine and its terminal
+  debug       Record why a session goes wrong: debug files, profiles and traces
+  config      Show the configuration
+  demo        Try the launcher with sample data (nothing connects anywhere)
+  version     Print the version
+  completion  Generate the autocompletion script for the specified shell
+  help        Show the help of a command or a topic
+
+Flags:
+      --debug categories[="attach,net,memory,launcher,runtime"]
+                turn on the debug mode, with every category, or with the
+                categories listed: attach, net, memory, launcher, runtime.
+                A list binds only in the = form, such as --debug=net
+      --debug-file file
+                write the client's debug records to this file. On its own,
+                it turns on every category (<NAME>_DEBUG_FILE does the same)
+  -h, --help
+                help for <name>
+      --no-color
+                print no colour (NO_COLOR does the same)
+      --no-input
+                ask nothing: a question that needs an answer fails with
+                exit code 4, and names the flag that answers it
+                (<NAME>_NO_INPUT=1 does the same)
+  -v, --version
+                version for <name>
+
+Additional help topics:
+  concepts    The words that this tool uses
+  exit-codes  What each exit code means
+
+Use "<name> [command] --help" for more information about a command.
+== help concepts
+The words that <name> uses, and what each one means.
+
+  host               The Linux machine, VM or container that runs sessions.
+  helper             The program on each host that runs its sessions.
+  session            A terminal on a host, which keeps running when you leave.
+  address            <host>/<session>. attach and flip take - for the last one.
+  agent              A coding agent, such as Claude Code or Codex.
+  launcher           The screen of hosts and sessions that <name> opens.
+  attach and detach  Attach shows a session in this terminal. Ctrl+\ detaches by
+                     default, and attach.detach_key can change it.
+  worktree           A session's own git worktree and branch (new --worktree).
+  secret             A value from a command on this computer, such as a token.
+  alert              A message from a host when a session needs you or fails.
+  provider script    A script of yours that starts, stops and checks a host.

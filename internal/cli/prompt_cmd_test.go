@@ -145,6 +145,9 @@ func TestHostAddCancelAfterTheInstall(t *testing.T) {
 	if !strings.Contains(errOut, "installed") {
 		t.Errorf("the install did not run:\n%s", errOut)
 	}
+	if !strings.Contains(errOut, "keep sessions running after you log out") || internalWords.MatchString(errOut) {
+		t.Errorf("the helper consent did not explain its changes in plain English:\n%s", errOut)
+	}
 }
 
 // The agents that host add installs go in the prompter's log as they are

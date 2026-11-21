@@ -7,7 +7,7 @@ title: "simstim new"
 Start a session on a host, and attach to it.
 
 ```text
-simstim new <host> [-- command…] [flags]
+simstim new <host> [-- <command>…] [flags]
 ```
 
 ## Examples

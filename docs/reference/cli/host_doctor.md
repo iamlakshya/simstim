@@ -7,10 +7,12 @@ title: "simstim host doctor"
 Check a host's setup, and with `--fix` fix what it can.
 
 ```text
-simstim host doctor <name> [flags]
+simstim host doctor <host> [flags]
 ```
 
-Checks a host: systemd and linger, the restore unit, terminfo, memory caps, swap, the session sockets and the agents. It warns when the host has less memory than an agent's docs ask for, and when a program in one session could drive another through its socket. For a VM made by host create lima, it also checks, on this computer, that the VM cannot reach services on this computer's loopback address. With `--fix` it offers to fix linger, the restore unit, Ghostty's terminfo, a broken current helper link, stale session sockets and old helper versions. Each fix is shown and explained before it runs; one that needs root is printed for you.
+Checks systemd, terminfo, memory caps, swap and the agents on a host. It checks that sessions keep running after you log out. It also checks the start-up entry that brings sessions back after a reboot. It warns when the host has less memory than an agent's docs ask for. It warns when a program in one session could drive another through its socket. For a VM made by host create lima, it checks, on this computer, that the VM cannot reach services on this computer's loopback address.
+
+With `--fix` it offers to fix what it found: sessions that stop when you log out, the start-up entry and Ghostty's terminfo. It also fixes a broken current helper link, stale session sockets and old helper versions. Each fix is shown and explained before it runs. A fix that needs root is printed for you.
 
 ## Examples
 

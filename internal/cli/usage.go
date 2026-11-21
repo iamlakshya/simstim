@@ -86,7 +86,8 @@ func unknownWord(parent *cobra.Command, typed string, lineCmd *cobra.Command, sk
 	} else {
 		var things []named
 		for _, sub := range parent.Commands() {
-			if sub.IsAvailableCommand() {
+			// A help topic counts: help and the root print it.
+			if sub.IsAvailableCommand() || IsTopic(sub) {
 				things = append(things, named{sub.Name(), append([]string{sub.Name()}, sub.Aliases...)})
 			}
 		}
@@ -174,9 +175,10 @@ func missingArgument(c *cobra.Command, what string) error {
 }
 
 // useArgs splits the arguments of a command's Use into the words a user
-// types: "rename <host>/<session> <new-name>" gives "<host>/<session>" and
-// "<new-name>". An optional part keeps its brackets, and choices, as in
-// "<host>/<session> | -", join with "or".
+// types: "rename <host>/<session> <name>" gives "<host>/<session>" and
+// "<name>". An optional part keeps its brackets. Choices, as in
+// "<host>/<session>|-", join with "or", with or without spaces around the
+// bar.
 func useArgs(use string) []string {
 	_, rest, _ := strings.Cut(use, " ")
 	var words []string
@@ -201,20 +203,33 @@ func useArgs(use string) []string {
 			choices = append(choices, words[i+2])
 			i += 2
 		}
-		out = append(out, strings.Join(choices, " or "))
+		w := strings.Join(choices, " or ")
+		if !strings.HasPrefix(w, "[") {
+			w = strings.ReplaceAll(w, "|", " or ")
+		}
+		out = append(out, w)
 	}
 	return out
 }
 
-// firstExample is the first line of a command's examples, without its
-// indent.
+// firstExample is the first command of a command's examples, without its
+// indent, on one line: the lines that a backslash continues join it.
 func firstExample(ex string) string {
+	first := ""
 	for _, l := range strings.Split(ex, "\n") {
-		if l = strings.TrimSpace(l); l != "" {
-			return l
+		l = strings.TrimSpace(l)
+		if l == "" && first == "" {
+			continue
 		}
+		first = strings.TrimSpace(first + " " + l)
+		// A line that ends with a backslash goes on in the next one.
+		if before, ok := strings.CutSuffix(first, "\\"); ok {
+			first = strings.TrimSpace(before)
+			continue
+		}
+		return first
 	}
-	return ""
+	return first
 }
 
 // parseFailed is the annotation of a command whose flags did not parse.

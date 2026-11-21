@@ -552,35 +552,58 @@ A repeat extends the notice instead of adding a line.
 
 The launcher is the home, and every action also has a command, for scripts and terminal keybindings.
 
+The root help groups the commands as this table does: Sessions, Hosts, Agents, and Setup and help ([CLI spec, 8.1](cli-spec.md#81-the-root-help)). Every command has an example in its help, and `simstim help concepts` explains the words that the tool uses.
+
 | Command | Does |
 | --- | --- |
 | `simstim` | Opens the launcher |
-| `simstim setup [--host h \| --create lima\|docker\|e2b] [--name n] [--agents a,b] [--yes] [--no-login]` | The guided setup: where agents run, the host, the agent checklist, the installs and the logins, then the first session's command |
-| `simstim host add <name> [target] [--ssh-config f] [--provider-script s --wake] [--yes]` | Connects a host: probe, consent, install, setup, doctor; with input on, the agent checklist when an agent is missing |
-| `simstim host ls`, `test`, `doctor`, `rm` | Host management. `host ls`, `test` and `doctor` take `--json` |
-| `simstim host restore <name> [--all] [--json]` | Starts again the sessions that a host restart stopped (or, with `--all`, a crash) |
-| `simstim host start\|stop\|status <name>` | Runs the host's provider script. `status` takes `--json` |
-| `simstim new <host> [--agent claude] [--dir ~/src/app [--mkdir]] [--name x] [--worktree [--base ref]] [--memory-max 4G] [--detach [--json]] [-- cmd…]` | Starts a session, and attaches unless `--detach` |
-| `simstim ls [--host h] [--json]` | Lists sessions, with their state and where the state came from, and why an agent ended: `errored (out of memory)` |
-| `simstim attach [<host>/<session> \| -]` | Attaches directly; `-` is the last session. Good for a Ghostty keybinding. Without a session, and with input on, it opens the picker: an inline list of sessions, from the session cache, with a filter. To a session whose agent has ended, it says why and what to try, as at the end of an attach. |
+| **Sessions** | |
+| `simstim new <host> [--agent claude] [--dir ~/src/app [--mkdir]] [--name x] [--worktree [--base ref]] [--secret NAME] [--memory-max 4G] [--inline] [--setup \| --no-setup] [--detach [--json]] [-- <command>…]` | Starts a session, and attaches unless `--detach` |
+| `simstim attach [<host>/<session>\|-]` | Attaches directly. `-` is the last session. Good for a Ghostty keybinding. Without a session, and with input on, it opens the picker: an inline list of sessions, from the session cache, with a filter. To a session whose agent has ended, it says why and what to try, as at the end of an attach. `a` is its alias. |
 | `simstim resume <host>/<session> [--memory-max 4G] [--secret NAME] [--detach [--json]]` | Starts an ended agent again in its session, with its resume command, and attaches unless `--detach`. Without `--memory-max`, the cap is the one the session asked for. |
-| `simstim flip [<host>/<session>]` | A quick switch: the sessions of every host in one list, then attach |
-| `simstim send <host>/<session> <text> [--no-enter]` | Types text into a session without attaching |
-| `simstim rename <host>/<session> <name>`, `kill <host>/<session>` | Renames; stops and removes (keeping a worktree that has work) |
-| `simstim ports <host>/<session>`, `forward <host>/<session> [port…]` | Lists the ports a session listens on; forwards them to localhost |
-| `simstim demo [--empty]` | The launcher on sample data; nothing connects anywhere |
+| `simstim ls [--host h] [--json]` | Lists sessions, with their state and where the state came from, and why an agent ended: `errored (out of memory)` |
+| `simstim kill <host>/<session>` | Stops a session and removes it, and keeps a worktree that has work. `rm` and `delete` are its aliases. |
+| `simstim rename <host>/<session> <name>` | Renames a session |
+| `simstim send <host>/<session> <text> [--no-enter]` | Types text into a session without attaching, then presses Enter |
+| `simstim ports <host>/<session> [--json]` | Lists the ports a session listens on |
+| `simstim forward <host>/<session> [<port>…]` | Forwards a session's ports to localhost, until Ctrl+C |
+| `simstim pull <host>/<session> [--into <branch>] [--force]` | Brings a session's branch into the git repository in the current folder |
+| `simstim flip [<host>/<session>\|-]` | A quick switch: the sessions of every host in one list, then attach |
+| **Hosts** | |
+| `simstim host add <name> [<ssh-target>] [--ssh-config f] [--label k=v] [--provider-script s --wake] [--yes]` | Connects a host: probe, consent, install, setup and doctor, and with input on the agent checklist when an agent is missing |
+| `simstim host ls [--json]` | Lists the hosts |
+| `simstim host test <host> [--json]` | Checks that a host answers, and how fast |
+| `simstim host doctor <host> [--fix [--yes]] [--json]` | Checks a host's setup, and with `--fix` fixes what it can |
+| `simstim host rm <host>` | Forgets a host (its sessions keep running) |
+| `simstim host restore <host> [--all] [--json]` | Starts again the sessions that a host restart stopped (or, with `--all`, a crash) |
+| `simstim host create lima\|docker\|e2b [<name>] [--cpus n] [--memory 8] [--disk 40] [--image i] [--template t] [--idle-stop 30m] [--token-command c]` | Makes a host with a provider, installs the helper and connects |
+| `simstim host destroy <host> [--yes] [--force]` | Deletes a created host's VM, container or sandbox, and every session on it |
+| `simstim host idle <host> <duration>\|never` | Sets how long a created host may idle before it stops |
+| `simstim host start\|stop\|status <host>` | Runs the host's provider or provider script. `status` takes `--json` |
+| `simstim host alerts <host> [--json]` | Shows where a host sends alerts, and the last deliveries |
+| `simstim host alerts set <host> [--ntfy url \| --webhook url \| --command c] [--add] [--events e,f] [...]` | Chooses where a host sends alerts, and which ones |
+| `simstim host alerts test <host> [--event e]`, `host alerts log <host> [--lines n] [--json]`, `host alerts off <host>` | Sends a test alert, shows the last deliveries, or turns alerts off |
+| **Agents** | |
+| `simstim agents ls [--json]` | Lists the agent table, with how each agent installs |
+| `simstim agents install <agent> [--host h] [--force]` | Installs an agent on a host with its official installer, in a session you watch |
+| **Setup and help** | |
+| `simstim setup [--host h \| --create lima\|docker\|e2b] [--name n] [--agents a,b] [--yes] [--no-login]` | The guided setup: where agents run, the host, the agent checklist, the installs and the logins, then the first session's command |
+| `simstim doctor [--fix [--yes]] [--json]` | Checks this computer: ssh, the config files and the secrets' commands |
 | `simstim doctor keys` | Prints each key event as the terminal sends it, and marks the client's own keys |
 | `simstim doctor terminal` | Asks the terminal what it supports: kitty keys, synchronized output, colours, and more |
 | `simstim --debug[=<categories>] <command>` | Turns on the debug mode for one command, or the launcher: every category, or those listed (`attach`, `net`, `memory`, `launcher`, `runtime`). A command prints the debug file's path on stderr first. The launcher shows its debug mark (2.2), and a notice with the path |
 | `simstim --debug-file <file> <command>` | Names the client's debug file, and turns on every category. `SIMSTIM_DEBUG_FILE` does the same |
 | `simstim debug start <host>/<session> [--for 30m] [--only <categories>]`, `debug stop <host>/<session>` | Turns the debug of a running session on, until `debug stop` or the time limit, or off at once |
-| `simstim debug save <host>/<session>` | Saves the last seconds of the session's flight recorder on the host |
-| `simstim debug profile <host>/<session> cpu\|heap\|goroutine [--for 30s]` | Writes a profile of the session's holder on the host. `--for` is for `cpu` only |
-| `simstim debug bundle [<host> \| <host>/<session>] [--ssh]` | Writes one archive of the debug files in the current folder, with private values replaced. Nothing is uploaded |
-| `simstim version [--json]`, `completion zsh\|bash\|fish` | Housekeeping |
+| `simstim debug save <host>/<session>` | Saves the session's recent debug record on the host: the last seconds of its execution trace |
+| `simstim debug profile <host>/<session> cpu\|heap\|goroutine [--for 30s]` | Writes a profile of the session's process on the host. `--for` is for `cpu` only |
+| `simstim debug bundle [<host>\|<host>/<session>] [--ssh]` | Writes one archive of the debug files in the current folder, with private values replaced. Nothing is uploaded |
+| `simstim config path`, `config keymap [--json]` | Prints where the configuration lives, or the launcher's commands and their keys |
+| `simstim demo [--empty]` | The launcher on sample data (nothing connects anywhere) |
+| `simstim version [--json]`, `completion bash\|zsh\|fish\|powershell` | Housekeeping |
+| `simstim help [<command>]`, `help concepts`, `help exit-codes` | The help of a command, the words that the tool uses, or the exit codes |
 | `simstim --no-input <command>`, `simstim --no-color <command>` | Turn questions or colour off for any command. `SIMSTIM_NO_INPUT` and `NO_COLOR` do the same. With input off, a question that needs an answer fails with exit code 4, and names the flag that answers it ([CLI spec, section 6](cli-spec.md#6-prompts-pickers-and-input-c4)) |
 
-**Exit codes** follow [the CLI spec, section 5](cli-spec.md#5-exit-codes-c2):
+**Exit codes** follow [the CLI spec, section 5](cli-spec.md#5-exit-codes-c2). `simstim help exit-codes` prints them:
 
 | Code | Meaning |
 | --- | --- |

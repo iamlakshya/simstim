@@ -10,6 +10,12 @@ Print where the configuration lives.
 simstim config path
 ```
 
+## Examples
+
+```sh
+simstim config path
+```
+
 ## Flags from the parent command
 
 | Flag | What it does |

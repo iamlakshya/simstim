@@ -10,6 +10,13 @@ List the agents in the agent table, with how each one installs.
 simstim agents ls [flags]
 ```
 
+## Examples
+
+```sh
+simstim agents ls
+simstim agents ls --json
+```
+
 ## Flags
 
 | Flag | What it does |

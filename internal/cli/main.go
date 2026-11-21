@@ -39,9 +39,12 @@ var stopDebug = client.StopDebug
 // Root builds the command tree.
 func Root() *cobra.Command {
 	root := &cobra.Command{
-		Use:           brand.Name,
-		Short:         "Run any coding agent on any host, and use it as if it ran here",
-		Long:          brand.DisplayName + " runs coding agents in sessions on hosts you reach with SSH.\nSessions keep running when you leave. Run it with no arguments for the launcher.",
+		Use:   brand.Name,
+		Short: "Run any coding agent on any host, and use it as if it ran here",
+		// The reference index and the man page print Long. The root help
+		// says the same in its usage line, and leaves Long out.
+		Long:          rootLong,
+		Example:       rootExample(),
 		Version:       fmt.Sprintf("%s (protocol %s)", version.Version, version.Protocol),
 		SilenceUsage:  true,
 		SilenceErrors: true,
@@ -51,12 +54,14 @@ func Root() *cobra.Command {
 		},
 	}
 	root.AddCommand(setupCmd(), hostCmd(), newCmd(), lsCmd(), agentsCmd(), attachCmd(), resumeCmd(), flipCmd(), sendCmd(), killCmd(), renameCmd(), portsCmd(), forwardCmd(), pullCmd(), doctorCmd(), debugCmd(), configCmd(), demoCmd(), versionCmd())
+	root.AddCommand(topics()...)
 	addRootFlags(root)
 	addDebugFlags(root)
 	// Cobra adds these two itself when it runs, after guard would have
-	// looked: add them now, so that they get the same errors.
+	// looked: add them now, so that they get the same errors and help.
 	root.InitDefaultHelpCmd()
 	root.InitDefaultCompletionCmd()
+	teach(root)
 	for _, c := range root.Commands() {
 		if c.Name() == "help" {
 			c.Args = helpArgs
