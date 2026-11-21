@@ -3,7 +3,7 @@
   // tools pinned by scripts/setup.sh. Open the repo in VS Code or any
   // devcontainer-aware editor, or run `devcontainer up`.
   "name": "dev",
-  // 2-1.26-bookworm, pinned by digest; Dependabot keeps it current.
+  // Bootstrap Go image, pinned by digest. Setup selects the exact module SDK.
   "image": "mcr.microsoft.com/devcontainers/go:2-1.26-bookworm@sha256:2b79ecf3072235dd9bf0074e7dc5c6c9df66e0173cac0ec92a0603e1f14a918a",
   "postCreateCommand": "scripts/setup.sh",
   "remoteEnv": {

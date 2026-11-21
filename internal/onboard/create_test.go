@@ -26,15 +26,19 @@ import (
 // fakeProvider makes machines in memory. With block, Create waits for its
 // context to end, as a slow VM would when the user presses Ctrl+C.
 type fakeProvider struct {
-	name  string
-	m     *clienttest.Machine
-	block bool
+	name     string
+	m        *clienttest.Machine
+	block    bool
+	onCreate func()
 }
 
 func (p fakeProvider) Name() string { return p.name }
 
 func (p fakeProvider) Create(ctx context.Context, req provider.Request) (client.Host, error) {
 	fmt.Fprintln(req.Out, "  made a fake machine")
+	if p.onCreate != nil {
+		p.onCreate()
+	}
 	if p.block {
 		p.m.SetState(client.MachineStarting)
 		<-ctx.Done()

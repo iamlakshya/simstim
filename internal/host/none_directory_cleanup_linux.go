@@ -174,6 +174,12 @@ func (cold *NoneColdResumeV1) checkRetainedDirectorySourceV1(ctx context.Context
 	// This exact transaction was issued by cold.Check before mutation. After
 	// accepted cleanup starts, client cancellation cannot manufacture another
 	// subject or interrupt the retained physical unlink into a fake success.
+	if cold.managed != nil {
+		if cold.closed || !cold.bound || cold.handed || cold.operation == nil || cold.operation.noneCold != cold || BootID() != cold.boot {
+			return sessionLeaseError("the managed None directory cleanup lost its original bound continuation")
+		}
+		return errors.Join(cold.managed.checkRetainedCleanupV1(ctx), cold.checkMetadataV1(ctx))
+	}
 	if cold.closed || !cold.bound || cold.handed || cold.operation == nil || cold.operation.noneCold != cold || cold.holder == nil || BootID() != cold.boot {
 		return sessionLeaseError("the actual original None cleanup continuation ended or changed")
 	}

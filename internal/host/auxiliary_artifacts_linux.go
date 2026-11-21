@@ -300,8 +300,13 @@ func (artifacts *auxiliaryArtifactsV1) checkRetainedBootDescriptorsV1(ctx contex
 		return err
 	}
 	current, err := vmneed.EncodeV1(*parsed, runtime.GOARCH)
-	if err != nil || !bytes.Equal(encoded, current) {
-		return errors.Join(auxiliaryUnavailableV1("the original protected auxiliary selection changed"), err)
+	if err != nil {
+		return err
+	}
+	if !bytes.Equal(encoded, current) {
+		if err := checkColdRestartSelectionV1(artifacts.vacancy.operation, artifacts.vacancy.need, artifacts.vacancy.runtime, snapshot); err != nil {
+			return err
+		}
 	}
 	for _, role := range artifacts.runtime {
 		info, err := role.file.Stat()

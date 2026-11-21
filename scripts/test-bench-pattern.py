@@ -99,12 +99,17 @@ class ConfirmationTests(unittest.TestCase):
             for package in PACKAGES:
                 (root / package).mkdir(parents=True)
             (root / "bin").mkdir()
-            for name in ("bench.sh", "bench-pattern.py"):
+            # This is a source checkout: bench.sh selects its exact compiler
+            # from go.mod even when this case does not test checksum writes.
+            toolchain = next(line for line in (ROOT.parent / "go.mod").read_text().splitlines()
+                             if line.startswith("toolchain "))
+            (root / "go.mod").write_text(
+                "module example.invalid/source-repository\n\ngo 1.26\n\n" + toolchain + "\n")
+            for name in ("bench.sh", "bench-pattern.py", "go-build-tags.sh"):
                 shutil.copyfile(ROOT / name, root / "scripts" / name)
             evidence = root / "evidence"
             repository_before = {}
             if repository:
-                (root / "go.mod").write_text("module example.invalid/source-repository\n\ngo 1.26\n")
                 (root / "go.sum").write_text("example.invalid/existing v1.0.0 h1:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=\n")
                 repository_before = {name: (root / name).read_bytes() for name in ("go.mod", "go.sum")}
             protected = root / "protected"
@@ -166,15 +171,18 @@ version)
                 tool_sum='h1:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='
                 if [ "${BENCH_STATS_FAIL_PHASE:-}" = version ]; then tool_version='v0.0.0-wrong-version'; fi
                 if [ "${BENCH_STATS_FAIL_PHASE:-}" = checksum ]; then tool_sum='h1:wrong-checksum'; fi
-                printf '%s: go1.26.11\n\tpath\tgolang.org/x/perf/cmd/benchstat\n\tmod\tgolang.org/x/perf\t%s\t%s\n' "$3" "$tool_version" "$tool_sum"
+                printf '%s: %s\n\tpath\tgolang.org/x/perf/cmd/benchstat\n\tmod\tgolang.org/x/perf\t%s\t%s\n' "$3" "$BENCH_TOOLCHAIN" "$tool_version" "$tool_sum"
                 ;;
-            *) printf '%s: go1.26.11\n' "$3" ;;
+            *) printf '%s: %s\n' "$3" "$BENCH_TOOLCHAIN" ;;
         esac
     else
-        printf 'go version go1.26.11 fixture/fixture\n'
+        printf 'go version %s fixture/fixture\n' "$BENCH_TOOLCHAIN"
     fi
     ;;
 test)
+    [ "$2" = -tags=userns_cohort_v3,http2legacy ] || exit 1
+    shift 2
+    set -- test "$@"
     case "$4" in
         */bin-base/*) side=base ;;
         */bin-head/*) side=head ;;
@@ -277,7 +285,9 @@ cat "$out"
                                BENCH_STATS_LOG=str(stats), BENCH_TOOL_LOG=str(tools),
                                BENCH_STATS_FIXTURE=str(root / "bin/stats"), BENCH_WORKTREE_LOG=str(worktrees),
                                BENCH_OUTPUT_DIR=str(evidence), BENCH_ROUNDS="1", BENCH_AGAIN_ROUNDS="2",
-                               BENCH_MAX="15", BENCH_REAL_GO=shutil.which("go"), **settings)
+                               BENCH_MAX="15", BENCH_REAL_GO=shutil.which("go"),
+                               BENCH_TOOLCHAIN=next(line.split()[1] for line in (ROOT.parent / "go.mod").read_text().splitlines()
+                                                    if line.startswith("toolchain ")), **settings)
             if not inside_module_tmp:
                 env["TMPDIR"] = outside_tmp
             if default_output:

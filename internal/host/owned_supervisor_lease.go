@@ -29,6 +29,7 @@ type OwnedSupervisorLease struct {
 	once           sync.Once
 	closeErr       error
 	prepareCleanup *SandboxPrepareParentCleanupV1
+	custody        *custodyInheritanceV1
 	managerCleanup interface {
 		Close() error
 		checkNativeRetiredV3(context.Context) error
@@ -46,7 +47,19 @@ func AcquireOwnedSupervisorLease(ctx context.Context, id string) (*OwnedSupervis
 	}
 	var native *sessionFileLease
 	var err error
-	if os.Getenv(holderLockFDEnv) == "3" {
+	custody, inherited, err := inheritManagerCustodyV1(ctx, id)
+	if err != nil {
+		if custody != nil {
+			cleanup := custody.Close()
+			if cleanup != nil {
+				return &OwnedSupervisorLease{custody: custody}, errors.Join(err, cleanup)
+			}
+		}
+		return nil, err
+	}
+	if inherited {
+		native = custody.native
+	} else if os.Getenv(holderLockFDEnv) == "3" {
 		_ = os.Unsetenv(holderLockFDEnv)
 		unix.CloseOnExec(3)
 		file := os.NewFile(3, "inherited-holder-lock")
@@ -62,10 +75,10 @@ func AcquireOwnedSupervisorLease(ctx context.Context, id string) (*OwnedSupervis
 	}
 	var generation [16]byte
 	if _, err := rand.Read(generation[:]); err != nil {
-		return nil, errors.Join(err, native.Close())
+		return nil, errors.Join(err, native.Close(), custody.Close())
 	}
 	lifetime, cancel := context.WithCancel(ctx)
-	return &OwnedSupervisorLease{native: native, lifetime: lifetime, cancel: cancel, generation: hex.EncodeToString(generation[:])}, nil
+	return &OwnedSupervisorLease{native: native, custody: custody, lifetime: lifetime, cancel: cancel, generation: hex.EncodeToString(generation[:])}, nil
 }
 
 func adoptSupervisorFileLease(ctx context.Context, id string, file *os.File) (result *sessionFileLease, failure error) {
@@ -126,7 +139,7 @@ func (owner *OwnedSupervisorLease) CloseWithError() error {
 			owner.cancel()
 		}
 		owner.mu.Lock()
-		pending, native, managerCleanup := owner.pending, owner.native, owner.managerCleanup
+		pending, custody, native, managerCleanup := owner.pending, owner.custody, owner.native, owner.managerCleanup
 		owner.mu.Unlock()
 		if managerCleanup != nil {
 			closed := managerCleanup.Close()
@@ -138,9 +151,12 @@ func (owner *OwnedSupervisorLease) CloseWithError() error {
 			owner.mu.Unlock()
 			owner.closeErr = errors.Join(owner.closeErr, unknown)
 		}
+		// The protocol checks owner then inheritance. Do not hold owner.mu
+		// while joining inheritance closure on parent death.
 		if pending != nil {
 			owner.closeErr = errors.Join(owner.closeErr, pending.peer.Close())
 		}
+		owner.closeErr = errors.Join(owner.closeErr, custody.Close())
 		if native != nil {
 			owner.closeErr = errors.Join(owner.closeErr, native.Close())
 		}

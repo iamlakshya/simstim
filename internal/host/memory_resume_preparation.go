@@ -26,9 +26,15 @@ func resumePreparationChargeV1(m *Manifest, boot string, primary, aux memoryUnit
 		}
 		return 0, false, nil
 	}
-	declared, err := declaredUnitMemoryV1(m, primary)
-	if err != nil || declared != value.MemoryMax {
+	declared, err := declaredUnitMemoryV1(m, memoryUnitFactsV1{})
+	if err != nil || declared != value.MemoryMax && declared != value.PreviousMemoryMax {
 		return 0, false, errors.Join(err, resumePreparationDataErrorV1())
 	}
+	if primary.exists && (primary.swap != 0 || primary.maximum != value.MemoryMax) {
+		return 0, false, resumePreparationDataErrorV1()
+	}
+	// The old native owner is positively stopped. PreviousMemoryMax only
+	// correlates its still-protected metadata; the actual new bootstrap must
+	// always use the selected target. Keep that full charge through takeover.
 	return value.MemoryMax, true, nil
 }

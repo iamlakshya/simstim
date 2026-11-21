@@ -106,7 +106,7 @@ func checkNoneColdRestartWriterV1(ctx context.Context, operation *SessionOperati
 	if err := cold.checkOriginV1(ctx); err != nil {
 		return err
 	}
-	if err := cold.checkVacancyV1(ctx); err != nil {
+	if err := cold.checkBeforeNativeV1(ctx); err != nil {
 		return err
 	}
 	var epoch [16]byte
@@ -128,17 +128,21 @@ func (cold *NoneColdResumeV1) restoreUnstartedMetadataV1() (returned error) {
 	if cold.closed || cold.handed || !cold.bound || !cold.published {
 		return nil
 	}
-	if cold.self != cold || cold.operation == nil || !cold.operation.Valid(cold.operation.Primary()) || cold.holder == nil || len(cold.originalBytes) == 0 {
+	if cold.self != cold || cold.operation == nil || !cold.operation.Valid(cold.operation.Primary()) || cold.holder == nil && cold.managed == nil || len(cold.originalBytes) == 0 {
 		return sessionLeaseError("the cancelled None stage lost its original owner")
 	}
 	launch := cold.operation.startup
-	if launch != nil && (launch.started || launch.unit != nil || launch.child != nil) {
+	if cold.managed != nil {
+		if !cold.managed.cancelled || cold.managed.claimed {
+			return sessionLeaseError("the managed None stage has no actual unclaimed native settlement")
+		}
+	} else if launch != nil && (launch.started || launch.unit != nil || launch.child != nil) {
 		return sessionLeaseError("the None cancellation cannot restore data after a possible native creation")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	return withPlacement(ctx, true, func(control *placementControl) (failure error) {
-		if err := errors.Join(CheckCaller(), ctx.Err(), cold.operation.native.check(ctx), cold.holder.check(ctx), cold.checkMetadataV1(ctx)); err != nil {
+		if err := errors.Join(CheckCaller(), ctx.Err(), cold.operation.native.check(ctx), cold.checkRetainedHolderV1(ctx), cold.checkMetadataV1(ctx)); err != nil {
 			return err
 		}
 		if BootID() != cold.boot {
@@ -172,7 +176,7 @@ func (cold *NoneColdResumeV1) restoreUnstartedMetadataV1() (returned error) {
 		if err := file.Close(); err != nil {
 			return err
 		}
-		if err := errors.Join(cold.checkMetadataV1(ctx), cold.holder.check(ctx), cold.operation.native.check(ctx), ctx.Err()); err != nil {
+		if err := errors.Join(cold.checkMetadataV1(ctx), cold.checkRetainedHolderV1(ctx), cold.operation.native.check(ctx), ctx.Err()); err != nil {
 			return err
 		}
 		if err := cold.operation.native.root.Rename(name, "manifest.json"); err != nil {

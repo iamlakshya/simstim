@@ -49,7 +49,7 @@ func selectSandboxPrepareLevelV1(target *HostPrepareTargetV1, c *Conn, probe api
 			if probe.OS != "linux" || !probeHasPreparableMicroVM(probe) {
 				return "", false, vmPrepareUnavailable()
 			}
-			if !c.HasFeature(api.FeatureVMNeedV1) || !c.HasFeature(api.FeatureAgentsDiskV1) {
+			if !c.HasFeature(api.FeatureVMNeedV1) || !c.HasFeature(api.FeatureAgentsDiskV1) || !c.HasFeature(api.FeatureRuntimeOriginV1) {
 				return "", false, c.grantHelperOld("prepare the authenticated microvm Need and agents disk")
 			}
 			return "microvm", true, nil
@@ -70,6 +70,9 @@ func selectSandboxPrepareLevelV1(target *HostPrepareTargetV1, c *Conn, probe api
 			continue
 		}
 		if level == wall.MicroVM {
+			if probe.OS == "linux" && (w.OK || w.CanPrepare) && (!c.HasFeature(api.FeatureVMNeedV1) || !c.HasFeature(api.FeatureAgentsDiskV1) || !c.HasFeature(api.FeatureRuntimeOriginV1)) {
+				return "", false, c.grantHelperOld("prepare the original complete microvm runtime")
+			}
 			if canVM && (w.OK || w.CanPrepare) {
 				best = level
 			}
@@ -142,6 +145,10 @@ func (c *Conn) prepareSandboxArtifactsV1(ctx context.Context, plan *sandboxPrepa
 		plan.vm = vmPlan
 		plan.mu.Unlock()
 		args.Runtime = &rt
+		args.RuntimeOrigin, err = vmPlan.runtimeOriginForV1(ctx, c)
+		if err != nil {
+			return api.SandboxPrepareArgsV1{}, "", "", err
+		}
 		args.VMNeedV1 = rawNeed
 		return args, need.Driver, rt.Runtime, nil
 	default:

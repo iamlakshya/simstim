@@ -38,3 +38,16 @@ func TestStopCancellationCannotBeginNativeOwnership(t *testing.T) {
 		t.Fatal("a cancelled stop returned a row or lost cancellation", err)
 	}
 }
+
+func TestRestoreBridgeRejectsInvalidOptionsBeforeMetadataEffects(t *testing.T) {
+	for _, raw := range []string{`null`, `{"all":null}`, `{"all":"true"}`, `{"all":true,"All":false}`, `{"all":false,"force":true}`, `{"all":false} {}`} {
+		var output bytes.Buffer
+		b := &bridge{ctx: context.Background(), w: proto.NewWriter(&output)}
+		b.restoreRequestV1(proto.Request{ID: 4, Op: "restore", Args: json.RawMessage(raw)})
+		frame, err := proto.Read(bufio.NewReader(&output))
+		var response proto.Response
+		if err != nil || json.Unmarshal(frame.Payload, &response) != nil || response.OK || response.Error == nil || response.Error.Code != "bad_request" || response.Error.Hint == "" {
+			t.Fatalf("invalid restore options reached metadata/native admission: %s: %+v %v", raw, response, err)
+		}
+	}
+}

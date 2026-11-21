@@ -7,11 +7,15 @@
 # See docs/contributing/testing.md.
 set -eu
 cd "$(dirname "$0")/.."
+go_build_toolchain=$(sh scripts/go-build-tags.sh toolchain)
+export GOTOOLCHAIN="$go_build_toolchain"
+go_build_tags=$(sh scripts/go-build-tags.sh)
+export GO_BUILD_TAGS="$go_build_tags"
 min=${1:-}
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
-pkgs=$(go list ./internal/... | grep -v '/tui$' | tr '\n' ',')
-if ! go test -count=1 -coverpkg="${pkgs%,}" -coverprofile="$tmp/cover.out" ./internal/... >"$tmp/test.log" 2>&1; then
+pkgs=$(go list -tags="$go_build_tags" ./internal/... | grep -v '/tui$' | tr '\n' ',')
+if ! go test -tags="$go_build_tags" -count=1 -coverpkg="${pkgs%,}" -coverprofile="$tmp/cover.out" ./internal/... >"$tmp/test.log" 2>&1; then
     cat "$tmp/test.log"
     echo "Error: a test failed, so there is no coverage to report."
     exit 1

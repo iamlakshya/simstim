@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"sync"
 
+	"github.com/iamlakshya/simstim/internal/api"
 	"github.com/iamlakshya/simstim/internal/image"
 	"github.com/iamlakshya/simstim/internal/proto"
 	"github.com/iamlakshya/simstim/internal/supply"
@@ -28,6 +29,7 @@ type newRequestWitnessV1 struct {
 	encoded        []byte
 	need           []byte
 	runtime        *selectedRuntimeReceiptV1
+	runtimeUse     *runtimeProjectionUseV1
 	agents         *InstalledAgentsReceiptV1
 	captured       bool
 	bound          *SessionOperation
@@ -50,14 +52,30 @@ func (b *bridge) newRequestContext(req proto.Request, args NewArgs) (context.Con
 	if err := errors.Join(CheckCaller(), b.ctx.Err()); err != nil {
 		return nil, err
 	}
+	if !api.ExactJSONFields(req.Args, args) {
+		return nil, newRuntimeError("the actual New frame has ambiguous or unsupported fields")
+	}
 	encoded, err := json.Marshal(args)
 	if err != nil {
 		return nil, err
 	}
+	decoded, err := decodeNewArgs(req.Args)
+	if err != nil {
+		return nil, err
+	}
+	canonical, err := json.Marshal(decoded)
+	if err != nil || !bytes.Equal(canonical, encoded) {
+		return nil, newRuntimeError("the decoded New frame differs from its original typed request")
+	}
+
 	witness := &newRequestWitnessV1{bridge: b, hostID: b.hostID, attempt: req.NewAttempt, requestID: req.ID, raw: bytes.Clone(req.Args), encoded: encoded, need: bytes.Clone(args.VMNeedV1)}
 	var expected *supply.Manifest
 	if len(args.VMNeedV1) != 0 {
 		need, err := vmneed.DecodeV1(args.VMNeedV1, runtime.GOARCH)
+		if err != nil {
+			return nil, err
+		}
+		witness.runtime, witness.runtimeUse, err = b.runtime.selectedVMRuntimeOriginV1(b.ctx, need.Driver, need.Runtime, args.RuntimeOrigin)
 		if err != nil {
 			return nil, err
 		}
@@ -73,8 +91,11 @@ func (b *bridge) newRequestContext(req proto.Request, args NewArgs) (context.Con
 		}
 		expected = args.Runtime
 	}
-	if expected != nil {
-		witness.runtime, err = b.runtime.selectedRuntime(*expected)
+	if len(args.VMNeedV1) == 0 && args.RuntimeOrigin != nil {
+		return nil, newRuntimeError("only an original VM Need may carry full runtime origin data")
+	}
+	if expected != nil && witness.runtime == nil {
+		witness.runtime, err = b.runtime.selectedRuntime(b.ctx, *expected)
 		if err != nil {
 			return nil, err
 		}
@@ -99,7 +120,7 @@ func captureNewRequest(ctx context.Context, args NewArgs) (context.Context, NewA
 	if err := json.Unmarshal(encoded, &snapshot); err != nil {
 		return nil, NewArgs{}, err
 	}
-	modern := len(args.VMNeedV1) != 0 || args.Runtime != nil
+	modern := len(args.VMNeedV1) != 0 || args.Runtime != nil || args.RuntimeOrigin != nil
 	witness, _ := ctx.Value(newRequestKeyV1{}).(*newRequestWitnessV1)
 	if witness == nil {
 		if modern {
@@ -144,7 +165,7 @@ func admitReservedRuntime(ctx context.Context, operation *SessionOperation, m *M
 		args.ID != operation.Primary() || witness.runtime == nil || witness.bridge.ctx.Err() != nil {
 		return newRuntimeError("the new request cannot bind this reserved runtime")
 	}
-	selected, err := witness.runtime.inventory(ctx)
+	selected, err := selectedRuntimeInventoryV1(ctx, witness.runtime, witness.runtimeUse)
 	if err != nil {
 		return err
 	}
@@ -213,11 +234,8 @@ func saveReservedManifest(operation *SessionOperation, m *Manifest) error {
 		witness.agents.mu.RLock()
 		defer witness.agents.mu.RUnlock()
 	}
-	if err := witness.runtime.checkLocked(operation.ownerContext); err != nil {
+	if err := checkSelectedRuntimeManifestLockedV1(operation.ownerContext, witness.runtime, witness.runtimeUse, m.RuntimeManifest); err != nil {
 		return err
-	}
-	if m.RuntimeManifest == nil || !reflect.DeepEqual(witness.runtime.manifest, *m.RuntimeManifest) {
-		return newRuntimeError("the protected runtime changed after original admission")
 	}
 	// One real native placement gate covers both exact active producers and
 	// the final durable writer. Never nest their independent gate callbacks.
@@ -228,7 +246,7 @@ func saveReservedManifest(operation *SessionOperation, m *Manifest) error {
 		if err := applyPersistentLockdownLockedV1(operation.ownerContext, control, m); err != nil {
 			return err
 		}
-		if err := witness.checkProducersLocked(control); err != nil {
+		if err := witness.checkProducersLocked(operation.ownerContext, control); err != nil {
 			return err
 		}
 		if err := operation.native.check(operation.ownerContext); err != nil {
@@ -237,7 +255,12 @@ func saveReservedManifest(operation *SessionOperation, m *Manifest) error {
 		if err := admitNewMemoryLockedV1(operation.ownerContext, operation, m); err != nil {
 			return err
 		}
-		return operation.saveNewManifest(m)
+		return operation.saveNewManifestGuardedV1(m, func(owned context.Context) error {
+			if err := witness.checkProducersLocked(owned, control); err != nil {
+				return err
+			}
+			return checkSelectedRuntimeActiveLockedV1(owned, witness.runtime, witness.runtimeUse, m.RuntimeManifest, wallDriver(m))
+		})
 	}, false)
 	if err == nil {
 		witness.written = true
@@ -245,7 +268,13 @@ func saveReservedManifest(operation *SessionOperation, m *Manifest) error {
 	return err
 }
 
-func (witness *newRequestWitnessV1) checkProducersLocked(control *placementControl) error {
+func (witness *newRequestWitnessV1) checkProducersLocked(ctx context.Context, control *placementControl) error {
+	if ctx == nil {
+		return newRuntimeError("the runtime writer has no original request context")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	check := func(publication *runtimePublication) error {
 		if publication == nil || publication.operation == nil || publication.owner == nil || publication.ctx.Err() != nil {
 			return newRuntimeError("an original runtime publication ended before the protected save")
@@ -255,8 +284,19 @@ func (witness *newRequestWitnessV1) checkProducersLocked(control *placementContr
 		}
 		return publication.owner.checkIdentity()
 	}
-	if witness.bridge == nil || witness.bridge.ctx.Err() != nil || witness.runtime.closed {
+	if witness.bridge == nil || witness.bridge.ctx.Err() != nil || witness.runtime == nil || witness.runtime.issuer != &witness.bridge.runtime || witness.runtime.closed {
 		return newRuntimeError("the original authenticated connection ended before the protected save")
+	}
+	if err := witness.runtime.checkOriginLockedV1(ctx); err != nil {
+		return err
+	}
+	if witness.runtimeUse != nil {
+		if witness.runtimeUse.original != witness.runtime || witness.runtimeUse.service != &witness.bridge.runtime {
+			return newRuntimeError("the VM projection changed its original runtime producer")
+		}
+		if err := witness.runtimeUse.checkActiveLocked(ctx); err != nil {
+			return err
+		}
 	}
 	if err := check(witness.runtime.publication); err != nil {
 		return err

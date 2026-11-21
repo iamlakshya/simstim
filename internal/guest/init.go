@@ -46,6 +46,7 @@ const heartbeatEvery = 5 * time.Second
 
 // Init is the guest init of one sandbox.
 type Init struct {
+	purgeReader             purgeReaderHooksV1
 	unwalled                *unwalledGuestV1
 	sshAgent                *SSHAgentProxy
 	imageSaves              map[string]*imageSaveGuestV1
@@ -124,6 +125,9 @@ func Run(args ...string) error {
 		}
 		if len(args) == 1 && args[0] == "--microvm-v1" {
 			return runMicroVM()
+		}
+		if len(args) == 1 && args[0] == purgeReaderArgumentV1 {
+			return runPurgeReaderVMV1()
 		}
 		return vmError("unknown versioned guest init argument")
 	}
@@ -231,6 +235,10 @@ func (g *Init) Serve() {
 			return
 		}
 		if g.vm != nil && st.Kind() != link.KindCtl && !g.vm.prepared() {
+			_ = st.Close()
+			continue
+		}
+		if g.purgeReader != nil && st.Kind() != link.KindCtl {
 			_ = st.Close()
 			continue
 		}

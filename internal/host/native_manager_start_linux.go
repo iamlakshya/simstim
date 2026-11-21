@@ -44,12 +44,23 @@ type nativeUnitActivationV1 struct {
 	executable      os.FileInfo
 	argv            []string
 	memoryMax       int64
-	prepareCPUQuota uint64
-	once            sync.Once
+	closeMu         sync.Mutex
+	closed          bool
 	closeErr        error
+	runtime         *custodyRuntimeV1
+	prepareCPUQuota uint64
 }
 
 func (manager *nativeUserManagerV1) startSupervisor(ctx context.Context, m *Manifest, executable string, argv []string, admission *runtimePublication) (*nativeUnitActivationV1, error) {
+	if m.Wall != nil && m.Wall.Driver != "plain" && !temporarySupervisorStartupV1(admission) {
+		enabled, err := manager.supportsCustodyV1(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if enabled {
+			return manager.startCustodySupervisorV1(ctx, m, executable, argv, admission)
+		}
+	}
 	unit := UnitName(m.ID)
 	if err := errors.Join(manager.checkNativeManager(), manager.events.arm(unit)); err != nil {
 		return nil, err
@@ -125,6 +136,17 @@ func (manager *nativeUserManagerV1) startSupervisor(ctx context.Context, m *Mani
 	if !job.IsValid() || job == "/" {
 		return nil, sessionLeaseError("the native manager returned no exact original startup job")
 	}
+	return manager.finishSupervisorActivationV1(ctx, m, info, argv, job, prepareCPUQuota)
+}
+
+// A genuine temporary prepare operation narrows this creation to its original
+// transient lifetime. It cannot install a persistent session custody pin.
+func temporarySupervisorStartupV1(admission *runtimePublication) bool {
+	return admission != nil && admission.startup != nil && admission.startup.IsSandboxPrepareV1()
+}
+
+func (manager *nativeUserManagerV1) finishSupervisorActivationV1(ctx context.Context, m *Manifest, info os.FileInfo, argv []string, job dbus.ObjectPath, prepareCPUQuota uint64) (*nativeUnitActivationV1, error) {
+	unit := UnitName(m.ID)
 	path, err := manager.events.waitJob(ctx, job)
 	if err != nil {
 		return nil, err
@@ -299,7 +321,18 @@ func (activation *nativeUnitActivationV1) Close() error {
 	if activation == nil {
 		return nil
 	}
-	activation.once.Do(func() { activation.closeErr = activation.peer.Close() })
+	activation.closeMu.Lock()
+	defer activation.closeMu.Unlock()
+	if activation.closed {
+		return activation.closeErr
+	}
+	// Retain the authenticated manager and peer until actual configuration
+	// cleanup succeeds; a transient unlink/reload failure must be retryable.
+	if err := activation.runtime.Close(); err != nil {
+		return err
+	}
+	activation.closeErr = activation.peer.Close()
+	activation.closed = true
 	return activation.closeErr
 }
 

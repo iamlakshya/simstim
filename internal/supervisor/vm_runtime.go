@@ -57,3 +57,9 @@ func vmRuntimeError(code string, err error) error {
 	}
 	return &proto.Error{Code: code, Message: err.Error(), Hint: "Read the session's supervisor.log and check the host runtime before resuming."}
 }
+
+// PhysicalExitV1 preserves the concrete native owner through this adapter.
+func (r vmRuntime) PhysicalExitV1() bool {
+	owner, ok := r.Sandbox.(interface{ PhysicalExitV1() bool })
+	return ok && owner.PhysicalExitV1()
+}

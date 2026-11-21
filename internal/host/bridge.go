@@ -439,11 +439,7 @@ func (b *bridge) handle(req proto.Request) {
 		_ = json.Unmarshal(req.Args, &a)
 		b.reply(req.ID, Folders(a.Prefix, a.Limit), nil)
 	case "restore":
-		var a struct {
-			All bool `json:"all"`
-		}
-		_ = json.Unmarshal(req.Args, &a)
-		b.reply(req.ID, Restore(a.All), nil)
+		b.restoreRequestV1(req)
 	case "doctor":
 		b.reply(req.ID, Doctor(), nil)
 	case "setup":

@@ -66,6 +66,10 @@ func (n *resumeNamedSSHKeyPlan) prepareNative(ctx context.Context, c *Conn, a Re
 	if err := n.check(ctx, c, false); err != nil {
 		return nil, err
 	}
+	a, err := n.vmArguments(a)
+	if err != nil {
+		return nil, err
+	}
 	metadata, err := n.metadataBytes(a)
 	if err != nil {
 		return nil, err
@@ -83,7 +87,7 @@ func (n *resumeNamedSSHKeyPlan) prepareNative(ctx context.Context, c *Conn, a Re
 		n.nativeAttempted = true
 		n.mu.Unlock()
 		var result api.ResumePrepareResultV1
-		if err := c.Call(resumePreparationRPCContextV1(ctx), "resume.prepare-v1", api.ResumePrepareArgsV1{V: 1, Start: start}, &result); err != nil {
+		if err := c.Call(resumePreparationRPCContextV1(ctx), "resume.prepare-v1", api.ResumePrepareArgsV1{V: 1, PrepareVM: n.creation.CreationWall == "microvm" && c.HasFeature(api.FeatureResumeVMSizeV1), Start: start}, &result); err != nil {
 			return nil, err
 		}
 		if !result.Valid() {
@@ -98,10 +102,25 @@ func (n *resumeNamedSSHKeyPlan) prepareNative(ctx context.Context, c *Conn, a Re
 		n.metadata = bytes.Clone(metadata)
 		prepared = n.prepared
 		n.mu.Unlock()
-	} else if !bytes.Equal(before, metadata) {
+	} else if !bytes.Equal(before, metadata) && prepared.VM == nil {
 		return nil, namedSSHKeySourceError()
 	}
 
+	if prepared.Mode == "cold" && n.creation.CreationWall == "microvm" && (!c.HasFeature(api.FeatureResumeVMSizeV1) || !c.HasFeature(api.FeatureRuntimeOriginV1)) {
+		return nil, c.grantHelperOld("prepare a fresh VM size before resume")
+	}
+	n.mu.Lock()
+	plannedVM := n.vm
+	n.mu.Unlock()
+	if prepared.Mode == "cold" && n.creation.CreationWall == "microvm" && prepared.VM == nil && plannedVM == nil {
+		return nil, namedSSHKeySourceError()
+	}
+	if prepared.VM != nil {
+		prepared, err = n.prepareVM(ctx, c, a, prepared)
+		if err != nil {
+			return nil, err
+		}
+	}
 	if err := n.checkRemote(ctx); err != nil {
 		return nil, err
 	}
@@ -138,7 +157,7 @@ func retainedNativeResumeModeV1(ctx context.Context, c *Conn, id string) (string
 	}
 	n.mu.Lock()
 	defer n.mu.Unlock()
-	if n.prepared == nil || !n.prepared.Valid() {
+	if n.prepared == nil || !n.prepared.Valid() || n.prepared.VM != nil {
 		return "", namedSSHKeySourceError()
 	}
 	return n.prepared.Mode, nil
@@ -165,7 +184,7 @@ func retainedNativeResumeModeLocalV1(ctx context.Context, c *Conn, id string) (s
 	}
 	n.mu.Lock()
 	defer n.mu.Unlock()
-	if n.prepared == nil || !n.prepared.Valid() {
+	if n.prepared == nil || !n.prepared.Valid() || n.prepared.VM != nil {
 		return "", namedSSHKeySourceError()
 	}
 	return n.prepared.Mode, nil

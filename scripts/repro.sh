@@ -30,6 +30,8 @@ fi
 APP_NAME=$(sed -n 's/^const Name = "\(.*\)"/\1/p' internal/brand/brand.go)
 MODULE=$(sed -n 's/^module //p' go.mod)
 export APP_NAME MODULE GOTOOLCHAIN=local
+go_build_tags=$(sh scripts/go-build-tags.sh)
+export GO_BUILD_TAGS="$go_build_tags"
 out=$(mktemp -d "${TMPDIR:-/tmp}/release-repro.XXXXXXXX")
 # Retain both actual passes and their source/input/hash evidence on failure
 # and success. Never erase a prior native image or compiler preparation.
@@ -60,7 +62,7 @@ for run in 1 2; do
         diff "$native_pair/source-pins-before.txt" "$native_pair/source-pins-after.txt"
         # Recheck BOTH real artifact trees against the original source pins.
         # A report JSON or a copied tag alone never substitutes for the bytes.
-        go run ./cmd/supply default-image repro \
+        go run -tags="$go_build_tags" ./cmd/supply default-image repro \
             --first "$native_pair/run-1/image/$arch" \
             --second "$native_pair/run-2/image/$arch" >"$state/default-$arch.json"
         cp -R "$native_pair/run-$run/image/$arch" "$state/default-image/$arch"

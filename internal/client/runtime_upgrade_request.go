@@ -43,6 +43,13 @@ func requireRuntimeUpgradeContext(ctx context.Context) error {
 		return grantPurposeError()
 	}
 	if requestGrantPurpose(r) == grantRemote {
+		if requestGrantOperation(r) == grantOpResume {
+			n, _ := ctx.Value(resumeVMPreparationKeyV1{}).(*resumeNamedSSHKeyPlan)
+			if n == nil {
+				return grantOperationError()
+			}
+			return requireResumeVMProducerV1(ctx, n.conn)
+		}
 		return requireGrantOperation(ctx, grantOpNew)
 	}
 	r.mu.Lock()

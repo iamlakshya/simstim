@@ -57,7 +57,7 @@ func (s *Supervisor) wait() {
 		s.markStopIntent()
 		s.ending()
 		s.stopGuest(systemGrace, ended)
-		kind, reason = host.EndSystem, "supervisor lifetime ended"
+		kind, reason = s.requestedEndV1(host.EndSystem, "supervisor lifetime ended")
 	case sg := <-s.sig:
 		s.markStopIntent()
 		// The system, or the user's manager, stops the session, as at a
@@ -65,7 +65,7 @@ func (s *Supervisor) wait() {
 		s.log.Info("stopping on a signal", "signal", sg.String())
 		s.ending()
 		s.stopGuest(systemGrace, ended)
-		kind, reason = host.EndSystem, "stopped with the host"
+		kind, reason = s.requestedEndV1(host.EndSystem, "stopped with the host")
 	case <-s.maxRunDone():
 		s.markStopIntent()
 		s.ending()
@@ -75,7 +75,7 @@ func (s *Supervisor) wait() {
 		s.markStopIntent()
 		s.ending()
 		s.stopGuest(systemGrace, ended)
-		kind, reason = host.EndStop, "stopped by request"
+		kind, reason = host.EndStop, s.stopReason()
 	case reason = <-s.quit:
 		if s.diskStopReason() != nil {
 			s.markStopIntent()
@@ -112,6 +112,7 @@ func (s *Supervisor) wait() {
 		kind, reason = host.EndSandbox, disk.Error()
 		s.raiseDiskFailure()
 	}
+	requestedStop := kind == host.EndStop
 	cleanupErr := s.closeSandbox()
 	<-ended // Cleanup must join the original waiter before accepting its result.
 	cleanupErr = errors.Join(cleanupErr, ownedWaitErr)
@@ -120,7 +121,16 @@ func (s *Supervisor) wait() {
 	}
 	if cleanupErr != nil {
 		natural = false
-		kind, reason = host.EndSandbox, cleanupErr.Error()
+		s.mu.Lock()
+		physicalCleanupErr := s.runtimeCleanupErr
+		s.mu.Unlock()
+		if requestedStop && physicalCleanupErr == nil && s.checkBackendPhysicalClosureV1(s.sb) == nil {
+			// The requested stop actually joined every owner. Preserve abnormal
+			// exit diagnostics without turning exit status into a cleanup fault.
+			kind, reason = host.EndStop, cleanupErr.Error()
+		} else {
+			kind, reason = host.EndSandbox, cleanupErr.Error()
+		}
 	}
 	// The owned exit can win the select before its final ctl event is read.
 	// Drain that reader before deciding whether a capture is ready.
@@ -140,6 +150,9 @@ func (s *Supervisor) wait() {
 		kind, reason = host.EndSandbox, "state capture failed"
 	}
 	s.finish(kind, reason)
+	if requestedStop {
+		s.depositManagerCustodyV1()
+	}
 }
 
 // ending moves the record to its last phase.
@@ -200,6 +213,13 @@ func (s *Supervisor) closeSandbox() (cleanupErr error) {
 		// Real backend cleanup releases N5 borrowers before all accepted
 		// serve, relay and forwarding stacks are joined.
 		s.joinRequestConnectionsV1()
+		borrowErr := s.joinNoneBorrowersV1()
+		cleanupErr = errors.Join(cleanupErr, borrowErr)
+		if borrowErr != nil {
+			s.mu.Lock()
+			s.runtimeCleanupErr = errors.Join(s.runtimeCleanupErr, borrowErr)
+			s.mu.Unlock()
+		}
 	}()
 	if s.diskStopReason() != nil {
 		s.markStopIntent()
@@ -221,7 +241,7 @@ func (s *Supervisor) closeSandbox() (cleanupErr error) {
 	} else if runtime != nil && attempted {
 		killErr := runtime.Kill()
 		waitErr := runtime.Wait()
-		cleanupErr = errors.Join(cleanupErr, killErr, waitErr)
+		cleanupErr = errors.Join(cleanupErr, s.runtimeCleanupWaitV1(runtime, killErr, waitErr))
 	}
 	// An unstarted factory owns only prepared leases and metadata pins.
 	// Release those non-destructively, after any watcher has joined.
@@ -254,15 +274,22 @@ func (s *Supervisor) finish(kind, reason string) {
 	s.mu.Unlock()
 	s.log.Info("supervisor exiting", "reason", m.Status.Reason)
 	s.audit.write("stop", map[string]any{"kind": kind, "reason": reason})
-	// The alerts raised so far go out, the end's and sandbox_error too.
-	s.al.Settle(2 * time.Second)
-	s.al.Close(2 * time.Second)
 	if !s.unwalledV1() {
 		_ = s.save(&m, true)
 	}
 	s.closeSocket()
 	s.finishMembers(kind, reason)
 	s.wg.Wait()
+	// Member ends can enqueue their own final alerts. Stop delivery admission
+	// only after those real producers and every terminal reader have joined.
+	s.al.Settle(2 * time.Second)
+	s.al.Close(2 * time.Second)
+	if s.al != nil {
+		if err := s.al.Join(context.Background()); err != nil {
+			s.log.Error("alert join before durable cleanup failed", "err", err)
+			select {}
+		}
+	}
 	if s.unwalledV1() {
 		joined := s.closeEventObservers()
 		recorded := s.recordNoneCleanupV1(kind, joined)

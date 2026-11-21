@@ -30,7 +30,7 @@ func sameImageFetchPinV1(left, right image.Request) bool {
 
 func (p *imageFetchIntentV1) beforeRequest(ctx context.Context, c *Conn, request proto.Request, _ any) error {
 	if p == nil {
-		if r := grantRequestOf(ctx); r != nil && (requestGrantOperation(r) == grantOpNew || requestGrantOperation(r) == grantOpSandboxPrepare) && (request.Op == "image.pull" || request.Op == "image.install") {
+		if r := grantRequestOf(ctx); r != nil && (requestGrantOperation(r) == grantOpNew || requestGrantOperation(r) == grantOpSandboxPrepare || requestGrantOperation(r) == grantOpResume) && (request.Op == "image.pull" || request.Op == "image.install") {
 			return imageFetchIntentError()
 		}
 		return nil

@@ -144,3 +144,8 @@ func (s *Supervisor) startNoneEnvironmentV1(ctx context.Context, values map[stri
 	s.mu.Unlock()
 	return result, nil
 }
+
+func (r noneRuntime) PhysicalExitV1() bool {
+	owner, ok := r.Sandbox.(interface{ PhysicalExitV1() bool })
+	return ok && owner.PhysicalExitV1()
+}

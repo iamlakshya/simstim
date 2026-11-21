@@ -18,11 +18,18 @@ writes native bytes or notifies the original writer. The real queue receives
 the original request once. Native tests cover trailers, empty DATA, active
 resets and repeated reuse of this classifier.
 
-This behaviour depends on Go 1.26.11 and the unreplaced `golang.org/x/net`
-version 0.62.0. Unsupported builds refuse interception before reading requests
-or forwarding credentials. They do not fall back to another HTTP protocol.
-An upgrade needs explicit replacement of the ownership hooks and fresh native
-correctness and resource checks. The Go 1.27 wrapper ignores those hooks.
+This behaviour requires exact Go 1.27.4, the unreplaced `golang.org/x/net`
+version 0.62.0 and its documented `http2legacy` build tag. The tag selects the
+original server, which calls the supplied scheduler. The default Go 1.27
+wrapper ignores that hook. The build checks its actual compiled tag and its
+original toolchain and module metadata before reading requests or forwarding
+credentials. Unsupported builds do not fall back to another HTTP protocol.
+
+The official compiler fixes missing dependency metadata in ordinary non-main
+test binaries. All tests still use the standard Go producer. Source selection
+alone does not prove native behaviour: ownership, scheduler, cancellation,
+resource, coverage, fuzz and performance gates all remain binding. A later
+upgrade needs fresh qualification. See the [build requirements](testing.md).
 
 As in the Go 1.26 standard server, RFC 7540 stream priorities do not change
 round-robin order. The pinned public API does not deliver RFC 9218 updates to a

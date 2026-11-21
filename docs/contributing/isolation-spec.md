@@ -839,6 +839,23 @@ A `stopped` session wakes on attach, as a stopped host does ([0013](decisions/00
 2. When the sandbox runs, the supervisor sends `refs` with the commits that the client has pulled (`Manifest.Pulled`). The guest answers with each branch's tip, its count of commits that are not pulled, and whether the work tree has changes. When the sandbox is stopped, the supervisor uses the guest's last `refs` claim, and the message gives no count. A sandbox that never sent a claim counts as not pulled. When commits are not pulled, or the work tree has changes, `rm` refuses. Its message names what is left: "auth-fix has 3 commits that you have not pulled." Try: `simstim pull devbox/auth-fix`, or `simstim rm devbox/auth-fix --force`. The launcher's delete sheet says the same in its red rule. The host never runs git on the session's files to find out.
 3. Then `rm` stops the sandbox as in 6.6, with a 5 s grace. The driver's `Destroy` removes the session folder: the clone or the session disk, the state folders, the audit log and the logs. `os.RemoveAll` follows no symlink.
 
+The fixed purge reader uses an immutable current copy in a separate restricted
+guest. Its copied session disk is read-only, with journal replay disabled. A
+new private scratch disk holds transient writes; no normal mutable session
+disk, copied home or agents disk is prepared. Only the protected work-inspection
+operation is served. It starts no session, terminal, shell, network, DNS,
+SSH-agent, secret or package setup. Its fixed Git probes run without privileges,
+hooks, network sockets or child creation. Unsupported repository behaviour is
+unknown rather than clean.
+
+The original host operation supplies the exact repository, seed and pulled
+commit plan. The guest's bounded ABI result remains a claim. A dirty or
+untracked tree, work outside the protected repositories, or any reachable
+commit outside the protected seed/pulled history remains work to save. Missing,
+invalid, incomplete or mismatched observations remain unknown. A claim never
+proves native stop, disk cleanup or a durable pull. The original host boot,
+copy, scratch and native reader owners remain until their actual cleanup joins.
+
 ### 6.8 Restore after a host reboot
 
 1. The restore unit runs `<helper> restore` at boot, as today.

@@ -53,7 +53,7 @@ func TestSandboxPrepareOriginalParentChildV1(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer operation.Close()
-	m, err := buildSandboxPrepareManifestV1(reservation.id, "/usr/bin/true", witness)
+	m, err := buildSandboxPrepareManifestV1(ctx, reservation.id, "/usr/bin/true", witness)
 	if err != nil {
 		t.Fatal(err)
 	}

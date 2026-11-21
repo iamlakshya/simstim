@@ -32,6 +32,19 @@ func saveRestartManifestV1(operation *SessionOperation, next *Manifest) error {
 	if err := CheckCaller(); err != nil {
 		return err
 	}
+	release, err := lockRestartVMProducersV1(operation)
+	if err != nil {
+		return err
+	}
+	defer release()
+	operation.gate.Lock()
+	receipt := operation.restartMemory
+	operation.gate.Unlock()
+	if receipt != nil && receipt.vm != nil {
+		if err := receipt.vm.verifyBeforePlacementV1(ctx); err != nil {
+			return err
+		}
+	}
 	return operation.withCurrentRead(ctx, func(owned context.Context) error {
 		return withPlacement(owned, restartMemoryAllowsDrainV1(operation), func(control *placementControl) (failure error) {
 			if err := checkRestartMemoryPublicationV1(operation, control); err != nil {
@@ -65,9 +78,28 @@ func saveRestartManifestV1(operation *SessionOperation, next *Manifest) error {
 			if err := json.Unmarshal(raw, &before); err != nil {
 				return err
 			}
-			if before.ID != operation.Primary() || before.SandboxOf != "" || before.path != "" || !bytes.Equal(before.VMNeedV1, next.VMNeedV1) ||
-				!reflect.DeepEqual(before.RuntimeManifest, next.RuntimeManifest) {
+			if before.ID != operation.Primary() || before.SandboxOf != "" || before.path != "" {
 				return sessionLeaseError("the prospective restart changed its original protected execution selection")
+			}
+			operation.gate.Lock()
+			receipt := operation.restartMemory
+			var selection *resumeVMSelectionV1
+			if receipt != nil {
+				selection = receipt.vm
+			}
+			operation.gate.Unlock()
+			if selection != nil {
+				if err := selection.checkTargetLockedV1(owned, control, next); err != nil {
+					return err
+				}
+			}
+			if !bytes.Equal(before.VMNeedV1, next.VMNeedV1) || !reflect.DeepEqual(before.RuntimeManifest, next.RuntimeManifest) {
+				if err := checkAdmittedRestartSelectionV1(operation, &before, next); err != nil {
+					return err
+				}
+				if selection == nil {
+					return sessionLeaseError("a changed VM restart lost its original producer")
+				}
 			}
 			if wallDriver(&before) != wallDriver(next) || wallLevel(&before) != wallLevel(next) {
 				if err := operation.noneMigration.check(owned, operation, &before, next); err != nil {
@@ -136,6 +168,11 @@ func saveRestartManifestV1(operation *SessionOperation, next *Manifest) error {
 			}
 			if err := errors.Join(reference.CheckFile(operation.native.root, "manifest.json", original, 0o600), operation.native.check(owned), owned.Err()); err != nil {
 				return err
+			}
+			if selection != nil {
+				if err := selection.checkTargetLockedV1(owned, control, next); err != nil {
+					return err
+				}
 			}
 			if err := operation.native.root.Rename(name, "manifest.json"); err != nil {
 				return err

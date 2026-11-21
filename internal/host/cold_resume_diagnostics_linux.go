@@ -17,5 +17,8 @@ func (cold *ColdResumeV1) CloseDiagnosticsV4() error {
 	if cold.startup != nil {
 		diagnostic = errors.Join(diagnostic, cold.startup.ManagerCloseDiagnosticsV4())
 	}
+	if cold.custody != nil && cold.custody.custodyKernelSourceV1 != nil {
+		diagnostic = errors.Join(diagnostic, cold.custody.managerDiagnostic)
+	}
 	return diagnostic
 }

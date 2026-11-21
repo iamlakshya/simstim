@@ -16,14 +16,28 @@ func (s *sandbox) ReleasePreparedV1() error {
 	s.lifeMu.Lock()
 	defer s.lifeMu.Unlock()
 	s.mu.Lock()
-	if s.cmd != nil && (s.pidfd >= 0 || !s.closed || !s.initProven) {
+	if s.cmd != nil && (s.pidfd >= 0 || !s.closed || s.creator == nil) {
 		s.mu.Unlock()
 		return setupError("the live or unproven process init owns its prepared resources", nil)
 	}
+	creator, started := s.creator, s.cmd != nil
 	s.preparedReleased = true
 	s.mu.Unlock()
+	if started {
+		if ready, err := creator.check(); err != nil || !ready {
+			return setupError("the original process creator has no genuine prepared-release closure", err)
+		}
+	}
+	if err := s.closeUnstartedCreatorV3(); err != nil {
+		return err
+	}
 	if s.copy != nil {
 		if err := s.copy.native.nativeExit(); err != nil {
+			return err
+		}
+	}
+	if s.freezer != nil {
+		if err := s.freezer.closeEmpty(); err != nil {
 			return err
 		}
 	}

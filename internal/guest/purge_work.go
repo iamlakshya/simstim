@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -74,7 +75,7 @@ func (g *Init) inspectPurgeWorkV1(raw json.RawMessage) (proto.PurgeWorkInspectRe
 	for _, repo := range args.Repositories {
 		wanted[repo.Name] = true
 	}
-	entries, err := os.ReadDir(g.path("/work"))
+	entries, err := g.purgeWorkDirectoryV1(ctx, g.path("/work"), 129)
 	if err != nil {
 		return result, err
 	}
@@ -104,7 +105,7 @@ func (g *Init) inspectPurgeRepositoryV1(ctx context.Context, repo proto.PurgeWor
 	if os.IsNotExist(err) && repo.Scratch {
 		// The actual scratch seed creates a plain directory. Every remaining
 		// entry is work; only a physically empty protected directory is clean.
-		entries, err := os.ReadDir(g.path(cwd))
+		entries, err := g.purgeWorkDirectoryV1(ctx, g.path(cwd), 1)
 		if err != nil {
 			return result, err
 		}
@@ -187,7 +188,28 @@ func (g *Init) inspectPurgeRepositoryV1(ctx context.Context, repo proto.PurgeWor
 	return result, nil
 }
 
+func (g *Init) purgeWorkDirectoryV1(ctx context.Context, path string, limit int) ([]os.DirEntry, error) {
+	if g.purgeReader == nil {
+		return os.ReadDir(path)
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	entries, readErr := file.ReadDir(limit)
+	if errors.Is(readErr, io.EOF) {
+		readErr = nil
+	}
+	return entries, errors.Join(readErr, file.Close(), ctx.Err())
+}
+
 func (g *Init) purgeGitProbeV1(ctx context.Context, cwd string, arguments ...string) (string, int, error) {
+	if g.purgeReader != nil {
+		return g.purgeReader.probe(ctx, cwd, arguments...)
+	}
 	id, err := bundleNonce()
 	if err != nil {
 		return "", 125, err

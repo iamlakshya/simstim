@@ -44,6 +44,7 @@ type sandboxPrepareWitnessV1 struct {
 	needBytes   []byte
 	need        *vmneed.NeedV1
 	runtime     *selectedRuntimeReceiptV1
+	runtimeUse  *runtimeProjectionUseV1
 	agents      *InstalledAgentsReceiptV1
 	imageLease  *image.Lease
 	imageSize   int64
@@ -177,18 +178,18 @@ func (b *bridge) newSandboxPrepareWitnessV1(ctx context.Context, req proto.Reque
 	case "none":
 		return nil, UserError("wall_unavailable", "sandbox preparation cannot test the none level", "Select process, gvisor or microvm when preparing a sandbox.")
 	case "process":
-		if args.Runtime != nil || len(args.VMNeedV1) != 0 {
+		if args.Runtime != nil || len(args.VMNeedV1) != 0 || args.RuntimeOrigin != nil {
 			return nil, UserError("bad_request", "the process sandbox preparation takes no runtime or VM Need", "Prepare the process wall without runtime or VM Need fields.")
 		}
 		witness.driver = "process"
 	case "gvisor":
-		if args.Runtime == nil || len(args.VMNeedV1) != 0 {
+		if args.Runtime == nil || len(args.VMNeedV1) != 0 || args.RuntimeOrigin != nil {
 			return nil, newRuntimeError("the gvisor sandbox preparation requires its selected runtime and no VM Need")
 		}
 		if _, err := gvisor.RuntimeItemsV1(*args.Runtime, runtime.GOARCH); err != nil {
 			return nil, err
 		}
-		receipt, err := b.runtime.selectedRuntime(*args.Runtime)
+		receipt, err := b.runtime.selectedRuntime(ctx, *args.Runtime)
 		if err != nil {
 			return nil, err
 		}
@@ -208,7 +209,7 @@ func (b *bridge) newSandboxPrepareWitnessV1(ctx context.Context, req proto.Reque
 		if args.Runtime != nil && !reflect.DeepEqual(*args.Runtime, need.Runtime) {
 			return nil, newRuntimeError("the sandbox prepare request carries two different runtime selections")
 		}
-		receipt, err := b.runtime.selectedRuntime(need.Runtime)
+		receipt, runtimeUse, err := b.runtime.selectedVMRuntimeOriginV1(ctx, need.Driver, need.Runtime, args.RuntimeOrigin)
 		if err != nil {
 			return nil, err
 		}
@@ -233,6 +234,7 @@ func (b *bridge) newSandboxPrepareWitnessV1(ctx context.Context, req proto.Reque
 		}
 		cloned := need.Clone()
 		witness.runtime = receipt
+		witness.runtimeUse = runtimeUse
 		witness.agents = agentsReceipt
 		witness.need = &cloned
 		witness.driver = need.Driver
@@ -312,11 +314,8 @@ func bindAndSaveSandboxPrepareV1(operation *SessionOperation, reservation *sessi
 	if witness.runtime != nil {
 		witness.runtime.mu.RLock()
 		defer witness.runtime.mu.RUnlock()
-		if err := witness.runtime.checkLocked(operation.ownerContext); err != nil {
+		if err := checkSelectedRuntimeManifestLockedV1(operation.ownerContext, witness.runtime, witness.runtimeUse, m.RuntimeManifest); err != nil {
 			return err
-		}
-		if m.RuntimeManifest == nil || !reflect.DeepEqual(witness.runtime.manifest, *m.RuntimeManifest) {
-			return newRuntimeError("the sandbox prepare runtime changed before admission")
 		}
 	} else if m.RuntimeManifest != nil || len(m.VMNeedV1) != 0 {
 		return newRuntimeError("a raw sandbox prepare manifest cannot issue runtime authority")
@@ -333,7 +332,7 @@ func bindAndSaveSandboxPrepareV1(operation *SessionOperation, reservation *sessi
 		if err := applyPersistentLockdownLockedV1(operation.ownerContext, control, m); err != nil {
 			return err
 		}
-		if err := witness.checkProducersLocked(control); err != nil {
+		if err := witness.checkProducersLocked(operation.ownerContext, control); err != nil {
 			return err
 		}
 		if err := operation.native.check(operation.ownerContext); err != nil {
@@ -342,7 +341,15 @@ func bindAndSaveSandboxPrepareV1(operation *SessionOperation, reservation *sessi
 		if err := admitNewMemoryLockedV1(operation.ownerContext, operation, m); err != nil {
 			return err
 		}
-		return operation.saveNewManifest(m)
+		return operation.saveNewManifestGuardedV1(m, func(owned context.Context) error {
+			if err := witness.checkProducersLocked(owned, control); err != nil {
+				return err
+			}
+			if witness.runtime == nil {
+				return owned.Err()
+			}
+			return checkSelectedRuntimeActiveLockedV1(owned, witness.runtime, witness.runtimeUse, m.RuntimeManifest, wallDriver(m))
+		})
 	}, false)
 	if err != nil {
 		return err
@@ -354,7 +361,13 @@ func bindAndSaveSandboxPrepareV1(operation *SessionOperation, reservation *sessi
 	return nil
 }
 
-func (witness *sandboxPrepareWitnessV1) checkProducersLocked(control *placementControl) error {
+func (witness *sandboxPrepareWitnessV1) checkProducersLocked(ctx context.Context, control *placementControl) error {
+	if ctx == nil {
+		return newRuntimeError("fixed preparation has no original request context")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if witness.bridge == nil || witness.bridge.ctx == nil || witness.bridge.ctx.Err() != nil {
 		return newRuntimeError("the original authenticated connection ended before sandbox prepare admission")
 	}
@@ -370,8 +383,19 @@ func (witness *sandboxPrepareWitnessV1) checkProducersLocked(control *placementC
 		}
 		return publication.owner.checkIdentity()
 	}
-	if witness.runtime.closed {
+	if witness.runtime.closed || witness.runtime.issuer != &witness.bridge.runtime {
 		return newRuntimeError("the selected runtime receipt closed before sandbox prepare admission")
+	}
+	if err := witness.runtime.checkOriginLockedV1(ctx); err != nil {
+		return err
+	}
+	if witness.runtimeUse != nil {
+		if witness.runtimeUse.original != witness.runtime || witness.runtimeUse.service != &witness.bridge.runtime {
+			return newRuntimeError("the fixed VM projection changed its original runtime producer")
+		}
+		if err := witness.runtimeUse.checkActiveLocked(ctx); err != nil {
+			return err
+		}
 	}
 	if err := check(witness.runtime.publication); err != nil {
 		return err

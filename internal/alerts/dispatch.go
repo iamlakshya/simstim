@@ -104,11 +104,12 @@ const (
 // file. Its methods never block the caller: events wait in small queues, and
 // an event that finds its queue full is dropped.
 type Dispatcher struct {
-	o    Options
-	in   chan Event
-	work chan job
-	quit chan struct{}
-	done chan struct{} // closed when the last delivery has ended
+	o        Options
+	in       chan Event
+	work     chan job
+	quit     chan struct{}
+	done     chan struct{} // closed when the last delivery has ended
+	loopDone chan struct{}
 
 	gen   atomic.Uint64 // counts the session's state changes
 	typed atomic.Int64  // when a person last typed, in Unix nanoseconds
@@ -148,7 +149,7 @@ func (s fileStamp) same(t fileStamp) bool { return s.mod.Equal(t.mod) && s.size 
 func New(o Options) *Dispatcher {
 	o.fill()
 	d := &Dispatcher{o: o, in: make(chan Event, inQueue), work: make(chan job, workQueue),
-		quit: make(chan struct{}), done: make(chan struct{}), sent: map[string]time.Time{}}
+		quit: make(chan struct{}), done: make(chan struct{}), loopDone: make(chan struct{}), sent: map[string]time.Time{}}
 	go d.loop()
 	go d.worker()
 	return d
@@ -224,6 +225,7 @@ func (d *Dispatcher) Close(wait time.Duration) {
 }
 
 func (d *Dispatcher) loop() {
+	defer close(d.loopDone)
 	for {
 		select {
 		case ev := <-d.in:

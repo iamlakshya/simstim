@@ -18,8 +18,10 @@ It downloads the release for your system, checks its signature with `ssh-keygen`
 
 <!-- test: skip (installs into your GOBIN) -->
 ```sh
-go install github.com/iamlakshya/simstim@latest
+GOTOOLCHAIN=go1.27.4 go install -tags=http2legacy github.com/iamlakshya/simstim@latest
 ```
+
+This selects the exact supported official compiler and the pinned module's original HTTP/2 implementation. This client-only install fetches its prepared signed host helpers. To build host helpers from a checkout, use `just helpers`: it builds both real namespace launchers before the generated cohort and helper. Main source recipes take their complete tags from `scripts/go-build-tags.sh`; a raw client-only build uses `GOTOOLCHAIN=go1.27.4 go build -tags=http2legacy`. A newer compiler or a build without the tag refuses HTTP interception before inspecting credentials. The `toolchain` directive alone does not force an exact compiler, and `go install` does not infer repository build tags.
 
 A client built this way has no host helpers inside it. The first time it connects a host, it downloads the helper bundle of its own release, checks the release's signature with `ssh-keygen` and the bundle's SHA-256, and keeps it in `~/.cache/simstim/helpers/`. Set `SIMSTIM_RELEASES_URL` to fetch from a mirror instead.
 

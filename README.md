@@ -26,7 +26,7 @@ The installer verifies the release's SSH signature and SHA-256 checksum, then pu
 With Go installed, you can instead run:
 
 ```sh
-go install github.com/iamlakshya/simstim@latest
+GOTOOLCHAIN=go1.27.4 go install -tags=http2legacy github.com/iamlakshya/simstim@latest
 ```
 
 The Go client downloads and verifies its matching host helpers on first connection. See [installation, updates and mirrors](docs/how-to/install.md). The Homebrew tap is not published yet.

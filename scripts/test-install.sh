@@ -4,6 +4,10 @@
 # checksums, signature or archive were changed. Needs goreleaser and Zig 0.17.
 set -euo pipefail
 cd "$(dirname "$0")/.."
+go_build_toolchain=$(sh scripts/go-build-tags.sh toolchain)
+export GOTOOLCHAIN="$go_build_toolchain"
+go_build_tags=$(sh scripts/go-build-tags.sh)
+export GO_BUILD_TAGS="$go_build_tags"
 
 APP_NAME=$(sed -n 's/^const Name = "\(.*\)"/\1/p' internal/brand/brand.go)
 MODULE=$(sed -n 's/^module //p' go.mod)

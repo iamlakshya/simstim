@@ -15,12 +15,13 @@ import (
 // preparation. Nonce and metadata cannot create an OP, native stop/artifact
 // source, reservation issuer, boot, selection or capacity permission.
 type ResumePreparationV1 struct {
-	V         int       `json:"v"`
-	Nonce     string    `json:"nonce"`
-	Boot      string    `json:"boot"`
-	Since     time.Time `json:"since"`
-	MemoryMax int64     `json:"memory_max"`
-	opaque    json.RawMessage
+	V                 int       `json:"v"`
+	Nonce             string    `json:"nonce"`
+	Boot              string    `json:"boot"`
+	Since             time.Time `json:"since"`
+	MemoryMax         int64     `json:"memory_max"`
+	PreviousMemoryMax int64     `json:"previous_memory_max,omitempty"`
+	opaque            json.RawMessage
 }
 
 func (ResumePreparationV1) Format(state fmt.State, _ rune) {
@@ -30,7 +31,7 @@ func resumePreparationDataErrorV1() error {
 	return UserError("resume_preparation", "the protected cold preparation is invalid or unsupported", "Retain its original operation and native resources; inspect them with the matching helper before retrying.")
 }
 func (value *ResumePreparationV1) UnmarshalJSON(raw []byte) error {
-	fields, err := api.JSONObjectFields(raw, "v", "nonce", "boot", "since", "memory_max")
+	fields, err := api.JSONObjectFields(raw, "v", "nonce", "boot", "since", "memory_max", "previous_memory_max")
 	if err != nil {
 		return resumePreparationDataErrorV1()
 	}
@@ -43,7 +44,7 @@ func (value *ResumePreparationV1) UnmarshalJSON(raw []byte) error {
 		return nil
 	}
 	type wire ResumePreparationV1
-	if len(fields) != 5 || !api.ExactJSONFields(raw, wire{}) {
+	if len(fields) != 5 && len(fields) != 6 || !api.ExactJSONFields(raw, wire{}) {
 		return resumePreparationDataErrorV1()
 	}
 	var decoded wire
@@ -77,6 +78,14 @@ func validateResumePreparationV1Data(value *ResumePreparationV1) error {
 	}
 	if value.V != 1 || len(value.opaque) != 0 || len(value.Nonce) != 64 || strings.Trim(value.Nonce, "0123456789abcdef") != "" || !auxiliaryBootIDV1(value.Boot) || value.Since.IsZero() || value.Since.Location() != time.UTC || value.MemoryMax <= 0 {
 		return resumePreparationDataErrorV1()
+	}
+	if value.PreviousMemoryMax != 0 {
+		if value.PreviousMemoryMax == value.MemoryMax {
+			return resumePreparationDataErrorV1()
+		}
+		if err := checkExactWalledCapV1(value.PreviousMemoryMax); err != nil {
+			return err
+		}
 	}
 	return checkExactWalledCapV1(value.MemoryMax)
 }

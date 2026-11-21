@@ -21,8 +21,8 @@ type vmInitConnection struct {
 	native  *vmSocketConn
 }
 
-// newVMInitConnection is called only by runMicroVM after its entry, tools
-// and disks passed verification and acceptVMGuest accepted one CID_HOST peer.
+// newVMInitConnection is called only by the real ordinary or fixed-reader
+// PID1 constructor after entry/tools/disk verification and one CID_HOST peer.
 // It cannot be constructed by a control DTO, session ID, ABI or memory fact.
 func newVMInitConnection(owner context.Context, init *Init, connection net.Conn) (*vmInitConnection, error) {
 	native, ok := connection.(*vmSocketConn)

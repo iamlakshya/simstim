@@ -29,6 +29,7 @@ type nativeStopInvocationV1 struct {
 	argv              []string
 	cgroup            *os.File
 	memoryMax         int64
+	runtime           *custodyRuntimeV1
 }
 
 func captureNativeStopInvocationV1(ctx context.Context, manager *nativeUserManagerV1, connection net.Conn, primary string, executable os.FileInfo, maximum int64) (_ *nativeStopInvocationV1, returned error) {
@@ -88,6 +89,10 @@ func captureNativeStopInvocationV1(ctx context.Context, manager *nativeUserManag
 		return nil, err
 	}
 	if err := result.checkCreationV1(ctx); err != nil {
+		return nil, err
+	}
+	result.runtime, err = manager.captureCustodyRuntimeV1(ctx, result.path, primary)
+	if err != nil {
 		return nil, err
 	}
 	complete = true
@@ -165,7 +170,7 @@ func (invocation *nativeStopInvocationV1) Close() error {
 	if invocation.peer != nil {
 		failure = errors.Join(failure, invocation.peer.Close())
 	}
-	return failure
+	return errors.Join(failure, invocation.runtime.Close())
 }
 func openNativeStopCgroupV1(primary string) (*os.File, error) {
 	if !validID(primary) {

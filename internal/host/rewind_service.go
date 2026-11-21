@@ -20,6 +20,8 @@ type bridgeRewindPreparationV1 struct {
 	warm               *WarmResumeV1
 	stopped            *StoppedSessionV1
 	cold               *ColdResumeV1
+	coldCapture        *ColdResumeV1 // actual incomplete local producer; never restart accounting
+	coldCaptureErr     error
 	publication        *runtimePublication
 	accounting         *resumePreparationLeaseV1
 	lifetime           context.Context

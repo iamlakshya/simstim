@@ -16,6 +16,11 @@ type restartMemoryAdmissionV1 struct {
 	after        Limits
 	need         []byte
 	runtime      []byte
+	nextNeed     []byte
+	nextRuntime  []byte
+	beforeAgents string
+	nextAgents   string
+	vm           *resumeVMSelectionV1
 	used         bool
 	restore      bool
 	policyMemory *string
@@ -39,7 +44,13 @@ func admitRestartMemoryV1(ctx context.Context, operation *SessionOperation, requ
 // This actual manual caller supplies its original Args. Only size policy
 // inputs are copied; no secret values enter the private memory receipt.
 func admitRestartMemoryRequestV1(ctx context.Context, operation *SessionOperation, args api.ResumeArgs) error {
-	return admitRestartMemoryPurposeV1(ctx, operation, args.MemoryMax, nil, captureRestartSizeRequestV1(args), false)
+	selection, err := resumeVMSelectionForArgsV1(ctx, operation, args)
+	if err != nil {
+		return err
+	}
+	request := captureRestartSizeRequestV1(args)
+	request.vm = selection
+	return admitRestartMemoryPurposeV1(ctx, operation, args.MemoryMax, nil, request, false)
 }
 
 // Only the actual automatic restore controller calls this private producer.
@@ -76,6 +87,9 @@ func admitRestartMemoryPurposeV1(ctx context.Context, operation *SessionOperatio
 		if err := ValidateManifestStart(current); err != nil {
 			return err
 		}
+		if request != nil && request.vm != nil && !sameRestartExecutionSelectionV1(current, &request.vm.before) {
+			return newRuntimeError("the resume selection changed its original protected source before admission")
+		}
 		preview, err := restartSizePreviewV1(current, layers, request)
 		if err != nil {
 			return err
@@ -83,6 +97,11 @@ func admitRestartMemoryPurposeV1(ctx context.Context, operation *SessionOperatio
 		after, err := restartLimitsForRequestV1(current, &preview, requested, restore)
 		if err != nil {
 			return err
+		}
+		if request != nil && request.vm != nil {
+			if err := request.vm.checkLockedV1(ctx, control); err != nil {
+				return err
+			}
 		}
 		if isWalledMemoryV1(current) {
 			// This is only a prospective replacement check. The current
@@ -92,7 +111,14 @@ func admitRestartMemoryPurposeV1(ctx context.Context, operation *SessionOperatio
 				return err
 			}
 		}
+		if !bytes.Equal(current.VMNeedV1, preview.VMNeedV1) && (request == nil || request.vm == nil) {
+			return vmNeedError("a changed VM selection has no original cold preparation")
+		}
 		runtime, err := json.Marshal(current.RuntimeManifest)
+		if err != nil {
+			return err
+		}
+		nextRuntime, err := json.Marshal(preview.RuntimeManifest)
 		if err != nil {
 			return err
 		}
@@ -104,8 +130,9 @@ func admitRestartMemoryPurposeV1(ctx context.Context, operation *SessionOperatio
 		if err := operation.native.check(ctx); err != nil {
 			return err
 		}
-		operation.restartMemory = &restartMemoryAdmissionV1{operation: operation, before: current.Limits, after: after, need: bytes.Clone(current.VMNeedV1), runtime: runtime, restore: restore}
+		operation.restartMemory = &restartMemoryAdmissionV1{operation: operation, before: current.Limits, after: after, need: bytes.Clone(current.VMNeedV1), runtime: runtime, nextNeed: bytes.Clone(preview.VMNeedV1), nextRuntime: nextRuntime, beforeAgents: current.Agents, nextAgents: preview.Agents, restore: restore}
 		if request != nil {
+			operation.restartMemory.vm = request.vm
 			operation.restartMemory.checkPolicy = true
 			if preview.Policy != nil && preview.Policy.Sandbox.Memory != nil {
 				value := *preview.Policy.Sandbox.Memory
@@ -134,8 +161,12 @@ func consumeRestartMemoryV1(operation *SessionOperation, before, after *Manifest
 		return err
 	}
 	if receipt.used || receipt.operation != operation || !reflect.DeepEqual(receipt.before, before.Limits) || !reflect.DeepEqual(receipt.after, after.Limits) ||
-		!bytes.Equal(receipt.need, before.VMNeedV1) || !bytes.Equal(receipt.runtime, runtime) {
+		!bytes.Equal(receipt.need, before.VMNeedV1) || !bytes.Equal(receipt.runtime, runtime) || before.Agents != receipt.beforeAgents || !bytes.Equal(receipt.nextNeed, after.VMNeedV1) || after.Agents != receipt.nextAgents {
 		return sessionLeaseError("the restart memory writer differs from its original admitted request")
+	}
+	nextRuntime, err := json.Marshal(after.RuntimeManifest)
+	if err != nil || !bytes.Equal(receipt.nextRuntime, nextRuntime) {
+		return sessionLeaseError("the restart runtime differs from its original admitted selection")
 	}
 	if receipt.checkPolicy {
 		var memory *string

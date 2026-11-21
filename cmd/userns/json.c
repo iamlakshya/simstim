@@ -160,10 +160,10 @@ void read_request(struct request *r) {
         free(key);if (seen&bit) fail("duplicate launcher request field");seen|=bit;
     } while (another(&p,'}'));
     space(&p);
-    if (p.p!=p.end || seen!=15 || (r->version!=1 && r->version!=2) || (r->probe && (r->count || r->dns))) fail("unsupported or incomplete launcher request");
+    if (p.p!=p.end || seen!=15 || (r->version!=1 && r->version!=2 && r->version!=3) || (r->probe && (r->count || r->dns))) fail("unsupported or incomplete launcher request");
     for (size_t i=0;i<r->count;++i) {
         struct mount_request *mount=&r->mounts[i];
-        if ((r->version==1 && mount->stage_fields) || (r->version==2 && mount->stage_fields!=24)) fail("incomplete versioned stage fields");
+        if ((r->version==1 && mount->stage_fields) || (r->version>=2 && mount->stage_fields!=24)) fail("incomplete versioned stage fields");
     }
     free(data);
 }

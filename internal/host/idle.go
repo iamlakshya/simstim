@@ -35,6 +35,9 @@ type IdleState struct {
 // and whether anything is busy now, it returns the new state and whether to
 // power off.
 func IdleDecide(now time.Time, st IdleState, boot string, busy bool, after time.Duration) (IdleState, bool) {
+	if after <= 0 {
+		return IdleState{BootID: boot, BusyAt: now}, false
+	}
 	if busy || st.BootID != boot || st.BusyAt.IsZero() || now.Before(st.BusyAt) {
 		return IdleState{BootID: boot, BusyAt: now}, false
 	}

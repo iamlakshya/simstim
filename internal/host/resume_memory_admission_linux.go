@@ -23,10 +23,14 @@ type resumePreparationLeaseV1 struct {
 	publication                                  *runtimePublication
 	value                                        ResumePreparationV1
 	need, runtime                                []byte
+	selection                                    *resumePreparationSelectionV1
 	published, transferred, takenOver, cancelled bool
 }
 
 func beginResumePreparationV1(ctx context.Context, operation *SessionOperation, cold *ColdResumeV1, preview *Manifest, nonce string) (_ *resumePreparationLeaseV1, failure error) {
+	if cold != nil && cold.custody != nil {
+		return cold.custody.adoptBootstrapPreparationV1(ctx, operation, cold, preview, nonce)
+	}
 	origin, err := requireResumePreparationAccountingOriginV1(ctx, operation)
 	if err != nil {
 		return nil, err
@@ -46,7 +50,14 @@ func beginResumePreparationV1(ctx context.Context, operation *SessionOperation, 
 	if err != nil {
 		return nil, err
 	}
-	lease := &resumePreparationLeaseV1{origin: origin, operation: operation, cold: cold, publication: publication, need: bytes.Clone(preview.VMNeedV1), runtime: bytes.Clone(selected), value: ResumePreparationV1{V: 1, Nonce: nonce, Boot: BootID(), Since: time.Now().UTC(), MemoryMax: preview.Limits.Declared}}
+	selection, err := captureResumePreparationSelectionV1(ctx, operation, preview)
+	if err != nil {
+		return nil, err
+	}
+	lease := &resumePreparationLeaseV1{selection: selection, origin: origin, operation: operation, cold: cold, publication: publication, need: bytes.Clone(preview.VMNeedV1), runtime: bytes.Clone(selected), value: ResumePreparationV1{V: 1, Nonce: nonce, Boot: BootID(), Since: time.Now().UTC(), MemoryMax: preview.Limits.Declared}}
+	if selection.before.MemoryMax != selection.target.MemoryMax {
+		lease.value.PreviousMemoryMax = selection.before.MemoryMax
+	}
 	if err := validateResumePreparationV1Data(&lease.value); err != nil {
 		return nil, err
 	}
@@ -70,10 +81,10 @@ func beginResumePreparationV1(ctx context.Context, operation *SessionOperation, 
 		if err != nil {
 			return err
 		}
-		if current.ResumePreparation != nil || current.Auxiliary != nil || current.Limits.MemoryMax != lease.value.MemoryMax || current.Limits.Declared != 0 && current.Limits.Declared != lease.value.MemoryMax {
+		if current.ResumePreparation != nil || current.Auxiliary != nil {
 			return resumePreparationErrorV1("the pending complete cap changed or another preparation owns this primary")
 		}
-		if err := cold.CheckManifest(ctx, operation, current); err != nil {
+		if err := lease.selection.checkCurrentV1(operation, current); err != nil {
 			return err
 		}
 		unit, err := readMemoryUnitV1(ctx, current.ID, true)
@@ -135,12 +146,11 @@ func (lease *resumePreparationLeaseV1) checkCurrentLockedV1(ctx context.Context,
 	if err != nil {
 		return nil, err
 	}
-	if !reflect.DeepEqual(current.ResumePreparation, &lease.value) || current.Auxiliary != nil || current.Limits.MemoryMax != lease.value.MemoryMax || current.Limits.Declared != 0 && current.Limits.Declared != lease.value.MemoryMax || !bytes.Equal(current.VMNeedV1, lease.need) {
+	if !reflect.DeepEqual(current.ResumePreparation, &lease.value) || current.Auxiliary != nil {
 		return nil, resumePreparationErrorV1("the protected pending preparation or complete cap changed")
 	}
-	selected, err := startupRuntimeBytes(current)
-	if err != nil || !bytes.Equal(selected, lease.runtime) {
-		return nil, errors.Join(err, resumePreparationDataErrorV1())
+	if err := lease.selection.checkCurrentV1(operation, current); err != nil {
+		return nil, err
 	}
 	return current, nil
 }
@@ -189,6 +199,9 @@ func (lease *resumePreparationLeaseV1) TransferToStarting(ctx context.Context, o
 	}
 	if next.ID != operation.Primary() || next.Limits.MemoryMax != lease.value.MemoryMax || next.Limits.Declared != lease.value.MemoryMax {
 		return resumePreparationDataErrorV1()
+	}
+	if err := lease.selection.checkTargetV1(operation, next); err != nil {
+		return err
 	}
 	if err := cold.CheckManifest(ctx, operation, next); err != nil {
 		return err

@@ -6,26 +6,78 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"runtime"
 	"runtime/debug"
 	"strings"
 	"sync/atomic"
 	"testing"
 )
 
+func physicalH2CandidateBuildInfo(tags string) *debug.BuildInfo {
+	return &debug.BuildInfo{GoVersion: physicalH2QualifiedRuntime, Deps: []*debug.Module{{Path: "golang.org/x/net", Version: "v0.62.0", Sum: physicalH2QualifiedModuleSum}}, Settings: []debug.BuildSetting{{Key: "-tags", Value: tags}}}
+}
+
 func TestPhysicalH2CompatibilityRequiresExactHookedToolchainAndModule(t *testing.T) {
-	pinned := &debug.BuildInfo{Deps: []*debug.Module{{Path: "golang.org/x/net", Version: "v0.62.0"}}}
-	if err := physicalH2CompatibilityError("go1.26.11", pinned); err != nil || physicalH2HooksError() != nil {
-		t.Fatal("the actual pinned build did not retain its qualified legacy hooks", err)
+	actualInfo, actualInfoOK := debug.ReadBuildInfo()
+	t.Logf("actual runtime=%q metadata_ok=%t compiled_http2legacy=%t", runtime.Version(), actualInfoOK, physicalH2LegacyServerCompiled)
+	if actualInfoOK && actualInfo != nil {
+		t.Logf("actual metadata GoVersion=%q Path=%q Main.Path=%q dependency_count=%d recorded_http2legacy=%t", actualInfo.GoVersion, actualInfo.Path, actualInfo.Main.Path, len(actualInfo.Deps), physicalH2LegacyTagRecorded(actualInfo.Settings))
+		for _, setting := range actualInfo.Settings {
+			if setting.Key == "-tags" {
+				t.Logf("actual recorded tags=%q", setting.Value)
+			}
+		}
+		for _, dependency := range actualInfo.Deps {
+			if dependency != nil && dependency.Path == "golang.org/x/net" {
+				t.Logf("actual x/net version=%q checksum=%q unreplaced=%t", dependency.Version, dependency.Sum, dependency.Replace == nil)
+			}
+		}
 	}
-	for _, version := range []string{"go1.26.10", "go1.26.12", "go1.27.0", "devel go1.26.11", ""} {
+	for _, tags := range []string{"http2legacy", "userns_cohort_v3,http2legacy", "http2legacy,userns_cohort_v3"} {
+		if err := physicalH2CompatibilityError(physicalH2QualifiedRuntime, physicalH2CandidateBuildInfo(tags)); err != nil {
+			t.Fatal("exact candidate metadata lost its legacy selection", err)
+		}
+	}
+	if actualError := physicalH2HooksError(); actualError != nil || !physicalH2LegacyServerCompiled {
+		info, ok := debug.ReadBuildInfo()
+		dependencies := 0
+		if ok && info != nil {
+			dependencies = len(info.Deps)
+		}
+		t.Fatalf("the actual candidate build lacks qualified legacy hooks: runtime=%q compiled_legacy=%t metadata_ok=%t dependencies=%d actual_error=%v", runtime.Version(), physicalH2LegacyServerCompiled, ok, dependencies, actualError)
+	}
+	pinned := physicalH2CandidateBuildInfo("http2legacy")
+	for _, version := range []string{"go1.26.11", "go1.27.3", "go1.27.5", "go1.28.0", "devel go1.27.4", ""} {
 		if !errors.Is(physicalH2CompatibilityError(version, pinned), errPhysicalH2Toolchain) {
 			t.Fatal("unqualified toolchain could run without its required hooks", version)
 		}
 	}
-	for _, info := range []*debug.BuildInfo{nil, {}, {Deps: []*debug.Module{{Path: "golang.org/x/net", Version: "v0.63.0"}}}, {Deps: []*debug.Module{{Path: "golang.org/x/net", Version: "v0.62.0", Replace: &debug.Module{Path: "local-copy"}}}}} {
-		if !errors.Is(physicalH2CompatibilityError("go1.26.11", info), errPhysicalH2Toolchain) {
-			t.Fatal("missing, upgraded or replaced scheduler dependency was accepted")
+	for _, tags := range []string{"", "http2legacyish", "prefixhttp2legacy", "HTTP2LEGACY", "http2legacy ", "http2legacy,", "userns_cohort_v3"} {
+		if !errors.Is(physicalH2CompatibilityError(physicalH2QualifiedRuntime, physicalH2CandidateBuildInfo(tags)), errPhysicalH2Toolchain) {
+			t.Fatal("missing or lookalike recorded legacy tag was accepted", tags)
 		}
+	}
+	for _, change := range []func(*debug.BuildInfo){
+		func(info *debug.BuildInfo) { info.GoVersion = "" },
+		func(info *debug.BuildInfo) { info.GoVersion = "go1.27.3" },
+		func(info *debug.BuildInfo) { info.Deps = nil },
+		func(info *debug.BuildInfo) { info.Deps = []*debug.Module{nil} },
+		func(info *debug.BuildInfo) { info.Deps[0].Version = "v0.63.0" },
+		func(info *debug.BuildInfo) { info.Deps[0].Sum = "" },
+		func(info *debug.BuildInfo) { info.Deps[0].Sum = "h1:not-the-qualified-module" },
+		func(info *debug.BuildInfo) { info.Deps[0].Replace = &debug.Module{Path: "local-copy"} },
+		func(info *debug.BuildInfo) { info.Deps = append(info.Deps, info.Deps[0]) },
+		func(info *debug.BuildInfo) { info.Settings = nil },
+		func(info *debug.BuildInfo) { info.Settings = append(info.Settings, info.Settings[0]) },
+	} {
+		info := physicalH2CandidateBuildInfo("http2legacy")
+		change(info)
+		if !errors.Is(physicalH2CompatibilityError(physicalH2QualifiedRuntime, info), errPhysicalH2Toolchain) {
+			t.Fatal("unknown, upgraded, replaced or ambiguous build metadata was accepted")
+		}
+	}
+	if !errors.Is(physicalH2CompatibilityError(physicalH2QualifiedRuntime, nil), errPhysicalH2Toolchain) {
+		t.Fatal("absent module metadata was accepted")
 	}
 }
 

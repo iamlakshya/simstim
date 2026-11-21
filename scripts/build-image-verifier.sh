@@ -28,7 +28,7 @@ for system in darwin linux; do
             XDG_DATA_HOME="$IMAGEVERIFY_HOME/data" XDG_STATE_HOME="$IMAGEVERIFY_HOME/state" \
             XDG_RUNTIME_DIR="$IMAGEVERIFY_HOME/run" XDG_CONFIG_DIRS="$IMAGEVERIFY_HOME/config-dirs" \
             XDG_DATA_DIRS="$IMAGEVERIFY_HOME/data-dirs" GOMODCACHE="$IMAGEVERIFY_GOMODCACHE" GOCACHE="$IMAGEVERIFY_GOCACHE" \
-            GOTOOLCHAIN=local GOPROXY=off "$IMAGEVERIFY_GO" build -mod=readonly -trimpath \
+            GOTOOLCHAIN=local GOPROXY=off "$IMAGEVERIFY_GO" build -tags=http2legacy -mod=readonly -trimpath \
             -ldflags "-s -w -X main.Version=$verifier_version" \
             -o "$root/internal/client/helpers/image-verifier-$system-$arch" .)
     done

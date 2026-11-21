@@ -19,6 +19,8 @@ import (
 type nativeForkJobV1 struct {
 	mu              sync.Mutex
 	destinations    []*host.ForkDestinationV1
+	retained        []*host.ForkDestinationV1
+	acceptFailure   error
 	started, closed bool
 	cancel          context.CancelFunc
 	done            chan struct{}
@@ -47,7 +49,10 @@ func (s *Supervisor) nativeForkLaneV1(client *client, scope *nativeStopScopeV1, 
 	if request.Op == proto.NativeForkDestinationV1 {
 		job.mu.Lock()
 		defer job.mu.Unlock()
-		if job.started || job.closed || len(job.destinations) >= 32 {
+		// The public protocol already bounds one child batch by ForkMaxCount.
+		// A failed partial keeps this same batch cleanup-only until its real
+		// borrowers join; it does not introduce a lifetime retry ceiling.
+		if job.started || job.closed || job.acceptFailure != nil || len(job.destinations) >= api.ForkMaxCount {
 			_ = scope.line.RejectAncillary()
 			client.reply(request.ID, nil, toProtoErr(execRefusal("the original fork destination batch was consumed or is full")))
 			return true
@@ -56,14 +61,23 @@ func (s *Supervisor) nativeForkLaneV1(client *client, scope *nativeStopScopeV1, 
 		source := scope.operation
 		scope.mu.Unlock()
 		destination, err := scope.owner.AcceptForkDestinationV1(scope.lifetime, source, scope.line, frame, scope.state)
+		if destination != nil {
+			job.retained = append(job.retained, destination)
+		}
 		if err != nil {
+			job.acceptFailure = err
 			client.reply(request.ID, nil, toProtoErr(err))
+			return true
+		}
+		if destination == nil {
+			job.acceptFailure = execRefusal("the original fork factory returned no actual destination")
+			client.reply(request.ID, nil, toProtoErr(job.acceptFailure))
 			return true
 		}
 		for _, prior := range job.destinations {
 			if prior.Child() == destination.Child() {
-				_ = destination.Close()
-				client.reply(request.ID, nil, toProtoErr(execRefusal("the original child reservation was already lent")))
+				job.acceptFailure = errors.Join(execRefusal("the original child reservation was already lent"), destination.Close())
+				client.reply(request.ID, nil, toProtoErr(job.acceptFailure))
 				return true
 			}
 		}
@@ -85,7 +99,7 @@ func (s *Supervisor) nativeForkLaneV1(client *client, scope *nativeStopScopeV1, 
 	for _, destination := range job.destinations {
 		children = append(children, destination.Child())
 	}
-	if job.started || job.closed || len(children) == 0 || !slices.Equal(children, args.Children) {
+	if job.started || job.closed || job.acceptFailure != nil || len(children) == 0 || !slices.Equal(children, args.Children) {
 		job.mu.Unlock()
 		client.reply(request.ID, nil, toProtoErr(execRefusal("the fork copy changed or repeated its actual destination batch")))
 		return true
@@ -119,7 +133,7 @@ func (job *nativeForkJobV1) closeDestinationsV1() error {
 		return nil
 	}
 	var failure error
-	for _, destination := range job.destinations {
+	for _, destination := range job.retained {
 		failure = errors.Join(failure, destination.Close())
 	}
 	if failure == nil {

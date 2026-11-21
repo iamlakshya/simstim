@@ -11,13 +11,14 @@ import (
 // the generic per-object native descriptor facts. It issues no Source.
 type purgeNativeRetirementsV4 struct {
 	nativeStartupRetirementsV1
-	mu        sync.Mutex
-	lines     map[*StartupLineV1]*purgeLineRetirementV4
-	endpoints map[*purgePrivateEndpointV2]struct{}
+	interrupts purgeIOInterruptFactsV4
+	mu         sync.Mutex
+	lines      map[*StartupLineV1]*purgeLineRetirementV4
+	endpoints  map[*purgePrivateEndpointV2]struct{}
 }
 
 func (owner *purgeNativeRetirementsV4) diagnosticsV4() error {
-	diagnostics := owner.nativeStartupRetirementsV1.diagnosticsV4()
+	diagnostics := errors.Join(owner.nativeStartupRetirementsV1.diagnosticsV4(), owner.interrupts.diagnosticsV4())
 	owner.mu.Lock()
 	endpoints := make([]*purgePrivateEndpointV2, 0, len(owner.endpoints))
 	for endpoint := range owner.endpoints {

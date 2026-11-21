@@ -44,13 +44,17 @@ type startupLaunchV1 struct {
 	exited                   bool
 	readFailed               bool
 	cleanupConfirmed         bool
+	loadedPreloanEnd         bool
+	custodyReleaseSent       bool
 	mu                       sync.Mutex
-	once                     sync.Once
+	closed                   bool
+	nativeJoined             bool
+	cancelAttempted          bool
 	closeErr                 error
 	preparePending           uint8 // only original fixed prepare request IDs 1, 2, 3 and 5
 	prepareFailed            bool
 	prepareCancelSent        bool
-	prepareCleanupDiagnostic error // private result DATA, never cleanup confirmation
+	prepareCleanupDiagnostic error // private result DATA only
 	managerDiagnostic        error
 }
 
@@ -73,6 +77,12 @@ func launchSupervisorOperation(ctx context.Context, operation *SessionOperation)
 	}
 	if err := checkRewindJournalForStartV1(ctx, operation); err != nil {
 		return nil, err
+	}
+	if operation.noneCold != nil && operation.noneCold.managed != nil {
+		return operation.noneCold.managed.launchFinalV1(ctx, operation, m)
+	}
+	if operation.nativeColdResume != nil && operation.nativeColdResume.custody != nil {
+		return operation.nativeColdResume.custody.launchFinalV1(ctx, operation, m)
 	}
 	if len(m.AutomaticRestore) != 0 && operation.AutomaticBoot() == nil {
 		return nil, automaticRestoreError()
@@ -345,11 +355,25 @@ func (launch *startupLaunchV1) waitNativeExit() error {
 			if launch.command != nil {
 				return launch.waitOriginalCommand()
 			}
+			if launch.canReconcileLoadedPreloanV1() {
+				if err := launch.manager.waitLoadedOriginalEndV1(); err != nil {
+					return err
+				}
+				launch.loadedPreloanEnd = true
+			}
 			return nil
 		}
 	}
 	if launch.command != nil && launch.command.Process != nil {
 		return launch.waitOriginalCommand()
+	}
+	if launch.canReconcileLoadedPreloanV1() {
+		if err := launch.manager.waitLoadedOriginalEndV1(); err != nil {
+			return err
+		}
+		launch.loadedPreloanEnd = true
+		launch.exited = true
+		return nil
 	}
 	if launch.manager != nil {
 		// An unresolved first manager operation remains in this actual scoped
@@ -362,47 +386,6 @@ func (launch *startupLaunchV1) waitNativeExit() error {
 		return nil
 	}
 	return sessionLeaseError("the original startup has no retained native lifetime owner")
-}
-
-func (launch *startupLaunchV1) Close() error {
-	if launch == nil {
-		return nil
-	}
-	launch.once.Do(func() {
-		if launch.buildingDone != nil {
-			<-launch.buildingDone
-		}
-		launch.mu.Lock()
-		defer launch.mu.Unlock()
-		if !launch.ready && !launch.exited {
-			if launch.line != nil {
-				launch.closeErr = errors.Join(launch.closeErr, launch.cancelPending())
-			}
-			// Keep the original OP above this call until the exact native exit
-			// joins. No detached cleanup goroutine or timeout releases it.
-			waitErr := launch.waitNativeExit()
-			launch.closeErr = errors.Join(launch.closeErr, launch.sandboxPrepareWaitFailureV1(waitErr))
-		}
-		if launch.line != nil {
-			launch.closeErr = errors.Join(launch.closeErr, launch.line.Close())
-		}
-		if launch.unit != nil {
-			launch.closeErr = errors.Join(launch.closeErr, launch.unit.Close())
-		}
-		if launch.child != nil {
-			launch.closeErr = errors.Join(launch.closeErr, launch.child.Close())
-		}
-		if launch.manager != nil {
-			launch.closeErr = errors.Join(launch.closeErr, closeNativeManagerResourceV4(launch.manager, launch.operation.Primary(), &launch.managerDiagnostic))
-		}
-		if launch.command != nil && launch.ready && !launch.exited {
-			launch.closeErr = errors.Join(launch.closeErr, launch.command.Process.Release())
-		}
-		if launch.placement != nil {
-			launch.closeErr = errors.Join(launch.closeErr, launch.placement.close())
-		}
-	})
-	return launch.closeErr
 }
 
 func (launch *startupLaunchV1) waitOriginalCommand() error {

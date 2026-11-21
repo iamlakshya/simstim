@@ -79,3 +79,27 @@ func (s *runtimeService) retireEndedSelectionV1(key string, receipt *selectedRun
 	delete(s.selections, key)
 	return nil
 }
+
+// The caller holds this SAME original receipt's read lock. This bounded guard
+// performs no file hashing and never reacquires placement control. Lock order
+// is receipt.mu -> service.mu; no producer holds service.mu while taking mu.
+func (receipt *selectedRuntimeReceiptV1) checkOriginLockedV1(ctx context.Context) error {
+	if receipt == nil || ctx == nil || receipt.issuer == nil || receipt.key == "" || receipt.closed || receipt.publication == nil || receipt.store == nil || len(receipt.files) != len(receipt.manifest.Items) {
+		return newRuntimeError("the original runtime writer lost its actual held producer")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	publication := receipt.publication
+	if publication.owner == nil || publication.operation == nil || publication.operation.owner != publication.owner || publication.ctx.Err() != nil {
+		return newRuntimeError("the original runtime publication ended or changed owner")
+	}
+	service := receipt.issuer
+	service.mu.Lock()
+	live := !service.closed && service.connection != nil && service.connection.Err() == nil && service.selections[receipt.key] == receipt
+	service.mu.Unlock()
+	if !live {
+		return newRuntimeError("the runtime writer lost its SAME full-key receipt or authenticated connection")
+	}
+	return publication.owner.checkIdentity()
+}

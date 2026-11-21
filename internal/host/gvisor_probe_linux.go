@@ -70,7 +70,7 @@ func (b *bridge) gvisorProbeContextV1(req proto.Request, expected supply.Manifes
 	if _, err := gvisor.RuntimeItemsV1(expected, runtime.GOARCH); err != nil {
 		return nil, nil, err
 	}
-	selected, err := b.runtime.selectedRuntime(expected)
+	selected, err := b.runtime.selectedRuntime(b.ctx, expected)
 	if err != nil {
 		return nil, nil, err
 	}

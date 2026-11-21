@@ -87,7 +87,7 @@ jobs:
           bash "$RUNNER_TEMP/verify-tag.sh" "$TAG"
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version-file: go.mod
+          go-version: '1.27.4'
           cache: false
       - name: Prepare the locked minimal root and actual OCI/verity artifacts
         env:
@@ -210,12 +210,12 @@ jobs:
           bash "$RUNNER_TEMP/verify-tag.sh" "$TAG"
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version-file: go.mod
+          go-version: '1.27.4'
           cache: false # a release builds from nothing
       - name: Prepare the genuine package-malware feed before helper and client builds
         # The explicit producer checks all four bounded OSV archive inputs and
         # retains their SHA-256 provenance. Missing data must fail the release.
-        run: go run ./cmd/feedgen --output internal/egress/rules/feed/snapshot.json
+        run: go run -tags="$(sh scripts/go-build-tags.sh)" ./cmd/feedgen --output internal/egress/rules/feed/snapshot.json
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: default-image-amd64
@@ -243,8 +243,8 @@ jobs:
           mkdir -p build/default-image
           for arch in amd64 arm64; do
             tar -xzf "build/default-image-transport/$arch/default-image-$arch.tar.gz" --no-same-owner -C build/default-image
-            go run ./cmd/supply default-image check --dir "build/default-image/$arch"
-            go run ./cmd/supply default-image published --dir "build/default-image/$arch"
+            go run -tags="$(sh scripts/go-build-tags.sh)" ./cmd/supply default-image check --dir "build/default-image/$arch"
+            go run -tags="$(sh scripts/go-build-tags.sh)" ./cmd/supply default-image published --dir "build/default-image/$arch"
           done
       - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
         with:
@@ -303,11 +303,11 @@ jobs:
         run: |
           manifest=internal/client/helpers/release-manifest.json
           dir=$(mktemp -d)
-          assets=$(go run ./cmd/supply assets "$manifest")
+          assets=$(go run -tags="$(sh scripts/go-build-tags.sh)" ./cmd/supply assets "$manifest")
           for asset in $assets; do
             gh release download "$TAG" --pattern "$asset" --dir "$dir"
           done
-          go run ./cmd/supply check -require-guest -require-kernel-efi -require-vmm -vmm build/vmm -gvisor build/gvisor -require-gvisor -images build/default-image -require-images -require-launch -require-image-verifier -require-mac-runtime -url "https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG" -dir "$dir" "$manifest"
+          go run -tags="$(sh scripts/go-build-tags.sh)" ./cmd/supply check -require-guest -require-kernel-efi -require-vmm -vmm build/vmm -gvisor build/gvisor -require-gvisor -images build/default-image -require-images -require-launch -require-image-verifier -require-mac-runtime -url "https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG" -dir "$dir" "$manifest"
           gh release upload "$TAG" "$manifest"
       - name: Sign the checksums with the release SSH key
         # install.sh checks this signature with ssh-keygen, which every host
@@ -326,9 +326,9 @@ jobs:
           gh release upload "$TAG" dist/checksums.txt.sig
           for arch in amd64 arm64; do
             envelope="$RUNNER_TEMP/launch-$arch.json"
-            go run ./cmd/launchmeta -binary "internal/client/helpers/launch-$arch" -arch "$arch" -version "${TAG#v}" -output "$envelope"
+            go run -tags="$(sh scripts/go-build-tags.sh)" ./cmd/launchmeta -binary "internal/client/helpers/launch-$arch" -arch "$arch" -version "${TAG#v}" -output "$envelope"
             ssh-keygen -q -Y sign -n "$APP_NAME-launch" -f "$key" "$envelope"
-            go run ./cmd/launchmeta -binary "internal/client/helpers/launch-$arch" -arch "$arch" -version "${TAG#v}" -output "$envelope" -verify-signature "$envelope.sig"
+            go run -tags="$(sh scripts/go-build-tags.sh)" ./cmd/launchmeta -binary "internal/client/helpers/launch-$arch" -arch "$arch" -version "${TAG#v}" -output "$envelope" -verify-signature "$envelope.sig"
             gh release upload "$TAG" "$envelope" "$envelope.sig"
           done
       - name: Docs tools (pinned in scripts/tools.lock)

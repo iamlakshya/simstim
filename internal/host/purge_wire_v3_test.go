@@ -84,12 +84,16 @@ func TestPurgeSocketDisconnectCancelsOnlyRequestV3(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer line.Close()
+	retirement := &purgeNativeRetirementsV4{}
+	if err := line.attachNativeRetirementV4(retirement.descriptorOwnerV4()); err != nil {
+		t.Fatal(err)
+	}
+	defer retirement.closeStartupLineV4(line)
 	native, err := pinUnverifiedNativeHelperPeerV1(server)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer native.Close()
+	defer retirement.closePeerV4(native)
 	identity, err := currentNativeHelperIdentityV1()
 	if err != nil {
 		t.Fatal(err)
@@ -99,7 +103,7 @@ func TestPurgeSocketDisconnectCancelsOnlyRequestV3(t *testing.T) {
 		t.Fatal(err)
 	}
 	identity.expected, native.identity = expected, identity
-	peer := &purgeRequestPeerV3{native: native}
+	peer := &purgeRequestPeerV3{native: native, retirement: retirement}
 	lifetime, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	if err := peer.Check(lifetime); err != nil {

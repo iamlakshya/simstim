@@ -85,6 +85,10 @@ In the launcher, select the session and press `u`. The launcher then attaches to
 
 A resume first stops what is left of the session: its old holder, and any process that the agent started, with the memory they hold. Then it starts the agent in the same folder, with its own resume command. Claude Code and Codex pick up the same conversation, but not a turn that was running. The session keeps its ID, name and worktree.
 
+For a cold microVM, `--memory-max 4G` selects 4 GiB of guest RAM. Admission adds the VMM reserve before checking the host's room. `--memory-max auto` uses the current sandbox policy and agent defaults. A changed size in a saved policy also applies at the next cold start. The client prepares fresh runtime, image and agents inputs before fetching keys. It keeps the sandbox's recorded VM driver. A helper that cannot prepare that size must be updated.
+
+A running sandbox keeps its current cap. Resume prints a warning when a requested size is ignored; pass the size again at its next cold start.
+
 For a session without a wall, without `--memory-max`, it gets the cap it asked for before, and `--memory-max auto` gives it the host's default. The size you give stays with the session for later resumes and restores. A size above what the host gives all its sessions is lowered to that. So when a session already had the default, `--memory-max` cannot give it more: give the host more memory ([Swap](#swap)), or stop other sessions.
 
 ## After an update of the helper

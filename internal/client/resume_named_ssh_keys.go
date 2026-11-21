@@ -38,6 +38,7 @@ type resumeNamedSSHKeyPlan struct {
 	ceiling         Tier
 	names           []string
 	layers          []api.Layer
+	vm              *VMNeedPlanV1
 	prepared        *api.ResumePrepareResultV1
 	rewind          *RewindPreparation
 	metadata        []byte
@@ -209,7 +210,7 @@ func (n *resumeNamedSSHKeyPlan) check(ctx context.Context, c *Conn, grants bool)
 
 func (n *resumeNamedSSHKeyPlan) arguments(ctx context.Context, c *Conn, a ResumeArgs) (context.Context, ResumeArgs, error) {
 	if n == nil {
-		if a.Prepared != nil || a.NamedSSHKeys != nil {
+		if a.Prepared != nil || a.NamedSSHKeys != nil || len(a.VMNeedV1) != 0 {
 			return ctx, a, namedSSHKeySourceError()
 		}
 		return ctx, a, nil
@@ -217,6 +218,7 @@ func (n *resumeNamedSSHKeyPlan) arguments(ctx context.Context, c *Conn, a Resume
 	if a.ID != n.id {
 		return ctx, a, namedSSHKeySourceError()
 	}
+	publicationContext := ctx
 	owned, finish, err := n.begin(ctx)
 	if err != nil {
 		return ctx, a, err
@@ -232,6 +234,10 @@ func (n *resumeNamedSSHKeyPlan) arguments(ctx context.Context, c *Conn, a Resume
 	}
 	if a.Prepared != nil && !reflect.DeepEqual(a.Prepared, prepared.Prepared) {
 		return ctx, a, namedSSHKeySourceError()
+	}
+	a, err = n.vmArguments(a)
+	if err != nil {
+		return ctx, a, err
 	}
 	a.Prepared = api.ClonePreparedResumeV1(prepared.Prepared)
 	if err := n.checkRemote(ctx); err != nil {
@@ -259,7 +265,7 @@ func (n *resumeNamedSSHKeyPlan) arguments(ctx context.Context, c *Conn, a Resume
 		}
 		a.NamedSSHKeys = keys
 	}
-	return context.WithValue(ctx, resumeNamedSSHKeyPublicationKey{}, n), a, nil
+	return context.WithValue(publicationContext, resumeNamedSSHKeyPublicationKey{}, n), a, nil
 }
 
 func (n *resumeNamedSSHKeyPlan) checkRemote(ctx context.Context) error {
@@ -273,7 +279,7 @@ func (n *resumeNamedSSHKeyPlan) checkRemote(ctx context.Context) error {
 	if rewind != nil {
 		return rewind.checkRemote(ctx)
 	}
-	if prepared == nil || !prepared.Valid() {
+	if prepared == nil || !prepared.Valid() || prepared.VM != nil {
 		return namedSSHKeySourceError()
 	}
 	var result api.ResumePrepareResultV1
@@ -363,7 +369,7 @@ func (n *resumeNamedSSHKeyPlan) beforeRequest(ctx context.Context, c *Conn, requ
 	values, fetched := maps.Clone(n.values), n.fetched
 	n.mu.Unlock()
 	defer clear(values)
-	if prepared == nil || !prepared.Valid() || !reflect.DeepEqual(a.Prepared, prepared.Prepared) || !bytes.Equal(metadata, before) {
+	if prepared == nil || !prepared.Valid() || prepared.VM != nil || !reflect.DeepEqual(a.Prepared, prepared.Prepared) || !bytes.Equal(metadata, before) {
 		return namedSSHKeySourceError()
 	}
 	if prepared.Mode == "warm" {

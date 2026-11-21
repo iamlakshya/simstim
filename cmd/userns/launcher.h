@@ -23,4 +23,5 @@ void bring_up_loopback(void);
 void enter_agent_user(void);
 void confine(const struct request *request);
 void close_setup_fds(void);
+void close_creator_completion(void);
 #endif

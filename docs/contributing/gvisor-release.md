@@ -11,7 +11,7 @@ file before applying the patch and every resulting source file afterwards.
 It derives its version from the actual patch digest and checks the same pin
 in `internal/wall/gvisor/native_build.go`.
 
-Prepare tools from `third_party/gvisor/build-tools.json` on each matching native Linux architecture. It pins official Bazel 8.8.1 and the upstream source-selected Go 1.27.3 archive by size and SHA-256. Preparation checks bytes before copying Bazel or making it executable. It keeps the SDK archive unextracted for Bazel's `distdir`. The project client, host and test toolchain stays at Go 1.26.11.
+Prepare tools from `third_party/gvisor/build-tools.json` on each matching native Linux architecture. It pins official Bazel 8.8.1 and the upstream source-selected Go 1.27.3 archive by size and SHA-256. Preparation checks bytes before copying Bazel or making it executable. It keeps the SDK archive unextracted for Bazel's `distdir`. The project client, host and test toolchain uses exact Go 1.27.4 with `http2legacy`.
 
 ```sh
 python3 scripts/prepare-gvisor-build.py --output <new-tools> --cache <downloads>

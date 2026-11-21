@@ -133,6 +133,9 @@ func (m *Model) resumeSelectedReady() tea.Cmd {
 	})
 	name, host := shown(s.Name), shown(h.name())
 	text := fmt.Sprintf("Resuming %s on %s…", name, host)
+	if s.State == api.StateStopped {
+		text = fmt.Sprintf("Waking %s on %s…", name, host)
+	}
 	if client.CapStopped(*s) && s.MemoryMax > 0 {
 		// The cap that stopped the agent applies again, unless the command
 		// line gives another.

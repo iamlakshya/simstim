@@ -22,10 +22,11 @@ const (
 // The native bridge issuer still requires its same-connection producer owners.
 // No field can select a command, environment, value, grant, seed or guest size.
 type SandboxPrepareArgsV1 struct {
-	Version  int              `json:"version"`
-	Level    string           `json:"level"`
-	Runtime  *supply.Manifest `json:"runtime,omitempty"`
-	VMNeedV1 json.RawMessage  `json:"vm_need_v1,omitempty"`
+	RuntimeOrigin json.RawMessage  `json:"runtime_origin_v1,omitempty"`
+	Version       int              `json:"version"`
+	Level         string           `json:"level"`
+	Runtime       *supply.Manifest `json:"runtime,omitempty"`
+	VMNeedV1      json.RawMessage  `json:"vm_need_v1,omitempty"`
 }
 
 // SandboxPrepareResultV1 is display data after a real fixed boot and cleanup.

@@ -4,6 +4,11 @@ package proto
 // cannot start an agent, run caller-supplied argv, publish refs or record a pull.
 const CtlPurgeWorkInspectV1 = "purge.work-inspect.v1"
 
+// GuestPurgeReaderV1 identifies the fixed reader's different tools entry.
+// It is a claim/compatibility marker, never a native boot or cleanup issuer.
+const GuestPurgeReaderV1 = "purge-reader-v1"
+const PurgeReaderResultLimitV1 = 48 << 10
+
 // PurgeWorkRepositoryV1 contains only original host-protected repository and
 // seed/pulled commit data. Names select /work/<name> inside the actual guest.
 type PurgeWorkRepositoryV1 struct {
@@ -31,4 +36,12 @@ type PurgeWorkInspectResultV1 struct {
 	Primary             string                        `json:"primary"`
 	OutsideRepositories bool                          `json:"outside_repositories"`
 	Repositories        []PurgeWorkRepositoryResultV1 `json:"repositories"`
+}
+
+// PurgeReaderWorkResultV1 does not change ordinary guest inspection. The
+// original native reader requires this closed ABI before checking Work against
+// its SAME protected plan. Neither field grants stop, boot or disk authority.
+type PurgeReaderWorkResultV1 struct {
+	ABI  string                   `json:"abi"`
+	Work PurgeWorkInspectResultV1 `json:"work"`
 }

@@ -86,6 +86,9 @@ func retainNoneColdCreationV1(operation *SessionOperation, launch *startupLaunch
 }
 
 func (cold *NoneColdResumeV1) checkTakeoverV1(ctx context.Context) error {
+	if cold.managed != nil {
+		return cold.managed.checkTakeoverV1(ctx)
+	}
 	launch := cold.startup
 	if !cold.bound || !cold.handed || cold.closed || launch == nil || cold.operation.startup != launch || launch.operation != cold.operation || launch.placement == nil || launch.placement.startup != cold.operation || launch.nativePeer() == nil || launch.nativePeer().identity == nil || launch.line == nil || cold.creation == nil || BootID() != cold.boot {
 		return sessionLeaseError("the None continuation has no actual native creation and code/namespace takeover")

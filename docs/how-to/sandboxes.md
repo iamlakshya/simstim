@@ -81,6 +81,46 @@ The session records this exception and shows a downgrade warning. It changes onl
 
 The wall and the network rules solve different problems. Review the [network policy](policy.md) and [secret permissions](secrets.md) before giving a sandbox credentials.
 
+## Stop and wake a microvm
+
+`stop` asks every session in the sandbox to end, syncs its disk and ends the
+owned VM and egress processes. A stopped sandbox keeps its workspace and
+configured agent state. It keeps no terminal screen or memory snapshot.
+The session disk is not encrypted.
+
+Attach to a stopped session, or press Enter in the launcher, to wake its
+sandbox. This uses the usual resume checks and fetches fresh secret values.
+The sandbox cold-starts and the agent resumes its conversation from disk.
+The terminal starts with an empty screen.
+
+Automatic idle stop is off by default. To enable it for a microvm, set a
+duration in the applicable policy layer:
+
+```toml
+[sandbox]
+idle_stop = "2h"
+disk_max = "16G"
+```
+
+The idle time counts only when no client is attached and no session in the
+sandbox is working. An attached shell or editor keeps the sandbox awake.
+Use `idle_stop = "never"` to turn it off.
+
+The sparse session disk grows up to `disk_max`; the cap reserves no host
+space. A full guest disk returns `ENOSPC` to the agent. Each running sandbox
+also checks its backing file system every minute. With less than 5 % free,
+it stops and raises `disk_full`. Free space before resuming it.
+
+After a host reboot, sandboxes with a session last claiming `working` start
+again, at most two at a time, with recent activity first. Other active
+sandboxes become stopped and wake on attach. A session that had already
+ended keeps its end state. Restored sessions have no saved secret values;
+the next attach arms them again. An explicit `restore --all` also retries
+sessions lost during the current boot.
+
+One restore flow runs on a host at a time. If another client or the boot
+unit is already restoring sessions, wait for it to finish and retry.
+
 ## Decoy credential files
 
 Walled sandboxes contain these fake credentials. They grant access to no account.

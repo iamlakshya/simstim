@@ -29,12 +29,15 @@ type VMNeedOptionsV1 struct {
 // canonical authenticated outside-G11 agents producer. A raw ContentRef or
 // validated Need alone cannot construct this client provenance.
 type VMNeedPlanV1 struct {
-	need           vmneed.NeedV1
-	hostID         string
-	raw            json.RawMessage
-	agents         image.AgentDiskV1
-	conn           *Conn
-	imageSelection *sandboxImageSelectionV1
+	need            vmneed.NeedV1
+	originalRuntime supply.Manifest
+	hostID          string
+	raw             json.RawMessage
+	agents          image.AgentDiskV1
+	conn            *Conn
+	stamp           *hostTransportStamp
+	request         *GrantRequest
+	imageSelection  *sandboxImageSelectionV1
 }
 
 // PrepareVMNeedV1 runs BEFORE secret values. Delivery and pin rules stay with
@@ -44,14 +47,14 @@ func (c *Conn) PrepareVMNeedV1(ctx context.Context, options VMNeedOptionsV1) (*V
 	return c.prepareVMNeedV1(ctx, options, nil)
 }
 
-// Only PrepareNewVM passes its already checked original request. The public
-// builder cannot create a maintenance request or borrow a New operation.
+// Actual New and the retained cold Resume pass their checked original request.
+// The public builder cannot borrow either original operation.
 func (c *Conn) prepareVMNeedV1(ctx context.Context, options VMNeedOptionsV1, original *GrantRequest) (_ *VMNeedPlanV1, returned error) {
 	if original != nil {
 		if original != grantRequestOf(ctx) {
 			return nil, grantOperationError()
 		}
-		if err := requireGrantOperation(ctx, grantOpNew); err != nil {
+		if err := requireVMOriginalRequestV1(ctx, c); err != nil {
 			return nil, err
 		}
 	}
@@ -63,7 +66,7 @@ func (c *Conn) prepareVMNeedV1(ctx context.Context, options VMNeedOptionsV1, ori
 		return nil, err
 	}
 	defer func() { returned = errors.Join(returned, closePolicy()) }()
-	if !c.HasFeature(api.FeatureVMNeedV1) || !c.HasFeature(api.FeatureAgentsDiskV1) {
+	if !c.HasFeature(api.FeatureVMNeedV1) || !c.HasFeature(api.FeatureAgentsDiskV1) || !c.HasFeature(api.FeatureRuntimeOriginV1) {
 		return nil, c.grantHelperOld("prepare the authenticated microvm Need and agents disk")
 	}
 	if _, err := vmneed.BudgetFor(options.GuestRAM); err != nil {
@@ -99,14 +102,11 @@ func (c *Conn) prepareVMNeedV1(ctx context.Context, options VMNeedOptionsV1, ori
 	if err := vmneed.ValidateLimitsForDriver(driver, options.CPUs, options.DiskMax, arch); err != nil {
 		return nil, &UserError{Msg: CleanLine(err.Error()), Hint: "Choose supported CPU and disk limits for this microvm.", Code: "vm_expected", Kind: KindFailed}
 	}
-	runtime, err = vmneed.SelectRuntimeForDriver(driver, runtime, arch)
-	if err != nil {
-		return nil, err
-	}
+	originalRuntime := cloneNewRuntimeManifest(runtime)
 	// Delivery above retains the complete original signed runtime request.
-	// Only this Need selects the closed CHV boot roles; no signed bytes or
-	// generic full-store record are replaced by the derived metadata.
-	runtime, err = vmneed.SelectRuntimeForDriver("chv", runtime, arch)
+	// Select the chosen driver's closed boot roles once. This Need projection
+	// never replaces the signed delivery document or its original receipt.
+	runtime, err = vmneed.SelectRuntimeForDriver(driver, runtime, arch)
 	if err != nil {
 		return nil, &UserError{Msg: "the original runtime has no valid selected VM boot set: " + CleanLine(err.Error()), Hint: "Install a current client release with the required VM, kernel and tools roles.", Code: "vm_expected", Kind: KindRefused}
 	}
@@ -134,7 +134,7 @@ func (c *Conn) prepareVMNeedV1(ctx context.Context, options VMNeedOptionsV1, ori
 	if c.HostID() != identity {
 		return nil, grantIdentityError(c.Host)
 	}
-	return &VMNeedPlanV1{need: need.Clone(), hostID: identity, raw: append(json.RawMessage(nil), raw...), agents: agents, conn: c, imageSelection: cloneSandboxImageSelection(imageSelection)}, nil
+	return &VMNeedPlanV1{need: need.Clone(), originalRuntime: originalRuntime, hostID: identity, raw: append(json.RawMessage(nil), raw...), agents: agents, conn: c, stamp: c.hostTransport, request: grantRequestOf(ctx), imageSelection: cloneSandboxImageSelection(imageSelection)}, nil
 }
 
 // Need returns an independent typed copy, never mutable host inventory.
@@ -154,20 +154,27 @@ func (p *VMNeedPlanV1) EncodedFor(c *Conn) (json.RawMessage, error) {
 	return append(json.RawMessage(nil), p.raw...), nil
 }
 
-// Actual New retains its locally computed signed request across the upgrade.
+// Actual New and cold Resume retain their locally computed signed request.
 // Installed bytes only avoid an unnecessary outbound consent question; the
 // original delivery receipt and first physical construction checks still apply.
 func (c *Conn) prepareVMRuntimeV1(ctx context.Context, probe api.CapProbe, progress io.Writer, original *GrantRequest) (supply.Manifest, error) {
 	if original == nil {
+		request, err := runtimeRequestFor(probe.Arch)
+		if err != nil {
+			return supply.Manifest{}, err
+		}
 		if _, err := EnsureRuntime(ctx, c, RuntimeOptions{Probe: &probe, Progress: progress}); err != nil {
 			return supply.Manifest{}, err
 		}
-		return runtimeManifest(probe.Arch)
+		if _, err := runtimeReady(ctx, c, request); err != nil {
+			return supply.Manifest{}, err
+		}
+		return cloneNewRuntimeManifest(request.Manifest), nil
 	}
 	if original != grantRequestOf(ctx) {
 		return supply.Manifest{}, grantOperationError()
 	}
-	if err := requireGrantOperation(ctx, grantOpNew); err != nil {
+	if err := requireVMOriginalRequestV1(ctx, c); err != nil {
 		return supply.Manifest{}, err
 	}
 	request, err := runtimeRequestFor(probe.Arch)
@@ -187,4 +194,30 @@ func (c *Conn) prepareVMRuntimeV1(ctx context.Context, probe api.CapProbe, progr
 		return supply.Manifest{}, err
 	}
 	return cloneNewRuntimeManifest(request.Manifest), nil
+}
+
+// The existing issuer accepts Resume only from its actual retained cold plan.
+func requireVMOriginalRequestV1(ctx context.Context, c *Conn) error {
+	if requestGrantOperation(grantRequestOf(ctx)) == grantOpResume {
+		return requireResumeVMProducerV1(ctx, c)
+	}
+	return requireGrantOperation(ctx, grantOpNew)
+}
+
+// Only the actual builder retained this full request before its projection.
+// Returning data never supplies the host's original producer or its lifetime.
+func (p *VMNeedPlanV1) runtimeOriginForV1(ctx context.Context, c *Conn) (json.RawMessage, error) {
+	if _, err := p.EncodedFor(c); err != nil {
+		return nil, err
+	}
+	if ctx == nil || p.stamp != c.hostTransport || p.request != grantRequestOf(ctx) {
+		return nil, grantOperationError()
+	}
+	if err := checkAcceptedHostTransport(c); err != nil {
+		return nil, err
+	}
+	if err := bindRequestTransportSource(ctx, c); err != nil {
+		return nil, err
+	}
+	return api.EncodeRuntimeOriginV1(api.RuntimeOriginV1{V: 1, Manifest: cloneNewRuntimeManifest(p.originalRuntime)})
 }

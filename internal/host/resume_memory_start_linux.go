@@ -20,6 +20,9 @@ func resumePreparationForOperationV1(operation *SessionOperation) *resumePrepara
 // reserveRestartMemoryControlLockedV1 is called by the SAME actual restart
 // writer with its current control. Ordinary starts keep their exact old path.
 func reserveRestartMemoryControlLockedV1(ctx context.Context, operation *SessionOperation, next *Manifest, control *placementControl) (*sessionFileLease, error) {
+	if handled, err := reserveManagedNoneRestartRSSLockedV1(ctx, operation, next, control); handled {
+		return nil, err
+	}
 	if next == nil || next.ResumePreparation == nil {
 		return reserveRestartMemoryLockedV1(ctx, operation, next)
 	}
@@ -52,8 +55,16 @@ func reserveRestartMemoryControlLockedV1(ctx context.Context, operation *Session
 	if err != nil {
 		return nil, err
 	}
-	if unit.exists || auxiliary.exists {
+	if auxiliary.exists {
 		return nil, resumePreparationErrorV1("the original pending native unit is no longer absent")
+	}
+	if unit.exists {
+		if lease.cold.custody == nil {
+			return nil, resumePreparationErrorV1("the original pending native unit is no longer absent")
+		}
+		if err := lease.cold.custody.checkBootstrapUnitV1(ctx, unit); err != nil {
+			return nil, err
+		}
 	}
 	facts, err := observeMemoryRoomLockedV1(ctx, "", 0)
 	if err != nil {
@@ -98,8 +109,16 @@ func checkResumePreparationStartLockedV1(ctx context.Context, operation *Session
 	if err != nil {
 		return err
 	}
-	if unit.exists || auxiliary.exists {
+	if auxiliary.exists {
 		return resumePreparationErrorV1("native dispatch found another ordinary or auxiliary unit")
+	}
+	if unit.exists {
+		if lease.cold.custody == nil {
+			return resumePreparationErrorV1("native dispatch found another ordinary or auxiliary unit")
+		}
+		if err := lease.cold.custody.checkBootstrapUnitV1(ctx, unit); err != nil {
+			return err
+		}
 	}
 	facts, err := observeMemoryRoomLockedV1(ctx, "", 0)
 	if err != nil {

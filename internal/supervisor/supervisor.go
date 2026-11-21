@@ -72,6 +72,8 @@ type Supervisor struct {
 	prepareCleanupDiagnostic     error // report only; never native cleanup permission
 	requests                     requestLifetimesV1
 	bootAgentsCustody            bootAgentsCustodyV1
+	custody                      *host.ManagerCustodyMainV1
+	idle                         idleStopStateV1
 	traceUpperMu                 sync.Mutex
 	traceUpper                   []*api.TraceUpperSampleV1
 	traceUpperDropped            bool
@@ -218,13 +220,6 @@ type Supervisor struct {
 	relayWake chan struct{}
 }
 
-// Run supervises session id: it builds the sandbox, serves the session's
-// socket, and returns when the sandbox has ended and the session is stopped,
-// ended or killed.
-func runSupervisor(owner context.Context, id string) error {
-	return runSupervisorMode(owner, id, nil)
-}
-
 func runSupervisorMode(owner context.Context, id string, operation *host.SessionOperation) (returned error) {
 	if err := secretmem.Protect(); err != nil {
 		return err
@@ -232,10 +227,12 @@ func runSupervisorMode(owner context.Context, id string, operation *host.Session
 	lifetime, cancelLifetime := context.WithCancelCause(owner)
 	defer cancelLifetime(context.Canceled)
 	owned, err := host.AcquireOwnedSupervisorLease(lifetime, id)
+	if owned != nil {
+		defer func() { returned = errors.Join(returned, owned.CloseWithError()) }()
+	}
 	if err != nil {
 		return wallError("cannot claim the supervisor process", err)
 	}
-	defer owned.Close()
 	m, err := host.LoadManifest(id)
 	if err != nil {
 		return &proto.Error{Code: "not_found", Message: "the supervisor cannot read session " + id + ": " + err.Error(),
@@ -269,7 +266,7 @@ func runSupervisorMode(owner context.Context, id string, operation *host.Session
 	defer func() { s.finishNoneStopsV1(returned) }()
 	defer func() {
 		s.retainUnconfirmedNonePublicationV1()
-		returned = errors.Join(returned, s.finishOriginalStartup(s.closeSandbox()))
+		returned = errors.Join(returned, s.finishOriginalStartup(s.closeSandbox()), s.closeManagerCustodyV1())
 	}()
 	generation := owned.Generation()
 	if generation == "" {
@@ -307,11 +304,25 @@ func runSupervisorMode(owner context.Context, id string, operation *host.Session
 	if err := s.listen(); err != nil {
 		return s.failed(host.EndBoot, err)
 	}
+	if owned.ManagerCustodyPendingV1() {
+		m, snap, err = s.acceptManagerCustodyBootstrapV1(lifetime)
+		if err != nil {
+			s.closeSocket()
+			if errors.Is(err, host.ErrManagerCustodyPassiveAbortV1) {
+				s.log.Info("the inherited passive bootstrap ended before factory release", "err", err)
+				return nil
+			}
+			return err
+		}
+		operation = s.bootOperation
+	}
 	if err := s.save(&snap, false); err != nil {
 		return s.failed(host.EndBoot, err)
 	}
 	if m.Wall.Driver != driverPlain {
-		operation, err = s.awaitOriginalLoan(lifetime)
+		if s.originalStart == nil {
+			operation, err = s.awaitOriginalLoan(lifetime)
+		}
 		if operation != nil {
 			s.bootOperation = operation
 		}

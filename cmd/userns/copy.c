@@ -81,7 +81,7 @@ static int publish(struct copy_owner *owner,struct copy_transaction *tx,int init
     /* The outer process did NOT unshare its pid-for-children namespace. This
      * fork is outside the guest PID namespace; guest PID1 cannot signal it. */
     pid_t pid=fork();if (pid<0) {int e=errno;close(result[0]);close(result[1]);close(gate[0]);close(gate[1]);return e;}
-    if (!pid) {
+    if (!pid) {close_creator_completion();
         close(result[0]);close(gate[1]);close(6);
         int code=copy_publish(owner,tx,gate[0]);
         ssize_t n=write(result[1],&code,sizeof(code));_exit(n==(ssize_t)sizeof(code) ? 0:1);

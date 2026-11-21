@@ -42,7 +42,10 @@ func (owner *StoppedSessionV1) settleNativeStopV1() error {
 	killed := false
 	for {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		err := owner.checkStoppedNativeFactsV1(ctx)
+		err := owner.retireNativeRuntimeAfterExitV1(ctx)
+		if err == nil {
+			err = owner.checkStoppedNativeFactsV1(ctx)
+		}
 		cancel()
 		if err == nil {
 			break

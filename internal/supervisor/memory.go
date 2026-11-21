@@ -87,6 +87,10 @@ func (s *Supervisor) noteAttach(c *client, a proto.Attach) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.leader = c
+	if s.idle.clients == nil {
+		s.idle.clients = make(map[*client]struct{})
+	}
+	s.idle.clients[c] = struct{}{}
 	s.m.LastAttachedAt = time.Now().UTC()
 	if a.Cols > 0 && a.Rows > 0 {
 		s.m.Term.Cols, s.m.Term.Rows = host.CapTerm(a.Cols, a.Rows)
@@ -137,6 +141,7 @@ func (s *Supervisor) noteResize(c *client, rz proto.Resize) {
 func (s *Supervisor) drop(c *client) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	delete(s.idle.clients, c)
 	if s.leader == c {
 		s.leader = nil
 	}

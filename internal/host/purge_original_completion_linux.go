@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"os/exec"
 )
 
 // This receipt is produced while the SAME original creation descriptor is
@@ -14,8 +15,10 @@ import (
 // A saved report, phase, PID or absent file cannot construct it.
 type purgeOriginalCompletionV3 struct {
 	owner           *purgeOriginalInvocationV3
-	executionFiles  []*os.File
-	executionRoots  []*os.Root
+	execution       *purgeAttemptExecV1
+	code            *purgeAttemptCodeV2
+	command         *exec.Cmd
+	state           *os.ProcessState
 	closedExecution bool
 }
 
@@ -42,43 +45,28 @@ func newPurgeOriginalCompletionV3(owner *purgeOriginalInvocationV3) (*purgeOrigi
 	if execution.command.ProcessState == nil || !execution.command.ProcessState.Success() || execution.waitErr != nil {
 		return nil, placementError("the actual original fixed purge process did not exit successfully; its private cleanup remains uncertain")
 	}
-	completion := &purgeOriginalCompletionV3{owner: owner, executionFiles: []*os.File{execution.creation, execution.directory}}
-	if execution.loan != nil {
-		completion.executionFiles = append(completion.executionFiles, execution.loan.OriginalCode, execution.loan.CopiedCode, execution.loan.ParentPidfd, execution.loan.Cancel)
-	}
-	for _, peer := range []*nativeStartupPeerV1{execution.peer, execution.line.nativePeer} {
-		if peer == nil {
-			continue
-		}
-		completion.executionRoots = append(completion.executionRoots, peer.proc)
-		if peer.identity != nil {
-			completion.executionFiles = append(completion.executionFiles, peer.identity.executable, peer.identity.user, peer.identity.cgroup)
-		}
-	}
+	completion := &purgeOriginalCompletionV3{owner: owner, execution: execution, code: owner.code, command: execution.command, state: execution.command.ProcessState}
 	return completion, nil
 }
 
 func (completion *purgeOriginalCompletionV3) Close(ctx context.Context) error {
-	if completion == nil || ctx == nil || completion.owner == nil || completion.owner.completion != completion {
+	if completion == nil || ctx == nil || completion.owner == nil || completion.owner.completion != completion || completion.owner.execution != completion.execution || completion.owner.code != completion.code || completion.execution == nil || completion.execution.command != completion.command || completion.command == nil || completion.command.ProcessState != completion.state || completion.state == nil || !completion.state.Success() || completion.execution.waitErr != nil {
 		return placementError("the original completion is not this SAME invocation's native receipt")
 	}
 	if err := errors.Join(ctx.Err(), CheckCaller()); err != nil {
 		return err
 	}
-	if !completion.closedExecution {
-		err := completion.owner.execution.Close()
-		observed := observeOriginalPurgeDescriptorCloseV3(completion.executionFiles, completion.executionRoots)
-		if observed == nil {
-			completion.closedExecution = true
-		}
-		if err != nil || observed != nil {
-			return errors.Join(err, observed)
-		}
-	} else if err := observeOriginalPurgeDescriptorCloseV3(completion.executionFiles, completion.executionRoots); err != nil {
-		return err
+	// The actual execution owner recorded its first closes, joined real I/O
+	// and preserved the original Cmd.Wait. No descriptor observer can replace
+	// that owner's immutable native retirement facts after closure.
+	diagnostic := completion.execution.Close()
+	if native := completion.execution.checkNativeRetiredV3(ctx); native != nil {
+		return errors.Join(diagnostic, native)
 	}
-	// Factory Close independently proves its own physical files/directory are
-	// gone or removes only those SAME actual creations. The native exit receipt
-	// grants no cleanup of a session, root, marker or arbitrary temporary path.
-	return completion.owner.code.Close()
+	completion.closedExecution = true
+	diagnostic = errors.Join(diagnostic, completion.execution.CloseDiagnosticsV3(), completion.code.Close())
+	if native := completion.code.checkNativeRetiredV3(ctx); native != nil {
+		return errors.Join(diagnostic, native)
+	}
+	return errors.Join(diagnostic, completion.code.CloseDiagnosticsV3())
 }

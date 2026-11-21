@@ -24,10 +24,20 @@ name = Path(sys.argv[0]).name
 with open(os.environ["CHECK_CALLS"], "a") as log:
     log.write(json.dumps([name, *sys.argv[1:]]) + "\n")
 if name == "go":
-    if sys.argv[1] == "run":
-        shutil.copyfile("docs/reference/agents.md", Path(sys.argv[4]) / "agents.md")
-    elif sys.argv[1] == "build":
-        Path(sys.argv[3]).write_text("#!/bin/sh\nexit 0\n")
+    args = sys.argv[1:]
+    if args == ["version"]:
+        pin = next(line.split()[1] for line in Path("go.mod").read_text().splitlines()
+                   if line.startswith("toolchain "))
+        print("go version " + pin + " fixture/fixture")
+    elif args and args[0] in ("run", "build"):
+        if "-tags=userns_cohort_v3,http2legacy" not in args:
+            raise SystemExit("source checks lost the complete build tag list")
+        if args[0] == "run":
+            output = Path(args[args.index("-out") + 1])
+            shutil.copyfile("docs/reference/agents.md", output / "agents.md")
+        else:
+            output = Path(args[args.index("-o") + 1])
+            output.write_text("#!/bin/sh\nexit 0\n")
 elif name == "typos":
     for arg in sys.argv[1:]:
         if not arg.startswith("-") and "bad-spelling-marker" in Path(arg).read_text():
@@ -52,12 +62,14 @@ class SourceCheckTests(unittest.TestCase):
             path = self.bin / tool
             path.write_text(FAKE_TOOL)
             path.chmod(0o755)
-        for name in (*CHECKS, "source-files.sh", "source-files.py"):
+        for name in (*CHECKS, "source-files.sh", "source-files.py", "go-build-tags.sh"):
             target = self.seed / "scripts" / name
             target.parent.mkdir(exist_ok=True)
             shutil.copyfile(SCRIPTS / name, target)
         shutil.copyfile(SCRIPTS.parent / ".gitignore", self.seed / ".gitignore")
-        self.write("go.mod", "module github.com/example/project\n")
+        toolchain = next(line for line in (SCRIPTS.parent / "go.mod").read_text().splitlines()
+                         if line.startswith("toolchain "))
+        self.write("go.mod", "module github.com/example/project\n\n" + toolchain + "\n")
         self.write("internal/brand/brand.go", 'package brand\nconst Name = "' + FIXTURE_NAME + '"\n')
         self.write("main.go", "package main\n")
         self.write("README.md", "# Public source\n")

@@ -15,6 +15,10 @@
 # fail the check, but a real slowdown does.
 set -euo pipefail
 cd "$(dirname "$0")/.."
+go_build_toolchain=$(sh scripts/go-build-tags.sh toolchain)
+export GOTOOLCHAIN="$go_build_toolchain"
+go_build_tags=$(sh scripts/go-build-tags.sh)
+export GO_BUILD_TAGS="$go_build_tags"
 
 base=${1:-origin/main}
 rounds=${BENCH_ROUNDS:-6}
@@ -170,12 +174,21 @@ require_binary() { # require_binary <side> <package> <binary>
 build() { # build <tree> <out dir> <side>
     local tree=$1 dest=$2 side=$3 pkg bench_bin
     mkdir -p "$dest"
+    if [ -d "$tree/internal/usernscode" ]; then
+        local cohort_log="$evidence/build-$side-userns.log"
+        if ! (cd "$tree" && cmd/userns/build.sh) >"$cohort_log" 2>&1; then
+            cat "$cohort_log" >&2
+            echo "bench: the $side actual namespace cohort could not be prepared." >&2
+            echo "Try: prepare Zig and the complete source, then build that tree's real launchers." >&2
+            return 1
+        fi
+    fi
     for pkg in "${pkgs[@]}"; do
         bench_bin="$dest/$(basename "$pkg").test"
         echo "bench: building $side $pkg" >&2
         local log_name="$evidence/build-$side-$(basename "$pkg")"
         local build_status=0
-        (cd "$tree" && go test -c -o "$bench_bin" "$pkg") >"$log_name.stdout" 2>"$log_name.stderr" || build_status=$?
+        (cd "$tree" && go test -tags="$go_build_tags" -c -o "$bench_bin" "$pkg") >"$log_name.stdout" 2>"$log_name.stderr" || build_status=$?
         cat "$log_name.stdout"
         cat "$log_name.stderr" >&2
         if [ "$build_status" -ne 0 ]; then

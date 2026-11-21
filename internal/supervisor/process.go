@@ -195,3 +195,9 @@ func processPath(env []string) string {
 }
 
 var _ sandbox = processSandbox{}
+
+// PhysicalExitV1 preserves the concrete native owner through this adapter.
+func (s processSandbox) PhysicalExitV1() bool {
+	owner, ok := s.Sandbox.(interface{ PhysicalExitV1() bool })
+	return ok && owner.PhysicalExitV1()
+}

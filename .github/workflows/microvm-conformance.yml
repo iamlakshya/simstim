@@ -48,7 +48,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version-file: go.mod
+          go-version: '1.27.4'
           cache: false
       - name: Require the exact source, real KVM and build room before Go jobs
         env:
@@ -63,7 +63,12 @@ jobs:
         run: |
           scripts/setup.sh --only just,zig
           go mod download
-          go run ./cmd/feedgen --output internal/egress/rules/feed/snapshot.json
+          if [ -d internal/usernscode ]; then
+            scripts/setup.sh --only zig
+            export PATH="$PWD/.tools/bin:$PATH"
+            cmd/userns/build.sh
+          fi
+          go run -tags="$(sh scripts/go-build-tags.sh)" ./cmd/feedgen --output internal/egress/rules/feed/snapshot.json
           export GOTOOLCHAIN=local GOPROXY=off GOSUMDB=sum.golang.org
           .tools/bin/just build
       - name: Run the full native escape and guest suites with the race detector
@@ -78,7 +83,7 @@ jobs:
             XDG_RUNTIME_DIR="$task_home/run" XDG_CONFIG_DIRS="$task_home/config-dirs" XDG_DATA_DIRS="$task_home/data-dirs" \
             GOMODCACHE="$module_cache" GOCACHE="$task_home/go-cache" \
             GOTOOLCHAIN=local GOPROXY=off GOSUMDB=sum.golang.org GOFLAGS=-mod=readonly \
-            go test -race -count=3 -p=2 -json ./internal/diag ./internal/host ./internal/supervisor ./internal/jail ./internal/wall/process ./internal/wall/microvm ./internal/guest \
+            go test -tags="$(sh scripts/go-build-tags.sh)" -race -count=3 -p=2 -json ./internal/diag ./internal/host ./internal/supervisor ./internal/jail ./internal/wall/process ./internal/wall/microvm ./internal/guest \
             | tee "$RUNNER_TEMP/native-go.jsonl"
           module=$(sed -n 's/^module //p' go.mod)
           python3 scripts/check-conformance-go.py "$RUNNER_TEMP/native-go.jsonl" \
@@ -147,7 +152,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version-file: go.mod
+          go-version: '1.27.4'
       - name: Require the selected immutable source and local build room
         env:
           REVISION: ${{ inputs.revision }}
@@ -176,12 +181,17 @@ jobs:
           PY
           echo "CONFORMANCE_CLIENT=$candidate" >> "$GITHUB_ENV"
           go mod download
+          if [ -d internal/usernscode ]; then
+            scripts/setup.sh --only zig
+            export PATH="$PWD/.tools/bin:$PATH"
+            cmd/userns/build.sh
+          fi
           export GOTOOLCHAIN=local GOPROXY=off GOSUMDB=sum.golang.org
           mkdir -p build
-          CGO_ENABLED=0 GOOS=linux GOARCH=$PROBE_ARCH go build -p=2 -trimpath -o "build/conformance-probe-$PROBE_ARCH" ./test/sandboxprobe
+          CGO_ENABLED=0 GOOS=linux GOARCH=$PROBE_ARCH go build -tags="$(sh scripts/go-build-tags.sh)" -p=2 -trimpath -o "build/conformance-probe-$PROBE_ARCH" ./test/sandboxprobe
           for arch in "$PROBE_ARCH"; do
-            CGO_ENABLED=0 GOOS=linux GOARCH=$arch go test -p=2 -c -o "build/conformance-link-$arch" ./internal/link
-            CGO_ENABLED=0 GOOS=linux GOARCH=$arch go test -p=2 -c -o "build/conformance-supervisor-$arch" ./internal/supervisor
+            CGO_ENABLED=0 GOOS=linux GOARCH=$arch go test -tags="$(sh scripts/go-build-tags.sh)" -p=2 -c -o "build/conformance-link-$arch" ./internal/link
+            CGO_ENABLED=0 GOOS=linux GOARCH=$arch go test -tags="$(sh scripts/go-build-tags.sh)" -p=2 -c -o "build/conformance-supervisor-$arch" ./internal/supervisor
           done
       - name: Prepare the run's own local connection files
         env:

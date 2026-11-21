@@ -12,7 +12,7 @@ simstim attach [<host>/<session>|-] [flags]
 
 **Aliases:** `a`
 
-Attaches this terminal to a session. A stopped host that its provider script can start wakes first. When the session's agent has ended, attach asks to start it again, as resume does. `--restart` answers yes. The host may be left out when no other host has a session of that name. With `--id`, name the host and exact session ID. A missing ID never becomes a session name.
+Attaches this terminal to a session. A stopped host that its provider script can start wakes first. A stopped sandbox wakes through the usual resume and secret checks, with an empty screen. When the session's agent has ended, attach asks to start it again, as resume does. `--restart` answers yes. The host may be left out when no other host has a session of that name. With `--id`, name the host and exact session ID. A missing ID never becomes a session name.
 
 ## Examples
 

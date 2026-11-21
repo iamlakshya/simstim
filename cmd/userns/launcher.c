@@ -19,16 +19,47 @@
 #include <string.h>
 #include <sys/prctl.h>
 #include <sys/resource.h>
+#include <sys/stat.h>
 #include <sys/socket.h>
 #include <sys/syscall.h>
 #include <sys/wait.h>
 #include <unistd.h>
 #include "policy.h"
 
+/* This writer exists only in the original process creator. The namespace
+ * child closes it before setup. No exit flag can substitute for this native
+ * child's exact signal/wait completion and the parent's atomic pidfd exit. */
+static int creator_completion=-1,creator_pidfd=-1;
+static pid_t creator_child=-1;
+static void creator_enable(void) {
+    struct stat info;int flags=fcntl(7,F_GETFL);
+    if (flags>=0 && (flags&O_ACCMODE)==O_WRONLY && !fstat(7,&info) && S_ISFIFO(info.st_mode) && info.st_uid==getuid()) {
+        if (fcntl(7,F_SETFD,FD_CLOEXEC)) return;
+        creator_completion=7;
+    }
+}
+void close_creator_completion(void) {
+    if (creator_completion>=0) close(creator_completion);
+    creator_completion=-1;
+}
+static void creator_finish(void) {
+    if (creator_completion<0) return;
+    if (creator_child>0) {
+        if (creator_pidfd<0) return;
+        if (syscall(SYS_pidfd_send_signal,creator_pidfd,SIGKILL,NULL,0)<0 && errno!=ESRCH) return;
+        pid_t got;do {got=waitpid(creator_child,NULL,0);} while (got<0 && errno==EINTR);
+        if (got!=creator_child) return;
+        creator_child=-1;
+    }
+    char closed='C';ssize_t n;
+    do {n=write(creator_completion,&closed,1);} while (n<0 && errno==EINTR);
+    close(creator_completion);creator_completion=-1;
+}
 static volatile sig_atomic_t stopping;
 static void interrupted(int sig) { (void)sig;stopping=1; }
 _Noreturn void fail(const char *what) {
     int saved=errno;
+    creator_finish();
     dprintf(2,"Error: namespace launcher: %s (%d).\nTry: run host prepare, then read the supervisor log.\n",what,saved);
     _exit(1);
 }
@@ -38,8 +69,9 @@ static void map(const char *path,unsigned inside,unsigned outside) {
     if (fd<0 || write(fd,text,(size_t)n)!=n || close(fd)) fail("write outer namespace ID map");
 }
 static _Noreturn void handoff_failed(int pidfd,pid_t pid,const char *why) {
-    syscall(SYS_pidfd_send_signal,pidfd,SIGKILL,NULL,0);
-    while (waitpid(pid,NULL,0)<0 && errno==EINTR) {}
+    if (syscall(SYS_pidfd_send_signal,pidfd,SIGKILL,NULL,0)<0 && errno!=ESRCH) {creator_pidfd=-1;fail(why);}
+    pid_t got;do {got=waitpid(pid,NULL,0);} while (got<0 && errno==EINTR);
+    if (got==pid) creator_child=-1;else creator_pidfd=-1;
     fail(why);
 }
 static void wait_ack(int pidfd,pid_t pid) {
@@ -133,6 +165,7 @@ static void refuse_initial_capabilities(void) {
 }
 int main(int argc,char **argv) {
     bool gvisor_outer=argc==2 && !strcmp(argv[1],"gvisor-outer-v1");
+    if (argc==1) creator_enable();
     if (prctl(PR_SET_DUMPABLE,0,0,0,0)) fail("clear launcher dumpability");
     if ((argc!=1 && !gvisor_outer) || getuid()==0 || geteuid()!=getuid() || getegid()!=getgid()) fail("launcher requires an ordinary unprivileged account and no arguments");
     refuse_initial_capabilities();
@@ -142,7 +175,9 @@ int main(int argc,char **argv) {
     if (prctl(PR_SET_PDEATHSIG,SIGTERM,0,0,0)) fail("arm launcher parent death");
     refuse_tracer();
     if (gvisor_outer) gvisor_outer_v1(&stopping);
-    struct request r={0};read_request(&r);validate_sources(&r);
+    struct request r={0};read_request(&r);
+    if (r.version>=3 && !r.probe && creator_completion<0) fail("v3 lacks original creator completion pipe");
+    validate_sources(&r);
     uid_t uid=getuid();gid_t gid=getgid();
     int proc=open("/proc",O_PATH|O_DIRECTORY|O_CLOEXEC);if (proc<0) fail("pin genuine proc for original native owner");
     if (unshare(CLONE_NEWUSER)) fail("make outer user namespace");
@@ -160,15 +195,17 @@ int main(int argc,char **argv) {
     int gate[2];if (pipe2(gate,O_CLOEXEC)) fail("make namespace activation pipe");
     int copy_channel[2]={-1,-1};
     if (r.version>=2 && !r.probe && socketpair(AF_UNIX,SOCK_SEQPACKET|SOCK_CLOEXEC,0,copy_channel)) fail("make original child copy-resource channel");
-    pid_t pid;
-    if (r.version>=2) {struct clone_args clone={.flags=CLONE_NEWPID,.exit_signal=SIGCHLD};pid=(pid_t)syscall(SYS_clone3,&clone,sizeof(clone));}
+    pid_t pid;int pidfd=-1;
+    if (r.version>=2) {struct clone_args clone={.flags=CLONE_NEWPID|(r.version>=3 ? CLONE_PIDFD:0),.pidfd=r.version>=3 ? (uint64_t)(uintptr_t)&pidfd:0,.exit_signal=SIGCHLD};pid=(pid_t)syscall(SYS_clone3,&clone,sizeof(clone));}
     else pid=fork();
     if (pid<0) fail("create owned namespace init");
-    if (!pid) {close(gate[1]);if (copy_channel[0]>=0) close(copy_channel[0]);child(&r,gate[0],copy_channel[1]);}
+    if (!pid) {close_creator_completion();close(gate[1]);if (copy_channel[0]>=0) close(copy_channel[0]);child(&r,gate[0],copy_channel[1]);}
     if (copy_channel[1]>=0) close(copy_channel[1]);
     close(gate[0]);
-    int pidfd=(int)syscall(SYS_pidfd_open,pid,0);
-    if (pidfd<0) {kill(pid,SIGKILL);waitpid(pid,NULL,0);fail("pin owned namespace init");}
+    creator_child=pid;
+    if (r.version<3) pidfd=(int)syscall(SYS_pidfd_open,pid,0);
+    creator_pidfd=pidfd;
+    if (pidfd<0) {kill(pid,SIGKILL);pid_t got;do {got=waitpid(pid,NULL,0);} while (got<0 && errno==EINTR);if (got==pid) creator_child=-1;fail("pin owned namespace init");}
     /* Only the exact unreaped child is signalled. The supervisor must own a
      * received pidfd and acknowledge it before any guest setup can begin. */
     if (!r.probe) wait_ack(pidfd,pid);
@@ -186,7 +223,9 @@ int main(int argc,char **argv) {
         syscall(SYS_pidfd_send_signal,pidfd,SIGKILL,NULL,0);fail("reap namespace init");
     }
     for (size_t i=0;i<r.count;++i) {close(r.mounts[i].fd);if (r.mounts[i].stage_fd) close(r.mounts[i].stage_fd);}
-    close(proc);close(gate[1]);close(pidfd);
+    creator_child=-1;
+    close(proc);close(gate[1]);close(pidfd);creator_pidfd=-1;
+    creator_finish();
     if (WIFEXITED(status)) return WEXITSTATUS(status);
     return WIFSIGNALED(status) ? 128+WTERMSIG(status) : 1;
 }

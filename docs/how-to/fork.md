@@ -26,6 +26,11 @@ its own branch prefix, so `pull` brings back that child's commits.
 Every child goes through admission. When the host has room for only some
 children, those children start and the command reports the others as failures.
 A failed freeze renewal discards unfinished copies.
+If a child's cleanup cannot be confirmed, the helper keeps its state and the
+original operation. A retry reports that failure until it is settled.
+If a child destination fails validation, that copy batch does not start.
+If cleanup cannot finish, the helper keeps the original operation and reports
+the failure.
 
 New children start with their secrets unarmed. Attaching supplies fresh
 values. Private SSH signers are not copied between sandboxes.
@@ -69,6 +74,7 @@ restore before that commit rolls back the disk and conversation changes,
 then restarts the original sandbox.
 
 A failed native cleanup keeps its original resources for the pending
-operation. A pending restore blocks another start or rewind until that
+operation. An incomplete restart preparation also stays with that operation
+until its original resources can be settled. A pending restore blocks another start or rewind until that
 operation settles. Keep its files in place; deleting a pending record does
 not repair its runtime.

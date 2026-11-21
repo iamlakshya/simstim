@@ -11,7 +11,7 @@ import (
 // confirmation remains scoped to the actual caller's original RemoteR.
 type RuntimeUpgradeOptions struct{ RuntimeOptions }
 
-// UpgradeRuntimeOnUse is the pre-value New or explicit maintenance path.
+// UpgradeRuntimeOnUse is the pre-value New, retained cold Resume or explicit maintenance path.
 // It retains the original request, native settings reader and connection.
 // Its result is delivery metadata; the actual caller must still consume its
 // original retained request and private post-delivery physical driver probe.

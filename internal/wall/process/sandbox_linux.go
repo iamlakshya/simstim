@@ -6,7 +6,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net"
 	"os"
 	"os/exec"
@@ -19,28 +18,32 @@ import (
 	"golang.org/x/sys/unix"
 
 	"github.com/iamlakshya/simstim/internal/files"
+	"github.com/iamlakshya/simstim/internal/supply"
 	"github.com/iamlakshya/simstim/internal/wall"
 )
 
 type sandbox struct {
-	spec             wall.Spec
-	lifeMu           sync.Mutex
-	mu               sync.Mutex
-	storage          *runtimeStorage
-	cmd              *exec.Cmd
-	pidfd            int
-	copy             *CopyOwnerV1
-	link             *net.UnixConn
-	exited           chan struct{}
-	closed           bool
-	preparedReleased bool
-	preparationErr   error
-	forced           bool
-	initProven       bool
-	result           wall.Exit
-	transferDone     chan struct{}
-	freezer          *processFreezerV1
-	freezerOff       string
+	spec                wall.Spec
+	lifeMu              sync.Mutex
+	mu                  sync.Mutex
+	storage             *runtimeStorage
+	cmd                 *exec.Cmd
+	pidfd               int
+	copy                *CopyOwnerV1
+	link                *net.UnixConn
+	exited              chan struct{}
+	closed              bool
+	preparedReleased    bool
+	preparationErr      error
+	forced              bool
+	initProven          bool
+	creator             *processCreatorClosureV3
+	partialCreator      *os.File
+	partialCreatorFacts *supply.FileCloseFactsV1
+	result              wall.Exit
+	transferDone        chan struct{}
+	freezer             *processFreezerV1
+	freezerOff          string
 }
 
 func newSandbox(spec wall.Spec) (wall.Sandbox, error) {
@@ -134,7 +137,24 @@ func (s *sandbox) Start(ctx context.Context) (_ net.Conn, returned error) {
 			returned = errors.Join(returned, copyOwner.native.nativeExit())
 		}
 	}()
-	extra := []*os.File{reader, theirs, root, copyChild}
+	completion, completionWriter, err := os.Pipe()
+	if err != nil {
+		link.Close()
+		return nil, setupError("make original native creator completion pipe", err)
+	}
+	defer completionWriter.Close()
+	creatorTransferred := false
+	defer func() {
+		if !creatorTransferred {
+			_ = completion.Close()
+		}
+	}()
+	completionFD := int(completion.Fd())
+	if err := unix.SetNonblock(completionFD, true); err != nil {
+		link.Close()
+		return nil, setupError("retain nonblocking original creator completion", err)
+	}
+	extra := []*os.File{reader, theirs, root, copyChild, completionWriter}
 	req := Request{V: RequestVersion, Mounts: []MountRequest{}}
 	factoryStages := map[string]*copyMountNativeV1{}
 	placement, placementErr := copyPlacementV3(s.spec.SessionDir, plan)
@@ -240,14 +260,13 @@ func (s *sandbox) Start(ctx context.Context) (_ net.Conn, returned error) {
 	cmd.Env = []string{"PATH=/usr/bin:/bin", "LANG=C", "LC_ALL=C"}
 	cmd.ExtraFiles = extra
 	cmd.Stdout, cmd.Stderr = logf, logf
-	cmd.SysProcAttr = &syscall.SysProcAttr{Pdeathsig: syscall.SIGTERM}
-	launcherPIDFD := -1
+	creatorPIDFD := -1
+	cmd.SysProcAttr = &syscall.SysProcAttr{Pdeathsig: syscall.SIGTERM, PidFD: &creatorPIDFD}
 	var nativeFreezer *processCgroupV1
 	if freezer != nil {
 		nativeFreezer = freezer.control.(*processCgroupV1)
 		cmd.SysProcAttr.UseCgroupFD = true
 		cmd.SysProcAttr.CgroupFD = int(nativeFreezer.child.Fd())
-		cmd.SysProcAttr.PidFD = &launcherPIDFD
 	}
 	s.mu.Lock()
 	if s.closed || s.cmd != nil {
@@ -268,24 +287,32 @@ func (s *sandbox) Start(ctx context.Context) (_ net.Conn, returned error) {
 		}
 	}
 	if err = cmd.Start(); err != nil {
-		if launcherPIDFD >= 0 {
-			// Retain an unexpected partial creation until the native empty
-			// cgroup cleanup proves it has no process left.
-			nativeFreezer.launcher = os.NewFile(uintptr(launcherPIDFD), "partial-freezer-launcher")
+		if creatorPIDFD >= 0 {
+			s.partialCreator = os.NewFile(uintptr(creatorPIDFD), "actual-unstarted-process-creator")
 		}
+		s.preparationErr = setupError("the original native process start failed before request delivery", err)
 		s.mu.Unlock()
 		link.Close()
 		return nil, setupError("cannot start static namespace launcher", err)
 	}
 	if nativeFreezer != nil {
 		freezer.mu.Lock()
-		freezeErr = nativeFreezer.bindCreatedLauncherV1(launcherPIDFD, cmd.Process.Pid)
+		duplicate, duplicateErr := unix.FcntlInt(uintptr(creatorPIDFD), unix.F_DUPFD_CLOEXEC, 0)
+		freezeErr = duplicateErr
+		if duplicateErr == nil {
+			freezeErr = nativeFreezer.bindCreatedLauncherV1(duplicate, cmd.Process.Pid)
+		}
 		freezer.mu.Unlock()
 	}
 	s.cmd, s.link, s.transferDone = cmd, link, make(chan struct{})
+	s.creator = &processCreatorClosureV3{completion: completion, completionFD: completionFD, pidfd: creatorPIDFD}
+	creatorTransferred = true
 	s.copy = copyOwner
 	startedCopy = true
 	freezerStarted = true
+	// After spawn only the original C creator keeps this writer. The child
+	// closes its inherited alias before any setup; Go never writes a receipt.
+	s.result.Err = errors.Join(s.result.Err, completionWriter.Close())
 	s.mu.Unlock()
 	go s.reap(cmd)
 	var transferOnce sync.Once
@@ -356,69 +383,6 @@ func (s *sandbox) Start(ctx context.Context) (_ net.Conn, returned error) {
 	return link, nil
 }
 
-func (s *sandbox) reap(cmd *exec.Cmd) {
-	err := cmd.Wait()
-	// The final ownership message may already be queued when the launcher
-	// exits. Join its reader before deciding that there is no owned init.
-	if s.transferDone != nil {
-		<-s.transferDone
-	}
-	s.mu.Lock()
-	var cleanupErr error
-	if s.pidfd >= 0 {
-		ready, readinessErr := pollInitExit(s.pidfd)
-		cleanupErr = errors.Join(cleanupErr, readinessErr)
-		var signalErr error
-		if !ready {
-			s.forced = true
-			signalErr = signalInit(s.pidfd, unix.SIGKILL, nil, 0)
-		}
-		if signalErr != nil && !errors.Is(signalErr, unix.ESRCH) {
-			// A failed kill cannot make a live init ready. Retain ownership
-			// and return uncertainty rather than block forever on that init.
-			cleanupErr = errors.Join(cleanupErr, fmt.Errorf("end owned namespace init: %w", signalErr))
-		} else if waitErr := waitInitExit(s.pidfd); waitErr != nil {
-			// Keep this exact owned descriptor. A completed launcher is not
-			// proof that its namespace init and descendants have ceased.
-			cleanupErr = errors.Join(cleanupErr, waitErr)
-			s.forced = true
-		} else {
-			s.initProven = true
-			cleanupErr = errors.Join(cleanupErr, unix.Close(s.pidfd))
-			s.pidfd = -1
-		}
-	}
-	s.result = wall.Exit{Err: errors.Join(s.result.Err, err, cleanupErr)}
-	if cmd.ProcessState != nil {
-		s.result.Code = cmd.ProcessState.ExitCode()
-		if ws, ok := cmd.ProcessState.Sys().(syscall.WaitStatus); ok && ws.Signaled() {
-			s.result.Signal = ws.Signal().String()
-		}
-	}
-	copyOwner := s.copy
-	freezer := s.freezer
-	canReleaseCopy := s.pidfd < 0
-	s.mu.Unlock()
-	var copyErr error
-	if copyOwner != nil {
-		if canReleaseCopy {
-			copyErr = copyOwner.native.nativeExit()
-		} else {
-			copyOwner.native.interrupt()
-			copyErr = setupError("preserve copy resources until original init exit is proven", nil)
-		}
-	}
-	var freezeErr error
-	if freezer != nil && canReleaseCopy {
-		freezeErr = freezer.closeEmpty()
-	}
-	s.mu.Lock()
-	s.result.Err = errors.Join(s.result.Err, copyErr, freezeErr)
-	s.closed = s.pidfd < 0 && copyErr == nil && freezeErr == nil
-	close(s.exited)
-	s.mu.Unlock()
-}
-
 // Wait returns the owned wait result. A cleanup error retains uncertain init
 // ownership; it is never evidence of a clean or physically completed exit.
 func (s *sandbox) Wait() wall.Exit {
@@ -445,6 +409,9 @@ func (s *sandbox) Destroy() error {
 	s.mu.Unlock()
 	if running {
 		return setupError("stop the sandbox before destroying it", nil)
+	}
+	if err := s.closeUnstartedCreatorV3(); err != nil {
+		return err
 	}
 	if s.freezer != nil {
 		if err := s.freezer.closeEmpty(); err != nil {

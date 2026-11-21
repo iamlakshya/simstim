@@ -2,15 +2,22 @@
 # release workflow read from internal/brand, so a rename needs no change here.
 version: 2
 
+# Checked against the shared source contract before any build hook.
+env:
+  - GO_BUILD_TAGS=userns_cohort_v3,http2legacy
+  - 'GOTOOLCHAIN={{ if eq (index .Env "GOTOOLCHAIN") "local" }}local{{ else }}go1.27.4{{ end }}'
+
 before:
   hooks:
+    - sh scripts/go-build-tags.sh check {{ .Env.GO_BUILD_TAGS }}
+    - sh scripts/go-build-tags.sh toolchain
     - go mod tidy -diff
     # Static process launcher and its canonical compiled syscall policy.
     - cmd/userns/build.sh
     - scripts/build-image-verifier.sh {{ .Version }}
     # The client embeds the host helpers, so build them first.
-    - sh -c 'for arch in amd64 arm64; do CGO_ENABLED=0 GOOS=linux GOARCH=$arch go build -trimpath -ldflags "-s -w -X {{ .Env.MODULE }}/internal/version.Version={{ .Version }}" -o internal/client/helpers/host-linux-$arch ./cmd/host; done'
-    - sh -c 'for arch in amd64 arm64; do CGO_ENABLED=0 GOOS=linux GOARCH=$arch go build -trimpath -ldflags "-s -w -X {{ .Env.MODULE }}/internal/version.Version={{ .Version }}" -o internal/client/helpers/launch-$arch ./cmd/launch; done'
+    - sh -c 'for arch in amd64 arm64; do CGO_ENABLED=0 GOOS=linux GOARCH=$arch go build -tags={{ .Env.GO_BUILD_TAGS }} -trimpath -ldflags "-s -w -X {{ .Env.MODULE }}/internal/version.Version={{ .Version }}" -o internal/client/helpers/host-linux-$arch ./cmd/host; done'
+    - sh -c 'for arch in amd64 arm64; do CGO_ENABLED=0 GOOS=linux GOARCH=$arch go build -tags={{ .Env.GO_BUILD_TAGS }} -trimpath -ldflags "-s -w -X {{ .Env.MODULE }}/internal/version.Version={{ .Version }}" -o internal/client/helpers/launch-$arch ./cmd/launch; done'
     # The shadow terminal (Zig 0.17), embedded next to the host helpers.
     - sh -c 'cd vt && zig build linux && cd .. && for arch in amd64 arm64; do cp vt/zig-out/linux/shadow-vt-$arch internal/client/helpers/vt-linux-$arch; done'
     # Pack this release's helpers into the prepared tools image and verity tree.
@@ -21,7 +28,7 @@ before:
     - scripts/mirror-mac-runtime.sh {{ .Version }}
     - scripts/write-release-manifest.sh {{ .Version }}
     # Man pages and shell completions, from the command tree.
-    - go run ./cmd/docgen -out build/reference -man build/man -completions build/completions
+    - go run -tags={{ .Env.GO_BUILD_TAGS }} ./cmd/docgen -out build/reference -man build/man -completions build/completions
 
 builds:
   - id: host
@@ -30,7 +37,7 @@ builds:
     env: [CGO_ENABLED=0]
     goos: [linux]
     goarch: [amd64, arm64]
-    flags: [-trimpath]
+    flags: [-trimpath, "-tags={{ .Env.GO_BUILD_TAGS }}"]
     ldflags: ["-s -w -X {{ .Env.MODULE }}/internal/version.Version={{ .Version }}"]
     mod_timestamp: "{{ .CommitTimestamp }}"
 
@@ -40,7 +47,7 @@ builds:
     env: [CGO_ENABLED=0]
     goos: [darwin, linux]
     goarch: [amd64, arm64]
-    flags: [-trimpath]
+    flags: [-trimpath, "-tags={{ .Env.GO_BUILD_TAGS }}"]
     ldflags: ["-s -w -X {{ .Env.MODULE }}/internal/version.Version={{ .Version }}"]
     mod_timestamp: "{{ .CommitTimestamp }}"
 

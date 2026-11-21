@@ -9,6 +9,8 @@ import (
 	"sync"
 
 	"github.com/iamlakshya/simstim/internal/api"
+	"github.com/iamlakshya/simstim/internal/cachefs"
+	"github.com/iamlakshya/simstim/internal/paths"
 	"github.com/iamlakshya/simstim/internal/proto"
 )
 
@@ -16,19 +18,25 @@ import (
 // Only the original native source controller may accept its original loan.
 // Closing it releases this borrow only after its physical copy has joined.
 type ForkDestinationV1 struct {
-	mu        sync.Mutex
-	owner     *OwnedSupervisorLease
-	source    *SessionOperation
-	operation *SessionOperation
-	state     proto.NativeStopStateV1
-	closed    bool
+	issuer             *ForkDestinationV1
+	pendingFile, probe *os.File
+	pendingRoot        *os.Root
+	retirement         nativeDescriptorRetirementsV1
+	accepted           bool
+	closeErr           error
+	mu                 sync.Mutex
+	owner              *OwnedSupervisorLease
+	source             *SessionOperation
+	operation          *SessionOperation
+	state              proto.NativeStopStateV1
+	closed             bool
 }
 
 func forkFailureV1(code, message string) error {
 	return UserError(code, message, "Retry fork through the current original sandbox and client connection.")
 }
 
-func (owner *OwnedSupervisorLease) AcceptForkDestinationV1(ctx context.Context, source *SessionOperation, line *StartupLineV1, frame proto.Frame, state proto.NativeStopStateV1) (_ *ForkDestinationV1, returned error) {
+func (owner *OwnedSupervisorLease) AcceptForkDestinationV1(ctx context.Context, source *SessionOperation, line *StartupLineV1, frame proto.Frame, state proto.NativeStopStateV1) (*ForkDestinationV1, error) {
 	if ctx == nil || source == nil || line == nil || owner == nil || owner.native == nil || !owner.Valid(state.Primary) || !owner.StartupCommittedV1() || source.native == nil || !source.native.borrowed || !source.Valid(state.Primary) || state.Generation != owner.generation {
 		return nil, forkFailureV1("fork_source", "the fork destination has no original live source operation")
 	}
@@ -44,46 +52,58 @@ func (owner *OwnedSupervisorLease) AcceptForkDestinationV1(ctx context.Context, 
 	if err != nil {
 		return nil, err
 	}
-	adopted := false
-	defer func() {
-		if !adopted {
-			returned = errors.Join(returned, file.Close())
-		}
-	}()
+	// Retain the actual materialised loan before any later identity or root
+	// check can fail. This partial is cleanup-only until every original
+	// acceptance check below succeeds; files alone never issue a destination.
+	result := &ForkDestinationV1{owner: owner, source: source, state: state, pendingFile: file}
+	result.issuer = result
 	line.mu.Lock()
 	peer := line.nativePeer
 	line.mu.Unlock()
 	if peer == nil {
-		return nil, forkFailureV1("fork_destination", "the child operation has no actual native sender")
+		return result, forkFailureV1("fork_destination", "the child operation has no actual native sender")
 	}
 	if err := errors.Join(peer.CheckSender(sender), checkBorrowedFlockV1(file, sender)); err != nil {
-		return nil, err
+		return result, err
 	}
-	native, err := adoptStartupOperationFile(ctx, args.Child, file)
+	// This is the same closed fork issuer and exact OP role, with resource
+	// custody retained before each fallible step. The generic startup adopter
+	// remains unchanged; no generic Source-from-FD constructor is added.
+	result.pendingRoot, err = cachefs.OpenPrivateRoot(paths.SessionDir(args.Child), false)
 	if err != nil {
-		return nil, err
+		return result, err
 	}
-	adopted = true
-	operation := sessionOperationFromNative(owner.Lifetime(), args.Child, native)
-	result := &ForkDestinationV1{owner: owner, source: source, operation: operation, state: state}
-	if err := result.check(ctx); err != nil {
-		return nil, errors.Join(err, result.Close())
+	rootRef, err := cachefs.CaptureRoot(result.pendingRoot)
+	if err != nil {
+		return result, err
 	}
-	if err := emptyForkDestinationV1(operation.native.root); err != nil {
-		return nil, errors.Join(err, result.Close())
+	fileRef, err := cachefs.CaptureFile(result.pendingRoot, lockFile, file, 0600)
+	if err != nil {
+		return result, err
 	}
-	if err := errors.Join(peer.CheckSender(sender), checkBorrowedFlockV1(file, sender)); err != nil {
-		return nil, errors.Join(err, result.Close())
+	native := &sessionFileLease{root: result.pendingRoot, file: file, rootRef: rootRef, fileRef: fileRef, id: args.Child, path: paths.SessionDir(args.Child), name: lockFile, borrowed: true}
+	result.operation = sessionOperationFromNative(owner.Lifetime(), args.Child, native)
+	result.pendingRoot, result.pendingFile = nil, nil // SAME objects now belong to the real OP.
+	if err := result.checkOriginalV1(ctx); err != nil {
+		return result, err
 	}
+	if err := result.emptyV1(); err != nil {
+		return result, err
+	}
+	if err := errors.Join(peer.CheckSender(sender), checkBorrowedFlockV1(file, sender), result.checkOriginalV1(ctx)); err != nil {
+		return result, err
+	}
+	result.accepted = true
 	return result, nil
 }
 
-func emptyForkDestinationV1(root *os.Root) (returned error) {
-	file, err := root.Open(".")
+func (destination *ForkDestinationV1) emptyV1() (returned error) {
+	file, err := destination.operation.native.root.Open(".")
 	if err != nil {
 		return err
 	}
-	defer func() { returned = errors.Join(returned, file.Close()) }()
+	destination.probe = file
+	defer func() { returned = errors.Join(returned, destination.retirement.closeFilesV4([]*os.File{file})) }()
 	for {
 		entries, err := file.ReadDir(16)
 		for _, entry := range entries {
@@ -101,7 +121,14 @@ func emptyForkDestinationV1(root *os.Root) (returned error) {
 }
 
 func (destination *ForkDestinationV1) check(ctx context.Context) error {
-	if destination == nil || ctx == nil || destination.closed || destination.owner == nil || destination.source == nil || destination.operation == nil || !destination.owner.Valid(destination.state.Primary) || !destination.owner.StartupCommittedV1() || !destination.source.Valid(destination.state.Primary) || !destination.operation.Valid(destination.operation.Primary()) || destination.operation.Primary() == destination.state.Primary {
+	if destination == nil || !destination.accepted {
+		return forkFailureV1("fork_destination", "the actual child destination has not completed its original acceptance")
+	}
+	return destination.checkOriginalV1(ctx)
+}
+
+func (destination *ForkDestinationV1) checkOriginalV1(ctx context.Context) error {
+	if destination == nil || destination.issuer != destination || ctx == nil || destination.closed || destination.owner == nil || destination.source == nil || destination.operation == nil || !destination.owner.Valid(destination.state.Primary) || !destination.owner.StartupCommittedV1() || !destination.source.Valid(destination.state.Primary) || !destination.operation.Valid(destination.operation.Primary()) || destination.operation.Primary() == destination.state.Primary {
 		return forkFailureV1("fork_destination", "the original child destination or source borrow ended")
 	}
 	return errors.Join(ctx.Err(), destination.owner.native.rootRef.CheckRoot(destination.source.native.root), destination.operation.native.check(ctx))
@@ -137,17 +164,22 @@ func (destination *ForkDestinationV1) Close() error {
 	}
 	destination.mu.Lock()
 	defer destination.mu.Unlock()
-	if destination.closed {
-		return nil
+	if destination.issuer != destination {
+		return forkFailureV1("fork_destination", "the original child destination has no actual received resource owner")
 	}
-	if destination.operation == nil {
-		return forkFailureV1("fork_destination", "the original child operation is absent")
+	if destination.closeErr != nil || destination.closed {
+		return destination.closeErr
 	}
-	if err := destination.operation.CloseWithError(); err != nil {
-		return err
+	// Every partial remains reachable, including a root opened before its
+	// receipt check and a failed emptiness-reader close. No LOCK_UN is used.
+	if destination.operation != nil {
+		destination.closeErr = errors.Join(destination.closeErr, destination.operation.CloseWithError())
 	}
-	destination.closed = true
-	return nil
+	destination.closeErr = errors.Join(destination.closeErr, destination.retirement.closeFilesV4([]*os.File{destination.pendingFile, destination.probe}), destination.retirement.closeRootsV4([]*os.Root{destination.pendingRoot}))
+	if destination.closeErr == nil {
+		destination.closed = true
+	}
+	return destination.closeErr
 }
 
 // CheckForkSnapshotRootV1 only compares a root borrowed from the original

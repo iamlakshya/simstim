@@ -21,8 +21,9 @@ type ResumeResult = api.ResumeResult
 
 // Resume starts the agent of a session again after it ended, with the
 // agent's own resume command. The caller fetches the session's secrets
-// (Session.Secrets) into a. A MemoryMax of 0 keeps the size the session
-// asked for before, and MemoryAuto asks for the host's default.
+// (Session.Secrets) into a. Zero keeps the previous size unless its sandbox
+// policy changes. MemoryAuto resolves current sandbox defaults. A microvm
+// request names guest RAM; admission adds its exact host reserve.
 func (c *Conn) Resume(ctx context.Context, a ResumeArgs) (*ResumeResult, error) {
 	a = cloneResumeValues(a)
 	ctx, request := ensureGrantRequest(ctx)

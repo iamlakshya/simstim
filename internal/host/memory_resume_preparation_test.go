@@ -64,3 +64,45 @@ func TestPreparationFutureDataIsOwnedOpaqueAndNeverCurrentAccounting(t *testing.
 		t.Fatal("opaque future data lost its owned bytes", string(encoded), err)
 	}
 }
+
+func TestPreparationReservesSelectedTargetThroughoutOriginalMetadataTransition(t *testing.T) {
+	for _, target := range []int64{256 << 20, 1 << 30} {
+		m := resumePreparationFixtureV1()
+		m.ResumePreparation.MemoryMax = target
+		m.ResumePreparation.PreviousMemoryMax = m.Limits.MemoryMax
+		for _, native := range []memoryUnitFactsV1{{}, {exists: true, maximum: target}} {
+			charge, active, err := resumePreparationChargeV1(&m, m.ResumePreparation.Boot, native, memoryUnitFactsV1{})
+			if err != nil || !active || charge != target {
+				t.Fatal("resize lost its full selected target charge", target, native, charge, active, err)
+			}
+		}
+		if _, _, err := resumePreparationChargeV1(&m, m.ResumePreparation.Boot, memoryUnitFactsV1{exists: true, maximum: m.Limits.MemoryMax}, memoryUnitFactsV1{}); err == nil {
+			t.Fatal("old native cap acquired the target resize reservation")
+		}
+		m.Limits.MemoryMax, m.Limits.Declared = target, target
+		charge, active, err := resumePreparationChargeV1(&m, m.ResumePreparation.Boot, memoryUnitFactsV1{exists: true, maximum: target}, memoryUnitFactsV1{})
+		if err != nil || !active || charge != target {
+			t.Fatal("restart publication released the original preparation early", charge, active, err)
+		}
+		if _, _, err := resumePreparationChargeV1(&m, m.ResumePreparation.Boot, memoryUnitFactsV1{exists: true, maximum: 2 << 30}, memoryUnitFactsV1{}); err == nil {
+			t.Fatal("unrelated native cap acquired the resize accounting leaf")
+		}
+	}
+}
+
+func TestPreparationResizeDataRoundTripPreservesOriginalCap(t *testing.T) {
+	m := resumePreparationFixtureV1()
+	m.ResumePreparation.MemoryMax = 1 << 30
+	m.ResumePreparation.PreviousMemoryMax = 512 << 20
+	raw, err := json.Marshal(m.ResumePreparation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var value ResumePreparationV1
+	if err := json.Unmarshal(raw, &value); err != nil {
+		t.Fatal(err)
+	}
+	if value.MemoryMax != m.ResumePreparation.MemoryMax || value.PreviousMemoryMax != m.ResumePreparation.PreviousMemoryMax || value.Nonce != m.ResumePreparation.Nonce {
+		t.Fatal("resize original cap was lost", string(raw))
+	}
+}

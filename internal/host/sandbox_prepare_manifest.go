@@ -17,7 +17,13 @@ import (
 	"github.com/iamlakshya/simstim/internal/vmneed"
 )
 
-func buildSandboxPrepareManifestV1(id, trueBin string, witness *sandboxPrepareWitnessV1) (*Manifest, error) {
+func buildSandboxPrepareManifestV1(ctx context.Context, id, trueBin string, witness *sandboxPrepareWitnessV1) (*Manifest, error) {
+	if ctx == nil {
+		return nil, newRuntimeError("fixed preparation has no request lifetime")
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if witness == nil || !validID(id) {
 		return nil, sessionLeaseError("sandbox prepare manifest has no valid reservation or witness")
 	}
@@ -87,7 +93,7 @@ func buildSandboxPrepareManifestV1(id, trueBin string, witness *sandboxPrepareWi
 		Files:       &FilePlan{Seed: Seed{Repo: "scratch", Scratch: true}},
 	}
 	if witness.runtime != nil {
-		selected, err := witness.runtime.inventory(context.Background())
+		selected, err := selectedRuntimeInventoryV1(ctx, witness.runtime, witness.runtimeUse)
 		if err != nil {
 			return nil, err
 		}

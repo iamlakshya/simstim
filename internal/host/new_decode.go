@@ -14,9 +14,14 @@ import (
 // becoming the zero value before the typed start interlock can inspect it.
 func decodeNewArgs(raw json.RawMessage) (NewArgs, error) {
 	var args NewArgs
-	fields, err := api.JSONObjectFields(raw, "wall", "secret_delivery", "runtime", "vm_need_v1", "inputs", "environment")
+	fields, err := api.JSONObjectFields(raw, "wall", "secret_delivery", "runtime", "vm_need_v1", "runtime_origin_v1", "inputs", "environment")
 	if err != nil {
 		return args, UserError("bad_request", "the new request is not an unambiguous JSON object", "Update the client and send the request again.")
+	}
+	if value, present := fields["runtime_origin_v1"]; present {
+		if _, err := api.DecodeRuntimeOriginV1(value); err != nil {
+			return args, err
+		}
 	}
 	if !api.ExactJSONFields(raw, (*api.NewArgs)(nil)) {
 		return args, UserError("bad_request", "new needs exact supported request fields", "Use a matching client and its original sealed start request.")

@@ -44,6 +44,9 @@ func checkStartingMemoryLockedV1(ctx context.Context, operation *SessionOperatio
 // Only an exact original private preparation may credit its already-counted
 // quantum; the existing ordinary Starting check remains the fallback.
 func checkStartingMemoryControlLockedV1(ctx context.Context, operation *SessionOperation, expected *Manifest, control *placementControl) error {
+	if handled, err := checkManagedNoneRSSStartLockedV1(ctx, operation, expected, control); handled {
+		return err
+	}
 	if expected != nil && expected.ResumePreparation != nil {
 		if err := checkResumePreparationStartLockedV1(ctx, operation, expected, control); err != nil {
 			return err

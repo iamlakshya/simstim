@@ -12,11 +12,12 @@ import (
 	"github.com/iamlakshya/simstim/internal/proto"
 )
 
-func resumeImageFixture(t *testing.T, history bool, policy string) (*Conn, *GrantRequest, context.Context, SandboxPolicy) {
+func resumeImageFixture(t *testing.T, history bool, policy string, features ...string) (*Conn, *GrantRequest, context.Context, SandboxPolicy) {
 	t.Helper()
 	h := h5GrantState(t)
 	writeRetainedImagePolicyFixture(t, policy)
-	c := finishGeneratedTransportFixture(t, h, strings.Repeat("a", 32), "session.id", "resume", api.FeatureResumeImageV1)
+	selectedFeatures := append([]string{"session.id", "resume", api.FeatureResumeImageV1}, features...)
+	c := finishGeneratedTransportFixture(t, h, strings.Repeat("a", 32), selectedFeatures...)
 	creation := h5Policy()
 	creation.CreationWall = "microvm"
 	if history {
@@ -27,7 +28,7 @@ func resumeImageFixture(t *testing.T, history bool, policy string) (*Conn, *Gran
 		}
 		creation.imageSelectionRaw = raw
 	}
-	if err := reserveSandbox(t.Context(), h, creation); err != nil {
+	if err := withSandboxReceiptObservation(t.Context(), c, func(owned context.Context) error { return reserveSandbox(owned, h, creation) }); err != nil {
 		t.Fatal(err)
 	}
 	r := NewGrantRequest(false, false)

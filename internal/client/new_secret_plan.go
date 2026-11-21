@@ -54,6 +54,9 @@ func (c *Conn) PrepareNewSecrets(ctx context.Context, a NewArgs, vm ...*VMNeedPl
 		return a, err
 	}
 	if a.Wall == "" || a.Wall == "none" {
+		if len(a.RuntimeOrigin) != 0 {
+			return a, grantOperationError()
+		}
 		if err := refuseUnwalledNamedSSHKeys(a); err != nil {
 			return a, err
 		}
@@ -306,8 +309,16 @@ func (p *newSecretPlan) arguments(ctx context.Context, c *Conn, a NewArgs) (NewA
 		if len(a.VMNeedV1) != 0 && !bytes.Equal(a.VMNeedV1, raw) {
 			return a, vmPrepareUnavailable()
 		}
+		origin, err := p.vm.runtimeOriginForV1(ctx, c)
+		if err != nil {
+			return a, err
+		}
+		if len(a.RuntimeOrigin) != 0 && !bytes.Equal(a.RuntimeOrigin, origin) {
+			return a, vmPrepareUnavailable()
+		}
+		a.RuntimeOrigin = origin
 		a.VMNeedV1 = raw
-	} else if len(a.VMNeedV1) != 0 {
+	} else if len(a.VMNeedV1) != 0 || len(a.RuntimeOrigin) != 0 {
 		return a, vmPrepareUnavailable()
 	}
 	return applyTrustedJudgeNewV1(ctx, p, a)

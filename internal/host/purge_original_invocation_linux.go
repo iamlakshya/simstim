@@ -25,6 +25,7 @@ type purgeOriginalInvocationV3 struct {
 	pendingBegin, broken, closed bool
 	last                         api.PurgeResult
 	completion                   *purgeOriginalCompletionV3
+	closeErr                     error
 }
 
 func newOriginalPurgeInvocationV3(ctx context.Context, args api.PurgeArgs) (*purgeOriginalInvocationV3, error) {
@@ -70,7 +71,7 @@ func (owner *purgeOriginalInvocationV3) Call(ctx context.Context, operation stri
 	if owner.pendingBegin && operation != purgeContinueV3 {
 		_ = owner.execution.cancelRequestV2()
 		if owner.execution.line != nil {
-			_ = owner.execution.line.conn.Close()
+			owner.execution.retirement.interruptLineV4(owner.execution.line)
 		}
 		owner.pendingBegin, owner.broken = false, true
 	}
@@ -82,7 +83,7 @@ func (owner *purgeOriginalInvocationV3) Call(ctx context.Context, operation stri
 		return owner.last, placementError("the original invocation lost its actual native line")
 	}
 	done := make(chan struct{})
-	stop := context.AfterFunc(ctx, func() { defer close(done); _ = line.conn.Close() })
+	stop := context.AfterFunc(ctx, func() { defer close(done); owner.execution.retirement.interruptLineV4(line) })
 	defer func() {
 		if !stop() {
 			<-done
@@ -110,7 +111,7 @@ func (owner *purgeOriginalInvocationV3) Call(ctx context.Context, operation stri
 	owner.last = result
 	if err != nil {
 		owner.broken = true
-		_ = line.conn.Close()
+		owner.execution.retirement.interruptLineV4(line)
 		return result, err
 	}
 	if operation == purgeCloseV3 {
@@ -181,11 +182,12 @@ func (owner *purgeOriginalInvocationV3) finishOriginalV3(ctx context.Context) er
 		}
 		owner.completion = completion
 	}
-	if err := owner.completion.Close(ctx); err != nil {
-		return err
+	owner.closeErr = errors.Join(owner.closeErr, owner.completion.Close(ctx))
+	if native := errors.Join(owner.execution.checkNativeRetiredV3(ctx), owner.code.checkNativeRetiredV3(ctx)); native != nil {
+		return errors.Join(owner.closeErr, native)
 	}
 	owner.closed = true
-	return nil
+	return owner.closeErr
 }
 
 // Close cancels an existing request. Native exit is mandatory before code
@@ -196,21 +198,20 @@ func (owner *purgeOriginalInvocationV3) Close() error {
 	}
 	owner.mu.Lock()
 	defer owner.mu.Unlock()
-	if owner.closed {
-		return nil
-	}
 	if owner.execution != nil {
-		if err := owner.execution.Close(); err != nil {
-			return err
+		owner.closeErr = errors.Join(owner.closeErr, owner.execution.Close(), owner.execution.CloseDiagnosticsV3())
+		if native := owner.execution.checkNativeRetiredV3(context.Background()); native != nil {
+			return errors.Join(owner.closeErr, native)
 		}
 	}
 	if owner.code != nil {
-		if err := owner.code.Close(); err != nil {
-			return err
+		owner.closeErr = errors.Join(owner.closeErr, owner.code.Close())
+		if native := owner.code.checkNativeRetiredV3(context.Background()); native != nil {
+			return errors.Join(owner.closeErr, native)
 		}
 	}
 	owner.closed = true
-	return nil
+	return owner.closeErr
 }
 
 // Continuation observes the SAME actual creation even after its own code

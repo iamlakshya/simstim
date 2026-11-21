@@ -253,7 +253,10 @@ func runRestore(args []string) error {
 	if err := host.CheckCaller(); err != nil {
 		return err
 	}
-	res := host.Restore(hasFlag(args, "--all"))
+	res, err := host.RestoreContext(context.Background(), hasFlag(args, "--all"))
+	if err != nil {
+		return err
+	}
 	if hasFlag(args, "--json") {
 		return printJSON(res)
 	}

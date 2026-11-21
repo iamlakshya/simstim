@@ -52,9 +52,16 @@ func TestCloseForWaitsForReadAndEvictsEntry(t *testing.T) {
 		t.Fatal(err)
 	}
 	src := &joiningReader{started: make(chan struct{}), wake: make(chan struct{})}
-	old := open
-	open = func(io.Reader) (cancelreader.CancelReader, error) { return src, nil }
-	t.Cleanup(func() { open = old; CloseFor(f); _ = f.Close() })
+	old := Open
+	Open = func(io.Reader) (cancelreader.CancelReader, error) { return src, nil }
+	t.Cleanup(func() {
+		Open = old
+		if err := Release(f); err != nil {
+			t.Error(err)
+			return
+		}
+		_ = f.Close()
+	})
 	r, err := For(f)
 	if err != nil {
 		t.Fatal(err)
@@ -68,17 +75,21 @@ func TestCloseForWaitsForReadAndEvictsEntry(t *testing.T) {
 	if err := <-returned; !errors.Is(err, context.Canceled) {
 		t.Fatal(err)
 	}
-	CloseFor(f)
+	if err := Release(f); err != nil {
+		t.Fatal(err)
+	}
 	if !src.exited.Load() || src.badClose.Load() {
-		t.Error("CloseFor closed its source before the in-flight read exited")
+		t.Error("Release closed its source before the in-flight read exited")
 	}
 	readersMu.Lock()
 	_, exists := readers[f]
 	readersMu.Unlock()
 	if exists {
-		t.Error("CloseFor retained the file in its reader registry")
+		t.Error("Release retained the file in its reader registry")
 	}
-	CloseFor(f)
+	if err := Release(f); err != nil {
+		t.Fatal(err)
+	}
 	if n := src.closed.Load(); n != 1 {
 		t.Errorf("closed source %d times, want once", n)
 	}

@@ -90,10 +90,18 @@ func (owner *StoppedSessionV1) receiveNativeHolderProofV1(id uint64) (returned e
 			returned = errors.Join(returned, file.Close())
 		}
 	}()
-	if err := errors.Join(owner.invocation.peer.checkNativeSender(sender), owner.invocation.Check(context.Background()), checkBorrowedFlockV1(file, sender)); err != nil {
+	if err := errors.Join(owner.invocation.peer.checkNativeSender(sender), owner.invocation.Check(context.Background())); err != nil {
 		return err
 	}
-	held, err := adoptSupervisorFileLease(context.Background(), owner.operation.Primary(), file)
+	var held *sessionFileLease
+	if owner.invocation.runtime != nil {
+		held, err = owner.adoptManagerHolderObservationV1(context.Background(), file)
+	} else {
+		if err := checkBorrowedFlockV1(file, sender); err != nil {
+			return err
+		}
+		held, err = adoptSupervisorFileLease(context.Background(), owner.operation.Primary(), file)
+	}
 	if err != nil {
 		return err
 	}

@@ -90,7 +90,7 @@ func (owner *OwnedSupervisorLease) AcceptStartupLoan(ctx context.Context, line *
 		return nil, errors.Join(err, line.RejectAncillary())
 	}
 	if loan.Version != 1 || loan.Primary != owner.native.id || len(loan.Nonce) != 64 || !supply.IsHex64(loan.Nonce) ||
-		loan.Purpose != "ordinary" && loan.Purpose != "automatic" && loan.Purpose != startupLoanPurposeSandboxPrepareV1 ||
+		loan.Purpose != "ordinary" && loan.Purpose != "automatic" && loan.Purpose != startupLoanPurposeSandboxPrepareV1 && loan.Purpose != "manager-custody" ||
 		loan.Need != "" && !supply.IsHex64(loan.Need) || loan.Runtime != "" && !supply.IsHex64(loan.Runtime) {
 		return nil, errors.Join(sessionLeaseError("the startup loan has invalid correlation"), line.RejectAncillary())
 	}
@@ -142,7 +142,7 @@ func (owner *OwnedSupervisorLease) AcceptStartupLoan(ctx context.Context, line *
 		return nil, err
 	}
 	runtimeBytes, err := startupRuntimeBytes(m)
-	if err != nil || m.Wall == nil || m.Status.State != StateStarting || startupDigest(m.VMNeedV1) != loan.Need || startupDigest(runtimeBytes) != loan.Runtime {
+	if err != nil || m.Wall == nil || (m.Status.State != StateStarting && loan.Purpose != "manager-custody") || (loan.Purpose == "manager-custody" && !owner.ManagerCustodyPendingV1()) || startupDigest(m.VMNeedV1) != loan.Need || startupDigest(runtimeBytes) != loan.Runtime {
 		operation.Close()
 		return nil, errors.Join(sessionLeaseError("the startup loan differs from the protected primary"), err)
 	}
@@ -157,6 +157,11 @@ func (owner *OwnedSupervisorLease) AcceptStartupLoan(ctx context.Context, line *
 			return nil, err
 		}
 		operation.automaticBoot = &AutomaticBootOperationV1{operation: operation, plan: bytes.Clone(m.AutomaticRestore)}
+	case "manager-custody":
+		if loan.Automatic != "" || IsSandboxPrepareManifestV1(m) {
+			operation.Close()
+			return nil, automaticRestoreError()
+		}
 	case startupLoanPurposeSandboxPrepareV1:
 		if loan.Automatic != "" || len(m.AutomaticRestore) != 0 {
 			operation.Close()

@@ -17,11 +17,13 @@ import (
 // the original outside OP/root, real reboot epoch and exclusive holder role.
 // It owns no VM artefact, declared quantum or whole-unit stopped subject.
 type NoneColdResumeV1 struct {
+	managed               *noneManagerCustodyV1
 	self                  *NoneColdResumeV1
 	life                  sync.Mutex
 	mu                    sync.Mutex
 	operation             *SessionOperation
 	preparation           *bridgeResumePreparationV1
+	automatic             *noneAutomaticRestoreOriginV1
 	holder                *sessionFileLease
 	manager               *nativeUserManagerV1
 	source                Manifest
@@ -43,11 +45,33 @@ func noneColdRoleV1(m *Manifest) bool {
 	return NoneSupervisorShapeV1(m)
 }
 
-func captureNoneColdResumeV1(ctx context.Context, p *bridgeResumePreparationV1) (partial *NoneColdResumeV1, returned error) {
+func captureNoneColdResumeV1(ctx context.Context, p *bridgeResumePreparationV1) (_ *NoneColdResumeV1, returned error) {
 	if ctx == nil || p == nil || p.bridge == nil || p.operation == nil || !p.active.Load() || p.bridge.ctx == nil || p.bridge.ctx.Err() != nil {
 		return nil, resumePreparationErrorV1("the None continuation has no actual original prepare request")
 	}
-	operation := p.operation
+	return captureNoneColdOwnerV1(ctx, p.operation, p, nil)
+}
+
+func captureNoneColdOwnerV1(ctx context.Context, operation *SessionOperation, p *bridgeResumePreparationV1, automatic *noneAutomaticRestoreOriginV1) (partial *NoneColdResumeV1, returned error) {
+	if ctx == nil || operation == nil || (p == nil) == (automatic == nil) {
+		return nil, sessionLeaseError("the None continuation has no single concrete original owner")
+	}
+	if automatic != nil {
+		if err := automatic.checkGateV1(ctx); err != nil {
+			return nil, err
+		}
+	}
+	if p != nil {
+		if p.operation != operation || !p.active.Load() || p.bridge == nil || p.bridge.ctx == nil || p.bridge.ctx.Err() != nil {
+			return nil, resumePreparationErrorV1("the actual manual None capture owner ended")
+		}
+		p.bridge.mu.Lock()
+		service := p.bridge.resumePreparationService
+		p.bridge.mu.Unlock()
+		if service == nil || service.plan.Load() != p {
+			return nil, resumePreparationErrorV1("the manual None capture is not its actual registered bridge plan")
+		}
+	}
 	if operation.native == nil || operation.native.borrowed || !operation.Valid(operation.Primary()) {
 		return nil, sessionLeaseError("the None continuation has no original owning OP")
 	}
@@ -65,6 +89,9 @@ func captureNoneColdResumeV1(ctx context.Context, p *bridgeResumePreparationV1) 
 	sameBoot := before.Run.BootID == boot
 	if sameBoot && !validNoneCleanupV1(before, boot) {
 		return nil, sessionLeaseError("the original None run has no trusted complete host-account cleanup for this boot and generation")
+	}
+	if sameBoot && p != nil && before.Run.Unit != "" {
+		return captureManagedNoneColdV1(ctx, operation, p, before)
 	}
 	holder, err := openNoneColdHolderV1(ctx, operation, before)
 	if err != nil {
@@ -89,7 +116,7 @@ func captureNoneColdResumeV1(ctx context.Context, p *bridgeResumePreparationV1) 
 			returned = errors.Join(returned, cleanup)
 			if cleanup != nil {
 				if result == nil {
-					result = &NoneColdResumeV1{operation: operation, preparation: p, holder: holder, manager: manager, source: CloneManifest(*before), boot: boot, sameBoot: sameBoot}
+					result = &NoneColdResumeV1{operation: operation, preparation: p, automatic: automatic, holder: holder, manager: manager, source: CloneManifest(*before), boot: boot, sameBoot: sameBoot}
 					result.self = result
 				}
 				result.managerDiagnostic = managerDiagnostic
@@ -113,7 +140,7 @@ func captureNoneColdResumeV1(ctx context.Context, p *bridgeResumePreparationV1) 
 			return nil, sessionLeaseError("this same-boot None continuation needs the actual original manager custody class; the managerless issuer cannot replace it")
 		}
 	}
-	result = &NoneColdResumeV1{operation: operation, preparation: p, holder: holder, manager: manager, source: CloneManifest(*before), boot: boot, sameBoot: sameBoot}
+	result = &NoneColdResumeV1{operation: operation, preparation: p, automatic: automatic, holder: holder, manager: manager, source: CloneManifest(*before), boot: boot, sameBoot: sameBoot}
 	result.self = result
 	result.memberIDs, err = captureNoneColdMemberIDsV1(ctx, operation)
 	if err != nil {
@@ -133,6 +160,9 @@ func captureNoneColdResumeV1(ctx context.Context, p *bridgeResumePreparationV1) 
 func (cold *NoneColdResumeV1) checkOriginV1(ctx context.Context) error {
 	if cold == nil || cold.self != cold {
 		return resumePreparationErrorV1("the original None continuation is absent")
+	}
+	if cold.automatic != nil {
+		return cold.automatic.checkV1(ctx, cold)
 	}
 	p := cold.preparation
 	if ctx == nil || p == nil || !p.active.Load() || p.noneCold != cold || p.operation != cold.operation || p.bridge == nil || p.bridge.ctx == nil || p.bridge.ctx.Err() != nil || p.warm != nil || p.cold != nil || len(p.token) != 64 {
@@ -209,7 +239,7 @@ func (cold *NoneColdResumeV1) Check(ctx context.Context, operation *SessionOpera
 	if cold.handed {
 		return cold.checkTakeoverV1(ctx)
 	}
-	return cold.checkVacancyV1(ctx)
+	return cold.checkBeforeNativeV1(ctx)
 }
 
 func (cold *NoneColdResumeV1) CheckManifest(ctx context.Context, operation *SessionOperation, next *Manifest) error {
@@ -223,6 +253,9 @@ func (cold *NoneColdResumeV1) CheckManifest(ctx context.Context, operation *Sess
 }
 
 func (cold *NoneColdResumeV1) Close() error {
+	if cold != nil && cold.self == cold && cold.managed != nil {
+		return cold.closeManagedV1()
+	}
 	if cold == nil {
 		return nil
 	}

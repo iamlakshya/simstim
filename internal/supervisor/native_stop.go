@@ -54,6 +54,9 @@ type nativeStopScopeV1 struct {
 
 func init() { Features = append(Features, proto.FeatureNativeStopV1) }
 func (s *Supervisor) nativeStopRequestV1(client *client, request proto.Request) bool {
+	if s.managerCustodyStopRequestV1(client, request) {
+		return true
+	}
 	if request.Op != proto.NativeStopInspectV1 && request.Op != proto.NativeStopCommitV1 && request.Op != proto.NativeResumeInspectV1 && request.Op != proto.NativeResumeCheckV1 {
 		return false
 	}
@@ -149,12 +152,14 @@ func (s *Supervisor) nativeStopRequestV1(client *client, request proto.Request) 
 		client.reply(request.ID, nil, toProtoErr(execRefusal("the original native stop continuation changed")))
 		return true
 	}
+	if err := root.retainManagerCustodyForSameRequestStopV1(scope.lifetime, scope.owner); err != nil {
+		client.reply(request.ID, nil, toProtoErr(err))
+		return true
+	}
 	// This means only that this original live owner accepted a stop. The
 	// outside owner must still join actual pidfd and whole native unit absence.
+	root.requestTrustedStopV1()
 	client.reply(request.ID, state, nil)
-	select {
-	case root.stop <- struct{}{}:
-	default:
-	}
+	root.signalTrustedStopV1()
 	return true
 }

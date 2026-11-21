@@ -15,6 +15,9 @@ import (
 // genuine holder vacancy is acquired only after the tracked creation and
 // BOTH native unit/cgroup lifetimes have ended under the SAME original OP.
 func (cold *ColdResumeV1) SettleForCancellationV1(ctx context.Context, operation *SessionOperation) error {
+	if cold != nil && cold.custody != nil {
+		return cold.custody.SettleForCancellationV1(ctx, operation)
+	}
 	if cold == nil || ctx == nil || operation == nil || operation != cold.operation || cold.vacancy == nil || cold.artifacts == nil {
 		return auxiliaryUnavailableV1("cold cancellation has no original native source")
 	}

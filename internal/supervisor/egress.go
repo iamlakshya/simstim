@@ -362,10 +362,9 @@ func (s *Supervisor) stopEgress() {
 			}
 			_ = ep.cmd.Process.Kill()
 		}
-		select {
-		case <-ep.done:
-		case <-time.After(reapWait):
-		}
+		// The original waiter is a true runtime owner. A timeout after Kill
+		// cannot certify native closure or permit manager custody deposit.
+		<-ep.done
 	})
 	if ep.ctl != nil {
 		<-ep.ctl.events.finished

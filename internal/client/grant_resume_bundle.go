@@ -59,6 +59,7 @@ func cloneResumeValues(a ResumeArgs) ResumeArgs {
 	a.NamedSSHKeys = api.CloneNamedSSHKeysV1(a.NamedSSHKeys)
 	a.Prepared = api.ClonePreparedResumeV1(a.Prepared)
 	a.ExpectedImageV1 = slices.Clone(a.ExpectedImageV1)
+	a.VMNeedV1 = slices.Clone(a.VMNeedV1)
 	a.Secrets, a.Snapshot = maps.Clone(a.Secrets), cloneGrantSnapshot(a.Snapshot)
 	a.Members = slices.Clone(a.Members)
 	for n := range a.Members {

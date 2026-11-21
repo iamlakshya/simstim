@@ -187,3 +187,9 @@ Stopping must still kill and physically join the original VM, init and
 control actor. A later stopped actor must come from retained original native
 custody and the same actual stopped-session issuer. Neither saved journal
 data nor a directory descriptor may recreate it.
+
+Final request writers recheck the same connection, immutable full-manifest key
+and original receipt pointer under its held read lock. They use a bounded
+identity guard inside placement control. Full file verification happens before
+that lock, using the actual request context. A copied or retired receipt cannot
+become live through a projection or a later writer.

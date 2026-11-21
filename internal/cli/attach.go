@@ -9,6 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/iamlakshya/simstim/internal/api"
 	"github.com/iamlakshya/simstim/internal/brand"
 	"github.com/iamlakshya/simstim/internal/client"
 	"github.com/iamlakshya/simstim/internal/onboard"
@@ -67,6 +68,7 @@ func attachCmd() *cobra.Command {
 		Aliases: []string{"a"},
 		Short:   "Attach to a session",
 		Long: "Attaches this terminal to a session. A stopped host that its provider script can start wakes first.\n" +
+			"A stopped sandbox wakes through the usual resume and secret checks, with an empty screen.\n" +
 			"When the session's agent has ended, attach asks to start it again, as resume does. --restart\n" +
 			"answers yes. The host may be left out when no other host has a session of that name.\n" +
 			"With --id, name the host and exact session ID. A missing ID never becomes a session name.",
@@ -116,6 +118,14 @@ func runAttach(cmd *cobra.Command, args []string, restart bool) error {
 	var s client.Session
 	err = a.open(cmd.Context(), cmd, func(ctx context.Context, f found) error {
 		s = *f.s
+		if s.State == api.StateStopped {
+			say(cmd, "Waking %s on %s…\n", shown(nameOf(s)), shown(f.host.Name))
+			r, err := restartAgent(ctx, cmd, f, true)
+			if err == nil {
+				s = *r
+			}
+			return err
+		}
 		if !client.Ended(s) {
 			if restart {
 				say(cmd, "The agent of %s on %s runs, so attach did not restart it.\n", shown(nameOf(s)), shown(f.host.Name))

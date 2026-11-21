@@ -33,6 +33,8 @@ type ForkSourceV1 struct {
 	memberReceipt  memberRootReceiptV1
 	children       []*forkChildV1
 	copied, closed bool
+	closeErr       error
+	retirement     nativeDescriptorRetirementsV1
 }
 
 type forkChildV1 struct {
@@ -41,6 +43,8 @@ type forkChildV1 struct {
 	operation       *SessionOperation
 	manifest        Manifest
 	started, closed bool
+	closeErr        error
+	retirement      nativeDescriptorRetirementsV1
 }
 
 func captureForkSourceV1(ctx context.Context, selected string) (_ *ForkSourceV1, returned error) {
@@ -78,7 +82,7 @@ func captureForkSourceV1(ctx context.Context, selected string) (_ *ForkSourceV1,
 }
 
 func (source *ForkSourceV1) check(ctx context.Context) error {
-	if source == nil || source.closed || source.operation == nil || source.warm == nil {
+	if source == nil || source.closed || source.closeErr != nil || source.operation == nil || source.warm == nil {
 		return forkFailureV1("fork_source", "the original native fork source ended")
 	}
 	if err := source.warm.Check(ctx, source.operation); err != nil {
@@ -434,45 +438,46 @@ func (source *ForkSourceV1) copy(ctx context.Context) (returned error) {
 	}
 }
 
-func (source *ForkSourceV1) Close() (returned error) {
+func (source *ForkSourceV1) Close() error {
 	if source == nil {
 		return nil
 	}
 	source.mu.Lock()
 	defer source.mu.Unlock()
 	if source.closed {
-		return nil
+		return source.closeErr
 	}
-	// Explicit native release joins the SAME source copy and destination OFD
-	// borrowers before any outside reservation may be deleted or unlocked.
+	// Join the SAME original copy/borrowers before closing any reservation.
 	if source.warm != nil {
 		if err := source.warm.Close(); err != nil {
-			return err
+			source.closeErr = rememberForkCloseV1(source.closeErr, err)
+			return source.closeErr
 		}
 	}
+	pending := false
 	if source.memberRoot != nil {
-		returned = errors.Join(returned, source.memberRoot.Close())
-		source.memberRoot = nil
+		source.closeErr = rememberForkCloseV1(source.closeErr, source.retirement.closeRootsV4([]*os.Root{source.memberRoot}))
+		if source.retirement.checkRootsV4([]*os.Root{source.memberRoot}) != nil {
+			pending = true
+		}
 	}
 	for _, child := range source.children {
-		if child.closed {
-			continue
+		source.closeErr = rememberForkCloseV1(source.closeErr, child.closeResourcesV1())
+		if child == nil || !child.closed {
+			pending = true
 		}
-		if child.operation != nil {
-			returned = errors.Join(returned, child.operation.CloseWithError())
-		}
-		if child.reservation != nil {
-			if child.reservation.launched {
-				child.reservation.close()
-			} else {
-				returned = errors.Join(returned, closeNewNoRoomReservationV1(child.reservation))
-			}
-		}
-		child.closed = true
 	}
+	if pending {
+		return source.closeErr
+	}
+	// An unjoined child must retain this original parent OP. No second Close
+	// may skip that child because a metadata closed flag was set on error.
 	if source.operation != nil {
-		returned = errors.Join(returned, source.operation.CloseWithError())
+		if err := source.operation.CloseWithError(); err != nil {
+			source.closeErr = rememberForkCloseV1(source.closeErr, err)
+			return source.closeErr
+		}
 	}
-	source.closed = returned == nil
-	return returned
+	source.closed = true
+	return source.closeErr
 }

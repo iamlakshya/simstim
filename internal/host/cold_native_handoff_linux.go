@@ -6,9 +6,10 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"golang.org/x/sys/unix"
 	"os"
 	"reflect"
+
+	"golang.org/x/sys/unix"
 )
 
 // checkColdRestartReservationLockedV1 reuses only this original native holder
@@ -59,6 +60,9 @@ func consumeColdResumeDispatchLockedV1(ctx context.Context, operation *SessionOp
 }
 
 func (cold *ColdResumeV1) checkNativeTakeoverLockedV1(ctx context.Context, operation *SessionOperation) error {
+	if cold.custody != nil {
+		return cold.custody.checkClaimedV1(ctx)
+	}
 	launch := cold.startup
 	if !cold.bound || !cold.handed || cold.closed || operation != cold.operation || launch == nil || operation.startup != launch || launch.operation != operation || launch.placement == nil || launch.placement.startup != operation || launch.unit == nil || launch.nativePeer() == nil || launch.nativePeer().identity == nil || launch.line == nil {
 		return auxiliaryUnavailableV1("the cold continuation has no actual original native takeover")
@@ -73,8 +77,13 @@ func (cold *ColdResumeV1) checkNativeTakeoverLockedV1(ctx context.Context, opera
 	if err != nil {
 		return err
 	}
-	if !bytes.Equal(current.VMNeedV1, cold.vacancy.need) || !reflect.DeepEqual(current.RuntimeManifest, launch.manifest.RuntimeManifest) {
+	if !reflect.DeepEqual(current.RuntimeManifest, launch.manifest.RuntimeManifest) {
 		return auxiliaryUnavailableV1("the original cold Need or runtime changed before native takeover")
+	}
+	if !bytes.Equal(current.VMNeedV1, cold.vacancy.need) {
+		if err := checkColdRestartSelectionV1(operation, cold.vacancy.need, cold.vacancy.runtime, current); err != nil {
+			return err
+		}
 	}
 	if err := cold.artifacts.checkAfterNativeTakeoverV1(ctx, cold, launch); err != nil {
 		return err

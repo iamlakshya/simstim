@@ -3,6 +3,10 @@
 set -euo pipefail
 umask 077
 cd "$(dirname "$0")/../.."
+go_build_toolchain=$(sh scripts/go-build-tags.sh toolchain)
+export GOTOOLCHAIN="$go_build_toolchain"
+go_build_tags=$(sh scripts/go-build-tags.sh)
+export GO_BUILD_TAGS="$go_build_tags"
 if [ "$#" -ne 1 ] || { [ "$1" != amd64 ] && [ "$1" != arm64 ]; }; then
     echo 'default-image repro: expected amd64 or arm64. Try: guest/base-image/repro.sh <native-arch>.' >&2
     exit 1
@@ -56,6 +60,6 @@ done
 shasum -a 256 go.mod go.sum guest/supply.lock internal/image/default_image.toml \
     guest/base-image/build.sh guest/base-image/prepare.sh >"$out_dir/source-pins-after.txt"
 diff "$out_dir/source-pins-before.txt" "$out_dir/source-pins-after.txt"
-go run ./cmd/supply default-image repro --first "$out_dir/run-1/image/$image_arch" \
+go run -tags="$go_build_tags" ./cmd/supply default-image repro --first "$out_dir/run-1/image/$image_arch" \
     --second "$out_dir/run-2/image/$image_arch" >"$out_dir/result.json"
 cat "$out_dir/result.json"

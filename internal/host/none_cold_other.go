@@ -35,3 +35,7 @@ func retainNoneColdRestartWriterV1(_ context.Context, operation *SessionOperatio
 	}
 	return nil
 }
+
+func (*NoneColdResumeV1) prepareManagerBootstrapV1(context.Context) error {
+	return sessionLeaseError("the original managed None continuation needs a supported Linux host")
+}

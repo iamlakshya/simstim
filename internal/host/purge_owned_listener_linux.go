@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net"
 	"os"
+	"sync"
 
 	"github.com/iamlakshya/simstim/internal/brand"
 	"github.com/iamlakshya/simstim/internal/cachefs"
@@ -16,6 +17,10 @@ import (
 // The raw child creates this own endpoint. It does not adopt an endpoint or
 // directory from a caller's pathname. A relative bind avoids HOME path limits.
 type purgeOwnedListenerV3 struct {
+	mu         sync.Mutex
+	acceptMu   sync.Mutex
+	retirement purgeNativeRetirementsV4
+	socketGone bool
 	root       *os.Root
 	rootRef    cachefs.Reference
 	listener   *net.UnixListener
@@ -117,26 +122,52 @@ func (owner *purgeOwnedListenerV3) Check() error {
 	return nil
 }
 
-func (owner *purgeOwnedListenerV3) Close() error {
+// Accept belongs to this original listener. Close interrupts its deadline and
+// joins this actual gate before recording the first native listener close.
+func (owner *purgeOwnedListenerV3) acceptV4() (*net.UnixConn, error) {
+	owner.acceptMu.Lock()
+	defer owner.acceptMu.Unlock()
+	owner.mu.Lock()
+	closing := owner.closing || owner.closed
+	owner.mu.Unlock()
+	if closing {
+		return nil, placementError("the original owned listener is closing")
+	}
+	return owner.listener.AcceptUnix()
+}
+
+func (owner *purgeOwnedListenerV3) Close() (returned error) {
 	if owner == nil {
 		return nil
 	}
-	if owner.closed {
-		if err := observeOriginalPurgeDescriptorCloseV3([]*os.File{owner.socketFile}, []*os.Root{owner.root}); err != nil {
-			return err
-		}
-		return nil
-	}
+	defer func() { returned = errors.Join(returned, owner.retirement.interrupts.diagnosticsV4()) }()
+	owner.mu.Lock()
 	owner.closing = true
-	if owner.listener != nil {
-		if err := owner.listener.Close(); !errors.Is(err, net.ErrClosed) {
-			owner.closeErr = errors.Join(owner.closeErr, err)
-		}
+	listener := owner.listener
+	owner.mu.Unlock()
+	if listener != nil {
+		owner.retirement.interruptListenerV4(listener)
 	}
-	if owner.root != nil && owner.socket != nil {
+	owner.acceptMu.Lock()
+	defer owner.acceptMu.Unlock()
+	owner.mu.Lock()
+	defer owner.mu.Unlock()
+	if owner.closed {
+		return errors.Join(owner.closeErr, owner.retirement.diagnosticsV4(), owner.retirement.checkAllRetiredV4())
+	}
+	owner.closeErr = errors.Join(owner.closeErr, owner.retirement.closeListenerV4(listener))
+	if err := owner.retirement.checkListenerV4(listener); err != nil {
+		return errors.Join(owner.closeErr, err)
+	}
+	if listener != nil && owner.socket == nil {
+		return errors.Join(owner.closeErr, placementError("the actual socket creation has no retained native identity; preserve its owner"))
+	}
+	if !owner.socketGone && owner.root != nil && owner.socket != nil {
 		info, err := owner.root.Lstat("attempt.sock")
 		if err == nil && os.SameFile(info, owner.socket) {
-			owner.closeErr = errors.Join(owner.closeErr, owner.root.Remove("attempt.sock"))
+			if err := owner.root.Remove("attempt.sock"); err != nil {
+				return errors.Join(owner.closeErr, err)
+			}
 		} else if errors.Is(err, os.ErrNotExist) {
 			if owner.socketFile == nil {
 				return placementError("the missing actual purge socket has no original native handle")
@@ -148,16 +179,39 @@ func (owner *purgeOwnedListenerV3) Close() error {
 			}
 		} else if err != nil {
 			return errors.Join(owner.closeErr, err)
-		} else if err == nil {
+		} else {
 			return errors.Join(owner.closeErr, placementError("preserved an unrelated replacement purge socket"))
 		}
+		if err := syncCapturedDirectory(owner.root); err != nil {
+			return errors.Join(owner.closeErr, err)
+		}
+		owner.socketGone = true
 	}
-	if owner.socketFile != nil {
-		owner.closeErr = errors.Join(owner.closeErr, owner.socketFile.Close())
+	owner.closeErr = errors.Join(owner.closeErr, owner.retirement.closeFilesV4([]*os.File{owner.socketFile}), owner.retirement.closeRootsV4([]*os.Root{owner.root}))
+	native := owner.retirement.checkAllRetiredV4()
+	if native == nil {
+		owner.closed = true
 	}
-	if owner.root != nil {
-		owner.closeErr = errors.Join(owner.closeErr, owner.root.Close())
+	return errors.Join(owner.closeErr, owner.retirement.diagnosticsV4(), native)
+}
+
+func (owner *purgeOwnedListenerV3) checkNativeRetiredV3(ctx context.Context) error {
+	if owner == nil || ctx == nil {
+		return placementError("the original owned listener retirement is absent")
 	}
-	owner.closed = true
-	return owner.closeErr
+	owner.mu.Lock()
+	defer owner.mu.Unlock()
+	if !owner.closed || owner.listener != nil && !owner.socketGone {
+		return placementError("the actual original listener retains unknown native resources")
+	}
+	return owner.retirement.checkAllRetiredV4()
+}
+
+func (owner *purgeOwnedListenerV3) CloseDiagnosticsV3() error {
+	if owner == nil {
+		return nil
+	}
+	owner.mu.Lock()
+	defer owner.mu.Unlock()
+	return errors.Join(owner.closeErr, owner.retirement.diagnosticsV4())
 }

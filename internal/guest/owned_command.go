@@ -77,6 +77,9 @@ func (g *Init) startOwned(run *execRun, cmd *exec.Cmd) error {
 // waitOwned has one waiter and sends the final group signal while the leader
 // is still unreaped. No caller retains PID/group signal rights after Wait.
 func (g *Init) waitOwned(run *execRun) (bool, error) {
+	if g.purgeReader != nil {
+		return g.purgeReader.wait(run)
+	}
 	run.waitOnce.Do(func() {
 		_, run.waitKnown = proc.AwaitStatus(run.cmd.Process.Pid)
 		run.mu.Lock()

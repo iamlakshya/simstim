@@ -5,6 +5,10 @@
 #   guest/build.sh [--only-kernels | --only-tools [--if-prepared]] [amd64|arm64|all|ARCH=...]
 set -euo pipefail
 cd "$(dirname "$0")/.."
+go_build_toolchain=$(sh scripts/go-build-tags.sh toolchain)
+export GOTOOLCHAIN="$go_build_toolchain"
+go_build_tags=$(sh scripts/go-build-tags.sh)
+export GO_BUILD_TAGS="$go_build_tags"
 
 fail() {
     echo "guest-build: $1" >&2
@@ -62,7 +66,7 @@ pin_get() {
     if [ -n "${GUEST_SUPPLY_TOOL:-}" ]; then
         "$GUEST_SUPPLY_TOOL" pin get "$1"
     else
-        go run ./cmd/supply pin get "$1"
+        go run -tags="$go_build_tags" ./cmd/supply pin get "$1"
     fi
 }
 
@@ -70,7 +74,7 @@ pin_verify() {
     if [ -n "${GUEST_SUPPLY_TOOL:-}" ]; then
         "$GUEST_SUPPLY_TOOL" pin verify "$1" "$2"
     else
-        go run ./cmd/supply pin verify "$1" "$2"
+        go run -tags="$go_build_tags" ./cmd/supply pin verify "$1" "$2"
     fi
 }
 
@@ -117,8 +121,8 @@ if [ "$inside_builder" -eq 0 ]; then
     guest_cache=$(cd "$cache_dir" && pwd -P)
     guest_source=$(pwd -P)
     guest_arch=$(host_arch)
-    CGO_ENABLED=0 GOOS=linux GOARCH="$guest_arch" go build -trimpath -o "$bin_dir/supply" ./cmd/supply
-    CGO_ENABLED=0 GOOS=linux GOARCH="$guest_arch" go build -trimpath -o "$bin_dir/verity" ./guest/verity
+    CGO_ENABLED=0 GOOS=linux GOARCH="$guest_arch" go build -tags="$go_build_tags" -trimpath -o "$bin_dir/supply" ./cmd/supply
+    CGO_ENABLED=0 GOOS=linux GOARCH="$guest_arch" go build -tags="$go_build_tags" -trimpath -o "$bin_dir/verity" ./guest/verity
     builder_image=$(pin_get builder.image)
     builder_args=(--inside-builder "$target")
     case "$mode" in
@@ -307,6 +311,8 @@ build_tools() {
         "${tree}/mnt/image" \
         "${tree}/mnt/agents" \
         "${tree}/mnt/session" \
+        "${tree}/mnt/reader-copy" \
+        "${tree}/mnt/reader-scratch" \
         "${tree}/mnt/root"
     install -m 0755 "$helper_bin" "${tree}/init"
     install -m 0755 "$vt_bin" "${tree}/bin/${app_name}-vt"

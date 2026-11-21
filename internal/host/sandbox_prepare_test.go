@@ -262,7 +262,7 @@ func TestSandboxPrepareSameConnectionImageDefaultsNeverFallBackToStore(t *testin
 	if _, err := bNoDefaults.runtime.status(ctx, runtimecache.RuntimeRequest{Manifest: gvisorManifest}); err != nil {
 		t.Fatal(err)
 	}
-	receiptNoDefaults, err := bNoDefaults.runtime.selectedRuntime(gvisorManifest)
+	receiptNoDefaults, err := bNoDefaults.runtime.selectedRuntime(ctx, gvisorManifest)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -285,7 +285,7 @@ func TestSandboxPrepareSameConnectionImageDefaultsNeverFallBackToStore(t *testin
 	if _, err := bWithDefaults.runtime.status(ctx, runtimecache.RuntimeRequest{Manifest: gvisorManifest, ImageDefaults: &imageDefaults}); err != nil {
 		t.Fatal(err)
 	}
-	receiptWithDefaults, err := bWithDefaults.runtime.selectedRuntime(gvisorManifest)
+	receiptWithDefaults, err := bWithDefaults.runtime.selectedRuntime(ctx, gvisorManifest)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -351,7 +351,7 @@ func TestSandboxPrepareFixedManifestQuotasAndOneUseWitness(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	m, err := buildSandboxPrepareManifestV1(reservation.id, "/usr/bin/true", witness)
+	m, err := buildSandboxPrepareManifestV1(ctx, reservation.id, "/usr/bin/true", witness)
 	if err != nil {
 		_ = cleanupSandboxPrepareSessionV1(operation, reservation)
 		t.Fatal(err)
@@ -420,7 +420,7 @@ func TestSandboxPrepareFixedManifestQuotasAndOneUseWitness(t *testing.T) {
 		_ = cleanupSandboxPrepareSessionV1(operation, reservation)
 		t.Fatal(err)
 	}
-	m2, err := buildSandboxPrepareManifestV1(res2.id, "/usr/bin/true", witness)
+	m2, err := buildSandboxPrepareManifestV1(ctx, res2.id, "/usr/bin/true", witness)
 	if err != nil {
 		_ = cleanupSandboxPrepareSessionV1(op2, res2)
 		_ = cleanupSandboxPrepareSessionV1(operation, reservation)

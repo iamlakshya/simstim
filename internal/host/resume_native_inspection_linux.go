@@ -38,6 +38,7 @@ type ColdResumeV1 struct {
 	creation            *os.File
 	rewindCreationGroup *os.File
 	closeErr            error
+	custody             *managerCustodyColdV1
 }
 
 // InspectResumeForOperationV1 never stops a live controller. Exactly one
@@ -54,6 +55,16 @@ func InspectResumeForOperationV1(ctx context.Context, operation *SessionOperatio
 	if protected.Run.BootID == BootID() {
 		owner, err := captureSupportedSupervisorPurposeV1(ctx, operation, proto.NativeResumeInspectV1)
 		if err != nil {
+			if noHolderSocket(err) {
+				custody, captureErr := captureManagerCustodyResumeV1(ctx, operation)
+				if captureErr != nil {
+					if custody != nil {
+						return nil, &ColdResumeV1{operation: operation, custody: custody}, errors.Join(err, captureErr)
+					}
+					return nil, nil, errors.Join(err, captureErr)
+				}
+				return nil, &ColdResumeV1{operation: operation, custody: custody}, nil
+			}
 			return nil, nil, err
 		}
 		result := &WarmResumeV1{owner: owner}
@@ -137,6 +148,9 @@ func (prepared *WarmResumeV1) Close() error {
 	return owner.Close()
 }
 func (prepared *ColdResumeV1) Check(ctx context.Context, operation *SessionOperation) error {
+	if prepared != nil && prepared.custody != nil {
+		return prepared.custody.Check(ctx, operation)
+	}
 	if prepared == nil || ctx == nil || operation == nil || operation != prepared.operation || prepared.vacancy == nil || prepared.artifacts == nil {
 		return auxiliaryUnavailableV1("the original cold native absence/artifact source is absent")
 	}
@@ -145,6 +159,9 @@ func (prepared *ColdResumeV1) Check(ctx context.Context, operation *SessionOpera
 	return prepared.checkLockedV1(ctx, operation)
 }
 func (prepared *ColdResumeV1) checkLockedV1(ctx context.Context, operation *SessionOperation) error {
+	if prepared.custody != nil {
+		return prepared.custody.Check(ctx, operation)
+	}
 	if prepared.closed || prepared.vacancy.operation != operation || prepared.artifacts.vacancy != prepared.vacancy {
 		return auxiliaryUnavailableV1("the original cold native source ended or changed")
 	}
@@ -157,6 +174,9 @@ func (prepared *ColdResumeV1) checkLockedV1(ctx context.Context, operation *Sess
 	return prepared.artifacts.CheckBeforeActivation(ctx)
 }
 func (prepared *ColdResumeV1) CheckManifest(ctx context.Context, operation *SessionOperation, proposed *Manifest) error {
+	if prepared != nil && prepared.custody != nil {
+		return prepared.custody.CheckManifest(ctx, operation, proposed)
+	}
 	if prepared == nil || ctx == nil || operation == nil || operation != prepared.operation || prepared.vacancy == nil || prepared.artifacts == nil {
 		return auxiliaryUnavailableV1("the original cold native absence/artifact source is absent")
 	}
@@ -165,8 +185,14 @@ func (prepared *ColdResumeV1) CheckManifest(ctx context.Context, operation *Sess
 	if err := prepared.checkLockedV1(ctx, operation); err != nil {
 		return err
 	}
-	if proposed == nil || proposed.ID != operation.Primary() || proposed.SandboxOf != "" || proposed.path != "" || !bytes.Equal(proposed.VMNeedV1, prepared.vacancy.need) {
-		return auxiliaryUnavailableV1("the cold continuation changed its original protected Need")
+	if proposed == nil || proposed.ID != operation.Primary() || proposed.SandboxOf != "" || proposed.path != "" {
+		return auxiliaryUnavailableV1("the cold continuation changed its original protected primary")
+	}
+	if !bytes.Equal(proposed.VMNeedV1, prepared.vacancy.need) {
+		if err := checkAdmittedRestartCurrentV1(operation, proposed); err != nil {
+			return err
+		}
+		return ValidateManifestStart(proposed)
 	}
 	runtime, err := startupRuntimeBytes(proposed)
 	if err != nil {
@@ -180,6 +206,9 @@ func (prepared *ColdResumeV1) CheckManifest(ctx context.Context, operation *Sess
 func (prepared *ColdResumeV1) Close() error {
 	if prepared == nil {
 		return nil
+	}
+	if prepared.custody != nil {
+		return prepared.custody.Close()
 	}
 	prepared.life.Lock()
 	defer prepared.life.Unlock()
@@ -227,25 +256,34 @@ func (prepared *ColdResumeV1) Close() error {
 // Resume consumes this actual cold source on the SAME original operation.
 // The host's canonical body receives no raw absence or execution constructor.
 func (prepared *ColdResumeV1) Resume(ctx context.Context, operation *SessionOperation, args api.ResumeArgs) (*api.ResumeResult, error) {
-	if err := prepared.Check(ctx, operation); err != nil {
+	if err := prepared.bindResumeOperationV1(ctx, operation); err != nil {
 		return nil, err
+	}
+	return resumeColdForPreparationV1(ctx, operation, prepared, args)
+}
+
+// Only this SAME actual Cold/OP producer may consume the original binding.
+// Extracting it does not permit a row, copied source or new VM lease issuer.
+func (prepared *ColdResumeV1) bindResumeOperationV1(ctx context.Context, operation *SessionOperation) error {
+	if err := prepared.Check(ctx, operation); err != nil {
+		return err
 	}
 	prepared.mu.Lock()
 	if prepared.closed || prepared.bound {
 		prepared.mu.Unlock()
-		return nil, auxiliaryUnavailableV1("the original cold continuation was consumed or ended")
+		return auxiliaryUnavailableV1("the original cold continuation was consumed or ended")
 	}
 	operation.gate.Lock()
 	if !operation.active.Load() || operation.nativeColdResume != nil || operation.startup != nil {
 		operation.gate.Unlock()
 		prepared.mu.Unlock()
-		return nil, auxiliaryUnavailableV1("the original operation already owns a cold continuation or startup")
+		return auxiliaryUnavailableV1("the original operation already owns a cold continuation or startup")
 	}
 	operation.nativeColdResume = prepared
 	prepared.bound = true
 	operation.gate.Unlock()
 	prepared.mu.Unlock()
-	return resumeColdForPreparationV1(ctx, operation, prepared, args)
+	return nil
 }
 
 // Resume sends values only after the actual same controller accepted the

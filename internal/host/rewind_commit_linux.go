@@ -211,16 +211,7 @@ func (p *bridgeRewindPreparationV1) captureColdForRewindV1(ctx context.Context) 
 		}
 		return err
 	}
-	vacancy, err := captureAuxiliaryVacancyFromStoppedV1(ctx, p.operation, p.stopped)
-	if err != nil {
-		return err
-	}
-	artifacts, err := captureAuxiliaryArtifactsV1(ctx, vacancy)
-	if err != nil {
-		return errors.Join(err, vacancy.Close())
-	}
-	p.cold = &ColdResumeV1{operation: p.operation, vacancy: vacancy, artifacts: artifacts}
-	return p.cold.Check(ctx, p.operation)
+	return p.captureLocalColdForRewindV1(ctx)
 }
 
 func (p *bridgeRewindPreparationV1) reserveRewindRestartV1(ctx context.Context) error {

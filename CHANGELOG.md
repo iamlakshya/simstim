@@ -4,6 +4,24 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ## [Unreleased]
 
+- Keep offline compiler selection exact, preserve prepared-input refusal before tool access, and check complete build tags in the existing source-archive fixtures.
+
+- Keep a fork child and its parent operation when child cleanup is unresolved, and preserve the first cleanup error on retries.
+
+- Report the first removal I/O interruption error while retaining separate native close facts.
+
+- Retain the original removal process’s first native close facts and join its listener before releasing temporary code and domain resources.
+
+- Keep the original stopped rewind vacancy and partial restart artifacts when artifact preparation or cleanup fails.
+
+- Retain a fork child's original destination loan and opened roots when validation or cleanup fails, and join that same failed batch before releasing its operation.
+
+- Keep the real namespace cohort and legacy HTTP/2 tags together in build, test, lint and release recipes. Generate the carried-code table only after both actual launchers.
+
+- Inspect purge work in a fixed reader guest, with an immutable copied disk, separate private scratch and only the protected work-inspection operation.
+
+- Build with exact Go 1.27.4 and the pinned module's documented legacy HTTP/2 tag. Keep standard test metadata and strict native-hook admission.
+
 - Refuse interception before reading requests when the build lacks the pinned HTTP/2 scheduler hooks.
 
 - Schedule ready HTTP/2 streams in deterministic rounds while retaining original control priority, flow credit and native write ownership.
@@ -74,6 +92,19 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 - Keep running fork and checkpoint workers bound to their actual accepted native operation while the control connection reads later frames.
 
+- Retain the original runtime connection and receipt through the actual request writer.
+
+- Recheck the same original runtime receipt at final request writers without hashing runtime files under placement control.
+
+- Preserve the original runtime origin through fresh New and Resume preparation.
+
+- Keep unwalled manager resume on its original kernel holder and live RSS accounting. Keep claimed bootstraps passive until proof aliases close.
+- Retain partial native manager setup objects and reject their use as operational managers or managerless absence.
+
+- Keep the selected restart memory cap charged through native service bootstrap and atomic publication while its original protected selection remains pinned.
+- Prove process creator and namespace-child closure through their original native handles, including failed pidfd handoff.
+
+- Every new session, with or without a sandbox, now has a supervisor outside it. The unwalled driver keeps the host account, folders and namespaces, and starts no egress process. Publication requires an earlier release with walls on by default.
 - Retain the original fixed-test runtime, placement and native parent until cleanup finishes; keep partial factory owners available after errors.
 - Drain failed image publication through its captured original boot placement before retiring the operation and holder.
 - Keep fixed-test cleanup custody until both the original transient unit and its native cgroup are absent.
@@ -96,6 +127,12 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 - Acknowledge ordinary policy changes after revoked HTTP requests finish their original physical cleanup.
 
 - Check the launcher's explicit host-key confirmation through registration and sandbox preparation, including refusal when the host presents another key.
+
+- Cold microVM resumes prepare a fresh authenticated size before keys, reserve guest RAM plus the exact host overhead, and retain the original selection until its replacement is admitted. New sessions and resumes keep the selected VM driver when a release carries several runtimes. Running sandboxes keep their cap and warning.
+
+- Read Linux file ownership through the actual native stat representation. Keep the same manager identity and original operation-lock checks.
+
+- Install custody-capable runtime services with a passive native reference before startup. Validate inherited kernel custody and retain the original holder file description through a single-use claim.
 
 - Preserve runtime writer durability failures and share guarded native file retirement.
 
@@ -188,6 +225,7 @@ Guard direct execution of measured VMM files on writable owned stores with the o
 - Freeze the original captured userspace-kernel mount and kept-state topology into a sealed public capsule, and retain it through actual native cleanup.
 
 - Retain one original protected userspace-kernel code suite with read-only handles to the same signed sealed objects, and check it before native command start.
+- Wake stopped microvm sandboxes through the usual resume checks. Optional `sandbox.idle_stop` uses the sandbox's shared stop path and stays off by default. Boot restore leaves idle sandboxes stopped and starts recent working sandboxes at most two at a time.
 - Add the real microvm conformance runner, bounded original trace readout and paired release evidence checks. Hardware measurements remain pending; automatic idle stop stays off.
 
 - `host prepare` probes the original saved host, delivers its pinned runtime, handles its optional root steps and runs a fixed sandbox test boot through separate owned phases. It records a prepared cache and floor only after successful boot and cleanup.
@@ -511,7 +549,6 @@ Guard direct execution of measured VMM files on writable owned stores with the o
 
 ### Changed
 
-- Every new session, with or without a sandbox, now has a supervisor outside it. The unwalled driver keeps the host account, folders and namespaces, and starts no egress process. Publication requires an earlier release with walls on by default.
 
 - New sessions use the host's pinned sandbox floor by default. `--wall none --downgrade` runs one without a wall, with the exception recorded. Agent installers and logins keep their explicit host-side downgrade.
 
@@ -549,7 +586,6 @@ Guard direct execution of measured VMM files on writable owned stores with the o
 ### Fixed
 
 - The setup example uses the documented host name, and the guide index no longer repeats a page.
-- Read Linux file ownership through the actual native stat representation. Keep the same manager identity and original operation-lock checks.
 
 - Provider-created hosts complete registration before sandbox preparation. A failed save still discards its own staged host key.
 

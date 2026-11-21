@@ -12,7 +12,6 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"sort"
 	"strings"
 	"time"
 )
@@ -25,25 +24,21 @@ type RestoreResult = api.RestoreResult
 // its resume command, and a session's own command runs again (resumeArgv).
 // A turn that was running is not resumed.
 func Restore(all bool) []RestoreResult {
-	boot := BootID()
-	entries, _ := os.ReadDir(paths.SessionsDir())
-	var out []RestoreResult
-	for _, e := range entries {
-		if !e.IsDir() {
-			continue
-		}
-		if r, ok := restoreOne(e.Name(), boot, all); ok {
-			out = append(out, r)
-		}
+	rows, err := RestoreContext(context.Background(), all)
+	if err != nil {
+		return []RestoreResult{lazyRestoreFailureV1(err)}
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
-	return out
+	return rows
 }
 
-// restoreOne looks at one session for Restore, under the session's lock.
+// restoreOneContext looks at one session for Restore, under the session's lock.
 // It reports false for a session to leave out of the results: one whose
 // holder runs, or one without a manifest.
-func restoreOne(id, boot string, all bool) (RestoreResult, bool) {
+func restoreOneContext(ctx context.Context, id, boot string, all bool) (RestoreResult, bool) {
+	return restoreOneForGateV1(ctx, id, boot, all, nil)
+}
+
+func restoreOneForGateV1(ctx context.Context, id, boot string, all bool, gate *restoreGateV1) (RestoreResult, bool) {
 	if err := CheckCaller(); err != nil {
 		return RestoreResult{ID: id, Action: "failed", Why: err.Error()}, true
 	}
@@ -55,7 +50,7 @@ func restoreOne(id, boot string, all bool) (RestoreResult, bool) {
 		return RestoreResult{}, false
 	}
 	r := RestoreResult{ID: id, Name: m.Name}
-	operation, err := BeginSessionOperation(context.Background(), id, renameWait)
+	operation, err := BeginSessionOperation(ctx, id, renameWait)
 	if err != nil {
 		r.Action, r.Why = "skipped", "a resume, a restore or a delete of it runs"
 		return r, true
@@ -76,6 +71,9 @@ func restoreOne(id, boot string, all bool) (RestoreResult, bool) {
 	if err := validateRestartWall(m); err != nil {
 		r.Action, r.Why = "failed", err.Error()
 		return r, true
+	}
+	if IsNoneSupervisor(m) {
+		return restoreNoneForGateV1(ctx, gate, operation, m, boot, all)
 	}
 	var selection *AutomaticRestoreSelection
 	if m.Wall != nil && m.Wall.Driver != "plain" {
@@ -99,6 +97,10 @@ func restoreOne(id, boot string, all bool) (RestoreResult, bool) {
 	case m.Restart.MaxAttempts > 0 && m.Run.RespawnCount >= m.Restart.MaxAttempts:
 		r.Action, r.Why = "skipped", fmt.Sprintf("already restored %d times", m.Run.RespawnCount)
 	default:
+		if lazy, handled := lazyRestoreDecisionV1(operation, m, all, selection); handled {
+			r.Action, r.Why, r.Hint = lazy.Action, lazy.Why, lazy.Hint
+			return r, true
+		}
 		if err := admitRestoreMemoryV1(operation.ownerContext, operation); err != nil {
 			r.Action, r.Why = "failed", err.Error()
 			return r, true

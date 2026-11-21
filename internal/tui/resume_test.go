@@ -14,6 +14,23 @@ func resumeCalls(be *fakeBackend) []string {
 	return slices.DeleteFunc(be.callList(), func(c string) bool { return !strings.HasPrefix(c, "resume ") })
 }
 
+func TestEnterWakesStoppedSandboxThroughResume(t *testing.T) {
+	hs := sessions(t, 80, 24)
+	h, s := hs.m.selectedPair()
+	if h == nil || s == nil {
+		t.Fatal("no selected session")
+	}
+	id := s.ID
+	s.State, s.Alive = api.StateStopped, false
+	hs.key("enter")
+	if calls := resumeCalls(hs.be); len(calls) != 1 {
+		t.Fatalf("stopped attach bypassed resume: %v", calls)
+	}
+	if len(hs.be.attached) != 1 || hs.be.attached[0].Session != id {
+		t.Fatal("wake did not attach after the checked resume")
+	}
+}
+
 // After the memory cap stopped an agent, the resume comes first, in the
 // line under the list and in the keys. u resumes it in the same session,
 // and the launcher then attaches to it, as after a start.

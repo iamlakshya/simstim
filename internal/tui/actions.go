@@ -196,6 +196,9 @@ func (m *Model) attachSelectedReady() tea.Cmd {
 	if ended(*s) {
 		return m.openEnded(h, *s)
 	}
+	if s.State == api.StateStopped {
+		return m.resumeSelectedReady()
+	}
 	return m.jack(h, s.ID, s.Name)
 }
 

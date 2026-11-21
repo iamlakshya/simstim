@@ -3,6 +3,7 @@
 package host
 
 import (
+	"context"
 	"errors"
 	"io"
 	"os"
@@ -20,11 +21,16 @@ func (owner *purgeAttemptCodeV2) Close() error {
 	owner.mu.Lock()
 	defer owner.mu.Unlock()
 	if owner.closed {
-		return nil
+		return errors.Join(owner.closeErr, owner.checkRetiredLockedV4())
 	}
 	owner.closing = true // A close request cannot admit any future launch.
 	if len(owner.loans) != 0 {
 		return sessionLeaseError("the original purge code still has an actual native execution loan")
+	}
+	if owner.directoryCreated && (owner.directory == nil || !owner.directoryRef.validDirectory()) {
+		return errors.Join(placementError("the original code directory creation has no retained native identity; preserve its owner"),
+			owner.retirement.closeFilesV4([]*os.File{owner.copyWriter, owner.copy, owner.lease, owner.source}),
+			owner.retirement.closeRootsV4([]*os.Root{owner.directory, owner.home}))
 	}
 	if owner.directory != nil {
 		unlinked, err := owner.originalCodeDirectoryUnlinkedV2()
@@ -69,19 +75,14 @@ func (owner *purgeAttemptCodeV2) Close() error {
 			return err
 		}
 	}
-	var failure error
-	for _, file := range []*os.File{owner.copy, owner.lease, owner.source} {
-		if file != nil {
-			failure = errors.Join(failure, file.Close())
-		}
+	owner.closeErr = errors.Join(owner.closeErr,
+		owner.retirement.closeFilesV4([]*os.File{owner.copyWriter, owner.copy, owner.lease, owner.source}),
+		owner.retirement.closeRootsV4([]*os.Root{owner.directory, owner.home}))
+	native := owner.checkRetiredLockedV4()
+	if native == nil {
+		owner.closed = true
 	}
-	for _, root := range []*os.Root{owner.directory, owner.home} {
-		if root != nil {
-			failure = errors.Join(failure, root.Close())
-		}
-	}
-	owner.closed = true
-	return failure
+	return errors.Join(owner.closeErr, native)
 }
 
 func (owner *purgeAttemptCodeV2) originalCodeDirectoryUnlinkedV2() (bool, error) {
@@ -90,7 +91,7 @@ func (owner *purgeAttemptCodeV2) originalCodeDirectoryUnlinkedV2() (bool, error)
 		return false, err
 	}
 	info, err := file.Stat()
-	closed := file.Close()
+	closed := owner.retirement.closeFilesV4([]*os.File{file})
 	if err != nil || closed != nil || !owner.directoryRef.matches(info) {
 		return false, errors.Join(sessionLeaseError("the retained original code directory descriptor changed"), err, closed)
 	}
@@ -107,7 +108,7 @@ func (owner *purgeAttemptCodeV2) checkOwnCodeEntriesV2() error {
 		return err
 	}
 	entries, err := file.ReadDir(3)
-	closed := file.Close()
+	closed := owner.retirement.closeFilesV4([]*os.File{file})
 	if err != nil && !errors.Is(err, io.EOF) || closed != nil {
 		return errors.Join(err, closed)
 	}
@@ -125,7 +126,7 @@ func (owner *purgeAttemptCodeV2) checkEmptyCodeDirectoryV2() error {
 		return err
 	}
 	entries, err := file.ReadDir(1)
-	closed := file.Close()
+	closed := owner.retirement.closeFilesV4([]*os.File{file})
 	if err != nil && !errors.Is(err, io.EOF) || closed != nil {
 		return errors.Join(err, closed)
 	}
@@ -164,4 +165,34 @@ func removeOwnPurgeCodeFileV2(root *os.Root, file *os.File, created os.FileInfo,
 		return err
 	}
 	return syncCapturedDirectory(root)
+}
+
+// The same factory retains every transient scan and writable handoff fact.
+// Directory unlink still comes only from its actual original creation above.
+func (owner *purgeAttemptCodeV2) checkRetiredLockedV4() error {
+	if len(owner.loans) != 0 {
+		return placementError("the original code factory still has actual native loans")
+	}
+	return errors.Join(owner.retirement.checkFilesV4([]*os.File{owner.copyWriter, owner.copy, owner.lease, owner.source}), owner.retirement.checkRootsV4([]*os.Root{owner.directory, owner.home}), owner.retirement.checkAllRetiredV4())
+}
+
+func (owner *purgeAttemptCodeV2) checkNativeRetiredV3(ctx context.Context) error {
+	if owner == nil || ctx == nil {
+		return placementError("the original code factory retirement is absent")
+	}
+	owner.mu.Lock()
+	defer owner.mu.Unlock()
+	if !owner.closed {
+		return placementError("the actual original code factory has not physically retired")
+	}
+	return owner.checkRetiredLockedV4()
+}
+
+func (owner *purgeAttemptCodeV2) CloseDiagnosticsV3() error {
+	if owner == nil {
+		return nil
+	}
+	owner.mu.Lock()
+	defer owner.mu.Unlock()
+	return errors.Join(owner.closeErr, owner.retirement.diagnosticsV4())
 }

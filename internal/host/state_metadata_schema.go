@@ -16,15 +16,16 @@ import (
 type stateMetadataRole string
 
 const (
-	stateWalls     stateMetadataRole = "walls.json"
-	stateIdle      stateMetadataRole = "idle.json"
-	stateDrain     stateMetadataRole = "drain.json"
-	stateLockdown  stateMetadataRole = "lockdown.json"
-	stateFootprint stateMetadataRole = "footprint.json"
+	stateWalls       stateMetadataRole = "walls.json"
+	stateIdle        stateMetadataRole = "idle.json"
+	stateDrain       stateMetadataRole = "drain.json"
+	stateLockdown    stateMetadataRole = "lockdown.json"
+	stateFootprint   stateMetadataRole = "footprint.json"
+	stateRestoreGate stateMetadataRole = "restore.lock"
 )
 
 func validStateMetadataRole(role stateMetadataRole) bool {
-	return role == stateWalls || role == stateIdle || role == stateDrain || role == stateLockdown || role == stateFootprint
+	return role == stateWalls || role == stateIdle || role == stateDrain || role == stateLockdown || role == stateFootprint || role == stateRestoreGate
 }
 
 type stateMetadataError struct {
@@ -64,6 +65,9 @@ func validateStateMetadata(role stateMetadataRole, data []byte) error {
 	}
 	if len(data) > proto.MaxFrame {
 		return placementError("the state metadata exceeds the protocol bound")
+	}
+	if role == stateRestoreGate {
+		return validateRestoreGateDataV1(data)
 	}
 	if role == stateLockdown {
 		return validateLockdownDataV1(data)

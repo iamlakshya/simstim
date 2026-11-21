@@ -60,7 +60,7 @@ void validate_sources(const struct request *r) {
     if (!fds) fail("allocate descriptor validation");
     for (size_t i=0;i<r->count;++i) {
         const struct mount_request *m=&r->mounts[i];
-        if (!valid_guest_path(m->guest) || (r->version>=2 && m->fd<7)) fail("non-canonical mount destination or reserved source fd");
+        if (!valid_guest_path(m->guest) || (r->version>=2 && m->fd<7) || (r->version>=3 && m->fd<8)) fail("non-canonical mount destination or reserved source fd");
         const char *hidden[]={"/.copy-staging","/proc","/dev","/run","/root","/sys","/etc/passwd","/etc/group","/etc/hosts","/etc/resolv.conf",NULL};
         for (size_t j=0;hidden[j];++j) if (beneath(m->guest,hidden[j])) fail("mount destination replaces a private system path");
         if (!strcmp(m->guest,"/etc") || !strcmp(m->guest,"/home") || !strcmp(m->guest,"/home/agent")) fail("mount replaces private configuration or home");
@@ -75,7 +75,7 @@ void validate_sources(const struct request *r) {
         if (fstat(m->fd,&st) || !(S_ISREG(st.st_mode) || S_ISDIR(st.st_mode))) fail("mount source is not a pinned regular file or directory");
         if (r->version>=2 && m->stage_fd) {
             if (!m->write || !S_ISDIR(st.st_mode)) fail("private copy stage has no writable directory source");
-            if (m->stage_fd<7 || !m->stage_name || strlen(m->stage_name)!=38 || strncmp(m->stage_name,".copy-",6)) fail("writable mount has no original factory stage");
+            if (m->stage_fd<7 || (r->version>=3 && m->stage_fd<8) || !m->stage_name || strlen(m->stage_name)!=38 || strncmp(m->stage_name,".copy-",6)) fail("writable mount has no original factory stage");
             for (size_t j=6;j<38;++j) if (!((m->stage_name[j]>='0' && m->stage_name[j]<='9') || (m->stage_name[j]>='a' && m->stage_name[j]<='f'))) fail("invalid factory stage identity");
             struct stat held,named;
             int parent=openat(m->stage_fd,"..",O_PATH|O_DIRECTORY|O_NOFOLLOW|O_CLOEXEC);

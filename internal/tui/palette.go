@@ -11,6 +11,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/iamlakshya/simstim/internal/api"
 	"github.com/iamlakshya/simstim/internal/brand"
 	"github.com/iamlakshya/simstim/internal/client"
 	"github.com/iamlakshya/simstim/internal/version"
@@ -151,7 +152,7 @@ func registry() []*command {
 		return needSession(m)
 	}
 	needEnded := func(m *Model) string {
-		if s := m.selected(); s != nil && !ended(*s) {
+		if s := m.selected(); s != nil && !ended(*s) && s.State != api.StateStopped {
 			return "the agent still runs"
 		}
 		return needSession(m)

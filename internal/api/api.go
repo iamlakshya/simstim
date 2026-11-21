@@ -29,6 +29,8 @@ const ReasonChildOOM = "a process in this session ran out of memory and was stop
 
 // NewArgs describes a session to start.
 type NewArgs struct {
+	// RuntimeOrigin is full original data for a same-connection VM projection.
+	RuntimeOrigin json.RawMessage `json:"runtime_origin_v1,omitempty"`
 	// NamedSSHKeys is cold-start private delivery, never guest environment.
 	NamedSSHKeys *NamedSSHKeysV1 `json:"named_ssh_keys,omitempty"`
 	// ProtectedTrustedSecretValues is private trusted-caller delivery, never guest environment.
@@ -183,6 +185,8 @@ type SessionInfo struct {
 // session, after the agent ended: the "resume" request. A helper that can
 // do it offers the feature "resume".
 type ResumeArgs struct {
+	// VMNeedV1 is the fresh same-connection cold VM selection, never boot authority.
+	VMNeedV1 json.RawMessage `json:"vm_need_v1,omitempty"`
 	// Prepared identifies the same original per-connection native resume plan.
 	Prepared *PreparedResumeV1 `json:"prepared,omitempty"`
 	// NamedSSHKeys is delivered only by the genuine original cold preparation.
@@ -206,9 +210,10 @@ type ResumeArgs struct {
 	Snapshot *SandboxSnapshot   `json:"snapshot,omitempty"`
 	Members  []MemberResumeArgs `json:"members,omitempty"`
 	ID       string             `json:"id"`
-	// MemoryMax is the session's memory cap from now on, in bytes. 0 keeps
-	// the size that the session asked for before, and MemoryAuto asks for
-	// the host's default.
+	// MemoryMax is the next size in bytes: guest RAM on microvm, the unit cap
+	// on other walls. Zero preserves the previous size unless its policy
+	// changes; MemoryAuto resolves the current sandbox policy and defaults.
+	// A running sandbox keeps its current cap.
 	MemoryMax int64 `json:"memory_max,omitempty"`
 	// Secrets are the values of the session's secrets, which the client
 	// fetches again. The host writes none of them down (host/secrets.go).

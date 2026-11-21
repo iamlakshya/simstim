@@ -6,6 +6,10 @@
 # runs it on main and weekly).
 set -euo pipefail
 cd "$(dirname "$0")/.."
+go_build_toolchain=$(sh scripts/go-build-tags.sh toolchain)
+export GOTOOLCHAIN="$go_build_toolchain"
+go_build_tags=$(sh scripts/go-build-tags.sh)
+export GO_BUILD_TAGS="$go_build_tags"
 
 external=false
 [ "${1:-}" = "--external" ] && external=true
@@ -33,7 +37,7 @@ fi
 
 step "Generated reference is current"
 ref=$(mktemp -d)
-go run ./cmd/docgen -out "$ref"
+go run -tags="$go_build_tags" ./cmd/docgen -out "$ref"
 if ! diff -r -q "$ref" docs/reference; then
     echo "docs/reference is stale. Try: just docs."
     fail=1
@@ -50,7 +54,7 @@ vale --minAlertLevel=error -- "${md[@]}" || fail=1
 
 step "Commands in the tutorials and how-to guides"
 name=$(sed -n 's/^const Name = "\(.*\)"/\1/p' internal/brand/brand.go)
-go build -o "$ref/$name" . && python3 scripts/test-docs-commands.py "$ref/$name" || fail=1
+go build -tags="$go_build_tags" -o "$ref/$name" . && python3 scripts/test-docs-commands.py "$ref/$name" || fail=1
 
 step "Site build and internal links"
 scripts/docs-site.sh dev /

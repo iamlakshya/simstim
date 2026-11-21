@@ -6,6 +6,10 @@
 #   guest/boot-test.sh [--print-console] [amd64|arm64|ARCH=...]
 set -euo pipefail
 cd "$(dirname "$0")/.."
+go_build_toolchain=$(sh scripts/go-build-tags.sh toolchain)
+export GOTOOLCHAIN="$go_build_toolchain"
+go_build_tags=$(sh scripts/go-build-tags.sh)
+export GO_BUILD_TAGS="$go_build_tags"
 
 fail() {
     echo "boot test: $1" >&2
@@ -76,8 +80,8 @@ meta_path="${out_dir}/tools-${arch}.verity.json"
 [ -f "$tools_path" ] || fail "missing ${tools_path}." "just guest ARCH=${arch}"
 [ -f "$meta_path" ] || fail "missing ${meta_path}." "just guest ARCH=${arch}"
 
-vmm_ver=$(go run ./cmd/supply pin get vmm.cloud-hypervisor.version)
-vmm_url=$(go run ./cmd/supply pin get "vmm.cloud-hypervisor.${arch}.url")
+vmm_ver=$(go run -tags="$go_build_tags" ./cmd/supply pin get vmm.cloud-hypervisor.version)
+vmm_url=$(go run -tags="$go_build_tags" ./cmd/supply pin get "vmm.cloud-hypervisor.${arch}.url")
 vmm_bin="${cache_dir}/cloud-hypervisor-${vmm_ver}-${arch}"
 mkdir -p "$cache_dir"
 if [ ! -f "$vmm_bin" ]; then
@@ -85,7 +89,7 @@ if [ ! -f "$vmm_bin" ]; then
         fail "could not download Cloud Hypervisor ${vmm_ver} from ${vmm_url}." "Run just guest-boot ARCH=${arch} again."
     mv "${vmm_bin}.part" "$vmm_bin"
 fi
-go run ./cmd/supply pin verify "vmm:cloud-hypervisor:${arch}" "$vmm_bin"
+go run -tags="$go_build_tags" ./cmd/supply pin verify "vmm:cloud-hypervisor:${arch}" "$vmm_bin"
 chmod 0755 "$vmm_bin"
 
 read -r data_blocks root_hash salt < <(

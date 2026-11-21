@@ -193,8 +193,12 @@ func (s *Supervisor) receiveOriginalStart(ctx context.Context) error {
 	}
 	var request proto.Request
 	if frame.Type == proto.TRequest && api.ExactJSONFields(frame.Payload, request) && json.Unmarshal(frame.Payload, &request) == nil &&
-		request.ID == 4 && request.Op == "cancel_start" && len(request.Args) == 0 && s.isSandboxPrepareBootV1() {
-		if err := s.bootOwner.CheckSandboxPrepareCancelV1(start.line); err != nil {
+		request.ID == 4 && request.Op == "cancel_start" && len(request.Args) == 0 && (s.isSandboxPrepareBootV1() || s.bootOwner.ManagerCustodyReleasedV1()) {
+		if s.isSandboxPrepareBootV1() {
+			if err := s.bootOwner.CheckSandboxPrepareCancelV1(start.line); err != nil {
+				return err
+			}
+		} else if err := s.bootOwner.CheckManagerCustodyCancelV1(start.line); err != nil {
 			return err
 		}
 		start.mu.Lock()
@@ -310,6 +314,9 @@ func (s *Supervisor) commitOriginalReady() error {
 	if start == nil {
 		return nil
 	} // The explicit plain test driver has no outside issuer.
+	if err := s.prepareManagerCustodyV1(); err != nil {
+		return err
+	}
 	if err := s.publishNativeAccountReadyV1(s.lifetimeContext()); err != nil {
 		return err
 	}

@@ -3,6 +3,10 @@
 set -euo pipefail
 umask 077
 cd "$(dirname "$0")/../.."
+go_build_toolchain=$(sh scripts/go-build-tags.sh toolchain)
+export GOTOOLCHAIN="$go_build_toolchain"
+go_build_tags=$(sh scripts/go-build-tags.sh)
+export GO_BUILD_TAGS="$go_build_tags"
 if [ "$#" -ne 2 ] || { [ "$1" != amd64 ] && [ "$1" != arm64 ]; } ||
     [ "${GITHUB_ACTIONS:-}" != true ] || [ "${GITHUB_REF_TYPE:-}" != tag ] ||
     [ "${GITHUB_REF_NAME:-}" != "$2" ]; then
@@ -21,7 +25,7 @@ case "$DOCKER_HOST" in unix://*) export DOCKER_HOST ;; *)
     echo 'default-image: publication needs the approved local Docker endpoint. Try: use the protected release runner.' >&2
     exit 1 ;; esac
 unset DOCKER_CONTEXT
-go build -trimpath -o "$work/supply" ./cmd/supply
+go build -tags="$go_build_tags" -trimpath -o "$work/supply" ./cmd/supply
 pin() { "$work/supply" pin get "$1"; }
 repository=$("$work/supply" default-image repository)
 "$work/supply" default-image check --dir "$out_dir/$image_arch" >"$work/checked.json"

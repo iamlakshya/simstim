@@ -146,8 +146,13 @@ func (vacancy *auxiliaryVacancyV1) Check(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if snapshot.ID != vacancy.operation.Primary() || snapshot.SandboxOf != "" || !bytes.Equal(snapshot.VMNeedV1, vacancy.need) || !bytes.Equal(runtime, vacancy.runtime) || !reflect.DeepEqual(snapshot.Auxiliary, vacancy.reservation) {
+	if snapshot.ID != vacancy.operation.Primary() || snapshot.SandboxOf != "" || !reflect.DeepEqual(snapshot.Auxiliary, vacancy.reservation) {
 		return auxiliaryUnavailableV1("the protected original auxiliary source changed")
+	}
+	if !bytes.Equal(snapshot.VMNeedV1, vacancy.need) || !bytes.Equal(runtime, vacancy.runtime) {
+		if err := checkColdRestartSelectionV1(vacancy.operation, vacancy.need, vacancy.runtime, snapshot); err != nil {
+			return err
+		}
 	}
 	if err := vacancy.manager.requireAuxiliaryUnitAbsentV1(ctx, vacancy.primary); err != nil {
 		return err

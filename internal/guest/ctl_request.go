@@ -41,6 +41,10 @@ func (g *Init) request(w *proto.Writer, req proto.Request) {
 		}
 		_ = w.WriteJSON(proto.TResponse, resp)
 	}
+	if g.purgeReader != nil {
+		g.purgeReader.request(req, reply)
+		return
+	}
 	if g.imageSaveControlV1(req, reply) {
 		return
 	}

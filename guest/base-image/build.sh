@@ -3,6 +3,10 @@
 set -euo pipefail
 umask 077
 cd "$(dirname "$0")/../.."
+go_build_toolchain=$(sh scripts/go-build-tags.sh toolchain)
+export GOTOOLCHAIN="$go_build_toolchain"
+go_build_tags=$(sh scripts/go-build-tags.sh)
+export GO_BUILD_TAGS="$go_build_tags"
 if [ "$#" -ne 1 ] || { [ "$1" != amd64 ] && [ "$1" != arm64 ]; }; then
     echo 'default-image: expected amd64 or arm64. Try: guest/base-image/build.sh <arch>.' >&2
     exit 1
@@ -24,8 +28,8 @@ case "$DOCKER_HOST" in unix://*) export DOCKER_HOST ;; *)
     echo 'default-image: a local Unix Docker endpoint is required. Try: use the approved local build runner.' >&2
     exit 1 ;; esac
 unset DOCKER_CONTEXT
-CGO_ENABLED=0 GOOS=linux GOARCH="$image_arch" go build -trimpath -o "$work/supply-linux" ./cmd/supply
-go build -trimpath -o "$work/supply-native" ./cmd/supply
+CGO_ENABLED=0 GOOS=linux GOARCH="$image_arch" go build -tags="$go_build_tags" -trimpath -o "$work/supply-linux" ./cmd/supply
+go build -tags="$go_build_tags" -trimpath -o "$work/supply-native" ./cmd/supply
 pin() { "$work/supply-native" pin get "$1"; }
 config() { "$work/supply-native" default-image config "$1"; }
 mkdir "$work/input" "$work/meta"

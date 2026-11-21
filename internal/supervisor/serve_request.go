@@ -105,11 +105,9 @@ func (s *Supervisor) request(c *client, f proto.Frame) bool {
 		s.audit.write("rename", nil)
 		c.reply(req.ID, map[string]string{"name": name}, nil)
 	case "stop":
+		s.requestTrustedStopV1()
 		c.reply(req.ID, map[string]bool{"stopping": true}, nil)
-		select {
-		case s.stop <- struct{}{}:
-		default:
-		}
+		s.signalTrustedStopV1()
 	case "kill":
 		c.reply(req.ID, map[string]bool{"killed": true}, nil)
 		select {

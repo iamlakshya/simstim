@@ -12,22 +12,24 @@ import (
 )
 
 type managerStartupEventsV1 struct {
-	mu            sync.Mutex
-	wake          chan struct{}
-	unit          string
-	path          dbus.ObjectPath
-	job           dbus.ObjectPath
-	observedJob   dbus.ObjectPath
-	jobID         uint32
-	removedJob    dbus.ObjectPath
-	removedID     uint32
-	result        string
-	invocation    string
-	activation    unitActivationProperties
-	err           error
-	dispatched    bool
-	negativeReply bool
-	unitRemoved   bool
+	mu                 sync.Mutex
+	wake               chan struct{}
+	unit               string
+	path               dbus.ObjectPath
+	job                dbus.ObjectPath
+	observedJob        dbus.ObjectPath
+	jobID              uint32
+	removedJob         dbus.ObjectPath
+	removedID          uint32
+	result             string
+	invocation         string
+	activation         unitActivationProperties
+	err                error
+	dispatched         bool
+	negativeReply      bool
+	unitRemoved        bool
+	loaded             bool
+	previousInvocation string
 }
 
 func (events *managerStartupEventsV1) observe(message *dbus.Message) {
@@ -109,6 +111,9 @@ func (events *managerStartupEventsV1) observe(message *dbus.Message) {
 			break
 		}
 		if events.path != "" {
+			if events.loaded && events.path == unitPath {
+				return
+			}
 			fault()
 			break
 		}
@@ -136,6 +141,9 @@ func (events *managerStartupEventsV1) observe(message *dbus.Message) {
 			}
 			encoded := hex.EncodeToString(invocation)
 			if encoded != "00000000000000000000000000000000" {
+				if events.loaded && encoded == events.previousInvocation && events.activation.InvocationID == "" {
+					return
+				}
 				if events.invocation != "" && events.invocation != encoded {
 					fault()
 					break
@@ -166,6 +174,22 @@ func (events *managerStartupEventsV1) arm(unit string) error {
 		return sessionLeaseError("this original manager connection already owns a startup")
 	}
 	events.unit = unit
+	return nil
+}
+
+// armLoadedV1 watches a loaded service's next actual job and invocation.
+// It never waits for UnitNew, and retained old-invocation notifications cannot
+// substitute for the new process created by the original StartUnit call.
+func (events *managerStartupEventsV1) armLoadedV1(unit string, path dbus.ObjectPath, previous string) error {
+	if unit == "" || !path.IsValid() || path == "/" {
+		return sessionLeaseError("reactivation has no exact loaded native unit")
+	}
+	events.mu.Lock()
+	defer events.mu.Unlock()
+	if events.unit != "" || events.err != nil {
+		return sessionLeaseError("this native connection already owns an activation")
+	}
+	events.unit, events.path, events.loaded, events.previousInvocation = unit, path, true, previous
 	return nil
 }
 
@@ -207,6 +231,9 @@ func (events *managerStartupEventsV1) bindActivation(value unitActivationPropert
 	defer events.mu.Unlock()
 	if events.err != nil {
 		return events.err
+	}
+	if events.loaded && value.InvocationID == events.previousInvocation {
+		return sessionLeaseError("the native service did not create a new invocation")
 	}
 	if events.invocation != "" && events.invocation != value.InvocationID || events.activation.InvocationID != "" && !sameUnitActivationProperties(events.activation, value) {
 		return sessionLeaseError("the first owned startup invocation changed")

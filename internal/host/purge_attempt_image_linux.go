@@ -20,6 +20,9 @@ import (
 // Only the raw fixed entry can produce one, before reading request input.
 type purgeAttemptImageV2 struct {
 	mu                       sync.Mutex
+	retirement               purgeNativeRetirementsV4
+	adoption                 *os.File
+	closing                  bool
 	kernel, original, copied *os.File
 	parent, cancelRequest    *os.File
 	mapped, originalInfo     os.FileInfo
@@ -37,24 +40,6 @@ func adoptRawPurgeAttemptImageV2() (result *purgeAttemptImageV2, returned error)
 	// class before REAL Start; 0100 alone is not a pre-Go protection proof.
 	// Explicit protection is the first raw-boundary action here.
 	protectionErr := secretmem.Protect()
-	// Public lifetime custody only. The actual original starter validated and
-	// froze this fifth inherited role before REAL Start. Do not let a parent
-	// death, cancellation, image error or bootstrap EOF release this PID while
-	// its manager adoption transaction may still contain the numeric PID.
-	unix.CloseOnExec(purgeAttemptAdoptionFDV3)
-	adoption := os.NewFile(uintptr(purgeAttemptAdoptionFDV3), "actual-original-purge-adoption-settlement")
-	adoptionErr := waitPurgeAttemptAdoptionV3(adoption)
-	adoptionCloseErr := adoption.Close()
-	if err := errors.Join(protectionErr, adoptionErr, adoptionCloseErr); err != nil {
-		return nil, err
-	}
-	state, err := secretmem.Inspect()
-	if err != nil || state.Dumpable == nil || *state.Dumpable != 0 || state.CoreHard != 0 {
-		return nil, errors.Join(placementError("the raw purge image has no current protected native process"), err)
-	}
-	if len(os.Args) != 2 || os.Args[1] != "purge-attempt-v2" {
-		return nil, placementError("the raw purge image has another closed command")
-	}
 	lifetime, cancel := context.WithCancel(context.Background())
 	image := &purgeAttemptImageV2{lifetime: lifetime, cancel: cancel, closeDone: make(chan struct{})}
 	complete := false
@@ -67,6 +52,24 @@ func adoptRawPurgeAttemptImageV2() (result *purgeAttemptImageV2, returned error)
 			}
 		}
 	}()
+	// Public lifetime custody only. The actual original starter validated and
+	// froze this fifth inherited role before REAL Start. Do not let a parent
+	// death, cancellation, image error or bootstrap EOF release this PID while
+	// its manager adoption transaction may still contain the numeric PID.
+	unix.CloseOnExec(purgeAttemptAdoptionFDV3)
+	image.adoption = os.NewFile(uintptr(purgeAttemptAdoptionFDV3), "actual-original-purge-adoption-settlement")
+	adoptionErr := waitPurgeAttemptAdoptionV3(image.adoption)
+	adoptionCloseErr := image.retirement.closeFilesV4([]*os.File{image.adoption})
+	if err := errors.Join(protectionErr, adoptionErr, adoptionCloseErr); err != nil {
+		return nil, err
+	}
+	state, err := secretmem.Inspect()
+	if err != nil || state.Dumpable == nil || *state.Dumpable != 0 || state.CoreHard != 0 {
+		return nil, errors.Join(placementError("the raw purge image has no current protected native process"), err)
+	}
+	if len(os.Args) != 2 || os.Args[1] != "purge-attempt-v2" {
+		return nil, placementError("the raw purge image has another closed command")
+	}
 	fd, err := unix.Open("/proc/self/exe", unix.O_PATH|unix.O_CLOEXEC, 0)
 	if err != nil {
 		return nil, err
@@ -115,7 +118,7 @@ func adoptRawPurgeAttemptImageV2() (result *purgeAttemptImageV2, returned error)
 }
 
 func (image *purgeAttemptImageV2) checkLockedV2(ctx context.Context) error {
-	if image == nil || ctx == nil || image.closed || image.kernel == nil || image.original == nil || image.copied == nil || image.mapped == nil {
+	if image == nil || ctx == nil || image.closing || image.closed || image.kernel == nil || image.original == nil || image.copied == nil || image.mapped == nil {
 		return placementError("the current purge code image ended")
 	}
 	if err := ctx.Err(); err != nil {
@@ -127,7 +130,7 @@ func (image *purgeAttemptImageV2) checkLockedV2(ctx context.Context) error {
 	}
 	fresh := os.NewFile(uintptr(fd), "current-kernel-purge-code-mapping")
 	info, err := fresh.Stat()
-	closed := fresh.Close()
+	closed := image.retirement.closeFilesV4([]*os.File{fresh})
 	if err != nil || closed != nil || !os.SameFile(info, image.mapped) {
 		return errors.Join(placementError("the purge actor changed its actual kernel-mapped image"), err, closed)
 	}
@@ -226,8 +229,10 @@ func (image *purgeAttemptImageV2) watchOriginalRequestV2(parent context.Context)
 	cancelFD, err := unix.FcntlInt(image.cancelRequest.Fd(), unix.F_DUPFD_CLOEXEC, 0)
 	if err != nil {
 		image.mu.Unlock()
-		return nil, nil, errors.Join(err, unix.Close(fd))
+		return nil, nil, errors.Join(err, image.retirement.closeFilesV4([]*os.File{os.NewFile(uintptr(fd), "actual-purge-parent-watch-partial")}))
 	}
+	parentFile := os.NewFile(uintptr(fd), "actual-purge-parent-watch")
+	cancelFile := os.NewFile(uintptr(cancelFD), "actual-purge-cancellation-watch")
 	image.watchers.Add(1)
 	image.mu.Unlock()
 	ctx, cancel := context.WithCancel(parent)
@@ -236,8 +241,7 @@ func (image *purgeAttemptImageV2) watchOriginalRequestV2(parent context.Context)
 	go func() {
 		defer close(done)
 		defer image.watchers.Done()
-		defer unix.Close(fd)
-		defer unix.Close(cancelFD)
+		defer image.retirement.closeFilesV4([]*os.File{parentFile, cancelFile})
 		for ctx.Err() == nil {
 			polls := []unix.PollFd{{Fd: int32(fd), Events: unix.POLLIN}, {Fd: int32(cancelFD), Events: unix.POLLIN}}
 			n, err := unix.Poll(polls, 100)
@@ -260,27 +264,49 @@ func (image *purgeAttemptImageV2) Close() error {
 		return nil
 	}
 	image.mu.Lock()
-	if image.closed {
+	if image.closing {
 		done := image.closeDone
 		image.mu.Unlock()
 		if done != nil {
 			<-done
 		}
-		return image.closeErr
+		return errors.Join(image.CloseDiagnosticsV3(), image.checkNativeRetiredV3(context.Background()))
 	}
-	image.closed = true
+	image.closing = true
 	if image.cancel != nil {
 		image.cancel()
 	}
 	image.mu.Unlock()
 	image.watchers.Wait()
-	for _, file := range []*os.File{image.kernel, image.original, image.copied, image.parent, image.cancelRequest} {
-		if file != nil {
-			image.closeErr = errors.Join(image.closeErr, file.Close())
-		}
-	}
+	diagnostic := image.retirement.closeFilesV4([]*os.File{image.adoption, image.kernel, image.original, image.copied, image.parent, image.cancelRequest})
+	native := image.retirement.checkAllRetiredV4()
+	image.mu.Lock()
+	image.closeErr = errors.Join(image.closeErr, diagnostic)
+	image.closed = native == nil
 	if image.closeDone != nil {
 		close(image.closeDone)
 	}
-	return image.closeErr
+	image.mu.Unlock()
+	return errors.Join(diagnostic, native)
+}
+
+func (image *purgeAttemptImageV2) checkNativeRetiredV3(ctx context.Context) error {
+	if image == nil || ctx == nil {
+		return placementError("the original raw image retirement is absent")
+	}
+	image.mu.Lock()
+	defer image.mu.Unlock()
+	if !image.closed {
+		return placementError("the original raw image retains unknown native descriptors")
+	}
+	return image.retirement.checkAllRetiredV4()
+}
+
+func (image *purgeAttemptImageV2) CloseDiagnosticsV3() error {
+	if image == nil {
+		return nil
+	}
+	image.mu.Lock()
+	defer image.mu.Unlock()
+	return errors.Join(image.closeErr, image.retirement.diagnosticsV4())
 }

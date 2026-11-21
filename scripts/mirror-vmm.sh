@@ -3,6 +3,10 @@
 # VMM or its jailer. The manifest writer repeats these checks before embedding.
 set -euo pipefail
 cd "$(dirname "$0")/.."
+go_build_toolchain=$(sh scripts/go-build-tags.sh toolchain)
+export GOTOOLCHAIN="$go_build_toolchain"
+go_build_tags=$(sh scripts/go-build-tags.sh)
+export GO_BUILD_TAGS="$go_build_tags"
 
 if [ "$#" -ne 1 ]; then
     echo "mirror-vmm: expected the release version." >&2
@@ -12,7 +16,7 @@ fi
 
 vmm_dir="${VMM_OUT_DIR:-build/vmm}"
 mkdir -p "$vmm_dir/inputs"
-pin() { go run ./cmd/supply pin get "$1"; }
+pin() { go run -tags="$go_build_tags" ./cmd/supply pin get "$1"; }
 
 for vmm_name in $(pin vmm.names); do
     for vmm_target in amd64 arm64 source; do
@@ -30,8 +34,8 @@ for vmm_name in $(pin vmm.names); do
             fi
             mv "$vmm_input.part" "$vmm_input"
         fi
-        go run ./cmd/supply pin verify "vmm:${vmm_name}:${vmm_target}" "$vmm_input"
+        go run -tags="$go_build_tags" ./cmd/supply pin verify "vmm:${vmm_name}:${vmm_target}" "$vmm_input"
     done
 done
 
-go run ./cmd/supply mirror-vmm -release "$1" -dir "$vmm_dir"
+go run -tags="$go_build_tags" ./cmd/supply mirror-vmm -release "$1" -dir "$vmm_dir"

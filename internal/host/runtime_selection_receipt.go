@@ -31,6 +31,7 @@ type heldRuntimeItemV1 struct {
 // runtime delivery/status request. All selected original role descriptors stay
 // held through the protected request writer and connection lifetime.
 type selectedRuntimeReceiptV1 struct {
+	key           string          // immutable original full-manifest key, assigned only by the producer
 	issuer        *runtimeService // immutable actual producer; no copied carrier can set it
 	closeMu       sync.Mutex
 	mu            sync.RWMutex
@@ -75,7 +76,7 @@ func selectedRuntimeKey(manifest supply.Manifest) (string, error) {
 	return startupDigest(raw), nil
 }
 
-func (s *runtimeService) selectedRuntime(expected supply.Manifest) (*selectedRuntimeReceiptV1, error) {
+func (s *runtimeService) selectedRuntime(ctx context.Context, expected supply.Manifest) (*selectedRuntimeReceiptV1, error) {
 	key, err := selectedRuntimeKey(expected)
 	if err != nil {
 		return nil, err
@@ -86,7 +87,7 @@ func (s *runtimeService) selectedRuntime(expected supply.Manifest) (*selectedRun
 	if closed || receipt == nil || receipt.issuer != s {
 		return nil, newRuntimeError("this authenticated connection has no original held runtime selection")
 	}
-	actual, err := receipt.inventory(context.Background())
+	actual, err := receipt.inventory(ctx)
 	if err != nil || !reflect.DeepEqual(actual, expected) {
 		return nil, errors.Join(newRuntimeError("the new request differs from its same-connection runtime selection"), err)
 	}
@@ -160,6 +161,7 @@ func (s *runtimeService) rememberRuntimeWithDefaults(ctx context.Context, manife
 		return err
 	}
 	receipt := &selectedRuntimeReceiptV1{
+		key:           key,
 		issuer:        s,
 		manifest:      cloneSelectedRuntime(manifest),
 		imageDefaults: cloneImageDefaults(defaults),
@@ -217,6 +219,9 @@ func (receipt *selectedRuntimeReceiptV1) retainImageDefaults(ctx context.Context
 	}
 	receipt.mu.Lock()
 	defer receipt.mu.Unlock()
+	if err := receipt.checkOriginLockedV1(ctx); err != nil {
+		return err
+	}
 	if err := receipt.checkLocked(ctx); err != nil {
 		return err
 	}
@@ -241,6 +246,9 @@ func (receipt *selectedRuntimeReceiptV1) defaultImageRequest(ctx context.Context
 	}
 	receipt.mu.RLock()
 	defer receipt.mu.RUnlock()
+	if err := receipt.checkOriginLockedV1(ctx); err != nil {
+		return image.Request{}, err
+	}
 	if err := receipt.checkLocked(ctx); err != nil {
 		return image.Request{}, err
 	}
@@ -299,6 +307,9 @@ func (receipt *selectedRuntimeReceiptV1) inventory(ctx context.Context) (supply.
 	}
 	receipt.mu.RLock()
 	defer receipt.mu.RUnlock()
+	if err := receipt.checkOriginLockedV1(ctx); err != nil {
+		return supply.Manifest{}, err
+	}
 	if err := receipt.checkLocked(ctx); err != nil {
 		return supply.Manifest{}, err
 	}

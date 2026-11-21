@@ -31,6 +31,19 @@ func StopContext(ctx context.Context, id string) (_ *SessionInfo, returned error
 	if primary.Wall == nil || primary.Wall.Driver == "plain" {
 		return nil, UserError("wall_unavailable", "this session has no supported sandbox to stop", "Quit its agent, or select a walled session.")
 	}
+	managed, available, managerErr := stopIntoManagerCustodyV1(ctx, operation)
+	if managed != nil {
+		defer func() { returned = errors.Join(returned, managed.Close()) }()
+	}
+	if available {
+		if managed == nil {
+			return nil, managerErr
+		}
+		return managed.stopResultV1(ctx, id, managerErr)
+	}
+	if managerErr != nil {
+		return nil, managerErr
+	}
 	stopped, stopErr := StopSessionForOperationV1(ctx, operation)
 	if stopped != nil {
 		defer func() { returned = errors.Join(returned, stopped.Close()) }()

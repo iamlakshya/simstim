@@ -24,6 +24,7 @@ func (s *Supervisor) tick() {
 		s.saveMembers()
 		s.memoryTick()
 		s.watchBeat()
+		s.idleStopTick(now())
 		if n := s.ctl.drops(time.Now()); n > 0 {
 			s.audit.write("events_dropped", map[string]any{"count": n})
 		}
@@ -39,14 +40,5 @@ func (s *Supervisor) tick() {
 		if dirty {
 			_ = s.save(&m, false)
 		}
-	}
-}
-
-// active records activity in the session at t, at most once a second.
-// The caller holds s.mu.
-func (s *Supervisor) active(t time.Time) {
-	if t.Sub(s.m.LastActivityAt) >= time.Second {
-		s.m.LastActivityAt = t.UTC()
-		s.dirty = true
 	}
 }

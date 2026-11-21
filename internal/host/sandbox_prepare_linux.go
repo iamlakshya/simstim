@@ -66,7 +66,7 @@ func (b *bridge) runSandboxPreparePlatformV1(ctx context.Context, _ time.Time, w
 		return api.SandboxPrepareResultV1{}, wrapSandboxBootError(err, defaultHint)
 	}
 
-	m, err := buildSandboxPrepareManifestV1(reservation.id, trueBin, witness)
+	m, err := buildSandboxPrepareManifestV1(ctx, reservation.id, trueBin, witness)
 	if err != nil {
 		b.joinSandboxPrepareDirectoryCleanupV1(operation, reservation)
 		return api.SandboxPrepareResultV1{}, wrapSandboxBootError(err, defaultHint)

@@ -19,16 +19,17 @@ import (
 // It observes the actual socket process, not namespace descriptors or code
 // tuples supplied by that peer. It grants no OP or resource authority.
 type purgeRequestPeerV3 struct {
-	native *nativeStartupPeerV1
-	image  *purgeAttemptImageV2
+	native     *nativeStartupPeerV1
+	retirement *purgeNativeRetirementsV4
+	image      *purgeAttemptImageV2
 }
 
 // The retained original code object is a PUBLIC observation only. The fixed
 // command supplies DATA; current native credentials, pinned lifetime and
 // outside placement enforce the Root-adopted operator boundary. This method
 // does not authenticate a parent's current mm or issue a session source.
-func acceptPurgeOperatorHelloV3(ctx context.Context, line *StartupLineV1, image *purgeAttemptImageV2, originalParent bool) (result *purgeRequestPeerV3, returned error) {
-	if ctx == nil || line == nil || image == nil {
+func acceptPurgeOperatorHelloV3(ctx context.Context, line *StartupLineV1, image *purgeAttemptImageV2, originalParent bool, retirement *purgeNativeRetirementsV4) (result *purgeRequestPeerV3, returned error) {
+	if ctx == nil || line == nil || image == nil || retirement == nil || line.nativeRetirement != retirement.descriptorOwnerV4() {
 		return nil, placementError("the purge DATA connector has no current image and original line")
 	}
 	if err := image.Check(ctx); err != nil {
@@ -45,7 +46,7 @@ func acceptPurgeOperatorHelloV3(ctx context.Context, line *StartupLineV1, image 
 	complete := false
 	defer func() {
 		if !complete {
-			returned = errors.Join(returned, identity.Close())
+			returned = errors.Join(returned, retirement.closeIdentityV4(identity))
 		}
 	}()
 	var hello proto.Hello
@@ -72,19 +73,19 @@ func acceptPurgeOperatorHelloV3(ctx context.Context, line *StartupLineV1, image 
 		return nil, err
 	}
 	peer.identity, identity.expected = identity, expected
-	owner := &purgeRequestPeerV3{native: peer, image: image}
+	owner := &purgeRequestPeerV3{native: peer, image: image, retirement: retirement}
 	if err := owner.CheckSender(ctx, sender); err != nil {
-		return nil, errors.Join(err, peer.Close())
+		return nil, errors.Join(err, retirement.closePeerV4(peer))
 	}
 	if originalParent {
 		if err := image.checkOriginalOperatorParentV3(ctx, owner, sender); err != nil {
-			return nil, errors.Join(err, peer.Close())
+			return nil, errors.Join(err, retirement.closePeerV4(peer))
 		}
 	}
 	line.mu.Lock()
 	defer line.mu.Unlock()
 	if line.closed || line.nativePeer != nil {
-		return nil, errors.Join(placementError("the purge DATA line ended or changed its original connector"), peer.Close())
+		return nil, errors.Join(placementError("the purge DATA line ended or changed its original connector"), retirement.closePeerV4(peer))
 	}
 	line.nativePeer = peer
 	complete = true
@@ -166,7 +167,10 @@ func (owner *purgeRequestPeerV3) Close() error {
 	if owner == nil || owner.native == nil {
 		return nil
 	}
-	return owner.native.Close()
+	if owner.retirement == nil {
+		return placementError("the original requester has no same native first-close owner")
+	}
+	return owner.retirement.closePeerV4(owner.native)
 }
 
 // This is the Root-adopted DATA requester boundary. It proves the actual live

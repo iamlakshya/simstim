@@ -111,3 +111,33 @@ func TestRuntimeProjectionRejectsMissingDuplicateAndWrongArchRoles(t *testing.T)
 		t.Fatal("the selected driver borrowed a safer alternative's floor")
 	}
 }
+
+func TestRuntimeProjectionPreservesExactAdvisoryVectorShapeV1(t *testing.T) {
+	for _, empty := range []bool{false, true} {
+		full := multipleVMMRuntimeV1()
+		full.Advisories = nil
+		if empty {
+			full.Advisories = []supply.Advisory{}
+		}
+		selected, err := SelectRuntimeForDriver("chv", full, "amd64")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if (selected.Advisories == nil) != (full.Advisories == nil) {
+			t.Fatal("selector rewrote original advisory vector representation")
+		}
+	}
+}
+func TestRuntimeProjectionExistingValidatorRejectsBothDuplicateRoleFormsV1(t *testing.T) {
+	for _, changedDigest := range []bool{false, true} {
+		full := multipleVMMRuntimeV1()
+		duplicate := full.Items[0]
+		if changedDigest {
+			duplicate.SHA256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+		}
+		full.Items = append(full.Items, duplicate)
+		if _, err := SelectRuntimeForDriver("chv", full, "amd64"); err == nil {
+			t.Fatal("canonical full validator accepted duplicate Kind/Name/Arch", changedDigest)
+		}
+	}
+}

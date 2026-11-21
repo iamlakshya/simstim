@@ -19,6 +19,9 @@ func sandboxPrepareImagePhaseV1(ctx context.Context, c *Conn) (*settingsOperatio
 }
 
 func requireImageFetchFamilyV1(ctx context.Context, c *Conn, family grantOperation) error {
+	if family == grantOpResume {
+		return requireResumeVMProducerV1(ctx, c)
+	}
 	if family == grantOpSandboxPrepare {
 		_, err := sandboxPrepareImagePhaseV1(ctx, c)
 		return err

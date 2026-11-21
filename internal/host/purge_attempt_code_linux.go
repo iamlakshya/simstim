@@ -22,6 +22,10 @@ import (
 // for another resource. There is no path/hash/file-info adoption constructor.
 type purgeAttemptCodeV2 struct {
 	mu                      sync.Mutex
+	retirement              purgeNativeRetirementsV4
+	closeErr                error
+	copyWriter              *os.File
+	directoryCreated        bool
 	origin                  *placement
 	source                  *os.File
 	sourceInfo              os.FileInfo
@@ -98,6 +102,7 @@ func newPurgeAttemptCodeV2(ctx context.Context, origin *placement, args api.Purg
 		if err := owner.home.Mkdir(owner.directoryLeaf, 0o700); err != nil {
 			return err
 		}
+		owner.directoryCreated = true
 		info, err := owner.home.Lstat(owner.directoryLeaf)
 		if err != nil || !refOf(info).validDirectory() {
 			return errors.Join(sessionLeaseError("the original temporary code directory lost its native creation"), err)
@@ -154,11 +159,13 @@ func newPurgeAttemptCodeV2(ctx context.Context, origin *placement, args api.Purg
 	if err != nil {
 		return nil, err
 	}
-	if err := owner.copy.Close(); err != nil {
-		_ = readOnly.Close()
-		return nil, err
+	// Retain both actual objects before the first writable close. A failed
+	// native close never drops the newly opened read-only creation.
+	owner.copyWriter, owner.copy = owner.copy, readOnly
+	owner.closeErr = errors.Join(owner.closeErr, owner.retirement.closeFilesV4([]*os.File{owner.copyWriter}))
+	if err := owner.retirement.checkFilesV4([]*os.File{owner.copyWriter}); err != nil {
+		return nil, errors.Join(owner.closeErr, err)
 	}
-	owner.copy = readOnly
 	if err := owner.copy.Chmod(0o100); err != nil {
 		return nil, err
 	}
@@ -222,7 +229,7 @@ func (owner *purgeAttemptCodeV2) checkLockedV2(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if err := errors.Join(owner.homeRef.matchesRoot(fresh), fresh.Close()); err != nil {
+	if err := errors.Join(owner.homeRef.matchesRoot(fresh), owner.retirement.closeRootsV4([]*os.Root{fresh})); err != nil {
 		return err
 	}
 	current, err := owner.home.Lstat(owner.directoryLeaf)

@@ -15,7 +15,7 @@ import (
 	"github.com/iamlakshya/simstim/internal/proto"
 )
 
-func init() { Features = append(Features, api.FeatureResumePreparationV1) }
+func init() { Features = append(Features, api.FeatureResumePreparationV1, api.FeatureResumeVMSizeV1) }
 
 type bridgeResumePreparationContextKeyV1 struct{}
 type bridgeResumePreparationV1 struct {
@@ -28,6 +28,10 @@ type bridgeResumePreparationV1 struct {
 	cancel       context.CancelFunc
 	publication  *runtimePublication
 	accounting   *resumePreparationLeaseV1
+	vm           *resumeVMSelectionV1
+	pendingVM    bool
+	vmSource     *api.ResumeVMSelectionV1
+	vmRequest    []byte
 	args         api.ResumeArgs
 	metadata     []byte
 	token        string
@@ -62,7 +66,11 @@ func (p *bridgeResumePreparationV1) result() api.ResumePrepareResultV1 {
 	if p.warm != nil {
 		mode = "warm"
 	}
-	return api.ResumePrepareResultV1{V: 1, Prepared: &api.PreparedResumeV1{V: 1, Token: p.token}, Mode: mode, Primary: p.operation.Primary()}
+	result := api.ResumePrepareResultV1{V: 1, Prepared: &api.PreparedResumeV1{V: 1, Token: p.token}, Mode: mode, Primary: p.operation.Primary()}
+	if p.pendingVM && p.cold != nil {
+		result.VM = p.vmSource
+	}
+	return result
 }
 func (p *bridgeResumePreparationV1) check(ctx context.Context) error {
 	if p == nil || !p.active.Load() || p.bridge == nil || p.lifetime == nil || p.lifetime.Err() != nil || p.bridge.ctx == nil || p.bridge.ctx.Err() != nil || p.operation == nil || !p.operation.Valid(p.operation.Primary()) {
@@ -83,13 +91,16 @@ func (p *bridgeResumePreparationV1) check(ctx context.Context) error {
 		}
 		return p.noneCold.Check(ctx, p.operation)
 	}
+	if p.cold != nil && p.pendingVM && p.accounting == nil {
+		return p.cold.Check(ctx, p.operation)
+	}
 	if p.cold == nil || p.accounting == nil {
 		return resumePreparationErrorV1("the cold preparation has no original native memory reservation")
 	}
 	return p.accounting.Check(ctx, p.operation, p.cold)
 }
 func (b *bridge) handleResumePreparationV1(req proto.Request) bool {
-	if req.Op != "resume.prepare-v1" && req.Op != "resume.prepared.check-v1" && req.Op != "resume.prepared.cancel-v1" {
+	if req.Op != "resume.prepare-v1" && req.Op != "resume.vm.prepare-v1" && req.Op != "resume.prepared.check-v1" && req.Op != "resume.prepared.cancel-v1" {
 		return false
 	}
 	service := b.resumeServiceV1()
@@ -115,6 +126,11 @@ func (b *bridge) handleResumePreparationV1(req proto.Request) bool {
 	}
 	if req.Op == "resume.prepare-v1" {
 		result, err := b.prepareResumeV1(service, req.Args)
+		b.reply(req.ID, result, err)
+		return true
+	}
+	if req.Op == "resume.vm.prepare-v1" {
+		result, err := b.prepareResumeVMV1(service, req)
 		b.reply(req.ID, result, err)
 		return true
 	}
@@ -147,15 +163,15 @@ func (b *bridge) handleResumePreparationV1(req proto.Request) bool {
 }
 func (b *bridge) prepareResumeV1(service *bridgeResumeServiceV1, raw json.RawMessage) (result *api.ResumePrepareResultV1, failure error) {
 	var args api.ResumePrepareArgsV1
-	fields, err := api.JSONObjectFields(raw, "v", "start")
-	if err != nil || len(fields) != 2 || !api.ExactJSONFields(raw, args) || json.Unmarshal(raw, &args) != nil || args.V != 1 || !api.ValidSessionID(args.Start.ID) {
+	fields, err := api.JSONObjectFields(raw, "v", "start", "prepare_vm")
+	if err != nil || len(fields) < 2 || len(fields) > 3 || !api.ExactJSONFields(raw, args) || json.Unmarshal(raw, &args) != nil || args.V != 1 || !api.ValidSessionID(args.Start.ID) {
 		return nil, resumePreparationErrorV1("the original resume metadata is invalid")
 	}
 	startFields, err := api.JSONObjectFields(fields["start"])
 	if err != nil {
 		return nil, err
 	}
-	for _, field := range []string{"prepared", "named_ssh_keys", "secrets", "members", "secret_delivery", "protected_trusted_secret_values", "protected_trusted_secret_values_v1"} {
+	for _, field := range []string{"prepared", "named_ssh_keys", "secrets", "members", "secret_delivery", "protected_trusted_secret_values", "protected_trusted_secret_values_v1", "vm_need_v1", "runtime_origin_v1"} {
 		if _, present := startFields[field]; present {
 			return nil, resumePreparationErrorV1("resume preparation cannot carry private values or delivery requests")
 		}
@@ -178,7 +194,7 @@ func (b *bridge) prepareResumeV1(service *bridgeResumeServiceV1, raw json.RawMes
 		result := prior.result()
 		return &result, nil
 	}
-	p := &bridgeResumePreparationV1{bridge: b, args: metadata, metadata: encoded}
+	p := &bridgeResumePreparationV1{bridge: b, args: metadata, metadata: encoded, pendingVM: args.PrepareVM}
 	ctx, cancel := context.WithCancel(b.ctx)
 	p.cancel = cancel
 	p.lifetime = context.WithValue(ctx, bridgeResumePreparationContextKeyV1{}, p)
@@ -218,6 +234,19 @@ func (b *bridge) prepareResumeV1(service *bridgeResumeServiceV1, raw json.RawMes
 	if err != nil {
 		return nil, err
 	}
+	if p.pendingVM && (current.Wall == nil || current.Wall.Level != "microvm") {
+		return nil, resumePreparationErrorV1("VM preparation does not name a protected microvm")
+	}
+	if p.warm != nil {
+		p.pendingVM = false
+	}
+	if p.pendingVM && p.cold != nil {
+		p.vmSource = &api.ResumeVMSelectionV1{V: 1, Need: bytes.Clone(current.VMNeedV1)}
+		if current.Policy != nil && current.Policy.Sandbox.Memory != nil {
+			value := *current.Policy.Sandbox.Memory
+			p.vmSource.PolicyMemory = &value
+		}
+	}
 	if p.noneCold != nil {
 		p.publication, err = beginRuntimePublicationKind(p.lifetime, "resume_prepare", nil, p.operation)
 		if err != nil {
@@ -226,33 +255,12 @@ func (b *bridge) prepareResumeV1(service *bridgeResumeServiceV1, raw json.RawMes
 		if err := admitRestartMemoryRequestV1(p.lifetime, p.operation, p.args); err != nil {
 			return nil, err
 		}
+		if err := p.noneCold.prepareManagerBootstrapV1(p.lifetime); err != nil {
+			return nil, err
+		}
 	}
-	if p.cold != nil {
-		p.publication, err = beginRuntimePublicationKind(p.lifetime, "resume_prepare", nil, p.operation)
-		if err != nil {
-			return nil, err
-		}
-		if err := admitRestartMemoryRequestV1(p.lifetime, p.operation, p.args); err != nil {
-			return nil, err
-		}
-		preview, err := p.operation.LoadContext(p.lifetime)
-		if err != nil {
-			return nil, err
-		}
-		if err := ApplyResumeLayers(preview, p.args.Layers); err != nil {
-			return nil, err
-		}
-		if err := ApplyRepositoryResume(preview, p.args); err != nil {
-			return nil, err
-		}
-		if err := applyAdmittedRestartMemoryV1(p.operation, preview); err != nil {
-			return nil, err
-		}
-		if err := p.cold.CheckManifest(p.lifetime, p.operation, preview); err != nil {
-			return nil, err
-		}
-		p.accounting, err = beginResumePreparationV1(p.lifetime, p.operation, p.cold, preview, p.token)
-		if err != nil {
+	if p.cold != nil && !p.pendingVM {
+		if err := p.finishColdPreparationV1(); err != nil {
 			return nil, err
 		}
 	}
@@ -268,6 +276,13 @@ func (b *bridge) prepareResumeV1(service *bridgeResumeServiceV1, raw json.RawMes
 // resumePreparedV1 is called only by this same bridge's actual decoded resume.
 // The opaque token never recreates an OP or switches a failed warm plan cold.
 func (b *bridge) resumePreparedV1(request proto.Request, a api.ResumeArgs) (*api.ResumeResult, error) {
+	fields, err := api.JSONObjectFields(request.Args)
+	if err != nil {
+		return nil, err
+	}
+	if _, present := fields["runtime_origin_v1"]; present {
+		return nil, resumePreparationErrorV1("the runtime origin belongs only to the cold second preparation phase")
+	}
 	service := b.resumeServiceV1()
 	if service == nil {
 		return nil, resumePreparationErrorV1("the original client connection ended")
@@ -283,7 +298,7 @@ func (b *bridge) resumePreparedV1(request proto.Request, a api.ResumeArgs) (*api
 		return nil, err
 	}
 	encoded, err := json.Marshal(metadata)
-	if err != nil || !bytes.Equal(encoded, p.metadata) {
+	if err != nil || !bytes.Equal(encoded, p.metadata) || p.pendingVM {
 		return nil, resumePreparationErrorV1("the final resume changed its original metadata")
 	}
 	if err := p.check(p.lifetime); err != nil {

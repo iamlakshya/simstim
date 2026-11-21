@@ -13,6 +13,10 @@
 # version list (versions.json) one level up.
 set -euo pipefail
 cd "$(dirname "$0")/.."
+go_build_toolchain=$(sh scripts/go-build-tags.sh toolchain)
+export GOTOOLCHAIN="$go_build_toolchain"
+go_build_tags=$(sh scripts/go-build-tags.sh)
+export GO_BUILD_TAGS="$go_build_tags"
 
 version=${1:-dev}
 base=${2:-/}
@@ -38,7 +42,7 @@ path="/${path#/}"
 path="${path%/}/"
 root=$(printf '%s' "$path" | sed -E 's#(v[0-9]+\.[0-9]+|dev)/$##')
 
-go run ./cmd/docgen -site site/src -site-url "$url$path"
+go run -tags="$go_build_tags" ./cmd/docgen -site site/src -site-url "$url$path"
 # The lockfile pins every package with its hash; install only what it says.
 if [ ! -d site/node_modules ] || [ site/pnpm-lock.yaml -nt site/node_modules/.pnpm/lock.yaml ]; then
     pnpm --dir site install --frozen-lockfile

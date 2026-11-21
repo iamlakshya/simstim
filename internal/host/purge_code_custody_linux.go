@@ -20,6 +20,7 @@ import (
 // The child never derives session, root or OP authority from these objects.
 type purgeCodeCustodyV3 struct {
 	mu          sync.Mutex
+	retirement  purgeNativeRetirementsV4
 	image       *purgeAttemptImageV2
 	root        *os.Root
 	rootRef     cachefs.Reference
@@ -59,7 +60,7 @@ func receivePurgeCodeCustodyV3(ctx context.Context, image *purgeAttemptImageV2, 
 	var directory *os.File
 	defer func() {
 		if directory != nil {
-			returned = errors.Join(returned, directory.Close())
+			returned = errors.Join(returned, owner.retirement.closeFilesV4([]*os.File{directory}))
 		}
 	}()
 	for index := 0; index < 2; index++ {
@@ -98,7 +99,7 @@ func receivePurgeCodeCustodyV3(ctx context.Context, image *purgeAttemptImageV2, 
 		return nil, err
 	}
 	matched := owner.rootRef.CheckRoot(current)
-	closed := current.Close()
+	closed := owner.retirement.closeRootsV4([]*os.Root{current})
 	if err := errors.Join(matched, closed); err != nil {
 		return nil, err
 	}
@@ -148,17 +149,7 @@ func (owner *purgeCodeCustodyV3) closeBorrowedV3() error {
 	if owner == nil {
 		return nil
 	}
-	var failure error
-	if owner.lease != nil {
-		failure = errors.Join(failure, owner.lease.Close())
-	}
-	if owner.root != nil {
-		failure = errors.Join(failure, owner.root.Close())
-	}
-	if owner.home != nil {
-		failure = errors.Join(failure, owner.home.Close())
-	}
-	return failure
+	return errors.Join(owner.retirement.closeFilesV4([]*os.File{owner.lease}), owner.retirement.closeRootsV4([]*os.Root{owner.root, owner.home}), owner.retirement.checkAllRetiredV4())
 }
 
 // CloseAfterTransaction removes only the actual original factory code objects,
@@ -170,10 +161,7 @@ func (owner *purgeCodeCustodyV3) CloseAfterTransaction(transaction *purgeActiveT
 	owner.mu.Lock()
 	defer owner.mu.Unlock()
 	if owner.closed {
-		if err := observeOriginalPurgeDescriptorCloseV3([]*os.File{owner.lease}, []*os.Root{owner.root, owner.home}); err != nil {
-			return err
-		}
-		return nil
+		return errors.Join(owner.closeErr, owner.retirement.checkAllRetiredV4())
 	}
 	if transaction == nil || owner.transaction != transaction || !transaction.closed {
 		return placementError("the actual code custody still has its original transaction")
@@ -186,7 +174,7 @@ func (owner *purgeCodeCustodyV3) CloseAfterTransaction(transaction *purgeActiveT
 		return err
 	}
 	actual, statErr := directory.Stat()
-	closedErr := directory.Close()
+	closedErr := owner.retirement.closeFilesV4([]*os.File{directory})
 	_, _, _, links, known := footprintIdentity(actual)
 	if statErr != nil || closedErr != nil || !known || !os.SameFile(actual, owner.rootInfo) {
 		return errors.Join(placementError("the original code directory lost its retained native identity"), statErr, closedErr)
@@ -201,15 +189,18 @@ func (owner *purgeCodeCustodyV3) CloseAfterTransaction(transaction *purgeActiveT
 				return errors.Join(placementError("the terminal code directory still has an unknown original file"), err)
 			}
 		}
-		if owner.endpoint == nil || !owner.endpoint.closed {
+		if owner.endpoint == nil || owner.endpoint.checkNativeRetiredV3(context.Background()) != nil {
 			return placementError("the unlinked code directory still has an original listener")
 		}
 		if err := syncCapturedDirectory(owner.home); err != nil {
 			return err
 		}
-		owner.closeErr = owner.closeBorrowedV3()
-		owner.closed = true
-		return owner.closeErr
+		owner.closeErr = errors.Join(owner.closeErr, owner.closeBorrowedV3())
+		native := owner.retirement.checkAllRetiredV4()
+		if native == nil {
+			owner.closed = true
+		}
+		return errors.Join(owner.closeErr, native)
 	}
 	if err := owner.rootRef.CheckRoot(owner.root); err != nil {
 		return err
@@ -225,7 +216,7 @@ func (owner *purgeCodeCustodyV3) CloseAfterTransaction(transaction *purgeActiveT
 		return err
 	}
 	entries, err := file.ReadDir(3)
-	closed := file.Close()
+	closed := owner.retirement.closeFilesV4([]*os.File{file})
 	if err != nil && !errors.Is(err, io.EOF) || closed != nil {
 		return errors.Join(err, closed)
 	}
@@ -241,8 +232,9 @@ func (owner *purgeCodeCustodyV3) CloseAfterTransaction(transaction *purgeActiveT
 		return err
 	}
 	if owner.endpoint != nil {
-		if err := owner.endpoint.Close(); err != nil {
-			return err
+		owner.closeErr = errors.Join(owner.closeErr, owner.endpoint.Close())
+		if native := owner.endpoint.checkNativeRetiredV3(context.Background()); native != nil {
+			return errors.Join(owner.closeErr, native)
 		}
 	}
 	if owner.leaf != owner.capture {
@@ -265,7 +257,39 @@ func (owner *purgeCodeCustodyV3) CloseAfterTransaction(transaction *purgeActiveT
 	if err := syncCapturedDirectory(owner.home); err != nil {
 		return err
 	}
-	owner.closeErr = owner.closeBorrowedV3()
-	owner.closed = true
-	return owner.closeErr
+	owner.closeErr = errors.Join(owner.closeErr, owner.closeBorrowedV3())
+	native := owner.retirement.checkAllRetiredV4()
+	if native == nil {
+		owner.closed = true
+	}
+	return errors.Join(owner.closeErr, native)
+}
+
+func (owner *purgeCodeCustodyV3) checkNativeRetiredV3(ctx context.Context) error {
+	if owner == nil || ctx == nil {
+		return placementError("the original code custody retirement is absent")
+	}
+	owner.mu.Lock()
+	defer owner.mu.Unlock()
+	if !owner.closed {
+		return placementError("the original code custody still owns its native creations")
+	}
+	var endpoint error
+	if owner.endpoint != nil {
+		endpoint = owner.endpoint.checkNativeRetiredV3(ctx)
+	}
+	return errors.Join(endpoint, owner.retirement.checkAllRetiredV4())
+}
+
+func (owner *purgeCodeCustodyV3) CloseDiagnosticsV3() error {
+	if owner == nil {
+		return nil
+	}
+	owner.mu.Lock()
+	defer owner.mu.Unlock()
+	var endpoint error
+	if owner.endpoint != nil {
+		endpoint = owner.endpoint.CloseDiagnosticsV3()
+	}
+	return errors.Join(owner.closeErr, endpoint, owner.retirement.diagnosticsV4())
 }

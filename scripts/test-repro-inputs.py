@@ -39,12 +39,17 @@ class DriverInputs(unittest.TestCase):
     def fake_go(self):
         path = self.bin / "go"
         # This process only records argv; it never builds or checks an image.
-        path.write_text("#!/usr/bin/env python3\nimport json,sys\nfrom pathlib import Path\n"
-                        + "Path(" + repr(str(self.root / "argv.json")) + ").write_text(json.dumps(sys.argv[1:]))\n")
+        path.write_text("#!/usr/bin/env python3\nimport json,os,sys\nfrom pathlib import Path\n"
+                        + "Path(" + repr(str(self.root / "argv.json")) + ").write_text(json.dumps(sys.argv[1:]))\n"
+                        + "Path(" + repr(str(self.root / "toolchain.txt")) + ").write_text(os.environ.get('GOTOOLCHAIN', ''))\n"
+                        + "if sys.argv[1:] == ['version']:\n"
+                        + "    pin = next(line.split()[1] for line in Path('go.mod').read_text().splitlines() if line.startswith('toolchain '))\n"
+                        + "    print('go version ' + pin + ' fixture/fixture')\n")
         path.chmod(0o700)
 
     def test_missing_real_inputs_do_not_invoke_a_compiler(self):
         self.fake_go()
+        self.assertTrue(os.access(SOURCE / "scripts/repro.sh", os.X_OK))
         driver = self.copy("scripts/repro.sh")
         result = subprocess.run(["bash", str(driver)], env=self.env, capture_output=True, timeout=5)
         self.assertNotEqual(result.returncode, 0)
@@ -54,6 +59,9 @@ class DriverInputs(unittest.TestCase):
     def test_manifest_path_and_version_are_single_literal_arguments(self):
         self.fake_go()
         driver = self.copy("scripts/write-release-manifest.sh")
+        self.copy("go.mod")
+        self.copy("scripts/go-build-tags.sh")
+        self.env["GOTOOLCHAIN"] = "local"
         marker = self.root / "unexpected"
         literal = str(self.root / ("image path $(touch " + str(marker) + ")"))
         version = "1.2.3$(touch " + str(marker) + ")"
@@ -63,6 +71,8 @@ class DriverInputs(unittest.TestCase):
         args = json.loads((self.root / "argv.json").read_text())
         self.assertEqual(args[args.index("-images") + 1], literal)
         self.assertEqual(args[args.index("-release") + 1], version)
+        self.assertIn("-tags=userns_cohort_v3,http2legacy", args)
+        self.assertEqual((self.root / "toolchain.txt").read_text(), "local")
         self.assertIn("-require-images", args)
         self.assertIn("-require-launch", args)
         self.assertIn("-require-image-verifier", args)
@@ -72,6 +82,7 @@ class DriverInputs(unittest.TestCase):
         driver = self.copy("scripts/test-install.sh")
         self.copy("internal/brand/brand.go")
         self.copy("go.mod")
+        self.copy("scripts/go-build-tags.sh")
         self.env["INSTALL_SNAPSHOT_DIR"] = "relative-snapshot"
         result = subprocess.run(["bash", str(driver)], env=self.env, capture_output=True, timeout=5)
         self.assertNotEqual(result.returncode, 0)

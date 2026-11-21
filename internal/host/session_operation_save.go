@@ -15,6 +15,12 @@ import (
 // canonical manifest codec. A moved or replaced path can neither redirect the
 // write nor turn an existing manifest into a newly admitted primary.
 func (operation *SessionOperation) saveNewManifest(m *Manifest) error {
+	return operation.saveNewManifestGuardedV1(m, nil)
+}
+
+// The actual original writer may retain a private bounded pre-Rename check.
+// A callback carries no producer authority; its actual caller supplies owners.
+func (operation *SessionOperation) saveNewManifestGuardedV1(m *Manifest, preRename func(context.Context) error) error {
 	if operation == nil || m == nil || m.ID != operation.id || m.path != "" || m.SandboxOf != "" || operation.native == nil || operation.native.borrowed {
 		return sessionLeaseError("the new manifest has no original owning reservation")
 	}
@@ -47,6 +53,11 @@ func (operation *SessionOperation) saveNewManifest(m *Manifest) error {
 		}
 		if err := closeManifestTemp(file); err != nil {
 			return errors.Join(err, file.Close())
+		}
+		if preRename != nil {
+			if err := preRename(ctx); err != nil {
+				return err
+			}
 		}
 		if err := operation.native.check(ctx); err != nil {
 			return err

@@ -39,19 +39,39 @@ must still finish during the wait. Caller cancellation reports incomplete
 cleanup and retains the same native owners; it does not undo the published
 policy or manufacture completion by closing a permitted carrier.
 
-HTTP interception currently requires the exact Go 1.26.11 toolchain and the
-unreplaced `golang.org/x/net` version 0.62.0. Its public legacy server exposes
-the native ownership hooks. The Go 1.27 wrapper ignores those hooks, so an
-unsupported build refuses before parsing requests or forwarding credentials.
-It gives a build hint and does not fall back to another HTTP protocol.
-Upgrading requires a supported replacement for those hooks and fresh native
-ownership, scheduler and resource qualification.
+HTTP interception requires the exact Go 1.27.4 toolchain, the unreplaced
+`golang.org/x/net` version 0.62.0 and its documented `http2legacy` build tag.
+That tag selects the original public server and its native ownership hooks.
+The default Go 1.27 wrapping server ignores those hooks. An unsupported build
+refuses before parsing requests or forwarding credentials, with no protocol
+fallback. A later upgrade needs fresh native ownership, scheduler and resource
+qualification.
+
+Go 1.27 fixes the test producer's missing dependency metadata
+([upstream issue](https://github.com/golang/go/issues/76926),
+[released source](https://github.com/golang/go/blob/go1.27.4/src/cmd/go/internal/load/test.go#L403)).
+The tag is [documented by the pinned module](https://github.com/golang/net/blob/v0.62.0/http2/README.md).
+The standard Go test runner, coverage denominator, six fuzz targets, race and
+repeat counts, and performance thresholds remain unchanged. Raw Go commands
+need `GOTOOLCHAIN=go1.27.4` and `-tags=http2legacy`. Additional build tags share
+one comma-separated list. `scripts/go-build-tags.sh` supplies the complete
+`userns_cohort_v3,http2legacy` list to the recipes and scripts. Explicit
+`-tags` replaces a tag list in `GOFLAGS`; it does not add to it. Never use
+caller-supplied tag metadata to establish carried-code provenance.
+
+Before Linux host or whole-package builds, run `just userns` from the complete
+source. It builds both real static launchers, then the strict code generator
+checks their bytes and writes the ignored identity table. The cohort tag
+excludes the empty Linux fallback, so a missing table cannot silently build
+an unsupported host. The policy-header emitter alone uses the explicit
+legacy-only bootstrap mode before that cohort exists. The ordinary standard
+test, lint, coverage, fuzz and benchmark commands and their counts remain.
 
 | Command | What it runs | Where |
 | --- | --- | --- |
 | `just test` | Go unit tests with the race detector, then the tests of `internal/link` again over a pipe with no buffer (`LINK_TEST_PIPE=1`), plus offline tests of the public-readiness checker, of the end-to-end cleanup, of the end-to-end probe of the session sockets and of the pins watch, of the release's signed-tag gate in a temporary repository (`scripts/test-verify-tag.sh`), of the cleanup of `test/e2e/host_git.py`, and of the `llms.txt` check | Needs Python 3.11 or later. The gate's test skips without git 2.34 and OpenSSH 8.8, except in CI |
 | `just cover` | The unit tests' coverage, which must stay at 70 % or more | Anywhere |
-| `go test ./internal/tui -run TestGolden -update` | Rewrites the golden screens after an intended change; review the diff | Anywhere |
+| `go test -tags="$(sh scripts/go-build-tags.sh)" ./internal/tui -run TestGolden -update` | Rewrites the golden screens after an intended change; review the diff | Anywhere |
 | `just fuzz` | Fuzzes the input filter, the frame reader, the holder's hook handler, the text cleaner, the paste guard's reader and the link's frame reader for 30 s each (`just fuzz 5m` for longer) | Anywhere |
 | `just lint` | `go vet`, the strict golangci-lint set, and the name, private-detail, script and file-size checks | Anywhere |
 | `just e2e` | The end-to-end suite against a real host | Needs a test host |
@@ -75,7 +95,7 @@ These are the project's quality expectations, with tools to check them locally a
 | Logs through `log/slog` | sloglint, and depguard, which keeps the standard `log` package to tests |
 | The strict lint set (`.golangci.yml`) reports nothing; every `nolint` names its linter and gives a reason | golangci-lint, nolintlint |
 | No known vulnerability in the code we call, and no dead code | govulncheck, deadcode (`just vulncheck`) |
-| Race-free tests, and 70 % or more coverage of `internal/` without the launcher | `go test -race`, `just cover` |
+| Race-free tests, and 70 % or more coverage of `internal/` without the launcher | `go test -tags="$(sh scripts/go-build-tags.sh)" -race`, `just cover` |
 | The frame reader and the input filter never lose a byte | fuzz targets (`just fuzz`) |
 | No hook can put an agent session ID without the agent's form into a resume command | a fuzz target (`just fuzz`) |
 | The paste guard finds the same clipboard writes in output that frames cut anywhere as in the whole output | a fuzz target (`just fuzz`) |
@@ -128,8 +148,8 @@ Some parts need Linux: ports and idle stop read `/proc`, and memory caps need sy
 The tests of the pinned host key run a fake `ssh` in most places. `internal/client/pin_sshd_test.go` and the files beside it run the real `ssh` against a real `sshd` on `127.0.0.1` instead, and check that the client trusts the same keys as `ssh` does: a port wildcard, a revocation in a second relative file, a certificate authority, a hashed entry, a known hosts file over 16 MiB and a `KnownHostsCommand`. They also check that the changed-key error keeps its exit code and its SHA256 fingerprint with `LogLevel QUIET` and `FingerprintHash md5` in the user's config, that `CheckHostIP yes` writes nothing to the pin (on the container's own address, since `ssh` skips that check for the loopback), and that a host's banner cannot imitate the message. More checks: a certificate whose key ID imitates `ssh`'s log, also while the user's `KnownHostsCommand` fails or hangs, `ProxyJump` hops (a hop at `DEBUG1`, a hop whose banner imitates `ssh`, a hop whose key changed, and the user's own `LogLevel`), a revoked key of another type, and ECDSA keys on three curves. The tests skip unless `PIN_SSHD=1`. Run them in a Linux container with `openssh-server`, where every file they write is in a temporary folder:
 
 ```sh
-docker run --rm -v "$PWD":/src -w /src -e PIN_SSHD=1 golang:1.26.11 sh -c \
-  'apt-get -qq update && apt-get -qq install -y openssh-server openssh-client >/dev/null && go test -run TestRealSSHD ./internal/client/'
+docker run --rm -v "$PWD":/src -w /src -e PIN_SSHD=1 golang:1.27.4 sh -c \
+  'apt-get -qq update && apt-get -qq install -y openssh-server openssh-client >/dev/null && go test -tags="$(sh scripts/go-build-tags.sh)" -run TestRealSSHD ./internal/client/'
 ```
 
 ## Coverage
@@ -143,12 +163,12 @@ just cover
 It runs the same as this:
 
 ```sh
-pk=$(go list ./internal/... | grep -v '/tui$' | tr '\n' ',')
-go test -count=1 -coverpkg="${pk%,}" -coverprofile=cover.out ./internal/...
+pk=$(go list -tags="$(sh scripts/go-build-tags.sh)" ./internal/... | grep -v '/tui$' | tr '\n' ',')
+go test -tags="$(sh scripts/go-build-tags.sh)" -count=1 -coverpkg="${pk%,}" -coverprofile=cover.out ./internal/...
 go tool cover -func=cover.out | tail -1
 ```
 
-The coverage is counted across packages: a test in one package counts for the code it runs in another, so an attach test in `internal/client` counts for the bridge in `internal/host`. Holders that a test starts write their coverage too, where `go test` collects it. `go tool cover -html=cover.out` shows which lines ran.
+The coverage is counted across packages: a test in one package counts for the code it runs in another, so an attach test in `internal/client` counts for the bridge in `internal/host`. Holders that a test starts write their coverage too, where `go test -tags="$(sh scripts/go-build-tags.sh)"` collects it. `go tool cover -html=cover.out` shows which lines ran.
 
 The bar is a floor, not the goal. A test checks what the code does, not just that it runs. When the bar was set, in October 2026, the coverage was 83 %, and 82 % without the shadow terminal.
 
@@ -279,7 +299,7 @@ The tests of the link of a sandbox (`internal/link`) run over a socket pair. Wit
 The link has a benchmark of its own. `just bench` does not run it yet, because no session uses the link. It passes 1 GiB through one stream over a socket pair, for each window from 64 KiB to 1 MiB, on one core:
 
 ```sh
-go test ./internal/link -run '^$' -bench Throughput -benchtime 1024x -cpu 1
+go test -tags="$(sh scripts/go-build-tags.sh)" ./internal/link -run '^$' -bench Throughput -benchtime 1024x -cpu 1
 ```
 
 The target is 100 MiB/s or more ([isolation spec, 12](isolation-spec.md#12-performance-targets-and-how-to-measure-them)). Every window passed it by far, the default of 64 KiB too. The default comes from the supervisor's memory budget, not from the benchmark ([isolation spec, 5.2](isolation-spec.md#52-internallink)).
@@ -312,7 +332,7 @@ The release is served locally, so the download is not in the time: a client arch
 `test/ttyshot` runs a program in a pseudo-terminal, sends keys from a script, and prints the screen it ends on, or draws it as SVG:
 
 ```sh
-go run ./test/ttyshot -script keys.tty -- ./bin/<name> demo
+go run -tags="$(sh scripts/go-build-tags.sh)" ./test/ttyshot -script keys.tty -- ./bin/<name> demo
 ```
 
 `just screenshots` uses it to draw the README's images.

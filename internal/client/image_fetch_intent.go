@@ -58,6 +58,7 @@ type imageFetchIntentV1 struct {
 	cancel             context.CancelFunc
 	busy               bool
 	finished           chan struct{}
+	finishWork         func()
 	closedTokens       map[string]bool
 	aborts             map[string]*imageFetchAbortV1
 }
@@ -157,7 +158,7 @@ func prepareNewImageFetch(ctx context.Context, c *Conn, resolved *resolvedImage,
 		return ctx, nil
 	}
 	family := requestGrantOperation(r)
-	if family != grantOpNew && family != grantOpSandboxPrepare {
+	if family != grantOpNew && family != grantOpSandboxPrepare && family != grantOpResume {
 		return ctx, nil
 	}
 	if err := requireImageFetchFamilyV1(ctx, c, family); err != nil {
@@ -206,8 +207,16 @@ func prepareNewImageFetch(ctx context.Context, c *Conn, resolved *resolvedImage,
 		return ctx, fmt.Errorf("encode the original image fetch selection: %w", err)
 	}
 	sum := sha256.Sum256(encoded)
-	work, cancel := context.WithCancel(ctx)
-	candidate := &imageFetchIntentV1{ctx: ctx, work: work, cancel: cancel, request: r, conn: c, use: use, resolved: cloneResolvedImageV1(*resolved), mode: mode, policyHash: policyHash, turns: map[uint64]*imageFetchCallV1{}, ceiling: requestCeiling(ctx, tier), closedTokens: map[string]bool{}, aborts: map[string]*imageFetchAbortV1{}, scope: grantScope{host: c.Host.Name, hostID: hid, tier: tier, kind: OutboundImageFetchV1, name: hex.EncodeToString(sum[:]), purpose: requestGrantPurpose(r), operation: family}}
+	lifetime := ctx
+	if family == grantOpResume {
+		var err error
+		lifetime, err = resumeVMImageFetchLifetimeV1(ctx, c)
+		if err != nil {
+			return ctx, err
+		}
+	}
+	work, cancel := context.WithCancel(lifetime)
+	candidate := &imageFetchIntentV1{ctx: lifetime, work: work, cancel: cancel, request: r, conn: c, use: use, resolved: cloneResolvedImageV1(*resolved), mode: mode, policyHash: policyHash, turns: map[uint64]*imageFetchCallV1{}, ceiling: requestCeiling(ctx, tier), closedTokens: map[string]bool{}, aborts: map[string]*imageFetchAbortV1{}, scope: grantScope{host: c.Host.Name, hostID: hid, tier: tier, kind: OutboundImageFetchV1, name: hex.EncodeToString(sum[:]), purpose: requestGrantPurpose(r), operation: family}}
 	r.mu.Lock()
 	if err := r.lifetimeErrorLocked(); err != nil {
 		r.mu.Unlock()
@@ -240,8 +249,21 @@ func prepareNewImageFetch(ctx context.Context, c *Conn, resolved *resolvedImage,
 	}
 	before.busy, before.finished = true, make(chan struct{})
 	*resolved = cloneResolvedImageV1(before.resolved)
+	delivery := before.work
+	if family == grantOpResume {
+		var cancel context.CancelFunc
+		delivery, cancel = context.WithCancel(before.work)
+		joined := make(chan struct{})
+		stop := context.AfterFunc(ctx, func() { defer close(joined); cancel() })
+		before.finishWork = func() {
+			if !stop() {
+				<-joined
+			}
+			cancel()
+		}
+	}
 	before.mu.Unlock()
-	return context.WithValue(before.work, imageFetchPublicationKeyV1{}, before), nil
+	return context.WithValue(delivery, imageFetchPublicationKeyV1{}, before), nil
 }
 
 func (p *imageFetchIntentV1) finish() {
@@ -251,6 +273,10 @@ func (p *imageFetchIntentV1) finish() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.busy {
+		if p.finishWork != nil {
+			p.finishWork()
+			p.finishWork = nil
+		}
 		p.busy = false
 		close(p.finished)
 	}

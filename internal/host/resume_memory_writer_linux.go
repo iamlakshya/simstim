@@ -9,24 +9,50 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"github.com/iamlakshya/simstim/internal/cachefs"
-	"github.com/iamlakshya/simstim/internal/proto"
 	"io"
 	"os"
 	"reflect"
+
+	"github.com/iamlakshya/simstim/internal/cachefs"
+	"github.com/iamlakshya/simstim/internal/proto"
 )
 
 // This dedicated writer changes ONLY the original pending leaf through its
 // SAME OP root, inside the already-held native placement transaction.
 func (lease *resumePreparationLeaseV1) writeLeafLockedV1(ctx context.Context, expected, next *ResumePreparationV1) error {
-	if lease == nil || lease.operation == nil || lease.operation.native == nil || lease.operation.native.borrowed {
+	if lease == nil {
 		return resumePreparationDataErrorV1()
 	}
-	if err := validateResumePreparationV1Data(next); err != nil {
+	current, err := lease.operation.LoadContext(ctx)
+	if err != nil {
 		return err
 	}
-	operation := lease.operation
-	return operation.withCurrentRead(ctx, func(owned context.Context) (failure error) {
+	if err := lease.selection.checkCurrentV1(lease.operation, current); err != nil {
+		return err
+	}
+	runtime, err := startupRuntimeBytes(current)
+	if err != nil {
+		return err
+	}
+	published, err := writeResumePreparationLeafLockedV1(ctx, lease.operation, current.VMNeedV1, runtime, expected, next)
+	if published {
+		lease.published = next != nil
+	}
+	return err
+}
+
+// writeResumePreparationLeafLockedV1 is the shared DATA writer. The actual
+// native admission owners retain all authority checks and placement locking.
+// Its result reports only the real rename effect, including a later sync error.
+func writeResumePreparationLeafLockedV1(ctx context.Context, operation *SessionOperation, need, selectedRuntimeSource []byte, expected, next *ResumePreparationV1) (bool, error) {
+	if operation == nil || operation.native == nil || operation.native.borrowed {
+		return false, resumePreparationDataErrorV1()
+	}
+	if err := validateResumePreparationV1Data(next); err != nil {
+		return false, err
+	}
+	published := false
+	err := operation.withCurrentRead(ctx, func(owned context.Context) (failure error) {
 		original, err := cachefs.OpenFile(operation.native.root, "manifest.json", os.O_RDONLY, 0600)
 		if err != nil {
 			return err
@@ -51,7 +77,7 @@ func (lease *resumePreparationLeaseV1) writeLeafLockedV1(ctx context.Context, ex
 		if err != nil {
 			return err
 		}
-		if snapshot.ID != operation.Primary() || snapshot.SandboxOf != "" || snapshot.path != "" || !bytes.Equal(snapshot.VMNeedV1, lease.need) || !bytes.Equal(selectedRuntime, lease.runtime) || !reflect.DeepEqual(snapshot.ResumePreparation, expected) {
+		if snapshot.ID != operation.Primary() || snapshot.SandboxOf != "" || snapshot.path != "" || !bytes.Equal(snapshot.VMNeedV1, need) || !bytes.Equal(selectedRuntime, selectedRuntimeSource) || !reflect.DeepEqual(snapshot.ResumePreparation, expected) {
 			return resumePreparationErrorV1("the original preparation publication source or token changed")
 		}
 		snapshot.ResumePreparation = cloneResumePreparationV1(next)
@@ -71,7 +97,6 @@ func (lease *resumePreparationLeaseV1) writeLeafLockedV1(ctx context.Context, ex
 		if err != nil {
 			return err
 		}
-		published := false
 		defer func() {
 			if !published {
 				failure = errors.Join(failure, operation.native.root.Remove(name))
@@ -97,7 +122,6 @@ func (lease *resumePreparationLeaseV1) writeLeafLockedV1(ctx context.Context, ex
 			return err
 		}
 		published = true
-		lease.published = next != nil
 
 		if err := syncCapturedDirectory(operation.native.root); err != nil {
 			return err
@@ -109,4 +133,5 @@ func (lease *resumePreparationLeaseV1) writeLeafLockedV1(ctx context.Context, ex
 		defer func() { failure = errors.Join(failure, current.Close()) }()
 		return errors.Join(prepared.CheckFile(operation.native.root, "manifest.json", current, 0600), operation.native.check(owned), owned.Err())
 	})
+	return published, err
 }

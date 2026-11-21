@@ -14,7 +14,7 @@ import (
 )
 
 // RequestVersion is the newest namespace-launcher format emitted by this helper.
-const RequestVersion = 2
+const RequestVersion = 3
 
 // MaxRequestBytes is the launcher's control-message bound.
 const MaxRequestBytes = 4 << 20
@@ -35,7 +35,8 @@ type MountRequest struct {
 // its arguments, an environment, a namespace, or a security policy.
 // fd3 carries this request, fd4 the link and fd5 the empty root. V2 reserves
 // fd6 for its original private copy owner; mount sources start at7. V1
-// compatibility starts mounts at6. The final guest receives only the link on3.
+// compatibility starts mounts at6. V3 reserves fd7 for the original native
+// creator completion writer; mounts start at8. The guest receives only link3.
 type Request struct {
 	V      int            `json:"v"`
 	Probe  bool           `json:"probe"`
@@ -91,7 +92,7 @@ func DecodeRequest(r io.Reader) (Request, error) {
 		return Request{}, err
 	}
 	for _, mount := range req.Mounts {
-		if req.V == 2 && mount.stageFields != 3 {
+		if req.V >= 2 && mount.stageFields != 3 {
 			return Request{}, fmt.Errorf("V2 mount lacks explicit original stage roles")
 		}
 	}
@@ -141,7 +142,7 @@ func (r Request) Validate() error {
 	fds := map[int]bool{}
 	guests := map[string]bool{}
 	for _, m := range r.Mounts {
-		if m.FD < 6 || r.V >= 2 && m.FD < 7 || int64(m.FD) > 2147483647 || fds[m.FD] || guests[m.Guest] || !validGuest(m.Guest) {
+		if m.FD < 6 || r.V >= 2 && m.FD < 7 || r.V >= 3 && m.FD < 8 || int64(m.FD) > 2147483647 || fds[m.FD] || guests[m.Guest] || !validGuest(m.Guest) {
 			return fmt.Errorf("invalid or repeated launcher mount")
 		}
 		if m.Write {
@@ -151,11 +152,11 @@ func (r Request) Validate() error {
 				}
 			}
 		}
-		if r.V == 1 && (m.stageFields != 0 || m.StageFD != 0 || m.StageName != "") || r.V == 2 && m.stageFields != 0 && m.stageFields != 3 {
+		if r.V == 1 && (m.stageFields != 0 || m.StageFD != 0 || m.StageName != "") || r.V >= 2 && m.stageFields != 0 && m.stageFields != 3 {
 			return fmt.Errorf("incomplete versioned private stage")
 		}
 		if m.StageFD != 0 {
-			if !m.Write || m.StageFD < 7 || int64(m.StageFD) > 2147483647 || fds[m.StageFD] || m.StageFD == m.FD || len(m.StageName) != 38 || !strings.HasPrefix(m.StageName, ".copy-") {
+			if !m.Write || m.StageFD < 7 || r.V >= 3 && m.StageFD < 8 || int64(m.StageFD) > 2147483647 || fds[m.StageFD] || m.StageFD == m.FD || len(m.StageName) != 38 || !strings.HasPrefix(m.StageName, ".copy-") {
 				return fmt.Errorf("invalid original factory stage")
 			}
 			for _, digit := range m.StageName[6:] {

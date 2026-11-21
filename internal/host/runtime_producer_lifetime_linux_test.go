@@ -49,7 +49,7 @@ func statusRuntimeReceiptV1(t *testing.T, service *runtimeService, request runti
 			t.Fatal("actual installed fixture was not checked present")
 		}
 	}
-	receipt, err := service.selectedRuntime(request.Manifest)
+	receipt, err := service.selectedRuntime(t.Context(), request.Manifest)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -72,7 +72,7 @@ func TestRuntimeCompletedDeliveryRetainsOriginalConnectionReceiptV1(t *testing.T
 	if !errors.Is(job.ctx.Err(), context.Canceled) || len(service.jobs) != 0 || len(runtimeSlots) != before {
 		t.Fatal("successful delivery did not finish its actual job/slot")
 	}
-	receipt, err := service.selectedRuntime(request.Manifest)
+	receipt, err := service.selectedRuntime(t.Context(), request.Manifest)
 	if err != nil {
 		t.Fatal("normal job cancellation revoked its successful connection receipt", err)
 	}
@@ -91,7 +91,7 @@ func TestRuntimeStatusRetiresEndedOriginalBeforeFreshNativeReceiptV1(t *testing.
 	service, request := runtimeProducerFixtureV1(t)
 	original := statusRuntimeReceiptV1(t, service, request)
 	original.publication.cancel(errors.New("original native publication ended"))
-	if _, err := service.selectedRuntime(request.Manifest); err == nil {
+	if _, err := service.selectedRuntime(t.Context(), request.Manifest); err == nil {
 		t.Fatal("lookup renewed an ended original receipt")
 	}
 	fresh := statusRuntimeReceiptV1(t, service, request)

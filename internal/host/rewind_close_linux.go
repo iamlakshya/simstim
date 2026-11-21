@@ -54,6 +54,9 @@ func (p *bridgeRewindPreparationV1) closeOwnedV1() error {
 			return err
 		}
 	}
+	if p.coldCapture != nil {
+		return rewindFailureV1("the original partial cold capture must settle before its operation can close")
+	}
 	if p.accounting != nil {
 		ctx, cancel := context.WithTimeout(p.execution, 15*time.Second)
 		err := p.accounting.Cancel(ctx, p.operation, p.cold)

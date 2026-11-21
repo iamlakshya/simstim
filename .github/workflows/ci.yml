@@ -26,23 +26,22 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version-file: go.mod
-      - name: Prepare the genuine held malware snapshot for tests and both release builds
-        # Explicit preparation only; ordinary package checks remain offline.
-        run: go run ./cmd/feedgen --output internal/egress/rules/feed/snapshot.json
+          go-version: '1.27.4'
       - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
         with:
           version: 0.17.0
       - name: Build the host helpers and the shadow terminal (the client embeds them)
         run: |
           cmd/userns/build.sh
+          # Explicit feed preparation follows the actual C/cohort producer.
+          go run -tags="$(sh scripts/go-build-tags.sh)" ./cmd/feedgen --output internal/egress/rules/feed/snapshot.json
           for arch in amd64 arm64; do
-            CGO_ENABLED=0 GOOS=linux GOARCH=$arch go build -trimpath -o internal/client/helpers/host-linux-$arch ./cmd/host
+            CGO_ENABLED=0 GOOS=linux GOARCH=$arch go build -tags="$(sh scripts/go-build-tags.sh)" -trimpath -o internal/client/helpers/host-linux-$arch ./cmd/host
           done
           (cd vt && zig build linux)
           for arch in amd64 arm64; do cp vt/zig-out/linux/shadow-vt-$arch internal/client/helpers/vt-linux-$arch; done
-      - run: go vet ./...
-      - run: go test -race -count=1 ./...
+      - run: go vet -tags="$(sh scripts/go-build-tags.sh)" ./...
+      - run: go test -tags="$(sh scripts/go-build-tags.sh)" -race -count=1 ./...
       - name: Test the isolated compiler preparation guards without network access
         run: python3 scripts/test-prepare-image-verifier-go.py
       - name: Test checksum-bound upstream tool preparation offline
@@ -71,8 +70,8 @@ jobs:
           export GOMODCACHE="$IMAGEVERIFY_GOMODCACHE" GOCACHE="$IMAGEVERIFY_GOCACHE"
           export GOTOOLCHAIN=local GOPROXY=off GOSUMDB=sum.golang.org GOFLAGS=-mod=readonly
           cd tools/imageverify
-          "$IMAGEVERIFY_GO" vet ./...
-          "$IMAGEVERIFY_GO" test -race -count=1 ./...
+          "$IMAGEVERIFY_GO" vet -tags=http2legacy ./...
+          "$IMAGEVERIFY_GO" test -tags=http2legacy -race -count=1 ./...
       - name: Pinned host keys against real localhost SSH servers
         run: |
           sudo apt-get update
@@ -89,17 +88,17 @@ jobs:
             GIT_CONFIG_GLOBAL="$pin_home/gitconfig" GIT_CONFIG_NOSYSTEM=1 \
             GOCACHE="$pin_home/go-cache" \
             GOMODCACHE="$(go env GOMODCACHE)" GOTOOLCHAIN=local PIN_SSHD=1 \
-            go test -race -count=3 -run '^TestRealSSHD' ./internal/client
+            go test -tags="$(sh scripts/go-build-tags.sh)" -race -count=3 -run '^TestRealSSHD' ./internal/client
       - name: The link's tests again, over a pipe with no buffer
         env:
           LINK_TEST_PIPE: "1"
-        run: go test -race -count=1 ./internal/link
+        run: go test -tags="$(sh scripts/go-build-tags.sh)" -race -count=1 ./internal/link
       - name: Coverage of internal/ without the launcher (70 % or more)
         run: scripts/cover.sh 70
       - name: Cross-build the client
         run: |
           for t in darwin/amd64 darwin/arm64 linux/amd64 linux/arm64 windows/amd64; do
-            CGO_ENABLED=0 GOOS=${t%/*} GOARCH=${t#*/} go build -o /dev/null .
+            CGO_ENABLED=0 GOOS=${t%/*} GOARCH=${t#*/} go build -tags="$(sh scripts/go-build-tags.sh)" -o /dev/null .
           done
       - name: Name check
         run: scripts/check-name.sh
@@ -109,6 +108,8 @@ jobs:
         run: scripts/check-scripts.sh
       - name: Public-readiness checker regression tests (offline)
         run: python3 scripts/test-scorecard-check.py
+      - name: Source archive checker regression tests (offline)
+        run: python3 scripts/test-source-checks.py
       - name: End-to-end cleanup tests (offline)
         run: python3 test/e2e/test_sandbox_hosts.py
       - name: Conformance evidence and native log parser tests (offline)
@@ -131,7 +132,7 @@ jobs:
         run: scripts/check-size.sh
       - name: Generated docs are current
         run: |
-          go run ./cmd/docgen
+          go run -tags="$(sh scripts/go-build-tags.sh)" ./cmd/docgen
           if [ -n "$(git status --porcelain docs/reference)" ]; then
             git status --short docs/reference
             echo "::error::docs/reference is stale. Run just docs and commit the result."
@@ -213,7 +214,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version-file: go.mod
+          go-version: '1.27.4'
       - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
         with:
           version: 0.17.0
@@ -221,10 +222,10 @@ jobs:
         run: |
           echo "XDG_CONFIG_HOME=$RUNNER_TEMP/config" >> "$GITHUB_ENV"
           cmd/userns/build.sh
-          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o internal/client/helpers/host-linux-amd64 ./cmd/host
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -tags="$(sh scripts/go-build-tags.sh)" -trimpath -o internal/client/helpers/host-linux-amd64 ./cmd/host
           (cd vt && zig build linux)
           cp vt/zig-out/linux/shadow-vt-amd64 internal/client/helpers/vt-linux-amd64
-          CGO_ENABLED=0 go build -trimpath -o bin/client .
+          CGO_ENABLED=0 go build -tags="$(sh scripts/go-build-tags.sh)" -trimpath -o bin/client .
       - name: Create a host in a container
         run: |
           bin/client host create docker ci
@@ -275,7 +276,13 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version-file: go.mod
+          go-version: '1.27.4'
+      - name: Prepare the namespace build tool when that source is present
+        run: |
+          if [ -d internal/usernscode ]; then
+            scripts/setup.sh --only zig
+            echo "$PWD/.tools/bin" >> "$GITHUB_PATH"
+          fi
       - name: The attach pump is no slower than the base
         env:
           BASE: ${{ github.event.pull_request.base.sha }}
@@ -294,11 +301,13 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version-file: go.mod
+          go-version: '1.27.4'
       - name: Unit tests of the portable packages
-        run: go test -count=1 ./internal/client/... ./internal/keys/... ./internal/keyread/... ./internal/term/... ./internal/ring/... ./internal/proto/... ./internal/agents/... ./internal/api/... ./internal/testhome/...
+        shell: bash
+        run: go test -tags="$(sh scripts/go-build-tags.sh)" -count=1 ./internal/client/... ./internal/keys/... ./internal/keyread/... ./internal/term/... ./internal/ring/... ./internal/proto/... ./internal/agents/... ./internal/api/... ./internal/testhome/...
       - name: Build the client
-        run: go build -o client.exe .
+        shell: bash
+        run: go build -tags="$(sh scripts/go-build-tags.sh)" -o client.exe .
 
   lint:
     runs-on: ubuntu-latest
@@ -310,21 +319,24 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version-file: go.mod
+          go-version: '1.27.4'
       - name: Build the host helpers (the client embeds them)
         run: |
           cmd/userns/build.sh
           for arch in amd64 arm64; do
-            CGO_ENABLED=0 GOOS=linux GOARCH=$arch go build -o internal/client/helpers/host-linux-$arch ./cmd/host
+            CGO_ENABLED=0 GOOS=linux GOARCH=$arch go build -tags="$(sh scripts/go-build-tags.sh)" -o internal/client/helpers/host-linux-$arch ./cmd/host
           done
+      - name: Select the complete source tag list
+        run: echo "GO_BUILD_TAGS=$(sh scripts/go-build-tags.sh)" >> "$GITHUB_ENV"
       - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         with:
           version: v2.14.0
+          args: --build-tags=${{ env.GO_BUILD_TAGS }}
       - name: Known vulnerabilities in the code we call
-        run: go run golang.org/x/vuln/cmd/govulncheck@v1.1.4 ./...
+        run: go run -tags="$(sh scripts/go-build-tags.sh)" golang.org/x/vuln/cmd/govulncheck@v1.1.4 -tags="$(sh scripts/go-build-tags.sh)" ./...
       - name: No dead code, tests included
         run: |
-          out=$(GOTOOLCHAIN=auto go run golang.org/x/tools/cmd/deadcode@v0.38.0 -test ./...)
+          out=$(go run -tags="$(sh scripts/go-build-tags.sh)" golang.org/x/tools/cmd/deadcode@v0.38.0 -tags="$(sh scripts/go-build-tags.sh)" -test ./...)
           [ -z "$out" ] || { echo "$out"; echo "::error::Dead code: remove it, or use it."; exit 1; }
 
   workflows:
@@ -363,7 +375,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version-file: go.mod
+          go-version: '1.27.4'
           cache: false
       - name: Prepare checked modules and two actual native default image builds
         env:
@@ -444,7 +456,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version-file: go.mod
+          go-version: '1.27.4'
           cache: false
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
@@ -475,7 +487,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version-file: go.mod
+          go-version: '1.27.4'
           cache: false
       - uses: astral-sh/setup-uv@18d369b23da25a81e9458561248e1aafff6a70fa # v10.3.1
         with:

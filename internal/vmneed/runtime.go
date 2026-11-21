@@ -2,6 +2,7 @@ package vmneed
 
 import (
 	"fmt"
+	"slices"
 
 	"github.com/iamlakshya/simstim/internal/runtimecache"
 	"github.com/iamlakshya/simstim/internal/supply"
@@ -110,7 +111,7 @@ func SelectRuntimeForDriver(driver string, original supply.Manifest, arch string
 	selected := supply.Manifest{
 		Release:    original.Release,
 		Runtime:    original.Runtime,
-		Advisories: append([]supply.Advisory(nil), original.Advisories...),
+		Advisories: slices.Clone(original.Advisories),
 	}
 	for _, role := range roles {
 		item, found := original.Find(role.Kind, role.Name, arch)

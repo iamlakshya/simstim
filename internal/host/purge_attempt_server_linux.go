@@ -5,6 +5,7 @@ package host
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net"
 	"time"
 
@@ -16,12 +17,16 @@ import (
 // This raw process creates all of them itself, once, and retains the original
 // vector across each physical connection and every failed cleanup attempt.
 type purgeAttemptServerV3 struct {
-	image       *purgeAttemptImageV2
-	endpoint    *purgeOwnedListenerV3
-	domain      *purgeAttemptDomainV3
-	code        *purgeCodeCustodyV3
-	transaction *purgeActiveTransactionV2
-	args        api.PurgeArgs
+	retirement     purgeNativeRetirementsV4
+	closeErr       error
+	partialDomains []*purgeAttemptDomainV3
+	partialCodes   []*purgeCodeCustodyV3
+	image          *purgeAttemptImageV2
+	endpoint       *purgeOwnedListenerV3
+	domain         *purgeAttemptDomainV3
+	code           *purgeCodeCustodyV3
+	transaction    *purgeActiveTransactionV2
+	args           api.PurgeArgs
 }
 
 // RunPurgeAttemptProcessV3 is a raw dispatcher boundary. The caller must exit
@@ -47,22 +52,36 @@ func RunPurgeAttemptProcessV3() int {
 	}
 	defer joinOriginal()
 	for {
+		if err := owner.checkConnectionOwnersRetiredV4(); err != nil {
+			// Keep the actual process and every unknown partial object. A new
+			// connection cannot replace a failed first native retirement.
+			time.Sleep(25 * time.Millisecond)
+			continue
+		}
 		if owner.code == nil && originalRequest.Err() != nil {
 			_ = owner.endpoint.Close()
 			_ = image.Close()
 			return 1
 		}
 		if owner.code != nil && owner.endpoint.closing && !owner.endpoint.closed {
-			if err := owner.endpoint.Close(); err != nil {
+			owner.closeErr = errors.Join(owner.closeErr, owner.endpoint.Close())
+			if owner.endpoint.checkNativeRetiredV3(context.Background()) != nil {
 				time.Sleep(25 * time.Millisecond)
 				continue
 			}
 		}
 		if owner.code != nil && owner.endpoint.closed {
-			if err := owner.code.CloseAfterTransaction(owner.transaction); err == nil {
-				if err := owner.domain.Close(); err == nil {
-					_ = owner.image.Close()
-					return 0
+			owner.closeErr = errors.Join(owner.closeErr, owner.code.CloseAfterTransaction(owner.transaction))
+			if owner.code.checkNativeRetiredV3(context.Background()) == nil {
+				owner.closeErr = errors.Join(owner.closeErr, owner.domain.Close())
+				if owner.domain.checkNativeRetiredV3(context.Background()) == nil {
+					owner.closeErr = errors.Join(owner.closeErr, owner.image.Close())
+					if owner.image.checkNativeRetiredV3(context.Background()) == nil {
+						if errors.Join(owner.closeErr, owner.retirement.diagnosticsV4()) != nil {
+							return 1
+						}
+						return 0
+					}
 				}
 			}
 			endpoint, err := createPurgeOwnedListenerV3(owner.image.lifetime, owner.image, owner.code)
@@ -73,11 +92,11 @@ func RunPurgeAttemptProcessV3() int {
 			owner.endpoint, owner.code.endpoint = endpoint, endpoint
 		}
 		if owner.code == nil {
-			_ = owner.endpoint.listener.SetDeadline(time.Now().Add(100 * time.Millisecond))
+			owner.closeErr = errors.Join(owner.closeErr, owner.endpoint.listener.SetDeadline(time.Now().Add(100*time.Millisecond)))
 		} else {
-			_ = owner.endpoint.listener.SetDeadline(time.Time{})
+			owner.closeErr = errors.Join(owner.closeErr, owner.endpoint.listener.SetDeadline(time.Time{}))
 		}
-		connection, err := owner.endpoint.listener.AcceptUnix()
+		connection, err := owner.endpoint.acceptV4()
 		if err != nil {
 			if temporary, ok := err.(net.Error); ok && temporary.Timeout() {
 				continue
@@ -94,6 +113,9 @@ func RunPurgeAttemptProcessV3() int {
 		}
 		finished := owner.serveConnectionV3(connection)
 		if finished {
+			if errors.Join(owner.closeErr, owner.retirement.diagnosticsV4()) != nil {
+				return 1
+			}
 			return 0
 		}
 	}
@@ -102,20 +124,27 @@ func RunPurgeAttemptProcessV3() int {
 func (owner *purgeAttemptServerV3) serveConnectionV3(connection *net.UnixConn) bool {
 	line, err := NewNativeStartupLineV1(connection)
 	if err != nil {
-		_ = connection.Close()
+		owner.closeErr = errors.Join(owner.closeErr, owner.retirement.closeConnectionV4(connection))
 		return false
 	}
-	defer line.Close()
+	if err := line.attachNativeRetirementV4(owner.retirement.descriptorOwnerV4()); err != nil {
+		owner.closeErr = errors.Join(owner.closeErr, err, owner.retirement.closeConnectionV4(connection))
+		return false
+	}
+	defer func() {
+		owner.retirement.interruptLineV4(line)
+		owner.closeErr = errors.Join(owner.closeErr, owner.retirement.closeStartupLineV4(line))
+	}()
 	bootstrap, cancel := context.WithTimeout(owner.image.lifetime, 10*time.Second)
 	defer cancel()
-	_ = line.SetDeadline(time.Now().Add(10 * time.Second))
+	owner.closeErr = errors.Join(owner.closeErr, line.SetDeadline(time.Now().Add(10*time.Second)))
 	if err := owner.endpoint.Check(); err != nil {
 		return false
 	}
 	if err := line.writePurgeAttemptNativeHelloV2(bootstrap, owner.image); err != nil {
 		return false
 	}
-	peer, err := acceptPurgeOperatorHelloV3(bootstrap, line, owner.image, owner.code == nil)
+	peer, err := acceptPurgeOperatorHelloV3(bootstrap, line, owner.image, owner.code == nil, &owner.retirement)
 	if err != nil {
 		return false
 	}
@@ -123,7 +152,7 @@ func (owner *purgeAttemptServerV3) serveConnectionV3(connection *net.UnixConn) b
 	for {
 		request, data, err := readPurgeRequestV3(bootstrap, line, peer)
 		if err != nil {
-			return owner.restoreDisconnectedV3()
+			return owner.finishDisconnectedV4(line)
 		}
 		if owner.code == nil {
 			if request.Op != purgeBeginV3 {
@@ -140,7 +169,8 @@ func (owner *purgeAttemptServerV3) serveConnectionV3(connection *net.UnixConn) b
 			}
 			if err != nil {
 				if domain != nil {
-					_ = domain.Close()
+					owner.partialDomains = append(owner.partialDomains, domain)
+					owner.closeErr = errors.Join(owner.closeErr, domain.Close())
 				}
 				_ = writePurgeResponseV3(line, request.ID, api.PurgeResult{}, err)
 				return false
@@ -151,10 +181,14 @@ func (owner *purgeAttemptServerV3) serveConnectionV3(connection *net.UnixConn) b
 				// The actual parent still retains its factory until this native
 				// process exits. No original session has been captured here.
 				if code != nil {
-					_ = code.closeBorrowedV3()
+					owner.partialCodes = append(owner.partialCodes, code)
+					owner.closeErr = errors.Join(owner.closeErr, code.closeBorrowedV3())
 				}
-				_ = owner.domain.Close()
-				owner.domain = nil
+				owner.partialDomains = append(owner.partialDomains, owner.domain)
+				owner.closeErr = errors.Join(owner.closeErr, owner.domain.Close())
+				if native := owner.domain.checkNativeRetiredV3(context.Background()); native == nil {
+					owner.domain = nil
+				}
 				_ = writePurgeResponseV3(line, request.ID, api.PurgeResult{}, err)
 				return false
 			}
@@ -176,16 +210,16 @@ func (owner *purgeAttemptServerV3) serveConnectionV3(connection *net.UnixConn) b
 		if err := line.RejectAncillary(); err != nil {
 			return false
 		}
-		_ = line.SetDeadline(time.Time{})
+		owner.closeErr = errors.Join(owner.closeErr, line.SetDeadline(time.Time{}))
 		requestContext, join, err := purgeRequestLifetimeV3(owner.image.lifetime, line, peer)
 		if err != nil {
-			return owner.restoreDisconnectedV3()
+			return owner.finishDisconnectedV4(line)
 		}
 		if first && request.Op == purgeBeginV3 {
 			original, originalJoin, watchErr := owner.image.watchOriginalRequestV2(requestContext)
 			if watchErr != nil {
 				join()
-				return owner.restoreDisconnectedV3()
+				return owner.finishDisconnectedV4(line)
 			}
 			priorJoin := join
 			requestContext, join = original, func() { originalJoin(); priorJoin() }
@@ -198,15 +232,14 @@ func (owner *purgeAttemptServerV3) serveConnectionV3(connection *net.UnixConn) b
 			if writeErr == nil {
 				owner.waitFinalResponseAckV3(line, peer, request.ID)
 			}
-			_ = owner.image.Close()
-			return true
+			return owner.finishLineV4(line)
 		}
 		if writeErr != nil {
-			return owner.restoreDisconnectedV3()
+			return owner.finishDisconnectedV4(line)
 		}
 		// Bound idle transport only. This deadline cannot end owner custody.
 		bootstrap = owner.image.lifetime
-		_ = line.SetDeadline(time.Now().Add(30 * time.Second))
+		owner.closeErr = errors.Join(owner.closeErr, line.SetDeadline(time.Now().Add(30*time.Second)))
 	}
 }
 
@@ -216,7 +249,7 @@ func (owner *purgeAttemptServerV3) serveConnectionV3(connection *net.UnixConn) b
 func (owner *purgeAttemptServerV3) waitFinalResponseAckV3(line *StartupLineV1, peer *purgeRequestPeerV3, id uint64) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	_ = line.SetDeadline(time.Now().Add(5 * time.Second))
+	owner.closeErr = errors.Join(owner.closeErr, line.SetDeadline(time.Now().Add(5*time.Second)))
 	frame, err := line.ReadFrame()
 	if err != nil || line.RejectAncillary() != nil {
 		return
@@ -247,15 +280,18 @@ func (owner *purgeAttemptServerV3) dispatchV3(request context.Context, operation
 		if err := transaction.CloseAfterCleanup(request); err != nil {
 			return transaction.reportV2(), err, false
 		}
-		if err := owner.code.CloseAfterTransaction(transaction); err != nil {
-			return transaction.reportV2(), err, false
+		diagnostic := owner.code.CloseAfterTransaction(transaction)
+		if native := owner.code.checkNativeRetiredV3(request); native != nil {
+			return transaction.reportV2(), errors.Join(diagnostic, native), false
 		}
-		if err := owner.domain.Close(); err != nil {
-			return transaction.reportV2(), err, false
+		diagnostic = errors.Join(diagnostic, owner.domain.Close())
+		if native := owner.domain.checkNativeRetiredV3(request); native != nil {
+			return transaction.reportV2(), errors.Join(diagnostic, native), false
 		}
+		owner.closeErr = errors.Join(owner.closeErr, diagnostic, owner.code.CloseDiagnosticsV3(), owner.domain.CloseDiagnosticsV3())
 		// The response uses only saved public DATA after all native subjects
 		// close. Image lifetime closes after the last physical response.
-		return transaction.reportV2(), nil, true
+		return transaction.reportV2(), owner.closeErr, true
 	default:
 		return transaction.reportV2(), placementError("the original purge owner refuses an unknown continuation"), false
 	}
@@ -274,12 +310,46 @@ func (owner *purgeAttemptServerV3) restoreDisconnectedV3() bool {
 	if err := owner.transaction.CloseAfterCleanup(context.Background()); err != nil {
 		return false
 	}
-	if err := owner.code.CloseAfterTransaction(owner.transaction); err != nil {
+	owner.closeErr = errors.Join(owner.closeErr, owner.code.CloseAfterTransaction(owner.transaction))
+	if owner.code.checkNativeRetiredV3(context.Background()) != nil {
 		return false
 	}
-	if err := owner.domain.Close(); err != nil {
+	owner.closeErr = errors.Join(owner.closeErr, owner.domain.Close())
+	return owner.domain.checkNativeRetiredV3(context.Background()) == nil
+}
+
+// The current connection's real framing and observer callbacks have joined
+// before this first close. Only then may the original image retire and exit.
+func (owner *purgeAttemptServerV3) finishLineV4(line *StartupLineV1) bool {
+	owner.retirement.interruptLineV4(line)
+	owner.closeErr = errors.Join(owner.closeErr, owner.retirement.closeStartupLineV4(line))
+	if owner.checkConnectionOwnersRetiredV4() != nil {
 		return false
 	}
-	_ = owner.image.Close()
-	return true
+	owner.closeErr = errors.Join(owner.closeErr, owner.image.Close())
+	return owner.image.checkNativeRetiredV3(context.Background()) == nil
+}
+
+func (owner *purgeAttemptServerV3) finishDisconnectedV4(line *StartupLineV1) bool {
+	if !owner.restoreDisconnectedV3() {
+		return false
+	}
+	return owner.finishLineV4(line)
+}
+
+func (owner *purgeAttemptServerV3) checkConnectionOwnersRetiredV4() error {
+	if err := owner.retirement.checkAllRetiredV4(); err != nil {
+		return err
+	}
+	for _, domain := range owner.partialDomains {
+		if err := domain.checkNativeRetiredV3(context.Background()); err != nil {
+			return err
+		}
+	}
+	for _, code := range owner.partialCodes {
+		if err := code.retirement.checkAllRetiredV4(); err != nil {
+			return err
+		}
+	}
+	return nil
 }

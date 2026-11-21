@@ -323,7 +323,7 @@ func (manager *nativeUserManagerV1) checkNativeRetiredV3(ctx context.Context) er
 	if manager.connection != nil {
 		transport = manager.connection.checkNativeRetiredV1()
 	}
-	return errors.Join(ctx.Err(), transport, nativeManagerDirectoryRetirementV1(manager), manager.retirement.checkPeerV4(manager.peer), manager.retirement.checkRootsV4([]*os.Root{manager.root}))
+	return errors.Join(ctx.Err(), transport, nativeManagerDirectoryRetirementV1(manager), manager.retirement.checkPeerV4(manager.peer), manager.retirement.checkRootsV4([]*os.Root{manager.root}), manager.retirement.checkAllRetiredV4())
 }
 
 func (manager *nativeUserManagerV1) CloseDiagnosticsV3() error {

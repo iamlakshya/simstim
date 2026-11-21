@@ -20,16 +20,18 @@ import (
 // Its placement is installed only after the actual original DATA parent has
 // passed the closed operator boundary. It accepts no resource authority.
 type purgeAttemptDomainV3 struct {
-	mu        sync.RWMutex
-	image     *purgeAttemptImageV2
-	placement *placement
-	control   *os.Root
-	state     *os.Root
-	lock      *os.File
-	host      *os.File
-	place     *os.File
-	closed    bool
-	closeErr  error
+	mu         sync.RWMutex
+	retirement purgeNativeRetirementsV4
+	image      *purgeAttemptImageV2
+	placement  *placement
+	control    *os.Root
+	state      *os.Root
+	lock       *os.File
+	host       *os.File
+	place      *os.File
+	closed     bool
+	closing    bool
+	closeErr   error
 }
 
 var purgeAttemptDomainsV3 = struct {
@@ -49,7 +51,7 @@ func purgeAttemptImageForPlacementV3(ctx context.Context, p *placement) (*purgeA
 	}
 	owner.mu.RLock()
 	defer owner.mu.RUnlock()
-	if owner.closed || owner.placement != p || owner.image == nil {
+	if owner.closed || owner.closing || owner.placement != p || owner.image == nil {
 		return nil, placementError("the copied purge consumer has no independently installed actual domain")
 	}
 	if err := owner.image.Check(ctx); err != nil {
@@ -98,10 +100,10 @@ func newIndependentPurgeAttemptDomainV3(ctx context.Context, image *purgeAttempt
 	}
 	file, err := installation.Open(".")
 	if err != nil {
-		return nil, errors.Join(err, installation.Close())
+		return nil, errors.Join(err, owner.retirement.closeRootsV4([]*os.Root{installation}))
 	}
 	installInfo, err := file.Stat()
-	closed := errors.Join(file.Close(), installation.Close())
+	closed := errors.Join(owner.retirement.closeFilesV4([]*os.File{file}), owner.retirement.closeRootsV4([]*os.Root{installation}))
 	if err != nil || closed != nil {
 		return nil, errors.Join(err, closed)
 	}
@@ -121,11 +123,17 @@ func newIndependentPurgeAttemptDomainV3(ctx context.Context, image *purgeAttempt
 	if err != nil {
 		return nil, err
 	}
-	unlock, err := waitPlacementFile(ctx, owner.control, "control.lock", owner.lock, lockInfo)
-	if err != nil {
+	if err := waitPurgeOriginalPlacementV4(ctx, owner.control, "control.lock", owner.lock, lockInfo); err != nil {
 		return nil, err
 	}
-	defer unlock()
+	defer func() {
+		// The actual first native close is the sole flock release, including
+		// failed validation. Never pass this owned file to the generic waiter.
+		returned = errors.Join(returned, owner.retirement.closeFilesV4([]*os.File{owner.lock}))
+		if owner.retirement.checkFilesV4([]*os.File{owner.lock}) != nil {
+			result = owner
+		}
+	}()
 	control, found, err := readPlacementControl(owner.control, scope)
 	if err != nil || !found {
 		return nil, errors.Join(placementError("the independent purge process found no original existing host domain"), err)
@@ -169,7 +177,7 @@ func newIndependentPurgeAttemptDomainV3(ctx context.Context, image *purgeAttempt
 	if err != nil || !bound || actual != domain {
 		return nil, errors.Join(placementError("the original placement description has another native domain binding"), err)
 	}
-	p := &placement{scope: scope, control: controlPath, executable: name, executableRef: image.mapped, installRef: installInfo, stateRef: sourceInfoFromRootV3(owner.state), hostRef: hostInfo, placeRef: placeInfo, controlRef: sourceInfoFromRootV3(owner.control), controlLockRef: lockInfo, hostID: args.HostID, boundRoots: control.PersistentRoots}
+	p := &placement{scope: scope, control: controlPath, executable: name, executableRef: image.mapped, installRef: installInfo, stateRef: owner.sourceInfoFromRootV4(owner.state), hostRef: hostInfo, placeRef: placeInfo, controlRef: owner.sourceInfoFromRootV4(owner.control), controlLockRef: lockInfo, hostID: args.HostID, boundRoots: control.PersistentRoots}
 	if p.stateRef == nil || p.controlRef == nil {
 		return nil, placementError("the independent current domain lost a real native directory description")
 	}
@@ -181,13 +189,13 @@ func newIndependentPurgeAttemptDomainV3(ctx context.Context, image *purgeAttempt
 	return owner, nil
 }
 
-func sourceInfoFromRootV3(root *os.Root) os.FileInfo {
+func (owner *purgeAttemptDomainV3) sourceInfoFromRootV4(root *os.Root) os.FileInfo {
 	file, err := root.Open(".")
 	if err != nil {
 		return nil
 	}
 	info, err := file.Stat()
-	closed := file.Close()
+	closed := owner.retirement.closeFilesV4([]*os.File{file})
 	if err != nil || closed != nil {
 		return nil
 	}
@@ -202,7 +210,7 @@ func (owner *purgeAttemptDomainV3) Install(ctx context.Context) error {
 	}
 	owner.mu.Lock()
 	defer owner.mu.Unlock()
-	if ctx == nil || owner.closed || owner.image == nil || owner.placement == nil {
+	if ctx == nil || owner.closed || owner.closing || owner.image == nil || owner.placement == nil {
 		return placementError("the actual independently derived purge domain is absent")
 	}
 	if err := errors.Join(ctx.Err(), owner.image.Check(ctx), owner.placement.checkIdentity()); err != nil {
@@ -233,26 +241,49 @@ func (owner *purgeAttemptDomainV3) Close() error {
 	owner.mu.Lock()
 	defer owner.mu.Unlock()
 	if owner.closed {
-		if err := observeOriginalPurgeDescriptorCloseV3([]*os.File{owner.lock, owner.host, owner.place}, []*os.Root{owner.control, owner.state}); err != nil {
-			return err
-		}
-		return nil
+		return errors.Join(owner.closeErr, owner.retirement.checkAllRetiredV4())
 	}
+	owner.closing = true
+	placementProcesses.Lock()
+	if placementProcesses.entry == owner.placement {
+		placementProcesses.entry = nil
+	}
+	if owner.placement != nil && placementProcesses.byScope[owner.placement.scope] == owner.placement {
+		delete(placementProcesses.byScope, owner.placement.scope)
+	}
+	placementProcesses.Unlock()
 	purgeAttemptDomainsV3.Lock()
 	if purgeAttemptDomainsV3.owners[owner.placement] == owner {
 		delete(purgeAttemptDomainsV3.owners, owner.placement)
 	}
 	purgeAttemptDomainsV3.Unlock()
-	for _, file := range []*os.File{owner.lock, owner.host, owner.place} {
-		if file != nil {
-			owner.closeErr = errors.Join(owner.closeErr, file.Close())
-		}
+	owner.closeErr = errors.Join(owner.closeErr,
+		owner.retirement.closeFilesV4([]*os.File{owner.lock, owner.host, owner.place}),
+		owner.retirement.closeRootsV4([]*os.Root{owner.control, owner.state}))
+	native := owner.retirement.checkAllRetiredV4()
+	if native == nil {
+		owner.closed = true
 	}
-	for _, root := range []*os.Root{owner.control, owner.state} {
-		if root != nil {
-			owner.closeErr = errors.Join(owner.closeErr, root.Close())
-		}
+	return errors.Join(owner.closeErr, native)
+}
+
+func (owner *purgeAttemptDomainV3) checkNativeRetiredV3(ctx context.Context) error {
+	if owner == nil || ctx == nil {
+		return placementError("the original independent domain retirement is absent")
 	}
-	owner.closed = true
-	return owner.closeErr
+	owner.mu.RLock()
+	defer owner.mu.RUnlock()
+	if !owner.closed {
+		return placementError("the original independent domain retains native resources")
+	}
+	return owner.retirement.checkAllRetiredV4()
+}
+
+func (owner *purgeAttemptDomainV3) CloseDiagnosticsV3() error {
+	if owner == nil {
+		return nil
+	}
+	owner.mu.RLock()
+	defer owner.mu.RUnlock()
+	return errors.Join(owner.closeErr, owner.retirement.diagnosticsV4())
 }

@@ -6,7 +6,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"syscall"
 	"time"
 
 	"golang.org/x/sys/unix"
@@ -69,7 +68,7 @@ func (s *sandbox) Kill() error {
 			}
 			s.initProven = true
 			closeErr := unix.Close(s.pidfd)
-			s.pidfd, s.closed = -1, true
+			s.pidfd = -1
 			s.result.Err = errors.Join(s.result.Err, closeErr)
 		default:
 		}
@@ -83,7 +82,10 @@ func (s *sandbox) Kill() error {
 		_ = s.link.Close()
 	}
 	if s.cmd != nil {
-		_ = s.cmd.Process.Signal(syscall.SIGTERM)
+		if s.creator == nil {
+			return errors.Join(s.result.Err, setupError("the original process launcher lost its atomic native creator", nil))
+		}
+		s.result.Err = errors.Join(s.result.Err, s.creator.signal(unix.SIGTERM))
 	} else {
 		s.closed = true
 	}
