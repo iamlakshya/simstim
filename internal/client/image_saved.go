@@ -118,13 +118,42 @@ func readImagePins(ctx context.Context) (image.Lock, error) {
 // imageRequestForNeedV1 repeats only the original host-bound pin selection for
 // the protected VM Need builder. A saved alias never becomes an OCI lookup.
 func (c *Conn) imageRequestForNeedV1(ctx context.Context, ref, arch string) (image.Request, error) {
-	request, saved, err := savedImageRequest(ctx, c, ref, arch)
-	if err != nil || saved {
-		return request.Clone(), err
-	}
-	resolved, err := resolveImage(ctx, ref, arch, false, ImageOptions{Arch: arch})
+	selection, err := c.imageSelectionForNeedV1(ctx, ref, arch)
 	if err != nil {
 		return image.Request{}, err
 	}
-	return resolved.request.Clone(), nil
+	return selection.Image.Clone(), nil
+}
+
+// imageSelectionForNeedV1 retains advisory origin only from the actual
+// original saved/OCI/release producer, never from a matching digest or label.
+func (c *Conn) imageSelectionForNeedV1(ctx context.Context, ref, arch string) (_ *sandboxImageSelectionV1, returned error) {
+	owned, policy, closePolicy, err := withRetainedImagePolicy(ctx, c)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { returned = errors.Join(returned, closePolicy()) }()
+	var request image.Request
+	saved := false
+	if ref != "default" {
+		request, saved, err = savedImageRequest(owned, c, ref, arch)
+		if err != nil {
+			return nil, err
+		}
+	}
+	selection := &sandboxImageSelectionV1{Version: 1, Origin: imageOriginSaved, Image: request.Clone()}
+	if !saved {
+		resolved, err := resolveImage(owned, ref, arch, false, ImageOptions{Arch: arch}, policy)
+		if err != nil {
+			return nil, err
+		}
+		selection.Image, selection.Origin = resolved.request.Clone(), imageOriginOCI
+		if resolved.release {
+			selection.Origin, selection.Release = imageOriginRelease, resolved.releaseVersion
+		}
+	}
+	if selection.Image.Validate() != nil || selection.Image.RootHash == "" || selection.Image.DataBlocks <= 0 || selection.Image.Transfer != "" || selection.Origin == imageOriginRelease && selection.Release == "" {
+		return nil, vmPrepareUnavailable()
+	}
+	return selection, nil
 }

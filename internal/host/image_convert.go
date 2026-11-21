@@ -61,6 +61,21 @@ func convertScopedWithSource(ctx context.Context, operation converterOperation, 
 	command.ExtraFiles = append(append([]*os.File{}, files...), helper, out)
 	command.WaitDelay = 5 * time.Second
 	command.Cancel = func() error { return command.Process.Signal(syscall.SIGTERM) }
+	native, err := newImageNativeGuardianV1(ctx, command, helper, unit)
+	if err != nil {
+		return err
+	}
+	defer func() { returned = errors.Join(returned, native.closeV1()) }()
+	fence, err := retainPublicationHelperV1(ctx)
+	if err != nil {
+		return err
+	}
+	// This SAME parent duplicate outlives atomic creation, native descendant
+	// closure and Wait, including every uncertain Start/error path below.
+	defer fence.Close()
+	if err := appendPublicationGuardianV1(command, fence); err != nil {
+		return err
+	}
 	input, err := command.StdinPipe()
 	if err != nil {
 		return fmt.Errorf("open image guardian input: %w", err)
@@ -73,8 +88,16 @@ func convertScopedWithSource(ctx context.Context, operation converterOperation, 
 	defer output.Close()
 	var diagnostic imageOutput
 	command.Stderr = &diagnostic
-	if err := command.Start(); err != nil {
-		return fmt.Errorf("start image guardian: %w", err)
+	startErr := command.Start()
+	var nativeStartErr error
+	if native != nil {
+		nativeStartErr = native.childStartedV1(startErr)
+	}
+	if startErr != nil {
+		if native != nil {
+			nativeStartErr = errors.Join(nativeStartErr, native.joinV1())
+		}
+		return errors.Join(fmt.Errorf("start image guardian: %w", startErr), nativeStartErr)
 	}
 	wait := make(chan error, 1)
 	go func() { wait <- command.Wait() }()
@@ -85,6 +108,9 @@ func convertScopedWithSource(ctx context.Context, operation converterOperation, 
 	defer func() {
 		input.Close()
 		cancel()
+		if native != nil {
+			returned = errors.Join(returned, native.joinV1())
+		}
 		if frameReaderDone != nil {
 			_ = output.Close()
 			<-frameReaderDone
@@ -101,6 +127,9 @@ func convertScopedWithSource(ctx context.Context, operation converterOperation, 
 			returned = errors.Join(returned, cleanupErr)
 		}
 	}()
+	if nativeStartErr != nil {
+		return nativeStartErr
+	}
 	var frames <-chan imageFrameResult
 	if source != nil {
 		frames, frameReaderDone = imageSaveGuardianFrames(execution, output)
@@ -124,6 +153,14 @@ func convertScopedWithSource(ctx context.Context, operation converterOperation, 
 	watch, err = pinImageScope(ctx, unit, owned)
 	if err != nil {
 		return UserError("image_scope", err.Error(), "Check the cgroup v2 memory controller and systemd user manager with host doctor.")
+	}
+	if native != nil {
+		if err := native.bindScopeV1(ctx, owned); err != nil {
+			return err
+		}
+		if err := native.releasePlanV1(); err != nil {
+			return err
+		}
 	}
 	if err := sendConverterPlan(input, plan); err != nil {
 		return err

@@ -176,7 +176,7 @@ func keepStartGrant(msg startedMsg) bool {
 
 func (m *Model) finishStartGrant(ctx context.Context, message tea.Msg) tea.Msg {
 	result, ok := message.(startedMsg)
-	if !ok || keepStartGrant(result) {
+	if !ok || result.selected != nil || keepStartGrant(result) {
 		return message
 	}
 	result.cleanupErr = m.grantOwners.release(ctx, result.grants)

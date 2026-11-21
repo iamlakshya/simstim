@@ -37,10 +37,14 @@ func (s *Server) preflightOpaqueTLS(ctx context.Context, conn net.Conn, reader i
 		return ctx, nil
 	}
 	entry := AuditEntry{Host: hdr.Host, Port: hdr.Port, Mode: "splice", Method: request.Method, Status: http.StatusForbidden, Decision: "deny"}
-	if decision := s.currentEngine().evaluate(request, nil, evalPrecheck); !decision.Allow {
+	if decision := s.precheckUnknownDestination(ctx, request); !decision.Allow {
 		entry.Rule = decision.Rule
 		if connect {
-			entry.Down, _ = writeHTTPStatus(conn, http.StatusForbidden, "Forbidden", RefusalLine(s.sessionRef(), hdr.Host, hdr.Port))
+			line := RefusalLine(s.sessionRef(), hdr.Host, hdr.Port)
+			if decision.unknownPressure {
+				line = unknownResourceLine()
+			}
+			entry.Down, _ = writeHTTPStatus(conn, http.StatusForbidden, "Forbidden", line)
 		}
 		formatted := s.formatAudit(entry)
 		return ctx, &formatted

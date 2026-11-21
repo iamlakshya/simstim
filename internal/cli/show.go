@@ -128,6 +128,9 @@ func sessionDetails(s client.Session) []detail {
 	state := showState(s)
 	add("ID", s.ID)
 	add("Agent", s.Agent)
+	add("Forked from", s.ForkOf)
+	add("Checkpoints", s.Checkpoints)
+	add("Wall", showSessionWall(s))
 	add("Task", s.Task)
 	add("Folder", s.Cwd)
 	add("State", state)
@@ -150,6 +153,8 @@ func sessionDetails(s client.Session) []detail {
 	add("Memory cap", showSize(s.MemoryMax))
 	add("Memory used", showSize(s.MemoryCurrent))
 	add("Packages", showPackages(s))
+	add("Usage", showModelUsage(s))
+	add("Pending policy", showPendingPolicy(s))
 	add("Host helper", s.HostVersion)
 	if s.Cols > 0 && s.Rows > 0 {
 		add("Size", fmt.Sprintf("%d×%d", s.Cols, s.Rows))
@@ -159,6 +164,8 @@ func sessionDetails(s client.Session) []detail {
 	}
 	add("Missing secrets", strings.Join(s.MissingSecrets, ", "))
 	add("Secrets", strings.Join(s.Secrets, ", "))
+	add("SSH keys", showNamedSSHKeys(s))
+	add("SSH keys next", showNextNamedSSHKeys(s))
 	if s.DebugUntil != nil {
 		add("Debug until", showTime(*s.DebugUntil))
 	}

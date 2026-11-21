@@ -4,7 +4,275 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ## [Unreleased]
 
+- Retain the original fixed-test runtime, placement and native parent until cleanup finishes; keep partial factory owners available after errors.
+- Drain failed image publication through its captured original boot placement before retiring the operation and holder.
+- Keep fixed-test cleanup custody until both the original transient unit and its native cgroup are absent.
+- Check the upstream SDK patch with its exact Bazel label.
+
+- Prepare gVisor builds with checksum-bound upstream tools and signed build provenance.
+
 ### Added
+
+- Retire VM lease and metadata descriptors from their actual guarded first close, preserve I/O diagnostics and finish cleanup without touching reused descriptors or replacement paths.
+
+- Retain actual VM boot-file factories and their ordered cleanup across preparation errors.
+
+- `fork` copies a running sandbox into independent cold starts. Every child has its own identity, terminal output, secret stand-ins and memory admission.
+
+- Microvm sandboxes keep disk checkpoints after finished turns where a real reflink probe succeeds. Rewind retains the selected disk, makes a safety checkpoint, restores every member's conversation and restarts through the original native stop with fresh admission, current policy and newly fetched credentials.
+
+- Writable raw VM disks select the pinned runtime's synchronous I/O engine, so a current-copy writer freeze can drain the original disk without leaving asynchronous requests behind.
+
+- Acknowledge ordinary policy changes after revoked HTTP requests finish their original physical cleanup.
+
+- Check the launcher's explicit host-key confirmation through registration and sandbox preparation, including refusal when the host presents another key.
+
+- Preserve runtime writer durability failures and share guarded native file retirement.
+
+- Continue an existing purge through a closed raw data relay after installed paths disappear. The original invocation retains its command, native creation and cleanup objects; a new connector cannot reconstruct a lost removal vector.
+
+- Retained stops keep their original manager owner or prove the current empty-store transient service before requesting closure.
+
+- Preserve the original HTTP/2 read deadline when a pending policy reset waits for an exposed header block to finish.
+
+- Retire native HTTP/2 stream window updates before releasing a cancelled request. Keep every selected write owned through completion, and close the original writer after a failed frame prefix.
+
+- Accept a joined machine through an explicitly selected existing ProxyJump route. Capture the route before resolution, keep bastion identities separate from the invite key and refuse changed sources before connecting.
+
+- `shell` opens the newest running shell beside an agent, or starts one through the original member grant path. `--new` and `--name` start another shell. At `none`, it starts a host shell in the same folder through the ordinary new-session path.
+
+- Runtime and image-store cleanup keeps the original resource stack and transfer slot after a failure, then retries parts, stores and publications in order.
+
+- Keep partial runtime stores and image cleanup retries under their original publication.
+
+- Retain original runtime part directories through publication and retryable durable cleanup.
+
+- Ordinary host addition and the launcher prepare and test the sandbox wall from the original saved host. The ten-step launcher keeps sandbox preparation and optional root steps before the agent checklist.
+- Let the protected purge copy inspect ordinary holders and run its fixed Git reader through their original native owners. Keep generic executable identity checks strict and retain endpoint cleanup before releasing inspection roots.
+
+- Repeated purge close checks observe the original descriptor objects after physical cleanup. A lost close acknowledgement does not require reopening a removed source or repeating a completed unlink.
+
+- Record a new worktree's native filesystem generation where the filesystem supports it. Purge preserves legacy or replaced worktrees and retains the same cleanup root through partial unlinks and retries. Force does not establish directory ownership.
+
+- Add a closed purge process which keeps its original transaction and native cleanup objects across requests. A lost client restores work before stop; an irreversible removal retains its original cleanup owner.
+
+- `--wall microvm` supports EC2 Nitro Sandboxes through the `nitro` driver, including Graviton, with no nested virtualisation. `host prepare --nitro-slots` reviews optional slot donations.
+
+- Releases include a separate signed EFI kernel pair from the shared pinned Linux build, with actual byte and fs-verity checks and the same source advisories.
+
+- Runtime and final inherited EFI kernel checks validate bounded image headers on the original descriptor, including the sealed fallback.
+
+- Add a machine from its own keyboard. `host invite` on the laptop prints a code, `host join` on the machine prepares it and prints a reply, and `host add --accept` adds it. The laptop still starts every connection.
+
+- Mac host joining prepares a hidden standard account, a pinned plain Lima VM, narrow SSH access and an original root-owned leave journal. It includes a system startup job, an explicit user launch-agent fallback, AC-only power review and Mac battery health. Hardware assurance remains required.
+
+- `new --machine e2b` makes one provider machine for each session, prepares its sandbox wall and removes the machine and its disk at `rm`. Secrets need the shared tier and explicit exposure. A failed start cleans up only its own machine.
+
+- Host removal keeps its original local source and native configuration handles through staging, rollback and final cleanup. Replaced hosts and files are preserved.
+
+- Provider-session classifier and named-key value paths recheck the shared tier before fetching. Classifier keys retain their original explicit exposure; named SSH keys keep their separate host-only delivery and fresh owner confirmation. Host exposure is recorded as history, never as permission.
+- Route sandbox stop through its original native owner and preserve earlier exit diagnostics in a rooted stopped-record publication.
+
+- Keep original HTTP/2 stream resets, physical write ownership and TLS cipher checks together while a policy stops one request.
+
+- Derive temporary purge code from the retained actual executable descriptor, verify its exact bytes and seal its new inode before native bootstrap. Original creator descriptors preserve replacements and prevent future borrowing during cleanup.
+
+- Retain the same temporary code factory when construction fails and its real cleanup cannot finish. A retry keeps the original descriptors instead of rebuilding ownership from a path.
+
+- Retain the actual purge origin before capture so original stopped objects can be checked after their own namespace cleanup. Missing names alone never establish closure, and replacements remain preserved.
+
+- Keep original ordinary preparation objects reachable on capture cleanup errors, and recheck native restoration before releasing an operation on a repeated refusal.
+
+- Releases check and sign both complete native gVisor builds from their actual source pin, guarded ELF entries and original bytes. Old, incomplete and mixed builds stop publication.
+
+- Connect the original userspace-kernel controller creation, sealed public setup, native final barriers and operation-guarded one-use guest transfer; require the exact five-companion runtime.
+
+- Let admitted WebSocket answers finish independently when another lane's request is still being written.
+
+- Keep signed runtime handling and native cache bindings independent, while preserving strict domain validation and cancellation.
+
+- Count WebSocket model request payloads at the original upstream writer and join that message writer before settling an incomplete turn.
+
+- Carry the original converter publication fence through captured setup, init, final exec and positive native cleanup, retaining it after uncertain start.
+
+- Connect the provisional direct VMM mode lease to original jail creation, exact private inheritance and physical cleanup. Keep uncertain owners and native availability gates explicit.
+
+Guard direct execution of measured VMM files on writable owned stores with the original native helper chain and mode lease. Read-only stores retain sealed execution.
+
+- Placement admission keeps one original failed constructor for cleanup retry and refuses another reservation until that cleanup succeeds. Waiting remains cancellable.
+
+- Agents-image factories and their bridge and supervisor callers retain the original receipt after a cleanup error, then retry that same source before releasing its publication.
+
+- Image conversion retains its original native publication fence through guardian and converter cleanup. Retirement and parent-death collection keep a retryable intent in the existing placement operation.
+
+- Run fixed ordinary Git reads through an authenticated original helper creation, explicit directory loans and joined native commands. Count results retain their actual process and reader owners; public purge still needs its full transaction and controller chain.
+
+- Commit an original ordinary main process pause before terminal hangup can run its shutdown handler. Reversible refusal still preserves a pre-existing user stop.
+
+- Count HTTP model body prefixes at the original physical connection writers, including the optional judge, and retain request cleanup until the answer writer settles. Keep Responses WebSocket accounting in its echoed ordered lane.
+
+- Pin the original roots and Git control files for active ordinary worktree inspection. Native administrative opens stay beneath the retained common root; these read loans grant no cleanup rights.
+
+- Make the native helper identity fixture create its connected endpoint in the actual protected child, so socket and current sender credentials describe the same process.
+
+- Freeze the original captured userspace-kernel mount and kept-state topology into a sealed public capsule, and retain it through actual native cleanup.
+
+- Retain one original protected userspace-kernel code suite with read-only handles to the same signed sealed objects, and check it before native command start.
+- Add the real microvm conformance runner, bounded original trace readout and paired release evidence checks. Hardware measurements remain pending; automatic idle stop stays off.
+
+- `host prepare` probes the original saved host, delivers its pinned runtime, handles its optional root steps and runs a fixed sandbox test boot through separate owned phases. It records a prepared cache and floor only after successful boot and cleanup.
+
+- Retain active ordinary holder preparation separately from physical stop ownership. The original holder restores its own bounded main process pause after a cancelled control request or outside process death; public purge still requires the remaining inspection and transaction owners.
+
+- Retain the original nested userspace-kernel creation pidfd outside the mapped helper, and require its positive exit before releasing runtime resources.
+
+- Distinguish denied access to the real KVM device from missing or broken devices. A VM probe reports a possible root-step remedy only after checking the other host prerequisites and runtime bytes; preparation still needs a fresh probe and successful test boot.
+
+- `host rm --purge` records native cleanup, asks for the host name, uses selected local root undo and keeps agent logins unless separately authorised. It reports preserved resources and secrets to rotate, supports retry without installation and forgets the host last. Ordinary worktrees currently need `--force`; unknown native ownership still stops removal.
+
+- `new auto` picks one of your hosts for a sandbox from its live room, cached images and round trips. `--dry-run` shows why it chose that host.
+
+- Automatic placement can try the next host after a current helper proves that a capacity refusal was never dispatched and the original attempt has closed. Older helpers keep the original attempt when that proof is unavailable.
+
+- Automatic placement reconciles pending local starts with memory already included by the same native sample. Completed starts no longer leave phantom memory charges after a later fresh sample. Pinned wall choices and explicit gvisor memory caps use the same rules as the actual start.
+
+- `ssh-config` prepares a pinned local SSH endpoint for sandbox shells, commands, SFTP and granted guest ports, without a sandbox SSH server.
+
+- Answer held network requests by their original opaque IDs from the CLI or policy sheet. Upload budget holds offer once and refuse; wider changes use the existing policy writer.
+
+- Count upload bytes at the upstream TCP connection, keep hourly spending across policy changes, and show a distinct upload-budget reason.
+
+- Remote command input errors keep their code, kind, structured data and original cause when diagnostic output is added. JSON distinguishes input that could not be read from input that could not be sent.
+
+- Count model API answers across a sandbox and its optional judge. Keep usage already reported by an answer in its budget after the answer is cut.
+
+- Apply host-held lockdown through the original native policy writer. Session allowances pause without resetting their once ledger; lifting it removes only that restriction.
+
+- Retain the original VM runtime lease when native cleanup is still pending, and join concurrent close attempts before releasing its owners.
+
+- Hold cold resume memory through key fetch and native dispatch, then settle it only at the original verified native handoff.
+
+- Keep resume preparation on one native warm controller or genuine cold source. Warm workers retain the original operation through explicit cancellation and cleanup, and cold starts hand capacity to their actual new native owner.
+
+- Named SSH key changes retain one local next-start choice in the existing sandbox record. Cold starts recheck each selected key; running signers and the original creation pin stay intact.
+
+- Named SSH and trusted classifier credentials use their original protected native startup source. Warm agent resumes keep the running credential roles, and next-start SSH key edits send names only.
+
+- Sandbox resume retains its original native preparation before fetching named SSH keys; warm resumes keep the existing runtime and signer, and key policy edits affect the next start only.
+
+- A sandbox can use the SSH keys that you name, through its own agent, without holding the keys. Policy changes take effect at its next start.
+
+- Show own-account isolation only from the original native-ready VM and its current protected run generation, and retire the descriptive mark when that run stops or changes.
+
+- Publish bounded advisory counts of held, vacant and quarantined account slots, and read them for host facts without starting a process. Missing or stale counts stay unknown and never reserve capacity.
+
+- Recover escaped slot descendants only through their original cgroup generation and parent, retain the exclusive lease through native closure, and allow safe retries of absent or interrupted separate-account session cleanup.
+
+- `host prepare --separate-accounts` offers the signed launcher and fixed account steps through the original root preparation and consent. The option is off by default.
+
+- Report bounded advisory slot counts from the existing protected root projection without running a process.
+
+- Preserve each microvm disk identity mode when joining the optional native slot runtime, and bind its actual guest connection through the existing engine owner.
+
+- Match root slot allocation records to their original native cgroup parent during keeper capture.
+
+- Trusted model arming can read a fresh names-only observation from the original live registry. The observation is transient and grants no credential or host access.
+
+- Retain the original physical stop and locked holder when preparing an auxiliary read in the same host boot.
+
+- Classifier session decisions use the original actor's durable policy writer. Judge outages reach existing alert destinations as `judge_unavailable`.
+
+- Policy file edits propagate to running sandboxes with bounded host fanout, checked conflict retries and pending-host recovery. `policy apply`, `edit` and `learn` preview and review changes through the same retained local sources.
+
+- Answer pending network requests through the original egress actor, keep protected-memory answers opaque, and save non-sensitive session answers through the live policy source and protected journal.
+
+- Refuse separate-account slot groups whose numeric primary ID differs from their named group, or aliases the login account, another slot or a privileged group.
+
+- Name a host for a repository, an organisation or a profile with `sandbox.host`, and `new` uses it when you name no host. A host that you name always wins over a rule. Labels are notes that never pick a host.
+
+- Private held targets can use compiled session rules in the existing engine and once ledger, with full state charging and current-policy replacement. Positive public answers keep their original local operation and checked backend response; private targets stay out of ordinary saved target fields.
+
+- Keep cold resume preparation in the existing native publication ledger and reject installer payloads before they can reserve a session.
+
+- Retain a cold preparation's complete memory charge through slow fetches and uncertain dispatch.
+
+- Check warm jail lifetimes through their original retained creation handles.
+
+- Keep native preparation accounting checks on the same locked publication control record.
+
+- Live policy replacement uses the original selected layers and a checked hash. The running record keeps applied settings separate from values that need another start.
+
+- Read outgoing files from supported stopped microvms through the original accounted native reader, with the same path, size, range and EOF checks as running copies.
+
+- Clear matching pending laptop policy metadata through the original ready supervisor and its single save turn, preserving unmatched inputs.
+
+- Pending policy sources stay separate from applied boot values and preserve current session grants. Unsupported future capsules remain opaque.
+
+- Live policy replacement hashes the original selected laptop layers and preserves applied boot, mount, secret, SSH-key and paste settings while network changes take effect.
+
+- Retain actual native supervisor and whole-unit closure before issuing an opaque stopped-session source for physical removal. Unknown lifetimes stay preserved.
+
+- The launcher policy sheet reads live held requests before ordinary rules, keeps selection by opaque ID and can refuse the selected request. Closing it cancels queued work.
+
+- `policy ls --in` lists live held network requests before rules, with their opaque IDs and original deadlines. Older helpers omit the optional `pending_network` JSON field.
+
+- Unknown network holds have a live read, refuse and descriptive-ID path through the current egress owner. Flow cancellation keeps the original question expiry, and display labels use the existing secret redactor. Positive opaque answers remain under implementation.
+
+- Public-only network restrictions survive structured policy-file edits and cold starts. Older helpers refuse these rules before they can ignore the restriction.
+
+- Network rules can retain an explicit public-address restriction through saved layers, atomic request plans and live permit checks. Older helpers must support the restriction before receiving it.
+
+- Bind physical userspace-kernel probe reuse to the same held native launcher, helper and signed runtime closure.
+
+- Bind native startup to the protected helper's actual executable and namespace descriptors before lending private operation rights, while retaining NoDump.
+
+- Check reproducibility with both independently prepared native default-image pairs and fresh per-pass launcher and offline-verifier builds.
+
+- Generate the genuine package-malware snapshot before release helper and client builds, retaining the source archives' provenance.
+
+- Include the OpenSSH client explicitly in the default image for named-key Git transport, with its actual package version recorded by the builder.
+
+- Add an explicit default-image reproducibility command that checks two fresh native builds and retains their actual OCI and verity comparison.
+
+- Recheck measured kernel descriptors in the final VMM execution helper while retaining sealed fallbacks and the existing VMM NoDump boundary.
+
+- Retain verified kernel and execute-only VMM descriptors through the actual microvm resource lifetime, including native measurement errors and physical cleanup.
+
+- Derive runtime fs-verity digests from release bytes, enable them on owned VMM and kernel store files, and retain measured kernel descriptors. VMM execution keeps its existing NoDump projection while its direct fs-verity boundary remains open.
+
+- Compare a resumed microvm image with the original protected Need before stopping or changing its sandbox. The client rechecks its retained image history under its current laptop policy.
+
+- A saved image alias cannot redirect the literal `default` image or change its recorded release origin.
+
+- Protected VM image selection keeps its original retained policy and records saved, OCI or release origin from the actual selection path.
+
+- Requests recheck their original settings and private publication guards after acquiring the physical writer turn, so a queued request cannot send after its source changes.
+
+- Microvm resume checks the original recorded image against the retained current policy before fetching secrets and binds that image to the resume frame.
+
+- Microvm creation records retain the exact original local image selection for later policy checks without following a moved tag.
+
+- Image verification retains the original effective local policy, config directory and accepted host source through preparation and retries.
+
+- Images for sandboxes are pinned by digest on your laptop, and can require a signature. An offline verifier checks the exact signer, issuer and pinned image before the host fetches or uses it.
+
+- Internal opt-in account launcher components validate signed slot metadata, separate slot and directory groups, and retain actual init-only source leases.
+
+- Internal stopped readers have an accounted auxiliary native lifetime, fixed read-only carriers and cleanup tied to their original operation and disk ownership.
+
+- Trusted judge metadata records selected-commit ecosystem names through owned input clones and the original protected start request. Model disclosure still requires the current source fence.
+
+- Judge evaluation has bounded labelled-case intake and a private opt-in report path. Imported audit candidates remain unlabelled until independently reviewed.
+
+- Pending network display records and nonpositive client requests use closed versioned snapshots, opaque identity and the original accepted host source. They grant no target, private-address or start permission.
+
+- The first admitted unknown-allow destination elects one alert after the original audit append and control acknowledgement. Named permissions retain their existing admission path.
+
+- Local placement caches retain receipt time and source identity, and inflight records count complete declared unit bytes under a native lock. Cached facts grant no host capacity.
+
+- Host health and user drain flow through the existing bridge and protected placement gates. Runtime maintenance keeps its own closed request and completes before a new root-step request.
+
+- Release builds have a pinned minimal Debian image recipe with the fixed guest account, deterministic OCI output and checked per-architecture image artifacts. Publication remains in the signed-tag workflow.
 
 - Starting records retain the original advisory placement description. Session output owns a bounded, cleaned display copy without granting start rights.
 
@@ -173,6 +441,12 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ### Changed
 
+- Every new session, with or without a sandbox, now has a supervisor outside it. The unwalled driver keeps the host account, folders and namespaces, and starts no egress process. Publication requires an earlier release with walls on by default.
+
+- New sessions use the host's pinned sandbox floor by default. `--wall none --downgrade` runs one without a wall, with the exception recorded. Agent installers and logins keep their explicit host-side downgrade.
+
+- The internal gVisor bootstrap carries closed C mapping, descriptor slots and native scope proofs. Its runtime topology and native security gates remain separate.
+
 - Supervisor manifest publication and process-init ownership have dedicated files with their existing lifetime protocol unchanged.
 
 - VM process and disk ownership now use one shared implementation. Cloud Hypervisor keeps its existing entry points.
@@ -203,6 +477,23 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 - `agents install --force` is now `--reinstall`. `--force` still works until v0.4.0 and 11 November 2027, whichever comes later, and warns.
 
 ### Fixed
+
+- The setup example uses the documented host name, and the guide index no longer repeats a page.
+- Read Linux file ownership through the actual native stat representation. Keep the same manager identity and original operation-lock checks.
+
+- Provider-created hosts complete registration before sandbox preparation. A failed save still discards its own staged host key.
+
+- Select one VM driver's exact boot metadata from the full verified runtime collection, so a release carrying both Cloud Hypervisor and Firecracker can prepare a VM without replacing its original signed manifest or delivery record.
+
+- Keep network and SSH rejection fixtures public-safe while preserving their exact address and protocol cases.
+
+- The paste guard checks complete Unicode output in bulk and avoids an extra allocation on ordinary frames. Clipboard controls and split characters are still checked. Attached output stays byte for byte.
+
+- Judge calls retain their exact source snapshot and retire it before mint or member publication, including additive and same-kind changes.
+
+- New sandbox preparation asks for runtime download consent only when verified bytes are missing, while retaining the original settings, signed request and physical construction checks.
+
+- Runtime abort and close wait for the original fetch cleanup before releasing slots, parts and selected receipts.
 
 - The complete Unicode mapping source uses a deterministic compressed representation with exact encoded and decoded integrity checks. The original corpus and rule semantics stay unchanged.
 

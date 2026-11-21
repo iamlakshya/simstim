@@ -69,12 +69,19 @@ func TestDowngradePasteIsTextAndCancelKeepsTheFloor(t *testing.T) {
 func TestDefaultWallAndExplicitNoneStayDistinct(t *testing.T) {
 	d := &newSession{}
 	if d.wall != "" {
-		t.Fatal("the form changed the legacy default")
+		t.Fatal("the form changed its original unspecified wall intent")
+	}
+	row := d.wallRow(&Model{}, 80)
+	if !strings.Contains(row, "● auto") {
+		t.Fatal("unspecified wall was not drawn as the pinned-floor default", row)
 	}
 	d.wallKey("left")
+	if d.wall != "none" || d.downgrade {
+		t.Fatal("choosing none lost explicit intent or silently approved a downgrade")
+	}
 	d.wallKey("right")
-	if d.wall != "none" {
-		t.Fatal("choosing none lost the explicit floor check")
+	if d.wall != "auto" || d.downgrade {
+		t.Fatal("returning to auto altered its floor selection or approval")
 	}
 }
 

@@ -50,13 +50,14 @@ func evidenceKeyFor(kind backendKind, manifest supply.Manifest, facts api.CapPro
 	}
 	sort.Slice(items, func(i, j int) bool { return items[i].Kind < items[j].Kind })
 	data, err := json.Marshal(struct {
+		Driver     string        `json:"driver"`
 		Version    int           `json:"version"`
 		Arch       string        `json:"arch"`
 		Kernel     string        `json:"kernel"`
 		HostHelper string        `json:"host_helper"`
 		UIDMode    string        `json:"uid_mode"`
 		Items      []supply.Item `json:"items"`
-	}{2, facts.Arch, facts.Kernel, identity, uidMode(facts), items})
+	}{kind.name(), 2, facts.Arch, facts.Kernel, identity, kind.identityMode(facts), items})
 	if err != nil {
 		return "", fmt.Errorf("encode microvm boot identity: %w", err)
 	}

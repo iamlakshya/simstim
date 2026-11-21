@@ -62,6 +62,10 @@ func (c *Conn) PrepareNewVM(ctx context.Context, a NewArgs, intent string) (*VMN
 	if err := requireGrantOperation(ctx, grantOpNew); err != nil {
 		return nil, err
 	}
+	ctx, err := captureNewImagePolicy(ctx, c, a)
+	if err != nil {
+		return nil, err
+	}
 	r := grantRequestOf(ctx)
 	operation, err := r.borrowNewSettings(ctx)
 	if err != nil {
@@ -85,19 +89,12 @@ func (c *Conn) PrepareNewVM(ctx context.Context, a NewArgs, intent string) (*VMN
 		}
 		return beforeVM, nil
 	}
-	settings, err := operation.Settings(ctx)
-	if err != nil {
-		return nil, err
-	}
-	tier, hid, err := grantHostTier(ctx, c.Host)
+	_, hid, err := grantHostTier(ctx, c.Host)
 	if err != nil {
 		return nil, err
 	}
 	if hid != c.HostID() {
 		return nil, grantIdentityError(c.Host)
-	}
-	if err := allowRequestGrant(ctx, c.Host, hid, tier, Outbound{Kind: OutboundSilentUpgrade}, settings); err != nil {
-		return nil, err
 	}
 	if a.Wall != "microvm" {
 		return nil, vmPrepareUnavailable()
@@ -112,7 +109,7 @@ func (c *Conn) PrepareNewVM(ctx context.Context, a NewArgs, intent string) (*VMN
 	if err != nil {
 		return nil, err
 	}
-	plan, err := c.PrepareVMNeedV1(ctx, options)
+	plan, err := c.prepareVMNeedV1(ctx, options, r)
 	if err != nil {
 		return nil, err
 	}
@@ -141,11 +138,15 @@ func validateNewVMPlan(ctx context.Context, a NewArgs, p *VMNeedPlanV1) (int64, 
 	if need.GuestRAM != options.GuestRAM || need.CPUs != options.CPUs || need.DiskMax != options.DiskMax {
 		return 0, vmPrepareUnavailable()
 	}
-	selected, err := resolveImage(ctx, options.Image, need.Image.Arch, false, ImageOptions{Arch: need.Image.Arch})
+	ctx, err = captureNewImagePolicy(ctx, p.conn, a)
 	if err != nil {
 		return 0, err
 	}
-	if !reflect.DeepEqual(selected.request, need.Image) {
+	selected, err := p.conn.imageRequestForNeedV1(ctx, options.Image, need.Image.Arch)
+	if err != nil {
+		return 0, err
+	}
+	if !reflect.DeepEqual(selected, need.Image) {
 		return 0, vmPrepareUnavailable()
 	}
 	budget, err := vmneed.BudgetFor(need.GuestRAM)

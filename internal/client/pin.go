@@ -100,13 +100,19 @@ func PinHostKey(ctx context.Context, h Host, want string, firstUse FirstUse) (Pi
 // pinHostKey is PinHostKey. Without replace, a pin that another client
 // wrote while this one waited for the lock stays, and it must hold want.
 func pinHostKey(ctx context.Context, h Host, want string, firstUse FirstUse, replace bool) (Pin, error) {
+	return pinHostKeySet(ctx, h, want, nil, firstUse, replace)
+}
+
+// pinHostKeySet retains the same source, stage, lock and one publication for
+// every explicitly compared key of an invitation reply.
+func pinHostKeySet(ctx context.Context, h Host, want string, wants []string, firstUse FirstUse, replace bool) (Pin, error) {
 	if attempt, _ := ctx.Value(hostTransportAttemptKey{}).(*hostTransportAttempt); attempt != nil && attempt.kind == hostTransportProvisional {
 		return Pin{}, hostStateRemovalError("a read-only provisional transport cannot publish a host pin")
 	}
 	if !ValidHostName(h.Name) {
 		return Pin{}, &UserError{Msg: fmt.Sprintf("%q cannot name a host", CleanLine(h.Name)), Hint: "Use letters, digits, dots, dashes and underscores, with no dot at the end.", Code: "bad_name", Kind: KindUsage}
 	}
-	if err := checkFingerprint(want); err != nil {
+	if err := checkFingerprintSet(want, wants); err != nil {
 		return Pin{}, err
 	}
 	st, err := stageForContext(ctx, h.Name)
@@ -136,7 +142,7 @@ func pinHostKey(ctx context.Context, h Host, want string, firstUse FirstUse, rep
 		return Pin{}, err
 	}
 	if !replace && pinned(h.Name) {
-		return keptPin(ctx, h.Name, want)
+		return keptPinSet(ctx, h.Name, want, wants)
 	}
 	if !replace && !staging(h.Name) {
 		// A saved host's pin: the host may have been forgotten while this
@@ -145,7 +151,7 @@ func pinHostKey(ctx context.Context, h Host, want string, firstUse FirstUse, rep
 			return Pin{}, err
 		}
 	}
-	keys, src, err := findHostKey(ctx, h, want, firstUse)
+	keys, src, err := findHostKeySet(ctx, h, want, wants, firstUse)
 	if err != nil {
 		return Pin{}, err
 	}

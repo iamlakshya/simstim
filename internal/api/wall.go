@@ -15,6 +15,8 @@ type WallProbe struct {
 
 // WallInfo is a session's wall, in its row.
 type WallInfo struct {
+	// OwnAccount is a current native-run display observation, never a grant.
+	OwnAccount     bool              `json:"own_account,omitempty"`
 	SavedImage     *SavedImageInfoV1 `json:"saved_image,omitempty"`
 	Level          string            `json:"level"`
 	Driver         string            `json:"driver"`

@@ -52,6 +52,8 @@ func lockFileWait(id, name string, d time.Duration) (unlock func(), err error) {
 // Cancellation ends admission without leaving a deferred waiter behind.
 func lockFileWaitContext(ctx context.Context, id, name string, d time.Duration) (func(), error) {
 	lease, err := openOwnedSessionFileLease(ctx, id, name, d)
-	if err != nil { return nil, err }
+	if err != nil {
+		return nil, err
+	}
 	return func() { _ = lease.Close() }, nil
 }

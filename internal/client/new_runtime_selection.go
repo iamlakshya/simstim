@@ -45,21 +45,18 @@ func (c *Conn) prepareNewRuntime(ctx context.Context, settings Settings, level s
 	if err != nil {
 		return nil, err
 	}
-	tier, hid, err := grantHostTier(ctx, c.Host)
+	_, hid, err := grantHostTier(ctx, c.Host)
 	if err != nil {
 		return nil, err
 	}
 	if hid != c.HostID() || !ValidHostID(hid) {
 		return nil, grantIdentityError(c.Host)
 	}
-	if err := allowRequestGrant(ctx, c.Host, hid, tier, Outbound{Kind: OutboundSilentUpgrade}, settings); err != nil {
-		return nil, err
-	}
 	mode := settings.Images.Fetch
 	if override, ok := ctx.Value(runtimeFetchKey{}).(string); ok && override != "" {
 		mode = override
 	}
-	if _, err := EnsureRuntime(ctx, c, RuntimeOptions{Mode: mode, Probe: &probe}); err != nil {
+	if _, err := UpgradeRuntimeOnUse(ctx, c, RuntimeUpgradeOptions{RuntimeOptions: RuntimeOptions{Mode: mode, Probe: &probe}}); err != nil {
 		return nil, err
 	}
 	if err := bindRequestTransportSource(ctx, c); err != nil {

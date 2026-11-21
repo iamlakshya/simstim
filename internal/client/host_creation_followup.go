@@ -13,6 +13,24 @@ type hostCreationCommittedSource struct {
 	used   atomic.Bool
 }
 
+// The creator's outer release owns this stage across its successful save and
+// unchecked setup continuation. Ordinary saves and failed writes still abort
+// their stages. No closed or superseded stage is revived by this handoff.
+func retainCommittedCreationStage(ctx context.Context, change HostChange, st *stage) bool {
+	o, _ := ctx.Value(hostStateObservationKey{}).(*HostStateObservation)
+	if o == nil || o.role != hostStateCreation || o.creation == nil || change.Was != nil || change.Now == nil || st == nil {
+		return false
+	}
+	o.mu.Lock()
+	proof := o.creation.committed
+	o.mu.Unlock()
+	held, _ := ctx.Value(heldKey{o.name}).(*heldLock)
+	if proof == nil || held == nil || proof.op != held || o.creation.op.Load() != held || proof.stage == nil || proof.stage != o.stage || proof.stage.st != st || !SameEntry(proof.host, *change.Now) {
+		return false
+	}
+	return held.checkStateOperation(ctx) == nil && sameStage(o.name, st) == nil
+}
+
 // The SAME actual writer invokes this only AFTER its successful durable
 // publication, while original membership/OP are still held. Failed capture is
 // committed uncertainty, never a raw-result or fresh-observation substitute.

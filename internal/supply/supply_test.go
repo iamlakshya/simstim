@@ -174,7 +174,7 @@ func TestLoadRefusesWhatItDoesNotKnow(t *testing.T) {
 	}
 	for name, tc := range map[string]struct{ data, want string }{
 		"an expiry":              {strings.Replace(string(b), `"release": "0.6.0"`, `"release": "0.6.0", "expires": "2027-01-01"`, 1), "expires"},
-		"a field inside an item": {strings.Replace(string(b), `"kind": "helper"`, `"kind": "helper", "fsverity": "x"`, 1), "fsverity"},
+		"a field inside an item": {strings.Replace(string(b), `"kind": "helper"`, `"kind": "helper", "unrecognised": "x"`, 1), "unrecognised"},
 		"two manifests":          {string(b) + string(b), "more than one"},
 		"a trailing ]":           {string(b) + "]", "more than one"},
 		"a trailing }":           {string(b) + "}", "more than one"},

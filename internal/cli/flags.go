@@ -125,6 +125,18 @@ func addTokenCommand(cmd *cobra.Command, p *string, usage string) {
 	shared(cmd.Flags(), "token-command")
 }
 
+// addRootStep adds --root-step, how to handle optional root changes.
+func addRootStep(cmd *cobra.Command, p *string, usage string) {
+	cmd.Flags().StringVar(p, "root-step", "", usage)
+	shared(cmd.Flags(), "root-step")
+}
+
+// addImages adds --images, where runtime files and images come from.
+func addImages(cmd *cobra.Command, p *string, usage string) {
+	cmd.Flags().StringVar(p, "images", "", usage)
+	shared(cmd.Flags(), "images")
+}
+
 // listValue is a list of names (cli-spec 10.3). The flag may come again,
 // and each value may hold several names, split at its commas, so
 // "--agents claude,codex" is "--agents claude --agents codex". Spaces

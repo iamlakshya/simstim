@@ -43,7 +43,13 @@ func runExec(c *setup, env []string) error {
 		}
 	}
 	if c.Userns {
-		err = rs.addPath("/proc", Read)
+		proc := Read
+		if c.GvisorV1Version == 1 {
+			// This is fresh procC, whose global controls are separately mounted
+			// readonly. A and host tasks are absent from its PID namespace.
+			proc |= Write
+		}
+		err = rs.addPath("/proc", proc)
 	} else {
 		for _, f := range procFiles {
 			if err = rs.addPath(f, Read); err != nil {
@@ -63,10 +69,17 @@ func runExec(c *setup, env []string) error {
 	if err := rs.enforce(); err != nil {
 		return err
 	}
+	if err := retainPublicationExecV1(c); err != nil {
+		return err
+	}
+	argv := append([]string(nil), c.Argv...)
+	if err := retainVMMExecStageV1(c, &argv); err != nil {
+		return err
+	}
 	if c.ExecFD > 0 {
-		err = execveat(c.ExecFD, c.Argv, env)
+		err = execveat(c.ExecFD, argv, env)
 	} else {
-		err = unix.Exec(c.Argv[0], c.Argv, env)
+		err = unix.Exec(argv[0], argv, env)
 	}
 	return failure("cannot run "+quote(c.Argv[0])+" in the jail: "+err.Error(),
 		"Check that a Bind shows the program, and the libraries that it loads.")

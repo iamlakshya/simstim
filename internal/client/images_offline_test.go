@@ -55,6 +55,7 @@ func TestCachedImageEnsureNeedsNeitherRegistryNorLoginHelper(t *testing.T) {
 		return image.CacheStatus{Present: true, Image: &record}, nil
 	})
 	connection.Features = []string{"images"}
+	bindImageFixturePeer(t, connection)
 	got, err := EnsureImage(context.Background(), connection, record.Ref, ImageOptions{Mode: "laptop", Arch: record.Arch})
 	if err != nil {
 		t.Fatal(err)

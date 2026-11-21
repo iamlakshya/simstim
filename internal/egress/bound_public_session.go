@@ -22,7 +22,7 @@ func ValidatePublicSessionState(initial InitArgs, state *api.SessionSecretState,
 	if len(owned.Intent.Modes) != len(owned.Primary) {
 		return invalidPublicSessionState()
 	}
-	args := BoundInitArgs{Version: MemberRegistryV2, Initial: initial, Modes: owned.Intent.Modes, Binds: owned.Intent.Binds, Saved: make(map[string]api.PublicSecretState), SavedMinted: owned.Minted, SavedRetired: owned.Retired}
+	args := BoundInitArgs{Version: MemberRegistryV2, Initial: initial, Modes: owned.Intent.Modes, Binds: owned.Intent.Binds, TrustedUses: owned.Intent.TrustedUses, Saved: make(map[string]api.PublicSecretState), SavedMinted: owned.Minted, SavedRetired: owned.Retired}
 	args.Initial.Secrets = nil
 	for name, mode := range owned.Intent.Modes {
 		if mode == api.SecretModeBound {
@@ -48,7 +48,7 @@ func ValidatePublicSessionState(initial InitArgs, state *api.SessionSecretState,
 		public.Armed = false
 		primary[name] = public
 	}
-	result := BoundInitResult{Version: MemberRegistryV2, CACert: publicCA, Generation: owned.Generation, Secrets: primary, Minted: owned.Minted, Retired: publicRetired}
+	result := BoundInitResult{TrustedUses: api.CloneTrustedSecretUses(owned.Intent.TrustedUses), Version: MemberRegistryV2, CACert: publicCA, Generation: owned.Generation, Secrets: primary, Minted: owned.Minted, Retired: publicRetired}
 	if err := checkPublicSessionFrames(args, result); err != nil {
 		return err
 	}
@@ -75,6 +75,11 @@ func checkPublicSessionFrames(args BoundInitArgs, result BoundInitResult) error 
 }
 
 func validatePublicSessionEntries(state *api.SessionSecretState) error {
+	for name, use := range state.Intent.TrustedUses {
+		if _, err := canonicalTrustedUse(name, use); err != nil {
+			return err
+		}
+	}
 	ctx := context.Background()
 	aliases := make(map[api.Secret]string)
 	identities := make(map[string]string)

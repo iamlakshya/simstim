@@ -2,7 +2,7 @@ package client
 
 import "github.com/iamlakshya/simstim/internal/api"
 
-type receiptPublicStateSpans struct{ generation, modes, binds api.JSONSpan }
+type receiptPublicStateSpans struct{ generation, modes, binds, primary, trusted api.JSONSpan }
 
 func receiptStateSpans(p jsonValueProjection, span api.JSONSpan) (receiptPublicStateSpans, error) {
 	var out receiptPublicStateSpans
@@ -15,6 +15,8 @@ func receiptStateSpans(p jsonValueProjection, span api.JSONSpan) (receiptPublicS
 				out.generation = f.Value
 			case "intent":
 				intent = f.Value
+			case "primary":
+				out.primary = f.Value
 			}
 		}
 		return nil
@@ -30,6 +32,8 @@ func receiptStateSpans(p jsonValueProjection, span api.JSONSpan) (receiptPublicS
 				out.modes = f.Value
 			case "binds":
 				out.binds = f.Value
+			case "trusted_uses":
+				out.trusted = f.Value
 			}
 		}
 		return nil
@@ -46,9 +50,11 @@ const (
 	receiptSupplied
 	receiptMissing
 	receiptExposed
+	receiptStatePrimary
+	receiptStateTrusted
 )
 
-type sandboxReceiptRelationPlan struct{ Groups [6]api.JSONSpan }
+type sandboxReceiptRelationPlan struct{ Groups [8]api.JSONSpan }
 type sandboxReceiptRelationLookup func(sandboxReceiptRelationGroup, api.JSONSpan) (api.JSONSpan, bool, error)
 type sandboxReceiptRelationPhase func(sandboxReceiptRelationPlan, func(sandboxReceiptRelationLookup) error) error
 

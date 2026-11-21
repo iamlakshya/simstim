@@ -44,6 +44,10 @@ func (s *sandbox) CertifyGuestBootV1(ctx context.Context, preparedABI, terminalA
 	defer cancel()
 	stop := context.AfterFunc(owner, cancel)
 	defer stop()
+	facts, err := s.slotCertificationFactsV1(recording, facts)
+	if err != nil {
+		return err
+	}
 	if err := s.driver.recordBoot(recording, runtime, facts); err != nil {
 		return fmt.Errorf("record the prepared owned microvm boot: %w", err)
 	}

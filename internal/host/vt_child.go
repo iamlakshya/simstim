@@ -24,6 +24,8 @@ func (v *VT) start() error {
 		v.mu.Unlock()
 		return ErrVTDown
 	}
+	v.starts.Add(1)
+	defer v.starts.Done()
 	v.collecting = true
 	v.pending = nil
 	cols, rows := v.cols, v.rows
@@ -46,7 +48,10 @@ func (v *VT) start() error {
 		return err
 	}
 	if v.closed {
+		v.mu.Unlock()
 		c.kill()
+		<-c.gone
+		v.mu.Lock()
 		return ErrVTDown
 	}
 	if c.dead {

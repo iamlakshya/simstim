@@ -162,7 +162,13 @@ func dial(ctx context.Context, h Host, rt route) (*Conn, error) {
 	return dialObserved(owned, callerContext, h, rt, attempt)
 }
 
-func dialObserved(ctx, callerContext context.Context, h Host, rt route, transportAttempt *hostTransportAttempt) (*Conn, error) {
+func dialObserved(ctx, callerContext context.Context, h Host, rt route, transportAttempt *hostTransportAttempt) (result *Conn, resultErr error) {
+	var nativeStart *ownedDialStartV1
+	defer func() {
+		if resultErr != nil && nativeStart != nil {
+			resultErr = &ownedDialFailureV1{start: nativeStart, actual: resultErr}
+		}
+	}()
 	if rt.agentOnly {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, agentbridge.HandshakeTimeout)
@@ -195,7 +201,8 @@ func dialObserved(ctx, callerContext context.Context, h Host, rt route, transpor
 			cancel()
 		}
 	}()
-	proc, err := dialStart(procCtx, rt.t, remote)
+	nativeStart = beginOwnedNewDialStartV1(ctx)
+	proc, err := dialStartOwnedV1(procCtx, rt.t, remote, nativeStart)
 	if err != nil {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
@@ -213,6 +220,7 @@ func dialObserved(ctx, callerContext context.Context, h Host, rt route, transpor
 		pending: map[uint64]chan proto.Response{}, stream: stream, done: make(chan struct{}), tr: trace}
 	c.route = rt
 	c.procDone = make(chan struct{})
+	recordOwnedNewDialConnectionV1(ctx, c, nativeStart)
 	c.agentOnly = rt.agentOnly
 	readerSize := 256 << 10
 	if rt.agentOnly {
@@ -304,17 +312,47 @@ func dialObserved(ctx, callerContext context.Context, h Host, rt route, transpor
 		return c, nil
 	}
 	if exclusiveContinuationDial(callerContext) {
-		c.execReader=r
-		c.execReadDone=make(chan struct{})
-		if ka!=nil && execDial(callerContext) {c.execAlive=ka.KeepAlive()}
+		c.execReader = r
+		c.execReadDone = make(chan struct{})
+		if ka != nil && execDial(callerContext) {
+			c.execAlive = ka.KeepAlive()
+		}
 	} else {
 		go c.readLoop(r)
 		c.startBridgeDebug(callerContext)
-		if ka!=nil {go c.keepAlive(ka.KeepAlive())}
+		if ka != nil {
+			go c.keepAlive(ka.KeepAlive())
+		}
 	}
-	if l,ok:=rt.lc.(Leaser);ok {
-		c.leaser=l
-		if !exclusiveContinuationDial(callerContext) {go keepLease(context.WithoutCancel(callerContext),c,l,leasePeriod)}
+	if l, ok := rt.lc.(Leaser); ok {
+		c.leaser = l
+		if !exclusiveContinuationDial(callerContext) {
+			c.machineLeaseDone = make(chan struct{})
+			go func() {
+				defer close(c.machineLeaseDone)
+				keepLease(context.WithoutCancel(callerContext), c, l, leasePeriod)
+			}()
+		}
+	}
+	if !c.agentOnly && !exclusiveContinuationDial(callerContext) && c.hostTransport != nil && c.hostTransport.kind == hostTransportSaved {
+		if err := c.CheckSavedSource(callerContext); err != nil {
+			c.Close()
+			return nil, err
+		}
+		if err := ReplayPendingPolicy(callerContext, c); err != nil {
+			warn(callerContext, "policy_pending", "Policy is still pending on "+CleanLine(c.Host.Name), "Run policy apply to retry with the current local policy.")
+		}
+		if err := callerContext.Err(); err != nil {
+			c.Close()
+			return nil, err
+		}
+		if err := c.CheckSavedSource(callerContext); err != nil {
+			c.Close()
+			return nil, err
+		}
+	}
+	if rt.machineOwner != nil {
+		rt.machineOwner.retainConnectionV1(c)
 	}
 	return c, nil
 }

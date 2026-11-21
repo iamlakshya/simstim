@@ -32,6 +32,8 @@ What the tool does to keep your hosts and your laptop safe, and what it leaves t
 
 **Threat model, in short:**
 
+Local host removal keeps the original saved entry and host identity while it stages managed configuration cleanup. A failed host save restores the original configuration when its native files still match. A changed host, directory or destination stops the next cleanup step. The client preserves replacements and reports any retained resources. A manifest, receipt or matching path alone never allows deletion.
+
 - **A compromised host** can see everything its agents can see. It can also send terminal escape sequences to the laptop. Their effects depend on your terminal's features, permissions and bugs. Trust a host before attaching, keep your terminal up to date, and use its clipboard and link controls to limit what remote output can do. simstim does not make hostile terminal output safe.
 - **Several attached clients** all receive live output, including queries, and all can send input. The size leader is not an access-control boundary. Do not treat another attached client as a read-only viewer.
 - **A compromised laptop** can drive every host it has keys for, as it already can through `ssh`.
@@ -70,6 +72,31 @@ It never replaces a matched named rule or a lock. Legacy policies which omit
 the setting keep their old preset fallback; no diagnostic rule label supplies
 permission or setting presence.
 
+First-host notification history uses the same bounded destination records
+as synthetic routing. An observation alone creates no route. The actual
+audit append precedes the private bookkeeping acknowledgement, and one
+current actor elects the notification. A failed append does not mark the
+host. Public audit and alert labels use the existing source-bound redactor;
+their opaque destination IDs carry no network or target authority.
+
 Saved-image lookup reads an alias tied to one host ID from the laptop's `images.lock`. It rechecks the original accepted host selection before publishing that image's digest. Another host receives no saved-image digest. A missing saved root never falls back to a registry. The protected VM Need carries the saved origin to the original host store, which still checks its native ownership receipt and the root bytes.
 
 Placement labels in a session row are advisory. Human display cleans a copy, and JSON keeps the original host metadata. These labels never choose the host or approve a start.
+
+Runtime preparation for a new sandbox keeps its original local settings and signed runtime request. An installed runtime does not ask for permission to download missing bytes. Delivery still checks that original request, and sandbox construction still performs its physical compatibility checks.
+
+OCI image certificate policy uses the original local settings and the effective new sandbox layers. Relative trusted root paths are relative to the original config.toml directory. Retries retain that policy and accepted host source. Native verifier and image pin operations recheck the same source before use.
+
+A microvm creation record keeps the exact image selected by this laptop, including whether it came from the signed default, an OCI pin or that host’s saved image. This history is immutable data. A later image policy check must validate it before using it; it does not grant a boot or select a newer tag.
+
+Before a microvm resume reads secret values, the client checks its original recorded image under the current policy from one retained local settings descriptor. It does not follow the current tag pin. The physical resume frame carries only that checked original image; the host must compare it with the protected original VM plan before activation. A changed local source or policy stops later reads and publication.
+
+Trusted root file paths stay in the laptop’s local source pin. New and resume send a separate cloned policy projection without those paths. The physical writer refuses an unprojected typed start.
+
+Private publication checks run once after the request acquires its physical writer turn. The same source ownership lasts through the complete frame write and ends before waiting for its response. A settings change while a request is queued prevents that frame from being sent.
+
+A public_only network rule restricts its destination addresses. It never creates a private-address exception. File edits preserve this bit in a structured rule, including its identity. New and resume refuse older helpers that cannot preserve it.
+
+A named SSH key policy action records only its literal allowed or revoked name in the laptop's existing sandbox record after the original host acknowledges it. This next-start choice leaves the original creation pin intact. A cold start reads the current local choice and checks the key's kind, host binding, tier, wall and consent again. Host policy metadata cannot authorise a laptop key read. A running signer keeps its installed keys.
+
+Trusted model arming reads the current private registry on the same protected live cohort. Its names-only observation can report an unavailable role. Saved metadata and display badges cannot establish that a classifier credential is armed, or authorise a new credential read.

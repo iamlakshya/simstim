@@ -11,6 +11,8 @@ import (
 	"path"
 	"slices"
 	"strings"
+
+	"github.com/iamlakshya/simstim/internal/seedmeta"
 )
 
 // DefaultCopyMax and DefaultSeedMax are independent per-start byte bounds.
@@ -41,15 +43,17 @@ const EmptyInputHash = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b
 // InputRepository describes one laptop bundle cloned under /work/Name.
 type InputRepository struct {
 	// Policy is the raw checked file at this exact selected commit, primary only.
-	Policy *RepositoryPolicy `json:"policy,omitempty"`
-	Name         string `json:"name"`
-	SourceBranch string `json:"source_branch,omitempty"`
-	Commit       string `json:"commit"`
-	Origin       string `json:"origin,omitempty"`
-	Size         int64  `json:"size"`
-	SHA256       string `json:"sha256"`
-	Dirty        bool   `json:"dirty,omitempty"`
-	ObjectFormat string `json:"object_format"`
+	Policy       *RepositoryPolicy `json:"policy,omitempty"`
+	Name         string            `json:"name"`
+	SourceBranch string            `json:"source_branch,omitempty"`
+	Commit       string            `json:"commit"`
+	Origin       string            `json:"origin,omitempty"`
+	// Ecosystems are bounded descriptive tags read from this selected commit.
+	Ecosystems   []string `json:"ecosystems,omitempty"`
+	Size         int64    `json:"size"`
+	SHA256       string   `json:"sha256"`
+	Dirty        bool     `json:"dirty,omitempty"`
+	ObjectFormat string   `json:"object_format"`
 }
 
 // GitIdentity is static laptop Git identity, written only to each clone's config.
@@ -130,11 +134,13 @@ func (p SessionInputs) Validate(copyMax, seedMax int64) error {
 		if repo.ObjectFormat != "sha1" && repo.ObjectFormat != "sha256" || repo.ObjectFormat == "sha1" && len(repo.Commit) != 40 || repo.ObjectFormat == "sha256" && len(repo.Commit) != 64 {
 			return bad("input repository object format does not match its commit")
 		}
-		if !inputText(repo.SourceBranch) || !inputText(repo.Origin) || repo.Size > seedMax {
+		if !inputText(repo.SourceBranch) || !inputText(repo.Origin) || !seedmeta.ValidEcosystems(repo.Ecosystems) || repo.Size > seedMax {
 			return bad("input repositories exceed seed_max or contain invalid metadata")
 		}
-		if policy:=repo.Policy;policy!=nil {
-			if index!=0 || !ValidPolicyHash(policy.Hash) || policy.Layer.Kind!=LayerRepo || policy.Layer.Source!=SourceRepositoryFile || policy.Layer.Name!=policy.Repo || policy.Layer.ReviewedHash!="" {return bad("input policy is not the raw checked primary file")}
+		if policy := repo.Policy; policy != nil {
+			if index != 0 || !ValidPolicyHash(policy.Hash) || policy.Layer.Kind != LayerRepo || policy.Layer.Source != SourceRepositoryFile || policy.Layer.Name != policy.Repo || policy.Layer.ReviewedHash != "" {
+				return bad("input policy is not the raw checked primary file")
+			}
 		}
 		seen[repo.Name] = true
 	}
@@ -184,7 +190,7 @@ type InputSummary struct {
 func (s InputSummary) Equal(other InputSummary) bool {
 	return s.Version == other.Version && s.Nonce == other.Nonce && s.Digest == other.Digest &&
 		s.FileCount == other.FileCount && s.CopyBytes == other.CopyBytes && s.Identity == other.Identity &&
-		slices.EqualFunc(s.Repositories,other.Repositories,func(a,b InputRepository)bool{return a.Equal(b)})
+		slices.EqualFunc(s.Repositories, other.Repositories, func(a, b InputRepository) bool { return a.Equal(b) })
 }
 
 func (p SessionInputs) summary() InputSummary {

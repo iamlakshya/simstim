@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/iamlakshya/simstim/internal/api"
+	"github.com/iamlakshya/simstim/internal/filecopy"
 	"github.com/iamlakshya/simstim/internal/host"
 	"github.com/iamlakshya/simstim/internal/inputtransfer"
 	"github.com/iamlakshya/simstim/internal/link"
@@ -27,7 +28,7 @@ import (
 // stream, and refuses the rest (spec 6.3 and 10.4).
 
 // Features are what the supervisor offers in its hello (spec 10.5).
-var Features = []string{api.FeatureSandboxCohort, inputtransfer.Feature, inputtransfer.PrimaryPolicyFeature, inputtransfer.FinishFeature, "wall", host.SavedRenameFeature, api.FeatureExecStream, api.FeatureSpawn, api.FeatureSandboxSnapshot, api.FeaturePullBundle, api.FeaturePullOutputProgress, api.FeatureBoundSecrets}
+var Features = []string{api.FeatureFork, api.FeatureRewind, api.FeatureSandboxCohort, inputtransfer.Feature, inputtransfer.PrimaryPolicyFeature, inputtransfer.FinishFeature, "wall", host.SavedRenameFeature, api.FeatureExecStream, api.FeatureSpawn, api.FeatureSandboxSnapshot, api.FeaturePullBundle, api.FeaturePullOutputProgress, api.FeatureBoundSecrets}
 
 // listenHint is the hint of an error of the session's socket.
 const listenHint = "Check the host's runtime folder ($XDG_RUNTIME_DIR) and its free space, then resume the session."
@@ -80,20 +81,33 @@ func (s *Supervisor) acceptLoop() {
 
 // client is one connection to the session's socket.
 type client struct {
-	imageSaveMu     sync.Mutex
-	imageSave       *imageSaveJobV1
-	imageSaveClosed bool
-	copyMu          sync.Mutex
-	copyBusy        bool
-	copyPlan        *copyReadPlan
-	pullMu          sync.Mutex
-	pull            *host.PullRPC
-	pullClosed      bool
-	conn            net.Conn
-	full            bool   // the peer may do everything (host.FullPeer)
-	hello           []byte // the client's hello, which the holder gets too
-	wmu             sync.Mutex
-	w               *proto.Writer
+	ctx                context.Context
+	cancel             context.CancelFunc
+	streamWorkers      sync.WaitGroup
+	traceUpperOn       atomic.Bool
+	traceUpperName     string
+	traceUpperKey      int64
+	traceUpperBridge   int64
+	traceUpperReceived int64
+	traceUpperPending  *api.TraceUpperSampleV1
+	nativeMu           sync.Mutex
+	frameReader        *bufio.Reader
+	nativeFrameReader  *host.StartupLineV1
+	nativeStop         *nativeStopScopeV1
+	imageSaveMu        sync.Mutex
+	imageSave          *imageSaveJobV1
+	imageSaveClosed    bool
+	copyMu             sync.Mutex
+	copyBusy           bool
+	copyPlan           *filecopy.ReadSessionV1
+	pullMu             sync.Mutex
+	pull               *host.PullRPC
+	pullClosed         bool
+	conn               net.Conn
+	full               bool   // the peer may do everything (host.FullPeer)
+	hello              []byte // the client's hello, which the holder gets too
+	wmu                sync.Mutex
+	w                  *proto.Writer
 	// writeWait bounds one output frame. writeErr prevents a second frame
 	// from following a partially written first frame.
 	writeWait time.Duration
@@ -160,10 +174,24 @@ func (c *client) endInput() {
 // close ends the connection and its holder stream.
 func (c *client) close() {
 	c.once.Do(func() {
+		if c.cancel != nil {
+			c.cancel()
+		}
 		if c.done != nil {
 			close(c.done)
 		}
 		c.conn.Close()
+		if scope := c.nativeScopeV1(); scope != nil {
+			if err := scope.closeIncomingWarmOperationV1(); err != nil {
+				scope.retainUncertainWarmBorrowV1(err)
+			}
+			scope.mu.Lock()
+			line := scope.line
+			scope.mu.Unlock()
+			if line != nil {
+				_ = line.Close()
+			}
+		}
 		c.closeImageSaveV1()
 		c.closePull()
 		c.gmu.Lock()
@@ -181,8 +209,15 @@ func (c *client) close() {
 // serve answers the hello of one connection, then its frames, until it
 // ends or a refused frame closes it.
 func (s *Supervisor) serve(conn net.Conn) {
+	owned, ok := s.ownRequestConnectionV1(conn)
+	if !ok {
+		return
+	}
+	defer s.finishRequestConnectionV1(owned)
 	c := &client{conn: conn, w: proto.NewWriter(conn), in: make(chan proto.Frame, maxQueuedFrames),
 		room: make(chan struct{}, 1), done: make(chan struct{}), drain: drainWait, writeWait: clientWriteWait}
+	c.ctx, c.cancel = context.WithCancel(s.owner().lifetimeContext())
+	s.bindRequestClientV1(owned, c)
 	ended := false // the client ended its connection itself
 	defer func() {
 		s.drop(c)
@@ -191,8 +226,10 @@ func (s *Supervisor) serve(conn net.Conn) {
 		} else {
 			c.close()
 		}
+		c.streamWorkers.Wait()
 	}()
 	r := bufio.NewReaderSize(conn, 64<<10)
+	c.frameReader = r
 	f, err := proto.Read(r)
 	if err != nil || f.Type != proto.THello {
 		return
@@ -211,7 +248,19 @@ func (s *Supervisor) serve(conn net.Conn) {
 	}
 	firstFrame := true
 	for {
-		f, err := proto.Read(r)
+		var f proto.Frame
+		var err error
+		if c.nativeFrameReader != nil {
+			f, err = c.nativeFrameReader.ReadFrame()
+			if err == nil && s.nativeWarmLaneFrameV1(c, f) {
+				continue
+			}
+			if err == nil {
+				err = c.nativeFrameReader.RejectAncillary()
+			}
+		} else {
+			f, err = proto.Read(r)
+		}
 		if err != nil {
 			ended = errors.Is(err, io.EOF)
 			return
@@ -242,6 +291,9 @@ func (s *Supervisor) serve(conn net.Conn) {
 			return
 		}
 		if s.inputFrame(c, r, f, wasFirst) {
+			return
+		}
+		if s.editorSSHFrameV1(c, r, f, wasFirst) {
 			return
 		}
 		if s.execFrame(c, r, f, wasFirst) {
@@ -288,8 +340,10 @@ func (s *Supervisor) frame(c *client, f proto.Frame) bool {
 		if json.Unmarshal(f.Payload, &a) != nil {
 			return false
 		}
+		s.traceUpperAttachV1(c, a)
 		s.noteAttach(c, a)
 	case proto.TInput:
+		s.traceUpperInputV1(c, len(f.Payload))
 		s.noteInput(c, f.Payload)
 	case proto.TResize:
 		var rz proto.Resize
@@ -300,6 +354,7 @@ func (s *Supervisor) frame(c *client, f proto.Frame) bool {
 	case proto.TDetach:
 		s.drop(c)
 	case proto.TTrace:
+		s.traceUpperBridgeV1(c, f.Payload)
 	case proto.TPing:
 		if !c.hasGuest() {
 			return c.write(proto.TPong, f.Payload) == nil

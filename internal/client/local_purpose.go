@@ -63,8 +63,14 @@ func requirePurposeOutbound(ctx context.Context, r *GrantRequest, outbound Outbo
 		if outbound.Kind == OutboundRootRun {
 			return requireRootOutbound(ctx, r, outbound)
 		}
+	case grantNetworkHold:
+		return requireNetworkHoldOutboundV1(ctx, r, outbound)
 	case grantImageSave:
 		return requireImageSaveOutbound(ctx, r, outbound, false)
+	case grantPurge:
+		return requirePurgeRootOutboundV1(ctx, r, outbound)
+	case grantRuntimeUpgrade:
+		return requireRuntimeUpgradeOutboundV1(ctx, r, outbound)
 	}
 	return grantPurposeError()
 }
@@ -84,8 +90,12 @@ func requirePurposeRecord(ctx context.Context, r *GrantRequest, outbound Outboun
 		if outbound.Kind == OutboundRootRun {
 			return requireRootOutbound(ctx, r, outbound)
 		}
+	case grantNetworkHold:
+		return requireNetworkHoldOutboundV1(ctx, r, outbound)
 	case grantImageSave:
 		return requireImageSaveOutbound(ctx, r, outbound, true)
+	case grantPurge:
+		return requirePurgeRootOutboundV1(ctx, r, outbound)
 	}
 	return grantPurposeError()
 }

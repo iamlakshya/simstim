@@ -21,8 +21,10 @@ type SandboxSnapshot struct {
 
 // SandboxSnapshotArgs retains the original typed member selector.
 type SandboxSnapshotArgs struct {
-	Cohort bool   `json:"cohort,omitempty"`
-	ID     string `json:"id"`
+	// TrustedReadiness restricts one actual live private-registry observation.
+	TrustedReadiness *TrustedSecretReadinessQueryV1 `json:"trusted_readiness,omitempty"`
+	Cohort           bool                           `json:"cohort,omitempty"`
+	ID               string                         `json:"id"`
 }
 
 // Clone owns the child list and preserves explicit empty-list presence.

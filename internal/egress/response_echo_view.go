@@ -36,6 +36,9 @@ func (s *responseEchoSnapshot) starts(b byte) bool {
 
 func (s *responseEchoSnapshot) resolve(index int) (api.Secret, error) {
 	group := s.base.groups[index]
+	if group.forbidden {
+		return "", errResponseEchoIdentity
+	}
 	if !group.ambiguous && !group.pending {
 		return group.Choices[0].Sentinel, nil
 	}

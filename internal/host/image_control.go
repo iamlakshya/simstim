@@ -67,6 +67,10 @@ func receiveImagePlan(in io.Reader) ([]byte, error) {
 	if err := imageWaitAck(in); err != nil {
 		return nil, err
 	}
+	return receiveAcknowledgedImagePlanV1(in)
+}
+
+func receiveAcknowledgedImagePlanV1(in io.Reader) ([]byte, error) {
 	var size uint32
 	if err := binary.Read(in, binary.LittleEndian, &size); err != nil {
 		return nil, fmt.Errorf("read image plan length: %w", err)

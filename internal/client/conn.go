@@ -35,13 +35,14 @@ type Conn struct {
 	agentStoppedAt time.Time
 	agentClose     sync.Once
 
-	execReader *bufio.Reader
-	execReadDone chan struct{}
-	execReadOnce sync.Once
-	execBusy atomic.Int64
-	leaseMu sync.Mutex
-	leaser Leaser
-	execAlive time.Duration
+	execReader       *bufio.Reader
+	execReadDone     chan struct{}
+	execReadOnce     sync.Once
+	execBusy         atomic.Int64
+	leaseMu          sync.Mutex
+	leaser           Leaser
+	machineLeaseDone chan struct{}
+	execAlive        time.Duration
 
 	proc   Proc
 	cancel context.CancelFunc
@@ -50,11 +51,12 @@ type Conn struct {
 	stdin  io.WriteCloser
 	nextID atomic.Uint64
 
-	mu        sync.Mutex
-	pending   map[uint64]chan proto.Response
-	uploading chan struct{}
-	stream    chan proto.Frame // attach frames: Attached, Output, Ended, Error
-	err       error
+	mu          sync.Mutex
+	pending     map[uint64]chan proto.Response
+	uploading   chan struct{}
+	stream      chan proto.Frame // attach frames: Attached, Output, Ended, Error
+	err         error
+	procWaitErr error // actual single Proc.Wait result, under mu
 
 	lastRecv atomic.Int64
 	done     chan struct{}
@@ -84,7 +86,7 @@ var startupExitWait = 500 * time.Millisecond
 
 func (c *Conn) killStartup() {
 	c.kill()
-	go func() { _ = c.proc.Wait() }()
+	c.watchProcess()
 }
 
 // waitStartup lets a transport report its exit after closing stdout. SSH and
@@ -92,23 +94,27 @@ func (c *Conn) killStartup() {
 // Killing them first would replace a useful exit code with a local signal.
 func (c *Conn) waitStartup(ctx context.Context) error {
 	_ = c.stdin.Close()
-	done := make(chan error, 1)
-	go func() { done <- c.proc.Wait() }()
+	c.watchProcess()
 	timer := time.NewTimer(startupExitWait)
 	defer timer.Stop()
 	select {
-	case err := <-done:
-		return err
+	case <-c.procDone:
+		return c.processWaitErrorV1()
 	case <-ctx.Done():
 		c.kill()
 		return ctx.Err()
 	case <-timer.C:
 		c.kill()
+		joined := time.NewTimer(3 * sshWaitDelay)
+		defer joined.Stop()
 		select {
-		case err := <-done:
-			return err
+		case <-c.procDone:
+			return c.processWaitErrorV1()
 		case <-ctx.Done():
 			return ctx.Err()
+		case <-joined.C:
+			return &UserError{Msg: "the transport has not finished cleanup after its failed start",
+				Hint: "Wait for the original transport to finish before trying another host.", Code: "transport_cleanup", Kind: KindFailed}
 		}
 	}
 }
@@ -173,15 +179,27 @@ func (c *Conn) kill() {
 
 func (c *Conn) watchProcess() {
 	c.procWatch.Do(func() {
+		if c.procDone == nil {
+			c.procDone = make(chan struct{})
+		}
 		go func() {
 			if c.cancel != nil {
 				defer c.cancel()
 			}
-			_ = c.proc.Wait()
+			err := c.proc.Wait()
+			c.mu.Lock()
+			c.procWaitErr = err
+			c.mu.Unlock()
 			close(c.procDone)
 			c.fail(ErrClosed)
 		}()
 	})
+}
+
+func (c *Conn) processWaitErrorV1() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.procWaitErr
 }
 
 // closeAgentTransport interrupts only this connection's owned process and
@@ -205,9 +223,11 @@ func (c *Conn) closeAgentTransport() error {
 
 // Close ends the connection.
 func (c *Conn) Close() {
-	if c.execReader!=nil {
+	if c.execReader != nil {
 		c.kill()
-		if output,ok:=c.proc.Stdout().(io.Closer);ok {_ = output.Close()}
+		if output, ok := c.proc.Stdout().(io.Closer); ok {
+			_ = output.Close()
+		}
 		_ = c.stdin.Close()
 		c.fail(ErrClosed)
 		// The actual mux/pump owner marks readDone only AFTER its read joins.

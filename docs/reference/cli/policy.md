@@ -10,7 +10,7 @@ Read and change sandbox policy at any layer.
 simstim policy [flags]
 ```
 
-Policy has six layers, from broadest to narrowest: built-in, all sessions, host, repository, profile and session. The narrowest matching layer decides. A deny wins inside that layer. Top-level and host locks win over every layer. Lists add up; a leading ! removes an inherited item. Profiles follow repository sections. Wider-layer changes reach a running sandbox at its next start. Unknown flows are refused in this phase.
+Policy has six layers, from broadest to narrowest: built-in, all sessions, host, repository, profile and session. The narrowest matching layer decides. A deny wins inside that layer. Top-level and host locks win over every layer. Lists add up; a leading ! removes an inherited item. Profiles follow repository sections. File-layer changes reach running sandboxes on reachable hosts. Other sandbox settings apply at the next start. Live held network requests appear with session policy when the helper supports them.
 
 Examples: simstim policy allow api.example.com `--repo` . simstim policy deny paste.example.net `--all` simstim policy check api.example.com `--host` box `--profile` review
 
@@ -28,10 +28,15 @@ Examples: simstim policy allow api.example.com `--repo` . simstim policy deny pa
 | Command | What it does |
 | --- | --- |
 | [`policy allow`](policy_allow.md) | Add an allow rule at one policy layer |
+| [`policy apply`](policy_apply.md) | Preview and apply current policy files to running sandboxes |
 | [`policy check`](policy_check.md) | Explain which rule and layer decides a destination |
 | [`policy deny`](policy_deny.md) | Add an deny rule at one policy layer |
+| [`policy edit`](policy_edit.md) | Edit one policy file, check it and preview its live changes |
+| [`policy learn`](policy_learn.md) | Turn selected observed network destinations into policy rules |
+| [`policy lockdown`](policy_lockdown.md) | Pause session allowances and refuse unknown network destinations |
 | [`policy log`](policy_log.md) | Read one session's network decisions |
 | [`policy ls`](policy_ls.md) | Show the merged policy and each value's layer |
+| [`policy refuse`](policy_refuse.md) | Refuse one held network request by its opaque ID |
 | [`policy rm`](policy_rm.md) | Remove a rule from one policy layer |
 
 See [all commands](_index.md).

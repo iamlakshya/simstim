@@ -83,15 +83,23 @@ func TestGvisorRuntimeCompatibilityDoesNotSupplyPhysicalOrBootAuthority(t *testi
 }
 
 func TestGvisorCachedFactRequiresTheExactOriginalRuntimeClosure(t *testing.T) {
-	probe := api.WallProbe{Driver: "gvisor", Level: "gvisor", OK: true, Version: gvisor.NativeBuildVersionV1, Facts: map[string]string{"runtime_manifest": "actual-original"}}
-	if !cachedGvisorMatchesV1(probe, "actual-original") {
+	probe := api.WallProbe{Driver: "gvisor", Level: "gvisor", OK: true, Version: gvisor.NativeBuildVersionV1, Facts: map[string]string{"runtime_manifest": "actual-original", "native_closure_v1": "actual-native"}}
+	if !cachedGvisorMatchesV1(probe, "actual-original", "actual-native") {
 		t.Fatal("the exact physical selected-runtime fact was refused")
 	}
-	if cachedGvisorMatchesV1(probe, "other") || cachedGvisorMatchesV1(probe, "") {
+	if cachedGvisorMatchesV1(probe, "other", "actual-native") || cachedGvisorMatchesV1(probe, "", "actual-native") {
 		t.Fatal("a cached fact chose or invented a runtime selection")
 	}
+	if cachedGvisorMatchesV1(probe, "actual-original", "changed-C-only") || cachedGvisorMatchesV1(probe, "actual-original", "") {
+		t.Fatal("C-only/unknown closure reused physical readiness")
+	}
+	delete(probe.Facts, "native_closure_v1")
+	if cachedGvisorMatchesV1(probe, "actual-original", "actual-native") {
+		t.Fatal("old runtime-only cache became complete native proof")
+	}
+	probe.Facts["native_closure_v1"] = "actual-native"
 	probe.OK = false
-	if cachedGvisorMatchesV1(probe, "actual-original") {
+	if cachedGvisorMatchesV1(probe, "actual-original", "actual-native") {
 		t.Fatal("construction-only data became physical readiness")
 	}
 }

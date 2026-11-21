@@ -22,18 +22,7 @@ func policyLsCmd() *cobra.Command {
 	var asJSON bool
 	cmd := &cobra.Command{Use: "ls", Short: "Show the merged policy and each value's layer", Args: cobra.NoArgs, Example: "  " + brand.Name + " policy ls --host box --repo . --profile review",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return withPolicy(cmd, layers, func(h client.Host, s client.Session, policy api.Policy) error {
-				if asJSON {
-					out := policyObject(h, s)
-					out["policy"] = policy
-					if s.Wall != nil {
-						out["wall"] = s.Wall
-					}
-					return printJSON(out)
-				}
-				printPolicy(s, policy)
-				return nil
-			})
+			return listPolicy(cmd, layers, asJSON)
 		}}
 	layers.add(cmd)
 	addJSON(cmd, &asJSON)
@@ -60,7 +49,7 @@ func policyCheckCmd() *cobra.Command {
 					decision = "allow"
 				}
 				if answer.Unknown != "" {
-					say(cmd, "%s: %s (no matching rule; network.unknown=%s, refused in this phase).\n", client.CleanLine(args[0]), decision, answer.Unknown)
+					say(cmd, "%s: %s (no matching rule; network.unknown=%s).\n", client.CleanLine(args[0]), decision, answer.Unknown)
 					return nil
 				}
 				say(cmd, "%s: %s by %s in %s %s.\n", client.CleanLine(args[0]), decision, client.CleanLine(answer.Rule), answer.Layer, client.CleanLine(answer.Name))
@@ -115,7 +104,7 @@ func printPolicy(s client.Session, policy api.Policy) {
 	} else if policy.Sandbox.Wall != nil {
 		level = *policy.Sandbox.Wall
 	}
-	fmt.Printf("Wall: %s\nPreset: %s\nUnknown: %s (unknown flows are refused in this phase)\n", client.CleanLine(level), client.CleanLine(string(policy.Preset)), client.CleanLine(string(policy.Unknown)))
+	fmt.Printf("Wall: %s\nPreset: %s\nUnknown: %s\n", client.CleanLine(level), client.CleanLine(string(policy.Preset)), client.CleanLine(string(policy.Unknown)))
 	for _, lock := range policy.Locks {
 		fmt.Printf("Lock: %s", client.CleanLine(strings.TrimSpace(string(lock.Layer)+" "+lock.Name)))
 		if len(lock.Deny) > 0 {
@@ -125,6 +114,11 @@ func printPolicy(s client.Session, policy api.Policy) {
 		printPolicyValues(lock.LayerValues, nil, "  locked ")
 	}
 	printPolicyValues(policy.LayerValues, policy.Origins, "Value: ")
+	printPolicyRules(policy)
+	printPendingPolicyValues(policy)
+}
+
+func printPolicyRules(policy api.Policy) {
 	for _, rule := range policy.Rules {
 		until := "next start"
 		if rule.Layer == api.LayerSession {
@@ -134,6 +128,14 @@ func printPolicy(s client.Session, policy api.Policy) {
 			until = "once"
 		} else if !rule.Until.IsZero() {
 			until = rule.Until.UTC().Format(time.RFC3339)
+		}
+		if rule.Layer == api.LayerSession && rule.Allow {
+			for _, source := range policy.Order {
+				if source.Kind == api.LayerLockdown {
+					until = "paused during lockdown"
+					break
+				}
+			}
 		}
 		action := "deny"
 		if rule.Allow {

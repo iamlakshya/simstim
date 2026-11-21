@@ -17,14 +17,17 @@ import (
 const legacyExposedIdentity = "legacy-exposed-v1"
 
 type registeredSecret struct {
-	value      api.Secret
-	identity   string
-	valueEpoch string
-	mode       api.SecretMode
-	present    bool
-	bound      *boundSecret
-	history    []api.Secret
-	minted     []registeredMint
+	trusted      *api.TrustedSecretUseV1
+	trustedArmed bool // readiness of this separately approved existing role
+	guest        bool
+	value        api.Secret
+	identity     string
+	valueEpoch   string
+	mode         api.SecretMode
+	present      bool
+	bound        *boundSecret
+	history      []api.Secret
+	minted       []registeredMint
 }
 
 type memberState struct {
@@ -94,6 +97,7 @@ func (state *memberState) initialArgs() (InitArgs, error) {
 	}
 	a := state.metadata
 	a.AgentKinds = slices.Clone(a.AgentKinds)
+	a.JudgeMetadata.Ecosystems = slices.Clone(a.JudgeMetadata.Ecosystems)
 	a.Decoys = api.CloneDecoyTripwires(state.decoys)
 	a.Secrets = make(map[string]string, len(state.secrets))
 	for name, secret := range state.secrets {

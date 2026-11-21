@@ -55,6 +55,7 @@ func CleanCapProbe(p api.CapProbe) api.CapProbe {
 	p.Walls = CleanWallProbes(p.Walls)
 	if p.Nitro != nil {
 		n := *p.Nitro
+		n.Mode = CleanLine(n.Mode)
 		if n.Pools != nil {
 			n.Pools = make(map[string]int64, len(p.Nitro.Pools))
 			for name, count := range p.Nitro.Pools {

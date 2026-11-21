@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strconv"
@@ -203,16 +204,20 @@ func (g *guide) done(h client.Host, f *onboard.Flow) {
 // runSession starts an install or a login in a session on h. On a terminal
 // it attaches; without one, it waits for the session to end. It returns the
 // session's ID, and whether the session ended.
-func (g *guide) runSession(h client.Host, a onboard.Action) (string, bool, error) {
+func (g *guide) runSession(h client.Host, a onboard.Action) (id string, finished bool, runErr error) {
 	cctx, cancel := context.WithTimeout(g.ctx, 90*time.Second)
+	request := client.NewGrantRequest(false, false)
+	cctx = client.WithGrantRequest(cctx, request)
+	defer func() { runErr = errors.Join(runErr, request.Close()) }()
 	conn, err := client.Dial(cctx, h, true)
 	if err != nil {
 		cancel()
 		return "", false, err
 	}
 	cols, rows := termSize()
-	s, err := conn.NewSession(cctx, client.TerminalArgs(a.Args, cols, rows))
+	s, err := startUnwalledControlV1(cctx, conn, a.Args, cols, rows)
 	conn.Close()
+	err = errors.Join(err, request.Close())
 	cancel()
 	if err != nil {
 		return "", false, err

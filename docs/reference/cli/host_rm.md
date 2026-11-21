@@ -10,7 +10,7 @@ Forget a host, or delete a created machine.
 simstim host rm <host> [flags]
 ```
 
-Forget a host: it leaves hosts.toml. Its sessions and the helper stay on the host. A host made by `host create` also has a machine. At a terminal, rm says what the machine holds, and asks you to type the host's name to delete it too. `--destroy` deletes it: it needs the typed name, or `--confirm` with the host's name. It refuses while a session is working, unless you pass `--force`.
+Forget a host: it leaves hosts.toml. Its sessions and the helper stay on the host. A host made by `host create` also has a machine. At a terminal, rm says what the machine holds, and asks you to type the host's name to delete it too. `--destroy` deletes it: it needs the typed name, or `--confirm` with the host's name. It refuses while a session is working, unless you pass `--force`. `--purge` removes installed host resources before the destroy and forget. It needs the typed host name. Agent logins stay unless you answer their separate question or use `--delete-logins`.
 
 ## Examples
 
@@ -23,9 +23,13 @@ simstim host rm lima --destroy --confirm lima
 
 | Flag | What it does |
 | --- | --- |
-| `--confirm <name>` | with `--destroy`, the host's name, typed in place of the question |
+| `--confirm <name>` | with `--destroy` or `--purge`, the host's name, typed in place of the question |
+| `--delete-logins` | with `--purge`, also delete the agent login files after removing host resources |
 | `--destroy` | also delete the machine that host create made: its VM, container or sandbox, with its disk and every session on it |
-| `--force` | go on although work is lost: with `--destroy`, delete the machine although a session is working |
+| `--force` | go on although work is lost: with `--destroy` or `--purge`, discard working sessions and unsaved or unpulled work |
+| `--json` | print JSON for scripts, and ask nothing (see docs/how-to/scripting.md) |
+| `--purge` | remove installed host resources, stop every session and report what remains |
+| `--root-step <string>` | with `--purge`, handle the fixed root undo: run, print or skip (default depends on tier and sandbox history) |
 
 ## Flags from the parent command
 

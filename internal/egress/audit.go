@@ -41,6 +41,15 @@ func FormatAudit(e AuditEntry, sc *Scrubber, now time.Time) AuditEntry {
 	e.Host = cleanAuditText(e.Host, secrets, 253)
 	e.Method = cleanAuditText(e.Method, secrets, 16)
 	e.Path = cleanAuditPath(e.Path, secrets)
+	e.Reason = cleanAuditText(e.Reason, secrets, 200)
+	if e.Usage != "reported" && e.Usage != "estimate" {
+		e.Usage = ""
+		e.ModelUsage = nil
+		e.UsageSaturated = false
+	}
+	if e.By != "live" && e.By != "classifier" {
+		e.By = ""
+	}
 	if e.Mode == "" {
 		e.Mode = "splice"
 	}

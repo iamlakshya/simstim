@@ -26,8 +26,11 @@ simstim attach my-vps/auth-fix      # go back to a session
 | Command | What it does |
 | --- | --- |
 | [`new`](new.md) | Start a session on a host, and attach to it |
+| [`shell`](shell.md) | Open a shell beside a session |
 | [`attach`](attach.md) | Attach to a session |
 | [`resume`](resume.md) | Start a session's agent again after it ended, and attach to it |
+| [`fork`](fork.md) | Copy a sandbox into independent sessions |
+| [`rewind`](rewind.md) | List disk checkpoints or return to one |
 | [`ls`](ls.md) | List sessions on every host, or on one |
 | [`show`](show.md) | Describe one session: its agent, state, folder and the command that attaches to it |
 | [`stop`](stop.md) | Stop a sandbox and keep its work and conversation |
@@ -54,8 +57,11 @@ simstim attach my-vps/auth-fix      # go back to a session
 | [`host create`](host_create.md) | Make a host with lima, docker or e2b, and connect it |
 | [`host default`](host_default.md) | Show or choose the default host for new sessions |
 | [`host doctor`](host_doctor.md) | Check a host's setup, and with `--fix` fix what it can |
+| [`host invite`](host_invite.md) | Make a public invite for a machine to prepare itself |
+| [`host join`](host_join.md) | Prepare this machine from a laptop invite on standard input |
+| [`host leave`](host_leave.md) | Undo this machine's original root-owned join ledger |
 | [`host ls`](host_ls.md) | List hosts |
-| [`host prepare`](host_prepare.md) | Probe a host and show its optional root steps |
+| [`host prepare`](host_prepare.md) | Probe a host, prepare its runtime and test its sandbox wall |
 | [`host rekey`](host_rekey.md) | Replace a host's pinned host key, after you confirm |
 | [`host restore`](host_restore.md) | Start again the sessions that a host restart stopped |
 | [`host rm`](host_rm.md) | Forget a host, or delete a created machine |
@@ -73,10 +79,15 @@ simstim attach my-vps/auth-fix      # go back to a session
 | --- | --- |
 | [`policy`](policy.md) | Read and change sandbox policy at any layer |
 | [`policy allow`](policy_allow.md) | Add an allow rule at one policy layer |
+| [`policy apply`](policy_apply.md) | Preview and apply current policy files to running sandboxes |
 | [`policy check`](policy_check.md) | Explain which rule and layer decides a destination |
 | [`policy deny`](policy_deny.md) | Add an deny rule at one policy layer |
+| [`policy edit`](policy_edit.md) | Edit one policy file, check it and preview its live changes |
+| [`policy learn`](policy_learn.md) | Turn selected observed network destinations into policy rules |
+| [`policy lockdown`](policy_lockdown.md) | Pause session allowances and refuse unknown network destinations |
 | [`policy log`](policy_log.md) | Read one session's network decisions |
 | [`policy ls`](policy_ls.md) | Show the merged policy and each value's layer |
+| [`policy refuse`](policy_refuse.md) | Refuse one held network request by its opaque ID |
 | [`policy rm`](policy_rm.md) | Remove a rule from one policy layer |
 
 ## Agents

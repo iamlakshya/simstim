@@ -45,6 +45,8 @@ func (a *ExecArgs) Normalise() error {
 // JoinArgs creates another terminal in an existing sandbox. Its environment,
 // wall, workspace, files and grant ceiling come from the primary session.
 type JoinArgs struct {
+	// ProtectedTrustedSecretValues is private trusted-caller delivery, never guest environment.
+	ProtectedTrustedSecretValues map[string]Secret `json:"protected_trusted_secret_values,omitempty"`
 	// SecretGeneration restricts the sealed current cohort; it grants no local name authority.
 	SecretGeneration   string                `json:"secret_generation,omitempty"`
 	Snapshot           *SandboxSnapshot      `json:"snapshot"`

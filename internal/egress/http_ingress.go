@@ -93,6 +93,7 @@ func serveHTTPConnection(ctx context.Context, conn net.Conn, config *tls.Config,
 }
 
 type http1Turn struct {
+	forward     *httpForwarding
 	done        chan struct{}
 	upgraded    chan struct{}
 	once        sync.Once
@@ -138,7 +139,7 @@ func (s *Server) serveHTTP1(ctx context.Context, conn net.Conn, reader io.Reader
 	served := &httpServerConn{Conn: serverEnd, forward: forward}
 	tunnel.setBodyStop(func() { _ = serverEnd.Close(); _ = guardEnd.Close() })
 	newTurn := func() *http1Turn {
-		return &http1Turn{done: make(chan struct{}), upgraded: make(chan struct{}),
+		return &http1Turn{forward: forward, done: make(chan struct{}), upgraded: make(chan struct{}),
 			drain: func() { forward.wait(ctx) },
 			stopRead: func() {
 				_ = serverEnd.SetReadDeadline(time.Now())
@@ -337,18 +338,19 @@ func (s *Server) serveIntercept(ctx context.Context, conn net.Conn, reader io.Re
 		return s.formatAudit(entry)
 	}
 	_ = conn.SetReadDeadline(time.Time{})
-	if !s.currentEngine().permitsIntercept(hdr.Host, hdr.Port) && !s.decoyHost(hdr.Host, hdr.Port) {
+	_, pendingRefusal := ctx.Value(pendingNetworkRefusalKey{}).(pendingNetworkRefusal)
+	if !pendingRefusal && !s.currentEngine().permitsIntercept(hdr.Host, hdr.Port) && !s.decoyHost(hdr.Host, hdr.Port) && !s.classifierServiceInspection(s.currentEngine(), hdr.Host, hdr.Port) {
 		return s.formatAudit(entry)
 	}
 	if client.ConnectionState().NegotiatedProtocol == "h2" {
 		var summaryMu sync.Mutex
 		var last *httpAuditResult
-		serveHTTPConnection(ctx, client, config, http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		_ = servePhysicalHTTP2(ctx, client, http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 			requestEntry := s.proxyHTTPRequest(w, req, hdr, "https", nil)
 			summaryMu.Lock()
 			last = requestEntry
 			summaryMu.Unlock()
-		}), nil)
+		}))
 		summaryMu.Lock()
 		if last != nil {
 			entry = last.get()

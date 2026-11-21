@@ -104,7 +104,7 @@ func imagePullCmd() *cobra.Command {
 		})
 	}}
 	command.Flags().BoolVar(&update, "update", false, "pin a moved tag after showing its old and new digests")
-	command.Flags().StringVar(&mode, "images", "", "get image bytes from auto, host or laptop (default: [images] fetch)")
+	addImages(command, &mode, "get image bytes from auto, host or laptop (default: [images] fetch)")
 	addJSON(command, &asJSON)
 	return command
 }

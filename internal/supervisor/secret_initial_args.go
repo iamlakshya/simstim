@@ -34,6 +34,7 @@ func boundStartupArgs(ctx context.Context, initial egress.InitArgs, retained *ap
 		}
 		args.Modes = maps.Clone(retained.Intent.Modes)
 		args.Binds = api.CloneSecretBinds(retained.Intent.Binds)
+		args.TrustedUses = api.CloneTrustedSecretUses(retained.Intent.TrustedUses)
 		if args.Modes == nil {
 			args.Modes = make(map[string]api.SecretMode)
 		}
@@ -44,6 +45,8 @@ func boundStartupArgs(ctx context.Context, initial egress.InitArgs, retained *ap
 		args.SavedRetired = api.CloneRetiredPrimaryStates(retained.Retired)
 	}
 	if fresh != nil {
+		args.TrustedUses = overlayTrustedUses(args.TrustedUses, fresh.Intent.TrustedUses)
+		args.ProtectedTrustedSecretValues = maps.Clone(fresh.ProtectedTrustedSecretValues)
 		if err := overlayStartupIntent(args.Modes, args.Binds, fresh.Intent); err != nil {
 			return egress.BoundInitArgs{}, err
 		}
@@ -63,6 +66,10 @@ func boundStartupArgs(ctx context.Context, initial egress.InitArgs, retained *ap
 		if err := overlayStartupIntent(args.Modes, args.Binds, *owned); err != nil {
 			return egress.BoundInitArgs{}, err
 		}
+		args.TrustedUses = overlayTrustedUses(args.TrustedUses, owned.TrustedUses)
+	}
+	if err := validateProtectedTrustedValues(args.TrustedUses, args.ProtectedTrustedSecretValues, false); err != nil {
+		return egress.BoundInitArgs{}, err
 	}
 	retired := &api.SessionSecretState{Retired: args.SavedRetired}
 	for name, mode := range args.Modes {
@@ -129,6 +136,11 @@ func coldStartupIntent(root host.Manifest, members []*host.Manifest, retained *a
 		owned, _, err := host.PrepareSecretDelivery(&record.SecretState.Intent, nil, true, recordedSecretNames(record.Secrets))
 		if err != nil {
 			return nil, err
+		}
+		for name, use := range owned.TrustedUses {
+			if _, exists := intent.TrustedUses[name]; !exists {
+				intent.TrustedUses = overlayTrustedUses(intent.TrustedUses, map[string]api.TrustedSecretUseV1{name: use})
+			}
 		}
 		for name, mode := range owned.Modes {
 			if _, exists := intent.Modes[name]; exists {

@@ -236,5 +236,18 @@ func untar(bundle []byte) (map[string][]byte, error) {
 // isHelper accepts the helper files and the manifest from the same signed
 // release bundle. The client needs that manifest's runtime digests as well.
 func isHelper(name string) bool {
-	return name == supply.FileName || strings.HasPrefix(name, "host-") || strings.HasPrefix(name, "vt-") || strings.HasPrefix(name,"userns-")
+	if name == supply.FileName || strings.HasPrefix(name, "host-") || strings.HasPrefix(name, "vt-") || strings.HasPrefix(name, "userns-") {
+		return true
+	}
+	for _, arch := range supply.Arches {
+		if name == "launch-"+arch {
+			return true
+		}
+		for _, system := range []string{"darwin", "linux"} {
+			if name == "image-verifier-"+system+"-"+arch {
+				return true
+			}
+		}
+	}
+	return false
 }

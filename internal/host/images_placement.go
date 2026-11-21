@@ -13,29 +13,105 @@ import (
 // or copied part exists. It retains that reservation through every transfer's
 // exact cleanup; only the Store's short final gate publishes stable names.
 func (s *imageService) open(ctx context.Context) (*image.Store, error) {
+	s.openMu.Lock()
+	defer s.openMu.Unlock()
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	if s.closed {
+		s.mu.Unlock()
 		return nil, fmt.Errorf("image connection has ended")
 	}
-	if s.store != nil {
-		if s.publication.ctx.Err() != nil {
-			return nil, context.Cause(s.publication.ctx)
+	if s.closeErr != nil {
+		publication, store := s.publication, s.store
+		s.mu.Unlock()
+		if err := s.closeImageOpenV1(publication, store); err != nil {
+			return nil, err
 		}
-		return s.store, nil
+		s.mu.Lock()
+		if s.closed {
+			s.mu.Unlock()
+			return nil, fmt.Errorf("image connection has ended")
+		}
 	}
-	publication, err := beginRuntimePublication(ctx)
+	if s.store != nil {
+		store, publication := s.store, s.publication
+		s.mu.Unlock()
+		if publication.ctx.Err() != nil {
+			return nil, context.Cause(publication.ctx)
+		}
+		return store, nil
+	}
+	if s.connection == nil {
+		s.connection = ctx
+	}
+	connection := s.connection
+	pending := s.publication
+	s.mu.Unlock()
+	if pending != nil {
+		if err := s.closeImageOpenV1(pending, nil); err != nil {
+			return nil, err
+		}
+	}
+	// Abort must be able to acquire mu and cancel this request while the
+	// original publication reservation or store is being acquired.
+	publication, err := beginImagePublicationV1(ctx, connection)
 	if err != nil {
 		return nil, err
 	}
-	store, err := image.OpenHost(publication.ctx, paths.ImagesDir(), publication.owner.domain(), publication.gate)
-	if err != nil {
-		return nil, errors.Join(err, publication.close())
+	s.mu.Lock()
+	s.publication = publication // Adopt before any subsequent failure branch.
+	s.mu.Unlock()
+	if err := publication.prepareStorageFootprintsV1(publication.ctx, "images"); err != nil {
+		return nil, errors.Join(err, s.closeImageOpenV1(publication, nil))
 	}
-	s.publication, s.store = publication, store
-	s.transfers = map[string]*image.Transfer{}
+	store, err := image.OpenHost(publication.ctx, paths.ImagesDir(), publication.owner.domain(), publication.gate)
+	s.mu.Lock()
+	s.store = store
+	closed := s.closed
+	s.mu.Unlock()
+	if err != nil {
+		return nil, errors.Join(err, s.closeImageOpenV1(publication, store))
+	}
+	if closed {
+		return nil, errors.Join(fmt.Errorf("image connection has ended"), s.closeImageOpenV1(publication, store))
+	}
+	s.mu.Lock()
+	if s.transfers == nil {
+		s.transfers = map[string]*image.Transfer{}
+	}
+	s.mu.Unlock()
 	go func() { <-publication.ctx.Done(); _ = s.close() }()
 	return store, nil
+}
+
+// Called with openMu held. The connection keeps failed partial-open objects;
+// no new publisher can replace them until this same ordered cleanup succeeds.
+func (s *imageService) closeImageOpenV1(publication *runtimePublication, store *image.Store) error {
+	if store != nil {
+		if err := store.Close(); err != nil {
+			s.mu.Lock()
+			s.closeErr = err
+			s.mu.Unlock()
+			return err
+		}
+		s.mu.Lock()
+		if s.store == store {
+			s.store = nil
+		}
+		s.mu.Unlock()
+	}
+	if err := publication.close(); err != nil {
+		s.mu.Lock()
+		s.closeErr = err
+		s.mu.Unlock()
+		return err
+	}
+	s.mu.Lock()
+	if s.publication == publication {
+		s.publication = nil
+	}
+	s.closeErr = nil
+	s.mu.Unlock()
+	return nil
 }
 
 func openImageInventory(ctx context.Context) (*image.Store, error) {
@@ -64,30 +140,51 @@ func (s *imageService) operationContext(ctx context.Context) (context.Context, f
 	}
 	owned, cancel := context.WithCancelCause(ctx)
 	stop := context.AfterFunc(publication.ctx, func() { cancel(context.Cause(publication.ctx)) })
-	return owned, func() { stop(); cancel(context.Canceled) }, nil
+	return context.WithValue(owned, publicationSourceContextV1{}, publication.operation), func() { stop(); cancel(context.Canceled) }, nil
 }
 
 func (s *imageService) close() error {
-	s.closeOnce.Do(func() {
-		s.mu.Lock()
-		s.closed = true
-		for _, job := range s.jobs {
-			job.cancel()
+	s.closeMu.Lock()
+	defer s.closeMu.Unlock()
+	s.mu.Lock()
+	s.closed = true
+	for _, job := range s.jobs {
+		job.cancel()
+	}
+	s.mu.Unlock()
+	s.active.Wait()
+	s.openMu.Lock()
+	defer s.openMu.Unlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var result error
+	for token, transfer := range s.transfers {
+		if err := transfer.Close(); err != nil {
+			result = errors.Join(result, err)
+		} else {
+			delete(s.transfers, token)
 		}
-		s.mu.Unlock()
-		s.active.Wait()
-		s.mu.Lock()
-		for _, transfer := range s.transfers {
-			s.closeErr = errors.Join(s.closeErr, transfer.Close())
+	}
+	if result != nil {
+		// Preserve the SAME store, creator capabilities and publication beneath
+		// unfinished cleanup. A second Close retries this original source.
+		s.closeErr = result
+		return result
+	}
+	if s.store != nil {
+		if err := s.store.Close(); err != nil {
+			s.closeErr = err
+			return err
 		}
-		if s.store != nil {
-			s.closeErr = errors.Join(s.closeErr, s.store.Close())
+		s.store = nil
+	}
+	if s.publication != nil {
+		if err := s.publication.close(); err != nil {
+			s.closeErr = err
+			return err
 		}
-		publication := s.publication
-		s.mu.Unlock()
-		if publication != nil {
-			s.closeErr = errors.Join(s.closeErr, publication.close())
-		}
-	})
-	return s.closeErr
+		s.publication = nil
+	}
+	s.closeErr = nil
+	return nil
 }

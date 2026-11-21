@@ -23,6 +23,7 @@ import (
 	"github.com/iamlakshya/simstim/internal/jail"
 	"github.com/iamlakshya/simstim/internal/paths"
 	"github.com/iamlakshya/simstim/internal/proto"
+	"github.com/iamlakshya/simstim/internal/runtimecache"
 	"github.com/iamlakshya/simstim/internal/supply"
 	"github.com/iamlakshya/simstim/internal/wall"
 	"golang.org/x/sys/unix"
@@ -33,11 +34,17 @@ import (
 // The canonical signed-runtime opener owns construction and checks all runsc
 // companions from the same original protected operation before returning it.
 type Runtime struct {
-	mu          sync.Mutex
-	program     *os.File
-	item        supply.Item
-	files       []*os.File
-	executables []Executable
+	projections     []*ControllerCodeV1
+	store           *runtimecache.Store
+	pendingFiles    []*os.File
+	closeErr        error
+	closing, closed bool
+	mu              sync.Mutex
+	protectedSuite  *ProtectedSuiteV1
+	program         *os.File
+	item            supply.Item
+	files           []*os.File
+	executables     []Executable
 }
 
 func (r *Runtime) Close() error {
@@ -46,14 +53,65 @@ func (r *Runtime) Close() error {
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	var result error
-	for _, f := range append([]*os.File{r.program}, r.files...) {
-		if f != nil {
-			result = errors.Join(result, f.Close())
+	if r.closed {
+		return nil
+	}
+	r.closing = true
+	if r.closeErr != nil {
+		return r.closeErr
+	}
+	if r.store != nil {
+		if err := r.store.Close(); err != nil {
+			return err
+		}
+		r.store = nil
+	}
+	for _, projection := range r.projections {
+		if err := projection.closeParentOwnedV1(); err != nil {
+			r.closeErr = errors.Join(r.closeErr, err)
 		}
 	}
-	r.program, r.files, r.executables = nil, nil, nil
-	return result
+	if r.closeErr != nil {
+		return r.closeErr
+	}
+	if r.protectedSuite != nil {
+		if err := r.protectedSuite.closeLockedV1(); err != nil {
+			return err
+		}
+	}
+	for index, file := range r.pendingFiles {
+		if file == nil {
+			continue
+		}
+		if err := file.Close(); err != nil {
+			r.closeErr = errors.Join(r.closeErr, err)
+		} else {
+			r.pendingFiles[index] = nil
+		}
+	}
+	if r.program != nil {
+		if err := r.program.Close(); err != nil {
+			r.closeErr = errors.Join(r.closeErr, err)
+		} else {
+			r.program = nil
+		}
+	}
+	for index, file := range r.files {
+		if file == nil {
+			continue
+		}
+		if err := file.Close(); err != nil {
+			r.closeErr = errors.Join(r.closeErr, err)
+		} else {
+			r.files[index] = nil
+		}
+	}
+	if r.closeErr != nil {
+		return r.closeErr
+	}
+	r.pendingFiles, r.files, r.executables = nil, nil, nil
+	r.closed = true
+	return nil
 }
 
 // OwnedCommand adds physical closure evidence to the actual namespace command.
@@ -88,6 +146,9 @@ type Executable struct {
 // CommandRequest carries only owned file capabilities and the one canonical
 // typed process mount plan to the existing gvisor-purpose jail owner.
 type CommandRequest struct {
+	Topology    *NativeTopologyV1
+	Suite       *ProtectedSuiteV1
+	ForkMounts  *ForkMountsV1
 	Spec        jail.Spec
 	Mounts      []wall.Mount
 	MountFiles  []*os.File
@@ -142,10 +203,14 @@ func (d *Driver) prepare(ctx context.Context, spec wall.Spec, existing bool) (wa
 		return nil, failure("wall_setup", "gvisor needs a trusted private session, helper and fresh process filesystem", nil)
 	}
 	storage, err := prepareStorage(ctx, spec, existing)
-	if err != nil {
+	if storage == nil {
 		return nil, failure("wall_setup", "cannot prepare gvisor runtime storage", err)
 	}
-	return &sandbox{driver: d, spec: spec, owner: ctx, storage: storage, done: make(chan struct{}), exit: wall.Exit{Code: -1}}, nil
+	resource := &sandbox{driver: d, spec: spec, owner: ctx, storage: storage, done: make(chan struct{}), exit: wall.Exit{Code: -1}, preparationErr: err}
+	if err != nil {
+		return resource, failure("wall_setup", "cannot prepare gvisor runtime storage", err)
+	}
+	return resource, nil
 }
 
 // ConstructionProbeV1 reports supported construction facts without executing
@@ -182,35 +247,46 @@ func ConstructionProbeV1(ctx context.Context) wall.Probe {
 }
 
 func (d *Driver) Probe(ctx context.Context) wall.Probe {
+	// Execution needs an original caller that can retain a real failed probe.
+	// A display-only Driver interface has no resource-return channel.
+	return ConstructionProbeV1(ctx)
+}
+
+// ProbeOwnedV1 returns the actual physical probe resource even on failure.
+// The original host probe purpose must adopt it before handling Probe.OK.
+func (d *Driver) ProbeOwnedV1(ctx context.Context) (result wall.Probe, resource wall.Sandbox) {
 	p := ConstructionProbeV1(ctx)
 	if !p.CanPrepare {
-		return p
+		return p, resource
 	}
 	spec, ok := wall.ExpectedSpec(ctx)
 	if !ok || spec.ID != "gvisorprobe" || spec.Root != wall.Reset || spec.Image != nil || spec.VM != nil {
-		return p
+		return p, resource
 	}
 	// These are the factory's private native-purpose projections. A supplied
 	// Spec alone cannot obtain either the original runtime or its host domain.
 	if _, err := d.options.ExpectedRuntime(ctx); err != nil {
 		p.Reason, p.Fix = err.Error(), "Prepare the selected runtime on the same authenticated connection."
-		return p
+		return p, resource
 	}
 	if _, err := d.options.Domain(ctx); err != nil {
 		p.Reason, p.Fix = err.Error(), "Retain the original host account and physical probe owner."
-		return p
+		return p, resource
 	}
 	probe, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	storage, err := prepareStorage(probe, spec, false)
-	if err == nil {
-		s := &sandbox{driver: d, spec: spec, owner: probe, storage: storage, done: make(chan struct{}), exit: wall.Exit{Code: -1}, smoke: true}
-		_, err = s.Start(probe)
+	if storage != nil {
+		s := &sandbox{driver: d, spec: spec, owner: probe, storage: storage, done: make(chan struct{}), exit: wall.Exit{Code: -1}, smoke: true, preparationErr: err}
+		resource = s
 		if err == nil {
-			result := s.Wait()
-			err = result.Err
-			if err == nil && result.Code != 0 {
-				err = fmt.Errorf("runsc smoke exited with code %d", result.Code)
+			_, err = s.Start(probe)
+			if err == nil {
+				result := s.Wait()
+				err = result.Err
+				if err == nil && result.Code != 0 {
+					err = fmt.Errorf("runsc smoke exited with code %d", result.Code)
+				}
 			}
 		}
 		cleanupErr := s.Destroy()
@@ -224,10 +300,10 @@ func (d *Driver) Probe(ctx context.Context) wall.Probe {
 		if errors.As(err, &supplied) {
 			p.Fix = supplied.Hint
 		}
-		return p
+		return p, resource
 	}
 	p.OK, p.Reason, p.Fix = true, "", ""
-	return p
+	return p, resource
 }
 
 func supportsKernel(release string) bool {
@@ -247,6 +323,9 @@ func supportsKernel(release string) bool {
 }
 
 type sandbox struct {
+	topology                                                     *NativeTopologyV1
+	forkMounts                                                   *ForkMountsV1
+	nativeLive                                                   *LiveOwnerV1
 	driver                                                       *Driver
 	spec                                                         wall.Spec
 	owner                                                        context.Context
@@ -261,9 +340,15 @@ type sandbox struct {
 	started, released, destroyed, physical, forced, hello, smoke bool
 	version                                                      string
 	runtime                                                      *Runtime
+	preparationErr                                               error
 }
 
-func (s *sandbox) Abilities() wall.Abilities { return wall.Abilities{} }
+func (s *sandbox) Abilities() wall.Abilities {
+	s.mu.Lock()
+	owner := s.nativeLive
+	s.mu.Unlock()
+	return wall.Abilities{Freeze: owner.FreezeAvailableV1()}
+}
 func (s *sandbox) CleanExit() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()

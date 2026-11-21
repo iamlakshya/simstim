@@ -166,12 +166,22 @@ func (d HostDetails) Facts() []Detail {
 	if d.Tier == TierShared && d.Host.Name != "" {
 		sysLine.Note = "reported by " + CleanDetail(d.Host.Name)
 	}
-	return []Detail{
+	lines := append([]Detail{
 		sysLine,
 		{Label: "Helper", Value: brand.HostBinary + " " + CleanDetail(i.Version)},
 		ad,
 		{Label: "Limits", Value: SizeText(i.MemoryMax) + " for sessions" + Dot + Plural(d.Sessions, "session", "sessions")},
+	}, hostHealthDetailsV1(i)...)
+	if i.Sandbox != nil {
+		value := "off, file cloning probe did not succeed"
+		if i.Sandbox.Reflink {
+			value = "available for microvm sandboxes"
+		} else if i.Sandbox.DiskFS == "ext4" {
+			value = "off, ext4 cannot clone files"
+		}
+		lines = append(lines, Detail{Label: "Checkpoints", Value: value})
 	}
+	return lines
 }
 
 // Plural is n with the word for it: "1 CPU", "4 CPUs".

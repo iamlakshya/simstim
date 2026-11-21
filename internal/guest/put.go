@@ -39,7 +39,9 @@ func putTarget(header proto.FilePutHeaderV1) (top, relative string, err error) {
 	if err := filecopy.Name(header.Name); err != nil {
 		return "", "", err
 	}
-	if header.Directory && (header.Path=="" || header.Size!=0 || header.Replace || header.SHA256!=api.EmptyInputHash) { return "","",putError("invalid empty-directory declaration") }
+	if header.Directory && (header.Path == "" || header.Size != 0 || header.Replace || header.SHA256 != api.EmptyInputHash) {
+		return "", "", putError("invalid empty-directory declaration")
+	}
 	if header.Path != "" {
 		return filecopy.GuestPath(header.Path)
 	}
@@ -78,8 +80,14 @@ func RunPutHelper(args []string) (returned error) {
 	defer func() { returned = errors.Join(returned, root.Close()) }()
 	result := proto.FilePutResultV1{Version: proto.FileTransferVersionV1, Path: path.Join(top, relative)}
 	var receiveErr error
-	if header.Directory { receiveErr=filecopy.MakeDirectory(context.Background(),root,relative,reader) } else { receiveErr=filecopy.ReceiveFile(context.Background(),root,relative,header.Size,header.SHA256,header.Replace,reader) }
-	if receiveErr!=nil { result.Path,result.Error="",asPutError(receiveErr) }
+	if header.Directory {
+		receiveErr = filecopy.MakeDirectory(context.Background(), root, relative, reader)
+	} else {
+		receiveErr = filecopy.ReceiveFile(context.Background(), root, relative, header.Size, header.SHA256, header.Replace, reader)
+	}
+	if receiveErr != nil {
+		result.Path, result.Error = "", asPutError(receiveErr)
+	}
 	return json.NewEncoder(os.Stdout).Encode(result)
 }
 
@@ -112,6 +120,12 @@ func (g *Init) servePut(st *link.Stream) {
 	}{}) {
 		return
 	}
+	if g.unwalled != nil {
+		if err := g.unwalledPutV1(ctx, st, header); err != nil {
+			g.putReply(st, "", err)
+		}
+		return
+	}
 	top, relative, err := putTarget(header)
 	if err != nil {
 		g.putReply(st, "", err)
@@ -123,8 +137,12 @@ func (g *Init) servePut(st *link.Stream) {
 			return
 		}
 	}
-	if handled,err:=g.ownedVMFilePut(ctx,st,header);handled {
-		if err!=nil{g.putReply(st,"",err)}else{g.putReply(st,path.Join(top,relative),nil)}
+	if handled, err := g.ownedVMFilePut(ctx, st, header); handled {
+		if err != nil {
+			g.putReply(st, "", err)
+		} else {
+			g.putReply(st, path.Join(top, relative), nil)
+		}
 		return
 	}
 	executable, err := g.helperExecutable()

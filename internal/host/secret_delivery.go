@@ -5,6 +5,7 @@ import (
 	"slices"
 
 	"github.com/iamlakshya/simstim/internal/api"
+	"github.com/iamlakshya/simstim/internal/egress"
 	"github.com/iamlakshya/simstim/internal/secretbind"
 )
 
@@ -33,6 +34,17 @@ func PrepareSecretDelivery(intent *api.SecretDeliveryIntent, values map[string]a
 		}
 	}
 	owned := api.CloneSecretDeliveryIntent(*intent)
+	for name, use := range owned.TrustedUses {
+		if !walled || egress.ValidateTrustedSecretUseV1(name, use) != nil {
+			return refuse()
+		}
+		binding, err := secretbind.Canonical(use.Bind)
+		if err != nil {
+			return refuse()
+		}
+		use.Bind = binding
+		owned.TrustedUses[name] = use
+	}
 	names := slices.Sorted(maps.Keys(owned.Modes))
 	if allowedSet != nil && len(names) != len(allowedSet) {
 		return refuse()

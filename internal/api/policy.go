@@ -89,6 +89,8 @@ type Rule struct {
 	Door    Door      `json:"door"`
 	Target  string    `json:"target"`
 	Mode    string    `json:"mode,omitempty"`
+	// PublicOnly restricts an allowance to public addresses, including late DNS.
+	PublicOnly bool `json:"public_only,omitempty" toml:"public_only,omitempty"`
 	// Methods preserves absent versus explicit empty exact HTTP token sets.
 	Methods *[]string `json:"methods,omitempty" toml:"methods,omitempty"`
 	// Tools grants provider capabilities only for this session and exact host.
@@ -139,6 +141,12 @@ type LayerRef struct {
 
 // Policy is the merged policy of a sandbox.
 type Policy struct {
+	// LayersHash names the complete desired laptop vector. It grants nothing.
+	LayersHash string `json:"layers_hash,omitempty"`
+	// NextStart lists settings whose pending values need another start.
+	NextStart []string `json:"next_start,omitempty"`
+	// NextLayers is read-only pending laptop data, never native authority.
+	NextLayers []Layer `json:"next_layers,omitempty"`
 	// Sources is a read-only policy.ls snapshot. It is never persisted in Policy.
 	Sources []Layer `json:"sources,omitempty"`
 	// Order is complete and unique when present. Older policies omit it.
@@ -184,6 +192,9 @@ func RuleID(r Rule) string {
 		} // Admission rejects invalid capabilities.
 		identity += "\x00policy-model-tools-v1\n" + strings.Join(tools, "\n") + "\n"
 	}
+	if r.PublicOnly {
+		identity += "\x00network-public-only-v1\n"
+	}
 	sum := sha256.Sum256([]byte(identity))
 	enc := strings.ToLower(base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(sum[:]))
 	return "g" + enc[:6]
@@ -196,6 +207,8 @@ type PolicyAddArgs struct {
 	Door   Door   `json:"door,omitempty"`
 	Target string `json:"target"`
 	Mode   string `json:"mode,omitempty"`
+	// PublicOnly restricts an allowance to public addresses, including late DNS.
+	PublicOnly bool `json:"public_only,omitempty" toml:"public_only,omitempty"`
 	// Methods preserves absent versus explicit empty exact HTTP token sets.
 	Methods *[]string `json:"methods,omitempty" toml:"methods,omitempty"`
 	// Tools grants provider capabilities only for this session and exact host.

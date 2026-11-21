@@ -21,9 +21,11 @@ func CloneFilePlan(plan *FilePlan) *FilePlan {
 	copy.State.Dirs = slices.Clone(plan.State.Dirs)
 	copy.State.Files = slices.Clone(plan.State.Files)
 	copy.Seed.Includes = slices.Clone(plan.Seed.Includes)
+	copy.Seed.Ecosystems = slices.Clone(plan.Seed.Ecosystems)
 	copy.Repositories = slices.Clone(plan.Repositories)
 	for i := range copy.Repositories {
 		copy.Repositories[i].Includes = slices.Clone(plan.Repositories[i].Includes)
+		copy.Repositories[i].Ecosystems = slices.Clone(plan.Repositories[i].Ecosystems)
 	}
 	return &copy
 }
@@ -49,6 +51,7 @@ func (p *FilePlan) NormaliseRepositories() ([]Seed, string, error) {
 	for i := range repositories {
 		seed := &repositories[i]
 		seed.Includes = slices.Clone(seed.Includes)
+		seed.Ecosystems = slices.Clone(seed.Ecosystems)
 		if !api.InputRepoName(seed.Repo) || seen[seed.Repo] || !seed.Scratch && !api.ValidGitOID(seed.Commit) {
 			return nil, "", UserError("seed_plan", "the protected repository list is invalid or has duplicate names", "Use distinct repository basenames before starting the sandbox.")
 		}

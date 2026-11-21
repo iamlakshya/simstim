@@ -10,6 +10,7 @@ func (s *Session) AbortStreams() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.aborted = true
+	s.cancelGuardedOpens()
 	for _, stream := range s.accepts {
 		stream.closedLocal, stream.writeShut = true, true
 		s.remove(stream)

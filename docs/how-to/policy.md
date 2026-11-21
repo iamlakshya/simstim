@@ -21,6 +21,12 @@ Use `--dry-run` with `allow` or `deny` to see the result without writing a file
 or sending a mutation. Wider layers apply to a running sandbox at its next
 start. The answer says so. A session's network grant applies at once.
 
+The live replacement protocol keeps network and classifier changes separate
+from settings that need another start. The applied level, image, mounts,
+secrets and SSH keys stay in the trusted running record. A pending view names
+those settings separately. A replacement must name the hash it replaces;
+a conflicting write reports the current hash without applying the old one.
+
 ```sh
 simstim policy allow api.example.com --repo . --dry-run
 simstim policy ls --repo . --profile review --host box
@@ -39,8 +45,16 @@ An explicit `network.unknown = "allow"` opens uncovered DNS hosts and public IP 
 Its audit decision is `allow-unknown`. It does not open a refused range or the
 host's own address, and it does not become a numeric exception for private or
 shared addresses. The `open` preset without that explicit unknown action keeps
-its existing refusal of unnamed IP literals. First-host alert delivery is
-still being completed.
+its existing refusal of unnamed IP literals. The first accepted
+`allow-unknown` audit for a host raises `egress_unknown` once in the running
+egress actor. Existing alert destinations and noise limits still apply. A
+live policy change keeps this history; a cold start begins a new one.
+
+This bookkeeping shares the existing bounded destination records. It does
+not allocate a synthetic address or send a DNS lookup for a real-DNS or
+direct-IP flow. If those records are full, only a new untrackable unknown
+allowance is refused, with a resource hint. An existing named grant still
+uses its normal policy path.
 
 With `network.unknown = "classify"`, uncovered flows first meet the fixed
 destination checks. They refuse unnamed IP addresses, the listed exfiltration
@@ -167,3 +181,203 @@ its `GET` and `HEAD` requests keep ordinary network policy. These hosts are
 inspected even after a broad host allowance. The endpoint's normal method
 restriction applies, and an omitted method restriction retains its unrestricted
 meaning. The same original permit handles both endpoint and network authority.
+
+## Public address restrictions
+
+A structured network allowance may set `public_only = true`. It still needs a
+matching allow rule, and all locks, denies, method limits and service checks
+still apply. The field restricts its physical destination after DNS resolution,
+including retries and later policy changes. An older numeric grant cannot open
+a refused range or the host itself for a permit that carries this restriction.
+
+The field survives saved layers, cloning and cold starts. Its absence preserves
+ordinary rules. A helper must support `network-public-only-v1` before it receives
+a restricted rule. The field alone does not complete the held-answer workflow,
+and it never permits a secret-bearing target in a saved file.
+
+## Pending network data
+
+Unknown `ask` flows wait before CONNECT succeeds or an absolute request reaches
+its origin. A flow timeout or disconnect leaves the question open for its
+original `network.ask_open` deadline. A later ordinary policy allowance is
+checked again before the original flow can proceed.
+
+Current pending reads use the live egress owner. They include opaque IDs,
+remaining waiters and the original expiry. Zero waiters do not close a question.
+Refusal uses its exact current ID; a descriptor supplies only descriptive class
+and revision data. Displayed hosts are redacted data and grant no permission.
+The status reason stays generic because the supervisor has no current secret
+redactor; policy reads obtain fresh display rows from egress. Opaque positive
+answers and wider publication remain under implementation.
+
+A target containing a known credential cannot be saved as an ordinary policy
+rule. Its private engine path supports memory-only once or session scope and
+uses the existing matcher and once ledger. A cold actor starts without those
+private rules. All numeric held-answer outputs retain `public_only = true`,
+including answers made on an own host; an answer never creates a private-address
+exception. An independent existing numeric rule still works before unknown
+handling. Public positive-action routing and ordinary session publication
+remain separate work while this engine path is being integrated.
+
+`policy ls --in <host>/<session>` also lists live held network requests when
+its helper supports them. They come before ordinary rules. Each row keeps its
+opaque ID, waiting flow count and original deadline, including when no flow is
+left waiting. Two private targets can have the same masked display and remain
+different requests. Their display text is never a target for an allowance.
+With `--json`, `pending_network` contains the complete versioned snapshot. An
+older helper omits the field; a stopped sandbox reports that its requests are
+unavailable.
+
+## Held network requests in the launcher
+
+Press `p` on a walled session to open its policy. Supported helpers list held
+network requests before ordinary rules. Their yellow rows retain separate
+opaque IDs even when two private targets have the same masked label. A request
+with no waiting flow stays visible until its original deadline.
+
+Select a held row and press `x` to refuse that request, or `r` to refresh the
+complete list. Delete removes an ordinary session rule, never a held request.
+Closing the sheet or changing its connection cancels queued work. A stopped
+sandbox or failed read shows that its live requests are unavailable.
+
+## Apply, edit and learn
+
+A hand edit waits until the next start, or until you apply it:
+
+```sh
+simstim policy apply --dry-run
+simstim policy apply -y
+```
+
+`apply` shows each sandbox's changed layers, then asks before sending them.
+With input off, pass `-y` or `--dry-run`. The client sends to saved hosts in
+parallel, with a five-second limit for each host. A host that cannot be reached
+stays in local pending state. The next contact retries only recorded hosts.
+`allow`, `deny`, `rm` and `apply` list missed hosts and still exit successfully.
+They do not grant permission to a different host identity.
+
+`policy edit --profile review` opens the selected table in `$EDITOR`, runs the
+configuration checks, then shows a dry run. Use `--all`, `--host`, `--repo` or
+`--profile` to choose its file. Session policy has no laptop file to edit.
+
+To propose rules from a session's recorded network allowances:
+
+```sh
+simstim policy learn box/auth-fix --repo . --dry-run
+simstim policy learn box/auth-fix --profile review -y
+```
+
+The list gives each destination and its flow count. Without `-y`, pick each rule
+at a terminal. `-y` selects every proposal. A masked destination cannot become
+a rule. Learning writes only selected rules, then uses the same live apply
+path. A proposal or a returned policy value never supplies a permission.
+
+Learning uses the recorded source of each decision. Some older records have
+no provenance and do not become proposals.
+
+Push allowances keep their separate repository visibility and public-push
+checks. Add one with `policy allow push`; a policy-file edit cannot supply
+those answers. Secrets, SSH keys, mounts, images, sizes, paste and isolation
+levels always need another start.
+
+A `~` marker shows that policy changes are pending. `show` lists pending
+values and the pending isolation level separately from the applied run.
+
+## Pause session allowances
+
+Use `policy lockdown` to apply the locked preset and refuse unknown destinations
+on saved hosts. Limit it to one host with `--host`:
+
+```sh
+simstim policy lockdown
+simstim policy lockdown --host box
+```
+
+Session allowances pause, including once and timed rules. Session denies and
+broader rules remain. Refused open flows close. The host keeps this restriction
+for later starts, including starts made from another laptop.
+
+Lift only that restriction with:
+
+```sh
+simstim policy lockdown --off --confirm=lockdown
+```
+
+At a terminal, `--off` asks for the word `lockdown` when `--confirm` is omitted.
+It leaves local policy edits unapplied and fetches no credentials. A host that
+cannot be reached remains pending, and the command fails. The recorded change
+is retried at the next contact.
+
+All agents in a sandbox share its model usage totals and token budget. The optional model judge counts towards that budget too. The budget keeps token counts that a provider has already reported when an answer ends early. The displayed total marks estimates made from the request and answer sizes.
+
+HTTP estimates count body prefixes written by the original request and answer connections. Headers, chunk framing and HTTP/2 padding do not count as body bytes. Origin read-ahead and bytes still waiting in the server do not count.
+
+When a policy stops one HTTP/2 request, other allowed requests on that connection can continue. The stopped request keeps its original physical writes until they finish or fail. The existing TLS cipher checks still apply.
+
+WebSocket request estimates count only payload prefixes written to the original model connection. Frame headers, masking keys and control messages do not count. A logical turn keeps its original message writer until that write finishes or fails. An early error in one lane lets the other admitted answers finish.
+
+Responses WebSocket events use their echoed `stream_id` to select an ordered lane. Different lanes can interleave. A provider error without an exact request or lane ends that socket. Each admitted answer then counts as an estimate.
+
+When a WebSocket reaches its token budget, every answer already admitted on that socket can finish. A later request waits for those answers, then the socket closes with code 1008.
+
+
+## Answer a held network request
+
+Read `policy ls --in box/abc234de` to find the request's opaque ID. Use that
+unchanged ID with the exact session ID. A masked destination is display text.
+It cannot stand in for a request ID.
+
+```sh
+simstim policy allow --request 00112233445566778899aabbccddeeff --in box/abc234de --once
+simstim policy refuse 00112233445566778899aabbccddeeff --in box/abc234de
+```
+
+Once releases the flows waiting on that request. When none waits, it permits
+the next flow. The next flow after those asks again. An ordinary held request
+also supports a session answer, or an explicit `--repo forge.example/team/app`
+or `--profile review`. A repository or profile answer saves a rule and uses
+the normal policy apply path. A target containing a known credential stays
+in protected memory; it cannot become a file rule.
+
+In the policy sheet, `o` answers once, Enter answers for the session, `r`
+selects an original exact repository section, and `f` selects the original
+profile. An organisation pattern does not become a repository answer; use an
+explicit `--repo` choice when this laptop has no exact section. `x` refuses.
+New sessions with an original local primary retain an empty exact repository
+section, after organisation sections and before the profile. The empty section
+grants nothing. A later repository answer writes there and follows the normal
+policy apply path. Host-reported origins and legacy records cannot create that
+original local reference.
+
+Ctrl+R refreshes. The original request, host and connection remain
+fixed through questions. A changed source, an expired request or an unsupported
+response stops the action. An uncertain answer is not sent again.
+
+## Set an upload budget
+
+Each sandbox has a separate upload budget for each destination host. The
+default is 16 MiB per hour. The first counted upload starts the hour. The
+counter measures bytes written to the upstream TCP connection, including HTTP
+and TLS framing. Model APIs and independently approved push remotes keep their
+existing exclusions. A guest label cannot claim one.
+
+At the limit, the upload waits and appears as an **upload budget** request.
+Choose once to continue its waiting flows, or the next flow when none waits.
+Choose refuse to stop it. The policy sheet offers these two answers. A normal
+network allow does not remove the byte limit. Session, repository and profile
+answers cannot create a lasting budget exception.
+
+For a higher limit, use the normal selected policy writer:
+
+```sh
+simstim policy edit --profile review
+```
+
+Set `network.upload_budget` to a size such as `"32M"` in that layer, then
+apply the policy. `new --set network.upload_budget=32M` selects it for a new
+session. `"0M"` is a zero-byte budget, not an unlimited setting.
+
+Changing policy keeps bytes already spent in the current hour. Raising the
+limit can release a waiting upload after the current policy and budget are
+checked together. Lowering it does not reset the counter. Once does not refill
+the budget; it continues only the flows selected by that original answer.

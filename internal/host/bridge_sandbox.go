@@ -3,6 +3,7 @@ package host
 import (
 	"encoding/json"
 	"errors"
+	"runtime"
 	"strings"
 
 	"github.com/iamlakshya/simstim/internal/api"
@@ -10,16 +11,26 @@ import (
 	"github.com/iamlakshya/simstim/internal/supply"
 )
 
-func init() { Features = append(Features, "sandbox") }
+func init() {
+	Features = append(Features, "sandbox")
+	if runtime.GOOS == "linux" && (runtime.GOARCH == "amd64" || runtime.GOARCH == "arm64") {
+		Features = append(Features, api.FeatureSandboxPrepareV1, api.FeatureVMNeedV1)
+	}
+}
 
 type sandboxProbeArgsV1 struct {
 	ReleaseURL string           `json:"release_url"`
 	Runtime    *supply.Manifest `json:"runtime,omitempty"`
 }
 
-// handleSandbox serves the real read-only diagnostic probe. Native boot
-// admission consumes its original producers independently of these facts.
+// handleSandbox serves the read-only diagnostic probe and the versioned fixed
+// test-boot preparation route. Native boot admission consumes its original
+// producers independently of diagnostic probe facts.
 func (b *bridge) handleSandbox(req proto.Request) bool {
+	if req.Op == "sandbox.prepare" {
+		b.handleSandboxPrepareV1(req)
+		return true
+	}
 	if req.Op != "sandbox.probe" {
 		return false
 	}

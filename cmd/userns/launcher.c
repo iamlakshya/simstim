@@ -132,15 +132,16 @@ static void refuse_initial_capabilities(void) {
      * The ordinary host bounding set may be nonzero and grants nothing. */
 }
 int main(int argc,char **argv) {
-    (void)argv;
+    bool gvisor_outer=argc==2 && !strcmp(argv[1],"gvisor-outer-v1");
     if (prctl(PR_SET_DUMPABLE,0,0,0,0)) fail("clear launcher dumpability");
-    if (argc!=1 || getuid()==0 || geteuid()!=getuid() || getegid()!=getgid()) fail("launcher requires an ordinary unprivileged account and no arguments");
+    if ((argc!=1 && !gvisor_outer) || getuid()==0 || geteuid()!=getuid() || getegid()!=getgid()) fail("launcher requires an ordinary unprivileged account and no arguments");
     refuse_initial_capabilities();
     struct rlimit core={0};if (setrlimit(RLIMIT_CORE,&core)) fail("disable core dumps");
     struct sigaction sa={.sa_handler=interrupted};sigemptyset(&sa.sa_mask);
     if (sigaction(SIGTERM,&sa,NULL) || sigaction(SIGINT,&sa,NULL) || sigaction(SIGHUP,&sa,NULL)) fail("install launcher termination handlers");
     if (prctl(PR_SET_PDEATHSIG,SIGTERM,0,0,0)) fail("arm launcher parent death");
     refuse_tracer();
+    if (gvisor_outer) gvisor_outer_v1(&stopping);
     struct request r={0};read_request(&r);validate_sources(&r);
     uid_t uid=getuid();gid_t gid=getgid();
     int proc=open("/proc",O_PATH|O_DIRECTORY|O_CLOEXEC);if (proc<0) fail("pin genuine proc for original native owner");

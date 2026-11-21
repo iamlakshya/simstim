@@ -2,6 +2,24 @@
 import run_parts
 
 
+def microvm_checks(c,measurements=False):
+    """Run the real selected VM suite only under the canonical host marker."""
+    if c.DISPOSABLE:
+        import microvm
+        microvm.run(c,measurements=measurements)
+    else:
+        c.ok(False,"microvm conformance needs an authenticated disposable host; no hardware check ran")
+
+
+def finish_conformance(c,clean,created,state):
+    """Publish completion only after the existing runner's own final cleanup."""
+    evidence=getattr(c,"conformance_evidence",None)
+    if evidence is not None:
+        evidence.check("runner_cleanup",clean,{"remaining_owned_ids":list(created),"finished":"finished" in state})
+        evidence.data["complete"]=bool(evidence.data.get("suite_finished") and clean and all(row["passed"] for row in evidence.data["checks"].values()))
+        evidence.save()
+
+
 def sandbox_host_checks(c, selected=False):
     """Run sandbox-hosts, or report the owner-host coverage policy."""
     if c.DISPOSABLE:

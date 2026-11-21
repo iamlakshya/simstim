@@ -26,27 +26,30 @@ import (
 // Its original unreaped child or first managed activation stays owned through
 // handoff, start delivery, readiness and synchronous failure cleanup.
 type startupLaunchV1 struct {
-	buildingDone     chan struct{}
-	operation        *SessionOperation
-	placement        *runtimePublication
-	manifest         *Manifest
-	executable       os.FileInfo
-	argv             []string
-	manager          *nativeUserManagerV1
-	unit             *nativeUnitActivationV1
-	command          *exec.Cmd
-	child            *nativeStartupPeerV1
-	line             *StartupLineV1
-	hello            proto.Hello
-	started          bool
-	loanSent         bool
-	ready            bool
-	exited           bool
-	readFailed       bool
-	cleanupConfirmed bool
-	mu               sync.Mutex
-	once             sync.Once
-	closeErr         error
+	buildingDone      chan struct{}
+	operation         *SessionOperation
+	placement         *runtimePublication
+	manifest          *Manifest
+	executable        os.FileInfo
+	argv              []string
+	manager           *nativeUserManagerV1
+	unit              *nativeUnitActivationV1
+	command           *exec.Cmd
+	child             *nativeStartupPeerV1
+	line              *StartupLineV1
+	hello             proto.Hello
+	started           bool
+	loanSent          bool
+	ready             bool
+	exited            bool
+	readFailed        bool
+	cleanupConfirmed  bool
+	mu                sync.Mutex
+	once              sync.Once
+	closeErr          error
+	preparePending    uint8 // only original fixed prepare request IDs 1, 2, 3 and 5
+	prepareFailed     bool
+	prepareCancelSent bool
 }
 
 func launchSupervisorOperation(ctx context.Context, operation *SessionOperation) (_ *startupLaunchV1, failure error) {
@@ -66,8 +69,14 @@ func launchSupervisorOperation(ctx context.Context, operation *SessionOperation)
 	if err := ValidateManifestStart(m); err != nil {
 		return nil, err
 	}
+	if err := checkRewindJournalForStartV1(ctx, operation); err != nil {
+		return nil, err
+	}
 	if len(m.AutomaticRestore) != 0 && operation.AutomaticBoot() == nil {
 		return nil, automaticRestoreError()
+	}
+	if IsSandboxPrepareManifestV1(m) != operation.IsSandboxPrepareV1() {
+		return nil, sessionLeaseError("the outside startup purpose does not match the protected primary")
 	}
 	origin, err := placementForCall()
 	if err != nil {
@@ -84,6 +93,10 @@ func launchSupervisorOperation(ctx context.Context, operation *SessionOperation)
 	launch := &startupLaunchV1{buildingDone: make(chan struct{}), operation: operation, manifest: m, executable: origin.executableRef, argv: append([]string(nil), argv...)}
 	defer close(launch.buildingDone)
 	operation.gate.Lock()
+	if err := checkNewNoRoomTerminalV1(operation); err != nil {
+		operation.gate.Unlock()
+		return nil, err
+	}
 	if !operation.active.Load() || operation.startup != nil {
 		operation.gate.Unlock()
 		return nil, sessionLeaseError("the original operation already owns a native startup or ended")
@@ -112,6 +125,17 @@ func launchSupervisorOperation(ctx context.Context, operation *SessionOperation)
 		launch.unit, err = launch.manager.startSupervisor(launch.placement.ctx, m, origin.executable, argv, launch.placement)
 		launch.started = launch.manager.events.wasDispatched()
 		if err != nil {
+			// A nonnil unit retains its actual observations for cleanup. An
+			// unsuccessful creation check cannot issue Cold creation custody.
+			return launch, err
+		}
+		if err := retainColdCreationV1(operation, launch); err != nil {
+			return launch, err
+		}
+		if err := retainNoneColdCreationV1(operation, launch); err != nil {
+			return launch, err
+		}
+		if err := captureRewindCreationGroupV1(ctx, operation, launch); err != nil {
 			return launch, err
 		}
 		m.Run.Unit = launch.unit.unit
@@ -119,19 +143,37 @@ func launchSupervisorOperation(ctx context.Context, operation *SessionOperation)
 	if err := launch.connect(ctx); err != nil {
 		return launch, err
 	}
-	if err := launch.sendOperationLoan(ctx); err != nil {
+	if operation.IsSandboxPrepareV1() {
+		if err := launch.enableSandboxPrepareCursorV1(); err != nil {
+			return launch, err
+		}
+	}
+	if operation.IsSandboxPrepareV1() {
+		if err := launch.sendSandboxPrepareLoanV1(ctx); err != nil {
+			return launch, err
+		}
+	} else if err := launch.sendOperationLoan(ctx); err != nil {
 		return launch, err
 	}
 	return launch, nil
 }
 
 func (launch *startupLaunchV1) startChild(ctx context.Context, m *Manifest, executable string, expected os.FileInfo, argv []string) error {
+	if launch.operation.nativeColdResume != nil {
+		return auxiliaryUnavailableV1("the original cold native continuation requires its authenticated manager")
+	}
+
 	devnull, err := os.OpenFile(os.DevNull, os.O_RDWR, 0)
 	if err != nil {
 		return err
 	}
 	defer devnull.Close()
-	lock, err := openHolderLockForLaunch(m.ID)
+	var lock *os.File
+	if launch.operation.noneCold != nil {
+		lock, err = noneColdLaunchHolderV1(ctx, launch.operation)
+	} else {
+		lock, err = openHolderLockForLaunch(m.ID)
+	}
 	if err != nil {
 		return err
 	}
@@ -142,8 +184,11 @@ func (launch *startupLaunchV1) startChild(ctx context.Context, m *Manifest, exec
 	command.Env = append(supervisorLaunchEnv(""), holderLockFDEnv+"=3")
 	command.ExtraFiles = []*os.File{lock}
 	command.SysProcAttr = &syscall.SysProcAttr{Setsid: true, PidFD: &pidfd}
-	if err := launch.placement.gate(ctx, func() error {
-		if err := checkStartingMemoryLockedV1(ctx, launch.operation, m); err != nil {
+	if err := launch.placement.gateControl(ctx, func(control *placementControl) error {
+		if err := checkStartingMemoryControlLockedV1(ctx, launch.operation, m, control); err != nil {
+			return err
+		}
+		if err := consumeNoneColdDispatchLockedV1(ctx, launch.operation, launch.placement); err != nil {
 			return err
 		}
 		return startSessionCommand(m, command)
@@ -160,8 +205,16 @@ func (launch *startupLaunchV1) startChild(ctx context.Context, m *Manifest, exec
 		return err
 	}
 	launch.child.proc = proc
-	if err := checkStartupExecutable(proc, expected, argv); err != nil {
+	if err := retainNoneColdCreationV1(launch.operation, launch); err != nil {
 		return err
+	}
+	if err := checkCreatedHelperArgumentsV1(launch.child, argv); err != nil {
+		return err
+	}
+	if launch.operation.IsSandboxPrepareV1() && m.Wall != nil && m.Wall.Level != "microvm" {
+		if err := applySandboxPrepareChildAffinityV1(launch); err != nil {
+			return err
+		}
 	}
 	m.Run.HolderPID = command.Process.Pid
 	return launch.child.checkLive()
@@ -178,12 +231,18 @@ func (launch *startupLaunchV1) check(ctx context.Context) error {
 		return err
 	}
 	if launch.unit != nil {
+		if launch.unit.peer.identity == nil {
+			return launch.unit.checkCreationV1(ctx)
+		}
 		return launch.unit.Check(ctx)
 	}
 	if launch.command == nil || launch.command.Process == nil || launch.child == nil || launch.command.ProcessState != nil {
 		return sessionLeaseError("startup lost its actual unreaped child object")
 	}
-	return errors.Join(launch.child.checkLive(), checkStartupExecutable(launch.child.proc, launch.executable, launch.argv))
+	if launch.child.identity == nil {
+		return checkCreatedHelperArgumentsV1(launch.child, launch.argv)
+	}
+	return errors.Join(launch.child.checkLive(), checkNativeHelperExecutableV1(launch.child, launch.executable, launch.argv))
 }
 
 func (launch *startupLaunchV1) nativePeer() *nativeStartupPeerV1 {
@@ -204,7 +263,7 @@ func (launch *startupLaunchV1) connect(ctx context.Context) error {
 		}
 		conn, err := (&net.Dialer{Timeout: 200 * time.Millisecond}).DialContext(ctx, "unix", paths.Socket(launch.manifest.ID))
 		if err == nil {
-			line, err := NewStartupLineV1(conn)
+			line, err := NewNativeStartupLineV1(conn)
 			if err != nil {
 				_ = conn.Close()
 				return err
@@ -224,7 +283,7 @@ func (launch *startupLaunchV1) connect(ctx context.Context) error {
 				return err
 			}
 			_ = line.SetDeadline(deadline)
-			if err := line.WriteFrame(proto.THello, proto.Hello{Magic: proto.Magic, Protocol: version.Protocol, Version: version.Version, Role: "bridge"}); err != nil {
+			if err := line.WriteNativeHelloV1(proto.Hello{Magic: proto.Magic, Protocol: version.Protocol, Version: version.Version, Role: NativeStartupRoleV1}); err != nil {
 				return err
 			}
 			frame, err := line.ReadFrame()
@@ -232,18 +291,14 @@ func (launch *startupLaunchV1) connect(ctx context.Context) error {
 				launch.readFailed = true
 				return err
 			}
-			if err := line.RejectAncillary(); err != nil {
+			if err := line.AcceptNativeHelloV1(frame); err != nil {
 				return err
 			}
 			if frame.Type != proto.THello || json.Unmarshal(frame.Payload, &launch.hello) != nil || launch.hello.Check(version.Protocol) != nil ||
 				launch.hello.Role != "supervisor" || !supply.IsHex64(launch.hello.StartupNonce) {
 				return sessionLeaseError("the original native supervisor did not offer its one startup challenge")
 			}
-			sender, err := line.currentSender()
-			if err != nil {
-				return err
-			}
-			if err := launch.nativePeer().checkNativeSender(sender); err != nil {
+			if err := line.bindOriginalNativePeerV1(launch.nativePeer()); err != nil {
 				return err
 			}
 			return launch.check(ctx)
@@ -272,18 +327,22 @@ func (launch *startupLaunchV1) waitNativeExit() error {
 			}
 			if err != nil || n != 1 || polls[0].Revents&unix.POLLIN == 0 {
 				if launch.command != nil {
-					_ = launch.command.Wait()
-					launch.exited = true
-					return nil
+					// The SAME unreaped command may supply independent real
+					// wait evidence. Never turn a failed wait into exited.
+					return errors.Join(err, launch.waitOriginalCommand())
 				}
 				if launch.manager != nil {
-					return launch.manager.events.waitOriginalEnd()
+					if endErr := launch.manager.events.waitOriginalEnd(); endErr != nil {
+						return errors.Join(err, endErr)
+					}
+					launch.exited = true
+					return err
 				}
 				return errors.Join(sessionLeaseError("the original native child has no positive physical exit"), err)
 			}
 			launch.exited = true
 			if launch.command != nil {
-				return launch.command.Wait()
+				return launch.waitOriginalCommand()
 			}
 			return nil
 		}
@@ -295,7 +354,11 @@ func (launch *startupLaunchV1) waitNativeExit() error {
 		// An unresolved first manager operation remains in this actual scoped
 		// controller. Only its original negative reply or correlated native
 		// unit removal can finish it; cancellation is never synthetic exit.
-		return launch.manager.events.waitOriginalEnd()
+		if err := launch.manager.events.waitOriginalEnd(); err != nil {
+			return err
+		}
+		launch.exited = true
+		return nil
 	}
 	return sessionLeaseError("the original startup has no retained native lifetime owner")
 }
@@ -310,13 +373,14 @@ func (launch *startupLaunchV1) Close() error {
 		}
 		launch.mu.Lock()
 		defer launch.mu.Unlock()
-		if !launch.ready {
+		if !launch.ready && !launch.exited {
 			if launch.line != nil {
 				launch.closeErr = errors.Join(launch.closeErr, launch.cancelPending())
 			}
 			// Keep the original OP above this call until the exact native exit
 			// joins. No detached cleanup goroutine or timeout releases it.
-			launch.closeErr = errors.Join(launch.closeErr, launch.waitNativeExit())
+			waitErr := launch.waitNativeExit()
+			launch.closeErr = errors.Join(launch.closeErr, launch.sandboxPrepareWaitFailureV1(waitErr))
 		}
 		if launch.line != nil {
 			launch.closeErr = errors.Join(launch.closeErr, launch.line.Close())
@@ -330,7 +394,7 @@ func (launch *startupLaunchV1) Close() error {
 		if launch.manager != nil {
 			launch.closeErr = errors.Join(launch.closeErr, launch.manager.Close())
 		}
-		if launch.command != nil && launch.ready {
+		if launch.command != nil && launch.ready && !launch.exited {
 			launch.closeErr = errors.Join(launch.closeErr, launch.command.Process.Release())
 		}
 		if launch.placement != nil {

@@ -46,6 +46,12 @@ func (g *Init) spawn(a proto.CtlStartArgs) (int, error) {
 }
 
 func (g *Init) endIfEmpty() {
+	// An unwalled holder keeps its final ring and actual controller after the
+	// agent exits, just as the legacy ordinary holder does. Explicit stop and
+	// link loss still run the one real teardown.
+	if g.unwalled != nil {
+		return
+	}
 	g.mu.Lock()
 	empty := g.emptyLocked()
 	if empty {
@@ -113,6 +119,9 @@ func SetPlainHolderSpawnerForTest(fn func() (*syscall.SysProcAttr, error)) func(
 	return func() { plainHolderSpawnerForTests = old }
 }
 func (g *Init) holderProcess() (*syscall.SysProcAttr, error) {
+	if g.unwalled != nil {
+		return g.unwalledProcessV1()
+	}
 	if g.vm != nil {
 		return g.vm.holderProcess()
 	}
@@ -122,6 +131,9 @@ func (g *Init) holderProcess() (*syscall.SysProcAttr, error) {
 	return agentProcess()
 }
 func (g *Init) ptyABI() string {
+	if g.unwalled != nil {
+		return proto.GuestNonePTYV1
+	}
 	if g.vm != nil {
 		return g.vm.ptyABI()
 	}

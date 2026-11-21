@@ -29,6 +29,7 @@ const (
 	OutboundDefaultHost    OutboundKind = "default-host"
 	OutboundRootRun        OutboundKind = "root-run"
 	OutboundSilentUpgrade  OutboundKind = "silent-upgrade"
+	OutboundImageFetchV1   OutboundKind = "image-fetch-v1"
 	// OutboundNet is a policy net allowance already classified as public by
 	// the canonical rule validator. Private targets use OutboundPrivateNet.
 	OutboundNet        OutboundKind = "net"
@@ -45,7 +46,7 @@ func (k OutboundKind) Valid() bool {
 	case OutboundSecret, OutboundSSHAgent, OutboundSSHKey, OutboundAlertToken,
 		OutboundRepo, OutboundForward, OutboundPaste, OutboundReverseForward,
 		OutboundPool, OutboundDefaultHost, OutboundRootRun, OutboundSilentUpgrade,
-		OutboundNet, OutboundPrivateNet, OutboundFloor, OutboundTemplate, OutboundPush, OutboundPublicPush:
+		OutboundNet, OutboundPrivateNet, OutboundFloor, OutboundTemplate, OutboundPush, OutboundPublicPush, OutboundImageFetchV1:
 		return true
 	default:
 		return false
@@ -200,6 +201,8 @@ func allowWithValidatedConfig(h Host, t Tier, o Outbound, s *Settings, view *Sec
 		return allowDefaultHost(h, t, o)
 	case OutboundRootRun:
 		return allowRootRun(h, t, o)
+	case OutboundImageFetchV1:
+		return allowImageFetchV1(h, t, o)
 	case OutboundSilentUpgrade:
 		return allowSilentUpgrade(h, t, o)
 	case OutboundNet:

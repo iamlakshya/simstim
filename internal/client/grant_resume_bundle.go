@@ -51,10 +51,19 @@ func (c *Conn) checkResumeBundle(ctx context.Context, a ResumeArgs) (Tier, error
 }
 
 func cloneResumeValues(a ResumeArgs) ResumeArgs {
+	a.ProtectedTrustedSecretValues = maps.Clone(a.ProtectedTrustedSecretValues)
+	if a.SecretDelivery != nil {
+		intent := api.CloneSecretDeliveryIntent(*a.SecretDelivery)
+		a.SecretDelivery = &intent
+	}
+	a.NamedSSHKeys = api.CloneNamedSSHKeysV1(a.NamedSSHKeys)
+	a.Prepared = api.ClonePreparedResumeV1(a.Prepared)
+	a.ExpectedImageV1 = slices.Clone(a.ExpectedImageV1)
 	a.Secrets, a.Snapshot = maps.Clone(a.Secrets), cloneGrantSnapshot(a.Snapshot)
 	a.Members = slices.Clone(a.Members)
 	for n := range a.Members {
 		a.Members[n].Secrets = maps.Clone(a.Members[n].Secrets)
+		a.Members[n].ProtectedTrustedSecretValues = maps.Clone(a.Members[n].ProtectedTrustedSecretValues)
 	}
 	return a
 }

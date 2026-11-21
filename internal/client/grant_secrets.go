@@ -97,7 +97,19 @@ func FetchSessionSecrets(ctx context.Context, h Host, id string, names []string,
 		}
 	}
 
-	settings := LoadSettings()
+	ctx, imageOperation, err := resumeImageBeforeValues(ctx, h, id, policy)
+	if err != nil {
+		return nil, err
+	}
+	var settings Settings
+	if imageOperation != nil {
+		settings, err = imageOperation.Settings(ctx)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		settings = LoadSettings()
+	}
 	if policy != nil && policy.SSHAgent {
 		if err := allowRequestGrant(ctx, h, hostID, tier, Outbound{Kind: OutboundSSHAgent}, settings); err != nil {
 			return nil, err
@@ -106,7 +118,42 @@ func FetchSessionSecrets(ctx context.Context, h Host, id string, names []string,
 	if err := allowResumeSecretNames(ctx, h, hostID, tier, settings, names, policy); err != nil {
 		return nil, err
 	}
-	return FetchSecrets(ctx, settings, names, terminal)
+	if rewind := originalRewindV1(ctx); rewind != nil {
+		if err := rewind.checkMemberValuesV1(ctx, h, id, names); err != nil {
+			return nil, err
+		}
+		values, err := FetchSecrets(ctx, settings, names, terminal)
+		if err != nil {
+			return nil, err
+		}
+		if err := rewind.checkMemberValuesV1(ctx, h, id, names); err != nil {
+			clear(values)
+			return nil, err
+		}
+		return values, nil
+	}
+	resumeConn, err := originalResumeValueConnectionV1(ctx, h, id)
+	if err != nil {
+		return nil, err
+	}
+	if resumeConn != nil {
+		if err := prepareTrustedJudgeResumeV1(ctx, resumeConn, id); err != nil {
+			return nil, err
+		}
+		if _, err := checkTrustedJudgeResumeBeforeValuesV1(ctx, resumeConn, id); err != nil {
+			return nil, err
+		}
+	}
+	values, err := FetchSecrets(ctx, settings, names, terminal)
+	if err != nil {
+		return nil, err
+	}
+	if resumeConn != nil {
+		if err := fetchTrustedJudgeResumeV1(ctx, resumeConn, id, values, terminal); err != nil {
+			return nil, err
+		}
+	}
+	return values, nil
 }
 
 // VisibleSecretNames lists names eligible for the new-session form.
@@ -141,6 +188,9 @@ func allowSecretNamesAtWall(ctx context.Context, h Host, hostID string, tier Tie
 		return err
 	}
 	for _, name := range names {
+		if err := checkSessionMachineSecretV1(h, settings, name, intent); err != nil {
+			return err
+		}
 		if err := allowRequestGrant(ctx, h, hostID, tier, Outbound{Kind: OutboundSecret, Name: name}, settings); err != nil {
 			return err
 		}

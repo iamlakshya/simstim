@@ -40,7 +40,7 @@ func main() {
 }
 
 func run(args []string, out io.Writer) error {
-	usage := &failure{msg: "say write, assets, check, pin or mirror-vmm", try: "go run ./cmd/supply write -release <version> internal/client/helpers"}
+	usage := &failure{msg: "say write, assets, check, pin, mirror-vmm or default-image", try: "go run ./cmd/supply write -release <version> internal/client/helpers"}
 	if len(args) == 0 {
 		return usage
 	}
@@ -53,8 +53,12 @@ func run(args []string, out io.Writer) error {
 		return check(args[1:], out)
 	case "pin":
 		return pinCmd(args[1:], out)
+	case "mirror-mac-runtime":
+		return mirrorMacRuntimeCmd(args[1:], out)
 	case "mirror-vmm":
 		return mirrorVMMCmd(args[1:], out)
+	case "default-image":
+		return defaultImageCmd(args[1:], out)
 	}
 	return usage
 }
@@ -72,8 +76,18 @@ func write(args []string, out io.Writer) error {
 	lockPath := fs.String("lock", "guest/supply.lock", "path to guest/supply.lock")
 	configsDir := fs.String("configs", "guest/kernel", "folder holding config-amd64 and config-arm64")
 	requireGuest := fs.Bool("require-guest", false, "fail unless the guest boot pair for both architectures is present")
+	requireEFI := fs.Bool("require-kernel-efi", false, "require both exact Linux EFI kernel artifacts")
 	vmmDir := fs.String("vmm", "", "the VMM build folder, holding inputs and assets")
 	requireVMM := fs.Bool("require-vmm", false, "fail unless every pinned VMM is mirrored for both architectures")
+	gvisorDir := fs.String("gvisor", "", "folder holding both exact native five-role gvisor builds")
+	requireGvisor := fs.Bool("require-gvisor", false, "require both current patched native gvisor closures")
+	imagesDir := fs.String("images", "", "folder holding both prepared default OCI images")
+	requireImages := fs.Bool("require-images", false, "fail unless both actual default OCI image pins are prepared")
+	requireLaunch := fs.Bool("require-launch", false, "require both actual separate-account launcher binaries")
+	requireVerifier := fs.Bool("require-image-verifier", false, "require all four actual offline signature verifier binaries")
+	macRuntimeDir := fs.String("mac-runtime", "", "the checked Mac runtime mirror folder")
+	macRuntimeLock := fs.String("mac-runtime-lock", "guest/mac-host.lock", "the public Mac runtime pins")
+	requireMacRuntime := fs.Bool("require-mac-runtime", false, "require both actual pinned Mac host artefacts")
 	if err := fs.Parse(args); err != nil {
 		return &failure{msg: err.Error(), try: "go run ./cmd/supply write -release <version> internal/client/helpers"}
 	}
@@ -106,8 +120,13 @@ func write(args []string, out io.Writer) error {
 	if len(m.Items) == 0 {
 		return &failure{msg: "no helper in " + dir, try: "build the helpers first: just helpers"}
 	}
-	if *guestDir != "" || *requireGuest {
+	if *guestDir != "" || *requireGuest || *requireEFI {
 		if err := addGuestItems(m, *guestDir, *lockPath, *configsDir, *requireGuest); err != nil {
+			return err
+		}
+	}
+	if *requireEFI {
+		if err := ensureKernelEFIPresentV1(m); err != nil {
 			return err
 		}
 	}
@@ -115,6 +134,25 @@ func write(args []string, out io.Writer) error {
 		if err := addVMMItems(m, *vmmDir, *lockPath, *requireVMM); err != nil {
 			return err
 		}
+	}
+	if *imagesDir != "" || *requireImages {
+		if err := addDefaultImageItems(m, *imagesDir, *lockPath, *requireImages); err != nil {
+			return err
+		}
+	}
+	if *gvisorDir != "" || *requireGvisor {
+		if err := addGvisorItemsV1(m, *gvisorDir, *requireGvisor); err != nil {
+			return err
+		}
+	}
+	if err := addLaunchItems(m, dir, *requireLaunch); err != nil {
+		return err
+	}
+	if err := addImageVerifierItems(m, dir, *requireVerifier); err != nil {
+		return err
+	}
+	if err := addMacRuntimeItems(m, *macRuntimeDir, *macRuntimeLock, *requireMacRuntime); err != nil {
+		return err
 	}
 	b, err := supply.Marshal(m)
 	if err != nil {
@@ -157,6 +195,11 @@ func assets(args []string, out io.Writer) error {
 		}
 	}
 	for _, it := range m.Items {
+		if it.Kind == supply.KindGvisor && it.BuildInputsSHA256 != "" {
+			emit("gvisor-build-inputs-" + it.Arch + ".json")
+			emit("gvisor-build.spdx-" + it.Arch + ".json")
+			emit("gvisor-module-lock-" + it.Arch + ".json")
+		}
 		if it.URL != "" {
 			emit(path.Base(it.URL))
 		}
@@ -183,8 +226,16 @@ func check(args []string, out io.Writer) error {
 	lockPath := fs.String("lock", "guest/supply.lock", "path to guest/supply.lock")
 	configsDir := fs.String("configs", "guest/kernel", "folder holding config-amd64 and config-arm64")
 	requireGuest := fs.Bool("require-guest", false, "fail unless the manifest names the guest boot pair for both architectures")
+	requireEFI := fs.Bool("require-kernel-efi", false, "require both signed Linux EFI kernel artifacts")
 	vmmDir := fs.String("vmm", "", "the VMM build folder holding the original pinned inputs")
 	requireVMM := fs.Bool("require-vmm", false, "fail unless the manifest names every pinned VMM on both architectures")
+	gvisorDir := fs.String("gvisor", "", "folder holding the original current native gvisor builds")
+	requireGvisor := fs.Bool("require-gvisor", false, "require every actual native five-role gvisor release item")
+	imagesDir := fs.String("images", "", "folder holding the original prepared default OCI images")
+	requireImages := fs.Bool("require-images", false, "require both actual checked default OCI image pins")
+	requireLaunch := fs.Bool("require-launch", false, "require both launcher items and actual uploaded launcher bytes")
+	requireVerifier := fs.Bool("require-image-verifier", false, "require all four exact offline signature verifier items")
+	requireMacRuntime := fs.Bool("require-mac-runtime", false, "require the pinned Lima and Linux VM image items")
 	if err := fs.Parse(args); err != nil {
 		return &failure{msg: err.Error(), try: "go run ./cmd/supply check -url <release URL> -dir <folder> <manifest>"}
 	}
@@ -208,10 +259,39 @@ func check(args []string, out io.Writer) error {
 			return err
 		}
 	}
+	if *requireEFI {
+		if err := ensureKernelEFIPresentV1(m); err != nil {
+			return err
+		}
+	}
 	if err := checkVMMReleaseExtras(m, *dir, *vmmDir, *lockPath, *requireVMM, out); err != nil {
 		return err
 	}
+	if err := checkGvisorReleaseItemsV1(m, *gvisorDir, *requireGvisor); err != nil {
+		return err
+	}
+	if err := checkGvisorUploadedProvenanceV1(m, *dir); err != nil {
+		return err
+	}
+	if *imagesDir != "" || *requireImages {
+		if err := checkDefaultImageItems(m, *imagesDir, *lockPath, *requireImages); err != nil {
+			return err
+		}
+	}
+	if err := checkLaunchItems(m, *requireLaunch); err != nil {
+		return err
+	}
+	if err := checkImageVerifierItems(m, *requireVerifier); err != nil {
+		return err
+	}
+	if err := checkMacRuntimeItems(m, *requireMacRuntime); err != nil {
+		return err
+	}
 	for _, it := range m.Items {
+		if (it.Kind == supply.KindVMM || it.Kind == supply.KindKernel) && it.FSVerity == "" {
+			return &failure{msg: "the runtime release asset has no fsverity digest: " + it.Name,
+				try: "write the manifest again from the actual kernel and mirrored VMM bytes"}
+		}
 		if it.URL == "" {
 			continue
 		}

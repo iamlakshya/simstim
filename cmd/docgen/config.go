@@ -45,6 +45,19 @@ func configPage(repo string) ([]byte, error) {
 	defaults := flatten(reflect.ValueOf(client.DefaultSettings()), "")
 	settings := fields(types["Settings"], "", types, defaults)
 	hosts := fields(types["Host"], "", types, nil)
+	imagePolicy, err := imagePolicyConfigFields(repo)
+	if err != nil {
+		return nil, err
+	}
+	settings = append(settings, imagePolicy...)
+	hosts = append(hosts, imagePolicy...)
+	sshKeys, secretKind, err := sshKeyConfigFields(repo)
+	if err != nil {
+		return nil, err
+	}
+	settings = append(settings, sshKeys...)
+	settings = append(settings, secretKind...)
+	hosts = append(hosts, sshKeys...)
 
 	var b strings.Builder
 	b.WriteString(header("Configuration", "2"))
@@ -57,6 +70,11 @@ func configPage(repo string) ([]byte, error) {
 	table(&b, settings, true)
 	b.WriteString("\n## hosts.toml\n\nThe hosts you added. `host add` writes it, and you can edit it by hand. Each host is a `[[host]]` table.\n\n")
 	table(&b, hosts, false)
+	hostRules, err := hostRuleConfigSection(repo)
+	if err != nil {
+		return nil, err
+	}
+	b.WriteString(hostRules)
 	return []byte(b.String()), nil
 }
 

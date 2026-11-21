@@ -10,5 +10,5 @@ func quietConnectionNotes(ctx context.Context) context.Context {
 // quietAttachContext also keeps a reconnect's warnings off the raw terminal.
 // The warning still reaches the debug log and the host's saved tier changes.
 func quietAttachContext(ctx context.Context) context.Context {
-	return WithTierQuestion(WithWarnings(quietConnectionNotes(ctx), nil), nil)
+	return WithAttachArmQuestionsV1(WithTierQuestion(WithWarnings(quietConnectionNotes(ctx), nil), nil), nil)
 }

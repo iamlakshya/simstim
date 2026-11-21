@@ -32,7 +32,7 @@ var modelData = map[string]ModelGuard{
 	"codex": {
 		Wire: "openai-responses", Hosts: []string{"api.openai.com", "chatgpt.com"},
 		Files:  []string{"POST api.openai.com/v1/files"},
-		Paths:  []string{"POST /v1/responses", "GET /v1/responses", "GET /v1/models", "POST /backend-api/codex/responses", "GET /backend-api/codex/responses", "GET /backend-api/codex/models"},
+		Paths:  []string{"POST /v1/responses", "POST /v1/chat/completions", "GET /v1/responses", "GET /v1/models", "POST /backend-api/codex/responses", "GET /backend-api/codex/responses", "GET /backend-api/codex/models"},
 		Tools:  []string{"function", "custom", "computer", "local_shell"},
 		Search: []string{"web_search", "web_search_2025_08_26"}, WebSocket: true,
 		Source: "https://github.com/openai/codex/blob/main/codex-rs/model-provider-info/src/lib.rs",

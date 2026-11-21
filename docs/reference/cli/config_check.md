@@ -10,7 +10,7 @@ Find mistakes in the config files, each with its file and line.
 simstim config check [flags]
 ```
 
-Reads config.toml and hosts.toml, and prints each mistake on one line, as file:line: message. It finds TOML errors, unknown keys, and values of the wrong type or outside their list. It checks legacy secret commands and structured definitions with the same rules as a session start. It also finds two spellings of one key and machines without a provider or an id. It also finds keys, sizes and times that do not parse, and hosts without a usable name or ssh. For an unknown key, it names the nearest known key. It exits with 1 when it finds an error, and with 0 when it finds only warnings, or nothing. With `--json`, it prints the report as one object, with the same exit codes.
+Reads config.toml and hosts.toml, and prints each mistake on one line, as file:line: message. It finds TOML errors, unknown keys, and values of the wrong type or outside their list. It checks legacy secret commands and structured definitions with the same rules as a session start. It also finds two spellings of one key and machines without a provider or an id. It also finds keys, sizes and times that do not parse, and hosts without a usable name or ssh. It checks every profile and repository host rule, including unused ones, against the saved hosts. For an unknown key, it names the nearest known key. It exits with 1 when it finds an error, and with 0 when it finds only warnings, or nothing. With `--json`, it prints the report as one object, with the same exit codes.
 
 ## Examples
 

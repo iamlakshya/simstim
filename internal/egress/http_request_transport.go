@@ -73,6 +73,12 @@ func (t requestHTTPTransport) RoundTrip(req *http.Request) (*http.Response, erro
 		}
 		return response, nil
 	}
+	t.scope.mu.Lock()
+	model := t.scope.model
+	t.scope.mu.Unlock()
+	if model != nil && model.usage != nil && modelUsageInferencePathV1(modelUsageWire(model), model.request.Path) {
+		return t.roundTripPhysicalOrigin(req)
+	}
 	conn, err := t.server.transport.NewClientConn(req.Context(), req.URL.Scheme, req.URL.Host)
 	if err != nil {
 		return nil, fmt.Errorf("open the owned origin connection: %w", err)

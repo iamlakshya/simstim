@@ -81,7 +81,7 @@ func newBoundWebSocket(ctx context.Context, origin io.ReadWriteCloser, filters w
 		s.shutdown()
 	})
 	server := &webSocketDirection{owner: s, input: origin, filter: filters.Server, emit: s.emitGuest}
-	client := &webSocketDirection{owner: s, input: input, filter: filters.Client, masked: true, emit: s.emitOrigin}
+	client := &webSocketDirection{owner: s, input: input, filter: filters.Client, masked: true, emit: s.emitOrigin, emitRequest: s.emitOriginRequest}
 	go s.runDirection(server)
 	go s.runDirection(client)
 	return boundWebSocket{state: s}, nil
@@ -162,12 +162,24 @@ func (s *boundWebSocketState) emitGuest(wire []byte) error {
 }
 
 func (s *boundWebSocketState) emitOrigin(wire []byte) error {
+	return s.emitOriginRequest(wire, nil, len(wire))
+}
+
+func (s *boundWebSocketState) emitOriginRequest(wire []byte, turn *ModelUsageTurnV1, payloadStart int) error {
 	defer clear(wire)
+	position := 0
 	for len(wire) != 0 {
 		if err := s.ctx.Err(); err != nil {
 			return err
 		}
 		n, err := s.origin.Write(wire)
+		if turn != nil && n > 0 {
+			body := max(0, position+n-max(position, payloadStart))
+			if body > 0 {
+				turn.physicalRequestPrefixV1(uint64(body))
+			}
+		}
+		position += n
 		wire = wire[n:]
 		if err != nil {
 			return webSocketFailure{1002}
@@ -266,11 +278,13 @@ func (b boundWebSocket) Close() error {
 }
 
 type webSocketDirection struct {
-	owner  *boundWebSocketState
-	input  io.Reader
-	filter webSocketMessageFilter
-	masked bool
-	emit   func([]byte) error
+	owner       *boundWebSocketState
+	input       io.Reader
+	filter      webSocketMessageFilter
+	masked      bool
+	emit        func([]byte) error
+	emitRequest func([]byte, *ModelUsageTurnV1, int) error
+	requestTurn *ModelUsageTurnV1
 }
 
 func (d *webSocketDirection) Format(state fmt.State, _ rune) {
@@ -320,6 +334,15 @@ func (d *webSocketDirection) message(opcode byte, message *webSocketMessageReade
 			return model
 		}
 		return webSocketFailure{1008}
+	}
+	if d.masked {
+		if request, ok := filtered.(interface {
+			physicalModelRequestV1() *ModelUsageTurnV1
+			physicalModelRequestFinishedV1()
+		}); ok {
+			d.requestTurn = request.physicalModelRequestV1()
+			defer func() { request.physicalModelRequestFinishedV1(); d.requestTurn = nil }()
+		}
 	}
 	closeFiltered := sync.OnceValue(filtered.Close)
 	defer closeFiltered()
@@ -391,6 +414,9 @@ func (d *webSocketDirection) send(opcode byte, final bool, payload []byte) error
 	wire, err := encodeWebSocketFrame(opcode, final, d.masked, payload, rand.Reader)
 	if err != nil {
 		return err
+	}
+	if d.masked && opcode < webSocketClose && d.requestTurn != nil && d.emitRequest != nil {
+		return d.emitRequest(wire, d.requestTurn, len(wire)-len(payload))
 	}
 	return d.emit(wire)
 }

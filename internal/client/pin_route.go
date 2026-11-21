@@ -20,6 +20,9 @@ import (
 type PinOptions struct {
 	// Want is the SHA256 fingerprint that --host-key gives, or "".
 	Want string
+	// Wants names every explicitly compared key of a checked join reply.
+	// Want may coexist only when Wants is its identical single value.
+	Wants []string
 	// FirstUse says what to do with a key that neither the user's known
 	// hosts nor Want names.
 	FirstUse FirstUse
@@ -83,15 +86,15 @@ func pinRoute(ctx context.Context, h Host, t Transport, interactive bool) (retur
 // unless o replaces it, and must hold o.Want: only host rekey changes a pin
 // to another key.
 func pinAsAsked(ctx context.Context, h Host, o *PinOptions) error {
-	if err := checkFingerprint(o.Want); err != nil {
+	if err := checkFingerprintSet(o.Want, o.Wants); err != nil {
 		return err
 	}
 	var p Pin
 	var err error
 	if !o.Replace && pinned(h.Name) {
-		p, err = keptPin(ctx, h.Name, o.Want)
+		p, err = keptPinSet(ctx, h.Name, o.Want, o.Wants)
 	} else {
-		p, err = pinHostKey(ctx, h, o.Want, o.FirstUse, o.Replace)
+		p, err = pinHostKeySet(ctx, h, o.Want, o.Wants, o.FirstUse, o.Replace)
 	}
 	if err != nil {
 		return err

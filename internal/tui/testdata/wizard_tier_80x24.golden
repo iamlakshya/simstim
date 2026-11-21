@@ -1,0 +1,24 @@
+
+
+
+
+
+
+
+                            ⣀⡠⠤⢄⡀   ⣀⣀⣀    ⢀⠤⠒⠊⠉⠉⠉⠑⠢⠤⡀
+                        ⢀⡠⠒⠉    ⠈⢑⢔⠉   ⠑⢄⡠⠒⠁       ⣀⢤⣚⣓⣦⣤⣀
+                  ⠶⠶⠶⢶⡒⠪⢅⡀     ⢀⠔⠁ ⠑⢄  ⡠⠊⠑⡄     ⢀⠔⡩⠊⠁   ⠈⠉⠛⠓⠶⠶
+                      ⠈⠑⠢⢌⡑⠢⠤⠤⠒⠁    ⢈⠦⡊   ⠈⠢⢄ ⢀⣔⠕⠊
+                          ⠈⠒⠢⢄⣀⣀⣀⡠⠤⠒⠁ ⠈⠢⢄⡀ ⣀⡠⠝⠉
+                                         ⠈⠉
+
+                                 s i m s t i m
+  ── Add a host ────────────────────────────────────────────── step 3 of 10 ──
+
+    Who else has root on raspberry?
+
+      1 Only me                   own: gets your secrets when you ask
+      2 Someone else              shared: no secret unless you mark it
+      3 A machine for one task    throwaway: short-lived secrets only
+
+    ↑↓ pick   enter next   esc back

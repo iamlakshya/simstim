@@ -25,7 +25,7 @@ func (g *Init) executeOwned(run *execRun, streams ownedCommandIO) int {
 		return code
 	}
 	if run.inputBundle != nil {
-		if run.vmRole != vmSeedCommand || run.kind != "" || run.fileCommit!=nil {
+		if run.vmRole != vmSeedCommand || run.kind != "" || run.fileCommit != nil {
 			return 125
 		}
 		cmd.ExtraFiles = []*os.File{run.inputBundle}

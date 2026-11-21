@@ -20,6 +20,22 @@ import (
 // runStage runs one stage of a jail. It returns an exit code only when the
 // command did not take this process's place.
 func runStage(args []string) int {
+	if len(args) == 2 && args[0] == stageGvisorOuterNativeV1 && args[1] == "3" {
+		return nativeGvisorOuterStageV1()
+	}
+	if len(args) == 3 && (args[0] == stageGvisorMapV2 || args[0] == stageGvisorControllerMapV1) {
+		count, err := strconv.Atoi(args[2])
+		if err != nil || strconv.Itoa(count) != args[2] || count < 6 || count > maxGvisorSlotsV2 {
+			return stageFailed(gvisorHandoffFailureV2("the original nested null vector count is invalid"))
+		}
+		if args[0] == stageGvisorControllerMapV1 {
+			return stageFailed(runGvisorControllerMapV1(args[1], count))
+		}
+		return stageFailed(runGvisorMapV2(args[1], count))
+	}
+	if len(args) == 0 {
+		return stageFailed(failure("this jail stage has no purpose", "Start jails with jail.Command, not by hand."))
+	}
 	if args[0] == stageProbe {
 		return probe()
 	}
@@ -46,6 +62,12 @@ func runStage(args []string) int {
 	case stageInit:
 		return runInit(c, os.Environ())
 	case stageExec:
+		if c.ControllerPublicV1 != nil {
+			return stageFailed(gvisorHandoffFailureV2("the fixed controller needs its original self-mapped ancestry entry"))
+		}
+		if err := enterVMMStageV1(c, stageExec); err != nil {
+			return stageFailed(err)
+		}
 		return stageFailed(runExec(c, os.Environ()))
 	case stageRemove:
 		return removeInside(c)
@@ -107,6 +129,9 @@ func outer(c *setup, env []string) int {
 	if err := cloexecFrom(3); err != nil {
 		return stageFailed(err)
 	}
+	if err := enterVMMStageV1(c, stageOuter); err != nil {
+		return stageFailed(err)
+	}
 	if stageHook != nil {
 		go stageHook()
 	}
@@ -119,18 +144,31 @@ func outer(c *setup, env []string) int {
 	// learn that this stage still runs.
 	defer func() { _ = syncW.Close() }()
 	in := *c
-	in.SyncFD = 5 + c.Files + len(c.Binds) + len(pinnedRules(c.Rules))
 	extra := inherited(c, true)
+	// Private purpose slots precede the mapping synchronisation pipe.
+	// Derive the actual next child slot rather than colliding with its lease.
+	in.SyncFD = 3 + len(extra)
 	cmd := exec.CommandContext(context.Background(), self)
 	cmd.Args = []string{argv0, fileRulesStageV1(stageInit, c), strconv.Itoa(3 + c.Files)}
 	cmd.Env = env
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
 	attr := namespaces(c.Net, false, initCaps)
 	attr.Pdeathsig = unix.SIGKILL
+	createdFD := -1
+	if c.VMMExecV1 != nil {
+		attr.PidFD = &createdFD
+	}
 	cmd.SysProcAttr = attr
 	setupW, err := startWithSync(cmd, extra, 3+c.Files, syncR)
 	if err != nil {
 		return stageFailed(err)
+	}
+	if err := reportVMMCreationV1(c, stageOuter, cmd.Process, createdFD); err != nil {
+		_ = setupW.Close()
+		_ = cmd.Process.Kill()
+		waitErr := cmd.Wait()
+		closeErr := closeInitInheritedV1(extra)
+		return stageFailed(errors.Join(err, waitErr, closeErr))
 	}
 	if err := writeChildSetup(cmd, setupW, &in); err != nil {
 		return stageFailed(err)
@@ -144,6 +182,11 @@ func outer(c *setup, env []string) int {
 		_ = cmd.Process.Kill()
 		_ = cmd.Wait()
 		return stageFailed(failure("the jail's init ended during set-up", "Read the error above."))
+	}
+	if err := finishVMMCreatorV1(c, stageOuter, extra); err != nil {
+		_ = cmd.Process.Kill()
+		waitErr := cmd.Wait()
+		return stageFailed(errors.Join(err, waitErr))
 	}
 	relay := startRelay(cmd.Process.Pid, sigs, unix.Kill)
 	waitErr := waitChildWithRelay(cmd.Process.Pid, relay, cmd.Wait, cmd.Process.Kill)
@@ -181,7 +224,7 @@ func inherited(c *setup, status bool) []*os.File {
 	for _, r := range pinnedRules(c.Rules) {
 		fds = append(fds, os.NewFile(uintptr(r.FD), r.Path))
 	}
-	return fds
+	return appendPublicationInheritedV1(c, appendVMMInheritedV1(c, fds))
 }
 
 // pinnedRules are the rules that have their own descriptor.

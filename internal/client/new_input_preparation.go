@@ -62,9 +62,20 @@ func cloneNewInputOptions(options NewInputOptions) NewInputOptions {
 // from the SAME retained Settings operation used by runtime and secret fetches.
 // A dirty primary owns one prospective commit, reused by final bundle capture.
 func (c *Conn) PrepareNewInputPolicy(ctx context.Context, a NewArgs, options NewInputOptions) (_ NewArgs, err error) {
+	if err := checkHostAttemptIntakeV1(ctx, a, &options); err != nil {
+		return a, err
+	}
 	r := grantRequestOf(ctx)
 	if r == nil {
 		return a, grantOperationError()
+	}
+	r.mu.Lock()
+	selection := r.hostSelection
+	r.mu.Unlock()
+	if selection != nil {
+		if err := selection.Check(ctx); err != nil {
+			return a, err
+		}
 	}
 	if options.HostClone != (a.Cwd != "") {
 		return a, copyInputError("input_primary", "the original host-directory choice and primary input selection disagree")
@@ -196,6 +207,9 @@ func (c *Conn) PrepareNewInputPolicy(ctx context.Context, a NewArgs, options New
 	}
 	p.layers, err = ResolvePolicyLayers(settings, c.Host, origin, options.Profile, options.Session)
 	if err != nil {
+		return a, err
+	}
+	if err := p.retainPrimaryRepositorySourceV1(ctx); err != nil {
 		return a, err
 	}
 	a.Layers = api.CloneLayers(p.layers)
@@ -369,7 +383,7 @@ func (p *newInputPreparation) inputArguments(ctx context.Context, a NewArgs) (Ne
 		a.Environment = environment
 	}
 	public := a
-	public.Layers = api.ProjectClientInputSources(a.Layers)
+	public.Layers = api.ProjectClientImagePolicy(api.ProjectClientInputSources(a.Layers))
 	raw, err := json.Marshal(public)
 	if err != nil {
 		return a, err

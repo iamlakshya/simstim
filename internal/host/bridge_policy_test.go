@@ -10,7 +10,7 @@ import (
 )
 
 func TestBridgeDispatchesEveryPolicyOperation(t *testing.T) {
-	for _, op := range []string{"policy.ls", "policy.add", "policy.rm", "policy.log"} {
+	for _, op := range []string{"policy.ls", "policy.add", "policy.rm", "policy.log", "policy.replace", "policy.lockdown"} {
 		t.Run(op, func(t *testing.T) {
 			var out bytes.Buffer
 			b := &bridge{w: proto.NewWriter(&out)}
@@ -31,7 +31,7 @@ func TestBridgeDispatchesEveryPolicyOperation(t *testing.T) {
 }
 
 func TestBridgeRefusesEveryPolicyOperationInsideSession(t *testing.T) {
-	for _, op := range []string{"policy.ls", "policy.add", "policy.rm", "policy.log"} {
+	for _, op := range []string{"policy.ls", "policy.add", "policy.rm", "policy.log", "policy.replace", "policy.lockdown"} {
 		t.Run(op, func(t *testing.T) {
 			var out bytes.Buffer
 			b := &bridge{w: proto.NewWriter(&out)}

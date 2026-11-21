@@ -42,7 +42,11 @@ func (c *protectedBootConfig) check() error {
 // never supplies runtime, image, process or original-operation authority.
 func prepareFirecrackerConfig(ctx context.Context, spec wall.Spec) (_ *protectedBootConfig, returned error) {
 	api, vsock := vmSocketPaths(vmDataDir(spec))
-	_, data, _, err := fc.Command(spec, fc.Paths{VMM: "/proc/self/fd/3", Kernel: "/proc/self/fd/4", Tools: "/proc/self/fd/5", Image: "/proc/self/fd/6", Agents: "/proc/self/fd/7", Session: "/proc/self/fd/8", Config: filepath.Join(spec.SessionDir, firecrackerConfigName), API: api, Vsock: vsock})
+	build := fc.Command
+	if spec.Driver == "nitro" {
+		build = fc.NitroCommand
+	}
+	_, data, _, err := build(spec, fc.Paths{VMM: "/proc/self/fd/3", Kernel: "/proc/self/fd/4", Tools: "/proc/self/fd/5", Image: "/proc/self/fd/6", Agents: "/proc/self/fd/7", Session: "/proc/self/fd/8", Config: filepath.Join(spec.SessionDir, firecrackerConfigName), API: api, Vsock: vsock})
 	if err != nil {
 		return nil, err
 	}

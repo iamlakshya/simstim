@@ -21,13 +21,9 @@ func checkBorrowedFlockV1(file *os.File, sender startupCredentials) (failure err
 	if file == nil || sender.pid <= 0 || sender.uid != uint32(os.Getuid()) {
 		return sessionLeaseError("the operation loan has no original native lock sender")
 	}
-	actual, err := file.Stat()
-	if err != nil {
+	var stat unix.Stat_t
+	if err := unix.Fstat(int(file.Fd()), &stat); err != nil {
 		return err
-	}
-	stat, ok := actual.Sys().(*unix.Stat_t)
-	if !ok {
-		return sessionLeaseError("the operation loan has no native file identity")
 	}
 	info, err := os.Open(fmt.Sprintf("/proc/self/fdinfo/%d", file.Fd()))
 	if err != nil {

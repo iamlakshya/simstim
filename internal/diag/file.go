@@ -26,6 +26,8 @@ type File struct {
 	path    string
 	max     int64
 	q       chan Record
+	reads   chan traceReadRequestV1
+	id      string
 	stop    chan struct{}
 	done    chan struct{}
 	once    sync.Once
@@ -44,7 +46,7 @@ func Open(path string, max int64) (*File, error) {
 	if err != nil {
 		return nil, err
 	}
-	t := &File{path: path, max: max, q: make(chan Record, queueLen), stop: make(chan struct{}), done: make(chan struct{})}
+	t := &File{path: path, max: max, q: make(chan Record, queueLen), reads: make(chan traceReadRequestV1), id: newTraceEpochV1(), stop: make(chan struct{}), done: make(chan struct{})}
 	t.cats.Store(uint32(AllCats))
 	go t.run(f, size)
 	return t, nil
@@ -67,7 +69,7 @@ func (t *File) Cats() Cats {
 }
 
 func openAppend(path string) (*os.File, int64, error) {
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR|os.O_APPEND, 0o600)
 	if err != nil {
 		return nil, 0, fmt.Errorf("open the trace file: %w", err)
 	}
@@ -81,7 +83,7 @@ func openAppend(path string) (*os.File, int64, error) {
 	markInUse(f)
 	if !samePath(f, path) {
 		f.Close()
-		if f, err = os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600); err != nil {
+		if f, err = os.OpenFile(path, os.O_CREATE|os.O_RDWR|os.O_APPEND, 0o600); err != nil {
 			return nil, 0, fmt.Errorf("open the trace file: %w", err)
 		}
 		markInUse(f)
@@ -130,6 +132,9 @@ func (t *File) run(f *os.File, size int64) {
 		case r := <-t.q:
 			w.add(r)
 			t.drain(w)
+		case request := <-t.reads:
+			t.drainReadPrefixV1(w)
+			request.reply <- w.readTraceV1(t.id, request)
 		case <-t.stop:
 			t.drain(w)
 			cerr := w.close()
@@ -161,12 +166,13 @@ func (t *File) drain(w *writer) {
 
 // writer is the file side of a File, used by its goroutine alone.
 type writer struct {
-	path string
-	max  int64
-	f    *os.File
-	bw   *bufio.Writer
-	size int64
-	err  error
+	epoch uint64
+	path  string
+	max   int64
+	f     *os.File
+	bw    *bufio.Writer
+	size  int64
+	err   error
 }
 
 func (w *writer) add(r Record) {
@@ -209,6 +215,7 @@ func (w *writer) turnOver() {
 		return
 	}
 	w.f, w.size = f, size
+	w.epoch++
 	w.bw.Reset(f)
 }
 

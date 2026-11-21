@@ -50,6 +50,7 @@ type vmHooks interface {
 	beforeOwnedReap(*execRun)
 	afterOwnedReap(*execRun)
 	stopMember(string) error
+	retireMemberForResume(string, string) error
 	stop(time.Duration)
 	memoryClaim() *proto.GuestMemoryV1
 	beginStop()
@@ -60,6 +61,9 @@ type vmHooks interface {
 }
 
 func (g *Init) commandProcess() (*syscall.SysProcAttr, error) {
+	if g.unwalled != nil {
+		return g.unwalledProcessV1()
+	}
 	if g.vm != nil {
 		return g.vm.agentProcess()
 	}
@@ -67,6 +71,9 @@ func (g *Init) commandProcess() (*syscall.SysProcAttr, error) {
 }
 
 func (g *Init) helperExecutable() (string, error) {
+	if g.unwalled != nil && g.unwalled.helper != nil {
+		return "/proc/self/fd/4", nil
+	}
 	if g.vm != nil {
 		return g.vm.helperExecutable()
 	}

@@ -163,6 +163,7 @@ A destination flag without `--add` replaces the whole file. With no destination 
 | `link_silent` | The guest init has not sent a valid heartbeat for 15 seconds |
 | `sandbox_ready`, `sandbox_stopped`, `sandbox_error` | The supervisor recorded a ready sandbox, a stop or a failure |
 | `health_degraded`, `health_recovered` | The host gained a health item, or its last health item cleared |
+| `judge_unavailable` | The trusted network judge could not make a decision |
 | `started` | The session started, or `resume` started its agent again |
 | `restored` | The session was started again after a host restart |
 | `test` | `host alerts test` |

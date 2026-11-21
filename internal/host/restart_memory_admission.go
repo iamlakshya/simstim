@@ -59,7 +59,13 @@ func admitRestartMemoryPurposeV1(ctx context.Context, operation *SessionOperatio
 	if requested < 0 && requested != api.MemoryAuto {
 		return UserError("memory_max", "the restart memory request is not a supported size or auto", "Choose auto or a supported explicit memory size.")
 	}
-	return withPlacement(ctx, restore, func(_ *placementControl) error {
+	return withPlacement(ctx, restore, func(control *placementControl) error {
+		// Only the actual typed automatic controller sets this private purpose.
+		if !restore {
+			if err := checkUserDrainLockedV1(ctx, control); err != nil {
+				return err
+			}
+		}
 		current, err := operation.LoadContext(ctx)
 		if err != nil {
 			return err

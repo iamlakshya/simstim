@@ -7,6 +7,9 @@ import (
 // CheckHTTPMethodFeature refuses all constrained payloads, including explicit
 // empty sets, before any older helper could ignore and broaden them.
 func (c *Conn) CheckHTTPMethodFeature(layers []api.Layer) error {
+	if err := c.checkPublicOnlyFeature(layers); err != nil {
+		return err
+	}
 	constrained, modelTools := false, false
 	for _, layer := range layers {
 		for _, rule := range layer.Rules {
@@ -32,6 +35,14 @@ func (c *Conn) CheckHTTPMethodFeature(layers []api.Layer) error {
 }
 
 func (c *Conn) canonicalPolicyMethods(a api.PolicyAddArgs) (api.PolicyAddArgs, error) {
+	if a.PublicOnly {
+		if a.Door != "" && a.Door != api.DoorNet {
+			return a, publicOnlyRuleError()
+		}
+		if !c.HasFeature(api.FeatureNetworkPublicOnly) {
+			return a, c.grantHelperOld("preserve public-only network rules")
+		}
+	}
 	if a.Methods != nil && !c.HasFeature(api.FeatureHTTPMethods) {
 		return a, c.grantHelperOld("preserve exact HTTP method constraints")
 	}

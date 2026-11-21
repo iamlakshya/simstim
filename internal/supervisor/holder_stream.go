@@ -45,7 +45,8 @@ func (s *Supervisor) guest(c *client) error {
 	// From now on, the client's reader may wait for the holder: the
 	// client's end closes the connection, whatever the reader does.
 	c.gs, c.watch = st, proc.WatchReadPeerGone(c.conn, c.closeSoon)
-	go s.relay(c, st, gr)
-	go s.forward(c, gw)
+	c.streamWorkers.Add(2)
+	go func() { defer c.streamWorkers.Done(); s.relay(c, st, gr) }()
+	go func() { defer c.streamWorkers.Done(); s.forward(c, gw) }()
 	return nil
 }

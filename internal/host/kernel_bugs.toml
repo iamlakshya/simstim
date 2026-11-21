@@ -1,0 +1,92 @@
+# Advisory and distribution data checked against the linked primary sources.
+# No mitigation runs here.
+schema = 1
+
+[[bug]]
+id = "CVE-2026-53365"
+name = "VsockDrop"
+what = "a local user can gain root through the virtio-vsock zerocopy path"
+url = "https://access.redhat.com/security/cve/cve-2026-53365"
+checked = 2026-11-20
+# Absence under /sys/module does not prove a built-in (=y) driver is absent.
+mitigated_by = ["module:vhost_vsock=absent"]
+
+# Disjoint affected intervals preserve fixes in older stable branches.
+# After the initial 6.7.0 introduction, -pre0 sentinels classify recognised
+# pre/rc candidates on later affected branches conservatively as maybe under
+# the CNA affected default, without claiming a pre0 release existed.
+[[bug.upstream]]
+from = "6.7.0"
+fixed = "6.12.97"
+[[bug.upstream]]
+from = "6.13.0-pre0"
+fixed = "6.18.34"
+[[bug.upstream]]
+from = "6.19.0-pre0"
+fixed = "7.0.11"
+# The retained Debian security tracker names the original mainline fix at
+# 7.1-rc5 (canonicalised here as 7.1.0-rc5).
+[[bug.upstream]]
+from = "7.1.0-pre0"
+fixed = "7.1.0-rc5"
+
+[[bug.distro]]
+id = "debian"
+version_id = "13"
+fixed = "6.12.100-1"
+[[bug.distro]]
+id = "ubuntu"
+version_id = "24.04"
+flavour = "generic"
+fixed = "6.8.0-147.147"
+
+[[bug]]
+id = "CVE-2026-74580"
+name = "Vghost"
+what = "a user with vhost device access can gain root through stale memory mappings"
+url = "https://matrix.tencent.com/en/2026/10/12/vghost-cve-2026-74580"
+checked = 2026-11-20
+# Its advisory requires restricting every vhost device. The current probe
+# has no complete device-access fact, so it cannot claim this mitigation.
+mitigated_by = []
+
+# After the initial 4.11.0 introduction, -pre0 sentinels classify recognised
+# pre/rc candidates on later affected branches conservatively as maybe under
+# the CNA affected default, without claiming a pre0 release existed.
+[[bug.upstream]]
+from = "4.11.0"
+fixed = "5.10.265"
+[[bug.upstream]]
+from = "5.11.0-pre0"
+fixed = "5.15.216"
+[[bug.upstream]]
+from = "5.16.0-pre0"
+fixed = "6.1.183"
+[[bug.upstream]]
+from = "6.2.0-pre0"
+fixed = "6.6.152"
+[[bug.upstream]]
+from = "6.7.0-pre0"
+fixed = "6.12.104"
+[[bug.upstream]]
+from = "6.13.0-pre0"
+fixed = "6.18.45"
+[[bug.upstream]]
+from = "6.19.0-pre0"
+fixed = "7.1.9"
+# Tencent's primary report reproduced 7.2.0-rc4; the CNA affected default
+# after 4.11.0 extends to 7.2.0, so 7.2.0-pre0 includes earlier 7.2 candidates
+# (such as rc1..rc3) as maybe rather than calling them fixed.
+[[bug.upstream]]
+from = "7.2.0-pre0"
+fixed = "7.2.0"
+
+[[bug.distro]]
+id = "debian"
+version_id = "13"
+fixed = "6.12.105-1"
+[[bug.distro]]
+id = "ubuntu"
+version_id = "24.04"
+flavour = "generic"
+fixed = "6.8.0-149.149"

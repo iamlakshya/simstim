@@ -29,9 +29,17 @@ func RunAgentsGuardian(args []string) error {
 	}
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
 	defer cancel()
+	ctx, closeFence, err := capturePublicationGuardianV1(ctx)
+	if err != nil {
+		return err
+	}
+	defer closeFence()
 	helper, output := os.NewFile(3, "agents-helper"), os.NewFile(4, "fresh-agents-output")
 	defer helper.Close()
 	defer output.Close()
+	if err := markImageGuardianPrivateV1([]*os.File{helper, output}); err != nil {
+		return err
+	}
 	return serveAgentsGuardian(ctx, unit, helper, output, os.Stdin, os.Stdout, imageAttachScope, runAgentsBuild)
 }
 

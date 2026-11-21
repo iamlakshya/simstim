@@ -91,8 +91,8 @@ func (schema PublicStateProjectionSchema) Validate(ctx context.Context, p *api.J
 	if err != nil {
 		return err
 	}
-	var groups [5]fdNameMap
-	for index, span := range []api.JSONSpan{intent.modes, intent.binds, fields.primary, fields.minted, fields.retired} {
+	var groups [6]fdNameMap
+	for index, span := range []api.JSONSpan{intent.modes, intent.binds, fields.primary, fields.minted, fields.retired, intent.trusted} {
 		groups[index], err = s.indexMap(span)
 		if err != nil {
 			return err
@@ -114,10 +114,20 @@ func (schema PublicStateProjectionSchema) Validate(ctx context.Context, p *api.J
 	if err := fdNonce(p, fields.generation); err != nil {
 		return err
 	}
-	for _, group := range groups {
+	for _, group := range groups[:5] {
 		if err := s.localMap(group, allowedNames); err != nil {
 			return err
 		}
+	}
+	trustedSchema := TrustedUseProjectionSchemaV1{use: schema.trusted, binding: schema.binding}
+	if err := s.mapSource(groups[5], func(_ uint64, record tomlinspect.HostRecord) error {
+		if err := ValidateTrustedSecretNameProjectionV1(p, jsonSpan(record.WholeSpan)); err != nil {
+			return err
+		}
+		_, err := trustedSchema.Project(owned, p, jsonSpan(record.ValueSpan), false)
+		return err
+	}); err != nil {
+		return err
 	}
 	if err := s.primaries(groups[0], groups[2], groups[1]); err != nil {
 		return err

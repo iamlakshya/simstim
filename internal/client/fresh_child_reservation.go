@@ -104,7 +104,7 @@ func (p *freshChildPlan) reserve(ctx context.Context) error {
 			}
 		}
 		intent := api.CloneSecretDeliveryIntent(p.intent)
-		child := SandboxPolicy{SessionID: id, HostID: p.conn.HostID(), Ceiling: ceiling, CreationWall: p.wall.level,
+		child := SandboxPolicy{imageSelectionRaw: bytes.Clone(p.ancestors.root.imageSelectionRaw), SessionID: id, HostID: p.conn.HostID(), Ceiling: ceiling, CreationWall: p.wall.level,
 			Secrets: append([]string{}, p.selection.names...), Exposed: exposed, CreatedAt: time.Now().UTC(), request: token,
 			PolicySources: slices.Clone(p.ancestors.root.PolicySources), DeliveryIntent: &intent,
 			lineage: &sandboxLineage{Version: 2, Parent: p.choice.Parent, Root: p.ancestors.root.SessionID,

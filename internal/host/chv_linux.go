@@ -22,7 +22,7 @@ import (
 // and trusted session manifests. The registered factory uses it for both
 // capability reporting and the supervisor's fresh expected-plan controller.
 func NewCloudHypervisorDriver() (*chv.Driver, error) {
-	return chv.New(chv.Options{Facts: microVMFacts, Identity: microVMIdentity, Domain: microVMStoreDomain, Reference: recordVMAuthority, Diagnostic: recordVMDiagnostic})
+	return chv.New(chv.Options{Facts: microVMFacts, Identity: microVMIdentity, Domain: microVMStoreDomain, Reference: recordVMAuthority, Diagnostic: recordVMDiagnostic, ForkDiskV1: withOriginalForkDiskDataV1, ReservationV2: withOriginalCheckpointReservationV2, ReservationSelectedV2: hasOriginalCheckpointReservationV2})
 }
 
 func microVMStoreDomain(ctx context.Context) (cachefs.Domain, error) {

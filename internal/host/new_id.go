@@ -1,6 +1,7 @@
 package host
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -26,7 +27,7 @@ func reserveSessionID(want string) (*sessionReservation, error) {
 	if want != "" && !api.ValidSessionID(want) {
 		return nil, UserError("bad_id", "the requested session ID is not valid", "Start the session through the client, which chooses its ID.")
 	}
-	if err := paths.EnsurePrivateDir(paths.SessionsDir()); err != nil {
+	if err := ensureFootprintedSessionParentV1(context.Background()); err != nil {
 		return nil, err
 	}
 	parent, err := os.OpenRoot(paths.SessionsDir())

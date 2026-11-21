@@ -6,8 +6,8 @@ import (
 	"os"
 	"slices"
 
+	"github.com/iamlakshya/simstim/internal/alerts"
 	"github.com/iamlakshya/simstim/internal/api"
- "github.com/iamlakshya/simstim/internal/alerts"
 	"github.com/iamlakshya/simstim/internal/host"
 	"github.com/iamlakshya/simstim/internal/proto"
 	"github.com/iamlakshya/simstim/internal/secretmem"
@@ -97,8 +97,12 @@ func (s *Supervisor) automaticReady() error {
 	if err := s.save(&snapshot, false); err != nil {
 		return err
 	}
-	if err:=s.startMaxRun();err!=nil{return err}
-	if err:=s.commitOriginalReady();err!=nil{return err}
+	if err := s.startMaxRun(); err != nil {
+		return err
+	}
+	if err := s.commitOriginalReady(); err != nil {
+		return err
+	}
 	s.raise(s.alertEvent(alerts.SandboxReady))
 	s.replay()
 	s.audit.write("controller_restored", nil)

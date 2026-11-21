@@ -19,17 +19,18 @@ type stateFileReplace func(context.Context, io.Writer) error
 // stateFileTxn owns one canonical mutex, root, lock and source descriptor.
 // Its descriptor view cannot outlive the callback. Nothing unlinks its lock.
 type stateFileTxn struct {
-	ctx       context.Context
-	name      string
-	root      *os.Root
-	anchors   []stateRootAnchor
-	lock      *stateFileLock
-	source    *os.File
-	before    os.FileInfo
-	output    *os.File
-	removed   bool
-	authority func() error
-	reader    *stateFDView
+	ctx           context.Context
+	name          string
+	root          *os.Root
+	anchors       []stateRootAnchor
+	lock          *stateFileLock
+	source        *os.File
+	before        os.FileInfo
+	output        *os.File
+	removed       bool
+	authority     func() error
+	configuration *networkHoldConfigV1
+	reader        *stateFDView
 }
 
 func withStateFileFD(ctx context.Context, subdirs []string, name string, write bool, change func(stateFileView) (stateFileReplace, error)) error {
@@ -250,6 +251,9 @@ func (tx *stateFileTxn) check() error {
 }
 
 func (tx *stateFileTxn) checkSnapshot(ctx context.Context) error {
+	if tx.configuration != nil {
+		return tx.configuration.checkTransactionSnapshot(ctx, tx)
+	}
 	if err := ctx.Err(); err != nil {
 		return err
 	}

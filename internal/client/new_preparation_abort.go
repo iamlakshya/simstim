@@ -2,7 +2,8 @@ package client
 
 import "context"
 
-// Abort retires only this request's proven never-attempted local reservation.
+// Abort retires this request's never-attempted reservation, or its exact
+// correlated terminal no-room attempt after proven native settlement.
 // The owner cancels/joins its active attempt first and supplies its own cleanup
 // context. Close separately releases source FDs/values. An uncertain physical
 // write, changed Source, future data or a receipt retains the original witness.
@@ -15,6 +16,9 @@ func (r *GrantRequest) Abort(ctx context.Context) (bool, error) {
 	r.mu.Unlock()
 	if fresh != nil {
 		return fresh.abort(ctx)
+	}
+	if handled, retired, err := abortSettledHostAttemptNewV1(ctx, r, plan); handled {
+		return retired, err
 	}
 	if plan == nil || plan.creation == nil {
 		return false, nil

@@ -35,7 +35,7 @@ func editStructuredFileRules(network map[string]any, rule api.Rule, remove strin
 		if err != nil {
 			return false, 0, false, policyError(err)
 		}
-		candidate := api.Rule{Layer: rule.Layer, Name: rule.Name, Door: api.DoorNet, Allow: canonical.Allow, Target: canonical.Target, Methods: canonical.Methods}
+		candidate := api.Rule{Layer: rule.Layer, Name: rule.Name, Door: api.DoorNet, Allow: canonical.Allow, Target: canonical.Target, Methods: canonical.Methods, PublicOnly: canonical.PublicOnly}
 		candidate.ID = api.RuleID(candidate)
 		if remove != "" && (remove == candidate.ID || remove == candidate.Target) {
 			changed = true
@@ -47,8 +47,15 @@ func editStructuredFileRules(network map[string]any, rule api.Rule, remove strin
 		}
 		kept = append(kept, entries[index])
 	}
-	if remove == "" && rule.Methods != nil && !exists {
-		kept = append(kept, map[string]any{"target": rule.Target, "allow": rule.Allow, "methods": *rule.Methods})
+	if remove == "" && (rule.Methods != nil || rule.PublicOnly) && !exists {
+		entry := map[string]any{"target": rule.Target, "allow": rule.Allow}
+		if rule.Methods != nil {
+			entry["methods"] = *rule.Methods
+		}
+		if rule.PublicOnly {
+			entry["public_only"] = true
+		}
+		kept = append(kept, entry)
 		changed = true
 		exists = true
 	}

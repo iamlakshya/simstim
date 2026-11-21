@@ -13,11 +13,19 @@ import (
 func (it Item) validateBootItem() error {
 	switch it.Kind {
 	case KindKernel:
+		asset := KernelAsset(it.Arch)
+		switch it.Name {
+		case "guest":
+		case KernelEFIName:
+			asset = KernelEFIAsset(it.Arch)
+		default:
+			return fmt.Errorf("unknown signed guest kernel role %q", it.Name)
+		}
 		if it.Licence != "GPL-2.0-only" {
 			return errors.New("a kernel needs licence GPL-2.0-only")
 		}
-		if path.Base(it.URL) != KernelAsset(it.Arch) {
-			return fmt.Errorf("a kernel for %s needs asset %s", it.Arch, KernelAsset(it.Arch))
+		if path.Base(it.URL) != asset {
+			return fmt.Errorf("a %s kernel for %s needs asset %s", it.Name, it.Arch, asset)
 		}
 		if path.Base(it.SourceURL) != KernelSourceAsset(it.Version) {
 			return fmt.Errorf("a kernel at %s needs source asset %s", it.Version, KernelSourceAsset(it.Version))

@@ -8,6 +8,9 @@ import (
 
 // CanonicalNetworkRule returns the one canonical structured file tuple.
 func CanonicalNetworkRule(raw api.NetworkRule) (api.NetworkRule, error) {
+	if err := canonicalRulePublicOnly(api.Rule{Allow: raw.Allow, Door: api.DoorNet, PublicOnly: raw.PublicOnly}); err != nil {
+		return raw, err
+	}
 	target, err := ValidateRuleTarget(raw.Target)
 	if err != nil {
 		return raw, err
@@ -35,7 +38,7 @@ func convertNetworkRules(layer *api.Layer) error {
 			removals = append(removals, raw)
 			continue
 		}
-		layer.Rules = append(layer.Rules, api.Rule{Door: api.DoorNet, Target: raw.Target, Allow: raw.Allow, Methods: raw.Methods})
+		layer.Rules = append(layer.Rules, api.Rule{Door: api.DoorNet, Target: raw.Target, Allow: raw.Allow, Methods: raw.Methods, PublicOnly: raw.PublicOnly})
 	}
 	// Retain only removal directives so each read reapplies them to fresh
 	// broader layers, without resurrecting a converted rule after policy rm.
@@ -61,7 +64,7 @@ func applyNetworkRemovals(rules []api.Rule, layer api.Layer, locks []api.Lock) (
 			}
 		}
 		rules = slices.DeleteFunc(rules, func(rule api.Rule) bool {
-			return (rule.Door == "" || rule.Door == api.DoorNet) && rule.Target == remove.Target && rule.Allow == remove.Allow && api.SameHTTPMethods(rule.Methods, remove.Methods)
+			return (rule.Door == "" || rule.Door == api.DoorNet) && rule.Target == remove.Target && rule.Allow == remove.Allow && rule.PublicOnly == remove.PublicOnly && api.SameHTTPMethods(rule.Methods, remove.Methods)
 		})
 	}
 	return rules, nil

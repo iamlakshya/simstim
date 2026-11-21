@@ -21,7 +21,7 @@ setup:
     scripts/setup.sh
 
 # Build the host helpers for every host platform, into the client's embed folder.
-helpers: userns
+helpers: userns launchers image-verifiers
     #!/usr/bin/env sh
     set -eu
     for arch in amd64 arm64; do
@@ -34,6 +34,20 @@ helpers: userns
 # Build the fixed static namespace launcher for both Linux host architectures.
 userns:
     cmd/userns/build.sh
+
+# Build both static separate-account launchers, without installing root steps.
+launchers:
+    #!/usr/bin/env sh
+    set -eu
+    mkdir -p bin {{helpers}}
+    for arch in amd64 arm64; do
+        CGO_ENABLED=0 GOOS=linux GOARCH=$arch go build -trimpath -ldflags '{{ldflags}}' -o bin/launch-$arch ./cmd/launch
+        cp bin/launch-$arch {{helpers}}/launch-$arch
+    done
+
+# Build the isolated verifier with its separately verified compiler.
+image-verifiers:
+    scripts/build-image-verifier.sh '{{version}}'
 
 # Write the release manifest from the helpers and any prepared VMM inputs.
 _manifest:
@@ -97,7 +111,7 @@ guest-boot *args:
     guest/boot-test.sh --print-console {{args}}
 
 # Build the helpers, then the client for this machine, into ./bin.
-build: helpers _vt-if-zig
+build: launchers helpers _vt-if-zig
     {{just_executable()}} _manifest
     mkdir -p bin
     CGO_ENABLED=0 go build -trimpath -ldflags '{{ldflags}}' -o bin/{{name}} .
@@ -114,6 +128,8 @@ test:
     LINK_TEST_PIPE=1 go test -race -count=1 ./internal/link
     python3 scripts/test-scorecard-check.py
     python3 test/e2e/test_sandbox_hosts.py
+    python3 test/e2e/test_conformance_evidence.py
+    python3 scripts/test-check-conformance-go.py
     python3 test/e2e/test_session_sockets.py
     python3 scripts/test-pins-watch.py
     python3 scripts/test-bench-pattern.py

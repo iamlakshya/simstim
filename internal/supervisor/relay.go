@@ -243,6 +243,7 @@ func (s *Supervisor) relayBody(c *client, st *link.Stream, r *bufio.Reader, t pr
 		out, err = rewriteResponse(buf)
 	default:
 		if t == proto.TOutput {
+			s.traceUpperOutputV1(c)
 			s.mu.Lock()
 			s.active(time.Now())
 			s.mu.Unlock()

@@ -5,6 +5,7 @@ package microvm
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/iamlakshya/simstim/internal/jail"
+	"github.com/iamlakshya/simstim/internal/nitrodev"
 	"github.com/iamlakshya/simstim/internal/wall"
 	"golang.org/x/sys/unix"
 )
@@ -40,7 +42,19 @@ func socketPair() (net.Conn, *os.File, error) {
 	return conn, theirs, nil
 }
 
-func (s *sandbox) launchRunner(ctx context.Context, files *bootFiles, subuid bool, until time.Time) (net.Conn, *runnerControl, *jail.Cmd, error) {
+func (s *sandbox) launchRunner(ctx context.Context, files *bootFiles, subuid bool, until time.Time) (rawResult net.Conn, controlResult *runnerControl, commandResult *jail.Cmd, returned error) {
+	s.mu.Lock()
+	owner := s.snapshotDisk
+	s.mu.Unlock()
+	returned = owner.borrow(ctx, func(_ *os.Root, _ *os.Root, disk *os.File) error {
+		var err error
+		rawResult, controlResult, commandResult, err = s.launchRunnerWithDiskV1(ctx, files, disk, subuid, until)
+		return err
+	})
+	return
+}
+
+func (s *sandbox) launchRunnerWithDiskV1(ctx context.Context, files *bootFiles, disk *os.File, subuid bool, until time.Time) (rawResult net.Conn, controlResult *runnerControl, commandResult *jail.Cmd, returned error) {
 	raw, rawChild, err := socketPair()
 	if err != nil {
 		return nil, nil, nil, err
@@ -64,26 +78,50 @@ func (s *sandbox) launchRunner(ctx context.Context, files *bootFiles, subuid boo
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	bootSpec := wall.Spec{ID: s.spec.ID, SessionDir: s.spec.SessionDir, MemoryMax: s.spec.MemoryMax, CPUs: s.spec.CPUs, DiskMax: s.spec.DiskMax, VM: s.spec.VM}
+	bootSpec := wall.Spec{Driver: s.driver.Name(), ID: s.spec.ID, SessionDir: s.spec.SessionDir, MemoryMax: s.spec.MemoryMax, CPUs: s.spec.CPUs, DiskMax: s.spec.DiskMax, VM: s.spec.VM}
 	plan := runnerPlan{Version: 1, Spec: bootSpec, BootUntil: until, SessionDirect: direct, UIDMode: s.uid}
 	controller, err := newNativeRunnerControl(control, bootSpec)
 	if err != nil {
 		return nil, nil, nil, err
 	}
 	var config *protectedBootConfig
-	if s.driver.kind == firecrackerBackend {
+	if s.driver.kind.isFirecracker() {
 		config, err = prepareFirecrackerConfig(ctx, s.spec)
 		if err != nil {
 			return nil, nil, nil, err
 		}
 		defer config.Close()
 	}
-	inherited := []*os.File{files.vmm, files.kernel, files.tools, files.image, files.agents, files.helper, rawChild, controlChild}
-	grants := []jail.FileRuleV1{{FD: 3, Role: jail.FileProgramV1, Mode: 0o111, Access: jail.Read | jail.Exec}}
+	if files.vmmOwner == nil {
+		return nil, nil, nil, fmt.Errorf("VMM launch lost its original verified runtime owner")
+	}
+	modeSource, err := files.vmmOwner.BeginExecMode(ctx)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	var modePhase *vmmExecPhaseV1
+	inherited := runnerFilesWithDiskV1(files, disk, rawChild, controlChild)
+	programMode := os.FileMode(0o111)
+	if modeSource != nil {
+		programMode = 0o555
+		plan.Version = 2
+	}
+	grants := []jail.FileRuleV1{{FD: 3, Role: jail.FileProgramV1, Mode: programMode, Access: jail.Read | jail.Exec}}
 	for fd := 4; fd <= 7; fd++ {
 		grants = append(grants, jail.FileRuleV1{FD: fd, Role: jail.FileDataV1, Mode: 0o444, Access: jail.Read})
 	}
-	binds := []jail.Bind{{Path: vmDataDir(s.spec), Write: true}, {Path: "/dev/kvm", Write: true}, {Path: "/dev/urandom"}}
+	grants = append(grants, jail.FileRuleV1{FD: 11, Role: jail.FileDataV1, Mode: 0o600, Access: jail.Read | jail.Write})
+	binds := []jail.Bind{{Path: vmDataDir(s.spec), Write: true}, {Path: "/dev/urandom"}}
+	if s.driver.kind == nitroBackend {
+		device, err := nitrodev.Open()
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		defer device.Close()
+		binds = append(binds, jail.Bind{File: device, Path: nitrodev.Device, Write: true})
+	} else {
+		binds = append(binds, jail.Bind{Path: "/dev/kvm", Write: true})
+	}
 	if config != nil {
 		if err := config.check(); err != nil {
 			return nil, nil, nil, err
@@ -93,6 +131,27 @@ func (s *sandbox) launchRunner(ctx context.Context, files *bootFiles, subuid boo
 	command, err := jail.Command(ctx, jail.Spec{Argv: []string{"/proc/self/fd/8", "chv-run"}, Files: inherited, FileRulesV1: grants, Subuid: subuid, Net: jail.NetNone, Seccomp: jail.ProfileVMM, Binds: binds, Rules: []jail.PathRule{{Path: vmDataDir(s.spec), Access: jail.Connect}}})
 	if err != nil {
 		return nil, nil, nil, err
+	}
+	started := false
+	defer func() {
+		if !started && modePhase != nil {
+			if settleErr := command.SettleVMMUnstartedV1(modeSource); settleErr != nil {
+				commandResult = command
+				returned = errors.Join(returned, settleErr)
+			}
+		}
+	}()
+	if modeSource != nil {
+		modePhase, err = newVMMExecPhaseV1(ctx, command, modeSource, files.vmm, control, s.spec.ID, s.driver.kind.name())
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		if err := s.retainVMMModePhaseV1(modePhase); err != nil {
+			return nil, nil, nil, err
+		}
+		if err := controller.attachModePhaseV1(modePhase); err != nil {
+			return nil, nil, nil, err
+		}
 	}
 	stdin, err := command.StdinPipe()
 	if err != nil {
@@ -106,6 +165,10 @@ func (s *sandbox) launchRunner(ctx context.Context, files *bootFiles, subuid boo
 	defer writer.Close()
 	command.Stdout = writer
 	command.Stderr = writer
+	if err := s.attachBootFileCommandV2(command); err != nil {
+		return nil, nil, nil, err
+	}
+	started = true // From here ONLY actual Cmd proof may settle creation.
 	if err := command.Start(); err != nil {
 		reader.Close()
 		if !command.PhysicalExitV1() {
@@ -124,6 +187,20 @@ func (s *sandbox) launchRunner(ctx context.Context, files *bootFiles, subuid boo
 		return nil, nil, command, fmt.Errorf("send VMM runner plan: %w", err)
 	}
 	stdin.Close()
+	if modePhase != nil {
+		if err := modePhase.run(ctx, controller); err != nil {
+			_ = command.Signal(os.Kill)
+			// SAME actual Cmd/source retains an uncertain armed fence until
+			// original physical whole-source cleanup proves no future exec.
+			return nil, nil, command, fmt.Errorf("complete original VMM exec mode phase: %w", err)
+		}
+	}
 	failed = false
 	return raw, controller, command, nil
+}
+
+// The existing endpoints remain at9/10. The final slot carries the disk that
+// the same factory retained; the jailed runner may never reopen it by path.
+func runnerFilesWithDiskV1(files *bootFiles, disk, raw, control *os.File) []*os.File {
+	return []*os.File{files.vmm, files.kernel, files.tools, files.image, files.agents, files.helper, raw, control, disk}
 }

@@ -31,6 +31,7 @@ func (e *Engine) modelCapabilityPlanLocked(request Request, features []string, p
 	}
 	var candidates []candidate
 	free := 0
+	var freeRules []*compiledRule
 	for _, layer := range e.layers {
 		for i := range layer.rules {
 			rule := &layer.rules[i]
@@ -49,6 +50,9 @@ func (e *Engine) modelCapabilityPlanLocked(request Request, features []string, p
 			}
 			if rank < 2 {
 				free |= mask
+				if mask != 0 && rule.publicOnly {
+					freeRules = append(freeRules, rule)
+				}
 			} else if mask != 0 {
 				candidates = append(candidates, candidate{rule, mask})
 			}
@@ -61,7 +65,10 @@ func (e *Engine) modelCapabilityPlanLocked(request Request, features []string, p
 	// CanonicalModelTools bounds this table to 64 states (six actual names).
 	states := 1 << len(features)
 	plans := make([]selection, states)
-	plans[free] = selection{found: true}
+	// Free coverage carries its rule restrictions even though it claims no
+	// new once slot. All DP states start with this same free plan, preserving
+	// the existing minimum-additional-slots comparison.
+	plans[free] = selection{rules: freeRules, found: true}
 	for _, candidate := range candidates {
 		for mask := 0; mask < states; mask++ {
 			old := plans[mask]

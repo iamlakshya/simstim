@@ -60,6 +60,10 @@ func cloneMemberState(input *memberState) (*memberState, error) {
 	output := &memberState{version: MemberRegistryV2, metadata: metadata, kinds: slices.Clone(input.kinds), generation: input.generation, secrets: make(map[string]registeredSecret, len(input.secrets)), sourceKinds: cloneStartupSources(input.sourceKinds), retired: cloneRetiredPrimaries(input.retired), decoys: api.CloneDecoyTripwires(input.decoys), decoyClasses: slices.Clone(input.decoyClasses)}
 	for name, old := range input.secrets {
 		secret := old
+		if old.trusted != nil {
+			use := api.CloneTrustedSecretUses(map[string]api.TrustedSecretUseV1{name: *old.trusted})[name]
+			secret.trusted = &use
+		}
 		secret.history = slices.Clone(old.history)
 		secret.minted = slices.Clone(old.minted)
 		for i := range secret.minted {
@@ -88,7 +92,7 @@ func (state *memberState) publicSecrets(names []string) map[string]api.PublicSec
 	output := make(map[string]api.PublicSecretState, len(names))
 	for _, name := range names {
 		secret, exists := state.secrets[name]
-		if !exists {
+		if !exists || !secretHasGuestUse(secret) {
 			continue
 		}
 		public := api.PublicSecretState{Mode: secret.mode, Armed: secret.present}
@@ -103,15 +107,18 @@ func (state *memberState) publicSecrets(names []string) map[string]api.PublicSec
 // This internal projection is ONLY used with the real control writer's size
 // check. It must never be returned, logged, persisted or sent to a peer.
 type registrySizeSecret struct {
-	Mode       api.SecretMode         `json:"mode"`
-	Present    bool                   `json:"present"`
-	Value      api.Secret             `json:"value"`
-	Identity   string                 `json:"identity"`
-	ValueEpoch string                 `json:"value_epoch"`
-	Binding    *api.SecretBind        `json:"binding,omitempty"`
-	Public     *api.PublicSecretState `json:"public,omitempty"`
-	History    []api.Secret           `json:"history,omitempty"`
-	Minted     []registrySizeMint     `json:"minted,omitempty"`
+	Trusted      *api.TrustedSecretUseV1 `json:"trusted_use,omitempty"`
+	TrustedArmed bool                    `json:"trusted_armed,omitempty"`
+	Guest        bool                    `json:"guest"`
+	Mode         api.SecretMode          `json:"mode"`
+	Present      bool                    `json:"present"`
+	Value        api.Secret              `json:"value"`
+	Identity     string                  `json:"identity"`
+	ValueEpoch   string                  `json:"value_epoch"`
+	Binding      *api.SecretBind         `json:"binding,omitempty"`
+	Public       *api.PublicSecretState  `json:"public,omitempty"`
+	History      []api.Secret            `json:"history,omitempty"`
+	Minted       []registrySizeMint      `json:"minted,omitempty"`
 }
 
 type registrySizeMint struct {
@@ -127,9 +134,14 @@ func (registrySizeSecret) Format(f fmt.State, _ rune) { _, _ = io.WriteString(f,
 func (registrySizeMint) Format(f fmt.State, _ rune)   { _, _ = io.WriteString(f, api.Redacted) }
 
 func checkBoundStateSize(ctx context.Context, state *memberState) error {
+	_, err := boundStateFrameBytes(ctx, state)
+	return err
+}
+
+func boundStateFrameBytes(ctx context.Context, state *memberState) (int, error) {
 	entries := make(map[string]registrySizeSecret, len(state.secrets))
 	for name, secret := range state.secrets {
-		entry := registrySizeSecret{Mode: secret.mode, Present: secret.present, Value: secret.value, Identity: secret.identity, ValueEpoch: secret.valueEpoch, History: secret.history}
+		entry := registrySizeSecret{Trusted: secret.trusted, TrustedArmed: secret.trustedArmed, Guest: secretHasGuestUse(secret), Mode: secret.mode, Present: secret.present, Value: secret.value, Identity: secret.identity, ValueEpoch: secret.valueEpoch, History: secret.history}
 		if secret.bound != nil {
 			binding := secret.bound.binding
 			entry.Binding = &binding
@@ -139,7 +151,7 @@ func checkBoundStateSize(ctx context.Context, state *memberState) error {
 		for _, mint := range secret.minted {
 			shape, err := publicSecretShape(ctx, name, mint.shape, mint.rule)
 			if err != nil {
-				return err
+				return 0, err
 			}
 			row := registrySizeMint{Value: mint.value, Sentinel: mint.sentinel, Shape: shape, Rule: mint.rule, Authority: mint.authority, Identity: mint.identity, Ready: mint.ready, Retired: mint.retired}
 			if mint.publication != nil {
@@ -151,7 +163,7 @@ func checkBoundStateSize(ctx context.Context, state *memberState) error {
 	}
 	retired, err := publicRetiredPrimaries(ctx, state.retired)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	projection := struct {
 		Version     int                                        `json:"version"`
@@ -163,10 +175,11 @@ func checkBoundStateSize(ctx context.Context, state *memberState) error {
 	}{MemberRegistryV2, state.metadata, state.generation, state.sourceKinds, retired, entries}
 	raw, err := json.Marshal(projection)
 	if err != nil {
-		return memberError("bad_request", "cannot prepare complete secret state", "Retry with matching helpers.")
+		return 0, memberError("bad_request", "cannot prepare complete secret state", "Retry with matching helpers.")
 	}
-	if proto.NewWriter(io.Discard).WriteJSON(proto.TRequest, proto.Request{ID: 1, Op: CtlBoundInit, Args: raw}) != nil {
-		return memberError("state_too_large", "complete secret state exceeds the control frame limit; replacement did not occur", "Stop and resume the sandbox with only the required approved names and policy.")
+	counter := new(privateFrameCounter)
+	if proto.NewWriter(counter).WriteJSON(proto.TRequest, proto.Request{ID: 1, Op: CtlBoundInit, Args: raw}) != nil {
+		return 0, memberError("state_too_large", "complete secret state exceeds the control frame limit; replacement did not occur", "Stop and resume the sandbox with only the required approved names and policy.")
 	}
-	return nil
+	return counter.bytes - 4, nil
 }

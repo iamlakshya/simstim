@@ -30,22 +30,30 @@ type gvisorProbeKeyV1 struct{}
 // connection's actual successful runtime delivery. It has no session manifest,
 // SessionOperation, original boot receipt, Need or startup/stop capability.
 type gvisorProbePurposeV1 struct {
-	mu             sync.Mutex
-	ctx            context.Context
-	cancel         context.CancelFunc
-	bridge         *bridge
-	request        uint64
-	selected       *selectedRuntimeReceiptV1
-	root           *os.Root
-	rootRef        cachefs.Reference
-	parent         *os.Root
-	parentRef      cachefs.Reference
-	name           string
-	lease          *os.File
-	leaseRef       cachefs.Reference
-	spec           wall.Spec
-	command        *probeGvisorCommandV1
-	issued, closed bool
+	closeMu                 sync.Mutex
+	probeWG                 sync.WaitGroup
+	runtime                 wall.Sandbox
+	resourceIssued, closing bool
+	closeErr                error
+	storageRemoved          bool
+	mu                      sync.Mutex
+	ctx                     context.Context
+	cancel                  context.CancelFunc
+	bridge                  *bridge
+	request                 uint64
+	selected                *selectedRuntimeReceiptV1
+	root                    *os.Root
+	rootRef                 cachefs.Reference
+	parent                  *os.Root
+	parentRef               cachefs.Reference
+	name                    string
+	lease                   *os.File
+	leaseRef                cachefs.Reference
+	spec                    wall.Spec
+	command                 *probeGvisorCommandV1
+	issued, closed          bool
+	bootstrap               *jail.GvisorBootstrapV1
+	physicalKey             string
 }
 
 func (b *bridge) gvisorProbeContextV1(req proto.Request, expected supply.Manifest) (context.Context, func() error, error) {
@@ -83,6 +91,14 @@ func newGvisorProbePurposeV1(ctx context.Context, b *bridge, requestID uint64, s
 	fail := func(cause error) (context.Context, func() error, error) {
 		return nil, nil, errors.Join(cause, purpose.close())
 	}
+	purpose.bootstrap, err = jail.CaptureGvisorBootstrapV1(owned)
+	if err != nil {
+		return fail(err)
+	}
+	purpose.physicalKey, err = gvisorPhysicalKeyV1(owned, expected, selected.publication.owner.domain(), purpose.bootstrap)
+	if err != nil {
+		return fail(err)
+	}
 	purpose.parent, err = cachefs.OpenPrivateRoot(paths.RuntimeDir(), true)
 	if err != nil {
 		return fail(err)
@@ -96,7 +112,7 @@ func newGvisorProbePurposeV1(ctx context.Context, b *bridge, requestID uint64, s
 		return fail(err)
 	}
 	dir := filepath.Join(paths.RuntimeDir(), purpose.name)
-	purpose.spec = wall.Spec{ID: "gvisorprobe", SessionDir: dir, Root: wall.Reset}
+	purpose.spec = wall.Spec{ID: "gvisorprobe", SessionDir: dir, Root: wall.Reset, MemoryMax: 512 << 20, CPUs: 1}
 	purpose.root, err = purpose.parent.OpenRoot(purpose.name)
 	if err != nil {
 		return fail(err)
@@ -142,7 +158,7 @@ func (p *gvisorProbePurposeV1) check(ctx context.Context) error {
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if p.closed || p.bridge == nil || p.request == 0 || p.selected == nil || p.root == nil || p.lease == nil {
+	if p.closed || p.closing || p.bridge == nil || p.request == 0 || p.selected == nil || p.root == nil || p.lease == nil {
 		return newRuntimeError("the physical probe's native owner ended")
 	}
 	if err := errors.Join(ctx.Err(), p.ctx.Err(), p.bridge.ctx.Err()); err != nil {
@@ -150,6 +166,10 @@ func (p *gvisorProbePurposeV1) check(ctx context.Context) error {
 	}
 	if err := p.selected.checkLocked(ctx); err != nil {
 		return err
+	}
+	actualKey, err := gvisorPhysicalKeyV1(ctx, p.selected.manifest, p.selected.publication.owner.domain(), p.bootstrap)
+	if err != nil || actualKey != p.physicalKey {
+		return errors.Join(err, newRuntimeError("the physical probe native closure changed"))
 	}
 	if err := p.rootRef.CheckRoot(p.root); err != nil {
 		return err
@@ -187,66 +207,135 @@ func gvisorNativeDomainV1(ctx context.Context) (cachefs.Domain, error) {
 	return OriginalBootDomain(ctx)
 }
 
+func (p *gvisorProbePurposeV1) beginResourceV1(ctx context.Context) error {
+	if err := p.check(ctx); err != nil {
+		return err
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.closed || p.closing || p.resourceIssued {
+		return newRuntimeError("this original probe resource was already issued or ended")
+	}
+	p.resourceIssued = true
+	p.probeWG.Add(1)
+	return nil
+}
+
 func (p *gvisorProbePurposeV1) close() error {
+	p.closeMu.Lock()
+	defer p.closeMu.Unlock()
 	p.mu.Lock()
 	if p.closed {
 		p.mu.Unlock()
 		return nil
 	}
-	p.closed = true
-	command := p.command
+	p.closing = true
 	p.cancel()
 	p.mu.Unlock()
-	var result error
+	// The producing call adopts its actual resource before Done. Close cannot
+	// miss a late pre-command storage/runtime owner after cancellation.
+	p.probeWG.Wait()
+	p.mu.Lock()
+	command, resource := p.command, p.runtime
+	p.mu.Unlock()
 	if command != nil {
-		result = command.stopAndJoin()
+		if err := command.stopAndJoin(); err != nil {
+			if !command.PhysicalExitV1() {
+				return err
+			}
+		}
 	}
-	// Only actual native exit reaches here. A timed-out wait cannot release
-	// the original runtime publication or make this probe's storage reusable.
-	var cleanupErr error
-	if p.root != nil && p.rootRef.Known() && p.parent != nil {
-		cleanupErr = errors.Join(p.rootRef.CheckRoot(p.root), p.parentRef.CheckRoot(p.parent))
-		if cleanupErr == nil {
-			current, err := p.parent.OpenRoot(p.name)
-			if err == nil {
-				err = errors.Join(p.rootRef.CheckRoot(current), current.Close())
-			}
-			cleanupErr = err
+	if resource != nil {
+		if err := resource.Destroy(); err != nil {
+			return err
 		}
-		if cleanupErr == nil {
-			cleanupErr = p.root.RemoveAll("gvisor")
-			if err := p.root.Remove("gvisor.lock"); err != nil && !errors.Is(err, os.ErrNotExist) {
-				cleanupErr = errors.Join(cleanupErr, err)
+		p.mu.Lock()
+		p.runtime = nil
+		p.mu.Unlock()
+	}
+	if p.closeErr != nil {
+		return p.closeErr
+	}
+	if !p.storageRemoved && p.root != nil && p.rootRef.Known() && p.parent != nil {
+		if err := errors.Join(p.rootRef.CheckRoot(p.root), p.parentRef.CheckRoot(p.parent)); err != nil {
+			return err
+		}
+		current, err := p.parent.OpenRoot(p.name)
+		if err != nil {
+			return err
+		}
+		checkErr, closeErr := p.rootRef.CheckRoot(current), current.Close()
+		if closeErr != nil {
+			p.closeErr = closeErr
+		}
+		if err := errors.Join(checkErr, closeErr); err != nil {
+			return err
+		}
+		if err := p.root.RemoveAll("gvisor"); err != nil {
+			return err
+		}
+		if err := p.root.Remove("gvisor.lock"); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		if p.lease != nil && p.leaseRef.Known() {
+			if err := p.leaseRef.CheckFile(p.root, "probe.lock", p.lease, 0o600); err != nil {
+				return err
 			}
-			if p.lease != nil && p.leaseRef.Known() {
-				err := p.leaseRef.CheckFile(p.root, "probe.lock", p.lease, 0o600)
-				if err == nil {
-					err = p.root.Remove("probe.lock")
-				}
-				cleanupErr = errors.Join(cleanupErr, err)
+			if err := p.root.Remove("probe.lock"); err != nil && !errors.Is(err, os.ErrNotExist) {
+				return err
 			}
 		}
+		p.storageRemoved = true
 	}
 	if p.lease != nil {
-		result = errors.Join(result, p.lease.Close())
+		if err := p.lease.Close(); err != nil {
+			p.closeErr = errors.Join(p.closeErr, err)
+		} else {
+			p.lease = nil
+		}
 	}
 	if p.root != nil {
-		result = errors.Join(result, p.root.Close())
+		if err := p.root.Close(); err != nil {
+			p.closeErr = errors.Join(p.closeErr, err)
+		} else {
+			p.root = nil
+		}
+	}
+	if p.closeErr != nil {
+		return p.closeErr
 	}
 	if p.parent != nil {
-		if cleanupErr == nil && p.name != "" && p.rootRef.Known() {
-			cleanupErr = p.parent.Remove(p.name)
+		if p.storageRemoved && p.name != "" && p.rootRef.Known() {
+			if err := p.parent.Remove(p.name); err != nil && !errors.Is(err, os.ErrNotExist) {
+				return err
+			}
 		}
-		result = errors.Join(result, p.parent.Close())
+		if err := p.parent.Close(); err != nil {
+			p.closeErr = err
+			return err
+		}
+		p.parent = nil
+	}
+	if p.bootstrap != nil {
+		if err := p.bootstrap.Close(); err != nil {
+			p.closeErr = err
+			return err
+		}
+		p.bootstrap = nil
 	}
 	if p.selected != nil {
 		p.selected.mu.RUnlock()
+		p.selected = nil
 	}
-	return errors.Join(result, cleanupErr)
+	p.mu.Lock()
+	p.closed = true
+	p.mu.Unlock()
+	return nil
 }
 
 type probeGvisorCommandV1 struct {
 	*jail.Cmd
+	suite   *gvisor.ProtectedSuiteV1
 	purpose *gvisorProbePurposeV1
 	ctx     context.Context
 	cancel  context.CancelFunc
@@ -257,6 +346,13 @@ type probeGvisorCommandV1 struct {
 
 func (c *probeGvisorCommandV1) Start() error {
 	err := c.purpose.check(c.ctx)
+	if err == nil {
+		manifest, expectedErr := gvisorExpectedRuntimeV1(c.ctx)
+		err = expectedErr
+		if err == nil {
+			err = c.suite.CheckOriginalV1(c.ctx, manifest, nil)
+		}
+	}
 	if err == nil {
 		c.purpose.mu.Lock()
 		if c.purpose.closed || c.purpose.issued || c.purpose.command != c {
@@ -269,7 +365,10 @@ func (c *probeGvisorCommandV1) Start() error {
 	if err != nil {
 		c.cancel()
 	}
-	return errors.Join(err, c.Cmd.Start())
+	if err != nil {
+		return errors.Join(err, c.Cmd.Start())
+	}
+	return startProbeGvisorControllerV1(c)
 }
 
 func (c *probeGvisorCommandV1) Wait() error {

@@ -11,19 +11,25 @@ import (
 // prepareVMGuest resolves existing applied policy/state once before seed. It
 // cannot choose execution pins or promote a guest's pending capture itself.
 func (s *Supervisor) prepareVMGuest(ctx context.Context, headless bool) error {
-	if s.m.Wall == nil || s.m.Wall.Driver != "chv" && s.m.Wall.Driver != "firecracker" {
+	if s.m.Wall == nil || s.m.Wall.Driver != "chv" && s.m.Wall.Driver != "firecracker" && s.m.Wall.Driver != "nitro" {
 		return nil
 	}
-	if _,err:=s.protectedVMDriver();err!=nil{return err}
-	if s.vmCorrelation==nil{return execRefusal("the VM prepare has no original same-connection correlation")}
+	if _, err := s.protectedVMDriver(); err != nil {
+		return err
+	}
+	if s.vmCorrelation == nil {
+		return execRefusal("the VM prepare has no original same-connection correlation")
+	}
 	plan, err := effectiveVMPlan(s.m, headless)
 	if err != nil {
 		return err
 	}
-	correlation:=*s.vmCorrelation
-	plan.Args.Correlation=&correlation
-	plan,err=vmconfig.Validate(plan.Args)
-	if err!=nil{return err}
+	correlation := *s.vmCorrelation
+	plan.Args.Correlation = &correlation
+	plan, err = vmconfig.Validate(plan.Args)
+	if err != nil {
+		return err
+	}
 	var result proto.CtlVMPrepareResult
 	if err = s.ctl.request(ctx, proto.CtlVMPrepare, plan.Args, &result); err != nil {
 		return err
@@ -31,7 +37,9 @@ func (s *Supervisor) prepareVMGuest(ctx context.Context, headless bool) error {
 	if result.GuestABI != proto.GuestOwnedPTYV2 {
 		return execRefusal("the VM has not applied its actual init-owned PTY contract")
 	}
-	if err:=s.confirmVMPrepare(ctx,result.Correlation);err!=nil{return err}
+	if err := s.confirmVMPrepare(ctx, result.Correlation); err != nil {
+		return err
+	}
 	if !headless {
 		s.vmPlan = &plan
 	}

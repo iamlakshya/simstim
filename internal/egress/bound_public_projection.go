@@ -12,7 +12,11 @@ import (
 // stand-ins must never be returned to a guest or treated as acknowledged.
 func (state *memberState) publicSessionProjection(ctx context.Context, includePending bool) (*api.SessionSecretState, error) {
 	intent := api.SecretDeliveryIntent{Version: api.SecretDeliveryIntentV1, Modes: make(map[string]api.SecretMode), Binds: make(map[string]api.SecretBind)}
+	intent.TrustedUses = state.publicTrustedUses()
 	for name, secret := range state.secrets {
+		if !secretHasGuestUse(secret) {
+			continue
+		}
 		intent.Modes[name] = secret.mode
 		if secret.bound != nil {
 			binding := secret.bound.binding

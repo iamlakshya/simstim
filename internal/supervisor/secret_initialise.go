@@ -30,6 +30,7 @@ func (s *Supervisor) clearStartupValues(primary map[string]string) {
 	defer s.mu.Unlock()
 	if s.startupSecrets != nil {
 		clear(s.startupSecrets.Values)
+		clear(s.startupSecrets.ProtectedTrustedSecretValues)
 	}
 }
 
@@ -53,6 +54,9 @@ func (s *Supervisor) setPublicEgressCA(owner *egressProc, public string) error {
 }
 
 func (s *Supervisor) initialiseEgress(ctx context.Context, owner *egressProc, initial egress.InitArgs, primary map[string]string) (secretEnvironment, error) {
+	if err := requirePublicOnlyEgress(ctx, owner, initial.Policy); err != nil {
+		return secretEnvironment{}, err
+	}
 	if !s.modernSecretStartup() {
 		if err := checkMemberCapability(ctx, owner); err != nil {
 			return secretEnvironment{}, err
@@ -97,6 +101,10 @@ func (s *Supervisor) initialiseEgress(ctx context.Context, owner *egressProc, in
 		return secretEnvironment{}, err
 	}
 	defer clear(args.Initial.Secrets)
+	defer clear(args.ProtectedTrustedSecretValues)
+	if err := requireTrustedJudgeControl(ctx, owner, args.TrustedUses); err != nil {
+		return secretEnvironment{}, err
+	}
 	var raw json.RawMessage
 	if err := owner.ctl.request(ctx, egress.CtlBoundInit, args, &raw); err != nil {
 		return secretEnvironment{}, err
@@ -112,7 +120,7 @@ func (s *Supervisor) initialiseEgress(ctx context.Context, owner *egressProc, in
 	if err != nil {
 		return secretEnvironment{}, err
 	}
-	state := &api.SessionSecretState{Version: api.SessionSecretStateV1, Intent: api.SecretDeliveryIntent{Version: api.SecretDeliveryIntentV1, Modes: args.Modes, Binds: args.Binds},
+	state := &api.SessionSecretState{Version: api.SessionSecretStateV1, Intent: api.SecretDeliveryIntent{Version: api.SecretDeliveryIntentV1, Modes: args.Modes, Binds: args.Binds, TrustedUses: api.CloneTrustedSecretUses(result.TrustedUses)},
 		Generation: result.Generation, Primary: result.Secrets, Minted: result.Minted, Retired: result.Retired}
 	if _, err := s.commitSecretPublicState(ctx, owner, nil, func(*api.SessionSecretState) (*api.SessionSecretState, error) { return state, nil }); err != nil {
 		return secretEnvironment{}, err

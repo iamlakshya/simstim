@@ -22,6 +22,11 @@ func ValidateAcknowledgedSessionSecretState(ctx context.Context, selectedKind st
 	if err := ValidateSavedPublicSessionState(owned); err != nil {
 		return err
 	}
+	for name, use := range intent.TrustedUses {
+		if !sameTrustedUseMetadata(map[string]api.TrustedSecretUseV1{name: use}, map[string]api.TrustedSecretUseV1{name: owned.Intent.TrustedUses[name]}) {
+			return registryIntentError()
+		}
+	}
 	for name := range intent.Binds {
 		if intent.Modes[name] != api.SecretModeBound {
 			return registryIntentError()

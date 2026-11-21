@@ -47,13 +47,14 @@ type heldKey struct{ name string }
 // heldLock is the lock of a host that a command took. Its unlock sets
 // gone: a context that outlives the lock no longer says that it holds it.
 type heldLock struct {
-	gone      atomic.Bool
-	forgetMu  sync.Mutex
-	forgotten *hostForgetWitness
-	stateOnce sync.Once
-	state     *hostStateLifetime
-	native    *hostOperationFile
-	terminal  atomic.Bool
+	savedRemoval atomic.Pointer[SavedHostRemovalV1]
+	gone         atomic.Bool
+	forgetMu     sync.Mutex
+	forgotten    *hostForgetWitness
+	stateOnce    sync.Once
+	state        *hostStateLifetime
+	native       *hostOperationFile
+	terminal     atomic.Bool
 }
 
 // LockHost takes the lock of host name for the command kind, such as

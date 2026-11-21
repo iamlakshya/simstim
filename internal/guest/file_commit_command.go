@@ -12,4 +12,4 @@ type fileCommitCommand struct {
 
 // VMFileCommitHelperMode is the closed root-entry/drop-to-agent publication
 // role, separate from the fixed UID1000 put receiver and Git fd3 purpose.
-const VMFileCommitHelperMode="wall-file-commit-v1"
+const VMFileCommitHelperMode = "wall-file-commit-v1"

@@ -13,7 +13,9 @@ func vmCommandCredentials(role vmCommandRole, docker bool, attr *syscall.SysProc
 	}
 	switch role {
 	case vmFileCommitCommand:
-		if attr.Credential!=nil{return vmError("the private publisher did not begin in its original root descriptor owner")}
+		if attr.Credential != nil {
+			return vmError("the private publisher did not begin in its original root descriptor owner")
+		}
 		return nil
 	case vmDockerCommand:
 		if !docker || attr.Credential != nil {

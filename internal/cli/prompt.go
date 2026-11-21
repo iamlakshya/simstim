@@ -83,6 +83,7 @@ var (
 	qPolicyRm      = &question{cmd: "policy rm", flag: "--all"}
 	qSharedNew     = &question{cmd: "new", flag: "None", refused: true}
 	qSharedResume  = &question{cmd: "resume", flag: "None", refused: true}
+	qSharedRewind  = &question{cmd: "rewind", flag: "None", refused: true}
 	qInstallHelper = &question{cmd: "host add", flag: "--yes"}
 	qAddAgents     = &question{cmd: "host add", flag: "--yes", keep: true}
 	// qHostKey is ssh's own question about a host key that the user's
@@ -104,11 +105,15 @@ var (
 	// qRmMachine is the typed name that host rm asks for, to delete the
 	// machine of a host that `host create` made. With input off, the
 	// machine stays, unless --destroy and --confirm name it.
-	qRmMachine = &question{cmd: "host rm", flag: "--destroy --confirm <host>", keep: true}
+	qRmMachine      = &question{cmd: "host rm", flag: "--destroy --confirm <host>", keep: true}
+	qRmPurge        = &question{cmd: "host rm", flag: "--purge --confirm <host>"}
+	qRmLogins       = &question{cmd: "host rm", flag: "--delete-logins", keep: true}
+	qPurgeRootStep  = &question{cmd: "host rm", flag: "--root-step run"}
+	qPurgeRootGrant = &question{cmd: "host rm", flag: "None", refused: true}
 )
 
 // questions lists every row, for the tests.
-var questions = []*question{qPolicyAllow, qPolicyDeny, qPolicyRm, qSharedNew, qSharedResume, qInstallHelper, qAddAgents, qHostKey, qHostTier, qRaiseTier, qRekey, qMakeFolder, qSetupScript, qFix, qHostFix, qRootStep, qSetup, qRmMachine, qDelete, qRestart}
+var questions = []*question{qPolicyAllow, qPolicyDeny, qPolicyRm, qSharedNew, qSharedResume, qSharedRewind, qInstallHelper, qAddAgents, qHostKey, qHostTier, qRaiseTier, qRekey, qMakeFolder, qSetupScript, qFix, qHostFix, qRootStep, qSetup, qRmMachine, qRmPurge, qRmLogins, qPurgeRootStep, qPurgeRootGrant, qDelete, qRestart, qJoinChanges, qLeaveChanges}
 
 // prompter asks a command's questions on stderr, and reads the answers from
 // stdin.

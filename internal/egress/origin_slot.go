@@ -21,6 +21,7 @@ func (s *Server) dialOrigin(ctx context.Context, host string, port int, permit *
 		<-s.originSem
 		return nil, addr, rule, err
 	}
+	conn = s.budgetOriginConn(ctx, conn, request, permit, addr)
 	return &originSlotConn{Conn: conn, release: func() { <-s.originSem }}, addr, rule, nil
 }
 

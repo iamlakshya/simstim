@@ -49,11 +49,13 @@ func RunInputApplyHelper(args []string) (returned error) {
 		return err
 	}
 	defer func() { returned = errors.Join(returned, root.Close()) }()
-	if err:=inputtransfer.ApplyIncludes(ctx,inputtransfer.ReceiveOptions{Scope:control.Scope,Stage:stage,Root:root,CopyMax:control.CopyMax,SeedMax:control.SeedMax,Protected:control.Protected,BeforeCreate:files.CheckSpace},summary);err!=nil{return err}
-	return inputtransfer.VerifyPrimaryPolicy(ctx,control,summary)
+	if err := inputtransfer.ApplyIncludes(ctx, inputtransfer.ReceiveOptions{Scope: control.Scope, Stage: stage, Root: root, CopyMax: control.CopyMax, SeedMax: control.SeedMax, Protected: control.Protected, BeforeCreate: files.CheckSpace}, summary); err != nil {
+		return err
+	}
+	return inputtransfer.VerifyPrimaryPolicy(ctx, control, summary)
 }
 func (g *Init) applyInputIncludes(ctx context.Context, control inputtransfer.Control, summary api.InputSummary) error {
-	if summary.FileCount == 0 && control.PrimaryRepository=="" {
+	if summary.FileCount == 0 && control.PrimaryRepository == "" {
 		return nil
 	}
 	prefix, err := inputtransfer.EncodeControl(control)

@@ -46,7 +46,10 @@ func (w *clipWrites) lists() [][][32]byte {
 }
 
 func (w *clipWrites) empty() bool {
-	for _, l := range w.lists() {
+	if len(w.board) > 0 {
+		return false
+	}
+	for _, l := range w.sel {
 		if len(l) > 0 {
 			return false
 		}

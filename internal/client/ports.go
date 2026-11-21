@@ -25,7 +25,7 @@ func (c *Conn) GrantPort(ctx context.Context, session string, port int) (string,
 	if !c.HasFeature(api.FeatureSandboxPortsV1) {
 		return "", portsUpgrade()
 	}
-	ctx,_=ensureGrantRequest(ctx)
+	ctx, _ = ensureGrantRequest(ctx)
 	ctx, release, err := c.beginGrant(ctx, "port forward", false)
 	if err != nil {
 		return "", err

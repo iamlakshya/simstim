@@ -33,3 +33,39 @@ func TestSessionExamplesUseTheCanonicalAddress(t *testing.T) {
 		t.Errorf("a documented bare-host alternative failed: %s", err)
 	}
 }
+
+// Host flags and positional hosts use the same canonical name. Provider
+// choices and the default names of created hosts remain valid examples.
+func TestHostExamplesUseTheCanonicalAddress(t *testing.T) {
+	for _, args := range [][]string{
+		{"setup", "--host", "my-server", "--agents", "claude,codex"},
+		{"setup", "--host=other", "--agents", "claude"},
+		{"ls", "--host", "box"},
+		{"agents", "install", "claude", "--host=other"},
+		{"host", "test", "other"},
+		{"host", "doctor", "box", "--json"},
+		{"host", "alerts", "log", "other"},
+		{"new", "other", "--detach", "--", "htop"},
+		{"host", "idle", "other", "30m"},
+	} {
+		if err := exampleParses(args); !strings.Contains(err, "a host example must use my-vps") {
+			t.Errorf("non-canonical host example %q = %q", args, err)
+		}
+	}
+	for _, args := range [][]string{
+		{"setup", "--host", "my-vps", "--agents", "claude,codex"},
+		{"ls", "--host=my-vps"},
+		{"agents", "install", "claude", "--host", "my-vps"},
+		{"host", "test", "my-vps"},
+		{"host", "doctor", "my-vps", "--json"},
+		{"new", "my-vps", "--detach", "--", "htop"},
+		{"host", "create", "docker", "test", "--image", "debian:stable-slim"},
+		{"host", "create", "e2b", "cloud", "--template", "base"},
+		{"host", "destroy", "lima"},
+		{"host", "idle", "lima", "30m"},
+	} {
+		if err := exampleParses(args); err != "" {
+			t.Errorf("valid host or provider example %q = %q", args, err)
+		}
+	}
+}

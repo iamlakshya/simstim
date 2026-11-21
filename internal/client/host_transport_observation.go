@@ -44,14 +44,16 @@ type hostTransportStamp struct {
 }
 
 type hostTransportAttempt struct {
-	kind         hostTransportKind
-	host         Host
-	observation  *HostStateObservation
-	op           *heldLock
-	priorID      string
-	continuation *hostTransportExpectation
-	active       atomic.Bool
-	finished     atomic.Bool
+	registrationMu        sync.Mutex
+	registrationTransport Transport // Actual registration factory object, never a DTO.
+	kind                  hostTransportKind
+	host                  Host
+	observation           *HostStateObservation
+	op                    *heldLock
+	priorID               string
+	continuation          *hostTransportExpectation
+	active                atomic.Bool
+	finished              atomic.Bool
 }
 
 func beginHostTransportObservation(ctx context.Context, h Host) (context.Context, func(), *hostTransportAttempt, error) {

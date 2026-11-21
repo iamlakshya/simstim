@@ -52,7 +52,16 @@ func AdvisoryKind(itemKind string) string {
 // below a.Before (isolation spec 20.9). An unresolved entry covers every
 // version.
 func (a Advisory) Matches(kind, name, version string) bool {
-	return a.Kind == kind && a.Name == name && (a.Unresolved || Below(version, a.Before))
+	return a.Kind == kind && kernelAdvisoryNameV1(kind, a.Name) == kernelAdvisoryNameV1(kind, name) && (a.Unresolved || Below(version, a.Before))
+}
+
+// Both signed kernel formats come from the same pinned Linux source. A
+// format-specific delivery name must never bypass that source's advisories.
+func kernelAdvisoryNameV1(kind, name string) string {
+	if kind == KindKernel && name == KernelEFIName {
+		return "guest"
+	}
+	return name
 }
 
 // Matches lists the advisories of m that cover something of a kind of

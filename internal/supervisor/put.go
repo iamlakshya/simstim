@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"path"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -57,6 +58,11 @@ func (s *Supervisor) beginFileTransfer(c *client) (context.Context, func(), erro
 }
 
 func (s *Supervisor) closeFileTransfers() {
+	s.cancelFileTransfersV1()
+	s.fileWG.Wait()
+}
+
+func (s *Supervisor) cancelFileTransfersV1() {
 	s.mu.Lock()
 	s.fileTransfersClosed = true
 	ops := make([]*fileTransfer, 0, len(s.fileTransfers))
@@ -66,9 +72,8 @@ func (s *Supervisor) closeFileTransfers() {
 	s.mu.Unlock()
 	for _, op := range ops {
 		op.cancel()
-		op.client.close()
+		_ = op.client.conn.Close()
 	}
-	s.fileWG.Wait()
 }
 
 // uploadFrame takes one dedicated full-peer connection. It never shares its
@@ -106,11 +111,16 @@ func (s *Supervisor) uploadFrame(c *client, reader *bufio.Reader, frame proto.Fr
 		policy = &copy
 	}
 	s.mu.Unlock()
-	if policy == nil {
+	unwalled := s.unwalledV1()
+	if policy == nil && !unwalled {
 		c.reply(begin.ID, nil, uploadRefusal("the running sandbox has no known upload policy"))
 		return true
 	}
 	limit := int64(host.MaxUpload)
+	if unwalled && begin.Path != "" {
+		c.reply(begin.ID, nil, &proto.Error{Code: "cp_unwalled", Message: "the session runs with the host's own files", Hint: "Use the host's ordinary file transfer command for a chosen path."})
+		return true
+	}
 	if begin.Path != "" {
 		limit, err = filecopy.CopyMax(policy)
 		if err == nil {
@@ -134,7 +144,7 @@ func (s *Supervisor) uploadFrame(c *client, reader *bufio.Reader, frame proto.Fr
 		c.reply(begin.ID, nil, toProtoErr(err))
 		return true
 	}
-	if begin.Path == "" && !pasteAny(policy) {
+	if begin.Path == "" && !unwalled && !pasteAny(policy) {
 		if err := checkPasteMedia(spool, begin.Size); err != nil {
 			c.reply(begin.ID, nil, toProtoErr(err))
 			return true
@@ -215,6 +225,9 @@ func (s *Supervisor) putFile(ctx context.Context, file *os.File, header proto.Fi
 	expected := header.Path
 	if expected == "" {
 		expected = path.Join(host.GuestRunDir(), "paste", header.SHA256[:12]+"-"+header.Name)
+		if s.unwalledV1() {
+			expected = filepath.Join(paths.PasteDir(s.owner().id), header.SHA256[:12]+"-"+header.Name)
+		}
 	}
 	if header.Path != "" && !header.Directory && s.owner().processCopy != nil {
 		if _, err := file.Seek(0, io.SeekStart); err != nil {

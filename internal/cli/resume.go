@@ -115,14 +115,15 @@ func resumeSession(cmd *cobra.Command, target string, a client.ResumeArgs, passe
 	return r, err
 }
 
-func resumeWithGrants(ctx context.Context, cmd *cobra.Command, f found, a client.ResumeArgs, passed []string) (*client.ResumeResult, *client.Session, error) {
+func resumeWithGrants(ctx context.Context, cmd *cobra.Command, f found, a client.ResumeArgs, passed []string) (res *client.ResumeResult, running *client.Session, err error) {
 	if _, err := client.ReadPolicySettings(); err != nil {
 		return nil, nil, err
 	}
-	cmd.SetContext(client.WithGrantRequest(ctx, client.NewGrantRequest(false, false)))
-	var res *client.ResumeResult
-	var running *client.Session
-	err := grantQuestions(cmd, func(ctx context.Context) error {
+	original := cmd.Context()
+	request := client.NewGrantRequest(false, false)
+	cmd.SetContext(client.WithGrantRequest(ctx, request))
+	defer func() { cmd.SetContext(original); err = errors.Join(err, request.Close()) }()
+	err = grantQuestions(cmd, func(ctx context.Context) error {
 		var err error
 		res, running, err = resumeRacing(ctx, f, a, passed, secretTerminal(cmd))
 		return err
@@ -194,6 +195,10 @@ func resumeFound(ctx context.Context, f found, a client.ResumeArgs, passed []str
 		return nil, err
 	}
 	if err := f.conn.CheckResumePolicyBeforeFetch(ctx, f.s.ID, plan); err != nil {
+		return nil, err
+	}
+	a.ID = f.s.ID
+	if _, err := f.conn.PrepareNativeResume(ctx, a); err != nil {
 		return nil, err
 	}
 	// A password manager may want a touch, so the secrets get their own time.

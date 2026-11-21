@@ -13,6 +13,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net"
 	"os"
@@ -45,6 +46,8 @@ const heartbeatEvery = 5 * time.Second
 
 // Init is the guest init of one sandbox.
 type Init struct {
+	unwalled                *unwalledGuestV1
+	sshAgent                *SSHAgentProxy
 	imageSaves              map[string]*imageSaveGuestV1
 	packageSettingsRequired bool // set only by the actual closed walled constructors
 	packageSettingsPhase    packageSettingsPhase
@@ -110,6 +113,11 @@ type Init struct {
 // Run is the guest init. It serves the link on fd 3 until the supervisor
 // stops it, or the link ends.
 func Run(args ...string) error {
+	unwalledID := ""
+	if len(args) == 3 && args[0] == "--wall" && args[1] == "none" {
+		unwalledID = args[2]
+		args = nil
+	}
 	if len(args) != 0 {
 		if len(args) == 1 && args[0] == "--self-test" {
 			return runSelfTest(os.Stdout, os.Stderr)
@@ -122,7 +130,11 @@ func Run(args ...string) error {
 	if err := secretmem.Protect(); err != nil {
 		return vmError("the guest init cannot protect its private control input")
 	}
-	dnsSocks, dnsErr := claimInheritedDNSSockets()
+	var dnsSocks DNSSockets
+	var dnsErr error
+	if unwalledID == "" {
+		dnsSocks, dnsErr = claimInheritedDNSSockets()
+	}
 	f := os.NewFile(linkFD, "link")
 	if f == nil {
 		return &proto.Error{Code: "wall_init", Message: "the guest init has no link on fd 3",
@@ -137,14 +149,51 @@ func Run(args ...string) error {
 	// Its log line on a signal never ends it before its end ran, whoever
 	// reads its output.
 	host.KeepOnBrokenPipe()
-	g := New(conn, os.Getenv(RootEnv), slog.New(slog.NewTextHandler(os.Stderr, nil)))
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	var mode *unwalledGuestV1
+	var earlyReaper bool
+	var sig chan os.Signal
+	if unwalledID != "" {
+		mode, err = newUnwalledGuestV1(unwalledID)
+		if err != nil {
+			conn.Close()
+			return err
+		}
+		earlyReaper = becomeSubreaper(logger)
+		if !earlyReaper {
+			// No hello or controller link is handed back before the actual
+			// None creator can join its original descendants. This remains
+			// an init-only failed preparation with no user process started.
+			cleanup := errors.Join(mode.runtime.Close(), conn.Close())
+			if mode.helper != nil {
+				cleanup = errors.Join(cleanup, mode.helper.Close())
+			}
+			return errors.Join(&proto.Error{Code: "wall_init", Message: "the unwalled init cannot become a native child subreaper", Hint: "Use a Linux host which permits unprivileged child subreapers, then retry the original start."}, cleanup)
+		}
+		sig = make(chan os.Signal, 1)
+		signal.Notify(sig, syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP)
+	}
+	g := New(conn, os.Getenv(RootEnv), logger)
 	g.packageSettingsRequired = true
-	g.setInheritedDNS(dnsSocks, dnsErr)
-	g.reaper = becomeSubreaper(g.log)
+	if unwalledID != "" {
+		g.unwalled = mode
+		g.root = ""
+		g.packageSettingsRequired = false
+	} else {
+		g.setInheritedDNS(dnsSocks, dnsErr)
+	}
+	if mode != nil {
+		g.reaper = earlyReaper
+	} else {
+		g.reaper = becomeSubreaper(g.log)
+	}
 	// A stop, from the test driver or as the supervisor dies
 	// (host.StopWithParent), ends the sandbox from the inside first.
-	sig := make(chan os.Signal, 1)
-	signal.Notify(sig, syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP)
+	if sig == nil {
+		sig = make(chan os.Signal, 1)
+		signal.Notify(sig, syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP)
+	}
+	defer signal.Stop(sig)
 	go func() {
 		select {
 		case s := <-sig:
@@ -157,6 +206,10 @@ func Run(args ...string) error {
 		go g.reapLoop()
 	}
 	g.Serve()
+	g.end() // Join the same once owner before observing its cleanup result.
+	if g.unwalled != nil {
+		return g.unwalled.cleanupErr
+	}
 	return nil
 }
 
@@ -182,6 +235,8 @@ func (g *Init) Serve() {
 			continue
 		}
 		switch st.Kind() {
+		case link.KindSFTP:
+			go g.serveEditorSFTPV1(st)
 		case link.KindPort:
 			g.acceptPort(st)
 		case link.KindCtl:
@@ -219,7 +274,9 @@ func (g *Init) Serve() {
 		case link.KindExec:
 			go g.serveExec(st)
 		case link.KindHolder:
-			go g.serveHolder(st)
+			if !g.tryEditorTerminalV1(st) {
+				go g.serveHolder(st)
+			}
 		default:
 			// Later versions carry the other kinds. Refuse them now.
 			_ = st.Close()
@@ -255,6 +312,7 @@ func (g *Init) end() {
 			}
 		}
 		g.stopExecs()
+		g.stopSSHAgent()
 		g.fileWG.Wait()
 		if g.vm != nil {
 			clean = g.vm.joinPTY() && clean
@@ -262,7 +320,13 @@ func (g *Init) end() {
 		stopHolders(holders, 3*time.Second)
 		if g.reaper {
 			// The holder is reaped: only this loop reaps now.
-			clean = g.reapOrphans() && clean
+			joined := g.reapOrphans()
+			clean = joined && clean
+			if g.unwalled != nil && !joined {
+				g.unwalled.cleanupErr = execError("the unwalled init did not confirm original child and terminal joins")
+			}
+		} else if g.unwalled != nil {
+			g.unwalled.cleanupErr = execError("the unwalled init has no native subreaper completion producer")
 		}
 		var drains sync.WaitGroup
 		for _, hp := range holders {
@@ -301,6 +365,16 @@ func (g *Init) end() {
 			// Closing both the event socket and link releases a read as
 			// well as a forwarder waiting for ctl stream credit.
 			<-hp.eventsDone
+		}
+		if g.unwalled != nil {
+			if err := g.unwalled.runtime.Close(); err != nil {
+				g.unwalled.cleanupErr = errors.Join(g.unwalled.cleanupErr, err)
+			}
+			if g.unwalled.helper != nil {
+				if err := g.unwalled.helper.Close(); err != nil {
+					g.unwalled.cleanupErr = errors.Join(g.unwalled.cleanupErr, err)
+				}
+			}
 		}
 		close(g.done)
 	})
@@ -356,6 +430,18 @@ func (g *Init) stop(grace time.Duration) {
 // path is the guest's path p, under the root that stands for the
 // sandbox's root, when there is one.
 func (g *Init) path(p string) string {
+	if g.unwalled != nil {
+		if p == host.GuestHome {
+			return g.unwalled.home
+		}
+		if p == host.GuestRunDir() {
+			return g.unwalled.runtime.Name()
+		}
+		if strings.HasPrefix(p, host.GuestRunDir()+"/") {
+			return filepath.Join(g.unwalled.runtime.Name(), strings.TrimPrefix(p, host.GuestRunDir()+"/"))
+		}
+		return p
+	}
 	if g.root == "" {
 		return p
 	}

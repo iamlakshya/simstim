@@ -219,11 +219,13 @@ type Session struct {
 	ctlOpen        bool   // the link's ctl stream has been opened
 	accepts        []*Stream
 	acceptQ        waitq
-	opens          []*Stream // streams whose open waits, in the order of their IDs
-	grants         []*Stream // streams with credit to give
-	refusals       []uint32  // streams to refuse
-	drained        waitq     // the writer has taken the refusals
-	hi, lo         []*Stream // streams with frames to send, ctl and holder first
+	opens          []*Stream      // streams whose open waits, in the order of their IDs
+	guardedOpens   []*guardedOpen // requests without IDs, admitted only by the physical writer
+	guardedOpening *guardedOpen   // source guard or raw write currently owned by that writer
+	grants         []*Stream      // streams with credit to give
+	refusals       []uint32       // streams to refuse
+	drained        waitq          // the writer has taken the refusals
+	hi, lo         []*Stream      // streams with frames to send, ctl and holder first
 	refused        uint64
 	wbuf           []byte // the writer's batch, reused
 	seq            uint64 // the number of the last batch built
@@ -410,6 +412,7 @@ func (s *Session) fail(err error) {
 		return
 	}
 	s.closed, s.err = true, err
+	s.cancelGuardedOpens()
 	for _, stream := range s.streams {
 		stream.notifyDone()
 	}

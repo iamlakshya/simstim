@@ -70,7 +70,10 @@ var (
 // which writes to stderr: what it says of its own key, or its debug log,
 // never counts as the destination's verdict.
 func trustHostKey(ctx context.Context, h Host, algs string) (trust, error) {
-	cfg, err := writeWrapper(h)
+	if err := checkJoinedProjectionStepV1(ctx, h); err != nil {
+		return trust{}, err
+	}
+	cfg, err := writeWrapperContext(ctx, h)
 	if err != nil {
 		return trust{}, err
 	}
@@ -106,7 +109,13 @@ func trustHostKey(ctx context.Context, h Host, algs string) (trust, error) {
 	cmd.WaitDelay = sshWaitDelay
 	var errb bytes.Buffer
 	cmd.Stdout, cmd.Stderr = io.Discard, &errb
+	if err := checkJoinedProjectionStepV1(ctx, h); err != nil {
+		return trust{}, err
+	}
 	runErr := runTrustCmd(cmd)
+	if err := checkJoinedProjectionStepV1(context.WithoutCancel(ctx), h); err != nil {
+		return trust{}, errors.Join(runErr, err)
+	}
 	if ctx.Err() != nil {
 		return trust{}, fmt.Errorf("read the host key of %s: %w", h.Name, ctx.Err())
 	}

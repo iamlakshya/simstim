@@ -37,6 +37,7 @@ type newHostResolvedMsg struct {
 	seq      uint64
 	selector string
 	host     client.Host
+	preview  hostSelectionPreview
 	err      error
 	action   newHostAction
 	form     *newSession
@@ -58,7 +59,8 @@ func (m *Model) resolveNewHost(selector string, action newHostAction, form *newS
 	message := newHostResolvedMsg{seq: seq, selector: selector, action: action, form: form, args: args, attach: attach,
 		modal: m.modal, prompt: m.prompt, screen: m.screen, current: m.cur}
 	return m.bgCmdFrom(ctx, func(ctx context.Context) tea.Msg {
-		message.host, message.err = be.ResolveHost(ctx, selector)
+		message.preview, message.err = be.PreviewHostSelection(ctx, selector, startInputOptions(args, args.Cwd != ""))
+		message.host = message.preview.host
 		return message
 	})
 }
@@ -112,6 +114,12 @@ func (m *Model) onNewHostResolved(msg newHostResolvedMsg) tea.Cmd {
 	if msg.err != nil {
 		return m.newHostLookupFailure(msg)
 	}
+	if msg.action == newHostSubmit && msg.preview.facadeValidated {
+		return m.submitPreviewedNewHost(msg)
+	}
+	if msg.preview.neutral() {
+		return m.acceptNeutralHostPreview(msg)
+	}
 	host := m.hostByName(msg.host.Name)
 	if host == nil || !client.SameEntry(host.host, msg.host) {
 		err := &client.UserError{Code: "host_changed", Kind: client.KindRefused,
@@ -126,6 +134,7 @@ func (m *Model) onNewHostResolved(msg newHostResolvedMsg) tea.Cmd {
 	case newHostChoice:
 		if m.modal == msg.form {
 			msg.form.useHost(host, msg.host)
+			msg.form.preview = msg.preview
 		}
 		return nil
 	case newHostSubmit:
@@ -193,11 +202,16 @@ func (m *Model) openDefaultNewSession(host *hostConn, msg newHostResolvedMsg) te
 		if m.modal != msg.modal || !client.SameEntry(host.host, msg.host) {
 			return nil
 		}
-		if err := client.Allow(host.host, host.tier, client.Outbound{Kind: client.OutboundDefaultHost}, client.DefaultSettings()); err != nil {
-			return m.toastErr(err)
+		if !msg.preview.facadeValidated {
+			if err := client.Allow(host.host, host.tier, client.Outbound{Kind: client.OutboundDefaultHost}, client.DefaultSettings()); err != nil {
+				return m.toastErr(err)
+			}
 		}
 		dialog := newSessionDialog(m, host)
-		dialog.selector, dialog.sourceHost, dialog.defaultHost = "", msg.host, host.name()
+		dialog.selector, dialog.sourceHost, dialog.preview = "", msg.host, msg.preview
+		if msg.preview.defaulted {
+			dialog.defaultHost = host.name()
+		}
 		m.modal = dialog
 		return nil
 	})

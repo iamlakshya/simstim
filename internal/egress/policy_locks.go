@@ -18,7 +18,7 @@ func compilePolicyLocks(locks []api.Lock) ([]compiledRule, error) {
 				return nil, err
 			}
 			compiled, err := compileRule(api.Rule{Layer: lock.Layer, Name: lock.Name, Door: api.DoorNet,
-				Target: canonical.Target, Methods: canonical.Methods})
+				Target: canonical.Target, Methods: canonical.Methods, PublicOnly: canonical.PublicOnly})
 			if err != nil {
 				return nil, err
 			}

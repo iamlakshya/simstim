@@ -62,7 +62,7 @@ func (w *newPublicationWitness) beforeRequest(ctx context.Context, c *Conn, req 
 	}
 	// The already encoded body is reused by the actual writer. Count the
 	// actual ID/header without re-encoding/copying all secret-bearing args.
-	header, err := json.Marshal(proto.Request{ID: req.ID, Op: req.Op, Args: json.RawMessage("{}")})
+	header, err := json.Marshal(proto.Request{ID: req.ID, Op: req.Op, Args: json.RawMessage("{}"), NewAttempt: req.NewAttempt})
 	if err != nil || len(req.Args)+len(header)-2+1 > proto.MaxFrame {
 		return &UserError{Msg: "the complete session request exceeds the protocol frame", Hint: "Select fewer inputs or grants for this start.", Code: "state_too_large", Kind: KindRefused}
 	}
@@ -71,6 +71,9 @@ func (w *newPublicationWitness) beforeRequest(ctx context.Context, c *Conn, req 
 		return err
 	}
 	if err := recordSecretNames(ctx, c.Host, c.HostID(), tier, actual.Secrets); err != nil {
+		return err
+	}
+	if err := w.plan.namedKeys.beforePhysical(ctx, w.plan, actual.NamedSSHKeys); err != nil {
 		return err
 	}
 	w.requestID = req.ID
@@ -92,6 +95,9 @@ func (w *newPublicationWitness) afterResponse(ctx context.Context, c *Conn, resp
 	s, ok := out.(*Session)
 	if !ok || s == nil || s.ID != w.creation.SessionID || s.Agent != w.plan.selection.Kind() || s.SandboxOf != "" || !ValidHostID(s.RunGeneration) || s.SecretState == nil {
 		return sandboxReceiptError()
+	}
+	if err := w.plan.namedKeys.checkAcknowledged(s.NamedSSHKeys); err != nil {
+		return err
 	}
 	if err := egress.ValidateSavedPublicSessionState(s.SecretState); err != nil {
 		return err

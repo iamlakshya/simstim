@@ -108,11 +108,15 @@ func prepareImage(ctx context.Context, c *Conn, text string, options ImageOption
 	if err := imageFeature(c); err != nil {
 		return image.Record{}, err
 	}
-	if err := ValidateSettings(LoadSettings()); err != nil {
+	ctx, policy, closePolicy, err := withRetainedImagePolicy(ctx, c)
+	if err != nil {
+		return image.Record{}, err
+	}
+	defer func() { returned = errors.Join(returned, closePolicy()) }()
+	if err := validateImagePolicy(policy); err != nil {
 		return image.Record{}, err
 	}
 	mode := options.Mode
-	var err error
 	if mode == "" {
 		mode, err = RuntimeFetchPreference(ctx)
 	} else {
@@ -125,16 +129,28 @@ func prepareImage(ctx context.Context, c *Conn, text string, options ImageOption
 	if err != nil {
 		return image.Record{}, err
 	}
-	if !resolve {
+	if !resolve && text != "default" {
 		if saved, known, err := ensureSavedImage(ctx, c, text, arch); known || err != nil {
 			return saved, err
 		}
 	}
-	resolved, err := resolveImage(ctx, text, arch, resolve, options)
+	resolved, err := resolveImage(ctx, text, arch, resolve, options, policy)
 	if err != nil {
 		return image.Record{}, err
 	}
 	request := resolved.request
+	if err := checkRetainedImagePolicy(ctx, c); err != nil {
+		return image.Record{}, err
+	}
+	if !resolved.release {
+		receipt, err := verifyImagePolicy(ctx, request, resolved.registry, policy)
+		if err != nil {
+			return image.Record{}, err
+		}
+		if err := recordImagePolicyReceipt(ctx, request, receipt); err != nil {
+			return image.Record{}, err
+		}
+	}
 	record, err = deliverImage(ctx, c, resolved, mode, options.Progress)
 	if err != nil {
 		return image.Record{}, err
@@ -161,6 +177,9 @@ func prepareImage(ctx context.Context, c *Conn, text string, options ImageOption
 }
 
 func deliverImage(ctx context.Context, c *Conn, resolved resolvedImage, mode string, progress io.Writer) (record image.Record, err error) {
+	if err := checkRetainedImagePolicy(ctx, c); err != nil {
+		return record, err
+	}
 	var cached image.CacheStatus
 	if err := c.Call(ctx, "image.status", image.StatusRequest{Request: &resolved.request}, &cached); err != nil {
 		return record, err
@@ -177,6 +196,9 @@ func deliverImage(ctx context.Context, c *Conn, resolved resolvedImage, mode str
 	if cached.Image != nil {
 		return record, imageCacheProtocolError()
 	}
+	if err := requireImageTransferV1(c); err != nil {
+		return record, err
+	}
 	if resolved.registry == nil {
 		resolved.registry, err = ImageRegistry(ctx, resolved.request.Ref)
 		if err != nil {
@@ -185,6 +207,13 @@ func deliverImage(ctx context.Context, c *Conn, resolved resolvedImage, mode str
 	}
 	if resolved.registry.Auth != (image.Credentials{}) {
 		mode = "laptop"
+	}
+	ctx, err = prepareNewImageFetch(ctx, c, &resolved, mode)
+	if err != nil {
+		return record, err
+	}
+	if intent, _ := ctx.Value(imageFetchPublicationKeyV1{}).(*imageFetchIntentV1); intent != nil {
+		defer intent.finish()
 	}
 	if mode == "auto" || mode == "host" {
 		record, err = fetchImageHost(ctx, c, resolved.request, progress)
@@ -195,6 +224,9 @@ func deliverImage(ctx context.Context, c *Conn, resolved resolvedImage, mode str
 			return record, err
 		}
 		runtimeLine(progress, "The host image download failed. Copying from this laptop once.\n")
+	}
+	if err := checkImageFetchBoundaryV1(ctx, c); err != nil {
+		return record, err
 	}
 	resolved, err = loadImageCopyPlan(ctx, resolved)
 	if err != nil {
@@ -211,8 +243,15 @@ func registryPinnedReference(ref image.Reference, digest string) string {
 	return ref.Registry + "/" + ref.Repository + "@" + digest
 }
 
-func pinImage(ctx context.Context, request *image.Request, options ImageOptions) error {
-	return updateImageLock(ctx, func(lock *image.Lock) error {
+func pinImage(ctx context.Context, request *image.Request, options ImageOptions, receipt imagePolicyReceipt) error {
+	if err := revalidateRetainedImagePolicy(ctx); err != nil {
+		return err
+	}
+	first := false
+	err := updateImageLock(ctx, func(lock *image.Lock) error {
+		if err := revalidateRetainedImagePolicy(ctx); err != nil {
+			return err
+		}
 		index := -1
 		for i := range lock.Images {
 			if lock.Images[i].Ref == request.Ref && lock.Images[i].HostID == "" {
@@ -223,7 +262,7 @@ func pinImage(ctx context.Context, request *image.Request, options ImageOptions)
 		if index < 0 {
 			lock.Images = append(lock.Images, image.Pin{Ref: request.Ref, Digest: request.Digest, PinnedAt: time.Now().UTC()})
 			index = len(lock.Images) - 1
-			runtimeLine(options.Progress, "Pinned %s to %s\n", CleanLine(request.Ref), request.Digest)
+			first = true
 		}
 		pin := &lock.Images[index]
 		if pin.Digest != request.Digest {
@@ -240,12 +279,19 @@ func pinImage(ctx context.Context, request *image.Request, options ImageOptions)
 				}
 				request.RootHash = platform.RootHash
 				request.DataBlocks = platform.DataBlocks
-				return nil
+				return applyImagePolicyReceipt(lock, *request, receipt)
 			}
 		}
 		pin.Platforms = append(pin.Platforms, image.PlatformPin{Arch: request.Arch, Digest: request.PlatformDigest})
-		return nil
+		return applyImagePolicyReceipt(lock, *request, receipt)
 	})
+	if err != nil {
+		return err
+	}
+	if first {
+		runtimeLine(options.Progress, "Pinned %s to %s\n", CleanLine(request.Ref), request.Digest)
+	}
+	return nil
 }
 
 func recordImageRoot(ctx context.Context, host string, request image.Request, record image.Record) error {
@@ -282,20 +328,34 @@ func recordImageRoot(ctx context.Context, host string, request image.Request, re
 }
 
 func copyImage(ctx context.Context, c *Conn, request image.Request, registry *image.Registry, documents []image.Document, layers []image.Layer, progress io.Writer) (record image.Record, returned error) {
+	if err := requireImageTransferV1(c); err != nil {
+		return record, err
+	}
+	if err := prepareImageCopyPlan(ctx, c, request, documents, layers); err != nil {
+		return record, err
+	}
+	correlation, err := imageTransferCorrelationV1()
+	if err != nil {
+		return record, err
+	}
+	begin := request.Clone()
+	begin.Transfer = correlation
 	var transfer image.Progress
-	if err := c.Call(ctx, "image.install", image.Install{Action: "begin", Request: &request}, &transfer); err != nil {
+	defer func() {
+		if returned != nil {
+			token := correlation
+			if intent, _ := ctx.Value(imageFetchPublicationKeyV1{}).(*imageFetchIntentV1); intent == nil && supply.IsHex64(transfer.Token+transfer.Token) {
+				token = transfer.Token
+			}
+			returned = errors.Join(returned, stopImageTransferV1(ctx, c, token))
+		}
+	}()
+	if err := callImageOwned(ctx, c, "image.install", image.Install{Action: "begin", Request: &begin}, &transfer); err != nil {
 		return record, err
 	}
 	if !supply.IsHex64(transfer.Token + transfer.Token) {
 		return record, fmt.Errorf("invalid image transfer token")
 	}
-	defer func() {
-		if returned != nil {
-			cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-			defer cancel()
-			_ = c.Call(cleanup, "image.install", image.Install{Action: "abort", Token: transfer.Token}, nil)
-		}
-	}()
 	for _, doc := range documents {
 		if err := copyImageBlob(ctx, c, transfer.Token, doc.Digest, strings.NewReader(string(doc.Data))); err != nil {
 			return record, err
@@ -308,6 +368,9 @@ func copyImage(ctx context.Context, c *Conn, request image.Request, registry *im
 			continue
 		}
 		seen[layer.Digest] = true
+		if err := checkImageFetchBoundaryV1(ctx, c); err != nil {
+			return record, err
+		}
 		file, err := image.CacheBlob(ctx, filepath.Join(CacheDir(), "images"), registry, ref, layer)
 		if err != nil {
 			return record, err
@@ -319,7 +382,7 @@ func copyImage(ctx context.Context, c *Conn, request image.Request, registry *im
 		}
 		runtimeLine(progress, "%s: %d bytes, sha256 ok\n", layer.Digest, layer.Size)
 	}
-	returned = c.Call(ctx, "image.install", image.Install{Action: "commit", Token: transfer.Token}, &record)
+	returned = callImageOwned(ctx, c, "image.install", image.Install{Action: "commit", Token: transfer.Token}, &record)
 	return record, returned
 }
 
@@ -330,7 +393,7 @@ func copyImageBlob(ctx context.Context, c *Conn, token, digest string, reader io
 		n, err := reader.Read(buffer)
 		if n > 0 {
 			var status image.Progress
-			if callErr := c.Call(ctx, "image.install", image.Install{Action: "chunk", Token: token, Digest: digest, Offset: offset, Data: buffer[:n]}, &status); callErr != nil {
+			if callErr := callImageOwned(ctx, c, "image.install", image.Install{Action: "chunk", Token: token, Digest: digest, Offset: offset, Data: buffer[:n]}, &status); callErr != nil {
 				return callErr
 			}
 			offset += int64(n)
@@ -345,4 +408,14 @@ func copyImageBlob(ctx context.Context, c *Conn, token, digest string, reader io
 			return err
 		}
 	}
+}
+
+func requireImageTransferV1(c *Conn) error {
+	if c == nil {
+		return imageFetchIntentError()
+	}
+	if !c.HasFeature(proto.FeatureImageTransferV1) {
+		return c.grantHelperOld("cancel and join image transfers")
+	}
+	return nil
 }

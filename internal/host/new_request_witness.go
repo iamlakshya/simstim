@@ -21,17 +21,20 @@ type newRequestKeyV1 struct{}
 // All fields and the issuer stay private to the actual bridge request path.
 // Context carries this witness; context values alone cannot issue one.
 type newRequestWitnessV1 struct {
-	mu        sync.Mutex
-	bridge    *bridge
-	requestID uint64
-	raw       []byte
-	encoded   []byte
-	need      []byte
-	runtime   *selectedRuntimeReceiptV1
-	agents    *InstalledAgentsReceiptV1
-	captured  bool
-	bound     *SessionOperation
-	written   bool
+	mu             sync.Mutex
+	bridge         *bridge
+	requestID      uint64
+	raw            []byte
+	encoded        []byte
+	need           []byte
+	runtime        *selectedRuntimeReceiptV1
+	agents         *InstalledAgentsReceiptV1
+	captured       bool
+	bound          *SessionOperation
+	written        bool
+	hostID         string
+	attempt        string
+	failureAttempt *newNoRoomAttemptV1
 }
 
 func newRuntimeError(message string) error {
@@ -51,7 +54,7 @@ func (b *bridge) newRequestContext(req proto.Request, args NewArgs) (context.Con
 	if err != nil {
 		return nil, err
 	}
-	witness := &newRequestWitnessV1{bridge: b, requestID: req.ID, raw: bytes.Clone(req.Args), encoded: encoded, need: bytes.Clone(args.VMNeedV1)}
+	witness := &newRequestWitnessV1{bridge: b, hostID: b.hostID, attempt: req.NewAttempt, requestID: req.ID, raw: bytes.Clone(req.Args), encoded: encoded, need: bytes.Clone(args.VMNeedV1)}
 	var expected *supply.Manifest
 	if len(args.VMNeedV1) != 0 {
 		need, err := vmneed.DecodeV1(args.VMNeedV1, runtime.GOARCH)
@@ -173,6 +176,9 @@ func admitReservedRuntime(ctx context.Context, operation *SessionOperation, m *M
 }
 
 func saveReservedManifest(operation *SessionOperation, m *Manifest) error {
+	if err := checkNewNoRoomTerminalV1(operation); err != nil {
+		return err
+	}
 	if operation == nil || m == nil || !operation.Valid(m.ID) {
 		return newRuntimeError("the reserved writer lost its original primary operation")
 	}
@@ -181,15 +187,20 @@ func saveReservedManifest(operation *SessionOperation, m *Manifest) error {
 		if len(m.VMNeedV1) != 0 || m.RuntimeManifest != nil {
 			return newRuntimeError("a raw manifest cannot issue runtime authority")
 		}
-		if isWalledMemoryV1(m) {
-			return withPlacement(operation.ownerContext, false, func(*placementControl) error {
+		return withPlacement(operation.ownerContext, false, func(control *placementControl) error {
+			if err := checkUserDrainLockedV1(operation.ownerContext, control); err != nil {
+				return err
+			}
+			if err := applyPersistentLockdownLockedV1(operation.ownerContext, control, m); err != nil {
+				return err
+			}
+			if isWalledMemoryV1(m) {
 				if err := admitNewMemoryLockedV1(operation.ownerContext, operation, m); err != nil {
 					return err
 				}
-				return operation.saveNewManifest(m)
-			}, false)
-		}
-		return operation.saveNewManifest(m)
+			}
+			return operation.saveNewManifest(m)
+		}, false)
 	}
 	witness.mu.Lock()
 	defer witness.mu.Unlock()
@@ -211,6 +222,12 @@ func saveReservedManifest(operation *SessionOperation, m *Manifest) error {
 	// One real native placement gate covers both exact active producers and
 	// the final durable writer. Never nest their independent gate callbacks.
 	err := withPlacement(operation.ownerContext, false, func(control *placementControl) error {
+		if err := checkUserDrainLockedV1(operation.ownerContext, control); err != nil {
+			return err
+		}
+		if err := applyPersistentLockdownLockedV1(operation.ownerContext, control, m); err != nil {
+			return err
+		}
 		if err := witness.checkProducersLocked(control); err != nil {
 			return err
 		}

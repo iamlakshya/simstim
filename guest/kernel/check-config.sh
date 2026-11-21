@@ -33,6 +33,10 @@ fi
 # Required =y symbols from spec 20.1, plus every "Generally Necessary" symbol
 # of moby/moby contrib/check-config.sh at commit 70efc0e31da3 (Linux 6.18).
 required=(
+    EFI
+    EFI_STUB
+    ACPI
+    PCI
     VIRTIO_PCI
     VIRTIO_MMIO
     VIRTIO_BLK

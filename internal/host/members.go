@@ -1,6 +1,7 @@
 package host
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -112,7 +113,11 @@ func PrepareSandboxMember(parent *Manifest, a api.JoinArgs) (*MemberStart, error
 	}
 	for i, arg := range argv {
 		if arg == "$SHELL" {
-			argv[i] = SandboxShell(parent)
+			if IsNoneSupervisor(parent) {
+				argv[i] = LoginShell()
+			} else {
+				argv[i] = SandboxShell(parent)
+			}
 		}
 	}
 	argv, hooks, sessionUUID := agentArgv(argv, args, agent, known, false)
@@ -152,10 +157,23 @@ func PrepareSandboxMember(parent *Manifest, a api.JoinArgs) (*MemberStart, error
 	// Reuse only its trusted, already projected PATH, never LoginEnv/LookPath.
 	dirs := filepath.SplitList(envValue(parent.Env, "PATH"))
 	env, term := walledEnv(args, a.ID, dirs, agent, false)
+	if IsNoneSupervisor(parent) {
+		env, term = sessionEnv(args, a.ID, parent.Env, agent, false)
+		if len(argv) > 0 {
+			path, err := lookPath(argv[0], envValue(env, "PATH"))
+			if err != nil {
+				return nil, UserError("agent_missing", "the selected unwalled member command is not installed", "Install the command on this host, then try again.")
+			}
+			argv[0] = path
+		}
+	}
 	env = slices.DeleteFunc(env, func(kv string) bool {
 		return strings.HasPrefix(kv, "SSH_AUTH_SOCK=") || strings.HasPrefix(kv, "SSH_AGENT_PID=")
 	})
 	hook := GuestRunDir() + "/hook-" + a.ID + ".sock"
+	if IsNoneSupervisor(parent) {
+		hook = filepath.Join(paths.SandboxRoot(parent.ID), "hook-"+a.ID+".sock")
+	}
 	for i, kv := range env {
 		if strings.HasPrefix(kv, brand.Env("HOOK_SOCK")+"=") {
 			env[i] = brand.Env("HOOK_SOCK") + "=" + hook
@@ -195,6 +213,9 @@ func PrepareSandboxMember(parent *Manifest, a api.JoinArgs) (*MemberStart, error
 	start.Manifest = &m
 	applySessionIdentity(&m)
 	if err := m.Save(); err != nil {
+		return nil, err
+	}
+	if err := start.recordCreatedMemberRootV1(context.Background(), parent); err != nil {
 		return nil, err
 	}
 	ok = true
@@ -246,7 +267,11 @@ func ResumeSandboxMember(saved, parent *Manifest) (*Manifest, error) {
 		if len(argv) == 0 {
 			return nil, memberError("the saved shell command is empty")
 		}
-		argv[0] = SandboxShell(parent)
+		if IsNoneSupervisor(parent) {
+			argv[0] = LoginShell()
+		} else {
+			argv[0] = SandboxShell(parent)
+		}
 	} else {
 		argv, _, err = resumeArgv(&m)
 		if err != nil {

@@ -164,15 +164,15 @@ func TestFlowSkipStopAndNoLogin(t *testing.T) {
 func TestInstallAndLoginArgs(t *testing.T) {
 	claude, _ := agents.Find("claude")
 	a := InstallArgs(claude)
-	if a.Name != "install-claude" || a.Cwd != "~" || a.Setup != api.SetupSkip || !slices.Equal(a.Argv, []string{"/bin/sh", "-c", claude.Setup.Install}) {
+	if a.Wall != "none" || !a.Downgrade || a.Name != "install-claude" || a.Cwd != "~" || a.Setup != api.SetupSkip || !slices.Equal(a.Argv, []string{"/bin/sh", "-c", claude.Setup.Install}) {
 		t.Fatalf("install args = %+v", a)
 	}
 	l, ok := LoginArgs(claude)
-	if !ok || !slices.Equal(l.Argv, []string{"/bin/sh", "-c", "claude auth login"}) || l.Agent != "" {
+	if !ok || l.Wall != "none" || !l.Downgrade || !slices.Equal(l.Argv, []string{"/bin/sh", "-c", "claude auth login"}) || l.Agent != "" {
 		t.Fatalf("login args = %+v", l)
 	}
 	agy, _ := agents.Find("antigravity")
-	if l, _ := LoginArgs(agy); l.Agent != "antigravity" || len(l.Argv) != 0 {
+	if l, _ := LoginArgs(agy); l.Wall != "none" || !l.Downgrade || l.Agent != "antigravity" || len(l.Argv) != 0 {
 		t.Fatalf("an agent whose first start is its login starts as itself: %+v", l)
 	}
 	aider, _ := agents.Find("aider")

@@ -9,6 +9,7 @@ import (
 
 	"github.com/BurntSushi/toml"
 
+	"github.com/iamlakshya/simstim/internal/api"
 	"github.com/iamlakshya/simstim/internal/configdata"
 	"github.com/iamlakshya/simstim/internal/tomlinspect"
 )
@@ -30,6 +31,7 @@ type agentSchemaNode struct {
 	elem               *agentSchemaNode
 	slots              []agentSchemaSlot
 	secret, containers bool
+	hostSelector       bool
 }
 type agentSchema struct {
 	root   *agentSchemaNode
@@ -87,6 +89,10 @@ func (s *agentSchema) compile(typ reflect.Type) (*agentSchemaNode, error) {
 		return nil, errAgentSettingsSchema
 	}
 	s.nodes[typ] = node
+	if typ == reflect.TypeFor[api.HostSelectorV1]() {
+		node.hostSelector = true
+		return node, nil
+	}
 	if !node.secret {
 		for _, hook := range []reflect.Type{reflect.TypeFor[toml.Unmarshaler](), reflect.TypeFor[encoding.TextUnmarshaler]()} {
 			if typ.Implements(hook) || reflect.PointerTo(typ).Implements(hook) {

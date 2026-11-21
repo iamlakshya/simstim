@@ -20,6 +20,7 @@ type newSecretPlan struct {
 	aborting, attempted, retired     bool
 	mu                               sync.Mutex
 	closed, busy, fetched, published bool
+	guestFetched                     bool
 	conn                             *Conn
 	operation                        *settingsOperation
 	selection                        *LocalAgentSelection
@@ -30,6 +31,7 @@ type newSecretPlan struct {
 	values                           map[string]api.Secret
 	vm                               *VMNeedPlanV1
 	runtime                          *newRuntimeSelection
+	namedKeys                        *newNamedSSHKeyPlan
 }
 
 // PrepareNewSecrets seals actual selected local agent/names/modes/bindings and
@@ -37,6 +39,9 @@ type newSecretPlan struct {
 // GrantRequest through questions/retries and Close it when that operation ends.
 // A microvm requires the actual same-connection pre-value Need builder result.
 func (c *Conn) PrepareNewSecrets(ctx context.Context, a NewArgs, vm ...*VMNeedPlanV1) (_ NewArgs, err error) {
+	if err := checkHostAttemptIntakeV1(ctx, a, nil); err != nil {
+		return a, err
+	}
 	r := grantRequestOf(ctx)
 
 	if r == nil || len(vm) > 1 {
@@ -49,6 +54,9 @@ func (c *Conn) PrepareNewSecrets(ctx context.Context, a NewArgs, vm ...*VMNeedPl
 		return a, err
 	}
 	if a.Wall == "" || a.Wall == "none" {
+		if err := refuseUnwalledNamedSSHKeys(a); err != nil {
+			return a, err
+		}
 		return a, nil
 	}
 	r.mu.Lock()
@@ -97,6 +105,9 @@ func (c *Conn) PrepareNewSecrets(ctx context.Context, a NewArgs, vm ...*VMNeedPl
 	}
 	wall := requestWallIntent(ctx)
 	for _, name := range names {
+		if err := checkSessionMachineSecretV1(c.Host, settings, name, wall); err != nil {
+			return a, err
+		}
 		if wall.exposed[name] {
 			intent.Modes[name] = api.SecretModeExposed
 			continue
@@ -125,9 +136,16 @@ func (c *Conn) PrepareNewSecrets(ctx context.Context, a NewArgs, vm ...*VMNeedPl
 	}
 	a.HostLabel = c.Host.Name
 	plan := &newSecretPlan{conn: c, operation: operation, selection: selection, layers: api.CloneLayers(a.Layers)}
+	plan.namedKeys, err = prepareNewNamedSSHKeys(ctx, plan, a)
+	if err != nil {
+		return a, err
+	}
 	if modern {
 		owned := api.CloneSecretDeliveryIntent(intent)
 		plan.intent = &owned
+	}
+	if err := prepareTrustedJudgeNewV1(ctx, plan, a); err != nil {
+		return a, err
 	}
 	if a.Wall == "gvisor" {
 		plan.runtime, err = c.prepareNewRuntime(ctx, settings, a.Wall)
@@ -187,6 +205,20 @@ func (c *Conn) PrepareNewSecrets(ctx context.Context, a NewArgs, vm ...*VMNeedPl
 		}
 		level, exposed := creationGrantFacts(owned)
 		creation := &SandboxPolicy{PolicySources: sources, SessionID: id, HostID: c.HostID(), Ceiling: ceiling, SSHAgent: a.SSHAgent, Secrets: append([]string{}, names...), CreationWall: level, Exposed: exposed, CreatedAt: time.Now().UTC(), request: token, DeliveryIntent: plan.intent}
+		if plan.vm != nil {
+			history, historyErr := originalVMImageHistoryV1(plan.vm)
+			if historyErr != nil {
+				return a, historyErr
+			}
+			creation.imageSelectionRaw = history
+			if len(creation.PolicySources) == 0 {
+				pinned, pinErr := originalVMImagePolicySourcesV1(owned, a)
+				if pinErr != nil {
+					return a, pinErr
+				}
+				creation.PolicySources = pinned
+			}
+		}
 		if err = reserveSandbox(owned, c.Host, *creation); errors.Is(err, errSandboxIDTaken) {
 			r.retryID()
 			continue
@@ -204,7 +236,7 @@ func (c *Conn) PrepareNewSecrets(ctx context.Context, a NewArgs, vm ...*VMNeedPl
 			saved.FutureDelivery || saved.FutureLineage || saved.futureDeliveryReceipt || saved.futureInputOperation ||
 			saved.deliveryReceipt != nil || saved.inputOperation != nil ||
 			!reflect.DeepEqual(saved.DeliveryIntent, plan.intent) || !slices.Equal(saved.Secrets, creation.Secrets) ||
-			!bytes.Equal(saved.PolicySources, creation.PolicySources) {
+			!bytes.Equal(saved.PolicySources, creation.PolicySources) || !bytes.Equal(saved.imageSelectionRaw, creation.imageSelectionRaw) {
 			return a, sandboxReceiptError()
 		}
 		plan.creation = cloneSandboxPolicy(saved)
@@ -244,6 +276,11 @@ func (p *newSecretPlan) arguments(ctx context.Context, c *Conn, a NewArgs) (NewA
 	} else if a.MemoryMax != p.header.MemoryMax {
 		return a, grantOperationError()
 	}
+	namedKeys, err := p.namedKeys.arguments(a.NamedSSHKeys)
+	if err != nil {
+		return a, err
+	}
+	a.NamedSSHKeys = namedKeys
 	a.HostLabel = p.header.HostLabel
 	if p.runtime != nil {
 		manifest, err := p.runtime.forArgs(ctx, c, a.Runtime)
@@ -273,7 +310,7 @@ func (p *newSecretPlan) arguments(ctx context.Context, c *Conn, a NewArgs) (NewA
 	} else if len(a.VMNeedV1) != 0 {
 		return a, vmPrepareUnavailable()
 	}
-	return a, nil
+	return applyTrustedJudgeNewV1(ctx, p, a)
 }
 
 func (p *newSecretPlan) fetch(ctx context.Context, h Host, names []string, terminal bool) (_ map[string]api.Secret, err error) {
@@ -303,6 +340,12 @@ func (p *newSecretPlan) fetch(ctx context.Context, h Host, names []string, termi
 			return nil, err
 		}
 	}
+	if err := p.namedKeys.check(ctx, p); err != nil {
+		return nil, err
+	}
+	if err := checkTrustedJudgeNewBeforeValuesV1(ctx, p); err != nil {
+		return nil, err
+	}
 	p.mu.Lock()
 	if p.fetched {
 		values := maps.Clone(p.values)
@@ -310,8 +353,14 @@ func (p *newSecretPlan) fetch(ctx context.Context, h Host, names []string, termi
 		return values, nil
 	}
 	p.mu.Unlock()
-	values, err := FetchSecrets(ctx, settings, names, terminal)
+	values, err := fetchNewGuestValuesV1(ctx, p, settings, names, terminal)
 	if err != nil {
+		return nil, err
+	}
+	if err := fetchTrustedJudgeNewV1(ctx, p, values, terminal); err != nil {
+		return nil, err
+	}
+	if err := p.namedKeys.fetch(ctx, p, terminal); err != nil {
 		return nil, err
 	}
 	if err := p.operation.Revalidate(ctx); err != nil {
@@ -325,53 +374,6 @@ func (p *newSecretPlan) fetch(ctx context.Context, h Host, names []string, termi
 	p.fetched = true
 	p.mu.Unlock()
 	return values, nil
-}
-
-// Close releases only this logical request's original local source/captures.
-// Busy or incomplete cleanup retains ownership for the caller to join/retry.
-func (r *GrantRequest) Close() error {
-	if r == nil {
-		return nil
-	}
-	r.mu.Lock()
-	r.ending = true
-	p, operation, inputs, fresh, imageSave := r.newSecrets, r.preparationSettings, r.newInputs, r.freshChild, r.imageSave
-	r.mu.Unlock()
-	if p != nil {
-		p.mu.Lock()
-		defer p.mu.Unlock()
-		if p.closed {
-			return nil
-		}
-		if p.busy {
-			return agentModeResourceError()
-		}
-	}
-	if err := fresh.close(); err != nil {
-		return err
-	}
-	if err := imageSave.close(); err != nil {
-		return err
-	}
-	if err := r.closeLocalPurposeResources(); err != nil {
-		return err
-	}
-	if err := inputs.close(); err != nil {
-		return err
-	}
-	if operation != nil {
-		if err := operation.Close(); err != nil {
-			return err
-		}
-	}
-	r.mu.Lock()
-	r.preparationClosed = true
-	r.mu.Unlock()
-	if p != nil {
-		p.closed = true
-		p.values = nil
-	}
-	return nil
 }
 
 func (p *newSecretPlan) final(ctx context.Context, c *Conn, a NewArgs, tier, ceiling Tier) (NewArgs, error) {

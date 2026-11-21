@@ -39,6 +39,9 @@ type Agent struct {
 	// The hooks' and the inline mode's arguments then go before the "--".
 	Resume   []string `json:"resume,omitempty"`
 	Continue []string `json:"continue,omitempty"`
+	// Fork starts a new conversation from an existing agent session ID.
+	// Without it, a fork uses Continue on its copied state folders.
+	Fork []string `json:"fork,omitempty"`
 	// IDCapture says how we learn the agent's own session ID:
 	// "choose" (we pass it), "hook", "scan" or "none".
 	IDCapture string `json:"id_capture"`
@@ -161,6 +164,7 @@ var Table = withModelData(withSecretData(withFileData([]Agent{
 		Launch:    []string{"claude", "--session-id", "{session_uuid}"},
 		Resume:    []string{"claude", "--resume", "{agent_session_id}"},
 		Continue:  []string{"claude", "--continue"},
+		Fork:      []string{"claude", "--resume", "{agent_session_id}", "--fork-session"},
 		IDCapture: "choose",
 		Hooks:     []string{"--settings", claudeHooks},
 		// --session-id "must be a valid UUID":

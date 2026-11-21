@@ -9,7 +9,7 @@ import (
 	"github.com/iamlakshya/simstim/internal/api"
 )
 
-var sandboxDeliveryReceiptFields = []string{"version", "revision", "previous", "creation", "publication", "operation", "scope", "allowed_names", "supplied_names", "missing_names", "state"}
+var sandboxDeliveryReceiptFields = []string{"version", "revision", "previous", "creation", "publication", "operation", "scope", "allowed_names", "supplied_names", "missing_names", "state", "arm_supplied_names", "trusted_arm_supplied_names"}
 var sandboxInputOperationFields = []string{"version", "revision", "previous", "creation", "operation", "scope", "nonce", "digest", "summary_hash", "selection_hash"}
 var sandboxReceiptScopeFields = []string{"host", "source", "host_id", "member_id", "root_id", "run_generation", "backend_generation"}
 
@@ -36,6 +36,7 @@ func projectSandboxReceiptSpans(ctx context.Context, p jsonValueProjection, span
 		known = sandboxDeliveryReceiptFields
 	}
 	var version api.JSONSpan
+	deltaPresent := false
 	err := p.Object(span, known, func(field api.JSONField) error {
 		if field.Known < 0 {
 			result.Future = true
@@ -50,6 +51,8 @@ func projectSandboxReceiptSpans(ctx context.Context, p jsonValueProjection, span
 			result.Allowed = field.Value
 		case "state":
 			result.State = field.Value
+		case "arm_supplied_names", "trusted_arm_supplied_names":
+			deltaPresent = true
 		}
 		return nil
 	})
@@ -73,9 +76,12 @@ func projectSandboxReceiptSpans(ctx context.Context, p jsonValueProjection, span
 		return result, err
 	}
 	result.Version = v
-	if v > 1 {
+	if v > 1 && (!delivery || v > 3) {
 		result.Future = true
 		return result, ctx.Err()
+	}
+	if delivery && v == 1 && deltaPresent {
+		result.Future = true // Preserve v1 unknown-extension semantics.
 	}
 	err = p.Object(result.Scope, sandboxReceiptScopeFields, func(field api.JSONField) error {
 		if field.Known < 0 {
@@ -118,9 +124,9 @@ func decodeSandboxReceiptsContext(ctx context.Context, raw json.RawMessage, sche
 			return err
 		}
 		row.futureDeliveryReceipt = shape.Future
-		if shape.Version == 1 {
+		if shape.Version == 1 || shape.Version == 2 || shape.Version == 3 {
 			var decoded sandboxDeliveryReceipt
-			if err := decodeContextJSON(ctx, row.deliveryReceiptRaw, &decoded); err != nil {
+			if err := decodeSandboxDeliveryReceiptVersion(ctx, row.deliveryReceiptRaw, shape.Version, &decoded); err != nil {
 				return err
 			}
 			knownErr := validateSandboxDeliveryReceiptKnownData(ctx, &decoded)

@@ -111,6 +111,11 @@ func (s *Server) needsSecretInspection(host string, port int) bool {
 	if state.hasBoundAuthority(authority) {
 		return true
 	}
+	for _, secret := range state.secrets {
+		if secret.trusted != nil && slices.Contains(secret.trusted.Bind.Hosts, authority) {
+			return true
+		}
+	}
 	for _, entries := range state.retired {
 		for _, entry := range entries {
 			if slices.Contains(entry.binding.Hosts, authority) {

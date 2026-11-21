@@ -102,6 +102,17 @@ func (m *Model) resumeSelectedReady() tea.Cmd {
 				return resumedMsg{key: key, err: err, settingsRead: read}
 			}
 		}
+		arguments := client.ResumeArgs{ID: key.id, Layers: plan.Layers}
+		if native, ok := unclean(c).(interface {
+			PrepareNativeResume(context.Context, client.ResumeArgs) (string, error)
+		}); ok {
+			if err := m.grantQuestions(cctx, func(ctx context.Context) error {
+				_, err := native.PrepareNativeResume(ctx, arguments)
+				return err
+			}); err != nil {
+				return resumedMsg{key: key, err: err, settingsRead: read}
+			}
+		}
 		var secrets map[string]api.Secret
 		err = m.grantQuestions(cctx, func(ctx context.Context) error {
 			var err error
@@ -114,7 +125,8 @@ func (m *Model) resumeSelectedReady() tea.Cmd {
 		var res *client.ResumeResult
 		err = m.grantQuestions(cctx, func(ctx context.Context) error {
 			var err error
-			res, err = c.Resume(ctx, client.ResumeArgs{ID: key.id, Secrets: secrets, Layers: plan.Layers})
+			arguments.Secrets = secrets
+			res, err = c.Resume(ctx, arguments)
 			return err
 		})
 		return resumedMsg{key: key, res: res, err: err, settingsRead: read}

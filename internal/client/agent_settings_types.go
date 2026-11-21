@@ -9,6 +9,9 @@ import (
 )
 
 func (node *agentSchemaNode) typed(value tomlinspect.ValueCursor) error {
+	if node.hostSelector {
+		return agentHostSelectorType(value)
+	}
 	if node.secret && value.Type() == tomlinspect.ScalarValue {
 		kind, err := value.ScalarType()
 		if err != nil {

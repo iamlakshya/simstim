@@ -19,12 +19,13 @@ import (
 // while its original native boot receipt is live. A Domain is storage data;
 // it grants neither execution nor a replacement boot selection.
 func OriginalBootDomain(ctx context.Context) (cachefs.Domain, error) {
-	if OriginalVMNeedFromContext(ctx) == nil {
+	receipt := OriginalVMNeedFromContext(ctx)
+	if receipt == nil {
 		return cachefs.Domain{}, vmNeedError("the runtime store has no original native boot owner")
 	}
-	owner, err := placementForCall()
-	if err != nil {
-		return cachefs.Domain{}, err
+	owner := receipt.boot.placement
+	if owner == nil {
+		return cachefs.Domain{}, vmNeedError("the runtime store lost its original admitted placement")
 	}
 	if err := owner.checkIdentity(); err != nil {
 		return cachefs.Domain{}, err
@@ -104,6 +105,9 @@ func (receipt *OriginalVMNeed) ConfirmPreparedCorrelation(ctx context.Context, c
 		return err
 	}
 	if err := receipt.binding.Check(ctx, connection, *receipt.need); err != nil {
+		return err
+	}
+	if err := receipt.finishOriginalCheckpointReservationV2(ctx, connection); err != nil {
 		return err
 	}
 	receipt.prepareConfirmed = true

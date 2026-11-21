@@ -15,8 +15,11 @@ import (
 // state, manifest or logs owned by another component. The root pins the actual
 // session directory, so replacing its pathname cannot redirect destruction.
 type runtimeStorage struct {
-	root  *os.Root
-	owned map[string]os.FileInfo
+	root                *os.Root
+	owned               map[string]os.FileInfo
+	closeErr            error
+	failedFiles         []*os.File
+	released, destroyed bool
 }
 
 func openRuntimeStorage(dir string) (*runtimeStorage, error) {
@@ -27,7 +30,7 @@ func openRuntimeStorage(dir string) (*runtimeStorage, error) {
 	r := &runtimeStorage{root: root, owned: make(map[string]os.FileInfo)}
 	for _, name := range []string{"process.json", "process-root", "namespace.log"} {
 		if err := r.capture(name); err != nil {
-			return nil, errors.Join(err, root.Close())
+			return r, err
 		}
 	}
 	return r, nil
@@ -51,15 +54,30 @@ func (r *runtimeStorage) capture(name string) error {
 	return nil
 }
 
-func (r *runtimeStorage) destroy() error {
-	if r == nil || r.root == nil {
+func (r *runtimeStorage) destroy() (returned error) {
+	if r == nil {
 		return nil
+	}
+	if r.closeErr != nil {
+		return r.closeErr
+	}
+	if r.destroyed {
+		return nil
+	}
+	if r.root == nil {
+		return fmt.Errorf("the released process metadata owner cannot remove remaining runtime objects")
 	}
 	dir, err := r.root.Open(".")
 	if err != nil {
 		return err
 	}
-	defer dir.Close()
+	defer func() {
+		if err := dir.Close(); err != nil {
+			r.failedFiles = append(r.failedFiles, dir)
+			r.closeErr = errors.Join(r.closeErr, err)
+			returned = errors.Join(returned, err)
+		}
+	}()
 	for _, name := range []string{"namespace.log", "process-root", "process.json"} {
 		want := r.owned[name]
 		if want == nil {
@@ -103,7 +121,29 @@ func (r *runtimeStorage) destroy() error {
 		}
 		delete(r.owned, name)
 	}
-	err = r.root.Close()
-	r.root = nil
-	return err
+	if err := r.release(); err != nil {
+		return err
+	}
+	r.destroyed = true
+	return nil
+}
+
+// release is metadata-only. A descriptor error is retained rather than turned
+// into a successful second Close of an already invalidated native handle.
+func (r *runtimeStorage) release() error {
+	if r == nil {
+		return nil
+	}
+	if r.closeErr != nil {
+		return r.closeErr
+	}
+	if r.root != nil {
+		if err := r.root.Close(); err != nil {
+			r.closeErr = err
+			return err
+		}
+		r.root = nil
+	}
+	r.released = true
+	return nil
 }

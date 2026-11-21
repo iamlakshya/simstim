@@ -11,7 +11,7 @@ import (
 	"github.com/iamlakshya/simstim/internal/wall/process"
 )
 
-func processDiskResourcesV1(spec wall.Spec) (_ *diskResourcesV1, returned error) {
+func processDiskResourcesV1(spec wall.Spec) (result *diskResourcesV1, returned error) {
 	volume, err := pinDiskVolumeV1(spec.SessionDir)
 	if err != nil {
 		return nil, err
@@ -19,6 +19,7 @@ func processDiskResourcesV1(spec wall.Spec) (_ *diskResourcesV1, returned error)
 	resources := &diskResourcesV1{volume: volume, process: true, limit: spec.DiskMax}
 	defer func() {
 		if returned != nil {
+			result = resources
 			returned = errors.Join(returned, resources.Close())
 		}
 	}()
@@ -43,17 +44,14 @@ func processDiskResourcesV1(spec wall.Spec) (_ *diskResourcesV1, returned error)
 		if !mount.Write || mount.Host != want {
 			return nil, diskFailure("disk_measure", "the process planner changed an owned writable storage role")
 		}
-		root, err := pinOwnedDiskRootV1(volume, spec.SessionDir, mount.Host)
+		root, err := resources.pinOwnedRootV1(volume, spec.SessionDir, mount.Host)
 		if err != nil {
 			return nil, err
 		}
 		// Validate execution-source roles without narrowing the accounting
 		// root. Inactive caches and read-only private epochs still use space.
 		if err := files.ValidateDiskRoots(volume, root); err != nil {
-			return nil, errors.Join(wallError("cannot validate a process storage source", err), root.Close())
-		}
-		if err := root.Close(); err != nil {
-			return nil, wallError("cannot close the process storage source check", err)
+			return nil, wallError("cannot validate a process storage source", err)
 		}
 		delete(owned, mount.Guest)
 	}

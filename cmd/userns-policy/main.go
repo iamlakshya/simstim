@@ -6,6 +6,7 @@ import (
 	"os"
 
 	"github.com/iamlakshya/simstim/internal/brand"
+	"github.com/iamlakshya/simstim/internal/proto"
 	"github.com/iamlakshya/simstim/internal/wall/process"
 )
 
@@ -22,6 +23,7 @@ func main() {
 	fmt.Printf("/* Generated from internal/wall/process. Do not edit. */\n#define HELPER_PATH %q\n#define GUEST_RUN %q\n", "/opt/"+brand.Name+"/bin/"+brand.HostBinary, "/run/"+brand.Name)
 	fmt.Printf("#define HELPER_DIR %q\n", "/opt/"+brand.Name+"/bin")
 	fmt.Printf("#define DNS_MARKER %q\n", brand.Env("DNS_FDS"))
+	fmt.Printf("#define JAIL_ARGV0 %q\n#define NATIVE_TREQUEST %d\n#define NATIVE_TRESPONSE %d\n", brand.Name+"-jail", proto.TRequest, proto.TResponse)
 	fmt.Println("#ifdef PROCESS_FILTER")
 	fmt.Println("static const struct sock_filter process_filter[] = {")
 	for _, s := range p {

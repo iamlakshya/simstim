@@ -74,9 +74,12 @@ type Request struct {
 	scheme            string
 	query             string // immutable query of an inspected HTTP request
 	forceQuery        bool
-	servicePathOnly   bool // internal required endpoint authority, never a public grant
-	classifierProbe   bool // read-only source-host check through the same matcher
-	withoutModelTools bool // internal probe through the same policy matcher
+	budgetPermit      *Permit // original waiting upload owner only; never serialised
+	uploadBudgetOnly  bool    // private budget-purpose matcher, never network authority
+	via               string  // original carrier mode, used only for the held wait bound
+	servicePathOnly   bool    // internal required endpoint authority, never a public grant
+	classifierProbe   bool    // read-only source-host check through the same matcher
+	withoutModelTools bool    // internal probe through the same policy matcher
 	Host              string
 	Port              int
 	Method            string
@@ -95,31 +98,42 @@ type Decision struct {
 
 	Allow bool
 	Rule  string
+	By    string // finite actual compiled grant provenance
 	// unmatched marks a terminal preset fallback with no eligible rule.
 	// Diagnostic rule labels never determine this internal state.
-	unmatched   bool
-	httpRefusal httpRefusalKind
+	classifiedRefusal bool
+	pendingRefusal    heldRefusalReason
+	unmatched         bool
+	publicOnly        bool // restriction of the matched rule, never permission
+	unknownAllowance  bool
+	unknownPressure   bool
+	httpRefusal       httpRefusalKind
 }
 
 type compiledRule struct {
-	classPattern string // class-only whole-label wildcard, never a network rule
-	door         api.Door
-	ref          api.LayerRef
-	id           string
-	allow        bool
-	host         string
-	wildcard     bool
-	isNumeric    bool
-	prefix       netip.Prefix
-	port         int // 0 means default: 443 on allow, any port on deny
-	path         string
-	pathPrefix   bool
-	tools        []string
-	methods      *[]string
-	once         bool
-	until        time.Time
-	grantID      string
-	slot         *onceSlot
+	classPattern     string // class-only whole-label wildcard, never a network rule
+	door             api.Door
+	ref              api.LayerRef
+	id               string
+	allow            bool
+	publicOnly       bool
+	uploadBudget     bool // internal held-byte continuation, never an ordinary net allowance
+	memoryOnly       bool // private compiled session row, absent from public policy
+	displaySensitive bool
+	by               string
+	host             string
+	wildcard         bool
+	isNumeric        bool
+	prefix           netip.Prefix
+	port             int // 0 means default: 443 on allow, any port on deny
+	path             string
+	pathPrefix       bool
+	tools            []string
+	methods          *[]string
+	once             bool
+	until            time.Time
+	grantID          string
+	slot             *onceSlot
 }
 
 type compiledLayer struct {
@@ -139,6 +153,7 @@ type Engine struct {
 	balanced        []compiledRule
 	preset          api.Preset
 	unknown         api.Unknown
+	lockdown        bool // the actual retained lock layer pauses session allowances
 	classifierNames classifierNameIndex
 	locks           []compiledRule
 	layers          []compiledLayer // narrowest first
@@ -194,6 +209,10 @@ func newEngineWithAgentRules(agentKind string, agentRules []compiledRule, pol ap
 		locks:      locks,
 		layers:     layers,
 		ledger:     newOnceLedger(),
+	}
+	eng.lockdown = hasLockdownLayer(pol)
+	if eng.lockdown {
+		eng.preset, eng.unknown = api.PresetLocked, api.UnknownDeny
 	}
 	eng.ledger.syncPolicy(eng)
 	if eng.unknown == api.UnknownClassify {

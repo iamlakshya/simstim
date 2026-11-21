@@ -13,9 +13,13 @@ type backendKind uint8
 const (
 	cloudHypervisorBackend backendKind = iota
 	firecrackerBackend
+	nitroBackend
 )
 
 func (k backendKind) name() string {
+	if k == nitroBackend {
+		return "nitro"
+	}
 	if k == firecrackerBackend {
 		return "firecracker"
 	}
@@ -23,29 +27,51 @@ func (k backendKind) name() string {
 }
 
 func (k backendKind) label() string {
-	if k == firecrackerBackend {
+	if k == nitroBackend {
+		return "Nitro Sandboxes"
+	}
+	if k.isFirecracker() {
 		return "Firecracker"
 	}
 	return "Cloud Hypervisor"
 }
 
 func (k backendKind) vmmName() string {
-	if k == firecrackerBackend {
+	if k.isFirecracker() {
 		return "firecracker"
 	}
 	return "cloud-hypervisor"
 }
 
 func (k backendKind) minimumVersion() string {
+	if k == nitroBackend {
+		return "1.18.0"
+	}
 	if k == firecrackerBackend {
 		return "1.17.0"
 	}
 	return "54.0"
 }
 
+func (k backendKind) isFirecracker() bool { return k == firecrackerBackend || k == nitroBackend }
+
+func (k backendKind) device() string {
+	if k == nitroBackend {
+		return "/dev/nitro_enclaves"
+	}
+	return "/dev/kvm"
+}
+
+func (k backendKind) kernelName() string {
+	if k == nitroBackend {
+		return "guest-efi"
+	}
+	return "guest"
+}
+
 func (k backendKind) roles() []vmneed.Role {
-	// The kind is private and constructors admit only these two constants.
-	return []vmneed.Role{{Kind: supply.KindVMM, Name: k.vmmName()}, {Kind: supply.KindKernel, Name: "guest"}, {Kind: supply.KindTools, Name: "tools"}}
+	roles, _ := vmneed.RolesForDriver(k.name())
+	return roles
 }
 
 func (k backendKind) validateRuntime(manifest supply.Manifest, arch string) error {
@@ -77,6 +103,12 @@ func backendForSpec(spec wall.Spec) (backendKind, error) {
 	}
 	if count != 1 {
 		return 0, fmt.Errorf("the microvm plan needs exactly one selected VMM")
+	}
+	if spec.Driver == "nitro" && selected == firecrackerBackend {
+		return nitroBackend, nil
+	}
+	if spec.Driver != "" && spec.Driver != selected.name() {
+		return 0, fmt.Errorf("the selected driver conflicts with the original VMM plan")
 	}
 	return selected, nil
 }

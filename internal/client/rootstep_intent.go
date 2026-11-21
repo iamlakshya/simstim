@@ -30,6 +30,9 @@ func cloneRootScript(script RootScript) RootScript {
 }
 
 func canonicalRootScript(probe api.CapProbe, script RootScript) (RootScript, error) {
+	if script.accounts != nil {
+		return script.accounts.canonical(probe, script)
+	}
 	if probe.OS != "linux" || probe.User != script.User {
 		return RootScript{}, rootStepError("the root plan does not match the actual host account")
 	}
@@ -37,7 +40,7 @@ func canonicalRootScript(probe api.CapProbe, script RootScript) (RootScript, err
 	for _, step := range script.Steps {
 		ids = append(ids, step.ID)
 	}
-	canonical, err := BuildRootScript(probe.User, probe.UID, ids, 0)
+	canonical, err := BuildRootScript(probe.User, probe.UID, ids, script.NitroSlots)
 	if err != nil {
 		return RootScript{}, err
 	}
@@ -82,6 +85,11 @@ func (c *Conn) CheckRootStepGrant(ctx context.Context, script RootScript, origin
 	if err := bindRequestTransportSource(ctx, c); err != nil {
 		return err
 	}
+	if script.accounts != nil {
+		if err := script.accounts.check(ctx, c, probe); err != nil {
+			return err
+		}
+	}
 	canonical, err := canonicalRootScript(probe, script)
 	if err != nil {
 		return err
@@ -121,6 +129,9 @@ func (c *Conn) CheckRootStepGrant(ctx context.Context, script RootScript, origin
 		return grantIdentityError(c.Host)
 	}
 	tier = min(tier, requestCeiling(ctx, tier))
+	if machine, _ := ctx.Value(sessionMachineOwnerKeyV1{}).(*SessionMachineOwnerV1); machine != nil {
+		return machine.checkRootV1(ctx, c, originalMode, originalYes)
+	}
 	return allowRequestGrant(ctx, c.Host, hostID, tier, Outbound{Kind: OutboundRootRun, Name: canonical.SHA256}, settings)
 }
 

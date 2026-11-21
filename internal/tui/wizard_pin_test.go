@@ -46,7 +46,7 @@ func TestWizardPinsFirst(t *testing.T) {
 	hs := newHarness(t, be, 80, 24)
 	hs.key("a")
 	hs.typeText("pi@raspberry")
-	hs.key("enter", "enter", "enter", "enter")
+	hs.key("enter", "enter", "1", "enter")
 	w := hs.m.modal.(*wizard)
 	if !w.saved {
 		t.Fatalf("not saved: step %v err %v", w.step, w.err)
@@ -89,7 +89,7 @@ func TestWizardAsksAboutAnUnknownKey(t *testing.T) {
 	if w.ask != nil || w.step != wzTest || w.err != nil {
 		t.Fatalf("after the yes: step %v ask %v err %v", w.step, w.ask, w.err)
 	}
-	hs.key("enter", "enter", "enter")
+	hs.key("enter", "1", "enter")
 	if !w.saved {
 		t.Fatalf("not saved: step %v err %v", w.step, w.err)
 	}
@@ -178,7 +178,7 @@ func TestWizardEscWaitsForTheSave(t *testing.T) {
 	open := heldGate(t, gate)
 	hs.key("a")
 	hs.typeText("pi@raspberry")
-	hs.key("enter", "enter", "enter", "enter")
+	hs.key("enter", "enter", "1", "enter")
 	w := hs.m.modal.(*wizard)
 	if w.saving == nil || w.saved {
 		t.Fatalf("the save is not held: saving %v, saved %v", w.saving != nil, w.saved)
@@ -203,12 +203,20 @@ func TestWizardCloseWaitsForTheSave(t *testing.T) {
 	be := newFakeBackend()
 	be.probe = client.Platform{OS: "linux", Arch: "arm64"}
 	gate := make(chan struct{})
-	be.saveGate = gate
+	be.committedSaveGate = gate
 	hs := newHarness(t, be, 80, 24)
 	open := heldGate(t, gate)
 	hs.key("a")
 	hs.typeText("pi@raspberry")
-	hs.key("enter", "enter", "enter", "enter")
+	hs.key("enter", "enter", "1", "enter")
+	// Hold the result of the actual successful CAS. A pre-commit wait is
+	// cancellable, so it cannot establish this post-commit join contract.
+	be.mu.Lock()
+	committed := len(be.saved) == 1 && be.tiers["raspberry"].Key == fakeHostKey
+	be.mu.Unlock()
+	if !committed {
+		t.Fatal("the held save did not commit its exact pin before Close")
+	}
 	closed := make(chan struct{})
 	go func() {
 		hs.m.Close()

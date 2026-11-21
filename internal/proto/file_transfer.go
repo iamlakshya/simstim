@@ -11,13 +11,13 @@ const FileTransferChunkMaxV1 = 1 << 20
 
 // FilePutHeaderV1 opens one put stream. An empty Path selects the paste folder.
 type FilePutHeaderV1 struct {
-	Directory bool `json:"directory,omitempty"`
-	Version int    `json:"v"`
-	Name    string `json:"name"`
-	Size    int64  `json:"size"`
-	SHA256  string `json:"sha256"`
-	Path    string `json:"path,omitempty"`
-	Replace bool   `json:"replace,omitempty"`
+	Directory bool   `json:"directory,omitempty"`
+	Version   int    `json:"v"`
+	Name      string `json:"name"`
+	Size      int64  `json:"size"`
+	SHA256    string `json:"sha256"`
+	Path      string `json:"path,omitempty"`
+	Replace   bool   `json:"replace,omitempty"`
 }
 
 // FilePutResultV1 confirms an exact, fully checked file, or gives its refusal.
@@ -31,7 +31,7 @@ type FilePutResultV1 struct {
 type FileGetHeaderV1 struct {
 	// List selects copy metadata; Offset and MaxBytes must both be zero.
 	// The actual copy policy/schema bounds its result across stream frames.
-	List bool `json:"list,omitempty"`
+	List     bool   `json:"list,omitempty"`
 	Version  int    `json:"v"`
 	Path     string `json:"path"`
 	Offset   int64  `json:"offset"`

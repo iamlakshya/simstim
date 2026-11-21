@@ -14,7 +14,10 @@ import (
 // quick-start line. That form or line waits for the start, and shows how it
 // went.
 type startReq struct {
-	host string
+	host              string
+	selected          *newSelectedStart
+	selectedHost      client.Host // actual attempt result, never preview metadata
+	selectedNewCalled bool        // only the actual wrapper result may be retried
 	// args are what to start. They keep the secrets of the start, so that
 	// the start after an answer does not fetch them again.
 	args client.NewArgs
@@ -50,6 +53,10 @@ func (m *Model) waiting(r startReq) (*newSession, *promptState) {
 // the answer in r.args. The form comes back, still starting, until the reply.
 // When the host is gone, the start ends, and a toast says why.
 func (m *Model) startAgain(r startReq) tea.Cmd {
+	if r.selected != nil {
+		m.modal = r.form
+		return m.startSelectedAgain(r)
+	}
 	h := m.hostByName(r.host)
 	if h == nil {
 		cleanup := m.cancelStart(r)
@@ -72,6 +79,9 @@ func (m *Model) cancelStart(r startReq) tea.Cmd {
 	}
 	if r.line != nil {
 		r.line.starting = false
+	}
+	if r.selected != nil {
+		return m.releaseSelectedNew(r.selected)
 	}
 	return m.releaseGrant(r.grants)
 }

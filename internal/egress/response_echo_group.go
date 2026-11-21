@@ -13,9 +13,10 @@ import (
 // and valid identity choices are retained even when this response cannot yet
 // resolve a group. No empty sentinel is used as an ambiguity placeholder.
 type responseEchoChoice struct {
-	Identity string
-	Sentinel api.Secret
-	Pending  bool
+	Forbidden bool // trusted-only value has no guest stand-in
+	Identity  string
+	Sentinel  api.Secret
+	Pending   bool
 }
 type responseEchoValueGroup struct {
 	Value   api.Secret
@@ -26,6 +27,7 @@ type responseEchoGroup struct {
 	Choices   []responseEchoChoice
 	ambiguous bool
 	pending   bool
+	forbidden bool
 }
 type responseEchoOverride struct {
 	group    int
@@ -66,10 +68,10 @@ func newResponseEchoGroupSnapshot(input []responseEchoValueGroup) (*responseEcho
 			merged[group.Value] = choices
 		}
 		for _, choice := range group.Choices {
-			if choice.Identity == "" || len(choice.Sentinel) != len(group.Value) || choice.Sentinel == group.Value {
+			if choice.Identity == "" || choice.Forbidden && choice.Sentinel != "" || !choice.Forbidden && (len(choice.Sentinel) != len(group.Value) || choice.Sentinel == group.Value) {
 				return nil, errResponseEchoIdentity
 			}
-			if old, ok := choices[choice.Identity]; ok && (old.Sentinel != choice.Sentinel || old.Pending != choice.Pending) {
+			if old, ok := choices[choice.Identity]; ok && (old.Sentinel != choice.Sentinel || old.Pending != choice.Pending || old.Forbidden != choice.Forbidden) {
 				return nil, errResponseEchoIdentity
 			}
 			choices[choice.Identity] = choice
@@ -90,6 +92,7 @@ func newResponseEchoGroupSnapshot(input []responseEchoValueGroup) (*responseEcho
 		sort.Slice(group.Choices, func(i, j int) bool { return group.Choices[i].Identity < group.Choices[j].Identity })
 		for _, choice := range group.Choices {
 			group.pending = group.pending || choice.Pending
+			group.forbidden = group.forbidden || choice.Forbidden
 			if choice.Sentinel != group.Choices[0].Sentinel {
 				group.ambiguous = true
 			}

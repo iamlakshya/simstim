@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/iamlakshya/simstim/internal/brand"
+	"github.com/iamlakshya/simstim/internal/client"
 )
 
 // The launcher (docs/contributing/ux-spec.md 2.2 and 2.3) is one list in one column, with no
@@ -344,7 +345,7 @@ func (m *Model) sessRowView(r sessRow, n int, c sessColumns, selected, withHost 
 	if m.prompt != nil && m.prompt.mode == promptSearch {
 		q = m.prompt.in.value()
 	}
-	name := nameSegs(shown(s.Name), c.name, sBold, q)
+	name := nameSegs(shown(client.PolicyDisplayName(s)), c.name, sBold, q)
 	if m.rename != nil && m.rename.key == r.key() {
 		name = []seg{{fit(m.rename.in.view(c.name, true), c.name), sPlain}}
 	}
@@ -353,6 +354,8 @@ func (m *Model) sessRowView(r sessRow, n int, c sessColumns, selected, withHost 
 	if withHost {
 		where = trunc(shown(r.h.name())+":"+folder, c.folder)
 	}
+	where = accountRowFolderV1(s, where, c.folder)
+	where = editorSSHRowFolderV1(s, where, c.folder)
 	segs := []seg{gutter(n), {" ", sPlain}, glyph, wallMark(s), {" ", sPlain}}
 	segs = append(segs, name...)
 	segs = append(segs, seg{"  ", sPlain}, seg{fit(shown(s.Agent), colAgent), sFaint}, seg{"  ", sPlain})

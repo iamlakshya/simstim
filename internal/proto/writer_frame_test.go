@@ -32,6 +32,9 @@ func TestEveryWriterEntryRejectsIncompleteOrFailedFrameWrites(t *testing.T) {
 		"Write":     func(w *Writer) error { return w.Write(TRequest, []byte("request")) },
 		"WriteCtx":  func(w *Writer) error { return w.WriteCtx(context.Background(), TRequest, []byte("request")) },
 		"WriteJSON": func(w *Writer) error { return w.WriteJSON(TRequest, map[string]string{"action": "request"}) },
+		"WriteJSONGuardedCtx": func(w *Writer) error {
+			return w.WriteJSONGuardedCtx(context.Background(), TRequest, map[string]string{"action": "request"}, func() error { return nil })
+		},
 		"WriteJSONCtx": func(w *Writer) error {
 			return w.WriteJSONCtx(context.Background(), TRequest, map[string]string{"action": "request"})
 		},

@@ -46,7 +46,7 @@ var loadFixedClassifier = sync.OnceValues(func() (fixedClassifierRules, error) {
 // rule or consume a permit. The caller has already exhausted actual policy.
 func fixedClassifierDecision(host string, numeric bool) Decision {
 	if numeric {
-		return Decision{Rule: "classify:ip"}
+		return Decision{Rule: "classify:ip", classifiedRefusal: true}
 	}
 	data, err := loadFixedClassifier()
 	if err != nil {
@@ -54,12 +54,12 @@ func fixedClassifierDecision(host string, numeric bool) Decision {
 	}
 	for _, deny := range data.Denies {
 		if matchesServiceHost(deny.rule, host) || deny.rule.wildcard && deny.rule.host == host {
-			return Decision{Rule: "classify:fixed"}
+			return Decision{Rule: "classify:fixed", classifiedRefusal: true}
 		}
 	}
 	for _, label := range strings.Split(host, ".") {
 		if randomClassifierLabel(label) {
-			return Decision{Rule: "classify:random"}
+			return Decision{Rule: "classify:random", classifiedRefusal: true}
 		}
 	}
 	// The actual hold/judge caller must handle unsure. This stage supplies no

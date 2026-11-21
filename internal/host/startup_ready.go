@@ -85,8 +85,13 @@ func (owner *OwnedSupervisorLease) CommitStartupReady(ctx context.Context, opera
 		m.Run.HolderPID != os.Getpid() || m.Run.BootID != BootID() || m.Run.Socket != paths.Socket(operation.Primary()) {
 		return sessionLeaseError("the actual native supervisor has no matching durable ready publication")
 	}
-	if err := operation.CloseWithError(); err != nil {
-		return err
+	// A fixed preparation boot still owes actual driver destruction and its
+	// native cleanup acknowledgement. Keep this SAME borrowed OP until that
+	// work joins; ordinary sessions retain their existing ready handoff.
+	if !operation.IsSandboxPrepareBootV1() {
+		if err := operation.CloseWithError(); err != nil {
+			return err
+		}
 	}
 	boot.ready = true
 	if boot.readyRequest != 0 {

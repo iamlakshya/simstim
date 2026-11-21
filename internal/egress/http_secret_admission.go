@@ -24,6 +24,7 @@ func (s *Server) admitSecretHTTPRequest(scope *originRequest, req *http.Request,
 	}
 	engine := s.currentEngine()
 	decision := engine.evaluateModelNetwork(scope.request, scope.permit, evalPrecheck)
+	decision = s.reserveUnknownDestinationLocked(scope.request, decision)
 	if !decision.Allow {
 		return requestSecretPlan{}, decision, nil
 	}

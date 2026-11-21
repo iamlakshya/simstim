@@ -14,6 +14,8 @@ type LayerValues struct {
 // SandboxValues holds settings shared by all six layers. Pointer fields
 // distinguish an explicit false, zero or empty value from an absent key.
 type SandboxValues struct {
+	// Host selects local placement from a repository, profile or session layer.
+	Host *HostSelectorV1 `json:"host,omitempty" toml:"host,omitempty"`
 	// Wall is auto, none, process, gvisor or microvm. Auto uses the host floor.
 	Wall *string `json:"wall,omitempty" toml:"wall,omitempty"`
 	// Preset is locked, balanced or open.
@@ -24,6 +26,8 @@ type SandboxValues struct {
 	System *string `json:"system,omitempty" toml:"system,omitempty"`
 	// Image names a pinned image.
 	Image *string `json:"image,omitempty" toml:"image,omitempty"`
+	// ImagePolicy checks OCI image signatures on the laptop before use.
+	ImagePolicy *ImagePolicyValues `json:"image_policy,omitempty" toml:"image_policy,omitempty"`
 	// DiskMax caps the session disk.
 	DiskMax *string `json:"disk_max,omitempty" toml:"disk_max,omitempty"`
 	// IdleStop stops an idle session after this duration, or never.
@@ -48,7 +52,8 @@ type SandboxValues struct {
 	Mounts []string `json:"mounts,omitempty" toml:"mounts,omitempty"`
 	// Secrets lists names from the laptop's secrets table.
 	Secrets []string `json:"secrets,omitempty" toml:"secrets,omitempty"`
-	// SSHKeys lists names of SSH keys to grant.
+	// SSHKeys lists configured ssh-key names for the next sandbox start.
+	// Changes apply at the next start; live signers keep their current selection.
 	SSHKeys []string `json:"ssh_keys,omitempty" toml:"ssh_keys,omitempty"`
 	// Include lists source files to seed into the workspace.
 	Include []string `json:"include,omitempty" toml:"include,omitempty"`

@@ -24,7 +24,10 @@ func ValidateBoundInitialResult(ctx context.Context, args BoundInitArgs, result 
 	if err != nil {
 		return err
 	}
-	state := &api.SessionSecretState{Version: api.SessionSecretStateV1, Intent: api.SecretDeliveryIntent{Version: api.SecretDeliveryIntentV1, Modes: args.Modes, Binds: args.Binds}, Generation: result.Generation, Primary: result.Secrets, Minted: result.Minted, Retired: result.Retired}
+	if !sameTrustedUseMetadata(args.TrustedUses, result.TrustedUses) {
+		return registryIntentError()
+	}
+	state := &api.SessionSecretState{Version: api.SessionSecretStateV1, Intent: api.SecretDeliveryIntent{Version: api.SecretDeliveryIntentV1, Modes: args.Modes, Binds: args.Binds, TrustedUses: args.TrustedUses}, Generation: result.Generation, Primary: result.Secrets, Minted: result.Minted, Retired: result.Retired}
 	if err := ValidateSavedPublicSessionState(state); err != nil {
 		return err
 	}
@@ -40,6 +43,12 @@ func ValidateBoundInitialResult(ctx context.Context, args BoundInitArgs, result 
 			return invalidPublicSessionState()
 		}
 		actuals[api.Secret(value)] = true
+	}
+	for name, value := range args.ProtectedTrustedSecretValues {
+		if _, ok := args.TrustedUses[name]; !ok {
+			return registryIntentError()
+		}
+		actuals[value] = true
 	}
 	prior := inputPublicStandIns(args)
 	aliases := make(map[initialAliasKey]api.PublicSecretState)

@@ -84,14 +84,14 @@ func For(goos, goarch string) ([]byte, bool) { return read("host-" + goos + "-" 
 func VT(goos, goarch string) ([]byte, bool) { return read("vt-" + goos + "-" + goarch) }
 
 // Userns returns this build's static namespace launcher for a host ABI.
-func Userns(goos,goarch string)([]byte,bool){return read("userns-"+goos+"-"+goarch)}
+func Userns(goos, goarch string) ([]byte, bool) { return read("userns-" + goos + "-" + goarch) }
 
 // Version identifies this set of helpers. It changes whenever any helper changes,
 // so each build installs into its own folder on the host and running sessions
 // keep their own binary.
 func Version() string {
 	names := append(allNames("host-*"), allNames("vt-*")...)
-	names=append(names,allNames("userns-*")...)
+	names = append(names, allNames("userns-*")...)
 	sort.Strings(names)
 	h := sha256.New()
 	for _, n := range names {

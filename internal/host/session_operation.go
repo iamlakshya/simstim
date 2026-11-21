@@ -11,6 +11,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/iamlakshya/simstim/internal/api"
 	"github.com/iamlakshya/simstim/internal/cachefs"
 	"github.com/iamlakshya/simstim/internal/link"
 	"github.com/iamlakshya/simstim/internal/proto"
@@ -19,21 +20,54 @@ import (
 // SessionOperation retains the canonical primary op.lock across a complete
 // operation/retry. Only its owner releases it, after owned resource cleanup.
 type SessionOperation struct {
-	automaticBoot *AutomaticBootOperationV1
-	originalBoot  *originalBootV1
-	startup       *startupLaunchV1
-	restartMemory *restartMemoryAdmissionV1
-	newRequest    *newRequestWitnessV1
-	id            string
-	native        *sessionFileLease
-	ownerContext  context.Context
-	lifetime      context.Context
-	cancel        context.CancelFunc
-	gate          sync.Mutex
-	readers       sync.WaitGroup
-	active        atomic.Bool
-	once          sync.Once
-	closeErr      error
+	sandboxPrepareCleanup    *sandboxPrepareCleanupV1
+	noneCold                 *NoneColdResumeV1
+	noneMigration            *legacyNoneMigrationV1
+	rewindPreparation        *bridgeRewindPreparationV1
+	resumePreparation        *resumePreparationLeaseV1
+	nativeColdResume         *ColdResumeV1
+	namedSSHKeys             *api.NamedSSHKeysV1
+	namedSSHKeysConsumed     bool
+	protectedTrustedStart    *protectedTrustedStartupV1
+	protectedTrustedConsumed bool
+	automaticBoot            *AutomaticBootOperationV1
+	sandboxPrepareBoot       *sandboxPrepareBootV1
+	originalBoot             *originalBootV1
+	startup                  *startupLaunchV1
+	restartMemory            *restartMemoryAdmissionV1
+	newRequest               *newRequestWitnessV1
+	sandboxPrepare           *sandboxPrepareWitnessV1
+	newNoRoom                *newNoRoomAttemptV1
+	id                       string
+	native                   *sessionFileLease
+	ownerContext             context.Context
+	lifetime                 context.Context
+	cancel                   context.CancelFunc
+	gate                     sync.Mutex
+	readers                  sync.WaitGroup
+	active                   atomic.Bool
+	once                     sync.Once
+	closeErr                 error
+}
+
+// IsSandboxPrepareV1 reports whether this parent operation owns a one-use
+// fixed sandbox.prepare test boot.
+func (o *SessionOperation) IsSandboxPrepareV1() bool {
+	if o == nil || !o.active.Load() || o.native == nil || o.native.borrowed || o.sandboxPrepare == nil {
+		return false
+	}
+	witness := o.sandboxPrepare
+	witness.mu.Lock()
+	defer witness.mu.Unlock()
+	return witness.bound == o && witness.written && witness.captured && witness.bridge != nil
+}
+
+// IsSandboxPrepareBootV1 reports whether this borrowed supervisor operation
+// accepted the closed sandbox-prepare startup loan.
+func (o *SessionOperation) IsSandboxPrepareBootV1() bool {
+	return o != nil && o.active.Load() && o.native != nil && o.native.borrowed &&
+		o.sandboxPrepareBoot != nil && o.sandboxPrepareBoot.operation == o &&
+		o.originalBoot != nil && o.originalBoot.operation == o && o.originalBoot.loan.Purpose == startupLoanPurposeSandboxPrepareV1
 }
 
 // BeginSessionOperation resolves and locks one protected primary. It never
@@ -164,6 +198,10 @@ func (o *SessionOperation) withCurrentRead(ctx context.Context, read func(contex
 		return memberError("the primary operation has no owned reader")
 	}
 	o.gate.Lock()
+	if err := checkNewNoRoomTerminalV1(o); err != nil {
+		o.gate.Unlock()
+		return err
+	}
 	if !o.active.Load() || o.native == nil || o.lifetime == nil {
 		o.gate.Unlock()
 		return memberError("the primary operation ended")
@@ -224,7 +262,12 @@ func (o *SessionOperation) CloseWithError() error {
 		if o.startup != nil {
 			o.closeErr = errors.Join(o.closeErr, o.startup.Close())
 		}
+		if o.noneMigration != nil {
+			o.closeErr = errors.Join(o.closeErr, o.noneMigration.close())
+		}
 		o.readers.Wait()
+		o.clearNamedSSHKeys()
+		o.clearProtectedTrustedSecretsV1()
 		if o.native == nil {
 			o.closeErr = memberError("the operation has no native descriptor owner")
 		} else {

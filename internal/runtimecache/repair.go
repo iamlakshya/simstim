@@ -16,6 +16,11 @@ func (s *Store) removeCorrupt(item supply.Item) error {
 	return s.removeCorruptContext(context.Background(), item)
 }
 func (s *Store) removeCorruptContext(ctx context.Context, item supply.Item) error {
+	_, done, guardErr := s.artifactModeGuard(ctx, item)
+	if guardErr != nil {
+		return guardErr
+	}
+	defer done()
 	name := "sha256/" + item.SHA256
 	f, err := s.openRegular(name, Mode(item))
 	if errors.Is(err, os.ErrNotExist) {

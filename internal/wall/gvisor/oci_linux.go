@@ -68,7 +68,9 @@ func makeOCI(spec wall.Spec, plan []wall.Mount, smoke bool) (ociSpec, error) {
 			{Destination: "/dev/shm", Type: "tmpfs", Source: "shm", Options: []string{"nosuid", "nodev", "noexec", "mode=1777"}},
 			{Destination: "/tmp", Type: "tmpfs", Source: "tmpfs", Options: []string{"nosuid", "nodev", "mode=1777"}},
 			{Destination: "/run", Type: "tmpfs", Source: "tmpfs", Options: []string{"nosuid", "nodev", "mode=755", "uid=1000", "gid=1000"}},
-			{Destination: "/home/agent", Type: "tmpfs", Source: "tmpfs", Options: []string{"nosuid", "nodev", "mode=700", "uid=1000", "gid=1000"}},
+			// The original factory binds a fresh private backing at this SAME
+			// A path. The gofer and outside fork reader share its actual files.
+			{Destination: "/home/agent", Type: "bind", Source: "/home/agent", Options: []string{"rbind", "rw", "nosuid", "nodev"}},
 		},
 	}
 	if smoke {

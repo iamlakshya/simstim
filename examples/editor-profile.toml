@@ -1,0 +1,10 @@
+# Optional HTTPS server-download profile. Setup does not install or select it.
+# VS Code: https://code.visualstudio.com/docs/remote/ssh
+# Zed: https://zed.dev/docs/remote-development
+# Redirected assets and extension/dependency hosts need separate exact rules.
+[profiles.editor.network]
+allow = [
+  "update.code.visualstudio.com:443",
+  "vscode.download.prss.microsoft.com:443",
+  "zed.dev:443",
+]

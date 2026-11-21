@@ -59,6 +59,50 @@ The value is never written to a file on either side: not the session's record, a
 
 The agent, and the programs it starts, can read the value, as they can read any variable in their environment. So can anything running as your user on the host, in `/proc`. Pass a secret only to a host you trust with it.
 
+## Use a separate classifier key
+
+A model judge can use a named key without giving it to the agent. Configure
+its command and exact HTTPS binding in `config.toml`, then name it in
+`classifier.key`:
+
+```toml
+[secrets.JUDGE_KEY]
+run = "op read op://dev/judge/key"
+hosts = ["model.example"]
+header = "Authorization"
+format = "Bearer {value}"
+
+[classifier]
+judge = "model"
+model = "your-model"
+endpoint = "https://model.example/v1/chat/completions"
+key = "JUDGE_KEY"
+```
+
+The key goes only to that fixed model request. The classifier reference adds
+no guest environment value or stand-in. Passing the same name to the agent
+requires its own separate guest selection and permission checks. Both uses
+share one fetched value when separately authorised.
+
+Normal name, host, kind and tier rules still apply. A shared host asks its own
+classifier question. An own-tier classifier key on a process wall needs a
+separate risk answer, with no as its default. A guest exposure answer does not
+answer either question. Host floors still apply.
+
+Attach and reconnect check the original local record and current protected
+credential state before the terminal pump starts. Already armed credentials
+run no value command. Missing bound credentials pass the current checks before
+they are fetched. A broken configuration gives a warning and leaves attach
+read-only: it sends no replacement layers or credentials.
+
+Changing a classifier key or endpoint does not fetch or arm it by itself.
+The exact current binding must pass a fresh authorised operation. An unavailable
+configured key makes the judge unavailable. For an anonymous local model,
+choose its explicit local endpoint and leave `key` empty; no key command runs.
+
+Classifier delivery needs matching helpers with `judge-key-v1` support. Only
+names, roles and bindings are retained; the value stays in protected memory.
+
 ## After a resume
 
 A [resume](restore-after-reboot.md#bring-back-one-session) fetches the session's secrets again, on your laptop. The host's record names the secrets, so a host could ask for any secret in your `config.toml`. So a resume fetches without asking only the ones that the host's `secrets` in `hosts.toml` lists. Pass any other secret that the session started with again:
@@ -96,3 +140,9 @@ GitHub, GitLab, npm and PyPI token families. A match becomes a new stand-in on t
 same exact host, after its public receipt is saved. The value stays in memory.
 The finite matcher preserves response delimiters and ignores file-scanner entropy
 and ignore markers. It does not recognise every possible credential format.
+
+An explicitly approved classifier credential has a separate trusted role. The
+host keeps its value in the protected egress process. It never becomes a guest
+secret or an environment variable. A cold start or cold resume carries the value
+over the original native startup channel. A warm resume keeps the running role
+and fetches no classifier key. Saved role metadata alone cannot arm it.

@@ -69,6 +69,28 @@ func prepareBoundMember(ctx context.Context, current *memberState, args MemberAd
 			return nil, registryIntentError()
 		}
 		if old, exists := state.secrets[name]; exists {
+			if !secretHasGuestUse(old) {
+				if old.present && old.value != value {
+					return nil, registryIntentError()
+				}
+				old.guest, old.mode, old.value, old.present = true, mode, value, true
+				if mode == api.SecretModeBound {
+					old.bound, err = publicBoundSecret(ctx, args.Kind, name, value, binding)
+					if err != nil {
+						return nil, err
+					}
+					old.identity = ""
+					authorities = append(authorities, binding.Hosts...)
+					if state.sourceKinds == nil {
+						state.sourceKinds = make(map[string][]string)
+					}
+					state.sourceKinds[name] = []string{args.Kind}
+				} else {
+					old.identity = legacyExposedIdentity
+				}
+				state.secrets[name], mutation = old, true
+				continue
+			}
 			if old.mode != mode || mode == api.SecretModeBound && (old.bound == nil || !sameRegistryBinding(old.bound.binding, binding)) {
 				return nil, memberError("secret_binding", "secret "+name+" changed mode or binding; replacement did not occur", "Start a fresh sandbox with the intended locally approved binding.")
 			}
@@ -102,7 +124,7 @@ func prepareBoundMember(ctx context.Context, current *memberState, args MemberAd
 		}
 		state.secrets[name], mutation = entry, true
 	}
-	changed, err := applyBoundUpdates(ctx, state, updates)
+	changed, err := applyTrustedArm(ctx, state, ArmArgs{Values: updates, TrustedUses: args.TrustedUses, ProtectedTrustedSecretValues: args.ProtectedTrustedSecretValues})
 	if err != nil {
 		return nil, err
 	}
@@ -145,6 +167,7 @@ func prepareBoundMember(ctx context.Context, current *memberState, args MemberAd
 			env[name] = args.Values[name]
 		}
 	}
+	authorities = append(authorities, trustedAddedAuthorities(current, state, changed)...)
 	slices.Sort(authorities)
 	return &boundMemberCandidate{prepared: prepared, env: env, names: names, changed: changed, newAuthorities: slices.Compact(authorities), mutation: mutation}, nil
 }

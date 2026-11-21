@@ -18,20 +18,22 @@ import (
 )
 
 type placement struct {
-	scope          string
-	control        string
-	executable     string
-	executableRef  os.FileInfo
-	installRef     os.FileInfo
-	stateRef       os.FileInfo
-	hostRef        os.FileInfo
-	placeRef       os.FileInfo
-	controlRef     os.FileInfo
-	controlLockRef os.FileInfo
-	hostID         string
-	boundRoots     persistentRootBinding
-	cleanupKind    string
-	installer      bool
+	publicationCleanup placementPublicationCleanupV1
+	scope              string
+	control            string
+	executable         string
+	executableRef      os.FileInfo
+	installRef         os.FileInfo
+	stateRef           os.FileInfo
+	hostRef            os.FileInfo
+	placeRef           os.FileInfo
+	controlRef         os.FileInfo
+	controlLockRef     os.FileInfo
+	hostID             string
+	boundRoots         persistentRootBinding
+	cleanupKind        string
+	installer          bool
+	installerCreated   map[string]purgeRef
 }
 
 var placementProcesses = struct {
@@ -289,7 +291,12 @@ func (p *placement) initialiseDomain(ctx context.Context, created bool) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	state, err := cachefs.OpenPrivateRoot(paths.StateDir(), !found)
+	var state *os.Root
+	if p.installer && !found {
+		state, err = cachefs.OpenPrivateRootCreated(paths.StateDir(), p.observeInstallerDirectoryV1)
+	} else {
+		state, err = cachefs.OpenPrivateRoot(paths.StateDir(), !found)
+	}
 	if err != nil {
 		return placementError("cannot anchor the host state generation")
 	}
@@ -357,6 +364,11 @@ func (p *placement) initialiseDomain(ctx context.Context, created bool) error {
 		return err
 	}
 	control = placementControl{ScopeFormat: 2, PersistentRoots: currentPersistentRoots(), RuntimeRoots: runtimeRoots, Version: 1, Scope: p.scope, UID: os.Getuid(), Control: refOf(p.controlRef), ControlLock: refOf(p.controlLockRef), HostID: id, State: refOf(p.stateRef), Host: refOf(p.hostRef), Place: refOf(p.placeRef), Active: map[string]placementOperationRecord{}, Refs: map[string]purgeRef{"state/host-id": refOf(p.hostRef), "state/place.lock": refOf(p.placeRef)}}
+	if p.installer {
+		if err := p.commitInstallerDirectoriesV1(&control); err != nil {
+			return err
+		}
+	}
 	return writePlacementControl(root, control)
 }
 

@@ -118,7 +118,7 @@ func (r *Registry) get(ctx context.Context, ref Reference, kind, id string) (*ht
 	}
 	if response.StatusCode != http.StatusOK {
 		response.Body.Close()
-		return nil, fmt.Errorf("registry refused image request (HTTP %d)", response.StatusCode)
+		return nil, &registryStatusError{status: response.StatusCode}
 	}
 	return response, nil
 }

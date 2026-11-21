@@ -38,6 +38,12 @@ func (w *wizard) view(m *Model) string {
 		title = fmt.Sprintf("Install %s on %s?", brand.HostBinary, w.host.Name)
 		body = w.installView(m, cw)
 		hints = []hint{{"enter", "install"}, {"esc", "back"}}
+	case wzSandboxes:
+		title = "Sandboxes on " + w.host.Name
+		body, hints = w.sandboxesView(m, cw)
+	case wzRoot:
+		title = "Root step on " + w.host.Name
+		body, hints = w.rootView(m, cw)
 	case wzReady:
 		body = w.readyView(m, cw)
 		hints = []hint{{"enter", "start a session"}, {"esc", "close"}}
@@ -79,7 +85,7 @@ func (w *wizard) stepLabel() string {
 	case w.step == wzRun && w.act.Kind == onboard.ActLogin:
 		n = wizSteps
 	case w.step == wzRun:
-		n = int(wzAgents) + 1
+		n = int(wzRun) + 1
 	}
 	return sFaint.Render(fmt.Sprintf("step %d of %d", n, wizSteps))
 }
@@ -148,6 +154,7 @@ func (w *wizard) pickTier(m *Model) tea.Cmd {
 	}
 	w.tier = tierChoices[w.tierPick].tier
 	if w.plat.Installed {
+		w.prepareAfterSave = canPrepareSandbox(m.be)
 		return w.setup(m)
 	}
 	w.step, w.err = wzInstall, nil
@@ -252,12 +259,29 @@ func (w *wizard) readyView(m *Model, cw int) []string {
 	if w.tier == client.TierShared {
 		sysLine += "  reported by " + w.host.Name
 	}
-	return append(body,
+	status := sSuccess.Render(glyphOK) + " " + sBold.Render(w.host.Name+" is ready.")
+	if w.prepareAfterSave && !w.sandboxTested {
+		status = sFaint.Render(glyphIdle) + " " + sBold.Render(w.host.Name+" is saved; sandbox wall not ready yet.")
+	}
+	out := append(body,
 		"",
-		sSuccess.Render(glyphOK)+" "+sBold.Render(w.host.Name+" is ready."),
+		status,
 		"",
 		field("Agents", strings.Join(names, dot)),
 		field("System", sysLine),
 		field("Limits", fmtSize(i.MemoryMax)+" for sessions"),
 	)
+	if w.prepareAfterSave {
+		floor := "not prepared"
+		if w.sandboxTested && w.host.WallFloor != "" {
+			floor = shown(w.host.WallFloor)
+		} else if w.bootSummary != nil && w.bootSummary.levelAfterRoot != "" {
+			floor += " (" + shown(w.bootSummary.levelAfterRoot) + " after root step)"
+		}
+		out = append(out, field("Floor", floor))
+		if w.printedFile != "" && !w.sandboxTested {
+			out = append(out, field("Script", w.printedFile))
+		}
+	}
+	return out
 }

@@ -45,6 +45,12 @@ type runnerNativeProof interface {
 	Close() error
 }
 
+// Only the private concrete native mode constructor registers this consumer.
+// There is no public callback/DTO or mode-phase registry.
+type runnerModePhase interface {
+	acceptExecChild(runnerMessage, *proto.UnixControlV1) error
+}
+
 type runnerControl struct {
 	conn                 net.Conn
 	encoder              *json.Encoder
@@ -59,6 +65,7 @@ type runnerControl struct {
 	input                io.Reader
 	ancillary            runnerAncillaryReader
 	native               runnerNativeProof
+	mode                 runnerModePhase
 }
 
 func newRunnerControl(conn net.Conn) *runnerControl {
@@ -111,10 +118,20 @@ func (c *runnerControl) acceptMessage(data []byte, control *proto.UnixControlV1)
 	if err := decoder.Decode(&more); err != io.EOF {
 		return fmt.Errorf("private VMM control has trailing data")
 	}
-	if message.Kind != "ready" && len(control.Files) != 0 {
+	if message.Kind != "ready" && message.Kind != "mode_exec_child" && len(control.Files) != 0 {
 		return fmt.Errorf("private VMM descriptors arrived outside their ready frame")
 	}
 	switch message.Kind {
+	case "mode_exec_child":
+		c.mu.Lock()
+		mode := c.mode
+		c.mu.Unlock()
+		if mode == nil || c.gotReady || c.gotExit || len(control.Files) != 1 {
+			return fmt.Errorf("private VMM final child has no original native mode consumer")
+		}
+		if err := mode.acceptExecChild(message, control); err != nil {
+			return err
+		}
 	case "ready":
 		if c.gotReady {
 			return fmt.Errorf("duplicate private VMM ready reply")

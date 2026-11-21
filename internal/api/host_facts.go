@@ -1,6 +1,9 @@
 package api
 
-import "time"
+import (
+	"github.com/iamlakshya/simstim/internal/macfacts"
+	"time"
+)
 
 // HostFactsVersion is the read-only host.facts wire format. Facts cannot
 // reserve capacity or issue an operation, runtime, stop or native boot grant.
@@ -25,6 +28,14 @@ type Health struct {
 // At is an observation timestamp, not a clock or freshness authority.
 // Actual New always performs fresh admission under the host's placement lock.
 type HostFacts struct {
+	// Mac is a client-only outer-hop observation. A Linux guest cannot assert it.
+	Mac *macfacts.Facts `json:"-"`
+	// SlotCapacity is a bounded root-derived observation of slot leases only.
+	// Nil is unknown; this never selects own-account mode or grants a slot.
+	SlotCapacity *SlotCapacityV1 `json:"slot_capacity,omitempty"`
+	// MemoryObservation is optional same-scan charged-root metadata only.
+	MemoryObservation *MemoryObservationV1 `json:"memory_observation,omitempty"`
+
 	Version         int         `json:"v"`
 	HostID          string      `json:"host_id"`
 	BootID          string      `json:"boot_id"`

@@ -1,6 +1,6 @@
 Wall: process
 Preset: balanced
-Unknown: ask (unknown flows are refused in this phase)
+Unknown: ask
 Lock: all deny paste.example.net
   locked sandbox.paste = "media"
 Value: sandbox.caches[.cache/go-build] = ".cache/go-build"  builtin

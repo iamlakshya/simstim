@@ -9,6 +9,7 @@ import (
 
 	"github.com/iamlakshya/simstim/internal/image"
 	"github.com/iamlakshya/simstim/internal/jail"
+	"github.com/iamlakshya/simstim/internal/publicationlease"
 )
 
 // runConverterJail is the ONE owned converter command/stdio/wait path. Source
@@ -29,6 +30,13 @@ func runConverterJailOutput(ctx context.Context, spec jail.Spec, produce func(io
 	defer cancel()
 	command, err := jail.Command(operation, spec)
 	if err != nil {
+		return nil, err
+	}
+	holder, ok := ctx.Value(publicationHolderContextV1{}).(*publicationlease.HolderV1)
+	if !ok || holder == nil {
+		return nil, placementError("the converter lost its original inherited publication holder")
+	}
+	if err := command.RetainPublicationLeaseV1(holder); err != nil {
 		return nil, err
 	}
 	input, err := command.StdinPipe()

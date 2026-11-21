@@ -17,6 +17,9 @@ func restartMemoryAllowsDrainV1(operation *SessionOperation) bool {
 // this writer finishes. It gives no stop/boot grant. The old unit must be
 // absent before its reservation can be replaced, even for a dead socket.
 func reserveRestartMemoryLockedV1(ctx context.Context, operation *SessionOperation, next *Manifest) (*sessionFileLease, error) {
+	if err := requireNoAuxiliaryMemoryLockedV1(ctx, operation, next); err != nil {
+		return nil, err
+	}
 	if !isWalledMemoryV1(next) {
 		return nil, nil
 	}
@@ -26,14 +29,21 @@ func reserveRestartMemoryLockedV1(ctx context.Context, operation *SessionOperati
 	if err := checkExactWalledCapV1(next.Limits.MemoryMax); err != nil {
 		return nil, err
 	}
-	vacant, err := openOwnedSessionFileLease(ctx, operation.Primary(), holderLockFile, 0)
+	retained, err := checkColdRestartReservationLockedV1(ctx, operation, next)
 	if err != nil {
 		return nil, err
 	}
-	fail := func(cause error) (*sessionFileLease, error) { return nil, errors.Join(cause, vacant.Close()) }
-	if err := operation.native.rootRef.CheckRoot(vacant.root); err != nil {
-		return fail(err)
+	var vacant *sessionFileLease
+	if !retained {
+		vacant, err = openOwnedSessionFileLease(ctx, operation.Primary(), holderLockFile, 0)
+		if err != nil {
+			return nil, err
+		}
+		if err := operation.native.rootRef.CheckRoot(vacant.root); err != nil {
+			return nil, errors.Join(err, vacant.Close())
+		}
 	}
+	fail := func(cause error) (*sessionFileLease, error) { return nil, errors.Join(cause, vacant.Close()) }
 	unit, err := readMemoryUnitV1(ctx, operation.Primary(), true)
 	if err != nil {
 		return fail(attachMemoryFactsV1(err, next.Limits.Declared))
@@ -42,6 +52,9 @@ func reserveRestartMemoryLockedV1(ctx context.Context, operation *SessionOperati
 		return fail(UserError("busy", "the old canonical sandbox unit still owns its reservation", "Keep the original owner stopped and wait for its native unit to finish before retrying."))
 	}
 	if _, err := memoryRoomLockedV1(ctx, operation, next.Limits.Declared); err != nil {
+		return fail(err)
+	}
+	if err := checkNitroAdmissionLockedV1(ctx, operation, next); err != nil {
 		return fail(err)
 	}
 	next.Run.BootID = BootID()

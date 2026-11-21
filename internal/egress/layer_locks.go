@@ -22,6 +22,9 @@ func resolveLayerValues(layers []api.Layer) (api.LayerValues, []api.ValueOrigin,
 		if l.Lock == nil {
 			continue
 		}
+		if l.Lock.Sandbox.Host != nil {
+			return api.LayerValues{}, nil, nil, hostRuleLayerError()
+		}
 		if l.Kind != api.LayerAll && l.Kind != api.LayerHost {
 			return api.LayerValues{}, nil, nil, &proto.Error{Code: "layer_key", Message: "only all sessions and host layers may hold locks", Hint: "Put the lock in config.toml or a host entry."}
 		}
@@ -96,6 +99,11 @@ func resolveLayerValues(layers []api.Layer) (api.LayerValues, []api.ValueOrigin,
 			return api.LayerValues{}, nil, nil, layerError(*decoysOff, "sandbox.decoys", lock.lock)
 		}
 	}
+	lockedFields := make(map[string]reflect.Value, len(fixed))
+	for key, lock := range fixed {
+		lockedFields[key] = lock.value
+	}
+	allocateLayerValueGroups(reflect.ValueOf(&merged).Elem(), "", lockedFields)
 	_ = visitValues(reflect.ValueOf(&merged).Elem(), "", func(key string, dst reflect.Value) error {
 		if lock, ok := fixed[key]; ok {
 			dst.Set(cloneValue(lock.value))

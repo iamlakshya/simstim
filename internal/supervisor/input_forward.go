@@ -45,9 +45,9 @@ func (s *Supervisor) applyInputPhase(ctx context.Context, input *startupInput, a
 	stop := context.AfterFunc(ctx, func() { _ = input.carrier.Close() })
 	defer stop()
 	s.mu.Lock()
-	primaryPolicy:=len(input.summary.Repositories)>0 && s.m.Files!=nil && s.m.Files.Seed.Laptop && s.m.Files.Seed.Repo==input.summary.Repositories[0].Name
+	primaryPolicy := len(input.summary.Repositories) > 0 && s.m.Files != nil && s.m.Files.Seed.Laptop && s.m.Files.Seed.Repo == input.summary.Repositories[0].Name
 	s.mu.Unlock()
-	if err := s.requireInputGuestMode(handshake, args == nil,primaryPolicy); err != nil {
+	if err := s.requireInputGuestMode(handshake, args == nil, primaryPolicy); err != nil {
 		return err
 	}
 	spool, err := os.CreateTemp(paths.SessionDir(s.id), ".input-declarations-")
@@ -84,7 +84,9 @@ func (s *Supervisor) applyInputPhase(ctx context.Context, input *startupInput, a
 	}
 	control := inputtransfer.Control{Scope: input.scope, CopyMax: input.copyMax, SeedMax: input.seedMax, Protected: protected}
 	s.mu.Lock()
-	if len(input.summary.Repositories)>0 && s.m.Files!=nil && s.m.Files.Seed.Laptop && s.m.Files.Seed.Repo==input.summary.Repositories[0].Name {control.PrimaryRepository=s.m.Files.Seed.Repo}
+	if len(input.summary.Repositories) > 0 && s.m.Files != nil && s.m.Files.Seed.Laptop && s.m.Files.Seed.Repo == input.summary.Repositories[0].Name {
+		control.PrimaryRepository = s.m.Files.Seed.Repo
+	}
 	s.mu.Unlock()
 	var prepared *proto.CtlStartArgs
 	if args != nil {
@@ -191,12 +193,20 @@ func (s *Supervisor) protectedInputPaths() ([]string, error) {
 	m := host.CloneManifest(*s.m)
 	s.mu.Unlock()
 	protected := []string{"/opt/agents", "/.tools", "/.persist"}
-	decoys,err:=proto.DecoyPaths();if err!=nil{return nil,err}
-	for _,name:=range decoys{protected=append(protected,host.GuestHome+"/"+name)}
-	packages, err := proto.PackageManagerPaths(); if err != nil {
+	decoys, err := proto.DecoyPaths()
+	if err != nil {
 		return nil, err
 	}
-	for _, name := range packages { protected = append(protected, host.GuestHome+"/"+name) }
+	for _, name := range decoys {
+		protected = append(protected, host.GuestHome+"/"+name)
+	}
+	packages, err := proto.PackageManagerPaths()
+	if err != nil {
+		return nil, err
+	}
+	for _, name := range packages {
+		protected = append(protected, host.GuestHome+"/"+name)
+	}
 	if m.Files != nil {
 		for _, mount := range slices.Concat(m.Files.Mounts, m.Files.Installs) {
 			protected = append(protected, mount.Guest)
@@ -243,7 +253,7 @@ func (s *Supervisor) requireInputGuestMode(ctx context.Context, detached bool, p
 	if err := request(ctx, proto.CtlGuestCapabilities, struct{}{}, &result); err != nil {
 		return err
 	}
-	if result.Version != 1 || !slices.Contains(result.Features, inputtransfer.Feature) || len(primaryPolicy)>0 && primaryPolicy[0] && !slices.Contains(result.Features,inputtransfer.PrimaryPolicyFeature) {
+	if result.Version != 1 || !slices.Contains(result.Features, inputtransfer.Feature) || len(primaryPolicy) > 0 && primaryPolicy[0] && !slices.Contains(result.Features, inputtransfer.PrimaryPolicyFeature) {
 		return inputFailure("the actual guest cannot apply the complete declared inputs")
 	}
 	return nil

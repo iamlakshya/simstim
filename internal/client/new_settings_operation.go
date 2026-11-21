@@ -12,6 +12,14 @@ func (r *GrantRequest) borrowNewSettings(ctx context.Context) (*settingsOperatio
 		return nil, grantOperationError()
 	}
 	r.mu.Lock()
+	selection := r.hostSelection
+	r.mu.Unlock()
+	if selection != nil {
+		if err := selection.checkOriginalHostSelectionSourceV1(ctx); err != nil {
+			return nil, err
+		}
+	}
+	r.mu.Lock()
 	if err := r.lifetimeErrorLocked(); err != nil {
 		r.mu.Unlock()
 		return nil, err

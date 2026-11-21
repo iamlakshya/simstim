@@ -11,6 +11,9 @@ import (
 // trusted manifest. Session flags/rules and the host's repository-file source
 // survive. No source names are invented on resume, including for a legacy manifest.
 func ApplyResumeLayers(m *Manifest, fresh []api.Layer) error {
+	if IsNoneSupervisor(m) {
+		return checkNoneResumeCarriersV1(m, fresh)
+	}
 	if len(fresh) == 0 {
 		return nil
 	}

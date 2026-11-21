@@ -41,6 +41,18 @@ func (gate *registryGate) LockContext(ctx context.Context) error {
 	}
 }
 
+// TryLock admits only an immediately available turn. A control writer uses
+// it to avoid waiting for policy while a mutation joins a control export.
+func (gate *registryGate) TryLock() bool {
+	gate.once.Do(func() { gate.token = make(chan struct{}, 1) })
+	select {
+	case gate.token <- struct{}{}:
+		return true
+	default:
+		return false
+	}
+}
+
 func (gate *registryGate) Unlock() {
 	select {
 	case <-gate.token:

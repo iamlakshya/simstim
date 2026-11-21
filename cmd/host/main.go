@@ -3,6 +3,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -56,6 +57,18 @@ var commands = map[string]func(args []string) error{
 	// The helper runs git in a child of its own, and the client runs
 	// repo.info over SSH. Not for people, so left out of the usage.
 	"git-op": func(args []string) error { return host.RunGitOp(args, os.Stdin, os.Stdout) },
+	"install-payload": func(args []string) error {
+		if len(args) != 0 {
+			return host.UserError("bad_request", "the closed installer accepts only its original input plan", "Install the helper through a matching current client.")
+		}
+		return host.RunInstallPayload(context.Background(), os.Stdin, os.Stdout)
+	},
+	"purge-payload": func(args []string) error {
+		if len(args) != 0 {
+			return host.UserError("bad_request", "the closed cleanup command accepts only its original input plan", "Resume the same saved host removal.")
+		}
+		return host.RunPurgePayload(context.Background(), os.Stdin, os.Stdout)
+	},
 	// The phone path: experimental, and left out of the usage on purpose
 	// until it is launched (docs/contributing/phone-path.md).
 	"pick":      func([]string) error { return host.RunPick(os.Stdin, os.Stdout) },
@@ -67,6 +80,16 @@ var commands = map[string]func(args []string) error{
 }
 
 func main() {
+	if len(os.Args) >= 2 && os.Args[1] == "purge-git-worker-v3" {
+		os.Exit(host.RunOrdinaryPurgeGitWorkerProcessV3())
+	}
+	if len(os.Args) >= 2 && os.Args[1] == "purge-relay-v3" {
+		os.Exit(host.RunPurgeRelayProcessV3())
+	}
+	// Raw protected entry must precede normal helper initialisation and input.
+	if len(os.Args) >= 2 && os.Args[1] == "purge-attempt-v2" {
+		os.Exit(host.RunPurgeAttemptProcessV3())
+	}
 	// This closed process boundary owns raw stdio until immediate exit.
 	if len(os.Args) >= 2 && os.Args[1] == "bridge-agent" {
 		os.Exit(host.RunAgentBridgeProcess(os.Stdin, os.Stdout))

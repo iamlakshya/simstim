@@ -13,10 +13,7 @@ import (
 	"io"
 	"log/slog"
 	"net"
-	"os"
-	"path/filepath"
 	"slices"
-	"strings"
 	"sync"
 	"time"
 
@@ -30,6 +27,9 @@ import (
 var Features = []string{"attach.replay", "upload", "peek", "setup", "rename", "send", "hooks", "restore", "ports", "worktree", "folders", "alerts", "trace", api.FeatureSandboxReviewContext, api.FeatureSandboxCohort, inputtransfer.Feature, inputtransfer.PrimaryPolicyFeature, inputtransfer.FinishFeature, api.FeatureExecStream, api.FeatureSpawn, api.FeatureSandboxGroupRM, api.FeatureSandboxSnapshot, "session.id", agentbridge.Feature}
 
 type bridge struct {
+	prepares                           sync.WaitGroup
+	rewindPreparationService           *bridgeRewindServiceV1
+	resumePreparationService           *bridgeResumeServiceV1
 	imageSaveRelays                    map[string]*imageSaveRelayV1
 	imageSaveClosed                    bool
 	copyMu                             sync.Mutex
@@ -43,6 +43,7 @@ type bridge struct {
 	images                             imageService
 	runtime                            runtimeService
 	ctx                                context.Context
+	hostID                             string
 	w                                  *proto.Writer
 	// log takes the bridge's debug lines, while its debug is on
 	// (bridge_debug.go).
@@ -130,7 +131,7 @@ func runBridge(in io.Reader, out io.Writer, owned OwnedBridgeOutput, inputs ...O
 	lines := diag.NewLines()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	b := &bridge{ctx: ctx, ownedInput: ownedInput, ownedOutput: owned, w: w, log: slog.New(lines), dbg: bridgeDebug{lines: lines}, uploads: map[uint64]*upload{}}
+	b := &bridge{ctx: ctx, hostID: hostID, ownedInput: ownedInput, ownedOutput: owned, w: w, log: slog.New(lines), dbg: bridgeDebug{lines: lines}, uploads: map[uint64]*upload{}}
 	liveBridges.Store(b, true)
 	defer liveBridges.Delete(b)
 	// An upload that never got its end, as one that its client gave up at
@@ -138,19 +139,7 @@ func runBridge(in io.Reader, out io.Writer, owned OwnedBridgeOutput, inputs ...O
 	defer b.reclaimUploadsAt(true)
 	defer b.stopDebug("end")
 	defer b.endAttach()
-	defer func() {
-		cancel()
-		returned = errors.Join(returned, b.closeImageSavesV1(), b.agents.close(), b.images.close())
-		b.runtime.close()
-		if ownedInput != nil {
-			_ = ownedInput.Cancel()
-		}
-		if owned != nil {
-			_ = owned.Cancel()
-		}
-		b.closePull()
-		b.closeCopy()
-	}()
+	defer func() { returned = errors.Join(returned, b.closeOwnedServicesV1(cancel, ownedInput, owned)) }()
 	inside := CheckCaller() != nil // bridge_inside.go
 	firstFrame := true
 	for {
@@ -196,6 +185,14 @@ func runBridge(in io.Reader, out io.Writer, owned OwnedBridgeOutput, inputs ...O
 					}
 					return b.inputs(r, req)
 				}
+				if req.Op == proto.EditorSSHOpenV1 {
+					if !wasFirst {
+						err := UserError("bad_request", "SSH requires a dedicated connection", "Open a fresh generated SSH connection.")
+						b.reply(req.ID, nil, err)
+						return err
+					}
+					return b.editorSSHV1(r, req)
+				}
 				if req.Op == "exec" {
 					if !wasFirst {
 						err := UserError("bad_request", "exec requires a dedicated connection", "Open a fresh connection for exec.")
@@ -223,9 +220,21 @@ func runBridge(in io.Reader, out io.Writer, owned OwnedBridgeOutput, inputs ...O
 					go func() { defer liveRequests.Add(-1); result, err := run(ctx); b.replyPull(req.ID, result, err) }()
 					continue
 				}
+				finishImage, queueErr := b.queueImageOperationV1(req)
+				if queueErr != nil {
+					b.reply(req.ID, nil, imageFailure(queueErr))
+					continue
+				}
 				liveRequests.Add(1) // EndBridge waits for it
+				finishPrepare := b.trackSandboxPrepareRequestV1(req)
 				go func() {
 					defer liveRequests.Add(-1)
+					if finishPrepare != nil {
+						defer finishPrepare()
+					}
+					if finishImage != nil {
+						defer finishImage()
+					}
 					b.serve(req)
 				}()
 			}
@@ -266,7 +275,7 @@ func (b *bridge) handle(req proto.Request) {
 	case api.SandboxReviewContextOp:
 		var args api.SandboxSnapshotArgs
 		fields, err := api.JSONObjectFields(req.Args, "id")
-		if err != nil || len(fields) != 1 || !api.ExactJSONFields(req.Args, args) || json.Unmarshal(req.Args, &args) != nil || args.Cohort {
+		if err != nil || len(fields) != 1 || !api.ExactJSONFields(req.Args, args) || json.Unmarshal(req.Args, &args) != nil || args.Cohort || args.TrustedReadiness != nil {
 			b.reply(req.ID, nil, UserError("bad_request", "invalid saved sandbox review request", "Use the original local publication receipt with the current helper."))
 			return
 		}
@@ -278,8 +287,12 @@ func (b *bridge) handle(req proto.Request) {
 			b.reply(req.ID, nil, UserError("bad_request", "invalid sandbox snapshot request", "Use the current client and helper."))
 			return
 		}
+		if !a.Cohort && a.TrustedReadiness != nil {
+			b.reply(req.ID, nil, UserError("bad_request", "trusted readiness needs the protected live cohort", "Use the original local arm request with matching helpers."))
+			return
+		}
 		if a.Cohort {
-			view, err := SandboxCohortSnapshot(context.Background(), a.ID)
+			view, err := SandboxCohortSnapshot(b.ctx, a.ID, api.CloneTrustedSecretReadinessQueryV1(a.TrustedReadiness))
 			b.reply(req.ID, view, err)
 			return
 		}
@@ -438,41 +451,8 @@ func (b *bridge) handle(req proto.Request) {
 		v, err := alertsRequest(req.Op, req.Args)
 		b.reply(req.ID, v, err)
 	default:
-		if !b.handlePorts(req) && !b.handleSandbox(req) && !b.handleCopy(req) && !b.handlePolicy(req) && !b.handleAgentsDisk(req) && !b.handleRuntime(req) && !b.handleImages(req) && !b.handlePull(req) && !b.handleMore(req) && !b.handleDebug(req) {
+		if !b.handleNamedSSHKeys(req) && !b.handlePorts(req) && !b.handleSandbox(req) && !b.handleCopy(req) && !b.handlePolicy(req) && !b.handleAgentsDisk(req) && !b.handleRuntime(req) && !b.handleImages(req) && !b.handlePull(req) && !b.handleMore(req) && !b.handleDebug(req) {
 			b.reply(req.ID, nil, UserError("unknown_op", "unknown request "+req.Op, "Update the host helper."))
-		}
-	}
-}
-
-func safeName(n string) string {
-	n = filepath.Base(n)
-	var sb strings.Builder
-	for _, r := range n {
-		switch {
-		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '.', r == '-', r == '_':
-			sb.WriteRune(r)
-		default:
-			sb.WriteRune('_')
-		}
-	}
-	s := strings.TrimLeft(sb.String(), ".")
-	if s == "" {
-		s = "file"
-	}
-	if len(s) > 80 {
-		s = s[len(s)-80:]
-	}
-	return s
-}
-
-func cleanOld(dir string, age time.Duration) {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return
-	}
-	for _, e := range entries {
-		if fi, err := e.Info(); err == nil && time.Since(fi.ModTime()) > age {
-			os.Remove(filepath.Join(dir, e.Name()))
 		}
 	}
 }

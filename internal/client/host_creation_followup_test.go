@@ -9,6 +9,9 @@ func TestCreationFollowupConsumesActualWriterSourceAndRetainsSameOP(t *testing.T
 	if err := UpdateHosts(ctx, HostChange{Kind: "host create", Now: &bound}); err != nil {
 		t.Fatal(err)
 	}
+	if currentStage(bound.Name) != o.stage.st || sameStage(bound.Name, o.stage.st) != nil {
+		t.Fatal("the successful creation writer ended its outer owner's stage before registration")
+	}
 	EndHostCreationAttemptContext(ctx)
 	post, err := ContinueHostCreationContext(ctx)
 	if err != nil {
@@ -26,6 +29,9 @@ func TestCreationFollowupConsumesActualWriterSourceAndRetainsSameOP(t *testing.T
 		t.Fatal(err)
 	}
 	defer abort()
+	if currentStage(bound.Name) == o.stage.st || sameStage(bound.Name, o.stage.st) == nil {
+		t.Fatal("registration did not supersede the original creator stage")
+	}
 	registration, err := ObserveHostRegistrationContext(stage, HostChange{Kind: "host add", Was: &bound, Now: &bound})
 	if err != nil {
 		t.Fatal(err)
@@ -39,15 +45,23 @@ func TestCreationFollowupConsumesActualWriterSourceAndRetainsSameOP(t *testing.T
 }
 
 func TestCreationFollowupRefusesMissingCommitAndChangedSource(t *testing.T) {
-	for _, kind := range []string{"no commit", "new epoch"} {
+	for _, kind := range []string{"no commit", "new epoch", "new stage"} {
 		t.Run(kind, func(t *testing.T) {
 			ctx, bound := terminalCreationFixture(t)
-			if kind == "new epoch" {
+			if kind != "no commit" {
 				if err := UpdateHosts(ctx, HostChange{Kind: "host create", Now: &bound}); err != nil {
 					t.Fatal(err)
 				}
-				if err := SaveHosts(t.Context(), []Host{bound}); err != nil {
-					t.Fatal(err)
+				if kind == "new epoch" {
+					if err := SaveHosts(t.Context(), []Host{bound}); err != nil {
+						t.Fatal(err)
+					}
+				} else {
+					_, abort, err := StagePinOwned(ctx, bound.Name)
+					if err != nil {
+						t.Fatal(err)
+					}
+					defer abort()
 				}
 			}
 			EndHostCreationAttemptContext(ctx)

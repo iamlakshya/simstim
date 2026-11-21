@@ -18,7 +18,7 @@ import (
 )
 
 type execRun struct {
-	fileCommit *fileCommitCommand
+	fileCommit  *fileCommitCommand
 	inputBundle *os.File // fixed input Git only; immutable descriptor, never wire argv authority
 	vmRole      vmCommandRole
 	vmGroup     string // private owned cgroup identity; never a wire/member value

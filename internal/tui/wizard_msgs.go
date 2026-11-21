@@ -25,6 +25,14 @@ func (w *wizard) onMsg(m *Model, msg tea.Msg) tea.Cmd {
 		return w.onActStarted(m, msg)
 	case hostSavedMsg:
 		return w.onSaved(m, msg)
+	case sandboxInspectMsg:
+		return w.onSandboxInspect(m, msg)
+	case rootExecDoneMsg:
+		return w.onRootExecDone(m, msg)
+	case rootActionDoneMsg:
+		return w.onRootActionDone(m, msg)
+	case sandboxBootMsg:
+		return w.onSandboxBoot(m, msg)
 	}
 	return nil
 }
@@ -78,6 +86,7 @@ func (w *wizard) onProbe(m *Model, msg probeMsg) tea.Cmd {
 	if msg.p.Installed {
 		w.checks = append(w.checks, check{name: "helper", state: ckOK, detail: m.be.HelperVersion() + " found"})
 		if w.made {
+			w.prepareAfterSave = canPrepareSandbox(m.be)
 			return w.setup(m)
 		}
 	} else {
@@ -121,6 +130,7 @@ func (w *wizard) onInstall(m *Model, msg installMsg) tea.Cmd {
 		return nil
 	}
 	w.plat.Installed = true
+	w.prepareAfterSave = canPrepareSandbox(m.be)
 	return w.setup(m)
 }
 
@@ -180,6 +190,12 @@ func (w *wizard) onSaved(m *Model, msg hostSavedMsg) tea.Cmd {
 	cmd := m.addTierHost(w.host, w.tier, false, conn, w.info)
 	if h := m.hostByName(w.host.Name); h != nil {
 		m.openHost(h)
+	}
+	if w.prepareAfterSave && msg.target != nil {
+		if sb, ok := m.be.(sandboxPrepareBackend); ok {
+			w.prepTarget = msg.target
+			return tea.Batch(cmd, w.startSandboxPrepare(m, sb))
+		}
 	}
 	return tea.Batch(cmd, w.loadAgents(m))
 }

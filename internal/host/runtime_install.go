@@ -19,6 +19,9 @@ const runtimeProcessTransfers = 16
 var runtimeSlots = make(chan struct{}, runtimeProcessTransfers)
 
 type runtimeOwnedPart struct {
+	mu          sync.Mutex
+	closing     bool
+	slot        bool
 	part        *runtimecache.Part
 	store       *runtimecache.Store
 	digest      string
@@ -29,33 +32,30 @@ type runtimeJob struct {
 	cancel    context.CancelFunc
 	requestID uint64
 	started   bool
+	done      chan struct{}
+	finished  sync.Once
+	released  sync.Once
+	cleanupMu sync.Mutex
+	resource  *runtimeOwnedPart
 }
 
 type runtimeService struct {
-	mu         sync.Mutex
-	parts      map[string]*runtimeOwnedPart
-	jobs       map[string]*runtimeJob
-	downloads  map[string]*runtimecache.Part
-	closed     bool
-	selections map[string]*selectedRuntimeReceiptV1
+	active           sync.WaitGroup
+	closeMu          sync.Mutex
+	owned            map[*runtimeOwnedPart]struct{}
+	selectionGate    chan struct{}
+	selectionPending *selectedRuntimeReceiptV1
+	mu               sync.Mutex
+	parts            map[string]*runtimeOwnedPart
+	jobs             map[string]*runtimeJob
+	downloads        map[string]*runtimecache.Part
+	closed           bool
+	closeDone        chan struct{}
+	selections       map[string]*selectedRuntimeReceiptV1
 }
 
-func (s *runtimeService) close() {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.closed = true
-	for _, job := range s.jobs {
-		job.cancel()
-	}
-	for token, part := range s.parts {
-		_ = part.close()
-		delete(s.parts, token)
-		<-runtimeSlots
-	}
-	for key, receipt := range s.selections {
-		_ = receipt.Close()
-		delete(s.selections, key)
-	}
+func (s *runtimeService) close() error {
+	return s.closeRuntimeServiceV1()
 }
 
 func runtimeValidate(m supply.Manifest) error { return runtimeValidateWithImageDefaults(m, nil) }
@@ -71,7 +71,13 @@ func (s *runtimeService) reserve() error {
 	if s.closed {
 		return fmt.Errorf("runtime connection is closed")
 	}
-	if len(s.parts)+len(s.jobs) >= runtimecache.MaxTransfers {
+	resources := len(s.owned)
+	for _, owner := range s.parts {
+		if _, held := s.owned[owner]; !held {
+			resources++
+		}
+	}
+	if resources+len(s.jobs) >= runtimecache.MaxTransfers {
 		return UserError("runtime_busy", "this connection has reached its runtime transfer limit", "Wait for one transfer to finish, then try again.")
 	}
 	select {
@@ -88,6 +94,14 @@ func (s *runtimeService) begin(a runtimecache.RuntimeInstall) (runtimecache.Runt
 
 func (s *runtimeService) beginContext(ctx context.Context, a runtimecache.RuntimeInstall) (runtimecache.RuntimePart, error) {
 	var result runtimecache.RuntimePart
+	done, enterErr := s.enterRuntimeV1()
+	if enterErr != nil {
+		return result, enterErr
+	}
+	defer done()
+	if err := s.retryRuntimeOwnersV1(); err != nil {
+		return result, err
+	}
 	if err := CheckCaller(); err != nil {
 		return result, err
 	}
@@ -110,40 +124,34 @@ func (s *runtimeService) beginContext(ctx context.Context, a runtimecache.Runtim
 	if item.SHA256 == "" {
 		return result, fmt.Errorf("runtime file is not named by the client's manifest")
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if err := s.reserve(); err != nil {
-		return result, err
-	}
-	release := true
-	defer func() {
-		if release {
-			<-runtimeSlots
-		}
-	}()
-	publication, store, err := openRuntimeProductionStore(ctx)
-	if err != nil {
-		return result, err
-	}
-	part, err := store.BeginContext(publication.ctx, item)
-	if err != nil {
-		store.Close()
-		_ = publication.close()
-		return result, err
-	}
 	var nonce [16]byte
 	if _, err := rand.Read(nonce[:]); err != nil {
-		part.Close()
-		store.Close()
-		_ = publication.close()
 		return result, fmt.Errorf("name runtime transfer: %w", err)
 	}
+	owner, err := s.newRuntimeOwnerV1()
+	if err != nil {
+		return result, err
+	}
+	owner.digest = item.SHA256
+	owner.publication, owner.store, err = openRuntimeProductionStore(ctx)
+	if err != nil {
+		return result, errors.Join(err, s.finishRuntimeOwnerV1(owner))
+	}
+	owner.part, err = owner.store.BeginContext(owner.publication.ctx, item)
+	if err != nil {
+		return result, errors.Join(err, s.finishRuntimeOwnerV1(owner))
+	}
 	result.Part = hex.EncodeToString(nonce[:])
+	s.mu.Lock()
 	if s.parts == nil {
 		s.parts = map[string]*runtimeOwnedPart{}
 	}
-	s.parts[result.Part] = &runtimeOwnedPart{part: part, store: store, digest: item.SHA256, publication: publication}
-	release = false
+	s.parts[result.Part] = owner
+	closed := s.closed
+	s.mu.Unlock()
+	if closed {
+		return result, errors.Join(fmt.Errorf("runtime connection ended before begin acknowledgement"), s.finishRuntimeOwnerV1(owner))
+	}
 	return result, nil
 }
 
@@ -151,9 +159,15 @@ func (s *runtimeService) install(ctx context.Context, a runtimecache.RuntimeInst
 	if err := CheckCaller(); err != nil {
 		return nil, err
 	}
-	switch a.Action {
-	case "begin":
+	if a.Action == "begin" {
 		return s.beginContext(ctx, a)
+	}
+	done, enterErr := s.enterRuntimeV1()
+	if enterErr != nil {
+		return nil, enterErr
+	}
+	defer done()
+	switch a.Action {
 	case "commit":
 		if a.Manifest == nil {
 			return nil, fmt.Errorf("runtime commit has no client manifest")
@@ -161,47 +175,43 @@ func (s *runtimeService) install(ctx context.Context, a runtimecache.RuntimeInst
 		if err := runtimeValidatePublication(*a.Manifest, a.ImageDefaults); err != nil {
 			return nil, err
 		}
-		publication, store, err := openRuntimeProductionStore(ctx)
-		if err != nil {
+		if err := s.retryRuntimeOwnersV1(); err != nil {
 			return nil, err
 		}
-		defer publication.close()
-		defer store.Close()
-		if err := commitRuntime(ctx, store, *a.Manifest, a.ImageDefaults); err != nil {
-			return nil, err
-		}
-		return nil, s.rememberRuntime(ctx, *a.Manifest)
+		return nil, s.commitRuntimeOwnedV1(ctx, *a.Manifest, a.ImageDefaults)
 	case "write", "finish", "abort":
-		s.mu.Lock()
 		if a.Action == "abort" {
-			if job := s.jobs[a.Part]; job != nil {
-				job.cancel()
-				s.mu.Unlock()
-				return nil, nil
+			if found, err := s.cancelRuntimeJobCleanupV1(a.Part); found {
+				return nil, err
 			}
 		}
-		own := s.parts[a.Part]
-		if own == nil {
-			s.mu.Unlock()
+		s.mu.Lock()
+		owner := s.parts[a.Part]
+		s.mu.Unlock()
+		if owner == nil {
 			return nil, fmt.Errorf("runtime part does not belong to this connection")
 		}
-		if a.Action == "write" {
-			err := own.part.WriteAt(a.Data, a.Offset)
-			if err != nil {
-				delete(s.parts, a.Part)
-				_ = own.close()
-				<-runtimeSlots
+		owner.mu.Lock()
+		if owner.closing {
+			owner.mu.Unlock()
+			cleanup := s.finishRuntimeOwnerV1(owner)
+			if a.Action == "abort" {
+				return nil, cleanup
 			}
-			s.mu.Unlock()
-			return nil, err
+			return nil, errors.Join(fmt.Errorf("runtime transfer is closing; this operation was not accepted"), cleanup)
 		}
-		delete(s.parts, a.Part)
-		s.mu.Unlock()
-		defer func() { _ = own.close(); <-runtimeSlots }()
+		var operationErr error
+		if a.Action == "write" {
+			operationErr = owner.part.WriteAt(a.Data, a.Offset)
+		}
 		if a.Action == "finish" {
-			return nil, own.part.Finish(ctx)
+			operationErr = owner.part.Finish(ctx)
 		}
-		return nil, nil
+		owner.mu.Unlock()
+		if a.Action == "write" && operationErr == nil {
+			return nil, nil
+		}
+		return nil, errors.Join(operationErr, s.finishRuntimeOwnerV1(owner))
 	default:
 		return nil, fmt.Errorf("unknown runtime installation phase")
 	}

@@ -53,77 +53,88 @@ func (s *Store) CommitWithImageDefaults(ctx context.Context, manifest supply.Man
 	if err := ValidateWithImageDefaults(manifest, defaults, arch); err != nil {
 		return err
 	}
-	return s.withPublication(ctx, func() error {
-		return s.locked(ctx, func() error {
-			for _, it := range manifest.Items {
-				has, err := s.hasContext(ctx, it)
-				if err != nil {
+	return retryExecMode(ctx, func() error {
+		return s.withPublication(ctx, func() error {
+			return s.locked(ctx, func() error {
+				for _, it := range manifest.Items {
+					has, err := s.hasContext(ctx, it)
+					if err != nil {
+						return err
+					}
+					if !has {
+						return fmt.Errorf("runtime is missing %s", it.Name)
+					}
+					if err := s.installVerityLocked(ctx, it); err != nil {
+						return err
+					}
+				}
+				// Recheck real artifact-directory durability before either an
+				// existing-label ACK or a new reference can commit. A failed
+				// Part close/sync record is never a durability permission.
+				if err := s.syncDir("sha256"); err != nil {
 					return err
 				}
-				if !has {
-					return fmt.Errorf("runtime is missing %s", it.Name)
-				}
-			}
-			name := "runtime/" + manifest.Runtime + ".json"
-			record := Record{Manifest: manifest, InstalledAt: time.Now().UTC(), ImageDefaults: cloneImageDefaults(defaults)}
-			if old, err := s.readRecord(name, arch); err == nil {
-				if !reflect.DeepEqual(old.Manifest.Items, manifest.Items) {
-					return fmt.Errorf("runtime label already names different entries")
-				}
-				// Legacy fixture/migration callers cannot erase known authority.
-				if defaults == nil {
-					return nil
-				}
-				if old.Manifest.Release != manifest.Release {
-					return fmt.Errorf("runtime image metadata names a different release")
-				}
-				if old.ImageDefaults != nil {
-					if !reflect.DeepEqual(*old.ImageDefaults, *defaults) {
-						return fmt.Errorf("runtime label already names different image defaults")
+				name := "runtime/" + manifest.Runtime + ".json"
+				record := Record{Manifest: manifest, InstalledAt: time.Now().UTC(), ImageDefaults: cloneImageDefaults(defaults)}
+				if old, err := s.readRecord(name, arch); err == nil {
+					if !reflect.DeepEqual(old.Manifest.Items, manifest.Items) {
+						return fmt.Errorf("runtime label already names different entries")
 					}
-					return nil
+					// Legacy fixture/migration callers cannot erase known authority.
+					if defaults == nil {
+						return nil
+					}
+					if old.Manifest.Release != manifest.Release {
+						return fmt.Errorf("runtime image metadata names a different release")
+					}
+					if old.ImageDefaults != nil {
+						if !reflect.DeepEqual(*old.ImageDefaults, *defaults) {
+							return fmt.Errorf("runtime label already names different image defaults")
+						}
+						return nil
+					}
+					record = old // Preserve arrival time, runtime entries and unknown fields.
+					record.ImageDefaults = cloneImageDefaults(defaults)
+				} else if !errors.Is(err, os.ErrNotExist) {
+					return err
 				}
-				record = old // Preserve arrival time, runtime entries and unknown fields.
-				record.ImageDefaults = cloneImageDefaults(defaults)
-			} else if !errors.Is(err, os.ErrNotExist) {
-				return err
-			}
-			data, err := json.Marshal(record)
-			if err != nil {
-				return fmt.Errorf("encode runtime record: %w", err)
-			}
-			var nonce [16]byte
-			if _, err := rand.Read(nonce[:]); err != nil {
-				return fmt.Errorf("name runtime record: %w", err)
-			}
-			tmp := "runtime/.record-" + hex.EncodeToString(nonce[:])
-			f, err := openNoFollow(s.root, tmp, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
-			if err != nil {
-				return fmt.Errorf("create runtime record: %w", err)
-			}
-			defer func() {
+				data, err := json.Marshal(record)
+				if err != nil {
+					return fmt.Errorf("encode runtime record: %w", err)
+				}
+				var nonce [16]byte
+				if _, err := rand.Read(nonce[:]); err != nil {
+					return fmt.Errorf("name runtime record: %w", err)
+				}
+				tmp := "runtime/.record-" + hex.EncodeToString(nonce[:])
+				f, err := openNoFollow(s.root, tmp, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+				if err != nil {
+					return fmt.Errorf("create runtime record: %w", err)
+				}
+				defer func() {
+					current, err := s.root.Lstat(tmp)
+					own, ferr := f.Stat()
+					if err == nil && ferr == nil && os.SameFile(current, own) {
+						_ = s.root.Remove(tmp)
+					}
+					_ = f.Close()
+				}()
+				if _, err := f.Write(append(data, '\n')); err != nil {
+					return fmt.Errorf("write runtime record: %w", err)
+				}
+				if err := f.Sync(); err != nil {
+					return fmt.Errorf("sync runtime record: %w", err)
+				}
 				current, err := s.root.Lstat(tmp)
 				own, ferr := f.Stat()
-				if err == nil && ferr == nil && os.SameFile(current, own) {
-					_ = s.root.Remove(tmp)
+				if err != nil || ferr != nil || !os.SameFile(current, own) {
+					return fmt.Errorf("runtime record changed before publication")
 				}
-				_ = f.Close()
-			}()
-			if _, err := f.Write(append(data, '\n')); err != nil {
-				return fmt.Errorf("write runtime record: %w", err)
-			}
-			if err := f.Sync(); err != nil {
-				return fmt.Errorf("sync runtime record: %w", err)
-			}
-			current, err := s.root.Lstat(tmp)
-			own, ferr := f.Stat()
-			if err != nil || ferr != nil || !os.SameFile(current, own) {
-				return fmt.Errorf("runtime record changed before publication")
-			}
-			if err := s.root.Rename(tmp, name); err != nil {
-				return fmt.Errorf("publish runtime record: %w", err)
-			}
-			return s.syncDir("runtime")
+				if err := s.root.Rename(tmp, name); err != nil {
+					return fmt.Errorf("publish runtime record: %w", err)
+				}
+				return s.syncDir("runtime")
+			})
 		})
 	})
 }

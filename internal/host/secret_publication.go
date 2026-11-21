@@ -64,6 +64,7 @@ func checkSecretPublicationResponse(value any) error {
 func publicationInfoFrom(m *Manifest, alive bool, roots ...*Manifest) SessionInfo {
 	owned := CloneManifest(*m)
 	info := infoFrom(&owned, alive)
+	liveNamedSSHKeys(&info)
 	info.SecretState = api.CloneSessionSecretState(owned.SecretState)
 	if publicationRunCoherent(&owned, roots) {
 		info.RunGeneration = owned.Run.Generation

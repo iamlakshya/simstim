@@ -32,8 +32,9 @@ func (h *Holder) serve(conn net.Conn, hookSock bool) {
 		h.drop(c)
 		c.close()
 	}()
-	r := bufio.NewReaderSize(conn, 64<<10)
-	f, err := proto.Read(r)
+	f, input, line, err := readHolderFirstFrameV1(c.conn)
+	c.helloLine = line
+	r := bufio.NewReaderSize(input, 64<<10)
 	if err != nil || f.Type != proto.THello {
 		return
 	}
@@ -41,6 +42,19 @@ func (h *Holder) serve(conn net.Conn, hookSock bool) {
 	if json.Unmarshal(f.Payload, &hello) != nil || hello.Check(version.Protocol) != nil {
 		_ = c.w.WriteJSON(proto.TError, proto.Error{Code: "protocol", Message: "incompatible client"})
 		return
+	}
+	if hello.Role == ordinaryPurgeRoleV2 {
+		h.serveOrdinaryPurgeV2(c, line, hookSock)
+		return
+	}
+	if hello.Role == ordinaryStopRoleV1 {
+		h.serveOrdinaryStopV1(c, line, hookSock)
+		return
+	}
+	if line != nil {
+		if err := line.RejectAncillary(); err != nil {
+			return
+		}
 	}
 	var refused *proto.Error
 	if c.access, refused = h.accessOf(conn, hookSock, hello.Role); refused != nil {

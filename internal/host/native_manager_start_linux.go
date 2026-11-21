@@ -15,6 +15,7 @@ import (
 	"github.com/godbus/dbus/v5"
 	"golang.org/x/sys/unix"
 
+	"github.com/iamlakshya/simstim/internal/api"
 	"github.com/iamlakshya/simstim/internal/brand"
 )
 
@@ -35,16 +36,17 @@ type transientAuxV1 struct {
 }
 
 type nativeUnitActivationV1 struct {
-	manager    *nativeUserManagerV1
-	path       dbus.ObjectPath
-	unit       string
-	properties unitActivationProperties
-	peer       *nativeStartupPeerV1
-	executable os.FileInfo
-	argv       []string
-	memoryMax  int64
-	once       sync.Once
-	closeErr   error
+	manager         *nativeUserManagerV1
+	path            dbus.ObjectPath
+	unit            string
+	properties      unitActivationProperties
+	peer            *nativeStartupPeerV1
+	executable      os.FileInfo
+	argv            []string
+	memoryMax       int64
+	prepareCPUQuota uint64
+	once            sync.Once
+	closeErr        error
 }
 
 func (manager *nativeUserManagerV1) startSupervisor(ctx context.Context, m *Manifest, executable string, argv []string, admission *runtimePublication) (*nativeUnitActivationV1, error) {
@@ -71,6 +73,19 @@ func (manager *nativeUserManagerV1) startSupervisor(ctx context.Context, m *Mani
 		property("Environment", supervisorLaunchEnv(unit)),
 		property("UnsetEnvironment", []string{holderLockFDEnv}),
 	}
+	var prepareCPUQuota uint64
+	if admission != nil && admission.startup != nil && admission.startup.IsSandboxPrepareV1() && m.Wall != nil && m.Wall.Level != "microvm" {
+		if err := validateSandboxPrepareBootManifestV1(m); err != nil {
+			return nil, err
+		}
+		prepareCPUQuota = uint64(api.SandboxPrepareCPUsV1) * 1_000_000
+		properties = append(properties, property("CPUAccounting", true), property("CPUQuotaPerSecUSec", prepareCPUQuota))
+	}
+	if m.Wall != nil && (m.Wall.Level == "process" || m.Wall.Level == "gvisor") {
+		// Each native guest creator enters a fresh child. The supervisor stays
+		// outside so it can renew and thaw the complete guest cgroup.
+		properties = append(properties, property("Delegate", true))
+	}
 	if m.Limits.MemoryMax > 0 {
 		properties = append(properties, property("MemoryMax", uint64(m.Limits.MemoryMax)), property("MemorySwapMax", uint64(0)))
 	}
@@ -79,8 +94,14 @@ func (manager *nativeUserManagerV1) startSupervisor(ctx context.Context, m *Mani
 	}
 	var job dbus.ObjectPath
 	var call *dbus.Call
-	err = admission.gate(ctx, func() error {
-		if err := checkStartingMemoryLockedV1(ctx, admission.startup, m); err != nil {
+	err = admission.gateControl(ctx, func(control *placementControl) error {
+		if err := checkStartingMemoryControlLockedV1(ctx, admission.startup, m, control); err != nil {
+			return err
+		}
+		if err := consumeColdResumeDispatchLockedV1(ctx, admission.startup, admission); err != nil {
+			return err
+		}
+		if err := consumeNoneColdDispatchLockedV1(ctx, admission.startup, admission); err != nil {
 			return err
 		}
 		manager.events.markDispatched()
@@ -125,9 +146,11 @@ func (manager *nativeUserManagerV1) startSupervisor(ctx context.Context, m *Mani
 	}
 	activation := &nativeUnitActivationV1{manager: manager, path: path, unit: unit, properties: observed,
 		peer:       &nativeStartupPeerV1{pid: int(observed.MainPID), uid: uint32(os.Getuid()), pidfd: pidfd, proc: proc},
-		executable: info, argv: slices.Clone(argv), memoryMax: m.Limits.MemoryMax}
-	if err := activation.Check(ctx); err != nil {
-		return nil, errors.Join(err, activation.Close())
+		executable: info, argv: slices.Clone(argv), memoryMax: m.Limits.MemoryMax, prepareCPUQuota: prepareCPUQuota}
+	if err := activation.checkCreationV1(ctx); err != nil {
+		// The real activation already exists. Keep its original pidfd/proc
+		// reachable through the caller even when the later live check fails.
+		return activation, err
 	}
 	return activation, nil
 }
@@ -158,6 +181,12 @@ func supervisorLaunchEnv(unit string) []string {
 }
 
 func (activation *nativeUnitActivationV1) Check(ctx context.Context) error {
+	return activation.checkInvocationV1(ctx, true)
+}
+func (activation *nativeUnitActivationV1) checkCreationV1(ctx context.Context) error {
+	return activation.checkInvocationV1(ctx, false)
+}
+func (activation *nativeUnitActivationV1) checkInvocationV1(ctx context.Context, identity bool) error {
 	if activation == nil || activation.peer == nil || activation.manager == nil {
 		return sessionLeaseError("startup lost its actual native activation owner")
 	}
@@ -191,7 +220,23 @@ func (activation *nativeUnitActivationV1) Check(ctx context.Context) error {
 			}
 		}
 	}
-	if err := checkStartupExecutable(activation.peer.proc, activation.executable, activation.argv); err != nil {
+	if activation.prepareCPUQuota != 0 {
+		accounting, err := activation.manager.getProperty(ctx, activation.path, systemdServiceInterface, "CPUAccounting")
+		enabled, ok := accounting.Value().(bool)
+		if err != nil || !ok || !enabled {
+			return errors.Join(sessionLeaseError("the original prepare unit lost CPU accounting"), err)
+		}
+		quota, err := activation.manager.getProperty(ctx, activation.path, systemdServiceInterface, "CPUQuotaPerSecUSec")
+		value, ok := quota.Value().(uint64)
+		if err != nil || !ok || value != activation.prepareCPUQuota {
+			return errors.Join(sessionLeaseError("the original prepare unit lost its fixed CPU quota"), err)
+		}
+	}
+	if identity {
+		if err := checkNativeHelperExecutableV1(activation.peer, activation.executable, activation.argv); err != nil {
+			return err
+		}
+	} else if err := checkCreatedHelperArgumentsV1(activation.peer, activation.argv); err != nil {
 		return err
 	}
 	cgroup, err := activation.peer.proc.ReadFile("cgroup")

@@ -29,7 +29,7 @@ func (s *Server) boundSecretNamesLocked(authority string) []string {
 	var names []string
 	for _, name := range slices.Sorted(maps.Keys(state.secrets)) {
 		secret := state.secrets[name]
-		if secret.bound != nil && slices.Contains(secret.bound.binding.Hosts, authority) {
+		if secret.bound != nil && slices.Contains(secret.bound.binding.Hosts, authority) || secret.trusted != nil && slices.Contains(secret.trusted.Bind.Hosts, authority) {
 			names = append(names, name)
 		}
 	}
@@ -48,7 +48,7 @@ func (s *Server) boundSecretNamesLocked(authority string) []string {
 
 func (state *memberState) hasSecretResource(name, authority string) bool {
 	secret, present := state.secrets[name]
-	if present && secret.bound != nil && slices.Contains(secret.bound.binding.Hosts, authority) {
+	if present && (secret.bound != nil && slices.Contains(secret.bound.binding.Hosts, authority) || secret.trusted != nil && slices.Contains(secret.trusted.Bind.Hosts, authority)) {
 		return true
 	}
 	for _, entry := range state.retired[name] {

@@ -78,7 +78,7 @@ func auditEntryMatches(entry api.NetAuditEntry, cutoff time.Time, by string) boo
 			return false
 		}
 	}
-	return by == "" || entry.Decision == by || strings.Contains(entry.Rule, by)
+	return by == "" || entry.By == by || entry.Decision == by || strings.Contains(entry.Rule, by)
 }
 
 func auditReadError() error {

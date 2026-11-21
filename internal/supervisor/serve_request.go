@@ -15,10 +15,34 @@ func (s *Supervisor) request(c *client, f proto.Frame) bool {
 	if json.Unmarshal(f.Payload, &req) != nil {
 		return false
 	}
+	if handled, alive := s.debugTraceRequestV1(c, req, f); handled {
+		return alive
+	}
+	if s.traceUpperRequestV1(c, req) {
+		return true
+	}
+	if handled, keep := s.noneDebugRequestV1(c, req, f); handled {
+		return keep
+	}
+	if s.nativeStopRequestV1(c, req) {
+		return true
+	}
+	if s.nativeWarmResumeRequestV1(c, req) {
+		return true
+	}
+	if s.editorSSHViewRequestV1(c, req) {
+		return true
+	}
 	if s.portRequest(c, req) {
 		return true
 	}
+	if s.modelUsageRequest(c, req) {
+		return true
+	}
 	if s.packageSettingsRequest(c, req) {
+		return true
+	}
+	if s.namedSSHKeyRequest(c, req) {
 		return true
 	}
 	if s.armRequest(c, req) {
@@ -30,6 +54,9 @@ func (s *Supervisor) request(c *client, f proto.Frame) bool {
 	if s.imageSaveRequestV1(c, req) {
 		return true
 	}
+	if s.checkpointRequestV1(c, req) {
+		return true
+	}
 	if s.pullRequest(c, req) {
 		return true
 	}
@@ -39,11 +66,12 @@ func (s *Supervisor) request(c *client, f proto.Frame) bool {
 	if s.memberRequest(c, req) {
 		return true
 	}
+	if s.protectedCohortReadinessRequestV1(c, req) {
+		return true
+	}
 	switch req.Op {
 	case "info":
-		var infoArgs struct {
-			Cohort bool `json:"cohort,omitempty"`
-		}
+		var infoArgs api.SandboxCohortInfoArgsV1
 		if len(req.Args) > 0 {
 			if !api.ExactJSONFields(req.Args, infoArgs) || json.Unmarshal(req.Args, &infoArgs) != nil {
 				c.reply(req.ID, nil, toProtoErr(secretIntentFailure()))

@@ -10,6 +10,33 @@
 
 Creating a host counts as your consent to install the helper on it. `host create` still prints what it installs and where. Nothing new listens on the host: the door is sshd, or the provider's own exec API.
 
+The helper's identity is checked during registration before sandbox preparation. A provider's successful creation reply alone does not mark the host as checked.
+
+## A machine for one session
+
+Use E2B when each session should have its own provider machine:
+
+<!-- test: help (it makes a paid provider machine) -->
+```sh
+simstim new --machine e2b --name task --detach
+```
+
+The saved host is `m-task`, and the session is `m-task/task`. The helper, probe, runtime and sandbox run there. The client shows the exact root script and runs it through the provider with `sudo -n`; it never asks for a password. The machine has the `shared` tier. Its actual probe decides which wall can run. A wall below `gvisor` needs an explicit level and `--downgrade`.
+
+Set the provider credentials and template in `config.toml`:
+
+```toml
+[machines.e2b]
+token_command = "your-key-command"
+template = ""
+```
+
+With no token command, the provider uses `E2B_API_KEY` or the E2B CLI login. An empty template uses the same default as `host create e2b`. Credentials stay on the laptop. The client copies no login file into the machine.
+
+Session and classifier credentials must be marked `shared` and explicitly exposed. Named SSH keys use their separate host-only delivery and fresh shared-host question. They never enter the guest environment; their exposure to the host is recorded by name. A changed saved tier does not relax these requirements.
+
+`--count` makes an independent machine for each session. A failed or cancelled start removes only its own machine. A machine that could not be removed stays marked `machine` in `host ls`; use `host rm <host> --destroy --confirm <host>` to retry. Removing its original session with `rm` destroys the machine and its disk. A stop or a detach keeps it. E2B may pause it with its memory, including any exposed secret, when its lease expires.
+
 ## With the guided setup
 
 `simstim setup` offers each provider when it asks where agents will run. It says whether this computer can use each one now: `limactl` or `docker` on your `PATH`, or an E2B key. If not, it shows the steps to install it, from the provider's own guide, and checks again. Then it makes the host, connects it, and offers the agent checklist and the logins ([install agents](install-agents.md#pick-them-from-a-checklist)). To skip the questions:
@@ -169,3 +196,15 @@ It refuses while a session is working, unless you pass `--force`. It also refuse
 | `host rm <host> --destroy` | Deletes it and forgets it |
 
 Every flag is in [the command reference](../reference/cli/host_create.md).
+
+## Microvm sandboxes in Lima
+
+On an M3 or later Mac with macOS 15 or later, Lima's vz backend can expose
+nested virtualisation. Host creation requests it and lets Lima perform the
+actual hardware and system check. An older Mac can still create a Lima VM.
+The client turns nesting off only after Lima reports that specific refusal.
+
+The guest must still have Linux 6.8 or later, usable `/dev/kvm`, and the
+verified runtime. Sandbox preparation performs the real boot check before a
+floor is pinned. A Mac model or a requested setting is not proof of working
+KVM. `host doctor` explains when an Apple silicon Lima guest has no KVM device.

@@ -185,6 +185,12 @@ func listenPrivate(sock, what string) (net.Listener, error) {
 
 // closeSockets closes both listeners and removes their files.
 func (h *Holder) closeSockets() {
+	if h.ordinary != nil {
+		if err := h.closeOriginalOrdinarySocketsV1(); err != nil {
+			h.log.Error("original holder socket closure is unknown", "err", err)
+		}
+		return
+	}
 	for _, ln := range []net.Listener{h.ln, h.hookLn} {
 		if ln != nil {
 			ln.Close()

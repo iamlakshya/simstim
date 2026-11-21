@@ -5,7 +5,7 @@ all harness source and rejects unlisted commands, unused entries, hidden
 calls and disposable-only actions outside the authenticated guard. Each
 entry states its ownership rule or why it needs a disposable host.
 """
-import ast, itertools, os, re
+import ast, itertools, os, re, conformance_allowed
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -14,7 +14,7 @@ OWNER_MODULES = ["joined_checks.py", "run.py", "run_parts.py", "owned.py", "agen
 DISPOSABLE_MODULES = ["disposable.py", "disposable_checks.py", "disposable_setup.py", "agent_login.py", "guided_setup.py",
                       "host_commands.py", "host_git.py", "sandbox_hosts.py", "session_sockets.py", "session_verbs.py"]
 BOUNDARY = ["boundary.py", "harness.py"]
-SUPPORT = ["allowed.py", "allowed_scan.py", "fakes.py", "login_fakes.py"]
+SUPPORT = ["allowed.py", "allowed_scan.py", "fakes.py", "login_fakes.py", "conformance_evidence.py", "conformance_allowed.py"]
 MODULES = OWNER_MODULES
 GUARDS = {"DISPOSABLE", "c.DISPOSABLE", "R.DISPOSABLE", "state.get('disposable')"}
 
@@ -484,6 +484,7 @@ def keys_for(argv, c):
     return set()
 
 
+conformance_allowed.extend(DISPOSABLE_ONLY, ONLY, DISPOSABLE_MODULES)
 from allowed_scan import (  # noqa: E402, F401 - re-exported for callers
     calls,
     check,

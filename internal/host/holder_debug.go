@@ -25,6 +25,8 @@ import (
 // knew the request.
 func (h *Holder) debugRequest(req proto.Request) (v any, perr *proto.Error, ok bool) {
 	switch req.Op {
+	case api.OpDebugTraceReadV1:
+		v, perr = h.readOriginalTraceV1(req.Args)
 	case api.OpDebugStart:
 		var a api.DebugStartArgs
 		if len(req.Args) > 0 && json.Unmarshal(req.Args, &a) != nil {

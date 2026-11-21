@@ -36,10 +36,20 @@ func RunImageGuardian(args []string) error {
 	}
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
 	defer cancel()
+	ctx, closeFence, err := capturePublicationGuardianV1(ctx)
+	if err != nil {
+		return err
+	}
+	defer closeFence()
 	files := make([]*os.File, count+2)
 	for i := range files {
 		files[i] = os.NewFile(uintptr(3+i), "image-inherited")
 		defer files[i].Close()
+	}
+	// No scope subprocess may inherit the original private layer/helper/output
+	// capabilities. The jail receives them only through its explicit Files.
+	if err := markImageGuardianPrivateV1(files); err != nil {
+		return err
 	}
 	var scope imageScopeInfo
 	if saved {

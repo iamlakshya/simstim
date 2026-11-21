@@ -61,6 +61,9 @@ func ReceiveUnixControlV1(conn *net.UnixConn, data []byte, maxDescriptors int) (
 		failure = errors.Join(failure, errors.New("native control was truncated or exceeded its exact descriptor bound"))
 	}
 	failure = errors.Join(failure, err, receiveErr)
+	if failure == nil && n > 0 {
+		failure = newUnixReceiveWitnessV1(conn, &control)
+	}
 	if failure != nil {
 		failure = errors.Join(failure, control.Close())
 	}

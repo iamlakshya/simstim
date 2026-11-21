@@ -16,12 +16,15 @@ import (
 type stateMetadataRole string
 
 const (
-	stateWalls stateMetadataRole = "walls.json"
-	stateIdle  stateMetadataRole = "idle.json"
+	stateWalls     stateMetadataRole = "walls.json"
+	stateIdle      stateMetadataRole = "idle.json"
+	stateDrain     stateMetadataRole = "drain.json"
+	stateLockdown  stateMetadataRole = "lockdown.json"
+	stateFootprint stateMetadataRole = "footprint.json"
 )
 
 func validStateMetadataRole(role stateMetadataRole) bool {
-	return role == stateWalls || role == stateIdle
+	return role == stateWalls || role == stateIdle || role == stateDrain || role == stateLockdown || role == stateFootprint
 }
 
 type stateMetadataError struct {
@@ -61,6 +64,15 @@ func validateStateMetadata(role stateMetadataRole, data []byte) error {
 	}
 	if len(data) > proto.MaxFrame {
 		return placementError("the state metadata exceeds the protocol bound")
+	}
+	if role == stateLockdown {
+		return validateLockdownDataV1(data)
+	}
+	if role == stateDrain {
+		return validateDrainDataV1(data)
+	}
+	if role == stateFootprint {
+		return validateFootprintLedgerV1(data)
 	}
 	var target any
 	var cache wallCache

@@ -2,6 +2,8 @@ package supervisor
 
 import (
 	"encoding/json"
+	"errors"
+	"io"
 	"log/slog"
 	"os"
 	"sync"
@@ -71,21 +73,35 @@ func (a *auditLog) close() {
 
 // writeNet appends one pre-scrubbed net audit record from the egress process.
 func (a *auditLog) writeNet(e egress.AuditEntry) {
+	if err := a.appendNet(e); err != nil && a != nil && a.log != nil {
+		a.log.Warn("net audit line not written", "err", err)
+	}
+}
+
+// appendNet reports actual acceptance to the existing serial audit worker.
+// A failed append never elects an unknown-host notification or rewrites data.
+func (a *auditLog) appendNet(e egress.AuditEntry) error {
 	if a == nil {
-		return
+		return errors.New("net audit storage is unavailable")
 	}
 	e.V = 1
 	e.Kind = "net"
 	b, err := json.Marshal(e) //nolint:gosec // G117: Secret holds the secret's name, never its value (spec 7.2)
 	if err != nil {
-		return
+		return err
 	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if a.f == nil {
-		return
+		return errors.New("net audit storage is closed")
 	}
-	if _, err := a.f.Write(append(b, '\n')); err != nil {
-		a.log.Warn("net audit line not written", "err", err)
+	line := append(b, '\n')
+	n, err := a.f.Write(line)
+	if err != nil {
+		return err
 	}
+	if n != len(line) {
+		return io.ErrShortWrite
+	}
+	return nil
 }

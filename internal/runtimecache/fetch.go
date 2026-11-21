@@ -26,17 +26,19 @@ func HTTPClient() *http.Client {
 
 // Fetch downloads one previously validated manifest item into its own part.
 // The progress callback sees the owned part only while it is active.
-func (s *Store) Fetch(ctx context.Context, item supply.Item, client *http.Client, progress func(*Part)) error {
+func (s *Store) Fetch(ctx context.Context, item supply.Item, client *http.Client, progress func(*Part)) (returned error) {
 	if has, err := s.Has(ctx, item); has || err != nil {
 		return err
 	}
 	part, err := s.BeginContext(ctx, item)
+	if part != nil {
+		defer func() { returned = errors.Join(returned, part.Close()) }()
+	}
+	if part != nil && progress != nil {
+		progress(part)
+	}
 	if err != nil {
 		return err
-	}
-	defer part.Close()
-	if progress != nil {
-		progress(part)
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, item.URL, nil)
 	if err != nil {

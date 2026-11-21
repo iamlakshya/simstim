@@ -55,8 +55,11 @@ func (s *Session) writeContinuation() {
 			return
 		}
 		for {
+			request, stream, release := s.takeGuardedOpen()
+			s.armGuardedWrite(request)
 			b, seq := s.build()
 			if len(b) == 0 {
+				s.finishGuardedOpen(request, stream, release, s.Err())
 				break
 			}
 			n, err := (sessionWriter{s}).Write(b)
@@ -65,9 +68,11 @@ func (s *Session) writeContinuation() {
 			}
 			if err != nil {
 				s.fail(fmt.Errorf("link: write: %w", err))
+				s.finishGuardedOpen(request, stream, release, err)
 				return
 			}
 			s.wrote(seq)
+			s.finishGuardedOpen(request, stream, release, nil)
 		}
 	}
 }

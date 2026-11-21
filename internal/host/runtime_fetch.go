@@ -36,7 +36,7 @@ func (s *runtimeService) registerFetch(ctx context.Context, a runtimecache.Runti
 	if s.jobs == nil {
 		s.jobs = map[string]*runtimeJob{}
 	}
-	s.jobs[a.Transfer] = &runtimeJob{ctx: ctx, cancel: cancel, requestID: requestID}
+	s.jobs[a.Transfer] = &runtimeJob{ctx: ctx, cancel: cancel, requestID: requestID, done: make(chan struct{})}
 	return nil
 }
 
@@ -47,8 +47,7 @@ func (s *runtimeService) fetch(ctx context.Context, a runtimecache.RuntimeReques
 	return s.fetchRegistered(a, 0)
 }
 
-func (s *runtimeService) fetchRegistered(a runtimecache.RuntimeRequest, requestID uint64) (api.RuntimeStatus, error) {
-	var result api.RuntimeStatus
+func (s *runtimeService) fetchRegistered(a runtimecache.RuntimeRequest, requestID uint64) (result api.RuntimeStatus, returned error) {
 	s.mu.Lock()
 	job := s.jobs[a.Transfer]
 	if job == nil || job.requestID != requestID || job.started {
@@ -58,26 +57,25 @@ func (s *runtimeService) fetchRegistered(a runtimecache.RuntimeRequest, requestI
 	job.started = true
 	s.mu.Unlock()
 	ctx := job.ctx
-	defer func() {
-		job.cancel()
-		s.mu.Lock()
-		delete(s.jobs, a.Transfer)
-		delete(s.downloads, a.Transfer)
-		s.mu.Unlock()
-		<-runtimeSlots
-	}()
+	defer func() { returned = errors.Join(returned, s.finishRuntimeJobV1(a.Transfer, job)) }()
 	if err := ctx.Err(); err != nil {
 		return result, err
 	}
 
+	owner := &runtimeOwnedPart{}
+	s.mu.Lock()
+	job.resource = owner
+	s.mu.Unlock()
 	publication, store, err := openRuntimeProductionStore(ctx)
+	owner.publication, owner.store = publication, store
 	if err != nil {
 		return result, err
 	}
-	defer publication.close()
-	defer store.Close()
 	for _, item := range a.Manifest.Items {
 		if err := store.Fetch(ctx, item, runtimecache.HTTPClient(), func(p *runtimecache.Part) {
+			owner.mu.Lock()
+			owner.part = p
+			owner.mu.Unlock()
 			s.mu.Lock()
 			defer s.mu.Unlock()
 			if s.downloads == nil {
@@ -91,7 +89,7 @@ func (s *runtimeService) fetchRegistered(a runtimecache.RuntimeRequest, requestI
 	if err := commitRuntime(ctx, store, a.Manifest, a.ImageDefaults); err != nil {
 		return result, err
 	}
-	if err := s.rememberRuntime(ctx, a.Manifest); err != nil {
+	if err := s.rememberRuntimeWithDefaults(ctx, a.Manifest, a.ImageDefaults); err != nil {
 		return result, err
 	}
 	return s.status(ctx, a)
@@ -118,7 +116,7 @@ func (s *runtimeService) status(ctx context.Context, a runtimecache.RuntimeReque
 	}
 	defer store.Close()
 	s.mu.Lock()
-	active := len(s.parts)+len(s.jobs) > 0
+	active := len(s.parts)+len(s.jobs)+len(s.owned) > 0 || s.selectionPending != nil
 	s.mu.Unlock()
 	allPresent := true
 	for _, it := range a.Manifest.Items {
@@ -136,7 +134,7 @@ func (s *runtimeService) status(ctx context.Context, a runtimecache.RuntimeReque
 		result.Items = append(result.Items, api.RuntimeFile{Kind: it.Kind, Name: it.Name, SHA256: it.SHA256, Size: it.Size, Present: present})
 	}
 	if !active && allPresent {
-		if err := s.rememberRuntime(ctx, a.Manifest); err != nil {
+		if err := s.rememberRuntimeWithDefaults(ctx, a.Manifest, a.ImageDefaults); err != nil {
 			return result, err
 		}
 		result.Drivers = runtimeDrivers(a.Manifest)
@@ -144,7 +142,13 @@ func (s *runtimeService) status(ctx context.Context, a runtimecache.RuntimeReque
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for _, own := range s.parts {
+		own.mu.Lock()
+		if own.part == nil {
+			own.mu.Unlock()
+			continue
+		}
 		received, started := own.part.Progress()
+		own.mu.Unlock()
 		result.Transfers = append(result.Transfers, api.RuntimeTransfer{SHA256: own.digest, Received: received, Started: started})
 	}
 	for _, part := range s.downloads {

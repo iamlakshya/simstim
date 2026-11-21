@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -51,6 +52,11 @@ func addGuestItems(m *supply.Manifest, guestDir, lockPath, configsDir string, re
 		if added {
 			addedKernel = true
 		}
+		efi, err := addArchGuestKernelEFIV1(m, assetsDir, configsDir, folder, srcAsset, arch, lock)
+		if err != nil {
+			return err
+		}
+		addedKernel = addedKernel || efi
 		if err := addArchGuestTools(m, guestDir, assetsDir, folder, arch, requireAll); err != nil {
 			return err
 		}
@@ -78,6 +84,10 @@ func addArchGuestKernel(m *supply.Manifest, assetsDir, configsDir, folder, srcAs
 	it.Licence = "GPL-2.0-only"
 	it.SourceURL = folder + "/" + srcAsset
 	it.Released = lock.Kernel.ReleasedDate()
+	it.FSVerity, err = supply.FSVerityDigest(context.Background(), bytes.NewReader(kData), int64(len(kData)))
+	if err != nil {
+		return false, err
+	}
 	m.Items = append(m.Items, it)
 	if err := verifyConfigCopy(filepath.Join(assetsDir, supply.ConfigAsset(arch)), filepath.Join(configsDir, supply.ConfigAsset(arch))); err != nil {
 		return false, err
@@ -162,6 +172,15 @@ func checkKernelReleaseExtras(m *supply.Manifest, dir, lockPath, configsDir stri
 	}
 	checkedSrc := map[string]bool{}
 	for _, it := range kernels {
+		if it.Name == supply.KernelEFIName {
+			data, err := os.ReadFile(filepath.Join(dir, supply.KernelEFIAsset(it.Arch)))
+			if err != nil {
+				return &failure{msg: err.Error(), try: "download the exact signed EFI kernel asset again"}
+			}
+			if err := supply.CheckKernelEFI(it.Arch, data); err != nil {
+				return &failure{msg: err.Error(), try: "rebuild the EFI kernel from its pinned source and configuration"}
+			}
+		}
 		if it.Version != lock.Kernel.Version || it.Released != lock.Kernel.ReleasedDate() {
 			return &failure{msg: fmt.Sprintf("kernel %s in the manifest is %s (%s), and guest/supply.lock pins %s (%s)",
 				it.Arch, it.Version, it.Released, lock.Kernel.Version, lock.Kernel.ReleasedDate()),

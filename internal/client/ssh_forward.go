@@ -14,9 +14,9 @@ import (
 type ForwardPair struct {
 	// RemoteSocket is the exact checked private supervisor port socket.
 	RemoteSocket string
-	Local      int
-	RemoteHost string
-	Remote     int
+	Local        int
+	RemoteHost   string
+	Remote       int
 }
 
 // Forward builds an ssh command that forwards local ports to the host until it
@@ -39,12 +39,18 @@ func (s *SSH) forwardCommand(ctx context.Context, pairs []ForwardPair, extra []s
 		return nil, err
 	}
 	args = append(args, "-o", "ClearAllForwardings=no", "-N", "-o", "ExitOnForwardFailure=yes")
-	for _,p:=range pairs {
-		if p.Local<1 || p.Local>65535{return nil,&UserError{Msg:"invalid local forward port",Hint:"Choose a port from 1 to 65535.",Code:"bad_port",Kind:KindUsage}}
-		if p.RemoteSocket!="" {
-			if !path.IsAbs(p.RemoteSocket) || path.Clean(p.RemoteSocket)!=p.RemoteSocket || CleanLine(p.RemoteSocket)!=p.RemoteSocket || strings.ContainsAny(p.RemoteSocket,":\x00\r\n%[]"){return nil,&UserError{Msg:"invalid supervisor port socket",Hint:"Grant the exact sandbox port again.",Code:"bad_port",Kind:KindRefused}}
-			args=append(args,"-L",fmt.Sprintf("127.0.0.1:%d:%s",p.Local,p.RemoteSocket))
-		}else{args=append(args,"-L",fmt.Sprintf("127.0.0.1:%d:%s:%d",p.Local,p.RemoteHost,p.Remote))}
+	for _, p := range pairs {
+		if p.Local < 1 || p.Local > 65535 {
+			return nil, &UserError{Msg: "invalid local forward port", Hint: "Choose a port from 1 to 65535.", Code: "bad_port", Kind: KindUsage}
+		}
+		if p.RemoteSocket != "" {
+			if !path.IsAbs(p.RemoteSocket) || path.Clean(p.RemoteSocket) != p.RemoteSocket || CleanLine(p.RemoteSocket) != p.RemoteSocket || strings.ContainsAny(p.RemoteSocket, ":\x00\r\n%[]") {
+				return nil, &UserError{Msg: "invalid supervisor port socket", Hint: "Grant the exact sandbox port again.", Code: "bad_port", Kind: KindRefused}
+			}
+			args = append(args, "-L", fmt.Sprintf("127.0.0.1:%d:%s", p.Local, p.RemoteSocket))
+		} else {
+			args = append(args, "-L", fmt.Sprintf("127.0.0.1:%d:%s:%d", p.Local, p.RemoteHost, p.Remote))
+		}
 	}
 	args = append(args, extra...)
 	if err := s.checkForward(ctx, args); err != nil {

@@ -117,6 +117,7 @@ def session_rows():
 
 C.start, C.attach, C.exact, C.names, C.state, C.made = start, attach, exact, names, state, made
 C.host_machine, C.session_rows, C.HERE, C.DISPOSABLE = T.machine, session_rows, HERE, DISPOSABLE
+C.target = T
 
 # SIGTERM and SIGHUP end the run as sys.exit does, so that the finally
 # below runs: Python's own end on them runs none.
@@ -156,6 +157,10 @@ try:
     if not ok(listed is not None, "the list of the host's sessions before the run succeeded"):
         sys.exit(1)
     state["before"] = {s["id"] for s in listed}
+    if os.environ.get("E2E_ONLY") in ("microvm", "microvm-measure"):
+        joined_checks.microvm_checks(C, os.environ.get("E2E_ONLY") == "microvm-measure")
+        owned.say("RESULT %d/%d passed" % (sum(results), len(results)))
+        sys.exit(0 if results and all(results) else 1)
     # Setting up hosts and sessions (agent_setup.py). E2E_ONLY=agent-setup runs only these.
     import agent_setup
     def setup_checks():
@@ -480,6 +485,7 @@ finally:
         owned.say("CLEAN-UP FAILED: the isolated client root stays for inspection: %s" % R.path)
     else:
         R.remove()
+    joined_checks.finish_conformance(C, clean, created, state)
     if not clean:
         # A run whose clean-up left something on the host fails, also when
         # every check passed. An exception that ended the run is shown first.

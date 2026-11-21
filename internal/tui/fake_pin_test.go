@@ -40,14 +40,18 @@ func (b *fakeBackend) PinHostKey(_ context.Context, h client.Host, want string) 
 	if b.pinErr != nil {
 		return client.Pin{}, b.pinErr
 	}
-	p := client.Pin{Fingerprint: fakeHostKey, Type: "ssh-ed25519", Keys: 1, Source: client.PinFromKnownHosts}
+	shown := b.pinKey
+	if shown == "" {
+		shown = fakeHostKey
+	}
+	p := client.Pin{Fingerprint: shown, Type: "ssh-ed25519", Keys: 1, Source: client.PinFromKnownHosts}
 	switch {
-	case want != "" && want != fakeHostKey:
+	case want != "" && want != shown:
 		return client.Pin{}, &client.UserError{Msg: h.Name + " shows another key", Code: "host_key_mismatch", Kind: client.KindRefused}
 	case want != "":
 		p.Source = client.PinMatchedFlag
 	case b.pinUnknown:
-		return client.Pin{}, &client.UncheckedKeyError{Pin: client.Pin{Fingerprint: fakeHostKey, Type: "ssh-ed25519", Keys: 1}}
+		return client.Pin{}, &client.UncheckedKeyError{Pin: client.Pin{Fingerprint: shown, Type: "ssh-ed25519", Keys: 1}}
 	}
 	if _, ok := b.staged[h.Name]; ok {
 		b.staged[h.Name] = p.Fingerprint

@@ -84,159 +84,6 @@ func (m *Model) startSessionReady(h *hostConn, r startReq) tea.Cmd {
 	return m.startSessionWithSource(h, r)
 }
 
-func (m *Model) startSessionWithSource(h *hostConn, r startReq) tea.Cmd {
-	c, be, originalHost, kept, cols, rows := h.conn, m.be, h.host, m.settings, m.width, m.height
-	read := m.beginSettingsRead()
-	return m.bgCmd(func(ctx context.Context) (message tea.Msg) {
-		defer func() { message = m.finishStartGrant(ctx, message) }()
-		settings, read := readSettings(be, kept, read)
-		if _, err := client.ReadPolicySettings(); err != nil {
-			return startedMsg{startReq: r, err: err, settingsRead: read}
-		}
-		hostClone := r.args.Cwd != ""
-		if r.grants == nil {
-			r.wallIntent = r.args.Wall
-			r.grants = client.NewGrantRequest(false, r.args.SSHAgent)
-			m.grantOwners.add(r.grants)
-		}
-		cctx, cancel := context.WithTimeout(client.WithGrantRequest(ctx, r.grants), 60*time.Second)
-		defer cancel()
-		endAttempt, err := m.grantOwners.begin(r.grants, cctx, cancel)
-		if err != nil {
-			return startedMsg{startReq: r, err: err, settingsRead: read}
-		}
-		defer endAttempt()
-		args, err := client.PrepareNewSessionArgs(cctx, r.args, cols, rows)
-		if err != nil {
-			return startedMsg{startReq: r, err: err, settingsRead: read}
-		}
-		r.args = args
-		if r.inputOptions == nil {
-			options := startInputOptions(r.args, hostClone)
-			r.inputOptions = &options
-		}
-		if !r.inputOptions.HostClone {
-			r.args.Cwd = ""
-		}
-		if planner, ok := unclean(c).(interface {
-			PrepareNewInputPolicy(context.Context, client.NewArgs, client.NewInputOptions) (client.NewArgs, error)
-		}); ok {
-			r.args, err = planner.PrepareNewInputPolicy(cctx, r.args, *r.inputOptions)
-			if err != nil {
-				return startedMsg{startReq: r, err: err, settingsRead: read}
-			}
-		}
-		if planner, ok := unclean(c).(interface {
-			PrepareNewPolicy(context.Context, client.NewArgs) (client.NewArgs, error)
-		}); ok {
-			r.args, err = planner.PrepareNewPolicy(cctx, r.args)
-			if err != nil {
-				return startedMsg{startReq: r, err: err, settingsRead: read}
-			}
-		}
-		if planner, ok := unclean(c).(interface {
-			ResolveNewWall(context.Context, client.NewArgs) (client.NewArgs, error)
-		}); ok {
-			r.args, err = planner.ResolveNewWall(cctx, r.args)
-			if err != nil {
-				return startedMsg{startReq: r, err: err, settingsRead: read}
-			}
-		} else if r.args.Wall != "" {
-			return startedMsg{startReq: r, err: &client.UserError{Msg: "this host connection cannot select a wall",
-				Hint: "Update the client and host helper, then try again.", Code: "wall_helper_old"}, settingsRead: read}
-		}
-		level := r.args.Wall
-		if level == "" {
-			level = "none"
-		}
-		if err := r.grants.BindNewWall(cctx, level, nil); err != nil {
-			return startedMsg{startReq: r, err: err, settingsRead: read}
-		}
-		if planner, ok := unclean(c).(interface {
-			PrepareNewInputs(context.Context, client.NewArgs) (client.NewArgs, error)
-		}); ok {
-			r.args, err = planner.PrepareNewInputs(cctx, r.args)
-			if err != nil {
-				return startedMsg{startReq: r, err: err, settingsRead: read}
-			}
-		}
-		if r.args.Wall == "microvm" && r.vm == nil {
-			planner, ok := unclean(c).(interface {
-				PrepareNewVM(context.Context, client.NewArgs, string) (*client.VMNeedPlanV1, error)
-			})
-			if !ok {
-				return startedMsg{startReq: r, err: &client.UserError{Msg: "this connection cannot prepare a microvm", Hint: "Update the client and host helper, then try again.", Code: "vm_prepare", Kind: client.KindRefused}, settingsRead: read}
-			}
-			r.vm, err = planner.PrepareNewVM(cctx, r.args, r.wallIntent)
-			if err != nil {
-				return startedMsg{startReq: r, err: err, settingsRead: read}
-			}
-		}
-		if planner, ok := unclean(c).(interface {
-			PrepareNewSecrets(context.Context, client.NewArgs, ...*client.VMNeedPlanV1) (client.NewArgs, error)
-		}); ok {
-			if r.vm != nil {
-				r.args, err = planner.PrepareNewSecrets(cctx, r.args, r.vm)
-			} else {
-				r.args, err = planner.PrepareNewSecrets(cctx, r.args)
-			}
-			if err != nil {
-				return startedMsg{startReq: r, err: err, settingsRead: read}
-			}
-		} else if r.args.Wall != "" && r.args.Wall != "none" {
-			return startedMsg{startReq: r, err: &client.UserError{Msg: "this connection cannot prepare sandbox inputs", Hint: "Update the client and host helper, then try again.", Code: "secret_helper_old", Kind: client.KindRefused}, settingsRead: read}
-		}
-		effectiveNames := client.SecretNames(originalHost, nil)
-		if len(r.args.Layers) > 0 {
-			effectiveNames, err = client.PolicySecretNames(r.args.Layers)
-			if err != nil {
-				return startedMsg{startReq: r, err: err, settingsRead: read}
-			}
-		}
-		if err := m.grantQuestions(cctx, func(ctx context.Context) error {
-			return c.CheckNewGrants(ctx, effectiveNames, r.args.SSHAgent)
-		}); err != nil {
-			return startedMsg{startReq: r, err: err, settingsRead: read}
-		}
-		if planner, ok := unclean(c).(interface {
-			CheckNewPolicyGrants(context.Context, []api.Layer) error
-		}); ok {
-			if err := m.grantQuestions(cctx, func(ctx context.Context) error {
-				return planner.CheckNewPolicyGrants(ctx, r.args.Layers)
-			}); err != nil {
-				return startedMsg{startReq: r, err: err, settingsRead: read}
-			}
-		}
-		var warn *client.UserError
-		if r.args.Setup == "" && !r.answered {
-			answers := be.SetupAnswers(r.host)
-			answers.Apply(&r.args)
-			r.answered, r.answers, warn = true, answers, answers.Warning
-		}
-		// One fetch of the secrets for each start. A question about the
-		// start keeps them for the start after the answer.
-		if r.args.Secrets == nil {
-			var secrets map[string]api.Secret
-			err := m.grantQuestions(cctx, func(ctx context.Context) error {
-				var err error
-				secrets, err = be.Secrets(ctx, settings, originalHost, effectiveNames)
-				return err
-			})
-			if err != nil {
-				return startedMsg{startReq: r, err: err, warn: warn, settingsRead: read}
-			}
-			r.args.Secrets = secrets
-		}
-		var s *client.Session
-		err = m.grantQuestions(cctx, func(ctx context.Context) error {
-			var err error
-			s, err = c.NewSession(ctx, r.args)
-			return err
-		})
-		return startedMsg{startReq: r, s: s, err: err, warn: warn, settingsRead: read}
-	})
-}
-
 // onStarted shows how a start went, and a warning about the user's answers
 // about setup scripts, when they could not be read.
 func (m *Model) onStarted(msg startedMsg) tea.Cmd {
@@ -318,6 +165,13 @@ func (m *Model) showStarted(msg startedMsg) tea.Cmd {
 		m.sel, m.autoSel = sessKey{h.name(), msg.s.ID}, false
 		m.syncSel()
 		if msg.attach {
+			if msg.selected != nil {
+				// The separate attach dial keeps the actual attempt's full Host,
+				// including its Source. It never adopts a preview or shared Conn.
+				target := *h
+				target.host = msg.selectedHost
+				return m.jack(&target, msg.s.ID, msg.s.Name)
+			}
 			return m.jack(h, msg.s.ID, msg.s.Name)
 		}
 	}

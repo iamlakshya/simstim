@@ -30,9 +30,12 @@ func ApplyPolicyAdd(layers []api.Layer, a api.PolicyAddArgs) (api.Policy, []api.
 	var err error
 	if door == api.DoorPush {
 		norm, err = egress.CanonicalPushTarget(a.Target)
-	} else if door==api.DoorPort {
-		_,err=api.ParsePortTarget(a.Target);norm=a.Target
-		if err!=nil || a.Methods!=nil || len(a.Tools)!=0 || a.Mode!="" || a.Once || !a.Allow && !a.Until.IsZero(){return api.Policy{},nil,api.Rule{},UserError("bad_port","a port rule needs one exact decimal port without methods, tools, mode or once","Pass a port from 1 to 65535 and a supported session allowance.")}
+	} else if door == api.DoorPort {
+		_, err = api.ParsePortTarget(a.Target)
+		norm = a.Target
+		if err != nil || a.Methods != nil || len(a.Tools) != 0 || a.Mode != "" || a.Once || !a.Allow && !a.Until.IsZero() {
+			return api.Policy{}, nil, api.Rule{}, UserError("bad_port", "a port rule needs one exact decimal port without methods, tools, mode or once", "Pass a port from 1 to 65535 and a supported session allowance.")
+		}
 	} else {
 		norm, err = egress.ValidateRuleTarget(a.Target)
 	}
@@ -43,7 +46,7 @@ func ApplyPolicyAdd(layers []api.Layer, a api.PolicyAddArgs) (api.Policy, []api.
 	if err != nil {
 		return api.Policy{}, nil, api.Rule{}, UserError("bad_method", err.Error(), "Pass each method as one exact HTTP token, such as GET or POST.")
 	}
-	candidate, err := egress.CanonicalRuleSelection(api.Rule{Layer: api.LayerSession, Allow: a.Allow, Door: door, Target: norm, Mode: a.Mode, Methods: methods, Tools: a.Tools})
+	candidate, err := egress.CanonicalRuleSelection(api.Rule{Layer: api.LayerSession, Allow: a.Allow, Door: door, Target: norm, Mode: a.Mode, Methods: methods, Tools: a.Tools, PublicOnly: a.PublicOnly})
 	if err != nil {
 		return api.Policy{}, nil, api.Rule{}, err
 	}
@@ -55,16 +58,17 @@ func ApplyPolicyAdd(layers []api.Layer, a api.PolicyAddArgs) (api.Policy, []api.
 		return api.Policy{}, nil, api.Rule{}, UserError("policy_grant", "cannot create a grant instance", "Try the policy command again.")
 	}
 	r := api.Rule{
-		GrantID: hex.EncodeToString(instance[:]),
-		Layer:   api.LayerSession,
-		Allow:   a.Allow,
-		Door:    door,
-		Target:  norm,
-		Mode:    a.Mode,
-		Methods: methods,
-		Tools:   candidate.Tools,
-		Once:    a.Once,
-		Until:   a.Until,
+		GrantID:    hex.EncodeToString(instance[:]),
+		Layer:      api.LayerSession,
+		Allow:      a.Allow,
+		Door:       door,
+		Target:     norm,
+		Mode:       a.Mode,
+		Methods:    methods,
+		PublicOnly: a.PublicOnly,
+		Tools:      candidate.Tools,
+		Once:       a.Once,
+		Until:      a.Until,
 	}
 	r.ID = api.RuleID(r)
 
@@ -180,8 +184,14 @@ func DropOnceRules(layers []api.Layer, now time.Time) (api.Policy, []api.Layer, 
 func cloneLayers(in []api.Layer) []api.Layer { return api.CloneLayers(in) }
 
 func (b *bridge) handlePolicy(req proto.Request) bool {
+	if b.handlePolicyLockdownV1(req) {
+		return true
+	}
+	if b.handleNetworkHold(req) {
+		return true
+	}
 	switch req.Op {
-	case "policy.ls", "policy.add", "policy.rm", "policy.log":
+	case "policy.ls", "policy.add", "policy.rm", "policy.log", "policy.replace":
 	default:
 		return false
 	}
@@ -195,6 +205,9 @@ func (b *bridge) handlePolicy(req proto.Request) bool {
 }
 
 func dispatchPolicyOp(op string, rawArgs json.RawMessage) (any, error) {
+	if op == "policy.replace" {
+		return dispatchPolicyReplace(rawArgs)
+	}
 	var base struct {
 		ID      string `json:"id"`
 		Session string `json:"session"`
@@ -234,6 +247,9 @@ func dispatchPolicyOp(op string, rawArgs json.RawMessage) (any, error) {
 				return nil, UserError("bad_request", "invalid policy.add arguments", "Update the client.")
 			}
 			var features []string
+			if args.PublicOnly {
+				features = append(features, api.FeatureNetworkPublicOnly)
+			}
 			if args.Door == api.DoorPush {
 				features = append(features, api.FeaturePolicyPush)
 			}
@@ -296,7 +312,7 @@ func offlinePolicyOp(sid, op string, rawArgs json.RawMessage) (any, error) {
 	}
 	switch op {
 	case "policy.ls":
-		return PolicySnapshot(api.CloneLayers(m.Layers))
+		return PolicySnapshotWithNext(api.CloneLayers(m.Layers), m.PolicyNext)
 	case "policy.log":
 		var a api.PolicyLogArgs
 		if len(rawArgs) > 0 && json.Unmarshal(rawArgs, &a) != nil {

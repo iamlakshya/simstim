@@ -11,6 +11,12 @@ import (
 )
 
 func validatePurgeControl(control placementControl) error {
+	if err := validateMemberRootReceiptsV1(control.MemberRoots); err != nil {
+		return err
+	}
+	if err := validateWorktreeOriginsV1(control.WorktreeOrigins); err != nil {
+		return err
+	}
 	if err := validateIdleShutdownCommit(control.ShutdownCommitted); err != nil {
 		return err
 	}
@@ -57,7 +63,7 @@ func validatePurgeControl(control placementControl) error {
 		if _, err := purgeRootPath(&control, pending.Root); err != nil {
 			return err
 		}
-		if pending.SHA256 != "" && !supply.IsHex64(pending.SHA256) {
+		if !purgeSafeParentRefV1(pending.Directory) || !supply.IsHex64(pending.SHA256) {
 			return placementError("the pending cleanup digest is malformed")
 		}
 		if pending.Item != nil && (pending.Item.Size <= 0 || !supply.IsHex64(pending.Item.SHA256)) {
@@ -97,7 +103,7 @@ func validatePurgeControl(control placementControl) error {
 		}
 	}
 	for name, intent := range control.StateWrites {
-		if name != "walls.json" && name != "idle.json" || !metadataWriteIntentKnown(intent) {
+		if !validStateMetadataRole(stateMetadataRole(name)) || !metadataWriteIntentKnown(intent) {
 			return placementError("the state metadata publication intent is unknown")
 		}
 	}

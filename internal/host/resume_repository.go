@@ -41,6 +41,9 @@ func ApplyRepositoryResume(m *Manifest, a api.ResumeArgs) error {
 		if err != nil {
 			return err
 		}
+		if IsNoneSupervisor(m) {
+			return checkNoneResumeCarriersV1(m, []api.Layer{layer})
+		}
 		if m.Wall == nil {
 			if len(layer.Rules) > 0 || !reflect.ValueOf(layer.LayerValues).IsZero() {
 				return UserError("not_walled", "the repository now needs sandbox policy", "Start a new walled session to use this repository policy.")
@@ -62,7 +65,7 @@ func ApplyRepositoryResume(m *Manifest, a api.ResumeArgs) error {
 		}
 		base = append(base, layer)
 	}
-	if m.Wall == nil {
+	if m.Wall == nil || IsNoneSupervisor(m) {
 		return nil
 	}
 	policy, clean, err := egress.MergeLayers(base)

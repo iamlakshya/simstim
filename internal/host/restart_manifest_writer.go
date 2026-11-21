@@ -37,6 +37,14 @@ func saveRestartManifestV1(operation *SessionOperation, next *Manifest) error {
 			if err := checkRestartMemoryPublicationV1(operation, control); err != nil {
 				return err
 			}
+			if !restartMemoryAllowsDrainV1(operation) {
+				if err := checkUserDrainLockedV1(owned, control); err != nil {
+					return err
+				}
+			}
+			if err := applyPersistentLockdownLockedV1(owned, control, next); err != nil {
+				return err
+			}
 			original, err := cachefs.OpenFile(operation.native.root, "manifest.json", os.O_RDONLY, 0o600)
 			if err != nil {
 				return err
@@ -58,13 +66,21 @@ func saveRestartManifestV1(operation *SessionOperation, next *Manifest) error {
 				return err
 			}
 			if before.ID != operation.Primary() || before.SandboxOf != "" || before.path != "" || !bytes.Equal(before.VMNeedV1, next.VMNeedV1) ||
-				!reflect.DeepEqual(before.RuntimeManifest, next.RuntimeManifest) || wallDriver(&before) != wallDriver(next) || wallLevel(&before) != wallLevel(next) {
+				!reflect.DeepEqual(before.RuntimeManifest, next.RuntimeManifest) {
 				return sessionLeaseError("the prospective restart changed its original protected execution selection")
+			}
+			if wallDriver(&before) != wallDriver(next) || wallLevel(&before) != wallLevel(next) {
+				if err := operation.noneMigration.check(owned, operation, &before, next); err != nil {
+					return err
+				}
 			}
 			if err := reference.CheckFile(operation.native.root, "manifest.json", original, 0o600); err != nil {
 				return err
 			}
-			vacant, err := reserveRestartMemoryLockedV1(owned, operation, next)
+			if before.Auxiliary != nil || next.Auxiliary != nil {
+				return UserError("busy", "ordinary restart cannot clear or replace auxiliary accounting", "Finish the genuine original auxiliary controller and its native lifetime before restarting the primary.")
+			}
+			vacant, err := reserveRestartMemoryControlLockedV1(owned, operation, next, control)
 			if err != nil {
 				return err
 			}
@@ -72,6 +88,9 @@ func saveRestartManifestV1(operation *SessionOperation, next *Manifest) error {
 				defer func() { failure = errors.Join(failure, vacant.Close()) }()
 			}
 			if err := consumeRestartMemoryV1(operation, &before, next); err != nil {
+				return err
+			}
+			if err := checkNoneColdRestartWriterV1(owned, operation, &before, next); err != nil {
 				return err
 			}
 			if err := ValidateManifestStart(next); err != nil {
@@ -122,6 +141,9 @@ func saveRestartManifestV1(operation *SessionOperation, next *Manifest) error {
 				return err
 			}
 			published = true
+			if operation.noneMigration != nil {
+				operation.noneMigration.published = true
+			}
 			if err := syncCapturedDirectory(operation.native.root); err != nil {
 				return err
 			}
@@ -131,6 +153,9 @@ func saveRestartManifestV1(operation *SessionOperation, next *Manifest) error {
 			}
 			defer func() { failure = errors.Join(failure, current.Close()) }()
 			if err := after.CheckFile(operation.native.root, "manifest.json", current, 0o600); err != nil {
+				return err
+			}
+			if err := retainNoneColdRestartWriterV1(owned, operation, next); err != nil {
 				return err
 			}
 			return operation.native.check(owned)

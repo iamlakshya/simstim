@@ -27,14 +27,14 @@ func runtimeManifest(t *testing.T) supply.Manifest {
 func TestRuntimeRequiresOriginalSameBuildCompanionClosure(t *testing.T) {
 	m := runtimeManifest(t)
 	items, err := RuntimeItemsV1(m, runtime.GOARCH)
-	if err != nil || len(items) != 4 {
+	if err != nil || len(items) != 5 {
 		t.Fatal("complete samebuild closure refused", items, err)
 	}
 	items[0].Version = "changed"
 	if m.Items[0].Version == "changed" {
 		t.Fatal("selector borrowed mutable original item storage")
 	}
-	for _, index := range []int{1, 2, 3} {
+	for _, index := range []int{1, 2, 3, 4} {
 		copy := m
 		copy.Items = append([]supply.Item(nil), m.Items...)
 		copy.Items = append(copy.Items[:index], copy.Items[index+1:]...)
@@ -77,7 +77,7 @@ func TestGvisorRuntimeDoesNotAcceptOtherArchitecture(t *testing.T) {
 }
 
 func TestGvisorRuntimeRefusesUnpatchedAndUnrelatedDistributionBuilds(t *testing.T) {
-	for _, version := range []string{"release-20261102.0", "release-20261102.0-1a2b3c4d", "release-20261103.0"} {
+	for _, version := range []string{"release-20261102.0", "release-20261102.0-1a2b3c4d", "release-20261102.0-dea09068", "release-20261102.0-5fbc10e2", "release-20261103.0"} {
 		manifest := runtimeManifest(t)
 		for index := range manifest.Items {
 			manifest.Items[index].Version = version

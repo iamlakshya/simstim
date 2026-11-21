@@ -32,6 +32,16 @@ func (c *Conn) CheckResumeGrants(ctx context.Context, id string, names []string)
 	if err := c.requireSecretFeature(len(names) != 0); err != nil {
 		return err
 	}
+	ctx, _, err := captureResumeImagePolicy(ctx, c, id)
+	if err != nil {
+		return err
+	}
+	if _, err := prepareResumeNamedSSHKeys(ctx, c, id); err != nil {
+		return err
+	}
+	if err := prepareTrustedJudgeResumeV1(ctx, c, id); err != nil {
+		return err
+	}
 	group, err := c.needsResumeMembers(ctx, id)
 	if err != nil {
 		return err

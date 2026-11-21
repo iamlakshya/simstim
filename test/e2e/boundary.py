@@ -320,6 +320,14 @@ class Root:
         internal/client works it out from the root's cache folder."""
         return _os.path.join(self.path, "cache", self.product, "cm")
 
+    def client_digest(self):
+        """Hash only this canonical root's actual selected local client."""
+        import hashlib
+        if ctx().root is not self:
+            raise Refused("the client belongs to another isolated run")
+        with open(self.cli, "rb") as stream:
+            return hashlib.file_digest(stream, "sha256").hexdigest()
+
 
 class Target:
     """The test host, as run.py reaches it beside the client: a command on

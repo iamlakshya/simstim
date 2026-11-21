@@ -9,6 +9,15 @@ func changeHostFiles(ctx context.Context, c HostChange, hosts []Host, withPin bo
 	if err != nil {
 		return nil, hostFileHooks{}, err
 	}
+	if err := checkSavedHostRemovalChangeV1(ctx, c, hosts); err != nil {
+		return nil, hostFileHooks{}, err
+	}
+	if err := checkJoinedIntroductionLocked(ctx, c); err != nil {
+		return nil, hostFileHooks{}, err
+	}
+	if err := CheckInviteRegistrationV1(ctx, c); err != nil {
+		return nil, hostFileHooks{}, err
+	}
 	if err := checkHostMachineSourceChange(ctx, c); err != nil {
 		return nil, hostFileHooks{}, err
 	}
@@ -66,6 +75,17 @@ func changeHostFiles(ctx context.Context, c HostChange, hosts []Host, withPin bo
 			return removeWrappers()
 		}
 	}
+	if beforeCheck, _ := ctx.Value(hostPrepareRecordCheckKey{}).(func(context.Context) error); beforeCheck != nil {
+		priorBeforeSave := hooks.beforeSave
+		hooks.beforeSave = func() error {
+			if priorBeforeSave != nil {
+				if err := priorBeforeSave(); err != nil {
+					return err
+				}
+			}
+			return beforeCheck(ctx)
+		}
+	}
 	hooks.membershipGeneration = generation
 	hooks.membershipSourceGeneration = sourceGeneration
 	priorCommit := hooks.commit
@@ -79,5 +99,52 @@ func changeHostFiles(ctx context.Context, c HostChange, hosts []Host, withPin bo
 	if observation, _ := ctx.Value(hostStateObservationKey{}).(*HostStateObservation); observation != nil && observation.role == hostStateCreation && c.Was == nil && c.Now != nil {
 		hooks.observeCommit = func() error { return recordHostCreationCommittedSource(ctx, observation, c, out) }
 	}
+	if capture, _ := ctx.Value(hostPrepareCommitCaptureKey{}).(*hostPrepareCommitCapture); capture != nil && c.Now != nil && capture.name == c.Now.Name {
+		priorObserve := hooks.observeCommit
+		hooks.observeCommit = func() error {
+			if priorObserve != nil {
+				if err := priorObserve(); err != nil {
+					return err
+				}
+			}
+			return capture.recordCommitted(ctx, c, out)
+		}
+	}
+	if machine := sessionMachineOwnerOfV1(ctx); machine != nil && c.Now != nil && c.Now.Name == machine.request.Name {
+		originalTarget := machine.capture.target
+		priorBeforeSave := hooks.beforeSave
+		hooks.beforeSave = func() error {
+			if priorBeforeSave != nil {
+				if err := priorBeforeSave(); err != nil {
+					return err
+				}
+			}
+			if err := machine.checkNextHostV1(*c.Now); err != nil {
+				return err
+			}
+			if originalTarget != nil {
+				expectedID := originalTarget.hostID
+				if c.HostID != "" {
+					expectedID = c.HostID
+				}
+				return originalTarget.checkLocked(ctx, expectedID)
+			}
+			return nil
+		}
+		priorObserve := hooks.observeCommit
+		hooks.observeCommit = func() error {
+			if priorObserve != nil {
+				if err := priorObserve(); err != nil {
+					return err
+				}
+			}
+			return machine.recordCommittedV1(ctx, c, out)
+		}
+	}
+	hooks, err = attachSavedHostRemovalHooksV1(ctx, c, hooks)
+	if err != nil {
+		return out, hooks, err
+	}
+	installInviteRegistrationCheck(ctx, c, &hooks)
 	return out, hooks, nil
 }

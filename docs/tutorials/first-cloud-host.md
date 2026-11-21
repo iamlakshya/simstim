@@ -103,6 +103,8 @@ Clone a repository on the server and start the agent in its own worktree, so its
 simstim new my-server --agent claude --dir ~/src/app --worktree --name first-task
 ```
 
+The new session uses the floor pinned during host preparation. Review it with `simstim host show my-server`; `simstim host prepare my-server` pins a floor for an older saved host. A later probe can confirm availability but does not silently change the saved floor.
+
 Give the agent a task. Then press **Ctrl+\\** to detach. The agent keeps working.
 
 To hear when it needs you, send alerts to your phone. Install the [ntfy](https://ntfy.sh) app, subscribe to a topic name that only you know, and tell the host about it:

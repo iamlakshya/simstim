@@ -73,12 +73,18 @@ func (s *Server) prepareModelHTTPRequest(scope *originRequest, request *http.Req
 				return model, "model request type"
 			}
 		}
+		model.requestBytes = uint64(len(body))
 		request.Body = newModelBody(body)
 		request.ContentLength = int64(len(body))
 		request.Header.Del("Content-Length")
 	}
 	if err := s.installModelRequest(scope, model); err != nil {
 		return model, err.Error()
+	}
+	if model.webSocket {
+		scope.mu.Lock()
+		scope.usageWS = newModelWebSocketUsage(scope)
+		scope.mu.Unlock()
 	}
 	return model, ""
 }
@@ -108,8 +114,31 @@ func (s *Server) installModelRequest(scope *originRequest, model *modelRequest) 
 		return fmt.Errorf("model policy")
 	}
 	scope.mu.Lock()
-	reserved := scope.reserved
+	reserved, usageWS := scope.reserved, scope.usageWS
 	scope.mu.Unlock()
+	if feature := engine.admitModelRequest(model, scope.permit, false, evalPrecheck); feature != "" {
+		return fmt.Errorf("%s", feature)
+	}
+	if !model.webSocket {
+		turn, refusal, err := s.usage.BeginV1(ModelUsageRequestV1{Wire: modelUsageWire(model), Path: model.request.Path, Model: model.usageModel, RequestBytes: model.requestBytes}, modelBudget(s.currentMembers().metadata.Policy))
+		if err != nil {
+			return fmt.Errorf("model accounting")
+		}
+		if refusal != nil {
+			model.budgetRefusal = refusal
+			return fmt.Errorf("model budget")
+		}
+		turn.setContext(scope.ctx)
+		model.usage = turn
+	} else if usageWS == nil {
+		// Only the upgrade has an HTTP refusal boundary. Logical messages
+		// use this same socket's admission below, which lets every already
+		// admitted response finish before a budget close.
+		if refusal := s.usage.BudgetRefusalV1(modelUsageWire(model), modelBudget(s.currentMembers().metadata.Policy)); refusal != nil {
+			model.budgetRefusal = refusal
+			return fmt.Errorf("model budget")
+		}
+	}
 	if feature := engine.admitModelRequest(model, scope.permit, !reserved, evalReserve); feature != "" {
 		return fmt.Errorf("%s", feature)
 	}

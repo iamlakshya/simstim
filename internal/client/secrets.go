@@ -69,8 +69,20 @@ func FetchSecrets(ctx context.Context, s Settings, names []string, terminal bool
 	}
 	out := make(map[string]api.Secret, len(names))
 	for i, name := range names {
+		if err := revalidateRewindValueSourceV1(ctx); err != nil {
+			return nil, err
+		}
+		if err := revalidateResumeImageValueSourceV1(ctx); err != nil {
+			return nil, err
+		}
 		v, err := runSecret(ctx, name, commands[i], terminal)
 		if err != nil {
+			return nil, err
+		}
+		if err := revalidateResumeImageValueSourceV1(ctx); err != nil {
+			return nil, err
+		}
+		if err := revalidateRewindValueSourceV1(ctx); err != nil {
 			return nil, err
 		}
 		out[name] = v

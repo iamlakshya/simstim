@@ -72,7 +72,10 @@ func runNamed(ctx context.Context, be Backend, o Options, what, hint string) (ru
 	o.Motion = motionOn(s.UI.Motion, os.Getenv)
 	m := New(ctx, be, o)
 	m.handoff = true
-	defer func() { m.closeAfterProgramContext(ctx); runErr = errors.Join(runErr, m.grantOwners.pendingError()) }()
+	defer func() {
+		m.closeAfterProgramContext(ctx)
+		runErr = errors.Join(runErr, m.grantOwners.pendingError(), m.selectedOwners.pendingError())
+	}()
 	prog := timeFrames(m)
 	resumed := false
 	for {
@@ -88,7 +91,7 @@ func runNamed(ctx context.Context, be Backend, o Options, what, hint string) (ru
 		stuck := li.finish()
 		li.restoreTerminal()
 		m.pauseBg()
-		if cleanupErr := m.grantOwners.pendingError(); cleanupErr != nil {
+		if cleanupErr := errors.Join(m.grantOwners.pendingError(), m.selectedOwners.pendingError()); cleanupErr != nil {
 			return cleanupErr
 		}
 		if err != nil && ctx.Err() != nil {
@@ -323,7 +326,7 @@ func (m *Model) attachTo(h *hostConn, id, name string) tea.Cmd {
 	x := &funcExec{run: func(in, out *os.File) error {
 		o.Settings, read = readSettings(be, o.Settings, read)
 		o.In, o.Out = in, out
-		res, aerr = be.Attach(ctx, o)
+		res, aerr = be.Attach(terminalAttachContextV1(ctx), o)
 		return nil
 	}}
 	return tea.Batch(func() tea.Msg { save(); return nil }, m.execWithInput(x, func(err error) tea.Msg {

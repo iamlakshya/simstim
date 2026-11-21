@@ -55,6 +55,7 @@ func TestEnvdRunKeepsInputErrorWhenCancellationRacesItsResult(t *testing.T) {
 		return out, err
 	}
 	out, err := e.Run(ctx, "printf output; printf source-reason >&2", &inputFailureAfterExit{read: read, ctx: ctx})
+	requireInputClassification(t, err, "input_read")
 	if !errors.Is(parent.Err(), context.Canceled) {
 		t.Fatal("the context was not cancelled during error selection")
 	}

@@ -21,14 +21,17 @@ const grantsFileName = "grants.json"
 // It stores only host names, host IDs, grant kinds, canonical names and
 // counts, never secret values, commands or credential URLs.
 type GrantRecord struct {
-	HostName  string       `json:"host_name"`
-	HostID    string       `json:"host_id,omitempty"`
-	Kind      OutboundKind `json:"kind"`
-	Name      string       `json:"name,omitempty"`
-	FirstAt   time.Time    `json:"first_at"`
-	LastAt    time.Time    `json:"last_at"`
-	Count     int          `json:"count"`
-	RemovedAt *time.Time   `json:"removed_at,omitempty"`
+	HostName string       `json:"host_name"`
+	HostID   string       `json:"host_id,omitempty"`
+	Kind     OutboundKind `json:"kind"`
+	Name     string       `json:"name,omitempty"`
+	// Exposure records host exposure at an actual provider-session send.
+	// It is history data only and never supplies permission or confirmation.
+	Exposure  string     `json:"exposure,omitempty"`
+	FirstAt   time.Time  `json:"first_at"`
+	LastAt    time.Time  `json:"last_at"`
+	Count     int        `json:"count"`
+	RemovedAt *time.Time `json:"removed_at,omitempty"`
 	unknown   map[string]json.RawMessage
 }
 
@@ -134,11 +137,11 @@ func decodeGrantsFile(raw []byte) (grantsFile, error) {
 	f.unknown = unknownLedgerFields(rootFields, "version", "grants")
 	for index := range f.Grants {
 		r := &f.Grants[index]
-		fields, err := api.JSONObjectFields(rows[index], "host_name", "host_id", "kind", "name", "first_at", "last_at", "count", "removed_at")
+		fields, err := api.JSONObjectFields(rows[index], "host_name", "host_id", "kind", "name", "exposure", "first_at", "last_at", "count", "removed_at")
 		if err != nil {
 			return grantsFile{}, badGrantStateError(grantsFileName)
 		}
-		r.unknown = unknownLedgerFields(fields, "host_name", "host_id", "kind", "name", "first_at", "last_at", "count", "removed_at")
+		r.unknown = unknownLedgerFields(fields, "host_name", "host_id", "kind", "name", "exposure", "first_at", "last_at", "count", "removed_at")
 		if !ValidHostName(r.HostName) {
 			return grantsFile{}, badGrantStateError(grantsFileName)
 		}
@@ -255,6 +258,7 @@ func RecordGrantContext(ctx context.Context, h Host, hostID string, o Outbound) 
 	if o.Kind == OutboundRepo && !canonicalLedgerRepo(canonName) {
 		return badRepoError("repository origin has no valid canonical identity")
 	}
+	exposure := sessionMachineGrantExposureV1(ctx, h, o.Kind)
 	return withStateFile(ctx, nil, grantsFileName, true, func(raw []byte, exists bool) ([]byte, error) {
 		f := grantsFile{Version: 1, Grants: []GrantRecord{}}
 		if exists {
@@ -268,11 +272,12 @@ func RecordGrantContext(ctx context.Context, h Host, hostID string, o Outbound) 
 		found := false
 		for i := range f.Grants {
 			r := &f.Grants[i]
-			if r.RemovedAt == nil && r.HostName == h.Name && r.HostID == hostID && r.Kind == o.Kind && r.Name == canonName {
+			if r.RemovedAt == nil && r.HostName == h.Name && r.HostID == hostID && r.Kind == o.Kind && r.Name == canonName && compatibleGrantExposureV1(r.Exposure, exposure) {
 				if r.Count < 0 || r.Count == int(^uint(0)>>1) {
 					return nil, grantCountError()
 				}
 				r.Count++
+				r.Exposure = mergeGrantExposureV1(r.Exposure, exposure)
 				if now.After(r.LastAt) {
 					r.LastAt = now
 				}
@@ -286,6 +291,7 @@ func RecordGrantContext(ctx context.Context, h Host, hostID string, o Outbound) 
 				HostID:   hostID,
 				Kind:     o.Kind,
 				Name:     canonName,
+				Exposure: exposure,
 				FirstAt:  now,
 				LastAt:   now,
 				Count:    1,
@@ -370,6 +376,7 @@ func GrantsForHostContext(ctx context.Context, h Host, hostID string) ([]GrantRe
 			return nil, grantCountError()
 		}
 		prev.Count += r.Count
+		prev.Exposure = mergeGrantExposureV1(prev.Exposure, r.Exposure)
 		if r.FirstAt.Before(prev.FirstAt) {
 			prev.FirstAt = r.FirstAt
 		}

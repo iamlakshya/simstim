@@ -64,6 +64,19 @@ func HostFacts(ctx context.Context) (api.HostFacts, error) {
 		facts.MemoryKnown = facts.MemTotal > 0 && facts.MemForSessions > 0
 		facts.DrainKnown = true
 		facts.Drain = control.Drain != "" || control.ShutdownCommitted != nil && control.ShutdownCommitted.BootID == facts.BootID
+		userDrain, drainErr := readUserDrainLockedV1(ctx, control, state)
+		if drainErr != nil {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			// A known purge/shutdown already proves the OR is on. Otherwise
+			// missing native user-setting evidence must not become healthy off.
+			if !facts.Drain {
+				facts.DrainKnown = false
+			}
+		} else {
+			facts.Drain = facts.Drain || userDrain.On
+		}
 		observed, accountingErr := observeMemoryRoomLockedV1(ctx, "", 0)
 		facts.At = observed.At
 		if ctx.Err() != nil {
@@ -95,9 +108,12 @@ func HostFacts(ctx context.Context) (api.HostFacts, error) {
 	facts.OnBattery, facts.OnBatteryKnown = hostFactsBatteryV1()
 	facts.RuntimeDigests, facts.RuntimeDigestsKnown = hostFactsRuntimeDigestsV1(ctx, owner)
 	facts.ImageDigests, facts.ImageDigestsKnown = hostFactsImageDigestsV1(ctx, owner)
+	appendHostHealthV1(ctx, owner, &facts)
+	appendSlotCapacityFactsV1(ctx, &facts)
 	if err := errors.Join(ctx.Err(), owner.checkIdentity()); err != nil {
 		return facts, err
 	}
+	trimHostMemoryObservationFrameV1(&facts)
 	return facts, nil
 }
 
@@ -170,8 +186,12 @@ func applyHostMemoryFactsV1(facts *api.HostFacts, observed memoryRoomFactsV1, ac
 	facts.AccountingKnown = accountingErr == nil && observed.Known && facts.MemoryKnown && observed.BootID == facts.BootID && !observed.At.IsZero() && observed.Budget == facts.MemForSessions && observed.Reserved >= 0 && observed.Room == observed.Budget-observed.Reserved && observed.Sandboxes >= 0
 	if facts.AccountingKnown {
 		facts.MemReserved, facts.Room, facts.Sandboxes = observed.Reserved, observed.Room, observed.Sandboxes
+		if api.ValidateMemoryObservationV1(observed.Observation, facts) == nil {
+			facts.MemoryObservation = api.CloneMemoryObservationV1(observed.Observation)
+		}
 		return
 	}
+	facts.MemoryObservation = nil
 	facts.MemReserved, facts.Room, facts.Sandboxes = 0, 0, 0
 	facts.Health = append(facts.Health, api.Health{ID: "memory_accounting", Severity: "blocks_new", Levels: []string{"process", "gvisor", "microvm"}, Message: "Current native memory accounting is unavailable.", Hint: "Run host doctor and inspect the current canonical unit reservations before selecting this host."})
 }

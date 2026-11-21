@@ -31,6 +31,11 @@ const (
 // whole of the agent's environment: the trusted side made it from a fixed
 // base, never from the host's login environment (spec 4.2).
 type CtlStartArgs struct {
+	// ForkOf requests the one initial namespace rename before any agent starts.
+	ForkOf string `json:"fork_of,omitempty"`
+	// SSHAgent enables only the guest endpoint of the original named-key set.
+	// Private keys stay in the supervisor and never appear on this stream.
+	SSHAgent bool `json:"ssh_agent,omitempty"`
 	// PackageManagers is one immutable cold-start guest settings plan.
 	PackageManagers *PackageManagersV1 `json:"package_managers,omitempty"`
 	// Decoys is private ephemeral cold-start data, never a saved row or label.

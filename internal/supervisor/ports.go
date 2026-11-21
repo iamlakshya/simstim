@@ -23,6 +23,7 @@ import (
 const maxForwardedPorts = 32
 
 type portForward struct {
+	openMu sync.Mutex // actual per-grant physical open lifetime; revokers join after portMu unlock
 	port   int
 	until  time.Time
 	ctx    context.Context
@@ -174,6 +175,8 @@ func (s *Supervisor) reconcilePorts() error {
 	}
 	s.portMu.Unlock()
 	for _, current := range ended {
+		current.openMu.Lock()
+		current.openMu.Unlock()
 		<-current.done
 	}
 	return failure
@@ -237,23 +240,30 @@ func (s *Supervisor) acceptPortForward(owner *portForward) {
 		allowed, _, grantErr := host.PortPolicyGrant(s.m.Policy, owner.port, time.Now())
 		s.mu.Unlock()
 		valid := !s.portsClosed && s.portListeners[owner.port] == owner && owner.ctx.Err() == nil && allowed && grantErr == nil
+		if valid {
+			select {
+			case owner.limit <- struct{}{}:
+				owner.wg.Add(1)
+			default:
+				valid = false
+			}
+		}
 		s.portMu.Unlock()
-		if !valid || !host.FullPeer(connection, s.id, s.peerCheck) {
+		if !valid {
 			_ = connection.Close()
 			continue
 		}
-		select {
-		case owner.limit <- struct{}{}:
-		default:
+		if !host.FullPeer(connection, s.id, s.peerCheck) {
+			owner.wg.Done()
+			<-owner.limit
 			_ = connection.Close()
 			continue
 		}
-		owner.wg.Add(1)
 		go func() {
 			defer owner.wg.Done()
 			defer func() { <-owner.limit }()
 			defer connection.Close()
-			stream, err := s.link.Open(owner.ctx, link.KindPort, proto.PortHeaderV1{Version: 1, Port: owner.port})
+			stream, err := s.link.OpenGuarded(owner.ctx, link.KindPort, proto.PortHeaderV1{Version: 1, Port: owner.port}, func(ctx context.Context) (func(), error) { return s.portGrantTurnV1(ctx, owner) })
 			if err != nil {
 				return
 			}
@@ -276,6 +286,8 @@ func (s *Supervisor) closePortListeners(terminal bool) {
 	}
 	s.portMu.Unlock()
 	for _, listener := range listeners {
+		listener.openMu.Lock()
+		listener.openMu.Unlock()
 		<-listener.done
 	}
 }

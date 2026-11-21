@@ -32,6 +32,7 @@ func (d *policySheet) begin(m *Model) (context.Context, uint64) {
 func (d *policySheet) stop() {
 	d.seq++
 	d.closed, d.loading = true, false
+	d.holds.dirty, d.holds.selected = true, ""
 	d.finishOp()
 }
 
@@ -39,6 +40,7 @@ func (d *policySheet) interrupted(err error) {
 	d.seq++
 	d.finishOp()
 	d.loading, d.err = false, err
+	d.holds.dirty = true
 }
 
 func policyInterrupted() error {

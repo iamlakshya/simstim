@@ -3,7 +3,7 @@ package host
 import (
 	"github.com/iamlakshya/simstim/internal/api"
 	"github.com/iamlakshya/simstim/internal/files"
- "github.com/iamlakshya/simstim/internal/proto"
+	"github.com/iamlakshya/simstim/internal/proto"
 	"github.com/iamlakshya/simstim/internal/sandbox"
 )
 
@@ -26,14 +26,20 @@ func SandboxStatePlan(m *Manifest) (files.StatePlan, error) {
 	if m.Policy != nil {
 		values = &m.Policy.Sandbox
 	}
-	plan,err:=sandbox.CacheStatePlan(kept,values)
-	if err!=nil{return files.StatePlan{},err}
-	paths,err:=proto.DecoyPaths();if err!=nil{return files.StatePlan{},err}
-	packages, err := proto.PackageManagerPaths(); if err != nil {
+	plan, err := sandbox.CacheStatePlan(kept, values)
+	if err != nil {
+		return files.StatePlan{}, err
+	}
+	paths, err := proto.DecoyPaths()
+	if err != nil {
+		return files.StatePlan{}, err
+	}
+	packages, err := proto.PackageManagerPaths()
+	if err != nil {
 		return files.StatePlan{}, err
 	}
 	paths = append(paths, packages...)
-	return files.ExcludeGeneratedHomeState(plan,paths)
+	return files.ExcludeGeneratedHomeState(plan, paths)
 }
 
 // SandboxShellCommand applies a configured shell without changing the user's

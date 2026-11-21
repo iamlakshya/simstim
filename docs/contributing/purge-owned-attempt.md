@@ -1,0 +1,27 @@
+# The original purge process
+
+The original outside helper creates a fixed executable copy and starts it through its held code descriptor. It retains the actual command, atomic child pidfd, native endpoint and factory objects. The creator checks the child's own code and namespace hello before lending its original code directory and locked file description. An incomplete send keeps the same execution owner alive.
+
+The raw child protects its process before reading a request. It checks its actual mapped image and original native parent. The parent's code and namespace descriptors are public observations. They do not prove its current memory image or grant a session operation. The closed boundary also checks current operator credentials and native cgroup placement. Unknown placement and a cgroup view containing only roots are refused. The ordinary caller and native helper checks retain their existing rules.
+
+The request carries only a host ID, removal nonce and force choice. The child opens and checks its own existing control, host state and placement sentinel. It creates no replacement host identity or installation. It installs this independently derived domain and constructs one original transaction before capturing session operations or native subjects. A fresh child cannot adopt destructive work from a saved journal.
+
+Begin, continue, abort and close run serially against that same transaction. Every initial and final work-loss check runs before the first stop. Before stop, a failed or cancelled request restores the same subjects and joins their readers before withdrawing its own drain. After any irreversible dispatch, a lost client does not release the original objects. The process keeps them for continuation and cleanup.
+
+One physical reader owns frame boundaries and ancillary descriptors. A separate native observer watches the original connector pidfd and socket half-close without reading protocol bytes. It cancels only the current request. The transaction has a separate lifetime. Later connections must pass the closed operator checks and name the exact original request. They cannot replace its force choice, operations, roots or native subjects.
+
+Terminal cleanup retains the original manifest, locks and directory across each unlink. Missing names do not prove completion. The same descriptors must show native link counts of zero. Final marker creation is retained at its actual exclusive creation call, including a partial write. Retry truncates only that same unsealed creation. A sealed marker is checked against its original bytes and native object.
+
+Worktree deletion also requires the original [native filesystem generation](worktree-native-birth.md). An inode receipt alone cannot authorise deletion after that inode has been reused. The transaction retains the same original worktree root before stop and through every cleanup retry. Old receipts and unsupported filesystems preserve the worktree, including with force.
+
+The final close vector is constructed only after every original terminal unlink and the genuine final marker pass. It records the actual original descriptors before closing any of them. Partial close retries check those same closed objects. They do not reload a removed session or require an already released source to prove itself again. Temporary code cleanup then removes only its factory's original files, socket and empty directory. Replacements and unrelated entries remain preserved.
+
+A close error can arrive after a read-only descriptor has physically closed. Repeated close then checks the same descriptor object for the native closed state. This applies only after that owner's own physical unlink and sync checks have completed. It does not turn a missing name, a saved phase or an arbitrary closed descriptor into cleanup permission.
+
+The original outside invocation keeps its actual command, atomic child pidfd, code factory and native connection. A failed call returns this same owner. It can reconnect to its own original creation. Its final completion receipt is constructed before closing the original native handles, after the actual command wait and positive successful kernel exit. Read-only close errors retain that receipt and those exact descriptor objects for retry.
+
+The raw data relay can connect after installed paths disappear. It pins its own kernel mapping and a readable descriptor for that same code. Both sides compare direct public code bytes and native metadata, and keep actual native credentials, cgroup, namespace and current-frame checks. The relay receives no private descriptors. It cannot begin a replacement transaction. The original live vector and its own domain remain the only mutation authority. See [decision 0050](decisions/0050-closed-purge-data-relay.md).
+
+Terminal close finishes physical transaction, code and domain cleanup before sending the final response. The owner briefly remains live for one acknowledgement on the same connection. This permits the relay to check the final sender while its native process is live. The acknowledgement grants no cleanup or release. An expired vector is reported as unknown custody; no saved report can recreate it.
+
+The hidden raw entry is separate from public purge activation. Managed and walled preparation, a managed attempt lifetime and the full native adversarial tests must be joined before the public path uses this transaction. Setsid alone does not promise survival of an SSH or login cgroup. Source parser and compiler checks do not establish those native guarantees.

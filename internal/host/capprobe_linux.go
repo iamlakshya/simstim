@@ -17,6 +17,7 @@ import (
 
 	"github.com/iamlakshya/simstim/internal/api"
 	"github.com/iamlakshya/simstim/internal/brand"
+	"github.com/iamlakshya/simstim/internal/nitrodev"
 )
 
 func readPlatformCapabilities(ctx context.Context, s capSource, p *api.CapProbe) {
@@ -71,8 +72,45 @@ func probeKVM(s capSource, manager string) api.KVM {
 	if uid, ok := capabilityUID(s.uid); ok {
 		k.ACLUser = probeACLUser(probeXattr(path), uid)
 	}
-	k.Usable = probeDeviceOpen(path, true)
+	k.Usable, k.AccessRestricted = probeKVMDeviceOpenV1(path)
 	return k
+}
+
+func probeKVMDeviceOpenV1(path string) (usable, accessRestricted bool) {
+	anchor, err := unix.Open(path, unix.O_PATH|unix.O_CLOEXEC|unix.O_NOFOLLOW, 0)
+	if err != nil {
+		return false, false
+	}
+	defer func() {
+		if unix.Close(anchor) != nil {
+			usable, accessRestricted = false, false
+		}
+	}()
+	var original unix.Stat_t
+	if unix.Fstat(anchor, &original) != nil || !isKVMDeviceV1(original) {
+		return false, false
+	}
+	// Reopen only the kernel alias of THIS retained device, so a path
+	// replacement cannot donate its identity to another failed open.
+	fd, err := unix.Open(fmt.Sprintf("/proc/self/fd/%d", anchor), unix.O_RDWR|unix.O_CLOEXEC, 0)
+	if err != nil {
+		return false, errors.Is(err, unix.EACCES) || errors.Is(err, unix.EPERM)
+	}
+	defer func() {
+		if unix.Close(fd) != nil {
+			usable, accessRestricted = false, false
+		}
+	}()
+	var stat unix.Stat_t
+	if unix.Fstat(fd, &stat) != nil || !isKVMDeviceV1(stat) || stat.Dev != original.Dev || stat.Ino != original.Ino || stat.Rdev != original.Rdev {
+		return false, false
+	}
+	result, _, errno := unix.Syscall(unix.SYS_IOCTL, uintptr(fd), 0xae00, 0)
+	return errno == 0 && result == 12, false
+}
+
+func isKVMDeviceV1(stat unix.Stat_t) bool {
+	return stat.Mode&unix.S_IFMT == unix.S_IFCHR && unix.Major(uint64(stat.Rdev)) == 10 && unix.Minor(uint64(stat.Rdev)) == 232
 }
 
 func probeXattr(path string) []byte {
@@ -89,35 +127,55 @@ func probeXattr(path string) []byte {
 }
 
 func probeDeviceOpen(path string, kvm bool) bool {
+	if kvm {
+		usable, _ := probeKVMDeviceOpenV1(path)
+		return usable
+	}
 	fd, err := unix.Open(path, unix.O_RDWR|unix.O_CLOEXEC, 0)
 	if err != nil {
 		return false
 	}
 	defer unix.Close(fd)
-	if !kvm {
-		return true
-	}
-	result, _, errno := unix.Syscall(unix.SYS_IOCTL, uintptr(fd), 0xae00, 0)
-	return errno == 0 && result == 12
+	return true
 }
 
 func probeNitro(s capSource) *api.Nitro {
-	path := s.path("/dev/nitro_enclaves")
-	if _, err := os.Stat(path); err != nil {
+	path := s.path(nitrodev.Device)
+	stat, err := os.Lstat(path)
+	if err != nil || stat.Mode()&os.ModeCharDevice == 0 {
 		return nil
 	}
-	n := &api.Nitro{Present: true, Usable: probeDeviceOpen(path, false), Pools: map[string]int64{}}
+	n := &api.Nitro{Present: true, Mode: stat.Mode().String(), Pools: map[string]int64{}}
+	var native unix.Stat_t
+	if unix.Lstat(path, &native) == nil {
+		n.Owner = int(native.Uid)
+	}
+	file, openErr := nitrodev.OpenAt(path, s.path(nitrodev.Sysfs))
+	n.Usable = openErr == nil
+	n.AccessRestricted = errors.Is(openErr, unix.EACCES) || errors.Is(openErr, unix.EPERM)
+	if file != nil {
+		if file.Close() != nil {
+			n.Usable = false
+		}
+	}
 	if uid, ok := capabilityUID(s.uid); ok {
 		n.ACLUser = probeACLUser(probeXattr(path), uid)
 	}
-	base := "/sys/class/misc/nitro_enclaves"
-	for key, file := range map[string]string{"cpu_pool": "ne_cpus", "mem_pool": "mem_pool/size", "pcie_slots": "pcie_slots"} {
-		value, err := strconv.ParseInt(strings.TrimSpace(string(s.read(filepath.Join(base, file)))), 10, 64)
+	for _, key := range []string{"cpu_pool/total", "cpu_pool/free", "cpu_pool/in_use", "mem_pool/total", "mem_pool/free", "mem_pool/in_use", "pcie_slots", "pcie_slots_total", "pcie_slots_in_use"} {
+		value, err := strconv.ParseInt(strings.TrimSpace(string(s.read(filepath.Join(nitrodev.Sysfs, key)))), 10, 64)
 		if err == nil && value >= 0 {
-			n.Pools[key] = value
+			n.Pools[strings.ReplaceAll(key, "/", "_")] = value
 		}
 	}
-	n.Pools["vcpus"] = int64(len(probeCPUList(s.read("/sys/devices/system/cpu/online"))))
+	if count, err := nitrodev.CPUCount(string(s.read("/sys/devices/system/cpu/present"))); err == nil {
+		n.Pools["vcpus"] = count
+	}
+	n.Pools["vcpu_budget"] = 5 * n.Pools["vcpus"]
+	rulePath := s.path(filepath.Join("/etc/udev/rules.d", "50-"+brand.Name+"-nitro.rules"))
+	if trustedRootFile(rulePath) {
+		rule := `ACTION=="add|change", SUBSYSTEM=="misc", KERNEL=="nitro_enclaves", RUN+="/usr/bin/setfacl -m u:` + s.username + `:rw /dev/nitro_enclaves"`
+		n.UdevUser = slices.Contains(strings.Split(string(s.read(filepath.Join("/etc/udev/rules.d", "50-"+brand.Name+"-nitro.rules"))), "\n"), rule)
+	}
 	return n
 }
 

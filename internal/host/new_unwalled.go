@@ -13,6 +13,15 @@ import (
 )
 
 func newUnwalled(ctx context.Context, a NewArgs) (_ *SessionInfo, err error) {
+	return newUnwalledModeV1(ctx, a, false)
+}
+
+// The legacy mode is reached only through the existing explicit test-driver
+// seam. Production None always selects its real supervisor/native path.
+func newUnwalledModeV1(ctx context.Context, a NewArgs, legacyFixture bool) (_ *SessionInfo, err error) {
+	if a.NamedSSHKeys != nil {
+		return nil, UserError("ssh_key_kind", "named SSH keys need a sandbox agent", "Choose a walled session for named SSH keys. The laptop agent has a separate own-host option.")
+	}
 	if err := checkName(a.Name); err != nil {
 		return nil, err
 	}
@@ -31,6 +40,13 @@ func newUnwalled(ctx context.Context, a NewArgs) (_ *SessionInfo, err error) {
 	secrets, err := checkSecrets(a.Secrets)
 	if err != nil {
 		return nil, err
+	}
+	intent, _, err := PrepareSecretDelivery(a.SecretDelivery, a.Secrets, false, nil)
+	if err != nil {
+		return nil, err
+	}
+	if intent != nil && len(intent.TrustedUses) != 0 {
+		return nil, UserError("not_walled", "trusted and bound secret roles cannot enter an unwalled session", "Choose the original admitted sandbox wall for those secret roles.")
 	}
 	login, err := LoginEnv(15 * time.Second)
 	if err != nil {
@@ -103,6 +119,10 @@ func newUnwalled(ctx context.Context, a NewArgs) (_ *SessionInfo, err error) {
 		Run:     Runtime{Socket: paths.Socket(id), BootID: BootID()},
 		Status:  Status{State: StateStarting, Since: now},
 		Restart: Restart{Policy: "resume", MaxAttempts: 3},
+	}
+	if !legacyFixture {
+		m.Wall = &WallRecord{Level: "none", Driver: "none", Version: version.Version, Reason: "runs as the host account without a wall", At: now, Floor: a.Floor, DowngradedFrom: a.DowngradedFrom}
+		m.SecretState = initialSecretState(intent)
 	}
 	if err := applyPlacementAuditNewV1(m, a.Placement); err != nil {
 		return nil, err

@@ -38,6 +38,11 @@ func writeWrapperContext(ctx context.Context, h Host) (string, error) {
 		// Its path would leave the folder, or name another host's file.
 		return "", badHostNameError(h.Name)
 	}
+	if closed, err := joinedProjectionWrapperAllowedV1(ctx, h); err != nil {
+		return "", err
+	} else if closed {
+		return writeJoinedProjectionWrapperV1(ctx, h)
+	}
 	hostConfig := ""
 	if h.SSHConfig != "" {
 		hostConfig = expand(h.SSHConfig)

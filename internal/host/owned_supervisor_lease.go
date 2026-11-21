@@ -18,15 +18,17 @@ import (
 // OwnedSupervisorLease retains the current supervisor's original holder lock.
 // It proves native ownership only. An outside startup loan supplies boot intent.
 type OwnedSupervisorLease struct {
-	native     *sessionFileLease
-	lifetime   context.Context
-	generation string
-	cancel     context.CancelFunc
-	mu         sync.Mutex
-	startup    *originalBootV1
-	pending    *pendingStartupV1
-	once       sync.Once
-	closeErr   error
+	managerStop    managerStopSourceV1
+	native         *sessionFileLease
+	lifetime       context.Context
+	generation     string
+	cancel         context.CancelFunc
+	mu             sync.Mutex
+	startup        *originalBootV1
+	pending        *pendingStartupV1
+	once           sync.Once
+	closeErr       error
+	prepareCleanup *SandboxPrepareParentCleanupV1
 }
 
 // AcquireOwnedSupervisorLease claims the existing holder lock before any
@@ -139,4 +141,16 @@ func (owner *OwnedSupervisorLease) Generation() string {
 		return ""
 	}
 	return owner.generation
+}
+
+// IsSandboxPrepareBootV1 reports whether this live supervisor accepted the
+// closed sandbox-prepare startup loan.
+func (owner *OwnedSupervisorLease) IsSandboxPrepareBootV1() bool {
+	if owner == nil {
+		return false
+	}
+	owner.mu.Lock()
+	defer owner.mu.Unlock()
+	return owner.startup != nil && owner.startup.owner == owner && owner.startup.operation != nil &&
+		owner.startup.operation.originalBoot == owner.startup && owner.startup.operation.IsSandboxPrepareBootV1()
 }

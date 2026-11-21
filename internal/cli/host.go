@@ -12,7 +12,6 @@ import (
 	"github.com/iamlakshya/simstim/internal/api"
 	"github.com/iamlakshya/simstim/internal/brand"
 	"github.com/iamlakshya/simstim/internal/client"
-	"github.com/iamlakshya/simstim/internal/client/helpers"
 	"github.com/iamlakshya/simstim/internal/onboard"
 )
 
@@ -29,21 +28,29 @@ func hostCmd() *cobra.Command {
 		hostProviderCmd("stop", "Stop the host through its provider or provider script",
 			"Stops the host through its provider or provider script. A VM's sessions stop too, and a sandbox's are paused."),
 		hostProviderCmd("status", "Ask the provider or provider script whether the host is running", ""), hostPrepareCmd())
+	cmd.AddCommand(hostInviteCmd(), hostJoinCmd(), hostLeaveCmd(), hostJoinApplyCmd(), hostJoinProbeCmd(), hostJoinLeaveCmd())
+	cmd.AddCommand(localMachineExtraCommandsV1()...)
 	return cmd
 }
 
 func hostAddCmd() *cobra.Command {
-	var sshConfig, providerScript, hostKey, tierStr string
+	var sshConfig, providerScript, tierStr, accept, address string
+	var hostKeys []string
+	var acceptFlags joinedAcceptFlagsV1
+	var rawRootMode, imagesMode string
 	var labels []string
-	var yes, wake bool
+	var yes, wake, noSandbox, delegateIO, separateAccounts bool
 	cmd := &cobra.Command{
 		Use:   "add <name> [<ssh-target>]",
 		Short: "Connect a host: check it, install the helper, prepare it",
-		Long: "Connect a host. The ssh target is a Host from your SSH config, or user@host.\n" +
-			"It defaults to the name. --ssh-config adds an extra SSH config file, for example a repo's own.",
-		Example: "  " + brand.Name + " host add my-vps" + "\n" +
-			"  " + brand.Name + " host add my-vps dev@203.0.113.10" + "\n" +
-			"  " + brand.Name + " host add my-vps --tier own --yes",
+		Long: "Connect a host, prepare its sandbox runtime and test its wall before saving\n" +
+			"its wall floor. The ssh target is a Host from your SSH config, or user@host;\n" +
+			"it defaults to the name. --no-sandbox skips sandbox preparation. --ssh-config\n" +
+			"adds an extra SSH config file, for example a repo's own.",
+		Example: "  " + brand.Name + " host add my-vps\n" +
+			"  " + brand.Name + " host add my-vps dev@203.0.113.10\n" +
+			"  " + brand.Name + " host add my-vps --tier own --yes\n" +
+			"  " + brand.Name + " host add my-vps --no-sandbox",
 		Args: cobra.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			h := client.Host{Name: args[0], SSH: args[0], SSHConfig: sshConfig}
@@ -70,16 +77,53 @@ func hostAddCmd() *cobra.Command {
 					return err
 				}
 			}
-			return addHostWithTier(cmd.Context(), prompts(cmd), h, yes, hostKey, tier, true)
+			if accept != "" {
+				if len(args) != 1 || providerScript != "" || len(labels) > 0 || wake {
+					return &client.UserError{Msg: "--accept uses only its original invite and checked reply", Hint: "Use host add <name> --accept - --host-key SHA256:… --tier <tier>.", Code: "bad_value", Kind: client.KindUsage}
+				}
+				options, err := parseInviteAcceptOptionsV1(cmd, yes)
+				if err != nil {
+					return err
+				}
+				options.sshConfig = sshConfig
+				return acceptJoinedHost(cmd, args[0], accept, address, hostKeys, tier, yes, options)
+			}
+			if address != "" || len(hostKeys) > 1 {
+				return &client.UserError{Msg: "multiple host keys and --address need --accept -", Hint: "Use one --host-key for ordinary host add.", Code: "bad_value", Kind: client.KindUsage}
+			}
+			hostKey := ""
+			if len(hostKeys) == 1 {
+				hostKey = hostKeys[0]
+			}
+			return addHostPrepared(cmd, prompts(cmd), h, hostAddOptions{
+				yes:              yes,
+				wantKey:          hostKey,
+				tier:             tier,
+				needTier:         true,
+				noSandbox:        noSandbox,
+				rawRootMode:      rawRootMode,
+				imagesMode:       imagesMode,
+				delegateIO:       delegateIO,
+				separateAccounts: separateAccounts,
+				wake:             wake,
+			})
 		},
 	}
 	cmd.Flags().StringVar(&sshConfig, "ssh-config", "", "an extra SSH config file to include")
 	addLabel(cmd, &labels, "labels as key=value, for example provider=gcp,region=eu")
 	addYes(cmd, &yes, "install the helper, pin its first host key, and offer no agents to install (needs --tier)")
-	cmd.Flags().StringVar(&hostKey, "host-key", "", "the SHA256 `fingerprint` of the host's key, as ssh-keygen -lf prints it on the host: the key to pin")
+	cmd.Flags().StringSliceVar(&hostKeys, "host-key", nil, "the SHA256 `fingerprint` of the host's key, as ssh-keygen -lf prints it on the host: the key to pin")
+	cmd.Flags().StringVar(&accept, "accept", "", "read the reply from standard input, with --accept -")
+	cmd.Flags().StringVar(&address, "address", "", "select an address from the reply")
 	cmd.Flags().StringVar(&tierStr, "tier", "", "who else has root on the host: own, throwaway or shared")
+	cmd.Flags().BoolVar(&noSandbox, "no-sandbox", false, "skip sandbox preparation and keep the host without a wall floor")
+	addImages(cmd, &imagesMode, "get runtime and image bytes from auto, host or laptop (default: [images] fetch)")
+	addRootStep(cmd, &rawRootMode, "handle optional root changes: run, print or skip (default depends on tier and sandbox history)")
+	cmd.Flags().BoolVar(&delegateIO, "delegate-io", false, "offer disk I/O controller delegation for this user")
+	cmd.Flags().BoolVar(&separateAccounts, "separate-accounts", false, "offer the signed launcher and separate sandbox accounts")
 	cmd.Flags().StringVar(&providerScript, "provider-script", "", "a script that starts and stops the host (see examples/providers)")
 	cmd.Flags().BoolVar(&wake, "wake", false, "start the host through its provider script when it does not answer")
+	addInviteAcceptFlagsV1(cmd, &acceptFlags)
 	return cmd
 }
 
@@ -156,14 +200,28 @@ func hostKeyOptions(h client.Host, want string, yes, terminal bool) *client.PinO
 // says. The new pin stays apart until the host is saved, so a host add that
 // fails leaves no pin.
 func connectHost(ctx context.Context, w io.Writer, save client.HostChange, chooseTier func() (client.Tier, error), consent func(q string) (bool, error), log *onboard.Log, pin *client.PinOptions) ([]api.AgentCheck, error) {
+	checks, _, err := connectHostCore(ctx, w, save, chooseTier, consent, log, pin, false)
+	return checks, err
+}
+
+func connectHostForPreparation(ctx context.Context, w io.Writer, save client.HostChange, chooseTier func() (client.Tier, error), consent func(q string) (bool, error), log *onboard.Log, pin *client.PinOptions) ([]api.AgentCheck, *client.HostPrepareTargetV1, error) {
+	return connectHostCore(ctx, w, save, chooseTier, consent, log, pin, true)
+}
+
+func connectHostCore(ctx context.Context, w io.Writer, save client.HostChange, chooseTier func() (client.Tier, error), consent func(q string) (bool, error), log *onboard.Log, pin *client.PinOptions, forPrepare bool) ([]api.AgentCheck, *client.HostPrepareTargetV1, error) {
 	ctx = client.WithTierQuestion(ctx, nil) // this flow owns its add question
 	h := *save.Now
 	save.Pin = true
 	ctx, abort, err := client.StagePinOwned(ctx, h.Name)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	defer abort()
+	observation, err := client.ObserveHostRegistrationContext(ctx, save)
+	if err != nil {
+		return nil, nil, err
+	}
+	ctx = client.WithHostStateObservation(ctx, observation)
 	step := func(format string, a ...any) { fmt.Fprintf(w, "  "+format+"\n", a...) }
 	fmt.Fprintf(w, "Connecting to %s (%s)…\n", h.Name, h.Target())
 	start := time.Now()
@@ -174,15 +232,15 @@ func connectHost(ctx context.Context, w io.Writer, save client.HostChange, choos
 	var pinned client.Pin
 	pin.Pinned = &pinned
 	pctx, cancel := context.WithTimeout(client.WithPin(ctx, pin), limit)
-	s, err := client.HostTransport(pctx, h, true)
+	s, baseline, err := client.PrepareHostRegistrationBaselineV1(pctx, h, true)
 	if err != nil {
 		cancel()
-		return nil, err
+		return nil, nil, err
 	}
 	p, err := client.Probe(pctx, s)
 	cancel()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	step("✓ connected in %s: %s/%s", time.Since(start).Round(time.Millisecond), p.OS, p.Arch)
 	if pinned.Source != "" {
@@ -191,18 +249,18 @@ func connectHost(ctx context.Context, w io.Writer, save client.HostChange, choos
 	if chooseTier != nil {
 		t, err := chooseTier()
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		save.Tier = t
 	}
 	if err := ensureHostHelper(ctx, w, h.Name, s, p, consent, log); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	dctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
 	conn, err := client.Dial(dctx, h, true)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	defer conn.Close()
 	if conn.HostIDChanged() {
@@ -211,9 +269,12 @@ func connectHost(ctx context.Context, w io.Writer, save client.HostChange, choos
 		save.Tier = client.TierShared
 	}
 	save.HostID = conn.HostID()
+	if err := conn.RecordHostBaseline(ctx, baseline); err != nil {
+		return nil, nil, err
+	}
 	res, err := conn.Setup(dctx)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	for _, s := range client.CleanChecks(res.Steps) {
 		mark := "✓"
@@ -227,47 +288,20 @@ func connectHost(ctx context.Context, w io.Writer, save client.HostChange, choos
 	}
 	d, err := conn.Doctor(dctx)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	step("✓ %s, %d CPUs, %.1f GiB, %.1f GiB of it for sessions", client.CleanLine(d.Distro), d.CPUs, float64(d.MemTotal)/(1<<30), float64(d.MemoryMax)/(1<<30))
 	checks, _ := conn.AgentChecks(dctx)
-	if err := saveAdded(ctx, save, pinned, log); err != nil {
-		return nil, err
+	var target *client.HostPrepareTargetV1
+	if forPrepare {
+		target, err = saveAddedForPreparation(ctx, save, pinned, log)
+	} else {
+		err = saveAdded(ctx, save, pinned, log)
 	}
-	return client.CleanAgentChecks(checks), nil
-}
-
-func ensureHostHelper(ctx context.Context, w io.Writer, hostName string, s client.Transport, p client.Platform, consent func(q string) (bool, error), log *onboard.Log) error {
-	if p.Installed {
-		fmt.Fprintf(w, "  ✓ %s %s is already installed\n", brand.HostBinary, client.HelperVersion())
-		return nil
-	}
-	bin, ok := helpers.For(p.OS, p.Arch)
-	if !ok {
-		return &client.UserError{Msg: fmt.Sprintf("no helper for %s/%s in this build", p.OS, p.Arch), Hint: "Use a Linux host on amd64 or arm64.", Code: "no_helper"}
-	}
-	fmt.Fprintf(w, "\n%s needs a small helper on the host to keep sessions alive.\n", brand.DisplayName)
-	fmt.Fprintf(w, "    What   %s %s, %.1f MB, SHA-256 checked\n", brand.HostBinary, client.HelperVersion(), float64(len(bin))/1e6)
-	fmt.Fprintf(w, "    Where  ~/.local/share/%s/bin/%s/\n", brand.Name, client.HelperVersion())
-	fmt.Fprintf(w, "    Also   keep sessions running after you log out, and install this\n")
-	fmt.Fprintf(w, "           terminal's terminfo\n")
-	fmt.Fprintf(w, "  Nothing listens on the network. To remove it later, delete ~/.local/share/%s on the host.\n\n", brand.Name)
-	ok, err := consent("Install it?")
 	if err != nil {
-		return err
+		return nil, nil, err
 	}
-	if !ok {
-		return &client.UserError{Msg: "cancelled; nothing was installed", Hint: brand.Name + " host add " + hostName, Code: "cancelled", Kind: client.KindCancelled}
-	}
-	ictx, cancel := context.WithTimeout(ctx, 5*time.Minute)
-	err = client.Install(ictx, s, p)
-	cancel()
-	if err != nil {
-		return err
-	}
-	fmt.Fprintf(w, "  ✓ installed %s %s\n", brand.HostBinary, client.HelperVersion())
-	log.Add("installed the helper on %s", hostName)
-	return nil
+	return client.CleanAgentChecks(checks), target, nil
 }
 
 // pinLine is the line of host add about h's pin.
@@ -287,12 +321,27 @@ func saveAdded(ctx context.Context, save client.HostChange, pinned client.Pin, l
 	if err := client.UpdateHosts(ctx, save); err != nil {
 		return err
 	}
-	if pinned.Source != "" && pinned.Source != client.PinKept {
-		log.Add("saved the host %s, with its pinned host key", h.Name)
-	} else {
-		log.Add("saved the host %s", h.Name)
-	}
+	recordSavedHostLog(h.Name, pinned, log)
 	return nil
+}
+
+func saveAddedForPreparation(ctx context.Context, save client.HostChange, pinned client.Pin, log *onboard.Log) (*client.HostPrepareTargetV1, error) {
+	h := *save.Now
+	beforeSetupSave(h)
+	target, err := client.UpdateHostsForPreparation(ctx, save)
+	if err != nil {
+		return nil, err
+	}
+	recordSavedHostLog(h.Name, pinned, log)
+	return target, nil
+}
+
+func recordSavedHostLog(name string, pinned client.Pin, log *onboard.Log) {
+	if pinned.Source != "" && pinned.Source != client.PinKept {
+		log.Add("saved the host %s, with its pinned host key", name)
+	} else {
+		log.Add("saved the host %s", name)
+	}
 }
 
 func hostLsCmd() *cobra.Command {
@@ -311,6 +360,10 @@ func hostLsCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			health := readHostsHealthV1(cmd.Context(), hosts)
+			if err := cmd.Context().Err(); err != nil {
+				return err
+			}
 			if asJSON {
 				// Each host has its keys in snake_case, and in Go form until
 				// the end of the old form.
@@ -318,6 +371,10 @@ func hostLsCmd() *cobra.Command {
 				objs := make([]map[string]any, len(hosts))
 				for i, h := range hosts {
 					objs[i] = hostObject(h, tiers.Of(h.Name))
+					if facts, ok := health[h.Name]; ok {
+						objs[i]["health"] = facts.Health
+						objs[i]["drain"] = facts.Drain
+					}
 				}
 				return printJSON(objs)
 			}
@@ -327,9 +384,17 @@ func hostLsCmd() *cobra.Command {
 			}
 			for _, h := range hosts {
 				extra := ""
+				if client.IsSessionMachineV1(h) {
+					extra = "  (machine)"
+				}
 				if h.SSHConfig != "" {
 					extra = "  (+ " + h.SSHConfig + ")"
 				}
+				facts, available := health[h.Name]
+				if text := hostHealthTextV1(facts, available); text != "" {
+					extra += "  (" + text + ")"
+				}
+				extra += hostLabelsSuffix(h)
 				fmt.Printf("%-16s %-10s %s%s\n", h.Name, tiers.Of(h.Name), h.Target(), extra)
 			}
 			return nil

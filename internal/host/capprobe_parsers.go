@@ -9,20 +9,7 @@ import (
 
 // probeOSRelease reads the display name without evaluating shell syntax.
 func probeOSRelease(b []byte) string {
-	values := make(map[string]string)
-	for _, line := range strings.Split(string(b), "\n") {
-		key, value, ok := strings.Cut(strings.TrimSpace(line), "=")
-		if !ok || strings.HasPrefix(key, "#") {
-			continue
-		}
-		value = strings.TrimSpace(value)
-		if len(value) >= 2 && value[0] == '\'' && value[len(value)-1] == '\'' {
-			value = value[1 : len(value)-1]
-		} else if len(value) >= 2 && value[0] == '"' && value[len(value)-1] == '"' {
-			value = strings.NewReplacer(`\"`, `"`, `\\`, `\`, `\$`, `$`, "\\`", "`").Replace(value[1 : len(value)-1])
-		}
-		values[key] = value
-	}
+	values := probeOSReleaseFieldsV1(b)
 	if values["PRETTY_NAME"] != "" {
 		return values["PRETTY_NAME"]
 	}

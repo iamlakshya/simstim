@@ -58,6 +58,7 @@ var hostSettings = []hostSetting{
 		"time of a minute or more, such as 30m or 2h, or never.", values: []string{"never"}, check: checkIdle, now: idleNow, save: func(h *client.Host, v string) { h.Machine.IdleStop = v }, apply: applyIdleSetting},
 	{key: "tier", about: "who else has root on the host: own, throwaway or shared. Lowering works at once.\n" +
 		"Raising connects to check the pinned host key, and asks for the host's typed name.", values: []string{"own", "throwaway", "shared"}, check: checkTier, current: tierNowContext, where: "in tiers.toml", apply: applyTierSetting},
+	hostLabelFamilySetting(),
 }
 
 func hostSetCmd() *cobra.Command {
@@ -225,7 +226,7 @@ func findSetting(key string) *hostSetting {
 			return &hostSettings[i]
 		}
 	}
-	return nil
+	return findHostLabelSetting(hostSettings, key)
 }
 
 // settingTwice is the error of a key given twice. Its Try: line is the

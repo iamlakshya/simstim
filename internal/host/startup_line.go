@@ -23,18 +23,26 @@ type startupCredentials struct {
 // frame, read failure or close also closes every materialised descriptor.
 // This transport supplies no startup or execution authority by itself.
 type StartupLineV1 struct {
-	conn      net.Conn
-	readMu    sync.Mutex
-	writeMu   sync.Mutex
-	mu        sync.Mutex
-	closed    bool
-	candidate *pendingStartupV1
-	reading   bool
-	bytes     int64
-	start     int64
-	files     []*os.File
-	cred      *startupCredentials
-	controlAt int64
+	prepareCursor       *sandboxPrepareFrameCursorV1
+	preparePoison       bool
+	nativePeer          *nativeStartupPeerV1
+	loanFiles           int // private closed-purpose role count; ordinary startup remains one
+	conn                net.Conn
+	readMu              sync.Mutex
+	writeMu             sync.Mutex
+	mu                  sync.Mutex
+	closed              bool
+	closeErr            error
+	candidate           *pendingStartupV1
+	reading             bool
+	bytes               int64
+	start               int64
+	files               []*os.File
+	cred                *startupCredentials
+	controlAt           int64
+	slotStartupPending  *slotReservedStartupPendingV2 // exact new-creation startup19
+	snapshotLoan        bool                          // armed only by the original warm Snapshot receiver
+	snapshotReservation bool                          // separate exact 18-role reserved Snapshot class
 }
 
 // NewStartupLineV1 must run before any buffered read of this connection.
@@ -45,7 +53,7 @@ func NewStartupLineV1(conn net.Conn) (*StartupLineV1, error) {
 	if err := enableStartupAncillary(conn); err != nil {
 		return nil, err
 	}
-	return &StartupLineV1{conn: conn}, nil
+	return &StartupLineV1{conn: conn, loanFiles: 1}, nil
 }
 
 // ReadFrame decodes one ordinary protocol frame with no read-ahead across its
@@ -54,18 +62,37 @@ func (line *StartupLineV1) ReadFrame() (proto.Frame, error) {
 	line.readMu.Lock()
 	defer line.readMu.Unlock()
 	line.mu.Lock()
-	if line.closed || len(line.files) != 0 {
+	resuming := line.prepareCursor != nil && line.prepareCursor.active
+	if line.closed || line.preparePoison || len(line.files) != 0 && !resuming {
 		err := line.closeAncillaryLocked()
 		line.mu.Unlock()
 		return proto.Frame{}, errors.Join(sessionLeaseError("startup has unclaimed native control data"), err)
 	}
-	line.start, line.reading = line.bytes, true
-	line.cred = nil
+	if !resuming {
+		line.start = line.bytes
+		line.cred = nil
+	}
+	line.reading = true
+	cursor := line.prepareCursor
+	if cursor != nil {
+		cursor.active = true
+	}
 	line.mu.Unlock()
-	frame, err := proto.ReadFrom(startupFrameInput{line})
+	var frame proto.Frame
+	var err error
+	if cursor != nil {
+		frame, err = cursor.read(startupFrameInput{line})
+	} else {
+		frame, err = proto.ReadFrom(startupFrameInput{line})
+	}
 	line.mu.Lock()
 	line.reading = false
-	if err != nil {
+	if cursor != nil && line.preparePoison && err == nil {
+		err = sessionLeaseError("the original preparation frame lost its native control integrity")
+		frame = proto.Frame{}
+	}
+	if err != nil && (cursor == nil || line.preparePoison || !sandboxPrepareReadDeadlineV1(err)) {
+		line.preparePoison = cursor != nil
 		err = errors.Join(err, line.closeAncillaryLocked())
 	}
 	line.mu.Unlock()
@@ -76,27 +103,64 @@ type startupFrameInput struct{ line *StartupLineV1 }
 
 func (input startupFrameInput) Read(data []byte) (int, error) {
 	line := input.line
-	n, files, cred, err := receiveStartupAncillary(line.conn, data)
+	line.mu.Lock()
+	snapshot := line.snapshotLoan
+	reservation := line.snapshotReservation
+	startupReservation := line.slotStartupPending != nil
+	line.mu.Unlock()
+	if (snapshot && reservation) || (startupReservation && (snapshot || reservation)) {
+		return 0, sessionLeaseError("the native reader has incompatible closed role classes")
+	}
+	var n int
+	var files []*os.File
+	var cred *startupCredentials
+	var err error
+	if startupReservation {
+		n, files, cred, err = receiveSlotReservedStartupAncillaryV2(line.conn, data)
+	} else if reservation {
+		n, files, cred, err = receiveSlotSnapshotReservationAncillaryV2(line.conn, data)
+	} else if snapshot {
+		n, files, cred, err = receiveSlotSnapshotAncillaryV1(line.conn, data)
+	} else {
+		n, files, cred, err = receiveStartupAncillaryBoundV1(line.conn, data, line.loanFiles)
+	}
 	line.mu.Lock()
 	defer line.mu.Unlock()
+	fatal := false
 	if line.closed || !line.reading {
+		fatal = true
 		err = errors.Join(err, sessionLeaseError("the startup reader ended"))
 	}
 	if cred != nil {
 		if line.cred != nil && *line.cred != *cred {
+			fatal = true
 			err = errors.Join(err, sessionLeaseError("a startup frame has more than one actual native sender"))
 		}
 		line.cred = cred
 	}
 	if len(files) != 0 {
-		if len(line.files) != 0 || line.bytes != line.start || len(files) != 1 || cred == nil {
+		bound := line.loanFiles
+		if snapshot {
+			bound = proto.NativeCheckpointRoleCountV1
+		}
+		if reservation {
+			bound = proto.NativeCheckpointReservationRoleCountV2
+		}
+		if startupReservation {
+			bound = proto.NativeSlotReservedStartupRoleCountV2
+		}
+		if len(line.files) != 0 || line.bytes != line.start || len(files) > bound || cred == nil {
+			fatal = true
 			err = errors.Join(err, sessionLeaseError("the startup descriptor is not attached to one frame boundary"))
 		}
 		line.controlAt = line.bytes
 		line.files = append(line.files, files...)
 	}
 	line.bytes += int64(n)
-	if err != nil {
+	if fatal && line.prepareCursor != nil {
+		line.preparePoison = true
+	}
+	if err != nil && (line.prepareCursor == nil || fatal || !sandboxPrepareReadDeadlineV1(err)) {
 		err = errors.Join(err, line.closeAncillaryLocked())
 	}
 	if n == 0 && err == nil {
@@ -123,7 +187,7 @@ func (line *StartupLineV1) takeLoanFile() (*os.File, startupCredentials, error) 
 		return nil, startupCredentials{}, errors.Join(sessionLeaseError("startup has no single current native loan"), line.closeAncillaryLocked())
 	}
 	file, cred := line.files[0], *line.cred
-	line.files, line.cred = nil, nil
+	line.files = nil // Current credentials still belong to this decoded frame.
 	return file, cred, nil
 }
 
@@ -163,14 +227,18 @@ func (line *StartupLineV1) Close() error {
 	line.mu.Lock()
 	defer line.mu.Unlock()
 	if line.closed {
-		return nil
+		return line.closeErr
 	}
 	line.closed = true
 	failure := errors.Join(line.conn.Close(), line.closeAncillaryLocked())
+	if line.nativePeer != nil {
+		failure = errors.Join(failure, line.nativePeer.Close())
+	}
 	if line.candidate != nil {
 		failure = errors.Join(failure, line.candidate.peer.Close())
 	}
-	return failure
+	line.closeErr = failure
+	return line.closeErr
 }
 
 // SetDeadline bounds startup control without replacing the physical reader.

@@ -63,13 +63,16 @@ func bootCommand(spec bootSpec) ([]string, MemoryBudget, error) {
 	}
 	args := []string{p.VMM, "--api-socket", "path=" + p.API, "--kernel", p.Kernel, "--cmdline", kernelCommandLine(tools, spec.Image), "--cpus", "boot=" + strconv.Itoa(spec.CPUs), "--memory", fmt.Sprintf("size=%dM", budget.Guest/mebibyte), "--balloon", "size=0,free_page_reporting=on", "--disk"}
 	for _, disk := range []struct{ path, serial string }{{p.Tools, "tools"}, {p.Image, "image"}, {p.Agents, "agents"}} {
-		args = append(args, "path="+disk.path+",readonly=on,direct=on,image_type=raw,backing_files=off,serial="+disk.serial)
+		args = append(args, "path="+disk.path+",readonly=on,direct=on,image_type=raw,backing_files=off,_disable_io_uring=on,_disable_aio=on,serial="+disk.serial)
 	}
 	direct := "on"
 	if !spec.SessionDirect {
 		direct = "off"
 	}
-	args = append(args, "path="+p.Session+",readonly=off,direct="+direct+",image_type=raw,backing_files=off,sparse=on,serial=session", "--vsock", "cid=3,socket="+p.Vsock, "--serial", "off", "--console", "off", "--seccomp", "true", "--landlock")
+	// The pinned raw backend otherwise falls through from denied io_uring
+	// to legacy Linux AIO. Select its supported synchronous implementation so
+	// a physical all-writer pause plus disk sync can drain a current copy.
+	args = append(args, "path="+p.Session+",readonly=off,direct="+direct+",image_type=raw,backing_files=off,sparse=on,_disable_io_uring=on,_disable_aio=on,serial=session", "--vsock", "cid=3,socket="+p.Vsock, "--serial", "off", "--console", "off", "--seccomp", "true", "--landlock")
 	return args, budget, nil
 }
 

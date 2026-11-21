@@ -28,10 +28,32 @@ type GrantRequest struct {
 	forge               *localForgePlan
 	root                *rootStepIntent
 	rootExecution       *rootStepExecution
+	rootAccounts        *rootAccountPreparation
 	metadataMode        *agentModeResources
 	newSecrets          *newSecretPlan
+	sdkStart            *sdkNewStartPlanV1
+	hostSelection       *HostSelectionV1
+	selectedHost        string
+	hostAttempt         *HostAttemptV1
+	autoGather          *autoPlacementGatheringV1
+	namedNew            *newNamedSSHKeyPlan
+	namedResume         *resumeNamedSSHKeyPlan
+	rewind              *RewindPreparation
+	namedPolicy         *namedSSHKeyPolicyPlanV1
+	namedPolicySource   *namedSSHPolicySourceV1
+	trustedJudge        *trustedJudgePlanV1
+	armSecrets          *armSecretsPlanV1
 	freshChild          *freshChildPlan
 	imageSave           *imageSaveOperation
+	imageFetch          *imageFetchIntentV1
+	policyReplace       *policyReplaceOperation
+	networkHold         *networkHoldOperation
+	purge               *purgeOperationV1
+	purgeUndo           *purgeRootUndoExecutionV1
+	runtimeUpgrade      *runtimeUpgradeIntentV1
+	sandboxPrepare      *sandboxPreparePlanV1
+	imagePolicy         *imagePolicyUseV1
+	resumeImage         *resumeImagePolicyV1
 	newInputs           *newInputPreparation
 	preparationSettings *settingsOperation
 	preparationClosed   bool
@@ -109,6 +131,9 @@ func (e *scopedGrantConfirmation) Unwrap() error { return e.ConfirmError }
 // terminal. The answer names the exact host identity, tier and grant in
 // err. It is not a persistent approval or an unattended override.
 func ConfirmGrant(ctx context.Context, err error) (context.Context, error) {
+	if stopped := ctx.Err(); stopped != nil {
+		return ctx, stopped
+	}
 	var q *scopedGrantConfirmation
 	if !errors.As(err, &q) || q.request == nil {
 		return ctx, &UserError{Msg: "the grant question no longer belongs to this request",
@@ -131,6 +156,10 @@ func ConfirmGrant(ctx context.Context, err error) (context.Context, error) {
 		q.request.mu.Unlock()
 		return ctx, grantOperationError()
 	}
+	if stopped := ctx.Err(); stopped != nil {
+		q.request.mu.Unlock()
+		return ctx, stopped
+	}
 	if q.request.confirmed == nil {
 		q.request.confirmed = map[grantScope]bool{}
 	}
@@ -147,6 +176,12 @@ func allowRequestGrant(ctx context.Context, h Host, hostID string, tier Tier, o 
 	if err := requirePurposeOutbound(ctx, r, o); err != nil {
 		return err
 	}
+	if requestGrantPurpose(r) == grantRemote && IsSessionMachineV1(h) && (o.Kind == OutboundSecret || o.Kind == OutboundSSHKey) {
+		if err := checkSessionMachineSecretTierV1(h, settings, o.Name); err != nil {
+			return err
+		}
+		tier = min(tier, TierShared)
+	}
 	key := grantScope{host: h.Name, hostID: hostID, tier: tier, kind: o.Kind, name: o.Name, purpose: requestGrantPurpose(r), operation: requestGrantOperation(r)}
 	r.mu.Lock()
 	if err := r.lifetimeErrorLocked(); err != nil {
@@ -155,6 +190,9 @@ func allowRequestGrant(ctx context.Context, h Host, hostID string, tier Tier, o 
 	}
 	o.Confirmed = r.confirmed[key]
 	r.mu.Unlock()
+	if o.Kind == OutboundSilentUpgrade && sessionMachineInitialRuntimeV1(ctx, h, hostID, r) {
+		o.Confirmed = true
+	}
 	err := Allow(h, tier, o, settings)
 	var q *ConfirmError
 	if errors.As(err, &q) {

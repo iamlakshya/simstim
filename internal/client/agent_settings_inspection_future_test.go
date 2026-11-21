@@ -4,6 +4,7 @@ package client
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"testing"
 )
@@ -17,7 +18,11 @@ func TestAgentCombinedInspectionKeepsFutureReceiptsOpaqueWithoutGrantingThem(t *
 			}
 			t.Run(name, func(t *testing.T) {
 				row := projectionRow()
-				row[field] = json.RawMessage(`{"version":2,"future":{"duplicate":1,"duplicate":2}}`)
+				version := 2
+				if field == "delivery_receipt" {
+					version = 3
+				}
+				row[field] = json.RawMessage(fmt.Sprintf(`{"version":%d,"future":{"duplicate":1,"duplicate":2}}`, version))
 				var other map[string]any
 				if !selected {
 					row["session_id"], row["ssh_agent"] = "other234", false

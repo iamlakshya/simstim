@@ -18,6 +18,7 @@ type activeFlow struct {
 	secretNames   []string
 	done          <-chan struct{}
 	carrier       *secretCarrier
+	judgeSource   *memberState // private exact source snapshot, never permission
 }
 
 type flowTracker struct {
@@ -27,6 +28,7 @@ type flowTracker struct {
 	tunnels  map[*httpTunnel]struct{}
 	carriers map[*secretCarrier]struct{}
 	closing  bool
+	export   *sourceExport // one existing management writer, outside user slots
 	sem      chan struct{}
 }
 
@@ -91,12 +93,19 @@ func (ft *flowTracker) snapshot() []activeFlow {
 	return all
 }
 
-func (ft *flowTracker) revalidate(eng *Engine, dialer *Dialer) {
+func (ft *flowTracker) revalidate(eng *Engine, dialer *Dialer) []activeFlow {
+	var revoked []activeFlow
 	for _, f := range ft.snapshot() {
 		if !flowAllowed(eng, dialer, f) {
-			f.cancel()
+			revoked = append(revoked, f)
 		}
 	}
+	// Capture the actual owners before cancellation can finish and remove
+	// them. The current engine already uses the original shared ledger.
+	for _, f := range revoked {
+		f.cancel()
+	}
+	return revoked
 }
 
 func flowAllowed(eng *Engine, dialer *Dialer, f activeFlow) bool {
@@ -157,7 +166,11 @@ func (s *Server) registerSecretFlow(ctx context.Context, conn, upstream net.Conn
 func (ft *flowTracker) closeAll() {
 	ft.mu.Lock()
 	ft.closing = true
+	export := ft.export
 	ft.mu.Unlock()
+	if export != nil {
+		export.cancel()
+	}
 	for _, f := range ft.snapshot() {
 		f.cancel()
 	}

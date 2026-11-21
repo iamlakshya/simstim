@@ -9,6 +9,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"sync"
 	"syscall"
 
 	"github.com/iamlakshya/simstim/internal/proto"
@@ -23,6 +24,8 @@ type nativeLineReader struct {
 	connection *net.UnixConn
 	control    proto.UnixControlV1
 	offset     int
+	modeMu     sync.Mutex
+	mode       *vmmExecPhaseV1
 }
 
 func (r *nativeLineReader) Read(buffer []byte) (int, error) {
@@ -37,9 +40,18 @@ func (r *nativeLineReader) Read(buffer []byte) (int, error) {
 		current.Close()
 		return 0, io.EOF
 	}
-	if current.Credentials == nil || current.Credentials.PID <= 0 || current.Credentials.UID != uint32(os.Geteuid()) {
+	if current.Credentials == nil || current.Credentials.PID <= 0 {
 		current.Close()
 		return 0, fmt.Errorf("private VMM control lacks its native sender credentials")
+	}
+	if current.Credentials.UID != uint32(os.Geteuid()) {
+		r.modeMu.Lock()
+		phase := r.mode
+		r.modeMu.Unlock()
+		if phase == nil || phase.command.CheckVMMNativeSenderV1(phase.source, r.connection, current.Credentials) != nil {
+			current.Close()
+			return 0, fmt.Errorf("private VMM control sender has no original native mapped identity")
+		}
 	}
 	if r.control.Credentials != nil && *r.control.Credentials != *current.Credentials {
 		current.Close()
@@ -49,8 +61,11 @@ func (r *nativeLineReader) Read(buffer []byte) (int, error) {
 		current.Close()
 		return 0, fmt.Errorf("private VMM descriptors are not on their frame's first byte")
 	}
-	r.control.Credentials = current.Credentials
-	r.control.Files = append(r.control.Files, current.Files...)
+	if r.offset == 0 {
+		r.control = current // preserve the actual FIRST native receive witness
+	} else {
+		current.Close() // no later frame byte may carry a descriptor role
+	}
 	r.offset += n
 	return n, nil
 }
@@ -137,4 +152,38 @@ func (s *runnerServer) sendNativeReady(session, driver string, owner *ownedVMMEn
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return proto.SendUnixControlV1(control, append(data, '\n'), []*os.File{process, peer})
+}
+
+// The original trusted runner transfers ONLY the handle created by THIS
+// command.SysProcAttr.PidFD. No advertised PID/pidfd_open adopts another child.
+// Actual parent Cmd/source ancestry and code are checked by the receiver.
+func (s *runnerServer) sendNativeModeExecChild(session, driver string, owner *ownedVMMEndpoint) error {
+	control, ok := s.conn.(*net.UnixConn)
+	if !ok {
+		return fmt.Errorf("VMM final child lost its original native control")
+	}
+	owner.mu.Lock()
+	fd := -1
+	var err error
+	if owner.fd >= 0 {
+		fd, err = unix.FcntlInt(uintptr(owner.fd), unix.F_DUPFD_CLOEXEC, 0)
+	} else {
+		err = fmt.Errorf("original final VMM creation owner is closed")
+	}
+	owner.mu.Unlock()
+	if err != nil {
+		return err
+	}
+	process := os.NewFile(uintptr(fd), "original-final-helper-creation-loan")
+	defer process.Close()
+	if err := owner.live(); err != nil {
+		return err
+	}
+	data, err := json.Marshal(runnerMessage{Kind: "mode_exec_child", Session: session, Driver: driver})
+	if err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return proto.SendUnixControlV1(control, append(data, '\n'), []*os.File{process})
 }

@@ -59,6 +59,11 @@ func deleteSessionDeclared(id string, name *string, members *[]string, res *Dele
 			return err
 		}
 	}
+	if primary == id {
+		if current, err := LoadManifest(id); err == nil && IsNoneSupervisor(current) {
+			return deleteNonePrimaryV1(id, name, members, res)
+		}
+	}
 	unlock, err := lockSession(primary)
 	if err != nil {
 		return err

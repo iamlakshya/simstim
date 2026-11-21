@@ -146,6 +146,12 @@ func (s *Server) publishMintReservation(ctx context.Context, next *memberState, 
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	if err := s.prepareMemoryCarryLocked(ctx, prepared); err != nil {
+		return nil, err
+	}
+	if err := s.retireJudgeSourcesLocked(ctx, next); err != nil {
+		return nil, err
+	}
 	reservation, err := reserveExistingMint(ctx, next, name, mint, use)
 	if err != nil {
 		return nil, err

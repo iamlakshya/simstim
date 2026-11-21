@@ -14,15 +14,25 @@ import (
 // children or lock files. Existing directories are never chmodded. A false
 // create argument performs no filesystem creation.
 func OpenPrivateRoot(dir string, create bool) (*os.Root, error) {
-	return openCheckedRoot(dir, create, true)
+	return openCheckedRoot(dir, create, true, nil)
+}
+
+// OpenPrivateRootCreated reports only directories this actual invocation made
+// successfully. Existing directories never receive a creation receipt. The
+// observer runs before any subsequent child is created and may stop the walk.
+func OpenPrivateRootCreated(dir string, created func(string, os.FileInfo) error) (*os.Root, error) {
+	if created == nil {
+		return nil, fmt.Errorf("directory creation requires its original observer")
+	}
+	return openCheckedRoot(dir, true, true, created)
 }
 
 // OpenSafeAncestor opens an existing owned or system ancestor, including a
 // root-owned sticky temporary directory. It creates nothing and grants no
 // private-file trust. Callers must validate each owned child independently.
-func OpenSafeAncestor(dir string) (*os.Root, error) { return openCheckedRoot(dir, false, false) }
+func OpenSafeAncestor(dir string) (*os.Root, error) { return openCheckedRoot(dir, false, false, nil) }
 
-func openCheckedRoot(dir string, create, private bool) (*os.Root, error) {
+func openCheckedRoot(dir string, create, private bool, created func(string, os.FileInfo) error) (*os.Root, error) {
 	if !filepath.IsAbs(dir) {
 		return nil, fmt.Errorf("private cache root is not absolute")
 	}
@@ -37,11 +47,14 @@ func openCheckedRoot(dir string, create, private bool) (*os.Root, error) {
 	name := ""
 	var final os.FileInfo
 	for i, part := range parts {
+		made := false
 		name = filepath.Join(name, part)
 		info, err := ancestor.Lstat(name)
 		if create && errors.Is(err, os.ErrNotExist) {
 			if err := ancestor.Mkdir(name, 0o700); err != nil && !errors.Is(err, os.ErrExist) {
 				return nil, fmt.Errorf("make private cache ancestor: %w", err)
+			} else if err == nil {
+				made = true
 			}
 			info, err = ancestor.Lstat(name)
 		}
@@ -50,6 +63,11 @@ func openCheckedRoot(dir string, create, private bool) (*os.Root, error) {
 		}
 		if !safeDirectory(ancestor, name, info, private && i == len(parts)-1) {
 			return nil, fmt.Errorf("private cache root has an unsafe ancestor")
+		}
+		if made && created != nil {
+			if err := created(filepath.Join(volume+string(filepath.Separator), name), info); err != nil {
+				return nil, err
+			}
 		}
 		final = info
 	}

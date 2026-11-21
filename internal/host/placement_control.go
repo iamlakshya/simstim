@@ -17,11 +17,14 @@ import (
 var errPlacementNoChange = errors.New("placement control unchanged")
 
 type placementOperationRecord struct {
-	PID   int       `json:"pid"`
-	Birth string    `json:"birth"`
-	Kind  string    `json:"kind"`
-	At    time.Time `json:"at"`
-	extra string
+	PID           int       `json:"pid"`
+	Birth         string    `json:"birth"`
+	Kind          string    `json:"kind"`
+	At            time.Time `json:"at"`
+	Fence         string    `json:"publication_fence,omitempty"`
+	FenceCreating bool      `json:"fence_creating,omitempty"`
+	FenceRemoving bool      `json:"fence_removing,omitempty"`
+	extra         string
 }
 
 type placementControl struct {
@@ -38,6 +41,8 @@ type placementControl struct {
 	Host              purgeRef                            `json:"host_generation"`
 	Place             purgeRef                            `json:"place_generation"`
 	Drain             string                              `json:"drain,omitempty"`
+	DrainRemoval      *drainRemovalV1                     `json:"drain_removal,omitempty"`
+	LockdownRemoval   *lockdownRemovalV1                  `json:"lockdown_removal,omitempty"`
 	Nonce             string                              `json:"operation_nonce,omitempty"`
 	Active            map[string]placementOperationRecord `json:"active"`
 	Report            *api.PurgeResult                    `json:"report,omitempty"`
@@ -53,6 +58,8 @@ type placementControl struct {
 	Roots             map[string]purgeRef                 `json:"roots,omitempty"`
 	Pending           *purgeResource                      `json:"pending,omitempty"`
 	Sessions          map[string]purgeSessionPlan         `json:"sessions,omitempty"`
+	MemberRoots       map[string]memberRootReceiptV1      `json:"member_roots,omitempty"`
+	WorktreeOrigins   map[string]worktreeOriginV1         `json:"worktree_origins,omitempty"`
 	CleanupPayloads   map[string]cleanupPayloadIntent     `json:"cleanup_payloads,omitempty"`
 	LoginSnapshot     bool                                `json:"login_snapshot"`
 	LoginComplete     bool                                `json:"login_complete"`
@@ -292,7 +299,7 @@ func withPlacementRoot(ctx context.Context, allowDrain bool, change func(*placem
 func (p *placementControl) UnmarshalJSON(data []byte) error {
 	type plain placementControl
 	var value plain
-	extra, err := decodeFootprint(data, &value, []string{"scope_format", "persistent_roots", "runtime_roots", "version", "scope", "uid", "control_generation", "control_lock_generation", "host_id", "state_generation", "host_generation", "place_generation", "drain", "operation_nonce", "active", "report", "requested", "completed", "baseline_bound", "baseline_absent", "parents", "phase", "destructive", "owner_run", "owner", "roots", "pending", "sessions", "sessions_collected", "runtime_terminal", "cleanup_payloads", "login_snapshot", "login_complete", "login_delete", "archives", "archive_writes", "state_writes", "shutdown_committed", "guard_witness", "final_captures", "footprints", "refs"})
+	extra, err := decodeFootprint(data, &value, []string{"scope_format", "persistent_roots", "runtime_roots", "version", "scope", "uid", "control_generation", "control_lock_generation", "host_id", "state_generation", "host_generation", "place_generation", "drain", "drain_removal", "lockdown_removal", "operation_nonce", "active", "report", "requested", "completed", "baseline_bound", "baseline_absent", "parents", "phase", "destructive", "owner_run", "owner", "roots", "pending", "sessions", "member_roots", "worktree_origins", "sessions_collected", "runtime_terminal", "cleanup_payloads", "login_snapshot", "login_complete", "login_delete", "archives", "archive_writes", "state_writes", "shutdown_committed", "guard_witness", "final_captures", "footprints", "refs"})
 	*p = placementControl(value)
 	p.extra = extra
 	return err
@@ -337,9 +344,18 @@ func validatePlacementControlData(control placementControl, scope string) error 
 		return placementError("the retained purge control belongs to another scope, identity or version")
 	}
 	for token, op := range control.Active {
-		if op.extra != "" || !ValidHostID(token) || op.PID <= 0 || op.Birth == "" || op.At.IsZero() || op.Kind != "start" && op.Kind != "publish" {
+		if op.extra != "" || !ValidHostID(token) || op.PID <= 0 || op.Birth == "" || op.At.IsZero() || op.Kind != "start" && op.Kind != "publish" && op.Kind != "auxiliary" && op.Kind != "resume_prepare" && op.Kind != "rewind_prepare" {
 			return placementError("the retained purge control has an invalid operation receipt")
 		}
+		if err := validatePublicationOperationV1(control, token, op); err != nil {
+			return err
+		}
+	}
+	if err := validateDrainRemovalV1(control.DrainRemoval); err != nil {
+		return err
+	}
+	if err := validateLockdownRemovalV1(control.LockdownRemoval); err != nil {
+		return err
 	}
 	return validatePurgeControl(control)
 }

@@ -19,6 +19,7 @@ func policyDenyCmd() *cobra.Command  { return policyAddCmd(false) }
 
 func policyAddCmd(allow bool) *cobra.Command {
 	var layer policyLayerFlags
+	var requestID string
 	var once, dryRun, asJSON, publicPush bool
 	var duration time.Duration
 	var tools []string
@@ -26,15 +27,34 @@ func policyAddCmd(allow bool) *cobra.Command {
 	if allow {
 		verb = "allow"
 	}
-	cmd := &cobra.Command{Use: verb + " [net] <target>", Short: "Add an " + verb + " rule at one policy layer", Args: cobra.RangeArgs(1, 2),
+	cmd := &cobra.Command{Use: verb + " [net] <target>", Short: "Add an " + verb + " rule at one policy layer", Args: func(cmd *cobra.Command, args []string) error {
+		if requestID != "" {
+			if len(args) != 0 {
+				return policyUsage("a held answer takes no target argument", "Use --request with --in and the original request ID, without a target.", "flags_conflict")
+			}
+			return nil
+		}
+		return cobra.RangeArgs(1, 2)(cmd, args)
+	},
 		Example: "  " + brand.Name + " policy " + verb + " api.example.com --repo .\n  " + brand.Name + " policy " + verb + " api.example.com --in box/auth-fix --dry-run",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			restoreReplay := noPolicyReplayForDryRun(cmd, dryRun)
+			defer restoreReplay()
 			if _, err := client.ReadPolicySettings(); err != nil {
 				return err
+			}
+			if requestID != "" {
+				if !allow || publicPush || cmd.Flags().Changed("tools") || cmd.Flags().Changed("for") || dryRun {
+					return policyUsage("a held answer cannot take target-grant or preview options", "Use --request with --in and --once, --repo or --profile; read policy ls to preview held requests.", "flags_conflict")
+				}
+				return runHeldNetworkAllowV1(cmd, layer, requestID, once, asJSON)
 			}
 			door, target, err := policyTarget(args)
 			if err != nil {
 				return err
+			}
+			if door == api.DoorSSHKey {
+				return runNamedSSHKeyPolicy(cmd, layer, target, allow, once, dryRun, asJSON, publicPush, tools)
 			}
 			if door == api.DoorPush {
 				if !allow {
@@ -91,6 +111,11 @@ func policyAddCmd(allow bool) *cobra.Command {
 				if err != nil {
 					return err
 				}
+				finishPolicy, err := beginPolicyFileCommand(cmd, dryRun)
+				if err != nil {
+					return err
+				}
+				defer finishPolicy()
 				var result client.FilePolicyResult
 				if allow && !dryRun {
 					err = grantQuestions(cmd, func(ctx context.Context) error {
@@ -104,10 +129,20 @@ func policyAddCmd(allow bool) *cobra.Command {
 				if err != nil {
 					return err
 				}
-				if asJSON {
-					return printJSON(map[string]any{"rule": result.Rule, "applies": result.Applies, "dry_run": dryRun})
+				var propagation client.PolicyPropagationResult
+				if !dryRun {
+					propagation, err = propagateFilePolicy(cmd, selected)
+					if err != nil {
+						return err
+					}
 				}
-				say(cmd, "%s %s (%s, %s %s); applies at the next start.%s\n", verb, client.CleanLine(result.Rule.Target), client.CleanLine(result.Rule.ID), selected.Kind, client.CleanLine(selected.Name), dryPolicyNote(dryRun))
+				if asJSON {
+					return printJSON(map[string]any{"rule": result.Rule, "applies": result.Applies, "dry_run": dryRun, "propagation": propagation})
+				}
+				say(cmd, "%s %s (%s, %s %s); saved to its policy file.%s\n", verb, client.CleanLine(result.Rule.Target), client.CleanLine(result.Rule.ID), selected.Kind, client.CleanLine(selected.Name), dryPolicyNote(dryRun))
+				if !dryRun {
+					printFilePolicyPropagation(cmd, propagation)
+				}
 				return nil
 			}
 			return withSession(cmd, layer.in, func(ctx context.Context, h client.Host, c *client.Conn, s *client.Session) error {
@@ -157,6 +192,10 @@ func policyAddCmd(allow bool) *cobra.Command {
 	layer.add(cmd)
 	addDryRun(cmd, &dryRun, "show the rule without writing or sending a mutation")
 	if allow {
+		cmd.Use = "allow [net] [<target>]"
+		cmd.Long = "Allow a destination at one selected policy layer. With --request, answer an original held request by opaque ID and exact session ID. Upload budget holds support only --once or policy refuse; change network.upload_budget through policy edit for a higher limit."
+		cmd.Example += "\n  " + brand.Name + " policy allow --request <request-ID> --in box/<session-ID> --once"
+		cmd.Flags().StringVar(&requestID, "request", "", "answer a live held network request by its opaque ID; upload budgets support only --once")
 		cmd.Flags().BoolVar(&publicPush, "public", false, "acknowledge that this exact repository push publishes to a public repository")
 		addList(cmd.Flags(), &tools, "tools", "allow model capabilities for this session: a comma-separated list, or the flag again")
 		cmd.Flags().BoolVar(&once, "once", false, "allow one matching flow, at session scope")
@@ -191,14 +230,24 @@ func policyRmCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
+				finishPolicy, err := beginPolicyFileCommand(cmd, false)
+				if err != nil {
+					return err
+				}
+				defer finishPolicy()
 				out, err := client.ChangeFilePolicy(cmd.Context(), selected, api.Rule{}, word, false)
 				if err != nil {
 					return err
 				}
-				if asJSON {
-					return printJSON(map[string]any{"removed": out.Removed, "applies": "next_start"})
+				propagation, err := propagateFilePolicy(cmd, selected)
+				if err != nil {
+					return err
 				}
-				say(cmd, "Removed %s; applies at the next start.\n", client.CleanLine(word))
+				if asJSON {
+					return printJSON(map[string]any{"removed": out.Removed, "applies": "next_start", "propagation": propagation})
+				}
+				say(cmd, "Removed %s from its policy file.\n", client.CleanLine(word))
+				printFilePolicyPropagation(cmd, propagation)
 				return nil
 			}
 			return withSession(cmd, layer.in, func(ctx context.Context, h client.Host, c *client.Conn, s *client.Session) error {

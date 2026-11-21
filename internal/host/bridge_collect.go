@@ -69,8 +69,10 @@ func (b *bridge) collect(a api.DebugCollectArgs) api.DebugCollected {
 	files := map[string]collected{}
 	addFolder(files, paths.DebugDir(), "host/bridge/")
 	ids, notes := bundleSessions(a)
+	traceBudget := int64(2 * diag.DefaultMax)
 	for _, id := range ids {
 		notes = append(notes, collectSession(id, files)...)
+		notes = append(notes, collectOriginalHolderTraceV1(id, files, &traceBudget)...)
 	}
 	secrets := alertSecrets()
 	out := api.DebugCollected{Home: home, Notes: notes}

@@ -49,7 +49,11 @@ func (s *Supervisor) awaitInputStartup(ctx context.Context) map[string]string {
 	stop := context.AfterFunc(ctx, func() { _ = listener.SetDeadline(now()) })
 	defer stop()
 	var values map[string]string
-	if s.originalStart!=nil {needValues=false;values=s.originalStart.values;s.originalStart.values=nil}
+	if s.originalStart != nil {
+		needValues = false
+		values = s.originalStart.values
+		s.originalStart.values = nil
+	}
 	for needValues || s.startupInput == nil {
 		conn, err := listener.Accept()
 		if err != nil {
@@ -95,7 +99,7 @@ func (s *Supervisor) acceptStartupInputs(ctx context.Context, c *client, reader 
 		return err
 	}
 	summary := *s.m.Inputs
-	summary.Repositories = slices.Clone(summary.Repositories)
+	summary.Repositories = api.CloneInputRepositories(summary.Repositories)
 	s.mu.Unlock()
 	clock, err := newInputPhaseClock(s.lifetimeContext(), summary)
 	if err != nil {

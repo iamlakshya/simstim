@@ -51,7 +51,12 @@ func (c *Conn) CheckPolicyGrant(ctx context.Context, id, target string) error {
 // AllowPolicy adds a network rule to the session layer. It holds H5's host
 // policy ownership through the final gate and the actual initial frame write.
 func (c *Conn) AllowPolicy(ctx context.Context, a api.PolicyAddArgs) (api.Rule, error) {
-	if a.Door==api.DoorPort{return c.changePortPolicy(ctx,a,true)}
+	if a.PublicOnly && a.Door != "" && a.Door != api.DoorNet {
+		return api.Rule{}, publicOnlyRuleError()
+	}
+	if a.Door == api.DoorPort {
+		return c.changePortPolicy(ctx, a, true)
+	}
 	var out api.Rule
 	if _, err := ReadPolicySettings(); err != nil {
 		return out, err
@@ -79,7 +84,7 @@ func (c *Conn) AllowPolicy(ctx context.Context, a api.PolicyAddArgs) (api.Rule, 
 		return out, err
 	}
 	defer release()
-	if err := c.CheckPolicyGrant(ctx, a.ID, a.Target); err != nil {
+	if err := c.checkPolicyRuleGrant(ctx, a.ID, api.Rule{Allow: true, Door: api.DoorNet, Target: a.Target, PublicOnly: a.PublicOnly}); err != nil {
 		return out, err
 	}
 	err = c.callWithSent(ctx, "policy.add", a, &out, release)

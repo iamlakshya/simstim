@@ -2,6 +2,8 @@
 
 simstim installs an agent with its vendor's own installer, in a session on the host, so you see the installer's output and can answer its questions. Then you log in with the agent's own login, in a session. simstim never logs in for you, and never sees your login.
 
+Agent installation and login deliberately run on the host at `none`. Their sessions record that downgrade. An ordinary new session still uses the pinned sandbox floor. This lets the vendor's installer and login update the host's agent installation without changing the default for your work.
+
 ## Pick them from a checklist
 
 `simstim setup` ends with a checklist of every agent it can install. First-class and supported agents come first; best-effort ones follow, marked as such. The agents the host has are ticked already, with their state: installed, logged in, or not.

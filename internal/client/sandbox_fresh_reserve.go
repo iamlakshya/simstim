@@ -89,7 +89,7 @@ func normaliseFreshSandboxChild(ctx context.Context, s *freshSandboxReservationS
 	}
 	if p.lineage == nil || p.lineage.Version != 2 || p.lineage.Parent != s.parent.SessionID || p.lineage.Root != s.root.SessionID ||
 		p.HostID != s.parent.HostID || p.SSHAgent || p.FutureLineage || p.FutureDelivery || p.CreationWall != s.root.CreationWall ||
-		p.Ceiling > s.parent.Ceiling || p.Ceiling > s.root.Ceiling || !bytes.Equal(p.PolicySources, s.root.PolicySources) ||
+		!bytes.Equal(p.imageSelectionRaw, s.root.imageSelectionRaw) || p.Ceiling > s.parent.Ceiling || p.Ceiling > s.root.Ceiling || !bytes.Equal(p.PolicySources, s.root.PolicySources) ||
 		!slices.Equal(p.Secrets, p.lineage.Allowed) || p.DeliveryIntent == nil || p.DeliveryIntent.Version != api.SecretDeliveryIntentV1 ||
 		p.deliveryReceipt != nil || p.inputOperation != nil || p.deliveryReceiptRaw != nil || p.inputOperationRaw != nil || p.futureDeliveryReceipt || p.futureInputOperation {
 		return nil, joinIntentError()
@@ -110,7 +110,7 @@ func normaliseFreshSandboxChild(ctx context.Context, s *freshSandboxReservationS
 		return nil, joinIntentError()
 	}
 	encoded, err := json.Marshal(savedSandbox{SessionID: p.SessionID, HostID: p.HostID, Ceiling: p.Ceiling.String(), SSHAgent: false,
-		Secrets: p.Secrets, CreatedAt: p.CreatedAt, Request: p.request, WallIntent: wall, PolicySources: p.PolicySources, Lineage: lineage, DeliveryIntent: delivery})
+		Secrets: p.Secrets, CreatedAt: p.CreatedAt, Request: p.request, WallIntent: wall, PolicySources: p.PolicySources, Lineage: lineage, DeliveryIntent: delivery, ImageSelection: p.imageSelectionRaw})
 	if err != nil {
 		return nil, err
 	}
@@ -122,6 +122,9 @@ func normaliseFreshSandboxChild(ctx context.Context, s *freshSandboxReservationS
 		return nil, err
 	}
 	fields["policy_sources"] = bytes.Clone(p.PolicySources)
+	if p.imageSelectionRaw != nil {
+		fields["image_selection_v1"] = bytes.Clone(p.imageSelectionRaw)
+	}
 	encoded, err = marshalSandboxObject(fields)
 	if err != nil {
 		return nil, err

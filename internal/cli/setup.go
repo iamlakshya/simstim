@@ -16,6 +16,15 @@ import (
 // content-bound setup answers. A changed script asks again. With input off,
 // a missing folder needs --mkdir and an untrusted script is skipped.
 func startSession(cmd *cobra.Command, conn *client.Conn, h client.Host, a client.NewArgs) (*client.Session, error) {
+	session, err, _ := startSessionOwnedV1(cmd, conn, h, a, nil)
+	return session, err
+}
+
+func startSessionOnAttemptV1(cmd *cobra.Command, attempt *client.HostAttemptV1, a client.NewArgs) (*client.Session, error, bool) {
+	return startSessionOwnedV1(cmd, attempt.Conn(), attempt.Host(), a, attempt)
+}
+
+func startSessionOwnedV1(cmd *cobra.Command, conn *client.Conn, h client.Host, a client.NewArgs, attempt *client.HostAttemptV1) (*client.Session, error, bool) {
 	var answers client.SetupAnswers
 	warnings := stderrFor(jsonOn(cmd), "setup_answers")
 	if a.Setup == "" {
@@ -27,25 +36,31 @@ func startSession(cmd *cobra.Command, conn *client.Conn, h client.Host, a client
 	for {
 		cctx, cancel := context.WithTimeout(cmd.Context(), 60*time.Second)
 		recordNewStartBudget(cmd.Context(), cctx)
-		s, err := conn.NewSession(cctx, a)
+		var s *client.Session
+		var err error
+		if attempt == nil {
+			s, err = conn.NewSession(cctx, a)
+		} else {
+			s, err = attempt.NewSession(cctx, a)
+		}
 		cancel()
 		if q, ok := client.FolderQuestionOf(err); ok && !a.MakeFolder {
 			yes, err := askMakeFolder(p, h.Name, q)
 			if err != nil {
-				return nil, err
+				return nil, err, false
 			}
 			if !yes {
-				return nil, p.cancel()
+				return nil, p.cancel(), false
 			}
 			if stopped(p.ctx) {
-				return nil, errInterrupted
+				return nil, errInterrupted, false
 			}
 			a.MakeFolder = true
 			continue
 		}
 		q, ok := client.SetupQuestionOf(err)
 		if !ok || a.Setup != "" {
-			return s, err
+			return s, err, true
 		}
 		past := answers.Past(q)
 		if q.Kept != "" {
@@ -58,13 +73,13 @@ func startSession(cmd *cobra.Command, conn *client.Conn, h client.Host, a client
 		}
 		run, err := askSetup(p, h.Name, q, past)
 		if err != nil {
-			return nil, err
+			return nil, err, false
 		}
 		if stopped(p.ctx) {
-			return nil, errInterrupted
+			return nil, errInterrupted, false
 		}
 		if err := rememberAnswer(p.ctx, warnings, h.Name, q, run); err != nil {
-			return nil, err
+			return nil, err, false
 		}
 		a, answers = client.AnswerSetup(a, q, run), answers.Answered(q, run)
 	}

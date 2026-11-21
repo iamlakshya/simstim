@@ -103,6 +103,9 @@ func EndBridge() {
 	for end := time.Now().Add(requestDrain); liveRequests.Load() > 0 && time.Now().Before(end); {
 		time.Sleep(20 * time.Millisecond)
 	}
+	// A bounded RPC failure cannot drop the actual original prepare worker
+	// while native construction, destruction or cleanup is still uncertain.
+	waitSandboxPrepareRequestsV1()
 }
 
 // gitOp runs one git operation in its child, within the operation's

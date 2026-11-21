@@ -47,14 +47,19 @@ func probeReservedGvisorOwnedV1(ctx context.Context, operation *SessionOperation
 	if err != nil {
 		return wall.Probe{}, err
 	}
-	for _, cached := range cachedWallProbes(ctx, selected.publication.owner) {
-		if cachedGvisorMatchesV1(cached, key) {
-			return wall.Probe{Driver: cached.Driver, Level: wall.GVisor, OK: true, CanPrepare: cached.CanPrepare, Version: cached.Version, Facts: cached.Facts}, nil
-		}
-	}
 	probeContext, finish, err := newGvisorProbePurposeV1(ctx, b, requestID, selected, manifest)
 	if err != nil {
 		return wall.Probe{}, err
+	}
+	purpose := gvisorProbeFromContextV1(probeContext)
+	for _, cached := range cachedWallProbes(ctx, selected.publication.owner) {
+		if cachedGvisorMatchesV1(cached, key, purpose.physicalKey) {
+			// Recheck the held original objects after reading the cached publication.
+			if err := errors.Join(purpose.check(probeContext), finish()); err != nil {
+				return wall.Probe{}, err
+			}
+			return wall.Probe{Driver: cached.Driver, Level: wall.GVisor, OK: true, CanPrepare: cached.CanPrepare, Version: cached.Version, Facts: cached.Facts}, nil
+		}
 	}
 	result, err := CapabilityProbe(probeContext, "")
 	err = errors.Join(err, finish())
@@ -69,6 +74,6 @@ func probeReservedGvisorOwnedV1(ctx context.Context, operation *SessionOperation
 	return wall.Probe{}, UserError("wall_unavailable", "the native probe omitted its actual registered gvisor implementation", "Use one current helper and original runtime selection for this start.")
 }
 
-func cachedGvisorMatchesV1(probe api.WallProbe, runtimeKey string) bool {
-	return runtimeKey != "" && probe.Driver == "gvisor" && probe.Level == "gvisor" && probe.OK && probe.Version == gvisor.NativeBuildVersionV1 && probe.Facts["runtime_manifest"] == runtimeKey
+func cachedGvisorMatchesV1(probe api.WallProbe, runtimeKey, physicalKey string) bool {
+	return runtimeKey != "" && physicalKey != "" && probe.Facts["native_closure_v1"] == physicalKey && probe.Driver == "gvisor" && probe.Level == "gvisor" && probe.OK && probe.Version == gvisor.NativeBuildVersionV1 && probe.Facts["runtime_manifest"] == runtimeKey
 }

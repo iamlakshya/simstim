@@ -21,6 +21,7 @@ type PublicStateCountSink interface {
 // startup accounting includes it. It retains no source, state or permission.
 type PublicStateProjectionSchema struct {
 	state, intent, binding, retired, primary, minted, shape, slot []string
+	trusted                                                       []string
 }
 
 // NewPublicStateProjectionSchema derives the same names as ExactJSONFields.
@@ -29,6 +30,7 @@ func NewPublicStateProjectionSchema() PublicStateProjectionSchema {
 	return PublicStateProjectionSchema{
 		state:   api.ExactJSONFieldNames((*api.SessionSecretState)(nil)),
 		intent:  api.ExactJSONFieldNames((*api.SecretDeliveryIntent)(nil)),
+		trusted: api.ExactJSONFieldNames((*api.TrustedSecretUseV1)(nil)),
 		binding: api.ExactJSONFieldNames((*api.SecretBind)(nil)),
 		retired: api.ExactJSONFieldNames((*api.RetiredPrimarySecretState)(nil)),
 		primary: api.ExactJSONFieldNames((*api.PublicSecretState)(nil)),
@@ -69,10 +71,10 @@ func projectedStateCountFields(p *api.JSONProjection, span api.JSONSpan, fields 
 	return values, projectedOpaqueError(err)
 }
 
-func projectedIntentCountFields(p *api.JSONProjection, span api.JSONSpan, fields []string) (version, modes, binds api.JSONSpan, err error) {
+func projectedIntentCountFields(p *api.JSONProjection, span api.JSONSpan, fields []string) (version, modes, binds, trusted api.JSONSpan, err error) {
 	null, err := projectedNull(p, span)
 	if err != nil || null {
-		return version, modes, binds, err
+		return version, modes, binds, trusted, err
 	}
 	err = p.Object(span, fields, func(field api.JSONField) error {
 		if field.Known < 0 {
@@ -85,12 +87,14 @@ func projectedIntentCountFields(p *api.JSONProjection, span api.JSONSpan, fields
 			binds = field.Value
 		case "modes":
 			modes = field.Value
+		case "trusted_uses":
+			trusted = field.Value
 		default:
 			return errProjectedStateOpaque
 		}
 		return nil
 	})
-	return version, modes, binds, projectedOpaqueError(err)
+	return version, modes, binds, trusted, projectedOpaqueError(err)
 }
 
 // This raw pass counts physical occurrences. The admitted grouped index
@@ -234,7 +238,7 @@ func (s PublicStateProjectionSchema) Count(ctx context.Context, p *api.JSONProje
 	if version != api.SessionSecretStateV1 {
 		return errProjectedStateOpaque
 	}
-	intentVersion, modes, binds, err := projectedIntentCountFields(p, fields.intent, s.intent)
+	intentVersion, modes, binds, trusted, err := projectedIntentCountFields(p, fields.intent, s.intent)
 	if err != nil {
 		return err
 	}
@@ -245,7 +249,7 @@ func (s PublicStateProjectionSchema) Count(ctx context.Context, p *api.JSONProje
 	if intent != api.SecretDeliveryIntentV1 {
 		return errProjectedStateOpaque
 	}
-	for _, mapSpan := range []api.JSONSpan{modes, binds, fields.primary, fields.minted, fields.retired} {
+	for _, mapSpan := range []api.JSONSpan{modes, binds, fields.primary, fields.minted, fields.retired, trusted} {
 		if err := s.countMapIndex(p, mapSpan, counter); err != nil {
 			return err
 		}

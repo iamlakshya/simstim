@@ -40,6 +40,9 @@ var sandboxFor = newSandbox
 // newSandbox returns the sandbox of session m, from the driver that its
 // trusted manifest names.
 func newSandbox(m *host.Manifest) (sandbox, error) {
+	if host.IsNoneSupervisor(m) {
+		return prepareNoneV1(context.Background(), m)
+	}
 	if m.Wall.Driver == "process" {
 		return prepareProcess(m)
 	}

@@ -148,6 +148,15 @@ func summary(ev Event) string {
 		s = on + " had a blocked credential misuse"
 	case EgressBlocked:
 		s = on + " was blocked by its network policy"
+	case ModelBudget:
+		s = on + " reached its model token budget"
+	case JudgeUnavailable:
+		s = on + " has an unavailable network judge"
+	case EgressUnknown:
+		s = on + " allowed an unknown network host"
+		if ev.Reason != "" {
+			s += " (" + ev.Reason + ")"
+		}
 	case Started:
 		s = name + " started on " + ev.Host
 	case Restored:

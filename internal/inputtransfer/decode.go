@@ -71,9 +71,11 @@ func decodeSummary(data []byte, summary *api.InputSummary) error {
 			return protocol("invalid input repository list")
 		}
 		for i, entry := range entries {
-			if !api.ExactJSONFields(entry,api.InputRepository{}) {return protocol("input repository fields are not exact")}
+			if !api.ExactJSONFields(entry, api.InputRepository{}) {
+				return protocol("input repository fields are not exact")
+			}
 			if _, err = decodeObject(entry, &summary.Repositories[i],
-				[]string{"name", "source_branch", "commit", "origin", "size", "sha256", "dirty", "object_format", "policy"},
+				[]string{"name", "source_branch", "commit", "origin", "ecosystems", "size", "sha256", "dirty", "object_format", "policy"},
 				[]string{"name", "commit", "size", "sha256", "object_format"}); err != nil {
 				return err
 			}

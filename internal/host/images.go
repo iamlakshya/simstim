@@ -16,13 +16,15 @@ import (
 )
 
 type imageService struct {
+	openMu      sync.Mutex
+	connection  context.Context
 	mu          sync.Mutex
 	store       *image.Store
 	transfers   map[string]*image.Transfer
 	closed      bool
 	active      sync.WaitGroup
 	publication *runtimePublication
-	closeOnce   sync.Once
+	closeMu     sync.Mutex
 	closeErr    error
 	jobs        map[string]*imageJob
 }
@@ -36,98 +38,155 @@ func (s *imageService) enter() (func(), error) {
 	s.active.Add(1)
 	return s.active.Done, nil
 }
-func (s *imageService) install(ctx context.Context, args image.Install) (any, error) {
-	if args.Action == "abort" {
-		s.mu.Lock()
-		job := s.jobs[args.Token]
-		if job != nil {
-			job.cancel()
-			delete(s.jobs, args.Token)
-		}
-		s.mu.Unlock()
-		if job != nil {
-			return nil, nil
-		}
+func checkImageBeginV1(args image.Install) error {
+	if args.Request == nil || args.Request.Transfer == "" || args.Token != "" || args.Digest != "" || args.Offset != 0 || len(args.Data) != 0 {
+		return fmt.Errorf("invalid correlated image begin request")
 	}
+	return args.Request.Validate()
+}
+func (s *imageService) install(ctx context.Context, args image.Install, requestID uint64) (any, error) {
 	if args.Action == "begin" {
-		if args.Request == nil || args.Token != "" || args.Digest != "" || args.Offset != 0 || len(args.Data) != 0 {
-			return nil, fmt.Errorf("invalid image begin request")
-		}
-		if err := args.Request.Validate(); err != nil {
-			return nil, err
-		}
-	} else if args.Action != "chunk" && args.Action != "commit" && args.Action != "abort" {
+		return s.beginImageV1(args, requestID)
+	}
+	if args.Action != "chunk" && args.Action != "commit" && args.Action != "abort" {
 		return nil, fmt.Errorf("unknown image install action")
 	}
-	store, err := s.open(ctx)
-	if err != nil {
+	if args.Request != nil || args.Token == "" {
+		return nil, fmt.Errorf("only image begin accepts a request; later phases need its original token")
+	}
+	if args.Action != "chunk" && (args.Digest != "" || args.Offset != 0 || len(args.Data) != 0) {
+		return nil, fmt.Errorf("invalid image completion request")
+	}
+	s.mu.Lock()
+	job := s.jobs[args.Token]
+	if job != nil && args.Action == "abort" {
+		job.cancel()
+	}
+	s.mu.Unlock()
+	if job == nil {
+		return nil, fmt.Errorf("image transfer does not belong to this connection")
+	}
+	if args.Action == "abort" {
+		// Join the actual begin/pull handler, including a request cancelled before
+		// it ran. Never delete the correlation before its creator has finished.
+		<-job.done
+		job.operation.Lock()
+		defer job.operation.Unlock()
+		var err error
+		if job.transfer != nil {
+			err = job.transfer.Close()
+		}
+		if err != nil {
+			return nil, err
+		}
+		s.mu.Lock()
+		job.complete = true
+		if s.jobs[job.correlation] == job {
+			delete(s.jobs, job.correlation)
+		}
+		if job.token != "" {
+			if s.jobs[job.token] == job {
+				delete(s.jobs, job.token)
+			}
+			if s.transfers[job.token] == job.transfer {
+				delete(s.transfers, job.token)
+			}
+		}
+		s.mu.Unlock()
+		return nil, nil
+	}
+	job.operation.Lock()
+	defer job.operation.Unlock()
+	s.mu.Lock()
+	complete := job.complete
+	transfer := job.transfer
+	token := job.token
+	s.mu.Unlock()
+	if job.kind != "begin" || complete || transfer == nil || args.Token != token {
+		return nil, fmt.Errorf("image phase does not own an active server transfer token")
+	}
+	if err := job.ctx.Err(); err != nil {
 		return nil, err
 	}
-	ctx, finish, err := s.operationContext(ctx)
+	owned, finish, err := s.operationContext(job.ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer finish()
-	if args.Action == "begin" {
-		if args.Request == nil || args.Token != "" || args.Digest != "" || args.Offset != 0 || len(args.Data) != 0 {
-			return nil, fmt.Errorf("invalid image begin request")
-		}
-		s.mu.Lock()
-		defer s.mu.Unlock()
-		if len(s.transfers) >= 8 {
-			return nil, fmt.Errorf("this connection already has eight image transfers")
-		}
-		transfer, err := store.BeginContext(ctx, *args.Request)
-		if err != nil {
+	if args.Action == "chunk" {
+		if err := transfer.WriteAt(owned, args.Digest, args.Offset, args.Data); err != nil {
 			return nil, err
 		}
 		progress := transfer.Progress()
-		s.transfers[progress.Token] = transfer
+		s.mu.Lock()
+		job.progress = progress
+		s.mu.Unlock()
 		return progress, nil
 	}
-	if args.Request != nil {
-		return nil, fmt.Errorf("only image begin accepts a request")
-	}
+	record, err := transfer.Commit(owned, ConvertImage)
+	// Commit returns only after conversion and transfer cleanup. An abort waits
+	// on this same operation mutex before removing either connection alias.
 	s.mu.Lock()
-	transfer := s.transfers[args.Token]
+	job.complete = !errors.Is(err, image.ErrTransferCleanupPending)
+	if job.complete && s.transfers[token] == transfer {
+		delete(s.transfers, token)
+	}
 	s.mu.Unlock()
-	if transfer == nil {
-		return nil, fmt.Errorf("image transfer does not belong to this connection")
-	}
-	switch args.Action {
-	case "chunk":
-		if err := transfer.WriteAt(ctx, args.Digest, args.Offset, args.Data); err != nil {
-			return nil, err
-		}
-		return transfer.Progress(), nil
-	case "commit", "abort":
-		s.mu.Lock()
-		delete(s.transfers, args.Token)
-		s.mu.Unlock()
-		if args.Digest != "" || args.Offset != 0 || len(args.Data) != 0 {
-			transfer.Close()
-			return nil, fmt.Errorf("invalid image completion request")
-		}
-		if args.Action == "abort" {
-			return nil, transfer.Close()
-		}
-		return transfer.Commit(ctx, ConvertImage)
-	default:
-		return nil, fmt.Errorf("unknown image install action")
-	}
+	job.cancel()
+	return record, err
 }
-
+func (s *imageService) beginImageV1(args image.Install, requestID uint64) (any, error) {
+	if err := checkImageBeginV1(args); err != nil {
+		return nil, err
+	}
+	job, err := s.claimImageHandlerV1(*args.Request, requestID, "begin")
+	if err != nil {
+		return nil, err
+	}
+	defer s.finishImageHandlerV1(job)
+	job.operation.Lock()
+	defer job.operation.Unlock()
+	if err := job.ctx.Err(); err != nil {
+		return nil, err
+	}
+	store, err := s.open(job.ctx)
+	if err != nil {
+		return nil, err
+	}
+	owned, finish, err := s.operationContext(job.ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer finish()
+	request := *args.Request
+	request.Transfer = ""
+	transfer, err := store.BeginContext(owned, request)
+	if err != nil {
+		return nil, err
+	}
+	progress := transfer.Progress()
+	s.mu.Lock()
+	if previous := s.jobs[progress.Token]; previous != nil && previous != job {
+		s.mu.Unlock()
+		return nil, errors.Join(fmt.Errorf("random image token collides with an existing connection operation"), transfer.Close())
+	}
+	job.transfer, job.token, job.progress = transfer, progress.Token, progress
+	s.transfers[progress.Token] = transfer
+	s.jobs[progress.Token] = job
+	cancelled := job.ctx.Err()
+	s.mu.Unlock()
+	if cancelled != nil {
+		return nil, cancelled
+	}
+	return progress, nil
+}
 func (s *imageService) status(token string) (image.Progress, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if job := s.jobs[token]; job != nil {
 		return job.progress, nil
 	}
-	transfer := s.transfers[token]
-	if transfer == nil {
-		return image.Progress{}, fmt.Errorf("image transfer does not belong to this connection")
-	}
-	return transfer.Progress(), nil
+	return image.Progress{}, fmt.Errorf("image transfer does not belong to this connection")
 }
 
 func imageFailure(err error) error {

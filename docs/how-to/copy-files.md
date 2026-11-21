@@ -31,4 +31,6 @@ simstim cp box/work:/work/project/output ./review --allow-flagged
 
 The client also checks received text for hidden characters and the session's locally available secrets before putting files at their final names. Use the computer that owns the session's original local approval and keep that policy record. The local record must include the original operation's acknowledgement. A missing or older copy approval stops the command before local file bytes are read.
 
-A stopped sandbox needs a resume before copying. For an unwalled session, use `scp` for that host's own files. Use [pull](pull.md) to bring back work with its Git history.
+A supported stopped microvm can provide outgoing files through a temporary reader. It starts no agent, installs no new secrets or named keys, and stays stopped. The reader keeps the original operation and checked disk until its complete native cleanup finishes. The first supported case is a login-owned microvm after a host reboot. A missing current-boot controller or unknown lifetime is refused and its files are kept. Incoming copies still need a running sandbox.
+
+For an unwalled session, use `scp` for that host's own files. Use [pull](pull.md) to bring back work with its Git history.

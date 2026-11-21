@@ -96,7 +96,11 @@ func (s *sandbox) finishPhysicalExit(control *runnerControl, waitErr error) {
 			exit.Err = fmt.Errorf("%w; VMM: %s", exit.Err, line)
 		}
 	}
-	exit.Err = errors.Join(exit.Err, s.releaseAgentsLease(), s.releaseLease())
+	snapshotErr := s.closeSnapshotDiskV1()
+	exit.Err = errors.Join(exit.Err, snapshotErr)
+	if snapshotErr == nil {
+		exit.Err = errors.Join(exit.Err, s.releaseBootStackV2())
+	}
 	s.mu.Lock()
 	s.exit, s.physicalExit = exit, true
 	connection := s.connection
@@ -113,4 +117,23 @@ func (s *sandbox) closeDoneLocked() {
 	default:
 		close(s.done)
 	}
+}
+
+// CleanExit is owned-process evidence for the canonical state publisher.
+// A guest status claim, forced stop or incomplete start cannot establish it.
+func (s *sandbox) CleanExit() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	select {
+	case <-s.done:
+	default:
+		return false
+	}
+	return s.cleanExitLocked()
+}
+
+// cleanExitLocked is the ONE owned natural-exit predicate. Caller holds mu
+// and has already observed done; neither guest claims nor Stop can satisfy it.
+func (s *sandbox) cleanExitLocked() bool {
+	return s.started && s.physicalExit && !s.forced && s.exit.Code == 0 && s.exit.Signal == "" && s.exit.Err == nil
 }

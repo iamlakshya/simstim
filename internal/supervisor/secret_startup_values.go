@@ -15,10 +15,12 @@ import (
 // startupSecretEnvelope is the same existing protected startup message, with
 // primary intent beside each member's canonical typed intent field.
 type startupSecretEnvelope struct {
-	Env            map[string]api.Secret     `json:"env"`
-	Members        []api.MemberResumeArgs    `json:"members"`
-	AllowMissing   bool                      `json:"allow_missing"`
-	SecretDelivery *api.SecretDeliveryIntent `json:"secret_delivery,omitempty"`
+	ProtectedTrustedSecretValues map[string]api.Secret     `json:"protected_trusted_secret_values,omitempty"`
+	NamedSSHKeys                 *api.NamedSSHKeysV1       `json:"named_ssh_keys,omitempty"`
+	Env                          map[string]api.Secret     `json:"env"`
+	Members                      []api.MemberResumeArgs    `json:"members"`
+	AllowMissing                 bool                      `json:"allow_missing"`
+	SecretDelivery               *api.SecretDeliveryIntent `json:"secret_delivery,omitempty"`
 }
 
 func (startupSecretEnvelope) Format(f fmt.State, _ rune) { _, _ = io.WriteString(f, api.Redacted) }
@@ -30,11 +32,12 @@ type processSecretInput struct {
 }
 
 type startupSecretInput struct {
-	Intent       api.SecretDeliveryIntent
-	Values       map[string]api.Secret
-	SourceKinds  map[string][]string
-	Processes    map[string]processSecretInput
-	Environments map[string]secretEnvironment
+	ProtectedTrustedSecretValues map[string]api.Secret
+	Intent                       api.SecretDeliveryIntent
+	Values                       map[string]api.Secret
+	SourceKinds                  map[string][]string
+	Processes                    map[string]processSecretInput
+	Environments                 map[string]secretEnvironment
 }
 
 func (startupSecretInput) Format(f fmt.State, _ rune) { _, _ = io.WriteString(f, api.Redacted) }
@@ -64,13 +67,25 @@ func (s *Supervisor) validateStartupSecrets(ctx context.Context, raw []byte, wan
 	if json.Unmarshal(raw, &message) != nil {
 		return nil, secretIntentFailure()
 	}
+	if message.NamedSSHKeys != nil {
+		defer clear(message.NamedSSHKeys.Values)
+	}
+	defer clear(message.ProtectedTrustedSecretValues)
+	defer func() {
+		for _, member := range message.Members {
+			clear(member.ProtectedTrustedSecretValues)
+		}
+	}()
+	if err := s.checkOriginalPrivateStartupPayloadV1(ctx, raw, message); err != nil {
+		return nil, err
+	}
 	s.mu.Lock()
 	root := s.snapshot()
 	s.mu.Unlock()
 	if err := knownSessionSecretState(root.SecretState); err != nil {
 		return nil, err
 	}
-	modern := root.SecretState != nil || message.SecretDelivery != nil
+	modern := root.SecretState != nil || message.SecretDelivery != nil || len(message.ProtectedTrustedSecretValues) > 0
 	for _, member := range s.knownMembers {
 		if err := knownSessionSecretState(member.SecretState); err != nil {
 			return nil, err
@@ -78,10 +93,13 @@ func (s *Supervisor) validateStartupSecrets(ctx context.Context, raw []byte, wan
 		modern = modern || member.SecretState != nil
 	}
 	for _, member := range message.Members {
-		modern = modern || member.SecretDelivery != nil
+		modern = modern || member.SecretDelivery != nil || len(member.ProtectedTrustedSecretValues) > 0
 	}
-	if modern && !api.ExactJSONFields(raw, startupSecretEnvelope{}) {
+	if (modern || message.NamedSSHKeys != nil) && !api.ExactJSONFields(raw, startupSecretEnvelope{}) {
 		return nil, secretIntentFailure()
+	}
+	if err := s.checkStartupNamedSSHKeys(root, message); err != nil {
+		return nil, err
 	}
 	var plan *startupSecretInput
 	var memberValues map[string]map[string]string
@@ -115,6 +133,7 @@ func (s *Supervisor) validateStartupSecrets(ctx context.Context, raw []byte, wan
 	}
 	s.mu.Lock()
 	s.startupSecrets, s.memberValues = plan, memberValues
+	s.startupNamedSSHKeys = cloneStartupNamedSSHKeys(message.NamedSSHKeys)
 	s.m.Run.StartEnvelope = false
 	s.mu.Unlock()
 	return primary, nil
@@ -136,7 +155,14 @@ func prepareStartupSecretInput(ctx context.Context, root host.Manifest, members 
 	}
 	plan := &startupSecretInput{Intent: api.SecretDeliveryIntent{Version: api.SecretDeliveryIntentV1, Modes: make(map[string]api.SecretMode), Binds: make(map[string]api.SecretBind)},
 		Values: make(map[string]api.Secret), SourceKinds: make(map[string][]string), Processes: make(map[string]processSecretInput)}
-	if err := plan.addProcess(ctx, root, message.SecretDelivery, message.Env); err != nil {
+	complete := false
+	defer func() {
+		if !complete {
+			clear(plan.Values)
+			clear(plan.ProtectedTrustedSecretValues)
+		}
+	}()
+	if err := plan.addProcess(ctx, root, message.SecretDelivery, message.Env, message.ProtectedTrustedSecretValues); err != nil {
 		return nil, err
 	}
 	if !message.AllowMissing {
@@ -160,7 +186,7 @@ func prepareStartupSecretInput(ctx context.Context, root host.Manifest, members 
 		if err := knownSessionSecretState(member.SecretState); err != nil {
 			return nil, err
 		}
-		if err := plan.addProcess(ctx, *member, byID[member.ID].SecretDelivery, checked[member.ID]); err != nil {
+		if err := plan.addProcess(ctx, *member, byID[member.ID].SecretDelivery, checked[member.ID], byID[member.ID].ProtectedTrustedSecretValues); err != nil {
 			return nil, err
 		}
 	}
@@ -175,10 +201,11 @@ func prepareStartupSecretInput(ctx context.Context, root host.Manifest, members 
 	if len(plan.SourceKinds) == 0 {
 		plan.SourceKinds = nil
 	}
+	complete = true
 	return plan, nil
 }
 
-func (p *startupSecretInput) addProcess(ctx context.Context, manifest host.Manifest, intent *api.SecretDeliveryIntent, values map[string]api.Secret) error {
+func (p *startupSecretInput) addProcess(ctx context.Context, manifest host.Manifest, intent *api.SecretDeliveryIntent, values map[string]api.Secret, protectedTrusted ...map[string]api.Secret) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -187,6 +214,16 @@ func (p *startupSecretInput) addProcess(ctx context.Context, manifest host.Manif
 	}
 	owned, names, err := host.PrepareSecretDelivery(intent, values, true, recordedSecretNames(manifest.Secrets))
 	if err != nil {
+		return err
+	}
+	if len(protectedTrusted) > 1 {
+		return secretIntentFailure()
+	}
+	var protected map[string]api.Secret
+	if len(protectedTrusted) == 1 {
+		protected = protectedTrusted[0]
+	}
+	if err := p.addTrustedProcess(ctx, *owned, protected, values); err != nil {
 		return err
 	}
 	process := processSecretInput{Names: names, Intent: *owned, Supplied: make(map[string]bool, len(values))}
@@ -217,6 +254,9 @@ func (p *startupSecretInput) addProcess(ctx context.Context, manifest host.Manif
 		}
 		process.Supplied[name] = true
 		if old, exists := p.Values[name]; exists && old != value {
+			return secretIntentFailure()
+		}
+		if trusted, exists := p.ProtectedTrustedSecretValues[name]; exists && trusted != value {
 			return secretIntentFailure()
 		}
 		p.Values[name] = value

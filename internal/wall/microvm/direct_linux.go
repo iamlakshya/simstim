@@ -36,7 +36,7 @@ func sessionDirect(spec wall.Spec) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	if kind == firecrackerBackend {
+	if kind.isFirecracker() {
 		// The pinned Firecracker block API uses buffered Sync IO. It has no
 		// direct-IO flag and cannot reuse Cloud Hypervisor's direct-IO proof.
 		return false, nil

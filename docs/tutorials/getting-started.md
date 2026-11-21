@@ -69,14 +69,16 @@ simstim host test my-server
 
 ## 3. Start a session
 
-Start a shell session that keeps running on the host:
+Start a shell session in a sandbox at the host's pinned floor:
 
 ```sh
 simstim new my-server --name first --detach
 simstim ls
 ```
 
-`ls` shows the session, with its state and folder.
+`ls` shows the session, with its state and folder. The floor comes from host preparation; a stronger level in your policy can raise it. `auto` keeps that saved choice. It does not choose a different level from each new probe.
+
+If the host has no saved floor, run `simstim host prepare my-server`. A host that offers only `none`, such as a container used for testing, needs the explicit exception `--wall none --downgrade`. Shared hosts never use the `process` level.
 
 To start an agent instead, name it. This opens the session in your terminal straight away:
 

@@ -208,12 +208,21 @@ func TestPartCleanupLeavesForeignReplacement(t *testing.T) {
 	}
 	f.Write([]byte("foreign"))
 	f.Close()
-	if err := part.Close(); err != nil {
-		t.Fatal(err)
+	if err := part.Close(); err == nil {
+		t.Fatal("foreign replacement became successful cleanup")
 	}
 	data, err := store.root.ReadFile(part.name)
 	if err != nil || string(data) != "foreign" {
 		t.Fatalf("foreign replacement removed or changed: %q %v", data, err)
+	}
+	if err := store.root.Remove(part.name); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.root.Rename(saved, part.name); err != nil {
+		t.Fatal(err)
+	}
+	if err := part.Close(); err != nil {
+		t.Fatal("same-source cleanup did not retry", err)
 	}
 }
 

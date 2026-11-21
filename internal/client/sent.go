@@ -22,8 +22,9 @@ func SentHeader(h Host, tier Tier, hostID string) string {
 }
 
 type sentTotal struct {
-	count uint64
-	last  time.Time
+	count        uint64
+	last         time.Time
+	hostExposure bool
 }
 
 // SentDetails shows recorded grant kinds, including never for those with no
@@ -42,6 +43,7 @@ func SentDetails(h Host, hostID string, records []GrantRecord) []Detail {
 		}
 		v := totals[r.Kind][r.Name]
 		v.count += uint64(r.Count)
+		v.hostExposure = v.hostExposure || r.Exposure == "host"
 		if r.LastAt.After(v.last) {
 			v.last = r.LastAt
 		}
@@ -72,7 +74,11 @@ func SentDetails(h Host, hostID string, records []GrantRecord) []Detail {
 			case OutboundRepo, OutboundPush, OutboundPublicPush:
 				rows[i].Items = append(rows[i].Items, CleanDetail(name))
 			default:
-				rows[i].Items = append(rows[i].Items, CleanDetail(name)+"  "+sentTimes(v))
+				label := CleanDetail(name)
+				if v.hostExposure {
+					label += " (exposed to host)"
+				}
+				rows[i].Items = append(rows[i].Items, label+"  "+sentTimes(v))
 			}
 		}
 	}

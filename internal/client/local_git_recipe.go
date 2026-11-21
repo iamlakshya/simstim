@@ -7,6 +7,7 @@ import (
 
 	"github.com/iamlakshya/simstim/internal/api"
 	"github.com/iamlakshya/simstim/internal/brand"
+	"github.com/iamlakshya/simstim/internal/seedmeta"
 )
 
 // localGitRecipe recognises the closed operations of the existing executor.
@@ -32,7 +33,8 @@ func localGitRecipe(args []string) bool {
 	}
 	switch args[0] {
 	case "ls-tree":
-		return len(args) == 5 && args[1] == "-z" && api.ValidGitOID(args[2]) && args[3] == "--" && (args[4] == "."+brand.Name || args[4] == "."+brand.Name+"/sandbox.toml")
+		return len(args) == 5 && args[1] == "-z" && api.ValidGitOID(args[2]) && args[3] == "--" && (args[4] == "."+brand.Name || args[4] == "."+brand.Name+"/sandbox.toml") ||
+			len(args) == 5+len(seedmeta.RootManifests()) && slices.Equal(args[1:3], []string{"-z", "--name-only"}) && api.ValidGitOID(args[3]) && args[4] == "--" && slices.Equal(args[5:], seedmeta.RootManifests())
 	case "rev-parse":
 		return localGitRevisionRecipe(args[1:])
 	case "cat-file":

@@ -114,7 +114,7 @@ func pin(c checked, files int) (pinned, error) {
 		real, err := os.Readlink("/proc/self/fd/" + strconv.Itoa(fd))
 		anonymous := false
 		if err == nil && b.File != nil {
-			anonymous, err = checkSuppliedBindV1(fd, b.Write, real)
+			anonymous, err = checkSuppliedBindV1(fd, b.Write, real, b.Path)
 		}
 		if err == nil && strings.HasSuffix(real, " (deleted)") && !anonymous {
 			err = errors.New("it was deleted")
@@ -340,7 +340,7 @@ func reopen(binds []bind) ([]int, error) {
 			var now string
 			now, err = os.Readlink("/proc/self/fd/" + strconv.Itoa(fd))
 			if err == nil {
-				anonymous, err = checkSuppliedBindV1(fd, b.Write, now)
+				anonymous, err = checkSuppliedBindV1(fd, b.Write, now, b.Path)
 			}
 			if err == nil && anonymous != b.AnonymousV1 {
 				err = errors.New("the supplied bind changed anonymous object class")

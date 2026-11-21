@@ -74,8 +74,8 @@ func projectedOptionalBoolean(p jsonValueProjection, span api.JSONSpan) (bool, e
 }
 
 func projectAgentRow(ctx context.Context, p jsonValueProjection, span, key api.JSONSpan, schema int, selected bool) (agentSandboxPolicy, error) {
-	known := []string{"session_id", "host_id", "ceiling", "ssh_agent", "secrets", "created_at", "request", "wall_intent", "policy_sources", "lineage", "delivery_intent"}
-	var fields [11]api.JSONSpan
+	known := []string{"session_id", "host_id", "ceiling", "ssh_agent", "secrets", "created_at", "request", "wall_intent", "policy_sources", "lineage", "delivery_intent", "image_selection_v1"}
+	var fields [12]api.JSONSpan
 	var facts agentSandboxPolicy
 	validity := agentPolicyRowValidity{wallNone: true}
 	err := p.Object(span, known, func(field api.JSONField) error {

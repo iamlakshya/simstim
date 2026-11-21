@@ -20,6 +20,7 @@ import (
 func TestConcurrentFirstImageRootsCompareUnderClientLock(t *testing.T) {
 	isolateRuntimeDelivery(t)
 	t.Setenv("DOCKER_CONFIG", t.TempDir())
+	registerImageFixtureHosts(t, "first", "second")
 	previous := http.DefaultTransport
 	body := []byte(`{"schemaVersion":2,"mediaType":"application/vnd.oci.image.manifest.v1+json","layers":[]}`)
 	http.DefaultTransport = runtimeDeliveryTransport(func(*http.Request) (*http.Response, error) {
@@ -60,6 +61,7 @@ func TestConcurrentFirstImageRootsCompareUnderClientLock(t *testing.T) {
 			}
 		})
 		connection.Features = []string{"images"}
+		bindImageFixturePeer(t, connection)
 		return connection
 	}
 	first := makePeer("first", strings.Repeat("a", 64), firstRelease)

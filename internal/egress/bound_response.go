@@ -30,6 +30,20 @@ func registryResponseSnapshots(state *memberState) (map[string]*responseEchoGrou
 		}
 	}
 	for _, secret := range state.secrets {
+		if secret.trusted != nil && !secretHasGuestUse(secret) {
+			for _, authority := range secret.trusted.Bind.Hosts {
+				if groups[authority] == nil {
+					groups[authority] = make(map[api.Secret][]responseEchoChoice)
+				}
+				values := slices.Clone(secret.history)
+				if secret.present {
+					values = append(values, secret.value)
+				}
+				for _, value := range values {
+					groups[authority][value] = append(groups[authority][value], responseEchoChoice{Identity: secret.identity, Forbidden: true})
+				}
+			}
+		}
 		if secret.bound == nil {
 			continue
 		}

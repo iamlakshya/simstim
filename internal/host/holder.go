@@ -40,34 +40,42 @@ type outFrame struct {
 }
 
 type hclient struct {
-	conn     net.Conn
-	w        *proto.Writer
-	out      chan outFrame
-	attached bool
-	once     sync.Once
-	done     chan struct{}
-	tr       clientTrace // the debug trace of this attach (holder_trace.go)
-	access   access      // what this connection may do (holder_peer.go)
+	helloLine *StartupLineV1
+	conn      net.Conn
+	w         *proto.Writer
+	out       chan outFrame
+	attached  bool
+	once      sync.Once
+	done      chan struct{}
+	tr        clientTrace // the debug trace of this attach (holder_trace.go)
+	access    access      // what this connection may do (holder_peer.go)
 }
 
 func (c *hclient) close() {
 	c.once.Do(func() {
 		close(c.done)
+		if c.helloLine != nil {
+			_ = c.helloLine.Close()
+		}
 		c.conn.Close()
 	})
 }
 
 // Holder owns one session: its PTY, output ring, socket and manifest.
 type Holder struct {
-	guest  *GuestHolder
-	ev     *guestEvents
-	vmTerm *guestpty.Terminal
-	id     string
-	log    *slog.Logger
-	ln     net.Listener
-	ptmx   *os.File
-	fd     int
-	cmd    *exec.Cmd
+	guest    *GuestHolder
+	ev       *guestEvents
+	vmTerm   *guestpty.Terminal
+	id       string
+	log      *slog.Logger
+	ln       net.Listener
+	ptmx     *os.File
+	fd       int
+	cmd      *exec.Cmd
+	main     *holderMainV1
+	ordinary *ownedOrdinaryHolderV1
+	waitDone chan struct{}
+	stopMu   sync.Mutex
 	// hookLn is the hook socket's listener. peerCheck is true when the
 	// holder checks where each peer runs (holder_peer.go).
 	hookLn    net.Listener
@@ -114,8 +122,9 @@ type Holder struct {
 	// readDone is closed when readLoop has read all the agent's output.
 	readDone chan struct{}
 	// The shadow terminal, for snapshots and query answers; nil if unavailable.
-	vt     *VT
-	ptyOut chan []byte // ordered writes to the PTY from the shadow terminal
+	vt         *VT
+	ptyOutDone chan struct{}
+	ptyOut     chan []byte // ordered writes to the PTY from the shadow terminal
 	// From screen rules.
 	scr       *screenModel
 	ruleState string
@@ -139,7 +148,7 @@ func RunHolder(id string) error {
 	if files, guestMode := guestHolder(); guestMode {
 		return runGuestHolder(id, files)
 	}
-	releaseLock, err := acquireHolderLock(id)
+	ordinary, releaseLock, err := acquireOrdinaryHolderV1(id)
 	if err != nil {
 		return err
 	}
@@ -149,6 +158,9 @@ func RunHolder(id string) error {
 		return err
 	}
 	defer pending.finish(releaseLock)
+	if err := bindOrdinaryHolderSocketsV1(ordinary, pending.peer); err != nil {
+		return err
+	}
 	m, err := loadStartingManifest(pending.ctx, id)
 	if err != nil {
 		return fmt.Errorf("load manifest: %w", err)
@@ -170,6 +182,8 @@ func RunHolder(id string) error {
 		ring:          ring.New(RingSize),
 		clients:       map[*hclient]struct{}{},
 		readDone:      make(chan struct{}),
+		waitDone:      make(chan struct{}),
+		ordinary:      ordinary,
 		syncFirstSave: true,
 		loadedName:    m.Name,
 	}
@@ -218,6 +232,9 @@ func (h *Holder) start() error {
 	if h.vmTerm != nil {
 		return h.startVMTerminal()
 	}
+	if h.waitDone == nil {
+		h.waitDone = make(chan struct{})
+	}
 	m := h.m
 	if len(m.Agent.Argv) == 0 {
 		return errors.New("no command to run")
@@ -237,11 +254,13 @@ func (h *Holder) start() error {
 	cmd.Env = append(append([]string(nil), m.Env...), h.secretEnv...)
 	cmd.Dir = m.Cwd
 	cols, rows := h.startSize()
+	main := prepareHolderMainV1(cmd)
 	ptmx, err := pty.StartWithSize(cmd, &pty.Winsize{Cols: clampCols(cols), Rows: clampRows(rows)})
 	cmd.Env, h.secretEnv = nil, nil // the agent has its copy; the holder keeps none
 	if err != nil {
 		return fmt.Errorf("start %s in a terminal: %w", argv[0], err)
 	}
+	h.main = main
 	h.ptmx = ptmx
 	h.fd = int(ptmx.Fd())
 	if _, ok := agents.Find(m.Agent.Kind); ok {
@@ -342,6 +361,9 @@ func (h *Holder) output(data []byte) {
 }
 
 func (h *Holder) waitLoop() {
+	if h.waitDone != nil {
+		defer close(h.waitDone)
+	}
 	var err error
 	var remote proto.Ended
 	if h.vmTerm != nil {
@@ -414,71 +436,4 @@ func (h *Holder) waitLoop() {
 	c := h.copyForSave()
 	h.mu.Unlock()
 	_ = h.save(c, false)
-}
-
-// updateStatus sets the session's state from the screen rules, the agent's
-// hooks and notifications, the memory warning, and its output. The caller
-// holds h.mu.
-func (h *Holder) updateStatus() {
-	if h.scr != nil && h.scr.dirty {
-		h.scr.dirty = false
-		h.ruleState, h.ruleID, _ = agents.Detect(h.m.Agent.Kind, h.scr.screen())
-		if full := h.scr.altScreen(); full != h.m.Status.FullScreen {
-			h.m.Status.FullScreen = full
-			h.dirty = true
-		}
-	}
-	state, src := h.agentState()
-	agentPrev := h.al.agent
-	h.al.agent = state
-	if h.mem.mark && state != StateNeedsInput {
-		// Close to the memory cap (holder_mem.go), after the agent's own wait.
-		state, src = StateNeedsInput, srcMemory
-	}
-	// The wait can also pass between the agent and the memory warning.
-	handover := state == StateNeedsInput && (src == srcMemory) != (h.m.Status.Source == srcMemory)
-	if state != h.m.Status.State || handover {
-		oom := h.m.Status.OOM
-		h.m.Status = Status{State: state, Since: time.Now().UTC(), Source: src, FullScreen: h.m.Status.FullScreen, OOM: oom}
-		switch {
-		case src == srcMemory:
-			h.m.Status.Reason = h.mem.reason()
-			h.mem.shown = time.Now()
-		case state == StateNeedsInput:
-			// The agent's question, if its hook gave one.
-			h.m.Status.Reason = h.notifyMsg
-		case oom:
-			// The memory cap stopped a process that the agent started.
-			h.m.Status.Reason = oomChildReason
-		}
-		h.dirty = true
-	}
-	if h.al.agent != agentPrev {
-		// Alerts follow the agent's own state, so its turns and questions
-		// count while the memory warning shows too.
-		h.alertState(agentPrev, h.al.agent)
-	}
-}
-
-// agentState is the session's state from the agent's own signals, without
-// the memory warning. The caller holds h.mu.
-func (h *Holder) agentState() (state, src string) {
-	state, src = StateIdle, "quiet"
-	switch {
-	case h.ruleState == StateNeedsInput:
-		state, src = StateNeedsInput, "screen:"+h.ruleID
-	case h.needInput:
-		state, src = StateNeedsInput, "notify"
-	case h.ruleState == StateWorking:
-		state, src = StateWorking, "screen:"+h.ruleID
-	case h.hookBusy:
-		state, src = StateWorking, "hook"
-	case h.busy:
-		state, src = StateWorking, "progress"
-	case h.hookSeen && !h.lastTurnEnd.IsZero() && time.Since(h.lastTurnEnd) < 3*time.Second:
-		state, src = StateIdle, "hook"
-	case time.Since(h.lastOut) < 3*time.Second:
-		state, src = StateWorking, "output"
-	}
-	return state, src
 }

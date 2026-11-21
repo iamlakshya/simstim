@@ -9,10 +9,11 @@ import (
 // NetworkRule is the structured file spelling of a net rule. Remove deletes
 // the exact inherited tuple, preserving Methods nil versus present-empty.
 type NetworkRule struct {
-	Target  string    `json:"target" toml:"target"`
-	Allow   bool      `json:"allow" toml:"allow"`
-	Methods *[]string `json:"methods,omitempty" toml:"methods,omitempty"`
-	Remove  bool      `json:"remove,omitempty" toml:"remove,omitempty"`
+	Target     string    `json:"target" toml:"target"`
+	Allow      bool      `json:"allow" toml:"allow"`
+	Methods    *[]string `json:"methods,omitempty" toml:"methods,omitempty"`
+	PublicOnly bool      `json:"public_only,omitempty" toml:"public_only,omitempty"`
+	Remove     bool      `json:"remove,omitempty" toml:"remove,omitempty"`
 }
 
 // SameHTTPMethods compares canonical presence and exact-case method sets.

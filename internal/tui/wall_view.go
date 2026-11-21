@@ -46,16 +46,20 @@ func sessionWallLevel(s client.Session) string {
 	if level == "process" {
 		return "process (shares your account)"
 	}
+	if account := sessionAccountLabelV1(s); account != "" {
+		return level + " (" + account + ")"
+	}
 	return level
 }
 
 // sessionWallWarnings lists names only. No secret value enters the launcher.
 // The values remain raw in the model for requests and JSON; this copy is text.
 func sessionWallWarnings(s client.Session) []string {
+	runtimeWarnings := sessionRuntimeWarningsV1(s)
 	if s.Wall == nil {
-		return nil
+		return runtimeWarnings
 	}
-	var out []string
+	out := runtimeWarnings
 	if s.Wall.DowngradedFrom != "" {
 		out = append(out, "! "+wallLevel(s.Wall.Level)+", below the floor "+wallLevel(s.Wall.DowngradedFrom))
 	}

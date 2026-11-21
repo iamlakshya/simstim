@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"strings"
 	"time"
 
@@ -20,9 +21,14 @@ import (
 
 // rmOpts are the words and flags of host rm.
 type rmOpts struct {
-	name    string
-	destroy bool
-	force   bool
+	name         string
+	destroy      bool
+	purge        bool
+	deleteLogins bool
+	rootStep     string
+	rootStepSet  bool
+	asJSON       bool
+	force        bool
 	// confirm is the name that --confirm gave, and confirmed is true when
 	// the flag was given.
 	confirm   string
@@ -38,19 +44,26 @@ func hostRmCmd() *cobra.Command {
 			"A host made by `host create` also has a machine. At a terminal, rm says what the machine\n" +
 			"holds, and asks you to type the host's name to delete it too. --destroy deletes it: it\n" +
 			"needs the typed name, or --confirm with the host's name. It refuses while a session is\n" +
-			"working, unless you pass --force.",
+			"working, unless you pass --force.\n" +
+			"--purge removes installed host resources before the destroy and forget. It needs the typed\n" +
+			"host name. Agent logins stay unless you answer their separate question or use --delete-logins.",
 		Example:           "  " + brand.Name + " host rm my-vps\n  " + brand.Name + " host rm lima --destroy --confirm lima",
 		Args:              cobra.ExactArgs(1),
 		ValidArgsFunction: completeHostArg,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			o.name, o.confirmed = args[0], cmd.Flags().Changed("confirm")
+			o.rootStepSet = cmd.Flags().Changed("root-step")
 			return removeHost(cmd.Context(), prompts(cmd), o)
 		},
 	}
 	f := cmd.Flags()
+	addJSON(cmd, &o.asJSON)
+	f.BoolVar(&o.purge, "purge", false, "remove installed host resources, stop every session and report what remains")
+	f.BoolVar(&o.deleteLogins, "delete-logins", false, "with --purge, also delete the agent login files after removing host resources")
+	addRootStep(cmd, &o.rootStep, "with --purge, handle the fixed root undo: run, print or skip (default depends on tier and sandbox history)")
 	f.BoolVar(&o.destroy, "destroy", false, "also delete the machine that host create made: its VM, container or sandbox, with its disk and every session on it")
-	addForce(cmd, &o.force, "with --destroy, delete the machine although a session is working")
-	addConfirm(cmd, &o.confirm, "with --destroy, the host's `name`, typed in place of the question")
+	addForce(cmd, &o.force, "with --destroy or --purge, discard working sessions and unsaved or unpulled work")
+	addConfirm(cmd, &o.confirm, "with --destroy or --purge, the host's `name`, typed in place of the question")
 	return cmd
 }
 
@@ -74,6 +87,7 @@ func hostDestroyCmd() *cobra.Command {
 	}
 	addForce(cmd, &o.force, "destroy it even while a session is working")
 	addYes(cmd, &yes, "the same as --confirm with the host's name")
+	addJSON(cmd, &o.asJSON)
 	return cmd
 }
 
@@ -83,6 +97,15 @@ func (o rmOpts) line(more ...string) string {
 	parts := []string{brand.Name, "host", "rm", shellWord(o.name)}
 	if o.destroy {
 		parts = append(parts, "--destroy")
+	}
+	if o.purge {
+		parts = append(parts, "--purge")
+	}
+	if o.deleteLogins {
+		parts = append(parts, "--delete-logins")
+	}
+	if o.rootStepSet {
+		parts = append(parts, "--root-step", shellWord(o.rootStep))
 	}
 	if o.force {
 		parts = append(parts, "--force")
@@ -100,6 +123,20 @@ func (o rmOpts) line(more ...string) string {
 func removeHost(ctx context.Context, p *prompter, o rmOpts) error {
 	if err := ctx.Err(); err != nil {
 		return err
+	}
+	if o.asJSON {
+		quiet := *p
+		quiet.out = io.Discard
+		quiet.on = false
+		quiet.ctx = client.WithoutInput(ctx)
+		p = &quiet
+		ctx = quiet.ctx
+	}
+	if o.purge {
+		return removePurgedHost(ctx, p, o)
+	}
+	if o.deleteLogins || o.rootStepSet {
+		return &client.UserError{Msg: "--delete-logins and --root-step need --purge", Hint: o.line("--purge"), Code: "missing_flag", Kind: client.KindUsage}
 	}
 	if !o.destroy && (o.confirmed || o.force) {
 		return withoutDestroy(o)
@@ -162,6 +199,9 @@ func removeHost(ctx context.Context, p *prompter, o rmOpts) error {
 		return err
 	}
 
+	if o.asJSON {
+		return printJSON(hostRemovalJSONV1{Host: client.CleanLine(h.Name), Removed: true, Destroyed: destroy || m.gone})
+	}
 	switch {
 	case h.Machine == nil:
 		fmt.Fprintf(p.out, "Forgot %s. Its sessions and the helper stay on the host.\n", h.Name)

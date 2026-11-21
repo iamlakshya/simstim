@@ -14,7 +14,14 @@ import (
 	"github.com/iamlakshya/simstim/internal/supply"
 )
 
-const startupLoanOperationV1 = "startup_loan_v1"
+const (
+	startupLoanOperationV1             = "startup_loan_v1"
+	startupLoanPurposeSandboxPrepareV1 = "sandbox-prepare"
+)
+
+type sandboxPrepareBootV1 struct {
+	operation *SessionOperation
+}
 
 // startupLoanV1 is bounded correlation, never authority. The actual outside
 // launch, current native sender and same held OP descriptor supply authority.
@@ -26,20 +33,26 @@ type startupLoanV1 struct {
 	Need      string `json:"need"`
 	Runtime   string `json:"runtime"`
 	Automatic string `json:"automatic,omitempty"`
+	// PrepareParent narrows only a genuine private prepare loan. It is a
+	// comparison with its issuer's actual parent, never cleanup authority.
+	PrepareParent *cachefs.Reference `json:"prepare_parent,omitempty"`
 }
 
 type originalBootV1 struct {
-	gvisorIssued bool // guarded by owner.mu; one physical userspace-kernel start per accepted loan
-	owner        *OwnedSupervisorLease
-	operation    *SessionOperation
-	line         *StartupLineV1
-	loan         startupLoanV1
-	need         []byte
-	currentNeed  []byte
-	runtime      *supply.Manifest
-	ready        bool
-	readyRequest uint64
-	readyReplied bool
+	placement       *placement // actual admitted process owner; cleanup never resolves a replacement
+	policyNext      []byte     // immutable protected next-input capsule captured under SAME original OP
+	gvisorIssued    bool       // guarded by owner.mu; one physical userspace-kernel start per accepted loan
+	owner           *OwnedSupervisorLease
+	operation       *SessionOperation
+	line            *StartupLineV1
+	loan            startupLoanV1
+	need            []byte
+	currentNeed     []byte
+	runtime         *supply.Manifest
+	ready           bool
+	readyRequest    uint64
+	readyReplied    bool
+	slotReservation *originalSlotStartupV2
 }
 
 func startupRuntimeBytes(m *Manifest) ([]byte, error) {
@@ -77,9 +90,16 @@ func (owner *OwnedSupervisorLease) AcceptStartupLoan(ctx context.Context, line *
 		return nil, errors.Join(err, line.RejectAncillary())
 	}
 	if loan.Version != 1 || loan.Primary != owner.native.id || len(loan.Nonce) != 64 || !supply.IsHex64(loan.Nonce) ||
-		loan.Purpose != "ordinary" && loan.Purpose != "automatic" ||
+		loan.Purpose != "ordinary" && loan.Purpose != "automatic" && loan.Purpose != startupLoanPurposeSandboxPrepareV1 ||
 		loan.Need != "" && !supply.IsHex64(loan.Need) || loan.Runtime != "" && !supply.IsHex64(loan.Runtime) {
 		return nil, errors.Join(sessionLeaseError("the startup loan has invalid correlation"), line.RejectAncillary())
+	}
+	if loan.Purpose == startupLoanPurposeSandboxPrepareV1 {
+		if loan.PrepareParent == nil || !loan.PrepareParent.Known() || !loan.PrepareParent.Directory {
+			return nil, errors.Join(sessionLeaseError("the private preparation loan has no original parent comparison"), line.RejectAncillary())
+		}
+	} else if loan.PrepareParent != nil {
+		return nil, errors.Join(sessionLeaseError("an ordinary startup acquired another purpose's parent comparison"), line.RejectAncillary())
 	}
 	file, sender, err := line.takeLoanFile()
 	if err != nil {
@@ -101,7 +121,7 @@ func (owner *OwnedSupervisorLease) AcceptStartupLoan(ctx context.Context, line *
 	candidate := line.candidate
 	validCandidate := !line.closed && candidate != nil && candidate.owner == owner && candidate.line == line && candidate.nonce == loan.Nonce
 	line.mu.Unlock()
-	if !validCandidate {
+	if !validCandidate || line.nativePeer == nil || candidate.peer != line.nativePeer {
 		return nil, sessionLeaseError("the loan is not the response to this original candidate startup connection")
 	}
 	if err := candidate.peer.CheckSender(sender); err != nil {
@@ -126,8 +146,9 @@ func (owner *OwnedSupervisorLease) AcceptStartupLoan(ctx context.Context, line *
 		operation.Close()
 		return nil, errors.Join(sessionLeaseError("the startup loan differs from the protected primary"), err)
 	}
-	if loan.Purpose == "automatic" {
-		if !supply.IsHex64(loan.Automatic) || startupDigest(m.AutomaticRestore) != loan.Automatic {
+	switch loan.Purpose {
+	case "automatic":
+		if IsSandboxPrepareManifestV1(m) || !supply.IsHex64(loan.Automatic) || startupDigest(m.AutomaticRestore) != loan.Automatic {
 			operation.Close()
 			return nil, automaticRestoreError()
 		}
@@ -136,15 +157,36 @@ func (owner *OwnedSupervisorLease) AcceptStartupLoan(ctx context.Context, line *
 			return nil, err
 		}
 		operation.automaticBoot = &AutomaticBootOperationV1{operation: operation, plan: bytes.Clone(m.AutomaticRestore)}
-	} else if loan.Automatic != "" || len(m.AutomaticRestore) != 0 {
-		operation.Close()
-		return nil, automaticRestoreError()
+	case startupLoanPurposeSandboxPrepareV1:
+		if loan.Automatic != "" || len(m.AutomaticRestore) != 0 {
+			operation.Close()
+			return nil, sessionLeaseError("the sandbox-prepare startup loan cannot carry automatic restore metadata")
+		}
+		if err := validateSandboxPrepareBootManifestV1(m); err != nil {
+			operation.Close()
+			return nil, err
+		}
+		operation.sandboxPrepareBoot = &sandboxPrepareBootV1{operation: operation}
+	default:
+		if loan.Automatic != "" || len(m.AutomaticRestore) != 0 {
+			operation.Close()
+			return nil, automaticRestoreError()
+		}
+		if IsSandboxPrepareManifestV1(m) {
+			operation.Close()
+			return nil, sessionLeaseError("an ordinary startup loan cannot launch a fixed sandbox-prepare record")
+		}
 	}
 	if err := errors.Join(peerOwner.Check(), checkBorrowedFlockV1(file, sender), native.check(ctx), ctx.Err()); err != nil {
 		operation.Close()
 		return nil, err
 	}
-	boot := &originalBootV1{owner: owner, operation: operation, line: line, loan: loan, need: bytes.Clone(m.VMNeedV1), currentNeed: bytes.Clone(m.VMNeedV1)}
+	placement, err := admittedBootPlacementV1(ctx)
+	if err != nil {
+		operation.Close()
+		return nil, err
+	}
+	boot := &originalBootV1{placement: placement, policyNext: bytes.Clone(m.PolicyNext), owner: owner, operation: operation, line: line, loan: loan, need: bytes.Clone(m.VMNeedV1), currentNeed: bytes.Clone(m.VMNeedV1)}
 	if m.RuntimeManifest != nil {
 		clone := *m.RuntimeManifest
 		clone.Items = append([]supply.Item(nil), clone.Items...)
@@ -163,6 +205,12 @@ func (owner *OwnedSupervisorLease) AcceptStartupLoan(ctx context.Context, line *
 	}
 	owner.pending, owner.startup = candidate, boot
 	operation.originalBoot = boot
+	if operation.IsSandboxPrepareBootV1() {
+		// Only this genuinely accepted private purpose resumes interrupted
+		// control frames on the SAME physical reader. Ordinary OP1/native3
+		// roles and all other startup consumers retain their existing limits.
+		line.prepareCursor = &sandboxPrepareFrameCursorV1{}
+	}
 	return operation, nil
 }
 

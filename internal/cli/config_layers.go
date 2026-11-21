@@ -75,13 +75,20 @@ func (c *checker) layerForbiddenKey(p keyPath) bool {
 	if !forbiddenLayerKey(p) {
 		return false
 	}
-	c.add(p, finding{Code: "layer_key", Message: ref(p) + " cannot grant a destination; locks hold values and denies"})
+	if hostRuleForbiddenKey(p) {
+		c.add(p, finding{Code: "host_rule_layer", Message: ref(p) + " may select a host only in a profile, repository section or session"})
+	} else {
+		c.add(p, finding{Code: "layer_key", Message: ref(p) + " cannot grant a destination; locks hold values and denies"})
+	}
 	return true
 }
 
 func forbiddenLayerKey(p keyPath) bool {
 	if len(p) < 2 {
 		return false
+	}
+	if hostRuleForbiddenKey(p) {
+		return true
 	}
 	last := p[len(p)-1].name
 	locked := p[0].name == "lock" || len(p) > 1 && p[0].name == "host" && p[1].name == "lock"
@@ -192,4 +199,11 @@ func writeConfigLayers(w io.Writer, layers []client.LayerDescription) {
 		}
 		fmt.Fprintf(w, "  %-12s %s\n", client.CleanLine(label), client.CleanLine(value))
 	}
+}
+
+func hostRuleForbiddenKey(p keyPath) bool {
+	if len(p) < 2 || p[len(p)-2].name != "sandbox" || p[len(p)-1].name != "host" {
+		return false
+	}
+	return p[0].name != "profiles" && p[0].name != "repos"
 }

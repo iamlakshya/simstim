@@ -21,11 +21,11 @@ func TestOCIUsesFreshHomeAndOnlyTypedProcessMounts(t *testing.T) {
 		t.Fatalf("unsafe OCI boundary: %+v", oci)
 	}
 	for _, mount := range oci.Mounts {
-		if (mount.Destination == "/home/agent" || mount.Destination == "/run") && (!slices.Contains(mount.Options, "uid=1000") || !slices.Contains(mount.Options, "gid=1000")) {
+		if mount.Destination == "/run" && (!slices.Contains(mount.Options, "uid=1000") || !slices.Contains(mount.Options, "gid=1000")) {
 			t.Fatal("private writable filesystem does not belong to the virtual guest user", mount)
 		}
-		if mount.Destination == "/home/agent" && (mount.Type != "tmpfs" || !slices.Contains(mount.Options, "mode=700")) {
-			t.Fatal("home is not fresh", mount)
+		if mount.Destination == "/home/agent" && (mount.Type != "bind" || mount.Source != "/home/agent" || !slices.Contains(mount.Options, "rbind") || !slices.Contains(mount.Options, "rw")) {
+			t.Fatal("home lost its actual fresh A/gofer backing role", mount)
 		}
 		if mount.Destination == "/usr" && !slices.Contains(mount.Options, "ro") {
 			t.Fatal("system is writable")

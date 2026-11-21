@@ -64,6 +64,9 @@ func applyBoundUpdates(ctx context.Context, state *memberState, values map[strin
 			secret.history = append(secret.history, secret.value)
 		}
 		secret.value, secret.present = value, true
+		if secret.trusted != nil {
+			secret.trustedArmed = false
+		}
 		secret.valueEpoch = epochs[secret.identity]
 		state.secrets[name] = secret
 		changed = append(changed, name)

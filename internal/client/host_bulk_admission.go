@@ -34,6 +34,9 @@ func saveHostsWithOPAdmission(ctx context.Context, hosts []Host) error {
 	if err != nil {
 		return err
 	}
+	if err := checkJoinedBulkRows(old, frozen); err != nil {
+		return err
+	}
 	if err := checkGenericHostMachineSources(old, frozen); err != nil {
 		return err
 	}

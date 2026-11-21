@@ -44,6 +44,9 @@ func (g *Init) request(w *proto.Writer, req proto.Request) {
 	if g.imageSaveControlV1(req, reply) {
 		return
 	}
+	if g.freezeControlV1(req, reply) {
+		return
+	}
 	if g.vm != nil {
 		var err error
 		finish, err = g.vm.controlOperation()
@@ -53,6 +56,16 @@ func (g *Init) request(w *proto.Writer, req proto.Request) {
 		}
 	}
 	switch req.Op {
+	case proto.CtlRefsV1:
+		result, err := g.snapshotRefsV1(req.Args)
+		reply(result, err)
+	case proto.CtlForkBranchesV1:
+		var args proto.CtlForkBranchesArgsV1
+		if !api.ExactJSONFields(req.Args, args) || json.Unmarshal(req.Args, &args) != nil {
+			reply(nil, snapshotGitErrorV1("the fork branch request is invalid"))
+			return
+		}
+		reply(struct{}{}, g.renameForkBranchesV1(args.Parent, args.Child))
 	case proto.CtlPortsV1:
 		reply(g.portClaims(), nil)
 	case proto.CtlReverseStartV1:
@@ -75,6 +88,9 @@ func (g *Init) request(w *proto.Writer, req proto.Request) {
 	case proto.CtlMemberPrepare:
 		result, err := g.prepareMember(req.Args)
 		reply(result, err)
+	case proto.CtlMemberResumePrepare:
+		result, err := g.prepareMemberResume(req.Args)
+		reply(result, err)
 	case proto.CtlMemberAbort:
 		result, err := g.abortPreparedMember(req.Args)
 		reply(result, err)
@@ -82,7 +98,7 @@ func (g *Init) request(w *proto.Writer, req proto.Request) {
 	case proto.CtlMemberStore:
 		reply(struct{}{}, g.storePreparedMember(req.Args))
 	case proto.CtlGuestCapabilities:
-		reply(proto.CtlGuestFeatures{Version: 1, Features: g.imageSaveGuestFeaturesV1([]string{proto.GuestSessionPrepareV1, proto.GuestMemberPrepareV1, proto.FeatureDecoyFilesV1, proto.FeaturePackageManagersV1, inputtransfer.Feature, inputtransfer.PrimaryPolicyFeature, api.FeatureBoundSecrets})}, nil)
+		reply(proto.CtlGuestFeatures{Version: 1, Features: g.imageSaveGuestFeaturesV1([]string{proto.GuestSessionPrepareV1, proto.GuestMemberPrepareV1, proto.FeatureDecoyFilesV1, proto.FeaturePackageManagersV1, inputtransfer.Feature, inputtransfer.PrimaryPolicyFeature, api.FeatureBoundSecrets, api.FeatureNamedSSHKeysV1})}, nil)
 	case proto.CtlPrepare:
 		result, err := g.prepareController(req.Args)
 		reply(result, err)
@@ -97,6 +113,9 @@ func (g *Init) request(w *proto.Writer, req proto.Request) {
 			return
 		}
 		result, err := g.vm.prepare(plan.Args)
+		reply(result, err)
+	case proto.CtlPurgeWorkInspectV1:
+		result, err := g.inspectPurgeWorkV1(req.Args)
 		reply(result, err)
 	case proto.CtlBundlePrepare:
 		var a proto.CtlBundleArgs
@@ -166,6 +185,14 @@ func (g *Init) request(w *proto.Writer, req proto.Request) {
 			return
 		}
 		reply(struct{}{}, g.stopMember(a.Session))
+	case proto.CtlEditorPrepareV1:
+		if g.vm != nil && !g.vm.prepared() {
+			reply(nil, vmError("the VM must be prepared before editor operations"))
+			return
+		}
+		reply(struct{}{}, g.prepareEditorV1(req.Args))
+	case proto.CtlEditorCancelV1:
+		reply(struct{}{}, g.cancelEditorV1(req.Args))
 	case proto.CtlExec:
 		if g.vm != nil && !g.vm.prepared() {
 			reply(nil, vmError("the VM must be prepared before commands"))
@@ -198,6 +225,12 @@ func (g *Init) request(w *proto.Writer, req proto.Request) {
 		if err != nil {
 			reply(nil, fmt.Errorf("read start: %w", err))
 			return
+		}
+		if a.ForkOf != "" {
+			if err := g.renameForkBranchesV1(a.ForkOf, a.Session); err != nil {
+				reply(nil, err)
+				return
+			}
 		}
 		g.mu.Lock()
 		prepared := a.PreparedClaim != "" && g.preparedMatchesLocked(a, proto.CtlStart, memberReady)

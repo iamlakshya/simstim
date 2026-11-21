@@ -134,7 +134,7 @@ func walkAgentReceiptRelations(p *api.JSONProjection, plan sandboxReceiptRelatio
 			continue
 		}
 		group := sandboxReceiptRelationGroup(index)
-		if group <= receiptOriginalBinds {
+		if group <= receiptOriginalBinds || group == receiptStatePrimary || group == receiptStateTrusted {
 			fields, err := p.Fields(span)
 			if err != nil {
 				return err

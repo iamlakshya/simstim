@@ -20,6 +20,8 @@ import (
 type InstalledAgentsReceiptV1 struct {
 	mu          sync.RWMutex
 	once        sync.Once
+	closeMu     sync.Mutex
+	finished    bool
 	disk        image.AgentDiskV1
 	lease       *image.Lease
 	store       *image.Store
@@ -31,6 +33,8 @@ type InstalledAgentsReceiptV1 struct {
 
 // EnsureInstalledAgentsV1 builds from the canonical table and pinned host
 // scope. The caller closes its receipt after exact metadata publication/use.
+// A nonnil receipt on error retains the SAME failed cleanup owner. The caller
+// must adopt it before handling the error and retry Close until it succeeds.
 func EnsureInstalledAgentsV1(ctx context.Context) (receipt *InstalledAgentsReceiptV1, returned error) {
 	if runtime.GOOS != "linux" || runtime.GOARCH != "amd64" && runtime.GOARCH != "arm64" {
 		return nil, agentsBuildFailure("this host does not support the Linux agents disk converter")
@@ -51,10 +55,9 @@ func ensureInstalledAgentsPublicationV1(publication *runtimePublication) (receip
 	defer func() {
 		if returned != nil {
 			if publication.ctx.Err() != nil {
-				returned = context.Cause(publication.ctx)
+				returned = errors.Join(returned, context.Cause(publication.ctx))
 			}
-			returned = errors.Join(returned, owned.Close())
-			receipt = nil
+			finishAgentsFactoryV1(&receipt, &returned)
 		}
 	}()
 	login, err := LoginEnvContext(publication.ctx, 15*time.Second)
@@ -84,6 +87,19 @@ func ensureInstalledAgentsPublicationV1(publication *runtimePublication) (receip
 		}
 	}()
 	return receipt, nil
+}
+
+// finishAgentsFactoryV1 transfers the SAME native object on cleanup error.
+// It never turns an error into an inventory or creates a replacement owner.
+func finishAgentsFactoryV1(receipt **InstalledAgentsReceiptV1, returned *error) {
+	if *returned == nil || *receipt == nil {
+		return
+	}
+	cleanup := (*receipt).Close()
+	*returned = errors.Join(*returned, cleanup)
+	if cleanup == nil {
+		*receipt = nil
+	}
 }
 
 // Inventory returns an independent outside-G11 producer description. It does
@@ -132,18 +148,34 @@ func (r *InstalledAgentsReceiptV1) Close() error {
 		r.mu.Lock()
 		defer r.mu.Unlock()
 		r.closed = true
-		if r.lease != nil {
-			r.closeErr = errors.Join(r.closeErr, r.lease.Close())
-		}
-		if r.store != nil {
-			r.closeErr = errors.Join(r.closeErr, r.store.Close())
-		}
-		if r.publication != nil {
-			r.closeErr = errors.Join(r.closeErr, r.publication.close())
-		}
-		if r.done != nil {
-			close(r.done)
-		}
 	})
-	return r.closeErr
+	r.closeMu.Lock()
+	defer r.closeMu.Unlock()
+	if r.finished {
+		return nil
+	}
+	if r.lease != nil {
+		if err := r.lease.Close(); err != nil {
+			r.closeErr = err
+			return err
+		}
+	}
+	if r.store != nil {
+		if err := r.store.Close(); err != nil {
+			r.closeErr = err
+			return err
+		}
+	}
+	if r.publication != nil {
+		if err := r.publication.close(); err != nil {
+			r.closeErr = err
+			return err
+		}
+	}
+	if r.done != nil {
+		close(r.done)
+	}
+	r.finished = true
+	r.closeErr = nil
+	return nil
 }

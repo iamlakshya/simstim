@@ -12,6 +12,10 @@ const (
 	grantLocalForge
 	grantLocalRoot
 	grantImageSave
+	grantNetworkHold
+	grantRuntimeUpgrade
+	grantPurge
+	grantHostPrepare
 )
 
 func requestGrantPurpose(r *GrantRequest) grantPurpose {
@@ -34,6 +38,9 @@ func requireRemoteGrantRequest(ctx context.Context) error {
 		}
 		if purpose != grantRemote {
 			return grantPurposeError()
+		}
+		if err := checkAutoNewReadyV1(ctx, r); err != nil {
+			return err
 		}
 	}
 	return nil

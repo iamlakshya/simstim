@@ -141,7 +141,7 @@ func TestBoundedReceiptMatchesFullKnownAndFutureGrammar(t *testing.T) {
 			valid := true
 			switch kind {
 			case "future wrapper":
-				receipt["version"] = 2
+				receipt["version"] = 4
 				receipt["revision"] = 99
 			case "future source":
 				source["version"] = 2
@@ -188,13 +188,13 @@ func TestBoundedReceiptOriginalNamesUseExactSortedCompactedSet(t *testing.T) {
 // TEST reference only: production uses the actual counted SAME-store phase.
 func receiptTestRelationPhase(t *testing.T, p *api.JSONProjection) sandboxReceiptRelationPhase {
 	return func(plan sandboxReceiptRelationPlan, check func(sandboxReceiptRelationLookup) error) error {
-		var groups [6]map[string]api.JSONSpan
+		var groups [8]map[string]api.JSONSpan
 		for group, span := range plan.Groups {
 			groups[group] = make(map[string]api.JSONSpan)
 			if span.End == 0 {
 				continue
 			}
-			if group <= int(receiptOriginalBinds) {
+			if group <= int(receiptOriginalBinds) || group == int(receiptStatePrimary) || group == int(receiptStateTrusted) {
 				fields, err := p.Fields(span)
 				if err != nil {
 					return err

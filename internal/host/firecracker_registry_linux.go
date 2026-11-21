@@ -24,7 +24,7 @@ func init() {
 // native storage domain and protected publisher as the other VM backend.
 func NewFirecrackerDriver() (*firecracker.Driver, error) {
 	return firecracker.New(firecracker.Options{Facts: microVMFacts, Identity: microVMIdentity,
-		Domain: microVMStoreDomain, Reference: recordVMAuthority, Diagnostic: recordVMDiagnostic})
+		Domain: microVMStoreDomain, Reference: recordVMAuthority, Diagnostic: recordVMDiagnostic, ForkDiskV1: withOriginalForkDiskDataV1, ReservationV2: withOriginalCheckpointReservationV2, ReservationSelectedV2: hasOriginalCheckpointReservationV2})
 }
 
 type firecrackerRegistration struct{}
@@ -86,6 +86,6 @@ func FirecrackerResourcesWithPublisherV1(publish func(context.Context, wall.Spec
 	}
 	return &vmResourcesV1{makeDriver: func() (wall.Driver, error) {
 		return firecracker.New(firecracker.Options{Facts: microVMFacts, Identity: microVMIdentity,
-			Domain: microVMStoreDomain, Reference: publish, Diagnostic: recordVMDiagnostic})
+			Domain: microVMStoreDomain, Reference: publish, Diagnostic: recordVMDiagnostic, ForkDiskV1: withOriginalForkDiskDataV1, ReservationV2: withOriginalCheckpointReservationV2, ReservationSelectedV2: hasOriginalCheckpointReservationV2})
 	}}, nil
 }

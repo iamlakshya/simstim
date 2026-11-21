@@ -315,12 +315,15 @@ The agent owns the whole terminal: every row and every column. There is no borde
 
 1. **Where.** A target from `~/.ssh/config` (↑↓ pick, and typing filters), a name, and an optional extra SSH config file.
 2. **Test.** Each check shows the spinner, then `✓` or `✕` with the time it took. A failure shows the error and its next step. The first check is the host key, which the wizard pins as `host add` does, before it connects (isolation spec 14.7.1). When your settings do not name the key, the step shows its fingerprint and the command that prints it on the host, with `enter pin this key` and `esc back`.
-3. **Install the helper.** This is the consent screen. It says what is installed and where, what else changes (linger, terminfo), and that nothing listens on the network.
-4. **Ready.** The host is saved with its pin, and Esc waits for that save to finish. The agents found, the system, and the memory for sessions. The host's sessions are now open behind the sheet. When a first-class or supported agent is missing or not logged in, Enter goes on to the agents. Otherwise it starts a session.
-5. **Agents.** The checklist: every agent with an installer, first-class and supported ones first. An installed agent has a green `✓`, a ticked one a cyan `●`, the rest a faint `○`, each with its state. The best-effort agents wait under a fold, `▸ 5 more agents, best effort`, which Enter or Space opens. Space ticks, and Enter installs what is ticked.
+3. **Tier.** Who else has root on the host (`Only me`, `Someone else`, `A machine for one task`), setting `own`, `shared` or `throwaway`.
+4. **Install the helper.** This is the consent screen when the helper is not installed yet. It says what is installed and where, what else changes (linger, terminfo), and that nothing listens on the network.
+5. **Sandboxes.** After the host is saved with its pin, separate saved-host requests probe the sandbox drivers and verify the pinned runtime and images. When no optional root step is needed, the wizard runs the short sandbox test boot at once and advances on success. When optional root setup can unlock a stronger wall, the sheet pauses (`enter root step   s skip   esc close`). If the test boot fails, the floor stays unchanged (`enter try again   s continue   esc close`).
+6. **Root step.** Shows each privileged step, its command and the script's SHA-256 before anything runs. On an `own` or `throwaway` host, Enter runs with `sudo` in the terminal; on a `shared` host, Enter prints the script for the owner, and `r` asks for the exact host name before running `sudo`. `p` prints, `s` skips, and Esc goes back to Sandboxes.
+7. **Ready.** Shows `connect`, `linger`, `terminfo`, the agents found, the system, the memory for sessions, and the sandbox `Floor`. If no sandbox wall was verified yet, the headline says the host is saved and its sandbox wall is not ready yet, rather than claiming it is ready. When a first-class or supported agent is missing or not logged in, Enter goes on to the agents. Otherwise it starts a session.
+8. **Agents.** The checklist: every agent with an installer, first-class and supported ones first. An installed agent has a green `✓`, a ticked one a cyan `●`, the rest a faint `○`, each with its state. The best-effort agents wait under a fold, `▸ 5 more agents, best effort`, which Enter or Space opens. Space ticks, and Enter installs what is ticked.
 
    ```text
-     ── Agents on pi ───────────────────────────────────────────── step 5 of 6 ──
+     ── Agents on pi ──────────────────────────────────────────── step 8 of 10 ──
 
        Tick the agents to install on pi. Each one installs with its vendor's
        own installer, in a session you watch.
@@ -334,8 +337,8 @@ The agent owns the whole terminal: every row and every column. There is no borde
        space tick   enter install 1 agent   esc back
    ```
 
-6. **Install, then log in.** One sheet for each install, then one for each agent that is installed but not logged in. Each shows the command, where it comes from, and the session it runs in (`install-codex`, `login-codex`). Enter starts the session and attaches; the user answers the installer or the login there. When they detach, or the session ends, the sheet checks the host again, and the next sheet shows how it went. `s` skips one, and Esc stops the rest.
-7. **Done.** Each agent with its mark (`✓` ready, `!` not logged in, `?` login unknown, `✕` missing) and the step to try, then the command for the first session. Enter opens the new-session form with that agent chosen.
+9. **Install, then log in.** One sheet for each install (step 9 of 10), then one for each agent that is installed but not logged in (step 10 of 10). Each shows the command, where it comes from, and the session it runs in (`install-codex`, `login-codex`). Enter starts the session and attaches; the user answers the installer or the login there. When they detach, or the session ends, the sheet checks the host again, and the next sheet shows how it went. `s` skips one, and Esc stops the rest.
+10. **Done.** Each agent with its mark (`✓` ready, `!` not logged in, `?` login unknown, `✕` missing) and the step to try, then the command for the first session. Enter opens the new-session form with that agent chosen.
 
 ### 2.11 Fast paths
 
@@ -581,6 +584,9 @@ A new session without a host uses `SIMSTIM_DEFAULT_HOST`, then the saved choice 
 | `simstim pull <address> [--into <branch>] [--force] [--id]` | Brings a session's branch into the git repository in the current folder |
 | **Hosts** | |
 | `simstim host add <name> [<ssh-target>] [--ssh-config f] [--label k=v] [--provider-script s --wake] [--yes]` | Connects a host: probe, consent, install, setup and doctor, and with input on the agent checklist when an agent is missing |
+| `simstim host invite <name> [--key <file>] [--ttl <duration>] [--label key=value]` | Makes a checked public invite and keeps its name and labels on the laptop. |
+| `simstim host join [--account <account>] [--address <address>] [--port <port>] [--yes]` | Prepares this machine from an invite on standard input and prints its reply and host keys. Mac joins also take explicit VM, startup and AC power choices. |
+| `simstim host leave [--account <account>] [--yes]` | Undoes this machine's original root-owned join ledger, newest first. |
 | `simstim host ls [--json]` | Lists the hosts |
 | `simstim host test <host> [--reconnect] [--json]` | Checks that a host answers, and how fast. `--reconnect` first retires its shared SSH connection |
 | `simstim host doctor <host> [--fix [--yes]] [--json]` | Checks a host's setup, and with `--fix` fixes what it can |
@@ -596,11 +602,11 @@ A new session without a host uses `SIMSTIM_DEFAULT_HOST`, then the saved choice 
 | `simstim host alerts test <host> [--event e]`, `host alerts log <host> [--lines n] [--json]`, `host alerts off <host>` | Sends a test alert, shows the last deliveries, or turns alerts off |
 | **Agents** | |
 | `simstim agents ls [--json]` | Lists the agent table, with how each agent installs |
-| `simstim agents install <agent> [<host>] [--host h] [--reinstall]` | Installs an agent on a host with its vendor's installer, in a session you watch |
+| `simstim agents install <agent> [<host>] [--host h] [--reinstall]` | Installs an agent on a host with its official installer, in a session you watch |
 | `simstim agents login <agent> [<host>] [--host h] [--json]` | Starts the agent's own login, or attaches to its existing login session. With input off it names the exact session instead |
 | **Setup and help** | |
 | `simstim setup [--host h \| --create lima\|docker\|e2b] [--name n] [--agents a,b] [--yes] [--no-login]` | The guided setup: where agents run, the host, the agent checklist, the installs and the logins, then the first session's command |
-| `simstim doctor [--fix [--yes]]` | Checks this computer: ssh, the config files and the secrets' commands |
+| `simstim doctor [--fix [--yes]] [--json]` | Checks this computer: ssh, the config files and the secrets' commands |
 | `simstim doctor keys` | Prints each key event as the terminal sends it, and marks the client's own keys |
 | `simstim doctor terminal` | Asks the terminal what it supports: kitty keys, synchronized output, colours, and more |
 | `simstim --debug[=<categories>] <command>` | Turns on the debug mode for one command, or the launcher: every category, or those listed (`attach`, `net`, `memory`, `launcher`, `runtime`). A command prints the debug file's path on stderr first. The launcher shows its debug mark (2.2), and a notice with the path |
@@ -682,3 +688,17 @@ These parts of the spec are planned, and are not in the current build:
 - editing a host from host details.
 
 Parts of the exit codes are not built yet either. A prompt with input off, such as `host destroy` in a script, reads no answer as no and exits with 130, not 4. Task C4 of [the CLI plan](cli-plan.md) builds that. `exec` and its exit codes come with task P1.13 of [the isolation plan](isolation-plan.md). Until that plan builds policies and tiers, no command exits with 5.
+
+### Held network requests
+
+The policy sheet reads held network requests on its original accepted session
+connection. It keeps the complete bounded snapshot and draws held rows before
+ordinary rules, in yellow, with their opaque IDs. Matching masked labels never
+merge rows. Selection follows an unchanged ID across a refreshed row order.
+A zero-waiter request keeps its original deadline and says it waits for a retry.
+
+On a held row, `x` refuses the selected opaque request and `r` refreshes the
+complete snapshot. Delete cannot remove an ordinary rule through a held row.
+A failed or stale refresh retains visible stale state and blocks actions.
+Closing the sheet or changing its connection retires queued work; a late reply
+cannot replace another sheet's state. Older helpers supply no invented list.

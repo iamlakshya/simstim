@@ -396,8 +396,11 @@ Try: simstim rm box/abcd2345 -y
 | --- | --- | --- | --- | --- |
 | `cp` | Copy the listed files that can run code or expose session data? | No | `--allow-flagged` | Fail with `cp_flagged` |
 | `image save` | Save the image with these reviewed changes? | No | `--allow-flagged` | Fail with `image_flagged` |
+| `rewind` | Restore the selected disk checkpoint, after showing its time and changed branches? | No | `-y` | Fail; a missing checkpoint number also needs an answer |
+| `rewind` with a secret or SSH key that `[secret_tiers]` marks `shared`, for a `shared` host | Send the selected value to this host for this exact rewind? | No | None | Refuse, with exit code 5 |
 | `rm` | `Delete auth-fix on box?` with what stops and what stays | No | `-y` | Fail, after the end of section 3 |
 | `attach` on an ended agent | `Start claude again in auth-fix on box? [Y/n]` | Yes | `--restart` | Fail |
+| `ssh-config` after preparing its generated files | `Add this Include to the top of your SSH config? [y/N]` | No | None | Keep: leave the generated files ready without changing the user's config |
 | `new`, missing folder | `Make it? [y/N]` | No | `--mkdir` | Fail |
 | `new`, a repository's setup script | `Run it? [y/N]` | No | `--setup-script`, `--no-setup-script` | Keep: skip it, with today's note |
 | `host add` | Install the helper | No | `--yes` | Fail |
@@ -406,6 +409,7 @@ Try: simstim rm box/abcd2345 -y
 | `host add` without `--tier` (H4) | Which tier | None | `--tier` | Fail |
 | `host add --accept` (H20) | Do the host keys match the machine's screen? | No | `--host-key SHA256:…`, once for each key | Fail |
 | `host join` (H20) | Make these changes? | No | `--yes` | Fail |
+| `host leave` (H20) | Undo these machine changes? | No | `--yes` | Fail |
 | `host rm` on a created host | The typed name of the machine | Keep it | `--destroy --confirm <host>` | Keep: forget only |
 | `host rm`, purge (H15) | The typed name of the host | Keep it | `--purge --confirm <host>` | Keep: forget only |
 | `host rm`, purge (H15): the agents' logins | `Delete these logins on box? [y/N]` | No | `--delete-logins` | Keep: the logins stay |
@@ -460,6 +464,9 @@ Every command that prints data or makes something takes `--json` (G10). This tab
 | `show` | A session object | C5 |
 | `new --detach`, `resume --detach` | A session object | C4 |
 | `new --count <n>` | An array: a session object for each session that started, and `{v, name, error}` for each that did not | P1.16 |
+| `fork --detach`, `fork --count <n>` | `{v, host, parent, children, failures}`. Each child is a session object. Each failure has a one-based `index` and an `error` with the fields of section 7.4. | P5.1 |
+| `rewind --list` | `{v, host, id, checkpoints, current_refs}`. Checkpoints are newest first, each with its immutable `name`, `created_at` and branch `refs`. | P5.4 |
+| `rewind <host>/<session> <n> -y` | `{v, host, id, checkpoint, session}`. `checkpoint` is the immutable name selected before confirmation. | P5.4 |
 | `ports` | `{v, host, session, id, ports}`: `session` is the name and `id` the ID. Each port has `port`, `address`, `pid` and `process` (`api.Port`) | C4 |
 | `doctor` | `{v, checks, fixes}`, each fix with `id` and `problem`. With `--fix -y`, each fix also has `done` or `error`, and a local fix has `changed`: each change it made, such as each file it removed. `--fix` without `-y` fails with exit code 4, because `--json` asks nothing | C4 |
 | `host ls` | An array of host objects, each with `v` and `tier` | today, C4, H4 |
@@ -619,7 +626,7 @@ A topic is a command with only `Use`, `Short` and `Long`, and a mark that makes 
 | `exit-codes` | The tables of sections 5.1 and 5.2. Until `exec` exists, the topic holds only 5.1. P1.13 adds the table of 5.2 with `exec`. | C3, P1.13 |
 | `policy` | The layers, and three examples. They are the `Long` of the `policy` command, because a topic cannot share a command's name. | P1.12 |
 
-`concepts` holds the words of the build. C3 ships these: host, helper, session, address, agent, launcher, attach and detach, worktree, secret, alert and provider script. P4.1 adds digest when it adds `host upgrade`. P4.6 adds runtime pin when `host doctor` shows pin ages. Each task that adds a word adds its line in the same pull request. The isolation plan adds sandbox, wall, level, floor, tier, layer, profile, rule, door, preset and drain.
+`concepts` holds the words of the build. C3 ships these: host, helper, session, address, agent, launcher, attach and detach, worktree, secret, alert and provider script. P4.1 adds digest with the release manifest and the helper digest check. C7 adds `host upgrade`. P4.6 adds runtime pin when `host doctor` shows pin ages. Each task that adds a word adds its line in the same pull request. The isolation plan adds sandbox, wall, level, floor, tier, layer, profile, rule, door, preset and drain.
 
 `cmd/docgen` writes each topic to `docs/reference/<topic>.md`, and the reference index links it. C2 writes `docs/reference/exit-codes.md` first, from the table of section 5. The topic and its page share their prose: `ConceptsIntro`, `ExitCodesIntro` and `ExitCodesOutro` in `internal/cli`.
 

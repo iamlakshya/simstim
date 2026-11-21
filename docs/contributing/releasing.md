@@ -28,7 +28,12 @@ Every release is built by `.github/workflows/release.yml` from a tag that a main
 | `release-manifest.json` | The client's trusted file digests, also embedded beside the helpers |
 | Raw VMM files and their source archives | The exact runtime files named by the release manifest |
 
-The builds are reproducible: `just repro` builds every binary twice from empty caches and checks they match, and CI runs it on every push.
+`just repro` builds every binary twice from empty build caches and checks they
+match. It requires the independently prepared native default-image pairs and
+the separately verified offline compiler described in the [build input
+guide](default-image-build.md). CI prepares both native image pairs and runs
+the two complete builds on every push. A source check or a missing-input
+refusal does not establish reproducibility.
 
 ### VMM pins and mirrors
 
@@ -54,6 +59,12 @@ The mirror checks files without booting them. Guest-kernel compatibility, fideli
 `just guest all` builds both architectures. It needs Docker, the pinned Go toolchain and Zig. The build uses the Debian image digest in `guest/supply.lock`. Inside it, apt checks Debian's signature and package hashes. The build also checks the exact signed `InRelease` digest from the locked snapshot before it installs a compiler or build dependency. It does not use the host's compiler or package sources.
 
 `guest/build.sh` checks the kernel, erofs-utils and moby inputs against the same lock. It builds the kernel at `/build/linux`, with fixed user, host and timestamp values. The timestamp comes from the newest commit that changed `guest/`. The committed full configs are checked before and after `make olddefconfig`. Both include virtio-MMIO for Firecracker. The amd64 result is a PVH ELF `vmlinux`; the arm64 result is an uncompressed `Image`. They remain the shared boot pair for both VMMs.
+
+The same build also emits `kernel-efi-amd64` from `arch/x86/boot/bzImage` and `kernel-efi-arm64` from the raw arm64 `Image`, with EFI stub support in the configs. These have the separate signed kernel name `guest-efi`. Each item retains the same source, version, release date and config as `guest`, and records its own actual SHA-256, size and fs-verity digest. The producer checks the Linux image markers, native PE architecture, EFI subsystem and executable entry. Both formats remain covered by the same Linux source advisories. Equal arm64 bytes do not permit renaming one signed role to another.
+
+The release writer and uploaded-file check use `-require-kernel-efi` to require both EFI items. Source and format fixtures do not establish native EFI boot or Nitro acceptance.
+
+The ordinary byte checks, runtime preparation and final inherited descriptor checks apply the same EFI format rule. The parser reads bounded headers from the existing descriptor with `ReadAt`; it opens no store path, changes no shared offset and makes no complete kernel copy. It allocates no symbol or debug table from input metadata. The original Need, descriptor owner, seals or fs-verity measurement still provide runtime authority and immutability.
 
 The tools image holds this release's helper at `/init`, its shadow terminal and the mount folders. `guest/verity` pads it to 4096-byte blocks, then appends the SHA-256 tree with a fixed zero salt and no superblock. The manifest writer checks the actual tree and records its whole-file digest, size, root hash and data blocks. The release publishes the kernel source and both committed configs beside the boot pair.
 
@@ -312,3 +323,9 @@ A release ships within 7 days of an advisory's publication. It carries the advis
 ## Why one action is pinned by tag
 
 Every action in the workflows is pinned to a full commit SHA, except the SLSA generator (`slsa-framework/slsa-github-generator`), which the release job calls by tag. The generator checks how it was called, and a provenance file made from a SHA reference does not verify. OpenSSF Scorecard counts this one reference against Pinned-Dependencies (9 of 10), which `just public-check` accepts.
+
+For every client release, refresh and review the vendored Sigstore trust root
+and its provenance in the release commit before making the signed tag. Follow
+the [trust-root refresh procedure](image-signature-trust-root.md). Ordinary
+builds and the offline verifier use those frozen bytes; they do not fetch a
+different trust root during a build or a signature check.

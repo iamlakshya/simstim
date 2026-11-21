@@ -3,7 +3,7 @@ package host
 func (resource *purgeResource) UnmarshalJSON(data []byte) error {
 	type plain purgeResource
 	var value plain
-	extra, err := decodeFootprint(data, &value, []string{"root", "relative", "ref", "quarantine", "sha256", "item"})
+	extra, err := decodeFootprint(data, &value, []string{"root", "relative", "ref", "directory", "quarantine", "sha256", "item"})
 	*resource = purgeResource(value)
 	resource.extra = extra
 	return err

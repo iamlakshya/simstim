@@ -13,6 +13,9 @@ import (
 // Replaying old supplied values through member.add would undo a later Arm.
 func (s *Supervisor) restoredSecretEnvironment(ctx context.Context, child *Supervisor, legacy map[string]api.Secret) (secretEnvironment, error) {
 	root := s.owner()
+	if root.unwalledV1() {
+		return root.restoredNoneEnvironmentV1(ctx, child, legacy)
+	}
 	root.mu.Lock()
 	plan := root.startupSecrets
 	modern := root.m.SecretState != nil

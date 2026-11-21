@@ -3,8 +3,8 @@ package guest
 import (
 	"context"
 	"io"
-	"os/exec"
 	"os"
+	"os/exec"
 	"syscall"
 
 	"github.com/iamlakshya/simstim/internal/proc"
@@ -22,7 +22,11 @@ func newOwnedCommand(parent context.Context, a proto.CtlExecArgs, env []string) 
 func (g *Init) agentCommand(run *execRun, out, errout io.Writer) (*exec.Cmd, int, error) {
 	var attr *syscall.SysProcAttr
 	var err error
-	if run.fileCommit!=nil {attr,err=g.fileCommitProcess(run)}else{attr,err=g.commandProcess()}
+	if run.fileCommit != nil {
+		attr, err = g.fileCommitProcess(run)
+	} else {
+		attr, err = g.commandProcess()
+	}
 	if err != nil {
 		return nil, 125, err
 	}
@@ -36,7 +40,9 @@ func (g *Init) agentCommand(run *execRun, out, errout io.Writer) (*exec.Cmd, int
 	cmd.Env = g.mapEnv(run.env)
 	cmd.SysProcAttr = attr
 	cmd.Stdout, cmd.Stderr = out, errout
-	if run.fileCommit!=nil{cmd.ExtraFiles=append([]*os.File(nil),run.fileCommit.files...)}
+	if run.fileCommit != nil {
+		cmd.ExtraFiles = append([]*os.File(nil), run.fileCommit.files...)
+	}
 	return cmd, 0, nil
 }
 

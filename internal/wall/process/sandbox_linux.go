@@ -23,28 +23,36 @@ import (
 )
 
 type sandbox struct {
-	spec         wall.Spec
-	lifeMu       sync.Mutex
-	mu           sync.Mutex
-	storage      *runtimeStorage
-	cmd          *exec.Cmd
-	pidfd        int
-	copy         *CopyOwnerV1
-	link         *net.UnixConn
-	exited       chan struct{}
-	closed       bool
-	forced       bool
-	initProven   bool
-	result       wall.Exit
-	transferDone chan struct{}
+	spec             wall.Spec
+	lifeMu           sync.Mutex
+	mu               sync.Mutex
+	storage          *runtimeStorage
+	cmd              *exec.Cmd
+	pidfd            int
+	copy             *CopyOwnerV1
+	link             *net.UnixConn
+	exited           chan struct{}
+	closed           bool
+	preparedReleased bool
+	preparationErr   error
+	forced           bool
+	initProven       bool
+	result           wall.Exit
+	transferDone     chan struct{}
+	freezer          *processFreezerV1
+	freezerOff       string
 }
 
 func newSandbox(spec wall.Spec) (wall.Sandbox, error) {
 	storage, err := openRuntimeStorage(spec.SessionDir)
-	if err != nil {
+	if storage == nil {
 		return nil, setupError("cannot pin sandbox runtime storage", err)
 	}
-	return &sandbox{spec: spec, storage: storage, pidfd: -1, exited: make(chan struct{})}, nil
+	resource := &sandbox{spec: spec, storage: storage, pidfd: -1, exited: make(chan struct{}), preparationErr: err}
+	if err != nil {
+		return resource, setupError("cannot pin sandbox runtime storage", err)
+	}
+	return resource, nil
 }
 
 // Start owns every descriptor and partial child before returning. The caller's
@@ -53,7 +61,7 @@ func (s *sandbox) Start(ctx context.Context) (_ net.Conn, returned error) {
 	s.lifeMu.Lock()
 	defer s.lifeMu.Unlock()
 	s.mu.Lock()
-	unavailable := s.closed || s.cmd != nil
+	unavailable := s.closed || s.cmd != nil || s.preparedReleased || s.preparationErr != nil || s.freezer != nil
 	s.mu.Unlock()
 	if unavailable {
 		return nil, setupError("sandbox already started or closed", nil)
@@ -110,6 +118,11 @@ func (s *sandbox) Start(ctx context.Context) (_ net.Conn, returned error) {
 	defer reader.Close()
 	defer writer.Close()
 	copyOwner, copyChild, err := copyControlV1(s)
+	if copyOwner != nil {
+		s.mu.Lock()
+		s.copy = copyOwner
+		s.mu.Unlock()
+	}
 	if err != nil {
 		link.Close()
 		return nil, setupError("cannot create original copy controller", err)
@@ -206,11 +219,36 @@ func (s *sandbox) Start(ctx context.Context) (_ net.Conn, returned error) {
 		link.Close()
 		return nil, setupError("namespace log changed before use", err)
 	}
+	freezer, freezeErr := prepareProcessFreezerV1(ctx)
+	s.mu.Lock()
+	s.freezer = freezer
+	if freezeErr != nil {
+		s.freezerOff = freezeErr.Error()
+	}
+	s.mu.Unlock()
+	if freezeErr != nil && freezer != nil {
+		link.Close()
+		return nil, setupError("retain the original guest cgroup until its cleanup is proved", freezeErr)
+	}
+	freezerStarted := false
+	defer func() {
+		if !freezerStarted && freezer != nil {
+			returned = errors.Join(returned, freezer.closeEmpty())
+		}
+	}()
 	cmd := exec.Command(launcher)
 	cmd.Env = []string{"PATH=/usr/bin:/bin", "LANG=C", "LC_ALL=C"}
 	cmd.ExtraFiles = extra
 	cmd.Stdout, cmd.Stderr = logf, logf
 	cmd.SysProcAttr = &syscall.SysProcAttr{Pdeathsig: syscall.SIGTERM}
+	launcherPIDFD := -1
+	var nativeFreezer *processCgroupV1
+	if freezer != nil {
+		nativeFreezer = freezer.control.(*processCgroupV1)
+		cmd.SysProcAttr.UseCgroupFD = true
+		cmd.SysProcAttr.CgroupFD = int(nativeFreezer.child.Fd())
+		cmd.SysProcAttr.PidFD = &launcherPIDFD
+	}
 	s.mu.Lock()
 	if s.closed || s.cmd != nil {
 		s.mu.Unlock()
@@ -222,14 +260,32 @@ func (s *sandbox) Start(ctx context.Context) (_ net.Conn, returned error) {
 		link.Close()
 		return nil, setupError("sandbox start was cancelled", err)
 	}
+	if nativeFreezer != nil {
+		if err = nativeFreezer.check(false); err != nil {
+			s.mu.Unlock()
+			link.Close()
+			return nil, setupError("the original guest cgroup changed before launcher creation", err)
+		}
+	}
 	if err = cmd.Start(); err != nil {
+		if launcherPIDFD >= 0 {
+			// Retain an unexpected partial creation until the native empty
+			// cgroup cleanup proves it has no process left.
+			nativeFreezer.launcher = os.NewFile(uintptr(launcherPIDFD), "partial-freezer-launcher")
+		}
 		s.mu.Unlock()
 		link.Close()
 		return nil, setupError("cannot start static namespace launcher", err)
 	}
+	if nativeFreezer != nil {
+		freezer.mu.Lock()
+		freezeErr = nativeFreezer.bindCreatedLauncherV1(launcherPIDFD, cmd.Process.Pid)
+		freezer.mu.Unlock()
+	}
 	s.cmd, s.link, s.transferDone = cmd, link, make(chan struct{})
 	s.copy = copyOwner
 	startedCopy = true
+	freezerStarted = true
 	s.mu.Unlock()
 	go s.reap(cmd)
 	var transferOnce sync.Once
@@ -252,6 +308,9 @@ func (s *sandbox) Start(ctx context.Context) (_ net.Conn, returned error) {
 		finishTransfer()
 		result := s.Wait()
 		return nil, setupError("namespace launcher did not start the sandbox", errors.Join(cause, killErr, result.Err))
+	}
+	if freezeErr != nil && freezer != nil {
+		return abort(freezeErr)
 	}
 	select {
 	case err = <-requestDone:
@@ -337,6 +396,7 @@ func (s *sandbox) reap(cmd *exec.Cmd) {
 		}
 	}
 	copyOwner := s.copy
+	freezer := s.freezer
 	canReleaseCopy := s.pidfd < 0
 	s.mu.Unlock()
 	var copyErr error
@@ -348,86 +408,15 @@ func (s *sandbox) reap(cmd *exec.Cmd) {
 			copyErr = setupError("preserve copy resources until original init exit is proven", nil)
 		}
 	}
+	var freezeErr error
+	if freezer != nil && canReleaseCopy {
+		freezeErr = freezer.closeEmpty()
+	}
 	s.mu.Lock()
-	s.result.Err = errors.Join(s.result.Err, copyErr)
-	s.closed = s.pidfd < 0 && copyErr == nil
+	s.result.Err = errors.Join(s.result.Err, copyErr, freezeErr)
+	s.closed = s.pidfd < 0 && copyErr == nil && freezeErr == nil
 	close(s.exited)
 	s.mu.Unlock()
-}
-
-// Stop terminates the namespace init after the caller's graceful ctl exchange.
-func (s *sandbox) Stop(ctx context.Context, grace time.Duration) error {
-	s.mu.Lock()
-	var signalErr error
-	if s.pidfd >= 0 {
-		if err := signalInit(s.pidfd, unix.SIGTERM, nil, 0); err != nil && !errors.Is(err, unix.ESRCH) {
-			signalErr = err
-		}
-	}
-	started := s.cmd != nil
-	s.mu.Unlock()
-	if !started {
-		return nil
-	}
-	timer := time.NewTimer(max(grace, 0))
-	defer timer.Stop()
-	select {
-	case <-s.exited:
-		s.mu.Lock()
-		defer s.mu.Unlock()
-		return errors.Join(signalErr, s.result.Err)
-	case <-ctx.Done():
-		return errors.Join(ctx.Err(), signalErr, s.Kill())
-	case <-timer.C:
-		return errors.Join(signalErr, s.Kill())
-	}
-}
-
-// Kill ends the whole PID namespace through its retained init pidfd.
-func (s *sandbox) Kill() error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.closed {
-		return nil
-	}
-	if s.pidfd >= 0 {
-		ready, readinessErr := pollInitExit(s.pidfd)
-		s.result.Err = errors.Join(s.result.Err, readinessErr)
-		if !ready {
-			s.forced = true
-		}
-		if err := signalInit(s.pidfd, unix.SIGKILL, nil, 0); err != nil && !errors.Is(err, unix.ESRCH) {
-			s.result.Err = errors.Join(s.result.Err, fmt.Errorf("kill namespace init: %w", err))
-			return s.result.Err
-		}
-		select {
-		case <-s.exited:
-			// A previous wait error retained this descriptor. Retry physical
-			// cleanup against the same owned init, preserving the old error.
-			if err := waitInitExit(s.pidfd); err != nil {
-				return errors.Join(s.result.Err, err)
-			}
-			s.initProven = true
-			closeErr := unix.Close(s.pidfd)
-			s.pidfd, s.closed = -1, true
-			s.result.Err = errors.Join(s.result.Err, closeErr)
-		default:
-		}
-	}
-	if s.copy != nil {
-		s.copy.native.interrupt()
-	}
-	// Before the acknowledged transfer the outer launcher owns the blocked
-	// child. Closing its link refuses activation and its own cleanup kills it.
-	if s.link != nil {
-		_ = s.link.Close()
-	}
-	if s.cmd != nil {
-		_ = s.cmd.Process.Signal(syscall.SIGTERM)
-	} else {
-		s.closed = true
-	}
-	return s.result.Err
 }
 
 // Wait returns the owned wait result. A cleanup error retains uncertain init
@@ -457,14 +446,25 @@ func (s *sandbox) Destroy() error {
 	if running {
 		return setupError("stop the sandbox before destroying it", nil)
 	}
+	if s.freezer != nil {
+		if err := s.freezer.closeEmpty(); err != nil {
+			return setupError("retain the original guest cgroup until it is empty", err)
+		}
+	}
 	if err := s.storage.destroy(); err != nil {
 		return setupError("cannot remove sandbox files", err)
 	}
 	return nil
 }
 
-// Abilities reports no optional copy or freeze support at this level.
-func (s *sandbox) Abilities() wall.Abilities { return wall.Abilities{} }
+// Abilities reports only a live factory-created cgroup's freeze support.
+func (s *sandbox) Abilities() wall.Abilities {
+	s.mu.Lock()
+	freezer := s.freezer
+	live := !s.closed && s.cmd != nil && s.pidfd >= 0
+	s.mu.Unlock()
+	return wall.Abilities{Freeze: live && freezer.available()}
+}
 
 // CleanExit is trusted evidence for committing an already captured state epoch.
 // It stays false until actual Wait completion, and after forced termination.

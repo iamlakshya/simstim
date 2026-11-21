@@ -122,12 +122,13 @@ func (k *gitOpKind) deadlineFor(req gitOpRequest) time.Duration {
 // gitOpAnswer is a git operation's answer. The child of worktree.add first
 // writes one with Plan alone, before the checkout, and then the answer.
 type gitOpAnswer struct {
-	Pull   *gitPullResult `json:"pull,omitempty"`
-	Error  *proto.Error   `json:"error,omitempty"`
-	Git    *GitInfo       `json:"git,omitempty"`    // worktree.add
-	Repo   *api.RepoInfo  `json:"repo,omitempty"`   // repo.info
-	Result string         `json:"result,omitempty"` // worktree.remove: what it did
-	Plan   *GitInfo       `json:"plan,omitempty"`   // worktree.add: what it is about to make
+	Purge  *purgeGitInspectionV1 `json:"purge,omitempty"`
+	Pull   *gitPullResult        `json:"pull,omitempty"`
+	Error  *proto.Error          `json:"error,omitempty"`
+	Git    *GitInfo              `json:"git,omitempty"`    // worktree.add
+	Repo   *api.RepoInfo         `json:"repo,omitempty"`   // repo.info
+	Result string                `json:"result,omitempty"` // worktree.remove: what it did
+	Plan   *GitInfo              `json:"plan,omitempty"`   // worktree.add: what it is about to make
 }
 
 // gitOpHint is the next step after a git operation that failed on the host.
@@ -139,6 +140,9 @@ var gitOpHint = "Run `" + brand.Name + " host doctor` to check the host."
 // other way, as the client does over SSH, git-op starts that child, in its
 // scope, first.
 func RunGitOp(args []string, stdin io.Reader, stdout io.Writer) error {
+	if handled, err := runOrdinaryGitWorkerEntryV2(args); handled {
+		return err
+	}
 	if len(args) != 1 || findGitOp(args[0]) == nil {
 		names := make([]string, len(gitOpKinds))
 		for i, k := range gitOpKinds {

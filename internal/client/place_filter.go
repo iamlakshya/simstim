@@ -10,19 +10,27 @@ import (
 )
 
 type autoPlacementCandidate struct {
-	host        Host
-	tier        Tier
-	observation *hostFactsObservation
-	need        PlacementNeed
-	level       string
-	declared    int64
-	room        int64
-	wakeClass   int // awake, free wake, paid wake
-	penalty     int
-	prefer      int
-	imageCached bool
-	near        bool
-	reason      string
+	placementFence *placementCompletionFenceV1
+	selectedWall   string
+	cached         *cachedPlacementFacts // advisory only; never an accepted observation
+	originalSource hostStateSource
+	localArgs      NewArgs
+	runtimeUpgrade bool
+	stopped        bool
+	pendingGrants  bool
+	host           Host
+	tier           Tier
+	observation    *hostFactsObservation
+	need           PlacementNeed
+	level          string
+	declared       int64
+	room           int64
+	wakeClass      int // awake, free wake, paid wake
+	penalty        int
+	prefer         int
+	imageCached    bool
+	near           bool
+	reason         string
 }
 
 // filterPlacementFacts uses only a genuine Source-bound observation. Passing
@@ -40,7 +48,29 @@ func filterPlacementFacts(ctx context.Context, candidate *autoPlacementCandidate
 	if !SameEntry(candidate.host, candidate.observation.host) {
 		return "", grantIdentityError(candidate.host)
 	}
-	facts, need := candidate.observation.facts, candidate.need
+	return filterPlacementFactsDataV1(candidate, inFlight, stopped, runtimeUpgrade, candidate.observation.facts, candidate.observation.roundTrip)
+}
+
+// Only these two checked wrappers may feed the common metadata filter. Cached
+// data remains a distinct type and never becomes a hostFactsObservation.
+func filterCachedPlacementFactsV1(ctx context.Context, candidate *autoPlacementCandidate, inFlight int64, stopped, runtimeUpgrade bool) (string, error) {
+	if candidate == nil || candidate.cached == nil || inFlight < 0 {
+		return "cached host facts are unavailable", nil
+	}
+	if err := validatePlacementNeed(candidate.need); err != nil {
+		return "", err
+	}
+	if err := candidate.cached.check(ctx); err != nil {
+		return "", err
+	}
+	if !SameEntry(candidate.host, candidate.cached.host) {
+		return "", grantIdentityError(candidate.host)
+	}
+	return filterPlacementFactsDataV1(candidate, inFlight, stopped, runtimeUpgrade, candidate.cached.entry.Facts, candidate.cached.entry.RoundTrip)
+}
+
+func filterPlacementFactsDataV1(candidate *autoPlacementCandidate, inFlight int64, stopped, runtimeUpgrade bool, facts api.HostFacts, roundTrip time.Duration) (string, error) {
+	need := candidate.need
 	if facts.OS != "linux" || need.Arch != "" && facts.Arch != need.Arch {
 		return "the host platform does not match", nil
 	}
@@ -61,7 +91,7 @@ func filterPlacementFacts(ctx context.Context, candidate *autoPlacementCandidate
 	var selected *api.WallProbe
 	for i := range facts.Walls {
 		probe := &facts.Walls[i]
-		if facts.WallsKnown && wallLevelRank(probe.Level) >= minimum && (probe.OK || probe.CanPrepare) &&
+		if facts.WallsKnown && wallLevelRank(probe.Level) >= minimum && (candidate.selectedWall == "" || probe.Level == candidate.selectedWall) && (probe.OK || probe.CanPrepare) &&
 			(selected == nil || wallLevelRank(probe.Level) > wallLevelRank(selected.Level)) {
 			selected = probe
 		}
@@ -76,6 +106,14 @@ func filterPlacementFacts(ctx context.Context, candidate *autoPlacementCandidate
 			return "", placementNeedError()
 		}
 		candidate.declared = budget.Limit
+		if candidate.localArgs.MemoryMax > 0 && candidate.localArgs.MemoryMax != budget.Limit {
+			return "the original memory cap differs from the selected complete microvm size", nil
+		}
+	} else if candidate.localArgs.MemoryMax > 0 {
+		if err := checkPlacementCapRepresentableV1(candidate.localArgs.MemoryMax); err != nil {
+			return "", err
+		}
+		candidate.declared = candidate.localArgs.MemoryMax
 	}
 	for _, health := range facts.Health {
 		if health.Severity != "blocks_new" || len(health.Levels) != 0 && !slices.Contains(health.Levels, selected.Level) {
@@ -99,6 +137,7 @@ func filterPlacementFacts(ctx context.Context, candidate *autoPlacementCandidate
 	if missingRuntime && !runtimeUpgrade {
 		return "the required client runtime cannot be prepared", nil
 	}
+	candidate.room = max(int64(0), facts.Room)
 	if !stopped {
 		candidate.room = max(int64(0), facts.Room)
 		if inFlight >= candidate.room {
@@ -138,7 +177,7 @@ func filterPlacementFacts(ctx context.Context, candidate *autoPlacementCandidate
 			}
 		}
 	}
-	candidate.near = !stopped && candidate.observation.roundTrip <= 10*time.Millisecond
+	candidate.near = !stopped && roundTrip <= 10*time.Millisecond
 	candidate.penalty = placementPressurePenalty(facts)
 	return "", nil
 }
@@ -148,4 +187,16 @@ func placementPressurePenalty(facts api.HostFacts) int {
 		return 1
 	}
 	return 0
+}
+
+// These are ranking data only. Native admission and the H19 binder continue
+// to require candidate.observation, never this DTO accessor.
+func (candidate *autoPlacementCandidate) selectionFactsV1() api.HostFacts {
+	if candidate.observation != nil {
+		return candidate.observation.facts
+	}
+	if candidate.cached != nil {
+		return candidate.cached.entry.Facts
+	}
+	return api.HostFacts{}
 }

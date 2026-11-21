@@ -150,9 +150,6 @@ func runSavedRootConvert(input io.Reader, output io.Writer) error {
 }
 
 func serveSavedRootGuardian(ctx context.Context, unit string, helper, output *os.File, control io.Reader, result io.Writer) error {
-	if err := secretmem.Protect(); err != nil {
-		return err
-	}
 	scope, err := imageAttachScope(ctx, unit)
 	if err != nil {
 		return err
@@ -161,7 +158,17 @@ func serveSavedRootGuardian(ctx context.Context, unit string, helper, output *os
 	if err := encoder.Encode(imageGuardianFrame{Phase: "ready", InvocationID: scope.InvocationID, ControlGroup: scope.ControlGroup}); err != nil {
 		return err
 	}
-	plan, err := receiveImagePlan(control)
+	// The first single ACK contains no plan or private bytes. The actual
+	// parent writes it only after binding the creation, helper executable
+	// and scope. Complete that native observation while still inspectable,
+	// then protect before reading even the private plan's length or body.
+	if err := imageWaitAck(control); err != nil {
+		return err
+	}
+	if err := secretmem.Protect(); err != nil {
+		return err
+	}
+	plan, err := receiveAcknowledgedImagePlanV1(control)
 	if err != nil {
 		return err
 	}

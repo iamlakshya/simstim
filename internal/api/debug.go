@@ -7,13 +7,23 @@ import "time"
 // holder, with debug.profile and debug.save. It serves debug.collect and
 // debug.read itself, for the bundle.
 const (
-	OpDebugStart   = "debug.start"
-	OpDebugStop    = "debug.stop"
-	OpDebugProfile = "debug.profile"
-	OpDebugSave    = "debug.save"
-	OpDebugCollect = "debug.collect"
-	OpDebugRead    = "debug.read"
+	OpDebugStart       = "debug.start"
+	OpDebugStop        = "debug.stop"
+	OpDebugProfile     = "debug.profile"
+	OpDebugSave        = "debug.save"
+	OpDebugCollect     = "debug.collect"
+	OpDebugRead        = "debug.read"
+	OpDebugTraceReadV1 = "debug.trace.read.v1"
 )
+
+// DebugTraceReadArgsV1 selects only the current original holder trace.
+// It contains no file path, descriptor, native owner or execution authority.
+type DebugTraceReadArgsV1 struct {
+	ID        string `json:"id"`
+	Epoch     string `json:"epoch,omitempty"`
+	Offset    int64  `json:"offset"`
+	ClockOnly bool   `json:"clock_only,omitempty"`
+}
 
 // FeatureDebug is the feature of a host helper that serves the debug
 // requests. It implies FeatureTrace.

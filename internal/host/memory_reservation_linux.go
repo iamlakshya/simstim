@@ -19,6 +19,12 @@ import (
 // filesystem. Saved unit names, sockets and guest reports choose no path or
 // value here. Unknown native reads refuse admission instead of returning zero.
 func readMemoryUnitV1(ctx context.Context, id string, walled bool) (memoryUnitFactsV1, error) {
+	return readMemoryUnitPurposeV1(ctx, id, walled, false)
+}
+
+// Both names are closed canonical projections. The boolean selects only the
+// internal facts role; it grants no unit creation, stop or boot authority.
+func readMemoryUnitPurposeV1(ctx context.Context, id string, walled, auxiliary bool) (memoryUnitFactsV1, error) {
 	var facts memoryUnitFactsV1
 	if !validID(id) {
 		return facts, sessionLeaseError("the memory reservation has no canonical primary ID")
@@ -36,7 +42,15 @@ func readMemoryUnitV1(ctx context.Context, id string, walled bool) (memoryUnitFa
 		return facts, memoryNativeFailureV1(err)
 	}
 	uid := os.Getuid()
-	name := fmt.Sprintf("user.slice/user-%d.slice/user@%d.service/%s/%s", uid, uid, brand.Slice, UnitName(id))
+	unit := UnitName(id)
+	if auxiliary {
+		var err error
+		unit, err = AuxUnitNameV1(id)
+		if err != nil {
+			return facts, err
+		}
+	}
+	name := fmt.Sprintf("user.slice/user-%d.slice/user@%d.service/%s/%s", uid, uid, brand.Slice, unit)
 	fd, err := unix.Openat2(root, name, &unix.OpenHow{Flags: unix.O_RDONLY | unix.O_DIRECTORY | unix.O_CLOEXEC,
 		Resolve: unix.RESOLVE_BENEATH | unix.RESOLVE_NO_SYMLINKS | unix.RESOLVE_NO_MAGICLINKS})
 	if errors.Is(err, unix.ENOENT) {
@@ -153,11 +167,11 @@ func memoryUnitIDsV1(ctx context.Context) ([]string, error) {
 		if !strings.HasPrefix(unit, brand.UnitPrefix) {
 			continue
 		}
-		id := strings.TrimSuffix(strings.TrimPrefix(unit, brand.UnitPrefix), ".service")
-		if !validID(id) || UnitName(id) != unit || !entry.IsDir() {
-			return nil, memoryNativeFailureV1(errors.New("a canonical native session unit has an unknown identity"))
+		key, err := canonicalMemoryUnitKeyV1(unit)
+		if err != nil || !entry.IsDir() {
+			return nil, memoryNativeFailureV1(errors.Join(err, errors.New("a canonical native session unit has an unknown identity")))
 		}
-		result = append(result, id)
+		result = append(result, key)
 	}
 	current, err := unix.Openat2(root, name, &unix.OpenHow{Flags: unix.O_RDONLY | unix.O_DIRECTORY | unix.O_CLOEXEC, Resolve: unix.RESOLVE_BENEATH | unix.RESOLVE_NO_SYMLINKS | unix.RESOLVE_NO_MAGICLINKS})
 	if err != nil {
@@ -170,4 +184,8 @@ func memoryUnitIDsV1(ctx context.Context) ([]string, error) {
 		return nil, memoryNativeFailureV1(errors.Join(statErr, closeErr))
 	}
 	return result, nil
+}
+
+func readAuxMemoryUnitV1(ctx context.Context, primary string) (memoryUnitFactsV1, error) {
+	return readMemoryUnitPurposeV1(ctx, primary, true, true)
 }

@@ -32,7 +32,7 @@ type fdPublicState struct {
 }
 
 type fdStateFields struct{ version, intent, generation, primary, minted, retired api.JSONSpan }
-type fdIntentFields struct{ version, modes, binds api.JSONSpan }
+type fdIntentFields struct{ version, modes, binds, trusted api.JSONSpan }
 
 func fdFields(p *api.JSONProjection, span api.JSONSpan, known []string, visit func(string, api.JSONSpan) error) error {
 	return projectedOpaqueError(p.Object(span, known, func(field api.JSONField) error {
@@ -75,13 +75,15 @@ func (s *fdPublicState) intentFields(span api.JSONSpan) (fdIntentFields, error) 
 			fields.modes = value
 		case "binds":
 			fields.binds = value
+		case "trusted_uses":
+			fields.trusted = value
 		}
 		return nil
 	})
 	return fields, err
 }
 
-func fdStringEqual(p *api.JSONProjection, span api.JSONSpan, want string) (bool, error) {
+func fdStringEqual(p TrustedUseProjectionV1, span api.JSONSpan, want string) (bool, error) {
 	null, err := projectedNull(p, span)
 	if err != nil || null {
 		return null && want == "", err
@@ -128,7 +130,7 @@ func fdNonce(p *api.JSONProjection, span api.JSONSpan) error {
 	return nil
 }
 
-func fdName(p *api.JSONProjection, span api.JSONSpan) error {
+func fdName(p TrustedUseProjectionV1, span api.JSONSpan) error {
 	first := true
 	prefix := true
 	position := 0

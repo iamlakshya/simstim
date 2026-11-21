@@ -29,20 +29,25 @@ type leaseEndKey struct {
 // Expected identities come from current and in-flight policies, not from the
 // still-old manifest seen before a policy-update reply has been published.
 type egressEvents struct {
-	mu            sync.Mutex
-	wake          chan struct{}
-	finished      chan struct{}
-	controlClosed chan struct{}
-	audits        []queuedNetAudit
-	auditBytes    int
-	auditSeq      uint64
-	emergency     *queuedNetAudit
-	fault         bool
-	current       map[leaseIdentity]struct{}
-	pending       map[leaseIdentity]struct{}
-	known         map[leaseIdentity]struct{}
-	ends          map[leaseEndKey]leaseEnd
-	order         []leaseEndKey
+	mu                                     sync.Mutex
+	wake                                   chan struct{}
+	finished                               chan struct{}
+	controlClosed                          chan struct{}
+	audits                                 []queuedNetAudit
+	auditBytes                             int
+	auditSeq                               uint64
+	emergency                              *queuedNetAudit
+	fault                                  bool
+	current                                map[leaseIdentity]struct{}
+	pending                                map[leaseIdentity]struct{}
+	known                                  map[leaseIdentity]struct{}
+	ends                                   map[leaseEndKey]leaseEnd
+	order                                  []leaseEndKey
+	networkRevision                        uint64
+	classifierSessions                     map[string]api.NetworkHoldActionArgs
+	classifierOrder                        []string
+	judgeUnavailable, judgeUnavailableSeen bool
+	modelBudget, modelBudgetSeen           bool
 }
 
 func newEgressEvents() *egressEvents {
@@ -139,6 +144,31 @@ func (q *egressEvents) enqueue(ev egress.CtlEvent, bytes int) bool {
 	if q.fault {
 		return false
 	}
+	if ev.Event == egress.EventClassifierSession {
+		return ev.ClassifierSession != nil && q.enqueueClassifierSessionLocked(*ev.ClassifierSession)
+	}
+	if ev.Event == egress.EventModelBudget {
+		if !q.modelBudgetSeen {
+			q.modelBudget, q.modelBudgetSeen = true, true
+			q.notify()
+		}
+		return true
+	}
+	if ev.Event == egress.EventJudgeUnavailable {
+		if !q.judgeUnavailableSeen {
+			q.judgeUnavailable, q.judgeUnavailableSeen = true, true
+			q.notify()
+		}
+		return true
+	}
+	if ev.Event == egress.EventNetworkHold && ev.NetworkHold != nil {
+		if ev.NetworkHold.Version != api.NetworkHoldV1 || ev.NetworkHold.Revision == 0 {
+			return false
+		}
+		q.networkRevision = max(q.networkRevision, ev.NetworkHold.Revision)
+		q.notify()
+		return true
+	}
 	if ev.Event == egress.EventAudit && ev.Audit != nil {
 		q.auditSeq++
 		a := queuedNetAudit{entry: *ev.Audit, seq: q.auditSeq, bytes: bytes}
@@ -223,5 +253,13 @@ func (q *egressEvents) nextDeadline() time.Time {
 func (q *egressEvents) empty() bool {
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	return len(q.audits) == 0 && q.emergency == nil && len(q.ends) == 0
+	return len(q.audits) == 0 && q.emergency == nil && len(q.ends) == 0 && q.networkRevision == 0 && len(q.classifierSessions) == 0 && !q.judgeUnavailable && !q.modelBudget
+}
+
+func (q *egressEvents) takeNetworkRevision() uint64 {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	revision := q.networkRevision
+	q.networkRevision = 0
+	return revision
 }

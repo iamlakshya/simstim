@@ -58,7 +58,7 @@ func (b *boundHTTPSecrets) prepareResponse(req *http.Request, response *http.Res
 				if err != nil {
 					return nil, err
 				}
-				return scope.s.inspectModelWebSocket(scope, model, opcode, checked)
+				return scope.s.inspectModelWebSocket(ctx, scope, model, opcode, checked)
 			}
 		}
 		filtered, err := newBoundWebSocket(scope.ctx, origin, filters)

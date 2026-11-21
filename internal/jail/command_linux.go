@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"os"
 	"os/exec"
 	"os/user"
@@ -43,22 +44,35 @@ const (
 // setup is what a stage needs. It reaches each stage on a pipe. Its
 // descriptor numbers are the same in every stage.
 type setup struct {
-	GvisorV1Version int                `json:"gvisor_v1_version,omitempty"`
-	BindsV1Version  int                `json:"binds_v1_version,omitempty"`
-	FilesV1Version  int                `json:"files_v1_version,omitempty"`
-	FileRulesV1     []pinnedFileRuleV1 `json:"file_rules_v1,omitempty"`
-	Argv            []string           `json:"argv"`
-	ExecFD          int                `json:"exec_fd,omitempty"` // Argv[0] is /proc/self/fd/<ExecFD>, one of Files
-	Binds           []bind             `json:"binds,omitempty"`
-	Rules           []rule             `json:"rules,omitempty"`
-	Net             NetMode            `json:"net"`
-	Seccomp         Profile            `json:"seccomp"`
-	Files           int                `json:"files"`               // inherited files, from fd 3
-	StatusFD        int                `json:"status_fd,omitempty"` // init says here how the command ended
-	SyncFD          int                `json:"sync_fd,omitempty"`   // init or remove waits here for outer's ID maps
-	Userns          bool               `json:"userns,omitempty"`    // the jail has namespaces
-	Sub             *subID             `json:"sub,omitempty"`       // run the command as a subuid
-	Remove          string             `json:"remove,omitempty"`    // the folder that the remove stage removes
+	ControllerPublicV1  *mappedControllerPublicV1 `json:"controller_public_v1,omitempty"`
+	PublicationLeaseV1  *publicationLeaseSetupV1  `json:"publication_lease_v1,omitempty"`
+	VMMExecV1           *vmmExecSetupV1           `json:"vmm_exec_v1,omitempty"`
+	InitLeaseV1Version  int                       `json:"init_lease_v1_version,omitempty"`
+	InitLeaseFDV1       int                       `json:"init_lease_fd_v1,omitempty"`
+	InitLeaseRefV1      *slotInitLeaseRefV1       `json:"init_lease_ref_v1,omitempty"`
+	gvisorCommonScope   *gvisorCommonScopeV1      // actual scope-only native enforcement on A
+	gvisorOuterGate     *os.File                  // original C death gate retained only by A
+	gvisorOuterNative   bool                      // issued only by the fixed early outer C/Go handshake
+	gvisorCreationChild *os.Process               // same original unreaped C task
+	gvisorCreation      *os.File                  // A retains its exact C creation pidfd through reap.
+	gvisorReport        *net.UnixConn             // SAME original post-map A/outside control; never serialised or inherited.
+	GvisorV1Version     int                       `json:"gvisor_v1_version,omitempty"`
+	BindsV1Version      int                       `json:"binds_v1_version,omitempty"`
+	FilesV1Version      int                       `json:"files_v1_version,omitempty"`
+	FileRulesV1         []pinnedFileRuleV1        `json:"file_rules_v1,omitempty"`
+	Argv                []string                  `json:"argv"`
+	ExecFD              int                       `json:"exec_fd,omitempty"` // Argv[0] is /proc/self/fd/<ExecFD>, one of Files
+	Binds               []bind                    `json:"binds,omitempty"`
+	Rules               []rule                    `json:"rules,omitempty"`
+	Net                 NetMode                   `json:"net"`
+	Seccomp             Profile                   `json:"seccomp"`
+	Files               int                       `json:"files"`               // inherited files, from fd 3
+	StatusFD            int                       `json:"status_fd,omitempty"` // init says here how the command ended
+	SyncFD              int                       `json:"sync_fd,omitempty"`   // init or remove waits here for outer's ID maps
+	Userns              bool                      `json:"userns,omitempty"`    // the jail has namespaces
+	Sub                 *subID                    `json:"sub,omitempty"`       // run the command as a subuid
+	Remove              string                    `json:"remove,omitempty"`    // the folder that the remove stage removes
+	gvisorForkRoot      *os.File                  // actual post-buildRoot A root; parent-only report role, never C Files
 }
 
 // Test hooks: whether a user namespace works, the Landlock ABI, and how the
@@ -85,6 +99,9 @@ var initDone atomic.Bool
 func Init() {
 	initDone.Store(true)
 	if len(os.Args) < 2 || os.Args[0] != argv0 {
+		if err := captureVMMRunnerStageV1(); err != nil {
+			os.Exit(stageFailed(err))
+		}
 		return
 	}
 	if err := unix.Prctl(unix.PR_SET_DUMPABLE, 0, 0, 0, 0); err != nil {
@@ -122,13 +139,16 @@ func Command(ctx context.Context, s Spec) (*Cmd, error) {
 		return nil, pinError("cannot check the jail's path support", "Check that this host supports openat2.", err)
 	}
 	_ = unix.Close(fd)
-	userns, err := usernsWorks()
-	if err != nil {
-		return nil, err
-	}
-	m, err := choose(s, userns, landlockABI(), lookupSubID)
-	if err != nil {
-		return nil, err
+	m := mode{userns: true}
+	if !s.gvisorV1 {
+		userns, err := usernsWorks()
+		if err != nil {
+			return nil, err
+		}
+		m, err = choose(s, userns, landlockABI(), lookupSubID)
+		if err != nil {
+			return nil, err
+		}
 	}
 	p, err := pin(c, len(s.Files))
 	if err != nil {

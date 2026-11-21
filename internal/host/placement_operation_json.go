@@ -7,7 +7,7 @@ import "encoding/json"
 func (record *placementOperationRecord) UnmarshalJSON(data []byte) error {
 	type plain placementOperationRecord
 	var value plain
-	extra, err := decodeFootprint(data, &value, []string{"pid", "birth", "kind", "at"})
+	extra, err := decodeFootprint(data, &value, []string{"pid", "birth", "kind", "at", "publication_fence", "fence_creating", "fence_removing"})
 	if err != nil {
 		return err
 	}

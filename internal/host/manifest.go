@@ -28,6 +28,20 @@ const (
 // Manifest is the record of one session, at ~/.local/state/<name>/sessions/<id>/manifest.json.
 // Readers keep fields they do not know, so v2 can add fields freely.
 type Manifest struct {
+	ForkOf       string `json:"fork_of,omitempty"`
+	ForkBranchOf string `json:"fork_branch_of,omitempty"`
+	ForkPending  bool   `json:"fork_pending,omitempty"`
+	Checkpoints  string `json:"checkpoints_status,omitempty"`
+	// Preparation is accounting data; its original bridge/native issuer is
+	// separate. It never authorises stop, artifact access, boot or capacity.
+	ResumePreparation *ResumePreparationV1 `json:"resume_preparation_v1,omitempty"`
+	// StopDiagnosticsV1 preserves the last end observed before an explicit
+	// native stop-fact publication. It is opaque diagnostic data, never
+	// stopped custody, clean-exit proof, capture or future start authority.
+	StopDiagnosticsV1 json.RawMessage `json:"stop_diagnostics_v1,omitempty"`
+
+	// Auxiliary is accounting data only; its real native issuer is separate.
+	Auxiliary *AuxiliaryReservationV1 `json:"auxiliary_v1,omitempty"`
 	// Placement is advisory original New request metadata, never capacity or boot authority.
 	PlacedBy      string                  `json:"placed_by,omitempty"`
 	PlaceReason   string                  `json:"place_reason,omitempty"`
@@ -47,13 +61,18 @@ type Manifest struct {
 	AutomaticRestore json.RawMessage `json:"restore_plan_v1,omitempty"`
 	VMCaptureNonce   string          `json:"vm_capture_nonce,omitempty"`
 	Wall             *WallRecord     `json:"wall,omitempty"`
-	Policy           *api.Policy     `json:"policy,omitempty"`
-	Layers           []api.Layer     `json:"layers,omitempty"`
-	Armed            bool            `json:"armed,omitempty"`
-	Guest            *GuestClaims    `json:"guest,omitempty"`
-	Life             *Life           `json:"life,omitempty"`
-	Files            *FilePlan       `json:"files,omitempty"`
-	SSHAgent         bool            `json:"ssh_agent,omitempty"`
+	// PolicyNext is opaque pending laptop data, never native or secret authority.
+	PolicyNext json.RawMessage `json:"policy_next,omitempty"`
+	Policy     *api.Policy     `json:"policy,omitempty"`
+	Layers     []api.Layer     `json:"layers,omitempty"`
+	Armed      bool            `json:"armed,omitempty"`
+	Guest      *GuestClaims    `json:"guest,omitempty"`
+	Life       *Life           `json:"life,omitempty"`
+	// NoneCleanup is bounded host-account cleanup DATA from the original None
+	// creator. It cannot issue a stopped, VM, wall or execution capability.
+	NoneCleanup *NoneCleanupV1 `json:"none_cleanup_v1,omitempty"`
+	Files       *FilePlan      `json:"files,omitempty"`
+	SSHAgent    bool           `json:"ssh_agent,omitempty"`
 	// SandboxOf is the primary session whose wall and workspace this member uses.
 	SandboxOf      string    `json:"sandbox_of,omitempty"`
 	Task           string    `json:"task,omitempty"`
@@ -160,19 +179,21 @@ type Limits struct {
 
 // Runtime is live process information.
 type Runtime struct {
-	extra         map[string]json.RawMessage
-	StartEnvelope bool      `json:"start_envelope,omitempty"`
-	Image         string    `json:"image,omitempty"`
-	Label         string    `json:"label,omitempty"`
-	Artefacts     []string  `json:"artefacts,omitempty"`
-	Generation    string    `json:"generation,omitempty"`
-	HolderPID     int       `json:"holder_pid,omitempty"`
-	AgentPID      int       `json:"agent_pid,omitempty"`
-	Unit          string    `json:"unit,omitempty"`
-	Socket        string    `json:"socket"`
-	BootID        string    `json:"boot_id,omitempty"`
-	StartedAt     time.Time `json:"started_at,omitempty"`
-	RespawnCount  int       `json:"respawn_count"`
+	NativeAccountMode       string `json:"native_account_mode,omitempty"`
+	NativeAccountGeneration string `json:"native_account_generation,omitempty"`
+	extra                   map[string]json.RawMessage
+	StartEnvelope           bool      `json:"start_envelope,omitempty"`
+	Image                   string    `json:"image,omitempty"`
+	Label                   string    `json:"label,omitempty"`
+	Artefacts               []string  `json:"artefacts,omitempty"`
+	Generation              string    `json:"generation,omitempty"`
+	HolderPID               int       `json:"holder_pid,omitempty"`
+	AgentPID                int       `json:"agent_pid,omitempty"`
+	Unit                    string    `json:"unit,omitempty"`
+	Socket                  string    `json:"socket"`
+	BootID                  string    `json:"boot_id,omitempty"`
+	StartedAt               time.Time `json:"started_at,omitempty"`
+	RespawnCount            int       `json:"respawn_count"`
 }
 
 // Status is the session's state and why.

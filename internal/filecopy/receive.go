@@ -118,7 +118,9 @@ func ReceiveFile(ctx context.Context, root *os.Root, relative string, size int64
 		return err
 	}
 	defer func() { err = errors.Join(err, cleanup()) }()
-	if err=ReceivePreparedStage(ctx,file,size,digest,input);err!=nil{return err}
+	if err = ReceivePreparedStage(ctx, file, size, digest, input); err != nil {
+		return err
+	}
 	// The stage owns its live descriptor until cleanup. In the Linux guest,
 	// publication links that exact anonymous inode; no helper-owned name is
 	// exposed while bytes arrive or left behind when the helper dies.

@@ -12,6 +12,15 @@ import (
 // Machine records the VM, container or sandbox that `host create` made for a
 // host. `host rm --destroy` deletes it.
 type Machine struct {
+	// Session names the session for which new --machine made this machine.
+	// An empty value denotes an ordinary reusable host.
+	Session string `toml:"session,omitempty"`
+	// SessionID is the stable ID acknowledged by this machine's original start.
+	SessionID string `toml:"session_id,omitempty"`
+	// Endpoint records a session machine's original provider API origin.
+	Endpoint string `toml:"endpoint,omitempty"`
+	// TransportURL records its original provider transport origin, without credentials.
+	TransportURL string `toml:"transport_url,omitempty"`
 	// Provider names the provider that made the machine: "lima", "docker"
 	// or "e2b".
 	Provider string `toml:"provider"`
@@ -242,9 +251,10 @@ func NewSSH(ctx context.Context, h Host, interactive bool) *SSH {
 // route is how to reach a host: its transport, and the lifecycle of its
 // machine when a provider made it.
 type route struct {
-	agentOnly bool // only the owned explicit agent transport constructor
-	t         Transport
-	lc        Lifecycle
+	machineOwner *SessionMachineOwnerV1
+	agentOnly    bool // only the owned explicit agent transport constructor
+	t            Transport
+	lc           Lifecycle
 }
 
 func routeTo(ctx context.Context, h Host, interactive bool) (route, error) {
@@ -255,7 +265,10 @@ func routeTo(ctx context.Context, h Host, interactive bool) (route, error) {
 	if h.Machine == nil {
 		return route{t: NewSSH(ctx, h, interactive)}, nil
 	}
-	lc, err := OpenMachine(h)
+	lc, machineOwner, err := sessionMachineLifecycleV1(ctx, h)
+	if err == nil && lc == nil {
+		lc, err = OpenMachine(h)
+	}
 	if err != nil {
 		return route{}, err
 	}
@@ -272,7 +285,7 @@ func routeTo(ctx context.Context, h Host, interactive bool) (route, error) {
 	if ssh, ok := t.(*SSH); ok {
 		ssh.origin = &h
 	}
-	return route{t: t, lc: lc}, nil
+	return route{t: t, lc: lc, machineOwner: machineOwner}, nil
 }
 
 // HostTransport returns the transport to h. A machine that a provider made

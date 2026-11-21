@@ -56,6 +56,14 @@ func (s *Server) acknowledgeMintedState(raw []byte) error {
 			p.finish(false)
 			return secretSaveFailure()
 		}
+		if err := s.prepareMemoryCarryLocked(ctx, prepared); err != nil {
+			p.finish(false)
+			return err
+		}
+		if err := s.retireJudgeSourcesLocked(ctx, next); err != nil {
+			p.finish(false)
+			return err
+		}
 		s.publishControlState(prepared, false)
 		p.finish(true)
 		return nil

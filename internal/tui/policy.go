@@ -32,6 +32,7 @@ type policySheet struct {
 	host, id, name string
 	level          string
 	policy         api.Policy
+	holds          networkHoldView
 	entries        []client.PolicyLogEntry
 	sel            int
 	loading        bool
@@ -45,6 +46,7 @@ type policyMsg struct {
 	seq     uint64
 	owner   *policySheet
 	policy  api.Policy
+	pending *api.NetworkHoldSnapshot
 	entries []client.PolicyLogEntry
 	notice  string
 	err     error
@@ -103,7 +105,11 @@ func (m *Model) readPolicy(d *policySheet) tea.Cmd {
 			return policyMsg{owner: d, seq: seq, entries: entries, err: err}
 		}
 		policy, err := c.Policy(ctx, id)
-		return policyMsg{owner: d, seq: seq, policy: policy, err: err}
+		if err != nil {
+			return policyMsg{owner: d, seq: seq, err: err}
+		}
+		pending, err := readPolicyHolds(ctx, c, id)
+		return policyMsg{owner: d, seq: seq, policy: policy, pending: pending, err: err}
 	})
 }
 
@@ -119,13 +125,16 @@ func (m *Model) onPolicy(msg policyMsg) tea.Cmd {
 	d.finishOp()
 	d.loading, d.err = false, msg.err
 	if msg.err != nil {
+		d.holds.dirty = true
 		return nil
 	}
-	d.policy, d.entries = msg.policy, msg.entries
-	d.sel = min(d.sel, max(len(d.policy.Rules)-1, 0))
 	if msg.notice != "" {
 		d.adding = false
 		return tea.Batch(m.toast(toastSuccess, msg.notice), m.readPolicy(d))
+	}
+	d.entries = msg.entries
+	if !d.log {
+		d.applyPolicyRead(msg.policy, msg.pending)
 	}
 	return nil
 }
@@ -159,24 +168,44 @@ func (d *policySheet) key(m *Model, k tea.KeyPressMsg) tea.Cmd {
 		d.stop()
 		m.modal = nil
 	case "a":
+		if request, held := d.selectedHold(); held && request.Reason == api.NetworkHoldUploadBudget {
+			d.err = heldUploadScopeErrorV1()
+			return nil
+		}
 		if !d.log {
 			d.adding, d.err = true, nil
 		}
 	case "up", "k":
 		d.sel = max(d.sel-1, 0)
 	case "down", "j":
-		d.sel = min(d.sel+1, max(len(d.policy.Rules)-1, 0))
+		d.sel = min(d.sel+1, max(d.policyRowCount()-1, 0))
 	case "delete", "backspace":
 		return m.removePolicy(d)
 	case "enter", "o":
-		if !d.log && len(d.policy.Rules) > 0 {
-			d.target.set(d.policy.Rules[d.sel].Target)
+		if _, held := d.selectedHold(); held {
+			scope := api.NetworkHoldSession
+			if ks == "o" {
+				scope = api.NetworkHoldOnce
+			}
+			return m.answerPolicyHold(d, scope)
+		}
+		if i := d.selectedRuleIndex(); !d.log && i >= 0 && i < len(d.policy.Rules) {
+			d.target.set(d.policy.Rules[i].Target)
 			return m.allowPolicy(d, ks == "o")
 		}
+	case "x":
+		return m.refusePolicyHold(d)
 	case "l":
 		d.log = !d.log
 		return m.readPolicy(d)
 	case "r":
+		if _, held := d.selectedHold(); held {
+			return m.answerPolicyHold(d, api.NetworkHoldRepo)
+		}
+		return m.readPolicy(d)
+	case "f":
+		return m.answerPolicyHold(d, api.NetworkHoldProfile)
+	case "ctrl+r":
 		return m.readPolicy(d)
 	}
 	return nil
@@ -229,10 +258,11 @@ func (m *Model) allowPolicy(d *policySheet, once bool) tea.Cmd {
 }
 
 func (m *Model) removePolicy(d *policySheet) tea.Cmd {
-	if d.log || len(d.policy.Rules) == 0 {
+	i := d.selectedRuleIndex()
+	if d.log || i < 0 || i >= len(d.policy.Rules) {
 		return nil
 	}
-	r := d.policy.Rules[d.sel]
+	r := d.policy.Rules[i]
 	if r.Layer != api.LayerSession {
 		d.err = &client.UserError{Msg: "this rule belongs to another policy layer",
 			Hint: "Only session rules can be removed here.", Code: "policy_layer", Kind: client.KindUsage}
@@ -266,8 +296,13 @@ func (d *policySheet) view(m *Model) string {
 	} else {
 		room := max((m.height-14)/2, 1)
 		top := max(d.sel-room+1, 0)
-		for i := top; i < len(d.policy.Rules) && i < top+room; i++ {
-			r := d.policy.Rules[i]
+		for row := top; row < d.policyRowCount() && row < top+room; row++ {
+			if row < d.holdCount() {
+				request := d.holds.snapshot.Requests[row]
+				body = append(body, marker(row == d.sel)+sWarning.Render(trunc(pendingNetworkSummary(request, m.now()), max(cw-2, 0))), "  "+sFaint.Render(request.ID))
+				continue
+			}
+			r := d.policy.Rules[row-d.holdCount()]
 			action := "deny"
 			if r.Allow {
 				action = "allow"
@@ -279,13 +314,23 @@ func (d *policySheet) view(m *Model) string {
 			} else if !r.Until.IsZero() {
 				end = r.Until.UTC().Format(time.RFC3339)
 			}
-			body = append(body, marker(i == d.sel)+trunc(text, max(cw-2, 0)), "  "+sFaint.Render(trunc(shown(string(r.Layer))+" "+shown(r.Name)+policySourceLabel(r.Source)+dot+end, max(cw-2, 0))))
+			body = append(body, marker(row == d.sel)+trunc(text, max(cw-2, 0)), "  "+sFaint.Render(trunc(shown(string(r.Layer))+" "+shown(r.Name)+policySourceLabel(r.Source)+dot+end, max(cw-2, 0))))
 		}
 		if len(d.policy.Locks) > 0 {
 			body = append(body, sFaint.Render(fmt.Sprintf("%d policy locks apply.", len(d.policy.Locks))))
 		}
-		if len(d.policy.Rules) == 0 && !d.loading {
+		if d.policyRowCount() == 0 && !d.loading {
 			body = append(body, sFaint.Render("No extra rules. The preset and agent rules still apply."))
+		}
+		if d.holds.loaded && d.holds.snapshot.Stopped {
+			body = append(body, sFaint.Render("Held requests unavailable: sandbox stopped."))
+		} else if d.holds.dirty {
+			body = append(body, sFaint.Render("Held requests changed: refresh the policy."))
+		}
+		if request, held := d.selectedHold(); held && request.Reason == api.NetworkHoldUploadBudget {
+			body = append(body, "", "Upload budget reached. Choose once or refuse.",
+				"Once continues waiting flows, or the next flow when none waits.",
+				"For a higher limit, edit network.upload_budget and apply the policy.")
 		}
 		if d.adding {
 			body = append(body, "", "Allow net  "+d.target.view(max(cw-11, 0), true))
@@ -298,6 +343,12 @@ func (d *policySheet) view(m *Model) string {
 		body = append(append(body, ""), errorLines(d.err, cw)...)
 	}
 	hints := []hint{{"a", "add"}, {"enter", "allow"}, {"o", "once"}, {"del", "remove"}, {"l", "log"}, {"esc", "back"}}
+	if request, held := d.selectedHold(); held {
+		hints = []hint{{"o", "once"}, {"enter", "session"}, {"r", "repository"}, {"f", "profile"}, {"x", "refuse"}, {"ctrl+r", "refresh"}, {"esc", "back"}}
+		if request.Reason == api.NetworkHoldUploadBudget {
+			hints = []hint{{"o", "once"}, {"x", "refuse"}, {"ctrl+r", "refresh"}, {"esc", "back"}}
+		}
+	}
 	if d.adding {
 		hints = []hint{{"enter", "allow for session"}, {"ctrl+o", "allow once"}, {"esc", "back"}}
 	} else if d.log {

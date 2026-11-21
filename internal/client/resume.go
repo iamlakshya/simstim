@@ -38,6 +38,14 @@ func (c *Conn) Resume(ctx context.Context, a ResumeArgs) (*ResumeResult, error) 
 	if err := bindRequestTransportSource(ctx, c); err != nil {
 		return nil, err
 	}
+	ctx, imagePolicy, err := captureResumeImagePolicy(ctx, c, a.ID)
+	if err != nil {
+		return nil, err
+	}
+	ctx, a, err = imagePolicy.arguments(ctx, a)
+	if err != nil {
+		return nil, err
+	}
 	if !c.HasFeature("resume") {
 		return nil, c.tooOldToResume()
 	}
@@ -73,6 +81,18 @@ func (c *Conn) Resume(ctx context.Context, a ResumeArgs) (*ResumeResult, error) 
 		}
 		a.Snapshot = cloneGrantSnapshot(intent.snapshot)
 	}
+	named, err := prepareResumeNamedSSHKeys(ctx, c, a.ID)
+	if err != nil {
+		return nil, err
+	}
+	ctx, a, err = named.arguments(ctx, c, a)
+	if err != nil {
+		return nil, err
+	}
+	a, err = applyTrustedJudgeResumeV1(ctx, c, a)
+	if err != nil {
+		return nil, err
+	}
 	ctx, release, err := c.beginGrant(ctx, "resume", false)
 	if err != nil {
 		return nil, err
@@ -93,6 +113,7 @@ func (c *Conn) Resume(ctx context.Context, a ResumeArgs) (*ResumeResult, error) 
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	a.Layers = api.ProjectClientImagePolicy(api.ProjectClientInputSources(a.Layers))
 	var r ResumeResult
 	if err := c.callWithSent(ctx, "resume", a, &r, release); err != nil {
 		return nil, c.resumeError(err)
@@ -103,6 +124,9 @@ func (c *Conn) Resume(ctx context.Context, a ResumeArgs) (*ResumeResult, error) 
 	if a.Snapshot != nil && r.Session.ID != a.ID {
 		return nil, &UserError{Msg: "the helper returned another sandbox member after resume",
 			Hint: "List sessions and use the original member's address.", Code: "protocol", Kind: KindRefused}
+	}
+	if err := checkTrustedJudgeAcknowledgedV1(ctx, c, r.Session.SecretState); err != nil {
+		return nil, err
 	}
 	return &r, nil
 }

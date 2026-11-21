@@ -11,6 +11,7 @@ type purgeResource struct {
 	Root       string       `json:"root"`
 	Relative   []byte       `json:"relative"`
 	Ref        purgeRef     `json:"ref"`
+	Directory  purgeRef     `json:"directory"`
 	Quarantine string       `json:"quarantine"`
 	SHA256     string       `json:"sha256,omitempty"`
 	Item       *supply.Item `json:"item,omitempty"`

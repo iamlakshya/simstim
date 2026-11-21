@@ -14,6 +14,9 @@ func (c *Conn) checkLayerGrants(ctx context.Context, tier Tier, layers []api.Lay
 }
 
 func (c *Conn) allowLayerGrants(ctx context.Context, tier Tier, layers []api.Layer, record bool) error {
+	if err := c.checkPublicOnlyFeature(layers); err != nil {
+		return err
+	}
 	settings, err := requestPolicySettings(ctx)
 	if err != nil {
 		return err
@@ -26,7 +29,7 @@ func (c *Conn) allowLayerGrants(ctx context.Context, tier Tier, layers []api.Lay
 			if rule.Door != "" && rule.Door != api.DoorNet {
 				continue
 			}
-			outbound, err := policyOutbound(rule.Target)
+			outbound, err := policyOutboundForRule(rule)
 			if err != nil {
 				return err
 			}

@@ -111,11 +111,12 @@ func TestEnvdRunFailsAndKillsWhenInputStalls(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	_, err := e.Run(ctx, "cat > /dev/null", strings.NewReader(strings.Repeat("x", 3*chunk)))
+	requireInputClassification(t, err, "input_send")
 	if ctx.Err() != nil {
 		t.Fatalf("Run = %v after ctx ended, want the stalled input before", err)
 	}
 	want := "Error: cannot send the input of a command to the sandbox " + testID + ": stdin was not sent in time: no SendInput call ended for 300ms\n\n" +
-		"Try: " + brand.Name + " host status cloud   (is the sandbox running?)\n"
+		"Try: " + brand.Name + " host status cloud (says whether the sandbox runs)\n"
 	if got := rendered(err); got != want {
 		t.Fatalf("Run's error, as the CLI shows it:\n%s\nwant:\n%s", got, want)
 	}
@@ -155,6 +156,7 @@ func TestEnvdRunFailsWhenItsInputReaderFails(t *testing.T) {
 	e, envd := envdFor(t, false)
 	file := filepath.Join(t.TempDir(), "in")
 	out, err := e.Run(context.Background(), fmt.Sprintf("cat > %q; echo done", file), &failingReader{part: []byte("part of the input\n")})
+	requireInputClassification(t, err, "input_read")
 	if !errors.Is(err, errDisk) || !strings.HasPrefix(rendered(err), "Error: cannot read the input of a command for the sandbox") || !strings.Contains(rendered(err), "\nTry: run the command again\n") {
 		t.Fatalf("Run = %q, %v, want the reader's error with a hint", out, err)
 	}

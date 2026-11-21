@@ -40,7 +40,7 @@ type Carried struct {
 var CarriedFiles = []Carried{
 	{KindHelper, brand.HostBinary, "host-linux-"},
 	{KindVT, brand.VTBinary, "vt-linux-"},
-	{KindUserns,brand.UsernsBinary,"userns-linux-"},
+	{KindUserns, brand.UsernsBinary, "userns-linux-"},
 }
 
 // File is the name of the build's file for an architecture.
@@ -60,6 +60,13 @@ func KernelAsset(arch string) string {
 	}
 	return "vmlinux-" + arch
 }
+
+// KernelEFIName is the separate signed Linux EFI image role. It never
+// aliases or rewrites the existing PVH/raw guest kernel tuple.
+const KernelEFIName = "guest-efi"
+
+// KernelEFIAsset names the bzImage EFI stub on amd64 and raw EFI Image on arm64.
+func KernelEFIAsset(arch string) string { return "kernel-efi-" + arch }
 
 // ToolsAsset is the release asset name of the tools EROFS image for arch.
 func ToolsAsset(arch string) string {

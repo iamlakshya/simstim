@@ -9,7 +9,7 @@ import (
 // Pressure/battery and recent imbalance penalties come directly after wake.
 func rankPlacementCandidates(candidates []*autoPlacementCandidate, settings PlacementSettings, recent []string) {
 	for _, candidate := range candidates {
-		candidate.penalty = placementPressurePenalty(candidate.observation.facts)
+		candidate.penalty = placementPressurePenalty(candidate.selectionFactsV1())
 		candidate.prefer = len(settings.Prefer)
 		if at := slices.Index(settings.Prefer, candidate.host.Name); at >= 0 {
 			candidate.prefer = at
@@ -46,7 +46,7 @@ func rankPlacementCandidates(candidates []*autoPlacementCandidate, settings Plac
 			}
 			return -order
 		}
-		if order := cmp.Compare(a.observation.facts.Sandboxes, b.observation.facts.Sandboxes); order != 0 {
+		if order := cmp.Compare(a.selectionFactsV1().Sandboxes, b.selectionFactsV1().Sandboxes); order != 0 {
 			return order
 		}
 		return cmp.Compare(a.host.Name, b.host.Name)

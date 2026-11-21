@@ -32,6 +32,10 @@ func sameGrantNames(a, b []string) bool {
 }
 
 func cloneGrantHost(h Host) Host {
+	if h.JoinedSSH != nil {
+		owned := *h.JoinedSSH
+		h.JoinedSSH = &owned
+	}
 	h.Place.Features, h.Place.Mandatory = slices.Clone(h.Place.Features), slices.Clone(h.Place.Mandatory)
 	if h.Place.Pool != nil {
 		pool := *h.Place.Pool

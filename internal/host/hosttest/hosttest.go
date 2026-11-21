@@ -15,22 +15,24 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"github.com/iamlakshya/simstim/internal/brand"
+	"github.com/iamlakshya/simstim/internal/client"
+	"github.com/iamlakshya/simstim/internal/guest"
+	"github.com/iamlakshya/simstim/internal/host"
+	"github.com/iamlakshya/simstim/internal/paths"
+	"github.com/iamlakshya/simstim/internal/supervisor"
+	"github.com/iamlakshya/simstim/internal/testhome"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"slices"
 	"strings"
 	"syscall"
 	"testing"
 	"time"
-
-	"github.com/iamlakshya/simstim/internal/brand"
-	"github.com/iamlakshya/simstim/internal/client"
-	"github.com/iamlakshya/simstim/internal/host"
-	"github.com/iamlakshya/simstim/internal/paths"
-	"github.com/iamlakshya/simstim/internal/testhome"
 )
 
 // Main runs the tests, or acts as the host helper when the binary was
@@ -38,8 +40,31 @@ import (
 // "keytest". Call it from TestMain. The tests run in a home of their own
 // (testhome), so no test reads or writes the user's real folders.
 func Main(m *testing.M) {
+	// The product has Linux hosts. Darwin fixtures intentionally retain the
+	// historical ordinary-holder test path; they do not qualify P6.3.
+	if runtime.GOOS != "linux" {
+		host.WallDriver = "legacy-none-test"
+	}
 	if len(os.Args) >= 3 {
 		switch os.Args[1] {
+		case "supervise", "supervise-restore-v1":
+			var err error
+			if os.Args[1] == "supervise" {
+				err = supervisor.Run(os.Args[2])
+			} else {
+				err = supervisor.RunAutomaticRestore(os.Args[2])
+			}
+			if err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				os.Exit(1)
+			}
+			os.Exit(0)
+		case "wall-init":
+			if err := guest.Run(os.Args[2:]...); err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				os.Exit(1)
+			}
+			os.Exit(0)
 		case "holder":
 			if err := host.RunHolder(os.Args[2]); err != nil {
 				fmt.Fprintln(os.Stderr, err)
@@ -70,6 +95,13 @@ func Main(m *testing.M) {
 	}
 	if len(os.Args) == 2 && os.Args[1] == "keytest" {
 		if err := host.KeyTest(); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		os.Exit(0)
+	}
+	if len(os.Args) == 2 && os.Args[1] == "install-payload" {
+		if err := host.RunInstallPayload(context.Background(), os.Stdin, os.Stdout); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
@@ -267,30 +299,6 @@ func (h *Host) Install(version, vt string) string {
 		h.t.Fatal(err)
 	}
 	return dst
-}
-
-// linkOrCopy makes dst the same file as src: a hard link when it can, so
-// that the copy is instant, or else a copy. Never a symbolic link: Linux
-// names a process's executable by the link's target.
-func linkOrCopy(src, dst string) error {
-	_ = os.Remove(dst)
-	if os.Link(src, dst) == nil {
-		return nil
-	}
-	in, err := os.Open(src)
-	if err != nil {
-		return err
-	}
-	defer in.Close()
-	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o755)
-	if err != nil {
-		return err
-	}
-	if _, err := io.Copy(out, in); err != nil {
-		out.Close()
-		return err
-	}
-	return out.Close()
 }
 
 // HolderLog returns the log of a session's holder.

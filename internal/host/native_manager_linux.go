@@ -13,10 +13,10 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/godbus/dbus/v5"
-	"golang.org/x/sys/unix"
 
 	"github.com/iamlakshya/simstim/internal/cachefs"
 )
@@ -67,8 +67,7 @@ func openNativeUserManagerV1(ctx context.Context) (_ *nativeUserManagerV1, failu
 	if err != nil {
 		return nil, err
 	}
-	stat, ok := manager.socketRef.Sys().(*unix.Stat_t)
-	if !ok || manager.socketRef.Mode()&os.ModeSocket == 0 || stat.Uid != uint32(os.Getuid()) {
+	if !nativeManagerSocketOwnerV1(manager.socketRef) {
 		return nil, sessionLeaseError("the original native user manager socket is not private")
 	}
 	// Resolve through the held runtime directory descriptor. A renamed or
@@ -159,8 +158,7 @@ func (manager *nativeUserManagerV1) checkNativeManager() error {
 		if err != nil {
 			continue
 		}
-		stat, ok := info.Sys().(*unix.Stat_t)
-		if ok && stat.Uid == 0 && info.Mode().IsRegular() && info.Mode().Perm()&0o022 == 0 && os.SameFile(actual, info) {
+		if nativeManagerExecutableOwnerV1(actual, info) {
 			trusted = true
 			break
 		}
@@ -186,6 +184,24 @@ func (manager *nativeUserManagerV1) checkNativeManager() error {
 		return errors.Join(sessionLeaseError("the native user manager is outside its original system user service"), err)
 	}
 	return manager.peer.Check()
+}
+
+// These are native file observations, not manager/source constructors. os
+// returns syscall.Stat_t here; x/sys/unix.Stat_t is a different named type.
+func nativeManagerSocketOwnerV1(info os.FileInfo) bool {
+	if info == nil {
+		return false
+	}
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	return ok && info.Mode()&os.ModeSocket != 0 && stat.Uid == uint32(os.Getuid())
+}
+
+func nativeManagerExecutableOwnerV1(actual, expected os.FileInfo) bool {
+	if actual == nil || expected == nil {
+		return false
+	}
+	stat, ok := expected.Sys().(*syscall.Stat_t)
+	return ok && stat.Uid == 0 && expected.Mode().IsRegular() && expected.Mode().Perm()&0o022 == 0 && os.SameFile(actual, expected)
 }
 
 func (manager *nativeUserManagerV1) getProperty(ctx context.Context, path dbus.ObjectPath, iface, name string) (dbus.Variant, error) {

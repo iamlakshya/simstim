@@ -1,21 +1,44 @@
 package jail
 
+import (
+	"errors"
+	"strconv"
+)
+
 // Distinct stage names make a frozen older helper reject the request before
 // execution. Its JSON decoder ignored unknown fields, so a field alone is
 // insufficient for a security-sensitive protocol extension.
 const (
-	stageOuterFilesV1 = "outer-files-v1"
-	stageInitFilesV1  = "init-files-v1"
-	stageExecFilesV1  = "exec-files-v1"
-	stageOuterBindsV1 = "outer-binds-v1"
-	stageInitBindsV1  = "init-binds-v1"
-	stageExecBindsV1  = "exec-binds-v1"
-	stageInitGvisorV1 = "init-gvisor-v1"
-	stageExecGvisorV1 = "exec-gvisor-v1"
+	stageOuterFilesV1           = "outer-files-v1"
+	stageInitFilesV1            = "init-files-v1"
+	stageExecFilesV1            = "exec-files-v1"
+	stageOuterBindsV1           = "outer-binds-v1"
+	stageInitBindsV1            = "init-binds-v1"
+	stageExecBindsV1            = "exec-binds-v1"
+	stageInitGvisorV1           = "init-gvisor-v1"
+	stageExecGvisorV1           = "exec-gvisor-v1"
+	stageInitGvisorControllerV1 = "init-gvisor-controller-v1"
+	stageExecGvisorControllerV1 = "exec-gvisor-controller-v1"
 )
 
 func fileRulesStageV1(stage string, c *setup) string {
+	selected := baseFileRulesStageV1(stage, c)
+	if c.InitLeaseV1Version == 1 && stage == stageInit {
+		selected = stageSlotInitLeaseV1
+	}
+	return publicationFileRulesStageV1(vmmFileRulesStageV1(selected, c), c)
+}
+
+func baseFileRulesStageV1(stage string, c *setup) string {
 	if c.GvisorV1Version == 1 {
+		if c.ControllerPublicV1 != nil {
+			switch stage {
+			case stageInit:
+				return stageInitGvisorControllerV1
+			case stageExec:
+				return stageExecGvisorControllerV1
+			}
+		}
 		switch stage {
 		case stageInit:
 			return stageInitGvisorV1
@@ -49,11 +72,28 @@ func fileRulesStageV1(stage string, c *setup) string {
 }
 
 func checkFileRulesStageV1(stage string, c *setup) (string, error) {
+	stage, modeErr := checkVMMFileRulesStageV1(stage, c)
+	if modeErr != nil {
+		return "", modeErr
+	}
+	stage, publicationErr := checkPublicationFileRulesStageV1(stage, c)
+	if publicationErr != nil {
+		return "", publicationErr
+	}
+	stage, leaseErr := checkSlotInitLeaseStageV1(stage, c)
+	if leaseErr != nil {
+		return "", leaseErr
+	}
 	normal := stage
 	v1 := true
 	bindsV1 := false
 	gvisorV1 := false
+	controllerV1 := false
 	switch stage {
+	case stageInitGvisorControllerV1:
+		normal, bindsV1, gvisorV1, controllerV1 = stageInit, true, true, true
+	case stageExecGvisorControllerV1:
+		normal, bindsV1, gvisorV1, controllerV1 = stageExec, true, true, true
 	case stageInitGvisorV1:
 		normal, bindsV1, gvisorV1 = stageInit, true, true
 	case stageExecGvisorV1:
@@ -79,6 +119,23 @@ func checkFileRulesStageV1(stage string, c *setup) (string, error) {
 			return "", failure("an anonymous bind has no supplied native source", "Use one current helper for the complete jail lifecycle.")
 		}
 		hasSupplied = hasSupplied || bound.SuppliedV1
+	}
+	if controllerV1 {
+		if c.ControllerPublicV1 == nil {
+			return "", gvisorHandoffFailureV2("the closed controller stage lost its public state")
+		}
+		if c.VMMExecV1 != nil || c.PublicationLeaseV1 != nil || c.InitLeaseV1Version != 0 {
+			return "", gvisorHandoffFailureV2("the closed controller cannot mix another private execution purpose")
+		}
+		code, extent, err := mappedControllerExtentV1(*c.ControllerPublicV1)
+		if err != nil || c.Files != extent-3 || c.ExecFD != code+1 || len(c.Argv) != 2 || c.Argv[0] != "/proc/self/fd/"+strconv.Itoa(code+1) || c.Argv[1] != "native-controller-setup-v1" {
+			return "", errors.Join(err, gvisorHandoffFailureV2("the fixed controller stage changed its exact public executable or vector"))
+		}
+	} else if c.ControllerPublicV1 != nil {
+		return "", gvisorHandoffFailureV2("a legacy or generic stage cannot adopt the fixed controller public state")
+	}
+	if gvisorV1 && !controllerV1 {
+		return "", gvisorHandoffFailureV2("the legacy generic gvisor executable purpose is retired")
 	}
 	if gvisorV1 {
 		if c.GvisorV1Version != 1 || !c.Userns || c.Sub != nil || c.Net != NetNone || c.Seccomp != profileGvisorV1 || len(c.Binds) == 0 {

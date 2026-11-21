@@ -1,0 +1,24 @@
+version = 1
+packages = ["bash", "ca-certificates", "curl", "git", "openssh-client", "passwd"]
+user = "agent"
+uid = 1000
+gid = 1000
+home = "/home/agent"
+shell = "/bin/bash"
+environment = ["PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin", "HOME=/home/agent", "LANG=C.UTF-8"]
+sources = ["https://snapshot.debian.org/", "https://manpages.debian.org/trixie/passwd/useradd.8.en.html"]
+
+[[file]]
+path = "etc/hostname"
+content = "agent\n"
+mode = 420
+
+[[file]]
+path = "etc/hosts"
+content = "127.0.0.1 localhost\n::1 localhost\n"
+mode = 420
+
+[[file]]
+path = "etc/resolv.conf"
+content = ""
+mode = 420

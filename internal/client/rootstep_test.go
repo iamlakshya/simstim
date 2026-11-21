@@ -88,7 +88,7 @@ func TestBuildRootScriptRejectsUnsafeIdentity(t *testing.T) {
 
 func TestBuildRootScriptRejectsUnsupportedSteps(t *testing.T) {
 	rootTestState(t)
-	for _, id := range []RootStepID{"", "KVM-ACL", "kvm-acl;id", "userns-apparmor", "nitro-acl", "nitro-udev", "nitro-slots", "launcher", "slots", "future"} {
+	for _, id := range []RootStepID{"", "KVM-ACL", "kvm-acl;id", "userns-apparmor", "launcher", "slots", "future"} {
 		rs, err := BuildRootScript("me", 1000, []RootStepID{RootLinger, id}, 0)
 		assertRootError(t, err)
 		if !reflect.DeepEqual(rs, RootScript{}) {

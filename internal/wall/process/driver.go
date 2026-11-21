@@ -65,26 +65,11 @@ func (Driver) Prepare(ctx context.Context, spec wall.Spec) (wall.Sandbox, error)
 	if err != nil {
 		return nil, setupError("cannot encode sandbox specification", err)
 	}
-	root, err := os.OpenRoot(spec.SessionDir)
+	resource, err := newSandbox(spec)
 	if err != nil {
-		return nil, setupError("cannot open sandbox folder", err)
+		return resource, err
 	}
-	defer root.Close()
-	f, err := root.OpenFile("process.json.new", os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
-	if err != nil {
-		return nil, setupError("cannot write sandbox specification", err)
-	}
-	created, statErr := f.Stat()
-	if statErr != nil {
-		return nil, setupError("cannot identify new sandbox specification", errors.Join(statErr, f.Close()))
-	}
-	if err = writePreparedSpec(f, b); err != nil {
-		return nil, setupError("cannot save sandbox specification", errors.Join(err, removePreparedTemp(root, created)))
-	}
-	if err = root.Rename("process.json.new", "process.json"); err != nil {
-		return nil, setupError("cannot publish sandbox specification", errors.Join(err, removePreparedTemp(root, created)))
-	}
-	return newSandbox(spec)
+	return prepareOwnedProcessSpecV1(resource, spec, b)
 }
 
 // Open reads a prepared sandbox after the supervisor or host restarted.

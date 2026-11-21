@@ -110,7 +110,7 @@ func (m *Model) runPendingAttach(ctx context.Context, in, out *os.File, stuck bo
 	}
 	pa.opts.Settings, pa.settingsRead = readSettings(m.be, pa.opts.Settings, pa.settingsRead)
 	pa.opts.In, pa.opts.Out = in, out
-	res, err := m.be.Attach(ctx, pa.opts)
+	res, err := m.be.Attach(terminalAttachContextV1(ctx), pa.opts)
 	if ctx.Err() != nil {
 		return nil, ctx.Err()
 	}

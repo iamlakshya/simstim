@@ -155,21 +155,7 @@ func (w *Writer) Write(t Type, payload []byte) error {
 // gives up with ctx's error and writes nothing. Once a frame has begun, it
 // goes out whole.
 func (w *Writer) WriteCtx(ctx context.Context, t Type, payload []byte) error {
-	buf, err := frame(t, payload)
-	if err != nil {
-		return err
-	}
-	select {
-	case w.turn <- struct{}{}:
-	case <-ctx.Done():
-		return ctx.Err()
-	}
-	defer func() { <-w.turn }()
-	// The turn and the end of ctx may have come together: the end wins.
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	return w.put(buf)
+	return w.writeCtxGuarded(ctx, t, payload, nil)
 }
 
 // EncodeFrame returns the canonical bytes of one frame. The caller owns the buffer.
@@ -337,6 +323,8 @@ type Request struct {
 	ID   uint64          `json:"id"`
 	Op   string          `json:"op"`
 	Args json.RawMessage `json:"args,omitempty"`
+	// NewAttempt is a fresh per-frame nonce for an optional terminal New refusal.
+	NewAttempt string `json:"new_attempt,omitempty"`
 }
 
 // Response answers a request with the same ID.

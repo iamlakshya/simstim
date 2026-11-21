@@ -73,6 +73,9 @@ func TestEveryDiskForcesRawAndDisablesBackingFiles(t *testing.T) {
 			if strings.HasSuffix(arg, "serial=session") && strings.Contains(arg, "direct=on") != direct {
 				t.Fatal("session direct-I/O selection changed")
 			}
+			if !strings.Contains(arg, "_disable_io_uring=on") || !strings.Contains(arg, "_disable_aio=on") {
+				t.Fatal("a pinned raw disk can select a kernel asynchronous backend")
+			}
 		}
 		if count != 4 || budget.Guest != spec.GuestRAM || budget.Limit != 4240*mebibyte {
 			t.Fatalf("disk count%d or memory plan%+v", count, budget)

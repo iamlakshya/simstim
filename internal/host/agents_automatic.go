@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"reflect"
 	"runtime"
 	"sync/atomic"
@@ -42,12 +41,7 @@ func PrepareAutomaticAgentsV1(ctx context.Context, authority *AutomaticBootOpera
 		receipt.boot.loan.Purpose != "automatic" || publish == nil {
 		return nil, automaticRestoreError()
 	}
-	defer func() {
-		if returned != nil && retained != nil {
-			returned = errors.Join(returned, retained.Close())
-			retained = nil
-		}
-	}()
+	defer finishAgentsFactoryV1(&retained, &returned)
 	returned = authority.WithCurrent(ctx, func(current *Manifest) error {
 		if !bytes.Equal(current.VMNeedV1, receipt.rawNeed) || current.ID != receipt.boot.loan.Primary || current.Agents != "" && current.Agents != receipt.need.Agents.SHA256 {
 			return automaticRestoreError()

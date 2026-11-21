@@ -11,7 +11,7 @@ type modelWebSocketRefusal struct{ line string }
 
 func (e modelWebSocketRefusal) Error() string { return e.line }
 
-func (s *Server) inspectModelWebSocket(scope *originRequest, handshake *modelRequest, opcode byte, input io.ReadCloser) (io.ReadCloser, error) {
+func (s *Server) inspectModelWebSocket(ctx context.Context, scope *originRequest, handshake *modelRequest, opcode byte, input io.ReadCloser) (io.ReadCloser, error) {
 	if opcode >= webSocketClose {
 		return input, nil
 	}
@@ -35,11 +35,19 @@ func (s *Server) inspectModelWebSocket(scope *originRequest, handshake *modelReq
 		clear(body)
 		return refuse("model request type")
 	}
+	model.requestBytes = uint64(len(body))
 	if err := s.installModelRequest(scope, model); err != nil {
 		clear(body)
 		return refuse(err.Error())
 	}
-	return newModelBody(body), nil
+	if err := s.admitModelWebSocketUsage(ctx, scope, model); err != nil {
+		clear(body)
+		return nil, err
+	}
+	scope.mu.Lock()
+	usage := scope.usageWS
+	scope.mu.Unlock()
+	return &modelUsageWebSocketRequestBody{ReadCloser: newModelBody(body), turn: model.usage, written: func() { usage.requestWritten(ctx, model) }}, nil
 }
 
 func identityWebSocketFilter(_ context.Context, _ byte, input io.ReadCloser) (io.ReadCloser, error) {

@@ -19,7 +19,7 @@ func (s *Supervisor) prepareDiskWatcherV1(runtime sandbox, initial context.Conte
 		return diskFailure("disk_measure", "the initial disk check has no owned startup budget")
 	}
 	// The explicitly selected plain fixture has no real sandbox storage plan.
-	if s.m.Wall != nil && s.m.Wall.Driver == driverPlain {
+	if s.m.Wall != nil && (s.m.Wall.Driver == driverPlain || s.m.Wall.Driver == "none" && s.m.Wall.Level == "none") {
 		return nil
 	}
 	source, known := runtime.(ownedDiskRuntimeV1)
@@ -76,6 +76,9 @@ func (s *Supervisor) closeDiskResourcesV1() error {
 	s.mu.Unlock()
 	if watcher != nil {
 		return watcher.resources.Close()
+	}
+	if prepared, ok := runtime.(interface{ closePreparedResourcesV1() error }); ok {
+		return prepared.closePreparedResourcesV1()
 	}
 	if source, known := runtime.(ownedDiskRuntimeV1); known {
 		return source.ownedDiskResourcesV1().Close()

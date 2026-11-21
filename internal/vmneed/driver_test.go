@@ -56,7 +56,7 @@ func TestFirecrackerNeedUsesSameCanonicalWire(t *testing.T) {
 
 func TestSelectedDriverDoesNotBorrowAnotherRuntime(t *testing.T) {
 	for name, change := range map[string]func(*NeedV1){
-		"unknown driver":      func(n *NeedV1) { n.Driver = "nitro" },
+		"unknown driver":      func(n *NeedV1) { n.Driver = "unknown" },
 		"different VMM":       func(n *NeedV1) { n.Runtime.Items[0].Name = "cloud-hypervisor" },
 		"old VMM":             func(n *NeedV1) { n.Runtime.Items[0].Version = "1.16.1" },
 		"CPU zero":            func(n *NeedV1) { n.CPUs = 0 },

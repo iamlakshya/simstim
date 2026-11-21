@@ -24,6 +24,8 @@ type Backend interface {
 	LoadHosts(ctx context.Context) ([]client.Host, error)
 	// ResolveHost selects a current saved UI target without dialing or grants.
 	ResolveHost(ctx context.Context, selected string) (client.Host, error)
+	// PreviewHostSelection returns closed, checked local display metadata only.
+	PreviewHostSelection(context.Context, string, client.NewInputOptions) (hostSelectionPreview, error)
 	// LoadTiers reads the current policy alongside the saved host snapshot.
 	LoadTiers(ctx context.Context, hosts []client.Host) (client.Tiers, error)
 	// ResolveHostTier asks the foreground question through ctx, then saves it.

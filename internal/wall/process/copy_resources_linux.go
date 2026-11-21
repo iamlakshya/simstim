@@ -29,14 +29,17 @@ type copyStageNativeV1 struct {
 	identity os.FileInfo
 }
 type copyOwnerNativeV1 struct {
-	runtime   *sandbox
-	conn      *net.UnixConn
-	mu        sync.Mutex
-	closed    atomic.Bool
-	ready     atomic.Bool
-	mounts    map[uint32]*copyMountNativeV1
-	active    *copyStageNativeV1
-	publisher int
+	runtime      *sandbox
+	conn         *net.UnixConn
+	mu           sync.Mutex
+	closed       atomic.Bool
+	ready        atomic.Bool
+	mounts       map[uint32]*copyMountNativeV1
+	active       *copyStageNativeV1
+	publisher    int
+	interruptMu  sync.Mutex
+	interruptErr error
+	closeErr     error
 }
 
 // NativeCopyOwnerV1 accepts only this package's concrete started sandbox and
@@ -114,43 +117,78 @@ func receiveCopyResourcesV1(owner *CopyOwnerV1, request Request) error {
 }
 
 func (o *copyOwnerNativeV1) interrupt() {
-	if o != nil && !o.closed.Swap(true) {
-		_ = o.conn.Close()
+	if o == nil {
+		return
+	}
+	o.interruptMu.Lock()
+	defer o.interruptMu.Unlock()
+	if !o.closed.Swap(true) {
+		o.interruptErr = o.conn.Close()
 	}
 }
 
-// nativeExit runs after actual launcher and init exit. It first proves every
-// publisher received from that original launcher has ceased, then cleans only
-// recorded staging identities through the retained original mount handles.
+// nativeExit runs only after the original launcher/init exit. It preserves
+// native publishers and staging objects on uncertainty, so a retry cannot
+// convert a previous unlink or descriptor failure into cleanup success.
 func (o *copyOwnerNativeV1) nativeExit() error {
+	if o == nil {
+		return nil
+	}
 	o.interrupt()
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	var result error
+	o.interruptMu.Lock()
+	interruptErr := o.interruptErr
+	o.interruptMu.Unlock()
+	if err := errors.Join(o.closeErr, interruptErr); err != nil {
+		return err
+	}
 	if o.publisher >= 0 {
 		if err := waitInitExit(o.publisher); err != nil {
 			return err
 		}
-		result = errors.Join(result, unix.Close(o.publisher))
+		if err := unix.Close(o.publisher); err != nil {
+			o.closeErr = err
+			return err
+		}
 		o.publisher = -1
 	}
 	if o.active != nil {
 		stage := o.active
-		result = errors.Join(result, copyUnlinkOwned(stage.mount.stage, stage.name, stage.identity, false), stage.file.Close())
+		if err := copyUnlinkOwned(stage.mount.stage, stage.name, stage.identity, false); err != nil {
+			return err
+		}
+		if err := stage.file.Close(); err != nil {
+			o.closeErr = err
+			return err
+		}
 		o.active = nil
 	}
-	for _, mount := range o.mounts {
+	for index, mount := range o.mounts {
 		if mount.ownedName != "" {
-			result = errors.Join(result, copyUnlinkOwned(mount.cleanupRoot, mount.ownedName, mount.identity, true))
+			if err := copyUnlinkOwned(mount.cleanupRoot, mount.ownedName, mount.identity, true); err != nil {
+				return err
+			}
+			mount.ownedName = ""
 		}
-		result = errors.Join(result, mount.stage.Close(), mount.root.Close())
-		if mount.cleanupRoot != nil {
-			result = errors.Join(result, mount.cleanupRoot.Close())
+		for _, field := range []**os.File{&mount.stage, &mount.root, &mount.cleanupRoot} {
+			if *field == nil {
+				continue
+			}
+			if err := (*field).Close(); err != nil {
+				o.closeErr = errors.Join(o.closeErr, err)
+			} else {
+				*field = nil
+			}
 		}
+		if o.closeErr != nil {
+			return o.closeErr
+		}
+		delete(o.mounts, index)
 	}
-	clear(o.mounts)
-	return result
+	return nil
 }
+
 func copyUnlinkOwned(parent *os.File, name string, expected os.FileInfo, directory bool) error {
 	raw, err := parent.SyscallConn()
 	if err != nil {

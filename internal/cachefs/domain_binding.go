@@ -7,7 +7,6 @@ import (
 	"io"
 	"os"
 
-	"github.com/iamlakshya/simstim/internal/api"
 	"github.com/iamlakshya/simstim/internal/proto"
 )
 
@@ -42,7 +41,7 @@ func ReadDomainBinding(ctx context.Context, root *os.Root, leaf string, file *os
 	if len(raw) > proto.MaxFrame {
 		return domain, false, domainError("the host-domain binding grew beyond its metadata bound")
 	}
-	fields, err := api.ProjectedJSONObjectFields(ctx, raw, "version", "domain")
+	fields, err := domainObjectFields(ctx, raw, "version", "domain")
 	var version int
 	if err != nil || len(fields) != 2 || json.Unmarshal(fields["version"], &version) != nil || version != 1 {
 		return domain, false, domainContextError(ctx, "the existing host-domain binding is malformed or has an unknown version")

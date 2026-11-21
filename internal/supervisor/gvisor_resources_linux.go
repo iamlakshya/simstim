@@ -10,6 +10,7 @@ import (
 	"slices"
 
 	"github.com/iamlakshya/simstim/internal/cachefs"
+	"github.com/iamlakshya/simstim/internal/files"
 	"github.com/iamlakshya/simstim/internal/host"
 	"github.com/iamlakshya/simstim/internal/wall"
 )
@@ -17,7 +18,7 @@ import (
 // prepareGVisor consumes the original native loan and the ONE process
 // filesystem plan. The host constructor fixes the runtime issuer, storage
 // domain and confined command owner; no caller callback or inventory is used.
-func prepareGVisor(ctx context.Context, m *host.Manifest) (_ sandbox, returned error) {
+func prepareGVisor(ctx context.Context, m *host.Manifest) (result sandbox, returned error) {
 	expected, err := originalGvisorPlan(ctx, m)
 	if err != nil {
 		return nil, err
@@ -25,12 +26,19 @@ func prepareGVisor(ctx context.Context, m *host.Manifest) (_ sandbox, returned e
 	receipt := host.OriginalVMNeedFromContext(ctx)
 	spec, capture, err := prepareProcessFilesystem(m, false)
 	if err != nil {
+		if capture != nil {
+			return &failedSandboxPreparationV1{capture: capture}, err
+		}
 		return nil, err
 	}
 	prepared := false
 	defer func() {
 		if !prepared && capture != nil {
-			returned = errors.Join(returned, capture.Close())
+			closeErr := capture.Close()
+			returned = errors.Join(returned, closeErr)
+			if closeErr != nil {
+				result = &failedSandboxPreparationV1{capture: capture}
+			}
 		}
 	}()
 	canonical, err := filepath.EvalSymlinks(expected.SessionDir)
@@ -50,26 +58,54 @@ func prepareGVisor(ctx context.Context, m *host.Manifest) (_ sandbox, returned e
 	}
 	disk, err := processDiskResourcesV1(spec)
 	if err != nil {
+		if disk != nil || capture != nil {
+			prepared = true
+			return &failedSandboxPreparationV1{capture: capture, disk: disk}, err
+		}
 		return nil, err
 	}
 	defer func() {
 		if !prepared {
-			returned = errors.Join(returned, disk.Close())
+			closeErr := disk.Close()
+			returned = errors.Join(returned, closeErr)
+			if closeErr != nil {
+				result = &failedSandboxPreparationV1{capture: capture, disk: disk}
+				prepared = true
+			}
 		}
 	}()
 	runtime, err := prepareGvisorLayout(owner, driver, spec)
 	if err != nil {
+		if runtime != nil {
+			prepared = true
+			return &failedSandboxPreparationV1{runtime: runtime, capture: capture, disk: disk}, err
+		}
 		return nil, err
 	}
 	release, ok := runtime.(interface{ ReleasePreparedV1() error })
 	if !ok {
-		return nil, execRefusal("the gvisor factory returned no actual prepared-resource owner")
+		prepared = true
+		return &failedSandboxPreparationV1{runtime: runtime, capture: capture, disk: disk}, execRefusal("the gvisor factory returned no actual prepared-resource owner")
+	}
+	home, ok := runtime.(interface {
+		WithPreparedForkHomeV1(context.Context, func(*os.Root) error) error
+	})
+	if !ok {
+		return nil, execRefusal("the gvisor factory supplied no original fresh-home disk root")
+	}
+	if err := home.WithPreparedForkHomeV1(ctx, func(root *os.Root) error {
+		// Accounting already covers the whole SAME session folder. Validate
+		// the actual new home role without adding an overlapping double count.
+		return files.ValidateDiskRoots(disk.volume, root)
+	}); err != nil {
+		return nil, err
 	}
 	// Gvisor's actual runtime lock belongs to this same factory. Its release
 	// refuses a live or uncertain init. Process metadata-only Close is unchanged.
 	disk.release = release.ReleasePreparedV1
 	if host.OriginalVMNeedFromContext(ctx) != receipt {
-		return nil, execRefusal("the original gvisor operation ended before runtime preparation completed")
+		prepared = true
+		return &failedSandboxPreparationV1{runtime: runtime, capture: capture, disk: disk}, execRefusal("the original gvisor operation ended before runtime preparation completed")
 	}
 	prepared = true
 	return processSandbox{Sandbox: runtime, capture: capture, disk: disk}, nil

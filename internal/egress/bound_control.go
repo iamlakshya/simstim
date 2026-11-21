@@ -47,7 +47,7 @@ func (s *Server) initialiseBoundControl(raw []byte) (BoundInitResult, error) {
 	if err != nil {
 		return BoundInitResult{}, err
 	}
-	result := BoundInitResult{Version: MemberRegistryV2, CACert: string(s.ca.publicPEM), Generation: next.state.generation, Secrets: next.state.publicSecrets(slices.Sorted(maps.Keys(next.state.secrets))), Minted: minted, Retired: retired}
+	result := BoundInitResult{TrustedUses: next.state.publicTrustedUses(), Version: MemberRegistryV2, CACert: string(s.ca.publicPEM), Generation: next.state.generation, Secrets: next.state.publicSecrets(slices.Sorted(maps.Keys(next.state.secrets))), Minted: minted, Retired: retired}
 	if err := checkBoundControlResult(result); err != nil {
 		return BoundInitResult{}, err
 	}
@@ -107,11 +107,17 @@ func (s *Server) addBoundControlMember(raw []byte) (MemberAddResultV2, error) {
 		return MemberAddResultV2{}, err
 	}
 	state := candidate.prepared.state
-	result := MemberAddResultV2{Version: MemberRegistryV2, Generation: state.generation, Env: candidate.env, Secrets: state.publicSecrets(candidate.names)}
+	result := MemberAddResultV2{TrustedUses: state.publicTrustedUses(), Version: MemberRegistryV2, Generation: state.generation, Env: candidate.env, Secrets: state.publicSecrets(candidate.names)}
 	if err := checkBoundControlResult(result); err != nil {
 		return MemberAddResultV2{}, err
 	}
 	if candidate.mutation {
+		if err := s.prepareMemoryCarryLocked(ctx, candidate.prepared); err != nil {
+			return MemberAddResultV2{}, err
+		}
+		if err := s.retireJudgeSourcesLocked(ctx, state); err != nil {
+			return MemberAddResultV2{}, err
+		}
 		pending := append(secretAuthorities(current, candidate.changed), candidate.newAuthorities...)
 		if err := s.closeSecretResources(ctx, candidate.changed, pending, candidate.newAuthorities); err != nil {
 			return MemberAddResultV2{}, err
@@ -144,12 +150,12 @@ func (s *Server) armControl(raw []byte) (ArmResult, error) {
 	if err != nil {
 		return ArmResult{}, err
 	}
-	changed, err := applyBoundUpdates(ctx, next, args.Values)
+	changed, err := applyTrustedArm(ctx, next, args)
 	if err != nil {
 		return ArmResult{}, err
 	}
 	if len(changed) == 0 {
-		result := ArmResult{Version: MemberRegistryV2, Generation: current.generation, Secrets: current.publicSecrets(slices.Sorted(maps.Keys(args.Values)))}
+		result := ArmResult{TrustedUses: current.publicTrustedUses(), Version: MemberRegistryV2, Generation: current.generation, Secrets: current.publicSecrets(slices.Sorted(maps.Keys(args.Values)))}
 		if err := checkBoundControlResult(result); err != nil {
 			return ArmResult{}, err
 		}
@@ -164,14 +170,22 @@ func (s *Server) armControl(raw []byte) (ArmResult, error) {
 		return ArmResult{}, err
 	}
 	prepared.secretOnly = true
-	result := ArmResult{Version: MemberRegistryV2, Generation: next.generation, Secrets: next.publicSecrets(slices.Sorted(maps.Keys(args.Values)))}
+	result := ArmResult{TrustedUses: next.publicTrustedUses(), Version: MemberRegistryV2, Generation: next.generation, Secrets: next.publicSecrets(slices.Sorted(maps.Keys(args.Values)))}
 	if err := checkBoundControlResult(result); err != nil {
 		return ArmResult{}, err
 	}
 	if err := validateLiveBoundSentinels(current, next); err != nil {
 		return ArmResult{}, err
 	}
-	if err := s.closeSecretResources(ctx, changed, secretAuthorities(current, changed), nil); err != nil {
+	if err := s.prepareMemoryCarryLocked(ctx, prepared); err != nil {
+		return ArmResult{}, err
+	}
+	if err := s.retireJudgeSourcesLocked(ctx, next); err != nil {
+		return ArmResult{}, err
+	}
+	addedAuthorities := trustedAddedAuthorities(current, next, changed)
+	pendingAuthorities := append(secretAuthorities(current, changed), addedAuthorities...)
+	if err := s.closeSecretResources(ctx, changed, pendingAuthorities, addedAuthorities); err != nil {
 		return ArmResult{}, err
 	}
 	s.publishControlState(prepared, false)
@@ -181,8 +195,13 @@ func (s *Server) armControl(raw []byte) (ArmResult, error) {
 func secretAuthorities(state *memberState, names []string) []string {
 	var authorities []string
 	for _, name := range names {
-		if secret, exists := state.secrets[name]; exists && secret.bound != nil {
-			authorities = append(authorities, secret.bound.binding.Hosts...)
+		if secret, exists := state.secrets[name]; exists {
+			if secret.bound != nil {
+				authorities = append(authorities, secret.bound.binding.Hosts...)
+			}
+			if secret.trusted != nil {
+				authorities = append(authorities, secret.trusted.Bind.Hosts...)
+			}
 		}
 	}
 	slices.Sort(authorities)

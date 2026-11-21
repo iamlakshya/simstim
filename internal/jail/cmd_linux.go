@@ -12,6 +12,7 @@ import (
 	"sync"
 	"syscall"
 
+	"github.com/iamlakshya/simstim/internal/slotlease"
 	"golang.org/x/sys/unix"
 )
 
@@ -20,21 +21,29 @@ import (
 // os.Pipe. It keeps the jail's process attributes to itself, so a caller
 // cannot take away the jail's new session, or its namespaces.
 type Cmd struct {
-	Stdin  io.Reader
-	Stdout io.Writer
-	Stderr io.Writer
+	modeExecV1         *vmmExecOwnerV1
+	publicationLeaseV1 *publicationExecLeaseV1
+	slotSourceV1       *slotlease.SourceV1
+	slotInitLeaseV1    *os.File
+	slotInitLeaseRefV1 *slotInitLeaseRefV1
+	Stdin              io.Reader
+	Stdout             io.Writer
+	Stderr             io.Writer
 
-	ctx         context.Context
-	cmd         *exec.Cmd
-	setup       []byte             // the first stage's set-up, sent on a pipe at Start
-	files       []*os.File         // Spec.Files, from fd 3
-	fileRulesV1 []pinnedFileRuleV1 // identity of the selected final Files slots
-	binds       []bind             // the pinned binds, as Command resolved them
-	rules       []rule             // the pinned rules, with their original paths and identities
-	pins        []*os.File         // the pinned binds and rules, which the first stage inherits
-	status      *os.File           // the read end of the pipe on which init says how the command ended
-	pipes       [3]*os.File        // the jail's ends of StdinPipe, StdoutPipe and StderrPipe
-	ends        []*os.File         // the caller's ends of those pipes
+	gvisorOuter      *gvisorOuterOwnerV1 // fixed C creator plus actual A creation pidfd
+	gvisorFreezer    *gvisorFreezerV1    // original creator and all descendants share this child
+	gvisorFreezerOff string
+	ctx              context.Context
+	cmd              *exec.Cmd
+	setup            []byte             // the first stage's set-up, sent on a pipe at Start
+	files            []*os.File         // Spec.Files, from fd 3
+	fileRulesV1      []pinnedFileRuleV1 // identity of the selected final Files slots
+	binds            []bind             // the pinned binds, as Command resolved them
+	rules            []rule             // the pinned rules, with their original paths and identities
+	pins             []*os.File         // the pinned binds and rules, which the first stage inherits
+	status           *os.File           // the read end of the pipe on which init says how the command ended
+	pipes            [3]*os.File        // the jail's ends of StdinPipe, StdoutPipe and StderrPipe
+	ends             []*os.File         // the caller's ends of those pipes
 
 	mu           sync.Mutex
 	phase        phase
@@ -76,9 +85,39 @@ func (c *Cmd) Start() error {
 	}
 	c.phase = phaseSetup
 	c.mu.Unlock()
+	// The private outer source may lock this exact creation thread. Release
+	// it on every real Start path; it cannot migrate to another goroutine.
+	defer c.releaseVMMCreationThreadV1()
 	defer c.closePins()
+	defer func() {
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		// No child, or a positively joined original init, cannot create a
+		// future writer. An uncertain Start keeps this SAME original OFD.
+		if c.physical {
+			c.lifecycleErr = errors.Join(c.lifecycleErr, c.closePublicationCaptureV1())
+		}
+	}()
+	if c.slotInitLeaseV1 != nil {
+		defer c.slotInitLeaseV1.Close()
+	}
+	if c.gvisorOuter != nil {
+		defer func() {
+			// An uncertain native lifetime retains the SAME code objects as its
+			// namespace owner. Successful starts close them only at physical join.
+			if c.PhysicalExitV1() {
+				_ = c.gvisorOuter.closeCodeV1()
+			}
+		}()
+	}
 	// Before the jail starts, a failure closes both ends of each pipe.
 	early := func(err error) error {
+		if settleErr := c.vmmNoCreationV1(); settleErr != nil {
+			return c.uncertainWait(errors.Join(err, settleErr))
+		}
+		if settleErr := c.settleVMMNoFutureBeforeWaitV1(); settleErr != nil {
+			return c.uncertainWait(errors.Join(err, settleErr))
+		}
 		c.closeEnds(true)
 		c.mu.Lock()
 		c.phase = phaseFailed
@@ -101,6 +140,28 @@ func (c *Cmd) Start() error {
 	if err := c.samePaths(); err != nil {
 		return early(err)
 	}
+	if c.gvisorOuter != nil {
+		return c.startGvisorOuterV1(files, release)
+	}
+	modeFiles, err := c.vmmCapturedFilesV1()
+	if err != nil {
+		return early(err)
+	}
+	if len(modeFiles) != 0 && c.slotInitLeaseV1 != nil {
+		return early(failure("the VMM mode source cannot mix with an unjoined slot purpose", "Keep the original runtime and use a complete native slot and mode cohort."))
+	}
+	if c.slotSourceV1 != nil {
+		if err := c.slotSourceV1.CheckCurrentV1(c.ctx); err != nil {
+			return early(err)
+		}
+		if err := checkSlotInitLeaseFileV1(c.slotInitLeaseV1, c.slotInitLeaseRefV1); err != nil {
+			return early(err)
+		}
+	}
+	publicationFiles, err := c.publicationCapturedFilesV1()
+	if err != nil {
+		return early(err)
+	}
 	setupR, setupW, err := os.Pipe()
 	if err != nil {
 		return early(failure("cannot make the jail's pipe: "+err.Error(), "Check the open-file limit."))
@@ -111,6 +172,11 @@ func (c *Cmd) Start() error {
 		return early(failure("cannot make the jail's pipe: "+err.Error(), "Check the open-file limit."))
 	}
 	c.cmd.ExtraFiles = append(append(slices.Clone(files), setupR, statusW), c.pins...)
+	c.cmd.ExtraFiles = append(c.cmd.ExtraFiles, publicationFiles...)
+	if c.slotInitLeaseV1 != nil {
+		c.cmd.ExtraFiles = append(c.cmd.ExtraFiles, c.slotInitLeaseV1)
+	}
+	c.cmd.ExtraFiles = append(c.cmd.ExtraFiles, modeFiles...)
 	createdFD := -1
 	attr := syscall.SysProcAttr{}
 	if c.cmd.SysProcAttr != nil {
@@ -145,6 +211,25 @@ func (c *Cmd) Start() error {
 		return stepFailed("cannot retain native jail ownership", "Use a supported kernel with creation pidfds.", cause)
 	}
 	unix.CloseOnExec(createdFD)
+	if nativeErr := c.vmmCreatedRootV1(createdFD); nativeErr != nil {
+		_ = setupW.Close()
+		c.mu.Lock()
+		c.lifecycleErr = errors.Join(c.lifecycleErr, nativeErr)
+		c.mu.Unlock()
+		if killErr := c.killGroup(); killErr != nil {
+			return c.uncertainWait(errors.Join(nativeErr, killErr))
+		}
+		if waitErr := waitOwnedPIDFD(createdFD, -1); waitErr != nil {
+			return c.uncertainWait(errors.Join(nativeErr, waitErr))
+		}
+		result := c.completeOwnedWait(false)
+		c.mu.Lock()
+		if c.physical {
+			c.phase = phaseFailed
+		}
+		c.mu.Unlock()
+		return errors.Join(nativeErr, result)
+	}
 	written := make(chan error, 1)
 	go func() {
 		n, err := setupW.Write(c.setup)
@@ -189,7 +274,9 @@ func (c *Cmd) Start() error {
 		}
 		result := c.completeOwnedWait(true)
 		c.mu.Lock()
-		c.phase = phaseFailed
+		if c.physical {
+			c.phase = phaseFailed
+		}
 		c.mu.Unlock()
 		return errors.Join(err, result)
 	}
@@ -233,87 +320,6 @@ func (c *Cmd) closePins() {
 		_ = f.Close()
 	}
 	c.pins = nil
-}
-
-// watch kills the whole jail when the context ends first.
-func (c *Cmd) watch() {
-	select {
-	case <-c.ctx.Done():
-		c.killGroup()
-	case <-c.done:
-	}
-}
-
-// killGroup targets the original group while the unreaped owned child pins
-// its number. A failed wait revokes group-number signalling permanently;
-// subsequent cleanup uses only the exact creation pidfd. This makes no claim
-// about a descendant that escaped that group or its namespace.
-func (c *Cmd) killGroup() error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if !c.reaped && c.owned {
-		err := c.signalOwnedLocked(unix.SIGKILL)
-		if err != nil {
-			c.lifecycleErr = errors.Join(c.lifecycleErr, err)
-			return err
-		}
-	}
-	return nil
-}
-
-// signalOwnedLocked checks current child ownership through the creation
-// descriptor before any group-number signal. This also fences a concurrent
-// watcher against a wait that just lost ownership. Caller holds mu.
-func (c *Cmd) signalOwnedLocked(sig syscall.Signal) error {
-	var checkErr error
-	if sig == unix.SIGKILL && !c.groupUnsafe {
-		var info unix.Siginfo
-		for {
-			checkErr = ownedWaitid(unix.P_PIDFD, c.pidfd, &info, unix.WEXITED|unix.WNOWAIT|unix.WNOHANG, nil)
-			if errors.Is(checkErr, unix.EINTR) {
-				continue
-			}
-			break
-		}
-		if checkErr != nil {
-			c.groupUnsafe = true
-		}
-	}
-	var signalErr error
-	if sig == unix.SIGKILL && !c.groupUnsafe {
-		signalErr = ownedGroupSignal(-c.pid, sig)
-	} else {
-		signalErr = ownedPidfdSignal(c.pidfd, sig, nil, 0)
-	}
-	if errors.Is(signalErr, unix.ESRCH) {
-		signalErr = nil
-	}
-	return errors.Join(checkErr, signalErr)
-}
-
-// Signal sends sig to the jail, whose init passes it on to the command.
-// During Start's set-up, it kills the jail instead, and Start fails.
-func (c *Cmd) Signal(sig os.Signal) error {
-	s, ok := sig.(syscall.Signal)
-	if !ok {
-		return failure("a jail takes only a syscall.Signal", "Pass a signal such as syscall.SIGTERM.")
-	}
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	switch {
-	case c.phase == phaseSetup:
-		c.abortOnce.Do(func() { close(c.abort) })
-		return nil
-	case (c.phase == phaseRunning || c.phase == phaseWaiting || c.phase == phaseUncertain) && !c.reaped:
-		err := c.signalOwnedLocked(s)
-		if err != nil {
-			c.lifecycleErr = errors.Join(c.lifecycleErr, err)
-			return stepFailed("cannot signal the jail", "Check that the jail still runs.", err)
-		}
-		return nil
-	default:
-		return failure("the jail is not running", "Signal a jail between a Start that worked and the end of its Wait.")
-	}
 }
 
 // Pid returns the process ID of the jail's first stage, which leads its

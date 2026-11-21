@@ -14,6 +14,7 @@ import (
 	"github.com/BurntSushi/toml"
 	"github.com/spf13/cobra"
 
+	"github.com/iamlakshya/simstim/internal/api"
 	"github.com/iamlakshya/simstim/internal/brand"
 	"github.com/iamlakshya/simstim/internal/client"
 	"github.com/iamlakshya/simstim/internal/configdata"
@@ -32,6 +33,7 @@ func configCheckCmd() *cobra.Command {
 			"It checks legacy secret commands and structured definitions with the same rules as a session start.\n" +
 			"It also finds two spellings of one key and machines without a provider or an id.\n" +
 			"It also finds keys, sizes and times that do not parse, and hosts without a usable name or ssh.\n" +
+			"It checks every profile and repository host rule, including unused ones, against the saved hosts.\n" +
 			"For an unknown key, it names the nearest known key.\n" +
 			"It exits with 1 when it finds an error, and with 0 when it finds only warnings, or nothing.\n" +
 			"With --json, it prints the report as one object, with the same exit codes.",
@@ -78,6 +80,7 @@ func warnSettings(cmd *cobra.Command, args []string) {
 	if msg == "" {
 		return
 	}
+	cmd.SetContext(client.WithAttachConfigWarningShownV1(cmd.Context()))
 	w, try := cmd.ErrOrStderr(), brand.Name+" config check"
 	if jsonOn(cmd) {
 		line, _ := json.Marshal(map[string]any{"v": jsonVersion, "warning": map[string]string{"code": "config_ignored", "message": msg, "try": try}})
@@ -253,6 +256,7 @@ func checkFile(f client.ConfigFile) (bool, []finding) {
 		return true, c.out
 	}
 	c.table(tree, f.Type, nil)
+	c.hostRuleReferencesV1(tree, f.Type)
 	// In the order of the file. A finding without a line comes last.
 	sort.SliceStable(c.out, func(i, j int) bool {
 		a, b := c.out[i].Line, c.out[j].Line
@@ -318,6 +322,16 @@ func (c *checker) table(t map[string]any, typ reflect.Type, p keyPath) {
 func (c *checker) value(v any, t reflect.Type, p keyPath) {
 	if t.Kind() == reflect.Pointer {
 		t = t.Elem()
+	}
+	if t == reflect.TypeFor[api.HostSelectorV1]() {
+		choice, err := api.DecodeHostSelectorV1(v)
+		if err == nil {
+			err = choice.Validate()
+		}
+		if err != nil {
+			c.add(p, finding{Code: "bad_value", Message: err.Error()})
+		}
+		return
 	}
 	if t == reflect.TypeFor[client.SecretDefinition]() {
 		c.secretDefinition(v, p)

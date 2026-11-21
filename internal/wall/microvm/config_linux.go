@@ -66,7 +66,7 @@ func readVMRecordFor(dir string, kind backendKind) (savedVM, error) {
 	if err := decoder.Decode(&more); !errors.Is(err, io.EOF) {
 		return savedVM{}, fmt.Errorf("saved microvm spec has trailing content")
 	}
-	if saved.Version != 1 || saved.UIDMode != "login" && saved.UIDMode != "subuid" {
+	if saved.Version != 1 || saved.UIDMode != "login" && saved.UIDMode != "subuid" && saved.UIDMode != slotUIDModeV1Name {
 		return savedVM{}, fmt.Errorf("unknown saved microvm spec version or identity mode")
 	}
 	return saved, nil
@@ -77,26 +77,38 @@ func (d *Driver) prepare(ctx context.Context, spec wall.Spec, create bool, mode 
 	if err != nil {
 		return nil, err
 	}
-	defer root.Close()
+	resource := newSandbox(d, spec, nil, mode, ctx)
+	resource.preparedRoot = root
+	fail := func(err error) (wall.Sandbox, error) {
+		resource.preparationErr = err
+		return resource, err
+	}
 	lease, err := acquireVMLeaseFor(ctx, root, d.kind)
+	resource.lease = lease // Adopt even a failed lock/open's actual partial owner.
 	if err != nil {
-		return nil, err
+		return fail(err)
 	}
 	if err := ctx.Err(); err != nil {
-		lease.Close()
-		return nil, err
+		return fail(err)
 	}
 	if create {
-		if err := writeVMSpec(root, spec, mode); err != nil {
-			lease.Close()
-			return nil, err
+		if err := writeOwnedVMSpecV1(root, spec, mode, resource); err != nil {
+			return fail(err)
 		}
 		if err := cachefs.MakePrivateDir(root, "vm"); err != nil {
-			lease.Close()
-			return nil, err
+			return fail(err)
 		}
 	}
-	return newSandbox(d, spec, lease, mode, ctx), nil
+	if mode != slotUIDModeV1Name {
+		resource.snapshotDisk, err = pinSnapshotDiskRootsV1(root, lease, d.kind, spec.DiskMax)
+		if err != nil {
+			return fail(err)
+		}
+	}
+	if err := resource.closePreparationRootV1(); err != nil {
+		return fail(err)
+	}
+	return resource, nil
 }
 
 func acquireVMLease(ctx context.Context, root *os.Root) (*os.File, error) {
@@ -104,20 +116,23 @@ func acquireVMLease(ctx context.Context, root *os.Root) (*os.File, error) {
 }
 
 func acquireVMLeaseFor(ctx context.Context, root *os.Root, kind backendKind) (*os.File, error) {
-	name := kind.name() + ".lock"
-	lease, err := cachefs.OpenFile(root, name, os.O_CREATE|os.O_RDWR, 0o600)
+	lease, err := cachefs.OpenFile(root, kind.name()+".lock", os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
-		return nil, err
+		return lease, err
 	}
+	return lease, lockVMLeaseForV1(ctx, root, kind, lease)
+}
+
+// The private factory retains this SAME open description on every failure.
+// A destructor rechecks the actual lock instead of inferring it from a field.
+func lockVMLeaseForV1(ctx context.Context, root *os.Root, kind backendKind, lease *os.File) error {
 	for {
 		if err := ctx.Err(); err != nil {
-			lease.Close()
-			return nil, err
+			return err
 		}
 		held, err := cachefs.TryLock(lease, cachefs.Exclusive)
 		if err != nil {
-			lease.Close()
-			return nil, err
+			return err
 		}
 		if held {
 			break
@@ -126,19 +141,18 @@ func acquireVMLeaseFor(ctx context.Context, root *os.Root, kind backendKind) (*o
 		select {
 		case <-ctx.Done():
 			timer.Stop()
-			lease.Close()
-			return nil, ctx.Err()
+			return ctx.Err()
 		case <-timer.C:
 		}
 	}
-	if _, err := cachefs.ValidateFile(root, name, lease, 0o600); err != nil {
-		lease.Close()
-		return nil, err
-	}
-	return lease, nil
+	_, err := cachefs.ValidateFile(root, kind.name()+".lock", lease, 0o600)
+	return err
 }
 
 func writeVMSpec(root *os.Root, spec wall.Spec, mode string) error {
+	return writeOwnedVMSpecV1(root, spec, mode, nil)
+}
+func writeOwnedVMSpecV1(root *os.Root, spec wall.Spec, mode string, owner *sandbox) (returned error) {
 	kind, err := backendForSpec(spec)
 	if err != nil {
 		return err
@@ -168,7 +182,7 @@ func writeVMSpec(root *os.Root, spec wall.Spec, mode string) error {
 	defer root.Remove(name)
 	_, writeErr := file.Write(append(data, '\n'))
 	syncErr := file.Sync()
-	closeErr := file.Close()
+	closeErr := closeVMPreparationFileV1(owner, file)
 	if err := errors.Join(writeErr, syncErr, closeErr); err != nil {
 		return fmt.Errorf("write microvm specification: %w", err)
 	}
@@ -179,7 +193,7 @@ func writeVMSpec(root *os.Root, spec wall.Spec, mode string) error {
 	if err != nil {
 		return err
 	}
-	defer dir.Close()
+	defer func() { returned = errors.Join(returned, closeVMPreparationFileV1(owner, dir)) }()
 	return cachefs.SyncDirectory(dir)
 }
 

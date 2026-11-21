@@ -103,8 +103,14 @@ func UpdateHosts(ctx context.Context, c HostChange) (failure error) {
 		return err
 	}
 	stageErr := err
+	stageOwnerContext := ctx
+	retainStage := false
 	if withPin {
-		defer abortPinStage(ctx, name, st)
+		defer func() {
+			if failure != nil || !retainStage {
+				abortPinStage(stageOwnerContext, name, st)
+			}
+		}()
 	}
 	if stageErr == nil {
 		var endPublication func()
@@ -157,12 +163,18 @@ func UpdateHosts(ctx context.Context, c HostChange) (failure error) {
 		}
 		defer unlockPin()
 	}
-	return updateHostsFileContext(ctx, func(locked context.Context, hosts []Host) ([]Host, hostFileHooks, error) {
+	failure = updateHostsFileContext(ctx, func(locked context.Context, hosts []Host) ([]Host, hostFileHooks, error) {
 		if err := checkHostPublicationObservation(locked, c); err != nil {
 			return nil, hostFileHooks{}, err
 		}
 		return changeHostFiles(locked, c, hosts, withPin, st)
 	})
+	if failure == nil && withPin {
+		// Decide custody before endMutation tears down its derived context.
+		// The exact original creator context is never replaced or recreated.
+		retainStage = retainCommittedCreationStage(stageOwnerContext, c, st)
+	}
+	return failure
 }
 
 func badHostNameError(name string) error {

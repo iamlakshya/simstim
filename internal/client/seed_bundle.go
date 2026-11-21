@@ -190,6 +190,10 @@ func createLaptopSeedSelected(ctx context.Context, source string, dirty bool, li
 	if _, err = stage.run(ctx, nil, 4096, "update-ref", sourceRef, commit); err != nil {
 		return nil, err
 	}
+	ecosystems, err := readSeedEcosystems(ctx, &stage, commit)
+	if err != nil {
+		return nil, err
+	}
 	output, err := os.OpenFile(seed.bundle, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
 	if err != nil {
 		return nil, err
@@ -213,7 +217,7 @@ func createLaptopSeedSelected(ctx context.Context, source string, dirty bool, li
 	if closeErr != nil {
 		return nil, closeErr
 	}
-	seed.declaration = api.InputRepository{Name: name, Commit: commit, SourceBranch: sourceRef, Origin: gitLine(origin), Size: limit - bounded.remaining, SHA256: hex.EncodeToString(sum.Sum(nil)), Dirty: dirty, ObjectFormat: format}
+	seed.declaration = api.InputRepository{Name: name, Commit: commit, SourceBranch: sourceRef, Origin: gitLine(origin), Ecosystems: ecosystems, Size: limit - bounded.remaining, SHA256: hex.EncodeToString(sum.Sum(nil)), Dirty: dirty, ObjectFormat: format}
 	// The checked-out branch is display context only. The bundle has exactly
 	// the one selected source ref, so unrelated branches and tags cannot leak.
 	return seed, nil

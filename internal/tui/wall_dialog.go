@@ -24,7 +24,7 @@ func (d *newSession) wallKey(key string) {
 		return
 	}
 	for i, value := range wallChoices {
-		if value == d.wall || value == "none" && d.wall == "" {
+		if value == d.wall || value == "auto" && d.wall == "" {
 			d.wall = wallChoices[(i+step+len(wallChoices))%len(wallChoices)]
 			d.downgrade = false
 			return
@@ -42,7 +42,7 @@ func (d *newSession) wallRow(m *Model, w int) string {
 				label += " (" + hostWallFloor(h) + ")"
 			}
 		}
-		if value == d.wall || value == "none" && d.wall == "" {
+		if value == d.wall || value == "auto" && d.wall == "" {
 			selected = len(choices)
 			label = sBold.Render("● " + label)
 		} else {

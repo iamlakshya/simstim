@@ -14,7 +14,11 @@ import (
 )
 
 type reverseDialKey struct{}
-func reverseDial(ctx context.Context)bool{value,_:=ctx.Value(reverseDialKey{}).(bool);return value}
+
+func reverseDial(ctx context.Context) bool {
+	value, _ := ctx.Value(reverseDialKey{}).(bool)
+	return value
+}
 
 // RunReverse exposes only the named laptop loopback port to one guest port.
 // Its own-host gate uses the original local session source before any frame.
@@ -31,15 +35,19 @@ func (c *Conn) RunReverse(ctx context.Context, session string, laptopPort, guest
 	if !c.HasFeature(api.FeatureReversePortsV1) {
 		return portsUpgrade()
 	}
-	ctx,_=ensureGrantRequest(ctx)
-	base:=ctx
-	start,cancel:=context.WithTimeout(context.WithValue(base,reverseDialKey{},true),60*time.Second)
-	raw,err:=dialHostContinuation(start,c)
+	ctx, _ = ensureGrantRequest(ctx)
+	base := ctx
+	start, cancel := context.WithTimeout(context.WithValue(base, reverseDialKey{}, true), 60*time.Second)
+	raw, err := dialHostContinuation(start, c)
 	cancel()
-	if err!=nil{return err}
+	if err != nil {
+		return err
+	}
 	defer raw.Close()
 	defer raw.execReadFinished() // This caller owns the initial synchronous reader; carrier/pump defers join first.
-	if !ValidHostID(c.HostID()) || raw.HostID()!=c.HostID() || !sameExecTransportSource(c,raw) || !raw.HasFeature(api.FeatureReversePortsV1){return portsUpgrade()}
+	if !ValidHostID(c.HostID()) || raw.HostID() != c.HostID() || !sameExecTransportSource(c, raw) || !raw.HasFeature(api.FeatureReversePortsV1) {
+		return portsUpgrade()
+	}
 	ctx, release, err := c.beginGrant(base, "reverse port forward", false)
 	if err != nil {
 		return err
@@ -59,9 +67,15 @@ func (c *Conn) RunReverse(ctx context.Context, session string, laptopPort, guest
 	if err := Allow(c.Host, tier, Outbound{Kind: OutboundReverseForward}, settings); err != nil {
 		return err
 	}
-	if err:=checkTransportBeforeTierMigration(ctx,c);err!=nil{return err}
-	if err:=checkTransportBeforeTierMigration(ctx,raw);err!=nil{return err}
-	if err:=c.checkGrantHost(ctx,false);err!=nil{return err}
+	if err := checkTransportBeforeTierMigration(ctx, c); err != nil {
+		return err
+	}
+	if err := checkTransportBeforeTierMigration(ctx, raw); err != nil {
+		return err
+	}
+	if err := c.checkGrantHost(ctx, false); err != nil {
+		return err
+	}
 	c.execBusy.Add(1)
 	defer c.execBusy.Add(-1)
 	stop := context.AfterFunc(base, raw.kill)

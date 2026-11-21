@@ -42,6 +42,8 @@ type SandboxPolicy struct {
 	inputOperation        *sandboxInputOperation
 	deliveryReceiptRaw    json.RawMessage
 	inputOperationRaw     json.RawMessage
+	imageSelectionRaw     json.RawMessage
+	sshKeyChoicesRaw      json.RawMessage
 	futureDeliveryReceipt bool
 	futureInputOperation  bool
 }
@@ -60,6 +62,8 @@ type savedSandbox struct {
 	DeliveryIntent  json.RawMessage `json:"delivery_intent,omitempty"`
 	DeliveryReceipt json.RawMessage `json:"delivery_receipt,omitempty"`
 	InputOperation  json.RawMessage `json:"input_operation,omitempty"`
+	ImageSelection  json.RawMessage `json:"image_selection_v1,omitempty"`
+	SSHKeyChoices   json.RawMessage `json:"ssh_key_choices_v1,omitempty"`
 }
 
 type sandboxFile struct {
@@ -142,7 +146,7 @@ func decodeSandboxContext(ctx context.Context, id string, raw json.RawMessage, s
 	if err := ctx.Err(); err != nil {
 		return SandboxPolicy{}, err
 	}
-	fields, err := sandboxObjectContext(ctx, raw, "session_id", "host_id", "ceiling", "ssh_agent", "secrets", "created_at", "request", "wall_intent", "policy_sources", "lineage", "delivery_intent", "delivery_receipt", "input_operation")
+	fields, err := sandboxObjectContext(ctx, raw, "session_id", "host_id", "ceiling", "ssh_agent", "secrets", "created_at", "request", "wall_intent", "policy_sources", "lineage", "delivery_intent", "delivery_receipt", "input_operation", "image_selection_v1")
 	if err != nil {
 		return SandboxPolicy{}, err
 	}
@@ -199,7 +203,7 @@ func decodeSandboxContext(ctx context.Context, id string, raw json.RawMessage, s
 			}
 		}
 	}
-	out := SandboxPolicy{deliveryReceiptRaw: slices.Clone(p.DeliveryReceipt), inputOperationRaw: slices.Clone(p.InputOperation), deliveryRaw: slices.Clone(fields["delivery_intent"]), FutureLineage: future, lineageRaw: slices.Clone(fields["lineage"]), PolicySources: slices.Clone(p.PolicySources), SessionID: id, HostID: p.HostID, Ceiling: tier, SSHAgent: p.SSHAgent,
+	out := SandboxPolicy{sshKeyChoicesRaw: slices.Clone(p.SSHKeyChoices), imageSelectionRaw: slices.Clone(p.ImageSelection), deliveryReceiptRaw: slices.Clone(p.DeliveryReceipt), inputOperationRaw: slices.Clone(p.InputOperation), deliveryRaw: slices.Clone(fields["delivery_intent"]), FutureLineage: future, lineageRaw: slices.Clone(fields["lineage"]), PolicySources: slices.Clone(p.PolicySources), SessionID: id, HostID: p.HostID, Ceiling: tier, SSHAgent: p.SSHAgent,
 		Secrets: slices.Clone(p.Secrets), CreatedAt: p.CreatedAt, request: p.Request,
 		CreationWall: intent.Level, Exposed: slices.Clone(intent.Exposed), wallIntent: slices.Clone(p.WallIntent), lineage: lineage}
 	if fields["delivery_intent"] != nil {
@@ -262,6 +266,12 @@ func reserveSandbox(ctx context.Context, h Host, p SandboxPolicy) error {
 				return &UserError{Msg: "this retry changes the session's immutable wall or exposure intent",
 					Hint: "Start a new request after resolving its wall and secret exposure.", Code: "wall_intent", Kind: KindRefused}
 			}
+			if !bytes.Equal(before.sshKeyChoicesRaw, p.sshKeyChoicesRaw) {
+				return namedSSHPolicySourceError()
+			}
+			if !bytes.Equal(before.imageSelectionRaw, p.imageSelectionRaw) {
+				return imageSelectionHistoryError()
+			}
 			if !bytes.Equal(before.PolicySources, p.PolicySources) {
 				return policySourceStateError()
 			}
@@ -311,6 +321,12 @@ func reserveSandbox(ctx context.Context, h Host, p SandboxPolicy) error {
 				return err
 			}
 		}
+		if p.imageSelectionRaw != nil {
+			if !json.Valid(p.imageSelectionRaw) {
+				return imageSelectionHistoryError()
+			}
+			known["image_selection_v1"] = slices.Clone(p.imageSelectionRaw)
+		}
 		if p.PolicySources != nil {
 			if !json.Valid(p.PolicySources) {
 				return policySourceStateError()
@@ -321,7 +337,7 @@ func reserveSandbox(ctx context.Context, h Host, p SandboxPolicy) error {
 			fields = map[string]json.RawMessage{}
 		}
 		for key, value := range known {
-			if (key == "wall_intent" || key == "policy_sources" || key == "lineage" || key == "delivery_intent") && fields[key] != nil {
+			if (key == "wall_intent" || key == "policy_sources" || key == "lineage" || key == "delivery_intent" || key == "image_selection_v1") && fields[key] != nil {
 				continue // Creation bytes and future nested metadata never change on retry.
 			}
 			fields[key] = value

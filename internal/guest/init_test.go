@@ -332,12 +332,12 @@ func TestTheGuestInitSurvivesABrokenOutputPipe(t *testing.T) {
 		// This legacy broken-pipe lifecycle fixture installs no package files.
 		// Its explicit supported off plan preserves the real constructor guard.
 		PackageManagers: &proto.PackageManagersV1{Version: 1, Mode: "off", MinReleaseAge: "7d", StartedAt: "2026-11-15T12:00:00Z"},
-		Session: testID,
-		Argv:    []string{"/bin/sh", "-c", "trap '' HUP TERM; echo $$ > '" + pidf + "'; exec sleep 300"},
-		Env:     env,
-		Cwd:     root,
-		Cols:    80,
-		Rows:    24,
+		Session:         testID,
+		Argv:            []string{"/bin/sh", "-c", "trap '' HUP TERM; echo $$ > '" + pidf + "'; exec sleep 300"},
+		Env:             env,
+		Cwd:             root,
+		Cols:            80,
+		Rows:            24,
 	})
 	if !resp.OK {
 		t.Fatalf("start = %+v", resp)

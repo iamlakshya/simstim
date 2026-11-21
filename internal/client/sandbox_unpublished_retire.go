@@ -42,6 +42,12 @@ func retireUnpublishedSandboxContext(ctx context.Context, c *Conn, original *San
 		return false, sandboxReceiptError()
 	}
 	defer release()
+	return retireProspectiveSandboxLockedV1(ctx, c, frozen)
+}
+
+// Caller holds one of the two concrete original retirement leases. Both keep
+// their distinct publication proofs while sharing this same protected CAS.
+func retireProspectiveSandboxLockedV1(ctx context.Context, c *Conn, frozen *SandboxPolicy) (retired bool, failure error) {
 	failure = withSandboxReceiptObservation(ctx, c, func(owned context.Context) error {
 		source, err := captureHostStateSourceWitness(owned, c)
 		if err != nil {

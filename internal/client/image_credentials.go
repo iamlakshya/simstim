@@ -19,6 +19,9 @@ import (
 // ImageRegistry reads the laptop's own registry login. The returned registry
 // may fetch bytes locally; its credentials must never enter a host request.
 func ImageRegistry(ctx context.Context, text string) (*image.Registry, error) {
+	if err := imageRegistryPolicyBoundary(ctx); err != nil {
+		return nil, err
+	}
 	ref, err := image.ParseReference(text)
 	if err != nil {
 		return nil, err
@@ -27,10 +30,23 @@ func ImageRegistry(ctx context.Context, text string) (*image.Registry, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := imageRegistryPolicyBoundary(ctx); err != nil {
+		return nil, err
+	}
 	return &image.Registry{Auth: credentials}, nil
 }
 
+func imageRegistryPolicyBoundary(ctx context.Context) error {
+	if original, _ := ctx.Value(imagePolicyUseKeyV1{}).(*imagePolicyUseV1); original != nil {
+		return revalidateRetainedImagePolicy(ctx)
+	}
+	return ctx.Err()
+}
+
 func imageCredentials(ctx context.Context, registry string) (image.Credentials, error) {
+	if err := ctx.Err(); err != nil {
+		return image.Credentials{}, err
+	}
 	dir := os.Getenv("DOCKER_CONFIG")
 	if dir == "" {
 		home, err := os.UserHomeDir()
@@ -39,7 +55,7 @@ func imageCredentials(ctx context.Context, registry string) (image.Credentials, 
 		}
 		dir = filepath.Join(home, ".docker")
 	}
-	file, err := os.Open(filepath.Join(dir, "config.json"))
+	file, err := openImageCredentialConfig(filepath.Join(dir, "config.json"))
 	if errors.Is(err, os.ErrNotExist) {
 		return image.Credentials{}, nil
 	}
@@ -47,7 +63,14 @@ func imageCredentials(ctx context.Context, registry string) (image.Credentials, 
 		return image.Credentials{}, fmt.Errorf("read registry login: %w", err)
 	}
 	defer file.Close()
-	data, err := io.ReadAll(io.LimitReader(file, image.MaxManifest+1))
+	info, err := file.Stat()
+	if err != nil {
+		return image.Credentials{}, err
+	}
+	if info.Size() > image.MaxManifest {
+		return image.Credentials{}, fmt.Errorf("registry login file exceeds 4 MiB")
+	}
+	data, err := io.ReadAll(io.LimitReader(imageCredentialReader{ctx: ctx, file: file}, image.MaxManifest+1))
 	if err != nil {
 		return image.Credentials{}, err
 	}
@@ -84,15 +107,34 @@ func imageCredentials(ctx context.Context, registry string) (image.Credentials, 
 		if strings.ContainsAny(helper, "/\\\x00\r\n") {
 			return image.Credentials{}, fmt.Errorf("registry credential helper has an invalid name")
 		}
-		command := exec.CommandContext(ctx, "docker-credential-"+helper, "get")
+		if err := ctx.Err(); err != nil {
+			return image.Credentials{}, err
+		}
+		if err := imageRegistryPolicyBoundary(ctx); err != nil {
+			return image.Credentials{}, err
+		}
+		helperContext, cancel := context.WithCancel(ctx)
+		defer cancel()
+		command := exec.CommandContext(helperContext, "docker-credential-"+helper, "get")
+		command.WaitDelay = sshWaitDelay
 		command.Stdin = strings.NewReader(server + "\n")
 		var output bytes.Buffer
-		command.Stdout = &imageBoundedBuffer{&output, image.MaxManifest}
+		bounded := &imageBoundedBuffer{buffer: &output, remaining: image.MaxManifest, cancel: cancel}
+		command.Stdout = bounded
 		if err := command.Run(); err != nil {
+			if ctx.Err() != nil {
+				return image.Credentials{}, ctx.Err()
+			}
+			if bounded.overflow {
+				return image.Credentials{}, fmt.Errorf("registry credential helper response exceeds 4 MiB")
+			}
 			if strings.Contains(strings.ToLower(output.String()), "credentials not found") {
 				return image.Credentials{}, nil
 			}
 			return image.Credentials{}, fmt.Errorf("read registry credential helper: %w", err)
+		}
+		if err := imageRegistryPolicyBoundary(ctx); err != nil {
+			return image.Credentials{}, err
 		}
 		var credentials struct{ Username, Secret string }
 		if err := json.Unmarshal(output.Bytes(), &credentials); err != nil {
@@ -130,10 +172,16 @@ func imageCredentials(ctx context.Context, registry string) (image.Credentials, 
 type imageBoundedBuffer struct {
 	buffer    *bytes.Buffer
 	remaining int64
+	cancel    context.CancelFunc
+	overflow  bool
 }
 
 func (b *imageBoundedBuffer) Write(p []byte) (int, error) {
 	if int64(len(p)) > b.remaining {
+		b.overflow = true
+		if b.cancel != nil {
+			b.cancel()
+		}
 		return 0, fmt.Errorf("registry credential helper response exceeds 4 MiB")
 	}
 	b.remaining -= int64(len(p))

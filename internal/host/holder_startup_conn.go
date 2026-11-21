@@ -45,8 +45,9 @@ func (p *holderStartup) finishClient(c *hclient, retained bool) {
 
 func (p *holderStartup) startupHello(c *hclient, hook bool) (*bufio.Reader, bool) {
 	_ = c.conn.SetDeadline(time.Now().Add(3 * time.Second))
-	r := bufio.NewReader(c.conn)
-	f, err := proto.Read(r)
+	f, input, line, err := readHolderFirstFrameV1(c.conn)
+	c.helloLine = line
+	r := bufio.NewReaderSize(input, 64<<10)
 	if err != nil || f.Type != proto.THello {
 		return r, false
 	}
@@ -54,6 +55,23 @@ func (p *holderStartup) startupHello(c *hclient, hook bool) (*bufio.Reader, bool
 	if json.Unmarshal(f.Payload, &hello) != nil || hello.Check(version.Protocol) != nil {
 		_ = c.w.WriteJSON(proto.TError, proto.Error{Code: "protocol", Message: "incompatible client", Hint: "Use the current client and host helper."})
 		return r, false
+	}
+	if hello.Role == ordinaryPurgeRoleV2 {
+		if active := p.activeHolder(); active != nil {
+			active.serveOrdinaryPurgeV2(c, line, hook)
+		}
+		return r, false
+	}
+	if hello.Role == ordinaryStopRoleV1 {
+		if active := p.activeHolder(); active != nil {
+			active.serveOrdinaryStopV1(c, line, hook)
+		}
+		return r, false
+	}
+	if line != nil {
+		if err := line.RejectAncillary(); err != nil {
+			return r, false
+		}
 	}
 	var refused *proto.Error
 	if c.access, refused = p.peer.accessOf(c.conn, hook, hello.Role); refused != nil {

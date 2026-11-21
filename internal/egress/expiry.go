@@ -62,11 +62,27 @@ func (s *Server) expire(eng *Engine, at time.Time) {
 // watchExpiry waits for the next lease deadline or policy replacement. There
 // is no polling loop when the current policy has no timed grants.
 func (s *Server) watchExpiry(ctx context.Context) {
+	var sentHoldRevision uint64
 	for {
 		eng := s.currentEngine()
 		at := s.now()
 		s.expire(eng, at)
 		next := eng.nextExpiry(at)
+		if s.holds != nil {
+			s.holds.expire(at)
+			if s.isInited() {
+				revision := s.holds.currentRevision()
+				if revision > sentHoldRevision {
+					if s.emitNetworkHoldRevision(ctx, revision) != nil {
+						return
+					}
+					sentHoldRevision = revision
+				}
+			}
+			if pending := s.holds.nextExpiry(); !pending.IsZero() && (next.IsZero() || pending.Before(next)) {
+				next = pending
+			}
+		}
 		if next.IsZero() {
 			select {
 			case <-ctx.Done():

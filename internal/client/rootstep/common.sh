@@ -36,6 +36,11 @@ begin() {
         [ -f "$old/id" ] || fail 'incomplete journal'
         if [ "$(cat "$old/id")" = "$step" ]; then
             [ -f "$old/receipt.json" ] || fail 'undo the incomplete root step before retrying'
+            if [ "$step" = nitro-slots ] && [ -f "$old/slots.applied" ]; then
+                previous_target=$(cat "$old/slots.applied")
+                case "$previous_target" in ''|*[!0-9]*) fail 'unknown previous Nitro slot target';; esac
+                if [ "$previous_target" -lt '@NITRO_SLOTS@' ]; then continue; fi
+            fi
             return 1
         fi
     done

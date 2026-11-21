@@ -25,6 +25,9 @@ func (c *Conn) CheckAlertGrants(ctx context.Context, cfg AlertsConfig, tokenComm
 }
 
 func checkAlertGrants(h Host, tier Tier, cfg AlertsConfig, tokenCommand bool, settings Settings) error {
+	if IsSessionMachineV1(h) {
+		tier = min(tier, TierShared)
+	}
 	grants, err := alertTokenGrants(cfg, tokenCommand)
 	if err != nil {
 		// An unreadable address may hide a capability. Refuse it below own

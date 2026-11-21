@@ -56,6 +56,7 @@ func imageReply(t *testing.T, root *string) (*Conn, *runtimeDeliveryPeer) {
 		}
 	})
 	connection.Features = []string{"images"}
+	bindImageFixturePeer(t, connection)
 	return connection, peer
 }
 
@@ -140,6 +141,7 @@ func TestImageHostCannotSupplyDigestAuthority(t *testing.T) {
 		return image.Record{Ref: args.Ref, Digest: "sha256:" + strings.Repeat("f", 64), PlatformDigest: args.PlatformDigest, Arch: args.Arch, RootHash: strings.Repeat("a", 64), DataBlocks: 1, Size: 12288}, nil
 	})
 	connection.Features = []string{"images"}
+	bindImageFixturePeer(t, connection)
 	_, err := PullImage(context.Background(), connection, "registry.example/team/dev:1", ImageOptions{Mode: "host", Arch: "amd64"})
 	var user *UserError
 	if !errors.As(err, &user) || user.Code != "image_protocol" {
@@ -213,6 +215,7 @@ func imageCopyReply(t *testing.T, hostFails bool, secret string) (*Conn, *runtim
 		}
 	})
 	connection.Features = []string{"images"}
+	bindImageFixturePeer(t, connection)
 	return connection, peer
 }
 

@@ -10,7 +10,7 @@ import (
 	"runtime"
 )
 
-var requiredRoles = []string{"runsc", "gvisor_sentry", "gvisor-sentry-prewarmer", "gvisor-proc-umounter"}
+var requiredRoles = []string{"runsc", "gvisor_sentry", "gvisor-sentry-prewarmer", "gvisor-proc-umounter", "runsc-fd-parking"}
 
 func runtimeRoot() string { return path.Join("/opt", brand.Name, "runtime", "gvisor") }
 
@@ -48,14 +48,6 @@ func RuntimeItemsV1(manifest supply.Manifest, arch string) ([]supply.Item, error
 		}
 		if item.Version != main.Version || item.Released != main.Released {
 			return nil, failure("runtime_missing", "gvisor executables must come from the same signed build and release", nil)
-		}
-		items = append(items, item)
-	}
-	// Upstream explicitly permits this helper to be absent, with slower
-	// teardown. If the original client includes it, check that same build.
-	if item, ok := manifest.Find(supply.KindGvisor, "runsc-fd-parking", arch); ok {
-		if item.Version != main.Version || item.Released != main.Released {
-			return nil, failure("runtime_missing", "gvisor fd-parking differs from the signed build", nil)
 		}
 		items = append(items, item)
 	}

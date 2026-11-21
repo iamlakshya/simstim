@@ -54,6 +54,9 @@ func ChangeFilePolicy(ctx context.Context, layer FileLayer, rule api.Rule, remov
 	default:
 		return out, missingFileLayer()
 	}
+	if rule.PublicOnly && (!rule.Allow || rule.Door != "" && rule.Door != api.DoorNet) {
+		return out, publicOnlyRuleError()
+	}
 	if rule.Door != "" && rule.Door != api.DoorNet {
 		return out, &UserError{Msg: "file policy edits currently use the net door", Hint: "Pass net, or leave the door out.", Code: "bad_door", Kind: KindUsage}
 	}
@@ -316,7 +319,7 @@ func editFileRules(section map[string]any, rule api.Rule, remove string) (bool, 
 			}
 			kept = append(kept, raw)
 		}
-		if remove == "" && rule.Methods == nil && (action == "allow") == rule.Allow && !exists && !structuredExists {
+		if remove == "" && rule.Methods == nil && !rule.PublicOnly && (action == "allow") == rule.Allow && !exists && !structuredExists {
 			kept = append(kept, rule.Target)
 			changed = true
 		}

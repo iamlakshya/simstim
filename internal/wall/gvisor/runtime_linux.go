@@ -24,30 +24,32 @@ func (d *Driver) openRuntime(ctx context.Context) (owned *Runtime, returned erro
 	if err != nil {
 		return nil, err
 	}
-	store, err := runtimecache.OpenHostReadOnly(ctx, d.options.Artefacts, domain)
-	if err != nil {
-		return nil, runtimeFileError("store", err)
-	}
 	owned = &Runtime{}
-	result := owned
-	defer func() {
-		returned = errors.Join(returned, store.Close())
-		if returned != nil {
-			returned = errors.Join(returned, result.Close())
-			owned = nil
-		}
-	}()
+	store, err := runtimecache.OpenHostReadOnly(ctx, d.options.Artefacts, domain)
+	owned.store = store
+	if err != nil {
+		return owned, runtimeFileError("store", err)
+	}
+
 	for _, item := range items {
 		file, err := store.OpenItem(ctx, item)
 		if err != nil {
-			return nil, runtimeFileError(item.Name, err)
+			if file != nil {
+				owned.pendingFiles = append(owned.pendingFiles, file)
+			}
+			return owned, runtimeFileError(item.Name, err)
 		}
 		sealed, sealErr := supply.SealRuntime(ctx, item, file)
-		if err := errors.Join(sealErr, file.Close()); err != nil {
+		closeErr := file.Close()
+		if closeErr != nil {
+			owned.pendingFiles = append(owned.pendingFiles, file)
+			owned.closeErr = errors.Join(owned.closeErr, closeErr)
+		}
+		if err := errors.Join(sealErr, closeErr); err != nil {
 			if sealed != nil {
-				err = errors.Join(err, sealed.Close())
+				owned.pendingFiles = append(owned.pendingFiles, sealed)
 			}
-			return nil, runtimeFileError(item.Name, err)
+			return owned, runtimeFileError(item.Name, err)
 		}
 		file = sealed
 		target := path.Join(runtimeRoot(), "gvisor-bin", item.Name)
@@ -59,6 +61,14 @@ func (d *Driver) openRuntime(ctx context.Context) (owned *Runtime, returned erro
 		}
 		owned.executables = append(owned.executables, Executable{Target: target, File: file})
 	}
+	owned.protectedSuite, err = captureProtectedSuiteV1(ctx, owned, items)
+	if err != nil {
+		return owned, err
+	}
+	if err := owned.store.Close(); err != nil {
+		return owned, err
+	}
+	owned.store = nil
 	return owned, nil
 }
 

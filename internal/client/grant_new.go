@@ -33,6 +33,9 @@ func (c *Conn) CheckNewGrants(ctx context.Context, names []string, sshAgent bool
 }
 
 func (c *Conn) newGrantTier(ctx context.Context, names []string, sshAgent bool) (Tier, Tier, error) {
+	if err := checkSessionMachineNewV1(ctx, c); err != nil {
+		return TierUnknown, TierUnknown, err
+	}
 	ctx, r := ensureGrantRequest(ctx)
 	if err := requireGrantOperation(ctx, grantOpNew); err != nil {
 		return TierUnknown, TierUnknown, err

@@ -41,7 +41,21 @@ func (m *Model) sessionDetail(h *hostConn, s client.Session, cw int, withHost bo
 		note = capNote
 	}
 	origin := liveSavedImageLabel(h, s)
-	facts := []string{where, origin, mem, shown(s.ID)}
+	forkOrigin := ""
+	if s.ForkOf != "" {
+		forkOrigin = "forked from " + shown(s.ForkOf)
+		for _, parent := range h.sessions {
+			if parent.ID == s.ForkOf && parent.Name != "" {
+				forkOrigin = "forked from " + shown(parent.Name)
+				break
+			}
+		}
+	}
+	checkpointNote := s.Checkpoints
+	if checkpointNote == "checkpoints: on" {
+		checkpointNote = ""
+	}
+	facts := []string{where, origin, forkOrigin, checkpointNote, mem, pendingPolicyLabel(s), editorSSHLabelV1(s), shown(s.ID)}
 	if summary := forwardSummary(s.Forwards); summary != "" {
 		facts = append(facts, summary)
 	}
@@ -52,7 +66,7 @@ func (m *Model) sessionDetail(h *hostConn, s client.Session, cw int, withHost bo
 		return detail
 	}
 	empty := func(p string) bool { return p == "" }
-	head := slices.DeleteFunc([]string{where, sessionWallLevel(s), origin, mem, forwardSummary(s.Forwards)}, empty)
+	head := slices.DeleteFunc([]string{where, sessionWallLevel(s), origin, forkOrigin, checkpointNote, mem, pendingPolicyLabel(s), forwardSummary(s.Forwards), editorSSHLabelV1(s)}, empty)
 	tail := slices.DeleteFunc([]string{shown(s.ID)}, empty)
 	if !h.loaded {
 		tail = append(tail, "last seen before this run")

@@ -96,7 +96,7 @@ func (g *Init) prepareInputs(raw []byte) error {
 	g.mu.Unlock()
 	if args.Start != nil {
 		original := *args.Start
-		original.Decoys=proto.CloneDecoyFilesV1(original.Decoys)
+		original.Decoys = proto.CloneDecoyFilesV1(original.Decoys)
 		original.PackageManagers = proto.ClonePackageManagersV1(original.PackageManagers)
 		original.Env, original.StateFiles = slices.Clone(original.Env), slices.Clone(original.StateFiles)
 		err = g.prepareSession(args.Start)
@@ -384,7 +384,7 @@ func (g *Init) inputStartAllowedLocked(a proto.CtlStartArgs) bool {
 }
 
 func inputInfrastructure(a proto.CtlStartArgs) proto.CtlStartArgs {
-	return proto.CtlStartArgs{PackageManagers: proto.ClonePackageManagersV1(a.PackageManagers), Decoys:proto.CloneDecoyFilesV1(a.Decoys),Session: a.Session, Agent: a.Agent, Env: a.Env, Cwd: a.Cwd, DNS: a.DNS, Proxy: a.Proxy, CACert: a.CACert, StateFiles: a.StateFiles, CaptureNonce: a.CaptureNonce, Restored: a.Restored, PendingMembers: a.PendingMembers}
+	return proto.CtlStartArgs{PackageManagers: proto.ClonePackageManagersV1(a.PackageManagers), Decoys: proto.CloneDecoyFilesV1(a.Decoys), Session: a.Session, Agent: a.Agent, Env: a.Env, Cwd: a.Cwd, DNS: a.DNS, Proxy: a.Proxy, CACert: a.CACert, StateFiles: a.StateFiles, CaptureNonce: a.CaptureNonce, Restored: a.Restored, PendingMembers: a.PendingMembers}
 }
 
 func (g *Init) useInputPreparation(a *proto.CtlStartArgs) (bool, error) {

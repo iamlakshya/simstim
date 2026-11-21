@@ -17,13 +17,17 @@ import (
 // No public constructor, serialised path or caller-supplied root can mint it.
 // The watcher borrows its roots; its owner joins the watcher before Close.
 type diskResourcesV1 struct {
-	mu      sync.Mutex
-	volume  *os.Root
-	roots   []*os.Root
-	process bool
-	limit   int64
-	release func() error
-	closed  bool
+	mu       sync.Mutex
+	volume   *os.Root
+	roots    []*os.Root
+	checks   []*os.Root
+	files    []*os.File
+	process  bool
+	limit    int64
+	release  func() error
+	closed   bool
+	closing  bool
+	closeErr error
 }
 
 type ownedDiskRuntimeV1 interface {
@@ -36,7 +40,7 @@ func (r *diskResourcesV1) options(requestStop func(error)) (diskOptions, error) 
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if r.closed || r.volume == nil || r.limit < 0 || r.process && len(r.roots) == 0 || requestStop == nil {
+	if r.closed || r.closing || r.closeErr != nil || r.volume == nil || r.limit < 0 || r.process && len(r.roots) == 0 || requestStop == nil {
 		return diskOptions{}, diskFailure("disk_measure", "the runtime factory's owned disk resources are incomplete or closed")
 	}
 	if r.process {
@@ -55,7 +59,7 @@ func (r *diskResourcesV1) start(ctx context.Context, run func(context.Context) (
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if r.closed {
+	if r.closed || r.closing || r.volume == nil || r.closeErr != nil {
 		return nil, diskFailure("disk_measure", "the prepared runtime's disk resources have already been released")
 	}
 	if err := ctx.Err(); err != nil {
@@ -75,21 +79,51 @@ func (r *diskResourcesV1) Close() error {
 	if r.closed {
 		return nil
 	}
+	r.closing = true
+	if r.closeErr != nil {
+		return r.closeErr
+	}
 	if r.release != nil {
 		if err := r.release(); err != nil {
-			return err // A live runtime still owns its lease; cleanup must finish.
+			return err
+		}
+		r.release = nil
+	}
+	for index := len(r.files) - 1; index >= 0; index-- {
+		if r.files[index] == nil {
+			continue
+		}
+		if err := r.files[index].Close(); err != nil {
+			r.closeErr = errors.Join(r.closeErr, err)
+		} else {
+			r.files[index] = nil
 		}
 	}
-	r.closed = true
-	var result error
-	for index := len(r.roots) - 1; index >= 0; index-- {
-		result = errors.Join(result, r.roots[index].Close())
+	for _, roots := range [][]*os.Root{r.checks, r.roots} {
+		for index := len(roots) - 1; index >= 0; index-- {
+			if roots[index] == nil {
+				continue
+			}
+			if err := roots[index].Close(); err != nil {
+				r.closeErr = errors.Join(r.closeErr, err)
+			} else {
+				roots[index] = nil
+			}
+		}
 	}
 	if r.volume != nil {
-		result = errors.Join(result, r.volume.Close())
+		if err := r.volume.Close(); err != nil {
+			r.closeErr = errors.Join(r.closeErr, err)
+		} else {
+			r.volume = nil
+		}
 	}
-	r.roots, r.volume = nil, nil
-	return result
+	if r.closeErr != nil {
+		return r.closeErr
+	}
+	r.files, r.checks, r.roots = nil, nil, nil
+	r.closed = true
+	return nil
 }
 
 func pinDiskVolumeV1(name string) (*os.Root, error) {
@@ -102,7 +136,7 @@ func pinDiskVolumeV1(name string) (*os.Root, error) {
 
 // pinOwnedDiskRootV1 joins the existing no-follow directory descriptor policy
 // to a rooted view of the SAME object. It never follows a grant or link tree.
-func pinOwnedDiskRootV1(volume *os.Root, session, name string) (*os.Root, error) {
+func (resources *diskResourcesV1) pinOwnedRootV1(volume *os.Root, session, name string) (*os.Root, error) {
 	relative, err := filepath.Rel(session, name)
 	if err != nil || !files.Relative(filepath.ToSlash(relative)) {
 		return nil, diskFailure("disk_measure", "a factory-owned writable root leaves its private session volume")
@@ -111,7 +145,7 @@ func pinOwnedDiskRootV1(volume *os.Root, session, name string) (*os.Root, error)
 	if err != nil {
 		return nil, wallError("cannot pin a factory-owned writable root without links", err)
 	}
-	defer pin.Close()
+	resources.files = append(resources.files, pin)
 	want, err := pin.Stat()
 	if err != nil {
 		return nil, wallError("cannot identify the factory-owned writable root", err)
@@ -120,16 +154,15 @@ func pinOwnedDiskRootV1(volume *os.Root, session, name string) (*os.Root, error)
 	if err != nil {
 		return nil, wallError("cannot open the pinned writable root", err)
 	}
+	resources.checks = append(resources.checks, root)
 	opened, err := root.Open(".")
 	if err != nil {
-		root.Close()
-		return nil, wallError("cannot identify the opened writable root", err)
+		return root, wallError("cannot identify the opened writable root", err)
 	}
+	resources.files = append(resources.files, opened)
 	got, statErr := opened.Stat()
-	closeErr := opened.Close()
-	if statErr != nil || closeErr != nil || !os.SameFile(want, got) {
-		root.Close()
-		return nil, diskFailure("disk_measure", "the factory-owned writable root changed while it was being pinned")
+	if statErr != nil || !os.SameFile(want, got) {
+		return root, diskFailure("disk_measure", "the factory-owned writable root changed while it was being pinned")
 	}
 	return root, nil
 }

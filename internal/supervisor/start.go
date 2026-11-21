@@ -6,6 +6,8 @@ import (
 	"github.com/iamlakshya/simstim/internal/host"
 	"github.com/iamlakshya/simstim/internal/link"
 	"github.com/iamlakshya/simstim/internal/proto"
+	"github.com/iamlakshya/simstim/internal/wall/gvisor"
+	"github.com/iamlakshya/simstim/internal/wall/none"
 	"github.com/iamlakshya/simstim/internal/wall/process"
 )
 
@@ -23,6 +25,9 @@ func (s *Supervisor) startGuest(ctx context.Context, sb sandbox, secrets map[str
 	if ctx.Err() != nil {
 		return wallError("the boot ended before the sandbox started", ctx.Err())
 	}
+	if err := s.startPendingNamedSSHKeys(); err != nil {
+		return err
+	}
 	if err := s.prepareBootDecoys(ctx); err != nil {
 		return err
 	}
@@ -30,8 +35,21 @@ func (s *Supervisor) startGuest(ctx context.Context, sb sandbox, secrets map[str
 		return err
 	}
 	modern := s.modernSecretStartup()
+	unwalled := s.unwalledV1()
+	if unwalled {
+		modern = false
+		defer s.clearStartupValues(secrets)
+		defer s.clearNoneMemberValuesV1()
+	}
 	var environment secretEnvironment
-	if modern {
+	if unwalled {
+		var err error
+		environment, err = s.startNoneEnvironmentV1(ctx, secrets)
+		if err != nil {
+			return err
+		}
+		defer func() { clear(environment.Env) }()
+	} else if modern {
 		var err error
 		environment, err = s.startEgress(ctx, secrets)
 		if err != nil {
@@ -58,6 +76,29 @@ func (s *Supervisor) startGuest(ctx context.Context, sb sandbox, secrets map[str
 			return err
 		}
 		s.processCopy = owner
+		gvisorOwner, err := gvisor.NativeLiveOwnerV1(runtime.Sandbox, conn)
+		if err != nil {
+			_ = conn.Close()
+			return err
+		}
+		s.gvisorLive = gvisorOwner
+	}
+	if runtime, ok := sb.(noneRuntime); ok {
+		owner, err := none.NativeLiveOwnerV1(runtime.Sandbox, conn)
+		if err != nil {
+			_ = conn.Close()
+			return err
+		}
+		s.noneLive = owner
+		receipt := host.OriginalVMNeedFromContext(s.lifetimeContext())
+		if receipt == nil {
+			_ = conn.Close()
+			return execRefusal("the none creator has no original native startup receipt")
+		}
+		if err := receipt.BindOriginalNoneBirthV1(ctx, owner, conn); err != nil {
+			_ = conn.Close()
+			return err
+		}
 	}
 	s.link = link.New(conn, link.Supervisor, link.Options{})
 	st, err := s.link.Open(ctx, link.KindCtl, nil)
@@ -71,6 +112,9 @@ func (s *Supervisor) startGuest(ctx context.Context, sb sandbox, secrets map[str
 	if err := s.requirePackageManagerGuest(ctx); err != nil {
 		return err
 	}
+	if err := s.requireNamedSSHGuest(ctx); err != nil {
+		return err
+	}
 	if err := s.checkControllerPrepare(ctx); err != nil {
 		return err
 	}
@@ -79,18 +123,31 @@ func (s *Supervisor) startGuest(ctx context.Context, sb sandbox, secrets map[str
 			s.stopEgress()
 			return err
 		}
-	} else {
+	} else if !unwalled {
 		environment, err = s.startEgress(ctx, secrets)
 		if err != nil {
 			return err
 		}
 	}
+	if err := s.startGuestStreamReaderV1(); err != nil {
+		return err
+	}
 	s.mu.Lock()
 	m := s.m
 	args := proto.CtlStartArgs{RunToken: s.runToken, PendingMembers: len(s.savedMembers), Session: s.id, Agent: m.Agent.Kind, Argv: m.Agent.Argv, Env: m.Env, Cwd: m.Cwd,
 		Cols: m.Term.Cols, Rows: m.Term.Rows, Hooks: m.Agent.Hooks, Secrets: environment.Env, SecretModes: environment.Modes, Missing: environment.Missing, Restored: host.WasRestored(m)}
-	args.Proxy = guestProxyForDriver(m.Wall.Driver)
-	args.DNS = dnsModeForManifest(m)
+	if m.ForkPending {
+		args.ForkOf = m.ForkBranchOf
+		if args.ForkOf == "" {
+			args.ForkOf = m.ForkOf
+		}
+	}
+	if !unwalled {
+		args.Proxy = guestProxyForDriver(m.Wall.Driver)
+		args.DNS = dnsModeForManifest(m)
+	} else {
+		args.Argv = host.UnwalledStartArgv(m)
+	}
 	if s.eg != nil {
 		args.CACert = s.eg.caCert
 	}
@@ -101,6 +158,7 @@ func (s *Supervisor) startGuest(ctx context.Context, sb sandbox, secrets map[str
 		m.Term.Cols, m.Term.Rows = host.CapTerm(orDefault(m.Term.Cols, 80), orDefault(m.Term.Rows, 24))
 	}
 	s.mu.Unlock()
+	args.SSHAgent = s.namedSSHAgentEnabled()
 	s.bootDecoyArgs(&args)
 	if err := s.bootPackageSettingsArgs(&args); err != nil {
 		return err
@@ -145,7 +203,9 @@ func (s *Supervisor) startGuest(ctx context.Context, sb sandbox, secrets map[str
 	if err := s.prepareMemberPhases(s.bootBudget, &args, proto.CtlStart, false); err != nil {
 		return err
 	}
-	s.registerLaunch()
+	if !s.isSandboxPrepareBootV1() {
+		s.registerLaunch()
+	}
 	var res proto.CtlStartResult
 	if err := s.ctl.request(ctx, proto.CtlStart, args, &res); err != nil {
 		return err

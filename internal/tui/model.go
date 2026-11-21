@@ -50,6 +50,8 @@ type Model struct {
 	grantRequests      chan grantQuestionRequest
 	grantActive        chan bool
 	grantOwners        grantOwners
+	selectedOwners     selectedNewOwners
+	selectedNew        *newSelectedStart
 	be                 Backend
 	settings           client.Settings
 	now                func() time.Time
@@ -250,6 +252,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	m.retireQuickFolders(quick, quickText, quickSeq)
 	m.retireFormFolders(modal)
 	m.retirePolicy(modal)
+	cmd = tea.Batch(cmd, m.retireSelectedNew())
 	if m.sel != before {
 		cmd = tea.Batch(cmd, m.schedulePreview())
 	}
@@ -331,7 +334,7 @@ func (m *Model) update(msg tea.Msg) tea.Cmd {
 		return m.onToastTick()
 	case debugTickMsg, debugDoneMsg:
 		return m.onDebugMsg(msg)
-	case dialledMsg, connDoneMsg, redialMsg, sessionsMsg, latencyMsg, doctorMsg, refreshTickMsg, latencyTickMsg:
+	case dialledMsg, connDoneMsg, redialMsg, sessionsMsg, latencyMsg, doctorMsg, hostRuntimeUpgradedV1, refreshTickMsg, latencyTickMsg:
 		return m.onConn(msg)
 	case previewTickMsg:
 		if msg.seq == m.preview.seq {
@@ -371,6 +374,12 @@ func (m *Model) update(msg tea.Msg) tea.Cmd {
 		return nil
 	case foldersMsg:
 		return m.onFolders(msg)
+	case newSelectedReadyMsg:
+		return m.onSelectedReady(msg)
+	case newSelectedResultMsg:
+		return m.onSelectedResult(msg)
+	case newSelectedFinishedMsg:
+		return m.onSelectedFinished(msg)
 	case startedMsg:
 		return m.onStarted(msg)
 	case resumedMsg:
@@ -391,6 +400,8 @@ func (m *Model) update(msg tea.Msg) tea.Cmd {
 		return m.onHostReloaded(msg)
 	case setupMsg:
 		return m.onSetup(msg)
+	case rootSealedMsg:
+		return m.onRootSealed(msg)
 	case editorDoneMsg:
 		return m.onEditorDone(msg)
 	case settingsMsg:
@@ -398,7 +409,7 @@ func (m *Model) update(msg tea.Msg) tea.Cmd {
 	case sshHostsMsg:
 		return m.onSSHHosts(msg)
 	}
-	switch d := m.modal.(type) {
+	switch d := questionOwner(m.modal).(type) {
 	case *wizard:
 		return d.onMsg(m, msg)
 	case *guide:

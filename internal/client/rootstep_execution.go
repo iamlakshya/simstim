@@ -57,6 +57,9 @@ func (c *Conn) RunRootStep(ctx context.Context, script RootScript, originalMode 
 	if originalMode != RootRun || options.Passwordless != intent.yes {
 		return grantPurposeError()
 	}
+	if machine, _ := ctx.Value(sessionMachineOwnerKeyV1{}).(*SessionMachineOwnerV1); machine != nil {
+		return machine.runRootV1(ctx, intent, options)
+	}
 	if options.In == nil {
 		options.In = os.Stdin
 	}
@@ -88,6 +91,9 @@ func (c *Conn) RunRootStep(ctx context.Context, script RootScript, originalMode 
 		after, probeErr := c.CapProbe(ctx, "")
 		if probeErr == nil {
 			probeErr = bindRequestTransportSource(ctx, c)
+		}
+		if probeErr == nil && intent.script.accounts != nil {
+			probeErr = intent.script.accounts.verifyInstalled(ctx, c, after)
 		}
 		if probeErr == nil {
 			probeErr = VerifyRootSteps(intent.before, after, intent.script)
@@ -122,6 +128,11 @@ func (e *rootStepExecution) start(ctx context.Context, phase rootStepPhase, opti
 	probe, err := e.intent.conn.CapProbe(ctx, "")
 	if err != nil {
 		return nil, err
+	}
+	if e.intent.script.accounts != nil {
+		if err := e.intent.script.accounts.check(ctx, e.intent.conn, probe); err != nil {
+			return nil, err
+		}
 	}
 	if _, err := canonicalRootScript(probe, e.intent.script); err != nil {
 		return nil, err

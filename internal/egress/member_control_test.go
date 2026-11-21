@@ -25,7 +25,7 @@ func TestMemberCapabilityDiscoveryBeforeInitHasNoAuthorityOrTrustPayload(t *test
 	}
 	var response proto.Response
 	var caps CapabilitiesResult
-	if json.Unmarshal(frame.Payload, &response) != nil || !response.OK || json.Unmarshal(response.Result, &caps) != nil || !reflect.DeepEqual(caps.Features, []string{MemberAddV1Feature, MemberAddV2Feature, api.FeatureBoundSecrets}) {
+	if json.Unmarshal(frame.Payload, &response) != nil || !response.OK || json.Unmarshal(response.Result, &caps) != nil || !reflect.DeepEqual(caps.Features, []string{MemberAddV1Feature, MemberAddV2Feature, api.FeatureBoundSecrets, api.FeatureNetworkPublicOnly, NetworkHoldsV1Feature, api.FeaturePolicyLockdownV1}) {
 		t.Fatal("member capability discovery failed before init")
 	}
 	if bytes.Contains(frame.Payload, []byte("CERTIFICATE")) || server.isInited() || server.currentMembers() != nil || server.currentEngine() != engine || server.scrubber.snapshot() != scrub {
@@ -53,7 +53,7 @@ func TestMemberCapabilitiesStaySeparateFromPublicCAAndEventsHoldOnlyNames(t *tes
 		t.Fatal("capabilities failed")
 	}
 	var caps CapabilitiesResult
-	if json.Unmarshal(response.Result, &caps) != nil || !reflect.DeepEqual(caps.Features, []string{MemberAddV1Feature, MemberAddV2Feature, api.FeatureBoundSecrets}) {
+	if json.Unmarshal(response.Result, &caps) != nil || !reflect.DeepEqual(caps.Features, []string{MemberAddV1Feature, MemberAddV2Feature, api.FeatureBoundSecrets, api.FeatureNetworkPublicOnly, NetworkHoldsV1Feature, api.FeaturePolicyLockdownV1}) {
 		t.Fatal("member capability was not advertised")
 	}
 	frame, err = proto.Read(reader)

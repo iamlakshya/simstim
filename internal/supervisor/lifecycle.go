@@ -115,6 +115,9 @@ func (s *Supervisor) wait() {
 	cleanupErr := s.closeSandbox()
 	<-ended // Cleanup must join the original waiter before accepting its result.
 	cleanupErr = errors.Join(cleanupErr, ownedWaitErr)
+	if runtime, ok := s.sb.(noneRuntime); ok && !runtime.cleanupConfirmedV1() {
+		cleanupErr = errors.Join(cleanupErr, execRefusal("the original unwalled run has no complete physical cleanup"))
+	}
 	if cleanupErr != nil {
 		natural = false
 		kind, reason = host.EndSandbox, cleanupErr.Error()
@@ -171,13 +174,21 @@ func (s *Supervisor) stopGuest(grace time.Duration, ended <-chan struct{}) {
 // kills each process that it can tie to the sandbox, and waits for the
 // sandbox's end. It may run more than once.
 func (s *Supervisor) closeSandbox() (cleanupErr error) {
+	s.cancelRequestConnectionsV1()
+	s.cancelFileTransfersV1()
+	s.stopCheckpointsV1()
+	s.stopNamedSSHAgent()
 	s.stopMaxRun()
 	s.cancelImageSavesV1()
 	s.closePortListeners(true)
 	s.closeReverseForwards()
-	s.closeFileTransfers()
 	defer func() {
+		s.clearPendingNamedSSHKeys()
+		s.clearStartupValues(nil)
 		s.stopEgress()
+		s.closeGuestStreamReaderV1()
+		s.closeFileTransfers()
+		cleanupErr = errors.Join(cleanupErr, s.closeEventObservers(), s.closeCommittedStartupReaderV1())
 		s.runtimeCleanup.Do(func() {
 			s.mu.Lock()
 			s.runtimeCleanupErr = cleanupErr
@@ -186,22 +197,42 @@ func (s *Supervisor) closeSandbox() (cleanupErr error) {
 				close(s.runtimeCleaned)
 			}
 		})
+		// Real backend cleanup releases N5 borrowers before all accepted
+		// serve, relay and forwarding stacks are joined.
+		s.joinRequestConnectionsV1()
 	}()
 	if s.diskStopReason() != nil {
 		s.markStopIntent()
 	}
 	cleanupErr = s.stopDiskWatcherV1()
+	if s.isSandboxPrepareBootV1() && cleanupErr != nil {
+		// The stopped watcher joined. Its observation failure explains the
+		// boot failure; actual disk Close below determines cleanup.
+		s.logPrepareCleanupV1(cleanupErr)
+		cleanupErr = nil
+	}
 	s.mu.Lock()
 	runtime, attempted := s.sb, s.sandboxStartAttempted
 	s.mu.Unlock()
-	if runtime != nil && attempted {
+	if s.isSandboxPrepareBootV1() {
+		cleanupErr = errors.Join(cleanupErr, s.closeSandboxPrepareRuntimeV1(runtime, attempted))
+	} else if failed, ok := runtime.(*failedSandboxPreparationV1); ok && !attempted {
+		cleanupErr = errors.Join(cleanupErr, failed.releasePreparedV1())
+	} else if runtime != nil && attempted {
 		killErr := runtime.Kill()
 		waitErr := runtime.Wait()
 		cleanupErr = errors.Join(cleanupErr, killErr, waitErr)
 	}
 	// An unstarted factory owns only prepared leases and metadata pins.
 	// Release those non-destructively, after any watcher has joined.
-	return errors.Join(cleanupErr, s.joinImageSavesV1(), s.closeDiskResourcesV1())
+	cleanupErr = errors.Join(cleanupErr, s.joinImageSavesV1(), s.closeDiskResourcesV1(), host.CloseOriginalForkDiskDataV1(s.lifetimeContext()))
+	if s.isSandboxPrepareBootV1() && s.capture != nil {
+		cleanupErr = errors.Join(cleanupErr, s.capture.Close())
+	}
+	if cleanupErr != nil {
+		return cleanupErr
+	}
+	return s.bootAgentsCustody.closeV1()
 }
 
 // finish closes the record with the run's end, makes the session's last
@@ -226,10 +257,23 @@ func (s *Supervisor) finish(kind, reason string) {
 	// The alerts raised so far go out, the end's and sandbox_error too.
 	s.al.Settle(2 * time.Second)
 	s.al.Close(2 * time.Second)
-	_ = s.save(&m, true)
+	if !s.unwalledV1() {
+		_ = s.save(&m, true)
+	}
 	s.closeSocket()
 	s.finishMembers(kind, reason)
 	s.wg.Wait()
+	if s.unwalledV1() {
+		joined := s.closeEventObservers()
+		recorded := s.recordNoneCleanupV1(kind, joined)
+		if err := recorded; err != nil {
+			s.log.Error("the original unwalled cleanup was not recorded", "err", err)
+		}
+		saveErr := s.save(&m, true)
+		if kind == host.EndStop {
+			s.noneCleanupCommitErr = errors.Join(recorded, saveErr)
+		}
+	}
 }
 
 // raiseError raises sandbox_error, and the end's alert when the guest never
@@ -316,7 +360,10 @@ const linkSilent = 15 * time.Second
 func (s *Supervisor) watchBeat() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	quiet := now().Sub(s.lastBeat) > linkSilent
+	if !s.heartbeatPause.IsZero() {
+		return
+	} // the original cgroup freezer owns this pause
+	quiet := now().Sub(s.lastBeat)-s.heartbeatDelay > linkSilent
 	first := quiet && !s.silent
 	s.silent = quiet
 	if first {

@@ -41,7 +41,7 @@ type PullBeginArgs struct {
 // DefaultRef is an untrusted claim until native bundle verification and a
 // namespaced fetch agree with it. SeedHeads comes only from protected data.
 type PullExport struct {
-	Repo string `json:"repo,omitempty"`
+	Repo       string   `json:"repo,omitempty"`
 	ID         string   `json:"id"`
 	Primary    string   `json:"primary"`
 	Token      string   `json:"token"`
@@ -95,7 +95,9 @@ func ValidGitOID(value string) bool {
 
 // Validate checks a peer's export description before any bytes or Git run.
 func (p PullExport) Validate(requestID string, limit int64) error {
-	if p.Repo != "" && !InputRepoName(p.Repo) { return fmt.Errorf("invalid pull repository identity") }
+	if p.Repo != "" && !InputRepoName(p.Repo) {
+		return fmt.Errorf("invalid pull repository identity")
+	}
 	if !ValidSessionID(requestID) || p.ID != requestID || !ValidSessionID(p.Primary) || !ValidSessionID(p.Token) || len(p.Token) != 26 {
 		return fmt.Errorf("invalid pull export identity")
 	}

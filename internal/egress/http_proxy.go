@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"net/http/httputil"
 	"sync"
@@ -46,45 +47,93 @@ func (s *Server) proxyHTTPRequest(w http.ResponseWriter, req *http.Request, hdr 
 		entry.Status, entry.Rule, entry.Decision = http.StatusForbidden, "http:cancelled", "deny"
 		writeInspectedError(w, brand.Name+": HTTP request was cancelled. Try: check the current network policy before retrying.", entry.Status)
 	}
+	auditOriginal := originalRequestSecretView(req).Authority
+	if turn != nil && turn.original != nil {
+		auditOriginal = turn.original.Authority
+	}
 	var scope *originRequest
 	var secrets *boundHTTPSecrets
 	var model *modelRequest
+	var usageWriter *modelUsageHTTPWriter
+	var usageComplete atomic.Bool
+	physical := physicalH2RequestDelivery(req)
+	physicalRetained := false
 	defer func() {
 		if turn != nil && bodyProgress != nil && !bodyProgress.complete.Load() {
 			turn.stopRead()
 		}
-		result.set(s.formatAudit(entry))
-		finish := sync.OnceFunc(func() {
-			defer func() { <-s.httpSem }()
+		result.set(s.formatNetworkAudit(entry, auditOriginal))
+		var finishOnce sync.Once
+		finish := func(physicalCompletion *ModelUsageCompletionV1) {
+			finishOnce.Do(func() {
+				defer func() { <-s.httpSem }()
+				if scope != nil {
+					scope.mu.Lock()
+					usageWS := scope.usageWS
+					scope.mu.Unlock()
+					if usageWS != nil {
+						usageWS.close()
+					}
+				}
+				complete := usageComplete.Load() && usageWriter != nil && !usageWriter.failed.Load() && scope != nil && scope.ctx.Err() == nil
+				if turn != nil && turn.forward != nil {
+					complete = complete && turn.forward.physicalComplete()
+				}
+				if scope != nil {
+					scope.joinPhysicalUpload()
+				}
+				if model != nil && model.usage != nil {
+					var completion ModelUsageCompletionV1
+					if physicalCompletion != nil {
+						completion = *physicalCompletion
+					} else {
+						completion = model.usage.FinishV1(complete)
+					}
+					applyUsageAudit(&entry, completion)
+				}
+				if scope != nil {
+					scope.stopIO()
+					if req.Body != nil && req.Body != http.NoBody {
+						_ = req.Body.Close()
+					}
+					if scope.measured != nil {
+						entry.Up, entry.Down = scope.measured.up.Load(), scope.measured.down.Load()
+					}
+				}
+				if secrets != nil && secrets.misuse.Load() {
+					entry.Status, entry.Rule, entry.Decision = http.StatusForbidden, "secret_misuse", "deny"
+					if name := secrets.decoy.Load(); name != nil {
+						entry.Rule, entry.Secret = "decoy", *name
+					}
+				}
+				formatted := s.formatNetworkAudit(entry, auditOriginal)
+				result.set(formatted)
+				s.emitAudit(formatted, hdr.Host)
+				if audited, ok := req.Context().Value(inspectedAuditKey{}).(*atomic.Bool); ok {
+					audited.Store(true)
+				}
+				if scope != nil {
+					scope.close()
+				}
+			})
+		}
+		if physical != nil {
+			complete := usageComplete.Load() && usageWriter != nil && !usageWriter.failed.Load() && scope != nil && scope.ctx.Err() == nil
+			var before func()
 			if scope != nil {
-				scope.stopIO()
-				if req.Body != nil && req.Body != http.NoBody {
-					_ = req.Body.Close()
+				before = scope.joinPhysicalUpload
+			}
+			physical.finalizer(complete, before, func(completion ModelUsageCompletionV1) {
+				if physicalRetained {
+					finish(&completion)
+				} else {
+					finish(nil)
 				}
-				if scope.measured != nil {
-					entry.Up, entry.Down = scope.measured.up.Load(), scope.measured.down.Load()
-				}
-			}
-			if secrets != nil && secrets.misuse.Load() {
-				entry.Status, entry.Rule, entry.Decision = http.StatusForbidden, "secret_misuse", "deny"
-				if name := secrets.decoy.Load(); name != nil {
-					entry.Rule, entry.Secret = "decoy", *name
-				}
-			}
-			formatted := s.formatAudit(entry)
-			result.set(formatted)
-			s.emitAudit(formatted)
-			if audited, ok := req.Context().Value(inspectedAuditKey{}).(*atomic.Bool); ok {
-				audited.Store(true)
-			}
-			if scope != nil {
-				scope.close()
-			}
-		})
-		if turn == nil {
-			finish()
+			})
+		} else if turn == nil {
+			finish(nil)
 		} else {
-			turn.finishAudit = finish
+			turn.finishAudit = func() { finish(nil) }
 			if entry.Status == http.StatusSwitchingProtocols {
 				turn.settle()
 			}
@@ -106,9 +155,15 @@ func (s *Server) proxyHTTPRequest(w http.ResponseWriter, req *http.Request, hdr 
 		original = *turn.original
 	}
 	request, err := canonicalHTTPRequest(req, hdr, scheme)
+	request.via = hdr.Via
 	if err != nil {
 		writeInspectedError(w, brand.Name+": "+err.Error(), http.StatusBadRequest)
 		entry.Status = http.StatusBadRequest
+		return
+	}
+	if pending, ok := req.Context().Value(pendingNetworkRefusalKey{}).(pendingNetworkRefusal); ok {
+		entry.Status, entry.Rule, entry.Decision = http.StatusForbidden, pending.decision.Rule, "deny"
+		writeInspectedError(w, pending.line, http.StatusForbidden)
 		return
 	}
 	eng := s.currentEngine()
@@ -119,7 +174,7 @@ func (s *Server) proxyHTTPRequest(w http.ResponseWriter, req *http.Request, hdr 
 	ctx, cancel := context.WithCancel(context.WithoutCancel(req.Context()))
 	tunnel, _ := req.Context().Value(httpTunnelKey{}).(*httpTunnel)
 	scope = &originRequest{s: s, request: request, scheme: scheme, query: req.URL.RawQuery, permit: permit, cancel: cancel, ctx: ctx,
-		tunnel: tunnel, body: originalBody, progress: bodyProgress, http2: req.ProtoMajor >= 2}
+		tunnel: tunnel, body: originalBody, progress: bodyProgress, http2: req.ProtoMajor >= 2, physicalDelivery: physical}
 	if err := scope.bindResponseWriter(w); err != nil {
 		cancel()
 		refuseCancelled()
@@ -134,14 +189,34 @@ func (s *Server) proxyHTTPRequest(w http.ResponseWriter, req *http.Request, hdr 
 		return
 	}
 	plan, decision, failure := s.admitSecretHTTPRequest(scope, req, original, hdr, scheme)
+	if failure == nil && !decision.Allow && (decision.unmatched || decision.classifiedRefusal) {
+		var carrier net.Conn
+		if scope.tunnel != nil {
+			carrier = scope.tunnel.conn
+		}
+		waited := s.awaitUnknown(scope.ctx, scope.request, original.Authority, hdr.Via, carrier, func(engine *Engine, candidate Request) Decision {
+			return engine.evaluateModelNetwork(candidate, scope.permit, evalPrecheck)
+		})
+		if waited.Allow {
+			// Recheck the original raw fields, current source/pin and policy
+			// together before any actual reservation after the wait.
+			plan, decision, failure = s.admitSecretHTTPRequest(scope, req, original, hdr, scheme)
+		} else {
+			decision = waited
+		}
+	}
 	if failure != nil {
 		entry.Status, entry.Rule, entry.Secret = failure.status, failure.auditRule(), failure.decoy
 		writeInspectedError(w, brand.Name+": "+failure.detail.Message+". Try: "+failure.detail.Hint, entry.Status)
 		return
 	}
 	entry.Rule = decision.Rule
+	entry.By = decision.By
 	if !decision.Allow {
-		message := RefusalLine(s.sessionRef(), hdr.Host, hdr.Port)
+		message := s.networkRefusalLine(decision, scope.request, original.Authority)
+		if decision.unknownPressure {
+			message = unknownResourceLine()
+		}
 		if decision.httpRefusal == httpRefusalReadOnly {
 			message = brand.Name + ": this service is read-only. Try: allow the exact write path and method."
 		}
@@ -197,6 +272,12 @@ func (s *Server) proxyHTTPRequest(w http.ResponseWriter, req *http.Request, hdr 
 	}
 	model, modelFailure := s.prepareModelHTTPRequest(scope, req)
 	if modelFailure != "" {
+		if model != nil && model.budgetRefusal != nil {
+			entry.Status, entry.Rule = http.StatusTooManyRequests, "model:budget"
+			s.emitModelBudget(scope.ctx, model.budgetRefusal)
+			_ = model.budgetRefusal.WriteHTTPV1(w, cleanAuditText(s.sessionRef(), s.scrubber.snapshot(), 128))
+			return
+		}
 		entry.Status, entry.Rule = http.StatusForbidden, "model:"+modelFailure
 		writeModelRefusal(w, model, s.modelRefusalLine(model, modelFailure))
 		if req.Body != nil {
@@ -228,6 +309,22 @@ func (s *Server) proxyHTTPRequest(w http.ResponseWriter, req *http.Request, hdr 
 			return
 		}
 		req.Body = delivery
+	}
+	if model != nil && model.usage != nil {
+		usageWriter = &modelUsageHTTPWriter{ResponseWriter: w, turn: model.usage}
+		if physical != nil {
+			if err := physical.retain(model.usage, nil); err != nil {
+				entry.Status = http.StatusBadGateway
+				writeInspectedError(w, errPhysicalH2Binding.Error(), entry.Status)
+				return
+			}
+			physical.observation(false)
+			physicalRetained = true
+			usageWriter.physical = true
+		} else if turn != nil && turn.forward != nil {
+			usageWriter.physical = true
+		}
+		w = usageWriter
 	}
 	entry.Decision = "allow"
 	ctx = context.WithValue(ctx, originRequestKey{}, scope)
@@ -271,7 +368,28 @@ func (s *Server) proxyHTTPRequest(w http.ResponseWriter, req *http.Request, hdr 
 				return err
 			}
 			entry.Status = resp.StatusCode
+			if model != nil && model.usage != nil && resp.StatusCode != http.StatusSwitchingProtocols {
+				configureModelUsageResponse(resp, model.usage, &usageComplete)
+				usageWriter.active = true
+				if physical != nil {
+					physical.observation(true)
+				}
+				if turn != nil && turn.forward != nil {
+					turn.forward.observeModelHTTP(model.usage, req.Method)
+				}
+			}
 			if resp.StatusCode == http.StatusSwitchingProtocols {
+				if model != nil && model.webSocket {
+					scope.mu.Lock()
+					usageWS := scope.usageWS
+					scope.mu.Unlock()
+					filtered, ok := resp.Body.(boundWebSocket)
+					if usageWS == nil || !ok || turn == nil || turn.forward == nil {
+						return errors.New("model upgrade has no actual forwarding observer")
+					}
+					usageWS.attach(filtered.state.fail)
+					turn.forward.observeModelWebSocket(usageWS)
+				}
 				if turn != nil {
 					turn.upgrade()
 				}

@@ -2,8 +2,10 @@ package client
 
 import (
 	"context"
+	"errors"
 
 	"github.com/iamlakshya/simstim/internal/api"
+	"github.com/iamlakshya/simstim/internal/egress"
 )
 
 type sandboxDeliveryContext struct {
@@ -22,8 +24,8 @@ func projectSandboxDelivery(ctx context.Context, p jsonValueProjection, span, al
 	if schema != 4 {
 		return nil, false, badSandboxStateContext(ctx)
 	}
-	var fields [3]api.JSONSpan
-	err := p.Object(span, []string{"version", "modes", "binds"}, func(field api.JSONField) error {
+	var fields [4]api.JSONSpan
+	err := p.Object(span, []string{"version", "modes", "binds", "trusted_uses"}, func(field api.JSONField) error {
 		if field.Known >= 0 {
 			fields[field.Known] = field.Value
 		}
@@ -165,6 +167,49 @@ func projectSandboxDelivery(ctx context.Context, p jsonValueProjection, span, al
 	}
 	if nok || bok || eok {
 		return nil, false, badSandboxStateContext(ctx)
+	}
+	if fields[3].End != 0 {
+		null, err := p.Literal(fields[3], "null")
+		if err != nil {
+			return nil, false, err
+		}
+		if !null {
+			schema := egress.NewTrustedUseProjectionSchemaV1()
+			future := false
+			err := p.Object(fields[3], nil, func(field api.JSONField) error {
+				if !row.hostIDNonempty || row.wallNone || row.sshAgent {
+					return badSandboxStateContext(ctx)
+				}
+				if err := egress.ValidateTrustedSecretNameProjectionV1(p, field.Name); err != nil {
+					return err
+				}
+				use, err := schema.Project(ctx, p, field.Value, retain)
+				if errors.Is(err, egress.ErrUnsupportedPublicState) {
+					future = true
+					return nil
+				}
+				if err != nil {
+					return err
+				}
+				if retain {
+					name, err := retainProjectedString(p, field.Name)
+					if err != nil {
+						return err
+					}
+					if kept.TrustedUses == nil {
+						kept.TrustedUses = map[string]api.TrustedSecretUseV1{}
+					}
+					kept.TrustedUses[name] = use
+				}
+				return nil
+			})
+			if err != nil {
+				return nil, false, err
+			}
+			if future {
+				return nil, true, nil
+			}
+		}
 	}
 	return kept, false, ctx.Err()
 }

@@ -79,6 +79,9 @@ func (m *Model) hostRow(h *hostConn, n int, selected bool, cw, nameW, rttW int) 
 		detail = []seg{{"not ready", sDanger}}
 	default:
 		detail = m.hostSummary(h, detailW)
+		if _, blocked := hostHealthSummaryV1(h); blocked {
+			glyph = seg{glyphFail, sDanger}
+		}
 	}
 	used := 0
 	for i := range detail {
@@ -124,6 +127,9 @@ func (m *Model) summaryText(h *hostConn) string {
 // needs the user stands out. When the two do not fit in w cells, the
 // session count goes, as in the header, so that the other stays whole.
 func (m *Model) hostSummary(h *hostConn, w int) []seg {
+	if health, _ := hostHealthSummaryV1(h); health != "" {
+		return []seg{{trunc(health, w), sWarning}}
+	}
 	if !h.loaded && len(h.sessions) == 0 {
 		return []seg{{"…", sFaint}}
 	}

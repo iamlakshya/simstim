@@ -53,7 +53,7 @@ func (b *bridge) handleImages(req proto.Request) bool {
 	case "image.install":
 		var args image.Install
 		if err = decodeRuntime(req.Args, &args); err == nil {
-			result, err = b.images.install(ctx, args)
+			result, err = b.images.install(ctx, args, req.ID)
 		}
 	case "image.status":
 		var args image.StatusRequest

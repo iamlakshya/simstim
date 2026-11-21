@@ -144,7 +144,7 @@ func agentArgv(argv []string, a NewArgs, agent agents.Agent, known, inline bool)
 // makeSessionDir creates the new session's private folder, and fails if a
 // session already has that ID.
 func makeSessionDir(id string) error {
-	if err := paths.EnsurePrivateDir(paths.SessionsDir()); err != nil {
+	if err := ensureFootprintedSessionParentV1(context.Background()); err != nil {
 		return err
 	}
 	dir := paths.SessionDir(id)
@@ -203,8 +203,11 @@ func List() ([]SessionInfo, error) {
 			}
 			reconcileForList(id, m)
 			info := infoFrom(m, alive(id))
+			liveEditorSSHViewV1(&info)
 			livePortView(&info)
 			livePackageSettings(&info)
+			liveModelUsage(&info)
+			liveNamedSSHKeys(&info)
 			mu.Lock()
 			out = append(out, info)
 			mu.Unlock()

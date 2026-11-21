@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/iamlakshya/simstim/internal/supply"
 	"github.com/iamlakshya/simstim/internal/proto"
+	"github.com/iamlakshya/simstim/internal/supply"
 )
 
 // Session states.
@@ -29,6 +29,10 @@ const ReasonChildOOM = "a process in this session ran out of memory and was stop
 
 // NewArgs describes a session to start.
 type NewArgs struct {
+	// NamedSSHKeys is cold-start private delivery, never guest environment.
+	NamedSSHKeys *NamedSSHKeysV1 `json:"named_ssh_keys,omitempty"`
+	// ProtectedTrustedSecretValues is private trusted-caller delivery, never guest environment.
+	ProtectedTrustedSecretValues map[string]Secret `json:"protected_trusted_secret_values,omitempty"`
 	// Placement is original client selection metadata, never admission proof.
 	Placement *PlacementV1 `json:"placement,omitempty"`
 	// Runtime is DATA selected by the same private original client plan.
@@ -109,19 +113,33 @@ type NewArgs struct {
 
 // SessionInfo is one row of the session list.
 type SessionInfo struct {
-	PlacedBy    string `json:"placed_by,omitempty"`
-	PlaceReason string `json:"place_reason,omitempty"`
+	ForkOf      string `json:"fork_of,omitempty"`
+	Checkpoints string `json:"checkpoints_status,omitempty"`
+	// SSH is display data from actual live selected SSH owners, never saved authority.
+	SSH bool `json:"ssh,omitempty"`
+	// Usage is the actual live root-eg sandbox-wide meter, never member attribution.
+	Usage *ModelUsageV1 `json:"usage,omitempty"`
+	// NamedSSHKeys describes the live signer and next-start names, never key authority.
+	NamedSSHKeys *NamedSSHKeyViewV1 `json:"named_ssh_keys,omitempty"`
+	// Policy fields are bounded display data, never a source or boot authority.
+	LayersHash      string                `json:"layers_hash,omitempty"`
+	PolicyChanged   bool                  `json:"policy_changed,omitempty"`
+	PolicyNextStart []string              `json:"policy_next_start,omitempty"`
+	PolicyNextWall  string                `json:"policy_next_wall,omitempty"`
+	Runtime         *SessionRuntimeInfoV1 `json:"runtime_info,omitempty"`
+	PlacedBy        string                `json:"placed_by,omitempty"`
+	PlaceReason     string                `json:"place_reason,omitempty"`
 	// PackageManagers is the actual live installed start plan, never a current-policy reconstruction.
 	PackageManagers *proto.PackageManagersV1 `json:"package_managers,omitempty"`
 	// Forwards is display-only state from the actual live supervisor.
-	Forwards []PortForwardInfo `json:"forwards,omitempty"`
-	CopiesPending bool      `json:"copies_pending,omitempty"`
-	Workspace     string    `json:"workspace,omitempty"`
-	Claimed       bool      `json:"claimed,omitempty"`
-	Wall          *WallInfo `json:"wall,omitempty"`
-	Armed         bool      `json:"armed,omitempty"`
-	SandboxOf     string    `json:"sandbox_of,omitempty"`
-	Task          string    `json:"task,omitempty"`
+	Forwards      []PortForwardInfo `json:"forwards,omitempty"`
+	CopiesPending bool              `json:"copies_pending,omitempty"`
+	Workspace     string            `json:"workspace,omitempty"`
+	Claimed       bool              `json:"claimed,omitempty"`
+	Wall          *WallInfo         `json:"wall,omitempty"`
+	Armed         bool              `json:"armed,omitempty"`
+	SandboxOf     string            `json:"sandbox_of,omitempty"`
+	Task          string            `json:"task,omitempty"`
 	// Explicit coherent publications alone carry run/public-state context.
 	RunGeneration  string                `json:"run_generation,omitempty"`
 	SecretSummary  *SessionSecretSummary `json:"secret_summary,omitempty"`
@@ -165,6 +183,14 @@ type SessionInfo struct {
 // session, after the agent ended: the "resume" request. A helper that can
 // do it offers the feature "resume".
 type ResumeArgs struct {
+	// Prepared identifies the same original per-connection native resume plan.
+	Prepared *PreparedResumeV1 `json:"prepared,omitempty"`
+	// NamedSSHKeys is delivered only by the genuine original cold preparation.
+	NamedSSHKeys *NamedSSHKeysV1 `json:"named_ssh_keys,omitempty"`
+	// ProtectedTrustedSecretValues is private trusted-caller delivery, never guest environment.
+	ProtectedTrustedSecretValues map[string]Secret `json:"protected_trusted_secret_values,omitempty"`
+	// ExpectedImageV1 is the original laptop image projection, never boot authority.
+	ExpectedImageV1 json.RawMessage `json:"expected_image_v1,omitempty"`
 	// Inputs and Environment come from one sealed local start selection.
 	Inputs         *InputSummary         `json:"inputs,omitempty"`
 	Environment    *SessionEnvironment   `json:"environment,omitempty"`
@@ -209,6 +235,8 @@ type Check struct {
 
 // HostInfo describes the host.
 type HostInfo struct {
+	KernelBugs []KernelBugResultV1 `json:"kernel_bugs,omitempty"`
+	Health     []Health            `json:"health,omitempty"`
 	// Sandbox is a fresh, optional capability report requested by doctor.
 	// Older helpers leave it absent. It supplies no admission authority.
 	Sandbox   *CapProbe         `json:"sandbox,omitempty"`
@@ -268,9 +296,9 @@ func (r RestoreResult) Text() string {
 
 // Port is a TCP port a session's processes listen on.
 type Port struct {
-	Claimed bool `json:"claimed,omitempty"`
-	Granted bool `json:"granted,omitempty"`
-	Reverse bool `json:"reverse,omitempty"`
+	Claimed bool   `json:"claimed,omitempty"`
+	Granted bool   `json:"granted,omitempty"`
+	Reverse bool   `json:"reverse,omitempty"`
 	Port    int    `json:"port"`
 	Address string `json:"address"`
 	PID     int    `json:"pid"`

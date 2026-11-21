@@ -22,6 +22,7 @@ import (
 )
 
 type runtimeStorage struct {
+	home            *freshForkHomeV1
 	session         *os.Root
 	root            *os.Root
 	lease           *os.File
@@ -29,6 +30,10 @@ type runtimeStorage struct {
 	identity        os.FileInfo
 	dir             string
 	staged          string
+	closeErr        error
+	failedFiles     []*os.File
+	layoutStarted   bool
+	removed         bool
 }
 
 func prepareStorage(ctx context.Context, spec wall.Spec, existing bool) (storage *runtimeStorage, returned error) {
@@ -40,7 +45,7 @@ func prepareStorage(ctx context.Context, spec wall.Spec, existing bool) (storage
 	owned := storage
 	defer func() {
 		if returned != nil {
-			returned = errors.Join(returned, owned.release())
+			storage = owned
 		}
 	}()
 	f, err := session.Open(".")
@@ -48,13 +53,15 @@ func prepareStorage(ctx context.Context, spec wall.Spec, existing bool) (storage
 		return nil, err
 	}
 	storage.sessionIdentity, err = f.Stat()
-	f.Close()
+	closeErr := storage.closeFileV1(f)
+	err = errors.Join(err, closeErr)
 	if err != nil {
 		return nil, err
 	}
 	if err = storage.lock(ctx); err != nil {
 		return nil, err
 	}
+	storage.layoutStarted = true
 	if !existing {
 		if err = cachefs.MakePrivateDir(session, "gvisor"); err != nil {
 			return nil, err
@@ -75,7 +82,7 @@ func prepareStorage(ctx context.Context, spec wall.Spec, existing bool) (storage
 			return nil, err
 		}
 		data, readErr := io.ReadAll(io.LimitReader(f, int64(len(spec.ID)+2)))
-		closeErr := f.Close()
+		closeErr := storage.closeFileV1(f)
 		if readErr != nil || closeErr != nil || string(data) != spec.ID+"\n" {
 			return nil, errors.Join(fmt.Errorf("gvisor runtime belongs to another session"), readErr, closeErr)
 		}
@@ -88,26 +95,36 @@ func prepareStorage(ctx context.Context, spec wall.Spec, existing bool) (storage
 		if writeErr == nil && n != len(spec.ID)+1 {
 			writeErr = io.ErrShortWrite
 		}
-		if err = errors.Join(writeErr, f.Close()); err != nil {
+		if err = errors.Join(writeErr, storage.closeFileV1(f)); err != nil {
 			return nil, err
 		}
+	}
+	storage.home, err = createFreshForkHomeV1(storage)
+	if err != nil {
+		return nil, err
 	}
 	return storage, nil
 }
 
 func (s *runtimeStorage) lock(ctx context.Context) error {
-	lease, err := cachefs.OpenFile(s.session, "gvisor.lock", os.O_CREATE|os.O_RDWR, 0600)
-	if err != nil {
-		return err
+	if s.closeErr != nil {
+		return s.closeErr
+	}
+	lease := s.lease
+	if lease == nil {
+		var err error
+		lease, err = cachefs.OpenFile(s.session, "gvisor.lock", os.O_CREATE|os.O_RDWR, 0o600)
+		s.lease = lease // Retain even an actual partial open or failed lock.
+		if err != nil {
+			return err
+		}
 	}
 	for {
 		if err := ctx.Err(); err != nil {
-			lease.Close()
 			return err
 		}
 		got, err := cachefs.TryLock(lease, cachefs.Exclusive)
 		if err != nil {
-			lease.Close()
 			return err
 		}
 		if got {
@@ -117,20 +134,15 @@ func (s *runtimeStorage) lock(ctx context.Context) error {
 		select {
 		case <-ctx.Done():
 			timer.Stop()
-			lease.Close()
 			return ctx.Err()
 		case <-timer.C:
 		}
 	}
-	if _, err := cachefs.ValidateFile(s.session, "gvisor.lock", lease, 0600); err != nil {
-		lease.Close()
-		return err
-	}
-	s.lease = lease
-	return nil
+	_, err := cachefs.ValidateFile(s.session, "gvisor.lock", lease, 0o600)
+	return err
 }
 
-func (s *runtimeStorage) bundle(spec wall.Spec, plan []wall.Mount, sources []*os.File, smoke bool) error {
+func (s *runtimeStorage) bundle(spec wall.Spec, plan []wall.Mount, sources []*os.File, smoke bool, fork *ForkMountsV1) error {
 	if len(plan) != len(sources) {
 		return fmt.Errorf("the gvisor bundle lost its captured mount vector")
 	}
@@ -156,6 +168,12 @@ func (s *runtimeStorage) bundle(spec wall.Spec, plan []wall.Mount, sources []*os
 	if err != nil {
 		return err
 	}
+	if fork == nil || fork.home != s.home || fork.sandbox == nil || fork.sandbox.storage != s {
+		return failure("wall_setup", "the actual OCI has no original home and mount factory", nil)
+	}
+	if err := fork.routeOCI(&oci); err != nil {
+		return err
+	}
 	for _, dir := range []string{"bundle", "runsc"} {
 		if err := cachefs.MakePrivateDir(s.root, dir); err != nil {
 			return err
@@ -179,6 +197,17 @@ func (s *runtimeStorage) bundle(spec wall.Spec, plan []wall.Mount, sources []*os
 		directory := true
 		if mount.Type == "bind" {
 			source := captured[mount.Source]
+			if mount.Destination == "/home/agent" || fork.routes[mount.Destination] != "" {
+				// Fixed A aliases originate in this SAME private producer; names
+				// route mount data only and never reopen a source as authority.
+				if mount.Destination == "/home/agent" && mount.Source == "/home/agent" {
+					source = fork.home.file
+				} else if mount.Source == "/work" {
+					source = fork.work
+				} else if strings.HasPrefix(mount.Source, "/home/agent/") {
+					source = fork.state[strings.TrimPrefix(mount.Source, "/home/agent/")]
+				}
+			}
 			if source == nil {
 				return fmt.Errorf("the gvisor bundle references an uncaptured mount source")
 			}
@@ -219,7 +248,7 @@ func (s *runtimeStorage) bundle(spec wall.Spec, plan []wall.Mount, sources []*os
 		return err
 	}
 	encodeErr := json.NewEncoder(f).Encode(oci)
-	closeErr := f.Close()
+	closeErr := s.closeFileV1(f)
 	if err = errors.Join(encodeErr, closeErr); err != nil {
 		return err
 	}
@@ -256,25 +285,59 @@ func (s *runtimeStorage) log() (*os.File, error) {
 }
 
 func (s *runtimeStorage) release() error {
-	var result error
+	if s == nil {
+		return nil
+	}
+	if s.closeErr != nil {
+		return s.closeErr
+	}
+	if s.home != nil {
+		if err := s.home.close(); err != nil {
+			return err // Retain the same original fresh-home owner for retry.
+		}
+	}
 	if s.root != nil {
-		result = errors.Join(result, s.root.Close())
-		s.root = nil
+		if err := s.root.Close(); err != nil {
+			s.closeErr = errors.Join(s.closeErr, err)
+		} else {
+			s.root = nil
+		}
 	}
 	if s.lease != nil {
-		result = errors.Join(result, s.lease.Close())
-		s.lease = nil
+		if err := s.lease.Close(); err != nil {
+			s.closeErr = errors.Join(s.closeErr, err)
+		} else {
+			s.lease = nil
+		}
 	}
 	if s.session != nil {
-		result = errors.Join(result, s.session.Close())
-		s.session = nil
+		if err := s.session.Close(); err != nil {
+			s.closeErr = errors.Join(s.closeErr, err)
+		} else {
+			s.session = nil
+		}
 	}
-	return result
+	return s.closeErr
+}
+
+func (s *runtimeStorage) closeFileV1(file *os.File) error {
+	if err := file.Close(); err != nil {
+		s.failedFiles = append(s.failedFiles, file)
+		s.closeErr = errors.Join(s.closeErr, err)
+		return err
+	}
+	return nil
 }
 
 func (s *runtimeStorage) reopen(ctx context.Context) error {
+	if s.closeErr != nil {
+		return s.closeErr
+	}
 	if s.session != nil {
-		return nil
+		return s.lock(ctx)
+	}
+	if s.sessionIdentity == nil {
+		return fmt.Errorf("gvisor has no original session identity for reopening")
 	}
 	root, err := cachefs.OpenPrivateRoot(s.dir, false)
 	if err != nil {
@@ -286,7 +349,7 @@ func (s *runtimeStorage) reopen(ctx context.Context) error {
 		return errors.Join(err, s.release())
 	}
 	got, statErr := f.Stat()
-	closeErr := f.Close()
+	closeErr := s.closeFileV1(f)
 	if statErr != nil || closeErr != nil || !os.SameFile(got, s.sessionIdentity) {
 		return errors.Join(fmt.Errorf("gvisor session root changed after release"), statErr, closeErr, s.release())
 	}
@@ -296,17 +359,34 @@ func (s *runtimeStorage) reopen(ctx context.Context) error {
 	return nil
 }
 
-func (s *runtimeStorage) destroy() error {
+func (s *runtimeStorage) destroy() (returned error) {
+	if s == nil {
+		return nil
+	}
+	if s.closeErr != nil {
+		return s.closeErr
+	}
+	if s.removed || !s.layoutStarted {
+		return s.release()
+	}
+	if s.identity == nil {
+		return fmt.Errorf("the partial gvisor layout has no original native identity for removal")
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if err := s.reopen(ctx); err != nil {
 		return err
 	}
+	if s.home != nil && !s.home.closed {
+		if err := s.home.close(); err != nil {
+			return err
+		}
+	}
 	dir, err := s.session.Open(".")
 	if err != nil {
 		return err
 	}
-	defer dir.Close()
+	defer func() { returned = errors.Join(returned, s.closeFileV1(dir)) }()
 	name := s.staged
 	if name == "" {
 		name = ".gvisor-cleanup-" + rand.Text()
@@ -327,5 +407,6 @@ func (s *runtimeStorage) destroy() error {
 		return err
 	}
 	s.staged = ""
+	s.removed = true
 	return s.release()
 }

@@ -53,8 +53,11 @@ func (p *receivedVMMProof) acceptReady(message runnerMessage, control *proto.Uni
 	if err := checkNativeVMMPair(control.Files[0], control.Files[1]); err != nil {
 		return err
 	}
-	p.pidfd, p.socket, p.ready = control.Files[0], control.Files[1], true
-	control.Files = nil
+	files, err := control.DetachFilesV1()
+	if err != nil {
+		return err
+	}
+	p.pidfd, p.socket, p.ready = files[0], files[1], true
 	return nil
 }
 

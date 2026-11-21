@@ -2,6 +2,7 @@ package egress
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -16,13 +17,25 @@ import (
 // A request keeps only public capability names after inspection. Its body is
 // replayed byte for byte, never logged or retained by the policy engine.
 type modelRequest struct {
-	request   Request
-	guard     *agents.ModelGuard
-	features  []string
-	search    bool
-	webSocket bool
-	file      bool
-	display   map[string]string
+	usage                *ModelUsageTurnV1
+	budgetRefusal        *ModelBudgetRefusalV1
+	usageModel           string
+	requestBytes         uint64
+	usageEventID         [32]byte
+	hasUsageEventID      bool
+	usageResponseID      [32]byte
+	usageStreamID        [32]byte
+	hasUsageStreamID     bool
+	usagePendingFinish   bool
+	usagePendingComplete bool
+	hasUsageResponseID   bool
+	request              Request
+	guard                *agents.ModelGuard
+	features             []string
+	search               bool
+	webSocket            bool
+	file                 bool
+	display              map[string]string
 }
 
 func (m *modelRequest) Format(state fmt.State, _ rune) {
@@ -146,6 +159,20 @@ func (s *modelJSONScan) value(content, tool bool, depth int) (modelJSONValue, er
 				return modelJSONValue{}, err
 			}
 			switch key {
+			case "event_id":
+				if depth == 0 && child.kind == 's' {
+					s.request.usageEventID = sha256.Sum256([]byte(child.text))
+					s.request.hasUsageEventID = true
+				}
+			case "stream_id":
+				if depth == 0 && s.websocket && child.kind == 's' {
+					s.request.usageStreamID = sha256.Sum256([]byte(child.text))
+					s.request.hasUsageStreamID = true
+				}
+			case "model":
+				if depth == 0 && child.kind == 's' && len(child.text) <= 256 {
+					s.request.usageModel = strings.Clone(child.text)
+				}
 			case "type":
 				hasType = true
 				invalidType = child.kind != 's'

@@ -33,7 +33,7 @@ func (s *Server) prepareBoundHTTPSecrets(scope *originRequest, req *http.Request
 	}
 	authority := net.JoinHostPort(scope.request.Host, strconv.Itoa(scope.request.Port))
 	view := &boundHTTPSecrets{boundHTTPSecretState: &boundHTTPSecretState{s: s, scope: scope, authority: authority, use: secretRequestUseForPlan(plan),
-		active: len(plan.generation.authorities[authority]) != 0}}
+		active: len(plan.generation.authorities[authority]) != 0 || s.needsSecretInspection(scope.request.Host, scope.request.Port)}}
 	if !view.active {
 		return view, nil
 	}
@@ -41,7 +41,11 @@ func (s *Server) prepareBoundHTTPSecrets(scope *originRequest, req *http.Request
 	if err != nil {
 		return nil, err
 	}
-	view.rules = rules
+	// A judge-only binding may refuse known echoes but cannot select a
+	// guest owner for newly minted credentials.
+	if len(plan.generation.authorities[authority]) != 0 {
+		view.rules = rules
+	}
 	view.webSocket, err = prepareBoundWebSocketRequest(req)
 	return view, err
 }

@@ -79,8 +79,15 @@ func (s *Supervisor) armSecrets(ctx context.Context, args api.ArmSecretsArgs) (*
 	if err := checkSecretPublicResponse(snapshot.SecretState); err != nil {
 		return nil, err
 	}
+	if err := validateProtectedTrustedValues(args.TrustedUses, args.ProtectedTrustedSecretValues, true); err != nil {
+		return nil, err
+	}
+	if err := requireTrustedJudgeControl(ctx, owner, args.TrustedUses); err != nil {
+		return nil, err
+	}
+	expectedTrusted := overlayTrustedUses(snapshot.SecretState.Intent.TrustedUses, args.TrustedUses)
 	names := slices.Sorted(maps.Keys(args.Secrets))
-	intent := api.SecretDeliveryIntent{Version: api.SecretDeliveryIntentV1, Modes: make(map[string]api.SecretMode), Binds: make(map[string]api.SecretBind)}
+	intent := api.SecretDeliveryIntent{Version: api.SecretDeliveryIntentV1, Modes: make(map[string]api.SecretMode), Binds: make(map[string]api.SecretBind), TrustedUses: api.CloneTrustedSecretUses(args.TrustedUses)}
 	for _, name := range names {
 		if snapshot.SecretState.Intent.Modes[name] != api.SecretModeBound || snapshot.SecretState.Primary[name].Mode != api.SecretModeBound {
 			return nil, secretIntentFailure()
@@ -92,7 +99,7 @@ func (s *Supervisor) armSecrets(ctx context.Context, args api.ArmSecretsArgs) (*
 		return nil, err
 	}
 	var raw json.RawMessage
-	err = owner.ctl.request(ctx, egress.CtlArm, egress.ArmArgs{Version: egress.MemberRegistryV2, Generation: args.Generation, Values: args.Secrets}, &raw)
+	err = owner.ctl.request(ctx, egress.CtlArm, egress.ArmArgs{Version: egress.MemberRegistryV2, Generation: args.Generation, Values: args.Secrets, TrustedUses: args.TrustedUses, ProtectedTrustedSecretValues: args.ProtectedTrustedSecretValues}, &raw)
 	if err != nil {
 		var negative *proto.Error
 		if errors.As(err, &negative) {
@@ -102,7 +109,7 @@ func (s *Supervisor) armSecrets(ctx context.Context, args api.ArmSecretsArgs) (*
 		return nil, secretCommitFailure()
 	}
 	var reply egress.ArmResult
-	if !api.ExactJSONFields(raw, reply) || json.Unmarshal(raw, &reply) != nil || reply.Version != egress.MemberRegistryV2 || len(reply.Secrets) != len(names) {
+	if !api.ExactJSONFields(raw, reply) || json.Unmarshal(raw, &reply) != nil || reply.Version != egress.MemberRegistryV2 || len(reply.Secrets) != len(names) || !egress.EqualTrustedSecretUsesV1(expectedTrusted, reply.TrustedUses) {
 		owner.ctl.closeOwnedControl()
 		return nil, secretCommitFailure()
 	}
@@ -124,6 +131,7 @@ func (s *Supervisor) armSecrets(ctx context.Context, args api.ArmSecretsArgs) (*
 			}
 			current.Primary[name] = reply.Secrets[name]
 		}
+		current.Intent.TrustedUses = api.CloneTrustedSecretUses(reply.TrustedUses)
 		current.Generation = reply.Generation
 		return current, nil
 	})
@@ -149,6 +157,7 @@ func (s *Supervisor) armRequest(c *client, request proto.Request) bool {
 		return true
 	}
 	defer clear(args.Secrets)
+	defer clear(args.ProtectedTrustedSecretValues)
 	ctx, cancel := context.WithTimeout(s.lifetimeContext(), secretControlWait)
 	defer cancel()
 	state, err := s.armSecrets(ctx, args)

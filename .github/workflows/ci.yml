@@ -16,6 +16,7 @@ concurrency:
 
 jobs:
   test:
+    needs: [reproducible, gvisor-repro]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -26,6 +27,9 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
+      - name: Prepare the genuine held malware snapshot for tests and both release builds
+        # Explicit preparation only; ordinary package checks remain offline.
+        run: go run ./cmd/feedgen --output internal/egress/rules/feed/snapshot.json
       - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
         with:
           version: 0.17.0
@@ -39,6 +43,36 @@ jobs:
           for arch in amd64 arm64; do cp vt/zig-out/linux/shadow-vt-$arch internal/client/helpers/vt-linux-$arch; done
       - run: go vet ./...
       - run: go test -race -count=1 ./...
+      - name: Test the isolated compiler preparation guards without network access
+        run: python3 scripts/test-prepare-image-verifier-go.py
+      - name: Test checksum-bound upstream tool preparation offline
+        run: |
+          python3 scripts/test-prepare-gvisor-build.py
+          python3 scripts/test-gvisor-build-inputs.py
+      - name: Test repro prerequisite refusal and literal artifact argument handling offline
+        run: python3 scripts/test-repro-inputs.py
+      - name: Prepare the separate official verifier compiler and checked module inputs
+        run: |
+          python3 scripts/prepare-image-verifier-go.py \
+            --lock tools/imageverify/toolchain.lock \
+            --output "$RUNNER_TEMP/image-verifier-go" \
+            --cache "$RUNNER_TEMP/image-verifier-downloads" \
+            --module tools/imageverify --prepare-module --env-file "$GITHUB_ENV"
+      - name: Vet and race-test the nested offline verifier with its own compiler
+        # Root ./... excludes this nested module. Main Go and PATH stay fixed.
+        run: |
+          compiler_sha=$(sha256sum "$IMAGEVERIFY_GO")
+          test "${compiler_sha%% *}" = "$IMAGEVERIFY_GO_SHA256"
+          export HOME="$IMAGEVERIFY_HOME" USERPROFILE="$IMAGEVERIFY_HOME"
+          export XDG_CONFIG_HOME="$IMAGEVERIFY_HOME/config" XDG_CACHE_HOME="$IMAGEVERIFY_HOME/cache"
+          export XDG_DATA_HOME="$IMAGEVERIFY_HOME/data" XDG_STATE_HOME="$IMAGEVERIFY_HOME/state"
+          export XDG_RUNTIME_DIR="$IMAGEVERIFY_HOME/run" XDG_CONFIG_DIRS="$IMAGEVERIFY_HOME/config-dirs"
+          export XDG_DATA_DIRS="$IMAGEVERIFY_HOME/data-dirs"
+          export GOMODCACHE="$IMAGEVERIFY_GOMODCACHE" GOCACHE="$IMAGEVERIFY_GOCACHE"
+          export GOTOOLCHAIN=local GOPROXY=off GOSUMDB=sum.golang.org GOFLAGS=-mod=readonly
+          cd tools/imageverify
+          "$IMAGEVERIFY_GO" vet ./...
+          "$IMAGEVERIFY_GO" test -race -count=1 ./...
       - name: Pinned host keys against real localhost SSH servers
         run: |
           sudo apt-get update
@@ -77,6 +111,10 @@ jobs:
         run: python3 scripts/test-scorecard-check.py
       - name: End-to-end cleanup tests (offline)
         run: python3 test/e2e/test_sandbox_hosts.py
+      - name: Conformance evidence and native log parser tests (offline)
+        run: |
+          python3 test/e2e/test_conformance_evidence.py
+          python3 scripts/test-check-conformance-go.py
       - name: Offline tests of the session sockets' end-to-end probe
         run: python3 test/e2e/test_session_sockets.py
       - name: Pins watch tests (offline, with recorded answers)
@@ -99,6 +137,68 @@ jobs:
             echo "::error::docs/reference is stale. Run just docs and commit the result."
             exit 1
           fi
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: default-repro-amd64
+          path: build/default-repro-transport/amd64
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: default-repro-arm64
+          path: build/default-repro-transport/arm64
+      - name: Restore both actual native image pairs with their recorded evidence
+        run: |
+          for arch in amd64 arm64; do
+            mkdir -p "$RUNNER_TEMP/default-repro-$arch"
+            tar -xzf "build/default-repro-transport/$arch/default-repro-$arch.tar.gz" \
+              --no-same-owner -C "$RUNNER_TEMP/default-repro-$arch"
+          done
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: gvisor-repro-amd64
+          path: build/gvisor-repro-transport/amd64
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: gvisor-repro-arm64
+          path: build/gvisor-repro-transport/arm64
+      - name: Restore both actual native gVisor pairs
+        run: |
+          for arch in amd64 arm64; do
+            mkdir -p "$RUNNER_TEMP/gvisor-repro-$arch"
+            tar -xzf "build/gvisor-repro-transport/$arch/gvisor-repro-$arch.tar.gz" \
+              --no-same-owner -C "$RUNNER_TEMP/gvisor-repro-$arch"
+          done
+      - uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
+        with:
+          distribution: goreleaser
+          version: "~> v2"
+          install-only: true
+      - name: Compare two real release builds, including independently rebuilt helpers
+        run: |
+          export DEFAULT_IMAGE_REPRO_AMD64="$RUNNER_TEMP/default-repro-amd64"
+          export DEFAULT_IMAGE_REPRO_ARM64="$RUNNER_TEMP/default-repro-arm64"
+          export GVISOR_REPRO_AMD64="$RUNNER_TEMP/gvisor-repro-amd64"
+          export GVISOR_REPRO_ARM64="$RUNNER_TEMP/gvisor-repro-arm64"
+          export GOMODCACHE="$(go env GOMODCACHE)"
+          scripts/repro.sh
+      - name: Package the real current-source snapshot for both native install checks
+        run: |
+          mkdir -p "$RUNNER_TEMP/install-default-images" "$RUNNER_TEMP/install-gvisor"
+          for arch in amd64 arm64; do
+            cp -R "$RUNNER_TEMP/default-repro-$arch/run-1/image/$arch" "$RUNNER_TEMP/install-default-images/$arch"
+            cp -R "$RUNNER_TEMP/gvisor-repro-$arch/run-1/output" "$RUNNER_TEMP/install-gvisor/$arch"
+          done
+          export DEFAULT_IMAGE_MANIFEST_INPUTS="$RUNNER_TEMP/install-default-images"
+          export GVISOR_MANIFEST_INPUTS="$RUNNER_TEMP/install-gvisor"
+          export APP_NAME=$(sed -n 's/^const Name = "\(.*\)"/\1/p' internal/brand/brand.go)
+          export MODULE=$(sed -n 's/^module //p' go.mod)
+          goreleaser release --snapshot --clean --skip=publish,sign,sbom
+          (cd dist && tar -czf "$RUNNER_TEMP/install-snapshot.tar.gz" metadata.json checksums.txt *.tar.gz)
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: install-snapshot
+          path: ${{ runner.temp }}/install-snapshot.tar.gz
+          if-no-files-found: error
+          retention-days: 1
 
   docker-host:
     # `host create docker`, then the end-to-end suite against the container,
@@ -242,9 +342,18 @@ jobs:
           advanced-security: false
 
   reproducible:
-    # Two builds of every release binary from empty caches must match byte
-    # for byte, so anyone can check a release against the source.
-    runs-on: ubuntu-latest
+    # Native image preparations are prerequisites for the two complete builds
+    # in the existing test job. No emulation or registry publication is used.
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
     permissions:
       contents: read
     steps:
@@ -256,18 +365,69 @@ jobs:
         with:
           go-version-file: go.mod
           cache: false
-      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
+      - name: Prepare checked modules and two actual native default image builds
+        env:
+          IMAGE_ARCH: ${{ matrix.arch }}
+        run: |
+          export GOTOOLCHAIN=local
+          go mod download
+          go mod verify
+          export GOMODCACHE="$(go env GOMODCACHE)"
+          export DEFAULT_IMAGE_REPRO_OUT_DIR="$RUNNER_TEMP/default-image-repro-$IMAGE_ARCH"
+          guest/base-image/repro.sh "$IMAGE_ARCH"
+      - name: Preserve actual OCI/root pairs and native/source evidence
+        env:
+          IMAGE_ARCH: ${{ matrix.arch }}
+        run: |
+          tar -C "$RUNNER_TEMP/default-image-repro-$IMAGE_ARCH" \
+            -czf "$RUNNER_TEMP/default-repro-$IMAGE_ARCH.tar.gz" \
+            result.json native-runner.txt source-pins-before.txt source-pins-after.txt \
+            "run-1/image/$IMAGE_ARCH" "run-2/image/$IMAGE_ARCH" run-1/build.log run-2/build.log
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          version: 0.17.0
-          use-cache: false
-      - uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
+          name: default-repro-${{ matrix.arch }}
+          path: ${{ runner.temp }}/default-repro-${{ matrix.arch }}.tar.gz
+          if-no-files-found: error
+          retention-days: 1
+
+  gvisor-repro:
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          distribution: goreleaser
-          version: "~> v2"
-          install-only: true
-      - run: scripts/repro.sh
+          persist-credentials: false
+      - name: Build both real native closures with separate empty state
+        env:
+          NATIVE_ARCH: ${{ matrix.arch }}
+        run: scripts/gvisor-native-repro.sh "$NATIVE_ARCH" "$RUNNER_TEMP/gvisor-repro-$NATIVE_ARCH"
+      - name: Preserve both original outputs and source evidence
+        env:
+          NATIVE_ARCH: ${{ matrix.arch }}
+        run: |
+          tar -C "$RUNNER_TEMP/gvisor-repro-$NATIVE_ARCH" \
+            -czf "$RUNNER_TEMP/gvisor-repro-$NATIVE_ARCH.tar.gz" \
+            source-pins-before.txt source-pins-after.txt tools/tools.json \
+            run-1/output run-2/output run-1/build.log run-2/build.log
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: gvisor-repro-${{ matrix.arch }}
+          path: ${{ runner.temp }}/gvisor-repro-${{ matrix.arch }}.tar.gz
+          if-no-files-found: error
+          retention-days: 1
 
   install:
+    needs: test
     # install.sh against a local, signed snapshot release: it must install a
     # good release and refuse changed checksums, signatures or archives.
     strategy:
@@ -286,16 +446,18 @@ jobs:
         with:
           go-version-file: go.mod
           cache: false
-      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          version: 0.17.0
-          use-cache: false
-      - uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
-        with:
-          distribution: goreleaser
-          version: "~> v2"
-          install-only: true
-      - run: scripts/test-install.sh
+          name: install-snapshot
+          path: build/install-snapshot-transport
+      - name: Restore the original snapshot built from this source in the Linux test job
+        run: |
+          mkdir -p "$RUNNER_TEMP/install-snapshot"
+          tar -xzf build/install-snapshot-transport/install-snapshot.tar.gz -C "$RUNNER_TEMP/install-snapshot"
+      - name: Run the unchanged signature, checksum, tamper and install assertions natively
+        env:
+          INSTALL_SNAPSHOT_DIR: ${{ runner.temp }}/install-snapshot
+        run: scripts/test-install.sh
 
   public-check:
     # Everything that must hold before the repository goes public: no

@@ -20,12 +20,18 @@ type UnixCredentialsV1 struct {
 type UnixControlV1 struct {
 	Files       []*os.File
 	Credentials *UnixCredentialsV1
+	received    *unixReceiveWitnessV1
 }
 
 // Close closes every still-owned descriptor, including an unclaimed prefix.
 func (control *UnixControlV1) Close() error {
 	if control == nil {
 		return nil
+	}
+	if control.received != nil {
+		failure := control.received.close()
+		control.Files, control.Credentials = nil, nil
+		return failure
 	}
 	var failure error
 	for _, file := range control.Files {

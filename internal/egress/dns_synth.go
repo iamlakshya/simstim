@@ -27,8 +27,18 @@ type syntheticTable struct {
 	mu     sync.RWMutex
 	limit  int
 	next   uint32
-	byHost map[string]netip.Addr
+	byHost map[string]destinationRecord
 	byAddr map[netip.Addr]string
+	byID   []string
+}
+
+// One existing bounded destination record may have no synthetic route.
+// The ordinal index aliases its host string and carries no permission.
+type destinationRecord struct {
+	addr      netip.Addr
+	id        uint64
+	unknown   bool
+	announced bool
 }
 
 func newSyntheticTable(limit int) *syntheticTable {
@@ -41,34 +51,99 @@ func newSyntheticTable(limit int) *syntheticTable {
 	return &syntheticTable{
 		limit:  limit,
 		next:   syntheticFirstUint32,
-		byHost: make(map[string]netip.Addr),
+		byHost: make(map[string]destinationRecord),
 		byAddr: make(map[netip.Addr]string),
 	}
 }
 
 func (t *syntheticTable) assign(host string) (netip.Addr, bool) {
 	t.mu.RLock()
-	if addr, ok := t.byHost[host]; ok {
+	if record, ok := t.byHost[host]; ok && record.addr.IsValid() {
 		t.mu.RUnlock()
-		return addr, true
+		return record.addr, true
 	}
 	t.mu.RUnlock()
 
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	if addr, ok := t.byHost[host]; ok {
-		return addr, true
+	record, exists := t.byHost[host]
+	if exists && record.addr.IsValid() {
+		return record.addr, true
 	}
-	if len(t.byHost) >= t.limit || t.next > syntheticLastUint32 {
+	if !exists && len(t.byHost) >= t.limit || t.next > syntheticLastUint32 {
 		return netip.Addr{}, false
 	}
 	var octets [4]byte
 	binary.BigEndian.PutUint32(octets[:], t.next)
 	t.next++
 	addr := netip.AddrFrom4(octets)
-	t.byHost[host] = addr
+	if !exists {
+		record.id = t.addIDLocked(host)
+	}
+	record.addr = addr
+	t.byHost[host] = record
 	t.byAddr[addr] = host
 	return addr, true
+}
+
+func (t *syntheticTable) addIDLocked(host string) uint64 {
+	if len(t.byID) == cap(t.byID) {
+		capacity := min(t.limit, max(1, 2*cap(t.byID)))
+		next := make([]string, len(t.byID), capacity)
+		copy(next, t.byID)
+		clear(t.byID)
+		t.byID = next
+	}
+	t.byID = append(t.byID, host)
+	return uint64(len(t.byID))
+}
+
+// reserveUnknown uses the existing name capacity without allocating a route
+// or address. A later synthetic DNS answer can fill the same record's addr.
+func (t *syntheticTable) reserveUnknown(host string) bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	record, exists := t.byHost[host]
+	if !exists {
+		if len(t.byHost) >= t.limit {
+			return false
+		}
+		record.id = t.addIDLocked(host)
+	}
+	record.unknown = true
+	t.byHost[host] = record
+	return true
+}
+
+func (t *syntheticTable) unknownID(host string) uint64 {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	record := t.byHost[host]
+	if !record.unknown {
+		return 0
+	}
+	return record.id
+}
+
+// acceptUnknown marks only a destination whose actual audit was accepted.
+// Every caller uses the current actor's existing private control stream.
+func (t *syntheticTable) acceptUnknown(id uint64) (first, known bool) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if id == 0 || id > uint64(len(t.byID)) {
+		return false, false
+	}
+	host := t.byID[id-1]
+	record, exists := t.byHost[host]
+	if !exists || !record.unknown {
+		return false, false
+	}
+	if record.announced {
+		return false, true
+	}
+	record.announced = true
+	t.byHost[host] = record
+	return true, true
 }
 
 func (t *syntheticTable) lookupHost(addr netip.Addr) (string, bool) {

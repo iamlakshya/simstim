@@ -15,6 +15,18 @@ the existing single mapped identity, the Gofer translates native owner 0 to
 virtual guest owner 1000 and maps that guest owner back to 0 for creation and
 ownership changes. It adds no host identity. Other requested owners fail.
 
+The fixed controller entry reads only its sealed public native object layout.
+It creates the Gofer and Sentry through original atomic creation handles and
+joins their final barriers. The Sentry positively joins its tiny proc unmount
+helper, then re-executes the same process through the same held code. Its raw
+final entry applies the prepared filesystem boundary before Go and systrap.
+Controller and Gofer use the existing all-thread filesystem-only branch.
+
+The controller publishes its own final filesystem result and aggregate before
+accepting the original late guest stream. The outside host must authenticate
+that exact creation, current code, namespace and socket chain and recheck its
+original operation. A setup frame or transport EOF grants no private input.
+
 Build all companions together on a supported Linux machine:
 
 ```sh

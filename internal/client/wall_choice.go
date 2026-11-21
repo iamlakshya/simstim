@@ -46,14 +46,17 @@ func ValidateWallRequest(request string, downgrade bool) error {
 }
 
 // ChooseWall resolves an explicit level or auto, which means the saved floor.
-// An empty request preserves the legacy SDK path. Front ends explicitly select auto. A named
+// An empty request selects auto too. A named
 // downgrade waives only the canonical wall_floor refusal for this start.
 func ChooseWall(h Host, tier Tier, request string, downgrade bool) (WallChoice, error) {
 	if err := ValidateWallRequest(request, downgrade); err != nil {
 		return WallChoice{}, err
 	}
 	if request == "" {
-		return WallChoice{Level: "none"}, nil
+		request = "auto"
+	}
+	if request == "auto" && h.WallFloor == "" {
+		return WallChoice{}, missingPinnedWallFloor(h)
 	}
 	saved := h.WallFloor
 	if saved == "" {
@@ -70,6 +73,9 @@ func ChooseWall(h Host, tier Tier, request string, downgrade bool) (WallChoice, 
 			return WallChoice{}, &UserError{Msg: fmt.Sprintf("%q is not a wall level", CleanLine(request)),
 				Hint: "Use --wall auto, none, process, gvisor or microvm.", Code: "bad_floor", Kind: KindUsage}
 		}
+	}
+	if level == wall.Process && tier != TierOwn && tier != TierThrowaway && !IsSessionMachineV1(h) {
+		return WallChoice{}, &UserError{Msg: "a shared host cannot run a process wall", Hint: "Use a pinned gvisor or microvm floor on this host.", Code: "wall_floor", Kind: KindRefused}
 	}
 	choice := WallChoice{Level: level.String(), Floor: floor.String()}
 	gate := allowFloor(h, tier, Outbound{Kind: OutboundFloor, Name: choice.Level})
@@ -99,4 +105,8 @@ func wallBelowFloor(h Host, level, floor string) error {
 	return &WallFloorError{Level: level, Floor: floor, Err: &UserError{Msg: fmt.Sprintf("%s runs sessions at %s or stronger, and %s is weaker", hostDisplayName(h), floor, level),
 		Hint: brand.Name + " new " + hostCommandArg(h) + " --wall " + level + " --downgrade",
 		Code: "wall_floor", Kind: KindRefused}}
+}
+
+func missingPinnedWallFloor(h Host) error {
+	return &UserError{Msg: "this host has no pinned sandbox floor", Hint: brand.Name + " host prepare " + hostCommandArg(h), Code: "wall_floor", Kind: KindRefused}
 }

@@ -22,7 +22,7 @@ func prepareFileCapture(m *host.Manifest) (*files.Capture, error) {
 	}
 	capture, err := files.BeginCapture(paths.SessionDir(m.ID), m.Files.State)
 	if err != nil {
-		return nil, wallError("cannot prepare agent state", err)
+		return capture, wallError("cannot prepare agent state", err)
 	}
 	return capture, nil
 }

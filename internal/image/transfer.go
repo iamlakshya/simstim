@@ -21,6 +21,7 @@ type Transfer struct {
 	sizes         map[string]int64
 	received      int64
 	closed        bool
+	cleaned       bool
 	directory     cachefs.Reference
 	directoryRoot *os.Root
 	creators      map[string]createdImageFile
@@ -155,13 +156,13 @@ func (t *Transfer) document(digest string) ([]byte, error) {
 }
 
 // Commit rechecks every copied digest before calling the jailed converter.
-func (t *Transfer) Commit(ctx context.Context, convert Converter) (Record, error) {
+func (t *Transfer) Commit(ctx context.Context, convert Converter) (record Record, returned error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if t.closed {
 		return Record{}, fmt.Errorf("image transfer has ended")
 	}
-	defer t.close()
+	defer func() { returned = errors.Join(returned, t.close()) }()
 	documents := map[string][]byte{}
 	for _, digest := range []string{t.request.Digest, t.request.PlatformDigest} {
 		data, err := t.document(digest)
@@ -204,48 +205,68 @@ func (t *Transfer) Commit(ctx context.Context, convert Converter) (Record, error
 
 // Close removes partial blobs and closes all descriptors on failure or disconnect.
 func (t *Transfer) Close() error { t.mu.Lock(); defer t.mu.Unlock(); return t.close() }
+
+// ErrTransferCleanupPending means the same original transfer still owns
+// partial-file or directory capabilities. A later Close retries those exact
+// capabilities; the caller must retain its aliases and publication meanwhile.
+var ErrTransferCleanupPending = errors.New("image transfer still owns unfinished native cleanup")
+
 func (t *Transfer) close() error {
-	if t.closed {
+	if t.cleaned {
 		return nil
 	}
-	t.closed = true
-	if t.directoryRoot != nil {
-		defer t.directoryRoot.Close()
-	}
+	t.closed = true // Future WriteAt/Commit calls cannot create another writer.
 	var result error
 	for digest, file := range t.files {
-		if created, ok := t.creators[digest]; ok {
-			result = errors.Join(result, t.store.cleanupCreated(created, 0o600))
-		} else {
+		created, ok := t.creators[digest]
+		if !ok {
 			result = errors.Join(result, ownershipError("copied image part lacks its creator witness"))
+			continue
+		}
+		if err := t.store.cleanupCreated(created, 0o600); err != nil {
+			// Preserve the SAME live descriptor and creator witness for retry.
+			result = errors.Join(result, err)
+			continue
 		}
 		result = errors.Join(result, file.Close())
+		delete(t.files, digest)
+		delete(t.sizes, digest)
+		delete(t.creators, digest)
+	}
+	if len(t.files) != 0 {
+		return errors.Join(result, ErrTransferCleanupPending)
 	}
 	root, err := t.store.childRoot("incoming/" + t.token)
 	if err != nil {
-		return errors.Join(result, err)
+		return errors.Join(result, err, ErrTransferCleanupPending)
 	}
 	defer root.Close()
 	if err := t.directory.CheckRoot(root); err != nil {
-		return errors.Join(result, err)
+		return errors.Join(result, err, ErrTransferCleanupPending)
 	}
 	names, err := directoryEntries(root)
 	if err != nil {
-		return errors.Join(result, err)
+		return errors.Join(result, err, ErrTransferCleanupPending)
 	}
 	if len(names) != 0 {
-		return errors.Join(result, ownershipError("image transfer retains unknown or replaced files"))
+		return errors.Join(result, ownershipError("image transfer retains unknown or replaced files"), ErrTransferCleanupPending)
 	}
-	// Reopen the named parent immediately before rmdir. An empty replacement
-	// token directory must not be mistaken for the creator's original root.
 	named, err := t.store.childRoot("incoming/" + t.token)
 	if err != nil {
-		return errors.Join(result, err)
+		return errors.Join(result, err, ErrTransferCleanupPending)
 	}
 	checkErr := t.directory.CheckRoot(named)
 	named.Close()
 	if checkErr != nil {
-		return errors.Join(result, checkErr)
+		return errors.Join(result, checkErr, ErrTransferCleanupPending)
 	}
-	return errors.Join(result, t.store.root.Remove("incoming/"+t.token))
+	if err := t.store.root.Remove("incoming/" + t.token); err != nil {
+		return errors.Join(result, err, ErrTransferCleanupPending)
+	}
+	t.cleaned = true
+	if t.directoryRoot != nil {
+		result = errors.Join(result, t.directoryRoot.Close())
+		t.directoryRoot = nil
+	}
+	return result
 }

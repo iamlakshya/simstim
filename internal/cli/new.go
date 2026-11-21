@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 	"strings"
-	"sync"
-	"time"
 
 	"github.com/spf13/cobra"
 
@@ -18,7 +16,9 @@ func newCmd() *cobra.Command {
 	var agent, dir, name, base, memoryMax, wallLevel, profile, preset, task, inside, imageRef string
 	var detach, worktree, inline, setup, noSetup, mkdir, asJSON, downgrade, untrusted, sshAgent bool
 	var secrets, expose, mounts, include, sets, allow, deny, seeds, copies []string
-	var seedDirty bool
+	var seedDirty, dryRun, allowWake bool
+	var needs []string
+	var machineProvider string
 	var environment []client.EnvironmentOption
 	var count int
 	var batch []map[string]any
@@ -37,6 +37,9 @@ func newCmd() *cobra.Command {
 		Args:              optionalNewHost,
 		ValidArgsFunction: completeNewHost,
 		RunE: func(cmd *cobra.Command, args []string) (runErr error) {
+			if err := checkNewMachineFlagsV1(cmd, args, machineProvider); err != nil {
+				return err
+			}
 			if _, err := client.ReadPolicySettings(); err != nil {
 				return err
 			}
@@ -44,13 +47,16 @@ func newCmd() *cobra.Command {
 				return policyUsage("--task must be one line", "Describe the work on one line.", "bad_task")
 			}
 			if cmd.Flags().Changed("in") {
+				if len(needs) != 0 || dryRun || allowWake {
+					return policyUsage("automatic placement cannot select an existing sandbox member", "Use new auto for a fresh sandbox, or omit --need, --dry-run and --allow-wake.", "flags_conflict")
+				}
 				if err := client.CheckSessionName(name); err != nil {
 					return err
 				}
 				return runFreshMemberNew(cmd, args, inside, agent, name, task, detach, asJSON)
 			}
 			execArgv := nonTerminalNewCommand(cmd, args, detach)
-			if err := beforeAttach(cmd, asJSON, detach || len(execArgv) > 0 && !asJSON); err != nil {
+			if err := beforeAttach(cmd, asJSON, detach || dryRun || len(execArgv) > 0 && !asJSON); err != nil {
 				return err
 			}
 			if err := client.CheckSessionName(name); err != nil {
@@ -63,38 +69,16 @@ func newCmd() *cobra.Command {
 			if err := client.ValidateWallRequest(requestedWall, downgrade); err != nil {
 				return err
 			}
-			h, err := selectedNewHost(cmd, args)
-			if err != nil {
-				return err
-			}
 			if setup && noSetup {
 				return &client.UserError{Msg: "--setup-script and --no-setup-script cannot go together", Hint: "Pass one of them.", Code: "flags_conflict", Kind: client.KindUsage}
 			}
 			var memMax int64
+			var err error
 			if cmd.Flags().Changed("memory-max") {
 				if memMax, err = client.ParseMemoryFlag(memoryMax); err != nil {
 					return err
 				}
 			}
-			ctx, cancel := context.WithTimeout(cmd.Context(), 60*time.Second)
-			conn, err := client.Dial(ctx, h, true)
-			if err != nil {
-				cancel()
-				return err
-			}
-			cancel()
-			var closeOnce sync.Once
-			closeBridge := func() { closeOnce.Do(conn.Close) }
-			defer closeBridge()
-			originalContext := cmd.Context()
-			request := client.NewGrantRequest(untrusted, sshAgent)
-			cleanup := &newStartCleanup{request: request, budget: originalContext}
-			cmd.SetContext(context.WithValue(client.WithGrantRequest(originalContext, request), newStartCleanupKey{}, cleanup))
-			defer func() { runErr = errors.Join(runErr, cleanup.finish()); cmd.SetContext(originalContext) }()
-			if len(execArgv) > 0 && !conn.HasFeature(api.FeatureExecStream) {
-				return &client.UserError{Msg: "the helper does not offer sandbox exec", Hint: "Upgrade the host helper, then run the command again.", Code: "upgrade_required"}
-			}
-			cols, rows := termSize()
 			a := client.NewArgs{Agent: agent, Cwd: client.RemotePath(dir), MakeFolder: mkdir, Name: name, Worktree: worktree, Base: base, Inline: inline, MemoryMax: memMax, SSHAgent: sshAgent, Downgrade: downgrade, Mounts: mounts, Include: include}
 			a.Wall, a.Task = requestedWall, task
 			if dash := cmd.ArgsLenAtDash(); dash >= 0 {
@@ -105,9 +89,6 @@ func newCmd() *cobra.Command {
 			}
 			if setup || noSetup {
 				a.Setup = setupValue(setup)
-			}
-			if err := newStartStep(cmd, func(ctx context.Context) error { a, err = client.PrepareNewSessionArgs(ctx, a, cols, rows); return err }); err != nil {
-				return err
 			}
 			values, err := client.ParseLayerSets(sets)
 			if err != nil {
@@ -133,21 +114,129 @@ func newCmd() *cobra.Command {
 			if !options.HostClone {
 				a.Cwd = ""
 			}
-			a, err = prepareWallStart(cmd, conn, h, a, request, options, secrets, expose)
+			originalContext := cmd.Context()
+			selectedHost := selectedNewArgumentV1(cmd, args)
+			var machineOwner *client.SessionMachineOwnerV1
+			if machineProvider != "" {
+				machineOwner, a, err = prepareNewMachineV1(cmd, machineProvider, a)
+				if machineOwner != nil {
+					defer func() { runErr = errors.Join(runErr, machineOwner.Finish(originalContext)) }()
+				}
+				if err != nil {
+					return err
+				}
+				selectedHost = machineOwner.Host().Name
+				callerContext := originalContext
+				defer cmd.SetContext(callerContext)
+				originalContext = machineOwner.Context(originalContext)
+			}
+			selection, err := client.PrepareHostSelection(originalContext, selectedHost, options)
 			if err != nil {
 				return err
 			}
-			s, err := startSession(cmd, conn, h, a)
-			if err == nil {
-				err = checkSessionID(h.Name, s.ID)
+			need, err := client.ParsePlacementNeed(needs)
+			if err != nil {
+				return errors.Join(err, selection.Close())
+			}
+			need.Untrusted = untrusted
+			if !selection.Automatic() && (len(needs) != 0 || allowWake) {
+				return errors.Join(policyUsage("automatic placement options need auto", "Use new auto with --need or --allow-wake.", "flags_conflict"), selection.Close())
+			}
+			wake := client.AutoPlacementOptionsV1{AllowWake: allowWake, Progress: prompts(cmd).out}
+			if dryRun {
+				defer func() { runErr = errors.Join(runErr, selection.Close()) }()
+				return dryRunNewPlacementV1(cmd, selection, a, need, wake)
+			}
+			plan, err := client.NewHostAttemptPlanV1(originalContext, selection, a, need, wake)
+			if plan != nil {
+				defer func() { runErr = errors.Join(runErr, plan.Close()) }()
 			}
 			if err != nil {
+				if plan == nil {
+					err = errors.Join(err, selection.Close())
+				}
 				return err
 			}
-			if err := cleanup.finish(); err != nil {
-				return err
+			defer cmd.SetContext(originalContext)
+			var chosen *client.HostAttemptV1
+			var h client.Host
+			var conn *client.Conn
+			var session *client.Session
+			for {
+				cmd.SetContext(originalContext)
+				attempt, nextErr, answered := nextSelectedNewAttemptV1(cmd, plan)
+				if nextErr != nil {
+					if attempt == nil || !answered {
+						return nextErr
+					}
+					retry, settleErr := plan.Retry(originalContext, attempt, nextErr)
+					if settleErr != nil {
+						return errors.Join(nextErr, settleErr)
+					}
+					if retry {
+						continue
+					}
+					return nextErr
+				}
+				chosen, h, conn = attempt, attempt.Host(), attempt.Conn()
+				cmd.SetContext(attempt.Context())
+				if len(execArgv) > 0 && !conn.HasFeature(api.FeatureExecStream) {
+					return &client.UserError{Msg: "the helper does not offer sandbox exec", Hint: "Upgrade the host helper, then run the command again.", Code: "upgrade_required"}
+				}
+				prepared := attempt.Args()
+				cols, rows := termSize()
+				if err := newStartStep(cmd, func(ctx context.Context) error {
+					prepared, err = client.PrepareNewSessionArgs(ctx, prepared, cols, rows)
+					return err
+				}); err != nil {
+					return err
+				}
+				prepared, err = prepareWallStart(cmd, conn, h, prepared, attempt.Request(), options, secrets, expose)
+				if err != nil {
+					return err
+				}
+				var actualResult bool
+				session, err, actualResult = startSessionOnAttemptV1(cmd, attempt, prepared)
+				if err != nil {
+					if !actualResult {
+						return err
+					}
+					retry, settleErr := plan.Retry(originalContext, attempt, err)
+					if settleErr != nil {
+						return errors.Join(err, settleErr)
+					}
+					if retry {
+						continue
+					}
+					return err
+				}
+				if err := checkSessionID(h.Name, session.ID); err != nil {
+					return err
+				}
+				if err := attempt.Request().Close(); err != nil {
+					return err
+				}
+				cmd.SetContext(originalContext)
+				break
 			}
-			cmd.SetContext(originalContext)
+			s := session
+			closeBridge := chosen.Close
+			if machineOwner != nil {
+				if err := closeBridge(); err != nil {
+					return err
+				}
+				if err := machineOwner.Commit(originalContext); err != nil {
+					return err
+				}
+				h = machineOwner.Host()
+				if len(execArgv) > 0 {
+					conn, err = client.Dial(originalContext, h, false)
+					if err != nil {
+						return err
+					}
+					defer conn.Close()
+				}
+			}
 			// An address without a host finds the new session at once.
 			client.RememberSession(h.Name, *s)
 			wallStartNotes(cmd, *s)
@@ -155,10 +244,14 @@ func newCmd() *cobra.Command {
 				return runNewCommand(cmd, conn, *s, execArgv)
 			}
 			if !detach {
-				closeBridge()
+				if err := closeBridge(); err != nil {
+					return err
+				}
 				return attach(cmd.Context(), h, s.ID, s.Name)
 			}
-			closeBridge()
+			if err := closeBridge(); err != nil {
+				return err
+			}
 			if cmd.Flags().Changed("count") {
 				batch = append(batch, sessionObject(h.Name, *s))
 				if !asJSON {
@@ -174,6 +267,10 @@ func newCmd() *cobra.Command {
 		},
 	}
 	f := cmd.Flags()
+	f.StringVar(&machineProvider, "machine", "", "make one provider machine for this session (e2b), removed by rm")
+	f.StringArrayVar(&needs, "need", nil, "require automatic placement architecture, tier or local features (repeatable)")
+	f.BoolVar(&dryRun, "dry-run", false, "show automatic placement without starting or waking a host")
+	f.BoolVar(&allowWake, "allow-wake", false, "allow an automatic paid wake without its extra question")
 	f.StringVarP(&agent, "agent", "a", "shell", "the agent: "+agentKinds())
 	f.StringVarP(&dir, "dir", "C", "~", "the folder on the host")
 	f.BoolVar(&mkdir, "mkdir", false, "make the folder on the host if it does not exist, without asking")
@@ -186,7 +283,7 @@ func newCmd() *cobra.Command {
 	f.StringVar(&base, "base", "", "the commit or branch the worktree starts from (default: HEAD)")
 	addMemoryMax(cmd, &memoryMax, "cap the session's memory: auto, or a `size` such as 4G (default: sessions.memory_max in config.toml)")
 	addSecret(cmd, &secrets, "pass secrets from config.toml's [secrets] into the session's environment, such as A,B, or the flag again")
-	f.StringVar(&wallLevel, "wall", "none", "the wall: auto (the host floor), none, process, gvisor or microvm")
+	f.StringVar(&wallLevel, "wall", "auto", "the wall: auto (the host floor), none, process, gvisor or microvm")
 	f.StringVar(&imageRef, "image", "", "the pinned image or an image saved on this host")
 	f.BoolVar(&downgrade, "downgrade", false, "run this start below the floor, with an explicit --wall level")
 	f.StringArrayVar(&expose, "expose", nil, "explicitly expose a named secret in the session (repeatable)")

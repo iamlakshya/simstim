@@ -8,7 +8,11 @@ How the client, the host helper and the shadow terminal fit together, and how a 
 
 The client runs in your local terminal. It opens one bridge process on the host over SSH or a provider's exec transport (section 8). The bridge connects to session holders through private Unix sockets. Each holder owns an agent's PTY, an 8 MiB output ring, a manifest, a status engine and a shadow terminal child.
 
-There is no daemon on the laptop and no central daemon on the host. Each session is one holder process, with a small vt child. The bridge lives only while a client is connected.
+There is no daemon on the laptop and no central daemon on the host. Every new session has a supervisor, a link and a guest init. The holder owns its PTY, ring and small vt child. The bridge lives only while a client is connected.
+
+At `none`, the guest init and agent share the supervisor's host account and namespaces. The working directory is the host folder or worktree that the user chose. There is no clone, seed bundle, egress process, DNS shim, classifier, sentinel or decoy. Secrets reach the holder as exposed values. The holder and hook sockets live in the private runtime folder under `g/<id>/`. The same relay passes terminal frames without changing their bytes.
+
+A legacy holder that was running when the helper updated keeps its old path. Moving its record to the new path needs either its original, physically joined holder or a changed kernel boot epoch under the same session operation. A saved status or process number cannot supply that proof. The [release prerequisite](../contributing/none-supervisor-release.md) applies before this change is merged or published.
 
 ## 2. Components
 
@@ -35,6 +39,13 @@ image, round trip, room, sandbox count and host name, in that order.
 These facts and labels are selection metadata. They reserve nothing and cannot
 start a sandbox. The selected host checks its current native reservations again
 under its placement lock before a start.
+
+The local `facts.json` cache keeps the original client receipt time and saved
+host Source. It drops opaque runtime text that selection does not need.
+`placements.json` records complete unit bytes under a private file lock.
+Only the creator can update or remove its exact mark. The latest minute counts
+as in flight; ten minutes of names provide the spread penalty. Future cache
+formats are retained and refused, rather than replaced with empty history.
 
 ### 2.2 Host: `simstim-host` and `simstim-vt`
 
@@ -96,17 +107,13 @@ Codex's launch, resume and continue commands include `--no-daemon`, so its work 
 
 ### 3.1 Add a host
 
-1. The user picks a host from `~/.ssh/config` (resolved with `ssh -G`), or types `user@host`, with an optional jump host.
-2. simstim writes the host to its own `hosts.conf`. It never edits `~/.ssh/config`.
-3. It opens the private master and runs `uname -sm`. It checks `PATH` for an installed helper.
-4. If there is no helper, or the wrong version, it asks first, then uploads the static helper over an exec channel. It checks the SHA-256 against a signed manifest and installs into a versioned folder.
-5. A `hello` handshake exchanges the protocol version and features.
-6. `simstim-host doctor` runs:
-   - Turn on linger, or warn that sessions die at logout.
-   - Install Ghostty's terminfo (`infocmp -x xterm-ghostty | tic -x -`).
-   - Find agents through the login shell.
-   - Check cgroup delegation.
-7. The host appears in the browser with its facts: provider label, latency, CPU, memory and sessions.
+1. The user picks a host from `~/.ssh/config` (resolved with `ssh -G`), or types `user@host`, with an optional extra SSH config file. It never edits `~/.ssh/config`.
+2. It stages and pins the host's SSH key, runs `uname -sm`, and asks for the host's trust tier (`own`, `shared` or `throwaway`).
+3. If there is no helper, or the wrong version, it asks first, then uploads the static helper over an exec channel, checks its SHA-256, and installs into a versioned folder.
+4. A `hello` handshake exchanges the protocol version, host ID and features. `setup` and `doctor` turn on linger, install Ghostty's terminfo, find agents through the login shell, and check cgroup delegation.
+5. Registration commits the host, its staged pin and its tier in `hosts.toml` (`UpdateHostsForPreparation`), returning a source-bound preparation target, and closes the registration connection.
+6. Unless `--no-sandbox` is set, four separate saved-host connections prepare sandboxes on that target, each under its own closed grant purpose: capability probe (`sandbox.probe`), pinned runtime and image delivery, optional root setup (`run`, `print` or `skip`, never reusing consent from another phase), and a fixed 60 s sandbox test boot (`sandbox.prepare`). Only a verified test boot and clean-up publish `wall_floor` (keeping any stronger floor) and `facts.json`.
+7. The host appears in the launcher with its facts, wall floor, latency, CPU, memory and sessions.
 
 ### 3.2 Start a session
 
@@ -199,7 +206,7 @@ Triggers: the detach key, closing the tab, `simstim rm` from elsewhere, or SIGTE
    - A paste that equals the text on the local clipboard, or on the primary selection, is a paste, not a drag, and uploads nothing. This check needs no parsing of terminal output.
    - It refuses a file in a private folder, such as `~/.ssh`, or with a secret's name, such as `*.pem`. It compares the identity of each folder above the path as given and above the resolved path, so links and other spellings count. It opens the resolved path with `O_NOFOLLOW`, checks that it opened the file that it checked, and the upload reads that file.
    - It refuses a file whose path a session put on the clipboard in the last day. It reads every byte that goes to the terminal, the session's and the client's own, and changes none. Its parser follows the parse table of the Ghostty commit that the shadow terminal pins. It reads OSC 52, iTerm2's `Copy` and `CopyToClipboard`, and kitty's OSC 5522.
-   - It over-approximates: it records every reading of the two that spec 7.6 names, the pinned Ghostty's and xterm's with C1 controls on. Two readers read every byte from the start of the attach. The second reads each C1 control as its 7-bit ESC form. In ground, each reader jumps to the next byte that can start an OSC string, so plain text costs about one pass. Every OSC 52 selection letter but `p` counts for the clipboard.
+   - It over-approximates: it records every reading of the two that spec 7.6 names, the pinned Ghostty's and xterm's with C1 controls on. Two readers read every byte from the start of the attach. The second reads each C1 control as its 7-bit ESC form. In ground, each reader jumps to the next byte that can start an OSC string, so plain text costs about one pass. Every OSC 52 selection letter but `p` counts for the clipboard. Complete UTF-8 output without a C2 byte cannot encode a C1 control, so that check runs in bulk. C2 bytes, invalid text and split characters keep the full translation check.
    - It keeps the SHA-256 of the text of the last 256 writes for 24 hours, in `paste-guard.json` in the state folder, mode 0600, under a lock that every client process shares. Before the output goes on, the reader appends each write's hashes to a journal beside the file, in one write, with the lock held shared. A goroutine folds the journal into the file with the lock held alone. A drop checks the file, the journal and the hashes not yet folded. Clipboard writes are rare, so normal output does no file work.
    - When the file holds 256 writes, every drop is refused until the oldest is a day old. If the file cannot be read, the drop is refused. Writes to a selection, such as the primary one, have their own list in the file for each reading, which never fills the clipboard's. Each write has a time in nanoseconds that keeps its order, and a full list drops the oldest by that order. A write more than a minute ahead of the clock means that the clock moved back, and every drop is refused for a day.
    - A reader that loses track of a write, such as kitty data that joins a transfer whose start it did not see, refuses every drop for a day. It appends that time to the journal first, so every client process refuses too, also after a restart.
@@ -231,6 +238,9 @@ Triggers: the detach key, closing the tab, `simstim rm` from elsewhere, or SIGTE
 ### 3.8 Upgrade
 
 - The client and the helper upgrade independently. New sessions use the new helper, and old holders keep running their own version.
+- New sandboxes compare their client's pinned runtime with the current host. Missing runtime files are installed on use. Shared hosts ask through the original request before an upgrade. The helper verifies the resulting bytes and retains the original selected files. A file inventory alone cannot prove that a driver can run.
+- Running sandboxes retain their runtime. Session lists mark an older runtime `outdated`, and one covered by the client's advisory list `exposed`.
+- A user drain setting stops new starts under the same placement lock. It does not stop running sessions. The setting has its own native metadata receipt and survives a restart. Automatic restore may skip this setting; the separate host removal gate still holds.
 - The bridge exchanges `hello` feature flags with the client. This does not upgrade a running holder.
 - A crashed vt child restarts from the ring, using the same executable path beside its holder. There is no live vt upgrade or holder re-exec.
 
@@ -404,3 +414,37 @@ The JSON cursor scans ordinary ASCII in its existing read window. It keeps each 
 Frame encoding checks the payload length before adding the type or header sizes. The existing frame limit and wire bytes stay the same. A payload beyond that limit is refused before any transport write.
 
 Placement descriptions use a closed versioned advisory record. Requests own their copy. The description supplies no native source, operation, Need, capacity reservation or start permission.
+
+A cancelled runtime transfer releases its slot after the original fetch cleanup completes. Closing the runtime service joins running transfers before retiring their parts and selected receipts. A status or EOF cannot stand in for that cleanup.
+
+Opted-in attach timing keeps a bounded ring of original supervisor frame
+arrival times. It observes headers and completion, never terminal payloads.
+The controlled conformance fixture joins these host-clock windows to the
+holder's original trace and the client's acknowledgements. Its conservative
+bound avoids subtracting different kernel clocks. Diagnostic readout uses
+the existing authenticated protocol and the trace writer's actual open
+descriptor. No returned path or record can create a native runtime owner.
+
+
+### 8.4 A joined Mac host
+
+A joined Mac is an outer SSH hop, followed by a plain Lima Linux VM. The
+laptop pins both host-key sets and starts every connection. The Mac account's
+key can reach only the VM's fixed `127.0.0.1` SSH port and the closed
+`facts-v1` action. The existing Linux helper runs in the VM and keeps the same
+terminal, sandbox and admission paths.
+
+The Mac join keeps its own root-owned ahead ledger and original leave helper.
+It installs a hidden standard account with SecureToken disabled, a pinned Lima
+runtime and VM image, a narrow effective sshd policy and a startup job. A fixed
+guard checks the original native account and VM directories, immutable runtime
+and frozen plain profile before restart. Mac battery and sleep facts come
+through that original outer SSH hop and affect advisory health and placement.
+They never replace the Linux guest's memory or native sandbox admission.
+
+The default system daemon and the explicit user launch-agent fallback both
+need manual hardware assurance. The latter gives the Mac's logged-in user
+custody of the VM disk, and reports that warning. Joining never enables Remote
+Login, changes battery policy or unlocks FileVault. After a restart, the user
+unlocks the Mac locally. [Use a Mac as a host](../how-to/a-mac-as-a-host.md)
+describes setup, power, leave and the required checks.

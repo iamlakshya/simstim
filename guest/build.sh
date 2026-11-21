@@ -216,7 +216,8 @@ build_kernel() {
                 "sudo apt-get install -y build-essential flex bison bc libssl-dev libelf-dev xz-utils"
     done
 
-    local kver kurl tarball epoch karch target_make cross="" out_file
+    local kver kurl tarball epoch karch cross="" out_file
+    local -a kernel_targets
     kver=$(pin_get kernel.version)
     kurl=$(pin_get kernel.url)
     tarball="${cache_dir}/linux-${kver}.tar.xz"
@@ -226,14 +227,14 @@ build_kernel() {
     harch=$(host_arch)
     if [ "$arch" = "amd64" ]; then
         karch="x86_64"
-        target_make="vmlinux"
+        kernel_targets=(vmlinux bzImage)
         out_file="vmlinux-amd64"
         if [ "$harch" != "amd64" ]; then
             cross="x86_64-linux-gnu-"
         fi
     else
         karch="arm64"
-        target_make="Image"
+        kernel_targets=(Image)
         out_file="Image-arm64"
         if [ "$harch" != "arm64" ]; then
             cross="aarch64-linux-gnu-"
@@ -264,15 +265,18 @@ build_kernel() {
     echo "guest-build: building ${out_file} (Linux ${kver})"
     KBUILD_BUILD_TIMESTAMP="$ts" KBUILD_BUILD_USER=builder KBUILD_BUILD_HOST=guest \
         SOURCE_DATE_EPOCH="$epoch" \
-        make -s -C "${work}/linux" -j"$(nproc)" ARCH="$karch" CROSS_COMPILE="$cross" "$target_make"
+        make -s -C "${work}/linux" -j"$(nproc)" ARCH="$karch" CROSS_COMPILE="$cross" "${kernel_targets[@]}"
 
     if [ "$arch" = "amd64" ]; then
         cp "${work}/linux/vmlinux" "${assets_dir}/${out_file}"
+        cp "${work}/linux/arch/x86/boot/bzImage" "${assets_dir}/kernel-efi-${arch}"
         chmod 0644 "${assets_dir}/${out_file}"
     else
         cp "${work}/linux/arch/arm64/boot/Image" "${assets_dir}/${out_file}"
+        cp "${work}/linux/arch/arm64/boot/Image" "${assets_dir}/kernel-efi-${arch}"
         chmod 0644 "${assets_dir}/${out_file}"
     fi
+    chmod 0644 "${assets_dir}/kernel-efi-${arch}"
     cp "$cfg" "${assets_dir}/config-${arch}"
     if [ ! -f "${assets_dir}/linux-${kver}.tar.xz" ]; then
         cp "$tarball" "${assets_dir}/linux-${kver}.tar.xz"

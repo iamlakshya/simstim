@@ -16,7 +16,7 @@ type runtimePublication struct {
 	operation  *placementOperation
 	stop       chan struct{}
 	watched    chan struct{}
-	once       sync.Once
+	closeMu    sync.Mutex
 	watchStop  sync.Once
 	releaseErr error
 	activity   sync.Mutex
@@ -66,12 +66,18 @@ func beginRuntimePublicationKind(ctx context.Context, kind string, boot *origina
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	operation, err := beginPlacementOperation(ctx, kind)
+	var operation *placementOperation
+	var err error
+	if boot != nil {
+		operation, err = beginPlacementPublicationOwnedV1(ctx, boot.placement, kind)
+	} else {
+		operation, err = beginPlacementPublicationV1(ctx, kind)
+	}
 	if err != nil {
 		return nil, err
 	}
 	owned, cancel := context.WithCancelCause(ctx)
-	publication := &runtimePublication{ctx: owned, cancel: cancel, owner: operation.owner, operation: operation, stop: make(chan struct{}), watched: make(chan struct{}), bootOwner: boot, startup: startup}
+	publication := &runtimePublication{ctx: context.WithValue(owned, publicationSourceContextV1{}, operation), cancel: cancel, owner: operation.owner, operation: operation, stop: make(chan struct{}), watched: make(chan struct{}), bootOwner: boot, startup: startup}
 	go publication.watch()
 	return publication, nil
 }
@@ -97,7 +103,11 @@ func (p *runtimePublication) watch() {
 					return err
 				}
 				return p.owner.withControl(p.ctx, func(control *placementControl) error {
-					if control.Drain != "" {
+					if p.operation.record.Kind == "auxiliary" {
+						if err := checkPurgeAuxiliaryContextControlV1(p.ctx, control); err != nil {
+							return err
+						}
+					} else if control.Drain != "" {
 						return UserError("draining", "purge cancelled this runtime or startup operation", "Finish the current removal before trying another runtime install.")
 					}
 					if current, ok := control.Active[p.operation.token]; !ok || current != p.operation.record {
@@ -119,6 +129,14 @@ func (p *runtimePublication) watch() {
 }
 
 func (p *runtimePublication) gate(ctx context.Context, publish func() error) error {
+	return p.gateControl(ctx, func(*placementControl) error { return publish() })
+}
+
+// gateControl exposes the SAME actually locked control record to a native
+// producer's accounting kernel. It creates no publisher, OP or capacity
+// authority and never reacquires the control lock from inside a publication.
+// Existing gate callers retain the identical checks and publication order.
+func (p *runtimePublication) gateControl(ctx context.Context, publish func(*placementControl) error) error {
 	if p == nil {
 		return placementError("runtime publication has no active publisher receipt")
 	}
@@ -136,15 +154,19 @@ func (p *runtimePublication) gate(ctx context.Context, publish func() error) err
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	return withPlacement(ctx, false, func(control *placementControl) error {
+	publishUnderControl := func(control *placementControl) error {
 		if p.ctx.Err() != nil {
 			return context.Cause(p.ctx)
 		}
 		if current, ok := control.Active[p.operation.token]; !ok || current != p.operation.record {
 			return placementError("runtime publication lost its exact active reservation")
 		}
-		return publish()
-	}, false)
+		return publish(control)
+	}
+	if p.operation.record.Kind == "auxiliary" {
+		return withAuxiliaryPlacementV1(ctx, publishUnderControl, false)
+	}
+	return withPlacement(ctx, false, publishUnderControl, false)
 }
 
 // close runs only after its caller has closed the exact owned parts/store.
@@ -152,7 +174,11 @@ func (p *runtimePublication) close() error {
 	if p == nil {
 		return nil
 	}
-	p.once.Do(func() { p.cancel(context.Canceled); p.stopWatching(); p.releaseErr = p.operation.Close() })
+	p.closeMu.Lock()
+	defer p.closeMu.Unlock()
+	p.cancel(context.Canceled)
+	p.stopWatching()
+	p.releaseErr = p.operation.Close()
 	return p.releaseErr
 }
 

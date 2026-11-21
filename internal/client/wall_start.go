@@ -12,6 +12,9 @@ import (
 // A fresh probe cannot select another saved host or refresh an old request's
 // Source. The shared publication participant is released while the probe runs.
 func (c *Conn) ResolveNewWall(ctx context.Context, a NewArgs) (NewArgs, error) {
+	if err := checkSessionMachineNewV1(ctx, c); err != nil {
+		return a, err
+	}
 	if err := ValidateWallRequest(a.Wall, a.Downgrade); err != nil {
 		return a, err
 	}
@@ -36,23 +39,22 @@ func (c *Conn) ResolveNewWall(ctx context.Context, a NewArgs) (NewArgs, error) {
 	if err != nil {
 		return a, err
 	}
-	// An empty SDK request has always meant the ordinary legacy start.
-	// CLI and launcher wall selection supply an explicit auto or named level.
-	if a.Wall == "" {
-		return a, nil
+	requested := a.Wall
+	if requested == "" {
+		requested = "auto"
 	}
 	host := cloneGrantHost(c.Host)
+	if requested == "auto" && host.WallFloor == "" {
+		return a, missingPinnedWallFloor(host)
+	}
 	var probe api.CapProbe
-	if a.Wall != "none" {
+	if requested != "none" {
 		probe, err = c.CapProbe(ctx, "")
 		if err != nil {
 			return a, err
 		}
 	}
-	if a.Wall == "auto" && host.WallFloor == "" {
-		host.WallFloor = BestWallLevel(probe).String()
-	}
-	choice, err := ChooseWall(host, tier, a.Wall, a.Downgrade)
+	choice, err := ChooseWall(host, tier, requested, a.Downgrade)
 	if err != nil {
 		return a, err
 	}

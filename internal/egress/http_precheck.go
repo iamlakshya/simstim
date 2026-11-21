@@ -52,9 +52,15 @@ func (e *Engine) httpHostRules(host string, port int) []compiledRule {
 }
 
 func (e *Engine) permitsIntercept(host string, port int) bool {
+	return e.permitsInterceptProbe(host, port, false)
+}
+
+func (e *Engine) permitsInterceptProbe(host string, port int, skipClassifier bool) bool {
 	rules := e.httpHostRules(host, port)
 	for _, request := range e.pushHTTPWitnesses(host, port, e.now()) {
-		if e.evaluateHTTP(request, nil, evalPrecheck).Allow {
+		request.classifierProbe = skipClassifier
+		decision := e.evaluateHTTP(request, nil, evalPrecheck)
+		if decision.Allow && !(skipClassifier && decision.unmatched && e.unknown == api.UnknownClassify) {
 			return true
 		}
 	}
@@ -64,7 +70,8 @@ func (e *Engine) permitsIntercept(host string, port int) bool {
 			continue
 		}
 		for _, method := range methods {
-			if e.evaluateHTTP(Request{Host: host, Port: port, Path: path, Method: method}, nil, evalPrecheck).Allow {
+			decision := e.evaluateHTTP(Request{Host: host, Port: port, Path: path, Method: method, classifierProbe: skipClassifier}, nil, evalPrecheck)
+			if decision.Allow && !(skipClassifier && decision.unmatched && e.unknown == api.UnknownClassify) {
 				return true
 			}
 		}

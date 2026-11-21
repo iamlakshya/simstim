@@ -345,7 +345,7 @@ func (f *Flow) FirstSession() string {
 // InstallArgs start an agent's official installer in a session named
 // install-<agent>, so the user sees its output and can answer it.
 func InstallArgs(a agents.Agent) client.NewArgs {
-	return client.NewArgs{Name: "install-" + a.Kind, Cwd: "~", Argv: []string{"/bin/sh", "-c", a.Setup.Install}, Setup: api.SetupSkip}
+	return client.NewArgs{Wall: "none", Downgrade: true, Name: "install-" + a.Kind, Cwd: "~", Argv: []string{"/bin/sh", "-c", a.Setup.Install}, Setup: api.SetupSkip}
 }
 
 // LoginArgs start an agent's own login in a session named login-<agent>. An
@@ -355,7 +355,7 @@ func LoginArgs(a agents.Agent) (client.NewArgs, bool) {
 	if a.Setup == nil || a.Setup.Login == "" {
 		return client.NewArgs{}, false
 	}
-	args := client.NewArgs{Name: "login-" + a.Kind, Cwd: "~", Setup: api.SetupSkip}
+	args := client.NewArgs{Wall: "none", Downgrade: true, Name: "login-" + a.Kind, Cwd: "~", Setup: api.SetupSkip}
 	if a.Setup.Login == a.Binaries[0] {
 		args.Agent = a.Kind
 	} else {

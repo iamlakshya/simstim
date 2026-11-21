@@ -6,9 +6,13 @@ Some sandbox features need a change that only the host's owner can make. Review 
 simstim host prepare box --root-step print
 ```
 
-The command checks the host and lists the needed steps. Each step has a reason, the change and its undo. A step that affects other accounts is marked as machine wide. The output includes the script and its SHA-256.
+The command first probes the saved host and delivers the runtime files pinned by this client. It then lists the needed steps. Each step has a reason, the change and its undo. A step that affects other accounts is marked as machine wide. The output includes the script and its SHA-256.
 
 `print` writes a new review file with mode 0600. It does not overwrite an existing file or run the script. A failed write may leave a partial review file. Inspect and move that file before trying again.
+
+After the root phase, preparation boots a fixed test sandbox and waits for its cleanup. Only a successful boot and cleanup can save the prepared cache and wall floor. A stronger existing floor is kept. A failed boot, or a host with no runnable wall, leaves both unchanged.
+
+Use `--images auto`, `--images host` or `--images laptop` to choose where runtime and image bytes come from. The default follows `[images] fetch`. Each phase uses its own connection to the same saved host. If that host is removed or replaced, start preparation again.
 
 ## Choose what happens
 

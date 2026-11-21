@@ -37,23 +37,27 @@ func prepareWallStart(cmd *cobra.Command, c *client.Conn, h client.Host, a clien
 	if err = request.BindNewWall(cmd.Context(), level, expose); err != nil {
 		return a, err
 	}
-	if err = newStartStep(cmd, func(ctx context.Context) error { a, err = c.PrepareNewInputs(ctx, a); return err }); err != nil {
+	if err = newStartStep(cmd, func(ctx context.Context) error {
+		return grantQuestions(cmd, func(context.Context) error { a, err = c.PrepareNewInputs(ctx, a); return err })
+	}); err != nil {
 		return a, err
 	}
 	var vm *client.VMNeedPlanV1
 	if err = newStartStep(cmd, func(ctx context.Context) error {
-		if a.Wall == "microvm" {
-			vm, err = c.PrepareNewVM(ctx, a, intent)
-			if err != nil {
-				return err
+		return grantQuestions(cmd, func(context.Context) error {
+			if a.Wall == "microvm" {
+				vm, err = c.PrepareNewVM(ctx, a, intent)
+				if err != nil {
+					return err
+				}
 			}
-		}
-		if vm != nil {
-			a, err = c.PrepareNewSecrets(ctx, a, vm)
-		} else {
-			a, err = c.PrepareNewSecrets(ctx, a)
-		}
-		return err
+			if vm != nil {
+				a, err = c.PrepareNewSecrets(ctx, a, vm)
+			} else {
+				a, err = c.PrepareNewSecrets(ctx, a)
+			}
+			return err
+		})
 	}); err != nil {
 		return a, err
 	}
@@ -64,8 +68,8 @@ func prepareWallStart(cmd *cobra.Command, c *client.Conn, h client.Host, a clien
 	effective := h
 	effective.Secrets = nil
 	names := client.SecretNames(effective, append(append(append([]string(nil), layerSecrets...), secrets...), expose...))
-	err = grantQuestions(cmd, func(context.Context) error {
-		return newStartStep(cmd, func(ctx context.Context) error {
+	err = newStartStep(cmd, func(ctx context.Context) error {
+		return grantQuestions(cmd, func(context.Context) error {
 			if err := c.CheckNewGrants(ctx, names, a.SSHAgent); err != nil {
 				return err
 			}

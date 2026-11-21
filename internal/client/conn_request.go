@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/iamlakshya/simstim/internal/api"
 	"github.com/iamlakshya/simstim/internal/proto"
 )
 
@@ -44,6 +45,9 @@ func (c *Conn) startCall(ctx context.Context, op string, args any) (uint64, chan
 	if err := ctx.Err(); err != nil {
 		return 0, nil, err
 	}
+	if err := checkClientImagePolicyWireV1(op, args); err != nil {
+		return 0, nil, err
+	}
 	id := c.nextID.Add(1)
 	req := proto.Request{ID: id, Op: op}
 	if args != nil {
@@ -53,27 +57,116 @@ func (c *Conn) startCall(ctx context.Context, op string, args any) (uint64, chan
 		}
 		req.Args = b
 	}
+	if err := prepareHostAttemptNewRequestV1(ctx, c, &req); err != nil {
+		return 0, nil, err
+	}
+	imageFetch := originalImageFetchV1(ctx)
+	upgrade, _ := ctx.Value(runtimeUpgradePublicationKeyV1{}).(*runtimeUpgradeIntentV1)
 	witness, _ := ctx.Value(newPublicationKey{}).(*newPublicationWitness)
-	if witness != nil {
-		if err := witness.beforeRequest(ctx, c, req, args); err != nil {
-			return 0, nil, err
-		}
-	}
-	if push, _ := ctx.Value(pushPublicationKey{}).(*pushPublicationWitness); push != nil {
-		if err := push.beforeRequest(ctx, c, req, args); err != nil {
-			return 0, nil, err
-		}
-	}
 	fresh, _ := ctx.Value(freshChildPublicationKey{}).(*freshChildPublicationWitness)
-	if fresh != nil {
-		if err := fresh.beforeRequest(ctx, c, req, args); err != nil {
-			return 0, nil, err
+	var releaseUpgrade func()
+	defer func() {
+		if releaseUpgrade != nil {
+			releaseUpgrade()
 		}
-	}
-	if imageSave, _ := ctx.Value(imageSavePublicationKey{}).(*imageSaveOperation); imageSave != nil {
-		if err := imageSave.beforeRequest(ctx, c, req, args); err != nil {
-			return 0, nil, err
+	}()
+	beforeFrame := func() error {
+		c.mu.Lock()
+		ended := c.err
+		c.mu.Unlock()
+		if ended != nil {
+			return ended
 		}
+		if err := revalidateOriginalStartSettingsV1(ctx, op); err != nil {
+			return err
+		}
+		if err := beforeRewindRequestV1(ctx, c, req, args); err != nil {
+			return err
+		}
+		if req.Op == "image.pull" || req.Op == "image.install" || req.Op == "image.status" {
+			if err := imageFetch.beforeRequest(ctx, c, req, args); err != nil {
+				return err
+			}
+		}
+		if req.Op == "sandbox.prepare" {
+			if err := sandboxPrepareBeforeRequestV1(ctx, c, req, args); err != nil {
+				return err
+			}
+		}
+		if err := checkAutoNewWireV1(ctx, c, req, args); err != nil {
+			return err
+		}
+		if req.Op == "new" {
+			if err := checkHostSelectionPublicationV1(ctx, c); err != nil {
+				return err
+			}
+		}
+		if err := beforeTrustedJudgeRequestV1(ctx, c, req, args); err != nil {
+			return err
+		}
+		if err := beforeNamedSSHKeysRequestV1(ctx, c, req, args); err != nil {
+			return err
+		}
+		if err := purgeBeforeRequest(ctx, c, req, args); err != nil {
+			return err
+		}
+		if err := networkHoldBeforeRequestV1(ctx, c, req, args); err != nil {
+			return err
+		}
+		if err := policyReplaceBeforeRequest(ctx, c, req, args); err != nil {
+			return err
+		}
+		if upgrade != nil {
+			owned, release, err := upgrade.beforeRequest(ctx, c, req, args)
+			if err != nil {
+				return err
+			}
+			releaseUpgrade = release
+			ctx = owned
+		}
+		if err := beforeHostAttemptNewRequestV1(ctx, c, req, args); err != nil {
+			return err
+		}
+		if witness != nil {
+			if err := witness.beforeRequest(ctx, c, req, args); err != nil {
+				return err
+			}
+		}
+		if push, _ := ctx.Value(pushPublicationKey{}).(*pushPublicationWitness); push != nil {
+			if err := push.beforeRequest(ctx, c, req, args); err != nil {
+				return err
+			}
+		}
+		if fresh != nil {
+			if err := fresh.beforeRequest(ctx, c, req, args); err != nil {
+				return err
+			}
+		}
+		if imageSave, _ := ctx.Value(imageSavePublicationKey{}).(*imageSaveOperation); imageSave != nil {
+			if err := imageSave.beforeRequest(ctx, c, req, args); err != nil {
+				return err
+			}
+		}
+		if imageResume, _ := ctx.Value(resumeImagePublicationKeyV1{}).(*resumeImagePolicyV1); imageResume != nil {
+			if err := imageResume.beforeRequest(ctx, c, req, args); err != nil {
+				return err
+			}
+		}
+		if plan, _ := ctx.Value(newPlanPublicationKey{}).(*newSecretPlan); plan != nil {
+			if err := plan.markPublicationAttempt(); err != nil {
+				return err
+			}
+		}
+		if fresh != nil {
+			if err := fresh.plan.markPublicationAttempt(); err != nil {
+				return err
+			}
+		}
+		if err := markRewindPublicationV1(ctx, c, req); err != nil {
+			return err
+		}
+
+		return nil
 	}
 	ch := make(chan proto.Response, 1)
 	c.mu.Lock()
@@ -89,30 +182,43 @@ func (c *Conn) startCall(ctx context.Context, op string, args any) (uint64, chan
 	c.pending[id] = ch
 	c.mu.Unlock()
 	requestStage("queued")
-	if plan, _ := ctx.Value(newPlanPublicationKey{}).(*newSecretPlan); plan != nil {
-		if err := plan.markPublicationAttempt(); err != nil {
-			c.drop(id)
-			return 0, nil, err
-		}
-	}
-	if fresh != nil {
-		if err := fresh.plan.markPublicationAttempt(); err != nil {
-			c.drop(id)
-			return 0, nil, err
-		}
-	}
-	if err := c.w.WriteJSONCtx(ctx, proto.TRequest, req); err != nil {
+	var gateErr error
+	if err := c.w.WriteJSONGuardedCtx(ctx, proto.TRequest, req, func() error { gateErr = beforeFrame(); return gateErr }); err != nil {
 		c.drop(id)
 		if ctx.Err() != nil {
 			return 0, nil, ctx.Err()
 		}
+		if gateErr != nil {
+			return 0, nil, gateErr
+		}
 		return 0, nil, ErrClosed
 	}
+	if imageFetch != nil && (op == "image.pull" || op == "image.install" || op == "image.status") {
+		imageFetch.wroteRequest(c, id)
+	}
+	if named := originalNamedSSHPolicyV1(ctx); named != nil && op == "ssh-key.policy" {
+		named.wroteRequest(c, id)
+	}
+	if op == "sandbox.prepare" {
+		sandboxPrepareWroteRequestV1(ctx, c, id)
+	}
+	wroteHostAttemptNewRequestV1(ctx, c, id)
 	if witness != nil {
 		witness.wroteRequest(c, id)
 	}
 	if fresh != nil {
 		fresh.wroteRequest(c, id)
+	}
+	if rewind := originalRewindV1(ctx); rewind != nil && op == api.OpRewindCommitV1 {
+		rewind.mu.Lock()
+		witness := rewind.publication
+		rewind.mu.Unlock()
+		if witness != nil {
+			witness.wroteRequestV3(c, id)
+		}
+	}
+	if upgrade != nil {
+		upgrade.wroteRequest(c, id)
 	}
 	return id, ch, nil
 }
@@ -135,16 +241,33 @@ func (c *Conn) awaitCallResult(ctx context.Context, op string, id uint64, ch cha
 		if resp.ID != id {
 			return &UserError{Msg: "the host answered a different request", Hint: "Reconnect to the host and retry the operation.", Code: "protocol", Kind: KindRefused}
 		}
+		var imageFetchErr error
+		if imageFetch := originalImageFetchV1(ctx); imageFetch != nil && (op == "image.pull" || op == "image.install" || op == "image.status") {
+			imageFetchErr = imageFetch.afterResponse(ctx, c, op, id, resp, out)
+		}
+		if op == "sandbox.prepare" {
+			imageFetchErr = errors.Join(imageFetchErr, sandboxPrepareAfterResponseV1(ctx, c, op, id, resp))
+		}
+		var namedErr error
+		if named := originalNamedSSHPolicyV1(ctx); named != nil && op == "ssh-key.policy" {
+			namedErr = named.afterResponse(ctx, c, op, id, resp)
+		}
 		if (resp.OK || partial) && out != nil && len(resp.Result) > 0 {
 			if err := json.Unmarshal(resp.Result, out); err != nil {
-				return fmt.Errorf("read the answer to %s: %w", op, err)
+				return errors.Join(fmt.Errorf("read the answer to %s: %w", op, err), namedErr, imageFetchErr)
 			}
 		}
 		if !resp.OK {
-			if resp.Error != nil {
-				return hostErrorOn(c.Host.Name, resp.Error)
+			if op == "new" && resp.Error != nil && (resp.Error.Code == "no_room" || hasNewNoRoomControlV1(resp.Error.Data)) {
+				return receiveHostAttemptNewRefusalV1(ctx, c, resp)
 			}
-			return errors.New("the host refused the request")
+			if resp.Error != nil {
+				return errors.Join(hostErrorOn(c.Host.Name, resp.Error), namedErr, imageFetchErr)
+			}
+			return errors.Join(errors.New("the host refused the request"), namedErr, imageFetchErr)
+		}
+		if namedErr != nil || imageFetchErr != nil {
+			return errors.Join(namedErr, imageFetchErr)
 		}
 		if witness, _ := ctx.Value(newPublicationKey{}).(*newPublicationWitness); witness != nil {
 			if err := witness.afterResponse(ctx, c, resp, out); err != nil {
@@ -156,8 +279,36 @@ func (c *Conn) awaitCallResult(ctx context.Context, op string, id uint64, ch cha
 				return err
 			}
 		}
+		if rewind := originalRewindV1(ctx); rewind != nil && op == api.OpRewindCommitV1 {
+			rewind.mu.Lock()
+			witness := rewind.publication
+			rewind.mu.Unlock()
+			if witness == nil {
+				return sandboxReceiptError()
+			}
+			if err := witness.afterResponseV3(ctx, c, resp, out); err != nil {
+				return err
+			}
+		}
+		if upgrade, _ := ctx.Value(runtimeUpgradePublicationKeyV1{}).(*runtimeUpgradeIntentV1); upgrade != nil {
+			if err := upgrade.afterResponse(ctx, c, resp, out); err != nil {
+				return err
+			}
+		}
 		return nil
 	}
 }
 
 func (c *Conn) drop(id uint64) { c.mu.Lock(); delete(c.pending, id); c.mu.Unlock() }
+
+func originalImageFetchV1(ctx context.Context) *imageFetchIntentV1 {
+	if selected, _ := ctx.Value(imageFetchPublicationKeyV1{}).(*imageFetchIntentV1); selected != nil {
+		return selected
+	}
+	if request := grantRequestOf(ctx); request != nil {
+		request.mu.Lock()
+		defer request.mu.Unlock()
+		return request.imageFetch
+	}
+	return nil
+}

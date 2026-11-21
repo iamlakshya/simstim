@@ -2,6 +2,7 @@ package host
 
 import (
 	"path"
+	"slices"
 
 	"github.com/iamlakshya/simstim/internal/api"
 	"github.com/iamlakshya/simstim/internal/brand"
@@ -71,7 +72,7 @@ func addLaptopRepositories(m *Manifest, summary *api.InputSummary, hostPrimary b
 			return UserError("seed_plan", "the selected repositories have the same basename", "Choose source repositories with distinct basenames.")
 		}
 		seen[repository.Name] = true
-		seed := Seed{Laptop: true, Repo: repository.Name, SourceBranch: repository.SourceBranch, Commit: repository.Commit, Origin: repository.Origin, BundleSize: repository.Size,
+		seed := Seed{Laptop: true, Repo: repository.Name, SourceBranch: repository.SourceBranch, Commit: repository.Commit, Origin: repository.Origin, Ecosystems: slices.Clone(repository.Ecosystems), BundleSize: repository.Size,
 			Branch: brand.Name + "/" + m.ID + "/" + Slug(repository.Name)}
 		repositories = append(repositories, seed)
 		// Only the original authenticated client facts create seed heads.

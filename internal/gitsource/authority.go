@@ -8,6 +8,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/iamlakshya/simstim/internal/brand"
 	"github.com/iamlakshya/simstim/internal/files"
 	"github.com/iamlakshya/simstim/internal/paths"
 	"github.com/iamlakshya/simstim/internal/proto"
@@ -39,7 +40,7 @@ func (a sourceAuthority) clone() sourceAuthority {
 // Missing directories remain path refusals; their absence grants nothing.
 func PrivateRestrictions() []Restriction {
 	var out []Restriction
-	for _, name := range []string{paths.StateDir(), filepath.Dir(paths.SandboxRoot("unused"))} {
+	for _, name := range []string{paths.StateDir(), filepath.Dir(paths.SandboxRoot("unused")), filepath.Join("/var/lib", brand.Name, "vms")} {
 		identity := ""
 		if root, err := os.OpenRoot(name); err == nil {
 			if file, err := root.Open("."); err == nil {

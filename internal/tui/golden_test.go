@@ -246,6 +246,36 @@ func TestGolden(t *testing.T) {
 			}
 			return hs.m
 		}},
+		{"wizard_sandboxes", func(t *testing.T, w, h int) *Model {
+			be := newFakeBackend()
+			be.probe = client.Platform{OS: "linux", Arch: "arm64"}
+			be.capProbe = fakeKVMBlockedProbe()
+			be.rootPreview = fakeRootPreview(client.TierOwn)
+			hs := newHarness(t, be, w, h)
+			hs.key("a")
+			hs.typeText("pi@raspberry")
+			hs.key("enter", "enter", "1", "enter")
+			wiz, ok := hs.m.modal.(*wizard)
+			if !ok || wiz.step != wzSandboxes || !wiz.saved {
+				t.Fatalf("did not pause at sandboxes: %T %+v", hs.m.modal, wiz)
+			}
+			return hs.m
+		}},
+		{"wizard_root", func(t *testing.T, w, h int) *Model {
+			be := newFakeBackend()
+			be.probe = client.Platform{OS: "linux", Arch: "arm64"}
+			be.capProbe = fakeKVMBlockedProbe()
+			be.rootPreview = fakeRootPreview(client.TierOwn)
+			hs := newHarness(t, be, w, h)
+			hs.key("a")
+			hs.typeText("pi@raspberry")
+			hs.key("enter", "enter", "1", "enter", "enter")
+			wiz, ok := hs.m.modal.(*wizard)
+			if !ok || wiz.step != wzRoot || !wiz.saved {
+				t.Fatalf("did not reach root step: %T %+v", hs.m.modal, wiz)
+			}
+			return hs.m
+		}},
 		{"wizard_ready", func(t *testing.T, w, h int) *Model {
 			be := newFakeBackend()
 			be.probe = client.Platform{OS: "linux", Arch: "arm64"}

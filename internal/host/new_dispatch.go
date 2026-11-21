@@ -46,14 +46,18 @@ func NewContext(ctx context.Context, args NewArgs) (*SessionInfo, error) {
 	if args.Wall == "auto" {
 		return nil, UserError("wall_unavailable", "the requested wall has not been resolved by its original client", "Choose the admitted wall through the current client before starting the sandbox.")
 	}
+	if WallDriver == "legacy-none-test" && (args.Wall == "" || args.Wall == "none") {
+		return newUnwalledModeV1(ctx, args, true)
+	}
 	if args.Wall == "" && WallDriver != "" {
 		return newWalled(ctx, args, WallDriver, original)
 	}
 	switch args.Wall {
 	case "", "none":
-		if len(args.VMNeedV1) != 0 || args.Runtime != nil || len(args.Layers) != 0 {
-			return nil, UserError("not_walled", "an unwalled start cannot carry sandbox runtime or policy authority", "Choose an explicit admitted sandbox wall for these inputs.")
+		if err := checkNonePolicyCarriersV1(args); err != nil {
+			return nil, err
 		}
+		args.Layers = nil // selection carriers were checked; no policy applies
 		return newUnwalled(ctx, args)
 	case "process":
 		return newWalled(ctx, args, "process", original)

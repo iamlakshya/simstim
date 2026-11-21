@@ -95,7 +95,12 @@ func launchHolder(m *Manifest) (*os.Process, error) {
 				"-p", fmt.Sprintf("MemoryMax=%d", m.Limits.MemoryMax),
 				"-p", "MemorySwapMax=0")
 		}
-		args = append(args, "--setenv="+unitEnv+"="+unit, exe, sub, m.ID)
+		// Close the managed holder's host-root inputs over this original
+		// creating bridge, as the native supervised launch already does.
+		for _, value := range managedOrdinaryEnvironmentV1(unit) {
+			args = append(args, "--setenv="+value)
+		}
+		args = append(args, "-p", "UnsetEnvironment="+holderLockFDEnv, exe, sub, m.ID)
 		from = logSize(m.ID)
 		command := exec.CommandContext(context.Background(), "systemd-run", args...)
 		var output bytes.Buffer

@@ -36,6 +36,9 @@ func CheckOpenContext(ctx context.Context, it Item, f *os.File) error {
 	if err := checkToolsTree(it, contextualReadSeeker{ctx: ctx, file: f}); err != nil {
 		return err
 	}
+	if err := checkFSVerityContent(ctx, it, f); err != nil {
+		return err
+	}
 	return ctx.Err()
 }
 

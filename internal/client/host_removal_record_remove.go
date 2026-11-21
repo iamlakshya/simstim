@@ -39,7 +39,7 @@ func removeHostRemovalRecordContext(ctx context.Context, original Host, validate
 }
 
 // removeExact is the original shared FDv2 checked unlink primitive. Its
-// nonterminal callers have only fixed removal.json purposes and actual scopes.
+// nonterminal callers have fixed removal.json or lockdown.json purposes and actual scopes.
 func (tx *stateFileTxn) removeExact() error {
 	if tx.source == nil {
 		return nil

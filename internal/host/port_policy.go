@@ -16,7 +16,7 @@ func PortPolicyGrant(policy *api.Policy, port int, at time.Time) (bool, time.Tim
 		if rule.Door != api.DoorPort {
 			continue
 		}
-		if _, err := api.ParsePortTarget(rule.Target); err != nil || rule.Methods != nil || len(rule.Tools)!=0 || rule.Mode != "" || rule.Once {
+		if _, err := api.ParsePortTarget(rule.Target); err != nil || rule.Methods != nil || len(rule.Tools) != 0 || rule.Mode != "" || rule.Once {
 			return false, time.Time{}, UserError("bad_port", "the saved port grant is not an exact supported port rule", "Use one decimal port, without methods, mode or once, before forwarding it.")
 		}
 	}

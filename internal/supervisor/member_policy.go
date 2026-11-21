@@ -117,14 +117,19 @@ func (s *Supervisor) sessionFeatures() []string {
 	root.mu.Lock()
 	ready := root.memberReady
 	packages := root.bootPackageSettingsInstalled && root.bootPackageSettings != nil && root.rec.phase == host.LifeRunning && root.lifetime != nil && root.lifetime.Err() == nil
-	events:=root.al!=nil
-	bound := ready && root.m != nil && root.m.SecretState != nil && root.m.SecretState.Supported()
+	events := root.al != nil
+	bound := ready && root.m != nil && !host.IsNoneSupervisor(root.m) && root.m.SecretState != nil && root.m.SecretState.Supported()
 	root.mu.Unlock()
 	features := slices.Clone(Features)
+	if root.unwalledV1() {
+		features = append(features, api.FeatureDebug)
+	}
 	if !packages {
 		features = slices.DeleteFunc(features, func(feature string) bool { return feature == proto.FeaturePackageManagersV1 })
 	}
-	if !events{features=slices.DeleteFunc(features,func(feature string)bool{return feature==api.FeatureEvents})}
+	if !events {
+		features = slices.DeleteFunc(features, func(feature string) bool { return feature == api.FeatureEvents })
+	}
 	if !ready {
 		features = slices.DeleteFunc(features, func(feature string) bool { return feature == api.FeatureSpawn || feature == api.FeatureSandboxSnapshot })
 	}

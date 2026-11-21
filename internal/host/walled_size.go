@@ -32,7 +32,7 @@ func newWalledMemoryV1(a NewArgs, driver string, values api.SandboxValues, agent
 	}
 	asked := max(a.MemoryMax, 0)
 	cap := asked
-	if driver == "chv" || driver == "firecracker" {
+	if driver == "chv" || driver == "firecracker" || driver == "nitro" {
 		need, err := vmneed.DecodeV1(a.VMNeedV1, runtime.GOARCH)
 		if err != nil {
 			return Limits{}, vmNeedError("the VM size has no original complete Need")

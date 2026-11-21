@@ -26,7 +26,7 @@ func (w *wizard) finishOp() {
 
 func (w *wizard) stop() (inStage bool) {
 	w.seq++
-	w.run, w.checking, w.starting = false, false, false
+	w.run, w.checking, w.starting, w.waitingRoot = false, false, false, false
 	if w.tok != nil {
 		w.tok.mu.Lock()
 		w.tok.stopped = true

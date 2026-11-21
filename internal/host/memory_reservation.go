@@ -8,6 +8,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/iamlakshya/simstim/internal/api"
 	"github.com/iamlakshya/simstim/internal/cachefs"
 	"github.com/iamlakshya/simstim/internal/paths"
 	"github.com/iamlakshya/simstim/internal/proto"
@@ -21,14 +22,16 @@ type memoryUnitFactsV1 struct {
 }
 
 type memoryRoomFactsV1 struct {
-	Known     bool      `json:"accounting_known"`
-	BootID    string    `json:"boot_id"`
-	At        time.Time `json:"at"`
-	Budget    int64     `json:"budget"`
-	Reserved  int64     `json:"reserved"`
-	Room      int64     `json:"room"`
-	Sandboxes int       `json:"sandboxes"`
-	Needed    int64     `json:"needed"`
+	Observation    *api.MemoryObservationV1 `json:"-"`
+	observationIDs map[string]struct{}      `json:"-"`
+	Known          bool                     `json:"accounting_known"`
+	BootID         string                   `json:"boot_id"`
+	At             time.Time                `json:"at"`
+	Budget         int64                    `json:"budget"`
+	Reserved       int64                    `json:"reserved"`
+	Room           int64                    `json:"room"`
+	Sandboxes      int                      `json:"sandboxes"`
+	Needed         int64                    `json:"needed"`
 }
 
 func noMemoryRoomV1(facts memoryRoomFactsV1) error {
@@ -102,7 +105,7 @@ func memoryRoomLockedV1(ctx context.Context, operation *SessionOperation, needed
 		return facts, err
 	}
 	if needed > facts.Room {
-		return facts, noMemoryRoomV1(facts)
+		return facts, newNativeRoomRefusalFromGateV1(operation, facts)
 	}
 	return facts, nil
 }
@@ -112,6 +115,7 @@ func memoryRoomLockedV1(ctx context.Context, operation *SessionOperation, needed
 // needed=0; they cannot create an operation, reservation or exclusion grant.
 func observeMemoryRoomLockedV1(ctx context.Context, excluded string, needed int64) (facts memoryRoomFactsV1, failure error) {
 	facts = memoryRoomFactsV1{BootID: BootID(), At: time.Now().UTC(), Budget: DefaultMemoryMax(), Needed: needed}
+	beginMemoryObservationV1(&facts)
 	if facts.BootID == "" || facts.Budget <= 0 {
 		return facts, UserError("no_room", "the current native memory budget or boot identity is unknown", "Inspect the host memory controller before using its room.")
 	}
@@ -128,6 +132,7 @@ func observeMemoryRoomLockedV1(ctx context.Context, excluded string, needed int6
 	root, err := cachefs.OpenPrivateRoot(paths.SessionsDir(), false)
 	if errors.Is(err, os.ErrNotExist) && len(unitsLeft) == 0 {
 		facts.Known, facts.Room = true, facts.Budget
+		finishMemoryObservationV1(&facts)
 		return facts, nil
 	}
 	if err != nil {
@@ -149,14 +154,10 @@ func observeMemoryRoomLockedV1(ctx context.Context, excluded string, needed int6
 		}
 		id := entry.Name()
 		delete(unitsLeft, id)
+		delete(unitsLeft, auxiliaryMemoryKeyV1(id))
 		info, err := root.Lstat(id)
 		if err != nil || !validID(id) || !info.IsDir() || !wallCacheOwned(info) || info.Mode().Perm() != 0o700 {
 			return facts, errors.Join(UserError("no_room", "the protected reservation directory is uncertain", "Retain the host state and inspect its session records."), err)
-		}
-		if id == excluded {
-			// Caller proves either first-publication absence or native holder
-			// vacancy before replacing this same original reservation.
-			continue
 		}
 		manifest, err := readRuntimeReference(root, id)
 		if errors.Is(err, os.ErrNotExist) {
@@ -164,8 +165,9 @@ func observeMemoryRoomLockedV1(ctx context.Context, excluded string, needed int6
 			// launch before its atomic first manifest. An existing canonical
 			// unit without that record is unknown, never zero.
 			unit, nativeErr := readMemoryUnitV1(ctx, id, false)
-			if nativeErr != nil || unit.exists {
-				return facts, errors.Join(UserError("no_room", "a native unit has no readable protected reservation", "Inspect the host's current session accounting."), nativeErr)
+			auxiliary, auxErr := readAuxMemoryUnitV1(ctx, id)
+			if nativeErr != nil || auxErr != nil || unit.exists || auxiliary.exists {
+				return facts, errors.Join(UserError("no_room", "a native unit has no readable protected reservation", "Inspect the host's current session accounting."), nativeErr, auxErr)
 			}
 			continue
 		}
@@ -175,22 +177,46 @@ func observeMemoryRoomLockedV1(ctx context.Context, excluded string, needed int6
 		if manifest.ID != id {
 			return facts, UserError("no_room", "a protected reservation names another primary", "Inspect this host's protected session records before starting another sandbox.")
 		}
-		if manifest.SandboxOf != "" || manifest.Run.BootID != facts.BootID {
-			continue
-		}
-		unit, err := readMemoryUnitV1(ctx, id, isWalledMemoryV1(&manifest))
+		auxiliary, err := readAuxMemoryUnitV1(ctx, id)
 		if err != nil {
 			return facts, err
 		}
-		charge, err := reservationChargeV1(&manifest, facts.BootID, facts.At, unit)
+		var unit memoryUnitFactsV1
+		if manifest.ResumePreparation != nil || manifest.Auxiliary != nil || auxiliary.exists || manifest.SandboxOf == "" && manifest.Run.BootID == facts.BootID && id != excluded {
+			unit, err = readMemoryUnitV1(ctx, id, isWalledMemoryV1(&manifest))
+			if err != nil {
+				return facts, err
+			}
+		}
+		charge, activePrepare, err := resumePreparationChargeV1(&manifest, facts.BootID, unit, auxiliary)
 		if err != nil {
 			return facts, err
+		}
+		counted := activePrepare
+		if !activePrepare {
+			var activeAux bool
+			charge, activeAux, err = auxiliaryReservationChargeV1(&manifest, facts.BootID, facts.At, unit, auxiliary)
+			if err != nil {
+				return facts, err
+			}
+			counted = activeAux
+			if !activeAux {
+				if id == excluded || manifest.SandboxOf != "" || manifest.Run.BootID != facts.BootID {
+					continue
+				}
+				charge, err = reservationChargeV1(&manifest, facts.BootID, facts.At, unit)
+				if err != nil {
+					return facts, err
+				}
+				counted = manifest.Wall != nil && (unit.exists || manifest.Status.State == StateStarting && (manifest.Status.Since.IsZero() || facts.At.Sub(manifest.Status.Since) <= 2*time.Minute))
+			}
 		}
 		if charge < 0 || facts.Reserved > math.MaxInt64-charge {
 			return facts, UserError("no_room", "the native reservation total cannot be represented", "Inspect the host's current session memory records.")
 		}
 		facts.Reserved += charge
-		if manifest.Wall != nil && (unit.exists || manifest.Status.State == StateStarting && (manifest.Status.Since.IsZero() || facts.At.Sub(manifest.Status.Since) <= 2*time.Minute)) {
+		observeMemoryChargeV1(&facts, id, charge)
+		if counted {
 			facts.Sandboxes++
 		}
 	}
@@ -199,10 +225,14 @@ func observeMemoryRoomLockedV1(ctx context.Context, excluded string, needed int6
 	}
 	facts.Known = true
 	facts.Room = facts.Budget - facts.Reserved
+	finishMemoryObservationV1(&facts)
 	return facts, nil
 }
 
 func admitNewMemoryLockedV1(ctx context.Context, operation *SessionOperation, m *Manifest) error {
+	if err := requireNoAuxiliaryMemoryLockedV1(ctx, operation, m); err != nil {
+		return err
+	}
 	if !isWalledMemoryV1(m) {
 		return nil
 	}
@@ -223,6 +253,9 @@ func admitNewMemoryLockedV1(ctx context.Context, operation *SessionOperation, m 
 		return sessionLeaseError("the original new reservation already has a native unit")
 	}
 	if _, err := memoryRoomLockedV1(ctx, operation, m.Limits.Declared); err != nil {
+		return err
+	}
+	if err := checkNitroAdmissionLockedV1(ctx, operation, m); err != nil {
 		return err
 	}
 	m.Run.BootID = BootID()

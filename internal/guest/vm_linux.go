@@ -93,7 +93,7 @@ func runMicroVM() error {
 		_ = fs.close()
 		return err
 	}
-	fs.copyNativeOwner=vm.connection // Only the verified real native initializer can issue copy mount resources.
+	fs.copyNativeOwner = vm.connection // Only the verified real native initializer can issue copy mount resources.
 	g.vm = vm
 	g.reaper = becomeSubreaper(log)
 	if !g.reaper {
@@ -125,8 +125,12 @@ func (v *vmRuntime) prepare(a proto.CtlVMPrepareArgs) (proto.CtlVMPrepareResult,
 		return proto.CtlVMPrepareResult{}, err
 	}
 	plan, err := validateVMPrepare(a)
-	if err != nil {return proto.CtlVMPrepareResult{},err}
-	if plan.Args.Correlation==nil {return proto.CtlVMPrepareResult{},vmError("the actual VM prepare has no original host correlation")}
+	if err != nil {
+		return proto.CtlVMPrepareResult{}, err
+	}
+	if plan.Args.Correlation == nil {
+		return proto.CtlVMPrepareResult{}, vmError("the actual VM prepare has no original host correlation")
+	}
 	v.mu.Lock()
 	if v.applied || v.preparing || v.failed {
 		v.mu.Unlock()
@@ -186,8 +190,8 @@ func (v *vmRuntime) prepare(a proto.CtlVMPrepareArgs) (proto.CtlVMPrepareResult,
 	v.applied = true
 	v.mu.Unlock()
 	complete = true
-	correlation:=*plan.Args.Correlation
-	return proto.CtlVMPrepareResult{GuestABI:proto.GuestOwnedPTYV2,Correlation:&correlation},nil
+	correlation := *plan.Args.Correlation
+	return proto.CtlVMPrepareResult{GuestABI: proto.GuestOwnedPTYV2, Correlation: &correlation}, nil
 }
 
 func (v *vmRuntime) prepared() bool { v.mu.Lock(); defer v.mu.Unlock(); return v.applied }
@@ -298,6 +302,11 @@ func (v *vmRuntime) capture(clean bool) (result error) {
 }
 
 func (v *vmRuntime) beginStop() {
+	if v.files != nil {
+		if err := v.files.closeSessionFreezeV1(); err != nil {
+			v.setError(err)
+		}
+	}
 	v.cancel()
 	v.mu.Lock()
 	preparation := v.prepareDone

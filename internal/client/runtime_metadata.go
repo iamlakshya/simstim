@@ -17,7 +17,7 @@ func runtimeRequestFor(arch string) (runtimecache.RuntimeRequest, error) {
 	if err != nil {
 		return runtimecache.RuntimeRequest{}, err
 	}
-	request := runtimecache.RuntimeRequest{Manifest: supply.Manifest{Release: m.Release, Runtime: m.Runtime, Advisories: m.Advisories}}
+	request := runtimecache.RuntimeRequest{Manifest: supply.Manifest{Release: m.Release, Runtime: m.Runtime, Advisories: supply.MergeAdvisories(m.Advisories, supply.KnownBad())}}
 	defaults := []supply.Item{}
 	hasRuntime := false
 	for _, item := range m.Items {

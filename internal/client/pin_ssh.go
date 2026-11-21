@@ -40,13 +40,19 @@ func sshG(ctx context.Context, args []string, target string) (map[string][]strin
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "ssh", slices.Concat(args, []string{"-G", "--", target})...)
 	cmd.WaitDelay = sshWaitDelay
-	var errb bytes.Buffer
+	var out, errb joinedFactsBufferV1
+	out.limit = 1 << 20
+	errb.limit = 32 << 10
+	cmd.Stdout = &out
 	cmd.Stderr = &errb
-	out, err := cmd.Output()
+	err := cmd.Run()
+	if out.exceeded || errb.exceeded {
+		return nil, "", &UserError{Msg: "the native SSH configuration output exceeds its bound", Hint: "Reduce the SSH configuration output and retry.", Code: "ssh_failed"}
+	}
 	if err != nil {
 		return nil, errb.String(), fmt.Errorf("ssh -G %s: %w", target, err)
 	}
-	vals, err := parseConfigValues(out)
+	vals, err := parseConfigValues(out.Bytes())
 	return vals, errb.String(), err
 }
 
@@ -201,6 +207,9 @@ var (
 // reaches no terminal: ssh logs only errors, and the client keeps them for
 // its own message, cleaned.
 func fetchHostKey(ctx context.Context, h Host, ask bool, algs string) ([]hostKey, error) {
+	if err := checkJoinedProjectionStepV1(ctx, h); err != nil {
+		return nil, err
+	}
 	cfg, err := writeWrapperContext(ctx, h)
 	if err != nil {
 		return nil, err
@@ -232,7 +241,13 @@ func fetchHostKey(ctx context.Context, h Host, ask bool, algs string) ([]hostKey
 	cmd.WaitDelay = sshWaitDelay
 	var errb bytes.Buffer
 	cmd.Stdout, cmd.Stderr = io.Discard, &errb
+	if err := checkJoinedProjectionStepV1(ctx, h); err != nil {
+		return nil, err
+	}
 	runErr := cmd.Run()
+	if err := checkJoinedProjectionStepV1(context.WithoutCancel(ctx), h); err != nil {
+		return nil, err
+	}
 	b, _ := os.ReadFile(file)
 	keys := readKeys(b)
 	switch {

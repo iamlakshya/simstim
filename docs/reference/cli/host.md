@@ -35,8 +35,11 @@ simstim host ls
 | [`host create`](host_create.md) | Make a host with lima, docker or e2b, and connect it |
 | [`host default`](host_default.md) | Show or choose the default host for new sessions |
 | [`host doctor`](host_doctor.md) | Check a host's setup, and with `--fix` fix what it can |
+| [`host invite`](host_invite.md) | Make a public invite for a machine to prepare itself |
+| [`host join`](host_join.md) | Prepare this machine from a laptop invite on standard input |
+| [`host leave`](host_leave.md) | Undo this machine's original root-owned join ledger |
 | [`host ls`](host_ls.md) | List hosts |
-| [`host prepare`](host_prepare.md) | Probe a host and show its optional root steps |
+| [`host prepare`](host_prepare.md) | Probe a host, prepare its runtime and test its sandbox wall |
 | [`host rekey`](host_rekey.md) | Replace a host's pinned host key, after you confirm |
 | [`host restore`](host_restore.md) | Start again the sessions that a host restart stopped |
 | [`host rm`](host_rm.md) | Forget a host, or delete a created machine |

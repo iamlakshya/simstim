@@ -69,7 +69,7 @@ func startReservedSessionWithOperation(m *Manifest, secrets map[string]api.Secre
 		m.Run.StartEnvelope = true
 	}
 	if err := saveReservedManifest(operation, m); err != nil {
-		return nil, err
+		return nil, sealNewNoRoomBeforeDispatchV1(operation, reservation, err)
 	}
 	logSkippedCopies(id, m.Git)
 	if m.Files != nil {
@@ -157,7 +157,9 @@ func infoFrom(m *Manifest, alive bool) SessionInfo {
 		}
 	}
 	placedBy, placeReason := placementAuditInfoV1(m)
-	return SessionInfo{
+	info := SessionInfo{
+		ForkOf: m.ForkOf, Checkpoints: m.Checkpoints,
+		Runtime:  sessionRuntimeInfoV1(m),
 		PlacedBy: placedBy, PlaceReason: placeReason,
 		CopiesPending: m.CopiesPending, ID: m.ID, Name: m.Name, Task: m.Task, SandboxOf: m.SandboxOf, Agent: m.Agent.Kind, Cwd: m.Cwd, Workspace: workspaceMode(m),
 		State: st.State, Source: st.Source, Since: st.Since, Reason: st.Reason, ExitCode: st.ExitCode, Signal: st.Signal, OOM: st.OOM,
@@ -168,4 +170,9 @@ func infoFrom(m *Manifest, alive bool) SessionInfo {
 		DebugUntil: debugUntil(m, alive),
 		Wall:       wallInfoForManifestV1(m), Claimed: st.Claimed, Armed: m.Armed,
 	}
+	if info.Wall != nil {
+		info.Wall.OwnAccount = nativeAccountActiveV1(m, alive)
+	}
+	policySessionInfo(m, &info)
+	return info
 }

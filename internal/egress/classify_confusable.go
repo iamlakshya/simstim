@@ -55,7 +55,7 @@ func buildClassifierNameIndex(engine *Engine) (classifierNameIndex, error) {
 	seen := make(map[classifierName]bool)
 	add := func(rules []compiledRule) error {
 		for _, rule := range rules {
-			if !rule.allow || rule.isNumeric || compiledDoor(rule) != api.DoorNet {
+			if !rule.allow || rule.uploadBudget || rule.isNumeric || compiledDoor(rule) != api.DoorNet {
 				continue
 			}
 			name := classifierName{host: rule.host, wildcard: rule.wildcard}
@@ -109,7 +109,7 @@ func (e *Engine) classifyConfusableLocked(request Request, host string) Decision
 			probe.Host, probe.classifierProbe = candidate, true
 			decision := e.evaluateLocked(probe, nil, evalPrecheck)
 			if decision.Allow && !decision.unmatched {
-				return Decision{Rule: "classify:confusable"}
+				return Decision{Rule: "classify:confusable", classifiedRefusal: true}
 			}
 		}
 	}

@@ -15,12 +15,19 @@ import (
 )
 
 func (s *Supervisor) policyRequest(c *client, req proto.Request) bool {
+	if req.Op == "policy.lockdown" {
+		return s.policyLockdownRequestV1(c, req)
+	}
+	if req.Op == "policy.replace" {
+		return s.policyReplaceRequest(c, req)
+	}
 	switch req.Op {
 	case "policy.ls":
 		s.mu.Lock()
 		layers := api.CloneLayers(s.m.Layers)
+		next := slices.Clone(s.m.PolicyNext)
 		s.mu.Unlock()
-		policy, err := host.PolicySnapshot(layers)
+		policy, err := host.PolicySnapshotWithNext(layers, next)
 		if err != nil {
 			c.reply(req.ID, nil, toProtoErr(err))
 			return true
@@ -85,9 +92,14 @@ func (s *Supervisor) applyLivePolicyAdd(a api.PolicyAddArgs) (*api.Rule, *proto.
 	s.m.Policy, s.m.Layers = &pol, layers
 	snap := s.snapshot()
 	s.mu.Unlock()
-	if err:=s.save(&snap,false);err!=nil{s.failPolicySave(ep);return nil,toProtoErr(err)}
-	if err:=s.reconcilePorts();err!=nil{return nil,toProtoErr(err)}
-	s.audit.write("rule", map[string]any{"op": "add", "id": rule.ID, "allow": rule.Allow, "target": rule.Target, "once": rule.Once, "door": rule.Door, "mode": rule.Mode, "tools": rule.Tools, "methods": rule.Methods, "grant_id": rule.GrantID, "until": rule.Until})
+	if err := s.save(&snap, false); err != nil {
+		s.failPolicySave(ep)
+		return nil, toProtoErr(err)
+	}
+	if err := s.reconcilePorts(); err != nil {
+		return nil, toProtoErr(err)
+	}
+	s.audit.write("rule", map[string]any{"op": "add", "id": rule.ID, "allow": rule.Allow, "target": rule.Target, "once": rule.Once, "door": rule.Door, "mode": rule.Mode, "tools": rule.Tools, "methods": rule.Methods, "public_only": rule.PublicOnly, "grant_id": rule.GrantID, "until": rule.Until})
 	return &rule, nil
 }
 
@@ -112,8 +124,13 @@ func (s *Supervisor) applyLivePolicyRm(a api.PolicyRmArgs) (int, *proto.Error) {
 	s.m.Policy, s.m.Layers = &pol, layers
 	snap := s.snapshot()
 	s.mu.Unlock()
-	if err:=s.save(&snap,false);err!=nil{s.failPolicySave(ep);return 0,toProtoErr(err)}
-	if err:=s.reconcilePorts();err!=nil{return 0,toProtoErr(err)}
+	if err := s.save(&snap, false); err != nil {
+		s.failPolicySave(ep)
+		return 0, toProtoErr(err)
+	}
+	if err := s.reconcilePorts(); err != nil {
+		return 0, toProtoErr(err)
+	}
 	s.audit.write("rule", map[string]any{"op": "rm", "id": a.ID, "target": a.Target, "removed": removed})
 	return removed, nil
 }
@@ -124,7 +141,10 @@ func pushPolicyToEgress(ep *egressProc, ref string, pol api.Policy) *proto.Error
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	if err := ep.ctl.request(ctx, egress.CtlPolicyUpdate, egress.PolicyUpdateArgs{SessionRef: ref, Policy: pol}, nil); err != nil {
+	if err := requirePublicOnlyEgress(ctx, ep, pol); err != nil {
+		return toProtoErr(err)
+	}
+	if err := ep.ctl.request(ctx, egress.CtlPolicyUpdate, egress.PolicyUpdateArgs{SessionRef: ref, Policy: pol, ResetUnknownRefusals: true}, nil); err != nil {
 		return toProtoErr(err)
 	}
 	return nil
@@ -139,8 +159,11 @@ func toProtoErr(err error) *proto.Error {
 }
 
 func (s *Supervisor) sharedPolicyRequest(c *client, req proto.Request) bool {
+	if s.networkHoldRequest(c, req) {
+		return true
+	}
 	switch req.Op {
-	case "policy.ls", "policy.log", "policy.add", "policy.rm":
+	case "policy.ls", "policy.log", "policy.add", "policy.rm", "policy.replace", "policy.lockdown":
 		s.owner().policyRequest(c, req)
 		return true
 	}

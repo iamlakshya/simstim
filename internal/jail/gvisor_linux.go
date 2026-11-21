@@ -10,11 +10,19 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// CommandGvisorV1 builds the closed userspace-kernel bootstrap purpose. Its
-// caller is the host's original native boot owner. Every source is an actual
-// supplied descriptor, and the outer private PID 1 loses all capabilities
-// before it starts a trusted exec stage in a child user and mount namespace.
-func CommandGvisorV1(ctx context.Context, spec Spec) (*Cmd, error) {
+// CommandGvisorV1 refuses the retired generic runtime route. The actual host
+// factory uses its original signed fixed controller and one-use late guest.
+func CommandGvisorV1(context.Context, Spec) (*Cmd, error) {
+	return nil, gvisorHandoffFailureV2("gvisor requires the original fixed controller constructor and late guest loan")
+}
+
+// CommandGvisorCapturedV1 refuses the retired generic runtime route. Use the
+// original host factory's fixed controller constructor and native aggregate.
+func CommandGvisorCapturedV1(context.Context, Spec, *GvisorBootstrapV1) (*Cmd, error) {
+	return nil, gvisorHandoffFailureV2("the generic captured gvisor command cannot inherit private guest input")
+}
+
+func commandGvisorPublicCapturedV1(ctx context.Context, spec Spec, source *GvisorBootstrapV1) (*Cmd, error) {
 	if spec.Subuid || spec.Net != NetNone || spec.Seccomp != "" || len(spec.Binds) == 0 {
 		return nil, failure("the gvisor command has conflicting namespace policy", "Use the original host gvisor factory.")
 	}
@@ -24,7 +32,15 @@ func CommandGvisorV1(ctx context.Context, spec Spec) (*Cmd, error) {
 		}
 	}
 	spec.gvisorV1, spec.Seccomp = true, profileGvisorV1
-	return Command(ctx, spec)
+	command, err := Command(ctx, spec)
+	if err != nil {
+		return nil, err
+	}
+	if err := configureGvisorOuterCapturedV1(command, source); err != nil {
+		command.closePins()
+		return nil, err
+	}
+	return command, nil
 }
 
 // gvisorBootstrapCapsV1 is confined to the child user namespace. No capability
@@ -37,9 +53,10 @@ var gvisorBootstrapCapsV1 = []uintptr{
 
 func gvisorExecNamespacesV1() *syscall.SysProcAttr {
 	return &syscall.SysProcAttr{
-		Cloneflags:  unix.CLONE_NEWUSER | unix.CLONE_NEWNS | unix.CLONE_NEWIPC | unix.CLONE_NEWUTS | unix.CLONE_NEWCGROUP | unix.CLONE_NEWNET,
-		UidMappings: []syscall.SysProcIDMap{{ContainerID: 0, HostID: 0, Size: 1}},
-		GidMappings: []syscall.SysProcIDMap{{ContainerID: 0, HostID: 0, Size: 1}},
+		// This child maps itself before receiving a single private descriptor.
+		// Its fresh PID namespace hides A and all host tasks from procC. It
+		// retains A's empty network namespace only for the private rendezvous.
+		Cloneflags:  unix.CLONE_NEWUSER | unix.CLONE_NEWPID | unix.CLONE_NEWNS | unix.CLONE_NEWIPC | unix.CLONE_NEWUTS | unix.CLONE_NEWCGROUP,
 		AmbientCaps: append([]uintptr(nil), gvisorBootstrapCapsV1...),
 		Pdeathsig:   unix.SIGKILL,
 	}
@@ -48,7 +65,8 @@ func gvisorExecNamespacesV1() *syscall.SysProcAttr {
 func prepareGvisorBootstrapV1() error {
 	ruid, euid, suid := unix.Getresuid()
 	rgid, egid, sgid := unix.Getresgid()
-	if os.Getppid() != 1 || ruid != 0 || euid != 0 || suid != 0 || rgid != 0 || egid != 0 || sgid != 0 {
+	groups, groupsErr := unix.Getgroups()
+	if os.Getpid() != 1 || os.Getppid() != 0 || ruid != 0 || euid != 0 || suid != 0 || rgid != 0 || egid != 0 || sgid != 0 || groupsErr != nil || len(groups) != 0 {
 		return failure("the gvisor exec stage lost its original private PID 1 or single mapped identity", "Keep the original native namespace owner.")
 	}
 	for _, name := range []string{"uid_map", "gid_map"} {

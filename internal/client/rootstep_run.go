@@ -149,6 +149,14 @@ func VerifyRootSteps(before, after api.CapProbe, rs RootScript) error {
 		}
 		ok := false
 		switch step.ID {
+		case RootLauncher, RootSlots:
+			ok = rs.accounts != nil && rs.accounts.installObserved(after)
+		case RootNitroACL:
+			ok = after.Nitro != nil && after.Nitro.Usable && after.Nitro.ACLUser
+		case RootNitroUdev:
+			ok = after.Nitro != nil && after.Nitro.UdevUser
+		case RootNitroSlots:
+			ok = after.Nitro != nil && after.Nitro.Pools["pcie_slots"] >= int64(rs.NitroSlots)
 		case RootKVMACL:
 			ok = after.KVM.Usable && after.KVM.ACLUser
 		case RootKVMGroup:

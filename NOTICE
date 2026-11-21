@@ -6,6 +6,14 @@ This product is licensed under the Apache License, Version 2.0 (see LICENSE).
 Third-party code and data
 -------------------------
 
+- internal/supply/trusted_root.json: public Sigstore trust material from
+  https://github.com/sigstore/root-signing, retrieved on 19 November 2026.
+  tools/imageverify/testdata/: recorded public verification fixtures from
+  sigstore-go v1.4.0, https://github.com/sigstore/sigstore-go, Copyright the
+  Sigstore Authors, licensed under the Apache License, Version 2.0.
+  The cosign-oci-v0.3.json and cosign-trusted-root.json fixtures come from
+  cosign v3.1.1, https://github.com/sigstore/cosign, under the same licence.
+
 - Release runtime files: Firecracker v1.18.0
   (https://github.com/firecracker-microvm/firecracker), Copyright Amazon.com,
   Inc. or its affiliates, licensed under the Apache License, Version 2.0.
@@ -126,3 +134,19 @@ and their upstream licence when the release builder distributes them.
   Copyright 1991-2022 Unicode, Inc. The matching skeleton follows UTS #39
   revision 26. The gzip representation preserves every original raw byte.
   The complete Unicode licence is in LICENSES/Unicode-3.0.txt.
+
+The SSH signature implementation uses github.com/hiddeco/sshsig, by Hidde Beydals, under the Apache License 2.0.
+
+
+Guest SFTP dependencies
+-----------------------
+
+The guest SFTP helper links github.com/pkg/sftp v1.13.12
+(https://github.com/pkg/sftp), Copyright (c) 2013, Dave Cheney, under the
+BSD 2-Clause licence. The complete upstream notice is in
+LICENSES/pkg-sftp-1.13.12-BSD-2-Clause.txt.
+
+Its filesystem-walking dependency is github.com/kr/fs v0.1.0
+(https://github.com/kr/fs), Copyright (c) 2012 The Go Authors, under the
+BSD 3-Clause licence. The complete upstream notice is in
+LICENSES/kr-fs-0.1.0-BSD-3-Clause.txt.

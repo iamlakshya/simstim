@@ -21,15 +21,17 @@ type FilePlan struct {
 // The bundle and include bytes live in the trusted session folder.
 type Seed struct {
 	// Laptop marks a bundle from the authenticated client input phase.
-	Laptop       bool       `json:"laptop,omitempty"`
-	SourceBranch string     `json:"source_branch,omitempty"`
-	Repo         string     `json:"repo"`
-	Commit       string     `json:"commit,omitempty"`
-	Branch       string     `json:"branch,omitempty"`
-	Origin       string     `json:"origin,omitempty"`
-	BundleSize   int64      `json:"bundle_size,omitempty"`
-	Includes     []SeedFile `json:"includes,omitempty"`
-	Scratch      bool       `json:"scratch,omitempty"`
+	Laptop       bool   `json:"laptop,omitempty"`
+	SourceBranch string `json:"source_branch,omitempty"`
+	Repo         string `json:"repo"`
+	Commit       string `json:"commit,omitempty"`
+	Branch       string `json:"branch,omitempty"`
+	Origin       string `json:"origin,omitempty"`
+	// Ecosystems are descriptive root-manifest tags from the selected commit.
+	Ecosystems []string   `json:"ecosystems,omitempty"`
+	BundleSize int64      `json:"bundle_size,omitempty"`
+	Includes   []SeedFile `json:"includes,omitempty"`
+	Scratch    bool       `json:"scratch,omitempty"`
 }
 
 // SeedFile is an explicitly included regular file, relative to the repo.

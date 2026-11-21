@@ -39,6 +39,9 @@ func formatCompiledTarget(cr compiledRule) string {
 }
 
 func compileRule(r api.Rule) (compiledRule, error) {
+	if err := canonicalRulePublicOnly(r); err != nil {
+		return compiledRule{}, err
+	}
 	methods, err := canonicalRuleMethods(r)
 	if err != nil {
 		return compiledRule{}, err
@@ -57,7 +60,7 @@ func compileRule(r api.Rule) (compiledRule, error) {
 		}
 	}
 	id := r.ID
-	if methods != nil || len(tools) != 0 {
+	if methods != nil || len(tools) != 0 || r.PublicOnly {
 		r.Methods, r.Target = methods, formatCompiledTarget(cr)
 		canonicalID := api.RuleID(r)
 		if id != "" && id != canonicalID {
@@ -76,6 +79,7 @@ func compileRule(r api.Rule) (compiledRule, error) {
 	cr.tools = tools
 	cr.ref = api.LayerRef{Kind: r.Layer, Name: r.Name, Source: r.Source}
 	cr.allow = r.Allow
+	cr.publicOnly = r.PublicOnly
 	cr.once = r.Once
 	cr.until = canonicalInstant(r.Until)
 	cr.grantID = r.GrantID
@@ -150,7 +154,7 @@ func MergeLayers(layers []api.Layer) (api.Policy, []api.Layer, error) {
 			denies = append(denies, lockedRule{layer: lk.Layer, target: target, rule: cr})
 		}
 		for _, raw := range lk.Network.Rules {
-			cr, err := compileRule(api.Rule{Layer: lk.Layer, Name: lk.Name, Door: api.DoorNet, Target: raw.Target, Methods: raw.Methods})
+			cr, err := compileRule(api.Rule{Layer: lk.Layer, Name: lk.Name, Door: api.DoorNet, Target: raw.Target, Methods: raw.Methods, PublicOnly: raw.PublicOnly})
 			if err != nil {
 				return api.Policy{}, nil, err
 			}
@@ -176,6 +180,7 @@ func MergeLayers(layers []api.Layer) (api.Policy, []api.Layer, error) {
 	if err := ValidateRuleIdentities(pol.Rules); err != nil {
 		return api.Policy{}, nil, err
 	}
+	applyLockdownProjection(&pol)
 	return pol, sorted, nil
 }
 
@@ -200,7 +205,7 @@ func cleanLayerRules(l api.Layer, denies []lockedRule) ([]api.Rule, error) {
 			}
 		}
 		canonicalID := api.RuleID(r)
-		if (r.Methods != nil || len(r.Tools) != 0) && r.ID != "" && r.ID != canonicalID {
+		if (r.Methods != nil || len(r.Tools) != 0 || r.PublicOnly) && r.ID != "" && r.ID != canonicalID {
 			return nil, &proto.Error{Code: "bad_rule_id", Message: "method-qualified rule has a noncanonical ID", Hint: "Remove the supplied rule ID and submit the rule again."}
 		}
 		r.ID = canonicalID

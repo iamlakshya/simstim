@@ -12,6 +12,9 @@ import (
 )
 
 func (g *Init) prepareSession(a *proto.CtlStartArgs) error {
+	if g.unwalled != nil {
+		return g.projectUnwalledV1(a, true)
+	}
 	if err := g.validateBootPackageSettings(a.PackageManagers); err != nil {
 		return err
 	}
@@ -42,11 +45,16 @@ func (g *Init) prepareSession(a *proto.CtlStartArgs) error {
 	if err := g.restoreState(*a); err != nil {
 		return err
 	}
-	if err:=g.applyBootDecoys(g.lifetime,a.Decoys);err!=nil{return err}
+	if err := g.applyBootDecoys(g.lifetime, a.Decoys); err != nil {
+		return err
+	}
 	if err := g.applyBootPackageSettings(g.lifetime, a.PackageManagers); err != nil {
 		return err
 	}
 	if err := g.memberProxyEnv(a, true); err != nil {
+		return err
+	}
+	if err := g.memberSSHAgentEnv(a); err != nil {
 		return err
 	}
 	g.mu.Lock()

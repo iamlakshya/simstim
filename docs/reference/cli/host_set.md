@@ -16,6 +16,10 @@ idle: how long a host that `host create` made may idle before it stops. It takes
 
 tier: who else has root on the host: own, throwaway or shared. Lowering works at once. Raising connects to check the pinned host key, and asks for the host's typed name.
 
+label.: a note, such as label.location=home. An empty value removes that label. Labels never select a host or allow a grant.
+
+drain: refuse new sandboxes while running sessions continue. Give a short reason, or off to clear it.
+
 ## Examples
 
 ```sh

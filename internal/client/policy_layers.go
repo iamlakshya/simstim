@@ -9,7 +9,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
-	"sort"
 	"strings"
 	"time"
 
@@ -88,27 +87,11 @@ func ResolvePolicyLayers(settings Settings, h Host, origin, profile string, sess
 	hostValues.Sandbox.Secrets = append(slices.Clone(h.Secrets), hostValues.Sandbox.Secrets...)
 	host := api.Layer{Kind: api.LayerHost, Name: h.Name, LayerValues: hostValues, Lock: policyLock(h.Lock)}
 	layers := []api.Layer{all, host}
-	if origin != "" {
-		normal, err := NormaliseOrigin(origin)
-		if err != nil {
-			return nil, err
-		}
-		var names []string
-		for name := range settings.Repos {
-			if name == normal || strings.HasSuffix(name, "/*") && strings.HasPrefix(normal, strings.TrimSuffix(name, "*")) {
-				names = append(names, name)
-			}
-		}
-		sort.Slice(names, func(i, j int) bool {
-			if len(names[i]) == len(names[j]) {
-				return names[i] < names[j]
-			}
-			return len(names[i]) < len(names[j])
-		})
-		for _, name := range names {
-			layers = append(layers, api.Layer{Kind: api.LayerRepo, Name: name, LayerValues: repoLayerValues(settings.Repos[name])})
-		}
+	repositories, err := matchingHostRuleRepositories(settings, origin)
+	if err != nil {
+		return nil, err
 	}
+	layers = append(layers, repositories...)
 	if profile != "" {
 		selected := profile
 		session.Sandbox.Profile = &selected

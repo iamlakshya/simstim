@@ -14,6 +14,8 @@ const (
 	deliveryPublicationReceipt sandboxReceiptWriteKind = iota + 1
 	inputOperationBegin
 	inputOperationFinish
+	armPublicationReceipt
+	rewindPublicationReceipt
 )
 
 type sandboxReceiptWriteIntent struct {
@@ -88,7 +90,10 @@ func validateSandboxReceiptWriteIntent(ctx context.Context, intent *sandboxRecei
 	var scope sandboxReceiptScope
 	var creation, previous string
 	switch intent.kind {
-	case deliveryPublicationReceipt:
+	case deliveryPublicationReceipt, armPublicationReceipt, rewindPublicationReceipt:
+		if intent.delivery == nil || intent.kind == armPublicationReceipt && (intent.delivery.Version != 2 || intent.delivery.Operation != "arm") || intent.kind == rewindPublicationReceipt && (intent.delivery.Version != 3 || intent.delivery.Operation != "rewind") || intent.kind == deliveryPublicationReceipt && intent.delivery.Version != 1 {
+			return sandboxReceiptError()
+		}
 		if err := validateSandboxDeliveryReceipt(ctx, intent.delivery); err != nil {
 			return err
 		}
@@ -130,7 +135,7 @@ func changeSandboxReceiptRow(ctx context.Context, file *sandboxFile, intent *san
 	key := "input_operation"
 	var current string
 	var next any = intent.input
-	if intent.kind == deliveryPublicationReceipt {
+	if intent.kind == deliveryPublicationReceipt || intent.kind == armPublicationReceipt || intent.kind == rewindPublicationReceipt {
 		key, next = "delivery_receipt", intent.delivery
 		if before.futureDeliveryReceipt {
 			return futureSandboxReceiptError()
@@ -147,6 +152,9 @@ func changeSandboxReceiptRow(ctx context.Context, file *sandboxFile, intent *san
 		}
 	}
 	if current != intent.expectedRevision {
+		if (intent.kind == armPublicationReceipt || intent.kind == rewindPublicationReceipt) && before.deliveryReceipt != nil && reflect.DeepEqual(before.deliveryReceipt, intent.delivery) {
+			return errStateNoChange // Only the same actual private ACK proof may retry.
+		}
 		return sandboxReceiptError()
 	}
 	if intent.kind == inputOperationFinish && !reflect.DeepEqual(before.inputOperation, intent.input) {

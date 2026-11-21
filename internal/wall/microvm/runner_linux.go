@@ -32,7 +32,7 @@ func RunVMHelper(in io.Reader) error {
 	if err := decodeHelper(in, &plan); err != nil {
 		return err
 	}
-	if plan.Version != 1 {
+	if plan.Version != 1 && plan.Version != 2 {
 		return fmt.Errorf("unknown microvm runner version")
 	}
 	if err := validateVMSpec(plan.Spec); err != nil {
@@ -64,19 +64,21 @@ func RunVMHelper(in io.Reader) error {
 		defer files[i].Close()
 		unix.CloseOnExec(int(files[i].Fd()))
 	}
+	mode, err := captureRunnerExecModeV1(ctx, plan.Version, files[0])
+	if err != nil {
+		return err
+	}
+	defer mode.Close()
 	root, err := cachefs.OpenPrivateRoot(vmDataDir(plan.Spec), false)
 	if err != nil {
 		return err
 	}
 	defer root.Close()
-	disk, err := cachefs.OpenFile(root, SessionDiskName, os.O_RDWR, 0o600)
-	if err != nil {
-		return err
-	}
+	disk := os.NewFile(11, "original-session-disk")
 	defer disk.Close()
-	info, err := disk.Stat()
-	if err != nil || info.Size() != plan.Spec.DiskMax {
-		return fmt.Errorf("existing VM session disk changed size")
+	unix.CloseOnExec(int(disk.Fd()))
+	if err := checkRunnerDiskV1(root, disk, plan.Spec.DiskMax); err != nil {
+		return err
 	}
 	api, vsock := vmSocketPaths(vmDataDir(plan.Spec))
 	for _, path := range []string{api, vsock} {
@@ -86,6 +88,9 @@ func RunVMHelper(in io.Reader) error {
 	}
 	command := exec.CommandContext(ctx, "/proc/self/fd/9", "chv-exec")
 	command.ExtraFiles = []*os.File{files[0], files[1], files[2], files[3], files[4], disk, files[5]}
+	if mode != nil {
+		command.ExtraFiles = append(command.ExtraFiles, mode.lease, mode.writer)
+	} // final private10/11
 	command.Env = []string{"LANG=C", "LC_ALL=C", "TZ=UTC"}
 	command.Stdout = os.Stderr
 	command.Stderr = os.Stderr
@@ -115,13 +120,38 @@ func RunVMHelper(in io.Reader) error {
 		file.Close()
 	}
 	disk.Close()
-	if err := json.NewEncoder(stdin).Encode(plan); err != nil {
+	var planErr error
+	if mode != nil {
+		planErr = server.sendNativeModeExecChild(plan.Spec.ID, kind.name(), owner)
+		if planErr == nil {
+			planErr = writeFinalExecPlanV2(stdin, plan)
+		}
+	} else {
+		planErr = json.NewEncoder(stdin).Encode(plan)
+	}
+	if planErr != nil {
 		stdin.Close()
 		command.Process.Kill()
 		command.Wait()
-		return fmt.Errorf("send VMM execution plan: %w", err)
+		return fmt.Errorf("send VMM execution plan: %w", planErr)
 	}
-	stdin.Close()
+	if mode != nil {
+		if err := server.receiveModeContinueV1(ctx, plan.BootUntil, stdin); err != nil {
+			stdin.Close()
+			command.Process.Kill()
+			command.Wait()
+			return fmt.Errorf("receive original direct VMM continuation: %w", err)
+		}
+		// Actual last-helper adoption and parent Arm were required for the
+		// original host continuation. This ancestor can never exec another VMM.
+		if err := mode.Close(); err != nil {
+			command.Process.Kill()
+			command.Wait()
+			return err
+		}
+	} else {
+		stdin.Close()
+	}
 	ended := make(chan runnerExit, 1)
 	go func() { err := command.Wait(); ended <- ownedVMMExit(command, err) }()
 	connectCtx, cancelConnect := context.WithDeadline(ctx, plan.BootUntil)
@@ -145,7 +175,7 @@ func RunVMHelper(in io.Reader) error {
 	}
 	defer guest.Close()
 	var fcControl *fc.Client
-	if kind == firecrackerBackend {
+	if kind.isFirecracker() {
 		apiConnection, err := owner.connectAPI(connectCtx, api)
 		if err == nil {
 			fcControl, err = fc.NewClient(apiConnection)
@@ -167,6 +197,17 @@ func RunVMHelper(in io.Reader) error {
 	go func() { _, _ = io.Copy(raw, guest); raw.Close() }()
 	exit := waitOwnedExit(exitObserved, ended)
 	_ = server.send(runnerMessage{Kind: "exit", Exit: &exit})
+	return nil
+}
+
+func checkRunnerDiskV1(root *os.Root, disk *os.File, bytes int64) error {
+	info, err := cachefs.ValidateFile(root, SessionDiskName, disk, 0o600)
+	if err != nil {
+		return fmt.Errorf("the VMM runner did not inherit its original session disk: %w", err)
+	}
+	if info.Size() != bytes {
+		return fmt.Errorf("the inherited VM session disk changed size")
+	}
 	return nil
 }
 

@@ -10,6 +10,7 @@ func (d *newSession) useHost(host *hostConn, selected client.Host) {
 	d.stopFolders()
 	currentAgent := d.agent()
 	d.host, d.sourceHost, d.selector = host.name(), selected, host.name()
+	d.preview = hostSelectionPreview{}
 	d.choices, d.finding, d.ai = agentChoices(host.info), host.info == nil, 0
 	for index, choice := range d.choices {
 		if choice.installed && choice.kind == currentAgent {
@@ -22,14 +23,14 @@ func (d *newSession) useHost(host *hostConn, selected client.Host) {
 }
 
 func (d *newSession) hostRow(m *Model, width int) string {
-	text := shown(d.host)
-	if d.selector == "" && d.host == d.defaultHost {
+	text := d.selectionName()
+	if d.selector == "" && d.preview.defaulted && (d.preview.automatic || d.host == d.defaultHost) {
 		text += " (default)"
 	}
 	if d.choosingHost {
 		text += "…"
 	}
-	if d.field == 6 && len(m.hosts) > 1 {
+	if d.field == 6 && (len(m.hosts) > 1 || d.preview.facadeValidated && len(m.hosts) > 0) {
 		text = "‹ " + text + " ›"
 	}
 	return trunc(text, width)
@@ -46,28 +47,31 @@ func (m *Model) chooseNewSessionHost(d *newSession, key string) tea.Cmd {
 	if step == 0 || len(m.hosts) == 0 {
 		return nil
 	}
-	if key == "space" && len(m.hosts) == 1 {
-		d.choosingHost, d.err = true, nil
-		return m.resolveNewHost(m.hosts[0].name(), newHostChoice, d, client.NewArgs{}, false)
-	}
-	if len(m.hosts) < 2 {
-		return nil
+	// Auto is explicit local intent. Its actual target comes only from the
+	// real attempt owner after the user submits the form.
+	names := []string{}
+	if d.preview.facadeValidated {
+		names = append(names, "auto")
 	}
 	index := 0
-	for i, host := range m.hosts {
-		if host.name() == d.host {
-			index = i
-			break
+	for _, host := range m.hosts {
+		if client.ValidHostName(host.name()) {
+			names = append(names, host.name())
+			if host.name() == d.host {
+				index = len(names) - 1
+			}
 		}
 	}
-	for n := 0; n < len(m.hosts); n++ {
-		index = (index + step + len(m.hosts)) % len(m.hosts)
-		name := m.hosts[index].name()
-		if name != d.host && client.ValidHostName(name) {
+	if len(names) < 2 {
+		if key == "space" && len(names) == 1 {
 			d.choosingHost, d.err = true, nil
-			return m.resolveNewHost(name, newHostChoice, d, client.NewArgs{}, false)
+			return m.resolveNewHost(names[0], newHostChoice, d, client.NewArgs{}, false)
 		}
+		return nil
 	}
+	name := names[(index+step+len(names))%len(names)]
+	d.choosingHost, d.err = true, nil
+	return m.resolveNewHost(name, newHostChoice, d, client.NewArgs{}, false)
 	return nil
 }
 

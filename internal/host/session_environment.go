@@ -101,30 +101,32 @@ func prepareResumeEnvironment(m *Manifest, environment *api.SessionEnvironment) 
 	args := NewArgs{Term: m.Term.Term, Environment: environment}
 	var env []string
 	var term string
-	if m.Wall!=nil && (m.Wall.Driver=="chv" || m.Wall.Driver=="firecracker"){
-		env,term,err=resolvedWalledEnv(args,m.ID,[]string{"/opt/agents/bin"},agent,inline,m.SecretState,m.Secrets)
-	}else{
-		login,loginErr:=LoginEnv(15*time.Second)
-		if loginErr!=nil{return UserError("bad_env","the current runtime environment cannot be prepared","Check the host login environment before resuming.")}
-	if m.Wall != nil {
-		bin := argv[0]
-		if !filepath.IsAbs(bin) {
-			bin, err = lookPath(bin, envValue(login, "PATH"))
+	if m.Wall != nil && (m.Wall.Driver == "chv" || m.Wall.Driver == "firecracker" || m.Wall.Driver == "nitro") {
+		env, term, err = resolvedWalledEnv(args, m.ID, []string{"/opt/agents/bin"}, agent, inline, m.SecretState, m.Secrets)
+	} else {
+		login, loginErr := LoginEnv(15 * time.Second)
+		if loginErr != nil {
+			return UserError("bad_env", "the current runtime environment cannot be prepared", "Check the host login environment before resuming.")
+		}
+		if m.Wall != nil && !IsNoneSupervisor(m) {
+			bin := argv[0]
+			if !filepath.IsAbs(bin) {
+				bin, err = lookPath(bin, envValue(login, "PATH"))
+				if err != nil {
+					return UserError("agent_missing", "the original runtime executable is unavailable", "Install the selected agent before resuming.")
+				}
+			}
+			bin, err = filepath.EvalSymlinks(bin)
 			if err != nil {
-				return UserError("agent_missing", "the original runtime executable is unavailable", "Install the selected agent before resuming.")
+				return UserError("agent_missing", "the original runtime executable cannot be resolved", "Reinstall the selected agent before resuming.")
+			}
+			env, term, err = resolvedWalledEnv(args, m.ID, agentDirs(bin, envValue(login, "PATH")), agent, inline, m.SecretState, m.Secrets)
+		} else {
+			env, term, err = resolvedUnwalledEnv(args, m.ID, login, agent, inline, m.SecretState, m.Secrets)
+			if err == nil {
+				env, err = withSSHAgentSocket(env, m.ID, m.SSHAgent)
 			}
 		}
-		bin, err = filepath.EvalSymlinks(bin)
-		if err != nil {
-			return UserError("agent_missing", "the original runtime executable cannot be resolved", "Reinstall the selected agent before resuming.")
-		}
-		env, term, err = resolvedWalledEnv(args, m.ID, agentDirs(bin, envValue(login, "PATH")), agent, inline, m.SecretState, m.Secrets)
-	} else {
-		env, term, err = resolvedUnwalledEnv(args, m.ID, login, agent, inline, m.SecretState, m.Secrets)
-		if err == nil {
-			env, err = withSSHAgentSocket(env, m.ID, m.SSHAgent)
-		}
-	}
 	}
 	if err != nil {
 		return err

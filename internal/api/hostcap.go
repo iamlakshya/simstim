@@ -7,22 +7,29 @@ import (
 
 // KVM is what the probe found about /dev/kvm.
 type KVM struct {
-	Present        bool   `json:"present"`
-	Usable         bool   `json:"usable"`
-	Mode           string `json:"mode,omitempty"`
-	Group          string `json:"group,omitempty"`
-	ACLUser        bool   `json:"acl_user,omitempty"`
-	InGroup        bool   `json:"in_group,omitempty"`
-	InGroupNow     bool   `json:"in_group_now,omitempty"`
-	InGroupManager bool   `json:"in_group_manager,omitempty"`
+	Present bool `json:"present"`
+	Usable  bool `json:"usable"`
+	// AccessRestricted describes a refused open of the actual KVM device.
+	// It supplies no admission, runtime readiness or root execution grant.
+	AccessRestricted bool   `json:"access_restricted,omitempty"`
+	Mode             string `json:"mode,omitempty"`
+	Group            string `json:"group,omitempty"`
+	ACLUser          bool   `json:"acl_user,omitempty"`
+	InGroup          bool   `json:"in_group,omitempty"`
+	InGroupNow       bool   `json:"in_group_now,omitempty"`
+	InGroupManager   bool   `json:"in_group_manager,omitempty"`
 }
 
 // Nitro is what the probe found about /dev/nitro_enclaves.
 type Nitro struct {
-	Present bool             `json:"present"`
-	Usable  bool             `json:"usable"`
-	ACLUser bool             `json:"acl_user,omitempty"`
-	Pools   map[string]int64 `json:"pools,omitempty"`
+	UdevUser         bool             `json:"udev_user,omitempty"`
+	AccessRestricted bool             `json:"access_restricted,omitempty"`
+	Mode             string           `json:"mode,omitempty"`
+	Owner            int              `json:"owner,omitempty"`
+	Present          bool             `json:"present"`
+	Usable           bool             `json:"usable"`
+	ACLUser          bool             `json:"acl_user,omitempty"`
+	Pools            map[string]int64 `json:"pools,omitempty"`
 }
 
 // CapProbe is the answer to sandbox.probe. It never holds a secret.

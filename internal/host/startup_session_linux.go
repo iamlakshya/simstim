@@ -67,3 +67,39 @@ func startOwnedSessionOperation(ctx context.Context, operation *SessionOperation
 	started, err := launch.waitReady(launch.placement.ctx)
 	return started, launch, err
 }
+
+// startSandboxPrepareSessionV1 launches the fixed test-boot supervisor under
+// the caller's 60-second and connection-bound context so timeout or client
+// loss interrupts delivery and readiness immediately before joined cleanup.
+func startSandboxPrepareSessionV1(ctx context.Context, operation *SessionOperation) (*Manifest, *startupLaunchV1, error) {
+	if operation == nil || !operation.IsSandboxPrepareV1() {
+		return nil, nil, sessionLeaseError("sandbox prepare start has no original prepare operation")
+	}
+	launch, err := launchSupervisorOperation(ctx, operation)
+	if err != nil {
+		return nil, launch, err
+	}
+	done := make(chan struct{})
+	stop := context.AfterFunc(ctx, func() {
+		defer close(done)
+		if launch.line != nil {
+			_ = launch.line.SetDeadline(time.Now())
+		}
+	})
+	defer func() {
+		if !stop() {
+			<-done
+		}
+	}()
+	if deadline, ok := ctx.Deadline(); ok && launch.line != nil {
+		_ = launch.line.SetDeadline(deadline)
+	}
+	transfer, cancel := context.WithTimeout(ctx, 5*time.Second)
+	err = launch.deliverStart(transfer, nil, nil, false, nil)
+	cancel()
+	if err != nil {
+		return nil, launch, err
+	}
+	started, err := launch.waitReady(ctx)
+	return started, launch, err
+}

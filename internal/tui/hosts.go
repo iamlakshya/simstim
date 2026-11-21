@@ -381,7 +381,9 @@ func (m *Model) look(s client.Session) (glyph, label seg) {
 	if ended(s) {
 		return endLook(s)
 	}
-	if decoyNotice(s){return seg{m.working(s.ID),sDanger},seg{"decoy used",sDanger}}
+	if decoyNotice(s) {
+		return seg{m.working(s.ID), sDanger}, seg{"decoy used", sDanger}
+	}
 	switch s.State {
 	case api.StateNeedsInput:
 		return seg{glyphNeedsInput, m.breath(sWarning)}, seg{"needs input", sWarning}
@@ -398,7 +400,9 @@ func (m *Model) look(s client.Session) (glyph, label seg) {
 // traceStyle colours a session's trace like its state: cyan for working,
 // yellow for needs input, faint otherwise.
 func traceStyle(s client.Session) lipgloss.Style {
-	if decoyNotice(s){return sDanger}
+	if decoyNotice(s) {
+		return sDanger
+	}
 	switch s.State {
 	case api.StateWorking:
 		return sKey

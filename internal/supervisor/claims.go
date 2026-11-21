@@ -185,7 +185,13 @@ func (s *Supervisor) apply(p []byte) {
 		// events, valid or not, never hide a silence.
 		s.mu.Lock()
 		s.lastBeat = now()
-		if s.silent {s.silent=false;ev:=s.alertEvent(alerts.HealthRecovered);ev.Reason="heartbeat_resumed";s.raise(ev)}
+		s.heartbeatDelay = 0
+		if s.silent {
+			s.silent = false
+			ev := s.alertEvent(alerts.HealthRecovered)
+			ev.Reason = "heartbeat_resumed"
+			s.raise(ev)
+		}
 		s.mu.Unlock()
 	case proto.EventStatus:
 		s.claimStatus(c)
@@ -217,7 +223,11 @@ func (s *Supervisor) claimStatus(c claim) {
 	g.State, g.Source, g.Reason, g.FullScreen, g.At = c.state, c.source, c.reason, c.fullScreen, t.UTC()
 	s.dirty = true
 	if prev != c.state {
-		ev:=s.alertEvent(alerts.StateChanged);ev.Claimed=true;ev.Reason=c.state;ev.Summary="state changed to "+c.state+" (claimed)";s.raise(ev)
+		ev := s.alertEvent(alerts.StateChanged)
+		ev.Claimed = true
+		ev.Reason = c.state
+		ev.Summary = "state changed to " + c.state + " (claimed)"
+		s.raise(ev)
 		s.turn.change(prev, c.state, t)
 		if s.al != nil {
 			s.al.StateChanged()
@@ -236,6 +246,7 @@ func (s *Supervisor) showStatus(t time.Time) {
 	}
 	old := s.m.Status
 	st := s.claimedStatus()
+	networkPending, networkStopped, networkReason := s.pendingNetworkStatus()
 	if st.ExitCode == nil {
 		// While the agent runs, the mark says that the cap stopped a
 		// process in the session. After its end, the mark means the agent
@@ -245,9 +256,14 @@ func (s *Supervisor) showStatus(t time.Time) {
 	switch {
 	case s.mark.on && st.State != host.StateNeedsInput:
 		st = host.Status{State: host.StateNeedsInput, Source: host.SrcMemory, Reason: host.MemoryReason(s.mark.usage), OOM: st.OOM}
+	case networkPending && !s.mark.on && st.ExitCode == nil:
+		st = host.Status{State: host.StateNeedsInput, Source: "network", Reason: networkReason, OOM: st.OOM}
 	case st.OOM && st.ExitCode == nil && st.State != host.StateNeedsInput:
 		// The memory cap stopped a process that the agent started.
 		st.Reason = host.OOMChildReason
+	}
+	if networkStopped && !networkPending && !s.mark.on && st.ExitCode == nil && st.State != host.StateNeedsInput {
+		st.Reason = "unknown network requests stopped after repeated refusals"
 	}
 	st.Since = old.Since
 	if st.State != old.State || st.Source != old.Source {
@@ -314,6 +330,7 @@ func (s *Supervisor) claimAlert(c claim) {
 		ev.Detail, ev.DetailFrom = c.detail, alerts.FromGuest
 	case alerts.TurnDone:
 		ev.Turn = s.turn.take(t)
+		s.queueCheckpointV1(checkpointTurnV1{session: s.id, detail: c.detail})
 	}
 	s.raise(ev)
 }

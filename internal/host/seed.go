@@ -118,6 +118,10 @@ func createSeed(a NewArgs, id, name, cwd string) (_ Seed, err error) {
 	if _, err = run(staging, "fetch", "--no-tags", "--no-write-fetch-head", "--", root, commit+":"+selectedRef); err != nil {
 		return Seed{}, err
 	}
+	ecosystems, err := seedEcosystems(run, staging, commit)
+	if err != nil {
+		return Seed{}, err
+	}
 	bundle := filepath.Join(scratch, "seed.bundle")
 	if _, err = run(staging, "bundle", "create", bundle, selectedRef); err != nil {
 		return Seed{}, err
@@ -164,7 +168,7 @@ func createSeed(a NewArgs, id, name, cwd string) (_ Seed, err error) {
 	if err = dst.Rename("seed.bundle.new", "seed.bundle"); err != nil {
 		return Seed{}, err
 	}
-	seed := Seed{Repo: basename, Commit: commit, Branch: brand.Name + "/" + id + "/" + Slug(name), Origin: origin, BundleSize: size, SourceBranch: strings.TrimPrefix(selectedRef, "refs/heads/")}
+	seed := Seed{Repo: basename, Commit: commit, Branch: brand.Name + "/" + id + "/" + Slug(name), Origin: origin, Ecosystems: ecosystems, BundleSize: size, SourceBranch: strings.TrimPrefix(selectedRef, "refs/heads/")}
 	if err = check(); err != nil {
 		return Seed{}, err
 	}

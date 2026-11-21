@@ -39,12 +39,16 @@ type ResumeResult = api.ResumeResult
 // It keeps the session's ID, name, folder, worktree and manifest. The cap
 // is the size asked for now, else the size the session asked for before,
 // else the host's default.
-func Resume(a api.ResumeArgs) (*ResumeResult, error) {return ResumeContext(context.Background(),a)}
+func Resume(a api.ResumeArgs) (*ResumeResult, error) { return ResumeContext(context.Background(), a) }
 
 // ResumeContext retains the actual caller and one original primary OP through native restart and cleanup.
-func ResumeContext(ctx context.Context,a api.ResumeArgs) (*ResumeResult,error){
-	if ctx==nil{return nil,UserError("bad_request","resume has no original caller lifetime","Start it through the original client request.")}
-	if err:=ctx.Err();err!=nil{return nil,err}
+func ResumeContext(ctx context.Context, a api.ResumeArgs) (*ResumeResult, error) {
+	if ctx == nil {
+		return nil, UserError("bad_request", "resume has no original caller lifetime", "Start it through the original client request.")
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	id := a.ID
 	if !validID(id) {
 		return nil, UserError("not_found", "no session "+id, "List sessions to find its ID.")
@@ -57,16 +61,24 @@ func ResumeContext(ctx context.Context,a api.ResumeArgs) (*ResumeResult,error){
 	}
 	// A second resume of the session, such as a key pressed twice, would
 	// stop the first's new holder, or save over its manifest.
-	operation,err:=BeginSessionOperation(ctx,id,renameWait)
-	if err!=nil{return nil,err}
+	operation, err := BeginSessionOperation(ctx, id, renameWait)
+	if err != nil {
+		return nil, err
+	}
 	defer operation.Close()
-	primary:=operation.Primary()
-	m,err:=operation.LoadContext(ctx)
+	primary := operation.Primary()
+	m, err := operation.LoadContext(ctx)
 	if err != nil {
 		return nil, UserError("not_found", "no session "+id, "List sessions to find its ID.")
 	}
+	if m.Wall != nil && m.Wall.Driver != "plain" {
+		return nil, UserError("resume_preparation", "a native sandbox resume needs its original warm or cold preparation", "Prepare the resume through the same verified current client connection before sending values.")
+	}
+	if err := checkResumeExpectedImageV1(ctx, operation, a.ExpectedImageV1); err != nil {
+		return nil, err
+	}
 	if a.Snapshot != nil || len(a.Members) > 0 || primary != id {
-		return resumeBundleLocked(id,a,m,operation)
+		return resumeBundleLocked(id, a, m, operation)
 	}
 	if err := validateResumeInputs(m, a.Inputs); err != nil {
 		return nil, err
@@ -97,8 +109,12 @@ func ResumeContext(ctx context.Context,a api.ResumeArgs) (*ResumeResult,error){
 	if err != nil {
 		return nil, err
 	}
-	if err:=validateRestartWall(m);err!=nil{return nil,err}
-	if err:=admitRestartMemoryRequestV1(ctx,operation,a);err!=nil{return nil,err}
+	if err := validateRestartWall(m); err != nil {
+		return nil, err
+	}
+	if err := admitRestartMemoryRequestV1(ctx, operation, a); err != nil {
+		return nil, err
+	}
 	// A command that resumeArgv refuses stops nothing. startAgain checks
 	// it again, after the old holder's last save.
 	if _, _, err := resumeArgv(m); err != nil {
@@ -110,14 +126,24 @@ func ResumeContext(ctx context.Context,a api.ResumeArgs) (*ResumeResult,error){
 		}
 	}
 	environmentPreview := CloneManifest(*m)
-	if err:=ApplyResumeLayers(&environmentPreview,a.Layers);err!=nil{return nil,err}
-	if err:=ApplyRepositoryResume(&environmentPreview,a);err!=nil{return nil,err}
+	if err := ApplyResumeLayers(&environmentPreview, a.Layers); err != nil {
+		return nil, err
+	}
+	if err := ApplyRepositoryResume(&environmentPreview, a); err != nil {
+		return nil, err
+	}
 	if err := prepareResumeEnvironment(&environmentPreview, a.Environment); err != nil {
 		return nil, err
 	}
 	// The session's debug stops with its old holder (holder_debug.go).
 	debugOn := debugUntil(m, alive(id)) != nil
-	if err := stopResumeHolder(id, m, pending); err != nil {
+	var legacyStop error
+	if m.Wall == nil && WallDriver != "legacy-none-test" {
+		legacyStop = stopLegacyForNoneResumeV1(ctx, operation)
+	} else {
+		legacyStop = stopResumeHolder(id, m, pending)
+	}
+	if err := legacyStop; err != nil {
 		return nil, UserError("busy", fmt.Sprintf("the previous holder of session %s could not be stopped: %v", id, err),
 			"Try again in a moment, or check the host with the host doctor.")
 	}
@@ -128,6 +154,9 @@ func ResumeContext(ctx context.Context,a api.ResumeArgs) (*ResumeResult,error){
 	// The old holder saves the manifest a last time as it stops.
 	if m, err = operation.LoadContext(ctx); err != nil {
 		return nil, UserError("not_found", "no session "+id, "List sessions to find its ID.")
+	}
+	if err := checkResumeExpectedImageV1(ctx, operation, a.ExpectedImageV1); err != nil {
+		return nil, err
 	}
 	if _, err := prepareResumeSecretDelivery(m, delivery, secrets); err != nil {
 		return nil, err
@@ -144,18 +173,22 @@ func ResumeContext(ctx context.Context,a api.ResumeArgs) (*ResumeResult,error){
 	if err := validateResumeInputs(m, a.Inputs); err != nil {
 		return nil, err
 	}
-	if err:=ApplyResumeLayers(m,a.Layers);err!=nil{return nil,err}
-	if err:=ApplyRepositoryResume(m,a);err!=nil{return nil,err}
+	if err := ApplyResumeLayers(m, a.Layers); err != nil {
+		return nil, err
+	}
+	if err := ApplyRepositoryResume(m, a); err != nil {
+		return nil, err
+	}
 	if err := prepareResumeEnvironment(m, a.Environment); err != nil {
 		return nil, err
 	}
 	m.HostLabel = a.HostLabel
 	m.Inputs = CloneInputSummary(a.Inputs)
 	m.Run.RespawnCount = 0
-	_, why, err := startAgain(m, again{operation:operation,label: resumedLabel, reason: "started again by a resume", secrets: secrets, secretDelivery: delivery})
-	refused:=restartRefusal(err)
+	_, why, err := startAgain(m, again{operation: operation, label: resumedLabel, reason: "started again by a resume", secrets: secrets, secretDelivery: delivery})
+	refused := restartRefusal(err)
 	switch {
-	case refused!=nil:
+	case refused != nil:
 		return nil, refused // Preserve final admission data and command refusal hints.
 	case err != nil:
 		return nil, UserError("start_failed", err.Error(), "Check the session log with the host doctor.")

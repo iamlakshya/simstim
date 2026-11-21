@@ -15,6 +15,7 @@ import (
 	"github.com/iamlakshya/simstim/internal/vmneed"
 	"github.com/iamlakshya/simstim/internal/wall"
 	"github.com/iamlakshya/simstim/internal/wall/microvm"
+	"github.com/iamlakshya/simstim/internal/wall/none"
 )
 
 type originalBootContextKeyV1 struct{}
@@ -23,6 +24,10 @@ type originalBootContextKeyV1 struct{}
 // Need and native supervisor/loan are private. A spec, row, copied identifier,
 // environment descriptor number or caller callback cannot construct one.
 type OriginalVMNeed struct {
+	noneHolder       *noneHolderBirthV1
+	noneBirth        *none.LiveOwnerV1
+	noneConnection   net.Conn
+	forkDiskData     *originalForkDiskDataV1
 	boot             *originalBootV1
 	need             *vmneed.NeedV1
 	spec             wall.Spec
@@ -86,14 +91,18 @@ func VMRunContextLocked(ctx context.Context, operation *SessionOperation, owner 
 			return nil, vmNeedError("the original VM Need lost its own held runtime selection")
 		}
 		copy := need.BootV1.Clone()
+		spec.Driver = need.Driver
 		spec.CPUs, spec.DiskMax, spec.VM, receipt.need = need.CPUs, need.DiskMax, &copy, need
-	} else if m.Wall.Level == "microvm" || m.Wall.Driver == "chv" || m.Wall.Driver == "firecracker" {
+	} else if m.Wall.Level == "microvm" || m.Wall.Driver == "chv" || m.Wall.Driver == "firecracker" || m.Wall.Driver == "nitro" {
 		return nil, vmNeedError("this actual microvm boot has no original authenticated Need")
 	}
 	if m.Wall.Driver == "gvisor" && (spec.Image != nil || spec.VM != nil || spec.RuntimeManifest == nil) {
 		return nil, vmNeedError("the original gvisor runtime has conflicting VM or image boot data")
 	}
 	receipt.spec = spec
+	if err := captureOriginalForkDiskDataLockedV1(ctx, receipt, operation, m); err != nil {
+		return nil, err
+	}
 	// ExpectedSpec remains a data projection. Native runtime consumers must
 	// also consume this private receipt and bind their actual owned runtime.
 	ctx = context.WithValue(ctx, originalBootContextKeyV1{}, receipt)

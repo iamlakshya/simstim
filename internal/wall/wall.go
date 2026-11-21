@@ -60,6 +60,9 @@ type ImageRef struct {
 
 // Spec describes the sandbox to prepare.
 type Spec struct {
+	// Driver is plan data copied from the validated original Need. It does
+	// not authorise execution or select bytes from the host's inventory.
+	Driver string
 	// RuntimeManifest is cloned plan data. The original native boot owner
 	// separately supplies execution authority and held role selection.
 	RuntimeManifest *supply.Manifest

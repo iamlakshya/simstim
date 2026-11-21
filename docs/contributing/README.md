@@ -5,10 +5,15 @@ How the project is built, tested, documented and released. New here? Read [CONTR
 | Page | What it covers |
 | --- | --- |
 | [Testing](testing.md) | Unit, golden, fuzz and end-to-end tests, coverage, and how to run them |
+| [Microvm conformance](microvm-conformance.md) | Real platform suites, original timing data, memory budgets and release evidence |
 | [Tracing typing lag](debug-trace.md) | The debug trace: turn it on, copy the host's file, and read where a key waits |
 | [How the docs work](docs.md) | How the docs are organised, generated, checked and published |
 | [Style](style.md) | Rules for code and for writing |
 | [Releasing](releasing.md) | Versions, what a release contains, and how to cut and check one |
+| [Build the default image](default-image-build.md) | Prepare the pinned Debian root, check OCI and verity artifacts, and publish through the signed-tag workflow |
+| [Sandbox preparation lifetime](sandbox-preparation-lifetime.md) | Retain the original test-boot owners until native cleanup has joined |
+| [Image publication cleanup](image-publication-cleanup.md) | Retain the original native helper fence and retry publication cleanup after cancellation or parent death |
+| [Prepare the native gVisor release files](gvisor-release.md) | Check both five-role native builds against the actual source pin and include their bytes in the signed release |
 | [Going public](going-public.md) | What is done, and the owner's steps to make the repo public |
 | [UX spec](ux-spec.md) | The launcher's screens, keys, colours, glyphs and motion |
 | [Renaming](renaming.md) | How to rename the product in one change |

@@ -24,17 +24,19 @@ type sandboxReceiptScope struct {
 }
 
 type sandboxDeliveryReceipt struct {
-	Version     int                     `json:"version"`
-	Revision    string                  `json:"revision"`
-	Previous    string                  `json:"previous,omitempty"`
-	Creation    string                  `json:"creation"`
-	Publication string                  `json:"publication"`
-	Operation   string                  `json:"operation"`
-	Scope       sandboxReceiptScope     `json:"scope"`
-	Allowed     []string                `json:"allowed_names"`
-	Supplied    []string                `json:"supplied_names"`
-	Missing     []string                `json:"missing_names"`
-	State       *api.SessionSecretState `json:"state"`
+	Version            int                     `json:"version"`
+	Revision           string                  `json:"revision"`
+	Previous           string                  `json:"previous,omitempty"`
+	Creation           string                  `json:"creation"`
+	Publication        string                  `json:"publication"`
+	Operation          string                  `json:"operation"`
+	Scope              sandboxReceiptScope     `json:"scope"`
+	Allowed            []string                `json:"allowed_names"`
+	Supplied           []string                `json:"supplied_names"`
+	Missing            []string                `json:"missing_names"`
+	State              *api.SessionSecretState `json:"state"`
+	ArmSupplied        []string                `json:"arm_supplied_names,omitempty"`
+	TrustedArmSupplied []string                `json:"trusted_arm_supplied_names,omitempty"`
 }
 
 type sandboxInputOperation struct {
@@ -58,6 +60,7 @@ func cloneSandboxDeliveryReceipt(r *sandboxDeliveryReceipt) *sandboxDeliveryRece
 	q.Scope.Source = r.Scope.Source.clone()
 	q.Allowed, q.Supplied, q.Missing = slices.Clone(r.Allowed), slices.Clone(r.Supplied), slices.Clone(r.Missing)
 	q.State = api.CloneSessionSecretState(r.State)
+	q.ArmSupplied, q.TrustedArmSupplied = slices.Clone(r.ArmSupplied), slices.Clone(r.TrustedArmSupplied)
 	return &q
 }
 
@@ -92,8 +95,8 @@ func validSandboxReceiptDigest(value string) bool {
 }
 
 func validateSandboxReceiptHeader(version int, revision, previous, creation, operation string) error {
-	if version != 1 || !ValidHostID(revision) || previous != "" && !ValidHostID(previous) ||
-		previous == revision || !ValidHostID(creation) || !validSandboxReceiptOperation(operation) {
+	if (version != 1 || !validSandboxReceiptOperation(operation)) && (version != 2 || operation != "arm") && (version != 3 || operation != "rewind") || !ValidHostID(revision) || previous != "" && !ValidHostID(previous) ||
+		previous == revision || !ValidHostID(creation) {
 		return sandboxReceiptError()
 	}
 	return nil
@@ -156,6 +159,9 @@ func validateSandboxDeliveryReceiptKnownData(ctx context.Context, r *sandboxDeli
 	if err := validateSandboxReceiptHeader(r.Version, r.Revision, r.Previous, r.Creation, r.Operation); err != nil {
 		return err
 	}
+	if r.Version == 3 && (r.ArmSupplied != nil || r.TrustedArmSupplied != nil) {
+		return sandboxReceiptError()
+	}
 	if !ValidHostID(r.Publication) || r.Scope.BackendGeneration == "" {
 		return sandboxReceiptError()
 	}
@@ -202,7 +208,7 @@ func validateSandboxDeliveryReceiptKnownData(ctx context.Context, r *sandboxDeli
 	if len(seen) != len(state.Intent.Modes) {
 		return sandboxReceiptError()
 	}
-	return ctx.Err()
+	return validateSandboxArmReceiptDataV2(ctx, r)
 }
 
 func validateSandboxInputOperation(ctx context.Context, r *sandboxInputOperation) error {
@@ -213,6 +219,9 @@ func validateSandboxInputOperation(ctx context.Context, r *sandboxInputOperation
 }
 
 func validateSandboxInputOperationKnownData(ctx context.Context, r *sandboxInputOperation) error {
+	if r == nil || r.Version != 1 {
+		return sandboxReceiptError()
+	}
 	if err := ctx.Err(); err != nil {
 		return err
 	}

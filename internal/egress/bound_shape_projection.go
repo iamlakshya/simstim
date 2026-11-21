@@ -28,7 +28,9 @@ func projectedOpaqueError(err error) error {
 	return err
 }
 
-func projectedNull(p *api.JSONProjection, span api.JSONSpan) (bool, error) {
+func projectedNull(p interface {
+	Literal(api.JSONSpan, string) (bool, error)
+}, span api.JSONSpan) (bool, error) {
 	if span == (api.JSONSpan{}) {
 		return true, nil
 	}
@@ -37,7 +39,7 @@ func projectedNull(p *api.JSONProjection, span api.JSONSpan) (bool, error) {
 
 // walkProjectedString preserves encoding/json's null-as-zero string rule.
 // The existing projection owns all JSON/escape grammar and source reads.
-func walkProjectedString(p *api.JSONProjection, span api.JSONSpan, visit func(rune) error) error {
+func walkProjectedString(p TrustedUseProjectionV1, span api.JSONSpan, visit func(rune) error) error {
 	null, err := projectedNull(p, span)
 	if err != nil || null {
 		return err
@@ -47,7 +49,7 @@ func walkProjectedString(p *api.JSONProjection, span api.JSONSpan, visit func(ru
 
 // projectedNativeInt checks only the DTO integer conversion over an already
 // validated JSON value span. JSON syntax belongs to the ONE projection.
-func projectedNativeInt(p *api.JSONProjection, span api.JSONSpan) (int, error) {
+func projectedNativeInt(p TrustedUseProjectionV1, span api.JSONSpan) (int, error) {
 	null, err := projectedNull(p, span)
 	if err != nil || null {
 		return 0, err

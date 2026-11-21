@@ -49,12 +49,18 @@ func exactSecretStateValue(decoder *json.Decoder, shape reflect.Type) bool {
 	if err != nil {
 		return false
 	}
+	// RawMessage carries a caller-owned schema. Keep every nested duplicate
+	// check here; its actual consumer still checks its closed payload type.
+	opaque := shape == reflect.TypeFor[json.RawMessage]()
 	delim, nested := token.(json.Delim)
 	if !nested {
 		return true
 	}
 	switch delim {
 	case '{':
+		if opaque {
+			shape = reflect.TypeFor[map[string]json.RawMessage]()
+		}
 		if shape.Kind() != reflect.Struct && shape.Kind() != reflect.Map {
 			return false
 		}
@@ -81,6 +87,12 @@ func exactSecretStateValue(decoder *json.Decoder, shape reflect.Type) bool {
 			}
 		}
 	case '[':
+		if shape == reflect.TypeFor[HostSelectorV1]() {
+			shape = reflect.TypeFor[[]string]()
+		}
+		if opaque {
+			shape = reflect.TypeFor[[]json.RawMessage]()
+		}
 		if shape.Kind() != reflect.Slice && shape.Kind() != reflect.Array {
 			return false
 		}

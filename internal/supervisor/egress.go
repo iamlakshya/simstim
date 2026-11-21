@@ -36,13 +36,14 @@ var testPlainProxy string
 var testEgressEnv []string
 
 type egressProc struct {
-	pid    int
-	cmd    *exec.Cmd
-	sess   *link.Session
-	ctl    *egressCtl
-	done   chan struct{}
-	dead   atomic.Bool
-	caCert string // public certificate only, received from egress on fd 3
+	pid          int
+	cmd          *exec.Cmd
+	sess         *link.Session
+	ctl          *egressCtl
+	done         chan struct{}
+	dead         atomic.Bool
+	caCert       string // public certificate only, received from egress on fd 3
+	networkHolds *networkHoldView
 
 	stopOnce sync.Once
 }
@@ -220,7 +221,14 @@ func (s *Supervisor) startEgress(ctx context.Context, secrets map[string]string)
 	agentKind := m.Agent.Kind
 	dnsMode := dnsModeForManifest(m)
 	ref := sessionRefOf(m)
+	judgeMetadata := trustedJudgeMetadata(m, pol)
 	s.mu.Unlock()
+
+	popularity, err := prepareClassifierPopularityV1(ctx, pol)
+	if err != nil {
+		return secretEnvironment{}, err
+	}
+	defer popularity.Close()
 
 	exe, err := os.Executable()
 	if err != nil {
@@ -242,6 +250,10 @@ func (s *Supervisor) startEgress(ctx context.Context, secrets map[string]string)
 	cmd := exec.CommandContext(context.WithoutCancel(ctx), exe, "egress", s.id)
 	cmd.Env = egressEnv()
 	cmd.ExtraFiles = []*os.File{theirs}
+	if err := popularity.AppendEgressCommandV1(ctx, cmd, s.id); err != nil {
+		_ = ours.Close()
+		return secretEnvironment{}, wallError("cannot prepare the popularity source", err)
+	}
 	cmd.Stdout, cmd.Stderr = logf, logf
 	cmd.WaitDelay = time.Second
 	cmd.SysProcAttr = host.StopWithParent(&syscall.SysProcAttr{Setsid: true})
@@ -275,14 +287,15 @@ func (s *Supervisor) startEgress(ctx context.Context, secrets map[string]string)
 	ep.ctl = newEgressCtl(ctx, s, ctlSt, ep)
 	kinds := host.MemberAgentKinds(s.m, s.knownMembers)
 	initArgs := egress.InitArgs{
-		Decoys:api.CloneDecoyTripwires(s.bootDecoyTripwires),
-		AgentKinds: kinds,
-		SessionID:  s.id,
-		SessionRef: ref,
-		Agent:      agentKind,
-		DNS:        dnsMode,
-		Policy:     pol,
-		Secrets:    secrets,
+		JudgeMetadata: judgeMetadata,
+		Decoys:        api.CloneDecoyTripwires(s.bootDecoyTripwires),
+		AgentKinds:    kinds,
+		SessionID:     s.id,
+		SessionRef:    ref,
+		Agent:         agentKind,
+		DNS:           dnsMode,
+		Policy:        pol,
+		Secrets:       secrets,
 	}
 	ep.ctl.setPublicInitial(initArgs) // before any init/member event or first write
 	environment, err := s.initialiseEgress(ctx, ep, initArgs, secrets)
@@ -366,22 +379,30 @@ func (s *Supervisor) stopEgress() {
 // acceptGuestStreams forwards KindEgress and KindDNS streams opened by the
 // guest init on s.link to the session's egress process. When egress has died,
 // every new stream fails closed at once and no second egress process starts.
-func (s *Supervisor) acceptGuestStreams() {
-	defer s.wg.Done()
+func (s *Supervisor) acceptGuestStreams(session *link.Session) {
+	var workers sync.WaitGroup
+	defer workers.Wait()
 	egressSem := make(chan struct{}, link.DefaultMaxGuestStreams)
 	dnsSem := make(chan struct{}, egress.MaxActiveDNS)
 	for {
-		st, err := s.link.Accept(context.Background())
+		st, err := session.Accept(context.Background())
 		if err != nil {
 			return
 		}
 		switch st.Kind() {
+		case link.KindAgent:
+			if agent := s.admitNamedSSHAgent(st); agent != nil {
+				workers.Add(1)
+				go func() { defer workers.Done(); agent.serve(st) }()
+			}
 		case link.KindRPort:
 			s.forwardReverseStream(st)
 		case link.KindEgress:
 			select {
 			case egressSem <- struct{}{}:
+				workers.Add(1)
 				go func(guestSt *link.Stream) {
+					defer workers.Done()
 					defer func() { <-egressSem }()
 					s.forwardEgressStream(guestSt)
 				}(st)
@@ -391,7 +412,9 @@ func (s *Supervisor) acceptGuestStreams() {
 		case link.KindDNS:
 			select {
 			case dnsSem <- struct{}{}:
+				workers.Add(1)
 				go func(guestSt *link.Stream) {
+					defer workers.Done()
 					defer func() { <-dnsSem }()
 					s.forwardDNSStream(guestSt)
 				}(st)

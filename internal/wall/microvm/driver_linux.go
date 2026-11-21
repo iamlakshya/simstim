@@ -14,6 +14,7 @@ import (
 
 	"github.com/iamlakshya/simstim/internal/api"
 	"github.com/iamlakshya/simstim/internal/cachefs"
+	"github.com/iamlakshya/simstim/internal/nitrodev"
 	"github.com/iamlakshya/simstim/internal/paths"
 	"github.com/iamlakshya/simstim/internal/runtimecache"
 	"github.com/iamlakshya/simstim/internal/supply"
@@ -33,6 +34,17 @@ type Options struct {
 	// Reference publishes only the validated client plan into the canonical
 	// trusted session manifest while image/runtime leases are still held.
 	Reference func(context.Context, wall.Spec) error
+	// ForkDiskV1 is installed by the closed host constructor. It borrows only
+	// the genuine original new Boot/SAME OP's staged disk DATA, checking that
+	// actual issuer before/after the callback. Presence grants no allocation,
+	// execution or skip-format right; root still creates its own fresh target.
+	ForkDiskV1 func(context.Context, func(*os.File) error) (bool, error)
+	// ReservationV2 borrows the genuine accepted Cold/new-Boot's old reserved
+	// native operands. A Spec, old journal or vector alone cannot supply it.
+	ReservationV2 func(context.Context, func([]*os.File) error) (bool, error)
+	// ReservationSelectedV2 is narrowing selection DATA from the SAME actual
+	// accepted Boot receipt. It cannot supply operands or grant allocation.
+	ReservationSelectedV2 func(context.Context) (bool, error)
 	// Diagnostic records at most the final 64 KiB outside the VM-data bind.
 	// The host supplies its canonical supervisor log sink.
 	Diagnostic func(context.Context, wall.Spec, []byte) error
@@ -62,6 +74,8 @@ func NewForDriver(name string, options Options) (*Driver, error) {
 		return newDriver(options, cloudHypervisorBackend)
 	case "firecracker":
 		return newDriver(options, firecrackerBackend)
+	case "nitro":
+		return newDriver(options, nitroBackend)
 	default:
 		return nil, fmt.Errorf("the microvm backend %q is unknown", name)
 	}
@@ -125,9 +139,13 @@ func (d *Driver) Probe(ctx context.Context) wall.Probe {
 		result.Fix = "Use a host kernel supported by this backend."
 		return result
 	}
-	if !facts.KVM.Usable {
-		result.Reason = "the microvm wall cannot use /dev/kvm"
-		result.Fix = "Give this account KVM access with the root step."
+	usable, accessBlocked := d.kind.deviceAccess(facts)
+	if !usable && !accessBlocked {
+		result.Reason = "the microvm wall cannot use " + d.kind.device()
+		result.Fix = "Check the host's KVM device and virtualisation support, then probe again."
+		if d.kind == nitroBackend {
+			result.Fix = nitrodev.ParentKernelHint
+		}
 		return result
 	}
 	if !facts.UserNS {
@@ -153,68 +171,7 @@ func (d *Driver) Probe(ctx context.Context) wall.Probe {
 		result.Fix = "Install the host's trusted e2fsprogs formatter and its system libraries."
 		return result
 	}
-	domain, err := d.options.Domain(ctx)
-	if err != nil {
-		result.Reason = err.Error()
-		return result
-	}
-	store, err := runtimecache.OpenHostReadOnly(ctx, d.options.Artefacts, domain)
-	if err != nil {
-		result.Reason = "the verified microvm runtime is missing"
-		result.Fix = "Install this client's runtime with host upgrade."
-		return result
-	}
-	defer store.Close()
-	records, err := store.RecordsContext(ctx, facts.Arch)
-	if err != nil {
-		result.Reason = err.Error()
-		return result
-	}
-	for _, record := range records {
-		if err := d.kind.validateRuntime(record.Manifest, facts.Arch); err != nil {
-			continue
-		}
-		vmm, ok := record.Manifest.Find(supply.KindVMM, d.kind.vmmName(), facts.Arch)
-		if !ok || supply.Below(vmm.Version, d.kind.minimumVersion()) {
-			continue
-		}
-		valid := true
-		for _, selector := range d.kind.roles() {
-			item, ok := record.Manifest.Find(selector.Kind, selector.Name, facts.Arch)
-			if !ok {
-				valid = false
-				break
-			}
-			file, err := store.OpenItem(ctx, item)
-			if err != nil {
-				valid = false
-				break
-			}
-			file.Close()
-		}
-		if !valid {
-			continue
-		}
-		result.CanPrepare = true
-		result.Version = vmm.Version
-		if err := d.checkBootEvidence(record.Manifest, facts); err != nil {
-			result.Reason = err.Error()
-			result.Fix = "Complete the controlled guest boot check for this runtime and host."
-			result.Facts["runtime_verified"] = "true"
-			continue
-		}
-		result.OK = true
-		result.Version = vmm.Version
-		result.Facts["runtime"] = record.Manifest.Runtime
-		result.Facts["runtime_verified"] = "true"
-		result.Facts["uid_mode"] = uidMode(facts)
-		return result
-	}
-	if result.Reason == "" {
-		result.Reason = "the cache has no complete verified " + d.kind.label() + " boot runtime"
-		result.Fix = "Install this client's runtime with host upgrade."
-	}
-	return result
+	return d.probeRuntimeV1(ctx, facts, result)
 }
 
 // RuntimeCompatibility supplies LevelsFor only with an actually booted,
@@ -226,7 +183,12 @@ func (d *Driver) RuntimeCompatibility(manifest supply.Manifest) (api.RuntimeDriv
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	facts, err := d.options.Facts(ctx)
-	if err != nil || d.checkBootEvidence(manifest, facts) != nil {
+	if err != nil {
+		return api.RuntimeDriver{}, false
+	}
+	// Keep the caller's full collection and its source/receipt untouched.
+	selected, err := vmneed.SelectRuntimeForDriver(d.Name(), manifest, facts.Arch)
+	if err != nil || d.checkBootEvidence(selected, facts) != nil {
 		return api.RuntimeDriver{}, false
 	}
 	domain, err := d.options.Domain(ctx)
@@ -239,7 +201,7 @@ func (d *Driver) RuntimeCompatibility(manifest supply.Manifest) (api.RuntimeDriv
 	}
 	defer store.Close()
 	for _, selector := range d.kind.roles() {
-		item, ok := manifest.Find(selector.Kind, selector.Name, facts.Arch)
+		item, ok := selected.Find(selector.Kind, selector.Name, facts.Arch)
 		if !ok || selector.Kind == supply.KindVMM && supply.Below(item.Version, d.kind.minimumVersion()) {
 			return api.RuntimeDriver{}, false
 		}
@@ -253,6 +215,9 @@ func (d *Driver) RuntimeCompatibility(manifest supply.Manifest) (api.RuntimeDriv
 	if d.kind == firecrackerBackend {
 		result.KernelMin = "5.10"
 		result.KernelSeries = []string{"5.10", "6.1", "6.18"}
+	}
+	if d.kind == nitroBackend {
+		result.KernelMin = ""
 	}
 	return result, true
 }
@@ -274,7 +239,22 @@ func (d *Driver) Prepare(ctx context.Context, spec wall.Spec) (wall.Sandbox, err
 	if err != nil {
 		return nil, err
 	}
-	return d.prepare(ctx, spec, true, uidMode(facts))
+	mode, err := slotPreparationModeV1(ctx, facts)
+	if d.kind == nitroBackend && mode != slotUIDModeV1Name {
+		mode = "login"
+	}
+	if err != nil {
+		return nil, err
+	}
+	if selected, err := d.reservationSelectionV2(ctx); err != nil {
+		return nil, err
+	} else if selected {
+		if !slotAccountModeV1(facts) {
+			return nil, fmt.Errorf("the actual reserved Boot requires its existing exact slot creator")
+		}
+		mode = slotUIDModeV1Name
+	}
+	return d.prepare(ctx, spec, true, mode)
 }
 
 // Build selects the new or stopped layout without deriving any execution
@@ -324,10 +304,29 @@ func (d *Driver) Open(ctx context.Context, sessionDir string) (wall.Sandbox, err
 	if err != nil {
 		return nil, err
 	}
-	if uidMode(facts) != record.UIDMode {
+	if !(d.kind == nitroBackend && record.UIDMode == "login") && !savedUIDModeV1(facts, record.UIDMode) {
 		return nil, fmt.Errorf("the microvm's persistent disk identity mode changed; no existing disk was formatted")
 	}
+	if selected, err := d.reservationSelectionV2(ctx); err != nil {
+		return nil, err
+	} else if selected && record.UIDMode != slotUIDModeV1Name {
+		return nil, fmt.Errorf("the actual reserved Boot cannot use an ordinary or subuid disk creator")
+	}
 	return d.prepare(ctx, spec, false, record.UIDMode)
+}
+
+func (d *Driver) reservationSelectionV2(ctx context.Context) (bool, error) {
+	if d.options.ReservationSelectedV2 == nil {
+		return false, nil
+	}
+	selected, err := d.options.ReservationSelectedV2(ctx)
+	if err != nil {
+		return false, err
+	}
+	if selected && d.options.ReservationV2 == nil {
+		return false, fmt.Errorf("the actual reserved Boot selector has no genuine original input provider")
+	}
+	return selected, nil
 }
 
 func validateVMSpec(spec wall.Spec) error {

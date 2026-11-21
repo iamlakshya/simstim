@@ -22,6 +22,9 @@ type pendingStartupV1 struct {
 func enableStartupAncillary(net.Conn) error {
 	return sessionLeaseError("native sandbox startup requires a supported Linux host")
 }
+func receiveStartupAncillaryBoundV1(net.Conn, []byte, int) (int, []*os.File, *startupCredentials, error) {
+	return 0, nil, nil, sessionLeaseError("native auxiliary startup requires a supported Linux host")
+}
 func receiveStartupAncillary(net.Conn, []byte) (int, []*os.File, *startupCredentials, error) {
 	return 0, nil, nil, sessionLeaseError("native sandbox startup requires a supported Linux host")
 }

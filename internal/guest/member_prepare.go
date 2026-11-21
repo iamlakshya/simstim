@@ -37,7 +37,7 @@ type preparedMember struct {
 }
 
 func cloneMemberArgs(a proto.CtlStartArgs) proto.CtlStartArgs {
-	a.Decoys=proto.CloneDecoyFilesV1(a.Decoys)
+	a.Decoys = proto.CloneDecoyFilesV1(a.Decoys)
 	a.PackageManagers = proto.ClonePackageManagersV1(a.PackageManagers)
 	a.Argv, a.Env = slices.Clone(a.Argv), slices.Clone(a.Env)
 	a.Hooks, a.Missing, a.StateFiles = slices.Clone(a.Hooks), slices.Clone(a.Missing), slices.Clone(a.StateFiles)
@@ -185,6 +185,9 @@ func (g *Init) prepareMember(raw []byte) (proto.CtlMemberPrepareResult, error) {
 // projectMember does infrastructure/trust work only. Both primary and children
 // receive their own agent's CA variables and the same sandbox proxy projection.
 func (g *Init) projectMember(a *proto.CtlStartArgs, primary bool) error {
+	if g.unwalled != nil {
+		return g.projectUnwalledV1(a, primary)
+	}
 	if err := g.resolveShell(a); err != nil {
 		return err
 	}
@@ -199,7 +202,9 @@ func (g *Init) projectMember(a *proto.CtlStartArgs, primary bool) error {
 			}
 		}
 	}
-	if err:=g.checkBootDecoys(a.Decoys);err!=nil{return err}
+	if err := g.checkBootDecoys(a.Decoys); err != nil {
+		return err
+	}
 	if err := g.checkBootPackageSettings(a.PackageManagers); err != nil {
 		return err
 	}
@@ -213,7 +218,10 @@ func (g *Init) projectMember(a *proto.CtlStartArgs, primary bool) error {
 		return err
 	}
 	a.Env = env
-	return g.memberProxyEnv(a, false)
+	if err := g.memberProxyEnv(a, false); err != nil {
+		return err
+	}
+	return g.memberSSHAgentEnv(a)
 }
 
 func (g *Init) preparedMatchesLocked(a proto.CtlStartArgs, target string, state preparedMemberState) bool {

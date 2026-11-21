@@ -10,29 +10,52 @@ import (
 	"time"
 
 	"github.com/iamlakshya/simstim/internal/api"
+	"github.com/iamlakshya/simstim/internal/filecopy"
 	"github.com/iamlakshya/simstim/internal/paths"
 	"github.com/iamlakshya/simstim/internal/proto"
 	"github.com/iamlakshya/simstim/internal/version"
 )
 
 type bridgeCopyRoute struct {
-	session string
-	line    *holderLine
-	stop    func() bool
-	once    sync.Once
+	session   string
+	line      *holderLine
+	guest     StoppedGuest
+	operation *SessionOperation
+	reader    *filecopy.ReadSessionV1
+	closeErr  error
+	stop      func() bool
+	once      sync.Once
 }
 
 func init() { Features = append(Features, proto.FeatureFileTransferV1, "cp") }
 
-func (r *bridgeCopyRoute) close() {
-	if r != nil {
-		r.once.Do(func() {
-			if r.stop != nil {
-				r.stop()
-			}
-			_ = r.line.c.Close()
-		})
+func (r *bridgeCopyRoute) close() error {
+	if r == nil {
+		return nil
 	}
+	if r.stop != nil {
+		r.stop()
+	}
+	return r.closeResourcesV1()
+}
+func (r *bridgeCopyRoute) closeResourcesV1() error {
+	if r == nil {
+		return nil
+	}
+	r.once.Do(func() {
+		if r.line != nil {
+			r.closeErr = errors.Join(r.closeErr, r.line.c.Close())
+		}
+		// Actual Kill/Wait and native whole absence finish before OP closure.
+		// A physically uncertain source retains this stack inside guest.Close.
+		if r.guest != nil {
+			r.closeErr = errors.Join(r.closeErr, r.guest.Close())
+		}
+		if r.operation != nil {
+			r.closeErr = errors.Join(r.closeErr, r.operation.CloseWithError())
+		}
+	})
+	return r.closeErr
 }
 
 func (b *bridge) closeCopy() {
@@ -102,15 +125,22 @@ func (b *bridge) copyConnection(ctx context.Context, id string) (*bridgeCopyRout
 	if manifest.Wall.Level != "process" && manifest.Wall.Level != "gvisor" && manifest.Wall.Level != "microvm" {
 		return nil, UserError("cp_path", "the recorded sandbox wall is unknown", "Resume the sandbox with the matching helper.")
 	}
-	if !alive(id) {
-		return nil, UserError("sandbox_stopped", "the sandbox is stopped", "Resume the sandbox, then copy its files.")
+	if alive(id) {
+		line, err := dialCopyHolder(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+		route = &bridgeCopyRoute{session: id, line: line}
+		route.stop = context.AfterFunc(ctx, func() { _ = line.c.Close() })
+	} else {
+		// The saved row chooses a route only. OpenStoppedGuest separately
+		// requires its genuine native whole-lifetime absence and fresh cap.
+		route, err = openStoppedCopyRouteV1(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+		route.stop = context.AfterFunc(ctx, func() { _ = route.closeResourcesV1() })
 	}
-	line, err := dialCopyHolder(ctx, id)
-	if err != nil {
-		return nil, err
-	}
-	route = &bridgeCopyRoute{session: id, line: line}
-	route.stop = context.AfterFunc(ctx, func() { _ = line.c.Close() })
 	b.copyMu.Lock()
 	if b.copyClosed || ctx.Err() != nil {
 		b.copyMu.Unlock()
@@ -163,6 +193,19 @@ func (b *bridge) handleCopy(req proto.Request) bool {
 	route, err := b.copyConnection(b.ctx, id)
 	if err != nil {
 		b.reply(req.ID, nil, err)
+		return true
+	}
+	if route.reader != nil {
+		var value any
+		if req.Op == "cp.list" {
+			value, err = route.reader.List(b.ctx, req.Args)
+		} else {
+			value, err = route.reader.Read(b.ctx, req.Args)
+		}
+		if err != nil {
+			_ = route.close()
+		}
+		b.reply(req.ID, value, filecopy.ReadErrorV1(err))
 		return true
 	}
 	if err := route.line.w.WriteJSONCtx(b.ctx, proto.TRequest, req); err != nil {

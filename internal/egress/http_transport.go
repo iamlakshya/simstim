@@ -21,33 +21,36 @@ type originRequestKey struct{}
 // Its immutable request and permit travel through the one session Transport's
 // dial context, including concurrent guest HTTP/2 streams.
 type originRequest struct {
-	s        *Server
-	request  Request
-	scheme   string
-	query    string
-	permit   *Permit
-	cancel   context.CancelFunc
-	ctx      context.Context
-	tunnel   *httpTunnel
-	body     io.Closer
-	progress *httpBodyProgress
-	delivery *httpBodyProgress
-	model    *modelRequest   // immutable snapshots; publication uses mu
-	service  *serviceRequest // same ownership for a service body/path decision
-	http2    bool
-	writerMu sync.Mutex // serialises writer use with retirement before handler return
-	writer   *http.ResponseController
-	mu       sync.Mutex
-	conn     net.Conn
-	client   *ownedHTTPClientConn
-	measured *measuredOriginConn
-	flow     uint64
-	addr     netip.Addr
-	reserved bool
-	closed   bool
-	stopOnce sync.Once
-	endOnce  sync.Once
-	done     chan struct{}
+	s                *Server
+	request          Request
+	scheme           string
+	query            string
+	permit           *Permit
+	cancel           context.CancelFunc
+	ctx              context.Context
+	tunnel           *httpTunnel
+	body             io.Closer
+	progress         *httpBodyProgress
+	delivery         *httpBodyProgress
+	usageWS          *modelWebSocketUsage
+	model            *modelRequest   // immutable snapshots; publication uses mu
+	service          *serviceRequest // same ownership for a service body/path decision
+	http2            bool
+	writerMu         sync.Mutex // serialises writer use with retirement before handler return
+	writer           *http.ResponseController
+	mu               sync.Mutex
+	conn             net.Conn
+	client           *ownedHTTPClientConn
+	physicalUpload   *physicalH2UploadConn
+	physicalDelivery *physicalH2Delivery
+	measured         *measuredOriginConn
+	flow             uint64
+	addr             netip.Addr
+	reserved         bool
+	closed           bool
+	stopOnce         sync.Once
+	endOnce          sync.Once
+	done             chan struct{}
 }
 
 func (r *originRequest) track() bool {
@@ -221,6 +224,7 @@ func (r *originRequest) stopIO() {
 		r.closed = true
 		conn := r.conn
 		client := r.client
+		upload := r.physicalUpload
 		delivery := r.delivery
 		r.mu.Unlock()
 		if r.progress != nil {
@@ -231,6 +235,9 @@ func (r *originRequest) stopIO() {
 		}
 		if conn != nil {
 			_ = conn.Close()
+		}
+		if upload != nil {
+			_ = upload.Close()
 		}
 		if client != nil {
 			client.close()
@@ -251,6 +258,9 @@ func (r *originRequest) stopIO() {
 }
 
 func (r *originRequest) abort() {
+	if r.physicalDelivery != nil {
+		r.physicalDelivery.invalidate()
+	}
 	r.writerMu.Lock()
 	writer := r.writer
 	if writer != nil {
@@ -287,4 +297,15 @@ func (c *checkedHTTPConn) Write(p []byte) (int, error) {
 		return 0, fmt.Errorf("%w: HTTP request was revoked before an origin write", ErrRefusedAddr)
 	}
 	return c.Conn.Write(p) //nolint:wrapcheck // preserve the checked net.Conn result
+}
+
+// Join only the physical request writer before meter settlement. Normal
+// teardown cancels the parser context after its final delivered event is read.
+func (r *originRequest) joinPhysicalUpload() {
+	r.mu.Lock()
+	upload := r.physicalUpload
+	r.mu.Unlock()
+	if upload != nil {
+		_ = upload.Close()
+	}
 }

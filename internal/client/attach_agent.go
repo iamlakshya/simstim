@@ -15,7 +15,7 @@ type agentReady struct {
 
 // dialAttach leaves the ordinary terminal connection unforwarded. Optional
 // agent preparation owns another, nonshared connection with its own reader.
-func dialAttach(ctx context.Context, h Host, session string, interactive bool) (connection *Conn, prepared *attachedAgent, returned error) {
+func dialAttachTransport(ctx context.Context, h Host, session string, interactive bool) (connection *Conn, prepared *attachedAgent, returned error) {
 	if err := checkSessionID(h.Name, session); err != nil {
 		return nil, nil, err
 	}

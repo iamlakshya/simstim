@@ -1,6 +1,8 @@
 package client
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"math"
 
@@ -20,8 +22,23 @@ func hostFactsFutureError() error {
 }
 
 func decodeHostFacts(raw []byte, hostID string) (api.HostFacts, error) {
+	return decodeHostFactsContext(context.Background(), raw, hostID)
+}
+
+func decodeHostFactsContext(ctx context.Context, raw []byte, hostID string) (decoded api.HostFacts, failure error) {
+	if ctx == nil {
+		return api.HostFacts{}, hostFactsProtocolError()
+	}
+	defer func() {
+		if err := ctx.Err(); err != nil {
+			decoded, failure = api.HostFacts{}, err
+		}
+	}()
+	if err := ctx.Err(); err != nil {
+		return api.HostFacts{}, err
+	}
 	var facts api.HostFacts
-	version, err := api.JSONObjectFields(raw, "v")
+	version, err := api.ProjectedJSONObjectFields(ctx, raw, "v")
 	if err != nil || json.Unmarshal(version["v"], &facts.Version) != nil {
 		return facts, hostFactsProtocolError()
 	}
@@ -30,18 +47,33 @@ func decodeHostFacts(raw []byte, hostID string) (api.HostFacts, error) {
 		return api.HostFacts{}, hostFactsFutureError()
 	}
 	names := api.ExactJSONFieldNames(facts)
-	fields, err := api.JSONObjectFields(raw, names...)
-	if err != nil || json.Unmarshal(raw, &facts) != nil {
+	fields, err := api.ProjectedJSONObjectFields(ctx, raw, names...)
+	if err != nil {
 		return api.HostFacts{}, hostFactsProtocolError()
+	}
+	futureSlots := false
+	if slot := fields["slot_capacity"]; len(slot) != 0 && !bytes.Equal(bytes.TrimSpace(slot), []byte("null")) {
+		version, err := api.JSONObjectFields(slot, "v")
+		var number int
+		if err != nil || json.Unmarshal(version["v"], &number) != nil || number < 1 {
+			return api.HostFacts{}, hostFactsProtocolError()
+		}
+		futureSlots = number > 1
 	}
 	known := make(map[string]json.RawMessage, len(names))
 	for _, name := range names {
+		if name == "memory_observation" {
+			continue // Optional overlap data is decoded separately and cannot hide other known facts.
+		}
+		if name == "slot_capacity" && futureSlots {
+			continue // Future slot DATA stays opaque while known facts validate.
+		}
 		if value, found := fields[name]; found {
 			known[name] = value
 		}
 	}
 	encoded, err := json.Marshal(known)
-	if err != nil || !api.ExactJSONFields(encoded, facts) {
+	if err != nil || json.Unmarshal(encoded, &facts) != nil || !api.ExactJSONFields(encoded, facts) {
 		return api.HostFacts{}, hostFactsProtocolError()
 	}
 	if err := validateHostFacts(facts, hostID); err != nil {
@@ -49,7 +81,17 @@ func decodeHostFacts(raw []byte, hostID string) (api.HostFacts, error) {
 	}
 	// Recognised v1 always completes its known validation before an opaque
 	// extension is classified. No future marker can hide a known failure.
-	if len(fields) != len(known) {
+	if sample, exists := fields["memory_observation"]; exists {
+		facts.MemoryObservation, err = decodeHostMemoryObservationV1(ctx, sample, &facts)
+		if err != nil {
+			return api.HostFacts{}, err
+		}
+	}
+	count := len(known)
+	if _, exists := fields["memory_observation"]; exists {
+		count++
+	}
+	if len(fields) != count {
 		return api.HostFacts{}, hostFactsFutureError()
 	}
 	return facts, nil
@@ -100,6 +142,9 @@ func validateHostFacts(f api.HostFacts, hostID string) error {
 				return hostFactsProtocolError()
 			}
 		}
+	}
+	if err := api.ValidateSlotCapacityV1(f.SlotCapacity); err != nil {
+		return hostFactsProtocolError()
 	}
 	return nil
 }

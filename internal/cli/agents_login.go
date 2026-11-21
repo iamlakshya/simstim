@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -121,8 +122,11 @@ var loginAttach = attachEnded
 // logIn runs a's own login on h: it finds the login that runs, or starts
 // one. With attachOK, which input on gives, it attaches, then checks the
 // login again. Otherwise it says how to attach.
-func logIn(ctx context.Context, h client.Host, a agents.Agent, attachOK bool) error {
+func logIn(ctx context.Context, h client.Host, a agents.Agent, attachOK bool) (runErr error) {
 	cctx, cancel := context.WithTimeout(ctx, 90*time.Second)
+	request := client.NewGrantRequest(false, false)
+	cctx = client.WithGrantRequest(cctx, request)
+	defer func() { runErr = errors.Join(runErr, request.Close()) }()
 	conn, err := client.Dial(cctx, h, true)
 	if err != nil {
 		cancel()
@@ -130,6 +134,7 @@ func logIn(ctx context.Context, h client.Host, a agents.Agent, attachOK bool) er
 	}
 	s, running, err := loginSession(cctx, conn, h, a)
 	conn.Close()
+	err = errors.Join(err, request.Close())
 	cancel()
 	if err != nil {
 		return err
@@ -165,15 +170,19 @@ func logIn(ctx context.Context, h client.Host, a agents.Agent, attachOK bool) er
 // two logins share the name (cli-spec 12.3, rule 11). The host's text in
 // it is cleaned before it is encoded: encoding/json escapes C0 controls,
 // but writes C1, bidirectional, zero-width and tag characters as they are.
-func loginJSON(cmd *cobra.Command, h client.Host, a agents.Agent) error {
+func loginJSON(cmd *cobra.Command, h client.Host, a agents.Agent) (runErr error) {
 	cctx, cancel := context.WithTimeout(cmd.Context(), 90*time.Second)
 	defer cancel()
+	request := client.NewGrantRequest(false, false)
+	cctx = client.WithGrantRequest(cctx, request)
+	defer func() { runErr = errors.Join(runErr, request.Close()) }()
 	conn, err := client.Dial(cctx, h, true)
 	if err != nil {
 		return err
 	}
 	s, running, err := loginSession(cctx, conn, h, a)
 	conn.Close()
+	err = errors.Join(err, request.Close())
 	if err != nil {
 		return err
 	}
@@ -203,7 +212,7 @@ func loginSession(ctx context.Context, conn *client.Conn, h client.Host, a agent
 	s, running := runningLogin(list, args.Name)
 	if !running {
 		cols, rows := termSize()
-		started, err := conn.NewSession(ctx, client.TerminalArgs(args, cols, rows))
+		started, err := startUnwalledControlV1(ctx, conn, args, cols, rows)
 		if err != nil {
 			return client.Session{}, false, err
 		}

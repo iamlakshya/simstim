@@ -59,6 +59,9 @@ func TestFailedCreationSaveEndsFateAfterWriterChecks(t *testing.T) {
 	if calls != 1 {
 		t.Fatal("birth was consumed before actual writer or repeated blindly")
 	}
+	if currentStage(bound.Name) != nil {
+		t.Fatal("a failed creation writer retained its pin stage")
+	}
 	if _, err := BindHostCreationResultContext(ctx, bound); err == nil {
 		t.Fatal("failed writer allowed same-context result replay")
 	}

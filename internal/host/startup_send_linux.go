@@ -26,6 +26,9 @@ func (launch *startupLaunchV1) sendOperationLoan(ctx context.Context) (failure e
 	if err := launch.check(ctx); err != nil {
 		return err
 	}
+	if launch.nativePeer() == nil || launch.nativePeer().identity == nil {
+		return sessionLeaseError("the actual original helper identity has not arrived before its private OP loan")
+	}
 	m, err := launch.operation.LoadContext(ctx)
 	if err != nil {
 		return err
@@ -39,7 +42,17 @@ func (launch *startupLaunchV1) sendOperationLoan(ctx context.Context) (failure e
 		return err
 	}
 	loan := startupLoanV1{Version: 1, Primary: m.ID, Nonce: launch.hello.StartupNonce, Purpose: "ordinary", Need: startupDigest(m.VMNeedV1), Runtime: startupDigest(runtimeBytes)}
-	if len(m.AutomaticRestore) != 0 {
+	if launch.operation.IsSandboxPrepareV1() {
+		if err := validateSandboxPrepareBootManifestV1(m); err != nil {
+			return err
+		}
+		loan.Purpose = startupLoanPurposeSandboxPrepareV1
+		parent, err := launch.operation.sandboxPrepare.originalParentComparisonV1(launch.operation)
+		if err != nil {
+			return err
+		}
+		loan.PrepareParent = &parent
+	} else if len(m.AutomaticRestore) != 0 {
 		boot := launch.operation.AutomaticBoot()
 		if boot == nil {
 			return automaticRestoreError()
@@ -59,6 +72,9 @@ func (launch *startupLaunchV1) sendOperationLoan(ctx context.Context) (failure e
 		boot.mu.Unlock()
 		loan.Purpose, loan.Automatic = "automatic", startupDigest(m.AutomaticRestore)
 	}
+	if p := launch.operation.rewindPreparation; p != nil && p.slotSnapshot != nil {
+		return launch.sendSlotReservedStartupV2Locked(ctx, m, loan, p)
+	}
 	file, err := launch.operation.native.duplicateLockedFile(ctx)
 	if err != nil {
 		return err
@@ -68,14 +84,34 @@ func (launch *startupLaunchV1) sendOperationLoan(ctx context.Context) (failure e
 	if err != nil {
 		return err
 	}
-	launch.loanSent = true
-	if err := launch.placement.gate(ctx, func() error {
+	if err := launch.placement.gateControl(ctx, func(control *placementControl) error {
 		if err := launch.operation.native.check(ctx); err != nil {
 			return err
 		}
 		if err := launch.checkNativeMemoryV1(ctx, m); err != nil {
 			return err
 		}
+		if launch.operation.nativeColdResume != nil {
+			if err := checkColdNativeTakeoverLockedV1(ctx, launch.operation); err != nil {
+				return err
+			}
+			if err := takeoverResumePreparationNativeLockedV1(ctx, launch.operation, launch.operation.nativeColdResume, control); err != nil {
+				return err
+			}
+		}
+		if err := checkNoneColdTakeoverV1(ctx, launch.operation); err != nil {
+			return err
+		}
+		if err := launch.queueSandboxPrepareReplyV1(1); err != nil {
+			return err
+		}
+		if loan.Purpose == startupLoanPurposeSandboxPrepareV1 {
+			parent, err := launch.operation.sandboxPrepare.originalParentComparisonV1(launch.operation)
+			if err != nil || loan.PrepareParent == nil || parent.Identity != loan.PrepareParent.Identity {
+				return errors.Join(sessionLeaseError("the original prepare parent changed at the physical loan send"), err)
+			}
+		}
+		launch.loanSent = true
 		return launch.line.writeLoan(proto.Request{ID: 1, Op: startupLoanOperationV1, Args: args}, file)
 	}); err != nil {
 		return err
@@ -93,7 +129,9 @@ func (launch *startupLaunchV1) sendOperationLoan(ctx context.Context) (failure e
 	return launch.check(ctx)
 }
 
-func (launch *startupLaunchV1) response(ctx context.Context, requestID uint64, live bool) (json.RawMessage, error) {
+func (launch *startupLaunchV1) response(ctx context.Context, requestID uint64, live bool) (_ json.RawMessage, failure error) {
+	consumed := false
+	defer func() { launch.finishSandboxPrepareReplyV1(requestID, consumed, failure) }()
 	done := make(chan struct{})
 	stop := context.AfterFunc(ctx, func() { defer close(done); _ = launch.line.SetDeadline(time.Now()) })
 	defer func() {
@@ -112,7 +150,9 @@ func (launch *startupLaunchV1) response(ctx context.Context, requestID uint64, l
 		}
 		frame, err := launch.line.ReadFrame()
 		if err != nil {
-			launch.readFailed = true
+			if launch.line.prepareCursor == nil || launch.line.preparePoison || !sandboxPrepareReadDeadlineV1(err) {
+				launch.readFailed = true
+			}
 			return nil, err
 		}
 		if err := launch.line.RejectAncillary(); err != nil {
@@ -126,7 +166,7 @@ func (launch *startupLaunchV1) response(ctx context.Context, requestID uint64, l
 		if native == nil || sender.pid != native.pid || sender.uid != native.uid {
 			return nil, sessionLeaseError("the startup response has another native sender")
 		}
-		if live {
+		if live && launch.line.prepareCursor == nil {
 			if err := launch.check(ctx); err != nil {
 				return nil, err
 			}
@@ -144,6 +184,15 @@ func (launch *startupLaunchV1) response(ctx context.Context, requestID uint64, l
 		var response proto.Response
 		if json.Unmarshal(frame.Payload, &response) != nil || response.ID != requestID {
 			return nil, sessionLeaseError("startup received another request's response")
+		}
+		if launch.line.prepareCursor != nil && !api.ExactJSONFields(frame.Payload, response) {
+			return nil, sessionLeaseError("the original preparation response has unknown or duplicate fields")
+		}
+		consumed = true
+		if live && launch.line.prepareCursor != nil {
+			if err := launch.check(ctx); err != nil {
+				return nil, err
+			}
 		}
 		if !response.OK {
 			if response.Error != nil {
@@ -172,20 +221,50 @@ func (launch *startupLaunchV1) deliverStart(ctx context.Context, env map[string]
 			return err
 		}
 	}
-	args, err := json.Marshal(struct {
-		Env            map[string]api.Secret     `json:"env"`
-		Members        []api.MemberResumeArgs    `json:"members"`
-		AllowMissing   bool                      `json:"allow_missing"`
-		SecretDelivery *api.SecretDeliveryIntent `json:"secret_delivery,omitempty"`
-	}{env, members, allowMissing, delivery})
+	var namedKeys *api.NamedSSHKeysV1
+	var protected map[string]api.Secret
+	var err error
+	if p := launch.operation.rewindPreparation; p != nil {
+		namedKeys, protected, members, err = p.takeStartupDeliveryV1(ctx, launch, delivery, members)
+	} else {
+		namedKeys, err = launch.operation.takeNamedSSHKeys(ctx)
+		if err == nil {
+			protected, members, err = launch.operation.takeProtectedTrustedSecretsV1(ctx, delivery, members)
+		}
+	}
+	defer clear(protected)
+	defer clearProtectedTrustedMembersV1(members)
+	if namedKeys != nil {
+		defer clear(namedKeys.Values)
+	}
 	if err != nil {
 		return err
 	}
+	if namedKeys != nil {
+		if err := requireSupervisorFeatures(launch.hello, api.FeatureNamedSSHKeysV1); err != nil {
+			return err
+		}
+	}
+	args, err := json.Marshal(struct {
+		ProtectedTrustedSecretValues map[string]api.Secret     `json:"protected_trusted_secret_values,omitempty"`
+		Env                          map[string]api.Secret     `json:"env"`
+		Members                      []api.MemberResumeArgs    `json:"members"`
+		AllowMissing                 bool                      `json:"allow_missing"`
+		SecretDelivery               *api.SecretDeliveryIntent `json:"secret_delivery,omitempty"`
+		NamedSSHKeys                 *api.NamedSSHKeysV1       `json:"named_ssh_keys,omitempty"`
+	}{protected, env, members, allowMissing, delivery, namedKeys})
+	if err != nil {
+		return err
+	}
+	defer clear(args)
 	if err := launch.placement.gate(ctx, func() error {
 		if err := launch.operation.native.check(ctx); err != nil {
 			return err
 		}
 		if err := launch.checkNativeMemoryV1(ctx, launch.manifest); err != nil {
+			return err
+		}
+		if err := launch.queueSandboxPrepareReplyV1(2); err != nil {
 			return err
 		}
 		return launch.line.WriteFrame(proto.TRequest, proto.Request{ID: 2, Op: "secrets", Args: args})
@@ -201,6 +280,9 @@ func (launch *startupLaunchV1) waitReady(ctx context.Context) (*Manifest, error)
 	defer launch.mu.Unlock()
 	if !launch.loanSent || launch.line == nil || launch.ready {
 		return nil, sessionLeaseError("readiness has no original pending startup connection")
+	}
+	if err := launch.queueSandboxPrepareReplyV1(3); err != nil {
+		return nil, err
 	}
 	if err := launch.line.WriteFrame(proto.TRequest, proto.Request{ID: 3, Op: StartupReadyOperationV1}); err != nil {
 		return nil, err
@@ -229,7 +311,19 @@ func (launch *startupLaunchV1) waitReady(ctx context.Context) (*Manifest, error)
 		return nil, err
 	}
 	launch.ready = true
-	return m, nil
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if err := launch.queueSandboxPrepareReplyV1(5); err != nil {
+		return nil, err
+	}
+	if err := launch.line.WriteFrame(proto.TRequest, proto.Request{ID: 5, Op: PolicyNextCommitOperationV1}); err != nil {
+		return nil, err
+	}
+	if _, err := launch.response(ctx, 5, true); err != nil {
+		return nil, err
+	}
+	return launch.operation.LoadContext(ctx)
 }
 
 func (launch *startupLaunchV1) cancelPending() error {

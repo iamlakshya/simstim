@@ -33,6 +33,11 @@ func RunWithOptions(id string, opt Options) error {
 			Hint:    "Only a supervisor starts the egress process, for a session in a sandbox.",
 		}
 	}
+	cleanup, err := adoptPopularityBootstrapV1(&opt)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
 	f := os.NewFile(linkFD, "egress-link")
 	if f == nil {
 		return &proto.Error{

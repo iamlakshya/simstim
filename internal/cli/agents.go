@@ -178,9 +178,12 @@ func withHostWord(cmd *cobra.Command, agent, host string) string {
 // installAgent runs an agent's installer in a session on h. With attachOK,
 // which input on gives, it attaches, so the user answers the installer.
 // Otherwise it starts the session, and says how to attach to it.
-func installAgent(ctx context.Context, h client.Host, a agents.Agent, reinstall, attachOK bool) error {
+func installAgent(ctx context.Context, h client.Host, a agents.Agent, reinstall, attachOK bool) (runErr error) {
 	cctx, cancel := context.WithTimeout(ctx, 90*time.Second)
 	defer cancel()
+	request := client.NewGrantRequest(false, false)
+	cctx = client.WithGrantRequest(cctx, request)
+	defer func() { runErr = errors.Join(runErr, request.Close()) }()
 	conn, err := client.Dial(cctx, h, true)
 	if err != nil {
 		return err
@@ -201,9 +204,9 @@ func installAgent(ctx context.Context, h client.Host, a agents.Agent, reinstall,
 	fmt.Fprintf(os.Stderr, "Installing %s on %s with its vendor's installer:\n\n    %s\n\n", a.Title, h.Name, a.Setup.Install)
 	fmt.Fprintf(os.Stderr, "It comes from %s.\nIt runs in a session, so you see its output and can answer its questions.\n\n", a.Setup.Source)
 	cols, rows := termSize()
-	args := client.TerminalArgs(onboard.InstallArgs(a), cols, rows)
-	s, err := conn.NewSession(cctx, args)
+	s, err := startUnwalledControlV1(cctx, conn, onboard.InstallArgs(a), cols, rows)
 	conn.Close()
+	err = errors.Join(err, request.Close())
 	if err == nil {
 		err = checkSessionID(h.Name, s.ID)
 	}

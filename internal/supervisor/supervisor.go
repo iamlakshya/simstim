@@ -17,14 +17,6 @@ package supervisor
 import (
 	"context"
 	"errors"
-	"log/slog"
-	"net"
-	"os"
-	"os/signal"
-	"sync"
-	"syscall"
-	"time"
-
 	"github.com/iamlakshya/simstim/internal/alerts"
 	"github.com/iamlakshya/simstim/internal/api"
 	"github.com/iamlakshya/simstim/internal/brand"
@@ -37,7 +29,16 @@ import (
 	"github.com/iamlakshya/simstim/internal/secretmem"
 	"github.com/iamlakshya/simstim/internal/version"
 	"github.com/iamlakshya/simstim/internal/vmconfig"
+	"github.com/iamlakshya/simstim/internal/wall/gvisor"
+	"github.com/iamlakshya/simstim/internal/wall/none"
 	"github.com/iamlakshya/simstim/internal/wall/process"
+	"log/slog"
+	"net"
+	"os"
+	"os/signal"
+	"sync"
+	"syscall"
+	"time"
 )
 
 // bootTimeout bounds the sandbox's start, from its build to the agent's.
@@ -67,10 +68,29 @@ var errStopped = &proto.Error{Code: "stopped", Message: "the host stopped the se
 
 // Supervisor holds one walled session's trusted state.
 type Supervisor struct {
+	prepareDestroyOnce           sync.Once
+	requests                     requestLifetimesV1
+	bootAgentsCustody            bootAgentsCustodyV1
+	traceUpperMu                 sync.Mutex
+	traceUpper                   []*api.TraceUpperSampleV1
+	traceUpperDropped            bool
+	noneStops                    map[*noneStopCompletionV1]struct{}
+	noneLive                     *none.LiveOwnerV1
+	checkpointMu                 sync.Mutex
+	checkpointQueue              chan checkpointTurnV1
+	checkpointCancel             context.CancelFunc
+	checkpointWG                 sync.WaitGroup
+	checkpointClosed             bool
+	checkpointLast               time.Time
+	checkpointProbed             bool
+	snapshotMu                   sync.Mutex
+	snapshotTurn                 chan struct{}
+	editorSSHCount               int // selected live SSH owners; protected by mu, never saved
 	imageSaveMu                  sync.Mutex
 	imageSaves                   map[*imageSaveJobV1]struct{}
 	imageSavesClosed             bool
 	processCopy                  *process.CopyOwnerV1
+	gvisorLive                   *gvisor.LiveOwnerV1
 	bootPackageSettingsPrepared  bool
 	bootPackageSettings          *proto.PackageManagersV1
 	bootPackageSettingsGuest     bool
@@ -88,6 +108,8 @@ type Supervisor struct {
 	portListeners                map[int]*portForward
 	portsClosed                  bool
 	maxRun                       *maxRunTimer
+	bootPlacementCleanup         *host.BootPlacementCleanupV1
+	prepareParentCleanup         *host.SandboxPrepareParentCleanupV1
 	bootOwner                    *host.OwnedSupervisorLease
 	originalStart                *originalStartup
 	originalReaderStarted        bool
@@ -113,6 +135,7 @@ type Supervisor struct {
 	runtimeCleaned               chan struct{}
 	runtimeCleanup               sync.Once
 	runtimeCleanupErr            error
+	noneCleanupCommitErr         error
 	memberValues                 map[string]map[string]string
 	startupSecrets               *startupSecretInput
 	retainedSecrets              *api.SessionSecretState
@@ -122,6 +145,10 @@ type Supervisor struct {
 	terminalABI                  string
 	vmPlan                       *vmconfig.Plan
 	eg                           *egressProc
+	sshAgent                     *namedSSHAgent
+	sshAgentStopped              bool
+	startupNamedSSHKeys          *api.NamedSSHKeysV1
+	guestStreams                 *guestStreamReaderV1
 	polMu                        sync.Mutex
 	egressStarted                bool
 	egressStopping               bool
@@ -158,19 +185,21 @@ type Supervisor struct {
 	sig                          chan os.Signal // a stop with the host
 	wg                           sync.WaitGroup
 
-	mu       sync.Mutex
-	m        *host.Manifest // the trusted manifest
-	rec      record         // the record of the run (life.go)
-	dirty    bool
-	leader   *client // the client whose size the agent's terminal has
-	turn     turnClock
-	mark     memMark
-	lastBeat time.Time
-	silent   bool   // the guest init has missed its heartbeats
-	lost     string // why the link was lost, when the supervisor closed it
-	end      endFacts
-	saveMu   sync.Mutex
-	closed   bool // the last save is done
+	mu             sync.Mutex
+	m              *host.Manifest // the trusted manifest
+	rec            record         // the record of the run (life.go)
+	dirty          bool
+	leader         *client // the client whose size the agent's terminal has
+	turn           turnClock
+	mark           memMark
+	lastBeat       time.Time
+	heartbeatPause time.Time
+	heartbeatDelay time.Duration
+	silent         bool   // the guest init has missed its heartbeats
+	lost           string // why the link was lost, when the supervisor closed it
+	end            endFacts
+	saveMu         sync.Mutex
+	closed         bool // the last save is done
 
 	// Events from the guest, in order (claims.go): ready is true once the
 	// run is recorded, and early holds the events that came before, at
@@ -236,13 +265,20 @@ func runSupervisorMode(owner context.Context, id string, operation *host.Session
 	defer lf.Close()
 	s := &Supervisor{bootOwner: owned, cancelLifetime: cancelLifetime, automatic: automatic, bootOperation: operation, runtimeCleaned: make(chan struct{}), loadedName: m.Name, lifetime: lifetime, id: id, m: m, log: slog.New(slog.NewTextHandler(lf, nil)), quit: make(chan string, 1), stop: make(chan struct{}, 1),
 		sig: make(chan os.Signal, 1), peerCheck: host.PeerCheck(id)}
-	defer func() { returned = errors.Join(returned, s.finishOriginalStartup(s.closeSandbox())) }()
+	defer func() { s.finishNoneStopsV1(returned) }()
+	defer func() {
+		s.retainUnconfirmedNonePublicationV1()
+		returned = errors.Join(returned, s.finishOriginalStartup(s.closeSandbox()))
+	}()
 	generation := owned.Generation()
 	if generation == "" {
 		return execRefusal("the actual supervisor lease has no live generation")
 	}
 	s.generation = generation
 	s.runToken = generation + "/" + id
+	// A cleanup record belongs only to the previous physical run. Clear it
+	// before the first boot save, even when the next startup fails.
+	s.m.NoneCleanup = nil
 	defer func() { returned = errors.Join(returned, s.closeLateInput()) }()
 	notifySignals(s.sig)
 	defer stopSignals(s.sig)
@@ -274,10 +310,12 @@ func runSupervisorMode(owner context.Context, id string, operation *host.Session
 	}
 	if m.Wall.Driver != driverPlain {
 		operation, err = s.awaitOriginalLoan(lifetime)
+		if operation != nil {
+			s.bootOperation = operation
+		}
 		if err != nil {
 			return s.failed(host.EndBoot, err)
 		}
-		s.bootOperation = operation
 		m, err = operation.LoadContext(lifetime)
 		if err != nil {
 			return s.failed(host.EndBoot, err)
@@ -326,25 +364,15 @@ func runSupervisorMode(owner context.Context, id string, operation *host.Session
 	if err := s.prepareBootPackageSettings(s.lifetimeContext()); err != nil {
 		return s.failed(host.EndBoot, err)
 	}
-	agentsReceipt, err := s.prepareBootAgents(s.lifetimeContext())
-	if err != nil {
+	if err := s.prepareOwnedBootAgentsV1(s.lifetimeContext()); err != nil {
 		return s.failed(host.EndBoot, err)
 	}
-	defer func() {
-		if agentsReceipt != nil {
-			returned = errors.Join(returned, agentsReceipt.Close())
-		}
-	}()
 	sb, err := s.sandboxForRun()
-	if err == nil {
-		s.adoptFileCapture(sb)
-	}
+	s.retainSandboxPreparationV1(sb)
+	s.adoptFileCapture(sb)
 	if err != nil {
 		return s.failed(host.EndBoot, err)
 	}
-	s.mu.Lock()
-	s.sb = sb
-	s.mu.Unlock()
 	if err := s.boot(sb); err != nil {
 		// Every end runs the sandbox's cleanup: a boot that failed or that
 		// a stop cut short too.
@@ -355,14 +383,10 @@ func runSupervisorMode(owner context.Context, id string, operation *host.Session
 		}
 		return s.failed(kind, errors.Join(err, cleanupErr))
 	}
-	if agentsReceipt != nil {
-		if err := agentsReceipt.Close(); err != nil {
-			return s.failed(host.EndBoot, errors.Join(err, s.closeSandbox()))
-		}
-		agentsReceipt = nil
+	if err := s.bootAgentsCustody.closeV1(); err != nil {
+		return s.failed(host.EndBoot, errors.Join(err, s.closeSandbox()))
 	}
-	s.wg.Add(3)
-	go s.acceptGuestStreams()
+	s.wg.Add(2)
 	go s.acceptLoop()
 	go s.tick()
 	if testStarted != nil {
@@ -382,6 +406,9 @@ func (s *Supervisor) started(res proto.CtlStartResult, missing []string) error {
 	s.setPhase(host.LifeRunning)
 	s.rec.started = t
 	m := s.m
+	if host.IsNoneSupervisor(m) {
+		m.RunHook = ""
+	}
 	if u := host.OwnUnit(s.id); u != "" {
 		m.Run.Unit = u
 	}
@@ -392,10 +419,20 @@ func (s *Supervisor) started(res proto.CtlStartResult, missing []string) error {
 	m.Run.StartEnvelope = false
 	m.Run.StartedAt = t
 	m.Run.Generation = s.generation
+	m.NoneCleanup = nil
 	if exe, err := os.Executable(); err == nil {
 		m.HolderBinary = exe
 	}
 	m.HostVersion = version.Version
+	m.ForkPending = false
+	switch {
+	case m.Wall == nil || m.Wall.Level != "microvm":
+		m.Checkpoints = "checkpoints: off, this wall has no session disk"
+	case m.Policy != nil && m.Policy.Sandbox.Checkpoints != nil && *m.Policy.Sandbox.Checkpoints == 0:
+		m.Checkpoints = "checkpoints: off, disabled by configuration"
+	default:
+		m.Checkpoints = "checkpoints: waiting for the first file-clone probe"
+	}
 	m.DebugUntil = nil
 	m.MissingSecrets = missing
 	root := s.owner()
@@ -404,88 +441,23 @@ func (s *Supervisor) started(res proto.CtlStartResult, missing []string) error {
 	m.Status = host.Status{State: host.StateWorking, Since: t, Source: "start"}
 	s.lastBeat = now()
 	s.turn.since = now() // a session starts out working
-	kind := alerts.Started
-	if restored {
-		kind = alerts.Restored
-	}
 	snapshot := s.snapshot()
 	s.mu.Unlock()
 	if err := s.save(&snapshot, false); err != nil {
 		return err
 	}
-	if s.primary == nil && s.automatic == nil {
+	primaryReady := s.primary == nil && s.automatic == nil
+	if primaryReady {
 		if err := s.startMaxRun(); err != nil {
 			return err
 		}
 		if err := s.commitOriginalReady(); err != nil {
 			return err
 		}
-		s.raise(s.alertEvent(alerts.SandboxReady))
 	}
-	s.raise(s.alertEvent(kind))
-	s.registerLaunch()
+	s.recordStartedAlertsAndLaunch(restored, primaryReady)
 	s.replay()
 	s.audit.write("start", map[string]any{"level": snapshot.Wall.Level, "driver": snapshot.Wall.Driver, "version": version.Version})
 	s.log.Info("the session started", "unit", snapshot.Run.Unit, "peer_check", s.peerCheck)
 	return nil
-}
-
-// snapshot is a copy of the trusted manifest, to save or send after the
-// caller lets s.mu go, with the record of the run as its Life. It copies
-// the claims too: claims change in place. The caller holds s.mu.
-// tick saves the trusted manifest when it changed, reads the unit's memory
-// and watches the guest init's heartbeat, once a second, until the link
-// ends.
-func (s *Supervisor) tick() {
-	defer s.wg.Done()
-	t := time.NewTicker(time.Second)
-	defer t.Stop()
-	for {
-		select {
-		case <-t.C:
-		case <-s.link.Done():
-			return
-		}
-		s.saveMembers()
-		s.memoryTick()
-		s.watchBeat()
-		if n := s.ctl.drops(time.Now()); n > 0 {
-			s.audit.write("events_dropped", map[string]any{"count": n})
-		}
-		s.mu.Lock()
-		if s.m.Status.State == host.StateWorking {
-			// The agent works: the host is not idle (idle.go).
-			s.active(time.Now())
-		}
-		dirty := s.dirty
-		s.dirty = false
-		m := s.snapshot()
-		s.mu.Unlock()
-		if dirty {
-			_ = s.save(&m, false)
-		}
-	}
-}
-
-// active records activity in the session at t, at most once a second.
-// The caller holds s.mu.
-func (s *Supervisor) active(t time.Time) {
-	if t.Sub(s.m.LastActivityAt) >= time.Second {
-		s.m.LastActivityAt = t.UTC()
-		s.dirty = true
-	}
-}
-
-// orDefault is n, or def when n is not positive.
-func orDefault(n, def int) int {
-	if n <= 0 {
-		return def
-	}
-	return n
-}
-
-// homeDir is the user's home, where alert commands run.
-func homeDir() string {
-	h, _ := os.UserHomeDir()
-	return h
 }

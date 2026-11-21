@@ -3,6 +3,7 @@
 #define WALL_LAUNCHER_H
 #define _GNU_SOURCE
 #include <stdbool.h>
+#include <signal.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <sys/types.h>
@@ -10,6 +11,7 @@
 struct mount_request { int fd,stage_fd; char *guest,*stage_name; bool write; unsigned stage_fields; };
 struct request { unsigned version; bool probe, dns; size_t count, capacity; struct mount_request *mounts; };
 _Noreturn void fail(const char *what);
+_Noreturn void gvisor_outer_v1(volatile sig_atomic_t *stopping);
 struct msghdr;
 struct cmsghdr;
 struct cmsghdr *native_control_next(struct msghdr *message,size_t *cursor);

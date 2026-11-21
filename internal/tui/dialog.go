@@ -43,6 +43,7 @@ type newSession struct {
 	folderHost   client.Host
 	wall         string
 	downgrade    bool
+	preview      hostSelectionPreview
 	host         string
 	selector     string
 	sourceHost   client.Host
@@ -312,16 +313,17 @@ func (d *newSession) view(m *Model) string {
 		label(3, "Worktree")+d.worktreeRow(),
 		label(5, "Wall")+d.wallRow(m, fw),
 		label(6, "Host")+d.hostRow(m, fw),
+		strings.Repeat(" ", labelW)+sFaint.Render(trunc(shown(d.preview.reason), fw)),
 		"",
 	)
 	switch {
 	case d.starting:
-		body = append(body, sKey.Render(m.spinner())+" "+sFaint.Render(fmt.Sprintf("Starting %s on %s…", shown(d.agent()), shown(d.host))), "")
+		body = append(body, sKey.Render(m.spinner())+" "+sFaint.Render(d.startingText()), "")
 	case d.err != nil:
 		body = append(append(body, errorLines(d.err, cw)...), "")
 	}
 	hints := []hint{{"enter", "start"}, {"tab", "next"}, {"ctrl+enter", "start detached"}, {"esc", "cancel"}}
-	return sheet(w, "New session on "+shown(d.host), "", hints, trimBlank(body), toneNormal)
+	return sheet(w, d.selectionTitle(), "", hints, trimBlank(body), toneNormal)
 }
 
 // worktreeRow is a choice of two: the folder itself, or a new git worktree.

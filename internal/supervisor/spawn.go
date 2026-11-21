@@ -43,6 +43,10 @@ func (s *Supervisor) childList() []*Supervisor {
 }
 
 func (s *Supervisor) spawn(a api.JoinArgs) (*api.SessionInfo, error) {
+	return s.spawnContextV1(s.owner().lifetimeContext(), a)
+}
+
+func (s *Supervisor) spawnContextV1(owner context.Context, a api.JoinArgs) (*api.SessionInfo, error) {
 	root := s.owner()
 	root.spawnMu.Lock()
 	defer root.spawnMu.Unlock()
@@ -56,7 +60,7 @@ func (s *Supervisor) spawn(a api.JoinArgs) (*api.SessionInfo, error) {
 	if err := root.requireConfirmedStoreBatch(); err != nil {
 		return nil, err
 	}
-	budget := newActiveBootBudget(root.lifetimeContext(), bootTimeout)
+	budget := newActiveBootBudget(owner, bootTimeout)
 	defer budget.close()
 	ctx := context.Context(budget)
 	if len(a.Secrets) > 0 || a.SecretDelivery != nil && len(a.SecretDelivery.Modes) > 0 {
@@ -91,6 +95,7 @@ func (s *Supervisor) spawn(a api.JoinArgs) (*api.SessionInfo, error) {
 	child.wg.Add(1)
 	go child.acceptLoop()
 	args := proto.CtlStartArgs{RunToken: child.runToken, Session: child.id, Agent: child.m.Agent.Kind, Argv: slices.Clone(child.m.Agent.Argv), Env: slices.Clone(child.m.Env), Cwd: parent.Cwd, Cols: child.m.Term.Cols, Rows: child.m.Term.Rows, Hooks: slices.Clone(child.m.Agent.Hooks)}
+	args.SSHAgent = root.namedSSHAgentEnabled()
 	root.bootDecoyArgs(&args)
 	if err := root.bootPackageSettingsArgs(&args); err != nil {
 		return nil, err
@@ -98,7 +103,7 @@ func (s *Supervisor) spawn(a api.JoinArgs) (*api.SessionInfo, error) {
 	shellStartArgs(child.m, &args)
 	// P22 owns atomic member needs/value installation before the guest receives
 	// sentinels. This call uses its one canonical egress process and engine.
-	environment, err := root.installMemberPolicy(ctx, child.m, a.Secrets, a.SecretDelivery, a.SecretGeneration)
+	environment, err := root.installMemberPolicy(ctx, child.m, a.Secrets, a.SecretDelivery, a.SecretGeneration, a.ProtectedTrustedSecretValues)
 	if a.SecretDelivery != nil {
 		for name, mode := range a.SecretDelivery.Modes {
 			if mode == api.SecretModeBound {
@@ -310,10 +315,13 @@ func (s *Supervisor) stopOnlyMember(id string) error {
 }
 
 func (s *Supervisor) guestABI(got string) bool {
+	if host.IsNoneSupervisor(s.m) {
+		return got == proto.GuestNonePTYV1
+	}
 	if s.m.Wall != nil && s.m.Wall.Driver == driverPlain {
 		return got == proto.GuestPlainTestV1
 	}
-	if s.m.Wall != nil && (s.m.Wall.Driver == "chv" || s.m.Wall.Driver == "firecracker") {
+	if s.m.Wall != nil && (s.m.Wall.Driver == "chv" || s.m.Wall.Driver == "firecracker" || s.m.Wall.Driver == "nitro") {
 		return got == proto.GuestOwnedPTYV2
 	}
 	return got == proto.GuestPTY1000V1

@@ -90,6 +90,9 @@ func (b BootV1) ValidateForDriver(driver, arch string) error {
 	if err := image.ValidateAgentsContentV1(b.Agents); err != nil {
 		return err
 	}
+	if driver == "nitro" && (b.GuestRAM < 64*Mebibyte || b.GuestRAM%(2*Mebibyte) != 0) {
+		return fmt.Errorf("Nitro guest memory must be at least 64 MiB and a multiple of 2 MiB")
+	}
 	_, err := BudgetFor(b.GuestRAM)
 	return err
 }
@@ -117,6 +120,9 @@ func ValidateLimitsForDriver(driver string, cpus int, diskMax int64, arch string
 		// v1.18.0's KVM startup path allows 32 vCPUs on both architectures.
 		// Odd counts are valid because this driver always disables SMT.
 		maximum = 32
+	case "nitro":
+		// The parent-specific limit is checked under native host admission.
+		maximum = 1024
 	default:
 		return fmt.Errorf("the VM Need names an unsupported driver")
 	}

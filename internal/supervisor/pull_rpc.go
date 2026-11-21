@@ -19,7 +19,7 @@ func (s *Supervisor) pullRequest(c *client, req proto.Request) bool {
 		return true
 	}
 	if c.pull == nil {
-		owner, err := host.NewPullRPC(s.owner().lifetimeContext(), s.openPullSource)
+		owner, err := host.NewPullRPC(c.requestContextV1(s.owner().lifetimeContext()), s.openPullSource)
 		if err != nil {
 			c.pullMu.Unlock()
 			c.reply(req.ID, nil, pullFailure(err))

@@ -67,14 +67,63 @@ func (c *Cmd) uncertainWait(err error) error {
 // The mutex fences the reaping boundary against every numeric group signal.
 func (c *Cmd) completeOwnedWait(readStatus bool) error {
 	c.mu.Lock()
+	outer := c.gvisorOuter
+	var nested *gvisorNestedCreationV1
+	if outer != nil {
+		nested = outer.nested
+	}
+	c.mu.Unlock()
+	if outer != nil {
+		if err := outer.joinActualA(nested); err != nil {
+			return c.uncertainWait(err)
+		}
+	}
+	// Keep the original creation descriptors until the purpose-private mode
+	// owner confirms whole-source physical closure and settles its fence.
+	// This runs before normal Wait is consumed, so uncertainty can be retried.
+	if err := c.settleVMMNoFutureBeforeWaitV1(); err != nil {
+		return c.uncertainWait(err)
+	}
+	// Retain all original creation/code handles until the actual all-process
+	// cgroup is empty. A logical wait or namespace PID1 exit cannot replace it.
+	if err := c.closeGvisorForkFreezerV1(); err != nil {
+		return c.uncertainWait(err)
+	}
+	if outer != nil && outer.fork != nil {
+		// A live fork reader checks this Cmd. Join it before taking Cmd.mu.
+		if err := outer.fork.close(); err != nil {
+			return c.uncertainWait(err)
+		}
+	}
+	c.mu.Lock()
 	werr := c.cmd.Wait()
 	c.reaped, c.physical = true, true
 	if c.pidfd >= 0 {
 		c.lifecycleErr = errors.Join(c.lifecycleErr, unix.Close(c.pidfd))
 		c.pidfd = -1
 	}
+	if c.gvisorOuter != nil && c.gvisorOuter.child != nil {
+		c.lifecycleErr = errors.Join(c.lifecycleErr, c.gvisorOuter.child.Close())
+		c.gvisorOuter.child, c.gvisorOuter.childFD = nil, -1
+	}
+	if c.gvisorOuter != nil {
+		if c.gvisorOuter.nested != nil {
+			c.lifecycleErr = errors.Join(c.lifecycleErr, c.gvisorOuter.nested.closeJoinedV1())
+		}
+	}
+	c.lifecycleErr = errors.Join(c.lifecycleErr, c.closePublicationCaptureV1())
 	cleanupErr := c.lifecycleErr
 	c.mu.Unlock()
+	// A controller witness reader holds its own mutex while checking this
+	// command. Retire the public code/guest owner AFTER releasing Cmd.mu, once
+	// physical is already published, so cleanup never inverts that lock order.
+	if outer != nil {
+		codeErr := outer.closeCodeV1()
+		c.mu.Lock()
+		c.lifecycleErr = errors.Join(c.lifecycleErr, codeErr)
+		cleanupErr = c.lifecycleErr
+		c.mu.Unlock()
+	}
 	var b []byte
 	var readErr, closeErr error
 	if c.status != nil {
@@ -112,7 +161,7 @@ func (c *Cmd) PhysicalExitV1() bool {
 	c.mu.Lock()
 	if c.physical {
 		c.mu.Unlock()
-		return true
+		return c.closeGvisorForkFreezerV1() == nil
 	}
 	if c.phase != phaseUncertain || !c.owned || c.pidfd < 0 {
 		c.mu.Unlock()
@@ -126,6 +175,27 @@ func (c *Cmd) PhysicalExitV1() bool {
 		c.mu.Unlock()
 		return false
 	}
+	if c.gvisorOuter != nil && !c.gvisorOuter.noChild {
+		if c.gvisorOuter.childFD < 0 {
+			c.mu.Unlock()
+			return false
+		}
+		outerReady, outerErr := ownedPIDFDReady(c.gvisorOuter.childFD, 0)
+		if outerErr != nil {
+			c.lifecycleErr = errors.Join(c.lifecycleErr, outerErr)
+		}
+		if outerErr != nil || !outerReady {
+			c.mu.Unlock()
+			return false
+		}
+		if c.gvisorOuter.nested != nil {
+			if err := c.gvisorOuter.nested.readyV1(); err != nil {
+				c.lifecycleErr = errors.Join(c.lifecycleErr, err)
+				c.mu.Unlock()
+				return false
+			}
+		}
+	}
 	c.phase = phaseWaiting
 	c.mu.Unlock()
 	// A failed wait cannot establish control of a status-pipe holder that
@@ -133,8 +203,9 @@ func (c *Cmd) PhysicalExitV1() bool {
 	// its EOF; actual POLLIN already proves the owned process's closure.
 	_ = c.completeOwnedWait(false)
 	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.physical
+	physical := c.physical
+	c.mu.Unlock()
+	return physical && c.closeGvisorForkFreezerV1() == nil
 }
 
 // finish publishes the result before releasing pipes and notifying waiters.

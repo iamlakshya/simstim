@@ -54,7 +54,7 @@ simstim host add my-vps
 simstim new my-vps --name first
 ```
 
-This opens a persistent shell on the host. **Press `Ctrl+\` to detach**, then reconnect to the same session. The host may be left out when no other host has a session of that name:
+This opens a persistent shell in a sandbox at the host's pinned floor. `host add` records that floor from the host's capabilities. A host without a pinned floor needs `host prepare` first. To run without a wall, name the exception: `--wall none --downgrade`. **Press `Ctrl+\` to detach**, then reconnect to the same session. The host may be left out when no other host has a session of that name:
 
 ```sh
 simstim attach my-vps/first

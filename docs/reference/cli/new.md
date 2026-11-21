@@ -29,6 +29,7 @@ simstim new my-vps --agent claude --detach --json
 | --- | --- |
 | `-a`, `--agent <string>` | the agent: claude, codex, opencode, antigravity, gemini, amp, cursor, aider, goose or shell (default: `shell`) |
 | `--allow <stringArray>` | allow a network destination for this session (repeatable) |
+| `--allow-wake` | allow an automatic paid wake without its extra question |
 | `--base <string>` | the commit or branch the worktree starts from (default: HEAD) |
 | `--copy <stringArray>` | copy one laptop file as source:guest-path (repeatable) |
 | `--count <int>` | start this many sessions without attaching, named &lt;name&gt;-1 to &lt;name&gt;-&lt;count&gt; (default: `1`) |
@@ -36,6 +37,7 @@ simstim new my-vps --agent claude --detach --json
 | `--detach` | start it without attaching |
 | `-C`, `--dir <string>` | the folder on the host (default: `~`) |
 | `--downgrade` | run this start below the floor, with an explicit `--wall` level |
+| `--dry-run` | show automatic placement without starting or waking a host |
 | `--env <string>` | set a guest variable as NAME=VALUE, or read NAME from this computer |
 | `--env-file <string>` | read literal guest variables from a local file |
 | `--expose <stringArray>` | explicitly expose a named secret in the session (repeatable) |
@@ -44,10 +46,12 @@ simstim new my-vps --agent claude --detach --json
 | `--include <stringArray>` | copy a regular source file into the sandbox's clone (repeatable) |
 | `--inline` | start the agent in its inline mode, so your terminal keeps its scrollback (see agents.inline in config.toml) |
 | `--json` | print JSON for scripts, and ask nothing (see docs/how-to/scripting.md) |
+| `--machine <string>` | make one provider machine for this session (e2b), removed by rm |
 | `--memory-max <size>` | cap the session's memory: auto, or a size such as 4G (default: sessions.memory_max in config.toml) |
 | `--mkdir` | make the folder on the host if it does not exist, without asking |
 | `--mount <stringArray>` | grant a host folder to the sandbox, read-only by default (repeatable) |
 | `-n`, `--name <string>` | a name for the session (default: the folder name) |
+| `--need <stringArray>` | require automatic placement architecture, tier or local features (repeatable) |
 | `--no-setup-script` | do not run the repository's setup script this time |
 | `--preset <string>` | the network preset: locked, balanced or open (default: `balanced`) |
 | `--profile <string>` | a named policy profile from config.toml |
@@ -59,7 +63,7 @@ simstim new my-vps --agent claude --detach --json
 | `--ssh-agent` | grant the laptop's SSH agent to one unwalled session on an own host |
 | `--task <string>` | one line about this session's work |
 | `--untrusted` | cap this session's grants at the throwaway tier |
-| `--wall <string>` | the wall: auto (the host floor), none, process, gvisor or microvm (default: `none`) |
+| `--wall <string>` | the wall: auto (the host floor), none, process, gvisor or microvm (default: `auto`) |
 | `-w`, `--worktree` | give the session its own git worktree and branch |
 
 ## Flags from the parent command

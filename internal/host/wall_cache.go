@@ -28,6 +28,9 @@ func writeWallCacheContext(ctx context.Context, probes []api.WallProbe) error {
 	if err := ctx.Err(); err != nil {
 		return stateMetadataFailure(err)
 	}
+	if err := validateGvisorCachePublicationV1(ctx, probes); err != nil {
+		return err
+	}
 	helperVersion := helperWallVersion()
 	if helperVersion == "" {
 		return UserError("state_metadata", "cannot identify the helper for the sandbox probe cache", "Inspect the running helper before refreshing its sandbox probe cache.")
@@ -35,6 +38,9 @@ func writeWallCacheContext(ctx context.Context, probes []api.WallProbe) error {
 	data, err := json.Marshal(wallCache{BootID: BootID(), Version: helperVersion, Walls: probes})
 	if err != nil {
 		return stateMetadataFailure(err)
+	}
+	if err := validateGvisorCachePublicationV1(ctx, probes); err != nil {
+		return err
 	}
 	return publishStateMetadata(ctx, stateWalls, data)
 }

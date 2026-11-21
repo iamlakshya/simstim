@@ -39,6 +39,8 @@ type ImageSaveSource struct {
 	publication     *runtimePublication
 	pending         *image.PreparedSave
 	once            sync.Once
+	closeMu         sync.Mutex
+	closed          bool
 	closeErr        error
 }
 
@@ -173,6 +175,7 @@ func (source *ImageSaveSource) Prepare(ctx context.Context, request image.SaveRe
 	}
 	owned, finishPublication := imageSaveContext(owned, source.publication.ctx)
 	defer finishPublication()
+	owned = context.WithValue(owned, publicationSourceContextV1{}, source.publication.operation)
 	prepared, err := source.store.PrepareSave(owned, source.publication.ctx, request, plan, func(ctx context.Context, output io.Writer) error {
 		if err := source.Check(ctx); err != nil {
 			return err
@@ -228,19 +231,41 @@ func (source *ImageSaveSource) Close() error {
 		source.cancel()
 		source.mu.Unlock()
 		source.active.Wait()
-		if source.pending != nil {
-			source.closeErr = errors.Join(source.closeErr, source.pending.Close())
-		}
-		if source.store != nil {
-			source.closeErr = errors.Join(source.closeErr, source.store.Close())
-		}
-		if source.publication != nil {
-			source.closeErr = errors.Join(source.closeErr, source.publication.close())
-		}
 		clear(source.values)
-		source.closeErr = errors.Join(source.closeErr, source.operation.CloseWithError())
 	})
-	return source.closeErr
+	source.closeMu.Lock()
+	defer source.closeMu.Unlock()
+	if source.closed {
+		return nil
+	}
+	for _, close := range []func() error{
+		func() error {
+			if source.pending != nil {
+				return source.pending.Close()
+			}
+			return nil
+		},
+		func() error {
+			if source.store != nil {
+				return source.store.Close()
+			}
+			return nil
+		},
+		func() error {
+			if source.publication != nil {
+				return source.publication.close()
+			}
+			return nil
+		},
+		source.operation.CloseWithError,
+	} {
+		if err := close(); err != nil {
+			source.closeErr = err
+			return err
+		}
+	}
+	source.closed, source.closeErr = true, nil
+	return nil
 }
 
 func imageSaveSourceFailure() error {
@@ -263,12 +288,12 @@ func beginImageSavePublication(ctx context.Context, source *ImageSaveSource) (*r
 	if err := source.Check(ctx); err != nil {
 		return nil, err
 	}
-	operation, err := beginPlacementOperation(ctx, "publish")
+	operation, err := beginPlacementPublicationV1(ctx, "publish")
 	if err != nil {
 		return nil, err
 	}
 	owned, cancel := context.WithCancelCause(ctx)
-	publication := &runtimePublication{ctx: owned, cancel: cancel, owner: operation.owner, operation: operation, stop: make(chan struct{}), watched: make(chan struct{}), imageSave: source}
+	publication := &runtimePublication{ctx: context.WithValue(owned, publicationSourceContextV1{}, operation), cancel: cancel, owner: operation.owner, operation: operation, stop: make(chan struct{}), watched: make(chan struct{}), imageSave: source}
 	go publication.watch()
 	return publication, nil
 }

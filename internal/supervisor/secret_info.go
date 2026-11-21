@@ -16,6 +16,9 @@ func (s *Supervisor) snapshotForInfo() (host.Manifest, error) {
 	}
 	selected := s.snapshot()
 	s.mu.Unlock()
+	if s.unwalledV1() {
+		selected.DebugUntil = s.noneDebugUntilV1()
+	}
 	root := s.owner()
 	if root == s {
 		return selected, nil

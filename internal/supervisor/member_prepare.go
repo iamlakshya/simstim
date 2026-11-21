@@ -51,6 +51,7 @@ func trustedMemberStore(a proto.CtlStartArgs, hasCA bool, proxy string) (*truste
 	if err != nil {
 		return nil, err
 	}
+	env = memberenv.NamedSSHEnvironment(env, a.SSHAgent)
 	if hasCA {
 		env, err = memberenv.Trust(env, a.Agent, filepath.Join(host.GuestRunDir(), "ca.pem"), filepath.Join(host.GuestRunDir(), "ca-bundle.pem"))
 		if err != nil {

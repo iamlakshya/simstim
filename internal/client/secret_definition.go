@@ -6,10 +6,11 @@ import "reflect"
 // TOML accepts the legacy command string or a table with these exact fields.
 // Nil Hosts and OnHosts mean absent. A nonnil empty OnHosts denies every host.
 type SecretDefinition struct {
-	Run         string   `toml:"run"`
-	Hosts       []string `toml:"hosts"`
-	Header      string   `toml:"header,omitempty"`
-	Format      string   `toml:"format,omitempty"`
+	Run    string   `toml:"run"`
+	Hosts  []string `toml:"hosts"`
+	Header string   `toml:"header,omitempty"`
+	Format string   `toml:"format,omitempty"`
+	// Kind selects an ordinary secret when empty, or a named SSH key with ssh-key.
 	Kind        string   `toml:"kind,omitempty"`
 	OnHosts     []string `toml:"on_hosts"`
 	formatEmpty bool

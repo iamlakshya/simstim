@@ -10,7 +10,15 @@ func (s *Server) formatAudit(e AuditEntry) AuditEntry {
 	return FormatAudit(e, s.scrubber, s.now())
 }
 
-func (s *Server) emitAudit(e AuditEntry) {
+func (s *Server) emitAudit(e AuditEntry, attemptedHost ...string) {
+	if e.Decision == "allow-unknown" && len(attemptedHost) == 1 {
+		s.mu.RLock()
+		table := s.synth
+		s.mu.RUnlock()
+		if table != nil {
+			e.UnknownDestination = table.unknownID(attemptedHost[0])
+		}
+	}
 	_ = s.writeControlJSON(context.Background(), nil, proto.TEvent, CtlEvent{Event: EventAudit, Audit: &e})
 }
 

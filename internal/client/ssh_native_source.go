@@ -50,7 +50,7 @@ type sshNativeSourceScope struct {
 
 func (s *SSH) requiresNativeSource() bool {
 	host := s.entryHost()
-	return host.Machine != nil && host.Machine.Provider == "lima" && host.Machine.Source != nil
+	return host.JoinedSSH != nil || host.Machine != nil && host.Machine.Provider == "lima" && host.Machine.Source != nil
 }
 
 func (scope *sshNativeSourceScope) matches(s *SSH) bool {
@@ -81,6 +81,9 @@ func (scope *sshNativeSourceScope) check(ctx context.Context) error {
 func (scope *sshNativeSourceScope) finish() error {
 	scope.once.Do(func() {
 		check := scope.check(scope.ctx)
+		if _, joined := scope.opener.(joinedProjectionMarkerV1); joined {
+			check = revalidateJoinedProjectionAfterStepV1(scope.ctx, scope)
+		}
 		scope.active.Store(false)
 		scope.err = errors.Join(check, scope.lease.Close())
 	})
@@ -102,13 +105,17 @@ func (s *SSH) beginNativeSource(ctx context.Context) (context.Context, func() er
 			return ctx, nil, machineSourceUnknown()
 		}
 	}
-	if s.nativeSource == nil {
+	opener := s.nativeSource
+	if opener == nil && s.entryHost().JoinedSSH != nil {
+		opener = &joinedProjectionSourceV1{route: cloneObservationHost(s.Host), original: cloneObservationHost(s.entryHost())}
+	}
+	if opener == nil {
 		if s.requiresNativeSource() {
 			return ctx, nil, machineSourceUnknown()
 		}
 		return ctx, func() error { return nil }, nil
 	}
-	lease, err := s.nativeSource.OpenSSHNativeSource(ctx)
+	lease, err := opener.OpenSSHNativeSource(ctx)
 	if err != nil {
 		if validSSHNativeLease(lease) {
 			err = errors.Join(err, lease.Close())
@@ -118,7 +125,7 @@ func (s *SSH) beginNativeSource(ctx context.Context) (context.Context, func() er
 	if !validSSHNativeLease(lease) {
 		return ctx, nil, machineSourceUnknown()
 	}
-	scope := &sshNativeSourceScope{ctx: ctx, opener: s.nativeSource, lease: lease, route: cloneObservationHost(s.Host), original: cloneObservationHost(s.entryHost())}
+	scope := &sshNativeSourceScope{ctx: ctx, opener: opener, lease: lease, route: cloneObservationHost(s.Host), original: cloneObservationHost(s.entryHost())}
 	scope.active.Store(true)
 	if err := scope.check(ctx); err != nil {
 		return ctx, nil, errors.Join(err, scope.finish())

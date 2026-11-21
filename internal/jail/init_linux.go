@@ -27,6 +27,23 @@ func runInit(c *setup, env []string) int {
 	if err := cloexecFrom(3); err != nil {
 		return stageFailed(err)
 	}
+	initLease, leaseErr := holdSlotInitLeaseV1(c)
+	if leaseErr != nil {
+		return stageFailed(leaseErr)
+	}
+	if initLease != nil {
+		defer initLease.Close()
+	}
+	publicationHold, publicationErr := holdPublicationInitV1(c)
+	if publicationErr != nil {
+		return stageFailed(publicationErr)
+	}
+	if publicationHold != nil {
+		// LIFO: every normal/error path joins actual descendants FIRST. The
+		// retained SH OFD cannot vanish while init could create a writer.
+		defer closePublicationInitV1(publicationHold)
+		defer endRest()
+	}
 	var status *os.File
 	if c.StatusFD > 0 {
 		status = os.NewFile(uintptr(c.StatusFD), "status")
@@ -35,6 +52,10 @@ func runInit(c *setup, env []string) int {
 	pid, err := startCommand(c, env)
 	if err != nil {
 		return stageFailed(err)
+	}
+	if c.gvisorCreation != nil {
+		defer c.gvisorCreation.Close()
+		defer c.gvisorCreationChild.Release()
 	}
 	relay := startRelay(pid, sigs, unix.Kill)
 	ws, err := reapWithRelay(pid, relay)
@@ -61,6 +82,9 @@ var afterMainReap func()
 // startCommand builds the root, confines this stage, and starts the exec
 // stage. It returns the command's process ID.
 func startCommand(c *setup, env []string) (int, error) {
+	if c.GvisorV1Version == 1 && (!c.gvisorOuterNative || c.gvisorOuterGate == nil) {
+		return 0, gvisorHandoffFailureV2("the outer stage has no original native mapping producer")
+	}
 	helper, err := unix.Open(self, unix.O_PATH|unix.O_CLOEXEC, 0)
 	if err != nil {
 		return 0, stepFailed("cannot open this program", "Report this as a bug.", err)
@@ -74,6 +98,9 @@ func startCommand(c *setup, env []string) (int, error) {
 		if err := awaitMaps(c.SyncFD); err != nil {
 			return 0, err
 		}
+	}
+	if err := enterVMMStageV1(c, stageInit); err != nil {
+		return 0, err
 	}
 	if !c.Userns && kernelABI() < minABI {
 		return 0, failure("a jail without a user namespace needs Landlock ABI 3 (Linux 6.2) or later, and this kernel has ABI "+
@@ -105,11 +132,26 @@ func startCommand(c *setup, env []string) (int, error) {
 		}
 		fds = append(fds, execFDs...)
 	}
+	if err == nil && c.GvisorV1Version == 1 && c.gvisorOuterNative {
+		c.gvisorForkRoot, err = captureGvisorMountedRootV2()
+	}
 	for _, fd := range fds {
 		_ = unix.Close(fd)
 	}
 	if err != nil {
 		return 0, err
+	}
+	if c.GvisorV1Version == 1 && c.gvisorOuterNative {
+		c.gvisorCommonScope, err = installGvisorCommonScopeV1(c, kernelABI())
+		if err != nil {
+			return 0, err
+		}
+		defer func() {
+			if c.gvisorCommonScope != nil {
+				_ = c.gvisorCommonScope.Close()
+				c.gvisorCommonScope = nil
+			}
+		}()
 	}
 	rs, err := initRules(c, helper)
 	if err != nil {
@@ -136,6 +178,9 @@ func startCommand(c *setup, env []string) (int, error) {
 		return 0, stepFailed("cannot close the init helper capability", "Retain the original jail owner and inspect its setup.", err)
 	}
 	helper = -1
+	if c.GvisorV1Version == 1 {
+		return startGvisorExecV2(c, env, rs)
+	}
 	return startExec(c, env)
 }
 
@@ -168,7 +213,14 @@ func commandRules(c *setup) (*ruleset, error) {
 	if err := checkStageFileRulesV1(c); err != nil {
 		return nil, err
 	}
-	rs, err := newRuleset(kernelABI(), c.Net)
+	var rs *ruleset
+	var err error
+	abi := kernelABI()
+	if c.GvisorV1Version == 1 && c.gvisorOuterNative && abi >= 6 {
+		rs, err = newGvisorParentFilesystemRulesV1(c, abi)
+	} else {
+		rs, err = newRuleset(abi, c.Net)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -193,6 +245,9 @@ func commandRules(c *setup) (*ruleset, error) {
 			return nil, err
 		}
 	}
+	if err := addPrivateVMMRulesV1(c, rs); err != nil {
+		return nil, err
+	}
 	return rs, nil
 }
 
@@ -208,8 +263,14 @@ func startExec(c *setup, env []string) (int, error) {
 	files := append([]*os.File{os.Stdin, os.Stdout, os.Stderr}, extra...)
 	//nolint:gosec // G702: this program starts itself again
 	attr := &syscall.SysProcAttr{Pdeathsig: unix.SIGKILL}
-	if c.GvisorV1Version == 1 {
-		attr = gvisorExecNamespacesV1()
+	createdFD := -1
+	if c.VMMExecV1 != nil {
+		attr.PidFD = &createdFD
+	}
+	if c.GvisorV1Version != 0 {
+		_ = r.Close()
+		_ = w.Close()
+		return 0, failure("gvisor cannot use the inherited-descriptor exec stage", "Use the closed self-map bootstrap purpose.")
 	}
 	p, err := os.StartProcess(self, []string{argv0, fileRulesStageV1(stageExec, c), strconv.Itoa(3 + c.Files)},
 		&os.ProcAttr{Env: env, Files: files, Sys: attr})
@@ -218,19 +279,32 @@ func startExec(c *setup, env []string) (int, error) {
 		_ = w.Close()
 		return 0, stepFailed("cannot start the jail's command", "Read the error above.", errors.Join(err, closeErr))
 	}
+	if err := reportVMMCreationV1(c, stageInit, p, createdFD); err != nil {
+		_ = w.Close()
+		_ = p.Kill()
+		_, waitErr := p.Wait()
+		closeErr := closeInitInheritedV1(extra)
+		return 0, errors.Join(err, waitErr, closeErr)
+	}
 	// Only the trusted child stage exists; it is blocked on its setup pipe.
 	// Close the parent's copies through these exact wrappers before releasing
 	// that child. No raw Files/bind/rule capability remains reachable via PID 1.
-	if closeErr := closeInitInheritedV1(extra); closeErr != nil {
+	if closeErr := closeVMMInitInheritedV1(c, extra); closeErr != nil {
 		_ = w.Close()
 		_ = p.Kill()
 		_, waitErr := p.Wait()
 		return 0, stepFailed("cannot close the init's setup capabilities before command release", "Retain the original jail owner and inspect its descriptor setup.", errors.Join(closeErr, waitErr))
 	}
-	next := *c
-	next.StatusFD, next.SyncFD, next.Sub = 0, 0, nil
+	next := setupForFinalExecV1(c)
 	if err := writeSetup(w, &next); err != nil {
-		return 0, err
+		_ = p.Kill()
+		_, waitErr := p.Wait()
+		return 0, errors.Join(err, waitErr)
+	}
+	if err := finishVMMCreatorV1(c, stageInit, extra); err != nil {
+		_ = p.Kill()
+		_, waitErr := p.Wait()
+		return 0, errors.Join(err, waitErr)
 	}
 	return p.Pid, nil
 }

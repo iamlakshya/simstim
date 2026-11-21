@@ -34,7 +34,7 @@ func (s *Supervisor) serveExec(c *client, r *bufio.Reader, req proto.Request) {
 	cwd := s.m.Cwd
 	s.mu.Unlock()
 	id := host.NewID()
-	ctx, cancel := context.WithTimeout(context.Background(), bootTimeout)
+	ctx, cancel := context.WithTimeout(c.requestContextV1(s.owner().lifetimeContext()), bootTimeout)
 	defer cancel()
 	err := s.ctl.request(ctx, proto.CtlExec, proto.CtlExecArgs{ID: id, Argv: a.Argv, Cwd: cwd, TimeoutMS: a.TimeoutMS}, nil)
 	if err != nil {

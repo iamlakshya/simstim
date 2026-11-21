@@ -6,45 +6,60 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/iamlakshya/simstim/internal/api"
+	"github.com/iamlakshya/simstim/internal/cachefs"
+	"github.com/iamlakshya/simstim/internal/jail"
+	"github.com/iamlakshya/simstim/internal/link"
+	"github.com/iamlakshya/simstim/internal/wall"
 	"io"
 	"net"
 	"os"
 	"path/filepath"
 	"sync"
 	"time"
-
-	"github.com/iamlakshya/simstim/internal/api"
-	"github.com/iamlakshya/simstim/internal/cachefs"
-	"github.com/iamlakshya/simstim/internal/jail"
-	"github.com/iamlakshya/simstim/internal/link"
-	"github.com/iamlakshya/simstim/internal/wall"
 )
 
 type sandbox struct {
-	driver             *Driver
-	spec               wall.Spec
-	uid                string
-	owner              context.Context
-	lease              *os.File
-	agentsLease        io.Closer
-	mu                 sync.Mutex
-	destroyMu          sync.Mutex
-	reapMu             sync.Mutex
-	started, destroyed bool
-	destroying         bool
-	preparedReleased   bool
-	forced             bool
-	command            ownedVMProcess
-	physicalExit       bool
-	cancel             context.CancelFunc
-	connection         net.Conn
-	control            *runnerControl
-	done               chan struct{}
-	exit               wall.Exit
-	log                byteTail
-	logDone            chan struct{}
-	helloChecked       bool
-	bootFacts          api.CapProbe
+	retirementMu         sync.Mutex
+	retirements          map[*os.File]*microVMFileRetirementV2
+	retirementDiagnostic error
+	preparationClosing   bool
+	dataRemoved          bool
+	bootCustody          *bootFileCustodyV2
+	driver               *Driver
+	spec                 wall.Spec
+	uid                  string
+	owner                context.Context
+	lease                *os.File
+	leaseMu              sync.Mutex
+	leaseCloseErr        error
+	preparedRoot         *os.Root
+	rootCloseErr         error
+	preparationErr       error
+	preparedFiles        []*os.File
+	fileCloseErr         error
+	agentsLease          io.Closer
+	agentsCloseMu        sync.Mutex
+	mu                   sync.Mutex
+	destroyMu            sync.Mutex
+	reapMu               sync.Mutex
+	started, destroyed   bool
+	destroying           bool
+	preparedReleased     bool
+	forced               bool
+	command              ownedVMProcess
+	physicalExit         bool
+	cancel               context.CancelFunc
+	connection           net.Conn
+	control              *runnerControl
+	done                 chan struct{}
+	exit                 wall.Exit
+	log                  byteTail
+	logDone              chan struct{}
+	helloChecked         bool
+	bootFacts            api.CapProbe
+	snapshotDisk         *snapshotDiskOwnerV1
+	partialSlotOwners    []interface{ Close() error }
 }
 
 var _ wall.Driver = (*Driver)(nil)
@@ -54,8 +69,13 @@ func newSandbox(driver *Driver, spec wall.Spec, lease *os.File, mode string, own
 	return &sandbox{driver: driver, spec: cloneBindingSpec(spec), lease: lease, uid: mode, owner: owner, done: make(chan struct{}), exit: wall.Exit{Code: -1}}
 }
 
-func (s *sandbox) Start(ctx context.Context) (net.Conn, error) {
+func (s *sandbox) Start(ctx context.Context) (_ net.Conn, returned error) {
 	s.mu.Lock()
+	if s.preparationErr != nil {
+		err := s.preparationErr
+		s.mu.Unlock()
+		return nil, err
+	}
 	if s.started || s.destroyed || s.destroying || s.preparedReleased {
 		s.mu.Unlock()
 		return nil, fmt.Errorf("this microvm cannot be started twice")
@@ -73,8 +93,9 @@ func (s *sandbox) Start(ctx context.Context) (net.Conn, error) {
 	if err != nil {
 		return nil, s.startFailed(err)
 	}
-	if !facts.UserNS || !facts.KVM.Usable || !facts.Seccomp || facts.LandlockABI < 1 || !api.SupportsMicroVMKernel(s.driver.Name(), facts.Kernel) {
-		return nil, s.startFailed(fmt.Errorf("the microvm needs a supported host kernel, namespace jail, seccomp, Landlock and usable KVM access"))
+	usable, _ := s.driver.kind.deviceAccess(facts)
+	if !facts.UserNS || !usable || !facts.Seccomp || facts.LandlockABI < 1 || !api.SupportsMicroVMKernel(s.driver.Name(), facts.Kernel) {
+		return nil, s.startFailed(fmt.Errorf("the microvm needs a supported host kernel, namespace jail, seccomp, Landlock and usable VMM device access"))
 	}
 	if err := noDumpPrerequisite(); err != nil {
 		return nil, s.startFailed(err)
@@ -82,7 +103,13 @@ func (s *sandbox) Start(ctx context.Context) (net.Conn, error) {
 	if !jail.Userns() {
 		return nil, s.startFailed(fmt.Errorf("the VMM requires the canonical namespace jail; its empty network namespace is unavailable"))
 	}
-	if s.uid != uidMode(facts) {
+	if s.uid == slotUIDModeV1Name {
+		if !slotAccountModeV1(facts) {
+			return nil, s.startFailed(fmt.Errorf("the saved own-account mode has no current optional root producer"))
+		}
+		return s.startSlotV1(ctx, facts)
+	}
+	if !(s.driver.kind == nitroBackend && s.uid == "login") && s.uid != uidMode(facts) {
 		return nil, s.startFailed(fmt.Errorf("the microvm persistent disk identity mode changed before start"))
 	}
 	subuid := s.uid == "subuid"
@@ -109,11 +136,17 @@ func (s *sandbox) Start(ctx context.Context) (net.Conn, error) {
 	if err != nil {
 		return nil, s.startFailed(err)
 	}
+	if err := s.captureSnapshotDiskV1(ctx); err != nil {
+		return nil, s.startFailed(err)
+	}
 	files, err := s.driver.openBootFiles(ctx, s.spec)
+	if adoptErr := s.adoptBootFilesV2(files); adoptErr != nil {
+		return nil, s.startFailed(errors.Join(err, adoptErr))
+	}
 	if err != nil {
 		return nil, s.startFailed(err)
 	}
-	defer files.close()
+	defer s.finishBootFilesAtReturnV2(&returned)
 	if err := s.driver.options.Reference(ctx, s.spec); err != nil {
 		return nil, s.startFailed(err)
 	}
@@ -166,20 +199,15 @@ func (s *sandbox) Start(ctx context.Context) (net.Conn, error) {
 	if err := control.waitReady(boot); err != nil {
 		s.Kill()
 		s.Wait()
-		return nil, fmt.Errorf("guest connection was not ready: %w", err)
+		return nil, s.bootFailure(fmt.Errorf("guest connection was not ready: %w", err))
 	}
 	checked, err := link.ReadGuestHello(boot, conn)
 	if err != nil {
 		s.Kill()
 		s.Wait()
-		return nil, fmt.Errorf("guest init did not boot within its deadline: %w", err)
+		return nil, s.bootFailure(fmt.Errorf("guest init did not boot within its deadline: %w", err))
 	}
 	stopStartupCancellation()
-	if ctx.Err() != nil {
-		s.Kill()
-		s.Wait()
-		return nil, ctx.Err()
-	}
 	if ctx.Err() != nil {
 		s.Kill()
 		s.Wait()
@@ -195,7 +223,11 @@ func (s *sandbox) Start(ctx context.Context) (net.Conn, error) {
 }
 
 func (s *sandbox) startFailed(err error) error {
-	err = errors.Join(err, s.releaseAgentsLease(), s.releaseLease())
+	snapshotErr := s.closeSnapshotDiskV1()
+	err = errors.Join(err, snapshotErr)
+	if snapshotErr == nil {
+		err = errors.Join(err, s.releaseBootStackV2())
+	}
 	if logErr := s.recordDiagnostics(); logErr != nil {
 		err = fmt.Errorf("%w; record VMM diagnostics: %v", err, logErr)
 	}
@@ -250,18 +282,6 @@ func (s *sandbox) Stop(ctx context.Context, grace time.Duration) error {
 	}
 }
 
-// PowerButton is the supervisor's bounded fallback when guest ctl stop fails.
-func (s *sandbox) PowerButton(ctx context.Context) error {
-	s.mu.Lock()
-	control := s.control
-	s.mu.Unlock()
-	if control == nil {
-		return fmt.Errorf("the VMM control channel is not running")
-	}
-	_, err := control.call(ctx, "power-button")
-	return err
-}
-
 // State reads only the VMM state API; no guest controls or arbitrary URL exists.
 func (s *sandbox) State(ctx context.Context) ([]byte, error) {
 	s.mu.Lock()
@@ -311,95 +331,26 @@ func (s *sandbox) Wait() wall.Exit {
 	defer s.mu.Unlock()
 	return s.exit
 }
-func (s *sandbox) Abilities() wall.Abilities { return wall.Abilities{} }
-
-// CleanExit is owned-process evidence for the canonical state publisher.
-// A guest status claim, forced stop or incomplete start cannot establish it.
-func (s *sandbox) CleanExit() bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	select {
-	case <-s.done:
-	default:
-		return false
-	}
-	return s.cleanExitLocked()
-}
-
-// cleanExitLocked is the ONE owned natural-exit predicate. Caller holds mu
-// and has already observed done; neither guest claims nor Stop can satisfy it.
-func (s *sandbox) cleanExitLocked() bool {
-	return s.started && s.physicalExit && !s.forced && s.exit.Code == 0 && s.exit.Signal == "" && s.exit.Err == nil
-}
-
-func (s *sandbox) Destroy() error {
-	s.destroyMu.Lock()
-	defer s.destroyMu.Unlock()
-	s.mu.Lock()
-	if s.destroyed {
-		s.mu.Unlock()
-		return nil
-	}
-	s.destroying = true
-	started := s.started
-	s.mu.Unlock()
-	defer func() { s.mu.Lock(); s.destroying = false; s.mu.Unlock() }()
-	if started {
-		_ = s.Kill()
-		s.Wait()
-		if !s.refreshPhysicalExit() {
-			return fmt.Errorf("the owned microvm may still run. Retain its disk and retry cleanup through this same controller")
-		}
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	root, err := cachefs.OpenPrivateRoot(s.spec.SessionDir, false)
-	if err != nil {
-		return err
-	}
-	defer root.Close()
-	s.mu.Lock()
-	lease := s.lease
-	s.mu.Unlock()
-	if lease == nil {
-		lease, err = acquireVMLeaseFor(ctx, root, s.driver.kind)
-		if err != nil {
-			return err
-		}
-		defer lease.Close()
-	}
-	if err := jail.RemoveAll(ctx, vmDataDir(s.spec)); err != nil {
-		return err
-	}
-	if err := root.Remove(s.driver.kind.name() + ".json"); err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("remove microvm specification: %w", err)
-	}
-	s.releaseLease()
-	s.mu.Lock()
-	s.destroyed = true
-	s.mu.Unlock()
-	return nil
-}
-
-func (s *sandbox) releaseLease() error {
-	s.mu.Lock()
-	lease := s.lease
-	s.lease = nil
-	s.mu.Unlock()
-	if lease != nil {
-		return lease.Close()
-	}
-	return nil
-}
 
 func (s *sandbox) releaseAgentsLease() error {
+	s.agentsCloseMu.Lock()
+	defer s.agentsCloseMu.Unlock()
 	s.mu.Lock()
 	lease := s.agentsLease
+	s.mu.Unlock()
+	if lease == nil {
+		return nil
+	}
+	// Close may need the original native creation to settle. Keep that exact
+	// owner on failure, and never hold the main mutex across its physical join.
+	if err := lease.Close(); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	// Both Start paths install this field once; a second Start is refused.
+	// This serialised release is its only clearing writer.
 	s.agentsLease = nil
 	s.mu.Unlock()
-	if lease != nil {
-		return lease.Close()
-	}
 	return nil
 }
 

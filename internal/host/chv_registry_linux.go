@@ -85,7 +85,7 @@ func CloudHypervisorResourcesWithPublisherV1(publish func(context.Context, wall.
 		return nil, fmt.Errorf("the VM resource factory needs a trusted live manifest publisher")
 	}
 	return &vmResourcesV1{makeDriver: func() (wall.Driver, error) {
-		return chv.New(chv.Options{Facts: microVMFacts, Identity: microVMIdentity, Domain: microVMStoreDomain, Reference: publish, Diagnostic: recordVMDiagnostic})
+		return chv.New(chv.Options{Facts: microVMFacts, Identity: microVMIdentity, Domain: microVMStoreDomain, Reference: publish, Diagnostic: recordVMDiagnostic, ForkDiskV1: withOriginalForkDiskDataV1, ReservationV2: withOriginalCheckpointReservationV2, ReservationSelectedV2: hasOriginalCheckpointReservationV2})
 	}}, nil
 }
 

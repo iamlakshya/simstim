@@ -40,8 +40,10 @@ func lockDown(c *setup, rs *ruleset, progs [][]bpf.RawInstruction) error {
 	if err := unix.Prctl(unix.PR_SET_DUMPABLE, 0, 0, 0, 0); err != nil {
 		return failure("cannot clear the dumpable flag after identity changes: "+err.Error(), "Report this as a bug.")
 	}
-	if err := rs.enforce(); err != nil {
-		return err
+	if c.GvisorV1Version != 1 || !c.gvisorOuterNative || c.gvisorOuterGate == nil {
+		if err := rs.enforce(); err != nil {
+			return err
+		}
 	}
 	for _, p := range progs {
 		if err := loadFilter(p); err != nil {

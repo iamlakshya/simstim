@@ -146,12 +146,22 @@ func cleanLines(list []string, clean func(string) string) []string {
 // CleanSession is a copy of a session row to draw, with every string that
 // the host sent cleaned. Requests use the row as the host sent it.
 func CleanSession(s Session) Session {
+	if s.Usage != nil {
+		if api.ValidModelUsageV1(*s.Usage) {
+			s.Usage = api.CloneModelUsageV1(s.Usage)
+		} else {
+			s.Usage = nil
+		}
+	}
+	s.NamedSSHKeys = cleanNamedSSHKeyView(s.NamedSSHKeys)
+	s = cleanPolicySessionInfo(s)
 	s.Wall = cleanWallInfoV1(s.Wall)
 	s.PackageManagers = proto.ClonePackageManagersV1(s.PackageManagers)
 	if proto.ValidatePackageManagersV1(s.PackageManagers) != nil {
 		s.PackageManagers = nil
 	}
 	s.ID, s.Name, s.Agent = CleanLine(s.ID), CleanLine(s.Name), CleanLine(s.Agent)
+	s.ForkOf, s.Checkpoints = CleanLine(s.ForkOf), CleanLine(s.Checkpoints)
 	s.Cwd = CleanPath(s.Cwd)
 	s.State, s.Source, s.Reason = CleanLine(s.State), CleanLine(s.Source), CleanLine(s.Reason)
 	s.PlacedBy, s.PlaceReason = CleanLine(s.PlacedBy), CleanLine(s.PlaceReason)
@@ -243,6 +253,7 @@ func CleanHostInfo(i HostInfo) HostInfo {
 	i.AgentVersions = cleanMap(i.AgentVersions, CleanLine)
 	i.Checks = CleanChecks(i.Checks)
 	i.AgentChecks = CleanAgentChecks(i.AgentChecks)
+	i.Health = cleanHostHealthV1(i.Health)
 	if i.Sandbox != nil {
 		probe := CleanCapProbe(*i.Sandbox)
 		i.Sandbox = &probe

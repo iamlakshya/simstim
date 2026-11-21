@@ -103,6 +103,9 @@ func CheckSealedRuntime(item Item, file *os.File) error {
 	if err := checkReader(item, item.Name, info.Size(), file); err != nil {
 		return err
 	}
+	if err := checkFSVerityContent(context.Background(), item, file); err != nil {
+		return err
+	}
 	after, err := file.Stat()
 	if err != nil {
 		return fmt.Errorf("recheck sealed runtime identity: %w", err)

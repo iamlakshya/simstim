@@ -612,7 +612,7 @@ func TestCompletionCommandTreeWiring(t *testing.T) {
 		}
 	}
 
-	localFileFlags := map[string]bool{"debug-file": true, "ssh-config": true, "provider-script": true}
+	localFileFlags := map[string]bool{"debug-file": true, "ssh-config": true, "provider-script": true, "key": true}
 	valueFlags := map[string]bool{
 		"host": true, "agent": true, "agents": true, "create": true, "secret": true,
 		"debug": true, "only": true, "memory-max": true, "idle-stop": true,

@@ -109,9 +109,13 @@ func (v *vmFiles) runtimeMounts(root *os.Root, allowFUSE bool) error {
 	if err := v.mount("tmpfs", filepath.Join(v.root, "dev/shm"), "tmpfs", unix.MS_NOSUID|unix.MS_NODEV, "mode=1777"); err != nil {
 		return err
 	}
-	if err:=v.ownedDirectory(root,"run/"+brand.Name,0755,0,0);err!=nil{return err}
-	if err:=v.copyTemporaryMountV1(root,"tmp","tmp");err!=nil{return err}
-	return v.copyTemporaryMountV1(root,"var/tmp","var-tmp")
+	if err := v.ownedDirectory(root, "run/"+brand.Name, 0755, 0, 0); err != nil {
+		return err
+	}
+	if err := v.copyTemporaryMountV1(root, "tmp", "tmp"); err != nil {
+		return err
+	}
+	return v.copyTemporaryMountV1(root, "var/tmp", "var-tmp")
 }
 
 func (v *vmFiles) tools(root *os.Root) error {
@@ -154,13 +158,19 @@ func (v *vmFiles) persistentHome(root *os.Root, plan files.StatePlan) error {
 	if err := v.ownedDirectory(session, "work", 0o700, AgentUID, AgentGID); err != nil {
 		return err
 	}
-	stages,err:=v.prepareCopyStagesV1(session)
-	if err!=nil{return err}
-	if err:=v.captureCopyMountV1("/work",session,"work",stages);err!=nil{return err}
+	stages, err := v.prepareCopyStagesV1(session)
+	if err != nil {
+		return err
+	}
+	if err := v.captureCopyMountV1("/work", session, "work", stages); err != nil {
+		return err
+	}
 	if err := v.bind(v.boot("mnt/session/work"), filepath.Join(v.root, "work"), false, true); err != nil {
 		return err
 	}
-	if err:=v.copyFreshHomeV1(root);err!=nil{return err}
+	if err := v.copyFreshHomeV1(root); err != nil {
+		return err
+	}
 	for _, name := range plan.Dirs {
 		if err := vmDirectory(session, filepath.Join("state/dirs", filepath.Dir(name)), 0o700); err != nil {
 			return err
@@ -171,7 +181,9 @@ func (v *vmFiles) persistentHome(root *os.Root, plan files.StatePlan) error {
 		if err := v.agentPath(root, name); err != nil {
 			return err
 		}
-		if err:=v.captureCopyMountV1("/home/agent/"+name,session,filepath.Join("state/dirs",name),stages);err!=nil{return err}
+		if err := v.captureCopyMountV1("/home/agent/"+name, session, filepath.Join("state/dirs", name), stages); err != nil {
+			return err
+		}
 		if err := v.bind(v.boot("mnt/session/state/dirs/"+name), filepath.Join(v.root, "home/agent", name), false, true); err != nil {
 			return err
 		}

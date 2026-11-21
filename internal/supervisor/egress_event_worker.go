@@ -30,9 +30,13 @@ func (c *egressCtl) closeEventControl() {
 	<-c.done
 	c.s.mu.Lock()
 	if c.s.m != nil && c.s.eg == c.owner {
+		if c.owner != nil && c.owner.networkHolds != nil {
+			c.owner.networkHolds.clear()
+		}
 		c.s.m.Armed = false
 		disarmPublicSecretsLocked(c.s.m)
 		c.s.dirty = true
+		c.s.showStatus(time.Now())
 	}
 	c.s.mu.Unlock()
 	// Closing the owned link does not linger behind a full control window.
@@ -53,7 +57,11 @@ func (c *egressCtl) runEvents(ctx context.Context) {
 	for {
 		audits, fault := c.events.takeAudits()
 		for _, entry := range audits {
-			c.s.audit.writeNet(entry.entry)
+			if entry.entry.Decision == "allow-unknown" && entry.entry.UnknownDestination != 0 {
+				c.acceptUnknownAudit(ctx, entry.entry)
+			} else {
+				c.s.audit.writeNet(entry.entry)
+			}
 			c.s.noteDecoyUse(entry.entry)
 			c.s.raiseModelBlocked(entry.entry)
 			audited = entry.seq
@@ -66,6 +74,24 @@ func (c *egressCtl) runEvents(ctx context.Context) {
 			c.s.audit.write("egress_control_failed", map[string]any{"reason": "audit_queue_overflow", "try": egressRecoveryHint})
 		}
 		closing := channelClosed(c.done)
+		networkChanged := c.events.takeNetworkRevision()
+		if networkChanged != 0 && !closing {
+			c.refreshNetworkHolds(ctx, networkChanged)
+		}
+		proposals := c.events.takeClassifierSessions()
+		unavailable := c.events.takeJudgeUnavailable()
+		budget := c.events.takeModelBudget()
+		if !closing {
+			for _, proposal := range proposals {
+				c.applyClassifierSession(ctx, proposal)
+			}
+			if unavailable {
+				c.raiseJudgeUnavailable()
+			}
+			if budget {
+				c.raiseModelBudget()
+			}
+		}
 		var count int
 		if c.events.hasEnds() {
 			// A live add holds polMu through its RPC, manifest publication
@@ -81,7 +107,7 @@ func (c *egressCtl) runEvents(ctx context.Context) {
 		if closing && c.events.empty() {
 			return
 		}
-		if len(audits) > 0 || count > 0 {
+		if len(audits) > 0 || count > 0 || networkChanged != 0 || len(proposals) > 0 || unavailable || budget {
 			continue
 		}
 		var timer *time.Timer

@@ -1,0 +1,25 @@
+# Separate accounts for sandbox VMMs
+
+Separate accounts are optional. The ordinary host preparation path does not install the launcher or its sudo rule. The default stays unchanged until the launcher has had an outside security review.
+
+An opted-in host has 16 slot accounts. Each has no home and no login shell. A sandbox's VMM runs in one account, inside its namespace jail. It keeps that slot's own primary group. The launcher requires one matching named group and refuses numeric aliases, including a login or KVM group. The VM directory's setgid bit gives sockets the login user's group without adding the VMM to that group. The login primary group must not be a slot or KVM group. Its egress process stays in the login user's unit. A VMM escape therefore reaches the slot account rather than the login account.
+
+Root owns the runtime store. Files arrive through a bounded stream and enter the store only after their size and SHA-256 match. Runtime files cannot name another host path. A session keeps its original login owner after its VMM stops. Another login user cannot start, stop, copy or destroy it. Pruning retains every session's referenced store files, including other users' files.
+
+The launcher accepts no command-line arguments. Its one sudoers rule allows an empty argument list. Requests contain checked session IDs, digests and limits. Each driver has a fixed argument template. No request contains a shell command, account ID or arbitrary pathname.
+
+Each slot has a kernel lock. A namespace init retains the original lock while its VMM runs. That lock alone does not prove that the namespace's children have finished: Linux closes the init's files before it finishes tearing down its PID namespace. After taking a free lock, the launcher also checks the previous allocation's original cgroup. The cgroup must be the same root-owned object from the same boot and must report no processes. A missing, changed or populated cgroup leaves the slot quarantined. A checked change of the kernel's boot ID settles allocations from the previous boot.
+
+The VMM stays in a root-created child of the caller's actual session cgroup. The client captures that cgroup before sudo and compares it with the child's actual parent, so a sudo session move cannot silently lose the unit's limits. Ancestor memory, swap and process limits still apply. The child does not delegate migration controls to the slot. The jail gives it private user and PID namespaces, no network, no capabilities, seccomp and Landlock. The immutable execute-only VMM copy, read-only mount projection, hard-zero core limit and host `fs.suid_dumpable=0` policy preserve the non-dumpable execution boundary.
+
+A fresh disk stays under a temporary name until the confined formatter and native jail start have succeeded. Publication cannot replace an existing disk. If a keeper is lost, recovery uses the same root-owned cgroup object and its actual population state. It does not reconstruct a process owner from a stored PID.
+
+Native readiness uses the actual root launch and guest socket. Kernel credentials and transferred creation handles bind the root sender, namespace init, VMM executable, cgroup and exact guest connection. A JSON reply, a process number, a slot number or a claimed status cannot establish readiness. A free slot lock also cannot prove that escaped descendants ended. Recovery checks the original cgroup generation, boot and parent, kills only that native object and confirms that it is empty before reuse. The native peer check needs Linux's `SO_PEERPIDFD` support. Unsupported hosts receive a refusal; there is no weaker account-mode fallback.
+
+The launcher updates only from a newer release envelope signed by the existing release key. The envelope names the launcher role, architecture, semantic version and executable SHA-256. Signature verification runs in Go with the dedicated launcher namespace. The new binary is never executed as part of verification.
+
+This boundary protects the login account from a VMM escape. It does not protect the host against its root account, or make a compromised login account a trusted operator. The login user can operate that user's own sandboxes. Root remains responsible for the launcher, account database and store.
+
+Host facts can read a small root-owned slot projection without starting a process. It partitions the 16 slots into held leases, native vacancies and quarantined slots. A held lease is not a count of running VMs. Missing, malformed, foreign, old-boot or stale observations stay unknown. The projection expires after 30 seconds and grants no capacity or permission. The root allocator still checks and takes the actual lease.
+
+The own account row appears only for an active run issued by the original native VM and guest connection. The protected run generation must still match. Preparation flags, guest claims and advisory slot counts cannot supply that label. Stopping, failed starts and a new run retire the old mark. The label grants no execution or admission permission.

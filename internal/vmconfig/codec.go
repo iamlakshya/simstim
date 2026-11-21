@@ -18,9 +18,11 @@ func Decode(data []byte) (Plan, error) {
 	if _, err := fields(outer["vm"], map[string]bool{"version": true, "system": true, "sudo": true, "docker": true, "state_dirs": true, "restore_capture_nonce": true}); err != nil {
 		return Plan{}, err
 	}
-	if raw,present:=outer["correlation"];present {
-		values,err:=fields(raw,map[string]bool{"v":true,"session":true,"generation":true,"need_sha256":true,"nonce":true})
-		if err!=nil || len(values)!=5{return Plan{},configError("the original VM correlation is not an exact supported object")}
+	if raw, present := outer["correlation"]; present {
+		values, err := fields(raw, map[string]bool{"v": true, "session": true, "generation": true, "need_sha256": true, "nonce": true})
+		if err != nil || len(values) != 5 {
+			return Plan{}, configError("the original VM correlation is not an exact supported object")
+		}
 	}
 	var args proto.CtlVMPrepareArgs
 	decoder := json.NewDecoder(bytes.NewReader(data))

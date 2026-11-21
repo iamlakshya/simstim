@@ -47,7 +47,28 @@ simstim host add dev-vm dev-vm --ssh-config ~/src/infra/ssh/config --tier shared
 2. Asks before it installs the helper, unless you pass `--yes`, then uploads it into `~/.local/share/simstim/bin/` and checks its SHA-256. In a script, or with `--no-input`, it cannot ask, so it fails with exit code 4 unless you pass `--yes` ([scripts](scripting.md)).
 3. Turns on systemd's linger for your user, so sessions keep running when you log out, and installs the unit that restores sessions after a reboot.
 4. Saves the host in `hosts.toml` ([configuration](../reference/config.md)).
-5. Lists the agents it finds. At a terminal, when a first-class or supported agent is missing, it shows the agent checklist: type the numbers of the agents to install ([install agents](install-agents.md)). `--yes` skips the checklist.
+5. Prepares the host's sandbox runtime and tests its strongest runnable sandbox wall, unless you pass `--no-sandbox` ([prepare sandboxes](#prepare-sandboxes)).
+6. Lists the agents it finds. At a terminal, when a first-class or supported agent is missing, it shows the agent checklist: type the numbers of the agents to install ([install agents](install-agents.md)). `--yes` skips the checklist.
+
+## Prepare sandboxes
+
+By default, `host add` prepares sandboxes right after saving the host. You can also run preparation at any time on a saved host:
+
+<!-- test: help (needs a saved host) -->
+```sh
+simstim host prepare my-server
+simstim host prepare my-server --root-step print
+simstim host prepare my-server --images laptop
+```
+
+`host prepare` runs four separate steps against the saved host:
+
+1. Probes the host's kernel, cgroups, `/dev/kvm` and registered sandbox drivers.
+2. Installs any missing runtime or default image files pinned by this client (`--images` chooses `auto`, `host` or `laptop`). Shared hosts ask before an upgrade.
+3. Handles optional root setup (`--root-step` takes `run`, `print` or `skip`; `--delegate-io` and `--separate-accounts` add those optional steps). Running `sudo` always asks for its own consent and never reuses an earlier answer. With `--yes`, optional root steps print to a file unless `--root-step` names another mode and passwordless `sudo` is ready.
+4. Runs a short fixed sandbox test boot and verifies clean-up. Only a complete test boot sets or raises the host's `wall_floor` and refreshes its cached placement facts; a stronger existing floor is kept. If no wall can run yet, or the test boot fails, the saved host keeps its previous floor and reports what is still needed.
+
+Pass `--no-sandbox` to `host add` to save the host without running sandbox preparation. `--no-sandbox` cannot be combined with `--images`, `--root-step`, `--delegate-io` or `--separate-accounts`.
 
 ## The host key
 

@@ -49,15 +49,16 @@ func (s *Server) ServeFlow(ctx context.Context, conn net.Conn, hdr StreamHeader)
 	if refusal := s.checkSecretDestination(ctx, originalSecretDestination(ctx, hdr.Host)); refusal != nil {
 		_ = conn.Close()
 		entry := s.formatAudit(AuditEntry{Host: decoyAuditDestination(hdr.Host, refusal), Port: hdr.Port, Rule: refusal.auditRule(), Secret: refusal.decoy, Status: http.StatusForbidden, Decision: "deny"})
-		s.emitAudit(entry)
+		s.emitAudit(entry, hdr.Host)
 		return entry
 	}
 	audited := new(atomic.Bool)
 	ctx = context.WithValue(ctx, inspectedAuditKey{}, audited)
 	p := s.currentEngine().NewPermit()
 	entry := s.serveFlow(ctx, conn, hdr, p)
+	entry = s.formatNetworkAudit(entry, originalSecretDestination(ctx, hdr.Host))
 	if !audited.Load() {
-		s.emitAudit(entry)
+		s.emitAudit(entry, hdr.Host)
 	}
 	for _, ended := range p.Close() {
 		s.emitOnceEnd(ended)
@@ -224,21 +225,23 @@ func requestAuditPath(req *http.Request) string {
 }
 
 func (s *Server) serveConnect(ctx context.Context, conn net.Conn, clientReader io.Reader, hdr StreamHeader, p *Permit) AuditEntry {
+	if decision := s.awaitCarrierPolicy(ctx, conn, hdr, http.MethodConnect); !decision.Allow {
+		return s.refuseCarrierPolicy(ctx, conn, clientReader, hdr, http.MethodConnect, decision, true)
+	}
 	if inspect, err := s.secretCarrierInspection(ctx, hdr); inspect || err != nil {
 		return s.serveInspectedFlow(ctx, conn, clientReader, hdr, true, err)
 	}
-	request := Request{Host: hdr.Host, Port: hdr.Port, Method: http.MethodConnect}
+	request := Request{Host: hdr.Host, Port: hdr.Port, via: hdr.Via, Method: http.MethodConnect}
 	var refused *AuditEntry
 	ctx, refused = s.preflightOpaqueTLS(ctx, conn, clientReader, hdr, request, true)
 	if refused != nil {
 		return *refused
 	}
-	eng := s.currentEngine()
-	dec := eng.DecideWithPermit(request, p)
+	dec := s.admitOrdinaryFlow(ctx, request, p)
 	if !dec.Allow {
 		var down int64
 		if hdr.Port != 443 {
-			down, _ = writeHTTPStatus(conn, http.StatusForbidden, "Forbidden", RefusalLine(s.sessionRef(), hdr.Host, hdr.Port))
+			down, _ = writeHTTPStatus(conn, http.StatusForbidden, "Forbidden", s.ordinaryRefusalLine(dec, hdr.Host, hdr.Port))
 		}
 		return s.formatAudit(AuditEntry{Host: hdr.Host, Port: hdr.Port, Mode: "splice", Method: http.MethodConnect, Status: http.StatusForbidden, Down: down, Rule: dec.Rule, Decision: "deny"})
 	}
@@ -255,26 +258,32 @@ func (s *Server) serveConnect(ctx context.Context, conn net.Conn, clientReader i
 		if hdr.Port != 443 {
 			down, _ = writeHTTPStatus(conn, http.StatusBadGateway, "Bad Gateway", brand.Name+": upstream connection failed")
 		}
-		return s.formatAudit(AuditEntry{Host: hdr.Host, Port: hdr.Port, Mode: "splice", Method: http.MethodConnect, Status: http.StatusBadGateway, Down: down, Rule: dec.Rule, Decision: "allow"})
+		return s.formatAudit(AuditEntry{Host: hdr.Host, Port: hdr.Port, Mode: "splice", Method: http.MethodConnect, Status: http.StatusBadGateway, Down: down, Rule: dec.Rule, By: dec.By, Decision: "allow"})
 	}
 	defer upstream.Close()
 
 	p.Commit()
-	return s.verifyAndSplice(ctx, conn, clientReader, upstream, hdr, http.MethodConnect, "", dec.Rule, addr, p)
+	entry := s.verifyAndSplice(ctx, conn, clientReader, upstream, hdr, http.MethodConnect, "", dec.Rule, addr, p)
+	if entry.Decision == "allow" {
+		entry.By = dec.By
+	}
+	return entry
 }
 
 func (s *Server) serveTransparent(ctx context.Context, conn net.Conn, hdr StreamHeader, p *Permit) AuditEntry {
+	if decision := s.awaitCarrierPolicy(ctx, conn, hdr, "TCP"); !decision.Allow {
+		return s.refuseCarrierPolicy(ctx, conn, conn, hdr, "TCP", decision, false)
+	}
 	if inspect, err := s.secretCarrierInspection(ctx, hdr); inspect || err != nil {
 		return s.serveInspectedFlow(ctx, conn, conn, hdr, false, err)
 	}
-	request := Request{Host: hdr.Host, Port: hdr.Port, Method: "TCP"}
+	request := Request{Host: hdr.Host, Port: hdr.Port, via: hdr.Via, Method: "TCP"}
 	var refused *AuditEntry
 	ctx, refused = s.preflightOpaqueTLS(ctx, conn, conn, hdr, request, false)
 	if refused != nil {
 		return *refused
 	}
-	eng := s.currentEngine()
-	dec := eng.DecideWithPermit(request, p)
+	dec := s.admitOrdinaryFlow(ctx, request, p)
 	if !dec.Allow {
 		return s.formatAudit(AuditEntry{Host: hdr.Host, Port: hdr.Port, Mode: "splice", Method: "TCP", Status: http.StatusForbidden, Rule: dec.Rule, Decision: "deny"})
 	}
@@ -283,15 +292,19 @@ func (s *Server) serveTransparent(ctx context.Context, conn net.Conn, hdr Stream
 		if errors.Is(err, ErrRefusedAddr) {
 			return s.formatAudit(AuditEntry{Host: hdr.Host, Port: hdr.Port, Mode: "splice", Method: "TCP", Status: http.StatusForbidden, Rule: rangeRule, Decision: "deny"})
 		}
-		return s.formatAudit(AuditEntry{Host: hdr.Host, Port: hdr.Port, Mode: "splice", Method: "TCP", Status: http.StatusBadGateway, Rule: dec.Rule, Decision: "allow"})
+		return s.formatAudit(AuditEntry{Host: hdr.Host, Port: hdr.Port, Mode: "splice", Method: "TCP", Status: http.StatusBadGateway, Rule: dec.Rule, By: dec.By, Decision: "allow"})
 	}
 	defer upstream.Close()
 	p.Commit()
-	return s.verifyAndSplice(ctx, conn, conn, upstream, hdr, "TCP", "", dec.Rule, addr, p)
+	entry := s.verifyAndSplice(ctx, conn, conn, upstream, hdr, "TCP", "", dec.Rule, addr, p)
+	if entry.Decision == "allow" {
+		entry.By = dec.By
+	}
+	return entry
 }
 
 func (s *Server) verifyAndSplice(ctx context.Context, conn net.Conn, clientReader io.Reader, upstream net.Conn, hdr StreamHeader, method, path, rule string, addr netip.Addr, p *Permit) AuditEntry {
-	request := Request{Host: hdr.Host, Port: hdr.Port, Method: method, Path: path}
+	request := Request{Host: hdr.Host, Port: hdr.Port, via: hdr.Via, Method: method, Path: path}
 	id, cancelFlow := s.registerSecretFlow(ctx, conn, upstream, request, addr, p)
 	defer s.flows.remove(id)
 	if !s.flowAllowed(s.currentEngine(), activeFlow{request: request, addr: addr, permit: p}) {
@@ -340,11 +353,10 @@ func (s *Server) servePlainHTTP(ctx context.Context, conn net.Conn, req *http.Re
 		down, _ := writeHTTPStatus(conn, http.StatusForbidden, "Forbidden", brand.Name+": invalid request path. Try: use a canonical URL path.")
 		return s.formatAudit(AuditEntry{Host: hdr.Host, Port: hdr.Port, Mode: "explicit", Method: req.Method, Path: auditPath, Status: http.StatusForbidden, Down: down, Rule: "invalid", Decision: "deny"})
 	}
-	eng := s.currentEngine()
-	request := Request{Host: hdr.Host, Port: hdr.Port, Method: req.Method, Path: cleanPath}
-	dec := eng.DecideWithPermit(request, p)
+	request := Request{Host: hdr.Host, Port: hdr.Port, via: hdr.Via, Method: req.Method, Path: cleanPath}
+	dec := s.admitOrdinaryFlow(ctx, request, p)
 	if !dec.Allow {
-		down, _ := writeHTTPStatus(conn, http.StatusForbidden, "Forbidden", RefusalLine(s.sessionRef(), hdr.Host, hdr.Port))
+		down, _ := writeHTTPStatus(conn, http.StatusForbidden, "Forbidden", s.ordinaryRefusalLine(dec, hdr.Host, hdr.Port))
 		return s.formatAudit(AuditEntry{Host: hdr.Host, Port: hdr.Port, Mode: "explicit", Method: req.Method, Path: auditPath, Status: http.StatusForbidden, Down: down, Rule: dec.Rule, Decision: "deny"})
 	}
 	upstream, addr, rangeRule, err := s.dialOrigin(ctx, hdr.Host, hdr.Port, p, &request)
@@ -354,7 +366,7 @@ func (s *Server) servePlainHTTP(ctx context.Context, conn net.Conn, req *http.Re
 			return s.formatAudit(AuditEntry{Host: hdr.Host, Port: hdr.Port, Mode: "explicit", Method: req.Method, Path: auditPath, Status: http.StatusForbidden, Down: down, Rule: rangeRule, Decision: "deny"})
 		}
 		down, _ := writeHTTPStatus(conn, http.StatusBadGateway, "Bad Gateway", brand.Name+": upstream connection failed")
-		return s.formatAudit(AuditEntry{Host: hdr.Host, Port: hdr.Port, Mode: "explicit", Method: req.Method, Path: auditPath, Status: http.StatusBadGateway, Down: down, Rule: dec.Rule, Decision: "allow"})
+		return s.formatAudit(AuditEntry{Host: hdr.Host, Port: hdr.Port, Mode: "explicit", Method: req.Method, Path: auditPath, Status: http.StatusBadGateway, Down: down, Rule: dec.Rule, By: dec.By, Decision: "allow"})
 	}
 	defer upstream.Close()
 
@@ -370,7 +382,7 @@ func (s *Server) servePlainHTTP(ctx context.Context, conn net.Conn, req *http.Re
 	upBytes, status, downBytes := forwardPlainHTTP(conn, upstream, req)
 	return s.formatAudit(AuditEntry{
 		Host: hdr.Host, Port: hdr.Port, Mode: "explicit", Method: req.Method, Path: auditPath,
-		Status: status, Up: upBytes, Down: downBytes, Rule: dec.Rule, Decision: "allow",
+		Status: status, Up: upBytes, Down: downBytes, Rule: dec.Rule, By: dec.By, Decision: "allow",
 	})
 }
 

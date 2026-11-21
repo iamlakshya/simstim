@@ -58,8 +58,11 @@ func (m *agentModeResources) closeInactive() error {
 
 func (r *GrantRequest) closeLocalPurposeResources() error {
 	r.mu.Lock()
-	forge, execution, mode := r.forge, r.rootExecution, r.metadataMode
+	forge, execution, mode, accounts := r.forge, r.rootExecution, r.metadataMode, r.rootAccounts
 	r.mu.Unlock()
+	if err := accounts.close(); err != nil {
+		return err
+	}
 	if forge != nil {
 		if err := forge.close(); err != nil {
 			return err

@@ -78,6 +78,9 @@ func (e *Engine) evaluateLocked(req Request, p *Permit, mode evalMode) Decision 
 	}
 	for _, layer := range e.layers {
 		allow, denied := e.choose(layer.rules, p, mode, func(r compiledRule) bool {
+			if r.allow && r.uploadBudget != req.uploadBudgetOnly {
+				return false
+			}
 			if compiledDoor(r) != door {
 				return false
 			}
@@ -99,8 +102,11 @@ func (e *Engine) evaluateLocked(req Request, p *Permit, mode evalMode) Decision 
 		if allow != nil {
 			e.useOnce(allow, p, mode)
 			match := allow.ref
-			return Decision{Allow: true, Rule: string(layer.kind) + ":" + allow.id, RuleID: allow.id, Target: formatCompiledTarget(*allow), Match: &match}
+			return Decision{Allow: true, publicOnly: allow.publicOnly, By: allow.by, Rule: string(layer.kind) + ":" + allow.id, RuleID: allow.id, Target: formatCompiledTarget(*allow), Match: &match}
 		}
+	}
+	if req.uploadBudgetOnly {
+		return Decision{Rule: "budget:upload", unmatched: true}
 	}
 	if door != api.DoorNet {
 		return Decision{Rule: "push:ungranted"}
@@ -122,7 +128,7 @@ func (e *Engine) evaluateLocked(req Request, p *Permit, mode evalMode) Decision 
 			return Decision{Rule: "unknown:deny", unmatched: true}
 		case api.UnknownAllow:
 			if !isIP {
-				return Decision{Allow: true, Rule: "unknown:allow", unmatched: true}
+				return Decision{Allow: true, Rule: "unknown:allow", unmatched: true, unknownAllowance: true}
 			}
 		}
 	}
@@ -131,7 +137,7 @@ func (e *Engine) evaluateLocked(req Request, p *Permit, mode evalMode) Decision 
 		// embedded-private and special ranges retain explicit numeric grants.
 		// The physical dial separately checks its current own-host addresses.
 		if _, public := new(Dialer).CheckAddr(addr, req.Port, nil); public {
-			return Decision{Allow: true, Rule: "unknown:allow", unmatched: true}
+			return Decision{Allow: true, Rule: "unknown:allow", unmatched: true, unknownAllowance: true}
 		}
 		return Decision{Rule: "unknown:address", unmatched: true}
 	}
@@ -146,7 +152,7 @@ func (e *Engine) evaluateLocked(req Request, p *Permit, mode evalMode) Decision 
 
 func (e *Engine) validPermit(p *Permit, mode evalMode) bool {
 	if p == nil {
-		return mode == evalStandalone || mode == evalPrecheck
+		return mode == evalStandalone || mode == evalPrecheck || mode == evalBudgetPrecheck
 	}
 	return p.ledger == e.ledger && !p.closed
 }
@@ -155,6 +161,8 @@ func (e *Engine) evaluateAddr(addr netip.Addr, port int, p *Permit, mode evalMod
 	return e.evaluateAddrRequest(addr, port, p, mode, nil)
 }
 
+// This callback supplies an exception only when the real Dialer has already
+// found a refused range or own-host address. PublicOnly can never supply one.
 func (e *Engine) evaluateAddrRequest(addr netip.Addr, port int, p *Permit, mode evalMode, request *Request) bool {
 	if !addr.IsValid() || port < 1 || port > 65535 || e.ledger == nil {
 		return false
@@ -164,6 +172,24 @@ func (e *Engine) evaluateAddrRequest(addr netip.Addr, port int, p *Permit, mode 
 	defer e.ledger.mu.Unlock()
 	if !e.validPermit(p, mode) {
 		return false
+	}
+	if p != nil && p.publicOnly {
+		return false
+	}
+	if request != nil {
+		check := evalPrecheck
+		if mode == evalRevalidate || p != nil && p.committed {
+			check = evalRevalidate
+		}
+		var decision Decision
+		if request.Path == "" {
+			decision = e.evaluateLocked(*request, p, check)
+		} else {
+			decision = e.evaluateModelNetworkLocked(*request, p, check)
+		}
+		if !decision.Allow || decision.publicOnly {
+			return false
+		}
 	}
 	method, path := "", ""
 	if request != nil {
@@ -190,6 +216,9 @@ func (e *Engine) evaluateAddrRequest(addr netip.Addr, port int, p *Permit, mode 
 			return false
 		}
 		if allow != nil {
+			if allow.publicOnly {
+				return false
+			}
 			e.useOnce(allow, p, mode)
 			return true
 		}

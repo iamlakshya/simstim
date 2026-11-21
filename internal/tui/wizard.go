@@ -24,13 +24,15 @@ const (
 	wzTest
 	wzTier
 	wzInstall
+	wzSandboxes
+	wzRoot
 	wzReady
 	wzAgents // the checklist
 	wzRun    // one install or login, in a session the user watches
 	wzDone   // the summary, and the first session
 )
 
-const wizSteps = 7
+const wizSteps = 10
 
 type checkState int
 
@@ -94,6 +96,7 @@ type wizard struct {
 	made   bool
 	prev   modal
 
+	sandboxPart
 	agentPart
 }
 
@@ -138,7 +141,7 @@ func newWizard() *wizard {
 	return w
 }
 
-func (w *wizard) busy() bool { return w.run || w.checking }
+func (w *wizard) busy() bool { return w.run || w.checking || w.waitingRoot }
 
 func (w *wizard) paste(s string) {
 	if w.step == wzWhere {
@@ -206,6 +209,10 @@ func (w *wizard) key(m *Model, k tea.KeyPressMsg) tea.Cmd {
 		if ks == "enter" && !w.run {
 			return w.install(m)
 		}
+	case wzSandboxes:
+		return w.sandboxesKey(m, ks)
+	case wzRoot:
+		return w.rootKey(m, ks)
 	case wzReady:
 		if ks == "enter" && !w.run && !w.checking {
 			if w.err != nil {
@@ -256,6 +263,8 @@ func (w *wizard) back(m *Model) tea.Cmd {
 		return tea.Batch(drop, cleanup, m.reloadHost(w.host.Name))
 	case w.step == wzWhere && w.prev != nil:
 		m.modal = w.prev
+	case w.step == wzRoot:
+		w.step, w.err = wzSandboxes, nil
 	case w.step == wzWhere || w.saved:
 		m.modal = nil
 	case w.step == wzInstall && !w.made:
@@ -329,6 +338,7 @@ func (w *wizard) submit(m *Model) tea.Cmd {
 	w.pin, w.ask, w.want = nil, nil, ""
 	w.was = nil
 	w.tier, w.tierPick = client.TierUnknown, -1
+	w.sandboxPart = sandboxPart{}
 	return w.probe(m)
 }
 

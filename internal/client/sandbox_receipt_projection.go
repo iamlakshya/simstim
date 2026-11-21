@@ -47,14 +47,14 @@ func projectAgentSandboxReceipts(ctx context.Context, p jsonValueProjection, row
 
 func projectKnownSandboxReceipt(ctx context.Context, p jsonValueProjection, span, rowKey api.JSONSpan, schema int, row receiptRowProjection, facts *agentSandboxPolicy, delivery bool, validateState func(api.JSONSpan, api.JSONSpan) error, checkNames func(api.JSONSpan, api.JSONSpan) error, withRelations sandboxReceiptRelationPhase) (bool, error) {
 	shape, err := projectSandboxReceiptSpans(ctx, p, span, schema, delivery)
-	if err != nil || shape.Version > 1 {
+	if err != nil || shape.Version > 1 && (!delivery || shape.Version > 3) {
 		return shape.Future, err
 	}
 	known := sandboxInputOperationFields
 	if delivery {
 		known = sandboxDeliveryReceiptFields
 	}
-	var fields [11]api.JSONSpan
+	var fields [13]api.JSONSpan
 	if err := p.Object(span, known, func(f api.JSONField) error {
 		if f.Known >= 0 {
 			fields[f.Known] = f.Value
@@ -75,9 +75,24 @@ func projectKnownSandboxReceipt(ctx context.Context, p jsonValueProjection, span
 		}
 	}
 	if delivery {
-		for _, i := range []int{7, 8, 9} {
+		arrays := []int{7, 8, 9}
+		if shape.Version == 2 || shape.Version == 3 {
+			arrays = append(arrays, 11, 12)
+		}
+		for _, i := range arrays {
 			if err := receiptProjectionNames(p, fields[i], false); err != nil {
 				return false, err
+			}
+		}
+	}
+	if delivery && shape.Version == 3 {
+		for _, span := range []api.JSONSpan{fields[11], fields[12]} {
+			if span.End == 0 {
+				continue
+			}
+			null, err := p.Literal(span, "null")
+			if err != nil || !null {
+				return false, sandboxReceiptError()
 			}
 		}
 	}
@@ -111,7 +126,7 @@ func projectKnownSandboxReceipt(ctx context.Context, p jsonValueProjection, span
 			stateFuture = true
 		}
 	}
-	if err := projectReceiptHeader(p, fields, delivery); err != nil {
+	if err := projectReceiptHeader(p, fields, delivery, shape.Version); err != nil {
 		return false, err
 	}
 	if err := projectReceiptScope(p, scope, row, rowKey, facts, delivery); err != nil {
@@ -167,8 +182,22 @@ func projectKnownSandboxReceipt(ctx context.Context, p jsonValueProjection, span
 	if err != nil {
 		return false, err
 	}
+	if shape.Version == 2 {
+		plan.Groups[receiptStatePrimary], plan.Groups[receiptStateTrusted] = state.primary, state.trusted
+		for _, delta := range []api.JSONSpan{fields[11], fields[12]} {
+			if err := receiptProjectionNames(p, delta, true); err != nil {
+				return false, err
+			}
+		}
+	}
 	err = withRelations(plan, func(lookup sandboxReceiptRelationLookup) error {
-		return checkIndexedReceiptRelations(p, state, row.delivery.End != 0, wallNone, fields[8], fields[9], shape.Allowed, lookup)
+		if err := checkIndexedReceiptRelations(p, state, row.delivery.End != 0, wallNone, fields[8], fields[9], shape.Allowed, lookup); err != nil {
+			return err
+		}
+		if shape.Version == 2 {
+			return checkIndexedArmReceiptDeltasV2(p, fields[11], fields[12], lookup)
+		}
+		return nil
 	})
 	if err != nil {
 		return false, err
@@ -176,7 +205,7 @@ func projectKnownSandboxReceipt(ctx context.Context, p jsonValueProjection, span
 	return shape.Future || sourceFuture, ctx.Err()
 }
 
-func projectReceiptHeader(p jsonValueProjection, fields [11]api.JSONSpan, delivery bool) error {
+func projectReceiptHeader(p jsonValueProjection, fields [13]api.JSONSpan, delivery bool, version int64) error {
 	for _, i := range []int{1, 3} {
 		if err := receiptProjectionHex(p, fields[i], 32); err != nil {
 			return err
@@ -204,6 +233,20 @@ func projectReceiptHeader(p jsonValueProjection, fields [11]api.JSONSpan, delive
 		if err := receiptProjectionHex(p, fields[4], 32); err != nil {
 			return err
 		}
+	}
+	if delivery && version == 2 {
+		arm, err := p.StringEqual(operation, "arm")
+		if err != nil || !arm {
+			return sandboxReceiptError()
+		}
+		return nil
+	}
+	if delivery && version == 3 {
+		rewind, err := p.StringEqual(operation, "rewind")
+		if err != nil || !rewind {
+			return sandboxReceiptError()
+		}
+		return nil
 	}
 	for _, kind := range []string{"new", "resume", "spawn"} {
 		ok, err := p.StringEqual(operation, kind)

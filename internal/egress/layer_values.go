@@ -17,6 +17,12 @@ import (
 // Config checking, --set and the trusted merge all use these constraints.
 func ValidateLayerValues(values api.LayerValues) error {
 	return visitValues(reflect.ValueOf(values), "", func(key string, v reflect.Value) error {
+		if key == "sandbox.host" && !v.IsNil() {
+			if err := v.Interface().(*api.HostSelectorV1).Validate(); err != nil {
+				return badLayerValue(key, "needs auto, a host name or a non-empty ordered list of distinct host names")
+			}
+			return nil
+		}
 		if v.Kind() == reflect.Pointer && !v.IsNil() {
 			v = v.Elem()
 		} else if v.IsZero() {
@@ -24,6 +30,9 @@ func ValidateLayerValues(values api.LayerValues) error {
 		}
 		if v.Kind() == reflect.String {
 			s := v.String()
+			if handled, err := validateImagePolicyValue(key, s); handled {
+				return err
+			}
 			if handled, err := validatePackageManagerValue(key, s); handled {
 				return err
 			}
@@ -108,6 +117,14 @@ func visitValues(v reflect.Value, prefix string, f func(string, reflect.Value) e
 			key = prefix + "." + key
 		}
 		field := v.Field(i)
+		if field.Kind() == reflect.Pointer && field.Type().Elem().Kind() == reflect.Struct {
+			if !field.IsNil() {
+				if err := visitValues(field.Elem(), key, f); err != nil {
+					return err
+				}
+			}
+			continue
+		}
 		if field.Kind() == reflect.Struct {
 			if err := visitValues(field, key, f); err != nil {
 				return err
@@ -134,6 +151,7 @@ func valuesMap(v api.LayerValues) map[string]reflect.Value {
 
 func mergeLayerValues(dst *api.LayerValues, l api.Layer, origins map[string]api.ValueOrigin) {
 	incoming := valuesMap(l.LayerValues)
+	allocateLayerValueGroups(reflect.ValueOf(dst).Elem(), "", incoming)
 	_ = visitValues(reflect.ValueOf(dst).Elem(), "", func(key string, old reflect.Value) error {
 		v, ok := incoming[key]
 		if !ok || key == "network.allow" || key == "network.deny" || key == "network.rules" {
@@ -185,7 +203,42 @@ func mergeLayerValues(dst *api.LayerValues, l api.Layer, origins map[string]api.
 	})
 }
 
+// Optional value groups preserve leaf inheritance, including explicit empty
+// strings. An empty incoming group allocates nothing and erases no value.
+func allocateLayerValueGroups(dst reflect.Value, prefix string, incoming map[string]reflect.Value) {
+	for i := 0; i < dst.NumField(); i++ {
+		key := strings.Split(dst.Type().Field(i).Tag.Get("toml"), ",")[0]
+		if prefix != "" {
+			key = prefix + "." + key
+		}
+		field := dst.Field(i)
+		if field.Kind() == reflect.Struct {
+			allocateLayerValueGroups(field, key, incoming)
+			continue
+		}
+		if field.Kind() != reflect.Pointer || field.Type().Elem().Kind() != reflect.Struct {
+			continue
+		}
+		if field.IsNil() {
+			for leaf := range incoming {
+				if strings.HasPrefix(leaf, key+".") {
+					field.Set(reflect.New(field.Type().Elem()))
+					break
+				}
+			}
+		}
+		if !field.IsNil() {
+			allocateLayerValueGroups(field.Elem(), key, incoming)
+		}
+	}
+}
+
 func cloneValue(v reflect.Value) reflect.Value {
+	if v.Type() == reflect.TypeFor[*api.HostSelectorV1]() && !v.IsNil() {
+		copy := *v.Interface().(*api.HostSelectorV1)
+		copy.Names = slices.Clone(copy.Names)
+		return reflect.ValueOf(&copy)
+	}
 	if v.Kind() == reflect.Slice {
 		out := reflect.MakeSlice(v.Type(), v.Len(), v.Len())
 		reflect.Copy(out, v)
@@ -210,6 +263,14 @@ func cloneValue(v reflect.Value) reflect.Value {
 // canonicalLayerValues also accepts the original preset and unknown wire
 // fields. A conflict is refused rather than choosing a spelling silently.
 func canonicalLayerValues(l *api.Layer) error {
+	if l.Sandbox.Host != nil {
+		if l.Source == api.SourceRepositoryFile {
+			return &proto.Error{Code: "layer_key", Message: "the repository file cannot set sandbox.host", Hint: "Put the host rule in a trusted repository section in config.toml."}
+		}
+		if l.Kind != api.LayerRepo && l.Kind != api.LayerProfile && l.Kind != api.LayerSession {
+			return hostRuleLayerError()
+		}
+	}
 	if err := ValidateLayerValues(l.LayerValues); err != nil {
 		return err
 	}
@@ -260,4 +321,8 @@ func canonicalLayerValues(l *api.Layer) error {
 
 func layerError(l api.Layer, key string, lock api.Lock) error {
 	return &proto.Error{Code: "policy_locked", Message: fmt.Sprintf("%s %q cannot change %s, locked by %s %q", l.Kind, l.Name, key, lock.Layer, lock.Name), Hint: "Review the named lock in config.toml or hosts.toml."}
+}
+
+func hostRuleLayerError() error {
+	return &proto.Error{Code: "host_rule_layer", Message: "sandbox.host cannot select a host from this layer", Hint: "Put the host rule in a profile, trusted repository section or the session --set values."}
 }

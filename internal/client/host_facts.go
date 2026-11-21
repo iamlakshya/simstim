@@ -46,7 +46,7 @@ func (c *Conn) readHostFacts(ctx context.Context) (*hostFactsObservation, error)
 		return nil, err
 	}
 	roundTrip := time.Since(started)
-	facts, err := decodeHostFacts(raw, c.HostID())
+	facts, err := decodeHostFactsContext(ctx, raw, c.HostID())
 	if err != nil {
 		return nil, err
 	}
@@ -56,8 +56,18 @@ func (c *Conn) readHostFacts(ctx context.Context) (*hostFactsObservation, error)
 	if err := checkFactsConnection(ctx, c); err != nil {
 		return nil, err
 	}
+	appendJoinedMacFactsV1(ctx, c, &facts)
+	if err := checkFactsConnection(ctx, c); err != nil {
+		return nil, err
+	}
+	received := time.Now()
+	release, releaseErr := ReleaseManifest()
+	appendClientHostHealthV1(&facts, stamp.host, release, started, received)
+	if releaseErr != nil {
+		facts.Health = append(facts.Health, api.Health{ID: "client-runtime", Severity: "warn", Message: "This client's runtime manifest could not be checked.", Hint: "Install the client again before starting a sandbox."})
+	}
 	return &hostFactsObservation{host: cloneObservationHost(c.Host), hostID: c.HostID(), source: stamp.source,
-		receivedAt: time.Now(), roundTrip: roundTrip, facts: cloneHostFacts(facts)}, nil
+		receivedAt: received, roundTrip: roundTrip, facts: cloneHostFacts(facts)}, nil
 }
 
 func checkFactsConnection(ctx context.Context, c *Conn) error {
@@ -99,6 +109,16 @@ func (o *hostFactsObservation) check(ctx context.Context) error {
 }
 
 func cloneHostFacts(facts api.HostFacts) api.HostFacts {
+	if facts.Mac != nil {
+		copy := *facts.Mac
+		facts.Mac = &copy
+	}
+
+	facts.MemoryObservation = api.CloneMemoryObservationV1(facts.MemoryObservation)
+	if facts.SlotCapacity != nil {
+		value := *facts.SlotCapacity
+		facts.SlotCapacity = &value
+	}
 	facts.Walls = slices.Clone(facts.Walls)
 	for i := range facts.Walls {
 		facts.Walls[i].Facts = maps.Clone(facts.Walls[i].Facts)

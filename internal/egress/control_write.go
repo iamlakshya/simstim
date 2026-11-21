@@ -37,15 +37,23 @@ func (s *Server) writeControlJSON(ctx context.Context, writer *proto.Writer, kin
 	if writer == nil || (s.ctlStream != nil && writer != s.ctl) {
 		return errors.New("egress control stream is unavailable")
 	}
+	return s.writeControlPayloadOwned(ctx, writer, kind, payload)
+}
+
+// The caller owns ctlMu. Success includes the actual underlying link write;
+// Stream.Write alone only queues bytes. Failed or cancelled partial frames
+// close and physically join the same owned session before this turn ends.
+func (s *Server) writeControlPayloadOwned(ctx context.Context, writer *proto.Writer, kind proto.Type, payload []byte) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	stream := s.ctlStream
 	if stream == nil {
-		// Embedded callers can provide an in-memory control writer. The
-		// actual control handler always binds its owned link stream first.
 		return writer.Write(kind, payload)
 	}
 	deadline, _ := ctx.Deadline()
 	if err := stream.SetWriteDeadline(deadline); err != nil {
-		_ = stream.Close()
+		_ = s.sess.Close()
 		return errors.New("egress control stream is unavailable")
 	}
 	changed := make(chan struct{})
@@ -59,10 +67,15 @@ func (s *Server) writeControlJSON(ctx context.Context, writer *proto.Writer, kin
 		}
 		_ = stream.SetWriteDeadline(time.Time{})
 	}()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if err := writer.Write(kind, payload); err != nil {
-		// A partial control frame cannot be followed by another frame.
-		// Closing this owned stream makes the control reader stop the link.
-		_ = stream.Close()
+		_ = s.sess.Close()
+		return errors.New("egress control frame was not delivered")
+	}
+	if err := stream.Flush(ctx); err != nil {
+		_ = s.sess.Close()
 		return errors.New("egress control frame was not delivered")
 	}
 	return nil

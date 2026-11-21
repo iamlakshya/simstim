@@ -98,12 +98,8 @@ func IdleSetup(after string) (string, error) {
 		return "", errors.New("idle stop needs a systemd user manager, and this host has none")
 	}
 	service, timer := IdleUnits(currentHelper(), d)
-	if err := os.MkdirAll(userUnitDir(), 0o700); err != nil {
-		return "", fmt.Errorf("make the folder for the idle units: %w", err)
-	}
 	for name, text := range map[string]string{idleUnit("service"): service, idleUnit("timer"): timer} {
-		//nolint:gosec // G306: systemd warns about a unit file that others cannot read; its text is public through systemd anyway
-		if err := os.WriteFile(filepath.Join(userUnitDir(), name), []byte(text), 0o644); err != nil {
+		if err := writeFootprintedUnitV1(context.Background(), name, text); err != nil {
 			return "", fmt.Errorf("write the idle unit %s: %w", name, err)
 		}
 	}
@@ -111,8 +107,11 @@ func IdleSetup(after string) (string, error) {
 	if out, err := exec.CommandContext(context.Background(), "systemctl", "--user", "daemon-reload").CombinedOutput(); err != nil {
 		return "", fmt.Errorf("systemctl daemon-reload: %w: %s", err, strings.TrimSpace(string(out)))
 	}
-	if out, err := exec.CommandContext(context.Background(), "systemctl", "--user", "enable", "--now", idleUnit("timer")).CombinedOutput(); err != nil {
-		return "", fmt.Errorf("enable the idle timer: %w: %s", err, strings.TrimSpace(string(out)))
+	if err := enableFootprintedUnitV1(context.Background(), "timers_wants", idleUnit("timer")); err != nil {
+		return "", err
+	}
+	if out, err := exec.CommandContext(context.Background(), "systemctl", "--user", "start", idleUnit("timer")).CombinedOutput(); err != nil {
+		return "", fmt.Errorf("start the idle timer: %w: %s", err, strings.TrimSpace(string(out)))
 	}
 	if !canPowerOff() {
 		return fmt.Sprintf("idle stop is set to %s, but it cannot power off without passwordless sudo", d), nil

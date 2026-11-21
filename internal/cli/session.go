@@ -170,7 +170,7 @@ func printSessions(all []hostSessions) {
 			continue
 		}
 		for _, s := range r.Sessions {
-			fmt.Printf("%-14s %-10s %-20s %-9s %-*s %6s  %s\n", host, shown(s.ID), trunc(shown(s.Name), 20), shown(s.Agent), stateW, stateLabel(s), age(s.CreatedAt), shown(s.Cwd))
+			fmt.Printf("%-14s %-10s %-20s %-9s %-*s %6s  %s%s\n", host, shown(s.ID), trunc(shown(client.PolicyDisplayName(s)), 20), shown(s.Agent), stateW, stateLabel(s), age(s.CreatedAt), shown(s.Cwd), sessionRuntimeMarksV1(s)+sessionAccountMarkV1(s))
 		}
 	}
 }

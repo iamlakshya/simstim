@@ -1,6 +1,7 @@
 package host
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -28,6 +29,7 @@ type GitInfo struct {
 	// skipped are the entries of .worktreeinclude that a new worktree did
 	// not get, and why. The start writes them to the session's log.
 	skipped []skippedCopy
+	extra   map[string]json.RawMessage
 }
 
 var slugRE = regexp.MustCompile(`[^a-z0-9]+`)
@@ -64,7 +66,7 @@ func makeWorktree(cwd, name, id, base string) (*GitInfo, error) {
 	if ans.Git == nil {
 		return nil, UserError("worktree", "git made no worktree", "Check the repository's state with git status.")
 	}
-	ans.Git.skipped = copyWorktreeInclude(ans.Git.RepoRoot, ans.Git.Worktree)
+	ans.Git.skipped = copyOriginalWorktreeIncludeV1(ans.Git, id)
 	return ans.Git, nil
 }
 
@@ -86,8 +88,8 @@ func rollBackWorktree(plan *GitInfo, err error) error {
 // addWorktree is worktree.add, in the git operation's child. Before the
 // checkout, which runs a repository's filters, it gives plan the worktree
 // that it is about to make.
-func addWorktree(a *worktreeAddArgs, plan func(*GitInfo)) (*GitInfo, error) {
-	if a == nil {
+func addWorktree(a *worktreeAddArgs, plan func(*GitInfo)) (result *GitInfo, returned error) {
+	if a == nil || !validID(a.ID) {
 		return nil, UserError("bad_request", "worktree.add needs its arguments", "Send them as the request's add.")
 	}
 	if _, err := exec.LookPath("git"); err != nil {
@@ -113,9 +115,6 @@ func addWorktree(a *worktreeAddArgs, plan func(*GitInfo)) (*GitInfo, error) {
 	slug := Slug(a.Name)
 	branch := brand.Name + "/" + slug + "-" + a.ID
 	wt := filepath.Join(WorktreesDir(), filepath.Base(root), slug+"-"+a.ID)
-	if err := os.MkdirAll(filepath.Dir(wt), 0o700); err != nil {
-		return nil, UserError("worktree", "could not make the folder for the worktree: "+err.Error(), "Check the host's disk with the host doctor.")
-	}
 	// When the add fails, makeWorktree removes the plan's folder and
 	// branch. So both must be new: this add's own, and nothing that was
 	// there before.
@@ -129,11 +128,22 @@ func addWorktree(a *worktreeAddArgs, plan func(*GitInfo)) (*GitInfo, error) {
 		return nil, UserError("worktree", fmt.Sprintf("the branch %s is already in %s", branch, root), "Start the session again: a new start picks a new ID.")
 	}
 	g := &GitInfo{RepoRoot: root, Worktree: wt, Branch: branch, BaseRef: base, BaseSHA: sha, CreatedBy: true}
+	origin, err := beginNativeWorktreeAddV1(g, a.ID)
+	if err != nil {
+		return nil, asUserError(err, "worktree", "Inspect the reported original worktree and branch before retrying the start.")
+	}
+	defer func() { returned = errors.Join(returned, origin.close()) }()
 	if plan != nil {
 		plan(g)
 	}
-	if _, err := git(root, "worktree", "add", "-b", branch, wt, sha); err != nil {
+	if err := origin.check(); err != nil {
+		return nil, err
+	}
+	if _, err := git(root, "worktree", "add", wt, branch); err != nil {
 		return nil, asUserError(err, "worktree", "Check the repository's state with git status.")
+	}
+	if err := origin.finish(); err != nil {
+		return nil, err
 	}
 	_, _ = git(root, "worktree", "lock", "--reason", brand.DisplayName+" session "+a.ID, wt)
 	return g, nil

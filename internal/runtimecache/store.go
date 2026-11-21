@@ -14,12 +14,14 @@ import (
 // Store is an owned directory held open for the lifetime of its operations.
 // All entries are addressed relative to its anchored descriptor.
 type Store struct {
-	root     *os.Root
-	readOnly bool
-	lockInfo os.FileInfo
-	gate     PublicationGate
-	domain   cachefs.Domain
+	root      *os.Root
+	readOnly  bool
+	execution bool // native execution metadata purpose; never a wire grant
+	lockInfo  os.FileInfo
+	gate      PublicationGate
+	domain    cachefs.Domain
 	// Private fault hooks let package tests witness transaction boundaries.
+	beforePartSync    func(*os.File) error
 	afterLink         func()
 	beforePruneRemove func(string)
 	onLockBlocked     func()
@@ -87,6 +89,15 @@ func (s *Store) openItem(item supply.Item) (*os.File, error) {
 	return s.openItemContext(context.Background(), item)
 }
 func (s *Store) openItemContext(ctx context.Context, item supply.Item) (*os.File, error) {
+	_, done, err := s.artifactModeGuard(ctx, item)
+	if err != nil {
+		return nil, err
+	}
+	defer done()
+	return s.openItemUnfencedContext(ctx, item)
+}
+
+func (s *Store) openItemUnfencedContext(ctx context.Context, item supply.Item) (*os.File, error) {
 	if !supply.IsHex64(item.SHA256) || !IsRuntime(item.Kind) || item.Size <= 0 {
 		return nil, fmt.Errorf("runtime item has invalid metadata")
 	}
@@ -137,6 +148,14 @@ func (s *Store) syncDir(name string) error {
 // Present reports an owned regular file of the expected size and mode. It is
 // a cheap inventory claim. Commit and OpenItem always verify the actual bytes.
 func (s *Store) present(item supply.Item) (bool, error) {
+	return s.presentContext(context.Background(), item)
+}
+func (s *Store) presentContext(ctx context.Context, item supply.Item) (bool, error) {
+	_, done, err := s.artifactModeGuard(ctx, item)
+	if err != nil {
+		return false, err
+	}
+	defer done()
 	if !supply.IsHex64(item.SHA256) || !IsRuntime(item.Kind) {
 		return false, fmt.Errorf("invalid runtime inventory item")
 	}
@@ -159,7 +178,9 @@ func (s *Store) present(item supply.Item) (bool, error) {
 // publication transaction has completed.
 func (s *Store) OpenItem(ctx context.Context, item supply.Item) (*os.File, error) {
 	var f *os.File
-	err := s.locked(ctx, func() error { var err error; f, err = s.openItemContext(ctx, item); return err })
+	err := retryExecMode(ctx, func() error {
+		return s.locked(ctx, func() error { var err error; f, err = s.openItemContext(ctx, item); return err })
+	})
 	return f, err
 }
 
@@ -167,13 +188,17 @@ func (s *Store) OpenItem(ctx context.Context, item supply.Item) (*os.File, error
 // missing for delivery purposes and may be repaired by a verified transfer.
 func (s *Store) Has(ctx context.Context, item supply.Item) (bool, error) {
 	var has bool
-	err := s.locked(ctx, func() error { var err error; has, err = s.hasContext(ctx, item); return err })
+	err := retryExecMode(ctx, func() error {
+		return s.locked(ctx, func() error { var err error; has, err = s.hasContext(ctx, item); return err })
+	})
 	return has, err
 }
 
 // Present returns a stable metadata-only presence claim during a transfer.
 func (s *Store) Present(ctx context.Context, item supply.Item) (bool, error) {
 	var has bool
-	err := s.locked(ctx, func() error { var err error; has, err = s.present(item); return err })
+	err := retryExecMode(ctx, func() error {
+		return s.locked(ctx, func() error { var err error; has, err = s.presentContext(ctx, item); return err })
+	})
 	return has, err
 }

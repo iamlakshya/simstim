@@ -98,7 +98,7 @@ func (b *bridge) handleDebug(req proto.Request) bool {
 	case api.OpDebugCollect, api.OpDebugRead:
 		b.handleBundle(req)
 		return true
-	case api.OpDebugStart, api.OpDebugStop, api.OpDebugProfile, api.OpDebugSave:
+	case api.OpDebugStart, api.OpDebugStop, api.OpDebugProfile, api.OpDebugSave, api.OpDebugTraceReadV1, api.OpDebugTraceUpperV1:
 	default:
 		return false
 	}

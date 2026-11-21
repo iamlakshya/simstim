@@ -46,7 +46,7 @@ func keepLease(ctx context.Context, c *Conn, l Leaser, period time.Duration) {
 			// frozen mid-turn costs more than a few idle minutes.
 			d = busy
 		}
-		_ = c.renewActiveLease(ctx,l,d,busy)
+		_ = c.renewActiveLease(ctx, l, d, busy)
 		cancel()
 		select {
 		case <-c.done:
@@ -67,8 +67,11 @@ func anyWorking(sessions []Session) bool {
 }
 
 // renewActiveLease serialises the real provider renewal with stream admission.
-func (c *Conn) renewActiveLease(ctx context.Context,l Leaser,d,busy time.Duration) error {
- c.leaseMu.Lock();defer c.leaseMu.Unlock()
- if c.execBusy.Load()>0 {d=busy}
- return l.Renew(ctx,d)
+func (c *Conn) renewActiveLease(ctx context.Context, l Leaser, d, busy time.Duration) error {
+	c.leaseMu.Lock()
+	defer c.leaseMu.Unlock()
+	if c.execBusy.Load() > 0 {
+		d = busy
+	}
+	return l.Renew(ctx, d)
 }

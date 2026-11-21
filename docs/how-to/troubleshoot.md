@@ -73,3 +73,11 @@ For more, turn on the debug mode: `--debug` on any command, or `simstim debug st
 ## Still stuck
 
 Open an issue with the bug form, and include the output of the three commands at the top, with anything private removed.
+
+## A remote command cannot read or send input
+
+The JSON error code `input_read` means the local input source could not be
+read. Fix that source, then try the command again. `input_send` means not all
+input could be sent to the sandbox. Check the host's status, then retry.
+
+Diagnostic output keeps the original error classification and structured data.

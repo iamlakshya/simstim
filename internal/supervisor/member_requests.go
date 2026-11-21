@@ -15,7 +15,7 @@ func (s *Supervisor) memberRequest(c *client, req proto.Request) bool {
 			c.reply(req.ID, nil, execRefusal("invalid spawn request"))
 			return true
 		}
-		row, err := s.spawn(a)
+		row, err := s.spawnContextV1(c.requestContextV1(s.owner().lifetimeContext()), a)
 		if err != nil {
 			c.reply(req.ID, nil, execRefusal(err.Error()))
 		} else {

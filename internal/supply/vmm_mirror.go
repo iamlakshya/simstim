@@ -2,6 +2,7 @@ package supply
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -70,6 +71,10 @@ func MirrorVMM(release string, v LockVMM, arch, input, outputDir string) (Item, 
 	out := filepath.Join(outputDir, name)
 	h := sha256.Sum256(data)
 	item, err := releaseVMMItem(release, v, arch, LockFile{SHA256: hex.EncodeToString(h[:]), Size: int64(len(data))})
+	if err != nil {
+		return Item{}, err
+	}
+	item.FSVerity, err = FSVerityDigest(context.Background(), bytes.NewReader(data), int64(len(data)))
 	if err != nil {
 		return Item{}, err
 	}

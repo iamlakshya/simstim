@@ -151,6 +151,23 @@ func exampleParses(args []string) string {
 	if err := c.ValidateRequiredFlags(); err != nil {
 		return err.Error()
 	}
+	if f := c.Flags().Lookup("host"); f != nil && f.Changed && f.Value.String() != "my-vps" {
+		return "a host example must use my-vps"
+	}
+	words := c.Flags().Args()
+	for i, use := range strings.Fields(c.Use)[1:] {
+		if strings.Trim(use, "[]") != "<host>" || i >= len(words) || words[i] == "my-vps" {
+			continue
+		}
+		// These commands need a created host. Its default name is the
+		// provider's name; the examples teach that lifecycle too.
+		if shortPath(c) == "host destroy" || shortPath(c) == "host idle" {
+			if _, err := findProvider(words[i]); err == nil {
+				continue
+			}
+		}
+		return "a host example must use my-vps"
+	}
 	if strings.Contains(c.Use, "<host>/<session>") {
 		args := c.Flags().Args()
 		hostChoice := strings.Contains(c.Use, "<host>|") || strings.Contains(c.Use, "|<host>")
@@ -225,7 +242,7 @@ func TestHelpHasNoInternalWords(t *testing.T) {
 // brackets, and <name> appears only where a command names a new thing:
 // a new host, or a session's new name (docs/contributing/cli-spec.md 8.2).
 func TestUsePlaceholders(t *testing.T) {
-	newName := map[string]bool{"host add": true, "host create": true, "rename": true}
+	newName := map[string]bool{"host add": true, "host invite": true, "host create": true, "rename": true}
 	angleChoice := regexp.MustCompile(`<[^>]*\|[^>]*>`)
 	eachCommand(Root(), func(c *cobra.Command) {
 		if strings.Contains(c.Use, "<name>") && !newName[shortPath(c)] {

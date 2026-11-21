@@ -10,7 +10,7 @@ Connect a host: check it, install the helper, prepare it.
 simstim host add <name> [<ssh-target>] [flags]
 ```
 
-Connect a host. The ssh target is a Host from your SSH config, or user@host. It defaults to the name. `--ssh-config` adds an extra SSH config file, for example a repo's own.
+Connect a host, prepare its sandbox runtime and test its wall before saving its wall floor. The ssh target is a Host from your SSH config, or user@host; it defaults to the name. `--no-sandbox` skips sandbox preparation. `--ssh-config` adds an extra SSH config file, for example a repo's own.
 
 ## Examples
 
@@ -18,15 +18,23 @@ Connect a host. The ssh target is a Host from your SSH config, or user@host. It 
 simstim host add my-vps
 simstim host add my-vps dev@203.0.113.10
 simstim host add my-vps --tier own --yes
+simstim host add my-vps --no-sandbox
 ```
 
 ## Flags
 
 | Flag | What it does |
 | --- | --- |
+| `--accept <string>` | read the reply from standard input, with `--accept` - |
+| `--address <string>` | select an address from the reply |
+| `--delegate-io` | offer disk I/O controller delegation for this user |
 | `--host-key <fingerprint>` | the SHA256 fingerprint of the host's key, as ssh-keygen -lf prints it on the host: the key to pin |
+| `--images <string>` | get runtime and image bytes from auto, host or laptop (default: [images] fetch) |
 | `--label <list>` | labels as key=value, for example provider=gcp,region=eu |
+| `--no-sandbox` | skip sandbox preparation and keep the host without a wall floor |
 | `--provider-script <string>` | a script that starts and stops the host (see examples/providers) |
+| `--root-step <string>` | handle optional root changes: run, print or skip (default depends on tier and sandbox history) |
+| `--separate-accounts` | offer the signed launcher and separate sandbox accounts |
 | `--ssh-config <string>` | an extra SSH config file to include |
 | `--tier <string>` | who else has root on the host: own, throwaway or shared |
 | `--wake` | start the host through its provider script when it does not answer |

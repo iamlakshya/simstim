@@ -10,6 +10,7 @@ package supply
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -36,22 +37,24 @@ const FileName = "release-manifest.json"
 // The kinds of item (isolation spec 14.9.1). Later tasks add the items of
 // the kinds after vt, and the format accepts them all now.
 const (
-	KindHelper  = "helper"   // the host helper
-	KindVT      = "vt"       // the shadow terminal
-	KindUserns  = "userns"   // the namespace launcher of the process wall
-	KindVMM     = "vmm"      // a virtual machine monitor, such as Cloud Hypervisor
-	KindKernel  = "kernel"   // the guest kernel
-	KindTools   = "tools"    // the tools image that a microvm boots from
-	KindImage   = "image"    // the default image, pinned by digest
-	KindGvisor  = "gvisor"   // runsc
-	KindLaunch  = "launch"   // the slot launcher of separate accounts
-	KindLima    = "lima"     // the Lima release for a Mac host
-	KindVMImage = "vm-image" // the base image of a Mac host's VM
+	KindHelper        = "helper"         // the host helper
+	KindVT            = "vt"             // the shadow terminal
+	KindUserns        = "userns"         // the namespace launcher of the process wall
+	KindVMM           = "vmm"            // a virtual machine monitor, such as Cloud Hypervisor
+	KindKernel        = "kernel"         // the guest kernel
+	KindTools         = "tools"          // the tools image that a microvm boots from
+	KindImage         = "image"          // the default image, pinned by digest
+	KindGvisor        = "gvisor"         // runsc
+	KindLaunch        = "launch"         // the slot launcher of separate accounts
+	KindLima          = "lima"           // the Lima release for a Mac host
+	KindVMImage       = "vm-image"       // the base image of a Mac host's VM
+	KindImageVerifier = "image-verifier" // the separate offline OCI signature verifier
 )
 
 var kinds = map[string]bool{
 	KindHelper: true, KindVT: true, KindUserns: true, KindVMM: true, KindKernel: true, KindTools: true,
 	KindImage: true, KindGvisor: true, KindLaunch: true, KindLima: true, KindVMImage: true,
+	KindImageVerifier: true,
 }
 
 // Manifest is one release's manifest.
@@ -76,8 +79,10 @@ type Item struct {
 	Size    int64  `json:"size,omitempty"`
 	// URL is where the release has the file. It always points at the
 	// project's own release.
-	URL     string `json:"url,omitempty"`
-	Licence string `json:"licence,omitempty"`
+	URL               string `json:"url,omitempty"`
+	Licence           string `json:"licence,omitempty"`
+	BuildInputsSHA256 string `json:"build_inputs_sha256,omitempty"`
+	SBOMSHA256        string `json:"sbom_sha256,omitempty"`
 	// SourceURL is the source of a GPL item, in the same release.
 	SourceURL string `json:"source_url,omitempty"`
 	// EOL and HostKernel are a VMM's: the date its fixes end, and the
@@ -95,6 +100,9 @@ type Item struct {
 	RootHash   string `json:"root_hash,omitempty"`
 	Salt       string `json:"salt,omitempty"`
 	DataBlocks int64  `json:"data_blocks,omitempty"`
+	// FSVerity is the SHA-256 fs-verity descriptor digest (4096-byte blocks,
+	// no salt), for the VMM and guest kernel. Disks never carry this field.
+	FSVerity string `json:"fsverity,omitempty"`
 }
 
 // Advisory is one entry of the known-bad list (isolation spec 20.9): the
@@ -135,7 +143,12 @@ func IsHex64(s string) bool { return hex64.MatchString(s) }
 // NewItem makes the item of a file: its SHA-256 and size come from data.
 func NewItem(kind, name, version, arch string, data []byte, url string) Item {
 	sum := sha256.Sum256(data)
-	return Item{Kind: kind, Name: name, Version: version, Arch: arch, SHA256: hex.EncodeToString(sum[:]), Size: int64(len(data)), URL: url}
+	it := Item{Kind: kind, Name: name, Version: version, Arch: arch, SHA256: hex.EncodeToString(sum[:]), Size: int64(len(data)), URL: url}
+	if fsVerityKind(kind) {
+		// bytes.Reader has exactly the supplied size and cannot fail ReadAt.
+		it.FSVerity, _ = FSVerityDigest(context.Background(), bytes.NewReader(data), int64(len(data)))
+	}
+	return it
 }
 
 // Load reads a manifest and checks its format. It refuses a field it does
@@ -218,6 +231,14 @@ func (it Item) label() string {
 }
 
 func (it Item) validate() error {
+	if it.BuildInputsSHA256 != "" || it.SBOMSHA256 != "" {
+		if it.Kind != KindGvisor || !IsHex64(it.BuildInputsSHA256) || !IsHex64(it.SBOMSHA256) {
+			return errors.New("build input and SBOM digests need an exact gvisor pair")
+		}
+	}
+	if err := it.validateFSVerity(); err != nil {
+		return err
+	}
 	switch {
 	case !kinds[it.Kind]:
 		return fmt.Errorf("unknown kind %q", it.Kind)
@@ -319,7 +340,10 @@ func Check(it Item, name string, data []byte) error {
 	if err := checkReader(it, name, int64(len(data)), r); err != nil {
 		return err
 	}
-	return checkToolsTree(it, r)
+	if err := checkToolsTree(it, r); err != nil {
+		return err
+	}
+	return checkFSVerityContent(context.Background(), it, r)
 }
 
 // CheckFile checks the file at p against it. It checks the file's size
@@ -338,7 +362,10 @@ func CheckFile(it Item, p string) error {
 	if err := checkReader(it, filepath.Base(p), fi.Size(), f); err != nil {
 		return err
 	}
-	return checkToolsTree(it, f)
+	if err := checkToolsTree(it, f); err != nil {
+		return err
+	}
+	return checkFSVerityContent(context.Background(), it, f)
 }
 
 // checkReader checks a file of size bytes, read from r, against it. It

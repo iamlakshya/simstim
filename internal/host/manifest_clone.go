@@ -10,6 +10,13 @@ import (
 // CloneManifest owns mutable DTO/source/opaque data without a JSON roundtrip.
 // Policy data delegates to the one canonical API clone.
 func CloneManifest(m Manifest) Manifest {
+	if m.NoneCleanup != nil {
+		copy := *m.NoneCleanup
+		m.NoneCleanup = &copy
+	}
+	m.ResumePreparation = cloneResumePreparationV1(m.ResumePreparation)
+	m.StopDiagnosticsV1 = slices.Clone(m.StopDiagnosticsV1)
+	m.Auxiliary = cloneAuxiliaryReservationV1(m.Auxiliary)
 	m.SecretState = api.CloneSessionSecretState(m.SecretState)
 	if m.Inputs != nil {
 		copy := *m.Inputs
@@ -73,6 +80,7 @@ func CloneManifest(m Manifest) Manifest {
 		copy := cloneSelectedRuntime(*m.RuntimeManifest)
 		m.RuntimeManifest = &copy
 	}
+	m.PolicyNext = slices.Clone(m.PolicyNext)
 	m.VMNeedV1 = slices.Clone(m.VMNeedV1)
 	m.AutomaticRestore = slices.Clone(m.AutomaticRestore)
 	m.extra = maps.Clone(m.extra)

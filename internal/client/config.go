@@ -45,6 +45,9 @@ type Host struct {
 	// SSHConfig adds an SSH config file to read as well, for example a repo's
 	// own.
 	SSHConfig string `toml:"ssh_config,omitempty"`
+	// JoinedSSH records the original invite writer's local generated SSH files.
+	// This data grants no connection, execution or removal.
+	JoinedSSH *JoinedSSHOwnership `toml:"joined_ssh,omitempty"`
 	// Labels tags the host with key-value pairs of your own, for example
 	// provider = "gcp".
 	Labels map[string]string `toml:"labels,omitempty"`
@@ -79,6 +82,16 @@ func (h Host) Pool() (inPool, set bool) {
 // fields are the config reference: cmd/docgen turns them into
 // docs/reference/config.md.
 type Settings struct {
+	// Machines configures providers used by new --machine for one session.
+	Machines struct {
+		// E2B selects credentials and the template for new --machine e2b.
+		E2B struct {
+			// TokenCommand prints the API key. Empty uses E2B_API_KEY or the E2B CLI login.
+			TokenCommand string `toml:"token_command"`
+			// Template selects the E2B template. Empty uses host create e2b's default.
+			Template string `toml:"template"`
+		} `toml:"e2b"`
+	} `toml:"machines"`
 	// Placement selects the order and wake policy of new auto.
 	Placement PlacementSettings `toml:"placement"`
 	// Images selects how runtime files and images reach a host.
@@ -154,6 +167,8 @@ type Settings struct {
 // DefaultSettings are the settings with nothing in config.toml.
 func DefaultSettings() Settings {
 	var s Settings
+	defaultWall := "auto"
+	s.Sandbox.Wall = &defaultWall
 	s.Placement = PlacementSettings{Strategy: "spread", Wake: "ask"}
 	s.Images.Fetch = "auto"
 	s.UI.Motion = "auto"
@@ -410,6 +425,10 @@ func ReadSettings() (Settings, string) {
 // withDefaults fills each setting that s leaves empty with its default.
 func withDefaults(s Settings) Settings {
 	d := DefaultSettings()
+	if s.Sandbox.Wall == nil {
+		defaultWall := *d.Sandbox.Wall
+		s.Sandbox.Wall = &defaultWall
+	}
 	if s.Placement.Strategy == "" {
 		s.Placement.Strategy = d.Placement.Strategy
 	}

@@ -16,6 +16,10 @@ func (s *Supervisor) snapshot() host.Manifest {
 		m.Guest = &g
 	}
 	m.Life = s.rec.life()
+	if host.IsNoneSupervisor(&m) && (s.rec.phase != host.LifeStopped || s.rec.end == nil || s.rec.end.Kind != host.EndStop) {
+		m.NoneCleanup = nil
+	}
+	s.retireNativeAccountV1(&m)
 	return m
 }
 

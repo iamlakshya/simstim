@@ -11,11 +11,16 @@ import (
 // Closed is therefore a fence for that one turn, including final framing and
 // trailers. It differs from the copy loop's successful guest-write position.
 type httpForwarding struct {
-	accepted atomic.Uint64
-	mu       sync.Mutex
-	written  uint64
-	done     bool
-	wake     chan struct{}
+	accepted   atomic.Uint64
+	mu         sync.Mutex
+	written    uint64
+	done       bool
+	failed     bool
+	body       *physicalHTTP1Body
+	bodyStart  uint64
+	wake       chan struct{}
+	usage      *modelWebSocketUsage
+	usageStart uint64
 }
 
 func newHTTPForwarding() *httpForwarding {
@@ -71,6 +76,54 @@ type httpGuestWriter struct {
 
 func (c *httpGuestWriter) Write(p []byte) (int, error) {
 	n, err := c.Conn.Write(p)
+	if n > 0 {
+		c.forward.observeSuccessfulWrite(p[:n])
+	}
+	if err != nil || n != len(p) {
+		c.forward.mu.Lock()
+		c.forward.failed = true
+		c.forward.mu.Unlock()
+	}
 	c.forward.advance(n, err != nil)
 	return n, err //nolint:wrapcheck // preserve the inherited stream's write result
+}
+
+func (f *httpForwarding) observeModelWebSocket(usage *modelWebSocketUsage) {
+	f.mu.Lock()
+	f.usage, f.usageStart = usage, f.accepted.Load()
+	f.mu.Unlock()
+}
+func (f *httpForwarding) observeSuccessfulWrite(payload []byte) {
+	f.mu.Lock()
+	usage, start, written := f.usage, f.usageStart, f.written
+	if f.body != nil && written+uint64(len(payload)) > f.bodyStart {
+		bodyPayload := payload
+		if written < f.bodyStart {
+			bodyPayload = payload[f.bodyStart-written:]
+		}
+		if f.body.feed(bodyPayload) != nil {
+			f.failed = true
+		}
+	}
+	f.mu.Unlock()
+	if usage == nil || written+uint64(len(payload)) <= start {
+		return
+	}
+	if written < start {
+		payload = payload[start-written:]
+	}
+	usage.observe(payload)
+}
+
+func (f *httpForwarding) observeModelHTTP(turn *ModelUsageTurnV1, method string) {
+	f.mu.Lock()
+	f.body = &physicalHTTP1Body{method: method, observe: turn.ForwardedV1}
+	f.bodyStart = f.accepted.Load()
+	f.mu.Unlock()
+}
+
+func (f *httpForwarding) physicalComplete() bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return !f.failed && f.written >= f.accepted.Load()
 }

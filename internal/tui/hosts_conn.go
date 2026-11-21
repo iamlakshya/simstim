@@ -41,6 +41,8 @@ func (m *Model) onConn(msg tea.Msg) tea.Cmd {
 		return m.onLatency(msg)
 	case doctorMsg:
 		return m.onDoctor(msg)
+	case hostRuntimeUpgradedV1:
+		return m.onHostRuntimeUpgradedV1(msg)
 	case refreshTickMsg:
 		return m.onRefreshTick()
 	case latencyTickMsg:
@@ -76,7 +78,7 @@ func (m *Model) onDialled(msg dialledMsg) tea.Cmd {
 	}
 	h.needRetire = false
 	h.conn, h.status, h.err, h.backoff = msg.conn, stOnline, nil, 0
-	cmds := []tea.Cmd{m.listSessions(h), m.ping(h), m.doctor(h), m.waitDone(h.name(), h.gen, h.conn)}
+	cmds := []tea.Cmd{m.listSessions(h), m.ping(h), m.doctor(h), m.upgradeHostRuntimeV1(h), m.waitDone(h.name(), h.gen, h.conn)}
 	if msg.conn.HostIDChanged() {
 		h.tier, h.idChanged = client.TierShared, true
 		cmds = append(cmds, m.toastHostIDChanged(h.name()))

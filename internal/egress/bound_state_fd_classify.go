@@ -17,6 +17,7 @@ const (
 	fdDTORetired
 	fdDTOShape
 	fdDTOSlot
+	fdDTOTrustedUse
 )
 
 func (s *fdPublicState) typeString(span api.JSONSpan) error {
@@ -73,6 +74,8 @@ func (s *fdPublicState) classifyDTO(span api.JSONSpan, kind byte) error {
 		known = s.shapes.shape
 	case fdDTOSlot:
 		known = s.shapes.slot
+	case fdDTOTrustedUse:
+		known = s.schema.trusted
 	default:
 		return errProjectedStateOpaque
 	}
@@ -105,7 +108,17 @@ func (s *fdPublicState) classifyDTO(span api.JSONSpan, kind byte) error {
 				return s.typeMap(value, s.typeString)
 			case "binds":
 				return s.typeMap(value, func(v api.JSONSpan) error { return s.classifyDTO(v, fdDTOBinding) })
+			case "trusted_uses":
+				return s.typeMap(value, func(v api.JSONSpan) error { return s.classifyDTO(v, fdDTOTrustedUse) })
 			}
+		case fdDTOTrustedUse:
+			if key == "bind" {
+				return s.classifyDTO(value, fdDTOBinding)
+			}
+			if key == "v" {
+				return s.typeInt(value)
+			}
+			return s.typeString(value)
 		case fdDTOBinding:
 			if key == "hosts" {
 				return s.typeArray(value, s.typeString)

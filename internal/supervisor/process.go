@@ -35,6 +35,22 @@ func (s processSandbox) StateCapture() *files.Capture { return s.capture }
 
 func (s processSandbox) Wait() error { return s.Sandbox.Wait().Err }
 
+func (s processSandbox) FreezeV1(ctx context.Context, maxMS int) error {
+	owner, ok := s.Sandbox.(outsideFreezerV1)
+	if !ok {
+		return snapshotFailureV1("the original process runtime has no cgroup freezer", nil)
+	}
+	return owner.FreezeV1(ctx, maxMS)
+}
+
+func (s processSandbox) ThawV1() error {
+	owner, ok := s.Sandbox.(outsideFreezerV1)
+	if !ok {
+		return snapshotFailureV1("the original process runtime has no cgroup thaw owner", nil)
+	}
+	return owner.ThawV1()
+}
+
 // CleanExit reports the runtime's own completed exit and forced-kill evidence.
 func (s processSandbox) CleanExit() bool {
 	runtime, ok := s.Sandbox.(interface{ CleanExit() bool })
@@ -43,24 +59,36 @@ func (s processSandbox) CleanExit() bool {
 
 func prepareProcess(m *host.Manifest) (sandbox, error) { return prepareProcessMode(m, false) }
 
-func prepareProcessMode(m *host.Manifest, headless bool) (_ sandbox, returned error) {
+func prepareProcessMode(m *host.Manifest, headless bool) (result sandbox, returned error) {
 	spec, capture, err := prepareProcessFilesystem(m, headless)
 	if err != nil {
+		if capture != nil {
+			return &failedSandboxPreparationV1{capture: capture}, err
+		}
 		return nil, err
 	}
 	prepared := false
 	defer func() {
 		if !prepared && capture != nil {
-			returned = errors.Join(returned, capture.Close())
+			closeErr := capture.Close()
+			returned = errors.Join(returned, closeErr)
+			if closeErr != nil {
+				result = &failedSandboxPreparationV1{capture: capture}
+			}
 		}
 	}()
 	sb, err := (process.Driver{}).Prepare(context.Background(), spec)
 	if err != nil {
+		if sb != nil {
+			prepared = true // Transfer the SAME returned partial owner and capture.
+			return &failedSandboxPreparationV1{runtime: sb, capture: capture}, err
+		}
 		return nil, err
 	}
 	disk, err := processDiskResourcesV1(spec)
 	if err != nil {
-		return nil, err
+		prepared = true
+		return &failedSandboxPreparationV1{runtime: sb, capture: capture, disk: disk}, err
 	}
 	prepared = true
 	return processSandbox{Sandbox: sb, capture: capture, disk: disk}, nil
@@ -70,6 +98,9 @@ func prepareProcessMode(m *host.Manifest, headless bool) (_ sandbox, returned er
 // It preserves the legacy PATH branch, canonical cache/state merge and owned
 // capture generation. The caller owns a successful capture; failure closes it.
 func prepareProcessFilesystem(m *host.Manifest, headless bool) (_ wall.Spec, capture *files.Capture, returned error) {
+	if host.IsSandboxPrepareManifestV1(m) {
+		headless = true
+	}
 	helper, err := os.Executable()
 	if err != nil {
 		return wall.Spec{}, nil, wallError("cannot find the supervisor helper", err)
@@ -103,12 +134,15 @@ func prepareProcessFilesystem(m *host.Manifest, headless bool) (_ wall.Spec, cap
 	m = &copy
 	capture, err = prepareFileCapture(m)
 	if err != nil {
-		return wall.Spec{}, nil, err
+		return wall.Spec{}, capture, err
 	}
 	defer func() {
 		if returned != nil && capture != nil {
-			returned = errors.Join(returned, capture.Close())
-			capture = nil
+			closeErr := capture.Close()
+			returned = errors.Join(returned, closeErr)
+			if closeErr == nil {
+				capture = nil
+			}
 		}
 	}()
 	if hadFilePlan {
@@ -143,6 +177,9 @@ func prepareProcessFilesystem(m *host.Manifest, headless bool) (_ wall.Spec, cap
 		if err != nil || spec.DiskMax < 0 {
 			return wall.Spec{}, capture, diskFailure("disk_measure", "the process sandbox.disk_max cannot be used")
 		}
+	}
+	if m.Policy != nil && m.Policy.Sandbox.CPUs != nil && *m.Policy.Sandbox.CPUs > 0 {
+		spec.CPUs = *m.Policy.Sandbox.CPUs
 	}
 
 	return spec, capture, nil

@@ -111,6 +111,9 @@ func prepareBoundInitial(ctx context.Context, args BoundInitArgs) (*preparedInit
 	if err := restoreMintedState(ctx, state, args.SavedMinted); err != nil {
 		return nil, err
 	}
+	if err := prepareTrustedInitial(ctx, state, args); err != nil {
+		return nil, err
+	}
 	if err := assignInitialSentinels(ctx, state, args.Saved); err != nil {
 		return nil, err
 	}

@@ -90,10 +90,7 @@ func (g *Init) startMember(a proto.CtlStartArgs, restore bool) (int, error) {
 			return 0, err
 		}
 	}
-	files := FilesFor(g.root, a.Session)
-	if g.vm != nil {
-		files = g.vm.holderFiles(a.Session)
-	}
+	files := g.memberFilesV1(a.Session)
 	// The explicitly installed no-wall fixture retains its legacy primary
 	// layout, so P14 lifecycle assertions stay unchanged. Production never
 	// enables this from RootEnv or another input.
@@ -108,8 +105,10 @@ func (g *Init) startMember(a proto.CtlStartArgs, restore bool) (int, error) {
 		return 0, err
 	}
 	home := g.path(host.GuestHome)
-	if err := paths.EnsurePrivateDir(home); err != nil {
-		return 0, err
+	if g.unwalled == nil {
+		if err := paths.EnsurePrivateDir(home); err != nil {
+			return 0, err
+		}
 	}
 	if err := writeManifest(g, a, files.Manifest); err != nil {
 		return 0, err
@@ -209,7 +208,13 @@ func (g *Init) startHolder(id string, files host.GuestHolder, home string, runTo
 	// Retain its context values without a competing CommandContext killer.
 	cmd := exec.CommandContext(context.WithoutCancel(g.lifetime), exe, "holder", id)
 	cmd.Env = append(holderEnv(os.Environ(), home), files.Env()...)
+	if g.unwalled != nil {
+		cmd.Env = append(append([]string(nil), os.Environ()...), files.Env()...)
+	}
 	cmd.ExtraFiles = []*os.File{theirs}
+	if g.unwalled != nil && g.unwalled.helper != nil {
+		cmd.ExtraFiles = append(cmd.ExtraFiles, g.unwalled.helper)
+	}
 	if g.vm != nil {
 		release, err := g.vm.configureHolder(cmd, id, runToken, files)
 		if err != nil {
@@ -279,6 +284,7 @@ func holderEnv(env []string, home string) []string {
 // When the holder goes, the guest init ends too: the supervisor then sees
 // the sandbox end.
 func (g *Init) passEvents(conn net.Conn, hp *holderProc) {
+	defer close(hp.eventsDone)
 	defer hp.closeEvents()
 	r := bufio.NewReader(conn)
 	var head [4]byte
@@ -298,7 +304,6 @@ func (g *Init) passEvents(conn net.Conn, hp *holderProc) {
 			g.holderEvent(hp, buf[1:])
 		}
 	}
-	close(hp.eventsDone)
 	<-hp.done
 	g.log.Info("the holder exited")
 	g.endIfEmpty()

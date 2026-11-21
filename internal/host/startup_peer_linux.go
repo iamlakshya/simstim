@@ -17,13 +17,15 @@ import (
 )
 
 type nativeStartupPeerV1 struct {
-	pid    int
-	uid    uint32
-	pidfd  int
-	proc   *os.Root
-	once   sync.Once
-	closed bool
-	mu     sync.Mutex
+	identity *nativeHelperIdentityV1
+	pid      int
+	uid      uint32
+	pidfd    int
+	proc     *os.Root
+	once     sync.Once
+	closed   bool
+	closeErr error
+	mu       sync.Mutex
 }
 
 type pendingStartupV1 struct {
@@ -48,9 +50,11 @@ func (owner *OwnedSupervisorLease) PrepareStartupHello(ctx context.Context, line
 	if err := errors.Join(ctx.Err(), line.RejectAncillary()); err != nil {
 		return "", err
 	}
-	peer, err := pinOutsideStartupPeer(line.conn)
-	if err != nil {
-		return "", err
+	line.mu.Lock()
+	peer := line.nativePeer
+	line.mu.Unlock()
+	if peer == nil {
+		return "", sessionLeaseError("the original outside startup has no accepted native code/namespace hello")
 	}
 	var nonce [32]byte
 	if _, err := rand.Read(nonce[:]); err != nil {
@@ -111,13 +115,19 @@ func (peer *nativeStartupPeerV1) checkLocked() error {
 	if err != nil || len(paths) == 0 || placeAmong(paths, "") != placeOutside {
 		return errors.Join(sessionLeaseError("the startup connector is inside a session or has unknown placement"), err)
 	}
-	selfNS, err := os.Readlink(filepath.Join(procRoot, "self", "ns", "cgroup"))
-	if err != nil {
-		return err
-	}
-	peerNS, err := peer.proc.Readlink("ns/cgroup")
-	if err != nil || selfNS != peerNS {
-		return errors.Join(sessionLeaseError("the original startup connector changed cgroup namespace"), err)
+	if peer.identity != nil {
+		if err := peer.identity.Check(peer.identity.expected); err != nil {
+			return err
+		}
+	} else {
+		selfNS, err := os.Readlink(filepath.Join(procRoot, "self", "ns", "cgroup"))
+		if err != nil {
+			return err
+		}
+		peerNS, err := peer.proc.Readlink("ns/cgroup")
+		if err != nil || selfNS != peerNS {
+			return errors.Join(sessionLeaseError("the original startup connector changed cgroup namespace"), err)
+		}
 	}
 	n, err = unix.Poll(polls, 0)
 	if err != nil || n != 0 {
@@ -145,17 +155,19 @@ func (peer *nativeStartupPeerV1) Close() error {
 	if peer == nil {
 		return nil
 	}
-	var failure error
 	peer.once.Do(func() {
 		peer.mu.Lock()
 		defer peer.mu.Unlock()
 		peer.closed = true
-		failure = unix.Close(peer.pidfd)
+		peer.closeErr = unix.Close(peer.pidfd)
+		if peer.identity != nil {
+			peer.closeErr = errors.Join(peer.closeErr, peer.identity.Close())
+		}
 		if peer.proc != nil {
-			failure = errors.Join(failure, peer.proc.Close())
+			peer.closeErr = errors.Join(peer.closeErr, peer.proc.Close())
 		}
 	})
-	return failure
+	return peer.closeErr
 }
 
 func (peer *nativeStartupPeerV1) checkLive() error {

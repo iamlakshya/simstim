@@ -17,10 +17,12 @@ import (
 
 // sessionOps are the bridge's requests that act on a session.
 var sessionOps = map[string]bool{
-	"events.watch":true,
-	"port.grant":true,"port.reverse":true,"ports":true,"ports.view":true,
+	api.OpRewindPrepareV1: true, api.OpRewindPreparedCheckV1: true, api.OpRewindCommitV1: true, api.OpRewindPreparedCancelV1: true, api.OpFork: true, api.OpRewind: true, api.OpCheckpoints: true,
+	"ssh-key.policy": true,
+	"events.watch":   true,
+	"port.grant":     true, "port.reverse": true, "ports": true, "ports.view": true,
 	"sandbox.probe": true,
-	"policy.ls": true, "policy.add": true, "policy.rm": true, "policy.log": true,
+	"policy.ls":     true, "policy.add": true, "policy.rm": true, "policy.log": true,
 	api.SandboxReviewContextOp: true, "inputs.begin": true, inputtransfer.Describe: true, "sandbox.snapshot": true, "exec": true, "spawn": true,
 	"delete": true, "resume": true, "restore": true, "send": true, "peek": true, "rename": true, "kill": true,
 }

@@ -13,8 +13,20 @@ import (
 	"github.com/iamlakshya/simstim/internal/proto"
 )
 
-func (s *Supervisor) installMemberPolicy(ctx context.Context, child *host.Manifest, approved map[string]api.Secret, intent *api.SecretDeliveryIntent, expectedGeneration string) (secretEnvironment, error) {
+func (s *Supervisor) installMemberPolicy(ctx context.Context, child *host.Manifest, approved map[string]api.Secret, intent *api.SecretDeliveryIntent, expectedGeneration string, protectedTrusted ...map[string]api.Secret) (secretEnvironment, error) {
 	root := s.owner()
+	if root.unwalledV1() {
+		if len(protectedTrusted) > 1 || len(protectedTrusted) == 1 && len(protectedTrusted[0]) > 0 {
+			return secretEnvironment{}, secretIntentFailure()
+		}
+		return root.installNoneMemberV1(ctx, child, approved, intent, expectedGeneration)
+	}
+	if len(protectedTrusted) > 1 {
+		return secretEnvironment{}, secretIntentFailure()
+	}
+	if len(protectedTrusted) == 1 && len(protectedTrusted[0]) > 0 && intent == nil {
+		return secretEnvironment{}, secretIntentFailure()
+	}
 	root.mu.Lock()
 	modern := root.m.SecretState != nil || child.SecretState != nil || intent != nil
 	root.mu.Unlock()
@@ -31,13 +43,22 @@ func (s *Supervisor) installMemberPolicy(ctx context.Context, child *host.Manife
 		}
 		return result, nil
 	}
-	return root.installBoundMemberPolicy(ctx, child, approved, intent, expectedGeneration)
+	return root.installBoundMemberPolicy(ctx, child, approved, intent, expectedGeneration, protectedTrusted...)
 }
 
-func (s *Supervisor) installBoundMemberPolicy(ctx context.Context, child *host.Manifest, approved map[string]api.Secret, intent *api.SecretDeliveryIntent, expectedGeneration string) (secretEnvironment, error) {
+func (s *Supervisor) installBoundMemberPolicy(ctx context.Context, child *host.Manifest, approved map[string]api.Secret, intent *api.SecretDeliveryIntent, expectedGeneration string, protectedTrusted ...map[string]api.Secret) (secretEnvironment, error) {
 	if intent == nil {
 		return secretEnvironment{}, secretIntentFailure()
 	}
+	trustedValues, err := memberTrustedValues(protectedTrusted)
+	if err != nil {
+		return secretEnvironment{}, err
+	}
+	defer clear(trustedValues)
+	if err := validateProtectedTrustedValues(intent.TrustedUses, trustedValues, true); err != nil {
+		return secretEnvironment{}, err
+	}
+
 	owned, requested, err := host.PrepareSecretDelivery(intent, approved, true, recordedSecretNames(child.Secrets))
 	if err != nil {
 		return secretEnvironment{}, err
@@ -62,10 +83,13 @@ func (s *Supervisor) installBoundMemberPolicy(ctx context.Context, child *host.M
 	if expectedGeneration != "" && expectedGeneration != snapshot.SecretState.Generation {
 		return secretEnvironment{}, secretIntentFailure()
 	}
-	if len(approved) > 0 && expectedGeneration == "" {
+	if (len(approved) > 0 || len(trustedValues) > 0) && expectedGeneration == "" {
 		return secretEnvironment{}, secretIntentFailure()
 	}
 	if err := requireBoundControl(ctx, owner); err != nil {
+		return secretEnvironment{}, err
+	}
+	if err := requireTrustedJudgeControl(ctx, owner, owned.TrustedUses); err != nil {
 		return secretEnvironment{}, err
 	}
 	if err := s.requireBoundGuest(ctx); err != nil {
@@ -78,7 +102,7 @@ func (s *Supervisor) installBoundMemberPolicy(ctx context.Context, child *host.M
 		authorizedGeneration = snapshot.SecretState.Generation
 	} // value-free trusted internal join only
 	args := egress.MemberAddV2Args{Generation: authorizedGeneration, Version: egress.MemberRegistryV2, Kind: selectedSecretKind(child.Agent.Kind), Values: values,
-		Modes: make(map[string]api.SecretMode), Binds: make(map[string]api.SecretBind)}
+		Modes: make(map[string]api.SecretMode), Binds: make(map[string]api.SecretBind), TrustedUses: owned.TrustedUses, ProtectedTrustedSecretValues: trustedValues}
 	for name := range values {
 		mode := owned.Modes[name]
 		if previous, exists := snapshot.SecretState.Intent.Modes[name]; exists && (previous != mode || mode == api.SecretModeBound && !sameSecretBinding(snapshot.SecretState.Intent.Binds[name], owned.Binds[name])) {
@@ -124,6 +148,7 @@ func (s *Supervisor) installBoundMemberPolicy(ctx context.Context, child *host.M
 			}
 			current.Primary[name] = public
 		}
+		current.Intent.TrustedUses = api.CloneTrustedSecretUses(reply.TrustedUses)
 		current.Generation = reply.Generation
 		return current, nil
 	})
@@ -153,7 +178,7 @@ func (s *Supervisor) installBoundMemberPolicy(ctx context.Context, child *host.M
 }
 
 func validateMemberSecretReply(ctx context.Context, args egress.MemberAddV2Args, reply egress.MemberAddResultV2, current *api.SessionSecretState) error {
-	if reply.Version != egress.MemberRegistryV2 || len(reply.Env) != len(args.Values) || len(reply.Secrets) != len(args.Values) {
+	if reply.Version != egress.MemberRegistryV2 || len(reply.Env) != len(args.Values) || len(reply.Secrets) != len(args.Values) || !egress.EqualTrustedSecretUsesV1(overlayTrustedUses(current.Intent.TrustedUses, args.TrustedUses), reply.TrustedUses) {
 		return secretCommitFailure()
 	}
 	actuals := make(map[api.Secret]bool, len(args.Values))

@@ -24,6 +24,7 @@ import (
 
 	"github.com/iamlakshya/simstim/internal/api"
 	"github.com/iamlakshya/simstim/internal/brand"
+	"github.com/iamlakshya/simstim/internal/egress/classify"
 	"github.com/iamlakshya/simstim/internal/link"
 	"github.com/iamlakshya/simstim/internal/proto"
 )
@@ -45,6 +46,8 @@ type InitArgs struct {
 	SessionID  string `json:"session_id"`
 	SessionRef string `json:"session_ref"`
 	Agent      string `json:"agent,omitempty"`
+	// JudgeMetadata is trusted start data, source-checked before judge IO.
+	JudgeMetadata classify.Metadata `json:"judge_metadata,omitempty"`
 	// AgentKinds is the trusted saved-member seed. It requires member-add-v1.
 	AgentKinds []string          `json:"agent_kinds,omitempty"`
 	DNS        string            `json:"dns,omitempty"`
@@ -62,18 +65,24 @@ type InitResult struct {
 
 // PolicyUpdateArgs updates the live policy of a running egress process.
 type PolicyUpdateArgs struct {
-	SessionRef string     `json:"session_ref,omitempty"`
-	Policy     api.Policy `json:"policy"`
+	// SourceLayers is the complete protected source vector for a live update.
+	// A non-nil vector is recomputed against the actual applied policy.
+	SourceLayers         []api.Layer `json:"source_layers,omitempty"`
+	SessionRef           string      `json:"session_ref,omitempty"`
+	Policy               api.Policy  `json:"policy"`
+	ResetUnknownRefusals bool        `json:"reset_unknown_refusals,omitempty"`
 }
 
 // CtlEvent is an asynchronous event emitted by egress on its control stream.
 type CtlEvent struct {
-	Event      string            `json:"event"`
-	Audit      *AuditEntry       `json:"audit,omitempty"`
-	OnceEnd    *OnceEndEvent     `json:"once_end,omitempty"`
-	RuleExpiry *RuleExpiryEvent  `json:"rule_expiry,omitempty"`
-	Member     *MemberAudit      `json:"member,omitempty"`
-	Minted     *MintedStateEvent `json:"minted,omitempty"`
+	ClassifierSession *api.NetworkHoldActionArgs `json:"classifier_session,omitempty"`
+	Event             string                     `json:"event"`
+	Audit             *AuditEntry                `json:"audit,omitempty"`
+	OnceEnd           *OnceEndEvent              `json:"once_end,omitempty"`
+	RuleExpiry        *RuleExpiryEvent           `json:"rule_expiry,omitempty"`
+	Member            *MemberAudit               `json:"member,omitempty"`
+	Minted            *MintedStateEvent          `json:"minted,omitempty"`
+	NetworkHold       *NetworkHoldEvent          `json:"network_hold,omitempty"`
 }
 
 // OnceEndEvent identifies the exact one-use lease whose flow has ended.
@@ -159,9 +168,10 @@ func LinkOptions() link.Options {
 
 // Options configures a Server.
 type Options struct {
-	Dialer *Dialer
-	Logger *slog.Logger
-	Now    func() time.Time
+	Popularity *PopularitySourceV1
+	Dialer     *Dialer
+	Logger     *slog.Logger
+	Now        func() time.Time
 	// OriginRoots overrides the system roots for an embedded server or test.
 	// Nil loads the system roots once at process start.
 	OriginRoots *x509.CertPool
@@ -184,6 +194,10 @@ type Server struct {
 	expiryWake chan struct{}
 	expired    map[onceKey]struct{}
 	policyMu   registryGate
+	holds      *networkHolds
+	classifier *classifierRuntime
+	usage      *ModelUsageMeterV1
+	uploads    *uploadBudgets
 
 	mu      sync.RWMutex
 	engine  *Engine
@@ -251,10 +265,22 @@ func NewServer(conn net.Conn, opt Options) (*Server, error) {
 		done:       make(chan struct{}),
 		cancel:     cancel,
 	}
+	srv.holds, err = newNetworkHolds(srv.scrubber)
+	if err != nil {
+		_ = srv.sess.Close()
+		return nil, err
+	}
 	srv.transport, err = srv.newHTTPTransport(opt.OriginRoots)
 	if err != nil {
 		return nil, err
 	}
+	srv.classifier = newClassifierRuntime(srv)
+	if err := srv.bindPopularitySourceV1(opt.Popularity); err != nil {
+		_ = srv.Close()
+		return nil, err
+	}
+	srv.usage = NewModelUsageMeterV1()
+	srv.uploads = newUploadBudgets()
 	return srv, nil
 }
 
@@ -294,11 +320,23 @@ func (s *Server) Close() error {
 		if cancel != nil {
 			cancel()
 		}
+		if s.holds != nil {
+			s.holds.close()
+		}
 		s.flows.closeAll()
+		if s.uploads != nil {
+			s.uploads.close()
+		}
+		if s.classifier != nil {
+			s.classifier.close()
+			s.classifier.facts.closePopularityV1()
+		}
+		s.dropMemoryGrants()
 		if s.transport != nil {
 			s.transport.CloseIdleConnections()
 		}
 		_ = s.sess.Close()
+		s.joinSourceExport()
 		close(s.done)
 	})
 	return nil

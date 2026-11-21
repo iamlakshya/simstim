@@ -55,6 +55,7 @@ type fakeHost struct {
 type fakeBackend struct {
 	// A test may use the actual local resolver; unset has no automatic target.
 	resolveHost             func(context.Context, string) (client.Host, error)
+	previewHost             func(context.Context, string, client.NewInputOptions) (hostSelectionPreview, error)
 	settingsWarn, detachKey string
 	settings                *client.Settings
 	newArgs                 []client.NewArgs
@@ -106,10 +107,12 @@ type fakeBackend struct {
 	loadGate, loading chan struct{}
 	loadCtx           context.Context
 	saveGate, saving  chan struct{}
+	committedSaveGate chan struct{} // an actual committed save whose result is still owned
 	saveCtx           context.Context
 	// pinUnknown says that the user's settings do not name the fake host's
 	// key, and pinErr is what a pin says, if it fails.
 	pinUnknown bool
+	pinKey     string // a changed remote key between the displayed question and confirmation
 	pinErr     error
 	staged     map[string]string // the pin staged for a host, "" for none yet
 	// stageGate, when set, holds StagePin until it closes or ctx ends.
@@ -122,6 +125,7 @@ type fakeBackend struct {
 	updateErr     error
 	resolveTier   func(context.Context, client.Host) (client.Tier, error)
 	retire        func(context.Context, client.Host) error
+	fakePrepareState
 }
 
 func newFakeBackend() *fakeBackend {
@@ -168,15 +172,8 @@ func (b *fakeBackend) UpdateHostsContext(ctx context.Context, c client.HostChang
 	b.mu.Lock()
 	b.saveCtx = ctx
 	b.mu.Unlock()
-	if b.saveGate != nil {
-		if b.saving != nil {
-			close(b.saving)
-		}
-		select {
-		case <-b.saveGate:
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		}
+	if err := b.waitSaveGate(ctx); err != nil {
+		return nil, err
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -206,6 +203,7 @@ func (b *fakeBackend) UpdateHostsContext(ctx context.Context, c client.HostChang
 	}
 	b.hosts = out
 	b.saved = append(b.saved, out)
+	b.bumpHostGenLocked(c)
 	if b.tiers == nil {
 		b.tiers = map[string]client.TierEntry{}
 	}
@@ -238,6 +236,8 @@ func (b *fakeBackend) UpdateHostsContext(ctx context.Context, c client.HostChang
 		b.record("clear removal %s", c.Was.Name)
 		return errClearRemoval, nil
 	}
+	b.record("save %s pin=%s", c.Now.Name, pin)
+	b.waitCommittedSaveResult()
 	return nil, nil
 }
 
@@ -395,15 +395,8 @@ func (b *fakeBackend) SaveHosts(ctx context.Context, hosts []client.Host) error 
 	b.mu.Lock()
 	b.saveCtx = ctx
 	b.mu.Unlock()
-	if b.saveGate != nil {
-		if b.saving != nil {
-			close(b.saving)
-		}
-		select {
-		case <-b.saveGate:
-		case <-ctx.Done():
-			return ctx.Err()
-		}
+	if err := b.waitSaveGate(ctx); err != nil {
+		return err
 	}
 	if err := ctx.Err(); err != nil {
 		return err

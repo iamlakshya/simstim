@@ -194,6 +194,7 @@ func layersRequireWall(layers []api.Layer) bool {
 		values := layer.LayerValues
 		values.Sandbox.Wall = nil
 		values.Sandbox.Profile = nil
+		values.Sandbox.Host = nil
 		values.Sandbox.Mounts = nil
 		values.Sandbox.Include = nil
 		values.Sandbox.Secrets = nil

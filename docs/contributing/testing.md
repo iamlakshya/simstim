@@ -8,6 +8,37 @@ the notification does not change the frame format or the attach stream.
 
 Every change keeps the tests green, and every bug fix adds the test that would have caught it.
 
+HTTP/2 ownership tests use TLS over owned pipes and the original public server.
+A streamed upload must return receive credit, then let its cancelled response
+retire while a later request finishes on the same connection. Every selected
+frame keeps its request owner until its native write finishes. A failed frame
+prefix closes that original writer, and settlement joins its writes before
+releasing the request. Frame headers and window updates never count as model
+payload bytes.
+
+An exposed HTTP/2 header block must finish before a private stream reset can
+reach the original server. If the peer abandons its CONTINUATION, revocation
+cancels origin work at once but retains the request's ownership until the
+actual connection closes. The production-policy test checks the retained
+worker, flow and meter, then closes the owned native socket and checks their
+joined retirement.
+
+A private reader wake must also preserve the caller's original read deadline.
+When that deadline expires inside an unfinished header block, the native reader
+returns its timeout to the server. A pending reset cannot turn that timeout
+into a loop or insert a control frame into the header block.
+
+Ordinary policy acknowledgements wait for revoked HTTP requests through their
+existing completion owners. Cancelling an origin alone does not prove that its
+queued response, original permit or worker has retired. Lockdown keeps its
+additional join of opaque flows.
+
+Publication captures those exact owners under the policy lock, after binding
+the engine to the original permit ledger, then releases that lock before waiting. A permitted sibling and a new permitted request
+must still finish during the wait. Caller cancellation reports incomplete
+cleanup and retains the same native owners; it does not undo the published
+policy or manufacture completion by closing a permitted carrier.
+
 | Command | What it runs | Where |
 | --- | --- | --- |
 | `just test` | Go unit tests with the race detector, then the tests of `internal/link` again over a pipe with no buffer (`LINK_TEST_PIPE=1`), plus offline tests of the public-readiness checker, of the end-to-end cleanup, of the end-to-end probe of the session sockets and of the pins watch, of the release's signed-tag gate in a temporary repository (`scripts/test-verify-tag.sh`), of the cleanup of `test/e2e/host_git.py`, and of the `llms.txt` check | Needs Python 3.11 or later. The gate's test skips without git 2.34 and OpenSSH 8.8, except in CI |
@@ -48,6 +79,7 @@ These are the project's quality expectations, with tools to check them locally a
 - **Screens** are golden files in `internal/tui/testdata`, at 60×20, 80×24 and 120×36, with motion off. A golden test fails on any change of text or layout. Run it with `-update` only when the change is meant, and read the diff.
 - **Colour** is tested separately in `internal/tui/theme_test.go`: each screen is rendered as a truecolour, 256-colour, 16-colour, `NO_COLOR` and no-terminal profile would receive it, and every fixed colour must keep a contrast of 3:1 on dark and light backgrounds.
 - **Model tests** (`internal/tui/model_test.go`) drive the launcher with keys against a fake backend, and check what it asks the backend to do.
+- **Host-key confirmation** exercises the wizard's unknown-key question, the exact fingerprint on its second connection, and refusal before saving or preparing a changed key. Registration tests check that the native pin and tier keep that fingerprint before the saved preparation target is used.
 - **Context ownership** is checked across terminal handoff and host saves. A resumed launcher keeps its own questions and notices while following the current operation's cancellation. Final cleanup still joins owned work after cancellation.
 - **The attach path** is byte-exact: any change to it needs a test that proves the bytes are unchanged.
 - **Clocked concurrency tests.** A `synctest.Test` owns the files and cleanup for the workers it starts. Register cleanup on the `t` passed into the bubble. Release and join each held worker before clearing its reader registry or closing its file, also when an assertion calls `t.Fatal`. A parent cleanup must not wait on a channel made inside the bubble.
@@ -252,6 +284,11 @@ The pins watch also runs govulncheck each day, so a new advisory shows up withou
 
 ## Time to first agent
 
+The [microvm conformance guide](microvm-conformance.md) gives the real
+macOS-to-Linux wall measurements, raw evidence, exact density count and
+release checks. Its measurements remain pending. It keeps the existing race,
+coverage, count, memory and performance gates.
+
 `scripts/time-to-agent.sh <ssh target> [ssh config] [agent]` measures the path in [getting started](../tutorials/getting-started.md) on a host you can already reach: it builds a snapshot release, signs it with a throwaway key, serves it on localhost, and times `install.sh`, `host add` and `new --agent` in a throwaway config folder, until the agent's state is known.
 
 | Date | Client | Host | install | host add | agent running | Total |
@@ -271,3 +308,76 @@ go run ./test/ttyshot -script keys.tty -- ./bin/<name> demo
 ```
 
 `just screenshots` uses it to draw the README's images.
+
+Held network display snapshots use version 1 and a nonzero revision, even when empty or stopped. They contain at most 128 open records with unique opaque IDs. A zero waiter count retains the original absolute expiry. Masked host text is display only; a consumer keeps IDs and asks the backend to resolve every action. A display snapshot grants no network authority.
+
+The held-request client tests use the actual ordered frame writer and generated accepted Source fixtures. They check a complete closed snapshot, distinct masked IDs, zero-waiter expiry, publication release before the response, purpose separation and a removed-and-readded host. These tests start no transport, provider or egress actor and grant no native provenance. Actual producer and positive permission gates stay separate.
+
+Pending network display checks use the bounded public V1 descriptors only. Distinct opaque IDs stay distinct when their masked host and port match. Zero active flows do not erase a held question or extend its original expiry. A complete invalid snapshot writes no partial list, and a stopped lifetime displays no open questions. These checks grant no policy target or answer authority; the real producer and ID-based mutators have separate gates.
+
+Judge source-retirement tests use the actual registry mutation paths. Additive mint and a new name under the same agent kind must cancel and join the old exact source call before publication. Primary authority generation remains stable for additive mint. A compile or mocked acknowledgement is not that lifecycle proof.
+
+Judge start metadata is owned at admission, legacy projection and registry cloning. These copy checks do not authorise metadata to cross a model boundary; the current source gate still decides that.
+
+The protected image selection records its origin from the same private producer as its image request. A saved image uses the original host-bound pin path. A release default carries the release string from that exact default-manifest resolution; a later read or matching digest cannot invent it. The retained image-policy source precedes either lookup.
+
+The private image selection producer gives literal `default` to its original
+release resolver before saved aliases. Its release and history label come from
+one original release manifest observation. A saved alias cannot shadow that
+selection; the alias grammar and collision rules stay unchanged.
+
+Public-only network regressions keep legacy IDs and numeric exceptions, then exercise the actual permit, DNS/dial callbacks, atomic endpoint and model plans, saved layer replay and live Server control revocation. Their origins and links are owned pipes; they do not prove native sandbox traffic or authorise external services.
+
+Held-request tests exercise the bounded store, original expiry/refusal accounting and source-known hostname redaction. Actual link waiters run in both socketpair and LINK_TEST_PIPE modes, retaining request half-close and exact response bytes. A separate owned-pipe egress/supervisor/control target checks the real timeout, fresh opaque descriptor, zero-waiter snapshot, audit redaction and refusal. These are component scopes, not native sandbox or positive-publication acceptance.
+
+Private held-target regressions use immutable session engine replacements and the same once ledger. They check actual waiter counts, retained session rules, current locks, opaque revocation with owned-pipe completion, cold actor removal and full existing frame charge. The capacity fixture fills trusted task metadata near the original frame limit, then proves a later source addition cannot borrow private-rule bytes. Numeric answers always retain the public ceiling; independent ordinary numeric rules still decide before a hold. Local inspection of fixed service hosts precedes any classifier path decision.
+
+The held-request policy-list tests run the existing `policy ls --in` command
+through an accepted fake transport and its real client writer. They check
+opaque IDs before ordinary rules, a zero-waiter original deadline, complete
+JSON output and absence on an older helper. An invalid complete snapshot must
+write no partial policy. These are client tests; real ask/egress lifetime and
+held-flow admission require their separate backend gates.
+
+The held-request policy-sheet tests exercise the real sheet read/refuse
+dispatch through its cleaning wrapper and ordinary UI recorder. They keep
+masked duplicate labels separate, retain selection by opaque ID, preserve
+zero-waiter records, and cancel a queued refusal on close or connection change.
+Malformed snapshots and unsupported helpers supply no current questions. The
+recorder grants no backend authority. Real Source/frame and egress lifetime
+gates remain separate. Positive answer/publish bindings require their actual
+producers before they can join. Run the TUI render checks and `just screenshots`
+on the coherent source; source-only tests are not a screenshot result.
+
+### Live policy replacement
+
+The live-policy core tests bind the ordered laptop layer vector to its exact
+JSON SHA-256. Session rules, repository files, built-ins and lockdown layers
+stay outside that vector. A replacement cannot add, rename or reorder the
+original selected identities or borrow mutable data from its caller.
+
+The existing merger still enforces locks. The explicit live projection changes
+network and push rules, network and classifier settings, preset and push.
+Every other sandbox field and nonlive lock remains applied until the next
+start, with descriptive pending keys. These pure tests do not prove a live
+swap: the original supervisor hash-CAS, same egress publisher and manifest
+commit must acknowledge the computed hash before a command claims success.
+Client Source gates, conflict retries, open-flow closure, pending-host replay
+and real multi-host timing remain separate required gates.
+
+Pending live-policy source data lives in its own opaque manifest capsule. The
+applied layer vector keeps every original nonlive value, so an ordinary
+policy re-merge or egress restart cannot arm a pending secret, image, mount or
+SSH key. A desired-source read combines the pending laptop vector with CURRENT
+protected session, built-in, repository-file and lockdown layers. A spent or
+removed session grant cannot return from an old pending snapshot.
+
+Tests preserve future capsule bytes in owned clones, refuse malformed/future
+views, and compare exact selected JSON projections without hash shortcuts.
+Only the actual original native owner, after readiness and its unchanged
+operation, generation, Need and captured-capsule checks, may clear matching
+pending data. A projection test is not that readiness producer.
+
+Private-address rejection fixtures construct their exact address bytes in code.
+Use reserved `example.com` names for email-shaped invalid inputs. Keep the
+address class, invalid user information and unknown-extension assertions intact.

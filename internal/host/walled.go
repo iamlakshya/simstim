@@ -35,7 +35,8 @@ var WallDriver string
 // login environment only finds the agent's binary, which the guest then
 // runs by its full path.
 func newWalled(ctx context.Context, a NewArgs, driver string, original NewArgs) (_ *SessionInfo, err error) {
-	microVM := driver == "chv" || driver == "firecracker"
+	defer clear(original.ProtectedTrustedSecretValues)
+	microVM := driver == "chv" || driver == "firecracker" || driver == "nitro"
 	if microVM && len(a.Mounts) > 0 {
 		return nil, UserError("wall_mount", "host folder mounts cannot enter a microvm", "Use declared laptop inputs or copy files into its workspace.")
 	}
@@ -48,6 +49,9 @@ func newWalled(ctx context.Context, a NewArgs, driver string, original NewArgs) 
 	}
 	policy, layers, err := egress.MergeLayers(a.Layers)
 	if err != nil {
+		return nil, err
+	}
+	if err := checkNewNamedSSHSelection(policy, a.NamedSSHKeys); err != nil {
 		return nil, err
 	}
 
@@ -90,7 +94,10 @@ func newWalled(ctx context.Context, a NewArgs, driver string, original NewArgs) 
 		reservation.close()
 		return nil, err
 	}
-	defer func() { reservation.close(); operation.Close() }()
+	defer func() { err = finishReservedNewNoRoomV1(operation, reservation, err) }()
+	if err := bindNewNoRoomAttemptV1(ctx, operation, reservation); err != nil {
+		return nil, err
+	}
 	id := reservation.id
 	inline := a.Inline && known && len(a.Argv) == 0 && agent.Inline.Has()
 	if microVM {
@@ -232,6 +239,12 @@ func newWalled(ctx context.Context, a NewArgs, driver string, original NewArgs) 
 		m.Wall.Reason = "shares the host kernel"
 	}
 	if err := admitReservedRuntime(ctx, operation, m, original); err != nil {
+		return nil, err
+	}
+	if err := captureNewNamedSSHKeys(ctx, operation, m, original); err != nil {
+		return nil, err
+	}
+	if err := captureNewProtectedTrustedSecretsV1(ctx, operation, m, original); err != nil {
 		return nil, err
 	}
 	if err := ValidateManifestStart(m); err != nil {

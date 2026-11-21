@@ -12,7 +12,7 @@ func (c *Conn) CheckPortPolicyGrant(ctx context.Context, session string) error {
 	if !c.HasFeature(api.FeatureSandboxPortsV1) {
 		return portsUpgrade()
 	}
-	ctx,_=ensureGrantRequest(ctx)
+	ctx, _ = ensureGrantRequest(ctx)
 	ctx, release, err := c.beginGrant(ctx, "port policy", false)
 	if err != nil {
 		return err
@@ -44,7 +44,7 @@ func (c *Conn) changePortPolicy(ctx context.Context, args api.PolicyAddArgs, all
 	if !c.HasFeature(api.FeatureSandboxPortsV1) {
 		return result, portsUpgrade()
 	}
-	if _, err := api.ParsePortTarget(args.Target); err != nil || args.Methods != nil || len(args.Tools)!=0 || args.Mode != "" || args.Once || !allow && !args.Until.IsZero() {
+	if _, err := api.ParsePortTarget(args.Target); err != nil || args.Methods != nil || len(args.Tools) != 0 || args.Mode != "" || args.Once || !allow && !args.Until.IsZero() {
 		return result, &UserError{Msg: "the port rule is not an exact supported session rule", Hint: "Name one decimal port, without methods, mode or --once.", Code: "bad_port", Kind: KindUsage}
 	}
 	args.Door, args.Allow = api.DoorPort, allow
@@ -52,7 +52,7 @@ func (c *Conn) changePortPolicy(ctx context.Context, args api.PolicyAddArgs, all
 		err := c.Call(ctx, "policy.add", args, &result)
 		return result, err
 	}
-	ctx,_=ensureGrantRequest(ctx)
+	ctx, _ = ensureGrantRequest(ctx)
 	ctx, release, err := c.beginGrant(ctx, "port policy allow", false)
 	if err != nil {
 		return result, err

@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"strings"
 
-	"github.com/iamlakshya/simstim/internal/api"
 	"github.com/iamlakshya/simstim/internal/proto"
 )
 
@@ -45,7 +44,7 @@ func (domain *Domain) UnmarshalJSON(raw []byte) error {
 
 func decodeDomainContext(ctx context.Context, raw []byte) (Domain, error) {
 	var domain Domain
-	fields, err := api.ProjectedJSONObjectFields(ctx, raw, "scope", "host_id")
+	fields, err := domainObjectFields(ctx, raw, "scope", "host_id")
 	if err != nil || len(fields) != 2 || json.Unmarshal(fields["scope"], &domain.Scope) != nil || json.Unmarshal(fields["host_id"], &domain.HostID) != nil {
 		return domain, domainContextError(ctx, "the existing host domain is malformed or has unknown fields")
 	}

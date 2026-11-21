@@ -5,21 +5,30 @@ import (
 	"errors"
 	"path/filepath"
 
+	"github.com/iamlakshya/simstim/internal/api"
 	"github.com/iamlakshya/simstim/internal/brand"
 	"github.com/iamlakshya/simstim/internal/image"
 	"github.com/iamlakshya/simstim/internal/supply"
 )
 
 type resolvedImage struct {
-	request   image.Request
-	registry  *image.Registry
-	documents []image.Document
-	layers    []image.Layer
-	release   bool
+	request        image.Request
+	registry       *image.Registry
+	documents      []image.Document
+	layers         []image.Layer
+	release        bool
+	releaseVersion string
+	issued         *imageResolutionV1
 }
 
-func resolveImage(ctx context.Context, text, arch string, resolve bool, options ImageOptions) (resolvedImage, error) {
-	var result resolvedImage
+func resolveImage(ctx context.Context, text, arch string, resolve bool, options ImageOptions, policy *api.ImagePolicyValues) (result resolvedImage, returned error) {
+	originalInput := text
+	defer func() {
+		if returned == nil {
+			use, _ := ctx.Value(imagePolicyUseKeyV1{}).(*imagePolicyUseV1)
+			result.issued = &imageResolutionV1{use: use, input: originalInput, request: result.request.Clone(), release: result.release, releaseVersion: result.releaseVersion}
+		}
+	}()
 	if text == "default" {
 		manifest, err := ReleaseManifest()
 		if err != nil {
@@ -31,6 +40,7 @@ func resolveImage(ctx context.Context, text, arch string, resolve bool, options 
 		}
 		text = brand.ImageRepository + "@" + item.Digest
 		result.release = true
+		result.releaseVersion = manifest.Release
 		result.request = image.Request{Ref: text, Digest: item.Digest, PlatformDigest: item.Digest, Arch: arch, RootHash: item.RootHash, DataBlocks: item.DataBlocks}
 		return result, result.request.Validate()
 	}
@@ -62,7 +72,14 @@ func resolveImage(ctx context.Context, text, arch string, resolve bool, options 
 		return result, err
 	}
 	request.Ref = text
-	if err := pinImage(ctx, &request, options); err != nil {
+	if err := checkImagePinMovement(ctx, request, options); err != nil {
+		return result, err
+	}
+	receipt, err := verifyImagePolicy(ctx, request, registry, policy)
+	if err != nil {
+		return result, err
+	}
+	if err := pinImage(ctx, &request, options, receipt); err != nil {
 		return result, err
 	}
 	result.request = request

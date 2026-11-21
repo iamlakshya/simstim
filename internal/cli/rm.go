@@ -76,6 +76,13 @@ func killCmd() *cobra.Command {
 // removeSession deletes the session that a names, after the question
 // unless yes, and takes it out of the session cache.
 func removeSession(cmd *cobra.Command, a address, yes bool) error {
+	if client.IsSessionMachineV1(a.host) {
+		return removeMachineSessionV1(cmd, a, yes)
+	}
+	return removeOrdinarySessionV1(cmd, a, yes)
+}
+
+func removeOrdinarySessionV1(cmd *cobra.Command, a address, yes bool) error {
 	return a.open(cmd.Context(), cmd, func(ctx context.Context, f found) error {
 		asked := false
 		if !yes {

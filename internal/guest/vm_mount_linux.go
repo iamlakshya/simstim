@@ -13,17 +13,18 @@ import (
 )
 
 type vmMountOps struct {
-	mount   func(string, string, string, uintptr, string) error
-	unmount func(string, int) error
-	pivot   func(string, string) error
-	chdir   func(string) error
-	own     func(*os.File, int, int) error
-	node    func(string, uint32, int) error
-	chmod   func(string, uint32) error
+	sessionFreeze func(*vmFiles) error
+	mount         func(string, string, string, uintptr, string) error
+	unmount       func(string, int) error
+	pivot         func(string, string) error
+	chdir         func(string) error
+	own           func(*os.File, int, int) error
+	node          func(string, uint32, int) error
+	chmod         func(string, uint32) error
 }
 
 func realVMMounts() vmMountOps {
-	return vmMountOps{mount: unix.Mount, unmount: unix.Unmount, pivot: unix.PivotRoot, chdir: unix.Chdir, own: func(file *os.File, uid, gid int) error { return file.Chown(uid, gid) }, node: unix.Mknod, chmod: unix.Chmod}
+	return vmMountOps{sessionFreeze: func(v *vmFiles) error { return v.captureSessionFreezeV1() }, mount: unix.Mount, unmount: unix.Unmount, pivot: unix.PivotRoot, chdir: unix.Chdir, own: func(file *os.File, uid, gid int) error { return file.Chown(uid, gid) }, node: unix.Mknod, chmod: unix.Chmod}
 }
 
 func (v *vmFiles) ownedDirectory(root *os.Root, name string, mode os.FileMode, uid, gid int) error {
@@ -33,6 +34,8 @@ func (v *vmFiles) ownedDirectory(root *os.Root, name string, mode os.FileMode, u
 type vmMounted struct{ target string }
 
 type vmFiles struct {
+	sessionFreeze                 *filesystemFreezeV1
+	sessionMount                  *os.File
 	imageSaveRoot, imageSaveUpper *os.Root
 	copyNativeOwner               *vmInitConnection
 	copyMounts                    map[string]*vmCopyMountV1
@@ -121,6 +124,9 @@ func (v *vmFiles) mountDisks() error {
 		if err := v.mount(v.boot("dev/"+m.device), v.boot(m.target), "ext4", flags, ""); err != nil {
 			return err
 		}
+	}
+	if v.ops.sessionFreeze != nil {
+		return v.ops.sessionFreeze(v)
 	}
 	return nil
 }
@@ -211,6 +217,9 @@ func (v *vmFiles) pivotBack() error {
 }
 
 func (v *vmFiles) close() error {
+	if err := v.closeSessionFreezeV1(); err != nil {
+		return err
+	}
 	result := errors.Join(v.closeImageSaveRootsV1(), v.closeCopyMountsV1())
 	for i := len(v.mounts) - 1; i >= 0; i-- {
 		target := v.mounts[i].target

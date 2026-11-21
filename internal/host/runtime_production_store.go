@@ -2,7 +2,6 @@ package host
 
 import (
 	"context"
-	"errors"
 
 	"github.com/iamlakshya/simstim/internal/paths"
 	"github.com/iamlakshya/simstim/internal/runtimecache"
@@ -15,9 +14,14 @@ func openRuntimeProductionStore(ctx context.Context) (*runtimePublication, *runt
 	if err != nil {
 		return nil, nil, err
 	}
+	if err := publication.prepareStorageFootprintsV1(publication.ctx, "runtime"); err != nil {
+		return publication, nil, err
+	}
 	store, err := runtimecache.OpenHost(publication.ctx, paths.ArtefactsDir(), publication.owner.domain(), publication.gate)
+	// The caller adopted an owner before entering this factory. Return every
+	// actual partial object; only that owner can close store before publication.
 	if err != nil {
-		return nil, nil, errors.Join(err, publication.close())
+		return publication, store, err
 	}
 	return publication, store, nil
 }
@@ -26,5 +30,26 @@ func (part *runtimeOwnedPart) close() error {
 	if part == nil {
 		return nil
 	}
-	return errors.Join(part.part.Close(), part.store.Close(), part.publication.close())
+	part.mu.Lock()
+	defer part.mu.Unlock()
+	part.closing = true
+	if part.part != nil {
+		if err := part.part.Close(); err != nil {
+			return err
+		}
+		part.part = nil
+	}
+	if part.store != nil {
+		if err := part.store.Close(); err != nil {
+			return err
+		}
+		part.store = nil
+	}
+	if part.publication != nil {
+		if err := part.publication.close(); err != nil {
+			return err
+		}
+		part.publication = nil
+	}
+	return nil
 }

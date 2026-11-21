@@ -23,11 +23,19 @@ type Paths struct {
 // bootConfiguration has only the devices used by this driver. It cannot
 // express a network device, metadata service, snapshot, balloon or host share.
 type bootConfiguration struct {
-	BootSource        bootSource    `json:"boot-source"`
-	Drives            []drive       `json:"drives"`
-	Machine           machineConfig `json:"machine-config"`
-	NetworkInterfaces []struct{}    `json:"network-interfaces"`
-	Vsock             vsockConfig   `json:"vsock"`
+	BootSource        bootSource     `json:"boot-source"`
+	Drives            []drive        `json:"drives"`
+	Machine           machineConfig  `json:"machine-config"`
+	NetworkInterfaces []struct{}     `json:"network-interfaces"`
+	Vsock             vsockConfig    `json:"vsock"`
+	Enclave           *enclaveConfig `json:"enclave,omitempty"`
+}
+
+// Direct mode uses ordinary virtio drivers and no dedicated CPU cores.
+// No caller can enable debug, hotplug, DMBs, metadata or network devices.
+type enclaveConfig struct {
+	Direct     bool `json:"direct_mode"`
+	Overcommit bool `json:"cpu_overcommit"`
 }
 
 type bootSource struct {
@@ -60,11 +68,27 @@ type vsockConfig struct {
 // provenance, descriptor ownership and actual jail placement are established
 // by the driver before this byte-only configuration step.
 func Command(spec wall.Spec, paths Paths) ([]string, []byte, vmneed.MemoryBudget, error) {
+	return command(spec, paths, "firecracker")
+}
+
+// NitroCommand uses the fixed direct-mode enclave backend and PCI transport.
+// The same original admitted Need and retained descriptors remain required.
+func NitroCommand(spec wall.Spec, paths Paths) ([]string, []byte, vmneed.MemoryBudget, error) {
+	if spec.Driver != "nitro" {
+		return nil, nil, vmneed.MemoryBudget{}, errors.New("the Nitro wall needs its explicit original driver plan")
+	}
+	return command(spec, paths, "nitro")
+}
+
+func command(spec wall.Spec, paths Paths, driver string) ([]string, []byte, vmneed.MemoryBudget, error) {
+	if spec.Driver != "" && spec.Driver != driver {
+		return nil, nil, vmneed.MemoryBudget{}, errors.New("the Firecracker transport conflicts with the original driver plan")
+	}
 	if spec.VM == nil {
 		return nil, nil, vmneed.MemoryBudget{}, errors.New("the Firecracker wall needs its admitted VM plan")
 	}
-	need := vmneed.NeedV1{BootV1: spec.VM.Clone(), Driver: "firecracker", CPUs: spec.CPUs, DiskMax: spec.DiskMax}
-	if err := need.ValidateWall(need.Image.Arch, "microvm", "firecracker", spec.MemoryMax); err != nil {
+	need := vmneed.NeedV1{BootV1: spec.VM.Clone(), Driver: driver, CPUs: spec.CPUs, DiskMax: spec.DiskMax}
+	if err := need.ValidateWall(need.Image.Arch, "microvm", driver, spec.MemoryMax); err != nil {
 		return nil, nil, vmneed.MemoryBudget{}, err
 	}
 	if !api.ValidSessionID(spec.ID) {
@@ -101,6 +125,9 @@ func Command(spec wall.Spec, paths Paths) ([]string, []byte, vmneed.MemoryBudget
 	} {
 		config.Drives = append(config.Drives, drive{ID: item.id, Path: item.path, ReadOnly: item.readOnly, Cache: "Writeback", IO: "Sync"})
 	}
+	if driver == "nitro" {
+		config.Enclave = &enclaveConfig{Direct: true, Overcommit: true}
+	}
 	data, err := json.Marshal(config)
 	if err != nil {
 		return nil, nil, vmneed.MemoryBudget{}, fmt.Errorf("encode Firecracker boot configuration: %w", err)
@@ -108,6 +135,9 @@ func Command(spec wall.Spec, paths Paths) ([]string, []byte, vmneed.MemoryBudget
 	// MMIO is the production default. PCI is deliberately absent from this
 	// driver's arguments. Nitro has a separate, explicit transport boundary.
 	args := []string{paths.VMM, "--config-file", paths.Config, "--api-sock", paths.API, "--id", spec.ID}
+	if driver == "nitro" {
+		args = append(args, "--enable-pci")
+	}
 	return args, append(data, '\n'), budget, nil
 }
 

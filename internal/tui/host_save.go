@@ -13,6 +13,7 @@ type hostSavedMsg struct {
 	owner      *wizard
 	seq        int
 	host       client.Host
+	target     *wizardPrepareTarget
 	remove     bool
 	err        error
 	warn       error
@@ -39,7 +40,7 @@ func (m *Model) applyHostSaved(ctx context.Context, msg hostSavedMsg) tea.Cmd {
 }
 
 func (m *Model) saveWizardHost(w *wizard, wctx context.Context, seq int, host client.Host) tea.Cmd {
-	be, pending := m.be, w.saving
+	be, pending, prep := m.be, w.saving, w.prepareAfterSave
 	was, tier, hostID := w.was, w.tier, ""
 	if w.conn != nil {
 		hostID = w.conn.HostID()
@@ -57,7 +58,19 @@ func (m *Model) saveWizardHost(w *wizard, wctx context.Context, seq int, host cl
 			}
 			defer close(pending.done)
 		}
-		msg.warn, msg.err = saveWizardHost(ctx, be, client.HostChange{Kind: "the launcher", Was: was, Now: &host, Pin: true, Tier: tier, HostID: hostID})
+		change := client.HostChange{Kind: "the launcher", Was: was, Now: &host, Pin: true, Tier: tier, HostID: hostID}
+		if prep {
+			if sb, ok := be.(sandboxPrepareBackend); ok {
+				msg.target, msg.warn, msg.err = sb.UpdateHostsForPrepare(ctx, change)
+				if msg.target != nil {
+					msg.host = msg.target.host
+				}
+			} else {
+				msg.warn, msg.err = saveWizardHost(ctx, be, change)
+			}
+		} else {
+			msg.warn, msg.err = saveWizardHost(ctx, be, change)
+		}
 		if pending != nil {
 			pending.err = msg.err
 		}

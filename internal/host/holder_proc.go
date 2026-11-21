@@ -7,15 +7,16 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 )
 
-// kill stops the agent's whole process group, then the holder.
-// stop ends the agent's process group, then the holder. When system is true,
+// stop joins the original main process and owned terminal, then the holder.
+// When system is true,
 // the session is recorded as stopped with the host, not as ended, so restore
 // brings it back after a restart.
 func (h *Holder) stop(reason string, system bool) {
+	h.stopMu.Lock()
+	defer h.stopMu.Unlock()
 	h.closeAlerts()
 	h.mu.Lock()
 	exited := h.exited
@@ -24,22 +25,12 @@ func (h *Holder) stop(reason string, system bool) {
 	if !exited && h.vmTerm != nil {
 		h.stopVMTerminal()
 	}
-	if !exited && h.vmTerm == nil && h.cmd != nil && h.cmd.Process != nil {
-		pid := h.cmd.Process.Pid
-		_ = syscall.Kill(-pid, syscall.SIGHUP)
-		deadline := time.Now().Add(3 * time.Second)
-		for time.Now().Before(deadline) {
-			h.mu.Lock()
-			exited = h.exited
-			h.mu.Unlock()
-			if exited {
-				break
-			}
-			time.Sleep(50 * time.Millisecond)
-		}
-		if !exited {
-			_ = syscall.Kill(-pid, syscall.SIGKILL)
-			time.Sleep(100 * time.Millisecond)
+	if h.vmTerm == nil && h.cmd != nil && h.cmd.Process != nil {
+		if err := h.joinOwnedMainV1(); err != nil {
+			h.log.Error("original agent closure is unknown; preserving holder ownership", "err", err)
+			// RunHolder's caller must not return and run its original holder
+			// release while main/terminal closure remains uncertain.
+			select {}
 		}
 	}
 	if h.vt != nil {
@@ -256,7 +247,9 @@ func (h *Holder) startVT() {
 		return
 	}
 	h.ptyOut = make(chan []byte, 256)
+	h.ptyOutDone = make(chan struct{})
 	go func() {
+		defer close(h.ptyOutDone)
 		for b := range h.ptyOut {
 			_, _ = h.writePTY(b)
 		}

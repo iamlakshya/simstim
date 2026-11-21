@@ -45,7 +45,7 @@ func CanonicalRuleInstances(rules []api.Rule) ([]api.Rule, error) {
 }
 
 // MatchesRuleReplacement is the existing explicit-add tuple: action and
-// grant attributes may change, while door/target/mode/method scope matches.
+// grant attributes may change, while door/target/mode/method/address scope matches.
 // This helper creates neither a grant instance nor a permit.
 func MatchesRuleReplacement(old, proposed api.Rule) (bool, error) {
 	left, err := canonicalIdentityRule(old)
@@ -57,7 +57,7 @@ func MatchesRuleReplacement(old, proposed api.Rule) (bool, error) {
 		return false, err
 	}
 	a, b := ruleHashKey(left), ruleHashKey(right)
-	return a.door == b.door && a.target == b.target && a.mode == b.mode && a.constrained == b.constrained && a.methods == b.methods && a.tools == b.tools, nil
+	return a.door == b.door && a.target == b.target && a.mode == b.mode && a.constrained == b.constrained && a.methods == b.methods && a.tools == b.tools && a.publicOnly == b.publicOnly, nil
 }
 
 // CheckRuleAddition previews an existing session addition/regrant, including
@@ -106,6 +106,7 @@ type ruleHashIdentity struct {
 	layer       api.LayerKind
 	name        string
 	allow       bool
+	publicOnly  bool
 	door        api.Door
 	target      string
 	mode        string
@@ -123,6 +124,9 @@ type ruleInstanceIdentity struct {
 }
 
 func canonicalIdentityRule(rule api.Rule) (api.Rule, error) {
+	if err := canonicalRulePublicOnly(rule); err != nil {
+		return api.Rule{}, err
+	}
 	if rule.Door == "" {
 		rule.Door = api.DoorNet
 	}
@@ -144,8 +148,10 @@ func canonicalIdentityRule(rule api.Rule) (api.Rule, error) {
 		}
 		rule.Target = target
 	}
-	if rule.Door==api.DoorPort {
-		if _,err:=api.ParsePortTarget(rule.Target);err!=nil || rule.Mode!="" || rule.Once || rule.Methods!=nil || len(rule.Tools)!=0 {return api.Rule{},&proto.Error{Code:"bad_port",Message:"the port rule is not exact and supported",Hint:"Use one decimal port without methods, tools, mode or once."}}
+	if rule.Door == api.DoorPort {
+		if _, err := api.ParsePortTarget(rule.Target); err != nil || rule.Mode != "" || rule.Once || rule.Methods != nil || len(rule.Tools) != 0 {
+			return api.Rule{}, &proto.Error{Code: "bad_port", Message: "the port rule is not exact and supported", Hint: "Use one decimal port without methods, tools, mode or once."}
+		}
 	}
 	if rule.Door == api.DoorPush {
 		return canonicalPushRule(rule)
@@ -170,7 +176,7 @@ func ruleHashKey(rule api.Rule) ruleHashIdentity {
 	if door == "" {
 		door = api.DoorNet
 	}
-	key := ruleHashIdentity{layer: rule.Layer, name: rule.Name, allow: rule.Allow, door: door, target: rule.Target, mode: rule.Mode}
+	key := ruleHashIdentity{layer: rule.Layer, name: rule.Name, allow: rule.Allow, door: door, target: rule.Target, mode: rule.Mode, publicOnly: rule.PublicOnly}
 	if rule.Methods != nil {
 		key.constrained = true
 		// Valid exact HTTP tokens cannot contain NUL. Presence distinguishes
@@ -201,7 +207,7 @@ func ValidateRuleIdentities(rules []api.Rule) error {
 			return err
 		}
 		canonicalID := api.RuleID(rule)
-		if (rule.Methods != nil || len(rule.Tools) != 0) && rule.ID != "" && rule.ID != canonicalID {
+		if (rule.Methods != nil || len(rule.Tools) != 0 || rule.PublicOnly) && rule.ID != "" && rule.ID != canonicalID {
 			return &proto.Error{Code: "bad_rule_id", Message: "method-qualified rule has a noncanonical ID", Hint: "Remove the supplied rule ID and submit the rule again."}
 		}
 		key := ruleHashKey(rule)
@@ -280,7 +286,7 @@ func compareRuleInstances(a, b api.Rule) int {
 			return order
 		}
 	}
-	for _, pair := range [][2]bool{{left.base.allow, right.base.allow}, {left.base.constrained, right.base.constrained}, {left.once, right.once}} {
+	for _, pair := range [][2]bool{{left.base.allow, right.base.allow}, {left.base.publicOnly, right.base.publicOnly}, {left.base.constrained, right.base.constrained}, {left.once, right.once}} {
 		if pair[0] != pair[1] {
 			if !pair[0] {
 				return -1

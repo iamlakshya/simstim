@@ -109,6 +109,8 @@ func cloneSandboxPolicy(p *SandboxPolicy) *SandboxPolicy {
 	q := *p
 	q.PolicySources, q.wallIntent, q.lineageRaw = slices.Clone(p.PolicySources), slices.Clone(p.wallIntent), slices.Clone(p.lineageRaw)
 	q.deliveryRaw = slices.Clone(p.deliveryRaw)
+	q.imageSelectionRaw = slices.Clone(p.imageSelectionRaw)
+	q.sshKeyChoicesRaw = slices.Clone(p.sshKeyChoicesRaw)
 	q.deliveryReceiptRaw, q.inputOperationRaw = slices.Clone(p.deliveryReceiptRaw), slices.Clone(p.inputOperationRaw)
 	q.deliveryReceipt, q.inputOperation = cloneSandboxDeliveryReceipt(p.deliveryReceipt), cloneSandboxInputOperation(p.inputOperation)
 	if p.DeliveryIntent != nil {
@@ -129,7 +131,7 @@ func sameSandboxCreation(a, b *SandboxPolicy) bool {
 	if a == nil || b == nil {
 		return a == nil && b == nil
 	}
-	return bytes.Equal(a.deliveryRaw, b.deliveryRaw) && sameSandboxDelivery(a, b) && a.FutureLineage == b.FutureLineage && bytes.Equal(a.lineageRaw, b.lineageRaw) && a.SessionID == b.SessionID && a.HostID == b.HostID && a.SSHAgent == b.SSHAgent &&
+	return bytes.Equal(a.sshKeyChoicesRaw, b.sshKeyChoicesRaw) && bytes.Equal(a.imageSelectionRaw, b.imageSelectionRaw) && bytes.Equal(a.deliveryRaw, b.deliveryRaw) && sameSandboxDelivery(a, b) && a.FutureLineage == b.FutureLineage && bytes.Equal(a.lineageRaw, b.lineageRaw) && a.SessionID == b.SessionID && a.HostID == b.HostID && a.SSHAgent == b.SSHAgent &&
 		a.CreatedAt.Equal(b.CreatedAt) && a.request == b.request &&
 		a.CreationWall == b.CreationWall && slices.Equal(a.Exposed, b.Exposed) &&
 		bytes.Equal(a.PolicySources, b.PolicySources) && bytes.Equal(a.wallIntent, b.wallIntent) &&
@@ -181,7 +183,7 @@ func validateLineageReservationContext(ctx context.Context, f *sandboxFile, chil
 		child.Ceiling > parent.Ceiling || child.lineage.Root != localSandboxRoot(&parent) ||
 		!slices.Equal(child.lineage.Allowed, localSandboxNames(&parent)) ||
 		child.CreationWall != parent.CreationWall || !slices.Equal(child.Exposed, parent.Exposed) ||
-		!bytes.Equal(child.PolicySources, parent.PolicySources) || !bytes.Equal(child.wallIntent, parent.wallIntent) {
+		!bytes.Equal(child.imageSelectionRaw, parent.imageSelectionRaw) || !bytes.Equal(child.PolicySources, parent.PolicySources) || !bytes.Equal(child.wallIntent, parent.wallIntent) {
 		return joinIntentError()
 	}
 	return nil

@@ -34,7 +34,8 @@ func TerminalArgs(a NewArgs, cols, rows int) NewArgs {
 // and what it takes from the settings from s, not from config.toml: its
 // inline mode, and its memory cap when a names none. The launcher passes
 // the settings that it holds, which an edit that breaks config.toml does
-// not replace.
+// not replace. Wall intent stays raw until the accepted connection resolves
+// the effective layers and its pinned floor before value preparation.
 func SessionArgs(a NewArgs, cols, rows int, s Settings) (NewArgs, error) {
 	a = terminalArgs(a, cols, rows)
 	a.Inline = a.Inline || s.Agents.Inline
@@ -76,26 +77,55 @@ func CheckSessionName(name string) error {
 func (c *Conn) Sessions(ctx context.Context) ([]Session, error) {
 	var out []Session
 	err := c.Call(ctx, "ls", nil, &out)
-	return ValidSessions(c.Host.Name, out), err
+	rows := ValidSessions(c.Host.Name, out)
+	if err == nil {
+		rows = c.markSessionPolicyChanges(ctx, rows)
+	}
+	return rows, err
 }
 
-// NewSession starts a session. Unless a names a memory cap, the session gets
-// the one in config.toml.
+// NewSession starts through the original policy and wall preparation. An
+// omitted wall uses the saved floor; none requires an explicit downgrade.
+// Unless a names a memory cap, the session gets the one in config.toml.
 func (c *Conn) NewSession(ctx context.Context, a NewArgs) (_ *Session, returned error) {
 	a.Placement = api.ClonePlacementV1(a.Placement)
+	a.NamedSSHKeys = api.CloneNamedSSHKeysV1(a.NamedSSHKeys)
+	a.ProtectedTrustedSecretValues = maps.Clone(a.ProtectedTrustedSecretValues)
 	if err := CheckSessionName(a.Name); err != nil {
 		return nil, err
 	}
 	if err := CheckRequestedWall(a.Wall); err != nil {
 		return nil, err
 	}
+	if a.Wall == "" || a.Wall == "none" {
+		if err := refuseUnwalledNamedSSHKeys(a); err != nil {
+			return nil, err
+		}
+	}
 	standalone := grantRequestOf(ctx) == nil
 	ctx, request := ensureGrantRequest(ctx)
 	if standalone {
-		defer func() { returned = errors.Join(returned, request.Close()) }()
+		cleanupContext := ctx
+		defer func() {
+			_, abortErr := request.Abort(cleanupContext)
+			returned = errors.Join(returned, abortErr, request.Close())
+		}()
 	}
-	if newPlanOf(ctx) == nil && (a.SecretDelivery != nil || len(a.VMNeedV1) != 0 || a.Runtime != nil) {
+	if newPlanOf(ctx) == nil && (a.SecretDelivery != nil || len(a.VMNeedV1) != 0 || a.Runtime != nil || a.NamedSSHKeys != nil || len(a.ProtectedTrustedSecretValues) != 0) {
 		return nil, grantOperationError()
+	}
+	request.mu.Lock()
+	unpreparedWall := request.wall == nil || request.sdkStart != nil
+	request.mu.Unlock()
+	if unpreparedWall {
+		var err error
+		a, err = prepareSDKNewStartV1(ctx, c, a)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if err := c.checkNewWallChoiceV1(ctx, a); err != nil {
+		return nil, err
 	}
 	if err := checkWallGrantArgs(ctx, a.Wall, a.SSHAgent); err != nil {
 		return nil, err
@@ -159,7 +189,7 @@ func (c *Conn) NewSession(ctx context.Context, a NewArgs) (_ *Session, returned 
 			return nil, err
 		}
 	}
-	a.Layers = api.ProjectClientInputSources(a.Layers)
+	a.Layers = api.ProjectClientImagePolicy(api.ProjectClientInputSources(a.Layers))
 	if plan != nil {
 		if err := plan.beginPublication(); err != nil {
 			return nil, err
@@ -193,6 +223,9 @@ func (c *Conn) NewSession(ctx context.Context, a NewArgs) (_ *Session, returned 
 		plan.mu.Lock()
 		plan.published = true
 		plan.mu.Unlock()
+	}
+	if err := acceptSessionMachineStartV1(baseContext, c, a, s); err != nil {
+		return nil, err
 	}
 	return &s, nil
 }
