@@ -21,6 +21,7 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ### Fixed
 
+- The setup example uses the documented host name, and the guide index no longer repeats a page.
 - The guided setup test now holds its fixture installer until the terminal reader starts. Fast installers cannot bypass the blocked reader case or leave the test waiting for a read that never began.
 
 - Developer setup uses the exact Go toolchain pinned in the repository, including inside the devcontainer. Failed setup tests print their full diagnostic output.

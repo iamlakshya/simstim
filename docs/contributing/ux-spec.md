@@ -585,10 +585,10 @@ The root help groups the commands as this table does: Sessions, Hosts, Agents, a
 | `simstim host alerts test <host> [--event e]`, `host alerts log <host> [--lines n] [--json]`, `host alerts off <host>` | Sends a test alert, shows the last deliveries, or turns alerts off |
 | **Agents** | |
 | `simstim agents ls [--json]` | Lists the agent table, with how each agent installs |
-| `simstim agents install <agent> [--host h] [--force]` | Installs an agent on a host with its vendor's installer, in a session you watch |
+| `simstim agents install <agent> [--host h] [--force]` | Installs an agent on a host with its official installer, in a session you watch |
 | **Setup and help** | |
 | `simstim setup [--host h \| --create lima\|docker\|e2b] [--name n] [--agents a,b] [--yes] [--no-login]` | The guided setup: where agents run, the host, the agent checklist, the installs and the logins, then the first session's command |
-| `simstim doctor [--fix [--yes]]` | Checks this computer: ssh, the config files and the secrets' commands |
+| `simstim doctor [--fix [--yes]] [--json]` | Checks this computer: ssh, the config files and the secrets' commands |
 | `simstim doctor keys` | Prints each key event as the terminal sends it, and marks the client's own keys |
 | `simstim doctor terminal` | Asks the terminal what it supports: kitty keys, synchronized output, colours, and more |
 | `simstim --debug[=<categories>] <command>` | Turns on the debug mode for one command, or the launcher: every category, or those listed (`attach`, `net`, `memory`, `launcher`, `runtime`). A command prints the debug file's path on stderr first. The launcher shows its debug mark (2.2), and a notice with the path |

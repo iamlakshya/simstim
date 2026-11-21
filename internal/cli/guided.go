@@ -39,7 +39,7 @@ func setupCmd() *cobra.Command {
 			"and it says what was done.\n\n" +
 			"Without a terminal, name the host with --host or --create, and pass --yes.",
 		Example: "  " + brand.Name + " setup\n" +
-			"  " + brand.Name + " setup --host my-server --agents claude,codex\n" +
+			"  " + brand.Name + " setup --host my-vps --agents claude,codex\n" +
 			"  " + brand.Name + " setup --create lima --agents claude --yes --no-login",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {

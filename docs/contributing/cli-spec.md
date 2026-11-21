@@ -607,7 +607,7 @@ A topic is a command with only `Use`, `Short` and `Long`, and a mark that makes 
 | `exit-codes` | The tables of sections 5.1 and 5.2. Until `exec` exists, the topic holds only 5.1. P1.13 adds the table of 5.2 with `exec`. | C3, P1.13 |
 | `policy` | The layers, and three examples. They are the `Long` of the `policy` command, because a topic cannot share a command's name. | P1.12 |
 
-`concepts` holds the words of the build. C3 ships these: host, helper, session, address, agent, launcher, attach and detach, worktree, secret, alert and provider script. P4.1 adds digest when it adds `host upgrade`. P4.6 adds runtime pin when `host doctor` shows pin ages. Each task that adds a word adds its line in the same pull request. The isolation plan adds sandbox, wall, level, floor, tier, layer, profile, rule, door, preset and drain.
+`concepts` holds the words of the build. C3 ships these: host, helper, session, address, agent, launcher, attach and detach, worktree, secret, alert and provider script. P4.1 adds digest with the release manifest and the helper digest check. C7 adds `host upgrade`. P4.6 adds runtime pin when `host doctor` shows pin ages. Each task that adds a word adds its line in the same pull request. The isolation plan adds sandbox, wall, level, floor, tier, layer, profile, rule, door, preset and drain.
 
 `cmd/docgen` writes each topic to `docs/reference/<topic>.md`, and the reference index links it. C2 writes `docs/reference/exit-codes.md` first, from the table of section 5. The topic and its page share their prose: `ConceptsIntro`, `ExitCodesIntro` and `ExitCodesOutro` in `internal/cli`.
 
