@@ -55,7 +55,10 @@ func openNativeUserManagerV1(ctx context.Context) (result *nativeUserManagerV1, 
 	if ctx == nil {
 		return nil, sessionLeaseError("the native manager has no original owner lifetime")
 	}
-	path := fmt.Sprintf("/run/user/%d", os.Getuid())
+	path := UserManagerRoot
+	if path == "" {
+		path = fmt.Sprintf("/run/user/%d", os.Getuid())
+	}
 	root, err := cachefs.OpenPrivateRoot(path, false)
 	if err != nil {
 		return nil, err

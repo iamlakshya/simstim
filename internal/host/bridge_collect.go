@@ -146,7 +146,7 @@ func collectSession(id string, files map[string]collected) []string {
 	} else {
 		notes = append(notes, id+": its holder is not running, so there are no fresh profiles")
 	}
-	for _, p := range []string{paths.DebugTrace(id), paths.HolderLog(id)} {
+	for _, p := range []string{paths.DebugTrace(id), paths.HolderLog(id), paths.SupervisorLog(id), paths.GuestHolderLog(id)} {
 		addFile(files, p, prefix+filepath.Base(p))
 		addFile(files, p+".1", prefix+filepath.Base(p)+".1")
 	}

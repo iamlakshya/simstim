@@ -94,9 +94,13 @@ func TestTheBundleHoldsNoCanary(t *testing.T) {
 	files := unpack(t, res.Path)
 	t.Logf("files %v\nleft %+v\nnotes %v\ncounts %+v", names(files), res.Left, res.Notes, res.Counts)
 	old, v := "host/sessions/"+s.ID+"/holder.log.1", "host/sessions/"+victim+"/"
+	sessionLog := "host/sessions/" + s.ID + "/holder.log"
+	if m, err := host.LoadManifest(s.ID); err == nil && m.Wall != nil {
+		sessionLog = "host/sessions/" + s.ID + "/supervisor.log"
+	}
 	window := "host/sessions/" + s.ID + "/debug/flight-20261016-000003.trace"
 	for _, want := range []string{"README.txt", "replaced.txt", "laptop/doctor.txt", "laptop/outside/1.jsonl",
-		"host/doctor.json", "host/ssh.log", "host/sessions/" + s.ID + "/debug.jsonl", "host/sessions/" + s.ID + "/holder.log", old,
+		"host/doctor.json", "host/ssh.log", "host/sessions/" + s.ID + "/debug.jsonl", sessionLog, old,
 		window, v + "debug.jsonl", v + "unit.txt", v + "kernel.txt"} {
 		if _, ok := files[want]; !ok {
 			t.Errorf("the bundle has no %s; it has %v", want, names(files))

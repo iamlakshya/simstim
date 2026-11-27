@@ -120,6 +120,12 @@ var SelfCgroup = func() ([]byte, error) {
 // read: on Linux. Tests set it to check the other case.
 var selfCgroupRequired = runtime.GOOS == "linux"
 
+// UserManagerRoot overrides the default /run/user/<uid> root used to locate
+// the native systemd user manager socket. Production leaves it empty; tests
+// point it at an isolated runtime directory so detached fixtures do not touch
+// the host's live user manager.
+var UserManagerRoot string
+
 // CgroupNamespaces returns the cgroup namespace of this process, and that of
 // the user's systemd user manager, or "" when the user has no manager. The
 // manager is the peer of its private socket, at its fixed place under
@@ -129,7 +135,11 @@ var CgroupNamespaces = func() (self, manager string, err error) {
 	if err != nil {
 		return "", "", fmt.Errorf("read this process's cgroup namespace: %w", err)
 	}
-	sock := fmt.Sprintf("/run/user/%d/systemd/private", os.Getuid())
+	root := UserManagerRoot
+	if root == "" {
+		root = fmt.Sprintf("/run/user/%d", os.Getuid())
+	}
+	sock := filepath.Join(root, "systemd", "private")
 	conn, err := (&net.Dialer{Timeout: time.Second}).DialContext(context.Background(), "unix", sock)
 	if errors.Is(err, os.ErrNotExist) {
 		return self, "", nil

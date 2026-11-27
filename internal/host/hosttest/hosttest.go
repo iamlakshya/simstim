@@ -19,7 +19,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"runtime"
 	"slices"
 	"strings"
@@ -45,6 +44,9 @@ func Main(m *testing.M) {
 	// historical ordinary-holder test path; they do not qualify P6.3.
 	if runtime.GOOS != "linux" {
 		host.WallDriver = "legacy-none-test"
+	}
+	if root := os.Getenv(brand.Env("TEST_USER_MANAGER_ROOT")); root != "" {
+		host.UserManagerRoot = root
 	}
 	if len(os.Args) >= 3 {
 		switch os.Args[1] {
@@ -92,6 +94,10 @@ func Main(m *testing.M) {
 	// A helper that this binary stands in for, reached through a fake
 	// ssh, serves the bridge.
 	if len(os.Args) >= 2 && os.Args[1] == "bridge" {
+		if err := host.InitPlacement(); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
 		err := host.RunBridge(host.BridgeInput(os.Stdin, os.Args[2:]), os.Stdout)
 		host.EndBridge()
 		if err != nil {
@@ -199,6 +205,10 @@ func New(t testing.TB) *Host {
 	// No systemd user manager can be reached from here, so holders start
 	// as detached processes.
 	t.Setenv("DBUS_SESSION_BUS_ADDRESS", "")
+	t.Setenv(brand.Env("TEST_USER_MANAGER_ROOT"), run)
+	oldManagerRoot := host.UserManagerRoot
+	host.UserManagerRoot = run
+	t.Cleanup(func() { host.UserManagerRoot = oldManagerRoot })
 	t.Setenv("SHELL", "/bin/sh")
 	// No agent the developer installed is found, or run, by a test. A test
 	// that needs a program of its own puts it in a folder of its own.
@@ -250,7 +260,7 @@ func outside(t testing.TB) {
 	cgroup := fmt.Sprintf("0::/user.slice/user-%d.slice/session-1.scope\n", uid)
 	self, ns := host.SelfCgroup, host.CgroupNamespaces
 	host.SelfCgroup = func() ([]byte, error) { return []byte(cgroup), nil }
-	host.CgroupNamespaces = func() (string, string, error) { return "cgroup:[1]", "cgroup:[1]", nil }
+	host.CgroupNamespaces = func() (string, string, error) { return "cgroup:[1]", "", nil }
 	t.Cleanup(func() { host.SelfCgroup, host.CgroupNamespaces = self, ns })
 }
 
@@ -311,7 +321,14 @@ func (h *Host) Install(version, vt string) string {
 // HolderLog returns the log of a session's holder.
 func (h *Host) HolderLog(id string) string {
 	b, _ := os.ReadFile(paths.HolderLog(id))
-	return string(b)
+	if len(b) > 0 {
+		return string(b)
+	}
+	if gb, err := os.ReadFile(filepath.Join(paths.SandboxRoot(id), "members", id, "holder.log")); err == nil && len(gb) > 0 {
+		return string(gb)
+	}
+	sb, _ := os.ReadFile(paths.SupervisorLog(id))
+	return string(sb)
 }
 
 // cleanup stops every session as `rm` does, and waits for each holder to
@@ -412,81 +429,4 @@ func Reap(pid int, timeout time.Duration) error {
 		_ = syscall.Kill(pid, syscall.SIGKILL)
 		return fmt.Errorf("process %d did not exit within %s", pid, timeout)
 	}
-}
-
-// OldName gives the session id the name name in its manifest, as a helper
-// before names were checked could: a name that new and rename now refuse,
-// such as one that looks like an ID. It stops the session's holder first,
-// so that no later save of the holder puts the old name back. The session
-// stays, with its agent ended.
-func OldName(t testing.TB, id, name string) {
-	t.Helper()
-	if pid := livePID(id); pid > 0 {
-		_, _ = host.HolderRequest(id, "kill", nil, 3*time.Second)
-		if err := Reap(pid, 10*time.Second); err != nil {
-			t.Fatal(err)
-		}
-	}
-	m, err := host.LoadManifest(id)
-	if err != nil {
-		t.Fatal(err)
-	}
-	m.Name = name
-	if err := m.Save(); err != nil {
-		t.Fatal(err)
-	}
-}
-
-// WaitFor polls cond until it is true, or fails the test after timeout.
-func WaitFor(t testing.TB, timeout time.Duration, what string, cond func() bool) {
-	t.Helper()
-	deadline := time.Now().Add(timeout)
-	for !cond() {
-		if time.Now().After(deadline) {
-			t.Fatalf("timed out after %s waiting for %s", timeout, what)
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-}
-
-// SkipOnGit254 skips a test whose session makes a worktree, or counts the
-// changed files of its repository, when this machine's git is 2.54.x: the
-// helper refuses that git for a step that fires hooks (spec 19.3).
-func SkipOnGit254(t testing.TB) {
-	t.Helper()
-	out, _ := exec.CommandContext(context.Background(), "git", "version").Output()
-	if regexp.MustCompile(`^git version 2\.54(\.|\s|$)`).Match(out) {
-		t.Skip("the helper refuses git 2.54 for a step that fires hooks")
-	}
-}
-
-// Script writes an executable shell script into a folder of the test's own,
-// and returns its path.
-func (h *Host) Script(name, body string) string {
-	h.t.Helper()
-	dir := filepath.Join(h.Root, "bin")
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		h.t.Fatal(err)
-	}
-	p := filepath.Join(dir, name)
-	if !strings.HasPrefix(body, "#!") {
-		body = "#!/bin/sh\n" + body
-	}
-	if err := os.WriteFile(p, []byte(body), 0o755); err != nil {
-		h.t.Fatal(err)
-	}
-	return p
-}
-
-// InSession makes this test's process look, to the helper's own check
-// (host.CheckCaller), like a program in the unit of session id, until the
-// test ends. It overrides New's outside. Holders that the test starts are
-// other processes: they keep their own cgroup.
-func InSession(t testing.TB, id string) {
-	t.Helper()
-	uid := os.Getuid()
-	cgroup := fmt.Sprintf("0::/user.slice/user-%d.slice/user@%d.service/%s/%s\n", uid, uid, brand.Slice, host.UnitName(id))
-	old := host.SelfCgroup
-	host.SelfCgroup = func() ([]byte, error) { return []byte(cgroup), nil }
-	t.Cleanup(func() { host.SelfCgroup = old })
 }
