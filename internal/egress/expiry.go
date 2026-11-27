@@ -62,7 +62,7 @@ func (s *Server) expire(eng *Engine, at time.Time) {
 // watchExpiry waits for the next lease deadline or policy replacement. There
 // is no polling loop when the current policy has no timed grants.
 func (s *Server) watchExpiry(ctx context.Context) {
-	var sentHoldRevision uint64
+	sentHoldRevision := uint64(1)
 	for {
 		eng := s.currentEngine()
 		at := s.now()

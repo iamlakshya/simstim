@@ -252,16 +252,20 @@ func (h *networkHolds) snapshot() api.NetworkHoldSnapshot {
 func (h *networkHolds) policyChanged(reset bool) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	hadRefusals := len(h.refusals) > 0 || len(h.classifierRefusals) > 0
 	if reset {
 		h.refusals = nil
 		clear(h.classifierRefusals)
 	}
 	if !h.closed {
-		// Source-bound redaction may have changed even when no pending
-		// target changed. Every next public snapshot reprojects its host.
-		h.revision++
-		for _, entry := range h.entries {
-			entry.meta.Revision = h.revision
+		// Source-bound redaction or stopped state may have changed when
+		// pending entries or refusal history exist. Avoid bumping an idle
+		// empty snapshot on ordinary init/reload so no spurious event fires.
+		if len(h.entries) > 0 || hadRefusals {
+			h.revision++
+			for _, entry := range h.entries {
+				entry.meta.Revision = h.revision
+			}
 		}
 		close(h.changed)
 		h.changed = make(chan struct{})
