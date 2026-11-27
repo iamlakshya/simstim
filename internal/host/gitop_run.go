@@ -39,7 +39,7 @@ var (
 
 // StopGitOps stops every git operation that this process runs, with its
 // scope or its process group, and waits up to 15 seconds for them to end.
-// After it, the process starts no worktree.add. Other operations still
+// After it, the process starts no worktree.add or seed. Other operations still
 // start, such as the worktree.discard that removes what a stopped add had
 // begun. EndBridge calls it when the bridge's connection ends, so that
 // nothing that the bridge started runs on without it.
@@ -64,12 +64,12 @@ func StopGitOps() {
 
 // liveGitOp adds the operation op, which cancel stops, to liveGitOps, and
 // returns the function that takes it off when it ended. After StopGitOps,
-// it refuses a worktree.add.
+// it refuses worktree.add and seed.
 func liveGitOp(op string, cancel context.CancelFunc) (ended func(), err error) {
 	d := make(chan struct{})
 	liveGitOpsMu.Lock()
 	defer liveGitOpsMu.Unlock()
-	if gitOpsStopped && op == gitOpWorktreeAdd {
+	if gitOpsStopped && (op == gitOpWorktreeAdd || op == "seed") {
 		return nil, UserError("git_op", "the helper did not start git in "+op+" on this host, because its connection ended", gitOpHint)
 	}
 	liveGitOps[&cancel] = d

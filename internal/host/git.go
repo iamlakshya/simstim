@@ -137,7 +137,7 @@ func runGit(dir string, hooks []string, args ...string) (string, int, error) {
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
-	s := strings.TrimSpace(string(out))
+	s := strings.TrimRight(string(out), "\r\n")
 	if err != nil {
 		code := -1
 		var ee *exec.ExitError

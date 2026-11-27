@@ -176,27 +176,46 @@ func repoInfo(dir string, changes bool) (*api.RepoInfo, error) {
 	return repoInfoWithPolicy(dir, changes, false)
 }
 
+func repoInfoDir(dir string, allowMissingAncestor bool) (string, bool) {
+	cleaned := filepath.Clean(dir)
+	if st, err := os.Stat(cleaned); err == nil && st.IsDir() {
+		return dir, true
+	}
+	if !allowMissingAncestor {
+		return "", false
+	}
+	missing, err := checkFolder(cleaned, false)
+	if err != nil || len(missing) == 0 {
+		return "", false
+	}
+	return filepath.Dir(missing[len(missing)-1]), true
+}
+
 func repoInfoWithPolicy(dir string, changes, policy bool) (*api.RepoInfo, error) {
 	dir = expandHome(dir)
 	if _, err := exec.LookPath("git"); err != nil {
 		return nil, UserError("no_git", "git is not installed on this host", "Install git on the host.")
 	}
-	top, err := git(dir, "rev-parse", "--show-toplevel")
+	target, ok := repoInfoDir(dir, policy && !changes)
+	if !ok {
+		return nil, notARepo(dir, nil)
+	}
+	top, err := git(target, "rev-parse", "--show-toplevel")
 	if err != nil {
 		return nil, notARepo(dir, err)
 	}
-	common, err := git(dir, "rev-parse", "--git-common-dir")
+	common, err := git(target, "rev-parse", "--git-common-dir")
 	if err != nil {
 		return nil, notARepo(dir, err)
 	}
-	r := &api.RepoInfo{Root: top, Main: mainFolder(dir, common), Branch: "HEAD"}
-	origin, code, err := runGit(dir, nil, "config", "--get", "remote.origin.url")
+	r := &api.RepoInfo{Root: top, Main: mainFolder(target, common), Branch: "HEAD"}
+	origin, code, err := runGit(target, nil, "config", "--get", "remote.origin.url")
 	if err != nil && code != 1 {
 		return nil, asUserError(err, "git", "Check remote.origin.url on the host.")
 	}
 	r.Origin = strings.TrimSpace(origin)
 	// symbolic-ref names the branch of a repository without commits too.
-	if b, err := git(dir, "symbolic-ref", "--quiet", "--short", "HEAD"); err == nil && b != "" {
+	if b, err := git(target, "symbolic-ref", "--quiet", "--short", "HEAD"); err == nil && b != "" {
 		r.Branch = b
 	}
 	if changes {
@@ -204,7 +223,7 @@ func repoInfoWithPolicy(dir string, changes, policy bool) (*api.RepoInfo, error)
 		if err := gitVersionGate(); err != nil {
 			return nil, err
 		}
-		st, err := git(dir, "status", "--porcelain")
+		st, err := git(target, "status", "--porcelain")
 		if err != nil {
 			return nil, asUserError(err, "git", "Check the repository's state on the host with git status.")
 		}
