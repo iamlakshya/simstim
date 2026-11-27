@@ -326,7 +326,7 @@ func runSupervisorMode(owner context.Context, id string, operation *host.Session
 	if err := s.save(&snap, false); err != nil {
 		return s.failed(host.EndBoot, err)
 	}
-	if m.Wall.Driver != driverPlain && !(testFakeSandbox && m.Wall.Driver == "fake") {
+	if m.Wall.Driver != driverPlain && (!testFakeSandbox || m.Wall.Driver != "fake") {
 		if s.originalStart == nil {
 			operation, err = s.awaitOriginalLoan(lifetime)
 		}

@@ -63,13 +63,14 @@ func (g *realEndedGate) Close() error {
 // realEndedSandbox runs the real guest init in this test process. The init
 // starts the real holder subprocess through this package's TestMain.
 type realEndedSandbox struct {
-	root     string
-	mu       sync.Mutex
-	gate     *realEndedGate
-	guest    net.Conn
-	stopped  bool
-	done     chan struct{}
-	doneOnce sync.Once
+	root      string
+	mu        sync.Mutex
+	gate      *realEndedGate
+	guest     net.Conn
+	stopped   bool
+	cleanExit bool
+	done      chan struct{}
+	doneOnce  sync.Once
 }
 
 func (s *realEndedSandbox) Start(ctx context.Context) (net.Conn, error) {
@@ -97,6 +98,9 @@ func (s *realEndedSandbox) Start(ctx context.Context) (net.Conn, error) {
 	init := guest.New(b, s.root, slog.New(slog.DiscardHandler))
 	go func() { //nolint:contextcheck // Start bounds boot only. The real init serves until its link closes.
 		init.Serve()
+		s.mu.Lock()
+		s.cleanExit = !s.stopped
+		s.mu.Unlock()
 		s.doneOnce.Do(func() { close(s.done) })
 	}()
 	return s.gate, nil
@@ -118,6 +122,12 @@ func (s *realEndedSandbox) Kill() error {
 }
 
 func (s *realEndedSandbox) Wait() error { <-s.done; return nil }
+
+func (s *realEndedSandbox) CleanExit() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.cleanExit
+}
 
 func (s *realEndedSandbox) transport() *realEndedGate {
 	s.mu.Lock()
@@ -276,9 +286,12 @@ func TestRealGuestInitPreservesEndedAfterEventBackpressure(t *testing.T) {
 		t.Fatal("the real guest's claimed end alert was not recorded")
 	}
 	// Stop through the supervisor's existing signal channel. Its real init
-	// must stop the holder, drain its events and close the link before the
-	// supervisor saves the claimed end for restore.
-	running.sig <- syscall.SIGTERM
+	// may already have ended cleanly on empty, or stop the holder and close
+	// the link before the supervisor saves the claimed end for restore.
+	select {
+	case running.sig <- syscall.SIGTERM:
+	case <-ended:
+	}
 	select {
 	case <-ended:
 	case <-time.After(10 * time.Second):

@@ -132,7 +132,7 @@ func installTestGuestImageRoots(path string, public []byte) error {
 	if err != nil {
 		return err
 	}
-	defer certs.Remove(name)
+	defer func() { _ = certs.Remove(name) }()
 	if _, err := file.Write(public); err != nil {
 		_ = file.Close()
 		return err
