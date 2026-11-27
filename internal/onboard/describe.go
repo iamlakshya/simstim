@@ -37,7 +37,7 @@ func cleanLine(l Line) Line {
 // cleaned (api.CleanText): the launcher and the command line draw it.
 func Describe(host string, c api.AgentCheck) Line {
 	c.Kind, c.Title = api.CleanText(c.Kind, 200), api.CleanText(c.Title, 200)
-	c.Path, c.LoginHow = api.CleanText(c.Path, 4000), api.CleanText(c.LoginHow, 4000)
+	c.Path, c.LoginHow = api.CleanText(c.Path, 4000), strings.TrimSpace(api.CleanText(c.LoginHow, 4000))
 	a, _ := agents.Find(c.Kind)
 	l := Line{Mark: "✓", Title: c.Title}
 	switch {

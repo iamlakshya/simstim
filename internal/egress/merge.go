@@ -177,6 +177,9 @@ func MergeLayers(layers []api.Layer) (api.Policy, []api.Layer, error) {
 		pol.Rules = append(pol.Rules, rules...)
 		pol.Order = append(pol.Order, api.LayerRef{Kind: l.Kind, Name: l.Name, Source: l.Source})
 	}
+	if len(pol.Order) == 0 {
+		pol.Order = []api.LayerRef{{Kind: api.LayerBuiltin}}
+	}
 	if err := ValidateRuleIdentities(pol.Rules); err != nil {
 		return api.Policy{}, nil, err
 	}

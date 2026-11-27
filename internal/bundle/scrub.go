@@ -114,7 +114,10 @@ var productWords = func() map[string]bool {
 		"forward", "pull", "doctor", "debug", "config", "demo", "version", "start", "stop", "save", "profile",
 		"bundle", "add", "rm", "rekey", "test", "status", "create", "destroy", "restore", "idle", "alerts", "keys",
 		"terminal", "keymap", "path", "check", "install", "log", "off", "set", "completion", "help", "delete",
-		"upgrade", "bash", "zsh", "fish", "powershell", "concepts", "exit-codes"} {
+		"upgrade", "bash", "zsh", "fish", "powershell", "concepts", "exit-codes",
+		"login", "events", "fork", "default", "invite", "join", "leave", "prepare", "policy", "allow", "apply",
+		"deny", "edit", "learn", "lockdown", "refuse", "rewind", "shell", "ssh-config", "ssh-proxy", "image",
+		"_join-apply", "_join-leave", "_join-probe", "_mac-facts", "_mac-vm-start"} {
 		words[strings.ToLower(w)] = true
 	}
 	return words

@@ -18,7 +18,8 @@ func (e *partialCreationError) Unwrap() []error { return []error{e.UserError, e.
 // Report the actual returned value without inferring successful creation,
 // publication, private proof readiness, resource absence or cleanup authority.
 func partialCreationResult(ctx context.Context, actual client.Host, cause error) error {
-	out := &client.UserError{Code: "provider_partial", Kind: client.KindFailed}
+	const defaultHint = "Inspect this actual provider operation and its returned resource before retrying or deleting anything."
+	out := &client.UserError{Code: "provider_partial", Kind: client.KindFailed, Hint: defaultHint}
 	var original *client.UserError
 	if errors.As(cause, &original) {
 		copy := *original
@@ -35,6 +36,6 @@ func partialCreationResult(ctx context.Context, actual client.Host, cause error)
 	if ctx.Err() != nil {
 		out.Msg += "; the creation caller also ended"
 	}
-	out.Hint = "Inspect this actual provider operation and its returned resource before retrying or deleting anything."
+	out.Hint = defaultHint
 	return &partialCreationError{UserError: out, cause: cause}
 }

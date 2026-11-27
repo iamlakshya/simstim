@@ -7,6 +7,7 @@ import (
 
 	"github.com/iamlakshya/simstim/internal/api"
 	"github.com/iamlakshya/simstim/internal/proto"
+	"github.com/iamlakshya/simstim/internal/sandbox"
 )
 
 type lockedValue struct {
@@ -74,6 +75,12 @@ func resolveLayerValues(layers []api.Layer) (api.LayerValues, []api.ValueOrigin,
 	}
 	var merged api.LayerValues
 	origins := map[string]api.ValueOrigin{}
+	defaults, err := sandbox.DefaultPaths()
+	if err != nil {
+		return api.LayerValues{}, nil, nil, &proto.Error{Code: "bad_value", Message: "built-in sandbox cache data cannot be used: " + err.Error(), Hint: "Update the host helper, then run host doctor."}
+	}
+	keepCaches := true
+	mergeLayerValues(&merged, api.Layer{Kind: api.LayerBuiltin, LayerValues: api.LayerValues{Sandbox: api.SandboxValues{KeepCaches: &keepCaches, Caches: defaults}}}, origins)
 	var decoysOff *api.Layer
 	for i, l := range layers {
 		for key, value := range valuesMap(l.LayerValues) {
