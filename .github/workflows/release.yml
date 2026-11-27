@@ -263,15 +263,6 @@ jobs:
         # The build script verifies the signed Debian snapshot metadata and
         # every source input against guest/supply.lock. It starts no guest.
         run: guest/build.sh --only-kernels all
-      - name: Prepare the separately pinned offline verifier compiler and module inputs
-        # Official archive size/SHA is checked before extraction or execution.
-        # This exports only IMAGEVERIFY_* and never changes main Go or PATH.
-        run: |
-          python3 scripts/prepare-image-verifier-go.py \
-            --lock tools/imageverify/toolchain.lock \
-            --output "$RUNNER_TEMP/image-verifier-go" \
-            --cache "$RUNNER_TEMP/image-verifier-downloads" \
-            --module tools/imageverify --prepare-module --env-file "$GITHUB_ENV"
       - uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
         with:
           distribution: goreleaser

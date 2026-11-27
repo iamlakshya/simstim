@@ -1,14 +1,13 @@
 # Offline image verifier
 
-This separate module keeps `sigstore-go` v1.4.0 on its required Go 1.27
-toolchain. The client and host module keeps its existing Go 1.26 toolchain.
-The exact Go 1.27.4 archives are in `toolchain.lock`, taken from
-[Go's release metadata](https://go.dev/dl/?mode=json).
+This separate module keeps `sigstore-go` v1.4.0 isolated from the main client
+and host dependency graph. It uses the same pinned Go 1.27.4 toolchain from
+`go.mod` (`GOTOOLCHAIN`), downloaded and verified by Go when missing.
 
-The release builds this module with its separately checked compiler, with
-automatic toolchain downloads disabled. It carries one verifier for each
-supported client platform: Linux and macOS, on amd64 and arm64. The release
-manifest records each executable's actual size and SHA-256.
+`just image-verifiers` (`scripts/build-image-verifier.sh`) builds this module
+with `-mod=readonly`, `-tags=http2legacy` and `-trimpath` for each supported
+client platform: Linux and macOS, on amd64 and arm64. The release manifest
+records each executable's actual size and SHA-256.
 
 The only command is `--image-signature-v1`. It reads one bounded request on
 stdin, checks the bundle offline, then writes one response on stdout. The

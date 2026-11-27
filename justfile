@@ -50,7 +50,7 @@ launchers:
         cp bin/launch-$arch {{helpers}}/launch-$arch
     done
 
-# Build the isolated verifier with its separately verified compiler.
+# Build the offline image signature verifier from its pinned module.
 image-verifiers:
     scripts/build-image-verifier.sh '{{version}}'
 

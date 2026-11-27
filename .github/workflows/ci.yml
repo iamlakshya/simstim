@@ -42,36 +42,18 @@ jobs:
           for arch in amd64 arm64; do cp vt/zig-out/linux/shadow-vt-$arch internal/client/helpers/vt-linux-$arch; done
       - run: go vet -tags="$(sh scripts/go-build-tags.sh)" ./...
       - run: go test -tags="$(sh scripts/go-build-tags.sh)" -race -count=1 ./...
-      - name: Test the isolated compiler preparation guards without network access
-        run: python3 scripts/test-prepare-image-verifier-go.py
       - name: Test checksum-bound upstream tool preparation offline
         run: |
           python3 scripts/test-prepare-gvisor-build.py
           python3 scripts/test-gvisor-build-inputs.py
       - name: Test repro prerequisite refusal and literal artifact argument handling offline
         run: python3 scripts/test-repro-inputs.py
-      - name: Prepare the separate official verifier compiler and checked module inputs
+      - name: Vet and race-test the nested offline verifier
+        # Root ./... excludes this nested module.
         run: |
-          python3 scripts/prepare-image-verifier-go.py \
-            --lock tools/imageverify/toolchain.lock \
-            --output "$RUNNER_TEMP/image-verifier-go" \
-            --cache "$RUNNER_TEMP/image-verifier-downloads" \
-            --module tools/imageverify --prepare-module --env-file "$GITHUB_ENV"
-      - name: Vet and race-test the nested offline verifier with its own compiler
-        # Root ./... excludes this nested module. Main Go and PATH stay fixed.
-        run: |
-          compiler_sha=$(sha256sum "$IMAGEVERIFY_GO")
-          test "${compiler_sha%% *}" = "$IMAGEVERIFY_GO_SHA256"
-          export HOME="$IMAGEVERIFY_HOME" USERPROFILE="$IMAGEVERIFY_HOME"
-          export XDG_CONFIG_HOME="$IMAGEVERIFY_HOME/config" XDG_CACHE_HOME="$IMAGEVERIFY_HOME/cache"
-          export XDG_DATA_HOME="$IMAGEVERIFY_HOME/data" XDG_STATE_HOME="$IMAGEVERIFY_HOME/state"
-          export XDG_RUNTIME_DIR="$IMAGEVERIFY_HOME/run" XDG_CONFIG_DIRS="$IMAGEVERIFY_HOME/config-dirs"
-          export XDG_DATA_DIRS="$IMAGEVERIFY_HOME/data-dirs"
-          export GOMODCACHE="$IMAGEVERIFY_GOMODCACHE" GOCACHE="$IMAGEVERIFY_GOCACHE"
-          export GOTOOLCHAIN=local GOPROXY=off GOSUMDB=sum.golang.org GOFLAGS=-mod=readonly
           cd tools/imageverify
-          "$IMAGEVERIFY_GO" vet -tags=http2legacy ./...
-          "$IMAGEVERIFY_GO" test -tags=http2legacy -race -count=1 ./...
+          go vet -tags=http2legacy -mod=readonly ./...
+          go test -tags=http2legacy -mod=readonly -race -count=1 ./...
       - name: Pinned host keys against real localhost SSH servers
         run: |
           sudo apt-get update
@@ -180,6 +162,7 @@ jobs:
           export GVISOR_REPRO_AMD64="$RUNNER_TEMP/gvisor-repro-amd64"
           export GVISOR_REPRO_ARM64="$RUNNER_TEMP/gvisor-repro-arm64"
           export GOMODCACHE="$(go env GOMODCACHE)"
+          (cd tools/imageverify && go mod download && go mod verify)
           scripts/repro.sh
       - name: Package the real current-source snapshot for both native install checks
         run: |
@@ -320,6 +303,10 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: '1.27.4'
+      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
+        with:
+          version: 0.17.0
+          use-cache: false
       - name: Build the host helpers (the client embeds them)
         run: |
           cmd/userns/build.sh

@@ -41,20 +41,19 @@ that initial root during a normal release refresh.
    copyright and Apache-2.0 entries in `REUSE.toml`. If the target is unchanged,
    record that the release checked the same SHA-256 again.
 
-4. Run the isolated verifier's tests with the separately checked compiler:
+4. Run the offline verifier's tests with the pinned Go toolchain:
 
    ```sh
    (
        cd tools/imageverify
-       GOTOOLCHAIN=local GOPROXY=off "$IMAGEVERIFY_GO" test ./...
+       go test -tags=http2legacy -mod=readonly ./...
    )
    just test lint
    just docs-check
    ```
 
-   `IMAGEVERIFY_GO` must be the absolute compiler selected by the verified
-   toolchain preparation. The root module keeps its own Go 1.26 toolchain.
-   The verifier module uses its pinned Go 1.27.4 toolchain and Sigstore v1.4.0.
+   Both the root module and `tools/imageverify` use the pinned Go 1.27.4
+   toolchain from `go.mod`, with `sigstore-go` v1.4.0 in `tools/imageverify`.
    Run these checks in CI for the release change. A failing recorded signature
    stops the refresh; do not disable identity, log or timestamp checks.
 

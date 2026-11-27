@@ -584,6 +584,7 @@ Guard direct execution of measured VMM files on writable owned stores with the o
 - The setup example uses the documented host name, and the guide index no longer repeats a page.
 - The guided setup test now holds its fixture installer until the terminal reader starts. Fast installers cannot bypass the blocked reader case or leave the test waiting for a read that never began.
 - Developer setup uses the exact Go toolchain pinned in the repository, including inside the devcontainer. Failed setup tests print their full diagnostic output.
+- Clean-checkout setup, the devcontainer and host-helper builds now use the pinned Go toolchain from `go.mod` directly instead of a separate verifier compiler setup. CI lint installs Zig 0.17.0 before building the namespace launcher.
 - Helper archives accept only the supported helper file names. Cache writes stay inside an opened directory even when an existing entry is a link.
 - Shadow terminal frames reject lengths that exceed their wire field or overflow the host's header arithmetic. Rejected profiles keep the previous profile and report an error.
 - Remote command input errors keep their code, kind, structured data and original cause when diagnostic output is added. JSON errors distinguish an input that could not be read from one that could not be sent.

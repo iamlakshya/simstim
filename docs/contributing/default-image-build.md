@@ -33,7 +33,7 @@ The registry package must be publicly readable by digest for anonymous hosts. An
 
 Unit fixtures exercise deterministic OCI and verity output and reject changed input, config, layer and root metadata. They do not count as a Debian build, a real package-manager recording, a guest boot or a registry publication. Those receipts must identify the actual prepared image and pinned tool versions.
 
-The offline signature verifier has its own Go 1.27.4 module and official archive lock. The release prepares that exact compiler in a fresh task directory, checks the archive's size and SHA-256 before extraction, and verifies the compiler version. It prepares module dependencies with normal checksum checks before the offline build. Only `IMAGEVERIFY_*` paths are exported. The main Go 1.26 toolchain, `PATH` and module files stay unchanged. Verifier builds use the isolated cache with automatic toolchain and proxy downloads disabled.
+The offline signature verifier lives in its own `tools/imageverify` module and builds with the same pinned Go 1.27.4 toolchain as the root module (`go.mod` / `GOTOOLCHAIN`). `scripts/build-image-verifier.sh` checks the active Go version against the pin and builds all four client platforms with `-mod=readonly`, `-tags=http2legacy` and `-trimpath`.
 
 On an approved native builder, `guest/base-image/repro.sh <arch>` makes two
 fresh preparation containers and separate empty Go build caches. Supply checks
@@ -58,21 +58,18 @@ fixed OSV inputs and retains each archive's SHA-256 provenance. A missing or
 invalid snapshot fails the release; an empty substitute is not generated.
 Ordinary runtime package checks use the embedded data without a network fetch.
 
-Normal CI tests the compiler preparation guards, then vets and race-tests the
-nested verifier module with that separately verified compiler. The root
-module's `./...` pattern excludes nested modules. Verifier tests run with
-isolated home and XDG paths, checked module inputs, local toolchain selection
-and proxy downloads disabled; the main module keeps its own pinned compiler.
+Normal CI vets and race-tests the nested `tools/imageverify` module with the
+pinned Go 1.27.4 toolchain and `-mod=readonly`, since the root module's `./...`
+pattern excludes nested modules.
 
 The global `just repro` command takes both original native build pairs through
 `DEFAULT_IMAGE_REPRO_AMD64` and `DEFAULT_IMAGE_REPRO_ARM64`. Each path names the
 retained output of that architecture's real `guest/base-image/repro.sh` run.
 It rechecks both artifact trees and their source pins, then uses build one for
 the first complete release pass and build two for the second. Provide the
-verified main module cache through `GOMODCACHE`, and the official separate
-compiler and prepared SDK cache through `IMAGEVERIFY_GO`,
-`IMAGEVERIFY_GO_SHA256` and `IMAGEVERIFY_GOMODCACHE`. The genuine held malware
-snapshot must also be prepared by the explicit feed producer.
+verified module cache (covering both the root module and `tools/imageverify`)
+through `GOMODCACHE`. The genuine held malware snapshot must also be prepared
+by the explicit feed producer.
 
 Each complete pass gets fresh main and verifier build caches, guest and Zig
 caches, home and XDG paths. GoReleaser rebuilds both launchers and all four

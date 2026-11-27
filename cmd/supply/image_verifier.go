@@ -20,7 +20,7 @@ func addImageVerifierItems(manifest *supply.Manifest, directory string, required
 				continue
 			}
 			if err != nil {
-				return &failure{msg: "read actual offline image verifier: " + err.Error(), try: "build all four verifier artifacts with the separately verified compatible toolchain"}
+				return &failure{msg: "read actual offline image verifier: " + err.Error(), try: "run just image-verifiers to build all four offline verifier binaries"}
 			}
 			if !validImageVerifierFile(file, system, arch) {
 				return &failure{msg: "offline verifier binary has another format or architecture", try: "build the isolated verifier module for its exact client OS/architecture"}

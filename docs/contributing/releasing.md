@@ -30,10 +30,10 @@ Every release is built by `.github/workflows/release.yml` from a tag that a main
 
 `just repro` builds every binary twice from empty build caches and checks they
 match. It requires the independently prepared native default-image pairs and
-the separately verified offline compiler described in the [build input
-guide](default-image-build.md). CI prepares both native image pairs and runs
-the two complete builds on every push. A source check or a missing-input
-refusal does not establish reproducibility.
+module cache described in the [build input guide](default-image-build.md). CI
+prepares both native image pairs and runs the two complete builds on every
+push. A source check or a missing-input refusal does not establish
+reproducibility.
 
 ### VMM pins and mirrors
 
