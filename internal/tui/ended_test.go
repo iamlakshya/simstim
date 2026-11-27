@@ -157,7 +157,7 @@ func TestEndedSessionSaysWhyAndWhatNext(t *testing.T) {
 	}
 	out := plainScreen(hs.m)
 	for _, want := range []string{
-		"2 ✕ importer",
+		"2 ✕  importer",
 		"out of memory  ",
 		"✕ stopped at its memory cap of 1.5 GiB   u resume",
 		"u resume   d delete   enter peek   esc hosts   ctrl+o commands",

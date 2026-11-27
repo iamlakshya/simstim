@@ -9,12 +9,12 @@
     ❯ ses
 
     ▍ New session                                      n
-      Stop session
       Peek at the screen                           space
+      Stop session
       Shell session · session shells are unavailable …
-      Policy session                                   p
       Attach session                               enter
       Rename session                                   r
       Delete session                                   d
+      Resume session · the agent still runs            u
 
     enter run   ↑↓ move   esc close

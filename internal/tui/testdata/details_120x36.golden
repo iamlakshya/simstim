@@ -2,14 +2,11 @@
   ⢄⡠⠊ simstim  hosts                                                                             3 hosts · 1 needs you
   ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
-  ▍ 1 ● atlas-dev  4 sessions · 1 needs you                                                              9ms  ⣀⣀⣀⣀⣀⣀⣀⣼
+  ▍ 1 ● atlas-dev  floor not pinned · now unknown · 4 sessions · 1 needs you                             9ms  ⣀⣀⣀⣀⣀⣀⣀⣼
     2 ◌ aws-gpu    offline                                                                                    ⣀⣀⣀⣀⣀⣀⣀⣀
-    3 ● gcp-dev    2 sessions                                                                           41ms  ⣀⣀⣀⣀⣀⣀⣀⣼
+    3 ● gcp-dev    floor not pinned · now unknown · 2 sessions                                          41ms  ⣀⣀⣀⣀⣀⣀⣀⣼
 
-    ssh atlas-dev · Debian 13 · 4 CPUs · claude, codex, opencode, shell
-
-
-
+    ssh atlas-dev · own · Debian 13 · 4 CPUs · claude, codex, opencode, shell · floor not pinned · now unknown
 
 
 
@@ -27,7 +24,10 @@
 
   ── atlas-dev ───────────────────────────────────────────────────────────────────── 9ms · 4 sessions · 1 needs you ──
 
+    Floor      not pinned
+    Level now  unknown
     Route      atlas-dev
+    Tier       own
     System     Debian 13 · amd64 · 4 CPUs · 8 GiB · 61 GiB free
     Helper     simstim-host 0.1.0
     Agents     claude 2.1.3 · codex 0.46.0 · opencode 1.0.12 · shell

@@ -115,7 +115,7 @@ func TestQuickOpen(t *testing.T) {
 	if len(hs.be.attached) != 1 || hs.be.attached[0].Session != "g6" {
 		t.Fatalf("1 attached %+v", hs.be.attached)
 	}
-	if !strings.Contains(plainScreen(hs.m), "1 "+glyphSpinStill+" bench") {
+	if !strings.Contains(plainScreen(hs.m), "1 "+glyphSpinStill+"  bench") {
 		t.Fatal("rows do not show their numbers")
 	}
 }

@@ -2,9 +2,9 @@
   ⢄⡠⠊ simstim  › pi                                                  1 session
   ────────────────────────────────────────────────────────────────────────────
 
-  ▍ 1 ⠶ install-cod…            ~                starting         0s  ⣀⣀⣀⣀⣀⣀⣀⣀
+  ▍ 1 ⠶  install-co…            ~                starting         0s  ⣀⣀⣀⣀⣀⣀⣀⣀
 
-    ~ · n001
+    ~ · n222
 
 
 
@@ -12,11 +12,11 @@
 
     ✓ Claude Code       installed, logged in
     ! Codex             installed, not logged in
-      → simstim new pi -- codex login --device-auth
+      → simstim agents login codex pi
     ✕ opencode          not installed
-      → simstim agents install opencode --host pi
+      → simstim agents install opencode pi
     ✕ Antigravity CLI   not installed
-      → simstim agents install antigravity --host pi
+      → simstim agents install antigravity pi
 
     Start your first session:
       simstim new pi --agent claude

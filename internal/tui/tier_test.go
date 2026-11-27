@@ -65,7 +65,7 @@ func TestWizardTierStepAndSharedLabels(t *testing.T) {
 	hs.key("esc")
 	hs.m.screen, hs.m.cur = scrHosts, ""
 	hostsOut := plainScreen(hs.m)
-	for _, want := range []string{"lab       shared", "ssh me@lab · shared · reported by lab · Ubuntu 24.04"} {
+	for _, want := range []string{"lab       floor gvisor · now unknown · shared", "ssh me@lab · shared · reported by lab · Ubuntu 24.04"} {
 		if !strings.Contains(hostsOut, want) {
 			t.Errorf("hosts view lacks %q:\n%s", want, hostsOut)
 		}

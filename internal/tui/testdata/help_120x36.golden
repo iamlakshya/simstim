@@ -2,10 +2,10 @@
   ⢄⡠⠊ simstim  › atlas-dev                                                              9ms · 4 sessions · 1 needs you
   ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
-  ▍ 1 ● auth-refactor                 claude    ~/src/app                                needs input      2m  ⣀⣀⣀⣀⣀⣀⣀⣀
-    2 ⠶ api-tests                     codex     ~/src/api                                working         14s  ⣀⣀⣀⣀⣀⣀⣀⣼
-    3 ○ notes                         shell     ~                                        idle             1h  ⣀⣀⣀⣀⣀⣀⣀⣀
-    4 ✓ docs-pass                     opencode  ~/src/docs                               exited 0         3h  ⣀⣀⣀⣀⣀⣀⣀⣀
+  ▍ 1 ●  auth-refactor                 claude    ~/src/app                               needs input      2m  ⣀⣀⣀⣀⣀⣀⣀⣀
+    2 ⠶  api-tests                     codex     ~/src/api                               working         14s  ⣀⣀⣀⣀⣀⣀⣀⣼
+    3 ○  notes                         shell     ~                                       idle             1h  ⣀⣀⣀⣀⣀⣀⣀⣀
+    4 ✓  docs-pass                     opencode  ~/src/docs                              exited 0         3h  ⣀⣀⣀⣀⣀⣀⣀⣀
 
     ~/src/app · 6.1 of 8 GiB · s4
 
@@ -23,14 +23,14 @@
   ── Keys ────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
     ↑↓ jk          move                                     w              next waiting session
-    1–9            open that row                            a              add host
-    esc            back to hosts                            s              guided setup
-    n              new session                              i              host details
-    enter          attach                                   /              search every host
-    space          peek at the screen                       alt+e          show ended
-    r f2           rename                                   q              quit
-    d              delete                                   ctrl+o         commands
-    u              resume                                   ctrl+c ctrl+c  quit
-    y              copy attach command
+    1–9            open that row                            p              policy
+    esc            back to hosts                            a              add host
+    n              new session                              s              guided setup
+    enter          attach                                   i              host details
+    space          peek at the screen                       /              search every host
+    r f2           rename                                   alt+e          show ended
+    d              delete                                   q              quit
+    u              resume                                   ctrl+o         commands
+    y              copy attach command                      ctrl+c ctrl+c  quit
 
     esc close
