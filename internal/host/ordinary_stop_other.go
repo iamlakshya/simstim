@@ -4,6 +4,7 @@ package host
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net"
 	"os/exec"
@@ -23,7 +24,7 @@ func acquireOrdinaryHolderV1(id string) (*ownedOrdinaryHolderV1, func(), error) 
 func prepareHolderMainV1(cmd *exec.Cmd) *holderMainV1 { return &holderMainV1{cmd: cmd, pidfd: -1} }
 func signalHolderMainV1(main *holderMainV1, signal syscall.Signal) error {
 	if err := main.cmd.Process.Signal(signal); err != nil {
-		return err
+		return fmt.Errorf("signal holder: %w", err)
 	}
 	if signal == syscall.SIGKILL || signal == syscall.SIGHUP {
 		// Non-Linux hosts have no pidfd or child subreaper; the agent leads its

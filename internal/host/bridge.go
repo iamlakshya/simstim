@@ -65,10 +65,11 @@ type bridge struct {
 	doneOnce sync.Once
 	soonOnce sync.Once
 
-	mu      sync.Mutex
-	holder  net.Conn
-	hw      *proto.Writer
-	holderQ *bridgeHolder
+	mu        sync.Mutex
+	soonTimer *time.Timer
+	holder    net.Conn
+	hw        *proto.Writer
+	holderQ   *bridgeHolder
 
 	// umu guards uploads, the uploads that have begun and not ended, the
 	// files of each, and uploadsDone, whether the bridge takes no more
@@ -155,6 +156,7 @@ func runBridge(in io.Reader, out io.Writer, owned OwnedBridgeOutput, inputs ...O
 	defer b.stopDebug("end")
 	defer b.endAttach()
 	defer func() { returned = errors.Join(returned, b.closeOwnedServicesV1(cancel, ownedInput, owned)) }()
+	defer b.stopSoon()
 	inWatch := proc.WatchReadPeerGone(in, b.shutSoon)
 	defer closeWatch(inWatch)
 	outWatch := proc.WatchWritePeerGone(out, b.shut)

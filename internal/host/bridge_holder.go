@@ -122,7 +122,26 @@ func closeWatch(c io.Closer) {
 // shutSoon ends the bridge after bridgeDrain once its input peer has closed,
 // so frames still buffered in stdin can pass first on a healthy session.
 func (b *bridge) shutSoon() {
-	b.soonOnce.Do(func() { time.AfterFunc(b.drain, b.shut) })
+	b.soonOnce.Do(func() {
+		b.mu.Lock()
+		if !b.ended {
+			b.soonTimer = time.AfterFunc(b.drain, b.shut)
+		}
+		b.mu.Unlock()
+	})
+}
+
+// stopSoon cancels any pending shutSoon timer when runBridge returns cleanly.
+func (b *bridge) stopSoon() {
+	b.doneOnce.Do(func() { close(b.done) })
+	b.mu.Lock()
+	b.ended = true
+	t := b.soonTimer
+	b.soonTimer = nil
+	b.mu.Unlock()
+	if t != nil {
+		t.Stop()
+	}
 }
 
 // shut ends the bridge at once when the client is gone: it wakes any wait on
