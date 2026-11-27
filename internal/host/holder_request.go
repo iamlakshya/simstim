@@ -124,6 +124,8 @@ func (h *Holder) request(c *hclient, req proto.Request) {
 			return
 		}
 		reply(map[string]int{"bytes": len(data)}, nil)
+	case "policy.ls", "policy.add", "policy.rm", "policy.log", "policy.replace":
+		reply(nil, &proto.Error{Code: "not_walled", Message: "session " + h.id + " has no sandbox policy", Hint: "Start a walled session to use policy commands."})
 	case "kill":
 		reply(map[string]bool{"killed": true}, nil)
 		go h.stop("killed by request", false)

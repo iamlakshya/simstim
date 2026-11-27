@@ -2,7 +2,10 @@
 
 package host
 
-import "os"
+import (
+	"os"
+	"path/filepath"
+)
 
 // Non-Linux hosts are used only by source tests. Production hosts target Linux.
 func mappedExecutable() (string, os.FileInfo, error) {
@@ -10,6 +13,11 @@ func mappedExecutable() (string, os.FileInfo, error) {
 	if err != nil {
 		return "", nil, placementError("cannot identify the running executable")
 	}
+	dir, err := filepath.EvalSymlinks(filepath.Dir(name))
+	if err != nil {
+		return "", nil, placementError("cannot resolve the running executable's directory")
+	}
+	name = filepath.Join(dir, filepath.Base(name))
 	info, err := os.Lstat(name)
 	if err != nil {
 		return "", nil, placementError("cannot anchor the running executable")
