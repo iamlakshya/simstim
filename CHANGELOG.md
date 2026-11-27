@@ -23,7 +23,6 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 - The setup example uses the documented host name, and the guide index no longer repeats a page.
 - The guided setup test now holds its fixture installer until the terminal reader starts. Fast installers cannot bypass the blocked reader case or leave the test waiting for a read that never began.
-
 - Developer setup uses the exact Go toolchain pinned in the repository, including inside the devcontainer. Failed setup tests print their full diagnostic output.
 - Helper archives accept only the supported helper file names. Cache writes stay inside an opened directory even when an existing entry is a link.
 - Shadow terminal frames reject lengths that exceed their wire field or overflow the host's header arithmetic. Rejected profiles keep the previous profile and report an error.
@@ -31,7 +30,6 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 - The E2B tests use one entry point for their private home and command wrappers, preserving child process cleanup.
 - Frame writers reject oversized payloads before adding header sizes, preserving the protocol limit and writing no partial frame.
 - JSON escaping avoids unchecked allocation arithmetic and keeps decoded host data exact.
-
 - Session JSON keeps integer values exact, including large memory sizes.
 - The terminal cleanup test counts open file names without looking up descriptors that can close during the count. It still checks that held reads keep their terminal open and that cleanup leaves no open file behind.
 - Tests of concurrent uploads let a second upload reach the held chunk. The test hook no longer makes the uploads take turns itself.
