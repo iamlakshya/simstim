@@ -43,7 +43,7 @@ func localGitControls(nonblockControl bool) (*os.File, *os.File, error) {
 	for _, fd := range []int{3, 4} {
 		var st syscall.Stat_t
 		if err := syscall.Fstat(fd, &st); err != nil || st.Mode&syscall.S_IFMT != syscall.S_IFIFO {
-			return nil, nil, fmt.Errorf("the local Git control is not a private pipe")
+			return nil, nil, errors.New("the local Git control is not a private pipe")
 		}
 		syscall.CloseOnExec(fd)
 	}
@@ -57,7 +57,7 @@ func localGitControls(nonblockControl bool) (*os.File, *os.File, error) {
 	}
 	control, status := os.NewFile(3, "local-git-control"), os.NewFile(4, "local-git-status")
 	if control == nil || status == nil {
-		return nil, nil, fmt.Errorf("the local Git private control is missing")
+		return nil, nil, errors.New("the local Git private control is missing")
 	}
 	return control, status, nil
 }

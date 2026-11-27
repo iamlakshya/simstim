@@ -65,8 +65,10 @@ func openOwnedSessionFileLease(ctx context.Context, id, name string, wait time.D
 	}()
 	notFoundIfGone := func(err error) error {
 		if ctx.Err() == nil {
-			if _, lerr := os.Lstat(path); errors.Is(lerr, os.ErrNotExist) {
+			if check, oerr := cachefs.OpenPrivateRoot(path, false); errors.Is(oerr, os.ErrNotExist) {
 				return UserError("not_found", "no such session", "List sessions to find its ID.")
+			} else if check != nil {
+				_ = check.Close()
 			}
 		}
 		return err
