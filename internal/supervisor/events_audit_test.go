@@ -5,17 +5,32 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
 	"github.com/iamlakshya/simstim/internal/alerts"
 )
 
-func TestEventPublisherPersistsPreparedV1ThroughOriginalAuditResource(t *testing.T) {
-	root := t.TempDir()
-	if real, err := filepath.EvalSymlinks(root); err == nil {
-		root = real
+func privateTempDir(t *testing.T) string {
+	t.Helper()
+	parent := ""
+	if runtime.GOOS != "windows" {
+		parent = "/tmp"
 	}
+	dir, err := os.MkdirTemp(parent, "sv-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if real, err := filepath.EvalSymlinks(dir); err == nil {
+		dir = real
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	return dir
+}
+
+func TestEventPublisherPersistsPreparedV1ThroughOriginalAuditResource(t *testing.T) {
+	root := privateTempDir(t)
 	path := filepath.Join(root, "audit.jsonl")
 	audit := openAudit(path, slog.New(slog.DiscardHandler))
 	defer audit.close()
@@ -45,10 +60,7 @@ func TestEventAuditRefusesMissingOrClosedOriginalAppendResource(t *testing.T) {
 	if err := (*auditLog)(nil).writeEvent(event); err == nil {
 		t.Fatal("an absent native append resource claimed persistence")
 	}
-	dir := t.TempDir()
-	if real, err := filepath.EvalSymlinks(dir); err == nil {
-		dir = real
-	}
+	dir := privateTempDir(t)
 	audit := openAudit(filepath.Join(dir, "audit.jsonl"), slog.New(slog.DiscardHandler))
 	audit.close()
 	if err := audit.writeEvent(event); err == nil {

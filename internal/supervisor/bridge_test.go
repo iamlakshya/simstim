@@ -194,6 +194,9 @@ func newBridgeHost(t *testing.T) (cl.Host, *bridgeTransport) {
 	t.Helper()
 	const provider = "supervisortest"
 	bridgeOnce.Do(func() {
+		cgroup := fmt.Sprintf("0::/user.slice/user-%d.slice/session-1.scope\n", os.Getuid())
+		host.SelfCgroup = func() ([]byte, error) { return []byte(cgroup), nil }
+		host.CgroupNamespaces = func() (string, string, error) { return "cgroup:[1]", "cgroup:[1]", nil }
 		cl.RegisterProvider(provider, func(ch cl.Host) (cl.Lifecycle, error) {
 			v, ok := bridgeMachines.Load(ch.Machine.ID)
 			if !ok {

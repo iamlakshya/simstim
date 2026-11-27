@@ -19,9 +19,9 @@ import (
 // Stop, Kill or Destroy, and creates no process, namespace, service or mount.
 func TestProcessCachePreparationPreservesLegacyPATHAndTypedFilePlans(t *testing.T) {
 	for _, key := range []string{"HOME", "USERPROFILE", "XDG_CONFIG_HOME", "XDG_CACHE_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME", "XDG_RUNTIME_DIR", "XDG_CONFIG_DIRS", "XDG_DATA_DIRS"} {
-		t.Setenv(key, t.TempDir())
+		t.Setenv(key, privateTempDir(t))
 	}
-	programs, explicit := t.TempDir(), t.TempDir()
+	programs, explicit := privateTempDir(t), privateTempDir(t)
 	for _, row := range []struct {
 		name, id string
 		files    *host.FilePlan

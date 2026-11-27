@@ -79,7 +79,6 @@ func (r *diskResourcesV1) Close() error {
 	if r.closed {
 		return nil
 	}
-	r.closing = true
 	if r.closeErr != nil {
 		return r.closeErr
 	}
@@ -89,6 +88,7 @@ func (r *diskResourcesV1) Close() error {
 		}
 		r.release = nil
 	}
+	r.closing = true
 	for index := len(r.files) - 1; index >= 0; index-- {
 		if r.files[index] == nil {
 			continue

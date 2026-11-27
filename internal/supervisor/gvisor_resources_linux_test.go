@@ -35,7 +35,7 @@ func (w *gvisorLayoutWitness) Open(ctx context.Context, _ string) (wall.Sandbox,
 func TestGvisorLayoutOnlySelectsPrepareOrOpenWithoutIssuingAuthority(t *testing.T) {
 	for _, kind := range []string{"absent", "directory", "file", "symlink"} {
 		t.Run(kind, func(t *testing.T) {
-			dir := t.TempDir()
+			dir := privateTempDir(t)
 			runtime := filepath.Join(dir, "gvisor")
 			var err error
 			switch kind {
@@ -44,7 +44,7 @@ func TestGvisorLayoutOnlySelectsPrepareOrOpenWithoutIssuingAuthority(t *testing.
 			case "file":
 				err = os.WriteFile(runtime, []byte("untrusted saved bytes"), 0600)
 			case "symlink":
-				err = os.Symlink(t.TempDir(), runtime)
+				err = os.Symlink(privateTempDir(t), runtime)
 			}
 			if err != nil {
 				t.Fatal(err)

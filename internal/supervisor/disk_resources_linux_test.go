@@ -21,10 +21,7 @@ import (
 
 func ownedProcessDiskFixture(t *testing.T) (wall.Spec, *files.Capture) {
 	t.Helper()
-	dir, err := filepath.EvalSymlinks(t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
+	dir := privateTempDir(t)
 	work := filepath.Join(dir, "work")
 	if err := os.Mkdir(work, 0o700); err != nil {
 		t.Fatal(err)
@@ -34,7 +31,7 @@ func ownedProcessDiskFixture(t *testing.T) (wall.Spec, *files.Capture) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = capture.Close() })
-	return wall.Spec{SessionDir: dir, Helper: t.TempDir(), DiskMax: 1 << 20, Mounts: []wall.Mount{{Host: work, Guest: "/work", Write: true}}, StateDirs: []string{".cache/tool"}, StateFiles: []string{".agent/state.sqlite"}, StateRestore: capture.Restore, StateCapture: capture.Incoming}, capture
+	return wall.Spec{SessionDir: dir, Helper: privateTempDir(t), DiskMax: 1 << 20, Mounts: []wall.Mount{{Host: work, Guest: "/work", Write: true}}, StateDirs: []string{".cache/tool"}, StateFiles: []string{".agent/state.sqlite"}, StateRestore: capture.Restore, StateCapture: capture.Incoming}, capture
 }
 
 func diskRootInfo(t *testing.T, root *os.Root) os.FileInfo {
