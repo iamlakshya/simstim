@@ -16,7 +16,7 @@ import (
 )
 
 func TestPurgeClosedRequestRefusesAuthorityFieldsV3(t *testing.T) {
-	args := api.PurgeArgs{HostID: strings.Repeat("a", 64), Nonce: strings.Repeat("b", 64), Force: true}
+	args := api.PurgeArgs{HostID: strings.Repeat("a", 32), Nonce: strings.Repeat("b", 32), Force: true}
 	request, err := purgeRequestFrameV3(9, purgeContinueV3, args)
 	if err != nil {
 		t.Fatal(err)

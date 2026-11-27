@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net"
 	"os"
 	"path/filepath"
@@ -212,11 +213,6 @@ func TestSandboxPrepareLinuxSuccessAndNoHistoryIncrement(t *testing.T) {
 				t.Errorf("unexpected fixed argv %v", loaded.Agent.Argv)
 			}
 		}
-		for _, p := range []string{filepath.Dir(paths.Socket(m.ID)), filepath.Dir(paths.HookSocket(m.ID)), paths.SandboxRoot(m.ID)} {
-			_ = os.MkdirAll(p, 0o700)
-		}
-		_ = os.WriteFile(paths.Socket(m.ID), []byte("sock"), 0o600)
-		_ = os.WriteFile(paths.HookSocket(m.ID), []byte("hook"), 0o600)
 		return &sandboxPrepareHookResultV1{bootMS: 23}, true
 	}
 	t.Cleanup(func() {
@@ -291,12 +287,12 @@ func TestSandboxPrepareLinuxTimeoutCancellationAndCleanup(t *testing.T) {
 	prevBoot := sandboxPrepareBootOverrideV1
 	sandboxPrepareTimeoutV1 = 80 * time.Millisecond
 	sandboxPrepareProbeOverrideV1 = func(context.Context, *bridge, *sandboxPrepareWitnessV1) error { return nil }
-	var timedOutID string
-	var observedCause error
+	timedOutIDCh := make(chan string, 1)
+	observedCauseCh := make(chan error, 1)
 	sandboxPrepareBootOverrideV1 = func(ctx context.Context, _ *SessionOperation, _ *sessionReservation, m *Manifest) (*sandboxPrepareHookResultV1, bool) {
-		timedOutID = m.ID
+		timedOutIDCh <- m.ID
 		<-ctx.Done()
-		observedCause = ctx.Err()
+		observedCauseCh <- ctx.Err()
 		return &sandboxPrepareHookResultV1{bootErr: ctx.Err()}, true
 	}
 	t.Cleanup(func() {
@@ -309,11 +305,27 @@ func TestSandboxPrepareLinuxTimeoutCancellationAndCleanup(t *testing.T) {
 	if rpcErr == nil {
 		t.Fatal("expected timeout failure")
 	}
+	var timedOutID string
+	var observedCause error
+	select {
+	case timedOutID = <-timedOutIDCh:
+	case <-time.After(3 * time.Second):
+		t.Fatal("timed out waiting for prepare boot hook ID")
+	}
+	select {
+	case observedCause = <-observedCauseCh:
+	case <-time.After(3 * time.Second):
+		t.Fatal("timed out waiting for prepare boot hook cancellation")
+	}
 	if !errors.Is(observedCause, context.DeadlineExceeded) {
 		t.Fatalf("expected DeadlineExceeded, got %v", observedCause)
 	}
 	if rpcErr.Code != "sandbox_boot" || strings.TrimSpace(rpcErr.Hint) == "" {
 		t.Fatalf("expected sandbox_boot with Try hint, got %+v", rpcErr)
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	for liveSandboxPrepareRequestsV1.Load() != 0 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
 	}
 	if _, err := os.Lstat(paths.SessionDir(timedOutID)); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("expected timed-out session directory %s to be cleaned up, err=%v", timedOutID, err)
@@ -372,7 +384,28 @@ func TestSandboxPrepareLinuxClientLossCancellationAndCleanup(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	sessionID := <-inFlight
+	earlyReply := make(chan error, 1)
+	go func() {
+		f, err := proto.Read(reader)
+		if err != nil {
+			earlyReply <- err
+			return
+		}
+		earlyReply <- fmt.Errorf("unexpected early bridge reply %d: %s", f.Type, string(f.Payload))
+	}()
+
+	var sessionID string
+	select {
+	case sessionID = <-inFlight:
+	case err := <-earlyReply:
+		_ = clientConn.Close()
+		<-bridgeDone
+		t.Fatalf("sandbox.prepare failed before boot started: %v", err)
+	case <-time.After(10 * time.Second):
+		_ = clientConn.Close()
+		<-bridgeDone
+		t.Fatal("timed out waiting for sandbox.prepare boot to start")
+	}
 	_ = clientConn.Close()
 
 	cause := <-cancelled
@@ -409,30 +442,32 @@ func TestSandboxPrepareLinuxUnconfirmedCleanupRetainsOwner(t *testing.T) {
 	prevProbe := sandboxPrepareProbeOverrideV1
 	prevBoot := sandboxPrepareBootOverrideV1
 	sandboxPrepareProbeOverrideV1 = func(context.Context, *bridge, *sandboxPrepareWitnessV1) error { return nil }
-	var retainedOp *SessionOperation
-	var retainedRes *sessionReservation
-	var retainedID string
+	type retainedState struct {
+		op  *SessionOperation
+		res *sessionReservation
+		id  string
+	}
+	retainedCh := make(chan retainedState, 1)
 	sandboxPrepareBootOverrideV1 = func(_ context.Context, operation *SessionOperation, reservation *sessionReservation, m *Manifest) (*sandboxPrepareHookResultV1, bool) {
-		retainedOp = operation
-		retainedRes = reservation
-		retainedID = m.ID
+		retainedCh <- retainedState{op: operation, res: reservation, id: m.ID}
 		return &sandboxPrepareHookResultV1{
 			bootErr:            errors.New("sandbox boot hung"),
 			stopUnconfirmedErr: errors.New("native helper pidfd did not report exit"),
 			stopConfirmed:      settled,
 		}, true
 	}
+	var retained retainedState
 	t.Cleanup(func() {
 		sandboxPrepareProbeOverrideV1 = prevProbe
 		sandboxPrepareBootOverrideV1 = prevBoot
-		if retainedRes != nil {
-			retainedRes.close()
+		if retained.res != nil {
+			retained.res.close()
 		}
-		if retainedOp != nil {
-			retainedOp.Close()
+		if retained.op != nil {
+			retained.op.Close()
 		}
-		if retainedID != "" {
-			_ = os.RemoveAll(paths.SessionDir(retainedID))
+		if retained.id != "" {
+			_ = os.RemoveAll(paths.SessionDir(retained.id))
 		}
 	})
 
@@ -440,19 +475,24 @@ func TestSandboxPrepareLinuxUnconfirmedCleanupRetainsOwner(t *testing.T) {
 	if rpcErr == nil {
 		t.Fatal("expected sandbox_boot error when runtime exit is unconfirmed")
 	}
+	select {
+	case retained = <-retainedCh:
+	case <-time.After(3 * time.Second):
+		t.Fatal("timed out waiting for retained prepare state")
+	}
 	if rpcErr.Code != "sandbox_boot" || !strings.Contains(rpcErr.Message, "physical cleanup is not yet confirmed") || strings.TrimSpace(rpcErr.Hint) == "" {
 		t.Fatalf("expected explicit unconfirmed cleanup failure and Try hint, got %+v", rpcErr)
 	}
 	if liveSandboxPrepareRequestsV1.Load() == 0 {
 		t.Fatal("bounded response dropped the original request worker")
 	}
-	if _, err := os.Stat(paths.Manifest(retainedID)); err != nil {
+	if _, err := os.Stat(paths.Manifest(retained.id)); err != nil {
 		t.Fatalf("expected retained manifest on disk: %v", err)
 	}
-	if retainedOp == nil || !retainedOp.Valid(retainedID) {
+	if retained.op == nil || !retained.op.Valid(retained.id) {
 		t.Fatalf("expected retained SessionOperation to stay active and valid")
 	}
-	otherOp, busyErr := BeginSessionOperation(context.Background(), retainedID, 0)
+	otherOp, busyErr := BeginSessionOperation(context.Background(), retained.id, 0)
 	if otherOp != nil {
 		otherOp.Close()
 		t.Fatal("expected op.lock to remain held by the retained SessionOperation")

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -288,10 +289,14 @@ func resolveSandboxPrepareTrueV1() (string, error) {
 	}
 	resolved, err := filepath.EvalSymlinks(bin)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("resolve true binary %q: %w", bin, err)
 	}
-	if !filepath.IsAbs(resolved) || filepath.Base(resolved) != "true" {
+	if !filepath.IsAbs(resolved) {
 		return "", fmt.Errorf("unexpected true binary path %q", resolved)
 	}
-	return resolved, nil
+	st, err := os.Stat(resolved)
+	if err != nil || !st.Mode().IsRegular() || st.Mode()&0o111 == 0 {
+		return "", errors.Join(fmt.Errorf("unexpected true binary path %q", resolved), err)
+	}
+	return bin, nil
 }

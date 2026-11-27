@@ -177,6 +177,21 @@ func alive(id string) bool {
 	return true
 }
 
+func liveNoneDebugUntilV1(m *Manifest, info *SessionInfo) {
+	if !info.Alive || !IsNoneSupervisor(m) {
+		return
+	}
+	raw, err := HolderRequest(info.ID, "info", nil, 500*time.Millisecond)
+	if err != nil {
+		return
+	}
+	var live Manifest
+	if json.Unmarshal(raw, &live) != nil {
+		return
+	}
+	info.DebugUntil = debugUntil(&live, true)
+}
+
 // List returns every session on this host, newest first.
 func List() ([]SessionInfo, error) {
 	entries, err := os.ReadDir(paths.SessionsDir())
@@ -208,6 +223,7 @@ func List() ([]SessionInfo, error) {
 			livePackageSettings(&info)
 			liveModelUsage(&info)
 			liveNamedSSHKeys(&info)
+			liveNoneDebugUntilV1(m, &info)
 			mu.Lock()
 			out = append(out, info)
 			mu.Unlock()

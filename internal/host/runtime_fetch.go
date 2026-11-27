@@ -92,7 +92,7 @@ func (s *runtimeService) fetchRegistered(a runtimecache.RuntimeRequest, requestI
 			return result, err
 		}
 	}
-	if err := commitRuntime(ctx, store, a.Manifest, a.ImageDefaults); err != nil {
+	if err := commitRuntime(ctx, publication, store, a.Manifest, a.ImageDefaults); err != nil {
 		return result, err
 	}
 	// Commit checked every original named blob and its real durability. Close

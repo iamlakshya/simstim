@@ -174,6 +174,9 @@ func deleteNonePrimaryV1(id string, name *string, members *[]string, result *Del
 		if err != nil {
 			return err
 		}
+		if afterNameCheck != nil {
+			afterNameCheck(id)
+		}
 		subject := &noneDeleteSourceV1{operation: operation}
 		subject.self = subject
 		// Adopt before construction: an error may return its SAME partial stop.

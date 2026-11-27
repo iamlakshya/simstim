@@ -19,7 +19,7 @@ import (
 func probeRuntimeFixtureV1(t *testing.T) supply.Manifest {
 	t.Helper()
 	manifest := supply.Manifest{Release: "v0.0.0", Runtime: "probe-fixture", Advisories: []supply.Advisory{}}
-	for _, name := range []string{"runsc", "gvisor_sentry", "gvisor-sentry-prewarmer", "gvisor-proc-umounter"} {
+	for _, name := range []string{"runsc", "gvisor_sentry", "gvisor-sentry-prewarmer", "gvisor-proc-umounter", "runsc-fd-parking"} {
 		item := supply.NewItem(supply.KindGvisor, name, gvisor.NativeBuildVersionV1, runtime.GOARCH, []byte("fixture "+name), brand.ReleasesURL+"/download/v0.0.0/"+name)
 		item.Released = "2026-11-02"
 		manifest.Items = append(manifest.Items, item)

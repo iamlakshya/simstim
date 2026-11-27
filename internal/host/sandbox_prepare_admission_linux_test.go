@@ -24,7 +24,7 @@ func installTestGvisorRuntimeV1(t *testing.T, arch string) (supply.Manifest, []s
 	t.Helper()
 	release := "0.6.0"
 	folder := supply.ReleaseFolder(release)
-	roles := []string{"runsc", "gvisor_sentry", "gvisor-sentry-prewarmer", "gvisor-proc-umounter"}
+	roles := []string{"runsc", "gvisor_sentry", "gvisor-sentry-prewarmer", "gvisor-proc-umounter", "runsc-fd-parking"}
 	var items []supply.Item
 	payloads := map[string][]byte{}
 	for _, role := range roles {
@@ -49,15 +49,19 @@ func installTestGvisorRuntimeV1(t *testing.T, arch string) (supply.Manifest, []s
 		DataBlocks: 64,
 	}}
 
-	ctx := context.Background()
+	ctx := t.Context()
 	publication, store, err := openRuntimeProductionStore(ctx)
+	defer func() {
+		if store != nil {
+			_ = store.Close()
+		}
+		if publication != nil {
+			_ = publication.close()
+		}
+	}()
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer func() {
-		_ = store.Close()
-		_ = publication.close()
-	}()
 	for _, it := range manifest.Items {
 		part, err := store.BeginContext(publication.ctx, it)
 		if err != nil {
@@ -73,7 +77,7 @@ func installTestGvisorRuntimeV1(t *testing.T, arch string) (supply.Manifest, []s
 		}
 		_ = part.Close()
 	}
-	if err := commitRuntime(ctx, store, manifest, &imageDefaults); err != nil {
+	if err := commitRuntime(ctx, publication, store, manifest, &imageDefaults); err != nil {
 		t.Fatal(err)
 	}
 	return manifest, imageDefaults

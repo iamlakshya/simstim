@@ -10,7 +10,7 @@ import (
 )
 
 func TestMicroVMFactorySelectsOnlyImplementedOriginalBackend(t *testing.T) {
-	for _, name := range []string{"chv", "firecracker"} {
+	for _, name := range []string{"chv", "firecracker", "nitro"} {
 		factory, err := MicroVMResourcesWithPublisherV1(name, func(context.Context, wall.Spec) error {
 			t.Fatal("selecting a factory performed publication")
 			return nil
@@ -26,7 +26,7 @@ func TestMicroVMFactorySelectsOnlyImplementedOriginalBackend(t *testing.T) {
 			t.Fatal("a backend manufactured the protected publisher", name)
 		}
 	}
-	for _, name := range []string{"", "none", "process", "nitro", "other"} {
+	for _, name := range []string{"", "none", "process", "gvisor", "other"} {
 		if factory, err := MicroVMResourcesWithPublisherV1(name, func(context.Context, wall.Spec) error { return nil }); err == nil || factory != nil {
 			t.Fatal("unimplemented or non-VM backend selected a VM factory", name)
 		}

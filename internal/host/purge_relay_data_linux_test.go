@@ -13,7 +13,7 @@ import (
 )
 
 func TestPurgeRelayCannotCreateVectorOrChangeTargetV3(t *testing.T) {
-	args := api.PurgeArgs{HostID: strings.Repeat("a", 64), Nonce: strings.Repeat("b", 64)}
+	args := api.PurgeArgs{HostID: strings.Repeat("a", 32), Nonce: strings.Repeat("b", 32)}
 	for _, operation := range []string{purgeBeginV3, purgeContinueV3} {
 		file, err := os.CreateTemp(t.TempDir(), "input")
 		if err != nil {
@@ -57,12 +57,12 @@ func TestPurgeRelayCannotCreateVectorOrChangeTargetV3(t *testing.T) {
 		t.Fatal("another response identifier satisfied the original request")
 	}
 	other := args
-	other.HostID = strings.Repeat("c", 64)
+	other.HostID = strings.Repeat("c", 32)
 	if _, err := decodePurgeRelayResponseDataV3(frame(7, raw), 7, other); err == nil {
 		t.Fatal("another host satisfied the original target")
 	}
 	other = args
-	other.Nonce = strings.Repeat("d", 64)
+	other.Nonce = strings.Repeat("d", 32)
 	if _, err := decodePurgeRelayResponseDataV3(frame(7, raw), 7, other); err == nil {
 		t.Fatal("another vector satisfied the original removal nonce")
 	}

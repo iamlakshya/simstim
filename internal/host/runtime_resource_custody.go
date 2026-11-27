@@ -98,7 +98,7 @@ func (s *runtimeService) commitRuntimeOwnedV1(ctx context.Context, manifest supp
 	if err != nil {
 		return err
 	}
-	if err := commitRuntime(ctx, owner.store, manifest, defaults); err != nil {
+	if err := commitRuntime(ctx, owner.publication, owner.store, manifest, defaults); err != nil {
 		return err
 	}
 	if err := s.finishRuntimeOwnerV1(owner); err != nil {

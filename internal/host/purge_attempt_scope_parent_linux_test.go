@@ -110,8 +110,22 @@ func TestPurgeScopeActualParentDeathKeepsBootstrapAliveUntilSettlementV3(t *test
 	if err := parent.Wait(); err != nil {
 		t.Fatal(err)
 	}
+	pollEINTR := func(polls []unix.PollFd, ms int) (int, error) {
+		deadline := time.Now().Add(time.Duration(ms) * time.Millisecond)
+		for {
+			rem := int(time.Until(deadline).Milliseconds())
+			if rem < 1 {
+				rem = 1
+			}
+			n, err := unix.Poll(polls, rem)
+			if errors.Is(err, unix.EINTR) && time.Now().Before(deadline) {
+				continue
+			}
+			return n, err
+		}
+	}
 	polls := []unix.PollFd{{Fd: int32(child.Fd()), Events: unix.POLLIN}}
-	if n, err := unix.Poll(polls, 50); err != nil || n != 0 {
+	if n, err := pollEINTR(polls, 50); err != nil || n != 0 {
 		t.Fatalf("actual parent death freed bootstrap before settlement: %d %v", n, err)
 	}
 	var complete [8]byte
@@ -119,7 +133,7 @@ func TestPurgeScopeActualParentDeathKeepsBootstrapAliveUntilSettlementV3(t *test
 	if _, err := gate.Write(complete[:]); err != nil {
 		t.Fatal(err)
 	}
-	if n, err := unix.Poll(polls, 5000); err != nil || n != 1 || polls[0].Revents&unix.POLLIN == 0 {
+	if n, err := pollEINTR(polls, 5000); err != nil || n != 1 || polls[0].Revents&unix.POLLIN == 0 {
 		t.Fatalf("settled bootstrap did not join after actual parent death: %d %v", n, err)
 	}
 }

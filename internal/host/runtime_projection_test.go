@@ -112,6 +112,14 @@ func runtimeOriginProducerDefaultsFixtureV1(t *testing.T, makeDefaults func(cont
 	full, payloads := runtimeOriginFullFixtureV1(t)
 	ctx := t.Context()
 	publication, store, err := openRuntimeProductionStore(ctx)
+	defer func() {
+		if store != nil {
+			_ = store.Close()
+		}
+		if publication != nil {
+			_ = publication.close()
+		}
+	}()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -121,9 +129,11 @@ func runtimeOriginProducerDefaultsFixtureV1(t *testing.T, makeDefaults func(cont
 			t.Fatal(err)
 		}
 		if err := part.WriteAt(payloads[item.SHA256], 0); err != nil {
+			_ = part.Close()
 			t.Fatal(err)
 		}
 		if err := part.Finish(ctx); err != nil {
+			_ = part.Close()
 			t.Fatal(err)
 		}
 		if err := part.Close(); err != nil {
@@ -134,13 +144,15 @@ func runtimeOriginProducerDefaultsFixtureV1(t *testing.T, makeDefaults func(cont
 	if makeDefaults != nil {
 		defaults = makeDefaults(ctx)
 	}
-	if err := commitRuntime(ctx, store, full, &defaults); err != nil {
+	if err := commitRuntime(ctx, publication, store, full, &defaults); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.Close(); err != nil {
+	s, store := store, nil
+	if err := s.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if err := publication.close(); err != nil {
+	p, publication := publication, nil
+	if err := p.close(); err != nil {
 		t.Fatal(err)
 	}
 	b, original, call := runtimeOriginBridgeFixtureV1(t, full, &defaults)
@@ -365,10 +377,20 @@ func TestRuntimeOriginRoleDigestOwnerCancellationAndRetirementRefuseV1(t *testin
 func runtimeOriginAgentsPinFixtureV1(t *testing.T, b *bridge) image.AgentDiskV1 {
 	t.Helper()
 	publication, err := beginRuntimePublication(b.ctx)
+	defer func() {
+		if publication != nil {
+			_ = publication.close()
+		}
+	}()
 	if err != nil {
 		t.Fatal(err)
 	}
 	store, err := image.OpenHost(b.ctx, paths.ImagesDir(), publication.owner.domain(), publication.gate)
+	defer func() {
+		if store != nil {
+			_ = store.Close()
+		}
+	}()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -396,10 +418,12 @@ func runtimeOriginAgentsPinFixtureV1(t *testing.T, b *bridge) image.AgentDiskV1 
 	if err := lease.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.Close(); err != nil {
+	s, store := store, nil
+	if err := s.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if err := publication.close(); err != nil {
+	p, publication := publication, nil
+	if err := p.close(); err != nil {
 		t.Fatal(err)
 	}
 	receipt, err := PinInstalledAgentsV1(b.ctx, disk.Content)

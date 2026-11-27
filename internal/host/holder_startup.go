@@ -48,10 +48,17 @@ func newHolderStartup(id string) *holderStartup {
 }
 
 func beginHolderStartup(id string) (*holderStartup, error) {
+	return beginHolderStartupWithPeerCheck(id, false)
+}
+
+func beginHolderStartupWithPeerCheck(id string, forcePeerCheck bool) (*holderStartup, error) {
 	p := newHolderStartup(id)
 	if err := p.peer.listen(); err != nil {
 		p.cancel()
 		return nil, err
+	}
+	if forcePeerCheck {
+		p.peer.peerCheck = true
 	}
 	for _, endpoint := range []struct {
 		ln   net.Listener

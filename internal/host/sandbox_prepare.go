@@ -268,24 +268,19 @@ func (b *bridge) acquireCachedPrepareImageV1(ctx context.Context, request image.
 		return nil, 0, imageFailure(err)
 	}
 	defer finish()
-	lease, err := store.Acquire(owned, request.PlatformDigest)
-	if err != nil {
-		return nil, 0, imageFailure(err)
-	}
-	cached, err := store.Cached(owned, request)
-	if err != nil {
-		_ = lease.Close()
-		return nil, 0, imageFailure(err)
-	}
-	if !cached.Present || cached.Image == nil {
-		_ = lease.Close()
+	file, lease, record, err := store.OpenImage(owned, request)
+	if errors.Is(err, os.ErrNotExist) {
 		return nil, 0, UserError("image_missing", "the release default image is not cached on this host", "Deliver or pull the default image before running sandbox preparation.")
 	}
-	if err := image.CheckRecord(request, *cached.Image); err != nil {
+	if err != nil {
+		return nil, 0, imageFailure(err)
+	}
+	_ = file.Close()
+	if err := image.CheckRecord(request, record); err != nil {
 		_ = lease.Close()
 		return nil, 0, err
 	}
-	return lease, cached.Image.Size, nil
+	return lease, record.Size, nil
 }
 
 func bindAndSaveSandboxPrepareV1(operation *SessionOperation, reservation *sessionReservation, m *Manifest, witness *sandboxPrepareWitnessV1) error {

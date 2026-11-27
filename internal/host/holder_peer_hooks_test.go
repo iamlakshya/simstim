@@ -247,6 +247,10 @@ func TestSecretsFromInsideAreRefused(t *testing.T) {
 func TestANewSessionFromInsideSaysWhyItsSecretsFailed(t *testing.T) {
 	secretHome(t)
 	fakePeer(t, otherCgroup(""), nil)
+	oldSelf, oldNS := SelfCgroup, CgroupNamespaces
+	SelfCgroup = func() ([]byte, error) { return []byte(outsideCgroup("")), nil }
+	CgroupNamespaces = func() (string, string, error) { return "cgroup:[1]", "cgroup:[1]", nil }
+	t.Cleanup(func() { SelfCgroup, CgroupNamespaces = oldSelf, oldNS })
 	oldWait, oldStart := stopWait, startHolder
 	stopWait = 100 * time.Millisecond
 	t.Cleanup(func() { stopWait, startHolder = oldWait, oldStart })

@@ -29,6 +29,9 @@ func init() {
 	if err := prepareAgentProcess(); err != nil {
 		os.Exit(104)
 	}
+	SelfCgroup = func() ([]byte, error) { return []byte("0::/user.slice/user-1000.slice/session-1.scope\n"), nil }
+	CgroupNamespaces = func() (string, string, error) { return "cgroup:[1]", "cgroup:[1]", nil }
+	selfCgroupRequired = true
 	if role != "" {
 		// Inspect numeric inherited descriptors without File.Fd or flag
 		// mutation. This proof must actually exercise blocking raw I/O.

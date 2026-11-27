@@ -3,6 +3,7 @@
 package host
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/json"
@@ -29,6 +30,12 @@ func TestSandboxPrepareOriginalParentChildV1(t *testing.T) {
 	if os.Getenv("PREPARE_PARENT_CHILD") != "1" {
 		return
 	}
+	uid := os.Getuid()
+	cgroup := fmt.Sprintf("0::/user.slice/user-%d.slice/session-1.scope\n", uid)
+	prevSelf, prevNS := SelfCgroup, CgroupNamespaces
+	SelfCgroup = func() ([]byte, error) { return []byte(cgroup), nil }
+	CgroupNamespaces = func() (string, string, error) { return "cgroup:[1]", "cgroup:[1]", nil }
+	t.Cleanup(func() { SelfCgroup, CgroupNamespaces = prevSelf, prevNS })
 	if err := InitPlacement(); err != nil {
 		t.Fatal(err)
 	}
@@ -172,7 +179,8 @@ func actualPrepareParentFixtureV1(t *testing.T, modes ...string) *prepareParentF
 	}
 	command.Env = append(os.Environ(), "PREPARE_PARENT_CHILD=1", "PREPARE_PARENT_ADDRESS="+address, "PREPARE_PARENT_MODE="+mode)
 	command.ExtraFiles = []*os.File{writer}
-	command.Stdout, command.Stderr = io.Discard, os.Stderr
+	var childOut bytes.Buffer
+	command.Stdout, command.Stderr = &childOut, os.Stderr
 	if err := command.Start(); err != nil {
 		t.Fatal(err)
 	}
@@ -199,7 +207,10 @@ func actualPrepareParentFixtureV1(t *testing.T, modes ...string) *prepareParentF
 	_ = reader.SetReadDeadline(deadline)
 	var id string
 	if _, err := fmt.Fscanln(reader, &id); err != nil {
-		t.Fatal(err)
+		_ = command.Process.Kill()
+		_ = command.Wait()
+		fixture.stopped = true
+		t.Fatalf("read child reservation id: %v (child output: %s)", err, childOut.String())
 	}
 	fixture.holder, err = AcquireOwnedSupervisorLease(context.Background(), id)
 	if err != nil {

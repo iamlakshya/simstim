@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"path/filepath"
 
 	"github.com/iamlakshya/simstim/internal/cachefs"
 	"github.com/iamlakshya/simstim/internal/supply"
@@ -41,7 +42,17 @@ func openStore(dir string, create bool) (*Store, error) {
 }
 
 func openStoreDomain(ctx context.Context, dir string, create bool, domain cachefs.Domain) (*Store, error) {
-	root, err := cachefs.OpenPrivateRoot(dir, create)
+	return openStoreDomainCreated(ctx, dir, create, domain, nil)
+}
+
+func openStoreDomainCreated(ctx context.Context, dir string, create bool, domain cachefs.Domain, created func(string, os.FileInfo) error) (*Store, error) {
+	var root *os.Root
+	var err error
+	if create && created != nil {
+		root, err = cachefs.OpenPrivateRootCreated(dir, created)
+	} else {
+		root, err = cachefs.OpenPrivateRoot(dir, create)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("open runtime store: %w", err)
 	}
@@ -58,7 +69,15 @@ func openStoreDomain(ctx context.Context, dir string, create bool, domain cachef
 			if err := ctx.Err(); err != nil {
 				return err
 			}
-			child, err := cachefs.OpenPrivateChild(root, name, create)
+			var child *os.Root
+			if create && created != nil {
+				childPath := filepath.Join(dir, name)
+				child, err = cachefs.OpenPrivateChildCreated(root, name, func(info os.FileInfo) error {
+					return created(childPath, info)
+				})
+			} else {
+				child, err = cachefs.OpenPrivateChild(root, name, create)
+			}
 			if err != nil {
 				return fmt.Errorf("open runtime store child: %w", err)
 			}

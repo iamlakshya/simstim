@@ -201,13 +201,20 @@ func TestPendingControlCannotAcknowledgeUnjoinedStartup(t *testing.T) {
 }
 
 func startupControlFixture(t *testing.T) (*Manifest, *holderStartup, func()) {
+	return startupControlFixtureWithPeerCheck(t, false, nil)
+}
+
+func startupControlFixtureWithPeerCheck(t *testing.T, peerCheck bool, beforeStart func(*Manifest)) (*Manifest, *holderStartup, func()) {
 	t.Helper()
 	m := startupTestManifest(t)
+	if beforeStart != nil {
+		beforeStart(m)
+	}
 	release, err := acquireHolderLock(m.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	p, err := beginHolderStartup(m.ID)
+	p, err := beginHolderStartupWithPeerCheck(m.ID, peerCheck)
 	if err != nil {
 		release()
 		t.Fatal(err)
@@ -273,10 +280,9 @@ func TestPendingControlSecretsNeedLoadedManifestAndStopBeforeLaunch(t *testing.T
 }
 
 func TestPendingControlRestrictedPeerCannotStopOrSupplySecrets(t *testing.T) {
-	m, p, _ := startupControlFixture(t)
-	fakePeer(t, otherCgroup(m.ID), nil)
-	// Configure this test's existing peer fixture before the first connection.
-	p.peer.peerCheck = true
+	m, p, _ := startupControlFixtureWithPeerCheck(t, true, func(m *Manifest) {
+		fakePeer(t, otherCgroup(m.ID), nil)
+	})
 	for _, op := range []string{"kill", cancelPendingStartOp, "secrets"} {
 		_, err := HolderRequest(m.ID, op, secretsMsg{Env: map[string]api.Secret{"EXPECTED": "fixture-value"}}, time.Second)
 		var refusal *proto.Error

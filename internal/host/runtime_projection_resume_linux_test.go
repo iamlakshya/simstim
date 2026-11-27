@@ -22,6 +22,7 @@ import (
 	"github.com/iamlakshya/simstim/internal/brand"
 	"github.com/iamlakshya/simstim/internal/egress"
 	"github.com/iamlakshya/simstim/internal/image"
+	"github.com/iamlakshya/simstim/internal/nitrodev"
 	"github.com/iamlakshya/simstim/internal/paths"
 	"github.com/iamlakshya/simstim/internal/proto"
 	"github.com/iamlakshya/simstim/internal/supply"
@@ -48,10 +49,21 @@ func runtimeOriginStoredRootFixtureV1(t *testing.T, ctx context.Context) image.R
 	})}}
 	request := image.Request{Ref: brand.ImageRepository + "@" + digest, Digest: digest, PlatformDigest: digest, Arch: runtime.GOARCH}
 	publication, err := beginRuntimePublication(ctx)
+	//nolint:contextcheck // publication cleanup releases host placement using its own lifecycle
+	defer func() {
+		if publication != nil {
+			_ = publication.close()
+		}
+	}()
 	if err != nil {
 		t.Fatal(err)
 	}
 	store, err := image.OpenHost(ctx, paths.ImagesDir(), publication.owner.domain(), publication.gate)
+	defer func() {
+		if store != nil {
+			_ = store.Close()
+		}
+	}()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -62,10 +74,13 @@ func runtimeOriginStoredRootFixtureV1(t *testing.T, ctx context.Context) image.R
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := store.Close(); err != nil {
+	s, store := store, nil
+	if err := s.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if err := publication.close(); err != nil {
+	p, publication := publication, nil
+	//nolint:contextcheck // publication cleanup releases host placement using its own lifecycle
+	if err := p.close(); err != nil {
 		t.Fatal(err)
 	}
 	request.RootHash, request.DataBlocks = record.RootHash, record.DataBlocks
@@ -138,6 +153,7 @@ func runtimeOriginPriorRecordFixtureV1(t *testing.T, b *bridge, need vmneed.Need
 	if err := operation.CloseWithError(); err != nil {
 		t.Fatal(err)
 	}
+	reservation.launched = true
 	reservation.close()
 	return id
 }
@@ -157,6 +173,11 @@ func TestResumeRuntimeProjectionConsumerUsesActualColdAndStatusOwnersV1(t *testi
 	root := runtimeOriginStoredRootFixtureV1(t, b.ctx)
 	for _, driver := range []string{"chv", "firecracker", "nitro"} {
 		t.Run(driver, func(t *testing.T) {
+			if driver == "nitro" {
+				if _, err := nitrodev.ReadResources(); err != nil {
+					t.Skip("actual AWS Nitro Enclaves hardware is unavailable: " + err.Error())
+				}
+			}
 			selected, err := vmneed.SelectRuntimeForDriver(driver, full, runtime.GOARCH)
 			if err != nil {
 				t.Fatal(err)

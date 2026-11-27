@@ -178,6 +178,7 @@ func (input startupFrameInput) Read(data []byte) (int, error) {
 	}
 	if err != nil && (line.prepareCursor == nil || fatal || !sandboxPrepareReadDeadlineV1(err)) {
 		err = errors.Join(err, line.closeAncillaryLocked())
+		return 0, err
 	}
 	if n == 0 && err == nil {
 		err = io.EOF
@@ -302,5 +303,11 @@ func (input startupOrdinaryInput) Read(data []byte) (int, error) {
 	if len(files) != 0 {
 		failure = errors.Join(failure, sessionLeaseError("unexpected native descriptors after startup"))
 	}
-	return n, failure
+	if failure != nil {
+		return 0, failure
+	}
+	if n == 0 {
+		return 0, io.EOF
+	}
+	return n, nil
 }

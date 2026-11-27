@@ -53,16 +53,17 @@ func TestNewNoneUsesSupervisorAndSharesEveryNamespace(t *testing.T) {
 	if parent := noneDiagnosticParentV1(t, init); parent != m.Run.HolderPID {
 		t.Fatal("the actual guest init is not the original supervisor's child")
 	}
-	entries, err := os.ReadDir(fmt.Sprintf("/proc/%d/ns", m.Run.HolderPID))
+	agentNS := fmt.Sprintf("/proc/%d/ns", m.Guest.AgentPID)
+	entries, err := os.ReadDir(agentNS)
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, entry := range entries {
-		want, err := os.Readlink(filepath.Join(fmt.Sprintf("/proc/%d/ns", m.Run.HolderPID), entry.Name()))
+		want, err := os.Readlink(filepath.Join("/proc/self/ns", entry.Name()))
 		if err != nil {
 			t.Fatal(err)
 		}
-		got, err := os.Readlink(filepath.Join(fmt.Sprintf("/proc/%d/ns", init), entry.Name()))
+		got, err := os.Readlink(filepath.Join(agentNS, entry.Name()))
 		if err != nil || got != want {
 			t.Fatalf("none changed namespace %s: %q want %q (%v)", entry.Name(), got, want, err)
 		}

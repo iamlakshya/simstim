@@ -30,13 +30,24 @@ func waitTill(t *testing.T, what string, ok func() bool) {
 	}
 }
 
+// legacyBridgeUploadHost prepares a temporary host whose sessions use the
+// legacy unwalled holder path (m.Wall == nil) so these tests exercise the
+// bridge's own local .upload-* temp-file lifecycle on Linux as well as macOS.
+func legacyBridgeUploadHost(t *testing.T) {
+	t.Helper()
+	hosttest.New(t)
+	old := host.WallDriver
+	host.WallDriver = "legacy-none-test"
+	t.Cleanup(func() { host.WallDriver = old })
+}
+
 // An upload that its client gave up after a chunk, as at a cancel, leaves
 // nothing on the host: when its connection closes, when the connection
 // begins another upload, and when it waits too long for its next frame on a
 // connection that stays. Its temporary file goes, closed, and so does its
 // state: its end then gets "unknown upload".
 func TestAnUploadWithNoEndLeavesNothing(t *testing.T) {
-	hosttest.New(t)
+	legacyBridgeUploadHost(t)
 	s := start(t, "paste", "sleep", "60")
 	temps := func() int {
 		matches, _ := filepath.Glob(filepath.Join(paths.PasteDir(s.ID), ".upload-*"))
@@ -91,7 +102,7 @@ func TestAnUploadWithNoEndLeavesNothing(t *testing.T) {
 // whose input stays open with nothing more on it after an upload's first
 // chunk.
 func TestAnIdleBridgeLeavesNoUpload(t *testing.T) {
-	hosttest.New(t)
+	legacyBridgeUploadHost(t)
 	s := start(t, "paste", "sleep", "60")
 	temps := func() int {
 		matches, _ := filepath.Glob(filepath.Join(paths.PasteDir(s.ID), ".upload-*"))
@@ -150,7 +161,7 @@ func TestAnIdleBridgeLeavesNoUpload(t *testing.T) {
 // ReclaimBridgesUploads waits for in-flight cleanup that has already removed
 // an upload from b.uploads before deleting or finalising its file on disk.
 func TestReclaimBridgesUploadsWaitsForInFlightCleanup(t *testing.T) {
-	hosttest.New(t)
+	legacyBridgeUploadHost(t)
 	s := start(t, "paste", "sleep", "60")
 	temps := func() int {
 		matches, _ := filepath.Glob(filepath.Join(paths.PasteDir(s.ID), ".upload-*"))
@@ -300,7 +311,7 @@ func TestReclaimBridgesUploadsWaitsForInFlightCleanup(t *testing.T) {
 // Concurrent idle reclamations, upload endings and watchdog reclamation leave
 // zero .upload-* files on disk at the moment ReclaimBridgesUploads returns.
 func TestConcurrentUploadReclamationLeavesNoTempFiles(t *testing.T) {
-	hosttest.New(t)
+	legacyBridgeUploadHost(t)
 	s := start(t, "paste", "sleep", "60")
 	var untrackedCount atomic.Int32
 	defer host.SetAfterUploadUntracked(func() {

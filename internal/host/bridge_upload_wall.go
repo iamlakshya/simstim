@@ -52,6 +52,9 @@ func (b *bridge) prepareWalledUpload(begin proto.UploadBegin) (*upload, int64, e
 		_ = line.c.Close()
 		return nil, 0, err
 	}
+	if begin.Path == "" {
+		begin.Name = safeName(begin.Name)
+	}
 	if err := line.w.WriteJSON(proto.TUploadBegin, begin); err != nil {
 		_ = line.c.Close()
 		return nil, 0, UserError("upload", "the supervisor did not accept the upload declaration", "Check that the sandbox is running, then upload the file again.")

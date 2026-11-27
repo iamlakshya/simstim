@@ -111,14 +111,28 @@ func validateRootAs(root *os.Root, before os.FileInfo, private bool) error {
 // OpenPrivateChild opens one owned private child below a checked root. It
 // refuses links, changed identity and unsafe existing modes without chmod.
 func OpenPrivateChild(root *os.Root, leaf string, create bool) (*os.Root, error) {
+	return openPrivateChild(root, leaf, create, nil)
+}
+
+// OpenPrivateChildCreated opens or creates one owned private child below a
+// checked root, calling created only when this call itself created leaf.
+func OpenPrivateChildCreated(root *os.Root, leaf string, created func(os.FileInfo) error) (*os.Root, error) {
+	return openPrivateChild(root, leaf, true, created)
+}
+
+func openPrivateChild(root *os.Root, leaf string, create bool, created func(os.FileInfo) error) (*os.Root, error) {
 	if err := safeLeaf(leaf); err != nil {
 		return nil, err
 	}
 	if err := validateRoot(root, nil); err != nil {
 		return nil, err
 	}
+	made := false
 	if create {
-		if err := root.Mkdir(leaf, 0o700); err != nil && !errors.Is(err, os.ErrExist) {
+		err := root.Mkdir(leaf, 0o700)
+		if err == nil {
+			made = true
+		} else if !errors.Is(err, os.ErrExist) {
 			return nil, fmt.Errorf("make private cache child: %w", err)
 		}
 	}
@@ -136,6 +150,12 @@ func OpenPrivateChild(root *os.Root, leaf string, create bool) (*os.Root, error)
 	if err := validateRoot(child, info); err != nil {
 		child.Close()
 		return nil, err
+	}
+	if made && created != nil {
+		if err := created(info); err != nil {
+			child.Close()
+			return nil, err
+		}
 	}
 	return child, nil
 }

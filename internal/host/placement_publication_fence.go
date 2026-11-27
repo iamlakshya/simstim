@@ -24,7 +24,7 @@ func beginPlacementPublicationV1(ctx context.Context, kind string) (*placementOp
 
 // Original boot callers pass their captured admission, never a fresh lookup.
 func beginPlacementPublicationOwnedV1(ctx context.Context, p *placement, kind string) (*placementOperation, error) {
-	if p == nil || kind != "start" && kind != "publish" {
+	if p == nil || kind != "start" && kind != "publish" && kind != "auxiliary" && kind != "resume_prepare" && kind != "rewind_prepare" {
 		return nil, placementError("the placement publication has no original owner or valid kind")
 	}
 	return p.admitPlacementConstructorV1(ctx, func() (*placementOperation, error) {

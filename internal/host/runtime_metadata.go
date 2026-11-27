@@ -19,14 +19,23 @@ var afterRuntimeImageLeases func()
 // commitRuntime publishes a label while holding all client-named default
 // platform image leases. Image collection rereads defaults under its exclusive
 // lease. The order is sorted image leases before the runtime transaction.
-func commitRuntime(ctx context.Context, store *runtimecache.Store, manifest supply.Manifest, defaults *[]supply.Item) (returned error) {
+func commitRuntime(ctx context.Context, publication *runtimePublication, store *runtimecache.Store, manifest supply.Manifest, defaults *[]supply.Item) (returned error) {
 	if err := runtimeValidatePublication(manifest, defaults); err != nil {
 		return err
 	}
 	if len(*defaults) == 0 {
 		return store.CommitWithImageDefaults(ctx, manifest, defaults, runtime.GOARCH)
 	}
-	images, err := image.Open(paths.ImagesDir())
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if publication == nil || publication.owner == nil {
+		return placementError("runtime publication has no active publisher receipt")
+	}
+	if err := publication.prepareStorageFootprintsV1(ctx, "images"); err != nil {
+		return fmt.Errorf("prepare image retention storage: %w", err)
+	}
+	images, err := image.OpenHost(ctx, paths.ImagesDir(), publication.owner.domain(), publication.gate)
 	if err != nil {
 		return fmt.Errorf("open image retention leases: %w", err)
 	}
