@@ -154,6 +154,9 @@ func (b realBackend) UpdateHosts(c client.HostChange) (warn, err error) {
 }
 
 func (realBackend) UpdateHostsContext(ctx context.Context, c client.HostChange) (warn, err error) {
+	if c.Now != nil {
+		return nil, client.UpdateHosts(ctx, c)
+	}
 	name := changedName(c)
 	ctx, unlock, err := client.LockHost(ctx, name, c.Kind)
 	if err != nil {
@@ -162,9 +165,6 @@ func (realBackend) UpdateHostsContext(ctx context.Context, c client.HostChange) 
 	defer unlock()
 	if err := client.UpdateHosts(ctx, c); err != nil {
 		return nil, err
-	}
-	if c.Now != nil {
-		return nil, nil
 	}
 	afterLauncherForget(name)
 	return client.ClearRemoval(name), nil

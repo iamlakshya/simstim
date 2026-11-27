@@ -112,23 +112,15 @@ func UpdateHosts(ctx context.Context, c HostChange) (failure error) {
 			}
 		}()
 	}
-	if stageErr == nil {
-		var endPublication func()
-		ctx, endPublication, err = withHostPublicationObservation(ctx, c)
-		if err != nil {
-			return err
-		}
-		defer endPublication()
-	}
-	if ValidHostName(name) {
-		var unlock func()
-		ctx, unlock, err = LockHost(ctx, name, c.Kind)
-		if err != nil {
-			return err
-		}
-		defer unlock()
-	}
 	if stageErr != nil {
+		if c.Was != nil && ValidHostName(name) {
+			var unlock func()
+			ctx, unlock, err = LockHost(ctx, name, c.Kind)
+			if err != nil {
+				return err
+			}
+			defer unlock()
+		}
 		// A retired stage cannot hide a changed saved entry. Compare under
 		// the same file lock before migration or any other side-file write;
 		// an unchanged entry still receives the captured stage's refusal.
@@ -138,6 +130,20 @@ func UpdateHosts(ctx context.Context, c HostChange) (failure error) {
 			}
 			return nil, hostFileHooks{}, stageErr
 		})
+	}
+	var endPublication func()
+	ctx, endPublication, err = withHostPublicationObservation(ctx, c)
+	if err != nil {
+		return err
+	}
+	defer endPublication()
+	if ValidHostName(name) {
+		var unlock func()
+		ctx, unlock, err = LockHost(ctx, name, c.Kind)
+		if err != nil {
+			return err
+		}
+		defer unlock()
 	}
 	if ValidHostName(name) {
 		var endMutation func()

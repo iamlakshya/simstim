@@ -54,12 +54,6 @@ func canPrepareSandbox(be Backend) bool {
 }
 
 func (realBackend) UpdateHostsForPrepare(ctx context.Context, c client.HostChange) (*wizardPrepareTarget, error, error) {
-	name := changedName(c)
-	ctx, unlock, err := client.LockHost(ctx, name, c.Kind)
-	if err != nil {
-		return nil, nil, err
-	}
-	defer unlock()
 	target, err := client.UpdateHostsForPreparation(ctx, c)
 	if err != nil {
 		return nil, nil, err
