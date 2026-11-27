@@ -411,13 +411,15 @@ Try: simstim rm box/abcd2345 -y
 | `host join` (H20) | Make these changes? | No | `--yes` | Fail |
 | `host leave` (H20) | Undo these machine changes? | No | `--yes` | Fail |
 | `host rm` on a created host | The typed name of the machine | Keep it | `--destroy --confirm <host>` | Keep: forget only |
-| `host rm`, purge (H15) | The typed name of the host | Keep it | `--purge --confirm <host>` | Keep: forget only |
+| `host rm`, purge (H15) | The typed name of the host | Keep it | `--purge --confirm <host>` | Fail |
 | `host rm`, purge (H15): the agents' logins | `Delete these logins on box? [y/N]` | No | `--delete-logins` | Keep: the logins stay |
+| `host prepare` with optional root changes (H7) | Show the exact root command and run it? | No | `--root-step run` | Fail |
+| `host rm`, purge with optional root changes (H15) | Show the exact root command and run it? | No | `--root-step run` | Fail |
 | `host set … tier=` to a lower tier (H5) | As isolation spec 9.1 | No | `-y` | Fail |
 | `host set … tier=` to a higher tier (H4) | The typed name of the host | Keep the tier | `--confirm <host>` | Fail |
 | `host rekey` (H3) | The typed name of the host | Keep the pin | `--confirm <host>` | Fail |
 | `policy allow`, `policy deny`, `policy rm`, without a layer (P1.12) | The layer to change | None | `--all` | Fail, with exit code 4 |
-| `--root-step run` on a `shared` host (H7) | The typed name of the host | Keep it | None | Refuse, with exit code 5 (section 5.3) |
+| `host prepare` or `host rm` with `--root-step run` on a `shared` host (H7, H15) | The typed name of the host | Keep it | None | Refuse, with exit code 5 (section 5.3) |
 | `new` or `resume` with a secret or an SSH key that `[secret_tiers]` marks `shared`, for a `shared` host (H5) | `Send CLAUDE_LAB to lab? Its owner can read it. [y/N]` | No | None | Refuse, with exit code 5 (section 5.3) |
 | `doctor --fix`, `host doctor --fix` | `Fix it? [y/N]` for each fix | No | `-y` | Fail |
 | `setup` | Each question of the guided setup | | `--yes` with `--host` (and `--tier`) or `--create`, and `--agents` | Fail |

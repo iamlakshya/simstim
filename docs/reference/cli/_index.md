@@ -32,7 +32,7 @@ simstim attach my-vps/auth-fix      # go back to a session
 | [`fork`](fork.md) | Copy a sandbox into independent sessions |
 | [`rewind`](rewind.md) | List disk checkpoints or return to one |
 | [`ls`](ls.md) | List sessions on every host, or on one |
-| [`show`](show.md) | Describe one session: its agent, state, folder and the command that attaches to it |
+| [`show`](show.md) | Describe one session: its agent, state, folder and attach command |
 | [`stop`](stop.md) | Stop a sandbox and keep its work and conversation |
 | [`rm`](rm.md) | Delete a session, after a question |
 | [`rename`](rename.md) | Rename a session |
@@ -73,6 +73,16 @@ simstim attach my-vps/auth-fix      # go back to a session
 | [`host test`](host_test.md) | Check that a host answers, and how fast |
 | [`host upgrade`](host_upgrade.md) | Install this client's helper on a host |
 
+## Images
+
+| Command | What it does |
+| --- | --- |
+| [`image`](image.md) | List, pull, save and remove microvm root images |
+| [`image ls`](image_ls.md) | List a host's prepared images |
+| [`image pull`](image_pull.md) | Pin an OCI image on this laptop and prepare it on a host |
+| [`image rm`](image_rm.md) | Remove an image that no session uses |
+| [`image save`](image_save.md) | Save a running microvm's system changes as an image on its host |
+
 ## Policy
 
 | Command | What it does |
@@ -104,6 +114,7 @@ simstim attach my-vps/auth-fix      # go back to a session
 | Command | What it does |
 | --- | --- |
 | [`setup`](setup.md) | Set up step by step: a host, its agents, and their logins |
+| [`ssh-config`](ssh-config.md) | Prepare the local SSH configuration for sandbox tools |
 | [`doctor`](doctor.md) | Check this machine and its terminal |
 | [`doctor keys`](doctor_keys.md) | Show each key as the terminal sends it, and the client's own keys |
 | [`doctor terminal`](doctor_terminal.md) | Ask this terminal what it supports: keys, colours and more |
@@ -119,7 +130,7 @@ simstim attach my-vps/auth-fix      # go back to a session
 | [`config path`](config_path.md) | Print where the configuration lives |
 | [`demo`](demo.md) | Try the launcher with sample data (nothing connects anywhere) |
 | [`version`](version.md) | Print the version |
-| [`completion`](completion.md) | Print the shell completion script for bash, zsh, fish or PowerShell |
+| [`completion`](completion.md) | Print the completion script for bash, zsh, fish or PowerShell |
 | [`completion bash`](completion_bash.md) | Print the completion script for bash |
 | [`completion fish`](completion_fish.md) | Print the completion script for fish |
 | [`completion powershell`](completion_powershell.md) | Print the completion script for PowerShell |

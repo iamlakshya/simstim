@@ -15,8 +15,8 @@ Lists a microvm sandbox's disk checkpoints, newest first, numbered from 1. Choos
 ## Examples
 
 ```sh
-simstim rewind box/auth-fix --list
-simstim rewind box/auth-fix 2 -y
+simstim rewind my-vps/auth-fix --list
+simstim rewind my-vps/auth-fix 2 -y
 ```
 
 ## Flags

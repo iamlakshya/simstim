@@ -17,7 +17,7 @@ Policy has six layers, from broadest to narrowest: built-in, all sessions, host,
 ```sh
 simstim policy allow api.example.com --repo .
 simstim policy deny paste.example.net --all
-simstim policy check api.example.com --host box --profile review
+simstim policy check api.example.com --host my-vps --profile review
 ```
 
 ## Flags from the parent command

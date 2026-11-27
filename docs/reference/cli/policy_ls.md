@@ -13,7 +13,7 @@ simstim policy ls [flags]
 ## Examples
 
 ```sh
-simstim policy ls --host box --repo . --profile review
+simstim policy ls --host my-vps --repo . --profile review
 ```
 
 ## Flags

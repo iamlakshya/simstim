@@ -25,7 +25,7 @@ simstim host join
 | `--address <strings>` | an address the laptop can reach (repeat for more than one) |
 | `--agent-user <string>` | on a Mac, the existing account for explicit user-agent mode |
 | `--cpus <int>` | on a Mac, the CPUs for its Linux VM |
-| `--memory <string>` | on a Mac, the memory for its Linux VM, such as 8G |
+| `--memory <size>` | on a Mac, the memory for its Linux VM, such as 8G |
 | `--port <uint16>` | the machine's outer SSH port (default: `22`) |
 | `--start-mode <string>` | on a Mac, daemon or user-agent (default: daemon) |
 | `-y`, `--yes` | answer yes to every question: make the displayed machine changes without asking |

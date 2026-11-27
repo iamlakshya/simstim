@@ -13,8 +13,8 @@ simstim policy learn <host>/<session> [flags]
 ## Examples
 
 ```sh
-simstim policy learn box/auth-fix --repo . --dry-run
-simstim policy learn box/auth-fix --profile review -y
+simstim policy learn my-vps/auth-fix --repo . --dry-run
+simstim policy learn my-vps/auth-fix --profile review -y
 ```
 
 ## Flags

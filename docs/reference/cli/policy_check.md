@@ -13,7 +13,7 @@ simstim policy check <target> [flags]
 ## Examples
 
 ```sh
-simstim policy check api.example.com --in box/auth-fix
+simstim policy check api.example.com --in my-vps/auth-fix
 ```
 
 ## Flags

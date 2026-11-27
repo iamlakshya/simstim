@@ -10,7 +10,7 @@ Forward chosen session ports, or one laptop port in reverse.
 simstim forward <host>/<session> [<port>…] [flags]
 ```
 
-Forwards the named session ports to 127.0.0.1 on this machine until Ctrl+C. Write local:guest to choose another local port. A sandbox forward grants that exact guest port and uses a private Unix socket on the host. With no port, a sandbox lists its claimed ports and asks. Use `--reverse` laptop[:guest] to reach one laptop loopback service from a sandbox on an own host. SSH forwards refuse RemoteForward, Tunnel and ForkAfterAuthentication yes in the host's SSH config.
+Forwards the named session ports to 127.0.0.1 on this machine, through an SSH connection of its own, until Ctrl+C. Write local:guest to choose another local port. A sandbox forward grants that exact guest port and uses a private Unix socket on the host. With no port, a sandbox lists its claimed ports and asks. Use `--reverse` laptop[:guest] to reach one laptop loopback service from a sandbox on an own host. SSH forwards refuse RemoteForward, Tunnel and ForkAfterAuthentication yes in the host's SSH config.
 
 ## Examples
 

@@ -16,7 +16,7 @@ Applies the locked preset and refuses unknown destinations on every reached sand
 
 ```sh
 simstim policy lockdown
-simstim policy lockdown --host box
+simstim policy lockdown --host my-vps
 simstim policy lockdown --off --confirm=lockdown
 ```
 

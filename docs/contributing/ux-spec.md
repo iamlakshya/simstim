@@ -624,6 +624,11 @@ A new session without a host uses `SIMSTIM_DEFAULT_HOST`, then the saved choice 
 | `simstim host stop <host> [flags]` | Stop the host through its provider or provider script. [Reference](../reference/cli/host_stop.md) |
 | `simstim host test <host> [flags]` | Check that a host answers, and how fast. [Reference](../reference/cli/host_test.md) |
 | `simstim host upgrade <host> [flags]` | Install this client's helper on a host. [Reference](../reference/cli/host_upgrade.md) |
+| `simstim image [flags]` | List, pull, save and remove microvm root images. [Reference](../reference/cli/image.md) |
+| `simstim image ls [<host>] [flags]` | List a host's prepared images. [Reference](../reference/cli/image_ls.md) |
+| `simstim image pull <ref> <host> [flags]` | Pin an OCI image on this laptop and prepare it on a host. [Reference](../reference/cli/image_pull.md) |
+| `simstim image rm <digest> <host> [flags]` | Remove an image that no session uses. [Reference](../reference/cli/image_rm.md) |
+| `simstim image save <host>/<session> <ref> [flags]` | Save a running microvm's system changes as an image on its host. [Reference](../reference/cli/image_save.md) |
 | `simstim ls [<host>] [flags]` | List sessions on every host, or on one. [Reference](../reference/cli/ls.md) |
 | `simstim new [<host>\|-] [-- <command>…] [flags]` | Start a session on a host, and attach to it. [Reference](../reference/cli/new.md) |
 | `simstim policy [flags]` | Read and change sandbox policy at any layer. [Reference](../reference/cli/policy.md) |

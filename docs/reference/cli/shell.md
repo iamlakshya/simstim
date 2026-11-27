@@ -24,7 +24,7 @@ simstim shell my-vps/auth-fix --new --name inspect
 | Flag | What it does |
 | --- | --- |
 | `--detach` | leave the shell running without attaching |
-| `--json` | print the detached shell as JSON |
+| `--json` | print JSON for scripts, and ask nothing (see docs/how-to/scripting.md) |
 | `-n`, `--name <string>` | name the new shell session |
 | `--new` | start a new shell even when one already runs |
 

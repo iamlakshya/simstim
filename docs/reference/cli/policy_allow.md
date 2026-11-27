@@ -7,7 +7,7 @@ title: "simstim policy allow"
 Add an allow rule at one policy layer.
 
 ```text
-simstim policy allow [net] [<target>] [flags]
+simstim policy allow [<door>] [<target>] [flags]
 ```
 
 Allow a destination at one selected policy layer. With `--request`, answer an original held request by opaque ID and exact session ID. Upload budget holds support only `--once` or policy refuse; change network.upload_budget through policy edit for a higher limit.
@@ -16,8 +16,8 @@ Allow a destination at one selected policy layer. With `--request`, answer an or
 
 ```sh
 simstim policy allow api.example.com --repo .
-simstim policy allow api.example.com --in box/auth-fix --dry-run
-simstim policy allow --request <request-ID> --in box/<session-ID> --once
+simstim policy allow api.example.com --in my-vps/auth-fix --dry-run
+simstim policy allow --request <request-ID> --in my-vps/<session-ID> --once
 ```
 
 ## Flags

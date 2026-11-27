@@ -15,8 +15,8 @@ Copies a sandbox's files and conversation into new sessions. Each child starts c
 ## Examples
 
 ```sh
-simstim fork box/auth-fix
-simstim fork box/auth-fix --count 3 --json
+simstim fork my-vps/auth-fix
+simstim fork my-vps/auth-fix --count 3 --json
 ```
 
 ## Flags

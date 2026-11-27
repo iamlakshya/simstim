@@ -7,14 +7,14 @@ title: "simstim policy deny"
 Add an deny rule at one policy layer.
 
 ```text
-simstim policy deny [net] <target> [flags]
+simstim policy deny [<door>] <target> [flags]
 ```
 
 ## Examples
 
 ```sh
 simstim policy deny api.example.com --repo .
-simstim policy deny api.example.com --in box/auth-fix --dry-run
+simstim policy deny api.example.com --in my-vps/auth-fix --dry-run
 ```
 
 ## Flags
