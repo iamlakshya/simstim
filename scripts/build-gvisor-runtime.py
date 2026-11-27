@@ -156,12 +156,14 @@ def build(args):
         status = Path(private) / "status"
         status.write_text("#!/bin/sh\nprintf '%s\\n' 'STABLE_VERSION " + version + "'\n")
         status.chmod(0o700)
+        # Upstream builds its release runsc with -c opt. The default fastbuild
+        # mode makes rules_go strip the symbols that check_go_entry reads.
         native_config = "x86_64" if arch == "amd64" else "aarch64"
-        run(source, bazel, "build", "--config=" + native_config, "--distdir=" + distdir, "--lockfile_mode=update", "--stamp",
+        run(source, bazel, "build", "--config=" + native_config, "--compilation_mode=opt", "--distdir=" + distdir, "--lockfile_mode=update", "--stamp",
             "--workspace_status_command=" + str(status), *TARGETS.values())
     items = []
     for name, target in TARGETS.items():
-        files = run(source, bazel, "cquery", "--config=" + native_config, "--distdir=" + distdir, "--lockfile_mode=update", "--output=files", target, capture=True).splitlines()
+        files = run(source, bazel, "cquery", "--config=" + native_config, "--compilation_mode=opt", "--distdir=" + distdir, "--lockfile_mode=update", "--output=files", target, capture=True).splitlines()
         if len(files) != 1:
             raise ValueError("the runtime target does not produce exactly one companion: " + name)
         built = source / files[0]
@@ -218,7 +220,7 @@ def main():
         build(args)
     except (OSError, ValueError, subprocess.CalledProcessError) as error:
         print("Error: " + str(error), file=sys.stderr)
-        print("Try: retain this build and use a clean checkout of the pinned source with Bazel and readelf installed.", file=sys.stderr)
+        print("Try: retain this build and use a clean checkout of the pinned source, with Bazel, readelf and gVisor's build packages (build-essential, crossbuild-essential-amd64 and crossbuild-essential-arm64) installed.", file=sys.stderr)
         return 1
     return 0
 

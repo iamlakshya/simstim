@@ -436,6 +436,12 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Install gVisor's build packages
+        # Upstream's images/default/Dockerfile lists these for a Bazel build.
+        # Its C toolchain calls both cross compilers, even natively.
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y build-essential crossbuild-essential-amd64 crossbuild-essential-arm64
       - name: Build both real native closures with separate empty state
         env:
           NATIVE_ARCH: ${{ matrix.arch }}

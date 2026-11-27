@@ -139,6 +139,12 @@ jobs:
             exit 1
           fi
           bash "$RUNNER_TEMP/verify-tag.sh" "$TAG"
+      - name: Install gVisor's build packages
+        # Upstream's images/default/Dockerfile lists these for a Bazel build.
+        # Its C toolchain calls both cross compilers, even natively.
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y build-essential crossbuild-essential-amd64 crossbuild-essential-arm64
       - name: Prepare checksum-bound upstream Bazel and SDK inputs
         # This never changes PATH, project Go, GOTOOLCHAIN or the module.
         run: |

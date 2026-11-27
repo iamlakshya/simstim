@@ -27,7 +27,11 @@ accepting the original late guest stream. The outside host must authenticate
 that exact creation, current code, namespace and socket chain and recheck its
 original operation. A setup frame or transport EOF grants no private input.
 
-Build all companions together on a supported Linux machine:
+Build all companions together on a supported Linux machine. gVisor's C
+toolchain calls both GCC cross compilers, even on a native build, so install
+the packages that upstream's `images/default/Dockerfile` lists for Bazel:
+`build-essential`, `crossbuild-essential-amd64` and
+`crossbuild-essential-arm64` (Debian and Ubuntu names).
 
 ```sh
 python3 scripts/build-gvisor-runtime.py /path/to/pinned-upstream /path/to/new-output
@@ -45,8 +49,10 @@ accepted.
 The build
 version suffix is the first eight digits of the patch's actual SHA-256, pinned
 in `internal/wall/gvisor/native_build.go`. It builds all five targets in one
-Bazel invocation and checks that each Go ELF entry points to the pre-init
-guard. It records the real output sizes and SHA-256 values in `build.json`.
+Bazel invocation with `-c opt`, as upstream's release build does; the default
+fastbuild mode strips the Go symbols. It then checks that each Go ELF entry
+points to the pre-init guard. It records the real output sizes and SHA-256
+values in `build.json`.
 
 The release builder must give those exact files their own release URLs and
 include their records in the existing signed release manifest. `build.json`
