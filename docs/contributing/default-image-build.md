@@ -55,12 +55,6 @@ with the other signed-snapshot package observations. Its presence does not
 provide a proxy route for process or gVisor sessions; those transports retain
 their own egress requirements.
 
-Before building helpers or clients, the release also runs the explicit
-`cmd/feedgen` producer. It derives the package-malware snapshot from the four
-fixed OSV inputs and retains each archive's SHA-256 provenance. A missing or
-invalid snapshot fails the release; an empty substitute is not generated.
-Ordinary runtime package checks use the embedded data without a network fetch.
-
 Normal CI vets and race-tests the nested `tools/imageverify` module with the
 pinned Go 1.27.4 toolchain and `-mod=readonly`, since the root module's `./...`
 pattern excludes nested modules.

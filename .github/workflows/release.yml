@@ -218,10 +218,6 @@ jobs:
         with:
           go-version: '1.27.4'
           cache: false # a release builds from nothing
-      - name: Prepare the genuine package-malware feed before helper and client builds
-        # The explicit producer checks all four bounded OSV archive inputs and
-        # retains their SHA-256 provenance. Missing data must fail the release.
-        run: go run -tags="$(sh scripts/go-build-tags.sh)" ./cmd/feedgen --output internal/egress/rules/feed/snapshot.json
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: default-image-amd64

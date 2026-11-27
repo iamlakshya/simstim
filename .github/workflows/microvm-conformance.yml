@@ -68,7 +68,6 @@ jobs:
             export PATH="$PWD/.tools/bin:$PATH"
             cmd/userns/build.sh
           fi
-          go run -tags="$(sh scripts/go-build-tags.sh)" ./cmd/feedgen --output internal/egress/rules/feed/snapshot.json
           export GOTOOLCHAIN=local GOPROXY=off GOSUMDB=sum.golang.org
           .tools/bin/just build
       - name: Run the full native escape and guest suites with the race detector

@@ -33,8 +33,6 @@ jobs:
       - name: Build the host helpers and the shadow terminal (the client embeds them)
         run: |
           cmd/userns/build.sh
-          # Explicit feed preparation follows the actual C/cohort producer.
-          go run -tags="$(sh scripts/go-build-tags.sh)" ./cmd/feedgen --output internal/egress/rules/feed/snapshot.json
           for arch in amd64 arm64; do
             CGO_ENABLED=0 GOOS=linux GOARCH=$arch go build -tags="$(sh scripts/go-build-tags.sh)" -trimpath -o internal/client/helpers/host-linux-$arch ./cmd/host
           done
@@ -143,8 +141,6 @@ jobs:
       - name: Build the host helpers and the shadow terminal (the client embeds them)
         run: |
           cmd/userns/build.sh
-          # Explicit feed preparation follows the actual C/cohort producer.
-          go run -tags="$(sh scripts/go-build-tags.sh)" ./cmd/feedgen --output internal/egress/rules/feed/snapshot.json
           for arch in amd64 arm64; do
             CGO_ENABLED=0 GOOS=linux GOARCH=$arch go build -tags="$(sh scripts/go-build-tags.sh)" -trimpath -o internal/client/helpers/host-linux-$arch ./cmd/host
           done
