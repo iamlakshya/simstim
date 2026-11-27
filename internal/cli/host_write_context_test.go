@@ -5,6 +5,8 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"io/fs"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"reflect"
@@ -19,16 +21,14 @@ import (
 // transaction boundaries; the guard does not claim general context dataflow.
 func TestProductionHostWritesKeepTheirContext(t *testing.T) {
 	root := filepath.Join("..", "..")
-	cmd := exec.CommandContext(t.Context(), "git", "-c", "core.fsmonitor=false", "ls-files", "-co", "--exclude-standard", "-z", "--", "*.go")
-	cmd.Dir = root
-	paths, err := cmd.Output()
+	rels, err := repoProductionGoFiles(t, root)
 	if err != nil {
 		t.Fatalf("list repository Go source: %v", err)
 	}
-	for _, rel := range strings.Split(string(paths), "\x00") {
-		if rel == "" || strings.HasSuffix(rel, "_test.go") {
-			continue
-		}
+	if len(rels) == 0 {
+		t.Fatal("list repository Go source returned no files")
+	}
+	for _, rel := range rels {
 		fileSet := token.NewFileSet()
 		file, err := parser.ParseFile(fileSet, filepath.Join(root, rel), nil, 0)
 		if err != nil {
@@ -38,6 +38,47 @@ func TestProductionHostWritesKeepTheirContext(t *testing.T) {
 			t.Errorf("%s: host write drops the caller's context", fileSet.Position(call.Pos()))
 		}
 	}
+}
+
+func repoProductionGoFiles(t *testing.T, root string) ([]string, error) {
+	t.Helper()
+	if _, err := os.Stat(filepath.Join(root, ".git")); err == nil {
+		cmd := exec.CommandContext(t.Context(), "git", "-c", "core.fsmonitor=false", "ls-files", "-co", "--exclude-standard", "-z", "--", "*.go")
+		cmd.Dir = root
+		paths, err := cmd.Output()
+		if err != nil {
+			return nil, err
+		}
+		var out []string
+		for _, rel := range strings.Split(string(paths), "\x00") {
+			if rel != "" && !strings.HasSuffix(rel, "_test.go") {
+				out = append(out, rel)
+			}
+		}
+		return out, nil
+	}
+	var out []string
+	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if d.IsDir() {
+			switch d.Name() {
+			case ".git", ".claude", ".tools", "private", "site", "vendor", "node_modules", "build", "dist", "bin":
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if strings.HasSuffix(d.Name(), ".go") && !strings.HasSuffix(d.Name(), "_test.go") {
+			rel, err := filepath.Rel(root, path)
+			if err != nil {
+				return err
+			}
+			out = append(out, rel)
+		}
+		return nil
+	})
+	return out, err
 }
 
 func detachedHostWrites(file *ast.File, clientPackage bool) []*ast.CallExpr {

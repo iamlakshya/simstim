@@ -47,6 +47,7 @@ func TestForward(t *testing.T) {
 	th.h.Script("ssh", `echo "$@" >> "$HOME/ssh.log"
 for a; do last=$a; done
 case " $* " in
+*" -G "*) exit 0;;
 *" -N "*) case " $* " in *" BatchMode=yes "*) exit 0;; esac; echo "Password: " >&2; sleep 5; exit 255;;
 *" -O "*) exit 0;;
 esac

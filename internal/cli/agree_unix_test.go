@@ -67,8 +67,19 @@ func TestShowScreen(t *testing.T) {
 		t.Fatal(err)
 	}
 	hosttest.WaitFor(t, 5*time.Second, "the holder to stop", func() bool {
-		_, err := host.HolderRequest(id, "peek", nil, 200*time.Millisecond)
-		return err != nil
+		if _, err := host.HolderRequest(id, "peek", nil, 200*time.Millisecond); err == nil {
+			return false
+		}
+		list, err := host.List()
+		if err != nil {
+			return false
+		}
+		for _, s := range list {
+			if s.ID == id {
+				return !s.Alive
+			}
+		}
+		return false
 	})
 
 	_, err = run(t, "show", "box/"+id, "--screen")

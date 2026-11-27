@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
@@ -35,5 +36,15 @@ func TestNamedSSHKeyDeliveryHasClosedExactNameDomain(t *testing.T) {
 		if strings.Contains(fmt.Sprintf(format, *valid), "private-fixture") {
 			t.Fatal("private key delivery leaked through formatting")
 		}
+	}
+}
+
+func TestCloneNamedSSHKeyViewV1MarshalsEmptySlicesAsArrays(t *testing.T) {
+	raw, err := json.Marshal(CloneNamedSSHKeyViewV1(&NamedSSHKeyViewV1{V: 1}))
+	if err != nil {
+		t.Fatalf("marshal empty view: %v", err)
+	}
+	if want := `{"v":1,"installed":[],"next_start":[]}`; string(raw) != want {
+		t.Fatalf("json = %s, want %s", raw, want)
 	}
 }

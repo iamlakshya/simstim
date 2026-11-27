@@ -78,12 +78,20 @@ func (view *NamedSSHKeyViewV1) Valid() bool {
 	return view != nil && view.V == 1 && validSSHKeyNames(view.Installed) && validSSHKeyNames(view.NextStart)
 }
 
-// CloneNamedSSHKeyViewV1 makes an owned copy of public display lists.
+// CloneNamedSSHKeyViewV1 makes an owned copy of public display lists, keeping
+// empty lists non-nil so JSON output emits [] rather than null.
 func CloneNamedSSHKeyViewV1(view *NamedSSHKeyViewV1) *NamedSSHKeyViewV1 {
 	if view == nil {
 		return nil
 	}
-	return &NamedSSHKeyViewV1{V: view.V, Installed: slices.Clone(view.Installed), NextStart: slices.Clone(view.NextStart)}
+	return &NamedSSHKeyViewV1{V: view.V, Installed: nonNilStrings(view.Installed), NextStart: nonNilStrings(view.NextStart)}
+}
+
+func nonNilStrings(names []string) []string {
+	if len(names) == 0 {
+		return []string{}
+	}
+	return slices.Clone(names)
 }
 
 func validSSHKeyNames(names []string) bool {

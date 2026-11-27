@@ -117,6 +117,21 @@ func knowsOption(opt string) (bool, error) {
 // SSH capability query and the wait for another query to finish.
 var sshKnowsOptionContext = knowsOptionContext
 
+func sshOptionCacheKey(opt string) (string, bool) {
+	sshPath, err := exec.LookPath("ssh")
+	if err != nil {
+		return "", false
+	}
+	if resolved, err := filepath.EvalSymlinks(sshPath); err == nil {
+		sshPath = resolved
+	}
+	info, err := os.Stat(sshPath)
+	if err != nil {
+		return "", false
+	}
+	return fmt.Sprintf("%s\x00%d\x00%d\x00%s", sshPath, info.Size(), info.ModTime().UnixNano(), opt), true
+}
+
 func knowsOptionContext(ctx context.Context, opt string) (bool, error) {
 	for !knowsMu.TryLock() {
 		timer := time.NewTimer(10 * time.Millisecond)
@@ -131,8 +146,11 @@ func knowsOptionContext(ctx context.Context, opt string) (bool, error) {
 	if err := ctx.Err(); err != nil {
 		return false, err
 	}
-	if v, ok := knows[opt]; ok {
-		return v, nil
+	key, cacheable := sshOptionCacheKey(opt)
+	if cacheable {
+		if v, ok := knows[key]; ok {
+			return v, nil
+		}
 	}
 	_, stderr, err := sshG(ctx, []string{"-F", os.DevNull, "-o", opt}, "probe.invalid")
 	if ctx.Err() != nil {
@@ -140,10 +158,14 @@ func knowsOptionContext(ctx context.Context, opt string) (bool, error) {
 	}
 	switch {
 	case unknownOptionRE.MatchString(stderr):
-		knows[opt] = false
+		if cacheable {
+			knows[key] = false
+		}
 		return false, nil
 	case err == nil:
-		knows[opt] = true
+		if cacheable {
+			knows[key] = true
+		}
 		return true, nil
 	}
 	return false, &UserError{Msg: fmt.Sprintf("cannot tell whether this computer's ssh knows %s: %s", opt, firstLine(stderr, err)),
