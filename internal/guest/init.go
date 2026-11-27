@@ -184,6 +184,9 @@ func Run(args ...string) error {
 		g.root = ""
 		g.packageSettingsRequired = false
 	} else {
+		if g.root != "" && plainHolderSpawnerForTests != nil {
+			g.packageSettingsRequired = false
+		}
 		g.setInheritedDNS(dnsSocks, dnsErr)
 	}
 	if mode != nil {
