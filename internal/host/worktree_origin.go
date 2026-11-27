@@ -131,15 +131,7 @@ func beginNativeWorktreeAddV1(g *GitInfo, id string) (result *nativeWorktreeAddV
 			return placementError("another original worktree already owns this session identity")
 		}
 		owner.parent, err = cachefs.OpenPrivateRootCreated(filepath.Dir(g.Worktree), func(path string, info os.FileInfo) error {
-			relative, err := filepath.Rel(paths.DataDir(), path)
-			if err != nil || !validPurgeRelative([]byte(relative)) || relative == "." || !refOf(info).validDirectory() {
-				return placementError("the worktree creator made an unknown storage parent")
-			}
-			if control.Refs == nil {
-				control.Refs = map[string]purgeRef{}
-			}
-			control.Refs["directory:data/"+relative] = refOf(info)
-			return writePlacementControl(guard, *control)
+			return recordCreatedDataDirV1(control, guard, path, info)
 		})
 		if err != nil {
 			return err
@@ -180,6 +172,46 @@ func beginNativeWorktreeAddV1(g *GitInfo, id string) (result *nativeWorktreeAddV
 		return nil, UserError("worktree", fmt.Sprintf("the original worktree %s was reserved but its branch creation did not finish: %v", g.Worktree, err), "Keep its original creation record and inspect the worktree and branch before retrying.")
 	}
 	return owner, nil
+}
+
+func recordCreatedDataDirV1(control *placementControl, guard *os.Root, path string, info os.FileInfo) error {
+	ref := refOf(info)
+	if !ref.validDirectory() {
+		return placementError("the worktree creator made an unknown storage parent")
+	}
+	clean := filepath.Clean(path)
+	if clean == filepath.Clean(paths.DataDir()) {
+		if control.Roots == nil {
+			control.Roots = map[string]purgeRef{}
+		}
+		control.Roots["data"] = ref
+		return writePlacementControl(guard, *control)
+	}
+	if relative, err := filepath.Rel(paths.DataDir(), clean); err == nil && validPurgeRelative([]byte(relative)) && relative != "." {
+		if control.Refs == nil {
+			control.Refs = map[string]purgeRef{}
+		}
+		control.Refs["directory:data/"+relative] = ref
+		return writePlacementControl(guard, *control)
+	}
+	parents, err := baselineParentPaths()
+	if err != nil {
+		return err
+	}
+	matched := false
+	for key, target := range parents {
+		if clean == filepath.Clean(target) {
+			if control.Parents == nil {
+				control.Parents = map[string]purgeRef{}
+			}
+			control.Parents[key] = ref
+			matched = true
+		}
+	}
+	if matched {
+		return writePlacementControl(guard, *control)
+	}
+	return placementError("the worktree creator made an unknown storage parent")
 }
 
 func nativeWorktreeDirectoryRefV1(root *os.Root) (purgeRef, error) {

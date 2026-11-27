@@ -1,6 +1,7 @@
 package host
 
 import (
+	"bufio"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -343,17 +344,57 @@ func TestBridgeWaitsForItsRequests(t *testing.T) {
 	t.Cleanup(startGitOpsAgain)
 	repo, pids := slowFilterRepo(t, "smudge", "")
 	in, w := io.Pipe()
+	outR, outW := io.Pipe()
 	ended := make(chan error, 1)
-	go func() { ended <- RunBridge(in, io.Discard) }()
+	go func() {
+		defer in.Close()
+		defer outW.Close()
+		ended <- RunBridge(in, outW)
+	}()
+	t.Cleanup(func() {
+		_ = w.Close()
+		_ = outR.Close()
+	})
+	br := bufio.NewReader(outR)
 	pw := proto.NewWriter(w)
 	if err := pw.WriteJSON(proto.THello, proto.Hello{Magic: proto.Magic, Protocol: version.Protocol, Role: "client"}); err != nil {
 		t.Fatal(err)
 	}
+	f, err := proto.Read(br)
+	if err != nil || f.Type != proto.THello {
+		t.Fatalf("bridge hello = %+v, %v", f, err)
+	}
+	replies := make(chan proto.Frame, 4)
+	go func() {
+		defer close(replies)
+		for {
+			rf, rerr := proto.Read(br)
+			if rerr != nil {
+				return
+			}
+			replies <- rf
+		}
+	}()
 	args, _ := json.Marshal(NewArgs{Name: "x", Cwd: repo, Worktree: true, Argv: []string{"sleep", "60"}})
 	if err := pw.WriteJSON(proto.TRequest, proto.Request{ID: 1, Op: "new", Args: args}); err != nil {
 		t.Fatal(err)
 	}
-	hostWaitFor(t, 60*time.Second, func() bool { return len(logLines(pids)) > 0 })
+	waitEnd := time.Now().Add(60 * time.Second)
+	for len(logLines(pids)) == 0 {
+		select {
+		case err := <-ended:
+			t.Fatalf("bridge ended before filter started: %v", err)
+		case rf, ok := <-replies:
+			if ok {
+				t.Fatalf("bridge replied before filter started: type=%d payload=%s", rf.Type, rf.Payload)
+			}
+		default:
+		}
+		if time.Now().After(waitEnd) {
+			t.Fatal("timed out waiting for filter to start")
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
 	_ = w.Close()
 	select {
 	case <-ended:
