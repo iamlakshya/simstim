@@ -66,12 +66,6 @@ func Main(m *testing.M) {
 				os.Exit(1)
 			}
 			os.Exit(0)
-		case "wall-init":
-			if err := guest.Run(os.Args[2:]...); err != nil {
-				fmt.Fprintln(os.Stderr, err)
-				os.Exit(1)
-			}
-			os.Exit(0)
 		case "holder":
 			if err := host.RunHolder(os.Args[2]); err != nil {
 				fmt.Fprintln(os.Stderr, err)
@@ -90,6 +84,13 @@ func Main(m *testing.M) {
 			}
 			os.Exit(0)
 		}
+	}
+	if len(os.Args) >= 2 && os.Args[1] == "wall-init" {
+		if err := guest.Run(os.Args[2:]...); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		os.Exit(0)
 	}
 	// A helper that this binary stands in for, reached through a fake
 	// ssh, serves the bridge.

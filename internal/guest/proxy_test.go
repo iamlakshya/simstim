@@ -3,9 +3,15 @@ package guest
 import (
 	"bufio"
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
 	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/json"
 	"io"
+	"math/big"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -16,14 +22,52 @@ import (
 	"testing"
 	"time"
 
+	"github.com/iamlakshya/simstim/internal/api"
 	"github.com/iamlakshya/simstim/internal/brand"
 	"github.com/iamlakshya/simstim/internal/egress"
 	"github.com/iamlakshya/simstim/internal/link"
 	"github.com/iamlakshya/simstim/internal/proto"
 )
 
+func newProxyOriginTLSServer(t *testing.T, host string, h http.Handler) (*httptest.Server, *x509.CertPool) {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	tmpl := &x509.Certificate{
+		SerialNumber:          big.NewInt(1),
+		Subject:               pkix.Name{CommonName: host},
+		DNSNames:              []string{host},
+		NotBefore:             now.Add(-time.Hour),
+		NotAfter:              now.Add(24 * time.Hour),
+		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		BasicConstraintsValid: true,
+		IsCA:                  true,
+	}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cert, err := x509.ParseCertificate(der)
+	if err != nil {
+		t.Fatal(err)
+	}
+	roots := x509.NewCertPool()
+	roots.AddCert(cert)
+
+	ts := httptest.NewUnstartedServer(h)
+	ts.TLS = &tls.Config{
+		Certificates: []tls.Certificate{{Certificate: [][]byte{der}, PrivateKey: key}},
+	}
+	ts.StartTLS()
+	return ts, roots
+}
+
 func TestGuestProxyEndToEndWithEgressAndCurl(t *testing.T) {
-	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	ts, originRoots := newProxyOriginTLSServer(t, "registry.npmjs.org", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("npm-ok:" + r.URL.Path))
 	}))
@@ -64,7 +108,7 @@ func TestGuestProxyEndToEndWithEgressAndCurl(t *testing.T) {
 			return nd.DialContext(ctx, "tcp", tsAddr)
 		},
 	}
-	egSrv, err := egress.NewServer(eEgConn, egress.Options{Dialer: dialer})
+	egSrv, err := egress.NewServer(eEgConn, egress.Options{Dialer: dialer, OriginRoots: originRoots})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -110,7 +154,7 @@ func TestGuestProxyEndToEndWithEgressAndCurl(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pol, _, err := egress.MergeLayers(nil)
+	pol, _, err := egress.MergeLayers([]api.Layer{{Kind: api.LayerSession, Unknown: api.UnknownDeny}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -118,8 +162,19 @@ func TestGuestProxyEndToEndWithEgressAndCurl(t *testing.T) {
 	if err := proto.NewWriter(ctlSt).WriteJSON(proto.TRequest, proto.Request{ID: 1, Op: egress.CtlInit, Args: initBytes}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := proto.Read(bufio.NewReader(ctlSt)); err != nil {
-		t.Fatal(err)
+	ctlReader := bufio.NewReader(ctlSt)
+	for {
+		f, err := proto.Read(ctlReader)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if f.Type == proto.TEvent {
+			continue
+		}
+		if f.Type != proto.TResponse {
+			t.Fatalf("CtlInit reply = %v, want response", f)
+		}
+		break
 	}
 
 	px, err := StartProxy(gGuest, "http://127.0.0.1:0", nil)

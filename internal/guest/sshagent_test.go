@@ -19,12 +19,17 @@ import (
 	"github.com/iamlakshya/simstim/internal/host"
 	"github.com/iamlakshya/simstim/internal/link"
 	"github.com/iamlakshya/simstim/internal/proto"
+	"github.com/iamlakshya/simstim/internal/testhome"
 )
 
 func namedSSHGuestFixture(t *testing.T) (*Init, *link.Session, string) {
 	t.Helper()
 	local, remote := net.Pipe()
-	root := t.TempDir()
+	root, err := testhome.ShortTempDir("sa")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(root) })
 	g := New(remote, root, slog.New(slog.DiscardHandler))
 	supervisor := link.New(local, link.Supervisor, link.Options{})
 	run := g.path(host.GuestRunDir())

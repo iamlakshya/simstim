@@ -190,7 +190,7 @@ func exitedShutdownHolder(t *testing.T, events net.Conn) *holderProc {
 	}
 	done := make(chan struct{})
 	close(done)
-	return &holderProc{cmd: cmd, done: done, eventsDone: make(chan struct{}), events: events}
+	return &holderProc{id: "abcd2345", cmd: cmd, done: done, eventsDone: make(chan struct{}), events: events}
 }
 
 func assertBoundedGuestEnd(t *testing.T, g *Init, hp *holderProc) {

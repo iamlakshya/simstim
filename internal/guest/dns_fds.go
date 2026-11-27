@@ -120,8 +120,7 @@ func claimDNSSocketFDs(udpFD, tcpFD, wantPort int) (DNSSockets, error) {
 			Hint:    "Update the host helper and its sandbox launcher, then resume the session.",
 		}
 	}
-	accepts, err := syscall.GetsockoptInt(tcpFD, syscall.SOL_SOCKET, syscall.SO_ACCEPTCONN)
-	if err != nil || accepts != 1 {
+	if !isListeningTCPSocket(tcpFD) {
 		closeRaw()
 		return DNSSockets{}, &proto.Error{
 			Code:    "wall_init",

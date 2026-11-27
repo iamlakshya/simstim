@@ -36,6 +36,9 @@ func runGuestHolder(id string, files GuestHolder) error {
 	h.ev = events
 	defer events.flush(time.Second)
 	KeepOnBrokenPipe()
+	signals := make(chan os.Signal, 1)
+	signal.Notify(signals, syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP)
+	defer signal.Stop(signals)
 	if err := h.adoptVMTerminal(); err != nil {
 		return err
 	}
@@ -65,11 +68,8 @@ func runGuestHolder(id string, files GuestHolder) error {
 	go h.readLoop()
 	go h.waitLoop()
 	go h.tick()
-	signals := make(chan os.Signal, 1)
-	signal.Notify(signals, syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP)
-	defer signal.Stop(signals)
 	received := <-signals
 	h.log.Info("guest holder stopping", "signal", received.String())
-	h.stop("stopped with its guest init", true)
+	h.stop("stopped with the host", true)
 	return nil
 }

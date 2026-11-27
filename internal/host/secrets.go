@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -188,16 +189,26 @@ func missingSecretsNote(names []string, restored bool) string {
 // agent yet, so it needs no lock.
 func (h *Holder) secretsBeforeStart(restored bool) {
 	want := h.m.Secrets
+	var missing []string
+	if h.guest != nil {
+		missing = append(missing, h.m.MissingSecrets...)
+	}
 	h.m.MissingSecrets = nil
-	if len(want) == 0 {
-		return
+	if len(want) > 0 {
+		if !restored || h.guest != nil {
+			h.secretEnv = h.awaitSecrets(want, secretsWait)
+		}
+		if h.secretEnv == nil {
+			for _, name := range want {
+				if !slices.Contains(missing, name) {
+					missing = append(missing, name)
+				}
+			}
+		}
 	}
-	if !restored {
-		h.secretEnv = h.awaitSecrets(want, secretsWait)
-	}
-	if h.secretEnv == nil {
-		h.m.MissingSecrets = append([]string(nil), want...)
-		h.notes = append(h.notes, missingSecretsNote(want, restored))
+	if len(missing) > 0 {
+		h.m.MissingSecrets = missing
+		h.notes = append(h.notes, missingSecretsNote(missing, restored))
 	}
 }
 

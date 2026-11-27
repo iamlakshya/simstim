@@ -207,8 +207,19 @@ func TestGuestDNSUDPAndTCPFramingTruncationAndHeadroom(t *testing.T) {
 	if err := proto.NewWriter(ctlSt).WriteJSON(proto.TRequest, proto.Request{ID: 1, Op: egress.CtlInit, Args: initBytes}); err != nil {
 		t.Fatal(err)
 	}
-	if f, err := proto.Read(bufio.NewReader(ctlSt)); err != nil || f.Type != proto.TResponse {
-		t.Fatalf("CtlInit reply = %v, %v", f, err)
+	ctlReader := bufio.NewReader(ctlSt)
+	for {
+		f, err := proto.Read(ctlReader)
+		if err != nil {
+			t.Fatalf("CtlInit reply = %v, %v", f, err)
+		}
+		if f.Type == proto.TEvent {
+			continue
+		}
+		if f.Type != proto.TResponse {
+			t.Fatalf("CtlInit reply = %v, want response", f)
+		}
+		break
 	}
 
 	var dnsStreams atomic.Int64

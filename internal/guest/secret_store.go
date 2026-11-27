@@ -73,6 +73,9 @@ func planSecretStores(rows []agents.SecretBinding, sentinels map[string]api.Secr
 	return guestStorePlans(plans), credentials, err
 }
 func guestStorePlans(plans []memberenv.StorePlan) []secretStorePlan {
+	if len(plans) == 0 {
+		return nil
+	}
 	result := make([]secretStorePlan, len(plans))
 	for i, p := range plans {
 		result[i] = secretStorePlan{name: p.Name, argv: p.Argv, sentinel: p.Sentinel}
