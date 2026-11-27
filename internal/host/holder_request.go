@@ -18,6 +18,21 @@ func (h *Holder) request(c *hclient, req proto.Request) {
 		_ = c.w.WriteJSON(proto.TResponse, resp)
 	}
 	switch req.Op {
+	case "pull.record":
+		if c.access != accessFull {
+			reply(nil, errInside)
+			return
+		}
+		var args holderPulledArgs
+		if json.Unmarshal(req.Args, &args) != nil {
+			reply(nil, UserError("pull_protocol", "the pulled record is invalid", "Use the current client and a full session address."))
+			return
+		}
+		if err := h.recordPulled(args); err != nil {
+			reply(nil, asUserError(err, "pull_ack", "Check the session storage, then pull again."))
+			return
+		}
+		reply(struct{}{}, nil)
 	case "info":
 		h.mu.Lock()
 		m := *h.m

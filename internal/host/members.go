@@ -2,6 +2,7 @@ package host
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -24,6 +25,9 @@ func SandboxPrimaryID(id string) (string, error) {
 	}
 	m, err := LoadManifest(id)
 	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return "", UserError("not_found", "no session "+id, "List sessions to find its ID.")
+		}
 		return "", err
 	}
 	if m.ID != id {

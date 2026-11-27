@@ -193,7 +193,9 @@ func startAgain(m *Manifest, a again) (argv []string, why string, err error) {
 	delete(m.Labels, resumedLabel)
 	m.Labels = withLabel(m.Labels, a.label, now.Format(time.RFC3339Nano))
 	m.Status = Status{State: StateStarting, Since: now, Reason: a.reason + ": " + why}
-	m.Run.StartEnvelope = a.allowMissing || a.members != nil || a.secretDelivery != nil
+	nativeWall := m.Wall != nil && m.Wall.Driver != "plain"
+	envelope := m.Wall != nil && (nativeWall || a.label != restoredLabel)
+	m.Run.StartEnvelope = envelope && (a.allowMissing || a.members != nil || a.secretDelivery != nil)
 	if a.automatic != nil {
 		if err := PinAutomaticRestore(m, a.automatic); err != nil {
 			return argv, why, err
@@ -209,7 +211,7 @@ func startAgain(m *Manifest, a again) (argv []string, why string, err error) {
 	if err := finishLegacyNoneTransitionV1(a.operation); err != nil {
 		return argv, why, err
 	}
-	if m.Wall != nil && m.Wall.Driver != "plain" {
+	if nativeWall {
 		if a.operation == nil {
 			return argv, why, sessionLeaseError("the real walled restart has no original owning operation")
 		}
@@ -259,7 +261,11 @@ func startAgain(m *Manifest, a again) (argv []string, why string, err error) {
 		}
 		return argv, why, err
 	}
-	if err := deliverStart(m.ID, a.secrets, a.members, a.allowMissing, a.secretDelivery); err != nil {
+	var delivery *api.SecretDeliveryIntent
+	if envelope {
+		delivery = a.secretDelivery
+	}
+	if err := deliverStart(m.ID, a.secrets, a.members, envelope && a.allowMissing, delivery); err != nil {
 		// The new holder waits for its secrets. It stops first, so that its
 		// agent never starts without them, as after a failed start.
 		if serr := stopStarting(m, proc); serr != nil {

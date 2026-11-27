@@ -63,13 +63,21 @@ func openOwnedSessionFileLease(ctx context.Context, id, name string, wait time.D
 			failure = errors.Join(failure, root.Close())
 		}
 	}()
+	notFoundIfGone := func(err error) error {
+		if ctx.Err() == nil {
+			if _, lerr := os.Lstat(path); errors.Is(lerr, os.ErrNotExist) {
+				return UserError("not_found", "no such session", "List sessions to find its ID.")
+			}
+		}
+		return err
+	}
 	rootRef, err := cachefs.CaptureRoot(root)
 	if err != nil {
-		return nil, err
+		return nil, notFoundIfGone(err)
 	}
 	file, err = cachefs.OpenFile(root, name, os.O_RDWR|os.O_CREATE, 0o600)
 	if err != nil {
-		return nil, err
+		return nil, notFoundIfGone(err)
 	}
 	deadline := time.Now().Add(wait)
 	for {
@@ -94,11 +102,11 @@ func openOwnedSessionFileLease(ctx context.Context, id, name string, wait time.D
 	}
 	fileRef, err := cachefs.CaptureFile(root, name, file, 0o600)
 	if err != nil {
-		return nil, err
+		return nil, notFoundIfGone(err)
 	}
 	lease := &sessionFileLease{root: root, file: file, rootRef: rootRef, fileRef: fileRef, id: id, name: name, path: path}
 	if err := lease.checkLocked(ctx); err != nil {
-		return nil, err
+		return nil, notFoundIfGone(err)
 	}
 	return lease, nil
 }

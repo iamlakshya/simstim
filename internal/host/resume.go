@@ -2,6 +2,7 @@ package host
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"sort"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/iamlakshya/simstim/internal/api"
 	"github.com/iamlakshya/simstim/internal/paths"
+	"github.com/iamlakshya/simstim/internal/proto"
 )
 
 // The user's resume: the agent of a session starts again in the same
@@ -284,6 +286,12 @@ func stopOverSocket(id string, m *Manifest) error {
 		_, requestErr := HolderRequest(id, "kill", nil, 2*time.Second)
 		deadline := time.Now().Add(stopWait)
 		for (alive(id) || holderLockHeld(id) || requestErr == nil && recordedProcessRuns(id, m)) && time.Now().Before(deadline) {
+			var pe *proto.Error
+			if errors.As(requestErr, &pe) && pe.Code == "starting" && alive(id) {
+				if left := time.Until(deadline); left > 0 {
+					_, requestErr = HolderRequest(id, "kill", nil, min(2*time.Second, left))
+				}
+			}
 			holderStopWaiting(id)
 			time.Sleep(50 * time.Millisecond)
 		}

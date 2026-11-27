@@ -199,7 +199,8 @@ func RunHolder(id string) error {
 	if err := pending.beginAgent(); err != nil {
 		return nil
 	}
-	if err := h.start(); err != nil {
+	c, err := h.startAgent()
+	if err != nil {
 		h.log.Error("agent did not start", "err", err)
 		h.mu.Lock()
 		code := 127
@@ -212,13 +213,22 @@ func RunHolder(id string) error {
 	}
 	h.startAlerts(restored)
 	h.startVT()
-	go h.readLoop()
-	go h.waitLoop()
-	go h.tick()
 
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP)
+	// Activate the live request handler before saving the started manifest so
+	// waitStarted never returns while sockets still reject info/peek/kill with
+	// pendingHolderError. Hold saveMu across activation so a fast-exiting child
+	// cannot save StateExited first.
+	h.saveMu.Lock()
+	go h.readLoop()
+	go h.waitLoop()
+	go h.tick()
 	pending.activate(h)
+	h.saveMu.Unlock()
+	if err := h.save(c, false); err != nil {
+		h.log.Warn("manifest not saved", "err", err)
+	}
 	s := <-sig
 	h.log.Info("stopping on a signal", "signal", s.String())
 	// A signal means the system (or the user's manager) is stopping the
@@ -232,12 +242,23 @@ func (h *Holder) start() error {
 	if h.vmTerm != nil {
 		return h.startVMTerminal()
 	}
+	c, err := h.startAgent()
+	if err != nil {
+		return err
+	}
+	if err := h.save(c, false); err != nil {
+		h.log.Warn("manifest not saved", "err", err)
+	}
+	return nil
+}
+
+func (h *Holder) startAgent() (savedCopy, error) {
 	if h.waitDone == nil {
 		h.waitDone = make(chan struct{})
 	}
 	m := h.m
 	if len(m.Agent.Argv) == 0 {
-		return errors.New("no command to run")
+		return savedCopy{}, errors.New("no command to run")
 	}
 	// The setup (or resume) hook and any notes show in the session's
 	// terminal before the agent (start.go). After a restore or a resume, the
@@ -246,7 +267,7 @@ func (h *Holder) start() error {
 	m.RunHook = ""
 	bin, err := lookPath(argv[0], envValue(m.Env, "PATH"))
 	if err != nil {
-		return err
+		return savedCopy{}, err
 	}
 	cmd := exec.CommandContext(context.Background(), bin, argv[1:]...)
 	cmd.Args[0] = argv[0]
@@ -258,7 +279,7 @@ func (h *Holder) start() error {
 	ptmx, err := pty.StartWithSize(cmd, &pty.Winsize{Cols: clampCols(cols), Rows: clampRows(rows)})
 	cmd.Env, h.secretEnv = nil, nil // the agent has its copy; the holder keeps none
 	if err != nil {
-		return fmt.Errorf("start %s in a terminal: %w", argv[0], err)
+		return savedCopy{}, fmt.Errorf("start %s in a terminal: %w", argv[0], err)
 	}
 	h.main = main
 	h.ptmx = ptmx
@@ -290,13 +311,10 @@ func (h *Holder) start() error {
 	// now is not undone by this save (holder_rename.go).
 	c := h.copyForSave()
 	h.mu.Unlock()
-	if err := h.save(c, false); err != nil {
-		h.log.Warn("manifest not saved", "err", err)
-	}
 	// The program and the count of its arguments only: an argument can hold
 	// a prompt's text or a key, and the log goes into a debug bundle.
 	h.log.Info("agent started", "program", m.Agent.Argv[0], "args", len(m.Agent.Argv)-1, "pid", cmd.Process.Pid)
-	return nil
+	return c, nil
 }
 
 func (h *Holder) readLoop() {

@@ -111,10 +111,14 @@ func runBridge(in io.Reader, out io.Writer, owned OwnedBridgeOutput, inputs ...O
 		_ = w.WriteJSON(proto.TError, err)
 		return err
 	}
-	hostID, err := HostID()
-	if err != nil {
-		_ = w.WriteJSON(proto.TError, proto.Error{Code: "host_id", Message: err.Error(), Hint: "Check " + paths.HostID() + " on the host."})
-		return err
+	inside := CheckCaller() != nil // bridge_inside.go
+	var hostID string
+	if !inside {
+		hostID, err = HostID()
+		if err != nil {
+			_ = w.WriteJSON(proto.TError, proto.Error{Code: "host_id", Message: err.Error(), Hint: "Check " + paths.HostID() + " on the host."})
+			return err
+		}
 	}
 	features := Features
 	if owned == nil {
@@ -143,7 +147,6 @@ func runBridge(in io.Reader, out io.Writer, owned OwnedBridgeOutput, inputs ...O
 	defer b.stopDebug("end")
 	defer b.endAttach()
 	defer func() { returned = errors.Join(returned, b.closeOwnedServicesV1(cancel, ownedInput, owned)) }()
-	inside := CheckCaller() != nil // bridge_inside.go
 	firstFrame := true
 	for {
 		f, err := proto.Read(r)
