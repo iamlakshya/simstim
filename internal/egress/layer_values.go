@@ -117,7 +117,7 @@ func visitValues(v reflect.Value, prefix string, f func(string, reflect.Value) e
 			key = prefix + "." + key
 		}
 		field := v.Field(i)
-		if field.Kind() == reflect.Pointer && field.Type().Elem().Kind() == reflect.Struct {
+		if isLayerValueGroupPointer(field) {
 			if !field.IsNil() {
 				if err := visitValues(field.Elem(), key, f); err != nil {
 					return err
@@ -216,7 +216,7 @@ func allocateLayerValueGroups(dst reflect.Value, prefix string, incoming map[str
 			allocateLayerValueGroups(field, key, incoming)
 			continue
 		}
-		if field.Kind() != reflect.Pointer || field.Type().Elem().Kind() != reflect.Struct {
+		if !isLayerValueGroupPointer(field) {
 			continue
 		}
 		if field.IsNil() {
@@ -231,6 +231,15 @@ func allocateLayerValueGroups(dst reflect.Value, prefix string, incoming map[str
 			allocateLayerValueGroups(field.Elem(), key, incoming)
 		}
 	}
+}
+
+// isLayerValueGroupPointer reports whether a pointer-to-struct field is an
+// optional nested table (such as sandbox.image_policy) rather than a scalar
+// union value (such as sandbox.host).
+func isLayerValueGroupPointer(field reflect.Value) bool {
+	return field.Kind() == reflect.Pointer &&
+		field.Type().Elem().Kind() == reflect.Struct &&
+		field.Type() != reflect.TypeFor[*api.HostSelectorV1]()
 }
 
 func cloneValue(v reflect.Value) reflect.Value {
