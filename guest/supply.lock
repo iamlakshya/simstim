@@ -49,6 +49,7 @@ image = "docker.io/library/debian@sha256:9c6e381421d0f48d1b8133e573f33c185ee16cb
 snapshot = "20261110T000000Z"
 suite = "trixie"
 inrelease_sha256 = "0584fba32e13e0ab8285fb16c27adea1ec03a73669c18702821094fd6ca86675"
+security_inrelease_sha256 = "8cfb86ff1190b904539e1c8c2069e9b373ec8add28f59cdab7f4839edb0cb5b6"
 
 [[vmm]]
 name = "cloud-hypervisor"

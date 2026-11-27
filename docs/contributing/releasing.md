@@ -58,7 +58,7 @@ The mirror checks files without booting them. Guest-kernel compatibility, fideli
 
 ### The guest kernel and tools image
 
-`just guest all` builds both architectures. It needs Docker, the pinned Go toolchain and Zig. The build uses the Debian image digest in `guest/supply.lock`. Inside it, apt checks Debian's signature and package hashes. The build also checks the exact signed `InRelease` digest from the locked snapshot before it installs a compiler or build dependency. It does not use the host's compiler or package sources.
+`just guest all` builds both architectures. It needs Docker, the pinned Go toolchain and Zig. The build uses the Debian image digest in `guest/supply.lock`. Inside it, apt checks Debian's signature and package hashes. The build reads the locked snapshot of the suite and of its security suite at the same time, because the pinned image already carries security updates. It checks the exact signed `InRelease` digest of each before it installs a compiler or build dependency. It does not use the host's compiler or package sources.
 
 `guest/build.sh` checks the kernel, erofs-utils and moby inputs against the same lock. It builds the kernel at `/build/linux`, with fixed user, host and timestamp values. The timestamp comes from the newest commit that changed `guest/`. The committed full configs are checked before and after `make olddefconfig`. Both include virtio-MMIO for Firecracker. The amd64 result is a PVH ELF `vmlinux`; the arm64 result is an uncompressed `Image`. They remain the shared boot pair for both VMMs.
 

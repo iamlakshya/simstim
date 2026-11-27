@@ -148,18 +148,30 @@ fi
 trap 'chown -R "$GUEST_BUILD_UID:$GUEST_BUILD_GID" /out /cache' EXIT
 
 # apt verifies Debian's signature and package hashes. Bind the exact signed
-# metadata to the lock too, before installing any build dependency.
+# metadata to the lock too, before installing any build dependency. The pinned
+# container already carries security updates, so the security suite at the
+# same snapshot time is a source too: without it, a -dev package's exact
+# version dependency would ask apt to downgrade the container's library.
 builder_snapshot=$(pin_get builder.snapshot)
 builder_suite=$(pin_get builder.suite)
 rm -f /etc/apt/sources.list.d/debian.sources /etc/apt/sources.list
-printf 'deb [check-valid-until=no] http://snapshot.debian.org/archive/debian/%s/ %s main\n' \
-    "$builder_snapshot" "$builder_suite" >/etc/apt/sources.list
+printf 'deb [check-valid-until=no] http://snapshot.debian.org/archive/%s/%s/ %s main\n' \
+    debian "$builder_snapshot" "$builder_suite" \
+    debian-security "$builder_snapshot" "${builder_suite}-security" >/etc/apt/sources.list
 apt-get -o Acquire::Check-Valid-Until=false -o Acquire::Languages=none update
-mapfile -t builder_inrelease < <(find /var/lib/apt/lists -maxdepth 1 -type f -name '*_InRelease')
-if [ "${#builder_inrelease[@]}" -ne 1 ]; then
-    fail "the builder did not fetch one signed Debian InRelease." "Check the builder snapshot in guest/supply.lock."
+for archive in debian debian-security; do
+    suite=$builder_suite pin=builder-inrelease
+    if [ "$archive" = debian-security ]; then suite="${builder_suite}-security" pin=builder-security-inrelease; fi
+    mapfile -t builder_inrelease < <(find /var/lib/apt/lists -maxdepth 1 -type f \
+        -name "*_archive_${archive}_${builder_snapshot}_dists_${suite}_InRelease")
+    if [ "${#builder_inrelease[@]}" -ne 1 ]; then
+        fail "the builder did not fetch the signed ${archive} InRelease." "Check the builder snapshot in guest/supply.lock."
+    fi
+    pin_verify "$pin" "${builder_inrelease[0]}"
+done
+if [ "$(find /var/lib/apt/lists -maxdepth 1 -type f -name '*_InRelease' | wc -l)" -ne 2 ]; then
+    fail "the builder fetched package metadata from an unlocked source." "Check the builder's apt sources."
 fi
-pin_verify builder-inrelease "${builder_inrelease[0]}"
 DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
     autoconf automake libtool pkg-config build-essential flex bison bc \
     libssl-dev libelf-dev xz-utils ca-certificates curl \

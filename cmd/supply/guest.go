@@ -332,6 +332,8 @@ func lookupLockKey(lock *supply.Lock, key string) (string, error) {
 		return lock.Builder.Suite, nil
 	case "builder.inrelease_sha256":
 		return lock.Builder.InReleaseSHA256, nil
+	case "builder.security_inrelease_sha256":
+		return lock.Builder.SecurityInReleaseSHA256, nil
 	}
 	if rest, ok := strings.CutPrefix(key, "vmm."); ok {
 		parts := strings.Split(rest, ".")
@@ -387,6 +389,8 @@ func verifyPinTarget(lock *supply.Lock, target, filePath string) error {
 		return verifyPinnedFile(filePath, lock.MobyCheckConfig.SHA256, 0, false)
 	case "builder-inrelease":
 		return verifyPinnedFile(filePath, lock.Builder.InReleaseSHA256, 0, false)
+	case "builder-security-inrelease":
+		return verifyPinnedFile(filePath, lock.Builder.SecurityInReleaseSHA256, 0, false)
 	}
 	if rest, ok := strings.CutPrefix(target, "vmm:"); ok {
 		name, arch, ok := strings.Cut(rest, ":")

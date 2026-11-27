@@ -75,12 +75,15 @@ type LockMoby struct {
 }
 
 // LockBuilder pins the container and the signed Debian package snapshot used
-// for reproducible builds. The InRelease digest binds the package checksums.
+// for reproducible builds. The InRelease digests bind the package checksums:
+// one for the suite, and one for its security suite at the same snapshot time,
+// whose updates the pinned container already carries.
 type LockBuilder struct {
-	Image           string `toml:"image"`
-	Snapshot        string `toml:"snapshot"`
-	Suite           string `toml:"suite"`
-	InReleaseSHA256 string `toml:"inrelease_sha256"`
+	Image                   string `toml:"image"`
+	Snapshot                string `toml:"snapshot"`
+	Suite                   string `toml:"suite"`
+	InReleaseSHA256         string `toml:"inrelease_sha256"`
+	SecurityInReleaseSHA256 string `toml:"security_inrelease_sha256"`
 }
 
 // LockFile pins a downloaded binary or source archive by URL, SHA-256 and optional size.

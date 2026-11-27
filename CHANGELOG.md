@@ -4,6 +4,8 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ## [Unreleased]
 
+- The guest builder now reads the locked Debian security suite as well as the main suite, at the same snapshot time, and pins both signed `InRelease` files (`security_inrelease_sha256` in `guest/supply.lock`). Before, apt refused `libssl-dev`, because the pinned image already carries a newer `libssl3t64` from a security update.
+
 - `just repro` runs from a plain checkout: it no longer hashes the removed feed snapshot, Go runs the toolchain that `go.mod` pins and checks the modules against `go.sum`, the image pairs keep their modes when copied, and each pass starts without the previous pass's outputs and with an empty Zig cache.
 
 - The gVisor runtime build now installs the packages upstream lists for Bazel (`build-essential` and both `crossbuild-essential` packages) in CI and in the release, and builds with `-c opt` as upstream's release does, so the Go symbols that the entry check reads are kept.

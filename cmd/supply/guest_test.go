@@ -78,6 +78,7 @@ image = "docker.io/library/debian@sha256:%s"
 snapshot = "20261110T000000Z"
 suite = "trixie"
 inrelease_sha256 = "0584fba32e13e0ab8285fb16c27adea1ec03a73669c18702821094fd6ca86675"
+security_inrelease_sha256 = "8cfb86ff1190b904539e1c8c2069e9b373ec8add28f59cdab7f4839edb0cb5b6"
 
 [[vmm]]
 name = "cloud-hypervisor"
@@ -242,16 +243,17 @@ func TestCheckRequireGuestRefusesMissingBootPair(t *testing.T) {
 func TestPinGetAndVerify(t *testing.T) {
 	lockPath, _, guestDir := writeTestLockAndGuest(t)
 	for key, want := range map[string]string{
-		"kernel.version":                  "6.18.63",
-		"kernel.released":                 "2026-11-10",
-		"erofs.version":                   "1.9.4",
-		"moby.commit":                     "70efc0e31da3a115fc87574d1b786fa2b867c346",
-		"builder.snapshot":                "20261110T000000Z",
-		"builder.suite":                   "trixie",
-		"builder.inrelease_sha256":        "0584fba32e13e0ab8285fb16c27adea1ec03a73669c18702821094fd6ca86675",
-		"vmm.cloud-hypervisor.version":    "54.1",
-		"vmm.cloud-hypervisor.amd64.size": "24",
-		"vmm.cloud-hypervisor.arm64.size": "24",
+		"kernel.version":                    "6.18.63",
+		"kernel.released":                   "2026-11-10",
+		"erofs.version":                     "1.9.4",
+		"moby.commit":                       "70efc0e31da3a115fc87574d1b786fa2b867c346",
+		"builder.snapshot":                  "20261110T000000Z",
+		"builder.suite":                     "trixie",
+		"builder.inrelease_sha256":          "0584fba32e13e0ab8285fb16c27adea1ec03a73669c18702821094fd6ca86675",
+		"builder.security_inrelease_sha256": "8cfb86ff1190b904539e1c8c2069e9b373ec8add28f59cdab7f4839edb0cb5b6",
+		"vmm.cloud-hypervisor.version":      "54.1",
+		"vmm.cloud-hypervisor.amd64.size":   "24",
+		"vmm.cloud-hypervisor.arm64.size":   "24",
 	} {
 		var out bytes.Buffer
 		if err := run([]string{"pin", "-lock", lockPath, "get", key}, &out); err != nil {

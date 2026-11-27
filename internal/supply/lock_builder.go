@@ -30,5 +30,8 @@ func validateBuilder(b LockBuilder) error {
 	if !hex64.MatchString(b.InReleaseSHA256) {
 		return fmt.Errorf("guest/supply.lock: [builder] inrelease_sha256 %q must be 64 lower-case hex digits", b.InReleaseSHA256)
 	}
+	if !hex64.MatchString(b.SecurityInReleaseSHA256) {
+		return fmt.Errorf("guest/supply.lock: [builder] security_inrelease_sha256 %q must be 64 lower-case hex digits", b.SecurityInReleaseSHA256)
+	}
 	return nil
 }
