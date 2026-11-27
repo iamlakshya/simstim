@@ -222,6 +222,14 @@ func connectHostCore(ctx context.Context, w io.Writer, save client.HostChange, c
 		return nil, nil, err
 	}
 	ctx = client.WithHostStateObservation(ctx, observation)
+	ctx, unlock, err := client.LockHost(ctx, h.Name, save.Kind)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer unlock()
+	if pin == nil {
+		pin = &client.PinOptions{}
+	}
 	step := func(format string, a ...any) { fmt.Fprintf(w, "  "+format+"\n", a...) }
 	fmt.Fprintf(w, "Connecting to %s (%s)…\n", h.Name, h.Target())
 	start := time.Now()

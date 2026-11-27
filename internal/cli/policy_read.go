@@ -20,7 +20,7 @@ import (
 func policyLsCmd() *cobra.Command {
 	var layers policyLayerFlags
 	var asJSON bool
-	cmd := &cobra.Command{Use: "ls", Short: "Show the merged policy and each value's layer", Args: cobra.NoArgs, Example: "  " + brand.Name + " policy ls --host box --repo . --profile review",
+	cmd := &cobra.Command{Use: "ls", Short: "Show the merged policy and each value's layer", Args: cobra.NoArgs, Example: "  " + brand.Name + " policy ls --host my-vps --repo . --profile review",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return listPolicy(cmd, layers, asJSON)
 		}}
@@ -32,7 +32,7 @@ func policyLsCmd() *cobra.Command {
 func policyCheckCmd() *cobra.Command {
 	var layers policyLayerFlags
 	var asJSON bool
-	cmd := &cobra.Command{Use: "check <target>", Short: "Explain which rule and layer decides a destination", Args: cobra.ExactArgs(1), Example: "  " + brand.Name + " policy check api.example.com --in box/auth-fix",
+	cmd := &cobra.Command{Use: "check <target>", Short: "Explain which rule and layer decides a destination", Args: cobra.ExactArgs(1), Example: "  " + brand.Name + " policy check api.example.com --in my-vps/auth-fix",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return withPolicy(cmd, layers, func(h client.Host, s client.Session, policy api.Policy) error {
 				answer, err := grant.Decide(s.Agent, policy, args[0])

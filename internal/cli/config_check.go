@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -80,7 +81,11 @@ func warnSettings(cmd *cobra.Command, args []string) {
 	if msg == "" {
 		return
 	}
-	cmd.SetContext(client.WithAttachConfigWarningShownV1(cmd.Context()))
+	ctx := cmd.Context()
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	cmd.SetContext(client.WithAttachConfigWarningShownV1(ctx))
 	w, try := cmd.ErrOrStderr(), brand.Name+" config check"
 	if jsonOn(cmd) {
 		line, _ := json.Marshal(map[string]any{"v": jsonVersion, "warning": map[string]string{"code": "config_ignored", "message": msg, "try": try}})

@@ -111,7 +111,7 @@ func acceptJoinedHost(cmd *cobra.Command, name, accept, address string, hostKeys
 
 // readAcceptedReply is useful to callers with a bounded input stream.
 func readAcceptedReply(in io.Reader) (code.Reply, error) {
-	b, err := io.ReadAll(io.LimitReader(in, code.MaxCode+1))
+	b, err := readBounded(in, code.MaxCode+1)
 	if err != nil {
 		return code.Reply{}, err
 	}

@@ -11,7 +11,7 @@ import (
 
 // runCountedNew keeps admission and consent independent for every start.
 func runCountedNew(cmd *cobra.Command, args []string, count int, name *string, detach *bool, asJSON bool, batch *[]map[string]any, runOne func(*cobra.Command, []string) error) error {
-	if !cmd.Flags().Changed("count") {
+	if !cmd.Flags().Changed("count") || cmd.Flags().Changed("in") {
 		return runOne(cmd, args)
 	}
 	if count < 1 {

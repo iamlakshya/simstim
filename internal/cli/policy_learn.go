@@ -15,7 +15,7 @@ func policyLearnCmd() *cobra.Command {
 	var layer policyLayerFlags
 	var dryRun, yes, asJSON bool
 	cmd := &cobra.Command{Use: "learn <host>/<session>", Short: "Turn selected observed network destinations into policy rules", Args: cobra.ExactArgs(1), ValidArgsFunction: firstArg(completeSessions),
-		Example: "  " + brand.Name + " policy learn box/auth-fix --repo . --dry-run\n  " + brand.Name + " policy learn box/auth-fix --profile review -y", RunE: func(cmd *cobra.Command, args []string) error {
+		Example: "  " + brand.Name + " policy learn my-vps/auth-fix --repo . --dry-run\n  " + brand.Name + " policy learn my-vps/auth-fix --profile review -y", RunE: func(cmd *cobra.Command, args []string) error {
 			restoreReplay := noPolicyReplayForDryRun(cmd, dryRun)
 			defer restoreReplay()
 			if layer.count() != 1 {

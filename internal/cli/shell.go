@@ -146,9 +146,9 @@ func shellCommand(selected *shellCommandSelection) *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVar(&forceNew, "new", false, "start a new shell even when one already runs")
-	cmd.Flags().StringVarP(&name, "name", "n", "", "name the new shell session")
-	cmd.Flags().BoolVar(&detach, "detach", false, "leave the shell running without attaching")
-	cmd.Flags().BoolVar(&asJSON, "json", false, "print the detached shell as JSON")
+	addName(cmd, &name, "name the new shell session")
+	addDetach(cmd, &detach, "leave the shell running without attaching")
+	addJSON(cmd, &asJSON)
 	return cmd
 }
 

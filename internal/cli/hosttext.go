@@ -14,8 +14,8 @@ import (
 // session ID before it prints it or puts it in a command for the user.
 
 // checkSessionID fails when id, the ID of a session that host sent, is not
-// one that a host makes: 1 to 64 letters, digits, - or _. Such an ID is
-// safe to print, and to put in a command line.
+// one that a host makes: 1 to 32 lower-case base32 characters (a-z, 2-7).
+// Such an ID is safe to print, and to put in a command line.
 func checkSessionID(host, id string) error {
 	if validSessionID(id) {
 		return nil

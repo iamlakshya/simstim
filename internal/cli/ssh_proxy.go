@@ -14,7 +14,7 @@ import (
 )
 
 func sshProxyCmd() *cobra.Command {
-	return &cobra.Command{Use: "ssh-proxy <session>.<host>." + brand.Name, Short: "Serve one sandbox SSH connection on standard input and output", Hidden: true, Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) (returned error) {
+	return &cobra.Command{Use: "ssh-proxy <session>.<host>." + brand.Name, Short: "Serve one sandbox SSH connection on standard input and output", Example: "  " + brand.Name + " ssh-proxy auth-fix.my-vps." + brand.Name, Hidden: true, Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) (returned error) {
 		session, host, err := client.ParseEditorSSHAlias(args[0])
 		if err != nil {
 			return err

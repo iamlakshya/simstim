@@ -29,9 +29,10 @@ type HelpGroup struct {
 var helpGroups = []HelpGroup{
 	{ID: "sessions", Title: "Sessions", Commands: []string{"new", "shell", "attach", "resume", "fork", "rewind", "ls", "show", "stop", "rm", "rename", "send", "ports", "forward", "pull", "cp", "events"}},
 	{ID: "hosts", Title: "Hosts", Commands: []string{"host"}},
+	{ID: "images", Title: "Images", Commands: []string{"image"}},
 	{ID: "policy", Title: "Policy", Commands: []string{"policy"}},
 	{ID: "agents", Title: "Agents", Commands: []string{"agents"}},
-	{ID: "setup", Title: "Setup and help", Commands: []string{"setup", "doctor", "debug", "config", "demo", "version", "completion", "help"}},
+	{ID: "setup", Title: "Setup and help", Commands: []string{"setup", "ssh-config", "doctor", "debug", "config", "demo", "version", "completion", "help"}},
 }
 
 // HelpGroups returns the root help's groups, for the reference docs.

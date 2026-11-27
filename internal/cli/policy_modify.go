@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"time"
 
@@ -27,7 +28,7 @@ func policyAddCmd(allow bool) *cobra.Command {
 	if allow {
 		verb = "allow"
 	}
-	cmd := &cobra.Command{Use: verb + " [net] <target>", ValidArgsFunction: completePolicyTargetDoor, Short: "Add an " + verb + " rule at one policy layer", Args: func(cmd *cobra.Command, args []string) error {
+	cmd := &cobra.Command{Use: verb + " [<door>] <target>", ValidArgsFunction: completePolicyTargetDoor, Short: "Add an " + verb + " rule at one policy layer", Args: func(cmd *cobra.Command, args []string) error {
 		if requestID != "" {
 			if len(args) != 0 {
 				return policyUsage("a held answer takes no target argument", "Use --request with --in and the original request ID, without a target.", "flags_conflict")
@@ -36,7 +37,7 @@ func policyAddCmd(allow bool) *cobra.Command {
 		}
 		return cobra.RangeArgs(1, 2)(cmd, args)
 	},
-		Example: "  " + brand.Name + " policy " + verb + " api.example.com --repo .\n  " + brand.Name + " policy " + verb + " api.example.com --in box/auth-fix --dry-run",
+		Example: "  " + brand.Name + " policy " + verb + " api.example.com --repo .\n  " + brand.Name + " policy " + verb + " api.example.com --in my-vps/auth-fix --dry-run",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			restoreReplay := noPolicyReplayForDryRun(cmd, dryRun)
 			defer restoreReplay()
@@ -81,7 +82,7 @@ func policyAddCmd(allow bool) *cobra.Command {
 			}
 			selectedTools, err := api.CanonicalModelTools(tools)
 			if err != nil {
-				return client.PolicyError(err)
+				return policyUsage(client.CleanLine(err.Error()), "Choose from: "+strings.Join(api.ModelToolNames(), ", ")+".", "bad_tools")
 			}
 			if cmd.Flags().Changed("tools") && (len(selectedTools) == 0 || !allow || layer.in == "") {
 				return policyUsage("--tools needs a non-empty session allowance", "Pass --in and one or more named capabilities to policy allow.", "bad_tools")
@@ -103,7 +104,12 @@ func policyAddCmd(allow bool) *cobra.Command {
 			rule := api.Rule{Allow: allow, Door: door, Target: canonical, Once: once, Until: until, Tools: selectedTools}
 			if len(rule.Tools) > 0 {
 				if err := egress.CheckRuleAddition(api.Policy{}, rule); err != nil {
-					return client.PolicyError(err)
+					pe := client.PolicyError(err)
+					var ue *client.UserError
+					if errors.As(pe, &ue) {
+						return policyUsage(ue.Msg, ue.Hint, "bad_tools")
+					}
+					return pe
 				}
 			}
 			if layer.in == "" {
@@ -192,9 +198,9 @@ func policyAddCmd(allow bool) *cobra.Command {
 	layer.add(cmd)
 	addDryRun(cmd, &dryRun, "show the rule without writing or sending a mutation")
 	if allow {
-		cmd.Use = "allow [net] [<target>]"
+		cmd.Use = "allow [<door>] [<target>]"
 		cmd.Long = "Allow a destination at one selected policy layer. With --request, answer an original held request by opaque ID and exact session ID. Upload budget holds support only --once or policy refuse; change network.upload_budget through policy edit for a higher limit."
-		cmd.Example += "\n  " + brand.Name + " policy allow --request <request-ID> --in box/<session-ID> --once"
+		cmd.Example += "\n  " + brand.Name + " policy allow --request <request-ID> --in my-vps/<session-ID> --once"
 		cmd.Flags().StringVar(&requestID, "request", "", "answer a live held network request by its opaque ID; upload budgets support only --once")
 		cmd.Flags().BoolVar(&publicPush, "public", false, "acknowledge that this exact repository push publishes to a public repository")
 		addList(cmd.Flags(), &tools, "tools", "allow model capabilities for this session: a comma-separated list, or the flag again")

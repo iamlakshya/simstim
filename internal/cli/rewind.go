@@ -29,7 +29,7 @@ func rewindCmd() *cobra.Command {
 		Long: "Lists a microvm sandbox's disk checkpoints, newest first, numbered from 1. Choose a number\n" +
 			"to restore its files and conversation. Rewind makes an undo checkpoint first, then starts the\n" +
 			"sandbox cold. Without a number it asks at a terminal. Reflink support is required on the host.",
-		Example: "  " + brand.Name + " rewind box/auth-fix --list\n  " + brand.Name + " rewind box/auth-fix 2 -y",
+		Example: "  " + brand.Name + " rewind my-vps/auth-fix --list\n  " + brand.Name + " rewind my-vps/auth-fix 2 -y",
 		Args:    cobra.RangeArgs(1, 2), ValidArgsFunction: completeSessionArg,
 		RunE: func(cmd *cobra.Command, words []string) error {
 			if list && len(words) > 1 {

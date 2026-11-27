@@ -191,6 +191,13 @@ func hintOf(err error) string {
 // cleaned and cut as the details show it, including map keys. The scripted
 // host-show info object retains its original data and uses jsonSafe instead.
 func cleanJSON(v any) any {
+	if raw, ok := v.(json.RawMessage); ok {
+		var decoded any
+		if err := json.Unmarshal(raw, &decoded); err != nil {
+			return client.CleanDetail(string(raw))
+		}
+		return cleanJSON(decoded)
+	}
 	switch v := v.(type) {
 	case map[string]any:
 		return cleanKeys(v)
@@ -212,13 +219,26 @@ func cleanKeys(m map[string]any) map[string]any {
 	return renamedDisplay(m, displayNames(slices.Collect(maps.Keys(m))))
 }
 
+func jsonObjectMap(v any) map[string]any {
+	if m, ok := v.(map[string]any); ok {
+		return m
+	}
+	if raw, ok := v.(json.RawMessage); ok {
+		var m map[string]any
+		if json.Unmarshal(raw, &m) == nil {
+			return m
+		}
+	}
+	return nil
+}
+
 // cleanInfo is what the host said about itself, cleaned as cleanJSON
 // cleans it. Its tables of agents and of their versions share one name
 // for each agent, so a version never shows under the name of another
 // agent, also where two names clean to one.
 func cleanInfo(info map[string]any) map[string]any {
-	agents, _ := info["agents"].(map[string]any)
-	versions, _ := info["agent_versions"].(map[string]any)
+	agents := jsonObjectMap(info["agents"])
+	versions := jsonObjectMap(info["agent_versions"])
 	names := displayNames(slices.Concat(slices.Collect(maps.Keys(agents)), slices.Collect(maps.Keys(versions))))
 	out := cleanKeys(info)
 	if agents != nil {

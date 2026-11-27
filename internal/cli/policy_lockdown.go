@@ -14,7 +14,7 @@ func policyLockdownCmd() *cobra.Command {
 	var off, asJSON bool
 	cmd := &cobra.Command{Use: "lockdown", Short: "Pause session allowances and refuse unknown network destinations", Args: cobra.NoArgs,
 		Long:    "Applies the locked preset and refuses unknown destinations on every reached sandbox. Session allowances pause; session denies and broader rules remain. Refused open flows close. The host keeps the restriction for later starts, including starts from another laptop. --off removes only this restriction and needs the literal word lockdown. It applies no local policy edits and fetches no credentials. Unreached hosts stay pending and make this command fail.",
-		Example: "  " + brand.Name + " policy lockdown\n  " + brand.Name + " policy lockdown --host box\n  " + brand.Name + " policy lockdown --off --confirm=lockdown", RunE: func(cmd *cobra.Command, _ []string) error {
+		Example: "  " + brand.Name + " policy lockdown\n  " + brand.Name + " policy lockdown --host my-vps\n  " + brand.Name + " policy lockdown --off --confirm=lockdown", RunE: func(cmd *cobra.Command, _ []string) error {
 			if off && literal == "" {
 				if !inputOn(cmd) {
 					return &client.UserError{Msg: "lifting lockdown needs the literal word lockdown", Hint: prompts(cmd).withFlags("--off", "--confirm=lockdown"), Code: "lockdown_confirm", Kind: client.KindNeedsAnswer}
@@ -71,7 +71,7 @@ func policyLockdownCmd() *cobra.Command {
 		}}
 	addHostFlag(cmd, &hostName, "change lockdown on this saved host only")
 	cmd.Flags().BoolVar(&off, "off", false, "lift only the lockdown restriction")
-	cmd.Flags().StringVar(&literal, "confirm", "", "the literal word lockdown, required with --off when input is off")
+	addConfirm(cmd, &literal, "the literal word lockdown, required with --off when input is off")
 	addJSON(cmd, &asJSON)
 	return cmd
 }

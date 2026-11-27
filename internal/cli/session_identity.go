@@ -64,7 +64,7 @@ func sessionArg(cmd *cobra.Command, args []string, strict bool) (address, error)
 			return address{}, err
 		}
 		h, err := client.FindHost(host)
-		return address{host: h, ref: ref, byID: true}, err
+		return address{host: h, ref: ref, byID: true, gone: fmt.Sprintf("no session %q on %s", ref, shown(h.Name))}, err
 	}
 	if len(args) > 0 {
 		return resolveAddress(cmd, args[0], strict)

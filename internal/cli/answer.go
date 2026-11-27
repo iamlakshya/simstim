@@ -31,6 +31,15 @@ import (
 // and keys.ReadUntil. A test fails on a direct read of os.Stdin anywhere
 // else (TestNoDirectReadOfStdin).
 
+// readBounded reads at most limit bytes from a non-interactive stream.
+func readBounded(in io.Reader, limit int64) ([]byte, error) {
+	data, err := io.ReadAll(io.LimitReader(in, limit))
+	if err != nil {
+		return nil, fmt.Errorf("read input: %w", err)
+	}
+	return data, nil
+}
+
 // interruptError is the error of a question that a signal or the end of
 // its context ended. It is a cancel, never an answer: a caller stops at
 // it, before it keeps or acts on anything. It counts as context.Canceled,
@@ -447,46 +456,4 @@ func (o oneByte) Read(p []byte) (int, error) {
 		p = p[:1]
 	}
 	return o.CancelReader.Read(p) //nolint:wrapcheck // a reader passes its reader's errors on as they are
-}
-
-// stoppingWatch is called as stopping's watcher of signals starts. Tests
-// hold it there, so that only stopping's own look at a signal that has
-// come can end its context.
-var stoppingWatch = func() {}
-
-// stopping is ctx, which also ends at a signal.
-func stopping(ctx context.Context) (context.Context, context.CancelFunc) {
-	sctx, cancel := context.WithCancel(ctx)
-	if signalled() {
-		// A signal that came before: sctx has ended already, at once.
-		cancel()
-		return sctx, cancel
-	}
-	// The caller reads the hook, so a later test's hook never races with
-	// a watcher that an earlier test started.
-	signal, watch := interrupted, stoppingWatch
-	go func() {
-		watch()
-		select {
-		case <-signal:
-			cancel()
-		case <-sctx.Done():
-		}
-	}()
-	return sctx, cancel
-}
-
-// stopped reports whether ctx has ended or a signal has come.
-func stopped(ctx context.Context) bool {
-	return ctx.Err() != nil || signalled()
-}
-
-// signalled reports whether a signal has come.
-func signalled() bool {
-	select {
-	case <-interrupted:
-		return true
-	default:
-		return false
-	}
 }

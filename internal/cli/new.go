@@ -269,7 +269,7 @@ func newCmd() *cobra.Command {
 	f := cmd.Flags()
 	f.StringVar(&machineProvider, "machine", "", "make one provider machine for this session (e2b), removed by rm")
 	f.StringArrayVar(&needs, "need", nil, "require automatic placement architecture, tier or local features (repeatable)")
-	f.BoolVar(&dryRun, "dry-run", false, "show automatic placement without starting or waking a host")
+	addDryRun(cmd, &dryRun, "show automatic placement without starting or waking a host")
 	f.BoolVar(&allowWake, "allow-wake", false, "allow an automatic paid wake without its extra question")
 	f.StringVarP(&agent, "agent", "a", "shell", "the agent: "+agentKinds())
 	f.StringVarP(&dir, "dir", "C", "~", "the folder on the host")

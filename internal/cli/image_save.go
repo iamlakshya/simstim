@@ -19,8 +19,9 @@ func imageSaveCmd() *cobra.Command {
 		Long: "Saves a running microvm's root image and system changes after a review.\n" +
 			"Workspaces, credentials, agent state and temporary files are left out.\n" +
 			"Treat the image as private to its host: a login copied to another path can remain in it.",
-		Example: "  " + brand.Name + " image save box/work devtools\n  " + brand.Name + " new box --image devtools",
-		Args:    cobra.ExactArgs(2),
+		Example:           "  " + brand.Name + " image save my-vps/auth-fix devtools\n  " + brand.Name + " new my-vps --image devtools",
+		Args:              cobra.ExactArgs(2),
+		ValidArgsFunction: firstArg(completeSessionArg),
 		RunE: func(cmd *cobra.Command, args []string) (returned error) {
 			if !image.ValidSaveRef(args[1]) {
 				return &client.UserError{Code: "bad_image_ref", Kind: client.KindUsage,
@@ -39,7 +40,7 @@ func imageSaveCmd() *cobra.Command {
 			}()
 			ctx := client.WithGrantRequest(client.WithoutWake(original), request)
 			cmd.SetContext(ctx)
-			return address.open(ctx, cmd, func(_ context.Context, found found) (returned error) {
+			return address.open(ctx, cmd, func(ctx context.Context, found found) (returned error) {
 				options := client.ImageSaveOptions{Replace: replace, AllowFlagged: allowFlagged, Terminal: secretTerminal(cmd)}
 				var prepared *client.ImageSave
 				handedOff := false
@@ -49,20 +50,22 @@ func imageSaveCmd() *cobra.Command {
 					}
 				}()
 				for {
-					operation, err := client.PrepareImageSave(cmd.Context(), found.conn, found.s.ID, args[1], options)
+					operation, err := client.PrepareImageSave(ctx, found.conn, found.s.ID, args[1], options)
 					if operation != nil {
 						prepared = operation
 					}
 					if err == nil {
 						handedOff = true
-						return finishImageSave(cmd, operation, prompts(cmd), allowFlagged, asJSON)
+						return finishImageSave(ctx, cmd, operation, sessionPrompts(cmd, found.host.Name, found.s.ID), allowFlagged, asJSON)
 					}
 					var question *client.ConfirmError
 					if !errors.As(err, &question) {
 						return err
 					}
-					if err := answerGrant(cmd, err, question); err != nil {
-						return err
+					var answerErr error
+					ctx, answerErr = answerGrantOn(cmd, nil, ctx, err, question)
+					if answerErr != nil {
+						return answerErr
 					}
 				}
 			})

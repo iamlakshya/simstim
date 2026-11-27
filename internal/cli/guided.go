@@ -90,6 +90,7 @@ type guide struct {
 	// unlockHost lets go of the lock of the host that the setup makes,
 	// which it holds from the create through the save of the connect.
 	unlockHost func()
+	baseCtx    context.Context
 }
 
 func newGuide(ctx context.Context, o guideOpts, local onboard.Local) *guide {
@@ -417,12 +418,17 @@ func (g *guide) create(kind string) (client.Host, error) {
 	fmt.Fprintf(g.out, "\nCreating %s with %s…\n", name, kind)
 	// No host rm of this name runs from here through the save of the
 	// connect, which ends the lock (releaseHost).
-	ctx, unlock, err := client.LockHost(g.ctx, name, "setup")
+	ctx, unlock, err := client.BeginHostCreationContextWithKind(g.ctx, client.HostCreationRequest{Name: name, Provider: kind}, "setup")
 	if err != nil {
 		return client.Host{}, err
 	}
+	g.baseCtx = g.ctx
 	g.ctx, g.unlockHost = ctx, unlock
 	h, err := g.local.Create(g.ctx, kind, name, g.out)
+	if err != nil {
+		return client.Host{}, err
+	}
+	g.ctx, err = client.ContinueHostCreationContext(g.ctx)
 	if err != nil {
 		return client.Host{}, err
 	}
@@ -436,6 +442,10 @@ func (g *guide) releaseHost() {
 	if g.unlockHost != nil {
 		g.unlockHost()
 		g.unlockHost = nil
+	}
+	if g.baseCtx != nil {
+		g.ctx = g.baseCtx
+		g.baseCtx = nil
 	}
 }
 

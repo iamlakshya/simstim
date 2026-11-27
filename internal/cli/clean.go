@@ -30,7 +30,10 @@ func printPorts(w io.Writer, ports []client.Port) {
 // text, the step to try too.
 func printRestore(w io.Writer, res []api.RestoreResult) {
 	for _, r := range res {
-		r.ID, r.Name, r.Action = client.CleanLine(r.ID), client.CleanLine(r.Name), client.CleanLine(r.Action)
+		if !validSessionID(r.ID) {
+			r.ID = "<invalid>"
+		}
+		r.Name, r.Action = client.CleanLine(r.Name), client.CleanLine(r.Action)
 		r.Why, r.Hint = client.CleanLine(r.Why), client.CleanLine(r.Hint)
 		fmt.Fprint(w, r.Text())
 	}

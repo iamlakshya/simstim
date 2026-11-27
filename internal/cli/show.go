@@ -23,7 +23,7 @@ func showCmd() *cobra.Command {
 	var asJSON, screen bool
 	cmd := &cobra.Command{
 		Use:   "show [<host>/<session>|-]",
-		Short: "Describe one session: its agent, state, folder and the command that attaches to it",
+		Short: "Describe one session: its agent, state, folder and attach command",
 		Long: "Prints everything about one session, one line for each detail that it has. With --screen, it prints\n" +
 			"the session's last screen as plain text instead, or adds it as screen with --json. Without a session,\n" +
 			"and at a terminal, it lets you pick one from a list. It does not wake a stopped host.",

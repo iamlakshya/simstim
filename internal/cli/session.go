@@ -18,7 +18,7 @@ import (
 	"github.com/iamlakshya/simstim/internal/tui"
 )
 
-func isTerminal(f *os.File) bool { return term.IsTerminal(int(f.Fd())) }
+var isTerminal = func(f *os.File) bool { return term.IsTerminal(int(f.Fd())) }
 
 func termSize() (int, int) { return termSizeOf(os.Stdout) }
 

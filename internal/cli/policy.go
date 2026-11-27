@@ -17,7 +17,7 @@ import (
 func policyCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "policy", Short: "Read and change sandbox policy at any layer", Args: cobra.NoArgs,
 		Long:    "Policy has six layers, from broadest to narrowest: built-in, all sessions, host, repository, profile and session.\nThe narrowest matching layer decides. A deny wins inside that layer. Top-level and host locks win over every layer.\nLists add up; a leading ! removes an inherited item. Profiles follow repository sections.\nFile-layer changes reach running sandboxes on reachable hosts. Other sandbox settings apply at the next start. Live held network requests appear with session policy when the helper supports them.",
-		Example: "  " + brand.Name + " policy allow api.example.com --repo .\n  " + brand.Name + " policy deny paste.example.net --all\n  " + brand.Name + " policy check api.example.com --host box --profile review"}
+		Example: "  " + brand.Name + " policy allow api.example.com --repo .\n  " + brand.Name + " policy deny paste.example.net --all\n  " + brand.Name + " policy check api.example.com --host my-vps --profile review"}
 	cmd.AddCommand(policyAllowCmd(), policyDenyCmd(), policyRmCmd(), policyLsCmd(), policyCheckCmd(), policyLogCmd(), policyApplyCmd(), policyEditCmd(), policyLearnCmd(), policyLockdownCmd(), policyRefuseCmdV1())
 	return cmd
 }

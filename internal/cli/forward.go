@@ -71,8 +71,8 @@ func forwardCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "forward <host>/<session> [<port>…]",
 		Short: "Forward chosen session ports, or one laptop port in reverse",
-		Long: "Forwards the named session ports to 127.0.0.1 on this machine until Ctrl+C.\n" +
-			"Write local:guest to choose another local port. A sandbox forward grants that exact guest port\n" +
+		Long: "Forwards the named session ports to 127.0.0.1 on this machine, through an SSH connection of its own,\n" +
+			"until Ctrl+C. Write local:guest to choose another local port. A sandbox forward grants that exact guest port\n" +
 			"and uses a private Unix socket on the host. With no port, a sandbox lists its claimed ports and asks.\n" +
 			"Use --reverse laptop[:guest] to reach one laptop loopback service from a sandbox on an own host.\n" +
 			"SSH forwards refuse RemoteForward, Tunnel and ForkAfterAuthentication yes in the host's SSH config.",

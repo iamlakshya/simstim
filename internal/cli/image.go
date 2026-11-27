@@ -4,20 +4,25 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/iamlakshya/simstim/internal/brand"
 	"github.com/iamlakshya/simstim/internal/client"
 	"github.com/iamlakshya/simstim/internal/image"
 	"github.com/spf13/cobra"
 )
 
 func imageCmd() *cobra.Command {
-	command := &cobra.Command{Use: "image", Short: "List, pull, save and remove microvm root images"}
+	command := &cobra.Command{
+		Use:     "image",
+		Short:   "List, pull, save and remove microvm root images",
+		Example: "  " + brand.Name + " image ls my-vps\n  " + brand.Name + " image pull ubuntu:24.04 my-vps",
+	}
 	command.AddCommand(imageListCmd(), imagePullCmd(), imageSaveCmd(), imageRemoveCmd())
 	return command
 }
 
 func imageListCmd() *cobra.Command {
 	var asJSON bool
-	command := &cobra.Command{Use: "ls [<host>]", Short: "List a host's prepared images", Args: cobra.MaximumNArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+	command := &cobra.Command{Use: "ls [<host>]", Short: "List a host's prepared images", Example: "  " + brand.Name + " image ls\n  " + brand.Name + " image ls my-vps", Args: cobra.MaximumNArgs(1), ValidArgsFunction: completeHostArg, RunE: func(cmd *cobra.Command, args []string) error {
 		hosts, err := client.LoadHosts()
 		if err != nil {
 			return err
@@ -82,7 +87,7 @@ func imageListCmd() *cobra.Command {
 func imagePullCmd() *cobra.Command {
 	var update, asJSON bool
 	var mode string
-	command := &cobra.Command{Use: "pull <ref> <host>", Short: "Pin an OCI image on this laptop and prepare it on a host", Args: cobra.ExactArgs(2), RunE: func(cmd *cobra.Command, args []string) error {
+	command := &cobra.Command{Use: "pull <ref> <host>", Short: "Pin an OCI image on this laptop and prepare it on a host", Example: "  " + brand.Name + " image pull ubuntu:24.04 my-vps", Args: cobra.ExactArgs(2), ValidArgsFunction: completeSecondHostArg, RunE: func(cmd *cobra.Command, args []string) error {
 		if err := client.ValidateSettings(client.LoadSettings()); err != nil {
 			return err
 		}
@@ -110,11 +115,18 @@ func imagePullCmd() *cobra.Command {
 }
 
 func imageRemoveCmd() *cobra.Command {
-	return &cobra.Command{Use: "rm <digest> <host>", Short: "Remove an image that no session uses", Args: cobra.ExactArgs(2), RunE: func(cmd *cobra.Command, args []string) error {
+	return &cobra.Command{Use: "rm <digest> <host>", Short: "Remove an image that no session uses", Example: "  " + brand.Name + " image rm sha256:abcd my-vps", Args: cobra.ExactArgs(2), ValidArgsFunction: completeSecondHostArg, RunE: func(cmd *cobra.Command, args []string) error {
 		return withImageHost(cmd.Context(), args[1], func(ctx context.Context, _ client.Host, c *client.Conn) error {
 			return client.RemoveImage(ctx, c, args[0])
 		})
 	}}
+}
+
+func completeSecondHostArg(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	if len(args) == 1 {
+		return completeHostArg(cmd, nil, toComplete)
+	}
+	return nil, cobra.ShellCompDirectiveNoFileComp
 }
 
 // Image conversion can outlast the general host operations' 90 second limit.

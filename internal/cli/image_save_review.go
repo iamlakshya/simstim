@@ -25,9 +25,9 @@ var qImageFlagged = &question{cmd: "image save", flag: "--allow-flagged"}
 
 func init() { questions = append(questions, qImageFlagged) }
 
-func finishImageSave(cmd *cobra.Command, operation imageSaveOperation, p *prompter, allowFlagged, asJSON bool) (returned error) {
+func finishImageSave(ctx context.Context, cmd *cobra.Command, operation imageSaveOperation, p *prompter, allowFlagged, asJSON bool) (returned error) {
 	defer func() { returned = errors.Join(returned, operation.Close()) }()
-	if err := cmd.Context().Err(); err != nil {
+	if err := ctx.Err(); err != nil {
 		return err
 	}
 	review := operation.Review()
@@ -55,14 +55,14 @@ func finishImageSave(cmd *cobra.Command, operation imageSaveOperation, p *prompt
 		}
 		allowFlagged = true
 	}
-	if err := cmd.Context().Err(); err != nil {
+	if err := ctx.Err(); err != nil {
 		return err
 	}
 	if allowFlagged {
 		operation.AllowFlagged()
 	}
 	var result image.SaveResult
-	if err := grantQuestions(cmd, func(ctx context.Context) error {
+	if _, err := grantQuestionsOn(cmd, nil, ctx, func(ctx context.Context) error {
 		var err error
 		result, err = operation.Keep(ctx)
 		return err

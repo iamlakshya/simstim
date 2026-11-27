@@ -181,7 +181,7 @@ func oneLineText(s string) string {
 // (docs/contributing/cli-spec.md 4.1).
 func (r report) print(w io.Writer, colour bool) {
 	if r.bare {
-		fmt.Fprintln(w, client.CleanBlock(r.msg))
+		fmt.Fprintln(w, shown(r.msg))
 		return
 	}
 	red, blue, bold, reset := "\x1b[31m", "\x1b[34m", "\x1b[1m", "\x1b[0m"

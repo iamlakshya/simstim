@@ -53,7 +53,7 @@ func hostInviteCmd() *cobra.Command {
 }
 func readJoinCode(cmd *cobra.Command, p *prompter, invite bool) (string, error) {
 	if !p.on {
-		b, err := io.ReadAll(io.LimitReader(cmd.InOrStdin(), code.MaxCode+1))
+		b, err := readBounded(cmd.InOrStdin(), code.MaxCode+1)
 		if err != nil {
 			return "", err
 		}
@@ -86,7 +86,7 @@ func readJoinCode(cmd *cobra.Command, p *prompter, invite bool) (string, error) 
 }
 func hostJoinCmd() *cobra.Command {
 	var options localJoinOptionsV1
-	var memory string
+	var memory sizeValue
 	var yes bool
 	cmd := &cobra.Command{Use: "join", Example: "  " + brand.Name + " host join", Short: "Prepare this machine from a laptop invite on standard input", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 		p := joinPrompts(cmd)
@@ -101,12 +101,7 @@ func hostJoinCmd() *cobra.Command {
 		if !yes && !p.on {
 			return p.needs(qJoinChanges, "a yes to the machine changes", "--yes")
 		}
-		if memory != "" {
-			options.MemoryBytes, _, err = parseSize(memory, false)
-			if err != nil {
-				return err
-			}
-		}
+		options.MemoryBytes = memory.bytes
 		if cmd.Flags().Changed("cpus") && options.CPUs <= 0 {
 			return &client.UserError{Msg: "--cpus needs a positive count", Hint: "Use --cpus 2, or omit it to use the platform's default.", Code: "bad_value", Kind: client.KindUsage}
 		}
@@ -145,8 +140,8 @@ func hostJoinCmd() *cobra.Command {
 	cmd.Flags().StringVar(&options.Account, "account", brand.Name, "the new or existing non-root login account")
 	cmd.Flags().StringSliceVar(&options.Addresses, "address", nil, "an address the laptop can reach (repeat for more than one)")
 	cmd.Flags().Uint16Var(&options.Port, "port", 22, "the machine's outer SSH port")
-	cmd.Flags().IntVar(&options.CPUs, "cpus", 0, "on a Mac, the CPUs for its Linux VM")
-	cmd.Flags().StringVar(&memory, "memory", "", "on a Mac, the memory for its Linux VM, such as 8G")
+	addCPUs(cmd, &options.CPUs, 0, "on a Mac, the CPUs for its Linux VM")
+	addMemory(cmd, &memory, "on a Mac, the memory for its Linux VM, such as 8G")
 	cmd.Flags().BoolVar(&options.AllowACSleepChange, "ac-awake", false, "on a Mac, explicitly allow the displayed AC sleep change")
 	cmd.Flags().StringVar(&options.StartMode, "start-mode", "", "on a Mac, daemon or user-agent (default: daemon)")
 	cmd.Flags().StringVar(&options.AgentUser, "agent-user", "", "on a Mac, the existing account for explicit user-agent mode")

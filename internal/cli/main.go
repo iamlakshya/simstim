@@ -94,7 +94,7 @@ func Root() *cobra.Command {
 			return runHome(cmd)
 		},
 	}
-	root.AddCommand(sshConfigCmd(), sshProxyCmd(), setupCmd(), hostCmd(), newCmd(), shellCmd(), lsCmd(), showCmd(), agentsCmd(), attachCmd(), resumeCmd(), forkCmd(), rewindCmd(), flipCmd(), sendCmd(), rmCmd(), killCmd(), renameCmd(), portsCmd(), forwardCmd(), pullCmd(), cpCmd(), eventsCmd(), policyCmd(), stopCmd(), doctorCmd(), debugCmd(), configCmd(), demoCmd(), versionCmd())
+	root.AddCommand(sshConfigCmd(), sshProxyCmd(), setupCmd(), hostCmd(), imageCmd(), newCmd(), shellCmd(), lsCmd(), showCmd(), agentsCmd(), attachCmd(), resumeCmd(), forkCmd(), rewindCmd(), flipCmd(), sendCmd(), rmCmd(), killCmd(), renameCmd(), portsCmd(), forwardCmd(), pullCmd(), cpCmd(), eventsCmd(), policyCmd(), stopCmd(), doctorCmd(), debugCmd(), configCmd(), demoCmd(), versionCmd())
 	root.AddCommand(topics()...)
 	addRootFlags(root)
 	addDebugFlags(root)

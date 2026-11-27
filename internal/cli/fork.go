@@ -21,7 +21,7 @@ func forkCmd() *cobra.Command {
 		Long: "Copies a sandbox's files and conversation into new sessions. Each child starts cold with its\n" +
 			"own session identity and admission check. The source keeps running after the copy. A single\n" +
 			"child attaches unless --detach is set. --count starts several children without attaching.",
-		Example: "  " + brand.Name + " fork box/auth-fix\n  " + brand.Name + " fork box/auth-fix --count 3 --json",
+		Example: "  " + brand.Name + " fork my-vps/auth-fix\n  " + brand.Name + " fork my-vps/auth-fix --count 3 --json",
 		Args:    cobra.ExactArgs(1), ValidArgsFunction: completeSessionArg,
 		RunE: func(cmd *cobra.Command, words []string) error {
 			counted := cmd.Flags().Changed("count")

@@ -17,8 +17,8 @@ import (
 func checkFreshMemberFlags(cmd *cobra.Command) error {
 	allowed := map[string]bool{"in": true, "agent": true, "name": true, "task": true, "detach": true, "json": true}
 	var refused string
-	cmd.LocalFlags().Visit(func(flag *pflag.Flag) {
-		if !allowed[flag.Name] && refused == "" {
+	cmd.LocalFlags().VisitAll(func(flag *pflag.Flag) {
+		if flag.Changed && !allowed[flag.Name] && refused == "" {
 			refused = flag.Name
 		}
 	})

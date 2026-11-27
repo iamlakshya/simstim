@@ -37,7 +37,7 @@ func encodeLocalJoinEnvelopeV1(kind, invite string, options localJoinOptionsV1) 
 }
 func decodeLocalJoinEnvelopeV1(in io.Reader, kind string) (localJoinEnvelopeV1, error) {
 	var request localJoinEnvelopeV1
-	body, err := io.ReadAll(io.LimitReader(in, (16<<10)+1))
+	body, err := readBounded(in, (16<<10)+1)
 	if err != nil {
 		return request, err
 	}

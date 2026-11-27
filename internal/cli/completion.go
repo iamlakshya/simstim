@@ -47,7 +47,7 @@ func polishCompletionCmd(root *cobra.Command) {
 	if err != nil || comp == nil || comp == root {
 		return
 	}
-	comp.Short = "Print the shell completion script for bash, zsh, fish or PowerShell"
+	comp.Short = "Print the completion script for bash, zsh, fish or PowerShell"
 	comp.Long = "Completion fills in commands, flags, saved hosts, cached sessions and agents from local files.\n" +
 		"It never connects to a host. See docs/how-to/shell-completion.md."
 	see := "\nSee docs/how-to/shell-completion.md."

@@ -68,13 +68,12 @@ func say(cmd *cobra.Command, format string, a ...any) {
 // warning with code. The message may hold a host's error, so it prints
 // cleaned.
 func note(cmd *cobra.Command, code, msg string) {
-	msg = shownNote(msg)
 	if cmd != nil && jsonOn(cmd) {
 		line, _ := json.Marshal(map[string]any{"v": jsonVersion, "warning": map[string]string{"code": code, "message": msg}})
 		fmt.Fprintf(os.Stderr, "%s\n", jsonSafe(line))
 		return
 	}
-	fmt.Fprintln(os.Stderr, shown(msg))
+	fmt.Fprintln(os.Stderr, shownNote(msg))
 }
 
 // warningFor returns a client.WarnFunc that writes client warnings (such
