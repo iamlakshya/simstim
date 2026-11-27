@@ -22,7 +22,7 @@ var sessionOps = map[string]bool{
 	"events.watch":   true,
 	"port.grant":     true, "port.reverse": true, "ports": true, "ports.view": true,
 	"sandbox.probe": true,
-	"policy.ls":     true, "policy.add": true, "policy.rm": true, "policy.log": true,
+	"policy.ls":     true, "policy.add": true, "policy.rm": true, "policy.log": true, "policy.replace": true, "policy.lockdown": true,
 	api.SandboxReviewContextOp: true, "inputs.begin": true, inputtransfer.Describe: true, "sandbox.snapshot": true, "exec": true, "spawn": true,
 	"delete": true, "resume": true, "restore": true, "send": true, "peek": true, "rename": true, "kill": true,
 }

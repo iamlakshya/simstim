@@ -111,6 +111,9 @@ func resolveLayerValues(layers []api.Layer) (api.LayerValues, []api.ValueOrigin,
 		}
 		return nil
 	})
+	if len(origins) == 0 {
+		return merged, nil, locks, nil
+	}
 	keys := make([]string, 0, len(origins))
 	for key := range origins {
 		keys = append(keys, key)

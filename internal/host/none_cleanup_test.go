@@ -2,15 +2,15 @@ package host
 
 import (
 	"context"
-	"github.com/iamlakshya/simstim/internal/cachefs"
-	"strings"
 	"testing"
 	"time"
+
+	"github.com/iamlakshya/simstim/internal/cachefs"
 )
 
 func noneCleanFixtureV1() Manifest {
 	at := time.Unix(100, 0).UTC()
-	boot := strings.Repeat("a", 32)
+	boot := "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
 	return Manifest{ID: "a2a2a2a2", Wall: &WallRecord{Level: "none", Driver: "none"}, Run: Runtime{BootID: boot, Generation: "original-run", HolderPID: 1001}, Life: &Life{Phase: LifeStopped, End: &LifeEnd{Kind: EndStop, At: at}}, NoneCleanup: &NoneCleanupV1{Version: 1, Scope: "n5", Boot: boot, Generation: "original-run", SupervisorPID: 1001, InitPID: 1002, SupervisorBirth: "42", InitBirth: "43", At: at.Add(time.Second), Directory: cachefs.Reference{Version: 1, Identity: "fixture-directory-data", Mode: 0700, Modified: at, Directory: true}, Holder: cachefs.Reference{Version: 1, Identity: "fixture-holder-data", Mode: 0600, Modified: at}}}
 }
 
@@ -28,7 +28,7 @@ func TestNoneCleanupDataRequiresTheExactOriginalRunAndScope(t *testing.T) {
 		"sandbox-end":           func(m *Manifest) { m.Life.End.Kind = EndSandbox },
 		"missing-end":           func(m *Manifest) { m.Life.End = nil },
 		"stale-generation":      func(m *Manifest) { m.Run.Generation = "new-run" },
-		"stale-boot":            func(m *Manifest) { m.Run.BootID = strings.Repeat("b", 32) },
+		"stale-boot":            func(m *Manifest) { m.Run.BootID = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb" },
 		"wrong-pid":             func(m *Manifest) { m.Run.HolderPID++ },
 		"same-actor":            func(m *Manifest) { m.NoneCleanup.InitPID = m.NoneCleanup.SupervisorPID },
 		"whole-unit-scope":      func(m *Manifest) { m.NoneCleanup.Scope = "unit" },

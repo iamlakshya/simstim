@@ -23,6 +23,15 @@ func decodeNewArgs(raw json.RawMessage) (NewArgs, error) {
 			return args, err
 		}
 	}
+	if wall, present := fields["wall"]; present {
+		var level string
+		if bytes.Equal(bytes.TrimSpace(wall), []byte("null")) || json.Unmarshal(wall, &level) != nil {
+			return args, UserError("bad_wall", "the requested wall must be a string", "Choose auto, none, process, gvisor or microvm.")
+		}
+		if err := checkRequestedWall(level); err != nil {
+			return args, err
+		}
+	}
 	if !api.ExactJSONFields(raw, (*api.NewArgs)(nil)) {
 		return args, UserError("bad_request", "new needs exact supported request fields", "Use a matching client and its original sealed start request.")
 	}
@@ -41,15 +50,6 @@ func decodeNewArgs(raw json.RawMessage) (NewArgs, error) {
 		}
 		if _, err := vmneed.DecodeV1(value, runtime.GOARCH); err != nil {
 			return args, UserError("bad_runtime", "the original VM Need is unsupported or malformed", "Prepare a supported Need through the original client request.")
-		}
-	}
-	if wall, present := fields["wall"]; present {
-		var level string
-		if bytes.Equal(bytes.TrimSpace(wall), []byte("null")) || json.Unmarshal(wall, &level) != nil {
-			return args, UserError("bad_wall", "the requested wall must be a string", "Choose auto, none, process, gvisor or microvm.")
-		}
-		if err := checkRequestedWall(level); err != nil {
-			return args, err
 		}
 	}
 	if delivery, present := fields["secret_delivery"]; present {

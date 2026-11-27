@@ -38,7 +38,7 @@ func decodeNoneDirectoryCreationV1(m *Manifest) (*noneDirectoryCreationV1, error
 	if err != nil || len(fields) != 8 || !api.ExactJSONFields(m.NoneDirectoryCreation, record) || json.Unmarshal(m.NoneDirectoryCreation, &record) != nil {
 		return nil, noneDirectoryOriginErrorV1("the original None directory creation data is unknown or changed")
 	}
-	if record.Version != 1 || record.Primary != m.ID || !api.ValidSessionID(record.Primary) || record.Boot != m.Run.BootID || !validNoneMigrationBootV1(record.Boot) || record.Generation == "" || record.Generation != m.Run.Generation || len(record.Generation) > 64 || !record.Parent.Known() || !record.Parent.Directory || record.Parent.Mode != 0700 || !record.Directory.Known() || !record.Directory.Directory || record.Directory.Mode != 0700 {
+	if record.Version != 1 || record.Primary != m.ID || !api.ValidSessionID(record.Primary) || record.Boot != m.Run.BootID || !auxiliaryBootIDV1(record.Boot) || record.Generation == "" || record.Generation != m.Run.Generation || len(record.Generation) > 64 || !record.Parent.Known() || !record.Parent.Directory || record.Parent.Mode != 0700 || !record.Directory.Known() || !record.Directory.Directory || record.Directory.Mode != 0700 {
 		return nil, noneDirectoryOriginErrorV1("the original None directory differs from its exact protected run")
 	}
 	if record.ParentBirth != nil && !record.ParentBirth.Known() || record.DirectoryBirth != nil && !record.DirectoryBirth.Known() {
