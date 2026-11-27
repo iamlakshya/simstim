@@ -40,10 +40,15 @@ type Parser struct {
 const maxSeq = 64 << 10 // a sequence longer than this is passed through as text
 
 // Feed adds p and calls fn for every complete token. Incomplete sequences stay
-// buffered until the next call.
+// buffered until the next call. A token's bytes are valid only during fn.
 func (ps *Parser) Feed(p []byte, fn func(Token)) {
-	ps.buf = append(ps.buf, p...)
-	b := ps.buf
+	// With nothing buffered, p is read where it is, and only an incomplete
+	// end is copied.
+	b := p
+	if len(ps.buf) > 0 {
+		ps.buf = append(ps.buf, p...)
+		b = ps.buf
+	}
 	i := 0
 	textStart := 0
 	flushText := func(end int) {
@@ -52,12 +57,16 @@ func (ps *Parser) Feed(p []byte, fn func(Token)) {
 		}
 	}
 	for i < len(b) {
-		next := bytes.IndexByte(b[i:], 0x1b)
-		if next < 0 {
-			i = len(b)
-			break
+		// A sequence often follows the last at once. Only text needs the
+		// bulk search for the next ESC.
+		if b[i] != 0x1b {
+			next := bytes.IndexByte(b[i:], 0x1b)
+			if next < 0 {
+				i = len(b)
+				break
+			}
+			i += next
 		}
-		i += next
 		n, tok, ok := parseEsc(b[i:])
 		if !ok {
 			if len(b)-i > maxSeq {

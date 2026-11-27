@@ -162,7 +162,7 @@ session. Uncertain cleanup retains the owner, lock and storage.
 3. The holder resizes the PTY and sends SIGWINCH to the foreground process group, even if the size is unchanged, so the agent repaints.
 4. Then it is pure pass-through, and the session owns every row and column ([0009](../contributing/decisions/0009-light-launcher.md)):
    - Output frames go straight to stdout. The client draws nothing of its own: no frame, no status line and no window title. The one exception is the reconnect notice (3.5). Alerts about other sessions, and a failed upload, go out as OSC 777 notifications, which draw nothing on the screen.
-   - The passive mode tracker finds the next ESC in bulk. Text before it stays one token; an incomplete or overlong sequence keeps the same buffering and size limits.
+   - The passive mode tracker reads each frame where it lies and copies only an incomplete end. It finds the next ESC in bulk after text, and at once when a sequence follows the last. Text before it stays one token; an incomplete or overlong sequence keeps the same buffering and size limits.
    - Input bytes go straight to the PTY, except the two filtered keys.
    - Live output, including terminal queries, goes to every attached client. Input from every attached client reaches the PTY, including terminal replies and mouse events. Replies are not restricted to the leader, so several terminals may answer the same query.
 
