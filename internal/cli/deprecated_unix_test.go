@@ -8,16 +8,19 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/iamlakshya/simstim/internal/client"
 )
 
 // new -d <folder> starts the session in that folder, as it did, and warns.
 func TestNewWithTheOldDashD(t *testing.T) {
 	th := newTestHost(t)
+	th.h.Install(client.HelperVersion(), "")
 	dir := filepath.Join(th.h.Home, "proj")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	out, stderr, code := mainLine(t, "new", "box", "-d", dir, "--detach", "--name", "old-d", "--", "sleep", "60")
+	out, stderr, code := mainLine(t, "new", "box", "-d", dir, "--detach", "--wall", "none", "--downgrade", "--name", "old-d", "--", "sleep", "60")
 	m := startedRE.FindStringSubmatch(stderr)
 	if code != 0 || m == nil || !strings.HasPrefix(stderr, warningOf(t, "new -d", "", "")) || strings.Count(stderr, "Warning:") != 1 {
 		t.Fatalf("new -d = %d, %q:\n%s", code, out, stderr)

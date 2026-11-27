@@ -22,12 +22,16 @@ func TestNewDetachJSONNeedsNoList(t *testing.T) {
 		return nil, errors.New("the list broke")
 	}
 	defer func() { listSessions = old }()
-	out, errOut, err := runApart(t, "new", "box", "--detach", "--json", "--name", "api", "--", "sleep", "60")
+	out, errOut, err := runApart(t, "new", "box", "--detach", "--wall", "none", "--downgrade", "--json", "--name", "api", "--", "sleep", "60")
 	var s map[string]any
 	if err != nil || json.Unmarshal([]byte(out), &s) != nil {
 		t.Fatalf("%v\nstdout %q\nstderr %q", err, out, errOut)
 	}
-	if s["address"] != "box/"+s["id"].(string) || errOut != "" {
+	var warn struct {
+		V       int
+		Warning map[string]string
+	}
+	if s["address"] != "box/"+s["id"].(string) || (errOut != "" && (json.Unmarshal([]byte(errOut), &warn) != nil || warn.Warning["code"] != "wall_downgraded")) {
 		t.Errorf("stdout %s\nstderr %q", out, errOut)
 	}
 }

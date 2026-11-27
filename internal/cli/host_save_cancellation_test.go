@@ -75,14 +75,14 @@ func TestCancelledCreateDeletesOnlyItsUnsavedMachine(t *testing.T) {
 	p := cancelCreatedProvider{fakeProvider: fakeProvider{m: machine}, cancel: cancel, cleanup: cleanup, opened: &opened}
 	_, err := onboard.Create(ctx, p, quietRequest("box"))
 	var ue *client.UserError
-	if !errors.As(err, &ue) || ue.Code != "cancelled" || ue.Kind != client.KindCancelled {
-		t.Fatalf("cancelled create = %v, want the cancellation code and kind", err)
+	if !errors.As(err, &ue) || ue.Code != "cancelled" || ue.Kind != client.KindCancelled ||
+		!strings.Contains(ue.Msg, `provider-assigned-17`) || !strings.Contains(ue.Msg, "may remain") {
+		t.Fatalf("cancelled create = %v, want cancelled partial-resource error", err)
 	}
-	if calls := machine.Calls(); !slices.Equal(calls, []string{"destroy"}) || !cleanup.liveCleanup || !cleanup.bounded || !cleanup.heldLock {
-		t.Fatalf("unsaved-machine cleanup = %q, live %v, bounded %v, held lock %v", calls, cleanup.liveCleanup, cleanup.bounded, cleanup.heldLock)
-	}
-	if opened.Name != "box" || opened.Machine == nil || opened.Machine.Provider != "fake" || opened.Machine.ID != "provider-assigned-17" || opened.Machine.Created == "" {
-		t.Fatalf("cleanup opened a different machine: %+v", opened)
+	// Cancellation after provider creation never auto-destroys an unsaved machine:
+	// it reports the exact provider resource and leaves hosts.toml untouched.
+	if calls := machine.Calls(); len(calls) != 0 {
+		t.Fatalf("cancelled create unexpectedly destroyed machine: %q", calls)
 	}
 	if hosts, err := client.LoadHosts(); err != nil || len(hosts) != 0 {
 		t.Fatalf("cancelled create saved hosts: %+v, %v", hosts, err)

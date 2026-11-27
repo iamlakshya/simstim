@@ -1,4 +1,4 @@
-== new box --detach --json --name api --memory-max 256M -- sleep 60
+== new box --detach --wall none --downgrade --json --name api --memory-max 256M -- sleep 60
 {
   "v": 1,
   "address": "box/<id>",
@@ -96,8 +96,14 @@
 [
   {
     "v": 1,
+    "JoinedSSH": null,
     "Labels": null,
+    "Lock": null,
     "Machine": {
+      "Session": "",
+      "SessionID": "",
+      "Endpoint": "",
+      "TransportURL": "",
       "Provider": "hosttest",
       "ID": "<ID>",
       "User": "",
@@ -107,18 +113,32 @@
       "BusyLease": "",
       "TokenCommand": "",
       "Stdin": "",
-      "Created": ""
+      "Created": "",
+      "Source": null
     },
     "Name": "box",
+    "Place": {
+      "Pool": null,
+      "Features": null,
+      "Mandatory": null,
+      "Cost": "",
+      "MaxSandboxes": 0
+    },
+    "Prepared": null,
     "Provider": null,
+    "Repos": null,
     "SSH": "box",
     "SSHConfig": "",
     "Secrets": null,
+    "WallFloor": "",
+    "classifier": {},
     "machine": {
       "id": "<id>",
       "provider": "hosttest"
     },
     "name": "box",
+    "network": {},
+    "sandbox": {},
     "ssh": "box",
     "tier": "own"
   }
@@ -214,6 +234,33 @@
     "keys": [
       "w"
     ]
+  },
+  {
+    "v": 1,
+    "command": "session: policy",
+    "keys": [
+      "p"
+    ]
+  },
+  {
+    "v": 1,
+    "command": "session: policy log",
+    "keys": []
+  },
+  {
+    "v": 1,
+    "command": "session: stop",
+    "keys": []
+  },
+  {
+    "v": 1,
+    "command": "session: shell",
+    "keys": []
+  },
+  {
+    "v": 1,
+    "command": "policy: lockdown",
+    "keys": []
   },
   {
     "v": 1,
@@ -334,6 +381,26 @@
     "keys": []
   }
 ]
+== agents login claude box --json
+{
+  "v": 1,
+  "address": "box/<id>",
+  "agent": "custom",
+  "alive": true,
+  "cols": 80,
+  "created_at": "<created_at>",
+  "cwd": "<cwd>",
+  "host": "box",
+  "host_version": "<host_version>",
+  "id": "<id>",
+  "memory_max": "<memory_max>",
+  "name": "login-claude",
+  "rows": 24,
+  "since": "<since>",
+  "source": "<source>",
+  "started": true,
+  "state": "<state>"
+}
 == host show box --json
 {
   "v": 1,

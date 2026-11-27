@@ -63,16 +63,16 @@ func TestAddressDash(t *testing.T) {
 	if got, code := reportOf(err); code != 3 || !strings.Contains(got, "Error: no session has been attached yet.") || !strings.Contains(got, "Try: "+brand.Name+" ls\n") {
 		t.Errorf("- with no last session: exit %d\n%s", code, got)
 	}
-	client.RememberLast("box", "a1b2", "web")
-	if a, _, err := addressOf(t, "send", "-", "hi"); err != nil || a.host.Name != "box" || a.ref != "a1b2" {
+	client.RememberLast("box", "a2b3", "web")
+	if a, _, err := addressOf(t, "send", "-", "hi"); err != nil || a.host.Name != "box" || a.ref != "a2b3" {
 		t.Errorf("- = %+v, %v", a, err)
 	}
 	// The last session is gone: the error names it by its name.
 	got, code := failsAs(t, "show", "-")
-	if code != 3 || !strings.Contains(got, "Error: the last session, web on box, is gone.") || strings.Contains(got, "a1b2") {
+	if code != 3 || !strings.Contains(got, "Error: the last session, web on box, is gone.") || strings.Contains(got, "a2b3") {
 		t.Errorf("show - after the session went: exit %d\n%s", code, got)
 	}
-	client.RememberLast("gone", "a1b2", "web")
+	client.RememberLast("gone", "a2b3", "web")
 	if _, _, err := addressOf(t, "show", "-"); err == nil || !strings.Contains(err.Error(), `"gone", which is no longer a saved host`) {
 		t.Errorf("- on a host that was removed: %v", err)
 	}

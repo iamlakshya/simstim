@@ -94,15 +94,15 @@ func TestAgentsLoginNeedsTheAgent(t *testing.T) {
 func TestRunningLogin(t *testing.T) {
 	t0 := time.Date(2026, 11, 11, 9, 0, 0, 0, time.UTC)
 	list := []client.Session{
-		loginRow("new1", api.StateExited, t0.Add(3*time.Hour)),
-		loginRow("err1", api.StateErrored, t0.Add(4*time.Hour)),
-		loginRow("lost1", api.StateLost, t0.Add(5*time.Hour)),
-		loginRow("old1", api.StateIdle, t0),
+		loginRow("new2", api.StateExited, t0.Add(3*time.Hour)),
+		loginRow("err2", api.StateErrored, t0.Add(4*time.Hour)),
+		loginRow("lost2", api.StateLost, t0.Add(5*time.Hour)),
+		loginRow("old2", api.StateIdle, t0),
 		{ID: "other", Name: "login-codex", State: api.StateWorking, CreatedAt: t0.Add(6 * time.Hour)},
-		loginRow("mid1", api.StateWorking, t0.Add(time.Hour)),
+		loginRow("mid2", api.StateWorking, t0.Add(time.Hour)),
 	}
-	if s, ok := runningLogin(list, "login-claude"); !ok || s.ID != "mid1" {
-		t.Errorf("found %+v, %v; want mid1", s, ok)
+	if s, ok := runningLogin(list, "login-claude"); !ok || s.ID != "mid2" {
+		t.Errorf("found %+v, %v; want mid2", s, ok)
 	}
 	if _, ok := runningLogin(list[:3], "login-claude"); ok {
 		t.Error("an ended login was found")
@@ -112,7 +112,7 @@ func TestRunningLogin(t *testing.T) {
 	_, tr := fakeBox(t, list[:1])
 	tr.SetAgents([]api.AgentCheck{claudeCheck(api.LoginNo, "")})
 	out, errOut, code := mainRun(t, "agents", "login", "claude", "--host", "box")
-	if code != 0 || out != "" || !strings.Contains(errOut, "Started box/fake1. Attach to finish the login: "+brand.Name+" attach --id -- box/fake1\n") {
+	if code != 0 || out != "" || !strings.Contains(errOut, "Started box/fake2. Attach to finish the login: "+brand.Name+" attach --id -- box/fake2\n") {
 		t.Errorf("after an ended login: exit %d, stdout %q, stderr:\n%s", code, out, errOut)
 	}
 }
@@ -131,7 +131,7 @@ func TestTwoLoginsNameTheirOwnSession(t *testing.T) {
 		}
 		said = append(said, errOut)
 	}
-	for i, want := range []string{"fake1", "fake2"} {
+	for i, want := range []string{"fake2", "fake3"} {
 		line := "Started box/" + want + ". Attach to finish the login: " + brand.Name + " attach --id -- box/" + want + "\n"
 		if said[i] != line {
 			t.Errorf("login %d said %q, want %q", i+1, said[i], line)
@@ -153,11 +153,11 @@ func TestLoginPrintsHostTextClean(t *testing.T) {
 	h, tr := fakeBox(t, []client.Session{loginRow(osc, api.StateIdle, t0)})
 	tr.SetAgents([]api.AgentCheck{hostile})
 	errOut, err := said(t, func() error { return logIn(context.Background(), h, claude, false) })
-	if err == nil || strings.Contains(errOut, "\x1b") || strings.Contains(err.Error(), "attach") {
-		t.Errorf("a running login with a hostile ID: %v\n%q", err, errOut)
+	if err != nil || strings.Contains(errOut, "\x1b") || !strings.Contains(errOut, "box/fake2") {
+		t.Errorf("a running login with a hostile ID was not ignored safely: %v\n%q", err, errOut)
 	}
 	var b strings.Builder
-	printError(&b, err, nil, false, false)
+	printError(&b, checkSessionID("box", osc), nil, false, false)
 	if strings.Contains(b.String(), "\x1b") || !strings.Contains(b.String(), "box sent a session ID that is not valid") {
 		t.Errorf("the error prints %q", b.String())
 	}
@@ -188,10 +188,10 @@ func TestLoginPrintsHostTextClean(t *testing.T) {
 	if _, errOut, code := mainRun(t, "agents", "install", "claude", "box", "--reinstall"); code != 1 || strings.Contains(errOut, "\x1b") || strings.Contains(errOut, "Started") {
 		t.Errorf("agents install with a hostile ID: exit %d\n%q", code, errOut)
 	}
-	if _, errOut, code := mainRun(t, "new", "box", "--detach"); code != 1 || strings.Contains(errOut, "\x1b") || strings.Contains(errOut, "Started") {
+	if _, errOut, code := mainRun(t, "new", "box", "--detach", "--wall", "none", "--downgrade"); code != 1 || strings.Contains(errOut, "\x1b") || strings.Contains(errOut, "Started") {
 		t.Errorf("new with a hostile ID: exit %d\n%q", code, errOut)
 	}
-	if !validSessionID("hqtiovfg") || !validSessionID("fake-1_A") || validSessionID("") || validSessionID("a/b") || validSessionID(strings.Repeat("a", 65)) {
+	if !validSessionID("hqtiovfg") || !validSessionID("fake2") || validSessionID("fake-1_A") || validSessionID("") || validSessionID("a/b") || validSessionID(strings.Repeat("a", 33)) {
 		t.Error("validSessionID")
 	}
 }
@@ -221,7 +221,7 @@ func TestAfterADetach(t *testing.T) {
 	})
 	errOut, err = said(t, func() error { return logIn(context.Background(), h, claude, true) })
 	if err != nil || !strings.Contains(errOut, "The check of the login failed: the host is busy.\n") ||
-		!strings.HasSuffix(errOut, "The login keeps running. Attach again: "+brand.Name+" attach --id -- box/fake1\n") {
+		!strings.HasSuffix(errOut, "The login keeps running. Attach again: "+brand.Name+" attach --id -- box/fake2\n") {
 		t.Errorf("a check that failed after the detach: %v\n%s", err, errOut)
 	}
 	// After the end of the login, a failed check is the command's error.
@@ -252,9 +252,9 @@ func TestLoginNamesTheDetachKey(t *testing.T) {
 		t.Errorf("a new login: %v\n%s", err, errOut)
 	}
 	// An attach to a login that runs names the key too.
-	tr.SetSessions([]client.Session{loginRow("s1", api.StateIdle, time.Date(2026, 11, 11, 9, 0, 0, 0, time.UTC))})
+	tr.SetSessions([]client.Session{loginRow("s2", api.StateIdle, time.Date(2026, 11, 11, 9, 0, 0, 0, time.UTC))})
 	errOut, err = said(t, func() error { return logIn(context.Background(), h, claude, true) })
-	if err != nil || !strings.Contains(errOut, "already runs in box/s1. Attaching to it. Answer it there, or press ctrl+] to leave it running.\n") || strings.Contains(errOut, `ctrl+\`) {
+	if err != nil || !strings.Contains(errOut, "already runs in box/s2. Attaching to it. Answer it there, or press ctrl+] to leave it running.\n") || strings.Contains(errOut, `ctrl+\`) {
 		t.Errorf("a login that runs: %v\n%s", err, errOut)
 	}
 }
@@ -294,7 +294,7 @@ func TestAgentsLoginJSON(t *testing.T) {
 	checkJSON(t, "agents login --json", out, false)
 	var s map[string]any
 	_ = json.Unmarshal([]byte(out), &s)
-	if s["v"] != float64(1) || s["host"] != "box" || s["id"] != "fake1" || s["name"] != "login-claude" || s["address"] != "box/fake1" || s["started"] != true {
+	if s["v"] != float64(1) || s["host"] != "box" || s["id"] != "fake2" || s["name"] != "login-claude" || s["address"] != "box/fake2" || s["started"] != true {
 		t.Errorf("a new login: %s", out)
 	}
 	// A second login in a row, which the fake's list does not show the
@@ -302,16 +302,16 @@ func TestAgentsLoginJSON(t *testing.T) {
 	out, _, code = mainRun(t, "agents", "login", "claude", "box", "--json")
 	s = nil
 	_ = json.Unmarshal([]byte(out), &s)
-	if code != 0 || s["id"] != "fake2" || s["address"] != "box/fake2" || s["started"] != true {
+	if code != 0 || s["id"] != "fake3" || s["address"] != "box/fake3" || s["started"] != true {
 		t.Errorf("a second login: exit %d\n%s", code, out)
 	}
 
-	_, tr = fakeBox(t, []client.Session{loginRow("s1", api.StateIdle, t0), loginRow("s0", api.StateExited, t0)})
+	_, tr = fakeBox(t, []client.Session{loginRow("s2", api.StateIdle, t0), loginRow("s3", api.StateExited, t0)})
 	tr.SetAgents([]api.AgentCheck{claudeCheck(api.LoginNo, "")})
 	out, _, code = mainRun(t, "agents", "login", "claude", "box", "--json")
 	s = nil
 	_ = json.Unmarshal([]byte(out), &s)
-	if code != 0 || s["id"] != "s1" || s["address"] != "box/s1" || s["started"] != false || starts(tr) != 0 {
+	if code != 0 || s["id"] != "s2" || s["address"] != "box/s2" || s["started"] != false || starts(tr) != 0 {
 		t.Errorf("a login that runs: exit %d, %d starts\n%s", code, starts(tr), out)
 	}
 
@@ -325,7 +325,7 @@ func TestAgentsLoginJSON(t *testing.T) {
 
 // JSON escapes unsafe runes and preserves all decoded host fields.
 func TestAgentsLoginJSONKeepsTheHostsText(t *testing.T) {
-	row := loginRow("s1", api.StateIdle, time.Date(2026, 11, 11, 9, 0, 0, 0, time.UTC))
+	row := loginRow("s2", api.StateIdle, time.Date(2026, 11, 11, 9, 0, 0, 0, time.UTC))
 	row.Reason = "r\u009b2J\u202e"
 	row.Cwd = "/home/dev/x\x1b]52;c;aGk=\x07"
 	row.HostVersion = "1.0\u200b\u2066"
@@ -381,10 +381,10 @@ func TestGoldenLogin(t *testing.T) {
 	}
 	show("a new login, logged in at its end", nil, true, loggedIn)
 	show("a new login, left by a detach", nil, true, detached)
-	show("a login that runs", []client.Session{loginRow("s1", api.StateIdle, t0)}, true, detached)
+	show("a login that runs", []client.Session{loginRow("s2", api.StateIdle, t0)}, true, detached)
 	show("input off", nil, false, nil)
-	show("input off, a login that runs", []client.Session{loginRow("s1", api.StateIdle, t0)}, false, nil)
-	show("input off, two logins that run", []client.Session{loginRow("s2", api.StateIdle, t0.Add(time.Minute)), loginRow("s1", api.StateIdle, t0)}, false, nil)
+	show("input off, a login that runs", []client.Session{loginRow("s2", api.StateIdle, t0)}, false, nil)
+	show("input off, two logins that run", []client.Session{loginRow("s3", api.StateIdle, t0.Add(time.Minute)), loginRow("s2", api.StateIdle, t0)}, false, nil)
 	got := strings.ReplaceAll(b.String(), brand.Name, "<name>")
 	golden := filepath.Join("testdata", "login.golden")
 	if *update {

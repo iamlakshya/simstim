@@ -15,7 +15,11 @@ type namedFakeProvider struct {
 
 func (p namedFakeProvider) Name() string { return p.name }
 func (p namedFakeProvider) Create(_ context.Context, req provider.Request) (client.Host, error) {
-	return client.Host{Name: req.Name, Machine: &client.Machine{Provider: p.name, ID: p.name + "-" + req.Name}}, nil
+	id := p.name + "-" + req.Name
+	if p.name == "lima" || p.name == "docker" {
+		id = provider.MachineName(req.Name)
+	}
+	return client.Host{Name: req.Name, Machine: &client.Machine{Provider: p.name, ID: id}}, nil
 }
 func (p namedFakeProvider) Open(client.Host) (client.Lifecycle, error) { return p.m, nil }
 func tierOfSaved(t *testing.T, name string) (client.Tier, client.TierEntry) {

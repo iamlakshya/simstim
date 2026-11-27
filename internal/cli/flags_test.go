@@ -481,7 +481,7 @@ func TestNewTakesOneHost(t *testing.T) {
 		want string
 	}{
 		{[]string{"new", "box", "htop"}, "Error: new takes one host. A command goes after --.\n\nTry: " + brand.Name + " new box -- htop (a folder goes after -C)\n"},
-		{[]string{"new", "--", "htop"}, "Error: new needs <host>.\n"},
+		{[]string{"new", "--", "htop"}, "Error: no host was selected.\n"},
 		{[]string{"new", "a b", "htop"}, "Error: new takes one host. A command goes after --.\n\nTry: " + brand.Name + " host ls\n"},
 	} {
 		got, code := lineErr(t, c.args...)

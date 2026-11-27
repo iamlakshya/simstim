@@ -89,7 +89,7 @@ func TestJSONErrorsKeepTheHostsText(t *testing.T) {
 			Error errorJSON `json:"error"`
 		}
 		_ = json.Unmarshal([]byte(errOut), &got)
-		if code != 1 || got.Error.Message != "the helper on box did not start: "+tr.BridgeStderr {
+		if code != 1 || got.Error.Message != "the helper on box did not start: "+client.CleanBlock(tr.BridgeStderr) {
 			t.Errorf("connection error changed: %s", errOut)
 		}
 	})
@@ -130,8 +130,8 @@ func TestValidJSONData(t *testing.T) {
 
 // Every session JSON output keeps raw values, while ls draws only copies.
 func TestSessionOutputsPreserveJSONAndCleanHumanCopies(t *testing.T) {
-	row := client.Session{ID: "legacy_ID", Name: "name\u200b\x1b]52;c;value\a", Agent: "custom\u202e", Cwd: "/work/\u2066repo", Reason: "busy\u009b2J", State: api.StateIdle, CreatedAt: time.Now()}
-	for _, args := range [][]string{{"ls", "--json"}, {"new", "box", "--detach", "--json", "--name", row.Name, "--agent", row.Agent, "--dir", row.Cwd}} {
+	row := client.Session{ID: "legacyid", Name: "name\u200b\x1b]52;c;value\a", Agent: "custom\u202e", Cwd: "/work/\u2066repo", Reason: "busy\u009b2J", State: api.StateIdle, CreatedAt: time.Now()}
+	for _, args := range [][]string{{"ls", "--json"}, {"new", "box", "--detach", "--wall", "none", "--downgrade", "--json", "--name", row.Name, "--agent", row.Agent, "--dir", row.Cwd, "--", "true"}} {
 		_, tr := fakeBox(t, []client.Session{row})
 		tr.NewID = row.ID
 		out, errOut, code := mainRun(t, args...)
@@ -161,9 +161,9 @@ func TestSessionOutputsPreserveJSONAndCleanHumanCopies(t *testing.T) {
 		}
 
 	}
-	fakeBox(t, []client.Session{row, {ID: "legacy_ID\u200b", Name: "invalid raw ID", State: api.StateIdle}})
+	fakeBox(t, []client.Session{row, {ID: "legacyid\u200b", Name: "invalid raw ID", State: api.StateIdle}})
 	human, _, code := mainRun(t, "ls")
-	if code != 0 || strings.ContainsAny(human, "\x1b\a\u200b\u202e\u2066\u009b") || !strings.Contains(human, "<invalid>") {
+	if code != 0 || strings.ContainsAny(human, "\x1b\a\u200b\u202e\u2066\u009b") || strings.Contains(human, "invalid raw ID") {
 		t.Fatalf("unsafe human ls: %d, %q", code, human)
 	}
 	if row.Name != "name\u200b\x1b]52;c;value\a" {

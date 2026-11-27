@@ -24,10 +24,11 @@ func TestSuggestions(t *testing.T) {
 		try  string
 	}{
 		{[]string{"list"}, []string{"ls"}, brand.Name + " ls"},
-		{[]string{"run"}, []string{"new"}, help("new")},
+		{[]string{"run"}, []string{"new"}, brand.Name + " new"},
 		{[]string{"run", "box"}, []string{"new"}, brand.Name + " new box"},
 		{[]string{"at"}, []string{"attach"}, brand.Name + " attach"},
-		{[]string{"ssh", "box"}, nil, help("")},
+		{[]string{"ssh", "box"}, []string{"ssh-config"}, help("ssh-config")},
+		{[]string{"scp", "box"}, []string{"cp"}, help("cp")},
 		// kill is an old name of rm: a word near it suggests rm.
 		{[]string{"kil"}, []string{"rm"}, brand.Name + " rm"},
 		{[]string{"LS"}, []string{"ls"}, brand.Name + " ls"},
@@ -211,7 +212,7 @@ func TestEachHostCodeExitsThroughMain(t *testing.T) {
 		"not_found": 3, "no_folder": 4, "bad_request": 1, "wall_floor": 5,
 	} {
 		tr.Fail("new", &proto.Error{Code: code, Message: "the host refused it", Hint: "Do something else."})
-		os.Args = []string{"client", "new", "box", "--detach"}
+		os.Args = []string{"client", "new", "box", "--detach", "--wall", "none", "--downgrade"}
 		got, exit := captureStderr(t, Main)
 		if exit != want || !strings.Contains(got, "Error: the host refused it.") || !strings.Contains(got, "Try: Do something else.") {
 			t.Errorf("the host's %s exits with %d, want %d:\n%s", code, exit, want, got)

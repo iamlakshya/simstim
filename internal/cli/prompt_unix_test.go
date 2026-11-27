@@ -124,8 +124,8 @@ func TestCommandsWithNoInput(t *testing.T) {
 	newTestHost(t)
 
 	// new: a missing folder needs --mkdir.
-	got, code := lineErr(t, "new", "box", "--dir", "~/not-there", "--no-input", "--detach")
-	if code != 4 || !strings.Contains(got, "Try: "+brand.Name+" new box --dir '~/not-there' --no-input --detach --mkdir") {
+	got, code := lineErr(t, "new", "box", "--dir", "~/not-there", "--no-input", "--detach", "--wall", "none", "--downgrade")
+	if code != 4 || !strings.Contains(got, "Try: "+brand.Name+" new box --dir '~/not-there' --no-input --detach --wall none --downgrade --mkdir") {
 		t.Errorf("new with a missing folder: exit %d\n%s", code, got)
 	}
 
@@ -168,16 +168,28 @@ func TestNewSkipsTheSetupScriptWithInputOff(t *testing.T) {
 			t.Fatalf("git %v: %v %s", args, err, out)
 		}
 	}
-	_, errOut, err := runApart(t, "new", "box", "--dir", repo, "--detach", "--no-input", "--", "sleep", "60")
+	_, errOut, err := runApart(t, "new", "box", "--dir", repo, "--detach", "--wall", "none", "--downgrade", "--no-input", "--", "sleep", "60")
 	if err != nil || !strings.Contains(errOut, "Skipping the setup script of "+repo+": you have not said that it may run on box. Pass --setup-script to run it.") {
 		t.Fatalf("new --no-input: %v\n%s", err, errOut)
 	}
-	out, errOut, err := runApart(t, "new", "box", "--dir", repo, "--detach", "--json", "--", "sleep", "60")
-	var warn struct {
-		V       int
-		Warning map[string]string
+	out, errOut, err := runApart(t, "new", "box", "--dir", repo, "--detach", "--wall", "none", "--downgrade", "--json", "--", "sleep", "60")
+	sawSetupSkipped := false
+	for _, line := range strings.Split(strings.TrimSpace(errOut), "\n") {
+		if line == "" {
+			continue
+		}
+		var warn struct {
+			V       int
+			Warning map[string]string
+		}
+		if err := json.Unmarshal([]byte(line), &warn); err != nil {
+			t.Fatalf("new --json non-JSON stderr line %q: %v", line, err)
+		}
+		if warn.Warning["code"] == "setup_skipped" {
+			sawSetupSkipped = true
+		}
 	}
-	if err != nil || json.Unmarshal([]byte(errOut), &warn) != nil || warn.Warning["code"] != "setup_skipped" || !json.Valid([]byte(out)) {
+	if err != nil || !sawSetupSkipped || !json.Valid([]byte(out)) {
 		t.Fatalf("new --json: %v\nstdout %s\nstderr %s", err, out, errOut)
 	}
 	if _, err := os.Stat(filepath.Join(os.Getenv("HOME"), "setup-ran")); err == nil {

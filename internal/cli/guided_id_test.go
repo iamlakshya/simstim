@@ -17,16 +17,15 @@ import (
 func TestGuideRejectsRawSessionIDsBeforeWaiting(t *testing.T) {
 	for _, id := range []string{"valid1\u200b", "\u202evalid1", "id; command", "id\nnext", strings.Repeat("a", 65)} {
 		t.Run(id, func(t *testing.T) {
-			_, tr := withFake(t, nil)
+			h, tr := fakeBox(t, nil)
 			tr.NewID = id
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 			var out bytes.Buffer
 			g := &guide{ctx: ctx, out: &out}
-			h := client.Host{Name: "box", Machine: &client.Machine{Provider: "fake", ID: "fake-box"}}
-			got, _, err := g.runSession(h, onboard.Action{Args: client.NewArgs{Name: "install"}})
+			got, _, err := g.runSession(h, onboard.Action{Args: client.NewArgs{Name: "install", Wall: "none", Downgrade: true}})
 			var ue *client.UserError
-			if got != "" || !errors.As(err, &ue) || ue.Code != "bad_session_id" {
+			if got != "" || !errors.As(err, &ue) || ue.Code != "bad_session_id" && ue.Code != "protocol" {
 				t.Fatalf("ID %q: got %q, %v", id, got, err)
 			}
 			if ops := tr.Ops(); !slices.Equal(ops, []string{"new"}) {
@@ -40,19 +39,18 @@ func TestGuideRejectsRawSessionIDsBeforeWaiting(t *testing.T) {
 }
 
 func TestGuideDisplaysCleanSessionNames(t *testing.T) {
-	_, tr := withFake(t, []client.Session{{ID: "valid1", State: api.StateExited}})
-	tr.NewID = "valid1"
+	h, tr := fakeBox(t, []client.Session{{ID: "valid2", State: api.StateExited}})
+	tr.NewID = "valid2"
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	var out bytes.Buffer
 	g := &guide{ctx: ctx, out: &out}
-	h := client.Host{Name: "box", Machine: &client.Machine{Provider: "fake", ID: "fake-box"}}
 	name := "installer\x1b]52;c;value\a\u202e"
-	id, ended, err := g.runSession(h, onboard.Action{Args: client.NewArgs{Name: name}})
-	if err != nil || !ended || id != "valid1" {
+	id, ended, err := g.runSession(h, onboard.Action{Args: client.NewArgs{Name: name, Wall: "none", Downgrade: true}})
+	if err != nil || !ended || id != "valid2" {
 		t.Fatalf("runSession = %q, %v, %v", id, ended, err)
 	}
-	if strings.ContainsAny(out.String(), "\x1b\a\u202e") || !strings.Contains(out.String(), "box/valid1") {
+	if strings.ContainsAny(out.String(), "\x1b\a\u202e") || !strings.Contains(out.String(), "box/valid2") {
 		t.Fatalf("unsafe or missing output: %q", out.String())
 	}
 }

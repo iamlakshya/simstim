@@ -30,7 +30,7 @@ func noUnsafeDisplay(t *testing.T, s string) {
 }
 
 func TestDoctorFixAndScrollbackDisplayCopies(t *testing.T) {
-	h, tr := fakeBox(t, []client.Session{{ID: "s1", Name: hostileDisplay, Agent: hostileDisplay, Alive: true, FullScreen: true}})
+	h, tr := fakeBox(t, []client.Session{{ID: "s2", Name: hostileDisplay, Agent: hostileDisplay, Alive: true, FullScreen: true}})
 	check := api.Check{Name: hostileDisplay, Detail: hostileDisplay, Fix: hostileDisplay}
 	info := api.HostInfo{Distro: hostileDisplay, OS: hostileDisplay, Arch: hostileDisplay, Version: hostileDisplay, Checks: []api.Check{check}}
 	fix := api.Fix{ID: "keep_raw", Problem: hostileDisplay, Action: hostileDisplay, Command: hostileDisplay, Error: hostileDisplay}
@@ -78,9 +78,12 @@ func TestDoctorFixAndScrollbackDisplayCopies(t *testing.T) {
 }
 
 func TestRestoreAndResumeRejectOrDisplayRawIDsSafely(t *testing.T) {
-	_, tr := fakeBox(t, []client.Session{{ID: "s1", Name: "app", Agent: "shell", State: api.StateExited}})
-	tr.Features = []string{"resume"}
-	tr.Replies = map[string]any{"restore": []api.RestoreResult{{ID: "s1\u200b", Name: hostileDisplay, Action: hostileDisplay, Why: hostileDisplay}}}
+	_, tr := fakeBox(t, []client.Session{{ID: "s2", Name: "app", Agent: "shell", State: api.StateExited}})
+	tr.Features = []string{"resume", "policy", client.PolicyLayerFeature}
+	tr.Replies = map[string]any{
+		"restore":   []api.RestoreResult{{ID: "s2\u200b", Name: hostileDisplay, Action: hostileDisplay, Why: hostileDisplay}},
+		"policy.ls": api.Policy{},
+	}
 	out, errOut, code := mainRun(t, "host", "restore", "box")
 	if code != 0 {
 		t.Fatalf("restore %d: %s", code, errOut)
@@ -89,11 +92,11 @@ func TestRestoreAndResumeRejectOrDisplayRawIDsSafely(t *testing.T) {
 	if !strings.Contains(out, "<invalid>") {
 		t.Fatalf("invalid ID cleaned into another ID: %s", out)
 	}
-	for _, id := range []string{"s1", "s1\u200b"} {
+	for _, id := range []string{"s2", "s2\u200b"} {
 		response := api.ResumeResult{Session: client.Session{ID: id, Name: hostileDisplay, Agent: hostileDisplay}, Why: hostileDisplay}
 		tr.Replies["resume"] = response
-		out, errOut, code = mainRun(t, "resume", "box/s1", "--detach")
-		if id != "s1" {
+		out, errOut, code = mainRun(t, "resume", "box/s2", "--detach")
+		if id != "s2" {
 			if code != 1 || out != "" || !strings.Contains(errOut, "session ID") {
 				t.Fatalf("bad resumed ID: %d %q %q", code, out, errOut)
 			}
@@ -105,10 +108,13 @@ func TestRestoreAndResumeRejectOrDisplayRawIDsSafely(t *testing.T) {
 		}
 	}
 	beforeOps := len(tr.Ops())
-	tr.SetSessions([]client.Session{{ID: "s1\u200b", Name: "app", State: api.StateExited}})
+	tr.SetSessions([]client.Session{{ID: "s2\u200b", Name: "app", State: api.StateExited}})
 	_, errOut, code = mainRun(t, "resume", "box/app", "--detach")
-	if code != 1 || !strings.Contains(errOut, "session ID") {
+	if code != 3 || !strings.Contains(errOut, "no session") {
 		t.Fatalf("bad request ID: %d, %s", code, errOut)
+	}
+	if strings.ContainsAny(errOut, "\x1b\a\u009b\u202e\u200b") {
+		t.Fatalf("unsafe display bytes: %q", errOut)
 	}
 	if slices.Contains(tr.Ops()[beforeOps:], "resume") {
 		t.Fatal("invalid raw ID reached resume request")
@@ -168,11 +174,22 @@ func TestCancellationLogUsesSafeDisplayCopies(t *testing.T) {
 }
 
 func TestPullSummaryCleansHostFields(t *testing.T) {
-	bin := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	bin := realTempDir(t)
+	t.Setenv("XDG_CONFIG_HOME", realTempDir(t))
+	ownState(t)
 	// The transport and git are local fixtures. No host is contacted.
 	word := strings.ReplaceAll(hostileDisplay, "\n", "")
-	ssh := "#!/bin/sh\nprintf '%s\\n' '/work/repo' '" + word + "' '1'\n"
+	repoPayload, err := json.Marshal(map[string]any{
+		"repo": api.RepoInfo{Root: "/work/repo", Branch: word, Dirty: 1},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	payloadFile := filepath.Join(bin, "repo.json")
+	if err := os.WriteFile(payloadFile, repoPayload, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ssh := "#!/bin/sh\ncase \" $* \" in\n  *\" -G \"*) echo \"hostname box\"; exit 0;;\nesac\ncat '" + payloadFile + "'\n"
 	git := "#!/bin/sh\ncase \"$1\" in\nsymbolic-ref) echo main;;\nrev-list) printf '%s\\n' '" + word + "';;\nesac\n"
 	for name, script := range map[string]string{"ssh": ssh, "git": git} {
 		if err := os.WriteFile(filepath.Join(bin, name), []byte(script), 0o700); err != nil {
@@ -181,8 +198,11 @@ func TestPullSummaryCleansHostFields(t *testing.T) {
 	}
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	h := client.Host{Name: "box", SSH: "box"}
-	s := client.Session{ID: "s1", Name: hostileDisplay, Cwd: "/work/repo"}
-	var err error
+	if err := client.SaveHostsContext(context.Background(), []client.Host{h}); err != nil {
+		t.Fatal(err)
+	}
+	pinFor(t, "box")
+	s := client.Session{ID: "s2", Name: hostileDisplay, Cwd: "/work/repo"}
 	_, out := captureOutput(t, func() { err = pull(context.Background(), h, &s, "review", false) })
 	if err != nil {
 		t.Fatal(err)

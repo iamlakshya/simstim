@@ -36,7 +36,7 @@ func TestNewChecksTheSetupScriptsContent(t *testing.T) {
 		}
 	}
 	start := func(name string) (id, note string) {
-		out, warnings, err := runApart(t, "new", "box", "--detach", "--json", "--dir", "~/src/app", "--name", name, "--", "/bin/sh", "-c", "echo AGENT-UP; exec sleep 60")
+		out, warnings, err := runApart(t, "new", "box", "--detach", "--wall", "none", "--downgrade", "--json", "--dir", "~/src/app", "--name", name, "--", "/bin/sh", "-c", "echo AGENT-UP; exec sleep 60")
 		if err != nil {
 			t.Fatalf("new %s: %v: %s", name, err, warnings)
 		}
@@ -130,7 +130,7 @@ func TestAnsweredNoIsACancel(t *testing.T) {
 	os.Stdin, os.Stdout, os.Stderr = term.TTY, term.TTY, term.TTY
 	defer func() { os.Stdin, os.Stdout, os.Stderr = oldIn, oldOut, oldErr }()
 	term.Type("n\n")
-	_, err = startSession(sessionCmd(context.Background()), conn, h, client.NewArgs{})
+	_, err = startSession(sessionCmd(context.Background()), conn, h, client.NewArgs{Wall: "none", Downgrade: true})
 	if !isCancel(err) || err.Error() != "Cancelled. Nothing changed." || printError(io.Discard, err, nil, false, false) != 130 {
 		t.Fatalf("the answer no = %v", err)
 	}

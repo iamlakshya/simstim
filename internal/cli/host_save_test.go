@@ -17,9 +17,10 @@ import (
 
 // The save at the end of setup --host and host add compares with the
 // entry that the command read at its start (docs/contributing/cli-spec.md
-// 11.3, rule 13). Neither holds the lock of the host across its connect,
-// so another command may remove the host, or make it again, meanwhile:
-// the save then changes nothing.
+// 11.3, rule 13). While connecting, connectHostCore holds the host lock so
+// concurrent commands fail with host_busy, and an out-of-band removal or
+// recreation in hosts.toml fails the save with host_changed without
+// overwriting it.
 
 // setupHost runs setup --host box, with change run once, just before its
 // save, and returns the setup's error.
@@ -53,17 +54,24 @@ func withSaved(t *testing.T) (client.Host, *clienttest.Machine, *clienttest.Tran
 	return h, m, tr
 }
 
-// A host that host rm forgets while setup --host connects it stays
-// forgotten: the setup's save fails with host_changed.
+// A host that is removed while setup --host connects it stays forgotten:
+// a concurrent host rm is blocked by setup's host lock, and an out-of-band
+// removal of hosts.toml fails the save with host_changed.
 func TestSetupHostKeepsARemovedHostRemoved(t *testing.T) {
 	_, _, tr := withSaved(t)
 	var rmErr error
 	err := setupHost(t, tr, func() {
 		rmErr = removeHost(context.Background(), quietPrompts(context.Background()), rmOpts{name: "box"})
+		if err := forgetHost("box"); err != nil {
+			t.Error(err)
+		}
 	})
-	var ue *client.UserError
-	if rmErr != nil || !errors.As(err, &ue) || ue.Code != "host_changed" || ue.Msg != "box was removed while setup ran, so it was not saved" {
-		t.Fatalf("setup --host of a host removed meanwhile: rm %v, setup %+v", rmErr, err)
+	var rmUE, setupUE *client.UserError
+	if !errors.As(rmErr, &rmUE) || rmUE.Code != "host_busy" || rmUE.Msg != "box is busy: setup changes it" {
+		t.Fatalf("concurrent host rm during setup --host: %+v", rmErr)
+	}
+	if !errors.As(err, &setupUE) || setupUE.Code != "host_changed" || setupUE.Msg != "box was removed while setup ran, so it was not saved" {
+		t.Fatalf("setup --host of a host removed meanwhile: setup %+v", err)
 	}
 	if _, err := client.FindHost("box"); err == nil {
 		t.Error("the removed host came back")
@@ -71,22 +79,26 @@ func TestSetupHostKeepsARemovedHostRemoved(t *testing.T) {
 }
 
 // A host made again while setup --host connects the old one keeps its new
-// entry: the setup's save does not overwrite it.
+// entry: a concurrent host rm is blocked by setup's host lock, and an
+// out-of-band replacement in hosts.toml fails the save with host_changed.
 func TestSetupHostKeepsAHostMadeAgain(t *testing.T) {
-	_, m, tr := withSaved(t)
-	var rmErr, createErr error
+	_, _, tr := withSaved(t)
+	var rmErr error
 	err := setupHost(t, tr, func() {
 		rmErr = removeHost(context.Background(), quietPrompts(context.Background()), destroyOpts("box", false))
-		// The provider makes the machine again, under the same ID.
-		m.SetState(client.MachineRunning)
-		p, _ := findProvider("fake")
-		createErr = createHost(context.Background(), p, quietRequest("box"))
+		recreated := client.Host{Name: "box", Machine: &client.Machine{Provider: "fake", ID: "fake-box", Created: "2"}}
+		if err := saveHost(recreated); err != nil {
+			t.Error(err)
+		}
 	})
-	var ue *client.UserError
-	if rmErr != nil || createErr != nil || !errors.As(err, &ue) || ue.Msg != "box was made again while setup ran, so it was not saved" {
-		t.Fatalf("setup --host of a host made again meanwhile: rm %v, create %v, setup %+v", rmErr, createErr, err)
+	var rmUE, setupUE *client.UserError
+	if !errors.As(rmErr, &rmUE) || rmUE.Code != "host_busy" || rmUE.Msg != "box is busy: setup changes it" {
+		t.Fatalf("concurrent host rm during setup --host: %+v", rmErr)
 	}
-	if now, err := client.FindHost("box"); err != nil || now.Machine == nil || now.Machine.Created == "1" {
+	if !errors.As(err, &setupUE) || setupUE.Code != "host_changed" || setupUE.Msg != "box was made again while setup ran, so it was not saved" {
+		t.Fatalf("setup --host of a host made again meanwhile: setup %+v", err)
+	}
+	if now, err := client.FindHost("box"); err != nil || now.Machine == nil || now.Machine.Created != "2" {
 		t.Errorf("the setup overwrote the new host: %+v, %v", now, err)
 	}
 }

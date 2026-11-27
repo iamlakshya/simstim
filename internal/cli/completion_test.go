@@ -24,7 +24,7 @@ import (
 
 func isolateCompletionEnv(t *testing.T) (cfgDir, stateDir string) {
 	t.Helper()
-	base := t.TempDir()
+	base := realTempDir(t)
 	t.Setenv("HOME", base)
 	t.Setenv("USERPROFILE", base)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(base, "config"))

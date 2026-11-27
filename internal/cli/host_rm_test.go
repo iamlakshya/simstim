@@ -241,15 +241,21 @@ func TestHostRmRecordsEachPart(t *testing.T) {
 }
 
 // A host made again with the same name gets a machine of the same ID from
-// Lima and Docker. The record of a removal of the earlier machine does not
-// count for it, and host create clears it: host rm --destroy deletes the
-// new machine.
+// Lima and Docker. An earlier removal receipt blocks reuse until cleared; once
+// cleared and made again, a record written for the earlier stamp still does
+// not count for the new machine, so host rm --destroy deletes the new machine.
 func TestHostRmAfterTheHostIsMadeAgain(t *testing.T) {
 	m, _ := withFake(t, nil)
 	p, _ := findProvider("fake")
 	old := client.Host{Name: "box", Machine: &client.Machine{Provider: "fake", ID: "fake-box", Created: "2026-01-01T00:00:00Z"}}
 	stale := client.LoadRemoval(old)
 	if err := stale.Record(client.RemovalDestroy); err != nil {
+		t.Fatal(err)
+	}
+	if err := createHost(context.Background(), p, quietRequest("box")); err == nil {
+		t.Fatal("host create silently overwrote an earlier removal receipt")
+	}
+	if err := client.ClearRemoval("box"); err != nil {
 		t.Fatal(err)
 	}
 	if err := createHost(context.Background(), p, quietRequest("box")); err != nil {
@@ -260,7 +266,7 @@ func TestHostRmAfterTheHostIsMadeAgain(t *testing.T) {
 		t.Fatalf("the new host: %+v, %v", h, err)
 	}
 	if client.LoadRemoval(old).Has(client.RemovalDestroy) {
-		t.Error("host create did not clear the record")
+		t.Error("the old removal record stayed")
 	}
 	// Also a record written after the create does not count for the new
 	// machine, whose stamp differs.

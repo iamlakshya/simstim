@@ -49,10 +49,10 @@ func TestHostCodesExitThroughMain(t *testing.T) {
 		code int
 		has  string
 	}{
-		{[]string{"new", "box", "--agent", "nosuch", "--detach"}, 3, `unknown agent "nosuch"`},
+		{[]string{"new", "box", "--agent", "nosuch", "--detach", "--wall", "none", "--downgrade"}, 2, "no canonical local command"},
 		{[]string{"rename", "box/" + id, " "}, 2, "a name is needed"},
 		{[]string{"new", "box", "--memory-max", "1M", "--detach"}, 2, "--memory-max"},
-		{[]string{"new", "box", "--dir", "/no/such/folder", "--detach"}, 4, "does not exist"},
+		{[]string{"new", "box", "--dir", "/no/such/folder", "--detach", "--wall", "none", "--downgrade"}, 4, "does not exist"},
 		{[]string{"host", "rm", "nowhere"}, 3, "no host named"},
 		{[]string{"atach"}, 2, "unknown command"},
 		{[]string{"config", "path"}, 0, ""},

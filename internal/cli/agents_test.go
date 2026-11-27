@@ -112,7 +112,7 @@ func TestAgentsInstallForceIsOld(t *testing.T) {
 	}
 	for _, flag := range []string{"--reinstall", "--force"} {
 		out, errOut, code = mainRun(t, "agents", "install", "claude", "box", flag)
-		if code != 0 || out != "" || !regexp.MustCompile(`Started box/fake[12]\. Attach to answer its questions`).MatchString(errOut) {
+		if code != 0 || out != "" || !regexp.MustCompile(`Started box/fake[23]\. Attach to answer its questions`).MatchString(errOut) {
 			t.Errorf("agents install %s: exit %d\nstdout %q\nstderr %s", flag, code, out, errOut)
 		}
 		warned := strings.Count(errOut, `Warning: "--force" is now "--reinstall". "--force" works until v0.4.0 and `)

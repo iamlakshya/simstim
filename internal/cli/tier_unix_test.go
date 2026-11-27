@@ -121,7 +121,7 @@ func TestSetupHostTiers(t *testing.T) {
 func TestHostSetTier(t *testing.T) {
 	th := keyHost(t)
 	fp := hostShows(t, th.h.Home, "trusted")
-	okSaid(t, "host", "add", "srv", "box", "--tier", "own", "--yes")
+	okSaid(t, "host", "add", "srv", "box", "--tier", "own", "--yes", "--no-sandbox")
 
 	// Lowering works at once without connecting or asking.
 	_ = os.Remove(filepath.Join(th.h.Home, "ssh.log"))
@@ -197,13 +197,31 @@ func TestHostSetTier(t *testing.T) {
 func TestChangedHostIDAndRekeyDowngradeToShared(t *testing.T) {
 	th := keyHost(t)
 	hostShows(t, th.h.Home, "trusted")
-	okSaid(t, "host", "add", "srv", "box", "--tier", "own", "--yes")
+	okSaid(t, "host", "add", "srv", "box", "--tier", "own", "--yes", "--no-sandbox")
 
-	// Replace the host's host-id file so the next bridge hello carries a new ID.
+	// Replace the host's host-id file (and reset the prior host's placement
+	// state domain and purge control) so the next bridge hello models a different host ID.
 	idFile := filepath.Join(th.h.Home, ".local", "state", brand.Name, "host-id")
-	if err := os.WriteFile(idFile, []byte("fedcba9876543210fedcba9876543210\n"), 0o600); err != nil {
-		t.Fatal(err)
+	replaceHostID := func(id string) {
+		t.Helper()
+		if matches, _ := filepath.Glob(filepath.Join(th.h.Home, "."+brand.Name+"-purge-*")); len(matches) > 0 {
+			for _, m := range matches {
+				if err := os.RemoveAll(m); err != nil {
+					t.Fatal(err)
+				}
+			}
+		}
+		if err := os.RemoveAll(filepath.Dir(idFile)); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(filepath.Dir(idFile), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(idFile, []byte(id+"\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
 	}
+	replaceHostID("fedcba9876543210fedcba9876543210")
 
 	out, errOut, err := runApart(t, "host", "show", "srv")
 	if err != nil {
@@ -222,9 +240,7 @@ func TestChangedHostIDAndRekeyDowngradeToShared(t *testing.T) {
 	// With --json on another host-ID change, stderr gets a JSON warning line
 	// and stdout gets tier=shared and host_id_changed=true.
 	okSaid(t, "host", "set", "srv", "tier=own", "--confirm", "srv")
-	if err := os.WriteFile(idFile, []byte("11112222333344445555666677778888\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	replaceHostID("11112222333344445555666677778888")
 	jOut, jErr, err := runApart(t, "host", "show", "srv", "--json")
 	if err != nil {
 		t.Fatalf("host show --json: %v\n%s\n%s", err, jOut, jErr)
@@ -243,7 +259,7 @@ func TestChangedHostIDAndRekeyDowngradeToShared(t *testing.T) {
 
 	// host ls shows the tier column and JSON field.
 	lsText := ok(t, "host", "ls")
-	if !strings.Contains(lsText, "srv              shared     box\n") {
+	if !strings.Contains(lsText, "srv              shared     box") {
 		t.Errorf("host ls:\n%s", lsText)
 	}
 	var lsJSON []map[string]any

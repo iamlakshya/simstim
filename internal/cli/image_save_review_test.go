@@ -43,8 +43,8 @@ func imageSaveTestCommand(ctx context.Context, out, review io.Writer) *cobra.Com
 func TestImageSaveFlaggedWithoutInputDropsOriginalPreparation(t *testing.T) {
 	var out, review bytes.Buffer
 	scene := &imageSaveScene{review: image.SaveReview{Size: 4096, Flagged: []image.SaveFinding{{Path: "/etc/profile", Reason: "shell start file"}}, Excluded: []image.SaveFinding{{Path: "/root/.ssh", Reason: "credentials"}}}}
-	p := &prompter{on: false, line: []string{"image", "save", "box/work", "tools"}, flagsAt: 4}
-	err := finishImageSave(imageSaveTestCommand(context.Background(), &out, &review), scene, p, false, false)
+	p := &prompter{on: false, line: []string{"image", "save", "box/abcd2345", "tools"}, flagsAt: 4}
+	err := finishImageSave(context.Background(), imageSaveTestCommand(context.Background(), &out, &review), scene, p, false, false)
 	var user *client.UserError
 	if !errors.As(err, &user) || user.Code != "image_flagged" || user.Kind != client.KindRefused || !strings.Contains(user.Hint, "--allow-flagged") {
 		t.Fatalf("missing explicit review refusal: %v", err)
@@ -72,7 +72,7 @@ func TestImageSaveReviewConsentAndDeclineKeepTheirOriginalOperation(t *testing.T
 			var out, review bytes.Buffer
 			scene := &imageSaveScene{review: image.SaveReview{Flagged: []image.SaveFinding{{Path: "/etc/profile", Reason: "shell start file"}}}}
 			p := testPrompts(test.input, &review)
-			err := finishImageSave(imageSaveTestCommand(context.Background(), &out, &review), scene, p, test.flag, false)
+			err := finishImageSave(context.Background(), imageSaveTestCommand(context.Background(), &out, &review), scene, p, test.flag, false)
 			if test.wantKeep == 0 && !isCancel(err) || test.wantKeep != 0 && err != nil {
 				t.Fatalf("review result: %v", err)
 			}
@@ -89,7 +89,7 @@ func TestImageSaveReviewConsentAndDeclineKeepTheirOriginalOperation(t *testing.T
 func TestImageSaveJSONReviewKeepsOnlyVersionedDataOnOutput(t *testing.T) {
 	var out, review bytes.Buffer
 	scene := &imageSaveScene{review: image.SaveReview{Size: 4096, Excluded: []image.SaveFinding{{Path: "/root/.config", Reason: "credential files"}}}}
-	err := finishImageSave(imageSaveTestCommand(context.Background(), &out, &review), scene, &prompter{}, false, true)
+	err := finishImageSave(context.Background(), imageSaveTestCommand(context.Background(), &out, &review), scene, &prompter{}, false, true)
 	if err != nil || scene.keep != 1 || scene.close != 1 {
 		t.Fatalf("save: %v, keep=%d close=%d", err, scene.keep, scene.close)
 	}
@@ -122,13 +122,13 @@ func TestImageSaveCancellationAndKeepFailureStillCloseOnce(t *testing.T) {
 	defer cancel()
 	var out bytes.Buffer
 	scene := &imageSaveScene{}
-	err := finishImageSave(imageSaveTestCommand(ctx, &out, cancelImageReviewWriter{cancel}), scene, &prompter{}, false, false)
+	err := finishImageSave(ctx, imageSaveTestCommand(ctx, &out, cancelImageReviewWriter{cancel}), scene, &prompter{}, false, false)
 	if !errors.Is(err, context.Canceled) || scene.keep != 0 || scene.close != 1 || out.Len() != 0 {
 		t.Fatalf("cancelled review: %v keep=%d close=%d output=%q", err, scene.keep, scene.close, out.String())
 	}
 	keepError, closeError := errors.New("keep failed"), errors.New("drop failed")
 	scene = &imageSaveScene{keepError: keepError, closeError: closeError}
-	err = finishImageSave(imageSaveTestCommand(context.Background(), &out, io.Discard), scene, &prompter{}, false, false)
+	err = finishImageSave(context.Background(), imageSaveTestCommand(context.Background(), &out, io.Discard), scene, &prompter{}, false, false)
 	if !errors.Is(err, keepError) || !errors.Is(err, closeError) || scene.keep != 1 || scene.close != 1 || out.Len() != 0 {
 		t.Fatalf("failed keep cleanup: %v keep=%d close=%d output=%q", err, scene.keep, scene.close, out.String())
 	}

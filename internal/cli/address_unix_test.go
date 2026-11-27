@@ -136,7 +136,7 @@ func TestAddressFollowsTheLiveList(t *testing.T) {
 		t.Errorf("show b again: exit %d\n%s", code, got)
 	}
 	otherClient(t, th, func(ctx context.Context, conn *client.Conn) error {
-		_, err := conn.NewSession(ctx, client.NewArgs{Name: "b", Argv: []string{"sleep", "60"}, Cols: 80, Rows: 24})
+		_, err := conn.NewSession(ctx, client.NewArgs{Name: "b", Argv: []string{"sleep", "60"}, Cols: 80, Rows: 24, Wall: "none", Downgrade: true})
 		return err
 	})
 	newB := idOf(t, th, "b")
@@ -171,7 +171,7 @@ func TestAddressAsksAgainOnAMiss(t *testing.T) {
 	// Another client starts a session: the fresh cache lacks it.
 	ok(t, "ls")
 	otherClient(t, th, func(ctx context.Context, conn *client.Conn) error {
-		_, err := conn.NewSession(ctx, client.NewArgs{Name: "elsewhere", Argv: []string{"sleep", "60"}, Cols: 80, Rows: 24})
+		_, err := conn.NewSession(ctx, client.NewArgs{Name: "elsewhere", Argv: []string{"sleep", "60"}, Cols: 80, Rows: 24, Wall: "none", Downgrade: true})
 		return err
 	})
 	if out := ok(t, "show", "elsewhere"); !strings.HasPrefix(out, "elsewhere on box\n") {

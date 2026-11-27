@@ -98,6 +98,10 @@ func TestHostTestReconnect(t *testing.T) {
 	th.h.Script("ssh", `mode=$(cat "`+modeFile+`" 2>/dev/null || echo normal)
 for a; do prev=$last; last=$a; done
 case " $* " in
+  *" -G "*)
+    printf 'hostname %s\n' "$last"
+    exit 0
+    ;;
   *" -O exit "*)
     host="$last"
     mf="`+stateDir+`/$host"
@@ -171,6 +175,7 @@ exec sh -c "$last"
 	if err := client.SaveHosts(t.Context(), []client.Host{{Name: "plain", SSH: "box"}}); err != nil {
 		t.Fatal(err)
 	}
+	pinFor(t, "plain")
 
 	// (a) Absent master: --reconnect succeeds cleanly and creates master 1.
 	clearEvents()
@@ -223,12 +228,6 @@ exec sh -c "$last"
 			t.Fatal(err)
 		}
 		clearEvents()
-		failsWithHint(t, "could not close the shared SSH connection to plain", "doctor --fix", "host", "test", "plain", "--reconnect")
-		if got := readEvents(); strings.Contains(got, "dial:") {
-			t.Fatalf("CLI reconnect in mode %s dialled over stuck master:\n%s", mode, got)
-		}
-
-		clearEvents()
 		drv.reconnectFromPalette()
 		err := drv.waitFailed("plain")
 		var ue *client.UserError
@@ -239,11 +238,22 @@ exec sh -c "$last"
 			t.Fatalf("launcher reconnect in mode %s dialled over stuck master:\n%s", mode, got)
 		}
 	}
+	drv.close()
+
+	for _, mode := range []string{"denied", "ignore", "hang"} {
+		if err := os.WriteFile(modeFile, []byte(mode), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		clearEvents()
+		failsWithHint(t, "could not close the shared SSH connection to plain", "-O exit", "host", "test", "plain", "--reconnect")
+		if got := readEvents(); strings.Contains(got, "dial:") {
+			t.Fatalf("CLI reconnect in mode %s dialled over stuck master:\n%s", mode, got)
+		}
+	}
 
 	// Restore normal mode and timeout, then verify non-SSH and unreachable SSH hosts.
 	restoreTimeout()
 	_ = os.WriteFile(modeFile, []byte("normal"), 0o600)
-	drv.close()
 
 	noSSH, _ := th.h.ClientHost("nossh")
 	if err := saveHost(noSSH); err != nil {
@@ -260,6 +270,7 @@ exec sh -c "$last"
 	if err := saveHost(client.Host{Name: "dead", SSH: "dead"}); err != nil {
 		t.Fatal(err)
 	}
+	pinFor(t, "dead")
 	clearEvents()
 	failsWithHint(t, "cannot reach dead", "ssh", "host", "test", "dead", "--reconnect")
 	if got := readEvents(); !strings.HasPrefix(got, "retire-absent:dead") {

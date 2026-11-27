@@ -8,10 +8,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"os"
 	"os/exec"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -180,10 +180,14 @@ func (t *Transport) Run(_ context.Context, remote string, stdin io.Reader) ([]by
 			uname = "Linux aarch64"
 		}
 		return []byte(uname + "\n__HELPER_PRESENT__\n"), nil
-	case strings.Contains(remote, "echo __INSTALLED__"):
+	case strings.Contains(remote, "echo __STAGED__"):
+		return []byte("__STAGED__\n"), nil
+	case strings.Contains(remote, "echo __INSTALLED__"), strings.Contains(remote, " install-payload"):
 		return []byte("__INSTALLED__\n"), nil
 	case strings.Contains(remote, " idle setup "):
 		return []byte("powers off when idle\n"), nil
+	case strings.Contains(remote, " git-op "+api.GitOpRepoInfo):
+		return []byte(`{"error":{"code":"not_a_repo","message":"not a git repository"}}`), nil
 	}
 	return nil, nil
 }
@@ -191,6 +195,28 @@ func (t *Transport) Run(_ context.Context, remote string, stdin io.Reader) ([]by
 // Start serves the fake bridge on the returned process's stdio.
 func (t *Transport) Start(_ context.Context, remote string) (client.Proc, error) {
 	t.record(remote)
+	if strings.Contains(remote, "printf 'baseline-v1\\n'") {
+		inR, inW := io.Pipe()
+		outR, outW := io.Pipe()
+		p := &pipeProc{in: inW, out: outR, done: make(chan struct{})}
+		go func() {
+			defer close(p.done)
+			_, _ = io.WriteString(outW, "baseline-v1\n"+
+				"bashrc\tabsent\t\n"+
+				"profile\tabsent\t\n"+
+				"bash_profile\tabsent\t\n"+
+				"zshrc\tabsent\t\n"+
+				"fish_config\tabsent\t\n"+
+				"authorized_keys\tabsent\t\n"+
+				"ssh_rc\tabsent\t\n"+
+				"systemd_user\tabsent\t\n"+
+				"crontab\tabsent\t\n")
+			_ = outW.Close()
+			_, _ = io.Copy(io.Discard, inR)
+			_ = inR.Close()
+		}()
+		return p, nil
+	}
 	if !t.has(remote) {
 		return missingProc{}, nil
 	}
@@ -227,7 +253,11 @@ func (t *Transport) serve(in io.Reader, out io.Writer) {
 	if hostID == "" && !t.NoHostID {
 		hostID = "0123456789abcdef0123456789abcdef"
 	}
-	_ = w.WriteJSON(proto.THello, proto.Hello{Magic: proto.Magic, Protocol: version.Protocol, Version: version.Version, Role: "bridge", HostID: hostID, Features: t.Features})
+	features := slices.Clone(t.Features)
+	if !slices.Contains(features, client.PolicyLayerFeature) {
+		features = append(features, client.PolicyLayerFeature)
+	}
+	_ = w.WriteJSON(proto.THello, proto.Hello{Magic: proto.Magic, Protocol: version.Protocol, Version: version.Version, Role: "bridge", HostID: hostID, Features: features})
 	for {
 		f, err := proto.Read(r)
 		if err != nil {
@@ -319,7 +349,7 @@ func (t *Transport) answer(req proto.Request) proto.Response {
 		var a api.NewArgs
 		_ = json.Unmarshal(req.Args, &a)
 		if newID == "" {
-			newID = fmt.Sprintf("fake%d", started)
+			newID = fakeSessionID(started)
 		}
 		v = api.SessionInfo{ID: newID, Name: a.Name, Agent: a.Agent, State: api.StateStarting, Alive: true}
 	case "resume":
@@ -358,6 +388,23 @@ func (t *Transport) answer(req proto.Request) proto.Response {
 	}
 	b, _ := json.Marshal(v)
 	return proto.Response{ID: req.ID, OK: true, Result: b}
+}
+
+func fakeSessionID(n int) string {
+	const digits = "234567abcdefghijklmnopqrstuvwxyz"
+	if n < 1 {
+		n = 1
+	}
+	var buf []byte
+	for v := n - 1; ; {
+		buf = append(buf, digits[v%len(digits)])
+		v /= len(digits)
+		if v == 0 {
+			break
+		}
+	}
+	slices.Reverse(buf)
+	return "fake" + string(buf)
 }
 
 // has reports whether the helper that remote names is on the host.

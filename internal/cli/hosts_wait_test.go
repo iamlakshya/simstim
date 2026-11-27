@@ -8,7 +8,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -18,6 +17,7 @@ import (
 
 	"github.com/iamlakshya/simstim/internal/client"
 	"github.com/iamlakshya/simstim/internal/host/hosttest"
+	"github.com/iamlakshya/simstim/internal/provider"
 )
 
 // A Ctrl+C while a command waits for the lock of hosts.toml cancels it as
@@ -84,27 +84,39 @@ func holdHostsToml(t *testing.T) func() {
 	return release
 }
 
-// host create never leaves a machine that no saved host names: when the
-// save waits out its time, it deletes the machine that it made. When that
-// delete fails too, the error names the machine that stays, and the tool
-// to delete it with.
+type lockAfterCreateProvider struct {
+	provider.Provider
+	t       *testing.T
+	created bool
+}
+
+func (p *lockAfterCreateProvider) Create(ctx context.Context, req provider.Request) (client.Host, error) {
+	h, err := p.Provider.Create(ctx, req)
+	if err == nil {
+		p.created = true
+		holdHostsToml(p.t)
+	}
+	return h, err
+}
+
+// When host create's save times out while hosts.toml is held after provider
+// creation, it does not auto-destroy the unsaved machine: it reports the
+// exact provider resource that may remain and saves nothing to hosts.toml.
 func TestCreateDeletesTheMachineThatItCouldNotSave(t *testing.T) {
 	m, _ := withFake(t, nil)
-	holdHostsToml(t)
 	defer client.ShortenHostsWait(200 * time.Millisecond)()
 	p, _ := findProvider("fake")
-	err := createHost(context.Background(), p, quietRequest("box"))
+	wp := &lockAfterCreateProvider{Provider: p, t: t}
+	err := createHost(context.Background(), wp, quietRequest("box"))
+	if !wp.created {
+		t.Fatalf("provider Create did not run before save timeout: %+v", err)
+	}
 	var ue *client.UserError
-	if !errors.As(err, &ue) || ue.Code != "hosts_busy" || !strings.HasSuffix(ue.Msg, ", so the fake machine fake-box was deleted again") ||
-		!strings.HasPrefix(ue.Hint, "End that command") || !slices.Contains(m.Calls(), "destroy") {
+	if !errors.As(err, &ue) || ue.Code != "hosts_busy" || !strings.Contains(ue.Msg, "fake-box") || !strings.Contains(ue.Msg, "may remain") || ue.Hint == "" {
 		t.Fatalf("host create whose save waited out its time: %+v, calls %v", err, m.Calls())
 	}
-	m.SetState(client.MachineRunning)
-	m.DestroyErr = errors.New("the daemon is gone")
-	err = createHost(context.Background(), p, quietRequest("box"))
-	if !errors.As(err, &ue) || !strings.HasSuffix(ue.Msg, ", and the fake machine fake-box stays: the daemon is gone") ||
-		ue.Hint != "Delete it with fake's own tools, then run the command again." {
-		t.Fatalf("host create whose delete failed too: %+v", err)
+	if len(m.Calls()) != 0 {
+		t.Fatalf("timed-out create unexpectedly called provider destroy: %v", m.Calls())
 	}
 	if _, err := client.FindHost("box"); err == nil {
 		t.Error("a host was saved")

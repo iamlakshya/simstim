@@ -49,21 +49,21 @@ func TestAnAnswerThatMeetsASignalKeepsNothing(t *testing.T) {
 
 	term.Type("y\n")
 	beforeChoice = func() { close(interrupted) }
-	if _, err := startSession(sessionCmd(context.Background()), conn, h, client.NewArgs{}); !errors.Is(err, errInterrupted) {
+	if _, err := startSession(sessionCmd(context.Background()), conn, h, client.NewArgs{Wall: "none", Downgrade: true}); !errors.Is(err, errInterrupted) {
 		t.Fatalf("a yes with a signal = %v, want a cancel", err)
 	}
 	withSignal(t)
 	term.Type("y\n")
 	ctx, cancel := context.WithCancel(context.Background())
 	beforeChoice = cancel
-	if _, err := startSession(sessionCmd(ctx), conn, h, client.NewArgs{}); !errors.Is(err, errInterrupted) {
+	if _, err := startSession(sessionCmd(ctx), conn, h, client.NewArgs{Wall: "none", Downgrade: true}); !errors.Is(err, errInterrupted) {
 		t.Fatalf("a yes as the context ends = %v, want a cancel", err)
 	}
 	withSignal(t)
 	term.Type("y\n")
 	ctx, cancel = context.WithCancel(context.Background())
 	afterAnswer = func(string) { cancel() }
-	if _, err := startSession(sessionCmd(ctx), conn, h, client.NewArgs{}); !errors.Is(err, errInterrupted) {
+	if _, err := startSession(sessionCmd(ctx), conn, h, client.NewArgs{Wall: "none", Downgrade: true}); !errors.Is(err, errInterrupted) {
 		t.Fatalf("a cancel after the yes = %v, want a cancel", err)
 	}
 	// The context ends while the read of the terminal waits. A question
@@ -85,7 +85,7 @@ func TestAnAnswerThatMeetsASignalKeepsNothing(t *testing.T) {
 	}()
 	within(t, "the question after the context ended, with the input blocked,", func() {
 		//nolint:contextcheck // startSession takes ctx from its command
-		if _, err := startSession(sessionCmd(ctx), conn, h, client.NewArgs{}); !errors.Is(err, errInterrupted) {
+		if _, err := startSession(sessionCmd(ctx), conn, h, client.NewArgs{Wall: "none", Downgrade: true}); !errors.Is(err, errInterrupted) {
 			t.Errorf("a cancel with no answer = %v, want a cancel", err)
 		}
 	})

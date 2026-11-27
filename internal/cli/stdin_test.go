@@ -19,6 +19,14 @@ var stdinAllowed = map[string]string{
 	"prompts":    "the prompter reads p.in only through readLine, which reads through answer",
 	"pickSession": "the picker reads os.Stdin only through keyread.For: the terminal's one reader, which answer shares, " +
 		"so the picker and the questions never make a second reader, which on Windows would drop what waits in the console",
+	"attachSession":          "hands stdin to attachSessionFiles, which owns the attached terminal stream and does not prompt",
+	"runHostPrepareTargetV1": "hands stdin to RunHostPrepareRootPhaseV1 for interactive sudo password entry, never for CLI prompts",
+	"removePurgedHost":       "hands stdin to root purge execution for interactive sudo password entry, never for CLI prompts",
+	"runNewCommand":          "hands stdin to RunExec as the non-interactive command's standard input stream",
+	"beforeAttach":           "passes os.Stdin to beforeAttachFiles only to check isTerminal, never to read",
+	"attachNeedsATerminal":   "passes os.Stdin to attachNeedsTerminalFiles only to check isTerminal, never to read",
+	"shellCommand":           "hands stdin to interactive shell attach or exec, never to CLI prompts",
+	"sshProxyCmd":            "hands stdin to ServeEditorSSH, which serves the SSH protocol stream directly",
 }
 
 // lineReads are the calls that read a line or a buffer of their own. Only

@@ -29,7 +29,7 @@ func keyHost(t *testing.T) *testHost {
 func TestHostAddPinsTheHostKey(t *testing.T) {
 	th := keyHost(t)
 	fp := hostShows(t, th.h.Home, "trusted")
-	out := okSaid(t, "host", "add", "added", "box", "--tier", "own", "--yes")
+	out := okSaid(t, "host", "add", "added", "box", "--tier", "own", "--yes", "--no-sandbox")
 	want := "  ✓ host key " + fp + " pinned, from your known_hosts\n"
 	if !strings.Contains(out, want) || strings.Index(out, "✓ connected") > strings.Index(out, want) {
 		t.Fatalf("host add said:\n%s", out)
@@ -52,13 +52,13 @@ func TestHostAddPinsTheHostKey(t *testing.T) {
 		}
 	}
 	// Again, with the same target: the pin stays.
-	if out := okSaid(t, "host", "add", "added", "box", "--yes"); !strings.Contains(out, "  ✓ host key "+fp+" already pinned\n") {
+	if out := okSaid(t, "host", "add", "added", "box", "--yes", "--no-sandbox"); !strings.Contains(out, "  ✓ host key "+fp+" already pinned\n") {
 		t.Errorf("host add again said:\n%s", out)
 	}
 	// A --host-key that the pin lacks is a refusal: only host rekey changes
 	// a pin.
 	_, other := hostKey(t)
-	got, code := lineErr(t, "host", "add", "added", "box", "--yes", "--host-key", other)
+	got, code := lineErr(t, "host", "add", "added", "box", "--yes", "--no-sandbox", "--host-key", other)
 	if code != 5 || !strings.Contains(got, "added has a pinned host key already, "+fp+", and the host shows "+other) ||
 		!strings.Contains(got, "Try: If you reinstalled added: "+brand.Name+" host rekey added. Otherwise, do not connect.") {
 		t.Errorf("another --host-key: exit %d\n%s", code, got)
@@ -73,7 +73,7 @@ func TestHostAddPinsTheHostKey(t *testing.T) {
 	if err := os.WriteFile(conf, []byte("# another target's config\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	got, code = lineErr(t, "host", "add", "added", "box.other", "--yes", "--ssh-config", conf)
+	got, code = lineErr(t, "host", "add", "added", "box.other", "--yes", "--no-sandbox", "--ssh-config", conf)
 	if code != 5 || !strings.Contains(got, "added's host key changed: "+fp+" was pinned, and the host shows "+shown) ||
 		!strings.Contains(got, "host rekey added") {
 		t.Errorf("another target: exit %d\n%s", code, got)
@@ -84,7 +84,7 @@ func TestHostAddPinsTheHostKey(t *testing.T) {
 	_ = os.Remove(filepath.Join(th.h.Home, "changed"))
 	// host rm forgets the pin, and no other.
 	hostShows(t, th.h.Home, "trusted")
-	okSaid(t, "host", "add", "added2", "box", "--tier", "own", "--yes")
+	okSaid(t, "host", "add", "added2", "box", "--tier", "own", "--yes", "--no-sandbox")
 	okSaid(t, "host", "rm", "added")
 	if client.HasPin("added") || !client.HasPin("added2") {
 		t.Errorf("after host rm: pin of added %v, of added2 %v", client.HasPin("added"), client.HasPin("added2"))
@@ -148,12 +148,12 @@ func TestHostAddOnFirstUse(t *testing.T) {
 	if code != 2 || !strings.Contains(got, "is not a SHA256 fingerprint") {
 		t.Errorf("a --host-key that is not one: exit %d\n%s", code, got)
 	}
-	out := okSaid(t, "host", "add", "added", "box", "--tier", "own", "--host-key", fp)
+	out := okSaid(t, "host", "add", "added", "box", "--tier", "own", "--host-key", fp, "--no-sandbox")
 	if !strings.Contains(out, "  ✓ host key "+fp+" pinned, matched --host-key\n") {
 		t.Errorf("--host-key said:\n%s", out)
 	}
 	okSaid(t, "host", "rm", "added")
-	out = okSaid(t, "host", "add", "added", "box", "--tier", "own", "--yes")
+	out = okSaid(t, "host", "add", "added", "box", "--tier", "own", "--yes", "--no-sandbox")
 	if !strings.Contains(out, "  ✓ host key "+fp+" pinned on first use. Check it on the machine: ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub\n") {
 		t.Errorf("--yes said:\n%s", out)
 	}
@@ -184,7 +184,7 @@ func TestHostAddWithAStaleKnownHost(t *testing.T) {
 	if _, err := client.FindHost("added"); err == nil || len(pinFiles(t)) != 0 {
 		t.Errorf("the host was saved, or pinned: %v", pinFiles(t))
 	}
-	if out := okSaid(t, "host", "add", "added", "box", "--tier", "own", "--host-key", fp); !strings.Contains(out, " pinned, matched --host-key") {
+	if out := okSaid(t, "host", "add", "added", "box", "--tier", "own", "--host-key", fp, "--no-sandbox"); !strings.Contains(out, " pinned, matched --host-key") {
 		t.Errorf("with --host-key:\n%s", out)
 	}
 }
@@ -194,7 +194,7 @@ func TestHostAddWithAStaleKnownHost(t *testing.T) {
 func TestChangedHostKeyExitsWith5(t *testing.T) {
 	th := keyHost(t)
 	hostShows(t, th.h.Home, "trusted")
-	okSaid(t, "host", "add", "added", "box", "--tier", "own", "--yes")
+	okSaid(t, "host", "add", "added", "box", "--tier", "own", "--yes", "--no-sandbox")
 	fp := pinnedAdded(t)
 	if err := os.MkdirAll(filepath.Join(th.h.Home, ".ssh"), 0o700); err != nil {
 		t.Fatal(err)
@@ -233,7 +233,7 @@ func TestChangedHostKeyExitsWith5(t *testing.T) {
 func TestHostRekey(t *testing.T) {
 	th := keyHost(t)
 	hostShows(t, th.h.Home, "trusted")
-	okSaid(t, "host", "add", "added", "box", "--tier", "own", "--yes")
+	okSaid(t, "host", "add", "added", "box", "--tier", "own", "--yes", "--no-sandbox")
 	old := pinnedAdded(t)
 	pin := filepath.Join(client.ConfigDir(), "ssh", "known_hosts-"+client.HostFileKey("added"))
 	oldPin, err := os.ReadFile(pin)

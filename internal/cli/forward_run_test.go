@@ -27,7 +27,7 @@ func TestForwardKeepsPreflightErrorsAndNoBanner(t *testing.T) {
 
 func TestForwardKeepsHostKeyRefusal(t *testing.T) {
 	th := newTestHost(t)
-	th.h.Script("ssh", `case " $* " in *" -G "*|*" -O "*) exit 0;; esac
+	th.h.Script("ssh", `case " $* " in *" -G "*) echo "hostname box"; exit 0;; *" -O "*) exit 0;; esac
 prev=
 for a; do [ "$prev" = -E ] && log=$a; prev=$a; done
 printf 'Host key for `+brand.Name+`-box has changed and you have requested strict checking.\nHost key verification failed.\n' >> "$log"
@@ -42,7 +42,7 @@ exit 255
 
 func TestForwardReportsUsefulLogDiagnostics(t *testing.T) {
 	th := newTestHost(t)
-	th.h.Script("ssh", `case " $* " in *" -G "*|*" -O "*) exit 0;; esac
+	th.h.Script("ssh", `case " $* " in *" -G "*) echo "hostname box"; exit 0;; *" -O "*) exit 0;; esac
 prev=
 for a; do [ "$prev" = -E ] && log=$a; prev=$a; done
 printf '\033cbind: Address already in use\nTry: unsafe\n' >> "$log"

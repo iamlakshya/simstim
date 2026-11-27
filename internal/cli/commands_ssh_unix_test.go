@@ -116,7 +116,7 @@ func TestPull(t *testing.T) {
 		t.Fatal(err)
 	}
 	newSession(t, "feat", "sleep", "60") // in the home folder, not a repository
-	out := okSaid(t, "new", "box", "--detach", "--name", "repo", "--dir", remote, "--", "sleep", "60")
+	out := okSaid(t, "new", "box", "--detach", "--wall", "none", "--downgrade", "--name", "repo", "--dir", remote, "--", "sleep", "60")
 	if !strings.Contains(out, "(repo, shell)") {
 		t.Fatalf("new = %q", out)
 	}
@@ -148,10 +148,35 @@ func TestPull(t *testing.T) {
 			t.Errorf("pull ran ssh with %q, want %q and %q", line, noForwarding, noPorts)
 		}
 	}
-	// The host's git ran in the helper's git-op, over the client's SSH.
-	log, _ := os.ReadFile(filepath.Join(th.h.Home, "ssh.log"))
-	if !strings.Contains(string(log), "git-op repo.info") {
-		t.Errorf("pull did not run git-op repo.info on the host: %s", log)
+	// For a provider-backed host, repo.info goes through the host transport.
+	if !slices.ContainsFunc(th.tr.Remotes(), func(r string) bool { return strings.Contains(r, "git-op repo.info") }) {
+		t.Errorf("pull did not run git-op repo.info through the host transport: %q", th.tr.Remotes())
+	}
+	// For a pure-SSH host (Machine == nil), repo.info goes over the client's SSH with no forwarding.
+	sshOnly := client.Host{Name: "sshbox", SSH: "box"}
+	if err := client.SaveHostsContext(context.Background(), []client.Host{th.ch, sshOnly}); err != nil {
+		t.Fatal(err)
+	}
+	pinFor(t, "sshbox")
+	beforeSSH := len(sshLines(t, th))
+	info, err := client.SessionRepo(context.Background(), sshOnly, remote)
+	if err != nil || info.Branch != "feature" || info.Dirty != 1 {
+		t.Fatalf("pure-SSH SessionRepo = %+v, %v", info, err)
+	}
+	if _, err := os.Stat(probeMarker); !os.IsNotExist(err) {
+		t.Errorf("pure-SSH SessionRepo executed host .gitconfig hook (%v)", err)
+	}
+	sshRepoLines := sshLines(t, th)[beforeSSH:]
+	if !slices.ContainsFunc(sshRepoLines, func(l string) bool { return strings.Contains(l, "git-op repo.info") }) {
+		t.Errorf("pure-SSH SessionRepo did not run git-op repo.info over ssh: %q", sshRepoLines)
+	}
+	for _, line := range sshRepoLines {
+		if !strings.Contains(line, noForwarding+" ") {
+			t.Errorf("pure-SSH SessionRepo ran ssh with %q, want %q", line, noForwarding)
+		}
+		if !strings.Contains(line, " -G ") && !strings.Contains(line, noPorts+" ") {
+			t.Errorf("pure-SSH SessionRepo ran ssh with %q, want %q", line, noPorts)
+		}
 	}
 }
 
@@ -159,6 +184,7 @@ func TestPull(t *testing.T) {
 // client names the host in the error, and its hint runs the doctor there.
 func TestNewNamesTheHostOfAGitScopeError(t *testing.T) {
 	th := newTestHost(t)
+	th.h.Install(client.HelperVersion(), "")
 	repo := filepath.Join(th.h.Home, "src", "app")
 	if err := os.MkdirAll(repo, 0o755); err != nil {
 		t.Fatal(err)
@@ -178,7 +204,7 @@ func TestNewNamesTheHostOfAGitScopeError(t *testing.T) {
 	th.h.Script("systemctl", "echo running\n")
 	th.h.Script("systemd-run", "echo 'Failed to connect to bus: No such file or directory' >&2\nexit 1\n")
 	failsWithHint(t, "could not start git in a scope on box: Failed to connect to bus", brand.Name+" host doctor box",
-		"new", "box", "--detach", "--dir", repo, "--worktree", "--", "sleep", "60")
+		"new", "box", "--detach", "--wall", "none", "--downgrade", "--dir", repo, "--worktree", "--", "sleep", "60")
 }
 
 // kill of a session whose worktree a scope failure kept names the host in
@@ -186,6 +212,7 @@ func TestNewNamesTheHostOfAGitScopeError(t *testing.T) {
 func TestKillNamesTheHostOfAKeptWorktree(t *testing.T) {
 	hosttest.SkipOnGit254(t)
 	th := newTestHost(t)
+	th.h.Install(client.HelperVersion(), "")
 	repo := filepath.Join(th.h.Home, "src", "app")
 	if err := os.MkdirAll(repo, 0o755); err != nil {
 		t.Fatal(err)
@@ -195,7 +222,7 @@ func TestKillNamesTheHostOfAKeptWorktree(t *testing.T) {
 			t.Fatalf("git %v: %v\n%s", args, err, out)
 		}
 	}
-	m := startedRE.FindStringSubmatch(okSaid(t, "new", "box", "--detach", "--name", "kept", "--dir", repo, "--worktree", "--", "sleep", "60"))
+	m := startedRE.FindStringSubmatch(okSaid(t, "new", "box", "--detach", "--wall", "none", "--downgrade", "--name", "kept", "--dir", repo, "--worktree", "--", "sleep", "60"))
 	if m == nil {
 		t.Fatal("new did not start the session")
 	}
@@ -235,7 +262,8 @@ func sshLines(t *testing.T, th *testHost) []string {
 // says what to try.
 func TestKillShowsWhyAWorktreeStays(t *testing.T) {
 	hosttest.SkipOnGit254(t)
-	newTestHost(t)
+	th := newTestHost(t)
+	th.h.Install(client.HelperVersion(), "")
 	repo := filepath.Join(os.Getenv("HOME"), "src", "app")
 	if err := os.MkdirAll(repo, 0o755); err != nil {
 		t.Fatal(err)
@@ -245,7 +273,7 @@ func TestKillShowsWhyAWorktreeStays(t *testing.T) {
 			t.Fatalf("git %v: %v\n%s", args, err, out)
 		}
 	}
-	m := startedRE.FindStringSubmatch(okSaid(t, "new", "box", "--detach", "--name", "bad", "--dir", repo, "--worktree", "--", "sleep", "60"))
+	m := startedRE.FindStringSubmatch(okSaid(t, "new", "box", "--detach", "--wall", "none", "--downgrade", "--name", "bad", "--dir", repo, "--worktree", "--", "sleep", "60"))
 	if m == nil {
 		t.Fatal("new did not start the session")
 	}

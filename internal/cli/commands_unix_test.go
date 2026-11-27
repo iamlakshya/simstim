@@ -41,7 +41,8 @@ func newTestHost(t *testing.T) *testHost {
 	ch.SSH = "box"
 	// The fake ssh shows a host key that the user's settings trust (keyFake),
 	// so a host that a test adds gets its pin from there.
-	h.Script("ssh", `echo "$@" >> "$HOME/ssh.log"
+	h.Script("ssh", `case " $* " in *" -V "*) echo "OpenSSH_fake" >&2; exit 0;; esac
+echo "$@" >> "$HOME/ssh.log"
 for a; do last=$a; done
 case " $* " in *" -N "*|*" -O "*) exit 0;; esac
 `+keyFake+`exec sh -c "$last"
@@ -56,13 +57,14 @@ case " $* " in *" -N "*|*" -O "*) exit 0;; esac
 	// box is saved with an SSH target, so no ssh command reaches it
 	// without a pin.
 	pinFor(t, "box")
+	h.Install(client.HelperVersion(), "")
 	return &testHost{h: h, ch: ch, tr: tr}
 }
 
 // newSession starts a detached session and returns its ID.
 func newSession(t *testing.T, name string, argv ...string) string {
 	t.Helper()
-	out := okSaid(t, append([]string{"new", "box", "--detach", "--name", name, "--"}, argv...)...)
+	out := okSaid(t, append([]string{"new", "box", "--detach", "--wall", "none", "--downgrade", "--name", name, "--"}, argv...)...)
 	m := startedRE.FindStringSubmatch(out)
 	if m == nil {
 		t.Fatalf("new printed %q", out)
@@ -125,7 +127,7 @@ func TestAttachNeedsATerminal(t *testing.T) {
 	newTestHost(t)
 	id := newSession(t, "s", "sleep", "60")
 	failsWithHint(t, "attach needs a terminal", brand.Name+" send box/"+id+" 'text'", "attach", "box/"+id)
-	fails(t, "new attaches, so it needs a terminal", "new", "box", "--", "sleep", "60")
+	fails(t, "new attaches, so it needs a terminal", "new", "box")
 	// Without a terminal, attach stops before it looks: show says it.
 	fails(t, "no session has been attached yet", "show", "-")
 	_, err := run(t, "show", "-")

@@ -21,7 +21,7 @@ func writeSettings(t *testing.T, text string) {
 // newSessionArgs starts a detached session with flags, and returns its ID.
 func newSessionArgs(t *testing.T, flags ...string) string {
 	t.Helper()
-	args := append(append([]string{"new", "box", "--detach"}, flags...), "--", "sleep", "60")
+	args := append(append([]string{"new", "box", "--detach", "--wall", "none", "--downgrade"}, flags...), "--", "sleep", "60")
 	m := startedRE.FindStringSubmatch(okSaid(t, args...))
 	if m == nil {
 		t.Fatalf("%q started nothing", args)

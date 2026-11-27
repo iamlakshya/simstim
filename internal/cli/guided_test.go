@@ -122,7 +122,7 @@ func testGuide(t *testing.T, ctx context.Context, o guideOpts, l onboard.Local, 
 			}
 		}
 		tr.SetAgents(checks)
-		return "s" + a.Args.Name, true, nil
+		return "s2345672", true, nil
 	}
 	return g, &out, &ran
 }

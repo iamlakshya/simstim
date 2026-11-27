@@ -94,7 +94,10 @@ func TestTheLockOfAHost(t *testing.T) {
 		t.Fatalf("host set while the host is locked: %+v", err)
 	}
 	p, _ := findProvider("fake")
-	held := lockOf(t, "new", "host rm")
+	_, held, err := client.BeginHostCreationContextWithKind(context.Background(), client.HostCreationRequest{Name: "new", Provider: "fake"}, "host rm")
+	if err != nil {
+		t.Fatal(err)
+	}
 	var made bytes.Buffer
 	req := quietRequest("new")
 	req.Out = &made
@@ -236,7 +239,7 @@ func TestCreateWithARecordThatStays(t *testing.T) {
 	req.Out = &made
 	err := createHost(context.Background(), p, req)
 	var ue *client.UserError
-	if !errors.As(err, &ue) || ue.Code != "removal_record" || !strings.Contains(ue.Msg, "so nothing was made") || made.Len() != 0 {
+	if !errors.As(err, &ue) || ue.Code != "grant_state" || !strings.Contains(ue.Msg, "removal.json") || made.Len() != 0 {
 		t.Fatalf("host create with a record that stays: %+v, made %q", err, made.String())
 	}
 	if _, err := client.FindHost("box"); err == nil {

@@ -75,7 +75,14 @@ func TestHostSetDoesWhatHostIdleDid(t *testing.T) {
 	}
 	oldSaid := okSaid(t, "host", "idle", "vm", "2h")
 	oldFile, _ := os.ReadFile(client.ConfigDir() + "/hosts.toml")
-	if string(newFile) != string(oldFile) {
+	stripGen := func(b []byte) string {
+		s := string(b)
+		if strings.HasPrefix(s, "# membership-generation:") {
+			_, s, _ = strings.Cut(s, "\n")
+		}
+		return s
+	}
+	if stripGen(newFile) != stripGen(oldFile) {
 		t.Errorf("hosts.toml after host set:\n%s\nafter host idle:\n%s", newFile, oldFile)
 	}
 	warning, rest, _ := strings.Cut(oldSaid, "\n")

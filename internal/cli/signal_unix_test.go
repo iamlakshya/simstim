@@ -110,7 +110,7 @@ func TestSignalsCancel(t *testing.T) {
 func TestASignalAtAQuestionKeepsNoAnswer(t *testing.T) {
 	hosttest.New(t)
 	term := hosttest.NewTerminal(t, 100, 30)
-	cmd, _ := child(t, term, "setup-trust", "new", "box", "--dir", "~/proj", "--name", "s", "--", "sleep", "60")
+	cmd, _ := child(t, term, "setup-trust", "new", "box", "--wall", "none", "--downgrade", "--dir", "~/proj", "--name", "s", "--", "sleep", "60")
 	term.WaitFor("Run it? [y/N] ")
 	if err := cmd.Process.Signal(os.Interrupt); err != nil {
 		t.Fatal(err)

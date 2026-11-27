@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
+	"strings"
 	"sync"
 
 	"github.com/iamlakshya/simstim/internal/client"
@@ -87,6 +88,23 @@ func (t *Transport) Start(ctx context.Context, remote string) (client.Proc, erro
 	t.remotes = append(t.remotes, remote)
 	if t.down != nil {
 		return nil, t.down
+	}
+	if strings.Contains(remote, "printf 'baseline-v1\\n'") {
+		inR, inW := io.Pipe()
+		outR, outW := io.Pipe()
+		p := &bridgeProc{in: inW, out: outR, done: make(chan struct{})}
+		stop := context.AfterFunc(ctx, p.Kill)
+		go func() {
+			cmd := exec.CommandContext(ctx, "/bin/sh", "-c", remote)
+			cmd.Stdin = inR
+			cmd.Stdout = outW
+			p.err = cmd.Run()
+			stop()
+			_ = outW.Close()
+			_ = inR.Close()
+			close(p.done)
+		}()
+		return p, nil
 	}
 	inR, inW := io.Pipe()
 	outR, outW := io.Pipe()

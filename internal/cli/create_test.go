@@ -30,9 +30,18 @@ func (fakeProvider) Create(_ context.Context, req provider.Request) (client.Host
 
 func (f fakeProvider) Open(client.Host) (client.Lifecycle, error) { return f.m, nil }
 
+func realTempDir(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	if real, err := filepath.EvalSymlinks(dir); err == nil {
+		return real
+	}
+	return dir
+}
+
 func withFake(t *testing.T, sessions []client.Session) (*clienttest.Machine, *clienttest.Transport) {
 	t.Helper()
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", realTempDir(t))
 	ownState(t)
 	t.Setenv("TERM", "xterm-256color")
 	tr := &clienttest.Transport{Sessions: sessions}
@@ -50,10 +59,10 @@ func withFake(t *testing.T, sessions []client.Session) (*clienttest.Machine, *cl
 // USERPROFILE is the home on Windows.
 func ownState(t *testing.T) {
 	t.Helper()
-	home := t.TempDir()
+	home := realTempDir(t)
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
-	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	t.Setenv("XDG_STATE_HOME", realTempDir(t))
 }
 
 // saveHost saves h in place of the saved host of the same name, as a hand

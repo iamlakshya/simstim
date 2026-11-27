@@ -52,7 +52,7 @@ func TestGoldenJSON(t *testing.T) {
 		fmt.Fprintf(&b, "== %s\n%s", strings.Join(args, " "), masked(out))
 	}
 	// An explicit cap keeps the JSON shape the same with and without /proc.
-	show("new", "box", "--detach", "--json", "--name", "api", "--memory-max", "256M", "--", "sleep", "60")
+	show("new", "box", "--detach", "--wall", "none", "--downgrade", "--json", "--name", "api", "--memory-max", "256M", "--", "sleep", "60")
 	show("ls", "--json")
 	show("ports", "box/api", "--json")
 	show("show", "box/api", "--json")
@@ -153,7 +153,7 @@ func TestCommandsPrintJSON(t *testing.T) {
 // JSON object with id, name, host and "v": 1, and nothing else on stdout.
 func TestNewDetachJSON(t *testing.T) {
 	newTestHost(t)
-	out, errOut, err := runApart(t, "new", "box", "--detach", "--json", "--name", "api", "--", "sleep", "60")
+	out, errOut, err := runApart(t, "new", "box", "--detach", "--wall", "none", "--downgrade", "--json", "--name", "api", "--", "sleep", "60")
 	if err != nil {
 		t.Fatalf("%v\n%s", err, errOut)
 	}
@@ -161,13 +161,18 @@ func TestNewDetachJSON(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &s); err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
-	if s["v"] != float64(1) || s["host"] != "box" || s["name"] != "api" || s["id"] == "" || s["address"] != "box/"+s["id"].(string) || errOut != "" {
+	var warn struct {
+		V       int
+		Warning map[string]string
+	}
+	if s["v"] != float64(1) || s["host"] != "box" || s["name"] != "api" || s["id"] == "" || s["address"] != "box/"+s["id"].(string) ||
+		(errOut != "" && (json.Unmarshal([]byte(errOut), &warn) != nil || warn.Warning["code"] != "wall_downgraded")) {
 		t.Fatalf("stdout %s, stderr %q", out, errOut)
 	}
 	checkJSON(t, "new --detach --json", out, false)
 
 	// A second session of that name gets its ID in its address too.
-	out = okJSON(t, "new", "box", "--detach", "--json", "--name", "api", "--", "sleep", "60")
+	out = okJSON(t, "new", "box", "--detach", "--wall", "none", "--downgrade", "--json", "--name", "api", "--", "sleep", "60")
 	_ = json.Unmarshal([]byte(out), &s)
 	if s["address"] != "box/"+s["id"].(string) {
 		t.Errorf("the second api's address is %v", s["address"])
@@ -236,8 +241,8 @@ func TestColourRules(t *testing.T) {
 // Confirmations go to stderr, and data to stdout (cli-spec 7.5).
 func TestStreams(t *testing.T) {
 	newTestHost(t)
-	out, errOut, err := runApart(t, "new", "box", "--detach", "--name", "s", "--", "sleep", "60")
-	if err != nil || out != "" || !strings.HasPrefix(errOut, "Started box/") {
+	out, errOut, err := runApart(t, "new", "box", "--detach", "--wall", "none", "--downgrade", "--name", "s", "--", "sleep", "60")
+	if err != nil || out != "" || !strings.Contains(errOut, "Started box/") {
 		t.Errorf("new --detach: %v, stdout %q, stderr %q", err, out, errOut)
 	}
 	out, errOut, err = runApart(t, "ls")

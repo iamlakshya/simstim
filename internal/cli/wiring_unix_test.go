@@ -43,9 +43,9 @@ func TestSecretCommandsGetTheTerminal(t *testing.T) {
 			t.Fatalf("%s: %v", args, err)
 		}
 	}
-	atTerminal("new", "box", "--detach", "--name", "one", "--secret", "TOK", "--", "sleep", "60")
-	atTerminal("new", "box", "--detach", "--name", "two", "--secret", "TOK", "--no-input", "--", "sleep", "60")
-	m := startedRE.FindStringSubmatch(okSaid(t, "new", "box", "--detach", "--name", "three", "--secret", "TOK", "--", "/bin/sh", "-c", "exit 0"))
+	atTerminal("new", "box", "--detach", "--wall", "none", "--downgrade", "--name", "one", "--secret", "TOK", "--", "sleep", "60")
+	atTerminal("new", "box", "--detach", "--wall", "none", "--downgrade", "--name", "two", "--secret", "TOK", "--no-input", "--", "sleep", "60")
+	m := startedRE.FindStringSubmatch(okSaid(t, "new", "box", "--detach", "--wall", "none", "--downgrade", "--name", "three", "--secret", "TOK", "--", "/bin/sh", "-c", "exit 0"))
 	if m == nil {
 		t.Fatal("new started no session")
 	}
@@ -148,7 +148,7 @@ func TestHostAddChecklistNoInputCommand(t *testing.T) {
 	th := newTestHost(t)
 	th.h.Install(client.HelperVersion(), "")
 	t.Setenv(noInputEnv, "")
-	term, done := inTerminal(t, "host", "add", "added", "box", "--tier", "own", "--no-input")
+	term, done := inTerminal(t, "host", "add", "added", "box", "--tier", "own", "--no-sandbox", "--no-input")
 	term.WaitFor("Agents:")
 	// An Enter would answer the checklist, if the command asked it.
 	term.Type("\r")

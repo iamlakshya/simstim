@@ -34,7 +34,7 @@ func TestAttachChecksTheTerminalFirst(t *testing.T) {
 	}
 	// The attach of new does the same, before it starts anything.
 	before = len(th.tr.Remotes())
-	if got, code := failsAs(t, "new", "box", "--", "sleep", "60"); code != 2 || !strings.Contains(got, "new attaches, so it needs a terminal") {
+	if got, code := failsAs(t, "new", "box"); code != 2 || !strings.Contains(got, "new attaches, so it needs a terminal") {
 		t.Errorf("new without a terminal: exit %d\n%s", code, got)
 	}
 	if n := len(th.tr.Remotes()); n != before {
@@ -54,17 +54,17 @@ func TestShowOnAStoppedProviderHost(t *testing.T) {
 		return h.Script("provider-"+state, "[ \"$1\" = start ] && touch "+started+"\n"+
 			"[ \"$1\" = status ] && echo '{\"state\": \""+state+"\"}'\ntrue\n")
 	}
+	pinFor(t, "cloud")
 	for _, c := range []struct{ state, ssh, want, try string }{
 		{"stopped", "ssh: connect to host cloud port 22: Connection refused",
 			"Error: cloud is stopped, and show does not start it.", "Try: " + brand.Name + " host start cloud (an attach to one of its sessions starts it too)"},
 		{"running", "cloud: Permission denied (publickey).",
-			"Permission denied (publickey)", "Try: ssh cloud"},
+			"the host refused the login (Permission denied)", "Try: ssh cloud"},
 	} {
-		h.Script("ssh", "echo \""+c.ssh+"\" >&2; exit 255\n")
+		h.Script("ssh", "case \" $* \" in *\" -G \"*) echo \"hostname cloud\"; exit 0;; esac\necho \""+c.ssh+"\" >&2; exit 255\n")
 		if err := client.SaveHostsContext(context.Background(), []client.Host{{Name: "cloud", SSH: "cloud", Provider: &client.Provider{Script: provider(c.state), WakeOnAttach: true}}}); err != nil {
 			t.Fatal(err)
 		}
-		pinFor(t, "cloud")
 		got, code := failsAs(t, "show", "cloud/c")
 		if code != 1 || !strings.Contains(got, c.want) || !strings.Contains(got, c.try) {
 			t.Errorf("show cloud/c on a %s host: exit %d\n%s", c.state, code, got)

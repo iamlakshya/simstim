@@ -67,7 +67,7 @@ func TestAnotherClientResumesFirst(t *testing.T) {
 func TestShowAFailedStart(t *testing.T) {
 	newTestHost(t)
 	// new fails, and the host keeps the session, with why it ended.
-	if _, err := run(t, "new", "box", "--detach", "--name", "bad", "--", "/no/such/agent-xyz"); err == nil {
+	if _, err := run(t, "new", "box", "--detach", "--wall", "none", "--downgrade", "--name", "bad", "--", "/no/such/agent-xyz"); err == nil {
 		t.Fatal("new started a command that does not exist")
 	}
 	hosttest.WaitFor(t, 10*time.Second, "the failed session in ls", func() bool { return strings.Contains(ok(t, "ls"), " bad ") })

@@ -3,31 +3,31 @@ Claude Code logs in with its own login, in a session on box:
 
     claude auth login
 
-It runs in the session login-claude (box/fake1). Answer it there, or press ctrl+\ to leave it running.
+It runs in the session login-claude (box/fake2). Answer it there, or press ctrl+\ to leave it running.
 
   ✓ Claude Code      /home/dev/.local/bin/claude, logged in (`claude auth status` says so)
--> attached to fake1
+-> attached to fake2
 == a new login, left by a detach
 Claude Code logs in with its own login, in a session on box:
 
     claude auth login
 
-It runs in the session login-claude (box/fake1). Answer it there, or press ctrl+\ to leave it running.
+It runs in the session login-claude (box/fake2). Answer it there, or press ctrl+\ to leave it running.
 
   ! Claude Code      /home/dev/.local/bin/claude, not logged in (`claude auth status` says not)
 
-The login keeps running. Attach again: <name> attach --id -- box/fake1
--> attached to fake1
+The login keeps running. Attach again: <name> attach --id -- box/fake2
+-> attached to fake2
 == a login that runs
-The login of Claude Code already runs in box/s1. Attaching to it. Answer it there, or press ctrl+\ to leave it running.
+The login of Claude Code already runs in box/s2. Attaching to it. Answer it there, or press ctrl+\ to leave it running.
 
   ! Claude Code      /home/dev/.local/bin/claude, not logged in (`claude auth status` says not)
 
-The login keeps running. Attach again: <name> attach --id -- box/s1
--> attached to s1
+The login keeps running. Attach again: <name> attach --id -- box/s2
+-> attached to s2
 == input off
-Started box/fake1. Attach to finish the login: <name> attach --id -- box/fake1
+Started box/fake2. Attach to finish the login: <name> attach --id -- box/fake2
 == input off, a login that runs
-The login of Claude Code already runs in box/s1. Attach to finish the login: <name> attach --id -- box/s1
-== input off, two logins that run
 The login of Claude Code already runs in box/s2. Attach to finish the login: <name> attach --id -- box/s2
+== input off, two logins that run
+The login of Claude Code already runs in box/s3. Attach to finish the login: <name> attach --id -- box/s3

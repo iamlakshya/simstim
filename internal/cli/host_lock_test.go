@@ -61,7 +61,17 @@ func TestCommandsLetTheLockGo(t *testing.T) {
 	if err := removeHost(context.Background(), quietPrompts(context.Background()), destroyOpts("box", true)); err != nil {
 		t.Fatal(err)
 	}
-	freeLock(t, "a host rm that worked")
+	// After removal, box is no longer saved so LockHost refuses as unknown,
+	// not busy; a fresh creation context acquires and releases its lock cleanly.
+	var ue *client.UserError
+	if _, _, err := client.LockHost(context.Background(), "box", "a test"); !errors.As(err, &ue) || ue.Code == "host_busy" {
+		t.Fatalf("after a host rm that worked, LockHost(box) = %v, want unknown host (not host_busy)", err)
+	}
+	_, unlock, err := client.BeginHostCreationContext(context.Background(), client.HostCreationRequest{Name: "box", Provider: "fake"})
+	if err != nil {
+		t.Fatalf("after a host rm that worked, the creation lock of box: %v", err)
+	}
+	unlock()
 }
 
 // A read of a host by a client built with go install, with nothing in its
@@ -72,7 +82,7 @@ func TestHostShowNeverDownloads(t *testing.T) {
 	if err := saveHost(client.Host{Name: "box", Machine: &client.Machine{Provider: "fake", ID: "fake-box"}}); err != nil {
 		t.Fatal(err)
 	}
-	tr.Helper = client.HelperVersion()
+	tr.Helper = "0.0.0-old"
 	var requests atomic.Int32
 	never := make(chan struct{})
 	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
@@ -154,14 +164,24 @@ func TestCreateAndRmOfTwoHostsAtOnce(t *testing.T) {
 			createErr = createHost(context.Background(), p, quietRequest(made))
 		}()
 		wg.Wait()
-		if rmErr != nil || createErr != nil {
-			t.Fatalf("rm %v, create %v", rmErr, createErr)
+		if rmErr != nil {
+			t.Fatalf("run %d: rm %v (create %v)", i, rmErr, createErr)
 		}
 		if _, err := client.FindHost(gone); err == nil {
 			t.Errorf("run %d: the host that rm forgot is back", i)
 		}
-		if _, err := client.FindHost(made); err != nil {
-			t.Errorf("run %d: the host that create made is lost", i)
+		if createErr == nil {
+			if _, err := client.FindHost(made); err != nil {
+				t.Errorf("run %d: the host that create made is lost", i)
+			}
+			continue
+		}
+		// Canonical membership writes rotate hosts.toml's generation: if rm
+		// landed while create held its creation or registration observation,
+		// create must refuse with host_state instead of overwriting hosts.toml.
+		var ue *client.UserError
+		if !errors.As(createErr, &ue) || (ue.Code != "host_state" && ue.Code != "setup_failed") || !strings.Contains(createErr.Error(), "saved hosts changed after the original observation") {
+			t.Fatalf("run %d: unexpected create error %v", i, createErr)
 		}
 	}
 }

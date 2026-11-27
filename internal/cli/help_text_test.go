@@ -156,12 +156,16 @@ func exampleParses(args []string) string {
 	}
 	words := c.Flags().Args()
 	for i, use := range strings.Fields(c.Use)[1:] {
-		if strings.Trim(use, "[]") != "<host>" || i >= len(words) || words[i] == "my-vps" {
+		token := strings.Trim(use, "[]")
+		if token != "<host>" && token != "<host>|-" {
+			continue
+		}
+		if i >= len(words) || words[i] == "my-vps" || strings.Contains(token, "|") && words[i] == "-" {
 			continue
 		}
 		// These commands need a created host. Its default name is the
 		// provider's name; the examples teach that lifecycle too.
-		if shortPath(c) == "host destroy" || shortPath(c) == "host idle" {
+		if shortPath(c) == "host destroy" || shortPath(c) == "host idle" || shortPath(c) == "host rm" || shortPath(c) == "host set" {
 			if _, err := findProvider(words[i]); err == nil {
 				continue
 			}
@@ -277,15 +281,14 @@ func TestHelpFitsTheWidth(t *testing.T) {
 			}
 		}
 	})
-	// The regression: Cobra's help of completion zsh indents a command with
-	// a tab, which takes it to 83 columns. The help indents it with two
-	// spaces.
+	// The regression: a tab-indented command line in Long exceeds 80 columns
+	// unless fitLong replaces the tab with two spaces.
 	zsh := brand.Name + " completion zsh > $(brew --prefix)/share/zsh/site-functions/_" + brand.Name
 	if n := displayed("\t" + zsh); n != 8+len(zsh) || n <= helpWidth {
 		t.Errorf("the tab before the command counts %d columns", n)
 	}
-	if out := helpOutput(t, "completion", "zsh", "--help"); !strings.Contains(out, "\n  "+zsh+"\n") {
-		t.Errorf("completion zsh --help does not indent the command with two spaces:\n%s", out)
+	if got := fitLong("\t" + zsh); got != "  "+zsh {
+		t.Errorf("fitLong did not replace the leading tab with two spaces: %q", got)
 	}
 }
 

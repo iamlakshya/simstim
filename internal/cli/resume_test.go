@@ -75,7 +75,7 @@ func TestResumeWithAnOldHelper(t *testing.T) {
 // of the shell comes back as a login shell.
 func TestResumeAttaches(t *testing.T) {
 	newTestHost(t)
-	m := startedRE.FindStringSubmatch(okSaid(t, "new", "box", "--detach", "--name", "again"))
+	m := startedRE.FindStringSubmatch(okSaid(t, "new", "box", "--detach", "--wall", "none", "--downgrade", "--name", "again"))
 	if m == nil {
 		t.Fatal("new started no session")
 	}

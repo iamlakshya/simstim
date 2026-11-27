@@ -3,7 +3,9 @@ package cli
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -11,7 +13,10 @@ import (
 	"github.com/iamlakshya/simstim/internal/api"
 	"github.com/iamlakshya/simstim/internal/brand"
 	"github.com/iamlakshya/simstim/internal/client"
+	"github.com/iamlakshya/simstim/internal/client/helpers"
 	"github.com/iamlakshya/simstim/internal/onboard"
+	"github.com/iamlakshya/simstim/internal/proto"
+	"github.com/iamlakshya/simstim/internal/version"
 )
 
 // mainRun runs Main with args, and returns its stdout, its stderr and its
@@ -86,12 +91,26 @@ func TestHostAddChecklistRow(t *testing.T) {
 // helper's install, before the checklist, says that the helper was
 // installed.
 func TestHostAddCancelAfterTheInstall(t *testing.T) {
+	if _, ok := helpers.For("linux", "arm64"); !ok {
+		t.Cleanup(helpers.HideEmbedded())
+		cacheDir := filepath.Join(t.TempDir(), brand.Name)
+		helperDir := filepath.Join(cacheDir, "helpers", version.Version)
+		if err := os.MkdirAll(helperDir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(helperDir, "host-linux-arm64"), []byte("fake-helper"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if !helpers.Cached(version.Version, cacheDir) {
+			t.Fatal("failed to load cached test helper")
+		}
+	}
 	_, tr := withFake(t, nil)
 	tr.NoHelper = true
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	tr.OnRun = func(remote string) {
-		if strings.HasSuffix(remote, " prune") { // the install's last step
+		if strings.Contains(remote, " install-payload") { // the install's last step
 			cancel()
 		}
 	}
@@ -163,13 +182,15 @@ func TestSetupNoInputCommand(t *testing.T) {
 // A Try: line puts the flag that answers before "--", never after it, where
 // it would go to the session's command.
 func TestTryLinesPutFlagsBeforeDash(t *testing.T) {
-	newTestHome(t)
+	_, tr := fakeBox(t, nil)
+	q, _ := json.Marshal(api.FolderQuestion{Folder: "~/not-there"})
+	tr.Fail("new", &proto.Error{Code: api.CodeNoFolder, Message: "the folder ~/not-there does not exist on this host", Hint: "Pass --mkdir.", Data: q})
 	got, code := lineErr(t, "new", "box", "--json", "--", "htop", "-d", "5")
 	if code != 2 || !strings.Contains(got, "Try: "+brand.Name+" new box --json --detach -- htop -d 5\n") {
 		t.Errorf("new --json -- htop: exit %d\n%s", code, got)
 	}
-	got, code = lineErr(t, "new", "box", "--dir", "~/not-there", "--no-input", "--detach", "--", "sleep", "60")
-	if code != 4 || !strings.Contains(got, "Try: "+brand.Name+" new box --dir '~/not-there' --no-input --detach --mkdir -- sleep 60\n") {
+	got, code = lineErr(t, "new", "box", "--dir", "~/not-there", "--no-input", "--detach", "--wall", "none", "--downgrade", "--", "sleep", "60")
+	if code != 4 || !strings.Contains(got, "Try: "+brand.Name+" new box --dir '~/not-there' --no-input --detach --wall none --downgrade --mkdir -- sleep 60\n") {
 		t.Errorf("new with a missing folder and a command: exit %d\n%s", code, got)
 	}
 	// A "--" that is a flag's value is not the end of the flags.

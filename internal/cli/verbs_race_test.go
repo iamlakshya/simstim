@@ -64,7 +64,7 @@ func TestRmRenameWhileTheQuestionWaits(t *testing.T) {
 			if err := conn.RenameSession(ctx, id, "b"); err != nil {
 				return err
 			}
-			_, err := conn.NewSession(ctx, client.NewArgs{Name: "a", Argv: []string{"sleep", "60"}, Cols: 80, Rows: 24})
+			_, err := conn.NewSession(ctx, client.NewArgs{Name: "a", Argv: []string{"sleep", "60"}, Cols: 80, Rows: 24, Wall: "none", Downgrade: true})
 			return err
 		})
 		renamed(t, th, "b")
@@ -257,7 +257,7 @@ func TestTheRaceKeepsTheAddressOfTheSession(t *testing.T) {
 		beforeResume = func(f found) {
 			beforeResume = old
 			otherClient(t, th, func(ctx context.Context, conn *client.Conn) error {
-				b, err := conn.NewSession(ctx, client.NewArgs{Name: "b", Argv: []string{"sleep", "60"}, Cols: 80, Rows: 24})
+				b, err := conn.NewSession(ctx, client.NewArgs{Name: "b", Argv: []string{"sleep", "60"}, Cols: 80, Rows: 24, Wall: "none", Downgrade: true})
 				if err != nil {
 					return err
 				}

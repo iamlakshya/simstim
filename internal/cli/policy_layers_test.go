@@ -90,7 +90,7 @@ func TestPolicyHelpUsesCanonicalGroupingAndThreeExamples(t *testing.T) {
 			t.Fatalf("policy help lacks %s", word)
 		}
 	}
-	if strings.Count(policy.Long, " policy ") < 3 {
+	if strings.Count(policy.Example, " policy ") < 3 {
 		t.Fatal("policy help lacks three examples")
 	}
 	for _, name := range []string{"profile", "set", "task"} {
@@ -105,7 +105,7 @@ func TestPolicyHelpUsesCanonicalGroupingAndThreeExamples(t *testing.T) {
 }
 
 func TestListWithBrokenSettingsWarnsOnceAndStillRuns(t *testing.T) {
-	cliPolicyHome(t)
+	fakeBox(t, nil)
 	path := filepath.Join(client.ConfigDir(), "config.toml")
 	if err := os.WriteFile(path, []byte("[broken"), 0o600); err != nil {
 		t.Fatal(err)

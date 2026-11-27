@@ -81,5 +81,5 @@ func TestAgentsInstallNoInput(t *testing.T) {
 	if err := wait(t, done); err != nil {
 		t.Fatalf("agents install --no-input: %v\n%s", err, term.Output())
 	}
-	term.WaitFor("Attach to answer its questions: " + brand.Name + " attach box/fake2")
+	term.WaitFor("Attach to answer its questions: " + brand.Name + " attach --id -- box/fake2")
 }

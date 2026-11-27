@@ -9,6 +9,10 @@ import (
 // (Linux names a process's executable by the link's target) and never hard-links
 // src (the host helper checks that its running executable has a single link).
 func copyFile(src, dst string) error {
+	return cloneOrCopy(src, dst)
+}
+
+func copyFileBytes(src, dst string) error {
 	_ = os.Remove(dst)
 	in, err := os.Open(src)
 	if err != nil {

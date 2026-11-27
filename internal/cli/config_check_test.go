@@ -58,13 +58,13 @@ func TestConfigCheckTypo(t *testing.T) {
 // A clean file, and no files at all, exit with 0.
 func TestConfigCheckClean(t *testing.T) {
 	write := configHome(t)
-	if out := ok(t, "config", "check"); !strings.HasSuffix(out, "hosts.toml: none yet\nNo config files yet.\n") {
+	if out := ok(t, "config", "check"); !strings.Contains(out, "hosts.toml: none yet\nNo config files yet.\n") || !strings.Contains(out, "\nLayers for ") {
 		t.Errorf("with no files, config check printed:\n%s", out)
 	}
 	write("config.toml", "[ui]\nmotion = \"off\"\n[keymap]\n\"session: delete\" = \"x\"\n\"host: add\" = false\n[secrets]\nTOKEN = \"op read op://dev/token\"\n")
 	write("hosts.toml", "[[host]]\nname = \"box\"\nssh = \"box\"\nlabels = { provider = \"gcp\" }\n[host.machine]\nprovider = \"lima\"\nid = \"box\"\nidle_stop = \"never\"\n")
 	out := ok(t, "config", "check")
-	if !strings.Contains(out, "config.toml: no problems\n") || !strings.HasSuffix(out, "hosts.toml: no problems\nNo problems in 2 files.\n") {
+	if !strings.Contains(out, "config.toml: no problems\n") || !strings.Contains(out, "hosts.toml: no problems\nNo problems in 2 files.\n") || !strings.Contains(out, "\nLayers for ") {
 		t.Errorf("clean files give:\n%s", out)
 	}
 	// A usage error of config check itself exits with 2.
@@ -256,7 +256,7 @@ func TestConfigCheckOldName(t *testing.T) {
 	configHome(t)("config.toml", "[keymap]\n\n\"session: view\" = \"v\"\n")
 	out, err := run(t, "config", "check")
 	if err != nil || !strings.Contains(out, "config.toml:3: warning: \"session: view\" is an old name. Use \"session: rename\".\n") ||
-		!strings.HasSuffix(out, "1 warning in 1 file.\n") {
+		!strings.Contains(out, "1 warning in 1 file.\n") {
 		t.Errorf("config check = %v:\n%s", err, out)
 	}
 }

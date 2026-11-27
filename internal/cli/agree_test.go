@@ -257,7 +257,7 @@ func missingUXSpecCommands(root *cobra.Command, have []string) []string {
 }
 func TestShowScreenAdversarialAndCancel(t *testing.T) {
 	sess := client.Session{
-		ID: "s1", Name: "hostile", Agent: "shell", State: api.StateWorking, Alive: true, Cols: 80, Rows: 24,
+		ID: "s2", Name: "hostile", Agent: "shell", State: api.StateWorking, Alive: true, Cols: 80, Rows: 24,
 	}
 	_, tr := withFake(t, []client.Session{sess})
 	box := client.Host{Name: "box", Machine: &client.Machine{Provider: "fake", ID: "fake-box"}}
@@ -265,7 +265,7 @@ func TestShowScreenAdversarialAndCancel(t *testing.T) {
 		t.Fatal(err)
 	}
 	tr.Screens = map[string][]byte{
-		"s1": []byte("\x1b[2J\x1b[HA\x1b[2000000000b\r\n" +
+		"s2": []byte("\x1b[2J\x1b[HA\x1b[2000000000b\r\n" +
 			"\x1b[2000000000I\x1b[2000000000S\x1b[H" +
 			"\x1b[2000000000@\x1b[2000000000Xsafe-done"),
 	}

@@ -15,9 +15,9 @@ import (
 )
 
 func TestKnownSessionIDNeverFallsBackToName(t *testing.T) {
-	for _, id := range []string{"legacy_ID", "abc234ef", "-", "_", strings.Repeat("a", 64)} {
+	for _, id := range []string{"legacyid", "abc234ef", strings.Repeat("a", 32)} {
 		t.Run(id, func(t *testing.T) {
-			collision := []client.Session{{ID: "owner123", Name: id}}
+			collision := []client.Session{{ID: "owner234", Name: id}}
 			if s, err := resolveIDIn(collision, id, "box"); s != nil || err == nil {
 				t.Fatalf("vanished ID resolved as name: %+v, %v", s, err)
 			}
@@ -53,12 +53,21 @@ func TestIDCommandsValidateBeforeDial(t *testing.T) {
 }
 
 func TestAttachLastAndIDDoNotSelectANameCollision(t *testing.T) {
-	_, tr := fakeBox(t, []client.Session{{ID: "owner123", Name: "legacy_ID", State: api.StateIdle}})
-	client.RememberLast("box", "legacy_ID", "mine")
-	for _, args := range [][]string{{"attach", "-"}, {"attach", "--id", "--", "box/legacy_ID"}} {
-		_, errOut, code := mainRun(t, args...)
-		if code != 3 || !strings.Contains(errOut, "no session") {
-			t.Fatalf("%v: exit %d, %s", args, code, errOut)
+	oldTTY := isTerminal
+	isTerminal = func(*os.File) bool { return true }
+	t.Cleanup(func() { isTerminal = oldTTY })
+	_, tr := fakeBox(t, []client.Session{{ID: "owner234", Name: "legacyid", State: api.StateIdle}})
+	client.RememberLast("box", "legacyid", "mine")
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"attach", "-"}, "is gone"},
+		{[]string{"attach", "--id", "--", "box/legacyid"}, "no session"},
+	} {
+		_, errOut, code := mainRun(t, tc.args...)
+		if code != 3 || !strings.Contains(errOut, tc.want) {
+			t.Fatalf("%v: exit %d, %s", tc.args, code, errOut)
 		}
 	}
 	if slices.Contains(tr.Ops(), "attach") {
@@ -75,20 +84,19 @@ func TestAttachLastAndIDDoNotSelectANameCollision(t *testing.T) {
 	}
 }
 
-func TestIDLookupAllowsLeadingDashTarget(t *testing.T) {
-	_, tr := fakeBox(t, []client.Session{{ID: "-old", State: api.StateIdle}})
-	var selected string
+func TestIDLookupRejectsNonBase32LeadingDashTarget(t *testing.T) {
+	_, tr := fakeBox(t, []client.Session{{ID: "old234", State: api.StateIdle}})
 	cmd := pullCmd()
 	cmd.SetContext(context.Background())
 	if err := cmd.Flags().Set("id", "true"); err != nil {
 		t.Fatal(err)
 	}
-	err := withSession(cmd, "box/-old", func(_ context.Context, _ client.Host, _ *client.Conn, s *client.Session) error {
-		selected = s.ID
+	err := withSession(cmd, "box/-old", func(_ context.Context, _ client.Host, _ *client.Conn, _ *client.Session) error {
 		return nil
 	})
-	if err != nil || selected != "-old" || !slices.Contains(tr.Ops(), "ls") {
-		t.Fatalf("exact leading dash ID: %q, %v", selected, err)
+	var ue *client.UserError
+	if !errors.As(err, &ue) || ue.Code != "bad_session_id" || len(tr.Ops()) != 0 {
+		t.Fatalf("non-base32 leading dash ID: %v, ops=%v", err, tr.Ops())
 	}
 }
 

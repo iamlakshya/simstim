@@ -354,14 +354,20 @@ func (h *Host) cleanup() {
 }
 
 // HolderPID asks a session's holder for its process ID. The manifest on
-// disk can lag behind: the holder writes it once it has started the agent.
+// disk can lag behind: the holder writes it once it has started the agent,
+// and the control socket answers "sockets" before the holder activates "info".
 func HolderPID(t testing.TB, id string) int {
 	t.Helper()
-	pid := livePID(id)
-	if pid <= 0 {
-		t.Fatalf("the holder of %s did not say its process ID", id)
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if pid := livePID(id); pid > 0 {
+			return pid
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the holder of %s did not say its process ID", id)
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
-	return pid
 }
 
 // livePID is the process ID that a session's holder reports, or 0.

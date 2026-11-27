@@ -17,12 +17,13 @@ import (
 	"github.com/iamlakshya/simstim/internal/client"
 	"github.com/iamlakshya/simstim/internal/client/helpers"
 	"github.com/iamlakshya/simstim/internal/host/hosttest"
+	"github.com/iamlakshya/simstim/internal/paths"
 	"github.com/iamlakshya/simstim/internal/provider/lima"
 )
 
 func TestHostCommands(t *testing.T) {
 	th := newTestHost(t)
-	if out := ok(t, "host", "ls"); out != "box              own        box\n" {
+	if out := ok(t, "host", "ls"); out != "box              own        box  (health unavailable)\n" {
 		t.Errorf("host ls = %q", out)
 	}
 	var hosts []client.Host
@@ -239,6 +240,7 @@ func TestAlertsCommands(t *testing.T) {
 }
 func TestAddHost(t *testing.T) {
 	th := newTestHost(t)
+	_ = os.RemoveAll(paths.BinDir())
 	added := th.ch
 	added.Name = "added"
 	ctx := context.Background()

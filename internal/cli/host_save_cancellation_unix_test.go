@@ -7,7 +7,6 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -71,15 +70,18 @@ func TestCancelledCreateSaveWaitRetiresItsStagedPin(t *testing.T) {
 	select {
 	case err := <-result:
 		var ue *client.UserError
-		if !errors.As(err, &ue) || ue.Code != "cancelled" || ue.Kind != client.KindCancelled {
+		if !errors.As(err, &ue) || ue.Code != "cancelled" || ue.Kind != client.KindCancelled ||
+			!strings.Contains(ue.Msg, made.Machine.ID) || !strings.Contains(ue.Msg, "may remain") {
 			t.Fatalf("cancelled staged-pin save = %v", err)
 		}
 	case <-time.After(10 * time.Second):
 		t.Fatal("the save wait did not honour cancellation")
 	}
 	releaseHosts()
-	if !client.SameEntry(opened, made) || !cleanup.liveCleanup || !cleanup.bounded || !cleanup.heldLock || !slices.Contains(machine.Calls(), "destroy") {
-		t.Fatalf("cleanup lost the exact machine, deadline or lock: made %+v, opened %+v, cleanup %+v", made, opened, cleanup)
+	// Cancelled creation never auto-destroys the unsaved machine; it reports
+	// the exact resource, retires its staged pin, and leaves hosts.toml untouched.
+	if calls := machine.Calls(); len(calls) != 0 {
+		t.Fatalf("cancelled staged-pin save unexpectedly destroyed machine: %q", calls)
 	}
 	staged, err = filepath.Glob(filepath.Join(client.ConfigDir(), "ssh", ".known_hosts-*-staged-*"))
 	if err != nil || len(staged) != 0 || client.HasPin("box") {
