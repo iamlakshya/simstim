@@ -77,14 +77,13 @@ func acquireHostMembershipContextMode(ctx context.Context, localBudget bool) (co
 		stop := context.AfterFunc(scope.ctx, cancel)
 		return bound, sync.OnceFunc(func() { stop(); cancel(); release() }), nil
 	}
+	unlock, err := lockHostsFile(ctx)
+	if err != nil {
+		return ctx, nil, err
+	}
 	budget, cancel := ctx, func() {}
 	if localBudget {
 		budget, cancel = context.WithTimeout(ctx, hostsWait)
-	}
-	unlock, err := lockHostsFile(budget)
-	if err != nil {
-		cancel()
-		return ctx, nil, err
 	}
 	bound, end := heldHostMembershipContext(budget)
 	return bound, sync.OnceFunc(func() { end(); unlock(); cancel() }), nil
