@@ -14,7 +14,12 @@ source = "https://pnpm.io/settings/store#storedir"
 [[cache]]
 tool = "Yarn Berry"
 path = ".yarn/berry/cache"
-source = "https://raw.githubusercontent.com/yarnpkg/berry/master/packages/yarnpkg-core/sources/Configuration.ts"
+source = "https://yarnpkg.com/configuration/yarnrc#globalFolder"
+
+[[cache]]
+tool = "Yarn Berry (XDG)"
+path = ".local/share/yarn/berry/cache"
+source = "https://raw.githubusercontent.com/yarnpkg/berry/%40yarnpkg/cli/4.17.0/packages/yarnpkg-core/sources/folderUtils.ts"
 
 [[cache]]
 tool = "pip"
