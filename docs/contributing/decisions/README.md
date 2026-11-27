@@ -45,8 +45,9 @@ Each record explains one choice: the context, the options and the outcome. Recor
 | [0045](0045-decoy-opt-outs-and-locks.md) | Check policy locks first, then keep every valid decoy opt out | Proposed |
 | [0046](0046-public-network-answer-ceilings.md) | Public network answers retain an explicit restrictive address ceiling through rules and permits | Proposed |
 | [0049](0049-nitro-slot-budget-undo.md) | Nitro slot donations remain until a separately authorised parent reboot | Proposed |
-| [0050](0050-closed-purge-data-relay.md) | A closed data relay continues only the original live purge vector, with native operator checks and bounded public code comparison | Proposed |
-| [0051](0051-closed-manager-custody.md) | Retain original kernel custody in the user's manager between stopped runs | Proposed |
-| [0052](0052-exact-http2-legacy-build.md) | Qualify the original public HTTP/2 hooks with exact official Go 1.27.4 and the documented legacy build tag | Proposed |
+| [0050](0050-closed-purge-data-relay.md) | A closed data relay continues only the original live purge vector, with native operator checks and bounded public code comparison | Rejected by 0053 |
+| [0051](0051-closed-manager-custody.md) | Retain original kernel custody in the user's manager between stopped runs | Rejected by 0053 |
+| [0052](0052-exact-http2-legacy-build.md) | Qualify the original public HTTP/2 hooks with exact official Go 1.27.4 and the documented legacy build tag | Rejected by 0053 |
+| [0053](0053-rebuild-with-open-source-parts.md) | Rebuild on the published base with maintained open-source parts, and build from scratch only when no tool meets the need | Accepted |
 
 Write a new record from [the template](template.md).
