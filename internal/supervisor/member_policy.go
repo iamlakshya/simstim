@@ -121,7 +121,7 @@ func (s *Supervisor) sessionFeatures() []string {
 	bound := ready && root.m != nil && !host.IsNoneSupervisor(root.m) && root.m.SecretState != nil && root.m.SecretState.Supported()
 	root.mu.Unlock()
 	features := slices.Clone(Features)
-	if root.unwalledV1() {
+	if root.unwalledV1() && !slices.Contains(features, api.FeatureDebug) {
 		features = append(features, api.FeatureDebug)
 	}
 	if !packages {

@@ -77,11 +77,22 @@ func (s *Supervisor) changeNamedSSHKeyPolicy(args api.NamedSSHKeyPolicyArgs) (ap
 	if err := pushPolicyToEgress(ep, ref, policy); err != nil {
 		return api.NamedSSHKeyPolicyResult{}, err
 	}
-	s.mu.Lock()
-	s.m.Policy, s.m.Layers = &policy, layers
-	snapshot := s.snapshot()
-	s.mu.Unlock()
-	if err := s.save(&snapshot, false); err != nil {
+	s.saveMu.Lock()
+	var snapshot host.Manifest
+	err = s.writeManifestChange(&snapshot, false, nil, nil, func(target *host.Manifest) error {
+		p := api.ClonePolicy(policy)
+		target.Policy, target.Layers = &p, api.CloneLayers(layers)
+		return nil
+	}, func(target *host.Manifest) {
+		p := api.ClonePolicy(*target.Policy)
+		s.m.Policy, s.m.Layers = &p, api.CloneLayers(target.Layers)
+	})
+	closed := s.closed
+	s.saveMu.Unlock()
+	if err == nil && closed {
+		err = namedSSHError("the session ended before this SSH key policy change was recorded")
+	}
+	if err != nil {
 		s.failPolicySave(ep)
 		return api.NamedSSHKeyPolicyResult{}, err
 	}

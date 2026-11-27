@@ -53,6 +53,13 @@ var now = func() time.Time { return phaseclock.Current.Now() }
 // started. Only tests set it.
 var testStarted func(*Supervisor)
 
+// testFakeSandbox permits the in-process "fake" test driver to skip the
+// outside native startup loan in unit tests. Always false in production.
+var testFakeSandbox bool
+
+// supervisorLinkOptions configures the supervisor's link session; zero in production.
+var supervisorLinkOptions link.Options
+
 // notifySignals relays the signals that stop the session with the host,
 // and stopSignals stops that. Tests replace them, to send a signal without
 // signalling the test.
@@ -319,7 +326,7 @@ func runSupervisorMode(owner context.Context, id string, operation *host.Session
 	if err := s.save(&snap, false); err != nil {
 		return s.failed(host.EndBoot, err)
 	}
-	if m.Wall.Driver != driverPlain {
+	if m.Wall.Driver != driverPlain && !(testFakeSandbox && m.Wall.Driver == "fake") {
 		if s.originalStart == nil {
 			operation, err = s.awaitOriginalLoan(lifetime)
 		}

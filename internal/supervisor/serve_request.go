@@ -121,7 +121,7 @@ func (s *Supervisor) request(c *client, f proto.Frame) bool {
 	case "secrets":
 		c.reply(req.ID, nil, &proto.Error{Code: "started", Message: "the session has started, so it takes no secrets now",
 			Hint: "Resume the session to pass its secrets again."})
-	case "peek", "ports":
+	case "peek":
 		return s.pass(c, f)
 	case "send":
 		var a struct {

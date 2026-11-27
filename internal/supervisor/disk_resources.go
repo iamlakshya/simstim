@@ -104,7 +104,7 @@ func (r *diskResourcesV1) Close() error {
 			if roots[index] == nil {
 				continue
 			}
-			if err := roots[index].Close(); err != nil {
+			if err := closeCheckedRootV1(roots[index]); err != nil {
 				r.closeErr = errors.Join(r.closeErr, err)
 			} else {
 				roots[index] = nil
@@ -112,7 +112,7 @@ func (r *diskResourcesV1) Close() error {
 		}
 	}
 	if r.volume != nil {
-		if err := r.volume.Close(); err != nil {
+		if err := closeCheckedRootV1(r.volume); err != nil {
 			r.closeErr = errors.Join(r.closeErr, err)
 		} else {
 			r.volume = nil
@@ -124,6 +124,11 @@ func (r *diskResourcesV1) Close() error {
 	r.files, r.checks, r.roots = nil, nil, nil
 	r.closed = true
 	return nil
+}
+
+func closeCheckedRootV1(root *os.Root) error {
+	_, statErr := root.Stat(".")
+	return errors.Join(statErr, root.Close())
 }
 
 func pinDiskVolumeV1(name string) (*os.Root, error) {

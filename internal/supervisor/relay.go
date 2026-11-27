@@ -307,8 +307,8 @@ func rewriteError(b []byte) ([]byte, error) {
 	return out, nil
 }
 
-// rewriteResponse rewrites an answer to a forwarded request (peek, ports,
-// send) from the holder: an error in the answer gets the same guest_error
+// rewriteResponse rewrites an answer to a forwarded request (peek, send)
+// from the holder: an error in the answer gets the same guest_error
 // attribution and trusted hint as an error frame, with no guest Data or
 // Result, and a good answer carries no Error.
 func rewriteResponse(b []byte) ([]byte, error) {

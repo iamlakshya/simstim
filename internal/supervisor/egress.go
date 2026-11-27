@@ -342,11 +342,16 @@ func (s *Supervisor) watchEgress(ep *egressProc) {
 func (s *Supervisor) stopEgress() {
 	s.mu.Lock()
 	s.egressStopping = true
-	s.m.Armed = false
-	if disarmPublicSecretsLocked(s.m) {
-		s.dirty = true
-	}
 	ep := s.eg
+	if ep != nil && s.m != nil {
+		if s.m.Armed {
+			s.m.Armed = false
+			s.dirty = true
+		}
+		if disarmPublicSecretsLocked(s.m) {
+			s.dirty = true
+		}
+	}
 	s.mu.Unlock()
 	if ep == nil {
 		return

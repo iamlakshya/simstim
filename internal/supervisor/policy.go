@@ -88,11 +88,22 @@ func (s *Supervisor) applyLivePolicyAdd(a api.PolicyAddArgs) (*api.Rule, *proto.
 	if perr := pushPolicyToEgress(ep, ref, pol); perr != nil {
 		return nil, perr
 	}
-	s.mu.Lock()
-	s.m.Policy, s.m.Layers = &pol, layers
-	snap := s.snapshot()
-	s.mu.Unlock()
-	if err := s.save(&snap, false); err != nil {
+	s.saveMu.Lock()
+	var snap host.Manifest
+	err = s.writeManifestChange(&snap, false, nil, nil, func(target *host.Manifest) error {
+		p := api.ClonePolicy(pol)
+		target.Policy, target.Layers = &p, api.CloneLayers(layers)
+		return nil
+	}, func(target *host.Manifest) {
+		p := api.ClonePolicy(*target.Policy)
+		s.m.Policy, s.m.Layers = &p, api.CloneLayers(target.Layers)
+	})
+	closed := s.closed
+	s.saveMu.Unlock()
+	if err == nil && closed {
+		err = &proto.Error{Code: "exiting", Message: "the session ended before this policy change was recorded", Hint: "Resume the session before changing its policy."}
+	}
+	if err != nil {
 		s.failPolicySave(ep)
 		return nil, toProtoErr(err)
 	}
@@ -120,11 +131,22 @@ func (s *Supervisor) applyLivePolicyRm(a api.PolicyRmArgs) (int, *proto.Error) {
 	if perr := pushPolicyToEgress(ep, ref, pol); perr != nil {
 		return 0, perr
 	}
-	s.mu.Lock()
-	s.m.Policy, s.m.Layers = &pol, layers
-	snap := s.snapshot()
-	s.mu.Unlock()
-	if err := s.save(&snap, false); err != nil {
+	s.saveMu.Lock()
+	var snap host.Manifest
+	err = s.writeManifestChange(&snap, false, nil, nil, func(target *host.Manifest) error {
+		p := api.ClonePolicy(pol)
+		target.Policy, target.Layers = &p, api.CloneLayers(layers)
+		return nil
+	}, func(target *host.Manifest) {
+		p := api.ClonePolicy(*target.Policy)
+		s.m.Policy, s.m.Layers = &p, api.CloneLayers(target.Layers)
+	})
+	closed := s.closed
+	s.saveMu.Unlock()
+	if err == nil && closed {
+		err = &proto.Error{Code: "exiting", Message: "the session ended before this policy change was recorded", Hint: "Resume the session before changing its policy."}
+	}
+	if err != nil {
 		s.failPolicySave(ep)
 		return 0, toProtoErr(err)
 	}

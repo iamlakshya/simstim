@@ -104,7 +104,7 @@ func (s *Supervisor) startGuest(ctx context.Context, sb sandbox, secrets map[str
 			return err
 		}
 	}
-	s.link = link.New(conn, link.Supervisor, link.Options{})
+	s.link = link.New(conn, link.Supervisor, supervisorLinkOptions)
 	st, err := s.link.Open(ctx, link.KindCtl, nil)
 	if err != nil {
 		return wallError("the sandbox's guest init did not answer", err)

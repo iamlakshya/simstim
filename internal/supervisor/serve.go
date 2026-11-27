@@ -146,7 +146,7 @@ var drainWait = 2 * time.Second
 // reply answers one request.
 func (c *client) reply(id uint64, v any, perr *proto.Error) {
 	resp := proto.Response{ID: id, OK: perr == nil, Error: perr}
-	if v != nil {
+	if perr == nil && v != nil {
 		resp.Result, _ = json.Marshal(v)
 	}
 	b, _ := json.Marshal(resp)

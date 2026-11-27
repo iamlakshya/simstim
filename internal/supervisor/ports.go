@@ -294,7 +294,7 @@ func (s *Supervisor) closePortListeners(terminal bool) {
 
 func (s *Supervisor) listSandboxPorts() ([]api.Port, error) {
 	root := s.owner()
-	ctx, cancel := context.WithTimeout(root.lifetimeContext(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(root.lifetimeContext(), 2*time.Second)
 	defer cancel()
 	var claims []api.Port
 	if err := root.ctl.requestDetached(ctx, proto.CtlPortsV1, struct{}{}, &claims); err != nil {

@@ -56,8 +56,11 @@ func (s *Supervisor) admitNamedSSHAgent(stream *link.Stream) *namedSSHAgent {
 		_ = stream.Close()
 		return nil
 	}
-	fields, err := api.JSONObjectFields(header)
-	if err != nil || len(fields) != 0 || !api.ExactJSONFields(header, struct{}{}) {
+	var parsed struct {
+		Kind string `json:"kind"`
+	}
+	fields, err := api.JSONObjectFields(header, "kind")
+	if err != nil || len(fields) != 1 || !api.ExactJSONFields(header, parsed) || json.Unmarshal(header, &parsed) != nil || parsed.Kind != string(link.KindAgent) {
 		_ = stream.Close()
 		return nil
 	}
