@@ -229,7 +229,7 @@ func TestActualTLSWebSocketOriginUsesOriginalFilteredMessageWriterAndTurn(t *tes
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = guest.Close() })
-	if _, err := io.WriteString(guest, "GET /v1/responses HTTP/1.1\r\nHost: api.openai.com:443\r\nConnection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Extensions: permessage-deflate\r\n\r\n"); err != nil {
+	if _, err := io.WriteString(guest, "GET /v1/responses HTTP/1.1\r\nHost: api.openai.com:443\r\nConnection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: "+testWebSocketKey()+"\r\nSec-WebSocket-Extensions: permessage-deflate\r\n\r\n"); err != nil {
 		t.Fatal(err)
 	}
 	reader := bufio.NewReader(guest)

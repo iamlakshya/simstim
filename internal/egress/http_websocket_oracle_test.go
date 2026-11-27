@@ -113,7 +113,7 @@ func protocolOracleFrame(opcode byte, final, masked bool, payload []byte) []byte
 }
 
 func TestHTTPProtocolClassicWebSocketKeepsFramesAndBackpressureUntilBothSidesClose(t *testing.T) {
-	const key = "dGhlIHNhbXBsZSBub25jZQ=="
+	key := testWebSocketKey()
 	// The public RFC 6455 example pair keeps the expected handshake independent
 	// of any hashing or handshake implementation in the code under test.
 	const accept = "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="

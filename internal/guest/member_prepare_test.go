@@ -41,7 +41,7 @@ func TestMemberPreparedClaimBindsRoleRawIntentAndConsumesOnce(t *testing.T) {
 		name   string
 		change func(*proto.CtlStartArgs)
 	}{
-		{"run", func(a *proto.CtlStartArgs) { a.RunToken = "other/child234" }},
+		{"run", func(a *proto.CtlStartArgs) { a.RunToken = "other-run" }},
 		{"session", func(a *proto.CtlStartArgs) { a.Session = "other234" }},
 		{"argv", func(a *proto.CtlStartArgs) { a.Argv = []string{"/bin/false"} }},
 		{"environment", func(a *proto.CtlStartArgs) { a.Env = append(a.Env, "USER_DATA=changed") }},

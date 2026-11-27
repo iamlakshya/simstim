@@ -71,7 +71,7 @@ func openPhysicalModelWebSocket(t *testing.T, fixture *httpLifetimeFixture) (net
 	}
 	_ = guest.SetDeadline(time.Now().Add(15 * time.Second))
 	t.Cleanup(func() { closeHTTPConnection(guest) })
-	if _, err := io.WriteString(guest, "GET /v1/responses HTTP/1.1\r\nHost: api.openai.com:443\r\nConnection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n"); err != nil {
+	if _, err := io.WriteString(guest, "GET /v1/responses HTTP/1.1\r\nHost: api.openai.com:443\r\nConnection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: "+testWebSocketKey()+"\r\n\r\n"); err != nil {
 		t.Fatal(err)
 	}
 	reader := bufio.NewReader(guest)

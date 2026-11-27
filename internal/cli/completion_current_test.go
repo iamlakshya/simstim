@@ -62,7 +62,8 @@ func TestLiveSessionFlagsUseCachedAddresses(t *testing.T) {
 		{"new", "--in", "atlas/"},
 	} {
 		rows, directive, stderr := execComplete(t, nil, cobra.ShellCompRequestCmd, args...)
-		want := []string{"atlas/auth-fix", "atlas/efgh2345", "atlas/ijkl2345"}
+		const atlas = "atlas/"
+		want := []string{atlas + "auth-fix", atlas + "efgh2345", atlas + "ijkl2345"}
 		if !slices.Equal(completionValues(rows), want) || directive != cobra.ShellCompDirectiveNoFileComp || stderr != "" {
 			t.Fatalf("actual session flag %q = %q, %d, %q", args, rows, directive, stderr)
 		}

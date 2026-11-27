@@ -3,7 +3,6 @@ package api
 import (
 	"encoding/json"
 	"io/fs"
-	"strings"
 	"time"
 )
 
@@ -36,13 +35,26 @@ type PurgeGuardWitness struct {
 	extra        map[string]json.RawMessage
 }
 
+func isLowerHex(s string, wantLen int) bool {
+	if len(s) != wantLen {
+		return false
+	}
+	for i := range len(s) {
+		c := s[i]
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+			return false
+		}
+	}
+	return true
+}
+
 // Known reports the closed current shape, without claiming native ownership.
 func (w PurgeGuardWitness) Known() bool {
-	if w.MarkerSHA256 != "" && (len(w.MarkerSHA256) != 64 || strings.Trim(w.MarkerSHA256, "0123456789abcdef") != "") {
+	if w.MarkerSHA256 != "" && !isLowerHex(w.MarkerSHA256, 64) {
 		return false
 	}
 	refs := []PurgeNativeReference{w.Root, w.Sentinel, w.Marker}
-	if len(w.HostID) != 32 || strings.Trim(w.HostID, "0123456789abcdef") != "" || len(w.Nonce) != 32 || strings.Trim(w.Nonce, "0123456789abcdef") != "" || len(w.Scope) != 64 || strings.Trim(w.Scope, "0123456789abcdef") != "" || w.User == "" || (w.Arch != "amd64" && w.Arch != "arm64") || w.Version != 1 || len(w.Token) != 32 || strings.Trim(w.Token, "0123456789abcdef") != "" || len(w.extra) != 0 {
+	if !isLowerHex(w.HostID, 32) || !isLowerHex(w.Nonce, 32) || !isLowerHex(w.Scope, 64) || w.User == "" || (w.Arch != "amd64" && w.Arch != "arm64") || w.Version != 1 || !isLowerHex(w.Token, 32) || len(w.extra) != 0 {
 		return false
 	}
 	for _, ref := range refs {
@@ -88,5 +100,5 @@ func (w PurgeGuardWitness) MarshalJSON() ([]byte, error) {
 // Prepared reports an acknowledged marker snapshot, including its exact body.
 // The stored pre-write identity alone is insufficient for a commit request.
 func (w PurgeGuardWitness) Prepared() bool {
-	return w.Known() && w.Marker.Size > 0 && len(w.MarkerSHA256) == 64 && strings.Trim(w.MarkerSHA256, "0123456789abcdef") == ""
+	return w.Known() && w.Marker.Size > 0 && isLowerHex(w.MarkerSHA256, 64)
 }

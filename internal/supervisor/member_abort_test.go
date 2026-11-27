@@ -41,7 +41,7 @@ func TestFailedOrCancelledPreparationSendsExactCleanupBeforeReturning(t *testing
 			defer cancel()
 			budget := newActiveBootBudget(parent, 30*time.Second)
 			defer budget.close()
-			args := proto.CtlStartArgs{Session: "child234", RunToken: "run/child234", Argv: []string{"/bin/true"}, Env: []string{"HOME=/home/agent"}, Cwd: "/work", SecretModes: map[string]api.SecretMode{}}
+			args := proto.CtlStartArgs{Session: "child234", RunToken: "child-run", Argv: []string{"/bin/true"}, Env: []string{"HOME=/home/agent"}, Cwd: "/work", SecretModes: map[string]api.SecretMode{}}
 			result := make(chan error, 1)
 			go func() { result <- s.prepareMemberPhases(budget, &args, proto.CtlSpawn, true) }()
 			reader, writer := bufio.NewReader(peer), proto.NewWriter(peer)

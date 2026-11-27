@@ -37,16 +37,16 @@ func TestLiveAuditScrubsAcceptedAndRejectedRequestTargets(t *testing.T) {
 	env.call(t, CtlInit, InitArgs{
 		SessionID: "audit2345", Agent: "shell",
 		Policy:  pathTestPolicy(t, api.PresetLocked, "example.com:80/"),
-		Secrets: map[string]string{"KEY": "sk-live-secret-987654"},
+		Secrets: map[string]string{"KEY": "sk-test-0000000000000"},
 	})
 	for i, tc := range []struct {
 		target string
 		status int
 		path   string
 	}{
-		{"http://example.com/hook/sk-live-%e2%80%8bsecret-987654?not_logged", 200, "/hook/[KEY]"},
-		{"http://example.com/hook/%252573k-live-secret-987654", 403, "/hook/[KEY]"},
-		{"http://example.com/%25ZZ/%2573k-live-secret-987654", 403, "/%ZZ/[KEY]"},
+		{"http://example.com/hook/sk-test-%e2%80%8b0000000000000?not_logged", 200, "/hook/[KEY]"},
+		{"http://example.com/hook/%252573k-test-0000000000000", 403, "/hook/[KEY]"},
+		{"http://example.com/%25ZZ/%2573k-test-0000000000000", 403, "/%ZZ/[KEY]"},
 		{"HTTP://example.com/v1/chat", 200, "/v1/chat"},
 		{"HTTP://user:password@example.com/v1/chat", 400, "/v1/chat"},
 	} {

@@ -30,7 +30,7 @@ func TestModelGETBodiesUnknownUpgradesAndUnsupportedFileHostsNeverReachOrigin(t 
 				request.Header.Set("Connection", "Upgrade")
 				request.Header.Set("Upgrade", test.upgrade)
 				request.Header.Set("Sec-WebSocket-Version", "13")
-				request.Header.Set("Sec-WebSocket-Key", "dGhlIHNhbXBsZSBub25jZQ==")
+				request.Header.Set("Sec-WebSocket-Key", testWebSocketKey())
 			}
 			response := httptest.NewRecorder()
 			f.env.srv.proxyHTTPRequest(response, request, StreamHeader{Via: "explicit", Host: test.host, Port: 443}, "http", nil)

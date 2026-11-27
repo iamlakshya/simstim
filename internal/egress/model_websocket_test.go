@@ -23,7 +23,7 @@ func openModelWebSocket(t *testing.T, f *modelHTTPFixture) (net.Conn, *bufio.Rea
 	t.Cleanup(func() { _ = guest.Close(); _ = proxy.Close() })
 	_ = guest.SetDeadline(time.Now().Add(10 * time.Second))
 	go f.env.srv.ServeFlow(t.Context(), proxy, StreamHeader{Via: "explicit", Host: "api.openai.com", Port: 443})
-	_, err := io.WriteString(guest, "GET http://api.openai.com:443/v1/responses HTTP/1.1\r\nHost: api.openai.com:443\r\nConnection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Extensions: permessage-deflate\r\n\r\n")
+	_, err := io.WriteString(guest, "GET http://api.openai.com:443/v1/responses HTTP/1.1\r\nHost: api.openai.com:443\r\nConnection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: "+testWebSocketKey()+"\r\nSec-WebSocket-Extensions: permessage-deflate\r\n\r\n")
 	if err != nil {
 		t.Fatal(err)
 	}

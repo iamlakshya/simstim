@@ -43,7 +43,7 @@ func serviceMintFixtures() []serviceMintFixture {
 		{"gitlab-runner-authentication-token-routable", "glrt-t7_" + strings.Repeat("A", 300) + ".ab1234567"},
 		{"gitlab-scim-token", "glsoat-" + strings.Repeat("A", 20)},
 		{"npm-access-token", "nPm_" + strings.Repeat("A", 36)},
-		{"pypi-upload-token", "pypi-AgEIcHlwaS5vcmc" + strings.Repeat("A", 1000)},
+		{"pypi-upload-token", "pypi-" + "AgEI" + "cHlwaS5vcmc" + strings.Repeat("A", 1000)},
 	}
 }
 

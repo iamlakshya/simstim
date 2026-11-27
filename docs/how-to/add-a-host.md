@@ -77,7 +77,7 @@ Pass `--no-sandbox` to `host add` to save the host without running sandbox prepa
 ```text
 Connecting to my-server (my-server)…
   ✓ connected in 1.9s: linux/amd64
-  ✓ host key SHA256:3f9aJm0QxV1oW4e8tYkz2bH7cN5dR6sL1uP9gA0iE2c pinned, from your known_hosts
+  ✓ host key SHA256:example000000000000000000000000000000000001 pinned, from your known_hosts
 ```
 
 - **From your known_hosts.** `host add` asks `ssh` whether your own SSH settings trust the key that the host shows, as `ssh my-server` would decide: your known_hosts files, hashed or not, a certificate authority, a `KnownHostsCommand` or DNS. When they do, it pins that key. A key that your settings revoke is never pinned. When your known_hosts holds another key for the host, `host add` stops with exit code 5. Check the key on the host, and pass it with `--host-key`.
@@ -90,7 +90,7 @@ The launcher's add-host wizard pins the key in the same way, before it connects.
 
 <!-- test: help (needs a reachable address) -->
 ```sh
-simstim host add box admin@203.0.113.7 --host-key SHA256:3f9aJm0QxV1oW4e8tYkz2bH7cN5dR6sL1uP9gA0iE2c
+simstim host add box admin@203.0.113.7 --host-key SHA256:example000000000000000000000000000000000001
 ```
 
 The pin is the file `~/.config/simstim/ssh/known_hosts-<key>`, where `<key>` is the host's name in lower case, a dash and 32 hex characters, such as `known_hosts-box-26f8567f2569182294c3fa5b9f9cb227`. Its first line names the host, and the client uses no file that names another. Two hosts whose names differ only in case each have their own. A host's name cannot end with a dot. Every `ssh` command for the host checks the key against that file alone, with options on the command line that win over every config file. So `StrictHostKeyChecking no`, `UserKnownHostsFile /dev/null`, a known hosts file of the system, DNS records or a `KnownHostsCommand` in your SSH config cannot pass another key. A jump host still follows your own config: the pin covers the host at the end of the path. A jump host cannot choose the pin either: the client reads ssh's own verdict on the host at the end, never the jump host's words. `host create lima` pins the new VM's key on first use.
@@ -102,7 +102,7 @@ A host that you added with an older version gets its pin at its next connection,
 When the host shows another key, every command stops, and exits with code 5:
 
 ```text
-Error: box's host key changed: SHA256:3f9aJm0QxV1oW4e8tYkz2bH7cN5dR6sL1uP9gA0iE2c was pinned, and the host shows SHA256:77b0Kd2nWq8YtE5rU1oP3iA6sF9gH4jL7zX0cV2bN8m.
+Error: box's host key changed: SHA256:example000000000000000000000000000000000001 was pinned, and the host shows SHA256:example000000000000000000000000000000000002.
 
 Try: If you reinstalled box: simstim host rekey box. Otherwise, do not connect.
 ```

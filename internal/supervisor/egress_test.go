@@ -150,7 +150,7 @@ func TestSupervisedEgressLivePolicySecretScrubAndDumpable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	secretVal := "sk-live-secret-987654"
+	secretVal := "fake-secret-for-tests-00000000"
 	sup, proxyURL := startEgressSession(t, "eglive23", "claude", pol, secretVal, ts.Listener.Addr().String(), dumpOut)
 
 	m, err := host.LoadManifest("eglive23")

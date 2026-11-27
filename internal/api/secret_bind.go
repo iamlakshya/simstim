@@ -2,7 +2,7 @@ package api
 
 // FeatureBoundSecrets must be checked before a bound value or binding form
 // is sent. A legacy helper would otherwise expose the value to the guest.
-const FeatureBoundSecrets = "bound-secrets-v1"
+const FeatureBoundSecrets = "bound-secrets-v1" // gitleaks:allow
 
 // SecretBind describes the named header of exact HTTPS destinations.
 // It contains no value and grants no network access.

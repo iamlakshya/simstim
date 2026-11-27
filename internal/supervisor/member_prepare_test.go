@@ -22,7 +22,7 @@ func TestTrustedStoreAllocationUsesSharedActualTrustAndFiltersOnlyMetadata(t *te
 	primary := proto.CtlStartArgs{Session: "primary234", RunToken: "run/primary234", Agent: "codex", Argv: []string{"codex"}, Cwd: "/work", Env: []string{"HOME=/home/agent", "HTTP_PROXY=" + host.DefaultGuestProxy, "CODEX_HOME=/home/agent/.codex", brand.Env("SESSION") + "=primary234", "TERM=xterm"}, Secrets: map[string]string{"OPENAI_API_KEY": "public-sentinel"}, SecretModes: map[string]api.SecretMode{"OPENAI_API_KEY": api.SecretModeBound}}
 	child := primary
 	child.Session = "child234"
-	child.RunToken = "run/child234"
+	child.RunToken = "child-run"
 	child.Env = append([]string(nil), primary.Env...)
 	child.Env[len(child.Env)-2] = brand.Env("SESSION") + "=child234"
 	child.Env[len(child.Env)-1] = "TERM=screen"
@@ -67,7 +67,7 @@ func TestTrustedStoreAllocationNeverInfersExposedOrUnknownAgentStore(t *testing.
 }
 
 func TestUnconfirmedStoreBlocksLaterZeroStoreAndSpawnBeforeAnyControl(t *testing.T) {
-	for _, args := range []proto.CtlStartArgs{{Session: "child234", RunToken: "run/child234"}, {Session: "child234", RunToken: "run/child234", SecretModes: map[string]api.SecretMode{}}} {
+	for _, args := range []proto.CtlStartArgs{{Session: "child234", RunToken: "child-run"}, {Session: "child234", RunToken: "child-run", SecretModes: map[string]api.SecretMode{}}} {
 		s := &Supervisor{id: "parent234", m: &host.Manifest{ID: "parent234", Wall: &host.WallRecord{Driver: "process"}}, rec: record{phase: host.LifeRunning}, storeBatch: &trustedStoreBatch{allocated: true}}
 		if err := s.prepareMemberPhases(nil, &args, proto.CtlSpawn, true); err == nil {
 			t.Fatal("a later member bypassed the unconfirmed Store")
@@ -102,7 +102,7 @@ func TestAcknowledgedDuplicateStoreUsesOnlyRemainingActiveBudget(t *testing.T) {
 	s := &Supervisor{id: "parent234", m: &host.Manifest{ID: "parent234"}, lifetime: parent, link: owner, rec: record{phase: host.LifeRunning}}
 	s.ctl = newCtl(s, stream)
 	t.Cleanup(func() { _ = owner.Close(); _ = guest.Close(); <-s.ctl.done })
-	args := proto.CtlStartArgs{Session: "child234", RunToken: "run/child234", Agent: "codex", Argv: []string{"codex"}, Env: []string{"HOME=/home/agent"}, Cwd: "/work", Secrets: map[string]string{"OPENAI_API_KEY": "public"}, SecretModes: map[string]api.SecretMode{"OPENAI_API_KEY": api.SecretModeBound}}
+	args := proto.CtlStartArgs{Session: "child234", RunToken: "child-run", Agent: "codex", Argv: []string{"codex"}, Env: []string{"HOME=/home/agent"}, Cwd: "/work", Secrets: map[string]string{"OPENAI_API_KEY": "public"}, SecretModes: map[string]api.SecretMode{"OPENAI_API_KEY": api.SecretModeBound}}
 	if err := s.planMemberStores([]proto.CtlStartArgs{args}, false, ""); err != nil {
 		t.Fatal(err)
 	}

@@ -9,19 +9,19 @@ import (
 )
 
 func TestAuditPathDecodesSecretsDespiteMalformedEscapes(t *testing.T) {
-	const value = "sk-live-secret-987654"
+	const value = "sk-test-0000000000000"
 	sc := NewScrubber(map[string]string{"KEY": value})
 	for _, tc := range []struct{ name, raw, want string }{
-		{"deep", "/hook/%252573k-live-secret-987654", "/hook/[KEY]"},
-		{"invalid-first", "/%ZZ/%2573k-live-secret-987654", "/%ZZ/[KEY]"},
-		{"invalid-last", "/%2573k-live-secret-987654/%ZZ", "/[KEY]/%ZZ"},
-		{"invalid-decoded", "/%25ZZ/%2573k-live-secret-987654", "/%ZZ/[KEY]"},
-		{"incomplete-last", "/%73k-live-secret-987654/%2", "/[KEY]/%2"},
-		{"lower-hex", "/hook/%73k-live-secret-987654/%2f", "/hook/[KEY]//"},
-		{"format-char", "/hook/sk-live-%e2%80%8bsecret-987654", "/hook/[KEY]"},
-		{"raw-format-char", "/hook/sk-live-\u200bsecret-987654", "/hook/[KEY]"},
-		{"control-char", "/hook/sk-live-%00secret-987654", "/hook/[KEY]"},
-		{"format-split-escape", "/hook/%\u200b73k-live-secret-987654", "/hook/[KEY]"},
+		{"deep", "/hook/%252573k-test-0000000000000", "/hook/[KEY]"},
+		{"invalid-first", "/%ZZ/%2573k-test-0000000000000", "/%ZZ/[KEY]"},
+		{"invalid-last", "/%2573k-test-0000000000000/%ZZ", "/[KEY]/%ZZ"},
+		{"invalid-decoded", "/%25ZZ/%2573k-test-0000000000000", "/%ZZ/[KEY]"},
+		{"incomplete-last", "/%73k-test-0000000000000/%2", "/[KEY]/%2"},
+		{"lower-hex", "/hook/%73k-test-0000000000000/%2f", "/hook/[KEY]//"},
+		{"format-char", "/hook/sk-test-%e2%80%8b0000000000000", "/hook/[KEY]"},
+		{"raw-format-char", "/hook/sk-test-\u200b0000000000000", "/hook/[KEY]"},
+		{"control-char", "/hook/sk-test-%000000000000000", "/hook/[KEY]"},
+		{"format-split-escape", "/hook/%\u200b73k-test-0000000000000", "/hook/[KEY]"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := sc.ScrubPath(tc.raw); got != tc.want {
@@ -61,31 +61,31 @@ func FuzzAuditPathKeepsSecretsOut(f *testing.F) {
 		f.Add(seed)
 	}
 	f.Fuzz(func(t *testing.T, prefix string) {
-		sc := NewScrubber(map[string]string{"KEY": "sk-live-secret-987654"})
-		got := sc.ScrubPath("/" + prefix + "/sk-live-%e2%80%8bsecret-987654")
-		if strings.Contains(got, "sk-live-secret-987654") || !utf8.ValidString(got) || len(got) > MaxAuditPathBytes {
+		sc := NewScrubber(map[string]string{"KEY": "sk-test-0000000000000"})
+		got := sc.ScrubPath("/" + prefix + "/sk-test-%e2%80%8b0000000000000")
+		if strings.Contains(got, "sk-test-0000000000000") || !utf8.ValidString(got) || len(got) > MaxAuditPathBytes {
 			t.Fatalf("unsafe audit path %q", got)
 		}
 	})
 }
 
 func TestAuditPathBoundsCannotExposeAnEncodedSecretPrefix(t *testing.T) {
-	sc := NewScrubber(map[string]string{"KEY": "sk-live-secret-987654"})
+	sc := NewScrubber(map[string]string{"KEY": "sk-test-0000000000000"})
 	for _, tail := range []string{"%", "%2", "%20"} {
-		raw := "http://example.com/hook/%73k-live-secret-987654/"
+		raw := "http://example.com/hook/%73k-test-0000000000000/"
 		raw += strings.Repeat("a", maxScrubInputBytes-len(raw)-len(tail)) + tail + "/extra"
 		if got := sc.ScrubPath(raw); got != "[path omitted]" {
 			t.Fatalf("oversized path = %q, want a fixed omission marker", got)
 		}
 	}
-	encoded := "%73k-live-secret-987654"
+	encoded := "%73k-test-0000000000000"
 	for range 64 {
 		encoded = strings.ReplaceAll(encoded, "%", "%25")
 	}
 	if got := sc.ScrubPath("/hook/" + encoded); got != "[path omitted]" {
 		t.Fatalf("over-nested path = %q, want a fixed omission marker", got)
 	}
-	encoded = "/sk-live-secret-987654"
+	encoded = "/sk-test-0000000000000"
 	for range 6 {
 		var next strings.Builder
 		for i := range len(encoded) {
@@ -99,7 +99,7 @@ func TestAuditPathBoundsCannotExposeAnEncodedSecretPrefix(t *testing.T) {
 	}
 	// Scrub before the final byte limit, including when removing hidden runes
 	// brings a whole secret back across that limit.
-	raw := "/" + strings.Repeat("a", 248) + "/sk-live-\u200bsecret-987654"
+	raw := "/" + strings.Repeat("a", 248) + "/sk-test-\u200b0000000000000"
 	got := sc.ScrubPath(raw)
 	if strings.Contains(got, "sk-") || len(got) > MaxAuditPathBytes || !utf8.ValidString(got) {
 		t.Fatalf("partial secret or invalid text at the final bound: %q", got)

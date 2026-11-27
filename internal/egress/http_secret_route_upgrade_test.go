@@ -13,7 +13,7 @@ import (
 )
 
 func TestHTTPSecretRouteClassicWebSocketScrubsLogicalEchoAndRejectsClientStandIn(t *testing.T) {
-	const key = "dGhlIHNhbXBsZSBub25jZQ=="
+	key := testWebSocketKey()
 	const accept = "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
 	var sentinel string
 	firstRead := make(chan error, 1)

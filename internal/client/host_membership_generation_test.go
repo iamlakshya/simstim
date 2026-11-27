@@ -2,6 +2,7 @@ package client
 
 import (
 	"bytes"
+	"strings"
 	"testing"
 )
 
@@ -36,7 +37,7 @@ func TestMembershipCanonicalWriterRotatesEveryActualWrite(t *testing.T) {
 }
 
 func TestMembershipGenerationOnlyExactFirstLineHasAuthority(t *testing.T) {
-	token := "0123456789abcdef0123456789abcdef"
+	token := strings.Repeat("0123456789abcdef", 2)
 	line := membershipGenerationPrefix + token + "\n"
 	if got, err := readMembershipGeneration(t.Context(), bytes.NewReader([]byte(line+"[[host]]\nname='box'\n"))); err != nil || got != token {
 		t.Fatalf("canonical first line refused: %q,%v", got, err)
@@ -49,7 +50,7 @@ func TestMembershipGenerationOnlyExactFirstLineHasAuthority(t *testing.T) {
 		membershipGenerationPrefix + token + "extra\n",
 		membershipGenerationPrefix + token + "\r\n",
 		membershipGenerationPrefix + token[:31] + "\n",
-		membershipGenerationPrefix + "0123456789abcdef0123456789abcdeG" + "\n",
+		membershipGenerationPrefix + token[:31] + "G\n",
 	} {
 		if _, err := readMembershipGeneration(t.Context(), bytes.NewReader([]byte(data))); err == nil {
 			t.Fatalf("noncanonical/spoof marker was authority: %q", data)

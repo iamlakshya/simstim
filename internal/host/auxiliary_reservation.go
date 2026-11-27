@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"strings"
 	"time"
 
 	"github.com/iamlakshya/simstim/internal/api"
@@ -75,13 +74,26 @@ func cloneAuxiliaryReservationV1(input *AuxiliaryReservationV1) *AuxiliaryReserv
 	return &copy
 }
 
+func isLowerHexV1(s string, wantLen int) bool {
+	if len(s) != wantLen {
+		return false
+	}
+	for i := range len(s) {
+		c := s[i]
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+			return false
+		}
+	}
+	return true
+}
+
 // This validates only representable accounting data. The actual producer
 // separately supplies original OP, native absence, admission and lifetime.
 func validateAuxiliaryReservationV1Data(reservation *AuxiliaryReservationV1) error {
 	if reservation == nil {
 		return nil
 	}
-	if reservation.Version != 1 || len(reservation.opaque) != 0 || len(reservation.Token) != 32 || strings.Trim(reservation.Token, "0123456789abcdef") != "" || !auxiliaryBootIDV1(reservation.BootID) || reservation.Since.IsZero() || reservation.Since.Location() != time.UTC || reservation.Declared <= 0 {
+	if reservation.Version != 1 || len(reservation.opaque) != 0 || !isLowerHexV1(reservation.Token, 32) || !auxiliaryBootIDV1(reservation.BootID) || reservation.Since.IsZero() || reservation.Since.Location() != time.UTC || reservation.Declared <= 0 {
 		return auxiliaryReservationDataErrorV1()
 	}
 	return checkExactWalledCapV1(reservation.Declared)

@@ -139,7 +139,7 @@ func TestSequentialControlQueuesAbortBehindRunningStore(t *testing.T) {
 			t.Error("owned guest did not finish")
 		}
 	})
-	a := proto.CtlStartArgs{Session: "child234", RunToken: "run/child234", Agent: "codex", Argv: []string{"codex"}, Env: []string{"HOME=/home/agent"}, Cwd: "/work", Secrets: map[string]string{"OPENAI_API_KEY": "public"}, SecretModes: map[string]api.SecretMode{"OPENAI_API_KEY": api.SecretModeBound}}
+	a := proto.CtlStartArgs{Session: "child234", RunToken: "child-run", Agent: "codex", Argv: []string{"codex"}, Env: []string{"HOME=/home/agent"}, Cwd: "/work", Secrets: map[string]string{"OPENAI_API_KEY": "public"}, SecretModes: map[string]api.SecretMode{"OPENAI_API_KEY": api.SecretModeBound}}
 	prepared, err := g.prepareMember(abortWire(t, proto.CtlSpawn, a))
 	if err != nil {
 		t.Fatal(err)

@@ -1,14 +1,19 @@
 package egress
 
 import (
+	"encoding/base64"
 	"net/http"
 	"testing"
 )
 
+func testWebSocketKey() string {
+	return base64.StdEncoding.EncodeToString([]byte("the sample nonce"))
+}
+
 func wsUpgradeFixture() (*http.Request, *http.Response) {
 	request := &http.Request{Method: http.MethodGet, ProtoMajor: 1, ProtoMinor: 1, Header: http.Header{
 		"Connection": {"keep-alive, Upgrade"}, "Upgrade": {"websocket"},
-		"Sec-Websocket-Key": {"dGhlIHNhbXBsZSBub25jZQ=="}, "Sec-Websocket-Version": {"13"},
+		"Sec-Websocket-Key": {testWebSocketKey()}, "Sec-Websocket-Version": {"13"},
 		"Sec-Websocket-Protocol": {"chat, superchat"}, "Sec-Websocket-Extensions": {"permessage-deflate"},
 	}}
 	response := &http.Response{StatusCode: http.StatusSwitchingProtocols, Header: http.Header{
@@ -66,8 +71,8 @@ func TestBoundWebSocketRejectsUnsolicitedExtensionsAndBadHandshakes(t *testing.T
 		func(r *http.Request) { r.ProtoMajor = 2 },
 		func(r *http.Request) { r.ProtoMinor = 0 },
 		func(r *http.Request) { r.Header.Set("Sec-Websocket-Key", "short") },
-		func(r *http.Request) { r.Header.Set("Sec-Websocket-Key", "dGhlIHNhbXBsZSBub25jZQ==\n") },
-		func(r *http.Request) { r.Header["sec-websocket-key"] = []string{"dGhlIHNhbXBsZSBub25jZQ=="} },
+		func(r *http.Request) { r.Header.Set("Sec-Websocket-Key", testWebSocketKey()+"\n") },
+		func(r *http.Request) { r.Header["sec-websocket-key"] = []string{testWebSocketKey()} },
 		func(r *http.Request) { r.Header.Set("Sec-Websocket-Version", "12") },
 		func(r *http.Request) { r.Header["Upgrade"] = []string{"websocket", "other"} },
 	} {
