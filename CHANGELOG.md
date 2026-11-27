@@ -4,6 +4,8 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ## [Unreleased]
 
+- Fix launcher palette order, host-name casing in error toasts, quick-start folder cleanup on reopen, new-session backend settings and new-host wizard saves; fix `hosts.toml` lock waits and race-detector exit delays in local Git helpers; add missing CLI examples for `host default`, `policy` and `ssh-config`.
+
 - Keep offline compiler selection exact, preserve prepared-input refusal before tool access, and check complete build tags in the existing source-archive fixtures.
 
 - Keep a fork child and its parent operation when child cleanup is unresolved, and preserve the first cleanup error on retries.
