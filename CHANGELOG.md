@@ -250,8 +250,6 @@ Guard direct execution of measured VMM files on writable owned stores with the o
 
 - Count upload bytes at the upstream TCP connection, keep hourly spending across policy changes, and show a distinct upload-budget reason.
 
-- Remote command input errors keep their code, kind, structured data and original cause when diagnostic output is added. JSON distinguishes input that could not be read from input that could not be sent.
-
 - Count model API answers across a sandbox and its optional judge. Keep usage already reported by an answer in its budget after the answer is cut.
 
 - Apply host-held lockdown through the original native policy writer. Session allowances pause without resetting their once ledger; lifting it removes only that restriction.
@@ -588,7 +586,7 @@ Guard direct execution of measured VMM files on writable owned stores with the o
 - Developer setup uses the exact Go toolchain pinned in the repository, including inside the devcontainer. Failed setup tests print their full diagnostic output.
 - Helper archives accept only the supported helper file names. Cache writes stay inside an opened directory even when an existing entry is a link.
 - Shadow terminal frames reject lengths that exceed their wire field or overflow the host's header arithmetic. Rejected profiles keep the previous profile and report an error.
-- Remote command input errors keep their code, kind and structured data when diagnostic output is added. JSON errors distinguish an input that could not be read from one that could not be sent.
+- Remote command input errors keep their code, kind, structured data and original cause when diagnostic output is added. JSON errors distinguish an input that could not be read from one that could not be sent.
 - The E2B tests use one entry point for their private home and command wrappers, preserving child process cleanup.
 - The terminal cleanup test counts open file names without looking up descriptors that can close during the count. It still checks that held reads keep their terminal open and that cleanup leaves no open file behind.
 - Tests of concurrent uploads let a second upload reach the held chunk. The test hook no longer makes the uploads take turns itself.

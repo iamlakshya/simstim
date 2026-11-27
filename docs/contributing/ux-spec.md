@@ -571,7 +571,7 @@ A new session without a host uses `SIMSTIM_DEFAULT_HOST`, then the saved choice 
 | --- | --- |
 | `simstim [flags]` | Run any coding agent on any host, and use it as if it ran here. [Reference](../reference/cli/_index.md) |
 | `simstim agents [flags]` | List the agents, install one on a host, and log in to it. [Reference](../reference/cli/agents.md) |
-| `simstim agents install <agent> [<host>] [flags]` | Install an agent on a host with its vendor's installer, in a session you can watch. [Reference](../reference/cli/agents_install.md) |
+| `simstim agents install <agent> [<host>] [flags]` | Install an agent on a host with its official installer. [Reference](../reference/cli/agents_install.md) |
 | `simstim agents login <agent> [<host>] [flags]` | Start an agent's own login on a host, in a session you can answer. [Reference](../reference/cli/agents_login.md) |
 | `simstim agents ls [flags]` | List the agents in the agent table, with how each one installs. [Reference](../reference/cli/agents_ls.md) |
 | `simstim attach [<host>/<session>\|-] [flags]` | Attach to a session. [Reference](../reference/cli/attach.md) |
