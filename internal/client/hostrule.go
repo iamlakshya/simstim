@@ -44,6 +44,9 @@ func resolveHostRulePlan(in hostRulePlanInput, hosts []Host, tiers Tiers) (hostR
 			}
 			name, reason = in.last, "from the last attached session"
 		}
+		if !slices.ContainsFunc(hosts, func(h Host) bool { return h.Name == name }) {
+			return hostRulePlan{}, unknownHostError(name, hosts)
+		}
 		if _, err := findPlacementHost(hosts, name); err != nil {
 			return hostRulePlan{}, err
 		}

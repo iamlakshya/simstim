@@ -20,7 +20,8 @@ func gitSSHOptions(config gitSSHConfig, dir string) (map[string]string, error) {
 		}
 		switch config.Args[i] {
 		case "-F":
-			if seenConfig || config.Args[i+1] != wrapperPath(Host{Name: config.Name}) {
+			h := Host{Name: config.Name}
+			if seenConfig || (config.Args[i+1] != wrapperEnvPath(h, false) && config.Args[i+1] != wrapperEnvPath(h, true)) {
 				return nil, badGitSSHConfig()
 			}
 			seenConfig = true
@@ -194,7 +195,7 @@ func gitSSHPinPath(name, value string) bool {
 }
 
 func gitUploadPackCommand(command string) bool {
-	raw, ok := strings.CutPrefix(command, "git-upload-pack ")
+	raw, ok := strings.CutPrefix(command, remoteUploadPack+" ")
 	if !ok || len(raw) < 2 || raw[0] != 39 || raw[len(raw)-1] != 39 {
 		return false
 	}
@@ -229,6 +230,6 @@ func gitSSHInvocationMatches(config gitSSHConfig, args []string) bool {
 	if strings.HasPrefix(target[at:], "[") && strings.HasSuffix(target, "]") && strings.Contains(target[at:], ":") {
 		target = target[:at] + strings.TrimSuffix(strings.TrimPrefix(target[at:], "["), "]")
 	}
-	command := "git-upload-pack '" + strings.ReplaceAll(config.Root, "'", `'\''`) + "'"
+	command := remoteUploadPack + " '" + strings.ReplaceAll(config.Root, "'", `'\''`) + "'"
 	return args[0] == target && args[1] == command
 }

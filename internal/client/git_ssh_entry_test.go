@@ -60,7 +60,7 @@ func TestGitSSHExecutorChecksFreshTierBeforeItsActualStart(t *testing.T) {
 	}}); err != nil {
 		t.Fatal(err)
 	}
-	more := []string{"-o", "SendEnv=GIT_PROTOCOL", h.SSH, "git-upload-pack '/repo'"}
+	more := []string{"-o", "SendEnv=GIT_PROTOCOL", h.SSH, remoteUploadPack + " '/repo'"}
 	_, release, err := prepareGitSSHStart(t.Context(), config, log.dir, more)
 	if release != nil {
 		release()
@@ -89,7 +89,7 @@ func TestGitSSHExecutorRejectsAChangedSavedEntry(t *testing.T) {
 	if err := SaveHosts(context.Background(), []Host{changed}); err != nil {
 		t.Fatal(err)
 	}
-	_, release, err := prepareGitSSHStart(t.Context(), config, log.dir, []string{h.SSH, "git-upload-pack '/repo'"})
+	_, release, err := prepareGitSSHStart(t.Context(), config, log.dir, []string{h.SSH, remoteUploadPack + " '/repo'"})
 	if release != nil {
 		release()
 	}

@@ -143,6 +143,10 @@ func WorktreeNote(host string, res DeleteResult) (note, hint string) {
 	return ue.Msg, ue.Hint
 }
 
+// remoteUploadPack runs git-upload-pack on the host without reading host-side
+// system or global git configuration (such as uploadpack.packObjectsHook).
+const remoteUploadPack = "env GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null git-upload-pack"
+
 // FetchArgs is the git fetch that brings branch from the host's repository
 // at root into the local branch into. force allows a fetch that is not a
 // fast-forward.
@@ -151,5 +155,5 @@ func FetchArgs(h Host, root, branch, into string, force bool) []string {
 	if force {
 		spec = "+" + spec
 	}
-	return []string{"fetch", "--no-tags", "--no-recurse-submodules", "--upload-pack=git-upload-pack", "--", h.SSH + ":" + root, spec}
+	return []string{"fetch", "--no-tags", "--no-recurse-submodules", "--upload-pack=" + remoteUploadPack, "--", h.SSH + ":" + root, spec}
 }

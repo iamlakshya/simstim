@@ -37,6 +37,55 @@ type hostCreationReservation struct {
 // Empty is not checked pin identity. The caller must immediately defer release
 // and still owns every provider action, partial response and cleanup outcome.
 func BeginHostCreationContext(ctx context.Context, request HostCreationRequest) (context.Context, func(), error) {
+	return beginHostCreationContext(ctx, request, "host create")
+}
+
+// BeginHostCreationContextWithKind behaves like BeginHostCreationContext while
+// recording kind as the lock owner label when kind is non-empty.
+func BeginHostCreationContextWithKind(ctx context.Context, request HostCreationRequest, kind string) (context.Context, func(), error) {
+	if kind == "" {
+		kind = "host create"
+	}
+	return beginHostCreationContext(ctx, request, kind)
+}
+
+func reuseHostCreationContext(ctx context.Context, existing *HostStateObservation, request HostCreationRequest) (context.Context, func(), error) {
+	if existing.role != hostStateCreation || existing.creation == nil || existing.creation.request != request {
+		return ctx, nil, hostStateRemovalError("the provider request differs from its existing creation reservation")
+	}
+	if err := existing.checkOwner(ctx); err != nil {
+		return ctx, nil, err
+	}
+	existing.mu.Lock()
+	started := existing.creation.started
+	existing.mu.Unlock()
+	if started {
+		return ctx, nil, hostStateRemovalError("the creation reservation already entered its provider attempt")
+	}
+	if err := withHostMembershipContext(ctx, existing.checkMembership); err != nil {
+		return ctx, nil, err
+	}
+	owned, _ := ctx.Value(heldKey{request.Name}).(*heldLock)
+	if owned == nil || owned != existing.creation.op.Load() {
+		return ctx, nil, hostStateRemovalError("the creation reservation lost its actual OP")
+	}
+	return ctx, func() {}, nil
+}
+
+func ensureCreationHostNameFree(ctx context.Context, name string) error {
+	return withHostMembershipContext(ctx, func(context.Context) error {
+		hosts, err := LoadHosts()
+		if err != nil {
+			return err
+		}
+		if slices.ContainsFunc(hosts, func(h Host) bool { return h.Name == name }) {
+			return hostStateRemovalError("a saved host already uses the requested creation name")
+		}
+		return nil
+	})
+}
+
+func beginHostCreationContext(ctx context.Context, request HostCreationRequest, kind string) (context.Context, func(), error) {
 	freezeHostMachineSourceObservers()
 	if err := ctx.Err(); err != nil {
 		return ctx, nil, err
@@ -45,38 +94,10 @@ func BeginHostCreationContext(ctx context.Context, request HostCreationRequest) 
 		return ctx, nil, hostStateRemovalError("the creation reservation needs its actual name and selected provider")
 	}
 	if existing, _ := ctx.Value(hostStateObservationKey{}).(*HostStateObservation); existing != nil {
-		if existing.role != hostStateCreation || existing.creation == nil || existing.creation.request != request {
-			return ctx, nil, hostStateRemovalError("the provider request differs from its existing creation reservation")
-		}
-		if err := existing.checkOwner(ctx); err != nil {
-			return ctx, nil, err
-		}
-		existing.mu.Lock()
-		started := existing.creation.started
-		existing.mu.Unlock()
-		if started {
-			return ctx, nil, hostStateRemovalError("the creation reservation already entered its provider attempt")
-		}
-		if err := withHostMembershipContext(ctx, existing.checkMembership); err != nil {
-			return ctx, nil, err
-		}
-		owned, _ := ctx.Value(heldKey{request.Name}).(*heldLock)
-		if owned == nil || owned != existing.creation.op.Load() {
-			return ctx, nil, hostStateRemovalError("the creation reservation lost its actual OP")
-		}
-		return ctx, func() {}, nil
+		return reuseHostCreationContext(ctx, existing, request)
 	}
 	// Refuse an already-saved name before superseding any older empty stage.
-	if err := withHostMembershipContext(ctx, func(context.Context) error {
-		hosts, err := LoadHosts()
-		if err != nil {
-			return err
-		}
-		if slices.ContainsFunc(hosts, func(h Host) bool { return h.Name == request.Name }) {
-			return hostStateRemovalError("a saved host already uses the requested creation name")
-		}
-		return nil
-	}); err != nil {
+	if err := ensureCreationHostNameFree(ctx, request.Name); err != nil {
 		return ctx, nil, err
 	}
 	staged, abort, err := StagePinOwned(ctx, request.Name)
@@ -109,7 +130,7 @@ func BeginHostCreationContext(ctx context.Context, request HostCreationRequest) 
 		abort()
 		return ctx, nil, err
 	}
-	owned, unlock, err := LockHost(WithHostStateObservation(staged, observation), request.Name, "host create")
+	owned, unlock, err := LockHost(WithHostStateObservation(staged, observation), request.Name, kind)
 	if err != nil {
 		abort()
 		return ctx, nil, err

@@ -214,6 +214,12 @@ func captureRegistrationBaselineNativeV1(ctx context.Context, h Host, transport 
 		return nil, errors.Join(baselineErrorV1("the read-only registration baseline exceeded its fixed bound"), err, process.Wait())
 	}
 	waitErr := process.Wait()
+	if waitErr != nil {
+		if d, ok := process.(interface{ sshDiag() (string, int) }); ok {
+			sshLog, _ := d.sshDiag()
+			waitErr = sshError(ctx, h, waitErr, sshLog, process.Stderr())
+		}
+	}
 	if err := checkHostTransportAttempt(native, attempt, h); err != nil {
 		return nil, errors.Join(err, waitErr)
 	}

@@ -113,10 +113,11 @@ func placementCacheFacts(facts api.HostFacts) api.HostFacts {
 		facts.Walls[i].Facts = nil
 	}
 	for i := range facts.Health {
-		facts.Health[i].Message, facts.Health[i].Hint = "", ""
-		if facts.Health[i].ID != "runtime-missing" && facts.Health[i].ID != "memory_accounting" {
-			facts.Health[i].ID = "observed-condition"
+		id := facts.Health[i].ID
+		if id != "runtime-missing" && id != "memory_accounting" {
+			id = "observed-condition"
 		}
+		facts.Health[i] = api.Health{ID: id, Severity: facts.Health[i].Severity, Levels: facts.Health[i].Levels}
 	}
 	return facts
 }

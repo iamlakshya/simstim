@@ -169,12 +169,12 @@ func TestGitSSHConfigRequiresTheProducerDigest(t *testing.T) {
 }
 
 func TestGitSSHInvocationRequiresOneUploadPackCommand(t *testing.T) {
-	for _, command := range []string{"git-upload-pack '/repo'", `git-upload-pack '/path with '\''quote'`} {
+	for _, command := range []string{remoteUploadPack + " '/repo'", remoteUploadPack + ` '/path with '\''quote'`} {
 		if err := validateGitSSHInvocation([]string{"box.example", command}); err != nil {
 			t.Fatalf("valid command %q: %v", command, err)
 		}
 	}
-	for _, command := range []string{"git-upload-pack '/repo'; printf unexpected", `git-upload-pack '/repo'; printf 'unexpected'`, "git-upload-pack /repo", "other-upload-pack '/repo'"} {
+	for _, command := range []string{remoteUploadPack + " '/repo'; printf unexpected", remoteUploadPack + ` '/repo'; printf 'unexpected'`, remoteUploadPack + " /repo", "git-upload-pack '/repo'", "other-upload-pack '/repo'"} {
 		if err := validateGitSSHInvocation([]string{"box.example", command}); err == nil {
 			t.Fatalf("accepted extra command %q", command)
 		}

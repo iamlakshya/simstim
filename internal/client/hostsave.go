@@ -170,6 +170,9 @@ func UpdateHosts(ctx context.Context, c HostChange) (failure error) {
 		defer unlockPin()
 	}
 	failure = updateHostsFileContext(ctx, func(locked context.Context, hosts []Host) ([]Host, hostFileHooks, error) {
+		if _, err := ApplyHostChange(hosts, c); err != nil {
+			return nil, hostFileHooks{}, err
+		}
 		if err := checkHostPublicationObservation(locked, c); err != nil {
 			return nil, hostFileHooks{}, err
 		}

@@ -345,6 +345,10 @@ func FindHost(name string) (Host, error) {
 			return h, nil
 		}
 	}
+	return Host{}, unknownHostError(name, hosts)
+}
+
+func unknownHostError(name string, hosts []Host) error {
 	names := make([]string, len(hosts))
 	for i, h := range hosts {
 		names[i] = h.Name
@@ -355,7 +359,7 @@ func FindHost(name string) (Host, error) {
 	if !ValidHostName(name) {
 		hint = fmt.Sprintf("Name one of the hosts that %s host ls lists.", brand.Name)
 	}
-	return Host{}, &UnknownNameError{
+	return &UnknownNameError{
 		UserError: &UserError{Msg: fmt.Sprintf("no host named %q", name), Hint: hint, Code: "host_not_found", Kind: KindNotFound},
 		Name:      name, Known: names,
 	}
