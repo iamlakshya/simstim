@@ -6,6 +6,8 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -49,6 +51,28 @@ func (s *Server) preflightOpaqueTLS(ctx context.Context, conn net.Conn, reader i
 		formatted := s.formatAudit(entry)
 		return ctx, &formatted
 	}
+	var revoked atomic.Bool
+	var closeOnce sync.Once
+	cancel := func() {
+		revoked.Store(true)
+		closeOnce.Do(func() { _ = conn.Close() })
+	}
+	check := func(eng *Engine, _ *Dialer) bool {
+		return !eng.hasPushInspectionHost(request.Host, request.Port) && eng.evaluate(request, nil, evalPrecheck).Allow
+	}
+	flowID := s.flows.add(activeFlow{request: request, cancel: cancel, check: check})
+	if flowID == 0 {
+		entry.Rule = "revoked"
+		formatted := s.formatAudit(entry)
+		return ctx, &formatted
+	}
+	defer s.flows.remove(flowID)
+	if !check(s.currentEngine(), s.dialer) {
+		cancel()
+		entry.Rule = "revoked"
+		formatted := s.formatAudit(entry)
+		return ctx, &formatted
+	}
 	if connect {
 		if _, err := io.WriteString(conn, "HTTP/1.1 200 Connection Established\r\n\r\n"); err != nil {
 			entry.Rule = "http:cancelled"
@@ -60,6 +84,9 @@ func (s *Server) preflightOpaqueTLS(ctx context.Context, conn net.Conn, reader i
 	hello, err := ReadClientHello(reader)
 	_ = conn.SetReadDeadline(time.Time{})
 	entry.Rule = "tls:client_hello"
+	if err != nil && revoked.Load() {
+		entry.Rule = "revoked"
+	}
 	if err == nil {
 		if refusal := s.checkSecretDestination(ctx, hello.RawServerName); refusal != nil {
 			entry.Rule, entry.Secret = refusal.auditRule(), refusal.decoy
