@@ -283,6 +283,7 @@ func handoffCommandCases() []handoffCommandCase {
 		{"debug save", "debug-save", func(m *Model, _ *hostConn, _ *wizard) tea.Cmd { return m.debugSave() }},
 		{"debug bundle", "bundle", func(m *Model, _ *hostConn, _ *wizard) tea.Cmd { return m.debugBundle() }},
 		{"wizard probe", "probe", func(m *Model, _ *hostConn, w *wizard) tea.Cmd { return w.probe(m) }},
+		{"wizard probe without pin", "probe", func(m *Model, _ *hostConn, w *wizard) tea.Cmd { w.made = true; return w.probe(m) }},
 		{"wizard install", "install", func(m *Model, _ *hostConn, w *wizard) tea.Cmd { return w.install(m) }},
 		{"wizard dial", "dial", func(m *Model, _ *hostConn, w *wizard) tea.Cmd { return w.setup(m) }},
 		{"wizard setup", "setup", func(m *Model, _ *hostConn, w *wizard) tea.Cmd { return w.setup(m) }},

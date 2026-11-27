@@ -387,6 +387,18 @@ func (w *wizard) probe(m *Model) tea.Cmd {
 		})
 	}
 	be, h, want, clock := m.be, w.host, w.want, m.now
+	if !pinFirst {
+		return tea.Batch(cleanup, m.bgCmdFrom(ctx, func(ctx context.Context) tea.Msg {
+			start := clock()
+			cctx, cancel := context.WithTimeout(ctx, 60*time.Second)
+			defer cancel()
+			p, err := be.Probe(cctx, h)
+			return probeMsg{owner: w, seq: seq, p: p, err: err, took: clock().Sub(start)}
+		}))
+	}
+	// Stage setup and prior-stage abort can block on an external pin lock, so
+	// Close joins that step through the bounded onClose hook while pauseBg
+	// tracks and joins the subsequent PinHostKey and Probe RPCs.
 	return tea.Batch(cleanup, func() tea.Msg {
 		if ctx.Err() != nil {
 			return nil
@@ -394,25 +406,22 @@ func (w *wizard) probe(m *Model) tea.Cmd {
 		start := clock()
 		cctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 		defer cancel()
-		var pin *client.Pin
-		if pinFirst {
-			beforeStagePin()
-			bound, ok, err := tok.stage(cctx, be, h.Name)
-			if err != nil {
-				return probeMsg{owner: w, seq: seq, pinErr: err}
-			}
-			if !ok {
-				return probeMsg{owner: w, seq: seq, pinErr: context.Canceled}
-			}
-			cctx = bound
+		beforeStagePin()
+		bound, ok, err := tok.stage(cctx, be, h.Name)
+		if err != nil {
+			return probeMsg{owner: w, seq: seq, pinErr: err}
+		}
+		if !ok {
+			return probeMsg{owner: w, seq: seq, pinErr: context.Canceled}
+		}
+		return m.bgCmdFrom(bound, func(cctx context.Context) tea.Msg {
 			p, err := be.PinHostKey(cctx, h, want)
 			if err != nil {
 				return probeMsg{owner: w, seq: seq, pinErr: err}
 			}
-			pin = &p
-		}
-		p, err := be.Probe(cctx, h)
-		return probeMsg{owner: w, seq: seq, p: p, err: err, took: clock().Sub(start), pin: pin}
+			plat, err := be.Probe(cctx, h)
+			return probeMsg{owner: w, seq: seq, p: plat, err: err, took: clock().Sub(start), pin: &p}
+		})()
 	})
 }
 
