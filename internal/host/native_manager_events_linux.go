@@ -135,12 +135,20 @@ func (events *managerStartupEventsV1) observe(message *dbus.Message) {
 		}
 		if value, found := properties["InvocationID"]; found {
 			invocation, ok := value.Value().([]byte)
-			if !ok || len(invocation) != 16 {
+			if !ok || (len(invocation) != 0 && len(invocation) != 16) {
 				fault()
 				break
 			}
-			encoded := hex.EncodeToString(invocation)
-			if encoded != "00000000000000000000000000000000" {
+			encoded := ""
+			if len(invocation) == 16 {
+				encoded = hex.EncodeToString(invocation)
+			}
+			if encoded == "" || encoded == "00000000000000000000000000000000" {
+				if events.activation.InvocationID != "" {
+					fault()
+					break
+				}
+			} else {
 				if events.loaded && encoded == events.previousInvocation && events.activation.InvocationID == "" {
 					return
 				}

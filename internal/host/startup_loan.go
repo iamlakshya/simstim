@@ -45,6 +45,7 @@ type originalBootV1 struct {
 	owner           *OwnedSupervisorLease
 	operation       *SessionOperation
 	line            *StartupLineV1
+	sender          startupCredentials
 	loan            startupLoanV1
 	need            []byte
 	currentNeed     []byte
@@ -191,7 +192,7 @@ func (owner *OwnedSupervisorLease) AcceptStartupLoan(ctx context.Context, line *
 		operation.Close()
 		return nil, err
 	}
-	boot := &originalBootV1{placement: placement, policyNext: bytes.Clone(m.PolicyNext), owner: owner, operation: operation, line: line, loan: loan, need: bytes.Clone(m.VMNeedV1), currentNeed: bytes.Clone(m.VMNeedV1)}
+	boot := &originalBootV1{placement: placement, policyNext: bytes.Clone(m.PolicyNext), owner: owner, operation: operation, line: line, sender: sender, loan: loan, need: bytes.Clone(m.VMNeedV1), currentNeed: bytes.Clone(m.VMNeedV1)}
 	if m.RuntimeManifest != nil {
 		clone := *m.RuntimeManifest
 		clone.Items = append([]supply.Item(nil), clone.Items...)

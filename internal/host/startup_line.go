@@ -257,6 +257,15 @@ func (line *StartupLineV1) SetDeadline(deadline time.Time) error {
 	return line.conn.SetDeadline(deadline)
 }
 
+func (line *StartupLineV1) isClosed() bool {
+	if line == nil {
+		return true
+	}
+	line.mu.Lock()
+	defer line.mu.Unlock()
+	return line.closed
+}
+
 func (line *StartupLineV1) currentSender() (startupCredentials, error) {
 	line.mu.Lock()
 	defer line.mu.Unlock()

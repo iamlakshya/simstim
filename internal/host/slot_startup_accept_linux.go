@@ -81,7 +81,7 @@ func acceptSlotReservedStartupIncomingV2(ctx context.Context, incoming *slotRese
 	operation := sessionOperationFromNative(owner.Lifetime(), loan.Primary, native)
 	input := &originalSlotStartupV2{incoming: incoming, operation: operation, roles: incoming.files[1:]}
 	input.issuer = input
-	boot := &originalBootV1{placement: placement, owner: owner, operation: operation, line: incoming.line, loan: loan, slotReservation: input}
+	boot := &originalBootV1{placement: placement, owner: owner, operation: operation, line: incoming.line, sender: incoming.sender, loan: loan, slotReservation: input}
 	input.boot = boot
 	operation.originalBoot = boot
 	// The same actual partial OP owns all received rights before any later

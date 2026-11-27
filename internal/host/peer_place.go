@@ -147,6 +147,9 @@ var CgroupNamespaces = func() (self, manager string, err error) {
 	}
 	manager, err = os.Readlink(filepath.Join(procRoot, strconv.Itoa(p.pid), "ns", "cgroup"))
 	if err != nil {
+		if errors.Is(err, os.ErrPermission) && verifyUserManagerNamespace(p) {
+			return self, self, nil
+		}
 		return self, "", fmt.Errorf("read the user manager's cgroup namespace: %w", err)
 	}
 	return self, manager, nil

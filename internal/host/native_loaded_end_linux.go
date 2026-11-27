@@ -51,11 +51,11 @@ func (manager *nativeUserManagerV1) checkLoadedOriginalEndV1(ctx context.Context
 	restarts, restartsOK := values["NRestarts"].Value().(uint32)
 	raw, rawOK := values["InvocationID"].Value().([]byte)
 	group, groupOK := values["ControlGroup"].Value().(string)
-	if !idOK || id != unit || !loadOK || load != "loaded" || !stateOK || state != "inactive" && state != "failed" || !pidOK || pid != 0 || !controlOK || control != 0 || !restartsOK || restarts != 0 || !rawOK || len(raw) != 16 || !groupOK || group != "" && group != fmt.Sprintf("/user.slice/user-%d.slice/user@%d.service/%s/%s", os.Getuid(), os.Getuid(), brand.Slice, unit) {
+	if !idOK || id != unit || !loadOK || load != "loaded" || !stateOK || state != "inactive" && state != "failed" || !pidOK || pid != 0 || !controlOK || control != 0 || !restartsOK || restarts != 0 || !rawOK || (len(raw) != 0 && len(raw) != 16) || !groupOK || group != "" && group != fmt.Sprintf("/user.slice/user-%d.slice/user@%d.service/%s/%s", os.Getuid(), os.Getuid(), brand.Slice, unit) {
 		return sessionLeaseError("the original loaded job still has live or unknown native owners")
 	}
 	got := hex.EncodeToString(raw)
-	if invocation != "" && got != invocation || invocation == "" && got != previous && got != strings.Repeat("0", 32) {
+	if invocation != "" && got != invocation || invocation == "" && got != "" && got != previous && got != strings.Repeat("0", 32) {
 		return sessionLeaseError("a different loaded invocation cannot settle the original startup")
 	}
 	// The exact job may end before a pidfd can be opened. At this stage no

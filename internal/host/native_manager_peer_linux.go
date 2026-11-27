@@ -57,5 +57,5 @@ func (manager *nativeUserManagerV1) captureOriginalPeerV4() error {
 	if err != nil {
 		return err
 	}
-	return manager.peer.Check()
+	return manager.checkManagerPeerNamespaceV1()
 }

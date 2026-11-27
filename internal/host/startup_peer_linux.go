@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"net"
 	"os"
 	"path/filepath"
@@ -101,12 +102,25 @@ func pinOutsideStartupPeer(conn net.Conn) (*nativeStartupPeerV1, error) {
 	return owned, nil
 }
 
+func pollNonBlocking(polls []unix.PollFd) (int, error) {
+	for {
+		n, err := unix.Poll(polls, 0)
+		if errors.Is(err, unix.EINTR) {
+			continue
+		}
+		if err != nil {
+			return n, fmt.Errorf("poll pidfd: %w", err)
+		}
+		return n, nil
+	}
+}
+
 func (peer *nativeStartupPeerV1) checkLocked() error {
 	if peer == nil || peer.closed || peer.pidfd < 0 || peer.proc == nil {
 		return sessionLeaseError("the original startup connector ended")
 	}
 	polls := []unix.PollFd{{Fd: int32(peer.pidfd), Events: unix.POLLIN}}
-	n, err := unix.Poll(polls, 0)
+	n, err := pollNonBlocking(polls)
 	if err != nil || n != 0 {
 		return errors.Join(sessionLeaseError("the original startup connector is no longer live"), err)
 	}
@@ -129,7 +143,7 @@ func (peer *nativeStartupPeerV1) checkLocked() error {
 			return errors.Join(sessionLeaseError("the original startup connector changed cgroup namespace"), err)
 		}
 	}
-	n, err = unix.Poll(polls, 0)
+	n, err = pollNonBlocking(polls)
 	if err != nil || n != 0 {
 		return errors.Join(sessionLeaseError("the startup connector ended during its native placement check"), err)
 	}
@@ -180,7 +194,7 @@ func (peer *nativeStartupPeerV1) checkLive() error {
 		return sessionLeaseError("the original native startup handle ended")
 	}
 	polls := []unix.PollFd{{Fd: int32(peer.pidfd), Events: unix.POLLIN}}
-	n, err := unix.Poll(polls, 0)
+	n, err := pollNonBlocking(polls)
 	if err != nil || n != 0 {
 		return errors.Join(sessionLeaseError("the original native startup process ended"), err)
 	}

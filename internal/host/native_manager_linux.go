@@ -164,7 +164,7 @@ func (manager *nativeUserManagerV1) checkNativeManagerPeerV1() error {
 	if manager == nil || manager.ctx == nil || manager.ctx.Err() != nil || manager.root == nil || manager.peer == nil || manager.connection == nil || manager.connection.isClosingV1() {
 		return sessionLeaseError("the original native user manager ended")
 	}
-	if err := manager.peer.Check(); err != nil {
+	if err := manager.checkManagerPeerNamespaceV1(); err != nil {
 		return err
 	}
 	if err := manager.rootRef.CheckRoot(manager.root); err != nil {
@@ -182,28 +182,13 @@ func (manager *nativeUserManagerV1) checkNativeManagerPeerV1() error {
 	if err != nil || !os.SameFile(socket, manager.socketRef) {
 		return errors.Join(sessionLeaseError("the original user manager socket changed"), err)
 	}
-	actual, err := startupExecutableInfo(manager.peer.proc)
-	if err != nil {
-		return err
-	}
-	trusted := false
-	for _, path := range []string{"/usr/lib/systemd/systemd", "/lib/systemd/systemd"} {
-		info, err := os.Stat(path)
-		if err != nil {
-			continue
-		}
-		if nativeManagerExecutableOwnerV1(actual, info) {
-			trusted = true
-			break
-		}
-	}
-	if !trusted {
-		return sessionLeaseError("the native manager peer is not the root-owned systemd executable")
-	}
 	command, err := manager.peer.proc.ReadFile("cmdline")
 	args := strings.Split(strings.TrimSuffix(string(command), "\x00"), "\x00")
 	if err != nil || len(args) != 2 || args[1] != "--user" {
 		return errors.Join(sessionLeaseError("the native manager peer is not the user's manager process"), err)
+	}
+	if err := manager.checkManagerExecutableV1(args[0]); err != nil {
+		return err
 	}
 	cgroup, err := manager.peer.proc.ReadFile("cgroup")
 	paths, _ := cgroupPaths(cgroup)
@@ -217,7 +202,7 @@ func (manager *nativeUserManagerV1) checkNativeManagerPeerV1() error {
 	if err != nil || !correct {
 		return errors.Join(sessionLeaseError("the native user manager is outside its original system user service"), err)
 	}
-	return manager.peer.Check()
+	return manager.checkManagerPeerNamespaceV1()
 }
 
 // These are native file observations, not manager/source constructors. os

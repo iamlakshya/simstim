@@ -49,6 +49,10 @@ func Main(m *testing.M) {
 	if len(os.Args) >= 3 {
 		switch os.Args[1] {
 		case "supervise", "supervise-restore-v1":
+			if err := host.InitPlacement(); err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				os.Exit(1)
+			}
 			var err error
 			if os.Args[1] == "supervise" {
 				err = supervisor.Run(os.Args[2])

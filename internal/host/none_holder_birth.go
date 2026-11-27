@@ -32,10 +32,10 @@ func newNoneHolderBirthLockedV1(ctx context.Context, receipt *OriginalVMNeed, bi
 	if owner.startup != receipt.boot || receipt.boot.ready || owner.pending == nil || owner.pending.peer == nil || receipt.boot.line == nil || receipt.boot.operation == nil || receipt.boot.operation.native == nil || !receipt.boot.operation.Valid(receipt.boot.loan.Primary) || owner.native == nil || owner.native.name != holderLockFile || !owner.Valid(receipt.boot.loan.Primary) || owner.generation == "" || !validNoneMigrationBootV1(BootID()) {
 		return nil, sessionLeaseError("the None holder differs from its actual outside creator and SAME operation")
 	}
-	sender, err := receipt.boot.line.currentSender()
-	if err != nil {
-		return nil, err
+	if receipt.boot.line.isClosed() {
+		return nil, sessionLeaseError("the original startup connection closed before None holder birth")
 	}
+	sender := receipt.boot.sender
 	if err := errors.Join(owner.pending.peer.CheckSender(sender), checkBorrowedFlockV1(receipt.boot.operation.native.file, sender), birth.CheckSessionV1(ctx, receipt.boot.loan.Primary, connection), observeNoneHolderV1(owner.native.file), owner.native.check(ctx), ctx.Err()); err != nil {
 		return nil, err
 	}
