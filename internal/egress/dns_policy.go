@@ -49,7 +49,7 @@ func (e *Engine) evaluateDNS(host string, at time.Time) dnsHostVerdict {
 	for _, port := range ports {
 		portAllowed := false
 		for _, request := range e.pushHTTPWitnesses(host, port, at) {
-			if e.evaluateHTTP(request, nil, evalPrecheck).Allow {
+			if decision := e.evaluateHTTP(request, nil, evalPrecheck); decision.Allow && !decision.unknownAllowance {
 				portAllowed = true
 			}
 		}
@@ -70,7 +70,7 @@ func (e *Engine) evaluateDNS(host string, at time.Time) dnsHostVerdict {
 					decision = e.evaluateHTTP(request, nil, evalPrecheck)
 				}
 				switch {
-				case decision.Allow:
+				case decision.Allow && !decision.unknownAllowance:
 					portAllowed = true
 				case decision.unmatched:
 					out.hasUnmatched = true

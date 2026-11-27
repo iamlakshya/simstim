@@ -24,7 +24,7 @@ func (e *Engine) evaluateHTTP(request Request, permit *Permit, mode evalMode) De
 
 func (e *Engine) evaluateHTTPLocked(request Request, permit *Permit, mode evalMode) Decision {
 	decision := e.evaluateLocked(request, permit, mode)
-	if !decision.Allow && decision.unmatched {
+	if (!decision.Allow || decision.unknownAllowance) && decision.unmatched {
 		if pushed := e.pushHTTPAllowanceLocked(request, permit, mode); pushed.Allow {
 			decision = pushed
 		}
