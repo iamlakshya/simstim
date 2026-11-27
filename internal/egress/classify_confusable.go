@@ -21,10 +21,10 @@ type classifierName struct {
 type classifierNameIndex map[string][]classifierName
 
 func classifierSkeleton(host string) (string, error) {
-	// UTS39 revision26 and its complete Unicode15 data match the tables
-	// actually active under the pinned Go1.26 toolchain. Later UTS39 versions
-	// change this algorithm; a future migration must update both together.
-	if norm.Version != "15.0.0" {
+	// UTS #39 revision 26 skeleton uses the pinned Unicode 15.0.0 prototype
+	// data. Unicode's Normalisation Stability Policy keeps NFD invariant for
+	// all Unicode 15.0.0 code points under Go 1.27's Unicode 17.0.0 tables.
+	if norm.Version != "15.0.0" && norm.Version != "17.0.0" {
 		return "", errClassifierUnicode
 	}
 	prototypes, err := loadClassifierConfusables()
