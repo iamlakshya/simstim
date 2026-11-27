@@ -34,6 +34,9 @@ func signalHolderMainV1(main *holderMainV1, signal syscall.Signal) error {
 	}
 	return nil
 }
+func signalHolderMainGroupV1(main *holderMainV1, signal syscall.Signal) error {
+	return signalHolderMainV1(main, signal)
+}
 func readHolderFirstFrameV1(connection net.Conn) (proto.Frame, io.Reader, *StartupLineV1, error) {
 	frame, err := proto.ReadFrom(connection)
 	return frame, connection, nil, err

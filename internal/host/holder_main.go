@@ -41,7 +41,11 @@ func (h *Holder) joinOwnedMainV1() error {
 			return err
 		}
 	}
-	if err := signalHolderMainV1(main, syscall.SIGHUP); err != nil && !errors.Is(err, os.ErrProcessDone) && !errors.Is(err, syscall.ESRCH) {
+	signalMain := signalHolderMainV1
+	if h.guest != nil {
+		signalMain = signalHolderMainGroupV1
+	}
+	if err := signalMain(main, syscall.SIGHUP); err != nil && !errors.Is(err, os.ErrProcessDone) && !errors.Is(err, syscall.ESRCH) {
 		return err
 	}
 	// This is the original owned terminal, not a later foreground group ID.
@@ -51,7 +55,7 @@ func (h *Holder) joinOwnedMainV1() error {
 	select {
 	case <-h.waitDone:
 	case <-time.After(3 * time.Second):
-		if err := signalHolderMainV1(main, syscall.SIGKILL); err != nil && !errors.Is(err, os.ErrProcessDone) && !errors.Is(err, syscall.ESRCH) {
+		if err := signalMain(main, syscall.SIGKILL); err != nil && !errors.Is(err, os.ErrProcessDone) && !errors.Is(err, syscall.ESRCH) {
 			return err
 		}
 		<-h.waitDone

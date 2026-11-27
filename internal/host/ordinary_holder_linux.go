@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"os"
@@ -76,6 +77,8 @@ func prepareHolderMainV1(cmd *exec.Cmd) *holderMainV1 {
 	cmd.SysProcAttr.PidFD = &main.pidfd
 	return main
 }
+const pidfdSignalProcessGroup = 1 << 2 // Linux >= 6.9 PIDFD_SIGNAL_PROCESS_GROUP
+
 func signalHolderMainV1(main *holderMainV1, signal syscall.Signal) error {
 	if main.pidfd >= 0 {
 		return unix.PidfdSendSignal(main.pidfd, unix.Signal(signal), nil, 0)
@@ -84,6 +87,31 @@ func signalHolderMainV1(main *holderMainV1, signal syscall.Signal) error {
 	// serialises Signal against Wait; it never signals a numeric group.
 	// This route cannot issue the native stopped source below.
 	return main.cmd.Process.Signal(signal)
+}
+
+func signalHolderMainGroupV1(main *holderMainV1, signal syscall.Signal) error {
+	if main.pidfd >= 0 {
+		err := unix.PidfdSendSignal(main.pidfd, signal, nil, pidfdSignalProcessGroup)
+		if !errors.Is(err, unix.EINVAL) {
+			if err != nil {
+				return fmt.Errorf("signal guest holder group: %w", err)
+			}
+			return nil
+		}
+		// Kernel < 6.9 fallback: signal -pgid only while pidfd proves the leader is unreaped.
+		if unix.PidfdSendSignal(main.pidfd, 0, nil, 0) == nil {
+			_ = syscall.Kill(-main.cmd.Process.Pid, signal)
+		}
+		if err := unix.PidfdSendSignal(main.pidfd, signal, nil, 0); err != nil {
+			return fmt.Errorf("signal guest holder: %w", err)
+		}
+		return nil
+	}
+	if err := main.cmd.Process.Signal(signal); err != nil {
+		return fmt.Errorf("signal guest holder: %w", err)
+	}
+	_ = syscall.Kill(-main.cmd.Process.Pid, signal)
+	return nil
 }
 
 func readHolderFirstFrameV1(connection net.Conn) (proto.Frame, io.Reader, *StartupLineV1, error) {
