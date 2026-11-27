@@ -1,6 +1,6 @@
 # The command line: implementation plan
 
-**Status:** proposed, 10 November 2026. **Spec:** [cli-spec.md](cli-spec.md). **Research:** [the CLI study](../research/cli-dx.md). **Decision:** [0033](decisions/0033-one-command-grammar.md).
+**Status:** proposed, 10 November 2026. **Progress:** [each task](progress.md). **Spec:** [cli-spec.md](cli-spec.md). **Research:** [the CLI study](../research/cli-dx.md). **Decision:** [0033](decisions/0033-one-command-grammar.md).
 
 This plan makes the command line easy to guess, hard to misuse and consistent. [The CLI study](../research/cli-dx.md) found the problems and proposes the grammar G1 to G14 and a command map. Record [0033](decisions/0033-one-command-grammar.md) proposes the grammar for the owner's yes. [The CLI spec](cli-spec.md) states each behaviour, input, error and test. This plan says which files each task changes, what proves it done, and in what order to build the tasks. Where the two differ, the spec wins, and the pull request corrects this plan.
 
@@ -139,14 +139,14 @@ Some isolation tasks depend on tasks of this plan, so their commands use the sha
   - `ls [<host>]`: the host as an argument. `--host` stays.
   - The host part of an address may be left out when the session's name is unique (question C-3). `-` means the last session, and nothing else.
 - **Spec:** [cli-spec.md, section 9](cli-spec.md#9-session-verbs-c5) and [section 3](cli-spec.md#3-old-names-and-warnings-c5-c6-c7).
-- **Files:** `internal/cli/session.go`, `internal/cli/resume.go`, `internal/cli/ended.go`, `internal/cli/deprecated.go`, new `internal/cli/show.go`, new `internal/cli/address.go`, and the session cache, which moves from `internal/tui/memory.go` to the new `internal/client/seen.go`.
+- **Files:** `internal/cli/session.go`, `internal/cli/resume.go`, `internal/cli/ended.go`, `internal/cli/deprecated.go`, new `internal/cli/show.go`, new `internal/cli/address.go`, new `internal/cli/rm.go`, and the session cache, which moves from `internal/tui/memory.go` to the new `internal/client/seen.go`.
 - **Acceptance:**
   - `kill box/a` works, warns once on stderr, and names `rm`.
   - `attach box/a` on an ended agent asks "Start claude again? [Y/n]" at a terminal. With `--no-input` it fails with exit code 4 and `--restart`.
   - `attach a` finds `box/a` when no other host has a session named `a`. Two matches fail with both full names.
   - `TestTopLevel` passes, with `kill` and `flip` hidden ([CLI spec, 2.3](cli-spec.md#23-tests)).
 - **Tests:** unit tests for the address rules, golden tests of the prompts, and end-to-end runs of `rm`, `attach` and `show`.
-- **Docs:** the README's first-session path, new `docs/how-to/sessions.md`, [the UX spec](ux-spec.md), the reference through `just docs`. The line `Describe one: simstim show <host>/<session> --json` in the snippet of `docs/how-to/use-with-agents.md` ([CLI spec, 16.1](cli-spec.md#161-what-the-docs-site-publishes)). The `address` line of `help concepts` (`concepts` in `internal/cli/topics.go`) says that only `attach` and `flip` take `-`. Widen it once every verb takes `-`. `TestTopLevel` skips the help topics with `IsTopic`: they are hidden commands that run.
+- **Docs:** the README's first-session path, new `docs/how-to/sessions.md`, [the UX spec](ux-spec.md), the reference through `just docs`. The line `Describe one: simstim show <host>/<session> --json` in the snippet of `docs/how-to/use-with-agents.md` ([CLI spec, 16.1](cli-spec.md#161-what-the-docs-site-publishes)). The `address` line of `help concepts` (`concepts` in `internal/cli/topics.go`) describes `<host>/<session>`, a unique session name and `-` for every session verb. `TestTopLevel` skips the help topics with `IsTopic`: they are hidden commands that run.
 - **CHANGELOG:** Changed. "`rm` deletes a session, and asks first. `kill` still works for now, and warns. `attach` wakes a stopped session and offers to restart an ended agent. `show` describes one session. You can leave out the host when a session's name is unique."
 - **Depends on:** C4.
 - **Questions:** C-1, C-3, C-4, C-10.
@@ -164,7 +164,7 @@ Some isolation tasks depend on tasks of this plan, so their commands use the sha
   - `new --setup` and `--no-setup` become `--setup-script` and `--no-setup-script`, so that "setup" names only the guided setup.
   - `-n` is `--name` everywhere. `host alerts log -n` becomes `--lines` alone, with a warned alias.
 - **Spec:** [cli-spec.md, section 10](cli-spec.md#10-flags-c6) and [section 3](cli-spec.md#3-old-names-and-warnings-c5-c6-c7).
-- **Files:** `internal/cli/session.go`, `internal/cli/alerts.go`, `internal/cli/create.go`, `internal/cli/agents.go`, `internal/cli/guided.go`, new `internal/cli/flags.go` (shared list and size parsers), `internal/cli/deprecated.go` (the warned aliases), and `cmd/docgen`, whose pages show the old flags through `cli.OldNames`.
+- **Files:** `internal/cli/session.go`, `internal/cli/alerts.go`, `internal/cli/create.go`, `internal/cli/agents.go`, `internal/cli/guided.go`, new `internal/cli/flags.go` (shared list and size parsers), `internal/cli/deprecated.go` (the warned aliases), and `cmd/docgen`, whose pages show the old flags through `cli.OldNames`. Also every other command file that defines a flag of spec 10.2. Also `internal/cli/main.go` (`--version`), `internal/api/memory.go` (`ParseSize`) and `internal/provider` (sizes in bytes).
 - **Acceptance:** each old form works and warns once. A test fails when two commands give one short flag two meanings.
 - **Tests:** unit tests for the parsers and the aliases.
 - **Docs:** the reference through `just docs`, and every how-to guide that shows an old form.
@@ -182,7 +182,7 @@ Some isolation tasks depend on tasks of this plan, so their commands use the sha
   - `host upgrade <host>` updates the helper. Today the user runs `host add` again.
   - With `--yes`, `host add` needs `--tier` once the isolation plan adds tiers (H4). Without it, the command fails with exit code 4 and the flag to pass.
 - **Spec:** [cli-spec.md, section 11](cli-spec.md#11-host-commands-c7) and [section 3](cli-spec.md#3-old-names-and-warnings-c5-c6-c7).
-- **Files:** `internal/cli/host.go`, `internal/cli/create.go`, new `internal/cli/host_set.go`, `internal/cli/deprecated.go`, `internal/client/config.go`.
+- **Files:** `internal/cli/host.go`, `internal/cli/create.go`, new `internal/cli/host_set.go`, `internal/cli/host_show.go`, `internal/cli/host_rm.go` and `internal/cli/host_upgrade.go`, `internal/cli/deprecated.go`, and new `internal/client/details.go` (the lines that `host show` and the launcher's host details share) and `internal/client/removal.go` (the record of `host rm`).
 - **Acceptance:** `host set box idle=2h` does what `host idle box 2h` did. `host rm` on a created machine says that it holds 2 sessions. It asks "Type box to delete the machine too, or press Enter to keep it:". `host show box --json` matches the launcher's details.
 - **Tests:** unit tests, golden tests of the prompts, and an end-to-end run against a test host.
 - **Docs:** `docs/how-to/add-a-host.md`, `docs/how-to/create-a-host.md`, `docs/how-to/uninstall.md`, the reference through `just docs`.
@@ -208,7 +208,7 @@ Some isolation tasks depend on tasks of this plan, so their commands use the sha
 
 - **Goal:** `config check` reads every config file and reports each error with its file and line, and each unknown key with the nearest known key. Once the isolation plan adds layers and profiles, it also prints which layers apply to the current folder.
 - **Spec:** [cli-spec.md, section 13](cli-spec.md#13-config-check-c9).
-- **Files:** new `internal/cli/config_check.go`, `internal/client/config.go`.
+- **Files:** new `internal/cli/config_check.go` (the command and the report), new `internal/cli/config_rules.go` (the checks of each value), new `internal/cli/config_words.go` (the report's words), new `internal/cli/config_lines.go` and `internal/cli/config_lex.go` (the lexer that finds lines), `internal/cli/config.go`, `internal/cli/errors.go` (an error that prints nothing more), `internal/cli/main.go` and `internal/cli/debug.go` (the warning before each command), `internal/client/config.go`, new `internal/client/configread.go` (the bounded read), new `internal/client/config_decode.go` (the shared field resolver and loader preflight), `internal/client/ops.go` (`SessionArgs`), `internal/client/fix.go` (the doctor's hint), `internal/client/machine.go` (one rule for an idle time), `internal/onboard/create.go`, `internal/tui/keymap.go` (`CheckKey`), `internal/tui/backend.go`, `internal/tui/model.go`, `internal/tui/actions.go`, `internal/tui/resume.go`, `internal/tui/wizard_agents.go`, `internal/tui/settings.go`, `internal/tui/tui.go` and `internal/tui/demo.go` (the launcher's warning, fresh reads and the settings that it keeps), `internal/bundle/scrub.go` and `cmd/docgen/config.go`.
 - **Acceptance:** a typo in a key name gets `~/.config/simstim/config.toml:4: unknown key "motoin" in [ui]. Did you mean "motion"?`, and `config check` exits with 1.
 - **Tests:** unit tests with broken files.
 - **Docs:** `docs/reference/config.md` through `just docs`.

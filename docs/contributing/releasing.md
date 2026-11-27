@@ -8,6 +8,7 @@ Versions follow [Semantic Versioning](https://semver.org): `MAJOR.MINOR.PATCH`.
 - **From 1.0**, a breaking change to the CLI, the config file, the key map or the wire protocol needs a new major version.
 - **Client and helper.** A client installs the helper that matches it, on each host, side by side with older ones, so running sessions keep their own helper. The hello message carries a protocol version, and an older client says what to update.
 - **Security fixes** go to the latest minor release only ([SECURITY.md](../../SECURITY.md)).
+- **Old names.** When a command, a flag or a value changes, its old form keeps working for two releases or 12 months, whichever is later. It does what it did. It also prints one warning on stderr with the new form and its end. The table of old forms is in `internal/cli/deprecated.go`, and the reference page of each command lists its old forms ([the CLI spec, section 3](cli-spec.md#3-old-names-and-warnings-c5-c6-c7)).
 
 ## What a release contains
 
@@ -24,14 +25,60 @@ Every release is built by `.github/workflows/release.yml` from a tag that a main
 | `multiple.intoto.jsonl` | SLSA level 3 provenance for every archive |
 | GitHub attestations | Build provenance, checked with `gh attestation verify` |
 | The Homebrew cask | Pushed to the tap when the `HOMEBREW_TAP_TOKEN` secret is set |
+| `release-manifest.json` | The client's trusted file digests, also embedded beside the helpers |
+| Raw VMM files and their source archives | The exact runtime files named by the release manifest |
 
-The builds are reproducible: `just repro` builds every binary twice from empty caches and checks they match, and CI runs it on every push.
+`just repro` builds every binary twice from empty build caches and checks they
+match. It requires the independently prepared native default-image and gVisor
+pairs described in the [build input guide](default-image-build.md). CI
+prepares both native image pairs on every push, in the `reproducible` and
+`gvisor-repro` jobs, and the `test-images` job runs the two complete builds
+from them. The unit tests run in the `test` job, which does not wait for the
+images, so a failed image build cannot skip them. A source check or a
+missing-input refusal does not establish reproducibility.
+
+### VMM pins and mirrors
+
+`guest/supply.lock` pins Cloud Hypervisor and Firecracker for amd64 and arm64. Each VMM has one version for both architectures, a source archive, release and support dates, and a watched tag and commit. The release uses the existing `cmd/supply` manifest writer. It keeps the digests in the client; a host's inventory supplies no trusted digest.
+
+Run `just mirror-vmm` to download and check the inputs without starting a VMM. `scripts/mirror-vmm.sh` checks every download's exact size and SHA-256. `cmd/supply mirror-vmm` checks the source before it writes a runtime file. The manifest writer repeats these checks before the client build. Missing inputs fail a release build.
+
+Firecracker v1.18.0 was [released on 9 November 2026](https://github.com/firecracker-microvm/firecracker/releases/tag/v1.18.0). Its tag names commit `eaf83bb718a559d324613d566eaf776b31a62340`. The [upstream release policy](https://github.com/firecracker-microvm/firecracker/blob/main/docs/RELEASE_POLICY.md) gives 9 May 2027 as the minimum end of support for 1.18. The lock uses that conservative date. Its [kernel policy](https://github.com/firecracker-microvm/firecracker/blob/v1.18.0/docs/kernel-policy.md) tests host kernel lines 5.10, 6.1 and 6.18, with 4 KiB pages.
+
+The Firecracker architecture pins cover upstream `.tgz` archives. At pin time, compare each downloaded archive with its upstream `.sha256.txt` and GitHub's release asset digest. The mirror selects only the exact `firecracker-v<version>-<machine>` member, checks its static 64-bit ELF architecture, then hashes that raw executable for the manifest. It never extracts or runs the jailer. The source snapshot is checked by its own pinned size and SHA-256. The release carries its Apache-2.0 licence and upstream notices.
+
+| Firecracker v1.18.0 raw file | Size in bytes | SHA-256 |
+| --- | ---: | --- |
+| `firecracker-v1.18.0-x86_64` | 3,921,872 | `b33f46cd6d88834cf6a4f8d184f08f219809c636236bffd286d233a60602a2ba` |
+| `firecracker-v1.18.0-aarch64` | 3,623,592 | `6f9e08df0a0072e3e7086c51ff434c034d705845e349175a01beb3f9cc025ce3` |
+
+These hashes come from the downloaded files and match the archive's `SHA256SUMS`. The release checks the uploaded raw files against the embedded manifest, rechecks the original pinned inputs and uploaded source, then uploads the manifest. The signed checksums cover those runtime and source files as well as the manifest. A release still fails if its known-bad list covers any of its own items.
+
+The mirror checks files without booting them. Guest-kernel compatibility, fidelity and escape tests remain separate checks on a supported Linux host. A successful mirror gives no boot-test result.
+
+### The guest kernel and tools image
+
+`just guest all` builds both architectures. It needs Docker, the pinned Go toolchain and Zig. The build uses the Debian image digest in `guest/supply.lock`. Inside it, apt checks Debian's signature and package hashes. The build reads the locked snapshot of the suite and of its security suite at the same time, because the pinned image already carries security updates. It checks the exact signed `InRelease` digest of each before it installs a compiler or build dependency. It does not use the host's compiler or package sources.
+
+`guest/build.sh` checks the kernel, erofs-utils and moby inputs against the same lock. It builds the kernel at `/build/linux`, with fixed user, host and timestamp values. The timestamp comes from the newest commit that changed `guest/`. The committed full configs are checked before and after `make olddefconfig`. Both include virtio-MMIO for Firecracker. The amd64 result is a PVH ELF `vmlinux`; the arm64 result is an uncompressed `Image`. They remain the shared boot pair for both VMMs.
+
+The same build also emits `kernel-efi-amd64` from `arch/x86/boot/bzImage` and `kernel-efi-arm64` from the raw arm64 `Image`, with EFI stub support in the configs. These have the separate signed kernel name `guest-efi`. Each item retains the same source, version, release date and config as `guest`, and records its own actual SHA-256, size and fs-verity digest. The producer checks the Linux image markers, native PE architecture, EFI subsystem and executable entry. Both formats remain covered by the same Linux source advisories. Equal arm64 bytes do not permit renaming one signed role to another.
+
+The release writer and uploaded-file check use `-require-kernel-efi` to require both EFI items. Source and format fixtures do not establish native EFI boot or Nitro acceptance.
+
+The ordinary byte checks, runtime preparation and final inherited descriptor checks apply the same EFI format rule. The parser reads bounded headers from the existing descriptor with `ReadAt`; it opens no store path, changes no shared offset and makes no complete kernel copy. It allocates no symbol or debug table from input metadata. The original Need, descriptor owner, seals or fs-verity measurement still provide runtime authority and immutability.
+
+The tools image holds this release's helper at `/init`, its shadow terminal and the mount folders. `guest/verity` pads it to 4096-byte blocks, then appends the SHA-256 tree with a fixed zero salt and no superblock. The manifest writer checks the actual tree and records its whole-file digest, size, root hash and data blocks. The release publishes the kernel source and both committed configs beside the boot pair.
+
+The release builds kernels before GoReleaser, then packs the tools image after the helpers are built. Its manifest and upload checks require both architectures. `just repro` repeats the kernel and tools builds with fresh build caches and compares the guest assets as well as the release binaries.
+
+`just guest-boot` is an explicit boot check on a Linux host with KVM access. It runs only the pinned Cloud Hypervisor and the guest init's self-test, with no network device. It never changes KVM permissions. A source or compiler check gives no boot, reproducibility or hardware result; run those checks on an authorised build or test host before accepting a release.
 
 ## Steps to release
 
 1. Make sure `main` is green in CI and the end-to-end tests pass (`just e2e`).
 2. Make sure that `.github/tag-signers` on `main` lists your tag key ([set up your tag key](#set-up-your-tag-key)).
-3. Remove each old name whose end has passed: its row in `internal/cli/deprecated.go`, and the code that keeps the old form working. Add an old command name to the synonyms in `internal/cli/errors.go`, so that a user who types it gets "Did you mean" ([CLI spec, section 3](cli-spec.md#3-old-names-and-warnings-c5-c6-c7)). When this release adds a warning, set the release's day in `releaseDays` in the same file: the 12 months of its old forms start that day. Then run `just docs`, because each reference page lists its old names with their end.
+3. Remove each old name whose end has passed: its row in `internal/cli/deprecated.go`, and the code that keeps the old form working. Add an old command name to the synonyms in `internal/cli/errors.go`, so that a user who types it gets "Did you mean" ([CLI spec, section 3](cli-spec.md#3-old-names-and-warnings-c5-c6-c7)). Add an old flag to `flagSynonyms` in the same file. When this release adds a warning, set the release's day in `releaseDays` in the same file: the 12 months of its old forms start that day. Then run `just docs`, because each reference page lists its old names with their end.
 4. In `CHANGELOG.md`, rename `## [Unreleased]` to `## [X.Y.Z] - YYYY-MM-DD`, and add a new empty `## [Unreleased]` above it. The release notes are taken from this section (`scripts/release-notes.sh`), so write them for users.
 5. Commit ("Release X.Y.Z") on a branch, open a pull request, and merge it when CI passes: `main` takes changes only through a pull request ([decision 0023](decisions/0023-protect-main.md)). Then sign a tag on the merged commit with your tag key, check it, and push it. Touch the key when it asks:
 
@@ -278,3 +325,9 @@ A release ships within 7 days of an advisory's publication. It carries the advis
 ## Why one action is pinned by tag
 
 Every action in the workflows is pinned to a full commit SHA, except the SLSA generator (`slsa-framework/slsa-github-generator`), which the release job calls by tag. The generator checks how it was called, and a provenance file made from a SHA reference does not verify. OpenSSF Scorecard counts this one reference against Pinned-Dependencies (9 of 10), which `just public-check` accepts.
+
+For every client release, refresh and review the vendored Sigstore trust root
+and its provenance in the release commit before making the signed tag. Follow
+the [trust-root refresh procedure](image-signature-trust-root.md). Ordinary
+builds and the offline verifier use those frozen bytes; they do not fetch a
+different trust root during a build or a signature check.

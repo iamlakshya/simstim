@@ -20,7 +20,7 @@ simstim has two kinds of screen, with opposite rules:
 
 ## 1. Principles
 
-1. **One job per screen.** Pick a host, then pick or start a session. Each screen is one list in one column. There are no sidebars, split panes, permanent previews or dashboards.
+1. **One job per screen.** Pick a host, then pick or start a session. Each screen is one list in one column. There are no sidebars, split panes, permanent peek panes or dashboards.
 2. **The session owns the terminal.** Once you attach, every row and column belongs to the agent. The client shows only two things of its own: the reconnect notice while the link is down, and system notifications (OSC 777), which draw nothing on the screen.
 3. **A signal, not a box.** No frame round the list. The look is a cyan accent, braille traces of each session's output, rules instead of boxes, and sheets that rise from the bottom. It reads like a console tuned to your sessions.
 4. **The terminal's own colours.** Every colour is a palette slot or the terminal's default, so simstim matches your theme. Fixed RGB is kept for the brand gradient.
@@ -70,7 +70,7 @@ Every list screen has the same parts, top to bottom:
 
     ● Do you want to proceed?              ~/src/app · 6.1 of 8 GiB · s4          ← the line under the list
 
-    ✓ Copied: simstim attach atlas-dev/auth-refactor.                            ← notices
+    ✓ Copied: simstim attach atlas-dev/s4.                                       ← notices
   ────────────────────────────────────────────────────────────────────────────   ← bottom rule
     ❯ / search every host   n start a session                                     ← the prompt line
     enter attach   space peek   r rename   esc hosts   ? keys                      ← the keys
@@ -200,7 +200,7 @@ Every list screen has the same parts, top to bottom:
     Retrying in the background.
   ```
 
-- **Every host:** `simstim flip`, or "All sessions" in the palette, lists every host's sessions in one list, under each host's name.
+- **Every host:** "All sessions" in the palette lists every host's sessions in one list, under each host's name. `simstim flip` opens the same list, and warns: it is an old name ([CLI spec, section 3](cli-spec.md#3-old-names-and-warnings-c5-c6-c7)). `simstim attach` with no session opens the picker instead, an inline list.
 
 #### 2.4.1 Resume
 
@@ -234,7 +234,9 @@ Enter attaches the selected result, and Esc closes the search. On a result whose
 
 ### 2.6 Quick start
 
-`n` opens the prompt line for a new session on the host in play. The whole session is one line: `claude ~/src/app auth`.
+`n` first resolves the effective default host in every launcher view. It opens the full new-session form for that host. The environment override wins over the saved default, then the only eligible non-shared host. A restored last-session view does not override this choice. A configured default that is invalid, shared, stale or unreadable shows its error and hint; it never selects another host.
+
+When there is no default, `n` keeps the quick start for the current usable host. That host must still be saved and online. The whole session is one line: `claude ~/src/app auth`.
 
 ```text
     claude  codex  opencode  shell   ~/src/api/  ~/src/app/
@@ -268,14 +270,16 @@ Every dialog is a sheet. It rises from the bottom of the screen over the dimmed 
 
 | Sheet | Opens on | What it holds |
 | --- | --- | --- |
-| New session | `ctrl+f` in the quick start, or the palette | Agent (the chosen one lit while the row has focus), folder with completion from the host, name, and worktree. "other…" runs any command you type. |
-| Delete | `d` | Red rule and title: "Delete api-tests?", what stops and what stays. For an agent that has ended, only what it removes. |
+| New session | `n` with an effective default, `ctrl+f` in the quick start, or the palette | Agent (the chosen one lit while the row has focus), folder with completion from the host, name, worktree, wall and host. The Host row changes only this start; left and right choose a saved host. "other…" runs any command you type. |
+| Delete | `d` | Red rule and title: "Delete api-tests?", what stops and what stays. For an agent that has ended, only what it removes. `simstim rm` asks with the same lines (`client.DeleteLines`). |
 | Peek | `space` | The session's last screen, refreshed while the agent runs. ↑↓ move to the next session, and Enter attaches. For an agent that has ended, it shows no memory, and Enter keeps it open. |
 | Commands | `ctrl+o` | The palette: a filter, then every command as plain words ("New session", "Peek at the screen") with its key in cyan. A command that cannot run says why, faint. |
 | Keys | `?` | Every key that works here, in two columns, built from the live registry. It leaves out `?` itself. |
-| Host details | `i` | Route, system, helper, agents with their versions (wrapped under the label when they do not fit), limits; `t` test, `s` shell, `r` reconnect, `x` remove |
+| Host details | `i` | The lines of `host show`, from one function in the client. First come the saved route, labels, machine, idle, provider script and secrets. Then come the system, the helper, the agents with their versions, and the limits. A list, such as the agents, wraps under its label when it does not fit. `t` test, `s` shell, `r` reconnect, `x` remove |
 | Add a host | `a` | The wizard (2.10) |
 | Set up | Enter on the first-run screen, `s` | The guided setup (2.12) |
+
+The new-session form marks an automatic host choice as `default`. Selecting another Host row makes that an explicit choice for this start and leaves the saved default unchanged. The form checks its default or explicit saved entry again before starting. If that choice changed, it asks the user to choose again. Escape cancels a pending local host selection; a late result cannot open a form or start a session.
 
 A click outside the palette, the peek, the host details or a confirm closes it.
 
@@ -310,13 +314,16 @@ The agent owns the whole terminal: every row and every column. There is no borde
 `a`, from any screen: a sheet with one step per screen, the step count at the right of its rule. Esc goes back one step. A reply to a closed setup step cannot advance a later setup. A check that times out shows its error and can be tried again.
 
 1. **Where.** A target from `~/.ssh/config` (↑↓ pick, and typing filters), a name, and an optional extra SSH config file.
-2. **Test.** Each check shows the spinner, then `✓` or `✕` with the time it took. A failure shows the error and its next step.
-3. **Install the helper.** This is the consent screen. It says what is installed and where, what else changes (linger, terminfo), and that nothing listens on the network.
-4. **Ready.** The agents found, the system, and the memory for sessions. The host's sessions are now open behind the sheet. When a first-class or supported agent is missing or not logged in, Enter goes on to the agents. Otherwise it starts a session.
-5. **Agents.** The checklist: every agent with an installer, first-class and supported ones first. An installed agent has a green `✓`, a ticked one a cyan `●`, the rest a faint `○`, each with its state. The best-effort agents wait under a fold, `▸ 5 more agents, best effort`, which Enter or Space opens. Space ticks, and Enter installs what is ticked.
+2. **Test.** Each check shows the spinner, then `✓` or `✕` with the time it took. A failure shows the error and its next step. The first check is the host key, which the wizard pins as `host add` does, before it connects (isolation spec 14.7.1). When your settings do not name the key, the step shows its fingerprint and the command that prints it on the host, with `enter pin this key` and `esc back`.
+3. **Tier.** Who else has root on the host (`Only me`, `Someone else`, `A machine for one task`), setting `own`, `shared` or `throwaway`.
+4. **Install the helper.** This is the consent screen when the helper is not installed yet. It says what is installed and where, what else changes (linger, terminfo), and that nothing listens on the network.
+5. **Sandboxes.** After the host is saved with its pin, separate saved-host requests probe the sandbox drivers and verify the pinned runtime and images. When no optional root step is needed, the wizard runs the short sandbox test boot at once and advances on success. When optional root setup can unlock a stronger wall, the sheet pauses (`enter root step   s skip   esc close`). If the test boot fails, the floor stays unchanged (`enter try again   s continue   esc close`).
+6. **Root step.** Shows each privileged step, its command and the script's SHA-256 before anything runs. On an `own` or `throwaway` host, Enter runs with `sudo` in the terminal; on a `shared` host, Enter prints the script for the owner, and `r` asks for the exact host name before running `sudo`. `p` prints, `s` skips, and Esc goes back to Sandboxes.
+7. **Ready.** Shows `connect`, `linger`, `terminfo`, the agents found, the system, the memory for sessions, and the sandbox `Floor`. If no sandbox wall was verified yet, the headline says the host is saved and its sandbox wall is not ready yet, rather than claiming it is ready. When a first-class or supported agent is missing or not logged in, Enter goes on to the agents. Otherwise it starts a session.
+8. **Agents.** The checklist: every agent with an installer, first-class and supported ones first. An installed agent has a green `✓`, a ticked one a cyan `●`, the rest a faint `○`, each with its state. The best-effort agents wait under a fold, `▸ 5 more agents, best effort`, which Enter or Space opens. Space ticks, and Enter installs what is ticked.
 
    ```text
-     ── Agents on pi ───────────────────────────────────────────── step 5 of 6 ──
+     ── Agents on pi ──────────────────────────────────────────── step 8 of 10 ──
 
        Tick the agents to install on pi. Each one installs with its vendor's
        own installer, in a session you watch.
@@ -330,19 +337,19 @@ The agent owns the whole terminal: every row and every column. There is no borde
        space tick   enter install 1 agent   esc back
    ```
 
-6. **Install, then log in.** One sheet for each install, then one for each agent that is installed but not logged in. Each shows the command, where it comes from, and the session it runs in (`install-codex`, `login-codex`). Enter starts the session and attaches; the user answers the installer or the login there. When they detach, or the session ends, the sheet checks the host again, and the next sheet shows how it went. `s` skips one, and Esc stops the rest.
-7. **Done.** Each agent with its mark (`✓` ready, `!` not logged in, `?` login unknown, `✕` missing) and the step to try, then the command for the first session. Enter opens the new-session form with that agent chosen.
+9. **Install, then log in.** One sheet for each install (step 9 of 10), then one for each agent that is installed but not logged in (step 10 of 10). Each shows the command, where it comes from, and the session it runs in (`install-codex`, `login-codex`). Enter starts the session and attaches; the user answers the installer or the login there. When they detach, or the session ends, the sheet checks the host again, and the next sheet shows how it went. `s` skips one, and Esc stops the rest.
+10. **Done.** Each agent with its mark (`✓` ready, `!` not logged in, `?` login unknown, `✕` missing) and the step to try, then the command for the first session. Enter opens the new-session form with that agent chosen.
 
 ### 2.11 Fast paths
 
 - **Where you left off.** The launcher opens on the sessions of the host you last attached to, with that session selected. `simstim` then Enter takes you back in.
 - **At once.** It draws the sessions it remembers before any host answers.
 - **Numbers.** 1–9 open the row with that number.
-- **Search and quick start.** `/` finds a session on any host; `n` starts one from a single line.
+- **Search and new sessions.** `/` finds a session on any host. `n` opens the form for the effective default, or keeps the single-line quick start when there is no default and the current host is usable.
 - **The mouse.** Click a row to select it, and click the selected row to open it. The wheel moves the selection, and a click on a palette row runs it.
 - **The tab title** counts the sessions that need you: `● 1 · simstim · homelab`.
 - **When nobody is looking.** If a session starts to need you while the terminal is in the background, the launcher sends a desktop notification.
-- **From the shell.** `simstim attach -` attaches to the last session.
+- **From the shell.** `simstim attach -` attaches to the last session. `simstim attach auth-refactor` finds the host of a session whose name is unique.
 
 ### 2.12 Guided setup
 
@@ -396,7 +403,7 @@ These keys work in the launcher. You can rebind any key in `config.toml`, and `s
 | `enter`, `l`, `→` | Hosts | Open the host's sessions |
 | `esc`, `h`, `←` | Sessions | Back to the hosts |
 | `enter` | Sessions | Attach, or open the quick start on an empty list. On a session whose agent has ended, open its last screen. |
-| `n` | Anywhere | Quick start on the host in play |
+| `n` | Anywhere | New-session form on the effective default; quick start on the current usable host only when no default exists |
 | `/` | Anywhere | Search every host |
 | `space` | Sessions | Peek at the screen |
 | `r`, `f2` | Sessions | Rename |
@@ -524,7 +531,7 @@ It shows what the agent will get through the pass-through.
 
 - "Detached. auth-refactor keeps running on atlas-dev."
 - "Reconnected to atlas-dev."
-- "Copied: simstim attach atlas-dev/auth-refactor."
+- "Copied: simstim attach atlas-dev/s4." The command names the session by its host and its ID.
 
 A repeat extends the notice instead of adding a line.
 
@@ -554,54 +561,111 @@ The launcher is the home, and every action also has a command, for scripts and t
 
 The root help groups the commands as this table does: Sessions, Hosts, Agents, and Setup and help ([CLI spec, 8.1](cli-spec.md#81-the-root-help)). Every command has an example in its help, and `simstim help concepts` explains the words that the tool uses.
 
+An address names a session: `<host>/<session>`, or `<session>` alone when no other host has a session of that name, or `-` for the last session attached to ([CLI spec, section 9.2](cli-spec.md#92-addresses)).
+
+A new session without a host uses `SIMSTIM_DEFAULT_HOST`, then the saved choice of `host default`, then the only eligible non-shared host. `new -` uses the still-saved host of the last attached session. A shared host cannot be the default. The launcher uses the same local resolver, and its last-session cache grants no permission to start work. Changing the Host row changes only that form's target. Every start still uses its actual accepted host connection and current checks.
+
+`host default <host>` sets the saved choice, `host default` prints it, and `host default --clear` clears it. Local host selection reads no room estimate and starts or wakes no machine. The chosen host still admits or refuses the actual session.
+
 | Command | Does |
 | --- | --- |
-| `simstim` | Opens the launcher |
-| **Sessions** | |
-| `simstim new <host> [--agent claude] [--dir ~/src/app [--mkdir]] [--name x] [--worktree [--base ref]] [--secret NAME] [--memory-max 4G] [--inline] [--setup \| --no-setup] [--detach [--json]] [-- <command>…]` | Starts a session, and attaches unless `--detach` |
-| `simstim attach [<host>/<session>\|-]` | Attaches directly. `-` is the last session. Good for a Ghostty keybinding. Without a session, and with input on, it opens the picker: an inline list of sessions, from the session cache, with a filter. To a session whose agent has ended, it says why and what to try, as at the end of an attach. `a` is its alias. |
-| `simstim resume <host>/<session> [--memory-max 4G] [--secret NAME] [--detach [--json]]` | Starts an ended agent again in its session, with its resume command, and attaches unless `--detach`. Without `--memory-max`, the cap is the one the session asked for. |
-| `simstim ls [--host h] [--json]` | Lists sessions, with their state and where the state came from, and why an agent ended: `errored (out of memory)` |
-| `simstim kill <host>/<session>` | Stops a session and removes it, and keeps a worktree that has work. `rm` and `delete` are its aliases. |
-| `simstim rename <host>/<session> <name>` | Renames a session |
-| `simstim send <host>/<session> <text> [--no-enter]` | Types text into a session without attaching, then presses Enter |
-| `simstim ports <host>/<session> [--json]` | Lists the ports a session listens on |
-| `simstim forward <host>/<session> [<port>…]` | Forwards a session's ports to localhost, until Ctrl+C |
-| `simstim pull <host>/<session> [--into <branch>] [--force]` | Brings a session's branch into the git repository in the current folder |
-| `simstim flip [<host>/<session>\|-]` | A quick switch: the sessions of every host in one list, then attach |
-| **Hosts** | |
-| `simstim host add <name> [<ssh-target>] [--ssh-config f] [--label k=v] [--provider-script s --wake] [--yes]` | Connects a host: probe, consent, install, setup and doctor, and with input on the agent checklist when an agent is missing |
-| `simstim host ls [--json]` | Lists the hosts |
-| `simstim host test <host> [--json]` | Checks that a host answers, and how fast |
-| `simstim host doctor <host> [--fix [--yes]] [--json]` | Checks a host's setup, and with `--fix` fixes what it can |
-| `simstim host rm <host>` | Forgets a host (its sessions keep running) |
-| `simstim host restore <host> [--all] [--json]` | Starts again the sessions that a host restart stopped (or, with `--all`, a crash) |
-| `simstim host create lima\|docker\|e2b [<name>] [--cpus n] [--memory 8] [--disk 40] [--image i] [--template t] [--idle-stop 30m] [--token-command c]` | Makes a host with a provider, installs the helper and connects |
-| `simstim host destroy <host> [--yes] [--force]` | Deletes a created host's VM, container or sandbox, and every session on it |
-| `simstim host idle <host> <duration>\|never` | Sets how long a created host may idle before it stops |
-| `simstim host start\|stop\|status <host>` | Runs the host's provider or provider script. `status` takes `--json` |
-| `simstim host alerts <host> [--json]` | Shows where a host sends alerts, and the last deliveries |
-| `simstim host alerts set <host> [--ntfy url \| --webhook url \| --command c] [--add] [--events e,f] [...]` | Chooses where a host sends alerts, and which ones |
-| `simstim host alerts test <host> [--event e]`, `host alerts log <host> [--lines n] [--json]`, `host alerts off <host>` | Sends a test alert, shows the last deliveries, or turns alerts off |
-| **Agents** | |
-| `simstim agents ls [--json]` | Lists the agent table, with how each agent installs |
-| `simstim agents install <agent> [--host h] [--force]` | Installs an agent on a host with its official installer, in a session you watch |
-| **Setup and help** | |
-| `simstim setup [--host h \| --create lima\|docker\|e2b] [--name n] [--agents a,b] [--yes] [--no-login]` | The guided setup: where agents run, the host, the agent checklist, the installs and the logins, then the first session's command |
-| `simstim doctor [--fix [--yes]] [--json]` | Checks this computer: ssh, the config files and the secrets' commands |
-| `simstim doctor keys` | Prints each key event as the terminal sends it, and marks the client's own keys |
-| `simstim doctor terminal` | Asks the terminal what it supports: kitty keys, synchronized output, colours, and more |
-| `simstim --debug[=<categories>] <command>` | Turns on the debug mode for one command, or the launcher: every category, or those listed (`attach`, `net`, `memory`, `launcher`, `runtime`). A command prints the debug file's path on stderr first. The launcher shows its debug mark (2.2), and a notice with the path |
-| `simstim --debug-file <file> <command>` | Names the client's debug file, and turns on every category. `SIMSTIM_DEBUG_FILE` does the same |
-| `simstim debug start <host>/<session> [--for 30m] [--only <categories>]`, `debug stop <host>/<session>` | Turns the debug of a running session on, until `debug stop` or the time limit, or off at once |
-| `simstim debug save <host>/<session>` | Saves the session's recent debug record on the host: the last seconds of its execution trace |
-| `simstim debug profile <host>/<session> cpu\|heap\|goroutine [--for 30s]` | Writes a profile of the session's process on the host. `--for` is for `cpu` only |
-| `simstim debug bundle [<host>\|<host>/<session>] [--ssh]` | Writes one archive of the debug files in the current folder, with private values replaced. Nothing is uploaded |
-| `simstim config path`, `config keymap [--json]` | Prints where the configuration lives, or the launcher's commands and their keys |
-| `simstim demo [--empty]` | The launcher on sample data (nothing connects anywhere) |
-| `simstim version [--json]`, `completion bash\|zsh\|fish\|powershell` | Housekeeping |
-| `simstim help [<command>]`, `help concepts`, `help exit-codes` | The help of a command, the words that the tool uses, or the exit codes |
-| `simstim --no-input <command>`, `simstim --no-color <command>` | Turn questions or colour off for any command. `SIMSTIM_NO_INPUT` and `NO_COLOR` do the same. With input off, a question that needs an answer fails with exit code 4, and names the flag that answers it ([CLI spec, section 6](cli-spec.md#6-prompts-pickers-and-input-c4)) |
+| `simstim [flags]` | Run any coding agent on any host, and use it as if it ran here. [Reference](../reference/cli/_index.md) |
+| `simstim agents [flags]` | List the agents, install one on a host, and log in to it. [Reference](../reference/cli/agents.md) |
+| `simstim agents install <agent> [<host>] [flags]` | Install an agent on a host with its official installer. [Reference](../reference/cli/agents_install.md) |
+| `simstim agents login <agent> [<host>] [flags]` | Start an agent's own login on a host, in a session you can answer. [Reference](../reference/cli/agents_login.md) |
+| `simstim agents ls [flags]` | List the agents in the agent table, with how each one installs. [Reference](../reference/cli/agents_ls.md) |
+| `simstim attach [<host>/<session>\|-] [flags]` | Attach to a session. [Reference](../reference/cli/attach.md) |
+| `simstim completion [flags]` | Print the shell completion script for bash, zsh, fish or PowerShell. [Reference](../reference/cli/completion.md) |
+| `simstim completion bash [flags]` | Print the completion script for bash. [Reference](../reference/cli/completion_bash.md) |
+| `simstim completion fish [flags]` | Print the completion script for fish. [Reference](../reference/cli/completion_fish.md) |
+| `simstim completion powershell [flags]` | Print the completion script for PowerShell. [Reference](../reference/cli/completion_powershell.md) |
+| `simstim completion zsh [flags]` | Print the completion script for zsh. [Reference](../reference/cli/completion_zsh.md) |
+| `simstim config [flags]` | Show the configuration. [Reference](../reference/cli/config.md) |
+| `simstim config check [flags]` | Find mistakes in the config files, each with its file and line. [Reference](../reference/cli/config_check.md) |
+| `simstim config keymap [flags]` | Print the launcher's commands and their keys. [Reference](../reference/cli/config_keymap.md) |
+| `simstim config path [flags]` | Print where the configuration lives. [Reference](../reference/cli/config_path.md) |
+| `simstim cp <source> <destination> [flags]` | Copy files between this computer and a running sandbox. [Reference](../reference/cli/cp.md) |
+| `simstim debug [flags]` | Record why a session goes wrong: debug files, profiles and traces. [Reference](../reference/cli/debug.md) |
+| `simstim debug bundle [<host>\|<host>/<session>] [flags]` | Write one archive of the debug files, with private values replaced. [Reference](../reference/cli/debug_bundle.md) |
+| `simstim debug profile <host>/<session> cpu\|heap\|goroutine [flags]` | Write a profile of the session's process, for go tool pprof. [Reference](../reference/cli/debug_profile.md) |
+| `simstim debug save <host>/<session> [flags]` | Save the session's recent debug record, just after a lag. [Reference](../reference/cli/debug_save.md) |
+| `simstim debug start <host>/<session> [flags]` | Turn on the debug of a running session, for 30 minutes or `--for`. [Reference](../reference/cli/debug_start.md) |
+| `simstim debug stop <host>/<session> [flags]` | Turn off the debug of a session at once. [Reference](../reference/cli/debug_stop.md) |
+| `simstim demo [flags]` | Try the launcher with sample data (nothing connects anywhere). [Reference](../reference/cli/demo.md) |
+| `simstim doctor [flags]` | Check this machine and its terminal. [Reference](../reference/cli/doctor.md) |
+| `simstim doctor keys [flags]` | Show each key as the terminal sends it, and the client's own keys. [Reference](../reference/cli/doctor_keys.md) |
+| `simstim doctor terminal [flags]` | Ask this terminal what it supports: keys, colours and more. [Reference](../reference/cli/doctor_terminal.md) |
+| `simstim events [<host>\|<host>/<session>] [flags]` | Read recent session events, or follow them as they happen. [Reference](../reference/cli/events.md) |
+| `simstim fork <host>/<session> [flags]` | Copy a sandbox into independent sessions. [Reference](../reference/cli/fork.md) |
+| `simstim forward <host>/<session> [<port>…] [flags]` | Forward chosen session ports, or one laptop port in reverse. [Reference](../reference/cli/forward.md) |
+| `simstim help [<command>] [flags]` | Show the help of a command or a topic. [Reference](../reference/cli/help.md) |
+| `simstim host [flags]` | Add, create, list, test and remove hosts. [Reference](../reference/cli/host.md) |
+| `simstim host add <name> [<ssh-target>] [flags]` | Connect a host: check it, install the helper, prepare it. [Reference](../reference/cli/host_add.md) |
+| `simstim host alerts <host> [flags]` | Show where a host sends alerts, and the last deliveries. [Reference](../reference/cli/host_alerts.md) |
+| `simstim host alerts log <host> [flags]` | Show the host's last alert deliveries, and why any were not sent. [Reference](../reference/cli/host_alerts_log.md) |
+| `simstim host alerts off <host> [flags]` | Turn alerts off on a host: remove its alerts file. [Reference](../reference/cli/host_alerts_off.md) |
+| `simstim host alerts set <host> [flags]` | Choose where a host sends alerts, and which ones. [Reference](../reference/cli/host_alerts_set.md) |
+| `simstim host alerts test <host> [flags]` | Send a test alert to every destination now, and say what each did. [Reference](../reference/cli/host_alerts_test.md) |
+| `simstim host create <provider> [<name>] [flags]` | Make a host with lima, docker or e2b, and connect it. [Reference](../reference/cli/host_create.md) |
+| `simstim host default [<host>] [flags]` | Show or choose the default host for new sessions. [Reference](../reference/cli/host_default.md) |
+| `simstim host doctor <host> [flags]` | Check a host's setup, and with `--fix` fix what it can. [Reference](../reference/cli/host_doctor.md) |
+| `simstim host invite <name> [flags]` | Make a public invite for a machine to prepare itself. [Reference](../reference/cli/host_invite.md) |
+| `simstim host join [flags]` | Prepare this machine from a laptop invite on standard input. [Reference](../reference/cli/host_join.md) |
+| `simstim host leave [flags]` | Undo this machine's original root-owned join ledger. [Reference](../reference/cli/host_leave.md) |
+| `simstim host ls [flags]` | List hosts. [Reference](../reference/cli/host_ls.md) |
+| `simstim host prepare <host> [flags]` | Probe a host, prepare its runtime and test its sandbox wall. [Reference](../reference/cli/host_prepare.md) |
+| `simstim host rekey <host> [flags]` | Replace a host's pinned host key, after you confirm. [Reference](../reference/cli/host_rekey.md) |
+| `simstim host restore <host> [flags]` | Start again the sessions that a host restart stopped. [Reference](../reference/cli/host_restore.md) |
+| `simstim host rm <host> [flags]` | Forget a host, or delete a created machine. [Reference](../reference/cli/host_rm.md) |
+| `simstim host set <host> <key>=<value>... [flags]` | Change a host's settings, such as idle or tier. [Reference](../reference/cli/host_set.md) |
+| `simstim host show <host> [flags]` | Describe a host. [Reference](../reference/cli/host_show.md) |
+| `simstim host start <host> [flags]` | Start the host through its provider or provider script. [Reference](../reference/cli/host_start.md) |
+| `simstim host status <host> [flags]` | Ask the provider or provider script whether the host is running. [Reference](../reference/cli/host_status.md) |
+| `simstim host stop <host> [flags]` | Stop the host through its provider or provider script. [Reference](../reference/cli/host_stop.md) |
+| `simstim host test <host> [flags]` | Check that a host answers, and how fast. [Reference](../reference/cli/host_test.md) |
+| `simstim host upgrade <host> [flags]` | Install this client's helper on a host. [Reference](../reference/cli/host_upgrade.md) |
+| `simstim image [flags]` | List, pull, save and remove microvm root images. [Reference](../reference/cli/image.md) |
+| `simstim image ls [<host>] [flags]` | List a host's prepared images. [Reference](../reference/cli/image_ls.md) |
+| `simstim image pull <ref> <host> [flags]` | Pin an OCI image on this laptop and prepare it on a host. [Reference](../reference/cli/image_pull.md) |
+| `simstim image rm <digest> <host> [flags]` | Remove an image that no session uses. [Reference](../reference/cli/image_rm.md) |
+| `simstim image save <host>/<session> <ref> [flags]` | Save a running microvm's system changes as an image on its host. [Reference](../reference/cli/image_save.md) |
+| `simstim ls [<host>] [flags]` | List sessions on every host, or on one. [Reference](../reference/cli/ls.md) |
+| `simstim new [<host>\|-] [-- <command>…] [flags]` | Start a session on a host, and attach to it. [Reference](../reference/cli/new.md) |
+| `simstim policy [flags]` | Read and change sandbox policy at any layer. [Reference](../reference/cli/policy.md) |
+| `simstim policy allow [net] [<target>] [flags]` | Add an allow rule at one policy layer. [Reference](../reference/cli/policy_allow.md) |
+| `simstim policy apply [flags]` | Preview and apply current policy files to running sandboxes. [Reference](../reference/cli/policy_apply.md) |
+| `simstim policy check <target> [flags]` | Explain which rule and layer decides a destination. [Reference](../reference/cli/policy_check.md) |
+| `simstim policy deny [net] <target> [flags]` | Add an deny rule at one policy layer. [Reference](../reference/cli/policy_deny.md) |
+| `simstim policy edit [flags]` | Edit one policy file, check it and preview its live changes. [Reference](../reference/cli/policy_edit.md) |
+| `simstim policy learn <host>/<session> [flags]` | Turn selected observed network destinations into policy rules. [Reference](../reference/cli/policy_learn.md) |
+| `simstim policy lockdown [flags]` | Pause session allowances and refuse unknown network destinations. [Reference](../reference/cli/policy_lockdown.md) |
+| `simstim policy log --in <host>/<session> [flags]` | Read one session's network decisions. [Reference](../reference/cli/policy_log.md) |
+| `simstim policy ls [flags]` | Show the merged policy and each value's layer. [Reference](../reference/cli/policy_ls.md) |
+| `simstim policy refuse <request-ID> [flags]` | Refuse one held network request by its opaque ID. [Reference](../reference/cli/policy_refuse.md) |
+| `simstim policy rm <id or target> [flags]` | Remove a rule from one policy layer. [Reference](../reference/cli/policy_rm.md) |
+| `simstim ports <host>/<session> [flags]` | List the TCP ports a session's processes listen on. [Reference](../reference/cli/ports.md) |
+| `simstim pull <host>/<session> [flags]` | Bring a session's branch into the git repository you are in. [Reference](../reference/cli/pull.md) |
+| `simstim rename <host>/<session> <name> [flags]` | Rename a session. [Reference](../reference/cli/rename.md) |
+| `simstim resume <host>/<session> [flags]` | Start a session's agent again after it ended, and attach to it. [Reference](../reference/cli/resume.md) |
+| `simstim rewind <host>/<session> [<n>] [flags]` | List disk checkpoints or return to one. [Reference](../reference/cli/rewind.md) |
+| `simstim rm [<host>/<session>\|-] [flags]` | Delete a session, after a question. [Reference](../reference/cli/rm.md) |
+| `simstim send <host>/<session> <text> [flags]` | Type text into a session without attaching, then press Enter. [Reference](../reference/cli/send.md) |
+| `simstim setup [flags]` | Set up step by step: a host, its agents, and their logins. [Reference](../reference/cli/setup.md) |
+| `simstim shell <host>/<session> [flags]` | Open a shell beside a session. [Reference](../reference/cli/shell.md) |
+| `simstim show [<host>/<session>\|-] [flags]` | Describe one session: its agent, state, folder and the command that attaches to it. [Reference](../reference/cli/show.md) |
+| `simstim ssh-config [flags]` | Prepare the local SSH configuration for sandbox tools. [Reference](../reference/cli/ssh-config.md) |
+| `simstim stop <host>/<session> [flags]` | Stop a sandbox and keep its work and conversation. [Reference](../reference/cli/stop.md) |
+| `simstim version [flags]` | Print the version. [Reference](../reference/cli/version.md) |
+
+The table has one row for each current command. `--no-input`, `--no-color`,
+`--debug` and `--debug-file` apply throughout the tree. `SIMSTIM_NO_INPUT` and
+`NO_COLOR` turn questions or colour off too: with input off, a question that
+needs an answer fails with exit code 4, and names the flag that answers it
+([CLI spec, section 6](cli-spec.md#6-prompts-pickers-and-input-c4)). The
+command reference lists their flags and the kept aliases. Hidden old forms warn
+and are not offered by completion.
+
+**Flags** mean one thing everywhere ([the CLI spec, section 10](cli-spec.md#10-flags-c6)). A list takes the flag again or commas, and a size takes a unit. An old form still works for two releases or 12 months, whichever is later, and prints one warning on stderr.
 
 **Exit codes** follow [the CLI spec, section 5](cli-spec.md#5-exit-codes-c2). `simstim help exit-codes` prints them:
 
@@ -646,6 +710,8 @@ labels = { provider = "homelab" }
 # provider = { script = "~/.config/simstim/providers/gcp.sh" }
 ```
 
+`simstim config check` finds the mistakes in both files ([CLI spec, section 13](cli-spec.md#13-config-check-c9)). A `config.toml` that does not decode, or cannot be read, stops no command: each one prints one warning with the line, and uses the defaults. The launcher shows the warning as a notice. After an edit in its settings editor that breaks the file, the launcher keeps the settings it had. A `hosts.toml` that does not decode stops each command that reads it, with exit code 2.
+
 ## 8. Not built yet
 
 These parts of the spec are planned, and are not in the current build:
@@ -657,3 +723,17 @@ These parts of the spec are planned, and are not in the current build:
 - editing a host from host details.
 
 Parts of the exit codes are not built yet either. A prompt with input off, such as `host destroy` in a script, reads no answer as no and exits with 130, not 4. Task C4 of [the CLI plan](cli-plan.md) builds that. `exec` and its exit codes come with task P1.13 of [the isolation plan](isolation-plan.md). Until that plan builds policies and tiers, no command exits with 5.
+
+### Held network requests
+
+The policy sheet reads held network requests on its original accepted session
+connection. It keeps the complete bounded snapshot and draws held rows before
+ordinary rules, in yellow, with their opaque IDs. Matching masked labels never
+merge rows. Selection follows an unchanged ID across a refreshed row order.
+A zero-waiter request keeps its original deadline and says it waits for a retry.
+
+On a held row, `x` refuses the selected opaque request and `r` refreshes the
+complete snapshot. Delete cannot remove an ordinary rule through a held row.
+A failed or stale refresh retains visible stale state and blocks actions.
+Closing the sheet or changing its connection retires queued work; a late reply
+cannot replace another sheet's state. Older helpers supply no invented list.

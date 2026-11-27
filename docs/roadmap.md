@@ -1,6 +1,6 @@
 # Roadmap
 
-**Status:** accepted at Gate 1, 15 October 2026. It replaces the scope lists of the first plan, which is kept as [history](contributing/history.md).
+**Status:** accepted at Gate 1, 15 October 2026. The isolation and CLI plans are tracked task by task in [progress](contributing/progress.md). It replaces the scope lists of the first plan, which is kept as [history](contributing/history.md).
 
 Every candidate feature is scored from the evidence in the research notes:
 
