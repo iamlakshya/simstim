@@ -75,6 +75,14 @@ func (s *Server) writeControlPayloadOwned(ctx context.Context, writer *proto.Wri
 		return errors.New("egress control frame was not delivered")
 	}
 	if err := stream.Flush(ctx); err != nil {
+		if errors.Is(err, context.Canceled) {
+			drainCtx, drainCancel := context.WithTimeout(context.WithoutCancel(ctx), 200*time.Millisecond)
+			drainErr := stream.Flush(drainCtx)
+			drainCancel()
+			if drainErr == nil {
+				return nil
+			}
+		}
 		_ = s.sess.Close()
 		return errors.New("egress control frame was not delivered")
 	}
