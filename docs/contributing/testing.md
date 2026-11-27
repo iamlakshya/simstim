@@ -285,7 +285,13 @@ The attach pump has benchmarks at each step a byte takes: the host's output ring
 
 Set `BENCH_OUTPUT_DIR` to a new directory below an existing writable parent to choose where the evidence stays. An existing path, a file or a symbolic link is refused. Without it, the check makes a new directory under `build/bench`. It keeps the tool and test binaries, their build information and hashes, raw samples, tables, compiler output and exit code on success and failure. Only its temporary base checkout is removed. When the command runs with a disposable home, choose an evidence directory outside that home and its temporary root.
 
-Nested benchmark cases are compared by their full names. Samples with the same case name must have the same package, file configuration and runtime CPU count on both sides. Conflicting identities stop the comparison, so unrelated cases cannot hide a slowdown. All six benchmark packages must build on both sides before sampling starts. A build failure prints the compiler output and stops the check. A missing binary, or one that cannot be executed, stops it too. The confirmation matches each part of a nested benchmark name. It keeps every slow case, including names with punctuation. One noisy round then does not fail the check, but a real slowdown does. CI runs it on every pull request against the base branch, with a 15 % limit for the noisier runners.
+Nested benchmark cases are compared by their full names. Samples with the same case name must have the same package, file configuration and runtime CPU count on both sides. Conflicting identities stop the comparison, so unrelated cases cannot hide a slowdown. All six benchmark packages must build on both sides before sampling starts. A build failure prints the compiler output and stops the check. A missing binary, or one that cannot be executed, stops it too. A benchmark failure during sampling stops the check and prints the failing package, the last lines of its output and a `Try:` hint, while keeping the full output in the evidence directory. The confirmation matches each part of a nested benchmark name. It keeps every slow case, including names with punctuation. One noisy round then does not fail the check, but a real slowdown does. CI runs it on every pull request against the base branch, with a 15 % limit for the noisier runners.
+
+`BenchmarkNoneKeyToPTY1000` in `internal/host` spawns live Linux sessions rather than measuring the attach pump in isolation. It skips by default so `just bench` stays fast and comparable against `origin/main`. Set `BENCH_NONE_KEY_TO_PTY=1` to run it explicitly on Linux after the runtime fixtures pass:
+
+```sh
+BENCH_NONE_KEY_TO_PTY=1 go test -tags="$(sh scripts/go-build-tags.sh)" -run '^$' -bench '^BenchmarkNoneKeyToPTY1000$' ./internal/host
+```
 
 Numbers on an Apple silicon laptop, 15 October 2026, per 32 KiB of agent output:
 

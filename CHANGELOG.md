@@ -6,6 +6,8 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 - Wire the image command group, fix CLI help, completion, JSON/stderr framing, guided setup lock release, session ID lookup, host-side `git-upload-pack` config isolation, `ssh` option cache keying, baseline host-key refusal, host-save conflict checks, and Linux systemd ≥ 254 user-manager and `supervise` startup checks; regenerate CLI reference docs and update `internal/cli` tests for the isolated runtime.
 
+- `scripts/bench.sh` now reports failing benchmark packages with the last lines of their output, a `Try:` hint and saved failure logs in the evidence directory. The Linux live-holder benchmark `BenchmarkNoneKeyToPTY1000` now runs only when `BENCH_NONE_KEY_TO_PTY=1` is set.
+
 - The guest builder now reads the locked Debian security suite as well as the main suite, at the same snapshot time, and pins both signed `InRelease` files (`security_inrelease_sha256` in `guest/supply.lock`). Before, apt refused `libssl-dev`, because the pinned image already carries a newer `libssl3t64` from a security update.
 
 - `just repro` runs from a plain checkout: it no longer hashes the removed feed snapshot, Go runs the toolchain that `go.mod` pins and checks the modules against `go.sum`, the image pairs keep their modes when copied, and each pass starts without the previous pass's outputs and with an empty Zig cache.

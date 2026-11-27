@@ -80,10 +80,14 @@ func noneBenchmarkAttachV1(b *testing.B, id string) (*bufio.Reader, *proto.Write
 	return reader, w
 }
 
-// Run explicitly after the runtime fixtures pass. Each timed sample sends
-// 1,000 keys through the actual holder path and waits for each PTY echo.
-// The two results are evidence to collect, never a source-level latency claim.
+// Run explicitly after the runtime fixtures pass by setting
+// BENCH_NONE_KEY_TO_PTY=1. Each timed sample sends 1,000 keys through the
+// actual holder path and waits for each PTY echo. The two results are evidence
+// to collect, never a source-level latency claim.
 func BenchmarkNoneKeyToPTY1000(b *testing.B) {
+	if os.Getenv("BENCH_NONE_KEY_TO_PTY") != "1" {
+		b.Skip("set BENCH_NONE_KEY_TO_PTY=1 to run this live holder benchmark")
+	}
 	for _, kind := range []string{"legacy", "supervisor"} {
 		b.Run(kind, func(b *testing.B) {
 			h := hosttest.New(b)
