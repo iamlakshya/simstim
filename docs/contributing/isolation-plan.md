@@ -1,6 +1,6 @@
 # Isolated sessions: implementation plan
 
-**Status:** proposed, 10 November 2026. **Spec:** [isolation-spec.md](isolation-spec.md). **Decision:** [0029](decisions/0029-a-sandbox-per-session.md). **Research:** [isolation](../research/isolation.md), [locations](../research/locations.md), [build facts](../research/build-facts.md). **Issue:** [#100](https://github.com/iamlakshya/simstim/issues/100).
+**Status:** proposed, 10 November 2026. **Progress:** [each task](progress.md). **Spec:** [isolation-spec.md](isolation-spec.md). **Decision:** [0029](decisions/0029-a-sandbox-per-session.md). **Research:** [isolation](../research/isolation.md), [locations](../research/locations.md), [build facts](../research/build-facts.md). **Issue:** [#100](https://github.com/iamlakshya/simstim/issues/100).
 
 This plan says in what order to build [the spec](isolation-spec.md), one pull request at a time. A coding agent builds each task under [AGENTS.md](../../AGENTS.md), [CONTRIBUTING.md](../../CONTRIBUTING.md) and [testing](testing.md). The spec says what each part does. This plan says which files each task changes, what proves it done, and which open questions it uses.
 

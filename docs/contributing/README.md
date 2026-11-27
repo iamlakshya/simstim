@@ -29,6 +29,7 @@ How the project is built, tested, documented and released. New here? Read [CONTR
 | [Isolated sessions: plan](isolation-plan.md) | The tasks that build the spec, in order, one pull request each, with acceptance criteria and tests, the goal that says when the design is done, and a table that traces each task to its spec and research (proposed) |
 | [The command line: spec](cli-spec.md) | What each task of the CLI plan builds: the grammar, errors and exit codes, prompts, machine output, help, verbs, flags, host commands, agent logins, config check, completion and docs for agents (proposed) |
 | [The command line: plan](cli-plan.md) | The tasks that make the command line easy to guess and hard to misuse: errors, exit codes, prompts, help, session verbs, flags, host commands and completion, under record 0033 |
+| [Progress of the plans](progress.md) | The state of each task of the isolation and CLI plans on the feature branch, and the current focus |
 | [Decisions](decisions/README.md) | Every design decision, with its reasons |
 | [Research](../research/README.md) | The evidence behind the design |
 | [History](history.md) | The first plan, as built |

@@ -1,6 +1,6 @@
 # The command line: implementation plan
 
-**Status:** proposed, 10 November 2026. **Spec:** [cli-spec.md](cli-spec.md). **Research:** [the CLI study](../research/cli-dx.md). **Decision:** [0033](decisions/0033-one-command-grammar.md).
+**Status:** proposed, 10 November 2026. **Progress:** [each task](progress.md). **Spec:** [cli-spec.md](cli-spec.md). **Research:** [the CLI study](../research/cli-dx.md). **Decision:** [0033](decisions/0033-one-command-grammar.md).
 
 This plan makes the command line easy to guess, hard to misuse and consistent. [The CLI study](../research/cli-dx.md) found the problems and proposes the grammar G1 to G14 and a command map. Record [0033](decisions/0033-one-command-grammar.md) proposes the grammar for the owner's yes. [The CLI spec](cli-spec.md) states each behaviour, input, error and test. This plan says which files each task changes, what proves it done, and in what order to build the tasks. Where the two differ, the spec wins, and the pull request corrects this plan.
 

@@ -181,7 +181,7 @@ export PATH="$PWD/.tools/bin:$PATH"
 just test lint
 ```
 
-Useful starting points: [good first issues](https://github.com/iamlakshya/simstim/labels/good%20first%20issue), [agent support](internal/agents), [contributor docs](docs/contributing/README.md), and the [roadmap](docs/roadmap.md). Please discuss large changes before implementing them.
+Useful starting points: [good first issues](https://github.com/iamlakshya/simstim/labels/good%20first%20issue), [agent support](internal/agents), [contributor docs](docs/contributing/README.md), and the [roadmap](docs/roadmap.md). The work on isolated sessions is tracked task by task in [progress](docs/contributing/progress.md). Please discuss large changes before implementing them.
 
 Read the [Code of Conduct](CODE_OF_CONDUCT.md), [governance](GOVERNANCE.md) and [maintainer list](MAINTAINERS.md). Contributions use the same licence as the project; no CLA or sign-off trailer is required.
 
