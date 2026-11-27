@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -114,6 +115,7 @@ func servePhysicalHTTP2WithHooks(ctx context.Context, actual *tls.Conn, handler 
 		ReadHeaderTimeout: handshakeTimeout,
 		MaxHeaderBytes:    maxHTTPHeaderBytes + physicalH2TokenOverhead,
 		HTTP2:             &http.HTTP2Config{MaxConcurrentStreams: maxActiveFlows, MaxReadFrameSize: physicalH2OriginalFrameLimit, MaxDecoderHeaderTableSize: physicalH2OriginalTableLimit},
+		ErrorLog:          slog.NewLogLogger(slog.DiscardHandler, slog.LevelError),
 		Handler:           conn.deliveryHandler(handler),
 	}
 	stop := context.AfterFunc(ctx, func() { _ = conn.Close() })

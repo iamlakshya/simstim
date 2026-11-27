@@ -67,9 +67,20 @@ func serveHTTPConnection(ctx context.Context, conn net.Conn, config *tls.Config,
 		serverConfig.NextProtos = append([]string(nil), serverConfig.NextProtos...)
 	}
 	listener := &connListener{conn: conn, done: make(chan struct{})}
-	var requests sync.WaitGroup
+	var (
+		requestsMu     sync.Mutex
+		requestsClosed bool
+		requests       sync.WaitGroup
+		connDoneOnce   sync.Once
+	)
 	server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestsMu.Lock()
+		if requestsClosed {
+			requestsMu.Unlock()
+			return
+		}
 		requests.Add(1)
+		requestsMu.Unlock()
 		defer requests.Done()
 		handler.ServeHTTP(w, r)
 	}), TLSConfig: serverConfig, ReadHeaderTimeout: handshakeTimeout,
@@ -77,17 +88,26 @@ func serveHTTPConnection(ctx context.Context, conn net.Conn, config *tls.Config,
 		HTTP2:          &http.HTTP2Config{MaxConcurrentStreams: maxActiveFlows},
 		BaseContext:    func(net.Listener) context.Context { return ctx },
 		ConnState: func(_ net.Conn, state http.ConnState) {
+			if state == http.StateNew {
+				requests.Add(1)
+			}
 			if idle != nil && (state == http.StateIdle || state == http.StateClosed) {
 				idle()
 			}
 			if state == http.StateClosed || state == http.StateHijacked {
-				_ = listener.Close()
+				connDoneOnce.Do(func() {
+					_ = listener.Close()
+					requests.Done()
+				})
 			}
 		},
 	}
 	stop := context.AfterFunc(ctx, func() { closeHTTPConnection(conn); _ = server.Close(); _ = listener.Close() })
 	defer stop()
 	_ = server.Serve(listener)
+	requestsMu.Lock()
+	requestsClosed = true
+	requestsMu.Unlock()
 	requests.Wait()
 	_ = server.Close()
 }
@@ -103,6 +123,8 @@ type http1Turn struct {
 	stopRead    func()
 	finishAudit func()
 	refusal     string
+	status      int
+	rule        string
 	method      string
 	target      string
 	original    *requestSecretRawView
@@ -156,9 +178,9 @@ func (s *Server) serveHTTP1(ctx context.Context, conn net.Conn, reader io.Reader
 		defer close(guardDone)
 		defer guardEnd.Close()
 		stream := bufio.NewReaderSize(reader, maxHTTPHeaderBytes)
-		reject := func(message string, original *http.Request) {
+		reject := func(message string, status int, rule string, original *http.Request) {
 			turn := newTurn()
-			turn.refusal = message
+			turn.refusal, turn.status, turn.rule = message, status, rule
 			if original != nil {
 				turn.method, turn.target = original.Method, original.RequestURI
 			}
@@ -186,29 +208,33 @@ func (s *Server) serveHTTP1(ctx context.Context, conn net.Conn, reader io.Reader
 				_ = conn.SetReadDeadline(time.Time{})
 				if err != nil {
 					if !errors.Is(err, io.EOF) && !errors.Is(err, net.ErrClosed) {
-						reject(brand.Name+": malformed HTTP request. Try: send one complete request header.", nil)
+						reject(brand.Name+": malformed HTTP request. Try: send one complete request header.", http.StatusBadRequest, "", nil)
 					}
 					return
 				}
 				if len(raw["Host"]) > 1 || validateRequestFraming(parsed, raw) != nil {
-					reject(brand.Name+": invalid HTTP framing. Try: send one unambiguous request.", parsed)
+					reject(brand.Name+": invalid HTTP framing. Try: send one unambiguous request.", http.StatusBadRequest, "", parsed)
 					return
 				}
 				// Preserve the original Host before Request.Write canonicalises it.
 				if len(raw["Host"]) != 1 {
-					reject(brand.Name+": HTTP request has no Host. Try: send one authority.", parsed)
+					reject(brand.Name+": HTTP request has no Host. Try: send one authority.", http.StatusBadRequest, "", parsed)
 					return
 				}
 				host, port, err := parseHostHeader(raw["Host"][0], hdr.Port)
 				if err != nil || host != hdr.Host || port != hdr.Port {
-					reject(brand.Name+": Host differs from the tunnel. Try: use the tunnel's authority.", parsed)
+					reject(brand.Name+": Host differs from the tunnel. Try: use the tunnel's authority.", http.StatusBadRequest, "", parsed)
 					return
 				}
 				req = parsed
 			}
 			original := originalRequestSecretView(req)
 			if _, err := canonicalHTTPRequest(req, hdr, scheme); err != nil {
-				reject(brand.Name+": "+err.Error(), req)
+				status, rule := http.StatusBadRequest, ""
+				if errors.Is(err, errInvalidHTTPPath) {
+					status, rule = http.StatusForbidden, "invalid"
+				}
+				reject(brand.Name+": "+err.Error(), status, rule, req)
 				return
 			}
 			turn := newTurn()
@@ -218,12 +244,21 @@ func (s *Server) serveHTTP1(ctx context.Context, conn net.Conn, reader io.Reader
 			case <-ctx.Done():
 				return
 			}
-			if err := req.Write(guardEnd); err != nil {
-				// A completed handler can stop an unfinished upload without
-				// making its refusal/response lose the last forwarded bytes.
-				// An invalid body also needs a read-side error at the standard
-				// server, while its response write side stays open for a 502.
-				turn.stopRead()
+			cw := &countingWriter{w: guardEnd}
+			if err := req.Write(cw); err != nil {
+				// For chunked uploads whose headers/chunks were already flushed
+				// at a chunk boundary, inject a malformed chunk-size line so the
+				// standard H1 server fails body decoding without tripping
+				// connReader's connection-death context cancellation.
+				signalled := false
+				if len(req.TransferEncoding) > 0 && cw.n.Load() > 0 {
+					if _, writeErr := io.WriteString(guardEnd, "!\r\n"); writeErr == nil {
+						signalled = true
+					}
+				}
+				if !signalled {
+					turn.stopRead()
+				}
 				select {
 				case <-turn.done:
 				case <-ctx.Done():
@@ -269,7 +304,10 @@ func (s *Server) serveHTTP1(ctx context.Context, conn net.Conn, reader io.Reader
 			activeMu.Lock()
 			active = turn
 			activeMu.Unlock()
-			summary = s.proxyHTTPRequest(w, req, hdr, scheme, turn)
+			got := s.proxyHTTPRequest(w, req, hdr, scheme, turn)
+			activeMu.Lock()
+			summary = got
+			activeMu.Unlock()
 		case <-ctx.Done():
 		}
 	}), func() {
@@ -293,8 +331,11 @@ func (s *Server) serveHTTP1(ctx context.Context, conn net.Conn, reader io.Reader
 	_ = conn.Close()
 	_ = guardEnd.Close()
 	<-guardDone
-	if summary != nil {
-		entry := summary.get()
+	activeMu.Lock()
+	got := summary
+	activeMu.Unlock()
+	if got != nil {
+		entry := got.get()
 		return &entry
 	}
 	return nil

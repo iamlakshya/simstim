@@ -141,7 +141,13 @@ func (s *Server) proxyHTTPRequest(w http.ResponseWriter, req *http.Request, hdr 
 	}()
 	if turn != nil && turn.refusal != "" {
 		entry.Method, entry.Path = turn.method, turn.target
-		entry.Status = http.StatusBadRequest
+		entry.Status = turn.status
+		if entry.Status == 0 {
+			entry.Status = http.StatusBadRequest
+		}
+		if turn.rule != "" {
+			entry.Rule = turn.rule
+		}
 		writeInspectedError(w, turn.refusal, entry.Status)
 		return result
 	}
@@ -157,8 +163,12 @@ func (s *Server) proxyHTTPRequest(w http.ResponseWriter, req *http.Request, hdr 
 	request, err := canonicalHTTPRequest(req, hdr, scheme)
 	request.via = hdr.Via
 	if err != nil {
-		writeInspectedError(w, brand.Name+": "+err.Error(), http.StatusBadRequest)
-		entry.Status = http.StatusBadRequest
+		status := http.StatusBadRequest
+		if errors.Is(err, errInvalidHTTPPath) {
+			status, entry.Rule = http.StatusForbidden, "invalid"
+		}
+		writeInspectedError(w, brand.Name+": "+err.Error(), status)
+		entry.Status = status
 		return
 	}
 	if pending, ok := req.Context().Value(pendingNetworkRefusalKey{}).(pendingNetworkRefusal); ok {
@@ -342,6 +352,7 @@ func (s *Server) proxyHTTPRequest(w http.ResponseWriter, req *http.Request, hdr 
 			p.Out.Header.Set("Accept-Encoding", "identity")
 			p.Out.Header.Del("Proxy-Authorization")
 			p.Out.Header.Del("Proxy-Connection")
+			p.Out.Header.Del("TE")
 			plan.applyHeaders(p.Out.Header)
 		},
 		FlushInterval: -1,

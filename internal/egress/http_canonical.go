@@ -13,6 +13,8 @@ import (
 
 const maxHTTPQueryBytes = 8 << 10
 
+var errInvalidHTTPPath = errors.New("invalid HTTP path. Try: use a canonical URL path")
+
 func canonicalHTTPRequest(req *http.Request, hdr StreamHeader, scheme string) (Request, error) {
 	if req.URL == nil || req.URL.User != nil || req.URL.Opaque != "" || req.URL.Fragment != "" || strings.Contains(req.RequestURI, "#") {
 		return Request{}, errors.New("invalid HTTP target. Try: use a URL without credentials or fragments")
@@ -54,7 +56,7 @@ func canonicalHTTPRequest(req *http.Request, hdr StreamHeader, scheme string) (R
 	}
 	path, err := canonicalPath(path)
 	if err != nil {
-		return Request{}, errors.New("invalid HTTP path. Try: use a canonical URL path")
+		return Request{}, errInvalidHTTPPath
 	}
 	req.URL.Scheme = scheme
 	req.URL.Host = net.JoinHostPort(hdr.Host, strconv.Itoa(hdr.Port))
