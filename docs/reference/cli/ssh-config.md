@@ -12,6 +12,13 @@ simstim ssh-config [flags]
 
 Checks the system SSH parser before writing local configuration and a pinned laptop host key. Asks before adding the generated Include to your SSH config. The SSH server runs in the client on standard input and output. It opens no listening port.
 
+## Examples
+
+```sh
+simstim ssh-config
+simstim ssh-config --remove
+```
+
 ## Flags
 
 | Flag | What it does |

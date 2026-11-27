@@ -77,7 +77,11 @@ func TestRunIsStable(t *testing.T) {
 	// 8.2), and the index groups the commands as the root help does.
 	cli, _ := filepath.Glob(filepath.Join(dir, "cli", "*.md"))
 	for _, f := range cli {
-		if b, _ := os.ReadFile(f); !strings.Contains(string(b), "\n## Examples\n\n```sh\n") {
+		fence := "\n## Examples\n\n```sh\n"
+		if filepath.Base(f) == "completion_powershell.md" {
+			fence = "\n## Examples\n\n```powershell\n"
+		}
+		if b, _ := os.ReadFile(f); !strings.Contains(string(b), fence) {
 			t.Errorf("%s has no example", filepath.Base(f))
 		}
 	}

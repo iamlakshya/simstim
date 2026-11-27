@@ -10,6 +10,14 @@ Show or choose the default host for new sessions.
 simstim host default [<host>] [flags]
 ```
 
+## Examples
+
+```sh
+simstim host default
+simstim host default my-vps
+simstim host default --clear
+```
+
 ## Flags
 
 | Flag | What it does |

@@ -23,7 +23,8 @@ func sshConfigCmd() *cobra.Command {
 		Long: "Checks the system SSH parser before writing local configuration and a pinned laptop host key.\n" +
 			"Asks before adding the generated Include to your SSH config. The SSH server runs in the\n" +
 			"client on standard input and output. It opens no listening port.",
-		Args: cobra.NoArgs,
+		Example: "  " + brand.Name + " ssh-config\n  " + brand.Name + " ssh-config --remove",
+		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) (returned error) {
 			if remove {
 				if err := client.RemoveEditorSSHConfig(cmd.Context()); err != nil {

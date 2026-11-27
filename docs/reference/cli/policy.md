@@ -12,7 +12,13 @@ simstim policy [flags]
 
 Policy has six layers, from broadest to narrowest: built-in, all sessions, host, repository, profile and session. The narrowest matching layer decides. A deny wins inside that layer. Top-level and host locks win over every layer. Lists add up; a leading ! removes an inherited item. Profiles follow repository sections. File-layer changes reach running sandboxes on reachable hosts. Other sandbox settings apply at the next start. Live held network requests appear with session policy when the helper supports them.
 
-Examples: simstim policy allow api.example.com `--repo` . simstim policy deny paste.example.net `--all` simstim policy check api.example.com `--host` box `--profile` review
+## Examples
+
+```sh
+simstim policy allow api.example.com --repo .
+simstim policy deny paste.example.net --all
+simstim policy check api.example.com --host box --profile review
+```
 
 ## Flags from the parent command
 
