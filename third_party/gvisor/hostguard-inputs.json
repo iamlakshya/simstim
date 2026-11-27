@@ -99,7 +99,7 @@
     },
     {
       "path": "runsc/cmd/sentry/sentrycmd/chroot.go",
-      "before_sha256": null,
+      "before_sha256": "da16743ad07de5bff488cbb45890966d00fb8f5ca970fd3103e66365f04ff050",
       "after_sha256": "3c3fc8d87e432d2937ce12727132d3d271ef691d46b0c283a25a2bb2e9681979",
       "mode": 420
     },

@@ -34,11 +34,13 @@ python3 scripts/build-gvisor-runtime.py /path/to/pinned-upstream /path/to/new-ou
 ```
 
 The script checks the exact clean commit before applying the patch. The build
-also checks every path's exact before hash, type and mode against
+also checks every path's exact before hash, type and execute bit against
 `hostguard-inputs.json`, rejects links and requires new source paths to be
-absent. The zero-context patch has no whitespace-only context lines. It is
-applied with `--unidiff-zero`, then every exact postimage is checked before
-Bazel starts. No fuzz, offset guess or whitespace rewrite is accepted.
+absent. Git records only the execute bit; the rest of a file's mode comes from
+the checkout's umask. The zero-context patch has no whitespace-only context
+lines. It is applied with `--unidiff-zero`, then every exact postimage is
+checked before Bazel starts. No fuzz, offset guess or whitespace rewrite is
+accepted.
 
 The build
 version suffix is the first eight digits of the patch's actual SHA-256, pinned

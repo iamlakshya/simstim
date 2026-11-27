@@ -4,6 +4,8 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ## [Unreleased]
 
+- The gVisor host patch now applies to its pinned upstream commit: it changes upstream's existing `runsc/cmd/sentry/sentrycmd/chroot.go` instead of creating it, and the build version suffix follows the new patch digest. The build compares only the execute bit that Git records, so a checkout's umask no longer fails it.
+
 - CI's required `test` job no longer waits for the native image builds, so a failed image build cannot skip the unit tests. The new `test-images` job runs the two complete release builds from the image pairs, and the `install` matrix follows it.
 
 - Fix launcher palette order, host-name casing in error toasts, quick-start folder cleanup on reopen, new-session backend settings and new-host wizard saves; fix `hosts.toml` lock waits and race-detector exit delays in local Git helpers; add missing CLI examples for `host default`, `policy` and `ssh-config`.

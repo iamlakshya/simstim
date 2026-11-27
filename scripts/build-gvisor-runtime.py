@@ -97,7 +97,9 @@ def verify_tree(source, inputs, phase):
             if target.exists():
                 raise ValueError("a new patch input already exists: " + str(name))
             continue
-        if not target.is_file() or target.stat().st_mode & 0o777 != entry["mode"]:
+        # Git records only the owner's execute bit; the rest of the mode
+        # comes from the checkout's umask, so compare just that bit.
+        if not target.is_file() or (target.stat().st_mode & 0o100) != (entry["mode"] & 0o100):
             raise ValueError("a patch input has another native type or mode: " + str(name))
         if hashlib.sha256(target.read_bytes()).hexdigest() != expected:
             raise ValueError("a patch input differs from its exact " + phase + " image: " + str(name))
