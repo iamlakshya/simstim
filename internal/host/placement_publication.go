@@ -3,6 +3,7 @@ package host
 import (
 	"context"
 	"errors"
+	"os"
 	"sync"
 	"time"
 
@@ -146,6 +147,10 @@ func (p *runtimePublication) gate(ctx context.Context, publish func() error) err
 // authority and never reacquires the control lock from inside a publication.
 // Existing gate callers retain the identical checks and publication order.
 func (p *runtimePublication) gateControl(ctx context.Context, publish func(*placementControl) error) error {
+	return p.gateControlRoot(ctx, func(control *placementControl, _ *os.Root) error { return publish(control) })
+}
+
+func (p *runtimePublication) gateControlRoot(ctx context.Context, publish func(*placementControl, *os.Root) error) error {
 	if p == nil {
 		return placementError("runtime publication has no active publisher receipt")
 	}
@@ -154,7 +159,7 @@ func (p *runtimePublication) gateControl(ctx context.Context, publish func(*plac
 	if err := p.checkCaller(); err != nil {
 		return err
 	}
-	if p == nil || p.operation == nil {
+	if p.operation == nil {
 		return placementError("runtime publication has no active publisher receipt")
 	}
 	if p.ctx.Err() != nil {
@@ -163,19 +168,19 @@ func (p *runtimePublication) gateControl(ctx context.Context, publish func(*plac
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	publishUnderControl := func(control *placementControl) error {
+	publishUnderControl := func(control *placementControl, guard *os.Root) error {
 		if p.ctx.Err() != nil {
 			return context.Cause(p.ctx)
 		}
 		if current, ok := control.Active[p.operation.token]; !ok || current != p.operation.record {
 			return placementError("runtime publication lost its exact active reservation")
 		}
-		return publish(control)
+		return publish(control, guard)
 	}
 	if p.operation.record.Kind == "auxiliary" {
-		return withAuxiliaryPlacementV1(ctx, publishUnderControl, false)
+		return withAuxiliaryPlacementRootV1(ctx, publishUnderControl, false)
 	}
-	return withPlacement(ctx, false, publishUnderControl, false)
+	return withPlacementRoot(ctx, false, publishUnderControl, false)
 }
 
 // close runs only after its caller has closed the exact owned parts/store.

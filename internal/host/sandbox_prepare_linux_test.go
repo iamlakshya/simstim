@@ -8,12 +8,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"net"
 	"os"
 	"path/filepath"
 	"runtime"
 	"slices"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -531,5 +533,61 @@ func TestSandboxPrepareLinuxUnavailableProbeAndLowDiskRefusals(t *testing.T) {
 	entries, err := os.ReadDir(paths.SessionsDir())
 	if err == nil && len(entries) != 0 {
 		t.Fatalf("expected zero leftover session directories, got %d", len(entries))
+	}
+}
+
+type fakeTrueFileInfo struct {
+	name string
+	mode fs.FileMode
+	uid  uint32
+}
+
+func (f fakeTrueFileInfo) Name() string       { return f.name }
+func (f fakeTrueFileInfo) Size() int64        { return 1 }
+func (f fakeTrueFileInfo) Mode() fs.FileMode  { return f.mode }
+func (f fakeTrueFileInfo) ModTime() time.Time { return time.Time{} }
+func (f fakeTrueFileInfo) IsDir() bool        { return f.mode.IsDir() }
+func (f fakeTrueFileInfo) Sys() any           { return &syscall.Stat_t{Uid: f.uid} }
+
+func TestValidateSandboxPrepareTrueV1(t *testing.T) {
+	if _, err := resolveSandboxPrepareTrueV1(); err != nil {
+		t.Fatalf("resolveSandboxPrepareTrueV1 on host failed: %v", err)
+	}
+
+	rootExec := fakeTrueFileInfo{name: "true", mode: 0o755, uid: 0}
+	rootLink := fakeTrueFileInfo{name: "true", mode: os.ModeSymlink | 0o777, uid: 0}
+	cases := []struct {
+		name         string
+		bin          string
+		binInfo      os.FileInfo
+		resolved     string
+		resolvedInfo os.FileInfo
+		wantOK       bool
+	}{
+		{name: "regular usr bin true", bin: "/usr/bin/true", binInfo: rootExec, resolved: "/usr/bin/true", resolvedInfo: rootExec, wantOK: true},
+		{name: "symlink to coreutils", bin: "/usr/bin/true", binInfo: rootLink, resolved: "/usr/bin/coreutils", resolvedInfo: rootExec, wantOK: true},
+		{name: "symlink to busybox", bin: "/bin/true", binInfo: rootLink, resolved: "/bin/busybox", resolvedInfo: rootExec, wantOK: true},
+		{name: "symlink to gnu-true", bin: "/usr/bin/true", binInfo: rootLink, resolved: "/usr/lib/cargo/bin/coreutils/gnu-true", resolvedInfo: rootExec, wantOK: true},
+		{name: "symlink to nix store", bin: "/usr/bin/true", binInfo: rootLink, resolved: "/nix/store/abc-coreutils/bin/true", resolvedInfo: rootExec, wantOK: true},
+		{name: "untrusted directory", bin: "/usr/bin/true", binInfo: rootLink, resolved: "/tmp/true", resolvedInfo: rootExec, wantOK: false},
+		{name: "unexpected basename", bin: "/usr/bin/true", binInfo: rootLink, resolved: "/usr/bin/sh", resolvedInfo: rootExec, wantOK: false},
+		{name: "bare -true suffix", bin: "/usr/bin/true", binInfo: rootLink, resolved: "/usr/bin/-true", resolvedInfo: rootExec, wantOK: false},
+		{name: "non-root symlink", bin: "/usr/bin/true", binInfo: fakeTrueFileInfo{name: "true", mode: os.ModeSymlink | 0o777, uid: 1000}, resolved: "/usr/bin/coreutils", resolvedInfo: rootExec, wantOK: false},
+		{name: "non-root resolved", bin: "/usr/bin/true", binInfo: rootLink, resolved: "/usr/bin/coreutils", resolvedInfo: fakeTrueFileInfo{name: "coreutils", mode: 0o755, uid: 1000}, wantOK: false},
+		{name: "group-writable resolved", bin: "/usr/bin/true", binInfo: rootLink, resolved: "/usr/bin/coreutils", resolvedInfo: fakeTrueFileInfo{name: "coreutils", mode: 0o775, uid: 0}, wantOK: false},
+		{name: "world-writable bin", bin: "/usr/bin/true", binInfo: fakeTrueFileInfo{name: "true", mode: 0o757, uid: 0}, resolved: "/usr/bin/true", resolvedInfo: rootExec, wantOK: false},
+		{name: "non-executable resolved", bin: "/usr/bin/true", binInfo: rootLink, resolved: "/usr/bin/coreutils", resolvedInfo: fakeTrueFileInfo{name: "coreutils", mode: 0o644, uid: 0}, wantOK: false},
+		{name: "symlink resolved info", bin: "/usr/bin/true", binInfo: rootLink, resolved: "/usr/bin/coreutils", resolvedInfo: rootLink, wantOK: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := validateSandboxPrepareTrueV1(tc.bin, tc.binInfo, tc.resolved, tc.resolvedInfo)
+			if tc.wantOK && err != nil {
+				t.Fatalf("expected acceptance, got %v", err)
+			}
+			if !tc.wantOK && err == nil {
+				t.Fatal("expected refusal, got nil")
+			}
+		})
 	}
 }

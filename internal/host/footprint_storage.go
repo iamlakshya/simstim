@@ -12,11 +12,6 @@ import (
 	"github.com/iamlakshya/simstim/internal/paths"
 )
 
-type createdStorageDirV1 struct {
-	path string
-	info os.FileInfo
-}
-
 func recordStorageDirV1(control *placementControl, guard *os.Root, path string, info os.FileInfo) error {
 	ref := refOf(info)
 	if !ref.validDirectory() {
@@ -55,31 +50,6 @@ func recordStorageDirV1(control *placementControl, guard *os.Root, path string, 
 		return writePlacementControl(guard, *control)
 	}
 	return placementError("the native storage producer created an unknown parent role")
-}
-
-func (p *runtimePublication) recordStorageFootprintsV1(created []createdStorageDirV1) error {
-	if len(created) == 0 {
-		return nil
-	}
-	p.activity.Lock()
-	defer p.activity.Unlock()
-	if err := p.checkCaller(); err != nil {
-		return err
-	}
-	return withPlacementRoot(p.ctx, false, func(control *placementControl, guard *os.Root) error {
-		if p.ctx.Err() != nil {
-			return context.Cause(p.ctx)
-		}
-		if current, ok := control.Active[p.operation.token]; !ok || current != p.operation.record {
-			return placementError("the storage directory producer lost its original publisher")
-		}
-		for _, entry := range created {
-			if err := recordStorageDirV1(control, guard, entry.path, entry.info); err != nil {
-				return err
-			}
-		}
-		return nil
-	}, true)
 }
 
 // prepareStorageFootprintsV1 is an actual native directory producer under the

@@ -113,12 +113,9 @@ func TestPurgeScopeActualParentDeathKeepsBootstrapAliveUntilSettlementV3(t *test
 	pollEINTR := func(polls []unix.PollFd, ms int) (int, error) {
 		deadline := time.Now().Add(time.Duration(ms) * time.Millisecond)
 		for {
-			rem := int(time.Until(deadline).Milliseconds())
-			if rem < 1 {
-				rem = 1
-			}
+			rem := max(int(time.Until(deadline).Milliseconds()), 0)
 			n, err := unix.Poll(polls, rem)
-			if errors.Is(err, unix.EINTR) && time.Now().Before(deadline) {
+			if errors.Is(err, unix.EINTR) {
 				continue
 			}
 			return n, err

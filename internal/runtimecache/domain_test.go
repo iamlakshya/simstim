@@ -227,3 +227,14 @@ func TestRuntimeHostConstructorsConvergeOnOneBoundSentinel(t *testing.T) {
 		store.Close()
 	}
 }
+
+func TestOpenHostCreatedRequiresObserver(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "store")
+	if store, err := OpenHostCreated(t.Context(), dir, runtimeDomainFixture(), runtimeDomainGate, nil); err == nil {
+		store.Close()
+		t.Fatal("OpenHostCreated accepted nil observer")
+	}
+	if _, err := os.Lstat(dir); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("OpenHostCreated with nil observer created directory: %v", err)
+	}
+}

@@ -1,17 +1,24 @@
 package host
 
-import "context"
+import (
+	"context"
+	"os"
+)
 
 // withAuxiliaryPlacementV1 admits only the original private purge owner when
 // drained. The concrete predicate checks that owner's actual control record,
 // source and native counterpart under this SAME lock. Ordinary callers retain
 // the normal drain refusal; a kind, token or manifest grants no exception.
 func withAuxiliaryPlacementV1(ctx context.Context, change func(*placementControl) error, write bool) error {
-	return withPlacement(ctx, true, func(control *placementControl) error {
+	return withAuxiliaryPlacementRootV1(ctx, func(control *placementControl, _ *os.Root) error { return change(control) }, write)
+}
+
+func withAuxiliaryPlacementRootV1(ctx context.Context, change func(*placementControl, *os.Root) error, write bool) error {
+	return withPlacementRoot(ctx, true, func(control *placementControl, guard *os.Root) error {
 		if err := checkPurgeAuxiliaryContextControlV1(ctx, control); err != nil {
 			return err
 		}
-		return change(control)
+		return change(control, guard)
 	}, write)
 }
 

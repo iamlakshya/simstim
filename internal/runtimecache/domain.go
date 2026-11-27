@@ -13,12 +13,19 @@ import (
 // final publication gate. Binding precedes creation of its runtime children.
 // An unbound populated cache is retained and requires explicit owner review.
 func OpenHost(ctx context.Context, dir string, domain cachefs.Domain, gate PublicationGate) (*Store, error) {
-	return OpenHostCreated(ctx, dir, domain, gate, nil)
+	return openHost(ctx, dir, domain, gate, nil)
 }
 
 // OpenHostCreated opens or creates a host-bound store like OpenHost, invoking
 // created for each directory newly created during the bind and child setup.
 func OpenHostCreated(ctx context.Context, dir string, domain cachefs.Domain, gate PublicationGate, created func(string, os.FileInfo) error) (*Store, error) {
+	if created == nil {
+		return nil, runtimeDomainError("host runtime storage creation requires its original observer")
+	}
+	return openHost(ctx, dir, domain, gate, created)
+}
+
+func openHost(ctx context.Context, dir string, domain cachefs.Domain, gate PublicationGate, created func(string, os.FileInfo) error) (*Store, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}

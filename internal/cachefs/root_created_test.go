@@ -52,3 +52,22 @@ func TestCreatedRootObserverStopsBeforeTheNextChild(t *testing.T) {
 		t.Fatal("factory created a later child after its producer ended", err)
 	}
 }
+
+func TestCreatedChildRequiresObserver(t *testing.T) {
+	base, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	root, err := OpenPrivateRoot(filepath.Join(base, "root"), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer root.Close()
+	if child, err := OpenPrivateChildCreated(root, "child", nil); err == nil {
+		child.Close()
+		t.Fatal("OpenPrivateChildCreated accepted nil observer")
+	}
+	if _, err := root.Lstat("child"); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("nil observer still created child directory: %v", err)
+	}
+}

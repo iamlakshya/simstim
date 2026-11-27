@@ -117,6 +117,9 @@ func OpenPrivateChild(root *os.Root, leaf string, create bool) (*os.Root, error)
 // OpenPrivateChildCreated opens or creates one owned private child below a
 // checked root, calling created only when this call itself created leaf.
 func OpenPrivateChildCreated(root *os.Root, leaf string, created func(os.FileInfo) error) (*os.Root, error) {
+	if created == nil {
+		return nil, errors.New("child directory creation requires its original observer")
+	}
 	return openPrivateChild(root, leaf, true, created)
 }
 

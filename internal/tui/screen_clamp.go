@@ -225,7 +225,7 @@ func clampEmulatorCSI(ctx context.Context, emu *vt.Emulator, cols, rows int) {
 	// Character edits can copy one whole row. Charge those actual bounds,
 	// rather than only their numeric parameter, against the shared budget.
 	for _, cmd := range []int{'S', 'T', 'L', 'M', '@', 'P', 'X'} {
-		limit, cost := rows, cols*rows
+		limit, cost := rows, min(cols*rows, maxScreenWorkBudget)
 		if cmd == '@' || cmd == 'P' || cmd == 'X' {
 			limit, cost = cols, cols
 		}

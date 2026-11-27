@@ -52,7 +52,7 @@ func (b *bridge) prepareWalledUpload(begin proto.UploadBegin) (*upload, int64, e
 		_ = line.c.Close()
 		return nil, 0, err
 	}
-	if begin.Path == "" {
+	if begin.Path == "" && IsNoneSupervisor(m) {
 		begin.Name = safeName(begin.Name)
 	}
 	if err := line.w.WriteJSON(proto.TUploadBegin, begin); err != nil {

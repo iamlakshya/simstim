@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"golang.org/x/sys/unix"
@@ -287,16 +288,64 @@ func resolveSandboxPrepareTrueV1() (string, error) {
 	if err != nil {
 		return "", err
 	}
+	binInfo, err := os.Lstat(bin)
+	if err != nil {
+		return "", fmt.Errorf("stat true binary %q: %w", bin, err)
+	}
 	resolved, err := filepath.EvalSymlinks(bin)
 	if err != nil {
 		return "", fmt.Errorf("resolve true binary %q: %w", bin, err)
 	}
-	if !filepath.IsAbs(resolved) {
-		return "", fmt.Errorf("unexpected true binary path %q", resolved)
+	resolvedInfo, err := os.Lstat(resolved)
+	if err != nil {
+		return "", fmt.Errorf("stat resolved true binary %q: %w", resolved, err)
 	}
-	st, err := os.Stat(resolved)
-	if err != nil || !st.Mode().IsRegular() || st.Mode()&0o111 == 0 {
-		return "", errors.Join(fmt.Errorf("unexpected true binary path %q", resolved), err)
+	if err := validateSandboxPrepareTrueV1(bin, binInfo, resolved, resolvedInfo); err != nil {
+		return "", err
 	}
 	return bin, nil
+}
+
+func validateSandboxPrepareTrueV1(bin string, binInfo os.FileInfo, resolved string, resolvedInfo os.FileInfo) error {
+	if binInfo == nil || resolvedInfo == nil {
+		return fmt.Errorf("unexpected true binary path %q", resolved)
+	}
+	binStat, ok := binInfo.Sys().(*syscall.Stat_t)
+	if !ok || binStat.Uid != 0 {
+		return fmt.Errorf("untrusted true binary %q", bin)
+	}
+	if binInfo.Mode()&os.ModeSymlink == 0 && (!binInfo.Mode().IsRegular() || binInfo.Mode().Perm()&0o022 != 0 || binInfo.Mode()&0o111 == 0) {
+		return fmt.Errorf("untrusted true binary %q", bin)
+	}
+	if !isTrustedSystemTruePathV1(resolved) {
+		return fmt.Errorf("unexpected true binary path %q", resolved)
+	}
+	resStat, ok := resolvedInfo.Sys().(*syscall.Stat_t)
+	if !ok || resStat.Uid != 0 || !resolvedInfo.Mode().IsRegular() || resolvedInfo.Mode().Perm()&0o022 != 0 || resolvedInfo.Mode()&0o111 == 0 {
+		return fmt.Errorf("untrusted resolved true binary %q", resolved)
+	}
+	return nil
+}
+
+func isTrustedSystemTruePathV1(resolved string) bool {
+	clean := filepath.Clean(resolved)
+	if !filepath.IsAbs(clean) {
+		return false
+	}
+	trustedDir := false
+	for _, prefix := range []string{"/usr/", "/bin/", "/lib/", "/lib64/", "/nix/store/"} {
+		if strings.HasPrefix(clean, prefix) {
+			trustedDir = true
+			break
+		}
+	}
+	if !trustedDir {
+		return false
+	}
+	base := filepath.Base(clean)
+	switch base {
+	case "true", "coreutils", "busybox", "toybox", "gnutrue":
+		return true
+	}
+	return strings.HasSuffix(base, "-true") && len(base) > len("-true")
 }

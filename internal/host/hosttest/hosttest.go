@@ -253,7 +253,7 @@ func rmAsCaller(args []string) {
 
 // outside makes this test's process look, to the helper's own check
 // (host.CheckCaller), like a login shell outside every session, on a host
-// with a systemd user manager, until the test ends. So the tests pass even
+// without a systemd user manager, until the test ends. So the tests pass even
 // when they run inside a session's unit. InSession says otherwise.
 func outside(t testing.TB) {
 	uid := os.Getuid()
@@ -320,12 +320,18 @@ func (h *Host) Install(version, vt string) string {
 
 // HolderLog returns the log of a session's holder.
 func (h *Host) HolderLog(id string) string {
-	b, _ := os.ReadFile(paths.HolderLog(id))
-	if len(b) > 0 {
-		return string(b)
+	var parts []string
+	for _, path := range []string{
+		paths.HolderLog(id),
+		filepath.Join(paths.SandboxRoot(id), "members", id, "holder.log"),
+		paths.GuestHolderLog(id),
+	} {
+		if b, err := os.ReadFile(path); err == nil && len(b) > 0 {
+			parts = append(parts, string(b))
+		}
 	}
-	if gb, err := os.ReadFile(filepath.Join(paths.SandboxRoot(id), "members", id, "holder.log")); err == nil && len(gb) > 0 {
-		return string(gb)
+	if len(parts) > 0 {
+		return strings.Join(parts, "\n")
 	}
 	sb, _ := os.ReadFile(paths.SupervisorLog(id))
 	return string(sb)

@@ -2,7 +2,6 @@ package host
 
 import (
 	"context"
-	"errors"
 	"os"
 
 	"github.com/iamlakshya/simstim/internal/paths"
@@ -16,16 +15,29 @@ func openRuntimeProductionStore(ctx context.Context) (*runtimePublication, *runt
 	if err != nil {
 		return nil, nil, err
 	}
-	var created []createdStorageDirV1
-	//nolint:contextcheck // publication.ctx derives from ctx and cancels on drain
-	store, err := runtimecache.OpenHostCreated(publication.ctx, paths.ArtefactsDir(), publication.owner.domain(), publication.gate, func(path string, info os.FileInfo) error {
-		created = append(created, createdStorageDirV1{path: path, info: info})
-		return nil
-	})
-	if len(created) > 0 {
-		//nolint:contextcheck // recordStorageFootprintsV1 uses publication.ctx derived from ctx
-		err = errors.Join(err, publication.recordStorageFootprintsV1(created))
+	var openControl *placementControl
+	var openGuard *os.Root
+	openPhase := true
+	gate := func(gateCtx context.Context, change func() error) error {
+		return publication.gateControlRoot(gateCtx, func(control *placementControl, guard *os.Root) error {
+			if !openPhase {
+				return change()
+			}
+			openControl, openGuard = control, guard
+			defer func() {
+				openControl, openGuard = nil, nil
+				openPhase = false
+			}()
+			return change()
+		})
 	}
+	//nolint:contextcheck // publication.ctx derives from ctx and cancels on drain
+	store, err := runtimecache.OpenHostCreated(publication.ctx, paths.ArtefactsDir(), publication.owner.domain(), gate, func(path string, info os.FileInfo) error {
+		if openControl == nil || openGuard == nil {
+			return placementError("storage directory creation occurred outside its active placement lock")
+		}
+		return recordStorageDirV1(openControl, openGuard, path, info)
+	})
 	// The caller adopted an owner before entering this factory. Return every
 	// actual partial object; only that owner can close store before publication.
 	if err != nil {

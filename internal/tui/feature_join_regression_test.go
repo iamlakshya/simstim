@@ -139,3 +139,28 @@ func TestScreenRenderObservesMidRenderCancellation(t *testing.T) {
 		t.Fatalf("mid-render cancellation = %v, %v", lines, err)
 	}
 }
+
+func TestLargeScreenExecutesSingleScrollAndLineEdit(t *testing.T) {
+	cases := []struct {
+		name  string
+		input string
+		row0  string
+		row1  string
+	}{
+		{name: "S", input: "top\r\nsecond\x1b[1S", row0: "second", row1: ""},
+		{name: "T", input: "top\x1b[1T", row0: "", row1: "top"},
+		{name: "L", input: "top\x1b[1;1H\x1b[1L", row0: "", row1: "top"},
+		{name: "M", input: "top\r\nsecond\x1b[1;1H\x1b[1M", row0: "second", row1: ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			lines, err := ScreenLinesContext(context.Background(), []byte(tc.input), 1000, 500)
+			if err != nil {
+				t.Fatalf("large screen %s failed: %v", tc.name, err)
+			}
+			if len(lines) < 2 || lines[0] != tc.row0 || lines[1] != tc.row1 {
+				t.Fatalf("large screen %s got rows [%q, %q], want [%q, %q]", tc.name, lines[0], lines[1], tc.row0, tc.row1)
+			}
+		})
+	}
+}
