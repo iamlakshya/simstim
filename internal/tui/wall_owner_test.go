@@ -12,6 +12,7 @@ import (
 
 func TestDowngradedNoneKeepsEveryExplicitExposureWarning(t *testing.T) {
 	s := client.Session{Wall: &api.WallInfo{Level: "none", DowngradedFrom: "process"}, Secrets: []string{"Z_TOKEN", "A_TOKEN"}}
+	setExposedDisplaySummary(&s, s.Armed)
 	warnings := strings.Join(sessionWallWarnings(s), "\n")
 	for _, text := range []string{"below the floor process", "exposed: A_TOKEN", "exposed: Z_TOKEN", "secrets not armed"} {
 		if !strings.Contains(warnings, text) {

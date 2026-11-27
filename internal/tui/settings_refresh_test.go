@@ -20,6 +20,11 @@ func TestExternalSettingsAtResumeAndWizard(t *testing.T) {
 				hs = endedLab(t, 80, 24)
 				h := hs.m.hostByName("gcp-dev")
 				h.host.Secrets = []string{"TOKEN"}
+				for i := range hs.be.hosts {
+					if hs.be.hosts[i].Name == "gcp-dev" {
+						hs.be.hosts[i].Secrets = []string{"TOKEN"}
+					}
+				}
 				for i := range h.sessions {
 					if h.sessions[i].ID == "g3" {
 						h.sessions[i].Secrets = []string{"TOKEN"}
@@ -35,7 +40,7 @@ func TestExternalSettingsAtResumeAndWizard(t *testing.T) {
 				hs = newHarness(t, be, 80, 24)
 				hs.key("a")
 				hs.typeText("pi")
-				hs.key("enter", "enter", "enter", "enter")
+				hs.key("enter", "enter", "1", "enter", "enter")
 				w := hs.m.modal.(*wizard)
 				if w.step != wzRun || w.act.Kind != "login" {
 					t.Fatalf("step %v, act %+v, err %v", w.step, w.act, w.err)

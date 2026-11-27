@@ -51,7 +51,7 @@ func TestLauncherNewUsesCanonicalDefaultRatherThanTheHighlightedHost(t *testing.
 		t.Run(test.name, func(t *testing.T) {
 			hs := newPlacementFixture(t, "gcp-dev")
 			t.Setenv(brand.Env("DEFAULT_HOST"), test.environment)
-			hs.m.hostSel = 2 // the highlighted aws-gpu is offline
+			hs.m.hostSel = 1 // the highlighted aws-gpu is offline
 			hs.m.mem.Last = &lastSession{Host: "aws-gpu", ID: "last2345"}
 			hs.key("n")
 			dialog, ok := hs.m.modal.(*newSession)
@@ -107,7 +107,7 @@ func TestNewFormHostRowChangesOnlyThisSelectionAndStartsOnThatHost(t *testing.T)
 	dialog.name.set("chosen-work")
 	dialog.folder.set("~/project")
 	dialog.field = 6
-	hs.key("right")
+	hs.key("right", "right")
 	if dialog.host != "gcp-dev" || dialog.selector != "gcp-dev" || dialog.sourceHost.Name != "gcp-dev" || dialog.name.value() != "chosen-work" || dialog.folder.value() != "~/project" {
 		t.Fatal("host selection lost the chosen saved entry or edited fields")
 	}
