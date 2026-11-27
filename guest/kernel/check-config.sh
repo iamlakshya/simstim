@@ -98,7 +98,7 @@ required=(
 )
 
 if [ "$arch" = "amd64" ]; then
-    required+=(PVH ACPI)
+    required+=(PVH)
 fi
 
 forbidden=(

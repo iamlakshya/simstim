@@ -10,6 +10,7 @@ import (
 )
 
 var baseRequired = []string{
+	"EFI", "EFI_STUB", "ACPI", "PCI",
 	"VIRTIO_PCI", "VIRTIO_MMIO", "VIRTIO_BLK", "VIRTIO_CONSOLE", "HW_RANDOM_VIRTIO",
 	"VIRTIO_BALLOON", "VSOCKETS", "VIRTIO_VSOCKETS",
 	"BLK_DEV_DM", "DM_INIT", "DM_VERITY",
@@ -33,7 +34,7 @@ func smallPassingConfig(arch string, overrides map[string]string) string {
 	var b strings.Builder
 	syms := append([]string(nil), baseRequired...)
 	if arch == "amd64" {
-		syms = append(syms, "PVH", "ACPI")
+		syms = append(syms, "PVH")
 	}
 	for _, s := range syms {
 		v, ok := overrides[s]
@@ -127,6 +128,16 @@ func TestSmallConfigsPassAndFail(t *testing.T) {
 			want: "CONFIG_CGROUP_BPF is n in ",
 		},
 		{
+			name: "missing EFI_STUB",
+			over: map[string]string{"EFI_STUB": "unset"},
+			want: "CONFIG_EFI_STUB is n in ",
+		},
+		{
+			name: "missing PCI",
+			over: map[string]string{"PCI": "unset"},
+			want: "CONFIG_PCI is n in ",
+		},
+		{
 			name: "missing landlock in LSM",
 			over: map[string]string{"LSM": `"lockdown,yama,landlock2"`},
 			want: "CONFIG_LSM lacks landlock in ",
@@ -172,13 +183,13 @@ func TestSmallConfigsPassAndFail(t *testing.T) {
 		}
 	}
 
-	// 4. PVH and ACPI are required on amd64 only, not arm64.
+	// 4. PVH is required on amd64 only, not arm64; ACPI/EFI/PCI are required on both.
 	armOnly := filepath.Join(dir, "arm64-no-pvh.config")
 	if err := os.WriteFile(armOnly, []byte(smallPassingConfig("arm64", nil)), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if out, err := runCheck(t, armOnly, "arm64"); err != nil {
-		t.Fatalf("arm64 without PVH/ACPI should pass: %v\n%s", err, out)
+		t.Fatalf("arm64 without PVH should pass: %v\n%s", err, out)
 	}
 	if out, err := runCheck(t, armOnly, "amd64"); err == nil || !strings.Contains(out, "CONFIG_PVH is n") {
 		t.Fatalf("amd64 without PVH should fail on CONFIG_PVH, got err=%v out=%s", err, out)
