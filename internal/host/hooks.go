@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/iamlakshya/simstim/internal/agents"
 	"github.com/iamlakshya/simstim/internal/brand"
 	"github.com/iamlakshya/simstim/internal/paths"
 	"github.com/iamlakshya/simstim/internal/proto"
@@ -52,7 +53,7 @@ func shellQuote(s string) string {
 // to the session's holder and always exits quickly and cleanly, so a hook can
 // never slow down or break the agent.
 func RunHook(event string, args []string) {
-	sock := os.Getenv(brand.Env("SOCK"))
+	sock := hookSocket()
 	if sock == "" {
 		return
 	}
@@ -82,7 +83,7 @@ func RunHook(event string, args []string) {
 	_ = conn.SetDeadline(time.Now().Add(time.Second))
 	w := proto.NewWriter(conn)
 	r := bufio.NewReader(conn)
-	if w.WriteJSON(proto.THello, proto.Hello{Magic: proto.Magic, Protocol: version.Protocol, Version: version.Version, Role: "hook"}) != nil {
+	if w.WriteJSON(proto.THello, proto.Hello{Magic: proto.Magic, Protocol: version.Protocol, Version: version.Version, Role: roleHook}) != nil {
 		return
 	}
 	if f, err := proto.Read(r); err != nil || f.Type != proto.THello {
@@ -91,6 +92,33 @@ func RunHook(event string, args []string) {
 	ev, _ := json.Marshal(HookEvent{Event: event, Payload: payload})
 	_ = w.WriteJSON(proto.TRequest, proto.Request{ID: 1, Op: "hook", Args: ev})
 	_, _ = proto.Read(r)
+}
+
+// hookSocket is the socket that a hook sends its event to: the hook socket
+// that the agent's environment names. A session that an older helper
+// started names only its session socket. Its holder is that older helper
+// too, and takes hook events there. A new holder never does: a resume or a
+// restore gives the session the hook socket first (withHookSocket).
+func hookSocket() string {
+	if sock := os.Getenv(brand.Env("HOOK_SOCK")); sock != "" {
+		return sock
+	}
+	return os.Getenv(brand.Env("SOCK"))
+}
+
+// withHookSocket returns env, a session's environment, naming only the hook
+// socket of session id. An older helper named the session socket instead.
+// A restore or a resume starts a new holder, which serves hooks only on the
+// hook socket.
+func withHookSocket(env []string, id string) []string {
+	sock, hook := brand.Env("SOCK")+"=", brand.Env("HOOK_SOCK")+"="
+	out := make([]string, 0, len(env)+1)
+	for _, kv := range env {
+		if !strings.HasPrefix(kv, sock) && !strings.HasPrefix(kv, hook) {
+			out = append(out, kv)
+		}
+	}
+	return append(out, hook+paths.HookSocket(id))
 }
 
 // applyHook updates the holder's view of the session from a hook event.
@@ -107,10 +135,8 @@ func (h *Holder) applyHook(ev HookEvent) {
 	now := time.Now().UTC()
 	switch ev.Event {
 	case "session-start":
-		if p.SessionID != "" && p.SessionID != h.m.Agent.AgentSessionID {
-			h.m.Agent.AgentSessionID = p.SessionID
-			h.m.Agent.IDSource = "hook"
-			h.m.Agent.IDHistory = append(h.m.Agent.IDHistory, IDEvent{ID: p.SessionID, Source: p.Source, At: now})
+		if !h.keepAgentID(p.SessionID, p.Source, now) {
+			return // the event changes nothing
 		}
 	case "prompt":
 		h.hookBusy, h.needInput, h.notifyMsg = true, false, ""
@@ -128,4 +154,33 @@ func (h *Holder) applyHook(ev HookEvent) {
 	}
 	h.hookSeen = true
 	h.dirty = true
+}
+
+// keepAgentID records id, the agent's own session ID from a session-start
+// hook, for the agent's resume command (resumeArgv). A hook runs what the
+// agent tells it to, so the ID can be any text, such as a flag that turns
+// the agent's approvals off at its next start. The holder keeps the ID only
+// when it has the form of the agent's IDs (agents.Agent.CheckID), even when
+// it is the ID that the session already has: an older helper kept any ID.
+// If it does not, the holder logs why and reports false. The caller holds
+// h.mu.
+func (h *Holder) keepAgentID(id, source string, now time.Time) bool {
+	if id == "" {
+		return true
+	}
+	agent, _ := agents.Find(h.m.Agent.Kind)
+	if err := agent.CheckID(id); err != nil {
+		h.log.Warn("session ID from a hook not kept", "reason", err.Error(), "kind", h.m.Agent.Kind, "id", clip(id, 80))
+		return false
+	}
+	if id == h.m.Agent.AgentSessionID {
+		// The startup hook repeats the ID that the host chose. The hook
+		// counts as seen, and the history gets no second entry.
+		return true
+	}
+	h.m.Agent.AgentSessionID = id
+	h.ev.agentID(h.id, id)
+	h.m.Agent.IDSource = "hook"
+	h.m.Agent.IDHistory = append(h.m.Agent.IDHistory, IDEvent{ID: id, Source: source, At: now})
+	return true
 }

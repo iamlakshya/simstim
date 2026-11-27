@@ -3,6 +3,7 @@
 package client
 
 import (
+	"fmt"
 	"os"
 	"os/signal"
 	"syscall"
@@ -44,6 +45,15 @@ func watchResize(_ *os.File) (<-chan struct{}, func()) {
 // controlMaster reports whether this OpenSSH can share connections.
 const controlMaster = true
 
+// ownerOf is the id of the user who owns fi, or -1. Tests fake it, as if a
+// folder were another user's.
+var ownerOf = func(fi os.FileInfo) int {
+	if st, ok := fi.Sys().(*syscall.Stat_t); ok {
+		return int(st.Uid)
+	}
+	return -1
+}
+
 // privateDir reports whether d is a real folder (not a link) that only this
 // user owns and can open, so nobody else can plant or read sockets in it.
 func privateDir(d string) bool {
@@ -51,6 +61,24 @@ func privateDir(d string) bool {
 	if err != nil || !fi.IsDir() || fi.Mode().Perm() != 0o700 {
 		return false
 	}
-	st, ok := fi.Sys().(*syscall.Stat_t)
+	return ownerOf(fi) == os.Getuid()
+}
+
+func controlFileOwned(info os.FileInfo) bool {
+	st, ok := info.Sys().(*syscall.Stat_t)
 	return ok && int(st.Uid) == os.Getuid()
+}
+
+// controlScope identifies the physical client root, so isolated roots do
+// not share or retire each other's sockets in the short fallback folder.
+func controlScope() (string, bool) {
+	info, err := os.Stat(ConfigDir())
+	if err != nil || !info.IsDir() {
+		return "", false
+	}
+	st, ok := info.Sys().(*syscall.Stat_t)
+	if !ok || int(st.Uid) != os.Getuid() {
+		return "", false
+	}
+	return fmt.Sprintf("%x:%x", st.Dev, st.Ino), true
 }

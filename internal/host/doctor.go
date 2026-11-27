@@ -6,7 +6,6 @@ import (
 	"os"
 	"os/exec"
 	"os/user"
-	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
@@ -80,12 +79,17 @@ func Doctor() HostInfo {
 			info.Checks = append(info.Checks, AgentMemoryChecks(info.Agents, info.MemTotal, info.MemoryMax)...)
 		}
 	}
+	info.Checks = append(info.Checks, socketsCheck(sd, weakHolders()))
+	info.Checks = append(info.Checks, gitScopeCheck()...)
 	gt := HasTerminfo("xterm-ghostty")
 	info.Checks = append(info.Checks, Check{Name: "Ghostty terminfo", OK: gt,
 		Detail: map[bool]string{true: "xterm-ghostty is installed", false: "xterm-ghostty is missing; sessions fall back to xterm-256color"}[gt],
 		Fix:    "infocmp -x xterm-ghostty | ssh <host> tic -x -"})
 	info.Checks = append(info.Checks, Check{Name: "runtime folder", OK: true, Detail: paths.RuntimeDir()})
 	info.Checks = append(info.Checks, IdleDoctor()...)
+	kernelBugs, kernelChecks := kernelBugReportV1(context.Background(), liveCapSource(), info.Kernel, nil)
+	info.KernelBugs = kernelBugs
+	info.Checks = append(info.Checks, kernelChecks...)
 	return info
 }
 
@@ -112,6 +116,12 @@ func Setup(a SetupArgs) SetupResult {
 			res.Steps = append(res.Steps, Check{Name: "linger", OK: true, Detail: "already on"})
 		} else {
 			u, _ := user.Current()
+			// This legacy logind operation has no native creator anchor. Retain an
+			// advisory ahead intent so removal reports it without adopting ownership.
+			if err := RecordFootprint(Footprint{Kind: "linger", Before: "off", After: "on"}); err != nil {
+				res.Steps = append(res.Steps, Check{Name: "linger", Detail: err.Error(), Fix: "Keep the host state and inspect the pending linger intent before retrying setup."})
+				return res
+			}
 			detail := "turned on"
 			err := exec.CommandContext(context.Background(), "loginctl", "enable-linger", u.Username).Run()
 			if err != nil {
@@ -149,17 +159,5 @@ func Setup(a SetupArgs) SetupResult {
 
 // installTerminfo compiles a terminfo source into ~/.terminfo.
 func installTerminfo(src string) error {
-	f, err := os.CreateTemp("", "terminfo-*")
-	if err != nil {
-		return fmt.Errorf("write the terminfo source: %w", err)
-	}
-	_, _ = f.WriteString(src)
-	f.Close()
-	defer os.Remove(f.Name())
-	home, _ := os.UserHomeDir()
-	out, err := exec.CommandContext(context.Background(), "tic", "-x", "-o", filepath.Join(home, ".terminfo"), f.Name()).CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("tic: %w: %s", err, strings.TrimSpace(string(out)))
-	}
-	return nil
+	return installFootprintedTerminfoV1(context.Background(), src)
 }

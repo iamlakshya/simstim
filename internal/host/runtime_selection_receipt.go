@@ -1,0 +1,364 @@
+package host
+
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"os"
+	"reflect"
+	"runtime"
+	"slices"
+	"sync"
+
+	"github.com/iamlakshya/simstim/internal/brand"
+	"github.com/iamlakshya/simstim/internal/image"
+	"github.com/iamlakshya/simstim/internal/paths"
+	"github.com/iamlakshya/simstim/internal/runtimecache"
+	"github.com/iamlakshya/simstim/internal/supply"
+)
+
+type heldRuntimeItemV1 struct {
+	item           supply.Item
+	file           *os.File
+	released       bool
+	closeAttempted bool
+	closeFacts     supply.FileCloseFactsV1
+}
+
+// selectedRuntimeReceiptV1 is issued only by this bridge's actual successful
+// runtime delivery/status request. All selected original role descriptors stay
+// held through the protected request writer and connection lifetime.
+type selectedRuntimeReceiptV1 struct {
+	key           string          // immutable original full-manifest key, assigned only by the producer
+	issuer        *runtimeService // immutable actual producer; no copied carrier can set it
+	closeMu       sync.Mutex
+	mu            sync.RWMutex
+	fileMu        sync.Mutex
+	once          sync.Once
+	manifest      supply.Manifest
+	imageDefaults *[]supply.Item
+	publication   *runtimePublication
+	store         *runtimecache.Store
+	files         []heldRuntimeItemV1
+	closed        bool
+	closeErr      error
+}
+
+func cloneSelectedRuntime(manifest supply.Manifest) supply.Manifest {
+	manifest.Items = slices.Clone(manifest.Items)
+	manifest.Advisories = slices.Clone(manifest.Advisories)
+	return manifest
+}
+
+func cloneImageDefaults(defaults *[]supply.Item) *[]supply.Item {
+	if defaults == nil {
+		return nil
+	}
+	cloned := slices.Clone(*defaults)
+	return &cloned
+}
+
+func startupDigest(raw []byte) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	sum := sha256.Sum256(raw)
+	return hex.EncodeToString(sum[:])
+}
+
+func selectedRuntimeKey(manifest supply.Manifest) (string, error) {
+	raw, err := json.Marshal(manifest)
+	if err != nil {
+		return "", err
+	}
+	return startupDigest(raw), nil
+}
+
+func (s *runtimeService) selectedRuntime(ctx context.Context, expected supply.Manifest) (*selectedRuntimeReceiptV1, error) {
+	key, err := selectedRuntimeKey(expected)
+	if err != nil {
+		return nil, err
+	}
+	s.mu.Lock()
+	receipt, closed := s.selections[key], s.closed
+	s.mu.Unlock()
+	if closed || receipt == nil || receipt.issuer != s {
+		return nil, newRuntimeError("this authenticated connection has no original held runtime selection")
+	}
+	actual, err := receipt.inventory(ctx)
+	if err != nil || !reflect.DeepEqual(actual, expected) {
+		return nil, errors.Join(newRuntimeError("the new request differs from its same-connection runtime selection"), err)
+	}
+	return receipt, nil
+}
+
+// rememberRuntime executes only after the same original request has checked
+// every named runtime object. A bare supplied manifest cannot call New's issuer.
+func (s *runtimeService) rememberRuntime(ctx context.Context, manifest supply.Manifest) error {
+	return s.rememberRuntimeWithDefaults(ctx, manifest, nil)
+}
+
+// rememberRuntimeWithDefaults retains same-connection request ImageDefaults
+// solely to cross-check an original client's default-image pin on this bridge.
+// On-disk Store.ImageDefaults is retention-only and never populates a receipt.
+func (s *runtimeService) rememberRuntimeWithDefaults(ctx context.Context, manifest supply.Manifest, defaults *[]supply.Item) (failure error) {
+	done, err := s.enterRuntimeV1()
+	if err != nil {
+		return err
+	}
+	defer done()
+	connection, request, release, err := s.selectionContextV1(ctx)
+	if err != nil {
+		return err
+	}
+	defer release()
+	ctx = request
+	unlock, err := s.lockRuntimeSelectionV1(ctx)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	if err := s.retryRuntimeSelectionV1(); err != nil {
+		return err
+	}
+	if err := runtimecache.ValidateWithImageDefaults(manifest, defaults, runtime.GOARCH); err != nil {
+		return err
+	}
+	if findings := manifest.OwnFindings(); len(findings) != 0 {
+		return newRuntimeError("the original selected runtime matches a known advisory")
+	}
+	key, err := selectedRuntimeKey(manifest)
+	if err != nil {
+		return err
+	}
+	s.mu.Lock()
+	closed, existing := s.closed, s.selections[key]
+	s.mu.Unlock()
+	if closed {
+		return newRuntimeError("the authenticated runtime connection has ended")
+	}
+	if existing != nil {
+		if existing.issuer != s {
+			return newRuntimeError("the original runtime receipt has another actual issuer")
+		}
+		if !existing.producerEndedV1() {
+			return existing.retainImageDefaults(ctx, defaults)
+		}
+		if err := s.retireEndedSelectionV1(key, existing); err != nil {
+			return err
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if err := connection.Err(); err != nil {
+			return err
+		}
+	}
+	publication, err := beginRuntimePublicationLifetimeV1(ctx, connection, "publish", nil, nil)
+	if err != nil {
+		return err
+	}
+	receipt := &selectedRuntimeReceiptV1{
+		key:           key,
+		issuer:        s,
+		manifest:      cloneSelectedRuntime(manifest),
+		imageDefaults: cloneImageDefaults(defaults),
+		publication:   publication,
+	}
+	retained := false
+	defer func() {
+		if !retained {
+			cleanup := receipt.Close()
+			failure = errors.Join(failure, cleanup)
+			if cleanup != nil {
+				s.mu.Lock()
+				s.selectionPending, s.selectionPendingKey = receipt, ""
+				s.mu.Unlock()
+			}
+		}
+	}()
+	receipt.store, err = runtimecache.OpenHostReadOnly(ctx, paths.ArtefactsDir(), publication.owner.domain())
+	if err != nil {
+		return err
+	}
+	for _, item := range receipt.manifest.Items {
+		file, err := receipt.store.OpenItem(ctx, item)
+		if err != nil {
+			return err
+		}
+		receipt.files = append(receipt.files, heldRuntimeItemV1{item: item, file: file})
+	}
+	if err := receipt.checkLocked(ctx); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	if s.closed || ctx.Err() != nil || connection.Err() != nil {
+		s.mu.Unlock()
+		return errors.Join(ctx.Err(), connection.Err(), newRuntimeError("the authenticated runtime request/connection ended before selection publication"))
+	}
+	if s.selections == nil {
+		s.selections = map[string]*selectedRuntimeReceiptV1{}
+	}
+	if current := s.selections[key]; current != nil {
+		s.mu.Unlock()
+		if current.issuer != s {
+			return newRuntimeError("the current runtime receipt belongs to another issuer")
+		}
+		return current.retainImageDefaults(ctx, defaults)
+	}
+	s.selections[key], retained = receipt, true
+	s.mu.Unlock()
+	return nil
+}
+
+func (receipt *selectedRuntimeReceiptV1) retainImageDefaults(ctx context.Context, defaults *[]supply.Item) error {
+	if receipt == nil {
+		return newRuntimeError("the selected runtime receipt is missing")
+	}
+	receipt.mu.Lock()
+	defer receipt.mu.Unlock()
+	if err := receipt.checkOriginLockedV1(ctx); err != nil {
+		return err
+	}
+	if err := receipt.checkLocked(ctx); err != nil {
+		return err
+	}
+	if defaults == nil {
+		return nil
+	}
+	if receipt.imageDefaults == nil {
+		receipt.imageDefaults = cloneImageDefaults(defaults)
+		return nil
+	}
+	if !reflect.DeepEqual(*receipt.imageDefaults, *defaults) {
+		return newRuntimeError("the runtime request carries conflicting default-image pins on this connection")
+	}
+	return nil
+}
+
+// defaultImageRequest returns the exact default-image pin supplied on this
+// same authenticated connection. It never falls back to Store.ImageDefaults.
+func (receipt *selectedRuntimeReceiptV1) defaultImageRequest(ctx context.Context, arch string) (image.Request, error) {
+	if receipt == nil {
+		return image.Request{}, newRuntimeError("the selected runtime receipt is missing")
+	}
+	receipt.mu.RLock()
+	defer receipt.mu.RUnlock()
+	if err := receipt.checkOriginLockedV1(ctx); err != nil {
+		return image.Request{}, err
+	}
+	if err := receipt.checkLocked(ctx); err != nil {
+		return image.Request{}, err
+	}
+	if receipt.imageDefaults == nil {
+		return image.Request{}, newRuntimeError("this connection's runtime selection carries no original default-image pins")
+	}
+	manifest := supply.Manifest{Release: receipt.manifest.Release, Items: *receipt.imageDefaults}
+	item, ok := manifest.Find(supply.KindImage, "agent-base", arch)
+	if !ok {
+		return image.Request{}, newRuntimeError("this connection's runtime selection has no default image pin for " + arch)
+	}
+	req := image.Request{
+		Ref:            brand.ImageRepository + "@" + item.Digest,
+		Digest:         item.Digest,
+		PlatformDigest: item.Digest,
+		Arch:           arch,
+		RootHash:       item.RootHash,
+		DataBlocks:     item.DataBlocks,
+	}
+	if err := req.Validate(); err != nil {
+		return image.Request{}, err
+	}
+	if req.RootHash == "" || req.DataBlocks <= 0 {
+		return image.Request{}, newRuntimeError("the default image pin is missing its verity root hash or block count")
+	}
+	return req, nil
+}
+
+func (receipt *selectedRuntimeReceiptV1) checkLocked(ctx context.Context) error {
+	if receipt == nil || receipt.closed || receipt.publication == nil || receipt.store == nil ||
+		len(receipt.files) != len(receipt.manifest.Items) || receipt.publication.ctx.Err() != nil {
+		return newRuntimeError("the original held runtime producer ended")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := receipt.publication.owner.checkIdentity(); err != nil {
+		return err
+	}
+	receipt.fileMu.Lock()
+	defer receipt.fileMu.Unlock()
+	for _, held := range receipt.files {
+		if held.file == nil {
+			return newRuntimeError("the original selected runtime lost a role descriptor")
+		}
+		if err := supply.CheckOpenContext(ctx, held.item, held.file); err != nil {
+			return err
+		}
+	}
+	return ctx.Err()
+}
+
+func (receipt *selectedRuntimeReceiptV1) inventory(ctx context.Context) (supply.Manifest, error) {
+	if receipt == nil {
+		return supply.Manifest{}, newRuntimeError("the selected runtime receipt is missing")
+	}
+	receipt.mu.RLock()
+	defer receipt.mu.RUnlock()
+	if err := receipt.checkOriginLockedV1(ctx); err != nil {
+		return supply.Manifest{}, err
+	}
+	if err := receipt.checkLocked(ctx); err != nil {
+		return supply.Manifest{}, err
+	}
+	return cloneSelectedRuntime(receipt.manifest), nil
+}
+
+func (receipt *selectedRuntimeReceiptV1) Close() error {
+	if receipt == nil {
+		return nil
+	}
+	receipt.once.Do(func() {
+		receipt.mu.Lock()
+		defer receipt.mu.Unlock()
+		receipt.closed = true
+	})
+	receipt.closeMu.Lock()
+	defer receipt.closeMu.Unlock()
+	for index := range receipt.files {
+		held := &receipt.files[index]
+		if held.file == nil || held.released {
+			continue
+		}
+		if !held.closeAttempted {
+			held.closeAttempted = true
+			held.closeFacts = supply.CloseFileOnceV1(held.file)
+			held.released = held.closeFacts.Retired
+			if err := errors.Join(held.closeFacts.Diagnostic, held.closeFacts.Unknown); err != nil {
+				receipt.closeErr = err
+				return err
+			}
+		}
+		if held.closeFacts.Unknown != nil {
+			return held.closeFacts.Unknown
+		}
+	}
+	if receipt.store != nil {
+		if err := receipt.store.Close(); err != nil {
+			receipt.closeErr = err
+			return err
+		}
+		receipt.store = nil
+	}
+	if receipt.publication != nil {
+		if err := receipt.publication.close(); err != nil {
+			receipt.closeErr = err
+			return err
+		}
+		receipt.publication = nil
+	}
+	receipt.closeErr = nil
+	return nil
+}

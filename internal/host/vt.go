@@ -46,7 +46,34 @@ const (
 	// vtStableAfter is how long a child must live for its restart delay
 	// to start again from the shortest.
 	vtStableAfter = time.Minute
+	// maxTermCols and maxTermRows are the largest terminal that the host
+	// gives an agent: its PTY and the shadow terminal. A client that asks
+	// for more gets this. The numbers are the project's own choice: Ghostty
+	// allows 65535, and its advisory GHSA-jqr7-69mm-v35h names apps that
+	// take a terminal size from a remote client, without a number. At 4096
+	// by 2048, the shadow terminal holds under 512 MiB, even with its
+	// 10,000 lines of scrollback full and the alternate screen on. With
+	// 4096 rows it held 629 MiB. vt/src/main.zig applies the same caps.
+	maxTermCols = 4096
+	maxTermRows = 2048
 )
+
+// clampCols is n as a terminal's columns: a value below 1 is 1, and a
+// value above maxTermCols is maxTermCols.
+func clampCols(n int) uint16 {
+	return uint16(min(max(n, 1), maxTermCols))
+}
+
+// clampRows is n as a terminal's rows: a value below 1 is 1, and a value
+// above maxTermRows is maxTermRows.
+func clampRows(n int) uint16 {
+	return uint16(min(max(n, 1), maxTermRows))
+}
+
+// capTerm is a terminal size within maxTermCols by maxTermRows.
+func capTerm(cols, rows int) (int, int) {
+	return int(clampCols(cols)), int(clampRows(rows))
+}
 
 // vtBackoff is the wait before each restart after a crash, in order. The
 // last one repeats, so a child that always crashes on the same output tries
@@ -140,6 +167,8 @@ type VT struct {
 
 	mu         sync.Mutex
 	child      *vtChild
+	starts     sync.WaitGroup
+	closeDone  chan struct{}
 	closed     bool
 	done       chan struct{}
 	cols, rows int
@@ -159,11 +188,13 @@ type vtChunkAt struct {
 
 // vtChild is one run of the shadow terminal process.
 type vtChild struct {
-	cmd     *exec.Cmd
-	stdin   io.WriteCloser
-	started time.Time
-	wake    chan struct{}
-	gone    chan struct{} // closed when the process has exited
+	cmd        *exec.Cmd
+	stdin      io.WriteCloser
+	started    time.Time
+	wake       chan struct{}
+	gone       chan struct{} // closed when the process has exited
+	writerDone chan struct{}
+	readerDone chan struct{}
 
 	// Guarded by VT.mu.
 	queue   [][]byte // frames waiting for the writer
@@ -190,6 +221,7 @@ func StartVT(opt VTOptions) (*VT, error) {
 	if opt.Rows <= 0 {
 		opt.Rows = 24
 	}
+	opt.Cols, opt.Rows = capTerm(opt.Cols, opt.Rows)
 	v := &VT{opt: opt, log: opt.Log, maxBehind: vtMaxBehind, done: make(chan struct{}), cols: opt.Cols, rows: opt.Rows}
 	if v.log == nil {
 		v.log = slog.New(slog.DiscardHandler)
@@ -233,7 +265,11 @@ func (v *VT) Feed(off int64, p []byte) {
 	}
 	for len(p) > 0 {
 		n := min(len(p), vtChunk)
-		c.push(vtFrame(vtFrameData, p[:n]))
+		if err := c.pushFrame(vtFrame(vtFrameData, p[:n])); err != nil {
+			c.dropped = true
+			v.log.Warn("shadow terminal rejected output", "err", err)
+			return
+		}
 		p = p[n:]
 	}
 }
@@ -244,11 +280,14 @@ func (v *VT) Resize(cols, rows, xpx, ypx int) {
 	if cols <= 0 || rows <= 0 {
 		return
 	}
+	cols, rows = capTerm(cols, rows)
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	v.cols, v.rows, v.xpx, v.ypx = cols, rows, xpx, ypx
 	if v.child != nil {
-		v.child.push(v.resizeFrame())
+		if err := v.child.pushFrame(v.resizeFrame()); err != nil {
+			v.log.Warn("shadow terminal rejected resize", "err", err)
+		}
 	}
 }
 
@@ -266,8 +305,9 @@ func (v *VT) Snapshot(cols, rows, maxLines int, timeout time.Duration) (snap []b
 		return nil, 0, fmt.Errorf("snapshot size %dx%d is not valid. Try: send the terminal size", cols, rows)
 	}
 	var p [8]byte
-	binary.LittleEndian.PutUint16(p[0:], clamp16(cols))
-	binary.LittleEndian.PutUint16(p[2:], clamp16(rows))
+	cols, rows = capTerm(cols, rows)
+	binary.LittleEndian.PutUint16(p[0:], clampCols(cols))
+	binary.LittleEndian.PutUint16(p[2:], clampRows(rows))
 	binary.LittleEndian.PutUint32(p[4:], clamp32(maxLines))
 	v.mu.Lock()
 	v.cols, v.rows = cols, rows
@@ -290,32 +330,45 @@ func (v *VT) AnswerQueries(on bool) {
 	defer v.mu.Unlock()
 	v.answering = on
 	if v.child != nil {
-		v.child.push(v.queriesFrame())
+		if err := v.child.pushFrame(v.queriesFrame()); err != nil {
+			v.log.Warn("shadow terminal rejected query control", "err", err)
+		}
 	}
 }
 
 // SetProfile sets what the shadow terminal reports while it answers queries.
-func (v *VT) SetProfile(p VTProfile) {
+func (v *VT) SetProfile(p VTProfile) error {
 	b, err := json.Marshal(p)
 	if err != nil {
-		return
+		return fmt.Errorf("encode the shadow terminal profile: %w", err)
+	}
+	frame, err := vtFrame(vtFrameProfile, b)
+	if err != nil {
+		return err
 	}
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	v.profile = b
 	if v.child != nil {
-		v.child.push(vtFrame(vtFrameProfile, b))
+		v.child.push(frame)
 	}
+	return nil
 }
 
 // Close stops the shadow terminal for good.
 func (v *VT) Close() error {
 	v.mu.Lock()
 	if v.closed {
+		done := v.closeDone
 		v.mu.Unlock()
+		if done != nil {
+			<-done
+		}
 		return nil
 	}
 	v.closed = true
+	v.closeDone = make(chan struct{})
+	defer close(v.closeDone)
 	close(v.done)
 	c := v.child
 	v.child = nil
@@ -333,6 +386,7 @@ func (v *VT) Close() error {
 			<-c.gone
 		}
 	}
+	v.starts.Wait()
 	return nil
 }
 
@@ -356,6 +410,10 @@ func (v *VT) sync() error {
 // It also returns the stream offset the child has been fed up to when it
 // gets the request.
 func (v *VT) request(kind byte, payload []byte, timeout time.Duration) ([]byte, int64, error) {
+	frame, err := vtFrame(kind, payload)
+	if err != nil {
+		return nil, 0, err
+	}
 	ch := make(chan vtReply, 1)
 	v.mu.Lock()
 	c := v.child
@@ -365,7 +423,7 @@ func (v *VT) request(kind byte, payload []byte, timeout time.Duration) ([]byte, 
 	}
 	fed := v.fed
 	c.waiters[kind] = append(c.waiters[kind], ch)
-	c.push(vtFrame(kind, payload))
+	c.push(frame)
 	v.mu.Unlock()
 
 	t := time.NewTimer(timeout)

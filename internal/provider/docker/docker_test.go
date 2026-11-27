@@ -5,8 +5,6 @@ import (
 	"context"
 	"errors"
 	"io"
-	"os"
-	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
@@ -18,61 +16,16 @@ import (
 	"github.com/iamlakshya/simstim/internal/provider/docker"
 )
 
-// fakeDocker is a docker on PATH that keeps each container's state in a
-// file and runs `exec` commands locally. It logs every call.
-const fakeDocker = `#!/bin/sh
-echo "$*" >> "$FAKE_DIR/log"
-cmd=$1; shift
-state() { cat "$FAKE_DIR/state-$1" 2>/dev/null; }
-case $cmd in
-inspect)
-  name=$3
-  if [ -f "$FAKE_DIR/state-$name" ]; then state "$name"; else echo "${FAKE_MISSING:-Error: No such object}: $name" >&2; exit 1; fi ;;
-run)
-  while [ "$1" != "--name" ]; do shift; done
-  echo running > "$FAKE_DIR/state-$2"; echo 0123456789ab ;;
-exec)
-  while [ "$1" != "sh" ]; do last=$1; shift; done
-  if [ "$(state "$last")" != running ]; then echo "Error response from daemon: container $last is not running" >&2; exit 1; fi
-  shift; shift
-  case $1 in *useradd*) exit 0 ;; esac # no users are made on this machine
-  exec sh -c "$1" ;;
-start|unpause) echo running > "$FAKE_DIR/state-$1" ;;
-stop) echo exited > "$FAKE_DIR/state-$3" ;;
-rm) rm -f "$FAKE_DIR/state-$2" ;;
-*) echo "fake docker: unknown command $cmd" >&2; exit 2 ;;
-esac
-`
-
-func setup(t *testing.T) string {
-	t.Helper()
-	if runtime.GOOS == "windows" {
-		t.Skip("the fake docker is a POSIX shell script")
-	}
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "docker"), []byte(fakeDocker), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
-	t.Setenv("FAKE_DIR", dir)
-	return dir
-}
-
-func calls(dir string) string {
-	b, _ := os.ReadFile(filepath.Join(dir, "log"))
-	return string(b)
-}
-
 func TestCreateAndLifecycle(t *testing.T) {
 	dir := setup(t)
 	ctx := context.Background()
 	var out bytes.Buffer
-	h, err := docker.Provider{}.Create(ctx, provider.Request{Name: "box", Out: &out})
+	h, err := fixtureCreate(t, ctx, provider.Request{Name: "box", Out: &out})
 	if err != nil {
 		t.Fatal(err)
 	}
 	c := provider.MachineName("box")
-	if h.Name != "box" || h.SSH != "" || h.Machine == nil || h.Machine.Provider != "docker" || h.Machine.ID != c || h.Machine.User != docker.DefaultUser || h.Machine.Image != docker.DefaultImage {
+	if h.Machine == nil || h.Machine.Source == nil || h.Machine.Source.ResourceID != fixtureResource || h.Machine.Source.EngineID != fixtureEngine || h.Name != "box" || h.SSH != "" || h.Machine.Provider != "docker" || h.Machine.ID != c || h.Machine.User != docker.DefaultUser || h.Machine.Image != docker.DefaultImage {
 		t.Fatalf("host = %+v, machine = %+v", h, h.Machine)
 	}
 	log := calls(dir)
@@ -80,7 +33,7 @@ func TestCreateAndLifecycle(t *testing.T) {
 	if !strings.Contains(log, want) {
 		t.Fatalf("docker calls:\n%s\nwant %q", log, want)
 	}
-	if !strings.Contains(log, "exec -u 0 "+c+" sh -c id -u user") {
+	if !strings.Contains(log, "exec -u 0 "+fixtureResource+" sh -c id -u user") {
 		t.Fatalf("no user was added:\n%s", log)
 	}
 	if !strings.Contains(out.String(), "docker run") {
@@ -88,7 +41,7 @@ func TestCreateAndLifecycle(t *testing.T) {
 	}
 
 	// A second create with the same name is refused.
-	if _, err := (docker.Provider{}).Create(ctx, provider.Request{Name: "box"}); err == nil {
+	if _, err := fixtureCreate(t, ctx, provider.Request{Name: "box"}); err == nil {
 		t.Fatal("a second container of the same name was made")
 	}
 
@@ -146,7 +99,7 @@ func TestMissingContainerWording(t *testing.T) {
 			setup(t)
 			t.Setenv("FAKE_MISSING", msg)
 			ctx := context.Background()
-			h, err := docker.Provider{}.Create(ctx, provider.Request{Name: "box"})
+			h, err := fixtureCreate(t, ctx, provider.Request{Name: "box"})
 			if err != nil {
 				t.Fatalf("create: %v", err)
 			}
@@ -166,7 +119,7 @@ func TestMissingContainerWording(t *testing.T) {
 
 func TestTransportRoundTrip(t *testing.T) {
 	setup(t)
-	if _, err := (docker.Provider{}).Create(context.Background(), provider.Request{Name: "rt"}); err != nil {
+	if _, err := fixtureCreate(t, context.Background(), provider.Request{Name: "rt"}); err != nil {
 		t.Fatal(err)
 	}
 	clienttest.RoundTrip(t, &docker.Transport{Container: provider.MachineName("rt"), User: "user"})
@@ -174,7 +127,7 @@ func TestTransportRoundTrip(t *testing.T) {
 
 func TestTransportRun(t *testing.T) {
 	setup(t)
-	if _, err := (docker.Provider{}).Create(context.Background(), provider.Request{Name: "run"}); err != nil {
+	if _, err := fixtureCreate(t, context.Background(), provider.Request{Name: "run"}); err != nil {
 		t.Fatal(err)
 	}
 	tr := &docker.Transport{Container: provider.MachineName("run"), User: "user"}
@@ -185,6 +138,12 @@ func TestTransportRun(t *testing.T) {
 	if _, err := tr.Run(context.Background(), "echo oops >&2; exit 3", nil); err == nil || !strings.Contains(err.Error(), "oops") {
 		t.Fatalf("a failing command: %v", err)
 	}
+	// What the command writes to stderr is the host's text: the error keeps
+	// it cleaned, ESC c and OSC 52 and hidden characters gone.
+	_, err = tr.Run(context.Background(), `printf 'a\033c b\033]52;c;aGk=\007 c\342\200\256d\342\200\213e\n' >&2; exit 3`, nil)
+	if err == nil || !strings.Contains(err.Error(), "ac b]52;c;aGk= cde") || strings.ContainsAny(err.Error(), "\x1b\x07\u202e\u200b") {
+		t.Fatalf("a failing command with a hostile stderr: %q", err)
+	}
 	if h := tr.ReachHint(); !strings.Contains(h, "docker exec -it -u user") {
 		t.Fatal(h)
 	}
@@ -194,10 +153,16 @@ func TestMissingDocker(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("PATH handling differs")
 	}
-	t.Setenv("PATH", t.TempDir())
-	_, err := docker.Provider{}.Create(context.Background(), provider.Request{Name: "x"})
-	var ue *client.UserError
-	if !errors.As(err, &ue) || !strings.Contains(ue.Hint, "Install Docker") {
-		t.Fatalf("err = %v, want a user error that says to install Docker", err)
+	for _, selected := range []string{"", "selected-context"} {
+		t.Run(selected, func(t *testing.T) {
+			isolateDockerHome(t)
+			t.Setenv("DOCKER_CONTEXT", selected)
+			t.Setenv("PATH", t.TempDir())
+			_, err := fixtureCreate(t, t.Context(), provider.Request{Name: "x"})
+			var unavailable *client.UserError
+			if !errors.As(err, &unavailable) || unavailable.Code != "tool_missing" || !strings.Contains(unavailable.Hint, "Install Docker") {
+				t.Fatalf("err = %v, want a user error that says to install Docker", err)
+			}
+		})
 	}
 }

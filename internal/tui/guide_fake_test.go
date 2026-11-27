@@ -23,7 +23,8 @@ type fakeLocal struct {
 	added     []string         // lines added to ~/.ssh/config
 	created   []string
 	createErr error
-	block     bool // Create waits for its context to end
+	block     bool   // Create waits for its context to end
+	idleSaid  string // what SetIdle says, when set
 }
 
 func (b *fakeBackend) Local() onboard.Local {
@@ -101,12 +102,19 @@ func (l *fakeLocal) Create(ctx context.Context, kind, name string, out io.Writer
 	h := client.Host{Name: name, Machine: &client.Machine{Provider: kind, ID: "box-" + name}}
 	l.be.mu.Lock()
 	l.be.hosts = append(l.be.hosts, h)
+	if l.be.tiers == nil {
+		l.be.tiers = map[string]client.TierEntry{}
+	}
+	l.be.tiers[name] = client.TierEntry{Name: name, Tier: client.ProviderTier(kind)}
 	l.be.mu.Unlock()
 	return h, nil
 }
 
 func (l *fakeLocal) SetIdle(_ context.Context, h client.Host) (string, error) {
 	l.be.record("idle %s", h.Name)
+	if l.idleSaid != "" {
+		return l.idleSaid, nil
+	}
 	return "powers off after 30m idle", nil
 }
 

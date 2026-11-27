@@ -11,10 +11,10 @@
     u              resume
     y              copy attach command
     w              next waiting session
+    p              policy
     a              add host
     s              guided setup
     i              host details
     /              search every host
     alt+e          show ended
     q              quit
-    ctrl+o         commands

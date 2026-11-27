@@ -2,14 +2,16 @@ package tui
 
 import (
 	"context"
-	"slices"
-	"sort"
+	"os"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/colorprofile"
 	uv "github.com/charmbracelet/ultraviolet"
 
+	"github.com/iamlakshya/simstim/internal/brand"
 	"github.com/iamlakshya/simstim/internal/client"
 	"github.com/iamlakshya/simstim/internal/onboard"
 )
@@ -37,15 +39,32 @@ type Options struct {
 	// Local is the guided setup's view of this computer. The command tree
 	// passes one that knows its providers.
 	Local onboard.Local
+	// After schedules delayed messages; tests replace it to run without wall-clock ticks.
+	After func(time.Duration, tea.Msg) tea.Cmd
+	// SessionShell runs the shared CLI shell command after terminal handoff.
+	SessionShell SessionShellRunner
+	// PolicyLockdown runs the real restrictive CLI action after handoff.
+	PolicyLockdown func(context.Context, *os.File, *os.File) error
 }
 
 // Model is the launcher: one list at a time, and the dialogs drawn over it.
 type Model struct {
-	ctx      context.Context
-	be       Backend
-	settings client.Settings
-	now      func() time.Time
-	motion   bool
+	ctx                context.Context
+	cancelTier         context.CancelFunc
+	tierRequests       chan tierQuestionRequest
+	grantRequests      chan grantQuestionRequest
+	grantActive        chan bool
+	grantOwners        grantOwners
+	selectedOwners     selectedNewOwners
+	selectedNew        *newSelectedStart
+	sessionShell       SessionShellRunner
+	policyLockdown     func(context.Context, *os.File, *os.File) error
+	be                 Backend
+	settings           client.Settings
+	now                func() time.Time
+	motion             bool
+	settingsWarned     string
+	settingsGeneration uint64
 
 	width, height int
 	dark          bool
@@ -105,30 +124,53 @@ type Model struct {
 	// again continues from the byte the terminal already shows.
 	attach    *client.AttachState
 	lastAgent map[string]string
+	newHost   newHostLookup
 	resuming  map[sessKey]bool // the sessions whose resume runs (resume.go)
 	conns     *connSet
 	dbg       launcherDebug // what the debug commands turned on (debug.go)
 
 	// exec hands the terminal to a blocking command; after delivers msg
 	// after d. Tests replace both.
-	exec  func(tea.ExecCommand, tea.ExecCallback) tea.Cmd
-	after func(d time.Duration, msg tea.Msg) tea.Cmd
+	exec          func(tea.ExecCommand, tea.ExecCallback) tea.Cmd
+	after         func(d time.Duration, msg tea.Msg) tea.Cmd
+	handoff       bool
+	pendingAttach *pendingAttach
+	pendingExec   *pendingExec
+	stopInput     func() bool
+	inputErr      error
+	bgMu          sync.Mutex
+	bgCtx         context.Context
+	bgCancel      context.CancelFunc
+	bgWG          sync.WaitGroup
+	waiters       atomic.Int32
+	hostSaves     hostSaveCompletions
+	// tierWait lets the fake scheduler recognise an idle question reader.
+	tierWait func(func() tea.Msg) tea.Msg
 }
 
 // renameState is the inline rename of a session row.
 type renameState struct {
 	key  sessKey
-	old  string
+	old  string // the name as the host sent it; the field shows it cleaned
 	in   input
 	busy bool
+	// edited is true once a key changed the field. Until then, Enter keeps
+	// the host's name, hidden characters and all.
+	edited bool
 }
 
 // New builds the launcher. It reads the saved hosts at once; everything
 // that touches the network runs later, in commands.
 func New(ctx context.Context, be Backend, o Options) *Model {
+	// The launcher draws its own screen: a wait of the client, such as for
+	// the lock of hosts.toml, writes nothing on it, and a host-ID change on
+	// Dial surfaces as a toast rather than stderr text.
+	ctx, cancelTier := context.WithCancel(ctx)
 	m := &Model{
-		ctx: ctx, be: be, now: o.Now, motion: o.Motion,
-		width: 80, height: 24, dark: true, focused: true,
+		ctx: ctx, be: be, sessionShell: o.SessionShell, policyLockdown: o.PolicyLockdown, now: o.Now, motion: o.Motion,
+		cancelTier: cancelTier, tierRequests: make(chan tierQuestionRequest, 1),
+		grantRequests: make(chan grantQuestionRequest, 1),
+		width:         80, height: 24, dark: true, focused: true,
 		autoSel:   true,
 		attach:    &client.AttachState{},
 		lastAgent: map[string]string{},
@@ -140,19 +182,20 @@ func New(ctx context.Context, be Backend, o Options) *Model {
 			return tea.Tick(d, func(time.Time) tea.Msg { return msg })
 		},
 	}
+	ctx = m.launcherContext(ctx)
+	m.ctx = ctx
+	if o.After != nil {
+		m.after = o.After
+	}
 	if m.now == nil {
 		m.now = time.Now
 	}
 	m.epoch, m.revealAt = m.now(), m.now()
-	m.settings = be.Settings()
+	m.settings, m.settingsWarned = be.ReadSettings()
 	commands = withKeymap(registry(), m.settings.Keymap)
-	hosts, err := be.LoadHosts()
-	m.loadErr = err
-	sort.SliceStable(hosts, func(i, j int) bool { return hosts[i].Name < hosts[j].Name })
-	for _, h := range hosts {
-		m.hosts = append(m.hosts, &hostConn{host: h})
-	}
+	m.hosts, m.loadErr = loadSavedHosts(ctx, be)
 	m.restore(o.Switcher)
+
 	if d, ok := be.(interface {
 		demoTraces(time.Time) map[sessKey][]time.Time
 	}); ok {
@@ -167,26 +210,15 @@ func New(ctx context.Context, be Backend, o Options) *Model {
 		// One host: its sessions are the only useful list.
 		m.screen, m.cur = scrSessions, m.hosts[0].name()
 	}
+	m.openBg(ctx)
 	m.syncSel()
 	return m
 }
 
-// Close closes every connection and saves what the launcher saw. Run calls
-// it after the program ends.
-func (m *Model) Close() {
-	if g, ok := m.modal.(*guide); ok {
-		g.halt() // a half-made machine is deleted before the launcher goes
-	}
-	m.stopBundle() // a bundle that stops leaves no file
-	m.remember()()
-	m.conns.closeAll()
-}
-
 // Init starts the connections and the timers.
 func (m *Model) Init() tea.Cmd {
-	be := m.be
 	cmds := []tea.Cmd{
-		func() tea.Msg { return sshHostsMsg{be.SSHConfigHosts()} },
+		m.loadSSHHosts(),
 		tea.RequestBackgroundColor,
 		tea.RequestForegroundColor,
 		queryPalette(),
@@ -194,6 +226,9 @@ func (m *Model) Init() tea.Cmd {
 		m.after(latencyEvery, latencyTickMsg{}),
 		m.after(activityEvery, activityTickMsg{}),
 		m.debugOnStart(),
+		m.waitForTierQuestion(),
+		m.waitForGrantQuestion(),
+		m.keymapOnStart(),
 	}
 	for _, h := range m.hosts {
 		cmds = append(cmds, m.dial(h))
@@ -203,48 +238,28 @@ func (m *Model) Init() tea.Cmd {
 		m.toasts.push(m.now(), toastError, sentence(msg), hint)
 		cmds = append(cmds, m.after(toastErrorLife, toastTickMsg{}))
 	}
+	if m.settingsWarned != "" {
+		cmds = append(cmds, m.toastNext(toastWarning, m.settingsWarned+".", brand.Name+" config check"))
+	}
 	return tea.Batch(append(cmds, m.startTimers())...)
 }
 
-// Timer and result messages.
-type (
-	previewTickMsg struct{ seq int }
-	opDoneMsg      struct {
-		host string
-		ok   string
-		err  error
-		drop string // a session to take off the list
-	}
-	foldersMsg struct {
-		host, prefix string
-		res          client.FoldersResult
-		quick        bool // for the quick-start line
-	}
-	activityTickMsg struct{}
-	startedMsg      struct {
-		startReq // what started: a question about it sends it again
-		s        *client.Session
-		err      error
-	}
-	attachDoneMsg struct {
-		host, id, name string
-		res            client.AttachResult
-		err            error
-	}
-	hostSavedMsg struct {
-		host   client.Host
-		remove bool
-		err    error
-	}
-	settingsMsg struct{ s client.Settings }
-	sshHostsMsg struct{ hosts []string }
-)
-
 // Update handles one message. It never blocks: everything slow is a command.
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	quick := m.prompt
+	quickText, quickSeq := "", uint64(0)
+	if quick != nil {
+		quickText, quickSeq = quick.in.value(), quick.folderSeq
+	}
 	before, modal, scr, cur, armed := m.sel, m.modal, m.screen, m.cur, m.quitArmed
 	selIdx, hostSel := m.selIdx, m.hostSel
-	cmd := m.update(msg)
+	// An action that read config.toml brings the settings first, so that
+	// what it leads to, such as an attach, uses them.
+	cmd := tea.Batch(m.settingsOf(msg), m.update(msg))
+	m.retireQuickFolders(quick, quickText, quickSeq)
+	m.retireFormFolders(modal)
+	m.retirePolicy(modal)
+	cmd = tea.Batch(cmd, m.retireSelectedNew())
 	if m.sel != before {
 		cmd = tea.Batch(cmd, m.schedulePreview())
 	}
@@ -272,6 +287,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m *Model) update(msg tea.Msg) tea.Cmd {
 	switch msg := msg.(type) {
+	case execInputFailedMsg:
+		m.inputErr = msg.err
+		return tea.Quit
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 		m.syncSel()
@@ -308,8 +326,12 @@ func (m *Model) update(msg tea.Msg) tea.Cmd {
 	case activityTickMsg:
 		return tea.Batch(m.after(activityEvery, activityTickMsg{}), m.readActivity())
 	case tea.KeyPressMsg:
+		if m.newHostLookupKey(msg.String()) {
+			return nil
+		}
 		return m.onKey(msg)
 	case tea.MouseClickMsg:
+		m.cancelNewHostLookup()
 		return m.onClick(msg)
 	case tea.MouseWheelMsg:
 		return m.onWheel(msg)
@@ -319,7 +341,7 @@ func (m *Model) update(msg tea.Msg) tea.Cmd {
 		return m.onToastTick()
 	case debugTickMsg, debugDoneMsg:
 		return m.onDebugMsg(msg)
-	case dialledMsg, connDoneMsg, redialMsg, sessionsMsg, latencyMsg, doctorMsg, refreshTickMsg, latencyTickMsg:
+	case dialledMsg, connDoneMsg, redialMsg, sessionsMsg, latencyMsg, doctorMsg, hostRuntimeUpgradedV1, refreshTickMsg, latencyTickMsg:
 		return m.onConn(msg)
 	case previewTickMsg:
 		if msg.seq == m.preview.seq {
@@ -329,15 +351,42 @@ func (m *Model) update(msg tea.Msg) tea.Cmd {
 	case peekMsg:
 		m.onPeek(msg)
 		return nil
+	case policyMsg:
+		return m.onPolicy(msg)
+	case policyStoppedMsg:
+		return m.onPolicyStopped(msg)
 	case opDoneMsg:
 		return m.onOpDone(msg)
+	case grantCleanupMsg:
+		if msg.err != nil {
+			return m.toastErr(msg.err)
+		}
+		return nil
+	case grantQuestionRequest:
+		return m.onGrantQuestion(msg)
+	case grantQuestionEndedMsg:
+		return m.onGrantQuestionEnded(msg)
+	case tierQuestionRequest:
+		return m.onTierQuestion(msg)
+	case tierQuestionEndedMsg:
+		return m.onTierQuestionEnded(msg)
+	case hostTierResolvedMsg:
+		return m.onHostTierResolved(msg)
+	case setupWarnMsg:
+		return m.toastSetupWarn(msg.warn)
 	case shellDoneMsg:
 		if msg.err != nil {
-			return m.toastErr(&client.UserError{Msg: "the shell on " + msg.host + " ended with an error: " + msg.err.Error()})
+			return m.toastErr(&client.UserError{Msg: "the shell on " + msg.host + " ended with an error: " + msg.err.Error(), Hint: "Open the shell again.", Code: "shell_failed"})
 		}
 		return nil
 	case foldersMsg:
 		return m.onFolders(msg)
+	case newSelectedReadyMsg:
+		return m.onSelectedReady(msg)
+	case newSelectedResultMsg:
+		return m.onSelectedResult(msg)
+	case newSelectedFinishedMsg:
+		return m.onSelectedFinished(msg)
 	case startedMsg:
 		return m.onStarted(msg)
 	case resumedMsg:
@@ -346,18 +395,28 @@ func (m *Model) update(msg tea.Msg) tea.Cmd {
 		return m.onAttachEnded(msg)
 	case hostSavedMsg:
 		return m.onHostSaved(msg)
+	case newStartSourceMsg:
+		return m.onNewStartSource(msg)
+	case newStartDialledMsg:
+		return m.onNewStartDialled(msg)
+	case newHostResolvedMsg:
+		return m.onNewHostResolved(msg)
+	case newHostTierResolvedMsg:
+		return m.onNewHostTierResolved(msg)
+	case hostReloadedMsg:
+		return m.onHostReloaded(msg)
 	case setupMsg:
 		return m.onSetup(msg)
+	case rootSealedMsg:
+		return m.onRootSealed(msg)
 	case editorDoneMsg:
 		return m.onEditorDone(msg)
 	case settingsMsg:
-		m.settings = msg.s
-		commands = withKeymap(registry(), m.settings.Keymap)
-		return nil
+		return m.onSettings(msg)
 	case sshHostsMsg:
 		return m.onSSHHosts(msg)
 	}
-	switch d := m.modal.(type) {
+	switch d := questionOwner(m.modal).(type) {
 	case *wizard:
 		return d.onMsg(m, msg)
 	case *guide:
@@ -376,39 +435,6 @@ func (m *Model) onToastTick() tea.Cmd {
 	return nil
 }
 
-// onOpDone reports a finished operation, and lists the host's sessions again.
-func (m *Model) onOpDone(msg opDoneMsg) tea.Cmd {
-	var cmd tea.Cmd
-	if msg.err != nil {
-		cmd = m.toastErr(msg.err)
-	} else if msg.ok != "" {
-		cmd = m.toast(toastSuccess, msg.ok)
-	}
-	if h := m.hostByName(msg.host); h != nil {
-		h.changes++
-		if msg.err == nil && msg.drop != "" {
-			h.sessions = slices.DeleteFunc(h.sessions, func(s client.Session) bool { return s.ID == msg.drop })
-			m.syncSel()
-		}
-		cmd = tea.Batch(cmd, m.listSessions(h))
-	}
-	if m.rename != nil && m.rename.busy {
-		m.rename = nil
-	}
-	return cmd
-}
-
-// onFolders takes folder completions, for the quick start or the form.
-func (m *Model) onFolders(msg foldersMsg) tea.Cmd {
-	if p := m.prompt; msg.quick && p != nil && p.host == msg.host && p.asked == msg.prefix {
-		p.folders = msg.res.Matches
-	}
-	if d, ok := m.modal.(*newSession); ok && d.host == msg.host && !msg.quick {
-		d.setSuggestions(msg.prefix, msg.res)
-	}
-	return nil
-}
-
 // onAttachEnded comes back from an attach, and tells the wizard if it waited for it.
 func (m *Model) onAttachEnded(msg attachDoneMsg) tea.Cmd {
 	cmd := m.onAttachDone(msg)
@@ -416,27 +442,6 @@ func (m *Model) onAttachEnded(msg attachDoneMsg) tea.Cmd {
 		cmd = tea.Batch(cmd, w.afterAttach(m, msg))
 	}
 	return cmd
-}
-
-// onSetup passes a setup step's result to the wizard, or drops it if the wizard closed.
-func (m *Model) onSetup(msg setupMsg) tea.Cmd {
-	if w, ok := m.modal.(*wizard); ok {
-		return w.onMsg(m, msg)
-	}
-	if msg.conn != nil {
-		return m.dropConn(msg.conn) // the wizard closed while it ran
-	}
-	return nil
-}
-
-// onEditorDone reloads the settings after the editor closes.
-func (m *Model) onEditorDone(msg editorDoneMsg) tea.Cmd {
-	be := m.be
-	reload := func() tea.Msg { return settingsMsg{be.Settings()} }
-	if msg.err != nil {
-		return tea.Batch(reload, m.toastErr(msg.err))
-	}
-	return reload
 }
 
 // onSSHHosts keeps the hosts from the SSH config, for the add-host wizard.

@@ -11,7 +11,6 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
-	"path/filepath"
 	"sync"
 	"syscall"
 	"time"
@@ -21,6 +20,7 @@ import (
 	"github.com/iamlakshya/simstim/internal/agents"
 	"github.com/iamlakshya/simstim/internal/brand"
 	"github.com/iamlakshya/simstim/internal/diag"
+	"github.com/iamlakshya/simstim/internal/guestpty"
 	"github.com/iamlakshya/simstim/internal/paths"
 	"github.com/iamlakshya/simstim/internal/proto"
 	"github.com/iamlakshya/simstim/internal/ring"
@@ -40,30 +40,46 @@ type outFrame struct {
 }
 
 type hclient struct {
-	conn     net.Conn
-	w        *proto.Writer
-	out      chan outFrame
-	attached bool
-	once     sync.Once
-	done     chan struct{}
-	tr       clientTrace // the debug trace of this attach (holder_trace.go)
+	helloLine *StartupLineV1
+	conn      net.Conn
+	w         *proto.Writer
+	out       chan outFrame
+	attached  bool
+	once      sync.Once
+	done      chan struct{}
+	tr        clientTrace // the debug trace of this attach (holder_trace.go)
+	access    access      // what this connection may do (holder_peer.go)
 }
 
 func (c *hclient) close() {
 	c.once.Do(func() {
 		close(c.done)
+		if c.helloLine != nil {
+			_ = c.helloLine.Close()
+		}
 		c.conn.Close()
 	})
 }
 
 // Holder owns one session: its PTY, output ring, socket and manifest.
 type Holder struct {
-	id   string
-	log  *slog.Logger
-	ln   net.Listener
-	ptmx *os.File
-	fd   int
-	cmd  *exec.Cmd
+	guest    *GuestHolder
+	ev       *guestEvents
+	vmTerm   *guestpty.Terminal
+	id       string
+	log      *slog.Logger
+	ln       net.Listener
+	ptmx     *os.File
+	fd       int
+	cmd      *exec.Cmd
+	main     *holderMainV1
+	ordinary *ownedOrdinaryHolderV1
+	waitDone chan struct{}
+	stopMu   sync.Mutex
+	// hookLn is the hook socket's listener. peerCheck is true when the
+	// holder checks where each peer runs (holder_peer.go).
+	hookLn    net.Listener
+	peerCheck bool
 
 	mu        sync.Mutex
 	m         *Manifest
@@ -92,6 +108,12 @@ type Holder struct {
 	// saveMu orders the manifest's saves; closed is set by the last one.
 	saveMu sync.Mutex
 	closed bool
+	// copies numbers each copy of the manifest for a save, under mu, and
+	// saved is the number of the newest copy saved, under saveMu: a save of
+	// an older copy never replaces a newer one, such as a renamed one.
+	copies, saved uint64
+	syncFirstSave bool
+	loadedName    string
 	// From agent hooks.
 	hookSeen    bool
 	hookBusy    bool
@@ -100,8 +122,9 @@ type Holder struct {
 	// readDone is closed when readLoop has read all the agent's output.
 	readDone chan struct{}
 	// The shadow terminal, for snapshots and query answers; nil if unavailable.
-	vt     *VT
-	ptyOut chan []byte // ordered writes to the PTY from the shadow terminal
+	vt         *VT
+	ptyOutDone chan struct{}
+	ptyOut     chan []byte // ordered writes to the PTY from the shadow terminal
 	// From screen rules.
 	scr       *screenModel
 	ruleState string
@@ -112,15 +135,39 @@ type Holder struct {
 	// its terminal first (start.go).
 	secretEnv []string
 	notes     []string
+	startup   *holderStartup
 	// The debug trace (holder_trace.go), on while a traced client is attached.
 	dbg holderDebug
 }
 
 // RunHolder runs the holder for session id until the session is killed.
 func RunHolder(id string) error {
-	m, err := LoadManifest(id)
+	if !validID(id) {
+		return UserError("not_found", "the holder needs a valid session ID", "List sessions to find its ID.")
+	}
+	if files, guestMode := guestHolder(); guestMode {
+		return runGuestHolder(id, files)
+	}
+	ordinary, releaseLock, err := acquireOrdinaryHolderV1(id)
+	if err != nil {
+		return err
+	}
+	pending, err := beginHolderStartup(id)
+	if err != nil {
+		releaseLock()
+		return err
+	}
+	defer pending.finish(releaseLock)
+	if err := bindOrdinaryHolderSocketsV1(ordinary, pending.peer); err != nil {
+		return err
+	}
+	m, err := loadStartingManifest(pending.ctx, id)
 	if err != nil {
 		return fmt.Errorf("load manifest: %w", err)
+	}
+	afterHolderLoad(pending.ctx, id)
+	if pending.ctx.Err() != nil {
+		return nil
 	}
 	lf, err := openHolderLog(paths.HolderLog(id), holderLogMax)
 	if err != nil {
@@ -129,43 +176,59 @@ func RunHolder(id string) error {
 	defer lf.Close()
 	lines := diag.NewLines()
 	h := &Holder{
-		id:       id,
-		m:        m,
-		log:      newHolderLog(lf, lines),
-		ring:     ring.New(RingSize),
-		clients:  map[*hclient]struct{}{},
-		readDone: make(chan struct{}),
+		id:            id,
+		m:             m,
+		log:           newHolderLog(lf, lines),
+		ring:          ring.New(RingSize),
+		clients:       map[*hclient]struct{}{},
+		readDone:      make(chan struct{}),
+		waitDone:      make(chan struct{}),
+		ordinary:      ordinary,
+		syncFirstSave: true,
+		loadedName:    m.Name,
 	}
 	h.dbg.lines = lines
 	// A holder that starts again, as after a reboot, starts with debug off.
 	m.DebugUntil = nil
+	// The unit goes in before any save, the save of a start that fails too.
+	h.takeUnit()
 	h.log.Info("holder starting", "session", id, "helper", brand.HostBinary, "version", version.Version)
 	restored := wasRestored(m)
-	if err := h.listen(); err != nil {
-		h.log.Error("listen failed", "err", err)
-		return err
-	}
+	pending.prepare(h, restored)
 	h.secretsBeforeStart(restored)
-	if err := h.start(); err != nil {
+	if err := pending.beginAgent(); err != nil {
+		return nil
+	}
+	c, err := h.startAgent()
+	if err != nil {
 		h.log.Error("agent did not start", "err", err)
 		h.mu.Lock()
 		code := 127
 		h.m.Status = Status{State: StateErrored, Since: time.Now().UTC(), ExitCode: &code, Reason: err.Error()}
+		c := h.copyForSave()
 		h.mu.Unlock()
-		_ = h.m.Save()
-		h.ln.Close()
-		os.Remove(paths.Socket(id))
+		_ = h.save(c, false)
+		h.closeSockets()
 		return err
 	}
 	h.startAlerts(restored)
 	h.startVT()
-	go h.acceptLoop()
-	go h.readLoop()
-	go h.waitLoop()
-	go h.tick()
 
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP)
+	// Activate the live request handler before saving the started manifest so
+	// waitStarted never returns while sockets still reject info/peek/kill with
+	// pendingHolderError. Hold saveMu across activation so a fast-exiting child
+	// cannot save StateExited first.
+	h.saveMu.Lock()
+	go h.readLoop()
+	go h.waitLoop()
+	go h.tick()
+	pending.activate(h)
+	h.saveMu.Unlock()
+	if err := h.save(c, false); err != nil {
+		h.log.Warn("manifest not saved", "err", err)
+	}
 	s := <-sig
 	h.log.Info("stopping on a signal", "signal", s.String())
 	// A signal means the system (or the user's manager) is stopping the
@@ -175,32 +238,27 @@ func RunHolder(id string) error {
 	return nil
 }
 
-func (h *Holder) listen() error {
-	sock := paths.Socket(h.id)
-	if err := paths.EnsurePrivateDir(filepath.Dir(sock)); err != nil {
-		return err
+func (h *Holder) start() error {
+	if h.vmTerm != nil {
+		return h.startVMTerminal()
 	}
-	if err := paths.EnsurePrivateDir(filepath.Dir(filepath.Dir(sock))); err != nil {
-		return err
-	}
-	_ = os.Remove(sock)
-	var lc net.ListenConfig
-	ln, err := lc.Listen(context.Background(), "unix", sock)
+	c, err := h.startAgent()
 	if err != nil {
-		return fmt.Errorf("listen on the session's socket: %w", err)
+		return err
 	}
-	if err := os.Chmod(sock, 0o600); err != nil {
-		ln.Close()
-		return fmt.Errorf("make the session's socket private: %w", err)
+	if err := h.save(c, false); err != nil {
+		h.log.Warn("manifest not saved", "err", err)
 	}
-	h.ln = ln
 	return nil
 }
 
-func (h *Holder) start() error {
+func (h *Holder) startAgent() (savedCopy, error) {
+	if h.waitDone == nil {
+		h.waitDone = make(chan struct{})
+	}
 	m := h.m
 	if len(m.Agent.Argv) == 0 {
-		return errors.New("no command to run")
+		return savedCopy{}, errors.New("no command to run")
 	}
 	// The setup (or resume) hook and any notes show in the session's
 	// terminal before the agent (start.go). After a restore or a resume, the
@@ -209,25 +267,21 @@ func (h *Holder) start() error {
 	m.RunHook = ""
 	bin, err := lookPath(argv[0], envValue(m.Env, "PATH"))
 	if err != nil {
-		return err
+		return savedCopy{}, err
 	}
 	cmd := exec.CommandContext(context.Background(), bin, argv[1:]...)
 	cmd.Args[0] = argv[0]
 	// Secrets go into the agent's environment and nowhere else.
 	cmd.Env = append(append([]string(nil), m.Env...), h.secretEnv...)
 	cmd.Dir = m.Cwd
-	cols, rows := m.Term.Cols, m.Term.Rows
-	if cols <= 0 {
-		cols = 80
-	}
-	if rows <= 0 {
-		rows = 24
-	}
-	ptmx, err := pty.StartWithSize(cmd, &pty.Winsize{Cols: clamp16(cols), Rows: clamp16(rows)})
+	cols, rows := h.startSize()
+	main := prepareHolderMainV1(cmd)
+	ptmx, err := pty.StartWithSize(cmd, &pty.Winsize{Cols: clampCols(cols), Rows: clampRows(rows)})
 	cmd.Env, h.secretEnv = nil, nil // the agent has its copy; the holder keeps none
 	if err != nil {
-		return fmt.Errorf("start %s in a terminal: %w", argv[0], err)
+		return savedCopy{}, fmt.Errorf("start %s in a terminal: %w", argv[0], err)
 	}
+	h.main = main
 	h.ptmx = ptmx
 	h.fd = int(ptmx.Fd())
 	if _, ok := agents.Find(m.Agent.Kind); ok {
@@ -242,9 +296,6 @@ func (h *Holder) start() error {
 
 	h.mu.Lock()
 	now := time.Now().UTC()
-	if u := ownUnit(h.id); u != "" {
-		m.Run.Unit = u
-	}
 	m.Run.HolderPID = os.Getpid()
 	m.Run.AgentPID = cmd.Process.Pid
 	m.Run.Socket = paths.Socket(h.id)
@@ -256,21 +307,21 @@ func (h *Holder) start() error {
 	m.HostVersion = version.Version
 	m.Status = Status{State: StateWorking, Since: now, Source: "start"}
 	h.lastOut = time.Now()
+	// A numbered copy, as every save of the holder: a rename that comes
+	// now is not undone by this save (holder_rename.go).
+	c := h.copyForSave()
 	h.mu.Unlock()
-	if err := m.Save(); err != nil {
-		h.log.Warn("manifest not saved", "err", err)
-	}
 	// The program and the count of its arguments only: an argument can hold
 	// a prompt's text or a key, and the log goes into a debug bundle.
 	h.log.Info("agent started", "program", m.Agent.Argv[0], "args", len(m.Agent.Argv)-1, "pid", cmd.Process.Pid)
-	return nil
+	return c, nil
 }
 
 func (h *Holder) readLoop() {
 	defer close(h.readDone)
 	buf := make([]byte, 64<<10)
 	for {
-		n, err := h.ptmx.Read(buf)
+		n, err := h.readPTY(buf)
 		if n > 0 {
 			h.output(buf[:n])
 		}
@@ -328,8 +379,20 @@ func (h *Holder) output(data []byte) {
 }
 
 func (h *Holder) waitLoop() {
-	err := h.cmd.Wait()
-	newKills, snap := h.reap()
+	if h.waitDone != nil {
+		defer close(h.waitDone)
+	}
+	var err error
+	var remote proto.Ended
+	if h.vmTerm != nil {
+		remote, err = h.vmTerm.Wait()
+	} else {
+		err = h.cmd.Wait()
+	}
+	newKills, snap := false, int64(0)
+	if h.vmTerm == nil {
+		newKills, snap = h.reap()
+	}
 	if snap > 0 {
 		h.goSnapshot(snap)
 	}
@@ -341,6 +404,12 @@ func (h *Holder) waitLoop() {
 	case <-time.After(time.Second):
 	}
 	ended, killed := endOf(err)
+	if h.vmTerm != nil {
+		ended = remote
+		if err != nil {
+			ended.ExitCode = 125
+		}
+	}
 	// New kills and a SIGKILL: the cap stopped the agent. New kills without
 	// one: it stopped other processes, which no tick has claimed yet.
 	ended.OOM = killed && newKills
@@ -349,6 +418,7 @@ func (h *Holder) waitLoop() {
 	h.mu.Lock()
 	h.exited = true
 	h.ended = ended
+	h.ev.ended(h.id, ended)
 	if h.stopping {
 		// The holder stopped the agent because the system is stopping: keep
 		// the session's state, so it is restored after the restart.
@@ -381,116 +451,7 @@ func (h *Holder) waitLoop() {
 		}
 	}
 	// Save a copy: other goroutines change the manifest under the lock.
-	m := *h.m
+	c := h.copyForSave()
 	h.mu.Unlock()
-	_ = h.save(&m, false)
-}
-
-// tick updates the status and saves the manifest when it changed.
-func (h *Holder) tick() {
-	t := time.NewTicker(time.Second)
-	defer t.Stop()
-	last := time.Now()
-	for range t.C {
-		last = h.noteTick(last)
-		h.step()
-	}
-}
-
-// step is one tick: it reads the unit's memory files, updates the status,
-// and saves the manifest when it changed.
-func (h *Holder) step() {
-	mem := h.readMem()
-	lt := h.lockTimed()
-	on := h.mem.on
-	h.checkMemory(mem)
-	h.snapshotBefore(on)
-	// Before updateStatus: a kill that it claims clears the memory warning's
-	// mark, and the status shows that in the same tick.
-	if kills := h.checkOOM(mem.kills); kills > 0 {
-		h.goSnapshot(kills) // in a goroutine: it reads no file under the lock
-	}
-	if !h.exited {
-		h.updateStatus()
-	}
-	dirty := h.dirty
-	h.dirty = false
-	var snapshot Manifest
-	if dirty {
-		snapshot = *h.m
-	}
-	h.mu.Unlock()
-	lt.tick()
-	if dirty {
-		if err := h.save(&snapshot, false); err != nil {
-			h.log.Warn("manifest not saved", "err", err)
-		}
-	}
-}
-
-// updateStatus sets the session's state from the screen rules, the agent's
-// hooks and notifications, the memory warning, and its output. The caller
-// holds h.mu.
-func (h *Holder) updateStatus() {
-	if h.scr != nil && h.scr.dirty {
-		h.scr.dirty = false
-		h.ruleState, h.ruleID, _ = agents.Detect(h.m.Agent.Kind, h.scr.screen())
-		if full := h.scr.altScreen(); full != h.m.Status.FullScreen {
-			h.m.Status.FullScreen = full
-			h.dirty = true
-		}
-	}
-	state, src := h.agentState()
-	agentPrev := h.al.agent
-	h.al.agent = state
-	if h.mem.mark && state != StateNeedsInput {
-		// Close to the memory cap (holder_mem.go), after the agent's own wait.
-		state, src = StateNeedsInput, srcMemory
-	}
-	// The wait can also pass between the agent and the memory warning.
-	handover := state == StateNeedsInput && (src == srcMemory) != (h.m.Status.Source == srcMemory)
-	if state != h.m.Status.State || handover {
-		oom := h.m.Status.OOM
-		h.m.Status = Status{State: state, Since: time.Now().UTC(), Source: src, FullScreen: h.m.Status.FullScreen, OOM: oom}
-		switch {
-		case src == srcMemory:
-			h.m.Status.Reason = h.mem.reason()
-			h.mem.shown = time.Now()
-		case state == StateNeedsInput:
-			// The agent's question, if its hook gave one.
-			h.m.Status.Reason = h.notifyMsg
-		case oom:
-			// The memory cap stopped a process that the agent started.
-			h.m.Status.Reason = oomChildReason
-		}
-		h.dirty = true
-	}
-	if h.al.agent != agentPrev {
-		// Alerts follow the agent's own state, so its turns and questions
-		// count while the memory warning shows too.
-		h.alertState(agentPrev, h.al.agent)
-	}
-}
-
-// agentState is the session's state from the agent's own signals, without
-// the memory warning. The caller holds h.mu.
-func (h *Holder) agentState() (state, src string) {
-	state, src = StateIdle, "quiet"
-	switch {
-	case h.ruleState == StateNeedsInput:
-		state, src = StateNeedsInput, "screen:"+h.ruleID
-	case h.needInput:
-		state, src = StateNeedsInput, "notify"
-	case h.ruleState == StateWorking:
-		state, src = StateWorking, "screen:"+h.ruleID
-	case h.hookBusy:
-		state, src = StateWorking, "hook"
-	case h.busy:
-		state, src = StateWorking, "progress"
-	case h.hookSeen && !h.lastTurnEnd.IsZero() && time.Since(h.lastTurnEnd) < 3*time.Second:
-		state, src = StateIdle, "hook"
-	case time.Since(h.lastOut) < 3*time.Second:
-		state, src = StateWorking, "output"
-	}
-	return state, src
+	_ = h.save(c, false)
 }

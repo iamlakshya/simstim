@@ -103,6 +103,9 @@ type jackIn struct {
 
 // jack starts the sweep, then attaches. With motion off it attaches at once.
 func (m *Model) jack(h *hostConn, id, name string) tea.Cmd {
+	if m.transferInputBlocked() {
+		return nil
+	}
 	if !m.motion {
 		return m.attachTo(h, id, name)
 	}

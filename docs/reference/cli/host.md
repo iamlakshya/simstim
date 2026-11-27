@@ -7,7 +7,14 @@ title: "simstim host"
 Add, create, list, test and remove hosts.
 
 ```text
-simstim host
+simstim host [flags]
+```
+
+## Examples
+
+```sh
+simstim host add my-vps
+simstim host ls
 ```
 
 ## Flags from the parent command
@@ -16,23 +23,32 @@ simstim host
 | --- | --- |
 | `--debug[=<categories>]` | turn on the debug mode, with every category, or with the categories listed: attach, net, memory, launcher, runtime. A list binds only in the = form, such as `--debug=net` |
 | `--debug-file <file>` | write the client's debug records to this file. On its own, it turns on every category (SIMSTIM_DEBUG_FILE does the same) |
+| `--no-color` | print no colour (NO_COLOR does the same) |
+| `--no-input` | ask nothing: a question that needs an answer fails with exit code 4, and names the flag that answers it (SIMSTIM_NO_INPUT=1 does the same) |
 
 ## Commands
 
 | Command | What it does |
 | --- | --- |
 | [`host add`](host_add.md) | Connect a host: check it, install the helper, prepare it |
-| [`host alerts`](host_alerts.md) | Show where a host sends alerts about its sessions, and the last deliveries |
-| [`host create`](host_create.md) | Make a new host with a provider (lima, docker, e2b), install the helper and connect |
-| [`host destroy`](host_destroy.md) | Delete a host made by `host create`: its VM, container or sandbox, and every session on it |
+| [`host alerts`](host_alerts.md) | Show where a host sends alerts, and the last deliveries |
+| [`host create`](host_create.md) | Make a host with lima, docker or e2b, and connect it |
+| [`host default`](host_default.md) | Show or choose the default host for new sessions |
 | [`host doctor`](host_doctor.md) | Check a host's setup, and with `--fix` fix what it can |
-| [`host idle`](host_idle.md) | Set how long a created host may idle before it stops, for example 30m, or never |
+| [`host invite`](host_invite.md) | Make a public invite for a machine to prepare itself |
+| [`host join`](host_join.md) | Prepare this machine from a laptop invite on standard input |
+| [`host leave`](host_leave.md) | Undo this machine's original root-owned join ledger |
 | [`host ls`](host_ls.md) | List hosts |
-| [`host restore`](host_restore.md) | Start again the sessions a host restart stopped (the host also does this at boot) |
-| [`host rm`](host_rm.md) | Forget a host (its sessions keep running) |
+| [`host prepare`](host_prepare.md) | Probe a host, prepare its runtime and test its sandbox wall |
+| [`host rekey`](host_rekey.md) | Replace a host's pinned host key, after you confirm |
+| [`host restore`](host_restore.md) | Start again the sessions that a host restart stopped |
+| [`host rm`](host_rm.md) | Forget a host, or delete a created machine |
+| [`host set`](host_set.md) | Change a host's settings, such as idle or tier |
+| [`host show`](host_show.md) | Describe a host |
 | [`host start`](host_start.md) | Start the host through its provider or provider script |
 | [`host status`](host_status.md) | Ask the provider or provider script whether the host is running |
-| [`host stop`](host_stop.md) | Stop the host through its provider or provider script (a VM's sessions stop too; a sandbox's are paused) |
+| [`host stop`](host_stop.md) | Stop the host through its provider or provider script |
 | [`host test`](host_test.md) | Check that a host answers, and how fast |
+| [`host upgrade`](host_upgrade.md) | Install this client's helper on a host |
 
 See [all commands](_index.md).

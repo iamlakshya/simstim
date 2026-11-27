@@ -5,6 +5,8 @@ import (
 	"context"
 	"errors"
 	"io"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -78,6 +80,26 @@ func readyCheck(kind, title, login string) api.AgentCheck {
 	return api.AgentCheck{Kind: kind, Title: title, Installed: true, OnPath: true, Path: "/home/dev/.local/bin/" + kind, Login: login}
 }
 
+// What ssh-keygen says, as the setup makes a key, goes where the guide
+// writes, stderr: stdout stays for data.
+func TestTheKeyStepWritesToTheGuide(t *testing.T) {
+	withFake(t, nil)
+	bin := t.TempDir()
+	keygen := "#!/bin/sh\necho 'Generating public/private ed25519 key pair.'\necho 'The key fingerprint is SHA256:x my laptop'\n"
+	if err := os.WriteFile(filepath.Join(bin, "ssh-keygen"), []byte(keygen), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	l := &guideLocal{keyLater: "~/.ssh/id_ed25519.pub"}
+	g, out, _ := testGuide(t, context.Background(), guideOpts{}, l, &clienttest.Transport{}, "y\n", true)
+	var err error
+	stdout, _ := captureOutput(t, func() { err = g.rentKey(&onboard.RentPlan{}) })
+	if err != nil || stdout != "" || !strings.Contains(out.String(), "Generating public/private ed25519 key pair.") ||
+		!strings.Contains(out.String(), "fingerprint") {
+		t.Errorf("rentKey: %v\nstdout %q\nthe guide wrote:\n%s", err, stdout, out.String())
+	}
+}
+
 // testGuide is a guide that reads in and writes to out. Its sessions only
 // record what they would run, and install what they are told to.
 func testGuide(t *testing.T, ctx context.Context, o guideOpts, l onboard.Local, tr *clienttest.Transport, in string, tty bool) (*guide, *bytes.Buffer, *[]string) {
@@ -100,7 +122,7 @@ func testGuide(t *testing.T, ctx context.Context, o guideOpts, l onboard.Local, 
 			}
 		}
 		tr.SetAgents(checks)
-		return "s" + a.Args.Name, true, nil
+		return "s2345672", true, nil
 	}
 	return g, &out, &ran
 }
@@ -120,7 +142,7 @@ func TestSetupWithFlags(t *testing.T) {
 		"Creating box with fake…", "✓ created the fake machine fake-box",
 		"[x] Claude Code", "[x] Codex", "To install: Codex.",
 		"Codex (1 of 1), with its vendor's installer",
-		"Done. box is ready.", "! Codex", "Try: " + brand.Name + " new box -- codex login --device-auth",
+		"Done. box is ready.", "! Codex", "Try: " + brand.Name + " agents login codex box",
 		brand.Name + " new box --agent claude",
 	} {
 		if !strings.Contains(out.String(), want) {
@@ -157,7 +179,7 @@ func TestSetupStepByStep(t *testing.T) {
 		"Type the numbers to install",
 		"Claude Code is not logged in. Its login:",
 		"Log in now? [Y/n]",
-		"Skipped. Later: " + brand.Name + " new box -- codex login --device-auth",
+		"Skipped. Later: " + brand.Name + " agents login codex box",
 		"✓ Claude Code", "Done. box is ready.",
 	} {
 		if !strings.Contains(out.String(), want) {
@@ -191,21 +213,16 @@ func TestSetupStopsAndSaysWhatWasDone(t *testing.T) {
 	// the checklist.
 	g.in = &cancelReader{r: strings.NewReader("2\n\nbox\n"), cancel: cancel}
 	err := g.run()
-	var ue *client.UserError
-	if !errors.As(err, &ue) || ue.Msg != "setup stopped; nothing else was changed" || !strings.Contains(ue.Hint, brand.Name+" setup") {
+	if !isCancel(err) || !strings.HasPrefix(err.Error(), "Cancelled. Done before that: made the fake machine fake-box, and saved the host box") ||
+		!strings.HasSuffix(err.Error(), ", and saved the host box.") {
 		t.Fatalf("err = %v\n%s", err, out)
-	}
-	for _, want := range []string{"Done before the stop:", "✓ made the fake machine fake-box, and saved the host box", "✓ saved the host box"} {
-		if !strings.Contains(out.String(), want) {
-			t.Errorf("missing %q in:\n%s", want, out)
-		}
 	}
 
 	ctx2, cancel2 := context.WithCancel(context.Background())
 	defer cancel2()
 	g2, out2, _ := testGuide(t, ctx2, guideOpts{}, &guideLocal{}, tr, "", true)
 	g2.in = &cancelReader{r: strings.NewReader(""), cancel: cancel2}
-	if err := g2.run(); !errors.As(err, &ue) || ue.Msg != "setup stopped; nothing was changed" {
+	if err := g2.run(); !isCancel(err) || err.Error() != "Cancelled. Nothing changed." {
 		t.Fatalf("a stop at the first question: %v\n%s", err, out2)
 	}
 }
@@ -216,7 +233,7 @@ func TestSetupNeedsATerminalOrFlags(t *testing.T) {
 		g, _, _ := testGuide(t, context.Background(), o, &guideLocal{}, &clienttest.Transport{}, "", false)
 		err := g.run()
 		var ue *client.UserError
-		if !errors.As(err, &ue) || !strings.Contains(ue.Hint, "--yes") {
+		if !errors.As(err, &ue) || !strings.Contains(ue.Hint, "--yes") || ue.Kind != client.KindNeedsAnswer {
 			t.Errorf("%+v: err = %v", o, err)
 		}
 	}
@@ -232,19 +249,19 @@ func TestSetupNeedsATerminalOrFlags(t *testing.T) {
 func TestSetupNamedHost(t *testing.T) {
 	withFake(t, nil)
 	g, _, _ := testGuide(t, context.Background(), guideOpts{}, &guideLocal{}, &clienttest.Transport{}, "", false)
-	h, err := g.namedHost("me@vps.example.com:2222")
-	if err != nil || h.Name != "vps.example.com" || h.SSH != "me@vps.example.com:2222" {
-		t.Fatalf("new host = %+v, %v", h, err)
+	h, was, err := g.namedHost("me@vps.example.com:2222")
+	if err != nil || h.Name != "vps.example.com" || h.SSH != "me@vps.example.com:2222" || was != nil {
+		t.Fatalf("new host = %+v, was %+v, %v", h, was, err)
 	}
 	saved := client.Host{Name: "box", Machine: &client.Machine{Provider: "fake", ID: "fake-box"}}
-	_ = client.SaveHost(saved)
-	if h, err := g.namedHost("box"); err != nil || h.Machine == nil {
-		t.Fatalf("a saved host = %+v, %v", h, err)
+	_ = saveHost(saved)
+	if h, was, err := g.namedHost("box"); err != nil || h.Machine == nil || was == nil || !client.SameEntry(*was, saved) {
+		t.Fatalf("a saved host = %+v, was %+v, %v", h, was, err)
 	}
-	_ = client.SaveHost(client.Host{Name: "vps", SSH: "vps"})
+	_ = saveHost(client.Host{Name: "vps", SSH: "vps"})
 	g.o.name = "vps"
 	var ue *client.UserError
-	if _, err := g.namedHost("me@203.0.113.9"); !errors.As(err, &ue) || !strings.Contains(ue.Msg, "already a host called vps") {
+	if _, _, err := g.namedHost("me@203.0.113.9"); !errors.As(err, &ue) || !strings.Contains(ue.Msg, "already a host called vps") {
 		t.Fatalf("a clash: %v", err)
 	}
 }

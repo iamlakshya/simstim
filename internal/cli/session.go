@@ -15,235 +15,70 @@ import (
 	"github.com/iamlakshya/simstim/internal/agents"
 	"github.com/iamlakshya/simstim/internal/brand"
 	"github.com/iamlakshya/simstim/internal/client"
-	"github.com/iamlakshya/simstim/internal/onboard"
 	"github.com/iamlakshya/simstim/internal/tui"
 )
 
-func isTerminal(f *os.File) bool { return term.IsTerminal(int(f.Fd())) }
+var isTerminal = func(f *os.File) bool { return term.IsTerminal(int(f.Fd())) }
 
-func termSize() (int, int) {
-	c, r, err := term.GetSize(int(os.Stdout.Fd()))
+func termSize() (int, int) { return termSizeOf(os.Stdout) }
+
+func termSizeOf(out *os.File) (int, int) {
+	c, r, err := term.GetSize(int(out.Fd()))
 	if err != nil {
 		return 80, 24
 	}
 	return c, r
 }
 
-func newCmd() *cobra.Command {
-	var agent, dir, name, base, memoryMax string
-	var detach, worktree, inline, setup, noSetup, mkdir bool
-	var secrets []string
-	cmd := &cobra.Command{
-		Use:   "new <host> [-- command…]",
-		Short: "Start a session on a host, and attach to it",
-		Example: "  " + brand.Name + " new my-vps --agent claude --dir ~/src/app\n" +
-			"  " + brand.Name + " new my-vps --agent claude --dir ~/src/new-app --mkdir\n" +
-			"  " + brand.Name + " new my-vps --agent claude --secret ANTHROPIC_API_KEY\n" +
-			"  " + brand.Name + " new my-vps --agent claude --memory-max 6G\n" +
-			"  " + brand.Name + " new my-vps --detach -- htop",
-		Args: cobra.MinimumNArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			h, err := client.FindHost(args[0])
-			if err != nil {
-				return err
-			}
-			if setup && noSetup {
-				return &client.UserError{Msg: "--setup and --no-setup cannot go together", Hint: "Pass one of them."}
-			}
-			var memMax int64
-			if cmd.Flags().Changed("memory-max") {
-				if memMax, err = client.ParseMemoryFlag(memoryMax); err != nil {
-					return err
-				}
-			}
-			// Fetch the secrets first: a password manager may want a touch,
-			// and a failing command should not cost a connection.
-			values, err := client.FetchSecrets(cmd.Context(), client.LoadSettings(), client.SecretNames(h, secrets), isTerminal(os.Stdin))
-			if err != nil {
-				return err
-			}
-			ctx, cancel := context.WithTimeout(cmd.Context(), 60*time.Second)
-			conn, err := client.Dial(ctx, h, true)
-			if err != nil {
-				cancel()
-				return err
-			}
-			cols, rows := termSize()
-			a := client.TerminalArgs(client.NewArgs{Agent: agent, Cwd: client.RemotePath(dir), MakeFolder: mkdir, Name: name, Worktree: worktree, Base: base, Inline: inline, MemoryMax: memMax, Secrets: values}, cols, rows)
-			if dash := cmd.ArgsLenAtDash(); dash >= 0 {
-				a.Argv = args[dash:]
-			}
-			if setup || noSetup {
-				a.Setup = setupValue(setup)
-			}
-			cancel()
-			s, err := startSession(cmd.Context(), conn, h, a)
-			conn.Close()
-			if err != nil {
-				return err
-			}
-			if detach {
-				fmt.Printf("Started %s/%s (%s, %s).\n", h.Name, s.ID, s.Name, s.Agent)
-				return nil
-			}
-			return attach(cmd.Context(), h, s.ID, s.Name)
-		},
-	}
-	cmd.Flags().StringVarP(&agent, "agent", "a", "shell", "the agent: "+agentKinds())
-	cmd.Flags().StringVarP(&dir, "dir", "d", "~", "the folder on the host")
-	cmd.Flags().BoolVar(&mkdir, "mkdir", false, "make the folder on the host if it does not exist, without asking")
-	cmd.Flags().StringVarP(&name, "name", "n", "", "a name for the session (default: the folder name)")
-	cmd.Flags().BoolVar(&detach, "detach", false, "start it without attaching")
-	cmd.Flags().BoolVarP(&worktree, "worktree", "w", false, "give the session its own git worktree and branch")
-	cmd.Flags().BoolVar(&inline, "inline", false, "start the agent in its inline mode, so your terminal keeps its scrollback (see agents.inline in config.toml)")
-	cmd.Flags().StringVar(&base, "base", "", "the commit or branch the worktree starts from (default: HEAD)")
-	cmd.Flags().StringVar(&memoryMax, "memory-max", "", "cap the session's memory: auto, or a `size` such as 4G (default: sessions.memory_max in config.toml)")
-	cmd.Flags().StringArrayVar(&secrets, "secret", nil, "pass a secret from config.toml's [secrets] into the session's environment (repeatable)")
-	cmd.Flags().BoolVar(&setup, "setup", false, "run the repository's setup script this time, whatever your answer for it")
-	cmd.Flags().BoolVar(&noSetup, "no-setup", false, "do not run the repository's setup script this time")
-	return cmd
-}
+// listSessions asks a host for its sessions. Tests replace it.
+var listSessions = func(ctx context.Context, conn *client.Conn) ([]client.Session, error) { return conn.Sessions(ctx) }
 
-// attach runs a session in this terminal.
-func attach(ctx context.Context, h client.Host, id, name string) error {
-	_, err := attachEnded(ctx, h, id, name)
-	return err
-}
-
-// attachEnded runs a session in this terminal, and reports whether the
-// session ended (rather than the user detaching).
-func attachEnded(ctx context.Context, h client.Host, id, name string) (bool, error) {
-	if !isTerminal(os.Stdin) || !isTerminal(os.Stdout) {
-		return false, &client.UserError{Msg: "attach needs a terminal", Hint: "Run it from a terminal, not a pipe."}
+// oneHost is the argument check of new: one host, then any command after
+// "--" (isolation spec 14.14). A second word before "--" fails, so that an
+// old "-d <folder>" after its end, or a command without its "--", never
+// starts a session that the user did not mean.
+func oneHost(c *cobra.Command, args []string) error {
+	before := len(args)
+	if dash := c.ArgsLenAtDash(); dash >= 0 {
+		before = dash
 	}
-	tui.RememberLast(h.Name, id, name)
-	res, err := client.Attach(ctx, client.AttachOptions{
-		Host: h, Session: id, Settings: client.LoadSettings(), Interactive: true,
-	})
-	if err != nil {
-		return false, err
-	}
-	if res.Ended != nil {
-		fmt.Print(endMessage(name, h.Name, id, res.Ended))
-	} else {
-		fmt.Printf("\r\nDetached. %s keeps running on %s.\n", name, h.Name)
-	}
-	return res.Ended != nil, nil
-}
-
-// resolve finds a session by ID or by unique name.
-func resolve(ctx context.Context, conn *client.Conn, ref string) (*client.Session, error) {
-	list, err := conn.Sessions(ctx)
-	if err != nil {
-		return nil, err
-	}
-	var byName []client.Session
-	for _, s := range list {
-		if s.ID == ref {
-			return &s, nil
+	switch {
+	case before == 0:
+		return argsError(c, nil)
+	case before > 1:
+		// A word that no host could have is not repeated (cli-spec 4.2).
+		hint := brand.Name + " host ls"
+		if client.ValidHostName(args[0]) {
+			hint = brand.Name + " new " + args[0] + " -- htop (a folder goes after -C)"
 		}
-		if s.Name == ref {
-			byName = append(byName, s)
-		}
+		return &client.UserError{Msg: "new takes one host. A command goes after --", Hint: hint, Code: "extra_argument", Kind: client.KindUsage}
 	}
-	switch len(byName) {
-	case 1:
-		return &byName[0], nil
-	case 0:
-		return nil, &client.UserError{Msg: fmt.Sprintf("no session %q on %s", ref, conn.Host.Name), Hint: brand.Name + " ls --host " + conn.Host.Name}
-	default:
-		return nil, &client.UserError{Msg: fmt.Sprintf("%d sessions are named %q on %s", len(byName), ref, conn.Host.Name), Hint: "Use the session ID from `" + brand.Name + " ls`."}
-	}
-}
-
-func withSession(ctx context.Context, target string, fn func(context.Context, client.Host, *client.Conn, *client.Session) error) error {
-	hn, ref, err := client.SplitTarget(target)
-	if err != nil {
-		return err
-	}
-	h, err := client.FindHost(hn)
-	if err != nil {
-		return err
-	}
-	cctx, cancel := context.WithTimeout(ctx, 60*time.Second)
-	defer cancel()
-	conn, err := client.Dial(cctx, h, true)
-	if err != nil {
-		return err
-	}
-	defer conn.Close()
-	s, err := resolve(cctx, conn, ref)
-	if err != nil {
-		return err
-	}
-	return fn(cctx, h, conn, s)
-}
-
-func attachCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:     "attach <host>/<session> | -",
-		Aliases: []string{"a"},
-		Short:   "Attach to a session (detach with Ctrl+\\); - is the last one",
-		Args:    cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			target := args[0]
-			if target == "-" {
-				host, id, ok := tui.LastSession()
-				if !ok {
-					return &client.UserError{Msg: "no session has been attached yet", Hint: brand.Name + " attach <host>/<session>, or pick one in " + brand.Name}
-				}
-				target = host + "/" + id
-			}
-			var h client.Host
-			var s *client.Session
-			err := withSession(cmd.Context(), target, func(_ context.Context, hh client.Host, _ *client.Conn, ss *client.Session) error {
-				h, s = hh, ss
-				return nil
-			})
-			if err != nil {
-				return err
-			}
-			if client.Ended(*s) {
-				return endedError(h, *s)
-			}
-			return attach(cmd.Context(), h, s.ID, s.Name)
-		},
-	}
-}
-
-func killCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:     "kill <host>/<session>",
-		Aliases: []string{"rm", "delete"},
-		Short:   "Stop a session and remove it",
-		Args:    cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return withSession(cmd.Context(), args[0], func(ctx context.Context, h client.Host, conn *client.Conn, s *client.Session) error {
-				res, err := conn.Delete(ctx, s.ID)
-				if err != nil {
-					return err
-				}
-				fmt.Printf("Deleted %s (%s) on %s.\n", s.Name, s.ID, h.Name)
-				if res.Worktree != "" {
-					fmt.Println(strings.ToUpper(res.Worktree[:1]) + res.Worktree[1:] + ".")
-				}
-				return nil
-			})
-		},
-	}
+	return nil
 }
 
 func renameCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "rename <host>/<session> <new-name>",
-		Short: "Rename a session",
-		Args:  cobra.ExactArgs(2),
+		Use:               "rename <host>/<session> <name>",
+		Short:             "Rename a session",
+		Example:           "  " + brand.Name + " rename my-vps/auth-fix login-fix",
+		Args:              cobra.ExactArgs(2),
+		ValidArgsFunction: completeSessionArg,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return withSession(cmd.Context(), args[0], func(ctx context.Context, h client.Host, conn *client.Conn, s *client.Session) error {
-				if err := conn.RenameSession(ctx, s.ID, args[1]); err != nil {
+			name := strings.TrimSpace(args[1])
+			if name == "" {
+				return &client.UserError{Msg: "a name is needed", Hint: "Pass a non-empty name for the session.", Code: "bad_name", Kind: client.KindUsage}
+			}
+			if err := client.CheckSessionName(name); err != nil {
+				return err
+			}
+			return withSession(cmd, args[0], func(ctx context.Context, h client.Host, conn *client.Conn, s *client.Session) error {
+				if err := conn.RenameSession(ctx, s.ID, name); err != nil {
 					return err
 				}
-				fmt.Printf("Renamed %s to %s on %s.\n", s.Name, args[1], h.Name)
+				renamed := *s
+				renamed.Name = name
+				client.RememberSession(h.Name, renamed)
+				say(cmd, "Renamed %s to %s on %s.\n", shown(s.Name), shown(name), shown(h.Name))
 				return nil
 			})
 		},
@@ -254,6 +89,25 @@ type hostSessions struct {
 	Host     string           `json:"host"`
 	Sessions []client.Session `json:"sessions"`
 	Error    string           `json:"error,omitempty"`
+	// err is the error behind Error.
+	err error
+	// at is when the host's list arrived, taken in its own worker, so that
+	// a slow host does not make another host's list look newer.
+	at time.Time
+}
+
+// rememberLists writes the lists of the hosts that answered to the session
+// cache, so that the picker and the launcher draw them at once. Each list
+// keeps the time when it arrived: a list that is older than the cache's
+// changes nothing.
+func rememberLists(results []hostSessions) {
+	lists := map[string]client.HostList{}
+	for _, r := range results {
+		if r.err == nil {
+			lists[r.Host] = client.HostList{Sessions: r.Sessions, At: r.at}
+		}
+	}
+	client.RememberLists(lists)
 }
 
 // listAll asks every host for its sessions at once. Listing does not boot
@@ -270,43 +124,55 @@ func listAll(ctx context.Context, hosts []client.Host) []hostSessions {
 			defer cancel()
 			conn, err := client.Dial(client.WithoutWake(ctx), h, false)
 			if err != nil {
-				results[i].Error = err.Error()
+				results[i].Error, results[i].err = err.Error(), err
 				return
 			}
 			defer conn.Close()
-			list, err := conn.Sessions(ctx)
+			list, err := listSessions(ctx, conn)
+			results[i].at = time.Now()
 			if err != nil {
-				results[i].Error = err.Error()
+				results[i].Error, results[i].err = err.Error(), err
 			}
 			results[i].Sessions = list
 		}()
 	}
 	wg.Wait()
+	for i := range results {
+		if results[i].Sessions == nil {
+			results[i].Sessions = []client.Session{} // a list in JSON, never null
+		}
+	}
 	return results
 }
 
 // printSessions prints one line for each session, by host. The state column
 // is as wide as its longest state, so a cause such as "(out of memory)"
-// keeps the columns after it in line.
-func printSessions(results []hostSessions) {
+// keeps the columns after it in line. What a host sent is cleaned first
+// (api.CleanText). The JSON keeps the host's own values.
+func printSessions(all []hostSessions) {
+	results := make([]hostSessions, len(all))
+	for i, r := range all {
+		results[i] = hostSessions{Host: r.Host, Sessions: client.CleanSessions(r.Sessions), Error: client.CleanLine(r.Error)}
+	}
 	sort.Slice(results, func(i, j int) bool { return results[i].Host < results[j].Host })
 	stateW := 12
 	for _, r := range results {
 		for _, s := range r.Sessions {
-			stateW = max(stateW, len([]rune(stateLabel(s))))
+			stateW = max(stateW, len([]rune(shown(stateLabel(s)))))
 		}
 	}
 	for _, r := range results {
+		host := shown(r.Host)
 		if r.Error != "" {
-			fmt.Printf("%s  ◌ %s\n", r.Host, r.Error)
+			fmt.Printf("%s  ◌ %s\n", host, shown(r.Error))
 			continue
 		}
 		if len(r.Sessions) == 0 {
-			fmt.Printf("%s  no sessions\n", r.Host)
+			fmt.Printf("%s  no sessions\n", host)
 			continue
 		}
 		for _, s := range r.Sessions {
-			fmt.Printf("%-14s %-10s %-20s %-9s %-*s %6s  %s\n", r.Host, s.ID, trunc(s.Name, 20), s.Agent, stateW, stateLabel(s), age(s.CreatedAt), s.Cwd)
+			fmt.Printf("%-14s %-10s %-20s %-9s %-*s %6s  %s%s\n", host, shown(s.ID), trunc(shown(client.PolicyDisplayName(s)), 20), shown(s.Agent), stateW, stateLabel(s), age(s.CreatedAt), shown(s.Cwd), sessionRuntimeMarksV1(s)+sessionAccountMarkV1(s))
 		}
 	}
 }
@@ -315,25 +181,28 @@ func lsCmd() *cobra.Command {
 	var hostName string
 	var asJSON bool
 	cmd := &cobra.Command{
-		Use:   "ls",
-		Short: "List sessions on every host",
-		Args:  cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
+		Use:               "ls [<host>]",
+		Short:             "List sessions on every host, or on one",
+		Example:           "  " + brand.Name + " ls\n  " + brand.Name + " ls my-vps --json",
+		Args:              cobra.MaximumNArgs(1),
+		ValidArgsFunction: completeLsHost,
+		RunE: func(cmd *cobra.Command, args []string) error {
 			hosts, err := client.LoadHosts()
 			if err != nil {
 				return err
 			}
-			if hostName != "" {
-				h, err := client.FindHost(hostName)
+			if len(args) == 1 || hostName != "" {
+				h, err := lsHost(args, hostName)
 				if err != nil {
 					return err
 				}
 				hosts = []client.Host{h}
 			}
 			if len(hosts) == 0 {
-				return &client.UserError{Msg: "no hosts yet", Hint: brand.Name + " host add <name>"}
+				return &client.UserError{Msg: "no hosts yet", Hint: brand.Name + " host add <name>", Code: "no_hosts"}
 			}
 			results := listAll(cmd.Context(), hosts)
+			rememberLists(results)
 			if asJSON {
 				return printJSON(results)
 			}
@@ -341,9 +210,27 @@ func lsCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&hostName, "host", "", "only this host")
-	cmd.Flags().BoolVar(&asJSON, "json", false, "print JSON")
+	addHostFlag(cmd, &hostName, "only this host, as the argument does")
+	addJSON(cmd, &asJSON)
 	return cmd
+}
+
+// lsHost is the one host that ls lists: its argument, or --host, which
+// stays as a kept alias. Two different hosts are a usage error.
+func lsHost(args []string, flag string) (client.Host, error) {
+	if len(args) == 1 && flag != "" && flag != args[0] {
+		hint := brand.Name + " ls " + args[0]
+		if !client.ValidHostName(args[0]) {
+			hint = brand.Name + " host ls (lists the hosts)"
+		}
+		return client.Host{}, &client.UserError{Msg: fmt.Sprintf("ls got two hosts: %s and %s", args[0], flag),
+			Hint: hint, Code: "two_hosts", Kind: client.KindUsage}
+	}
+	if len(args) == 1 {
+		return client.FindHost(args[0])
+	}
+	h, err := client.FindHost(flag)
+	return h, fromFlag(err, "host")
 }
 
 func trunc(s string, n int) string {
@@ -371,16 +258,17 @@ func age(t time.Time) string {
 func sendCmd() *cobra.Command {
 	var noEnter bool
 	cmd := &cobra.Command{
-		Use:     "send <host>/<session> <text>",
-		Short:   "Type text into a session without attaching, then press Enter",
-		Example: "  " + brand.Name + " send my-vps/auth-fix \"run the tests and fix what fails\"",
-		Args:    cobra.ExactArgs(2),
+		Use:               "send <host>/<session> <text>",
+		Short:             "Type text into a session without attaching, then press Enter",
+		Example:           "  " + brand.Name + " send my-vps/auth-fix \"run the tests and fix what fails\"",
+		Args:              cobra.ExactArgs(2),
+		ValidArgsFunction: completeSessionArg,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return withSession(cmd.Context(), args[0], func(ctx context.Context, h client.Host, conn *client.Conn, s *client.Session) error {
+			return withSession(cmd, args[0], func(ctx context.Context, h client.Host, conn *client.Conn, s *client.Session) error {
 				if err := conn.SendText(ctx, s.ID, args[1], !noEnter); err != nil {
 					return err
 				}
-				fmt.Printf("Sent to %s on %s.\n", s.Name, h.Name)
+				say(cmd, "Sent to %s on %s.\n", shown(nameOf(*s)), shown(h.Name))
 				return nil
 			})
 		},
@@ -389,27 +277,18 @@ func sendCmd() *cobra.Command {
 	return cmd
 }
 
-func flipCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "flip [<host>/<session>]",
-		Short: "Switch sessions quickly: the session list of every host, then attach",
-		Args:  cobra.MaximumNArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			if len(args) == 1 {
-				return attachCmd().RunE(cmd, args)
-			}
-			return tui.RunWith(cmd.Context(), tui.Options{Switcher: true, Local: onboard.System{Providers: providers}})
-		},
-	}
-}
-
 func demoCmd() *cobra.Command {
 	var empty bool
 	cmd := &cobra.Command{
 		Use:   "demo",
-		Short: "Try the launcher with sample hosts and sessions (nothing connects anywhere)",
-		Args:  cobra.NoArgs,
+		Short: "Try the launcher with sample data (nothing connects anywhere)",
+		Example: "  " + brand.Name + " demo\n" +
+			"  " + brand.Name + " demo --empty   # as on the first run",
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			if err := checkLauncher(cmd, "the demo", brand.Name+" demo (run it at a terminal with input on)"); err != nil {
+				return err
+			}
 			return tui.RunDemo(cmd.Context(), empty)
 		},
 	}

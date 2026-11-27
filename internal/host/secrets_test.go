@@ -6,7 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
+	"slices"
 	"strings"
 	"syscall"
 	"testing"
@@ -15,6 +15,7 @@ import (
 	"github.com/iamlakshya/simstim/internal/api"
 	"github.com/iamlakshya/simstim/internal/paths"
 	"github.com/iamlakshya/simstim/internal/ring"
+	"github.com/iamlakshya/simstim/internal/testhome"
 )
 
 const secretValue = "fake-secret-for-tests-0123456789"
@@ -24,11 +25,11 @@ const secretValue = "fake-secret-for-tests-0123456789"
 func secretHome(t *testing.T) {
 	t.Helper()
 	alertHome(t)
-	rt, err := os.MkdirTemp("/tmp", "sec")
+	rt, err := testhome.ShortTempDir("sec")
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { os.RemoveAll(rt) })
+	t.Cleanup(func() { _ = os.RemoveAll(rt) })
 	t.Setenv("XDG_RUNTIME_DIR", rt)
 }
 
@@ -55,7 +56,7 @@ func secretHolder(t *testing.T, argv ...string) *Holder {
 	if err := h.listen(); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { h.ln.Close() })
+	t.Cleanup(h.closeSockets)
 	return h
 }
 
@@ -114,11 +115,14 @@ func TestSecretsReachOnlyTheAgent(t *testing.T) {
 	if strings.Contains(string(row), secretValue) {
 		t.Errorf("the session row holds the secret: %s", row)
 	}
-	manifest, _ := os.ReadFile(paths.Manifest(h.id))
-	if !strings.Contains(string(manifest), `"secrets": [`) || !strings.Contains(string(manifest), `"OPENAI_API_KEY"`) {
+	manifest, err := os.ReadFile(paths.Manifest(h.id))
+	var saved struct {
+		Secrets []string `json:"secrets"`
+	}
+	if err != nil || json.Unmarshal(manifest, &saved) != nil || !slices.Equal(saved.Secrets, []string{"OPENAI_API_KEY"}) {
 		t.Errorf("the manifest does not name the secret:\n%s", manifest)
 	}
-	args, err := exec.Command("ps", "-ww", "-o", "args=", "-p", strconv.Itoa(pid)).Output()
+	args, err := ownedProcessArgs(h.cmd.Process)
 	if err != nil || strings.Contains(string(args), secretValue) || !strings.Contains(string(args), "sleep") {
 		t.Errorf("the agent's command line %q (%v)", args, err)
 	}

@@ -7,7 +7,9 @@ only these. They use a throwaway client config with a copy of hosts.toml, so
 the user's own files are never changed. They install no agent and start no
 login: `--agents shell` installs nothing.
 """
-import json, os, re, shutil, subprocess, tempfile
+import json, os, re, shutil, tempfile
+
+import owned
 
 
 class Ctx:
@@ -17,13 +19,11 @@ class Ctx:
 
 
 def run(c):
-    tmp = tempfile.mkdtemp(prefix="e2e-guided-")
+    tmp = tempfile.mkdtemp(prefix="e2e-guided-", dir=c.root.path)
     cfg = os.path.join(tmp, "config", c.NAME)
     os.makedirs(cfg)
-    real = os.path.join(os.environ.get("XDG_CONFIG_HOME", os.path.expanduser("~/.config")), c.NAME, "hosts.toml")
-    shutil.copy(real, cfg)
-    envx = dict(os.environ, **c.env)
-    envx.update(XDG_CONFIG_HOME=os.path.join(tmp, "config"), XDG_STATE_HOME=os.path.join(tmp, "state"))
+    shutil.copy(os.path.join(c.root.config, "hosts.toml"), cfg)
+    envx = c.root.env(dict(c.env, XDG_CONFIG_HOME=os.path.join(tmp, "config"), XDG_STATE_HOME=os.path.join(tmp, "state")))
     try:
         with_flags(c, envx)
         refusals(c, envx)
@@ -33,18 +33,17 @@ def run(c):
 
 
 def names(c, envx):
-    r = subprocess.run([c.cli, "ls", "--json", "--host", c.HOST], env=envx, capture_output=True, text=True, timeout=60)
-    return {s["name"] for h in json.loads(r.stdout or "[]") for s in (h.get("sessions") or [])}
+    _, out, _ = owned.run_cmd([c.cli, "ls", "--json", "--host", c.HOST], env=envx, timeout=60)
+    return {s["name"] for h in json.loads(out or "[]") if isinstance(h.get("sessions"), list) for s in h["sessions"]}
 
 
 def with_flags(c, envx):
     before = names(c, envx)
-    r = subprocess.run([c.cli, "setup", "--host", c.HOST, "--agents", "shell", "--yes", "--no-login"],
-                       env=envx, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=300)
-    out = r.stdout
-    if not c.ok(r.returncode == 0 and ("Done. %s is ready." % c.HOST) in out,
-                "guided: setup --host --agents shell --yes --no-login finishes (exit %d)" % r.returncode):
-        print(out[-1500:], r.stderr[-500:])
+    code, stdout, stderr = owned.run_cmd([c.cli, "setup", "--host", c.HOST, "--agents", "shell", "--yes", "--no-login"], env=envx, timeout=300)
+    out = stdout + stderr  # the setup talks on stderr
+    if not c.ok(code == 0 and ("Done. %s is ready." % c.HOST) in out,
+                "guided: setup --host --agents shell --yes --no-login finishes (exit %d)" % code):
+        owned.say(owned.safe_text(out[-1500:] + stderr[-500:]))
         return
     c.ok("Connecting to %s" % c.HOST in out and "Agents on %s" % c.HOST in out,
          "guided: it connects the host, then shows the agent checklist")
@@ -59,23 +58,25 @@ def with_flags(c, envx):
     c.ok(re.search(r"  [✓!?✕] Claude Code ", out.split("Done.")[1]),
          "guided: the summary gives Claude Code's state on the host")
     new = [n for n in names(c, envx) - before if n.startswith(("install-", "login-"))]
-    c.ok(not new, "guided: no installer or login session was started (%s)" % ", ".join(sorted(new)))
+    c.ok(not new, "guided: no installer or login session was started (%s)" % ", ".join(owned.safe_text(n) for n in sorted(new)))
 
 
 def refusals(c, envx):
-    r = subprocess.run([c.cli, "setup"], env=envx, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=60)
-    c.ok(r.returncode == 1 and "Try:" in r.stderr and "--yes" in r.stderr,
-         "guided: with no terminal and no flags, setup refuses and says which flags to pass")
-    r = subprocess.run([c.cli, "setup", "--host", c.HOST, "--agents", "no-such-agent", "--yes"],
-                       env=envx, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=60)
-    c.ok(r.returncode == 1 and 'no agent called "no-such-agent"' in r.stderr and "Connecting" not in r.stdout,
+    code, out, err = owned.run_cmd([c.cli, "setup"], env=envx, timeout=60)
+    c.ok(code == 4 and "Try:" in err and "--yes" in err,
+         "guided: with no terminal and no flags, setup refuses with exit code 4 and says which flags to pass")
+    code, out, err = owned.run_cmd([c.cli, "setup", "--host", c.HOST, "--agents", "no-such-agent", "--yes"], env=envx, timeout=60)
+    c.ok(code == 3 and 'no agent called "no-such-agent"' in err and "Connecting" not in out + err,
          "guided: an unknown agent is refused before anything runs")
 
 
 def stop(c, envx):
     t = c.Term([c.cli, "setup"], env=envx)
-    asked = t.wait_for(rb"Pick one \[1-\d\]: ", 60)
-    t.send(b"\x03")  # Ctrl+C, as the terminal sends it
-    code = t.exit_code(30)
-    c.ok(asked and code == 1 and b"setup stopped; nothing was changed" in t.buf,
+    try:
+        asked = t.wait_for(rb"Pick one \[1-\d\]: ", 60)
+        t.send(b"\x03")  # Ctrl+C, as the terminal sends it
+        code = t.exit_code(30)
+    finally:
+        t.close()
+    c.ok(asked and code == 130 and b"Cancelled. Nothing changed." in t.buf,
          "guided: Ctrl+C at the first question stops, and says nothing was changed (exit %s)" % code)

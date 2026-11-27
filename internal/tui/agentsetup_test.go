@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"maps"
 	"strings"
 	"testing"
 
@@ -59,41 +60,80 @@ func TestMissingSecretsShow(t *testing.T) {
 	}
 }
 
-func (b *fakeBackend) SetupTrust(host string) map[string]bool {
+// SetupAnswers returns a copy of the answers kept for host, as the client's
+// file would give them, and the warning of a file that did not parse, once.
+func (b *fakeBackend) SetupAnswers(host string) client.SetupAnswers {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	return b.trust[host]
+	s := b.trust[host]
+	out := client.SetupAnswers{Refused: maps.Clone(s.Refused), Hashes: maps.Clone(s.Hashes), Trusted: maps.Clone(s.Trusted), Warning: b.trustWarn}
+	b.trustWarn = nil
+	return out
 }
 
-func (b *fakeBackend) RememberSetup(host, repo string, run bool) error {
-	b.record("remember %s %s run=%v", host, repo, run)
+// RememberSetup keeps an answer as the client's file does: a yes with its
+// hash, which removes a no, and a no, which removes a yes. It returns the
+// warning of a file that did not parse while the answer was kept, once.
+func (b *fakeBackend) RememberSetup(ctx context.Context, host, repo string, run bool, hash string) (*client.UserError, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	b.record("remember %s %s run=%v hash=%s", host, repo, run, hash)
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	s := b.trust[host]
+	s.Refused, s.Trusted, s.Hashes = maps.Clone(s.Refused), maps.Clone(s.Trusted), maps.Clone(s.Hashes)
+	for _, m := range []*map[string]bool{&s.Refused, &s.Trusted} {
+		if *m == nil {
+			*m = map[string]bool{}
+		}
+	}
+	if s.Hashes == nil {
+		s.Hashes = map[string]string{}
+	}
+	delete(s.Refused, repo)
+	delete(s.Trusted, repo)
+	delete(s.Hashes, repo)
+	if !run {
+		s.Refused[repo] = false
+	} else {
+		s.Trusted[repo] = true
+		if hash != "" {
+			s.Hashes[repo] = hash
+		}
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if b.trust == nil {
-		b.trust = map[string]map[string]bool{}
+		b.trust = map[string]client.SetupAnswers{}
 	}
-	if b.trust[host] == nil {
-		b.trust[host] = map[string]bool{}
-	}
-	b.trust[host][repo] = run
-	return nil
+	b.trust[host] = s
+	warn := b.rememberWarn
+	b.rememberWarn = nil
+	return warn, nil
 }
 
-func (b *fakeBackend) Secrets(_ context.Context, h client.Host) (map[string]api.Secret, error) {
+func (b *fakeBackend) Secrets(_ context.Context, s client.Settings, h client.Host, _ []string) (map[string]api.Secret, error) {
 	b.record("secrets %s", h.Name)
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	b.secretsFrom = append(b.secretsFrom, s)
 	return b.secrets, b.secretErr
 }
 
 // SessionSecrets fetches the named secrets from the same pretend config.
-func (b *fakeBackend) SessionSecrets(_ context.Context, names []string) (map[string]api.Secret, error) {
+func (b *fakeBackend) SessionSecrets(_ context.Context, s client.Settings, _ client.Host, _ string, names []string) (map[string]api.Secret, error) {
 	if len(names) == 0 {
 		return nil, nil
 	}
 	b.record("secrets %v", names)
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	b.secretsFrom = append(b.secretsFrom, s)
 	if b.secretErr != nil {
 		return nil, b.secretErr
 	}

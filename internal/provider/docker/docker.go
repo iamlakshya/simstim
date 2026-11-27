@@ -8,9 +8,9 @@ package docker
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
-	"os/exec"
 	"strings"
 
 	"github.com/iamlakshya/simstim/internal/brand"
@@ -42,18 +42,59 @@ func RunArgs(container, host, image string) []string {
 const addUser = `id -u ` + DefaultUser + ` >/dev/null 2>&1 || useradd -m -s /bin/bash ` + DefaultUser
 
 // Create starts the container and gives it a user like a VM's.
-func (Provider) Create(ctx context.Context, req provider.Request) (client.Host, error) {
+func (Provider) Create(ctx context.Context, req provider.Request) (result client.Host, returned error) {
+	scope, err := client.HostCreationSourceScopeContext(ctx)
+	if err != nil {
+		return client.Host{}, err
+	}
+	if scope.Request() != provider.CreationSourceRequest("docker", req) {
+		return client.Host{}, sourceUnknown()
+	}
+	frame := &dockerSourceBirth{scope: scope, request: scope.Request()}
+	ctx = context.WithValue(ctx, dockerSourceBirthKey{}, frame)
+	frame.ctx = ctx
+	defer func() {
+		returned = errors.Join(returned, frame.metadata.Close())
+		locator := ""
+		if frame.locator != nil {
+			locator = frame.locator.endpoint
+			returned = errors.Join(returned, frame.locator.close())
+		}
+		if returned != nil && frame.attempted {
+			if result.Machine == nil {
+				result = freezeBirthHost(frame.partial)
+			}
+			returned = provider.RetainedCreation(result, frame.runID, locator, returned)
+		}
+	}()
+	metadata, err := client.OpenProviderSourceMetadata(ctx)
+	if err != nil {
+		return client.Host{}, err
+	}
+	frame.metadata = metadata
+	locator, err := captureSourceLocator(ctx)
+	if err != nil {
+		return client.Host{}, err
+	}
+	frame.locator = &locator
+	if err := locator.checkInspector(ctx); err != nil {
+		return client.Host{}, err
+	}
 	out := req.Out
 	if out == nil {
 		out = io.Discard
 	}
 	c := provider.MachineName(req.Name)
-	st, err := inspect(ctx, c)
+	rawState, err := locator.exec(ctx, "inspect", "-f", "{{.State.Status}}", c)
+	st := strings.TrimSpace(string(rawState))
+	if err != nil && (strings.Contains(strings.ToLower(err.Error()), "no such object") || strings.Contains(strings.ToLower(err.Error()), "no such container")) {
+		st, err = "", nil
+	}
 	if err != nil {
 		return client.Host{}, err
 	}
 	if st != "" {
-		return client.Host{}, &client.UserError{Msg: "Docker already has a container called " + c, Hint: "docker rm -f " + c + "   (if you no longer need it), or choose another name"}
+		return client.Host{}, &client.UserError{Msg: "Docker already has a container called " + c, Hint: "Inspect it on the selected original Docker endpoint, or choose another name.", Code: "instance_exists"}
 	}
 	image := req.Image
 	if image == "" {
@@ -61,49 +102,51 @@ func (Provider) Create(ctx context.Context, req provider.Request) (client.Host, 
 	}
 	args := RunArgs(c, req.Name, image)
 	fmt.Fprintf(out, "  Starting the container: docker %s\n", strings.Join(args, " "))
-	if _, err := provider.Exec(ctx, install, "docker", args...); err != nil {
+	frame.partial = client.Host{Name: req.Name, Machine: &client.Machine{Provider: "docker", ID: c, User: DefaultUser, Image: image}}
+	frame.attempted = true
+	runID, err := locator.exec(ctx, args...)
+	frame.runID = strings.TrimSpace(string(runID))
+	if err != nil {
 		return client.Host{}, err
 	}
 	user := DefaultUser
-	if _, err := provider.Exec(ctx, install, "docker", "exec", "-u", "0", c, "sh", "-c", addUser); err != nil {
+	if _, err := locator.exec(ctx, "exec", "-u", "0", strings.TrimSpace(string(runID)), "sh", "-c", addUser); err != nil {
 		fmt.Fprintf(out, "  Note: could not add the user %q (%v), so sessions run as root.\n", DefaultUser, err)
 		user = "root"
 	}
-	return client.Host{Name: req.Name, Machine: &client.Machine{Provider: "docker", ID: c, User: user, Image: image}}, nil
-}
-
-// inspect returns the container's state, or "" when there is no container.
-func inspect(ctx context.Context, c string) (string, error) {
-	out, err := provider.Exec(ctx, install, "docker", "inspect", "-f", "{{.State.Status}}", c)
+	host := client.Host{Name: req.Name, Machine: &client.Machine{Provider: "docker", ID: c, User: user, Image: image}}
+	source, err := locator.receipt(ctx, host, string(runID))
 	if err != nil {
-		if msg := strings.ToLower(err.Error()); strings.Contains(msg, "no such object") || strings.Contains(msg, "no such container") {
-			return "", nil
-		}
-		return "", err
+		return client.Host{}, &client.UserError{Code: "source_inventory", Msg: "the created container is retained because its actual source provenance could not be confirmed", Hint: "Inspect the container on its original Docker engine before creating another host.", Kind: client.KindRefused}
 	}
-	return strings.TrimSpace(string(out)), nil
+	host.Machine.Source = source
+	frame.result = freezeBirthHost(host)
+	return client.RecordHostMachineSourceBirthContext(ctx, host)
 }
 
-// Open returns the lifecycle of a container this provider made.
+// Open returns the lifecycle bound to the original engine and resource.
 func (Provider) Open(h client.Host) (client.Lifecycle, error) {
+	if h.Machine == nil || h.Machine.Provider != "docker" {
+		return nil, sourceUnknown()
+	}
+	source, err := client.NormaliseMachineSource("docker", h.Machine.Source)
+	if err != nil {
+		return nil, err
+	}
+	if source.Config.Role == client.MachineConfigUnused {
+		return nil, sourceUnknown()
+	}
 	user := h.Machine.User
 	if user == "" {
 		user = "root"
 	}
-	return &container{name: h.Machine.ID, user: user}, nil
+	return &container{host: freezeBirthHost(h), source: source, user: user}, nil
 }
 
 type container struct {
-	name, user string
-}
-
-// Status maps Docker's state to the client's machine states.
-func (c *container) Status(ctx context.Context) (string, error) {
-	st, err := inspect(ctx, c.name)
-	if err != nil {
-		return "", err
-	}
-	return state(st), nil
+	host   client.Host
+	source *client.MachineSourceProvenance
+	user   string
 }
 
 func state(s string) string {
@@ -114,44 +157,9 @@ func state(s string) string {
 		return client.MachineStarting
 	case "", "removing":
 		return client.MachineMissing
-	default: // created, exited, paused, dead
+	default:
 		return client.MachineStopped
 	}
-}
-
-// Start starts or unpauses the container.
-func (c *container) Start(ctx context.Context) error {
-	st, err := inspect(ctx, c.name)
-	if err != nil {
-		return err
-	}
-	verb := "start"
-	if st == "paused" {
-		verb = "unpause"
-	}
-	_, err = provider.Exec(ctx, install, "docker", verb, c.name)
-	return err
-}
-
-// Stop stops the container. Its files stay; its sessions end.
-func (c *container) Stop(ctx context.Context) error {
-	_, err := provider.Exec(ctx, install, "docker", "stop", "-t", "5", c.name)
-	return err
-}
-
-// Destroy deletes the container and its files.
-func (c *container) Destroy(ctx context.Context) error {
-	st, err := inspect(ctx, c.name)
-	if err != nil || st == "" {
-		return err
-	}
-	_, err = provider.Exec(ctx, install, "docker", "rm", "-f", c.name)
-	return err
-}
-
-// Transport is `docker exec -i` into the container.
-func (c *container) Transport(context.Context, bool) (client.Transport, error) {
-	return &Transport{Container: c.name, User: c.user}, nil
 }
 
 // Transport runs commands in a container with `docker exec -i`: no TTY, so
@@ -159,6 +167,7 @@ func (c *container) Transport(context.Context, bool) (client.Transport, error) {
 // daemon kills the command it ran, and only that command.
 type Transport struct {
 	Container, User string
+	saved           *container
 }
 
 func (t *Transport) args(remote string) []string {
@@ -178,19 +187,30 @@ func unreachable(_ int, stderr string) bool {
 
 // Start runs remote in the container.
 func (t *Transport) Start(ctx context.Context, remote string) (client.Proc, error) {
-	cmd := exec.CommandContext(ctx, "docker", t.args(remote)...)
-	return client.CommandProc(cmd, unreachable)
+	cmd, closeSource, err := t.command(ctx, remote)
+	if err != nil {
+		return nil, err
+	}
+	process, err := client.CommandProc(cmd, unreachable)
+	if err != nil {
+		return nil, errors.Join(err, closeSource())
+	}
+	return &dockerSourceProc{Proc: process, closeSource: closeSource}, nil
 }
 
 // Run runs remote in the container to its end and returns its stdout.
-func (t *Transport) Run(ctx context.Context, remote string, stdin io.Reader) ([]byte, error) {
-	cmd := exec.CommandContext(ctx, "docker", t.args(remote)...)
+func (t *Transport) Run(ctx context.Context, remote string, stdin io.Reader) (_ []byte, returned error) {
+	cmd, closeSource, err := t.command(ctx, remote)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { returned = errors.Join(returned, closeSource()) }()
 	var out, errb bytes.Buffer
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = stdin, &out, &errb
 	if err := cmd.Run(); err != nil {
 		msg := provider.Tail(errb.String(), 3)
 		if unreachable(0, errb.String()) {
-			return out.Bytes(), &client.UserError{Msg: fmt.Sprintf("cannot reach the container %s: %s", t.Container, msg), Hint: t.ReachHint()}
+			return out.Bytes(), &client.UserError{Msg: fmt.Sprintf("cannot reach the container %s: %s", t.Container, msg), Hint: t.ReachHint(), Code: "unreachable"}
 		}
 		return out.Bytes(), fmt.Errorf("%w: %s", err, msg)
 	}
@@ -199,5 +219,10 @@ func (t *Transport) Run(ctx context.Context, remote string, stdin io.Reader) ([]
 
 // ReachHint is the docker command that should work first.
 func (t *Transport) ReachHint() string {
-	return fmt.Sprintf("docker exec -it -u %s %s sh   (check that this works first)", t.User, t.Container)
+	if t.saved != nil {
+		source := t.saved.source
+		return fmt.Sprintf("docker --host %s --config %s exec -it -u %s %s sh (check that this works first)",
+			client.ShellWord(source.Endpoint), client.ShellWord(source.Config.Path), client.ShellWord(t.User), source.ResourceID)
+	}
+	return fmt.Sprintf("docker exec -it -u %s %s sh (check that this works first)", t.User, t.Container)
 }

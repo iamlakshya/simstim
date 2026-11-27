@@ -19,14 +19,15 @@ func scrollbackAdvice(sessions []client.Session) []string {
 			continue
 		}
 		a, ok := agents.Find(s.Agent)
-		title := s.Agent
+		title := shown(s.Agent)
 		if ok {
 			title = a.Title
 		}
+		name := shown(nameOf(s))
 		if ok && a.Inline.Has() {
-			out = append(out, fmt.Sprintf("%s (%s) draws full screen, so your terminal keeps no scrollback of it. Try: start it with `%s new … --inline`, or set agents.inline = true in config.toml", s.Name, title, brand.Name))
+			out = append(out, fmt.Sprintf("%s (%s) draws full screen, so your terminal keeps no scrollback of it. Try: start it with `%s new … --inline`, or set agents.inline = true in config.toml", name, title, brand.Name))
 		} else {
-			out = append(out, fmt.Sprintf("%s (%s) draws full screen and keeps its own scrollback; it has no inline mode", s.Name, title))
+			out = append(out, fmt.Sprintf("%s (%s) draws full screen and keeps its own scrollback; it has no inline mode", name, title))
 		}
 	}
 	return out
@@ -38,7 +39,7 @@ func printScrollback(ctx context.Context, conn *client.Conn) {
 	if err != nil {
 		return
 	}
-	for _, line := range scrollbackAdvice(sessions) {
+	for _, line := range scrollbackAdvice(client.CleanSessions(sessions)) {
 		fmt.Printf("  ! scrollback: %s\n", line)
 	}
 }

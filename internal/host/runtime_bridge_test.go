@@ -29,7 +29,7 @@ func TestBridgeRequests(t *testing.T) {
 		t.Fatalf("features = %q", c.Features)
 	}
 
-	s, err := c.NewSession(ctx, client.NewArgs{Name: "via-bridge", Argv: []string{"/bin/sh"}, Cwd: "~", Cols: 100, Rows: 30})
+	s, err := c.NewSession(ctx, client.NewArgs{Name: "via-bridge", Argv: []string{"/bin/sh"}, Cwd: "~", Cols: 100, Rows: 30, Wall: "none", Downgrade: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -281,7 +281,7 @@ func TestBridgeMissingFolder(t *testing.T) {
 	}
 	ctx := context.Background()
 	dir := filepath.Join(h.Home, "src", "new-app")
-	a := client.NewArgs{Argv: []string{"true"}, Cwd: "~/src/new-app"}
+	a := client.NewArgs{Argv: []string{"true"}, Cwd: "~/src/new-app", Wall: "none", Downgrade: true}
 	_, err := c.NewSession(ctx, a)
 	q, ok := client.FolderQuestionOf(err)
 	if !ok || q.Folder != dir {
@@ -302,7 +302,7 @@ func TestBridgeMissingFolder(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(h.Home, "a-file"), []byte("x\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	_, err = c.NewSession(ctx, client.NewArgs{Argv: []string{"true"}, Cwd: "~/a-file", MakeFolder: true})
+	_, err = c.NewSession(ctx, client.NewArgs{Argv: []string{"true"}, Cwd: "~/a-file", MakeFolder: true, Wall: "none", Downgrade: true})
 	var ue *client.UserError
 	if !errors.As(err, &ue) || ue.Code != "bad_folder" {
 		t.Fatalf("new in a file = %v", err)

@@ -5,13 +5,31 @@ How the project is built, tested, documented and released. New here? Read [CONTR
 | Page | What it covers |
 | --- | --- |
 | [Testing](testing.md) | Unit, golden, fuzz and end-to-end tests, coverage, and how to run them |
+| [HTTP/2 scheduling](http2-scheduler.md) | The pinned public scheduler, native ownership and resource checks |
+| [Microvm conformance](microvm-conformance.md) | Real platform suites, original timing data, memory budgets and release evidence |
 | [Tracing typing lag](debug-trace.md) | The debug trace: turn it on, copy the host's file, and read where a key waits |
 | [How the docs work](docs.md) | How the docs are organised, generated, checked and published |
 | [Style](style.md) | Rules for code and for writing |
 | [Releasing](releasing.md) | Versions, what a release contains, and how to cut and check one |
+| [Build the default image](default-image-build.md) | Prepare the pinned Debian root, check OCI and verity artifacts, and publish through the signed-tag workflow |
+| [Sandbox preparation lifetime](sandbox-preparation-lifetime.md) | Retain the original test-boot owners until native cleanup has joined |
+| [Preparation close outcomes](preparation-close-outcomes.md) | Preserve original I/O failures after physical preparation cleanup joins |
+| [Removal process scope](purge-attempt-scope.md) | Keep the original copied process through native scope adoption and cleanup |
+| [Purge decision](purge-cohort-decision.md) | Share one physical commit or abort decision between prepared monitors |
+| [Ordinary purge holder](purge-holder-cohort.md) | Join the original holder and its native monitor before reporting restoration |
+| [Native resource retirement](native-resource-retirement.md) | Keep first native close facts separate from diagnostic reports |
+| [Native manager setup](native-manager-setup.md) | Retain actual partial managers and refuse incomplete operational setup |
+| [Purge scope retirement](purge-scope-retirement.md) | Join the original removal process and its native scope before release |
+| [Image publication cleanup](image-publication-cleanup.md) | Retain the original native helper fence and retry publication cleanup after cancellation or parent death |
+| [Prepare the native gVisor release files](gvisor-release.md) | Check both five-role native builds against the actual source pin and include their bytes in the signed release |
 | [Going public](going-public.md) | What is done, and the owner's steps to make the repo public |
 | [UX spec](ux-spec.md) | The launcher's screens, keys, colours, glyphs and motion |
 | [Renaming](renaming.md) | How to rename the product in one change |
+| [Isolated sessions: spec](isolation-spec.md) | What to build so that each session runs in its own sandbox, on hosts that the user adds: terms, interfaces, policy layers, the classifier, shells, config, commands, protocol, platforms, risks and open questions (proposed) |
+| [Isolated sessions: plan](isolation-plan.md) | The tasks that build the spec, in order, one pull request each, with acceptance criteria and tests, the goal that says when the design is done, and a table that traces each task to its spec and research (proposed) |
+| [The command line: spec](cli-spec.md) | What each task of the CLI plan builds: the grammar, errors and exit codes, prompts, machine output, help, verbs, flags, host commands, agent logins, config check, completion and docs for agents (proposed) |
+| [The command line: plan](cli-plan.md) | The tasks that make the command line easy to guess and hard to misuse: errors, exit codes, prompts, help, session verbs, flags, host commands and completion, under record 0033 |
+| [Progress of the plans](progress.md) | The state of each task of the isolation and CLI plans on the feature branch, and the current focus |
 | [Decisions](decisions/README.md) | Every design decision, with its reasons |
 | [Research](../research/README.md) | The evidence behind the design |
 | [History](history.md) | The first plan, as built |

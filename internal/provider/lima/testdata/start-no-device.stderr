@@ -1,0 +1,4 @@
+# written from Lima 2.3.0's source (pkg/instance/start.go:237 and 431-433, pkg/hostagent/events/watcher.go:75-83, pkg/logrusutil/logrusutil.go:52-57, pkg/driver/vz/vm_darwin.go:433, cmd/limactl/main.go:56), not recorded. It shows the rare order in which limactl start reads the host agent's fatal line before its exiting event. Other lines are left out.
+time="2026-11-11T10:00:00Z" level=info msg="Starting the instance `dev-vm` with internal VM driver `vz`"
+time="2026-11-11T10:00:01Z" level=error msg="[hostagent] nested virtualization is not supported on this device" fields.level=fatal
+time="2026-11-11T10:00:01Z" level=fatal msg="exiting, status={Running:false Degraded:false Exiting:true Errors:[] SSHLocalPort:0 CloudInitProgress:<nil> PortForward:<nil> Vsock:<nil> RequirementProgress:<nil>} (hint: see `/Users/me/.lima/dev-vm/ha.stderr.log`)"

@@ -157,7 +157,7 @@ func TestEndedSessionSaysWhyAndWhatNext(t *testing.T) {
 	}
 	out := plainScreen(hs.m)
 	for _, want := range []string{
-		"2 ✕ importer",
+		"2 ✕  importer",
 		"out of memory  ",
 		"✕ stopped at its memory cap of 1.5 GiB   u resume",
 		"u resume   d delete   enter peek   esc hosts   ctrl+o commands",
@@ -245,7 +245,7 @@ func TestLostSessionOffersResumeAndRestore(t *testing.T) {
 			t.Errorf("the keys offer a peek without a holder:\n%s", out)
 		}
 		for _, cmd := range commands {
-			if cmd.name() == "session: preview" && cmd.reason(hs.m) == "" {
+			if cmd.name() == "session: peek" && cmd.reason(hs.m) == "" {
 				t.Error("the palette offers a peek without a holder")
 			}
 		}

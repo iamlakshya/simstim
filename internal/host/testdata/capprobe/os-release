@@ -1,0 +1,4 @@
+NAME="Example Linux"
+PRETTY_NAME="Example Linux 13 (stable)"
+VERSION_ID="13"
+IGNORED="$(no-command-runs)"

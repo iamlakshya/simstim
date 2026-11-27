@@ -82,6 +82,9 @@ func lingerFix() []fixItem {
 	return []fixItem{{Fix: api.Fix{ID: "linger", Problem: "linger is off, so sessions stop when your last login on the host ends",
 		Action: "turn on linger for " + u.Username + " with loginctl, without sudo; if the host needs root for it, the fix says so", Command: cmd},
 		run: func() error {
+			if err := RecordFootprint(Footprint{Kind: "linger", Before: "off", After: "on"}); err != nil {
+				return err
+			}
 			out, err := exec.CommandContext(context.Background(), "loginctl", "enable-linger", u.Username).CombinedOutput()
 			if err == nil && lingerOn() {
 				return nil
@@ -195,21 +198,25 @@ func currentLinkFix() []fixItem {
 		}}}
 }
 
+// staleSocketsFix finds the session sockets (s/) and hook sockets (h/) that
+// nothing answers on.
 func staleSocketsFix() []fixItem {
-	dir := filepath.Join(paths.RuntimeDir(), "s")
-	entries, _ := os.ReadDir(dir)
+	dir := paths.RuntimeDir()
 	var stale []string
-	for _, e := range entries {
-		p := filepath.Join(dir, e.Name())
-		if e.Type()&os.ModeSocket == 0 || !strings.HasSuffix(e.Name(), ".sock") {
-			continue
+	for _, sub := range []string{"s", "h"} {
+		entries, _ := os.ReadDir(filepath.Join(dir, sub))
+		for _, e := range entries {
+			p := filepath.Join(dir, sub, e.Name())
+			if e.Type()&os.ModeSocket == 0 || !strings.HasSuffix(e.Name(), ".sock") {
+				continue
+			}
+			d := net.Dialer{Timeout: 300 * time.Millisecond}
+			if c, err := d.DialContext(context.Background(), "unix", p); err == nil {
+				c.Close()
+				continue
+			}
+			stale = append(stale, p)
 		}
-		d := net.Dialer{Timeout: 300 * time.Millisecond}
-		if c, err := d.DialContext(context.Background(), "unix", p); err == nil {
-			c.Close()
-			continue
-		}
-		stale = append(stale, p)
 	}
 	if len(stale) == 0 {
 		return nil

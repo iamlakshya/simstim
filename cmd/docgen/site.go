@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -50,6 +51,11 @@ How the project is run, what changed, what comes next, and how to help build it.
 | [Code of conduct](../../CODE_OF_CONDUCT.md) | How we treat each other |
 `
 
+// siteDescription is the site's description: Starlight's, which
+// site/astro.config.mjs reads from generated/brand.json, and the quote at
+// the top of llms.txt.
+const siteDescription = brand.DisplayName + " runs Claude Code, Codex or any terminal agent in a session on a machine you own, and shows you its real screen, byte for byte."
+
 // page is one Markdown file of the repository as a page of the site.
 type page struct {
 	src string // its path in the repository, or "" for a generated page
@@ -71,13 +77,28 @@ type page struct {
 //   - generated/pages.json: every hosted file's path in the repository and
 //     its page, for scripts/check-site-links.py;
 //   - generated/sidebar.json: the three tabs and their sidebars (sitenav.go);
-//   - generated/brand.json and agents.json, for the landing page.
-func sitePages(docs, out, repo string) error {
+//   - generated/brand.json and agents.json, for the landing page and the
+//     site's description;
+//   - ../public/: the images, a Markdown copy of each page, and llms.txt,
+//     which lists the copies for siteURL, the address of this build
+//     (copies.go).
+func sitePages(docs, out, repo, siteURL string) error {
+	if siteURL == "" {
+		return errors.New("-site needs -site-url, the address of this build of the site. Try: scripts/docs-site.sh, which passes it")
+	}
 	content := filepath.Join(out, "content", "docs")
-	for _, dir := range []string{content, filepath.Join(out, "generated"), filepath.Join(out, "..", "public", "images")} {
+	for _, dir := range []string{content, filepath.Join(out, "generated")} {
 		if err := os.RemoveAll(dir); err != nil {
 			return fmt.Errorf("clear %s: %w", dir, err)
 		}
+	}
+	public, err := openPublic(filepath.Join(out, "..", "public"))
+	if err != nil {
+		return err
+	}
+	defer func() { _ = public.Close() }()
+	if err := clearCopies(public); err != nil {
+		return err
 	}
 	pages, err := collect(docs)
 	if err != nil {
@@ -91,17 +112,37 @@ func sitePages(docs, out, repo string) error {
 		}
 	}
 	byURL["docs/project"] = "/project/"
-	for _, p := range pages {
-		md := rewriteLinks(p.md, p.src, p.url, byURL, repo)
-		if err := writeFile(filepath.Join(content, p.dst), []byte(withFrontMatter(md, p, repo))); err != nil {
+	// The landing page draws its own content, so the site gets no page from
+	// the repository's README. It is the landing page's Markdown copy: the
+	// file that links to / stand for.
+	readme, err := os.ReadFile("README.md")
+	if err != nil {
+		return fmt.Errorf("read README.md: %w", err)
+	}
+	all := append([]page{{src: "README.md", url: "/", md: string(readme)}}, pages...)
+	entries := make(map[string]entry, len(all))
+	for _, p := range all {
+		v := viewOf(rewriteLinks(p.md, p.src, p.url, byURL, repo))
+		entries[p.url] = entry{title: v.title, desc: describe(v.body)}
+		if p.dst == "" {
+			continue // the landing page
+		}
+		md, err := withFrontMatter(v, p, repo)
+		if err != nil {
+			return err
+		}
+		if err := writeFile(filepath.Join(content, p.dst), []byte(md)); err != nil {
 			return err
 		}
 	}
-	if err := copyImages(docs, filepath.Join(out, "..", "public", "images")); err != nil {
+	if err := copyImages(docs, public); err != nil {
 		return err
 	}
 	nav, err := sidebar(docs, byURL)
 	if err != nil {
+		return err
+	}
+	if err := writeCopies(public, all, entries, byURL, nav, repo, siteURL); err != nil {
 		return err
 	}
 	return siteData(filepath.Join(out, "generated"), byURL, nav)
@@ -167,38 +208,59 @@ func add(pages *[]page, src, dst, md string) error {
 	return nil
 }
 
-// withFrontMatter gives a page the front matter the site needs: its title,
-// from its first "# " heading, which it removes, since the site prints the
-// title; a description, from its first paragraph; where its source is; and
-// where to suggest a change, unless the page is generated. Front matter the
-// page has already is kept, apart from the Hugo-only weight.
-func withFrontMatter(md string, p page, repo string) string {
-	var keep []string
+// view is a page as the site shows it. It holds the front matter that the
+// page keeps (apart from the Hugo-only weight), its title from the front
+// matter or the first "# " heading, and its body without that heading,
+// since the site prints the title.
+type view struct {
+	keep  []string
+	title string
+	body  string
+}
+
+// viewOf splits a page's Markdown into its view.
+func viewOf(md string) view {
+	var v view
 	if strings.HasPrefix(md, "---\n") {
 		if end := strings.Index(md[4:], "\n---\n"); end >= 0 {
 			for _, l := range strings.Split(md[4:4+end], "\n") {
-				if !strings.HasPrefix(l, "weight:") {
-					keep = append(keep, l)
+				if t, ok := strings.CutPrefix(l, "title:"); ok {
+					v.title = unquote(strings.TrimSpace(t))
+				} else if !strings.HasPrefix(l, "weight:") {
+					v.keep = append(v.keep, l)
 				}
 			}
 			md = md[4+end+5:]
 		}
 	}
 	title, body := splitTitle(md)
-	for _, l := range keep {
-		if strings.HasPrefix(l, "title:") {
-			title = ""
-		}
+	if v.title == "" {
+		v.title = title
+	}
+	v.body = body
+	return v
+}
+
+// withFrontMatter gives a page the front matter the site needs: its title,
+// a description from its first paragraph, where its source is, where to
+// suggest a change (unless the page is generated), and a link to its
+// Markdown copy in its head. Front matter the page has already is kept,
+// apart from the Hugo-only weight. The link joins the page's own head list
+// when it has one.
+func withFrontMatter(v view, p page, repo string) (string, error) {
+	keep, joined, err := joinHead(v.keep, p.url)
+	if err != nil {
+		return "", fmt.Errorf("%s: %w", p.src, err)
 	}
 	var fm strings.Builder
 	fm.WriteString("---\n")
-	if title != "" {
-		fm.WriteString("title: " + quote(title) + "\n")
+	if v.title != "" {
+		fm.WriteString("title: " + quote(v.title) + "\n")
 	}
 	for _, l := range keep {
 		fm.WriteString(l + "\n")
 	}
-	if d := describe(body); d != "" {
+	if d := describe(v.body); d != "" {
 		fm.WriteString("description: " + quote(d) + "\n")
 	}
 	fm.WriteString("srcPath: " + quote(p.src) + "\n")
@@ -208,8 +270,11 @@ func withFrontMatter(md string, p page, repo string) string {
 	} else {
 		fm.WriteString("editUrl: " + quote(repo+"/edit/main/"+p.src) + "\n")
 	}
+	if !joined {
+		fm.WriteString("head:\n" + alternate(p.url, "  "))
+	}
 	fm.WriteString("---\n")
-	return fm.String() + strings.TrimLeft(body, "\n")
+	return fm.String() + strings.TrimLeft(v.body, "\n"), nil
 }
 
 // splitTitle takes a page's first "# " heading outside code as its title.
@@ -256,8 +321,13 @@ func describe(body string) string {
 	return ""
 }
 
-// copyImages copies docs/images into the site's public folder.
-func copyImages(docs, dst string) error {
+// copyImages copies docs/images into the images folder of the site's
+// public folder, which it empties first. A link at images is removed, not
+// followed.
+func copyImages(docs string, public *os.Root) error {
+	if err := public.RemoveAll("images"); err != nil {
+		return fmt.Errorf("clear the images in %s: %w", public.Name(), err)
+	}
 	files, err := filepath.Glob(filepath.Join(docs, "images", "*"))
 	if err != nil {
 		return fmt.Errorf("list the images: %w", err)
@@ -267,7 +337,7 @@ func copyImages(docs, dst string) error {
 		if err != nil {
 			return fmt.Errorf("read %s: %w", f, err)
 		}
-		if err := writeFile(filepath.Join(dst, filepath.Base(f)), b); err != nil {
+		if err := writeIn(public, "images/"+filepath.Base(f), b); err != nil {
 			return err
 		}
 	}
@@ -293,6 +363,7 @@ func siteData(dir string, pages map[string]string, nav []tab) error {
 		"brand": map[string]string{
 			"name": brand.Name, "displayName": brand.DisplayName, "tagline": brand.Tagline,
 			"hostBinary": brand.HostBinary, "envPrefix": brand.EnvPrefix,
+			"description": siteDescription,
 		},
 	}
 	for name, v := range files {
@@ -311,7 +382,7 @@ func writeFile(dst string, b []byte) error {
 	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 		return fmt.Errorf("make %s: %w", filepath.Dir(dst), err)
 	}
-	if err := os.WriteFile(dst, b, 0o644); err != nil { //nolint:gosec // G703: dst is under the output folder named on the command line
+	if err := os.WriteFile(dst, b, 0o644); err != nil {
 		return fmt.Errorf("write %s: %w", dst, err)
 	}
 	return nil

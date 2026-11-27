@@ -27,9 +27,6 @@ import (
 	"github.com/iamlakshya/simstim/internal/paths"
 )
 
-// The tests in this binary may start it again as a session's holder.
-func TestMain(m *testing.M) { hosttest.Main(m) }
-
 // rawReady is what the client writes once the terminal is in raw mode: it
 // saves the window title. Keys typed before it would be cooked.
 const rawReady = "\x1b[22;0t"
@@ -48,6 +45,10 @@ type attachRun struct {
 
 func newAttachRun(t *testing.T) *attachRun {
 	t.Helper()
+	// No test reads the user's clipboard. A missing file is a clipboard
+	// that cannot be read, so the paste guard's hash check alone applies,
+	// unless a test puts text there.
+	t.Setenv(brand.Env("TEST_CLIPBOARD_TEXT"), filepath.Join(t.TempDir(), "no-clipboard"))
 	h := hosttest.New(t)
 	ch, tr := h.ClientHost("box")
 	return &attachRun{t: t, h: h, ch: ch, tr: tr, term: hosttest.NewTerminal(t, 80, 24)}
@@ -475,7 +476,7 @@ func TestAttachFailures(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer f.Close()
-	if _, err := client.Attach(ctx, client.AttachOptions{Host: r.ch, Session: id, Settings: client.DefaultSettings(), In: f, Out: f}); err == nil || !strings.Contains(err.Error(), "raw mode") {
+	if _, err := client.Attach(ctx, client.AttachOptions{Host: r.ch, Session: id, Settings: client.DefaultSettings(), In: f, Out: f}); err == nil || !strings.Contains(err.Error(), "terminal state") {
 		t.Errorf("attach without a terminal = %v", err)
 	}
 }
@@ -529,6 +530,7 @@ func TestImagePaste(t *testing.T) {
 	if up, _ := os.ReadFile(path); !bytes.HasPrefix(up, []byte("\x89PNG")) {
 		t.Errorf("the agent got %q; the file there holds %q", b, up)
 	}
+	r.term.WaitFor("uploaded clipboard.png (18 bytes)")
 	// With no image on the clipboard, the key goes to the agent.
 	t.Setenv(brand.Env("TEST_CLIPBOARD_IMAGE"), filepath.Join(t.TempDir(), "none.png"))
 	r.term.Type("\x16")

@@ -25,6 +25,8 @@ import (
 // knew the request.
 func (h *Holder) debugRequest(req proto.Request) (v any, perr *proto.Error, ok bool) {
 	switch req.Op {
+	case api.OpDebugTraceReadV1:
+		v, perr = h.readOriginalTraceV1(req.Args)
 	case api.OpDebugStart:
 		var a api.DebugStartArgs
 		if len(req.Args) > 0 && json.Unmarshal(req.Args, &a) != nil {
@@ -133,9 +135,9 @@ func (h *Holder) endDebug(reason string, all bool) bool {
 func (h *Holder) setDebugUntil(until *time.Time) {
 	h.mu.Lock()
 	h.m.DebugUntil = until
-	m := *h.m
+	c := h.copyForSave()
 	h.mu.Unlock()
-	if err := h.save(&m, false); err != nil {
+	if err := h.save(c, false); err != nil {
 		h.log.Warn("manifest not saved", "err", err)
 	}
 }

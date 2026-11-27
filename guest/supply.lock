@@ -1,0 +1,73 @@
+# Pins that no package ecosystem covers, and every outside input of the boot
+# pair and the VMM, pinned by SHA-256 (spec 19.5 and 20.1).
+version = 1
+
+[[pin]]
+name = "kernel"
+ref = "v6.18.65"
+commit = "4700e3adf3b24b39dd4929e9c6d62811ba3ccea8"
+watch = "osv"
+
+[[pin]]
+name = "erofs-utils"
+repo = "erofs/erofs-utils"
+ref = "v1.9.4"
+commit = "f36cadb5c563995ab3aa8572a60ed6b721b9557d"
+watch = "github"
+
+[[pin]]
+name = "cloud-hypervisor"
+repo = "cloud-hypervisor/cloud-hypervisor"
+ref = "v54.1"
+commit = "74aeae19cb1ee2c44d33796b0e4e95e1a68e94dd"
+watch = "github"
+
+[[pin]]
+name = "firecracker"
+repo = "firecracker-microvm/firecracker"
+ref = "v1.18.0"
+commit = "eaf83bb718a559d324613d566eaf776b31a62340"
+watch = "github"
+
+[kernel]
+version = "6.18.65"
+released = 2026-11-23
+url = "https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.18.65.tar.xz"
+sha256 = "c92606f956f09dc50b5a0e2af9e86763fce27ada1647de97f8d1ac8cfc95801d"
+
+[erofs_utils]
+version = "1.9.4"
+url = "https://github.com/erofs/erofs-utils/archive/refs/tags/v1.9.4.tar.gz"
+sha256 = "7d135aa2550326a5acf20f53c518aea5a8900015ce50700044e40f818c31dd80"
+
+[moby_check_config]
+commit = "70efc0e31da3a115fc87574d1b786fa2b867c346"
+sha256 = "fda4343e9b50c47896653ca774ccbe9614bfcdb60f080d2b6277baf27efc0a71"
+
+[builder]
+image = "docker.io/library/debian@sha256:9c6e381421d0f48d1b8133e573f33c185ee16cbf505eda9c4a8a4791b25ea8a6"
+snapshot = "20261110T000000Z"
+suite = "trixie"
+inrelease_sha256 = "0584fba32e13e0ab8285fb16c27adea1ec03a73669c18702821094fd6ca86675"
+security_inrelease_sha256 = "8cfb86ff1190b904539e1c8c2069e9b373ec8add28f59cdab7f4839edb0cb5b6"
+
+[[vmm]]
+name = "cloud-hypervisor"
+version = "54.1"
+released = 2026-11-11
+eol = 2027-01-06
+amd64 = { url = "https://github.com/cloud-hypervisor/cloud-hypervisor/releases/download/v54.1/cloud-hypervisor-static", sha256 = "f9ffb9646783233d1f0fb09e77db1fca66499d1041e63bc011b90683c0d49933", size = 7344872 }
+arm64 = { url = "https://github.com/cloud-hypervisor/cloud-hypervisor/releases/download/v54.1/cloud-hypervisor-static-aarch64", sha256 = "96ef17679a4a75be8eefa1956dd645a57f7974ec50565090ea9298f9bbb761ad", size = 5824616 }
+source = { url = "https://github.com/cloud-hypervisor/cloud-hypervisor/releases/download/v54.1/cloud-hypervisor-v54.1.tar.xz", sha256 = "7f030190ea1d47c45d1a6eff02b94378987091cf60c2462ee0a6105e5dfdb78a", size = 33472980 }
+
+# Architecture pins cover upstream archives. The release mirrors only their
+# raw Firecracker executable and hashes that extracted file in the manifest.
+# eol is the upstream minimum support date, a conservative release bound.
+[[vmm]]
+name = "firecracker"
+version = "1.18.0"
+released = 2026-11-09
+eol = 2027-05-09
+amd64 = { url = "https://github.com/firecracker-microvm/firecracker/releases/download/v1.18.0/firecracker-v1.18.0-x86_64.tgz", sha256 = "1ac8eec866dd5eea14efecf6323e22b23eea24054545338a5b34bc5bca6623cd", size = 7606252 }
+arm64 = { url = "https://github.com/firecracker-microvm/firecracker/releases/download/v1.18.0/firecracker-v1.18.0-aarch64.tgz", sha256 = "2a6130ff0338901ff9d7fbd73ce046c6b1c6123889dc84a34d678aa53bd0c0c2", size = 7438783 }
+source = { url = "https://github.com/firecracker-microvm/firecracker/archive/refs/tags/v1.18.0.tar.gz", sha256 = "89f02fe6867edcf0a0154305d5533a611e48eaa99ba11d24aa2f076492bef615", size = 11631021 }

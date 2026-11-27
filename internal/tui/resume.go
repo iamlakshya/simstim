@@ -2,11 +2,13 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/iamlakshya/simstim/internal/api"
 	"github.com/iamlakshya/simstim/internal/client"
 )
 
@@ -19,6 +21,7 @@ type resumedMsg struct {
 	key sessKey
 	res *client.ResumeResult
 	err error
+	settingsRead
 }
 
 // resumeSelected starts the selected session's agent again, with the cap
@@ -26,6 +29,13 @@ type resumedMsg struct {
 // resume of the session runs, the key does nothing. The row still says
 // that the agent ended until the host has stopped the old holder.
 func (m *Model) resumeSelected() tea.Cmd {
+	if h, s := m.selectedPair(); h != nil && s != nil {
+		return m.withHostTier(h, m.resumeSelectedReady)
+	}
+	return nil
+}
+
+func (m *Model) resumeSelectedReady() tea.Cmd {
 	h, s := m.selectedPair()
 	if s == nil {
 		return nil
@@ -37,33 +47,99 @@ func (m *Model) resumeSelected() tea.Cmd {
 	if !h.online() {
 		return m.toastErr(offlineErr(h))
 	}
-	names, err := client.ResumeSecrets(h.host, *s, nil)
-	if err != nil {
-		// The host names the secrets: one that hosts.toml does not give it
-		// needs the command line, where the user names it too.
-		return m.toastErr(err)
-	}
 	if m.resuming == nil {
 		m.resuming = map[sessKey]bool{}
 	}
 	m.resuming[key] = true
-	c, ctx, be := h.conn, m.ctx, m.be
-	resume := func() tea.Msg {
-		// The host stops the old holder and its unit, then waits for the start.
-		cctx, cancel := context.WithTimeout(ctx, 90*time.Second)
-		defer cancel()
-		secrets, err := be.SessionSecrets(cctx, names)
-		if err != nil {
-			return resumedMsg{key: key, err: err}
+	c, be, originalHost, originalSession, kept := h.conn, m.be, h.host, *s, m.settings
+	request := client.NewGrantRequest(false, false)
+	m.grantOwners.add(request)
+	read := m.beginSettingsRead()
+	resume := m.bgCmd(func(ctx context.Context) (message tea.Msg) {
+		defer func() {
+			if result, ok := message.(resumedMsg); ok {
+				result.err = errors.Join(result.err, m.grantOwners.release(ctx, request))
+				message = result
+			}
+		}()
+		settings, read := readSettings(be, kept, read)
+		if _, err := client.ReadPolicySettings(); err != nil {
+			return resumedMsg{key: key, err: err, settingsRead: read}
 		}
-		res, err := c.Resume(cctx, client.ResumeArgs{ID: key.id, Secrets: secrets})
-		return resumedMsg{key: key, res: res, err: err}
+		// The host stops the old holder and its unit, then waits for the start.
+		cctx, cancel := context.WithTimeout(client.WithGrantRequest(ctx, request), 90*time.Second)
+		defer cancel()
+		endAttempt, err := m.grantOwners.begin(request, cctx, cancel)
+		if err != nil {
+			return resumedMsg{key: key, err: err, settingsRead: read}
+		}
+		defer endAttempt()
+		var plan client.ResumePolicyPlan
+		if planner, ok := unclean(c).(interface {
+			PlanResumePolicy(context.Context, string) (client.ResumePolicyPlan, error)
+		}); ok {
+			var err error
+			plan, err = planner.PlanResumePolicy(cctx, key.id)
+			if err != nil {
+				return resumedMsg{key: key, err: err, settingsRead: read}
+			}
+		}
+		effectiveNames, err := client.ResumePlanSecretNames(originalHost, originalSession, nil, plan)
+		if err != nil {
+			return resumedMsg{key: key, err: err, settingsRead: read}
+		}
+		if err := m.grantQuestions(cctx, func(ctx context.Context) error {
+			return c.CheckResumeGrants(ctx, key.id, effectiveNames)
+		}); err != nil {
+			return resumedMsg{key: key, err: err, settingsRead: read}
+		}
+		if planner, ok := unclean(c).(interface {
+			CheckResumePolicyBeforeFetch(context.Context, string, client.ResumePolicyPlan) error
+		}); ok {
+			if err := m.grantQuestions(cctx, func(ctx context.Context) error {
+				return planner.CheckResumePolicyBeforeFetch(ctx, key.id, plan)
+			}); err != nil {
+				return resumedMsg{key: key, err: err, settingsRead: read}
+			}
+		}
+		arguments := client.ResumeArgs{ID: key.id, Layers: plan.Layers}
+		if native, ok := unclean(c).(interface {
+			PrepareNativeResume(context.Context, client.ResumeArgs) (string, error)
+		}); ok {
+			if err := m.grantQuestions(cctx, func(ctx context.Context) error {
+				_, err := native.PrepareNativeResume(ctx, arguments)
+				return err
+			}); err != nil {
+				return resumedMsg{key: key, err: err, settingsRead: read}
+			}
+		}
+		var secrets map[string]api.Secret
+		err = m.grantQuestions(cctx, func(ctx context.Context) error {
+			var err error
+			secrets, err = be.SessionSecrets(ctx, settings, originalHost, key.id, effectiveNames)
+			return err
+		})
+		if err != nil {
+			return resumedMsg{key: key, err: err, settingsRead: read}
+		}
+		var res *client.ResumeResult
+		err = m.grantQuestions(cctx, func(ctx context.Context) error {
+			var err error
+			arguments.Secrets = secrets
+			res, err = c.Resume(ctx, arguments)
+			return err
+		})
+		return resumedMsg{key: key, res: res, err: err, settingsRead: read}
+	})
+	name, host := shown(s.Name), shown(h.name())
+	text := fmt.Sprintf("Resuming %s on %s…", name, host)
+	if s.State == api.StateStopped {
+		text = fmt.Sprintf("Waking %s on %s…", name, host)
 	}
-	text := fmt.Sprintf("Resuming %s on %s…", s.Name, h.name())
 	if client.CapStopped(*s) && s.MemoryMax > 0 {
 		// The cap that stopped the agent applies again, unless the command
 		// line gives another.
-		text = fmt.Sprintf("Resuming %s on %s, with its cap of %s…", s.Name, h.name(), fmtSize(s.MemoryMax))
+		text = fmt.Sprintf("Resuming %s on %s, with its cap of %s…", name, host, fmtSize(s.MemoryMax))
 	}
 	return tea.Batch(m.toast(toastInfo, text), resume)
 }
@@ -95,5 +171,5 @@ func (m *Model) onResumed(msg resumedMsg) tea.Cmd {
 	if m.sel == msg.key && m.modal == nil && m.prompt == nil && m.rename == nil {
 		return m.jack(h, s.ID, s.Name)
 	}
-	return tea.Batch(m.toast(toastSuccess, fmt.Sprintf("Resumed %s on %s.", s.Name, h.name())), m.listSessions(h))
+	return tea.Batch(m.toast(toastSuccess, fmt.Sprintf("Resumed %s on %s.", shown(s.Name), shown(h.name()))), m.listSessions(h))
 }

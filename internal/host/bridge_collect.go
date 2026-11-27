@@ -69,8 +69,10 @@ func (b *bridge) collect(a api.DebugCollectArgs) api.DebugCollected {
 	files := map[string]collected{}
 	addFolder(files, paths.DebugDir(), "host/bridge/")
 	ids, notes := bundleSessions(a)
+	traceBudget := int64(2 * diag.DefaultMax)
 	for _, id := range ids {
 		notes = append(notes, collectSession(id, files)...)
+		notes = append(notes, collectOriginalHolderTraceV1(id, files, &traceBudget)...)
 	}
 	secrets := alertSecrets()
 	out := api.DebugCollected{Home: home, Notes: notes}
@@ -144,7 +146,7 @@ func collectSession(id string, files map[string]collected) []string {
 	} else {
 		notes = append(notes, id+": its holder is not running, so there are no fresh profiles")
 	}
-	for _, p := range []string{paths.DebugTrace(id), paths.HolderLog(id)} {
+	for _, p := range []string{paths.DebugTrace(id), paths.HolderLog(id), paths.SupervisorLog(id), paths.GuestHolderLog(id)} {
 		addFile(files, p, prefix+filepath.Base(p))
 		addFile(files, p+".1", prefix+filepath.Base(p)+".1")
 	}

@@ -13,6 +13,7 @@ import (
 
 	"github.com/iamlakshya/simstim/internal/client"
 	"github.com/iamlakshya/simstim/internal/client/clienttest"
+	"github.com/iamlakshya/simstim/internal/testhome"
 )
 
 // fakeSSH puts an ssh on PATH that runs the remote command locally, or
@@ -33,16 +34,23 @@ exec sh -c "$last"
 	}
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	// A short cache, in the tests' own root: a socket's path in it fits.
+	cache, err := os.MkdirTemp(testhome.Root(), "c")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("XDG_CACHE_HOME", cache)
 }
 
 func TestSSHTransportRoundTrip(t *testing.T) {
 	fakeSSH(t)
+	client.PinForTest(t, "box")
 	clienttest.RoundTrip(t, &client.SSH{Host: client.Host{Name: "box", SSH: "box"}})
 }
 
 func TestSSHTransportUnreachable(t *testing.T) {
 	fakeSSH(t)
+	client.PinForTest(t, "box")
 	s := &client.SSH{Host: client.Host{Name: "box", SSH: "unreachable"}}
 	p, err := s.Start(context.Background(), "true")
 	if err != nil {
@@ -55,13 +63,14 @@ func TestSSHTransportUnreachable(t *testing.T) {
 	if p.Stderr() == "" {
 		t.Fatal("stderr was not kept")
 	}
-	if got := s.ReachHint(); got != "ssh unreachable   (check that this works first)" {
+	if got := s.ReachHint(); got != "ssh unreachable (check that this works first)" {
 		t.Fatalf("hint = %q", got)
 	}
 }
 
 func TestSSHTransportRun(t *testing.T) {
 	fakeSSH(t)
+	client.PinForTest(t, "box")
 	s := &client.SSH{Host: client.Host{Name: "box", SSH: "box"}}
 	out, err := s.Run(context.Background(), "tr a-z A-Z", bytes.NewReader([]byte("hello")))
 	if err != nil || string(out) != "HELLO" {
@@ -74,9 +83,49 @@ func TestDialNotInstalledOverAnyTransport(t *testing.T) {
 	// The fake ssh runs the bridge command locally, where the helper is not
 	// installed: the shell says "not found", which means "install it".
 	h := client.Host{Name: "nowhere-" + filepath.Base(t.TempDir()), SSH: "box"}
+	if err := client.StagePin(context.Background(), h.Name); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { client.AbortPin(h.Name) })
+	client.PinForTest(t, h.Name)
 	_, err := client.Dial(context.Background(), h, false)
 	var ue *client.UserError
 	if !errors.As(err, &ue) || !strings.HasSuffix(ue.Hint, " host add "+h.Name) {
 		t.Fatalf("err = %v, want a user error to add the host", err)
+	}
+}
+
+// An interactive ssh shows the user what the host writes to stderr, as it
+// comes, but cleaned: ESC c, an OSC 52 write, a bidirectional override and
+// a zero-width space never reach the terminal, when the command works and
+// when it fails.
+func TestInteractiveStderrIsClean(t *testing.T) {
+	fakeSSH(t)
+	client.PinForTest(t, "box")
+	const remote = `printf 'a\033c b\033]52;c;aGk=\007 c\342\200\256d\342\200\213e\nprompt: ' >&2`
+	for _, tail := range []string{"", "; exit 3"} {
+		f, err := os.CreateTemp(t.TempDir(), "stderr")
+		if err != nil {
+			t.Fatal(err)
+		}
+		old := os.Stderr
+		os.Stderr = f
+		s := &client.SSH{Host: client.Host{Name: "box", SSH: "box"}, Interactive: true}
+		_, runErr := s.Run(context.Background(), remote+tail, nil)
+		os.Stderr = old
+		_ = f.Close()
+		got, err := os.ReadFile(f.Name())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if want := "ac b]52;c;aGk= cde\nprompt: "; string(got) != want {
+			t.Errorf("with %q the terminal got %q, want %q", tail, got, want)
+		}
+		if (tail == "") != (runErr == nil) {
+			t.Errorf("with %q: %v", tail, runErr)
+		}
+		if runErr != nil && strings.ContainsAny(runErr.Error(), "\x1b\x07\u202e\u200b") {
+			t.Errorf("the error holds the host's controls: %q", runErr.Error())
+		}
 	}
 }

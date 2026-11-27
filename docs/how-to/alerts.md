@@ -21,16 +21,16 @@ Your phone shows "Test alert from my-vps". From now on, every session on `my-vps
 
 **ntfy.sh, the public server.** Use a topic name nobody can guess, as above.
 
-**Your own ntfy server, or a reserved topic.** These need an access token. Give `--token-cmd` a command that prints the token on your laptop, such as a keychain read. The client runs it, sends the token to the host, and never prints it:
+**Your own ntfy server, or a reserved topic.** These need an access token. Give `--token-command` a command that prints the token on your laptop, such as a keychain read. The client runs it, sends the token to the host, and never prints it:
 
 ```sh
 # macOS keychain
 simstim host alerts set my-vps --ntfy https://ntfy.example.com/agents \
-  --token-cmd 'security find-generic-password -s ntfy-token -w'
+  --token-command 'security find-generic-password -s ntfy-token -w'
 
 # 1Password
 simstim host alerts set my-vps --ntfy https://ntfy.example.com/agents \
-  --token-cmd 'op read op://Private/ntfy/token'
+  --token-command 'op read op://Private/ntfy/token'
 ```
 
 The token is stored only on the host, in the alerts file, which only you can read. To keep it in a file of its own instead, edit the alerts file by hand and set `token_file` (see [the alerts file](#the-alerts-file)). The token file must be mode 0600 too.
@@ -50,6 +50,25 @@ A webhook address is a secret: anyone who has it can post to your channel. It st
 
 If your service needs a header, such as `Authorization`, add it to the alerts file by hand, under `headers`.
 
+For an OpenTelemetry collector, use `--format otlp` and give the full OTLP/HTTP
+logs endpoint. The host sends one log record for each alert:
+
+```sh
+simstim host alerts set my-vps --webhook http://localhost:4318/v1/logs --format otlp
+simstim host alerts test my-vps
+```
+
+The body follows [OTLP's JSON encoding](https://opentelemetry.io/docs/specs/otlp/#json-protobuf-encoding).
+The record carries the event name, session and reason as attributes, and the
+summary as its body. Detail stays off unless you enable it. Collector rejections
+appear in the delivery log. The same destination checks, delay and noise limits
+apply. Nothing is sent until you name a destination.
+
+You can select `sandbox_ready`, `sandbox_stopped`, `sandbox_error`,
+`health_degraded` and `health_recovered` in `events`. A run stopped by its time
+limit carries `reason = "max_run"`. These sandbox and health events are included
+in the default list, along with disk protection and a silent guest init.
+
 ## Set up a command
 
 A command runs on the host with `sh -c`, in your home folder and your login environment. It gets the event as one line of JSON on stdin, and as environment variables:
@@ -63,6 +82,8 @@ A command runs on the host with `sh -c`, in your home folder and your login envi
 | `SIMSTIM_TIME` | When it happened, in RFC 3339, UTC |
 | `SIMSTIM_EXIT_CODE`, `SIMSTIM_SIGNAL` | How the program ended, for `exited`, `failed` and `oom` |
 | `SIMSTIM_DETAIL` | The agent's question, only if you turn `detail` on |
+| `SIMSTIM_DETAIL_FROM`, `SIMSTIM_EXIT_FROM` | `guest` when that detail or exit report came from the sandbox |
+| `SIMSTIM_CLAIMED` | `1` when the event itself is a sandbox claim |
 | `SIMSTIM_EVENT_VERSION` | The version of the event's format, now `1` |
 
 Some examples:
@@ -79,7 +100,7 @@ simstim host alerts set my-vps --add --command \
   'curl -s -d chat_id=12345 --data-urlencode "text=$SIMSTIM_SUMMARY" "https://api.telegram.org/bot$(cat ~/.telegram-token)/sendMessage"'
 ```
 
-Event values never go into the command line itself, so a session name such as `$(rm -rf ~)` is only text. Keep it that way in your own scripts: quote the variables (`"$SIMSTIM_SUMMARY"`), and never pass them to `eval` or `sh -c`.
+Event values never go into the command line itself, so a session name such as `$(rm -rf ~)` is only text. Keep it that way in your own scripts: quote the variables (`"$SIMSTIM_SUMMARY"`), and never pass them to `eval` or `sh -c`. This matters most for `SIMSTIM_DETAIL`, which the agent, or any program in the session, writes. Treat it as data, and never put it into code, such as a script or a template.
 
 A command has 10 seconds. After that it is stopped, with any children it started. Its output goes to the delivery log, cut short.
 
@@ -88,7 +109,7 @@ A command has 10 seconds. After that it is stopped, with any children it started
 `host alerts set` writes `~/.config/simstim/alerts.toml` on the host, mode 0600. You may also edit it by hand. A file that other users can read is not used: `chmod 600` it. An unknown key is an error, so a typo never turns alerts off without a word.
 
 ```toml
-events = ["needs_input", "turn_done", "failed", "oom", "memory"]  # the default
+events = ["needs_input", "turn_done", "failed", "oom", "memory"]  # a narrower list
 delay = "10s"               # how long needs_input waits before it is sent
 min_turn = "60s"            # the shortest turn that sends turn_done
 detail = false              # add the agent's question to needs_input
@@ -118,7 +139,7 @@ These `host alerts set` flags write the same keys:
 
 | Flag | Key |
 | --- | --- |
-| `--ntfy URL`, `--token-cmd CMD` | an ntfy destination, with `token` |
+| `--ntfy URL`, `--token-command CMD` | an ntfy destination, with `token` |
 | `--webhook URL`, `--format F` | a webhook destination |
 | `--command CMD` | a command destination |
 | `--events a,b` | `events` |
@@ -138,11 +159,20 @@ A destination flag without `--add` replaces the whole file. With no destination 
 | `failed` | The program ended with another code, or a signal |
 | `oom` | A process in the session hit its memory cap and was stopped. When that process was the program itself, `oom` is the session's end, in place of `failed`, and has `exit_code` and `signal`. A program that runs on does not also send `needs_input`. [Memory](memory.md) says how to raise the cap |
 | `memory` | The session is close to its memory cap, before the cap stops a process |
+| `disk_full` | The supervisor stopped the sandbox for disk protection |
+| `link_silent` | The guest init has not sent a valid heartbeat for 15 seconds |
+| `sandbox_ready`, `sandbox_stopped`, `sandbox_error` | The supervisor recorded a ready sandbox, a stop or a failure |
+| `health_degraded`, `health_recovered` | The host gained a health item, or its last health item cleared |
+| `judge_unavailable` | The trusted network judge could not make a decision |
 | `started` | The session started, or `resume` started its agent again |
 | `restored` | The session was started again after a host restart |
 | `test` | `host alerts test` |
 
-No event is sent when you kill a session, or when the host shuts down.
+For a walled session, the agent's reported state and end remain claims. The
+supervisor's own lifecycle and protection records remain separate native facts.
+Claimed summaries end with `(claimed)`. JSON carries `claimed`, `exit_from` and
+`detail_from` when they apply. A guest-written question is also labelled in text.
+These labels do not make a guest's text safe to execute.
 
 A session's end is `exited`, `failed`, or the `oom` that stopped the program itself. The limit of one event of a kind a minute never holds an end back ([keep the noise down](#keep-the-noise-down)). So if the cap stops a process that the program started, and then the program itself within a minute, both `oom` alerts go out. Only the second has `exit_code` and `signal`. For processes that the program started, a session sends one `oom` a minute at most.
 
@@ -174,7 +204,7 @@ An event looks like this:
 ## Keep the noise down
 
 - `needs_input` waits `delay` (10 seconds). If the session moves on, or you type into it, in that time, nothing is sent. So you get no alert while you are at the keyboard. Set `quiet_when_typing = false` to change that.
-- Each session sends one event of a kind a minute at most. This limit never holds back the session's end: `exited`, `failed`, or the `oom` that stopped the program.
+- Each session sends one event of a kind a minute at most. This limit never holds back the session's end: `exited`, `failed`, or the `oom` that stopped the program. A fresh `link_silent` transition also bypasses this limit.
 - A host sends 20 events a minute at most, across all its sessions. This limit counts a session's end too.
 - `turn_done` comes only after turns longer than `min_turn` (a minute).
 - List only the events you want in `events`, or give one destination its own `events`.
@@ -191,7 +221,7 @@ simstim host alerts test my-vps --event needs_input
 It says what each destination did. Then look at the delivery log, which also says why an event was not sent:
 
 ```sh
-simstim host alerts log my-vps -n 50
+simstim host alerts log my-vps --lines 50
 ```
 
 If the log has nothing from a session at all, the session may run an older helper, from before alerts. Start it again.
@@ -215,3 +245,7 @@ simstim host alerts off my-vps
 ```
 
 This removes the alerts file. Running sessions stop sending at their next event.
+
+An explicit `--events` needs at least one event, such as `failed` or `oom`.
+An empty value or a list of only commas is an error.
+To stop sending alerts, use `host alerts off <host>`.

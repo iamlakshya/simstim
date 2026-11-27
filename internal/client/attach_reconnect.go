@@ -21,14 +21,8 @@ func (a *attacher) reconnect(ctx context.Context) (detached bool, err error) {
 	since := diag.Now()
 	DebugLog().Debug("connection lost", diag.CatKey, diag.CatNet, "reason", reason)
 	go a.ssh.masterState(context.WithoutCancel(ctx), "drop")
-	// The title says so too, pushed so that it can be put back as it was.
-	a.write([]byte("\x1b]9;4;3\x1b\\\x1b[22;0t\x1b]2;⧗ reconnecting · " + a.key + "\x1b\\"))
-	defer func() {
-		a.write([]byte("\x1b]9;4;0\x1b\\\x1b[23;0t"))
-		if len(a.tracker.M.Title) > 0 {
-			a.write(a.tracker.M.Title) // for terminals without a title stack
-		}
-	}()
+	finishNotice := a.reconnectNotice(ctx)
+	defer finishNotice()
 	banner := time.After(bannerAfter)
 	delay := time.Duration(0)
 	for {
@@ -48,6 +42,30 @@ func (a *attacher) reconnect(ctx context.Context) (detached bool, err error) {
 	}
 }
 
+// reconnectNotice draws only the client's complete control sequences. They
+// abort any unfinished session escape, so the notification boundary starts
+// again at ground, including when the next attach uses replay.
+func (a *attacher) reconnectNotice(ctx context.Context) func() {
+	// The title says so too, pushed so that it can be put back as it was.
+	a.write(ctx, []byte("\x1b]9;4;3\x1b\\\x1b[22;0t\x1b]2;⧗ reconnecting · "+oscSafe(a.key)+"\x1b\\"))
+	a.outStream.reset()
+	return func() {
+		a.write(ctx, []byte("\x1b]9;4;0\x1b\\\x1b[23;0t"))
+		a.outStream.reset()
+		if len(a.tracker.M.Title) > 0 {
+			a.writeOutput(ctx, a.tracker.M.Title) // for terminals without a title stack
+		}
+	}
+}
+
+// reconnectTitle says in the terminal's title that the link is down. It
+// pushes the title first, so that it can be put back as it was. The title
+// holds the session's ID, which the host sent: it gets a cleaned copy,
+// with no BEL or ESC to end it early.
+func (a *attacher) reconnectTitle() []byte {
+	return []byte("\x1b]9;4;3\x1b\\\x1b[22;0t\x1b]2;" + CleanLine("⧗ reconnecting · "+a.key) + "\x1b\\")
+}
+
 // waitToRetry waits for the next try: the retry delay, or a key press. It
 // returns true when the user pressed the detach key, the terminal closed,
 // or the attach was cancelled. The banner shows once, after a while.
@@ -55,8 +73,9 @@ func (a *attacher) waitToRetry(ctx context.Context, banner, retry <-chan time.Ti
 	for {
 		select {
 		case <-banner:
-			a.flash("connection lost · reconnecting · keys are not sent · " + a.o.Settings.Attach.DetachKey + " to leave")
+			a.flash(ctx, "connection lost · reconnecting · keys are not sent · "+a.o.Settings.Attach.DetachKey+" to leave")
 		case b, ok := <-a.inCh:
+			a.inputPending = false
 			if !ok {
 				return true
 			}
@@ -67,6 +86,7 @@ func (a *attacher) waitToRetry(ctx context.Context, banner, retry <-chan time.Ti
 				}
 			}
 			_ = a.filter.Flush()
+			a.askInput()
 			return false // a key press: try again now
 		case <-retry:
 			return false
@@ -81,27 +101,28 @@ func (a *attacher) waitToRetry(ctx context.Context, banner, retry <-chan time.Ti
 // try again later.
 func (a *attacher) tryReconnect(ctx context.Context) (done bool, err error) {
 	a.ssh.ExitMaster(ctx)
-	dctx, cancel := context.WithTimeout(ctx, 20*time.Second)
-	conn, err := Dial(dctx, a.o.Host, false)
+	dctx, cancel := context.WithTimeout(quietAttachContext(ctx), 20*time.Second)
+	conn, agent, err := dialAttach(dctx, a.o.Host, a.o.Session, false)
 	cancel()
 	var ue *UserError
 	if err != nil {
 		return errors.As(err, &ue), err
 	}
-	a.conn.Close()
-	a.conn = conn
+	a.closeConnections()
+	a.conn, a.agent = conn, agent
 	cols, rows, xpx, ypx := a.size()
 	before := a.cu.Offset
-	att, err := a.handshake(a.cu.Offset, cols, rows, xpx, ypx, true)
+	att, err := a.handshake(ctx, a.cu.Offset, cols, rows, xpx, ypx, true)
 	if err != nil {
 		return errors.As(err, &ue), err
 	}
-	a.clearFlash()
+	a.clearFlash(ctx)
 	if att.Mode == "replay" {
 		a.cu.History(att.Live)
 	} else {
-		a.begin(att, &AttachState{}, rows)
+		a.begin(ctx, att, &AttachState{}, rows)
 	}
+	a.startAgent(ctx)
 	a.res.Missed += att.Live - before
 	return true, nil
 }

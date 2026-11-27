@@ -8,11 +8,17 @@
 # it with go install, which checks the module's sum), and links them into
 # .tools/bin.
 # The justfile puts .tools/bin first on its PATH. Go itself comes from go.mod:
-# any Go 1.21 or newer downloads the pinned toolchain on first use.
+# any Go 1.21 or newer downloads that exact toolchain on first use.
 #
 #   scripts/setup.sh --only node,typos   only these tools, and no build (CI)
 set -euo pipefail
 cd "$(dirname "$0")/.."
+# Images such as the devcontainer may set GOTOOLCHAIN=local with an older
+# bootstrap Go. Build and test with the repository's exact pinned toolchain.
+go_build_toolchain=$(GOTOOLCHAIN="" sh scripts/go-build-tags.sh toolchain)
+export GOTOOLCHAIN="$go_build_toolchain"
+go_build_tags=$(sh scripts/go-build-tags.sh)
+export GO_BUILD_TAGS="$go_build_tags"
 
 only=""
 if [ "${1:-}" = "--only" ]; then
@@ -94,11 +100,11 @@ say ""
 say "Building and testing once, to check the setup…"
 just build
 log=$(mktemp)
-if ! go test -count=1 ./... >"$log" 2>&1; then
+if ! go test -tags="$go_build_tags" -count=1 ./... >"$log" 2>&1; then
     say ""
-    grep -E -- '--- FAIL|^FAIL|panic:' "$log" >&2 || tail -40 "$log" >&2
+    cat "$log" >&2
     rm -f "$log"
-    die "a test failed; the lines above say which. Run it again with go test -run <name> -v."
+    die "a test failed; the lines above say which. Run it again with go test -tags='$go_build_tags' -run <name> -v."
 fi
 rm -f "$log"
 say ""

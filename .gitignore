@@ -7,6 +7,10 @@
 /site/src/content/docs/
 /site/src/generated/
 /site/public/images/
+# The docs for coding agents that cmd/docgen -site writes: llms.txt and a
+# Markdown copy of each page
+/site/public/llms.txt
+/site/public/**/*.md
 # Pinned developer tools (scripts/setup.sh)
 /.tools/
 /dist/

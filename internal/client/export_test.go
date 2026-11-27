@@ -1,6 +1,10 @@
 package client
 
-import "time"
+import (
+	"context"
+	"testing"
+	"time"
+)
 
 // SetLeasePeriod lets tests renew leases faster. It returns a function that
 // puts the old period back.
@@ -18,5 +22,57 @@ func SetEscFlush(d time.Duration) func() {
 	return func() { escFlush = old }
 }
 
+// PinForTest gives the host called name a pin of a new key, in the test's
+// own config folder: every connection checks one.
+func PinForTest(t testing.TB, name string) {
+	t.Helper()
+	pinFor(t, name)
+}
+
 // AnswersPings reports whether RoundTrip times c's host with pings.
 func AnswersPings(c *Conn) bool { return !c.noPong.Load() }
+
+// ForgetClipMemory drops what this process holds of the paste guard's
+// memory, as a new client process would start. The file stays.
+func ForgetClipMemory() {
+	clipMemMu.Lock()
+	defer clipMemMu.Unlock()
+	clear(clipMems)
+}
+
+// SetDropRead runs f after the guard opened the files of a drop and before
+// the client reads them. It returns a function that takes it away.
+func SetDropRead(f func()) func() {
+	dropRead = f
+	return func() { dropRead = nil }
+}
+
+// FlushClipMemory waits until this process's clipboard writes are in the
+// paste guard's file, and its journal is folded.
+func FlushClipMemory() {
+	clipMemMu.Lock()
+	mems := make([]*clipMemory, 0, len(clipMems))
+	for _, m := range clipMems {
+		mems = append(mems, m)
+	}
+	clipMemMu.Unlock()
+	for _, m := range mems {
+		m.flush(context.Background(), 10*time.Second)
+	}
+}
+
+// SetRequestStage makes f see each stage of a request (requestStage), for
+// the rest of a test. It returns a function that puts the old one back.
+func SetRequestStage(f func(stage string)) func() {
+	old := requestStage
+	requestStage = f
+	return func() { requestStage = old }
+}
+
+// SetBeforeHostsSave runs fn in UpdateHosts just before its save. It
+// returns a function that puts the old one back.
+func SetBeforeHostsSave(fn func()) func() {
+	old := beforeHostsSave
+	beforeHostsSave = fn
+	return func() { beforeHostsSave = old }
+}

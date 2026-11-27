@@ -7,7 +7,13 @@ title: "simstim host start"
 Start the host through its provider or provider script.
 
 ```text
-simstim host start <name>
+simstim host start <host> [flags]
+```
+
+## Examples
+
+```sh
+simstim host start my-vps
 ```
 
 ## Flags from the parent command
@@ -16,5 +22,7 @@ simstim host start <name>
 | --- | --- |
 | `--debug[=<categories>]` | turn on the debug mode, with every category, or with the categories listed: attach, net, memory, launcher, runtime. A list binds only in the = form, such as `--debug=net` |
 | `--debug-file <file>` | write the client's debug records to this file. On its own, it turns on every category (SIMSTIM_DEBUG_FILE does the same) |
+| `--no-color` | print no colour (NO_COLOR does the same) |
+| `--no-input` | ask nothing: a question that needs an answer fails with exit code 4, and names the flag that answers it (SIMSTIM_NO_INPUT=1 does the same) |
 
 Part of [`host`](host.md): add, create, list, test and remove hosts.

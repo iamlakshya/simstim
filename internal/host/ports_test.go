@@ -51,6 +51,7 @@ func TestHolderTakesOnlyItsOwnUnit(t *testing.T) {
 			cgroup = "0::/user.slice/" + brand.Slice + "/" + want + "\n"
 		}
 		fakeProc(t, map[string]string{"self/cgroup": cgroup})
+		h.takeUnit()
 		if err := h.start(); err != nil {
 			t.Fatal(err)
 		}

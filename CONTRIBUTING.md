@@ -4,9 +4,11 @@ Thank you for your interest. The project is young, so open an issue before a lar
 
 ## Set up
 
-On macOS or Linux (amd64 or arm64), install Go 1.21 or newer, git and OpenSSH first. Go 1.21 is the bootstrap minimum, not the build toolchain: with automatic toolchain downloads enabled (`GOTOOLCHAIN=auto`), Go downloads the version pinned in [go.mod](go.mod), currently Go 1.26.10.
+On macOS or Linux (amd64 or arm64), install Go 1.21 or newer, git and OpenSSH first. Go 1.21 is the bootstrap minimum, not the build toolchain: the build scripts select the exact version pinned in [go.mod](go.mod), currently Go 1.27.4. Go downloads and verifies that official toolchain through Go's checksum database when it is missing. An explicit `GOTOOLCHAIN=local` stays local only when the selected compiler reports the exact pinned version; otherwise the build stops with a hint. The setup script overrides a container image's `GOTOOLCHAIN=local` (such as in the devcontainer) to select that pinned toolchain. The `toolchain` directive alone is a minimum preference; a newer installed compiler is not qualified for HTTP interception.
 
-You also need bash, curl, tar (with gzip and xz support), and either `sha256sum` or `shasum`. These download, unpack and check the tools. Install Python 3 for the documentation checks and end-to-end tests. Then, from your checkout, run:
+Source builds use the documented `http2legacy` build tag from the pinned HTTP/2 module. The recipes, CI and release configuration pass it explicitly. For raw Go commands, use `GOTOOLCHAIN=go1.27.4 go build -tags="$(sh scripts/go-build-tags.sh)"` or `GOTOOLCHAIN=go1.27.4 go test -tags="$(sh scripts/go-build-tags.sh)" ./...`. The main recipes use the complete list from `scripts/go-build-tags.sh`, including the real generated namespace cohort. Explicit tags replace `GOFLAGS` tags. Build the actual launcher cohort with `just userns` before whole-package Linux checks; the policy generator uses a separate bootstrap tag list before the C artifacts exist.
+
+You also need bash, curl, tar (with gzip and xz support), and either `sha256sum` or `shasum`. These download, unpack and check the tools. Install Python 3.11 or later for the script tests, the documentation checks and the end-to-end tests. Then, from your checkout, run:
 
 ```sh
 scripts/setup.sh
@@ -15,7 +17,9 @@ export PATH="$PWD/.tools/bin:$PATH"
 
 The script cannot change your shell's PATH; the `export` makes the installed `just` available in that shell. Or call `.tools/bin/just` directly.
 
-It puts pinned versions of just, golangci-lint, GoReleaser, gitleaks, Zig 0.16, and the docs tools (Node and pnpm for the site, typos, Vale, lychee) into `.tools/` (git-ignored), checks each download's SHA-256 against [scripts/tools.lock](scripts/tools.lock), then builds and tests once. Go tools built from source use Go's module checksums. The justfile puts `.tools/bin` first on its PATH. Or open the repo in its [devcontainer](.devcontainer/devcontainer.json), which runs the same script.
+It puts pinned versions of just, golangci-lint, GoReleaser, gitleaks, Zig 0.17, and the docs tools (Node and pnpm for the site, typos, Vale, lychee) into `.tools/` (git-ignored), checks each download's SHA-256 against [scripts/tools.lock](scripts/tools.lock), then builds and tests once. Go tools built from source use Go's module checksums. The justfile puts `.tools/bin` first on its PATH. Or open the repo in its [devcontainer](.devcontainer/devcontainer.json), which runs the same script.
+
+If a setup test fails, the script prints its full output, including the assertion that failed.
 
 ```sh
 just build   # host helpers, the shadow terminal, then the client, into ./bin

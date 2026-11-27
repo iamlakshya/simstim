@@ -10,14 +10,23 @@ Check this machine and its terminal.
 simstim doctor [flags]
 ```
 
-Checks this computer: ssh, the config files and the secrets' commands. With `--fix` it offers to fix what it can: SSH configs it generated for hosts you removed, and ControlMaster sockets whose master died. Each fix is shown before it runs. `host doctor <name>` checks a host.
+Checks this computer: ssh, the config files and the secrets' commands. With `--fix` it offers to fix what it can: SSH configs it generated that no saved host references, and owned ControlMaster sockets whose master died. A saved host's references stay. It never removes an SSH config that you made. Each fix is shown before it runs. `host doctor <host>` checks a host.
+
+## Examples
+
+```sh
+simstim doctor
+simstim doctor --fix
+simstim doctor --json
+```
 
 ## Flags
 
 | Flag | What it does |
 | --- | --- |
 | `--fix` | offer to fix the problems found, one by one |
-| `-y`, `--yes` | with `--fix`, apply every fix without asking |
+| `--json` | print JSON for scripts, and ask nothing (see docs/how-to/scripting.md) |
+| `-y`, `--yes` | answer yes to every question: apply each fix that `--fix` offers |
 
 ## Flags from the parent command
 
@@ -25,12 +34,14 @@ Checks this computer: ssh, the config files and the secrets' commands. With `--f
 | --- | --- |
 | `--debug[=<categories>]` | turn on the debug mode, with every category, or with the categories listed: attach, net, memory, launcher, runtime. A list binds only in the = form, such as `--debug=net` |
 | `--debug-file <file>` | write the client's debug records to this file. On its own, it turns on every category (SIMSTIM_DEBUG_FILE does the same) |
+| `--no-color` | print no colour (NO_COLOR does the same) |
+| `--no-input` | ask nothing: a question that needs an answer fails with exit code 4, and names the flag that answers it (SIMSTIM_NO_INPUT=1 does the same) |
 
 ## Commands
 
 | Command | What it does |
 | --- | --- |
-| [`doctor keys`](doctor_keys.md) | Show every key as the terminal sends it, and which keys simstim keeps |
-| [`doctor terminal`](doctor_terminal.md) | Ask this terminal what it supports (keys, colours, synchronized output…) |
+| [`doctor keys`](doctor_keys.md) | Show each key as the terminal sends it, and the client's own keys |
+| [`doctor terminal`](doctor_terminal.md) | Ask this terminal what it supports: keys, colours and more |
 
 See [all commands](_index.md).

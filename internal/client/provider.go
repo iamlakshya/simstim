@@ -31,6 +31,8 @@ type Provider struct {
 	// WakeOnAttach starts the host through the script when it does not answer
 	// and you attach or start a session.
 	WakeOnAttach bool `toml:"wake_on_attach,omitempty"`
+	// Cost is free or paid when automatic placement wakes this script.
+	Cost string `toml:"cost,omitempty"`
 }
 
 // ProviderStatus is the answer to the status action.
@@ -41,7 +43,7 @@ type ProviderStatus struct {
 // RunProvider runs one provider action for h.
 func RunProvider(ctx context.Context, h Host, action string) ([]byte, error) {
 	if h.Provider == nil || h.Provider.Script == "" {
-		return nil, &UserError{Msg: h.Name + " has no provider script", Hint: brand.Name + " host add " + h.Name + " --provider-script <path>"}
+		return nil, &UserError{Msg: h.Name + " has no provider script", Hint: brand.Name + " host add " + h.Name + " --provider-script <path>", Code: "no_provider_script"}
 	}
 	job, _ := json.Marshal(map[string]any{"action": action, "host": map[string]any{"name": h.Name, "ssh": h.SSH, "labels": h.Labels}})
 	cmd := exec.CommandContext(ctx, expand(h.Provider.Script), action)
@@ -54,7 +56,7 @@ func RunProvider(ctx context.Context, h Host, action string) ([]byte, error) {
 		if msg == "" {
 			msg = err.Error()
 		}
-		return nil, &UserError{Msg: fmt.Sprintf("the provider script could not %s %s: %s", action, h.Name, msg), Hint: "Run the script by hand: " + h.Provider.Script + " " + action}
+		return nil, &UserError{Msg: fmt.Sprintf("the provider script could not %s %s: %s", action, h.Name, msg), Hint: "Run " + pathWord(h.Provider.Script) + " " + action + " by hand to see what fails.", Code: "provider_script"}
 	}
 	return out.Bytes(), nil
 }
@@ -66,12 +68,14 @@ func wake(ctx context.Context, h Host) error {
 	}
 	deadline := time.Now().Add(4 * time.Minute)
 	for time.Now().Before(deadline) {
-		s := &SSH{Host: h}
 		pctx, cancel := context.WithTimeout(ctx, 20*time.Second)
-		_, err := s.Run(pctx, "true", nil)
+		err := answers(pctx, &SSH{Host: h})
 		cancel()
 		if err == nil {
 			return nil
+		}
+		if IsHostKeyError(err) {
+			return err // trying again cannot change the host's key
 		}
 		select {
 		case <-ctx.Done():

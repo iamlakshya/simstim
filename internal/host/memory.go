@@ -207,15 +207,16 @@ func sliceLimit() int64 {
 	return n
 }
 
-// warnSession writes a warning to the log of session id, where a failed
-// start and the host doctor look.
-func warnSession(id, msg string, err error) {
-	f, ferr := os.OpenFile(paths.HolderLog(id), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
-	if ferr != nil {
+// warnSession writes a warning, with its details as key and value pairs,
+// to the log of session id, where a failed start and the host doctor look.
+// It writes through the log's turnover, as the holder does.
+func warnSession(id, msg string, args ...any) {
+	l, err := openHolderLog(paths.HolderLog(id), holderLogMax)
+	if err != nil {
 		return
 	}
-	defer f.Close()
-	newHolderLog(f, nil).Warn(msg, "err", err)
+	defer l.Close()
+	newHolderLog(l, nil).Warn(msg, args...)
 }
 
 // sessionsMemoryCheck is the host doctor's line about the memory of all
@@ -317,4 +318,19 @@ func limitText(n int64) string {
 		return "all the host's memory"
 	}
 	return gibText(n)
+}
+
+// memoryCurrent reads the memory that the unit of a session uses now.
+func memoryCurrent(unit string) int64 {
+	if unit == "" {
+		return 0
+	}
+	uid := os.Getuid()
+	p := fmt.Sprintf("/sys/fs/cgroup/user.slice/user-%d.slice/user@%d.service/%s/%s/memory.current", uid, uid, brand.Slice, unit)
+	b, err := os.ReadFile(p)
+	if err != nil {
+		return 0
+	}
+	n, _ := strconv.ParseInt(strings.TrimSpace(string(b)), 10, 64)
+	return n
 }

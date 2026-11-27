@@ -33,6 +33,16 @@ const f_event = 'E';
 /// The largest payload accepted for a frame other than D.
 const max_control = 1 << 20;
 
+/// The most columns and rows the terminal takes. A larger size, from the
+/// command line or a frame, is cut to these. The holder applies the same
+/// caps (internal/host/vt.go), and this process applies them too, so a size
+/// that reaches it by another path cannot pass them. Ghostty allows 65535,
+/// and its advisory GHSA-jqr7-69mm-v35h names apps that take a terminal
+/// size from a remote client. At 4096 by 2048, this process holds under
+/// 512 MiB with its scrollback full and the alternate screen on.
+const max_cols = 4096;
+const max_rows = 2048;
+
 /// The one terminal this process holds.
 var shadow: Shadow = undefined;
 
@@ -76,9 +86,9 @@ pub fn main(init: std.process.Init.Minimal) !void {
             writeOut(build_options.version ++ " ghostty " ++ build_options.ghostty ++ "\n");
             return;
         } else if (std.mem.eql(u8, arg, "--cols")) {
-            cols = try std.fmt.parseInt(u16, args.next() orelse return error.MissingValue, 10);
+            cols = try parseSize(args.next() orelse return error.MissingValue, max_cols);
         } else if (std.mem.eql(u8, arg, "--rows")) {
-            rows = try std.fmt.parseInt(u16, args.next() orelse return error.MissingValue, 10);
+            rows = try parseSize(args.next() orelse return error.MissingValue, max_rows);
         } else if (std.mem.eql(u8, arg, "--scrollback")) {
             scrollback = try std.fmt.parseInt(usize, args.next() orelse return error.MissingValue, 10);
         } else {
@@ -204,8 +214,20 @@ fn handleControl(kind: u8, p: []const u8) void {
     }
 }
 
-fn resize(cols: u16, rows: u16, width_px: u16, height_px: u16) void {
-    if (cols == 0 or rows == 0) return;
+/// A size from the command line, cut to most.
+fn parseSize(s: []const u8, most: u16) !u16 {
+    return capSize(try std.fmt.parseInt(usize, s, 10), most);
+}
+
+/// n as a number of columns or rows: at most most.
+fn capSize(n: usize, most: u16) u16 {
+    return @intCast(@min(n, most));
+}
+
+fn resize(cols_asked: u16, rows_asked: u16, width_px: u16, height_px: u16) void {
+    if (cols_asked == 0 or rows_asked == 0) return;
+    const cols = capSize(cols_asked, max_cols);
+    const rows = capSize(rows_asked, max_rows);
     const term = &shadow.term;
     if (cols == term.cols and rows == term.rows and width_px == 0) return;
     shadow.stream.handler.resize(.{
@@ -265,11 +287,11 @@ fn onDeviceAttributes(_: *Handler) vt.device_attributes.Attributes {
     attrs.secondary = .{ .device_type = .vt220, .firmware_version = 10, .rom_cartridge = 0 };
     const prof = if (shadow.profile) |p| p.value else return attrs;
     if (prof.da1) |v| if (v.len > 0) {
-        attrs.primary = .{ .conformance_level = @enumFromInt(v[0]), .features = shadow.da1 };
+        attrs.primary = .{ .conformance_level = @fromBackingInt(@intCast(v[0])), .features = shadow.da1 };
     };
     if (prof.da2) |v| if (v.len >= 3) {
         attrs.secondary = .{
-            .device_type = @enumFromInt(v[0]),
+            .device_type = @fromBackingInt(@intCast(v[0])),
             .firmware_version = v[1],
             .rom_cartridge = v[2],
         };

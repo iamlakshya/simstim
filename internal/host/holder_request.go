@@ -2,9 +2,11 @@ package host
 
 import (
 	"encoding/json"
+	"errors"
 	"strings"
 
 	"github.com/iamlakshya/simstim/internal/proto"
+	"github.com/iamlakshya/simstim/internal/version"
 )
 
 func (h *Holder) request(c *hclient, req proto.Request) {
@@ -16,6 +18,21 @@ func (h *Holder) request(c *hclient, req proto.Request) {
 		_ = c.w.WriteJSON(proto.TResponse, resp)
 	}
 	switch req.Op {
+	case "pull.record":
+		if c.access != accessFull {
+			reply(nil, errInside)
+			return
+		}
+		var args holderPulledArgs
+		if json.Unmarshal(req.Args, &args) != nil {
+			reply(nil, UserError("pull_protocol", "the pulled record is invalid", "Use the current client and a full session address."))
+			return
+		}
+		if err := h.recordPulled(args); err != nil {
+			reply(nil, asUserError(err, "pull_ack", "Check the session storage, then pull again."))
+			return
+		}
+		reply(struct{}{}, nil)
 	case "info":
 		h.mu.Lock()
 		m := *h.m
@@ -39,20 +56,39 @@ func (h *Holder) request(c *hclient, req proto.Request) {
 			Name string `json:"name"`
 		}
 		if json.Unmarshal(req.Args, &args) != nil || strings.TrimSpace(args.Name) == "" {
-			reply(nil, &proto.Error{Code: "bad_request", Message: "a name is needed"})
+			reply(nil, &proto.Error{Code: "bad_request", Message: "a name is needed", Hint: "Pass a non-empty name for the session."})
 			return
 		}
-		h.mu.Lock()
-		h.m.Name = strings.TrimSpace(args.Name)
-		h.dirty = true
-		h.mu.Unlock()
-		reply(map[string]string{"name": args.Name}, nil)
+		// The rename takes the session's lock, and the manifest has the new
+		// name before the answer, so a delete that was confirmed under the
+		// old name reads it there (cli-spec 9.5).
+		var perr *proto.Error
+		switch err := h.rename(strings.TrimSpace(args.Name)); {
+		case err == nil:
+			reply(map[string]string{"name": args.Name}, nil)
+		case errors.Is(err, errEnding):
+			reply(nil, &proto.Error{Code: "exiting", Message: "the session is ending, so it was not renamed", Hint: "List the sessions to see it."})
+		case errors.As(err, &perr):
+			reply(nil, perr)
+		default:
+			reply(nil, &proto.Error{Code: "save", Message: "cannot save the new name: " + err.Error(), Hint: "Check the host's disk with the host doctor."})
+		}
 	case "ports":
 		h.mu.Lock()
 		unit, pid := h.m.Run.Unit != "", h.m.Run.AgentPID
 		h.mu.Unlock()
 		reply(listeningPorts(sessionPIDs(unit, pid)), nil)
+	case "sockets":
+		// What the doctor reads (doctor_sockets.go): whether this holder
+		// checks its peers. A holder from before the check does not know
+		// this op.
+		reply(socketsState{PeerCheck: h.peerCheck, Version: version.Version}, nil)
 	case "hook":
+		// Hooks reach the hook socket only (spec 10.4).
+		if c.access != accessHook {
+			reply(nil, errNoHooksHere)
+			return
+		}
 		var ev HookEvent
 		if json.Unmarshal(req.Args, &ev) == nil {
 			h.mu.Lock()
@@ -83,11 +119,13 @@ func (h *Holder) request(c *hclient, req proto.Request) {
 			data = append(data, '\r')
 		}
 		noteTyping(d, data)
-		if _, err := h.ptmx.Write(data); err != nil {
+		if _, err := h.writePTY(data); err != nil {
 			reply(nil, &proto.Error{Code: "write", Message: err.Error()})
 			return
 		}
 		reply(map[string]int{"bytes": len(data)}, nil)
+	case "policy.ls", "policy.add", "policy.rm", "policy.log", "policy.replace":
+		reply(nil, &proto.Error{Code: "not_walled", Message: "session " + h.id + " has no sandbox policy", Hint: "Start a walled session to use policy commands."})
 	case "kill":
 		reply(map[string]bool{"killed": true}, nil)
 		go h.stop("killed by request", false)

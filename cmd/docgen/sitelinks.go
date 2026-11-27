@@ -27,7 +27,24 @@ var (
 //
 // Links in code blocks and code spans are left alone.
 func rewriteLinks(md, src, url string, pages map[string]string, repo string) string {
-	fix := func(dest string) string { return resolve(dest, src, url, pages, repo) }
+	return rewrite(md, func(dest string) string { return resolve(dest, src, url, pages, repo) }, true)
+}
+
+// copyLinks rewrites a page's links for its Markdown copy (copies.go). A
+// link to a file the site hosts goes to that page's copy (copies maps each
+// hosted file to it), as a path relative to this page's copy. Images stay
+// Markdown images. Other links go where rewriteLinks sends them.
+func copyLinks(md, src, url string, copies map[string]string, repo string) string {
+	from := path.Dir(copyURL(url)) // the folder that holds the copy
+	if from != "/" {
+		from += "/"
+	}
+	return rewrite(md, func(dest string) string { return resolve(dest, src, from, copies, repo) }, false)
+}
+
+// rewrite gives every link of md outside code the destination that fix
+// returns. With htmlImages, a Markdown image becomes an HTML image.
+func rewrite(md string, fix func(string) string, htmlImages bool) string {
 	var out strings.Builder
 	fence := ""
 	for _, line := range strings.SplitAfter(md, "\n") {
@@ -48,15 +65,16 @@ func rewriteLinks(md, src, url string, pages map[string]string, repo string) str
 			out.WriteString(m[1] + fix(m[2]) + m[3] + line[len(strings.TrimRight(line, "\n")):])
 			continue
 		}
-		out.WriteString(rewriteLine(line, fix))
+		out.WriteString(rewriteLine(line, fix, htmlImages))
 	}
 	return out.String()
 }
 
 // rewriteLine rewrites the links of one line of text. A link in a code span
-// is left alone; a link whose text holds a code span, as in
-// [`host add`](host_add.md), is a link.
-func rewriteLine(line string, fix func(string) string) string {
+// is left alone, while a link whose text holds a code span, as in
+// [`host add`](host_add.md), is a link. With htmlImages, an image becomes
+// an HTML image.
+func rewriteLine(line string, fix func(string) string, htmlImages bool) string {
 	spans := codeSpans(line)
 	inCode := func(i int) bool {
 		for _, sp := range spans {
@@ -72,7 +90,7 @@ func rewriteLine(line string, fix func(string) string) string {
 		if inCode(m[0]) {
 			continue
 		}
-		if line[m[0]] == '!' {
+		if htmlImages && line[m[0]] == '!' {
 			// Relative Markdown images are source imports to Astro, not
 			// URLs into public/. HTML keeps the page-relative asset URL,
 			// including when the site is served under a version prefix.

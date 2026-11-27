@@ -9,6 +9,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/iamlakshya/simstim/internal/brand"
 	"github.com/iamlakshya/simstim/internal/client"
 	"github.com/iamlakshya/simstim/internal/onboard"
 )
@@ -45,33 +46,44 @@ type guide struct {
 	err     error
 	note    string
 
-	run     bool
-	seq     int
-	cancel  context.CancelFunc
-	done    chan struct{} // closed when a create has finished, clean-up included
-	out     *lastLine     // the provider's progress
-	pending string        // a place to choose once the probe answers
+	run      bool
+	stopping bool
+	seq      int
+	cancel   context.CancelFunc
+	done     chan struct{} // closed when a create has finished, clean-up included
+	creation *guideCreate
+	out      *lastLine // the provider's progress
+	pending  string    // a place to choose once the probe answers
 }
 
 // Guided setup results.
 type (
 	placesMsg struct {
+		scope  guideScope
 		places []onboard.Place
 		choose string
 	}
 	createdMsg struct {
-		seq  int
-		host client.Host
-		err  error
-		took time.Duration
+		scope guideScope
+		name  string
+		host  client.Host
+		err   error
+		took  time.Duration
 	}
-	rentKeyMsg   struct{ key string }
+	rentKeyMsg struct {
+		scope guideScope
+		key   string
+		err   error
+	}
 	rentCheckMsg struct {
-		seq  int
-		err  error
-		took time.Duration
+		scope guideScope
+		err   error
+		took  time.Duration
 	}
-	rentNameMsg struct{ present bool }
+	rentNameMsg struct {
+		scope   guideScope
+		present bool
+	}
 )
 
 // openGuide opens the guided setup on "where will agents run?".
@@ -84,8 +96,12 @@ func (m *Model) openGuide() tea.Cmd {
 func (g *guide) busy() bool { return g.run }
 
 func (g *guide) paste(s string) {
-	if g.typing() {
+	if !g.run && g.typing() {
+		before := g.in.value()
 		g.in.insert(s)
+		if g.in.value() != before {
+			g.seq++
+		}
 	}
 }
 
@@ -102,29 +118,34 @@ func (g *guide) typing() bool {
 
 // probe reads where agents can run, then chooses choose if it is ready.
 func (g *guide) probe(m *Model, choose string) tea.Cmd {
+	if g.run || g.step != gdWhere {
+		return nil
+	}
+	scope := g.nextScope()
 	local := m.be.Local()
-	return func() tea.Msg { return placesMsg{places: local.Places(), choose: choose} }
+	return m.bgCmd(func(context.Context) tea.Msg { return placesMsg{scope: scope, places: local.Places(), choose: choose} })
 }
 
-func (g *guide) begin(m *Model) (context.Context, int) {
-	g.halt()
+func (g *guide) begin(m *Model) (context.Context, guideScope) {
+	m.stopGuide(g)
 	g.run, g.err = true, nil
-	ctx, cancel := context.WithCancel(m.ctx)
+	ctx, cancel := context.WithCancel(m.backgroundContext())
 	g.cancel = cancel
-	return ctx, g.seq
+	return ctx, g.scope()
 }
 
 // halt stops a running step, and waits for a create to clean up after
 // itself, so quitting leaves no half-made machine.
 func (g *guide) halt() {
 	g.seq++
-	g.run = false
-	if g.cancel != nil {
-		g.cancel()
-		g.cancel = nil
-	}
+	g.finishOp()
+	g.stopping = false
 	if g.done != nil {
-		<-g.done
+		if g.creation != nil {
+			g.creation.stopAndWait()
+		} else {
+			<-g.done
+		}
 		g.done = nil
 	}
 }
@@ -155,7 +176,7 @@ func (g *guide) key(m *Model, k tea.KeyPressMsg) tea.Cmd {
 		if ks == "enter" {
 			addr := strings.TrimSpace(g.in.value())
 			if !onboard.ValidAddr(addr) {
-				g.err = &client.UserError{Msg: "type the server's address", Hint: "An IP address or a DNS name, as the provider's console shows it."}
+				g.err = &client.UserError{Msg: "type the server's address", Hint: "Type its IP address or DNS name, as the provider's console shows it.", Code: "missing_value", Kind: client.KindUsage}
 				return nil
 			}
 			g.plan.Addr, g.err = addr, nil
@@ -173,7 +194,11 @@ func (g *guide) key(m *Model, k tea.KeyPressMsg) tea.Cmd {
 	case gdRentConfig:
 		return g.configKey(m, ks)
 	}
+	before := g.in.value()
 	if g.typing() && g.in.key(k) {
+		if g.in.value() != before {
+			g.seq++
+		}
 		g.err = nil
 		if g.step == gdRentUser {
 			g.checks = nil
@@ -193,9 +218,14 @@ func (g *guide) userOr() string {
 // running create is stopped first, and its clean-up shows.
 func (g *guide) back(m *Model) tea.Cmd {
 	if g.step == gdCreate && g.run {
+		g.stopping = true
 		if g.cancel != nil {
 			g.cancel()
 			g.cancel = nil
+		}
+		if g.creation != nil && !g.creation.requestStop() {
+			g.interrupted()
+			return nil
 		}
 		g.note = "Stopping, and deleting what was begun…"
 		return nil
@@ -221,6 +251,7 @@ func (g *guide) back(m *Model) tea.Cmd {
 }
 
 func (g *guide) whereKey(m *Model, ks string) tea.Cmd {
+	before := g.sel
 	n := len(g.places)
 	switch ks {
 	case "up", "k":
@@ -239,6 +270,9 @@ func (g *guide) whereKey(m *Model, ks string) tea.Cmd {
 			return g.choose(m, g.places[g.sel])
 		}
 	}
+	if g.sel != before {
+		g.seq++
+	}
 	g.err = nil
 	return nil
 }
@@ -249,11 +283,12 @@ func (g *guide) choose(m *Model, p onboard.Place) tea.Cmd {
 	if !p.Ready {
 		if g.pending == p.Kind {
 			g.pending = ""
-			g.err = &client.UserError{Msg: p.Title + " is not ready yet: " + p.Note, Hint: "Do the steps above, then press enter again."}
+			g.err = &client.UserError{Msg: p.Title + " is not ready yet: " + p.Note, Hint: "Do the steps above, then press enter again.", Code: "not_ready"}
 			return nil
 		}
 		return g.probe(m, p.Kind)
 	}
+	g.seq++
 	g.pending, g.err, g.kind = "", nil, p.Kind
 	switch p.Kind {
 	case onboard.SSH:
@@ -271,6 +306,10 @@ func (g *guide) choose(m *Model, p onboard.Place) tea.Cmd {
 }
 
 func (g *guide) onPlaces(m *Model, msg placesMsg) tea.Cmd {
+	if !g.owns(msg.scope) || g.step != gdWhere || g.run {
+		return nil
+	}
+	g.seq++
 	g.places = msg.places
 	g.sel = min(g.sel, max(len(g.places)-1, 0))
 	if msg.choose == "" {
@@ -292,43 +331,69 @@ func (g *guide) create(m *Model) tea.Cmd {
 	}
 	switch {
 	case !client.ValidHostName(name):
-		g.err = &client.UserError{Msg: fmt.Sprintf("%q cannot name a host", name), Hint: "Use letters, digits, dots, dashes and underscores."}
+		g.err = &client.UserError{Msg: fmt.Sprintf("%q cannot name a host", name), Hint: "Use letters, digits, dots, dashes and underscores, with no dot at the end.", Code: "bad_name", Kind: client.KindUsage}
 		return nil
 	case m.hostByName(name) != nil:
-		g.err = &client.UserError{Msg: "there is already a host named " + name, Hint: "Pick another name."}
+		g.err = &client.UserError{Msg: "there is already a host named " + name, Hint: "Pick another name.", Code: "host_exists"}
 		return nil
 	}
 	g.step, g.note = gdCreate, ""
 	g.checks = []check{{name: "create", state: ckRunning, detail: "with " + g.kind}}
-	ctx, seq := g.begin(m)
-	done := make(chan struct{})
-	g.done, g.out = done, &lastLine{}
+	ctx, scope := g.begin(m)
+	run := &guideCreate{done: make(chan struct{})}
+	g.creation, g.done, g.out = run, run.done, &lastLine{}
 	local, kind, out, clock := m.be.Local(), g.kind, g.out, m.now
-	return func() tea.Msg {
-		defer close(done)
+	return m.bgCmdFrom(ctx, func(ctx context.Context) tea.Msg {
+		if !run.start() {
+			return nil
+		}
+		defer run.end()
 		start := clock()
 		h, err := local.Create(ctx, kind, name, out)
-		return createdMsg{seq: seq, host: h, err: err, took: clock().Sub(start)}
-	}
+		msg := createdMsg{scope: scope, name: name, host: h, err: err, took: clock().Sub(start)}
+		run.complete(msg)
+		return msg
+	})
 }
 
 func (g *guide) onCreated(m *Model, msg createdMsg) tea.Cmd {
-	if g.done != nil {
-		g.done = nil // the command has finished
-	}
-	if msg.seq != g.seq {
+	if !g.owns(msg.scope) || g.step != gdCreate || !g.run {
 		return nil
 	}
-	g.run, g.cancel, g.note = false, nil, ""
+	if g.done != nil {
+		select {
+		case <-g.done:
+		default:
+			return nil
+		}
+	}
+	g.seq++
+	g.done = nil
+	g.creation = nil
+	stopped := g.stopping
+	g.finishOp()
+	g.stopping, g.note = false, ""
 	if msg.err != nil {
 		g.checks[0].state = ckFailed
 		g.err = msg.err
+		if hostChanged(msg.err) {
+			return m.reloadHost(msg.name)
+		}
 		return nil
 	}
-	// The wizard connects it: creating it was the user's yes to the helper.
+	if stopped {
+		m.modal = nil
+		m.rememberCreatedHost(msg.host)
+		return m.toastNext(toastInfo, fmt.Sprintf("Created %s. The host is saved.", msg.host.Name), brand.Name+" setup --host="+msg.host.Name+" (continues setup)")
+	}
 	w := newWizard()
 	w.guided, w.made = true, true
 	w.host = msg.host
+	if msg.host.Machine != nil {
+		w.tier = client.ProviderTier(msg.host.Machine.Provider)
+	}
+	made := msg.host
+	w.was = &made
 	m.modal = w
 	return w.probe(m)
 }
@@ -343,11 +408,14 @@ func (g *guide) onMsg(m *Model, msg tea.Msg) tea.Cmd {
 	case createdMsg:
 		return g.onCreated(m, msg)
 	case rentKeyMsg:
-		g.plan.Key = msg.key
-		return nil
+		return g.onRentKey(msg)
 	case rentCheckMsg:
 		return g.onRentCheck(m, msg)
 	case rentNameMsg:
+		if !g.owns(msg.scope) || g.step != gdRentName || g.run {
+			return nil
+		}
+		g.seq++
 		g.present, g.asked = msg.present, false
 		g.step, g.checks, g.note = gdRentConfig, nil, ""
 		return nil

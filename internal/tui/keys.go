@@ -14,7 +14,15 @@ import (
 // top, the prompt line, an inline rename, then the numbers, the moves and the
 // command registry.
 func (m *Model) onKey(k tea.KeyPressMsg) tea.Cmd {
+	if m.transferInputBlocked() {
+		return nil
+	}
 	ks := k.String()
+	if ks == "ctrl+c" {
+		if q, ok := m.modal.(*hostTierQuestion); ok {
+			return q.key(m, k)
+		}
+	}
 	if m.quitArmed {
 		// ctrl+c again quits, anything else cancels.
 		m.quitArmed = false
@@ -26,9 +34,6 @@ func (m *Model) onKey(k tea.KeyPressMsg) tea.Cmd {
 	if ks == "ctrl+c" {
 		m.quitArmed = true
 		return nil
-	}
-	if m.jacking != nil {
-		return nil // a few frames until the session takes over
 	}
 	if m.modal != nil {
 		return m.modal.key(m, k)
@@ -89,6 +94,9 @@ func (m *Model) navKey(ks string) bool {
 // onPaste handles a paste: into a field being typed, or, if it is a session
 // ID, a jump to that session.
 func (m *Model) onPaste(text string) tea.Cmd {
+	if m.transferInputBlocked() {
+		return nil
+	}
 	switch {
 	case m.modal != nil:
 		if p, ok := m.modal.(interface{ paste(string) }); ok {
@@ -99,7 +107,11 @@ func (m *Model) onPaste(text string) tea.Cmd {
 		m.prompt.in.insert(text)
 		return nil
 	case m.rename != nil:
+		before := m.rename.in.value()
 		m.rename.in.insert(text)
+		if m.rename.in.value() != before {
+			m.rename.edited = true
+		}
 		return nil
 	}
 	id := strings.TrimSpace(text)
@@ -126,7 +138,7 @@ func (m *Model) startRename() tea.Cmd {
 	if s == nil {
 		return nil
 	}
-	m.rename = &renameState{key: sessKey{h.name(), s.ID}, old: s.Name, in: newInput(s.Name, "a name")}
+	m.rename = &renameState{key: sessKey{h.name(), s.ID}, old: s.Name, in: newInput(shown(s.Name), "a name")}
 	return nil
 }
 
@@ -142,9 +154,13 @@ func (m *Model) renameKey(k tea.KeyPressMsg) tea.Cmd {
 	case "enter":
 		name := strings.TrimSpace(r.in.value())
 		h := m.hostByName(r.key.host)
-		if name == "" || name == r.old || h == nil {
+		if name == "" || name == r.old || !r.edited && name == strings.TrimSpace(shown(r.old)) || h == nil {
 			m.rename = nil
 			return nil
+		}
+		// A name that looks like an ID is refused, and the box stays open.
+		if err := client.CheckSessionName(name); err != nil {
+			return m.toastErr(err)
 		}
 		r.busy = true
 		h.changes++
@@ -154,10 +170,13 @@ func (m *Model) renameKey(k tea.KeyPressMsg) tea.Cmd {
 			}
 		}
 		id, old := r.key.id, r.old
-		return m.op(h, fmt.Sprintf("Renamed %s to %s on %s.", old, name, h.name()), func(ctx context.Context, c Conn) error {
+		return m.op(h, fmt.Sprintf("Renamed %s to %s on %s.", shown(old), shown(name), shown(h.name())), func(ctx context.Context, c Conn) error {
 			return c.RenameSession(ctx, id, name)
 		})
 	}
-	r.in.key(k)
+	before := r.in.value()
+	if r.in.key(k) && r.in.value() != before {
+		r.edited = true
+	}
 	return nil
 }

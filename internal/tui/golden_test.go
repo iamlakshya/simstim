@@ -11,6 +11,7 @@ import (
 
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/iamlakshya/simstim/internal/api"
 	"github.com/iamlakshya/simstim/internal/client"
 )
 
@@ -125,6 +126,12 @@ func TestGolden(t *testing.T) {
 			hs.typeText("te")
 			return hs.m
 		}},
+		{"setup_skip", func(t *testing.T, w, h int) *Model {
+			hs := home(t, w, h)
+			hs.be.state["atlas-dev"].setupErr = api.CodeSetupOutside
+			hs.key("n", "enter")
+			return hs.m
+		}},
 		{"new_session_error", func(t *testing.T, w, h int) *Model {
 			hs := home(t, w, h)
 			hs.be.state["atlas-dev"].newErr = &client.UserError{Msg: "aider is not installed on this host", Hint: "Install it on the host, then try again."}
@@ -208,7 +215,16 @@ func TestGolden(t *testing.T) {
 			hs.key("enter")
 			return hs.m
 		}},
-		{"wizard_install", func(t *testing.T, w, h int) *Model {
+		{"wizard_host_key", func(t *testing.T, w, h int) *Model {
+			be := newFakeBackend()
+			be.pinUnknown = true
+			hs := newHarness(t, be, w, h)
+			hs.key("a")
+			hs.typeText("pi@raspberry")
+			hs.key("enter")
+			return hs.m
+		}},
+		{"wizard_tier", func(t *testing.T, w, h int) *Model {
 			be := newFakeBackend()
 			be.probe = client.Platform{OS: "linux", Arch: "arm64"}
 			hs := newHarness(t, be, w, h)
@@ -217,13 +233,60 @@ func TestGolden(t *testing.T) {
 			hs.key("enter", "enter")
 			return hs.m
 		}},
+		{"wizard_install", func(t *testing.T, w, h int) *Model {
+			be := newFakeBackend()
+			be.probe = client.Platform{OS: "linux", Arch: "arm64"}
+			hs := newHarness(t, be, w, h)
+			hs.key("a")
+			hs.typeText("pi@raspberry")
+			hs.key("enter", "enter", "1")
+			wiz, ok := hs.m.modal.(*wizard)
+			if !ok || wiz.step != wzInstall || wiz.tier != client.TierOwn {
+				t.Fatalf("the explicit tier did not reach install consent: %T %+v", hs.m.modal, wiz)
+			}
+			return hs.m
+		}},
+		{"wizard_sandboxes", func(t *testing.T, w, h int) *Model {
+			be := newFakeBackend()
+			be.probe = client.Platform{OS: "linux", Arch: "arm64"}
+			be.capProbe = fakeKVMBlockedProbe()
+			be.rootPreview = fakeRootPreview(client.TierOwn)
+			hs := newHarness(t, be, w, h)
+			hs.key("a")
+			hs.typeText("pi@raspberry")
+			hs.key("enter", "enter", "1", "enter")
+			wiz, ok := hs.m.modal.(*wizard)
+			if !ok || wiz.step != wzSandboxes || !wiz.saved {
+				t.Fatalf("did not pause at sandboxes: %T %+v", hs.m.modal, wiz)
+			}
+			return hs.m
+		}},
+		{"wizard_root", func(t *testing.T, w, h int) *Model {
+			be := newFakeBackend()
+			be.probe = client.Platform{OS: "linux", Arch: "arm64"}
+			be.capProbe = fakeKVMBlockedProbe()
+			be.rootPreview = fakeRootPreview(client.TierOwn)
+			hs := newHarness(t, be, w, h)
+			hs.key("a")
+			hs.typeText("pi@raspberry")
+			hs.key("enter", "enter", "1", "enter", "enter")
+			wiz, ok := hs.m.modal.(*wizard)
+			if !ok || wiz.step != wzRoot || !wiz.saved {
+				t.Fatalf("did not reach root step: %T %+v", hs.m.modal, wiz)
+			}
+			return hs.m
+		}},
 		{"wizard_ready", func(t *testing.T, w, h int) *Model {
 			be := newFakeBackend()
 			be.probe = client.Platform{OS: "linux", Arch: "arm64"}
 			hs := newHarness(t, be, w, h)
 			hs.key("a")
 			hs.typeText("pi@raspberry")
-			hs.key("enter", "enter", "enter")
+			hs.key("enter", "enter", "1", "enter")
+			wiz, ok := hs.m.modal.(*wizard)
+			if !ok || wiz.step != wzReady || !wiz.saved || wiz.tier != client.TierOwn {
+				t.Fatalf("the explicit tier and install did not reach ready: %T %+v", hs.m.modal, wiz)
+			}
 			return hs.m
 		}},
 	}

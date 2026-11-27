@@ -1,0 +1,22 @@
+Wall: process
+Preset: balanced
+Unknown: ask
+Lock: all deny paste.example.net
+  locked sandbox.paste = "media"
+Value: sandbox.caches[.cache/go-build] = ".cache/go-build"  builtin
+Value: sandbox.caches[.cache/pip] = ".cache/pip"  builtin
+Value: sandbox.caches[.cache/uv] = ".cache/uv"  builtin
+Value: sandbox.caches[.cargo/git] = ".cargo/git"  builtin
+Value: sandbox.caches[.cargo/registry] = ".cargo/registry"  builtin
+Value: sandbox.caches[.gradle/caches] = ".gradle/caches"  builtin
+Value: sandbox.caches[.local/share/pnpm/store] = ".local/share/pnpm/store"  builtin
+Value: sandbox.caches[.m2/repository] = ".m2/repository"  builtin
+Value: sandbox.caches[.npm/_cacache] = ".npm/_cacache"  builtin
+Value: sandbox.caches[.yarn/berry/cache] = ".yarn/berry/cache"  builtin
+Value: sandbox.caches[go/pkg/mod] = "go/pkg/mod"  builtin
+Value: sandbox.keep_caches = true  builtin
+Value: sandbox.paste = "media"  all
+Value: sandbox.secrets[PROFILE] = "PROFILE"  profile review
+Value: sandbox.secrets[TEAM] = "TEAM"  host box
+grp5vrf  allow net api.example.com  repo forge.example/team/app  next start
+gc2easo  allow net once.example.com  session   once

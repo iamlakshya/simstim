@@ -1,0 +1,62 @@
+# Paths are relative to the Linux guest's home. Each sandbox keeps its own.
+# Only cache roots are listed; tool settings, credentials and programs reset.
+
+[[cache]]
+tool = "npm"
+path = ".npm/_cacache"
+source = "https://docs.npmjs.com/cli/v11/commands/npm-cache#details"
+
+[[cache]]
+tool = "pnpm"
+path = ".local/share/pnpm/store"
+source = "https://pnpm.io/settings/store#storedir"
+
+[[cache]]
+tool = "Yarn Berry"
+path = ".yarn/berry/cache"
+source = "https://yarnpkg.com/configuration/yarnrc#globalFolder"
+
+[[cache]]
+tool = "Yarn Berry (XDG)"
+path = ".local/share/yarn/berry/cache"
+source = "https://raw.githubusercontent.com/yarnpkg/berry/%40yarnpkg/cli/4.17.0/packages/yarnpkg-core/sources/folderUtils.ts"
+
+[[cache]]
+tool = "pip"
+path = ".cache/pip"
+source = "https://pip.pypa.io/en/stable/topics/caching/#default-paths"
+
+[[cache]]
+tool = "uv"
+path = ".cache/uv"
+source = "https://docs.astral.sh/uv/concepts/cache/#cache-directory"
+
+[[cache]]
+tool = "Cargo registry"
+path = ".cargo/registry"
+source = "https://doc.rust-lang.org/cargo/guide/cargo-home.html"
+
+[[cache]]
+tool = "Cargo Git sources"
+path = ".cargo/git"
+source = "https://doc.rust-lang.org/cargo/guide/cargo-home.html"
+
+[[cache]]
+tool = "Go modules"
+path = "go/pkg/mod"
+source = "https://go.dev/ref/mod#module-cache"
+
+[[cache]]
+tool = "Go build"
+path = ".cache/go-build"
+source = "https://go.dev/src/cmd/go/internal/cache/default.go"
+
+[[cache]]
+tool = "Gradle"
+path = ".gradle/caches"
+source = "https://docs.gradle.org/current/userguide/directory_layout.html#dir:caches"
+
+[[cache]]
+tool = "Maven"
+path = ".m2/repository"
+source = "https://maven.apache.org/settings.html#simple-values"

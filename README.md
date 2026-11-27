@@ -26,7 +26,7 @@ The installer verifies the release's SSH signature and SHA-256 checksum, then pu
 With Go installed, you can instead run:
 
 ```sh
-go install github.com/iamlakshya/simstim@latest
+GOTOOLCHAIN=go1.27.4 go install -tags=http2legacy github.com/iamlakshya/simstim@latest
 ```
 
 The Go client downloads and verifies its matching host helpers on first connection. See [installation, updates and mirrors](docs/how-to/install.md). The Homebrew tap is not published yet.
@@ -54,11 +54,21 @@ simstim host add my-vps
 simstim new my-vps --name first
 ```
 
-This opens a persistent shell on the host. **Press `Ctrl+\` to detach**, then reconnect to the same session:
+This opens a persistent shell in a sandbox at the host's pinned floor. `host add` records that floor from the host's capabilities. A host without a pinned floor needs `host prepare` first. To run without a wall, name the exception: `--wall none --downgrade`. **Press `Ctrl+\` to detach**, then reconnect to the same session. The host may be left out when no other host has a session of that name:
 
 ```sh
 simstim attach my-vps/first
+simstim attach first
 ```
+
+To see a session, or to delete it when you are done:
+
+```sh
+simstim show first
+simstim rm first
+```
+
+`rm` asks first. [Work with sessions](docs/how-to/sessions.md) has the details.
 
 To run an installed agent instead:
 
@@ -114,7 +124,8 @@ Agent authentication stays with the agent on the host. simstim does not provide 
 
 | Task | Start here |
 | --- | --- |
-| List sessions or attach from a script | `simstim ls --json`, `simstim attach my-vps/first` |
+| Attach, describe or delete a session | [Sessions](docs/how-to/sessions.md), `simstim attach first`, `simstim show first`, `simstim rm first` |
+| List sessions or attach from a script | [Scripts](docs/how-to/scripting.md), `simstim ls --json`, `simstim attach my-vps/first` |
 | Work on a separate branch | [Worktrees](docs/how-to/worktrees.md) |
 | Bring the remote branch home | [Pull a session's branch](docs/how-to/pull.md) |
 | See or forward a development port | [Ports](docs/how-to/ports.md) |
@@ -170,7 +181,7 @@ export PATH="$PWD/.tools/bin:$PATH"
 just test lint
 ```
 
-Useful starting points: [good first issues](https://github.com/iamlakshya/simstim/labels/good%20first%20issue), [agent support](internal/agents), [contributor docs](docs/contributing/README.md), and the [roadmap](docs/roadmap.md). Please discuss large changes before implementing them.
+Useful starting points: [good first issues](https://github.com/iamlakshya/simstim/labels/good%20first%20issue), [agent support](internal/agents), [contributor docs](docs/contributing/README.md), and the [roadmap](docs/roadmap.md). The work on isolated sessions is tracked task by task in [progress](docs/contributing/progress.md). Please discuss large changes before implementing them.
 
 Read the [Code of Conduct](CODE_OF_CONDUCT.md), [governance](GOVERNANCE.md) and [maintainer list](MAINTAINERS.md). Contributions use the same licence as the project; no CLA or sign-off trailer is required.
 

@@ -89,21 +89,30 @@ func TestFlowInstallsThenLogins(t *testing.T) {
 		t.Fatalf("first = %+v", a)
 	}
 	// Codex installs, but is not logged in.
-	f.Done(a, []api.AgentCheck{ready("claude", "Claude Code", api.LoginYes), ready("codex", "Codex", api.LoginNo)}, true)
+	a.Session = "install1"
+	if err := f.Done(a, []api.AgentCheck{ready("claude", "Claude Code", api.LoginYes), ready("codex", "Codex", api.LoginNo)}, true); err != nil {
+		t.Fatal(err)
+	}
 	b := f.Next()
 	if b.Kind != ActInstall || b.Agent.Kind != "opencode" || b.N != 2 {
 		t.Fatalf("second = %+v", b)
 	}
 	// The user leaves opencode's installer running.
-	f.Done(b, nil, false)
-	if l := f.Line("opencode"); l.Mark != "✕" || !strings.Contains(l.Try, "installer still runs") || !strings.Contains(l.Try, "box/install-opencode") {
+	b.Session = "install2"
+	if err := f.Done(b, nil, false); err != nil {
+		t.Fatal(err)
+	}
+	if l := f.Line("opencode"); l.Mark != "✕" || !strings.Contains(l.Try, "installer still runs") || !strings.Contains(l.Try, "box/install2") {
 		t.Fatalf("opencode line = %+v", l)
 	}
 	c := f.Next()
 	if c.Kind != ActLogin || c.Agent.Kind != "codex" || c.Args.Name != "login-codex" || c.Of != 1 {
 		t.Fatalf("login = %+v", c)
 	}
-	f.Done(c, []api.AgentCheck{ready("codex", "Codex", api.LoginYes)}, true)
+	c.Session = "login1"
+	if err := f.Done(c, []api.AgentCheck{ready("codex", "Codex", api.LoginYes)}, true); err != nil {
+		t.Fatal(err)
+	}
 	if d := f.Next(); d.Kind != ActDone {
 		t.Fatalf("then %+v", d)
 	}
@@ -155,23 +164,33 @@ func TestFlowSkipStopAndNoLogin(t *testing.T) {
 func TestInstallAndLoginArgs(t *testing.T) {
 	claude, _ := agents.Find("claude")
 	a := InstallArgs(claude)
-	if a.Name != "install-claude" || a.Cwd != "~" || a.Setup != api.SetupSkip || !slices.Equal(a.Argv, []string{"/bin/sh", "-c", claude.Setup.Install}) {
+	if a.Wall != "none" || !a.Downgrade || a.Name != "install-claude" || a.Cwd != "~" || a.Setup != api.SetupSkip || !slices.Equal(a.Argv, []string{"/bin/sh", "-c", claude.Setup.Install}) {
 		t.Fatalf("install args = %+v", a)
 	}
 	l, ok := LoginArgs(claude)
-	if !ok || !slices.Equal(l.Argv, []string{"/bin/sh", "-c", "claude auth login"}) || l.Agent != "" {
+	if !ok || l.Wall != "none" || !l.Downgrade || !slices.Equal(l.Argv, []string{"/bin/sh", "-c", "claude auth login"}) || l.Agent != "" {
 		t.Fatalf("login args = %+v", l)
 	}
 	agy, _ := agents.Find("antigravity")
-	if l, _ := LoginArgs(agy); l.Agent != "antigravity" || len(l.Argv) != 0 {
+	if l, _ := LoginArgs(agy); l.Wall != "none" || !l.Downgrade || l.Agent != "antigravity" || len(l.Argv) != 0 {
 		t.Fatalf("an agent whose first start is its login starts as itself: %+v", l)
 	}
 	aider, _ := agents.Find("aider")
 	if _, ok := LoginArgs(aider); ok {
 		t.Fatal("aider has no login command")
 	}
-	if got := LoginCommand("box", agy); got != brand.Name+" new box --agent antigravity" {
-		t.Fatalf("login command = %q", got)
+	// The login command is agents login, also for an agent whose first
+	// start is its login (cli-spec 12.3).
+	for _, c := range []struct {
+		a    agents.Agent
+		want string
+	}{{claude, brand.Name + " agents login claude box"}, {agy, brand.Name + " agents login antigravity box"}, {aider, ""}} {
+		if got := LoginCommand("box", c.a); got != c.want {
+			t.Errorf("LoginCommand(box, %s) = %q, want %q", c.a.Kind, got, c.want)
+		}
+	}
+	if got := InstallCommand("box", "codex"); got != brand.Name+" agents install codex box" {
+		t.Errorf("InstallCommand = %q", got)
 	}
 }
 
@@ -180,11 +199,11 @@ func TestDescribe(t *testing.T) {
 		c          api.AgentCheck
 		mark, want string
 	}{
-		{api.AgentCheck{Kind: "gemini", Title: "Gemini CLI"}, "✕", "agents install gemini --host box"},
+		{api.AgentCheck{Kind: "gemini", Title: "Gemini CLI"}, "✕", "agents install gemini box"},
 		{api.AgentCheck{Kind: "opencode", Title: "opencode", Installed: true, Path: "/home/dev/.opencode/bin/opencode"}, "✕", `export PATH="/home/dev/.opencode/bin:$PATH"`},
 		{ready("claude", "Claude Code", api.LoginYes), "✓", ""},
-		{ready("codex", "Codex", api.LoginNo), "!", "new box -- codex login --device-auth"},
-		{ready("antigravity", "Antigravity CLI", api.LoginUnknown), "?", "if it asks you to log in"},
+		{ready("codex", "Codex", api.LoginNo), "!", "agents login codex box"},
+		{ready("antigravity", "Antigravity CLI", api.LoginUnknown), "?", "if it asks you to log in: " + brand.Name + " agents login antigravity box"},
 		{ready("aider", "Aider", api.LoginNo), "!", "--secret ANTHROPIC_API_KEY"},
 	}
 	for _, tc := range cases {
@@ -192,5 +211,9 @@ func TestDescribe(t *testing.T) {
 		if l.Mark != tc.mark || !strings.Contains(l.Try, tc.want) || l.Short == "" {
 			t.Errorf("%s: %+v, want mark %s and a try with %q", tc.c.Kind, l, tc.mark, tc.want)
 		}
+	}
+	dirty := Describe("box", api.AgentCheck{Kind: "claude\x1b[31m", Title: "Claude\x1b[2J", Installed: true, OnPath: true, Path: "/bin/claude\x1b]0;bad\x07", Login: api.LoginYes, LoginHow: "ok\r\nnow"})
+	if strings.ContainsAny(dirty.Title+dirty.State+dirty.Try, "\x1b\x07\r\n") {
+		t.Errorf("Describe kept control characters: %+v", dirty)
 	}
 }

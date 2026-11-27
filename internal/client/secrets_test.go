@@ -19,9 +19,9 @@ func TestFetchSecrets(t *testing.T) {
 		t.Skip("the commands are sh")
 	}
 	var s Settings
-	s.Secrets = map[string]string{
-		"OPENAI_API_KEY": "printf '%s\\n' " + testSecret,
-		"MULTI":          "printf 'line one\\nline two\\r\\n'",
+	s.Secrets = map[string]SecretDefinition{
+		"OPENAI_API_KEY": {Run: "printf '%s\\n' " + testSecret},
+		"MULTI":          {Run: "printf 'line one\\nline two\\r\\n'"},
 	}
 	got, err := FetchSecrets(context.Background(), s, []string{"OPENAI_API_KEY", "MULTI"}, false)
 	if err != nil {
@@ -44,12 +44,12 @@ func TestFetchSecretsErrorsShowNoValue(t *testing.T) {
 	defer func() { SecretTimeout = old }()
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	var s Settings
-	s.Secrets = map[string]string{
-		"FAILS":   "echo " + testSecret + "; echo " + testSecret + " >&2; exit 3",
-		"EMPTY":   "true",
-		"SLOW":    "echo " + testSecret + "; sleep 5",
-		"NUL":     "printf '" + testSecret + "\\000'",
-		"TOO_BIG": "head -c 70000 /dev/zero | tr '\\0' x",
+	s.Secrets = map[string]SecretDefinition{
+		"FAILS":   {Run: "echo " + testSecret + "; echo " + testSecret + " >&2; exit 3"},
+		"EMPTY":   {Run: "true"},
+		"SLOW":    {Run: "echo " + testSecret + "; sleep 5"},
+		"NUL":     {Run: "printf '" + testSecret + "\\000'"},
+		"TOO_BIG": {Run: "head -c 70000 /dev/zero | tr '\\0' x"},
 	}
 	for name, want := range map[string]string{
 		"FAILS":   "the command of the secret FAILS failed (exit code 3)",
@@ -68,6 +68,9 @@ func TestFetchSecretsErrorsShowNoValue(t *testing.T) {
 		}
 		if strings.Contains(ue.Msg+ue.Hint, testSecret) {
 			t.Errorf("%s: the error shows the value: %+v", name, ue)
+		}
+		if want := "Add MISSING = \"<the command that prints it>\" under [secrets] in " + settingsPath() + "."; name == "MISSING" && ue.Hint != want {
+			t.Errorf("MISSING: hint %q, want %q", ue.Hint, want)
 		}
 	}
 }

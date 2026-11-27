@@ -56,30 +56,44 @@ func cliPages(pages map[string][]byte) error {
 func visible(c *cobra.Command) []*cobra.Command {
 	var out []*cobra.Command
 	for _, sub := range c.Commands() {
-		if sub.IsAvailableCommand() && !sub.IsAdditionalHelpTopicCommand() {
+		// Cobra counts its help command as not available, but the root
+		// help lists it, so the reference does too.
+		if sub.IsAvailableCommand() && !cli.IsTopic(sub) || !c.HasParent() && sub.Name() == "help" {
 			out = append(out, sub)
 		}
 	}
 	return out
 }
 
-// commandPage is one command's page: what it does, its usage, the long
-// help, examples, flags, subcommands and where it sits in the tree.
+// commandPage is one command's page: what it does, its usage, its aliases,
+// the long help, examples, flags, its old names (from cli.OldNames, the
+// table of internal/cli/deprecated.go), subcommands and where it sits in
+// the tree.
 func commandPage(c *cobra.Command) string {
 	var b strings.Builder
 	b.WriteString(prose(sentence(c.Short)) + "\n\n")
 	fmt.Fprintf(&b, "```text\n%s\n```\n\n", c.UseLine())
+	if line := aliasLine(c); line != "" {
+		b.WriteString(line + "\n\n")
+	}
 	if c.Long != "" {
 		b.WriteString(prose(c.Long) + "\n\n")
 	}
 	if ex := dedent(c.Example); ex != "" {
-		fmt.Fprintf(&b, "## Examples\n\n```sh\n%s\n```\n\n", ex)
+		language := "sh"
+		if shortPath(c) == "completion powershell" {
+			language = "powershell"
+		}
+		fmt.Fprintf(&b, "## Examples\n\n```%s\n%s\n```\n\n", language, ex)
 	}
 	if t := flagTable(c.NonInheritedFlags()); t != "" {
 		b.WriteString("## Flags\n\n" + t + "\n")
 	}
 	if t := flagTable(c.InheritedFlags()); t != "" {
 		b.WriteString("## Flags from the parent command\n\n" + t + "\n")
+	}
+	if t := oldNames(shortPath(c)); t != "" {
+		b.WriteString("## Old names\n\n" + t + "\n")
 	}
 	if subs := visible(c); len(subs) > 0 {
 		b.WriteString("## Commands\n\n| Command | What it does |\n| --- | --- |\n")
@@ -97,8 +111,23 @@ func commandPage(c *cobra.Command) string {
 	return b.String()
 }
 
-// commandsIndex is the commands' index: the bare command, then every
-// command and subcommand in one table, in the order of the tree.
+// aliasLine is the line of a command's kept aliases, each as a user types
+// it, or "" for a command without one.
+func aliasLine(c *cobra.Command) string {
+	if len(c.Aliases) == 0 {
+		return ""
+	}
+	parent := shortPath(c.Parent())
+	names := make([]string, len(c.Aliases))
+	for i, a := range c.Aliases {
+		names[i] = "`" + strings.TrimSpace(parent+" "+a) + "`"
+	}
+	return "**Aliases:** " + strings.Join(names, ", ")
+}
+
+// commandsIndex is the commands' index: the bare command and its examples,
+// then the commands in the groups of the root help, each with its
+// subcommands in the order of the tree, then the help topics.
 func commandsIndex(r *cobra.Command) string {
 	var b strings.Builder
 	b.WriteString(prose(sentence(r.Short)) + "\n\n")
@@ -106,17 +135,60 @@ func commandsIndex(r *cobra.Command) string {
 	if r.Long != "" {
 		b.WriteString(prose(r.Long) + "\n\n")
 	}
-	b.WriteString("## Every command\n\n| Command | What it does |\n| --- | --- |\n")
+	if ex := dedent(r.Example); ex != "" {
+		fmt.Fprintf(&b, "## Examples\n\n```sh\n%s\n```\n\n", ex)
+	}
+	var rows strings.Builder
 	var walk func(c *cobra.Command)
 	walk = func(c *cobra.Command) {
+		fmt.Fprintf(&rows, "| [`%s`](%s) | %s |\n", shortPath(c), pageName(c.CommandPath()), cell(c.Short))
 		for _, sub := range visible(c) {
-			fmt.Fprintf(&b, "| [`%s`](%s) | %s |\n", shortPath(sub), pageName(sub.CommandPath()), cell(sub.Short))
 			walk(sub)
 		}
 	}
-	walk(r)
+	top := map[string]*cobra.Command{}
+	for _, sub := range visible(r) {
+		top[sub.Name()] = sub
+	}
+	for _, g := range cli.HelpGroups() {
+		rows.Reset()
+		for _, name := range g.Commands {
+			if sub, ok := top[name]; ok {
+				walk(sub)
+			}
+		}
+		if rows.Len() > 0 {
+			fmt.Fprintf(&b, "## %s\n\n| Command | What it does |\n| --- | --- |\n%s\n", g.Title, rows.String())
+		}
+	}
+	b.WriteString("## Help topics\n\n| Topic | What it holds |\n| --- | --- |\n")
+	for _, t := range r.Commands() {
+		if cli.IsTopic(t) {
+			fmt.Fprintf(&b, "| [`help %s`](../%s.md) | %s |\n", t.Name(), t.Name(), cell(t.Short))
+		}
+	}
 	if t := flagTable(r.NonInheritedFlags()); t != "" {
 		b.WriteString("\n## Flags\n\n" + t)
+	}
+	if t := oldNames(""); t != "" {
+		b.WriteString("\n## Old names\n\n" + t)
+	}
+	return b.String()
+}
+
+// oldNames lists the old forms of the command at path that still work,
+// with their end and a note, from the client's table of old forms
+// (docs/contributing/cli-spec.md 3.1). Help and completion leave them out.
+// The root is "".
+func oldNames(path string) string {
+	olds := cli.OldNames(path)
+	if len(olds) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("These still work, and print a warning on stderr, until their end.\n\n| Old | New | Works until | Note |\n| --- | --- | --- | --- |\n")
+	for _, o := range olds {
+		fmt.Fprintf(&b, "| %s | %s | %s | %s |\n", plainCell(o.Old), plainCell(o.New), plainCell(o.Until), cell(o.Note))
 	}
 	return b.String()
 }
@@ -180,6 +252,12 @@ func prose(s string) string {
 		paras = append(paras, inline(strings.Join(lines, " ")))
 	}
 	return strings.Join(paras, "\n\n")
+}
+
+// plainCell is text for a table cell as it is, with its HTML characters and
+// pipes escaped: an old form that quotes a command is already plain.
+func plainCell(s string) string {
+	return strings.ReplaceAll(escapes.Replace(strings.Join(strings.Fields(s), " ")), "|", "\\|")
 }
 
 // cell is help text inside a table cell.

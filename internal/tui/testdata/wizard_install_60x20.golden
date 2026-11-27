@@ -5,7 +5,7 @@
 
                   ⣀⡠⠤⢄⡀   ⣀⣀⣀    ⢀⠤⠒⠊⠉⠉⠉⠑⠢⠤⡀
               ⢀⡠⠒⠉    ⠈⢑⢔⠉   ⠑⢄⡠⠒⠁       ⣀⢤⣚⣓⣦⣤⣀
-  ── Install simstim-host on raspberry? ─── step 3 of 6 ──
+  ── Install simstim-host on raspberry? ── step 4 of 10 ──
 
     simstim needs a small helper on the host to keep
     sessions alive.

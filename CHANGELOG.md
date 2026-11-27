@@ -4,23 +4,722 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ## [Unreleased]
 
+- Fix supervisor, guest, sandbox and kernel test regressions across macOS and Linux, including guest-holder process-group shutdown, retained disk-resource cleanup on failed lease release, async bridge framing with directional peer-gone watches, SSH agent framing and policy persistence.
+
+- Fix CI hygiene checks: clear historical false positives in `.gitleaksignore` and replace key-like example and test literals, remove template injection and dynamic secret indexing in the microvm conformance workflow, bump the pinned guest kernel to `6.18.65` with reviewed pin-watch verdicts, upgrade `github.com/klauspost/compress` to `v1.20.5` for `GO-2026-6865`, and update pinned `govulncheck` to `v1.10.0` for Go 1.27 compatibility.
+
+- Fix Linux regressions in egress, TUI, bundle and host: reopen sealed popularity memfds read-only before stat checks, bound large TUI screen rendering and test baselines, isolate `hosttest` from the host systemd user manager, collect supervisor and guest holder logs in bundles, fix startup line error and EOF handling, bind host-owned runtime and image storage cleanly with synchronous creation receipts, avoid self-deadlocking cached image acquisition in sandbox prepare, allow all placement publication kinds, sanitise unwalled paste filenames, and project live unwalled debug expiry in `ls`.
+
+- Wire the image command group, fix CLI help, completion, JSON/stderr framing, guided setup lock release, session ID lookup, host-side `git-upload-pack` config isolation, `ssh` option cache keying, baseline host-key refusal, host-save conflict checks, and Linux systemd ≥ 254 user-manager and `supervise` startup checks; regenerate CLI reference docs and update `internal/cli` tests for the isolated runtime.
+
+- `scripts/bench.sh` now reports failing benchmark packages with the last lines of their output, a `Try:` hint and saved failure logs in the evidence directory. The Linux live-holder benchmark `BenchmarkNoneKeyToPTY1000` now runs only when `BENCH_NONE_KEY_TO_PTY=1` is set.
+
+- The guest builder now reads the locked Debian security suite as well as the main suite, at the same snapshot time, and pins both signed `InRelease` files (`security_inrelease_sha256` in `guest/supply.lock`). Before, apt refused `libssl-dev`, because the pinned image already carries a newer `libssl3t64` from a security update.
+
+- `just repro` runs from a plain checkout: it no longer hashes the removed feed snapshot, Go runs the toolchain that `go.mod` pins and checks the modules against `go.sum`, the image pairs keep their modes when copied, and each pass starts without the previous pass's outputs and with an empty Zig cache.
+
+- The gVisor runtime build now installs the packages upstream lists for Bazel (`build-essential` and both `crossbuild-essential` packages) in CI and in the release, and builds with `-c opt` as upstream's release does, so the Go symbols that the entry check reads are kept.
+
+- Two builds of the default image now give the same bytes: the build removes ldconfig's auxiliary cache, which records inode numbers and change times. `guest/base-image/repro.sh` no longer needs a prepared module cache or an exact local Go: Go runs the toolchain that `go.mod` pins and checks the modules against `go.sum`.
+
+- The gVisor host patch now applies to its pinned upstream commit: it changes upstream's existing `runsc/cmd/sentry/sentrycmd/chroot.go` instead of creating it, and the build version suffix follows the new patch digest. The build compares only the execute bit that Git records, so a checkout's umask no longer fails it.
+
+- CI's required `test` job no longer waits for the native image builds, so a failed image build cannot skip the unit tests. The new `test-images` job runs the two complete release builds from the image pairs, and the `install` matrix follows it.
+
+- The mode tracker reads each attach output frame where it lies, without copying it first, and looks for the next escape sequence only after text. Its readings are unchanged.
+
+- Check each frame of an attach's output for C1 controls once, for the paste guard and the notifications together, rather than once for each. The attach pump does less work for every frame, and its output is unchanged.
+
+- Fix launcher palette order, host-name casing in error toasts, quick-start folder cleanup on reopen, new-session backend settings and new-host wizard saves; fix `hosts.toml` lock waits and race-detector exit delays in local Git helpers; add missing CLI examples for `host default`, `policy` and `ssh-config`.
+
+- Keep offline compiler selection exact, preserve prepared-input refusal before tool access, and check complete build tags in the existing source-archive fixtures.
+
+- Keep a fork child and its parent operation when child cleanup is unresolved, and preserve the first cleanup error on retries.
+
+- Report the first removal I/O interruption error while retaining separate native close facts.
+
+- Retain the original removal process’s first native close facts and join its listener before releasing temporary code and domain resources.
+
+- Keep the original stopped rewind vacancy and partial restart artifacts when artifact preparation or cleanup fails.
+
+- Retain a fork child's original destination loan and opened roots when validation or cleanup fails, and join that same failed batch before releasing its operation.
+
+- Keep the real namespace cohort and legacy HTTP/2 tags together in build, test, lint and release recipes. Generate the carried-code table only after both actual launchers.
+
+- Inspect purge work in a fixed reader guest, with an immutable copied disk, separate private scratch and only the protected work-inspection operation.
+
+- Build with exact Go 1.27.4 and the pinned module's documented legacy HTTP/2 tag. Keep standard test metadata and strict native-hook admission.
+
+- Refuse interception before reading requests when the build lacks the pinned HTTP/2 scheduler hooks.
+
+- Schedule ready HTTP/2 streams in deterministic rounds while retaining original control priority, flow credit and native write ownership.
+
+- Keep HTTP/2 upload accounting intact when a native write ends at the frame header before its padding or body bytes arrive.
+
+- Run read-only VM checkpoint writes through the original subordinate control actor.
+
+- Admit original read-only VMM execution with the login UID and two genuinely mapped groups.
+
+- Clear the original read-only init capabilities on every native Go thread before control creation.
+
+- Keep the first native descriptor-close result for private cleanup. Manager connections join their actual I/O before closing, including cancellation and EOF.
+
+- Report manager cleanup diagnostics separately from native resource retirement, so a known retired object does not keep an operation parked.
+
+- Keep partial native manager setup under its original cleanup owner and reject operational or managerless fallback use.
+
+- Advance native manager cleanup only from its original retirement facts while preserving the original I/O outcome separately.
+
+- Keep purge creator, scope and code-loan cleanup tied to the original native wait and first descriptor-close facts.
+
+- Keep unwalled metadata resources when their first native close cannot be confirmed, including an already-closed Root. Report close diagnostics separately from known physical retirement.
+
+- Retain the original unwalled runtime-directory transaction through a failed capture or unconfirmed root close, and keep its diagnostics in the original operation result.
+
+- Preserve the original rejected native cleanup owner's close report before unwalled stop cleanup retires that owner.
+
+- Keep selected-shell grant questions and secret-command diagnostics on the launcher's restored terminal files.
+
+- Send the original read-only VM control replies with their required native disk witness.
+
+- Run the launcher's session-shell and lockdown actions through the real CLI implementations. Keep the selected shell's original host Source, settings and tier through dials, grants and reconnects.
+
+- Keep original native phase close diagnostics after safe cleanup retries.
+
+- Retain partial generated boot-config files through the original VM cleanup owner and preserve their close diagnostics.
+
+- Retain the real subordinate-opened session disk through the original read-only VMM and snapshot lifetime, with the current nine-file initial layout.
+
+- Join the helper's original unwalled cleanup owners before normal or idle exit, and keep their operation lock through an unresolved native stop.
+
+- Share the bounded native filesystem-generation observer between actual resource creators. The observation stays data; each resource still needs its own original creation, operation and cleanup subject.
+
+- Cleanly stopped unwalled sessions can be removed through a fresh storage operation. Persistent runtime cleanup checks the original creator's native filesystem generation and preserves unknown or unsupported directories.
+
+- Keep an unwalled deletion's original operation and roots when metadata capture fails after runtime cleanup. A retry uses the same retained transaction.
+
+- Keep the original copied removal child unreaped until its native manager scope adoption settles. Cancellation and disconnect retain the same transaction; admission requires live scope membership, and cleanup requires the original group to be empty.
+
+- Retain the same unstarted removal scope when initial native cleanup fails. A retry observes its original closed descriptors before releasing the code factory.
+
+- Add one bounded native decision queue for a purge's prepared monitors. They observe the same first commit or abort without consuming it; a subject's timeout cannot independently choose between kill and thaw.
+
+- Ordinary purge holders can retain the original shared native decision through parent loss and physically join their own terminal resources. Restoration completes only after their native monitor handles and readers close.
+
+- Preserve the original boot-file I/O diagnostic after successful physical cleanup.
+
+- Keep runtime selections alive through their original connection after a completed transfer, and retain failed native cleanup before any replacement.
+
+- Retain the original native snapshot reader until both its transfer and cancellation replies have joined.
+
+- Complete cached session values for `--in`, supported policy doors and help topics from the actual commands. Stop local completion reads on cancellation.
+
+- Follow nested existing ProxyJump routes during invitation acceptance, including SSH URI jump entries, while retaining the original source and separate pinned projections.
+
+- Report an original preparation cleanup I/O failure after the actual runtime, process and unit have safely joined.
+
+- Keep running fork and checkpoint workers bound to their actual accepted native operation while the control connection reads later frames.
+
+- Retain the original runtime connection and receipt through the actual request writer.
+
+- Recheck the same original runtime receipt at final request writers without hashing runtime files under placement control.
+
+- Preserve the original runtime origin through fresh New and Resume preparation.
+
+- Keep unwalled manager resume on its original kernel holder and live RSS accounting. Keep claimed bootstraps passive until proof aliases close.
+- Retain partial native manager setup objects and reject their use as operational managers or managerless absence.
+
+- Keep the selected restart memory cap charged through native service bootstrap and atomic publication while its original protected selection remains pinned.
+- Prove process creator and namespace-child closure through their original native handles, including failed pidfd handoff.
+
+- Every new session, with or without a sandbox, now has a supervisor outside it. The unwalled driver keeps the host account, folders and namespaces, and starts no egress process. Publication requires an earlier release with walls on by default.
+- Retain the original fixed-test runtime, placement and native parent until cleanup finishes; keep partial factory owners available after errors.
+- Drain failed image publication through its captured original boot placement before retiring the operation and holder.
+- Keep fixed-test cleanup custody until both the original transient unit and its native cgroup are absent.
+- Check the upstream SDK patch with its exact Bazel label.
+
+- Prepare gVisor builds with checksum-bound upstream tools and signed build provenance.
+
 ### Added
 
+- Retire VM lease and metadata descriptors from their actual guarded first close, preserve I/O diagnostics and finish cleanup without touching reused descriptors or replacement paths.
+
+- Retain actual VM boot-file factories and their ordered cleanup across preparation errors.
+
+- `fork` copies a running sandbox into independent cold starts. Every child has its own identity, terminal output, secret stand-ins and memory admission.
+
+- Microvm sandboxes keep disk checkpoints after finished turns where a real reflink probe succeeds. Rewind retains the selected disk, makes a safety checkpoint, restores every member's conversation and restarts through the original native stop with fresh admission, current policy and newly fetched credentials.
+
+- Writable raw VM disks select the pinned runtime's synchronous I/O engine, so a current-copy writer freeze can drain the original disk without leaving asynchronous requests behind.
+
+- Acknowledge ordinary policy changes after revoked HTTP requests finish their original physical cleanup.
+
+- Check the launcher's explicit host-key confirmation through registration and sandbox preparation, including refusal when the host presents another key.
+
+- Cold microVM resumes prepare a fresh authenticated size before keys, reserve guest RAM plus the exact host overhead, and retain the original selection until its replacement is admitted. New sessions and resumes keep the selected VM driver when a release carries several runtimes. Running sandboxes keep their cap and warning.
+
+- Read Linux file ownership through the actual native stat representation. Keep the same manager identity and original operation-lock checks.
+
+- Install custody-capable runtime services with a passive native reference before startup. Validate inherited kernel custody and retain the original holder file description through a single-use claim.
+
+- Preserve runtime writer durability failures and share guarded native file retirement.
+
+- Continue an existing purge through a closed raw data relay after installed paths disappear. The original invocation retains its command, native creation and cleanup objects; a new connector cannot reconstruct a lost removal vector.
+
+- Retained stops keep their original manager owner or prove the current empty-store transient service before requesting closure.
+
+- Preserve the original HTTP/2 read deadline when a pending policy reset waits for an exposed header block to finish.
+
+- Retire native HTTP/2 stream window updates before releasing a cancelled request. Keep every selected write owned through completion, and close the original writer after a failed frame prefix.
+
+- Accept a joined machine through an explicitly selected existing ProxyJump route. Capture the route before resolution, keep bastion identities separate from the invite key and refuse changed sources before connecting.
+
+- `shell` opens the newest running shell beside an agent, or starts one through the original member grant path. `--new` and `--name` start another shell. At `none`, it starts a host shell in the same folder through the ordinary new-session path.
+
+- Runtime and image-store cleanup keeps the original resource stack and transfer slot after a failure, then retries parts, stores and publications in order.
+
+- Keep partial runtime stores and image cleanup retries under their original publication.
+
+- Retain original runtime part directories through publication and retryable durable cleanup.
+
+- Ordinary host addition and the launcher prepare and test the sandbox wall from the original saved host. The ten-step launcher keeps sandbox preparation and optional root steps before the agent checklist.
+- Let the protected purge copy inspect ordinary holders and run its fixed Git reader through their original native owners. Keep generic executable identity checks strict and retain endpoint cleanup before releasing inspection roots.
+
+- Repeated purge close checks observe the original descriptor objects after physical cleanup. A lost close acknowledgement does not require reopening a removed source or repeating a completed unlink.
+
+- Record a new worktree's native filesystem generation where the filesystem supports it. Purge preserves legacy or replaced worktrees and retains the same cleanup root through partial unlinks and retries. Force does not establish directory ownership.
+
+- Add a closed purge process which keeps its original transaction and native cleanup objects across requests. A lost client restores work before stop; an irreversible removal retains its original cleanup owner.
+
+- `--wall microvm` supports EC2 Nitro Sandboxes through the `nitro` driver, including Graviton, with no nested virtualisation. `host prepare --nitro-slots` reviews optional slot donations.
+
+- Releases include a separate signed EFI kernel pair from the shared pinned Linux build, with actual byte and fs-verity checks and the same source advisories.
+
+- Runtime and final inherited EFI kernel checks validate bounded image headers on the original descriptor, including the sealed fallback.
+
+- Add a machine from its own keyboard. `host invite` on the laptop prints a code, `host join` on the machine prepares it and prints a reply, and `host add --accept` adds it. The laptop still starts every connection.
+
+- Mac host joining prepares a hidden standard account, a pinned plain Lima VM, narrow SSH access and an original root-owned leave journal. It includes a system startup job, an explicit user launch-agent fallback, AC-only power review and Mac battery health. Hardware assurance remains required.
+
+- `new --machine e2b` makes one provider machine for each session, prepares its sandbox wall and removes the machine and its disk at `rm`. Secrets need the shared tier and explicit exposure. A failed start cleans up only its own machine.
+
+- Host removal keeps its original local source and native configuration handles through staging, rollback and final cleanup. Replaced hosts and files are preserved.
+
+- Provider-session classifier and named-key value paths recheck the shared tier before fetching. Classifier keys retain their original explicit exposure; named SSH keys keep their separate host-only delivery and fresh owner confirmation. Host exposure is recorded as history, never as permission.
+- Route sandbox stop through its original native owner and preserve earlier exit diagnostics in a rooted stopped-record publication.
+
+- Keep original HTTP/2 stream resets, physical write ownership and TLS cipher checks together while a policy stops one request.
+
+- Derive temporary purge code from the retained actual executable descriptor, verify its exact bytes and seal its new inode before native bootstrap. Original creator descriptors preserve replacements and prevent future borrowing during cleanup.
+
+- Retain the same temporary code factory when construction fails and its real cleanup cannot finish. A retry keeps the original descriptors instead of rebuilding ownership from a path.
+
+- Retain the actual purge origin before capture so original stopped objects can be checked after their own namespace cleanup. Missing names alone never establish closure, and replacements remain preserved.
+
+- Keep original ordinary preparation objects reachable on capture cleanup errors, and recheck native restoration before releasing an operation on a repeated refusal.
+
+- Releases check and sign both complete native gVisor builds from their actual source pin, guarded ELF entries and original bytes. Old, incomplete and mixed builds stop publication.
+
+- Connect the original userspace-kernel controller creation, sealed public setup, native final barriers and operation-guarded one-use guest transfer; require the exact five-companion runtime.
+
+- Let admitted WebSocket answers finish independently when another lane's request is still being written.
+
+- Keep signed runtime handling and native cache bindings independent, while preserving strict domain validation and cancellation.
+
+- Count WebSocket model request payloads at the original upstream writer and join that message writer before settling an incomplete turn.
+
+- Carry the original converter publication fence through captured setup, init, final exec and positive native cleanup, retaining it after uncertain start.
+
+- Connect the provisional direct VMM mode lease to original jail creation, exact private inheritance and physical cleanup. Keep uncertain owners and native availability gates explicit.
+
+Guard direct execution of measured VMM files on writable owned stores with the original native helper chain and mode lease. Read-only stores retain sealed execution.
+
+- Placement admission keeps one original failed constructor for cleanup retry and refuses another reservation until that cleanup succeeds. Waiting remains cancellable.
+
+- Agents-image factories and their bridge and supervisor callers retain the original receipt after a cleanup error, then retry that same source before releasing its publication.
+
+- Image conversion retains its original native publication fence through guardian and converter cleanup. Retirement and parent-death collection keep a retryable intent in the existing placement operation.
+
+- Run fixed ordinary Git reads through an authenticated original helper creation, explicit directory loans and joined native commands. Count results retain their actual process and reader owners; public purge still needs its full transaction and controller chain.
+
+- Commit an original ordinary main process pause before terminal hangup can run its shutdown handler. Reversible refusal still preserves a pre-existing user stop.
+
+- Count HTTP model body prefixes at the original physical connection writers, including the optional judge, and retain request cleanup until the answer writer settles. Keep Responses WebSocket accounting in its echoed ordered lane.
+
+- Pin the original roots and Git control files for active ordinary worktree inspection. Native administrative opens stay beneath the retained common root; these read loans grant no cleanup rights.
+
+- Make the native helper identity fixture create its connected endpoint in the actual protected child, so socket and current sender credentials describe the same process.
+
+- Freeze the original captured userspace-kernel mount and kept-state topology into a sealed public capsule, and retain it through actual native cleanup.
+
+- Retain one original protected userspace-kernel code suite with read-only handles to the same signed sealed objects, and check it before native command start.
+- Wake stopped microvm sandboxes through the usual resume checks. Optional `sandbox.idle_stop` uses the sandbox's shared stop path and stays off by default. Boot restore leaves idle sandboxes stopped and starts recent working sandboxes at most two at a time.
+- Add the real microvm conformance runner, bounded original trace readout and paired release evidence checks. Hardware measurements remain pending; automatic idle stop stays off.
+
+- `host prepare` probes the original saved host, delivers its pinned runtime, handles its optional root steps and runs a fixed sandbox test boot through separate owned phases. It records a prepared cache and floor only after successful boot and cleanup.
+
+- Retain active ordinary holder preparation separately from physical stop ownership. The original holder restores its own bounded main process pause after a cancelled control request or outside process death; public purge still requires the remaining inspection and transaction owners.
+
+- Retain the original nested userspace-kernel creation pidfd outside the mapped helper, and require its positive exit before releasing runtime resources.
+
+- Distinguish denied access to the real KVM device from missing or broken devices. A VM probe reports a possible root-step remedy only after checking the other host prerequisites and runtime bytes; preparation still needs a fresh probe and successful test boot.
+
+- `host rm --purge` records native cleanup, asks for the host name, uses selected local root undo and keeps agent logins unless separately authorised. It reports preserved resources and secrets to rotate, supports retry without installation and forgets the host last. Ordinary worktrees currently need `--force`; unknown native ownership still stops removal.
+
+- `new auto` picks one of your hosts for a sandbox from its live room, cached images and round trips. `--dry-run` shows why it chose that host.
+
+- Automatic placement can try the next host after a current helper proves that a capacity refusal was never dispatched and the original attempt has closed. Older helpers keep the original attempt when that proof is unavailable.
+
+- Automatic placement reconciles pending local starts with memory already included by the same native sample. Completed starts no longer leave phantom memory charges after a later fresh sample. Pinned wall choices and explicit gvisor memory caps use the same rules as the actual start.
+
+- `ssh-config` prepares a pinned local SSH endpoint for sandbox shells, commands, SFTP and granted guest ports, without a sandbox SSH server.
+
+- Answer held network requests by their original opaque IDs from the CLI or policy sheet. Upload budget holds offer once and refuse; wider changes use the existing policy writer.
+
+- Count upload bytes at the upstream TCP connection, keep hourly spending across policy changes, and show a distinct upload-budget reason.
+
+- Count model API answers across a sandbox and its optional judge. Keep usage already reported by an answer in its budget after the answer is cut.
+
+- Apply host-held lockdown through the original native policy writer. Session allowances pause without resetting their once ledger; lifting it removes only that restriction.
+
+- Retain the original VM runtime lease when native cleanup is still pending, and join concurrent close attempts before releasing its owners.
+
+- Hold cold resume memory through key fetch and native dispatch, then settle it only at the original verified native handoff.
+
+- Keep resume preparation on one native warm controller or genuine cold source. Warm workers retain the original operation through explicit cancellation and cleanup, and cold starts hand capacity to their actual new native owner.
+
+- Named SSH key changes retain one local next-start choice in the existing sandbox record. Cold starts recheck each selected key; running signers and the original creation pin stay intact.
+
+- Named SSH and trusted classifier credentials use their original protected native startup source. Warm agent resumes keep the running credential roles, and next-start SSH key edits send names only.
+
+- Sandbox resume retains its original native preparation before fetching named SSH keys; warm resumes keep the existing runtime and signer, and key policy edits affect the next start only.
+
+- A sandbox can use the SSH keys that you name, through its own agent, without holding the keys. Policy changes take effect at its next start.
+
+- Show own-account isolation only from the original native-ready VM and its current protected run generation, and retire the descriptive mark when that run stops or changes.
+
+- Publish bounded advisory counts of held, vacant and quarantined account slots, and read them for host facts without starting a process. Missing or stale counts stay unknown and never reserve capacity.
+
+- Recover escaped slot descendants only through their original cgroup generation and parent, retain the exclusive lease through native closure, and allow safe retries of absent or interrupted separate-account session cleanup.
+
+- `host prepare --separate-accounts` offers the signed launcher and fixed account steps through the original root preparation and consent. The option is off by default.
+
+- Report bounded advisory slot counts from the existing protected root projection without running a process.
+
+- Preserve each microvm disk identity mode when joining the optional native slot runtime, and bind its actual guest connection through the existing engine owner.
+
+- Match root slot allocation records to their original native cgroup parent during keeper capture.
+
+- Trusted model arming can read a fresh names-only observation from the original live registry. The observation is transient and grants no credential or host access.
+
+- Retain the original physical stop and locked holder when preparing an auxiliary read in the same host boot.
+
+- Classifier session decisions use the original actor's durable policy writer. Judge outages reach existing alert destinations as `judge_unavailable`.
+
+- Policy file edits propagate to running sandboxes with bounded host fanout, checked conflict retries and pending-host recovery. `policy apply`, `edit` and `learn` preview and review changes through the same retained local sources.
+
+- Answer pending network requests through the original egress actor, keep protected-memory answers opaque, and save non-sensitive session answers through the live policy source and protected journal.
+
+- Refuse separate-account slot groups whose numeric primary ID differs from their named group, or aliases the login account, another slot or a privileged group.
+
+- Name a host for a repository, an organisation or a profile with `sandbox.host`, and `new` uses it when you name no host. A host that you name always wins over a rule. Labels are notes that never pick a host.
+
+- Private held targets can use compiled session rules in the existing engine and once ledger, with full state charging and current-policy replacement. Positive public answers keep their original local operation and checked backend response; private targets stay out of ordinary saved target fields.
+
+- Keep cold resume preparation in the existing native publication ledger and reject installer payloads before they can reserve a session.
+
+- Retain a cold preparation's complete memory charge through slow fetches and uncertain dispatch.
+
+- Check warm jail lifetimes through their original retained creation handles.
+
+- Keep native preparation accounting checks on the same locked publication control record.
+
+- Live policy replacement uses the original selected layers and a checked hash. The running record keeps applied settings separate from values that need another start.
+
+- Read outgoing files from supported stopped microvms through the original accounted native reader, with the same path, size, range and EOF checks as running copies.
+
+- Clear matching pending laptop policy metadata through the original ready supervisor and its single save turn, preserving unmatched inputs.
+
+- Pending policy sources stay separate from applied boot values and preserve current session grants. Unsupported future capsules remain opaque.
+
+- Live policy replacement hashes the original selected laptop layers and preserves applied boot, mount, secret, SSH-key and paste settings while network changes take effect.
+
+- Retain actual native supervisor and whole-unit closure before issuing an opaque stopped-session source for physical removal. Unknown lifetimes stay preserved.
+
+- The launcher policy sheet reads live held requests before ordinary rules, keeps selection by opaque ID and can refuse the selected request. Closing it cancels queued work.
+
+- `policy ls --in` lists live held network requests before rules, with their opaque IDs and original deadlines. Older helpers omit the optional `pending_network` JSON field.
+
+- Unknown network holds have a live read, refuse and descriptive-ID path through the current egress owner. Flow cancellation keeps the original question expiry, and display labels use the existing secret redactor. Positive opaque answers remain under implementation.
+
+- Public-only network restrictions survive structured policy-file edits and cold starts. Older helpers refuse these rules before they can ignore the restriction.
+
+- Network rules can retain an explicit public-address restriction through saved layers, atomic request plans and live permit checks. Older helpers must support the restriction before receiving it.
+
+- Bind physical userspace-kernel probe reuse to the same held native launcher, helper and signed runtime closure.
+
+- Bind native startup to the protected helper's actual executable and namespace descriptors before lending private operation rights, while retaining NoDump.
+
+- Check reproducibility with both independently prepared native default-image pairs and fresh per-pass launcher and offline-verifier builds.
+
+- Generate the genuine package-malware snapshot before release helper and client builds, retaining the source archives' provenance.
+
+- Include the OpenSSH client explicitly in the default image for named-key Git transport, with its actual package version recorded by the builder.
+
+- Add an explicit default-image reproducibility command that checks two fresh native builds and retains their actual OCI and verity comparison.
+
+- Recheck measured kernel descriptors in the final VMM execution helper while retaining sealed fallbacks and the existing VMM NoDump boundary.
+
+- Retain verified kernel and execute-only VMM descriptors through the actual microvm resource lifetime, including native measurement errors and physical cleanup.
+
+- Derive runtime fs-verity digests from release bytes, enable them on owned VMM and kernel store files, and retain measured kernel descriptors. VMM execution keeps its existing NoDump projection while its direct fs-verity boundary remains open.
+
+- Compare a resumed microvm image with the original protected Need before stopping or changing its sandbox. The client rechecks its retained image history under its current laptop policy.
+
+- A saved image alias cannot redirect the literal `default` image or change its recorded release origin.
+
+- Protected VM image selection keeps its original retained policy and records saved, OCI or release origin from the actual selection path.
+
+- Requests recheck their original settings and private publication guards after acquiring the physical writer turn, so a queued request cannot send after its source changes.
+
+- Microvm resume checks the original recorded image against the retained current policy before fetching secrets and binds that image to the resume frame.
+
+- Microvm creation records retain the exact original local image selection for later policy checks without following a moved tag.
+
+- Image verification retains the original effective local policy, config directory and accepted host source through preparation and retries.
+
+- Images for sandboxes are pinned by digest on your laptop, and can require a signature. An offline verifier checks the exact signer, issuer and pinned image before the host fetches or uses it.
+
+- Internal opt-in account launcher components validate signed slot metadata, separate slot and directory groups, and retain actual init-only source leases.
+
+- Internal stopped readers have an accounted auxiliary native lifetime, fixed read-only carriers and cleanup tied to their original operation and disk ownership.
+
+- Trusted judge metadata records selected-commit ecosystem names through owned input clones and the original protected start request. Model disclosure still requires the current source fence.
+
+- Judge evaluation has bounded labelled-case intake and a private opt-in report path. Imported audit candidates remain unlabelled until independently reviewed.
+
+- Pending network display records and nonpositive client requests use closed versioned snapshots, opaque identity and the original accepted host source. They grant no target, private-address or start permission.
+
+- The first admitted unknown-allow destination elects one alert after the original audit append and control acknowledgement. Named permissions retain their existing admission path.
+
+- Local placement caches retain receipt time and source identity, and inflight records count complete declared unit bytes under a native lock. Cached facts grant no host capacity.
+
+- Host health and user drain flow through the existing bridge and protected placement gates. Runtime maintenance keeps its own closed request and completes before a new root-step request.
+
+- Release builds have a pinned minimal Debian image recipe with the fixed guest account, deterministic OCI output and checked per-architecture image artifacts. Publication remains in the signed-tag workflow.
+
+- Starting records retain the original advisory placement description. Session output owns a bounded, cleaned display copy without granting start rights.
+
+- Placement request and display metadata use a closed versioned schema and owned copies. The descriptions grant no capacity or start rights.
+
+- Host selection has typed pool and feature settings, requirements parsing, Source-bound fact filters and deterministic ranking. These checks grant no reservation or start permission.
+
+- Image lists and live session details show a saved image's origin from the protected boot selection on the current host.
+
+- The launcher's `n` action offers the named default host first in every view and checks the accepted source before creating a new request.
+
+- `image save` collects the selected session's current local values, reviews paged changes from the original running VM source, and keeps or drops the prepared same-host root. Export omits generated state and preserves file and directory attributes for review.
+
+- Internal streams expose a stable lifetime signal at full closure or reset, without changing half-close or wire bytes.
+
+- Hosts report resource facts and cached sandbox diagnostics through the existing bridge. The observer requires existing native ownership and creates no host state.
+
+- Saved image selections retain their original host and verified root through the existing store, local pin lock and original VM request.
+
+- `new` can resolve an omitted host from a named default, the environment, the last host or a sole saved host. `host default` updates the named default through the current local membership.
+
+- New sessions accept `--image` through the existing policy layers and locks. `new --in` refuses the flag before work.
+
+- Host facts have versioned data types with explicit known bits, byte units and pressure percentages.
+
+- Classify mode compares confusable names with the existing rule authority using pinned Unicode 15 data.
+
+- Classify mode checks fixed exfiltration destinations, numeric addresses and complete long labels. Webhook and paste service paths share the existing endpoint admission rules.
+
+- `new --in` starts a fresh member with its own local secret approval inside the existing sandbox.
+
+- Process copy publishers create their private stages under the original protected session directory and check the source mount before binding it.
+
+- Selected gVisor starts probe the delivered runtime before fetching private values. Cached physical results retain their native owner and exact runtime identity.
+
+- Walled starts verify the original supervisor has its exact native memory cap and zero swap before lending private boot rights.
+
+- Walled sessions reserve their declared memory cap before starting. Restarts check that cap against current host room before publishing the new start.
+
+- VM copies validate bytes in a private stage on the original writable mount, then publish through the fixed account helper.
+
+- Bound service credentials stay blocked at token mint endpoints, and streamed responses detect the added service token formats.
+
+- GitHub service rules check REST and GraphQL reference writes against the same protected branch policy before sending credentials.
+
+- Session lists and `show` report the package manager settings installed at the current sandbox start. A later policy change does not replace that plan.
+
+- CLI tests separate Unix host and terminal fixtures from portable command, file and fake-transport checks. Windows keeps its own isolated test home and child cleanup checks.
+
+- The private-detail check distinguishes public systemd unit names and template tokens from email addresses. Email addresses beside those forms still fail.
+
+- Builds carry and install the real static process namespace launcher with its checked fixed descriptor protocol and compiled syscall policy. Guest init protects its control input after the fixed executable transition.
+
+- The gVisor host factory binds its original native boot owner, signed patched companion closure and captured filesystem descriptors. Its virtual guest keeps UID and GID 1000.
+
+- Decoy values use the existing egress tripwire, local denied-host inspection and audit path. Intercepted request bodies check a bounded prefix before origin access, and live policy updates retain the applied start generation.
+
+- Host preparation shows optional root steps with the exact script and undo instructions. Runs keep their original host identity and a history of uncertain attempts.
+
+- Positive repository push grants use local forge visibility checks and distinct consent for public repositories.
+
+- Every cold sandbox start creates a private decoy generation through its fixed-account helper. Generated files stay out of retained state, and the existing egress audit reports blocked use without stopping the session. Decoy policy changes apply on the next start.
+
+- Runtime descriptors project through private read only mounts before execution. Runtime byte seals support older kernels and the complete gVisor companion set.
+
+- Bridge helper cleanup retains native child observation errors. An unverified exit cancels I/O and stops the original child before the actual wait.
+
+- Host creation keeps its original operation while registering and setting up the newly saved host.
+
+- Resume and automatic restore retain one original native operation through protected restart publication and readiness. Process and gVisor memory changes use the original request admission; VM restarts keep their recorded Need and cap.
+
+- Bridge input cancellation stops and joins the actual reader process. Private input chunks preserve raw bytes and inherited file flags.
+
+- Decoy opt outs keep policy locks. A conflicting value refuses the start before any decoy side effect.
+
+- Managed Lima SSH transports retain their original native configuration restriction through key checks, command startup and the owned process wait. Port forwards recheck the saved request Source at their physical start.
+
+- The sandbox guide lists each decoy credential, its inactive form and how to turn decoys off.
+
+- Sandbox forwarding grants exact guest loopback ports through private host sockets. Reverse forwarding exposes one chosen laptop loopback service to an own-host sandbox and ends its guest listener with the connection. Port claims and actual forwards stay separate in the launcher.
+
+- Sandboxes hold decoy credential files, and a use of one raises an alert. `[sandbox] decoys = false` turns them off.
+
+- Terminal and setup retries retain the original settings descriptor across individual network attempts. Ending the logical request blocks late answers and new work while resource cleanup remains retryable.
+
+- Exact repository push grants use the existing ledger, inspect every observed receive-pack command prefix and leave discovery grants unspent.
+
+- Failed native host creation reports retained resources and their original locators. A missing Docker command keeps its installation hint. Saved Docker actions keep the original engine, configuration and container ID. Saved Lima lifecycle commands keep their original home and instance.
+
+- Release builds create the shared guest kernel and verified tools image for both architectures, with the kernel source and configs. The guest build uses the locked Debian builder and signed package snapshot. Reproducibility checks include the guest assets.
+
+- New-session inputs use the original accepted host Source and one retained local settings operation. Their first payload writes a current-run receipt before bytes leave, and completion clears only that exact receipt. A no-wake retry can finish an acknowledged input operation without reading or resending laptop files.
+
+- `new --count` starts independently admitted sessions and reports partial failures in one JSON array. Without a terminal, `new -- <command>` runs through sandbox exec, returns the command's status and keeps the stopped sandbox's work.
+
+- New sessions accept laptop seeds, copied files and ordered environment flags. Policy, wall, inputs and secret values use one retained request through setup questions. Cancelling the command or launcher joins that attempt before aborting unused preparation and closing it. Uncertain writes keep their record.
+
+- `events --follow` reads session events over the existing host connection. JSON events use one versioned object per line. Event delivery is independent of alert destinations and their delay.
+
+- Dedicated command and input continuations keep the original accepted host Source while releasing the host publication lock during their network handshake. A changed host cannot acquire that continuation.
+
+- New-session input preparation retains the original settings source, selected primary policy and capture across questions. Laptop copy expressions stay in the local policy record.
+
+- Walled startup retains the original native operation through selected input delivery and durable readiness. Both MicroVM drivers use the protected Need selection and the actual engine connection for guest preparation.
+
+- Walled startup retains its original operation lock through launch, start delivery and readiness. Automatic restore borrows the same native lock. Failed or uncertain cleanup keeps the original owner and session storage until its lifetime has joined.
+
+- Both VM backends can enter the released helper's disk, runner and execution stages. Private stage commands refuse path arguments.
+
+- Sandbox boots enter the helper's real guest init. The sandbox guide explains wall selection and Firecracker's supported kernels and file boundary.
+
+- Sandbox capability reports keep verified VM construction inputs separate from compatibility readiness. The bridge reads current host facts through the same bounded collector.
+
+- Walled supervisors share the holder's memory warning, peer checks and rotating guest log writer. VM waits retain native failures, and released disk resources prevent a later start.
+
+- The protected VM resource selector chooses the actual Cloud Hypervisor or Firecracker backend and keeps the existing manifest writer.
+
+- Sandbox alerts retain guest state, exit and detail provenance in text, JSON, command variables and OTLP logs. The dispatcher settles real accepted work within the caller's budget. Disk, heartbeat and lifecycle events use the specified defaults and existing host limits.
+
+- Pull review recognises a strictly known original legacy unwalled public set as empty, then still checks fresh local secret values. Missing modern receipts remain incomplete.
+
+- `cp` copies files and folders into and out of a running sandbox, with an original local size ceiling, rooted path checks and a review before files land on the laptop. Incoming file bytes stay anonymous in the Linux guest until publication.
+
+- Releases pin Firecracker 1.18.0 for both architectures and mirror its checked raw executables, source and notices. The client's embedded release manifest carries the actual file digests. Release checks refuse missing files and known-bad pins.
+
+- SSH agent forwarding uses a dedicated helper entry with bounded identity frames and owned endpoint recovery. Incomplete cleanup keeps its ownership witnesses and reports a resource refusal.
+
+- Alert webhooks accept `--format otlp` and send lifecycle logs to the collector endpoint you name. Sandbox and health events use the existing alert settings and noise limits.
+
+- GitHub repository creation, gists, visibility changes, workflow writes, runner registration and collaborator changes require an explicit network path grant. The existing request permit also checks that grant during policy changes.
+
+- A bundle pull can select one protected repository with --repo. Full-history retries keep that same repository and its seed history.
+
+- `policy allow --tools` grants named model capabilities for one session and exact model host. It takes repeated or comma-separated names. Empty sets and wider layers fail. Dry runs use the same canonical rule identity and helper feature gate as real changes. Shell completion uses the same capability table. Alert event values also come from their canonical event table.
+
+- Secret badges and start notes use the compact delivery summary. Bound credentials are no longer labelled exposed. Missing or incomplete metadata stays unknown. Displaying a session changes no credential or permission.
+
+- Model API requests check exact paths, tool types, remote content and file uploads before reaching the provider. Session tool grants share the existing network permit and lease ledger. Refusals use provider-shaped HTTP 403 errors or WebSocket policy closes ([model API guards](docs/how-to/model-api-guards.md)).
+
+- Image paste sends sandboxed sessions a guest path through a checked file stream. The default sandbox policy accepts images and PDF files.
+
+- The launcher asks for scoped grants while the original operation stays alive. Yes or no questions default to no. Typed host approval requires the exact name. Cancel, closing the launcher or handing off the terminal stops the wait and cannot approve a later request.
+
+- The launcher opens session policy and its log from the palette. It can allow or revoke a rule and stop a sandbox while keeping its work. Closing a sheet cancels its pending work. Late results cannot replace another sheet or another host connection.
+
+- Firecracker's MMIO backend shares VM disk and process ownership with Cloud Hypervisor. Native startup binding checks the original VMM handle and guest connection without recovering a saved PID.
+
+- Firecracker boot configuration and private control use the canonical VM plan, fixed devices and one owned connection. Driver selection keeps the existing boot format and checks each VMM's CPU and version limits.
+
+- Laptop seeds bind repository policy to the exact selected commit. Dirty seeds reuse one private prospective commit through review and transfer. Local Git checks actual managed provider sharing and keeps uncertain native captures until cleanup joins.
+
+- Completion on the real `policy rm` command lists rule IDs and targets from every local config layer. Profile names use the same config schema. Both stay local and quiet, including when another command holds a host lock.
+
+- Policy commands read and change rules in all-session, host, repository, profile and session layers. File changes preserve unrelated keys. Dry runs change nothing. `config check` reports the current folder's layers and their sources.
+
+- Shell completion fills in hosts, sessions and agents. Host names come from `hosts.toml`, with each target beside its name. Session addresses use `host/name` from the last list that the launcher, picker or `ls` saw. They use `host/id` when a name is duplicated, contains terminal controls or could identify another session. Lists older than a minute show their age. `--agent`, `agents install`, `--secret`, `host create`, `host set` and `debug profile` complete their values too. Completion reads local files and never connects to a host. A signal ends completion with code 130 and no error text. An empty request or invalid flags return no values and disable file completion. File path flags retain their file completion. The reference now includes `completion` for bash, zsh, fish and PowerShell ([shell completion](docs/how-to/shell-completion.md)).
+- Each host has a tier: `own`, `throwaway` or `shared`. `host add` asks who else has root on the machine, and `host show` and `host set` show or change the answer. Hosts that you added before keep working as `own`. Hosts added by an older client after migration stay `shared` until their next terminal use asks the tier. The launcher asks before foreground work, with no default answer ([choose a host's tier](docs/how-to/choose-a-host-tier.md)).
+
+- The protocol gains stream frames, which carry many streams over one connection between a sandbox and its host. They do not travel between the client and a host yet, so sessions do not change.
+
+- `config check` finds mistakes in your config files ([configuration](docs/reference/config.md)). It reads `config.toml` and `hosts.toml`, and prints each mistake on one line with its file and line. A typo prints `~/.config/simstim/config.toml:4: unknown key "motoin" in [ui]. Did you mean "motion"?`. It finds TOML errors, unknown keys and values of the wrong type. It finds values outside their list, such as `ui.motion`, and sizes, times and keys that do not parse. It finds `[keymap]` names that are not launcher commands, and secrets without a command. It also finds hosts without a usable name, two hosts with one name, and hosts that need `ssh` and have none. It exits with 1 when it finds an error, and `--json` prints the report as one object. A `config.toml` that does not decode, or cannot be read, no longer goes unnoticed. Each command now prints one warning with the line, and uses the defaults. The launcher shows the warning as a notice. After an edit in its settings editor that breaks the file, the launcher keeps the settings it had, and says so. Each attach, start, resume and agent login in the launcher reads the file again, so a fix made in another window counts. Changes to `ui.motion` take effect after the next read. An older action cannot overwrite a newer settings edit when it finishes. Home-relative report paths use forward slashes on every platform. An error for an oversized file names the shared limit. The check refuses two spellings of one known key or table, while host names and free map keys stay distinct. A machine table needs a provider and a non-empty id. The ordinary loaders refuse ambiguous aliases too, before choosing a setting or an SSH route. Every command reads `config.toml` and `hosts.toml` once, as regular files of at most 1 MiB, so a FIFO or a device never makes a command wait. A `hosts.toml` that does not decode, and `doctor` when a config file has an error or an unknown key, now say `Try: simstim config check`. `config check` checks an idle time by the rule of `host idle`: a minute or more, or never.
 - The launcher's host details show each agent's version, such as `claude 2.1.3` ([#26](https://github.com/iamlakshya/simstim/issues/26)). The host helper reads it from the agent's `--version` when the launcher connects, and the launcher keeps it for that connection. `host doctor --json` has the versions too, as `agent_versions`. When the agents do not fit on one line, as at 60 columns, they wrap under their label. The shell shows no version, and neither does an agent that prints none. An older host helper sends no versions, so its details show the names alone.
+- The docs site publishes `llms.txt` and a Markdown copy of each page, for coding agents. A new guide, [use with coding agents](docs/how-to/use-with-agents.md), has a snippet for a project's `AGENTS.md`.
+- `--no-input`, `--json` on every command that prints data, and a picker when a command needs a session that you did not name ([scripting](docs/how-to/scripting.md)). `--no-input`, `--json` or `SIMSTIM_NO_INPUT=1` turn input off: a question that needs an answer then fails with exit code 4, and its "Try:" line is your command with the flag that answers it, before any `--`, such as `host add --yes`. Opening the launcher, running `flip` with no session, or running `demo` with input off also fails with exit code 4, and needs stdin, stdout and stderr on a terminal. With input off, SSH asks nothing either, `forward`'s included: it runs with `BatchMode=yes`. `new --detach`, `resume --detach`, `ports`, `doctor`, `host test`, `host restore`, `host status` and `version` now take `--json`, and `doctor --fix --json -y` and `host doctor --fix --json -y` apply the fixes and report each one. Every JSON object at the top has `"v": 1`, and with `--json` an error, a warning or a note is one JSON line on stderr. `attach` with no session opens a short list of your sessions at a terminal: type to filter it, and press Enter. A paste in the list or at a question keeps only the characters that you could type, and Ctrl+C cancels, also in the middle of a paste. A paste of many lines at a question stays in the line, and does not answer it. At a terminal, a question fails rather than reading a plain line if raw mode cannot open, and the client stops rather than starting a second reader if an earlier terminal read could not be cancelled. Type to the session after its screen appears. The list sends the terminal no query, so no reply reaches the session. It starts from the sessions that `ls`, the picker and the launcher saw last, and `ls` now writes them too. The session last attached to moves from `launcher.json` to `last.json` beside it, so a list never overwrites it. `--no-color` turns colour off, as `NO_COLOR` and `TERM=dumb` do.
+- `host upgrade <host>` installs this client's helper on a host, without the other steps of `host add`. It removes no helper, so a newer client's helper stays ([add a host](docs/how-to/add-a-host.md#update-the-helper)).
 
 ### Changed
 
+- New sessions use the host's pinned sandbox floor by default. `--wall none --downgrade` runs one without a wall, with the exception recorded. Agent installers and logins keep their explicit host-side downgrade.
+
+- The internal gVisor bootstrap carries closed C mapping, descriptor slots and native scope proofs. Its runtime topology and native security gates remain separate.
+
+- Supervisor manifest publication and process-init ownership have dedicated files with their existing lifetime protocol unchanged.
+
+- VM process and disk ownership now use one shared implementation. Cloud Hypervisor keeps its existing entry points.
+
+- The launcher checks current local permissions before fetching secrets for a start or resume. A broken config cannot run commands from settings kept for display. One request retains its exact permissions through setup retries.
+
+- Shell completion keeps long local secret names intact. It checks the file it actually opens, so replacing a regular file with a pipe cannot make completion wait. The file limit stays at 4 MiB.
+
+- `config check` validates command strings and structured secret definitions through the same decoder and normaliser as session starts. It keeps field suggestions and line numbers, checks unused definitions and tiers, and never runs their commands.
+
+- The launcher and the command line use the same words. In the launcher's palette and `[keymap]`, `session: preview` is now `session: peek`. `"session: preview"` in `config.toml` still works until v0.4.0 and 11 November 2027, whichever comes later: `config keymap` warns on stderr, and the launcher shows one notice at start. `show <address> --screen` prints a session's last screen as plain text, with control and hidden characters removed, and adds `screen` as an array of lines with `--json`. `host test <host> --reconnect` closes the shared SSH connection before it tests a new one, as `host: reconnect` in the launcher does ([sessions](docs/how-to/sessions.md#see-one-session), [scripting](docs/how-to/scripting.md#old-names)).
+- `rm` deletes a session, and asks first. `kill` still works for now, and warns. `attach` wakes a stopped host and offers to restart an ended agent. `show` describes one session. You can leave out the host when a session's name is unique ([sessions](docs/how-to/sessions.md)). At a terminal, `rm` says what stops and what stays, and asks `Delete it? [y/N]`. It asks with the lines of the launcher's delete sheet. A worktree that the session made goes with its branch, unless it has changes or new commits. The question says so for a folder in the helper's worktrees. When the session is renamed while the question waits, `rm` deletes nothing. The host also refuses a delete when the name is no longer the one confirmed, also for a session that had no name. A rename now waits for a start, a resume, a restore or a delete of the same session, and saves the new name before it answers. A session whose holder an older helper started gets the same guard. The launcher's delete keeps a session that was renamed while its question waited. `-y` deletes without the question. Without a terminal, `rm` without `-y` still deletes, with a warning, until v0.4.0 and 11 November 2027. After that, it fails with exit code 4. `delete` stays another name for `rm`. `kill` deletes without asking, as before. `flip` runs `attach`, or alone opens the launcher's list of every session. Both warn on stderr until v0.4.0 and 11 November 2027, and help no longer lists them. On an agent that has ended, `attach` asks `Start claude again in auth-fix on my-vps? [Y/n]`. Yes does what `resume` does, then attaches. `--restart` answers yes. At a terminal with `--no-input` and without `--restart`, `attach` fails with exit code 4. `show <address>` prints one line for each detail of a session, and the command that attaches to it. With `--json`, it prints the session object of `new --detach --json`. The `address` of a session in JSON is always `host/ID`, never a name. It does not wake a stopped host, and says that the host is stopped only when its provider script says so. `attach`, `show` and `rm` with no session open the picker at a terminal. Every command that takes a session takes an address. An address is `<host>/<session>`, the session alone, or `-` for the last session attached to. `-` and a picked session are found by their ID alone. The client finds the host of a session alone from the sessions that it saw last. It asks a host again when its list is more than 60 seconds old. It asks every host before it says that a name is not found. It never wakes a host to ask. The host's own list then decides which session the name means, so a rename never sends a command to the wrong session. A name on two hosts fails with exit code 2, and lists both full addresses. `rm` also refuses a session alone when a host did not answer. `ls` takes the host as its argument, as in `ls my-vps`, and `--host` still works. `resume` on an agent that still runs attaches, with a note. With `--detach`, it says that the agent runs. The session cache now records when each host's list arrived. `new`, `rename` and `rm` update it. The questions of `rm` and `attach`, and the text of `show`, clean what a host sends of control characters. For scripts, these exit codes change. `resume --detach` on an agent that still runs exited with 1, and now exits with 0. A command that needs a terminal exited with 1 without one, and now exits with 2. These are `attach`, the attach of `new` and `resume`, the launcher, `doctor keys` and `doctor terminal`. `attach` checks for the terminal before it looks for the session, so in a script it opens no connection, and wakes no host. `new` and `resume` without `--detach` check first too, so they start or resume nothing. `attach -` with no last session now says `Try: simstim ls`. A word without a `/`, such as `kill box`, failed as not host/session, and now names a session.
+- In an address, a word of the form of a session's ID is now always an ID, never a name ([sessions](docs/how-to/sessions.md)). That form is 8 lower-case letters and digits from 2 to 7, with at least one digit, such as `abcd2345`. Every new ID has a digit. Such a word reaches only the session with that ID, or fails with exit code 3. `new --name`, `rename` and the launcher refuse a name of that form with exit code 2. Add a dash, as in `abcd-2345`. A name of 8 letters, such as `frontend`, works as before. A name that `new` takes from the folder gets `-s` at its end when it looks like an ID or is a session's ID. A session's name can have at most 64 characters. A session that already has a name like an ID keeps it, and its ID reaches it. The helper also refuses a name that is the ID of a session on the host. Every command that the client prints for you names a session by its host and its ID. This covers the "Try:" lines, the attach line of `show`, the notes of `debug start` and `resume`, and the command that `y` copies in the launcher. The session's name stays in the text around it. A word that names no session gets suggestions by host and ID, each with its name. A suggestion for a misspelt command or flag, or an unknown host, repeats a session only by host and ID. Otherwise its "Try:" line lists the host's sessions. The same holds for the "Try:" line of `--json` without `--detach`. In `debug bundle <host>/<word>`, a word of the form of an ID is an ID too.
+- A daily job checks the Ghostty commit and the guest pins against each project's own advisories and OSV, and the Go toolchain with govulncheck. It opens an issue when an advisory covers a pin, or when it cannot check a pin against an advisory.
+- Flags mean one thing everywhere. Each old form still works for two releases or 12 months, whichever is later, and warns. `-C` is now the short form of `new --dir`. `-d` still sets the folder until its end, and warns. Then it becomes the short form of `--detach` ([`new`](docs/reference/cli/new.md#old-names)). `new --setup` and `--no-setup` are now `--setup-script` and `--no-setup-script`, so that "setup" names only the guided setup. `host alerts set --token-cmd` is now `--token-command`, as on `host create`. `agents install --force` is now `--reinstall`, because `--force` only goes on where work is lost. `host alerts log -n` is now `--lines`, so `-n` always means `--name`, and `setup` takes `-n` too. `-v` is now `--version`. `host create --memory` and `--disk` take a size with a unit, such as `8G` or `1.5G`. A bare number still means GiB, and warns. Every list of names takes the flag again or commas: `--secret A,B` is the same as `--secret A --secret B`. So do `setup --agents`, `host add --label`, `host alerts set --events`, `debug start --only` and `--debug`. For scripts, these change. A repeated `--agents`, `--label`, `--only` or `--debug` kept only its last value, and now keeps them all. `new` takes one host before `--`. A second word, such as a command without its `--`, used to be ignored, and is now an error with exit code 2. `new -- htop` without a host took `htop` as the host, and now fails with exit code 2. Each old form prints one warning on stderr. The warning names the new form, and the release and the day after which the old form may stop working. The reference lists the old forms of each command under "Old names". Early warnings honour `--json` and `--no-color`, even when the command cannot run. An explicit empty `host alerts set --events` is now a usage error.
+- Every error now ends with a "Try:" line, a mistyped command gets a suggestion, and exit codes follow a documented table ([exit codes](docs/reference/exit-codes.md)). The code comes from the kind of the error, never from its message: 1 failed, 2 wrong usage, 3 not found, 4 needs an answer, 5 refused and 130 cancelled. A mistyped command, such as `atach`, says `Did you mean "attach"?`, and its "Try:" line is your command line with the word fixed, when that line would run. It never runs the guess. A mistyped flag, host or agent gets the same help, and `list`, `remove` and `install` suggest `ls`, `rm` and `agents install`. `host` and the other nouns print their help when you give them no word, and an unknown word, as in `host ad`, now fails instead of printing the help. `completion` and its shells get the same errors, and so does `help`, as in `help atach`. A missing argument prints the command's usage and an example. An error that is not a user error suggests a debug bundle. A `hosts.toml` that does not decode now says the line and the column. The client removes control characters from what a host sends in an error, and from your words that a "Try:" line repeats. A hint that repeats a host, an SSH target or a script's path quotes it for the shell. For scripts, these exit codes change. Code 2 now means wrong usage: a host that did not answer exited with 2 before, and now exits with 1. Wrong usage, such as an unknown command or flag, a missing or extra argument, two flags that conflict, or a name that matches two sessions, exited with 1 and now exits with 2. The answer no, Ctrl+C outside an attach, and SIGTERM exited with 1, or ended the client by the signal, and now exit with 130. A signal at a question cancels the command, and keeps no answer. An upload that a cancel stops leaves no part of it on the host. After a cancel, the client sends a host no more requests and saves no host. Cancellation before the initial save after `host create` commits causes bounded cleanup of its unsaved machine. An already-saved host stays saved if later preparation stops, with no further host write. A cancel after deleting a machine keeps its saved host and reports the deletion for a retry. A cancel during the fixes of `doctor --fix` names what was done before it, also how far a fix that it stopped got, such as "removed 1 of 2 generated SSH configs", and with `--json` its data holds every fix, with each change it made. With `--fix -y --json`, each local fix lists its changes as `changed`. When the cache folder's path is too long for the sockets of shared SSH connections, they now go in the runtime folder (`$XDG_RUNTIME_DIR`, or a folder of the user's in the temporary folder without it), when that folder is the user's, is not a link and nobody else may write it, before a private folder in `/tmp`. `setup`, and `new --detach` for a folder that does not exist, without a terminal exited with 1 and now exit with 4. Without `--detach`, `new` fails with exit code 2 first. An unknown agent, provider, template or secret exited with 1 and now exits with 3. A closed connection exited with 2 and now exits with 1. "No hosts yet" exited with 3 and now exits with 1. A question of `host add` or `host destroy` with no terminal to answer it reads no answer as no, and exits with 130. The change that moves the prompts, task C4 of [the CLI plan](docs/contributing/cli-plan.md), makes it exit with 4.
+- `host set` changes any host setting, `host show` describes a host, and `host rm` asks what else to remove. `host idle` and `host destroy` still work for now, and warn. `host set <host> idle=2h` does what `host idle <host> 2h` did. It checks every pair before it changes anything, and suggests the key you meant. `host show` prints what the launcher's host details show, from the same code, and does not start a stopped host. So the host details now also show the host's labels, machine, idle time, provider script and the names of its secrets. A host that does not answer is not an error there: it prints why, and exits with 0. At a terminal, `host rm` on a host that `host create` made says what the machine holds. It asks you to type the host's name to delete the machine too, and Enter keeps it. `--destroy` deletes it, with the typed name or `--confirm <host>` in a script. It now refuses when the provider cannot tell the machine's state, or when the machine runs and it cannot list the sessions. After the typed name, it checks again just before the delete. Each save or forget of a host compares: it goes ahead only while the saved entry is still the one that the command read. So a host that another command removed or made again meanwhile is never saved back or forgotten. This holds for `setup --host` and the launcher too. A command that works on a machine holds a lock of that host until it ends: `host create`, `host set` and `host rm`, across its question too. Another command of that host then fails at once, and says that the host is busy. Two commands that change two hosts at once lose no change in `hosts.toml`. A wait for another command that saves `hosts.toml` says so after a second, ends after 10 seconds, and stops at Ctrl+C. The file name of a host's generated SSH config now holds a hash of the host's exact name, so `Box` and `box` never share one. `doctor --fix` removes only unreferenced configs that the client generated. Saved host references and SSH configs that you made stay. A cancelled command never saves `hosts.toml`. When the save after `host create` fails, it deletes the machine that it made. What the helper says when `host set` sets the idle stop is cleaned before it reaches the terminal. `host show` and `host rm` never install or prune a helper. A failed delete keeps the host, so you can run the command again. `host destroy <host> -y` now runs `host rm <host> --destroy --confirm <host>`. The old names work until v0.4.0 and 11 November 2027, whichever comes later ([add a host](docs/how-to/add-a-host.md), [create a host](docs/how-to/create-a-host.md#destroy-a-host)).
+- Data goes to stdout, and everything else to stderr. For scripts that read these lines from stdout, they moved to stderr: the `Started <host>/<id>` line of `new --detach` and the `Resumed` line of `resume --detach` (use `--json` for the ID), the `Forwarding` lines of `forward`, the file paths that `debug save`, `debug profile` and `debug bundle` print, `pull`'s summary, the confirmations of `kill`, `rename`, `send`, `host rm`, `host destroy`, `host idle`, `host start`, `host stop`, `host alerts set`, `host alerts test` and `host alerts off`, the lines that say there is no data (`No hosts yet.`, `Nothing to restore`, `listens on no TCP ports`, `has sent no alerts yet`), the `Try:` lines of `doctor` and `host doctor`, and all of `setup`, `host add`, `host create` and `agents install`. A question shows its default in capitals, takes Enter for the default, asks again after an answer that is not yes or no, and cancels after the third. Esc, Ctrl+C, the end of input, or a signal at a question restores the terminal, prints "Cancelled. Nothing changed.", or what changed before it, and exits with 130. Before, the end of input at a question of `doctor --fix` was a no. A secret's command now gets the terminal when stdin and stderr are terminals, also with stdout in a file, and not with input off. `agents install` with input off starts the installer without attaching to it. `host ls --json` prints its keys in `snake_case` too, such as `ssh_config`. Its old keys, such as `SSHConfig`, print until v0.4.0 and 11 November 2027, with a warning on stderr.
+- The help groups commands, every command has an example, and `help concepts` explains the words that the tool uses ([concepts](docs/reference/concepts.md)). The root help lists the commands under Sessions, Hosts, Agents, and Setup and help. It says that the command alone opens the launcher, and shows three examples. `help exit-codes` prints the table of exit codes. The reference lists the commands in the same groups, and each command's page shows its aliases. Every help fits 80 columns. The help no longer uses words of the build that you do not meet. `debug save` now says that it saved the session's recent debug record. `host add` says that it keeps sessions running after you log out. The host commands name their argument `<host>`, as in `host rm <host>`, and `rename` calls the new name `<name>`. A mistyped help topic, as in `help exit-code`, gets a suggestion. A word after a topic, as in `concepts extra`, fails as it does after any other command.
 - The README starts with installation and a complete first-session path, then groups features, trust and replay limits, agent support, daily tasks and contribution links. It uses the Mermaid architecture diagram, still screenshots and separate recording links, with secondary screens collapsed.
+- The hints of `host doctor`, `agents install`, `setup` and the launcher now name `agents login`, in place of `new <host> -- <login command>`. `agents install` and `agents login` take the host as their second word, as in `agents install claude my-server`, and `--host` still works. With more than one host and none named, they fail with exit code 2, and name your hosts. An agent without an install command, such as `shell`, now fails with exit code 2, not 3. Human output cleans display copies of host text. JSON escapes unsafe runes and keeps exact decoded data. A host error's message and hint retain their defined clean display conversion. Raw session IDs are validated before action.
+
+- `attach --id` and `pull --id` resolve only an exact session ID. Picker and last-session attaches use exact IDs too. A vanished session never redirects to another session with the same name. Login and onboarding hints pass `--id --`. Onboarding rejects missing or invalid IDs before it changes state. `SIMSTIM_NO_INSTALL=1` prevents a connection from installing or pruning a missing helper. The e2e harness enforces this guard on every owner host after environment overrides.
+
+### Deprecated
+
+- `agents install --force` is now `--reinstall`. `--force` still works until v0.4.0 and 11 November 2027, whichever comes later, and warns.
 
 ### Fixed
 
+- The setup example uses the documented host name, and the guide index no longer repeats a page.
+- The guided setup test now holds its fixture installer until the terminal reader starts. Fast installers cannot bypass the blocked reader case or leave the test waiting for a read that never began.
+- Developer setup uses the exact Go toolchain pinned in the repository, including inside the devcontainer. Failed setup tests print their full diagnostic output.
+- Clean-checkout setup, the devcontainer and host-helper builds now use the pinned Go toolchain from `go.mod` directly instead of a separate verifier compiler setup. CI lint installs Zig 0.17.0 before building the namespace launcher.
+- Helper archives accept only the supported helper file names. Cache writes stay inside an opened directory even when an existing entry is a link.
+- Shadow terminal frames reject lengths that exceed their wire field or overflow the host's header arithmetic. Rejected profiles keep the previous profile and report an error.
+- Remote command input errors keep their code, kind, structured data and original cause when diagnostic output is added. JSON errors distinguish an input that could not be read from one that could not be sent.
+- The E2B tests use one entry point for their private home and command wrappers, preserving child process cleanup.
+- The terminal cleanup test counts open file names without looking up descriptors that can close during the count. It still checks that held reads keep their terminal open and that cleanup leaves no open file behind.
+- Tests of concurrent uploads let a second upload reach the held chunk. The test hook no longer makes the uploads take turns itself.
+- Reader and launcher tests check handoff before held cleanup ends. Missing input demand fails at its context deadline. They also cover failed raw mode and the prompt policy after a guided install. A whitespace editor command that crashes fails its test without stopping the other checks.
+- Provider-created hosts complete registration before sandbox preparation. A failed save still discards its own staged host key.
+- Select one VM driver's exact boot metadata from the full verified runtime collection, so a release carrying both Cloud Hypervisor and Firecracker can prepare a VM without replacing its original signed manifest or delivery record.
+- Keep network and SSH rejection fixtures public-safe while preserving their exact address and protocol cases.
+- The paste guard checks complete Unicode output in bulk and avoids an extra allocation on ordinary frames. The mode tracker finds text spans in bulk and keeps split sequences. Clipboard controls and split characters are still checked. Attached output stays byte for byte.
+- Judge calls retain their exact source snapshot and retire it before mint or member publication, including additive and same-kind changes.
+- New sandbox preparation asks for runtime download consent only when verified bytes are missing, while retaining the original settings, signed request and physical construction checks.
+- Runtime abort and close wait for the original fetch cleanup before releasing slots, parts and selected receipts.
+- The complete Unicode mapping source uses a deterministic compressed representation with exact encoded and decoded integrity checks. The original corpus and rule semantics stay unchanged.
+- JSON escaping reserves the existing input length without unchecked capacity addition, preserving exact output and the unchanged-input fast path.
+- Frame writers check the payload cap before adding encoded lengths. Empty and maximum-sized frames keep the same wire bytes.
+- Projected JSON string scans reuse existing windows for ordinary ASCII while preserving every cancellation check and cache update.
+- Image export checks the canonical path for known values before producing labels, diagnostics or file output.
+- Pending image cleanup retains exact native leases through review and retires only matching expired objects. Changed and unknown parts remain untouched.
+- Host facts recheck the saved entry as well as its generation and original source around the reply.
+- Explicit unknown-destination actions retain their canonical order before the legacy open fallback.
+- Unknown-allow policy permits uncovered public literal addresses while retaining the static address and physical host checks. HTTP audit records identify the fallback.
+- CLI tests cover `new --in` flag refusal, same-host routing and literal command hints.
+- Approval record updates preserve opaque metadata and stably order unsorted rows through the same parser and index. Output uses validated spans from that same source and inspection.
+- JSON image pulls emit structured progress on stderr.
+- Test fixtures use the actual cleanup and isolated certificate boundary helpers, retain one copy of the guest DNS cases and preserve the intended memory policy inputs.
+- The source-selection test fixture includes the required `llms.txt` checker stub.
+- The client starts correctly when registering the old agent reinstall flag. Package-manager config errors keep their specific code and source line.
+- Event watches use the native audit for real fast-failure replay and preserve live stream boundaries. Failed persistence, incomplete records and unexpected connection ends report a gap instead of silently succeeding. Native bridge IO is cancelled and joined through its actual owners.
+- Decoy opt-outs stay disabled across valid policy layers. Lock conflicts refuse startup before generation or file writes.
+- Validate complete public secret receipt metadata through the same source inspection, including unordered maps, prior stand-ins and unsupported future data.
+- Register the internal egress child and keep compressed-trailer tests on the complete header decoder.
+- Model API admission checks the complete upload before connecting and reserves network and tool grants together. It reads every content encoding field, keeps live one-use grants independent, and refuses malformed tools, URLs and upgrades.
+- Native VM binding refuses a closed guest stream even when its process still runs and unread data remains queued.
+- VM cleanup keeps its original process owner and resource leases after an uncertain wait. It refuses deletion until physical exit is proved and retains earlier cleanup errors.
+- Retain jail process ownership after an uncertain wait and require kernel exit readiness before releasing native resources.
+- Route sandbox policy requests through the guarded bridge handler, and negotiate method constraints with the running supervisor.
+- The docs site pins Astro 7.4.7, which includes the fixes for [dynamic tag injection](https://github.com/withastro/astro/security/advisories/GHSA-mh32-jxcr-mh9f) and [image path checks](https://github.com/withastro/astro/security/advisories/GHSA-r3h5-4585-7x3w).
+- An E2B command's input error keeps its diagnostic text and hint when cancellation arrives as the command finishes. Before, that race could replace the input error with an invalid cancellation message.
+- The fake envd in the E2B tests now keeps buffered output when a command ends or is killed. Before, a signal could discard stdout and diagnostic stderr.
+- The E2B provider's tests no longer hang for minutes when the machine is busy. Their fake of envd now ends every command, and each child it left, when a test ends. If something still runs after 10 s, the test fails and names it.
+- The helper's install in an E2B sandbox no longer stops part way on a slow link or a busy machine. The client queued the whole helper at once, and gave up when it could not send all of it in 10 s. Now it queues at most 1 MiB at a time. During `Close`, it gives up when no `SendInput` or `CloseStdin` call completes for 10 s. A `Write` blocked by the full queue waits for its current `SendInput` call or the install to stop. Each unary input call has a 30 s request limit. With `stdin = "stream"`, `StreamInput` uses the client's own transport unchanged. Progress during the stream is the transport's reads of the request body pipe, and the client gives up when the transport reads nothing from it for 10 s. After the transport has read the body's end, `Close` waits the 10 s stall limit plus about 11 s (about 21 s in all) for `envd` to answer, assuming the far end and the path hold at most 1 MiB plus 64 KiB at 100 KiB/s. A larger buffer makes `Close` give up early, safely, with no end of input and no success. The separate final `CloseStdin` request has its own 30 s limit. It sends the end of the input only after the sandbox has taken all of it. Before, a link that broke could give a command a part of its input as the whole.
+- The client now waits for the kill of a stopped command in an E2B sandbox. Before, it sent the kill in the background, and a client that exited at once could leave the command running. The client also kills a command whose stream broke, or whose start stopped or broke before its process ID arrived. It does the same when it cannot read or send the command's input, or the end of that input. When an install's input could not be sent, the client said nothing, and the install failed only after its 5-minute limit. It now fails at once, says why, and says what to try. A stopped command's error also says why it stopped. That error, and the error of a failed input, now end with the last lines that the command wrote to stderr. The client keeps at most the last 8 KiB for those diagnostics.
+- Process walls retain init ownership after an uncertain wait, preserve session data during runtime cleanup, and reject trailing specification data.
+- Keep physical link closure available after logical stream abort, and reject later stream admission or queued frame dispatch.
+- Interrupted host changes keep one cancellation policy: unsaved machines are cleaned up and completed deletions can be retried. Cleanup reports a provider that cannot open the machine, and a late cancel keeps the actual save failure. Screen fixtures close and join their query readers.
+- Session JSON keeps integer values exact, including large memory sizes.
+- The launcher keeps cancellation and its own tier questions after terminal handoff. Host save tests preserve the caller's context, and final cleanup still joins owned work after cancellation.
+- A temporary SSH config write now stops if its host label cannot be read. It leaves any existing file alone.
+- Pending holders confirm a stop before the agent starts. Delayed work keeps the session until its stop is confirmed.
+- Tests keep shared SSH control sockets in a directory owned by their run. Holder lifetime checks inspect only children they launched.
+- Provider SSH routes keep the original saved machine identity for pin checks. Failed host removal retires the pin before config cleanup, and stale saves cannot change a replacement's tier.
+- Host details trim display whitespace. Host JSON omits unset fields while keeping raw data and full integer precision. Legacy host help follows the command grammar.
+- Doctor stops repairs when cancelled and reports what it already changed. It keeps SSH files whose ownership it cannot confirm.
+- Terminal reader tests keep their files and worker cleanup inside the test's clock bubble, including when an assertion fails.
+- The benchmark check compares nested cases separately and reruns them by their exact names, so a confirmation measures every slow case. It refuses samples with conflicting packages or configurations. It stops on any failed build or missing binary, so no package can be left out of the comparison. It prepares and verifies the pinned statistics tool before sampling. Tool preparation stays outside Go modules, so it never adds tool checksums to the repository. It keeps the binaries, raw samples and logs in a new evidence folder on success and failure.
+- The launcher stops and joins tier question readers before a terminal handoff. It starts a fresh reader on return. A cancelled question keeps the host at `shared` until it is answered.
+- Cancelling an attach keeps the clipboard history needed by the paste guard. Clipboard memory checks honour cancellation and refuse an unchecked drop. Terminal output stays byte for byte.
+- `doctor --fix` removes a dead shared SSH socket only when the current socket root's ownership index names it. Unindexed, replaced or live sockets stay.
+- The setup login check removes only the temporary SSH configs it created. It keeps files that changed or that a saved host references.
+- Forgetting a host keeps SSH configs that another saved host still uses, including aliases. It preserves files with a changed owner or inode. Cancellation before cleanup keeps the pinned key and generated configs.
+- Launcher entry points keep exit code 1 when no terminal is available. Their error code is `launcher_no_terminal`, separate from commands that need a terminal and exit with code 2. Input off takes precedence when a stream is also redirected. A new session keeps the holder's security refusal when its secret handoff fails, after stopping the owned holder.
+- Saving a setup answer no longer replaces a temporary file owned by another program. An unreadable answers file stays in place and stops the save. Cancelling a wait or a save keeps no new answer, while an answer already saved stays kept.
+- Tests keep the XDG config and data search paths in private directories. Child test processes also discard inherited search paths while keeping their test home.
+- Pull keeps the session's host and repository as its source. Local Git URL rewrites cannot redirect it or run another transport.
+- Pinned SSH commands now keep the real startup exit status. A missing helper still installs when SSH closes output before it exits.
+- `forward` and `pull` report changed host keys as refusals. Output from a jump host is cleaned, and a private log supplies SSH's verdict.
+- Concurrent host saves no longer overwrite another host. Generated SSH configs use each host's file key and are replaced atomically.
+- A cancelled host-key migration or wizard retry leaves no new pin. A stopped wizard cannot use or delete another operation's staged key.
+- Shared SSH sockets reserve space for OpenSSH's temporary bind suffix. An index retires known masters without readable pins or user SSH config.
+- The shadow terminal now uses libghostty-vt 1.0.0. It fixes one advisory in which terminal output could corrupt its memory, and one in which a very wide terminal could crash it when narrowed. The host caps a terminal size from a client at 4096 columns and 2048 rows. Building the shadow terminal now needs Zig 0.17.0.
+- Terminal checks refuse a busy reader before changing modes. A reader failure restores the terminal and sends no queries. Attach and demo restore the original terminal mode after delayed reader cleanup. The session picker gives a terminal recovery hint. The launcher keeps completed host removals when it returns from another command. Queued input cannot replace a pending terminal handoff. Returning from another command keeps completed host creations and lets interrupted setup checks run again. Key creation and editor processes stop when the command is cancelled, and failed key creation gives a recovery hint.
+- The launcher and demo stop their input readers before another command reads the terminal. Terminal modes are saved before opening console readers and restored on exit. If a reader cannot restart after an external command, the launcher exits and restores the terminal. Diagnostic key reads also stop waiting when a console reports a successful cancel but keeps the read blocked. Background launcher requests stop at an attach handoff, and cancelled renames no longer keep the keys busy afterwards. An empty editor command reports an error instead of a panic. Replies from a closed setup step cannot advance a later setup. A machine whose initial host save already committed stays saved if later preparation stops, with no further host write.
+- Session notifications no longer split long terminal sequences or sequences that another escape ended. Rename navigation changes no unedited name. Legacy rename recovery keeps the latest exit state and resume choices. Holder checks no longer consume another wait or mistake a reused process ID for the session.
+- When a new session's secrets cannot reach the session, the start now stops the session's holder before it deletes the session. Before, that holder could start its agent later, and bring the deleted session's folder back. When the start cannot confirm that the holder stopped, it keeps the session and its new folder, and its error says why. A holder that answers after the start's 5 seconds is stopped in the same way. A resume whose secrets cannot reach the session now stops the new holder too, so the agent never starts without its secrets. A holder on a host with cgroup v1 now records its systemd unit too. A save of a session's manifest that fails no longer leaves a temporary file in the session's folder. A slow restored holder keeps its lock and process record before its socket opens, so a rename, resume or delete stays safe. Attached notifications now wait for a clean byte boundary in the session's output.
+- Cancelling a host lookup stops removal before any question or deletion, including `--force`, and leaves `host show` output empty. A cancelled forget reports a deletion that already finished. The launcher clears stale machine details, reloads saves made elsewhere and closes unused add connections. Config cleanup preserves files used by other saved hosts, including linked paths.
 - `host create docker` works again with newer Docker, which writes "no such object" in lower case. The Docker provider now reads the missing-container error in either case. Before, it took the new wording as a failure and stopped.
-- The toolchain is now Go 1.26.10. It fixes a `crypto/x509` issue that govulncheck found (GO-2026-6809), in which certificate checks trusted intermediate certificates that are known to be compromised.
+- The toolchain is now Go 1.26.11. It fixes two issues that govulncheck found. In GO-2026-6809, `crypto/x509` certificate checks trusted intermediate certificates that are known to be compromised. In GO-2026-6859, an HTTP/1 server that limits request bodies could crash when its handler read the body while it wrote the response header.
 - CI's required `test` job now runs the offline public-readiness checker regression tests, rather than leaving them only in `just test`.
+- The unit tests no longer write to your real home folder, and no longer use the shared runtime folder in `/tmp`, nor the shared folder for SSH connections there. A test of signals no longer leaves a test host in the temporary folder at each run. Before, a test that turned on debug mode wrote CPU and heap profiles into your real debug folder. The tests of each package that uses the home or those folders now run in a temporary home, which goes after them.
 - The security, architecture and restore guides now describe the shipped trust boundary, multi-client input, bounded replay and reboot behaviour. They no longer promise an untrusted-host filter, cached client replies, live holder upgrades or a screen saved across reboot. An accessible Mermaid architecture diagram replaces the introductory text drawing. The site now treats Markdown images as public assets rather than source imports, so the diagram builds under both root and versioned paths.
 - The manual cosign verification guide now requires this repository's release workflow and the exact selected tag, rather than accepting any GitHub workflow identity. It downloads matching assets, checks the selected archive's checksum by its complete name, and explains the GitHub CLI requirement for attestation verification.
 - `public-check` rejects empty, incomplete, duplicate or malformed hosted Scorecard reports, and keeps a failed Scorecard command's diagnostics and failure status. Its output separates local checkout checks from hosted results. Offline regression tests run in `just test`; Python 3 is needed for them. The public-readiness guide distinguishes completed work from the owner's remaining security and publishing tasks.
 - Contributor and source-install instructions now state the bootstrap prerequisites and how to put the pinned tools on PATH, rather than assuming a setup script can change its caller's shell. The contributor guide explains the pull-request and docs checks. The Code of Conduct links directly to its existing private reporting route instead of offering a GitHub private message that does not exist.
+
+### Security
+
+- Each host you add over SSH now has a pinned host key that your SSH config cannot turn off. A changed key stops the connection, and `host rekey` replaces the pin after you confirm. `host add` pins the key that your own SSH settings trust, as `ssh` itself decides, or checks it against `--host-key SHA256:…`, or pins it on first use after ssh's question or with `--yes`, and says where the pin came from. The connections that ask and read a key offer no key and no password. With input off, and neither `--yes` nor `--host-key`, `host add` fails with exit code 4 for a key that your settings do not trust. A `host add` that fails leaves no pin, and `host add` never replaces a saved host's pin. A changed key exits with code 5, and its message names the pinned key and the one that the host shows, whatever your config's `LogLevel` or `FingerprintHash`. `host rekey` asks for the host's typed name, or takes `--confirm <host>`, and fails with exit code 4 without either when input is off. `host create lima` pins the new VM's key. A host that you added before gets its pin at its next connection, once: without a terminal, a key that your settings do not trust fails that connection with exit code 4, unless your config takes new keys. The shared connections' sockets now have names that hold the host and its pin, so a connection that checked another key is never used again. The launcher's add-host wizard pins the key in the same way, and asks before it pins a key that your settings do not name. Neither a host's own text nor a jump host can make the client trust a key that `ssh` refuses, and the client's errors never quote what a host wrote. Every connection checks a pin, so a host that another client removed is never reached. Each host's pin is a file of its own, also for names that differ only in case, and it names its host on its first line. A host's name can no longer end with a dot. The launcher's remove and `host rm` both remove the pin, and `host doctor` shows it ([add a host](docs/how-to/add-a-host.md#the-host-key), [decision 0035](docs/contributing/decisions/0035-pinned-host-keys.md)).
+- Stopping a session never signals a process ID read from its manifest. The helper asks its holder to stop, or stops that session's own service. If it cannot confirm the stop, it keeps the session and reports `busy`.
+- The client no longer forwards your SSH agent, X11 or a local command to any host, even when your `~/.ssh/config` asks for it. `forward` still forwards the ports you name. The port forwards that your SSH config names no longer come up with the client's connections, except with `forward`. The client also no longer delegates your Kerberos credentials, and a `ProxyJump` hop gets the same settings. `forward` now has a connection of its own, and refuses to start when your config has a `RemoteForward`, a `Tunnel` or `ForkAfterAuthentication yes` for the host ([decision 0034](docs/contributing/decisions/0034-ssh-options-on-the-command-line.md)).
+- A program in one session can no longer type into, attach to or stop another session through its socket, or through the host helper. A program that it starts outside its session still can, for example with `systemd-run --user --scope`, or by moving itself through a `cgroup.procs` file that you own. Sandboxes will close that gap. Agents' hooks use a socket that accepts only hook events. The check needs a systemd user manager on the host. Without one, as on a Docker host, only the hook socket's limits apply. A session that an older helper started keeps its older holder, without the check, until you resume it. So does a session that started while the host had no systemd user manager. `host doctor` reports the session sockets as weak in both cases ([security model](docs/explanation/security.md)).
+- The host keeps an agent's session ID from a hook only when it has the agent's form, such as a UUID for Claude Code. A hook can no longer add flags to the agent's resume command. A restore or a resume checks a saved ID again, and drops one that an older helper kept without the check. The session's `holder.log` says why. A restore or a resume also refuses a command with an argument that turns the agent's own approvals off, such as `--dangerously-skip-permissions`, `--permission-mode auto` or Codex's `-a never`, unless the session's own command holds the same argument with the same values. So a typed `--allowedTools Read` does not allow `--allowedTools Bash`. The check also reads the keys and strings of a JSON `--settings` value and of a Codex `-c` value, such as `web_search="live"`, so an escape cannot hide them. These lists are a deny list, not a wall: they cannot name every spelling in every version of an agent. `host restore` now prints a failure's hint. Codex's resume command puts `--` before the session ID, and a Codex session that an older helper saved gets that command too ([session IDs and approvals](docs/reference/agents.md#session-ids-and-approvals)).
+- The launcher, `ls` and notices remove control and hidden characters from text that a host sends. The characters removed are C0 and C1 controls, DEL, bidirectional controls, and zero-width and tag characters. Three places clean whatever passes through them: the command line's error printer, the launcher's notices and error lines, and the copies of a host's stderr that the SSH, Docker and E2B transports keep or show. The other commands, the peek and the questions about a host's paths clean what they print too. A session's reason, name or folder can no longer write to your clipboard or change the screen through the launcher or a notification. The peek also drops a session's links. The client still sends the host's own values back. The launcher does not offer a folder whose name holds such a character, and a question quotes a path that holds one. The client leaves out or refuses a session ID that does not have the form that every host helper makes: in a list, in the launcher's memory, and in the answer to `new` or `resume`. A command that the client prints or copies, such as the launcher's copied attach command, names a session by its ID. So a session's name cannot run as shell code when you paste the command. `--json` output escapes these characters and keeps the values. The alerts guide now says never to put `SIMSTIM_DETAIL` into code. The agent's output while you are attached stays byte for byte.
+- `host create lima` makes VMs that cannot reach services on your Mac's loopback address. It needs Lima 2.3.0 or later, and refuses an older Lima on every system. On a Mac, it makes the VM with `vz` and sets Lima's `networkOpts.hostLoopback` to false. If Lima's `override.yaml` keeps the path open, or Lima's settings give the VM a `user-v2` network, which Lima cannot run with the path closed, `host create` deletes the new VM before it starts, and says which settings to remove. It also turns on nested virtualisation where macOS allows it, and turns it off again, with a line that says so, where macOS refuses it. If the VM still does not start, `host create` deletes it. On Linux, Lima's QEMU cannot close the path, and `host create` warns. `host doctor` now warns for a Lima VM that can reach the loopback services, such as a VM made before this change, and names the commands that close the path. It names Lima's `override.yaml` when that file keeps the path open, and it warns when a running VM's settings changed after the VM started, until the VM restarts ([create a host](docs/how-to/create-a-host.md#your-macs-loopback-services)).
+- A paste no longer uploads a file whose path a session put on your clipboard in the last day, nor files under `~/.ssh`, `~/.aws` and the other private folders that [image paste](docs/how-to/image-paste.md#files-that-stay-on-your-laptop) lists, nor files such as `.env` and `.env.local`. A link to such a file counts too. The client keeps only hashes of the clipboard writes, in one file that every client process shares. A paste of the text on your clipboard uploads nothing, even when it names a file: drag the file to upload it. A notice names each uploaded file.
+- A repository's setup script runs without a question only while its content is the one you trusted. The host reads `.simstim/setup`, `.simstim/resume` and `.simstim/stop` at each start, and the client keeps their SHA-256 hash with your yes, in version 2 of `setup-trust.json`. The hash covers these files only, not the files that a script runs or reads. After a change to any of them, `new` and the launcher ask again, and say that the script changed. Without a terminal, `new` skips the changed script with a note. A yes from the old file has no hash, so it asks once more, and says that you trusted the script before this version checked its content. A no stays. Before a restore or a resume, the host checks the scripts again: a changed `resume` script is skipped, with a line in the session's log. A session that started before this version skips the repository's `resume` script at each restore or resume. Start a new session to run it again. A script that leads outside its repository through a symlink stops the start with `setup_outside`, and an executable script or a repository folder that cannot be read stops it with `setup_unreadable`. `--no-setup` and a no read no script, and the launcher offers to start without the scripts. A file of answers that does not parse moves aside to a free name, and never replaces an older `setup-trust.json.bad`. Every read and save of the file holds a lock, so two clients cannot lose each other's answers. A lock that stays busy trusts no script, and keeps no answer ([setup hooks](docs/how-to/setup-hooks.md#a-changed-script-asks-again)).
+- A release now builds only from a tag that a maintainer signed with a key in the repository's list. Before any build step, the release job runs `main`'s copy of the gate, never the tag's copy. The gate checks the tag's SSH signature against `.github/tag-signers` as `main` has it, which lists only hardware keys. It also checks that the tagged commit is on `main` and is the commit that the job checked out. It refuses lightweight tags, unsigned tags, and the signed tag of an older release under a new name. GoReleaser now builds the pushed tag, not another tag on the same commit. The release job names a `release` environment, which is to hold the release secrets, so that a workflow from before the gate cannot read them. `install.sh` and the client accept a signature by any key in the release key list, so the release key can rotate in two steps without a release that they cannot check. `scripts/test-verify-tag.sh` tests the gate in a temporary repository, in `just test` and in CI (decision 0041, [releasing](docs/contributing/releasing.md#the-signed-tag-gate)).
+- Files listed in `.worktreeinclude` are copied only from inside the repository. A symlink that points out of it is skipped. Git on the host no longer runs a repository's hooks or fsmonitor. This covers the hook scripts in `.git/hooks` and, from git 2.54, the hooks that a repository's config defines (`hook.<name>.command`).
+  - The copy also skips any other symbolic link and any special file, never replaces a file that the worktree has, and writes one line to the session's log for each file it skips, with the reason ([what it copies](docs/how-to/worktrees.md#what-worktreeinclude-copies)).
+  - A pattern that holds `.` or `..` as a part, such as `./.env` or `config/../.env`, is now skipped. Write `.env`. A leading `/` still anchors a pattern to the repository's top folder, as in `.gitignore`.
+  - A `.worktreeinclude` over 64 KiB, or with more than 1000 patterns, is skipped whole.
+  - Each git step of the host helper runs in a process of its own. With a systemd user manager, it runs in a scope under the sessions' slice, so a filter that a session sets in the repository runs there too. When the helper cannot ask the user manager, the step fails with `git_scope` and runs no git. `host doctor` has a new line, "git scope", which checks that systemd can make such a scope.
+  - A git step that runs past its deadline, 10 minutes to make a worktree and 1 minute for the others, is stopped with all that it started, and fails with `git_timeout`. So a filter that hangs no longer hangs `new`, `kill` or `pull`. The process that runs git keeps the deadline itself, so it holds also when the client's connection drops, and a dropped connection stops the git that it started at once. A worktree whose checkout fails or is stopped is removed again, with its branch. When that removal fails, the error says where they stay, with a command that removes them. After a dropped connection, the helper waits up to a minute for the removal before it exits. An add never starts where its folder or its branch is already there.
+  - On a host with git 2.54, the helper no longer makes or removes worktrees, and `pull` from it fails too, with `git_version` and the hint to update git to 2.55 or later. Git 2.54 runs the hooks that a repository's config defines, and has no switch that turns them all off. A session without a worktree still starts.
+  - When an error keeps a worktree at a delete, `kill` names the host and prints the hint, such as `simstim host doctor <host>`, and the launcher shows it as a warning. A setup-script question says where a worktree that the start could not remove stays, and how to remove it.
+  - `pull` asks the helper about the session's repository in the same way ([worktrees](docs/how-to/worktrees.md#how-the-host-runs-git)).
 
 ## [0.1.2] - 2026-10-17
 

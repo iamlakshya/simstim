@@ -1,0 +1,131 @@
+# Listed token-creation/rotation endpoints. These grant no authority.
+# Only an actual current or retired exact bound authority activates them.
+# Ordinary endpoint grants, methods, locks, denies and model guards still apply.
+
+[[barriers]]
+hosts = ["api.github.com"]
+methods = ["POST"]
+path = "/app-manifests/*/conversions"
+kind = "grant"
+bound_only = true
+source = "https://docs.github.com/en/rest/apps/apps?apiVersion=2026-03-10#create-a-github-app-from-a-manifest"
+
+[[barriers]]
+hosts = ["api.github.com"]
+methods = ["POST"]
+path = "/app/installations/*/access_tokens"
+kind = "grant"
+bound_only = true
+source = "https://docs.github.com/en/rest/apps/apps?apiVersion=2026-03-10#create-an-installation-access-token-for-an-app"
+
+[[barriers]]
+hosts = ["api.github.com"]
+methods = ["POST"]
+path = "/applications/*/token/scoped"
+kind = "grant"
+bound_only = true
+source = "https://docs.github.com/en/rest/apps/apps?apiVersion=2026-03-10#create-a-scoped-access-token"
+
+[[barriers]]
+hosts = ["api.github.com"]
+methods = ["PATCH"]
+path = "/applications/*/token"
+kind = "grant"
+bound_only = true
+source = "https://docs.github.com/en/rest/apps/oauth-applications?apiVersion=2026-03-10#reset-a-token"
+
+[[barriers]]
+hosts = ["github.com"]
+methods = ["POST"]
+path = "/login/oauth/access_token"
+kind = "grant"
+bound_only = true
+source = "https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/authorizing-oauth-apps#refreshing-user-access-tokens"
+
+[[barriers]]
+hosts = ["api.openai.com"]
+methods = ["POST"]
+path = "/v1/organization/admin_api_keys"
+kind = "grant"
+bound_only = true
+source = "https://developers.openai.com/api/reference/resources/admin/subresources/organization/subresources/admin_api_keys/methods/create/"
+
+[[barriers]]
+hosts = ["api.openai.com"]
+methods = ["POST"]
+path = "/v1/organization/projects/*/service_accounts"
+kind = "grant"
+bound_only = true
+source = "https://developers.openai.com/api/reference/resources/admin/subresources/organization/subresources/projects/subresources/service_accounts/methods/create"
+
+[[barriers]]
+hosts = ["api.openai.com"]
+methods = ["POST"]
+path = "/v1/organization/projects/*/service_accounts/*/api_keys"
+kind = "grant"
+bound_only = true
+source = "https://developers.openai.com/api/reference/resources/admin/subresources/organization/subresources/projects/subresources/service_accounts/subresources/api_keys/methods/create"
+
+[[barriers]]
+hosts = ["gitlab.com"]
+methods = ["POST"]
+path = "/api/v4/personal_access_tokens/*/rotate"
+kind = "grant"
+bound_only = true
+source = "https://docs.gitlab.com/api/personal_access_tokens/#rotate-a-personal-access-token"
+
+[[barriers]]
+hosts = ["gitlab.com"]
+methods = ["POST"]
+path = "/api/v4/projects/*/access_tokens"
+kind = "grant"
+bound_only = true
+source = "https://docs.gitlab.com/api/project_access_tokens/#create-a-project-access-token"
+
+[[barriers]]
+hosts = ["gitlab.com"]
+methods = ["POST"]
+path = "/api/v4/projects/*/access_tokens/*/rotate"
+kind = "grant"
+bound_only = true
+source = "https://docs.gitlab.com/api/project_access_tokens/#rotate-a-project-access-token"
+
+[[barriers]]
+hosts = ["gitlab.com"]
+methods = ["POST"]
+path = "/api/v4/groups/*/access_tokens"
+kind = "grant"
+bound_only = true
+source = "https://docs.gitlab.com/api/group_access_tokens/#create-a-group-access-token"
+
+[[barriers]]
+hosts = ["gitlab.com"]
+methods = ["POST"]
+path = "/api/v4/groups/*/access_tokens/*/rotate"
+kind = "grant"
+bound_only = true
+source = "https://docs.gitlab.com/api/group_access_tokens/#rotate-a-group-access-token"
+
+[[barriers]]
+hosts = ["gitlab.com"]
+methods = ["POST"]
+path = "/api/v4/user/personal_access_tokens"
+kind = "grant"
+bound_only = true
+source = "https://docs.gitlab.com/api/user_tokens/#create-a-personal-access-token"
+
+[[barriers]]
+hosts = ["gitlab.com"]
+methods = ["POST"]
+path = "/api/v4/users/*/personal_access_tokens"
+kind = "grant"
+bound_only = true
+source = "https://docs.gitlab.com/api/user_tokens/#create-a-personal-access-token-for-a-user"
+
+[[barriers]]
+hosts = ["gitlab.com"]
+methods = ["POST"]
+path = "/api/v4/users/*/impersonation_tokens"
+kind = "grant"
+bound_only = true
+source = "https://docs.gitlab.com/api/user_tokens/#create-an-impersonation-token"

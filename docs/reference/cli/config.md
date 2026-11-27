@@ -7,7 +7,14 @@ title: "simstim config"
 Show the configuration.
 
 ```text
-simstim config
+simstim config [flags]
+```
+
+## Examples
+
+```sh
+simstim config path
+simstim config keymap
 ```
 
 ## Flags from the parent command
@@ -16,12 +23,15 @@ simstim config
 | --- | --- |
 | `--debug[=<categories>]` | turn on the debug mode, with every category, or with the categories listed: attach, net, memory, launcher, runtime. A list binds only in the = form, such as `--debug=net` |
 | `--debug-file <file>` | write the client's debug records to this file. On its own, it turns on every category (SIMSTIM_DEBUG_FILE does the same) |
+| `--no-color` | print no colour (NO_COLOR does the same) |
+| `--no-input` | ask nothing: a question that needs an answer fails with exit code 4, and names the flag that answers it (SIMSTIM_NO_INPUT=1 does the same) |
 
 ## Commands
 
 | Command | What it does |
 | --- | --- |
-| [`config keymap`](config_keymap.md) | Print every home-screen command and its keys (rebind them under [keymap] in config.toml) |
+| [`config check`](config_check.md) | Find mistakes in the config files, each with its file and line |
+| [`config keymap`](config_keymap.md) | Print the launcher's commands and their keys |
 | [`config path`](config_path.md) | Print where the configuration lives |
 
 See [all commands](_index.md).

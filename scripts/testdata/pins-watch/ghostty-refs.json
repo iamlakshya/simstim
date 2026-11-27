@@ -1,0 +1,113 @@
+{
+ "refs": {
+  "v1.0.0": {
+   "ref": "refs/tags/v1.0.0",
+   "object": {
+    "sha": "9b530d68117161d3d7c04812ba9f4bec258d9d33",
+    "type": "tag"
+   }
+  },
+  "v1.0.1": {
+   "ref": "refs/tags/v1.0.1",
+   "object": {
+    "sha": "4fdb1d7d47544e4b3912e32343f4075c5a9744b8",
+    "type": "tag"
+   }
+  },
+  "v1.1.0": {
+   "ref": "refs/tags/v1.1.0",
+   "object": {
+    "sha": "2f44bf55c3f89fa4dd44ea3238f567f9e7a36032",
+    "type": "tag"
+   }
+  },
+  "v1.2.0": {
+   "ref": "refs/tags/v1.2.0",
+   "object": {
+    "sha": "70a8c299af5a8d0a57b2c73eb157bfcccd65426d",
+    "type": "tag"
+   }
+  },
+  "v1.3.0": {
+   "ref": "refs/tags/v1.3.0",
+   "object": {
+    "sha": "9a30bd632708c3c1f01f201057048b366a8a70e5",
+    "type": "tag"
+   }
+  },
+  "v1.4.0": {
+   "ref": "refs/tags/v1.4.0",
+   "object": {
+    "sha": "ce787fc18a7782e81585beb63f0d905ccaf69284",
+    "type": "tag"
+   }
+  },
+  "vt-1.0.0": {
+   "ref": "refs/tags/vt-1.0.0",
+   "object": {
+    "sha": "6b38d55f04e66ebecc472d8be19946edcc6d2e9d",
+    "type": "tag"
+   }
+  }
+ },
+ "tags": {
+  "9b530d68117161d3d7c04812ba9f4bec258d9d33": {
+   "object": {
+    "sha": "4b4d4062dfed7b37424c7210d1230242c709e990",
+    "type": "commit",
+    "url": "https://api.github.com/repos/ghostty-org/ghostty/git/commits/4b4d4062dfed7b37424c7210d1230242c709e990"
+   }
+  },
+  "4fdb1d7d47544e4b3912e32343f4075c5a9744b8": {
+   "object": {
+    "sha": "3f7c3afaf947280bd2852626ff4599c02d9fb07e",
+    "type": "commit",
+    "url": "https://api.github.com/repos/ghostty-org/ghostty/git/commits/3f7c3afaf947280bd2852626ff4599c02d9fb07e"
+   }
+  },
+  "2f44bf55c3f89fa4dd44ea3238f567f9e7a36032": {
+   "object": {
+    "sha": "facda0c3fb1310c7698fc77ba193165ef38cd58e",
+    "type": "commit",
+    "url": "https://api.github.com/repos/ghostty-org/ghostty/git/commits/facda0c3fb1310c7698fc77ba193165ef38cd58e"
+   }
+  },
+  "70a8c299af5a8d0a57b2c73eb157bfcccd65426d": {
+   "object": {
+    "sha": "3e38e284ca593b601fb70e877c3155fedf42e2e5",
+    "type": "commit",
+    "url": "https://api.github.com/repos/ghostty-org/ghostty/git/commits/3e38e284ca593b601fb70e877c3155fedf42e2e5"
+   }
+  },
+  "9a30bd632708c3c1f01f201057048b366a8a70e5": {
+   "object": {
+    "sha": "703d11c642a96af9e54b55b04f131bf3888948a9",
+    "type": "commit",
+    "url": "https://api.github.com/repos/ghostty-org/ghostty/git/commits/703d11c642a96af9e54b55b04f131bf3888948a9"
+   }
+  },
+  "ce787fc18a7782e81585beb63f0d905ccaf69284": {
+   "object": {
+    "sha": "83fb95624b0439ee660c2679b43b38c8b63769cd",
+    "type": "commit",
+    "url": "https://api.github.com/repos/ghostty-org/ghostty/git/commits/83fb95624b0439ee660c2679b43b38c8b63769cd"
+   }
+  },
+  "6b38d55f04e66ebecc472d8be19946edcc6d2e9d": {
+   "object": {
+    "sha": "0fa3d577a5614150ff8e2c152de5fb9d5c6d2dec",
+    "type": "commit",
+    "url": "https://api.github.com/repos/ghostty-org/ghostty/git/commits/0fa3d577a5614150ff8e2c152de5fb9d5c6d2dec"
+   }
+  }
+ },
+ "commits": {
+  "ad97d331459a0762f7aea5f56fe86748e03b860f": {
+   "sha": "ad97d331459a0762f7aea5f56fe86748e03b860f"
+  },
+  "0fa3d577a5614150ff8e2c152de5fb9d5c6d2dec": {
+   "sha": "0fa3d577a5614150ff8e2c152de5fb9d5c6d2dec"
+  },
+  "1111111111111111111111111111111111111111": 422
+ }
+}

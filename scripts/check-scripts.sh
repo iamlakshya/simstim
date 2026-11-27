@@ -7,7 +7,10 @@
 # It uses perl, which macOS and Linux both have; macOS grep has no -P.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-hits=$(git ls-files -z '*.sh' | xargs -0 perl -ne 'print "$ARGV:$.: $_" if /\$[A-Za-z_][A-Za-z0-9_]*[^\x00-\x7F]/; close ARGV if eof')
+files=$(mktemp)
+trap 'rm -f "$files"' EXIT
+bash scripts/source-files.sh --tracked -- '*.sh' >"$files"
+hits=$(xargs -0 perl -ne 'print "$ARGV:$.: $_" if /\$[A-Za-z_][A-Za-z0-9_]*[^\x00-\x7F]/; close ARGV if eof' -- <"$files")
 if [ -n "$hits" ]; then
     echo "$hits"
     echo

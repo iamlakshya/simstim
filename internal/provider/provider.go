@@ -1,5 +1,5 @@
 // Package provider makes hosts: the VMs, containers and sandboxes that `host
-// create` starts, bootstraps and connects, and `host destroy` deletes. Each
+// create` starts, bootstraps and connects, and `host rm --destroy` deletes. Each
 // provider is a sub-package (lima, docker, e2b). The client reaches their
 // machines through the lifecycle and transport they return. The design is in
 // docs/contributing/decisions/0013-host-providers.md.
@@ -36,8 +36,10 @@ type Provider interface {
 type Request struct {
 	// Name is the new host's name.
 	Name string
-	// CPUs, MemoryGiB and DiskGiB size a VM.
-	CPUs, MemoryGiB, DiskGiB int
+	// CPUs, Memory and Disk size a VM. Memory and Disk are in bytes, and
+	// 0 is the provider's default.
+	CPUs         int
+	Memory, Disk int64
 	// Image is the container image, for docker.
 	Image string
 	// Template is the sandbox template, for e2b.
@@ -64,27 +66,85 @@ func Exec(ctx context.Context, install string, name string, args ...string) ([]b
 
 // ExecInput is Exec with stdin.
 func ExecInput(ctx context.Context, stdin io.Reader, install string, name string, args ...string) ([]byte, error) {
-	if _, err := exec.LookPath(name); err != nil {
-		return nil, &client.UserError{Msg: name + " is not installed, or not on your PATH", Hint: install}
+	return execInput(ctx, stdin, nil, 0, install, name, args...)
+}
+
+// ExecEnvironment runs the existing provider command with an explicit original
+// operation environment. It is used to pin a selected creation locator, never
+// to import an agent/session environment into provider operations.
+func ExecEnvironment(ctx context.Context, environment []string, install, name string, args ...string) ([]byte, error) {
+	if environment == nil {
+		return nil, fmt.Errorf("the explicit provider environment is unavailable")
 	}
-	cmd := exec.CommandContext(ctx, name, args...)
-	cmd.Stdin = stdin
+	return execInput(ctx, nil, environment, 0, install, name, args...)
+}
+
+func execInput(ctx context.Context, stdin io.Reader, environment []string, limit int, install string, name string, args ...string) ([]byte, error) {
+	if environment == nil {
+		if _, err := exec.LookPath(name); err != nil {
+			return nil, &client.UserError{Msg: name + " is not installed, or not on your PATH", Hint: install, Code: "tool_missing"}
+		}
+	}
 	var out, errb bytes.Buffer
-	cmd.Stdout, cmd.Stderr = &out, &errb
-	if err := cmd.Run(); err != nil {
+	var stdout, stderr io.Writer = &out, &errb
+	var boundedOut, boundedError *boundedMetadataOutput
+	if limit > 0 {
+		boundedOut, boundedError = &boundedMetadataOutput{limit: limit}, &boundedMetadataOutput{limit: 64 << 10}
+		stdout, stderr = boundedOut, boundedError
+	}
+	var runErr error
+	if environment != nil {
+		runErr = runProviderEnvironment(ctx, name, args, environment, stdin, stdout, stderr)
+	} else {
+		cmd := exec.CommandContext(ctx, name, args...)
+		cmd.Stdin, cmd.Stdout, cmd.Stderr = stdin, stdout, stderr
+		runErr = cmd.Run()
+	}
+	if limit > 0 {
+		out, errb = boundedOut.Buffer, boundedError.Buffer
+		if boundedOut.exceeded || boundedError.exceeded {
+			return nil, fmt.Errorf("provider metadata exceeds its read bound")
+		}
+	}
+	if err := runErr; err != nil {
+		var missing *exec.Error
+		if errors.As(err, &missing) && errors.Is(missing.Err, exec.ErrNotFound) {
+			return nil, &client.UserError{Msg: name + " is not installed, or not on your PATH", Hint: install, Code: "tool_missing"}
+		}
 		if ctx.Err() != nil {
 			return out.Bytes(), fmt.Errorf("%s %s: %w", name, firstWord(args), ctx.Err())
 		}
-		return out.Bytes(), fmt.Errorf("%s %s: %w: %s", name, firstWord(args), err, Tail(errb.String(), 3))
+		return out.Bytes(), &ExecError{
+			Msg:    fmt.Sprintf("%s %s: %v: %s", name, firstWord(args), err, Tail(errb.String(), 3)),
+			Stderr: errb.String(),
+			Err:    err,
+		}
 	}
 	return out.Bytes(), nil
 }
 
-// Tail is the last n non-empty lines of s, joined by "; ".
+// ExecError is a provider tool that failed. Its message ends with the last
+// lines of the tool's stderr, cleaned by Tail. Stderr keeps all of it, as
+// the tool wrote it, for a caller that looks for a known message. A caller
+// that shows Stderr cleans it first.
+type ExecError struct {
+	Msg    string
+	Stderr string
+	Err    error
+}
+
+func (e *ExecError) Error() string { return e.Msg }
+
+// Unwrap returns the error of the run, such as an *exec.ExitError.
+func (e *ExecError) Unwrap() error { return e.Err }
+
+// Tail is the last n non-empty lines of s, joined by "; ". s is what a
+// command wrote to stderr, often a host's own text, and errors show it: so
+// each line is cleaned (client.CleanLine).
 func Tail(s string, n int) string {
 	var lines []string
 	for _, l := range strings.Split(strings.TrimSpace(s), "\n") {
-		if l = strings.TrimSpace(l); l != "" {
+		if l = strings.TrimSpace(client.CleanLine(l)); l != "" {
 			lines = append(lines, l)
 		}
 	}

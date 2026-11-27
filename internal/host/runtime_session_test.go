@@ -3,8 +3,11 @@ package host_test
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
+	"strconv"
 	"strings"
 	"syscall"
 	"testing"
@@ -37,8 +40,10 @@ func TestSessionLifecycle(t *testing.T) {
 	if m.Run.HolderPID == 0 || m.Run.AgentPID == 0 || m.Run.Socket != paths.Socket(s.ID) || m.HolderBinary == "" {
 		t.Errorf("the holder did not record itself: %+v", m.Run)
 	}
-	if fi, err := os.Stat(paths.Socket(s.ID)); err != nil || fi.Mode().Perm() != 0o600 {
-		t.Fatalf("socket: %v, %v", fi, err)
+	for _, sock := range []string{paths.Socket(s.ID), paths.HookSocket(s.ID)} {
+		if fi, err := os.Stat(sock); err != nil || fi.Mode().Perm() != 0o600 {
+			t.Fatalf("socket %s: %v, %v", sock, fi, err)
+		}
 	}
 
 	res, err := host.Delete(s.ID)
@@ -50,6 +55,11 @@ func TestSessionLifecycle(t *testing.T) {
 	}
 	if _, err := os.Stat(paths.SessionDir(s.ID)); !os.IsNotExist(err) {
 		t.Fatalf("the session's folder is still there: %v", err)
+	}
+	for _, sock := range []string{paths.Socket(s.ID), paths.HookSocket(s.ID)} {
+		if _, err := os.Stat(sock); !os.IsNotExist(err) {
+			t.Errorf("socket %s is still there: %v", sock, err)
+		}
 	}
 	if list, _ := host.List(); len(list) != 0 {
 		t.Fatalf("list after delete = %+v", list)
@@ -145,6 +155,45 @@ func TestNewChecksItsArguments(t *testing.T) {
 	}
 }
 
+// A start whose agent cannot run keeps its session, as errored, and so the
+// folder that it made (review 7, finding 4): a resume starts the agent
+// there. With a secret, the holder answers before it fails.
+func TestAStartThatKeepsItsSessionKeepsItsFolder(t *testing.T) {
+	h := hosttest.New(t)
+	bad := filepath.Join(h.Home, "not-a-program")
+	writeFile(t, bad, "this is not a script\n")
+	if err := os.Chmod(bad, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	var ids []string
+	for i, secrets := range []map[string]api.Secret{nil, {"TEST_TOKEN": "fake-value"}} {
+		dir := filepath.Join(h.Home, "made", strconv.Itoa(i))
+		_, err := host.New(host.NewArgs{Argv: []string{bad}, Cwd: dir, MakeFolder: true, Secrets: secrets})
+		if codeOf(err) != "start_failed" {
+			t.Fatalf("new with %d secrets: %v", len(secrets), err)
+		}
+		var id string
+		hosttest.WaitFor(t, 5*time.Second, "the failed start's holder to exit", func() bool {
+			list, _ := host.List()
+			i := slices.IndexFunc(list, func(s host.SessionInfo) bool { return s.Cwd == dir && !s.Alive })
+			if i >= 0 {
+				id = list[i].ID
+			}
+			return i >= 0
+		})
+		if _, serr := os.Stat(dir); serr != nil {
+			t.Fatalf("with %d secrets: the kept session's folder went: %v", len(secrets), serr)
+		}
+		ids = append(ids, id)
+	}
+	writeFile(t, bad, "#!/bin/sh\nexec sleep 60\n")
+	for _, id := range ids {
+		if _, err := host.Resume(api.ResumeArgs{ID: id, Secrets: map[string]api.Secret{"TEST_TOKEN": "fake-value"}}); err != nil {
+			t.Errorf("resume %s in its kept folder: %v", id, err)
+		}
+	}
+}
+
 // New makes a missing folder, and the folders above it, with the mode that
 // mkdir -p gives them. A start that fails after that removes them again,
 // here because the repository's setup script needs an answer first.
@@ -185,6 +234,42 @@ func TestNewMakesTheFolderAndRemovesItAfterAFailedStart(t *testing.T) {
 	}
 }
 
+// A setup script that leaves the repository through a symlink fails the
+// start with setup_outside, and the start leaves no worktree behind. The
+// scripts would not run with --no-setup-script, so that start goes on.
+func TestNewRefusesASetupScriptOutsideTheRepository(t *testing.T) {
+	hosttest.SkipOnGit254(t) // each start makes a worktree
+	h := hosttest.New(t)
+	dir := repo(t, h)
+	outside := filepath.Join(h.Home, "elsewhere")
+	writeFile(t, outside, "#!/bin/sh\necho not from the repository\n")
+	if err := os.Chmod(outside, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(dir, "."+brand.Name, "setup")
+	if err := os.MkdirAll(filepath.Dir(link), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, link); err != nil {
+		t.Fatal(err)
+	}
+	git(t, dir, "add", "-A")
+	git(t, dir, "commit", "-q", "-m", "a setup script elsewhere")
+	a := host.NewArgs{Argv: []string{"sleep", "60"}, Cwd: "~/src/app", Worktree: true}
+	_, err := host.New(a)
+	var pe *proto.Error
+	if !errors.As(err, &pe) || pe.Code != api.CodeSetupOutside || !strings.Contains(pe.Message, "points outside the repository") {
+		t.Fatalf("new = %v, want %s", err, api.CodeSetupOutside)
+	}
+	if n := strings.Count(git(t, dir, "worktree", "list"), "\n") + 1; n != 1 {
+		t.Errorf("the refused start left a worktree: %d worktrees", n)
+	}
+	a.Setup = api.SetupSkip
+	if _, err := host.New(a); err != nil {
+		t.Errorf("new --no-setup-script = %v", err)
+	}
+}
+
 func TestShellIsTheDefaultAgent(t *testing.T) {
 	hosttest.New(t)
 	s, err := host.New(host.NewArgs{Cwd: "~", Term: "no-such-terminal", TermProgram: "TestTerm", TermProgramVersion: "1.0"})
@@ -202,10 +287,14 @@ func TestShellIsTheDefaultAgent(t *testing.T) {
 		t.Errorf("an unknown TERM falls back to xterm-256color, got %q", m.Term.Term)
 	}
 	env := strings.Join(m.Env, "\n")
-	for _, want := range []string{"TERM=xterm-256color", "COLORTERM=truecolor", "TERM_PROGRAM=TestTerm", brand.Env("SESSION") + "=" + s.ID, brand.Env("SOCK") + "=" + paths.Socket(s.ID)} {
+	for _, want := range []string{"TERM=xterm-256color", "COLORTERM=truecolor", "TERM_PROGRAM=TestTerm", brand.Env("SESSION") + "=" + s.ID, brand.Env("HOOK_SOCK") + "=" + paths.HookSocket(s.ID)} {
 		if !strings.Contains(env, want) {
 			t.Errorf("the agent's environment lacks %s", want)
 		}
+	}
+	// It names only the hook socket, never the session socket.
+	if strings.Contains(env, brand.Env("SOCK")+"=") || strings.Contains(env, paths.Socket(s.ID)) {
+		t.Errorf("the agent's environment names the session socket:\n%s", env)
 	}
 	send(t, s.ID, "echo SHELL-$((6*7)) $"+brand.Env("SESSION"))
 	waitOutput(t, s.ID, "SHELL-42 "+s.ID)
@@ -314,13 +403,44 @@ func TestStopWithTheHost(t *testing.T) {
 	if m.Status.State == host.StateExited || m.Status.State == host.StateErrored || m.Status.Source != "system" {
 		t.Fatalf("a session stopped with the host must stay restorable: %+v", m.Status)
 	}
-	if _, err := os.Stat(paths.Socket(s.ID)); !os.IsNotExist(err) {
-		t.Errorf("the socket is still there: %v", err)
+	for _, sock := range []string{paths.Socket(s.ID), paths.HookSocket(s.ID)} {
+		if _, err := os.Stat(sock); !os.IsNotExist(err) {
+			t.Errorf("socket %s is still there: %v", sock, err)
+		}
 	}
 }
 
 // A holder that is slow to exit must not write its manifest again after
 // Delete removed the session's folder.
+// The test process itself runs in a session's unit, as when a contributor
+// runs the tests in a shell session on a host. The fixture still starts,
+// deletes and cleans up its sessions, and gives the process back its own
+// membership after its cleanup.
+func TestTheFixtureWorksInsideASession(t *testing.T) {
+	uid := os.Getuid()
+	inside := []byte(fmt.Sprintf("0::/user.slice/user-%d.slice/user@%d.service/%s/%s\n", uid, uid, brand.Slice, host.UnitName("zzzz2222")))
+	self, ns := host.SelfCgroup, host.CgroupNamespaces
+	host.SelfCgroup = func() ([]byte, error) { return inside, nil }
+	host.CgroupNamespaces = func() (string, string, error) { return "cgroup:[1]", "cgroup:[1]", nil }
+	t.Cleanup(func() { host.SelfCgroup, host.CgroupNamespaces = self, ns })
+	if host.CheckCaller() == nil {
+		t.Fatal("the stand-in membership is not inside a session")
+	}
+	// The fixture's cleanup reports a delete that fails, so the subtest
+	// passes only when it deleted the session that it left.
+	t.Run("fixture", func(t *testing.T) {
+		hosttest.New(t)
+		s := start(t, "deleted", "sleep", "60")
+		if _, err := host.Delete(s.ID); err != nil {
+			t.Fatalf("delete in the fixture: %v", err)
+		}
+		start(t, "left", "sleep", "60")
+	})
+	if host.CheckCaller() == nil {
+		t.Error("after the fixture, the process does not have its own membership back")
+	}
+}
+
 func TestDeletedSessionStaysDeleted(t *testing.T) {
 	h := hosttest.New(t)
 	// Under the race detector, each holder pauses for a second as it exits:

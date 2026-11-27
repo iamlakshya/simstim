@@ -1,6 +1,79 @@
 package agents
 
-import "testing"
+import (
+	"regexp"
+	"slices"
+	"strings"
+	"testing"
+)
+
+// Each first-class agent gives the form of its own session IDs, and each
+// form in the table is a regular expression. An ID passes only as a whole.
+// An agent without a form takes no ID.
+func TestValidID(t *testing.T) {
+	for _, a := range Table {
+		if a.IDPattern == "" {
+			if a.Support == FirstClass {
+				t.Errorf("%s: a first-class agent needs the form of its session IDs", a.Kind)
+			}
+			continue
+		}
+		if _, err := regexp.Compile(a.IDPattern); err != nil {
+			t.Errorf("%s: %v", a.Kind, err)
+		}
+	}
+	const uuid4, uuid7 = "3f2b8c1e-9d4a-4e6b-8f7c-1a2b3c4d5e6f", "0199a3f1-7c2e-7d4b-9a5e-3f1c2b4d5e6f"
+	for _, c := range []struct {
+		kind, id string
+		ok       bool
+	}{
+		// Claude Code's IDs are UUIDs, and Codex makes UUIDv7 IDs.
+		{"claude", uuid4, true},
+		{"claude", uuid7, true},
+		{"codex", uuid7, true},
+		{"codex", uuid4, true},
+		{"claude", "--dangerously-skip-permissions", false},
+		{"claude", "--permission-mode=bypassPermissions", false},
+		{"claude", "", false},
+		{"claude", strings.ToUpper(uuid4), false},
+		{"claude", uuid4 + "\n", false},
+		{"claude", uuid4 + " --yolo", false},
+		{"claude", "-" + uuid4, false},
+		{"claude", uuid4[:35], false},
+		{"claude", "my-session", false},
+		{"codex", "--yolo", false},
+		{"codex", "-p", false},
+		{"codex", "session_" + uuid4, false},
+		// Without a form, no ID passes.
+		{"opencode", uuid4, false},
+		{"shell", uuid4, false},
+	} {
+		a, ok := Find(c.kind)
+		if !ok {
+			t.Fatalf("no agent %s", c.kind)
+		}
+		if got := a.ValidID(c.id); got != c.ok {
+			t.Errorf("%s: ValidID(%q) = %v, want %v", c.kind, c.id, got, c.ok)
+		}
+	}
+	// A form without anchors still has to match the whole ID.
+	if a := (Agent{IDPattern: "[0-9]+"}); a.ValidID("12 --yolo") || !a.ValidID("12") {
+		t.Error("a form without anchors matched part of an ID")
+	}
+	if a := (Agent{IDPattern: "("}); a.ValidID("(") {
+		t.Error("a form that does not compile took an ID")
+	}
+}
+
+// Codex takes its session ID as a positional argument, so its resume
+// command ends the options with "--" before it.
+func TestCodexResumeEndsTheOptions(t *testing.T) {
+	a, _ := Find("codex")
+	got := Expand(a.Resume, map[string]string{"agent_session_id": "--yolo"})
+	if want := []string{"codex", "--no-daemon", "resume", "--", "--yolo"}; !slices.Equal(got, want) {
+		t.Errorf("resume = %q, want %q", got, want)
+	}
+}
 
 func TestEveryAgentHasASupportLevel(t *testing.T) {
 	seen := map[string]bool{}

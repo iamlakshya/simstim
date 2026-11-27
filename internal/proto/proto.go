@@ -8,12 +8,12 @@ package proto
 
 import (
 	"bufio"
+	"context"
 	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
-	"sync"
 
 	"github.com/iamlakshya/simstim/internal/brand"
 )
@@ -54,6 +54,24 @@ const (
 	TUploadBegin Type = 0x40
 	TUploadChunk Type = 0x41
 	TUploadEnd   Type = 0x42
+
+	// The stream frames carry many streams over one link (package link).
+	// Their payloads are binary and start with a u32 stream ID,
+	// little-endian. They never travel between the client and a host's
+	// bridge outside an op that streams.
+
+	// TStreamOpen opens a stream: the ID, then a JSON header that names the
+	// stream's kind.
+	TStreamOpen Type = 0x50
+	// TStreamData carries a stream's bytes: the ID, then the bytes.
+	TStreamData Type = 0x51
+	// TStreamClose closes a stream: the ID, then one byte. 0 closes both
+	// ways, 1 the sender's writes only, and 2 refuses or resets the
+	// stream.
+	TStreamClose Type = 0x52
+	// TStreamWindow gives credit: the ID, then a u32 of more bytes that
+	// the sender of the frame will take on that stream.
+	TStreamWindow Type = 0x53
 )
 
 // Frame is one decoded frame.
@@ -66,7 +84,11 @@ type Frame struct {
 var ErrFrameTooBig = errors.New("proto: frame too big")
 
 // Read reads one frame.
-func Read(r *bufio.Reader) (Frame, error) {
+func Read(r *bufio.Reader) (Frame, error) { return ReadFrom(r) }
+
+// ReadFrom uses the canonical frame decoder without requiring read-ahead.
+// Startup control uses it to associate native ancillary data with one frame.
+func ReadFrom(r io.Reader) (Frame, error) {
 	var hdr [4]byte
 	if _, err := io.ReadFull(r, hdr[:]); err != nil {
 		// io.EOF here is the clean end of the stream, which callers test for
@@ -90,28 +112,75 @@ func Read(r *bufio.Reader) (Frame, error) {
 	return Frame{Type: Type(buf[0]), Payload: buf[1:]}, nil
 }
 
-// Writer writes whole frames. It is safe for concurrent use.
+// ReadLimit rejects a declared oversized frame before body allocation.
+func ReadLimit(r *bufio.Reader, limit uint32) (Frame, error) {
+	if limit == 0 || limit > MaxFrame {
+		return Frame{}, ErrFrameTooBig
+	}
+	header, err := r.Peek(4)
+	if err != nil {
+		return Read(r)
+	}
+	if binary.LittleEndian.Uint32(header) > limit {
+		return Frame{}, ErrFrameTooBig
+	}
+	return Read(r)
+}
+
+// Writer writes whole frames. It is safe for concurrent use: one frame at
+// a time, each in a single call to the underlying writer.
 type Writer struct {
-	mu sync.Mutex
-	w  io.Writer
+	// turn holds a token while a frame is written. A writer that waits for
+	// its turn with a context can give up at the context's end.
+	turn chan struct{}
+	w    io.Writer
 }
 
 // NewWriter wraps w.
-func NewWriter(w io.Writer) *Writer { return &Writer{w: w} }
+func NewWriter(w io.Writer) *Writer { return &Writer{w: w, turn: make(chan struct{}, 1)} }
 
 // Write writes one frame in a single call to the underlying writer.
 func (w *Writer) Write(t Type, payload []byte) error {
-	if len(payload)+1 > MaxFrame {
-		return ErrFrameTooBig
+	buf, err := frame(t, payload)
+	if err != nil {
+		return err
+	}
+	w.turn <- struct{}{}
+	defer func() { <-w.turn }()
+	return w.put(buf)
+}
+
+// WriteCtx writes one frame as Write does, unless ctx ends first: while it
+// waits for its turn behind another frame, and when its turn has come, it
+// gives up with ctx's error and writes nothing. Once a frame has begun, it
+// goes out whole.
+func (w *Writer) WriteCtx(ctx context.Context, t Type, payload []byte) error {
+	return w.writeCtxGuarded(ctx, t, payload, nil)
+}
+
+// EncodeFrame returns the canonical bytes of one frame. The caller owns the buffer.
+func EncodeFrame(t Type, payload []byte) ([]byte, error) { return frame(t, payload) }
+
+// frame is the bytes of one frame of type t.
+func frame(t Type, payload []byte) ([]byte, error) {
+	if len(payload) > MaxFrame-1 {
+		return nil, ErrFrameTooBig
 	}
 	buf := make([]byte, 5+len(payload))
 	binary.LittleEndian.PutUint32(buf, uint32(len(payload)+1)) //nolint:gosec // G115: the length is at most MaxFrame, checked above
 	buf[4] = byte(t)
 	copy(buf[5:], payload)
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	if _, err := w.w.Write(buf); err != nil {
+	return buf, nil
+}
+
+// put writes a frame's bytes, in its turn.
+func (w *Writer) put(buf []byte) error {
+	n, err := w.w.Write(buf)
+	if err != nil {
 		return fmt.Errorf("proto: write a frame: %w", err)
+	}
+	if n != len(buf) {
+		return fmt.Errorf("proto: write a frame: %w", io.ErrShortWrite)
 	}
 	return nil
 }
@@ -123,6 +192,15 @@ func (w *Writer) WriteJSON(t Type, v any) error {
 		return fmt.Errorf("proto: encode a frame: %w", err)
 	}
 	return w.Write(t, b)
+}
+
+// WriteJSONCtx marshals v and writes it as one frame, as WriteCtx does.
+func (w *Writer) WriteJSONCtx(ctx context.Context, t Type, v any) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return fmt.Errorf("proto: encode a frame: %w", err)
+	}
+	return w.WriteCtx(ctx, t, b)
 }
 
 // Output frames carry the absolute offset of their first byte.
@@ -207,11 +285,15 @@ func DecodeChunk(p []byte) (uint64, []byte, error) {
 
 // Hello is the first frame each way.
 type Hello struct {
-	Magic    string   `json:"magic"`
-	Protocol string   `json:"protocol"`
-	Version  string   `json:"version"`
-	Role     string   `json:"role"`
-	Features []string `json:"features,omitempty"`
+	// StartupNonce correlates a single native OP loan on this connection.
+	// It is not permission or an execution receipt.
+	StartupNonce string   `json:"startup_nonce,omitempty"`
+	Magic        string   `json:"magic"`
+	Protocol     string   `json:"protocol"`
+	Version      string   `json:"version"`
+	Role         string   `json:"role"`
+	HostID       string   `json:"host_id,omitempty"`
+	Features     []string `json:"features,omitempty"`
 }
 
 // Check reports whether h is a compatible peer.
@@ -241,6 +323,8 @@ type Request struct {
 	ID   uint64          `json:"id"`
 	Op   string          `json:"op"`
 	Args json.RawMessage `json:"args,omitempty"`
+	// NewAttempt is a fresh per-frame nonce for an optional terminal New refusal.
+	NewAttempt string `json:"new_attempt,omitempty"`
 }
 
 // Response answers a request with the same ID.
@@ -253,12 +337,14 @@ type Response struct {
 
 // Attach asks to attach to a session.
 type Attach struct {
-	Session string `json:"session"`
-	Cols    int    `json:"cols"`
-	Rows    int    `json:"rows"`
-	XPx     int    `json:"xpx,omitempty"`
-	YPx     int    `json:"ypx,omitempty"`
-	Client  string `json:"client"`
+	// ForwardAgent is the retired forwarding request; current bridges refuse it.
+	ForwardAgent bool   `json:"forward_agent,omitempty"`
+	Session      string `json:"session"`
+	Cols         int    `json:"cols"`
+	Rows         int    `json:"rows"`
+	XPx          int    `json:"xpx,omitempty"`
+	YPx          int    `json:"ypx,omitempty"`
+	Client       string `json:"client"`
 	// LastOffset is the offset after the last byte this client's terminal shows,
 	// or -1 when the terminal has none of this session's output.
 	LastOffset int64 `json:"last_offset"`
@@ -299,6 +385,8 @@ type Resize struct {
 
 // Ended reports that the agent exited.
 type Ended struct {
+	// Claimed identifies an end reported inside the guest, never a native exit.
+	Claimed  bool   `json:"claimed,omitempty"`
 	ExitCode int    `json:"exit_code"`
 	Signal   string `json:"signal,omitempty"`
 	OOM      bool   `json:"oom,omitempty"`
@@ -306,6 +394,11 @@ type Ended struct {
 
 // UploadBegin starts an upload of a file into a session's paste folder.
 type UploadBegin struct {
+	// Directory is one exact empty folder with an explicit guest Path.
+	Directory bool `json:"directory,omitempty"`
+	// Path and Replace are used only after file-transfer-v1 negotiation.
+	Path    string `json:"path,omitempty"`
+	Replace bool   `json:"replace,omitempty"`
 	ID      uint64 `json:"id"`
 	Session string `json:"session"`
 	Name    string `json:"name"`

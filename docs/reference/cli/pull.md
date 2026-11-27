@@ -10,7 +10,7 @@ Bring a session's branch into the git repository you are in.
 simstim pull <host>/<session> [flags]
 ```
 
-Fetches the branch that the session's folder has checked out, over your SSH connection, into a branch of the repository in the current folder: the same name, or `--into`. It changes neither working tree.
+Fetches the branch that the session's folder has checked out, over your SSH connection, into a branch of the repository in the current folder: the same name, or `--into`. It changes neither working tree. With `--id`, the target is an exact session ID and never falls back to a name.
 
 ## Examples
 
@@ -23,7 +23,8 @@ simstim pull my-vps/auth-fix --into review/auth-fix
 
 | Flag | What it does |
 | --- | --- |
-| `--force` | move the local branch even when the fetch is not a fast-forward |
+| `--force` | go on although work is lost: move the local branch even when the fetch is not a fast-forward |
+| `--id` | resolve the target only as a session ID, never as a name |
 | `--into <string>` | the local branch to fetch into (default: the session's branch name) |
 
 ## Flags from the parent command
@@ -32,5 +33,7 @@ simstim pull my-vps/auth-fix --into review/auth-fix
 | --- | --- |
 | `--debug[=<categories>]` | turn on the debug mode, with every category, or with the categories listed: attach, net, memory, launcher, runtime. A list binds only in the = form, such as `--debug=net` |
 | `--debug-file <file>` | write the client's debug records to this file. On its own, it turns on every category (SIMSTIM_DEBUG_FILE does the same) |
+| `--no-color` | print no colour (NO_COLOR does the same) |
+| `--no-input` | ask nothing: a question that needs an answer fails with exit code 4, and names the flag that answers it (SIMSTIM_NO_INPUT=1 does the same) |
 
 See [all commands](_index.md).

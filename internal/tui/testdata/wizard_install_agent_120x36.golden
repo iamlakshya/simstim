@@ -24,7 +24,7 @@
 
 
 
-  ── Install Codex? ─────────────────────────────────────────────────────────────────────────────────── step 5 of 6 ──
+  ── Install Codex? ────────────────────────────────────────────────────────────────────────────────── step 9 of 10 ──
 
     Codex (1 of 1) installs with its vendor's installer, from https://github.com/openai/codex#readme. It runs in a
     session named install-codex on pi, where you can answer its questions.

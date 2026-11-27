@@ -8,62 +8,141 @@ weight: 1
 Run any coding agent on any host, and use it as if it ran here.
 
 ```text
-simstim
+simstim [flags]
 ```
 
-simstim runs coding agents in sessions on hosts you reach with SSH. Sessions keep running when you leave. Run it with no arguments for the launcher.
+With no command, simstim opens the launcher: one screen of your hosts and their sessions.
 
-## Every command
+## Examples
+
+```sh
+simstim setup                       # connect a host, step by step
+simstim new my-vps --agent claude   # start an agent, and attach to it
+simstim attach my-vps/auth-fix      # go back to a session
+```
+
+## Sessions
 
 | Command | What it does |
 | --- | --- |
-| [`agents`](agents.md) | List the agents, and install one on a host |
-| [`agents install`](agents_install.md) | Install an agent on a host with its vendor's installer, in a session you can watch |
-| [`agents ls`](agents_ls.md) | List the agents in the agent table, with how each one installs |
-| [`attach`](attach.md) | Attach to a session (detach with Ctrl+\\); - is the last one |
-| [`config`](config.md) | Show the configuration |
-| [`config keymap`](config_keymap.md) | Print every home-screen command and its keys (rebind them under [keymap] in config.toml) |
-| [`config path`](config_path.md) | Print where the configuration lives |
-| [`debug`](debug.md) | Record why a session goes wrong: debug in a running session, profiles and the flight recorder |
-| [`debug bundle`](debug_bundle.md) | Write one local archive of the debug files, with private values replaced, to attach to an issue |
-| [`debug profile`](debug_profile.md) | Write a profile of the session's holder on the host, for go tool pprof |
-| [`debug save`](debug_save.md) | Save the last seconds of the session's flight recorder, just after a lag |
-| [`debug start`](debug_start.md) | Turn on the debug of a running session, for 30 minutes or the time that `--for` gives |
-| [`debug stop`](debug_stop.md) | Turn off the debug of a session at once, and the host side of each traced attach |
-| [`demo`](demo.md) | Try the launcher with sample hosts and sessions (nothing connects anywhere) |
-| [`doctor`](doctor.md) | Check this machine and its terminal |
-| [`doctor keys`](doctor_keys.md) | Show every key as the terminal sends it, and which keys simstim keeps |
-| [`doctor terminal`](doctor_terminal.md) | Ask this terminal what it supports (keys, colours, synchronized output…) |
-| [`flip`](flip.md) | Switch sessions quickly: the session list of every host, then attach |
-| [`forward`](forward.md) | Forward a session's ports to localhost (all of them if none are given) |
+| [`new`](new.md) | Start a session on a host, and attach to it |
+| [`shell`](shell.md) | Open a shell beside a session |
+| [`attach`](attach.md) | Attach to a session |
+| [`resume`](resume.md) | Start a session's agent again after it ended, and attach to it |
+| [`fork`](fork.md) | Copy a sandbox into independent sessions |
+| [`rewind`](rewind.md) | List disk checkpoints or return to one |
+| [`ls`](ls.md) | List sessions on every host, or on one |
+| [`show`](show.md) | Describe one session: its agent, state, folder and attach command |
+| [`stop`](stop.md) | Stop a sandbox and keep its work and conversation |
+| [`rm`](rm.md) | Delete a session, after a question |
+| [`rename`](rename.md) | Rename a session |
+| [`send`](send.md) | Type text into a session without attaching, then press Enter |
+| [`ports`](ports.md) | List the TCP ports a session's processes listen on |
+| [`forward`](forward.md) | Forward chosen session ports, or one laptop port in reverse |
+| [`pull`](pull.md) | Bring a session's branch into the git repository you are in |
+| [`cp`](cp.md) | Copy files between this computer and a running sandbox |
+| [`events`](events.md) | Read recent session events, or follow them as they happen |
+
+## Hosts
+
+| Command | What it does |
+| --- | --- |
 | [`host`](host.md) | Add, create, list, test and remove hosts |
 | [`host add`](host_add.md) | Connect a host: check it, install the helper, prepare it |
-| [`host alerts`](host_alerts.md) | Show where a host sends alerts about its sessions, and the last deliveries |
+| [`host alerts`](host_alerts.md) | Show where a host sends alerts, and the last deliveries |
 | [`host alerts log`](host_alerts_log.md) | Show the host's last alert deliveries, and why any were not sent |
 | [`host alerts off`](host_alerts_off.md) | Turn alerts off on a host: remove its alerts file |
 | [`host alerts set`](host_alerts_set.md) | Choose where a host sends alerts, and which ones |
 | [`host alerts test`](host_alerts_test.md) | Send a test alert to every destination now, and say what each did |
-| [`host create`](host_create.md) | Make a new host with a provider (lima, docker, e2b), install the helper and connect |
-| [`host destroy`](host_destroy.md) | Delete a host made by `host create`: its VM, container or sandbox, and every session on it |
+| [`host create`](host_create.md) | Make a host with lima, docker or e2b, and connect it |
+| [`host default`](host_default.md) | Show or choose the default host for new sessions |
 | [`host doctor`](host_doctor.md) | Check a host's setup, and with `--fix` fix what it can |
-| [`host idle`](host_idle.md) | Set how long a created host may idle before it stops, for example 30m, or never |
+| [`host invite`](host_invite.md) | Make a public invite for a machine to prepare itself |
+| [`host join`](host_join.md) | Prepare this machine from a laptop invite on standard input |
+| [`host leave`](host_leave.md) | Undo this machine's original root-owned join ledger |
 | [`host ls`](host_ls.md) | List hosts |
-| [`host restore`](host_restore.md) | Start again the sessions a host restart stopped (the host also does this at boot) |
-| [`host rm`](host_rm.md) | Forget a host (its sessions keep running) |
+| [`host prepare`](host_prepare.md) | Probe a host, prepare its runtime and test its sandbox wall |
+| [`host rekey`](host_rekey.md) | Replace a host's pinned host key, after you confirm |
+| [`host restore`](host_restore.md) | Start again the sessions that a host restart stopped |
+| [`host rm`](host_rm.md) | Forget a host, or delete a created machine |
+| [`host set`](host_set.md) | Change a host's settings, such as idle or tier |
+| [`host show`](host_show.md) | Describe a host |
 | [`host start`](host_start.md) | Start the host through its provider or provider script |
 | [`host status`](host_status.md) | Ask the provider or provider script whether the host is running |
-| [`host stop`](host_stop.md) | Stop the host through its provider or provider script (a VM's sessions stop too; a sandbox's are paused) |
+| [`host stop`](host_stop.md) | Stop the host through its provider or provider script |
 | [`host test`](host_test.md) | Check that a host answers, and how fast |
-| [`kill`](kill.md) | Stop a session and remove it |
-| [`ls`](ls.md) | List sessions on every host |
-| [`new`](new.md) | Start a session on a host, and attach to it |
-| [`ports`](ports.md) | List the TCP ports a session's processes listen on |
-| [`pull`](pull.md) | Bring a session's branch into the git repository you are in |
-| [`rename`](rename.md) | Rename a session |
-| [`resume`](resume.md) | Start a session's agent again after it ended, and attach to it |
-| [`send`](send.md) | Type text into a session without attaching, then press Enter |
+| [`host upgrade`](host_upgrade.md) | Install this client's helper on a host |
+
+## Images
+
+| Command | What it does |
+| --- | --- |
+| [`image`](image.md) | List, pull, save and remove microvm root images |
+| [`image ls`](image_ls.md) | List a host's prepared images |
+| [`image pull`](image_pull.md) | Pin an OCI image on this laptop and prepare it on a host |
+| [`image rm`](image_rm.md) | Remove an image that no session uses |
+| [`image save`](image_save.md) | Save a running microvm's system changes as an image on its host |
+
+## Policy
+
+| Command | What it does |
+| --- | --- |
+| [`policy`](policy.md) | Read and change sandbox policy at any layer |
+| [`policy allow`](policy_allow.md) | Add an allow rule at one policy layer |
+| [`policy apply`](policy_apply.md) | Preview and apply current policy files to running sandboxes |
+| [`policy check`](policy_check.md) | Explain which rule and layer decides a destination |
+| [`policy deny`](policy_deny.md) | Add an deny rule at one policy layer |
+| [`policy edit`](policy_edit.md) | Edit one policy file, check it and preview its live changes |
+| [`policy learn`](policy_learn.md) | Turn selected observed network destinations into policy rules |
+| [`policy lockdown`](policy_lockdown.md) | Pause session allowances and refuse unknown network destinations |
+| [`policy log`](policy_log.md) | Read one session's network decisions |
+| [`policy ls`](policy_ls.md) | Show the merged policy and each value's layer |
+| [`policy refuse`](policy_refuse.md) | Refuse one held network request by its opaque ID |
+| [`policy rm`](policy_rm.md) | Remove a rule from one policy layer |
+
+## Agents
+
+| Command | What it does |
+| --- | --- |
+| [`agents`](agents.md) | List the agents, install one on a host, and log in to it |
+| [`agents install`](agents_install.md) | Install an agent on a host with its official installer |
+| [`agents login`](agents_login.md) | Start an agent's own login on a host, in a session you can answer |
+| [`agents ls`](agents_ls.md) | List the agents in the agent table, with how each one installs |
+
+## Setup and help
+
+| Command | What it does |
+| --- | --- |
 | [`setup`](setup.md) | Set up step by step: a host, its agents, and their logins |
+| [`ssh-config`](ssh-config.md) | Prepare the local SSH configuration for sandbox tools |
+| [`doctor`](doctor.md) | Check this machine and its terminal |
+| [`doctor keys`](doctor_keys.md) | Show each key as the terminal sends it, and the client's own keys |
+| [`doctor terminal`](doctor_terminal.md) | Ask this terminal what it supports: keys, colours and more |
+| [`debug`](debug.md) | Record why a session goes wrong: debug files, profiles and traces |
+| [`debug bundle`](debug_bundle.md) | Write one archive of the debug files, with private values replaced |
+| [`debug profile`](debug_profile.md) | Write a profile of the session's process, for go tool pprof |
+| [`debug save`](debug_save.md) | Save the session's recent debug record, just after a lag |
+| [`debug start`](debug_start.md) | Turn on the debug of a running session, for 30 minutes or `--for` |
+| [`debug stop`](debug_stop.md) | Turn off the debug of a session at once |
+| [`config`](config.md) | Show the configuration |
+| [`config check`](config_check.md) | Find mistakes in the config files, each with its file and line |
+| [`config keymap`](config_keymap.md) | Print the launcher's commands and their keys |
+| [`config path`](config_path.md) | Print where the configuration lives |
+| [`demo`](demo.md) | Try the launcher with sample data (nothing connects anywhere) |
 | [`version`](version.md) | Print the version |
+| [`completion`](completion.md) | Print the completion script for bash, zsh, fish or PowerShell |
+| [`completion bash`](completion_bash.md) | Print the completion script for bash |
+| [`completion fish`](completion_fish.md) | Print the completion script for fish |
+| [`completion powershell`](completion_powershell.md) | Print the completion script for PowerShell |
+| [`completion zsh`](completion_zsh.md) | Print the completion script for zsh |
+| [`help`](help.md) | Show the help of a command or a topic |
+
+## Help topics
+
+| Topic | What it holds |
+| --- | --- |
+| [`help concepts`](../concepts.md) | The words that this tool uses |
+| [`help exit-codes`](../exit-codes.md) | What each exit code means |
 
 ## Flags
 
@@ -71,3 +150,14 @@ simstim runs coding agents in sessions on hosts you reach with SSH. Sessions kee
 | --- | --- |
 | `--debug[=<categories>]` | turn on the debug mode, with every category, or with the categories listed: attach, net, memory, launcher, runtime. A list binds only in the = form, such as `--debug=net` |
 | `--debug-file <file>` | write the client's debug records to this file. On its own, it turns on every category (SIMSTIM_DEBUG_FILE does the same) |
+| `--no-color` | print no colour (NO_COLOR does the same) |
+| `--no-input` | ask nothing: a question that needs an answer fails with exit code 4, and names the flag that answers it (SIMSTIM_NO_INPUT=1 does the same) |
+| `--version` | print the version |
+
+## Old names
+
+These still work, and print a warning on stderr, until their end.
+
+| Old | New | Works until | Note |
+| --- | --- | --- | --- |
+| -v | --version | v0.4.0 and 11 November 2027, whichever comes later | No command has `-v`. |

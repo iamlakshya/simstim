@@ -1,0 +1,320 @@
+package cli
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"slices"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/iamlakshya/simstim/internal/api"
+	"github.com/iamlakshya/simstim/internal/brand"
+	"github.com/iamlakshya/simstim/internal/client"
+	"github.com/iamlakshya/simstim/internal/client/clienttest"
+)
+
+// host doctor --fix --json needs -y, which answers for every fix: with it,
+// the fixes run, and the JSON holds how each ended.
+func TestHostFixWithJSON(t *testing.T) {
+	_, tr := fakeBox(t, nil)
+	tr.Features = []string{"doctor.fix"}
+	tr.Fixes = []api.Fix{{ID: "old-helpers", Problem: "4 old helper versions", Action: "remove them"}}
+	machineChecks["fake"] = func(context.Context, client.Host) api.Check {
+		return api.Check{Name: "helper", OK: true, Detail: "ok"}
+	}
+	t.Cleanup(func() { delete(machineChecks, "fake") })
+	_, errOut, code := mainRun(t, "host", "doctor", "box", "--fix", "--json")
+	if code != 4 || !strings.Contains(errOut, `host doctor box --fix --json -y"`) {
+		t.Errorf("host doctor --fix --json: exit %d, %q", code, errOut)
+	}
+	if slices.Contains(tr.Requests(), "doctor.fix") {
+		t.Errorf("host doctor --fix --json sent doctor.fix without -y: %v", tr.Requests())
+	}
+	out, errOut, code := mainRun(t, "host", "doctor", "box", "--fix", "--json", "-y")
+	var d struct {
+		V      int
+		Checks []json.RawMessage
+		Fixes  []struct {
+			ID   string
+			Done bool
+		}
+	}
+	if code != 0 || errOut != "" || json.Unmarshal([]byte(out), &d) != nil || d.V != 1 || len(d.Checks) == 0 {
+		t.Fatalf("host doctor --fix --json -y: exit %d\nstdout %q\nstderr %q", code, out, errOut)
+	}
+	done := false
+	for _, f := range d.Fixes {
+		done = done || f.ID == "old-helpers" && f.Done
+	}
+	if !done {
+		t.Errorf("the old helpers were not removed: %+v", d.Fixes)
+	}
+}
+
+// atCancel runs the command line with a context that has ended already.
+func atCancel(t *testing.T, args ...string) error {
+	t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	var err error
+	_, _ = captureOutput(t, func() {
+		root := Root() //nolint:contextcheck // the command takes ctx from ExecuteContext
+		root.SetArgs(args)
+		err = root.ExecuteContext(withLine(ctx, args))
+	})
+	return err
+}
+
+// No fix runs after a cancel: not doctor's with --json and -y, not
+// doctor's with -y, and not host doctor's with --json and -y. The files stay,
+// and the exit is the cancel's.
+func TestNoFixAfterACancel(t *testing.T) {
+	newTestHome(t)
+	gone := writeFixWrapper(t, "gone")
+	for _, args := range [][]string{{"doctor", "--fix", "--json", "-y"}, {"doctor", "--fix", "-y"}} {
+		// Nothing asked: the cancel is no cancel at a question.
+		err := atCancel(t, args...)
+		if !isCancel(err) || errors.Is(err, errInterrupted) || printError(io.Discard, err, nil, false, false) != 130 {
+			t.Errorf("%s with the context ended: %v", args, err)
+		}
+		if _, err := os.Stat(gone); err != nil {
+			t.Fatalf("%s with the context ended removed the file: %v", args, err)
+		}
+	}
+
+	h, tr := fakeBox(t, nil)
+	tr.Features = []string{"doctor.fix"}
+	tr.Fixes = []api.Fix{{ID: "old-helpers", Problem: "4 old helper versions", Action: "remove them"}}
+	conn, err := client.Dial(context.Background(), h, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := hostFixesJSON(ctx, conn, h, client.HostInfo{}); !errors.Is(err, errInterrupted) {
+		t.Errorf("host doctor --fix --json -y with the context ended: %v", err)
+	}
+	if slices.Contains(tr.Requests(), "doctor.fix") {
+		t.Errorf("a host fix ran after the cancel: %v", tr.Requests())
+	}
+}
+
+// A cancel that comes after doctor's last look for one, just before it
+// applies the fixes, applies none: doctor --fix -y applies them through
+// applyLocal, which looks once more, and so does the client.
+func TestACancelJustBeforeTheFixesFixesNothing(t *testing.T) {
+	newTestHome(t)
+	gone := writeFixWrapper(t, "gone")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	old := fixStage
+	fixStage = func(stage string) {
+		if stage == "apply" {
+			cancel()
+		}
+	}
+	defer func() { fixStage = old }()
+	args := []string{"doctor", "--fix", "-y"}
+	var err error
+	_, _ = captureOutput(t, func() {
+		root := Root() //nolint:contextcheck // the command takes ctx from ExecuteContext
+		root.SetArgs(args)
+		err = root.ExecuteContext(withLine(ctx, args))
+	})
+	if !isCancel(err) || !strings.Contains(err.Error(), "during the fixes") || printError(io.Discard, err, nil, false, false) != 130 {
+		t.Errorf("doctor --fix -y with a cancel just before the fixes: %v", err)
+	}
+	if _, err := os.Stat(gone); err != nil {
+		t.Errorf("a fix ran after the cancel: %v", err)
+	}
+}
+
+// A cancel that comes once the host has listed its fixes, while the client
+// gets ready to ask for them (it reads Ghostty's terminfo), sends no apply:
+// host doctor --fix --json -y stops at the cancel, as every request after
+// a cancel does. A fake infocmp says when the apply's turn has come.
+func TestACancelBeforeTheHostsApplyAppliesNone(t *testing.T) {
+	_, tr := withFake(t, nil)
+	tr.Features = []string{"doctor.fix"}
+	tr.Fixes = []api.Fix{{ID: "linger", Problem: "linger is off", Action: "turn it on", Command: "loginctl enable-linger"}}
+	bin := t.TempDir()
+	turn := filepath.Join(bin, "apply")
+	script := "#!/bin/sh\nn=$(cat '" + bin + "/calls' 2>/dev/null || echo 0)\nn=$((n+1))\necho $n > '" + bin + "/calls'\n" +
+		"if [ $n -ge 2 ]; then : > '" + turn + "'; exec sleep 30; fi\n"
+	clienttest.WriteScript(t, filepath.Join(bin, "infocmp"), script)
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	h := client.Host{Name: "box", Machine: &client.Machine{Provider: "fake", ID: "fake-box"}}
+	conn, err := client.Dial(context.Background(), h, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- hostFixesJSON(ctx, conn, h, client.HostInfo{}) }()
+	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(10 * time.Millisecond) {
+		if _, err := os.Stat(turn); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the apply's turn never came")
+		}
+	}
+	cancel()
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Errorf("host doctor --fix --json -y with a cancel before the apply: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("host doctor --fix --json -y did not end at the cancel")
+	}
+	if _, err := conn.Sessions(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if n := strings.Count(strings.Join(tr.Requests(), " "), "doctor.fix"); n != 1 {
+		t.Errorf("%d doctor.fix requests reached the host, want the list alone: %q", n, tr.Requests())
+	}
+}
+
+// writeFixWrapper creates an old-name wrapper with the canonical ownership
+// header. A filename or a generic generated comment does not authorise removal.
+func writeFixWrapper(t *testing.T, name string) string {
+	t.Helper()
+	p := filepath.Join(client.ConfigDir(), "ssh", "config-"+name)
+	if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	body := fmt.Sprintf("# Generated by %s for host %q. Do not edit; it is rewritten on each run.\nHost %s\n", brand.Name, name, name)
+	if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+// cancelAtTheFirstFile is a context that a cancel ends once a local fix
+// has removed its first file.
+func cancelAtTheFirstFile(t *testing.T) context.Context {
+	t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
+	old := client.RemovedFile
+	client.RemovedFile = func(string) { cancel() }
+	t.Cleanup(func() { client.RemovedFile = old; cancel() })
+	return ctx
+}
+
+// cancelLineOf is the line that err prints on a terminal, and checks that
+// its exit code is the cancel's.
+func cancelLineOf(t *testing.T, err error) string {
+	t.Helper()
+	if err == nil {
+		t.Fatal("the cancelled fixes returned no error")
+	}
+	var line bytes.Buffer
+	if code := printError(&line, err, nil, false, false); code != 130 {
+		t.Errorf("%v exits with %d, want 130", err, code)
+	}
+	return line.String()
+}
+
+// cancelledFixes is the fixes in the data of err as --json prints it, and
+// checks that its exit code is the cancel's.
+func cancelledFixes(t *testing.T, err error) []api.Fix {
+	t.Helper()
+	var out bytes.Buffer
+	if code := printErrorJSON(&out, err, nil, false); code != 130 {
+		t.Errorf("the JSON error exits with %d, want 130: %s", code, out.Bytes())
+	}
+	var line struct {
+		Error struct {
+			Code string
+			Data struct{ Fixes []api.Fix }
+		}
+	}
+	if json.Unmarshal(out.Bytes(), &line) != nil || line.Error.Code != "cancelled" {
+		t.Errorf("the JSON error: %s", out.Bytes())
+	}
+	return line.Error.Data.Fixes
+}
+
+// stopping gives a context that has ended already when a signal came
+// before it: at once, not when its watcher of signals runs, which the test
+// holds.
+func TestStoppingSeesAnEarlierSignalAtOnce(t *testing.T) {
+	withSignal(t)
+	held := make(chan struct{})
+	old := stoppingWatch
+	stoppingWatch = func() { <-held }
+	defer func() { close(held); stoppingWatch = old }()
+	close(interrupted)
+	sctx, cancel := stopping(context.Background())
+	defer cancel()
+	if sctx.Err() == nil {
+		t.Error("stopping's context is alive after a signal")
+	}
+}
+
+// A signal that came before the fixes, with the context not yet ended,
+// fixes nothing: the context that the fixes get has ended at once. The
+// watcher of signals is held, so that only that first look can end it.
+func TestASignalBeforeTheFixesFixesNothing(t *testing.T) {
+	withSignal(t)
+	held := make(chan struct{})
+	old := stoppingWatch
+	stoppingWatch = func() { <-held }
+	defer func() { close(held); stoppingWatch = old }()
+	newTestHome(t)
+	gone := writeFixWrapper(t, "gone")
+	close(interrupted)
+	_, err := applyLocal(context.Background(), []string{"ssh-configs"})
+	if !isCancel(err) {
+		t.Errorf("the fixes after a signal: %v", err)
+	}
+	if _, err := os.Stat(gone); err != nil {
+		t.Errorf("a fix ran after the signal: %v", err)
+	}
+}
+
+// Main writes the warnings of the end of a debug run as JSON lines, with
+// --json.
+func TestMainWarnsInJSON(t *testing.T) {
+	newTestHome(t)
+	old := stopDebug
+	defer func() { stopDebug = old }()
+	stopDebug = func(w io.Writer) {
+		fmt.Fprint(w, "Warning: the debug file x is not complete.\nTry: make room.\n")
+	}
+	out, errOut, code := mainRun(t, "version", "--json")
+	var warn struct {
+		V       int
+		Warning map[string]string
+	}
+	if code != 0 || !json.Valid([]byte(out)) || json.Unmarshal([]byte(errOut), &warn) != nil || warn.Warning["code"] != "debug_incomplete" {
+		t.Errorf("version --json: exit %d\nstdout %q\nstderr %q", code, out, errOut)
+	}
+	if _, errOut, _ = mainRun(t, "version"); !strings.HasPrefix(errOut, "Warning: the debug file x") {
+		t.Errorf("version: stderr %q", errOut)
+	}
+}
+
+// host ls --json warns about its old keys also with no hosts.
+func TestHostLsJSONWithNoHostsWarns(t *testing.T) {
+	newTestHome(t)
+	out, errOut, code := mainRun(t, "host", "ls", "--json")
+	var warn struct {
+		V       int
+		Warning map[string]string
+	}
+	if code != 0 || strings.TrimSpace(out) != "[]" || json.Unmarshal([]byte(errOut), &warn) != nil || warn.Warning["old"] == "" {
+		t.Errorf("host ls --json with no hosts: exit %d\nstdout %q\nstderr %q", code, out, errOut)
+	}
+}

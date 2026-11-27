@@ -3,6 +3,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -23,7 +24,7 @@ const usage = `%[1]s keeps agent sessions alive on this host. The client runs it
 Usage:
   %[1]s bridge              serve one client on stdin and stdout
   %[1]s ls [--json]         list sessions
-  %[1]s new [--agent a] [--dir d [--mkdir]] [--name n] [--memory-max size] [--setup|--no-setup] [-- argv…]
+  %[1]s new [--agent a] [--dir d [--mkdir]] [--name n] [--memory-max size] [--setup-script|--no-setup-script] [-- argv…]
   %[1]s rm <id>             stop a session and remove it
   %[1]s doctor [--json]     check this host
   %[1]s keytest             print every key the terminal sends
@@ -36,7 +37,12 @@ Usage:
 // commands are the helper's commands. Each gets the arguments after its name.
 var commands = map[string]func(args []string) error{
 	"bridge": func(args []string) error {
-		return host.RunBridge(host.BridgeInput(os.Stdin, args), os.Stdout)
+		err := host.RunBridge(host.BridgeInput(os.Stdin, args), os.Stdout)
+		// The connection has ended: stop the git that its requests run,
+		// with its filters, and let a stopped start remove its half-made
+		// worktree, before this process exits.
+		host.EndBridge()
+		return err
 	},
 	"idle":    runIdle,
 	"holder":  runHolder,
@@ -48,6 +54,21 @@ var commands = map[string]func(args []string) error{
 	"restore": runRestore,
 	"prune":   runPrune,
 	"keytest": func([]string) error { return host.KeyTest() },
+	// The helper runs git in a child of its own, and the client runs
+	// repo.info over SSH. Not for people, so left out of the usage.
+	"git-op": func(args []string) error { return host.RunGitOp(args, os.Stdin, os.Stdout) },
+	"install-payload": func(args []string) error {
+		if len(args) != 0 {
+			return host.UserError("bad_request", "the closed installer accepts only its original input plan", "Install the helper through a matching current client.")
+		}
+		return host.RunInstallPayload(context.Background(), os.Stdin, os.Stdout)
+	},
+	"purge-payload": func(args []string) error {
+		if len(args) != 0 {
+			return host.UserError("bad_request", "the closed cleanup command accepts only its original input plan", "Resume the same saved host removal.")
+		}
+		return host.RunPurgePayload(context.Background(), os.Stdin, os.Stdout)
+	},
 	// The phone path: experimental, and left out of the usage on purpose
 	// until it is launched (docs/contributing/phone-path.md).
 	"pick":      func([]string) error { return host.RunPick(os.Stdin, os.Stdout) },
@@ -59,6 +80,20 @@ var commands = map[string]func(args []string) error{
 }
 
 func main() {
+	if len(os.Args) >= 2 && os.Args[1] == "purge-git-worker-v3" {
+		os.Exit(host.RunOrdinaryPurgeGitWorkerProcessV3())
+	}
+	if len(os.Args) >= 2 && os.Args[1] == "purge-relay-v3" {
+		os.Exit(host.RunPurgeRelayProcessV3())
+	}
+	// Raw protected entry must precede normal helper initialisation and input.
+	if len(os.Args) >= 2 && os.Args[1] == "purge-attempt-v2" {
+		os.Exit(host.RunPurgeAttemptProcessV3())
+	}
+	// This closed process boundary owns raw stdio until immediate exit.
+	if len(os.Args) >= 2 && os.Args[1] == "bridge-agent" {
+		os.Exit(host.RunAgentBridgeProcess(os.Stdin, os.Stdout))
+	}
 	if len(os.Args) < 2 {
 		fmt.Fprintf(os.Stderr, usage, brand.HostBinary)
 		os.Exit(2)
@@ -68,12 +103,16 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Error: unknown command %q\n", os.Args[1])
 		os.Exit(1)
 	}
-	if err := run(os.Args[2:]); err != nil {
+	err := run(os.Args[2:])
+	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		var pe *proto.Error
 		if errors.As(err, &pe) && pe.Hint != "" {
 			fmt.Fprintf(os.Stderr, "\nTry: %s\n", pe.Hint)
 		}
+	}
+	host.WaitForNoneCustodyV1()
+	if err != nil {
 		os.Exit(1)
 	}
 }
@@ -138,9 +177,9 @@ func newArgs(args []string) (host.NewArgs, error) {
 		case "--name":
 			i++
 			a.Name = arg(args, i)
-		case "--setup":
+		case "--setup-script", "--setup":
 			a.Setup = api.SetupRun
-		case "--no-setup":
+		case "--no-setup-script", "--no-setup":
 			a.Setup = api.SetupSkip
 		case "--memory-max":
 			i++
@@ -167,6 +206,9 @@ func runRm(args []string) error {
 	}
 	if res.Worktree != "" {
 		fmt.Println(res.Worktree)
+		if res.WorktreeHint != "" {
+			fmt.Printf("\nTry: %s\n", res.WorktreeHint)
+		}
 	}
 	return nil
 }
@@ -207,12 +249,19 @@ func runHook(args []string) error {
 }
 
 func runRestore(args []string) error {
-	res := host.Restore(hasFlag(args, "--all"))
+	// Restore starts sessions again: not from inside a session.
+	if err := host.CheckCaller(); err != nil {
+		return err
+	}
+	res, err := host.RestoreContext(context.Background(), hasFlag(args, "--all"))
+	if err != nil {
+		return err
+	}
 	if hasFlag(args, "--json") {
 		return printJSON(res)
 	}
 	for _, r := range res {
-		fmt.Printf("%-10s %-20s %-9s %s\n", r.ID, r.Name, r.Action, r.Why)
+		fmt.Print(r.Text())
 	}
 	return nil
 }

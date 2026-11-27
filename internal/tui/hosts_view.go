@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/iamlakshya/simstim/internal/api"
+	"github.com/iamlakshya/simstim/internal/client"
 )
 
 // Hosts.
@@ -19,7 +20,7 @@ func (m *Model) hostsView(cw int) listView {
 	vh := m.visibleHosts()
 	nameW := 8
 	for _, h := range vh {
-		nameW = max(nameW, cells(h.name()))
+		nameW = max(nameW, cells(shown(h.name())))
 	}
 	nameW = min(nameW, max(cw/4, 8))
 	rttW := hostRight
@@ -78,13 +79,16 @@ func (m *Model) hostRow(h *hostConn, n int, selected bool, cw, nameW, rttW int) 
 		detail = []seg{{"not ready", sDanger}}
 	default:
 		detail = m.hostSummary(h, detailW)
+		if _, blocked := hostHealthSummaryV1(h); blocked {
+			glyph = seg{glyphFail, sDanger}
+		}
 	}
 	used := 0
 	for i := range detail {
 		detail[i].s = trunc(detail[i].s, detailW-used)
 		used += cells(detail[i].s)
 	}
-	name := nameSegs(h.name(), nameW, nameSt, "")
+	name := nameSegs(shown(h.name()), nameW, nameSt, "")
 	segs := make([]seg, 0, 10+len(name)+len(detail)+len(right))
 	segs = append(segs, gutter(n), seg{" ", sPlain}, glyph, seg{" ", sPlain})
 	segs = append(segs, name...)
@@ -123,13 +127,45 @@ func (m *Model) summaryText(h *hostConn) string {
 // needs the user stands out. When the two do not fit in w cells, the
 // session count goes, as in the header, so that the other stays whole.
 func (m *Model) hostSummary(h *hostConn, w int) []seg {
+	if health, _ := hostHealthSummaryV1(h); health != "" {
+		return []seg{{trunc(health, w), sWarning}}
+	}
 	if !h.loaded && len(h.sessions) == 0 {
 		return []seg{{"…", sFaint}}
 	}
-	out := []seg{{m.summaryText(h), sFaint}}
+	base := m.summaryText(h)
+	if h.tier.Valid() && h.tier != client.TierOwn {
+		switch {
+		case len(h.sessions) == 0:
+			base = h.tier.String()
+		case cells(base+dot+h.tier.String()) <= w:
+			base += dot + h.tier.String()
+		default:
+			base = h.tier.String()
+		}
+	}
+	wall := hostWallFacts(h)
+	if cells(wall+dot+base) <= w {
+		base = wall + dot + base
+	} else if (!h.tier.Valid() || h.tier == client.TierOwn) && cells(wall) <= w {
+		base = wall
+	}
+	out := []seg{{base, sFaint}}
+	if h.idChanged {
+		changed := seg{"host ID changed", sWarning}
+		if cells(base+dot+changed.s) <= w {
+			out = append(out, seg{dot, sFaint}, changed)
+		} else {
+			return []seg{changed}
+		}
+	}
 	if need := needCount(h); need > 0 {
 		needs := seg{fmt.Sprintf("%d needs you", need), sWarning}
-		if cells(out[0].s+dot+needs.s) > w {
+		used := 0
+		for _, s := range out {
+			used += cells(s.s)
+		}
+		if used+cells(dot+needs.s) > w {
 			return []seg{needs}
 		}
 		out = append(out, seg{dot, sFaint}, needs)
@@ -190,23 +226,37 @@ func joinFacts(facts ...string) string {
 	return strings.Join(out, sFaint.Render(dot))
 }
 
-// hostDetail is the line under the hosts: how it is reached, and what it is.
+// hostDetail is the line under the hosts: how it is reached, its tier, and what it is.
 func (m *Model) hostDetail(h *hostConn, cw int) string {
-	parts := []string{"ssh " + h.host.SSH}
+	target := "ssh " + shown(h.host.SSH)
+	if h.host.SSH == "" {
+		target = shown(h.host.Target())
+	}
+	parts := []string{target}
+	if h.tier.Valid() {
+		parts = append(parts, h.tier.String())
+	}
+	if h.idChanged {
+		parts = append(parts, "host ID changed")
+	}
 	if i := h.info; i != nil {
-		for _, s := range []string{i.Distro, plural(i.CPUs, "CPU", "CPUs")} {
+		if h.tier == client.TierShared {
+			parts = append(parts, "reported by "+shown(h.name()))
+		}
+		for _, s := range []string{shown(i.Distro), plural(i.CPUs, "CPU", "CPUs")} {
 			if s != "" && !strings.HasPrefix(s, "0 ") {
 				parts = append(parts, s)
 			}
 		}
 		names := make([]string, 0, len(i.Agents))
 		for k := range i.Agents {
-			names = append(names, k)
+			names = append(names, shown(k))
 		}
 		sort.Strings(names)
 		if len(names) > 0 {
 			parts = append(parts, strings.Join(names, ", "))
 		}
 	}
+	parts = append(parts, hostWallFacts(h))
 	return sFaint.Render(trunc(strings.Join(parts, dot), cw))
 }

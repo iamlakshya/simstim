@@ -4,9 +4,6 @@
 
   ▍ 1 ● atlas-dev  1 needs you               9ms  ⣀⣀⣀⣀⣀⣀⣀⣼
     2 ◌ aws-gpu    offline                        ⣀⣀⣀⣀⣀⣀⣀⣀
-    3 ● gcp-dev    2 sessions               41ms  ⣀⣀⣀⣀⣀⣀⣀⣼
-
-    ssh atlas-dev · Debian 13 · 4 CPUs · claude, codex, o…
   ── New session on atlas-dev ────────────────────────────
 
     Agent      claude  codex  opencode  shell  other…
@@ -16,5 +13,8 @@
     Name       auth
 
     Worktree   ● this folder   ○ new worktree
+    Wall       ○ none  ● auto (not pinned)  ○ process
+    Host       atlas-dev
+
 
     enter start   tab next   esc cancel

@@ -11,16 +11,19 @@
 #   VERSION       a release tag, for example v0.1.0 (default: the latest)
 #   GITHUB_TOKEN  needed only while the repository is private
 #   BASE_URL      a mirror of the release files, used instead of GitHub
-#   SIGNERS       an allowed-signers line other than the release key (tests)
+#   SIGNERS       allowed-signers lines to trust instead of the release keys (tests)
 set -eu
 
 MODULE="github.com/iamlakshya/simstim"
 REPO="${MODULE#github.com/}"
 NAME="${REPO##*/}"
 INSTALL_DIR="${INSTALL_DIR:-$HOME/.local/bin}"
-# The release key, the same as .github/release-signers.
-RELEASE_SIGNER='release namespaces="file" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGyv3BRbYeIpUvqwia5q4CuqngP+aUzouWZ8x73U2LOy'
-SIGNERS="${SIGNERS:-$RELEASE_SIGNER}"
+# The release keys, one allowed-signers line each, the same as
+# .github/release-signers. A signature by any of them passes. During a key
+# rotation the new key is listed beside the old one, until a release that the
+# new key signed ships (docs/contributing/releasing.md).
+RELEASE_SIGNERS='release namespaces="file" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGyv3BRbYeIpUvqwia5q4CuqngP+aUzouWZ8x73U2LOy'
+SIGNERS="${SIGNERS:-$RELEASE_SIGNERS}"
 
 say() { printf '%s\n' "$*" >&2; }
 die() { say "Error: $*"; exit 1; }

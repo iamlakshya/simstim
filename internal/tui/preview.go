@@ -2,18 +2,20 @@ package tui
 
 import (
 	"context"
-	"io"
 	"strings"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/charmbracelet/x/vt"
+
+	"github.com/iamlakshya/simstim/internal/api"
 )
 
-// peekBytes is how much of a session's newest output the preview reads.
-const peekBytes = 64 << 10
+// PeekBytes is how much of a session's newest output a screen peek reads.
+const PeekBytes = 64 << 10
+
+const peekBytes = PeekBytes
 
 // previewState is the preview of the selected session.
 type previewState struct {
@@ -69,22 +71,23 @@ func (p *previewModal) key(m *Model, k tea.KeyPressMsg) tea.Cmd {
 }
 
 func (p *previewModal) view(m *Model) string {
-	hc, s := m.selectedPair()
-	if s == nil {
+	hc, row := m.selectedPair()
+	if row == nil {
 		return ""
 	}
+	s := shownSession(*row)
 	w := m.dialogWidth()
 	cw := w - 4
-	_, label := m.look(*s)
+	_, label := m.look(s)
 	hints := []hint{{"enter", "attach"}, {"↑↓", "next"}, {"esc", "close"}}
 	mem := fmtMemory(s.MemoryCurrent, s.MemoryMax)
-	if ended(*s) {
+	if ended(s) {
 		// The last screen of an agent that has ended: nothing to attach to,
 		// and the memory is no longer the agent's.
 		hints, mem = hints[1:], ""
 	}
 	var facts []string
-	for _, f := range []string{s.Agent, truncPath(homePath(hc, s.Cwd), max(cw/3, 16)), mem} {
+	for _, f := range []string{shown(s.Agent), truncPath(shown(homePath(hc, s.Cwd)), max(cw/3, 16)), mem} {
 		if f != "" {
 			facts = append(facts, f)
 		}
@@ -93,7 +96,7 @@ func (p *previewModal) view(m *Model) string {
 	body := make([]string, 0, 2+len(preview))
 	body = append(body, sFaint.Render(trunc(strings.Join(facts, dot), cw)), "")
 	body = append(body, preview...)
-	return sheet(w, "Peek · "+s.Name, label.st.Render(label.s), hints, body, toneNormal)
+	return sheet(w, "Peek · "+shown(s.Name), label.st.Render(label.s), hints, body, toneNormal)
 }
 
 // schedulePreview loads the preview of the selected session after a short
@@ -123,16 +126,17 @@ func (m *Model) peek() tea.Cmd {
 		return nil
 	}
 	m.preview.inflight = true
-	key, c, ctx := m.preview.key, h.conn, m.ctx
-	return func() tea.Msg {
-		cctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	key, c := m.preview.key, h.conn
+	return m.bgCmd(func(bgCtx context.Context) tea.Msg {
+		cctx, cancel := context.WithTimeout(bgCtx, 10*time.Second)
 		defer cancel()
 		data, cols, rows, err := c.Peek(cctx, key.id, peekBytes)
 		if err != nil {
 			return peekMsg{key: key, err: err}
 		}
-		return peekMsg{key: key, shot: renderScreen(data, cols, rows)}
-	}
+		shot, err := renderScreenContext(cctx, data, cols, rows)
+		return peekMsg{key: key, shot: shot, err: err}
+	})
 }
 
 func (m *Model) onPeek(msg peekMsg) {
@@ -158,56 +162,11 @@ type screenShot struct {
 // renderScreen runs bytes through a terminal emulator of the session's size.
 // The bytes are the tail of the session's output, so the first few may be the
 // end of a cut sequence; the emulator shrugs those off.
-func renderScreen(data []byte, cols, rows int) (shot *screenShot) {
-	// A preview is never worth a crash: odd bytes give an empty screen.
-	defer func() {
-		if recover() != nil {
-			shot = &screenShot{blank: true}
-		}
-	}()
-	if cols <= 0 || cols > 1000 {
-		cols = 80
-	}
-	if rows <= 0 || rows > 500 {
-		rows = 24
-	}
-	emu := vt.NewEmulator(cols, rows)
-	// The emulator answers terminal queries through a pipe. Drain it, so a
-	// query in the output cannot block the write.
-	done := make(chan struct{})
-	pw, _ := emu.InputPipe().(*io.PipeWriter)
-	if pw != nil {
-		go func() {
-			_, _ = io.Copy(io.Discard, emu)
-			close(done)
-		}()
-	} else {
-		data = stripQueries(data)
-		close(done)
-	}
-	_, _ = emu.Write(data)
-	if pw != nil {
-		_ = pw.Close()
-	}
-	<-done
-
-	shot = &screenShot{blank: true}
-	for y := range rows {
-		line := make(uv.Line, cols)
-		for x := range cols {
-			if c := emu.CellAt(x, y); c != nil {
-				line[x] = *c
-			} else {
-				line[x] = uv.EmptyCell
-			}
-		}
-		shot.lines = append(shot.lines, line)
-		if strings.TrimSpace(line.String()) != "" {
-			shot.bottom, shot.blank = y, false
-		}
-	}
-	if pos := emu.CursorPosition(); !emu.CursorHidden() && pos.Y > shot.bottom && pos.Y < rows {
-		shot.bottom = pos.Y
+func renderScreen(data []byte, cols, rows int) *screenShot {
+	cols, rows = normalizeScreenSize(cols, rows)
+	shot, err := renderScreenContext(context.Background(), data, cols, rows)
+	if err != nil || shot == nil {
+		return &screenShot{lines: make([]uv.Line, rows), blank: true}
 	}
 	return shot
 }
@@ -226,20 +185,40 @@ func (s *screenShot) view(w, h int) []string {
 	return out
 }
 
-// renderCells draws the first w cells of a line with their styles.
+// renderCells draws the first w cells of a line with their styles. The
+// cells hold what the session printed, so each is cleaned (cleanCell).
 func renderCells(l uv.Line, w int) string {
 	if w <= 0 {
 		return ""
 	}
 	cut := make(uv.Line, 0, w)
 	for x := 0; x < len(l) && x < w; x++ {
-		c := l[x]
+		c := cleanCell(l[x])
 		if c.Width > 1 && x+c.Width > w {
 			c = uv.EmptyCell
 		}
 		cut = append(cut, c)
 	}
 	return cut.Render() + ansi.ResetStyle
+}
+
+// cleanCell is a cell without the characters that api.CleanText removes.
+// The terminal model drops most of them, but it keeps tag characters in a
+// cell. A cell that cleaning changes keeps its width: it holds the cleaned
+// text when that is as wide, and spaces when it is not.
+func cleanCell(c uv.Cell) uv.Cell {
+	// An OSC 8 link's address and parameters are the session's text too,
+	// and Render would send them to the terminal. The peek shows no links.
+	c.Link = uv.Link{}
+	clean := api.CleanText(c.Content, len(c.Content))
+	if clean == c.Content {
+		return c
+	}
+	if clean == "" || ansi.StringWidth(clean) != c.Width {
+		clean = strings.Repeat(" ", max(c.Width, 0))
+	}
+	c.Content = clean
+	return c
 }
 
 // previewLines fills the preview box.
@@ -250,7 +229,7 @@ func (m *Model) previewLines(w, h int) []string {
 		return []string{sKey.Render(m.spinner()) + " " + sFaint.Render("Loading the last screen…")}
 	case p.shot == nil && p.err != "":
 		var out []string
-		for _, l := range wrap(sentence(p.err), w) {
+		for _, l := range wrap(sentence(shown(p.err)), w) {
 			out = append(out, sFaint.Render(l))
 		}
 		return out

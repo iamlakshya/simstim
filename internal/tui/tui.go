@@ -3,12 +3,13 @@
 //
 // The model never blocks: every request to a host runs in a tea.Cmd and
 // reports back with a message. Attaching hands the whole terminal to
-// client.Attach through tea.Exec, and the launcher comes back when the
-// user detaches.
+// client.Attach while the launcher stands down, and the launcher comes back
+// when the user detaches.
 package tui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -23,29 +24,100 @@ import (
 	"github.com/iamlakshya/simstim/internal/client"
 )
 
+var (
+	isTerminal = func(f *os.File) bool { return term.IsTerminal(int(f.Fd())) }
+	runProgram = func(ctx context.Context, m tea.Model, in io.Reader, out io.Writer) error {
+		if _, err := tea.NewProgram(m, tea.WithContext(ctx), tea.WithInput(in), tea.WithOutput(out)).Run(); err != nil {
+			return fmt.Errorf("run the launcher: %w", err)
+		}
+		return nil
+	}
+)
+
 // Run opens the launcher, with no providers for the guided setup.
 func Run(ctx context.Context) error { return RunWith(ctx, Options{}) }
 
 // RunWith opens the launcher with options; Motion is set from the settings.
 func RunWith(ctx context.Context, o Options) error {
-	return runWith(ctx, realBackend{local: o.Local}, o)
+	if localGitSourceInit != nil {
+		return localGitSourceInit
+	}
+	return runWith(ctx, DefaultBackend(o.Local), o)
 }
 
 func runWith(ctx context.Context, be Backend, o Options) error {
-	if !term.IsTerminal(int(os.Stdin.Fd())) || !term.IsTerminal(int(os.Stdout.Fd())) {
-		return &client.UserError{Msg: "the launcher needs a terminal", Hint: brand.Name + " ls, or run it in a terminal"}
+	what := "the launcher"
+	hint := brand.Name + " ls (lists the sessions without the launcher)"
+	if o.Switcher {
+		what = "the switcher"
+		hint = brand.Name + " flip <host>/<session> (names a session without the switcher)"
 	}
-	o.Motion = motionOn(be.Settings().UI.Motion, os.Getenv)
+	return runNamed(ctx, be, o, what, hint)
+}
+
+func runNamed(ctx context.Context, be Backend, o Options, what, hint string) (runErr error) {
+	if !client.InputAllowed(ctx) {
+		return &client.UserError{
+			Msg:  what + " cannot open with input off",
+			Hint: hint,
+			Code: "no_input",
+			Kind: client.KindNeedsAnswer,
+		}
+	}
+	in, out := launcherIn(), launcherOut()
+	if !isTerminal(in) || !isTerminal(out) || !isTerminal(os.Stderr) {
+		return &client.UserError{Msg: what + " needs a terminal", Hint: hint, Code: "launcher_no_terminal", Kind: client.KindFailed}
+	}
+	s, _ := be.ReadSettings()
+	o.Motion = motionOn(s.UI.Motion, os.Getenv)
 	m := New(ctx, be, o)
-	defer m.Close()
-	_, err := tea.NewProgram(timeFrames(m), tea.WithContext(ctx)).Run()
-	if err != nil && ctx.Err() != nil {
-		return nil // stopped by a signal; sessions keep running
+	m.handoff = true
+	defer func() {
+		m.closeAfterProgramContext(ctx)
+		runErr = errors.Join(runErr, m.grantOwners.pendingError(), m.selectedOwners.pendingError())
+	}()
+	prog := timeFrames(m)
+	resumed := false
+	for {
+		li, err := startLauncherInput(in)
+		if err != nil {
+			if resumed {
+				return resumeInputError(err)
+			}
+			return err
+		}
+		m.stopInput = li.finish
+		err = runProgram(ctx, prog, li, out)
+		stuck := li.finish()
+		li.restoreTerminal()
+		m.pauseBg()
+		if cleanupErr := errors.Join(m.grantOwners.pendingError(), m.selectedOwners.pendingError()); cleanupErr != nil {
+			return cleanupErr
+		}
+		if err != nil && ctx.Err() != nil {
+			return nil // stopped by a signal; sessions keep running
+		}
+		if err != nil {
+			return err
+		}
+		if m.inputErr != nil {
+			return m.inputErr
+		}
+
+		if m.pendingExec != nil {
+			prog, err = m.runPendingExec(ctx, in, out, stuck)
+		} else {
+			prog, err = m.runPendingAttach(ctx, in, out, stuck)
+		}
+		if ctx.Err() != nil {
+			return nil
+		}
+		if err != nil || prog == nil {
+			return err
+		}
+		resumed = true
+
 	}
-	if err != nil {
-		return fmt.Errorf("run the launcher: %w", err)
-	}
-	return nil
 }
 
 // motionOn applies ui.motion. "auto" turns motion off inside SSH sessions,
@@ -76,7 +148,7 @@ func (m *Model) View() tea.View {
 	v.ReportFocus = true
 	v.WindowTitle = brand.DisplayName
 	if h := m.selectedHost(); h != nil && m.screen == scrSessions {
-		v.WindowTitle += " · " + h.name()
+		v.WindowTitle += " · " + shown(h.name())
 	}
 	if n := m.needYou(); n > 0 {
 		v.WindowTitle = fmt.Sprintf("● %d · %s", n, v.WindowTitle)
@@ -165,12 +237,17 @@ func drawAt(c *lipgloss.Canvas, s string, x, y int) {
 // funcExec is a tea.ExecCommand that runs a function with the terminal.
 type funcExec struct {
 	in, out *os.File
+	li      *launcherInput
 	run     func(in, out *os.File) error
 }
 
 func (f *funcExec) SetStdin(r io.Reader) {
-	if file, ok := r.(*os.File); ok {
-		f.in = file
+	switch v := r.(type) {
+	case *os.File:
+		f.in = v
+	case *launcherInput:
+		f.in = v.in
+		f.li = v
 	}
 }
 
@@ -182,7 +259,17 @@ func (f *funcExec) SetStdout(w io.Writer) {
 
 func (f *funcExec) SetStderr(io.Writer) {}
 
-func (f *funcExec) Run() error {
+func (f *funcExec) Run() (err error) {
+	if f.li != nil {
+		if err := f.li.pauseForExec(); err != nil {
+			return resumeInputError(err)
+		}
+		defer func() {
+			if rerr := f.li.resumeAfterExec(); rerr != nil {
+				err = errors.Join(resumeInputError(rerr), err)
+			}
+		}()
+	}
 	in, out := f.in, f.out
 	if in == nil {
 		in = os.Stdin
@@ -193,8 +280,30 @@ func (f *funcExec) Run() error {
 	return f.run(in, out)
 }
 
+type pendingAttach struct {
+	settingsRead
+	opts           client.AttachOptions
+	host, id, name string
+}
+
+type resumedModel struct {
+	m    *Model
+	done attachDoneMsg
+}
+
+func (r *resumedModel) Init() tea.Cmd { return r.m.resumeAfterAttach(r.done) }
+func (r *resumedModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	_, cmd := r.m.Update(msg)
+	return r, cmd
+}
+func (r *resumedModel) View() tea.View { return r.m.View() }
+
 // attachTo hands the terminal to the session until the user detaches.
 func (m *Model) attachTo(h *hostConn, id, name string) tea.Cmd {
+	if m.handingOff() || m.jacking != nil {
+		return nil
+	}
+	name = client.CleanLine(name) // only drawn, in the notices after the attach
 	o := client.AttachOptions{
 		Host: h.host, Session: id, Settings: m.settings, State: m.attach,
 		// The launcher has let go of the terminal, so SSH may prompt.
@@ -204,18 +313,44 @@ func (m *Model) attachTo(h *hostConn, id, name string) tea.Cmd {
 	save := m.remember()
 	var res client.AttachResult
 	var aerr error
+	read := m.beginSettingsRead()
 	be, ctx, host := m.be, m.ctx, h.name()
+	save = func(sessions func()) func() {
+		return func() { sessions(); be.RememberLast(host, id, name) }
+	}(save)
+	if m.handoff {
+		save()
+		m.pendingAttach = &pendingAttach{opts: o, host: host, id: id, name: name, settingsRead: read}
+		return m.quitForHandoff()
+	}
 	x := &funcExec{run: func(in, out *os.File) error {
+		o.Settings, read = readSettings(be, o.Settings, read)
 		o.In, o.Out = in, out
-		res, aerr = be.Attach(ctx, o)
+		res, aerr = be.Attach(terminalAttachContextV1(ctx), o)
 		return nil
 	}}
-	return tea.Batch(func() tea.Msg { save(); return nil }, m.exec(x, func(err error) tea.Msg {
+	return tea.Batch(func() tea.Msg { save(); return nil }, m.execWithInput(x, func(err error) tea.Msg {
 		if aerr != nil {
 			err = aerr
 		}
-		return attachDoneMsg{host: host, id: id, name: name, res: res, err: err}
+		return attachDoneMsg{host: host, id: id, name: name, res: res, err: err, settingsRead: read}
 	}))
+}
+
+func writeAttachEnd(w io.Writer, name, host string, r client.AttachResult) {
+	name, host = client.CleanLine(name), client.CleanLine(host)
+	switch e := r.Ended; {
+	case e == nil:
+		_, _ = fmt.Fprintf(w, "\r\nDetached. %s keeps running on %s.\n", name, host)
+	case e.ExitCode == -1:
+		_, _ = fmt.Fprintf(w, "\r\n%s on %s stopped.\n", name, host)
+	case e.OOM:
+		_, _ = fmt.Fprintf(w, "\r\n%s on %s ended (out of memory).\n", name, host)
+	case e.Signal != "":
+		_, _ = fmt.Fprintf(w, "\r\n%s on %s ended (%s).\n", name, host, client.CleanLine(e.Signal))
+	default:
+		_, _ = fmt.Fprintf(w, "\r\n%s on %s ended (exit %d).\n", name, host, e.ExitCode)
+	}
 }
 
 func (m *Model) onAttachDone(msg attachDoneMsg) tea.Cmd {
@@ -228,10 +363,11 @@ func (m *Model) onAttachDone(msg attachDoneMsg) tea.Cmd {
 		return tea.Batch(append(cmds, m.toastErr(msg.err))...)
 	}
 	r := msg.res
+	name, host := shown(msg.name), shown(msg.host)
 	if r.Reconnects > 0 {
-		text := fmt.Sprintf("Reconnected to %s.", msg.host)
+		text := fmt.Sprintf("Reconnected to %s.", host)
 		if r.Missed > 0 {
-			text = fmt.Sprintf("Reconnected to %s (missed %s, replayed).", msg.host, fmtSize(r.Missed))
+			text = fmt.Sprintf("Reconnected to %s (missed %s, replayed).", host, fmtSize(r.Missed))
 		}
 		cmds = append(cmds, m.toast(toastInfo, text))
 	}
@@ -239,15 +375,15 @@ func (m *Model) onAttachDone(msg attachDoneMsg) tea.Cmd {
 	kind := toastSuccess
 	switch e := r.Ended; {
 	case e == nil:
-		text = fmt.Sprintf("Detached. %s keeps running on %s.", msg.name, msg.host)
+		text = fmt.Sprintf("Detached. %s keeps running on %s.", name, host)
 	case e.ExitCode == -1:
-		text, kind = fmt.Sprintf("%s on %s stopped.", msg.name, msg.host), toastWarning
+		text, kind = fmt.Sprintf("%s on %s stopped.", name, host), toastWarning
 	case e.OOM:
-		text, kind = fmt.Sprintf("%s on %s ended (out of memory).", msg.name, msg.host), toastWarning
+		text, kind = fmt.Sprintf("%s on %s ended (out of memory).", name, host), toastWarning
 	case e.Signal != "":
-		text, kind = fmt.Sprintf("%s on %s ended (%s).", msg.name, msg.host, e.Signal), toastWarning
+		text, kind = fmt.Sprintf("%s on %s ended (%s).", name, host, shown(e.Signal)), toastWarning
 	default:
-		text = fmt.Sprintf("%s on %s ended (exit %d).", msg.name, msg.host, e.ExitCode)
+		text = fmt.Sprintf("%s on %s ended (exit %d).", name, host, e.ExitCode)
 		if e.ExitCode != 0 {
 			kind = toastWarning
 		}

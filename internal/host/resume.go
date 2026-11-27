@@ -3,14 +3,15 @@ package host
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"sort"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/iamlakshya/simstim/internal/api"
 	"github.com/iamlakshya/simstim/internal/paths"
+	"github.com/iamlakshya/simstim/internal/proto"
 )
 
 // The user's resume: the agent of a session starts again in the same
@@ -40,7 +41,16 @@ type ResumeResult = api.ResumeResult
 // It keeps the session's ID, name, folder, worktree and manifest. The cap
 // is the size asked for now, else the size the session asked for before,
 // else the host's default.
-func Resume(a api.ResumeArgs) (*ResumeResult, error) {
+func Resume(a api.ResumeArgs) (*ResumeResult, error) { return ResumeContext(context.Background(), a) }
+
+// ResumeContext retains the actual caller and one original primary OP through native restart and cleanup.
+func ResumeContext(ctx context.Context, a api.ResumeArgs) (*ResumeResult, error) {
+	if ctx == nil {
+		return nil, UserError("bad_request", "resume has no original caller lifetime", "Start it through the original client request.")
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	id := a.ID
 	if !validID(id) {
 		return nil, UserError("not_found", "no session "+id, "List sessions to find its ID.")
@@ -48,31 +58,113 @@ func Resume(a api.ResumeArgs) (*ResumeResult, error) {
 	if err := checkMemoryMax(a.MemoryMax); err != nil {
 		return nil, err
 	}
+	if err := CheckCaller(); err != nil {
+		return nil, err
+	}
 	// A second resume of the session, such as a key pressed twice, would
 	// stop the first's new holder, or save over its manifest.
-	unlock, err := lockSession(id)
+	operation, err := BeginSessionOperation(ctx, id, renameWait)
 	if err != nil {
 		return nil, err
 	}
-	defer unlock()
-	m, err := LoadManifest(id)
+	defer operation.Close()
+	primary := operation.Primary()
+	m, err := operation.LoadContext(ctx)
 	if err != nil {
 		return nil, UserError("not_found", "no session "+id, "List sessions to find its ID.")
 	}
-	if alive(id) && m.Status.State != StateExited && m.Status.State != StateErrored {
-		return nil, UserError("agent_running", "the agent of "+m.Name+" still runs",
+	if m.Wall != nil && m.Wall.Driver != "plain" {
+		return nil, UserError("resume_preparation", "a native sandbox resume needs its original warm or cold preparation", "Prepare the resume through the same verified current client connection before sending values.")
+	}
+	if err := checkResumeExpectedImageV1(ctx, operation, a.ExpectedImageV1); err != nil {
+		return nil, err
+	}
+	if a.Snapshot != nil || len(a.Members) > 0 || primary != id {
+		return resumeBundleLocked(id, a, m, operation)
+	}
+	if err := validateResumeInputs(m, a.Inputs); err != nil {
+		return nil, err
+	}
+	if m.Wall != nil {
+		children, err := SandboxMembers(primary)
+		if err != nil {
+			return nil, err
+		}
+		if len(children) > 0 {
+			return nil, UserError("sandbox_changed", "this sandbox needs a complete member resume", "Read its complete snapshot and use a current client before resuming.")
+		}
+	}
+	pending := m.Status.State == StateStarting && m.Run.AgentPID == 0
+	if alive(id) && m.Status.State != StateExited && m.Status.State != StateErrored && !pending {
+		name := m.Name
+		if settled, ok := settledRenameName(id); ok {
+			name = settled
+		}
+		return nil, UserError("agent_running", "the agent of "+name+" still runs",
 			"Attach to it. To start it again, quit the agent first, then resume the session.")
+	}
+	delivery, err := prepareResumeSecretDelivery(m, a.SecretDelivery, a.Secrets)
+	if err != nil {
+		return nil, err
 	}
 	secrets, err := resumeSecrets(m.Secrets, a.Secrets)
 	if err != nil {
 		return nil, err
 	}
+	if err := validateRestartWall(m); err != nil {
+		return nil, err
+	}
+	if err := admitRestartMemoryRequestV1(ctx, operation, a); err != nil {
+		return nil, err
+	}
+	// A command that resumeArgv refuses stops nothing. startAgain checks
+	// it again, after the old holder's last save.
+	if _, _, err := resumeArgv(m); err != nil {
+		return nil, err
+	}
+	if pending {
+		if err := stopPendingForResume(id, m); err != nil {
+			return nil, err
+		}
+	}
+	environmentPreview := CloneManifest(*m)
+	if err := ApplyResumeLayers(&environmentPreview, a.Layers); err != nil {
+		return nil, err
+	}
+	if err := ApplyRepositoryResume(&environmentPreview, a); err != nil {
+		return nil, err
+	}
+	if err := prepareResumeEnvironment(&environmentPreview, a.Environment); err != nil {
+		return nil, err
+	}
 	// The session's debug stops with its old holder (holder_debug.go).
 	debugOn := debugUntil(m, alive(id)) != nil
-	stopHolder(id, m)
+	var legacyStop error
+	if m.Wall == nil && WallDriver != "legacy-none-test" {
+		legacyStop = stopLegacyForNoneResumeV1(ctx, operation)
+	} else {
+		legacyStop = stopResumeHolder(id, m, pending)
+	}
+	if err := legacyStop; err != nil {
+		return nil, UserError("busy", fmt.Sprintf("the previous holder of session %s could not be stopped: %v", id, err),
+			"Try again in a moment, or check the host with the host doctor.")
+	}
+	if oldHolderRuns(id) {
+		return nil, UserError("busy", fmt.Sprintf("the previous holder of session %s is still running", id),
+			"Try again in a moment, or check the host with the host doctor.")
+	}
 	// The old holder saves the manifest a last time as it stops.
-	if m, err = LoadManifest(id); err != nil {
+	if m, err = operation.LoadContext(ctx); err != nil {
 		return nil, UserError("not_found", "no session "+id, "List sessions to find its ID.")
+	}
+	if err := checkResumeExpectedImageV1(ctx, operation, a.ExpectedImageV1); err != nil {
+		return nil, err
+	}
+	if _, err := prepareResumeSecretDelivery(m, delivery, secrets); err != nil {
+		return nil, err
+	}
+	if err := reconcileUnsavedLocked(m); err != nil {
+		return nil, UserError("start_failed", err.Error(), "Check the session log with the host doctor.")
 	}
 	switch {
 	case a.MemoryMax > 0:
@@ -80,15 +172,37 @@ func Resume(a api.ResumeArgs) (*ResumeResult, error) {
 	case a.MemoryMax < 0:
 		m.Limits.MemoryAsked = 0
 	}
+	if err := validateResumeInputs(m, a.Inputs); err != nil {
+		return nil, err
+	}
+	if err := ApplyResumeLayers(m, a.Layers); err != nil {
+		return nil, err
+	}
+	if err := ApplyRepositoryResume(m, a); err != nil {
+		return nil, err
+	}
+	if err := prepareResumeEnvironment(m, a.Environment); err != nil {
+		return nil, err
+	}
+	m.HostLabel = a.HostLabel
+	m.Inputs = CloneInputSummary(a.Inputs)
 	m.Run.RespawnCount = 0
-	_, why, err := startAgain(m, again{label: resumedLabel, reason: "started again by a resume", secrets: secrets})
-	if err != nil {
+	_, why, err := startAgain(m, again{operation: operation, label: resumedLabel, reason: "started again by a resume", secrets: secrets, secretDelivery: delivery})
+	refused := restartRefusal(err)
+	switch {
+	case refused != nil:
+		return nil, refused // Preserve final admission data and command refusal hints.
+	case err != nil:
 		return nil, UserError("start_failed", err.Error(), "Check the session log with the host doctor.")
 	}
 	if mm := waitStarted(id, time.Second); mm != nil {
 		m = mm
 	}
-	return &ResumeResult{Session: infoFrom(m, alive(id)), Why: why, DebugStopped: debugOn}, nil
+	result := &ResumeResult{Session: publicationInfoFrom(m, alive(id)), Why: why, DebugStopped: debugOn}
+	if err := checkSecretPublicationResponse(result); err != nil {
+		return nil, err
+	}
+	return result, nil
 }
 
 // resumeSecrets checks the secrets that a resume brings, and returns those
@@ -122,56 +236,76 @@ var stopWait = 5 * time.Second
 
 // stopHolder stops the holder of session id, then its unit, and with the
 // unit every process that the agent left there. m is the session's
-// manifest, or nil when it cannot be read.
-func stopHolder(id string, m *Manifest) {
-	if alive(id) {
-		_, _ = HolderRequest(id, "kill", nil, 2*time.Second)
-		deadline := time.Now().Add(stopWait)
-		for alive(id) && time.Now().Before(deadline) {
-			time.Sleep(100 * time.Millisecond)
+// manifest, or nil when it cannot be read. It returns an error when a live
+// or starting holder could not be stopped.
+func stopHolder(id string, m *Manifest) error {
+	if err := stopOverSocket(id, m); err != nil {
+		return err
+	}
+	if m != nil && m.Run.Unit != "" {
+		if m.Run.Unit != UnitName(id) {
+			return fmt.Errorf("the recorded unit does not belong to session %s", id)
+		}
+		if !SystemdUser() {
+			return fmt.Errorf("the service manager cannot confirm the stop of session %s", id)
+		}
+		err := stopUnitChecked(m.Run.Unit)
+		waitUnitUnloaded(m.Run.Unit)
+		if err != nil {
+			return err
 		}
 	}
-	switch {
-	case m != nil && m.Run.Unit != "":
-		stopUnit(m.Run.Unit)
-	case m != nil && m.Run.HolderPID > 0 && alive(id):
-		killHolder(m.Run.HolderPID)
-	}
-	os.Remove(paths.Socket(id))
-}
-
-// killHolder stops a holder that did not stop when asked: SIGTERM first,
-// then SIGKILL when it is still there after stopWait. It returns only once
-// the holder is gone, or after stopWait more. The holder saves the manifest
-// and removes its socket as it stops. Both must come before a new holder
-// starts.
-func killHolder(pid int) {
-	_ = syscall.Kill(pid, syscall.SIGTERM)
-	if waitGone(pid, stopWait) {
-		return
-	}
-	_ = syscall.Kill(pid, syscall.SIGKILL)
-	waitGone(pid, stopWait)
-}
-
-// waitGone waits until the process pid has exited, for timeout at most. It
-// reaps the process when it is a child of this one, since a child that is
-// not reaped still answers kill(pid, 0). It reports whether it is gone.
-func waitGone(pid int, timeout time.Duration) bool {
-	deadline := time.Now().Add(timeout)
-	for {
-		var ws syscall.WaitStatus
-		if p, _ := syscall.Wait4(pid, &ws, syscall.WNOHANG, nil); p == pid {
-			return true
-		}
-		if errors.Is(syscall.Kill(pid, 0), syscall.ESRCH) {
-			return true
-		}
-		if time.Now().After(deadline) {
-			return false
-		}
+	// A lock proves that a holder exists, not that its recorded PID still
+	// names that process. Recovery never signals or reaps that bare PID.
+	// Only a launch that owns its *os.Process may stop it directly.
+	deadline := time.Now().Add(stopWait)
+	for holderStillRuns(id, m) && time.Now().Before(deadline) {
+		holderStopWaiting(id)
 		time.Sleep(50 * time.Millisecond)
 	}
+	if holderStillRuns(id, m) {
+		return fmt.Errorf("the holder of session %s has not confirmed its stop", id)
+	}
+	_ = os.Remove(paths.Socket(id))
+	_ = os.Remove(paths.HookSocket(id))
+	return nil
+}
+
+func holderStillRuns(id string, m *Manifest) bool {
+	return alive(id) || holderLockHeld(id) || recordedProcessRuns(id, m)
+}
+
+// holderStopWaiting lets tests release a legacy holder after its socket
+// closes but before its final save and process exit.
+var holderStopWaiting = func(string) {}
+
+// stopOverSocket allows an acknowledged legacy stop to finish without
+// signalling the recorded PID after its socket has gone.
+func stopOverSocket(id string, m *Manifest) error {
+	if alive(id) {
+		_, requestErr := HolderRequest(id, "kill", nil, 2*time.Second)
+		deadline := time.Now().Add(stopWait)
+		for (alive(id) || holderLockHeld(id) || requestErr == nil && recordedProcessRuns(id, m)) && time.Now().Before(deadline) {
+			var pe *proto.Error
+			if errors.As(requestErr, &pe) && pe.Code == "starting" && alive(id) {
+				if left := time.Until(deadline); left > 0 {
+					_, requestErr = HolderRequest(id, "kill", nil, min(2*time.Second, left))
+				}
+			}
+			holderStopWaiting(id)
+			time.Sleep(50 * time.Millisecond)
+		}
+		if requestErr == nil && !alive(id) && !holderLockHeld(id) && recordedProcessRuns(id, m) {
+			return fmt.Errorf("the holder of session %s accepted its stop but is still running", id)
+		}
+	}
+	return nil
+}
+
+// recordedProcessRuns observes the old holder after a successful stop reply.
+// It never signals or reaps a process whose socket has already closed.
+func recordedProcessRuns(id string, m *Manifest) bool {
+	return m != nil && (m.Run.BootID == "" || m.Run.BootID == BootID()) && holderPIDAlive(m.Run.HolderPID, id)
 }
 
 // stopUnit stops a session's unit, with every process in it. It then waits
@@ -181,6 +315,12 @@ func stopUnit(unit string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	_, _ = systemctl(ctx, "stop", unit)
+	waitUnitUnloaded(unit)
+}
+
+func waitUnitUnloaded(unit string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
 		out, err := systemctl(ctx, "show", unit, "-p", "LoadState", "--value")

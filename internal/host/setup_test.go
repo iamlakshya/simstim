@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/iamlakshya/simstim/internal/api"
 	"github.com/iamlakshya/simstim/internal/brand"
@@ -28,6 +29,20 @@ func setupRepo(t *testing.T) string {
 	for k, v := range map[string]string{"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.com", "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.com", "GIT_CONFIG_GLOBAL": os.DevNull} {
 		t.Setenv(k, v)
 	}
+	childRaces(t)
+	// No systemd user manager can be reached from here, as in hosttest.New,
+	// so git never runs in the developer's own slice. The scope tests fake
+	// one.
+	rt, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("XDG_RUNTIME_DIR", rt)
+	t.Setenv("DBUS_SESSION_BUS_ADDRESS", "")
+	// A fake systemctl can take seconds to start on a busy machine.
+	old := gitScopeProbeTimeout
+	gitScopeProbeTimeout = 30 * time.Second
+	t.Cleanup(func() { gitScopeProbeTimeout = old })
 	dir, _ := filepath.EvalSymlinks(t.TempDir())
 	repo := filepath.Join(dir, "app")
 	hook := filepath.Join(repo, "."+brand.Name, "setup")
@@ -43,11 +58,31 @@ func setupRepo(t *testing.T) string {
 	return repo
 }
 
+// childRaces makes the race detector of the git operations' children, which
+// are this test binary, write its reports to a folder, and fails the test
+// when one does. It also stops their pause at exit, a second each.
+func childRaces(t *testing.T) {
+	t.Helper()
+	dir := t.TempDir()
+	t.Setenv("GORACE", "log_path="+filepath.Join(dir, "race")+" atexit_sleep_ms=0")
+	t.Cleanup(func() {
+		reports, _ := filepath.Glob(filepath.Join(dir, "race.*"))
+		for _, r := range reports {
+			b, _ := os.ReadFile(r)
+			t.Errorf("a git operation's child found a data race:\n%s", b)
+		}
+	})
+}
+
 func question(t *testing.T, err error) api.SetupQuestion {
 	t.Helper()
 	var pe *proto.Error
 	if !errors.As(err, &pe) || pe.Code != api.CodeSetupTrust {
 		t.Fatalf("want a setup_trust question, got %v", err)
+	}
+	// The hint names the client's flags that answer the question.
+	if want := "Pass --setup-script to run it, or --no-setup-script to start without it. The launcher asks."; pe.Hint != want {
+		t.Errorf("the hint is %q, want %q", pe.Hint, want)
 	}
 	var q api.SetupQuestion
 	if json.Unmarshal(pe.Data, &q) != nil {
@@ -56,31 +91,60 @@ func question(t *testing.T, err error) api.SetupQuestion {
 	return q
 }
 
+// hashOf is the setup hash of the scripts at top, for a test.
+func hashOf(t *testing.T, top string) string {
+	t.Helper()
+	s, err := setupHash(top)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return s.hash
+}
+
 func TestSetupHooksNeedTrust(t *testing.T) {
 	repo := setupRepo(t)
 	script := filepath.Join(repo, "."+brand.Name, "setup")
 	sub := filepath.Join(repo, "src")
 	_ = os.MkdirAll(sub, 0o755)
+	hash := hashOf(t, repo)
 
-	// Unknown: ask, from the repository's root, even in a subfolder.
+	// Unknown: ask, from the repository's root, even in a subfolder. The
+	// question carries the setup hash.
 	_, err := setupHooks(NewArgs{}, sub, nil)
-	if q := question(t, err); q.Repo != repo || q.Script != script {
-		t.Fatalf("question %+v", q)
+	if q := question(t, err); q.Repo != repo || q.Script != script || q.Hash != hash {
+		t.Fatalf("question %+v, want hash %s", q, hash)
 	}
-	// Trusted, refused, and the two overrides.
+	// The order of spec 19.2: the override, the refusal, the hash.
 	for _, c := range []struct {
+		name string
 		a    NewArgs
 		want string
 	}{
-		{NewArgs{SetupTrust: map[string]bool{repo: true}}, script},
-		{NewArgs{SetupTrust: map[string]bool{repo: false}}, ""},
-		{NewArgs{Setup: api.SetupRun, SetupTrust: map[string]bool{repo: false}}, script},
-		{NewArgs{Setup: api.SetupSkip, SetupTrust: map[string]bool{repo: true}}, ""},
+		{"--setup-script", NewArgs{Setup: api.SetupRun, SetupTrust: map[string]bool{repo: false}}, script},
+		{"--no-setup-script", NewArgs{Setup: api.SetupSkip, SetupHashes: map[string]string{repo: hash}}, ""},
+		{"refused", NewArgs{SetupTrust: map[string]bool{repo: false}, SetupHashes: map[string]string{repo: hash}}, ""},
+		{"trusted", NewArgs{SetupHashes: map[string]string{repo: hash}}, script},
 	} {
 		h, err := setupHooks(c.a, sub, nil)
 		if err != nil || h.setup != c.want {
-			t.Errorf("%+v: setup %q, %v; want %q", c.a, h.setup, err, c.want)
+			t.Errorf("%s: setup %q, %v; want %q", c.name, h.setup, err, c.want)
 		}
+		if (h.hash != "") != (c.want != "") || h.hash != "" && h.hash != hash {
+			t.Errorf("%s: hash %q, want it only when the scripts run", c.name, h.hash)
+		}
+	}
+	// Otherwise it asks: for another hash, saying that the script changed,
+	// and for an older client's yes without a hash.
+	_, err = setupHooks(NewArgs{SetupHashes: map[string]string{repo: "an older hash"}}, sub, nil)
+	var pe *proto.Error
+	if q := question(t, err); q.Hash != hash || !errors.As(err, &pe) || !strings.Contains(pe.Message, "changed after you trusted it") {
+		t.Errorf("changed: %v, question %+v", err, q)
+	}
+	if q := question(t, func() error {
+		_, err := setupHooks(NewArgs{SetupTrust: map[string]bool{repo: true}}, sub, nil)
+		return err
+	}()); q.Hash != hash {
+		t.Errorf("an older client's yes: question %+v", q)
 	}
 	// A refused repository falls back to the host's own hook.
 	own := filepath.Join(paths.ConfigDir(), "hooks", "setup")
@@ -96,16 +160,18 @@ func TestSetupHooksNeedTrust(t *testing.T) {
 }
 
 func TestSetupHooksInANewWorktree(t *testing.T) {
+	skipOnGit254(t)
 	repo := setupRepo(t)
 	gi, err := makeWorktree(repo, "fix", "abcd2345", "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	// The worktree shares the repository's answer.
-	if key, top := repoOf(gi.Worktree); key != repo || top != gi.Worktree {
-		t.Fatalf("repoOf(worktree) = %s, %s", key, top)
+	if key, top, err := repoOf(gi.Worktree); key != repo || top != gi.Worktree || err != nil {
+		t.Fatalf("repoOf(worktree) = %s, %s, %v", key, top, err)
 	}
-	h, err := setupHooks(NewArgs{SetupTrust: map[string]bool{repo: true}}, gi.Worktree, gi)
+	// The worktree's scripts are the repository's: the same hash.
+	h, err := setupHooks(NewArgs{SetupHashes: map[string]string{repo: hashOf(t, repo)}}, gi.Worktree, gi)
 	if err != nil || h.setup != filepath.Join(gi.Worktree, "."+brand.Name, "setup") {
 		t.Fatalf("trusted worktree: %+v %v", h, err)
 	}

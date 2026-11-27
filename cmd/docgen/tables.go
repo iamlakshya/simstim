@@ -7,6 +7,7 @@ import (
 
 	"github.com/iamlakshya/simstim/internal/agents"
 	"github.com/iamlakshya/simstim/internal/brand"
+	"github.com/iamlakshya/simstim/internal/cli"
 	"github.com/iamlakshya/simstim/internal/client"
 	"github.com/iamlakshya/simstim/internal/tui"
 )
@@ -76,15 +77,47 @@ func agentsPage() []byte {
 		fmt.Fprintf(&b, "| %s | `%s` | %s | `%s` | `%s` | %s | %s | %s |\n", a.Title, a.Kind, a.Support, strings.Join(a.Binaries, "`, `"), strings.Join(a.Launch, " "), resume, status, inline)
 	}
 	b.WriteString("\n**Inline mode** is how an agent draws in the terminal's normal screen, so your terminal keeps its scrollback. `new --inline`, or `agents.inline` in [the configuration](config.md), starts agents that have one this way; see [keep your scrollback](../how-to/scrollback.md).\n")
+	approvalsTable(&b)
 	installTable(&b)
 	b.WriteString("\nTo add an agent, add a row to the table and, if it has them, screen rules in `internal/agents/rules/`. See [the contributing guide](../../CONTRIBUTING.md).\n")
 	return []byte(b.String())
 }
 
+// approvalsTable lists the form of each agent's session IDs, and the
+// arguments that turn its own approvals off.
+func approvalsTable(b *strings.Builder) {
+	b.WriteString("\n## Session IDs and approvals\n\n")
+	b.WriteString("A restore or a resume gives the agent's own session ID to its resume command ([what comes back](../how-to/restore-after-reboot.md#what-comes-back)). The agent's hook can report a new ID, for example after `/clear`. The host uses an ID only when it has the agent's form below, or when the host chose the ID itself. It checks an ID when a hook reports it, and again before each resume, so it also checks an ID that an older helper saved. So a hook cannot add a flag to the resume command. Without a usable ID, a session with a command of its own runs that command again. Any other session runs the agent's continue command. The session's `holder.log` says why the host did not use an ID.\n\n")
+	b.WriteString("A restore or a resume also refuses a command that turns the agent's own approvals off, unless the session's own command holds the same argument, with the same values. So `--allowedTools Read` that you typed does not allow `--allowedTools Bash`. The table lists these arguments:\n\n")
+	b.WriteString("- A flag alone, such as `--yolo`, is a switch. `--flag=*` takes one value, any value. `--flag=a|b` takes one value and counts only with one of these, and `--flag!=a|b` with any value but these. `--flag=...` takes a list of values, up to the next argument that starts with `-`. A value can follow `=`, follow a short flag directly, or be the next argument. `{}` stands for a JSON object, so `--settings!={}` refuses a path to a settings file, which the host cannot read.\n")
+	b.WriteString("- A text counts in any argument, in upper or lower case. The host also decodes an argument that is a JSON object, or a `key=value` override with a TOML value, and checks the keys and strings inside. So an escape such as `\\u0062` cannot hide a text. `key!=a|b` is that key with any value but these, and `key=*` is that key with any value.\n\n")
+	b.WriteString("| Agent | Session ID form | Flags | Text |\n| --- | --- | --- | --- |\n")
+	for _, a := range agents.Table {
+		if a.IDPattern == "" && len(a.DangerFlags) == 0 && len(a.DangerText) == 0 {
+			continue
+		}
+		fmt.Fprintf(b, "| %s | %s | %s | %s |\n", a.Title, codeList([]string{a.IDPattern}), codeList(a.DangerFlags), codeList(a.DangerText))
+	}
+}
+
+// codeList writes items as code, separated by commas, or a dash for none.
+func codeList(items []string) string {
+	var out []string
+	for _, s := range items {
+		if s != "" {
+			out = append(out, "`"+strings.ReplaceAll(s, "|", "\\|")+"`")
+		}
+	}
+	if len(out) == 0 {
+		return "—"
+	}
+	return strings.Join(out, ", ")
+}
+
 // installTable lists each agent's install command and how a host tells that
 // it is logged in.
 func installTable(b *strings.Builder) {
-	fmt.Fprintf(b, "\n## Install and log in\n\n`%s agents install <agent>` runs the install command in a session on the host. `host add` and `host doctor` check each first-class and supported agent, and any other installed one: is it installed, does a login shell find it, and is it logged in. You log in yourself, with the agent's own login in a session ([install agents](../how-to/install-agents.md)).\n\n", brand.Name)
+	fmt.Fprintf(b, "\n## Install and log in\n\n`%[1]s agents install <agent> <host>` runs the install command in a session on the host. `host add` and `host doctor` check each first-class and supported agent, and any other installed one: is it installed, does a login shell find it, and is it logged in. `%[1]s agents login <agent> <host>` starts the agent's own login in a session, and you answer it there ([install agents](../how-to/install-agents.md)).\n\n", brand.Name)
 	b.WriteString("| Agent | Install command | Log in with | Logged in when |\n| --- | --- | --- | --- |\n")
 	for _, a := range agents.Installable() {
 		s := a.Setup
@@ -109,6 +142,56 @@ func installTable(b *strings.Builder) {
 	}
 }
 
+// exitCodesPage lists the exit codes, from the table that the client uses,
+// with the prose of help exit-codes. It holds the table of CLI spec 5.1
+// only: P1.13 adds that of 5.2, the codes of exec, with exec.
+func exitCodesPage() []byte {
+	var b strings.Builder
+	b.WriteString(header("Exit codes", "5"))
+	fmt.Fprintf(&b, "%s `%s help exit-codes` prints the same table. [Scripting](../how-to/scripting.md) shows the JSON line.\n\n", prose(cli.ExitCodesIntro), brand.Name)
+	b.WriteString("| Code | Kind | Meaning | Examples |\n| --- | --- | --- | --- |\n")
+	for _, e := range cli.ExitCodes() {
+		kind := ""
+		if e.Code != 0 {
+			kind = "`" + e.Kind.String() + "`"
+		}
+		fmt.Fprintf(&b, "| %d | %s | %s | %s |\n", e.Code, kind, e.Meaning, e.Examples)
+	}
+	b.WriteString("\n" + prose(cli.ExitCodesOutro) + "\n")
+	return []byte(b.String())
+}
+
+// conceptsPage lists the words that the tool uses, from the list that help
+// concepts prints, with its prose.
+func conceptsPage() []byte {
+	var b strings.Builder
+	b.WriteString(header("Concepts", "6"))
+	fmt.Fprintf(&b, "%s `%s help concepts` prints the same list.\n\n", prose(cli.ConceptsIntro), brand.Name)
+	b.WriteString("| Word | Meaning |\n| --- | --- |\n")
+	for _, c := range cli.Concepts() {
+		fmt.Fprintf(&b, "| %s | %s |\n", cell(c.Word), cell(sentence(c.Meaning)))
+	}
+	return []byte(b.String())
+}
+
+// topicPages adds a page for each help topic, <topic>.md
+// (docs/contributing/cli-spec.md 8.3). A topic without a page here fails
+// the run.
+func topicPages(pages map[string][]byte) error {
+	builders := map[string]func() []byte{"concepts": conceptsPage, "exit-codes": exitCodesPage}
+	for _, c := range root().Commands() {
+		if !cli.IsTopic(c) {
+			continue
+		}
+		page, ok := builders[c.Name()]
+		if !ok {
+			return fmt.Errorf("the help topic %q has no reference page.\nTry: add a page for it to topicPages in cmd/docgen", c.Name())
+		}
+		pages[c.Name()+".md"] = page()
+	}
+	return nil
+}
+
 // indexPage is the reference section's home.
 func indexPage() []byte {
 	var b strings.Builder
@@ -118,6 +201,8 @@ func indexPage() []byte {
 	b.WriteString("- [Configuration](config.md): `config.toml` and `hosts.toml`.\n")
 	b.WriteString("- [Keys](keymap.md): the launcher's commands and keys.\n")
 	b.WriteString("- [Agents](agents.md): the agent table.\n")
+	b.WriteString("- [Exit codes](exit-codes.md): what each exit code means.\n")
+	b.WriteString("- [Concepts](concepts.md): the words that the tool uses.\n")
 	return []byte(b.String())
 }
 

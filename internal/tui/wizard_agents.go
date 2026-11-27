@@ -6,6 +6,8 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/iamlakshya/simstim/internal/api"
+	"github.com/iamlakshya/simstim/internal/brand"
 	"github.com/iamlakshya/simstim/internal/client"
 	"github.com/iamlakshya/simstim/internal/onboard"
 )
@@ -16,18 +18,21 @@ import (
 // only shows it and runs it.
 
 type agentPart struct {
-	flow     *onboard.Flow
-	checking bool // the host's agent checks are on their way
-	row      int  // the selected row of the checklist
-	unfold   bool // the best-effort agents show
-	act      onboard.Action
-	starting bool          // the session of act is starting
-	waiting  string        // the session the wizard waits on, while attached
-	last     *onboard.Line // how the last install or login went
+	flow       *onboard.Flow
+	checking   bool // the host's agent checks are on their way
+	checkAct   onboard.Action
+	checkEnded bool
+	row        int  // the selected row of the checklist
+	unfold     bool // the best-effort agents show
+	act        onboard.Action
+	starting   bool          // the session of act is starting
+	waiting    string        // the session the wizard waits on, while attached
+	last       *onboard.Line // how the last install or login went
 }
 
 type (
 	agentChecksMsg struct {
+		owner  *wizard
 		seq    int
 		checks []client.AgentCheck
 		err    error
@@ -35,9 +40,11 @@ type (
 		ended  bool
 	}
 	actStartedMsg struct {
-		seq int
-		s   *client.Session
-		err error
+		owner *wizard
+		seq   int
+		s     *client.Session
+		err   error
+		settingsRead
 	}
 )
 
@@ -71,21 +78,24 @@ func (w *wizard) recheck(m *Model, a onboard.Action, ended bool) tea.Cmd {
 		}
 		return nil
 	}
+	ctx, seq := w.beginAgentOp(m)
 	w.checking = true
-	c, ctx, seq := h.conn, m.ctx, w.seq
-	return func() tea.Msg {
+	w.checkAct, w.checkEnded = a, ended
+	c := h.conn
+	return m.bgCmd(func(context.Context) tea.Msg {
 		cctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 		defer cancel()
 		checks, err := c.AgentChecks(cctx)
-		return agentChecksMsg{seq: seq, checks: checks, err: err, act: a, ended: ended}
-	}
+		return agentChecksMsg{owner: w, seq: seq, checks: checks, err: err, act: a, ended: ended}
+	})
 }
 
 func (w *wizard) onAgentChecks(m *Model, msg agentChecksMsg) tea.Cmd {
-	if msg.seq != w.seq {
+	if !w.owns(msg.owner, msg.seq) || !w.checking || !w.saved || (w.step != wzReady && w.step != wzRun) {
 		return nil
 	}
 	w.checking = false
+	w.finishOp()
 	if msg.err != nil {
 		// An older helper cannot check agents: the wizard ends at "ready".
 		if msg.act.Kind != "" {
@@ -97,7 +107,10 @@ func (w *wizard) onAgentChecks(m *Model, msg agentChecksMsg) tea.Cmd {
 		w.flow = onboard.NewFlow(w.host.Name, msg.checks, nil)
 		return nil
 	}
-	w.flow.Done(msg.act, msg.checks, msg.ended)
+	if err := w.flow.Done(msg.act, msg.checks, msg.ended); err != nil {
+		w.err = err
+		return nil
+	}
 	l := w.flow.Line(msg.act.Agent.Kind)
 	w.last = &l
 	var cmd tea.Cmd
@@ -198,6 +211,7 @@ func (w *wizard) agentBack(m *Model) tea.Cmd {
 		w.last = nil
 		w.step = wzDone
 	default:
+		w.stop()
 		m.modal = nil
 	}
 	return nil
@@ -210,25 +224,37 @@ func (w *wizard) runAct(m *Model) tea.Cmd {
 		w.err = w.hostErr(h)
 		return nil
 	}
+	ctx, seq := w.beginAgentOp(m)
 	w.starting, w.err = true, nil
-	a := client.TerminalArgs(w.act.Args, m.width, m.height)
-	c, ctx, seq := h.conn, m.ctx, w.seq
-	return func() tea.Msg {
-		cctx, cancel := context.WithTimeout(ctx, 60*time.Second)
+	c, be, kept, args, cols, rows := h.conn, m.be, m.settings, w.act.Args, m.width, m.height
+	read := m.beginSettingsRead()
+	return m.bgCmdFrom(ctx, func(actionCtx context.Context) tea.Msg {
+		settings, read := readSettings(be, kept, read)
+		a, err := client.SessionArgs(args, cols, rows, settings)
+		if err != nil {
+			return actStartedMsg{owner: w, seq: seq, err: err, settingsRead: read}
+		}
+		cctx, cancel := context.WithTimeout(actionCtx, 60*time.Second)
 		defer cancel()
 		s, err := c.NewSession(cctx, a)
-		return actStartedMsg{seq: seq, s: s, err: err}
-	}
+		return actStartedMsg{owner: w, seq: seq, s: s, err: err, settingsRead: read}
+	})
 }
 
 func (w *wizard) onActStarted(m *Model, msg actStartedMsg) tea.Cmd {
-	if msg.seq != w.seq {
+	if !w.owns(msg.owner, msg.seq) || w.step != wzRun || !w.starting || w.waiting != "" {
 		return nil
 	}
 	w.starting = false
+	w.finishOp()
 	h := m.hostByName(w.host.Name)
 	if msg.err != nil || msg.s == nil || h == nil {
 		w.err = msg.err
+		return nil
+	}
+	if !api.ValidSessionID(msg.s.ID) {
+		w.err = &client.UserError{Msg: "the host sent a session ID that is not valid",
+			Hint: brand.Name + " host doctor " + client.ShellWord(w.host.Name), Code: "bad_session_id"}
 		return nil
 	}
 	h.sessions = append(h.sessions, *msg.s)
@@ -265,7 +291,7 @@ func (w *wizard) startSession(m *Model, agent string) {
 // hostErr says why the wizard's host cannot be reached now.
 func (w *wizard) hostErr(h *hostConn) error {
 	if h == nil {
-		return &client.UserError{Msg: w.host.Name + " is no longer in the list", Hint: "Close this, and add the host again."}
+		return &client.UserError{Msg: w.host.Name + " is no longer in the list", Hint: "Close this, and add the host again.", Code: "host_not_found", Kind: client.KindNotFound}
 	}
 	return offlineErr(h)
 }

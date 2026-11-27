@@ -3,20 +3,14 @@ package client
 import (
 	"bufio"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
-	"github.com/iamlakshya/simstim/internal/brand"
 	"github.com/iamlakshya/simstim/internal/proto"
-	"github.com/iamlakshya/simstim/internal/version"
 )
 
 // ErrClosed is returned after the connection to the host is gone.
@@ -29,16 +23,40 @@ type Conn struct {
 	Host     Host
 	Features []string
 
+	hostTransport  *hostTransportStamp
+	hostID         string
+	hostIDChanged  bool
+	route          route
+	agentOnly      bool
+	agentReader    *bufio.Reader
+	procWatch      sync.Once
+	procDone       chan struct{}
+	agentStopTime  sync.Once
+	agentStoppedAt time.Time
+	agentClose     sync.Once
+
+	execReader       *bufio.Reader
+	execReadDone     chan struct{}
+	execReadOnce     sync.Once
+	execBusy         atomic.Int64
+	leaseMu          sync.Mutex
+	leaser           Leaser
+	machineLeaseDone chan struct{}
+	execAlive        time.Duration
+
 	proc   Proc
+	cancel context.CancelFunc
 	hint   string
 	w      *proto.Writer
 	stdin  io.WriteCloser
 	nextID atomic.Uint64
 
-	mu      sync.Mutex
-	pending map[uint64]chan proto.Response
-	stream  chan proto.Frame // attach frames: Attached, Output, Ended, Error
-	err     error
+	mu          sync.Mutex
+	pending     map[uint64]chan proto.Response
+	uploading   chan struct{}
+	stream      chan proto.Frame // attach frames: Attached, Output, Ended, Error
+	err         error
+	procWaitErr error // actual single Proc.Wait result, under mu
 
 	lastRecv atomic.Int64
 	done     chan struct{}
@@ -55,129 +73,50 @@ type Conn struct {
 // ErrNotInstalled means the host has no helper of this client's version.
 var ErrNotInstalled = errors.New("the helper is not installed")
 
-// Dial starts the bridge on the host and does the hello. For a saved host (one
-// the user added, and so agreed to the helper on), a missing helper of this
-// version is installed first: an upgrade never needs the user.
-//
-// A host that a provider made is asked for its state first, and started or
-// resumed when it is stopped, unless ctx comes from WithoutWake.
-func Dial(ctx context.Context, h Host, interactive bool) (*Conn, error) {
-	r, err := routeTo(ctx, h, interactive)
-	if err != nil {
-		return nil, err
-	}
-	c, err := dial(ctx, h, r)
-	var ue *UserError
-	if err != nil && h.Provider != nil && h.Provider.WakeOnAttach && errors.As(err, &ue) && strings.HasPrefix(ue.Msg, "cannot reach") {
-		// A stopped cloud host: start it through its provider script, then try again.
-		if werr := wake(ctx, h); werr != nil {
-			return nil, werr
-		}
-		c, err = dial(ctx, h, r)
-	}
-	if !errors.Is(err, ErrNotInstalled) {
-		return c, err
-	}
-	if _, ferr := FindHost(h.Name); ferr != nil {
-		return nil, &UserError{Msg: fmt.Sprintf("the %s helper is not installed on %s", brand.Name, h.Name), Hint: brand.Name + " host add " + h.Name}
-	}
-	p, perr := Probe(ctx, r.t)
-	if perr != nil {
-		return nil, perr
-	}
-	if !p.Installed {
-		if ierr := Install(ctx, r.t, p); ierr != nil {
-			return nil, ierr
-		}
-	}
-	return dial(ctx, h, r)
+// HostID returns the 32-character hex host ID from the bridge's hello, or ""
+// when an older helper sent none.
+func (c *Conn) HostID() string { return c.hostID }
+
+// HostIDChanged reports whether this connection observed a host ID different
+// from the one previously stored in tiers.toml.
+func (c *Conn) HostIDChanged() bool { return c.hostIDChanged }
+
+// startupExitWait bounds the grace after the transport closes its stream.
+var startupExitWait = 500 * time.Millisecond
+
+func (c *Conn) killStartup() {
+	c.kill()
+	c.watchProcess()
 }
 
-func dial(ctx context.Context, h Host, rt route) (*Conn, error) {
-	remote := RemoteHelper(HelperVersion()) + " bridge"
-	ka, _ := rt.t.(KeepAliver)
-	if ka != nil {
-		// This transport does not end the bridge when the client goes, so the
-		// bridge ends itself when the pings stop.
-		remote += fmt.Sprintf(" --idle-exit %d", int(BridgeIdleExit.Seconds()))
-	}
-	// The bridge lives as long as the connection, not as long as this dial:
-	// it keeps ctx's values but not its deadline.
-	proc, err := rt.t.Start(context.WithoutCancel(ctx), remote)
-	if err != nil {
-		return nil, err
-	}
-	stdin := proc.Stdin()
-	c := &Conn{Host: h, proc: proc, hint: rt.t.ReachHint(), stdin: stdin, w: proto.NewWriter(stdin),
-		pending: map[uint64]chan proto.Response{}, stream: make(chan proto.Frame, 4096), done: make(chan struct{}),
-		tr: newConnTrace(ctx)}
-	r := bufio.NewReaderSize(proc.Stdout(), 256<<10)
-	if err := c.w.WriteJSON(proto.THello, proto.Hello{Magic: proto.Magic, Protocol: version.Protocol, Version: version.Version, Role: "client"}); err != nil {
-		c.kill()
-		return nil, c.startError(err)
-	}
-	type res struct {
-		f   proto.Frame
-		err error
-	}
-	first := make(chan res, 1)
-	go func() { f, err := proto.Read(r); first <- res{f, err} }()
+// waitStartup lets a transport report its exit after closing stdout. SSH and
+// container transports can close the stream before collecting that status.
+// Killing them first would replace a useful exit code with a local signal.
+func (c *Conn) waitStartup(ctx context.Context) error {
+	_ = c.stdin.Close()
+	c.watchProcess()
+	timer := time.NewTimer(startupExitWait)
+	defer timer.Stop()
 	select {
+	case <-c.procDone:
+		return c.processWaitErrorV1()
 	case <-ctx.Done():
 		c.kill()
-		return nil, ctx.Err()
-	case x := <-first:
-		if x.err != nil {
-			c.kill()
-			return nil, c.startError(x.err)
+		return ctx.Err()
+	case <-timer.C:
+		c.kill()
+		joined := time.NewTimer(3 * sshWaitDelay)
+		defer joined.Stop()
+		select {
+		case <-c.procDone:
+			return c.processWaitErrorV1()
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-joined.C:
+			return &UserError{Msg: "the transport has not finished cleanup after its failed start",
+				Hint: "Wait for the original transport to finish before trying another host.", Code: "transport_cleanup", Kind: KindFailed}
 		}
-		if x.f.Type != proto.THello {
-			c.kill()
-			return nil, errors.New("unexpected first frame from host")
-		}
-		var hello proto.Hello
-		if err := json.Unmarshal(x.f.Payload, &hello); err != nil {
-			c.kill()
-			return nil, fmt.Errorf("read the host's hello: %w", err)
-		}
-		if err := hello.Check(version.Protocol); err != nil {
-			c.kill()
-			return nil, &UserError{Msg: err.Error(), Hint: brand.Name + " host add " + h.Name + "   (reinstalls the helper)"}
-		}
-		c.Features = hello.Features
 	}
-	c.lastRecv.Store(time.Now().UnixNano())
-	go c.readLoop(r)
-	c.startBridgeDebug(ctx)
-	go func() {
-		_ = proc.Wait()
-		c.fail(ErrClosed)
-	}()
-	if ka != nil {
-		go c.keepAlive(ka.KeepAlive())
-	}
-	if l, ok := rt.lc.(Leaser); ok {
-		go keepLease(context.WithoutCancel(ctx), c, l, leasePeriod)
-	}
-	return c, nil
-}
-
-func (c *Conn) startError(err error) error {
-	waitErr := c.proc.Wait()
-	msg := strings.TrimSpace(c.proc.Stderr())
-	if strings.Contains(msg, "No such file") || strings.Contains(msg, "not found") {
-		return ErrNotInstalled
-	}
-	if msg == "" {
-		return err
-	}
-	if lines := strings.Split(msg, "\n"); len(lines) > 3 {
-		msg = strings.Join(lines[len(lines)-3:], "\n")
-	}
-	if errors.Is(waitErr, ErrUnreachable) {
-		return &UserError{Msg: fmt.Sprintf("cannot reach %s: %s", c.Host.Name, msg), Hint: c.hint}
-	}
-	return &UserError{Msg: fmt.Sprintf("the helper on %s did not start: %s", c.Host.Name, msg), Hint: brand.Name + " host doctor " + c.Host.Name}
 }
 
 func (c *Conn) readLoop(r *bufio.Reader) {
@@ -231,10 +170,91 @@ func (c *Conn) fail(err error) {
 	}
 }
 
-func (c *Conn) kill() { c.proc.Kill() }
+func (c *Conn) kill() {
+	if c.cancel != nil {
+		c.cancel()
+	}
+	c.proc.Kill()
+}
+
+func (c *Conn) watchProcess() {
+	c.procWatch.Do(func() {
+		if c.procDone == nil {
+			c.procDone = make(chan struct{})
+		}
+		go func() {
+			if c.cancel != nil {
+				defer c.cancel()
+			}
+			err := c.proc.Wait()
+			c.mu.Lock()
+			c.procWaitErr = err
+			c.mu.Unlock()
+			close(c.procDone)
+			c.fail(ErrClosed)
+		}()
+	})
+}
+
+func (c *Conn) processWaitErrorV1() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.procWaitErr
+}
+
+// closeAgentTransport interrupts only this connection's owned process and
+// pipes. A link reader can call it without recursively joining itself.
+func (c *Conn) closeAgentTransport() error {
+	c.agentStopTime.Do(func() {
+		at := time.Now()
+		if source, ok := c.proc.(*sshProc); ok {
+			at = source.revokeAgentAt(at)
+		}
+		c.agentStoppedAt = at
+	})
+	c.kill()
+	if output, ok := c.proc.Stdout().(io.Closer); ok {
+		_ = output.Close()
+	}
+	_ = c.stdin.Close()
+	c.fail(ErrClosed)
+	return nil
+}
 
 // Close ends the connection.
 func (c *Conn) Close() {
+	if c.execReader != nil {
+		c.kill()
+		if output, ok := c.proc.Stdout().(io.Closer); ok {
+			_ = output.Close()
+		}
+		_ = c.stdin.Close()
+		c.fail(ErrClosed)
+		// The actual mux/pump owner marks readDone only AFTER its read joins.
+		return
+	}
+	if c.agentOnly {
+		c.agentClose.Do(func() {
+			_ = c.closeAgentTransport()
+			// Process output can need two seconds, followed by the native
+			// log's single four-second scan/cleanup budget. Link teardown
+			// overlaps this absolute deadline and repeated Close adds none.
+			remaining := time.Until(c.agentStoppedAt.Add(3 * sshWaitDelay))
+			timer := time.NewTimer(max(remaining, 0))
+			defer timer.Stop()
+			select {
+			case <-c.procDone:
+			case <-timer.C:
+				if source, ok := c.proc.(*sshProc); ok {
+					source.agentShutdownFailed()
+				}
+			}
+		})
+		return
+	}
+	if c.cancel != nil {
+		defer c.cancel()
+	}
 	_ = c.stdin.Close()
 	select {
 	case <-c.done:
@@ -258,53 +278,6 @@ func (c *Conn) Ping() error {
 	return c.w.Write(proto.TPing, nil)
 }
 
-// Call sends a request and decodes the result into out.
-func (c *Conn) Call(ctx context.Context, op string, args any, out any) error {
-	id := c.nextID.Add(1)
-	req := proto.Request{ID: id, Op: op}
-	if args != nil {
-		b, err := json.Marshal(args)
-		if err != nil {
-			return fmt.Errorf("encode the %s request: %w", op, err)
-		}
-		req.Args = b
-	}
-	ch := make(chan proto.Response, 1)
-	c.mu.Lock()
-	if c.err != nil {
-		c.mu.Unlock()
-		return c.err
-	}
-	c.pending[id] = ch
-	c.mu.Unlock()
-	if err := c.w.WriteJSON(proto.TRequest, req); err != nil {
-		return ErrClosed
-	}
-	select {
-	case <-ctx.Done():
-		c.mu.Lock()
-		delete(c.pending, id)
-		c.mu.Unlock()
-		return ctx.Err()
-	case resp, ok := <-ch:
-		if !ok {
-			return ErrClosed
-		}
-		if !resp.OK {
-			if resp.Error != nil {
-				return &UserError{Msg: resp.Error.Message, Hint: resp.Error.Hint, Code: resp.Error.Code, Data: resp.Error.Data}
-			}
-			return errors.New("the host refused the request")
-		}
-		if out != nil && len(resp.Result) > 0 {
-			if err := json.Unmarshal(resp.Result, out); err != nil {
-				return fmt.Errorf("read the answer to %s: %w", op, err)
-			}
-		}
-		return nil
-	}
-}
-
 // Stream returns attach frames.
 func (c *Conn) Stream() <-chan proto.Frame { return c.stream }
 
@@ -318,51 +291,3 @@ func (c *Conn) Send(t proto.Type, p []byte) error {
 
 // SendJSON writes a JSON frame.
 func (c *Conn) SendJSON(t proto.Type, v any) error { return c.w.WriteJSON(t, v) }
-
-// Upload sends a file into a session's paste folder and returns its path on the host.
-func (c *Conn) Upload(ctx context.Context, session, name string, data []byte) (string, error) {
-	id := c.nextID.Add(1)
-	ch := make(chan proto.Response, 1)
-	c.mu.Lock()
-	if c.err != nil {
-		c.mu.Unlock()
-		return "", c.err
-	}
-	c.pending[id] = ch
-	c.mu.Unlock()
-	if err := c.w.WriteJSON(proto.TUploadBegin, proto.UploadBegin{ID: id, Session: session, Name: name, Size: int64(len(data))}); err != nil {
-		return "", ErrClosed
-	}
-	for off := 0; off < len(data); off += 256 << 10 {
-		end := off + 256<<10
-		if end > len(data) {
-			end = len(data)
-		}
-		if err := c.w.Write(proto.TUploadChunk, proto.EncodeChunk(id, data[off:end])); err != nil {
-			return "", ErrClosed
-		}
-	}
-	sum := sha256.Sum256(data)
-	if err := c.w.WriteJSON(proto.TUploadEnd, proto.UploadEnd{ID: id, SHA256: hex.EncodeToString(sum[:])}); err != nil {
-		return "", ErrClosed
-	}
-	select {
-	case <-ctx.Done():
-		return "", ctx.Err()
-	case resp, ok := <-ch:
-		if !ok {
-			return "", ErrClosed
-		}
-		if !resp.OK {
-			if resp.Error != nil {
-				return "", &UserError{Msg: resp.Error.Message, Hint: resp.Error.Hint}
-			}
-			return "", errors.New("upload failed")
-		}
-		var r proto.UploadResult
-		if err := json.Unmarshal(resp.Result, &r); err != nil {
-			return "", fmt.Errorf("read the answer to an upload: %w", err)
-		}
-		return r.Path, nil
-	}
-}

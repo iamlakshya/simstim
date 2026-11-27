@@ -21,8 +21,9 @@ const bundleWait = 10 * time.Minute
 
 // bundleRun is a bundle being written.
 type bundleRun struct {
-	cancel context.CancelFunc
-	done   chan struct{}
+	cancel  context.CancelFunc
+	done    chan struct{}
+	started bool // read only after pauseBg has joined the command
 }
 
 // debugBundle starts the bundle of the selected session or host, in the
@@ -40,11 +41,12 @@ func (m *Model) debugBundle() tea.Cmd {
 	if s != nil {
 		what, id = s.Name+" on "+h.name(), s.ID
 	}
-	ctx, cancel := context.WithTimeout(m.ctx, bundleWait)
+	ctx, cancel := context.WithTimeout(m.backgroundContext(), bundleWait)
 	run := &bundleRun{cancel: cancel, done: make(chan struct{})}
 	m.dbg.bundling = run
 	host := h.host
-	return tea.Batch(m.toast(toastInfo, "Writing the debug bundle of "+what+"…"), func() tea.Msg {
+	return tea.Batch(m.toast(toastInfo, "Writing the debug bundle of "+what+"…"), m.bgCmd(func(context.Context) tea.Msg {
+		run.started = true
 		defer close(run.done)
 		defer cancel()
 		res, err := be.Bundle(ctx, host, id)
@@ -53,7 +55,7 @@ func (m *Model) debugBundle() tea.Cmd {
 		}
 		return debugDoneMsg{ok: "Wrote the bundle. Read it before you share it.",
 			path: res.Path + " · " + sizeText(res.Size), bundled: true}
-	})
+	}))
 }
 
 // stopBundle stops a bundle that is being written, and waits a moment for
@@ -64,6 +66,9 @@ func (m *Model) stopBundle() {
 		return
 	}
 	run.cancel()
+	if !run.started {
+		return
+	}
 	select {
 	case <-run.done:
 	case <-time.After(5 * time.Second):

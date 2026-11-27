@@ -1,7 +1,9 @@
 package host_test
 
 import (
+	"bufio"
 	"encoding/json"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,6 +15,7 @@ import (
 	"github.com/iamlakshya/simstim/internal/host"
 	"github.com/iamlakshya/simstim/internal/host/hosttest"
 	"github.com/iamlakshya/simstim/internal/paths"
+	"github.com/iamlakshya/simstim/internal/proto"
 )
 
 // waitStatus waits until a session's status has the state and source.
@@ -106,11 +109,21 @@ func TestStatusFromHooks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	send(t, s.ID, "echo '{\"session_id\":\"abc-123\",\"source\":\"startup\"}' | "+hookCommand(t, h, "SessionStart"))
+	// An ID that is not a UUID could be a flag for claude's resume command.
+	// The holder does not keep it, and its log says why. The hooks run in
+	// turn, so the second ID is the only one in the history.
+	const id = "3f2b8c1e-9d4a-4e6b-8f7c-1a2b3c4d5e6f"
+	send(t, s.ID, "echo '{\"session_id\":\"--dangerously-skip-permissions\",\"source\":\"startup\"}' | "+hookCommand(t, h, "SessionStart"))
+	send(t, s.ID, "echo '{\"session_id\":\""+id+"\",\"source\":\"clear\"}' | "+hookCommand(t, h, "SessionStart"))
 	hosttest.WaitFor(t, 10*time.Second, "the agent's own session ID", func() bool {
 		a := live(t, s.ID).Agent
-		return a.AgentSessionID == "abc-123" && a.IDSource == "hook" && len(a.IDHistory) == 1
+		return a.AgentSessionID == id && a.IDSource == "hook" && len(a.IDHistory) == 1
 	})
+	log, err := os.ReadFile(paths.HolderLog(s.ID))
+	if err != nil || !strings.Contains(string(log), `msg="session ID from a hook not kept"`) ||
+		!strings.Contains(string(log), "id=--dangerously-skip-permissions") {
+		t.Errorf("the holder's log does not say why it kept no ID (%v):\n%s", err, log)
+	}
 	send(t, s.ID, "echo '{\"message\":\"Claude needs your permission\"}' | "+hookCommand(t, h, "Notification"))
 	m := waitStatus(t, s.ID, host.StateNeedsInput, "notify")
 	if m.Status.Reason != "Claude needs your permission" {
@@ -134,16 +147,90 @@ func TestStatusFromHooks(t *testing.T) {
 
 func TestHookOutsideASessionDoesNothing(t *testing.T) {
 	hosttest.New(t)
+	t.Setenv(brand.Env("HOOK_SOCK"), "")
 	t.Setenv(brand.Env("SOCK"), "")
 	host.RunHook("stop", nil) // returns at once
-	t.Setenv(brand.Env("SOCK"), filepath.Join(t.TempDir(), "none.sock"))
+	t.Setenv(brand.Env("HOOK_SOCK"), filepath.Join(t.TempDir(), "none.sock"))
 	host.RunHook("stop", []string{`{"type":"agent-turn-complete"}`}) // nothing listens
 }
 
-func TestCodexNotifyHook(t *testing.T) {
+// A session that an older helper started names only its session socket,
+// and its holder is that older helper too, which takes hooks there. A plain
+// listener stands in for it: the hook sends its event to the session socket.
+func TestTheHookFallsBackToAnOlderHoldersSessionSocket(t *testing.T) {
+	h := hosttest.New(t)
+	sock := filepath.Join(h.Root, "old.sock")
+	ln, err := net.Listen("unix", sock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	got := make(chan proto.Request, 1)
+	go func() {
+		c, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		defer c.Close()
+		r, w := bufio.NewReader(c), proto.NewWriter(c)
+		f, err := proto.Read(r)
+		var hello proto.Hello
+		if err != nil || json.Unmarshal(f.Payload, &hello) != nil || hello.Role != "hook" {
+			return
+		}
+		_ = w.WriteJSON(proto.THello, proto.Hello{Magic: proto.Magic, Protocol: "1.0", Role: "holder"})
+		if f, err = proto.Read(r); err != nil {
+			return
+		}
+		var req proto.Request
+		_ = json.Unmarshal(f.Payload, &req)
+		got <- req
+		_ = w.WriteJSON(proto.TResponse, proto.Response{ID: req.ID, OK: true})
+	}()
+	t.Setenv(brand.Env("HOOK_SOCK"), "")
+	t.Setenv(brand.Env("SOCK"), sock)
+	host.RunHook("notification", []string{`{"message":"old"}`})
+	select {
+	case req := <-got:
+		if req.Op != "hook" || !strings.Contains(string(req.Args), `"old"`) {
+			t.Errorf("the older holder got %+v", req)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the hook sent nothing to the session socket")
+	}
+}
+
+// A resume or a restore gives a session that an older helper started the
+// hook socket, in place of the session socket.
+func TestAResumeGivesAnOldSessionTheHookSocket(t *testing.T) {
 	hosttest.New(t)
+	s := start(t, "old", "/bin/sh", "-c", `echo "HOOK=$`+brand.Env("HOOK_SOCK")+` SOCK=$`+brand.Env("SOCK")+`."; sleep 0.3`)
+	waitState(t, s.ID, host.StateExited)
+	m := manifest(t, s.ID)
+	var env []string
+	for _, kv := range m.Env {
+		if !strings.HasPrefix(kv, brand.Env("HOOK_SOCK")+"=") {
+			env = append(env, kv)
+		}
+	}
+	env = append(env, brand.Env("SOCK")+"="+paths.Socket(s.ID))
+	m.Env = env
+	if err := m.Save(); err != nil {
+		t.Fatal(err)
+	}
+	resume(t, api.ResumeArgs{ID: s.ID})
+	waitOutput(t, s.ID, "HOOK="+paths.HookSocket(s.ID)+" SOCK=.")
+	got := strings.Join(manifest(t, s.ID).Env, "\n")
+	if !strings.Contains(got, brand.Env("HOOK_SOCK")+"="+paths.HookSocket(s.ID)) || strings.Contains(got, brand.Env("SOCK")+"=") {
+		t.Errorf("the environment after the resume:\n%s", got)
+	}
+}
+
+func TestCodexNotifyHook(t *testing.T) {
+	h := hosttest.New(t)
 	s := start(t, "codex-like", "sleep", "60")
-	t.Setenv(brand.Env("SOCK"), paths.Socket(s.ID))
+	t.Setenv(brand.Env("HOOK_SOCK"), paths.HookSocket(s.ID))
+	t.Setenv(brand.Env("SOCK"), filepath.Join(h.Root, "wrong.sock"))
 	host.RunHook("notification", []string{`{"message":"waiting"}`})
 	if m := waitStatus(t, s.ID, host.StateNeedsInput, "notify"); m.Status.Reason != "waiting" {
 		t.Errorf("reason = %q", m.Status.Reason)

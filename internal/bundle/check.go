@@ -15,6 +15,10 @@ import (
 // also runs the patterns again: home folders, email addresses, tailnet
 // names, fingerprints and addresses.
 
+// fileKeyRe is a host's file key (client.HostFileKey) in the name of one of
+// its files, which holds the host's name and a hash of it.
+var fileKeyRe = regexp.MustCompile(`(?:known_hosts|config)-[a-z0-9._-]{1,32}-[0-9a-f]{32}|[a-z0-9._-]{1,32}-[0-9a-f]{32}\.lock`)
+
 // placeholderRe matches what the replacements wrote, which the check skips.
 var placeholderRe = regexp.MustCompile(`<(?:host|addr|session|key|folder)-[0-9]+>|<(?:laptop|user|email|fingerprint|ssh-config|known-hosts)>|\(hidden\)`)
 
@@ -69,6 +73,11 @@ func (s *Scrubber) check(b []byte, mode checkMode) string {
 
 // checkNames looks for each name that the bundle knows.
 func (s *Scrubber) checkNames(low []byte, mode checkMode) string {
+	for _, p := range s.fileKeys {
+		if holds(low, p.value, func(prev, next int) bool { return alnumAt(prev) || alnumAt(next) }) {
+			return p.kind
+		}
+	}
 	for _, p := range s.phrases {
 		if holds(low, bytes.ToLower(p.value), passesFor(p.kind, mode)) {
 			return p.kind
@@ -88,7 +97,7 @@ func (s *Scrubber) checkPatterns(low []byte) string {
 	for _, pass := range []func([]byte) []byte{c.replaceFingerprints, c.replaceEmails, c.replaceHomes, c.replaceAddrs} {
 		pass(bytes.Clone(low))
 	}
-	if tsNetRe.Match(low) {
+	if tsNetRe.Match(low) || fileKeyRe.Match(low) {
 		return KindHost
 	}
 	for _, k := range kinds {

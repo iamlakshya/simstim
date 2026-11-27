@@ -95,7 +95,11 @@ func TestTheBridgeCollectsAndReads(t *testing.T) {
 	for _, f := range col.Files {
 		listed = append(listed, f.Path)
 	}
-	if col.Home != h.Home || !slices.Contains(listed, prefix+"debug.jsonl") || !slices.Contains(listed, prefix+"holder.log") ||
+	sessionLog := prefix + "holder.log"
+	if m, err := host.LoadManifest(s.ID); err == nil && m.Wall != nil {
+		sessionLog = prefix + "supervisor.log"
+	}
+	if col.Home != h.Home || !slices.Contains(listed, prefix+"debug.jsonl") || !slices.Contains(listed, sessionLog) ||
 		!slices.ContainsFunc(listed, func(p string) bool { return strings.HasPrefix(p, prefix+"debug/heap-") }) ||
 		!slices.ContainsFunc(listed, func(p string) bool { return strings.HasPrefix(p, prefix+"debug/goroutine-") }) {
 		t.Fatalf("collected %+v", col)

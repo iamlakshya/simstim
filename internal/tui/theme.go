@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"charm.land/lipgloss/v2"
+
+	"github.com/iamlakshya/simstim/internal/client"
 )
 
 // Colour tokens (docs/contributing/ux-spec.md 4.1). Every colour is a palette slot or the
@@ -62,8 +64,8 @@ const (
 	glyphPrompt     = "❯"
 	glyphNext       = "→"
 	glyphSpinStill  = "⠶"
-	sep             = "   " // between hints
-	dot             = " · " // between facts
+	sep             = "   "      // between hints
+	dot             = client.Dot // between facts, as the client's details use it
 )
 
 // The spinner is a braille scan: one dot running round the cell.

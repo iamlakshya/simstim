@@ -12,10 +12,10 @@ import (
 	"unicode/utf8"
 
 	"github.com/charmbracelet/x/ansi"
-	"github.com/muesli/cancelreader"
 	"golang.org/x/term"
 
 	"github.com/iamlakshya/simstim/internal/client"
+	"github.com/iamlakshya/simstim/internal/keyread"
 )
 
 // The demo's made-up agent, which an attach shows. It fills the whole
@@ -36,7 +36,7 @@ const (
 
 // Attach shows a made-up agent screen that fills the whole terminal, the
 // way a real session does, until the detach key.
-func (b *demoBackend) Attach(ctx context.Context, o client.AttachOptions) (client.AttachResult, error) {
+func (b *demoBackend) Attach(ctx context.Context, o client.AttachOptions) (res client.AttachResult, err error) {
 	b.mu.Lock()
 	var s client.Session
 	for _, x := range b.sessions[o.Host.Name] {
@@ -52,44 +52,27 @@ func (b *demoBackend) Attach(ctx context.Context, o client.AttachOptions) (clien
 	if out == nil {
 		out = os.Stdout
 	}
-	old, err := term.MakeRaw(int(in.Fd()))
-	if err != nil {
-		return client.AttachResult{}, fmt.Errorf("put the terminal in raw mode: %w", err)
+	if err := keyread.CheckStuck(in); err != nil {
+		return client.AttachResult{}, stuckLauncherBusyError(err)
 	}
-	defer func() { _ = term.Restore(int(in.Fd()), old) }()
-	cr, err := cancelreader.NewReader(in)
+	original, err := term.GetState(int(in.Fd()))
+	if err != nil {
+		return client.AttachResult{}, fmt.Errorf("save the terminal state: %w", err)
+	}
+	defer func() { _ = term.Restore(int(in.Fd()), original) }()
+	input, err := startDemoInput(in)
 	if err != nil {
 		return client.AttachResult{}, fmt.Errorf("read the terminal: %w", err)
 	}
-	defer cr.Close()
-	keys := readKeys(cr)
+	defer func() { res.ReaderStuck = input.finish() }()
+	if _, err := term.MakeRaw(int(in.Fd())); err != nil {
+		return client.AttachResult{}, fmt.Errorf("put the terminal in raw mode: %w", err)
+	}
+	input.ask()
 	_, _ = io.WriteString(out, "\x1b[?1049h")
-	defer func() {
-		cr.Cancel()
-		_, _ = io.WriteString(out, "\x1b[?1049l")
-	}()
-	(&demoAgent{s: s, out: out}).run(ctx, keys)
+	defer func() { _, _ = io.WriteString(out, "\x1b[?1049l") }()
+	(&demoAgent{s: s, out: out}).run(ctx, input)
 	return client.AttachResult{Detached: true}, nil
-}
-
-// readKeys sends each read of r on the channel, and closes it when a read
-// fails.
-func readKeys(r io.Reader) <-chan []byte {
-	keys := make(chan []byte, 8)
-	go func() {
-		defer close(keys)
-		buf := make([]byte, 256)
-		for {
-			n, err := r.Read(buf)
-			if n > 0 {
-				keys <- append([]byte(nil), buf[:n]...)
-			}
-			if err != nil {
-				return
-			}
-		}
-	}()
-	return keys
 }
 
 // demoAgent is the made-up agent behind an attach: its session, the line
@@ -114,13 +97,13 @@ const (
 // run draws the screen, and draws it again when the terminal's size changes
 // or a prompt is sent, until the detach key or the end of ctx. A typed key
 // draws only the input line.
-func (a *demoAgent) run(ctx context.Context, keys <-chan []byte) {
+func (a *demoAgent) run(ctx context.Context, input *demoInput) {
 	a.draw(false)
 	tick := time.NewTicker(200 * time.Millisecond)
 	defer tick.Stop()
 	for {
 		select {
-		case k, ok := <-keys:
+		case k, ok := <-input.keys:
 			// Ctrl+\, as a legacy byte or a kitty keyboard sequence.
 			if !ok || bytes.IndexByte(k, 0x1c) >= 0 || bytes.Contains(k, []byte("\x1b[92;5u")) {
 				return
@@ -132,6 +115,7 @@ func (a *demoAgent) run(ctx context.Context, keys <-chan []byte) {
 				a.draw(true)
 			case keyNone: // nothing to draw
 			}
+			input.ask()
 		case <-tick.C:
 			a.draw(false)
 		case <-ctx.Done():

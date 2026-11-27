@@ -1,0 +1,156 @@
+package code
+
+import (
+	"crypto/ed25519"
+	"encoding/base64"
+	"errors"
+	"strings"
+	"testing"
+	"time"
+
+	"golang.org/x/crypto/ssh"
+)
+
+func fixtureInvite(t *testing.T) Invite {
+	t.Helper()
+	key, err := ssh.NewPublicKey(ed25519.NewKeyFromSeed(make([]byte, 32)).Public())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return Invite{strings.TrimSpace(string(ssh.MarshalAuthorizedKey(key))), 0x1020304050607080, time.Unix(2000000000, 0).UTC()}
+}
+func fixtureReply() Reply {
+	return Reply{Nonce: 0x1020304050607080, Account: "worker", Addresses: []string{"192.0.2.2", "example-tailnet.ts.net", "2001:db8::1"}, Port: 2222, Fingerprints: []string{"SHA256:" + base64.RawStdEncoding.EncodeToString(make([]byte, 32))}}
+}
+func errorCode(t *testing.T, err error, want string) {
+	t.Helper()
+	var e *Error
+	if !errors.As(err, &e) || e.Code != want {
+		t.Fatalf("error %v, want %s", err, want)
+	}
+}
+func TestInviteRoundTripAndExpiry(t *testing.T) {
+	inv := fixtureInvite(t)
+	encoded, err := EncodeInvite(inv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := DecodeInvite(encoded, inv.Expires.Add(-time.Second))
+	if err != nil || got != inv {
+		t.Fatalf("round trip: %+v %v", got, err)
+	}
+	_, err = DecodeInvite(encoded, inv.Expires)
+	errorCode(t, err, "invite_expired")
+	_, err = DecodeInvite(encoded, inv.Expires.Add(time.Hour))
+	errorCode(t, err, "invite_expired")
+}
+func TestEveryGroupDetectsChangedCharacter(t *testing.T) {
+	encoded, err := EncodeInvite(fixtureInvite(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	groups := strings.Split(encoded, "-")
+	for n, g := range groups {
+		for c := range len(g) {
+			changed := append([]string(nil), groups...)
+			b := []byte(g)
+			b[c] = alphabet[(strings.IndexByte(alphabet, b[c])+1)%32]
+			changed[n] = string(b)
+			_, err = DecodeInvite(strings.Join(changed, "-"), time.Time{})
+			errorCode(t, err, "code_check")
+			if !strings.Contains(err.Error(), "group "+itoa(n+1)) {
+				t.Fatalf("changed group %d: %v", n+1, err)
+			}
+		}
+	}
+}
+func itoa(n int) string {
+	if n < 10 {
+		return string(rune('0' + n))
+	}
+	return itoa(n/10) + itoa(n%10)
+}
+func TestUnknownVersionAndFieldsFailClosed(t *testing.T) {
+	inv := fixtureInvite(t)
+	encoded, _ := EncodeInvite(inv)
+	raw, _ := decode(encoded)
+	unknown, _ := encode(append([]byte{Version + 1}, raw...))
+	_, err := DecodeInvite(unknown, time.Time{})
+	errorCode(t, err, "code_version")
+	unknown, _ = encode(append(append([]byte{Version}, raw...), 255, 0, 1, 1))
+	_, err = DecodeInvite(unknown, time.Time{})
+	errorCode(t, err, "code_check")
+	repeated, _ := encode(append(append([]byte{Version}, raw...), fieldNonce, 0, 8, 0, 0, 0, 0, 0, 0, 0, 1))
+	_, err = DecodeInvite(repeated, time.Time{})
+	errorCode(t, err, "code_check")
+}
+func TestReplyNestedPathAndValidation(t *testing.T) {
+	r := fixtureReply()
+	r.SuggestedTier = "shared"
+	r.Hops = []Hop{{Account: "hop", Addresses: []string{"gateway.example"}, Port: 22, Fingerprints: r.Fingerprints}}
+	encoded, err := EncodeReply(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := DecodeReply(strings.ToLower(encoded))
+	if err != nil || got.Account != r.Account || len(got.Hops) != 1 || got.Hops[0].Account != "hop" {
+		t.Fatalf("nested reply: %+v %v", got, err)
+	}
+	for _, modify := range []func(*Reply){func(r *Reply) { r.Account = "worker\nPermitRootLogin yes" }, func(r *Reply) { r.Account = "root" }, func(r *Reply) { r.Addresses = []string{"host -oProxyCommand=bad"} }, func(r *Reply) { r.Addresses = []string{"host..example"} }, func(r *Reply) { r.Port = 0 }, func(r *Reply) { r.Fingerprints = []string{"SHA256:" + strings.Repeat("A", 42) + "B"} }, func(r *Reply) { r.Fingerprints = append(r.Fingerprints, r.Fingerprints[0]) }, func(r *Reply) { r.Nonce = 0 }} {
+		bad := fixtureReply()
+		modify(&bad)
+		if _, err := EncodeReply(bad); err == nil {
+			t.Fatalf("accepted invalid fields: %+v", bad)
+		}
+	}
+}
+func TestReplyBoundsAndMalformedTLV(t *testing.T) {
+	_, err := DecodeReply(strings.Repeat("A", MaxCode+1))
+	errorCode(t, err, "code_check")
+	for _, raw := range [][]byte{{Version, fieldNonce}, {Version, fieldNonce, 0, 9, 1}, {Version, fieldNonce, 0, 0}} {
+		encoded, _ := encode(raw)
+		_, err = DecodeReply(encoded)
+		errorCode(t, err, "code_check")
+	}
+}
+func TestPublicKeyRefusesOptionsAndNewlines(t *testing.T) {
+	pub := fixtureInvite(t).PublicKey
+	for _, s := range []string{"command=bad " + pub, pub + "\n" + pub, pub + "\rcomment"} {
+		if _, err := PublicKey(s); err == nil {
+			t.Fatal("accepted annotated key")
+		}
+	}
+}
+func FuzzDecodeReply(f *testing.F) {
+	encoded, _ := EncodeReply(fixtureReply())
+	f.Add(encoded)
+	f.Add("")
+	f.Fuzz(func(t *testing.T, s string) {
+		r, err := DecodeReply(s)
+		if err == nil {
+			if err = r.Validate(); err != nil {
+				t.Fatal(err)
+			}
+			encoded, e := EncodeReply(r)
+			if e != nil || len(encoded) > MaxCode {
+				t.Fatalf("successful decode cannot be encoded: %v", e)
+			}
+		}
+	})
+}
+
+// The first four vectors are the 13-character groups of the official
+// Syncthing device-ID documentation, not values generated by this codec.
+func TestSyncthingChecksumGoldenVectors(t *testing.T) {
+	for _, vector := range []struct {
+		payload string
+		want    byte
+	}{
+		{"MFZWI3DBONSGY", 'C'}, {"YLTMRWGC43ENR", '5'}, {"QXGZDMMFZWI3D", 'P'}, {"BONSGYYLTMRWA", 'D'},
+		{"BAAAAAAAAAAAA", '7'}, {"ABAAAAAAAAAAA", '6'}, {"AB725E4GHIQPL3ZFGT", 'G'},
+	} {
+		if got := check(vector.payload); got != vector.want {
+			t.Fatalf("documented checksum %s: got %c, want %c", vector.payload, got, vector.want)
+		}
+	}
+}

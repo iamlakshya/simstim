@@ -93,16 +93,20 @@ func (m *Model) readActivity() tea.Cmd {
 	if s == nil || h == nil || !h.online() || ended(*s) || m.modal != nil {
 		return nil
 	}
-	key, c, ctx := sessKey{h.name(), s.ID}, h.conn, m.ctx
-	return func() tea.Msg {
-		cctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	key, c := sessKey{h.name(), s.ID}, h.conn
+	return m.bgCmd(func(bgCtx context.Context) tea.Msg {
+		cctx, cancel := context.WithTimeout(bgCtx, 5*time.Second)
 		defer cancel()
 		data, cols, rows, err := c.Peek(cctx, key.id, peekBytes)
 		if err != nil {
 			return nil
 		}
-		return activityMsg{key: key, text: activityLine(renderScreen(data, cols, rows))}
-	}
+		shot, err := renderScreenContext(cctx, data, cols, rows)
+		if err != nil {
+			return nil
+		}
+		return activityMsg{key: key, text: activityLine(shot)}
+	})
 }
 
 func (m *Model) onActivity(msg activityMsg) {
@@ -132,12 +136,13 @@ func activityLine(s *screenShot) string {
 		return ""
 	}
 	for y := s.bottom; y >= 0 && y < len(s.lines); y-- {
+		// The line is what the session printed: it is cleaned to draw.
 		text := strings.TrimSpace(strings.Map(func(r rune) rune {
 			if r >= 0x2500 && r <= 0x257F { // box drawing
 				return ' '
 			}
 			return r
-		}, s.lines[y].String()))
+		}, client.CleanLine(s.lines[y].String())))
 		text = strings.Join(strings.Fields(text), " ")
 		if text == "" || chrome.MatchString(text) {
 			continue

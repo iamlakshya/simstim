@@ -14,24 +14,27 @@ import (
 	"github.com/iamlakshya/simstim/internal/version"
 )
 
-func (h *Holder) acceptLoop() {
+// acceptLoop serves each connection to ln, the session socket or, when
+// hookSock is true, the hook socket.
+func (h *Holder) acceptLoop(ln net.Listener, hookSock bool) {
 	for {
-		conn, err := h.ln.Accept()
+		conn, err := ln.Accept()
 		if err != nil {
 			return
 		}
-		go h.serve(conn)
+		go h.serve(conn, hookSock)
 	}
 }
 
-func (h *Holder) serve(conn net.Conn) {
+func (h *Holder) serve(conn net.Conn, hookSock bool) {
 	c := &hclient{conn: conn, w: proto.NewWriter(conn), out: make(chan outFrame, clientQueue), done: make(chan struct{})}
 	defer func() {
 		h.drop(c)
 		c.close()
 	}()
-	r := bufio.NewReaderSize(conn, 64<<10)
-	f, err := proto.Read(r)
+	f, input, line, err := readHolderFirstFrameV1(c.conn)
+	c.helloLine = line
+	r := bufio.NewReaderSize(input, 64<<10)
 	if err != nil || f.Type != proto.THello {
 		return
 	}
@@ -40,42 +43,76 @@ func (h *Holder) serve(conn net.Conn) {
 		_ = c.w.WriteJSON(proto.TError, proto.Error{Code: "protocol", Message: "incompatible client"})
 		return
 	}
-	if err := c.w.WriteJSON(proto.THello, proto.Hello{Magic: proto.Magic, Protocol: version.Protocol, Version: version.Version, Role: "holder"}); err != nil {
+	if hello.Role == ordinaryPurgeRoleV2 {
+		h.serveOrdinaryPurgeV2(c, line, hookSock)
 		return
 	}
-	for {
-		f, err := proto.Read(r)
-		if err != nil {
+	if hello.Role == ordinaryStopRoleV1 {
+		h.serveOrdinaryStopV1(c, line, hookSock)
+		return
+	}
+	if line != nil {
+		if err := line.RejectAncillary(); err != nil {
 			return
 		}
-		switch f.Type {
-		case proto.TAttach:
-			var a proto.Attach
-			if json.Unmarshal(f.Payload, &a) == nil {
-				h.attach(c, a)
-			}
-		case proto.TTrace:
-			c.bridgeRead(f.Payload)
-		case proto.TInput:
-			h.input(c, f.Payload)
-		case proto.TResize:
-			var rz proto.Resize
-			if json.Unmarshal(f.Payload, &rz) == nil {
-				h.resize(c, rz, false)
-			}
-		case proto.TDetach:
-			h.drop(c)
-		case proto.TPing:
-			_ = c.w.Write(proto.TPong, f.Payload)
-		case proto.TRequest:
-			var req proto.Request
-			if json.Unmarshal(f.Payload, &req) == nil {
-				h.request(c, req)
-			}
-		default:
-			// Other frames are not for a holder: ignore them.
+	}
+	var refused *proto.Error
+	if c.access, refused = h.accessOf(conn, hookSock, hello.Role); refused != nil {
+		h.log.Warn("refused a connection", "role", hello.Role, "hook_socket", hookSock)
+		_ = c.w.WriteJSON(proto.TError, refused)
+		return
+	}
+	if err := c.w.WriteJSON(proto.THello, proto.Hello{Magic: proto.Magic, Protocol: version.Protocol, Version: version.Version, Role: "holder", Features: holderFeatures}); err != nil {
+		return
+	}
+	h.dispatch(c, r)
+}
+
+// dispatch serves the frames of one connection after its hello, as its
+// access allows, until the connection ends or a refusal closes it.
+func (h *Holder) dispatch(c *hclient, r *bufio.Reader) {
+	for {
+		f, err := proto.Read(r)
+		if err != nil || !h.dispatchFrame(c, f) {
+			return
 		}
 	}
+}
+
+// dispatchFrame applies the canonical access policy to one already-read frame.
+// Startup handoff must dispatch such a frame once, through this same path.
+func (h *Holder) dispatchFrame(c *hclient, f proto.Frame) bool {
+	if c.access != accessFull {
+		return h.serveLimited(c, f)
+	}
+	switch f.Type {
+	case proto.TAttach:
+		var a proto.Attach
+		if json.Unmarshal(f.Payload, &a) == nil {
+			h.attach(c, a)
+		}
+	case proto.TTrace:
+		c.bridgeRead(f.Payload)
+	case proto.TInput:
+		h.input(c, f.Payload)
+	case proto.TResize:
+		var rz proto.Resize
+		if json.Unmarshal(f.Payload, &rz) == nil {
+			h.resize(c, rz, false)
+		}
+	case proto.TDetach:
+		h.drop(c)
+	case proto.TPing:
+		_ = c.w.Write(proto.TPong, f.Payload)
+	case proto.TRequest:
+		var req proto.Request
+		if json.Unmarshal(f.Payload, &req) == nil {
+			h.request(c, req)
+		}
+	default:
+		// Other frames are not for a holder: ignore them.
+	}
+	return true
 }
 
 func (h *Holder) attach(c *hclient, a proto.Attach) {
@@ -198,38 +235,84 @@ func (h *Holder) input(c *hclient, p []byte) {
 	d := h.al.d
 	h.mu.Unlock()
 	noteTyping(d, p)
-	if _, err := h.ptmx.Write(p); err != nil {
+	if _, err := h.writePTY(p); err != nil {
 		h.log.Warn("pty write failed", "err", err)
 	}
 	lt.key(c, len(p))
 }
 
 func (h *Holder) resize(c *hclient, rz proto.Resize, force bool) {
+	if rz.Cols <= 0 || rz.Rows <= 0 {
+		return
+	}
+	asked := rz
+	rz.Cols, rz.Rows = capTerm(rz.Cols, rz.Rows)
 	h.mu.Lock()
 	leader := h.leader == c
 	exited := h.exited
-	if leader && rz.Cols > 0 && rz.Rows > 0 {
+	if leader {
 		h.m.Term.Cols, h.m.Term.Rows = rz.Cols, rz.Rows
 		h.dirty = true
 	}
 	h.mu.Unlock()
-	if !leader || exited || rz.Cols <= 0 || rz.Rows <= 0 {
+	if !leader || exited {
 		return
 	}
+	h.noteClamp(asked, rz)
 	h.log.Debug("resize", diag.CatKey, diag.CatAttach, "cols", rz.Cols, "rows", rz.Rows, "force", force)
-	_ = pty.Setsize(h.ptmx, &pty.Winsize{Cols: clamp16(rz.Cols), Rows: clamp16(rz.Rows), X: clamp16(rz.XPx), Y: clamp16(rz.YPx)})
+	if h.vmTerm != nil {
+		_ = h.vmTerm.Resize(rz)
+	} else {
+		_ = pty.Setsize(h.ptmx, &pty.Winsize{Cols: clampCols(rz.Cols), Rows: clampRows(rz.Rows), X: clamp16(rz.XPx), Y: clamp16(rz.YPx)})
+	}
 	h.mu.Lock()
-	h.scr.resize(rz.Cols, rz.Rows)
+	h.scr.resize(rz.Cols, rz.Rows) // the screen model has a smaller cap of its own
 	vt := h.vt
 	h.mu.Unlock()
 	if vt != nil {
 		vt.Resize(rz.Cols, rz.Rows, rz.XPx, rz.YPx)
 	}
-	if force {
+	if force && h.vmTerm != nil {
+		_ = h.vmTerm.Signal(uint32(unix.SIGWINCH))
+	}
+	if force && h.vmTerm == nil {
 		// Make the agent repaint even when the size did not change.
 		if pgrp, err := unix.IoctlGetInt(h.fd, unix.TIOCGPGRP); err == nil && pgrp > 0 {
 			_ = unix.Kill(-pgrp, unix.SIGWINCH)
 		}
+	}
+}
+
+// startSize is the size of the agent's terminal when it starts: the last
+// size that a client set, or 80 by 24 when there is none, within
+// maxTermCols by maxTermRows. The manifest keeps the size that it sets, so
+// the session's row and peek report it.
+func (h *Holder) startSize() (cols, rows int) {
+	h.mu.Lock()
+	term := h.m.Term
+	asked := proto.Resize{Cols: term.Cols, Rows: term.Rows}
+	if asked.Cols <= 0 {
+		asked.Cols = 80
+	}
+	if asked.Rows <= 0 {
+		asked.Rows = 24
+	}
+	set := asked
+	set.Cols, set.Rows = capTerm(asked.Cols, asked.Rows)
+	// The manifest keeps "no size" only when a client gave neither number.
+	if term.Cols > 0 || term.Rows > 0 {
+		h.m.Term.Cols, h.m.Term.Rows = set.Cols, set.Rows
+	}
+	h.mu.Unlock()
+	h.noteClamp(asked, set)
+	return set.Cols, set.Rows
+}
+
+// noteClamp writes a line to the holder's log when the cap changed a
+// client's terminal size: the size asked for, and the size set.
+func (h *Holder) noteClamp(asked, set proto.Resize) {
+	if asked.Cols != set.Cols || asked.Rows != set.Rows {
+		h.log.Info("resize clamped", "asked_cols", asked.Cols, "asked_rows", asked.Rows, "cols", set.Cols, "rows", set.Rows)
 	}
 }
 

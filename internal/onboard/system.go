@@ -11,7 +11,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
-	"strings"
 	"time"
 
 	"github.com/iamlakshya/simstim/internal/client"
@@ -124,26 +123,38 @@ func (System) AddSSHHost(lines string) error {
 	return nil
 }
 
-// SSHWorks runs `ssh -o BatchMode=yes target true`: it works only when no
-// password, passphrase or host key question stands in the way.
+// SSHWorks checks that `ssh target true` works only when no password,
+// passphrase or host key question stands in the way. Like every ssh
+// command of the client, it logs in only with a pinned key: the key that
+// the user's own settings trust for target (client.CheckLogin). It reads
+// the user's config through the client's generated one, forwards nothing,
+// and has a connection of its own.
 func (System) SSHWorks(ctx context.Context, target string) error {
-	ctx, cancel := context.WithTimeout(ctx, 25*time.Second)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, "ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=15", "--", target, "true")
-	var errb bytes.Buffer
-	cmd.Stderr = &errb
-	if err := cmd.Run(); err != nil {
-		msg := provider.Tail(errb.String(), 1)
-		if msg == "" {
-			msg = err.Error()
+	if _, err := client.DefaultSSHConfig(); err != nil {
+		var ue *client.UserError
+		if errors.As(err, &ue) {
+			return err
 		}
-		hint := "ssh " + target + "   (run it yourself to see what it asks)"
-		if strings.Contains(msg, "Host key verification failed") {
-			hint = "ssh " + target + "   (once, by hand: check the key's fingerprint, then answer yes)"
-		}
-		return &client.UserError{Msg: fmt.Sprintf("cannot log in to %s with ssh yet: %s", target, msg), Hint: hint}
+		dir := filepath.Join(client.ConfigDir(), "ssh")
+		return &client.UserError{Msg: "cannot write the SSH config that ssh needs: " + err.Error(),
+			Hint: "Make " + dir + " a folder that you can write to, or set XDG_CONFIG_HOME to one.", Code: "ssh_config_write"}
 	}
-	return nil
+	ctx, cancel := context.WithTimeout(ctx, 90*time.Second)
+	defer cancel()
+	err := client.CheckLogin(ctx, target)
+	if err == nil {
+		return nil
+	}
+	hint := client.SSHCommand(target) + " (run it yourself to see what it asks)"
+	if errors.Is(err, client.ErrUnchecked) {
+		return &client.UserError{Msg: fmt.Sprintf("cannot log in to %s with ssh yet: its host key is not in your known_hosts", target),
+			Hint: client.SSHCommand(target) + " (once, by hand: check the key's fingerprint, then answer yes)", Code: "unreachable"}
+	}
+	var ue *client.UserError
+	if errors.As(err, &ue) {
+		return &client.UserError{Msg: fmt.Sprintf("cannot log in to %s with ssh yet: %s", target, ue.Msg), Hint: hint, Code: "unreachable"}
+	}
+	return &client.UserError{Msg: fmt.Sprintf("cannot log in to %s with ssh yet: %v", target, err), Hint: hint, Code: "unreachable"}
 }
 
 // Create makes a host with the provider called kind (see Create). Progress
@@ -154,7 +165,7 @@ func (s System) Create(ctx context.Context, kind, name string, out io.Writer) (c
 			return Create(ctx, p, provider.Request{Name: name, Out: out})
 		}
 	}
-	return client.Host{}, &client.UserError{Msg: fmt.Sprintf("this build cannot make %s hosts", kind), Hint: "Pick another place."}
+	return client.Host{}, &client.UserError{Msg: fmt.Sprintf("this build cannot make %s hosts", kind), Hint: "Pick another place.", Code: "unknown_provider"}
 }
 
 // SetIdle sets up idle stop (see SetIdle).

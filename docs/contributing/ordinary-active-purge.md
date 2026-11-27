@@ -1,0 +1,13 @@
+# Active ordinary purge preparation
+
+The ordinary holder has a private preparation purpose before destructive stop. It captures the same original operation, current native helper and socket, original holder lock description, original main creation descriptor and native completion objects. Active capture does not construct a stopped session. The stopped type is issued only after the actual stop and original physical joins.
+
+The bounded holder pauses only its original main process through the descriptor obtained atomically at creation. It observes that child's native stopped event without reaping it. Its real `Cmd.Wait`, terminal and reader remain with the same holder. A pre-existing user-stopped main stays stopped when preparation is withdrawn. A main that had already joined does not start again.
+
+The holder records its restoration obligation before sending a stop signal. Its private control handler retains that obligation through failed requests, a closed connection and the original outside process's death. Those events cancel an existing reversible operation. They grant no new signal or storage permission. The handler continues the same creation only when this preparation paused it, then confirms restoration through its own original native completion object. Unknown restoration keeps the obligation and its original objects.
+
+The outside preparation checks the same operation on every method. Checking quiescence asks the actual holder for a new native observation. A local phase field cannot supply that result. A lost restoration response closes only the original transport, retains the original peer loan and joins the holder's native completion before releasing anything. An actual stop dispatch prevents restoration or release through `Close`. Consuming a genuine held pause kills only that original creation before terminal hangup. Its HUP handler cannot run between the final inspection and destructive stop. Its genuine stopped owner must remain with the transaction through cleanup.
+
+This is the bounded N5 main-process producer. It does not freeze escaped children or a managed whole unit. A managed unit needs its retained original cgroup and an outside restoration participant before freezing its holder. That producer is a separate implementation.
+
+The public purge command does not yet use this preparation. Joining that command requires the temporary attempt owner, original worktree inspection permits and fixed inspection helper, walled preparation, all-session initial and final checks, and cleanup retry custody. Source and primitive tests do not establish those behaviours or native host acceptance.

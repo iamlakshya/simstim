@@ -2,12 +2,15 @@ package client
 
 import (
 	"context"
-	"os"
-	"os/exec"
-	"strings"
-
+	"errors"
+	"fmt"
 	"github.com/iamlakshya/simstim/internal/api"
 	"github.com/iamlakshya/simstim/internal/brand"
+	"maps"
+	"os"
+	"os/exec"
+	"slices"
+	"strings"
 )
 
 // Session is a session row, as the host reports it.
@@ -19,28 +22,133 @@ type HostInfo = api.HostInfo
 // NewArgs describes a new session.
 type NewArgs = api.NewArgs
 
-// TerminalArgs fills the terminal identity of a new session from this terminal.
+// TerminalArgs fills the terminal identity of a new session from this
+// terminal, and its inline mode from config.toml.
 func TerminalArgs(a NewArgs, cols, rows int) NewArgs {
+	a = terminalArgs(a, cols, rows)
+	a.Inline = a.Inline || LoadSettings().Agents.Inline
+	return a
+}
+
+// SessionArgs fills a new session's terminal identity from this terminal,
+// and what it takes from the settings from s, not from config.toml: its
+// inline mode, and its memory cap when a names none. The launcher passes
+// the settings that it holds, which an edit that breaks config.toml does
+// not replace. Wall intent stays raw until the accepted connection resolves
+// the effective layers and its pinned floor before value preparation.
+func SessionArgs(a NewArgs, cols, rows int, s Settings) (NewArgs, error) {
+	a = terminalArgs(a, cols, rows)
+	a.Inline = a.Inline || s.Agents.Inline
+	if a.MemoryMax == 0 {
+		n, err := SettingsMemoryMax(s)
+		if err != nil {
+			return a, err
+		}
+		a.MemoryMax = n
+		if n == 0 {
+			a.MemoryMax = MemoryAuto
+		}
+	}
+	return a, nil
+}
+
+func terminalArgs(a NewArgs, cols, rows int) NewArgs {
 	a.Term = os.Getenv("TERM")
 	a.ColorTerm = os.Getenv("COLORTERM")
 	a.TermProgram = os.Getenv("TERM_PROGRAM")
 	a.TermProgramVersion = os.Getenv("TERM_PROGRAM_VERSION")
 	a.Cols, a.Rows = cols, rows
-	a.Inline = a.Inline || LoadSettings().Agents.Inline
 	return a
 }
 
-// Sessions lists a host's sessions.
+// CheckSessionName refuses name, a name that the user gives a session,
+// when it looks like a session ID or is too long (api.CheckName), as the
+// helper does too: an address with an ID's form always means an ID
+// (cli-spec 9.2). The error has the code bad_name, and exit code 2.
+func CheckSessionName(name string) error {
+	if msg, hint, ok := api.CheckName(name); !ok {
+		return &UserError{Msg: msg, Hint: hint, Code: "bad_name", Kind: KindUsage}
+	}
+	return nil
+}
+
+// Sessions lists a host's sessions, as the host sent them, without a row
+// whose ID is not a session ID (ValidSessions).
 func (c *Conn) Sessions(ctx context.Context) ([]Session, error) {
 	var out []Session
 	err := c.Call(ctx, "ls", nil, &out)
-	return out, err
+	rows := ValidSessions(c.Host.Name, out)
+	if err == nil {
+		rows = c.markSessionPolicyChanges(ctx, rows)
+	}
+	return rows, err
 }
 
-// NewSession starts a session. Unless a names a memory cap, the session gets
-// the one in config.toml.
-func (c *Conn) NewSession(ctx context.Context, a NewArgs) (*Session, error) {
-	a, err := withMemoryMax(a)
+// NewSession starts through the original policy and wall preparation. An
+// omitted wall uses the saved floor; none requires an explicit downgrade.
+// Unless a names a memory cap, the session gets the one in config.toml.
+func (c *Conn) NewSession(ctx context.Context, a NewArgs) (_ *Session, returned error) {
+	a.Placement = api.ClonePlacementV1(a.Placement)
+	a.NamedSSHKeys = api.CloneNamedSSHKeysV1(a.NamedSSHKeys)
+	a.ProtectedTrustedSecretValues = maps.Clone(a.ProtectedTrustedSecretValues)
+	if err := CheckSessionName(a.Name); err != nil {
+		return nil, err
+	}
+	if err := CheckRequestedWall(a.Wall); err != nil {
+		return nil, err
+	}
+	if a.Wall == "" || a.Wall == "none" {
+		if err := refuseUnwalledNamedSSHKeys(a); err != nil {
+			return nil, err
+		}
+	}
+	standalone := grantRequestOf(ctx) == nil
+	ctx, request := ensureGrantRequest(ctx)
+	if standalone {
+		cleanupContext := ctx
+		defer func() {
+			_, abortErr := request.Abort(cleanupContext)
+			returned = errors.Join(returned, abortErr, request.Close())
+		}()
+	}
+	if newPlanOf(ctx) == nil && (a.SecretDelivery != nil || len(a.VMNeedV1) != 0 || a.Runtime != nil || a.NamedSSHKeys != nil || len(a.ProtectedTrustedSecretValues) != 0) {
+		return nil, grantOperationError()
+	}
+	request.mu.Lock()
+	unpreparedWall := request.wall == nil || request.sdkStart != nil
+	request.mu.Unlock()
+	if unpreparedWall {
+		var err error
+		a, err = prepareSDKNewStartV1(ctx, c, a)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if err := c.checkNewWallChoiceV1(ctx, a); err != nil {
+		return nil, err
+	}
+	if err := checkWallGrantArgs(ctx, a.Wall, a.SSHAgent); err != nil {
+		return nil, err
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	var err error
+	if inputs := newInputPreparationOf(ctx); inputs != nil {
+		inputs.mu.Lock()
+		a, err = inputs.inputArguments(ctx, a)
+		inputs.mu.Unlock()
+		if err != nil {
+			return nil, err
+		}
+	} else if a.Inputs != nil || a.Environment != nil {
+		return nil, grantOperationError()
+	}
+	if plan := newPlanOf(ctx); plan != nil {
+		a, err = plan.arguments(ctx, c, a)
+	} else {
+		a, err = withMemoryMax(a)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -50,8 +158,73 @@ func (c *Conn) NewSession(ctx context.Context, a NewArgs) (*Session, error) {
 	if err := c.needMakeFolder(a); err != nil {
 		return nil, err
 	}
+	baseContext := ctx
+	ctx, release, err := c.beginGrant(ctx, "new", a.SSHAgent || grantRequestOf(ctx).SSHAgent)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+	// One immutable local layer snapshot supplies both the creation pin
+	// and the actual outgoing arguments for this attempt.
+	a.Layers = api.CloneLayers(a.Layers)
+	a.Argv = slices.Clone(a.Argv)
+	a.Secrets = maps.Clone(a.Secrets)
+	a.HostLabel = c.Host.Name
+	a, tier, err := c.prepareNewGrants(ctx, a)
+	if err != nil {
+		return nil, err
+	}
+	if err := c.CheckPolicyLayerFeature(a.Layers); err != nil {
+		return nil, err
+	}
+	if err := c.CheckHTTPMethodFeature(StartPolicyLayers(a)); err != nil {
+		return nil, err
+	}
+	if err := c.checkLayerGrants(ctx, tier, StartPolicyLayers(a)); err != nil {
+		return nil, err
+	}
+	plan := newPlanOf(ctx)
+	if plan == nil || plan.intent == nil {
+		if err := recordSecretNames(ctx, c.Host, c.HostID(), tier, a.Secrets); err != nil {
+			return nil, err
+		}
+	}
+	a.Layers = api.ProjectClientImagePolicy(api.ProjectClientInputSources(a.Layers))
+	if plan != nil {
+		if err := plan.beginPublication(); err != nil {
+			return nil, err
+		}
+		defer plan.endPublication()
+		ctx, err = newPublicationContext(baseContext, ctx, c, plan, a)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if a.Wall != "" && a.Wall != "none" {
+		if err := NoteSandboxStarted(ctx, c.Host, c.HostID()); err != nil {
+			return nil, err
+		}
+	}
 	var s Session
-	if err := c.Call(ctx, "new", a, &s); err != nil {
+	if err := c.callNewWithInputs(baseContext, ctx, a, &s, release); err != nil {
+		return nil, err
+	}
+	if err := checkSessionID(c.Host.Name, s.ID); err != nil {
+		return nil, err
+	}
+	if a.ID != "" && s.ID != a.ID {
+		return nil, &UserError{Msg: "the helper returned another session's ID",
+			Hint: brand.Name + " host doctor " + ShellWord(c.Host.Name), Code: "protocol"}
+	}
+	if plan != nil && plan.intent == nil {
+		plan.mu.Lock()
+		plan.published = true
+		plan.mu.Unlock()
+	}
+	if err := acceptSessionMachineStartV1(baseContext, c, a, s); err != nil {
 		return nil, err
 	}
 	return &s, nil
@@ -63,7 +236,7 @@ func (c *Conn) needMakeFolder(a NewArgs) error {
 	if !a.MakeFolder || c.HasFeature("mkdir") {
 		return nil
 	}
-	return &UserError{Msg: "the helper on " + c.Host.Name + " is too old to make folders", Hint: brand.Name + " host add " + c.Host.Name + "   (updates the helper)"}
+	return &UserError{Msg: "the helper on " + c.Host.Name + " is too old to make folders", Hint: brand.Name + " host add " + c.Host.Name + " (updates the helper)", Code: "helper_old"}
 }
 
 // DeleteResult says what deleting a session did.
@@ -83,6 +256,53 @@ func (c *Conn) Delete(ctx context.Context, id string) (DeleteResult, error) {
 	return r, err
 }
 
+// DeleteNamed deletes the session id only while its name is still name,
+// the name that the user confirmed: the host refuses the delete with
+// session_renamed after a rename. The name is sent also when it is empty,
+// as for a session with no name, which a rename may give one. A helper
+// from before this ignores the name, and deletes.
+func (c *Conn) DeleteNamed(ctx context.Context, id, name string) (DeleteResult, error) {
+	var r DeleteResult
+	err := c.Call(ctx, "delete", map[string]string{"id": id, "name": name}, &r)
+	return r, err
+}
+
+// DeleteLines say what deleting the session s on host does, for the
+// question before it: what stops, and what stays. The launcher's delete
+// sheet and the rm command ask with the same lines. folder is the
+// session's folder as the user reads it, such as ~/src/app. The host's
+// words are cleaned of control and hidden characters.
+//
+// A folder stays, except a worktree that the session made: the host
+// removes it with its branch when it has no changes and no new commits.
+// The helper does not say which session made a worktree, so a folder in
+// the helper's worktrees gets a line that is true either way.
+func DeleteLines(s Session, host, folder string) []string {
+	oneLine := strings.NewReplacer("\r\n", " ", "\n", " ", "\t", " ")
+	agent := api.CleanText(oneLine.Replace(s.Agent), 200)
+	host = api.CleanText(oneLine.Replace(host), 200)
+	folder = api.CleanText(oneLine.Replace(folder), 1000)
+	stays := fmt.Sprintf("The folder %s stays.", folder)
+	if MaybeWorktree(s) {
+		stays = fmt.Sprintf("If the session made the worktree %s, it goes with its branch, unless it has changes or new commits.", folder)
+	}
+	if Ended(s) {
+		// Nothing runs that could lose work: say only what goes.
+		return []string{fmt.Sprintf("This removes the session from %s.", host), stays}
+	}
+	return []string{
+		fmt.Sprintf("This stops %s on %s and removes the session.", agent, host),
+		stays + " Unsaved work in the agent is lost.",
+	}
+}
+
+// MaybeWorktree reports whether the session s runs in the helper's folder
+// of worktrees on the host. The session may have made that worktree, or
+// may only have started in it.
+func MaybeWorktree(s Session) bool {
+	return strings.Contains(s.Cwd, "/"+brand.Name+"/worktrees/")
+}
+
 // Port is a TCP port a session listens on.
 type Port = api.Port
 
@@ -95,14 +315,14 @@ func (c *Conn) Ports(ctx context.Context, id string) ([]Port, error) {
 
 // RenameSession renames a session.
 func (c *Conn) RenameSession(ctx context.Context, id, name string) error {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return &UserError{Msg: "a name is needed", Hint: "Pass a non-empty name for the session.", Code: "bad_name", Kind: KindUsage}
+	}
+	if err := CheckSessionName(name); err != nil {
+		return err
+	}
 	return c.Call(ctx, "rename", map[string]string{"id": id, "name": name}, nil)
-}
-
-// Doctor asks the host to check itself.
-func (c *Conn) Doctor(ctx context.Context) (HostInfo, error) {
-	var d HostInfo
-	err := c.Call(ctx, "doctor", nil, &d)
-	return d, err
 }
 
 // Peek returns the newest output of a session, for a preview.

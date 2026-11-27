@@ -3,16 +3,14 @@ package client
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
-	"github.com/muesli/cancelreader"
 	xterm "golang.org/x/term"
 
-	"github.com/iamlakshya/simstim/internal/brand"
 	"github.com/iamlakshya/simstim/internal/diag"
 	"github.com/iamlakshya/simstim/internal/keys"
 	"github.com/iamlakshya/simstim/internal/proto"
@@ -44,10 +42,11 @@ type AttachOptions struct {
 
 // AttachResult says how an attach ended.
 type AttachResult struct {
-	Detached   bool
-	Ended      *proto.Ended
-	Missed     int64 // bytes replayed after reconnects
-	Reconnects int
+	Detached    bool
+	Ended       *proto.Ended
+	Missed      int64 // bytes replayed after reconnects
+	Reconnects  int
+	ReaderStuck bool
 }
 
 // Heartbeat timings.
@@ -65,24 +64,39 @@ const (
 var escFlush = 15 * time.Millisecond
 
 type attacher struct {
-	o       AttachOptions
-	conn    *Conn
-	ssh     *SSH
-	fd      int
-	tracker *term.Tracker
-	cu      term.Catchup // where the terminal is in the session's output
-	filter  *keys.Filter
-	inCh    chan []byte
-	res     AttachResult
-	key     string
+	agent         *attachedAgent
+	agentReady    <-chan agentReady
+	agentStarting bool
+	agentSetup    sync.WaitGroup
+	inputPending  bool
+	o             AttachOptions
+	conn          *Conn
+	ssh           *SSH
+	fd            int
+	tracker       *term.Tracker
+	cu            term.Catchup // where the terminal is in the session's output
+	filter        *keys.Filter
+	in            *attachInput
+	inCh          chan []byte
+	res           AttachResult
+	key           string
 	// swallow holds watched keys whose press we consumed, so their release is swallowed too.
 	swallow map[int]bool
 	// seen is the last known state of each session on this host, for notifications.
 	seen map[string]string
-	tr   *attachTrace // the debug trace (trace.go), or nil
+	// outStream tracks ground boundaries in TOutput so notifications never
+	// split an unfinished escape sequence or multi-byte UTF-8 rune.
+	outStream     outStream
+	pendingNotify [][]byte
+	tr            *attachTrace // the debug trace (trace.go), or nil
 	// dropped says why the attach dropped its connection, for the debug
 	// mode: "" when the connection closed by itself.
 	dropped string
+	guard   *pasteGuard  // reads every byte to the terminal for clipboard writes, and checks drops
+	held    []heldNotice // notices that wait until the terminal is between sequences
+	// clipUnread says that the paste guard could not read the clipboard in
+	// this attach, which its debug log said once.
+	clipUnread bool
 }
 
 // Attach connects to a session and runs it in this terminal until the user
@@ -94,16 +108,19 @@ func Attach(ctx context.Context, o AttachOptions) (AttachResult, error) {
 	if o.Out == nil {
 		o.Out = os.Stdout
 	}
+	if err := checkAttachInput(o.In); err != nil {
+		return AttachResult{}, err
+	}
 	if o.State == nil {
 		o.State = &AttachState{}
 	}
 	dk, err := keys.Parse(o.Settings.Attach.DetachKey)
 	if err != nil {
-		return AttachResult{}, &UserError{Msg: "bad detach key: " + err.Error(), Hint: "Fix attach.detach_key in the config."}
+		return AttachResult{}, &UserError{Msg: "bad detach key: " + err.Error(), Hint: "Fix attach.detach_key in the config.", Code: "bad_config", Kind: KindUsage}
 	}
 	pk, err := keys.Parse(o.Settings.Attach.ImagePasteKey)
 	if err != nil {
-		return AttachResult{}, &UserError{Msg: "bad image paste key: " + err.Error(), Hint: "Fix attach.image_paste_key in the config."}
+		return AttachResult{}, &UserError{Msg: "bad image paste key: " + err.Error(), Hint: "Fix attach.image_paste_key in the config.", Code: "bad_config", Kind: KindUsage}
 	}
 	tr := openAttachTrace(o.Session)
 	ctx = withTrace(ctx, tr)
@@ -116,72 +133,62 @@ func Attach(ctx context.Context, o AttachOptions) (AttachResult, error) {
 	if o.State.Valid && o.State.Key == a.key && !o.State.Modes.AltScreen {
 		last = o.State.Offset
 	}
-	conn, err := Dial(ctx, o.Host, o.Interactive)
+	conn, agent, err := dialAttach(ctx, o.Host, o.Session, o.Interactive)
 	if err != nil {
 		return AttachResult{}, err
 	}
-	a.conn = conn
-	defer func() { a.conn.Close() }()
+	a.conn, a.agent = conn, agent
+	defer a.closeConnections()
 	go a.ssh.masterState(ctx, "attach")
 	cols, rows, xpx, ypx := a.size()
-	att, err := a.handshake(last, cols, rows, xpx, ypx, false)
+	att, err := a.handshake(ctx, last, cols, rows, xpx, ypx, false)
 	if err != nil {
 		return AttachResult{}, err
 	}
 	DebugLog().Debug("attached", diag.CatKey, diag.CatAttach, "mode", att.Mode, "from", att.From, "live", att.Live)
 
-	old, err := xterm.MakeRaw(a.fd)
+	original, err := xterm.GetState(a.fd)
 	if err != nil {
+		return AttachResult{}, fmt.Errorf("save the terminal state: %w", err)
+	}
+	defer func() { _ = xterm.Restore(a.fd, original) }()
+	a.inCh = make(chan []byte, 256)
+	a.in, err = startAttachInput(o.In, a.inCh, a.tr)
+	if err != nil {
+		return AttachResult{}, err
+	}
+	if _, err := xterm.MakeRaw(a.fd); err != nil {
+		a.in.finish()
 		return AttachResult{}, fmt.Errorf("cannot put the terminal in raw mode: %w", err)
 	}
-	cr, err := cancelreader.NewReader(o.In)
-	if err != nil {
-		_ = xterm.Restore(a.fd, old)
-		return AttachResult{}, fmt.Errorf("read the terminal: %w", err)
+	if a.agent == nil {
+		a.askInput()
 	}
-	a.inCh = make(chan []byte, 256)
-	stop, readDone := make(chan struct{}), make(chan struct{})
-	go func() {
-		defer close(readDone)
-		buf := make([]byte, 32<<10)
-		for {
-			n, err := cr.Read(buf)
-			if n > 0 {
-				a.tr.stdin(n)
-				select {
-				case a.inCh <- append([]byte(nil), buf[:n]...):
-				case <-stop:
-					return
-				}
-			}
-			if err != nil {
-				close(a.inCh)
-				return
-			}
-		}
-	}()
 
+	// The paste guard takes the terminal's state that the last attach in
+	// this process left only now, when nothing more can fail before the
+	// detach gives it back.
+	a.guard = newPasteGuard(clipMemoryAt(clipPath()))
 	// Remember the title, to put it back on detach. While attached the
 	// title is the agent's: the client draws nothing of its own.
-	a.write([]byte("\x1b[22;0t"))
-	a.begin(att, o.State, rows)
+	a.write(ctx, []byte("\x1b[22;0t"))
+	a.begin(ctx, att, o.State, rows)
+	a.startAgent(ctx)
 
 	runErr := a.loop(ctx)
+	a.stopAgent()
 
 	// Stop the reader before its files are closed, and before anything else
-	// reads the terminal.
-	cr.Cancel()
-	close(stop)
-	select {
-	case <-readDone:
-	case <-time.After(time.Second):
-	}
+	// reads the terminal. A read that could not be stopped stays open rather
+	// than race with its close.
+	a.res.ReaderStuck = a.in.finish()
 	// Put the terminal back exactly as we found it: undo the session's modes,
 	// never with RIS, which would wipe the scrollback.
-	a.write(a.tracker.M.ResetSequence())
-	a.write([]byte("\x1b]9;4;0\x1b\\\x1b[23;0t"))
-	_ = xterm.Restore(a.fd, old)
-	_ = cr.Close()
+	cleanupCtx := context.WithoutCancel(ctx)
+	a.write(cleanupCtx, a.tracker.M.ResetSequence())
+	a.endGuard(cleanupCtx)
+	a.flushPendingNotify(cleanupCtx)
+	a.write(cleanupCtx, []byte("\x1b]9;4;0\x1b\\\x1b[23;0t"))
 
 	o.State.Key, o.State.Offset, o.State.Modes, o.State.Valid = a.key, a.cu.Offset, a.tracker.M, true
 	if a.res.Ended != nil {
@@ -190,78 +197,59 @@ func Attach(ctx context.Context, o AttachOptions) (AttachResult, error) {
 	return a.res, runErr
 }
 
-func (a *attacher) write(b []byte) {
+// write sends bytes to the terminal: the client's own, and the session's
+// title and modes that it sends again. The paste guard reads every byte that
+// the terminal gets, and only reads it.
+func (a *attacher) write(ctx context.Context, b []byte) { a.writeChecked(ctx, b, false) }
+
+// writeChecked is write for bytes that the caller may have checked: free
+// says that c1Free(b) holds, and false says nothing.
+func (a *attacher) writeChecked(ctx context.Context, b []byte, free bool) {
 	if len(b) > 0 {
+		a.guard.observeChecked(ctx, b, free)
 		_, _ = a.o.Out.Write(b)
 	}
 }
 
-func (a *attacher) size() (cols, rows, xpx, ypx int) { return termSize(a.o.Out) }
-
-// handshake sends the attach request and waits for the answer. reconnect is
-// true when the attach resumes after a dropped link.
-func (a *attacher) handshake(last int64, cols, rows, xpx, ypx int, reconnect bool) (proto.Attached, error) {
-	trace, cats := a.conn.startTrace()
-	req := proto.Attach{Session: a.o.Session, Cols: cols, Rows: rows, XPx: xpx, YPx: ypx, Client: brand.Name, LastOffset: last,
-		Trace: trace, Categories: cats, Reconnect: reconnect}
-	if err := a.conn.SendJSON(proto.TAttach, req); err != nil {
-		return proto.Attached{}, ErrClosed
-	}
-	timeout := time.After(15 * time.Second)
-	for {
-		select {
-		case f := <-a.conn.Stream():
-			switch f.Type {
-			case proto.TAttached:
-				var att proto.Attached
-				if err := json.Unmarshal(f.Payload, &att); err != nil {
-					return att, fmt.Errorf("read the host's answer to attach: %w", err)
-				}
-				return att, nil
-			case proto.TError:
-				var pe proto.Error
-				_ = json.Unmarshal(f.Payload, &pe)
-				return proto.Attached{}, &UserError{Msg: pe.Message, Hint: pe.Hint}
-			default:
-				// Other frames before the answer are ignored.
-			}
-		case <-a.conn.Done():
-			return proto.Attached{}, ErrClosed
-		case <-timeout:
-			return proto.Attached{}, errors.New("the host did not answer the attach in time")
-		}
-	}
+// show sends the session's bytes to the terminal, unchanged, then any
+// notice that waited for the terminal to be between sequences.
+func (a *attacher) show(ctx context.Context, b []byte) {
+	a.writeOutput(ctx, b)
 }
 
+func (a *attacher) size() (cols, rows, xpx, ypx int) { return termSize(a.o.Out) }
+
 // begin prepares the screen for the bytes that follow.
-func (a *attacher) begin(att proto.Attached, st *AttachState, rows int) {
+func (a *attacher) begin(ctx context.Context, att proto.Attached, st *AttachState, rows int) {
 	a.cu.History(att.Live)
 	if att.Mode == "replay" && st.Valid && st.Key == a.key {
 		// The terminal still shows this session up to st.Offset: put its modes back and continue.
 		a.tracker = &term.Tracker{M: st.Modes}
 		a.cu.Offset = att.From
-		a.write(st.Modes.RestoreSequence())
+		a.write(ctx, st.Modes.RestoreSequence())
 		return
 	}
 	// A full redraw. Keep what is on screen in the scrollback, then start clean.
 	a.tracker = term.NewTracker()
+	a.outStream.reset()
 	a.cu.Offset = att.From
 	// For "snapshot", a TSnapshot frame redraws the screen as of From, and the
 	// output from From follows; bytes before Live are history and are sanitised.
 	if a.o.Settings.Attach.Scrollback == "clear" {
-		a.write([]byte("\x1b[H\x1b[2J\x1b[3J"))
+		a.write(ctx, []byte("\x1b[H\x1b[2J\x1b[3J"))
 	} else {
-		a.write([]byte(fmt.Sprintf("\x1b[%d;1H%s\x1b[H", rows, strings.Repeat("\n", rows))))
+		a.write(ctx, []byte(fmt.Sprintf("\x1b[%d;1H%s\x1b[H", rows, strings.Repeat("\n", rows))))
 	}
+	a.flushPendingNotify(ctx)
 }
 
 // output shows bytes from offset off, skipping any the terminal already has.
-func (a *attacher) output(off int64, data []byte) {
+func (a *attacher) output(ctx context.Context, off int64, data []byte) {
 	show, fresh := a.cu.Feed(off, data)
 	if fresh == nil {
 		return // the terminal already shows it
 	}
-	a.write(show)
+	a.writeOutput(ctx, show)
 	a.tracker.Feed(fresh)
 }
 
@@ -280,6 +268,7 @@ func (a *attacher) loop(ctx context.Context) error {
 	lastTick := time.Now()
 	others := make(chan []Session, 1)
 	var detachTimer, flushTimer <-chan time.Time
+	var agentHeld []byte
 	for {
 		select {
 		case now := <-wake.C:
@@ -287,20 +276,42 @@ func (a *attacher) loop(ctx context.Context) error {
 			lastTick = now
 			if gap > wakeGap {
 				a.dropped = "the laptop slept"
+				a.stopAgent()
 				a.conn.kill()
 			}
 		case <-watch.C:
+			if err := a.watchAgentGrant(ctx); err != nil {
+				return err
+			}
 			a.watchOthers(ctx, others)
 		case list := <-others:
-			a.notifyOthers(list)
+			a.notifyOthers(ctx, list)
 		case f := <-a.conn.Stream():
-			if done, err := a.frame(f); done || err != nil {
+			if done, err := a.frame(ctx, f); done || err != nil {
+				return err
+			}
+		case ready := <-a.agentReady:
+			if stop, err := a.onAgentReady(ctx, ready, &agentHeld, &detachTimer, &flushTimer); stop || err != nil {
+				return err
+			}
+		case <-a.agentDone():
+			if err := a.onAgentLost(); err != nil {
 				return err
 			}
 		case b, ok := <-a.inCh:
+			a.inputPending = false
+			if !ok {
+				a.res.Detached = true
+				return nil
+			}
+			if a.agentStarting {
+				agentHeld = b
+				continue
+			}
 			if a.onKeys(ctx, b, ok, &detachTimer, &flushTimer) {
 				return nil
 			}
+			a.askInput()
 		case <-flushTimer:
 			flushTimer = nil
 			if b := a.filter.Flush(); len(b) > 0 {
@@ -315,6 +326,8 @@ func (a *attacher) loop(ctx context.Context) error {
 		case <-heart.C:
 			a.heartbeat()
 		case <-a.conn.Done():
+			agentHeld = nil
+			a.stopAgent()
 			if detached, err := a.reconnect(ctx); detached || err != nil {
 				a.res.Detached = detached
 				return err
@@ -364,17 +377,18 @@ func (a *attacher) heartbeat() {
 	_ = a.conn.Ping()
 	if time.Since(a.conn.LastRecv()) > deadAfter {
 		a.dropped = "no answer from the host"
+		a.stopAgent()
 		a.conn.kill()
 	}
 }
 
 // frame handles one frame from the host. done is true when the attach is over.
-func (a *attacher) frame(f proto.Frame) (done bool, err error) {
+func (a *attacher) frame(ctx context.Context, f proto.Frame) (done bool, err error) {
 	switch f.Type {
 	case proto.TOutput:
 		off, data, err := proto.DecodeOutput(f.Payload)
 		if err == nil {
-			a.output(off, data)
+			a.output(ctx, off, data)
 			if a.tr != nil {
 				a.tr.drawn(off, len(data))
 			}
@@ -382,11 +396,13 @@ func (a *attacher) frame(f proto.Frame) (done bool, err error) {
 	case proto.TSnapshot:
 		// A redraw of the current screen, made by the host's terminal emulator.
 		// It contains no queries, so it goes straight to the terminal.
-		a.write(f.Payload)
+		a.show(ctx, f.Payload)
 		a.tracker.Feed(f.Payload)
 	case proto.TEnded:
 		var e proto.Ended
 		_ = json.Unmarshal(f.Payload, &e)
+		// The signal's name is drawn, in the notice at the end of an attach.
+		e.Signal = CleanLine(e.Signal)
 		a.res.Ended = &e
 		return true, nil
 	case proto.TError:
@@ -396,7 +412,7 @@ func (a *attacher) frame(f proto.Frame) (done bool, err error) {
 			a.res.Ended = &proto.Ended{ExitCode: -1}
 			return true, nil
 		}
-		return true, &UserError{Msg: pe.Message, Hint: pe.Hint}
+		return true, hostError(&pe)
 	default:
 		// Other frames need nothing from an attached client.
 	}

@@ -13,11 +13,12 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/iamlakshya/simstim/internal/brand"
 	"github.com/iamlakshya/simstim/internal/client"
-	"github.com/iamlakshya/simstim/internal/provider"
+	"github.com/iamlakshya/simstim/internal/ring"
 )
 
 // EnvdPort is the port of envd, E2B's daemon inside each sandbox.
@@ -168,12 +169,23 @@ func (e *Envd) KeepAlive() time.Duration { return 10 * time.Second }
 
 // ReachHint says how to check the sandbox.
 func (e *Envd) ReachHint() string {
-	return brand.Name + " host status " + e.Host + "   (is the sandbox running?)"
+	return brand.Name + " host status " + e.Host + " (says whether the sandbox runs)"
 }
 
 // Start runs remote with /bin/sh -c in the sandbox, with a tag of its own
 // and stdin open.
 func (e *Envd) Start(ctx context.Context, remote string) (client.Proc, error) {
+	return e.start(ctx, remote, startOptions{})
+}
+
+type startOptions struct {
+	stderrTail bool
+}
+
+func (e *Envd) start(ctx context.Context, remote string, options startOptions) (client.Proc, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, withCause(ctx, fmt.Errorf("cannot reach the sandbox %s: %w", e.SandboxID, err))
+	}
 	tag := brand.Name + "-" + randomHex(6)
 	msg, err := json.Marshal(startRequest{Process: processConfig{Cmd: "/bin/sh", Args: []string{"-c", remote}}, Tag: tag, Stdin: true})
 	if err != nil {
@@ -184,15 +196,27 @@ func (e *Envd) Start(ctx context.Context, remote string) (client.Proc, error) {
 		return nil, err
 	}
 	sctx, cancel := context.WithCancel(ctx)
-	req, err := e.request(sctx, "Start", &body, true)
+	var sent atomic.Bool
+	req, err := e.request(sctx, "Start", &sentReader{r: &body, sent: &sent}, true)
 	if err != nil {
 		cancel()
 		return nil, err
 	}
+	if err := ctx.Err(); err != nil {
+		cancel()
+		return nil, withCause(ctx, fmt.Errorf("cannot reach the sandbox %s: %w", e.SandboxID, err))
+	}
+	p := &proc{e: e, tag: tag, cancel: cancel, done: make(chan struct{})}
+	if options.stderrTail {
+		p.runStderr = ring.New(stderrTailBytes)
+	}
 	resp, err := e.client().Do(req)
 	if err != nil {
 		cancel()
-		return nil, fmt.Errorf("cannot reach the sandbox %s: %w", e.SandboxID, err)
+		if sent.Load() {
+			p.signal(ctx)
+		}
+		return nil, withCause(ctx, fmt.Errorf("cannot reach the sandbox %s: %w", e.SandboxID, err))
 	}
 	if resp.StatusCode != http.StatusOK {
 		err := responseError(resp)
@@ -200,11 +224,21 @@ func (e *Envd) Start(ctx context.Context, remote string) (client.Proc, error) {
 		cancel()
 		return nil, fmt.Errorf("cannot start a command in the sandbox %s: %w", e.SandboxID, err)
 	}
-	p := &proc{e: e, tag: tag, body: resp.Body, cancel: cancel, done: make(chan struct{})}
-	if err := p.readStart(); err != nil {
+	p.body = resp.Body
+	mayRun, err := p.readStart()
+	if err != nil {
 		cancel()
 		resp.Body.Close()
-		return nil, err
+		if mayRun {
+			p.signal(ctx)
+		}
+		return nil, withCause(ctx, err)
+	}
+	if err := ctx.Err(); err != nil {
+		cancel()
+		resp.Body.Close()
+		p.signal(ctx)
+		return nil, withCause(ctx, fmt.Errorf("cannot reach the sandbox %s: %w", e.SandboxID, err))
 	}
 	p.stdoutR, p.stdoutW = io.Pipe()
 	if e.Stream {
@@ -219,26 +253,23 @@ func (e *Envd) Start(ctx context.Context, remote string) (client.Proc, error) {
 	return p, nil
 }
 
-// Run runs remote to its end, with stdin, and returns its stdout.
-func (e *Envd) Run(ctx context.Context, remote string, stdin io.Reader) ([]byte, error) {
-	p, err := e.Start(ctx, remote)
-	if err != nil {
-		return nil, err
+// sentReader notes when the transport begins to read the Start body, which
+// holds the command and its tag. Before that, envd cannot have seen either.
+type sentReader struct {
+	r    io.Reader
+	sent *atomic.Bool
+}
+
+func (r *sentReader) Read(b []byte) (int, error) {
+	r.sent.Store(true)
+	return r.r.Read(b) //nolint:wrapcheck // request body passes its reader's errors on as they are
+}
+
+func withCause(ctx context.Context, err error) error {
+	if cause := context.Cause(ctx); cause != nil && !errors.Is(err, cause) {
+		return fmt.Errorf("%w: %w", cause, err)
 	}
-	go func() {
-		if stdin != nil {
-			_, _ = io.Copy(p.Stdin(), stdin)
-		}
-		_ = p.Stdin().Close()
-	}()
-	out, rerr := io.ReadAll(p.Stdout())
-	if werr := p.Wait(); werr != nil {
-		return out, fmt.Errorf("%w: %s", werr, provider.Tail(p.Stderr(), 3))
-	}
-	if rerr != nil {
-		return out, fmt.Errorf("read the command's output: %w", rerr)
-	}
-	return out, nil
+	return err
 }
 
 // proc is one command running in the sandbox.
@@ -253,12 +284,23 @@ type proc struct {
 	stdoutR *io.PipeReader
 	stdoutW *io.PipeWriter
 
-	mu      sync.Mutex
-	stderr  strings.Builder
-	exit    *int32
-	waitErr error
-	done    chan struct{}
-	killed  sync.Once
+	mu     sync.Mutex
+	stderr strings.Builder
+	// runStderr is allocated only for Run, before the output pump starts.
+	runStderr *ring.Ring
+	exit      *int32
+	waitErr   error
+	// inputErr is why the input failed, when that made send kill the
+	// command.
+	inputErr *inputError
+	done     chan struct{}
+	killed   sync.Once
+	// signaled sends the one SIGKILL request, apart from the cut of the
+	// stream, so every path that kills shares it.
+	signaled sync.Once
+	// killing is set when a kill starts, before it cuts any request, so an
+	// input that fails after it failed because of the kill.
+	killing atomic.Bool
 }
 
 func (p *proc) Stdin() io.WriteCloser { return p.in }
@@ -270,26 +312,28 @@ func (p *proc) Stderr() string {
 	return p.stderr.String()
 }
 
-// readStart reads the first event, which carries the process ID.
-func (p *proc) readStart() error {
+// readStart reads the first event, which carries the process ID. mayRun is
+// true when the failure does not prove that envd rejected the command before
+// starting it.
+func (p *proc) readStart() (mayRun bool, err error) {
 	for {
 		flags, msg, err := readEnvelope(p.body)
 		if err != nil {
-			return fmt.Errorf("cannot reach the sandbox %s: %w", p.e.SandboxID, err)
+			return true, fmt.Errorf("cannot reach the sandbox %s: %w", p.e.SandboxID, err)
 		}
 		if flags&flagEndStream != 0 {
 			if err := endError(msg); err != nil {
-				return fmt.Errorf("cannot start a command in the sandbox %s: %w", p.e.SandboxID, err)
+				return false, fmt.Errorf("cannot start a command in the sandbox %s: %w", p.e.SandboxID, err)
 			}
-			return errors.New("envd ended the stream before the command started")
+			return true, errors.New("envd ended the stream before the command started")
 		}
 		var ev processEvent
 		if err := json.Unmarshal(msg, &ev); err != nil {
-			return fmt.Errorf("read envd's start event: %w", err)
+			return true, fmt.Errorf("read envd's start event: %w", err)
 		}
 		if ev.Event.Start != nil {
 			p.pid = ev.Event.Start.Pid
-			return nil
+			return false, nil
 		}
 	}
 }
@@ -317,11 +361,7 @@ func (p *proc) pump() {
 		switch {
 		case ev.Event.Data != nil:
 			if len(ev.Event.Data.Stderr) > 0 {
-				p.mu.Lock()
-				if p.stderr.Len() < 8192 {
-					p.stderr.Write(ev.Event.Data.Stderr)
-				}
-				p.mu.Unlock()
+				p.captureStderr(ev.Event.Data.Stderr)
 			}
 			if len(ev.Event.Data.Stdout) > 0 {
 				if _, err := p.stdoutW.Write(ev.Event.Data.Stdout); err != nil {
@@ -363,19 +403,44 @@ func (p *proc) Wait() error {
 }
 
 // Kill ends the command: SIGKILL through envd, and the stream is dropped.
-func (p *proc) Kill() {
+func (p *proc) Kill() { p.kill(context.Background()) }
+
+// kill is Kill with ctx's values. The SIGKILL goes out even when ctx has
+// ended, which is when a command most needs it. A second kill waits for the
+// first.
+func (p *proc) kill(ctx context.Context) {
+	p.killing.Store(true)
 	p.killed.Do(func() {
-		p.mu.Lock()
-		ended := p.exit != nil
-		p.mu.Unlock()
-		if !ended {
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancel()
-			_ = p.e.unary(ctx, "SendSignal", signalRequest{Process: selector{Pid: p.pid}, Signal: "SIGNAL_SIGKILL"})
-		}
+		p.signal(ctx)
 		p.cancel()
-		_ = p.stdoutR.CloseWithError(io.ErrClosedPipe)
+		if p.stdoutR != nil {
+			_ = p.stdoutR.CloseWithError(io.ErrClosedPipe)
+		}
 	})
+}
+
+// signal sends SIGKILL through envd once for the command, whichever path
+// kills it: the end of ctx, a failed input, or Run itself. A call while the
+// request is out waits for its answer. It keeps the stream, which then
+// carries the command's end event.
+func (p *proc) signal(ctx context.Context) {
+	p.signaled.Do(func() { p.sendSignal(ctx) })
+}
+
+// sendSignal asks envd for the SIGKILL, unless the command's exit status is
+// known. It uses the process ID once StartEvent has given one, and the
+// request's tag before then. Only signal calls it.
+func (p *proc) sendSignal(ctx context.Context) {
+	if p.exited() {
+		return
+	}
+	sel := selector{Pid: p.pid}
+	if sel.Pid == 0 {
+		sel = selector{Tag: p.tag}
+	}
+	sctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	_ = p.e.unary(sctx, "SendSignal", signalRequest{Process: sel, Signal: "SIGNAL_SIGKILL"})
 }
 
 func randomHex(n int) string {

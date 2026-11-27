@@ -3,7 +3,8 @@
 # or Tailscale address, a tailnet name or an email address. Examples in the
 # docs use the documentation ranges (192.0.2.0/24, 198.51.100.0/24,
 # 203.0.113.0/24), example.com (or the reserved example.invalid) and the
-# users "me", "you" and "dev".
+# users "me", "you" and "dev". /home/agent is allowed too: it is the home
+# folder of the sandbox's own guest user, which the design names (spec 7.1).
 #
 # A maintainer can add words of their own (machine names, a homelab's name)
 # to private/deny.txt, one extended regex per line. A line that starts with
@@ -24,8 +25,9 @@ patterns=(
     '(^|[^0-9.])100\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\.[0-9]{1,3}\.[0-9]{1,3}($|[^0-9.])'
     # Tailnet names.
     '[A-Za-z0-9-]+\.ts\.net'
-    # Email addresses.
-    '[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}'
+    # Email addresses have complete DNS labels. A leading hyphen is not
+    # a domain, and a match cannot stop before another domain component.
+    '[A-Za-z0-9._%+-]+@[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?)*\.[A-Za-z]{2,}($|[^A-Za-z0-9.]|\.($|[^A-Za-z0-9]))'
 )
 more_allow=""
 if [ -f private/deny.txt ]; then
@@ -41,12 +43,13 @@ fi
 # Matches that are fine: generic users, documentation names and addresses,
 # the bots' addresses, and another project's public contact addresses that an
 # old version of a research note quoted.
-allow='/Users/(me|you|runner|shared)([/" ]|$)|/home/(me|you|u|dev|user|runner|linuxbrew|admin|ubuntu|debian|vscode|node)([/" .:;)\<&]|$)|example-tailnet\.ts\.net|@([A-Za-z0-9-]+\.)*(example|example\.(com|org|net|invalid)|openssh\.com|users\.noreply\.github\.com)([^A-Za-z0-9.-]|$)|git@github\.com|support@github\.com|noreply@|user@UID|@v[0-9]|@sha256|@latest|[a-z]+@herdr\.dev'
+allow='/Users/(me|you|runner|shared)([/" ]|$)|/home/(me|you|u|dev|user|runner|linuxbrew|admin|ubuntu|debian|vscode|node|agent)([/" .:;,)\<&`]|$)|example-tailnet\.ts\.net|@([A-Za-z0-9-]+\.)*(example|example\.(com|org|net|invalid)|openssh\.com|users\.noreply\.github\.com)([^A-Za-z0-9.-]|$)|git@github\.com|support@github\.com|noreply@|user@UID|@v[0-9]|@sha256|@latest|[a-z]+@herdr\.dev'
 allow+="$more_allow"
 
 # --history checks every version of every file in every commit, plus the
 # commit messages: run it before the repository goes public.
 if [ "${1:-}" = "--history" ]; then
+    bash scripts/source-files.sh --tracked --require-git >/dev/null
     fail=0
     tmp=$(mktemp -d)
     trap 'rm -rf "$tmp"' EXIT
@@ -87,13 +90,18 @@ if [ "${1:-}" = "--history" ]; then
     exit 0
 fi
 
+files=$(mktemp)
+trap 'rm -f "$files"' EXIT
+bash scripts/source-files.sh --tracked >"$files"
 fail=0
-while IFS= read -r file; do
-    [ -f "$file" ] || continue
-    grep -I -q . "$file" 2>/dev/null || continue # binary or empty
+checked=0
+while IFS= read -r -d '' file; do
+    case "$file" in go.sum | vt/build.zig.zon | scripts/check-private.sh) continue ;; esac
+    grep -I -q . "./$file" 2>/dev/null || continue # binary or empty
+    checked=$((checked + 1))
     # Remove the allowed forms first, so a line with one of them and a real
     # hit still fails.
-    text=$(sed -E "s#${allow}##g" "$file")
+    text=$(sed -E "s#${allow}##g" "./$file")
     for p in "${patterns[@]}"; do
         hits=$(printf '%s\n' "$text" | grep -n -E -- "$p" || true)
         if [ -n "$hits" ]; then
@@ -102,7 +110,12 @@ while IFS= read -r file; do
             fail=1
         fi
     done
-done < <(git ls-files --cached | grep -v -E '^(go\.sum|vt/build\.zig\.zon|scripts/check-private\.sh)$')
+done <"$files"
+if [ "$checked" -eq 0 ]; then
+    echo "Error: the private-detail check selected no text files." >&2
+    echo "Try: use a complete source tree, then run the check again." >&2
+    exit 2
+fi
 
 if [ "$fail" -ne 0 ]; then
     echo

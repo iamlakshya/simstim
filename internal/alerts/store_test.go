@@ -12,20 +12,6 @@ import (
 	"github.com/iamlakshya/simstim/internal/api"
 )
 
-// TestMain points the state and config folders at a temporary folder, so no
-// test can touch the real ones.
-func TestMain(m *testing.M) {
-	dir, err := os.MkdirTemp("", "alerts-test-")
-	if err != nil {
-		panic(err)
-	}
-	os.Setenv("XDG_STATE_HOME", filepath.Join(dir, "state"))
-	os.Setenv("XDG_CONFIG_HOME", filepath.Join(dir, "config"))
-	code := m.Run()
-	os.RemoveAll(dir)
-	os.Exit(code)
-}
-
 func TestLogTurnsOver(t *testing.T) {
 	dir := t.TempDir()
 	l := &DeliveryLog{Path: filepath.Join(dir, "alerts.log"), Lock: filepath.Join(dir, "lock"), Max: 1000}

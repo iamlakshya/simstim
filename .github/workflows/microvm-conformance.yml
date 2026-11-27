@@ -1,0 +1,327 @@
+name: Microvm conformance
+
+on:
+  workflow_dispatch:
+    inputs:
+      revision:
+        description: Exact source commit built for both client and host
+        required: true
+
+permissions: {}
+
+jobs:
+  native-assurance:
+    # Select an EXISTING prepared Linux runner in the conformance environment.
+    # This workflow provisions no machine and changes no KVM permissions.
+    runs-on: ${{ fromJSON(vars[matrix.runner]) }}
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        include:
+          - arch: amd64
+            runner: CONFORMANCE_LINUX_RUNNER_AMD64
+          - arch: arm64
+            runner: CONFORMANCE_LINUX_RUNNER_ARM64
+    environment: conformance
+    permissions:
+      contents: read
+    env:
+      HOME: ${{ github.workspace }}/private/native-build-home
+      USERPROFILE: ${{ github.workspace }}/private/native-build-home
+      XDG_CONFIG_HOME: ${{ github.workspace }}/private/native-build-home/config
+      XDG_CACHE_HOME: ${{ github.workspace }}/private/native-build-home/cache
+      XDG_DATA_HOME: ${{ github.workspace }}/private/native-build-home/data
+      XDG_STATE_HOME: ${{ github.workspace }}/private/native-build-home/state
+      XDG_RUNTIME_DIR: ${{ github.workspace }}/private/native-build-home/run
+      XDG_CONFIG_DIRS: ${{ github.workspace }}/private/native-build-home/config-dirs
+      XDG_DATA_DIRS: ${{ github.workspace }}/private/native-build-home/data-dirs
+      GOCACHE: ${{ github.workspace }}/private/native-build-home/go-cache
+      GOPATH: ${{ github.workspace }}/private/native-build-home/go
+      GOENV: "off"
+      GOFLAGS: "-mod=readonly -p=2"
+      GOMAXPROCS: "2"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.revision }}
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.27.4'
+          cache: false
+      - name: Require the exact source, real KVM and build room before Go jobs
+        env:
+          REVISION: ${{ inputs.revision }}
+          EXPECTED_ARCH: ${{ matrix.arch }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$REVISION"
+          case "$EXPECTED_ARCH:$(uname -m)" in amd64:x86_64|amd64:amd64|arm64:aarch64|arm64:arm64) ;; *) echo 'The native runner architecture differs from its actual required platform.' >&2; exit 1 ;; esac
+          test -r /dev/kvm && test -w /dev/kvm
+          python3 -c 'import shutil,sys; sys.exit(0 if shutil.disk_usage(".").free >= 8*1024**3 else "conformance: fewer than 8 GiB free; no Go job admitted")'
+      - name: Prepare the canonical tools and module inputs explicitly
+        run: |
+          scripts/setup.sh --only just,zig
+          go mod download
+          if [ -d internal/usernscode ]; then
+            scripts/setup.sh --only zig
+            export PATH="$PWD/.tools/bin:$PATH"
+            cmd/userns/build.sh
+          fi
+          export GOTOOLCHAIN=local GOPROXY=off GOSUMDB=sum.golang.org
+          .tools/bin/just build
+      - name: Run the full native escape and guest suites with the race detector
+        run: |
+          set -o pipefail
+          task_home=$(mktemp -d "$RUNNER_TEMP/native-home.XXXXXX")
+          module_cache=$(go env GOMODCACHE)
+          mkdir -p "$task_home/config" "$task_home/cache" "$task_home/data" "$task_home/state" "$task_home/run" "$task_home/config-dirs" "$task_home/data-dirs"
+          env HOME="$task_home" USERPROFILE="$task_home" \
+            XDG_CONFIG_HOME="$task_home/config" XDG_CACHE_HOME="$task_home/cache" \
+            XDG_DATA_HOME="$task_home/data" XDG_STATE_HOME="$task_home/state" \
+            XDG_RUNTIME_DIR="$task_home/run" XDG_CONFIG_DIRS="$task_home/config-dirs" XDG_DATA_DIRS="$task_home/data-dirs" \
+            GOMODCACHE="$module_cache" GOCACHE="$task_home/go-cache" \
+            GOTOOLCHAIN=local GOPROXY=off GOSUMDB=sum.golang.org GOFLAGS=-mod=readonly \
+            go test -tags="$(sh scripts/go-build-tags.sh)" -race -count=3 -p=2 -json ./internal/diag ./internal/host ./internal/supervisor ./internal/jail ./internal/wall/process ./internal/wall/microvm ./internal/guest \
+            | tee "$RUNNER_TEMP/native-go.jsonl"
+          module=$(sed -n 's/^module //p' go.mod)
+          python3 scripts/check-conformance-go.py "$RUNNER_TEMP/native-go.jsonl" \
+            --package "$module/internal/diag" --package "$module/internal/host" --package "$module/internal/supervisor" \
+            --package "$module/internal/jail" --package "$module/internal/wall/process" \
+            --package "$module/internal/wall/microvm" --package "$module/internal/guest" \
+            > "$RUNNER_TEMP/native-summary.json"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: microvm-native-${{ matrix.arch }}-${{ inputs.revision }}
+          path: |
+            ${{ runner.temp }}/native-go.jsonl
+            ${{ runner.temp }}/native-summary.json
+          if-no-files-found: error
+
+  client-to-host:
+    needs: native-assurance
+    # Root supplies a real same-source VM-equipped client from the normal
+    # qualified producer on an EXISTING prepared macOS runner. A helper-only
+    # just build is not a candidate-runtime or guest-tools handoff.
+    runs-on: ${{ fromJSON(vars.CONFORMANCE_MACOS_RUNNER) }}
+    environment: conformance
+    permissions:
+      contents: read
+    env:
+      HOME: ${{ github.workspace }}/private/client-build-home
+      USERPROFILE: ${{ github.workspace }}/private/client-build-home
+      XDG_CONFIG_HOME: ${{ github.workspace }}/private/client-build-home/config
+      XDG_CACHE_HOME: ${{ github.workspace }}/private/client-build-home/cache
+      XDG_DATA_HOME: ${{ github.workspace }}/private/client-build-home/data
+      XDG_STATE_HOME: ${{ github.workspace }}/private/client-build-home/state
+      XDG_RUNTIME_DIR: ${{ github.workspace }}/private/client-build-home/run
+      XDG_CONFIG_DIRS: ${{ github.workspace }}/private/client-build-home/config-dirs
+      XDG_DATA_DIRS: ${{ github.workspace }}/private/client-build-home/data-dirs
+      GOCACHE: ${{ github.workspace }}/private/client-build-home/go-cache
+      GOPATH: ${{ github.workspace }}/private/client-build-home/go
+      GOENV: "off"
+      GOFLAGS: "-mod=readonly -p=2"
+      GOMAXPROCS: "2"
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        include:
+          - substrate: bare-metal
+            arch: amd64
+            host: conformance-bare-metal-amd64
+            marker: CONFORMANCE_BARE_METAL_AMD64_MARKER
+          - substrate: nested
+            arch: amd64
+            host: conformance-nested-amd64
+            marker: CONFORMANCE_NESTED_AMD64_MARKER
+          - substrate: bare-metal
+            arch: arm64
+            host: conformance-bare-metal-arm64
+            marker: CONFORMANCE_BARE_METAL_ARM64_MARKER
+          - substrate: nested
+            arch: arm64
+            host: conformance-nested-arm64
+            marker: CONFORMANCE_NESTED_ARM64_MARKER
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.revision }}
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.27.4'
+      - name: Require the selected immutable source and local build room
+        env:
+          REVISION: ${{ inputs.revision }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$REVISION"
+          python3 -c 'import shutil,sys; sys.exit(0 if shutil.disk_usage(".").free >= 8*1024**3 else "conformance: fewer than 8 GiB free; no build admitted")'
+      - name: Require the real current-source candidate and build only test fixtures
+        # H10/supply/release owners prepare candidate bytes and host caches.
+        # This job never injects runtimes into host storage or mints a Need
+        # from an archive, status or matching metadata.
+        env:
+          PROBE_ARCH: ${{ matrix.arch }}
+          CANDIDATE_ROOT: ${{ vars.CONFORMANCE_CANDIDATE_ROOT }}
+          REVISION: ${{ inputs.revision }}
+        run: |
+          app=$(sed -n 's/^const Name = "\(.*\)"/\1/p' internal/brand/brand.go)
+          candidate="$CANDIDATE_ROOT/bin/$app"
+          test -n "$CANDIDATE_ROOT" && test -x "$candidate"
+          go version -m "$candidate" > "$RUNNER_TEMP/candidate-buildinfo.txt"
+          python3 - "$RUNNER_TEMP/candidate-buildinfo.txt" "$REVISION" <<'PY'
+          import sys
+          rows=[line.split() for line in open(sys.argv[1])]
+          settings=dict(row[1].split('=',1) for row in rows if len(row)==2 and row[0]=='build' and '=' in row[1])
+          if settings.get('vcs.revision')!=sys.argv[2] or settings.get('vcs.modified')!='false':
+              raise SystemExit('No actual candidate for the selected source; Root must provide the qualified H10/supply/release handoff.')
+          PY
+          echo "CONFORMANCE_CLIENT=$candidate" >> "$GITHUB_ENV"
+          go mod download
+          if [ -d internal/usernscode ]; then
+            scripts/setup.sh --only zig
+            export PATH="$PWD/.tools/bin:$PATH"
+            cmd/userns/build.sh
+          fi
+          export GOTOOLCHAIN=local GOPROXY=off GOSUMDB=sum.golang.org
+          mkdir -p build
+          CGO_ENABLED=0 GOOS=linux GOARCH=$PROBE_ARCH go build -tags="$(sh scripts/go-build-tags.sh)" -p=2 -trimpath -o "build/conformance-probe-$PROBE_ARCH" ./test/sandboxprobe
+          for arch in "$PROBE_ARCH"; do
+            CGO_ENABLED=0 GOOS=linux GOARCH=$arch go test -tags="$(sh scripts/go-build-tags.sh)" -p=2 -c -o "build/conformance-link-$arch" ./internal/link
+            CGO_ENABLED=0 GOOS=linux GOARCH=$arch go test -tags="$(sh scripts/go-build-tags.sh)" -p=2 -c -o "build/conformance-supervisor-$arch" ./internal/supervisor
+          done
+      - name: Prepare the run's own local connection files
+        env:
+          HOSTS: ${{ secrets.CONFORMANCE_HOSTS_TOML }}
+          KEY: ${{ secrets.CONFORMANCE_SSH_KEY }}
+          KNOWN: ${{ secrets.CONFORMANCE_KNOWN_HOSTS }}
+        run: |
+          umask 077
+          task_home=$(mktemp -d "$RUNNER_TEMP/conformance-home.XXXXXX")
+          app=$(sed -n 's/^const Name = "\(.*\)"/\1/p' internal/brand/brand.go)
+          mkdir -p "$task_home/.ssh" "$task_home/config/$app" "$task_home/state" "$task_home/cache" "$task_home/data" "$task_home/run" "$task_home/config-dirs" "$task_home/data-dirs"
+          printf '%s\n' "$HOSTS" > "$task_home/config/$app/hosts.toml"
+          printf '%s\n' "$KEY" > "$task_home/.ssh/key"
+          printf '%s\n' "$KNOWN" > "$task_home/.ssh/known_hosts"
+          printf 'Host *\n IdentityFile %s/.ssh/key\n IdentitiesOnly yes\n UserKnownHostsFile %s/.ssh/known_hosts\n StrictHostKeyChecking yes\n' "$task_home" "$task_home" > "$task_home/.ssh/config"
+          {
+            echo "HOME=$task_home"
+            echo "USERPROFILE=$task_home"
+            echo "XDG_CONFIG_HOME=$task_home/config"
+            echo "XDG_STATE_HOME=$task_home/state"
+            echo "XDG_CACHE_HOME=$task_home/cache"
+            echo "XDG_DATA_HOME=$task_home/data"
+            echo "XDG_RUNTIME_DIR=$task_home/run"
+            echo "XDG_CONFIG_DIRS=$task_home/config-dirs"
+            echo "XDG_DATA_DIRS=$task_home/data-dirs"
+          } >> "$GITHUB_ENV"
+      - name: Run the actual macOS client, Linux guest and immutable evidence path (bare-metal amd64)
+        if: matrix.marker == 'CONFORMANCE_BARE_METAL_AMD64_MARKER'
+        env:
+          E2E_HOST: ${{ matrix.host }}
+          E2E_DISPOSABLE: "1"
+          E2E_DISPOSABLE_MARKER: ${{ secrets.CONFORMANCE_BARE_METAL_AMD64_MARKER }}
+          E2E_SUBSTRATE: ${{ matrix.substrate }}
+          E2E_REVISION: ${{ inputs.revision }}
+          E2E_HOST_ARCH: ${{ matrix.arch }}
+        run: |
+          case "$E2E_HOST_ARCH" in amd64|arm64) ;; *) echo 'Set the actual prepared host architecture; no guessed probe can run.' >&2; exit 1 ;; esac
+          scripts/time-to-agent.sh --host "$E2E_HOST" --client "$CONFORMANCE_CLIENT" \
+            --probe "build/conformance-probe-$E2E_HOST_ARCH" --wall microvm \
+            --link-bench "build/conformance-link-$E2E_HOST_ARCH" --supervisor-bench "build/conformance-supervisor-$E2E_HOST_ARCH" \
+            --substrate "$E2E_SUBSTRATE" --revision "$E2E_REVISION" \
+            --runs 20 --stop-first --shell --output "$RUNNER_TEMP/evidence-$E2E_SUBSTRATE-$E2E_HOST_ARCH"
+      - name: Run the actual macOS client, Linux guest and immutable evidence path (nested amd64)
+        if: matrix.marker == 'CONFORMANCE_NESTED_AMD64_MARKER'
+        env:
+          E2E_HOST: ${{ matrix.host }}
+          E2E_DISPOSABLE: "1"
+          E2E_DISPOSABLE_MARKER: ${{ secrets.CONFORMANCE_NESTED_AMD64_MARKER }}
+          E2E_SUBSTRATE: ${{ matrix.substrate }}
+          E2E_REVISION: ${{ inputs.revision }}
+          E2E_HOST_ARCH: ${{ matrix.arch }}
+        run: |
+          case "$E2E_HOST_ARCH" in amd64|arm64) ;; *) echo 'Set the actual prepared host architecture; no guessed probe can run.' >&2; exit 1 ;; esac
+          scripts/time-to-agent.sh --host "$E2E_HOST" --client "$CONFORMANCE_CLIENT" \
+            --probe "build/conformance-probe-$E2E_HOST_ARCH" --wall microvm \
+            --link-bench "build/conformance-link-$E2E_HOST_ARCH" --supervisor-bench "build/conformance-supervisor-$E2E_HOST_ARCH" \
+            --substrate "$E2E_SUBSTRATE" --revision "$E2E_REVISION" \
+            --runs 20 --stop-first --shell --output "$RUNNER_TEMP/evidence-$E2E_SUBSTRATE-$E2E_HOST_ARCH"
+      - name: Run the actual macOS client, Linux guest and immutable evidence path (bare-metal arm64)
+        if: matrix.marker == 'CONFORMANCE_BARE_METAL_ARM64_MARKER'
+        env:
+          E2E_HOST: ${{ matrix.host }}
+          E2E_DISPOSABLE: "1"
+          E2E_DISPOSABLE_MARKER: ${{ secrets.CONFORMANCE_BARE_METAL_ARM64_MARKER }}
+          E2E_SUBSTRATE: ${{ matrix.substrate }}
+          E2E_REVISION: ${{ inputs.revision }}
+          E2E_HOST_ARCH: ${{ matrix.arch }}
+        run: |
+          case "$E2E_HOST_ARCH" in amd64|arm64) ;; *) echo 'Set the actual prepared host architecture; no guessed probe can run.' >&2; exit 1 ;; esac
+          scripts/time-to-agent.sh --host "$E2E_HOST" --client "$CONFORMANCE_CLIENT" \
+            --probe "build/conformance-probe-$E2E_HOST_ARCH" --wall microvm \
+            --link-bench "build/conformance-link-$E2E_HOST_ARCH" --supervisor-bench "build/conformance-supervisor-$E2E_HOST_ARCH" \
+            --substrate "$E2E_SUBSTRATE" --revision "$E2E_REVISION" \
+            --runs 20 --stop-first --shell --output "$RUNNER_TEMP/evidence-$E2E_SUBSTRATE-$E2E_HOST_ARCH"
+      - name: Run the actual macOS client, Linux guest and immutable evidence path (nested arm64)
+        if: matrix.marker == 'CONFORMANCE_NESTED_ARM64_MARKER'
+        env:
+          E2E_HOST: ${{ matrix.host }}
+          E2E_DISPOSABLE: "1"
+          E2E_DISPOSABLE_MARKER: ${{ secrets.CONFORMANCE_NESTED_ARM64_MARKER }}
+          E2E_SUBSTRATE: ${{ matrix.substrate }}
+          E2E_REVISION: ${{ inputs.revision }}
+          E2E_HOST_ARCH: ${{ matrix.arch }}
+        run: |
+          case "$E2E_HOST_ARCH" in amd64|arm64) ;; *) echo 'Set the actual prepared host architecture; no guessed probe can run.' >&2; exit 1 ;; esac
+          scripts/time-to-agent.sh --host "$E2E_HOST" --client "$CONFORMANCE_CLIENT" \
+            --probe "build/conformance-probe-$E2E_HOST_ARCH" --wall microvm \
+            --link-bench "build/conformance-link-$E2E_HOST_ARCH" --supervisor-bench "build/conformance-supervisor-$E2E_HOST_ARCH" \
+            --substrate "$E2E_SUBSTRATE" --revision "$E2E_REVISION" \
+            --runs 20 --stop-first --shell --output "$RUNNER_TEMP/evidence-$E2E_SUBSTRATE-$E2E_HOST_ARCH"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: microvm-${{ matrix.substrate }}-${{ matrix.arch }}-${{ inputs.revision }}
+          path: ${{ runner.temp }}/evidence-${{ matrix.substrate }}-${{ matrix.arch }}
+          if-no-files-found: error
+
+  paired-evidence:
+    needs: client-to-host
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.revision }}
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: microvm-*-${{ inputs.revision }}
+          path: evidence
+      - name: Keep native assurance distinct from the macOS-to-Linux evidence
+        env:
+          REVISION: ${{ inputs.revision }}
+        run: |
+          module=$(sed -n 's/^module //p' go.mod)
+          for arch in amd64 arm64; do
+            python3 scripts/check-conformance-go.py "evidence/microvm-native-$arch-$REVISION/native-go.jsonl" \
+              --package "$module/internal/diag" --package "$module/internal/host" --package "$module/internal/supervisor" \
+              --package "$module/internal/jail" --package "$module/internal/wall/process" \
+              --package "$module/internal/wall/microvm" --package "$module/internal/guest"
+          done
+      - name: Check every actual paired metric without changing idle_stop
+        env:
+          REVISION: ${{ inputs.revision }}
+          ISSUES: ${{ vars.MICROVM_CONFORMANCE_ISSUES }}
+        run: |
+          if [ -n "$ISSUES" ]; then printf '%s\n' "$ISSUES" > "$RUNNER_TEMP/issues.json"; else printf '{}\n' > "$RUNNER_TEMP/issues.json"; fi
+          python3 scripts/check-microvm-conformance.py --revision "$REVISION" --issues "$RUNNER_TEMP/issues.json" \
+            "evidence/microvm-bare-metal-amd64-$REVISION/report.json" \
+            "evidence/microvm-nested-amd64-$REVISION/report.json" \
+            "evidence/microvm-bare-metal-arm64-$REVISION/report.json" \
+            "evidence/microvm-nested-arm64-$REVISION/report.json"

@@ -2,7 +2,9 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -10,6 +12,7 @@ import (
 	"github.com/iamlakshya/simstim/internal/api"
 	"github.com/iamlakshya/simstim/internal/brand"
 	"github.com/iamlakshya/simstim/internal/client"
+	"github.com/iamlakshya/simstim/internal/keyread"
 	"github.com/iamlakshya/simstim/internal/onboard"
 )
 
@@ -23,6 +26,17 @@ func (g *guide) agents(h client.Host, f *onboard.Flow) error {
 	f.Start()
 	for {
 		a := f.Next()
+		if a.Kind != onboard.ActInstall && a.Kind != onboard.ActLogin {
+			return nil
+		}
+		if g.tty && g.terminalBusy() {
+			f.Stop()
+			return &client.UserError{
+				Msg:  "the terminal's reader from the last session is still running",
+				Hint: brand.Name + " setup --host " + shellWord(h.Name) + " (continues setup in a new command)",
+				Code: "terminal_busy",
+			}
+		}
 		var err error
 		switch a.Kind {
 		case onboard.ActInstall:
@@ -37,6 +51,16 @@ func (g *guide) agents(h client.Host, f *onboard.Flow) error {
 			return err
 		}
 	}
+}
+
+func (g *guide) terminalBusy() bool {
+	if g.readerStuck {
+		return true
+	}
+	if f, ok := g.in.(*os.File); ok {
+		return keyread.CheckStuck(f) != nil
+	}
+	return false
 }
 
 // checklist shows every agent with an installer, ticks what --agents names,
@@ -144,8 +168,12 @@ func (g *guide) login(h client.Host, f *onboard.Flow, a onboard.Action) error {
 // inSession runs an install or a login, checks the host again, and says
 // how it went.
 func (g *guide) inSession(h client.Host, f *onboard.Flow, a onboard.Action) error {
+	if err := g.ctx.Err(); err != nil {
+		// A Ctrl+C that came with the last answer: start nothing.
+		return err
+	}
 	if g.tty {
-		fmt.Fprintf(g.out, "It runs in the session %s on %s. Answer it there; ctrl+\\ leaves it running.\n", a.Args.Name, h.Name)
+		fmt.Fprintf(g.out, "It runs in the session %s on %s. Answer it there; %s leaves it running.\n", shown(a.Args.Name), shown(h.Name), shown(client.LoadSettings().Attach.DetachKey))
 	}
 	id, ended, err := g.session(h, a)
 	if err != nil {
@@ -156,7 +184,9 @@ func (g *guide) inSession(h client.Host, f *onboard.Flow, a onboard.Action) erro
 		return err
 	}
 	a.Session = id
-	f.Done(a, checks, ended)
+	if err := f.Done(a, checks, ended); err != nil {
+		return err
+	}
 	fmt.Fprintln(g.out)
 	printLine(g.out, f.Line(a.Agent.Kind))
 	return nil
@@ -174,25 +204,31 @@ func (g *guide) done(h client.Host, f *onboard.Flow) {
 // runSession starts an install or a login in a session on h. On a terminal
 // it attaches; without one, it waits for the session to end. It returns the
 // session's ID, and whether the session ended.
-func (g *guide) runSession(h client.Host, a onboard.Action) (string, bool, error) {
+func (g *guide) runSession(h client.Host, a onboard.Action) (id string, finished bool, runErr error) {
 	cctx, cancel := context.WithTimeout(g.ctx, 90*time.Second)
+	request := client.NewGrantRequest(false, false)
+	cctx = client.WithGrantRequest(cctx, request)
+	defer func() { runErr = errors.Join(runErr, request.Close()) }()
 	conn, err := client.Dial(cctx, h, true)
 	if err != nil {
 		cancel()
 		return "", false, err
 	}
 	cols, rows := termSize()
-	s, err := conn.NewSession(cctx, client.TerminalArgs(a.Args, cols, rows))
+	s, err := startUnwalledControlV1(cctx, conn, a.Args, cols, rows)
 	conn.Close()
+	err = errors.Join(err, request.Close())
 	cancel()
 	if err != nil {
 		return "", false, err
 	}
-	var ended bool
+	var ended, stuck bool
 	if g.tty {
-		ended, err = attachEnded(g.ctx, h, s.ID, s.Name)
+		ended, stuck, err = attachSession(g.ctx, h, s.ID, s.Name)
+		g.readerStuck = g.readerStuck || stuck
 	} else {
-		fmt.Fprintf(g.out, "Started %s/%s. Waiting for it to end (%s attach %s/%s shows it)…\n", h.Name, s.Name, brand.Name, h.Name, s.ID)
+		d := client.CleanSession(*s) // the host's own text, only printed
+		fmt.Fprintf(g.out, "Started %s/%s. Waiting for it to end (%s attach %s shows it)…\n", h.Name, d.Name, brand.Name, client.CommandTarget(h.Name, s.ID))
 		ended, err = waitEnded(g.ctx, h, s.ID, 15*time.Minute)
 	}
 	return s.ID, ended, err
@@ -232,7 +268,7 @@ func waitEnded(ctx context.Context, h client.Host, id string, limit time.Duratio
 func (g *guide) agentChecks(h client.Host) ([]api.AgentCheck, error) {
 	cctx, cancel := context.WithTimeout(g.ctx, 60*time.Second)
 	defer cancel()
-	conn, err := client.Dial(cctx, h, true)
+	conn, err := client.Dial(cctx, h, !g.readerStuck)
 	if err != nil {
 		return nil, err
 	}

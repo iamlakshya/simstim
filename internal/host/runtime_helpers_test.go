@@ -97,9 +97,13 @@ func waitState(t *testing.T, id, state string) {
 // dial connects a client to this host, through the real bridge.
 func dial(t *testing.T, h *hosttest.Host) *client.Conn {
 	t.Helper()
+	h.Install(client.HelperVersion(), "")
 	ch, _ := h.ClientHost("box")
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
+	if err := client.SaveHosts(ctx, []client.Host{ch}); err != nil {
+		t.Fatal(err)
+	}
 	c, err := client.Dial(ctx, ch, false)
 	if err != nil {
 		t.Fatal(err)
@@ -270,4 +274,19 @@ func writeFile(t *testing.T, path, body string) {
 	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// holderRuns reports whether session id's holder runs.
+func holderRuns(t *testing.T, id string) bool {
+	t.Helper()
+	list, err := host.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range list {
+		if s.ID == id {
+			return s.Alive
+		}
+	}
+	return false
 }

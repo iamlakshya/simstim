@@ -24,22 +24,14 @@ func TestStopUnitWaitsForSystemd(t *testing.T) {
 	}
 }
 
-// Without systemd, a holder that answers neither the kill request nor
-// SIGTERM gets SIGKILL. stopHolder returns only once it is gone, so that
-// its last save and its removal of the socket cannot follow a new start.
+// An unacknowledged holder cannot be forced to stop through a manifest PID.
+// The recorded PID may now belong to another process. Recovery waits for a
+// bounded time, keeps the socket and leaves that process alone.
 func TestStopHolderWaitsForAStuckHolder(t *testing.T) {
-	alertHome(t)
-	run, err := os.MkdirTemp("", "rs")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { os.RemoveAll(run) })
-	t.Setenv("XDG_RUNTIME_DIR", run)
+	secretHome(t)
 	old := stopWait
 	stopWait = 300 * time.Millisecond
 	t.Cleanup(func() { stopWait = old })
-
-	// The socket answers, but nothing on it stops, as a hung holder.
 	id := "stuck234"
 	if err := paths.EnsurePrivateDir(filepath.Dir(paths.Socket(id))); err != nil {
 		t.Fatal(err)
@@ -48,29 +40,37 @@ func TestStopHolderWaitsForAStuckHolder(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { ln.Close() })
+	t.Cleanup(func() { _ = ln.Close() })
 	go func() {
 		for {
 			c, err := ln.Accept()
 			if err != nil {
 				return
 			}
-			c.Close()
+			_ = c.Close()
 		}
 	}()
-	hung := exec.Command("/bin/sh", "-c", `trap "" TERM; while :; do sleep 1; done`)
-	if err := hung.Start(); err != nil {
+	// This benign child belongs to the test, not the session. No user
+	// process is selected. Cleanup owns its exact process handle.
+	other := exec.Command("sleep", "60")
+	if err := other.Start(); err != nil {
 		t.Fatal(err)
 	}
-	pid := hung.Process.Pid
-	t.Cleanup(func() { _ = syscall.Kill(pid, syscall.SIGKILL) })
-	time.Sleep(100 * time.Millisecond) // for the trap to be set
-
-	stopHolder(id, &Manifest{ID: id, Run: Runtime{HolderPID: pid}})
-	if err := syscall.Kill(pid, 0); err == nil {
-		t.Error("the stuck holder still runs after stopHolder")
+	t.Cleanup(func() {
+		_ = other.Process.Kill()
+		_, _ = other.Process.Wait()
+	})
+	started := time.Now()
+	if err := stopHolder(id, &Manifest{ID: id, Run: Runtime{HolderPID: other.Process.Pid}}); err == nil {
+		t.Fatal("an unacknowledged holder was reported stopped")
 	}
-	if _, err := os.Stat(paths.Socket(id)); err == nil {
-		t.Error("the stuck holder's socket is still there")
+	if elapsed := time.Since(started); elapsed < stopWait || elapsed > 3*time.Second+2*stopWait {
+		t.Errorf("stop observation took %v outside its bounded wait", elapsed)
+	}
+	if err := other.Process.Signal(syscall.Signal(0)); err != nil {
+		t.Errorf("recovery signalled the recorded unrelated process: %v", err)
+	}
+	if _, err := os.Stat(paths.Socket(id)); err != nil {
+		t.Errorf("the unacknowledged holder's socket was removed: %v", err)
 	}
 }

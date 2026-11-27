@@ -50,3 +50,7 @@ const controlMaster = false
 
 // privateDir is never needed on Windows, which shares no connections.
 func privateDir(string) bool { return false }
+
+func controlFileOwned(os.FileInfo) bool { return false }
+
+func controlScope() (string, bool) { return "", false }

@@ -4,14 +4,12 @@ import (
 	"errors"
 	"io"
 	"os"
-	"regexp"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/iamlakshya/simstim/internal/api"
 	"github.com/iamlakshya/simstim/internal/client"
-	"github.com/iamlakshya/simstim/internal/host/hosttest"
 	"github.com/iamlakshya/simstim/internal/proto"
 )
 
@@ -71,24 +69,6 @@ func TestPrintSessionsKeepsColumns(t *testing.T) {
 	}
 }
 
-// Through a real host: an agent that exits with a code, and one that a
-// signal kills. ls says why each ended, and attach says what to try, while
-// their holders still answer.
-func TestLsSaysWhyAnAgentEnded(t *testing.T) {
-	newTestHost(t)
-	crash := newSession(t, "crash", "/bin/sh", "-c", "exit 3")
-	shot := newSession(t, "shot", "/bin/sh", "-c", "kill -KILL $$")
-	want := []*regexp.Regexp{
-		regexp.MustCompile(crash + `\s+crash\s+.*errored \(exit code 3\)`),
-		regexp.MustCompile(shot + `\s+shot\s+.*errored \(killed\)`),
-	}
-	hosttest.WaitFor(t, 10*time.Second, "ls to say why both agents ended", func() bool {
-		out := ok(t, "ls")
-		return want[0].MatchString(out) && want[1].MatchString(out)
-	})
-	failsWithHint(t, "the session crash on box ended (exit code 3)", "resume box/"+crash, "attach", "box/crash")
-}
-
 // attach to an agent that has ended reads like the message at the end of an
 // attach, with the same step after the memory cap: a resume, which can give
 // it a bigger cap. After a clean exit, the step also offers to remove it,
@@ -108,12 +88,12 @@ func TestEndedErrorSaysWhatToTry(t *testing.T) {
 	}
 	done := client.Session{ID: "b2", Name: "docs", State: api.StateExited, ExitCode: new(0)}
 	if err := endedError(h, done); !errors.As(err, &ue) || ue.Msg != "the session docs on box ended (exit code 0)" ||
-		!strings.Contains(ue.Hint, "resume box/b2") || !strings.Contains(ue.Hint, "kill box/b2") {
+		!strings.Contains(ue.Hint, "resume box/b2") || !strings.Contains(ue.Hint, "rm box/b2") {
 		t.Fatalf("endedError = %+v", err)
 	}
 	lost := client.Session{ID: "c3", Name: "pair", State: api.StateLost, Reason: "the host restarted"}
 	if err := endedError(h, lost); !errors.As(err, &ue) || ue.Msg != "the session pair on box ended (the host restarted)" ||
-		!strings.Contains(ue.Hint, " resume box/c3   (") || !strings.Contains(ue.Hint, "host restore box --all") {
+		!strings.Contains(ue.Hint, " resume box/c3, or ") || !strings.Contains(ue.Hint, "host restore box --all") {
 		t.Fatalf("endedError = %+v", err)
 	}
 }

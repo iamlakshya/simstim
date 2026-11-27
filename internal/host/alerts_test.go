@@ -20,12 +20,24 @@ import (
 	"github.com/iamlakshya/simstim/internal/proto"
 )
 
-// alertHome gives a test its own config and state folders.
+// alertHome gives a test its own home and XDG folders so its placement domain
+// stays separate from other tests in the binary.
 func alertHome(t *testing.T) {
 	t.Helper()
-	dir := t.TempDir()
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	home := filepath.Join(dir, "home")
+	if err := os.MkdirAll(home, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(dir, "config"))
 	t.Setenv("XDG_STATE_HOME", filepath.Join(dir, "state"))
+	t.Setenv("XDG_DATA_HOME", filepath.Join(dir, "data"))
+	t.Setenv("XDG_CACHE_HOME", filepath.Join(dir, "cache"))
 	t.Setenv("SHELL", "/bin/sh")
 }
 

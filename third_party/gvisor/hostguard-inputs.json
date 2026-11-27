@@ -1,0 +1,383 @@
+{
+  "upstream_commit": "7a675ac66a1e2357abdaa6cccedabcd3cce9aa5c",
+  "files": [
+    {
+      "path": "runsc/BUILD",
+      "before_sha256": "2f453819582fe1e40684d72be3d86d36bd962526bf65d0f42a1f05f1a6aa7ad5",
+      "after_sha256": "5777c792917b9a9359854f97d1e925b5ced7d05b942ae321b09c11f67ba2b2f0",
+      "mode": 420
+    },
+    {
+      "path": "runsc/boot/BUILD",
+      "before_sha256": "db0a30f4e996173ace8a0575bff1fe733b3eb336226cc2a84785c5e080eba9e5",
+      "after_sha256": "112202b87a95e7d0fc6594c71bb52166ea84872bb26143f90a6e316d2c136f42",
+      "mode": 420
+    },
+    {
+      "path": "runsc/boot/loader.go",
+      "before_sha256": "a9819fa720aa3ace7499d08d2c32ad9a9e7904b6ae9daeeb785166119e7e41d8",
+      "after_sha256": "8bcdadf7cf71c560f7555f854de2c0af91dd796761318315502496958bd89af4",
+      "mode": 420
+    },
+    {
+      "path": "runsc/cmd/BUILD",
+      "before_sha256": "19c6474b2a7e3fb8bc336106c35c2b6868593fe438979bb055b0588358491255",
+      "after_sha256": "8dca24555993ce0dfc4437b7b87a555e1303c85e271b06013cc4e3129e995155",
+      "mode": 420
+    },
+    {
+      "path": "runsc/cmd/gofer.go",
+      "before_sha256": "2f39716854a05ead648c4205c338e986dcc7c0e694e7003982cb850c218c14ff",
+      "after_sha256": "7844f2d110aaed76690a64b0396faddb0426b2e3b34524f5277156cd09cf17a1",
+      "mode": 420
+    },
+    {
+      "path": "runsc/cmd/native_controller_linux.go",
+      "before_sha256": null,
+      "after_sha256": "831a3dad65f96dabbe8ae6f002656155dd9419c8eeb235b0d5ebf57af63fafb2",
+      "mode": 420
+    },
+    {
+      "path": "runsc/cmd/native_gofer_linux.go",
+      "before_sha256": null,
+      "after_sha256": "52cff74f66a4a45567b03dc7beeeced181729304c1ae88bfbd8629881c130d8b",
+      "mode": 420
+    },
+    {
+      "path": "runsc/cmd/sandboxsetup/BUILD",
+      "before_sha256": "afa1a679ec6fa1d0cb2ff24166811db32dc8991bddd89af72801708c36722333",
+      "after_sha256": "85ee9e32b4608a495e33a6beea3b7f2b4d191a066e59efdf803dc4541e053159",
+      "mode": 420
+    },
+    {
+      "path": "runsc/cmd/sandboxsetup/caps.go",
+      "before_sha256": "be0855411f51d0a2eff3ec09da4567c369839fb08d4712073a8f7b35f4b57d9d",
+      "after_sha256": "d5b3b3b833fff2cca83db88a93975cade9816990c7ef601df61cab17a601de26",
+      "mode": 420
+    },
+    {
+      "path": "runsc/cmd/sandboxsetup/caps_unsafe.go",
+      "before_sha256": "68bade83654784b1c59d6976858589fc4b4a55d637094a888b207e9bf35f8ce2",
+      "after_sha256": "70017cbc30c1dd2c8ef1c343909c8de8e012e1d3a3dd49defc7a7645211d3f5e",
+      "mode": 420
+    },
+    {
+      "path": "runsc/cmd/sandboxsetup/native_proc_umounter.go",
+      "before_sha256": null,
+      "after_sha256": "abfb20663d3be418167c0088a472b18941f369afe864d5dd76d49a8262dd61a8",
+      "mode": 420
+    },
+    {
+      "path": "runsc/cmd/sandboxsetup/process.go",
+      "before_sha256": "bc068f720b67811686ff182c775dd739f0b848885d7091924bcd75154c9423cf",
+      "after_sha256": "67b246c6b4b272d39083fd85c4f98018a73906fea199638a90fa6d53f2f000d0",
+      "mode": 420
+    },
+    {
+      "path": "runsc/cmd/sentry/BUILD",
+      "before_sha256": "3291575c495ef9fc1721736ce868fdf8c47bb3c5b315896c791c531e3f33b4e8",
+      "after_sha256": "453d77fc24408d54169d8bfff46d7f05fc527998b5a4a819fd2ee8a8a422d5ef",
+      "mode": 420
+    },
+    {
+      "path": "runsc/cmd/sentry/sentry_main.go",
+      "before_sha256": "9137aab7d5f277350f8c11ff622712d200d130af38181c2fc542e7e42e258250",
+      "after_sha256": "206712dced79a27bb2c235ddc9eee051880445eb9010cd4d5cc7137e6484befc",
+      "mode": 420
+    },
+    {
+      "path": "runsc/cmd/sentry/sentrycmd/BUILD",
+      "before_sha256": "cb34c01a5977cce42cff426e7d1ad84db0b84dc9f97931558d86f02c0ee2f1a2",
+      "after_sha256": "7600afb8d03484fc8541ef319b4069231eaaafbe62745b1b31bf9b7c7eb242de",
+      "mode": 420
+    },
+    {
+      "path": "runsc/cmd/sentry/sentrycmd/boot.go",
+      "before_sha256": "247c48ed32ae49b7bcea3bb45f69af5791a0be0638e084d180269df03b012eba",
+      "after_sha256": "07efefaf819f78d4f566ed64cf08579cb549797b438868c2b6999de0fe7124fd",
+      "mode": 420
+    },
+    {
+      "path": "runsc/cmd/sentry/sentrycmd/chroot.go",
+      "before_sha256": "da16743ad07de5bff488cbb45890966d00fb8f5ca970fd3103e66365f04ff050",
+      "after_sha256": "3c3fc8d87e432d2937ce12727132d3d271ef691d46b0c283a25a2bb2e9681979",
+      "mode": 420
+    },
+    {
+      "path": "runsc/cmd/sentry/sentrycmd/native_final_linux.go",
+      "before_sha256": null,
+      "after_sha256": "01e06561e41792c57d8fffa7356e4cab52cd11fd37e8f28b3695ed4538591d88",
+      "mode": 420
+    },
+    {
+      "path": "runsc/cmd/sentry/sentrycmd/native_final_test.go",
+      "before_sha256": null,
+      "after_sha256": "577dca31d1c71480a5e5db7200488883979d7fd81e00fdaf5e0fb51f24d109d3",
+      "mode": 420
+    },
+    {
+      "path": "runsc/cmd/sentry/sentrycmd/native_fixed_spec_linux.go",
+      "before_sha256": null,
+      "after_sha256": "f45fd67be0dafd03cfca15db1a61ce7b207de6b74b8fc85044a4f897b3dd0659",
+      "mode": 420
+    },
+    {
+      "path": "runsc/cmd/sentry/sentrycmd/native_setup_linux.go",
+      "before_sha256": null,
+      "after_sha256": "eb04211c1c45a979560f58d3f2e860b4b41e1a8b4c7d9371a73882fd3a0b8165",
+      "mode": 420
+    },
+    {
+      "path": "runsc/fdparking/fdparking.c",
+      "before_sha256": "23811478b25e7de655c2f4f0b173b09670577fcfdcc1d0388c5eddea2f658e50",
+      "after_sha256": "3fd07ad952a40ab1834d4998da344b381a28639817a3ba98de8047f3d97bef83",
+      "mode": 420
+    },
+    {
+      "path": "runsc/gofer/fs/BUILD",
+      "before_sha256": "81c9a2fa3661c6583d78d33fd221084a47e55e39467c5dfcf8c9e2c9196b12c9",
+      "after_sha256": "6ac66d455b2361906ef5d20aa0378a948cb0c198acd7a437ca4be4313bd75e10",
+      "mode": 420
+    },
+    {
+      "path": "runsc/gofer/fs/lisafs.go",
+      "before_sha256": "c60aab7f0492e3424317902e95ea51e0b8dce04c0f4a527b9d2ce7384c533fce",
+      "after_sha256": "da0c7771215f26d2ded45d2799ba78018a4f7c7dce26d3e268248808ffa3ae3c",
+      "mode": 420
+    },
+    {
+      "path": "runsc/hostguard/BUILD",
+      "before_sha256": null,
+      "after_sha256": "7955d7bdc4309dc9c769a8ddb4495f3b8aa7f945adfc5cebb80255fd3c8ad13f",
+      "mode": 420
+    },
+    {
+      "path": "runsc/hostguard/closed_role_elf_linux.go",
+      "before_sha256": null,
+      "after_sha256": "8aa6801da629dd5d1c1dfbcb1301dc860e1fb01957dcc1ecce5cf8610081f588",
+      "mode": 420
+    },
+    {
+      "path": "runsc/hostguard/closed_role_elf_test.go",
+      "before_sha256": null,
+      "after_sha256": "0b83b42f370e13856d6277d5f21d08367d0a1ddff98a12a1041e7bb0d637496e",
+      "mode": 420
+    },
+    {
+      "path": "runsc/hostguard/closed_role_exec_linux.go",
+      "before_sha256": null,
+      "after_sha256": "dcdc6b08d54f8adaa21e3ffb2a7cd8e00facf2eb3816cd3673598d60eccb0ce4",
+      "mode": 420
+    },
+    {
+      "path": "runsc/hostguard/closed_role_exec_test.go",
+      "before_sha256": null,
+      "after_sha256": "98924f440b57e5ecfac0e9bbbc05437e5c06a8214bb5c8ebfc299a8bd819d7d8",
+      "mode": 420
+    },
+    {
+      "path": "runsc/hostguard/controller_aggregate_linux.go",
+      "before_sha256": null,
+      "after_sha256": "e68815588eab7891e88ebbdd5f23421cb73be940672f72c2a5424be64c2109ab",
+      "mode": 420
+    },
+    {
+      "path": "runsc/hostguard/controller_setup_linux.go",
+      "before_sha256": null,
+      "after_sha256": "69866ae1ec6f169d015a12d91c9b725268484033b579eb2a49ec9bd8c14ea731",
+      "mode": 420
+    },
+    {
+      "path": "runsc/hostguard/controller_setup_test.go",
+      "before_sha256": null,
+      "after_sha256": "9c03ce27b5a7da316a1c5a561d0fc979a722301bc146cf1dd7e43ce6a3f2c40c",
+      "mode": 420
+    },
+    {
+      "path": "runsc/hostguard/entry_linux_amd64.s",
+      "before_sha256": null,
+      "after_sha256": "1cdc491b4aa8f37fe71c2329069f19115d250ed9bf94ec72bf9315a48c5b0ab6",
+      "mode": 420
+    },
+    {
+      "path": "runsc/hostguard/entry_linux_arm64.s",
+      "before_sha256": null,
+      "after_sha256": "10d579ee4b6bc8c3692d509dc87e751d90b6d33761b271fba6263a00ec593754",
+      "mode": 420
+    },
+    {
+      "path": "runsc/hostguard/final_exec_linux.go",
+      "before_sha256": null,
+      "after_sha256": "55769d0d359895b7530bcb9e58d2357dff6f14c0914172aa92165ba8eac02e75",
+      "mode": 420
+    },
+    {
+      "path": "runsc/hostguard/final_fs_linux.go",
+      "before_sha256": null,
+      "after_sha256": "1a889673fc53d7e55a891475a90a81d7639fb9a7b6dd7df872bcef928fb6d473",
+      "mode": 420
+    },
+    {
+      "path": "runsc/hostguard/final_gofer_io_linux.go",
+      "before_sha256": null,
+      "after_sha256": "b62f4b72215f92d5f40612e7d1f82f5438a667273a2ac4a06f0704b3ca468162",
+      "mode": 420
+    },
+    {
+      "path": "runsc/hostguard/final_io_linux.go",
+      "before_sha256": null,
+      "after_sha256": "12de4d1866650ea41f60b0d7ac76b95985f9ad28e2b38a035eb47f9d73e30d3f",
+      "mode": 420
+    },
+    {
+      "path": "runsc/hostguard/final_io_test.go",
+      "before_sha256": null,
+      "after_sha256": "d77ce7cf1998af6ba5280ce506b8678f954df94a9e5caff8d496ef394d6dfbe8",
+      "mode": 420
+    },
+    {
+      "path": "runsc/hostguard/final_publish_linux.go",
+      "before_sha256": null,
+      "after_sha256": "3cd1ed486ef3bd4016fdabedf41e0a5fdeb1510a78254e2b8ee0df4856807dc7",
+      "mode": 420
+    },
+    {
+      "path": "runsc/hostguard/final_state_linux.go",
+      "before_sha256": null,
+      "after_sha256": "675148bfb9b537d199e46a232e23ef8183d941cb1b503f366b0f58f0e82170a1",
+      "mode": 420
+    },
+    {
+      "path": "runsc/hostguard/final_state_test.go",
+      "before_sha256": null,
+      "after_sha256": "69551a9a2fedad227b73840f12396ca182e505980f39a27e09d6e3626c41a6c8",
+      "mode": 420
+    },
+    {
+      "path": "runsc/hostguard/fs_only_threads_test.go",
+      "before_sha256": null,
+      "after_sha256": "2f567634ad6de28df57f2c3f3a5c4d9804b3c5d9ef16e230ec5af0f36fdaff7c",
+      "mode": 420
+    },
+    {
+      "path": "runsc/hostguard/gofer_park_linux.go",
+      "before_sha256": null,
+      "after_sha256": "c24ca3a170d1a98d2784517b40cd023c82c064640f76263e34d01bd6c078d831",
+      "mode": 420
+    },
+    {
+      "path": "runsc/hostguard/gofer_setup_test.go",
+      "before_sha256": null,
+      "after_sha256": "70a6419ef3dd4a633773ff1c84e6e74d96c36551f9720c00aa5a1f5cb34f36c9",
+      "mode": 420
+    },
+    {
+      "path": "runsc/hostguard/hostguard.go",
+      "before_sha256": null,
+      "after_sha256": "dd98c900ff41e8e1108b0356d08c1903385c65bf221e078ce85ce073b206fed2",
+      "mode": 420
+    },
+    {
+      "path": "runsc/hostguard/hostguard_test.go",
+      "before_sha256": null,
+      "after_sha256": "942f9ccb72c740bca52cb2395a5cc13f8ae19c3e0f6b7cfe1bdcc0d0c1bc19a0",
+      "mode": 420
+    },
+    {
+      "path": "runsc/hostguard/private_phase_linux.go",
+      "before_sha256": null,
+      "after_sha256": "4df2ea1989641171c486163a9e3b7b8fe960946f64635497b32a343f0a9d1316",
+      "mode": 420
+    },
+    {
+      "path": "runsc/hostguard/role_creation_test.go",
+      "before_sha256": null,
+      "after_sha256": "dcb1d9cf32abf915a293d5a4b1c62f22b50485d81d53f3e543855433e80dc2c5",
+      "mode": 420
+    },
+    {
+      "path": "runsc/hostguard/role_lifetime_linux.go",
+      "before_sha256": null,
+      "after_sha256": "fca1ada26761b3c4a2d685710daf60f80a9df8610508556df812a34abfc531d8",
+      "mode": 420
+    },
+    {
+      "path": "runsc/hostguard/role_witness_linux.go",
+      "before_sha256": null,
+      "after_sha256": "67ccaea7d0b7e761708e0c4f629a1cafdbde6efc2cfb8147d6b11eebb589dae3",
+      "mode": 420
+    },
+    {
+      "path": "runsc/hostguard/sentry_creation_linux.go",
+      "before_sha256": null,
+      "after_sha256": "5e842c3f5820441bc9b485435ed4bc51ff77ac3c00a2f75f0a7b2fbedcd20e62",
+      "mode": 420
+    },
+    {
+      "path": "runsc/hostguard/sentry_setup_linux.go",
+      "before_sha256": null,
+      "after_sha256": "a73e77c618e00f95c54b8111655eba495a1374fde965b4edcbc11d60c571817a",
+      "mode": 420
+    },
+    {
+      "path": "runsc/hostguard/sentry_setup_test.go",
+      "before_sha256": null,
+      "after_sha256": "25535704d3386028e3841702f938daef6f264455c2eff7eb0d7a731332fef380",
+      "mode": 420
+    },
+    {
+      "path": "runsc/hostguard/topology_linux.go",
+      "before_sha256": null,
+      "after_sha256": "f83a9a14a8c1488104aedb9bf2dae767f6662dc7d9497ea05e215e4e42c79ec6",
+      "mode": 420
+    },
+    {
+      "path": "runsc/hostguard/topology_test.go",
+      "before_sha256": null,
+      "after_sha256": "61e43966ee8123b6a4abd07a0e24d60d061005d82086c311b2383cd9bee10fe1",
+      "mode": 420
+    },
+    {
+      "path": "runsc/main.go",
+      "before_sha256": "0c9c42752301679f8dd0f426a44a903080d538c3de456f67063e64832ce45dc8",
+      "after_sha256": "282002b54dfe716371ba74d8d52005b54d68d73b5e039dfb23108c6385d01c12",
+      "mode": 420
+    },
+    {
+      "path": "runsc/nativeconfig/BUILD",
+      "before_sha256": null,
+      "after_sha256": "84e685d0c18a79d154cf2876cef42c1dfa5c50c44ddf850dca738ad510237063",
+      "mode": 420
+    },
+    {
+      "path": "runsc/nativeconfig/fixed_linux.go",
+      "before_sha256": null,
+      "after_sha256": "a65c93a8aa934340daaed398900f37e5c06f2aee1f5e5499634b5c2557421279",
+      "mode": 420
+    },
+    {
+      "path": "runsc/prewarmer/prewarmer.c",
+      "before_sha256": "c7bce249be1b5f8cefd948db5b8467b9551292dfbbe12c136abef9aa16512a3c",
+      "after_sha256": "4d2ce371c19678f76f0ec0e724cd61f276d4234edad0e2254bc444fc9faca21b",
+      "mode": 420
+    },
+    {
+      "path": "runsc/procumounter/procumounter.c",
+      "before_sha256": "af499f1f3d6d627bb7bbe1965455ca4d1bae5b3ea44b20936d88e691b1d26da0",
+      "after_sha256": "eae8f10404148e82f6bbdea3d20cecac88515e8eef1a1536b222f581fcbe7900",
+      "mode": 420
+    },
+    {
+      "path": "runsc/sandbox/BUILD",
+      "before_sha256": "304d8eadbef09045d69ab5063d01e084376fbd6b2fdb0bf75d6e2b622a156e72",
+      "after_sha256": "65f80eac2de7b7aab57aecad722c0d7548f48c65e0505d2906ebff0f6c334963",
+      "mode": 420
+    },
+    {
+      "path": "runsc/sandbox/sandbox.go",
+      "before_sha256": "aa0f97e0f6632f5cc26afe0cce4e4aaa5893693a343ee6143cfca04503ed1167",
+      "after_sha256": "9dd7e9b73dde605d53b3c4bb8bd065fdbc8841d52d479ef567c3cc0abbb41c51",
+      "mode": 420
+    }
+  ]
+}

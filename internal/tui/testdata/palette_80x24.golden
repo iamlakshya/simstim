@@ -2,23 +2,23 @@
   ⢄⡠⠊ simstim  › atlas-dev                      9ms · 4 sessions · 1 needs you
   ────────────────────────────────────────────────────────────────────────────
 
-  ▍ 1 ● auth-refact…  claude    ~/src/app        needs input      2m  ⣀⣀⣀⣀⣀⣀⣀⣀
-    2 ⠶ api-tests     codex     ~/src/api        working         14s  ⣀⣀⣀⣀⣀⣀⣀⣼
+  ▍ 1 ●  auth-refac…  claude    ~/src/app        needs input      2m  ⣀⣀⣀⣀⣀⣀⣀⣀
+    2 ⠶  api-tests    codex     ~/src/api        working         14s  ⣀⣀⣀⣀⣀⣀⣀⣼
   ── Commands ────────────────────────────────────────────────────────────────
 
     ❯ ses
 
     ▍ New session                                                          n
+      Peek at the screen                                               space
+      Stop session
+      Shell session · session shells are unavailable in this view
       Attach session                                                   enter
       Rename session                                                       r
       Delete session                                                       d
       Resume session · the agent still runs                                u
-      Peek at the screen                                               space
+      Policy session                                                       p
       All sessions
+      Policy log
       Next waiting session                                                 w
-      New session, with the form
-      Copy attach command                                                  y
-      Test host
-      Settings
 
     enter run   ↑↓ move   esc close

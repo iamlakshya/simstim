@@ -3,8 +3,8 @@ package tui
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
-	"time"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -36,20 +36,32 @@ type agentChoice struct {
 }
 
 type newSession struct {
-	host     string
-	choices  []agentChoice
-	ai       int
-	field    int // 0 agent, 1 folder, 2 name, 3 worktree, 4 command (only for "other")
-	command  input
-	folder   input
-	name     input
-	worktree bool
-	suggest  []string // folder completions for the current folder text
-	hints    bool     // suggest holds recent folders and repositories, not completions
-	si       int      // the next suggestion Tab takes
-	finding  bool     // the host's agents are not known yet
-	starting bool
-	err      error
+	folderSeq    uint64
+	folderCtx    context.Context
+	folderCancel context.CancelFunc
+	folderGen    int
+	folderHost   client.Host
+	wall         string
+	downgrade    bool
+	preview      hostSelectionPreview
+	host         string
+	selector     string
+	sourceHost   client.Host
+	defaultHost  string
+	choosingHost bool
+	choices      []agentChoice
+	ai           int
+	field        int // 0 agent, 1 folder, 2 name, 3 worktree, 4 command, 5 wall, 6 host
+	command      input
+	folder       input
+	name         input
+	worktree     bool
+	suggest      []string // folder completions for the current folder text
+	hints        bool     // suggest holds recent folders and repositories, not completions
+	si           int      // the next suggestion Tab takes
+	finding      bool     // the host's agents are not known yet
+	starting     bool
+	err          error
 }
 
 const labelW = 11
@@ -82,7 +94,8 @@ const otherAgent = "other…"
 
 func newSessionDialog(m *Model, h *hostConn) *newSession {
 	d := &newSession{
-		host:    h.name(),
+		host:     h.name(),
+		selector: h.name(), sourceHost: h.host,
 		choices: agentChoices(h.info),
 		command: newInput("", "a command, for example aider --model sonnet"),
 		folder:  newInput("~", "~"),
@@ -109,8 +122,12 @@ func (d *newSession) agent() string {
 func (d *newSession) busy() bool { return d.starting }
 
 func (d *newSession) paste(s string) {
+	if d.starting {
+		return
+	}
 	switch d.field {
 	case 1:
+		d.stopFolders()
 		d.folder.insert(s)
 	case 2:
 		d.name.insert(s)
@@ -122,9 +139,9 @@ func (d *newSession) paste(s string) {
 // order is the sequence Tab moves through; the command field exists only for "other".
 func (d *newSession) order() []int {
 	if d.agent() == otherAgent {
-		return []int{0, 4, 1, 2, 3}
+		return []int{0, 4, 1, 2, 3, 5, 6}
 	}
-	return []int{0, 1, 2, 3}
+	return []int{0, 1, 2, 3, 5, 6}
 }
 
 func (d *newSession) step(n int) {
@@ -169,6 +186,7 @@ func (d *newSession) key(m *Model, k tea.KeyPressMsg) tea.Cmd {
 	ks := k.String()
 	if d.starting {
 		if ks == "esc" {
+			d.stopFolders()
 			m.modal = nil
 		}
 		return nil
@@ -183,6 +201,7 @@ func (d *newSession) key(m *Model, k tea.KeyPressMsg) tea.Cmd {
 	}
 	switch ks {
 	case "esc":
+		d.stopFolders()
 		m.modal = nil
 		return nil
 	case "tab", "down":
@@ -208,6 +227,10 @@ func (d *newSession) key(m *Model, k tea.KeyPressMsg) tea.Cmd {
 		d.name.key(k)
 	case 4:
 		d.command.key(k)
+	case 5:
+		d.wallKey(ks)
+	case 6:
+		return m.chooseNewSessionHost(d, ks)
 	case 3:
 		switch ks {
 		case "left", "h":
@@ -224,27 +247,21 @@ func (d *newSession) key(m *Model, k tea.KeyPressMsg) tea.Cmd {
 // submit starts the session the form describes; attach is false for a
 // start in the background.
 func (d *newSession) submit(m *Model, attach bool) tea.Cmd {
-	h := m.hostByName(d.host)
-	if h == nil {
-		m.modal = nil
-		return nil
-	}
 	folder := strings.TrimSpace(d.folder.value())
 	if folder == "" {
 		folder = "~"
 	}
-	a := client.NewArgs{Agent: d.agent(), Cwd: client.RemotePath(folder), Name: strings.TrimSpace(d.name.value()), Worktree: d.worktree}
+	a := client.NewArgs{Agent: d.agent(), Cwd: client.RemotePath(folder), Name: strings.TrimSpace(d.name.value()), Worktree: d.worktree, Wall: d.wall, Downgrade: d.downgrade}
 	if d.agent() == otherAgent {
 		c := strings.TrimSpace(d.command.value())
 		if c == "" {
-			d.field, d.err = 4, &client.UserError{Msg: "type the command to run", Hint: "For example: aider --model sonnet"}
+			d.field, d.err = 4, &client.UserError{Msg: "type the command to run", Hint: "Type a command, such as aider --model sonnet.", Code: "missing_value", Kind: client.KindUsage}
 			return nil
 		}
 		// exec replaces the shell, so the command is the session's process.
 		a.Agent, a.Argv = "", []string{"/bin/sh", "-c", "exec " + c}
 	}
-	d.starting, d.err = true, nil
-	return m.startSession(h, startReq{args: a, attach: attach, form: d})
+	return m.submitNewSessionHost(d, a, attach)
 }
 
 // agentKey moves through the agents: arrows and h l, space, or a letter,
@@ -294,16 +311,19 @@ func (d *newSession) view(m *Model) string {
 		label(2, "Name")+d.name.view(fw, d.field == 2),
 		"",
 		label(3, "Worktree")+d.worktreeRow(),
+		label(5, "Wall")+d.wallRow(m, fw),
+		label(6, "Host")+d.hostRow(m, fw),
+		strings.Repeat(" ", labelW)+sFaint.Render(trunc(shown(d.preview.reason), fw)),
 		"",
 	)
 	switch {
 	case d.starting:
-		body = append(body, sKey.Render(m.spinner())+" "+sFaint.Render(fmt.Sprintf("Starting %s on %s…", d.agent(), d.host)), "")
+		body = append(body, sKey.Render(m.spinner())+" "+sFaint.Render(d.startingText()), "")
 	case d.err != nil:
 		body = append(append(body, errorLines(d.err, cw)...), "")
 	}
 	hints := []hint{{"enter", "start"}, {"tab", "next"}, {"ctrl+enter", "start detached"}, {"esc", "cancel"}}
-	return sheet(w, "New session on "+d.host, "", hints, trimBlank(body), toneNormal)
+	return sheet(w, d.selectionTitle(), "", hints, trimBlank(body), toneNormal)
 }
 
 // worktreeRow is a choice of two: the folder itself, or a new git worktree.
@@ -359,24 +379,6 @@ func (d *newSession) agentRow(w int) string {
 	return b.String()
 }
 
-// fetchFolders asks the host for completions of the folder field.
-func (m *Model) fetchFolders(d *newSession) tea.Cmd {
-	h := m.hostByName(d.host)
-	if h == nil || !h.online() {
-		return nil
-	}
-	prefix, name, c, ctx := d.folder.value(), h.name(), h.conn, m.ctx
-	return func() tea.Msg {
-		cctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-		defer cancel()
-		res, err := c.Folders(cctx, prefix)
-		if err != nil {
-			return nil
-		}
-		return foldersMsg{host: name, prefix: prefix, res: res}
-	}
-}
-
 // setSuggestions keeps completions that still fit what the user has typed.
 func (d *newSession) setSuggestions(prefix string, res client.FoldersResult) {
 	if prefix != d.folder.value() {
@@ -411,7 +413,7 @@ func (d *newSession) suggestLine(w int) string {
 	if d.hints {
 		lead = "recent: "
 	}
-	return sFaint.Render(fit(lead+strings.Join(d.suggest, "  "), w))
+	return sFaint.Render(fit(lead+strings.Join(shownAll(d.suggest), "  "), w))
 }
 
 // completion returns the next match that extends what the user typed. Adding
@@ -440,11 +442,22 @@ type shellDoneMsg struct {
 
 // openShell hands the terminal to an interactive SSH shell on the host.
 func (m *Model) openShell(h *hostConn) tea.Cmd {
+	return m.withHostTier(h, func() tea.Cmd { return m.openShellReady(h) })
+}
+
+func (m *Model) openShellReady(h *hostConn) tea.Cmd {
 	s := &client.SSH{Host: h.host, Interactive: true}
 	cmd, err := s.Shell(m.ctx)
 	if err != nil {
 		return m.toastErr(err)
 	}
 	name := h.name()
-	return tea.ExecProcess(cmd, func(err error) tea.Msg { return shellDoneMsg{host: name, err: err} })
+	x := &funcExec{run: func(in, out *os.File) error {
+		cmd.Stdin, cmd.Stdout, cmd.Stderr = in, out, os.Stderr
+		if err := cmd.Run(); err != nil {
+			return fmt.Errorf("run the shell: %w", err)
+		}
+		return nil
+	}}
+	return m.execWithInput(x, func(err error) tea.Msg { return shellDoneMsg{host: name, err: err} })
 }

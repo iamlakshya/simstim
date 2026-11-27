@@ -23,8 +23,8 @@ const bundleWait = 10 * time.Minute
 func debugBundleCmd() *cobra.Command {
 	var ssh bool
 	cmd := &cobra.Command{
-		Use:   "bundle [<host> | <host>/<session>]",
-		Short: "Write one local archive of the debug files, with private values replaced, to attach to an issue",
+		Use:   "bundle [<host>|<host>/<session>]",
+		Short: "Write one archive of the debug files, with private values replaced",
 		Long: "Without an argument, the bundle takes the laptop's side only. With a host, it adds every session\n" +
 			"on that host that has debug files, and with a session, that session only. It writes\n" +
 			brand.Name + "-debug-<time>.tar.gz in the current folder, with mode 0600. It replaces host names,\n" +
@@ -32,13 +32,14 @@ func debugBundleCmd() *cobra.Command {
 			"the values of the host's alerts file. Nothing is uploaded. Read the files before you share them.",
 		Example: "  " + brand.Name + " debug bundle my-vps/auth-fix\n" +
 			"  " + brand.Name + " debug bundle my-vps --ssh",
-		Args: cobra.MaximumNArgs(1),
+		Args:              cobra.MaximumNArgs(1),
+		ValidArgsFunction: completeHostOrSessionArg,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			res, err := runBundle(cmd.Context(), args, ssh)
 			if err != nil {
 				return err
 			}
-			printBundle(os.Stdout, res)
+			printBundle(os.Stderr, res)
 			return nil
 		},
 	}
@@ -53,7 +54,7 @@ func runBundle(ctx context.Context, args []string, ssh bool) (*bundle.Result, er
 	if len(args) == 1 {
 		hn, ref, slash := strings.Cut(args[0], "/")
 		if hn == "" || slash && ref == "" {
-			return nil, &client.UserError{Msg: fmt.Sprintf("%q is not a host or host/session", args[0]), Hint: brand.Name + " ls"}
+			return nil, &client.UserError{Msg: fmt.Sprintf("%q is not a host or host/session", args[0]), Hint: brand.Name + " ls", Code: "bad_address", Kind: client.KindUsage}
 		}
 		h, err := client.FindHost(hn)
 		if err != nil {
@@ -61,7 +62,7 @@ func runBundle(ctx context.Context, args []string, ssh bool) (*bundle.Result, er
 		}
 		o.Host, o.Session = &h, ref
 	} else if ssh {
-		return nil, &client.UserError{Msg: "--ssh needs a host", Hint: brand.Name + " debug bundle <host> --ssh"}
+		return nil, &client.UserError{Msg: "--ssh needs a host", Hint: brand.Name + " debug bundle <host> --ssh", Code: "missing_argument", Kind: client.KindUsage}
 	}
 	dir, err := os.Getwd()
 	if err != nil {

@@ -1,0 +1,152 @@
+{
+  "v": 1,
+  "ok": false,
+  "files": [
+    {
+      "path": "~/.config/simstim/config.toml",
+      "exists": true
+    },
+    {
+      "path": "~/.config/simstim/hosts.toml",
+      "exists": true
+    }
+  ],
+  "findings": [
+    {
+      "path": "~/.config/simstim/config.toml",
+      "line": 3,
+      "severity": "error",
+      "code": "unknown_key",
+      "message": "unknown key \"motoin\" in [ui]",
+      "suggestions": [
+        "motion"
+      ]
+    },
+    {
+      "path": "~/.config/simstim/config.toml",
+      "line": 6,
+      "severity": "error",
+      "code": "bad_value",
+      "message": "\"detach_key\" in [attach]: unknown modifier \"ctr\" in \"ctr+x\""
+    },
+    {
+      "path": "~/.config/simstim/config.toml",
+      "line": 7,
+      "severity": "error",
+      "code": "bad_value",
+      "message": "\"scrollback\" in [attach] must be \"keep\" or \"clear\", not \"kept\""
+    },
+    {
+      "path": "~/.config/simstim/config.toml",
+      "line": 10,
+      "severity": "error",
+      "code": "bad_value",
+      "message": "\"memory_max\" in [sessions]: \"100M\" is below the smallest cap, 256M. Use auto, or a size such as 4G"
+    },
+    {
+      "path": "~/.config/simstim/config.toml",
+      "line": 13,
+      "severity": "error",
+      "code": "wrong_type",
+      "message": "\"inline\" in [agents] must be true or false, not \"yes\""
+    },
+    {
+      "path": "~/.config/simstim/config.toml",
+      "line": 16,
+      "severity": "error",
+      "code": "bad_value",
+      "message": "\"sesion: delete\" in [keymap] is not a launcher command",
+      "suggestions": [
+        "session: delete"
+      ]
+    },
+    {
+      "path": "~/.config/simstim/config.toml",
+      "line": 17,
+      "severity": "error",
+      "code": "bad_value",
+      "message": "\"session: rename\" in [keymap]: \"opt+e\" is not a key: \"opt\" is not a modifier, which is ctrl, alt, shift, meta, hyper or super"
+    },
+    {
+      "path": "~/.config/simstim/config.toml",
+      "line": 17,
+      "severity": "error",
+      "code": "wrong_type",
+      "message": "\"session: rename\" in [keymap] must list keys as strings, not 5"
+    },
+    {
+      "path": "~/.config/simstim/config.toml",
+      "line": 18,
+      "severity": "error",
+      "code": "bad_value",
+      "message": "\"host: add\" in [keymap]: the launcher never matches \"shift+ctrl+a\", because it names the modifiers in the order ctrl, alt, shift, meta, hyper, super: write \"ctrl+shift+a\""
+    },
+    {
+      "path": "~/.config/simstim/config.toml",
+      "line": 21,
+      "severity": "error",
+      "code": "bad_value",
+      "message": "\"EMPTY\" in [secrets] has an empty command"
+    },
+    {
+      "path": "~/.config/simstim/hosts.toml",
+      "line": 6,
+      "severity": "error",
+      "code": "bad_host",
+      "message": "two hosts are named \"box\""
+    },
+    {
+      "path": "~/.config/simstim/hosts.toml",
+      "line": 8,
+      "severity": "error",
+      "code": "unknown_key",
+      "message": "unknown key \"sshh\" in [[host]]",
+      "suggestions": [
+        "ssh"
+      ]
+    },
+    {
+      "path": "~/.config/simstim/hosts.toml",
+      "line": 10,
+      "severity": "error",
+      "code": "bad_value",
+      "message": "\"machine\" in [[host]] needs a non-empty id"
+    },
+    {
+      "path": "~/.config/simstim/hosts.toml",
+      "line": 11,
+      "severity": "error",
+      "code": "bad_value",
+      "message": "\"provider\" in [host.machine] must be \"lima\", \"docker\" or \"e2b\", not \"lim\""
+    },
+    {
+      "path": "~/.config/simstim/hosts.toml",
+      "line": 12,
+      "severity": "error",
+      "code": "bad_value",
+      "message": "\"idle_stop\" in [host.machine] must be a time of a minute or more, such as 30m or 2h, or never, not \"5x\""
+    },
+    {
+      "path": "~/.config/simstim/hosts.toml",
+      "line": 13,
+      "severity": "error",
+      "code": "bad_value",
+      "message": "\"stdin\" in [host.machine] must be \"send\" or \"stream\", not \"pipe\""
+    },
+    {
+      "path": "~/.config/simstim/hosts.toml",
+      "line": 15,
+      "severity": "error",
+      "code": "bad_host",
+      "message": "the host \"bad name\" has no ssh target"
+    },
+    {
+      "path": "~/.config/simstim/hosts.toml",
+      "line": 16,
+      "severity": "error",
+      "code": "bad_host",
+      "message": "\"bad name\" cannot name a host: use up to 63 letters, digits, dots, dashes and underscores, from a letter or a digit"
+    }
+  ],
+  "layers": []
+}

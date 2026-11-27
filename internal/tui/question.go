@@ -14,13 +14,27 @@ import (
 // quick-start line. That form or line waits for the start, and shows how it
 // went.
 type startReq struct {
-	host string
+	host              string
+	selected          *newSelectedStart
+	selectedHost      client.Host // actual attempt result, never preview metadata
+	selectedNewCalled bool        // only the actual wrapper result may be retried
 	// args are what to start. They keep the secrets of the start, so that
 	// the start after an answer does not fetch them again.
-	args   client.NewArgs
-	attach bool
-	form   *newSession  // the form that started it, or nil
-	line   *promptState // the quick-start line that started it, or nil
+	args client.NewArgs
+	// grants belongs to this logical start, including its setup retries.
+	grants       *client.GrantRequest
+	vm           *client.VMNeedPlanV1
+	wallIntent   string
+	inputOptions *client.NewInputOptions
+	// answered is true once the start has read the user's answers about
+	// setup scripts into args. A start after an answer keeps the answers
+	// it has, with the new one in them. answers are those answers, so a
+	// question can say what the user said before.
+	answered bool
+	answers  client.SetupAnswers
+	attach   bool
+	form     *newSession  // the form that started it, or nil
+	line     *promptState // the quick-start line that started it, or nil
 }
 
 // waiting returns the form or the quick-start line that started r, while it
@@ -39,10 +53,14 @@ func (m *Model) waiting(r startReq) (*newSession, *promptState) {
 // the answer in r.args. The form comes back, still starting, until the reply.
 // When the host is gone, the start ends, and a toast says why.
 func (m *Model) startAgain(r startReq) tea.Cmd {
+	if r.selected != nil {
+		m.modal = r.form
+		return m.startSelectedAgain(r)
+	}
 	h := m.hostByName(r.host)
 	if h == nil {
-		m.cancelStart(r)
-		return m.toastErr(&client.UserError{Msg: "the host " + r.host + " is no longer in the list", Hint: "Add the host again, then start the session."})
+		cleanup := m.cancelStart(r)
+		return tea.Batch(cleanup, m.toastErr(&client.UserError{Msg: "the host " + r.host + " is no longer in the list", Hint: "Add the host again, then start the session.", Code: "host_not_found", Kind: client.KindNotFound}))
 	}
 	m.modal = nil
 	if r.form != nil {
@@ -53,7 +71,7 @@ func (m *Model) startAgain(r startReq) tea.Cmd {
 
 // cancelStart closes a question about a start, and brings back what started
 // it, ready to start again: the new-session form, or the quick-start line.
-func (m *Model) cancelStart(r startReq) {
+func (m *Model) cancelStart(r startReq) tea.Cmd {
 	m.modal = nil
 	if r.form != nil {
 		r.form.starting = false
@@ -62,4 +80,8 @@ func (m *Model) cancelStart(r startReq) {
 	if r.line != nil {
 		r.line.starting = false
 	}
+	if r.selected != nil {
+		return m.releaseSelectedNew(r.selected)
+	}
+	return m.releaseGrant(r.grants)
 }

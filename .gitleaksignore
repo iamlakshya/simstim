@@ -3,3 +3,35 @@
 # history; the tests now use values that do not look like keys.
 6f6a38a7f5a70bcb1c606adf3c2dbcc68eae4155:internal/client/secrets_test.go:generic-api-key:15
 6f6a38a7f5a70bcb1c606adf3c2dbcc68eae4155:internal/host/secrets_test.go:generic-api-key:21
+
+# Example SSH SHA-256 host-key fingerprints in documentation, kept in history;
+# the document now uses obvious placeholder fingerprints.
+1a9d622e9595af4f6e88d515cc9794cb9a31e8cf:docs/how-to/add-a-host.md:generic-api-key:59
+1a9d622e9595af4f6e88d515cc9794cb9a31e8cf:docs/how-to/add-a-host.md:generic-api-key:72
+
+# Historical false positives on protocol capability names, hex character-set
+# literals next to Token fields, RFC 6455 sample Sec-WebSocket-Key values,
+# and synthetic test fixtures; HEAD now avoids key-like literals.
+c94c1f730dd03c24879337630ebbdcb2ccb5aad4:internal/api/secret_bind.go:generic-api-key:5
+c94c1f730dd03c24879337630ebbdcb2ccb5aad4:internal/client/host_membership_generation_test.go:generic-api-key:39
+c94c1f730dd03c24879337630ebbdcb2ccb5aad4:internal/egress/audit_flow_test.go:generic-api-key:40
+c94c1f730dd03c24879337630ebbdcb2ccb5aad4:internal/egress/audit_adversarial_test.go:generic-api-key:64
+c94c1f730dd03c24879337630ebbdcb2ccb5aad4:internal/egress/audit_adversarial_test.go:generic-api-key:73
+c94c1f730dd03c24879337630ebbdcb2ccb5aad4:internal/egress/http_secret_route_upgrade_test.go:generic-api-key:16
+c94c1f730dd03c24879337630ebbdcb2ccb5aad4:internal/egress/http_websocket_oracle_test.go:generic-api-key:116
+c94c1f730dd03c24879337630ebbdcb2ccb5aad4:internal/egress/websocket_upgrade_test.go:generic-api-key:69
+c94c1f730dd03c24879337630ebbdcb2ccb5aad4:internal/guest/member_abort_test.go:generic-api-key:142
+c94c1f730dd03c24879337630ebbdcb2ccb5aad4:internal/guest/member_prepare_test.go:generic-api-key:44
+c94c1f730dd03c24879337630ebbdcb2ccb5aad4:internal/supervisor/egress_test.go:generic-api-key:153
+c94c1f730dd03c24879337630ebbdcb2ccb5aad4:internal/supervisor/member_abort_test.go:generic-api-key:44
+c94c1f730dd03c24879337630ebbdcb2ccb5aad4:internal/supervisor/member_prepare_test.go:generic-api-key:25
+c94c1f730dd03c24879337630ebbdcb2ccb5aad4:internal/supervisor/member_prepare_test.go:generic-api-key:70
+c94c1f730dd03c24879337630ebbdcb2ccb5aad4:internal/supervisor/member_prepare_test.go:generic-api-key:105
+fd276870978fcb307934aac03a7542ee10a10988:internal/api/purge_guard.go:generic-api-key:45
+fd276870978fcb307934aac03a7542ee10a10988:internal/egress/model_websocket_test.go:generic-api-key:26
+4cec4a752043fbcbe879ab9a56f458b412930bb2:internal/egress/model_protocol_regression_test.go:generic-api-key:33
+94eec1627e206eeaed3ae8133755bd4ad101733f:internal/egress/response_service_rules_test.go:generic-api-key:46
+3fa26ae3750436b9fa349e9ab6afac4e9b6eff49:internal/egress/model_usage_websocket_upload_test.go:generic-api-key:232
+3fa26ae3750436b9fa349e9ab6afac4e9b6eff49:internal/egress/model_usage_websocket_writer_pending_test.go:generic-api-key:73
+3fa26ae3750436b9fa349e9ab6afac4e9b6eff49:internal/host/auxiliary_reservation.go:generic-api-key:84
+0652fb9aba6caf9e81d6287983343254cbc05696:internal/cli/completion_current_test.go:generic-api-key:65

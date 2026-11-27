@@ -2,16 +2,20 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"os"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"golang.org/x/term"
 
 	"github.com/iamlakshya/simstim/internal/brand"
 	"github.com/iamlakshya/simstim/internal/client"
+	"github.com/iamlakshya/simstim/internal/keyread"
+	"github.com/iamlakshya/simstim/internal/keys"
 )
 
 // probeQueries asks the terminal about everything the pass-through relies on.
@@ -34,18 +38,39 @@ type capability struct {
 	ok           bool
 }
 
-func terminalProbe() error {
+// terminalProbe asks the terminal what it supports. A signal ends its wait
+// for the answers.
+func terminalProbe(ctx context.Context) error {
 	fd := int(os.Stdin.Fd())
 	if !term.IsTerminal(fd) || !term.IsTerminal(int(os.Stdout.Fd())) {
-		return &client.UserError{Msg: "the terminal check needs a terminal", Hint: "Run it in your terminal."}
+		return &client.UserError{Msg: "the terminal check needs a terminal", Hint: "Run it in your terminal.", Code: "no_terminal", Kind: client.KindUsage}
 	}
-	old, err := term.MakeRaw(fd)
+	if err := keyread.CheckStuck(os.Stdin); err != nil {
+		return terminalReadError(err)
+	}
+	original, err := term.GetState(fd)
 	if err != nil {
-		return fmt.Errorf("put the terminal in raw mode: %w", err)
+		return terminalReadError(err)
 	}
+	restore := sync.OnceFunc(func() { _ = term.Restore(fd, original) })
+	defer restore()
+	in, done, err := inputOf(os.Stdin)
+	if err != nil {
+		return err
+	}
+	defer done()
+	if _, err := term.MakeRaw(fd); err != nil {
+		return terminalReadError(err)
+	}
+	// Opening a Windows console reader can flush queued replies. Own it
+	// before sending queries, and start reading only after raw mode is set.
 	_, _ = os.Stdout.WriteString(probeQueries)
-	reply := readUntilDA1(2 * time.Second)
-	_ = term.Restore(fd, old)
+	reply := readUntilDA1(ctx, in, 2*time.Second)
+	done()
+	restore()
+	if ctx.Err() != nil {
+		return fmt.Errorf("check the terminal: %w", ctx.Err())
+	}
 
 	r := string(reply)
 	mode := func(n int) (string, bool) {
@@ -100,25 +125,22 @@ func terminalProbe() error {
 	return nil
 }
 
-// readUntilDA1 reads the terminal's replies until the DA1 answer or the timeout.
-func readUntilDA1(timeout time.Duration) []byte {
-	done := make(chan []byte, 1)
-	go func() {
-		var buf bytes.Buffer
-		b := make([]byte, 1024)
-		for {
-			n, err := os.Stdin.Read(b)
-			buf.Write(b[:n])
-			if regexp.MustCompile(`\x1b\[\?[\d;]*c`).Match(buf.Bytes()) || err != nil {
-				done <- buf.Bytes()
-				return
-			}
-		}
-	}()
-	select {
-	case r := <-done:
-		return r
-	case <-time.After(timeout):
+// readUntilDA1 reads replies from the already-owned in until the DA1 answer,
+// the timeout, the end of ctx or a signal. Its caller owns the reader and
+// terminal modes, so this helper never opens or closes another reader.
+func readUntilDA1(ctx context.Context, in keys.CancelReader, timeout time.Duration) []byte {
+	sctx, cancel := stopping(ctx)
+	defer cancel()
+	tctx, stop := context.WithTimeout(sctx, timeout)
+	defer stop()
+	var buf bytes.Buffer
+	da1 := regexp.MustCompile(`\x1b\[\?[\d;]*c`)
+	err := keys.ReadUntil(tctx, in, func(b []byte) bool {
+		buf.Write(b)
+		return !da1.Match(buf.Bytes())
+	})
+	if err != nil && !da1.Match(buf.Bytes()) {
 		return nil
 	}
+	return buf.Bytes()
 }

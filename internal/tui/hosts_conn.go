@@ -11,6 +11,21 @@ import (
 	"github.com/iamlakshya/simstim/internal/client"
 )
 
+// HostOnline reports whether host name currently holds a live background connection.
+func (m *Model) HostOnline(name string) bool {
+	h := m.hostByName(name)
+	return h != nil && h.online()
+}
+
+// HostFailed reports whether host name is in the failed state and returns its error.
+func (m *Model) HostFailed(name string) (bool, error) {
+	h := m.hostByName(name)
+	if h == nil || h.status != stFailed {
+		return false, nil
+	}
+	return true, h.err
+}
+
 // onConn handles the connection messages.
 func (m *Model) onConn(msg tea.Msg) tea.Cmd {
 	switch msg := msg.(type) {
@@ -26,6 +41,8 @@ func (m *Model) onConn(msg tea.Msg) tea.Cmd {
 		return m.onLatency(msg)
 	case doctorMsg:
 		return m.onDoctor(msg)
+	case hostRuntimeUpgradedV1:
+		return m.onHostRuntimeUpgradedV1(msg)
 	case refreshTickMsg:
 		return m.onRefreshTick()
 	case latencyTickMsg:
@@ -50,14 +67,32 @@ func (m *Model) onDialled(msg dialledMsg) tea.Cmd {
 			h.status = stOffline
 		}
 		h.backoff = nextBackoff(h.backoff)
-		return m.after(h.backoff, redialMsg{name: h.name(), gen: h.gen})
+		retry := m.after(h.backoff, redialMsg{name: h.name(), gen: h.gen})
+		if msg.reconnect {
+			return tea.Batch(m.toastErr(msg.err), retry)
+		}
+		return retry
 	}
+	if msg.conn != nil && !m.conns.adopt(msg.conn) {
+		return nil
+	}
+	h.needRetire = false
 	h.conn, h.status, h.err, h.backoff = msg.conn, stOnline, nil, 0
-	cmds := []tea.Cmd{m.listSessions(h), m.ping(h), m.doctor(h), waitDone(h.name(), h.gen, h.conn)}
+	cmds := []tea.Cmd{m.listSessions(h), m.ping(h), m.doctor(h), m.upgradeHostRuntimeV1(h), m.waitDone(h.name(), h.gen, h.conn)}
+	if msg.conn.HostIDChanged() {
+		h.tier, h.idChanged = client.TierShared, true
+		cmds = append(cmds, m.toastHostIDChanged(h.name()))
+	}
 	if m.previewOpen() && m.preview.key.host == h.name() {
 		cmds = append(cmds, m.peek())
 	}
 	return tea.Batch(cmds...)
+}
+
+func (m *Model) toastHostIDChanged(name string) tea.Cmd {
+	return m.toastNext(toastWarning,
+		name+" answers with a different host ID, so its tier is now shared.",
+		fmt.Sprintf("If it is the same machine: %s host set %s tier=own", brand.Name, name))
 }
 
 // onConnDone notes a lost connection and dials again later.
@@ -68,9 +103,11 @@ func (m *Model) onConnDone(msg connDoneMsg) tea.Cmd {
 	}
 	old := h.conn
 	h.conn, h.status, h.rtts, h.rtt = nil, stOffline, nil, rttSpread{}
+	h.listing, h.pinging, h.doctoring = false, false, false
 	h.err = &client.UserError{
 		Msg:  "lost the connection to " + h.name(),
 		Hint: fmt.Sprintf("%s host test %s", brand.Name, h.name()),
+		Code: "closed",
 	}
 	h.backoff = nextBackoff(h.backoff)
 	return tea.Batch(m.dropConn(old), m.after(h.backoff, redialMsg{name: h.name(), gen: h.gen}))
@@ -104,7 +141,7 @@ func (m *Model) onSessions(msg sessionsMsg) tea.Cmd {
 	h.err = nil
 	cmd := m.alertNew(h, msg.list)
 	m.noteActivity(h, msg.list)
-	h.sessions, h.loaded = msg.list, true
+	h.sessions, h.loaded, h.seenAt = msg.list, true, msg.at
 	m.syncSel()
 	if m.want.host == h.name() {
 		m.want = sessKey{} // it is gone: the first live list did not have it
@@ -132,7 +169,11 @@ func (m *Model) onLatency(msg latencyMsg) tea.Cmd {
 // onDoctor keeps a host's facts, for the details and the new-session form.
 func (m *Model) onDoctor(msg doctorMsg) tea.Cmd {
 	h := m.hostByName(msg.name)
-	if h == nil || h.gen != msg.gen || msg.err != nil {
+	if h == nil || h.gen != msg.gen {
+		return nil
+	}
+	h.doctoring = false
+	if msg.err != nil {
 		return nil
 	}
 	info := msg.info

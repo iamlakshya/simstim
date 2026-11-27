@@ -4,34 +4,32 @@
 <circle cx="22" cy="20" r="6" fill="#FF5F57"/>
 <circle cx="42" cy="20" r="6" fill="#FEBC2E"/>
 <circle cx="62" cy="20" r="6" fill="#28C840"/>
-<text x="40.8" y="74.0" textLength="8.4" fill="#0E7C7B" font-weight="bold">⢄</text>
-<text x="49.2" y="74.0" textLength="8.4" fill="#0EAFBB" font-weight="bold">⡠</text>
-<text x="57.6" y="74.0" textLength="8.4" fill="#00E5FF" font-weight="bold">⠊</text>
-<text x="74.4" y="74.0" textLength="8.4" fill="#0E7C7B" font-weight="bold">s</text>
-<text x="82.8" y="74.0" textLength="8.4" fill="#0E8D90" font-weight="bold">i</text>
-<text x="91.2" y="74.0" textLength="8.4" fill="#0F9EA5" font-weight="bold">m</text>
-<text x="99.6" y="74.0" textLength="8.4" fill="#0EAFBB" font-weight="bold">s</text>
-<text x="108.0" y="74.0" textLength="8.4" fill="#0BC1D1" font-weight="bold">t</text>
-<text x="116.4" y="74.0" textLength="8.4" fill="#06D3E8" font-weight="bold">i</text>
-<text x="124.8" y="74.0" textLength="8.4" fill="#00E5FF" font-weight="bold">m</text>
+<text x="40.8" y="74.0" textLength="8.4" fill="#BFBDB6" font-weight="bold">⢄</text>
+<text x="49.2" y="74.0" textLength="8.4" fill="#BFBDB6" font-weight="bold">⡠</text>
+<text x="57.6" y="74.0" textLength="8.4" fill="#BFBDB6" font-weight="bold">⠊</text>
+<text x="74.4" y="74.0" textLength="58.8" fill="#BFBDB6" font-weight="bold">simstim</text>
 <text x="150.0" y="74.0" textLength="42.0" fill="#656565">hosts</text>
 <text x="754.8" y="74.0" textLength="67.2" fill="#656565">3 hosts </text>
 <text x="822.0" y="74.0" textLength="8.4" fill="#656565">·</text>
-<text x="838.8" y="74.0" textLength="92.4" fill="#F9AF4F">1 needs you</text>
+<text x="838.8" y="74.0" textLength="109.2" fill="#BFBDB6">1 needs you  </text>
 <text x="40.8" y="91.0" textLength="890.4" fill="#656565">──────────────────────────────────────────────────────────────────────────────────────────────────────────</text>
 <text x="57.6" y="125.0" textLength="8.4" fill="#656565">1</text>
-<text x="74.4" y="125.0" textLength="8.4" fill="#7FD962">●</text>
+<text x="74.4" y="125.0" textLength="8.4" fill="#BFBDB6">●</text>
 <text x="91.2" y="125.0" textLength="58.8" fill="#BFBDB6" font-weight="bold">gcp-dev</text>
-<text x="200.4" y="125.0" textLength="84.0" fill="#656565">2 sessions</text>
+<text x="200.4" y="125.0" textLength="142.8" fill="#656565">floor not pinned </text>
+<text x="343.2" y="125.0" textLength="8.4" fill="#656565">·</text>
+<text x="351.6" y="125.0" textLength="109.2" fill="#656565"> now unknown </text>
+<text x="460.8" y="125.0" textLength="8.4" fill="#656565">·</text>
+<text x="469.2" y="125.0" textLength="92.4" fill="#656565"> 2 sessions</text>
 <text x="813.6" y="125.0" textLength="33.6" fill="#656565">38ms</text>
-<text x="864.0" y="125.0" textLength="8.4" fill="#90E1C6">⣰</text>
-<text x="872.4" y="125.0" textLength="8.4" fill="#90E1C6">⣾</text>
-<text x="880.8" y="125.0" textLength="8.4" fill="#90E1C6">⣿</text>
-<text x="889.2" y="125.0" textLength="8.4" fill="#90E1C6">⣧</text>
-<text x="897.6" y="125.0" textLength="8.4" fill="#90E1C6">⣠</text>
-<text x="906.0" y="125.0" textLength="8.4" fill="#90E1C6">⣿</text>
-<text x="914.4" y="125.0" textLength="8.4" fill="#90E1C6">⣷</text>
-<text x="922.8" y="125.0" textLength="8.4" fill="#90E1C6">⣶</text>
+<text x="864.0" y="125.0" textLength="8.4" fill="#BFBDB6">⣰</text>
+<text x="872.4" y="125.0" textLength="8.4" fill="#BFBDB6">⣾</text>
+<text x="880.8" y="125.0" textLength="8.4" fill="#BFBDB6">⣿</text>
+<text x="889.2" y="125.0" textLength="8.4" fill="#BFBDB6">⣧</text>
+<text x="897.6" y="125.0" textLength="8.4" fill="#BFBDB6">⣠</text>
+<text x="906.0" y="125.0" textLength="8.4" fill="#BFBDB6">⣿</text>
+<text x="914.4" y="125.0" textLength="8.4" fill="#BFBDB6">⣷</text>
+<text x="922.8" y="125.0" textLength="8.4" fill="#BFBDB6">⣶</text>
 <text x="57.6" y="142.0" textLength="8.4" fill="#656565">2</text>
 <text x="74.4" y="142.0" textLength="8.4" fill="#656565">◌</text>
 <text x="91.2" y="142.0" textLength="92.4" fill="#656565">hetzner-box</text>
@@ -44,42 +42,50 @@
 <text x="906.0" y="142.0" textLength="8.4" fill="#656565">⣀</text>
 <text x="914.4" y="142.0" textLength="8.4" fill="#656565">⣀</text>
 <text x="922.8" y="142.0" textLength="8.4" fill="#656565">⣀</text>
-<text x="40.8" y="159.0" textLength="8.4" fill="#90E1C6">▍</text>
+<text x="40.8" y="159.0" textLength="8.4" fill="#BFBDB6">▍</text>
 <text x="49.2" y="159.0" textLength="25.2" fill="#BFBDB6"> 3 </text>
-<text x="74.4" y="159.0" textLength="8.4" fill="#7FD962">●</text>
+<text x="74.4" y="159.0" textLength="8.4" fill="#BFBDB6">●</text>
 <text x="91.2" y="159.0" textLength="58.8" fill="#BFBDB6" font-weight="bold">homelab</text>
-<text x="150.0" y="159.0" textLength="142.8" fill="#BFBDB6">      4 sessions </text>
-<text x="292.8" y="159.0" textLength="8.4" fill="#BFBDB6">·</text>
-<text x="309.6" y="159.0" textLength="92.4" fill="#F9AF4F">1 needs you</text>
-<text x="402.0" y="159.0" textLength="462.0" fill="#BFBDB6">                                                  4ms  </text>
-<text x="864.0" y="159.0" textLength="8.4" fill="#90E1C6">⣶</text>
-<text x="872.4" y="159.0" textLength="8.4" fill="#90E1C6">⣾</text>
-<text x="880.8" y="159.0" textLength="8.4" fill="#90E1C6">⣿</text>
-<text x="889.2" y="159.0" textLength="8.4" fill="#90E1C6">⣧</text>
-<text x="897.6" y="159.0" textLength="8.4" fill="#90E1C6">⣠</text>
-<text x="906.0" y="159.0" textLength="8.4" fill="#90E1C6">⣿</text>
-<text x="914.4" y="159.0" textLength="8.4" fill="#90E1C6">⣷</text>
-<text x="922.8" y="159.0" textLength="8.4" fill="#90E1C6">⣶</text>
+<text x="150.0" y="159.0" textLength="193.2" fill="#BFBDB6">      floor not pinned </text>
+<text x="343.2" y="159.0" textLength="8.4" fill="#BFBDB6">·</text>
+<text x="351.6" y="159.0" textLength="109.2" fill="#BFBDB6"> now unknown </text>
+<text x="460.8" y="159.0" textLength="8.4" fill="#BFBDB6">·</text>
+<text x="469.2" y="159.0" textLength="100.8" fill="#BFBDB6"> 4 sessions </text>
+<text x="570.0" y="159.0" textLength="8.4" fill="#BFBDB6">·</text>
+<text x="578.4" y="159.0" textLength="285.6" fill="#BFBDB6"> 1 needs you                 4ms  </text>
+<text x="864.0" y="159.0" textLength="8.4" fill="#BFBDB6">⣶</text>
+<text x="872.4" y="159.0" textLength="8.4" fill="#BFBDB6">⣾</text>
+<text x="880.8" y="159.0" textLength="8.4" fill="#BFBDB6">⣿</text>
+<text x="889.2" y="159.0" textLength="8.4" fill="#BFBDB6">⣧</text>
+<text x="897.6" y="159.0" textLength="8.4" fill="#BFBDB6">⣠</text>
+<text x="906.0" y="159.0" textLength="8.4" fill="#BFBDB6">⣿</text>
+<text x="914.4" y="159.0" textLength="8.4" fill="#BFBDB6">⣷</text>
+<text x="922.8" y="159.0" textLength="8.4" fill="#BFBDB6">⣶</text>
 <text x="57.6" y="193.0" textLength="100.8" fill="#656565">ssh homelab </text>
 <text x="158.4" y="193.0" textLength="8.4" fill="#656565">·</text>
-<text x="166.8" y="193.0" textLength="252.0" fill="#656565"> Debian GNU/Linux 13 (trixie) </text>
-<text x="418.8" y="193.0" textLength="8.4" fill="#656565">·</text>
-<text x="427.2" y="193.0" textLength="67.2" fill="#656565"> 4 CPUs </text>
-<text x="494.4" y="193.0" textLength="8.4" fill="#656565">·</text>
-<text x="502.8" y="193.0" textLength="327.6" fill="#656565"> claude, codex, gemini, opencode, shell</text>
+<text x="166.8" y="193.0" textLength="42.0" fill="#656565"> own </text>
+<text x="208.8" y="193.0" textLength="8.4" fill="#656565">·</text>
+<text x="217.2" y="193.0" textLength="252.0" fill="#656565"> Debian GNU/Linux 13 (trixie) </text>
+<text x="469.2" y="193.0" textLength="8.4" fill="#656565">·</text>
+<text x="477.6" y="193.0" textLength="67.2" fill="#656565"> 4 CPUs </text>
+<text x="544.8" y="193.0" textLength="8.4" fill="#656565">·</text>
+<text x="553.2" y="193.0" textLength="336.0" fill="#656565"> claude, codex, gemini, opencode, shell </text>
+<text x="889.2" y="193.0" textLength="8.4" fill="#656565">·</text>
+<text x="897.6" y="193.0" textLength="25.2" fill="#656565"> fl</text>
+<text x="922.8" y="193.0" textLength="8.4" fill="#656565">…</text>
 <text x="40.8" y="516.0" textLength="890.4" fill="#656565">──────────────────────────────────────────────────────────────────────────────────────────────────────────</text>
 <text x="57.6" y="533.0" textLength="8.4" fill="#656565">❯</text>
 <text x="66.0" y="533.0" textLength="336.0" fill="#656565"> / search every host   n start a session</text>
-<text x="57.6" y="550.0" textLength="42.0" fill="#90E1C6">enter</text>
+<text x="24.0" y="550.0" textLength="75.6" fill="#BFBDB6">    enter</text>
 <text x="99.6" y="550.0" textLength="42.0" fill="#656565"> open</text>
-<text x="166.8" y="550.0" textLength="8.4" fill="#90E1C6">1</text>
-<text x="175.2" y="550.0" textLength="8.4" fill="#90E1C6">–</text>
-<text x="183.6" y="550.0" textLength="8.4" fill="#90E1C6">9</text>
+<text x="141.6" y="550.0" textLength="33.6" fill="#BFBDB6">   1</text>
+<text x="175.2" y="550.0" textLength="8.4" fill="#BFBDB6">–</text>
+<text x="183.6" y="550.0" textLength="8.4" fill="#BFBDB6">9</text>
 <text x="192.0" y="550.0" textLength="42.0" fill="#656565"> jump</text>
-<text x="259.2" y="550.0" textLength="8.4" fill="#90E1C6">a</text>
+<text x="234.0" y="550.0" textLength="33.6" fill="#BFBDB6">   a</text>
 <text x="267.6" y="550.0" textLength="75.6" fill="#656565"> add host</text>
-<text x="368.4" y="550.0" textLength="50.4" fill="#90E1C6">ctrl+o</text>
+<text x="343.2" y="550.0" textLength="75.6" fill="#BFBDB6">   ctrl+o</text>
 <text x="418.8" y="550.0" textLength="75.6" fill="#656565"> commands</text>
-<text x="519.6" y="550.0" textLength="8.4" fill="#90E1C6">?</text>
+<text x="494.4" y="550.0" textLength="33.6" fill="#BFBDB6">   ?</text>
 <text x="528.0" y="550.0" textLength="42.0" fill="#656565"> keys</text>
 </svg>

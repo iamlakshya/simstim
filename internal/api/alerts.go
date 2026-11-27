@@ -38,7 +38,7 @@ type AlertDestination struct {
 	TokenFile string `json:"token_file,omitempty" toml:"token_file,omitempty"`
 	// Priority is the ntfy priority: 1 to 5, or min, low, default, high, urgent.
 	Priority string `json:"priority,omitempty" toml:"priority,omitempty"`
-	// Format is the webhook's body: "json" (the event), "slack" or "discord".
+	// Format is the webhook's body: "json", "slack", "discord" or "otlp".
 	Format string `json:"format,omitempty" toml:"format,omitempty"`
 	// Headers are extra HTTP headers for a webhook.
 	Headers map[string]string `json:"headers,omitempty" toml:"headers,omitempty"`

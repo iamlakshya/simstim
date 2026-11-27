@@ -1,0 +1,53 @@
+{
+  "version": 1,
+  "upstream_commit": "7a675ac66a1e2357abdaa6cccedabcd3cce9aa5c",
+  "bazel_version": "8.8.1",
+  "go_sdk_version": "1.27.3",
+  "rules_go": "0.63.0",
+  "gazelle": "0.51.3",
+  "sdk_patch": "tools/go_types_memoize.patch",
+  "artifacts": {
+    "linux/amd64": {
+      "bazel": {
+        "url": "https://releases.bazel.build/8.8.1/release/bazel-8.8.1-linux-x86_64",
+        "sha256": "5b5bab2095065817d3416ca9a0678bd39c10c9ede432dbe8187bfe74de285160",
+        "size": 64823995
+      },
+      "go_sdk": {
+        "url": "https://dl.google.com/go/go1.27.3.linux-amd64.tar.gz",
+        "sha256": "65efbc80fdc1fa2cd2631cad5b481777a68e8725f34e89f50fc6ac714e379b40",
+        "size": 70588678
+      }
+    },
+    "linux/arm64": {
+      "bazel": {
+        "url": "https://releases.bazel.build/8.8.1/release/bazel-8.8.1-linux-arm64",
+        "sha256": "41ad5f9e833fcaee7398111343570cb155ca14985abb084b1f0ad2d29eaaec6d",
+        "size": 62949687
+      },
+      "go_sdk": {
+        "url": "https://dl.google.com/go/go1.27.3.linux-arm64.tar.gz",
+        "sha256": "a06e99309dbcbdca1a8ccd2282c3ee146e55930886e26b4f1193269587165f49",
+        "size": 67076044
+      }
+    },
+    "darwin/arm64": {
+      "bazel": {
+        "url": "https://releases.bazel.build/8.8.1/release/bazel-8.8.1-darwin-arm64",
+        "sha256": "3b5864201e7be5e14fd14a2af2fc25ad9592a8269755793f6f3bfe0cb6136490",
+        "size": 59204318
+      },
+      "go_sdk": {
+        "url": "https://dl.google.com/go/go1.27.3.darwin-arm64.tar.gz",
+        "sha256": "dd3908cf20959d798c1e06ebe5b72213f0505ce01373b40ce3110975a6cd99c2",
+        "size": 68196737
+      }
+    }
+  },
+  "source_files": {
+    ".bazelrc": "8a1551a479275366f73eb2c067ba0f02bb9aa98551a563cd9703b8d5076649cc",
+    "MODULE.bazel": "ae53792e12f8893a3351b9ee8573c4f7ea8c810c953021fb68a3b38e340e42fb",
+    "go.mod": "ce3c330a41dbacd3da73b58a967f7466beae0d6cb3e8c02903fcf2967d939e21",
+    "tools/go_types_memoize.patch": "c222e2b1f22e2f07d8e0f1e5251388634053bcd492dc94a13c3888e2b42c1dbd"
+  }
+}

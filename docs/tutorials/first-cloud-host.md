@@ -71,8 +71,10 @@ ssh my-server echo ok
 
 Connect the host. This installs a small helper in your home folder there; nothing listens on the network.
 
+Use `own` when you alone have root. Choose `shared` if someone else has root ([host tiers](../how-to/choose-a-host-tier.md)).
+
 ```sh
-simstim host add my-server --yes
+simstim host add my-server --tier own --yes
 simstim host doctor my-server
 ```
 
@@ -80,17 +82,17 @@ simstim host doctor my-server
 
 <!-- test: help (runs the vendor's installer) -->
 ```sh
-simstim agents install claude --host my-server
+simstim agents install claude my-server
 ```
 
-Answer the installer's questions in the session that opens. When it is done, the client says how to log in. For Claude Code, run its login in a session, and follow the link it prints:
+Answer the installer's questions in the session that opens. When it is done, the client says how to log in. Start Claude Code's own login in a session, and follow the link it prints:
 
-<!-- test: skip (it starts a login) -->
+<!-- test: help (it starts a login on the host) -->
 ```sh
-simstim new my-server -- claude auth login
+simstim agents login claude my-server
 ```
 
-simstim never sees your login. [Install an agent](../how-to/install-agents.md) has the login for each agent.
+simstim never sees your login. [Install an agent](../how-to/install-agents.md) says how each agent logs in.
 
 ## 6. Give the agent a task, and walk away
 
@@ -100,6 +102,8 @@ Clone a repository on the server and start the agent in its own worktree, so its
 ```sh
 simstim new my-server --agent claude --dir ~/src/app --worktree --name first-task
 ```
+
+The new session uses the floor pinned during host preparation. Review it with `simstim host show my-server`; `simstim host prepare my-server` pins a floor for an older saved host. A later probe can confirm availability but does not silently change the saved floor.
 
 Give the agent a task. Then press **Ctrl+\\** to detach. The agent keeps working.
 

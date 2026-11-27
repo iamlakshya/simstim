@@ -1,0 +1,5 @@
+This internal source prototype adapts BurntSushi/toml v1.6.0 lexer/parser semantics under COPYING and Go1.26.11 numeric/time semantics under GO-LICENSE. Exact inputs and licences remain in the outer immutable primary packets. Grammar states are pinned; FD spans, fixed native cursors and redacted errors are the maintained extraction.
+
+The new local metadata backend is a source-only prototype authorised by the outer ROOT-DECISION. It executes global mapping/keyInfo/implicit rules separately from each returned inline topHash, using exact source-reference names and numeric object indexes in an owned anonymous file. Its API captures the actual mode's typed serial resource lease. It does not decode Settings, retain commands, execute providers, open agents or approve any outbound value.
+
+All compilation, tests, max-legal/collision/cancellation proofs, complete shared-schema/P23 composition and whole actor resource checks remain unrun. The closed client consumer and actual main lifecycle/caller join must be reviewed together. This source must not be applied or represented as accepted based on formatting or source bounds.

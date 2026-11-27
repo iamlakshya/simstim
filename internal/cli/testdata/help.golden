@@ -1,0 +1,106 @@
+== --help
+Run any coding agent on any host, and use it as if it ran here
+
+Usage:
+  <name>            opens the launcher
+  <name> [command]
+
+Examples:
+  <name> setup                       # connect a host, step by step
+  <name> new my-vps --agent claude   # start an agent, and attach to it
+  <name> attach my-vps/auth-fix      # go back to a session
+
+Sessions:
+  new         Start a session on a host, and attach to it
+  shell       Open a shell beside a session
+  attach      Attach to a session
+  resume      Start a session's agent again after it ended, and attach to it
+  fork        Copy a sandbox into independent sessions
+  rewind      List disk checkpoints or return to one
+  ls          List sessions on every host, or on one
+  show        Describe one session: its agent, state, folder and attach command
+  stop        Stop a sandbox and keep its work and conversation
+  rm          Delete a session, after a question
+  rename      Rename a session
+  send        Type text into a session without attaching, then press Enter
+  ports       List the TCP ports a session's processes listen on
+  forward     Forward chosen session ports, or one laptop port in reverse
+  pull        Bring a session's branch into the git repository you are in
+  cp          Copy files between this computer and a running sandbox
+  events      Read recent session events, or follow them as they happen
+
+Hosts:
+  host        Add, create, list, test and remove hosts
+
+Images:
+  image       List, pull, save and remove microvm root images
+
+Policy:
+  policy      Read and change sandbox policy at any layer
+
+Agents:
+  agents      List the agents, install one on a host, and log in to it
+
+Setup and help:
+  setup       Set up step by step: a host, its agents, and their logins
+  ssh-config  Prepare the local SSH configuration for sandbox tools
+  doctor      Check this machine and its terminal
+  debug       Record why a session goes wrong: debug files, profiles and traces
+  config      Show the configuration
+  demo        Try the launcher with sample data (nothing connects anywhere)
+  version     Print the version
+  completion  Print the completion script for bash, zsh, fish or PowerShell
+  help        Show the help of a command or a topic
+
+Flags:
+      --debug categories[=attach,net,memory,launcher,runtime]
+                turn on the debug mode, with every category, or with the
+                categories listed: attach, net, memory, launcher, runtime.
+                A list binds only in the = form, such as --debug=net
+      --debug-file file
+                write the client's debug records to this file. On its own,
+                it turns on every category (<NAME>_DEBUG_FILE does the same)
+  -h, --help
+                help for <name>
+      --no-color
+                print no colour (NO_COLOR does the same)
+      --no-input
+                ask nothing: a question that needs an answer fails with
+                exit code 4, and names the flag that answers it
+                (<NAME>_NO_INPUT=1 does the same)
+      --version
+                print the version
+
+Additional help topics:
+  concepts    The words that this tool uses
+  exit-codes  What each exit code means
+
+Use "<name> [command] --help" for more information about a command.
+== help concepts
+The words that <name> uses, and what each one means.
+
+  layer              One source of settings and rules. Narrower layers override
+                     broader ones.
+  profile            A named policy layer selected after repository sections.
+  rule               An allow or deny for one door and destination.
+  door               A controlled way through a sandbox wall, such as the
+                     network.
+  preset             A built-in network policy: locked, balanced or open.
+  sandbox            A session workspace behind a wall with explicit grants.
+  wall               The boundary around a sandbox.
+  level              The wall strength: none, process, gvisor or microvm.
+  floor              The minimum wall level saved for a host.
+  tier               The laptop's limit on what a host may receive.
+  host               The Linux machine, VM or container that runs sessions.
+  helper             The program on each host that runs its sessions.
+  session            A terminal on a host, which keeps running when you leave.
+  address            <host>/<session>, a unique session name, or - for the last
+                     attached.
+  agent              A coding agent, such as Claude Code or Codex.
+  launcher           The screen of hosts and sessions that <name> opens.
+  attach and detach  Attach shows a session in this terminal. Ctrl+\ detaches by
+                     default, and attach.detach_key can change it.
+  worktree           A session's own git worktree and branch (new --worktree).
+  secret             A value from a command on this computer, such as a token.
+  alert              A message from a host when a session needs you or fails.
+  provider script    A script of yours that starts, stops and checks a host.

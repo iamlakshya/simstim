@@ -3,11 +3,13 @@ package tui
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/iamlakshya/simstim/internal/api"
+	"github.com/iamlakshya/simstim/internal/brand"
 	"github.com/iamlakshya/simstim/internal/client"
 )
 
@@ -18,18 +20,23 @@ import (
 // RunDemo opens the launcher on sample data. With empty, it shows the
 // first-run screen instead.
 func RunDemo(ctx context.Context, empty bool) error {
-	return runWith(ctx, newDemoBackend(empty), Options{})
+	return runNamed(ctx, newDemoBackend(empty), Options{}, "the demo", brand.Name+" help demo (shows how to try the demo)")
 }
 
 type demoBackend struct {
 	mu       sync.Mutex
 	hosts    []client.Host
+	tiers    map[string]client.TierEntry
 	sessions map[string][]client.Session
 	offline  map[string]bool
 }
 
 func newDemoBackend(empty bool) *demoBackend {
-	b := &demoBackend{sessions: map[string][]client.Session{}, offline: map[string]bool{"hetzner-box": true}}
+	b := &demoBackend{
+		tiers:    map[string]client.TierEntry{},
+		sessions: map[string][]client.Session{},
+		offline:  map[string]bool{"hetzner-box": true},
+	}
 	if empty {
 		return b
 	}
@@ -44,55 +51,104 @@ func newDemoBackend(empty bool) *demoBackend {
 		{ID: "k2v7m4qa", Name: "auth-refactor", Agent: "claude", Cwd: "/home/me/src/app", State: "needs_input", Source: "screen:permission_prompt",
 			Reason: "Do you want to proceed?", CreatedAt: ago(2 * time.Minute), Since: ago(40 * time.Second), Alive: true,
 			MemoryCurrent: 612 << 20, MemoryMax: 8 << 30, Cols: 120, Rows: 34},
-		{ID: "p9x3hdte", Name: "api-tests", Agent: "codex", Cwd: "/home/me/src/api", State: "working", Source: "screen:esc_to_interrupt",
+		{ID: "p2x3hdte", Name: "api-tests", Agent: "codex", Cwd: "/home/me/src/api", State: "working", Source: "screen:esc_to_interrupt",
 			CreatedAt: ago(14 * time.Second), Since: ago(5 * time.Second), Alive: true, MemoryCurrent: 140 << 20, MemoryMax: 8 << 30, Cols: 120, Rows: 34},
-		{ID: "w5c8n2rb", Name: "docs-site", Agent: "opencode", Cwd: "/home/me/src/docs", State: "idle", Source: "quiet",
+		{ID: "w5c6n2rb", Name: "docs-site", Agent: "opencode", Cwd: "/home/me/src/docs", State: "idle", Source: "quiet",
 			CreatedAt: ago(time.Hour), Since: ago(20 * time.Minute), Alive: true, MemoryCurrent: 380 << 20, MemoryMax: 8 << 30, Cols: 120, Rows: 34},
 		{ID: "j6r4y7uf", Name: "notes", Agent: "shell", Cwd: "/home/me", State: "exited", CreatedAt: ago(3 * time.Hour), Since: ago(2 * time.Hour),
 			ExitCode: new(int), Alive: true, Cols: 120, Rows: 34},
 	}
 	b.sessions["gcp-dev"] = []client.Session{
-		{ID: "t3f8a1zk", Name: "data-pipeline", Agent: "gemini", Cwd: "/home/me/pipeline", State: "working", Source: "hook",
+		{ID: "t3f6a2zk", Name: "data-pipeline", Agent: "gemini", Cwd: "/home/me/pipeline", State: "working", Source: "hook",
 			CreatedAt: ago(26 * time.Minute), Since: ago(3 * time.Second), Alive: true, MemoryCurrent: 290 << 20, MemoryMax: 6 << 30, Cols: 120, Rows: 34},
 		// The memory cap stopped this agent. Its holder still answers.
-		{ID: "m8d2c6vx", Name: "big-import", Agent: "claude", Cwd: "/home/me/data", State: "errored", Source: "process", Reason: "oom",
+		{ID: "m7d2c6vx", Name: "big-import", Agent: "claude", Cwd: "/home/me/data", State: "errored", Source: "process", Reason: "oom",
 			OOM: true, Signal: "killed", ExitCode: new(137), CreatedAt: ago(50 * time.Minute), Since: ago(12 * time.Minute), Alive: true,
 			MemoryCurrent: 1 << 30, MemoryMax: 6 << 30, Cols: 120, Rows: 34},
+	}
+	for _, h := range b.hosts {
+		b.tiers[h.Name] = client.TierEntry{Name: h.Name, Tier: client.TierOwn}
 	}
 	return b
 }
 
-func (b *demoBackend) LoadHosts() ([]client.Host, error) {
+func (b *demoBackend) LoadHosts(context.Context) ([]client.Host, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return append([]client.Host(nil), b.hosts...), nil
 }
 
-func (b *demoBackend) SaveHosts(h []client.Host) error {
+func (b *demoBackend) LoadTiers(ctx context.Context, hosts []client.Host) (client.Tiers, error) {
+	if err := ctx.Err(); err != nil {
+		return client.Tiers{}, err
+	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	b.hosts = append([]client.Host(nil), h...)
-	return nil
+	for _, h := range hosts {
+		if _, ok := b.tiers[h.Name]; !ok {
+			b.tiers[h.Name] = client.TierEntry{Name: h.Name, Tier: client.TierOwn}
+		}
+	}
+	return client.NewTiers(b.tiers), nil
 }
 
-func (b *demoBackend) Settings() client.Settings {
+func (b *demoBackend) ResolveHostTier(ctx context.Context, h client.Host) (client.Tier, error) {
+	ts, err := b.LoadTiers(ctx, []client.Host{h})
+	return ts.Of(h.Name), err
+}
+
+// UpdateHosts changes the demo's hosts in memory. The demo keeps no
+// records of removals, so it warns of nothing.
+func (b *demoBackend) UpdateHosts(c client.HostChange) (warn, err error) {
+	return b.UpdateHostsContext(context.Background(), c)
+}
+
+func (b *demoBackend) UpdateHostsContext(ctx context.Context, c client.HostChange) (warn, err error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	out, err := client.ApplyHostChange(b.hosts, c)
+	if err != nil {
+		return nil, err
+	}
+	b.hosts = out
+	switch {
+	case c.Now == nil && c.Was != nil:
+		delete(b.tiers, c.Was.Name)
+	case c.Now != nil && c.Tier.Valid():
+		b.tiers[c.Now.Name] = client.TierEntry{Name: c.Now.Name, Tier: c.Tier, HostID: c.HostID}
+	}
+	return nil, nil
+}
+
+// ReadSettings gives no warning: the demo runs on sample data, and its own
+// command warns of a broken config.toml before it starts.
+func (b *demoBackend) ReadSettings() (client.Settings, string) {
 	s := client.LoadSettings()
 	s.Keymap = nil
-	return s
+	return s, ""
 }
 
 func (b *demoBackend) HelperVersion() string { return "0.1.0" }
 
 // The demo forgets: it starts the same way every time.
-func (b *demoBackend) Memory() memory                           { return memory{} }
-func (b *demoBackend) Remember(memory)                          {}
-func (b *demoBackend) SetupTrust(string) map[string]bool        { return nil }
-func (b *demoBackend) RememberSetup(string, string, bool) error { return nil }
-func (b *demoBackend) Secrets(context.Context, client.Host) (map[string]api.Secret, error) {
+func (b *demoBackend) Memory() memory                          { return memory{} }
+func (b *demoBackend) Remember(map[string]client.HostList)     {}
+func (b *demoBackend) RememberLast(string, string, string)     {}
+func (b *demoBackend) SetupAnswers(string) client.SetupAnswers { return client.SetupAnswers{} }
+func (b *demoBackend) RememberSetup(ctx context.Context, _, _ string, _ bool, _ string) (*client.UserError, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return nil, nil
+}
+func (b *demoBackend) Secrets(context.Context, client.Settings, client.Host, []string) (map[string]api.Secret, error) {
 	return nil, nil
 }
 
-func (b *demoBackend) SessionSecrets(context.Context, []string) (map[string]api.Secret, error) {
+func (b *demoBackend) SessionSecrets(context.Context, client.Settings, client.Host, string, []string) (map[string]api.Secret, error) {
 	return nil, nil
 }
 
@@ -100,9 +156,32 @@ func (b *demoBackend) Dial(_ context.Context, h client.Host) (Conn, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if b.offline[h.Name] {
-		return nil, &client.UserError{Msg: "cannot reach " + h.Name + ": connection timed out", Hint: "ssh " + h.SSH}
+		return nil, &client.UserError{Msg: "cannot reach " + h.Name + ": connection timed out", Hint: "ssh " + h.SSH, Code: "unreachable"}
 	}
 	return &demoConn{be: b, host: h.Name, done: make(chan struct{})}, nil
+}
+
+func (b *demoBackend) StagePin(context.Context, string) error { return nil }
+func (b *demoBackend) AbortPin(string)                        {}
+
+// ForgetHost forgets the host in the demo's list: nothing is written.
+func (b *demoBackend) ForgetHost(_ context.Context, name string) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.hosts = slices.DeleteFunc(b.hosts, func(o client.Host) bool { return o.Name == name })
+	return nil
+}
+
+func (b *demoBackend) PinHostKey(context.Context, client.Host, string) (client.Pin, error) {
+	return client.Pin{Fingerprint: "SHA256:" + strings.Repeat("d", 43), Type: "ssh-ed25519", Keys: 1, Source: client.PinFromKnownHosts}, nil
+}
+
+// SaveHostPin saves the host in the demo's list: nothing is written.
+func (b *demoBackend) SaveHostPin(h client.Host) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.hosts = append(slices.DeleteFunc(b.hosts, func(o client.Host) bool { return o.Name == h.Name }), h)
+	return nil
 }
 
 func (b *demoBackend) Probe(context.Context, client.Host) (client.Platform, error) {
@@ -151,7 +230,7 @@ func (c *demoConn) NewSession(_ context.Context, a client.NewArgs) (*client.Sess
 		parts := strings.Split(strings.TrimRight(a.Cwd, "/"), "/")
 		name = parts[len(parts)-1]
 	}
-	s := client.Session{ID: "n" + time.Now().Format("150405"), Name: name, Agent: a.Agent, Cwd: a.Cwd, State: "working",
+	s := client.Session{ID: api.NewSessionID(), Name: name, Agent: a.Agent, Cwd: a.Cwd, State: "working",
 		CreatedAt: time.Now(), Since: time.Now(), Alive: true, Cols: a.Cols, Rows: a.Rows}
 	c.be.sessions[c.host] = append(c.be.sessions[c.host], s)
 	return &s, nil
@@ -173,12 +252,15 @@ func (c *demoConn) Resume(_ context.Context, a client.ResumeArgs) (*client.Resum
 	return nil, errors.New("no such session")
 }
 
-func (c *demoConn) Delete(_ context.Context, id string) (client.DeleteResult, error) {
+func (c *demoConn) DeleteNamed(_ context.Context, id, name string) (client.DeleteResult, error) {
 	c.be.mu.Lock()
 	defer c.be.mu.Unlock()
 	list := c.be.sessions[c.host]
 	for i, s := range list {
 		if s.ID == id {
+			if s.Name != name {
+				return client.DeleteResult{}, &client.UserError{Msg: "the session " + id + " is now named " + s.Name, Hint: "List the sessions, then delete the one you mean.", Code: "session_renamed"}
+			}
 			c.be.sessions[c.host] = append(list[:i:i], list[i+1:]...)
 			return client.DeleteResult{Deleted: true}, nil
 		}
@@ -234,6 +316,10 @@ func (c *demoConn) Folders(_ context.Context, prefix string) (client.FoldersResu
 	return r, nil
 }
 
+func (c *demoConn) HostID() string { return "" }
+
+func (c *demoConn) HostIDChanged() bool { return false }
+
 func (c *demoConn) Done() <-chan struct{} { return c.done }
 
 func (c *demoConn) Close() { c.once.Do(func() { close(c.done) }) }
@@ -264,4 +350,28 @@ func (b *demoBackend) demoTraces(now time.Time) map[sessKey][]time.Time {
 		}
 	}
 	return out
+}
+
+func (b *demoBackend) Reconnect(ctx context.Context, h client.Host) (Conn, error) {
+	return b.Dial(ctx, h)
+}
+
+func (b *demoBackend) Settings() client.Settings {
+	s, _ := b.ReadSettings()
+	return s
+}
+
+func (c *demoConn) CheckNewGrants(ctx context.Context, names []string, sshAgent bool) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if sshAgent || len(names) > 0 {
+		return &client.UserError{Msg: "the demo cannot receive real grants",
+			Hint: "Open a saved host to use secrets or an SSH agent.", Code: "grant_refused", Kind: client.KindRefused}
+	}
+	return nil
+}
+
+func (c *demoConn) CheckResumeGrants(ctx context.Context, _ string, names []string) error {
+	return c.CheckNewGrants(ctx, names, false)
 }

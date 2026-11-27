@@ -1,0 +1,149 @@
+#!/bin/sh
+# Run as root. Keep this file until every recorded step has been undone.
+set -eu
+PATH=/usr/sbin:/usr/bin:/sbin:/bin
+LC_ALL=C
+export PATH LC_ALL
+umask 022
+fail() { printf 'Error: %s\nTry: ask the machine owner to check the root-step records.\n' "$*" >&2; exit 1; }
+[ "$(id -u)" = 0 ] || fail 'run this undo as root'
+u='me'
+account_uid=$(id -u "$u" 2>/dev/null || true)
+[ -z "$account_uid" ] || [ "$account_uid" = '1001' ] || fail 'the account uid changed'
+base='/var/lib/@BRAND@/root-steps'
+d="$base/$u"
+safe() {
+    [ ! -L "$1" ] || fail "symbolic link at $1"
+    [ "$(stat -c %u "$1")" = 0 ] || fail "non-root owner at $1"
+    mode=$(stat -c %a "$1")
+    [ $((0$mode & 022)) = 0 ] || fail "writable root-step path $1"
+}
+for p in /var /var/lib /var/lib/@BRAND@ "$base" "$d" "$d/journal" "$base/.lock"; do safe "$p"; done
+exec 9>"$base/.lock"
+flock -n 9 || fail 'another root step or undo is running'
+restore() {
+    target=$1
+    source=$2
+    [ ! -L "$target" ] || fail "symbolic link at $target"
+    if [ -e "$source.before" ]; then
+        safe "$source.before"
+        tmp=$(mktemp "${target}.XXXXXXXX")
+        cp -p "$source.before" "$tmp" && mv -f "$tmp" "$target"
+    elif [ -e "$source.absent" ]; then
+        rm -f "$target"
+    fi
+}
+machine_json() {
+    tmp=$(mktemp "$base/machine.XXXXXXXX") || return 1
+    printf '{"version":1,"steps":[' > "$tmp" || return 1
+    sep=''
+    for mid in io-uring-off vsock-modules; do
+        m="$base/machine/$mid"
+        [ -d "$m" ] || continue
+        printf '%s{"id":"%s","file_present":%s,"before":' "$sep" "$mid" "$(if [ -e "$m/file.before" ]; then echo true; else echo false; fi)" >> "$tmp" || return 1
+        if [ -f "$m/value" ]; then cat "$m/value" >> "$tmp" || return 1; else printf null >> "$tmp" || return 1; fi
+        printf ',"users":[' >> "$tmp" || return 1
+        usep=''
+        for ref in "$m"/users/*; do
+            [ -f "$ref" ] || continue
+            printf '%s"%s"' "$usep" "${ref##*/}" >> "$tmp" || return 1
+            usep=,
+        done
+        printf ']}' >> "$tmp" || return 1
+        sep=,
+    done
+    printf ']}\n' >> "$tmp" || return 1
+    chmod 0644 "$tmp" || return 1
+    mv -f "$tmp" "$base/machine.json" || return 1
+}
+undo_machine() {
+    mid=$1
+    m="$base/machine/$mid"
+    [ -d "$m" ] || return 0
+    safe "$m"
+    safe "$m/users"
+    rm -f "$m/users/$u" || return 1
+    remaining=$(find "$m/users" -mindepth 1 -maxdepth 1 -type f -printf x) || return 1
+    if [ -z "$remaining" ]; then
+        case "$mid" in
+            io-uring-off)
+                value=$(cat "$m/value")
+                case "$value" in 0|1|2) ;; *) fail 'invalid recorded io_uring value';; esac
+                restore '/etc/sysctl.d/50-@BRAND@.conf' "$m/file" || return 1
+                sysctl -w "kernel.io_uring_disabled=$value" || return 1
+                ;;
+            vsock-modules) restore '/etc/modprobe.d/50-@BRAND@-vsock.conf' "$m/file" || return 1 ;;
+        esac
+        rm -rf "$m" || return 1
+    fi
+    machine_json
+}
+applied() {
+    tmp=$(mktemp "$d/applied.XXXXXXXX")
+    printf '{"version":1,"user":"%s","steps":[' "$u" > "$tmp"
+    sep=''
+    for entry in "$d"/journal/*; do
+        [ -f "$entry/receipt.json" ] || continue
+        printf '%s"%s"' "$sep" "$(cat "$entry/id")" >> "$tmp"
+        sep=,
+    done
+    printf '],"records":[' >> "$tmp"
+    sep=''
+    for entry in "$d"/journal/*; do
+        [ -f "$entry/receipt.json" ] || continue
+        printf '%s' "$sep" >> "$tmp"
+        cat "$entry/receipt.json" >> "$tmp"
+        sep=,
+    done
+    printf ']}\n' >> "$tmp"
+    chmod 0644 "$tmp"
+    mv -f "$tmp" "$d/applied.json"
+}
+undo_step() {
+    [ ! -f "$j/unchanged" ] || return 0
+    case "$step" in
+        kvm-acl) setfacl -x 'u:me' /dev/kvm ;;
+        kvm-group) gpasswd -d 'me' kvm ;;
+        linger) loginctl disable-linger 'me' ;;
+        delegate-io)
+            restore '/etc/systemd/system/user@1001.service.d/50-@BRAND@-delegate.conf' "$j/file" && systemctl daemon-reload ;;
+        subuid)
+            [ -f "$j/range" ] || return 0
+            range=$(cat "$j/range")
+            printf '%s\n' "$range" | awk -F- 'NF != 2 || $1 !~ /^[0-9]+$/ || $2 !~ /^[0-9]+$/ || $2-$1 != 65535 { exit 1 }' || fail 'invalid subordinate ID record'
+            for database in subuid subgid; do
+                if [ -s "/etc/$database" ]; then
+                    last=$(tail -c 1 "/etc/$database" | od -An -tu1)
+                    [ "$last" -eq 10 ] || fail "truncated /etc/$database needs owner repair before undo"
+                fi
+            done
+            for database in subuid subgid; do
+                awk -F: '$0 != "" && $0 !~ /^#/ && (NF != 3 || $1 == "" || $2 !~ /^[0-9]+$/ || $3 !~ /^[0-9]+$/ || $3 < 1 || $2+$3-1 > 4294967294) { exit 1 }' "/etc/$database" || fail "malformed /etc/$database needs owner repair before undo"
+            done
+            # Native shadow holds its own locks and subtracts only this owner's
+            # range. It preserves all other users and IDs outside the range.
+            usermod --del-subuids "$range" --del-subgids "$range" 'me' ;;
+        io-uring-off|vsock-modules) undo_machine "$step" ;;
+        *) fail 'unknown step in the root journal' ;;
+    esac
+}
+status=0
+# Numeric journal names and the checked user have no shell separators or spaces.
+for j in $(printf '%s\n' "$d"/journal/* | sort -r); do
+    [ -d "$j" ] || continue
+    safe "$j"
+    safe "$j/id"
+    step=$(cat "$j/id")
+    printf 'Undo %s\n' "$step"
+    if undo_step; then
+        rm -rf "$j"
+        applied
+    else
+        status=1
+        printf 'Could not undo %s. Keep this script and retry.\n' "$step" >&2
+    fi
+ done
+if [ "$status" != 0 ]; then exit "$status"; fi
+rm -f "$d/applied.json" "$d/undo.sh" "$d/subid-allocate.sh"
+rmdir "$d/journal" "$d"
+printf '%s\n' __ROOT_STEP_UNDONE__

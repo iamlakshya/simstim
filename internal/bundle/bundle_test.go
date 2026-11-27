@@ -31,9 +31,6 @@ import (
 	"github.com/iamlakshya/simstim/internal/paths"
 )
 
-// The tests in this binary may start it again as a session's holder.
-func TestMain(m *testing.M) { hosttest.Main(m) }
-
 // The private values of the canary test: each must be gone from every
 // file of the bundle.
 const (
@@ -69,7 +66,7 @@ func TestTheBundleHoldsNoCanary(t *testing.T) {
 	t.Setenv("USER", fakeUser)
 	bundle.SetHostname(t, fakeLaptop+".local")
 	ch, _ := h.ClientHost(fakeHost)
-	if err := client.SaveHosts([]client.Host{ch, {Name: "jumpy", SSH: fakeUser + "@jump.example.net:2222"}}); err != nil {
+	if err := client.SaveHosts(context.Background(), []client.Host{ch, {Name: "jumpy", SSH: fakeUser + "@jump.example.net:2222"}}); err != nil {
 		t.Fatal(err)
 	}
 	if err := alerts.Save(paths.AlertsConfig(), api.AlertsConfig{Destinations: []api.AlertDestination{
@@ -97,9 +94,13 @@ func TestTheBundleHoldsNoCanary(t *testing.T) {
 	files := unpack(t, res.Path)
 	t.Logf("files %v\nleft %+v\nnotes %v\ncounts %+v", names(files), res.Left, res.Notes, res.Counts)
 	old, v := "host/sessions/"+s.ID+"/holder.log.1", "host/sessions/"+victim+"/"
+	sessionLog := "host/sessions/" + s.ID + "/holder.log"
+	if m, err := host.LoadManifest(s.ID); err == nil && m.Wall != nil {
+		sessionLog = "host/sessions/" + s.ID + "/supervisor.log"
+	}
 	window := "host/sessions/" + s.ID + "/debug/flight-20261016-000003.trace"
 	for _, want := range []string{"README.txt", "replaced.txt", "laptop/doctor.txt", "laptop/outside/1.jsonl",
-		"host/doctor.json", "host/ssh.log", "host/sessions/" + s.ID + "/debug.jsonl", "host/sessions/" + s.ID + "/holder.log", old,
+		"host/doctor.json", "host/ssh.log", "host/sessions/" + s.ID + "/debug.jsonl", sessionLog, old,
 		window, v + "debug.jsonl", v + "unit.txt", v + "kernel.txt"} {
 		if _, ok := files[want]; !ok {
 			t.Errorf("the bundle has no %s; it has %v", want, names(files))

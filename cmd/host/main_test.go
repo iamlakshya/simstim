@@ -6,8 +6,35 @@ import (
 	"testing"
 
 	"github.com/iamlakshya/simstim/internal/api"
+	"github.com/iamlakshya/simstim/internal/host"
+	"github.com/iamlakshya/simstim/internal/host/hosttest"
 	"github.com/iamlakshya/simstim/internal/proto"
 )
+
+// The tests in this binary may start it again as a session's holder.
+func TestMain(m *testing.M) { hosttest.Main(m) }
+
+// A program in session A runs the helper's own rm, and restore, on session
+// B. The helper refuses before it stops anything, and B keeps running.
+func TestRmFromInsideASessionIsRefused(t *testing.T) {
+	hosttest.New(t)
+	b, err := host.New(host.NewArgs{Name: "b", Cwd: "~", Argv: []string{"sleep", "60"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	hosttest.InSession(t, "aaaa2222")
+	var pe *proto.Error
+	if err := runRm([]string{b.ID}); !errors.As(err, &pe) || pe.Code != "forbidden" || pe.Hint == "" {
+		t.Fatalf("rm from inside a session = %v, want forbidden with a hint", err)
+	}
+	if err := runRestore([]string{"--all"}); !errors.As(err, &pe) || pe.Code != "forbidden" {
+		t.Fatalf("restore from inside a session = %v, want forbidden", err)
+	}
+	list, err := host.List()
+	if err != nil || len(list) != 1 || list[0].ID != b.ID || !list[0].Alive {
+		t.Fatalf("after rm from inside a session: %+v, %v", list, err)
+	}
+}
 
 // The helper's own `new` reads a memory cap as the client does, and refuses a
 // bad one with a hint.
@@ -23,6 +50,18 @@ func TestNewArgsMemoryMax(t *testing.T) {
 		var pe *proto.Error
 		if !errors.As(err, &pe) || pe.Code != "memory_max" || !strings.Contains(pe.Hint, api.MemorySizes) {
 			t.Errorf("new --memory-max %q = %v, want a memory_max error with a hint", size, err)
+		}
+	}
+}
+
+// The helper's own `new` takes the client's names for the setup script's
+// answer, which its hint names, and its old names still work.
+func TestNewArgsSetupScript(t *testing.T) {
+	for flag, want := range map[string]string{
+		"--setup-script": api.SetupRun, "--no-setup-script": api.SetupSkip, "--setup": api.SetupRun, "--no-setup": api.SetupSkip,
+	} {
+		if a, err := newArgs([]string{flag}); err != nil || a.Setup != want {
+			t.Errorf("new %s = %q, %v, want %q", flag, a.Setup, err, want)
 		}
 	}
 }

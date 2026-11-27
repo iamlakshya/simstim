@@ -183,7 +183,7 @@ func TestBridgeResume(t *testing.T) {
 		t.Fatalf("features %q, want resume", c.Features)
 	}
 	ctx := context.Background()
-	s, err := c.NewSession(ctx, client.NewArgs{Name: "short", Argv: []string{"/bin/sh", "-c", "sleep 0.2; exit 4"}, Cwd: "~"})
+	s, err := c.NewSession(ctx, client.NewArgs{Name: "short", Argv: []string{"/bin/sh", "-c", "sleep 0.2; exit 4"}, Cwd: "~", Wall: "none", Downgrade: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -200,8 +200,12 @@ func TestBridgeResume(t *testing.T) {
 	waitState(t, s.ID, host.StateErrored)
 	pid := hosttest.HolderPID(t, s.ID)
 	// An older helper does not offer it.
-	c.Features = []string{"attach.replay", "mkdir"}
-	_, err = c.Resume(ctx, client.ResumeArgs{ID: s.ID})
+	oldFeatures := host.Features
+	host.Features = []string{"attach.replay", "mkdir"}
+	t.Cleanup(func() { host.Features = oldFeatures })
+	oldConn := dial(t, h)
+	host.Features = oldFeatures
+	_, err = oldConn.Resume(ctx, client.ResumeArgs{ID: s.ID})
 	var ue *client.UserError
 	if !errors.As(err, &ue) || !strings.Contains(ue.Msg, "too old to resume") || !strings.Contains(ue.Hint, "host add box") {
 		t.Fatalf("resume with an old helper = %v", err)

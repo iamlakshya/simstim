@@ -33,16 +33,19 @@ func (realClock) AfterFunc(d time.Duration, f func()) func() bool {
 
 // Options configure a Dispatcher. Each zero field takes its default.
 type Options struct {
-	Path      string        // the alerts file: paths.AlertsConfig()
-	Host      string        // the host's name in events: the hostname
-	Env       []string      // the environment of command destinations: this process's
-	Dir       string        // the working folder of command destinations: the home folder
-	Logger    *slog.Logger  // where problems are logged: nowhere
-	Clock     Clock         // the real clock
-	Limiter   Limiter       // the host-wide limit: a FileLimiter at paths.AlertsRate()
-	Log       *DeliveryLog  // the delivery log at paths.AlertsLog()
-	HTTP      *http.Client  // NewHTTPClient()
-	RetryWait time.Duration // how long to wait before the one retry: 2 s
+	// PublishEvent appends a prepared, redacted event to the native audit owner.
+	// It grants no authority and must not call back into this dispatcher.
+	PublishEvent func(Event) error
+	Path         string        // the alerts file: paths.AlertsConfig()
+	Host         string        // the host's name in events: the hostname
+	Env          []string      // the environment of command destinations: this process's
+	Dir          string        // the working folder of command destinations: the home folder
+	Logger       *slog.Logger  // where problems are logged: nowhere
+	Clock        Clock         // the real clock
+	Limiter      Limiter       // the host-wide limit: a FileLimiter at paths.AlertsRate()
+	Log          *DeliveryLog  // the delivery log at paths.AlertsLog()
+	HTTP         *http.Client  // NewHTTPClient()
+	RetryWait    time.Duration // how long to wait before the one retry: 2 s
 }
 
 func (o *Options) fill() {
@@ -101,11 +104,12 @@ const (
 // file. Its methods never block the caller: events wait in small queues, and
 // an event that finds its queue full is dropped.
 type Dispatcher struct {
-	o    Options
-	in   chan Event
-	work chan job
-	quit chan struct{}
-	done chan struct{} // closed when the last delivery has ended
+	o        Options
+	in       chan Event
+	work     chan job
+	quit     chan struct{}
+	done     chan struct{} // closed when the last delivery has ended
+	loopDone chan struct{}
 
 	gen   atomic.Uint64 // counts the session's state changes
 	typed atomic.Int64  // when a person last typed, in Unix nanoseconds
@@ -117,10 +121,15 @@ type Dispatcher struct {
 	stamp  fileStamp
 	loaded bool
 
-	mu      sync.Mutex
-	closed  bool
-	sent    map[string]time.Time // when each kind last went out
-	pending func() bool          // stops the waiting needs_input
+	mu         sync.Mutex
+	closed     bool
+	events     eventBuffer
+	sent       map[string]time.Time // when each kind last went out
+	pending    func() bool          // stops the waiting needs_input
+	pendingSeq uint64
+	nextSeq    uint64
+	unfinished map[uint64]bool
+	settling   map[*settlement]bool
 }
 
 type job struct {
@@ -140,22 +149,39 @@ func (s fileStamp) same(t fileStamp) bool { return s.mod.Equal(t.mod) && s.size 
 func New(o Options) *Dispatcher {
 	o.fill()
 	d := &Dispatcher{o: o, in: make(chan Event, inQueue), work: make(chan job, workQueue),
-		quit: make(chan struct{}), done: make(chan struct{}), sent: map[string]time.Time{}}
+		quit: make(chan struct{}), done: make(chan struct{}), loopDone: make(chan struct{}), sent: map[string]time.Time{}}
 	go d.loop()
 	go d.worker()
 	return d
 }
 
-// Notify queues an event. It never blocks.
+// Notify queues destination delivery without waiting for a destination. The
+// native audit append, when configured, precedes stream publication.
 func (d *Dispatcher) Notify(ev Event) {
 	if d.muted.Load() {
 		return
 	}
 	ev.at = d.o.Clock.Now()
 	ev.gen = d.gen.Load()
+	if err := d.publishEvent(ev); err != nil {
+		d.o.Logger.Warn("event persistence failed", "error", err)
+	}
+	d.mu.Lock()
+	if d.closed {
+		d.mu.Unlock()
+		return
+	}
+	ev.seq = d.nextSeq + 1
 	select {
 	case d.in <- ev:
+		d.nextSeq = ev.seq
+		if d.unfinished == nil {
+			d.unfinished = make(map[uint64]bool)
+		}
+		d.unfinished[ev.seq] = true
+		d.mu.Unlock()
 	default:
+		d.mu.Unlock()
 		d.o.Logger.Warn("alert dropped: too many are waiting", "event", ev.Event)
 	}
 }
@@ -184,8 +210,11 @@ func (d *Dispatcher) Close(wait time.Duration) {
 	close(d.quit)
 	d.mu.Lock()
 	d.closed = true
+	d.closeEventsLocked()
 	if d.pending != nil {
-		d.pending()
+		if d.pending() {
+			d.completeLocked(d.pendingSeq)
+		}
 	}
 	close(d.work)
 	d.mu.Unlock()
@@ -196,6 +225,7 @@ func (d *Dispatcher) Close(wait time.Duration) {
 }
 
 func (d *Dispatcher) loop() {
+	defer close(d.loopDone)
 	for {
 		select {
 		case ev := <-d.in:
@@ -211,6 +241,7 @@ func (d *Dispatcher) loop() {
 func (d *Dispatcher) handle(ev Event) {
 	set, sinks := d.settings()
 	if set == nil || !set.wants(ev.Event) || (ev.Event == TurnDone && ev.Turn < set.MinTurn) {
+		d.complete(ev.seq)
 		return
 	}
 	if ev.Event != NeedsInput || set.Delay <= 0 {
@@ -220,25 +251,32 @@ func (d *Dispatcher) handle(ev Event) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if d.closed {
+		d.completeLocked(ev.seq)
 		return
 	}
 	if d.pending != nil {
-		d.pending() // a newer needs_input replaces the waiting one
+		if d.pending() {
+			d.completeLocked(d.pendingSeq)
+		} // a newer event replaces the waiting one
 	}
+	d.pendingSeq = ev.seq
 	d.pending = d.o.Clock.AfterFunc(set.Delay, func() { d.fire(ev, set, sinks) })
 }
 
 // fire applies the noise rules, then queues the event for delivery.
 func (d *Dispatcher) fire(ev Event, set *Settings, sinks []sink) {
 	if d.muted.Load() {
+		d.complete(ev.seq)
 		return
 	}
 	if why := d.stale(ev, set); why != "" {
 		d.skip(ev, why)
+		d.complete(ev.seq)
 		return
 	}
 	if why := d.queue(ev, set, sinks); why != "" {
 		d.skip(ev, why)
+		d.complete(ev.seq)
 	}
 }
 
@@ -253,14 +291,16 @@ func (d *Dispatcher) fire(ev Event, set *Settings, sinks []sink) {
 // minute never holds an end back, and an end does not start it. Each run
 // ends once, and restore and resume start a new run in a new holder, so
 // each end is new. The host's limit still counts an end.
+// A fresh link_silent transition also bypasses the session minute (spec 10.8).
 func (d *Dispatcher) queue(ev Event, set *Settings, sinks []sink) string {
 	now := d.o.Clock.Now()
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if d.closed {
+		d.completeLocked(ev.seq)
 		return ""
 	}
-	end := ev.ends()
+	end := ev.ends() || ev.Event == LinkSilent
 	if last, ok := d.sent[ev.Event]; ok && !end && now.Sub(last) < sessionGap {
 		return "this session sent one " + ev.Event + " in the last minute"
 	}
@@ -296,6 +336,7 @@ func (d *Dispatcher) worker() {
 	defer close(d.done)
 	for j := range d.work {
 		deliverAll(&d.o, j.ev, j.set, j.sinks, false)
+		d.complete(j.ev.seq)
 	}
 }
 
@@ -344,6 +385,7 @@ func prepare(ev Event, host string, set *Settings) Event {
 	}
 	if !set.Detail {
 		ev.Detail = ""
+		ev.DetailFrom = ""
 	}
 	ev.Summary = summary(ev)
 	return ev

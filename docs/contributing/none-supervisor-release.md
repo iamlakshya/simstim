@@ -1,0 +1,27 @@
+# Releasing the unwalled supervisor path
+
+P6.3 depends on one release with walls enabled by default. The owner must merge and publish this change only after that release. This is a release order requirement. The private feature branch implements the real production path; a disabled runtime flag does not stand in for the prerequisite.
+
+New `none` sessions use their original reserved operation and native supervisor startup. The guest init shares the host account and every namespace. It uses the ordinary holder protocol and link. It creates no wall and starts no egress process. The old ordinary holder entrypoint remains for holders that were already running.
+
+Before publication, run the host runtime tests and attach fixtures on the new path. Compare every namespace of the guest init with the supervisor through `/proc/<pid>/ns/`. Confirm that no egress process starts. Run the key-to-PTY benchmark against the legacy path with 1,000 keys in each sample, and report its distribution against section 12 of the isolation spec.
+
+The original native lifecycle sources remain required. A clean None stop records its exact boot, run, original directory and holder identity only after the actual init, terminals, streams and controller workers join. The record is canonical data. A same-boot managerless restart also needs the actual outside operation, the same rooted holder lease and current checks which refuse surviving target actors. A changed-boot restart uses its separate real kernel epoch. No None record becomes a walled stop, a VM source or an artefact grant.
+
+Cancellation before any attempted native dispatch may restore only the same source's exact prior canonical bytes after checking the staged record. Any failed or uncertain dispatch keeps the old cleanup record invalid. Unknown old holders, missing native custody and uncertain cleanup remain preserved and refused. A stopped row or a saved PID never authorises a replacement process.
+
+Check the full stop-to-resume path with another healthy session and an unrelated process whose executable cannot be read. The process scan must refuse only actors associated with the target's actual run or rooted members. A clean `max_run` end uses the same complete cleanup requirements as a manual stop. The host's original floor and explicit downgrade remain recorded; harmless selectors do not become applied sandbox policy.
+
+The production host scope is Linux. A Mac client reaches a Linux host or a Lima Linux VM. Darwin host-test fixtures may explicitly retain the historical ordinary-holder test path through the existing test-driver seam. Those tests protect client compatibility; they provide no evidence for the new Linux runtime, namespaces, completion source or performance target.
+
+An actual None directory creator records opaque filesystem generation data while its mkdir and opened directory remain held. A later storage-only removal also needs its actual Delete operation and exact stopped epoch. A persistent runtime left after a reboot is removed only when its current rooted parent and directory match that original generation. Ext4, XFS and Btrfs use the shared native data observer. Missing, legacy, unsupported or replaced origins preserve the path with a Try hint. Force cannot supply an origin, and the record grants no runtime or restart permission.
+
+A partial storage removal keeps its original Delete operation and opened roots in the same helper. A failed metadata capture cannot remove anything. Once runtime cleanup has changed its original directory, a later metadata error retains that same transaction for a retry. A missing name does not replace an opened root or supply a new source. Test capture and close failures as well as child unlink, root unlink and parent sync failures before publication.
+
+The helper closes admission of new None cleanup owners before its normal or idle exit. It joins its actual original stop and deletion objects before exiting. A partial stop is returned to its caller, and its original operation cannot close while that stop still owns native resources. Request completion and connection loss do not settle native cleanup. A failed or unconfirmed close keeps the same owner alive; a saved record cannot replace it. Prove these exit races and physical joins on the Linux host before publication.
+
+Metadata root retirement uses the shared first-close owner. Go's Root close result alone cannot prove native closure. Each original first lease, member and parent must retire through that owner after all rooted operations return. Unknown retirement keeps the same roots and operation. Known retirement permits progress while its diagnostic stays in the original Delete result. Other platforms preserve these resources when the native proof is unavailable.
+
+The runtime-directory transaction also owns its base, parent and selected root from the first successful open. A constructor error returns any unsettled original transaction before the error. Delete and cold continuation adopt that same object before handling the failure. An incomplete capture cannot remove storage. Its root retirement uses the same first-close facts and preserves diagnostics separately from native uncertainty.
+
+A refused native inspection can return its original partial cleanup owner. The N5 stop keeps that exact object, copies its report before retiring it and includes the diagnostic in the original operation result. This report does not turn a rejected Cold owner into a None stop or a restart source.

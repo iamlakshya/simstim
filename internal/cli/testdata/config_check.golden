@@ -1,0 +1,19 @@
+~/.config/simstim/config.toml:3: unknown key "motoin" in [ui]. Did you mean "motion"?
+~/.config/simstim/config.toml:6: "detach_key" in [attach]: unknown modifier "ctr" in "ctr+x".
+~/.config/simstim/config.toml:7: "scrollback" in [attach] must be "keep" or "clear", not "kept".
+~/.config/simstim/config.toml:10: "memory_max" in [sessions]: "100M" is below the smallest cap, 256M. Use auto, or a size such as 4G.
+~/.config/simstim/config.toml:13: "inline" in [agents] must be true or false, not "yes".
+~/.config/simstim/config.toml:16: "sesion: delete" in [keymap] is not a launcher command. Did you mean "session: delete"?
+~/.config/simstim/config.toml:17: "session: rename" in [keymap]: "opt+e" is not a key: "opt" is not a modifier, which is ctrl, alt, shift, meta, hyper or super.
+~/.config/simstim/config.toml:17: "session: rename" in [keymap] must list keys as strings, not 5.
+~/.config/simstim/config.toml:18: "host: add" in [keymap]: the launcher never matches "shift+ctrl+a", because it names the modifiers in the order ctrl, alt, shift, meta, hyper, super: write "ctrl+shift+a".
+~/.config/simstim/config.toml:21: "EMPTY" in [secrets] has an empty command.
+~/.config/simstim/hosts.toml:6: two hosts are named "box".
+~/.config/simstim/hosts.toml:8: unknown key "sshh" in [[host]]. Did you mean "ssh"?
+~/.config/simstim/hosts.toml:10: "machine" in [[host]] needs a non-empty id.
+~/.config/simstim/hosts.toml:11: "provider" in [host.machine] must be "lima", "docker" or "e2b", not "lim".
+~/.config/simstim/hosts.toml:12: "idle_stop" in [host.machine] must be a time of a minute or more, such as 30m or 2h, or never, not "5x".
+~/.config/simstim/hosts.toml:13: "stdin" in [host.machine] must be "send" or "stream", not "pipe".
+~/.config/simstim/hosts.toml:15: the host "bad name" has no ssh target.
+~/.config/simstim/hosts.toml:16: "bad name" cannot name a host: use up to 63 letters, digits, dots, dashes and underscores, from a letter or a digit.
+18 errors in 2 files.

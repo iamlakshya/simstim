@@ -5,11 +5,14 @@ package bundle
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
+	"github.com/iamlakshya/simstim/internal/brand"
 	"github.com/iamlakshya/simstim/internal/client"
 )
 
@@ -34,6 +37,7 @@ printf 'debug1: Reading configuration data HOMEDIR/.ssh/config\n' >> "$log"
 printf 'debug1: kex: algorithm: sntrup761x25519-sha512@openssh.com\n' >> "$log"
 printf 'debug1: Executing proxy command: exec cloudflared access ssh --service-token-secret s3cr3t-zz\n' >> "$log"
 printf 'debug1: Connecting to 198.51.100.77 [198.51.100.77] port 22.\n' >> "$log"
+printf 'debug1: Found key in PIN:2\n' >> "$log"
 printf 'debug1: Will attempt key: zorbo@laptop-x ED25519 %s agent\n' "$fp" >> "$log"
 printf 'debug1: Offering public key: HOMEDIR/.ssh/id_zorbo ED25519 %s explicit\n' "$fp" >> "$log"
 printf 'debug1: Sending env LC_TOKEN = tok-zz-123\n' >> "$log"
@@ -54,13 +58,22 @@ func TestTheSSHLogLosesWhatSSHKnows(t *testing.T) {
 		t.Fatal(err)
 	}
 	wrapper := filepath.Join(client.ConfigDir(), "ssh", "config-sshbox")
-	script := strings.ReplaceAll(strings.ReplaceAll(fakeSSH, "WRAPPER", wrapper), "HOMEDIR", home)
+	pin := filepath.Join(client.ConfigDir(), "ssh", "known_hosts-"+client.HostFileKey("sshbox"))
+	script := strings.NewReplacer("WRAPPER", wrapper, "PIN", pin, "HOMEDIR", home).Replace(fakeSSH)
 	if err := os.WriteFile(filepath.Join(bin, "ssh"), []byte(script), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", bin+":"+os.Getenv("PATH"))
 	h := client.Host{Name: "sshbox", SSH: "sshbox"}
-	if err := client.SaveHosts([]client.Host{h}); err != nil {
+	if err := client.SaveHosts(context.Background(), []client.Host{h}); err != nil {
+		t.Fatal(err)
+	}
+	// A saved host has a pinned host key: no ssh connects to it without one.
+	key := append([]byte("\x00\x00\x00\x0bssh-ed25519\x00\x00\x00\x20"), bytes.Repeat([]byte{7}, 32)...)
+	if err := os.MkdirAll(filepath.Dir(pin), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(pin, []byte("# "+brand.Name+" pin of the host sshbox\nx-sshbox ssh-ed25519 "+base64.StdEncoding.EncodeToString(key)+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	b := &builder{o: Options{Host: &h, SSH: true}, vals: laptopValues(), res: &Result{}}
@@ -70,14 +83,15 @@ func TestTheSSHLogLosesWhatSSHKnows(t *testing.T) {
 		t.Fatalf("no ssh -v log: %v", b.res.Notes)
 	}
 	out := NewScrubber(b.vals).Scrub(b.sshLog)
+	hash := strings.TrimPrefix(client.HostFileKey("sshbox"), "sshbox-")
 	for _, bad := range []string{"zorbo", "198.51.100.77", "hop.example.net", "jumper", "SHA256:", "laptop-x", "sshbox",
-		"s3cr3t-zz", "tok-zz-123", "ghp_zz_456", "acme-infra", home} {
+		hash, "s3cr3t-zz", "tok-zz-123", "ghp_zz_456", "acme-infra", home} {
 		if bytes.Contains(out, []byte(bad)) {
 			t.Errorf("the log still holds %q:\n%s", bad, out)
 		}
 	}
 	for _, want := range []string{"Will attempt key: <key-", "<fingerprint>", "Reading configuration data <ssh-config>",
-		"<ssh-config> line 3:", "Reading configuration data ~/.ssh/config", "/ssh/config-<host-", "@openssh.com"} {
+		"<ssh-config> line 3:", "Reading configuration data ~/.ssh/config", "/ssh/config-<host-", "/ssh/known_hosts-<host-", "@openssh.com"} {
 		if !strings.Contains(string(out), want) {
 			t.Errorf("the log lacks %q:\n%s", want, out)
 		}
@@ -94,5 +108,30 @@ func TestTheSSHLogLosesWhatSSHKnows(t *testing.T) {
 	b.sshFacts(context.Background())
 	if b.sshLog != nil || len(b.res.Notes) != 1 || !strings.Contains(b.res.Notes[0], "reached through its provider") {
 		t.Errorf("a provider's host: log %q, notes %v", b.sshLog, b.res.Notes)
+	}
+}
+
+// When ssh -G prints a line too long to read, the bundle keeps the values
+// before it, and says that some may not be replaced.
+func TestSSHValuesCutShort(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	bin := filepath.Join(home, "bin")
+	if err := os.MkdirAll(bin, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	script := "#!/bin/sh\nprintf 'hostname 198.51.100.77\\nxauthlocation /'\nhead -c 2100000 /dev/zero | tr '\\0' x\nprintf '\\nuser zorbo\\n'\n"
+	if err := os.WriteFile(filepath.Join(bin, "ssh"), []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+":"+os.Getenv("PATH"))
+	b := &builder{vals: Values{}, res: &Result{}}
+	b.sshValues(context.Background(), client.Host{Name: "sshbox", SSH: "sshbox"})
+	if !slices.Contains(b.vals.Hosts, "198.51.100.77") {
+		t.Errorf("the value before the long line is lost: %v", b.vals.Hosts)
+	}
+	if len(b.res.Notes) != 1 || !strings.Contains(b.res.Notes[0], "may not be replaced") {
+		t.Errorf("notes %q, want one that says some values may not be replaced", b.res.Notes)
 	}
 }

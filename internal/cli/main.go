@@ -5,11 +5,9 @@ package cli
 
 import (
 	"context"
-	"errors"
 	"fmt"
+	"io"
 	"os"
-	"os/signal"
-	"syscall"
 
 	"github.com/spf13/cobra"
 
@@ -18,97 +16,167 @@ import (
 	"github.com/iamlakshya/simstim/internal/version"
 )
 
-// Exit codes.
-const (
-	exitUser    = 1
-	exitHost    = 2
-	exitMissing = 3
-)
-
 // Main runs the client with the process's arguments and returns its exit
-// code.
+// code, which comes from the kind of the error (docs/reference/exit-codes.md).
 func Main() int {
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM)
+	if code, handled := client.GitSSHMode(os.Args[1:]); handled {
+		return code
+	}
+	if localGitSourceInit != nil {
+		return finish(os.Stderr, localGitSourceInit, nil, false, false, jsonAsked(nil, os.Args[1:]))
+	}
+	ctx, stop := listen()
 	defer stop()
-	err := Root().ExecuteContext(ctx)
+	if os.Getenv(brand.Env("NO_INSTALL")) == "1" {
+		ctx = client.WithoutInstall(ctx)
+	}
+	args := os.Args[1:]
+	completion := completionArgs(args)
+	if completion {
+		if len(args) == 1 {
+			_, _ = fmt.Fprintln(os.Stdout, ":4")
+			return 0
+		}
+		restore, ok := quietCompletionErrors()
+		if !ok {
+			_, _ = fmt.Fprintln(os.Stdout, ":4")
+			return 0
+		}
+		defer restore()
+	}
+	// A wait of the client, such as for the lock of hosts.toml, or a
+	// changed host ID, says so on stderr: with --json, as a warning line.
+	wantJSON := jsonAsked(nil, args)
+	run := client.WithNotes(withLine(ctx, args), stderrFor(wantJSON, "waiting"))
+	run = client.WithWarnings(run, warningFor(wantJSON))
+	cmd, err := Root().ExecuteContextC(run)
+	// ctx ends only at a signal.
+	signalled := ctx.Err() != nil
+	if completion || isCompletionRequest(cmd) {
+		if signalled {
+			return exitCode(client.KindCancelled)
+		}
+		if err != nil {
+			return exitCode(client.KindFailed)
+		}
+		return 0
+	}
+	asJSON := jsonAsked(cmd, args)
+	// A run that ended before its command ran, as -v does, still warns
+	// about the old forms that it used.
+	warnOldFlags(cmd)
 	if err != nil {
 		client.DebugLog().Warn("the command failed", "err", err)
 	}
 	// The debug files are complete before the process ends.
-	client.StopDebug(os.Stderr)
-	if err != nil {
-		return printError(err)
-	}
-	return 0
+	stopDebug(stderrFor(asJSON, "debug_incomplete"))
+	return finish(os.Stderr, err, cmd, colourAsked(cmd, args, os.Stderr), signalled, asJSON)
 }
+
+// stopDebug ends the client's debug run, and writes any warning on its
+// writer. Tests replace it, to make it warn.
+var stopDebug = client.StopDebug
 
 // Root builds the command tree.
 func Root() *cobra.Command {
 	root := &cobra.Command{
-		Use:           brand.Name,
-		Short:         "Run any coding agent on any host, and use it as if it ran here",
-		Long:          brand.DisplayName + " runs coding agents in sessions on hosts you reach with SSH.\nSessions keep running when you leave. Run it with no arguments for the launcher.",
+		Use:   brand.Name,
+		Short: "Run any coding agent on any host, and use it as if it ran here",
+		// The reference index and the man page print Long. The root help
+		// says the same in its usage line, and leaves Long out.
+		Long:          rootLong,
+		Example:       rootExample(),
 		Version:       fmt.Sprintf("%s (protocol %s)", version.Version, version.Protocol),
 		SilenceUsage:  true,
 		SilenceErrors: true,
-		Args:          cobra.NoArgs,
+		Args:          unknownCommand,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return runHome(cmd.Context())
+			return runHome(cmd)
 		},
 	}
-	root.AddCommand(setupCmd(), hostCmd(), newCmd(), lsCmd(), agentsCmd(), attachCmd(), resumeCmd(), flipCmd(), sendCmd(), killCmd(), renameCmd(), portsCmd(), forwardCmd(), pullCmd(), doctorCmd(), debugCmd(), configCmd(), demoCmd(), versionCmd())
+	root.AddCommand(sshConfigCmd(), sshProxyCmd(), setupCmd(), hostCmd(), imageCmd(), newCmd(), shellCmd(), lsCmd(), showCmd(), agentsCmd(), attachCmd(), resumeCmd(), forkCmd(), rewindCmd(), flipCmd(), sendCmd(), rmCmd(), killCmd(), renameCmd(), portsCmd(), forwardCmd(), pullCmd(), cpCmd(), eventsCmd(), policyCmd(), stopCmd(), doctorCmd(), debugCmd(), configCmd(), demoCmd(), versionCmd())
+	root.AddCommand(topics()...)
+	addRootFlags(root)
 	addDebugFlags(root)
+	root.PersistentPreRunE = beforeRun
+	// --version has no short form: Cobra adds -v only when the root has no
+	// flag called version (docs/contributing/cli-spec.md 10.1).
+	var showVersion bool
+	root.Flags().BoolVar(&showVersion, "version", false, "print the version")
+	if liveOld("-v") {
+		root.Flags().BoolVarP(&showVersion, "v", "v", false, "")
+		hideOld(root.Flags(), "v", "-v")
+	}
+	// Cobra adds these two itself when it runs, after guard would have
+	// looked: add them now, so that they get the same errors and help.
+	root.InitDefaultHelpCmd()
+	root.InitDefaultCompletionCmd()
+	wireCompletion(root)
+	teach(root)
+	for _, c := range root.Commands() {
+		if c.Name() == "help" {
+			c.Args = helpArgs
+			c.ValidArgsFunction = completeHelpArgs
+		}
+	}
+	guard(root)
 	return root
 }
 
+// beforeRun runs before every command: it applies --no-color and input
+// off, warns about the old forms that the command line used and of a
+// config.toml that cannot be used, then turns on the debug mode that it
+// asks for.
+func beforeRun(cmd *cobra.Command, args []string) error {
+	if isCompletionRequest(cmd) {
+		cmd.Root().SetErr(io.Discard)
+		return nil
+	}
+	applyNoColor(cmd)
+	if !inputOn(cmd) {
+		// Nothing asks: SSH runs with BatchMode=yes, and keeps its words
+		// out of the terminal (cli-spec 6.1).
+		cmd.SetContext(client.WithoutInput(cmd.Context()))
+	}
+	warnOldFlags(cmd)
+	if !isLauncher(cmd, args) {
+		cmd.SetContext(client.WithNotices(cmd.Context(), stderrFor(jsonOn(cmd), "host_key_pinned")))
+		if inputOn(cmd) {
+			cmd.SetContext(client.WithTierQuestion(cmd.Context(), func(ctx context.Context, h client.Host) (client.Tier, error) {
+				p := prompts(cmd)
+				p.ctx = ctx
+				return p.askTier(h.Name)
+			}))
+		}
+	} else {
+		// The launcher and switcher show identity notices in their own chrome.
+		cmd.SetContext(client.WithWarnings(cmd.Context(), nil))
+	}
+	if policyWritesSettings(cmd) {
+		if _, err := client.ReadPolicySettings(); err != nil {
+			return err
+		}
+	}
+	warnSettings(cmd, args)
+	configureAttachArmQuestionsV1(cmd)
+	return startDebug(cmd, args)
+}
+
 func versionCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "version",
-		Short: "Print the version",
-		Args:  cobra.NoArgs,
-		Run: func(*cobra.Command, []string) {
+	var asJSON bool
+	cmd := &cobra.Command{
+		Use:     "version",
+		Short:   "Print the version",
+		Example: "  " + brand.Name + " version\n  " + brand.Name + " version --json",
+		Args:    cobra.NoArgs,
+		RunE: func(*cobra.Command, []string) error {
+			if asJSON {
+				return printJSON(map[string]string{"version": version.Version, "protocol": version.Protocol, "helper": client.HelperVersion()})
+			}
 			fmt.Printf("%s %s (protocol %s, host helper %s)\n", brand.Name, version.Version, version.Protocol, client.HelperVersion())
+			return nil
 		},
 	}
-}
-
-// printError prints an error with its suggested next step, and returns the exit code.
-func printError(err error) int {
-	var ue *client.UserError
-	red, blue, bold, reset := "\x1b[31m", "\x1b[34m", "\x1b[1m", "\x1b[0m"
-	if os.Getenv("NO_COLOR") != "" || !isTerminal(os.Stderr) {
-		red, blue, bold, reset = "", "", "", ""
-	}
-	if errors.As(err, &ue) {
-		fmt.Fprintf(os.Stderr, "%s%sError:%s %s\n", bold, red, reset, ue.Msg)
-		if ue.Hint != "" {
-			fmt.Fprintf(os.Stderr, "\n%sTry:%s %s\n", blue, reset, ue.Hint)
-		}
-		if ue.Hint != "" && containsAny(ue.Msg, "cannot reach", "connection") {
-			return exitHost
-		}
-		if containsAny(ue.Msg, "no session", "no host") {
-			return exitMissing
-		}
-		return exitUser
-	}
-	if errors.Is(err, client.ErrClosed) {
-		fmt.Fprintf(os.Stderr, "%s%sError:%s the connection to the host closed\n\n%sTry:%s run the command again\n", bold, red, reset, blue, reset)
-		return exitHost
-	}
-	fmt.Fprintf(os.Stderr, "%s%sError:%s %v\n", bold, red, reset, err)
-	return exitUser
-}
-
-func containsAny(s string, subs ...string) bool {
-	for _, x := range subs {
-		if len(x) > 0 && len(s) >= len(x) {
-			for i := 0; i+len(x) <= len(s); i++ {
-				if s[i:i+len(x)] == x {
-					return true
-				}
-			}
-		}
-	}
-	return false
+	addJSON(cmd, &asJSON)
+	return cmd
 }

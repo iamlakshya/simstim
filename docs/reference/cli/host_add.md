@@ -7,20 +7,38 @@ title: "simstim host add"
 Connect a host: check it, install the helper, prepare it.
 
 ```text
-simstim host add <name> [ssh-target] [flags]
+simstim host add <name> [<ssh-target>] [flags]
 ```
 
-Connect a host. The ssh target is a Host from your SSH config, or user@host. It defaults to the name. `--ssh-config` adds an extra SSH config file, for example a repo's own.
+Connect a host, prepare its sandbox runtime and test its wall before saving its wall floor. The ssh target is a Host from your SSH config, or user@host; it defaults to the name. `--no-sandbox` skips sandbox preparation. `--ssh-config` adds an extra SSH config file, for example a repo's own.
+
+## Examples
+
+```sh
+simstim host add my-vps
+simstim host add my-vps dev@203.0.113.10
+simstim host add my-vps --tier own --yes
+simstim host add my-vps --no-sandbox
+```
 
 ## Flags
 
 | Flag | What it does |
 | --- | --- |
-| `--label <string>` | labels, for example provider=gcp,region=eu |
+| `--accept <string>` | read the reply from standard input, with `--accept` - |
+| `--address <string>` | select an address from the reply |
+| `--delegate-io` | offer disk I/O controller delegation for this user |
+| `--host-key <fingerprint>` | the SHA256 fingerprint of the host's key, as ssh-keygen -lf prints it on the host: the key to pin |
+| `--images <string>` | get runtime and image bytes from auto, host or laptop (default: [images] fetch) |
+| `--label <list>` | labels as key=value, for example provider=gcp,region=eu |
+| `--no-sandbox` | skip sandbox preparation and keep the host without a wall floor |
 | `--provider-script <string>` | a script that starts and stops the host (see examples/providers) |
+| `--root-step <string>` | handle optional root changes: run, print or skip (default depends on tier and sandbox history) |
+| `--separate-accounts` | offer the signed launcher and separate sandbox accounts |
 | `--ssh-config <string>` | an extra SSH config file to include |
+| `--tier <string>` | who else has root on the host: own, throwaway or shared |
 | `--wake` | start the host through its provider script when it does not answer |
-| `-y`, `--yes` | install the helper without asking |
+| `-y`, `--yes` | answer yes to every question: install the helper, pin its first host key, and offer no agents to install (needs `--tier`) |
 
 ## Flags from the parent command
 
@@ -28,5 +46,7 @@ Connect a host. The ssh target is a Host from your SSH config, or user@host. It 
 | --- | --- |
 | `--debug[=<categories>]` | turn on the debug mode, with every category, or with the categories listed: attach, net, memory, launcher, runtime. A list binds only in the = form, such as `--debug=net` |
 | `--debug-file <file>` | write the client's debug records to this file. On its own, it turns on every category (SIMSTIM_DEBUG_FILE does the same) |
+| `--no-color` | print no colour (NO_COLOR does the same) |
+| `--no-input` | ask nothing: a question that needs an answer fails with exit code 4, and names the flag that answers it (SIMSTIM_NO_INPUT=1 does the same) |
 
 Part of [`host`](host.md): add, create, list, test and remove hosts.

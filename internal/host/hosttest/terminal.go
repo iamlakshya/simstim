@@ -2,6 +2,7 @@ package hosttest
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"os"
 	"strings"
@@ -12,6 +13,8 @@ import (
 
 	"github.com/charmbracelet/x/vt"
 	"github.com/creack/pty"
+
+	"github.com/iamlakshya/simstim/internal/keyread"
 )
 
 // Terminal is a pseudo-terminal that stands in for the user's terminal: the
@@ -52,6 +55,21 @@ func NewTerminal(t testing.TB, cols, rows int) *Terminal {
 		}
 	}()
 	t.Cleanup(func() {
+		// A question or the picker may have left a read of the terminal
+		// waiting: stop it before the terminal closes under it. When the
+		// read cannot be stopped, the terminal stays open, and its other
+		// side and that side's reader with it: the test leaks them rather
+		// than close the terminal under the read. A reader that cannot
+		// cancel is the terminal's way. A cancelled read that goes on is
+		// a bug.
+		switch err := keyread.Release(tty); {
+		case errors.Is(err, keyread.ErrCannotCancel):
+			t.Logf("the terminal stays open: %v", err)
+			return
+		case err != nil:
+			t.Errorf("the terminal stays open: %v", err)
+			return
+		}
 		_ = tty.Close()
 		_ = p.Close()
 		select {
@@ -105,8 +123,13 @@ func tail(b []byte, n int) []byte {
 // text of each row, and whether it is on the alternate screen.
 func Screen(out []byte, cols, rows int) (lines []string, alt bool) {
 	e := vt.NewEmulator(cols, rows)
-	// The emulator writes replies to queries into a pipe: drain and drop them.
-	go func() { _, _ = io.Copy(io.Discard, e) }()
+	// The emulator writes replies to queries into a pipe that nothing reads.
+	// Closing its write end up front avoids both blocking on writes and racing
+	// vt.Emulator.Read against Close on e.closed.
+	if pw, ok := e.InputPipe().(io.Closer); ok {
+		_ = pw.Close()
+	}
+	defer func() { _ = e.Close() }()
 	_, _ = e.Write(out)
 	var b strings.Builder
 	for y := range rows {

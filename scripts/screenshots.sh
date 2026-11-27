@@ -11,6 +11,10 @@
 # terminal window, cell by cell. SVG keeps the text sharp at any size.
 set -euo pipefail
 cd "$(dirname "$0")/.."
+go_build_toolchain=$(sh scripts/go-build-tags.sh toolchain)
+export GOTOOLCHAIN="$go_build_toolchain"
+go_build_tags=$(sh scripts/go-build-tags.sh)
+export GO_BUILD_TAGS="$go_build_tags"
 
 cli=$(cd "$(dirname "${1:?usage: scripts/screenshots.sh path/to/client}")" && pwd)/$(basename "$1")
 name=$(sed -n 's/^const Name = "\(.*\)"/\1/p' internal/brand/brand.go)
@@ -18,7 +22,7 @@ out=docs/images
 
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
-go build -o "$tmp/ttyshot" ./test/ttyshot
+go build -tags="$go_build_tags" -o "$tmp/ttyshot" ./test/ttyshot
 # A fresh config with motion off: the spinner stands still, and the user's own
 # settings never show in an image.
 mkdir -p "$tmp/config/$name" "$out"

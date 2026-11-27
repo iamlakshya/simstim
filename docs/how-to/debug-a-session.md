@@ -32,11 +32,11 @@ The launcher prints no such line. Its header shows `debug` instead, and a notice
 
 | Category | What it records | Where |
 | --- | --- | --- |
-| `attach` | Each key, its echo, the holder's lock and its screen model | Laptop and host |
+| `attach` | Each key, its echo, and the lock and screen model of the session's process on the host | Laptop and host |
 | `net` | Timed pings, each drop and reconnect, the shared SSH connection, ssh's own errors, and each request that the bridge serves | Laptop and host |
 | `memory` | A sample of the session's memory each second. At an out-of-memory kill, the 20 largest processes by RSS, both at the memory warning before it and after it | Host |
 | `launcher` | Each frame of the launcher: the time in `Update` and in `View` | Laptop |
-| `runtime` | Go's runtime metrics each second, the flight recorder, and CPU and heap profiles | Laptop and host |
+| `runtime` | Go's runtime metrics each second, the recent debug record (the last seconds of Go's execution trace), and CPU and heap profiles | Laptop and host |
 
 `runtime` costs the most. Leave it out when you do not need it: `--debug=attach,net,memory`.
 
@@ -48,21 +48,21 @@ The launcher prints no such line. Its header shows `debug` instead, and a notice
 simstim debug start my-vps/auth-fix
 ```
 
-1. The holder records the host's categories: `attach`, `memory` and `runtime`. To record fewer, add `--only memory`, for example.
-2. The holder records the keys of every attached client.
+1. The session's process on the host records the host's categories: `attach`, `memory` and `runtime`. To record fewer, add `--only memory`, for example.
+2. It records the keys of every attached client.
 3. Debug stops by itself after 30 minutes. To keep it on longer, add `--for 8h`. The limit is 24 hours.
 4. To stop it at once, run `simstim debug stop my-vps/auth-fix`.
 
-A second `debug start` sets a new end. `simstim ls --json` shows the end as `debug_until`. After a reboot or a `resume`, the session's new holder starts with debug off. `resume` says so when debug was on: run `debug start` again to keep recording.
+A second `debug start` sets a new end. `simstim ls --json` shows the end as `debug_until`. After a reboot or a `resume`, the session's new process starts with debug off. `resume` says so when debug was on: run `debug start` again to keep recording.
 
 Debug uses some of the session's memory, which counts against its memory cap:
 
-- `runtime` keeps the flight recorder's window, about 8 to 12 MiB on a busy session.
+- `runtime` keeps the recent debug record, about 8 to 12 MiB on a busy session.
 - The queue of records waiting for the disk can take about 2 MiB more.
 
 So to chase a memory problem, such as [#40](https://github.com/iamlakshya/simstim/issues/40), leave `runtime` out: `simstim debug start my-vps/auth-fix --only memory`.
 
-At each out-of-memory kill, the holder writes the largest processes left in the session to `holder.log`, with debug on or off. The process that the kernel stopped is gone by then. With `memory` on, the holder also notes the largest processes when the memory warning starts. At the kill, it writes that list too, which names the process stopped. Each line says whether it is from before the kill or after it.
+At each out-of-memory kill, the session's process on the host writes the largest processes left in the session to `holder.log`, with debug on or off. The process that the kernel stopped is gone by then. With `memory` on, it also notes the largest processes when the memory warning starts. At the kill, it writes that list too, which names the process stopped. Each line says whether it is from before the kill or after it.
 
 The client in the first terminal records nothing on the laptop, because it did not start with `--debug`. To trace your keys end to end, detach, and attach again with `--debug`.
 
@@ -76,7 +76,7 @@ The launcher's palette, `ctrl+o`, has four debug commands. They have no key, but
 | --- | --- |
 | `debug: start` | With a session selected, turns on that session's debug, as `debug start` does. With a host selected, turns on the debug of the launcher's connection to that host. Once that works, it turns on the launcher's own debug too, with every category. |
 | `debug: stop` | Turns off the launcher's debug, and the debug that `debug: start` turned on. When `debug: start` turned nothing on, it turns off the selected session's debug, or that of the connection to the selected host. |
-| `debug: save` | Saves the flight recorder's window of the launcher, and of the selected session |
+| `debug: save` | Saves the recent debug record of the launcher, and of the selected session |
 | `debug: bundle` | Writes the bundle of the selected session or host, in the folder where the launcher started. One bundle is written at a time. |
 
 While the launcher's own debug is on, its header shows `debug` and the minutes left, such as `debug 24m`. Each attach from the launcher is then traced. What `debug: start` turns on stops after 30 minutes, and a second `debug: start` sets a new end. With `--debug`, the launcher's own debug lasts as long as the launcher, and the mark shows no minutes. The debug that `debug: start` turns on for a session or a connection still stops after 30 minutes.
@@ -85,7 +85,7 @@ While a bundle is being written, the header says `bundling…`. A notice then gi
 
 ## Save the seconds before a lag
 
-While the session's `runtime` category is on, its holder keeps the newest 10 s or so of Go's execution trace. This is the flight recorder. Just after a lag, run this from a second terminal:
+While the session's `runtime` category is on, the session's process on the host keeps the newest 10 s or so of Go's execution trace. This is the session's recent debug record. Just after a lag, run this from a second terminal:
 
 ```sh
 simstim debug save my-vps/auth-fix
@@ -93,10 +93,10 @@ simstim debug save my-vps/auth-fix
 
 Or detach, and run `debug: save` in the launcher. A detach takes well under the 10 s that the window keeps.
 
-The holder also saves the window by itself, at most once a minute:
+The session's process also saves the window by itself, at most once a minute:
 
-- when a key waits more than 100 ms for the holder's lock
-- when the holder's status tick comes more than 500 ms late
+- when a key waits more than 100 ms for the lock of the session's process
+- when the status tick of the session's process comes more than 500 ms late
 
 With `runtime` on, the client saves its own window when an echo takes 250 ms longer than the median of the pings.
 
@@ -109,7 +109,7 @@ simstim debug profile my-vps/auth-fix cpu --for 1m
 simstim debug profile my-vps/auth-fix heap
 ```
 
-The holder writes a `cpu`, `heap` or `goroutine` profile, with debug on or off. A CPU profile runs for 30 s, or for the time that `--for` gives, up to 5 minutes. `--for` is for `cpu` only: the other two take a moment. The client shows the time left. If you stop the client, the holder still writes the file. While one profile or save runs, a second one in the same session fails, and says to wait.
+The session's process on the host writes a `cpu`, `heap` or `goroutine` profile, with debug on or off. A CPU profile runs for 30 s, or for the time that `--for` gives, up to 5 minutes. `--for` is for `cpu` only: the other two take a moment. The client shows the time left. If you stop the client, it still writes the file. While one profile or save runs, a second one in the same session fails, and says to wait.
 
 ## Where the files are
 
@@ -125,8 +125,10 @@ On the host, in `~/.local/state/simstim/`, or under `$XDG_STATE_HOME` there:
 
 | File | What |
 | --- | --- |
-| `sessions/<id>/debug.jsonl` | The holder's records and debug lines |
-| `sessions/<id>/holder.log` | The holder's log, with the processes of the session at each out-of-memory kill |
+| `sessions/<id>/debug.jsonl` | The records and debug lines of the session's process |
+| `sessions/<id>/holder.log` | The log of the session's process, with the processes of the session at each out-of-memory kill |
+| `sessions/<id>/supervisor.log` | The trusted supervisor's log for a walled session |
+| `sessions/<id>/guest-init.log`, `guest-holder.log` | Guest logs kept by the test driver outside the sandbox root, so they survive a resume |
 | `sessions/<id>/debug/` | `cpu-<time>.pprof`, `heap-<time>.pprof`, `goroutine-<time>.pprof`, `flight-<time>.trace` and `auto-flight-<time>.trace` |
 | `debug/bridge-<time>-<pid>.jsonl` | Each bridge's requests, with its profiles, while a client with debug on is connected |
 
@@ -141,7 +143,7 @@ simstim debug bundle my-vps/auth-fix
 ```
 
 - Without an argument, it takes the laptop's side only. With a host, it adds every session on that host that has debug files. With a session, it adds that session only.
-- It also takes fresh heap and goroutine profiles of each session's holder, and the output of `doctor` and `host doctor`.
+- It also takes fresh heap and goroutine profiles of each session's process on the host, and the output of `doctor` and `host doctor`.
 - For each session, it takes the state of its systemd unit and the kernel's report of an out-of-memory kill. The kernel's report needs a user in the `systemd-journal`, `adm` or `wheel` group. Without one, the unit's state still shows the kill.
 - `--ssh` adds the `ssh -v` log of one new connection to the host. That connection does not use the shared one, and never asks for a password.
 - It writes `simstim-debug-<time>.tar.gz` with mode 0600, and each file in it has mode 0600 too. The name holds no host name. Until the archive is complete, its name ends in `.part`. Ctrl+C stops the bundle, and it leaves no file.
@@ -220,10 +222,10 @@ These copies replace nothing.
 
 ## Limits
 
-- Each debug file turns over at 8 MiB to the same name with `.1` added. `holder.log` turns over at 1 MiB.
+- Each debug file turns over at 8 MiB to the same name with `.1` added. `holder.log` and `guest-holder.log` turn over at 1 MiB.
 - A session's `debug/` folder keeps 32 MiB, and each debug folder 64 MiB. The oldest files go first, the windows saved by themselves before the rest. A file in use, or still being written, stays.
-- A busy holder's saved window can be about 12 MiB, more than the 8 MiB that the recorder aims for.
-- `kill` removes a session's files with its folder.
+- The saved window of a busy session can be about 12 MiB, more than the 8 MiB that Go aims for.
+- `rm` removes a session's files with its folder.
 - With debug off, the client and the bridge discard their debug lines, and each hook costs one check.
 
 ## What it never records
@@ -237,4 +239,4 @@ Profiles and saved windows hold function and file names, counts, sizes and times
 
 ## An older host helper
 
-When the helper on a host predates the debug mode, `debug start` says that it is too old. `debug bundle` says the same of a helper without the bundle. Update it with `simstim host add <host>`. A session that started before the update keeps its old holder, which has no debug mode. Debug works once that session starts again.
+When the helper on a host predates the debug mode, `debug start` says that it is too old. `debug bundle` says the same of a helper without the bundle. Update it with `simstim host add <host>`. A session that started before the update keeps its old process, which has no debug mode. Debug works once that session starts again.

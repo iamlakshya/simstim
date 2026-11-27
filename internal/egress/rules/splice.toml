@@ -1,0 +1,3 @@
+# Verified certificate pinning or mutual TLS exceptions belong here, each
+# with a primary source. No host is exempt without that evidence.
+hosts = []

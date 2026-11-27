@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/iamlakshya/simstim/internal/brand"
+	"github.com/iamlakshya/simstim/internal/client"
 	"github.com/iamlakshya/simstim/internal/diag"
 )
 
@@ -109,10 +110,14 @@ var formatWords = func() map[string]bool {
 var productWords = func() map[string]bool {
 	words := map[string]bool{}
 	for _, w := range []string{brand.Name, brand.DisplayName, brand.HostBinary, brand.VTBinary, brand.Slice,
-		"setup", "host", "new", "ls", "agents", "attach", "resume", "flip", "send", "kill", "rename", "ports",
+		"setup", "host", "new", "ls", "show", "agents", "attach", "resume", "flip", "send", "kill", "rename", "ports",
 		"forward", "pull", "doctor", "debug", "config", "demo", "version", "start", "stop", "save", "profile",
-		"bundle", "add", "rm", "test", "status", "create", "destroy", "restore", "idle", "alerts", "keys",
-		"terminal", "keymap", "path", "install", "log", "off", "set", "completion", "help", "delete"} {
+		"bundle", "add", "rm", "rekey", "test", "status", "create", "destroy", "restore", "idle", "alerts", "keys",
+		"terminal", "keymap", "path", "check", "install", "log", "off", "set", "completion", "help", "delete",
+		"upgrade", "bash", "zsh", "fish", "powershell", "concepts", "exit-codes",
+		"login", "events", "fork", "default", "invite", "join", "leave", "prepare", "policy", "allow", "apply",
+		"deny", "edit", "learn", "lockdown", "refuse", "rewind", "shell", "ssh-config", "ssh-proxy", "image",
+		"_join-apply", "_join-leave", "_join-probe", "_mac-facts", "_mac-vm-start"} {
 		words[strings.ToLower(w)] = true
 	}
 	return words
@@ -137,6 +142,16 @@ type placed struct {
 	kind  string
 }
 
+// fileKey is a host's file key (client.HostFileKey) and what replaces it.
+// A host whose name stays on its own, or is an address, gets a placeholder
+// only when its file key appears.
+type fileKey struct {
+	host  string
+	value []byte
+	ph    string
+	kind  string
+}
+
 // Scrubber replaces the private values in the files of one bundle. One
 // value gets the same placeholder in every file.
 type Scrubber struct {
@@ -144,6 +159,8 @@ type Scrubber struct {
 	homesEsc []*regexp.Regexp  // the same, in a URL's escapes, in any case
 	folders  []placed          // session folders as paths from ~, longest first
 	keys     []placed          // names of SSH keys, longest first
+	fileKeys []fileKey         // file keys of hosts (client.HostFileKey), longest first
+	keyHosts map[string]string // placeholders given to kept hosts' file keys
 	phrases  []placed          // names with a boundary inside, such as a space
 	names    map[string]placed // other names, by their lower case
 	inner    []placed          // the names of hosts, the laptop and users, longest first
@@ -154,7 +171,7 @@ type Scrubber struct {
 
 // NewScrubber prepares the replacements of v.
 func NewScrubber(v Values) *Scrubber {
-	s := &Scrubber{names: map[string]placed{}, addrs: map[string]string{}, counts: map[string]int{}}
+	s := &Scrubber{names: map[string]placed{}, keyHosts: map[string]string{}, addrs: map[string]string{}, counts: map[string]int{}}
 	for _, h := range v.Homes {
 		if h = filepath.Clean(h); h != "/" && h != "." {
 			s.homes = append(s.homes, []byte(h))
@@ -175,6 +192,7 @@ func NewScrubber(v Values) *Scrubber {
 	for _, h := range v.Hosts {
 		s.addTarget(h)
 	}
+	s.addFileKeys(v.Hosts)
 	for _, n := range v.Sessions {
 		if !s.known(n) {
 			s.addName(n, fmt.Sprintf("<session-%d>", s.count(KindSession)+1), KindSession)
@@ -226,23 +244,70 @@ func (s *Scrubber) addName(n, ph, kind string) {
 	}
 }
 
-// addTarget adds a host's name or SSH target, such as user@my-vps:22: the
-// user as a user, and the host as a host. An address is left to the rule
-// for addresses.
-func (s *Scrubber) addTarget(t string) {
+// targetHost splits an SSH target, such as user@my-vps:22, into its user
+// and its host.
+func targetHost(t string) (user, host string) {
 	t = strings.TrimSpace(strings.TrimPrefix(t, "ssh://"))
 	if u, h, ok := strings.Cut(t, "@"); ok {
-		s.addName(u, "<user>", KindUser)
-		t = h
+		user, t = u, h
 	}
 	if h, port, ok := strings.Cut(t, ":"); ok && !strings.Contains(port, ":") {
 		t = h
 	}
-	t = strings.Trim(t, "[]/")
-	if t == "" || isAddr(t) {
+	return user, strings.Trim(t, "[]/")
+}
+
+// addTarget adds a host's name or SSH target, such as user@my-vps:22: the
+// user as a user, and the host as a host. An address is left to the rule
+// for addresses.
+func (s *Scrubber) addTarget(t string) {
+	u, h := targetHost(t)
+	if u != "" {
+		s.addName(u, "<user>", KindUser)
+	}
+	if h == "" || isAddr(h) {
 		return
 	}
-	s.hostPlaceholder(t)
+	s.hostPlaceholder(h)
+}
+
+// addFileKeys adds the file key (client.HostFileKey) of each host: its
+// whole key goes, even when the host's name alone stays or is an address.
+func (s *Scrubber) addFileKeys(hosts []string) {
+	for _, raw := range hosts {
+		_, th := targetHost(raw)
+		for _, h := range []string{strings.TrimSpace(raw), th} {
+			key := client.HostFileKey(h)
+			if key == "" || slices.ContainsFunc(s.fileKeys, func(k fileKey) bool { return string(k.value) == key }) {
+				continue
+			}
+			fk := fileKey{host: strings.ToLower(h), value: []byte(key), kind: KindHost}
+			if p, ok := s.names[fk.host]; ok {
+				fk.ph, fk.kind = p.ph, p.kind
+			}
+			s.fileKeys = append(s.fileKeys, fk)
+		}
+	}
+	sort.SliceStable(s.fileKeys, func(i, j int) bool { return len(s.fileKeys[i].value) > len(s.fileKeys[j].value) })
+}
+
+// fileKeyPh records one replacement of k and returns its placeholder.
+func (s *Scrubber) fileKeyPh(k fileKey) string {
+	if k.ph != "" {
+		s.counts[k.kind]++
+		return k.ph
+	}
+	if ph, _, ok := s.addr([]byte(k.host), 0); ok {
+		return ph
+	}
+	ph, ok := s.keyHosts[k.host]
+	if !ok {
+		s.nHosts++
+		ph = fmt.Sprintf("<host-%d>", s.nHosts)
+		s.keyHosts[k.host] = ph
+	}
+	s.counts[KindHost]++
+	return ph
 }
 
 // hostPlaceholder is a host's placeholder, given now if it has none.
