@@ -27,6 +27,7 @@ type serviceMintHTTPFixture struct {
 func newServiceMintHTTPFixture(t *testing.T, host string, bound bool, policy api.Policy, handler http.Handler) *serviceMintHTTPFixture {
 	t.Helper()
 	f := new(serviceMintHTTPFixture)
+	testCtx := t.Context()
 	dialer := &Dialer{Lookup: func(context.Context, string) ([]netip.Addr, error) {
 		f.lookups.Add(1)
 		return []netip.Addr{netip.MustParseAddr("198.51.100.8")}, nil
@@ -37,7 +38,11 @@ func newServiceMintHTTPFixture(t *testing.T, host string, bound bool, policy api
 		f.dials.Add(1)
 		client, origin := net.Pipe()
 		t.Cleanup(func() { _ = client.Close(); _ = origin.Close() })
-		go serveHTTPConnection(t.Context(), origin, nil, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { f.requests.Add(1); handler.ServeHTTP(w, r) }), nil)
+		go serveHTTPConnection(testCtx, origin, nil, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			f.requests.Add(1)
+			_, _ = io.Copy(io.Discard, r.Body)
+			handler.ServeHTTP(w, r)
+		}), nil)
 		return client, nil
 	}}
 	f.control = newBoundControlFixtureWithOptions(t, true, Options{Dialer: dialer})

@@ -4,6 +4,7 @@ package egress
 
 import (
 	"os"
+	"strconv"
 
 	"golang.org/x/sys/unix"
 )
@@ -27,9 +28,29 @@ func newPopularitySnapshotV1() (*os.File, error) {
 	return file, nil
 }
 
-func sealPopularitySnapshotV1(file *os.File) error {
-	_, err := unix.FcntlInt(file.Fd(), unix.F_ADD_SEALS, popularitySealsV1)
-	return err
+func sealPopularitySnapshotV1(file *os.File) (*os.File, error) {
+	if file == nil {
+		return nil, popularityErrorV1()
+	}
+	if _, err := unix.FcntlInt(file.Fd(), unix.F_ADD_SEALS, popularitySealsV1); err != nil {
+		return nil, popularityErrorV1()
+	}
+	fd, err := unix.Open("/proc/self/fd/"+strconv.Itoa(int(file.Fd())), unix.O_RDONLY|unix.O_CLOEXEC, 0)
+	if err != nil {
+		return nil, popularityErrorV1()
+	}
+	sealed := os.NewFile(uintptr(fd), "classifier-popularity")
+	before, err := popularityFileVersionV1Of(file)
+	if err != nil {
+		_ = sealed.Close()
+		return nil, popularityErrorV1()
+	}
+	after, err := popularitySnapshotVersionV1(sealed)
+	if err != nil || before != after {
+		_ = sealed.Close()
+		return nil, popularityErrorV1()
+	}
+	return sealed, nil
 }
 
 func popularityFileVersionV1Of(file *os.File) (popularityFileVersionV1, error) {
@@ -55,6 +76,10 @@ func popularityOriginalVersionV1(file *os.File) (popularityFileVersionV1, error)
 func popularitySnapshotVersionV1(file *os.File) (popularityFileVersionV1, error) {
 	version, err := popularityFileVersionV1Of(file)
 	if err != nil || version.Mode&0o111 != 0 {
+		return popularityFileVersionV1{}, popularityErrorV1()
+	}
+	flags, err := unix.FcntlInt(file.Fd(), unix.F_GETFL, 0)
+	if err != nil || flags&unix.O_ACCMODE != unix.O_RDONLY {
 		return popularityFileVersionV1{}, popularityErrorV1()
 	}
 	seals, err := unix.FcntlInt(file.Fd(), unix.F_GET_SEALS, 0)

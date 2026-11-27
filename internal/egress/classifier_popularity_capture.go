@@ -93,9 +93,12 @@ func CapturePopularityV1(ctx context.Context, original *os.File, selected string
 	if err != nil || afterErr != nil || before != after || count != before.Size || count > maxPopularityBytesV1 || ctx.Err() != nil {
 		return nil, popularityErrorV1()
 	}
-	if err := sealPopularitySnapshotV1(snapshot); err != nil {
+	sealed, err := sealPopularitySnapshotV1(snapshot)
+	if err != nil {
 		return nil, popularityErrorV1()
 	}
+	_ = snapshot.Close()
+	snapshot = sealed
 	version, err := popularitySnapshotVersionV1(snapshot)
 	if err != nil || version.Size != count {
 		return nil, popularityErrorV1()

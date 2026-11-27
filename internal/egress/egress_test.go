@@ -243,6 +243,7 @@ func TestServerBalanced403ECHSmugglingAndRevocation(t *testing.T) {
 		t.Fatalf("TLS response = status %d body %q, %v", tlsResp.StatusCode, gotBody, err)
 	}
 	_ = tlsConn.Close()
+	env.waitAudits(t, 1)
 
 	// 4. Disallowed host (example.com:443) gets 403 with exact grant command.
 	st2, err := env.supSess.Open(ctx, link.KindEgress, StreamHeader{Via: "explicit", Host: "example.com", Port: 443})
@@ -261,6 +262,7 @@ func TestServerBalanced403ECHSmugglingAndRevocation(t *testing.T) {
 	if resp2.StatusCode != http.StatusForbidden || resp2.Header.Get("X-Should-Retry") != "false" || string(body2) != wantGrant {
 		t.Fatalf("403 reply = status %d retry=%q body=%q, want %q", resp2.StatusCode, resp2.Header.Get("X-Should-Retry"), body2, wantGrant)
 	}
+	env.waitAudits(t, 2)
 
 	// 5. ECH ClientHello on an allowed host is refused before reaching upstream.
 	hitsBefore := upstreamHits.Load()
@@ -280,6 +282,10 @@ func TestServerBalanced403ECHSmugglingAndRevocation(t *testing.T) {
 	if len(echReply) != 0 || upstreamHits.Load() != hitsBefore {
 		t.Fatalf("ECH flow reached upstream or returned data: reply=%x hits=%d->%d", echReply, hitsBefore, upstreamHits.Load())
 	}
+	audits := env.waitAudits(t, 3)
+	if audits[2].Rule != "tls:ech" || audits[2].Decision != "deny" {
+		t.Errorf("ECH audit = %+v, want tls:ech deny", audits[2])
+	}
 
 	// 6. Smuggling attempt (duplicate Host header) gets 400 Bad Request.
 	stSmug, err := env.supSess.Open(ctx, link.KindEgress, StreamHeader{Via: "explicit", Host: "registry.npmjs.org", Port: 443})
@@ -293,6 +299,7 @@ func TestServerBalanced403ECHSmugglingAndRevocation(t *testing.T) {
 	}
 	_ = respSmug.Body.Close()
 	_ = stSmug.Close()
+	env.waitAudits(t, 4)
 
 	// 7. Plain HTTP denied path containing secret scrubs secret in audit log.
 	stHTTP, err := env.supSess.Open(ctx, link.KindEgress, StreamHeader{Via: "explicit", Host: "example.com", Port: 80})
@@ -303,10 +310,7 @@ func TestServerBalanced403ECHSmugglingAndRevocation(t *testing.T) {
 	_, _ = io.ReadAll(stHTTP)
 	_ = stHTTP.Close()
 
-	audits := env.waitAudits(t, 5)
-	if audits[2].Rule != "tls:ech" || audits[2].Decision != "deny" {
-		t.Errorf("ECH audit = %+v, want tls:ech deny", audits[2])
-	}
+	audits = env.waitAudits(t, 5)
 	if audits[4].Path != "/tokens/[NPM_TOKEN]/use" || strings.Contains(audits[4].Path, "npm_super_secret_val") {
 		t.Errorf("secret scrub audit = %+v", audits[4])
 	}
