@@ -48,6 +48,9 @@ type Provider struct {
 	HTTP *http.Client
 	// CLIConfig is the E2B CLI's login file; "" means ~/.e2b/config.json.
 	CLIConfig string
+	// frozenDomain is captured by the closed session-machine producer.
+	frozenDomain string
+	frozen       bool
 }
 
 // Name is "e2b".
@@ -74,12 +77,17 @@ func (p Provider) envdURL(sb sandbox) string {
 	if p.SandboxURL != "" {
 		return p.SandboxURL
 	}
-	if u := os.Getenv("E2B_SANDBOX_URL"); u != "" {
-		return u
+	if !p.frozen {
+		if u := os.Getenv("E2B_SANDBOX_URL"); u != "" {
+			return u
+		}
 	}
 	d := sb.Domain
 	if d == "" {
-		d = domain()
+		d = p.frozenDomain
+		if d == "" {
+			d = domain()
+		}
 	}
 	return fmt.Sprintf("https://%d-%s.%s", EnvdPort, sb.SandboxID, d)
 }
@@ -116,20 +124,34 @@ func BuildHint(name string) string {
 // memory) when its lease runs out, does not wake for stray traffic, and
 // keeps its URLs private.
 func (p Provider) Create(ctx context.Context, req provider.Request) (client.Host, error) {
+	h, _, err := p.create(ctx, req)
+	return h, err
+}
+
+func (p Provider) create(ctx context.Context, req provider.Request) (client.Host, *box, error) {
+	return p.createWithCheck(ctx, req, nil)
+}
+
+func (p Provider) createWithCheck(ctx context.Context, req provider.Request, beforeCreate func() error) (client.Host, *box, error) {
 	out := req.Out
 	if out == nil {
 		out = io.Discard
 	}
 	a, err := p.api(ctx, req.TokenCommand)
 	if err != nil {
-		return client.Host{}, err
+		return client.Host{}, nil, err
 	}
 	name := req.Template
 	if name == "" {
 		name = DefaultTemplate
 	}
 	if err := checkTemplate(ctx, a, name, out); err != nil {
-		return client.Host{}, err
+		return client.Host{}, nil, err
+	}
+	if beforeCreate != nil {
+		if err := beforeCreate(); err != nil {
+			return client.Host{}, nil, err
+		}
 	}
 	idle := lease(req.IdleStop, DefaultIdleLease, DefaultBusyLease)
 	sb, err := a.create(ctx, newSandbox{
@@ -141,13 +163,14 @@ func (p Provider) Create(ctx context.Context, req provider.Request) (client.Host
 		Metadata:   map[string]string{brand.Name + "-host": req.Name},
 	})
 	if err != nil {
-		return client.Host{}, err
+		return client.Host{}, nil, err
 	}
-	fmt.Fprintf(out, "  Created the sandbox %s from the template %s\n", sb.SandboxID, name)
-	return client.Host{Name: req.Name, Machine: &client.Machine{
+	fmt.Fprintf(out, "  Created the sandbox %s from the template %s\n", client.CleanLine(sb.SandboxID), client.CleanLine(name))
+	h := client.Host{Name: req.Name, Machine: &client.Machine{
 		Provider: "e2b", ID: sb.SandboxID, User: defaultUser, Template: name,
 		IdleStop: req.IdleStop, TokenCommand: req.TokenCommand,
-	}}, nil
+	}}
+	return h, &box{p: p, h: h, id: sb.SandboxID, a: a, last: &sb}, nil
 }
 
 func checkTemplate(ctx context.Context, a *api, name string, out io.Writer) error {
@@ -168,6 +191,16 @@ func checkTemplate(ctx context.Context, a *api, name string, out io.Writer) erro
 
 // Open returns the lifecycle of a sandbox this provider made.
 func (p Provider) Open(h client.Host) (client.Lifecycle, error) {
+	if h.Machine == nil || !validMachineID(h.Machine.ID) {
+		return nil, machineIdentityError()
+	}
+	if client.IsSessionMachineV1(h) {
+		if !validMachineOrigin(h.Machine.Endpoint) || !validMachineOrigin(h.Machine.TransportURL) {
+			return nil, machineIdentityError()
+		}
+		p.APIURL, p.SandboxURL = h.Machine.Endpoint, h.Machine.TransportURL
+		p = freezeMachineProvider(p)
+	}
 	return &box{p: p, h: h, id: h.Machine.ID}, nil
 }
 

@@ -2,12 +2,9 @@ package tui
 
 import (
 	"fmt"
-	"sort"
-	"strings"
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/iamlakshya/simstim/internal/brand"
 	"github.com/iamlakshya/simstim/internal/client"
 )
 
@@ -47,35 +44,29 @@ func (c *confirm) view(m *Model) string {
 	return sheet(w, c.title, "", []hint{c.yes, c.no}, trimBlank(body), t)
 }
 
+// deleteDialog asks before a session is deleted, with the lines that the
+// rm command asks with too (client.DeleteLines).
 func deleteDialog(h *hostConn, s client.Session) *confirm {
-	host, d := h.name(), shown(s)
-	lines := []string{
-		fmt.Sprintf("This stops %s on %s and removes the session.", d.Agent, host),
-		fmt.Sprintf("The folder %s stays. Unsaved work in the agent is lost.", homePath(h, d.Cwd)),
-	}
-	if ended(s) {
-		// Nothing runs that could lose work: say only what goes.
-		lines = []string{
-			fmt.Sprintf("This removes the session from %s.", host),
-			fmt.Sprintf("The folder %s stays.", homePath(h, d.Cwd)),
-		}
-	}
+	host := h.name()
 	return &confirm{
-		title: "Delete " + d.Name + "?", lines: lines, danger: true,
+		title: "Delete " + shown(s.Name) + "?", lines: client.DeleteLines(s, host, homePath(h, s.Cwd)), danger: true,
 		yes: hint{"enter", "delete"}, no: hint{"esc", "keep"},
 		run: func(m *Model) tea.Cmd { return m.deleteSession(host, s) },
 	}
 }
 
 func removeHostDialog(h client.Host) *confirm {
+	name := shown(h.Name)
 	return &confirm{
-		title: "Remove " + h.Name + "?",
+		title: "Remove " + name + "?",
 		lines: []string{
-			fmt.Sprintf("This removes %s from the hosts on this computer.", h.Name),
+			fmt.Sprintf("This removes %s from the hosts on this computer.", name),
 			"Its sessions and the helper stay on the host, and keep running.",
 		},
 		danger: true, yes: hint{"enter", "remove"}, no: hint{"esc", "keep"},
-		run: func(m *Model) tea.Cmd { return m.saveHosts(h, true) },
+		// The entry that the dialog showed: a host made again while it
+		// waited is not removed.
+		run: func(m *Model) tea.Cmd { return m.changeHost(client.HostChange{Was: &h}) },
 	}
 }
 
@@ -112,46 +103,38 @@ func (d *details) view(m *Model) string {
 		return ""
 	}
 	field := func(k, v string) string { return sFaint.Render(fit(k, labelW)) + trunc(v, cw-labelW) }
-	route := h.host.SSH
-	if h.host.SSHConfig != "" {
-		route += sFaint.Render("  with " + h.host.SSHConfig)
-	}
-	body := []string{"", field("Route", route)}
-	if i := h.info; i != nil {
-		sys := []string{}
-		for _, s := range []string{i.Distro, i.Arch, plural(i.CPUs, "CPU", "CPUs"), fmtSize(i.MemTotal), fmtSize(i.DiskFree) + " free"} {
-			if s != "" && !strings.HasPrefix(s, "0 ") {
-				sys = append(sys, s)
+	body := []string{"", field("Floor", hostWallFloor(h)), field("Level now", hostWallNow(h))}
+	// The lines come from the client, as `host show` prints them
+	// (cli-spec 11.2).
+	for _, line := range (client.HostDetails{Host: h.host, Tier: h.tier, IDChanged: h.idChanged, Info: h.info, Sessions: len(h.sessions)}).Lines() {
+		if len(line.Items) == 0 {
+			v := line.Value
+			if line.Note != "" {
+				v += sFaint.Render("  " + line.Note)
 			}
+			body = append(body, field(line.Label, v))
+			continue
 		}
-		var names []string
-		for k := range i.Agents {
-			if v := i.AgentVersions[k]; v != "" {
-				k += " " + v
-			}
-			names = append(names, k)
-		}
-		sort.Strings(names)
-		body = append(body,
-			field("System", strings.Join(sys, dot)),
-			field("Helper", brand.HostBinary+" "+i.Version))
-		// The agents go on more lines rather than lose their versions.
-		for n, l := range joinWrap(names, cw-labelW) {
+		// A list goes on more lines rather than lose its items, such as
+		// the agents' versions.
+		for n, l := range joinWrap(line.Items, cw-labelW) {
 			k := ""
 			if n == 0 {
-				k = "Agents"
+				k = line.Label
 			}
 			body = append(body, field(k, l))
 		}
-		body = append(body, field("Limits", fmtSize(i.MemoryMax)+" for sessions"+dot+plural(len(h.sessions), "session", "sessions")))
-	} else {
+	}
+	if h.info == nil {
 		msg, _ := errText(h.err)
+		msg = oneLine(msg)
 		if msg == "" {
 			msg = "waiting for the host to answer"
 		}
-		body = append(body, field("Status", sFaint.Render(sentence(msg))))
+		body = append(body, field("Status", sFaint.Render(sentence(shown(msg)))))
 	}
 	body = append(body, "")
 	hints := []hint{{"t", "test"}, {"s", "shell"}, {"r", "reconnect"}, {"x", "remove"}, {"esc", "back"}}
-	return sheet(w, h.name(), m.hostState(h, w-8-cells(h.name())), hints, trimBlank(body), toneNormal)
+	title := shown(h.name())
+	return sheet(w, title, m.hostState(h, w-8-cells(title)), hints, trimBlank(body), toneNormal)
 }

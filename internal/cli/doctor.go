@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strconv"
@@ -21,17 +22,28 @@ func doctorCmd() *cobra.Command {
 		Use:   "doctor",
 		Short: "Check this machine and its terminal",
 		Long: "Checks this computer: ssh, the config files and the secrets' commands. With --fix it\n" +
-			"offers to fix what it can: SSH configs it generated for hosts you removed, and\n" +
-			"ControlMaster sockets whose master died. Each fix is shown before it runs.\n" +
+			"offers to fix what it can: SSH configs it generated that no saved host references,\n" +
+			"and owned ControlMaster sockets whose master died. A saved host's references stay. It\n" +
+			"never removes an SSH config that you made. Each fix is shown before it runs.\n" +
 			"`host doctor <host>` checks a host.",
 		Example: "  " + brand.Name + " doctor\n  " + brand.Name + " doctor --fix\n  " + brand.Name + " doctor --json",
 		Args:    unknownCommand,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			if stopped(cmd.Context()) {
+				return cancelled()
+			}
 			if asJSON && fix && !yes {
 				// With --json nothing is asked, so -y must answer for each fix.
 				return prompts(cmd).needs(qFix, "a yes for each fix")
 			}
-			checks, fixes := client.LocalChecks(), client.LocalFixes(false, nil)
+			checks := client.LocalChecks()
+			fixes, err := client.LocalFixesContext(cmd.Context(), false, nil)
+			if err != nil {
+				if errors.Is(err, context.Canceled) {
+					return cancelled()
+				}
+				return err
+			}
 			if asJSON && fix {
 				res, err := applyAll(fixes, func(ids []string) ([]client.Fix, error) {
 					return applyLocal(cmd.Context(), ids)
@@ -64,8 +76,8 @@ func doctorCmd() *cobra.Command {
 		},
 	}
 	addJSON(cmd, &asJSON)
-	cmd.Flags().BoolVar(&fix, "fix", false, "offer to fix the problems found, one by one")
-	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "with --fix, apply every fix without asking")
+	addFix(cmd, &fix)
+	addYes(cmd, &yes, "apply each fix that --fix offers")
 	cmd.AddCommand(&cobra.Command{
 		Use:     "terminal",
 		Short:   "Ask this terminal what it supports: keys, colours and more",
@@ -92,7 +104,7 @@ func doctorCmd() *cobra.Command {
 func keyTester(ctx context.Context) error {
 	fd := int(os.Stdin.Fd())
 	if !term.IsTerminal(fd) {
-		return &client.UserError{Msg: "the key tester needs a terminal", Hint: "Run it from a terminal.", Code: "no_terminal"}
+		return &client.UserError{Msg: "the key tester needs a terminal", Hint: "Run it from a terminal.", Code: "no_terminal", Kind: client.KindUsage}
 	}
 	s := client.LoadSettings()
 	dk, err := keys.Parse(s.Attach.DetachKey)

@@ -7,7 +7,7 @@ title: "simstim doctor terminal"
 Ask this terminal what it supports: keys, colours and more.
 
 ```text
-simstim doctor terminal
+simstim doctor terminal [flags]
 ```
 
 ## Examples

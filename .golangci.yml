@@ -4,6 +4,7 @@
 version: "2"
 
 run:
+  build-tags: [userns_cohort_v3, http2legacy]
   timeout: 10m
   # Paths in the exclusions below are relative to the module's root.
   relative-path-mode: gomod

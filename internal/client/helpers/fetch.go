@@ -17,6 +17,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/iamlakshya/simstim/internal/supply"
 )
 
 // ReleaseSigners are the keys that sign releases' checksums.txt, as
@@ -91,6 +93,26 @@ func cacheHelpers(dir string, files map[string][]byte) error {
 		}
 	}
 	return nil
+}
+
+// Cached loads the helpers for version from cacheDir, where an earlier
+// Fetch left them. It never downloads. It reports whether this build has
+// its helpers now: its own, the cached ones, or ones that Fetch loaded.
+func Cached(version, cacheDir string) bool {
+	if Embedded() {
+		return true
+	}
+	fetchMu.Lock()
+	defer fetchMu.Unlock()
+	if fetched != nil {
+		return true
+	}
+	files, err := readDir(filepath.Join(cacheDir, "helpers", version))
+	if err != nil || len(files) == 0 {
+		return false
+	}
+	fetched = files
+	return true
 }
 
 func readDir(dir string) (map[string][]byte, error) {
@@ -233,7 +255,8 @@ func untar(bundle []byte) (map[string][]byte, error) {
 	return files, nil
 }
 
-// isHelper is true for a host helper's or a shadow terminal's file name.
+// isHelper accepts the helper files and the manifest from the same signed
+// release bundle. The client needs that manifest's runtime digests as well.
 func isHelper(name string) bool {
 	_, ok := helperLeaf(name)
 	return ok
@@ -242,6 +265,8 @@ func isHelper(name string) bool {
 // helperLeaf returns a canonical cache name, never an archive path.
 func helperLeaf(name string) (string, bool) {
 	switch name {
+	case supply.FileName:
+		return supply.FileName, true
 	case "host-linux-amd64":
 		return "host-linux-amd64", true
 	case "host-linux-arm64":
@@ -250,6 +275,22 @@ func helperLeaf(name string) (string, bool) {
 		return "vt-linux-amd64", true
 	case "vt-linux-arm64":
 		return "vt-linux-arm64", true
+	case "userns-linux-amd64":
+		return "userns-linux-amd64", true
+	case "userns-linux-arm64":
+		return "userns-linux-arm64", true
+	case "launch-amd64":
+		return "launch-amd64", true
+	case "launch-arm64":
+		return "launch-arm64", true
+	case "image-verifier-darwin-amd64":
+		return "image-verifier-darwin-amd64", true
+	case "image-verifier-darwin-arm64":
+		return "image-verifier-darwin-arm64", true
+	case "image-verifier-linux-amd64":
+		return "image-verifier-linux-amd64", true
+	case "image-verifier-linux-arm64":
+		return "image-verifier-linux-arm64", true
 	default:
 		return "", false
 	}

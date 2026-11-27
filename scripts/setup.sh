@@ -13,6 +13,10 @@
 #   scripts/setup.sh --only node,typos   only these tools, and no build (CI)
 set -euo pipefail
 cd "$(dirname "$0")/.."
+go_build_toolchain=$(sh scripts/go-build-tags.sh toolchain)
+export GOTOOLCHAIN="$go_build_toolchain"
+go_build_tags=$(sh scripts/go-build-tags.sh)
+export GO_BUILD_TAGS="$go_build_tags"
 
 only=""
 if [ "${1:-}" = "--only" ]; then
@@ -99,11 +103,11 @@ say ""
 say "Building and testing once, to check the setup…"
 just build
 log=$(mktemp)
-if ! go test -count=1 ./... >"$log" 2>&1; then
+if ! go test -tags="$go_build_tags" -count=1 ./... >"$log" 2>&1; then
     say ""
     cat "$log" >&2
     rm -f "$log"
-    die "a test failed; the lines above say which. Run it again with go test -run <name> -v."
+    die "a test failed; the lines above say which. Run it again with go test -tags="$go_build_tags" -run <name> -v."
 fi
 rm -f "$log"
 say ""

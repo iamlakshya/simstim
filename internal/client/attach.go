@@ -3,15 +3,14 @@ package client
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	xterm "golang.org/x/term"
 
-	"github.com/iamlakshya/simstim/internal/brand"
 	"github.com/iamlakshya/simstim/internal/diag"
 	"github.com/iamlakshya/simstim/internal/keys"
 	"github.com/iamlakshya/simstim/internal/proto"
@@ -65,22 +64,31 @@ const (
 var escFlush = 15 * time.Millisecond
 
 type attacher struct {
-	o       AttachOptions
-	conn    *Conn
-	ssh     *SSH
-	fd      int
-	tracker *term.Tracker
-	cu      term.Catchup // where the terminal is in the session's output
-	filter  *keys.Filter
-	in      *attachInput
-	inCh    chan []byte
-	res     AttachResult
-	key     string
+	agent         *attachedAgent
+	agentReady    <-chan agentReady
+	agentStarting bool
+	agentSetup    sync.WaitGroup
+	inputPending  bool
+	o             AttachOptions
+	conn          *Conn
+	ssh           *SSH
+	fd            int
+	tracker       *term.Tracker
+	cu            term.Catchup // where the terminal is in the session's output
+	filter        *keys.Filter
+	in            *attachInput
+	inCh          chan []byte
+	res           AttachResult
+	key           string
 	// swallow holds watched keys whose press we consumed, so their release is swallowed too.
 	swallow map[int]bool
 	// seen is the last known state of each session on this host, for notifications.
 	seen map[string]string
-	tr   *attachTrace // the debug trace (trace.go), or nil
+	// outStream tracks ground boundaries in TOutput so notifications never
+	// split an unfinished escape sequence or multi-byte UTF-8 rune.
+	outStream     outStream
+	pendingNotify [][]byte
+	tr            *attachTrace // the debug trace (trace.go), or nil
 	// dropped says why the attach dropped its connection, for the debug
 	// mode: "" when the connection closed by itself.
 	dropped string
@@ -125,15 +133,15 @@ func Attach(ctx context.Context, o AttachOptions) (AttachResult, error) {
 	if o.State.Valid && o.State.Key == a.key && !o.State.Modes.AltScreen {
 		last = o.State.Offset
 	}
-	conn, err := Dial(ctx, o.Host, o.Interactive)
+	conn, agent, err := dialAttach(ctx, o.Host, o.Session, o.Interactive)
 	if err != nil {
 		return AttachResult{}, err
 	}
-	a.conn = conn
-	defer func() { a.conn.Close() }()
+	a.conn, a.agent = conn, agent
+	defer a.closeConnections()
 	go a.ssh.masterState(ctx, "attach")
 	cols, rows, xpx, ypx := a.size()
-	att, err := a.handshake(last, cols, rows, xpx, ypx, false)
+	att, err := a.handshake(ctx, last, cols, rows, xpx, ypx, false)
 	if err != nil {
 		return AttachResult{}, err
 	}
@@ -153,7 +161,9 @@ func Attach(ctx context.Context, o AttachOptions) (AttachResult, error) {
 		a.in.finish()
 		return AttachResult{}, fmt.Errorf("cannot put the terminal in raw mode: %w", err)
 	}
-	a.in.ask()
+	if a.agent == nil {
+		a.askInput()
+	}
 
 	// The paste guard takes the terminal's state that the last attach in
 	// this process left only now, when nothing more can fail before the
@@ -163,8 +173,10 @@ func Attach(ctx context.Context, o AttachOptions) (AttachResult, error) {
 	// title is the agent's: the client draws nothing of its own.
 	a.write(ctx, []byte("\x1b[22;0t"))
 	a.begin(ctx, att, o.State, rows)
+	a.startAgent(ctx)
 
 	runErr := a.loop(ctx)
+	a.stopAgent()
 
 	// Stop the reader before its files are closed, and before anything else
 	// reads the terminal. A read that could not be stopped stays open rather
@@ -175,6 +187,7 @@ func Attach(ctx context.Context, o AttachOptions) (AttachResult, error) {
 	cleanupCtx := context.WithoutCancel(ctx)
 	a.write(cleanupCtx, a.tracker.M.ResetSequence())
 	a.endGuard(cleanupCtx)
+	a.flushPendingNotify(cleanupCtx)
 	a.write(cleanupCtx, []byte("\x1b]9;4;0\x1b\\\x1b[23;0t"))
 
 	o.State.Key, o.State.Offset, o.State.Modes, o.State.Valid = a.key, a.cu.Offset, a.tracker.M, true
@@ -197,46 +210,10 @@ func (a *attacher) write(ctx context.Context, b []byte) {
 // show sends the session's bytes to the terminal, unchanged, then any
 // notice that waited for the terminal to be between sequences.
 func (a *attacher) show(ctx context.Context, b []byte) {
-	a.write(ctx, b)
-	a.writeHeld(ctx)
+	a.writeOutput(ctx, b)
 }
 
 func (a *attacher) size() (cols, rows, xpx, ypx int) { return termSize(a.o.Out) }
-
-// handshake sends the attach request and waits for the answer. reconnect is
-// true when the attach resumes after a dropped link.
-func (a *attacher) handshake(last int64, cols, rows, xpx, ypx int, reconnect bool) (proto.Attached, error) {
-	trace, cats := a.conn.startTrace()
-	req := proto.Attach{Session: a.o.Session, Cols: cols, Rows: rows, XPx: xpx, YPx: ypx, Client: brand.Name, LastOffset: last,
-		Trace: trace, Categories: cats, Reconnect: reconnect}
-	if err := a.conn.SendJSON(proto.TAttach, req); err != nil {
-		return proto.Attached{}, ErrClosed
-	}
-	timeout := time.After(15 * time.Second)
-	for {
-		select {
-		case f := <-a.conn.Stream():
-			switch f.Type {
-			case proto.TAttached:
-				var att proto.Attached
-				if err := json.Unmarshal(f.Payload, &att); err != nil {
-					return att, fmt.Errorf("read the host's answer to attach: %w", err)
-				}
-				return att, nil
-			case proto.TError:
-				var pe proto.Error
-				_ = json.Unmarshal(f.Payload, &pe)
-				return proto.Attached{}, hostError(&pe)
-			default:
-				// Other frames before the answer are ignored.
-			}
-		case <-a.conn.Done():
-			return proto.Attached{}, ErrClosed
-		case <-timeout:
-			return proto.Attached{}, errors.New("the host did not answer the attach in time")
-		}
-	}
-}
 
 // begin prepares the screen for the bytes that follow.
 func (a *attacher) begin(ctx context.Context, att proto.Attached, st *AttachState, rows int) {
@@ -250,6 +227,7 @@ func (a *attacher) begin(ctx context.Context, att proto.Attached, st *AttachStat
 	}
 	// A full redraw. Keep what is on screen in the scrollback, then start clean.
 	a.tracker = term.NewTracker()
+	a.outStream.reset()
 	a.cu.Offset = att.From
 	// For "snapshot", a TSnapshot frame redraws the screen as of From, and the
 	// output from From follows; bytes before Live are history and are sanitised.
@@ -258,6 +236,7 @@ func (a *attacher) begin(ctx context.Context, att proto.Attached, st *AttachStat
 	} else {
 		a.write(ctx, []byte(fmt.Sprintf("\x1b[%d;1H%s\x1b[H", rows, strings.Repeat("\n", rows))))
 	}
+	a.flushPendingNotify(ctx)
 }
 
 // output shows bytes from offset off, skipping any the terminal already has.
@@ -266,7 +245,7 @@ func (a *attacher) output(ctx context.Context, off int64, data []byte) {
 	if fresh == nil {
 		return // the terminal already shows it
 	}
-	a.show(ctx, show)
+	a.writeOutput(ctx, show)
 	a.tracker.Feed(fresh)
 }
 
@@ -285,6 +264,7 @@ func (a *attacher) loop(ctx context.Context) error {
 	lastTick := time.Now()
 	others := make(chan []Session, 1)
 	var detachTimer, flushTimer <-chan time.Time
+	var agentHeld []byte
 	for {
 		select {
 		case now := <-wake.C:
@@ -292,9 +272,13 @@ func (a *attacher) loop(ctx context.Context) error {
 			lastTick = now
 			if gap > wakeGap {
 				a.dropped = "the laptop slept"
+				a.stopAgent()
 				a.conn.kill()
 			}
 		case <-watch.C:
+			if err := a.watchAgentGrant(ctx); err != nil {
+				return err
+			}
 			a.watchOthers(ctx, others)
 		case list := <-others:
 			a.notifyOthers(ctx, list)
@@ -302,11 +286,28 @@ func (a *attacher) loop(ctx context.Context) error {
 			if done, err := a.frame(ctx, f); done || err != nil {
 				return err
 			}
+		case ready := <-a.agentReady:
+			if stop, err := a.onAgentReady(ctx, ready, &agentHeld, &detachTimer, &flushTimer); stop || err != nil {
+				return err
+			}
+		case <-a.agentDone():
+			if err := a.onAgentLost(); err != nil {
+				return err
+			}
 		case b, ok := <-a.inCh:
+			a.inputPending = false
+			if !ok {
+				a.res.Detached = true
+				return nil
+			}
+			if a.agentStarting {
+				agentHeld = b
+				continue
+			}
 			if a.onKeys(ctx, b, ok, &detachTimer, &flushTimer) {
 				return nil
 			}
-			a.in.ask()
+			a.askInput()
 		case <-flushTimer:
 			flushTimer = nil
 			if b := a.filter.Flush(); len(b) > 0 {
@@ -321,6 +322,8 @@ func (a *attacher) loop(ctx context.Context) error {
 		case <-heart.C:
 			a.heartbeat()
 		case <-a.conn.Done():
+			agentHeld = nil
+			a.stopAgent()
 			if detached, err := a.reconnect(ctx); detached || err != nil {
 				a.res.Detached = detached
 				return err
@@ -370,6 +373,7 @@ func (a *attacher) heartbeat() {
 	_ = a.conn.Ping()
 	if time.Since(a.conn.LastRecv()) > deadAfter {
 		a.dropped = "no answer from the host"
+		a.stopAgent()
 		a.conn.kill()
 	}
 }

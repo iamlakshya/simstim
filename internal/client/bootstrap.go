@@ -1,10 +1,7 @@
 package client
 
 import (
-	"bytes"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"strings"
 
@@ -82,10 +79,23 @@ func platformOf(system, machine string) (goos, arch string) {
 	return goos, arch
 }
 
-// Install uploads the helper for p, and the shadow terminal when this build
-// has one, checks each SHA-256 on the host, and moves them into place. It never
-// runs during a background reconnect.
+// Install installs the checked helper and records its original ownership.
+// Existing versions retain their own files and native lifetimes.
 func Install(ctx context.Context, s Transport, p Platform) error {
+	return InstallHelper(ctx, s, p)
+}
+
+// Prune runs the helper's prune: each install leaves the old versions
+// behind, and the new helper removes those that nothing uses. A failure
+// here never fails the install.
+func Prune(ctx context.Context, s Transport) {
+	_, _ = s.Run(ctx, RemoteHelper(HelperVersion())+" prune", nil)
+}
+
+// InstallHelper uploads the helper for p, and the shadow terminal when this
+// build has one, checks each SHA-256 on the host, and moves them into place.
+// It removes nothing, so a newer client's helper stays (cli-spec 11.4).
+func InstallHelper(ctx context.Context, s Transport, p Platform) error {
 	bin, ok := helpers.For(p.OS, p.Arch)
 	if !ok {
 		return &UserError{
@@ -94,56 +104,12 @@ func Install(ctx context.Context, s Transport, p Platform) error {
 			Code: "no_helper",
 		}
 	}
-	files := []struct {
-		name string
-		data []byte
-	}{{brand.VTBinary, nil}, {brand.HostBinary, bin}}
+	files := []installCarriedV1{{brand.VTBinary, nil}, {brand.UsernsBinary, nil}, {brand.HostBinary, bin}}
 	if vt, ok := helpers.VT(p.OS, p.Arch); ok {
 		files[0].data = vt
 	}
-	ver := HelperVersion()
-	for i, f := range files {
-		if f.data == nil {
-			continue
-		}
-		last := i == len(files)-1
-		if err := upload(ctx, s, ver, f.name, f.data, last); err != nil {
-			return err
-		}
+	if launcher, ok := helpers.Userns(p.OS, p.Arch); ok {
+		files[1].data = launcher
 	}
-	// Each install leaves the old versions behind. The new helper removes
-	// those that nothing uses; a failure here never fails the install.
-	_, _ = s.Run(ctx, RemoteHelper(ver)+" prune", nil)
-	return nil
-}
-
-// upload sends one file into the versioned helper folder. The helper itself
-// goes last, because its presence is what marks the version as installed.
-func upload(ctx context.Context, s Transport, ver, name string, data []byte, last bool) error {
-	sum := sha256.Sum256(data)
-	hexsum := hex.EncodeToString(sum[:])
-	dir := fmt.Sprintf(`"$HOME/.local/share/%s/bin/%s"`, brand.Name, ver)
-	steps := []string{
-		"set -e",
-		"umask 077",
-		"d=" + dir,
-		`mkdir -p "$d"`,
-		`t="$d/.upload.$$"`,
-		`cat > "$t"`,
-		fmt.Sprintf(`echo "%s  $t" | sha256sum -c --quiet - || { rm -f "$t"; echo "checksum mismatch" >&2; exit 3; }`, hexsum),
-		`chmod 755 "$t"`,
-		fmt.Sprintf(`mv -f "$t" "$d/%s"`, name),
-	}
-	if last {
-		steps = append(steps, fmt.Sprintf(`ln -sfn %q "$HOME/.local/share/%s/bin/current"`, ver, brand.Name))
-	}
-	steps = append(steps, "echo __INSTALLED__")
-	out, err := s.Run(ctx, strings.Join(steps, "; "), bytes.NewReader(data))
-	if err != nil {
-		return err
-	}
-	if !strings.Contains(string(out), "__INSTALLED__") {
-		return fmt.Errorf("the install of %s did not finish: %s", name, tailStderr(string(out)))
-	}
-	return nil
+	return installOwnedHelperV1(ctx, s, p, files)
 }

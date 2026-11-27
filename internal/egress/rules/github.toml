@@ -1,0 +1,127 @@
+# Protected REST operations from isolation spec 7.2. These barriers grant no
+# host or path. The ordinary policy engine must find an explicit path allow.
+
+[[barriers]]
+hosts = ["api.github.com", "github.com"]
+methods = ["POST"]
+path = "/user/repos"
+kind = "grant"
+source = "https://docs.github.com/en/rest/repos/repos#create-a-repository-for-the-authenticated-user"
+
+[[barriers]]
+hosts = ["api.github.com", "github.com"]
+methods = ["POST"]
+path = "/orgs/*/repos"
+kind = "grant"
+source = "https://docs.github.com/en/rest/repos/repos#create-an-organization-repository"
+
+[[barriers]]
+hosts = ["api.github.com", "github.com"]
+methods = ["POST"]
+path = "/gists"
+kind = "grant"
+source = "https://docs.github.com/en/rest/gists/gists#create-a-gist"
+
+[[barriers]]
+hosts = ["api.github.com", "github.com"]
+methods = ["PATCH"]
+path = "/repos/*/*"
+kind = "visibility"
+source = "https://docs.github.com/en/rest/repos/repos#update-a-repository"
+
+[[barriers]]
+hosts = ["api.github.com", "github.com"]
+methods = ["PUT", "DELETE"]
+path = "/repos/*/*/contents/.github/**"
+kind = "grant"
+source = "https://docs.github.com/en/rest/repos/contents#create-or-update-file-contents"
+
+[[barriers]]
+hosts = ["api.github.com", "github.com"]
+methods = ["POST"]
+path = "/repos/*/*/actions/runners/registration-token"
+kind = "grant"
+source = "https://docs.github.com/en/rest/actions/self-hosted-runners#create-a-registration-token-for-a-repository"
+
+[[barriers]]
+hosts = ["api.github.com", "github.com"]
+methods = ["POST", "PUT", "PATCH", "DELETE"]
+path = "/repos/*/*/collaborators/**"
+kind = "grant"
+source = "https://docs.github.com/en/rest/collaborators/collaborators"
+
+# Ref namespace barriers compose with every matching workflow/visibility rule.
+# Missing/outside branch targets need the SAME real endpoint grant; malformed
+# request shapes never gain that exception. SmartGit uses a separate parser.
+
+[[barriers]]
+hosts = ["api.github.com", "github.com"]
+methods = ["PUT", "DELETE"]
+path = "/repos/*/*/contents/**"
+kind = "ref_contents"
+source = "https://docs.github.com/en/rest/repos/contents#create-or-update-file-contents"
+
+[[barriers]]
+hosts = ["api.github.com", "github.com"]
+methods = ["POST"]
+path = "/repos/*/*/git/refs"
+kind = "ref_create"
+source = "https://docs.github.com/en/rest/git/refs#create-a-reference"
+
+[[barriers]]
+hosts = ["api.github.com", "github.com"]
+methods = ["PATCH"]
+path = "/repos/*/*/git/refs/**"
+kind = "ref_update"
+source = "https://docs.github.com/en/rest/git/refs#update-a-reference"
+
+[[barriers]]
+hosts = ["api.github.com", "github.com"]
+methods = ["DELETE"]
+path = "/repos/*/*/git/refs/**"
+kind = "ref_delete"
+source = "https://docs.github.com/en/rest/git/refs#delete-a-reference"
+
+[[barriers]]
+hosts = ["api.github.com", "github.com"]
+methods = ["POST"]
+path = "/repos/*/*/merges"
+kind = "ref_merge"
+source = "https://docs.github.com/en/rest/branches/branches#merge-a-branch"
+
+[[barriers]]
+hosts = ["api.github.com", "github.com"]
+methods = ["PUT"]
+path = "/repos/*/*/pulls/*/merge"
+kind = "ref_pull_merge"
+source = "https://docs.github.com/en/rest/pulls/pulls#merge-a-pull-request"
+
+[[barriers]]
+hosts = ["api.github.com", "github.com"]
+methods = ["POST"]
+path = "/repos/*/*/merge-upstream"
+kind = "ref_upstream"
+source = "https://docs.github.com/en/rest/branches/branches#sync-a-fork-branch-with-the-upstream-repository"
+
+[[barriers]]
+hosts = ["api.github.com", "github.com"]
+methods = ["POST"]
+path = "/repos/*/*/branches/**/rename"
+kind = "ref_rename"
+source = "https://docs.github.com/en/rest/branches/branches#rename-a-branch"
+
+# Current API2026-03-10 asynchronous equivalent of the same ref-moving merge.
+[[barriers]]
+hosts = ["api.github.com", "github.com"]
+methods = ["PUT"]
+path = "/repos/*/*/pulls/*/merge-async"
+kind = "ref_pull_merge_async"
+source = "https://docs.github.com/en/rest/pulls/pulls#merge-a-pull-request-asynchronously"
+
+# Parse the selected operation and compose every specified ref mutation.
+[[barriers]]
+hosts = ["api.github.com", "github.com"]
+methods = ["POST", "GET", "PUT", "PATCH", "DELETE"]
+path = "/graphql"
+kind = "graphql"
+source = "https://docs.github.com/en/graphql/overview/public-schema"

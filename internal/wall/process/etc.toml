@@ -1,0 +1,3 @@
+# Only these host entries enter a process wall. The launcher creates passwd,
+# group, hosts and resolv.conf itself. Keep this list narrow.
+entries = ["alternatives", "ssl", "ld.so.cache", "ld.so.conf", "ld.so.conf.d", "nsswitch.conf", "localtime", "gai.conf"]

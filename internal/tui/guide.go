@@ -65,6 +65,7 @@ type (
 	}
 	createdMsg struct {
 		scope guideScope
+		name  string
 		host  client.Host
 		err   error
 		took  time.Duration
@@ -330,7 +331,7 @@ func (g *guide) create(m *Model) tea.Cmd {
 	}
 	switch {
 	case !client.ValidHostName(name):
-		g.err = &client.UserError{Msg: fmt.Sprintf("%q cannot name a host", name), Hint: "Use letters, digits, dots, dashes and underscores.", Code: "bad_name", Kind: client.KindUsage}
+		g.err = &client.UserError{Msg: fmt.Sprintf("%q cannot name a host", name), Hint: "Use letters, digits, dots, dashes and underscores, with no dot at the end.", Code: "bad_name", Kind: client.KindUsage}
 		return nil
 	case m.hostByName(name) != nil:
 		g.err = &client.UserError{Msg: "there is already a host named " + name, Hint: "Pick another name.", Code: "host_exists"}
@@ -349,7 +350,7 @@ func (g *guide) create(m *Model) tea.Cmd {
 		defer run.end()
 		start := clock()
 		h, err := local.Create(ctx, kind, name, out)
-		msg := createdMsg{scope: scope, host: h, err: err, took: clock().Sub(start)}
+		msg := createdMsg{scope: scope, name: name, host: h, err: err, took: clock().Sub(start)}
 		run.complete(msg)
 		return msg
 	})
@@ -375,6 +376,9 @@ func (g *guide) onCreated(m *Model, msg createdMsg) tea.Cmd {
 	if msg.err != nil {
 		g.checks[0].state = ckFailed
 		g.err = msg.err
+		if hostChanged(msg.err) {
+			return m.reloadHost(msg.name)
+		}
 		return nil
 	}
 	if stopped {
@@ -385,6 +389,11 @@ func (g *guide) onCreated(m *Model, msg createdMsg) tea.Cmd {
 	w := newWizard()
 	w.guided, w.made = true, true
 	w.host = msg.host
+	if msg.host.Machine != nil {
+		w.tier = client.ProviderTier(msg.host.Machine.Provider)
+	}
+	made := msg.host
+	w.was = &made
 	m.modal = w
 	return w.probe(m)
 }

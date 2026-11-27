@@ -59,9 +59,9 @@ func TestCreateRefusesAnOldLima(t *testing.T) {
 			if err := os.WriteFile(filepath.Join(dir, "version"), []byte("limactl version 2.2.1\n"), 0o644); err != nil {
 				t.Fatal(err)
 			}
-			_, err := Provider{}.Create(context.Background(), provider.Request{Name: "dev"})
+			_, err := fixtureCreate(t, context.Background(), provider.Request{Name: "dev"})
 			var ue *client.UserError
-			if !errors.As(err, &ue) || ue.Msg != tc.msg || ue.Hint != "Update Lima (https://lima-vm.io/docs/installation/), then run this again." {
+			if !errors.As(retainedCreationCause(err), &ue) || ue.Msg != tc.msg || ue.Hint != "Update Lima (https://lima-vm.io/docs/installation/), then run this again." {
 				t.Fatalf("create = %#v", err)
 			}
 			if cs := calls(t, dir); len(cs) != 1 || cs[0][0] != "--version" {
@@ -86,9 +86,9 @@ func TestCreateWithoutAVersion(t *testing.T) {
 			if err := os.WriteFile(filepath.Join(dir, tc.file), []byte(tc.version), 0o644); err != nil {
 				t.Fatal(err)
 			}
-			_, err := Provider{}.Create(context.Background(), provider.Request{Name: "dev"})
+			_, err := fixtureCreate(t, context.Background(), provider.Request{Name: "dev"})
 			var ue *client.UserError
-			if !errors.As(err, &ue) || ue.Hint != "limactl --version" || ue.Msg != `could not read the version of limactl from "`+tc.quoted+`"` {
+			if !errors.As(retainedCreationCause(err), &ue) || ue.Hint != "limactl --version" || ue.Msg != `could not read the version of limactl from "`+tc.quoted+`"` {
 				t.Fatalf("create = %#v", err)
 			}
 			if verbs(calls(t, dir)) != nil {
@@ -100,9 +100,9 @@ func TestCreateWithoutAVersion(t *testing.T) {
 
 func TestCreateWithoutLimactl(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
-	_, err := Provider{}.Create(context.Background(), provider.Request{Name: "dev"})
+	_, err := fixtureCreate(t, context.Background(), provider.Request{Name: "dev"})
 	var ue *client.UserError
-	if !errors.As(err, &ue) || ue.Msg != "limactl is not installed, or not on your PATH" {
+	if !errors.As(retainedCreationCause(err), &ue) || ue.Msg != "limactl is not installed, or not on your PATH" {
 		t.Fatalf("create = %#v", err)
 	}
 }

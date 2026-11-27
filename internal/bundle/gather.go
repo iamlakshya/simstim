@@ -118,6 +118,8 @@ func (b *builder) hostFacts(ctx context.Context) error {
 			return err
 		}
 		ids = []string{s.ID}
+		// A hint from here on names the session by its ID (again).
+		b.found = s.ID
 	}
 	if b.col, err = b.conn.DebugCollect(ctx, ids, len(ids) == 0); err != nil {
 		return err

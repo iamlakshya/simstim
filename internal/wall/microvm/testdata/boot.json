@@ -1,0 +1,36 @@
+{
+  "argv": [
+    "/store/vmm",
+    "--api-socket",
+    "path=/run/private/vmm.sock",
+    "--kernel",
+    "/store/kernel",
+    "--cmdline",
+    "ro quiet root=/dev/dm-0 rootfstype=erofs init=/init dm-mod.waitfor=/dev/vda,/dev/vdb dm-mod.create=\"tools,,0,ro,0 1600 verity 1 /dev/vda /dev/vda 4096 4096 200 200 sha256 dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd 0000000000000000000000000000000000000000000000000000000000000000 1 panic_on_corruption;image,,1,ro,0 2400 verity 1 /dev/vdb /dev/vdb 4096 4096 300 301 sha256 cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc 0000000000000000000000000000000000000000000000000000000000000000 1 panic_on_corruption\" -- wall-init --microvm-v1",
+    "--cpus",
+    "boot=2",
+    "--memory",
+    "size=4096M",
+    "--balloon",
+    "size=0,free_page_reporting=on",
+    "--disk",
+    "path=/store/tools,readonly=on,direct=on,image_type=raw,backing_files=off,_disable_io_uring=on,_disable_aio=on,serial=tools",
+    "path=/store/image,readonly=on,direct=on,image_type=raw,backing_files=off,_disable_io_uring=on,_disable_aio=on,serial=image",
+    "path=/store/agents,readonly=on,direct=on,image_type=raw,backing_files=off,_disable_io_uring=on,_disable_aio=on,serial=agents",
+    "path=/session/vm/disk.img,readonly=off,direct=on,image_type=raw,backing_files=off,sparse=on,_disable_io_uring=on,_disable_aio=on,serial=session",
+    "--vsock",
+    "cid=3,socket=/run/private/vsock.sock",
+    "--serial",
+    "off",
+    "--console",
+    "off",
+    "--seccomp",
+    "true",
+    "--landlock"
+  ],
+  "memory": {
+    "guest": 4294967296,
+    "reserve": 150994944,
+    "limit": 4445962240
+  }
+}

@@ -142,7 +142,7 @@ func TestSetupWithFlags(t *testing.T) {
 		"Creating box with fake…", "✓ created the fake machine fake-box",
 		"[x] Claude Code", "[x] Codex", "To install: Codex.",
 		"Codex (1 of 1), with its vendor's installer",
-		"Done. box is ready.", "! Codex", "Try: " + brand.Name + " new box -- codex login --device-auth",
+		"Done. box is ready.", "! Codex", "Try: " + brand.Name + " agents login codex box",
 		brand.Name + " new box --agent claude",
 	} {
 		if !strings.Contains(out.String(), want) {
@@ -179,7 +179,7 @@ func TestSetupStepByStep(t *testing.T) {
 		"Type the numbers to install",
 		"Claude Code is not logged in. Its login:",
 		"Log in now? [Y/n]",
-		"Skipped. Later: " + brand.Name + " new box -- codex login --device-auth",
+		"Skipped. Later: " + brand.Name + " agents login codex box",
 		"✓ Claude Code", "Done. box is ready.",
 	} {
 		if !strings.Contains(out.String(), want) {
@@ -249,19 +249,19 @@ func TestSetupNeedsATerminalOrFlags(t *testing.T) {
 func TestSetupNamedHost(t *testing.T) {
 	withFake(t, nil)
 	g, _, _ := testGuide(t, context.Background(), guideOpts{}, &guideLocal{}, &clienttest.Transport{}, "", false)
-	h, err := g.namedHost("me@vps.example.com:2222")
-	if err != nil || h.Name != "vps.example.com" || h.SSH != "me@vps.example.com:2222" {
-		t.Fatalf("new host = %+v, %v", h, err)
+	h, was, err := g.namedHost("me@vps.example.com:2222")
+	if err != nil || h.Name != "vps.example.com" || h.SSH != "me@vps.example.com:2222" || was != nil {
+		t.Fatalf("new host = %+v, was %+v, %v", h, was, err)
 	}
 	saved := client.Host{Name: "box", Machine: &client.Machine{Provider: "fake", ID: "fake-box"}}
-	_ = client.SaveHost(context.Background(), saved)
-	if h, err := g.namedHost("box"); err != nil || h.Machine == nil {
-		t.Fatalf("a saved host = %+v, %v", h, err)
+	_ = saveHost(saved)
+	if h, was, err := g.namedHost("box"); err != nil || h.Machine == nil || was == nil || !client.SameEntry(*was, saved) {
+		t.Fatalf("a saved host = %+v, was %+v, %v", h, was, err)
 	}
-	_ = client.SaveHost(context.Background(), client.Host{Name: "vps", SSH: "vps"})
+	_ = saveHost(client.Host{Name: "vps", SSH: "vps"})
 	g.o.name = "vps"
 	var ue *client.UserError
-	if _, err := g.namedHost("me@203.0.113.9"); !errors.As(err, &ue) || !strings.Contains(ue.Msg, "already a host called vps") {
+	if _, _, err := g.namedHost("me@203.0.113.9"); !errors.As(err, &ue) || !strings.Contains(ue.Msg, "already a host called vps") {
 		t.Fatalf("a clash: %v", err)
 	}
 }

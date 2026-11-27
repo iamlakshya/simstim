@@ -2,7 +2,6 @@ package cli
 
 import (
 	"fmt"
-	"path/filepath"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -27,8 +26,12 @@ func configCmd() *cobra.Command {
 		Example: "  " + brand.Name + " config keymap\n" +
 			"  " + brand.Name + " config keymap --json",
 		Args: cobra.NoArgs,
-		RunE: func(*cobra.Command, []string) error {
-			entries := tui.Keymap(client.LoadSettings())
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			s := client.LoadSettings()
+			if _, ok := s.Keymap["session: preview"]; ok {
+				warnOld(cmd, oldKeymapPreview)
+			}
+			entries := tui.Keymap(s)
 			if asJSON {
 				for i := range entries {
 					if entries[i].Keys == nil {
@@ -54,9 +57,10 @@ func configCmd() *cobra.Command {
 		Example: "  " + brand.Name + " config path",
 		Args:    cobra.NoArgs,
 		Run: func(*cobra.Command, []string) {
-			fmt.Println(filepath.Join(client.ConfigDir(), "config.toml"))
-			fmt.Println(filepath.Join(client.ConfigDir(), "hosts.toml"))
+			for _, f := range client.ConfigFiles() {
+				fmt.Println(f.Path)
+			}
 		},
-	})
+	}, configCheckCmd())
 	return cmd
 }

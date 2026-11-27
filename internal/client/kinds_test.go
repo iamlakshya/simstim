@@ -167,6 +167,7 @@ func stringLit(e ast.Expr) (string, bool) {
 // builds, and in the table of the host's codes (docs/contributing/style.md).
 func TestOneCodeOneKind(t *testing.T) {
 	kinds := map[string]map[string]string{} // code, kind, where
+	notCreated := 0
 	fset := token.NewFileSet()
 	err := filepath.WalkDir("..", func(p string, d os.DirEntry, err error) error {
 		if err != nil || d.IsDir() || !strings.HasSuffix(p, ".go") || strings.HasSuffix(p, "_test.go") {
@@ -181,7 +182,7 @@ func TestOneCodeOneKind(t *testing.T) {
 			if !ok || !namesUserError(lit.Type, f.Name.Name == "client") {
 				return true
 			}
-			code, kind := "", "KindFailed"
+			code, kind, msg := "", "KindFailed", ""
 			for _, el := range lit.Elts {
 				kv, ok := el.(*ast.KeyValueExpr)
 				if !ok {
@@ -193,6 +194,17 @@ func TestOneCodeOneKind(t *testing.T) {
 					code, _ = stringLit(kv.Value)
 				case k.Name == "Kind":
 					kind = lastName(kv.Value)
+				case k.Name == "Msg":
+					msg = literalText(kv.Value)
+				}
+			}
+			if strings.Contains(msg, "not made by") {
+				// One fact has one code: a host that host create did not
+				// make is not_created, a usage error, at every site.
+				notCreated++
+				if code != "not_created" || kind != "KindUsage" {
+					t.Errorf("%s says that a host was not made by host create with %s and %s, want not_created and KindUsage",
+						fset.Position(lit.Pos()), code, kind)
 				}
 			}
 			if code != "" {
@@ -210,6 +222,9 @@ func TestOneCodeOneKind(t *testing.T) {
 	}
 	if len(kinds) < 30 {
 		t.Fatalf("found only %d codes: the test no longer reads the code", len(kinds))
+	}
+	if notCreated < 3 {
+		t.Errorf("found %d errors of a host that host create did not make, want those of OpenMachine, host rm and host set", notCreated)
 	}
 	names := map[Kind]string{KindFailed: "KindFailed", KindUsage: "KindUsage", KindNotFound: "KindNotFound",
 		KindNeedsAnswer: "KindNeedsAnswer", KindRefused: "KindRefused", KindCancelled: "KindCancelled"}
@@ -236,6 +251,21 @@ func namesUserError(e ast.Expr, inClient bool) bool {
 		return inClient && e.Name == "UserError"
 	}
 	return false
+}
+
+// literalText joins the string literals in e, such as the parts of
+// h.Name + " was not made by host create".
+func literalText(e ast.Expr) string {
+	var b strings.Builder
+	ast.Inspect(e, func(n ast.Node) bool {
+		if s, ok := n.(ast.Expr); ok {
+			if t, ok := stringLit(s); ok {
+				b.WriteString(t)
+			}
+		}
+		return true
+	})
+	return b.String()
 }
 
 // lastName is the name of an identifier, or of a selector's last part.

@@ -27,17 +27,25 @@ func (s *SSH) ConfigValues(ctx context.Context) (map[string][]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-	// The forwarding options of every command line, as the bridge has them.
-	args := slices.Concat([]string{"-F", cfg}, NoForwarding(), NoPortForwards(), []string{"-G", "--", s.Host.SSH})
-	cmd := exec.CommandContext(ctx, "ssh", args...)
-	cmd.WaitDelay = sshWaitDelay
-	out, err := cmd.Output()
-	if err != nil {
-		return nil, fmt.Errorf("ssh -G %s: %w", s.Host.Name, err)
+	var pin []string
+	if ValidHostName(s.Host.Name) {
+		var snap pinSnap
+		var ok bool
+		if lerr := readPinLocked(ctx, s.Host.Name, func() { snap, ok, err = loadPin(s.Host.Name) }); lerr != nil {
+			return nil, lerr
+		}
+		if err != nil {
+			return nil, err
+		}
+		if ok {
+			if pin, err = pinArgs(s.Host.Name, snap.path); err != nil {
+				return nil, err
+			}
+		}
 	}
-	vals, err := parseConfigValues(out)
+	// The forwarding options of every command line, and the pin, as the
+	// bridge has them.
+	vals, _, err := sshG(ctx, slices.Concat([]string{"-F", cfg}, NoForwarding(), pin, NoPortForwards()), s.Host.SSH)
 	if err != nil {
 		return vals, fmt.Errorf("ssh -G %s: %w", s.Host.Name, err)
 	}
@@ -76,9 +84,12 @@ const verboseWait = 15 * time.Second
 // its log. It does not use or disturb the shared connection, never asks
 // for a password, and stops after verboseWait. The remote side runs true.
 func (s *SSH) VerboseLog(ctx context.Context) ([]byte, error) {
-	cfg, err := writeWrapper(s.Host)
-	if err != nil {
+	if err := ctx.Err(); err != nil {
 		return nil, err
+	}
+	base, err := (&SSH{Host: s.Host}).connArgs(ctx, false)
+	if err != nil {
+		return nil, err // a saved host that has no pin yet, or an unsaved host
 	}
 	dir, err := os.MkdirTemp("", brand.Name+"-ssh-")
 	if err != nil {
@@ -88,8 +99,10 @@ func (s *SSH) VerboseLog(ctx context.Context) ([]byte, error) {
 	log := filepath.Join(dir, "ssh.log")
 	ctx, cancel := context.WithTimeout(ctx, verboseWait)
 	defer cancel()
-	args := slices.Concat([]string{"-F", cfg}, NoForwarding(), NoPortForwards(), OwnConnection(),
-		[]string{"-T", "-o", "BatchMode=yes", "-v", "-E", log, "--", s.Host.SSH, "true"})
+	// -v comes before the pin's LogLevel=ERROR, so ssh keeps DEBUG1: ssh
+	// uses the first LogLevel or -v option on the command line.
+	args := slices.Concat([]string{"-v"}, base, NoPortForwards(),
+		[]string{"-T", "-e", "none", "-E", log, "--", s.Host.SSH, "true"})
 	cmd := exec.CommandContext(ctx, "ssh", args...)
 	cmd.WaitDelay = sshWaitDelay
 	runErr := cmd.Run()

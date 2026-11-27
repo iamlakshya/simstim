@@ -7,7 +7,7 @@ title: "simstim host"
 Add, create, list, test and remove hosts.
 
 ```text
-simstim host
+simstim host [flags]
 ```
 
 ## Examples
@@ -33,15 +33,22 @@ simstim host ls
 | [`host add`](host_add.md) | Connect a host: check it, install the helper, prepare it |
 | [`host alerts`](host_alerts.md) | Show where a host sends alerts, and the last deliveries |
 | [`host create`](host_create.md) | Make a host with lima, docker or e2b, and connect it |
-| [`host destroy`](host_destroy.md) | Delete a created host: its machine and every session on it |
+| [`host default`](host_default.md) | Show or choose the default host for new sessions |
 | [`host doctor`](host_doctor.md) | Check a host's setup, and with `--fix` fix what it can |
-| [`host idle`](host_idle.md) | Set how long a created host may idle before it stops |
+| [`host invite`](host_invite.md) | Make a public invite for a machine to prepare itself |
+| [`host join`](host_join.md) | Prepare this machine from a laptop invite on standard input |
+| [`host leave`](host_leave.md) | Undo this machine's original root-owned join ledger |
 | [`host ls`](host_ls.md) | List hosts |
+| [`host prepare`](host_prepare.md) | Probe a host, prepare its runtime and test its sandbox wall |
+| [`host rekey`](host_rekey.md) | Replace a host's pinned host key, after you confirm |
 | [`host restore`](host_restore.md) | Start again the sessions that a host restart stopped |
-| [`host rm`](host_rm.md) | Forget a host (its sessions keep running) |
+| [`host rm`](host_rm.md) | Forget a host, or delete a created machine |
+| [`host set`](host_set.md) | Change a host's settings, such as idle or tier |
+| [`host show`](host_show.md) | Describe a host |
 | [`host start`](host_start.md) | Start the host through its provider or provider script |
 | [`host status`](host_status.md) | Ask the provider or provider script whether the host is running |
 | [`host stop`](host_stop.md) | Stop the host through its provider or provider script |
 | [`host test`](host_test.md) | Check that a host answers, and how fast |
+| [`host upgrade`](host_upgrade.md) | Install this client's helper on a host |
 
 See [all commands](_index.md).

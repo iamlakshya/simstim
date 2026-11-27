@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -24,9 +25,19 @@ import (
 // noInputEnv is the variable that turns input off.
 var noInputEnv = brand.Env("NO_INPUT")
 
+// The selected-shell adapter binds these actual restored files. This carries
+// no answer or grant: input policy and the live question still apply.
+type promptTerminalKey struct{}
+type promptTerminalFiles struct{ in, out *os.File }
+
 // inputOn reports whether cmd may ask: stdin, stdout and stderr are
 // terminals, and the user did not turn input off.
 func inputOn(cmd *cobra.Command) bool {
+	if cmd != nil && cmd.Context() != nil {
+		if files, ok := cmd.Context().Value(promptTerminalKey{}).(promptTerminalFiles); ok {
+			return !inputOff(cmd) && isTerminal(files.in) && isTerminal(files.out)
+		}
+	}
 	return !inputOff(cmd) && isTerminal(os.Stdin) && isTerminal(os.Stdout) && isTerminal(os.Stderr)
 }
 
@@ -47,7 +58,12 @@ func envTurnsInputOff(v string) bool { return v != "" && v != "0" && v != "false
 // stderr are terminals. stdout may go to a file. The command's stderr then
 // reaches the user's.
 func secretTerminal(cmd *cobra.Command) bool {
-	return !inputOff(cmd) && isTerminal(os.Stdin) && isTerminal(os.Stderr)
+	if cmd == nil {
+		return !inputOff(nil) && isTerminal(os.Stdin) && isTerminal(os.Stderr)
+	}
+	input, inputOK := cmd.InOrStdin().(*os.File)
+	diagnostic, diagnosticOK := cmd.ErrOrStderr().(*os.File)
+	return !inputOff(cmd) && inputOK && diagnosticOK && isTerminal(input) && isTerminal(diagnostic)
 }
 
 // boolFlag is the value of a bool flag of cmd, or false when cmd has none.
@@ -70,23 +86,49 @@ type question struct {
 	// ask for: with input off, the command takes it and says so. Otherwise
 	// the command fails with exit code 4, and names flag.
 	keep bool
+	// refused questions need live consent and have no answering flag.
+	refused bool
 }
 
 // The questions that commands ask today. A task that adds a prompt adds its
 // row here, and to the spec's table.
 var (
+	qPolicyAllow   = &question{cmd: "policy allow", flag: "--all"}
+	qPolicyDeny    = &question{cmd: "policy deny", flag: "--all"}
+	qPolicyRm      = &question{cmd: "policy rm", flag: "--all"}
+	qSharedNew     = &question{cmd: "new", flag: "None", refused: true}
+	qSharedResume  = &question{cmd: "resume", flag: "None", refused: true}
+	qSharedRewind  = &question{cmd: "rewind", flag: "None", refused: true}
 	qInstallHelper = &question{cmd: "host add", flag: "--yes"}
 	qAddAgents     = &question{cmd: "host add", flag: "--yes", keep: true}
-	qMakeFolder    = &question{cmd: "new", flag: "--mkdir"}
-	qSetupScript   = &question{cmd: "new", flag: "--setup", keep: true}
-	qFix           = &question{cmd: "doctor", flag: "-y"}
-	qHostFix       = &question{cmd: "host doctor", flag: "-y"}
-	qDestroy       = &question{cmd: "host destroy", flag: "-y"}
-	qSetup         = &question{cmd: "setup", flag: "--yes"}
+	// qHostKey is ssh's own question about a host key that the user's
+	// known hosts lack: the client lets ssh ask it (isolation spec 14.7.1).
+	qHostKey     = &question{cmd: "host add", flag: "--host-key"}
+	qHostTier    = &question{cmd: "host add", flag: "--tier"}
+	qRaiseTier   = &question{cmd: "host set", flag: "--confirm <host>"}
+	qRekey       = &question{cmd: "host rekey", flag: "--confirm"}
+	qMakeFolder  = &question{cmd: "new", flag: "--mkdir"}
+	qSetupScript = &question{cmd: "new", flag: "--setup-script", keep: true}
+	qFix         = &question{cmd: "doctor", flag: "-y"}
+	qHostFix     = &question{cmd: "host doctor", flag: "-y"}
+	qRootStep    = &question{cmd: "host prepare", flag: "--root-step run"}
+	qSetup       = &question{cmd: "setup", flag: "--yes"}
+	// qDelete fails with input off only after the end of its old form:
+	// until then rm deletes and warns (rm.go).
+	qDelete  = &question{cmd: "rm", flag: "-y"}
+	qRestart = &question{cmd: "attach", flag: "--restart", def: true}
+	// qRmMachine is the typed name that host rm asks for, to delete the
+	// machine of a host that `host create` made. With input off, the
+	// machine stays, unless --destroy and --confirm name it.
+	qRmMachine      = &question{cmd: "host rm", flag: "--destroy --confirm <host>", keep: true}
+	qRmPurge        = &question{cmd: "host rm", flag: "--purge --confirm <host>"}
+	qRmLogins       = &question{cmd: "host rm", flag: "--delete-logins", keep: true}
+	qPurgeRootStep  = &question{cmd: "host rm", flag: "--root-step run"}
+	qPurgeRootGrant = &question{cmd: "host rm", flag: "None", refused: true}
 )
 
 // questions lists every row, for the tests.
-var questions = []*question{qInstallHelper, qAddAgents, qMakeFolder, qSetupScript, qFix, qHostFix, qDestroy, qSetup}
+var questions = []*question{qPolicyAllow, qPolicyDeny, qPolicyRm, qSharedNew, qSharedResume, qSharedRewind, qInstallHelper, qAddAgents, qHostKey, qHostTier, qRaiseTier, qRekey, qMakeFolder, qSetupScript, qFix, qHostFix, qRootStep, qSetup, qRmMachine, qRmPurge, qRmLogins, qPurgeRootStep, qPurgeRootGrant, qDelete, qRestart, qJoinChanges, qLeaveChanges}
 
 // prompter asks a command's questions on stderr, and reads the answers from
 // stdin.
@@ -103,6 +145,17 @@ type prompter struct {
 	flagsAt int
 	// path is the command's path, for a line that is not known.
 	path string
+	// For a question about a session (sessionPrompts): short is the
+	// command's path and the session's host/ID alone, the line when the
+	// whole line would not reach the terminal whole, and host is the
+	// session's host. try, when set, is the Try: line instead, as when the
+	// session's address could not go in a command.
+	short []string
+	host  string
+	try   string
+	// help is the command's help, the Try: line when the line holds a
+	// word that would not reach the terminal whole.
+	help string
 	// log lists what earlier steps changed, for the line of a cancel. Steps
 	// add to it as they change something, so a cancel at any point lists
 	// all of it.
@@ -110,28 +163,63 @@ type prompter struct {
 }
 
 // prompts is the prompter of cmd.
+// An old name's line is in its new form, so that a Try: line teaches it.
 func prompts(cmd *cobra.Command) *prompter {
-	line := commandLine(cmd)
-	return &prompter{ctx: cmd.Context(), in: os.Stdin, out: os.Stderr, on: inputOn(cmd),
-		line: line, flagsAt: flagsAt(cmd, line), path: cmd.CommandPath()}
+	line := newForm(cmd, commandLine(cmd))
+	p := &prompter{ctx: cmd.Context(), in: os.Stdin, out: os.Stderr, on: inputOn(cmd),
+		line: line, flagsAt: flagsAt(cmd, line), path: cmd.CommandPath(), help: helpOf(cmd)}
+	if p.ctx != nil {
+		if files, ok := p.ctx.Value(promptTerminalKey{}).(promptTerminalFiles); ok {
+			p.in, p.out = files.in, files.out
+		}
+	}
+	return p
 }
 
 // withFlags is p's command line with flags added before any "--", as a
 // command that runs as written.
 func (p *prompter) withFlags(flags ...string) string {
-	if len(p.line) == 0 {
-		return strings.Join(append([]string{p.path}, flags...), " ")
+	if p.try != "" {
+		return p.try
 	}
+	out := lineWithFlags(p.path, p.line, p.flagsAt, flags)
+	if p.short != nil {
+		// The line holds the found host/ID, and sessionLine checked each
+		// word, so an older ID without a digit keeps its command.
+		if !whole(out) {
+			return printedOr(p.host, lineWithFlags(p.path, p.short, len(p.short), flags))
+		}
+		return out
+	}
+	if len(p.line) == 0 {
+		return out
+	}
+	// The line repeats what the user typed: it goes through typedLine.
 	at := min(p.flagsAt, len(p.line))
+	words := append(append(slices.Clone(p.line[:at]), flags...), p.line[at:]...)
+	help := p.help
+	if help == "" {
+		help = p.path + " --help"
+	}
+	return typedLine(words, out, help)
+}
+
+// lineWithFlags is line with flags added at index at, as a command that
+// runs as written, or path and the flags when line is empty.
+func lineWithFlags(path string, line []string, at int, flags []string) string {
+	if len(line) == 0 {
+		return strings.Join(append([]string{path}, flags...), " ")
+	}
+	at = min(at, len(line))
 	// The user's words are quoted where a shell needs it. The flags are
 	// ours, placeholders such as <host> included, and stay as they are.
 	parts := []string{brand.Name}
 	if at > 0 {
-		parts = append(parts, joinWords(p.line[:at]))
+		parts = append(parts, joinWords(line[:at]))
 	}
 	parts = append(parts, flags...)
-	if at < len(p.line) {
-		parts = append(parts, joinWords(p.line[at:]))
+	if at < len(line) {
+		parts = append(parts, joinWords(line[at:]))
 	}
 	return strings.Join(parts, " ")
 }
@@ -172,6 +260,10 @@ func (p *prompter) confirm(q *question, text, need string) (bool, error) {
 	if !p.on {
 		if q.keep {
 			return q.def, nil
+		}
+		if q.refused {
+			return false, &client.UserError{Msg: q.cmd + " needs a live terminal answer for this grant",
+				Hint: "Run the command in a terminal, with input on.", Code: "tier_refused", Kind: client.KindRefused}
 		}
 		return false, p.needs(q, need)
 	}
@@ -223,6 +315,37 @@ func (p *prompter) yesNo(text string, def bool) (bool, error) {
 			return false, p.cancel()
 		}
 		fmt.Fprintln(p.out, "Type y or n, or press Enter for the answer in capitals.")
+	}
+}
+
+// askTier asks who else has root on host (isolation spec 14.2.1, 14.8.3).
+// It has no default answer: 1/own, 2/shared or 3/throwaway picks the tier,
+// and three other answers cancel.
+func (p *prompter) askTier(host string) (client.Tier, error) {
+	if !p.on {
+		return client.TierUnknown, p.needs(qHostTier, "the tier of "+host+" (own, throwaway or shared)", "--tier", "<tier>")
+	}
+	fmt.Fprintf(p.out, "\nWho else has root on %s?\n", shown(host))
+	fmt.Fprintln(p.out, "  1  Only me                  own")
+	fmt.Fprintln(p.out, "  2  Someone else             shared")
+	fmt.Fprintln(p.out, "  3  A machine for one task   throwaway")
+	for try := 1; ; try++ {
+		a, err := p.ask("Tier (1, 2 or 3): ")
+		if err != nil {
+			return client.TierUnknown, err
+		}
+		switch strings.ToLower(strings.TrimSpace(a)) {
+		case "1", "own":
+			return client.TierOwn, nil
+		case "2", "shared":
+			return client.TierShared, nil
+		case "3", "throwaway":
+			return client.TierThrowaway, nil
+		}
+		if try == 3 {
+			return client.TierUnknown, p.cancel()
+		}
+		fmt.Fprintln(p.out, "Type 1, 2 or 3, or own, shared or throwaway.")
 	}
 }
 

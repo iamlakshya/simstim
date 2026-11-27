@@ -21,7 +21,7 @@ func (f *makeFolderAsk) key(m *Model, k tea.KeyPressMsg) tea.Cmd {
 		r.args.MakeFolder = true
 		return m.startAgain(r)
 	case "n", "esc", "q":
-		m.cancelStart(f.startReq)
+		return m.cancelStart(f.startReq)
 	}
 	return nil
 }
@@ -34,7 +34,7 @@ func (f *makeFolderAsk) view(m *Model) string {
 	}
 	folder = client.ShowPath(folder) // from the host
 	body := make([]string, 1, 8)     // a blank line first
-	body = append(body, wrap("The folder "+folder+" does not exist on "+f.host+".", w-4)...)
+	body = append(body, wrap("The folder "+folder+" does not exist on "+shown(f.host)+".", w-4)...)
 	body = append(body, "")
 	body = append(body, wrap("Make it, with any missing folders above it, and start the session there?", w-4)...)
 	return sheet(w, "Make the folder?", "", []hint{{"y", "make it"}, {"n", "cancel"}}, body, toneNormal)

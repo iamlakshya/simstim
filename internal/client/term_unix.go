@@ -3,6 +3,7 @@
 package client
 
 import (
+	"fmt"
 	"os"
 	"os/signal"
 	"syscall"
@@ -63,13 +64,21 @@ func privateDir(d string) bool {
 	return ownerOf(fi) == os.Getuid()
 }
 
-// ownedDir reports whether d is a real folder (not a link) that this user
-// owns, and that neither its group nor others may write: nobody else can
-// move or replace a folder in it.
-func ownedDir(d string) bool {
-	fi, err := os.Lstat(d)
-	if err != nil || !fi.IsDir() || fi.Mode().Perm()&0o022 != 0 {
-		return false
+func controlFileOwned(info os.FileInfo) bool {
+	st, ok := info.Sys().(*syscall.Stat_t)
+	return ok && int(st.Uid) == os.Getuid()
+}
+
+// controlScope identifies the physical client root, so isolated roots do
+// not share or retire each other's sockets in the short fallback folder.
+func controlScope() (string, bool) {
+	info, err := os.Stat(ConfigDir())
+	if err != nil || !info.IsDir() {
+		return "", false
 	}
-	return ownerOf(fi) == os.Getuid()
+	st, ok := info.Sys().(*syscall.Stat_t)
+	if !ok || int(st.Uid) != os.Getuid() {
+		return "", false
+	}
+	return fmt.Sprintf("%x:%x", st.Dev, st.Ino), true
 }

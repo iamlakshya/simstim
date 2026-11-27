@@ -358,3 +358,64 @@ func waitRuns(t *testing.T, path string, n int) {
 		return strings.Count(string(b), "\n") == n
 	})
 }
+
+// A restored holder that answers late is not stopped (review 7, finding
+// 2): it never waits for secrets, so its agent cannot start without them.
+// The restore waits longer for it, and even past that wait leaves the
+// holder to finish starting.
+func TestASlowRestoredHolderIsKept(t *testing.T) {
+	hosttest.New(t)
+	observeHolders(t)
+	s := start(t, "slow", "sleep", "60")
+	crash(t, s.ID)
+	m := manifest(t, s.ID)
+	m.Run.BootID = "a boot before"
+	if err := m.Save(); err != nil {
+		t.Fatal(err)
+	}
+	oldWait, oldRestore, oldLate := *host.StartWait, *host.RestoreWait, *host.LateStart
+	t.Cleanup(func() { *host.StartWait, *host.RestoreWait, *host.LateStart = oldWait, oldRestore, oldLate })
+	stall := filepath.Join(t.TempDir(), "start-stall")
+	if err := os.WriteFile(stall, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(host.StartStallEnv, stall)
+	*host.StartWait = 300 * time.Millisecond
+	late := false
+	*host.LateStart = func(string) {
+		// launchHolder gave up: the holder goes on within restoreWait.
+		late = true
+		_ = os.Remove(stall)
+	}
+	res := host.Restore(false)
+	if !late || len(res) != 1 || res[0].ID != s.ID || res[0].Action != "restored" {
+		t.Fatalf("the restore of a slow holder: %+v (late: %v)", res, late)
+	}
+	waitState(t, s.ID, host.StateWorking)
+	if !namedHolderRuns(t, s.ID) {
+		t.Fatal("the restored holder was stopped")
+	}
+
+	// Slower than restoreWait too: Restore reports that the holder may
+	// still start, and still does not kill it.
+	crash(t, s.ID)
+	m = manifest(t, s.ID)
+	m.Run.BootID = "a boot before"
+	if err := m.Save(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(stall, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	*host.RestoreWait = 300 * time.Millisecond
+	*host.LateStart = func(string) {}
+	res = host.Restore(false)
+	if len(res) != 1 || res[0].Action != "failed" || !strings.Contains(res[0].Why, "and its holder may still start") {
+		t.Fatalf("restore slower than restoreWait: %+v", res)
+	}
+	if !namedHolderRuns(t, s.ID) {
+		t.Fatal("the restored holder slower than restoreWait was stopped")
+	}
+	_ = os.Remove(stall)
+	waitState(t, s.ID, host.StateWorking)
+}

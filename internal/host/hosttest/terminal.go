@@ -124,7 +124,12 @@ func tail(b []byte, n int) []byte {
 func Screen(out []byte, cols, rows int) (lines []string, alt bool) {
 	e := vt.NewEmulator(cols, rows)
 	// The emulator writes replies to queries into a pipe: drain and drop them.
-	go func() { _, _ = io.Copy(io.Discard, e) }()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_, _ = io.Copy(io.Discard, e)
+	}()
+	defer func() { _ = e.Close(); <-done }()
 	_, _ = e.Write(out)
 	var b strings.Builder
 	for y := range rows {

@@ -1,7 +1,9 @@
 package host
 
 import (
+	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -15,6 +17,8 @@ import (
 	"github.com/iamlakshya/simstim/internal/agents"
 	"github.com/iamlakshya/simstim/internal/brand"
 	"github.com/iamlakshya/simstim/internal/paths"
+	"github.com/iamlakshya/simstim/internal/proto"
+	"github.com/iamlakshya/simstim/internal/version"
 )
 
 // meminfo is a /proc/meminfo for a host with total bytes of memory and no
@@ -228,18 +232,29 @@ func TestHolderStarted(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer l.Close()
+	done := make(chan struct{})
+	requests := make(chan proto.Request, 1)
 	go func() {
+		defer close(done)
 		for {
 			c, err := l.Accept()
 			if err != nil {
 				return
 			}
-			c.Close()
+			answerMemoryHolder(c, requests)
 		}
 	}()
+	defer func() { l.Close(); <-done }()
 	if err := holderStarted(id, from, 5*time.Second); err != nil {
 		t.Errorf("a start that worked = %v", err)
+	}
+	select {
+	case req := <-requests:
+		if req.Op != "sockets" {
+			t.Errorf("readiness request = %q, want sockets", req.Op)
+		}
+	default:
+		t.Error("the successful start never checked holder readiness")
 	}
 	for i := range 4 {
 		if _, err := fmt.Fprintf(hl, "time=x level=INFO msg=\"holder line %d\" %s\n", i, strings.Repeat("x", 60)); err != nil {
@@ -254,6 +269,29 @@ func TestHolderStarted(t *testing.T) {
 			t.Errorf("the logs lost %q:\n%s\n--\n%s", want, old, cur)
 		}
 	}
+}
+
+// answerMemoryHolder serves the actual readiness handshake on an owned socket.
+func answerMemoryHolder(c net.Conn, requests chan<- proto.Request) {
+	defer c.Close()
+	_ = c.SetDeadline(time.Now().Add(time.Second))
+	r, w := bufio.NewReader(c), proto.NewWriter(c)
+	if f, err := proto.Read(r); err != nil || f.Type != proto.THello {
+		return
+	}
+	if err := w.WriteJSON(proto.THello, proto.Hello{Magic: proto.Magic, Protocol: version.Protocol, Version: version.Version, Role: "holder"}); err != nil {
+		return
+	}
+	f, err := proto.Read(r)
+	var req proto.Request
+	if err != nil || f.Type != proto.TRequest || json.Unmarshal(f.Payload, &req) != nil || req.Op != "sockets" {
+		return
+	}
+	select {
+	case requests <- req:
+	default:
+	}
+	_ = w.WriteJSON(proto.TResponse, proto.Response{ID: req.ID, OK: true})
 }
 
 func TestSessionsMemoryCheck(t *testing.T) {

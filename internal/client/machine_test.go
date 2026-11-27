@@ -19,6 +19,10 @@ var fakeID atomic.Int64
 // register makes a fresh provider for one test and returns its host.
 func register(t *testing.T, lc client.Lifecycle) client.Host {
 	t.Helper()
+	// The client's folders of the test's own: a connection may write a
+	// file of the host's.
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	name := "fake" + string(rune('a'+fakeID.Add(1)))
 	client.RegisterProvider(name, func(client.Host) (client.Lifecycle, error) { return lc, nil })
 	return client.Host{Name: "box", Machine: &client.Machine{Provider: name, ID: "m-1"}}
@@ -66,7 +70,7 @@ func TestDialMissingMachine(t *testing.T) {
 	h := register(t, m)
 	_, err := client.Dial(context.Background(), h, false)
 	var ue *client.UserError
-	if !errors.As(err, &ue) || !strings.Contains(ue.Msg, "is gone") || !strings.Contains(ue.Hint, "host destroy") {
+	if !errors.As(err, &ue) || !strings.Contains(ue.Msg, "is gone") || !strings.Contains(ue.Hint, "host rm") {
 		t.Fatalf("err = %v, want a user error saying the machine is gone", err)
 	}
 }

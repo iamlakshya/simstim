@@ -127,6 +127,8 @@ On the host, in `~/.local/state/simstim/`, or under `$XDG_STATE_HOME` there:
 | --- | --- |
 | `sessions/<id>/debug.jsonl` | The records and debug lines of the session's process |
 | `sessions/<id>/holder.log` | The log of the session's process, with the processes of the session at each out-of-memory kill |
+| `sessions/<id>/supervisor.log` | The trusted supervisor's log for a walled session |
+| `sessions/<id>/guest-init.log`, `guest-holder.log` | Guest logs kept by the test driver outside the sandbox root, so they survive a resume |
 | `sessions/<id>/debug/` | `cpu-<time>.pprof`, `heap-<time>.pprof`, `goroutine-<time>.pprof`, `flight-<time>.trace` and `auto-flight-<time>.trace` |
 | `debug/bridge-<time>-<pid>.jsonl` | Each bridge's requests, with its profiles, while a client with debug on is connected |
 
@@ -220,10 +222,10 @@ These copies replace nothing.
 
 ## Limits
 
-- Each debug file turns over at 8 MiB to the same name with `.1` added. `holder.log` turns over at 1 MiB.
+- Each debug file turns over at 8 MiB to the same name with `.1` added. `holder.log` and `guest-holder.log` turn over at 1 MiB.
 - A session's `debug/` folder keeps 32 MiB, and each debug folder 64 MiB. The oldest files go first, the windows saved by themselves before the rest. A file in use, or still being written, stays.
 - The saved window of a busy session can be about 12 MiB, more than the 8 MiB that Go aims for.
-- `kill` removes a session's files with its folder.
+- `rm` removes a session's files with its folder.
 - With debug off, the client and the bridge discard their debug lines, and each hook costs one check.
 
 ## What it never records

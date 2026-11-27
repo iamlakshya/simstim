@@ -1,0 +1,33 @@
+{
+  "data_version": "publicsuffix.org's public_suffix_list.dat, git revision d6c92f1bbb7433e5db7b8405c25d4035fb8ff376 (2026-02-06T07:36:33Z)",
+  "expected": {
+    "ancestor_count": 922,
+    "ancestor_sha256": "579751978d9d718ef4145b4c543d980439f57a4a960a16a5e3ccca229a9e5b24",
+    "icann_rules": 6930,
+    "nodes": 10533,
+    "private_rules": 3203,
+    "rules": 10133
+  },
+  "module": "golang.org/x/net",
+  "module_go_mod_sum": "h1:WgDCOTH8iwtB66T4/GfI94AHo/hhdb7Hah9NDseQfiI=",
+  "module_sum": "h1:18ELalfM5+XNRwzM2nYqXsZQ9ByS1uhj2O/U7+5jqRY=",
+  "module_version": "v0.62.0",
+  "source_sha256": {
+    "LICENSE": "911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad",
+    "go.mod": "7bbcec6b6af859939ec01bbe5234e556c867bf80e171abc23ad16c2c8e3951fe",
+    "publicsuffix/data/children": "761402a681757153843a161c71955577e76a5ef96abc1a845d20a9a96304bfb7",
+    "publicsuffix/data/nodes": "47ed63d4f3763b7e4515345e1f06054d3bff97c6175a6f53466218e633a0b9cb",
+    "publicsuffix/data/text": "9b649c8a6aeabdb8971286d07683a20dc00e406a99631f960e0a47bb85df4af8",
+    "publicsuffix/gen.go": "c2d87418038d231f84b6ebaf03dac90ce76b7574ba4af45ff64de9b021917a4b",
+    "publicsuffix/list.go": "f15f57281ee2efc1cde449d489d199547e8bb0d736ff81caf10467784728e05f",
+    "publicsuffix/table.go": "00add19ece14eec90b1320a81dc2c680474e88255e08df82f2d942bcf414979a",
+    "publicsuffix/table_test.go": "d06c468a0861c96554bc70dd895809a278b43e81ca674b57632714be4ed2bc43"
+  },
+  "upstream": {
+    "licence_sha256": "66a3107d5ad6a058aab753eaac2047ccb2ed0e39465dd0fe5844da3e300d5172",
+    "licence_url": "https://raw.githubusercontent.com/publicsuffix/list/d6c92f1bbb7433e5db7b8405c25d4035fb8ff376/LICENSE",
+    "revision": "d6c92f1bbb7433e5db7b8405c25d4035fb8ff376",
+    "sha256": "a5638281157e8c902b127a5376f9ea2d024bf2ee11524133a6a76cd1d14ee7be",
+    "url": "https://raw.githubusercontent.com/publicsuffix/list/d6c92f1bbb7433e5db7b8405c25d4035fb8ff376/public_suffix_list.dat"
+  }
+}

@@ -61,6 +61,9 @@ func hostWithInteractiveSpy(t *testing.T) (*testHost, client.Host, *interactiveL
 	machine := *h.Machine
 	machine.Provider = provider
 	h.Machine = &machine
+	if err := client.SaveHostContext(t.Context(), h); err != nil {
+		t.Fatal(err)
+	}
 	return th, h, spy
 }
 

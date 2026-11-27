@@ -119,7 +119,7 @@ func (g *guide) rentName(r *onboard.RentPlan) error {
 			a = onboard.RentName
 		}
 		if !client.ValidHostName(a) {
-			fmt.Fprintln(g.out, "Use letters, digits, dots, dashes and underscores.")
+			fmt.Fprintln(g.out, "Use letters, digits, dots, dashes and underscores, with no dot at the end.")
 			continue
 		}
 		if _, err := client.FindHost(a); err == nil {

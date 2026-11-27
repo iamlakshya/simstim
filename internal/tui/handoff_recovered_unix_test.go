@@ -161,7 +161,7 @@ func TestRecoveredHandoffWindowPreservesQuitAndJackSelection(t *testing.T) {
 		hs.m.openHost(hc)
 		_ = hs.m.View()
 
-		_, _ = hs.m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+		hs.send(tea.KeyPressMsg{Code: tea.KeyEnter})
 		if hs.m.jacking == nil || hs.m.jacking.id != "s2" {
 			t.Fatalf("expected jacking into s2, got %+v", hs.m.jacking)
 		}

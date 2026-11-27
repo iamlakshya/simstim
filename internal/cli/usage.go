@@ -26,6 +26,10 @@ func guard(root *cobra.Command) {
 	walk = func(c *cobra.Command) {
 		switch {
 		case c.HasSubCommands() && !c.Runnable():
+			if c.Annotations == nil {
+				c.Annotations = map[string]string{}
+			}
+			c.Annotations[groupCommand] = "true"
 			c.Args = unknownCommand
 			c.RunE = func(c *cobra.Command, _ []string) error { return c.Help() }
 		case c.Args != nil:
@@ -86,9 +90,10 @@ func unknownWord(parent *cobra.Command, typed string, lineCmd *cobra.Command, sk
 	} else {
 		var things []named
 		for _, sub := range parent.Commands() {
-			// A help topic counts: help and the root print it.
+			// A help topic counts alongside warned old names.
 			if sub.IsAvailableCommand() || IsTopic(sub) {
-				things = append(things, named{sub.Name(), append([]string{sub.Name()}, sub.Aliases...)})
+				answers := append([]string{sub.Name()}, sub.Aliases...)
+				things = append(things, named{sub.Name(), append(answers, oldNamesOf(sub)...)})
 			}
 		}
 		cands = suggest(typed, things, true)
@@ -113,12 +118,13 @@ func commandTry(parent, lineCmd *cobra.Command, skip int, cands []string) string
 		return helpOf(parent)
 	}
 	line := commandLine(lineCmd)
+	help := strings.TrimSuffix(parent.CommandPath()+" "+cands[0], " ") + " --help"
 	if at := plain(lineCmd, line); len(at) > skip {
 		if fixed := replaceAt(line, at[skip], cands[0]); parses(fixed) {
-			return brand.Name + " " + joinWords(fixed)
+			return suggestedLine(fixed, help)
 		}
 	}
-	return strings.TrimSuffix(parent.CommandPath()+" "+cands[0], " ") + " --help"
+	return help
 }
 
 // shortPath is a command's path without the product's name: "host add".
@@ -235,6 +241,9 @@ func firstExample(ex string) string {
 // parseFailed is the annotation of a command whose flags did not parse.
 const parseFailed = "flags-did-not-parse"
 
+// groupCommand marks a command that only groups subcommands and prints help.
+const groupCommand = "group-command"
+
 // unparsed marks c as a command whose flags did not parse.
 func unparsed(c *cobra.Command) {
 	if c.Annotations == nil {
@@ -286,7 +295,9 @@ func unknownFlag(c *cobra.Command, name string, e *pflag.NotExistError) error {
 		typed = "-" + e.GetSpecifiedName()
 	}
 	var cands []string
-	if e.GetSpecifiedShortnames() == "" {
+	if now, ok := flagSynonyms[shortPath(c)][typed]; ok {
+		cands = []string{now}
+	} else if e.GetSpecifiedShortnames() == "" {
 		var things []named
 		c.Flags().VisitAll(func(f *pflag.Flag) {
 			if !f.Hidden && f.Deprecated == "" {
@@ -302,8 +313,8 @@ func unknownFlag(c *cobra.Command, name string, e *pflag.NotExistError) error {
 			if text := line[w.at]; w.isFlag && (text == typed || strings.HasPrefix(text, typed+"=")) {
 				fixed := slices.Clone(line)
 				fixed[w.at] = cands[0] + strings.TrimPrefix(text, typed)
-				if parses(fixed) {
-					try = brand.Name + " " + joinWords(fixed)
+				if fixed = newForm(c, fixed); parses(fixed) {
+					try = suggestedLine(fixed, try)
 				}
 				break
 			}
@@ -315,13 +326,26 @@ func unknownFlag(c *cobra.Command, name string, e *pflag.NotExistError) error {
 	}
 }
 
-func flagName(f *pflag.Flag) string { return "--" + f.Name }
+// flagName is the flag as the user types it. A hidden flag that keeps an
+// old short form, such as -d, has that letter as its long name too, and
+// is named by its short form, which help and the reference show.
+func flagName(f *pflag.Flag) string {
+	if f.Name == f.Shorthand && len(f.Annotations[oldKey]) > 0 {
+		return "-" + f.Shorthand
+	}
+	return "--" + f.Name
+}
 
 // valueKind says what a flag's value must be, from its type.
 func valueKind(e *pflag.InvalidValueError) string {
 	switch e.GetFlag().Value.Type() {
 	case "duration":
+		if _, ok := e.GetFlag().Value.(*neverValue); ok {
+			return "a time of a minute or more, such as 30m, or never"
+		}
 		return "a time, such as 30s or 5m"
+	case "size":
+		return "a size, such as 4G"
 	case "int", "int8", "int16", "int32", "int64", "uint", "uint8", "uint16", "uint32", "uint64", "count":
 		return "a whole number"
 	case "float32", "float64":

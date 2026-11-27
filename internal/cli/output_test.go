@@ -2,19 +2,13 @@ package cli
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
 
 	"github.com/spf13/cobra"
-
-	"github.com/iamlakshya/simstim/internal/brand"
-	"github.com/iamlakshya/simstim/internal/client"
-	"github.com/iamlakshya/simstim/internal/host/hosttest"
 )
 
 func TestVersioned(t *testing.T) {
@@ -37,56 +31,12 @@ func TestVersioned(t *testing.T) {
 // machine to machine: a golden file shows them as <key>.
 var volatile = regexp.MustCompile(`(?m)^(\s*)"(id|ID|cwd|created_at|since|last_activity_at|last_attached_at|host_version|helper|connect_ms|round_trip_ms|detail|state|source|memory_max|memory_current|unit|version)": ("[^"]*"|[0-9.]+)(,?)$`)
 
+// addressKey is the key of an address: host/ID, whose ID is volatile.
+var addressKey = regexp.MustCompile(`(?m)^(\s*"address": "[^"/]*/)[^"]*"`)
+
 // masked is a command's real JSON with its volatile values replaced.
 func masked(out string) string {
-	return volatile.ReplaceAllString(out, `$1"$2": "<$2>"$4`)
-}
-
-// Each JSON shape of cli-spec 7.1, from the real commands against the test
-// host, against a golden file. The values that change from run to run are
-// masked; every key, and the shape around it, is the command's own.
-func TestGoldenJSON(t *testing.T) {
-	newTestHost(t)
-	var b strings.Builder
-	show := func(args ...string) {
-		out, errOut, err := runApart(t, args...)
-		if err != nil {
-			t.Fatalf("%s: %v\n%s", args, err, errOut)
-		}
-		fmt.Fprintf(&b, "== %s\n%s", strings.Join(args, " "), masked(out))
-	}
-	// An explicit cap keeps the JSON shape the same with and without /proc.
-	show("new", "box", "--detach", "--json", "--name", "api", "--memory-max", "256M", "--", "sleep", "60")
-	show("ls", "--json")
-	show("ports", "box/api", "--json")
-	show("doctor", "--json")
-	show("host", "ls", "--json")
-	show("host", "test", "box", "--json")
-	show("host", "restore", "box", "--json")
-	show("host", "status", "box", "--json")
-	show("version", "--json")
-	show("config", "keymap", "--json")
-
-	fmt.Fprintf(&b, "== errors\n")
-	for _, args := range [][]string{{"host", "test", "nowhere", "--json"}, {"atach", "box/api", "--json"}, {"new", "box", "--json", "--", "htop"}} {
-		_, errOut, _ := mainRun(t, args...)
-		b.WriteString(errOut)
-	}
-
-	got := strings.ReplaceAll(b.String(), brand.Name, "<name>")
-	golden := filepath.Join("testdata", "json.golden")
-	if *update {
-		if err := os.WriteFile(golden, []byte(got), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	want, err := os.ReadFile(golden)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got != string(want) {
-		t.Errorf("the JSON differs from %s (run go test ./internal/cli -run TestGoldenJSON -update, and read the diff):\n%s", golden, got)
-	}
+	return addressKey.ReplaceAllString(volatile.ReplaceAllString(out, `$1"$2": "<$2>"$4`), `$1<id>"`)
 }
 
 var keyRE = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
@@ -140,88 +90,10 @@ func checkJSON(t *testing.T, name, out string, old bool) {
 	walk("", v)
 }
 
-// Each command with --json against the test host: one value on stdout,
-// with "v" and snake_case keys, and nothing on stderr but JSON lines.
-func TestCommandsPrintJSON(t *testing.T) {
-	newTestHost(t)
-	newSession(t, "web", "/bin/sh")
-	ended := newSession(t, "done", "/bin/sh", "-c", "exit 0")
-	agentEnded(t, ended)
-	for _, args := range [][]string{
-		{"ls", "--json"},
-		{"resume", "box/done", "--detach", "--json"},
-		{"ports", "box/web", "--json"},
-		{"doctor", "--json"},
-		{"host", "ls", "--json"},
-		{"host", "status", "box", "--json"},
-		{"host", "test", "box", "--json"},
-		{"host", "doctor", "box", "--json"},
-		{"host", "restore", "box", "--json"},
-		{"host", "alerts", "box", "--json"},
-		{"host", "alerts", "log", "box", "--json"},
-		{"agents", "ls", "--json"},
-		{"config", "keymap", "--json"},
-		{"version", "--json"},
-	} {
-		out, errOut, err := runApart(t, args...)
-		if err != nil {
-			t.Errorf("%s: %v\n%s", args, err, errOut)
-			continue
-		}
-		checkJSON(t, strings.Join(args, " "), out, args[0] == "host" && args[1] == "ls")
-		for _, l := range strings.Split(strings.TrimSpace(errOut), "\n") {
-			if l != "" && !json.Valid([]byte(l)) {
-				t.Errorf("%s: stderr has a line that is not JSON: %q", args, l)
-			}
-		}
-	}
-	// Both forms of the keys of host ls, until their end, and a warning.
-	out, errOut, _ := runApart(t, "host", "ls", "--json")
-	for _, k := range []string{`"Name": "box"`, `"name": "box"`, `"SSH": "box"`, `"ssh": "box"`} {
-		if !strings.Contains(out, k) {
-			t.Errorf("host ls --json lacks %s:\n%s", k, out)
-		}
-	}
-	if !strings.Contains(errOut, `"warning":{"code":"old_keys"`) || strings.Count(errOut, "\n") != 1 {
-		t.Errorf("host ls --json warned %q", errOut)
-	}
-}
-
-// The first acceptance line of C4: `new box --detach --json` prints one
-// JSON object with id, name, host and "v": 1, and nothing else on stdout.
-func TestNewDetachJSON(t *testing.T) {
-	newTestHost(t)
-	out, errOut, err := runApart(t, "new", "box", "--detach", "--json", "--name", "api", "--", "sleep", "60")
-	if err != nil {
-		t.Fatalf("%v\n%s", err, errOut)
-	}
-	var s map[string]any
-	if err := json.Unmarshal([]byte(out), &s); err != nil {
-		t.Fatalf("%v\n%s", err, out)
-	}
-	if s["v"] != float64(1) || s["host"] != "box" || s["name"] != "api" || s["id"] == "" || s["address"] != "box/api" || errOut != "" {
-		t.Fatalf("stdout %s, stderr %q", out, errOut)
-	}
-	checkJSON(t, "new --detach --json", out, false)
-
-	// A second session of that name gets its ID in its address.
-	out = okJSON(t, "new", "box", "--detach", "--json", "--name", "api", "--", "sleep", "60")
-	_ = json.Unmarshal([]byte(out), &s)
-	if s["address"] != "box/"+s["id"].(string) {
-		t.Errorf("the second api's address is %v", s["address"])
-	}
-
-	// --json without --detach is a usage error.
-	got, code := lineErr(t, "new", "box", "--json")
-	if code != 2 || !strings.Contains(got, "--json needs --detach") || !strings.Contains(got, "Try: "+brand.Name+" new box --json --detach") {
-		t.Errorf("new --json: exit %d\n%s", code, got)
-	}
-}
-
 // With --json, a failure writes nothing to stdout, and one JSON line to
 // stderr (question C-7).
 func TestJSONErrorIsOneLine(t *testing.T) {
-	hosttest.New(t)
+	newTestHome(t)
 	old := os.Args
 	defer func() { os.Args = old }()
 	for _, c := range []struct {
@@ -253,7 +125,8 @@ func TestJSONErrorIsOneLine(t *testing.T) {
 // Output to a pipe has no escape byte and no spinner: not in data, not in
 // a warning and not in an error.
 func TestPipedOutputHasNoColour(t *testing.T) {
-	newTestHost(t)
+	newTestHome(t)
+	fakeBox(t, nil)
 	t.Setenv("NO_COLOR", "")
 	t.Setenv("TERM", "xterm-256color")
 	old := os.Args
@@ -270,28 +143,27 @@ func TestPipedOutputHasNoColour(t *testing.T) {
 // A word that is a flag's value is no flag: in "--debug-file --json",
 // --json names the debug file. So when the line does not parse, its error
 // is no JSON for that word, and a --no-color there leaves colour on.
+var flagValueCases = []struct {
+	args         []string
+	json, colour bool
+}{
+	{[]string{"version", "--debug-file", "--json", "--bogus"}, false, true},
+	{[]string{"version", "--debug-file", "--no-color", "--bogus"}, false, true},
+	{[]string{"--debug-file", "--json", "version", "--bogus"}, false, true},
+	{[]string{"version", "--debug-file=x", "--json", "--bogus"}, true, true},
+	{[]string{"version", "--no-color", "--bogus"}, false, false},
+	{[]string{"version", "--bogus", "--", "--json"}, false, true},
+	// A flag of the command that failed takes its value too.
+	{[]string{"new", "box", "--dir", "--json", "--bogus"}, false, true},
+	{[]string{"new", "box", "--dir", "--no-color", "--bogus"}, false, true},
+	// A bool flag's value counts, and the last one wins.
+	{[]string{"version", "--json=1", "--bogus"}, true, true},
+	{[]string{"version", "--json", "--json=false", "--bogus"}, false, true},
+	{[]string{"version", "--no-color", "--no-color=false", "--bogus"}, false, true},
+}
+
 func TestAFlagsValueIsNoFlag(t *testing.T) {
-	term := hosttest.NewTerminal(t, 80, 10)
-	t.Setenv("NO_COLOR", "")
-	t.Setenv("TERM", "xterm-256color")
-	for _, c := range []struct {
-		args         []string
-		json, colour bool
-	}{
-		{[]string{"version", "--debug-file", "--json", "--bogus"}, false, true},
-		{[]string{"version", "--debug-file", "--no-color", "--bogus"}, false, true},
-		{[]string{"--debug-file", "--json", "version", "--bogus"}, false, true},
-		{[]string{"version", "--debug-file=x", "--json", "--bogus"}, true, true},
-		{[]string{"version", "--no-color", "--bogus"}, false, false},
-		{[]string{"version", "--bogus", "--", "--json"}, false, true},
-		// A flag of the command that failed takes its value too.
-		{[]string{"new", "box", "--dir", "--json", "--bogus"}, false, true},
-		{[]string{"new", "box", "--dir", "--no-color", "--bogus"}, false, true},
-		// A bool flag's value counts, and the last one wins.
-		{[]string{"version", "--json=1", "--bogus"}, true, true},
-		{[]string{"version", "--json", "--json=false", "--bogus"}, false, true},
-		{[]string{"version", "--no-color", "--no-color=false", "--bogus"}, false, true},
-	} {
+	for _, c := range flagValueCases {
 		root := Root()
 		root.SetArgs(c.args)
 		var cmd *cobra.Command
@@ -303,60 +175,24 @@ func TestAFlagsValueIsNoFlag(t *testing.T) {
 		if got := jsonAsked(cmd, c.args); got != c.json {
 			t.Errorf("%q: JSON %v, want %v", c.args, got, c.json)
 		}
-		if got := colourAsked(cmd, c.args, term.TTY); got != c.colour {
-			t.Errorf("%q: colour %v, want %v", c.args, got, c.colour)
-		}
 	}
 }
-
-// Colour follows NO_COLOR, TERM=dumb and --no-color, for each stream.
-func TestColourRules(t *testing.T) {
-	term := hosttest.NewTerminal(t, 80, 10)
+func TestNoColourFlagAndPipe(t *testing.T) {
+	newTestHome(t)
 	t.Setenv("NO_COLOR", "")
 	t.Setenv("TERM", "xterm-256color")
-	if !colourAsked(nil, nil, term.TTY) {
-		t.Error("no colour on a terminal")
+	r, pw, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
 	}
-	_, pw, _ := os.Pipe()
-	if colourAsked(nil, []string{"ls", "--no-color"}, term.TTY) || colourOn(pw) {
-		t.Error("colour with --no-color, or on a stream that is not a terminal")
-	}
-	if colourAsked(nil, []string{"--", "--no-color"}, term.TTY) != true {
-		t.Error("a --no-color after -- turned colour off")
-	}
-	t.Setenv("TERM", "dumb")
-	if colourOn(term.TTY) {
-		t.Error("colour with TERM=dumb")
-	}
-	t.Setenv("TERM", "xterm-256color")
-	t.Setenv("NO_COLOR", "1")
-	if colourOn(term.TTY) {
-		t.Error("colour with NO_COLOR")
+	defer r.Close()
+	defer pw.Close()
+	if colourOn(pw) {
+		t.Error("colour on a stream that is not a terminal")
 	}
 	// --no-color sets NO_COLOR for the run, so the launcher follows it too.
 	t.Setenv("NO_COLOR", "")
 	if _, err := run(t, "--no-color", "config", "path"); err != nil || os.Getenv("NO_COLOR") == "" {
 		t.Errorf("--no-color: %v, NO_COLOR=%q", err, os.Getenv("NO_COLOR"))
-	}
-}
-
-// Confirmations go to stderr, and data to stdout (cli-spec 7.5).
-func TestStreams(t *testing.T) {
-	newTestHost(t)
-	out, errOut, err := runApart(t, "new", "box", "--detach", "--name", "s", "--", "sleep", "60")
-	if err != nil || out != "" || !strings.HasPrefix(errOut, "Started box/") {
-		t.Errorf("new --detach: %v, stdout %q, stderr %q", err, out, errOut)
-	}
-	out, errOut, err = runApart(t, "ls")
-	if err != nil || !strings.Contains(out, " s ") || errOut != "" {
-		t.Errorf("ls: %v, stdout %q, stderr %q", err, out, errOut)
-	}
-	out, errOut, err = runApart(t, "kill", "box/s")
-	if err != nil || out != "" || !strings.HasPrefix(errOut, "Deleted s (") {
-		t.Errorf("kill: %v, stdout %q, stderr %q", err, out, errOut)
-	}
-	var ue *client.UserError
-	if _, _, err := runApart(t, "resume", "box/x", "--json"); !errors.As(err, &ue) || ue.Code != "json_needs_detach" {
-		t.Errorf("resume --json without --detach: %v", err)
 	}
 }

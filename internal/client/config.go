@@ -4,24 +4,39 @@ package client
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"runtime"
-	"sort"
 	"strconv"
 	"strings"
 
 	"github.com/BurntSushi/toml"
 
+	"github.com/iamlakshya/simstim/internal/api"
 	"github.com/iamlakshya/simstim/internal/brand"
 )
 
 // Host is one saved host.
 type Host struct {
+	// Private once-only creation capability; never serialized or metadata authority.
+	machineSourceBirth *hostMachineSourceBirth `toml:"-" json:"-"`
+	// WallFloor is the host's actual pinned minimum wall level.
+	WallFloor string `toml:"wall_floor,omitempty"`
+	// Place controls this host's automatic-placement pool and local features.
+	Place HostPlacement `toml:"place,omitempty"`
+	// Prepared records the last observed preparation facts; it grants no start.
+	Prepared *PreparedHost `toml:"prepared,omitempty"`
+	api.LayerValues
+	// Lock fixes values and denies for every session on this host.
+	Lock *api.LayerValues `toml:"lock,omitempty"`
+
 	// Name names the host in commands, as in `attach <name>/<session>`.
 	Name string `toml:"name"`
 	// SSH says how to reach the host: a Host alias from your SSH config, or
@@ -30,6 +45,9 @@ type Host struct {
 	// SSHConfig adds an SSH config file to read as well, for example a repo's
 	// own.
 	SSHConfig string `toml:"ssh_config,omitempty"`
+	// JoinedSSH records the original invite writer's local generated SSH files.
+	// This data grants no connection, execution or removal.
+	JoinedSSH *JoinedSSHOwnership `toml:"joined_ssh,omitempty"`
 	// Labels tags the host with key-value pairs of your own, for example
 	// provider = "gcp".
 	Labels map[string]string `toml:"labels,omitempty"`
@@ -41,12 +59,57 @@ type Host struct {
 	// Secrets lists secrets from config.toml that every new session on this
 	// host gets, for example ["ANTHROPIC_API_KEY"]. `new --secret` adds more.
 	Secrets []string `toml:"secrets,omitempty"`
+	// Repos lists repositories that may be sent to this host in clone mode.
+	Repos []string `toml:"repos,omitempty"`
+	pool  *bool
+}
+
+// WithPool returns a copy with an explicit automatic-placement pool setting.
+func (h Host) WithPool(inPool bool) Host { v := inPool; h.Place.Pool, h.pool = &v, nil; return h }
+
+// Pool reports the explicit automatic-placement setting, if any.
+func (h Host) Pool() (inPool, set bool) {
+	if h.Place.Pool != nil {
+		return *h.Place.Pool, true
+	}
+	if h.pool == nil {
+		return false, false
+	}
+	return *h.pool, true
 }
 
 // Settings are the user's preferences, from config.toml. The comments on its
 // fields are the config reference: cmd/docgen turns them into
 // docs/reference/config.md.
 type Settings struct {
+	// Machines configures providers used by new --machine for one session.
+	Machines struct {
+		// E2B selects credentials and the template for new --machine e2b.
+		E2B struct {
+			// TokenCommand prints the API key. Empty uses E2B_API_KEY or the E2B CLI login.
+			TokenCommand string `toml:"token_command"`
+			// Template selects the E2B template. Empty uses host create e2b's default.
+			Template string `toml:"template"`
+		} `toml:"e2b"`
+	} `toml:"machines"`
+	// Placement selects the order and wake policy of new auto.
+	Placement PlacementSettings `toml:"placement"`
+	// Images selects how runtime files and images reach a host.
+	Images struct {
+		// Fetch is auto, host or laptop. Auto uses the host when it can reach
+		// the release, then falls back to the laptop once if that fetch fails.
+		// Host downloads on the host. Laptop copies checked files from here.
+		Fetch string `toml:"fetch"`
+	} `toml:"images"`
+
+	api.LayerValues
+	// Lock fixes values and denies that narrower layers may not change.
+	Lock *api.LayerValues `toml:"lock,omitempty"`
+	// Profiles names policy layers selected after the repository.
+	Profiles map[string]api.LayerValues `toml:"profiles,omitempty"`
+	// Repos names policy layers by origin, without a scheme or .git.
+	Repos map[string]RepoSettings `toml:"repos,omitempty"`
+
 	// UI holds the launcher's look and feel.
 	UI struct {
 		// Motion turns the launcher's animation on or off: "auto" (off inside
@@ -94,12 +157,20 @@ type Settings struct {
 	// manager read: OPENAI_API_KEY = "op read op://dev/openai/key". A session
 	// gets one only when asked (`new --secret`, or a host's secrets). The
 	// value goes to that session's environment and is never stored.
-	Secrets map[string]string `toml:"secrets"`
+	Secrets map[string]SecretDefinition `toml:"secrets"`
+	// SecretTiers sets the lowest tier that may receive each named secret.
+	// Unlisted names require own; on_hosts is an additional saved-host gate.
+	SecretTiers map[string]string `toml:"secret_tiers,omitempty"`
+	loadErr     error
 }
 
 // DefaultSettings are the settings with nothing in config.toml.
 func DefaultSettings() Settings {
 	var s Settings
+	defaultWall := "auto"
+	s.Sandbox.Wall = &defaultWall
+	s.Placement = PlacementSettings{Strategy: "spread", Wake: "ask"}
+	s.Images.Fetch = "auto"
 	s.UI.Motion = "auto"
 	s.Attach.DetachKey = "ctrl+\\"
 	// Windows Terminal keeps Ctrl+V for itself.
@@ -113,7 +184,9 @@ func DefaultSettings() Settings {
 }
 
 type hostsFile struct {
-	Hosts []Host `toml:"host"`
+	// Default is a saved host name, auto, or empty when none is selected.
+	Default string `toml:"default,omitempty"`
+	Hosts   []Host `toml:"host"`
 }
 
 // ConfigDir is $XDG_CONFIG_HOME/<name>, or ~/.config/<name> (on macOS too).
@@ -146,32 +219,44 @@ func StateDir() string {
 func hostsPath() string    { return filepath.Join(ConfigDir(), "hosts.toml") }
 func settingsPath() string { return filepath.Join(ConfigDir(), "config.toml") }
 
-// LoadHosts reads the saved hosts. A file that cannot be read is an
-// error of the file system. A file that does not decode is the user's to
-// fix: a usage error that says where.
+// ConfigFile is one of the client's config files.
+type ConfigFile struct {
+	// Name is the file's name, such as "config.toml".
+	Name string
+	// Path is where the file lives.
+	Path string
+	// Type is the struct that the file decodes into. Its TOML tags are the
+	// file's known keys.
+	Type reflect.Type
+}
+
+// ConfigFiles lists the config files: config.toml, then hosts.toml.
+// `config path` prints their paths, and `config check` reads them.
+func ConfigFiles() []ConfigFile {
+	return []ConfigFile{
+		{Name: "config.toml", Path: settingsPath(), Type: reflect.TypeFor[Settings]()},
+		{Name: "hosts.toml", Path: hostsPath(), Type: reflect.TypeFor[hostsFile]()},
+	}
+}
+
+// LoadHosts reads the saved hosts, through ReadConfigFile. A file that
+// cannot be read is an error of the file system. One that is not a regular
+// file, or is too large, cannot be used, and says so. A file that does not
+// decode is the user's to fix: a usage error that says where.
 func LoadHosts() ([]Host, error) {
-	b, err := os.ReadFile(hostsPath())
-	if errors.Is(err, os.ErrNotExist) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, fmt.Errorf("read %s: %w", hostsPath(), err)
-	}
-	var f hostsFile
-	if _, err := toml.Decode(string(b), &f); err != nil {
-		return nil, tomlError(hostsPath(), string(b), err)
-	}
-	return f.Hosts, nil
+	file, err := loadHostsFile()
+	return file.Hosts, err
 }
 
 // tomlLine finds the line in the error of a value of the wrong type, which
 // the TOML package gives only in its text.
 var tomlLine = regexp.MustCompile(`^toml: line (\d+)`)
 
-// tomlError is the usage error of a TOML file that does not decode, with
-// the line and column of the mistake.
-func tomlError(path, data string, err error) error {
-	msg, line, col := err.Error(), 0, 0
+// TOMLWhere reads the error of a TOML file that does not decode: what went
+// wrong, and its line and column, or 0 when the error gives none. data is
+// the file's text.
+func TOMLWhere(data string, err error) (msg string, line, col int) {
+	msg = err.Error()
 	var pe toml.ParseError
 	if errors.As(err, &pe) {
 		msg, line, col = pe.Message, pe.Position.Line, pe.Position.Col
@@ -185,58 +270,48 @@ func tomlError(path, data string, err error) error {
 			col = len(lines[line-1]) - len(strings.TrimLeft(lines[line-1], " \t")) + 1
 		}
 	}
-	where, hint := path, "Fix "+path+"."
-	if line > 0 {
-		where = fmt.Sprintf("%s, line %d, column %d", path, line, col)
-		hint = fmt.Sprintf("Fix line %d of %s.", line, path)
-	}
-	return &UserError{Msg: where + ": " + strings.TrimPrefix(msg, "toml: "), Hint: hint, Code: "bad_config", Kind: KindUsage}
+	return strings.TrimPrefix(msg, "toml: "), line, col
 }
 
-// SaveHosts writes the saved hosts. It is the one function that writes
-// hosts.toml, and it writes nothing once ctx has ended: a cancel that came
-// before the save keeps the file as it was (StoppedError).
-func SaveHosts(ctx context.Context, hosts []Host) error {
+// tomlError is the usage error of a TOML file that does not decode, with
+// the line and column of the mistake (docs/contributing/cli-spec.md 13.4).
+func tomlError(path, data string, err error) error {
+	msg, line, col := TOMLWhere(data, err)
+	where := path
+	if line > 0 {
+		where = fmt.Sprintf("%s, line %d, column %d", path, line, col)
+	}
+	return &UserError{Msg: where + ": " + msg, Hint: brand.Name + " config check", Code: "bad_config", Kind: KindUsage}
+}
+
+// SaveHosts replaces the saved host list under its file lock. A caller
+// changing one entry uses SaveHost or ForgetHostContext instead, so it
+// cannot overwrite another command's change to a different host.
+func SaveHosts(ctx context.Context, hosts []Host) error { return SaveHostsContext(ctx, hosts) }
+
+// SaveHostsContext replaces the whole list through H3's one locked writer,
+// while preserving cancellation for existing context-bearing callers.
+func SaveHostsContext(ctx context.Context, hosts []Host) error {
 	if err := ctx.Err(); err != nil {
 		return stoppedBefore("save the hosts", err)
 	}
-	sort.Slice(hosts, func(i, j int) bool { return hosts[i].Name < hosts[j].Name })
-	if err := os.MkdirAll(ConfigDir(), 0o700); err != nil {
-		return fmt.Errorf("make %s: %w", ConfigDir(), err)
-	}
-	tmp := hostsPath() + ".tmp"
-	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
-	if err != nil {
-		return fmt.Errorf("save the hosts: %w", err)
-	}
-	fmt.Fprintf(f, "# Hosts for %s. Edit with `%s host`.\n\n", brand.DisplayName, brand.Name)
-	if err := toml.NewEncoder(f).Encode(hostsFile{Hosts: hosts}); err != nil {
-		f.Close()
-		return fmt.Errorf("save the hosts: %w", err)
-	}
-	if err := f.Close(); err != nil {
-		return fmt.Errorf("save the hosts: %w", err)
-	}
-	if err := os.Rename(tmp, hostsPath()); err != nil {
-		return fmt.Errorf("save the hosts: %w", err)
-	}
-	return nil
+	return saveHostsWithOPAdmission(ctx, hosts)
 }
 
-// SaveHost adds h to the saved hosts, or replaces the host of the same
-// name, through SaveHosts: nothing once ctx has ended.
-func SaveHost(ctx context.Context, h Host) error {
-	hosts, err := LoadHosts()
+// SaveHost adds h to the saved hosts, or replaces the host of the same name,
+// in one locked read, change and write of hosts.toml.
+func SaveHost(h Host) error { return SaveHostContext(context.Background(), h) }
+
+// SaveHostContext changes one saved entry without losing another writer.
+func SaveHostContext(ctx context.Context, h Host) error {
+	if err := ctx.Err(); err != nil {
+		return stoppedBefore("save the hosts", err)
+	}
+	was, err := SavedEntry(h.Name)
 	if err != nil {
 		return err
 	}
-	for i := range hosts {
-		if hosts[i].Name == h.Name {
-			hosts[i] = h
-			return SaveHosts(ctx, hosts)
-		}
-	}
-	return SaveHosts(ctx, append(hosts, h))
+	return UpdateHosts(ctx, HostChange{Kind: "host save", Was: was, Now: &h})
 }
 
 // StoppedError is the error of a change that a cancel or a timeout came
@@ -286,16 +361,83 @@ func FindHost(name string) (Host, error) {
 	}
 }
 
-var hostNameRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$`)
+// ValidHostName reports whether n can name a saved host.
+func ValidHostName(n string) bool {
+	var state hostNameValidation
+	for _, r := range n {
+		state.Rune(r)
+	}
+	return state.Valid()
+}
 
-// ValidHostName reports whether n can name a host.
-func ValidHostName(n string) bool { return hostNameRE.MatchString(n) }
+// HostFileKey names the files of the host called name: its name in lower
+// case, cut to 32 bytes at most and with no dot or dash at its end, a dash,
+// and 32 hex characters (128 bits) of SHA-256 over the exact name. The hash
+// tells apart two names that differ only in case, which a disk that ignores
+// case would take for one file; the name only helps a person read it. Every
+// file of a host's own uses it: its pin, the pin's lock and the pin's
+// temporary files now, and later its SSH config. It is "" for a name that
+// cannot name a host, from which no path is ever built.
+func HostFileKey(name string) string {
+	if !ValidHostName(name) {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(name))
+	p := strings.ToLower(name)
+	if len(p) > 32 {
+		p = p[:32]
+	}
+	return strings.TrimRight(p, ".-") + "-" + hex.EncodeToString(sum[:16])
+}
 
-// LoadSettings reads the settings, with defaults for anything missing.
+// SettingsWarning is the warning of a config.toml that does not decode or
+// cannot be read, or "" when it decodes or does not exist. LoadSettings
+// then gives the defaults (docs/contributing/cli-spec.md 13.4).
+func SettingsWarning() string {
+	_, w := ReadSettings()
+	return w
+}
+
+// LoadSettings reads the settings, with defaults for anything missing. A
+// config.toml that does not decode, or cannot be read, gives the defaults
+// alone, and the CLI and the launcher warn of it (SettingsWarning).
 func LoadSettings() Settings {
-	var s Settings
-	_, _ = toml.DecodeFile(settingsPath(), &s)
+	s, _ := ReadSettings()
+	return s
+}
+
+// ReadSettings reads config.toml once, through ReadConfigFile, for its
+// settings and its warning: the warning of a file that does not decode,
+// cannot be read or is too large, or "". With a warning, the settings are
+// the defaults alone.
+func ReadSettings() (Settings, string) {
+	operation, err := openSettingsOperation(context.Background())
+	if err != nil {
+		return failedSettingsRead(err)
+	}
+	settings := operation.settings
+	if err := operation.Close(); err != nil {
+		return failedSettingsRead(settingsOperationFailure(err))
+	}
+	return settings, ""
+}
+
+// withDefaults fills each setting that s leaves empty with its default.
+func withDefaults(s Settings) Settings {
 	d := DefaultSettings()
+	if s.Sandbox.Wall == nil {
+		defaultWall := *d.Sandbox.Wall
+		s.Sandbox.Wall = &defaultWall
+	}
+	if s.Placement.Strategy == "" {
+		s.Placement.Strategy = d.Placement.Strategy
+	}
+	if s.Placement.Wake == "" {
+		s.Placement.Wake = d.Placement.Wake
+	}
+	if s.Images.Fetch == "" {
+		s.Images.Fetch = d.Images.Fetch
+	}
 	if s.UI.Motion == "" {
 		s.UI.Motion = d.UI.Motion
 	}

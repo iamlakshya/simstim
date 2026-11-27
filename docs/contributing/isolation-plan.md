@@ -605,21 +605,24 @@ These tasks need no wall, and they help every session. H2 goes first ([question 
   - `internal/client/ssh.go` (`baseArgs`, `sshError`) and `internal/client/machine.go` (`ForgetHost`).
   - `internal/cli/host.go` (`--host-key`, and a new `hostRekeyCmd`).
   - `internal/provider/lima/lima.go` (the pin at `host create`).
-  - `go.mod` (`golang.org/x/crypto`).
+  - `internal/tui/wizard.go` and `internal/tui/backend.go` (the launcher's add-host wizard pins as `host add` does).
+  - No new dependency: OpenSSH decides which key the user's settings trust, so the client needs no known hosts matcher of its own (spec 14.7.1).
   - New `docs/contributing/decisions/0035-pinned-host-keys.md`, and the records index.
 - **Acceptance:**
   - `host add` prints where the pin came from: "from your known_hosts", "matched --host-key" or "on first use" (spec 14.7.1).
   - A changed key fails with the message of spec 14.14 and the exit code 5 ([CLI spec, 5.3](cli-spec.md#53-the-codes-of-the-isolation-spec)), even with `StrictHostKeyChecking no` in `~/.ssh/config`.
   - `host rekey` replaces the pin after the user types the host's name, or with `--confirm <host>`. With input off and without `--confirm`, it fails with exit code 4.
   - Lima hosts are pinned at `host create`.
-  - `ForgetHost` also removes `known_hosts-<name>`.
-  - The pin is the file `known_hosts-<name>`. H3 writes no `tiers.toml`: H4 copies the fingerprint there (spec 14.7.1).
+  - `ForgetHost` also removes `known_hosts-<key>`, under the pin's lock, and keeps the lock file.
+  - The pin is the file `known_hosts-<key>`, where `<key>` is the host's file key (`client.HostFileKey`): the name in lower case, cut to 32 characters and with no dot or dash at its end, a dash, and 32 hex characters (128 bits) of SHA-256 over the exact name. The pin's first line names the exact host, and every read checks it. Names that differ only in case each get a pin of their own, and a name that ends with a dot or a space is refused. A pin of the first version, `known_hosts-<name>`, moves at the host's next connection. H3 writes no `tiers.toml`: H4 copies the fingerprint there (spec 14.7.1).
   - The pin options also hold `GlobalKnownHostsFile=/dev/null` and `VerifyHostKeyDNS=no`, and `KnownHostsCommand=none` on OpenSSH 8.5 or later.
   - `--host-key` is checked against a key from the user's known hosts too. The connection that fetches a key offers no key and no password.
   - A `@cert-authority` or `@revoked` line is never copied. A host that only a `@cert-authority` line matches gets its own key pinned.
   - `PinHostKey` and `host rekey` stop the host's master after they write the pin.
   - A host saved before this task gets its pin at its next connection.
-- **Tests:** units of `PinHostKey`: known hosts files with plain, hashed and `[host]:port` entries, `@cert-authority` and `@revoked` lines, and with none. A `--host-key` that differs from the known hosts. Units of `baseArgs`: the pin options are there when `known_hosts-<name>` exists. End-to-end test 3.
+  - The verdict comes from `ssh`'s own log file (`-E`), and the most severe verdict in it wins, so neither a host's text nor a ProxyJump hop can make it "trusted".
+  - The launcher's add-host wizard stages the pin before it connects, and saves the host with it. Every connection checks a pin or a staged pin, saved host or not.
+- **Tests:** units of `PinHostKey`: each verdict of the user's settings (trusted, unknown, changed, revoked) and a log that cannot be read. A `--host-key` that differs from the known hosts. Against a real sshd in a container, the same answer as `ssh` for a port wildcard, a revocation in a second relative file, a CA-only host, a hashed entry, a known hosts file over 16 MiB and a `KnownHostsCommand`, a certificate's key ID that imitates `ssh`, ProxyJump hops, a revoked key of another type, and ECDSA keys on three curves. Units of `baseArgs`: the pin options are there when `known_hosts-<key>` exists. Case twins added at once, a forget while another client holds the lock, the migration. End-to-end test 3.
 - **Docs:** `docs/how-to/add-a-host.md`, `docs/explanation/security.md`, the reference through `just docs` for `host rekey` and `--host-key`. The record 0035.
 - **CHANGELOG:** Security. "Each host you add over SSH now has a pinned host key that your SSH config cannot turn off. A changed key stops the connection, and `host rekey` replaces the pin after you confirm."
 - **Depends on:** H2, and C2 and C4 of [the CLI plan](cli-plan.md), for the exit code and the typed name. It adds the record 0035.
@@ -639,7 +642,7 @@ These tasks need no wall, and they help every session. H2 goes first ([question 
   - New `docs/contributing/decisions/0036-host-tiers-and-the-grant-gate.md`, and the records index.
 - **Acceptance:**
   - The first run of the new client writes `tiers.toml`, with every host as `own`.
-  - The migration copies each host's pinned fingerprint from the `known_hosts-<name>` of H3 into `key` (spec 14.6.1).
+  - The migration copies each host's pinned fingerprint from the `known_hosts-<key>` of H3 into `key` (spec 14.6.1).
   - `host add` asks the question in a terminal. `--yes` without `--tier` fails with exit code 4, and names `--tier` ([question 50](isolation-spec.md#15-open-questions)).
   - `host create e2b` gives `shared`. Lima and Docker hosts get `own`.
   - A changed host ID warns, and sets the tier to `shared`.
@@ -1993,7 +1996,7 @@ The rule of this phase: **the laptop holds the digests, the hosts hold the bytes
 ### P7.2 Decoys
 
 - **Goal:** spec 21.7: decoy credential files in the sandbox's home, from data, whose values are tripwires in the egress process (`secret_misuse`, 10.8). Each decoy takes only a form that its tool does not read by default. Each decoy is in the docs, and `[sandbox] decoys = false` (8.3) turns them off. No source measures decoys in a sandbox, but canary keys caught a real CI breach, and worms check the keys that they find ([facts](../research/build-facts.md#7-later-phases)).
-- **Files:** new `internal/guest/decoys.go`, new `internal/guest/decoys.toml` (data), new `internal/supervisor/decoys.go` (the values), `internal/egress/secrets.go` (the tripwires, and the class rule for the decoys' hosts).
+- **Files:** new `internal/guest/decoys.go`, new `internal/proto/decoys.toml` (shared data), new `internal/supervisor/decoys.go` (the values), `internal/egress/secrets.go` (the tripwires, and the class rule for the decoys' hosts).
 - **Acceptance:** a decoy's value sent to any host is refused and raises `secret_misuse`, also on a decoy's host that the policy refuses. The quiet test of spec 21.7 shows that the default image's tools send no decoy by themselves. `[sandbox] decoys = false` writes no decoy.
 - **Tests:** the tests of spec 21.7, with the quiet test and a manual TruffleHog check.
 - **Docs:** `docs/how-to/sandboxes.md` (each decoy), `docs/explanation/security.md`.

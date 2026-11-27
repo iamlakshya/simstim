@@ -24,23 +24,35 @@ func (w *wizard) finishOp() {
 	w.ctx = nil
 }
 
-func (w *wizard) stop() {
+func (w *wizard) stop() (inStage bool) {
 	w.seq++
-	w.run, w.checking, w.starting = false, false, false
+	w.run, w.checking, w.starting, w.waitingRoot = false, false, false, false
+	if w.tok != nil {
+		w.tok.mu.Lock()
+		w.tok.stopped = true
+		inStage = !w.tok.staged
+		w.staged = w.staged || w.tok.staged
+		if w.tok.staged {
+			w.pinScope = w.tok.scope
+		}
+		w.tok.mu.Unlock()
+		w.tok = nil
+	}
 	w.finishOp()
+	return inStage
 }
 
 func (w *wizard) begin(m *Model) (context.Context, int, tea.Cmd) {
 	cleanup := m.dropConn(w.takeConn())
 	w.stop()
 	w.run = true
-	w.ctx, w.cancel = context.WithCancel(m.backgroundContext())
+	w.ctx, w.cancel = w.operationContext(m.backgroundContext())
 	return w.ctx, w.seq, cleanup
 }
 
 func (w *wizard) beginAgentOp(m *Model) (context.Context, int) {
 	w.stop()
-	w.ctx, w.cancel = context.WithCancel(m.backgroundContext())
+	w.ctx, w.cancel = w.operationContext(m.backgroundContext())
 	return w.ctx, w.seq
 }
 
@@ -60,6 +72,7 @@ func (m *Model) resumeWizard() tea.Cmd {
 	}
 	checking, act, ended := w.checking, w.checkAct, w.checkEnded
 	w.stop()
+	w.saving = nil
 	w.conn = nil
 	for i := range w.checks {
 		if w.checks[i].state == ckRunning {

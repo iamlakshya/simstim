@@ -7,7 +7,7 @@ title: "simstim debug save"
 Save the session's recent debug record, just after a lag.
 
 ```text
-simstim debug save <host>/<session>
+simstim debug save <host>/<session> [flags]
 ```
 
 While the session's runtime category is on, the session's process on the host keeps the newest 10 s or so of Go's execution trace. This saves that window to a file on the host, for go tool trace.

@@ -40,6 +40,7 @@ const (
 	KindRPort  Kind = "rport"  // one connection from the guest to a laptop port
 	KindAgent  Kind = "agent"  // one SSH agent connection from the guest
 	KindSFTP   Kind = "sftp"   // one SFTP session of an editor
+	KindEvents Kind = "events" // one read-only event stream on a dedicated outer carrier
 	KindGet    Kind = "get"    // one file copied out of the guest
 	KindLayer  Kind = "layer"  // the guest's root as a tar stream, for image save
 )
@@ -190,9 +191,13 @@ func breach(format string, a ...any) error {
 
 // Session is one end of a link.
 type Session struct {
-	conn net.Conn
-	side Side
-	opt  Options
+	inputBundleAllowed bool
+	inputMain          *Stream
+	inputContinuation  bool
+	inputOpened        uint8
+	conn               net.Conn
+	side               Side
+	opt                Options
 
 	hello chan struct{} // closed when the other end's hello has passed
 	done  chan struct{} // closed when the link has ended
@@ -200,28 +205,32 @@ type Session struct {
 	wg    sync.WaitGroup
 	rbuf  []byte // the reader's frame, reused
 
-	mu       sync.Mutex
-	closed   bool
-	err      error
-	helloOK  bool
-	streams  map[uint32]*Stream
-	count    [2]int // open streams, by the side that opened them
-	nextID   uint64 // the next ID that this side gives
-	sentID   uint32 // the last ID whose open this side has sent
-	nextPeer uint64 // the ID that the other side must give next
-	ctlOpen  bool   // the link's ctl stream has been opened
-	accepts  []*Stream
-	acceptQ  waitq
-	opens    []*Stream // streams whose open waits, in the order of their IDs
-	grants   []*Stream // streams with credit to give
-	refusals []uint32  // streams to refuse
-	drained  waitq     // the writer has taken the refusals
-	hi, lo   []*Stream // streams with frames to send, ctl and holder first
-	refused  uint64
-	wbuf     []byte // the writer's batch, reused
-	seq      uint64 // the number of the last batch built
-	written  uint64 // the number of the last batch that the connection took
-	progress waitq  // a stream left the link, or a batch was written
+	mu             sync.Mutex
+	closed         bool
+	aborted        bool // logical revocation; raw transport still belongs to its owner
+	transportClose sync.Once
+	err            error
+	helloOK        bool
+	streams        map[uint32]*Stream
+	count          [2]int // open streams, by the side that opened them
+	nextID         uint64 // the next ID that this side gives
+	sentID         uint32 // the last ID whose open this side has sent
+	nextPeer       uint64 // the ID that the other side must give next
+	ctlOpen        bool   // the link's ctl stream has been opened
+	accepts        []*Stream
+	acceptQ        waitq
+	opens          []*Stream      // streams whose open waits, in the order of their IDs
+	guardedOpens   []*guardedOpen // requests without IDs, admitted only by the physical writer
+	guardedOpening *guardedOpen   // source guard or raw write currently owned by that writer
+	grants         []*Stream      // streams with credit to give
+	refusals       []uint32       // streams to refuse
+	drained        waitq          // the writer has taken the refusals
+	hi, lo         []*Stream      // streams with frames to send, ctl and holder first
+	refused        uint64
+	wbuf           []byte // the writer's batch, reused
+	seq            uint64 // the number of the last batch built
+	written        uint64 // the number of the last batch that the connection took
+	progress       waitq  // a stream left the link, or a batch was written
 }
 
 // New starts a link over conn. It sends this side's hello at once. Streams
@@ -265,6 +274,9 @@ func (s *Session) noHello() {
 // or a map that marshals to a JSON object, or nil. The open carries it with
 // the field "kind" added. Open waits for the other side's hello.
 func (s *Session) Open(ctx context.Context, k Kind, header any) (*Stream, error) {
+	if err := s.terminalError(); err != nil {
+		return nil, err
+	}
 	if who, ok := s.opt.Opener[k]; !ok || who != s.side {
 		return nil, fmt.Errorf("link: the %s may not open a %q stream. Try: open it from the %s", s.side, k, s.side.other())
 	}
@@ -365,6 +377,9 @@ func (s *Session) Accept(ctx context.Context) (*Stream, error) {
 // goroutines to end.
 func (s *Session) Close() error {
 	s.fail(net.ErrClosed)
+	// Logical abort deliberately leaves raw I/O alone. Physical ownership
+	// still closes the actual transport once before waiting for its joins.
+	s.closeTransport()
 	s.wg.Wait()
 	return nil
 }
@@ -397,11 +412,32 @@ func (s *Session) fail(err error) {
 		return
 	}
 	s.closed, s.err = true, err
+	s.cancelGuardedOpens()
+	for _, stream := range s.streams {
+		stream.notifyDone()
+	}
 	close(s.done)
 	s.mu.Unlock()
-	if s.conn != nil {
-		_ = s.conn.Close()
+	s.closeTransport()
+}
+
+// terminalError reads only logical admission state. A raw operation admitted
+// before revocation may finish; no later operation may enter the transport.
+func (s *Session) terminalError() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return s.err
 	}
+	return nil
+}
+
+func (s *Session) closeTransport() {
+	s.transportClose.Do(func() {
+		if s.conn != nil {
+			_ = s.conn.Close()
+		}
+	})
 }
 
 // signal wakes the one goroutine that waits on c, if any, without

@@ -69,7 +69,7 @@ var gitOpKinds = []*gitOpKind{
 		return gitOpAnswer{}, discardWorktreeHere(r.Git)
 	}},
 	{gitOpRepoInfo, time.Minute, func(r gitOpRequest, _ func(*GitInfo)) (a gitOpAnswer, err error) {
-		a.Repo, err = repoInfo(r.Dir, r.Changes)
+		a.Repo, err = repoInfoWithPolicy(r.Dir, r.Changes, r.Policy)
 		return a, err
 	}},
 }
@@ -98,6 +98,7 @@ type worktreeAddArgs struct {
 
 // gitOpRequest is a git operation's request.
 type gitOpRequest struct {
+	Pull *gitPullArgs `json:"pull,omitempty"`
 	// RepoInfoArgs is repo.info's request, the one that the client sends.
 	api.RepoInfoArgs
 	// Add is worktree.add's request.
@@ -121,11 +122,13 @@ func (k *gitOpKind) deadlineFor(req gitOpRequest) time.Duration {
 // gitOpAnswer is a git operation's answer. The child of worktree.add first
 // writes one with Plan alone, before the checkout, and then the answer.
 type gitOpAnswer struct {
-	Error  *proto.Error  `json:"error,omitempty"`
-	Git    *GitInfo      `json:"git,omitempty"`    // worktree.add
-	Repo   *api.RepoInfo `json:"repo,omitempty"`   // repo.info
-	Result string        `json:"result,omitempty"` // worktree.remove: what it did
-	Plan   *GitInfo      `json:"plan,omitempty"`   // worktree.add: what it is about to make
+	Purge  *purgeGitInspectionV1 `json:"purge,omitempty"`
+	Pull   *gitPullResult        `json:"pull,omitempty"`
+	Error  *proto.Error          `json:"error,omitempty"`
+	Git    *GitInfo              `json:"git,omitempty"`    // worktree.add
+	Repo   *api.RepoInfo         `json:"repo,omitempty"`   // repo.info
+	Result string                `json:"result,omitempty"` // worktree.remove: what it did
+	Plan   *GitInfo              `json:"plan,omitempty"`   // worktree.add: what it is about to make
 }
 
 // gitOpHint is the next step after a git operation that failed on the host.
@@ -137,6 +140,9 @@ var gitOpHint = "Run `" + brand.Name + " host doctor` to check the host."
 // other way, as the client does over SSH, git-op starts that child, in its
 // scope, first.
 func RunGitOp(args []string, stdin io.Reader, stdout io.Writer) error {
+	if handled, err := runOrdinaryGitWorkerEntryV2(args); handled {
+		return err
+	}
 	if len(args) != 1 || findGitOp(args[0]) == nil {
 		names := make([]string, len(gitOpKinds))
 		for i, k := range gitOpKinds {
@@ -167,6 +173,11 @@ func RunGitOp(args []string, stdin io.Reader, stdout io.Writer) error {
 // dir's work tree, its main repository's folder, its branch and, when
 // changes asks, the count of its changed files.
 func repoInfo(dir string, changes bool) (*api.RepoInfo, error) {
+	return repoInfoWithPolicy(dir, changes, false)
+}
+
+func repoInfoWithPolicy(dir string, changes, policy bool) (*api.RepoInfo, error) {
+	dir = expandHome(dir)
 	if _, err := exec.LookPath("git"); err != nil {
 		return nil, UserError("no_git", "git is not installed on this host", "Install git on the host.")
 	}
@@ -179,6 +190,11 @@ func repoInfo(dir string, changes bool) (*api.RepoInfo, error) {
 		return nil, notARepo(dir, err)
 	}
 	r := &api.RepoInfo{Root: top, Main: mainFolder(dir, common), Branch: "HEAD"}
+	origin, code, err := runGit(dir, nil, "config", "--get", "remote.origin.url")
+	if err != nil && code != 1 {
+		return nil, asUserError(err, "git", "Check remote.origin.url on the host.")
+	}
+	r.Origin = strings.TrimSpace(origin)
 	// symbolic-ref names the branch of a repository without commits too.
 	if b, err := git(dir, "symbolic-ref", "--quiet", "--short", "HEAD"); err == nil && b != "" {
 		r.Branch = b
@@ -193,6 +209,13 @@ func repoInfo(dir string, changes bool) (*api.RepoInfo, error) {
 			return nil, asUserError(err, "git", "Check the repository's state on the host with git status.")
 		}
 		r.Dirty = countLines(st)
+	}
+	if policy {
+		r.Policy, err = ReadSandboxFile(r.Root, r.Main)
+		if err != nil {
+			return nil, err
+		}
+		r.PolicyChecked = true
 	}
 	return r, nil
 }

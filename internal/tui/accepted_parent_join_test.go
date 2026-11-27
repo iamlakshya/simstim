@@ -36,9 +36,7 @@ func TestPickerDropsInvalidSessionIDsFromCacheAndRefresh(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	good := client.Session{ID: "a2", Name: "raw\u200bname"}
 	bad := client.Session{ID: "../invalid", Name: "unusable"}
-	if err := saveMemory(memory{Sessions: map[string][]client.Session{"box": {bad, good}}}); err != nil {
-		t.Fatal(err)
-	}
+	client.RememberSessions(map[string][]client.Session{"box": {bad, good}})
 	rows := CachedSessions([]string{"box"})
 	if len(rows) != 1 || !reflect.DeepEqual(rows[0].Session, good) {
 		t.Fatalf("the cached picker rows changed valid values or kept a bad ID: %+v", rows)
@@ -109,9 +107,16 @@ func TestSetupAnswerPassesCurrentContextAndHashThroughBackend(t *testing.T) {
 	}}
 	m.modal = ask
 	cmd := ask.key(m, tea.KeyPressMsg{Code: 'y', Text: "y"})
-	finished := make(chan struct{})
-	go func() { executeHandoffCommand(cmd); close(finished) }()
-	call := lifecycleWait(t, entered)
+	ps := newProgStepper(t, m, m)
+	var call setupContextCall
+	finished := ps.stepToGate(cmd, func() bool {
+		select {
+		case call = <-entered:
+			return true
+		default:
+			return false
+		}
+	})
 	if call.ctx != current || call.ctx.Value(handoffContextKey{}) != "kept" || call.host != h.name() || call.repo != ask.q.Repo || call.hash != ask.q.Hash || !call.run {
 		t.Fatalf("the backend lost the current operation or checked hash: %+v", call)
 	}

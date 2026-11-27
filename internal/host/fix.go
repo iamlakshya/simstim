@@ -82,6 +82,9 @@ func lingerFix() []fixItem {
 	return []fixItem{{Fix: api.Fix{ID: "linger", Problem: "linger is off, so sessions stop when your last login on the host ends",
 		Action: "turn on linger for " + u.Username + " with loginctl, without sudo; if the host needs root for it, the fix says so", Command: cmd},
 		run: func() error {
+			if err := RecordFootprint(Footprint{Kind: "linger", Before: "off", After: "on"}); err != nil {
+				return err
+			}
 			out, err := exec.CommandContext(context.Background(), "loginctl", "enable-linger", u.Username).CombinedOutput()
 			if err == nil && lingerOn() {
 				return nil

@@ -4,10 +4,13 @@ an agent's hook reaches its own session only.
 
 run.py calls run() with its helpers. `E2E_ONLY=session-sockets just e2e` runs
 only these. They start two sessions of their own, type only into the first,
-and delete both. They touch no other session. On a host without a systemd
+and delete both. They touch no other session. Hook events run only on an authenticated
+disposable host, through the canonical process boundary. On a host without a systemd
 user manager, they check only that `host doctor` reports the sockets as weak.
 """
-import base64, json, re, struct, subprocess, time
+import base64, json, re, struct, time
+
+import boundary, owned
 
 
 class Ctx:
@@ -83,16 +86,16 @@ def probe_step(c, t, b):
 
 def doctor_checks(c):
     """The lines of host doctor, by name."""
-    r = subprocess.run([c.cli, "host", "doctor", c.HOST, "--json"], capture_output=True, text=True, timeout=120)
-    return {x["name"]: x for x in json.loads(r.stdout or "{}").get("checks") or []}
+    obj = owned.json_of([c.cli, "host", "doctor", c.HOST, "--json"], c.envx)
+    return {x["name"]: x for x in (obj or {}).get("checks") or []}
 
 
 def rows(c):
-    r = subprocess.run([c.cli, "ls", "--json", "--host", c.HOST], capture_output=True, text=True, timeout=60)
-    return {s["id"]: s for h in json.loads(r.stdout or "[]") for s in (h.get("sessions") or [])}
+    return {s["id"]: s for s in owned.sessions_on(c, c.envx) or []}
 
 
 def run(c):
+    boundary.require_disposable(c)
     lines = doctor_checks(c)
     check = lines.get("session sockets")
     if not c.ok(check is not None, "sockets: host doctor reports the session sockets"):
@@ -106,57 +109,72 @@ def run(c):
         print("SKIP sockets: the host has no systemd user manager, so its holders keep the role check alone")
         return
     if not check.get("ok"):
-        print("NOTE sockets: host doctor says %s" % check.get("detail"))
+        owned.say("NOTE sockets: host doctor says %s" % owned.safe_text(check.get("detail")))
     created = []
     try:
         checks(c, created)
     finally:
-        for s in created:
-            subprocess.run([c.cli, "kill", c.HOST + "/" + s], capture_output=True)
+        failed = owned.clean_up(c, created)
+        for sid in list(c.created):
+            if sid not in boundary.OWNED:
+                c.created.remove(sid)
+        c.ok(not failed, "sockets: both owned sessions are deleted by ID")
 
 
 def checks(c, created):
-    a = c.start("e2e-sock-a", *c.BASH_I)
-    b = c.start("e2e-sock-b", "/bin/sh", "-c", "sleep 600")
+    name_a, name_b = owned.e2e_name("e2e-sock-a"), owned.e2e_name("e2e-sock-b")
+    a, _, _ = owned.start_new(c, c.envx, c.created, name_a, "--",
+                              *owned.program("/bin/sh", "HISTFILE=; export HISTFILE; exec /bin/bash --norc --noprofile -i",
+                                             keep=(c.NAME.upper() + "_HOOK_SOCK", c.NAME.upper() + "_SESSION")))
+    b, _, _ = owned.start_new(c, c.envx, c.created, name_b, "--", *owned.program("/bin/sh", "exec sleep 600"))
+    if a:
+        c.names[a] = name_a
+    if b:
+        c.names[b] = name_b
     created += [s for s in (a, b) if s]
     if not c.ok(a and b, "sockets: two sessions start"):
         return
-    t = c.Term([c.cli, "attach", c.HOST + "/" + a], env=c.env)
-    if not c.ok(t.wait_for(rb"\$( |\x1b)", 30), "sockets: the first session's shell is ready"):
+    if not c.ok(c.exact(a, "socket probes") and c.exact(b, "socket probes"),
+                "sockets: both probe targets are the run's exact owned sessions"):
         return
-    t.send(b" unset HISTFILE; { set +o history; history -c; } 2>/dev/null\r")
+    t = c.attach(a)
+    try:
+        if not c.ok(t.wait_for(rb"\$( |\x1b)", 30), "sockets: the first session's shell is ready"):
+            return
 
-    # 1. The helper's bridge, run in the first session, asks to type into
-    #    the second session, to show its screen, to delete it, and to attach
-    #    to it. Each answer must be forbidden. The marker is computed, so the
-    #    typed line does not hold it.
-    stream = (frame(HELLO, {"magic": c.NAME, "protocol": "1.0", "version": "e2e", "role": "client"})
-              + frame(REQUEST, {"id": 1, "op": "send", "args": {"id": b, "text": "echo E2E-TYPED", "enter": True}})
-              + frame(REQUEST, {"id": 2, "op": "peek", "args": {"id": b, "bytes": 100}})
-              + frame(REQUEST, {"id": 3, "op": "delete", "args": {"id": b}})
-              + frame(ATTACH, {"session": b, "cols": 80, "rows": 24, "client": "e2e", "last_offset": -1}))
-    line = ("(echo %s | base64 -d; sleep 4) | %s bridge | tr -c '[:print:]' '\\n' | grep -o 'code.:.[a-z_]*'; echo SOCK-$((40+2))\r"
-            % (base64.b64encode(stream).decode(), c.HELPER))
-    t.buf = b""
-    t.send(line.encode())
-    c.ok(t.wait_for(rb"SOCK-42", 30), "sockets: the bridge in the first session answers")
-    got = re.findall(rb'code":"([a-z_]+)', t.buf)
-    c.ok(got.count(b"forbidden") == 4,
-         "sockets: send, peek, delete and attach from inside a session are forbidden (%s)" % b", ".join(got).decode())
+        # 1. The helper's bridge, run in the first session, asks to type into
+        #    the second session, to show its screen, to delete it, and to attach
+        #    to it. Each answer must be forbidden. The marker is computed, so the
+        #    typed line does not hold it.
+        stream = (frame(HELLO, {"magic": c.NAME, "protocol": "1.0", "version": "e2e", "role": "client"})
+                  + frame(REQUEST, {"id": 1, "op": "send", "args": {"id": b, "text": "echo E2E-TYPED", "enter": True}})
+                  + frame(REQUEST, {"id": 2, "op": "peek", "args": {"id": b, "bytes": 100}})
+                  + frame(REQUEST, {"id": 3, "op": "delete", "args": {"id": b}})
+                  + frame(ATTACH, {"session": b, "cols": 80, "rows": 24, "client": "e2e", "last_offset": -1}))
+        line = ("(echo %s | base64 -d; sleep 4) | %s bridge | tr -c '[:print:]' '\\n' | grep -o 'code.:.[a-z_]*'; echo SOCK-$((40+2))\r"
+                % (base64.b64encode(stream).decode(), c.HELPER))
+        t.buf = b""
+        t.send(line.encode())
+        c.ok(t.wait_for(rb"SOCK-42", 30), "sockets: the bridge in the first session answers")
+        got = re.findall(rb'code":"([a-z_]+)', t.buf)
+        c.ok(got.count(b"forbidden") == 4,
+             "sockets: send, peek, delete and attach from inside a session are forbidden (%s)" % b", ".join(got).decode())
 
-    # 2. The second session's socket itself, dialled from the first session,
-    #    refuses to type. This needs python3 on the host.
-    probe_step(c, t, b)
+        # 2. The second session's socket itself, dialled from the first session,
+        #    refuses to type. This needs python3 on the host.
+        probe_step(c, t, b)
 
-    # 3. A hook in the first session that names the second session's hook
-    #    socket is refused. The first session's own hook is taken.
-    hook = c.NAME.upper() + "_HOOK_SOCK"
-    t.send(("env %s=\"${%s%%/*}/%s.sock\" %s hook notification '{\"message\":\"e2e-cross-hook\"}'\r"
-            % (hook, hook, b, c.HELPER)).encode())
-    t.send(("%s hook notification '{\"message\":\"e2e-own-hook\"}'; echo HOOKS-$((40+2))\r" % c.HELPER).encode())
-    c.ok(t.wait_for(rb"HOOKS-42", 30), "sockets: the hooks ran")
-    t.send(b"\x1c")
-    t.exit_code(10)
+        # 3. A hook in the first session that names the second session's hook
+        #    socket is refused. The first session's own hook is taken.
+        hook = c.NAME.upper() + "_HOOK_SOCK"
+        t.send(("env %s=\"${%s%%/*}/%s.sock\" %s hook notification '{\"message\":\"e2e-cross-hook\"}'\r"
+                % (hook, hook, b, c.HELPER)).encode())
+        t.send(("%s hook notification '{\"message\":\"e2e-own-hook\"}'; echo HOOKS-$((40+2))\r" % c.HELPER).encode())
+        c.ok(t.wait_for(rb"HOOKS-42", 30), "sockets: the hooks ran")
+        t.send(b"\x1c")
+        t.exit_code(10)
+    finally:
+        t.close()
     time.sleep(2)
     r = rows(c)
     c.ok(r.get(a, {}).get("reason") == "e2e-own-hook" and r.get(a, {}).get("state") == "needs_input",
@@ -165,8 +183,11 @@ def checks(c, created):
          "sockets: a hook cannot reach another session (%s, %r)" % (r.get(b, {}).get("state"), r.get(b, {}).get("reason")))
 
     # 4. Nothing reached the second session's terminal.
-    t = c.Term([c.cli, "attach", c.HOST + "/" + b], env=c.env)
-    t.read(3)
-    t.send(b"\x1c")
-    t.exit_code(10)
-    c.ok(b"E2E-TYPED" not in t.buf, "sockets: nothing was typed into the second session")
+    t = c.attach(b)
+    try:
+        t.read(3)
+        t.send(b"\x1c")
+        t.exit_code(10)
+        c.ok(b"E2E-TYPED" not in t.buf, "sockets: nothing was typed into the second session")
+    finally:
+        t.close()

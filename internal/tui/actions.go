@@ -29,10 +29,11 @@ func (m *Model) op(h *hostConn, ok string, fn func(context.Context, Conn) error)
 }
 
 func offlineErr(h *hostConn) error {
+	name := shown(h.name())
 	if h.status == stConnecting {
-		return &client.UserError{Msg: "still connecting to " + h.name(), Hint: "Wait a moment, then try again.", Code: "connecting"}
+		return &client.UserError{Msg: "still connecting to " + name, Hint: "Wait a moment, then try again.", Code: "connecting"}
 	}
-	return &client.UserError{Msg: h.name() + " is offline", Hint: fmt.Sprintf("%s host test %s", brand.Name, h.name()), Code: "offline"}
+	return &client.UserError{Msg: name + " is offline", Hint: fmt.Sprintf("%s host test %s", brand.Name, name), Code: "offline"}
 }
 
 // newSessionHost picks the host for "session: new": the host in play, or
@@ -51,59 +52,50 @@ func (m *Model) newSessionHost() *hostConn {
 }
 
 func (m *Model) openNewSession() tea.Cmd {
-	h := m.newSessionHost()
-	if h == nil {
-		m.backToHosts()
-		return m.toast(toastInfo, "Choose a host, then press n.")
-	}
-	m.modal = newSessionDialog(m, h)
-	return nil
+	return m.resolveNewHost("", newHostForm, nil, client.NewArgs{}, false)
 }
 
 // openSelectedHost is Enter on the hosts list.
 func (m *Model) openSelectedHost() tea.Cmd {
 	if h := m.selectedHost(); h != nil {
-		m.openHost(h)
+		return m.withHostTier(h, func() tea.Cmd { m.openHost(h); return nil })
 	}
 	return nil
 }
 
 // startSession sends "new" to the host h, for the start r.
 func (m *Model) startSession(h *hostConn, r startReq) tea.Cmd {
+	return m.withHostTier(h, func() tea.Cmd { return m.startSessionReady(h, r) })
+}
+
+func (m *Model) startSessionReady(h *hostConn, r startReq) tea.Cmd {
 	r.host = h.name()
+	// A name that looks like an ID fails before any secret is fetched.
+	if err := client.CheckSessionName(r.args.Name); err != nil {
+		return func() tea.Msg { return startedMsg{startReq: r, err: err} }
+	}
 	if !h.online() {
 		err := offlineErr(h)
 		return func() tea.Msg { return startedMsg{startReq: r, err: err} }
 	}
-	r.args = client.TerminalArgs(r.args, m.width, m.height)
-	c, be, host := h.conn, m.be, h.host
-	return m.bgCmd(func(ctx context.Context) tea.Msg {
-		cctx, cancel := context.WithTimeout(ctx, 60*time.Second)
-		defer cancel()
-		var warn *client.UserError
-		if r.args.Setup == "" && !r.answered {
-			answers := be.SetupAnswers(r.host)
-			answers.Apply(&r.args)
-			r.answered, r.answers, warn = true, answers, answers.Warning
-		}
-		// One fetch of the secrets for each start. A question about the
-		// start keeps them for the start after the answer.
-		if r.args.Secrets == nil {
-			secrets, err := be.Secrets(cctx, host)
-			if err != nil {
-				return startedMsg{startReq: r, err: err, warn: warn}
-			}
-			r.args.Secrets = secrets
-		}
-		s, err := c.NewSession(cctx, r.args)
-		return startedMsg{startReq: r, s: s, err: err, warn: warn}
-	})
+	if r.grants == nil && r.args.Secrets == nil && !r.answered && r.vm == nil && r.inputOptions == nil {
+		return m.prepareNewStartSource(h, r)
+	}
+	return m.startSessionWithSource(h, r)
 }
 
 // onStarted shows how a start went, and a warning about the user's answers
 // about setup scripts, when they could not be read.
 func (m *Model) onStarted(msg startedMsg) tea.Cmd {
+	d, p := m.waiting(msg.startReq)
+	waited := d != nil || p != nil
 	cmd := m.showStarted(msg)
+	if keepStartGrant(msg) && !waited {
+		cmd = tea.Batch(cmd, m.releaseGrant(msg.grants))
+	}
+	if msg.cleanupErr != nil {
+		cmd = tea.Batch(cmd, m.toastErr(msg.cleanupErr))
+	}
 	if w := msg.warn; w != nil {
 		return tea.Batch(m.toastSetupWarn(w), cmd)
 	}
@@ -117,6 +109,11 @@ func (m *Model) onStarted(msg startedMsg) tea.Cmd {
 func (m *Model) showStarted(msg startedMsg) tea.Cmd {
 	d, p := m.waiting(msg.startReq)
 	waited := d != nil || p != nil
+	if q, ok := downgradeOf(msg.err); ok && waited && msg.grants == nil && msg.args.Wall != "auto" && msg.args.Wall != "" {
+		cleanup := m.disposeModal()
+		m.modal = &downgradeSheet{request: msg.startReq, level: q.Level, floor: q.Floor, typed: newInput("", q.Level)}
+		return cleanup
+	}
 	if q, ok := client.FolderQuestionOf(msg.err); ok && !msg.args.MakeFolder {
 		if waited {
 			cleanup := m.disposeModal()
@@ -168,13 +165,27 @@ func (m *Model) showStarted(msg startedMsg) tea.Cmd {
 		m.sel, m.autoSel = sessKey{h.name(), msg.s.ID}, false
 		m.syncSel()
 		if msg.attach {
+			if msg.selected != nil {
+				// The separate attach dial keeps the actual attempt's full Host,
+				// including its Source. It never adopts a preview or shared Conn.
+				target := *h
+				target.host = msg.selectedHost
+				return m.jack(&target, msg.s.ID, msg.s.Name)
+			}
 			return m.jack(h, msg.s.ID, msg.s.Name)
 		}
 	}
-	return tea.Batch(m.toast(toastSuccess, fmt.Sprintf("Started %s on %s.", msg.s.Name, h.name())), m.listSessions(h))
+	return tea.Batch(m.toast(toastSuccess, fmt.Sprintf("Started %s on %s.", shown(msg.s.Name), shown(h.name()))), m.listSessions(h))
 }
 
 func (m *Model) attachSelected() tea.Cmd {
+	if h, s := m.selectedPair(); h != nil && s != nil {
+		return m.withHostTierContext(m.backgroundContext(), h, m.attachSelectedReady)
+	}
+	return m.attachSelectedReady()
+}
+
+func (m *Model) attachSelectedReady() tea.Cmd {
 	h, s := m.selectedPair()
 	if s == nil {
 		if sessionRows(m.rows()) == 0 {
@@ -185,17 +196,26 @@ func (m *Model) attachSelected() tea.Cmd {
 	if ended(*s) {
 		return m.openEnded(h, *s)
 	}
+	if s.State == api.StateStopped {
+		return m.resumeSelectedReady()
+	}
 	return m.jack(h, s.ID, s.Name)
 }
 
+// copyAttach copies the command that attaches to the selected session. It
+// names the session by host/ID, never by its name, which can mean another
+// session (cli-spec 9.2). An address that a shell would not read back as it
+// is, as from a host that sends an odd ID, is not copied.
 func (m *Model) copyAttach() tea.Cmd {
 	h, s := m.selectedPair()
 	if s == nil {
 		return nil
 	}
-	// By the session's ID: a name is the host's text, and could be shell
-	// syntax when the command is pasted.
-	text := fmt.Sprintf("%s attach %s", brand.Name, client.CommandTarget(h.name(), s.ID))
+	addr := h.name() + "/" + s.ID
+	if !api.ValidSessionID(s.ID) || client.ShellWord(addr) != addr {
+		return m.toastErr(&client.UserError{Msg: "the address of this session cannot go in a command", Hint: brand.Name + " ls", Code: "bad_address", Kind: client.KindUsage})
+	}
+	text := brand.Name + " attach --id -- " + addr
 	return tea.Batch(tea.SetClipboard(text), m.toast(toastSuccess, "Copied: "+text+"."))
 }
 
@@ -208,7 +228,9 @@ func (m *Model) confirmDelete() tea.Cmd {
 	return nil
 }
 
-// deleteSession runs after the confirm.
+// deleteSession runs after the confirm. s is the session as the question
+// showed it: the host deletes it only while its name is still s.Name, so a
+// session renamed since stays.
 func (m *Model) deleteSession(host string, s client.Session) tea.Cmd {
 	h := m.hostByName(host)
 	if h == nil {
@@ -221,8 +243,8 @@ func (m *Model) deleteSession(host string, s client.Session) tea.Cmd {
 	return m.bgCmd(func(ctx context.Context) tea.Msg {
 		cctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 		defer cancel()
-		res, err := c.Delete(cctx, id)
-		ok := fmt.Sprintf("Deleted %s on %s.", s.Name, host)
+		res, err := c.DeleteNamed(cctx, id, s.Name)
+		ok := fmt.Sprintf("Deleted %s on %s.", shown(s.Name), shown(host))
 		note, hint := client.WorktreeNote(host, res)
 		if note != "" {
 			ok += " " + sentence(note)
@@ -235,18 +257,32 @@ func (m *Model) deleteSession(host string, s client.Session) tea.Cmd {
 	})
 }
 
-// saveHosts writes the host list with one host added, replaced or removed,
-// unless the launcher's context ends first: then it writes nothing.
-func (m *Model) saveHosts(host client.Host, remove bool) tea.Cmd {
+// changeHost saves c.Now, or with c.Now nil forgets the host, in the
+// background. c.Was is the entry that the launcher read: when another
+// command changed the host since, such as a host rm, or a host create of
+// the same name, it changes nothing, and fails with host_changed. So a
+// removed host never comes back, and a confirmation that waited never
+// removes a host made again (cli-spec 11.3, rule 13).
+func (m *Model) changeHost(c client.HostChange) tea.Cmd {
 	be := m.be
+	c.Kind = "the launcher"
+	remove := c.Now == nil
+	host := c.Now
+	if remove {
+		host = c.Was
+	}
 	return m.bgCmd(func(ctx context.Context) tea.Msg {
-		hosts, err := be.LoadHosts(ctx)
-		if err != nil {
-			return m.completeHostSave(hostSavedMsg{host: host, remove: remove, err: err})
-		}
-		out := changedHosts(hosts, host, remove)
-		return m.completeHostSave(hostSavedMsg{host: host, remove: remove, err: be.SaveHosts(ctx, out)})
+		// A removed host keeps no record of an unfinished `host rm`. The
+		// removal worked already: a failure of that clean-up is a warning.
+		warn, err := saveWizardHost(ctx, be, c)
+		return m.completeHostSave(hostSavedMsg{host: *host, remove: remove, err: err, warn: warn})
 	})
+}
+
+// hostChanged reports a save refused because its saved entry changed.
+func hostChanged(err error) bool {
+	ue, ok := asUserError(err)
+	return ok && (ue.Code == "host_changed" || ue.Code == "host_exists")
 }
 
 func (m *Model) onHostSaved(msg hostSavedMsg) tea.Cmd {
@@ -263,7 +299,7 @@ func (m *Model) onHostSaved(msg hostSavedMsg) tea.Cmd {
 		}
 		return nil
 	}
-	return m.applyHostSaved(msg)
+	return m.applyHostSaved(m.backgroundContext(), msg)
 }
 
 // testHost measures the round trip to h.
@@ -279,6 +315,6 @@ func (m *Model) testHost(h *hostConn) tea.Cmd {
 		if err != nil {
 			return opDoneMsg{host: name, err: err}
 		}
-		return opDoneMsg{host: name, ok: fmt.Sprintf("%s answers in %s.", name, fmtLatency(d))}
+		return opDoneMsg{host: name, ok: fmt.Sprintf("%s answers in %s.", shown(name), fmtLatency(d))}
 	})
 }

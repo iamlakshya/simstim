@@ -29,19 +29,29 @@ const (
 // touches it; the work happens in tea.Cmds that report back with messages.
 type hostConn struct {
 	host      client.Host
+	tier      client.Tier
+	tierUnset bool
+	idChanged bool
 	status    connStatus
 	conn      Conn
 	gen       int // bumped on every dial, so late answers from old connections are dropped
 	err       error
 	sessions  []client.Session
 	loaded    bool
-	rtts      rttWindow // the round trips of the last minute (rtt.go)
-	rtt       rttSpread // their spread, as the launcher shows it
-	info      *client.HostInfo
-	backoff   time.Duration
-	listing   bool
-	pinging   bool
-	doctoring bool
+	// seenAt is when the host's list last arrived, for the session cache,
+	// as the worker that fetched it saw it: a list that the launcher saves
+	// later keeps this time.
+	seenAt     time.Time
+	rtts       rttWindow // the round trips of the last minute (rtt.go)
+	rtt        rttSpread // their spread, as the launcher shows it
+	info       *client.HostInfo
+	backoff    time.Duration
+	listing    bool
+	pinging    bool
+	doctoring  bool
+	needRetire bool
+	dialCancel context.CancelFunc
+	dialSerial chan struct{}
 	// changes counts local edits to the list (a new, renamed or deleted
 	// session). A list asked for before the latest edit is stale.
 	changes int
@@ -54,10 +64,11 @@ func (h *hostConn) online() bool { return h.status == stOnline && h.conn != nil 
 // Messages from the connection commands.
 type (
 	dialledMsg struct {
-		name string
-		gen  int
-		conn Conn
-		err  error
+		name      string
+		gen       int
+		conn      Conn
+		err       error
+		reconnect bool
 	}
 	connDoneMsg struct {
 		name string
@@ -73,6 +84,9 @@ type (
 		changes int
 		list    []client.Session
 		err     error
+		// at is when the list arrived, taken by the worker that asked: the
+		// launcher may handle the message much later, as after an attach.
+		at time.Time
 	}
 	latencyMsg struct {
 		name string
@@ -89,6 +103,24 @@ type (
 	latencyTickMsg struct{}
 )
 
+// loadSavedHosts reads the saved hosts and their tiers for New.
+func loadSavedHosts(ctx context.Context, be Backend) ([]*hostConn, error) {
+	hosts, err := be.LoadHosts(ctx)
+	if err != nil {
+		return nil, err
+	}
+	tiers, err := be.LoadTiers(ctx, hosts)
+	if err != nil {
+		return nil, err
+	}
+	sort.SliceStable(hosts, func(i, j int) bool { return hosts[i].Name < hosts[j].Name })
+	out := make([]*hostConn, 0, len(hosts))
+	for _, h := range hosts {
+		out = append(out, &hostConn{host: h, tier: tiers.Of(h.Name), tierUnset: tiers.NeedsAnswer(h.Name), idChanged: tiers.IDChanged(h.Name)})
+	}
+	return out, nil
+}
+
 func (m *Model) hostByName(name string) *hostConn {
 	for _, h := range m.hosts {
 		if h.name() == name {
@@ -100,22 +132,56 @@ func (m *Model) hostByName(name string) *hostConn {
 
 // dial starts a background connection to h.
 func (m *Model) dial(h *hostConn) tea.Cmd {
+	return m.dialWith(h, nil, false)
+}
+
+func (m *Model) dialWith(h *hostConn, drop Conn, manual bool) tea.Cmd {
+	if h.dialCancel != nil {
+		h.dialCancel()
+	}
+	ctx, cancel := context.WithCancel(m.backgroundContext())
+	h.dialCancel = cancel
+	if h.dialSerial == nil {
+		h.dialSerial = make(chan struct{}, 1)
+	}
 	h.gen++
 	h.status = stConnecting
 	h.listing, h.pinging, h.doctoring = false, false, false
-	h.rtts, h.rtt = nil, rttSpread{} // a new connection starts its own round trips
-	gen, host, be, set := h.gen, h.host, m.be, m.conns
-	return m.bgCmd(func(bgCtx context.Context) tea.Msg {
-		dctx, cancel := context.WithTimeout(bgCtx, 30*time.Second)
-		defer cancel()
-		c, err := dialClean(dctx, be, host)
+	h.rtts, h.rtt = nil, rttSpread{}
+	gen, host, retire, be, set, serial := h.gen, h.host, h.needRetire, m.be, m.conns, h.dialSerial
+	return m.bgCmdFrom(ctx, func(bgCtx context.Context) tea.Msg {
+		// The set retains drop until this command starts or Close retires it.
+		if drop != nil {
+			set.drop(drop)
+		}
+		select {
+		case serial <- struct{}{}:
+			defer func() { <-serial }()
+		case <-bgCtx.Done():
+			return nil
+		}
+		if bgCtx.Err() != nil {
+			return nil
+		}
+		dctx, finish := context.WithTimeout(bgCtx, 30*time.Second)
+		defer finish()
+		var c Conn
+		var err error
+		if retire {
+			c, err = be.Reconnect(dctx, host)
+			if err == nil && c != nil {
+				c = cleanConn{c}
+			}
+		} else {
+			c, err = dialClean(dctx, be, host)
+		}
 		if err == nil && c != nil {
 			if bgCtx.Err() != nil || !set.addUnadopted(c) {
 				c.Close()
 				return nil
 			}
 		}
-		return dialledMsg{name: host.Name, gen: gen, conn: c, err: err}
+		return dialledMsg{name: host.Name, gen: gen, conn: c, err: err, reconnect: manual}
 	})
 }
 
@@ -154,7 +220,7 @@ func (m *Model) listSessions(h *hostConn) tea.Cmd {
 		cctx, cancel := context.WithTimeout(bgCtx, 15*time.Second)
 		defer cancel()
 		list, err := c.Sessions(cctx)
-		return sessionsMsg{name: name, gen: gen, changes: changes, list: list, err: err}
+		return sessionsMsg{name: name, gen: gen, changes: changes, list: list, err: err, at: time.Now()}
 	})
 }
 
@@ -201,46 +267,72 @@ func nextBackoff(d time.Duration) time.Duration {
 // offline reports whether err means the host could not be reached at all,
 // as opposed to reached but not ready.
 func offline(err error) bool {
+	if ue, ok := asUserError(err); ok && ue.Code == "reconnect_failed" {
+		return false
+	}
 	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, client.ErrClosed) {
 		return true
 	}
-	msg, _ := errText(err)
+	// The whole message, not the text that the launcher draws, which a
+	// long error has cut.
+	msg := err.Error()
 	return strings.HasPrefix(msg, "cannot reach") || strings.Contains(msg, "timed out") ||
 		strings.Contains(msg, "Connection refused") || strings.Contains(msg, "No route to host")
 }
 
-// reconnect drops h's connection, if any, and dials again now.
+// reconnect closes h's bridge and shared SSH connection, if any, and dials a
+// fresh connection now.
 func (m *Model) reconnect(h *hostConn) tea.Cmd {
-	var cmds []tea.Cmd
-	if h.conn != nil {
-		cmds = append(cmds, m.dropConn(h.conn))
-		h.conn = nil
+	if h == nil {
+		return nil
 	}
+	old := h.conn
+	h.conn = nil
+	h.info = nil
+	h.needRetire = true
 	h.backoff = 0
-	return tea.Batch(append(cmds, m.dial(h))...)
+	return m.dialWith(h, old, true)
 }
 
 // addHost puts a new or changed host in the list. If conn is set, it is a
 // ready connection to adopt, so the host needs no second dial.
-func (m *Model) addHost(host client.Host, conn Conn, info *client.HostInfo) tea.Cmd {
+func (m *Model) addTierHost(host client.Host, tier client.Tier, idChanged bool, conn Conn, info *client.HostInfo) tea.Cmd {
 	h := m.hostByName(host.Name)
+	if h != nil && h.dialCancel != nil {
+		h.dialCancel()
+	}
 	var cmds []tea.Cmd
 	if h == nil {
 		h = &hostConn{host: host}
 		m.hosts = append(m.hosts, h)
 		sort.SliceStable(m.hosts, func(i, j int) bool { return m.hosts[i].name() < m.hosts[j].name() })
 	} else {
+		if !sameRoute(h.host, host) {
+			h.sessions, h.info, h.err = nil, nil, nil
+			h.loaded, h.listing, h.pinging = false, false, false
+			h.backoff, h.rtts, h.rtt = 0, nil, rttSpread{}
+			m.syncSel()
+		}
 		h.host = host
 		if h.conn != nil {
 			cmds = append(cmds, m.dropConn(h.conn))
 			h.conn = nil
 		}
 	}
+	if !tier.Valid() {
+		tier = client.TierShared
+	}
+	h.tier, h.idChanged = tier, idChanged
 	if conn != nil && !m.conns.adopt(conn) {
 		conn = nil
 	}
+	h.needRetire = false
 	if conn == nil {
 		return tea.Batch(append(cmds, m.dial(h))...)
+	}
+	if conn.HostIDChanged() {
+		h.tier, h.idChanged = client.TierShared, true
+		cmds = append(cmds, m.toastHostIDChanged(h.name()))
 	}
 	h.gen++
 	h.conn, h.status, h.err, h.backoff, h.info = conn, stOnline, nil, 0, info
@@ -251,26 +343,6 @@ func (m *Model) addHost(host client.Host, conn Conn, info *client.HostInfo) tea.
 		cmds = append(cmds, m.doctor(h))
 	}
 	return tea.Batch(cmds...)
-}
-
-// removeHost forgets h here. Its sessions keep running on the host.
-func (m *Model) removeHost(name string) tea.Cmd {
-	for i, h := range m.hosts {
-		if h.name() != name {
-			continue
-		}
-		m.hosts = append(m.hosts[:i], m.hosts[i+1:]...)
-		h.gen++
-		if m.cur == name {
-			m.screen, m.cur = scrHosts, ""
-		}
-		m.syncSel()
-		if h.conn != nil {
-			return m.dropConn(h.conn)
-		}
-		return nil
-	}
-	return nil
 }
 
 // Session order and looks.
@@ -309,6 +381,9 @@ func (m *Model) look(s client.Session) (glyph, label seg) {
 	if ended(s) {
 		return endLook(s)
 	}
+	if decoyNotice(s) {
+		return seg{m.working(s.ID), sDanger}, seg{"decoy used", sDanger}
+	}
 	switch s.State {
 	case api.StateNeedsInput:
 		return seg{glyphNeedsInput, m.breath(sWarning)}, seg{"needs input", sWarning}
@@ -319,12 +394,15 @@ func (m *Model) look(s client.Session) (glyph, label seg) {
 	case api.StateIdle:
 		return seg{glyphIdle, sFaint}, seg{"idle", sFaint}
 	}
-	return seg{glyphIdle, sFaint}, seg{strings.ReplaceAll(s.State, "_", " "), sFaint}
+	return seg{glyphIdle, sFaint}, seg{strings.ReplaceAll(shown(s.State), "_", " "), sFaint}
 }
 
 // traceStyle colours a session's trace like its state: cyan for working,
 // yellow for needs input, faint otherwise.
 func traceStyle(s client.Session) lipgloss.Style {
+	if decoyNotice(s) {
+		return sDanger
+	}
 	switch s.State {
 	case api.StateWorking:
 		return sKey
@@ -377,11 +455,11 @@ func (m *Model) alertNew(h *hostConn, list []client.Session) tea.Cmd {
 		if s.State != api.StateNeedsInput || before[s.ID] == api.StateNeedsInput {
 			continue
 		}
-		body := s.Name + " needs you"
-		if s.Reason != "" {
-			body += ": " + s.Reason
+		body := shown(s.Name) + " needs you"
+		if r := shown(s.Reason); r != "" {
+			body += ": " + r
 		}
-		b.WriteString("\x1b]777;notify;" + client.OSCText(brand.DisplayName+" · "+h.name()) + ";" + client.OSCText(body) + "\x1b\\")
+		b.WriteString("\x1b]777;notify;" + oscText(brand.DisplayName+" · "+shown(h.name())) + ";" + oscText(body) + "\x1b\\")
 	}
 	if b.Len() == 0 {
 		return nil
@@ -398,4 +476,19 @@ func (m *Model) rememberCreatedHost(host client.Host) {
 	m.hosts = append(m.hosts, &hostConn{host: host, status: stOffline})
 	sort.SliceStable(m.hosts, func(i, j int) bool { return m.hosts[i].name() < m.hosts[j].name() })
 	m.syncSel()
+}
+
+// oscText keeps text safe inside an OSC string.
+func oscText(s string) string {
+	return strings.ReplaceAll(shown(s), ";", " ")
+}
+
+// addHost retains the package-local call shape used by lifecycle fixtures.
+// Policy-bearing production saves use addTierHost with their committed tier.
+func (m *Model) addHost(host client.Host, conn Conn, info *client.HostInfo) tea.Cmd {
+	tier, changed := client.TierUnknown, false
+	if h := m.hostByName(host.Name); h != nil {
+		tier, changed = h.tier, h.idChanged
+	}
+	return m.addTierHost(host, tier, changed, conn, info)
 }

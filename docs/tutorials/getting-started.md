@@ -44,9 +44,11 @@ The launcher offers the same setup: run `simstim` with no hosts, and press Enter
 
 For a script, or to skip the questions, answer them with flags:
 
+These examples use `own` for a host where only you have root. Choose `shared` when someone else has root ([host tiers](../how-to/choose-a-host-tier.md)).
+
 <!-- test: help (it changes the host) -->
 ```sh
-simstim setup --host my-server --agents claude,codex --yes --no-login
+simstim setup --host my-server --tier own --agents claude,codex --yes --no-login
 ```
 
 ### Or step by step
@@ -54,7 +56,7 @@ simstim setup --host my-server --agents claude,codex --yes --no-login
 The setup runs commands you can also run yourself. `host add` checks that the host answers, installs the helper, and saves the host:
 
 ```sh
-simstim host add my-server --yes
+simstim host add my-server --tier own --yes
 ```
 
 `--yes` agrees to the helper's install; leave it out to see what it installs first. Then check the host:
@@ -63,18 +65,20 @@ simstim host add my-server --yes
 simstim host test my-server
 ```
 
-[Install an agent](../how-to/install-agents.md) has the rest: `agents install`, and each agent's login.
+[Install an agent](../how-to/install-agents.md) has the rest: `agents install`, and `agents login` for the agent's own login.
 
 ## 3. Start a session
 
-Start a shell session that keeps running on the host:
+Start a shell session in a sandbox at the host's pinned floor:
 
 ```sh
 simstim new my-server --name first --detach
 simstim ls
 ```
 
-`ls` shows the session, with its state and folder.
+`ls` shows the session, with its state and folder. The floor comes from host preparation; a stronger level in your policy can raise it. `auto` keeps that saved choice. It does not choose a different level from each new probe.
+
+If the host has no saved floor, run `simstim host prepare my-server`. A host that offers only `none`, such as a container used for testing, needs the explicit exception `--wall none --downgrade`. Shared hosts never use the `process` level.
 
 To start an agent instead, name it. This opens the session in your terminal straight away:
 
@@ -101,8 +105,10 @@ Or run `simstim` with no arguments to open the launcher: Enter on a host shows i
 ## 5. Clean up
 
 ```sh
-simstim kill my-server/first
+simstim rm my-server/first
 ```
+
+`rm` says what stops and what stays, and asks first. Type `y` to delete the session. Its folder stays on the host.
 
 ## Next
 

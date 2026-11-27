@@ -2,18 +2,10 @@ package tui
 
 import (
 	"context"
-	"encoding/json"
-	"errors"
 	"fmt"
-	"strings"
 	"sync"
 	"sync/atomic"
-	"testing"
 	"time"
-
-	tea "charm.land/bubbletea/v2"
-	"charm.land/lipgloss/v2"
-	uv "github.com/charmbracelet/ultraviolet"
 
 	"github.com/iamlakshya/simstim/internal/api"
 	"github.com/iamlakshya/simstim/internal/client"
@@ -27,6 +19,7 @@ var now = time.Date(2026, 10, 15, 12, 0, 0, 0, time.UTC)
 
 // fakeHost is the state of one pretend host, shared by its connections.
 type fakeHost struct {
+	grantErr error
 	sessions []client.Session
 	info     client.HostInfo
 	screens  map[string][]byte
@@ -53,32 +46,43 @@ type fakeHost struct {
 	// debugErr is what a debug start says, if it fails (debug_test.go).
 	debugErr error
 	// folders are more folders that the host suggests (clean_test.go).
-	folders []string
+	folders   []string
+	hostID    string
+	idChanged bool
 }
 
 // fakeBackend pretends to be SSH, the hosts and the terminal.
 type fakeBackend struct {
-	mu        sync.Mutex
-	hosts     []client.Host
-	state     map[string]*fakeHost
-	conns     []*fakeConn
-	dials     map[string]int
-	calls     []string
-	saved     [][]client.Host
-	known     []string
-	probe     client.Platform
-	probeErr  error
-	installed bool
-	attach    client.AttachResult
-	attachErr error
-	attached  []client.AttachOptions
-	blocked   *atomic.Int64 // goroutines waiting in Done
-	mem       memory        // what the launcher remembers between runs
-	saves     int
-	secrets   map[string]api.Secret // a host's own secrets, for every start
-	secretErr error
-	trust     map[string]client.SetupAnswers // answers about setup scripts, by host
-	trustWarn *client.UserError              // the answers' file did not parse
+	// A test may use the actual local resolver; unset has no automatic target.
+	resolveHost             func(context.Context, string) (client.Host, error)
+	previewHost             func(context.Context, string, client.NewInputOptions) (hostSelectionPreview, error)
+	settingsWarn, detachKey string
+	settings                *client.Settings
+	newArgs                 []client.NewArgs
+	secretsFrom             []client.Settings
+	mu                      sync.Mutex
+	hosts                   []client.Host
+	tiers                   map[string]client.TierEntry
+	tiersErr                error
+	state                   map[string]*fakeHost
+	conns                   []*fakeConn
+	dials                   map[string]int
+	calls                   []string
+	saved                   [][]client.Host
+	known                   []string
+	probe                   client.Platform
+	probeErr                error
+	installed               bool
+	attach                  client.AttachResult
+	attachErr               error
+	attached                []client.AttachOptions
+	blocked                 *atomic.Int64 // goroutines waiting in Done
+	mem                     memory        // what the launcher remembers between runs
+	saves                   int
+	secrets                 map[string]api.Secret // a host's own secrets, for every start
+	secretErr               error
+	trust                   map[string]client.SetupAnswers // answers about setup scripts, by host
+	trustWarn               *client.UserError              // the answers' file did not parse
 	// rememberWarn is the warning of the next answer: the file did not
 	// parse when the answer was kept.
 	rememberWarn *client.UserError
@@ -103,7 +107,25 @@ type fakeBackend struct {
 	loadGate, loading chan struct{}
 	loadCtx           context.Context
 	saveGate, saving  chan struct{}
+	committedSaveGate chan struct{} // an actual committed save whose result is still owned
 	saveCtx           context.Context
+	// pinUnknown says that the user's settings do not name the fake host's
+	// key, and pinErr is what a pin says, if it fails.
+	pinUnknown bool
+	pinKey     string // a changed remote key between the displayed question and confirmation
+	pinErr     error
+	staged     map[string]string // the pin staged for a host, "" for none yet
+	// stageGate, when set, holds StagePin until it closes or ctx ends.
+	stageGate chan struct{}
+	// beforeUpdate and beforeInstall run at the start of UpdateHosts and
+	// Install: what another command does at that moment. updateErr is what
+	// UpdateHosts returns, such as host_busy while a command holds the lock.
+	beforeUpdate  func(client.HostChange)
+	beforeInstall func(client.Host)
+	updateErr     error
+	resolveTier   func(context.Context, client.Host) (client.Tier, error)
+	retire        func(context.Context, client.Host) error
+	fakePrepareState
 }
 
 func newFakeBackend() *fakeBackend {
@@ -138,29 +160,99 @@ func (b *fakeBackend) LoadHosts(ctx context.Context) ([]client.Host, error) {
 	return append([]client.Host(nil), b.hosts...), nil
 }
 
-// SaveHosts saves as the real one does: nothing once ctx has ended.
-func (b *fakeBackend) SaveHosts(ctx context.Context, h []client.Host) error {
+// UpdateHosts saves or forgets one host, with the compare of the real one
+// (client.ApplyHostChange). The launcher has no other way to write the
+// hosts. beforeUpdate, when set, runs first: another command that changes
+// the hosts just before the save.
+func (b *fakeBackend) UpdateHosts(c client.HostChange) (warn, err error) {
+	return b.UpdateHostsContext(context.Background(), c)
+}
+
+func (b *fakeBackend) UpdateHostsContext(ctx context.Context, c client.HostChange) (warn, err error) {
 	b.mu.Lock()
 	b.saveCtx = ctx
 	b.mu.Unlock()
-	if b.saveGate != nil {
-		close(b.saving)
-		<-b.saveGate
+	if err := b.waitSaveGate(ctx); err != nil {
+		return nil, err
 	}
 	if err := ctx.Err(); err != nil {
-		return err
+		return nil, err
+	}
+	if b.beforeUpdate != nil {
+		b.beforeUpdate(c)
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
 	b.mu.Lock()
-	defer b.mu.Unlock()
-	b.hosts = append([]client.Host(nil), h...)
-	b.saved = append(b.saved, b.hosts)
-	return nil
+	if b.updateErr != nil {
+		b.mu.Unlock()
+		return nil, b.updateErr
+	}
+	out, err := client.ApplyHostChange(b.hosts, c)
+	if err != nil {
+		b.mu.Unlock()
+		return nil, err
+	}
+	pin := ""
+	if c.Now != nil {
+		pin = b.staged[c.Now.Name]
+	}
+	if c.Pin && c.Now != nil {
+		delete(b.staged, c.Now.Name)
+	}
+	b.hosts = out
+	b.saved = append(b.saved, out)
+	b.bumpHostGenLocked(c)
+	if b.tiers == nil {
+		b.tiers = map[string]client.TierEntry{}
+	}
+	switch {
+	case c.Now == nil && c.Was != nil:
+		delete(b.tiers, c.Was.Name)
+	case c.Now != nil:
+		e := b.tiers[c.Now.Name]
+		e.Name = c.Now.Name
+		if c.Tier.Valid() {
+			e.Tier, e.IDChanged = c.Tier, false
+		}
+		if c.HostID != "" {
+			e.HostID = c.HostID
+		}
+		if pin != "" {
+			e.Key = pin
+		}
+		if e.Tier.Valid() {
+			b.tiers[c.Now.Name] = e
+		}
+	}
+	b.mu.Unlock()
+	if c.Now == nil {
+		b.mu.Lock()
+		delete(b.staged, c.Was.Name)
+		b.mu.Unlock()
+		b.record("forget %s", c.Was.Name)
+		// The forget's clean-up of the record (errClearRemoval).
+		b.record("clear removal %s", c.Was.Name)
+		return errClearRemoval, nil
+	}
+	b.record("save %s pin=%s", c.Now.Name, pin)
+	b.waitCommittedSaveResult()
+	return nil, nil
 }
 
 func (b *fakeBackend) Settings() client.Settings {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.settings != nil {
+		return *b.settings
+	}
 	var s client.Settings
 	s.UI.Motion = "off"
 	s.Attach.DetachKey = "ctrl+\\"
+	if b.detachKey != "" {
+		s.Attach.DetachKey = b.detachKey
+	}
 	return s
 }
 
@@ -184,9 +276,35 @@ func (b *fakeBackend) Dial(ctx context.Context, h client.Host) (Conn, error) {
 	if st.dialErr != nil {
 		return nil, st.dialErr
 	}
-	c := &fakeConn{be: b, name: h.Name, done: make(chan struct{})}
+	id := st.hostID
+	if id == "" {
+		id = "0123456789abcdef0123456789abcdef"
+	}
+	changed := st.idChanged
+	if changed {
+		st.idChanged = false
+		if b.tiers != nil {
+			e := b.tiers[h.Name]
+			e.Name, e.Tier, e.HostID, e.IDChanged = h.Name, client.TierShared, id, true
+			b.tiers[h.Name] = e
+		}
+	}
+	c := &fakeConn{be: b, name: h.Name, hostID: id, idChanged: changed, done: make(chan struct{})}
 	b.conns = append(b.conns, c)
 	return c, nil
+}
+
+func (b *fakeBackend) Reconnect(ctx context.Context, h client.Host) (Conn, error) {
+	b.record("reconnect %s", h.Name)
+	b.mu.Lock()
+	retire := b.retire
+	b.mu.Unlock()
+	if retire != nil {
+		if err := retire(ctx, h); err != nil {
+			return nil, err
+		}
+	}
+	return b.Dial(ctx, h)
 }
 
 // conn is the newest connection to a host.
@@ -201,7 +319,8 @@ func (b *fakeBackend) conn(name string) *fakeConn {
 	return nil
 }
 
-func (b *fakeBackend) Probe(context.Context, client.Host) (client.Platform, error) {
+func (b *fakeBackend) Probe(_ context.Context, h client.Host) (client.Platform, error) {
+	b.record("probe %s", h.Name)
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	p := b.probe
@@ -211,6 +330,9 @@ func (b *fakeBackend) Probe(context.Context, client.Host) (client.Platform, erro
 
 func (b *fakeBackend) Install(_ context.Context, h client.Host, _ client.Platform) error {
 	b.record("install %s", h.Name)
+	if b.beforeInstall != nil {
+		b.beforeInstall(h)
+	}
 	b.mu.Lock()
 	b.installed = true
 	if b.state[h.Name] == nil {
@@ -233,12 +355,17 @@ func (b *fakeBackend) Memory() memory {
 	return b.mem
 }
 
-// Remember writes the sessions, as the real one does: never the last
+// Remember writes the lists, as the real one does: never the last
 // session.
-func (b *fakeBackend) Remember(mem memory) {
+func (b *fakeBackend) Remember(lists map[string]client.HostList) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	b.mem.Sessions = mem.Sessions
+	b.mem.Sessions = map[string][]client.Session{}
+	b.mem.Seen = map[string]time.Time{}
+	for h, l := range lists {
+		b.mem.Sessions[h] = l.Sessions
+		b.mem.Seen[h] = l.At
+	}
 	b.saves++
 }
 
@@ -264,430 +391,59 @@ func (b *fakeBackend) Attach(_ context.Context, o client.AttachOptions) (client.
 }
 
 // fakeConn is one pretend bridge connection.
-type fakeConn struct {
-	be     *fakeBackend
-	name   string
-	done   chan struct{}
-	mu     sync.Mutex
-	waits  int64
-	closed bool
-}
-
-func (c *fakeConn) isClosed() bool {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.closed
-}
-
-func (c *fakeConn) host() *fakeHost {
-	return c.be.state[c.name]
-}
-
-func (c *fakeConn) Folders(_ context.Context, prefix string) (client.FoldersResult, error) {
-	all := []string{"~/src/api/", "~/src/app/", "~/notes/"}
-	c.be.mu.Lock()
-	all = append(all, c.host().folders...)
-	c.be.mu.Unlock()
-	r := client.FoldersResult{Recent: []string{"~/src/app"}, Repos: []string{"~/src/api", "~/src/app"}}
-	for _, p := range all {
-		if prefix != "" && strings.HasPrefix(p, prefix) {
-			r.Matches = append(r.Matches, p)
-		}
+func (b *fakeBackend) SaveHosts(ctx context.Context, hosts []client.Host) error {
+	b.mu.Lock()
+	b.saveCtx = ctx
+	b.mu.Unlock()
+	if err := b.waitSaveGate(ctx); err != nil {
+		return err
 	}
-	return r, nil
-}
-
-func (c *fakeConn) Sessions(context.Context) ([]client.Session, error) {
-	if c.isClosed() {
-		return nil, client.ErrClosed
+	if err := ctx.Err(); err != nil {
+		return err
 	}
-	c.be.mu.Lock()
-	defer c.be.mu.Unlock()
-	return append([]client.Session(nil), c.host().sessions...), nil
-}
-
-func (c *fakeConn) NewSession(_ context.Context, a client.NewArgs) (*client.Session, error) {
-	for k := range a.Secrets {
-		c.be.record("new %s secret %s=%v", c.name, k, a.Secrets[k])
-	}
-	if len(a.Argv) > 0 {
-		c.be.record("new %s agent=%s argv=%v cwd=%s name=%s worktree=%v size=%dx%d", c.name, a.Agent, a.Argv, a.Cwd, a.Name, a.Worktree, a.Cols, a.Rows)
-	} else {
-		c.be.record("new %s agent=%s cwd=%s name=%s worktree=%v size=%dx%d", c.name, a.Agent, a.Cwd, a.Name, a.Worktree, a.Cols, a.Rows)
-	}
-	if a.Setup != "" {
-		c.be.record("new %s setup=%s", c.name, a.Setup)
-	}
-	if len(a.SetupHashes) > 0 {
-		c.be.record("new %s setup_hashes=%v", c.name, a.SetupHashes)
-	}
-	if a.MakeFolder {
-		c.be.record("new %s mkdir %s", c.name, a.Cwd)
-	}
-	c.be.mu.Lock()
-	defer c.be.mu.Unlock()
-	h := c.host()
-	if h.newErr != nil {
-		return nil, h.newErr
-	}
-	if h.missing != "" && a.Cwd == h.missing && !a.MakeFolder {
-		data, _ := json.Marshal(client.FolderQuestion{Folder: "/home/dev/" + strings.TrimPrefix(h.missing, "~/")})
-		return nil, &client.UserError{Msg: "the folder does not exist", Code: api.CodeNoFolder, Data: data}
-	}
-	// The order of the host: the override, a refusal, the trusted hash.
-	run, known := a.SetupTrust[h.setupRepo]
-	refused := known && !run
-	if h.setupRepo != "" && a.Setup == "" && !refused && (h.setupHash == "" || a.SetupHashes[h.setupRepo] != h.setupHash) {
-		data, _ := json.Marshal(client.SetupQuestion{Repo: h.setupRepo, Script: h.setupRepo + "/.setup", Hash: h.setupHash})
-		return nil, &client.UserError{Msg: "the repository has a setup script", Code: api.CodeSetupTrust, Data: data}
-	}
-	if h.setupErr != "" && a.Setup != api.SetupSkip {
-		return nil, &client.UserError{Msg: "the setup script of /home/dev/src/app, .x/setup, points outside the repository, so it cannot run",
-			Hint: "Make .x/setup a file in the repository, or start with --no-setup.", Code: h.setupErr}
-	}
-	name := a.Name
-	if name == "" {
-		name = "app"
-	}
-	s := client.Session{ID: fmt.Sprintf("n%03d", len(h.sessions)+1), Name: name, Agent: a.Agent, Cwd: a.Cwd,
-		State: api.StateStarting, Since: now, CreatedAt: now, Alive: true}
-	h.sessions = append(h.sessions, s)
-	return &s, nil
-}
-
-// Resume starts a session's agent again: it works once more, with nothing
-// of how it ended.
-func (c *fakeConn) Resume(_ context.Context, a client.ResumeArgs) (*client.ResumeResult, error) {
-	c.be.record("resume %s %s memory=%d secrets=%v", c.name, a.ID, a.MemoryMax, a.Secrets)
-	c.be.mu.Lock()
-	defer c.be.mu.Unlock()
-	h := c.host()
-	if h.resumeErr != nil {
-		return nil, h.resumeErr
-	}
-	for i, s := range h.sessions {
-		if s.ID == a.ID {
-			s.State, s.Source, s.Since, s.Alive = api.StateWorking, "start", now, true
-			s.Reason, s.Signal, s.ExitCode, s.OOM = "", "", nil, false
-			h.sessions[i] = s
-			return &client.ResumeResult{Session: s, Why: "resumed its own session"}, nil
-		}
-	}
-	return nil, &client.UserError{Msg: "no session " + a.ID, Hint: "List sessions to find its ID."}
-}
-
-func (c *fakeConn) Delete(_ context.Context, id string) (client.DeleteResult, error) {
-	c.be.record("delete %s %s", c.name, id)
-	c.be.mu.Lock()
-	defer c.be.mu.Unlock()
-	h := c.host()
-	for i, s := range h.sessions {
-		if s.ID == id {
-			h.sessions = append(h.sessions[:i], h.sessions[i+1:]...)
-			res := client.DeleteResult{Deleted: true}
-			if s.Name == "api-tests" {
-				res.Worktree = "kept the worktree ~/src/api-tests: it has uncommitted changes"
-			}
-			if c.be.deleted != nil {
-				res = *c.be.deleted
-			}
-			return res, nil
-		}
-	}
-	return client.DeleteResult{}, &client.UserError{Msg: "no session " + id, Hint: "Refresh the list."}
-}
-
-func (c *fakeConn) RenameSession(_ context.Context, id, name string) error {
-	c.be.record("rename %s %s %s", c.name, id, name)
-	c.be.mu.Lock()
-	defer c.be.mu.Unlock()
-	for i := range c.host().sessions {
-		if c.host().sessions[i].ID == id {
-			c.host().sessions[i].Name = name
-		}
-	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.hosts = append([]client.Host(nil), hosts...)
+	b.saved = append(b.saved, append([]client.Host(nil), hosts...))
 	return nil
 }
 
-func (c *fakeConn) Doctor(ctx context.Context) (client.HostInfo, error) {
-	c.be.mu.Lock()
-	hook := c.be.doctorHook
-	c.be.mu.Unlock()
-	if hook != nil {
-		hook(ctx, c.name)
-	}
+func (b *fakeBackend) LoadTiers(ctx context.Context, hosts []client.Host) (client.Tiers, error) {
 	if err := ctx.Err(); err != nil {
-		return client.HostInfo{}, err
+		return client.Tiers{}, err
 	}
-	c.be.mu.Lock()
-	defer c.be.mu.Unlock()
-	return c.host().info, nil
-}
-
-func (c *fakeConn) Peek(_ context.Context, id string, _ int) ([]byte, int, int, error) {
-	c.be.mu.Lock()
-	defer c.be.mu.Unlock()
-	b, ok := c.host().screens[id]
-	if !ok {
-		return nil, 0, 0, errors.New("no screen kept")
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.tiersErr != nil {
+		return client.Tiers{}, b.tiersErr
 	}
-	return b, 100, 30, nil
-}
-
-func (c *fakeConn) Setup(context.Context) (client.SetupResult, error) {
-	return client.SetupResult{Steps: []api.Check{
-		{Name: "linger", OK: true, Detail: "on"},
-		{Name: "terminfo", OK: true, Detail: "xterm-ghostty installed"},
-	}}, nil
-}
-
-func (c *fakeConn) RoundTrip(context.Context) (time.Duration, error) {
-	c.be.mu.Lock()
-	defer c.be.mu.Unlock()
-	h := c.host()
-	h.pings++
-	if len(h.rtts) > 0 {
-		return h.rtts[(h.pings-1)%len(h.rtts)], nil
-	}
-	return h.latency, nil
-}
-
-// Done counts its callers as blocked, so the harness knows they wait.
-func (c *fakeConn) Done() <-chan struct{} {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if !c.closed {
-		c.waits++
-		c.be.blocked.Add(1)
-	}
-	return c.done
-}
-
-func (c *fakeConn) Close() {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if !c.closed {
-		c.closed = true
-		c.be.blocked.Add(-c.waits)
-		close(c.done)
-	}
-}
-
-// Harness: runs the model the way Bubble Tea would, with fake time.
-
-type timerMsg struct {
-	d   time.Duration
-	msg tea.Msg
-}
-
-type harness struct {
-	t       *testing.T
-	m       *Model
-	be      *fakeBackend
-	clock   time.Time
-	results chan tea.Msg
-	running atomic.Int64
-	timers  []timerMsg
-	quit    bool
-	raw     []string // what the model wrote to the terminal itself
-}
-
-func newHarness(t *testing.T, be *fakeBackend, w, h int) *harness {
-	t.Helper()
-	hs := &harness{t: t, be: be, clock: now, results: make(chan tea.Msg, 4096)}
-	m := New(context.Background(), be, Options{Now: func() time.Time { return hs.clock }})
-	m.after = func(d time.Duration, msg tea.Msg) tea.Cmd {
-		return func() tea.Msg { return timerMsg{d, msg} }
-	}
-	m.exec = func(c tea.ExecCommand, fn tea.ExecCallback) tea.Cmd {
-		return func() tea.Msg { return fn(c.Run()) }
-	}
-	hs.m = m
-	t.Cleanup(m.Close)
-	hs.send(tea.WindowSizeMsg{Width: w, Height: h})
-	hs.do(m.Init())
-	return hs
-}
-
-// do runs cmd and everything it leads to, until only goroutines waiting
-// for a connection to end are left.
-func (hs *harness) do(cmd tea.Cmd) {
-	hs.t.Helper()
-	hs.start(cmd)
-	deadline := time.Now().Add(5 * time.Second)
-	for {
-		select {
-		case msg := <-hs.results:
-			hs.deliver(msg)
-			continue
-		default:
-		}
-		if hs.running.Load() <= hs.be.blocked.Load() {
-			// Settle once more, in case a waiter just woke.
-			time.Sleep(2 * time.Millisecond)
-			if len(hs.results) == 0 && hs.running.Load() <= hs.be.blocked.Load() {
-				return
-			}
-			continue
-		}
-		if time.Now().After(deadline) {
-			hs.t.Fatalf("commands did not settle: %d running, %d waiting", hs.running.Load(), hs.be.blocked.Load())
-		}
-		time.Sleep(time.Millisecond)
-	}
-}
-
-func (hs *harness) start(cmd tea.Cmd) {
-	if cmd == nil {
-		return
-	}
-	hs.running.Add(1)
-	go func() {
-		msg := cmd()
-		hs.results <- msg
-		hs.running.Add(-1)
-	}()
-}
-
-func (hs *harness) deliver(msg tea.Msg) {
-	switch msg := msg.(type) {
-	case nil:
-	case tea.BatchMsg:
-		for _, c := range msg {
-			hs.start(c)
-		}
-	case timerMsg:
-		hs.timers = append(hs.timers, msg)
-	case tea.QuitMsg:
-		hs.quit = true
-	case tea.RawMsg:
-		hs.raw = append(hs.raw, fmt.Sprint(msg.Msg))
-	default:
-		_, cmd := hs.m.Update(msg)
-		hs.start(cmd)
-	}
-}
-
-// send delivers one message and settles.
-func (hs *harness) send(msg tea.Msg) {
-	hs.t.Helper()
-	_, cmd := hs.m.Update(msg)
-	hs.do(cmd)
-}
-
-// key presses keys by name, in order.
-func (hs *harness) key(keys ...string) {
-	hs.t.Helper()
-	for _, k := range keys {
-		hs.send(keyMsg(k))
-	}
-}
-
-// typeText types each rune as a key press.
-func (hs *harness) typeText(s string) {
-	hs.t.Helper()
-	for _, r := range s {
-		hs.send(tea.KeyPressMsg{Code: r, Text: string(r)})
-	}
-}
-
-// fire delivers the pending timers whose message matches.
-func (hs *harness) fire(match func(tea.Msg) bool) int {
-	hs.t.Helper()
-	var keep []timerMsg
-	var due []timerMsg
-	for _, t := range hs.timers {
-		if match(t.msg) {
-			due = append(due, t)
-		} else {
-			keep = append(keep, t)
+	if b.tiers == nil {
+		b.tiers = make(map[string]client.TierEntry, len(hosts))
+		for _, h := range hosts {
+			b.tiers[h.Name] = client.TierEntry{Name: h.Name, Tier: client.TierOwn}
 		}
 	}
-	hs.timers = keep
-	for _, t := range due {
-		hs.send(t.msg)
-	}
-	return len(due)
+	return client.NewTiers(b.tiers), nil
 }
 
-func keyMsg(k string) tea.KeyPressMsg {
-	special := map[string]tea.KeyPressMsg{
-		"enter":      {Code: tea.KeyEnter},
-		"ctrl+enter": {Code: tea.KeyEnter, Mod: tea.ModCtrl},
-		"esc":        {Code: tea.KeyEscape},
-		"tab":        {Code: tea.KeyTab},
-		"shift+tab":  {Code: tea.KeyTab, Mod: tea.ModShift},
-		"up":         {Code: tea.KeyUp},
-		"down":       {Code: tea.KeyDown},
-		"left":       {Code: tea.KeyLeft},
-		"right":      {Code: tea.KeyRight},
-		"backspace":  {Code: tea.KeyBackspace},
-		"space":      {Code: tea.KeySpace, Text: " "},
-		"ctrl+c":     {Code: 'c', Mod: tea.ModCtrl},
-		"ctrl+o":     {Code: 'o', Mod: tea.ModCtrl},
-		"ctrl+u":     {Code: 'u', Mod: tea.ModCtrl},
-		"ctrl+f":     {Code: 'f', Mod: tea.ModCtrl},
-		"alt+e":      {Code: 'e', Mod: tea.ModAlt},
+func (b *fakeBackend) ResolveHostTier(ctx context.Context, h client.Host) (client.Tier, error) {
+	if b.resolveTier != nil {
+		return b.resolveTier(ctx, h)
 	}
-	if m, ok := special[k]; ok {
-		return m
+	ts, err := b.LoadTiers(ctx, []client.Host{h})
+	if err == nil && ts.NeedsAnswer(h.Name) {
+		return client.TierShared, &client.UserError{Msg: "the host tier needs an answer", Hint: "Choose a host tier.", Code: "needs_answer", Kind: client.KindNeedsAnswer}
 	}
-	r := []rune(k)
-	return tea.KeyPressMsg{Code: r[0], Text: k}
+	return ts.Of(h.Name), err
 }
 
-// Fixtures.
+func (c *fakeConn) HostID() string { return c.hostID }
 
-func ago(d time.Duration) time.Time { return now.Add(-d) }
+func (c *fakeConn) HostIDChanged() bool { return c.idChanged }
 
-func code(n int) *int { return &n }
-
-// labBackend is three hosts: two online with sessions, one unreachable.
-func labBackend() *fakeBackend {
-	be := newFakeBackend()
-	be.hosts = []client.Host{
-		{Name: "atlas-dev", SSH: "atlas-dev"},
-		{Name: "gcp-dev", SSH: "dev@203.0.113.7", SSHConfig: "~/src/infra/ssh/config"},
-		{Name: "aws-gpu", SSH: "aws-gpu"},
-	}
-	be.state["atlas-dev"] = &fakeHost{
-		latency: 9 * time.Millisecond,
-		info: client.HostInfo{User: "dev", Distro: "Debian 13", Arch: "amd64", CPUs: 4, MemTotal: 8 << 30, DiskFree: 61 << 30,
-			Version: "0.1.0", MemoryMax: 6551502848,
-			Agents:        map[string]string{"claude": "/usr/local/bin/claude", "codex": "/usr/local/bin/codex", "opencode": "/usr/bin/opencode", "shell": "/usr/bin/zsh"},
-			AgentVersions: map[string]string{"claude": "2.1.3", "codex": "0.46.0", "opencode": "1.0.12"}},
-		sessions: []client.Session{
-			{ID: "s5", Name: "docs-pass", Agent: "opencode", Cwd: "/home/dev/src/docs", State: api.StateExited, ExitCode: code(0), Since: ago(3 * time.Hour), CreatedAt: ago(5 * time.Hour)},
-			{ID: "s2", Name: "notes", Agent: "shell", Cwd: "/home/dev", State: api.StateIdle, Since: ago(time.Hour), CreatedAt: ago(26 * time.Hour), Alive: true},
-			{ID: "s3", Name: "api-tests", Agent: "codex", Cwd: "/home/dev/src/api", State: api.StateWorking, Since: ago(14 * time.Second), CreatedAt: ago(40 * time.Minute), Alive: true},
-			{ID: "s4", Name: "auth-refactor", Agent: "claude", Cwd: "/home/dev/src/app", State: api.StateNeedsInput, Since: ago(2 * time.Minute), CreatedAt: ago(time.Hour),
-				Alive: true, MemoryCurrent: 6549825126, MemoryMax: 8 << 30},
-		},
-		screens: map[string][]byte{
-			"s4": []byte("\x1b[?1049h\x1b[2J\x1b[H\x1b[c" +
-				"\x1b[1m✻ Welcome back\x1b[0m\r\n\r\n" +
-				"> Refactor the auth module to use the new token store\r\n\r\n" +
-				"\x1b[32m●\x1b[0m I'll start by reading the current implementation.\r\n\r\n" +
-				"  Read internal/auth/store.go (212 lines)\r\n" +
-				"  Read internal/auth/session.go (96 lines)\r\n\r\n" +
-				"\x1b[33m●\x1b[0m Should I also migrate the old sessions table? (y/n)\r\n\r\n" +
-				"> "),
-			"s3": []byte("running 48 tests\r\n\x1b[32mok\x1b[0m  api/handlers  0.41s\r\n"),
-		},
-	}
-	be.state["gcp-dev"] = &fakeHost{
-		latency: 41 * time.Millisecond,
-		info:    client.HostInfo{Distro: "Ubuntu 24.04", Arch: "amd64", CPUs: 8, MemTotal: 32 << 30, MemoryMax: 30431772672, Agents: map[string]string{"gemini": "/usr/bin/gemini", "shell": "/bin/bash"}},
-		sessions: []client.Session{
-			{ID: "g6", Name: "bench", Agent: "gemini", Cwd: "/srv/bench", State: api.StateWorking, Since: ago(5 * time.Minute), CreatedAt: ago(2 * time.Hour), Alive: true},
-			{ID: "g2", Name: "scratch", Agent: "shell", Cwd: "/tmp", State: api.StateExited, ExitCode: code(1), Since: ago(50 * time.Hour), CreatedAt: ago(60 * time.Hour)},
-		},
-	}
-	be.state["aws-gpu"] = &fakeHost{dialErr: &client.UserError{
-		Msg:  "cannot reach aws-gpu: ssh: connect to host 198.51.100.4 port 22: Operation timed out",
-		Hint: "ssh aws-gpu   (check that this works first)",
-	}}
-	return be
+func (b *fakeBackend) ReadSettings() (client.Settings, string) {
+	s := b.Settings()
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return s, b.settingsWarn
 }
-
-func uvDraw(c *lipgloss.Canvas, s string) { uv.NewStyledString(s).Draw(c, c.Bounds()) }

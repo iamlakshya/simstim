@@ -6,7 +6,6 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -70,8 +69,12 @@ func TestCreateArgs(t *testing.T) {
 			t.Errorf("%s: args =\n%q\nwant\n%q", goos, got, want)
 		}
 	}
-	got := strings.Join(CreateArgs("vm", provider.Request{CPUs: 4, MemoryGiB: 8, DiskGiB: 80}, "darwin"), " ")
+	got := strings.Join(CreateArgs("vm", provider.Request{CPUs: 4, Memory: 8 << 30, Disk: 80 << 30}, "darwin"), " ")
 	if !strings.Contains(got, "--cpus=4 --memory=8 --disk=80") {
+		t.Fatal(got)
+	}
+	got = strings.Join(CreateArgs("vm", provider.Request{Memory: 1536 << 20, Disk: 512 << 20}, "darwin"), " ")
+	if !strings.Contains(got, "--memory=1.5 --disk=0.5") {
 		t.Fatal(got)
 	}
 }
@@ -85,184 +88,12 @@ func TestShellLine(t *testing.T) {
 	}
 }
 
-// fakeLimactl acts as limactl for one Mac or Linux machine. It keeps each
-// instance's status, and whether its VM asks for nested virtualisation, in
-// files. A start writes ha.pid, as Lima's host agent does, and a stop
-// removes it. It logs each call as one line: its arguments, each followed
-// by the unit separator, so that the test sees every argument whole.
-//
-// Files in FAKE_DIR change what it does:
-//   - refuse-nesting: this Mac cannot run a VM inside a VM. Every start of
-//     a VM that asks for nesting fails, as Lima's does: refuse-stderr goes
-//     to stderr, and refuse-ha becomes the instance's ha.stderr.log. With
-//     refuse-late, the log is written after the start returns, by a process
-//     whose PID is in ha.pid. It removes ha.pid first, as Lima's host agent
-//     does.
-//   - fail-start: the next start fails: fail-start goes to stderr, and
-//     fail-ha becomes the instance's ha.stderr.log.
-//   - override-open, override-qemu and override-nested: Lima's
-//     override.yaml sets hostLoopback true, vmType qemu, or
-//     nestedVirtualization true, whatever create or edit asked for.
-//   - edit-fails, delete-fails, version-fails and version-fails-quiet: those
-//     commands fail. version holds what --version prints.
-//   - after-edit-list-fails, after-edit-list-bad,
-//     after-edit-list-incomplete, after-edit-list-empty and
-//     after-edit-list-other: once an edit has run, list fails, prints text
-//     that is not JSON, leaves out nestedVirtualization, lists nothing, or
-//     lists only another instance.
-//   - networks-json: the config's networks, as JSON.
-//
-// Lines that start with # in the copied files are the testdata's notes,
-// which limactl never prints.
-const fakeLimactl = `#!/bin/sh
-for a; do printf '%s\037' "$a"; done >> "$FAKE_DIR/log"
-printf '\n' >> "$FAKE_DIR/log"
-cmd=$1; shift
-for a; do n=$a; done
-copy() { grep -v '^#' "$1"; true; }
-case $cmd in
---version)
-  if [ -f "$FAKE_DIR/version-fails" ]; then echo "limactl: command failed" >&2; exit 1; fi
-  if [ -f "$FAKE_DIR/version-fails-quiet" ]; then exit 3; fi
-  if [ -f "$FAKE_DIR/version" ]; then cat "$FAKE_DIR/version"; else echo "limactl version 2.3.0"; fi ;;
-list)
-  if [ -f "$FAKE_DIR/edited" ] && [ -f "$FAKE_DIR/after-edit-list-fails" ]; then echo "fake limactl: list failed" >&2; exit 1; fi
-  if [ -f "$FAKE_DIR/edited" ] && [ -f "$FAKE_DIR/after-edit-list-bad" ]; then echo '{"name":'; exit 0; fi
-  if [ -f "$FAKE_DIR/edited" ] && [ -f "$FAKE_DIR/after-edit-list-empty" ]; then exit 0; fi
-  if [ -f "$FAKE_DIR/edited" ] && [ -f "$FAKE_DIR/after-edit-list-other" ]; then echo '{"name":"other","status":"Running"}'; exit 0; fi
-  for f in "$FAKE_DIR"/inst-*; do
-    [ -f "$f" ] || continue
-    i=${f##*/inst-}
-    loop=true; [ -f "$FAKE_DIR/closed-$i" ] && loop=false
-    [ -f "$FAKE_DIR/override-open" ] && loop=true
-    vm=vz; [ -f "$FAKE_DIR/override-qemu" ] && vm=qemu
-    nest=false; if [ -f "$FAKE_DIR/nested-$i" ] || [ -f "$FAKE_DIR/override-nested" ]; then nest=true; fi
-    nest="\"nestedVirtualization\":$nest,"
-    if [ -f "$FAKE_DIR/edited" ] && [ -f "$FAKE_DIR/after-edit-list-incomplete" ]; then nest=; fi
-    nets=; if [ -f "$FAKE_DIR/networks-json" ]; then nets=",\"networks\":$(cat "$FAKE_DIR/networks-json")"; fi
-    printf '{"name":"%s","status":"%s","dir":"%s/%s","vmType":"%s","sshConfigFile":"%s/%s/ssh.config","cpus":2,"config":{%s"networkOpts":{"hostLoopback":%s}%s}}\n' \
-      "$i" "$(cat "$f")" "$FAKE_DIR" "$i" "$vm" "$FAKE_DIR" "$i" "$nest" "$loop" "$nets"
-  done ;;
-create)
-  for a; do case $a in --name=*) n=${a#--name=} ;; esac; done
-  mkdir -p "$FAKE_DIR/$n"
-  for a; do case $a in
-    '--set=.networkOpts.hostLoopback = false') touch "$FAKE_DIR/closed-$n" ;;
-    --nested-virt) touch "$FAKE_DIR/nested-$n" ;;
-  esac; done
-  echo Stopped > "$FAKE_DIR/inst-$n" ;;
-edit)
-  if [ -f "$FAKE_DIR/edit-fails" ]; then echo "fake limactl: edit failed" >&2; exit 1; fi
-  prev=
-  for a; do
-    if [ "$prev" = --set ] && [ "$a" = '.nestedVirtualization = false' ]; then rm -f "$FAKE_DIR/nested-$n"; fi
-    prev=$a
-  done
-  touch "$FAKE_DIR/edited" ;;
-start)
-  d=$FAKE_DIR/$n
-  mkdir -p "$d"
-  if [ -f "$FAKE_DIR/refuse-nesting" ] && { [ -f "$FAKE_DIR/nested-$n" ] || [ -f "$FAKE_DIR/override-nested" ]; }; then
-    if [ -f "$FAKE_DIR/refuse-late" ]; then
-      (sleep 0.3; rm -f "$d/ha.pid"; sleep 0.2; copy "$FAKE_DIR/refuse-ha" > "$d/ha.stderr.log") </dev/null >/dev/null 2>&1 &
-      echo $! > "$d/ha.pid"
-    elif [ -f "$FAKE_DIR/refuse-ha" ]; then
-      copy "$FAKE_DIR/refuse-ha" > "$d/ha.stderr.log"
-    fi
-    copy "$FAKE_DIR/refuse-stderr" >&2
-    exit 1
-  fi
-  if [ -f "$FAKE_DIR/fail-start" ]; then
-    if [ -f "$FAKE_DIR/fail-ha" ]; then copy "$FAKE_DIR/fail-ha" > "$d/ha.stderr.log"; fi
-    copy "$FAKE_DIR/fail-start" >&2
-    rm -f "$FAKE_DIR/fail-start"
-    exit 1
-  fi
-  echo $$ > "$d/ha.pid"
-  echo Running > "$FAKE_DIR/inst-$n" ;;
-stop) rm -f "$FAKE_DIR/$n/ha.pid"; echo Stopped > "$FAKE_DIR/inst-$n" ;;
-delete)
-  if [ -f "$FAKE_DIR/delete-fails" ]; then echo "fake limactl: delete failed" >&2; exit 1; fi
-  rm -f "$FAKE_DIR/inst-$n" ;;
-*) echo "fake limactl: unknown command $cmd" >&2; exit 2 ;;
-esac
-`
-
-// fakeLima puts the fake limactl first on PATH, sets the operating system
-// that the provider sees, and returns the fake's folder.
-func fakeLima(t *testing.T, system string) string {
-	t.Helper()
-	if runtime.GOOS == "windows" {
-		t.Skip("the fake limactl is a POSIX shell script")
-	}
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "limactl"), []byte(fakeLimactl), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
-	t.Setenv("FAKE_DIR", dir)
-	t.Setenv("LIMA_HOME", "")
-	old := goos
-	goos = system
-	t.Cleanup(func() { goos = old })
-	return dir
-}
-
-// set makes the fake's files: a name alone makes an empty file, and
-// name=testdata-file copies that file from testdata.
-func set(t *testing.T, dir string, files ...string) {
-	t.Helper()
-	for _, f := range files {
-		name, from, ok := strings.Cut(f, "=")
-		var b []byte
-		if ok {
-			var err error
-			if b, err = os.ReadFile(filepath.Join("testdata", from)); err != nil {
-				t.Fatal(err)
-			}
-		}
-		if err := os.WriteFile(filepath.Join(dir, name), b, 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-}
-
-// calls returns the fake's calls, each as its arguments.
-func calls(t *testing.T, dir string) [][]string {
-	t.Helper()
-	b, _ := os.ReadFile(filepath.Join(dir, "log"))
-	var out [][]string
-	for _, line := range strings.Split(string(b), "\n") {
-		if line != "" {
-			out = append(out, strings.Split(strings.TrimSuffix(line, "\x1f"), "\x1f"))
-		}
-	}
-	return out
-}
-
-// verbs returns the first argument of each call that changes a VM, in
-// order: calls of list and --version are left out.
-func verbs(cs [][]string) []string {
-	var out []string
-	for _, c := range cs {
-		if c[0] != "list" && c[0] != "--version" {
-			out = append(out, c[0])
-		}
-	}
-	return out
-}
-
-// called reports whether the fake was called with exactly args.
-func called(cs [][]string, args ...string) bool {
-	return slices.ContainsFunc(cs, func(c []string) bool { return slices.Equal(c, args) })
-}
-
 func TestCreateAndLifecycle(t *testing.T) {
 	dir := fakeLima(t, "linux")
 	ctx := context.Background()
 
 	var out bytes.Buffer
-	h, err := Provider{}.Create(ctx, provider.Request{Name: "dev", Out: &out})
+	h, err := fixtureCreate(t, ctx, provider.Request{Name: "dev", Out: &out})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -285,7 +116,7 @@ func TestCreateAndLifecycle(t *testing.T) {
 			t.Errorf("output lacks %q:\n%s", want, out.String())
 		}
 	}
-	if _, err := (Provider{}).Create(ctx, provider.Request{Name: "dev"}); err == nil {
+	if _, err := fixtureCreate(t, ctx, provider.Request{Name: "dev"}); err == nil {
 		t.Fatal("a second instance of the same name was made")
 	}
 
@@ -326,7 +157,7 @@ func TestCreateOnAMac(t *testing.T) {
 	dir := fakeLima(t, "darwin")
 	ctx := context.Background()
 	var out bytes.Buffer
-	h, err := Provider{}.Create(ctx, provider.Request{Name: "dev", Out: &out})
+	h, err := fixtureCreate(t, ctx, provider.Request{Name: "dev", Out: &out})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -349,7 +180,7 @@ func TestCreateOnAMac(t *testing.T) {
 }
 
 // Lima's override.yaml wins over the arguments of limactl create. A VM that
-// it leaves open is deleted before it starts.
+// it leaves open is retained without starting it.
 func TestCreateRefusesAnOverride(t *testing.T) {
 	inst := provider.MachineName("dev")
 	for _, tc := range []struct {
@@ -360,28 +191,37 @@ func TestCreateRefusesAnOverride(t *testing.T) {
 	} {
 		t.Run(tc.file, func(t *testing.T) {
 			dir := fakeLima(t, "darwin")
-			t.Setenv("LIMA_HOME", tc.limaHome)
+			if tc.limaHome == "" {
+				home, err := filepath.EvalSymlinks(t.TempDir())
+				if err != nil {
+					t.Fatal(err)
+				}
+				t.Setenv("HOME", home)
+				t.Setenv("LIMA_HOME", "")
+			} else {
+				t.Setenv("LIMA_HOME", filepath.Join(dir, "explicit-home"))
+			}
 			set(t, dir, tc.file)
-			_, err := Provider{}.Create(context.Background(), provider.Request{Name: "dev"})
+			_, err := fixtureCreate(t, context.Background(), provider.Request{Name: "dev"})
 			var ue *client.UserError
-			if !errors.As(err, &ue) ||
-				ue.Msg != "Lima made "+inst+" with "+tc.setting+", which lets it reach services on your Mac's loopback address, so host create deleted it" ||
-				ue.Hint != "remove vmType and networkOpts.hostLoopback from "+tc.path+", then run this again" {
+			if !errors.As(retainedCreationCause(err), &ue) ||
+				ue.Msg != "Lima made "+inst+" with "+tc.setting+", which lets it reach services on your Mac's loopback address; the VM is retained for inspection" ||
+				ue.Hint != retainedHintPrefix+"remove vmType and networkOpts.hostLoopback from "+overridePath()+", then run this again" {
 				t.Fatalf("create = %#v", err)
 			}
 			cs := calls(t, dir)
-			if !slices.Equal(verbs(cs), []string{"create", "delete"}) || !called(cs, "delete", "--force", inst) {
+			if !slices.Equal(verbs(cs), []string{"create"}) || called(cs, "delete", "--force", inst) {
 				t.Errorf("limactl calls: %q", cs)
 			}
-			if _, err := os.Stat(filepath.Join(dir, "inst-"+inst)); err == nil {
-				t.Error("the open VM was left")
+			if _, err := os.Stat(filepath.Join(dir, "inst-"+inst)); err != nil {
+				t.Error("the actual partial VM was lost")
 			}
 		})
 	}
 }
 
 // Lima's vz driver refuses hostLoopback false with a user-v2 network, which
-// default.yaml or override.yaml can give every VM. Such a VM is deleted
+// default.yaml or override.yaml can give every VM. Such a VM is retained
 // before it starts, and the Try names the file and the network.
 func TestCreateRefusesAUserV2Network(t *testing.T) {
 	inst := provider.MachineName("dev")
@@ -416,7 +256,7 @@ func TestCreateRefusesAUserV2Network(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			_, err := Provider{}.Create(context.Background(), provider.Request{Name: "dev"})
+			_, err := fixtureCreate(t, context.Background(), provider.Request{Name: "dev"})
 			cs := calls(t, dir)
 			if tc.network == "" {
 				if err != nil || !slices.Equal(verbs(cs), []string{"create", "start"}) {
@@ -429,12 +269,12 @@ func TestCreateRefusesAUserV2Network(t *testing.T) {
 				where = filepath.Join(config, tc.file)
 			}
 			var ue *client.UserError
-			if !errors.As(err, &ue) ||
-				ue.Msg != "Lima gives "+inst+" the user-v2 network "+tc.network+", which cannot go with networkOpts.hostLoopback false, so host create deleted it" ||
-				ue.Hint != "remove the network {lima: "+tc.network+"} from networks in "+where+", then run this again" {
+			if !errors.As(retainedCreationCause(err), &ue) ||
+				ue.Msg != "Lima gives "+inst+" the user-v2 network "+tc.network+", which cannot go with networkOpts.hostLoopback false; the VM is retained for inspection" ||
+				ue.Hint != retainedHintPrefix+"remove the network {lima: "+tc.network+"} from networks in "+where+", then run this again" {
 				t.Fatalf("create = %#v", err)
 			}
-			if !slices.Equal(verbs(cs), []string{"create", "delete"}) || !called(cs, "delete", "--force", inst) {
+			if !slices.Equal(verbs(cs), []string{"create"}) || called(cs, "delete", "--force", inst) {
 				t.Errorf("limactl calls: %q", cs)
 			}
 		})
@@ -458,7 +298,7 @@ func TestCreateStartsAgainWithoutNesting(t *testing.T) {
 			dir := fakeLima(t, "darwin")
 			set(t, dir, append(tc.files, "refuse-nesting")...)
 			var out bytes.Buffer
-			h, err := Provider{}.Create(context.Background(), provider.Request{Name: "dev", Out: &out})
+			h, err := fixtureCreate(t, context.Background(), provider.Request{Name: "dev", Out: &out})
 			if err != nil {
 				t.Fatalf("create: %v\n%s", err, out.String())
 			}
@@ -482,9 +322,9 @@ func TestCreateReportsOtherStartFailures(t *testing.T) {
 	dir := fakeLima(t, "darwin")
 	set(t, dir, "fail-start=start-exiting.stderr", "fail-ha=ha-other.log")
 	var out bytes.Buffer
-	_, err := Provider{}.Create(context.Background(), provider.Request{Name: "dev", Out: &out})
+	_, err := fixtureCreate(t, context.Background(), provider.Request{Name: "dev", Out: &out})
 	var ee *provider.ExecError
-	if !errors.As(err, &ee) || !strings.HasPrefix(err.Error(), "limactl start: ") || !strings.Contains(ee.Stderr, "exiting, status=") {
+	if !errors.As(err, &ee) || !strings.HasPrefix(retainedCreationCause(err).Error(), "limactl start: ") || !strings.Contains(ee.Stderr, "exiting, status=") {
 		t.Fatalf("create = %v", err)
 	}
 	if cs := calls(t, dir); !slices.Equal(verbs(cs), []string{"create", "start"}) {
@@ -495,8 +335,8 @@ func TestCreateReportsOtherStartFailures(t *testing.T) {
 	}
 }
 
-// When the start again fails, the VM, which no host names, is deleted.
-func TestCreateDeletesAVMThatDoesNotStartAgain(t *testing.T) {
+// When the start again fails, the actual VM is retained for inspection.
+func TestCreateRetainsAVMThatDoesNotStartAgain(t *testing.T) {
 	inst := provider.MachineName("dev")
 	again := brand.Name + " host create lima dev (to try again)"
 	refused := []string{"refuse-nesting", "refuse-stderr=start-exiting.stderr", "refuse-ha=ha-no-device.log"}
@@ -508,48 +348,48 @@ func TestCreateDeletesAVMThatDoesNotStartAgain(t *testing.T) {
 		suffix, hint string
 		kept         bool
 	}{
-		{"the edit fails", append(refused, "edit-fails"), []string{"create", "start", "edit", "delete"},
+		{"the edit fails", append(refused, "edit-fails"), []string{"create", "start", "edit"},
 			"Lima could not turn nested virtualisation off for " + inst + " (limactl edit: exit status 1: fake limactl: edit failed)",
-			", so host create deleted it", again, false},
+			"; the VM is retained for inspection", again, true},
 		// The edit works, but Lima's override.yaml keeps nesting on: no start
 		// again, and the Try names the file.
-		{"an override keeps nesting on", append(refused, "override-nested"), []string{"create", "start", "edit", "delete"},
+		{"an override keeps nesting on", append(refused, "override-nested"), []string{"create", "start", "edit"},
 			"Lima's override.yaml keeps nested virtualisation on for " + inst + ", which this Mac cannot run",
-			", so host create deleted it", "remove nestedVirtualization from ~/.lima/_config/override.yaml, then run this again", false},
+			"; the VM is retained for inspection", "remove nestedVirtualization from ~/.lima/_config/override.yaml, then run this again", true},
 		// A read after the edit that fails, is not JSON, or leaves out
 		// nesting: no start again.
-		{"the read after the edit fails", append(refused, "after-edit-list-fails"), []string{"create", "start", "edit", "delete"},
+		{"the read after the edit fails", append(refused, "after-edit-list-fails"), []string{"create", "start", "edit"},
 			"could not read " + inst + " from limactl after the edit (limactl list: exit status 1: fake limactl: list failed)",
-			", so host create deleted it", again, false},
-		{"the read after the edit is not JSON", append(refused, "after-edit-list-bad"), []string{"create", "start", "edit", "delete"},
+			"; the VM is retained for inspection", again, true},
+		{"the read after the edit is not JSON", append(refused, "after-edit-list-bad"), []string{"create", "start", "edit"},
 			"could not read " + inst + " from limactl after the edit (read limactl list: ",
-			", so host create deleted it", again, false},
-		{"the read after the edit leaves out nesting", append(refused, "after-edit-list-incomplete"), []string{"create", "start", "edit", "delete"},
+			"; the VM is retained for inspection", again, true},
+		{"the read after the edit leaves out nesting", append(refused, "after-edit-list-incomplete"), []string{"create", "start", "edit"},
 			"limactl did not say whether nested virtualisation is off for " + inst,
-			", so host create deleted it", again, false},
-		// A list that works but leaves the VM out: delete it all the same.
-		{"the list after the edit is empty", append(refused, "after-edit-list-empty"), []string{"create", "start", "edit", "delete"},
-			"limactl did not list " + inst + " after the edit", ", so host create deleted it", again, false},
-		{"the list after the edit holds another VM", append(refused, "after-edit-list-other"), []string{"create", "start", "edit", "delete"},
-			"limactl did not list " + inst + " after the edit", ", so host create deleted it", again, false},
-		{"the second start fails", append(refused, "fail-start=start-exiting.stderr", "fail-ha=ha-other.log"), []string{"create", "start", "edit", "start", "delete"},
+			"; the VM is retained for inspection", again, true},
+		// An incomplete list cannot authorise deleting a reusable instance name.
+		{"the list after the edit is empty", append(refused, "after-edit-list-empty"), []string{"create", "start", "edit"},
+			"limactl did not list " + inst + " after the edit", "; the VM is retained for inspection", again, true},
+		{"the list after the edit holds another VM", append(refused, "after-edit-list-other"), []string{"create", "start", "edit"},
+			"limactl did not list " + inst + " after the edit", "; the VM is retained for inspection", again, true},
+		{"the second start fails", append(refused, "fail-start=start-exiting.stderr", "fail-ha=ha-other.log"), []string{"create", "start", "edit", "start"},
 			inst + " did not start without nested virtualisation either (limactl start: exit status 1: ",
-			", so host create deleted it", again, false},
-		{"the delete fails too", append(refused, "edit-fails", "delete-fails"), []string{"create", "start", "edit", "delete"},
+			"; the VM is retained for inspection", again, true},
+		{"a failing delete recipe is never attempted", append(refused, "edit-fails", "delete-fails"), []string{"create", "start", "edit"},
 			"Lima could not turn nested virtualisation off for " + inst + " (limactl edit: exit status 1: fake limactl: edit failed)",
-			", and host create could not delete it: limactl delete: exit status 1: fake limactl: delete failed",
-			"limactl delete --force " + inst + ", then " + again, true},
+			"; the VM is retained for inspection",
+			again, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := fakeLima(t, "darwin")
 			set(t, dir, tc.files...)
-			_, err := Provider{}.Create(context.Background(), provider.Request{Name: "dev"})
+			_, err := fixtureCreate(t, context.Background(), provider.Request{Name: "dev"})
 			var ue *client.UserError
-			if !errors.As(err, &ue) || !strings.HasPrefix(ue.Msg, tc.prefix) || !strings.HasSuffix(ue.Msg, tc.suffix) || ue.Hint != tc.hint {
+			if !errors.As(retainedCreationCause(err), &ue) || !strings.HasPrefix(ue.Msg, tc.prefix) || !strings.HasSuffix(ue.Msg, tc.suffix) || ue.Hint != retainedHintPrefix+strings.ReplaceAll(tc.hint, "~/.lima", dir) {
 				t.Fatalf("create = %#v", err)
 			}
 			cs := calls(t, dir)
-			if !slices.Equal(verbs(cs), tc.verbs) || !called(cs, "delete", "--force", inst) {
+			if !slices.Equal(verbs(cs), tc.verbs) || called(cs, "delete", "--force", inst) {
 				t.Errorf("limactl calls: %q", cs)
 			}
 			_, serr := os.Stat(filepath.Join(dir, "inst-"+inst))
@@ -557,5 +397,22 @@ func TestCreateDeletesAVMThatDoesNotStartAgain(t *testing.T) {
 				t.Errorf("VM kept = %v, want %v", serr == nil, tc.kept)
 			}
 		})
+	}
+}
+
+// Fractional byte requests retain the platform's isolation arguments.
+func TestByteSizesKeepLimaPlatformGuards(t *testing.T) {
+	for _, system := range []string{"darwin", "linux"} {
+		args := CreateArgs("vm", provider.Request{Memory: 1536 << 20, Disk: 512 << 20}, system)
+		for _, want := range []string{"--plain", "--memory=1.5", "--disk=0.5"} {
+			if !slices.Contains(args, want) {
+				t.Errorf("%s byte sizes lack %q: %q", system, want, args)
+			}
+		}
+		for _, guard := range []string{"--vm-type=vz", "--set=.networkOpts.hostLoopback = false", "--nested-virt"} {
+			if slices.Contains(args, guard) != (system == "darwin") {
+				t.Errorf("%s byte sizes have incorrect %q: %q", system, guard, args)
+			}
+		}
 	}
 }

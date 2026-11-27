@@ -14,13 +14,23 @@ A host keeps a reserve of memory for its system, and its sessions share the rest
 | 16 GiB | 13.3 GiB |
 | 32 GiB | 28.3 GiB |
 
-By default, one session may use all of it, and so may all sessions together. A VM sold as 4 GB has a little less than 4 GiB, so its sessions get about 2.8 GiB. `host add` says what a host gives sessions, and so does `host doctor`:
+Without a wall, one session may use all of it, and so may all such sessions together. A VM sold as 4 GB has a little less than 4 GiB, so its sessions get about 2.8 GiB. `host add` says what a host gives sessions, and so does `host doctor`:
 
 ```sh
 simstim host doctor my-server
 ```
 
 The launcher shows what a session uses under the list, such as `942 MiB of 2.9 GiB`.
+
+## Room for a walled sandbox
+
+A process, gVisor or microvm sandbox reserves its complete declared size before it starts. Other starts count that reservation even while it is idle or its holder does not answer. A sandbox that does not fit is refused. The host does not make it smaller.
+
+Without an explicit size, the sandbox uses its template's size, then its agent's sandbox size, then 2 CPUs and 4 GiB. An agent's minimum machine memory is a separate check. A 4 GiB sandbox therefore needs more than a 4 GiB host, because the host keeps its system reserve. Choose a smaller explicit size or a larger host.
+
+For a process or gVisor wall, the size is its unit's cap. For a microvm, the size is guest RAM. The host adds 128 MiB plus guest RAM divided by 256, rounded up to a whole MiB. A 4 GiB guest reserves 4,240 MiB in total. That reserve is added once.
+
+A restart keeps the old reservation until the old native unit has ended. It then checks room again before reserving the new start. Automatic restore keeps the protected cap. A manual size change applies at the next start.
 
 ## Check that the host fits the agent
 
@@ -58,7 +68,7 @@ In `config.toml` (`simstim config path` says where it is):
 memory_max = "2G"
 ```
 
-A size is a number and a unit, in powers of 1024: `512M`, `4G`, `4GiB` or `1.5G`. The smallest is `256M`. `auto` gives the host's default, and `--memory-max auto` gives it to one session whatever the config says. A size above what the host gives all its sessions is lowered to that. `max` and `infinity` are not sizes here: `auto` already lets a session use all that the host gives its sessions.
+For a session without a wall, a size is a number and a unit, in powers of 1024: `512M`, `4G`, `4GiB` or `1.5G`. The smallest is `256M`. `auto` gives the host's default, and `--memory-max auto` gives it to one session whatever the config says. A size above what the host gives all its sessions is lowered to that. `max` and `infinity` are not sizes here: `auto` already lets a session use all that the host gives its sessions.
 
 A running session keeps the cap it started with. A new cap applies to the sessions that start after the change, and to the sessions that `host restore` starts again.
 
@@ -75,7 +85,11 @@ In the launcher, select the session and press `u`. The launcher then attaches to
 
 A resume first stops what is left of the session: its old holder, and any process that the agent started, with the memory they hold. Then it starts the agent in the same folder, with its own resume command. Claude Code and Codex pick up the same conversation, but not a turn that was running. The session keeps its ID, name and worktree.
 
-Without `--memory-max`, the session gets the cap it asked for before, and `--memory-max auto` gives it the host's default. The size you give stays with the session for later resumes and restores. A size above what the host gives all its sessions is lowered to that. So when a session already had the default, `--memory-max` cannot give it more: give the host more memory ([Swap](#swap)), or stop other sessions.
+For a cold microVM, `--memory-max 4G` selects 4 GiB of guest RAM. Admission adds the VMM reserve before checking the host's room. `--memory-max auto` uses the current sandbox policy and agent defaults. A changed size in a saved policy also applies at the next cold start. The client prepares fresh runtime, image and agents inputs before fetching keys. It keeps the sandbox's recorded VM driver. A helper that cannot prepare that size must be updated.
+
+A running sandbox keeps its current cap. Resume prints a warning when a requested size is ignored; pass the size again at its next cold start.
+
+For a session without a wall, without `--memory-max`, it gets the cap it asked for before, and `--memory-max auto` gives it the host's default. The size you give stays with the session for later resumes and restores. A size above what the host gives all its sessions is lowered to that. So when a session already had the default, `--memory-max` cannot give it more: give the host more memory ([Swap](#swap)), or stop other sessions.
 
 ## After an update of the helper
 

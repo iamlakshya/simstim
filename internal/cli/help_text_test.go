@@ -11,7 +11,6 @@ import (
 	"github.com/spf13/pflag"
 
 	"github.com/iamlakshya/simstim/internal/brand"
-	"github.com/iamlakshya/simstim/internal/host/hosttest"
 )
 
 // The text of the help: examples, words, placeholders and width
@@ -172,7 +171,7 @@ func exampleParses(args []string) string {
 	if strings.Contains(c.Use, "<host>/<session>") {
 		args := c.Flags().Args()
 		hostChoice := strings.Contains(c.Use, "<host>|") || strings.Contains(c.Use, "|<host>")
-		if len(args) > 0 && args[0] != "-" && args[0] != "my-vps/auth-fix" && (!hostChoice || args[0] != "my-vps") {
+		if len(args) > 0 && args[0] != "-" && args[0] != "my-vps/auth-fix" && args[0] != "auth-fix" && (!hostChoice || args[0] != "my-vps") {
 			return "a session example must use my-vps/auth-fix"
 		}
 	}
@@ -243,7 +242,7 @@ func TestHelpHasNoInternalWords(t *testing.T) {
 // brackets, and <name> appears only where a command names a new thing:
 // a new host, or a session's new name (docs/contributing/cli-spec.md 8.2).
 func TestUsePlaceholders(t *testing.T) {
-	newName := map[string]bool{"host add": true, "host create": true, "rename": true}
+	newName := map[string]bool{"host add": true, "host invite": true, "host create": true, "rename": true}
 	angleChoice := regexp.MustCompile(`<[^>]*\|[^>]*>`)
 	eachCommand(Root(), func(c *cobra.Command) {
 		if strings.Contains(c.Use, "<name>") && !newName[shortPath(c)] {
@@ -266,7 +265,7 @@ func TestUsePlaceholders(t *testing.T) {
 // Every command's help fits a terminal of helpWidth columns, the root's
 // and the topics' too.
 func TestHelpFitsTheWidth(t *testing.T) {
-	hosttest.New(t)
+	newTestHome(t)
 	eachCommand(Root(), func(c *cobra.Command) {
 		out := helpOutput(t, append(strings.Fields(shortPath(c)), "--help")...)
 		for _, l := range strings.Split(out, "\n") {
@@ -314,7 +313,7 @@ func TestDisplayed(t *testing.T) {
 // A topic takes no words, as help <topic> does not: an extra word fails
 // with exit code 2.
 func TestTopicsTakeNoWords(t *testing.T) {
-	hosttest.New(t)
+	newTestHome(t)
 	for _, args := range [][]string{{"concepts", "extra"}, {"help", "concepts", "extra"}, {"exit-codes", "x"}} {
 		if got, code := lineErr(t, args...); code != 2 {
 			t.Errorf("%s exits with %d:\n%s", strings.Join(args, " "), code, got)
@@ -339,27 +338,25 @@ func TestTopicProseIsShared(t *testing.T) {
 	}
 }
 
-// The address line of help concepts is true: the commands that it names
-// take -, and the others do not yet. C5 widens the line.
+// The address concept describes the forms all session commands share.
+// Each command resolves - by the last session's ID, before any host is dialled.
 func TestAddressConceptIsTrue(t *testing.T) {
-	hosttest.New(t)
+	newTestHome(t)
 	var line string
 	for _, c := range Concepts() {
 		if c.Word == "address" {
 			line = c.Meaning
 		}
 	}
-	for _, name := range []string{"attach", "flip"} {
-		if !strings.Contains(line, name) {
-			t.Errorf("the address line does not name %s: %q", name, line)
-		}
-		if got, code := lineErr(t, name, "-"); code != 3 || !strings.Contains(got, "no session has been attached yet") {
-			t.Errorf("%s - exits with %d:\n%s", name, code, got)
+	for _, form := range []string{"<host>/<session>", "unique session name", "-", "last attached"} {
+		if !strings.Contains(line, form) {
+			t.Errorf("the address concept lost %q: %q", form, line)
 		}
 	}
-	for _, args := range [][]string{{"kill", "-"}, {"ports", "-"}, {"debug", "start", "-"}} {
-		if got, code := lineErr(t, args...); code != 2 || !strings.Contains(got, `"-" is not`) {
-			t.Errorf("%s takes -, so the address line of help concepts may name it: exit %d\n%s", strings.Join(args, " "), code, got)
+	for _, name := range []string{"attach", "flip", "show", "rm", "kill", "resume", "rename", "send", "ports", "forward", "pull", "debug start"} {
+		_, _, err := addressOf(t, append(strings.Fields(name), "-")...)
+		if got, code := reportOf(err); code != 3 || !strings.Contains(got, "no session has been attached yet") {
+			t.Errorf("%s - does not share the last-session resolver: exit %d\n%s", name, code, got)
 		}
 	}
 }

@@ -23,12 +23,13 @@ import (
 // terminal. The launcher drives the same engine.
 
 type guideOpts struct {
-	host, create, name, agents string
-	agentsSet, yes, noLogin    bool
+	host, create, name, tier, agents string
+	agentsSet, yes, noLogin          bool
 }
 
 func setupCmd() *cobra.Command {
 	var o guideOpts
+	var agentList []string
 	cmd := &cobra.Command{
 		Use:   "setup",
 		Short: "Set up step by step: a host, its agents, and their logins",
@@ -37,13 +38,14 @@ func setupCmd() *cobra.Command {
 			"It connects or creates the host, installs the agents you tick with their official installers,\n" +
 			"and offers each agent's own login, each in a session you watch. Ctrl+C stops it at any step,\n" +
 			"and it says what was done.\n\n" +
-			"Without a terminal, name the host with --host or --create, and pass --yes.",
+			"Without a terminal, name the host with --host (and --tier) or --create, and pass --yes.",
 		Example: "  " + brand.Name + " setup\n" +
 			"  " + brand.Name + " setup --host my-vps --agents claude,codex\n" +
 			"  " + brand.Name + " setup --create lima --agents claude --yes --no-login",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			o.agentsSet = cmd.Flags().Changed("agents")
+			o.agents = strings.Join(agentList, ",")
 			ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt)
 			defer stop()
 			g := newGuide(ctx, o, onboard.System{Providers: providers})
@@ -54,11 +56,12 @@ func setupCmd() *cobra.Command {
 		},
 	}
 	f := cmd.Flags()
-	f.StringVar(&o.host, "host", "", "use this host: a saved host, a Host from your SSH config, or user@host")
+	addHostFlag(cmd, &o.host, "use this host: a saved host, a Host from your SSH config, or user@host")
 	f.StringVar(&o.create, "create", "", "make a new host with a provider: lima, docker or e2b")
-	f.StringVar(&o.name, "name", "", "the host's name (default: from --host, or the provider's name)")
-	f.StringVar(&o.agents, "agents", "", "the agents to install, such as claude,codex (none installs nothing)")
-	f.BoolVarP(&o.yes, "yes", "y", false, "do not ask: install the helper, and only the agents in --agents")
+	addName(cmd, &o.name, "the host's name (default: from --host, or the provider's name)")
+	f.StringVar(&o.tier, "tier", "", "who else has root on the host: own, throwaway or shared")
+	addList(f, &agentList, "agents", "the agents to install, such as claude,codex (none installs nothing)")
+	addYes(cmd, &o.yes, "install the helper, and install no agent outside --agents")
 	f.BoolVar(&o.noLogin, "no-login", false, "do not offer the agents' logins")
 	return cmd
 }
@@ -84,6 +87,9 @@ type guide struct {
 	// agent checks. Tests replace both.
 	session func(h client.Host, a onboard.Action) (string, bool, error)
 	checks  func(h client.Host) ([]api.AgentCheck, error)
+	// unlockHost lets go of the lock of the host that the setup makes,
+	// which it holds from the create through the save of the connect.
+	unlockHost func()
 }
 
 func newGuide(ctx context.Context, o guideOpts, local onboard.Local) *guide {
@@ -96,6 +102,7 @@ func newGuide(ctx context.Context, o guideOpts, local onboard.Local) *guide {
 
 // run does the whole setup. After Ctrl+C it says what was done.
 func (g *guide) run() error {
+	defer g.releaseHost()
 	err := g.all()
 	if err != nil && (g.ctx.Err() != nil || errors.Is(err, context.Canceled)) {
 		return g.stopped(err)
@@ -108,7 +115,11 @@ func (g *guide) all() error {
 		return err
 	}
 	fmt.Fprintf(g.out, "Set up %s: a host, its agents, and their logins. Ctrl+C stops at any step, and says what was done.\n", brand.DisplayName)
-	h, made, err := g.where()
+	h, was, made, err := g.where()
+	if err != nil {
+		return err
+	}
+	tier, chooseTier, err := g.resolveTier(h, made)
 	if err != nil {
 		return err
 	}
@@ -128,15 +139,20 @@ func (g *guide) all() error {
 		}
 		return ok, err
 	}
-	checks, err := connectHost(g.ctx, g.out, h, consent, g.log)
+	// Preserve the captured entry and owned pin context through setup.
+	checks, err := connectHost(g.ctx, g.out, client.HostChange{Kind: "setup", Was: was, Now: &h, Pin: true, Tier: tier}, chooseTier, consent, g.log, hostKeyOptions(h, "", made || g.o.yes, g.tty))
+	g.releaseHost()
 	if err != nil {
+		if errors.Is(err, client.ErrUnchecked) {
+			return g.p.needs(qSetup, "--yes to pin the host key of "+h.Name+" on first use", "--yes")
+		}
 		return err
 	}
 	if made && onboard.PowersOffWhenIdle(h.Machine.Provider) {
 		if out, err := g.local.SetIdle(g.ctx, h); err != nil {
-			fmt.Fprintf(g.out, "  ✕ idle stop: %v\n", err)
+			fmt.Fprintf(g.out, "  ✕ idle stop: %s\n", shown(err.Error()))
 		} else {
-			fmt.Fprintf(g.out, "  ✓ idle stop: %s\n", client.CleanLine(out))
+			idleSaid(g.out, out)
 		}
 	}
 	f := onboard.NewFlow(h.Name, checks, g.log)
@@ -158,6 +174,11 @@ func (g *guide) check() error {
 			return err
 		}
 	}
+	if g.o.tier != "" {
+		if _, err := client.ParseTier(g.o.tier); err != nil {
+			return err
+		}
+	}
 	if g.o.agentsSet {
 		if err := onboard.CheckAgents(g.o.agents); err != nil {
 			return fromFlag(err, "agents")
@@ -167,7 +188,9 @@ func (g *guide) check() error {
 		// Input is off: the flags must answer every question (qSetup).
 		var flags []string
 		if g.o.host == "" && g.o.create == "" {
-			flags = append(flags, "--host", "<host>")
+			flags = append(flags, "--host", "<host>", "--tier", "<tier>")
+		} else if g.o.host != "" && g.o.tier == "" {
+			flags = append(flags, "--tier", "<tier>")
 		}
 		if !g.o.yes {
 			flags = append(flags, "--yes")
@@ -175,6 +198,25 @@ func (g *guide) check() error {
 		return g.p.needs(qSetup, "--host or --create, with --yes, to answer its questions", flags...)
 	}
 	return nil
+}
+
+func (g *guide) resolveTier(h client.Host, made bool) (client.Tier, func() (client.Tier, error), error) {
+	g.p.in, g.p.out, g.p.on = g.in, g.out, g.tty
+	if g.o.tier != "" {
+		t, err := client.ParseTier(g.o.tier)
+		return t, nil, err
+	}
+	if made {
+		return client.ProviderTier(h.Machine.Provider), nil, nil
+	}
+	hasTier, err := hasSavedHostTier(g.ctx, h.Name)
+	if err != nil || hasTier {
+		return client.TierUnknown, nil, err
+	}
+	if g.o.yes || !g.tty {
+		return client.TierUnknown, nil, missingTierWithYes(g.p, qSetup, h.Name)
+	}
+	return client.TierUnknown, func() (client.Tier, error) { return g.p.askTier(h.Name) }, nil
 }
 
 // stopped says what was done before Ctrl+C.
@@ -189,17 +231,18 @@ func (g *guide) stopped(err error) error {
 	return cancelled(g.log.Lines()...)
 }
 
-// where asks where agents will run, and returns the host to connect. made
-// is true when the setup made the machine, which counts as the user's yes
-// to the helper.
-func (g *guide) where() (h client.Host, made bool, err error) {
+// where asks where agents will run, and returns the host to connect, and
+// the saved entry that it read for it, or nil for a new host. made is true
+// when the setup made the machine, which counts as the user's yes to the
+// helper.
+func (g *guide) where() (h client.Host, was *client.Host, made bool, err error) {
 	switch {
 	case g.o.host != "":
-		h, err = g.namedHost(g.o.host)
-		return h, false, err
+		h, was, err = g.namedHost(g.o.host)
+		return h, was, false, err
 	case g.o.create != "":
 		h, err = g.create(g.o.create)
-		return h, true, err
+		return h, savedAs(h), true, err
 	}
 	g.heading("Where will agents run?")
 	for {
@@ -214,11 +257,11 @@ func (g *guide) where() (h client.Host, made bool, err error) {
 		fmt.Fprintln(g.out)
 		i, _, err := g.pick(fmt.Sprintf("Pick one [1-%d]: ", len(places)), len(places), false)
 		if err != nil {
-			return client.Host{}, false, err
+			return client.Host{}, nil, false, err
 		}
 		p, ok, err := g.ready(places[i-1])
 		if err != nil {
-			return client.Host{}, false, err
+			return client.Host{}, nil, false, err
 		}
 		if !ok {
 			fmt.Fprintln(g.out)
@@ -226,16 +269,20 @@ func (g *guide) where() (h client.Host, made bool, err error) {
 		}
 		switch p.Kind {
 		case onboard.SSH:
-			h, err = g.sshHost(p)
+			h, was, err = g.sshHost(p)
 		case onboard.Rent:
 			h, err = g.rent()
 		default:
 			h, err = g.create(p.Kind)
-			made = true
+			was, made = savedAs(h), true
 		}
-		return h, made, err
+		return h, was, made, err
 	}
 }
+
+// savedAs is a copy of h, the entry that the create saved, as the Was of
+// the save after it.
+func savedAs(h client.Host) *client.Host { return &h }
 
 // ready shows how to make a place ready, and checks again when the user
 // presses Enter. It returns false when the user picks another place.
@@ -256,10 +303,10 @@ func (g *guide) ready(p onboard.Place) (onboard.Place, bool, error) {
 }
 
 // namedHost is the host --host names: a saved host, or a new one reached by
-// an SSH target.
-func (g *guide) namedHost(target string) (client.Host, error) {
-	if h, err := client.FindHost(target); err == nil {
-		return h, nil
+// an SSH target. was is the saved entry, or nil for a new host.
+func (g *guide) namedHost(target string) (h client.Host, was *client.Host, err error) {
+	if was, err = client.SavedEntry(target); err != nil || was != nil {
+		return savedOrNone(was), was, err
 	}
 	name := g.o.name
 	if name == "" {
@@ -268,23 +315,37 @@ func (g *guide) namedHost(target string) (client.Host, error) {
 	return g.newHost(name, target)
 }
 
-// newHost checks a new host's name against the saved ones. A saved host
-// with the same name and target is used as it is.
-func (g *guide) newHost(name, target string) (client.Host, error) {
-	if !client.ValidHostName(name) {
-		return client.Host{}, &client.UserError{Msg: fmt.Sprintf("%q cannot name a host", name), Hint: "Use letters, digits, dots, dashes and underscores, with --name.", Code: "bad_name", Kind: client.KindUsage}
+// savedOrNone is the host of a saved entry, or no host.
+func savedOrNone(was *client.Host) client.Host {
+	if was == nil {
+		return client.Host{}
 	}
-	if h, err := client.FindHost(name); err == nil {
-		if h.SSH == target {
-			return h, nil
-		}
-		return client.Host{}, &client.UserError{Msg: fmt.Sprintf("there is already a host called %s, reached by %s", name, h.Target()), Hint: brand.Name + " setup --host " + shellWord(target) + " --name <another-name>, or " + brand.Name + " setup --host " + shellWord(name), Code: "host_exists"}
-	}
-	return client.Host{Name: name, SSH: target}, nil
+	return *was
 }
 
-// sshHost asks which host in the SSH config, or for a user@host target.
-func (g *guide) sshHost(p onboard.Place) (client.Host, error) {
+// newHost checks a new host's name against the saved ones. A saved host
+// with the same name and target is used as it is: was is its entry, or nil
+// for a new host.
+func (g *guide) newHost(name, target string) (client.Host, *client.Host, error) {
+	if !client.ValidHostName(name) {
+		return client.Host{}, nil, &client.UserError{Msg: fmt.Sprintf("%q cannot name a host", name), Hint: "Use letters, digits, dots, dashes and underscores, with no dot at the end, with --name.", Code: "bad_name", Kind: client.KindUsage}
+	}
+	saved, err := client.SavedEntry(name)
+	switch {
+	case err != nil:
+		return client.Host{}, nil, err
+	case saved != nil && saved.SSH == target:
+		return *saved, saved, nil
+	case saved != nil:
+		h := *saved
+		return client.Host{}, nil, &client.UserError{Msg: fmt.Sprintf("there is already a host called %s, reached by %s", name, h.Target()), Hint: brand.Name + " setup --host " + shellWord(target) + " --name <another-name>, or " + brand.Name + " setup --host " + shellWord(name), Code: "host_exists"}
+	}
+	return client.Host{Name: name, SSH: target}, nil, nil
+}
+
+// sshHost asks which host in the SSH config, or for a user@host target. was
+// is the saved entry of the host, or nil for a new host.
+func (g *guide) sshHost(p onboard.Place) (client.Host, *client.Host, error) {
 	fmt.Fprintln(g.out)
 	var target string
 	if len(p.Hosts) > 0 {
@@ -294,7 +355,7 @@ func (g *guide) sshHost(p onboard.Place) (client.Host, error) {
 		fmt.Fprintln(g.out)
 		i, text, err := g.pick("Pick a number, or type user@host: ", len(p.Hosts), true)
 		if err != nil {
-			return client.Host{}, err
+			return client.Host{}, nil, err
 		}
 		target = text
 		if i > 0 {
@@ -304,7 +365,7 @@ func (g *guide) sshHost(p onboard.Place) (client.Host, error) {
 	for target == "" {
 		t, err := g.ask("Type the SSH target, such as dev@203.0.113.10: ")
 		if err != nil {
-			return client.Host{}, err
+			return client.Host{}, nil, err
 		}
 		target = t
 	}
@@ -314,7 +375,7 @@ func (g *guide) sshHost(p onboard.Place) (client.Host, error) {
 		if name != target {
 			a, err := g.ask(fmt.Sprintf("A name for it [%s]: ", name))
 			if err != nil {
-				return client.Host{}, err
+				return client.Host{}, nil, err
 			}
 			if a != "" {
 				name = a
@@ -322,14 +383,14 @@ func (g *guide) sshHost(p onboard.Place) (client.Host, error) {
 		}
 	}
 	for {
-		h, err := g.newHost(name, target)
+		h, was, err := g.newHost(name, target)
 		if err == nil || !g.tty {
-			return h, err
+			return h, was, err
 		}
 		msg, _ := errText(err)
 		fmt.Fprintf(g.out, "%s.\n", sentenceCase(msg))
 		if name, err = g.ask("Another name: "); err != nil {
-			return client.Host{}, err
+			return client.Host{}, nil, err
 		}
 	}
 }
@@ -354,13 +415,28 @@ func (g *guide) create(kind string) (client.Host, error) {
 		return client.Host{}, err
 	}
 	fmt.Fprintf(g.out, "\nCreating %s with %s…\n", name, kind)
+	// No host rm of this name runs from here through the save of the
+	// connect, which ends the lock (releaseHost).
+	ctx, unlock, err := client.LockHost(g.ctx, name, "setup")
+	if err != nil {
+		return client.Host{}, err
+	}
+	g.ctx, g.unlockHost = ctx, unlock
 	h, err := g.local.Create(g.ctx, kind, name, g.out)
 	if err != nil {
 		return client.Host{}, err
 	}
 	fmt.Fprintf(g.out, "  ✓ created the %s machine %s\n", h.Machine.Provider, h.Machine.ID)
-	g.log.Add("made the %s machine %s, and saved the host %s (%s host destroy %s deletes it)", h.Machine.Provider, h.Machine.ID, h.Name, brand.Name, h.Name)
+	g.log.Add("made the %s machine %s, and saved the host %s (%s host rm %s --destroy deletes it)", h.Machine.Provider, h.Machine.ID, h.Name, brand.Name, h.Name)
 	return h, nil
+}
+
+// releaseHost lets go of the lock of the host that the setup made, once.
+func (g *guide) releaseHost() {
+	if g.unlockHost != nil {
+		g.unlockHost()
+		g.unlockHost = nil
+	}
 }
 
 // errText is an error's message, and its hint for a user error.

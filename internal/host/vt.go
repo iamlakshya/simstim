@@ -167,6 +167,8 @@ type VT struct {
 
 	mu         sync.Mutex
 	child      *vtChild
+	starts     sync.WaitGroup
+	closeDone  chan struct{}
 	closed     bool
 	done       chan struct{}
 	cols, rows int
@@ -357,10 +359,16 @@ func (v *VT) SetProfile(p VTProfile) error {
 func (v *VT) Close() error {
 	v.mu.Lock()
 	if v.closed {
+		done := v.closeDone
 		v.mu.Unlock()
+		if done != nil {
+			<-done
+		}
 		return nil
 	}
 	v.closed = true
+	v.closeDone = make(chan struct{})
+	defer close(v.closeDone)
 	close(v.done)
 	c := v.child
 	v.child = nil
@@ -378,6 +386,7 @@ func (v *VT) Close() error {
 			<-c.gone
 		}
 	}
+	v.starts.Wait()
 	return nil
 }
 

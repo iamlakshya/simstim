@@ -56,6 +56,10 @@ func copyWorktreeInclude(root, wt string) []skippedCopy {
 		return []skippedCopy{{includeFile, "the worktree cannot be opened: " + err.Error()}}
 	}
 	defer dst.Close()
+	return copyWorktreeIncludePatternsV1(src, dst, patterns, nil)
+}
+
+func copyWorktreeIncludePatternsV1(src, dst *os.Root, patterns []string, check func() error) []skippedCopy {
 	var skipped []skippedCopy
 	done := map[string]bool{}
 	for _, line := range patterns {
@@ -66,6 +70,12 @@ func copyWorktreeInclude(root, wt string) []skippedCopy {
 				continue
 			}
 			done[name] = true
+			if check != nil {
+				if err := check(); err != nil {
+					skipped = append(skipped, skippedCopy{name, "the original worktree changed: " + err.Error()})
+					continue
+				}
+			}
 			if why := copyInto(src, dst, name); why != "" {
 				skipped = append(skipped, skippedCopy{name, why})
 			}

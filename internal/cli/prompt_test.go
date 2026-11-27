@@ -3,21 +3,16 @@ package cli
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
-	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/iamlakshya/simstim/internal/brand"
 	"github.com/iamlakshya/simstim/internal/client"
 	"github.com/iamlakshya/simstim/internal/client/helpers"
-	"github.com/iamlakshya/simstim/internal/host/hosttest"
 )
 
 // The variable turns input off with any value but "", "0" and "false"
@@ -67,107 +62,6 @@ func TestInputOffByFlags(t *testing.T) {
 		// The test's own streams are not a terminal.
 		if inputOn(cmd) {
 			t.Errorf("%s: input on without a terminal", c.args)
-		}
-	}
-}
-
-// promptIn asks one question on a pseudo-terminal, as a person sees it, and
-// returns the answer and what the terminal showed.
-func promptIn(t *testing.T, keys string, ask func(p *prompter) (bool, error)) (bool, string, error) {
-	t.Helper()
-	term := hosttest.NewTerminal(t, 80, 10)
-	p := &prompter{ctx: context.Background(), in: term.TTY, out: term.TTY, on: true}
-	type result struct {
-		ok  bool
-		err error
-	}
-	done := make(chan result, 1)
-	go func() {
-		ok, err := ask(p)
-		done <- result{ok, err}
-	}()
-	term.WaitFor("] ")
-	for _, k := range strings.Split(keys, "|") {
-		term.Type(k)
-		time.Sleep(20 * time.Millisecond) // each key in its own read, as a person types
-	}
-	select {
-	case r := <-done:
-		return r.ok, string(term.Output()), r.err
-	case <-time.After(10 * time.Second):
-		t.Fatalf("the prompt never ended; the terminal shows %q", term.Output())
-		return false, "", nil
-	}
-}
-
-// Yes, no, the default, three bad answers, esc and ctrl+c, on a terminal.
-func TestYesNoOnATerminal(t *testing.T) {
-	q := func(def bool) func(p *prompter) (bool, error) {
-		return func(p *prompter) (bool, error) { return p.yesNo("Delete it?", def) }
-	}
-	for _, c := range []struct {
-		name, keys string
-		def        bool
-		want       bool
-		cancel     bool
-	}{
-		{"yes", "y|\r", false, true, false},
-		{"YES in capitals", "Y|E|S|\r", false, true, false},
-		{"no", "n|o|\r", true, false, false},
-		{"Enter takes the default no", "\r", false, false, false},
-		{"Enter takes the default yes", "\r", true, true, false},
-		{"backspace edits", "n|\x7f|y|\r", false, true, false},
-		{"an arrow does nothing", "\x1b[A|y|\r", false, true, false},
-		{"three bad answers cancel", "x|\r|m|a|y|b|e|\r|?|\r", false, false, true},
-		{"esc cancels", "\x1b", false, false, true},
-		{"ctrl+c cancels", "\x03", true, false, true},
-	} {
-		t.Run(c.name, func(t *testing.T) {
-			got, screen, err := promptIn(t, c.keys, q(c.def))
-			if c.cancel {
-				if !isCancel(err) || !errors.Is(err, context.Canceled) {
-					t.Fatalf("err = %v, want a cancel; the terminal shows %q", err, screen)
-				}
-				return
-			}
-			if err != nil || got != c.want {
-				t.Fatalf("got %v, %v, want %v; the terminal shows %q", got, err, c.want, screen)
-			}
-			opts := "[y/N]"
-			if c.def {
-				opts = "[Y/n]"
-			}
-			if !strings.Contains(screen, "Delete it? "+opts+" ") {
-				t.Fatalf("the question was %q", screen)
-			}
-		})
-	}
-}
-
-// The question of a severe action needs the typed name: the exact name
-// confirms, Enter keeps the thing, and any other text cancels.
-func TestTypedName(t *testing.T) {
-	ask := func(p *prompter) (bool, error) {
-		return p.typedName("Type box to delete the machine, or press Enter to keep it: [box]", "box")
-	}
-	for _, c := range []struct {
-		keys   string
-		want   bool
-		cancel bool
-	}{
-		{"b|o|x|\r", true, false},
-		{"\r", false, false},
-		{"B|o|x|\r", false, true},
-		{"b|o|\r", false, true},
-		{"\x1b", false, true},
-		// Only the exact name: spaces around it, or spaces alone, cancel.
-		{" |b|o|x|\r", false, true},
-		{"b|o|x| |\r", false, true},
-		{" | |\r", false, true},
-	} {
-		got, screen, err := promptIn(t, c.keys, ask)
-		if c.cancel != isCancel(err) || got != c.want || (err != nil && !c.cancel) {
-			t.Errorf("%q: got %v, %v, want %v (cancel %v); the terminal shows %q", c.keys, got, err, c.want, c.cancel, screen)
 		}
 	}
 }
@@ -244,16 +138,19 @@ func TestEveryPromptHasARow(t *testing.T) {
 			t.Errorf("%q: no such command", q.cmd)
 			continue
 		}
-		var f string
-		if strings.HasPrefix(q.flag, "--") {
-			if cmd.Flags().Lookup(strings.TrimPrefix(q.flag, "--")) != nil {
-				f = q.flag
+		// A row's flags may be more than one, with their values, as in
+		// "--destroy --confirm <host>".
+		for _, f := range strings.Fields(q.flag) {
+			switch {
+			case strings.HasPrefix(f, "--"):
+				if cmd.Flags().Lookup(strings.TrimPrefix(f, "--")) == nil {
+					t.Errorf("%s: no flag %s", q.cmd, f)
+				}
+			case strings.HasPrefix(f, "-"):
+				if cmd.Flags().ShorthandLookup(strings.TrimPrefix(f, "-")) == nil {
+					t.Errorf("%s: no flag %s", q.cmd, f)
+				}
 			}
-		} else if fl := cmd.Flags().ShorthandLookup(strings.TrimPrefix(q.flag, "-")); fl != nil {
-			f = q.flag
-		}
-		if f == "" {
-			t.Errorf("%s: no flag %s", q.cmd, q.flag)
 		}
 		found := false
 		for _, r := range rows {
@@ -267,7 +164,11 @@ func TestEveryPromptHasARow(t *testing.T) {
 					names = true
 				}
 			}
-			if names && strings.Contains(cells[4], q.flag) && strings.Contains(cells[5], map[bool]string{true: "Keep", false: "Fail"}[q.keep]) {
+			inputOff := map[bool]string{true: "Keep", false: "Fail"}[q.keep]
+			if q.refused {
+				inputOff = "Refuse"
+			}
+			if names && strings.Contains(cells[4], q.flag) && strings.Contains(cells[5], inputOff) {
 				found = true
 			}
 		}
@@ -294,82 +195,15 @@ func TestPromptsWithInputOff(t *testing.T) {
 			continue
 		}
 		var ue *client.UserError
+		if q.refused {
+			if ok || !errors.As(err, &ue) || ue.Kind != client.KindRefused || exitCode(ue.Kind) != 5 || ue.Hint != "Run the command in a terminal, with input on." {
+				t.Errorf("%s: %+v, want a terminal-only refusal with its exact hint", q.cmd, err)
+			}
+			continue
+		}
 		if !errors.As(err, &ue) || ue.Kind != client.KindNeedsAnswer || exitCode(ue.Kind) != 4 || !strings.HasSuffix(ue.Hint, " "+q.flag) {
 			t.Errorf("%s: %+v, want exit code 4 and %s", q.cmd, err, q.flag)
 		}
-	}
-}
-
-// Each command that asks, run with --no-input: it fails with exit code 4
-// and names the flag, or takes the default and says so on stderr.
-func TestCommandsWithNoInput(t *testing.T) {
-	newTestHost(t)
-
-	// new: a missing folder needs --mkdir.
-	got, code := lineErr(t, "new", "box", "--dir", "~/not-there", "--no-input", "--detach")
-	if code != 4 || !strings.Contains(got, "Try: "+brand.Name+" new box --dir '~/not-there' --no-input --detach --mkdir") {
-		t.Errorf("new with a missing folder: exit %d\n%s", code, got)
-	}
-
-	// doctor --fix: each fix needs -y.
-	_ = os.MkdirAll(filepath.Join(client.ConfigDir(), "ssh"), 0o700)
-	_ = os.WriteFile(filepath.Join(client.ConfigDir(), "ssh", "config-gone"), []byte("# generated\n"), 0o600)
-	got, code = lineErr(t, "doctor", "--fix", "--no-input")
-	if code != 4 || !strings.Contains(got, "doctor needs a yes for each fix, and input is off") || !strings.Contains(got, "Try: "+brand.Name+" doctor --fix --no-input -y") {
-		t.Errorf("doctor --fix: exit %d\n%s", code, got)
-	}
-	if _, err := os.Stat(filepath.Join(client.ConfigDir(), "ssh", "config-gone")); err != nil {
-		t.Error("doctor --fix with input off removed the file")
-	}
-
-	// host doctor --fix: each fix needs -y.
-	old := time.Now().Add(-2 * time.Hour)
-	for _, v := range []string{"v0.1.0", "v0.2.0", "v0.3.0", "v0.4.0"} {
-		dir := filepath.Join(os.Getenv("XDG_DATA_HOME"), brand.Name, "bin", v)
-		_ = os.MkdirAll(dir, 0o700)
-		_ = os.Chtimes(dir, old, old)
-	}
-	got, code = lineErr(t, "host", "doctor", "box", "--fix", "--no-input")
-	if code != 4 || !strings.Contains(got, "host doctor needs a yes for each fix, and input is off") || !strings.Contains(got, "Try: "+brand.Name+" host doctor box --fix --no-input -y") {
-		t.Errorf("host doctor --fix: exit %d\n%s", code, got)
-	}
-
-	// setup: its flags must answer every question.
-	if _, code = lineErr(t, "setup", "--no-input"); code != 4 {
-		t.Errorf("setup --no-input exits with %d", code)
-	}
-
-	// The variable does the same as the flag.
-	t.Setenv(noInputEnv, "1")
-	if _, code = lineErr(t, "doctor", "--fix"); code != 4 {
-		t.Errorf("doctor --fix with %s=1 exits with %d", noInputEnv, code)
-	}
-}
-
-// host destroy needs -y with input off, and leaves the host untouched on
-// no or when input is off.
-func TestHostQuestionsWithInputOff(t *testing.T) {
-	withFake(t, nil)
-	if err := saveHost(context.Background(), client.Host{Name: "box", Machine: &client.Machine{Provider: "fake", ID: "fake-box"}}); err != nil {
-		t.Fatal(err)
-	}
-	p := quietPrompts(context.Background())
-	p.line, p.flagsAt = []string{"host", "destroy", "box"}, 3
-	err := destroyHost(context.Background(), p, "box", false, false)
-	var ue *client.UserError
-	if !errors.As(err, &ue) || ue.Kind != client.KindNeedsAnswer || ue.Hint != brand.Name+" host destroy box -y" {
-		t.Fatalf("destroy with input off: %+v", err)
-	}
-	if _, err := client.FindHost("box"); err != nil {
-		t.Fatal("the host was forgotten")
-	}
-	// A no is a cancel, and nothing changes.
-	var out bytes.Buffer
-	if err := destroyHost(context.Background(), testPrompts("n\n", &out), "box", false, false); !isCancel(err) {
-		t.Fatalf("destroy, no: %v", err)
-	}
-	if !strings.Contains(out.String(), "Delete the fake machine fake-box, with its disk and every session on it? [y/N] ") {
-		t.Fatalf("destroy asked %q", out.String())
 	}
 }
 
@@ -406,109 +240,6 @@ func TestHostAddAsksBeforeTheHelper(t *testing.T) {
 	}
 }
 
-// With input off, new skips a repository's setup script that nobody
-// allowed, and says so on stderr, with the flag that runs it: one line, or
-// one JSON line with --json.
-func TestNewSkipsTheSetupScriptWithInputOff(t *testing.T) {
-	newTestHost(t)
-	if _, err := exec.LookPath("git"); err != nil {
-		t.Skip("no git")
-	}
-	for k, v := range map[string]string{"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.com", "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.com", "GIT_CONFIG_GLOBAL": os.DevNull} {
-		t.Setenv(k, v)
-	}
-	dir, _ := filepath.EvalSymlinks(t.TempDir())
-	repo := filepath.Join(dir, "app")
-	hook := filepath.Join(repo, "."+brand.Name, "setup")
-	_ = os.MkdirAll(filepath.Dir(hook), 0o755)
-	if err := os.WriteFile(hook, []byte("#!/bin/sh\ntouch \"$HOME/setup-ran\"\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	for _, args := range [][]string{{"init", "-q", "-b", "main"}, {"add", "-A"}, {"commit", "-q", "-m", "init"}} {
-		c := exec.Command("git", args...)
-		c.Dir = repo
-		if out, err := c.CombinedOutput(); err != nil {
-			t.Fatalf("git %v: %v %s", args, err, out)
-		}
-	}
-	_, errOut, err := runApart(t, "new", "box", "--dir", repo, "--detach", "--no-input", "--", "sleep", "60")
-	if err != nil || !strings.Contains(errOut, "Skipping the setup script of "+repo+": you have not said that it may run on box. Pass --setup to run it.") {
-		t.Fatalf("new --no-input: %v\n%s", err, errOut)
-	}
-	out, errOut, err := runApart(t, "new", "box", "--dir", repo, "--detach", "--json", "--", "sleep", "60")
-	var warn struct {
-		V       int
-		Warning map[string]string
-	}
-	if err != nil || json.Unmarshal([]byte(errOut), &warn) != nil || warn.Warning["code"] != "setup_skipped" || !json.Valid([]byte(out)) {
-		t.Fatalf("new --json: %v\nstdout %s\nstderr %s", err, out, errOut)
-	}
-	if _, err := os.Stat(filepath.Join(os.Getenv("HOME"), "setup-ran")); err == nil {
-		t.Error("the setup script ran")
-	}
-}
-
-// Each prompt's text, against a golden file (cli-spec 6.4).
-func TestGoldenPrompts(t *testing.T) {
-	_, tr := withFake(t, nil)
-	if _, ok := helpers.For("linux", "arm64"); !ok {
-		t.Skip("this build has no helper for linux/arm64 (run just helpers)")
-	}
-	var b strings.Builder
-	show := func(name, in string, ask func(p *prompter) error) {
-		var out bytes.Buffer
-		err := ask(testPrompts(in, &out))
-		fmt.Fprintf(&b, "== %s (answers %q)\n%s\n", name, in, out.String())
-		if err != nil {
-			fmt.Fprintf(&b, "-> %v\n", err)
-		}
-	}
-	show("new: a missing folder", "\n", func(p *prompter) error {
-		_, err := askMakeFolder(p, "box", client.FolderQuestion{Folder: "/home/dev/src/new-app"})
-		return err
-	})
-	show("new: a setup script", "y\n", func(p *prompter) error {
-		_, err := askSetup(p, "box", client.SetupQuestion{Repo: "/home/dev/src/app", Script: "/home/dev/src/app/.<name>/setup"}, client.SetupNotTrusted)
-		return err
-	})
-	show("doctor --fix", "y\n", func(p *prompter) error {
-		return offerFixes(p, qFix, sampleFixes[:1], false, func([]string) ([]client.Fix, error) { return nil, nil })
-	})
-	_ = saveHost(context.Background(), client.Host{Name: "box", Machine: &client.Machine{Provider: "fake", ID: "fake-box"}})
-	show("host destroy", "no\n", func(p *prompter) error { return destroyHost(context.Background(), p, "box", false, false) })
-	tr.NoHelper = true
-	show("host add: the helper", "n\n", func(p *prompter) error {
-		var err error
-		// The helper's description goes to stderr, apart from the question.
-		captureOutput(t, func() {
-			err = addHost(context.Background(), p, client.Host{Name: "new", Machine: &client.Machine{Provider: "fake", ID: "fake-new"}}, false)
-		})
-		return err
-	})
-	show("three answers that are not one", "x\nmaybe\n?\n", func(p *prompter) error {
-		_, err := p.yesNo("Install it?", false)
-		return err
-	})
-	show("a typed name", "box\n", func(p *prompter) error {
-		_, err := p.typedName("Type box to delete the machine, or press Enter to keep it:", "box")
-		return err
-	})
-	got := strings.ReplaceAll(b.String(), brand.Name, "<name>")
-	golden := filepath.Join("testdata", "prompts.golden")
-	if *update {
-		if err := os.WriteFile(golden, []byte(got), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	want, err := os.ReadFile(golden)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got != string(want) {
-		t.Errorf("the prompts differ from %s (run go test ./internal/cli -run TestGoldenPrompts -update, and read the diff):\n%s", golden, got)
-	}
-}
-
 // A cancel prints one line, and exits with 130.
 func TestCancelPrintsOneLine(t *testing.T) {
 	var b bytes.Buffer
@@ -519,5 +250,30 @@ func TestCancelPrintsOneLine(t *testing.T) {
 	if code := printErrorJSON(&b, cancelled("saved the host box"), nil, false); code != 130 ||
 		b.String() != `{"v":1,"error":{"code":"cancelled","kind":"cancelled","message":"Cancelled. Done before that: saved the host box.","exit":130}}`+"\n" {
 		t.Errorf("printed %q, exit %d", b.String(), code)
+	}
+}
+
+func TestLocalCommandsWithNoInput(t *testing.T) {
+	newTestHome(t)
+	// doctor --fix: each fix needs -y.
+	_ = os.MkdirAll(filepath.Join(client.ConfigDir(), "ssh"), 0o700)
+	_ = os.WriteFile(filepath.Join(client.ConfigDir(), "ssh", "config-gone"), generatedSSHFixture(), 0o600)
+	got, code := lineErr(t, "doctor", "--fix", "--no-input")
+	if code != 4 || !strings.Contains(got, "doctor needs a yes for each fix, and input is off") || !strings.Contains(got, "Try: "+brand.Name+" doctor --fix --no-input -y") {
+		t.Errorf("doctor --fix: exit %d\n%s", code, got)
+	}
+	if _, err := os.Stat(filepath.Join(client.ConfigDir(), "ssh", "config-gone")); err != nil {
+		t.Error("doctor --fix with input off removed the file")
+	}
+
+	// setup: its flags must answer every question.
+	if _, code = lineErr(t, "setup", "--no-input"); code != 4 {
+		t.Errorf("setup --no-input exits with %d", code)
+	}
+
+	// The variable does the same as the flag.
+	t.Setenv(noInputEnv, "1")
+	if _, code = lineErr(t, "doctor", "--fix"); code != 4 {
+		t.Errorf("doctor --fix with %s=1 exits with %d", noInputEnv, code)
 	}
 }

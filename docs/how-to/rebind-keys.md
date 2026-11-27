@@ -19,6 +19,14 @@ Then rebind them in `config.toml` (`simstim config path` prints where it is):
 
 Every command stays in the command palette (`ctrl+o`) whatever its keys. The full list is in the [keys reference](../reference/keymap.md).
 
+To find a misspelt command name or a key that the launcher cannot read, check the file:
+
+```sh
+simstim config check
+```
+
+It prints each mistake with its line, such as `~/.config/simstim/config.toml:12: "sesion: delete" in [keymap] is not a launcher command. Did you mean "session: delete"?`.
+
 ## While attached
 
 Only two keys are the client's while you are attached to a session; everything else goes to the agent. Change them in `config.toml`:

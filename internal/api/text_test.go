@@ -159,3 +159,15 @@ func TestValidSessionID(t *testing.T) {
 		}
 	}
 }
+
+// CleanBlock cleans line by line and keeps the line breaks, and cuts the
+// whole text to max runes: three lines of 1000 runes give 1000 runes.
+func TestCleanBlock(t *testing.T) {
+	if got := CleanBlock("a\x1bc\r\nb\u202e\tc", 100); got != "ac\nb c" {
+		t.Errorf("CleanBlock = %q", got)
+	}
+	long := strings.Repeat(strings.Repeat("x", BlockMax)+"\n", 3)
+	if got := CleanBlock(long, BlockMax); utf8.RuneCountInString(got) != BlockMax || strings.Contains(got, "\n") {
+		t.Errorf("CleanBlock of three long lines gives %d runes", utf8.RuneCountInString(got))
+	}
+}

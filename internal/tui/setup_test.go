@@ -40,7 +40,7 @@ func TestQuickStartAsksAboutASetupScript(t *testing.T) {
 	}
 	hs.key("y")
 	// The yes keeps the question's hash, and the start goes again with it,
-	// not with --setup.
+	// not with --setup-script.
 	hasCall(t, hs.be, "remember atlas-dev /home/dev/src/app run=true hash=h1")
 	hasCall(t, hs.be, "new atlas-dev setup_hashes=map[/home/dev/src/app:h1]")
 	if len(hs.be.attached) != 1 || hs.m.prompt != nil || hs.m.modal != nil {
@@ -137,7 +137,7 @@ func TestSetupAnswerWarnsWhenTheFileBroke(t *testing.T) {
 }
 
 // A script that cannot run gives the launcher no question, and no
-// --no-setup flag: it offers to start without the repository's scripts.
+// --no-setup-script flag: it offers to start without the repository's scripts.
 func TestSetupOutsideOffersToStartWithoutTheScript(t *testing.T) {
 	for _, code := range []string{api.CodeSetupOutside, api.CodeSetupUnreadable} {
 		hs := trustLab(t)

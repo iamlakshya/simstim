@@ -9,8 +9,27 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/iamlakshya/simstim/internal/api"
 	"github.com/iamlakshya/simstim/internal/client"
 )
+
+// shown is text from a host or config as the launcher shows it on one line:
+// without control or hidden characters.
+func shown(s string) string {
+	return api.CleanText(strings.NewReplacer("\r\n", " ", "\n", " ", "\t", " ").Replace(s), 4000)
+}
+
+func shownAll(ss []string) []string {
+	out := make([]string, len(ss))
+	for i, s := range ss {
+		out[i] = shown(s)
+	}
+	return out
+}
+
+func cleanFolders(res client.FoldersResult) client.FoldersResult {
+	return client.OfferFolders(res)
+}
 
 // cells is the width of s in terminal cells, ignoring escape sequences.
 func cells(s string) int { return ansi.StringWidth(s) }
@@ -93,12 +112,7 @@ type seg struct {
 }
 
 // plural picks the word for n.
-func plural(n int, one, many string) string {
-	if n == 1 {
-		return fmt.Sprintf("%d %s", n, one)
-	}
-	return fmt.Sprintf("%d %s", n, many)
-}
+func plural(n int, one, many string) string { return client.Plural(n, one, many) }
 
 // fmtAge is a short age: 14s, 2m, 1h, 3d.
 func fmtAge(d time.Duration) string {
@@ -133,18 +147,9 @@ func fmtLatency(d time.Duration) string {
 	}
 }
 
-// fmtSize is a size in binary units: 310 MiB, 6.1 GiB.
-func fmtSize(b int64) string {
-	const mib, gib = 1 << 20, 1 << 30
-	switch {
-	case b >= gib:
-		return trimZero(fmt.Sprintf("%.1f", float64(b)/gib)) + " GiB"
-	case b >= mib:
-		return fmt.Sprintf("%d MiB", b/mib)
-	default:
-		return fmt.Sprintf("%d KiB", b>>10)
-	}
-}
+// fmtSize is a size in binary units: 310 MiB, 6.1 GiB. The host details
+// share it with `host show`.
+func fmtSize(b int64) string { return client.SizeText(b) }
 
 // fmtMemory is the memory line of a session: "6.1 of 8 GiB".
 func fmtMemory(cur, limit int64) string {
@@ -162,8 +167,6 @@ func fmtMemory(cur, limit int64) string {
 	}
 	return c + " of " + l
 }
-
-func trimZero(s string) string { return strings.TrimSuffix(s, ".0") }
 
 // fuzzy reports whether every letter of q appears in s in order, and scores
 // the match: runs of letters and word starts count more, as do short strings.
@@ -219,17 +222,34 @@ func fuzzyPos(q, s string) []bool {
 	return hit
 }
 
-// errText splits an error into its message and its "Try:" hint.
+// errTextMax is the most runes of an error's message or hint that the
+// launcher draws.
+const errTextMax = api.BlockMax
+
+// errText splits an error into its message and its "Try:" hint, each
+// cleaned and cut short. An error can carry what a host wrote to stderr,
+// such as a failed connection's, so no control or hidden character of it
+// reaches the screen (isolation spec 14.15). Its lines stay lines.
 func errText(err error) (msg, hint string) {
 	if err == nil {
 		return "", ""
 	}
 	// An error can hold what a host sent.
 	if ue, ok := asUserError(err); ok {
-		return client.CleanLine(ue.Msg), client.CleanLine(ue.Hint)
+		return cleanLines(ue.Msg), cleanLines(ue.Hint)
 	}
-	return client.CleanLine(err.Error()), ""
+	return cleanLines(err.Error()), ""
 }
+
+// cleanLines is s cleaned line by line, with each line break as one
+// newline, and cut to errTextMax runes: an SSH error of three lines of
+// stderr keeps its three lines, which wrap draws one by one.
+func cleanLines(s string) string { return api.CleanBlock(s, errTextMax) }
+
+// oneLine is s, such as the message of errText, with each line break as a
+// space: for the places that draw an error on one line, such as a row of a
+// list or a field. A break there would start a line outside the place.
+func oneLine(s string) string { return strings.ReplaceAll(s, "\n", " ") }
 
 // sentence makes a message start with a capital letter and end with a stop.
 func sentence(s string) string {

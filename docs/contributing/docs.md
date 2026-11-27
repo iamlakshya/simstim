@@ -77,6 +77,8 @@ The name is never spelled in `site/`: pages take it from the site's title and fr
 
 The site loads only its own files: no CDN, no web fonts from elsewhere, no analytics, and Astro's telemetry is off in every build. The npm packages are pinned in `site/pnpm-lock.yaml`; pnpm waits a week before it uses a new release, and runs no package's install script. The fonts are committed files: `scripts/site-vendor.sh` fetches them at pinned versions, checks each one's SHA-256, and cuts them down. Run it only to change a version, then commit the result.
 
+The Astro pin is 7.4.7. It includes the upstream fixes for [dynamic tag injection](https://github.com/withastro/astro/security/advisories/GHSA-mh32-jxcr-mh9f) and [image path checks](https://github.com/withastro/astro/security/advisories/GHSA-r3h5-4585-7x3w).
+
 | File | What | Licence |
 | --- | --- | --- |
 | `site/public/fonts/sans.woff2` | Inter 4, Latin, at its text optical size, for text | SIL OFL 1.1 |
@@ -106,6 +108,8 @@ CI builds the site on every push and keeps it as an artifact named `docs-site`. 
 - every link on the built site (lychee, offline). `just docs-check --external` also checks links to other sites, which CI does on `main` and weekly;
 - no built page links to GitHub for a page the site hosts.
 - `llms.txt` lists every page of `pages.json` once, each with a description, and each copy that it names exists (`scripts/check-llms-txt.py`). Each copy has its source's title and text, with code exactly as it is. Each link leads where `cmd/docgen` sends the source's link, and its relative links lead to other copies or to images. lychee checks the copies' links too. A page needs a first paragraph for its description.
+
+The source-selection harness (`scripts/test-source-checks.py`) stubs the semantic docs checks, including the `llms.txt` checker, so its tests focus on file selection. `scripts/test-check-llms-txt.py` tests the real checker separately.
 
 ## Images
 

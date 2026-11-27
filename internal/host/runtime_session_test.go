@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
+	"strconv"
 	"strings"
 	"syscall"
 	"testing"
@@ -153,6 +155,45 @@ func TestNewChecksItsArguments(t *testing.T) {
 	}
 }
 
+// A start whose agent cannot run keeps its session, as errored, and so the
+// folder that it made (review 7, finding 4): a resume starts the agent
+// there. With a secret, the holder answers before it fails.
+func TestAStartThatKeepsItsSessionKeepsItsFolder(t *testing.T) {
+	h := hosttest.New(t)
+	bad := filepath.Join(h.Home, "not-a-program")
+	writeFile(t, bad, "this is not a script\n")
+	if err := os.Chmod(bad, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	var ids []string
+	for i, secrets := range []map[string]api.Secret{nil, {"TEST_TOKEN": "fake-value"}} {
+		dir := filepath.Join(h.Home, "made", strconv.Itoa(i))
+		_, err := host.New(host.NewArgs{Argv: []string{bad}, Cwd: dir, MakeFolder: true, Secrets: secrets})
+		if codeOf(err) != "start_failed" {
+			t.Fatalf("new with %d secrets: %v", len(secrets), err)
+		}
+		var id string
+		hosttest.WaitFor(t, 5*time.Second, "the failed start's holder to exit", func() bool {
+			list, _ := host.List()
+			i := slices.IndexFunc(list, func(s host.SessionInfo) bool { return s.Cwd == dir && !s.Alive })
+			if i >= 0 {
+				id = list[i].ID
+			}
+			return i >= 0
+		})
+		if _, serr := os.Stat(dir); serr != nil {
+			t.Fatalf("with %d secrets: the kept session's folder went: %v", len(secrets), serr)
+		}
+		ids = append(ids, id)
+	}
+	writeFile(t, bad, "#!/bin/sh\nexec sleep 60\n")
+	for _, id := range ids {
+		if _, err := host.Resume(api.ResumeArgs{ID: id, Secrets: map[string]api.Secret{"TEST_TOKEN": "fake-value"}}); err != nil {
+			t.Errorf("resume %s in its kept folder: %v", id, err)
+		}
+	}
+}
+
 // New makes a missing folder, and the folders above it, with the mode that
 // mkdir -p gives them. A start that fails after that removes them again,
 // here because the repository's setup script needs an answer first.
@@ -195,7 +236,7 @@ func TestNewMakesTheFolderAndRemovesItAfterAFailedStart(t *testing.T) {
 
 // A setup script that leaves the repository through a symlink fails the
 // start with setup_outside, and the start leaves no worktree behind. The
-// scripts would not run with --no-setup, so that start goes on.
+// scripts would not run with --no-setup-script, so that start goes on.
 func TestNewRefusesASetupScriptOutsideTheRepository(t *testing.T) {
 	hosttest.SkipOnGit254(t) // each start makes a worktree
 	h := hosttest.New(t)
@@ -225,7 +266,7 @@ func TestNewRefusesASetupScriptOutsideTheRepository(t *testing.T) {
 	}
 	a.Setup = api.SetupSkip
 	if _, err := host.New(a); err != nil {
-		t.Errorf("new --no-setup = %v", err)
+		t.Errorf("new --no-setup-script = %v", err)
 	}
 }
 

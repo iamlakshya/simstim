@@ -95,6 +95,7 @@ func TestGuideFromTheWelcome(t *testing.T) {
 	// the VM got its idle stop.
 	hasCall(t, be, "install vm")
 	hasCall(t, be, "idle vm")
+	noCall(t, be, "stage ") // the create pinned it, and saved it
 	if w.step != wzReady || !w.saved || w.flow == nil {
 		t.Fatalf("not ready: step %v saved %v flow %v err %v", w.step, w.saved, w.flow != nil, w.err)
 	}
@@ -270,7 +271,7 @@ func TestWizardAgentsOnlyWhenNeeded(t *testing.T) {
 	hs := newHarness(t, be, 80, 24)
 	hs.key("a")
 	hs.typeText("pi")
-	hs.key("enter", "enter")
+	hs.key("enter", "enter", "1")
 	w := hs.m.modal.(*wizard)
 	if !w.saved || w.wantsAgents() {
 		t.Fatalf("saved %v, wants agents %v", w.saved, w.wantsAgents())
@@ -289,8 +290,11 @@ func TestWizardAgentsSkipAndStop(t *testing.T) {
 	hs := newHarness(t, be, 80, 24)
 	hs.key("a")
 	hs.typeText("pi")
-	hs.key("enter", "enter", "enter")
+	hs.key("enter", "enter", "1", "enter")
 	w := hs.m.modal.(*wizard)
+	if !w.saved || w.step != wzAgents || w.tier != client.TierOwn {
+		t.Fatalf("the explicit tier did not reach agent selection: saved=%v step=%v tier=%s", w.saved, w.step, w.tier)
+	}
 	// The fold opens on enter; space ticks a best-effort agent.
 	hs.key("down", "down", "down", "down", "enter")
 	if !w.unfold {
@@ -333,7 +337,11 @@ func agentsHarness(t *testing.T, w, h int) *harness {
 	hs.m.motion = false
 	hs.key("a")
 	hs.typeText("pi")
-	hs.key("enter", "enter")
+	hs.key("enter", "enter", "1")
+	wiz, ok := hs.m.modal.(*wizard)
+	if !ok || wiz.step != wzReady || !wiz.saved || wiz.tier != client.TierOwn {
+		t.Fatalf("the agent fixture did not reach its saved ready step: %T %+v", hs.m.modal, wiz)
+	}
 	return hs
 }
 

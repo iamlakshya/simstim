@@ -174,7 +174,7 @@ func TestAnUploadStopsAtItsCancel(t *testing.T) {
 // after a timeout, a failure. The file stays as it was.
 func TestNoSaveAfterACancel(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-	if err := SaveHosts(context.Background(), []Host{{Name: "kept", SSH: "kept"}}); err != nil {
+	if err := SaveHostsContext(context.Background(), []Host{{Name: "kept", SSH: "kept"}}); err != nil {
 		t.Fatal(err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -186,12 +186,12 @@ func TestNoSaveAfterACancel(t *testing.T) {
 		want error
 		kind Kind
 	}{{ctx, context.Canceled, KindCancelled}, {expired, context.DeadlineExceeded, KindFailed}} {
-		err := SaveHost(c.ctx, Host{Name: "new", SSH: "new"})
+		err := SaveHostContext(c.ctx, Host{Name: "new", SSH: "new"})
 		var ue *UserError
 		if !errors.Is(err, c.want) || !errors.As(err, &ue) || ue.Kind != c.kind || ue.Hint == "" {
 			t.Errorf("SaveHost after %v = %v (%+v)", c.want, err, ue)
 		}
-		if err := SaveHosts(c.ctx, nil); !errors.Is(err, c.want) {
+		if err := SaveHostsContext(c.ctx, nil); !errors.Is(err, c.want) {
 			t.Errorf("SaveHosts after %v = %v", c.want, err)
 		}
 	}

@@ -63,10 +63,17 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version-file: go.mod
+          go-version: '1.27.4'
           cache: false
+      - name: Prepare the actual carried namespace cohort when present
+        run: |
+          if [ -d internal/usernscode ]; then
+            scripts/setup.sh --only zig
+            export PATH="$PWD/.tools/bin:$PATH"
+            cmd/userns/build.sh
+          fi
       - name: Known vulnerabilities in the code we call
-        run: go run golang.org/x/vuln/cmd/govulncheck@v1.1.4 ./...
+        run: go run -tags="$(sh scripts/go-build-tags.sh)" golang.org/x/vuln/cmd/govulncheck@v1.1.4 -tags="$(sh scripts/go-build-tags.sh)" ./...
 
   issues:
     # The only job that may write, and only on the daily run. It checks the

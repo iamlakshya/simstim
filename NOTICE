@@ -6,6 +6,20 @@ This product is licensed under the Apache License, Version 2.0 (see LICENSE).
 Third-party code and data
 -------------------------
 
+- internal/supply/trusted_root.json: public Sigstore trust material from
+  https://github.com/sigstore/root-signing, retrieved on 19 November 2026.
+  tools/imageverify/testdata/: recorded public verification fixtures from
+  sigstore-go v1.4.0, https://github.com/sigstore/sigstore-go, Copyright the
+  Sigstore Authors, licensed under the Apache License, Version 2.0.
+  The cosign-oci-v0.3.json and cosign-trusted-root.json fixtures come from
+  cosign v3.1.1, https://github.com/sigstore/cosign, under the same licence.
+
+- Release runtime files: Firecracker v1.18.0
+  (https://github.com/firecracker-microvm/firecracker), Copyright Amazon.com,
+  Inc. or its affiliates, licensed under the Apache License, Version 2.0.
+  The raw executables and source are mirrored without changes. The upstream
+  licence, NOTICE and dependency notices are in third-party-licences/firecracker-*.
+
 Code or data adapted from other open-source projects is listed here, with its
 licence and the files it appears in.
 
@@ -34,3 +48,105 @@ The docs site (site/) ships these, unchanged or cut down by scripts/site-vendor.
 Projects whose designs informed this one:
 - zmx (https://github.com/neurosnap/zmx), MIT (and the code above)
 - Herdr (https://github.com/herdrdev/herdr), Apache-2.0 (and the rule data above)
+
+- internal/nettarget/wildcard_psl_data.go: negative ancestor data derived from
+  the Public Suffix List, revision d6c92f1bbb7433e5db7b8405c25d4035fb8ff376
+  (https://github.com/publicsuffix/list), licensed under MPL 2.0.
+  The complete licence is in LICENSES/MPL-2.0.txt. The pinned x/net library
+  handles public suffix matching. The ancestor index adds only negative boundaries.
+
+- internal/egress/rules/minted.json: three finite model credential families.
+  internal/egress/rules/minted-services.json: 21 finite GitHub, GitLab, npm and
+  PyPI credential families. These response patterns are
+  derived from gitleaks v8.30.1, commit 83d9cd684c87d95d656c1458ef04895a7f1cbd8e
+  (https://github.com/gitleaks/gitleaks/blob/83d9cd684c87d95d656c1458ef04895a7f1cbd8e/config/gitleaks.toml).
+  This is a derived network-response subset. File and line allowlists,
+  ignore comments and entropy suppression do not exempt response values.
+  The complete upstream MIT copyright and permission notice follows.
+
+MIT License
+
+Copyright (c) 2019 Zachary Rice
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+D-Bus transport dependency
+--------------------------
+
+The host helper links github.com/godbus/dbus/v5 v5.2.2
+(https://github.com/godbus/dbus), under the BSD 2-Clause licence:
+
+Copyright (c) 2013, Georg Reinke (<guelfey at gmail dot com>), Google
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions
+are met:
+
+1. Redistributions of source code must retain the above copyright notice,
+this list of conditions and the following disclaimer.
+
+2. Redistributions in binary form must reproduce the above copyright
+notice, this list of conditions and the following disclaimer in the
+documentation and/or other materials provided with the distribution.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+"AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED
+TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
+PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
+LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
+NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+
+gVisor host runtime patch
+https://github.com/google/gvisor
+Copyright The gVisor Authors.
+
+The source patch under third_party/gvisor derives from gVisor commit
+7a675ac66a1e2357abdaa6cccedabcd3cce9aa5c and retains its Apache-2.0 licence.
+Its licence is the repository's LICENSE. Runtime binaries keep this notice
+and their upstream licence when the release builder distributes them.
+
+- internal/egress/rules/confusables-15.0.0.txt.gz: the complete confusable
+  prototype data comes from Unicode 15.0.0
+  (https://www.unicode.org/Public/security/15.0.0/confusables.txt),
+  Copyright 1991-2022 Unicode, Inc. The matching skeleton follows UTS #39
+  revision 26. The gzip representation preserves every original raw byte.
+  The complete Unicode licence is in LICENSES/Unicode-3.0.txt.
+
+The SSH signature implementation uses github.com/hiddeco/sshsig, by Hidde Beydals, under the Apache License 2.0.
+
+
+Guest SFTP dependencies
+-----------------------
+
+The guest SFTP helper links github.com/pkg/sftp v1.13.12
+(https://github.com/pkg/sftp), Copyright (c) 2013, Dave Cheney, under the
+BSD 2-Clause licence. The complete upstream notice is in
+LICENSES/pkg-sftp-1.13.12-BSD-2-Clause.txt.
+
+Its filesystem-walking dependency is github.com/kr/fs v0.1.0
+(https://github.com/kr/fs), Copyright (c) 2012 The Go Authors, under the
+BSD 3-Clause licence. The complete upstream notice is in
+LICENSES/kr-fs-0.1.0-BSD-3-Clause.txt.

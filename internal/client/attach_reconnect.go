@@ -21,13 +21,8 @@ func (a *attacher) reconnect(ctx context.Context) (detached bool, err error) {
 	since := diag.Now()
 	DebugLog().Debug("connection lost", diag.CatKey, diag.CatNet, "reason", reason)
 	go a.ssh.masterState(context.WithoutCancel(ctx), "drop")
-	a.write(ctx, a.reconnectTitle())
-	defer func() {
-		a.write(ctx, []byte("\x1b]9;4;0\x1b\\\x1b[23;0t"))
-		if len(a.tracker.M.Title) > 0 {
-			a.write(ctx, a.tracker.M.Title) // for terminals without a title stack
-		}
-	}()
+	finishNotice := a.reconnectNotice(ctx)
+	defer finishNotice()
 	banner := time.After(bannerAfter)
 	delay := time.Duration(0)
 	for {
@@ -44,6 +39,22 @@ func (a *attacher) reconnect(ctx context.Context) (detached bool, err error) {
 		}
 		DebugLog().Debug("reconnect failed", diag.CatKey, diag.CatNet, "err", err)
 		delay = nextRetry(delay)
+	}
+}
+
+// reconnectNotice draws only the client's complete control sequences. They
+// abort any unfinished session escape, so the notification boundary starts
+// again at ground, including when the next attach uses replay.
+func (a *attacher) reconnectNotice(ctx context.Context) func() {
+	// The title says so too, pushed so that it can be put back as it was.
+	a.write(ctx, []byte("\x1b]9;4;3\x1b\\\x1b[22;0t\x1b]2;⧗ reconnecting · "+oscSafe(a.key)+"\x1b\\"))
+	a.outStream.reset()
+	return func() {
+		a.write(ctx, []byte("\x1b]9;4;0\x1b\\\x1b[23;0t"))
+		a.outStream.reset()
+		if len(a.tracker.M.Title) > 0 {
+			a.writeOutput(ctx, a.tracker.M.Title) // for terminals without a title stack
+		}
 	}
 }
 
@@ -64,6 +75,7 @@ func (a *attacher) waitToRetry(ctx context.Context, banner, retry <-chan time.Ti
 		case <-banner:
 			a.flash(ctx, "connection lost · reconnecting · keys are not sent · "+a.o.Settings.Attach.DetachKey+" to leave")
 		case b, ok := <-a.inCh:
+			a.inputPending = false
 			if !ok {
 				return true
 			}
@@ -74,7 +86,7 @@ func (a *attacher) waitToRetry(ctx context.Context, banner, retry <-chan time.Ti
 				}
 			}
 			_ = a.filter.Flush()
-			a.in.ask()
+			a.askInput()
 			return false // a key press: try again now
 		case <-retry:
 			return false
@@ -89,18 +101,18 @@ func (a *attacher) waitToRetry(ctx context.Context, banner, retry <-chan time.Ti
 // try again later.
 func (a *attacher) tryReconnect(ctx context.Context) (done bool, err error) {
 	a.ssh.ExitMaster(ctx)
-	dctx, cancel := context.WithTimeout(ctx, 20*time.Second)
-	conn, err := Dial(dctx, a.o.Host, false)
+	dctx, cancel := context.WithTimeout(quietAttachContext(ctx), 20*time.Second)
+	conn, agent, err := dialAttach(dctx, a.o.Host, a.o.Session, false)
 	cancel()
 	var ue *UserError
 	if err != nil {
 		return errors.As(err, &ue), err
 	}
-	a.conn.Close()
-	a.conn = conn
+	a.closeConnections()
+	a.conn, a.agent = conn, agent
 	cols, rows, xpx, ypx := a.size()
 	before := a.cu.Offset
-	att, err := a.handshake(a.cu.Offset, cols, rows, xpx, ypx, true)
+	att, err := a.handshake(ctx, a.cu.Offset, cols, rows, xpx, ypx, true)
 	if err != nil {
 		return errors.As(err, &ue), err
 	}
@@ -110,6 +122,7 @@ func (a *attacher) tryReconnect(ctx context.Context) (done bool, err error) {
 	} else {
 		a.begin(ctx, att, &AttachState{}, rows)
 	}
+	a.startAgent(ctx)
 	a.res.Missed += att.Live - before
 	return true, nil
 }

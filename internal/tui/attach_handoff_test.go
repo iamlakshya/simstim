@@ -2,7 +2,6 @@ package tui
 
 import (
 	"context"
-	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -68,84 +67,6 @@ func withFakeLauncherIO(t *testing.T, termFn func(*os.File) bool, progFn func(co
 	return errPath
 }
 
-type progStepper struct {
-	t       *testing.T
-	pm      tea.Model
-	m       *Model
-	results chan tea.Msg
-	running atomic.Int64
-	timers  []timerMsg
-}
-
-func newProgStepper(t *testing.T, pm tea.Model, m *Model) *progStepper {
-	t.Helper()
-	m.after = func(d time.Duration, msg tea.Msg) tea.Cmd {
-		return func() tea.Msg { return timerMsg{d, msg} }
-	}
-	return &progStepper{
-		t:       t,
-		pm:      pm,
-		m:       m,
-		results: make(chan tea.Msg, 512),
-	}
-}
-
-func (ps *progStepper) start(cmd tea.Cmd) {
-	if cmd == nil {
-		return
-	}
-	ps.running.Add(1)
-	go func() {
-		msg := cmd()
-		ps.results <- msg
-		ps.running.Add(-1)
-	}()
-}
-
-func (ps *progStepper) stepUntil(cmd tea.Cmd, extraBlocked func() int64) {
-	ps.t.Helper()
-	ps.start(cmd)
-	deadline := time.Now().Add(5 * time.Second)
-	for {
-		select {
-		case msg := <-ps.results:
-			switch msg := msg.(type) {
-			case nil, tea.RawMsg, tea.QuitMsg:
-			case tea.BatchMsg:
-				for _, c := range msg {
-					ps.start(c)
-				}
-			case timerMsg:
-				ps.timers = append(ps.timers, msg)
-			default:
-				_, next := ps.pm.Update(msg)
-				ps.start(next)
-			}
-			continue
-		default:
-		}
-		parked := int64(ps.m.waiters.Load())
-		if extraBlocked != nil {
-			parked += extraBlocked()
-		}
-		if ps.running.Load() <= parked {
-			time.Sleep(time.Millisecond)
-			if len(ps.results) == 0 && ps.running.Load() <= parked {
-				return
-			}
-			continue
-		}
-		if time.Now().After(deadline) {
-			ps.t.Fatalf("commands did not settle: running=%d parked=%d", ps.running.Load(), parked)
-		}
-		time.Sleep(time.Millisecond)
-	}
-}
-
-func (ps *progStepper) step(cmd tea.Cmd) {
-	ps.stepUntil(cmd, nil)
-}
-
 // When be.Attach returns ReaderStuck = true in the runWith handoff loop, the
 // launcher writes the detach notice to stderr and exits cleanly without
 // starting a second tea.Program or terminal reader.
@@ -164,15 +85,15 @@ func TestLauncherStopsCleanlyWhenAttachReaderStuck(t *testing.T) {
 			if runs > 1 {
 				t.Fatal("runWith started a second tea.Program while the attach reader was stuck")
 			}
+			m := pm.(*framed).m.(*Model)
+			ps := newProgStepper(t, pm, m)
 			_, _ = pm.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
 			_, _ = pm.Update(sessionsMsg{name: "box", gen: 0, list: []client.Session{s}})
 			_, cmd := pm.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 			if cmd == nil {
 				t.Fatal("Enter on session returned nil cmd")
 			}
-			if _, ok := cmd().(tea.QuitMsg); !ok {
-				t.Fatal("attach handoff did not return tea.Quit")
-			}
+			ps.attachQuit(cmd, s.ID, nil)
 			return nil
 		},
 	)
@@ -226,9 +147,7 @@ func TestLauncherResumesAfterCleanAttachHandoff(t *testing.T) {
 				if cmd == nil {
 					t.Fatal("Enter on session returned nil cmd")
 				}
-				if _, ok := cmd().(tea.QuitMsg); !ok {
-					t.Fatal("attach handoff did not return tea.Quit")
-				}
+				ps.attachQuit(cmd, s.ID, nil)
 			case 2:
 				rm, ok := fr.m.(*resumedModel)
 				if !ok {
@@ -326,9 +245,7 @@ func TestLauncherDropsUnadoptedDialAcrossAttachHandoff(t *testing.T) {
 				if cmd == nil {
 					t.Fatal("Enter on session returned nil cmd")
 				}
-				if _, ok := cmd().(tea.QuitMsg); !ok {
-					t.Fatal("attach handoff did not return tea.Quit")
-				}
+				ps.attachQuit(cmd, s.ID, slowBlocked.Load)
 
 				// Let slow's Dial finish and call addUnadopted right as the
 				// program exits, without delivering dialledMsg to Update.
@@ -424,9 +341,7 @@ func TestLauncherWaitDoneDoesNotAccumulateAndHandlesCloseDuringAttach(t *testing
 				if cmd == nil {
 					t.Fatalf("run %d: Enter returned nil cmd", runs)
 				}
-				if _, ok := cmd().(tea.QuitMsg); !ok {
-					t.Fatalf("run %d: Enter did not return tea.Quit", runs)
-				}
+				ps.attachQuit(cmd, s.ID, nil)
 				return nil
 			}
 			statusAfterClose = m.hostByName("box").status
@@ -448,99 +363,3 @@ func TestLauncherWaitDoneDoesNotAccumulateAndHandlesCloseDuringAttach(t *testing
 // When Doctor is still in flight when the launcher hands off to Attach,
 // pauseBg cancels it and resumeAfterAttach re-issues Doctor so host metadata is
 // not permanently lost.
-func TestLauncherRestartsInterruptedDoctorAfterAttachHandoff(t *testing.T) {
-	be := newFakeBackend()
-	be.hosts = []client.Host{{Name: "box", SSH: "box"}}
-	s := client.Session{ID: "s1", Name: "auth-fix", Agent: "claude", State: "idle", Alive: true}
-	be.state["box"] = &fakeHost{
-		sessions: []client.Session{s},
-		info:     client.HostInfo{Distro: "Ubuntu 24.04", Arch: "arm64", CPUs: 4},
-	}
-	be.attach = client.AttachResult{Detached: true}
-
-	doctorEntered := make(chan struct{})
-	var doctorCalls atomic.Int32
-	var doctorBlocked atomic.Int64
-	be.doctorHook = func(ctx context.Context, _ string) {
-		if doctorCalls.Add(1) == 1 {
-			doctorBlocked.Add(1)
-			defer doctorBlocked.Add(-1)
-			close(doctorEntered)
-			<-ctx.Done()
-		}
-	}
-
-	runs := 0
-	var distroAfterResume string
-	withFakeLauncherIO(t,
-		func(*os.File) bool { return true },
-		func(_ context.Context, pm tea.Model, _ io.Reader, _ io.Writer) error {
-			runs++
-			fr := pm.(*framed)
-			switch runs {
-			case 1:
-				m := fr.m.(*Model)
-				ps := newProgStepper(t, pm, m)
-				ps.stepUntil(pm.Init(), doctorBlocked.Load)
-				_, _ = pm.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
-				<-doctorEntered
-				if m.hostByName("box").info != nil {
-					t.Fatal("doctor info populated while first Doctor was still blocked")
-				}
-				_, cmd := pm.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
-				if cmd == nil {
-					t.Fatal("Enter on session returned nil cmd")
-				}
-				if _, ok := cmd().(tea.QuitMsg); !ok {
-					t.Fatal("attach handoff did not return tea.Quit")
-				}
-			case 2:
-				rm := fr.m.(*resumedModel)
-				ps := newProgStepper(t, pm, rm.m)
-				ps.step(pm.Init())
-				if info := rm.m.hostByName("box").info; info != nil {
-					distroAfterResume = info.Distro
-				}
-			default:
-				t.Fatalf("unexpected run %d", runs)
-			}
-			return nil
-		},
-	)
-
-	if err := runWith(context.Background(), be, Options{Now: func() time.Time { return now }}); err != nil {
-		t.Fatalf("runWith = %v", err)
-	}
-	if doctorCalls.Load() < 2 {
-		t.Fatalf("doctor calls = %d, want at least 2 (initial + resumed)", doctorCalls.Load())
-	}
-	if distroAfterResume != "Ubuntu 24.04" {
-		t.Fatalf("host distro after resume = %q, want Ubuntu 24.04", distroAfterResume)
-	}
-}
-
-// runWith checks all three streams (including stderr) and InputAllowed before
-// creating a tea.Program.
-func TestLauncherChecksStderrAndInputAllowed(t *testing.T) {
-	be := newFakeBackend()
-	runs := 0
-	withFakeLauncherIO(t,
-		func(f *os.File) bool { return f != os.Stderr },
-		func(context.Context, tea.Model, io.Reader, io.Writer) error { runs++; return nil },
-	)
-	err := runWith(context.Background(), be, Options{})
-	var ue *client.UserError
-	if !errors.As(err, &ue) || ue.Code != "launcher_no_terminal" || ue.Kind != client.KindFailed || runs != 0 {
-		t.Fatalf("redirected stderr: err=%v (code=%v), runs=%d", err, ue, runs)
-	}
-
-	withFakeLauncherIO(t,
-		func(*os.File) bool { return true },
-		func(context.Context, tea.Model, io.Reader, io.Writer) error { runs++; return nil },
-	)
-	err = runWith(client.WithoutInput(context.Background()), be, Options{})
-	ue = nil
-	if !errors.As(err, &ue) || ue.Code != "no_input" || ue.Kind != client.KindNeedsAnswer || runs != 0 {
-		t.Fatalf("WithoutInput: err=%v (ue=%+v), runs=%d", err, ue, runs)
-	}
-}

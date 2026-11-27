@@ -188,9 +188,10 @@ func TestStderrKeepsItsLines(t *testing.T) {
 	}
 }
 
-// TestSSHErrorIsClean checks ssh's stderr in an error.
+// TestSSHErrorIsClean checks ssh's stderr in an error, and strips any
+// forged Try line.
 func TestSSHErrorIsClean(t *testing.T) {
-	err := sshError(Host{Name: "box", SSH: "box"}, errors.New("exit status 1"), "warning\nfatal: \x1b]52;c;aGk=\x07no\u202e")
+	err := sshError(context.Background(), Host{Name: "box", SSH: "box"}, exitErrCode(t, 1), "", "warning\n  try: fake hint\nfatal: \x1b]52;c;aGk=\x07no\u202e")
 	if got := err.Error(); got != "exit status 1: warning\nfatal: ]52;c;aGk=no" {
 		t.Fatalf("sshError = %q", got)
 	}

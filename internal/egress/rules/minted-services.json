@@ -1,0 +1,406 @@
+{
+  "status": "PINNED_DERIVED_SERVICE_RULE_DATA",
+  "source_repository": "https://github.com/gitleaks/gitleaks",
+  "source_tag": "v8.30.1",
+  "source_commit": "83d9cd684c87d95d656c1458ef04895a7f1cbd8e",
+  "source_path": "config/gitleaks.toml",
+  "source_sha256": "e163e53b9e7e8a8511e77271e2b323ed057759542a6d988258afe3a1fa329caf",
+  "license": "MIT",
+  "effective_scope": "21 finite GitHub, GitLab, npm and PyPI credential families; not full gitleaks",
+  "maximum_scan_window_bytes": 1021,
+  "global_allowlists": "not used to suppress network redaction",
+  "inline_ignore_comments": "not recognised in network responses",
+  "rules": [
+    {
+      "id": "github-app-token",
+      "regex": "((?:ghu|ghs)_[0-9a-zA-Z]{36})",
+      "capture_group": 1,
+      "upstream_regex": "(?:ghu|ghs)_[0-9a-zA-Z]{36}",
+      "upstream_secret_group": 0,
+      "upstream_entropy": 3,
+      "upstream_keywords": [
+        "ghu_",
+        "ghs_"
+      ],
+      "upstream_rule_allowlists": [
+        {
+          "paths": [
+            "(?:^|/)@octokit/auth-token/README\\.md$"
+          ]
+        }
+      ],
+      "max_secret_bytes": 40,
+      "max_match_bytes": 40,
+      "left_context_bytes": 1,
+      "max_scan_window_bytes": 41,
+      "network_entropy_policy": "do-not-suppress-credential-shaped-values",
+      "source_line": 2131
+    },
+    {
+      "id": "github-fine-grained-pat",
+      "regex": "(github_pat_\\w{82})",
+      "capture_group": 1,
+      "upstream_regex": "github_pat_\\w{82}",
+      "upstream_secret_group": 0,
+      "upstream_entropy": 3,
+      "upstream_keywords": [
+        "github_pat_"
+      ],
+      "upstream_rule_allowlists": [],
+      "max_secret_bytes": 93,
+      "max_match_bytes": 93,
+      "left_context_bytes": 1,
+      "max_scan_window_bytes": 94,
+      "network_entropy_policy": "do-not-suppress-credential-shaped-values",
+      "source_line": 2145
+    },
+    {
+      "id": "github-oauth",
+      "regex": "(gho_[0-9a-zA-Z]{36})",
+      "capture_group": 1,
+      "upstream_regex": "gho_[0-9a-zA-Z]{36}",
+      "upstream_secret_group": 0,
+      "upstream_entropy": 3,
+      "upstream_keywords": [
+        "gho_"
+      ],
+      "upstream_rule_allowlists": [],
+      "max_secret_bytes": 40,
+      "max_match_bytes": 40,
+      "left_context_bytes": 1,
+      "max_scan_window_bytes": 41,
+      "network_entropy_policy": "do-not-suppress-credential-shaped-values",
+      "source_line": 2152
+    },
+    {
+      "id": "github-pat",
+      "regex": "(ghp_[0-9a-zA-Z]{36})",
+      "capture_group": 1,
+      "upstream_regex": "ghp_[0-9a-zA-Z]{36}",
+      "upstream_secret_group": 0,
+      "upstream_entropy": 3,
+      "upstream_keywords": [
+        "ghp_"
+      ],
+      "upstream_rule_allowlists": [
+        {
+          "paths": [
+            "(?:^|/)@octokit/auth-token/README\\.md$"
+          ]
+        }
+      ],
+      "max_secret_bytes": 40,
+      "max_match_bytes": 40,
+      "left_context_bytes": 1,
+      "max_scan_window_bytes": 41,
+      "network_entropy_policy": "do-not-suppress-credential-shaped-values",
+      "source_line": 2159
+    },
+    {
+      "id": "github-refresh-token",
+      "regex": "(ghr_[0-9a-zA-Z]{36})",
+      "capture_group": 1,
+      "upstream_regex": "ghr_[0-9a-zA-Z]{36}",
+      "upstream_secret_group": 0,
+      "upstream_entropy": 3,
+      "upstream_keywords": [
+        "ghr_"
+      ],
+      "upstream_rule_allowlists": [],
+      "max_secret_bytes": 40,
+      "max_match_bytes": 40,
+      "left_context_bytes": 1,
+      "max_scan_window_bytes": 41,
+      "network_entropy_policy": "do-not-suppress-credential-shaped-values",
+      "source_line": 2170
+    },
+    {
+      "id": "gitlab-cicd-job-token",
+      "regex": "(glcbt-[0-9a-zA-Z]{1,5}_[0-9a-zA-Z_-]{20})",
+      "capture_group": 1,
+      "upstream_regex": "glcbt-[0-9a-zA-Z]{1,5}_[0-9a-zA-Z_-]{20}",
+      "upstream_secret_group": 0,
+      "upstream_entropy": 3,
+      "upstream_keywords": [
+        "glcbt-"
+      ],
+      "upstream_rule_allowlists": [],
+      "max_secret_bytes": 32,
+      "max_match_bytes": 32,
+      "left_context_bytes": 1,
+      "max_scan_window_bytes": 33,
+      "network_entropy_policy": "do-not-suppress-credential-shaped-values",
+      "source_line": 2177
+    },
+    {
+      "id": "gitlab-deploy-token",
+      "regex": "(gldt-[0-9a-zA-Z_\\-]{20})",
+      "capture_group": 1,
+      "upstream_regex": "gldt-[0-9a-zA-Z_\\-]{20}",
+      "upstream_secret_group": 0,
+      "upstream_entropy": 3,
+      "upstream_keywords": [
+        "gldt-"
+      ],
+      "upstream_rule_allowlists": [],
+      "max_secret_bytes": 25,
+      "max_match_bytes": 25,
+      "left_context_bytes": 1,
+      "max_scan_window_bytes": 26,
+      "network_entropy_policy": "do-not-suppress-credential-shaped-values",
+      "source_line": 2184
+    },
+    {
+      "id": "gitlab-feature-flag-client-token",
+      "regex": "(glffct-[0-9a-zA-Z_\\-]{20})",
+      "capture_group": 1,
+      "upstream_regex": "glffct-[0-9a-zA-Z_\\-]{20}",
+      "upstream_secret_group": 0,
+      "upstream_entropy": 3,
+      "upstream_keywords": [
+        "glffct-"
+      ],
+      "upstream_rule_allowlists": [],
+      "max_secret_bytes": 27,
+      "max_match_bytes": 27,
+      "left_context_bytes": 1,
+      "max_scan_window_bytes": 28,
+      "network_entropy_policy": "do-not-suppress-credential-shaped-values",
+      "source_line": 2191
+    },
+    {
+      "id": "gitlab-feed-token",
+      "regex": "(glft-[0-9a-zA-Z_\\-]{20})",
+      "capture_group": 1,
+      "upstream_regex": "glft-[0-9a-zA-Z_\\-]{20}",
+      "upstream_secret_group": 0,
+      "upstream_entropy": 3,
+      "upstream_keywords": [
+        "glft-"
+      ],
+      "upstream_rule_allowlists": [],
+      "max_secret_bytes": 25,
+      "max_match_bytes": 25,
+      "left_context_bytes": 1,
+      "max_scan_window_bytes": 26,
+      "network_entropy_policy": "do-not-suppress-credential-shaped-values",
+      "source_line": 2198
+    },
+    {
+      "id": "gitlab-incoming-mail-token",
+      "regex": "(glimt-[0-9a-zA-Z_\\-]{25})",
+      "capture_group": 1,
+      "upstream_regex": "glimt-[0-9a-zA-Z_\\-]{25}",
+      "upstream_secret_group": 0,
+      "upstream_entropy": 3,
+      "upstream_keywords": [
+        "glimt-"
+      ],
+      "upstream_rule_allowlists": [],
+      "max_secret_bytes": 31,
+      "max_match_bytes": 31,
+      "left_context_bytes": 1,
+      "max_scan_window_bytes": 32,
+      "network_entropy_policy": "do-not-suppress-credential-shaped-values",
+      "source_line": 2205
+    },
+    {
+      "id": "gitlab-kubernetes-agent-token",
+      "regex": "(glagent-[0-9a-zA-Z_\\-]{50})",
+      "capture_group": 1,
+      "upstream_regex": "glagent-[0-9a-zA-Z_\\-]{50}",
+      "upstream_secret_group": 0,
+      "upstream_entropy": 3,
+      "upstream_keywords": [
+        "glagent-"
+      ],
+      "upstream_rule_allowlists": [],
+      "max_secret_bytes": 58,
+      "max_match_bytes": 58,
+      "left_context_bytes": 1,
+      "max_scan_window_bytes": 59,
+      "network_entropy_policy": "do-not-suppress-credential-shaped-values",
+      "source_line": 2212
+    },
+    {
+      "id": "gitlab-oauth-app-secret",
+      "regex": "(gloas-[0-9a-zA-Z_\\-]{64})",
+      "capture_group": 1,
+      "upstream_regex": "gloas-[0-9a-zA-Z_\\-]{64}",
+      "upstream_secret_group": 0,
+      "upstream_entropy": 3,
+      "upstream_keywords": [
+        "gloas-"
+      ],
+      "upstream_rule_allowlists": [],
+      "max_secret_bytes": 70,
+      "max_match_bytes": 70,
+      "left_context_bytes": 1,
+      "max_scan_window_bytes": 71,
+      "network_entropy_policy": "do-not-suppress-credential-shaped-values",
+      "source_line": 2219
+    },
+    {
+      "id": "gitlab-pat",
+      "regex": "(glpat-[\\w-]{20})",
+      "capture_group": 1,
+      "upstream_regex": "glpat-[\\w-]{20}",
+      "upstream_secret_group": 0,
+      "upstream_entropy": 3,
+      "upstream_keywords": [
+        "glpat-"
+      ],
+      "upstream_rule_allowlists": [],
+      "max_secret_bytes": 26,
+      "max_match_bytes": 26,
+      "left_context_bytes": 1,
+      "max_scan_window_bytes": 27,
+      "network_entropy_policy": "do-not-suppress-credential-shaped-values",
+      "source_line": 2226
+    },
+    {
+      "id": "gitlab-pat-routable",
+      "regex": "(\\bglpat-[0-9a-zA-Z_-]{27,300}\\.[0-9a-z]{2}[0-9a-z]{7}\\b)",
+      "capture_group": 1,
+      "upstream_regex": "\\bglpat-[0-9a-zA-Z_-]{27,300}\\.[0-9a-z]{2}[0-9a-z]{7}\\b",
+      "upstream_secret_group": 0,
+      "upstream_entropy": 4,
+      "upstream_keywords": [
+        "glpat-"
+      ],
+      "upstream_rule_allowlists": [],
+      "max_secret_bytes": 316,
+      "max_match_bytes": 316,
+      "left_context_bytes": 1,
+      "max_scan_window_bytes": 317,
+      "network_entropy_policy": "do-not-suppress-credential-shaped-values",
+      "source_line": 2233
+    },
+    {
+      "id": "gitlab-ptt",
+      "regex": "(glptt-[0-9a-f]{40})",
+      "capture_group": 1,
+      "upstream_regex": "glptt-[0-9a-f]{40}",
+      "upstream_secret_group": 0,
+      "upstream_entropy": 3,
+      "upstream_keywords": [
+        "glptt-"
+      ],
+      "upstream_rule_allowlists": [],
+      "max_secret_bytes": 46,
+      "max_match_bytes": 46,
+      "left_context_bytes": 1,
+      "max_scan_window_bytes": 47,
+      "network_entropy_policy": "do-not-suppress-credential-shaped-values",
+      "source_line": 2240
+    },
+    {
+      "id": "gitlab-rrt",
+      "regex": "(GR1348941[\\w-]{20})",
+      "capture_group": 1,
+      "upstream_regex": "GR1348941[\\w-]{20}",
+      "upstream_secret_group": 0,
+      "upstream_entropy": 3,
+      "upstream_keywords": [
+        "gr1348941"
+      ],
+      "upstream_rule_allowlists": [],
+      "max_secret_bytes": 29,
+      "max_match_bytes": 29,
+      "left_context_bytes": 1,
+      "max_scan_window_bytes": 30,
+      "network_entropy_policy": "do-not-suppress-credential-shaped-values",
+      "source_line": 2247
+    },
+    {
+      "id": "gitlab-runner-authentication-token",
+      "regex": "(glrt-[0-9a-zA-Z_\\-]{20})",
+      "capture_group": 1,
+      "upstream_regex": "glrt-[0-9a-zA-Z_\\-]{20}",
+      "upstream_secret_group": 0,
+      "upstream_entropy": 3,
+      "upstream_keywords": [
+        "glrt-"
+      ],
+      "upstream_rule_allowlists": [],
+      "max_secret_bytes": 25,
+      "max_match_bytes": 25,
+      "left_context_bytes": 1,
+      "max_scan_window_bytes": 26,
+      "network_entropy_policy": "do-not-suppress-credential-shaped-values",
+      "source_line": 2254
+    },
+    {
+      "id": "gitlab-runner-authentication-token-routable",
+      "regex": "(\\bglrt-t\\d_[0-9a-zA-Z_\\-]{27,300}\\.[0-9a-z]{2}[0-9a-z]{7}\\b)",
+      "capture_group": 1,
+      "upstream_regex": "\\bglrt-t\\d_[0-9a-zA-Z_\\-]{27,300}\\.[0-9a-z]{2}[0-9a-z]{7}\\b",
+      "upstream_secret_group": 0,
+      "upstream_entropy": 4,
+      "upstream_keywords": [
+        "glrt-"
+      ],
+      "upstream_rule_allowlists": [],
+      "max_secret_bytes": 318,
+      "max_match_bytes": 318,
+      "left_context_bytes": 1,
+      "max_scan_window_bytes": 319,
+      "network_entropy_policy": "do-not-suppress-credential-shaped-values",
+      "source_line": 2261
+    },
+    {
+      "id": "gitlab-scim-token",
+      "regex": "(glsoat-[0-9a-zA-Z_\\-]{20})",
+      "capture_group": 1,
+      "upstream_regex": "glsoat-[0-9a-zA-Z_\\-]{20}",
+      "upstream_secret_group": 0,
+      "upstream_entropy": 3,
+      "upstream_keywords": [
+        "glsoat-"
+      ],
+      "upstream_rule_allowlists": [],
+      "max_secret_bytes": 27,
+      "max_match_bytes": 27,
+      "left_context_bytes": 1,
+      "max_scan_window_bytes": 28,
+      "network_entropy_policy": "do-not-suppress-credential-shaped-values",
+      "source_line": 2268
+    },
+    {
+      "id": "npm-access-token",
+      "regex": "\\b((?:npm_|NPM_|npM_|NPm_|nPm_|NpM_|nPM_|Npm_)[a-zA-Z0-9]{36})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "capture_group": 1,
+      "upstream_regex": "(?i)\\b(npm_[a-z0-9]{36})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "upstream_secret_group": 0,
+      "upstream_entropy": 2,
+      "upstream_keywords": [
+        "npm_"
+      ],
+      "upstream_rule_allowlists": [],
+      "max_secret_bytes": 40,
+      "max_match_bytes": 42,
+      "left_context_bytes": 1,
+      "max_scan_window_bytes": 43,
+      "network_entropy_policy": "do-not-suppress-credential-shaped-values",
+      "source_line": 2659
+    },
+    {
+      "id": "pypi-upload-token",
+      "regex": "(pypi-AgEIcHlwaS5vcmc[\\w-]{50,1000})",
+      "capture_group": 1,
+      "upstream_regex": "pypi-AgEIcHlwaS5vcmc[\\w-]{50,1000}",
+      "upstream_secret_group": 0,
+      "upstream_entropy": 3,
+      "upstream_keywords": [
+        "pypi-ageichlwas5vcmc"
+      ],
+      "upstream_rule_allowlists": [],
+      "max_secret_bytes": 1020,
+      "max_match_bytes": 1020,
+      "left_context_bytes": 1,
+      "max_scan_window_bytes": 1021,
+      "network_entropy_policy": "do-not-suppress-credential-shaped-values",
+      "source_line": 2809
+    }
+  ]
+}

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -108,4 +109,45 @@ func TestReadUntilPassesTheChunks(t *testing.T) {
 	if err != nil || calls != 1 {
 		t.Errorf("ReadUntil after fn says stop = %v, %d calls", err, calls)
 	}
+}
+
+type slowCancelReader struct {
+	started    chan struct{}
+	wake       chan struct{}
+	closed     bool
+	readExited atomic.Bool
+}
+
+func (s *slowCancelReader) Read([]byte) (int, error) {
+	defer s.readExited.Store(true)
+	close(s.started)
+	<-s.wake
+	if s.closed {
+		return 0, errors.New("closed while Read was still running")
+	}
+	return 0, io.EOF
+}
+
+func (s *slowCancelReader) Cancel() bool {
+	go func() {
+		time.Sleep(15 * time.Millisecond)
+		close(s.wake)
+	}()
+	return true
+}
+
+func TestReadUntilWaitsForCancelledReadBeforeReturn(t *testing.T) {
+	r := &slowCancelReader{started: make(chan struct{}), wake: make(chan struct{})}
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		<-r.started
+		cancel()
+	}()
+	if err := ReadUntil(ctx, r, func([]byte) bool { return true }); !errors.Is(err, context.Canceled) {
+		t.Fatalf("ReadUntil = %v, want context.Canceled", err)
+	}
+	if !r.readExited.Load() {
+		t.Error("ReadUntil returned before the cancelled read exited")
+	}
+	r.closed = true
 }

@@ -29,30 +29,24 @@ type execPathModel struct {
 }
 
 func (m *execPathModel) Init() tea.Cmd {
-	model := m.Model.(*framed).m.(*Model)
-	model.handoff = false
-	h := &hostConn{host: client.Host{Name: "box", SSH: "box"}}
-	var command tea.Cmd
-	switch m.action {
-	case "editor":
-		command = model.openSettings()
-	case "shell":
-		command = model.openShell(h)
-	case "keygen":
-		command = (&guide{step: gdRentKey}).keyKey(model, "k")
-	case "attach":
-		command = model.attachTo(h, "s1", "session")
-	}
-	first := func() tea.Msg { <-m.readStarted; return command() }
+	model := outerModel(m.Model)
+	model.handoff = false // retain the direct tea.Exec input-failure contract
+	first := func() tea.Msg { <-m.readStarted; return interactiveActionReadyMsg{} }
 	return tea.Batch(m.Model.Init(), first)
 }
 
 func (m *execPathModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if _, ok := msg.(interactiveActionReadyMsg); ok {
+		model := outerModel(m.Model)
+		if m.action == "attach" {
+			return m, model.attachTo(model.hostByName("box"), "s1", "session")
+		}
+		return m, outerAction(model, m.action)
+	}
 	_, cmd := m.Model.Update(msg)
 	switch msg.(type) {
 	case editorDoneMsg, shellDoneMsg, rentKeyMsg, attachDoneMsg:
-		// Make a wrong ordinary callback fail promptly, rather than waiting
-		// for the otherwise unresponsive terminal to reach the test deadline.
+		// A wrong ordinary callback still fails promptly at the same assertion.
 		m.ordinary.Add(1)
 		cmd = tea.Batch(cmd, tea.Quit)
 	}
@@ -70,7 +64,7 @@ func TestExecEntryPointsStopWhenInputCannotResume(t *testing.T) {
 printf 'stdio-ok\n' > "$TEST_EXEC_RECORD"
 `
 			h.Script("fake-editor", script)
-			h.Script("ssh", script)
+			h.Script("ssh", execSSHFixture(t, script))
 			h.Script("ssh-keygen", script)
 			t.Setenv("EDITOR", filepath.Join(h.Root, "bin", "fake-editor"))
 			t.Setenv("VISUAL", "")
@@ -97,7 +91,7 @@ printf 'stdio-ok\n' > "$TEST_EXEC_RECORD"
 			if err != nil {
 				t.Fatal(err)
 			}
-			be := newFakeBackend()
+			be := execOwnedBackend(t)
 			runProgram = func(ctx context.Context, pm tea.Model, in io.Reader, out io.Writer) error {
 				model := &execPathModel{Model: pm, action: action, readStarted: reader.entered, ordinary: &ordinary}
 				_, err := tea.NewProgram(model, tea.WithContext(ctx), tea.WithInput(in), tea.WithOutput(out), tea.WithoutSignalHandler()).Run()

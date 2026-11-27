@@ -6,7 +6,10 @@ import (
 	"strings"
 	"time"
 
+	tea "charm.land/bubbletea/v2"
+
 	"github.com/iamlakshya/simstim/internal/brand"
+	"github.com/iamlakshya/simstim/internal/client"
 	"github.com/iamlakshya/simstim/internal/onboard"
 )
 
@@ -22,13 +25,25 @@ func (w *wizard) view(m *Model) string {
 	case wzTest:
 		body = append([]string{"", sBold.Render("Testing " + w.host.Name), ""}, w.checkLines(m, cw)...)
 		hints = []hint{{"enter", "next"}, {"esc", "back"}}
-		if w.err != nil {
+		switch {
+		case w.ask != nil:
+			body = append(body, w.askView(cw)...)
+			hints = []hint{{"enter", "pin this key"}, {"esc", "back"}}
+		case w.err != nil:
 			hints = []hint{{"enter", "try again"}, {"esc", "back"}}
 		}
+	case wzTier:
+		body, hints = w.tierView(cw)
 	case wzInstall:
 		title = fmt.Sprintf("Install %s on %s?", brand.HostBinary, w.host.Name)
 		body = w.installView(m, cw)
 		hints = []hint{{"enter", "install"}, {"esc", "back"}}
+	case wzSandboxes:
+		title = "Sandboxes on " + w.host.Name
+		body, hints = w.sandboxesView(m, cw)
+	case wzRoot:
+		title = "Root step on " + w.host.Name
+		body, hints = w.rootView(m, cw)
 	case wzReady:
 		body = w.readyView(m, cw)
 		hints = []hint{{"enter", "start a session"}, {"esc", "close"}}
@@ -70,7 +85,7 @@ func (w *wizard) stepLabel() string {
 	case w.step == wzRun && w.act.Kind == onboard.ActLogin:
 		n = wizSteps
 	case w.step == wzRun:
-		n = int(wzAgents) + 1
+		n = int(wzRun) + 1
 	}
 	return sFaint.Render(fmt.Sprintf("step %d of %d", n, wizSteps))
 }
@@ -108,7 +123,73 @@ func (w *wizard) whereView(cw int) ([]string, []hint) {
 	return body, hints
 }
 
+var tierChoices = [...]struct {
+	title string
+	note  string
+	tier  client.Tier
+}{
+	{"Only me", "own: gets your secrets when you ask", client.TierOwn},
+	{"Someone else", "shared: no secret unless you mark it", client.TierShared},
+	{"A machine for one task", "throwaway: short-lived secrets only", client.TierThrowaway},
+}
+
+func (w *wizard) tierKey(m *Model, ks string) tea.Cmd {
+	switch ks {
+	case "up", "k":
+		w.tierPick = max(w.tierPick-1, 0)
+	case "down", "j":
+		w.tierPick = min(w.tierPick+1, len(tierChoices)-1)
+	case "enter":
+		return w.pickTier(m)
+	case "1", "2", "3":
+		w.tierPick = int(ks[0] - '1')
+		return w.pickTier(m)
+	}
+	return nil
+}
+
+func (w *wizard) pickTier(m *Model) tea.Cmd {
+	if w.tierPick < 0 || w.tierPick >= len(tierChoices) {
+		return nil
+	}
+	w.tier = tierChoices[w.tierPick].tier
+	if w.plat.Installed {
+		w.prepareAfterSave = canPrepareSandbox(m.be)
+		return w.setup(m)
+	}
+	w.step, w.err = wzInstall, nil
+	return nil
+}
+
+func (w *wizard) tierView(cw int) ([]string, []hint) {
+	return tierQuestionView(w.host.Name, w.tierPick, cw)
+}
+
+func tierQuestionView(name string, pick, cw int) ([]string, []hint) {
+	body := make([]string, 0, 3+len(tierChoices))
+	body = append(body, "", sBold.Render("Who else has root on "+name+"?"), "")
+	titleW := min(24, max(cw-30, 22))
+	for i, c := range tierChoices {
+		row := marker(i == pick) + listRow(i == pick,
+			seg{fmt.Sprintf("%d ", i+1), sFaint},
+			seg{fit(c.title, titleW), sBold},
+			seg{"  " + trunc(c.note, max(cw-titleW-6, 0)), sFaint})
+		body = append(body, row)
+	}
+	return body, []hint{{"↑↓", "pick"}, {"enter", "next"}, {"esc", "back"}}
+}
+
 func (w *wizard) checkLines(m *Model, cw int) []string { return m.checkLines(w.checks, cw) }
+
+// askView asks about a key that the user's settings do not name, as ssh
+// asks at a terminal, with the command that shows the key on the machine.
+func (w *wizard) askView(cw int) []string {
+	body := []string{""}
+	body = append(body, wrap(fmt.Sprintf("%s shows the host key %s, which your known_hosts does not name. Check it on the machine first:",
+		w.host.Name, w.ask.Fingerprint), cw)...)
+	body = append(body, "", "  "+sKey.Render(trunc(w.ask.CheckCommand(), cw-2)), "")
+	return append(body, wrap("Pin it only if they match. Every connection then checks it.", cw)...)
+}
 
 // checkLines draws the progress of a step: a spinner, then ✓ or ✕, the
 // check's name, and its detail.
@@ -174,12 +255,33 @@ func (w *wizard) readyView(m *Model, cw int) []string {
 			sys = append(sys, s)
 		}
 	}
-	return append(body,
+	sysLine := strings.Join(sys, dot)
+	if w.tier == client.TierShared {
+		sysLine += "  reported by " + w.host.Name
+	}
+	status := sSuccess.Render(glyphOK) + " " + sBold.Render(w.host.Name+" is ready.")
+	if w.prepareAfterSave && !w.sandboxTested {
+		status = sFaint.Render(glyphIdle) + " " + sBold.Render(w.host.Name+" is saved; sandbox wall not ready yet.")
+	}
+	out := append(body,
 		"",
-		sSuccess.Render(glyphOK)+" "+sBold.Render(w.host.Name+" is ready."),
+		status,
 		"",
 		field("Agents", strings.Join(names, dot)),
-		field("System", strings.Join(sys, dot)),
+		field("System", sysLine),
 		field("Limits", fmtSize(i.MemoryMax)+" for sessions"),
 	)
+	if w.prepareAfterSave {
+		floor := "not prepared"
+		if w.sandboxTested && w.host.WallFloor != "" {
+			floor = shown(w.host.WallFloor)
+		} else if w.bootSummary != nil && w.bootSummary.levelAfterRoot != "" {
+			floor += " (" + shown(w.bootSummary.levelAfterRoot) + " after root step)"
+		}
+		out = append(out, field("Floor", floor))
+		if w.printedFile != "" && !w.sandboxTested {
+			out = append(out, field("Script", w.printedFile))
+		}
+	}
+	return out
 }

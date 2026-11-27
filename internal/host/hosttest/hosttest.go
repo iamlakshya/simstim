@@ -20,6 +20,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"slices"
 	"strings"
 	"syscall"
@@ -27,8 +28,11 @@ import (
 	"time"
 
 	"github.com/iamlakshya/simstim/internal/brand"
+	"github.com/iamlakshya/simstim/internal/client"
+	"github.com/iamlakshya/simstim/internal/guest"
 	"github.com/iamlakshya/simstim/internal/host"
 	"github.com/iamlakshya/simstim/internal/paths"
+	"github.com/iamlakshya/simstim/internal/supervisor"
 	"github.com/iamlakshya/simstim/internal/testhome"
 )
 
@@ -37,8 +41,31 @@ import (
 // "keytest". Call it from TestMain. The tests run in a home of their own
 // (testhome), so no test reads or writes the user's real folders.
 func Main(m *testing.M) {
+	// The product has Linux hosts. Darwin fixtures intentionally retain the
+	// historical ordinary-holder test path; they do not qualify P6.3.
+	if runtime.GOOS != "linux" {
+		host.WallDriver = "legacy-none-test"
+	}
 	if len(os.Args) >= 3 {
 		switch os.Args[1] {
+		case "supervise", "supervise-restore-v1":
+			var err error
+			if os.Args[1] == "supervise" {
+				err = supervisor.Run(os.Args[2])
+			} else {
+				err = supervisor.RunAutomaticRestore(os.Args[2])
+			}
+			if err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				os.Exit(1)
+			}
+			os.Exit(0)
+		case "wall-init":
+			if err := guest.Run(os.Args[2:]...); err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				os.Exit(1)
+			}
+			os.Exit(0)
 		case "holder":
 			if err := host.RunHolder(os.Args[2]); err != nil {
 				fmt.Fprintln(os.Stderr, err)
@@ -61,7 +88,9 @@ func Main(m *testing.M) {
 	// A helper that this binary stands in for, reached through a fake
 	// ssh, serves the bridge.
 	if len(os.Args) >= 2 && os.Args[1] == "bridge" {
-		if err := host.RunBridge(host.BridgeInput(os.Stdin, os.Args[2:]), os.Stdout); err != nil {
+		err := host.RunBridge(host.BridgeInput(os.Stdin, os.Args[2:]), os.Stdout)
+		host.EndBridge()
+		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
@@ -74,10 +103,31 @@ func Main(m *testing.M) {
 		}
 		os.Exit(0)
 	}
+	if len(os.Args) == 2 && os.Args[1] == "install-payload" {
+		if err := host.RunInstallPayload(context.Background(), os.Stdin, os.Stdout); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		os.Exit(0)
+	}
 	done, err := testhome.Isolate()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
+	}
+	controlsDone, err := configureControls()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		done()
+		os.Exit(1)
+	}
+	if code, handled := client.GitSSHMode(os.Args[1:]); handled {
+		if err := controlsDone(); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			code = 1
+		}
+		done()
+		os.Exit(code)
 	}
 	flag.Parse()
 	// Child processes write their coverage where this binary writes its
@@ -86,6 +136,10 @@ func Main(m *testing.M) {
 		_ = os.Setenv("GOCOVERDIR", f.Value.String())
 	}
 	code := m.Run()
+	if err := controlsDone(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		code = 1
+	}
 	done()
 	os.Exit(ExitCode(code))
 }
@@ -110,15 +164,29 @@ type Host struct {
 // the end of the test every session is deleted and its holder waited for.
 func New(t testing.TB) *Host {
 	t.Helper()
+	if !testhome.SocketDirActive() {
+		done, err := configureControls()
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() {
+			if err := done(); err != nil {
+				t.Error(err)
+			}
+		})
+	}
 	root := shortTempDir(t)
 	h := &Host{Root: root, Home: filepath.Join(root, "home"), t: t}
 	run := filepath.Join(root, "run")
-	for _, d := range []string{h.Home, run} {
+	for _, d := range []string{h.Home, run, filepath.Join(root, "config-dirs"), filepath.Join(root, "data-dirs")} {
 		if err := os.MkdirAll(d, 0o700); err != nil {
 			t.Fatal(err)
 		}
 	}
 	t.Setenv("HOME", h.Home)
+	t.Setenv("USERPROFILE", h.Home)
+	t.Setenv("XDG_CONFIG_DIRS", filepath.Join(root, "config-dirs"))
+	t.Setenv("XDG_DATA_DIRS", filepath.Join(root, "data-dirs"))
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(h.Home, ".config"))
 	t.Setenv("XDG_DATA_HOME", filepath.Join(h.Home, ".local", "share"))
 	t.Setenv("XDG_STATE_HOME", filepath.Join(h.Home, ".local", "state"))
@@ -236,30 +304,6 @@ func (h *Host) Install(version, vt string) string {
 	return dst
 }
 
-// linkOrCopy makes dst the same file as src: a hard link when it can, so
-// that the copy is instant, or else a copy. Never a symbolic link: Linux
-// names a process's executable by the link's target.
-func linkOrCopy(src, dst string) error {
-	_ = os.Remove(dst)
-	if os.Link(src, dst) == nil {
-		return nil
-	}
-	in, err := os.Open(src)
-	if err != nil {
-		return err
-	}
-	defer in.Close()
-	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o755)
-	if err != nil {
-		return err
-	}
-	if _, err := io.Copy(out, in); err != nil {
-		out.Close()
-		return err
-	}
-	return out.Close()
-}
-
 // HolderLog returns the log of a session's holder.
 func (h *Host) HolderLog(id string) string {
 	b, _ := os.ReadFile(paths.HolderLog(id))
@@ -269,6 +313,18 @@ func (h *Host) HolderLog(id string) string {
 // cleanup stops every session as `rm` does, and waits for each holder to
 // exit, so that none outlives the test and each writes its coverage.
 func (h *Host) cleanup() {
+	// Later Setenv cleanups may have restored PATH already. Keep this
+	// host's own fixture tools available until its sessions are gone.
+	oldPath := os.Getenv("PATH")
+	if err := os.Setenv("PATH", filepath.Join(h.Root, "bin")+string(os.PathListSeparator)+systemPath()); err != nil {
+		h.t.Error(err)
+	}
+	defer func() {
+		if err := os.Setenv("PATH", oldPath); err != nil {
+			h.t.Error(err)
+		}
+	}()
+
 	entries, _ := os.ReadDir(paths.SessionsDir())
 	for _, e := range entries {
 		id := e.Name()
@@ -345,6 +401,29 @@ func Reap(pid int, timeout time.Duration) error {
 	case <-time.After(timeout):
 		_ = syscall.Kill(pid, syscall.SIGKILL)
 		return fmt.Errorf("process %d did not exit within %s", pid, timeout)
+	}
+}
+
+// OldName gives the session id the name name in its manifest, as a helper
+// before names were checked could: a name that new and rename now refuse,
+// such as one that looks like an ID. It stops the session's holder first,
+// so that no later save of the holder puts the old name back. The session
+// stays, with its agent ended.
+func OldName(t testing.TB, id, name string) {
+	t.Helper()
+	if pid := livePID(id); pid > 0 {
+		_, _ = host.HolderRequest(id, "kill", nil, 3*time.Second)
+		if err := Reap(pid, 10*time.Second); err != nil {
+			t.Fatal(err)
+		}
+	}
+	m, err := host.LoadManifest(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.Name = name
+	if err := m.Save(); err != nil {
+		t.Fatal(err)
 	}
 }
 

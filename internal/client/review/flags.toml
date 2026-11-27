@@ -1,0 +1,35 @@
+# Static paths whose changes need an explicit review before a branch moves.
+[[path]]
+category = "git"
+patterns = [".githooks/**", ".husky/**", ".gitmodules"]
+
+[[path]]
+category = "CI"
+patterns = [".github/workflows/**", ".gitlab-ci.yml", ".circleci/**", "azure-pipelines.yml", "Jenkinsfile"]
+
+[[path]]
+category = "build and install"
+patterns = ["binding.gyp", "Makefile", "setup.py", "build.rs"]
+
+[[path]]
+category = "editor and shell"
+patterns = [".vscode/tasks.json", ".vscode/settings.json", ".idea/**", ".envrc"]
+
+[[path]]
+category = "registry config"
+patterns = [".npmrc", ".yarnrc.yml", "pip.conf", ".cargo/config.toml"]
+
+[[content]]
+path = "package.json"
+checker = "scripts"
+category = "build and install"
+
+[[content]]
+path = "pyproject.toml"
+checker = "python-build"
+category = "build and install"
+
+[[content]]
+path = ".gitattributes"
+checker = "attributes-filter"
+category = "git"

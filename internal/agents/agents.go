@@ -11,10 +11,23 @@ import (
 	"slices"
 	"strings"
 	"sync"
+
+	"github.com/iamlakshya/simstim/internal/api"
 )
 
 // Agent describes one agent CLI.
 type Agent struct {
+	// StateDirs are folders, or single files, under the home that a resume
+	// needs. A sandbox keeps these paths across starts and resets the rest.
+	StateDirs []string `json:"state_dirs,omitempty"`
+	// InstallDirs are folders under the home that hold the agent's files.
+	// A process wall binds them read-only at their host paths.
+	InstallDirs []string `json:"install_dirs,omitempty"`
+	// ProjectFiles are repository paths that the agent reads as settings.
+	// Review flags changes to these paths before work leaves a sandbox.
+	ProjectFiles []string `json:"project_files,omitempty"`
+	// CAEnv names the canonical PEM CA file variables used inside a wall.
+	CAEnv    []string `json:"ca_env,omitempty"`
 	Kind     string   `json:"kind"`
 	Title    string   `json:"title"`
 	Binaries []string `json:"binaries"`
@@ -26,6 +39,9 @@ type Agent struct {
 	// The hooks' and the inline mode's arguments then go before the "--".
 	Resume   []string `json:"resume,omitempty"`
 	Continue []string `json:"continue,omitempty"`
+	// Fork starts a new conversation from an existing agent session ID.
+	// Without it, a fork uses Continue on its copied state folders.
+	Fork []string `json:"fork,omitempty"`
 	// IDCapture says how we learn the agent's own session ID:
 	// "choose" (we pass it), "hook", "scan" or "none".
 	IDCapture string `json:"id_capture"`
@@ -67,13 +83,36 @@ type Agent struct {
 	// not a size for one process. The host doctor warns when a host has less.
 	// In October 2026, the docs of opencode and Antigravity CLI named none.
 	Memory int64 `json:"memory,omitempty"`
+	// Size is optional per-sandbox size data. Memory above remains the agent
+	// documentation's minimum MACHINE memory and never supplies this default.
+	Size *api.SandboxSize `json:"size,omitempty"`
 	// Setup is how to install the agent and log in (setup.go).
 	Setup *Setup `json:"setup,omitempty"`
+	// TokenHint describes a separate credential with limited permissions and spending.
+	TokenHint string `json:"token_hint,omitempty"`
+	// Secrets is public credential binding metadata for this agent.
+	Secrets []SecretBinding `json:"secrets,omitempty"`
+	// ModelGuard limits requests and provider-run tools on model hosts.
+	ModelGuard *ModelGuard `json:"model_guard,omitempty"`
+	// Egress names the first-class HTTPS hosts in the canonical agent data.
+	Egress []string `json:"egress,omitempty"`
+}
+
+// SandboxSize returns an owned copy of this agent's per-sandbox size data.
+// Nil lets the canonical resolver use its 2-CPU, 4-GiB fallback.
+func (a Agent) SandboxSize() *api.SandboxSize {
+	if a.Size == nil {
+		return nil
+	}
+	size := *a.Size
+	return &size
 }
 
 // GB is a gigabyte as agents' docs give memory: 10^9 bytes, a little less
 // than a GiB. A machine of "4 GB" has 3.7 GiB.
 const GB = 1_000_000_000
+
+const lowValueTokenHint = "Make a credential for this host alone. Use the smallest permissions and spending limits your provider supports."
 
 // Inline is an agent's switch to its inline mode: arguments, environment
 // variables, or both.
@@ -116,12 +155,16 @@ const claudeHooks = `{"hooks":{` +
 // Table is the built-in agent table, checked against each agent's docs in
 // October 2026. First-class agents come first: the launcher lists them in
 // this order.
-var Table = []Agent{
+var Table = withModelData(withSecretData(withFileData([]Agent{
 	{
-		Kind: "claude", Title: "Claude Code", Binaries: []string{"claude"},
+		CAEnv: []string{"NODE_EXTRA_CA_CERTS"},
+		Kind:  "claude", Title: "Claude Code", Binaries: []string{"claude"},
+		TokenHint: lowValueTokenHint,
+		Egress:    []string{"api.anthropic.com", "platform.claude.com", "claude.ai", "claude.com", "sso.claude.com"},
 		Launch:    []string{"claude", "--session-id", "{session_uuid}"},
 		Resume:    []string{"claude", "--resume", "{agent_session_id}"},
 		Continue:  []string{"claude", "--continue"},
+		Fork:      []string{"claude", "--resume", "{agent_session_id}", "--fork-session"},
 		IDCapture: "choose",
 		Hooks:     []string{"--settings", claudeHooks},
 		// --session-id "must be a valid UUID":
@@ -166,7 +209,10 @@ var Table = []Agent{
 		},
 	},
 	{
-		Kind: "codex", Title: "Codex", Binaries: []string{"codex"},
+		CAEnv: []string{"CODEX_CA_CERTIFICATE", "SSL_CERT_FILE"},
+		Kind:  "codex", Title: "Codex", Binaries: []string{"codex"},
+		TokenHint: lowValueTokenHint,
+		Egress:    []string{"api.openai.com", "chatgpt.com", "auth.openai.com"},
 		// --no-daemon keeps Codex's work inside the session's PTY and cgroup.
 		Launch: []string{"codex", "--no-daemon"},
 		// SESSION_ID is a plain positional argument for clap, so "--" ends
@@ -220,6 +266,7 @@ var Table = []Agent{
 	},
 	{
 		Kind: "opencode", Title: "opencode", Binaries: []string{"opencode"},
+		TokenHint: lowValueTokenHint,
 		Launch:    []string{"opencode"},
 		Resume:    []string{"opencode", "-s", "{agent_session_id}"},
 		Continue:  []string{"opencode", "-c"},
@@ -238,6 +285,7 @@ var Table = []Agent{
 		// Antigravity CLI replaced Gemini CLI for Google's consumer plans on
 		// 18 June 2026 (https://www.antigravity.google/docs/cli/commands/resume).
 		Kind: "antigravity", Title: "Antigravity CLI", Binaries: []string{"agy"},
+		TokenHint: lowValueTokenHint,
 		Launch:    []string{"agy"},
 		Resume:    []string{"agy", "--conversation", "{agent_session_id}"},
 		Continue:  []string{"agy", "--continue"},
@@ -254,6 +302,7 @@ var Table = []Agent{
 	},
 	{
 		Kind: "gemini", Title: "Gemini CLI", Binaries: []string{"gemini"},
+		TokenHint: lowValueTokenHint,
 		Launch:    []string{"gemini", "--session-id", "{session_uuid}"},
 		Resume:    []string{"gemini", "--resume", "{agent_session_id}"},
 		Continue:  []string{"gemini", "--resume"},
@@ -272,6 +321,7 @@ var Table = []Agent{
 	},
 	{
 		Kind: "amp", Title: "Amp", Binaries: []string{"amp"},
+		TokenHint: lowValueTokenHint,
 		Launch:    []string{"amp"},
 		Resume:    []string{"amp", "threads", "continue", "{agent_session_id}"},
 		Continue:  []string{"amp", "threads", "continue", "--last"},
@@ -288,6 +338,7 @@ var Table = []Agent{
 	},
 	{
 		Kind: "cursor", Title: "Cursor CLI", Binaries: []string{"agent", "cursor-agent"},
+		TokenHint: lowValueTokenHint,
 		Launch:    []string{"agent"},
 		Resume:    []string{"agent", "--resume", "{agent_session_id}"},
 		Continue:  []string{"agent", "--continue"},
@@ -305,6 +356,7 @@ var Table = []Agent{
 	},
 	{
 		Kind: "aider", Title: "Aider", Binaries: []string{"aider"},
+		TokenHint: lowValueTokenHint,
 		Launch:    []string{"aider"},
 		Continue:  []string{"aider", "--restore-chat-history"},
 		IDCapture: "none",
@@ -319,6 +371,7 @@ var Table = []Agent{
 	},
 	{
 		Kind: "goose", Title: "Goose", Binaries: []string{"goose"},
+		TokenHint: lowValueTokenHint,
 		Launch:    []string{"goose", "session"},
 		Continue:  []string{"goose", "session", "-r"},
 		IDCapture: "none",
@@ -338,7 +391,7 @@ var Table = []Agent{
 		IDCapture: "none",
 		Support:   Supported, // and through it, any program
 	},
-}
+})))
 
 // Find returns the agent with the given kind.
 func Find(kind string) (Agent, bool) {

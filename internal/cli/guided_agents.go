@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strconv"
@@ -172,7 +173,7 @@ func (g *guide) inSession(h client.Host, f *onboard.Flow, a onboard.Action) erro
 		return err
 	}
 	if g.tty {
-		fmt.Fprintf(g.out, "It runs in the session %s on %s. Answer it there; ctrl+\\ leaves it running.\n", a.Args.Name, h.Name)
+		fmt.Fprintf(g.out, "It runs in the session %s on %s. Answer it there; %s leaves it running.\n", shown(a.Args.Name), shown(h.Name), shown(client.LoadSettings().Attach.DetachKey))
 	}
 	id, ended, err := g.session(h, a)
 	if err != nil {
@@ -183,7 +184,9 @@ func (g *guide) inSession(h client.Host, f *onboard.Flow, a onboard.Action) erro
 		return err
 	}
 	a.Session = id
-	f.Done(a, checks, ended)
+	if err := f.Done(a, checks, ended); err != nil {
+		return err
+	}
 	fmt.Fprintln(g.out)
 	printLine(g.out, f.Line(a.Agent.Kind))
 	return nil
@@ -201,16 +204,20 @@ func (g *guide) done(h client.Host, f *onboard.Flow) {
 // runSession starts an install or a login in a session on h. On a terminal
 // it attaches; without one, it waits for the session to end. It returns the
 // session's ID, and whether the session ended.
-func (g *guide) runSession(h client.Host, a onboard.Action) (string, bool, error) {
+func (g *guide) runSession(h client.Host, a onboard.Action) (id string, finished bool, runErr error) {
 	cctx, cancel := context.WithTimeout(g.ctx, 90*time.Second)
+	request := client.NewGrantRequest(false, false)
+	cctx = client.WithGrantRequest(cctx, request)
+	defer func() { runErr = errors.Join(runErr, request.Close()) }()
 	conn, err := client.Dial(cctx, h, true)
 	if err != nil {
 		cancel()
 		return "", false, err
 	}
 	cols, rows := termSize()
-	s, err := conn.NewSession(cctx, client.TerminalArgs(a.Args, cols, rows))
+	s, err := startUnwalledControlV1(cctx, conn, a.Args, cols, rows)
 	conn.Close()
+	err = errors.Join(err, request.Close())
 	cancel()
 	if err != nil {
 		return "", false, err

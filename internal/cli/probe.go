@@ -43,7 +43,7 @@ type capability struct {
 func terminalProbe(ctx context.Context) error {
 	fd := int(os.Stdin.Fd())
 	if !term.IsTerminal(fd) || !term.IsTerminal(int(os.Stdout.Fd())) {
-		return &client.UserError{Msg: "the terminal check needs a terminal", Hint: "Run it in your terminal.", Code: "no_terminal"}
+		return &client.UserError{Msg: "the terminal check needs a terminal", Hint: "Run it in your terminal.", Code: "no_terminal", Kind: client.KindUsage}
 	}
 	if err := keyread.CheckStuck(os.Stdin); err != nil {
 		return terminalReadError(err)

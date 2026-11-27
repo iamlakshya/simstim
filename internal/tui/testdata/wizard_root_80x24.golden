@@ -1,0 +1,24 @@
+
+  ⢄⡠⠊ simstim  › raspberry                                          0 sessions
+  ────────────────────────────────────────────────────────────────────────────
+
+    No sessions on raspberry yet.
+
+    n start one from a single line, like: claude ~/src/app
+
+
+
+
+
+
+
+  ── Root step on raspberry ────────────────────────────────── step 6 of 10 ──
+
+    Review what runs with sudo on raspberry:
+
+    • Add pi to the kvm group
+      usermod -aG kvm pi
+
+    SHA-256  0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcd…
+
+    enter run with sudo   p print   s skip   esc back

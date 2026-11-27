@@ -8,9 +8,11 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/spf13/cobra"
 
+	"github.com/iamlakshya/simstim/internal/api"
 	"github.com/iamlakshya/simstim/internal/brand"
 	"github.com/iamlakshya/simstim/internal/client"
 )
@@ -31,15 +33,15 @@ type ExitCode struct {
 var exitCodes = []ExitCode{
 	{Code: 0, Meaning: "Done.", Examples: "A command did its job. Help printed. An attach ended with a detach, or with the agent's end."},
 	{Code: 1, Kind: client.KindFailed, Meaning: "The command could not do its job.",
-		Examples: "A host did not answer. The helper failed. No hosts yet. A connection that closed. An error that is not a user error."},
+		Examples: "A host did not answer. The helper failed. No hosts yet. A connection that closed. `config check` found an error. An error that is not a user error."},
 	{Code: 2, Kind: client.KindUsage, Meaning: "The command line or a config file is wrong.",
 		Examples: "An unknown command or flag. A missing or extra argument. A bad value. Two flags that conflict. A name that matches two sessions. A `hosts.toml` that does not decode."},
 	{Code: 3, Kind: client.KindNotFound, Meaning: "A named thing does not exist.",
 		Examples: "No host, session, agent, provider, template or secret of that name."},
 	{Code: 4, Kind: client.KindNeedsAnswer, Meaning: "The command needs an answer, and input is off.",
-		Examples: "`host add` without `--yes`. `doctor --fix` without `-y`. A new session's folder that does not exist, without `--mkdir`. `setup` without the flags that answer its questions."},
+		Examples: "`host add` without `--yes`, or `--yes` without `--tier`, or without `--host-key` for a host key that your SSH settings do not trust. `host rekey`, or raising a tier in `host set`, without `--confirm`. `doctor --fix` without `-y`. A new session's folder that does not exist, without `--mkdir`. `setup` without the flags that answer its questions."},
 	{Code: 5, Kind: client.KindRefused, Meaning: "A policy or a tier refuses the action.",
-		Examples: "None in this release."},
+		Examples: "A host whose key differs from its pinned host key, or whose pin file is missing. A `--host-key` that the host does not show."},
 	{Code: 130, Kind: client.KindCancelled, Meaning: "The user or a signal cancelled.",
 		Examples: "The answer no. Esc or Ctrl+C at a question or in the picker. The end of input at a question. Ctrl+C or SIGTERM outside an attach."},
 }
@@ -69,11 +71,23 @@ var errSignal = errors.New("a signal ended the command")
 // of "Did you mean", or the short help of a missing argument.
 type usageError struct {
 	*client.UserError
-	suggestions    []string
+	suggestions []string
+	// labels, when set, holds a name for each suggestion, which the error
+	// shows beside it: a session's name beside its host/ID.
+	labels         []string
 	usage, example string
 }
 
 func (e *usageError) Unwrap() error { return e.UserError }
+
+// quietError is the error of a command that has already said what went
+// wrong on stdout, such as a check that printed its findings. It sets the
+// exit code, and finish prints nothing more.
+type quietError struct {
+	*client.UserError
+}
+
+func (e *quietError) Unwrap() error { return e.UserError }
 
 // report is an error as printError shows it.
 type report struct {
@@ -81,6 +95,7 @@ type report struct {
 	code           string
 	kind           client.Kind
 	suggestions    []string
+	labels         []string
 	usage, example string
 	data           json.RawMessage
 	// user is true for a user error, whose message is a sentence.
@@ -103,7 +118,7 @@ func describe(err error, cmd *cobra.Command) report {
 		r := report{msg: ue.Msg, try: ue.Hint, code: ue.Code, kind: ue.Kind, data: ue.Data, user: true}
 		var u *usageError
 		if errors.As(err, &u) {
-			r.suggestions, r.usage, r.example = u.suggestions, u.usage, u.example
+			r.suggestions, r.labels, r.usage, r.example = u.suggestions, u.labels, u.usage, u.example
 		}
 		var un *client.UnknownNameError
 		if errors.As(err, &un) && cmd != nil {
@@ -127,12 +142,39 @@ func describe(err error, cmd *cobra.Command) report {
 	}
 }
 
-// helpOf is the command line that prints the help of cmd.
+// helpOf is the command line that prints the help of cmd, or of its new
+// form when cmd is an old command.
 func helpOf(cmd *cobra.Command) string {
 	if cmd == nil {
 		return brand.Name + " --help"
 	}
+	if form, ok := oldCommands[cmd.Name()]; ok && cmd.Parent() == cmd.Root() {
+		return brand.Name + " " + form[0] + " --help"
+	}
 	return cmd.CommandPath() + " --help"
+}
+
+// shown is text as an error shows it on a terminal: on one line, and
+// without control or hidden characters, wherever the text came from.
+func shown(s string) string {
+	return api.CleanText(oneLineText(s), 4000)
+}
+
+// shownShort bounds descriptive metadata, such as a session or host name,
+// before it joins a note or message that ends with a printed command.
+func shownShort(s string) string {
+	return api.CleanText(oneLineText(s), 200)
+}
+
+// shownNote cleans a note for stderr or JSON without truncating a validated
+// trailing command.
+func shownNote(s string) string {
+	s = oneLineText(s)
+	return api.CleanText(s, max(len(s)+1, 4000))
+}
+
+func oneLineText(s string) string {
+	return strings.NewReplacer("\r\n", " ", "\n", " ", "\t", " ").Replace(s)
 }
 
 // print writes the report in the one form of an error, on w
@@ -155,7 +197,10 @@ func (r report) print(w io.Writer, colour bool) {
 	fmt.Fprintf(w, "%s%sError:%s %s\n", bold, red, reset, msg)
 	q := make([]string, len(r.suggestions))
 	for i, s := range r.suggestions {
-		q[i] = fmt.Sprintf("%q", client.CleanLine(s))
+		q[i] = fmt.Sprintf("%q", shown(s))
+		if i < len(r.labels) && r.labels[i] != "" {
+			q[i] += " (" + shown(r.labels[i]) + ")"
+		}
 	}
 	switch len(q) {
 	case 0:
@@ -165,12 +210,29 @@ func (r report) print(w io.Writer, colour bool) {
 		fmt.Fprintf(w, "\nDid you mean one of these: %s?\n", strings.Join(q, ", "))
 	}
 	if r.usage != "" {
-		fmt.Fprintf(w, "\nUsage:   %s\n", client.CleanLine(r.usage))
+		fmt.Fprintf(w, "\nUsage:   %s\n", shown(r.usage))
 		if r.example != "" {
-			fmt.Fprintf(w, "Example: %s\n", client.CleanLine(r.example))
+			fmt.Fprintf(w, "Example: %s\n", shown(r.example))
 		}
 	}
-	fmt.Fprintf(w, "\n%sTry:%s %s\n", blue, reset, client.CleanLine(r.try))
+	fmt.Fprintf(w, "\n%sTry:%s %s\n", blue, reset, shown(r.try))
+}
+
+// didYouMean is the line of suggestions, or "" with none: `Did you mean
+// "attach"?`, or `Did you mean one of these: "bash", "zsh"?`.
+func didYouMean(suggestions []string) string {
+	q := make([]string, len(suggestions))
+	for i, s := range suggestions {
+		q[i] = fmt.Sprintf("%q", client.CleanLine(s))
+	}
+	switch len(q) {
+	case 0:
+		return ""
+	case 1:
+		return "Did you mean " + q[0] + "?"
+	default:
+		return "Did you mean one of these: " + strings.Join(q, ", ") + "?"
+	}
 }
 
 // printError prints err with its next step on w, and returns its exit code.
@@ -203,13 +265,28 @@ func failure(err error, cmd *cobra.Command, signalled bool) report {
 
 // finish ends a run: it prints err, if any, and returns the exit code. A
 // signal makes the run a cancel, also when the command returned no error.
-// With asJSON the error is one JSON line (cli-spec 7.4).
+// With asJSON the error is one JSON line (cli-spec 7.4). A quietError
+// prints nothing, because its command has said it all.
 func finish(w io.Writer, err error, cmd *cobra.Command, colour, signalled, asJSON bool) int {
+	if result, ok := execExit(err); ok {
+		if cause := execCause(err, result); cause != nil {
+			if asJSON {
+				_ = printErrorJSON(w, cause, cmd, false)
+			} else {
+				_ = printError(w, cause, cmd, colour, false)
+			}
+		}
+		return result.code
+	}
 	if err == nil {
 		if !signalled {
 			return 0
 		}
 		err = errSignal
+	}
+	var q *quietError
+	if errors.As(err, &q) && !signalled {
+		return exitCode(q.Kind)
 	}
 	if asJSON {
 		return printErrorJSON(w, err, cmd, signalled)
@@ -231,20 +308,41 @@ func colourOn(f *os.File) bool {
 // here.
 var synonyms = map[string]map[string]string{
 	"": {
-		"list":    "ls",
-		"remove":  "rm",
-		"del":     "rm",
-		"connect": "attach",
-		"open":    "attach",
-		"create":  "new",
-		"run":     "new",
-		"install": "agents install",
-		"hosts":   "host ls",
+		"list":     "ls",
+		"remove":   "rm",
+		"del":      "rm",
+		"connect":  "attach",
+		"open":     "attach",
+		"create":   "new",
+		"run":      "new",
+		"install":  "agents install",
+		"hosts":    "host ls",
+		"info":     "show",
+		"status":   "show",
+		"describe": "show",
+		"inspect":  "show",
+		"update":   "host upgrade",
+		"upgrade":  "host upgrade",
 	},
 	"host": {
-		"list": "ls",
+		"list":     "ls",
+		"remove":   "rm",
+		"delete":   "rm",
+		"forget":   "rm",
+		"info":     "show",
+		"details":  "show",
+		"config":   "set",
+		"settings": "set",
 	},
 }
+
+// flagSynonyms holds the old flags whose end has passed (cli-spec 3.1,
+// rule 8). It is keyed by the command's path without the product's name,
+// then by the old flag as typed, such as "--token-cmd" or "-n". A value is
+// the new flag, which "Did you mean" names. The release that removes a
+// flag's row from oldForms adds it here. A test checks that every new flag
+// exists.
+var flagSynonyms = map[string]map[string]string{}
 
 // named is one thing that a typed word may mean: its name, and every name
 // that it answers to, such as a command's aliases.
@@ -267,11 +365,23 @@ func suggest(typed string, things []named, prefix bool) []string {
 	if low == "" {
 		return nil
 	}
-	runes := len([]rune(low))
+	runes := utf8.RuneCountInString(low)
 	short := runes <= 2
 	most := 2
 	if runes <= 4 {
 		most = 1
+	}
+	// A word more than two runes longer than every name is neither near one
+	// nor its start. Leave it at that: its distances would cost time in step
+	// with its length, and a config file may hold a very long key.
+	longest := 0
+	for _, t := range things {
+		for _, a := range t.answers {
+			longest = max(longest, utf8.RuneCountInString(strings.ToLower(a)))
+		}
+	}
+	if runes > longest+most {
+		return nil
 	}
 	type candidate struct {
 		name string
@@ -344,8 +454,10 @@ func suggestName(cmd *cobra.Command, e *client.UnknownNameError) ([]string, stri
 	if len(cands) == 0 {
 		return nil, e.Hint
 	}
-	if line, ok := withName(cmd, commandLine(cmd), e, cands[0]); ok && parses(line) {
-		return cands, brand.Name + " " + joinWords(line)
+	if line, ok := withName(cmd, commandLine(cmd), e, cands[0]); ok {
+		if line = newForm(cmd, line); parses(line) {
+			return cands, suggestedLine(line, e.Hint)
+		}
 	}
 	return cands, e.Hint
 }

@@ -34,7 +34,7 @@ var (
 
 // startNew starts a VM that Create made. When Lima refuses nested
 // virtualisation, it turns nesting off and starts the VM once more. If that
-// fails, it deletes the VM, which no host names yet.
+// fails, it retains the VM and reports the original locator.
 func startNew(ctx context.Context, out io.Writer, host, inst string) error {
 	fmt.Fprintf(out, "  Starting it: limactl start %s\n", inst)
 	err := startVM(ctx, inst)
@@ -45,7 +45,7 @@ func startNew(ctx context.Context, out io.Writer, host, inst string) error {
 	again := brand.Name + " host create lima " + host + " (to try again)"
 	edit := []string{"edit", "--tty=false", "--set", ".nestedVirtualization = false", inst}
 	fmt.Fprintf(out, "  Turning nested virtualisation off: limactl %s\n", shellLine(edit))
-	if _, err := provider.Exec(ctx, install, "limactl", edit...); err != nil {
+	if _, err := limaExec(ctx, edit...); err != nil {
 		if ctx.Err() != nil {
 			return err
 		}
@@ -88,7 +88,7 @@ func checkNestingOff(ctx context.Context, inst, again string) error {
 }
 
 func startVM(ctx context.Context, inst string) error {
-	_, err := provider.Exec(ctx, install, "limactl", "start", "--tty=false", inst)
+	_, err := limaExec(ctx, "start", "--tty=false", inst)
 	return err
 }
 

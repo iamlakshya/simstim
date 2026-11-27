@@ -12,7 +12,7 @@ simstim setup [flags]
 
 A guided setup. It asks where agents will run: a host in your SSH config, a local VM with Lima, a Docker container, an E2B sandbox, or a server you will rent, which it walks you through. It connects or creates the host, installs the agents you tick with their official installers, and offers each agent's own login, each in a session you watch. Ctrl+C stops it at any step, and it says what was done.
 
-Without a terminal, name the host with `--host` or `--create`, and pass `--yes`.
+Without a terminal, name the host with `--host` (and `--tier`) or `--create`, and pass `--yes`.
 
 ## Examples
 
@@ -26,12 +26,13 @@ simstim setup --create lima --agents claude --yes --no-login
 
 | Flag | What it does |
 | --- | --- |
-| `--agents <string>` | the agents to install, such as claude,codex (none installs nothing) |
+| `--agents <list>` | the agents to install, such as claude,codex (none installs nothing) |
 | `--create <string>` | make a new host with a provider: lima, docker or e2b |
 | `--host <string>` | use this host: a saved host, a Host from your SSH config, or user@host |
-| `--name <string>` | the host's name (default: from `--host`, or the provider's name) |
+| `-n`, `--name <string>` | the host's name (default: from `--host`, or the provider's name) |
 | `--no-login` | do not offer the agents' logins |
-| `-y`, `--yes` | do not ask: install the helper, and only the agents in `--agents` |
+| `--tier <string>` | who else has root on the host: own, throwaway or shared |
+| `-y`, `--yes` | answer yes to every question: install the helper, and install no agent outside `--agents` |
 
 ## Flags from the parent command
 

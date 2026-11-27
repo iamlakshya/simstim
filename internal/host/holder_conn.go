@@ -32,8 +32,9 @@ func (h *Holder) serve(conn net.Conn, hookSock bool) {
 		h.drop(c)
 		c.close()
 	}()
-	r := bufio.NewReaderSize(conn, 64<<10)
-	f, err := proto.Read(r)
+	f, input, line, err := readHolderFirstFrameV1(c.conn)
+	c.helloLine = line
+	r := bufio.NewReaderSize(input, 64<<10)
 	if err != nil || f.Type != proto.THello {
 		return
 	}
@@ -42,13 +43,26 @@ func (h *Holder) serve(conn net.Conn, hookSock bool) {
 		_ = c.w.WriteJSON(proto.TError, proto.Error{Code: "protocol", Message: "incompatible client"})
 		return
 	}
+	if hello.Role == ordinaryPurgeRoleV2 {
+		h.serveOrdinaryPurgeV2(c, line, hookSock)
+		return
+	}
+	if hello.Role == ordinaryStopRoleV1 {
+		h.serveOrdinaryStopV1(c, line, hookSock)
+		return
+	}
+	if line != nil {
+		if err := line.RejectAncillary(); err != nil {
+			return
+		}
+	}
 	var refused *proto.Error
 	if c.access, refused = h.accessOf(conn, hookSock, hello.Role); refused != nil {
 		h.log.Warn("refused a connection", "role", hello.Role, "hook_socket", hookSock)
 		_ = c.w.WriteJSON(proto.TError, refused)
 		return
 	}
-	if err := c.w.WriteJSON(proto.THello, proto.Hello{Magic: proto.Magic, Protocol: version.Protocol, Version: version.Version, Role: "holder"}); err != nil {
+	if err := c.w.WriteJSON(proto.THello, proto.Hello{Magic: proto.Magic, Protocol: version.Protocol, Version: version.Version, Role: "holder", Features: holderFeatures}); err != nil {
 		return
 	}
 	h.dispatch(c, r)
@@ -59,45 +73,46 @@ func (h *Holder) serve(conn net.Conn, hookSock bool) {
 func (h *Holder) dispatch(c *hclient, r *bufio.Reader) {
 	for {
 		f, err := proto.Read(r)
-		if err != nil {
+		if err != nil || !h.dispatchFrame(c, f) {
 			return
 		}
-		// The role and peer check (holder_peer.go). A connection with full
-		// access takes the path below, frame for frame as before.
-		if c.access != accessFull {
-			if !h.serveLimited(c, f) {
-				return
-			}
-			continue
-		}
-		switch f.Type {
-		case proto.TAttach:
-			var a proto.Attach
-			if json.Unmarshal(f.Payload, &a) == nil {
-				h.attach(c, a)
-			}
-		case proto.TTrace:
-			c.bridgeRead(f.Payload)
-		case proto.TInput:
-			h.input(c, f.Payload)
-		case proto.TResize:
-			var rz proto.Resize
-			if json.Unmarshal(f.Payload, &rz) == nil {
-				h.resize(c, rz, false)
-			}
-		case proto.TDetach:
-			h.drop(c)
-		case proto.TPing:
-			_ = c.w.Write(proto.TPong, f.Payload)
-		case proto.TRequest:
-			var req proto.Request
-			if json.Unmarshal(f.Payload, &req) == nil {
-				h.request(c, req)
-			}
-		default:
-			// Other frames are not for a holder: ignore them.
-		}
 	}
+}
+
+// dispatchFrame applies the canonical access policy to one already-read frame.
+// Startup handoff must dispatch such a frame once, through this same path.
+func (h *Holder) dispatchFrame(c *hclient, f proto.Frame) bool {
+	if c.access != accessFull {
+		return h.serveLimited(c, f)
+	}
+	switch f.Type {
+	case proto.TAttach:
+		var a proto.Attach
+		if json.Unmarshal(f.Payload, &a) == nil {
+			h.attach(c, a)
+		}
+	case proto.TTrace:
+		c.bridgeRead(f.Payload)
+	case proto.TInput:
+		h.input(c, f.Payload)
+	case proto.TResize:
+		var rz proto.Resize
+		if json.Unmarshal(f.Payload, &rz) == nil {
+			h.resize(c, rz, false)
+		}
+	case proto.TDetach:
+		h.drop(c)
+	case proto.TPing:
+		_ = c.w.Write(proto.TPong, f.Payload)
+	case proto.TRequest:
+		var req proto.Request
+		if json.Unmarshal(f.Payload, &req) == nil {
+			h.request(c, req)
+		}
+	default:
+		// Other frames are not for a holder: ignore them.
+	}
+	return true
 }
 
 func (h *Holder) attach(c *hclient, a proto.Attach) {
@@ -220,7 +235,7 @@ func (h *Holder) input(c *hclient, p []byte) {
 	d := h.al.d
 	h.mu.Unlock()
 	noteTyping(d, p)
-	if _, err := h.ptmx.Write(p); err != nil {
+	if _, err := h.writePTY(p); err != nil {
 		h.log.Warn("pty write failed", "err", err)
 	}
 	lt.key(c, len(p))
@@ -245,7 +260,11 @@ func (h *Holder) resize(c *hclient, rz proto.Resize, force bool) {
 	}
 	h.noteClamp(asked, rz)
 	h.log.Debug("resize", diag.CatKey, diag.CatAttach, "cols", rz.Cols, "rows", rz.Rows, "force", force)
-	_ = pty.Setsize(h.ptmx, &pty.Winsize{Cols: clampCols(rz.Cols), Rows: clampRows(rz.Rows), X: clamp16(rz.XPx), Y: clamp16(rz.YPx)})
+	if h.vmTerm != nil {
+		_ = h.vmTerm.Resize(rz)
+	} else {
+		_ = pty.Setsize(h.ptmx, &pty.Winsize{Cols: clampCols(rz.Cols), Rows: clampRows(rz.Rows), X: clamp16(rz.XPx), Y: clamp16(rz.YPx)})
+	}
 	h.mu.Lock()
 	h.scr.resize(rz.Cols, rz.Rows) // the screen model has a smaller cap of its own
 	vt := h.vt
@@ -253,7 +272,10 @@ func (h *Holder) resize(c *hclient, rz proto.Resize, force bool) {
 	if vt != nil {
 		vt.Resize(rz.Cols, rz.Rows, rz.XPx, rz.YPx)
 	}
-	if force {
+	if force && h.vmTerm != nil {
+		_ = h.vmTerm.Signal(uint32(unix.SIGWINCH))
+	}
+	if force && h.vmTerm == nil {
 		// Make the agent repaint even when the size did not change.
 		if pgrp, err := unix.IoctlGetInt(h.fd, unix.TIOCGPGRP); err == nil && pgrp > 0 {
 			_ = unix.Kill(-pgrp, unix.SIGWINCH)

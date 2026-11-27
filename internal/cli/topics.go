@@ -32,12 +32,22 @@ type Concept struct {
 // concepts are the words of help concepts, one entry each. An entry that is
 // wider than a terminal wraps under its meaning. A task that adds a word
 // that users meet adds its entry here, in the same change. C5 widens the
-// address once every verb takes -.
+// address as the session commands add their supported forms.
 var concepts = []Concept{
+	{"layer", "One source of settings and rules. Narrower layers override broader ones"},
+	{"profile", "A named policy layer selected after repository sections"},
+	{"rule", "An allow or deny for one door and destination"},
+	{"door", "A controlled way through a sandbox wall, such as the network"},
+	{"preset", "A built-in network policy: locked, balanced or open"},
+	{"sandbox", "A session workspace behind a wall with explicit grants"},
+	{"wall", "The boundary around a sandbox"},
+	{"level", "The wall strength: none, process, gvisor or microvm"},
+	{"floor", "The minimum wall level saved for a host"},
+	{"tier", "The laptop's limit on what a host may receive"},
 	{"host", "The Linux machine, VM or container that runs sessions"},
 	{"helper", "The program on each host that runs its sessions"},
 	{"session", "A terminal on a host, which keeps running when you leave"},
-	{"address", "<host>/<session>. attach and flip take - for the last one"},
+	{"address", "<host>/<session>, a unique session name, or - for the last attached"},
 	{"agent", "A coding agent, such as Claude Code or Codex"},
 	{"launcher", "The screen of hosts and sessions that " + brand.Name + " opens"},
 	{"attach and detach", "Attach shows a session in this terminal. Ctrl+\\ detaches by default, " +

@@ -1,0 +1,46 @@
+version = 1
+
+[[rule]]
+reason = "shell start file"
+paths = ["/etc/profile", "/etc/profile.d/**", "/etc/bash.bashrc", "/home/*/.bashrc", "/home/*/.profile", "/home/*/.bash_profile", "/root/.bashrc", "/root/.profile", "/root/.bash_profile"]
+source = "https://www.gnu.org/software/bash/manual/html_node/Bash-Startup-Files.html"
+
+[[rule]]
+reason = "shell start file"
+paths = ["/etc/zsh/**", "/home/*/.zshrc", "/home/*/.zprofile", "/root/.zshrc", "/root/.zprofile"]
+source = "https://zsh.sourceforge.io/Doc/Release/Files.html"
+
+[[rule]]
+reason = "git configuration or template"
+paths = ["/etc/gitconfig", "/home/*/.gitconfig", "/root/.gitconfig"]
+source = "https://git-scm.com/docs/git-config#FILES"
+
+[[rule]]
+reason = "git configuration or template"
+paths = ["/usr/share/git-core/templates/**"]
+source = "https://git-scm.com/docs/git-init#_template_directory"
+
+[[rule]]
+reason = "service or scheduled command"
+paths = ["/etc/systemd/**", "/usr/lib/systemd/**", "/lib/systemd/**"]
+source = "https://www.freedesktop.org/software/systemd/man/latest/systemd.unit.html"
+
+[[rule]]
+reason = "service or scheduled command"
+paths = ["/etc/crontab", "/etc/cron.d/**", "/etc/cron.hourly/**", "/etc/cron.daily/**", "/etc/cron.weekly/**", "/etc/cron.monthly/**", "/var/spool/cron/**"]
+source = "https://manpages.debian.org/bookworm/cron/cron.8.en.html"
+
+[[rule]]
+reason = "dynamic linker configuration"
+paths = ["/etc/ld.so.preload", "/etc/ld.so.conf.d/**"]
+source = "https://man7.org/linux/man-pages/man8/ld.so.8.html"
+
+[[rule]]
+reason = "file in the original image PATH"
+check = "image_path"
+source = "https://pubs.opengroup.org/onlinepubs/9799919799/basedefs/V1_chap08.html#tag_08_03"
+
+[[rule]]
+reason = "set-user-ID or set-group-ID file"
+check = "privileged_mode"
+source = "https://man7.org/linux/man-pages/man7/inode.7.html"

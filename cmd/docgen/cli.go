@@ -52,16 +52,10 @@ func cliPages(pages map[string][]byte) error {
 	return nil
 }
 
-// visible lists a command's subcommands that a user can run. It leaves out
-// Cobra's own completion command, which Root() adds so that it gets the
-// client's errors: its help is Cobra's, and the reference does not
-// document it yet (docs/contributing/cli-spec.md 14.5).
+// visible lists a command's subcommands that a user can run.
 func visible(c *cobra.Command) []*cobra.Command {
 	var out []*cobra.Command
 	for _, sub := range c.Commands() {
-		if !c.HasParent() && sub.Name() == "completion" {
-			continue
-		}
 		// Cobra counts its help command as not available, but the root
 		// help lists it, so the reference does too.
 		if sub.IsAvailableCommand() && !cli.IsTopic(sub) || !c.HasParent() && sub.Name() == "help" {
@@ -86,7 +80,11 @@ func commandPage(c *cobra.Command) string {
 		b.WriteString(prose(c.Long) + "\n\n")
 	}
 	if ex := dedent(c.Example); ex != "" {
-		fmt.Fprintf(&b, "## Examples\n\n```sh\n%s\n```\n\n", ex)
+		language := "sh"
+		if shortPath(c) == "completion powershell" {
+			language = "powershell"
+		}
+		fmt.Fprintf(&b, "## Examples\n\n```%s\n%s\n```\n\n", language, ex)
 	}
 	if t := flagTable(c.NonInheritedFlags()); t != "" {
 		b.WriteString("## Flags\n\n" + t + "\n")
@@ -94,12 +92,8 @@ func commandPage(c *cobra.Command) string {
 	if t := flagTable(c.InheritedFlags()); t != "" {
 		b.WriteString("## Flags from the parent command\n\n" + t + "\n")
 	}
-	if olds := cli.OldNames(shortPath(c)); len(olds) > 0 {
-		b.WriteString("## Old names\n\nThese still work, and print a warning on stderr, until their end.\n\n| Old | New | Works until |\n| --- | --- | --- |\n")
-		for _, o := range olds {
-			fmt.Fprintf(&b, "| %s | %s | %s |\n", plainCell(o.Old), plainCell(o.New), plainCell(o.Until))
-		}
-		b.WriteString("\n")
+	if t := oldNames(shortPath(c)); t != "" {
+		b.WriteString("## Old names\n\n" + t + "\n")
 	}
 	if subs := visible(c); len(subs) > 0 {
 		b.WriteString("## Commands\n\n| Command | What it does |\n| --- | --- |\n")
@@ -175,6 +169,26 @@ func commandsIndex(r *cobra.Command) string {
 	}
 	if t := flagTable(r.NonInheritedFlags()); t != "" {
 		b.WriteString("\n## Flags\n\n" + t)
+	}
+	if t := oldNames(""); t != "" {
+		b.WriteString("\n## Old names\n\n" + t)
+	}
+	return b.String()
+}
+
+// oldNames lists the old forms of the command at path that still work,
+// with their end and a note, from the client's table of old forms
+// (docs/contributing/cli-spec.md 3.1). Help and completion leave them out.
+// The root is "".
+func oldNames(path string) string {
+	olds := cli.OldNames(path)
+	if len(olds) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("These still work, and print a warning on stderr, until their end.\n\n| Old | New | Works until | Note |\n| --- | --- | --- | --- |\n")
+	for _, o := range olds {
+		fmt.Fprintf(&b, "| %s | %s | %s | %s |\n", plainCell(o.Old), plainCell(o.New), plainCell(o.Until), cell(o.Note))
 	}
 	return b.String()
 }

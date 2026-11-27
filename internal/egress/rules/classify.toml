@@ -1,0 +1,89 @@
+# Fixed destinations for unknown=classify. Wildcard rows cover the named
+# domain and its subdomains, never another domain with a matching substring.
+
+[[denies]]
+host = "*.webhook.site"
+source = "https://www.wiz.io/blog/shai-hulud-npm-supply-chain-attack"
+
+[[denies]]
+host = "*.requestcatcher.com"
+source = "https://panther.com/blog/frankly-malicious-inside-a-38-package-npm-supply-chain-campaign-targeting-tech-giants"
+
+[[denies]]
+host = "*.lhr.life"
+source = "https://panther.com/blog/frankly-malicious-inside-a-38-package-npm-supply-chain-campaign-targeting-tech-giants"
+
+[[denies]]
+host = "*.trycloudflare.com"
+source = "https://unit42.paloaltonetworks.com/teampcp-supply-chain-attacks/"
+
+[[denies]]
+host = "*.oastify.com"
+source = "https://panther.com/blog/frankly-malicious-inside-a-38-package-npm-supply-chain-campaign-targeting-tech-giants"
+
+[[denies]]
+host = "*.byted-dast.com"
+source = "https://panther.com/blog/frankly-malicious-inside-a-38-package-npm-supply-chain-campaign-targeting-tech-giants"
+
+[[denies]]
+host = "*.oast.fun"
+source = "https://panther.com/blog/frankly-malicious-inside-a-38-package-npm-supply-chain-campaign-targeting-tech-giants"
+
+[[denies]]
+host = "*.oast.pro"
+source = "https://panther.com/blog/frankly-malicious-inside-a-38-package-npm-supply-chain-campaign-targeting-tech-giants"
+
+[[denies]]
+host = "*.oast.me"
+source = "https://panther.com/blog/frankly-malicious-inside-a-38-package-npm-supply-chain-campaign-targeting-tech-giants"
+
+[[denies]]
+host = "*.oast.live"
+source = "https://panther.com/blog/frankly-malicious-inside-a-38-package-npm-supply-chain-campaign-targeting-tech-giants"
+
+[[denies]]
+host = "*.oast.site"
+source = "https://panther.com/blog/frankly-malicious-inside-a-38-package-npm-supply-chain-campaign-targeting-tech-giants"
+
+[[denies]]
+host = "*.interactsh.com"
+source = "https://panther.com/blog/frankly-malicious-inside-a-38-package-npm-supply-chain-campaign-targeting-tech-giants"
+
+[[denies]]
+host = "*.burpcollaborator.net"
+source = "https://panther.com/blog/frankly-malicious-inside-a-38-package-npm-supply-chain-campaign-targeting-tech-giants"
+
+[[denies]]
+host = "*.canarytokens.com"
+source = "https://panther.com/blog/frankly-malicious-inside-a-38-package-npm-supply-chain-campaign-targeting-tech-giants"
+
+[[denies]]
+host = "*.dnshook.site"
+source = "https://panther.com/blog/frankly-malicious-inside-a-38-package-npm-supply-chain-campaign-targeting-tech-giants"
+
+[[denies]]
+host = "*.dnslog.pw"
+source = "https://panther.com/blog/frankly-malicious-inside-a-38-package-npm-supply-chain-campaign-targeting-tech-giants"
+
+# Service barriers apply for every unknown action and after a host grant.
+# Their only exception is a normally matched path and method allowance.
+
+[[barriers]]
+hosts = ["discord.com", "discordapp.com"]
+path = "/api/webhooks/**"
+kind = "grant"
+source = "https://securitylabs.datadoghq.com/articles/mut-8964-an-npm-and-pypi-malicious-campaign-targeting-windows-users/"
+
+[[barriers]]
+hosts = ["api.telegram.org"]
+path = "/bot"
+path_prefix = true
+kind = "grant"
+source = "https://securitylabs.datadoghq.com/articles/mut-8964-an-npm-and-pypi-malicious-campaign-targeting-windows-users/"
+
+[[barriers]]
+hosts = ["pastebin.com"]
+path = "/**"
+except_methods = ["GET", "HEAD"]
+kind = "grant"
+source = "https://socket.dev/blog/stegabin-26-malicious-npm-packages-use-pastebin-steganography"

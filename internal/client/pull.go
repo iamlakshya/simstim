@@ -15,9 +15,9 @@ import (
 // GitSSHCommand is the ssh command line for GIT_SSH_COMMAND, so git reaches
 // a host the way the client does: through the client's own SSH config and
 // shared connection, with no forwarding.
-func GitSSHCommand(h Host) (string, error) {
+func GitSSHCommand(ctx context.Context, h Host) (string, error) {
 	s := &SSH{Host: h}
-	args, err := s.baseArgs()
+	args, err := s.connArgs(ctx, true)
 	if err != nil {
 		return "", err
 	}
@@ -46,17 +46,39 @@ type RepoInfo = api.RepoInfo
 // and fsmonitor off, and in a scope under the sessions' slice when the host
 // has a systemd user manager.
 func SessionRepo(ctx context.Context, h Host, dir string) (RepoInfo, error) {
+	return sessionRepoInfo(ctx, h, dir, true)
+}
+
+// SessionRepoPolicy reads repository policy without running git status.
+func SessionRepoPolicy(ctx context.Context, h Host, dir string) (RepoInfo, error) {
+	return sessionRepoInfo(ctx, h, dir, false)
+}
+
+func sessionRepoInfo(ctx context.Context, h Host, dir string, changes bool) (RepoInfo, error) {
 	s := &SSH{Host: h}
-	req, err := json.Marshal(api.RepoInfoArgs{Dir: dir, Changes: true})
+	req, err := json.Marshal(api.RepoInfoArgs{Dir: dir, Changes: changes, Policy: !changes})
 	if err != nil {
 		return RepoInfo{}, fmt.Errorf("write the request for the repository: %w", err)
 	}
 	out, err := s.Run(ctx, RemoteHelper(HelperVersion())+" git-op "+api.GitOpRepoInfo, bytes.NewReader(req))
 	if err != nil {
+		if ctx.Err() != nil {
+			return RepoInfo{}, ctx.Err()
+		}
+		if IsHostKeyError(err) {
+			return RepoInfo{}, err
+		}
 		return RepoInfo{}, &UserError{Msg: fmt.Sprintf("could not ask %s about the repository at %s: %s", h.Name, CleanPath(dir), CleanLine(err.Error())),
 			Hint: brand.Name + " host doctor " + h.Name, Code: "ssh_failed"}
 	}
-	return parseRepoInfo(h, dir, out)
+	repo, err := parseRepoInfo(h, dir, out)
+	if err != nil {
+		return repo, err
+	}
+	if !changes && !repo.PolicyChecked {
+		return RepoInfo{}, &UserError{Msg: "the helper cannot check repository policy files", Hint: brand.Name + " host add " + ShellWord(h.Name) + " (updates the helper)", Code: "helper_old", Kind: KindFailed}
+	}
+	return repo, nil
 }
 
 // parseRepoInfo reads the answer of repo.info about dir on h. Each text
@@ -122,5 +144,5 @@ func FetchArgs(h Host, root, branch, into string, force bool) []string {
 	if force {
 		spec = "+" + spec
 	}
-	return []string{"fetch", "--no-tags", h.SSH + ":" + root, spec}
+	return []string{"fetch", "--no-tags", "--no-recurse-submodules", "--upload-pack=git-upload-pack", "--", h.SSH + ":" + root, spec}
 }

@@ -1,0 +1,103 @@
+# Address ranges that the egress process refuses unless a rule names the
+# address or CIDR by number (spec 7.2). Short forms such as 10/8 stand for
+# the full ranges.
+
+[[refused]]
+cidr = "0.0.0.0/8"
+note = "this host on this network"
+source = "https://www.rfc-editor.org/rfc/rfc6890"
+
+[[refused]]
+cidr = "10/8"
+note = "private-use IPv4"
+source = "https://www.rfc-editor.org/rfc/rfc1918"
+
+[[refused]]
+cidr = "100.64/10"
+note = "shared CGNAT and overlay address space"
+source = "https://www.rfc-editor.org/rfc/rfc6598"
+
+[[refused]]
+cidr = "127.0.0.0/8"
+note = "IPv4 loopback"
+source = "https://www.rfc-editor.org/rfc/rfc1122"
+
+[[refused]]
+cidr = "169.254.0.0/16"
+note = "IPv4 link-local and cloud instance metadata (169.254.169.254)"
+source = "https://www.rfc-editor.org/rfc/rfc3927"
+
+[[refused]]
+cidr = "172.16/12"
+note = "private-use IPv4"
+source = "https://www.rfc-editor.org/rfc/rfc1918"
+
+[[refused]]
+cidr = "192.0.0.0/24"
+note = "IETF protocol assignments"
+source = "https://www.rfc-editor.org/rfc/rfc6890"
+
+[[refused]]
+cidr = "192.168/16"
+note = "private-use IPv4"
+source = "https://www.rfc-editor.org/rfc/rfc1918"
+
+[[refused]]
+cidr = "198.18.0.0/15"
+note = "benchmarking and synthetic sandbox addresses"
+source = "https://www.rfc-editor.org/rfc/rfc2544"
+
+[[refused]]
+cidr = "224.0.0.0/4"
+note = "IPv4 multicast"
+source = "https://www.rfc-editor.org/rfc/rfc5771"
+
+[[refused]]
+cidr = "240.0.0.0/4"
+note = "reserved IPv4 and limited broadcast (255.255.255.255)"
+source = "https://www.rfc-editor.org/rfc/rfc1112"
+
+[[refused]]
+cidr = "::/128"
+note = "unspecified IPv6"
+source = "https://www.rfc-editor.org/rfc/rfc4291"
+
+[[refused]]
+cidr = "::1/128"
+note = "IPv6 loopback"
+source = "https://www.rfc-editor.org/rfc/rfc4291"
+
+[[refused]]
+cidr = "64:ff9b:1::/48"
+note = "local-use IPv4/IPv6 translation"
+source = "https://www.rfc-editor.org/rfc/rfc8215"
+
+[[refused]]
+cidr = "2001::/32"
+note = "Teredo tunnelling"
+source = "https://www.rfc-editor.org/rfc/rfc4380"
+
+[[refused]]
+cidr = "2002::/16"
+note = "6to4 transition addresses"
+source = "https://www.rfc-editor.org/rfc/rfc7526"
+
+[[refused]]
+cidr = "fc00::/7"
+note = "unique local IPv6"
+source = "https://www.rfc-editor.org/rfc/rfc4193"
+
+[[refused]]
+cidr = "fd00:ec2::254"
+note = "EC2 IPv6 instance metadata"
+source = "https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html"
+
+[[refused]]
+cidr = "fe80::/10"
+note = "link-local IPv6"
+source = "https://www.rfc-editor.org/rfc/rfc4291"
+
+[[refused]]
+cidr = "ff00::/8"
+note = "IPv6 multicast"
+source = "https://www.rfc-editor.org/rfc/rfc4291"

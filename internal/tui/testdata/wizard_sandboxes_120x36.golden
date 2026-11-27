@@ -1,0 +1,36 @@
+
+  ⢄⡠⠊ simstim  › raspberry                                                                                  0 sessions
+  ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+    No sessions on raspberry yet.
+
+    n start one from a single line, like: claude ~/src/app
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  ── Sandboxes on raspberry ────────────────────────────────────────────────────────────────────────── step 5 of 10 ──
+
+    ✓ probe       gvisor now · microvm with root
+    ✓ runtime     pinned images ready
+    ✓ gvisor      gvisor · runsc
+    ○ chv         no /dev/kvm access
+
+    Optional root setup unlocks microvm on raspberry.
+
+    enter root step   s skip   esc close

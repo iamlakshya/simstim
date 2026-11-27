@@ -1,0 +1,93 @@
+# Built-in network presets (spec 7.2).
+#
+# locked opens only the agent's own Egress hosts from internal/agents.
+# balanced opens locked plus the package registries and code hosts below.
+# open opens every public host, never the refused ranges in ranges.toml.
+#
+# Object stores stay out of balanced: spec 7.2 opens them only when a grant
+# names the host.
+
+[[balanced.registries]]
+host = "registry.npmjs.org"
+ports = [443]
+source = "https://docs.npmjs.com/cli/v11/using-npm/registry"
+
+[[balanced.registries]]
+host = "registry.yarnpkg.com"
+ports = [443]
+source = "https://yarnpkg.com/configuration/yarnrc#npmRegistryServer"
+
+[[balanced.registries]]
+host = "pypi.org"
+ports = [443]
+source = "https://docs.pypi.org/api/index-api/"
+
+[[balanced.registries]]
+host = "files.pythonhosted.org"
+ports = [443]
+source = "https://docs.pypi.org/api/index-api/"
+
+[[balanced.registries]]
+host = "crates.io"
+ports = [443]
+source = "https://doc.rust-lang.org/cargo/reference/registries.html"
+
+[[balanced.registries]]
+host = "static.crates.io"
+ports = [443]
+source = "https://doc.rust-lang.org/cargo/reference/registries.html"
+
+[[balanced.registries]]
+host = "index.crates.io"
+ports = [443]
+source = "https://doc.rust-lang.org/cargo/reference/registries.html"
+
+[[balanced.registries]]
+host = "proxy.golang.org"
+ports = [443]
+source = "https://proxy.golang.org/"
+
+[[balanced.registries]]
+host = "sum.golang.org"
+ports = [443]
+source = "https://sum.golang.org/"
+
+[[balanced.code_hosts]]
+host = "github.com"
+ports = [443]
+source = "https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/about-githubs-ip-addresses"
+
+[[balanced.code_hosts]]
+host = "api.github.com"
+ports = [443]
+source = "https://docs.github.com/en/rest/overview/resources-in-the-rest-api"
+
+[[balanced.code_hosts]]
+host = "codeload.github.com"
+ports = [443]
+source = "https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/about-githubs-ip-addresses"
+
+[[balanced.code_hosts]]
+host = "objects.githubusercontent.com"
+ports = [443]
+source = "https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/about-githubs-ip-addresses"
+
+[[balanced.code_hosts]]
+host = "raw.githubusercontent.com"
+ports = [443]
+source = "https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/about-githubs-ip-addresses"
+
+[[balanced.code_hosts]]
+host = "release-assets.githubusercontent.com"
+ports = [443]
+source = "https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/about-githubs-ip-addresses"
+
+[[balanced.code_hosts]]
+host = "gitlab.com"
+ports = [443]
+source = "https://docs.gitlab.com/user/gitlab_com/"
+
+[[balanced.code_hosts]]
+host = "codeberg.org"
+ports = [443]
+source = "https://docs.codeberg.org/"

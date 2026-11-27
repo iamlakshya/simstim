@@ -1,0 +1,204 @@
+[
+  {
+    "mode": "guarded",
+    "age": "0d",
+    "environment": [
+      "npm_config_ignore_scripts=true",
+      "YARN_ENABLE_SCRIPTS=false",
+      "NPM_CONFIG_IGNORE_SCRIPTS=true",
+      "GOTOOLCHAIN=local",
+      "GOPROXY=https://proxy.golang.org",
+      "GOSUMDB=sum.golang.org",
+      "GOVCS=*:off"
+    ],
+    "files": [
+      {
+        "Path": ".bunfig.toml",
+        "Content": "[install]\nignoreScripts = true\n"
+      },
+      {
+        "Path": ".config/.bunfig.toml",
+        "Content": "[install]\nignoreScripts = true\n"
+      },
+      {
+        "Path": ".config/pnpm/config.yaml",
+        "Content": "ignoreScripts: true\n"
+      }
+    ]
+  },
+  {
+    "mode": "guarded",
+    "age": "1d",
+    "environment": [
+      "npm_config_ignore_scripts=true",
+      "npm_config_min_release_age=1",
+      "YARN_ENABLE_SCRIPTS=false",
+      "YARN_NPM_MINIMAL_AGE_GATE=1440",
+      "NPM_CONFIG_IGNORE_SCRIPTS=true",
+      "PIP_UPLOADED_PRIOR_TO=2026-11-14T12:00:00Z",
+      "UV_EXCLUDE_NEWER=2026-11-14T12:00:00Z",
+      "GOTOOLCHAIN=local",
+      "GOPROXY=https://proxy.golang.org",
+      "GOSUMDB=sum.golang.org",
+      "GOVCS=*:off"
+    ],
+    "files": [
+      {
+        "Path": ".bunfig.toml",
+        "Content": "[install]\nignoreScripts = true\nminimumReleaseAge = 86400\n"
+      },
+      {
+        "Path": ".config/.bunfig.toml",
+        "Content": "[install]\nignoreScripts = true\nminimumReleaseAge = 86400\n"
+      },
+      {
+        "Path": ".config/pnpm/config.yaml",
+        "Content": "ignoreScripts: true\nminimumReleaseAge: 1440\n"
+      }
+    ]
+  },
+  {
+    "mode": "guarded",
+    "age": "7d",
+    "environment": [
+      "npm_config_ignore_scripts=true",
+      "npm_config_min_release_age=7",
+      "YARN_ENABLE_SCRIPTS=false",
+      "YARN_NPM_MINIMAL_AGE_GATE=10080",
+      "NPM_CONFIG_IGNORE_SCRIPTS=true",
+      "PIP_UPLOADED_PRIOR_TO=2026-11-08T12:00:00Z",
+      "UV_EXCLUDE_NEWER=2026-11-08T12:00:00Z",
+      "GOTOOLCHAIN=local",
+      "GOPROXY=https://proxy.golang.org",
+      "GOSUMDB=sum.golang.org",
+      "GOVCS=*:off"
+    ],
+    "files": [
+      {
+        "Path": ".bunfig.toml",
+        "Content": "[install]\nignoreScripts = true\nminimumReleaseAge = 604800\n"
+      },
+      {
+        "Path": ".config/.bunfig.toml",
+        "Content": "[install]\nignoreScripts = true\nminimumReleaseAge = 604800\n"
+      },
+      {
+        "Path": ".config/pnpm/config.yaml",
+        "Content": "ignoreScripts: true\nminimumReleaseAge: 10080\n"
+      }
+    ]
+  },
+  {
+    "mode": "strict",
+    "age": "0d",
+    "environment": [
+      "npm_config_ignore_scripts=true",
+      "YARN_ENABLE_SCRIPTS=false",
+      "NPM_CONFIG_IGNORE_SCRIPTS=true",
+      "PIP_ONLY_BINARY=:all:",
+      "UV_NO_BUILD=1",
+      "GOTOOLCHAIN=local",
+      "GOPROXY=https://proxy.golang.org",
+      "GOSUMDB=sum.golang.org",
+      "GOVCS=*:off"
+    ],
+    "files": [
+      {
+        "Path": ".bunfig.toml",
+        "Content": "[install]\nignoreScripts = true\n"
+      },
+      {
+        "Path": ".config/.bunfig.toml",
+        "Content": "[install]\nignoreScripts = true\n"
+      },
+      {
+        "Path": ".config/pnpm/config.yaml",
+        "Content": "ignoreScripts: true\n"
+      }
+    ]
+  },
+  {
+    "mode": "strict",
+    "age": "1d",
+    "environment": [
+      "npm_config_ignore_scripts=true",
+      "npm_config_min_release_age=1",
+      "YARN_ENABLE_SCRIPTS=false",
+      "YARN_NPM_MINIMAL_AGE_GATE=1440",
+      "NPM_CONFIG_IGNORE_SCRIPTS=true",
+      "PIP_UPLOADED_PRIOR_TO=2026-11-14T12:00:00Z",
+      "PIP_ONLY_BINARY=:all:",
+      "UV_EXCLUDE_NEWER=2026-11-14T12:00:00Z",
+      "UV_NO_BUILD=1",
+      "GOTOOLCHAIN=local",
+      "GOPROXY=https://proxy.golang.org",
+      "GOSUMDB=sum.golang.org",
+      "GOVCS=*:off"
+    ],
+    "files": [
+      {
+        "Path": ".bunfig.toml",
+        "Content": "[install]\nignoreScripts = true\nminimumReleaseAge = 86400\n"
+      },
+      {
+        "Path": ".config/.bunfig.toml",
+        "Content": "[install]\nignoreScripts = true\nminimumReleaseAge = 86400\n"
+      },
+      {
+        "Path": ".config/pnpm/config.yaml",
+        "Content": "ignoreScripts: true\nminimumReleaseAge: 1440\n"
+      }
+    ]
+  },
+  {
+    "mode": "strict",
+    "age": "7d",
+    "environment": [
+      "npm_config_ignore_scripts=true",
+      "npm_config_min_release_age=7",
+      "YARN_ENABLE_SCRIPTS=false",
+      "YARN_NPM_MINIMAL_AGE_GATE=10080",
+      "NPM_CONFIG_IGNORE_SCRIPTS=true",
+      "PIP_UPLOADED_PRIOR_TO=2026-11-08T12:00:00Z",
+      "PIP_ONLY_BINARY=:all:",
+      "UV_EXCLUDE_NEWER=2026-11-08T12:00:00Z",
+      "UV_NO_BUILD=1",
+      "GOTOOLCHAIN=local",
+      "GOPROXY=https://proxy.golang.org",
+      "GOSUMDB=sum.golang.org",
+      "GOVCS=*:off"
+    ],
+    "files": [
+      {
+        "Path": ".bunfig.toml",
+        "Content": "[install]\nignoreScripts = true\nminimumReleaseAge = 604800\n"
+      },
+      {
+        "Path": ".config/.bunfig.toml",
+        "Content": "[install]\nignoreScripts = true\nminimumReleaseAge = 604800\n"
+      },
+      {
+        "Path": ".config/pnpm/config.yaml",
+        "Content": "ignoreScripts: true\nminimumReleaseAge: 10080\n"
+      }
+    ]
+  },
+  {
+    "mode": "off",
+    "age": "0d",
+    "environment": [],
+    "files": []
+  },
+  {
+    "mode": "off",
+    "age": "1d",
+    "environment": [],
+    "files": []
+  },
+  {
+    "mode": "off",
+    "age": "7d",
+    "environment": [],
+    "files": []
+  }
+]

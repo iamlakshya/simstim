@@ -98,6 +98,7 @@ func TestOptionsWinOverTheConfig(t *testing.T) {
 	cfg := writeFile(t, filepath.Join(t.TempDir(), "config"), everything)
 	ctx := context.Background()
 	s := &SSH{Host: Host{Name: "box", SSH: "box.invalid", SSHConfig: cfg}}
+	pinFor(t, "box")
 
 	cmd, err := s.Command(ctx, "true", "-T")
 	if err != nil {
@@ -128,6 +129,7 @@ func TestForwardKeepsItsPorts(t *testing.T) {
 	userSSH := realSSH(t)
 	writeFile(t, filepath.Join(userSSH, "config"), "ClearAllForwardings yes\nForwardAgent yes\nForwardX11 yes\nPermitLocalCommand yes\nLocalCommand true\n")
 	s := &SSH{Host: Host{Name: "box", SSH: "box.invalid"}, Interactive: true}
+	pinFor(t, "box")
 	cmd, err := s.Forward(context.Background(), []ForwardPair{{Local: 45678, RemoteHost: "127.0.0.1", Remote: 3000}})
 	if err != nil {
 		t.Fatal(err)
@@ -147,6 +149,7 @@ func TestForwardRefusesAWayIn(t *testing.T) {
 	userSSH := realSSH(t)
 	// ssh -G prints xauthlocation before remoteforward. A line longer than
 	// bufio.Scanner's default of 64 KiB once hid every line after it.
+	pinFor(t, "box")
 	long := "XAuthLocation /" + strings.Repeat("x", 70000) + "\n    RemoteForward 6666 127.0.0.1:22"
 	for line, want := range map[string]string{
 		"RemoteForward 6666 127.0.0.1:22": "RemoteForward 6666 [127.0.0.1]:22",
@@ -167,8 +170,12 @@ func TestForwardRefusesAWayIn(t *testing.T) {
 // takes the ControlPath of the user's config.
 func TestNoControlFolderIgnoresTheUsersControlPath(t *testing.T) {
 	userSSH := realSSH(t)
+	oldFallback := controlFallbackDir
+	controlFallbackDir = func(uint32) string { return "/dev/null" }
+	defer func() { controlFallbackDir = oldFallback }()
 	t.Setenv("XDG_CACHE_HOME", "/dev/null") // no folder can be made in it
 	writeFile(t, filepath.Join(userSSH, "config"), "ControlMaster auto\nControlPath /tmp/user-master-%C\nControlPersist 600\n")
+	pinFor(t, "box")
 	cmd, err := (&SSH{Host: Host{Name: "box", SSH: "box.invalid"}}).Command(context.Background(), "true", "-T")
 	if err != nil {
 		t.Fatal(err)
@@ -185,11 +192,12 @@ func TestNoControlFolderIgnoresTheUsersControlPath(t *testing.T) {
 // master still stays for its 10 minutes.
 func TestNothingForksAfterAuthentication(t *testing.T) {
 	userSSH := realSSH(t)
-	if !sshKnowsFork() {
+	if !sshKnowsFork(t.Context()) {
 		t.Skip("OpenSSH before 8.7 has no ForkAfterAuthentication")
 	}
 	writeFile(t, filepath.Join(userSSH, "config"), "ForkAfterAuthentication yes\nHost jump.invalid\n    ForkAfterAuthentication yes\n")
 	s := &SSH{Host: Host{Name: "box", SSH: "box.invalid"}, Interactive: true}
+	pinFor(t, "box")
 	fwd, err := s.Forward(context.Background(), []ForwardPair{{Local: 45678, RemoteHost: "127.0.0.1", Remote: 3000}})
 	if err != nil {
 		t.Fatalf("forward: %v", err)
@@ -269,6 +277,7 @@ func TestProxyJumpHopIsHardened(t *testing.T) {
 	userSSH := realSSH(t)
 	writeFile(t, filepath.Join(userSSH, "config"), everything)
 	s := &SSH{Host: Host{Name: "box", SSH: "box.invalid"}}
+	pinFor(t, "box")
 	cmd, err := s.Command(context.Background(), "true", "-T")
 	if err != nil {
 		t.Fatal(err)

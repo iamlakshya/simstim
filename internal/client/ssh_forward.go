@@ -2,21 +2,21 @@ package client
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os/exec"
-	"slices"
+	"path"
 	"strings"
-	"time"
 
 	"github.com/iamlakshya/simstim/internal/brand"
 )
 
 // ForwardPair is one forwarded port.
 type ForwardPair struct {
-	Local      int
-	RemoteHost string
-	Remote     int
+	// RemoteSocket is the exact checked private supervisor port socket.
+	RemoteSocket string
+	Local        int
+	RemoteHost   string
+	Remote       int
 }
 
 // Forward builds an ssh command that forwards local ports to the host until it
@@ -30,14 +30,29 @@ type ForwardPair struct {
 // host reach this computer, with a RemoteForward or a Tunnel, or would send
 // ssh to the background, with ForkAfterAuthentication (decision 0034).
 func (s *SSH) Forward(ctx context.Context, pairs []ForwardPair) (*exec.Cmd, error) {
-	args, err := s.args(false)
+	return s.forwardCommand(ctx, pairs, nil)
+}
+
+func (s *SSH) forwardCommand(ctx context.Context, pairs []ForwardPair, extra []string) (*exec.Cmd, error) {
+	args, err := s.connArgs(ctx, false)
 	if err != nil {
 		return nil, err
 	}
 	args = append(args, "-o", "ClearAllForwardings=no", "-N", "-o", "ExitOnForwardFailure=yes")
 	for _, p := range pairs {
-		args = append(args, "-L", fmt.Sprintf("127.0.0.1:%d:%s:%d", p.Local, p.RemoteHost, p.Remote))
+		if p.Local < 1 || p.Local > 65535 {
+			return nil, &UserError{Msg: "invalid local forward port", Hint: "Choose a port from 1 to 65535.", Code: "bad_port", Kind: KindUsage}
+		}
+		if p.RemoteSocket != "" {
+			if !path.IsAbs(p.RemoteSocket) || path.Clean(p.RemoteSocket) != p.RemoteSocket || CleanLine(p.RemoteSocket) != p.RemoteSocket || strings.ContainsAny(p.RemoteSocket, ":\x00\r\n%[]") {
+				return nil, &UserError{Msg: "invalid supervisor port socket", Hint: "Grant the exact sandbox port again.", Code: "bad_port", Kind: KindRefused}
+			}
+			args = append(args, "-L", fmt.Sprintf("127.0.0.1:%d:%s", p.Local, p.RemoteSocket))
+		} else {
+			args = append(args, "-L", fmt.Sprintf("127.0.0.1:%d:%s:%d", p.Local, p.RemoteHost, p.Remote))
+		}
 	}
+	args = append(args, extra...)
 	if err := s.checkForward(ctx, args); err != nil {
 		return nil, err
 	}
@@ -49,21 +64,15 @@ func (s *SSH) Forward(ctx context.Context, pairs []ForwardPair) (*exec.Cmd, erro
 // nothing, and refuses a forward that would open a way from the host into
 // this computer.
 func (s *SSH) checkForward(ctx context.Context, opts []string) error {
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, "ssh", slices.Concat(opts, []string{"-G", "--", s.Host.SSH})...)
-	cmd.WaitDelay = sshWaitDelay
-	out, err := cmd.Output()
-	if err != nil {
-		msg := err.Error()
-		var ee *exec.ExitError
-		if errors.As(err, &ee) && len(ee.Stderr) > 0 {
-			msg = strings.TrimSpace(string(ee.Stderr))
+	vals, stderr, err := sshG(ctx, opts, s.Host.SSH)
+	if err != nil && vals == nil {
+		msg := strings.TrimSpace(stderr)
+		if msg == "" {
+			msg = err.Error()
 		}
 		return &UserError{Msg: fmt.Sprintf("forward cannot check the SSH config for %s: %s", s.Host.Name, msg),
 			Hint: "ssh -G " + ShellWord(s.Host.SSH) + " (check that this works first)", Code: "ssh_failed"}
 	}
-	vals, err := parseConfigValues(out)
 	if err != nil {
 		// A line that is too long to read hides every line after it.
 		return &UserError{Msg: fmt.Sprintf("forward cannot read all of what ssh -G prints for %s, so it cannot check it: %v", s.Host.Name, err),

@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 
 	"github.com/iamlakshya/simstim/internal/client"
 )
@@ -23,9 +24,11 @@ import (
 // jsonVersion is the value of "v" in every top-level object.
 const jsonVersion = 1
 
-// addJSON gives cmd the flag --json.
+// addJSON gives cmd the flag --json, one of the flags of cli-spec 10.2
+// that mean one thing everywhere (flags.go).
 func addJSON(cmd *cobra.Command, p *bool) {
 	cmd.Flags().BoolVar(p, "json", false, "print JSON for scripts, and ask nothing (see docs/how-to/scripting.md)")
+	shared(cmd.Flags(), "json")
 }
 
 // jsonOn reports whether cmd prints JSON.
@@ -36,6 +39,8 @@ func addRootFlags(root *cobra.Command) {
 	f := root.PersistentFlags()
 	f.Bool("no-input", false, "ask nothing: a question that needs an answer fails with exit code 4, and names the flag that answers it ("+noInputEnv+"=1 does the same)")
 	f.Bool("no-color", false, "print no colour (NO_COLOR does the same)")
+	shared(f, "no-input")
+	shared(f, "no-color")
 }
 
 // applyNoColor makes --no-color hold for everything this run draws,
@@ -60,14 +65,39 @@ func say(cmd *cobra.Command, format string, a ...any) {
 
 // note prints a note that a script may need, such as a step that the
 // command skipped, on stderr: one line, or with --json one JSON line, as a
-// warning with code.
+// warning with code. The message may hold a host's error, so it prints
+// cleaned.
 func note(cmd *cobra.Command, code, msg string) {
+	msg = shownNote(msg)
 	if cmd != nil && jsonOn(cmd) {
 		line, _ := json.Marshal(map[string]any{"v": jsonVersion, "warning": map[string]string{"code": code, "message": msg}})
 		fmt.Fprintf(os.Stderr, "%s\n", jsonSafe(line))
 		return
 	}
-	fmt.Fprintln(os.Stderr, client.CleanBlock(msg))
+	fmt.Fprintln(os.Stderr, shown(msg))
+}
+
+// warningFor returns a client.WarnFunc that writes client warnings (such
+// as a changed host ID) to stderr: as Warning:/Try: lines, or one JSON
+// warning line when asJSON is true.
+func warningFor(asJSON bool) client.WarnFunc {
+	return func(code, msg, hint string) {
+		msg = shown(msg)
+		hint = shown(hint)
+		if asJSON {
+			w := map[string]string{"code": code, "message": msg}
+			if hint != "" {
+				w["try"] = hint
+			}
+			line, _ := json.Marshal(map[string]any{"v": jsonVersion, "warning": w})
+			fmt.Fprintf(os.Stderr, "%s\n", jsonSafe(line))
+			return
+		}
+		fmt.Fprintf(os.Stderr, "Warning: %s\n", msg)
+		if hint != "" {
+			fmt.Fprintf(os.Stderr, "Try: %s\n", hint)
+		}
+	}
 }
 
 // stderrFor is stderr for messages that a part of the client writes by
@@ -139,7 +169,7 @@ func versioned(v any) ([]byte, error) {
 		return nil, fmt.Errorf("write JSON: %w", err)
 	}
 	out.WriteByte('\n')
-	return out.Bytes(), nil
+	return jsonSafe(out.Bytes()), nil
 }
 
 // withV puts "v": 1 first in an object. Any other value stays as it is.
@@ -157,29 +187,14 @@ func withV(obj json.RawMessage) json.RawMessage {
 }
 
 // sessionObject is a session for scripts (cli-spec 7.1): its host, its
-// address, and every field that has a value. list is every session on the
-// host, so that the address uses the ID when two sessions share the name.
-func sessionObject(host string, s client.Session, list []client.Session) map[string]any {
+// address, and every field that has a value. The address is always
+// host/ID, never a name: a name can change, or come to mean another
+// session, between the list that it came from and the script's next step.
+func sessionObject(host string, s client.Session) map[string]any {
 	obj := valuesOf(s)
 	obj["host"] = host
-	obj["address"] = host + "/" + sessionRef(s, list)
+	obj["address"] = host + "/" + s.ID
 	return obj
-}
-
-// sessionRef is the session's part of its address: its name, or its ID
-// when another session on the host has that name or that ID. An address
-// finds a session by ID first, then by name, so the name must not stand
-// for another session.
-func sessionRef(s client.Session, list []client.Session) string {
-	for _, o := range list {
-		if o.ID != s.ID && (o.Name == s.Name || o.ID == s.Name) {
-			return s.ID
-		}
-	}
-	if s.Name == "" {
-		return s.ID
-	}
-	return s.Name
 }
 
 // valuesOf is v as a JSON object, without the keys that hold no value: an
@@ -201,9 +216,10 @@ func valuesOf(v any) map[string]any {
 }
 
 // hostObject is a saved host as `host ls --json` prints it: its keys in
-// snake_case, as hosts.toml names them, and, until the end of the old
-// form, the same keys in Go form too (cli-spec 3.2, question C-9).
-func hostObject(h client.Host) map[string]any {
+// snake_case, as hosts.toml names them, its tier from tiers.toml, and,
+// until the end of the old form, the same keys in Go form too
+// (cli-spec 3.2, question C-9).
+func hostObject(h client.Host, tier client.Tier) map[string]any {
 	obj := map[string]any{}
 	raw, _ := json.Marshal(h)
 	var old map[string]json.RawMessage
@@ -215,6 +231,9 @@ func hostObject(h client.Host) map[string]any {
 		for k, v := range m {
 			obj[k] = v
 		}
+	}
+	if tier.Valid() {
+		obj["tier"] = tier.String()
 	}
 	return obj
 }
@@ -260,17 +279,15 @@ type errorJSON struct {
 }
 
 // printJSON writes the report as one JSON line on w, and returns its exit
-// code.
+// code. Any text of the report may be a host's, or hold a host's: its code,
+// its message, its Try: line, its suggestions and its data. Each prints
+// encoded with unsafe runes escaped, keeping the exact decoded values.
 func (r report) printJSON(w io.Writer) int {
 	code := exitCode(r.kind)
-	var data json.RawMessage
-	if json.Valid(r.data) {
-		data = r.data
-	}
 	line, _ := json.Marshal(struct {
 		V     int       `json:"v"`
 		Error errorJSON `json:"error"`
-	}{jsonVersion, errorJSON{Code: r.code, Kind: r.kind.String(), Message: r.msg, Try: r.try, Exit: code, Suggestions: r.suggestions, Data: data}})
+	}{jsonVersion, errorJSON{Code: r.code, Kind: r.kind.String(), Message: r.msg, Try: r.try, Exit: code, Suggestions: r.suggestions, Data: validJSONData(r.data)}})
 	fmt.Fprintf(w, "%s\n", jsonSafe(line))
 	return code
 }
@@ -299,10 +316,17 @@ func colourAsked(cmd *cobra.Command, args []string, f *os.File) bool {
 // flag, --name=<bool> counts by its value, and the last one wins. Without
 // cmd, the flags of the top command read it.
 func flagOn(cmd *cobra.Command, args []string, name string) bool {
-	fs := Root().PersistentFlags()
-	if cmd != nil {
-		fs = cmd.Flags()
+	if cmd == nil {
+		// Reading global flags must not build executable command handlers.
+		cmd = &cobra.Command{}
+		addRootFlags(cmd)
+		addDebugFlags(cmd)
+		return boolFlagAsked(cmd.PersistentFlags(), args, name)
 	}
+	return boolFlagAsked(cmd.Flags(), args, name)
+}
+
+func boolFlagAsked(fs *pflag.FlagSet, args []string, name string) bool {
 	on := false
 	for _, w := range words(fs, args) {
 		if !w.isFlag {
@@ -318,6 +342,43 @@ func flagOn(cmd *cobra.Command, args []string, name string) bool {
 		}
 	}
 	return on
+}
+
+// beforeAttach is the check of new and resume before any lookup and any
+// remote work: --json needs --detach, and an attach needs a terminal
+// (cli-spec 9.3, rule 2). So a script without a terminal opens no
+// connection, and starts or resumes no session.
+func beforeAttach(cmd *cobra.Command, asJSON, detach bool) error {
+	return beforeAttachFiles(cmd, asJSON, detach, os.Stdin, os.Stdout)
+}
+
+func beforeAttachFiles(cmd *cobra.Command, asJSON, detach bool, in, out *os.File) error {
+	switch {
+	case detach:
+		return nil
+	case asJSON:
+		return needsDetach(cmd)
+	}
+	return attachNeedsTerminalFiles(cmd, in, out)
+}
+
+// attachNeedsATerminal is the error of new or resume without --detach when
+// stdin or stdout is not a terminal, or nil. Its Try: line puts --detach
+// before any "--".
+func attachNeedsATerminal(cmd *cobra.Command) error {
+	return attachNeedsTerminalFiles(cmd, os.Stdin, os.Stdout)
+}
+
+func attachNeedsTerminalFiles(cmd *cobra.Command, in, out *os.File) error {
+	if isTerminal(in) && isTerminal(out) {
+		return nil
+	}
+	return &client.UserError{
+		Msg:  shortPath(cmd) + " attaches, so it needs a terminal",
+		Hint: prompts(cmd).withFlags("--detach"),
+		Code: "no_terminal",
+		Kind: client.KindUsage,
+	}
 }
 
 // needsDetach is the error of --json on new or resume without --detach.

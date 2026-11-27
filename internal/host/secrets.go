@@ -89,6 +89,15 @@ func secretsFailed(err error) error {
 // returns them as environment entries for the agent. Any other connection
 // is told the session is starting. It returns nil after the timeout.
 func (h *Holder) awaitSecrets(want []string, timeout time.Duration) []string {
+	if h.startup != nil {
+		env := h.startup.awaitSecrets(want, timeout)
+		if env != nil {
+			h.log.Info("secrets received", "count", len(env))
+		} else if h.startup.ctx.Err() == nil {
+			h.log.Warn("secrets did not arrive, starting without them", "waited", timeout)
+		}
+		return env
+	}
 	ul, ok := h.ln.(*net.UnixListener)
 	if !ok {
 		return nil
@@ -121,7 +130,7 @@ func (h *Holder) readSecrets(conn net.Conn, want []string, deadline time.Time) (
 	if f, err := proto.Read(r); err != nil || f.Type != proto.THello {
 		return nil, errors.New("no hello")
 	}
-	if err := w.WriteJSON(proto.THello, proto.Hello{Magic: proto.Magic, Protocol: version.Protocol, Version: version.Version, Role: "holder"}); err != nil {
+	if err := w.WriteJSON(proto.THello, proto.Hello{Magic: proto.Magic, Protocol: version.Protocol, Version: version.Version, Role: "holder", Features: holderFeatures}); err != nil {
 		return nil, err
 	}
 	if !h.fullPeer(conn) {
@@ -148,17 +157,9 @@ func (h *Holder) readSecrets(conn net.Conn, want []string, deadline time.Time) (
 	if req.Op != "secrets" {
 		return nil, fail("starting", "the session is starting")
 	}
-	var msg secretsMsg
-	if err := json.Unmarshal(req.Args, &msg); err != nil {
-		return nil, fail("bad_request", "the secrets are not valid JSON")
-	}
-	env := make([]string, 0, len(want))
-	for _, k := range want {
-		v, ok := msg.Env[k]
-		if !ok {
-			return nil, fail("bad_request", "the secret "+k+" is missing")
-		}
-		env = append(env, k+"="+string(v))
+	env, err := secretEnvironment(req.Args, want)
+	if err != nil {
+		return nil, fail("bad_request", err.Error())
 	}
 	_ = w.WriteJSON(proto.TResponse, proto.Response{ID: req.ID, OK: true, Result: json.RawMessage(`{"ok":true}`)})
 	return env, nil
@@ -198,4 +199,48 @@ func (h *Holder) secretsBeforeStart(restored bool) {
 		h.m.MissingSecrets = append([]string(nil), want...)
 		h.notes = append(h.notes, missingSecretsNote(want, restored))
 	}
+}
+
+// secretEnvironment selects values only for names from the loaded manifest.
+// Both pending and ordinary secrets readers use this same validation.
+func secretEnvironment(raw json.RawMessage, want []string) ([]string, error) {
+	var msg secretsMsg
+	if err := json.Unmarshal(raw, &msg); err != nil {
+		return nil, errors.New("the secrets are not valid JSON")
+	}
+	env := make([]string, 0, len(want))
+	for _, k := range want {
+		v, ok := msg.Env[k]
+		if !ok {
+			return nil, errors.New("the secret " + k + " is missing")
+		}
+		env = append(env, k+"="+string(v))
+	}
+	return env, nil
+}
+
+func deliverStart(id string, env map[string]api.Secret, members []api.MemberResumeArgs, allowMissing bool, intent ...*api.SecretDeliveryIntent) error {
+	var delivery *api.SecretDeliveryIntent
+	if len(intent) != 0 && intent[0] != nil {
+		copy := api.CloneSecretDeliveryIntent(*intent[0])
+		delivery = &copy
+	}
+	modern := delivery != nil
+	for _, member := range members {
+		modern = modern || member.SecretDelivery != nil
+	}
+	if members == nil && !allowMissing && !modern {
+		return deliver(id, env)
+	}
+	required := []string{api.FeatureSpawn, api.FeatureSandboxSnapshot}
+	if modern {
+		required = append(required, api.FeatureBoundSecrets)
+	}
+	_, err := HolderRequestWithFeatures(id, "secrets", struct {
+		Env            map[string]api.Secret     `json:"env"`
+		Members        []api.MemberResumeArgs    `json:"members"`
+		AllowMissing   bool                      `json:"allow_missing"`
+		SecretDelivery *api.SecretDeliveryIntent `json:"secret_delivery,omitempty"`
+	}{env, members, allowMissing, delivery}, 5*time.Second, required...)
+	return err
 }

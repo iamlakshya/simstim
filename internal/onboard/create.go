@@ -27,11 +27,11 @@ func PowersOffWhenIdle(p string) bool { return p == Lima }
 // made.
 func CheckCreate(p provider.Provider, req provider.Request) error {
 	if !client.ValidHostName(req.Name) {
-		return &client.UserError{Msg: fmt.Sprintf("%q cannot name a host", req.Name), Hint: "Use letters, digits, dots, dashes and underscores.", Code: "bad_name", Kind: client.KindUsage}
+		return &client.UserError{Msg: fmt.Sprintf("%q cannot name a host", req.Name), Hint: "Use letters, digits, dots, dashes and underscores, with no dot at the end.", Code: "bad_name", Kind: client.KindUsage}
 	}
-	if req.IdleStop != "" && req.IdleStop != "never" {
-		if d, err := time.ParseDuration(req.IdleStop); err != nil || d < time.Minute {
-			return &client.UserError{Msg: fmt.Sprintf("%q is not an idle time", req.IdleStop), Hint: "Use a duration of a minute or more, such as 30m or 2h, or never.", Code: "bad_value", Kind: client.KindUsage}
+	if req.IdleStop != "" {
+		if err := client.CheckIdleTime(req.IdleStop); err != nil {
+			return err
 		}
 	}
 	if _, err := client.FindHost(req.Name); err == nil {
@@ -41,57 +41,73 @@ func CheckCreate(p provider.Provider, req provider.Request) error {
 }
 
 // Create makes a machine for a new host with p, and saves the host at once,
-// so that `host destroy` can always find what was made. It does not install
+// so that `host rm --destroy` can always find what was made. It does not install
 // the helper: the caller connects the host next.
 //
-// If ctx ends while the provider works, as when the user presses Ctrl+C,
-// Create deletes the machine it had begun to make, when the provider names
-// machines after their hosts and no such machine was there before. The
-// error then says what was cleaned up.
+// Provider results and stored provenance alone never authorise cleanup. A
+// failed binding/save retains and reports the exact returned resource. Only an
+// actual closed native producer capability could authorise original-locator
+// cleanup; the current historical birth token supplies no such capability.
 func Create(ctx context.Context, p provider.Provider, req provider.Request) (client.Host, error) {
+	ctx, release, err := client.BeginHostCreationContext(ctx, CreationRequest(p, req))
+	if err != nil {
+		return client.Host{}, err
+	}
+	defer release()
 	if err := CheckCreate(p, req); err != nil {
 		return client.Host{}, err
 	}
-	probe := client.Host{Name: req.Name, Machine: &client.Machine{Provider: p.Name(), ID: provider.MachineName(req.Name)}}
-	fresh := false
-	if named[p.Name()] {
-		if lc, err := p.Open(probe); err == nil {
-			st, err := lc.Status(ctx)
-			fresh = err == nil && st == client.MachineMissing
-		}
+	if err := client.CheckHostCreationRemovalContext(ctx, req.Name); err != nil {
+		return client.Host{}, err
 	}
+	// Begin owns the one provider key stage. Do not shadow its captured
+	// stage or refresh its absent-name source after an external reply.
+	if err := client.StartHostCreationContext(ctx); err != nil {
+		return client.Host{}, err
+	}
+	defer client.EndHostCreationAttemptContext(ctx)
 	h, err := p.Create(ctx, req)
 	if err == nil {
-		// The machine is made: it is saved, also when a cancel came just
-		// now, so that host destroy finds it. The caller's next step sees
-		// the cancel, and lists the machine among the changes.
-		err = client.SaveHost(context.WithoutCancel(ctx), h)
-	}
-	if err == nil {
+		if err := validateCreationResult(p, req, h); err != nil {
+			// A malformed identity cannot authorise Destroy of the returned
+			// name or ID. Preserve and report its actual partial outcome.
+			return h, err
+		}
+		bound, bindErr := client.BindHostCreationResultContext(ctx, h)
+		if bindErr != nil {
+			return h, unsaved(ctx, p, req, h, bindErr)
+		}
+		h = bound
+		// A new host: the save compares with no entry (cli-spec 11.3),
+		// publishes any pin that the provider staged, and records the
+		// provider's tier (isolation spec 14.8.3).
+		if err := client.UpdateHosts(ctx, client.HostChange{Kind: "host create", Now: &h, Pin: true, Tier: client.ProviderTier(p.Name())}); err != nil {
+			return h, unsaved(ctx, p, req, h, err)
+		}
 		return h, nil
+	}
+	if h.Machine != nil || h.Name != "" {
+		// Presence supplies reporting data only, never Bind/Update/Destroy
+		// authority. Preserve the actual value/private token on uncertainty.
+		return h, partialCreationResult(ctx, h, err)
 	}
 	if ctx.Err() == nil {
 		return client.Host{}, err
 	}
-	stopped := &client.UserError{Msg: fmt.Sprintf("stopped while making %s; nothing was saved", req.Name), Hint: brand.Name + " setup", Code: "cancelled", Kind: client.KindCancelled}
-	switch {
-	case fresh:
-		// A fresh context: the user's has ended, and the clean-up must still run.
-		cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Minute)
-		defer cancel()
-		if lc, oerr := p.Open(probe); oerr == nil {
-			if derr := lc.Destroy(cctx); derr != nil {
-				stopped.Msg = fmt.Sprintf("stopped while making %s, and the %s machine %s may be left: %v", req.Name, p.Name(), probe.Machine.ID, derr)
-				stopped.Hint = "Delete it with " + p.Name() + "'s own tools."
-				return client.Host{}, stopped
-			}
-		}
-		stopped.Msg = fmt.Sprintf("stopped while making %s; the half-made %s machine %s was deleted", req.Name, p.Name(), probe.Machine.ID)
-	case !named[p.Name()]:
-		stopped.Msg = fmt.Sprintf("stopped while making %s; if %s had begun a machine, it stops by itself when its lease ends", req.Name, p.Name())
-		stopped.Hint = "Check " + p.Name() + "'s own console for a machine labelled " + req.Name + "."
+	stopped := &client.UserError{Msg: fmt.Sprintf("stopped while making %s. Nothing was saved and an unverified partial %s resource may remain", req.Name, p.Name()),
+		Hint: "Inspect " + p.Name() + "'s own console and this creation attempt before retrying or deleting any resource.", Code: "cancelled", Kind: client.KindCancelled}
+	if p.Name() == E2B {
+		stopped.Msg += ". A sandbox may stop when its lease ends"
 	}
+
 	return client.Host{}, stopped
+}
+
+// unsaved retains the exact resource after a failed binding/save. Neither the
+// raw returned Host nor historical Source data is a native cleanup capability.
+func unsaved(ctx context.Context, p provider.Provider, req provider.Request, h client.Host, saveErr error) error {
+	client.EndHostCreationAttemptContext(ctx)
+	return partialCreationResult(ctx, h, saveErr)
 }
 
 // SetIdle installs, or with "never" removes, the helper's idle timer on a

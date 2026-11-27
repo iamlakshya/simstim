@@ -7,7 +7,7 @@ title: "simstim doctor keys"
 Show each key as the terminal sends it, and the client's own keys.
 
 ```text
-simstim doctor keys
+simstim doctor keys [flags]
 ```
 
 Turns on the kitty keyboard protocol, then prints each key press as bytes. To check the path to a host, start a session that runs the same tester there: simstim new &lt;host&gt; -- simstim-host keytest

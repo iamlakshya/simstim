@@ -1,10 +1,10 @@
 package host
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
-	"net"
 	"os"
 	"os/exec"
 	"strconv"
@@ -34,11 +34,38 @@ func UnitName(id string) string { return brand.UnitPrefix + id + ".service" }
 // to it.
 var holderExecutable = os.Executable
 
+// startWait is how long a start waits for its holder's socket to answer.
+var startWait = 5 * time.Second
+
+// restoreWait is how much longer a restore waits for a holder that did not
+// answer within startWait.
+var restoreWait = 30 * time.Second
+
+// unitEnv names the variable that tells a holder the unit that
+// launchHolder started it in, so that the holder records the unit in its
+// first save also where its cgroup does not show it, as with cgroup v1.
+var unitEnv = brand.Env("UNIT")
+
 // launchHolder starts the holder for m and waits until its socket answers.
-func launchHolder(m *Manifest) error {
+// Without systemd, it returns the holder's process, which this process
+// started: a start that fails stops that very process (stopStarting). The
+// caller releases it.
+func launchHolder(m *Manifest) (*os.Process, error) {
+	if m.Files != nil {
+		if err := seedConnectionAlive(); err != nil {
+			return nil, err
+		}
+	}
+	if err := ValidateManifestStart(m); err != nil {
+		return nil, err
+	}
 	exe, err := holderExecutable()
 	if err != nil {
-		return err
+		return nil, err
+	}
+	sub, stopSeconds, err := sessionCommand(m)
+	if err != nil {
+		return nil, err
 	}
 	// Every warning of the start goes to the session's log before the
 	// holder opens it, so that the log has one writer while it runs. The
@@ -57,38 +84,62 @@ func launchHolder(m *Manifest) error {
 			// SIGTERM goes to the holder only, which stops its agent itself and
 			// records why; anything left is killed after the timeout.
 			"-p", "KillMode=mixed",
-			"-p", "TimeoutStopSec=15",
+			"-p", "TimeoutStopSec=" + stopSeconds,
 			"-p", "OOMPolicy=continue",
+		}
+		if m.Wall != nil {
+			args = append(args, "-p", "TasksMax=4096")
 		}
 		if m.Limits.MemoryMax > 0 {
 			args = append(args,
 				"-p", fmt.Sprintf("MemoryMax=%d", m.Limits.MemoryMax),
 				"-p", "MemorySwapMax=0")
 		}
-		args = append(args, exe, "holder", m.ID)
+		// Close the managed holder's host-root inputs over this original
+		// creating bridge, as the native supervised launch already does.
+		for _, value := range managedOrdinaryEnvironmentV1(unit) {
+			args = append(args, "--setenv="+value)
+		}
+		args = append(args, "-p", "UnsetEnvironment="+holderLockFDEnv, exe, sub, m.ID)
 		from = logSize(m.ID)
-		out, err := exec.CommandContext(context.Background(), "systemd-run", args...).CombinedOutput()
+		command := exec.CommandContext(context.Background(), "systemd-run", args...)
+		var output bytes.Buffer
+		command.Stdout, command.Stderr = &output, &output
+		err := startSessionCommand(m, command)
+		if err == nil {
+			err = command.Wait()
+		}
+		out := output.Bytes()
 		if err != nil {
-			return fmt.Errorf("systemd-run: %w: %s", err, strings.TrimSpace(string(out)))
+			return nil, fmt.Errorf("systemd-run: %w: %s", err, strings.TrimSpace(string(out)))
 		}
 		m.Run.Unit = unit
-	} else {
-		// No systemd user manager: start the holder in its own session, detached.
-		devnull, err := os.OpenFile(os.DevNull, os.O_RDWR, 0)
-		if err != nil {
-			return fmt.Errorf("start the holder: %w", err)
-		}
-		defer devnull.Close()
-		cmd := exec.CommandContext(context.Background(), exe, "holder", m.ID)
-		cmd.Stdin, cmd.Stdout, cmd.Stderr = devnull, devnull, devnull
-		cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
-		from = logSize(m.ID)
-		if err := cmd.Start(); err != nil {
-			return fmt.Errorf("start the holder: %w", err)
-		}
-		_ = cmd.Process.Release()
+		return nil, holderStarted(m.ID, from, startWait)
 	}
-	return holderStarted(m.ID, from, 5*time.Second)
+	// No systemd user manager: start the holder in its own session, detached,
+	// with holder.lock held across fork so ownership has no gap.
+	devnull, err := os.OpenFile(os.DevNull, os.O_RDWR, 0)
+	if err != nil {
+		return nil, fmt.Errorf("start the holder: %w", err)
+	}
+	defer devnull.Close()
+	lockFile, err := openHolderLockForLaunch(m.ID)
+	if err != nil {
+		return nil, fmt.Errorf("start the holder: %w", err)
+	}
+	cmd := exec.CommandContext(context.Background(), exe, sub, m.ID)
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = devnull, devnull, devnull
+	cmd.ExtraFiles = []*os.File{lockFile}
+	cmd.Env = append(os.Environ(), holderLockFDEnv+"=3")
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	from = logSize(m.ID)
+	if err := startSessionCommand(m, cmd); err != nil {
+		lockFile.Close()
+		return nil, fmt.Errorf("start the holder: %w", err)
+	}
+	lockFile.Close()
+	m.Run.HolderPID = cmd.Process.Pid
+	return cmd.Process, holderStarted(m.ID, from, startWait)
 }
 
 // holderStarted waits until the holder of session id answers. It writes
@@ -112,9 +163,9 @@ func logSize(id string) int64 {
 func waitSocket(id string, from int64, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
-		d := net.Dialer{Timeout: 200 * time.Millisecond}
-		if c, err := d.DialContext(context.Background(), "unix", paths.Socket(id)); err == nil {
-			c.Close()
+		// The endpoint exists before manifest loading, so a raw connection
+		// proves pending control, not readiness to receive secrets or run.
+		if _, err := HolderRequest(id, "sockets", nil, min(200*time.Millisecond, time.Until(deadline))); err == nil {
 			return nil
 		}
 		// The holder writes an errored status if the agent failed to start.

@@ -76,6 +76,10 @@ func question(t *testing.T, err error) api.SetupQuestion {
 	if !errors.As(err, &pe) || pe.Code != api.CodeSetupTrust {
 		t.Fatalf("want a setup_trust question, got %v", err)
 	}
+	// The hint names the client's flags that answer the question.
+	if want := "Pass --setup-script to run it, or --no-setup-script to start without it. The launcher asks."; pe.Hint != want {
+		t.Errorf("the hint is %q, want %q", pe.Hint, want)
+	}
 	var q api.SetupQuestion
 	if json.Unmarshal(pe.Data, &q) != nil {
 		t.Fatalf("data %s", pe.Data)
@@ -112,8 +116,8 @@ func TestSetupHooksNeedTrust(t *testing.T) {
 		a    NewArgs
 		want string
 	}{
-		{"--setup", NewArgs{Setup: api.SetupRun, SetupTrust: map[string]bool{repo: false}}, script},
-		{"--no-setup", NewArgs{Setup: api.SetupSkip, SetupHashes: map[string]string{repo: hash}}, ""},
+		{"--setup-script", NewArgs{Setup: api.SetupRun, SetupTrust: map[string]bool{repo: false}}, script},
+		{"--no-setup-script", NewArgs{Setup: api.SetupSkip, SetupHashes: map[string]string{repo: hash}}, ""},
 		{"refused", NewArgs{SetupTrust: map[string]bool{repo: false}, SetupHashes: map[string]string{repo: hash}}, ""},
 		{"trusted", NewArgs{SetupHashes: map[string]string{repo: hash}}, script},
 	} {

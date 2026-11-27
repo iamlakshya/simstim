@@ -9,10 +9,36 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/vt"
 
+	"github.com/iamlakshya/simstim/internal/api"
 	"github.com/iamlakshya/simstim/internal/client"
 )
 
 var _ Backend = (*demoBackend)(nil)
+
+// Every session of the demo has an ID of the form that the helper makes,
+// with a digit, as the images and the site's demo show them: the sample
+// sessions, and each session that the demo starts.
+func TestTheDemosIDsAreIDs(t *testing.T) {
+	be := newDemoBackend(false)
+	for host, list := range be.sessions {
+		for _, s := range list {
+			if !api.LooksLikeID(s.ID) {
+				t.Errorf("the demo's session %s on %s has the ID %q", s.Name, host, s.ID)
+			}
+		}
+	}
+	c, err := be.Dial(context.Background(), client.Host{Name: "homelab"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	for range 500 {
+		s, err := c.NewSession(context.Background(), client.NewArgs{Name: "x", Cwd: "~"})
+		if err != nil || !api.LooksLikeID(s.ID) {
+			t.Fatalf("the demo started %+v, %v", s, err)
+		}
+	}
+}
 
 func TestDemoBackend(t *testing.T) {
 	ctx := context.Background()
@@ -40,7 +66,7 @@ func TestDemoBackend(t *testing.T) {
 	if err := c.RenameSession(ctx, list[0].ID, "renamed"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := c.Delete(ctx, list[1].ID); err != nil {
+	if _, err := c.DeleteNamed(ctx, list[1].ID, list[1].Name); err != nil {
 		t.Fatal(err)
 	}
 	s, _ := c.NewSession(ctx, client.NewArgs{Agent: "claude", Cwd: "~/src/app"})

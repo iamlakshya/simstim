@@ -43,6 +43,9 @@ func AlertsLog() string { return filepath.Join(StateDir(), "alerts.log") }
 // Holders lock it while they read or change it, and while they write the log.
 func AlertsRate() string { return filepath.Join(StateDir(), "alerts.rate") }
 
+// HostID is the host's 32-character hex ID file, created once on first run.
+func HostID() string { return filepath.Join(StateDir(), "host-id") }
+
 // SessionsDir holds one folder per session.
 func SessionsDir() string { return filepath.Join(StateDir(), "sessions") }
 
@@ -90,6 +93,11 @@ func Socket(id string) string { return filepath.Join(RuntimeDir(), "s", id+".soc
 // socket fits: Linux allows 107 bytes, macOS 103.
 func HookSocket(id string) string { return filepath.Join(RuntimeDir(), "h", id+".sock") }
 
+// SandboxRoot is a process sandbox's private guest root. The test driver
+// uses the same short runtime path, which keeps the guest sockets within
+// the length that a socket's path may have.
+func SandboxRoot(id string) string { return filepath.Join(RuntimeDir(), "g", id) }
+
 // BinDir is where versioned helpers are installed.
 func BinDir() string { return filepath.Join(DataDir(), "bin") }
 
@@ -104,3 +112,6 @@ func EnsurePrivateDir(dir string) error {
 	}
 	return nil
 }
+
+// AuditLog is the trusted supervisor audit file for one session.
+func AuditLog(id string) string { return filepath.Join(SessionDir(id), "audit.jsonl") }

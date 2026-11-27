@@ -53,11 +53,17 @@ func (b *handoffBackend) LoadHosts(ctx context.Context) ([]client.Host, error) {
 	return b.fakeBackend.LoadHosts(ctx)
 }
 
-func (b *handoffBackend) SaveHosts(ctx context.Context, hosts []client.Host) error {
-	if err := b.gate(ctx, "save-write"); err != nil {
-		return err
+func (b *handoffBackend) UpdateHostsContext(ctx context.Context, c client.HostChange) (warn, err error) {
+	if _, err := b.LoadHosts(ctx); err != nil {
+		return nil, err
 	}
-	return b.fakeBackend.SaveHosts(ctx, hosts)
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if err := b.gate(ctx, "save-write"); err != nil {
+		return nil, err
+	}
+	return b.fakeBackend.UpdateHostsContext(ctx, c)
 }
 
 func (b *handoffBackend) Probe(ctx context.Context, h client.Host) (client.Platform, error) {
@@ -168,11 +174,11 @@ func (c *handoffConn) Resume(ctx context.Context, a client.ResumeArgs) (*client.
 	return c.fakeConn.Resume(ctx, a)
 }
 
-func (c *handoffConn) Delete(ctx context.Context, id string) (client.DeleteResult, error) {
+func (c *handoffConn) DeleteNamed(ctx context.Context, id, name string) (client.DeleteResult, error) {
 	if err := c.gate(ctx, "delete"); err != nil {
 		return client.DeleteResult{}, err
 	}
-	return c.fakeConn.Delete(ctx, id)
+	return c.fakeConn.DeleteNamed(ctx, id, name)
 }
 
 func (c *handoffConn) RoundTrip(ctx context.Context) (time.Duration, error) {
@@ -257,11 +263,13 @@ func handoffCommandCases() []handoffCommandCase {
 		}},
 		{"test host", "ping", func(m *Model, h *hostConn, _ *wizard) tea.Cmd { return m.testHost(h) }},
 		{"quick folders", "folders", func(m *Model, h *hostConn, _ *wizard) tea.Cmd {
-			m.prompt = &promptState{host: h.name(), in: newInput("~/src", "")}
+			m.prompt = &promptState{mode: promptNew, host: h.name(), in: newInput("~/src", "")}
 			return m.askFolders()
 		}},
 		{"form folders", "folders", func(m *Model, h *hostConn, _ *wizard) tea.Cmd {
-			return m.fetchFolders(&newSession{host: h.name(), folder: newInput("~/src", "")})
+			d := &newSession{host: h.name(), folder: newInput("~/src", "")}
+			m.modal = d
+			return m.fetchFolders(d)
 		}},
 		{"resume", "resume", func(m *Model, _ *hostConn, _ *wizard) tea.Cmd { return m.resumeSelected() }},
 		{"debug start", "debug-start", func(m *Model, _ *hostConn, _ *wizard) tea.Cmd { return m.debugStart() }},
@@ -338,15 +346,17 @@ func TestBackgroundRPCsCancelAndJoinAtAttachHandoff(t *testing.T) {
 			var release sync.Once
 			letGo := func() { release.Do(func() { close(call.release) }) }
 			t.Cleanup(func() { cancel(); letGo() })
-			finished := make(chan struct{})
 			cmd := tc.start(m, h, w)
-			go func() { executeHandoffCommand(cmd); close(finished) }()
+			ps := newProgStepper(t, m, m)
 			var ctx context.Context
-			select {
-			case ctx = <-call.entered:
-			case <-time.After(10 * time.Second):
-				t.Fatal("the request did not reach its gate")
-			}
+			finished := ps.stepToGate(cmd, func() bool {
+				select {
+				case ctx = <-call.entered:
+					return true
+				default:
+					return false
+				}
+			})
 			if ctx.Value(handoffContextKey{}) != "kept" {
 				t.Fatal("the request lost its parent context values")
 			}

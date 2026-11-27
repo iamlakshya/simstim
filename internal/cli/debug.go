@@ -20,24 +20,22 @@ import (
 // --debug-file, and the commands that start and stop the debug of a
 // running session, save its recent debug record, and write its profiles.
 
-// addDebugFlags adds the global debug flags to root. They turn on the
-// client's debug before any command runs.
+// addDebugFlags adds the global debug flags to root. startDebug turns on
+// the client's debug before any command runs.
 func addDebugFlags(root *cobra.Command) {
 	f := root.PersistentFlags()
-	f.String("debug", "", "turn on the debug mode, with every category, or with the `categories` listed: "+
+	addList(f, new([]string), "debug", "turn on the debug mode, with every category, or with the `categories` listed: "+
 		strings.ReplaceAll(diag.CatList, ",", ", ")+". A list binds only in the = form, such as --debug=net")
 	f.Lookup("debug").NoOptDefVal = diag.CatList
 	f.String("debug-file", "", "write the client's debug records to this `file`. On its own, it turns on every category ("+diag.EnvFile+" does the same)")
+	shared(f, "debug")
+	shared(f, "debug-file")
 	_ = root.RegisterFlagCompletionFunc("debug", completeCats(diag.AllCats))
-	root.PersistentPreRunE = func(cmd *cobra.Command, args []string) error {
-		applyNoColor(cmd)
-		if !inputOn(cmd) {
-			// Nothing asks: SSH runs with BatchMode=yes, and keeps its words
-			// out of the terminal (cli-spec 6.1).
-			cmd.SetContext(client.WithoutInput(cmd.Context()))
-		}
-		return startDebug(cmd, args)
-	}
+}
+
+// isLauncher reports whether cmd opens the TUI launcher or switcher.
+func isLauncher(cmd *cobra.Command, args []string) bool {
+	return !cmd.HasParent() || cmd.Name() == "flip" && len(args) == 0
 }
 
 // completeCats completes a list of categories from cats, separated by
@@ -48,8 +46,8 @@ func completeCats(cats diag.Cats) cobra.CompletionFunc {
 		have := diag.CatsOf(strings.Split(prefix, ","))
 		var out []string
 		for _, c := range cats.List() {
-			if !have.Has(c) {
-				out = append(out, prefix+c)
+			if cand := prefix + c; !have.Has(c) && strings.HasPrefix(cand, toComplete) {
+				out = append(out, cand)
 			}
 		}
 		return out, cobra.ShellCompDirectiveNoFileComp | cobra.ShellCompDirectiveNoSpace
@@ -65,7 +63,7 @@ func startDebug(cmd *cobra.Command, args []string) error {
 		return nil // the shell's completion of a word: nothing to record, and nothing to print
 	}
 	flags := cmd.Flags()
-	val, _ := flags.GetString("debug")
+	val := flags.Lookup("debug").Value.String()
 	file, _ := flags.GetString("debug-file")
 	set := flags.Changed("debug")
 	if !flags.Changed("debug-file") {
@@ -87,8 +85,7 @@ func startDebug(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	launcher := !cmd.HasParent() || cmd.Name() == "flip" && len(args) == 0
-	if !launcher {
+	if !isLauncher(cmd, args) {
 		note(cmd, "debug_on", "debug on: "+tildeHome(path))
 	}
 	return nil
@@ -98,7 +95,7 @@ func startDebug(cmd *cobra.Command, args []string) error {
 func tildeHome(p string) string {
 	if home, err := os.UserHomeDir(); err == nil && home != "" {
 		if rest, ok := strings.CutPrefix(p, home+string(filepath.Separator)); ok {
-			return "~/" + rest
+			return "~/" + filepath.ToSlash(rest)
 		}
 	}
 	return p
@@ -120,7 +117,7 @@ func debugCmd() *cobra.Command {
 
 func debugStartCmd() *cobra.Command {
 	var d time.Duration
-	var only string
+	var only []string
 	cmd := &cobra.Command{
 		Use:   "start <host>/<session>",
 		Short: "Turn on the debug of a running session, for 30 minutes or --for",
@@ -128,16 +125,17 @@ func debugStartCmd() *cobra.Command {
 			"for every attached client, until debug stop or the time limit. A second debug start sets a new end.",
 		Example: "  " + brand.Name + " debug start my-vps/auth-fix\n" +
 			"  " + brand.Name + " debug start my-vps/auth-fix --for 8h --only memory",
-		Args: cobra.ExactArgs(1),
+		Args:              cobra.ExactArgs(1),
+		ValidArgsFunction: completeSessionArg,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if d < time.Second || d > api.DebugForMax {
 				return &client.UserError{Msg: "--for: " + d.String() + " is not between 1s and 24h", Hint: "Pass a time such as 30m or 8h.", Code: "bad_value", Kind: client.KindUsage}
 			}
-			cats, err := hostCats(only)
+			cats, err := hostCats(only, listTyped(cmd.Flags(), "only"))
 			if err != nil {
 				return err
 			}
-			return withSession(cmd.Context(), args[0], func(ctx context.Context, h client.Host, conn *client.Conn, s *client.Session) error {
+			return withSession(cmd, args[0], func(ctx context.Context, h client.Host, conn *client.Conn, s *client.Session) error {
 				st, err := conn.DebugStart(ctx, s.ID, cats, d)
 				if err != nil {
 					return err
@@ -146,26 +144,27 @@ func debugStartCmd() *cobra.Command {
 				if st.Until != nil {
 					until = clockTime(*st.Until)
 				}
-				fmt.Fprintf(os.Stderr, "Debug is on for %s on %s until %s (%s).\n", client.CleanLine(s.Name), h.Name, until, client.CleanLine(strings.Join(st.Categories, ", ")))
-				fmt.Fprintf(os.Stderr, "The host writes its records to %s.\n", client.CleanPath(st.File))
-				fmt.Fprintf(os.Stderr, "To trace your keys too, attach with --debug. To stop: %s debug stop %s\n", brand.Name, client.CommandTarget(h.Name, s.ID))
+				fmt.Fprintf(os.Stderr, "Debug is on for %s on %s until %s (%s).\n", shownShort(nameOf(*s)), shownShort(h.Name), until, shownShort(strings.Join(st.Categories, ", ")))
+				fmt.Fprintf(os.Stderr, "The host writes its records to %s.\n", shown(st.File))
+				fmt.Fprintf(os.Stderr, "To trace your keys too, attach with --debug. To stop: %s\n", sessionCommand(h.Name, s.ID, "debug stop"))
 				return nil
 			})
 		},
 	}
-	cmd.Flags().DurationVar(&d, "for", api.DebugFor, "how long debug stays on, up to 24h")
-	cmd.Flags().StringVar(&only, "only", "", "record only these host `categories`: attach, memory or runtime (default: all three)")
+	addFor(cmd, &d, api.DebugFor, "how long debug stays on, up to 24h")
+	addList(cmd.Flags(), &only, "only", "record only these host `categories`: attach, memory or runtime (default: all three)")
 	_ = cmd.RegisterFlagCompletionFunc("only", completeCats(diag.HostCats))
 	return cmd
 }
 
-// hostCats reads --only: categories of the host only. An empty list is
-// every one of them.
-func hostCats(only string) (diag.Cats, error) {
-	if only == "" {
+// hostCats reads --only: categories of the host only. When --only is not
+// set, or was set to nothing, as "", it returns every one of them, as
+// before. A list of no names, such as ",", is an error.
+func hostCats(only []string, set bool) (diag.Cats, error) {
+	if !set {
 		return diag.HostCats, nil
 	}
-	cats, err := diag.ParseCats(only)
+	cats, err := diag.ParseCats(strings.Join(only, ","))
 	if err != nil {
 		return 0, &client.UserError{Msg: "--only: " + err.Error(), Hint: "Name attach, memory or runtime.", Code: "bad_value", Kind: client.KindUsage}
 	}
@@ -188,22 +187,23 @@ func clockTime(t time.Time) string {
 
 func debugStopCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:     "stop <host>/<session>",
-		Short:   "Turn off the debug of a session at once",
-		Long:    "Turns off the debug of a session at once, and the host side of each traced attach.",
-		Example: "  " + brand.Name + " debug stop my-vps/auth-fix",
-		Args:    cobra.ExactArgs(1),
+		Use:               "stop <host>/<session>",
+		Short:             "Turn off the debug of a session at once",
+		Long:              "Turns off the debug of a session at once, and the host side of each traced attach.",
+		Example:           "  " + brand.Name + " debug stop my-vps/auth-fix",
+		Args:              cobra.ExactArgs(1),
+		ValidArgsFunction: completeSessionArg,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return withSession(cmd.Context(), args[0], func(ctx context.Context, h client.Host, conn *client.Conn, s *client.Session) error {
+			return withSession(cmd, args[0], func(ctx context.Context, h client.Host, conn *client.Conn, s *client.Session) error {
 				st, err := conn.DebugStop(ctx, s.ID)
 				if err != nil {
 					return err
 				}
 				if !st.Stopped {
-					fmt.Fprintf(os.Stderr, "Debug was not on for %s on %s.\n", client.CleanLine(s.Name), h.Name)
+					fmt.Fprintf(os.Stderr, "Debug was not on for %s on %s.\n", shown(nameOf(*s)), shown(h.Name))
 					return nil
 				}
-				fmt.Fprintf(os.Stderr, "Debug is off for %s on %s. Its records are in %s on the host.\n", client.CleanLine(s.Name), h.Name, client.CleanPath(st.File))
+				fmt.Fprintf(os.Stderr, "Debug is off for %s on %s. Its records are in %s on the host.\n", shown(nameOf(*s)), shown(h.Name), shown(st.File))
 				return nil
 			})
 		},
@@ -216,15 +216,16 @@ func debugSaveCmd() *cobra.Command {
 		Short: "Save the session's recent debug record, just after a lag",
 		Long: "While the session's runtime category is on, the session's process on the host keeps the newest\n" +
 			"10 s or so of Go's execution trace. This saves that window to a file on the host, for go tool trace.",
-		Example: "  " + brand.Name + " debug save my-vps/auth-fix",
-		Args:    cobra.ExactArgs(1),
+		Example:           "  " + brand.Name + " debug save my-vps/auth-fix",
+		Args:              cobra.ExactArgs(1),
+		ValidArgsFunction: completeSessionArg,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return withSession(cmd.Context(), args[0], func(ctx context.Context, h client.Host, conn *client.Conn, s *client.Session) error {
+			return withSession(cmd, args[0], func(ctx context.Context, h client.Host, conn *client.Conn, s *client.Session) error {
 				f, err := conn.DebugSave(ctx, s.ID)
 				if err != nil {
 					return err
 				}
-				fmt.Fprintf(os.Stderr, "Saved the recent debug record of %s: %s on %s (%s).\n", client.CleanLine(s.Name), client.CleanPath(f.Path), h.Name, sizeText(f.Size))
+				fmt.Fprintf(os.Stderr, "Saved the recent debug record of %s: %s on %s (%s).\n", shown(nameOf(*s)), shown(f.Path), shown(h.Name), sizeText(f.Size))
 				return nil
 			})
 		},
@@ -253,11 +254,11 @@ func debugProfileCmd() *cobra.Command {
 			if d < time.Second || d > diag.ProfileMax {
 				return &client.UserError{Msg: "--for: " + d.String() + " is not between 1s and 5m", Hint: "Pass a time such as 30s or 2m.", Code: "bad_value", Kind: client.KindUsage}
 			}
-			return withSession(cmd.Context(), args[0], func(ctx context.Context, h client.Host, conn *client.Conn, s *client.Session) error {
+			return withSession(cmd, args[0], func(ctx context.Context, h client.Host, conn *client.Conn, s *client.Session) error {
 				wait := 30 * time.Second
 				if kind == diag.ProfileCPU {
 					wait += d
-					defer countDown("Profiling the CPU of "+client.CleanLine(s.Name), d)()
+					defer countDown("Profiling the CPU of "+shown(nameOf(*s)), d)()
 				}
 				// A CPU profile may take longer than the connection's own time.
 				ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), wait)
@@ -266,17 +267,21 @@ func debugProfileCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				fmt.Fprintf(os.Stderr, "Wrote a %s profile of %s: %s on %s (%s).\n", kind, client.CleanLine(s.Name), client.CleanPath(f.Path), h.Name, sizeText(f.Size))
+				fmt.Fprintf(os.Stderr, "Wrote a %s profile of %s: %s on %s (%s).\n", kind, shown(nameOf(*s)), shown(f.Path), shown(h.Name), sizeText(f.Size))
 				return nil
 			})
 		},
 	}
-	cmd.Flags().DurationVar(&d, "for", diag.ProfileDefault, "cpu only: how long the profile runs, up to 5m")
-	cmd.ValidArgsFunction = func(_ *cobra.Command, args []string, _ string) ([]string, cobra.ShellCompDirective) {
-		if len(args) == 1 {
-			return []string{diag.ProfileCPU, diag.ProfileHeap, diag.ProfileGoroutine}, cobra.ShellCompDirectiveNoFileComp
+	addFor(cmd, &d, diag.ProfileDefault, "cpu only: how long the profile runs, up to 5m")
+	cmd.ValidArgsFunction = func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		switch len(args) {
+		case 0:
+			return completeSessions(cmd, args, toComplete)
+		case 1:
+			return completeFixed(diag.ProfileCPU, diag.ProfileHeap, diag.ProfileGoroutine)(cmd, args, toComplete)
+		default:
+			return nil, cobra.ShellCompDirectiveNoFileComp
 		}
-		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
 	return cmd
 }

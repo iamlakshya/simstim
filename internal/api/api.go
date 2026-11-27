@@ -3,8 +3,12 @@
 package api
 
 import (
+	"encoding/json"
 	"fmt"
 	"time"
+
+	"github.com/iamlakshya/simstim/internal/proto"
+	"github.com/iamlakshya/simstim/internal/supply"
 )
 
 // Session states.
@@ -25,10 +29,55 @@ const ReasonChildOOM = "a process in this session ran out of memory and was stop
 
 // NewArgs describes a session to start.
 type NewArgs struct {
-	Name  string   `json:"name,omitempty"`
-	Agent string   `json:"agent,omitempty"`
-	Argv  []string `json:"argv,omitempty"`
-	Cwd   string   `json:"cwd,omitempty"`
+	// RuntimeOrigin is full original data for a same-connection VM projection.
+	RuntimeOrigin json.RawMessage `json:"runtime_origin_v1,omitempty"`
+	// NamedSSHKeys is cold-start private delivery, never guest environment.
+	NamedSSHKeys *NamedSSHKeysV1 `json:"named_ssh_keys,omitempty"`
+	// ProtectedTrustedSecretValues is private trusted-caller delivery, never guest environment.
+	ProtectedTrustedSecretValues map[string]Secret `json:"protected_trusted_secret_values,omitempty"`
+	// Placement is original client selection metadata, never admission proof.
+	Placement *PlacementV1 `json:"placement,omitempty"`
+	// Runtime is DATA selected by the same private original client plan.
+	Runtime *supply.Manifest `json:"runtime,omitempty"`
+	// VMNeedV1 is accepted only from the same locally sealed authenticated plan.
+	VMNeedV1 json.RawMessage `json:"vm_need_v1,omitempty"`
+	// Inputs and Environment come from one sealed local start selection.
+	Inputs         *InputSummary         `json:"inputs,omitempty"`
+	Environment    *SessionEnvironment   `json:"environment,omitempty"`
+	HostLabel      string                `json:"host_label,omitempty"`
+	SecretDelivery *SecretDeliveryIntent `json:"secret_delivery,omitempty"`
+	Task           string                `json:"task,omitempty"`
+	// Mounts are explicit host folder grants for a sandbox.
+	Mounts []string `json:"mounts,omitempty"`
+	// Include names regular source files to copy at seed time.
+	Include []string `json:"include,omitempty"`
+	// Downgrade records the explicit request to run below the floor.
+	// It is request metadata, never host-side authorisation.
+	Downgrade bool `json:"downgrade,omitempty"`
+	// RepositoryPolicy is a checked local preview, never outgoing authority.
+	RepositoryPolicy *RepositoryPolicy `json:"-"`
+	// GrantHash and GrantAnswers bind explicit repository proposal choices.
+	GrantHash    string          `json:"grant_hash,omitempty"`
+	GrantAnswers map[string]bool `json:"grant_answers,omitempty"`
+	// Layers are selected laptop policy layers. The helper adds its own
+	// built-in and repository-file input. They never grant a local tier.
+	Layers []Layer `json:"layers,omitempty"`
+	// ID is the session ID chosen by a client whose helper offers session.id.
+	// The helper reserves it without replacing any existing session.
+	ID string `json:"id,omitempty"`
+	// Wall names the requested wall. Only empty or none starts unwalled.
+	// Sandbox launchers implement the other levels without a fallback.
+	Wall string `json:"wall,omitempty"`
+	// Floor records this locally selected start; it grants no host authority.
+	Floor          string `json:"floor,omitempty"`
+	DowngradedFrom string `json:"downgraded_from,omitempty"`
+	// SSHAgent gives this unwalled session a fixed socket path. Only an
+	// explicit, separately forwarded attach connection supplies its agent.
+	SSHAgent bool     `json:"ssh_agent,omitempty"`
+	Name     string   `json:"name,omitempty"`
+	Agent    string   `json:"agent,omitempty"`
+	Argv     []string `json:"argv,omitempty"`
+	Cwd      string   `json:"cwd,omitempty"`
 	// MakeFolder makes Cwd, and any missing folders above it, when Cwd does
 	// not exist and is a full path. Without it, a missing Cwd is a
 	// CodeNoFolder error. A helper that can do it offers the feature "mkdir".
@@ -66,27 +115,58 @@ type NewArgs struct {
 
 // SessionInfo is one row of the session list.
 type SessionInfo struct {
-	ID             string    `json:"id"`
-	Name           string    `json:"name"`
-	Agent          string    `json:"agent"`
-	Cwd            string    `json:"cwd"`
-	State          string    `json:"state"`
-	Source         string    `json:"source,omitempty"` // what the state was learnt from
-	Since          time.Time `json:"since"`
-	Reason         string    `json:"reason,omitempty"`
-	ExitCode       *int      `json:"exit_code,omitempty"`
-	Signal         string    `json:"signal,omitempty"`
-	OOM            bool      `json:"oom_killed,omitempty"`
-	CreatedAt      time.Time `json:"created_at"`
-	LastActivityAt time.Time `json:"last_activity_at,omitempty"`
-	LastAttachedAt time.Time `json:"last_attached_at,omitempty"`
-	Alive          bool      `json:"alive"`
-	Unit           string    `json:"unit,omitempty"`
-	MemoryMax      int64     `json:"memory_max,omitempty"`
-	MemoryCurrent  int64     `json:"memory_current,omitempty"`
-	HostVersion    string    `json:"host_version"`
-	Cols           int       `json:"cols"`
-	Rows           int       `json:"rows"`
+	ForkOf      string `json:"fork_of,omitempty"`
+	Checkpoints string `json:"checkpoints_status,omitempty"`
+	// SSH is display data from actual live selected SSH owners, never saved authority.
+	SSH bool `json:"ssh,omitempty"`
+	// Usage is the actual live root-eg sandbox-wide meter, never member attribution.
+	Usage *ModelUsageV1 `json:"usage,omitempty"`
+	// NamedSSHKeys describes the live signer and next-start names, never key authority.
+	NamedSSHKeys *NamedSSHKeyViewV1 `json:"named_ssh_keys,omitempty"`
+	// Policy fields are bounded display data, never a source or boot authority.
+	LayersHash      string                `json:"layers_hash,omitempty"`
+	PolicyChanged   bool                  `json:"policy_changed,omitempty"`
+	PolicyNextStart []string              `json:"policy_next_start,omitempty"`
+	PolicyNextWall  string                `json:"policy_next_wall,omitempty"`
+	Runtime         *SessionRuntimeInfoV1 `json:"runtime_info,omitempty"`
+	PlacedBy        string                `json:"placed_by,omitempty"`
+	PlaceReason     string                `json:"place_reason,omitempty"`
+	// PackageManagers is the actual live installed start plan, never a current-policy reconstruction.
+	PackageManagers *proto.PackageManagersV1 `json:"package_managers,omitempty"`
+	// Forwards is display-only state from the actual live supervisor.
+	Forwards      []PortForwardInfo `json:"forwards,omitempty"`
+	CopiesPending bool              `json:"copies_pending,omitempty"`
+	Workspace     string            `json:"workspace,omitempty"`
+	Claimed       bool              `json:"claimed,omitempty"`
+	Wall          *WallInfo         `json:"wall,omitempty"`
+	Armed         bool              `json:"armed,omitempty"`
+	SandboxOf     string            `json:"sandbox_of,omitempty"`
+	Task          string            `json:"task,omitempty"`
+	// Explicit coherent publications alone carry run/public-state context.
+	RunGeneration  string                `json:"run_generation,omitempty"`
+	SecretSummary  *SessionSecretSummary `json:"secret_summary,omitempty"`
+	SecretState    *SessionSecretState   `json:"secret_state,omitempty"`
+	ID             string                `json:"id"`
+	Name           string                `json:"name"`
+	Agent          string                `json:"agent"`
+	Cwd            string                `json:"cwd"`
+	State          string                `json:"state"`
+	Source         string                `json:"source,omitempty"` // what the state was learnt from
+	Since          time.Time             `json:"since"`
+	Reason         string                `json:"reason,omitempty"`
+	ExitCode       *int                  `json:"exit_code,omitempty"`
+	Signal         string                `json:"signal,omitempty"`
+	OOM            bool                  `json:"oom_killed,omitempty"`
+	CreatedAt      time.Time             `json:"created_at"`
+	LastActivityAt time.Time             `json:"last_activity_at,omitempty"`
+	LastAttachedAt time.Time             `json:"last_attached_at,omitempty"`
+	Alive          bool                  `json:"alive"`
+	Unit           string                `json:"unit,omitempty"`
+	MemoryMax      int64                 `json:"memory_max,omitempty"`
+	MemoryCurrent  int64                 `json:"memory_current,omitempty"`
+	HostVersion    string                `json:"host_version"`
+	Cols           int                   `json:"cols"`
+	Rows           int                   `json:"rows"`
 	// FullScreen is true while the program draws on the alternate screen,
 	// so the terminal keeps no scrollback of it.
 	FullScreen bool `json:"full_screen,omitempty"`
@@ -105,10 +185,35 @@ type SessionInfo struct {
 // session, after the agent ended: the "resume" request. A helper that can
 // do it offers the feature "resume".
 type ResumeArgs struct {
-	ID string `json:"id"`
-	// MemoryMax is the session's memory cap from now on, in bytes. 0 keeps
-	// the size that the session asked for before, and MemoryAuto asks for
-	// the host's default.
+	// VMNeedV1 is the fresh same-connection cold VM selection, never boot authority.
+	VMNeedV1 json.RawMessage `json:"vm_need_v1,omitempty"`
+	// Prepared identifies the same original per-connection native resume plan.
+	Prepared *PreparedResumeV1 `json:"prepared,omitempty"`
+	// NamedSSHKeys is delivered only by the genuine original cold preparation.
+	NamedSSHKeys *NamedSSHKeysV1 `json:"named_ssh_keys,omitempty"`
+	// ProtectedTrustedSecretValues is private trusted-caller delivery, never guest environment.
+	ProtectedTrustedSecretValues map[string]Secret `json:"protected_trusted_secret_values,omitempty"`
+	// ExpectedImageV1 is the original laptop image projection, never boot authority.
+	ExpectedImageV1 json.RawMessage `json:"expected_image_v1,omitempty"`
+	// Inputs and Environment come from one sealed local start selection.
+	Inputs         *InputSummary         `json:"inputs,omitempty"`
+	Environment    *SessionEnvironment   `json:"environment,omitempty"`
+	HostLabel      string                `json:"host_label,omitempty"`
+	SecretDelivery *SecretDeliveryIntent `json:"secret_delivery,omitempty"`
+	// Layers and proposal answers come only from the approved local resume
+	// preparation; host rows cannot select laptop configuration sources.
+	Layers           []Layer           `json:"layers,omitempty"`
+	RepositoryPolicy *RepositoryPolicy `json:"-"`
+	GrantHash        string            `json:"grant_hash,omitempty"`
+	GrantAnswers     map[string]bool   `json:"grant_answers,omitempty"`
+	// Snapshot and Members are sent only through the complete H5 bundle gate.
+	Snapshot *SandboxSnapshot   `json:"snapshot,omitempty"`
+	Members  []MemberResumeArgs `json:"members,omitempty"`
+	ID       string             `json:"id"`
+	// MemoryMax is the next size in bytes: guest RAM on microvm, the unit cap
+	// on other walls. Zero preserves the previous size unless its policy
+	// changes; MemoryAuto resolves the current sandbox policy and defaults.
+	// A running sandbox keeps its current cap.
 	MemoryMax int64 `json:"memory_max,omitempty"`
 	// Secrets are the values of the session's secrets, which the client
 	// fetches again. The host writes none of them down (host/secrets.go).
@@ -135,6 +240,11 @@ type Check struct {
 
 // HostInfo describes the host.
 type HostInfo struct {
+	KernelBugs []KernelBugResultV1 `json:"kernel_bugs,omitempty"`
+	Health     []Health            `json:"health,omitempty"`
+	// Sandbox is a fresh, optional capability report requested by doctor.
+	// Older helpers leave it absent. It supplies no admission authority.
+	Sandbox   *CapProbe         `json:"sandbox,omitempty"`
 	Hostname  string            `json:"hostname"`
 	OS        string            `json:"os"`
 	Arch      string            `json:"arch"`
@@ -191,6 +301,9 @@ func (r RestoreResult) Text() string {
 
 // Port is a TCP port a session's processes listen on.
 type Port struct {
+	Claimed bool   `json:"claimed,omitempty"`
+	Granted bool   `json:"granted,omitempty"`
+	Reverse bool   `json:"reverse,omitempty"`
 	Port    int    `json:"port"`
 	Address string `json:"address"`
 	PID     int    `json:"pid"`

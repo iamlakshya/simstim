@@ -7,13 +7,15 @@ title: "simstim new"
 Start a session on a host, and attach to it.
 
 ```text
-simstim new <host> [-- <command>…] [flags]
+simstim new [<host>|-] [-- <command>…] [flags]
 ```
+
+Starts one session and attaches. `--detach` leaves it running. `--count` starts independent sessions without attaching. Without a terminal, a command after -- runs through sandbox exec and returns its exit code. Its completed sandbox stops and keeps its work for pull.
 
 ## Examples
 
 ```sh
-simstim new my-vps --agent claude --dir ~/src/app
+simstim new my-vps --agent claude -C ~/src/app
 simstim new my-vps --agent claude --dir ~/src/new-app --mkdir
 simstim new my-vps --agent claude --secret ANTHROPIC_API_KEY
 simstim new my-vps --agent claude --memory-max 6G
@@ -26,17 +28,42 @@ simstim new my-vps --agent claude --detach --json
 | Flag | What it does |
 | --- | --- |
 | `-a`, `--agent <string>` | the agent: claude, codex, opencode, antigravity, gemini, amp, cursor, aider, goose or shell (default: `shell`) |
+| `--allow <stringArray>` | allow a network destination for this session (repeatable) |
+| `--allow-wake` | allow an automatic paid wake without its extra question |
 | `--base <string>` | the commit or branch the worktree starts from (default: HEAD) |
+| `--copy <stringArray>` | copy one laptop file as source:guest-path (repeatable) |
+| `--count <int>` | start this many sessions without attaching, named &lt;name&gt;-1 to &lt;name&gt;-&lt;count&gt; (default: `1`) |
+| `--deny <stringArray>` | deny a network destination for this session (repeatable) |
 | `--detach` | start it without attaching |
-| `-d`, `--dir <string>` | the folder on the host (default: `~`) |
+| `-C`, `--dir <string>` | the folder on the host (default: `~`) |
+| `--downgrade` | run this start below the floor, with an explicit `--wall` level |
+| `--dry-run` | show automatic placement without starting or waking a host |
+| `--env <string>` | set a guest variable as NAME=VALUE, or read NAME from this computer |
+| `--env-file <string>` | read literal guest variables from a local file |
+| `--expose <stringArray>` | explicitly expose a named secret in the session (repeatable) |
+| `--image <string>` | the pinned image or an image saved on this host |
+| `--in <string>` | start a fresh agent in this host's existing sandbox session |
+| `--include <stringArray>` | copy a regular source file into the sandbox's clone (repeatable) |
 | `--inline` | start the agent in its inline mode, so your terminal keeps its scrollback (see agents.inline in config.toml) |
 | `--json` | print JSON for scripts, and ask nothing (see docs/how-to/scripting.md) |
+| `--machine <string>` | make one provider machine for this session (e2b), removed by rm |
 | `--memory-max <size>` | cap the session's memory: auto, or a size such as 4G (default: sessions.memory_max in config.toml) |
 | `--mkdir` | make the folder on the host if it does not exist, without asking |
+| `--mount <stringArray>` | grant a host folder to the sandbox, read-only by default (repeatable) |
 | `-n`, `--name <string>` | a name for the session (default: the folder name) |
-| `--no-setup` | do not run the repository's setup script this time |
-| `--secret <stringArray>` | pass a secret from config.toml's [secrets] into the session's environment (repeatable) |
-| `--setup` | run the repository's setup script this time, whatever your answer for it |
+| `--need <stringArray>` | require automatic placement architecture, tier or local features (repeatable) |
+| `--no-setup-script` | do not run the repository's setup script this time |
+| `--preset <string>` | the network preset: locked, balanced or open (default: `balanced`) |
+| `--profile <string>` | a named policy profile from config.toml |
+| `--secret <list>` | pass secrets from config.toml's [secrets] into the session's environment, such as A,B, or the flag again |
+| `--seed <stringArray>` | seed a laptop Git repository into /work/&lt;basename&gt; (repeatable) |
+| `--seed-dirty` | include the original dirty seed snapshot in one prospective commit |
+| `--set <stringArray>` | set one policy key=value for this session (repeatable) |
+| `--setup-script` | run the repository's setup script this time, whatever your answer for it |
+| `--ssh-agent` | grant the laptop's SSH agent to one unwalled session on an own host |
+| `--task <string>` | one line about this session's work |
+| `--untrusted` | cap this session's grants at the throwaway tier |
+| `--wall <string>` | the wall: auto (the host floor), none, process, gvisor or microvm (default: `auto`) |
 | `-w`, `--worktree` | give the session its own git worktree and branch |
 
 ## Flags from the parent command
@@ -47,5 +74,15 @@ simstim new my-vps --agent claude --detach --json
 | `--debug-file <file>` | write the client's debug records to this file. On its own, it turns on every category (SIMSTIM_DEBUG_FILE does the same) |
 | `--no-color` | print no colour (NO_COLOR does the same) |
 | `--no-input` | ask nothing: a question that needs an answer fails with exit code 4, and names the flag that answers it (SIMSTIM_NO_INPUT=1 does the same) |
+
+## Old names
+
+These still work, and print a warning on stderr, until their end.
+
+| Old | New | Works until | Note |
+| --- | --- | --- | --- |
+| -d | -C | v0.4.0 and 11 November 2027, whichever comes later | After its end, `-d` is the short form of `--detach`. |
+| --setup | --setup-script | v0.4.0 and 11 November 2027, whichever comes later | "Setup" then names only the guided setup. |
+| --no-setup | --no-setup-script | v0.4.0 and 11 November 2027, whichever comes later |  |
 
 See [all commands](_index.md).

@@ -8,8 +8,7 @@
 
 
 
-
-  ── Add a host ─────────────────────────────────────────────── step 4 of 6 ──
+  ── Add a host ────────────────────────────────────────────── step 7 of 10 ──
 
     ✓ connect
     ✓ linger      on
@@ -20,5 +19,6 @@
       Agents  claude · shell
       System  Ubuntu 24.04 · arm64 · 2 CPUs · 4 GiB
       Limits  2.9 GiB for sessions
+      Floor   gvisor
 
     enter choose agents   esc close

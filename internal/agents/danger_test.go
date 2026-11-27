@@ -205,7 +205,7 @@ func TestDangersDecodeEscapes(t *testing.T) {
 // approvals off, so a restore or a resume never refuses them.
 func TestTheTableIsSafe(t *testing.T) {
 	for _, a := range Table {
-		for _, cmd := range [][]string{a.Launch, a.Resume, a.Continue} {
+		for _, cmd := range [][]string{a.Launch, a.Resume, a.Continue, a.Fork} {
 			argv := slices.Concat(cmd, a.Hooks, a.Inline.Args)
 			if got := firstDanger(a, argv); got != "" {
 				t.Errorf("%s: its own command %q has %q, which turns its approvals off", a.Kind, argv, got)

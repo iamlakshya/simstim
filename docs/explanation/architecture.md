@@ -8,7 +8,11 @@ How the client, the host helper and the shadow terminal fit together, and how a 
 
 The client runs in your local terminal. It opens one bridge process on the host over SSH or a provider's exec transport (section 8). The bridge connects to session holders through private Unix sockets. Each holder owns an agent's PTY, an 8 MiB output ring, a manifest, a status engine and a shadow terminal child.
 
-There is no daemon on the laptop and no central daemon on the host. Each session is one holder process, with a small vt child. The bridge lives only while a client is connected.
+There is no daemon on the laptop and no central daemon on the host. Every new session has a supervisor, a link and a guest init. The holder owns its PTY, ring and small vt child. The bridge lives only while a client is connected.
+
+At `none`, the guest init and agent share the supervisor's host account and namespaces. The working directory is the host folder or worktree that the user chose. There is no clone, seed bundle, egress process, DNS shim, classifier, sentinel or decoy. Secrets reach the holder as exposed values. The holder and hook sockets live in the private runtime folder under `g/<id>/`. The same relay passes terminal frames without changing their bytes.
+
+A legacy holder that was running when the helper updated keeps its old path. Moving its record to the new path needs either its original, physically joined holder or a changed kernel boot epoch under the same session operation. A saved status or process number cannot supply that proof. The [release prerequisite](../contributing/none-supervisor-release.md) applies before this change is merged or published.
 
 ## 2. Components
 
@@ -19,12 +23,29 @@ One static Go binary.
 | Part | Job |
 | --- | --- |
 | Screens | The launcher: the hosts, then one host's sessions, one list at a time, with search across hosts, a one-line quick start, and sheets (the palette, peek, forms, the add-host wizard) that rise over it. It remembers what it saw, to draw at once. It runs in the alternate screen and is built with Bubble Tea v2. While attached it draws nothing. See [UX](../contributing/ux-spec.md), [0009](../contributing/decisions/0009-light-launcher.md), [0011](../contributing/decisions/0011-instant-launcher.md) and [0012](../contributing/decisions/0012-own-look.md). |
-| CLI | `simstim host …`, `new`, `ls`, `attach`, `kill`, `doctor`, `completion`. `--json` on every list. |
+| CLI | `simstim host …`, `new`, `ls`, `show`, `attach`, `rm`, `doctor`, `completion`. `--json` on every list. |
 | SSH layer | Runs the system `ssh` with a generated config. Owns a private ControlMaster per host. Opens the bridge channel. Uploads files. |
 | Attach pump | Raw mode, an output pump with a passive mode tracker, the input filter, resize forwarding, the reset list on detach. |
 | Reconnect | Heartbeat, wake detection, backoff, and resume by byte offset. |
 | Clipboard | Reads images from the local clipboard. Rewrites dropped file paths. The paste guard refuses private files, and paths that the session put on the clipboard. |
 | Capability probe | One batch of terminal queries at start-up, cached per terminal. It drives simstim's own screens and `doctor`. |
+
+Placement policy keeps local pool membership and feature labels in `host.place`.
+Its candidate filter uses versioned facts from the original accepted host Source.
+Unknown accounting gives no room. A microvm's need includes its whole unit reserve.
+Ranking compares wake class, pressure and spread penalties, preference, cached
+image, round trip, room, sandbox count and host name, in that order.
+
+These facts and labels are selection metadata. They reserve nothing and cannot
+start a sandbox. The selected host checks its current native reservations again
+under its placement lock before a start.
+
+The local `facts.json` cache keeps the original client receipt time and saved
+host Source. It drops opaque runtime text that selection does not need.
+`placements.json` records complete unit bytes under a private file lock.
+Only the creator can update or remove its exact mark. The latest minute counts
+as in flight; ten minutes of names provide the spread penalty. Future cache
+formats are retained and refused, rather than replaced with empty history.
 
 ### 2.2 Host: `simstim-host` and `simstim-vt`
 
@@ -43,6 +64,8 @@ Installed by the client into `~/.local/share/simstim/bin/<version>/`, with a `cu
 | `kill`, `rm` | Stops the session's whole cgroup. Removes the manifest and the worktree when it is safe. | Seconds |
 | `doctor` | Checks linger, cgroups, terminfo, agents on `PATH` and the disk, and prints fixes | Seconds |
 | `restore [--all]` | Respawns sessions after a reboot with each agent's resume command. A user unit, `<name>-restore.service`, runs it at boot. | Run at boot, then exit |
+
+The bridge's sandbox capability request gathers fresh host facts and probes the registered drivers. A driver's `can_prepare` reports verified construction inputs. Its `ok` field reports compatibility readiness. Starting a VM still needs the original operation and VM Need.
 
 ### 2.3 Session status
 
@@ -84,17 +107,13 @@ Codex's launch, resume and continue commands include `--no-daemon`, so its work 
 
 ### 3.1 Add a host
 
-1. The user picks a host from `~/.ssh/config` (resolved with `ssh -G`), or types `user@host`, with an optional jump host.
-2. simstim writes the host to its own `hosts.conf`. It never edits `~/.ssh/config`.
-3. It opens the private master and runs `uname -sm`. It checks `PATH` for an installed helper.
-4. If there is no helper, or the wrong version, it asks first, then uploads the static helper over an exec channel. It checks the SHA-256 against a signed manifest and installs into a versioned folder.
-5. A `hello` handshake exchanges the protocol version and features.
-6. `simstim-host doctor` runs:
-   - Turn on linger, or warn that sessions die at logout.
-   - Install Ghostty's terminfo (`infocmp -x xterm-ghostty | tic -x -`).
-   - Find agents through the login shell.
-   - Check cgroup delegation.
-7. The host appears in the browser with its facts: provider label, latency, CPU, memory and sessions.
+1. The user picks a host from `~/.ssh/config` (resolved with `ssh -G`), or types `user@host`, with an optional extra SSH config file. It never edits `~/.ssh/config`.
+2. It stages and pins the host's SSH key, runs `uname -sm`, and asks for the host's trust tier (`own`, `shared` or `throwaway`).
+3. If there is no helper, or the wrong version, it asks first, then uploads the static helper over an exec channel, checks its SHA-256, and installs into a versioned folder.
+4. A `hello` handshake exchanges the protocol version, host ID and features. `setup` and `doctor` turn on linger, install Ghostty's terminfo, find agents through the login shell, and check cgroup delegation.
+5. Registration commits the host, its staged pin and its tier in `hosts.toml` (`UpdateHostsForPreparation`), returning a source-bound preparation target, and closes the registration connection.
+6. Unless `--no-sandbox` is set, four separate saved-host connections prepare sandboxes on that target, each under its own closed grant purpose: capability probe (`sandbox.probe`), pinned runtime and image delivery, optional root setup (`run`, `print` or `skip`, never reusing consent from another phase), and a fixed 60 s sandbox test boot (`sandbox.prepare`). Only a verified test boot and clean-up publish `wall_floor` (keeping any stronger floor) and `facts.json`.
+7. The host appears in the launcher with its facts, wall floor, latency, CPU, memory and sessions.
 
 ### 3.2 Start a session
 
@@ -120,6 +139,20 @@ Codex's launch, resume and continue commands include `--no-daemon`, so its work 
 5. The holder forks the PTY at the client's size and runs the agent's `launch_argv`. It starts the vt child, and opens its sockets.
 6. The client attaches at once (3.3).
 
+Walled starts keep one operation lock from the reserved session through the
+ready acknowledgement. The parent lends that same open description on the
+early control connection. Start delivery uses that connection too. Automatic
+restore uses the same handoff and preserves its selected controller and members.
+The borrower closes its own copy after the durable ready record and port
+reconciliation. The parent closes its copy after the acknowledgement.
+
+The service manager path uses its native private socket. Startup follows the
+returned job, first invocation and live helper handle. A managed helper uses
+`Type=exec` with literal arguments on supported managers, including systemd 252.
+Without a user manager, the original child object owns the helper lifetime.
+Pending cancellation joins that original owner before cleanup can remove the
+session. Uncertain cleanup retains the owner, lock and storage.
+
 ### 3.3 Attach
 
 1. The client sends `attach{cols, rows, xpx, ypx, client_id, caps, last_offset}`. It sends no offset (−1) when the session was on the alternate screen at the last detach: detach left that screen (3.4), and the terminal threw its cells away ([0028](../contributing/decisions/0028-redraw-the-alternate-screen.md)). A reconnect inside one attach (3.5) never leaves it, and keeps its offset.
@@ -135,7 +168,7 @@ Codex's launch, resume and continue commands include `--no-daemon`, so its work 
 
 ### 3.4 Detach
 
-Triggers: the detach key, closing the tab, `simstim kill` from elsewhere, or SIGTERM.
+Triggers: the detach key, closing the tab, `simstim rm` from elsewhere, or SIGTERM.
 
 1. The client closes its attach stream, but the holder keeps running.
 2. The client writes the ordered reset list in one write, and never sends RIS (`ESC c`), which wipes Ghostty's scrollback. The list:
@@ -206,6 +239,9 @@ Triggers: the detach key, closing the tab, `simstim kill` from elsewhere, or SIG
 ### 3.8 Upgrade
 
 - The client and the helper upgrade independently. New sessions use the new helper, and old holders keep running their own version.
+- New sandboxes compare their client's pinned runtime with the current host. Missing runtime files are installed on use. Shared hosts ask through the original request before an upgrade. The helper verifies the resulting bytes and retains the original selected files. A file inventory alone cannot prove that a driver can run.
+- Running sandboxes retain their runtime. Session lists mark an older runtime `outdated`, and one covered by the client's advisory list `exposed`.
+- A user drain setting stops new starts under the same placement lock. It does not stop running sessions. The setting has its own native metadata receipt and survives a restart. Automatic restore may skip this setting; the separate host removal gate still holds.
 - The bridge exchanges `hello` feature flags with the client. This does not upgrade a running holder.
 - A crashed vt child restarts from the ring, using the same executable path beside its holder. There is no live vt upgrade or holder re-exec.
 
@@ -267,7 +303,8 @@ The contract has its own page: [the fidelity contract](fidelity.md).
 | `~/.config/simstim/config.toml` | Settings and keymap overrides, with a JSON Schema |
 | `~/.config/simstim/hosts.toml` | Saved hosts: name, SSH target, labels, optional provider block |
 | `~/.config/simstim/ssh/hosts.conf` | Generated SSH blocks for hosts added in simstim. Included by the wrapper. |
-| `~/.cache/simstim/cm/nf-%C` | ControlMaster sockets. Each path fits the system's socket limit. The `nf-` prefix keeps the client off masters that older clients started ([decision 0034](../contributing/decisions/0034-ssh-options-on-the-command-line.md)). When the cache path is too long, the sockets go in `cm` of the runtime folder (`$XDG_RUNTIME_DIR/simstim`, or `simstim-<uid>` in the temporary folder without it), when that folder is the user's, is not a link and nobody else may write it. Else they go in a private `/tmp/simstim-<uid>`. |
+| `~/.config/simstim/ssh/known_hosts-<key>` | A host's pinned host key (0600), which every `ssh` command for the host checks ([decision 0035](../contributing/decisions/0035-pinned-host-keys.md)). `<key>` is the host's name in lower case (32 characters at most), a dash and 32 hex characters of SHA-256 over the exact name, so names that differ only in case never share a file. The first line names the host. `<key>.lock` is its lock |
+| Private short control base, with root-scoped index and random epoch folders | Shared SSH masters. Each final socket uses the `nf-` prefix. The complete temporary bind path, including OpenSSH's 17-byte suffix, is at most 103 bytes. Forget and rekey retire the indexed epoch before a delayed authentication can publish a reusable master. Unindexed old sockets are not adopted or retired ([decision 0035](../contributing/decisions/0035-pinned-host-keys.md)). |
 | `~/.cache/simstim/helpers/<version>/` | Host helpers fetched from the release, for a client built with `go install` |
 | `~/.local/state/simstim/` | Logs, and each session's last byte offset |
 | `~/.local/state/simstim/debug/` | The client's debug files, while `--debug` is on (0700; [debug a session](../how-to/debug-a-session.md)) |
@@ -310,7 +347,7 @@ Each command started over envd has a tag of its own. A dropped request does not 
 
 Each provider is a package under `internal/provider` (`lima`, `docker`, `e2b`). It creates a machine, and for a host it made, gives a lifecycle: status, start or resume, stop or pause, destroy, and a transport. `hosts.toml` records the provider and the machine's ID in the host's `[host.machine]` table.
 
-- **Create:** make the machine, save the host, then the normal add: probe, install the helper (showing what and where), set up linger and terminfo, and connect.
+- **Create:** make the machine, save the host, then the normal add: probe, install the helper (showing what and where), set up linger and terminfo, and connect. The client keeps the original creation operation through registration and setup.
 - **Wake on attach:** before it dials, the client asks the provider for the machine's state. If it is stopped or paused, the client starts or resumes it (`limactl start`, `docker start`, `POST /v2/sandboxes/{id}/connect`), waits until a command runs, reads the address again, then dials. The launcher does not wake hosts by itself; attaching does. Provider scripts keep working as before.
 - **Idle stop, VMs:** a systemd user timer runs `<helper> idle check` every few minutes. With no client connected (no bridge running) and no session working for the idle time (30 minutes by default), it runs `sudo -n systemctl poweroff`. No credential is kept on the host. A new boot starts the count again.
 - **Idle stop, sandboxes:** a lease. While any client is connected, it renews the sandbox's timeout every minute: 60 minutes while a session works, 15 when none does. When nobody renews it, the sandbox pauses with its memory.
@@ -340,3 +377,77 @@ For a host you add yourself, if OpenSSH can reach it, simstim can. [The connecti
 | Herdr | Apache-2.0 | The managed SSH config and banner skipping. Remote install with consent. The reconnect ladder and wake detection. The image paste bridge. The resume table and hooks. The agent detection manifests. Safe file writes. The pane environment clean-up. Exact files are listed in [the Herdr note](../research/herdr.md#83-modules-worth-borrowing). |
 | Amp | Proprietary | **Patterns only, clean-room.** No code, prompts or assets. See [UX](../contributing/ux-spec.md). |
 | VS Code Remote, Zed | — | The login-shell environment resolution. Uploading a versioned server over SSH. |
+
+Policy requests use the host bridge and the session's supervisor. A helper upgrade does not upgrade a running supervisor. Stop and resume a session before adding HTTP method constraints if its supervisor lacks that feature. Programs inside a session cannot use the bridge to read or change sandbox policies.
+
+A walled supervisor owns its native holder lease and opens its early control socket before constructing a runtime. The original outside operation loan and selected start envelope travel on one connection. A VM prepare then binds the actual Start connection to the original protected Need and accepts one exact guest echo. Saved identifiers and expected configuration are data, and cannot issue that operation.
+
+Running fork and checkpoint workers retain the actual accepted native operation, original sender and physical connection. They recheck those original owners after later control frames arrive. Startup account checks remain limited to the pending ready publication.
+A cancelled snapshot transfer keeps the same descriptor reader until the original transfer and cancellation replies have both joined, in either arrival order. The cancellation reply supplies no new operation.
+
+A dedicated command or input continuation starts from its accepted parent
+connection. It keeps that connection's original membership Source and route.
+Its network handshake holds no host publication lock. Short checks before
+startup and after the hello require the same Source, host identity and native
+state references. A later saved host entry cannot replace those facts.
+
+A managed native SSH transport retains its provider's read-only instance and
+configuration pins through the actual command wait. It remains an SSH transport
+for key pinning. This extra restriction grants no membership, cleanup or root
+authority. Config readers share the same active native scope; an ended scope
+cannot open a replacement source. The derived Lima locator name is checked
+against the same complete local secret namespace before use.
+
+The host bridge transfers its input and output files to private helper children. Each child has one byte-copying role. Cancelling I/O closes its private socket and stops the original child; waiting joins that child. Input frames preserve every byte, including the final bytes before EOF.
+An uncertain child exit triggers cancellation before waiting. The native observation error remains in the result.
+
+Live package manager settings come from the supervisor's installed cold-start plan. Session lists do not derive installed settings from a newer policy. Stopped, older or unreachable supervisors report no installed plan. The client validates and owns its display copy.
+
+Process file copies retain their staging directories under the original factory's protected session storage. Guest sources cannot contain that storage. The factory checks original mount identity before it offers atomic replacement. A source on another mount has no persistent copy producer yet. The fresh root keeps its separate masked stage.
+
+Local grant updates stream the existing approval record through the request's parser and index. Unknown metadata stays byte-identical. Unsorted rows use the existing ordering and keep equal rows stable. Duplicate fields fail before the replacement is published. The index closes before the protected file is replaced. After full validation, the writer copies the original root around the grants array. For an existing selected row, it replaces only three validated value spans. Those spans belong to the same parser, source and inspection generation.
+
+Host facts use a versioned metadata schema. Known bits distinguish an unavailable reading from zero. Memory and disk counts use bytes; pressure readings use percentages. These fields grant no session membership or runtime authority.
+
+A saved-image boot keeps the local client pin as a typed part of its original Need. The protected boot owner checks the same saved selection against its actual host domain. The image store separately opens the existing original root, retains its native lease, and verifies the ownership receipt, complete file digest and verity metadata. A projected spec or matching identifier cannot issue that native root.
+
+Image save retains one normal supervisor connection for save, review pages, keep and drop. Its complete review is read in bounded pages from the same original pending save token; page requests never reopen the root or recapture settings. The actual running owner captures a fresh protected primary operation, its original native start connection, public sentinels and cold-start decoys. The guest pins the original merged root and overlay upper before pivot, including the detached reset upper. One bounded immutable advisory changes vector is paged over the existing control protocol. The guest can hide a change from this advisory list, so the saved root remains hostile; host exclusions and secret scanning inspect its whole stream independently. The same reservation supplies its root tar on the existing layer stream. Cancellation joins that exact export before roots or the protected operation close. A failed cancellation retains the source until the same original VMM has positive native exit evidence. No terminal stream is inspected.
+
+The JSON cursor scans ordinary ASCII in its existing read window. It keeps each byte's cancellation check, cursor advance and cache accounting in the original order. Escapes, controls and non-ASCII keep the existing scalar branches.
+
+Frame encoding checks the payload length before adding the type or header sizes. The existing frame limit and wire bytes stay the same. A payload beyond that limit is refused before any transport write.
+
+Placement descriptions use a closed versioned advisory record. Requests own their copy. The description supplies no native source, operation, Need, capacity reservation or start permission.
+
+A cancelled runtime transfer releases its slot after the original fetch cleanup completes. Closing the runtime service joins running transfers before retiring their parts and selected receipts. A status or EOF cannot stand in for that cleanup.
+
+Opted-in attach timing keeps a bounded ring of original supervisor frame
+arrival times. It observes headers and completion, never terminal payloads.
+The controlled conformance fixture joins these host-clock windows to the
+holder's original trace and the client's acknowledgements. Its conservative
+bound avoids subtracting different kernel clocks. Diagnostic readout uses
+the existing authenticated protocol and the trace writer's actual open
+descriptor. No returned path or record can create a native runtime owner.
+
+### 8.4 A joined Mac host
+
+A joined Mac is an outer SSH hop, followed by a plain Lima Linux VM. The
+laptop pins both host-key sets and starts every connection. The Mac account's
+key can reach only the VM's fixed `127.0.0.1` SSH port and the closed
+`facts-v1` action. The existing Linux helper runs in the VM and keeps the same
+terminal, sandbox and admission paths.
+
+The Mac join keeps its own root-owned ahead ledger and original leave helper.
+It installs a hidden standard account with SecureToken disabled, a pinned Lima
+runtime and VM image, a narrow effective sshd policy and a startup job. A fixed
+guard checks the original native account and VM directories, immutable runtime
+and frozen plain profile before restart. Mac battery and sleep facts come
+through that original outer SSH hop and affect advisory health and placement.
+They never replace the Linux guest's memory or native sandbox admission.
+
+The default system daemon and the explicit user launch-agent fallback both
+need manual hardware assurance. The latter gives the Mac's logged-in user
+custody of the VM disk, and reports that warning. Joining never enables Remote
+Login, changes battery policy or unlocks FileVault. After a restart, the user
+unlocks the Mac locally. [Use a Mac as a host](../how-to/a-mac-as-a-host.md)
+describes setup, power, leave and the required checks.

@@ -7,7 +7,7 @@ title: "simstim config"
 Show the configuration.
 
 ```text
-simstim config
+simstim config [flags]
 ```
 
 ## Examples
@@ -30,6 +30,7 @@ simstim config keymap
 
 | Command | What it does |
 | --- | --- |
+| [`config check`](config_check.md) | Find mistakes in the config files, each with its file and line |
 | [`config keymap`](config_keymap.md) | Print the launcher's commands and their keys |
 | [`config path`](config_path.md) | Print where the configuration lives |
 

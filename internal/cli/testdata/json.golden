@@ -1,7 +1,7 @@
 == new box --detach --json --name api --memory-max 256M -- sleep 60
 {
   "v": 1,
-  "address": "box/api",
+  "address": "box/<id>",
   "agent": "shell",
   "alive": true,
   "cols": 80,
@@ -51,6 +51,25 @@
   "ports": [],
   "session": "api"
 }
+== show box/api --json
+{
+  "v": 1,
+  "address": "box/<id>",
+  "agent": "shell",
+  "alive": true,
+  "cols": 80,
+  "created_at": "<created_at>",
+  "cwd": "<cwd>",
+  "host": "box",
+  "host_version": "<host_version>",
+  "id": "<id>",
+  "memory_max": "<memory_max>",
+  "name": "api",
+  "rows": 24,
+  "since": "<since>",
+  "source": "<source>",
+  "state": "<state>"
+}
 == doctor --json
 {
   "v": 1,
@@ -87,7 +106,8 @@
       "IdleStop": "",
       "BusyLease": "",
       "TokenCommand": "",
-      "Stdin": ""
+      "Stdin": "",
+      "Created": ""
     },
     "Name": "box",
     "Provider": null,
@@ -99,7 +119,8 @@
       "provider": "hosttest"
     },
     "name": "box",
-    "ssh": "box"
+    "ssh": "box",
+    "tier": "own"
   }
 ]
 == host test box --json
@@ -153,7 +174,7 @@
   },
   {
     "v": 1,
-    "command": "session: preview",
+    "command": "session: peek",
     "keys": [
       "space"
     ]
@@ -313,6 +334,79 @@
     "keys": []
   }
 ]
+== host show box --json
+{
+  "v": 1,
+  "info": {
+    "agent_versions": {
+      "claude": "2.1.3",
+      "codex": "0.46.0"
+    },
+    "agents": {
+      "claude": "/usr/local/bin/claude",
+      "codex": "/usr/local/bin/codex",
+      "shell": "/bin/bash"
+    },
+    "arch": "amd64",
+    "cpus": 4,
+    "disk_free": 65498251264,
+    "distro": "Debian 13",
+    "hostname": "box",
+    "mem_total": 8589934592,
+    "memory_max": 6551502848,
+    "os": "linux",
+    "user": "dev",
+    "version": "0.1.2"
+  },
+  "labels": {
+    "provider": "gcp",
+    "region": "eu"
+  },
+  "machine": {
+    "id": "box-1a2b",
+    "idle_stop": "2h",
+    "provider": "lima"
+  },
+  "name": "box",
+  "reachable": true,
+  "secrets": [
+    "ANTHROPIC_API_KEY"
+  ],
+  "session_count": 2,
+  "ssh": "dev@203.0.113.7",
+  "ssh_config": "~/src/infra/ssh/config",
+  "tier": "own"
+}
+== host show box --json, when box does not answer
+{
+  "v": 1,
+  "error": "cannot reach box",
+  "labels": {
+    "provider": "gcp",
+    "region": "eu"
+  },
+  "machine": {
+    "id": "box-1a2b",
+    "idle_stop": "2h",
+    "provider": "lima"
+  },
+  "name": "box",
+  "reachable": false,
+  "secrets": [
+    "ANTHROPIC_API_KEY"
+  ],
+  "ssh": "dev@203.0.113.7",
+  "ssh_config": "~/src/infra/ssh/config",
+  "tier": "own",
+  "try": "<name> host doctor box"
+}
+== host upgrade box --json
+{
+  "v": 1,
+  "host": "box",
+  "helper": "0.1.2-1a2b3c4d",
+  "outcome": "installed"
+}
 == errors
 {"v":1,"error":{"code":"host_not_found","kind":"not_found","message":"no host named \"nowhere\"","try":"<name> host add nowhere","exit":3}}
 {"v":1,"error":{"code":"unknown_command","kind":"usage","message":"unknown command \"atach\"","try":"<name> attach --help","exit":2,"suggestions":["attach"]}}

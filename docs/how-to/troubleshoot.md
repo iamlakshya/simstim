@@ -16,6 +16,8 @@ simstim host doctor my-server
 
 ## Let the doctor fix it
 
+If a resume or delete reports that a session is busy, its holder has not confirmed that it stopped. The helper keeps the session and its files. It never kills a process just because the manifest records its number, because that number may now belong to another program. Wait a moment and try again. If it stays busy, run `simstim host doctor <host>` and check the session's log.
+
 Both doctors can fix the common problems they find. Each fix is shown first, with what it does and the command it runs, and runs only when you say yes:
 
 <!-- test: help (it changes the host) -->
@@ -32,10 +34,12 @@ simstim doctor --fix
 | | The `current` helper link is broken, so hooks and the restore unit cannot find the helper: points it at the helper in use. |
 | | Session sockets with no session behind them: removes them. |
 | | Old helper versions that nothing uses: removes them, keeping the newest three and every one in use. Each install does this by itself too. |
-| `doctor --fix` | SSH configs generated for hosts you removed: removes them. |
-| | ControlMaster sockets whose SSH master died, which can make connections hang: removes them. |
+| `doctor --fix` | Unreferenced SSH configs it generated: removes them. Configs that you made, replaced or that another saved host uses stay. |
+| | Dead shared SSH sockets named by the current socket root's ownership index: removes them. Unindexed, replaced or live sockets stay. |
 
 The doctor never uses sudo. When a fix needs root, for example linger on some hosts, it prints the command for you to run. `--yes` applies every fix without asking. In a script, or with `--no-input`, `--fix` needs `--yes`, and fails with exit code 4 without it.
+
+Cancellation stops the next repair from starting. Its message lists repairs already completed. An old SSH file counts as generated only when its header identifies the host. A filename or a generic comment is not enough.
 
 ## Common problems
 
@@ -47,13 +51,13 @@ The doctor never uses sudo. When a fix needs root, for example linger on some ho
 | Asked for a password every time | Load your key into an SSH agent, or use a key without a passphrase for this host. |
 | A key does nothing in the agent | `simstim doctor keys` shows what your terminal sends. Some terminals keep keys for themselves. |
 | Typing in a session lags now and then | Look at the round trip in the launcher. Two numbers with the second in yellow, such as `31/100ms`, mean an uneven link. Some keys then wait much longer than the first number says. That points to the network, such as Wi-Fi or a VPN. [Tracing typing lag](../contributing/debug-trace.md) shows where a key waits. |
-| An agent is "not installed" | `simstim agents install <agent> --host my-server` runs its installer in a session ([install agents](install-agents.md)). An agent installed by hand must be on your `PATH` in a login shell. |
-| An agent asks you to log in | Run its own login in a session; `host doctor` prints the command. |
+| An agent is "not installed" | `simstim agents install <agent> my-server` runs its installer in a session ([install agents](install-agents.md)). An agent installed by hand must be on your `PATH` in a login shell. |
+| An agent asks you to log in | `simstim agents login <agent> my-server` runs its own login in a session. `host doctor` prints the command. |
 | Sessions stop when you log out | Linger is off: `host doctor` says so, and `host doctor --fix` turns it on. |
 | The screen looks wrong after attaching | Detach and attach again. If it stays wrong, open an issue with your terminal's name and version. |
 | A session `ended (out of memory)` | The session's memory cap stopped the agent. Resume it in the same session: `simstim resume my-server/app`, or `u` in the launcher. Claude Code and Codex pick up the same conversation. `--memory-max 4G` gives it a bigger cap ([memory](memory.md#when-the-cap-stops-an-agent)). |
 | A session needs you: "close to its memory cap (2.7 of 2.9 GiB)" | The session's memory cap can soon stop a process, often the agent. Save your work first, then see [when a session comes close to its cap](memory.md#when-a-session-comes-close-to-its-cap). |
-| A session's agent `exited` or crashed | `simstim resume my-server/app`, or `u` in the launcher, starts it again in the same session. `simstim kill my-server/app`, or `d`, removes the session. |
+| A session's agent `exited` or crashed | `simstim resume my-server/app`, or `u` in the launcher, starts it again in the same session. `simstim rm my-server/app`, or `d`, removes the session. |
 | "A process in this session ran out of memory and was stopped" | The cap stopped a process that the agent started, such as a build. The agent runs on, and usually reports the failed step itself. |
 
 ## Logs
@@ -71,3 +75,11 @@ For more, turn on the debug mode: `--debug` on any command, or `simstim debug st
 ## Still stuck
 
 Open an issue with the bug form, and include the output of the three commands at the top, with anything private removed.
+
+## A remote command cannot read or send input
+
+The JSON error code `input_read` means the local input source could not be
+read. Fix that source, then try the command again. `input_send` means not all
+input could be sent to the sandbox. Check the host's status, then retry.
+
+Diagnostic output keeps the original error classification and structured data.

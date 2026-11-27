@@ -71,12 +71,11 @@ func TestEventEnv(t *testing.T) {
 	}
 }
 
-// An event has no word about who wrote its detail yet. That variable,
-// <NAME>_DETAIL_FROM, comes with walled sessions, whose guest writes it
-// (docs/contributing/isolation-spec.md 10.8).
-func TestEventHasNoDetailFrom(t *testing.T) {
-	if _, ok := reflect.TypeOf(Event{}).FieldByName("DetailFrom"); ok {
-		t.Error("Event has DetailFrom")
+// Host detail keeps its old shape. Guest detail explicitly names its source
+// in both machine encodings and the rendered message (isolation spec 10.8).
+func TestEventDistinguishesGuestDetailFromHostDetail(t *testing.T) {
+	if _, ok := reflect.TypeOf(Event{}).FieldByName("DetailFrom"); !ok {
+		t.Error("Event has no detail provenance")
 	}
 	ev := Event{V: 1, Event: NeedsInput, Host: "box", Detail: "Proceed?", Summary: "s"}
 	if j := string(ev.JSON()); strings.Contains(j, "detail_from") {
@@ -84,5 +83,15 @@ func TestEventHasNoDetailFrom(t *testing.T) {
 	}
 	if env := strings.Join(ev.env(), "\n"); strings.Contains(env, "DETAIL_FROM") {
 		t.Errorf("env has DETAIL_FROM:\n%s", env)
+	}
+	ev.DetailFrom = FromGuest
+	if j := string(ev.JSON()); !strings.Contains(j, `"detail_from":"guest"`) {
+		t.Errorf("guest JSON has no detail source: %s", j)
+	}
+	if env := strings.Join(ev.env(), "\n"); !strings.Contains(env, brand.Env("DETAIL_FROM")+"=guest") {
+		t.Errorf("guest environment has no detail source: %s", env)
+	}
+	if !strings.Contains(ev.Text(), "The sandbox says:\nProceed?") {
+		t.Errorf("guest detail was presented as a host fact: %q", ev.Text())
 	}
 }

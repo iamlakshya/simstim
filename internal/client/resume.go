@@ -21,17 +21,112 @@ type ResumeResult = api.ResumeResult
 
 // Resume starts the agent of a session again after it ended, with the
 // agent's own resume command. The caller fetches the session's secrets
-// (Session.Secrets) into a. A MemoryMax of 0 keeps the size the session
-// asked for before, and MemoryAuto asks for the host's default.
+// (Session.Secrets) into a. Zero keeps the previous size unless its sandbox
+// policy changes. MemoryAuto resolves current sandbox defaults. A microvm
+// request names guest RAM; admission adds its exact host reserve.
 func (c *Conn) Resume(ctx context.Context, a ResumeArgs) (*ResumeResult, error) {
+	a = cloneResumeValues(a)
+	ctx, request := ensureGrantRequest(ctx)
+	if err := requireRemoteGrantRequest(ctx); err != nil {
+		return nil, err
+	}
+	if err := requireGrantOperation(ctx, grantOpResume); err != nil {
+		return nil, err
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if err := bindRequestTransportSource(ctx, c); err != nil {
+		return nil, err
+	}
+	ctx, imagePolicy, err := captureResumeImagePolicy(ctx, c, a.ID)
+	if err != nil {
+		return nil, err
+	}
+	ctx, a, err = imagePolicy.arguments(ctx, a)
+	if err != nil {
+		return nil, err
+	}
 	if !c.HasFeature("resume") {
 		return nil, c.tooOldToResume()
 	}
+	if err := c.RequireSecrets(NewArgs{Secrets: a.Secrets}); err != nil {
+		return nil, err
+	}
+	for _, member := range a.Members {
+		if err := c.requireSecretFeature(len(member.Secrets) != 0); err != nil {
+			return nil, err
+		}
+	}
+	if err := checkUncheckedResumeSelection(ctx, c, nil); err != nil {
+		return nil, err
+	}
+	group, err := c.needsResumeMembers(ctx, a.ID)
+	if err != nil {
+		return nil, err
+	}
+	if group || a.Snapshot != nil || a.Members != nil {
+		request.mu.Lock()
+		before := cloneResumeGrantIntent(request.resume)
+		request.mu.Unlock()
+		names := secretMapNames(a.Secrets)
+		if before != nil {
+			names = before.originalNames
+		}
+		intent, _, err := c.prepareResumeMemberSelection(ctx, a.ID, names, actualResumeNames(a))
+		if err != nil {
+			return nil, err
+		}
+		if a.Snapshot != nil && !sameGrantSnapshot(a.Snapshot, intent.snapshot) {
+			return nil, joinIntentError()
+		}
+		a.Snapshot = cloneGrantSnapshot(intent.snapshot)
+	}
+	named, err := prepareResumeNamedSSHKeys(ctx, c, a.ID)
+	if err != nil {
+		return nil, err
+	}
+	ctx, a, err = named.arguments(ctx, c, a)
+	if err != nil {
+		return nil, err
+	}
+	a, err = applyTrustedJudgeResumeV1(ctx, c, a)
+	if err != nil {
+		return nil, err
+	}
+	ctx, release, err := c.beginGrant(ctx, "resume", false)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+	tier, err := c.checkResumeGrants(ctx, a)
+	if err != nil {
+		return nil, err
+	}
+	if err := recordSecretNames(ctx, c.Host, c.HostID(), tier, a.Secrets); err != nil {
+		return nil, err
+	}
+	for _, member := range a.Members {
+		if err := recordSecretNames(ctx, c.Host, c.HostID(), tier, member.Secrets); err != nil {
+			return nil, err
+		}
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	a.Layers = api.ProjectClientImagePolicy(api.ProjectClientInputSources(a.Layers))
 	var r ResumeResult
-	if err := c.Call(ctx, "resume", a, &r); err != nil {
+	if err := c.callWithSent(ctx, "resume", a, &r, release); err != nil {
 		return nil, c.resumeError(err)
 	}
 	if err := checkSessionID(c.Host.Name, r.Session.ID); err != nil {
+		return nil, err
+	}
+	if a.Snapshot != nil && r.Session.ID != a.ID {
+		return nil, &UserError{Msg: "the helper returned another sandbox member after resume",
+			Hint: "List sessions and use the original member's address.", Code: "protocol", Kind: KindRefused}
+	}
+	if err := checkTrustedJudgeAcknowledgedV1(ctx, c, r.Session.SecretState); err != nil {
 		return nil, err
 	}
 	return &r, nil
@@ -61,13 +156,68 @@ func (c *Conn) tooOldToResume() error {
 // a name that no secret could have. The error shows it quoted, since it
 // comes from the host and could hold escapes for the terminal.
 func ResumeSecrets(h Host, s Session, passed []string) ([]string, error) {
+	return ResumeSecretsContext(context.Background(), h, s, passed)
+}
+
+// ResumeSecretsContext is ResumeSecrets with a context for policy reads
+// and one command's terminal confirmations. Every context-bearing caller
+// must use it rather than dropping that context at the gate.
+func ResumeSecretsContext(ctx context.Context, h Host, s Session, passed []string) ([]string, error) {
+	ctx, _ = ensureGrantRequest(ctx)
+	if err := requireGrantOperation(ctx, grantOpResume); err != nil {
+		return nil, err
+	}
+	names, err := ResumeSecretNames(h, s, passed)
+	if err != nil {
+		return nil, err
+	}
+	if err := bindRequestLocalSource(ctx, h); err != nil {
+		return nil, err
+	}
+	_, hostID, err := grantHostTier(ctx, h)
+	if err != nil {
+		return nil, err
+	}
+	tier, p, err := EffectiveSessionTier(ctx, h, s.ID, hostID)
+	if err != nil {
+		return nil, err
+	}
+	if err := bindLegacyResumeIntent(ctx, h, hostID, s.ID, names, p); err != nil {
+		return nil, err
+	}
+	settings := LoadSettings()
+	if err := allowResumeSecretNames(ctx, h, hostID, tier, settings, names, p); err != nil {
+		return nil, err
+	}
+	if p != nil && p.SSHAgent {
+		if err := allowRequestGrant(ctx, h, hostID, tier, Outbound{Kind: OutboundSSHAgent}, settings); err != nil {
+			return nil, err
+		}
+	}
+	return names, nil
+}
+
+// ResumeSecretNames checks the names a host asks to fetch without reading
+// policy or state. The real fetch and the RPC must still enforce the gate.
+func ResumeSecretNames(h Host, s Session, passed []string) ([]string, error) {
 	own := SecretNames(h, nil)
+	sessName := resumeOneLine(s.Name)
+	hostName := resumeOneLine(h.Name)
+	addr, addrOK := validResumeAddr(h.Name, s.ID)
 	var names, missing []string
 	for _, n := range s.Secrets {
 		switch {
 		case !secretNameRE.MatchString(n):
-			return nil, &UserError{Msg: fmt.Sprintf("%s on %s asks for a secret named %+q, which is not a name", CleanLine(s.Name), h.Name, n),
-				Hint: fmt.Sprintf("Run %s kill %s, then start a new session.", brand.Name, CommandTarget(h.Name, s.ID)), Code: "bad_secret", Kind: KindUsage}
+			hint := ""
+			if addrOK {
+				hint = fmt.Sprintf("Delete the session with %s rm %s, then start a new one.", brand.Name, addr)
+			}
+			return nil, &UserError{
+				Msg:  fmt.Sprintf("%s on %s asks for a secret named %q, which is not a name", sessName, hostName, n),
+				Hint: resumeHintOrLs(h.Name, hint),
+				Code: "bad_secret",
+				Kind: KindUsage,
+			}
 		case slices.Contains(own, n), slices.Contains(passed, n):
 			names = append(names, n)
 		default:
@@ -78,9 +228,35 @@ func ResumeSecrets(h Host, s Session, passed []string) ([]string, error) {
 		return names, nil
 	}
 	flags := "--secret " + strings.Join(missing, " --secret ")
+	hint := ""
+	if addrOK {
+		hint = fmt.Sprintf("%s resume %s %s (passes them, if you trust %s with them)", brand.Name, addr, flags, hostName)
+	}
 	return nil, &UserError{
-		Msg:  fmt.Sprintf("%s on %s asks for secrets that hosts.toml does not give %s: %s", CleanLine(s.Name), h.Name, h.Name, strings.Join(missing, ", ")),
-		Hint: fmt.Sprintf("%s resume %s %s (passes them, if you trust %s with them)", brand.Name, CommandTarget(h.Name, s.ID), flags, h.Name),
+		Msg:  fmt.Sprintf("%s on %s asks for secrets that hosts.toml does not give %s: %s", sessName, hostName, hostName, strings.Join(missing, ", ")),
+		Hint: resumeHintOrLs(h.Name, hint),
 		Code: "secrets_missing",
 	}
+}
+
+func resumeOneLine(s string) string {
+	return api.CleanText(strings.NewReplacer("\r\n", " ", "\n", " ", "\r", " ", "\t", " ").Replace(s), 200)
+}
+
+func validResumeAddr(host, id string) (string, bool) {
+	if !ValidHostName(host) || !api.ValidSessionID(id) {
+		return "", false
+	}
+	address := host + "/" + id
+	return address, ShellWord(address) == address
+}
+
+func resumeHintOrLs(host, hint string) string {
+	if hint != "" && !strings.ContainsAny(hint, "\r\n\t") && api.CleanText(hint, 4000) == hint {
+		return hint
+	}
+	if ValidHostName(host) {
+		return brand.Name + " ls " + host + " (lists sessions to check the ID)"
+	}
+	return brand.Name + " ls (lists sessions to check the ID)"
 }

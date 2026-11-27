@@ -8,23 +8,34 @@ cd "$(dirname "$0")/.."
 name=$(sed -n 's/^const Name = "\(.*\)"/\1/p' internal/brand/brand.go)
 module=$(sed -n 's/^module //p' go.mod)
 if [ -z "$name" ]; then
-    echo "check-name: cannot read the name from internal/brand/brand.go" >&2
+    echo "Error: cannot read the name from internal/brand/brand.go." >&2
+    echo "Try: use a complete source tree, then run the check again." >&2
     exit 2
 fi
 
+files=$(mktemp)
+trap 'rm -f "$files"' EXIT
+bash scripts/source-files.sh -- '*.go' 'justfile' '.goreleaser.yaml' '.github/workflows/*.yml' 'scripts/*.sh' 'install.sh' 'test/e2e/*.py' 'vt/*.zig' 'vt/src/*.zig' 'vt/build.zig.zon' 'internal/*/testdata/*/*.py' 'site/astro.config.mjs' 'site/package.json' 'site/src/*' 'scripts/*.py' >"$files"
 fail=0
-while IFS= read -r file; do
+checked=0
+while IFS= read -r -d '' file; do
     case "$file" in
-        internal/brand/*) continue ;;
+        internal/brand/* | scripts/check-name.sh | scripts/rename.sh) continue ;;
     esac
+    checked=$((checked + 1))
     # Drop the module path, then look for the name in any case.
-    hits=$(sed "s#${module}##g" "$file" | grep -n -i -- "$name" || true)
+    hits=$(sed "s#${module}##g" "./$file" | grep -n -i -- "$name" || true)
     if [ -n "$hits" ]; then
         echo "$file:"
         echo "$hits" | sed 's/^/  /'
         fail=1
     fi
-done < <(git ls-files --cached --others --exclude-standard -- '*.go' 'justfile' '.goreleaser.yaml' '.github/workflows/*.yml' 'scripts/*.sh' 'install.sh' 'test/e2e/*.py' 'vt/*.zig' 'vt/src/*.zig' 'vt/build.zig.zon' 'internal/*/testdata/*/*.py' 'site/astro.config.mjs' 'site/package.json' 'site/src/*' 'scripts/*.py' | grep -v '^scripts/check-name.sh$' | grep -v '^scripts/rename.sh$')
+done <"$files"
+if [ "$checked" -eq 0 ]; then
+    echo "Error: the name check selected no source files." >&2
+    echo "Try: use a complete source tree, then run the check again." >&2
+    exit 2
+fi
 
 if [ "$fail" -ne 0 ]; then
     echo

@@ -14,6 +14,7 @@ simstim host test <host> [flags]
 
 ```sh
 simstim host test my-vps
+simstim host test my-vps --reconnect
 simstim host test my-vps --json
 ```
 
@@ -22,6 +23,7 @@ simstim host test my-vps --json
 | Flag | What it does |
 | --- | --- |
 | `--json` | print JSON for scripts, and ask nothing (see docs/how-to/scripting.md) |
+| `--reconnect` | close the shared SSH connection first, then test a new one |
 
 ## Flags from the parent command
 

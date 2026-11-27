@@ -36,3 +36,7 @@ The guard errs on the side of refusing. Terminals read some sequences in differe
 If the guard refused a file that you want the agent to have, copy the file to the host yourself.
 
 The guard stops uploads. It does not stop a session from writing to your clipboard. To be asked before each write, change your terminal's setting, such as `clipboard-write = ask` in Ghostty.
+
+For a sandboxed session, the supervisor sends each upload to the guest through a separate file stream. The returned path is in the guest's paste folder, so the agent can read it. The upload never becomes a path in the host's session folder.
+
+The default sandbox policy accepts PNG, JPEG, GIF, WebP and PDF bytes. A file's extension cannot override this check. Set `sandbox.paste = "any"` in a trusted policy layer before starting the sandbox to accept other file types. A cancelled or incomplete upload has no completed file receipt.

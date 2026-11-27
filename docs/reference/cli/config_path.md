@@ -7,7 +7,7 @@ title: "simstim config path"
 Print where the configuration lives.
 
 ```text
-simstim config path
+simstim config path [flags]
 ```
 
 ## Examples

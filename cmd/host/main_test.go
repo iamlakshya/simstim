@@ -53,3 +53,15 @@ func TestNewArgsMemoryMax(t *testing.T) {
 		}
 	}
 }
+
+// The helper's own `new` takes the client's names for the setup script's
+// answer, which its hint names, and its old names still work.
+func TestNewArgsSetupScript(t *testing.T) {
+	for flag, want := range map[string]string{
+		"--setup-script": api.SetupRun, "--no-setup-script": api.SetupSkip, "--setup": api.SetupRun, "--no-setup": api.SetupSkip,
+	} {
+		if a, err := newArgs([]string{flag}); err != nil || a.Setup != want {
+			t.Errorf("new %s = %q, %v, want %q", flag, a.Setup, err, want)
+		}
+	}
+}

@@ -15,9 +15,11 @@ import (
 // too.
 
 // endMessage is what attach prints when the agent of the session id ended,
-// with the step to try next when there is one.
+// with the step to try next when there is one. The step names the session
+// by host/ID, so id is the ID as the host sent it.
 func endMessage(name, host, id string, e *proto.Ended) string {
-	name = client.CleanLine(name)
+	rawHost := host
+	name, host = shownShort(name), shownShort(host)
 	if e.ExitCode == -1 {
 		return fmt.Sprintf("\r\nThe session %s on %s stopped.\n", name, host)
 	}
@@ -25,11 +27,13 @@ func endMessage(name, host, id string, e *proto.Ended) string {
 	if e.OOM {
 		why = "out of memory"
 	} else if e.Signal != "" {
-		why = client.CleanLine(e.Signal)
+		why = shown(e.Signal)
 	}
 	s := fmt.Sprintf("\r\nThe session %s on %s ended (%s).\n", name, host, why)
-	if hint := client.EndHint(e, client.CommandTarget(host, id)); hint != "" {
-		s += "\nTry: " + hint + "\n"
+	if addr, ok := idAddress(rawHost, id); ok {
+		if hint := client.EndHint(e, addr); hint != "" {
+			s += "\nTry: " + printedOr(rawHost, hint) + "\n"
+		}
 	}
 	return s
 }
@@ -37,7 +41,7 @@ func endMessage(name, host, id string, e *proto.Ended) string {
 // stateLabel is a session's state as ls prints it, with why its agent
 // ended: "errored (out of memory)", "errored (killed)".
 func stateLabel(s client.Session) string {
-	st := strings.ReplaceAll(s.State, "_", " ")
+	st := strings.ReplaceAll(shown(s.State), "_", " ")
 	if why := endCause(s); why != "" {
 		return st + " (" + why + ")"
 	}
@@ -56,11 +60,11 @@ func endCause(s client.Session) string {
 	var why string
 	switch {
 	case s.State == api.StateLost:
-		why = s.Reason
+		why = shown(s.Reason)
 	case client.CapStopped(s):
 		why = "out of memory"
 	case s.Signal != "":
-		why = s.Signal
+		why = shown(s.Signal)
 	case s.ExitCode != nil && *s.ExitCode != 0:
 		why = fmt.Sprintf("exit code %d", *s.ExitCode)
 	}
@@ -81,11 +85,11 @@ func endedError(h client.Host, row client.Session) error {
 	if why == "" && s.ExitCode != nil {
 		why = fmt.Sprintf("exit code %d", *s.ExitCode)
 	}
-	msg := fmt.Sprintf("the session %s on %s ended", s.Name, h.Name)
+	msg := fmt.Sprintf("the session %s on %s ended", shownShort(nameOf(s)), shownShort(h.Name))
 	if why != "" {
 		msg += " (" + why + ")"
 	}
-	ref := client.CommandTarget(h.Name, row.ID)
+	ref, ok := idAddress(h.Name, row.ID)
 	resume := brand.Name + " resume " + ref
 	hint := client.SessionEndHint(s, ref)
 	switch {
@@ -93,9 +97,12 @@ func endedError(h client.Host, row client.Session) error {
 	case s.State == api.StateLost:
 		hint = fmt.Sprintf("%s, or %s host restore %s --all (brings back every lost session)", resume, brand.Name, h.Name)
 	case client.CleanExit(s):
-		hint = fmt.Sprintf("%s, or %s kill %s (removes it)", resume, brand.Name, ref)
+		hint = fmt.Sprintf("%s, or %s rm %s (removes it)", resume, brand.Name, ref)
 	default:
 		hint = resume
 	}
-	return &client.UserError{Msg: msg, Hint: hint, Code: "session_ended"}
+	if !ok {
+		hint = lsOf(h.Name)
+	}
+	return &client.UserError{Msg: msg, Hint: printedOr(h.Name, hint), Code: "session_ended"}
 }

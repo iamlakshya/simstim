@@ -3,6 +3,7 @@ package link
 import (
 	"encoding/binary"
 	"fmt"
+	"io"
 
 	"github.com/iamlakshya/simstim/internal/proto"
 	"github.com/iamlakshya/simstim/internal/version"
@@ -18,14 +19,35 @@ const (
 	maxBatch = 256 << 10
 )
 
+// sessionWriter admits an actual raw write under the logical-state lock.
+// The one writer retains its buffer through the syscall. Abort revokes queued
+// work, while the transport owner must close and join already admitted I/O.
+type sessionWriter struct{ session *Session }
+
+func (w sessionWriter) Write(p []byte) (int, error) {
+	s := w.session
+	s.mu.Lock()
+	if s.closed {
+		err := s.err
+		s.mu.Unlock()
+		return 0, err
+	}
+	s.mu.Unlock()
+	return s.conn.Write(p)
+}
+
 // writeLoop sends this side's hello, then the frames of the streams, until
 // the link ends. It is the only writer of the connection.
 func (s *Session) writeLoop() {
 	h := proto.Hello{Magic: proto.Magic, Protocol: version.Protocol, Version: version.Version, Role: s.side.String()}
-	if err := proto.NewWriter(s.conn).WriteJSON(proto.THello, h); err != nil {
+	if err := proto.NewWriter(sessionWriter{s}).WriteJSON(proto.THello, h); err != nil {
 		s.fail(fmt.Errorf("link: send the hello: %w", err))
 		return
 	}
+	s.writeContinuation()
+}
+
+func (s *Session) writeContinuation() {
 	for {
 		select {
 		case <-s.wake:
@@ -33,15 +55,24 @@ func (s *Session) writeLoop() {
 			return
 		}
 		for {
+			request, stream, release := s.takeGuardedOpen()
+			s.armGuardedWrite(request)
 			b, seq := s.build()
 			if len(b) == 0 {
+				s.finishGuardedOpen(request, stream, release, s.Err())
 				break
 			}
-			if _, err := s.conn.Write(b); err != nil {
+			n, err := (sessionWriter{s}).Write(b)
+			if err == nil && n != len(b) {
+				err = io.ErrShortWrite
+			}
+			if err != nil {
 				s.fail(fmt.Errorf("link: write: %w", err))
+				s.finishGuardedOpen(request, stream, release, err)
 				return
 			}
 			s.wrote(seq)
+			s.finishGuardedOpen(request, stream, release, nil)
 		}
 	}
 }
@@ -51,6 +82,9 @@ func (s *Session) writeLoop() {
 func (s *Session) wrote(seq uint64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.aborted {
+		return
+	}
 	s.written = seq
 	s.progress.wake()
 }
@@ -127,6 +161,9 @@ func (s *Session) pop() *Stream {
 // schedule queues st for the writer when it has a frame to send. Under
 // s.mu.
 func (s *Session) schedule(st *Stream) {
+	if s.closed {
+		return
+	}
 	if st.queued || !st.sendable() {
 		return
 	}

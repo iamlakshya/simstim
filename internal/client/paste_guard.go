@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/iamlakshya/simstim/internal/credentialpaths"
 )
 
 // The paste guard (spec 7.6, guarantee G10) keeps a drop from uploading a
@@ -255,7 +257,7 @@ func readDropped(f *os.File, limit int) (data []byte, ok bool, err error) {
 
 // privateFolders are the folders in the home folder whose files are never
 // uploaded, and privateNames the names (spec 7.6).
-var privateFolders = []string{".ssh", ".aws", ".config", ".gnupg", ".kube", ".docker", "Library/Keychains"}
+var privateFolders = credentialpaths.Folders()
 
 // openDropped opens a dropped file for upload, or says why it must stay on
 // the laptop. It checks the path as given and the path with every link
@@ -340,45 +342,7 @@ func inPrivateFolder(path string, folders []privateFolder) string {
 // compares with Unicode case folding, as a file system that ignores case
 // does, so "ſ" counts as "s".
 func privateName(name string) string {
-	pattern := ""
-	switch {
-	case strings.EqualFold(name, ".env"):
-		pattern = ".env"
-	case foldPrefix(name, ".env.") && !envTemplate(name):
-		pattern = ".env.*"
-	case foldSuffix(name, ".pem"):
-		pattern = "*.pem"
-	case foldSuffix(name, ".key"):
-		pattern = "*.key"
-	case foldPrefix(name, "id_"):
-		pattern = "id_*"
-	case foldPrefix(name, "credentials"):
-		pattern = "credentials*"
-	default:
-		return ""
-	}
-	return "has a private name (" + pattern + ")"
-}
-
-// envTemplate reports whether a .env.* file is one of the three names that
-// by custom hold no secret (question 109).
-func envTemplate(name string) bool {
-	for _, t := range []string{".env.example", ".env.sample", ".env.template"} {
-		if strings.EqualFold(name, t) {
-			return true
-		}
-	}
-	return false
-}
-
-func foldPrefix(s, prefix string) bool {
-	r, p := []rune(s), []rune(prefix)
-	return len(r) >= len(p) && strings.EqualFold(string(r[:len(p)]), prefix)
-}
-
-func foldSuffix(s, suffix string) bool {
-	r, p := []rune(s), []rune(suffix)
-	return len(r) >= len(p) && strings.EqualFold(string(r[len(r)-len(p):]), suffix)
+	return credentialpaths.PrivateName(name)
 }
 
 // tildePath shortens a path in the home folder to ~/….

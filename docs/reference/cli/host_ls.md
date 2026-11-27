@@ -36,8 +36,8 @@ simstim host ls --json
 
 These still work, and print a warning on stderr, until their end.
 
-| Old | New | Works until |
-| --- | --- | --- |
-| the Go keys of "host ls --json" | snake_case keys | v0.4.0 and 11 November 2027, whichever comes later |
+| Old | New | Works until | Note |
+| --- | --- | --- | --- |
+| the Go keys of "host ls --json" | snake_case keys | v0.4.0 and 11 November 2027, whichever comes later |  |
 
 Part of [`host`](host.md): add, create, list, test and remove hosts.

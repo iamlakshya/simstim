@@ -29,8 +29,7 @@ func (s *setupAsk) key(m *Model, k tea.KeyPressMsg) tea.Cmd {
 	case "n":
 		run = false
 	case "esc", "q":
-		m.cancelStart(s.startReq)
-		return nil
+		return m.cancelStart(s.startReq)
 	default:
 		return nil
 	}
@@ -77,17 +76,17 @@ func (s *setupAsk) view(m *Model) string {
 	var first string
 	switch s.past() {
 	case client.SetupChanged:
-		first = "The setup script of " + repo + " on " + s.host + " changed after you trusted it: " + script + "."
+		first = "The setup script of " + repo + " on " + shown(s.host) + " changed after you trusted it: " + script + "."
 	case client.SetupUnchecked:
-		first = "You trusted the setup script of " + repo + " on " + s.host + " before this version checked its content: " + script + "."
+		first = "You trusted the setup script of " + repo + " on " + shown(s.host) + " before this version checked its content: " + script + "."
 	case client.SetupNotTrusted:
-		first = "The repository " + repo + " on " + s.host + " has a setup script, " + script + "."
+		first = "The repository " + repo + " on " + shown(s.host) + " has a setup script, " + script + "."
 	}
 	body := make([]string, 1, 14) // a blank line first
 	lines := []string{
 		first,
 		"It runs in the session before the agent, as you, with the session's environment and secrets. Say yes only for a repository you trust.",
-		"The answer is kept for this repository on " + s.host + " until the script changes.",
+		"The answer is kept for this repository on " + shown(s.host) + " until the script changes.",
 	}
 	// Where a worktree that the start could not remove stays (host text).
 	if s.q.Kept != "" {
@@ -102,7 +101,7 @@ func (s *setupAsk) view(m *Model) string {
 
 // setupSkipAsk offers to start without the repository's scripts, when one
 // of them cannot run: it leads outside the repository (setup_outside), or
-// it cannot be read (setup_unreadable). The error's hint names --no-setup,
+// it cannot be read (setup_unreadable). The error's hint names --no-setup-script,
 // which the launcher has no flag for: this is the launcher's way to it.
 type setupSkipAsk struct {
 	startReq
@@ -126,7 +125,7 @@ func (s *setupSkipAsk) key(m *Model, k tea.KeyPressMsg) tea.Cmd {
 		r.args.Setup = api.SetupSkip
 		return m.startAgain(r)
 	case "n", "esc", "q":
-		m.cancelStart(s.startReq)
+		return m.cancelStart(s.startReq)
 	}
 	return nil
 }
@@ -136,7 +135,7 @@ func (s *setupSkipAsk) view(m *Model) string {
 	body := make([]string, 1, 12) // a blank line first
 	for _, l := range []string{
 		sentence(s.err.Msg),
-		"Start the session without the repository's setup scripts? Your own hooks on " + s.host + " still run.",
+		"Start the session without the repository's setup scripts? Your own hooks on " + shown(s.host) + " still run.",
 	} {
 		body = append(body, wrap(l, w-4)...)
 		body = append(body, "")

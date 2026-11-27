@@ -26,7 +26,7 @@ The script must be a file in the repository. It can be a relative symlink to ano
 ```text
 Error: the setup script of /home/me/src/app, .simstim/setup, points outside the repository, so it cannot run
 
-Try: Make .simstim/setup a file in the repository, or start with --no-setup.
+Try: Make .simstim/setup a file in the repository, or start with --no-setup-script.
 ```
 
 A symlink out of the repository to nothing, or to a file that is not executable, counts as no script, because it could not run. The session then starts as in a repository with no script.
@@ -68,22 +68,22 @@ The repository /home/me/src/app on my-server has a setup script:
 
 It runs in the session before the agent, as you, with the session's environment and
 secrets. Say yes only for a repository you trust. The answer is kept for this
-repository on my-server until the script changes; --setup and --no-setup override it.
+repository on my-server until the script changes; --setup-script and --no-setup-script override it.
 
 Run it? [y/N]
 ```
 
 The launcher asks the same in a dialog, from the quick start and from the form. The answer is kept on your laptop, in `~/.local/state/simstim/setup-trust.json`, and every worktree of the repository shares it. To change an answer, edit or delete that file.
 
-For one session, `--setup` runs the script and `--no-setup` skips it, whatever the answer:
+For one session, `--setup-script` runs the script and `--no-setup-script` skips it, whatever the answer:
 
 <!-- test: help (needs a host and a repository) -->
 ```sh
-simstim new my-server --agent claude --dir ~/src/app --worktree --setup
-simstim new my-server --agent claude --dir ~/src/app --no-setup
+simstim new my-server --agent claude --dir ~/src/app --worktree --setup-script
+simstim new my-server --agent claude --dir ~/src/app --no-setup-script
 ```
 
-Without a terminal to ask on, for example in a script, with its output in a pipe or with `--no-input`, `new` skips a script you have not answered for, or one that changed after your yes, and says so on stderr. `--no-setup` and a no read no script, so they also start a session whose script cannot run.
+Without a terminal to ask on, for example in a script, with its output in a pipe or with `--no-input`, `new` skips a script you have not answered for, or one that changed after your yes, and says so on stderr. `--no-setup-script` and a no read no script, so they also start a session whose script cannot run.
 
 ### A changed script asks again
 

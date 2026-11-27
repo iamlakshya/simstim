@@ -4,6 +4,10 @@
 # checksums, signature or archive were changed. Needs goreleaser and Zig 0.17.
 set -euo pipefail
 cd "$(dirname "$0")/.."
+go_build_toolchain=$(sh scripts/go-build-tags.sh toolchain)
+export GOTOOLCHAIN="$go_build_toolchain"
+go_build_tags=$(sh scripts/go-build-tags.sh)
+export GO_BUILD_TAGS="$go_build_tags"
 
 APP_NAME=$(sed -n 's/^const Name = "\(.*\)"/\1/p' internal/brand/brand.go)
 MODULE=$(sed -n 's/^module //p' go.mod)
@@ -17,10 +21,26 @@ cleanup() {
 }
 trap cleanup EXIT
 
-echo "test-install: building a snapshot release"
-goreleaser release --snapshot --clean --skip=publish,sign,sbom >"$work/build.log" 2>&1 ||
-    { cat "$work/build.log" >&2; exit 1; }
-version=$(sed -n 's/.*"version":"\([^"]*\)".*/\1/p' dist/metadata.json)
+snapshot=${INSTALL_SNAPSHOT_DIR:-}
+if [ -n "$snapshot" ]; then
+    case "$snapshot" in /*) ;; *)
+        echo 'test-install: prepared snapshot path must be absolute. Try: use the original current-source CI snapshot artifact.' >&2
+        exit 1 ;; esac
+    if [ ! -d "$snapshot" ] || [ -L "$snapshot" ]; then
+        echo 'test-install: prepared snapshot is not an ordinary directory. Try: restore the actual current-source snapshot artifact.' >&2
+        exit 1
+    fi
+else
+    echo "test-install: building a snapshot release"
+    goreleaser release --snapshot --clean --skip=publish,sign,sbom >"$work/build.log" 2>&1 ||
+        { cat "$work/build.log" >&2; exit 1; }
+    snapshot=$(cd dist && pwd -P)
+fi
+version=$(sed -n 's/.*"version":"\([^"]*\)".*/\1/p' "$snapshot/metadata.json")
+if [ -z "$version" ]; then
+    echo 'test-install: snapshot metadata has no actual version. Try: preserve and inspect the original GoReleaser snapshot.' >&2
+    exit 1
+fi
 
 # Two throwaway keys stand in for the release keys, as while a rotation lists
 # the old key and the new one.
@@ -29,7 +49,7 @@ ssh-keygen -q -t ed25519 -N '' -C test2 -f "$work/key2"
 signers="release namespaces=\"file\" $(cut -d' ' -f1,2 "$work/key.pub")
 release namespaces=\"file\" $(cut -d' ' -f1,2 "$work/key2.pub")"
 mkdir "$work/www"
-cp dist/*.tar.gz dist/checksums.txt "$work/www/"
+cp "$snapshot"/*.tar.gz "$snapshot/checksums.txt" "$work/www/"
 ssh-keygen -q -Y sign -n file -f "$work/key" "$work/www/checksums.txt"
 
 port=$((20000 + RANDOM % 20000))

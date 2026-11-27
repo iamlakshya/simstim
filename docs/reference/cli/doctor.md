@@ -10,7 +10,7 @@ Check this machine and its terminal.
 simstim doctor [flags]
 ```
 
-Checks this computer: ssh, the config files and the secrets' commands. With `--fix` it offers to fix what it can: SSH configs it generated for hosts you removed, and ControlMaster sockets whose master died. Each fix is shown before it runs. `host doctor <host>` checks a host.
+Checks this computer: ssh, the config files and the secrets' commands. With `--fix` it offers to fix what it can: SSH configs it generated that no saved host references, and owned ControlMaster sockets whose master died. A saved host's references stay. It never removes an SSH config that you made. Each fix is shown before it runs. `host doctor <host>` checks a host.
 
 ## Examples
 
@@ -26,7 +26,7 @@ simstim doctor --json
 | --- | --- |
 | `--fix` | offer to fix the problems found, one by one |
 | `--json` | print JSON for scripts, and ask nothing (see docs/how-to/scripting.md) |
-| `-y`, `--yes` | with `--fix`, apply every fix without asking |
+| `-y`, `--yes` | answer yes to every question: apply each fix that `--fix` offers |
 
 ## Flags from the parent command
 

@@ -1,0 +1,95 @@
+version = 1
+
+[[tool]]
+name = "npm"
+sources = ["https://docs.npmjs.com/cli/v11/using-npm/config", "https://docs.npmjs.com/cli/v12/configuring-npm/npmrc"]
+[[tool.env]]
+name = "npm_config_ignore_scripts"
+value = "true"
+mode = "guarded"
+case_insensitive = true
+[[tool.env]]
+name = "npm_config_min_release_age"
+value = "{{days}}"
+mode = "guarded"
+age = true
+case_insensitive = true
+
+[[tool]]
+name = "pnpm"
+sources = ["https://pnpm.io/configuring", "https://pnpm.io/settings/dependency-resolution", "https://pnpm.io/settings/build"]
+[[tool.file]]
+paths = [".config/pnpm/config.yaml"]
+base = "ignoreScripts: true\n"
+age_line = "minimumReleaseAge: {{minutes}}\n"
+
+[[tool]]
+name = "yarn"
+sources = ["https://yarnpkg.com/configuration/yarnrc"]
+[[tool.env]]
+name = "YARN_ENABLE_SCRIPTS"
+value = "false"
+mode = "guarded"
+[[tool.env]]
+name = "YARN_NPM_MINIMAL_AGE_GATE"
+value = "{{minutes}}"
+mode = "guarded"
+age = true
+
+[[tool]]
+name = "bun"
+sources = ["https://bun.com/docs/runtime/bunfig", "https://bun.com/docs/pm/lifecycle"]
+[[tool.env]]
+name = "NPM_CONFIG_IGNORE_SCRIPTS"
+value = "true"
+mode = "guarded"
+[[tool.file]]
+paths = [".bunfig.toml", ".config/.bunfig.toml"]
+base = "[install]\nignoreScripts = true\n"
+age_line = "minimumReleaseAge = {{seconds}}\n"
+
+[[tool]]
+name = "pip"
+sources = ["https://pip.pypa.io/en/stable/user_guide/", "https://pip.pypa.io/en/stable/cli/pip_install/"]
+[[tool.env]]
+name = "PIP_UPLOADED_PRIOR_TO"
+value = "{{cutoff}}"
+mode = "guarded"
+age = true
+[[tool.env]]
+name = "PIP_ONLY_BINARY"
+value = ":all:"
+mode = "strict"
+
+[[tool]]
+name = "uv"
+sources = ["https://docs.astral.sh/uv/reference/environment/", "https://docs.astral.sh/uv/reference/settings/"]
+[[tool.env]]
+name = "UV_EXCLUDE_NEWER"
+value = "{{cutoff}}"
+mode = "guarded"
+age = true
+[[tool.env]]
+name = "UV_NO_BUILD"
+value = "1"
+mode = "strict"
+
+[[tool]]
+name = "go"
+sources = ["https://go.dev/doc/toolchain", "https://go.dev/ref/mod"]
+[[tool.env]]
+name = "GOTOOLCHAIN"
+value = "local"
+mode = "guarded"
+[[tool.env]]
+name = "GOPROXY"
+value = "https://proxy.golang.org"
+mode = "guarded"
+[[tool.env]]
+name = "GOSUMDB"
+value = "sum.golang.org"
+mode = "guarded"
+[[tool.env]]
+name = "GOVCS"
+value = "*:off"
+mode = "guarded"

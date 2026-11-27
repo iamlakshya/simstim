@@ -1,0 +1,22 @@
+# Public pinned inputs for joined Apple silicon Mac hosts. The mirror keeps
+# both byte identities unchanged in this project's signed release.
+version = 1
+
+[lima]
+name = "lima"
+version = "2.3.0"
+arch = "arm64"
+url = "https://github.com/lima-vm/lima/releases/download/v2.3.0/lima-2.3.0-Darwin-arm64.tar.gz"
+sha256 = "b7af444bd8f91d3c307477e562f2cf3bd7595d62b9429185e4fa841563578cfc"
+size = 50317981
+asset = "lima-2.3.0-Darwin-arm64.tar.gz"
+
+[image]
+name = "lima-ubuntu"
+version = "26.04-20261016"
+arch = "arm64"
+url = "https://cloud-images.ubuntu.com/releases/resolute/release-20261016/ubuntu-26.04-server-cloudimg-arm64.img"
+sha256 = "8eb876c2ccc4b6ff89e4a65d511815923b285e04503ba465809bf587f763da24"
+size = 940373504
+asset = "lima-ubuntu-26.04-20261016-arm64.img"
+released = "2026-10-16"

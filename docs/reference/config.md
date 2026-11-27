@@ -7,12 +7,21 @@ weight: 2
 
 simstim reads two files from `~/.config/simstim/` (or `$XDG_CONFIG_HOME/simstim/`). `simstim config path` prints where they are.
 
+`simstim config check` reads both files, and prints each mistake with its file and line. It finds TOML errors, unknown keys, values of the wrong type or outside their list, and hosts without a usable name or `ssh`. For an unknown key, it names the nearest known key. A `hosts.toml` that does not decode stops every command that reads it. A `config.toml` that does not decode, or cannot be read, stops nothing: each command warns, and uses the defaults. The launcher shows the warning as a notice.
+
 ## config.toml
 
 Your preferences. Every key is optional; a missing key takes its default.
 
 | Key | Type | Default | What it does |
 | --- | --- | --- | --- |
+| `machines.e2b.token_command` | string | — | Prints the API key. Empty uses E2B_API_KEY or the E2B CLI login. |
+| `machines.e2b.template` | string | — | Selects the E2B template. Empty uses host create e2b's default. |
+| `placement` | PlacementSettings | — | Selects the order and wake policy of new auto. |
+| `images.fetch` | string | `"auto"` | Is auto, host or laptop. Auto uses the host when it can reach the release, then falls back to the laptop once if that fetch fails. Host downloads on the host. Laptop copies checked files from here. |
+| `lock` | value | — | Fixes values and denies that narrower layers may not change. |
+| `profiles` | table | — | Names policy layers selected after the repository. |
+| `repos` | table | — | Names policy layers by origin, without a scheme or .git. |
 | `ui.motion` | string | `"auto"` | Turns the launcher's animation on or off: "auto" (off inside SSH sessions, Emacs and JetBrains terminals, and with NO_COLOR or TERM=dumb), "on" or "off". |
 | `attach.detach_key` | string | `"ctrl+\"` | Leaves the session and keeps it running. Press it twice to send it to the agent. |
 | `attach.image_paste_key` | string | `"ctrl+v"` | Uploads the image on the clipboard to the host and pastes its path. Without an image, the key goes to the agent. |
@@ -21,6 +30,12 @@ Your preferences. Every key is optional; a missing key takes its default.
 | `sessions.memory_max` | string | `"auto"` | Caps the memory of each new session, with everything it starts. "auto" gives the host's default: its memory minus a reserve for the system. A size is a number and a unit in powers of 1024, such as "512M", "4G", "4GiB" or "1.5G", from 256M. A host lowers a size above its limit for all sessions together to that limit. `new --memory-max` sets it for one session. |
 | `keymap` | table | — | Rebinds launcher commands by name ("session: delete"). A value is a key, a list of keys, or "" to unbind. `config keymap` lists the names. |
 | `secrets` | table | — | Names environment variables for sessions, each with a command that prints its value on this computer, such as a keychain or password manager read: OPENAI_API_KEY = "op read op://dev/openai/key". A session gets one only when asked (`new --secret`, or a host's secrets). The value goes to that session's environment and is never stored. |
+| `secret_tiers` | table | — | Sets the lowest tier that may receive each named secret. Unlisted names require own; on_hosts is an additional saved-host gate. |
+| `sandbox.image_policy.identity` | string | — | Is the exact cosign certificate identity required for OCI images. |
+| `sandbox.image_policy.issuer` | string | — | Is the exact OIDC issuer required for that identity. |
+| `sandbox.image_policy.trusted_root` | string | — | Names a Sigstore trusted_root.json on the laptop. Empty uses the public Sigstore trusted root embedded in the client. |
+| `sandbox.ssh_keys` | array of string | `[]` | Lists configured ssh-key names for the next sandbox start. Changes apply at the next start; live signers keep their current selection. |
+| `secrets.<name>.kind` | string | `""` | Selects an ordinary secret when empty, or a named SSH key with ssh-key. |
 
 ## hosts.toml
 
@@ -28,14 +43,24 @@ The hosts you added. `host add` writes it, and you can edit it by hand. Each hos
 
 | Key | Type | What it does |
 | --- | --- | --- |
+| `wall_floor` | string | Is the host's actual pinned minimum wall level. |
+| `place` | HostPlacement | Controls this host's automatic-placement pool and local features. |
+| `prepared` | value | Records the last observed preparation facts; it grants no start. |
+| `lock` | value | Fixes values and denies for every session on this host. |
 | `name` | string | Names the host in commands, as in `attach <name>/<session>`. |
 | `ssh` | string | Says how to reach the host: a Host alias from your SSH config, or user@host[:port]. |
 | `ssh_config` | string | Adds an SSH config file to read as well, for example a repo's own. |
+| `joined_ssh` | value | Records the original invite writer's local generated SSH files. This data grants no connection, execution or removal. |
 | `labels` | table | Tags the host with key-value pairs of your own, for example provider = "gcp". |
 | `[provider]` | table | Names a script that starts and stops the host. Optional. |
 | `provider.script` | string | Names a program that starts, stops and reports on the host. It gets the action as its argument and a JSON job on stdin (see examples/providers). |
 | `provider.wake_on_attach` | boolean | Starts the host through the script when it does not answer and you attach or start a session. |
+| `provider.cost` | string | Is free or paid when automatic placement wakes this script. |
 | `[machine]` | table | Records the VM, container or sandbox that `host create` made for this host. Hosts you added yourself have none. |
+| `machine.session` | string | Names the session for which new --machine made this machine. An empty value denotes an ordinary reusable host. |
+| `machine.session_id` | string | Is the stable ID acknowledged by this machine's original start. |
+| `machine.endpoint` | string | Records a session machine's original provider API origin. |
+| `machine.transport_url` | string | Records its original provider transport origin, without credentials. |
 | `machine.provider` | string | Names the provider that made the machine: "lima", "docker" or "e2b". |
 | `machine.id` | string | Names the machine as the provider knows it: the Lima instance, the Docker container, or the E2B sandbox ID. |
 | `machine.user` | string | Runs the helper and the sessions on docker and e2b hosts. Lima hosts use the user from Lima's SSH config. |
@@ -45,4 +70,22 @@ The hosts you added. `host add` writes it, and you can edit it by hand. Each hos
 | `machine.busy_lease` | string | Sets how long an E2B sandbox keeps running after the last client goes, while a session is working (60m by default). |
 | `machine.token_command` | string | Prints the E2B API key, for example a read from your keychain. It is used when E2B_API_KEY is not set and the E2B CLI is not logged in. The key is never written down. |
 | `machine.stdin` | string | Says how keys reach an E2B sandbox: "send" (one request for each chunk, the default) or "stream" (one long request; not yet proved on E2B's servers). |
+| `machine.created` | string | Is when `host create` made the machine, as an RFC 3339 time. Lima and Docker give each machine of a host the same name, so this tells them apart for the record of an unfinished `host rm`. |
+| `machine.source` | value | Binds closed-create resource/locator provenance; current sharing is inspected separately. |
 | `secrets` | array of string | Lists secrets from config.toml that every new session on this host gets, for example ["ANTHROPIC_API_KEY"]. `new --secret` adds more. |
+| `repos` | array of string | Lists repositories that may be sent to this host in clone mode. |
+| `sandbox.image_policy.identity` | string | Is the exact cosign certificate identity required for OCI images. |
+| `sandbox.image_policy.issuer` | string | Is the exact OIDC issuer required for that identity. |
+| `sandbox.image_policy.trusted_root` | string | Names a Sigstore trusted_root.json on the laptop. Empty uses the public Sigstore trusted root embedded in the client. |
+| `sandbox.ssh_keys` | array of string | Lists configured ssh-key names for the next sandbox start. Changes apply at the next start; live signers keep their current selection. |
+
+## Host rules
+
+Put `sandbox.host` in a named profile, a named repository section, or the session's `--set` values. It takes a host name, an ordered list of names, or `auto`. A narrower value replaces the broader choice.
+
+| Key | Type | What it does |
+| --- | --- | --- |
+| `profiles."<name>".sandbox.host` | host name, ordered list or auto | Selects local placement from a repository, profile or session layer. |
+| `repos."<origin>".sandbox.host` | host name, ordered list or auto | Selects local placement from a repository, profile or session layer. |
+
+The all-sessions layer, a saved host's layer and any lock cannot select the host. A repository's own settings file cannot select it either. A host named by the invoker always wins over a rule. See [pick a host](../how-to/pick-a-host.md) for the complete order and the rules for repository sections.

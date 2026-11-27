@@ -12,11 +12,17 @@ Downloaded helper archives select only the supported helper and shadow terminal 
 - **A repository's setup script runs only after you trust it,** for each repository on each host. The client asks, and keeps the answer on the laptop with a hash of the scripts. A change to the scripts asks again. The hash covers only the bytes of the setup, resume and stop scripts: a file that a script runs or reads can change with no question ([setup hooks](../how-to/setup-hooks.md)).
 - **The host's own git runs no hooks and no fsmonitor of a repository,** neither the scripts in `.git/hooks` nor the hooks that its config defines. With a systemd user manager, it runs in a scope under the sessions' slice, with a deadline. The copy of `.worktreeinclude` skips symbolic links and special files ([worktrees](../how-to/worktrees.md#how-the-host-runs-git)).
 - **The client never forwards your SSH agent, your X11 display or your Kerberos credentials to a host.** Every `ssh` command that it runs has `-o ForwardAgent=no -o ForwardX11=no -o PermitLocalCommand=no -o GSSAPIDelegateCredentials=no`. Options on the command line win over every config file, so a `ForwardAgent yes` in your `~/.ssh/config` reaches no host. The client's generated SSH config starts with the same settings and `ClearAllForwardings yes`, so a `ProxyJump` hop gets them too, and opens no port forward. With your agent, any process on the host could log in to other machines as you while you are connected. To push from a host, give it a key or a token of its own, for that host only ([decision 0034](../contributing/decisions/0034-ssh-options-on-the-command-line.md)).
+- **Each host you reach over SSH has a pinned host key.** `host add` asks OpenSSH whether your own SSH settings trust the key that the host shows: your known_hosts, a certificate authority, a `KnownHostsCommand` or DNS, as `ssh` itself would decide. The client does not read those files itself. When they trust the key, it pins that key. Otherwise it checks the key against `--host-key`, or pins it on first use after ssh's question or `--yes`. The connections that ask and read a key offer no key, no password and no agent. The client reads ssh's verdict from ssh's own log file. The most severe verdict in it wins, and a verdict counts only when ssh ended as that verdict ends, so neither a host's own text nor a jump host can turn a refusal or a failure into trust. The client's errors never quote what a host wrote. The pin is the file `~/.config/simstim/ssh/known_hosts-<key>`, named from the host's name and a 128-bit hash of it, so two hosts never share one. Its first line names its host, and the client uses no file that names another. It is written only once the host is saved, so a `host add` that fails leaves no pin. The launcher's add-host wizard pins in the same way, and asks before it pins a key that your settings do not name.
+- **Your SSH config cannot undo the pin.** Every `ssh` command for the host has `-o HostKeyAlias=simstim-<name> -o UserKnownHostsFile=<the pin> -o StrictHostKeyChecking=yes -o UpdateHostKeys=no -o GlobalKnownHostsFile=/dev/null -o VerifyHostKeyDNS=no -o NoHostAuthenticationForLocalhost=no -o CheckHostIP=no -o FingerprintHash=sha256 -o LogLevel=ERROR`, and `-o KnownHostsCommand=none` and `-o NoHostAuthenticationForProxyCommand=no` where ssh knows them. When the client cannot tell whether ssh knows them, it does not connect. These options win over every config file, so no line of your SSH config, of the system's known hosts or of DNS can pass another key. `CheckHostIP=no` keeps ssh from writing to the pin. `FingerprintHash` and `LogLevel` keep the changed-key message and its SHA256 fingerprint, whatever your config says, and hide a host's banner, which could imitate that message.
+- **Only `host rekey` replaces a pin.** A changed key stops every command with exit code 5. `host add` never replaces the pin of a saved host, whatever its target. `host rekey` replaces it after you type the host's name. The name of each shared connection's socket holds a key of the host's name and its pin, so two hosts with different pins never share a connection, and a connection that checked the old key is never used again. Every connection checks a pin, saved host or not: a host that another client forgot is never reached. A host that you added before pins existed gets its pin at its next connection: from what your settings trust, or on first use where your config takes new keys without a question, or after ssh's question at a terminal. Without a terminal, that connection fails with exit code 4, and no connection to a saved host goes without a pin. A jump host follows your own config: the session to the host at the end is end-to-end SSH with the pinned key, so a jump host can neither read nor change it, and it cannot choose the pin ([decision 0035](../contributing/decisions/0035-pinned-host-keys.md)).
 - **Only `forward` brings up port forwards.** Every other command clears the port forwards and the tunnel that your config names (`ClearAllForwardings=yes`). `forward` has a connection of its own, so its forwards end when it ends. It brings up the ports that you name, and the local and dynamic forwards of your config. It refuses to start when your config has a `RemoteForward` or a `Tunnel` for the host, because either one lets the host reach your laptop. It also refuses `ForkAfterAuthentication yes`, which would keep the forward running after `forward` ends.
 - **Helpers are released signed,** and checked by SHA-256 before install.
 - **Sockets and staged files are private:** 0600 and 0700, owner checked.
+- **SSH cleanup keeps files it does not own.** A login check's temporary config belongs to its staged host key. If its host label cannot be read, the write stops before replacing a file. Cleanup rechecks the published file's identity and current saved-host references. Doctor probes only sockets in this client's indexed epochs. It rechecks the socket's ownership, identity and refused connection under the pin and saved-host locks before removing it. Replaced files, live sockets and unindexed sockets stay.
 - **A program in a session cannot drive a session through its socket.** With a systemd user manager, each session runs in a unit of its own. When a program connects to a session's socket, the holder asks the kernel which process it is (`SO_PEERCRED`), then reads that process's cgroup. A program in any session's unit, including the session's own, gets only a ping. On that socket, an attach, typed keys, the requests behind `send`, `kill` and `rename`, and every other request get the error `forbidden`. A program whose cgroup the holder cannot read counts as inside a session, and so does a program of another user, root included. On Linux 6.5 or later, the holder also checks that the process is still the one that connected, so a reused process ID cannot pass. The bridge and your own SSH shells run outside every session, and work as before.
 - **The host helper refuses too.** When a program in a session runs the helper itself, the helper sees that it runs inside a session. Its bridge then refuses to attach, and to send, peek, rename, kill, delete, resume or restore any session, and its own `rm` and `restore` commands refuse too. On Linux, a helper that cannot read its own cgroup refuses in the same way. So does a helper in a cgroup namespace other than your systemd user manager's, which can hide that a program runs in a session.
+- **A pending holder can confirm its own stop before agent launch.** Its existing control socket opens before it loads the session manifest. The same peer rules apply while it waits for secrets or other startup work. A successful pending stop waits for startup to finish, closes the sockets and releases the holder lock before it answers. A stop that cannot join delayed work fails without claiming completion. Once agent launch has begun, the running holder must own the stop. A pending reply cannot authorise process or descendant cleanup.
+
 - **Hooks have a socket of their own.** The agent's environment names only its session's hook socket, which accepts hook events and nothing else. A hook from another session gets `forbidden` there. A session's socket takes no hook events.
 - **Without a systemd user manager,** as in a host made with `host create docker`, sessions have no unit. The holder cannot tell a session's program from another of yours, so any of your programs can still attach to, type into or stop a session. Only the hook socket's limits apply. `host doctor` reports the session sockets as weak there.
 - **After an upgrade,** a session that an older helper started keeps its older holder until you resume it. That holder has no hook socket and no check. So does a holder that started while the host had no systemd user manager, even after the manager comes back. `host doctor` asks each running holder whether it checks its peers. It reports the session sockets as weak while any holder does not, and names the session. To move it to a holder with the check, quit its agent, then `resume` it.
@@ -28,6 +34,71 @@ Downloaded helper archives select only the supported helper and shadow terminal 
 
 **Threat model, in short:**
 
+Local host removal keeps the original saved entry and host identity while it stages managed configuration cleanup. A failed host save restores the original configuration when its native files still match. A changed host, directory or destination stops the next cleanup step. The client preserves replacements and reports any retained resources. A manifest, receipt or matching path alone never allows deletion.
+
 - **A compromised host** can see everything its agents can see. It can also send terminal escape sequences to the laptop. Their effects depend on your terminal's features, permissions and bugs. Trust a host before attaching, keep your terminal up to date, and use its clipboard and link controls to limit what remote output can do. simstim does not make hostile terminal output safe.
 - **Several attached clients** all receive live output, including queries, and all can send input. The size leader is not an access-control boundary. Do not treat another attached client as a read-only viewer.
 - **A compromised laptop** can drive every host it has keys for, as it already can through `ssh`.
+
+Local Git checks known private folders and the actual writable roots of managed sandboxes before reading a source repository. Managed local Lima and Docker machines need their original creation record and a fresh check of the same configuration and resource. An old or changed record cannot establish an empty sharing set. Shares added outside the tool remain the owner’s responsibility.
+
+A laptop seed reads repository policy from the commit selected for the bundle. Ordinary seeds ignore working-tree edits to that file. A dirty seed makes one private prospective commit and uses that same commit for policy review and the bundle. A changed source or selected base stops the operation before values or input payload are sent.
+
+Walled sandboxes hold fake credentials in two inert files: an AWS `prod-admin` profile and Git's credential-store file, without enabling that helper. Each cold start makes fresh random values. A request carrying one is refused and raises `secret_misuse`; the session keeps running. Decoys also trigger on their named credential hosts when normal policy refuses the host. `[sandbox] decoys = false` disables the files and tripwires. Decoys do not replace other controls: targeted code can avoid these public paths, and no measurement establishes their false-alarm rate in a developer sandbox.
+
+Decoy credentials have no binding, arming or grant authority. Their values stay in the trusted start's memory and the fixed guest files. Public session metadata and receipts contain none of those values. A tripwire refusal uses the existing audit and alert path; it does not stop the session. If the destination itself contains a decoy, the audit omits that destination rather than recording a case-folded fake value.
+
+The classifier's fixed destination checks run only after actual policy leaves
+a flow uncovered. They are a first filter, not a wall or a claim about a
+domain's safety. Webhook and bot path barriers also apply after a broad host
+allowance, using the ordinary endpoint grant transaction. The remaining
+classifier facts, holds and judge paths are separate
+work. Raw Unicode host input keeps the existing refusal; canonical A-labels
+keep their existing parser contract.
+
+The confusable-name check uses the complete Unicode 15.0.0 prototype mapping
+and the skeleton algorithm of UTS #39 revision 26. That version matches the
+normalisation data active under the pinned toolchain. It does not claim the
+newer bidirectional skeleton algorithm. Its comparison index grants nothing:
+each hit rechecks the original policy matcher before the fixed refusal.
+
+An explicit unknown-site `allow` may open an otherwise uncovered public IP
+literal. Address safety remains independent: the current refused-range and
+own-host checks still run before the checked physical dial. This fallback
+does not create a numeric grant for private, link-local or shared ranges.
+Changing the live policy revalidates both prospective and active flows.
+
+The unknown action follows actual scalar presence. An explicit `ask` or
+`deny` therefore restricts an uncovered DNS flow even under the `open` preset.
+It never replaces a matched named rule or a lock. Legacy policies which omit
+the setting keep their old preset fallback; no diagnostic rule label supplies
+permission or setting presence.
+
+First-host notification history uses the same bounded destination records
+as synthetic routing. An observation alone creates no route. The actual
+audit append precedes the private bookkeeping acknowledgement, and one
+current actor elects the notification. A failed append does not mark the
+host. Public audit and alert labels use the existing source-bound redactor;
+their opaque destination IDs carry no network or target authority.
+
+Saved-image lookup reads an alias tied to one host ID from the laptop's `images.lock`. It rechecks the original accepted host selection before publishing that image's digest. Another host receives no saved-image digest. A missing saved root never falls back to a registry. The protected VM Need carries the saved origin to the original host store, which still checks its native ownership receipt and the root bytes.
+
+Placement labels in a session row are advisory. Human display cleans a copy, and JSON keeps the original host metadata. These labels never choose the host or approve a start.
+
+Runtime preparation for a new sandbox keeps its original local settings and signed runtime request. An installed runtime does not ask for permission to download missing bytes. Delivery still checks that original request, and sandbox construction still performs its physical compatibility checks.
+
+OCI image certificate policy uses the original local settings and the effective new sandbox layers. Relative trusted root paths are relative to the original config.toml directory. Retries retain that policy and accepted host source. Native verifier and image pin operations recheck the same source before use.
+
+A microvm creation record keeps the exact image selected by this laptop, including whether it came from the signed default, an OCI pin or that host’s saved image. This history is immutable data. A later image policy check must validate it before using it; it does not grant a boot or select a newer tag.
+
+Before a microvm resume reads secret values, the client checks its original recorded image under the current policy from one retained local settings descriptor. It does not follow the current tag pin. The physical resume frame carries only that checked original image; the host must compare it with the protected original VM plan before activation. A changed local source or policy stops later reads and publication.
+
+Trusted root file paths stay in the laptop’s local source pin. New and resume send a separate cloned policy projection without those paths. The physical writer refuses an unprojected typed start.
+
+Private publication checks run once after the request acquires its physical writer turn. The same source ownership lasts through the complete frame write and ends before waiting for its response. A settings change while a request is queued prevents that frame from being sent.
+
+A public_only network rule restricts its destination addresses. It never creates a private-address exception. File edits preserve this bit in a structured rule, including its identity. New and resume refuse older helpers that cannot preserve it.
+
+A named SSH key policy action records only its literal allowed or revoked name in the laptop's existing sandbox record after the original host acknowledges it. This next-start choice leaves the original creation pin intact. A cold start reads the current local choice and checks the key's kind, host binding, tier, wall and consent again. Host policy metadata cannot authorise a laptop key read. A running signer keeps its installed keys.
+
+Trusted model arming reads the current private registry on the same protected live cohort. Its names-only observation can report an unavailable role. Saved metadata and display badges cannot establish that a classifier credential is armed, or authorise a new credential read.

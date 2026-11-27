@@ -6,6 +6,7 @@ import (
 
 	"github.com/iamlakshya/simstim/internal/brand"
 	"github.com/iamlakshya/simstim/internal/bundle"
+	"github.com/iamlakshya/simstim/internal/client"
 )
 
 // The values of the review's cases, with home folders built at run time
@@ -19,6 +20,50 @@ func reviewScrubber() *bundle.Scrubber {
 		Sessions: []string{"acme-fix", "api", "nebula", brand.Name},
 		Folders:  []string{"/srv/nebula/app", "/home" + "/qwyn/src/acmecorp", "/srv/clients/globex"},
 	})
+}
+
+// A host's file key, its name and a hash of it, goes whole: in the names
+// of its pin, the pin's lock and their temporary files, and even when the
+// host's name alone stays or is an address or a tailnet name. A file key
+// that is left, of a host that the bundle does not know, keeps its file out.
+func TestHostFileKeys(t *testing.T) {
+	s := bundle.NewScrubber(bundle.Values{
+		Hosts:  []string{"zorblax", "ZORBLAX", "dev", "quixote-mbp", "box.example-tailnet.ts.net", "198.51.100.77", "qwyn@build-7:22"},
+		Laptop: []string{"quixote-mbp"},
+		Users:  []string{"qwyn"},
+	})
+	key := client.HostFileKey("zorblax")
+	for in, want := range map[string]string{
+		"read ~/.config/x/ssh/known_hosts-" + key:                               "read ~/.config/x/ssh/known_hosts-<host-1>",
+		"read ~/.config/x/ssh/known_hosts-" + client.HostFileKey("ZORBLAX"):     "read ~/.config/x/ssh/known_hosts-<host-1>",
+		"lock ~/.config/x/ssh/" + key + ".lock":                                 "lock ~/.config/x/ssh/<host-1>.lock",
+		"tmp .known_hosts-" + key + "-staged-123":                               "tmp .known_hosts-<host-1>-staged-123",
+		"debug1: Found key in /x/known_hosts-" + key + ":3":                     "debug1: Found key in /x/known_hosts-<host-1>:3",
+		`{"file_key":"` + key + `"}`:                                            `{"file_key":"<host-1>"}`,
+		"pin known_hosts-" + client.HostFileKey("dev") + " on dev":              "pin known_hosts-<host-4> on dev",
+		"pin known_hosts-" + client.HostFileKey("quixote-mbp"):                  "pin known_hosts-<laptop>",
+		"lock /x/" + client.HostFileKey("box.example-tailnet.ts.net") + ".lock": "lock /x/<host-2>.lock",
+		"lock /x/" + client.HostFileKey("198.51.100.77") + ".lock":              "lock /x/<addr-1>.lock",
+		"pin known_hosts-" + client.HostFileKey("build-7"):                      "pin known_hosts-<host-3>",
+	} {
+		got := string(s.Scrub([]byte(in)))
+		if got != want {
+			t.Errorf("Scrub(%q)\n got %q\nwant %q", in, got, want)
+		}
+		if k := s.Check([]byte(got)); k != "" {
+			t.Errorf("Check(%q) still finds %s", got, k)
+		}
+	}
+	for _, left := range []string{
+		"known_hosts-" + client.HostFileKey("other-host"),
+		"config-" + client.HostFileKey("other-host"),
+		client.HostFileKey("other-host") + ".lock",
+		key,
+	} {
+		if k := s.Check([]byte("read " + left)); k != bundle.KindHost {
+			t.Errorf("Check(%q) = %q, want a host", left, k)
+		}
+	}
 }
 
 // A user's, a host's or the laptop's name next to a hyphen, a slash or a

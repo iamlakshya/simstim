@@ -111,15 +111,33 @@ func replaceAt(line []string, i int, with string) []string {
 
 // withName is the command line with the unknown name of e replaced by
 // with, in the one word where the user typed it for cmd: the value of the
-// flag that e names (its last one, which the flag keeps), or else the
-// argument at e's index. In that word, the name may be all of it, the host
+// flag that e names, or else the argument at e's index. A flag that takes
+// one value keeps its last use, so that use holds the name. A list flag
+// keeps every use, so e's item counts across them, and the use that holds
+// that item holds the name. In that word, the name may be all of it, the host
 // of an address such as name/session, or an item of a list such as a,name.
 func withName(cmd *cobra.Command, line []string, e *client.UnknownNameError, with string) ([]string, bool) {
-	at, head := -1, 0
+	at, head, item := -1, 0, e.Item
 	skip, arg := pathLen(cmd), 0
+	// A list flag keeps the names of every use, so its item counts across
+	// them all (cli-spec 10.3).
+	list := false
+	if f := cmd.Flags().Lookup(e.Flag); f != nil {
+		_, list = f.Value.(*listValue)
+	}
+	left := e.Item
 	for _, w := range words(cmd.Flags(), line) {
 		switch {
 		case w.isFlag:
+		case e.Flag != "" && list:
+			if w.flag != e.Flag || left < 0 {
+				break
+			}
+			n, raw := listItem(line[w.at][w.value:], left)
+			if left < n {
+				at, head, item = w.at, w.value, raw
+			}
+			left -= n
 		case e.Flag != "":
 			if w.flag == e.Flag {
 				at, head = w.at, w.value
@@ -136,7 +154,7 @@ func withName(cmd *cobra.Command, line []string, e *client.UnknownNameError, wit
 	if at < 0 {
 		return nil, false
 	}
-	fixed, ok := fixName(line[at][head:], e.Name, e.Item, with)
+	fixed, ok := fixName(line[at][head:], e.Name, item, with)
 	if !ok {
 		return nil, false
 	}

@@ -8,7 +8,7 @@ The repository /home/dev/src/app on box has a setup script:
 
 It runs in the session before the agent, as you, with the session's environment and
 secrets. Say yes only for a repository you trust. The answer is kept for this
-repository on box until the script changes; --setup and --no-setup override it.
+repository on box until the script changes; --setup-script and --no-setup-script override it.
 
 Run it? [y/N] 
 == doctor --fix (answers "y\n")
@@ -20,12 +20,34 @@ Found 1 to fix:
    Runs: loginctl enable-linger me
    Fix it? [y/N] 
 
-== host destroy (answers "no\n")
-Delete the fake machine fake-box, with its disk and every session on it? [y/N] 
+== host rm --destroy: the machine (answers "bo\n")
+box was made by `host create`: the fake machine fake-box. It holds 2 sessions.
+Type box to delete the machine, or press Enter to keep it: 
 -> Cancelled. Nothing changed.
+== host rekey (answers "box\n")
+Reading the host key of box (fake fake-box)…
+  Pinned now: SHA256:ooooooooooooooooooooooooooooooooooooooooooo
+  box shows:  SHA256:nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn
+Type box to pin the new key, or press Enter to keep the old one:   ✓ host key SHA256:nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn pinned for box. The old key no longer works. Its tier is now shared.
+
+== host rm: the machine, kept (answers "\n")
+box was made by `host create`: the fake machine fake-box. It holds 2 sessions.
+Type box to delete the machine too, or press Enter to keep it: Forgot box. The fake machine fake-box stays, with its sessions and the helper: delete it with fake's own tools.
+
 == host add: the helper (answers "n\n")
 Install it? [y/N] 
 -> Cancelled. Nothing changed.
+== host add: the tier (answers "1\n")
+
+Who else has root on box?
+  1  Only me                  own
+  2  Someone else             shared
+  3  A machine for one task   throwaway
+Tier (1, 2 or 3): 
+== host set: raise the tier (answers "lab\n")
+Checking lab (fake fake-lab)…
+Type lab to raise its tier from shared to own, or press Enter to keep shared: lab: tier shared → own.
+
 == three answers that are not one (answers "x\nmaybe\n?\n")
 Install it? [y/N] Type y or n, or press Enter for the answer in capitals.
 Install it? [y/N] Type y or n, or press Enter for the answer in capitals.
@@ -33,3 +55,15 @@ Install it? [y/N]
 -> Cancelled. Nothing changed.
 == a typed name (answers "box\n")
 Type box to delete the machine, or press Enter to keep it: 
+== rm (answers "\n")
+Delete auth-fix on box?
+This stops claude on box and removes the session.
+The folder /home/dev/src/app stays. Unsaved work in the agent is lost.
+Delete it? [y/N] 
+== rm: an ended agent (answers "y\n")
+Delete auth-fix on box?
+This removes the session from box.
+The folder /home/dev/src/app stays.
+Delete it? [y/N] 
+== attach: an ended agent (answers "\n")
+Start claude again in auth-fix on box? [Y/n] 

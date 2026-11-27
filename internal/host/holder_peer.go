@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/iamlakshya/simstim/internal/guestpty"
 	"github.com/iamlakshya/simstim/internal/paths"
 	"github.com/iamlakshya/simstim/internal/proto"
 )
@@ -136,8 +137,12 @@ func (h *Holder) serveLimited(c *hclient, f proto.Frame) bool {
 // folder, and turns the peer check on when the holder runs in the unit that
 // launchHolder started for it.
 func (h *Holder) listen() error {
-	sock, hook := paths.Socket(h.id), paths.HookSocket(h.id)
-	for _, dir := range []string{filepath.Dir(filepath.Dir(sock)), filepath.Dir(sock), filepath.Dir(hook)} {
+	sock, hook := h.sockets()
+	dirs := []string{filepath.Dir(filepath.Dir(sock)), filepath.Dir(sock), filepath.Dir(hook)}
+	if h.guest != nil {
+		dirs = nil
+	}
+	for _, dir := range dirs {
 		if err := paths.EnsurePrivateDir(dir); err != nil {
 			return err
 		}
@@ -146,13 +151,18 @@ func (h *Holder) listen() error {
 	if err != nil {
 		return err
 	}
-	hookLn, err := listenPrivate(hook, "the session's hook socket")
+	var hookLn net.Listener
+	if h.vmTerm != nil {
+		hookLn, err = guestpty.AdoptHook(hook)
+	} else {
+		hookLn, err = listenPrivate(hook, "the session's hook socket")
+	}
 	if err != nil {
 		ln.Close()
 		return err
 	}
 	h.ln, h.hookLn = ln, hookLn
-	h.peerCheck = inOwnUnit(h.id)
+	h.peerCheck = h.guest == nil && inOwnUnit(h.id)
 	h.log.Info("sockets open", "peer_check", h.peerCheck)
 	return nil
 }
@@ -175,11 +185,18 @@ func listenPrivate(sock, what string) (net.Listener, error) {
 
 // closeSockets closes both listeners and removes their files.
 func (h *Holder) closeSockets() {
+	if h.ordinary != nil {
+		if err := h.closeOriginalOrdinarySocketsV1(); err != nil {
+			h.log.Error("original holder socket closure is unknown", "err", err)
+		}
+		return
+	}
 	for _, ln := range []net.Listener{h.ln, h.hookLn} {
 		if ln != nil {
 			ln.Close()
 		}
 	}
-	os.Remove(paths.Socket(h.id))
-	os.Remove(paths.HookSocket(h.id))
+	sock, hook := h.sockets()
+	os.Remove(sock)
+	os.Remove(hook)
 }

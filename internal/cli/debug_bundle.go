@@ -32,7 +32,8 @@ func debugBundleCmd() *cobra.Command {
 			"the values of the host's alerts file. Nothing is uploaded. Read the files before you share them.",
 		Example: "  " + brand.Name + " debug bundle my-vps/auth-fix\n" +
 			"  " + brand.Name + " debug bundle my-vps --ssh",
-		Args: cobra.MaximumNArgs(1),
+		Args:              cobra.MaximumNArgs(1),
+		ValidArgsFunction: completeHostOrSessionArg,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			res, err := runBundle(cmd.Context(), args, ssh)
 			if err != nil {

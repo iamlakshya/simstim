@@ -1,8 +1,7 @@
-//go:build !darwin
+//go:build !darwin && !linux
 
 package diag
 
-// perCallMono is false here: on Linux, Go's own monotonic clock is
-// CLOCK_MONOTONIC, through the vDSO, so the start's reading plus Go's
-// clock stays on the system's clock, and costs no system call.
+// Platforms without the shared Linux/macOS clock contract keep a clock
+// relative to this process. Those records cannot calibrate another host.
 const perCallMono = false

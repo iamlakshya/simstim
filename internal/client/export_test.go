@@ -2,6 +2,7 @@ package client
 
 import (
 	"context"
+	"testing"
 	"time"
 )
 
@@ -19,6 +20,13 @@ func SetEscFlush(d time.Duration) func() {
 	old := escFlush
 	escFlush = d
 	return func() { escFlush = old }
+}
+
+// PinForTest gives the host called name a pin of a new key, in the test's
+// own config folder: every connection checks one.
+func PinForTest(t testing.TB, name string) {
+	t.Helper()
+	pinFor(t, name)
 }
 
 // AnswersPings reports whether RoundTrip times c's host with pings.
@@ -59,4 +67,12 @@ func SetRequestStage(f func(stage string)) func() {
 	old := requestStage
 	requestStage = f
 	return func() { requestStage = old }
+}
+
+// SetBeforeHostsSave runs fn in UpdateHosts just before its save. It
+// returns a function that puts the old one back.
+func SetBeforeHostsSave(fn func()) func() {
+	old := beforeHostsSave
+	beforeHostsSave = fn
+	return func() { beforeHostsSave = old }
 }

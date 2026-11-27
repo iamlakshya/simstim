@@ -57,6 +57,10 @@ func gitVersionGate() error {
 		return nil
 	}
 	out, err := gitCommand(append(slices.Clone(gitSafe), "version")...).Output()
+	return checkGitVersionOutput(out, err)
+}
+
+func checkGitVersionOutput(out []byte, err error) error {
 	m := gitVersionRE.FindStringSubmatch(strings.TrimSpace(string(out)))
 	if err != nil || m == nil {
 		return UserError(api.CodeGitVersion, fmt.Sprintf("could not read the version of git on this host: %q", firstLine(string(out))),
@@ -84,6 +88,10 @@ func gitArgs(dir string, hooks []string, args ...string) []string {
 	}
 	return slices.Concat(gitSafe, off, []string{"-C", dir}, args)
 }
+
+// SafeGitArgs applies the one existing canonical non-executing Git policy in dir.
+// Guest-owned fixed commands use the same event data as host Git operations.
+func SafeGitArgs(dir string, args ...string) []string { return gitArgs(dir, nil, args...) }
 
 // git runs git with args in the folder dir, and returns what it printed.
 // Only the commands of a git operation call it, in its child (gitop.go).

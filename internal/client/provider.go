@@ -31,6 +31,8 @@ type Provider struct {
 	// WakeOnAttach starts the host through the script when it does not answer
 	// and you attach or start a session.
 	WakeOnAttach bool `toml:"wake_on_attach,omitempty"`
+	// Cost is free or paid when automatic placement wakes this script.
+	Cost string `toml:"cost,omitempty"`
 }
 
 // ProviderStatus is the answer to the status action.
@@ -66,12 +68,14 @@ func wake(ctx context.Context, h Host) error {
 	}
 	deadline := time.Now().Add(4 * time.Minute)
 	for time.Now().Before(deadline) {
-		s := &SSH{Host: h}
 		pctx, cancel := context.WithTimeout(ctx, 20*time.Second)
-		_, err := s.Run(pctx, "true", nil)
+		err := answers(pctx, &SSH{Host: h})
 		cancel()
 		if err == nil {
 			return nil
+		}
+		if IsHostKeyError(err) {
+			return err // trying again cannot change the host's key
 		}
 		select {
 		case <-ctx.Done():

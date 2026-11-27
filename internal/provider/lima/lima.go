@@ -8,9 +8,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 
 	"github.com/iamlakshya/simstim/internal/brand"
@@ -20,11 +23,14 @@ import (
 
 const install = "Install Lima (https://lima-vm.io/docs/installation/), then run this again."
 
-// Defaults for a new VM: small, and a sparse disk.
+// Defaults for a new VM: small, and a sparse disk. The sizes are in bytes.
 const (
-	DefaultCPUs      = 2
-	DefaultMemoryGiB = 4
-	DefaultDiskGiB   = 40
+	// DefaultCPUs is the CPU count of a new VM.
+	DefaultCPUs = 2
+	// DefaultMemory is the memory of a new VM, in bytes.
+	DefaultMemory = 4 << 30
+	// DefaultDisk is the sparse disk size of a new VM, in bytes.
+	DefaultDisk = 40 << 30
 	// Template is Lima's Ubuntu LTS template.
 	Template = "template:ubuntu-lts"
 	// DefaultIdleStop is how long a VM idles before it powers itself off.
@@ -52,6 +58,7 @@ type instance struct {
 	Memory        int64  `json:"memory"`
 	Disk          int64  `json:"disk"`
 	Config        *struct {
+		Plain                *bool `json:"plain"`
 		NestedVirtualization *bool `json:"nestedVirtualization"`
 		NetworkOpts          struct {
 			HostLoopback *bool `json:"hostLoopback"`
@@ -64,11 +71,30 @@ type instance struct {
 
 // find returns the instance called name, or nil when there is none.
 func find(ctx context.Context, name string) (*instance, error) {
-	out, err := provider.Exec(ctx, install, "limactl", "list", "--json")
+	out, err := limaExec(ctx, "list", "--json")
 	if err != nil {
 		return nil, err
 	}
-	return parseList(out, name)
+	in, err := parseList(out, name)
+	if err != nil {
+		return nil, err
+	}
+	if saved, _ := ctx.Value(limaSavedSourceKey{}).(*limaSavedSource); saved != nil && in != nil {
+		if saved.ctx != ctx || saved.owner == nil || in.Name != saved.owner.inst || in.Dir != saved.owner.source.Config.Path || in.SSHConfigFile != filepath.Join(in.Dir, "ssh.config") {
+			return nil, plainSourceUnknown()
+		}
+	}
+	if frame, _ := ctx.Value(limaSourceBirthKey{}).(*limaSourceBirth); frame != nil && in != nil {
+		if frame.ctx != ctx || frame.locator == nil || in.Dir != filepath.Join(frame.locator.source.Path, name) {
+			return nil, plainSourceUnknown()
+		}
+		if frame.instancePin != nil {
+			if err := frame.instancePin.Revalidate(); err != nil {
+				return nil, err
+			}
+		}
+	}
+	return in, nil
 }
 
 // parseList reads the NDJSON of `limactl list --json`: one object per line.
@@ -101,26 +127,59 @@ func parseList(out []byte, name string) (*instance, error) {
 // that hostLoopback can close the loopback path, and --nested-virt asks Lima
 // to run Apple's own nesting check when the VM starts.
 func CreateArgs(inst string, req provider.Request, system string) []string {
-	cpus, mem, disk := req.CPUs, req.MemoryGiB, req.DiskGiB
+	cpus, mem, disk := req.CPUs, req.Memory, req.Disk
 	if cpus <= 0 {
 		cpus = DefaultCPUs
 	}
 	if mem <= 0 {
-		mem = DefaultMemoryGiB
+		mem = DefaultMemory
 	}
 	if disk <= 0 {
-		disk = DefaultDiskGiB
+		disk = DefaultDisk
 	}
 	args := []string{"create", "--tty=false", "--name=" + inst, "--plain"}
 	if system == "darwin" {
 		args = append(args, "--vm-type=vz", "--set=.networkOpts.hostLoopback = false", "--nested-virt")
 	}
-	return append(args, fmt.Sprintf("--cpus=%d", cpus), fmt.Sprintf("--memory=%d", mem), fmt.Sprintf("--disk=%d", disk), Template)
+	return append(args, fmt.Sprintf("--cpus=%d", cpus), "--memory="+gib(mem), "--disk="+gib(disk), Template)
+}
+
+// gib formats bytes as the GiB number that limactl accepts.
+func gib(bytes int64) string {
+	return strconv.FormatFloat(float64(bytes)/(1<<30), 'f', -1, 64)
 }
 
 // Create makes and starts the VM, and returns the host that reaches it
 // through Lima's ssh.config.
-func (Provider) Create(ctx context.Context, req provider.Request) (client.Host, error) {
+func (Provider) Create(ctx context.Context, req provider.Request) (result client.Host, returned error) {
+	scope, err := client.HostCreationSourceScopeContext(ctx)
+	if err != nil {
+		return client.Host{}, err
+	}
+	if scope.Request() != provider.CreationSourceRequest("lima", req) {
+		return client.Host{}, plainSourceUnknown()
+	}
+	frame := &limaSourceBirth{scope: scope, request: scope.Request()}
+	ctx = context.WithValue(ctx, limaSourceBirthKey{}, frame)
+	frame.ctx = ctx
+	locator, err := captureLimaSourceLocator()
+	if err != nil {
+		return client.Host{}, err
+	}
+	frame.locator = locator
+	frame.home = locator.source.Path
+	defer func() {
+		if frame.inspection != nil {
+			returned = errors.Join(returned, frame.inspection.Close())
+		}
+		returned = errors.Join(returned, frame.instancePin.Close(), locator.close())
+		if returned != nil && frame.attempted {
+			if result.Machine == nil {
+				result = freezeBirthHost(frame.partial)
+			}
+			returned = provider.RetainedCreation(result, frame.partial.Machine.ID, frame.home, returned)
+		}
+	}()
 	out := req.Out
 	if out == nil {
 		out = io.Discard
@@ -132,7 +191,7 @@ func (Provider) Create(ctx context.Context, req provider.Request) (client.Host, 
 	if in, err := find(ctx, inst); err != nil {
 		return client.Host{}, err
 	} else if in != nil {
-		return client.Host{}, &client.UserError{Msg: "Lima already has an instance called " + inst, Hint: "Pick another name, or delete the instance with limactl delete " + inst + ".", Code: "instance_exists"}
+		return client.Host{}, &client.UserError{Msg: "Lima already has an instance called " + inst, Hint: "Inspect it on the selected original Lima locator, or choose another name.", Code: "instance_exists"}
 	}
 	if goos != "darwin" {
 		fmt.Fprintf(out, "  ! Lima with QEMU cannot stop %s from reaching this machine's loopback services.\n", req.Name)
@@ -140,9 +199,20 @@ func (Provider) Create(ctx context.Context, req provider.Request) (client.Host, 
 	}
 	args := CreateArgs(inst, req, goos)
 	fmt.Fprintf(out, "  Creating the VM: limactl %s\n", shellLine(args))
-	if _, err := provider.Exec(ctx, install, "limactl", args...); err != nil {
+	frame.partial = client.Host{Name: req.Name, Machine: &client.Machine{Provider: "lima", ID: inst}}
+	frame.attempted = true
+	if _, err := limaExec(ctx, args...); err != nil {
 		return client.Host{}, err
 	}
+	frame.created = true
+	instanceSource, instancePin, err := provider.CaptureSourceConfigPinned(filepath.Join(locator.source.Path, inst))
+	if err != nil {
+		return client.Host{}, err
+	}
+	if instanceSource.Role != client.MachineConfigExisting {
+		return client.Host{}, errors.Join(plainSourceUnknown(), instancePin.Close())
+	}
+	frame.instanceSource, frame.instancePin = instanceSource, instancePin
 	if goos == "darwin" {
 		if err := checkClosed(ctx, inst); err != nil {
 			return client.Host{}, err
@@ -158,14 +228,38 @@ func (Provider) Create(ctx context.Context, req provider.Request) (client.Host, 
 	if in == nil || in.SSHConfigFile == "" {
 		return client.Host{}, fmt.Errorf("limactl did not report the SSH config of %s", inst)
 	}
+	if in.Dir != frame.instanceSource.Path || in.SSHConfigFile != filepath.Join(in.Dir, "ssh.config") {
+		return client.Host{}, plainSourceUnknown()
+	}
 	idle := req.IdleStop
 	if idle == "" {
 		idle = DefaultIdleStop
 	}
-	return client.Host{
+	h := client.Host{
 		Name: req.Name, SSH: sshAlias(inst), SSHConfig: in.SSHConfigFile,
 		Machine: &client.Machine{Provider: "lima", ID: inst, IdleStop: idle},
-	}, nil
+	}
+	source, inspection, sourceErr := capturePlainSource(ctx, h, in)
+	if sourceErr != nil {
+		return client.Host{}, sourceErr
+	}
+	h.Machine.Source = source
+	frame.inspection = inspection
+	// Lima's own SSH config checks no host key. The client pins the new
+	// VM's key now, before its first connection (isolation spec 14.7.1).
+	pin, err := pinHostKey(ctx, h)
+	if err != nil {
+		return client.Host{}, discard(ctx, inst, fmt.Sprintf("could not pin the host key of the new VM %s (%v)", inst, err), "run this again")
+	}
+	fmt.Fprintf(out, "  ✓ %s\n", pin.Line())
+	frame.result = freezeBirthHost(h)
+	return client.RecordHostMachineSourceBirthContext(ctx, h)
+}
+
+// pinHostKey pins the host key of a new VM on first use: the client made
+// the VM, and nobody else had its key. Tests replace it.
+var pinHostKey = func(ctx context.Context, h client.Host) (client.Pin, error) {
+	return client.PinHostKey(ctx, h, "", client.FirstUseAccept)
 }
 
 // shellLine is args as they would be typed in a shell, for the progress
@@ -178,50 +272,34 @@ func shellLine(args []string) string {
 	return strings.Join(q, " ")
 }
 
-// discard deletes a VM that Create made but cannot hand over, so that no
-// VM is left that no host names. The error says what went wrong, and hint
-// what to try next.
+// discard reports a failed creation without deleting by a reusable name.
+// The caller retains the actual partial resource and original native locator.
 func discard(ctx context.Context, inst, problem, hint string) error {
-	if _, err := provider.Exec(ctx, install, "limactl", "delete", "--force", inst); err != nil {
-		return &client.UserError{
-			Msg:  fmt.Sprintf("%s, and host create could not delete it: %v", problem, err),
-			Hint: "limactl delete --force " + inst + ", then " + hint,
-			Code: "lima_vm",
-		}
-	}
-	return &client.UserError{Msg: problem + ", so host create deleted it", Hint: hint, Code: "lima_vm"}
+	return &client.UserError{Msg: problem + "; the VM is retained for inspection", Hint: "Inspect the exact VM on its original Lima locator before retrying; " + hint, Code: "lima_vm"}
 }
 
 // sshAlias is the Host that Lima's ssh.config defines for an instance.
 func sshAlias(inst string) string { return "lima-" + inst }
 
-// Open returns the lifecycle of a VM this provider made.
+// Open returns the lifecycle bound to the original instance directory.
 func (Provider) Open(h client.Host) (client.Lifecycle, error) {
-	return &vm{h: h, inst: h.Machine.ID}, nil
+	if h.Machine == nil || h.Machine.Provider != "lima" {
+		return nil, plainSourceUnknown()
+	}
+	source, err := client.NormaliseMachineSource("lima", h.Machine.Source)
+	if err != nil {
+		return nil, err
+	}
+	if source.ResourceID != h.Machine.ID || filepath.Base(source.Config.Path) != source.ResourceID {
+		return nil, plainSourceUnknown()
+	}
+	return &vm{h: freezeBirthHost(h), inst: source.ResourceID, source: source}, nil
 }
 
 type vm struct {
-	h    client.Host
-	inst string
-	// last is what Status last read while the VM was running, so that
-	// Transport need not ask again.
-	last *instance
-}
-
-// Status maps Lima's status to the client's machine states.
-func (v *vm) Status(ctx context.Context) (string, error) {
-	in, err := find(ctx, v.inst)
-	if err != nil {
-		return "", err
-	}
-	if in == nil {
-		return client.MachineMissing, nil
-	}
-	st := state(in.Status)
-	if st == client.MachineRunning {
-		v.last = in
-	}
-	return st, nil
+	h      client.Host
+	inst   string
+	source *client.MachineSourceProvenance
 }
 
 func state(s string) string {
@@ -230,46 +308,7 @@ func state(s string) string {
 		return client.MachineRunning
 	case "Installing", "":
 		return client.MachineStarting
-	default: // Stopped, Broken, Uninitialized: start tries again
+	default:
 		return client.MachineStopped
 	}
-}
-
-// Start boots the VM and returns when Lima says SSH works.
-func (v *vm) Start(ctx context.Context) error {
-	return startVM(ctx, v.inst)
-}
-
-// Stop shuts the VM down. Its disk stays.
-func (v *vm) Stop(ctx context.Context) error {
-	_, err := provider.Exec(ctx, install, "limactl", "stop", v.inst)
-	return err
-}
-
-// Destroy deletes the VM and its disk.
-func (v *vm) Destroy(ctx context.Context) error {
-	in, err := find(ctx, v.inst)
-	if err != nil || in == nil {
-		return err
-	}
-	_, err = provider.Exec(ctx, install, "limactl", "delete", "--force", v.inst)
-	return err
-}
-
-// Transport is the system ssh, through the client's generated config, which
-// includes Lima's ssh.config. The config is read again on each start,
-// because Lima may pick a new local port.
-func (v *vm) Transport(ctx context.Context, interactive bool) (client.Transport, error) {
-	h := v.h
-	in := v.last
-	if in == nil {
-		in, _ = find(ctx, v.inst)
-	}
-	if in != nil && in.SSHConfigFile != "" {
-		h.SSHConfig = in.SSHConfigFile
-	}
-	if h.SSH == "" {
-		h.SSH = sshAlias(v.inst)
-	}
-	return &client.SSH{Host: h, Interactive: interactive}, nil
 }

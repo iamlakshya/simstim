@@ -25,30 +25,33 @@ const (
 )
 
 type promptState struct {
-	mode     promptMode
-	in       input
-	host     string   // where a new session starts
-	sel      int      // the selected search result
-	folders  []string // the host's completions for the folder being typed
-	asked    string   // the folder prefix last asked for
-	starting bool
-	err      error
-	at       time.Time
+	folderSeq     uint64
+	folderCtx     context.Context
+	folderProgram context.Context
+	folderCancel  context.CancelFunc
+	folderGen     int
+	folderHost    client.Host
+	mode          promptMode
+	in            input
+	host          string   // where a new session starts
+	sel           int      // the selected search result
+	folders       []string // the host's completions for the folder being typed
+	asked         string   // the folder prefix last asked for
+	starting      bool
+	err           error
+	at            time.Time
 }
 
 func (m *Model) openSearch() tea.Cmd {
+	if m.prompt != nil {
+		m.prompt.stopFolders()
+	}
 	m.prompt = &promptState{mode: promptSearch, in: newInput("", "a session, an agent, a folder or a host"), at: m.now()}
 	return nil
 }
 
 func (m *Model) openQuickStart() tea.Cmd {
-	h := m.newSessionHost()
-	if h == nil {
-		m.backToHosts()
-		return m.toast(toastInfo, "Choose a host, then press n.")
-	}
-	m.prompt = &promptState{mode: promptNew, host: h.name(), in: newInput("", m.defaultAgent(h)+" ~/folder name"), at: m.now()}
-	return nil
+	return m.resolveNewHost("", newHostQuick, nil, client.NewArgs{}, false)
 }
 
 // agentsOn lists the agents a host has, the shell last.
@@ -124,7 +127,7 @@ func (m *Model) ghost() string {
 			}
 		}
 	}
-	if pathWord(word) {
+	if pathWord(word) && m.quickFoldersCurrent(p) {
 		for _, f := range p.folders {
 			if strings.HasPrefix(f, word) && f != word && f != word+"/" {
 				return f[len(word):]
@@ -164,12 +167,14 @@ func (m *Model) promptKey(k tea.KeyPressMsg) tea.Cmd {
 	ks := k.String()
 	if p.starting {
 		if ks == "esc" {
+			p.stopFolders()
 			m.prompt = nil
 		}
 		return nil
 	}
 	switch ks {
 	case "esc":
+		p.stopFolders()
 		m.prompt = nil
 		return nil
 	case "up", "ctrl+p":
@@ -200,17 +205,20 @@ func (m *Model) promptKey(k tea.KeyPressMsg) tea.Cmd {
 	}
 	h := m.hostByName(p.host)
 	if h == nil {
+		p.stopFolders()
 		m.prompt = nil
 		return nil
 	}
 	switch ks {
 	case "tab":
 		if g := m.ghost(); g != "" {
+			p.stopFolders()
 			p.in.insert(g)
 			return m.askFolders()
 		}
 		return nil
 	case "ctrl+f":
+		p.stopFolders()
 		d := newSessionDialog(m, h)
 		a := quickArgs(p.in.value(), agentsOn(h), m.defaultAgent(h))
 		for i, c := range d.choices {
@@ -225,37 +233,17 @@ func (m *Model) promptKey(k tea.KeyPressMsg) tea.Cmd {
 		return nil
 	case "enter", "ctrl+enter", "alt+enter", "ctrl+j":
 		a := quickArgs(p.in.value(), agentsOn(h), m.defaultAgent(h))
+		p.stopFolders()
 		p.starting, p.err = true, nil
 		m.lastAgent[h.name()] = a.Agent
 		return m.startSession(h, startReq{args: a, attach: ks == "enter", line: p})
 	}
 	if p.in.key(k) {
+		p.stopFolders()
 		p.err = nil
 		return m.askFolders()
 	}
 	return nil
-}
-
-// askFolders asks the host for completions of the folder being typed.
-func (m *Model) askFolders() tea.Cmd {
-	p := m.prompt
-	h := m.hostByName(p.host)
-	text := p.in.value()
-	word := text[strings.LastIndex(text, " ")+1:]
-	if h == nil || !h.online() || !pathWord(word) || word == p.asked {
-		return nil
-	}
-	p.asked = word
-	name, c := h.name(), h.conn
-	return m.bgCmd(func(ctx context.Context) tea.Msg {
-		cctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-		defer cancel()
-		res, err := c.Folders(cctx, word)
-		if err != nil {
-			return nil
-		}
-		return foldersMsg{host: name, prefix: word, res: res, quick: true}
-	})
 }
 
 // promptLine draws the prompt: the host or "search", the text with its
@@ -267,21 +255,22 @@ func (m *Model) promptLine(w int) string {
 	}
 	label := "search"
 	if p.mode == promptNew {
-		label = p.host
+		label = shown(p.host)
 	}
 	lead := sAccent.Render(label) + " " + sAccent.Bold(true).Render(glyphPrompt) + " "
 	room := w - cells(lead)
 	if p.starting {
 		a := quickArgs(p.in.value(), m.agentsFor(p.host), "")
-		return lead + sKey.Render(m.spinner()) + " " + m.shimmer(fmt.Sprintf("Starting %s on %s…", orDefault(a.Agent, "the agent"), p.host))
+		return lead + sKey.Render(m.spinner()) + " " + m.shimmer(fmt.Sprintf("Starting %s on %s…", shown(orDefault(a.Agent, "the agent")), shown(p.host)))
 	}
-	g := m.ghost()
+	g := shown(m.ghost())
 	if g == "" || p.in.pos != len(p.in.val) {
 		return lead + p.in.view(room, true)
 	}
 	// The cursor sits on the completion's first letter.
-	r := []rune(trunc(g, max(room-cells(p.in.value()), 1)))
-	return lead + trunc(p.in.value(), room-len(r)) + sPlain.Reverse(true).Faint(true).Render(string(r[:1])) + sFaint.Render(string(r[1:]))
+	val := shown(p.in.value())
+	r := []rune(trunc(g, max(room-cells(val), 1)))
+	return lead + trunc(val, room-len(r)) + sPlain.Reverse(true).Faint(true).Render(string(r[:1])) + sFaint.Render(string(r[1:]))
 }
 
 func (m *Model) agentsFor(host string) []string {
@@ -321,11 +310,11 @@ func (m *Model) quickHints(w int) string {
 	}
 	out := strings.Join(parts, "  ")
 	if len(p.folders) > 0 {
-		out += sFaint.Render(sep + strings.Join(p.folders, "  "))
+		out += sFaint.Render(sep + strings.Join(shownAll(p.folders), "  "))
 	}
 	if p.err != nil {
 		msg, _ := errText(p.err)
-		out = sErrHead.Render(glyphFail) + " " + sDanger.Render(sentence(msg))
+		out = sErrHead.Render(glyphFail) + " " + sDanger.Render(sentence(oneLine(msg)))
 	}
 	return trunc(out, w)
 }

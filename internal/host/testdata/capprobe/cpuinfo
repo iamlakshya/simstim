@@ -1,0 +1,4 @@
+processor : 0
+flags : fpu vmx sse sse2
+processor : 1
+flags : fpu vmx sse sse2

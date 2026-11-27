@@ -14,8 +14,9 @@ import (
 // reader of the terminal that answer reads through too. Each has its
 // reason.
 var stdinAllowed = map[string]string{
-	"newGuide": "the guide reads g.in only through its prompter, whose questions read through answer",
-	"prompts":  "the prompter reads p.in only through readLine, which reads through answer",
+	"runForward": "hands stdin only to RunForward, which owns the SSH child stdin and does not prompt",
+	"newGuide":   "the guide reads g.in only through its prompter, whose questions read through answer",
+	"prompts":    "the prompter reads p.in only through readLine, which reads through answer",
 	"pickSession": "the picker reads os.Stdin only through keyread.For: the terminal's one reader, which answer shares, " +
 		"so the picker and the questions never make a second reader, which on Windows would drop what waits in the console",
 }

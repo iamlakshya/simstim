@@ -157,10 +157,10 @@ type scriptCase struct {
 func scriptCases(top string) []scriptCase {
 	return []scriptCase{
 		{"no answer", NewArgs{}, true},
-		{"--setup", NewArgs{Setup: api.SetupRun}, true},
-		{"--setup over a refusal", NewArgs{Setup: api.SetupRun, SetupTrust: map[string]bool{top: false}}, true},
+		{"--setup-script", NewArgs{Setup: api.SetupRun}, true},
+		{"--setup-script over a refusal", NewArgs{Setup: api.SetupRun, SetupTrust: map[string]bool{top: false}}, true},
 		{"a yes", NewArgs{SetupHashes: map[string]string{top: "h"}}, true},
-		{"--no-setup", NewArgs{Setup: api.SetupSkip}, false},
+		{"--no-setup-script", NewArgs{Setup: api.SetupSkip}, false},
 		{"refused", NewArgs{SetupTrust: map[string]bool{top: false}}, false},
 	}
 }
@@ -209,7 +209,7 @@ func TestSetupOutside(t *testing.T) {
 	rel := "." + brand.Name + "/setup"
 	startFails(t, top, api.CodeSetupOutside, func(t *testing.T, name string, pe *proto.Error) {
 		if pe.Message != "the setup script of "+top+", "+rel+", points outside the repository, so it cannot run" ||
-			pe.Hint != "Make "+rel+" a file in the repository, or start with --no-setup." {
+			pe.Hint != "Make "+rel+" a file in the repository, or start with --no-setup-script." {
 			t.Errorf("%s: %q, try %q", name, pe.Message, pe.Hint)
 		}
 	})
@@ -231,7 +231,7 @@ func TestSetupUnreadable(t *testing.T) {
 	rel := "." + brand.Name + "/resume"
 	startFails(t, top, api.CodeSetupUnreadable, func(t *testing.T, name string, pe *proto.Error) {
 		if pe.Message != "could not read the setup script of "+top+", "+rel+": permission denied" ||
-			pe.Hint != "Let your user on the host read "+rel+", or start with --no-setup." {
+			pe.Hint != "Let your user on the host read "+rel+", or start with --no-setup-script." {
 			t.Errorf("%s: %q, try %q", name, pe.Message, pe.Hint)
 		}
 	})
@@ -261,13 +261,13 @@ func TestSetupUnreadableTopLevel(t *testing.T) {
 	}
 	startFails(t, top, api.CodeSetupUnreadable, func(t *testing.T, name string, pe *proto.Error) {
 		if pe.Message != "could not read the folder "+top+", so the setup scripts of "+top+" cannot be checked: permission denied" ||
-			pe.Hint != "Let your user on the host read the folder "+top+", or start with --no-setup." {
+			pe.Hint != "Let your user on the host read the folder "+top+", or start with --no-setup-script." {
 			t.Errorf("%s: %q, try %q", name, pe.Message, pe.Hint)
 		}
 	})
 }
 
-// --no-setup and a refusal decide before the host reads any script. --setup
+// --no-setup-script and a refusal decide before the host reads any script. --setup-script
 // and the other rules read them.
 func TestSetupDecisionsThatReadNoScript(t *testing.T) {
 	alertHome(t)

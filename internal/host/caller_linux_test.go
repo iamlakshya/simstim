@@ -9,7 +9,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/iamlakshya/simstim/internal/host"
 	"github.com/iamlakshya/simstim/internal/host/hosttest"
 )
 
@@ -96,19 +95,4 @@ func TestRmFromANewCgroupNamespaceIsRefused(t *testing.T) {
 	if _, _, result := rmAsCaller(t, nil, b.ID, "none"); result != "deleted" {
 		t.Errorf("rm in this namespace, without a user manager: %q", result)
 	}
-}
-
-// holderRuns reports whether session id's holder runs.
-func holderRuns(t *testing.T, id string) bool {
-	t.Helper()
-	list, err := host.List()
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, s := range list {
-		if s.ID == id {
-			return s.Alive
-		}
-	}
-	return false
 }

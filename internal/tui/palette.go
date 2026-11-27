@@ -11,6 +11,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/iamlakshya/simstim/internal/api"
 	"github.com/iamlakshya/simstim/internal/brand"
 	"github.com/iamlakshya/simstim/internal/client"
 	"github.com/iamlakshya/simstim/internal/version"
@@ -33,13 +34,15 @@ type binding struct {
 // command is one entry of the registry. The same registry feeds the
 // palette, the shortcuts and the keys of the launcher (docs/contributing/ux-spec.md 2.7).
 type command struct {
-	noun, verb string
-	short      string // the words in the shortcuts, if not the verb
-	keys       []binding
-	firstRun   bool // works on the first-run screen too
-	hidden     bool // kept out of the palette
-	why        func(m *Model) string
-	run        func(m *Model) tea.Cmd
+	noun, verb   string
+	short        string // the words in the shortcuts, if not the verb
+	cli          string // the CLI command, with any flag that picks this action
+	launcherOnly string // why the action has no CLI command
+	keys         []binding
+	firstRun     bool // works on the first-run screen too
+	hidden       bool // kept out of the palette
+	why          func(m *Model) string
+	run          func(m *Model) tea.Cmd
 	// instead, if set, is what the command's key does when the command
 	// cannot run, in place of the notice that says why. It reports whether
 	// it took the key.
@@ -149,7 +152,7 @@ func registry() []*command {
 		return needSession(m)
 	}
 	needEnded := func(m *Model) string {
-		if s := m.selected(); s != nil && !ended(*s) {
+		if s := m.selected(); s != nil && !ended(*s) && s.State != api.StateStopped {
 			return "the agent still runs"
 		}
 		return needSession(m)
@@ -161,25 +164,27 @@ func registry() []*command {
 		return needSession(m)
 	}
 	return append([]*command{
-		{noun: "session", verb: "new", short: "new session", keys: []binding{{"n", anywhere}},
-			why: func(m *Model) string {
-				h := m.newSessionHost()
-				switch {
-				case h == nil:
-					return "choose a host first"
-				case h.status == stOffline || h.status == stFailed:
-					return h.name() + " is offline"
-				}
-				return ""
-			},
-			run: (*Model).openQuickStart},
-		{noun: "session", verb: "new with the form", short: "new session, with the form", why: func(m *Model) string {
-			if m.newSessionHost() == nil {
-				return "choose a host first"
+		{noun: "session", verb: "policy", cli: "policy ls --in", keys: []binding{{"p", onSessions}}, why: needSession, run: (*Model).openPolicy},
+		{noun: "session", verb: "policy log", cli: "policy log --in", why: needSession, run: (*Model).openPolicyLog},
+		{noun: "session", verb: "stop", cli: "stop", why: needSession, run: (*Model).stopSelected},
+		{noun: "session", verb: "shell", cli: "shell", why: func(m *Model) string {
+			if why := needSession(m); why != "" {
+				return why
+			}
+			if m.sessionShell == nil {
+				return "session shells are unavailable in this view"
 			}
 			return ""
-		}, run: (*Model).openNewSession},
-		{noun: "session", verb: "attach", keys: []binding{{"enter", onSessions}},
+		}, run: (*Model).openSessionShell},
+		{noun: "policy", verb: "lockdown", cli: "policy lockdown", why: func(m *Model) string {
+			if m.policyLockdown == nil {
+				return "lockdown is unavailable in this view"
+			}
+			return ""
+		}, run: (*Model).runPolicyLockdown},
+		{noun: "session", verb: "new", short: "new session", cli: "new", keys: []binding{{"n", anywhere}}, run: (*Model).openQuickStart},
+		{noun: "session", verb: "new with the form", short: "new session, with the form", cli: "new", run: (*Model).openNewSession},
+		{noun: "session", verb: "attach", cli: "attach", keys: []binding{{"enter", onSessions}},
 			why: func(m *Model) string {
 				if m.screen == scrSessions && m.selected() == nil && sessionRows(m.rows()) == 0 {
 					return ""
@@ -187,14 +192,14 @@ func registry() []*command {
 				return needAgent(m)
 			},
 			run: (*Model).attachSelected, instead: (*Model).enterEnded},
-		{noun: "session", verb: "preview", short: "peek at the screen", keys: []binding{{"space", onSessions}}, why: needScreen, run: (*Model).openPreview},
-		{noun: "session", verb: "rename", keys: []binding{{"r", onSessions}, {"f2", onSessions}}, why: needSession, run: (*Model).startRename},
-		{noun: "session", verb: "delete", keys: []binding{{"d", onSessions}}, why: needSession, run: (*Model).confirmDelete},
-		{noun: "session", verb: "resume", keys: []binding{{resumeKey, onSessions}}, why: needEnded, run: (*Model).resumeSelected},
-		{noun: "session", verb: "copy attach command", short: "copy attach command", keys: []binding{{"y", onSessions}}, why: needAgent, run: (*Model).copyAttach},
-		{noun: "session", verb: "next waiting", short: "next waiting session", keys: []binding{{"w", anywhere}}, run: (*Model).nextWaiting},
+		{noun: "session", verb: "peek", short: "peek at the screen", cli: "show --screen", keys: []binding{{"space", onSessions}}, why: needScreen, run: (*Model).openPreview},
+		{noun: "session", verb: "rename", cli: "rename", keys: []binding{{"r", onSessions}, {"f2", onSessions}}, why: needSession, run: (*Model).startRename},
+		{noun: "session", verb: "delete", cli: "rm", keys: []binding{{"d", onSessions}}, why: needSession, run: (*Model).confirmDelete},
+		{noun: "session", verb: "resume", cli: "resume", keys: []binding{{resumeKey, onSessions}}, why: needEnded, run: (*Model).resumeSelected},
+		{noun: "session", verb: "copy attach command", short: "copy attach command", launcherOnly: "it copies a command to the clipboard", keys: []binding{{"y", onSessions}}, why: needAgent, run: (*Model).copyAttach},
+		{noun: "session", verb: "next waiting", short: "next waiting session", launcherOnly: "it moves the selection", keys: []binding{{"w", anywhere}}, run: (*Model).nextWaiting},
 
-		{noun: "host", verb: "open", short: "open host", keys: []binding{{"enter", onHosts}},
+		{noun: "host", verb: "open", short: "open host", cli: "ls", keys: []binding{{"enter", onHosts}},
 			why: func(m *Model) string {
 				if m.screen != scrHosts {
 					return "the sessions are open"
@@ -202,36 +207,36 @@ func registry() []*command {
 				return needHost(m)
 			},
 			run: (*Model).openSelectedHost},
-		{noun: "host", verb: "add", short: "add host", keys: []binding{{"a", anywhere}}, firstRun: true, run: (*Model).openWizard},
-		{noun: "host", verb: "set up", short: "guided setup", keys: []binding{{"s", anywhere}}, firstRun: true, run: (*Model).openGuide},
-		{noun: "host", verb: "details", short: "host details", keys: []binding{{"i", anywhere}}, why: needHost,
+		{noun: "host", verb: "add", short: "add host", cli: "host add", keys: []binding{{"a", anywhere}}, firstRun: true, run: (*Model).openWizard},
+		{noun: "host", verb: "set up", short: "guided setup", cli: "setup --host", keys: []binding{{"s", anywhere}}, firstRun: true, run: (*Model).openGuide},
+		{noun: "host", verb: "details", short: "host details", cli: "host show", keys: []binding{{"i", anywhere}}, why: needHost,
 			run: func(m *Model) tea.Cmd { m.modal = &details{host: m.selectedHost().name()}; return nil }},
-		{noun: "host", verb: "test", why: needHost, run: func(m *Model) tea.Cmd { return m.testHost(m.selectedHost()) }},
-		{noun: "host", verb: "reconnect", why: needHost, run: func(m *Model) tea.Cmd { return m.reconnect(m.selectedHost()) }},
-		{noun: "host", verb: "remove", why: needHost,
+		{noun: "host", verb: "test", cli: "host test", why: needHost, run: func(m *Model) tea.Cmd { return m.testHost(m.selectedHost()) }},
+		{noun: "host", verb: "reconnect", cli: "host test --reconnect", why: needHost, run: func(m *Model) tea.Cmd { return m.reconnect(m.selectedHost()) }},
+		{noun: "host", verb: "remove", cli: "host rm", why: needHost,
 			run: func(m *Model) tea.Cmd { m.modal = removeHostDialog(m.selectedHost().host); return nil }},
 
-		{noun: "view", verb: "hosts", short: "back to the hosts", why: func(m *Model) string {
+		{noun: "view", verb: "hosts", short: "back to the hosts", launcherOnly: "it changes the view", why: func(m *Model) string {
 			if m.screen == scrHosts {
 				return "the hosts are open"
 			}
 			return ""
 		}, run: func(m *Model) tea.Cmd { m.backToHosts(); return nil }},
-		{noun: "view", verb: "all sessions", run: func(m *Model) tea.Cmd { m.openHost(nil); return nil }},
-		{noun: "view", verb: "search", short: "search every host", keys: []binding{{"/", anywhere}}, run: (*Model).openSearch},
-		{noun: "view", verb: "toggle ended", short: "show ended", keys: []binding{{"alt+e", onSessions}},
+		{noun: "view", verb: "all sessions", cli: "ls", run: func(m *Model) tea.Cmd { m.openHost(nil); return nil }},
+		{noun: "view", verb: "search", short: "search every host", launcherOnly: "it changes the view", keys: []binding{{"/", anywhere}}, run: (*Model).openSearch},
+		{noun: "view", verb: "toggle ended", short: "show ended", launcherOnly: "it changes the view", keys: []binding{{"alt+e", onSessions}},
 			run: func(m *Model) tea.Cmd { m.hideExited = !m.hideExited; m.syncSel(); return nil }},
-		{noun: "view", verb: "shortcuts", short: "keys", keys: []binding{{"?", anywhere}}, firstRun: true,
+		{noun: "view", verb: "shortcuts", short: "keys", launcherOnly: "it changes the view", keys: []binding{{"?", anywhere}}, firstRun: true,
 			run: func(m *Model) tea.Cmd { m.modal = &helpSheet{}; return nil }},
-		{noun: "view", verb: "commands", keys: []binding{{"ctrl+o", anywhere}}, firstRun: true, hidden: true,
+		{noun: "view", verb: "commands", launcherOnly: "it changes the view", keys: []binding{{"ctrl+o", anywhere}}, firstRun: true, hidden: true,
 			run: func(m *Model) tea.Cmd { m.modal = &palette{in: newInput("", "")}; return nil }},
 
-		{noun: brand.Name, verb: "settings", firstRun: true, run: (*Model).openSettings},
-		{noun: brand.Name, verb: "about", firstRun: true,
+		{noun: brand.Name, verb: "settings", launcherOnly: "it edits config.toml, whose path config path prints", firstRun: true, run: (*Model).openSettings},
+		{noun: brand.Name, verb: "about", cli: "version", firstRun: true,
 			run: func(m *Model) tea.Cmd {
-				return m.toast(toastInfo, fmt.Sprintf("%s %s, protocol %s, host helper %s.", brand.DisplayName, version.Version, version.Protocol, m.be.HelperVersion()))
+				return m.toast(toastInfo, fmt.Sprintf("%s %s, protocol %s, host helper %s.", brand.DisplayName, version.Version, version.Protocol, shown(m.be.HelperVersion())))
 			}},
-		{noun: brand.Name, verb: "quit", keys: []binding{{"q", anywhere}}, firstRun: true,
+		{noun: brand.Name, verb: "quit", launcherOnly: "it quits the launcher", keys: []binding{{"q", anywhere}}, firstRun: true,
 			run: func(*Model) tea.Cmd { return tea.Quit }},
 	}, debugCommands()...)
 }

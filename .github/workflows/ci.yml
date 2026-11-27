@@ -16,6 +16,7 @@ concurrency:
 
 jobs:
   test:
+    needs: [reproducible, gvisor-repro]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -25,29 +26,79 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version-file: go.mod
+          go-version: '1.27.4'
       - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
         with:
           version: 0.17.0
       - name: Build the host helpers and the shadow terminal (the client embeds them)
         run: |
+          cmd/userns/build.sh
+          # Explicit feed preparation follows the actual C/cohort producer.
+          go run -tags="$(sh scripts/go-build-tags.sh)" ./cmd/feedgen --output internal/egress/rules/feed/snapshot.json
           for arch in amd64 arm64; do
-            CGO_ENABLED=0 GOOS=linux GOARCH=$arch go build -trimpath -o internal/client/helpers/host-linux-$arch ./cmd/host
+            CGO_ENABLED=0 GOOS=linux GOARCH=$arch go build -tags="$(sh scripts/go-build-tags.sh)" -trimpath -o internal/client/helpers/host-linux-$arch ./cmd/host
           done
           (cd vt && zig build linux)
           for arch in amd64 arm64; do cp vt/zig-out/linux/shadow-vt-$arch internal/client/helpers/vt-linux-$arch; done
-      - run: go vet ./...
-      - run: go test -race -count=1 ./...
+      - run: go vet -tags="$(sh scripts/go-build-tags.sh)" ./...
+      - run: go test -tags="$(sh scripts/go-build-tags.sh)" -race -count=1 ./...
+      - name: Test the isolated compiler preparation guards without network access
+        run: python3 scripts/test-prepare-image-verifier-go.py
+      - name: Test checksum-bound upstream tool preparation offline
+        run: |
+          python3 scripts/test-prepare-gvisor-build.py
+          python3 scripts/test-gvisor-build-inputs.py
+      - name: Test repro prerequisite refusal and literal artifact argument handling offline
+        run: python3 scripts/test-repro-inputs.py
+      - name: Prepare the separate official verifier compiler and checked module inputs
+        run: |
+          python3 scripts/prepare-image-verifier-go.py \
+            --lock tools/imageverify/toolchain.lock \
+            --output "$RUNNER_TEMP/image-verifier-go" \
+            --cache "$RUNNER_TEMP/image-verifier-downloads" \
+            --module tools/imageverify --prepare-module --env-file "$GITHUB_ENV"
+      - name: Vet and race-test the nested offline verifier with its own compiler
+        # Root ./... excludes this nested module. Main Go and PATH stay fixed.
+        run: |
+          compiler_sha=$(sha256sum "$IMAGEVERIFY_GO")
+          test "${compiler_sha%% *}" = "$IMAGEVERIFY_GO_SHA256"
+          export HOME="$IMAGEVERIFY_HOME" USERPROFILE="$IMAGEVERIFY_HOME"
+          export XDG_CONFIG_HOME="$IMAGEVERIFY_HOME/config" XDG_CACHE_HOME="$IMAGEVERIFY_HOME/cache"
+          export XDG_DATA_HOME="$IMAGEVERIFY_HOME/data" XDG_STATE_HOME="$IMAGEVERIFY_HOME/state"
+          export XDG_RUNTIME_DIR="$IMAGEVERIFY_HOME/run" XDG_CONFIG_DIRS="$IMAGEVERIFY_HOME/config-dirs"
+          export XDG_DATA_DIRS="$IMAGEVERIFY_HOME/data-dirs"
+          export GOMODCACHE="$IMAGEVERIFY_GOMODCACHE" GOCACHE="$IMAGEVERIFY_GOCACHE"
+          export GOTOOLCHAIN=local GOPROXY=off GOSUMDB=sum.golang.org GOFLAGS=-mod=readonly
+          cd tools/imageverify
+          "$IMAGEVERIFY_GO" vet -tags=http2legacy ./...
+          "$IMAGEVERIFY_GO" test -tags=http2legacy -race -count=1 ./...
+      - name: Pinned host keys against real localhost SSH servers
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y openssh-server openssh-client
+          pin_home=$(mktemp -d "$RUNNER_TEMP/pin-home.XXXXXX")
+          cleanup() { sudo python3 -c 'import shutil,sys; shutil.rmtree(sys.argv[1])' "$pin_home"; }
+          trap cleanup EXIT
+          mkdir -p "$pin_home/config" "$pin_home/state" "$pin_home/data" "$pin_home/cache" "$pin_home/run" "$pin_home/gnupg" "$pin_home/tmp"
+          chmod 700 "$pin_home/run" "$pin_home/gnupg"
+          sudo env -i PATH="$PATH" HOME="$pin_home" USERPROFILE="$pin_home" \
+            XDG_CONFIG_HOME="$pin_home/config" XDG_STATE_HOME="$pin_home/state" \
+            XDG_DATA_HOME="$pin_home/data" XDG_CACHE_HOME="$pin_home/cache" \
+            XDG_RUNTIME_DIR="$pin_home/run" GNUPGHOME="$pin_home/gnupg" TMPDIR="$pin_home/tmp" \
+            GIT_CONFIG_GLOBAL="$pin_home/gitconfig" GIT_CONFIG_NOSYSTEM=1 \
+            GOCACHE="$pin_home/go-cache" \
+            GOMODCACHE="$(go env GOMODCACHE)" GOTOOLCHAIN=local PIN_SSHD=1 \
+            go test -tags="$(sh scripts/go-build-tags.sh)" -race -count=3 -run '^TestRealSSHD' ./internal/client
       - name: The link's tests again, over a pipe with no buffer
         env:
           LINK_TEST_PIPE: "1"
-        run: go test -race -count=1 ./internal/link
+        run: go test -tags="$(sh scripts/go-build-tags.sh)" -race -count=1 ./internal/link
       - name: Coverage of internal/ without the launcher (70 % or more)
         run: scripts/cover.sh 70
       - name: Cross-build the client
         run: |
           for t in darwin/amd64 darwin/arm64 linux/amd64 linux/arm64 windows/amd64; do
-            CGO_ENABLED=0 GOOS=${t%/*} GOARCH=${t#*/} go build -o /dev/null .
+            CGO_ENABLED=0 GOOS=${t%/*} GOARCH=${t#*/} go build -tags="$(sh scripts/go-build-tags.sh)" -o /dev/null .
           done
       - name: Name check
         run: scripts/check-name.sh
@@ -57,8 +108,14 @@ jobs:
         run: scripts/check-scripts.sh
       - name: Public-readiness checker regression tests (offline)
         run: python3 scripts/test-scorecard-check.py
+      - name: Source archive checker regression tests (offline)
+        run: python3 scripts/test-source-checks.py
       - name: End-to-end cleanup tests (offline)
         run: python3 test/e2e/test_sandbox_hosts.py
+      - name: Conformance evidence and native log parser tests (offline)
+        run: |
+          python3 test/e2e/test_conformance_evidence.py
+          python3 scripts/test-check-conformance-go.py
       - name: Offline tests of the session sockets' end-to-end probe
         run: python3 test/e2e/test_session_sockets.py
       - name: Pins watch tests (offline, with recorded answers)
@@ -75,16 +132,78 @@ jobs:
         run: scripts/check-size.sh
       - name: Generated docs are current
         run: |
-          go run ./cmd/docgen
+          go run -tags="$(sh scripts/go-build-tags.sh)" ./cmd/docgen
           if [ -n "$(git status --porcelain docs/reference)" ]; then
             git status --short docs/reference
             echo "::error::docs/reference is stale. Run just docs and commit the result."
             exit 1
           fi
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: default-repro-amd64
+          path: build/default-repro-transport/amd64
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: default-repro-arm64
+          path: build/default-repro-transport/arm64
+      - name: Restore both actual native image pairs with their recorded evidence
+        run: |
+          for arch in amd64 arm64; do
+            mkdir -p "$RUNNER_TEMP/default-repro-$arch"
+            tar -xzf "build/default-repro-transport/$arch/default-repro-$arch.tar.gz" \
+              --no-same-owner -C "$RUNNER_TEMP/default-repro-$arch"
+          done
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: gvisor-repro-amd64
+          path: build/gvisor-repro-transport/amd64
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: gvisor-repro-arm64
+          path: build/gvisor-repro-transport/arm64
+      - name: Restore both actual native gVisor pairs
+        run: |
+          for arch in amd64 arm64; do
+            mkdir -p "$RUNNER_TEMP/gvisor-repro-$arch"
+            tar -xzf "build/gvisor-repro-transport/$arch/gvisor-repro-$arch.tar.gz" \
+              --no-same-owner -C "$RUNNER_TEMP/gvisor-repro-$arch"
+          done
+      - uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
+        with:
+          distribution: goreleaser
+          version: "~> v2"
+          install-only: true
+      - name: Compare two real release builds, including independently rebuilt helpers
+        run: |
+          export DEFAULT_IMAGE_REPRO_AMD64="$RUNNER_TEMP/default-repro-amd64"
+          export DEFAULT_IMAGE_REPRO_ARM64="$RUNNER_TEMP/default-repro-arm64"
+          export GVISOR_REPRO_AMD64="$RUNNER_TEMP/gvisor-repro-amd64"
+          export GVISOR_REPRO_ARM64="$RUNNER_TEMP/gvisor-repro-arm64"
+          export GOMODCACHE="$(go env GOMODCACHE)"
+          scripts/repro.sh
+      - name: Package the real current-source snapshot for both native install checks
+        run: |
+          mkdir -p "$RUNNER_TEMP/install-default-images" "$RUNNER_TEMP/install-gvisor"
+          for arch in amd64 arm64; do
+            cp -R "$RUNNER_TEMP/default-repro-$arch/run-1/image/$arch" "$RUNNER_TEMP/install-default-images/$arch"
+            cp -R "$RUNNER_TEMP/gvisor-repro-$arch/run-1/output" "$RUNNER_TEMP/install-gvisor/$arch"
+          done
+          export DEFAULT_IMAGE_MANIFEST_INPUTS="$RUNNER_TEMP/install-default-images"
+          export GVISOR_MANIFEST_INPUTS="$RUNNER_TEMP/install-gvisor"
+          export APP_NAME=$(sed -n 's/^const Name = "\(.*\)"/\1/p' internal/brand/brand.go)
+          export MODULE=$(sed -n 's/^module //p' go.mod)
+          goreleaser release --snapshot --clean --skip=publish,sign,sbom
+          (cd dist && tar -czf "$RUNNER_TEMP/install-snapshot.tar.gz" metadata.json checksums.txt *.tar.gz)
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: install-snapshot
+          path: ${{ runner.temp }}/install-snapshot.tar.gz
+          if-no-files-found: error
+          retention-days: 1
 
   docker-host:
     # `host create docker`, then the end-to-end suite against the container,
-    # then `host destroy`: the exec transport, proved live (record 0013).
+    # then `host rm --destroy`: the exec transport, proved live (record 0013).
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -95,26 +214,36 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version-file: go.mod
+          go-version: '1.27.4'
       - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
         with:
           version: 0.17.0
       - name: Build the client, with the host helper and the shadow terminal
         run: |
           echo "XDG_CONFIG_HOME=$RUNNER_TEMP/config" >> "$GITHUB_ENV"
-          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o internal/client/helpers/host-linux-amd64 ./cmd/host
+          cmd/userns/build.sh
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -tags="$(sh scripts/go-build-tags.sh)" -trimpath -o internal/client/helpers/host-linux-amd64 ./cmd/host
           (cd vt && zig build linux)
           cp vt/zig-out/linux/shadow-vt-amd64 internal/client/helpers/vt-linux-amd64
-          CGO_ENABLED=0 go build -trimpath -o bin/client .
+          CGO_ENABLED=0 go build -tags="$(sh scripts/go-build-tags.sh)" -trimpath -o bin/client .
       - name: Create a host in a container
-        run: bin/client host create docker ci
+        run: |
+          bin/client host create docker ci
+          m=$(openssl rand -hex 16)
+          echo "E2E_DISPOSABLE_MARKER=$m" >> "$GITHUB_ENV"
+          cid=$(python3 -c 'import glob, os, tomllib; f = open(glob.glob(os.environ["XDG_CONFIG_HOME"] + "/*/hosts.toml")[0], "rb"); print(tomllib.load(f)["host"][0]["machine"]["id"])')
+          printf '%s\n' "$m" | docker exec -u 0 -i "$cid" sh -c 'cat > /etc/e2e-disposable'
       - name: End-to-end tests against it
         env:
           E2E_HOST: ci
+          # The container is made for this run, and destroyed after it: the
+          # checks of a disposable host, which type into sessions and change
+          # a host's shared state, run here too.
+          E2E_DISPOSABLE: "1"
         run: python3 test/e2e/run.py bin/client
       - name: Destroy it
         if: always()
-        run: bin/client host destroy ci --yes --force
+        run: bin/client host rm ci --destroy --confirm ci --force
 
   docs-impact:
     # A pull request that changes commands, config, keys or agents must change
@@ -147,7 +276,13 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version-file: go.mod
+          go-version: '1.27.4'
+      - name: Prepare the namespace build tool when that source is present
+        run: |
+          if [ -d internal/usernscode ]; then
+            scripts/setup.sh --only zig
+            echo "$PWD/.tools/bin" >> "$GITHUB_PATH"
+          fi
       - name: The attach pump is no slower than the base
         env:
           BASE: ${{ github.event.pull_request.base.sha }}
@@ -166,11 +301,13 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version-file: go.mod
+          go-version: '1.27.4'
       - name: Unit tests of the portable packages
-        run: go test -count=1 ./internal/client/... ./internal/keys/... ./internal/keyread/... ./internal/term/... ./internal/ring/... ./internal/proto/... ./internal/agents/... ./internal/api/... ./internal/testhome/...
+        shell: bash
+        run: go test -tags="$(sh scripts/go-build-tags.sh)" -count=1 ./internal/client/... ./internal/keys/... ./internal/keyread/... ./internal/term/... ./internal/ring/... ./internal/proto/... ./internal/agents/... ./internal/api/... ./internal/testhome/...
       - name: Build the client
-        run: go build -o client.exe .
+        shell: bash
+        run: go build -tags="$(sh scripts/go-build-tags.sh)" -o client.exe .
 
   lint:
     runs-on: ubuntu-latest
@@ -182,20 +319,24 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version-file: go.mod
+          go-version: '1.27.4'
       - name: Build the host helpers (the client embeds them)
         run: |
+          cmd/userns/build.sh
           for arch in amd64 arm64; do
-            CGO_ENABLED=0 GOOS=linux GOARCH=$arch go build -o internal/client/helpers/host-linux-$arch ./cmd/host
+            CGO_ENABLED=0 GOOS=linux GOARCH=$arch go build -tags="$(sh scripts/go-build-tags.sh)" -o internal/client/helpers/host-linux-$arch ./cmd/host
           done
+      - name: Select the complete source tag list
+        run: echo "GO_BUILD_TAGS=$(sh scripts/go-build-tags.sh)" >> "$GITHUB_ENV"
       - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         with:
           version: v2.14.0
+          args: --build-tags=${{ env.GO_BUILD_TAGS }}
       - name: Known vulnerabilities in the code we call
-        run: go run golang.org/x/vuln/cmd/govulncheck@v1.1.4 ./...
+        run: go run -tags="$(sh scripts/go-build-tags.sh)" golang.org/x/vuln/cmd/govulncheck@v1.1.4 -tags="$(sh scripts/go-build-tags.sh)" ./...
       - name: No dead code, tests included
         run: |
-          out=$(GOTOOLCHAIN=auto go run golang.org/x/tools/cmd/deadcode@v0.38.0 -test ./...)
+          out=$(go run -tags="$(sh scripts/go-build-tags.sh)" golang.org/x/tools/cmd/deadcode@v0.38.0 -tags="$(sh scripts/go-build-tags.sh)" -test ./...)
           [ -z "$out" ] || { echo "$out"; echo "::error::Dead code: remove it, or use it."; exit 1; }
 
   workflows:
@@ -213,9 +354,18 @@ jobs:
           advanced-security: false
 
   reproducible:
-    # Two builds of every release binary from empty caches must match byte
-    # for byte, so anyone can check a release against the source.
-    runs-on: ubuntu-latest
+    # Native image preparations are prerequisites for the two complete builds
+    # in the existing test job. No emulation or registry publication is used.
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
     permissions:
       contents: read
     steps:
@@ -225,20 +375,71 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version-file: go.mod
+          go-version: '1.27.4'
           cache: false
-      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
+      - name: Prepare checked modules and two actual native default image builds
+        env:
+          IMAGE_ARCH: ${{ matrix.arch }}
+        run: |
+          export GOTOOLCHAIN=local
+          go mod download
+          go mod verify
+          export GOMODCACHE="$(go env GOMODCACHE)"
+          export DEFAULT_IMAGE_REPRO_OUT_DIR="$RUNNER_TEMP/default-image-repro-$IMAGE_ARCH"
+          guest/base-image/repro.sh "$IMAGE_ARCH"
+      - name: Preserve actual OCI/root pairs and native/source evidence
+        env:
+          IMAGE_ARCH: ${{ matrix.arch }}
+        run: |
+          tar -C "$RUNNER_TEMP/default-image-repro-$IMAGE_ARCH" \
+            -czf "$RUNNER_TEMP/default-repro-$IMAGE_ARCH.tar.gz" \
+            result.json native-runner.txt source-pins-before.txt source-pins-after.txt \
+            "run-1/image/$IMAGE_ARCH" "run-2/image/$IMAGE_ARCH" run-1/build.log run-2/build.log
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          version: 0.17.0
-          use-cache: false
-      - uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
+          name: default-repro-${{ matrix.arch }}
+          path: ${{ runner.temp }}/default-repro-${{ matrix.arch }}.tar.gz
+          if-no-files-found: error
+          retention-days: 1
+
+  gvisor-repro:
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          distribution: goreleaser
-          version: "~> v2"
-          install-only: true
-      - run: scripts/repro.sh
+          persist-credentials: false
+      - name: Build both real native closures with separate empty state
+        env:
+          NATIVE_ARCH: ${{ matrix.arch }}
+        run: scripts/gvisor-native-repro.sh "$NATIVE_ARCH" "$RUNNER_TEMP/gvisor-repro-$NATIVE_ARCH"
+      - name: Preserve both original outputs and source evidence
+        env:
+          NATIVE_ARCH: ${{ matrix.arch }}
+        run: |
+          tar -C "$RUNNER_TEMP/gvisor-repro-$NATIVE_ARCH" \
+            -czf "$RUNNER_TEMP/gvisor-repro-$NATIVE_ARCH.tar.gz" \
+            source-pins-before.txt source-pins-after.txt tools/tools.json \
+            run-1/output run-2/output run-1/build.log run-2/build.log
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: gvisor-repro-${{ matrix.arch }}
+          path: ${{ runner.temp }}/gvisor-repro-${{ matrix.arch }}.tar.gz
+          if-no-files-found: error
+          retention-days: 1
 
   install:
+    needs: test
     # install.sh against a local, signed snapshot release: it must install a
     # good release and refuse changed checksums, signatures or archives.
     strategy:
@@ -255,18 +456,20 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version-file: go.mod
+          go-version: '1.27.4'
           cache: false
-      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          version: 0.17.0
-          use-cache: false
-      - uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
-        with:
-          distribution: goreleaser
-          version: "~> v2"
-          install-only: true
-      - run: scripts/test-install.sh
+          name: install-snapshot
+          path: build/install-snapshot-transport
+      - name: Restore the original snapshot built from this source in the Linux test job
+        run: |
+          mkdir -p "$RUNNER_TEMP/install-snapshot"
+          tar -xzf build/install-snapshot-transport/install-snapshot.tar.gz -C "$RUNNER_TEMP/install-snapshot"
+      - name: Run the unchanged signature, checksum, tamper and install assertions natively
+        env:
+          INSTALL_SNAPSHOT_DIR: ${{ runner.temp }}/install-snapshot
+        run: scripts/test-install.sh
 
   public-check:
     # Everything that must hold before the repository goes public: no
@@ -284,7 +487,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version-file: go.mod
+          go-version: '1.27.4'
           cache: false
       - uses: astral-sh/setup-uv@18d369b23da25a81e9458561248e1aafff6a70fa # v10.3.1
         with:

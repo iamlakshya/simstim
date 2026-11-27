@@ -1,0 +1,13 @@
+# Original runtime projections
+
+A VM Need names exactly one driver's boot roles. A release may deliver several drivers and both normal and EFI kernels in one runtime collection. The selected Need is a projection of that collection. It does not replace the original runtime request or its held descriptors.
+
+The `runtime-origin-v1` feature adds a version 1 raw carrier to VM new and fixed sandbox preparation requests. A cold resume carries it only in `resume.vm.prepare-v1`, its second preparation phase. Phase one, the final resume and warm resumes refuse it. Identical second-phase retries keep the same canonical carrier; a changed carrier is refused. The carrier holds the complete original runtime collection as data. It is limited to 1 MiB within the existing 4 MiB frame. Exact field names, required fields and duplicate checks apply to its nested manifest too. A null advisory list keeps its established meaning and representation. Null manifests, runtime items and list elements are refused. A client keeps it on the same private request, connection and image plan that produced the Need.
+
+The helper uses that full collection's exact key to select one existing producer on the same accepted connection. It does not search other collections for matching roles. The producer must still own its original files, publication and lifetime. A private use derives the closed driver roles from that original producer and compares them with the Need. The use owns no separate receipt, file, publication or lifetime. The protected writer verifies every original descriptor before taking the placement lock. It keeps the original producer lock until publication. Inside placement and just before rename, bounded checks revalidate the original issuer, exact map entry, selected roles, publication and actual request cancellation.
+
+A request without the carrier keeps the older exact-manifest lookup. If only the full collection exists, a projected request without an origin is refused. An inventory, copied receipt, supplied manifest, selected subset or new context cannot renew a retired producer. Only a genuine runtime status or delivery request can issue a new producer after the old one has finished cleanup.
+
+The lock order is witness or selection, original runtime receipt, agents receipt, placement, then the short service-map lock. A service-map lock never waits for a receipt or placement lock.
+
+These checks run before a VM starts. The existing agents, image, native startup and memory owners still apply. New and resume tests that use real store and status producers prove those file and request paths. They do not prove installed-agent discovery, the converter jail or a VM boot unless those operations actually ran.

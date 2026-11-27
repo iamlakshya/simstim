@@ -14,6 +14,23 @@ func resumeCalls(be *fakeBackend) []string {
 	return slices.DeleteFunc(be.callList(), func(c string) bool { return !strings.HasPrefix(c, "resume ") })
 }
 
+func TestEnterWakesStoppedSandboxThroughResume(t *testing.T) {
+	hs := sessions(t, 80, 24)
+	h, s := hs.m.selectedPair()
+	if h == nil || s == nil {
+		t.Fatal("no selected session")
+	}
+	id := s.ID
+	s.State, s.Alive = api.StateStopped, false
+	hs.key("enter")
+	if calls := resumeCalls(hs.be); len(calls) != 1 {
+		t.Fatalf("stopped attach bypassed resume: %v", calls)
+	}
+	if len(hs.be.attached) != 1 || hs.be.attached[0].Session != id {
+		t.Fatal("wake did not attach after the checked resume")
+	}
+}
+
 // After the memory cap stopped an agent, the resume comes first, in the
 // line under the list and in the keys. u resumes it in the same session,
 // and the launcher then attaches to it, as after a start.
@@ -111,6 +128,7 @@ func TestResumeSecretsAndErrors(t *testing.T) {
 		}
 	}
 	h.host.Secrets = []string{"TOKEN"}
+	replace(hs.be, h.host)
 	hs.be.secrets = map[string]api.Secret{"TOKEN": "t0k", "OTHER": "x", "GITHUB_TOKEN": "gh"}
 	setSecrets("TOKEN", "GITHUB_TOKEN")
 	hs.key("u")
@@ -138,12 +156,20 @@ func TestResumeSecretsAndErrors(t *testing.T) {
 // memory cap, the notice says which cap the agent gets again.
 func TestResumeOnceAtATime(t *testing.T) {
 	hs := endedLab(t, 80, 24)
-	cmd := hs.m.resumeSelected()
+	resolve := hs.m.resumeSelected()
+	if resolve == nil {
+		t.Fatal("u did not start the saved host's tier check")
+	}
+	_, cmd := hs.m.Update(resolve())
 	if cmd == nil || !hs.m.resuming[sessKey{"gcp-dev", "g3"}] {
 		t.Fatal("u did not start a resume")
 	}
 	hasToast(t, hs.m, "Resuming importer on gcp-dev, with its cap of 1.5 GiB…")
-	if again := hs.m.resumeSelected(); again != nil {
+	resolve = hs.m.resumeSelected()
+	if resolve == nil {
+		t.Fatal("the repeated key did not check current saved policy")
+	}
+	if _, again := hs.m.Update(resolve()); again != nil {
 		t.Error("a second u started another resume of the same session")
 	}
 	hs.do(cmd)

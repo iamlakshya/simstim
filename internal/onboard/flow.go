@@ -205,7 +205,11 @@ func NeedsLogin(it Item) bool {
 // Done records how an install or a login went, from the host's checks after
 // the user left its session. ended says whether the session ended, rather
 // than the user detaching from it.
-func (f *Flow) Done(a Action, checks []api.AgentCheck, ended bool) {
+func (f *Flow) Done(a Action, checks []api.AgentCheck, ended bool) error {
+	if !api.ValidSessionID(a.Session) {
+		return &client.UserError{Msg: "the host sent a session ID that is not valid",
+			Hint: brand.Name + " host doctor " + client.ShellWord(f.Host), Code: "bad_session_id"}
+	}
 	f.update(checks)
 	it := f.item(a.Agent.Kind)
 	// A command names the session by its ID, or quoted (client.CommandTarget).
@@ -220,9 +224,9 @@ func (f *Flow) Done(a Action, checks []api.AgentCheck, ended bool) {
 		case it.Installed():
 			f.Log.Add("installed %s on %s", a.Agent.Title, f.Host)
 		case !ended:
-			f.notes[a.Agent.Kind] = "its installer still runs: " + brand.Name + " attach " + session
+			f.notes[a.Agent.Kind] = "its installer still runs: " + brand.Name + " attach --id -- " + session
 		default:
-			f.notes[a.Agent.Kind] = "its installer ended, but it is not installed: read its output with " + brand.Name + " attach " + session
+			f.notes[a.Agent.Kind] = "its installer ended, but it is not installed: read its output with " + brand.Name + " attach --id -- " + session
 		}
 	case ActLogin:
 		f.logins = f.logins[1:]
@@ -230,9 +234,10 @@ func (f *Flow) Done(a Action, checks []api.AgentCheck, ended bool) {
 		case it.Check.Login == api.LoginYes:
 			f.Log.Add("logged in to %s on %s", a.Agent.Title, f.Host)
 		case !ended:
-			f.notes[a.Agent.Kind] = "its login still runs: " + brand.Name + " attach " + session
+			f.notes[a.Agent.Kind] = "its login still runs: " + brand.Name + " attach --id -- " + session
 		}
 	}
+	return nil
 }
 
 // Skip passes over an action: the user chose not to do it now.
@@ -310,7 +315,7 @@ func (f *Flow) Line(kind string) Line {
 	if n := f.notes[kind]; n != "" {
 		l.Try = n
 	}
-	return l
+	return cleanLine(l)
 }
 
 // FirstAgent is the agent for the first session: the first in the table's
@@ -340,7 +345,7 @@ func (f *Flow) FirstSession() string {
 // InstallArgs start an agent's official installer in a session named
 // install-<agent>, so the user sees its output and can answer it.
 func InstallArgs(a agents.Agent) client.NewArgs {
-	return client.NewArgs{Name: "install-" + a.Kind, Cwd: "~", Argv: []string{"/bin/sh", "-c", a.Setup.Install}, Setup: api.SetupSkip}
+	return client.NewArgs{Wall: "none", Downgrade: true, Name: "install-" + a.Kind, Cwd: "~", Argv: []string{"/bin/sh", "-c", a.Setup.Install}, Setup: api.SetupSkip}
 }
 
 // LoginArgs start an agent's own login in a session named login-<agent>. An
@@ -350,7 +355,7 @@ func LoginArgs(a agents.Agent) (client.NewArgs, bool) {
 	if a.Setup == nil || a.Setup.Login == "" {
 		return client.NewArgs{}, false
 	}
-	args := client.NewArgs{Name: "login-" + a.Kind, Cwd: "~", Setup: api.SetupSkip}
+	args := client.NewArgs{Wall: "none", Downgrade: true, Name: "login-" + a.Kind, Cwd: "~", Setup: api.SetupSkip}
 	if a.Setup.Login == a.Binaries[0] {
 		args.Agent = a.Kind
 	} else {
@@ -359,16 +364,21 @@ func LoginArgs(a agents.Agent) (client.NewArgs, bool) {
 	return args, true
 }
 
-// LoginCommand is the command that starts an agent's own login in a new
-// session on host. An agent whose login is its first start starts as itself.
+// LoginCommand is the command that starts an agent's own login in a session
+// on host, as LoginArgs starts it: agents login
+// (docs/contributing/cli-spec.md 12.3). It is "" for an agent without a
+// login of its own.
 func LoginCommand(host string, a agents.Agent) string {
 	if a.Setup == nil || a.Setup.Login == "" {
 		return ""
 	}
-	if a.Setup.Login == a.Binaries[0] {
-		return fmt.Sprintf("%s new %s --agent %s", brand.Name, host, a.Kind)
-	}
-	return fmt.Sprintf("%s new %s -- %s", brand.Name, host, a.Setup.Login)
+	return fmt.Sprintf("%s agents login %s %s", brand.Name, a.Kind, host)
+}
+
+// InstallCommand is the command that installs an agent on host with its
+// vendor's installer.
+func InstallCommand(host, kind string) string {
+	return fmt.Sprintf("%s agents install %s %s", brand.Name, kind, host)
 }
 
 // Log is what a guided setup changed, in order, so that a stop at any step

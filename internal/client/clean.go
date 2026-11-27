@@ -146,12 +146,33 @@ func cleanLines(list []string, clean func(string) string) []string {
 // CleanSession is a copy of a session row to draw, with every string that
 // the host sent cleaned. Requests use the row as the host sent it.
 func CleanSession(s Session) Session {
+	if s.Usage != nil {
+		if api.ValidModelUsageV1(*s.Usage) {
+			s.Usage = api.CloneModelUsageV1(s.Usage)
+		} else {
+			s.Usage = nil
+		}
+	}
+	s.NamedSSHKeys = cleanNamedSSHKeyView(s.NamedSSHKeys)
+	s = cleanPolicySessionInfo(s)
+	s.Wall = cleanWallInfoV1(s.Wall)
+	s.PackageManagers = proto.ClonePackageManagersV1(s.PackageManagers)
+	if proto.ValidatePackageManagersV1(s.PackageManagers) != nil {
+		s.PackageManagers = nil
+	}
 	s.ID, s.Name, s.Agent = CleanLine(s.ID), CleanLine(s.Name), CleanLine(s.Agent)
+	s.ForkOf, s.Checkpoints = CleanLine(s.ForkOf), CleanLine(s.Checkpoints)
 	s.Cwd = CleanPath(s.Cwd)
 	s.State, s.Source, s.Reason = CleanLine(s.State), CleanLine(s.Source), CleanLine(s.Reason)
+	s.PlacedBy, s.PlaceReason = CleanLine(s.PlacedBy), CleanLine(s.PlaceReason)
 	s.Signal, s.Unit, s.HostVersion = CleanLine(s.Signal), CleanLine(s.Unit), CleanLine(s.HostVersion)
 	s.MissingSecrets = cleanLines(s.MissingSecrets, CleanLine)
 	s.Secrets = cleanLines(s.Secrets, CleanLine)
+	s.Forwards = slices.Clone(s.Forwards)
+	s.Forwards = slices.DeleteFunc(s.Forwards, func(forward api.PortForwardInfo) bool { return forward.Port < 1 || forward.Port > 65535 })
+	if len(s.Forwards) > 64 {
+		s.Forwards = s.Forwards[:64]
+	}
 	return s
 }
 
@@ -232,6 +253,11 @@ func CleanHostInfo(i HostInfo) HostInfo {
 	i.AgentVersions = cleanMap(i.AgentVersions, CleanLine)
 	i.Checks = CleanChecks(i.Checks)
 	i.AgentChecks = CleanAgentChecks(i.AgentChecks)
+	i.Health = cleanHostHealthV1(i.Health)
+	if i.Sandbox != nil {
+		probe := CleanCapProbe(*i.Sandbox)
+		i.Sandbox = &probe
+	}
 	return i
 }
 
@@ -263,13 +289,21 @@ func CleanBlock(s string) string {
 }
 
 // tailStderr is the end of what a host wrote to stderr, as an error shows
-// it: its last three lines, each one cleaned.
+// it: its last three lines, each one cleaned, with any standalone Try: line
+// dropped so a host cannot impersonate the client's own hint.
 func tailStderr(s string) string {
-	lines := strings.Split(strings.TrimSpace(s), "\n")
-	if len(lines) > 3 {
-		lines = lines[len(lines)-3:]
+	var kept []string
+	for _, l := range strings.Split(strings.TrimSpace(s), "\n") {
+		cl := CleanLine(l)
+		if strings.HasPrefix(strings.ToLower(strings.TrimSpace(cl)), "try:") {
+			continue
+		}
+		kept = append(kept, cl)
 	}
-	return CleanBlock(strings.Join(lines, "\n"))
+	if len(kept) > 3 {
+		kept = kept[len(kept)-3:]
+	}
+	return strings.Join(kept, "\n")
 }
 
 // checkSessionID refuses a session ID in a host's answer that is not one

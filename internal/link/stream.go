@@ -52,6 +52,8 @@ type Stream struct {
 	dropped     bool   // that reset dropped bytes that waited here
 	writeShut   bool   // this end writes no more
 	closedLocal bool   // Close was called
+	done        chan struct{}
+	doneClosed  bool
 	rdl, wdl    time.Time
 	readQ       waitq // Reads that wait
 	writeQ      waitq // a Write that waits
@@ -79,6 +81,17 @@ func (st *Stream) Header(v any) error {
 	return nil
 }
 
+// HeaderBytes returns an owned copy for a kind-specific canonical decoder.
+func (st *Stream) HeaderBytes() []byte { return append([]byte(nil), st.header...) }
+
+// PeerWriteClosed reports whether the ordered peer half-close has arrived.
+// Buffered input may remain. A reset or full close is never a valid handoff.
+func (st *Stream) PeerWriteClosed() bool {
+	st.s.mu.Lock()
+	defer st.s.mu.Unlock()
+	return !st.s.aborted && st.remoteEOF && !st.peerGone && !st.refused && !st.closedLocal
+}
+
 // Read reads the bytes that the other end sent. It returns io.EOF after
 // the other end has closed its writes and every byte has been read, and
 // ErrRefused when the other end refused or reset the stream.
@@ -103,6 +116,9 @@ func (st *Stream) Read(p []byte) (int, error) {
 // tryRead reads what it can now. done is false when the Read must wait.
 // Under s.mu.
 func (st *Stream) tryRead(p []byte) (n int, done bool, err error) {
+	if st.s.aborted {
+		return 0, true, st.s.err
+	}
 	switch {
 	case st.closedLocal:
 		return 0, true, net.ErrClosed
@@ -170,6 +186,9 @@ func (st *Stream) Write(p []byte) (int, error) {
 
 // writeErr is why a Write fails now, or nil. Under s.mu.
 func (st *Stream) writeErr() error {
+	if st.s.aborted {
+		return st.s.err
+	}
 	switch {
 	case st.closedLocal:
 		return net.ErrClosed
@@ -226,6 +245,7 @@ func (st *Stream) Close() error {
 		return net.ErrClosed
 	}
 	st.closedLocal, st.writeShut = true, true
+	st.notifyDone()
 	// Nobody reads these bytes now. Their credit goes back, so that an
 	// other end that still writes is not stuck.
 	st.consume(st.in.len())
@@ -294,6 +314,9 @@ func (st *Stream) linger(dl time.Time) error {
 // has left the link and the connection has written every batch that holds
 // its data or its close, or the link has ended. Under s.mu.
 func (st *Stream) closed() (bool, error) {
+	if st.s.aborted {
+		return true, st.s.err
+	}
 	switch {
 	case st.gone && st.lastSeq <= st.s.written:
 		if st.dropped {
@@ -329,6 +352,7 @@ func (s *Session) remove(st *Stream) {
 		return
 	}
 	st.gone = true
+	st.notifyDone()
 	delete(s.streams, st.id)
 	s.count[ownerOf(st.id)]--
 	if st.queued {
