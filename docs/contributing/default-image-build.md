@@ -63,13 +63,18 @@ The global `just repro` command takes both original native build pairs through
 `DEFAULT_IMAGE_REPRO_AMD64` and `DEFAULT_IMAGE_REPRO_ARM64`. Each path names the
 retained output of that architecture's real `guest/base-image/repro.sh` run.
 It rechecks both artifact trees and their source pins, then uses build one for
-the first complete release pass and build two for the second. Provide the
-verified module cache (covering both the root module and `tools/imageverify`)
-through `GOMODCACHE`. The genuine held malware snapshot must also be prepared
-by the explicit feed producer.
+the first complete release pass and build two for the second. The gVisor
+pairs come the same way, through `GVISOR_REPRO_AMD64` and `GVISOR_REPRO_ARM64`.
+Go runs the toolchain that `go.mod` pins, and `go mod download` checks the
+modules of the root module and `tools/imageverify` against their `go.sum`
+files; both passes then read that module cache offline.
 
 Each complete pass gets fresh main and verifier build caches, guest and Zig
-caches, home and XDG paths. GoReleaser rebuilds both launchers and all four
+caches, home and XDG paths. It also starts without `dist` and the guest, VMM,
+gVisor and Mac runtime asset folders, so a file left by the first pass cannot
+stand in for one that the second failed to make. The Zig local cache is
+emptied but keeps one path, `.zig-cache` in the checkout, as in the release
+job: the shadow terminal embeds that path through a C header's `__FILE__`. GoReleaser rebuilds both launchers and all four
 verifier helpers in each pass. Their actual bytes, the release binaries and
 the guest assets must match. The script retains its source-pin checks, logs
 and hash evidence. It never substitutes a report JSON, image tag or emulated

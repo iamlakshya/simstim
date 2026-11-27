@@ -4,6 +4,8 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ## [Unreleased]
 
+- `just repro` runs from a plain checkout: it no longer hashes the removed feed snapshot, Go runs the toolchain that `go.mod` pins and checks the modules against `go.sum`, the image pairs keep their modes when copied, and each pass starts without the previous pass's outputs and with an empty Zig cache.
+
 - The gVisor runtime build now installs the packages upstream lists for Bazel (`build-essential` and both `crossbuild-essential` packages) in CI and in the release, and builds with `-c opt` as upstream's release does, so the Go symbols that the entry check reads are kept.
 
 - Two builds of the default image now give the same bytes: the build removes ldconfig's auxiliary cache, which records inode numbers and change times. `guest/base-image/repro.sh` no longer needs a prepared module cache or an exact local Go: Go runs the toolchain that `go.mod` pins and checks the modules against `go.sum`.

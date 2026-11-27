@@ -1,27 +1,32 @@
 #!/usr/bin/env bash
 # Two real builds from empty caches, with independently prepared native image
-# pairs and the pinned Go module cache as explicit inputs.
+# pairs as explicit inputs.
 set -euo pipefail
 umask 077
 cd "$(dirname "$0")/.."
 if [ "$#" -ne 0 ] || [ -z "${DEFAULT_IMAGE_REPRO_AMD64:-}" ] ||
     [ -z "${DEFAULT_IMAGE_REPRO_ARM64:-}" ] || [ -z "${GVISOR_REPRO_AMD64:-}" ] ||
-    [ -z "${GVISOR_REPRO_ARM64:-}" ] || [ -z "${GOMODCACHE:-}" ]; then
-    echo 'repro: native default image pairs, native gVisor pairs and GOMODCACHE are required. Try: follow docs/contributing/default-image-build.md before running just repro.' >&2
+    [ -z "${GVISOR_REPRO_ARM64:-}" ]; then
+    echo 'repro: native default image pairs and native gVisor pairs are required. Try: follow docs/contributing/default-image-build.md before running just repro.' >&2
     exit 1
 fi
-for input in "$DEFAULT_IMAGE_REPRO_AMD64" "$DEFAULT_IMAGE_REPRO_ARM64" "$GVISOR_REPRO_AMD64" "$GVISOR_REPRO_ARM64" "$GOMODCACHE"; do
+for input in "$DEFAULT_IMAGE_REPRO_AMD64" "$DEFAULT_IMAGE_REPRO_ARM64" "$GVISOR_REPRO_AMD64" "$GVISOR_REPRO_ARM64"; do
     case "$input" in /*) ;; *)
-        echo 'repro: prepared inputs must have absolute paths. Try: pass absolute paths for the prepared artifact and module cache directories.' >&2
+        echo 'repro: prepared inputs must have absolute paths. Try: pass absolute paths for the prepared artifact directories.' >&2
         exit 1 ;; esac
 done
-expected_go=$(sed -n 's/^toolchain //p' go.mod)
-case "$(GOTOOLCHAIN=local go version)" in "go version $expected_go "*) ;; *)
-    echo "repro: main compiler differs from go.mod ($expected_go). Try: install $expected_go or unset GOTOOLCHAIN before preparing offline inputs." >&2
-    exit 1 ;; esac
+# Go runs the toolchain that go.mod pins, and fetches and checks it when the
+# local Go differs. go mod download checks every module of both modules
+# against go.sum and the checksum database; both passes then read that one
+# module cache offline.
+go_build_toolchain=$(sh scripts/go-build-tags.sh toolchain)
+export GOTOOLCHAIN="$go_build_toolchain"
+go mod download
+(cd tools/imageverify && go mod download)
+GOMODCACHE=$(go env GOMODCACHE)
 APP_NAME=$(sed -n 's/^const Name = "\(.*\)"/\1/p' internal/brand/brand.go)
 MODULE=$(sed -n 's/^module //p' go.mod)
-export APP_NAME MODULE GOTOOLCHAIN=local GOPROXY=off
+export APP_NAME MODULE GOMODCACHE GOPROXY=off
 go_build_tags=$(sh scripts/go-build-tags.sh)
 export GO_BUILD_TAGS="$go_build_tags"
 out=$(mktemp -d "${TMPDIR:-/tmp}/release-repro.XXXXXXXX")
@@ -29,7 +34,7 @@ out=$(mktemp -d "${TMPDIR:-/tmp}/release-repro.XXXXXXXX")
 # and success. Never erase a prior native image preparation.
 shasum -a 256 go.mod go.sum tools/imageverify/go.mod tools/imageverify/go.sum \
     guest/supply.lock internal/image/default_image.toml \
-    internal/supply/trusted_root.json internal/egress/rules/feed/snapshot.json >"$out/source-pins-before.txt"
+    internal/supply/trusted_root.json >"$out/source-pins-before.txt"
 shasum -a 256 go.mod go.sum guest/supply.lock internal/image/default_image.toml \
     guest/base-image/build.sh guest/base-image/prepare.sh >"$out/native-image-source-pins.txt"
 shasum -a 256 third_party/gvisor/build-tools.json third_party/gvisor/hostguard.patch \
@@ -55,19 +60,27 @@ for run in 1 2; do
         go run -tags="$go_build_tags" ./cmd/supply default-image repro \
             --first "$native_pair/run-1/image/$arch" \
             --second "$native_pair/run-2/image/$arch" >"$state/default-$arch.json"
-        cp -R "$native_pair/run-$run/image/$arch" "$state/default-image/$arch"
+        # -p keeps the checked artifacts' modes; the umask above would
+        # otherwise turn a 0444 blob into 0400, which supply refuses.
+        cp -Rp "$native_pair/run-$run/image/$arch" "$state/default-image/$arch"
         native_gvisor=$GVISOR_REPRO_AMD64
         if [ "$arch" = arm64 ]; then native_gvisor=$GVISOR_REPRO_ARM64; fi
         diff "$out/gvisor-source-pins.txt" "$native_gvisor/source-pins-before.txt"
         diff "$native_gvisor/source-pins-before.txt" "$native_gvisor/source-pins-after.txt"
         diff -r "$native_gvisor/run-1/output" "$native_gvisor/run-2/output"
-        cp -R "$native_gvisor/run-$run/output" "$state/gvisor/$arch"
+        cp -Rp "$native_gvisor/run-$run/output" "$state/gvisor/$arch"
     done
     export DEFAULT_IMAGE_MANIFEST_INPUTS="$state/default-image" GVISOR_MANIFEST_INPUTS="$state/gvisor"
-    rm -rf vt/.zig-cache vt/zig-out
+    # Each pass starts without the outputs that the hashes below read, so a
+    # file left by pass 1 cannot stand in for one that pass 2 failed to make.
+    rm -rf vt/.zig-cache vt/zig-out .zig-cache dist build/guest build/gvisor/assets build/vmm build/mac-runtime
+    # The shadow terminal embeds its Zig local cache path (a C header's
+    # __FILE__), so both passes use the one path that setup-zig gives the
+    # release job, emptied above. The global cache path does not reach it.
+    export ZIG_GLOBAL_CACHE_DIR="$state/zig-cache" ZIG_LOCAL_CACHE_DIR="$PWD/.zig-cache"
     GUEST_CACHE_DIR="$state/guest-cache" guest/build.sh --only-kernels all >"$state/guest.log" 2>&1 ||
         { cat "$state/guest.log" >&2; exit 1; }
-    ZIG_GLOBAL_CACHE_DIR="$state/zig-cache" GUEST_CACHE_DIR="$state/guest-cache" \
+    GUEST_CACHE_DIR="$state/guest-cache" \
         goreleaser build --snapshot --clean >"$state/build.log" 2>&1 ||
         { cat "$state/build.log" >&2; exit 1; }
     {
@@ -81,7 +94,7 @@ for run in 1 2; do
 done
 shasum -a 256 go.mod go.sum tools/imageverify/go.mod tools/imageverify/go.sum \
     guest/supply.lock internal/image/default_image.toml \
-    internal/supply/trusted_root.json internal/egress/rules/feed/snapshot.json >"$out/source-pins-after.txt"
+    internal/supply/trusted_root.json >"$out/source-pins-after.txt"
 diff "$out/source-pins-before.txt" "$out/source-pins-after.txt"
 if ! diff "$out/1.txt" "$out/2.txt"; then
     echo "repro: the two actual builds differ; retained evidence: $out" >&2

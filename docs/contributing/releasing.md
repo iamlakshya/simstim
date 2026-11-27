@@ -29,8 +29,8 @@ Every release is built by `.github/workflows/release.yml` from a tag that a main
 | Raw VMM files and their source archives | The exact runtime files named by the release manifest |
 
 `just repro` builds every binary twice from empty build caches and checks they
-match. It requires the independently prepared native default-image pairs and
-module cache described in the [build input guide](default-image-build.md). CI
+match. It requires the independently prepared native default-image and gVisor
+pairs described in the [build input guide](default-image-build.md). CI
 prepares both native image pairs on every push, in the `reproducible` and
 `gvisor-repro` jobs, and the `test-images` job runs the two complete builds
 from them. The unit tests run in the `test` job, which does not wait for the
