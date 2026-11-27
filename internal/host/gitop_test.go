@@ -138,6 +138,8 @@ func TestGitOpsRunInAScope(t *testing.T) {
 			versions++
 		case strings.Contains(line, ` config -z --name-only --get-regexp ^hook\..*\.command$`):
 			reads++
+		case strings.Contains(line, ` config --get `):
+			// Read-only git config lookups (remote.origin.url, extensions.refStorage) do not fire hooks.
 		case !strings.Contains(line, " -c hook.evil.enabled=false -C "):
 			t.Errorf("line %d does not turn off the config's hook: %q", i, line)
 		default:
@@ -542,7 +544,7 @@ func TestRunGitOp(t *testing.T) {
 			t.Errorf("git-op %q: %v, want %s with a hint", c.args, err, c.code)
 		}
 	}
-	if err := RunGitOp(nil, nil, &out); err == nil || !strings.Contains(err.Error(), "<worktree.add|worktree.remove|worktree.discard|repo.info>") {
+	if err := RunGitOp(nil, nil, &out); err == nil || !strings.Contains(err.Error(), "<worktree.add|worktree.remove|worktree.discard|repo.info|pull.bundle|purge.inspect>") {
 		t.Errorf("usage = %v", err)
 	}
 }

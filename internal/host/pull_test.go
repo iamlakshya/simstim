@@ -68,7 +68,7 @@ func TestRepositorySourcePreservesTrailingSpaceDirectory(t *testing.T) {
 }
 
 func TestStoppedSandboxRowKeepsProtectedWallAndStoppedState(t *testing.T) {
-	m := &Manifest{ID: "fixture2", Status: Status{State: StateStopped}, Wall: &WallRecord{Driver: "process", Level: "process"}}
+	m := &Manifest{ID: "fixture2", Status: Status{State: StateStopped}, Life: &Life{Phase: LifeStopped, End: &LifeEnd{Kind: EndStop}}, Wall: &WallRecord{Driver: "process", Level: "process"}}
 	row := infoFrom(m, false)
 	if row.State != api.StateStopped || row.Wall == nil || row.Wall.Driver != "process" {
 		t.Fatal("stopped pull lost the actual session routing facts", row)

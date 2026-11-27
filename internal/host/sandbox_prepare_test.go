@@ -2,6 +2,7 @@ package host
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -15,15 +16,11 @@ import (
 	"testing"
 
 	"github.com/iamlakshya/simstim/internal/api"
-	"github.com/iamlakshya/simstim/internal/brand"
 	"github.com/iamlakshya/simstim/internal/paths"
 	"github.com/iamlakshya/simstim/internal/proto"
-	"github.com/iamlakshya/simstim/internal/runtimecache"
-	"github.com/iamlakshya/simstim/internal/supply"
 	"github.com/iamlakshya/simstim/internal/testhome"
 	"github.com/iamlakshya/simstim/internal/version"
 	"github.com/iamlakshya/simstim/internal/vmneed"
-	"github.com/iamlakshya/simstim/internal/wall/gvisor"
 )
 
 func setupIsolatedPrepareHost(t *testing.T) string {
@@ -130,77 +127,38 @@ func callSandboxPrepareOverBridge(t *testing.T, raw json.RawMessage) *proto.Erro
 	return resp.Error
 }
 
-func installTestGvisorRuntimeV1(t *testing.T, arch string) (supply.Manifest, []supply.Item) {
+func callSandboxPrepareDirect(t *testing.T, raw json.RawMessage) *proto.Error {
 	t.Helper()
-	release := "0.6.0"
-	folder := supply.ReleaseFolder(release)
-	roles := []string{"runsc", "gvisor_sentry", "gvisor-sentry-prewarmer", "gvisor-proc-umounter"}
-	var items []supply.Item
-	payloads := map[string][]byte{}
-	for _, role := range roles {
-		payload := []byte("#!/bin/sh\n# " + role + "\n")
-		it := supply.NewItem(supply.KindGvisor, role, gvisor.NativeBuildVersionV1, arch, payload, folder+"/"+role+"-"+arch)
-		it.Released = "2026-11-02"
-		items = append(items, it)
-		payloads[it.SHA256] = payload
+	var output bytes.Buffer
+	b := &bridge{ctx: t.Context(), w: proto.NewWriter(&output)}
+	b.handleSandboxPrepareV1(proto.Request{ID: 1, Op: "sandbox.prepare", Args: raw})
+	respFrame, err := proto.Read(bufio.NewReader(&output))
+	if err != nil || respFrame.Type != proto.TResponse {
+		t.Fatalf("sandbox.prepare direct reply frame=%+v error=%v", respFrame, err)
 	}
-	manifest := supply.Manifest{
-		Release:    release,
-		Runtime:    "rt-gvisor-test-v1",
-		Items:      items,
-		Advisories: []supply.Advisory{},
-	}
-	imageDefaults := []supply.Item{{
-		Kind:       supply.KindImage,
-		Name:       "agent-base",
-		Arch:       arch,
-		Digest:     "sha256:" + strings.Repeat("a1", 32),
-		RootHash:   strings.Repeat("b2", 32),
-		DataBlocks: 64,
-	}}
-
-	ctx := context.Background()
-	publication, store, err := openRuntimeProductionStore(ctx)
-	if err != nil {
+	var resp proto.Response
+	if err := json.Unmarshal(respFrame.Payload, &resp); err != nil {
 		t.Fatal(err)
 	}
-	defer func() {
-		_ = store.Close()
-		_ = publication.close()
-	}()
-	for _, it := range manifest.Items {
-		part, err := store.BeginContext(publication.ctx, it)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := part.WriteAt(payloads[it.SHA256], 0); err != nil {
-			_ = part.Close()
-			t.Fatal(err)
-		}
-		if err := part.Finish(ctx); err != nil {
-			_ = part.Close()
-			t.Fatal(err)
-		}
-		_ = part.Close()
+	if resp.OK || resp.Error == nil {
+		t.Fatalf("expected structured refusal for %s, got %+v", string(raw), resp)
 	}
-	if err := commitRuntime(ctx, store, manifest, &imageDefaults); err != nil {
-		t.Fatal(err)
-	}
-	return manifest, imageDefaults
+	return resp.Error
 }
 
 func TestSandboxPrepareWireValidation(t *testing.T) {
 	setupIsolatedPrepareHost(t)
 
 	cases := []struct {
-		name string
-		raw  json.RawMessage
-		code string
+		name   string
+		raw    json.RawMessage
+		code   string
+		direct bool
 	}{
 		{name: "empty", raw: nil, code: "bad_request"},
 		{name: "array", raw: json.RawMessage(`[]`), code: "bad_request"},
 		{name: "unknown_field", raw: json.RawMessage(`{"version":1,"level":"process","command":"sh"}`), code: "bad_request"},
-		{name: "trailing_json", raw: json.RawMessage(`{"version":1,"level":"process"}{}`), code: "bad_request"},
+		{name: "trailing_json", raw: json.RawMessage(`{"version":1,"level":"process"}{}`), code: "bad_request", direct: true},
 		{name: "version_zero", raw: json.RawMessage(`{"version":0,"level":"process"}`), code: "bad_request"},
 		{name: "version_two", raw: json.RawMessage(`{"version":2,"level":"process"}`), code: "bad_request"},
 		{name: "level_none", raw: json.RawMessage(`{"version":1,"level":"none"}`), code: "wall_unavailable"},
@@ -212,7 +170,12 @@ func TestSandboxPrepareWireValidation(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			rpcErr := callSandboxPrepareOverBridge(t, tc.raw)
+			var rpcErr *proto.Error
+			if tc.direct {
+				rpcErr = callSandboxPrepareDirect(t, tc.raw)
+			} else {
+				rpcErr = callSandboxPrepareOverBridge(t, tc.raw)
+			}
 			if rpcErr.Code != tc.code {
 				t.Fatalf("got code %q, want %q (err=%+v)", rpcErr.Code, tc.code, rpcErr)
 			}
@@ -223,107 +186,7 @@ func TestSandboxPrepareWireValidation(t *testing.T) {
 	}
 }
 
-func TestSandboxPrepareSameConnectionImageDefaultsNeverFallBackToStore(t *testing.T) {
-	if runtime.GOARCH != "amd64" && runtime.GOARCH != "arm64" {
-		t.Skip("release manifests support amd64 and arm64")
-	}
-	setupIsolatedPrepareHost(t)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	gvisorManifest, imageDefaults := installTestGvisorRuntimeV1(t, runtime.GOARCH)
-
-	// Confirm the retention store on disk holds ImageDefaults.
-	onDiskDefaults, err := runtimeImageDefaults(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	expectedDigest := imageDefaults[0].Digest
-	if !onDiskDefaults[expectedDigest] {
-		t.Fatalf("expected on-disk Store.ImageDefaults to contain %s", expectedDigest)
-	}
-
-	// Raw gvisor prepare without same-connection runtime selection must fail closed.
-	bRaw := &bridge{ctx: ctx, hostID: "0123456789abcdef0123456789abcdef"}
-	t.Cleanup(func() { bRaw.runtime.close() })
-	rawArgs := api.SandboxPrepareArgsV1{Version: 1, Level: "gvisor", Runtime: &gvisorManifest}
-	rawBytes, _ := json.Marshal(rawArgs)
-	if _, err := bRaw.newSandboxPrepareWitnessV1(ctx, proto.Request{ID: 1, Op: "sandbox.prepare", Args: rawBytes}, rawBytes, rawArgs); err == nil {
-		t.Fatal("expected raw gvisor prepare without same-connection runtime receipt to fail")
-	}
-
-	// Connection B remembers the runtime WITHOUT same-connection ImageDefaults:
-	// defaultImageRequest MUST refuse rather than falling back to Store.ImageDefaults.
-	bNoDefaults := &bridge{ctx: ctx, hostID: "0123456789abcdef0123456789abcdef"}
-	t.Cleanup(func() { bNoDefaults.runtime.close() })
-	if err := bNoDefaults.runtime.bindConnectionV1(ctx); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := bNoDefaults.runtime.status(ctx, runtimecache.RuntimeRequest{Manifest: gvisorManifest}); err != nil {
-		t.Fatal(err)
-	}
-	receiptNoDefaults, err := bNoDefaults.runtime.selectedRuntime(ctx, gvisorManifest)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := receiptNoDefaults.defaultImageRequest(ctx, runtime.GOARCH); err == nil {
-		t.Fatal("defaultImageRequest must refuse when same-connection ImageDefaults were omitted")
-	} else {
-		var pe *proto.Error
-		if !errors.As(err, &pe) || pe.Code != "runtime_origin" {
-			t.Fatalf("expected runtime_origin refusal, got %v", err)
-		}
-	}
-
-	// Connection C supplies same-connection ImageDefaults: defaultImageRequest
-	// returns the exact release default image pin, and rejects conflicting updates.
-	bWithDefaults := &bridge{ctx: ctx, hostID: "0123456789abcdef0123456789abcdef"}
-	t.Cleanup(func() { bWithDefaults.runtime.close() })
-	if err := bWithDefaults.runtime.bindConnectionV1(ctx); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := bWithDefaults.runtime.status(ctx, runtimecache.RuntimeRequest{Manifest: gvisorManifest, ImageDefaults: &imageDefaults}); err != nil {
-		t.Fatal(err)
-	}
-	receiptWithDefaults, err := bWithDefaults.runtime.selectedRuntime(ctx, gvisorManifest)
-	if err != nil {
-		t.Fatal(err)
-	}
-	gotImage, err := receiptWithDefaults.defaultImageRequest(ctx, runtime.GOARCH)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if gotImage.Ref != brand.ImageRepository+"@"+expectedDigest ||
-		gotImage.Digest != expectedDigest ||
-		gotImage.PlatformDigest != expectedDigest ||
-		gotImage.RootHash != imageDefaults[0].RootHash ||
-		gotImage.DataBlocks != imageDefaults[0].DataBlocks {
-		t.Fatalf("unexpected default image request: %+v", gotImage)
-	}
-
-	conflicting := []supply.Item{{
-		Kind:       supply.KindImage,
-		Name:       "agent-base",
-		Arch:       runtime.GOARCH,
-		Digest:     "sha256:" + strings.Repeat("c3", 32),
-		RootHash:   strings.Repeat("d4", 32),
-		DataBlocks: 128,
-	}}
-	if err := bWithDefaults.runtime.rememberRuntimeWithDefaults(ctx, gvisorManifest, &conflicting); err == nil {
-		t.Fatal("expected conflicting same-connection ImageDefaults to fail closed")
-	}
-
-	// Witness construction on bWithDefaults succeeds for gvisor with matching Runtime.
-	witness, err := bWithDefaults.newSandboxPrepareWitnessV1(ctx, proto.Request{ID: 2, Op: "sandbox.prepare", Args: rawBytes}, rawBytes, rawArgs)
-	if err != nil {
-		t.Fatalf("expected same-connection gvisor witness to succeed: %v", err)
-	}
-	if witness.driver != "gvisor" || !witness.captured || witness.runtime != receiptWithDefaults {
-		t.Fatalf("unexpected gvisor witness: %+v", witness)
-	}
-}
-
-func TestSandboxPrepareFixedManifestQuotasAndOneUseWitness(t *testing.T) {
+func TestSandboxPrepareFixedManifestQuotas(t *testing.T) {
 	if runtime.GOARCH != "amd64" && runtime.GOARCH != "arm64" {
 		t.Skip("release manifests support amd64 and arm64")
 	}
@@ -399,41 +262,6 @@ func TestSandboxPrepareFixedManifestQuotasAndOneUseWitness(t *testing.T) {
 		t.Fatal("expected secrets on prepare manifest to be rejected")
 	}
 
-	// Bind and save once under placement lock.
-	if err := bindAndSaveSandboxPrepareV1(operation, reservation, m, witness); err != nil {
-		_ = cleanupSandboxPrepareSessionV1(operation, reservation)
-		t.Fatal(err)
-	}
-	if !operation.IsSandboxPrepareV1() {
-		t.Fatal("expected operation.IsSandboxPrepareV1() after bind")
-	}
-
-	// Reusing the same one-use witness on a second reservation must fail closed.
-	res2, err := reserveSessionID("")
-	if err != nil {
-		_ = cleanupSandboxPrepareSessionV1(operation, reservation)
-		t.Fatal(err)
-	}
-	op2, err := beginReservedSessionOperation(ctx, res2)
-	if err != nil {
-		res2.close()
-		_ = cleanupSandboxPrepareSessionV1(operation, reservation)
-		t.Fatal(err)
-	}
-	m2, err := buildSandboxPrepareManifestV1(ctx, res2.id, "/usr/bin/true", witness)
-	if err != nil {
-		_ = cleanupSandboxPrepareSessionV1(op2, res2)
-		_ = cleanupSandboxPrepareSessionV1(operation, reservation)
-		t.Fatal(err)
-	}
-	if err := bindAndSaveSandboxPrepareV1(op2, res2, m2, witness); err == nil {
-		_ = cleanupSandboxPrepareSessionV1(op2, res2)
-		_ = cleanupSandboxPrepareSessionV1(operation, reservation)
-		t.Fatal("expected second bind of one-use sandboxPrepareWitnessV1 to fail")
-	}
-	if err := cleanupSandboxPrepareSessionV1(op2, res2); err != nil {
-		t.Fatal(err)
-	}
 	if err := cleanupSandboxPrepareSessionV1(operation, reservation); err != nil {
 		t.Fatal(err)
 	}

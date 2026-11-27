@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -140,6 +141,11 @@ func TestOwnedOutputCancelsBlockedChildPrivatePipe(t *testing.T) {
 		t.Fatal("the actual output child was not joined")
 	}
 	after, err := unix.FcntlInt(uintptr(copyFD), unix.F_GETFL, 0)
+	// XNU records FWASWRITTEN (0x10000) on the OFD after the first write(2).
+	const darwinFWasWritten = 0x10000
+	if runtime.GOOS == "darwin" {
+		after &^= darwinFWasWritten
+	}
 	if err != nil || before != after {
 		t.Fatal("output cancellation changed the inherited pipe's OFD flags", err)
 	}

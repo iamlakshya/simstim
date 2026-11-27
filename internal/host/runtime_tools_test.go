@@ -104,8 +104,10 @@ func TestManifestKeepsFieldsItDoesNotKnow(t *testing.T) {
 	if err := host.Rename(s.ID, "renamed"); err != nil {
 		t.Fatal(err)
 	}
-	b, _ = os.ReadFile(paths.Manifest(s.ID))
-	if !strings.Contains(string(b), `"from_a_newer_helper": {`) || !strings.Contains(string(b), `"name": "renamed"`) {
+	b, err = os.ReadFile(paths.Manifest(s.ID))
+	var kept map[string]json.RawMessage
+	var renamed string
+	if err != nil || json.Unmarshal(b, &kept) != nil || string(kept["from_a_newer_helper"]) != `{"x":1}` || json.Unmarshal(kept["name"], &renamed) != nil || renamed != "renamed" {
 		t.Errorf("manifest = %s", b)
 	}
 	if _, err := host.LoadManifest("nosuchid"); err == nil {

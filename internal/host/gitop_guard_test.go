@@ -47,7 +47,7 @@ func fakeGitVersion(t *testing.T, version string) {
 // no hook, such as repo.info without its count, runs on 2.54 too.
 func TestGitVersionGate(t *testing.T) {
 	repo := setupRepo(t)
-	for _, c := range []struct {
+	for i, c := range []struct {
 		version string
 		refused string
 	}{
@@ -59,12 +59,13 @@ func TestGitVersionGate(t *testing.T) {
 		{"not git at all", "could not read the version of git on this host"},
 	} {
 		t.Run(c.version, func(t *testing.T) {
+			id := fmt.Sprintf("abcd234%c", 'a'+i)
 			fakeGitVersion(t, c.version)
 			if _, err := gitOp(gitOpRepoInfo, repoReq(repo, false)); err != nil {
 				t.Errorf("repo.info without its count = %v", err)
 			}
 			_, err := gitOp(gitOpRepoInfo, repoReq(repo, true))
-			gi, addErr := makeWorktree(repo, "gate", "abcd2345", "")
+			gi, addErr := makeWorktree(repo, "gate", id, "")
 			var pe *proto.Error
 			if c.refused == "" {
 				if err != nil || addErr != nil {
@@ -80,7 +81,7 @@ func TestGitVersionGate(t *testing.T) {
 					t.Errorf("got %v, want git_version that says %q", e, c.refused)
 				}
 			}
-			if _, err := git(repo, "rev-parse", "--verify", "--quiet", "refs/heads/"+brand.Name+"/gate-abcd2345"); gi != nil || err == nil || !missing(filepath.Join(WorktreesDir(), "app", "gate-abcd2345")) {
+			if _, err := git(repo, "rev-parse", "--verify", "--quiet", "refs/heads/"+brand.Name+"/gate-"+id); gi != nil || err == nil || !missing(filepath.Join(WorktreesDir(), "app", "gate-"+id)) {
 				t.Error("a refused worktree.add made a worktree or a branch")
 			}
 		})

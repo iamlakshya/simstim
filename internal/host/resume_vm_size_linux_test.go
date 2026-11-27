@@ -6,11 +6,14 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/iamlakshya/simstim/internal/api"
+	"github.com/iamlakshya/simstim/internal/image"
 	"github.com/iamlakshya/simstim/internal/proto"
+	"github.com/iamlakshya/simstim/internal/supply"
 	"github.com/iamlakshya/simstim/internal/vmneed"
 )
 
@@ -81,4 +84,15 @@ func TestRestartProcessAndGvisorSizesStayExactUnitCaps(t *testing.T) {
 		}
 
 	}
+}
+
+func resumeImageMetadataFixtureV1() vmneed.NeedV1 {
+	folder := supply.ReleaseFolder("1.0.0") + "/"
+	vmm := supply.NewItem(supply.KindVMM, "cloud-hypervisor", "54.1", "amd64", []byte("vmm"), folder+"cloud-hypervisor-static")
+	vmm.EOL, vmm.Released, vmm.HostKernel = "2027-01-06", "2026-11-11", ">=6.8"
+	kernel := supply.NewItem(supply.KindKernel, "guest", "6.18.63", "amd64", []byte("kernel"), folder+"vmlinux-amd64")
+	kernel.Licence, kernel.SourceURL, kernel.Released = "GPL-2.0-only", folder+"linux-6.18.63.tar.xz", "2026-11-10"
+	tools := supply.NewItem(supply.KindTools, "tools", "1.0.0", "amd64", []byte("tools"), folder+"tools-amd64.erofs")
+	tools.Size, tools.DataBlocks, tools.RootHash, tools.Salt = 202*4096, 200, strings.Repeat("d", 64), strings.Repeat("0", 64)
+	return vmneed.NeedV1{BootV1: vmneed.BootV1{Version: 1, GuestRAM: 1024 * vmneed.Mebibyte, Runtime: supply.Manifest{Release: "1.0.0", Runtime: "fixture", Items: []supply.Item{vmm, kernel, tools}}, Image: image.Request{Ref: "registry.example/team/dev:1", Digest: "sha256:" + strings.Repeat("a", 64), PlatformDigest: "sha256:" + strings.Repeat("b", 64), Arch: "amd64", RootHash: strings.Repeat("c", 64), DataBlocks: 300}, Agents: supply.ContentRef{Name: "agents", SHA256: strings.Repeat("e", 64), Size: 4096}}, Driver: "chv", CPUs: 2, DiskMax: 16 << 20}
 }

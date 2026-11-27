@@ -51,7 +51,7 @@ func TestResumeRejectsInvalidPolicyBeforeStoppingHolder(t *testing.T) {
 			resumePolicyOutside(t)
 			m.Layers = resumePolicyLayers(tc.target)
 			m.Policy = &api.Policy{Preset: api.PresetOpen}
-			m.Run.Unit, m.Run.RespawnCount = "policy-test.service", 3
+			m.Run.Unit, m.Run.RespawnCount = UnitName(m.ID), 3
 			until := time.Now().Add(time.Hour)
 			m.DebugUntil = &until
 			if err := m.Save(); err != nil {
@@ -103,10 +103,16 @@ func TestResumePreservesPolicyErrorAfterHoldersLastSave(t *testing.T) {
 		t.Run(tc.code, func(t *testing.T) {
 			m := savedPolicyManifest(t)
 			resumePolicyOutside(t)
-			m.Run.Unit = "policy-test.service"
+			m.Run.Unit = UnitName(m.ID)
 			if err := m.Save(); err != nil {
 				t.Fatal(err)
 			}
+			fakeStopManager(t, true)
+			oldRepoInfo := repositorySourceInfo
+			repositorySourceInfo = func(string) (*api.RepoInfo, error) {
+				return nil, UserError("not_a_repo", "not a git repository", "Start in a git repository.")
+			}
+			t.Cleanup(func() { repositorySourceInfo = oldRepoInfo })
 			oldSystemctl := systemctl
 			t.Cleanup(func() { systemctl = oldSystemctl })
 			stops := 0
@@ -129,6 +135,9 @@ func TestResumePreservesPolicyErrorAfterHoldersLastSave(t *testing.T) {
 					}
 					return nil, nil
 				case "show":
+					if len(args) >= 4 && args[3] == "ActiveState" {
+						return []byte("inactive\n"), nil
+					}
 					return []byte("not-found\n"), nil
 				default:
 					t.Fatalf("unexpected systemd action: %q", args)

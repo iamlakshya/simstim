@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"syscall"
 	"testing"
@@ -114,8 +115,11 @@ func TestSecretsReachOnlyTheAgent(t *testing.T) {
 	if strings.Contains(string(row), secretValue) {
 		t.Errorf("the session row holds the secret: %s", row)
 	}
-	manifest, _ := os.ReadFile(paths.Manifest(h.id))
-	if !strings.Contains(string(manifest), `"secrets": [`) || !strings.Contains(string(manifest), `"OPENAI_API_KEY"`) {
+	manifest, err := os.ReadFile(paths.Manifest(h.id))
+	var saved struct {
+		Secrets []string `json:"secrets"`
+	}
+	if err != nil || json.Unmarshal(manifest, &saved) != nil || !slices.Equal(saved.Secrets, []string{"OPENAI_API_KEY"}) {
 		t.Errorf("the manifest does not name the secret:\n%s", manifest)
 	}
 	args, err := ownedProcessArgs(h.cmd.Process)

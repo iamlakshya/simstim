@@ -19,6 +19,8 @@ import (
 
 func isolateHostState(t *testing.T) string {
 	t.Helper()
+	host.ResetPlacementForTest()
+	t.Cleanup(host.ResetPlacementForTest)
 	root := t.TempDir()
 	t.Setenv("HOME", root)
 	t.Setenv("USERPROFILE", root)
@@ -97,8 +99,18 @@ func TestHostIDConcurrentFirstRunsGiveOneID(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(entries) != 1 || entries[0].Name() != "host-id" {
-			t.Fatalf("round %d: unexpected entries in state dir: %v", round, entries)
+		hasHostID := false
+		for _, entry := range entries {
+			switch entry.Name() {
+			case "host-id":
+				hasHostID = true
+			case "place.lock":
+			default:
+				t.Fatalf("round %d: unexpected entries in state dir: %v", round, entries)
+			}
+		}
+		if !hasHostID {
+			t.Fatalf("round %d: missing host-id in state dir: %v", round, entries)
 		}
 	}
 }
@@ -182,10 +194,11 @@ func TestBridgeHelloCarriesHostID(t *testing.T) {
 		t.Fatalf("hello.HostID = %q, want %q", hello.HostID, want)
 	}
 
-	// Corrupt host-id: bridge sends TError with code host_id.
+	// Corrupt host-id: a fresh bridge process sends TError with code host_id.
 	if err := os.WriteFile(paths.HostID(), []byte("not-hex\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	host.ResetPlacementForTest()
 	in.Reset()
 	out.Reset()
 	_ = proto.NewWriter(&in).WriteJSON(proto.THello, proto.Hello{

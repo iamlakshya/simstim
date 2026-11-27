@@ -3,6 +3,7 @@ package host
 import (
 	"bufio"
 	"bytes"
+	"errors"
 	"io"
 	"net"
 	"testing"
@@ -56,7 +57,7 @@ func TestBridgeAttachPassesExactFramesAndOldReaderKeepsReplacement(t *testing.T)
 			t.Fatal("the attached bridge changed a frame", got, err)
 		}
 	}
-	if _, err := proto.Read(reader); err != io.EOF {
+	if _, err := proto.Read(reader); !errors.Is(err, io.EOF) {
 		t.Fatal("old reader reported the replacement as stopped", err)
 	}
 	b.mu.Lock()
