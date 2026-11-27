@@ -18,6 +18,7 @@ import (
 	"github.com/iamlakshya/simstim/internal/diag"
 	"github.com/iamlakshya/simstim/internal/inputtransfer"
 	"github.com/iamlakshya/simstim/internal/paths"
+	"github.com/iamlakshya/simstim/internal/proc"
 	"github.com/iamlakshya/simstim/internal/proto"
 	"github.com/iamlakshya/simstim/internal/secretmem"
 	"github.com/iamlakshya/simstim/internal/version"
@@ -58,9 +59,16 @@ type bridge struct {
 	attachMu sync.Mutex
 	ended    bool
 
-	mu     sync.Mutex
-	holder net.Conn
-	hw     *proto.Writer
+	in, out  any
+	drain    time.Duration
+	done     chan struct{}
+	doneOnce sync.Once
+	soonOnce sync.Once
+
+	mu      sync.Mutex
+	holder  net.Conn
+	hw      *proto.Writer
+	holderQ *bridgeHolder
 
 	// umu guards uploads, the uploads that have begun and not ended, the
 	// files of each, and uploadsDone, whether the bridge takes no more
@@ -135,7 +143,7 @@ func runBridge(in io.Reader, out io.Writer, owned OwnedBridgeOutput, inputs ...O
 	lines := diag.NewLines()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	b := &bridge{ctx: ctx, hostID: hostID, ownedInput: ownedInput, ownedOutput: owned, w: w, log: slog.New(lines), dbg: bridgeDebug{lines: lines}, uploads: map[uint64]*upload{}}
+	b := &bridge{ctx: ctx, hostID: hostID, ownedInput: ownedInput, ownedOutput: owned, w: w, log: slog.New(lines), dbg: bridgeDebug{lines: lines}, uploads: map[uint64]*upload{}, in: in, out: out, drain: bridgeDrain, done: make(chan struct{})}
 	if err := b.runtime.bindConnectionV1(ctx); err != nil {
 		return err
 	}
@@ -147,11 +155,26 @@ func runBridge(in io.Reader, out io.Writer, owned OwnedBridgeOutput, inputs ...O
 	defer b.stopDebug("end")
 	defer b.endAttach()
 	defer func() { returned = errors.Join(returned, b.closeOwnedServicesV1(cancel, ownedInput, owned)) }()
+	inWatch := proc.WatchReadPeerGone(in, b.shutSoon)
+	defer closeWatch(inWatch)
+	outWatch := proc.WatchWritePeerGone(out, b.shut)
+	defer closeWatch(outWatch)
 	firstFrame := true
 	for {
+		select {
+		case <-b.done:
+			return nil
+		default:
+		}
 		f, err := proto.Read(r)
 		if err != nil {
+			select {
+			case <-b.done:
+				return nil
+			default:
+			}
 			if errors.Is(err, io.EOF) {
+				b.finishHolder()
 				return nil
 			}
 			return err
@@ -263,7 +286,7 @@ func runBridge(in io.Reader, out io.Writer, owned OwnedBridgeOutput, inputs ...O
 		case proto.TDetach:
 			b.note("detach", 0)
 			b.forward(f)
-			b.closeHolder()
+			b.endHolder()
 		case proto.TUploadBegin:
 			b.uploadBegin(f.Payload)
 		case proto.TUploadChunk:

@@ -38,7 +38,7 @@ func (b *bridge) attach(a proto.Attach) error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	b.closeHolder()
+	b.endHolder()
 	b.traced = a.Trace != "" && (len(a.Categories) == 0 || slices.Contains(a.Categories, diag.CatAttach))
 	if !validID(a.Session) {
 		return fmt.Errorf("no session %s", a.Session)
@@ -61,19 +61,24 @@ func (b *bridge) attach(a proto.Attach) error {
 		_ = conn.Close()
 		return errors.New("the session's holder did not answer")
 	}
-	b.mu.Lock()
-	if b.ended {
-		b.mu.Unlock()
-		_ = conn.Close()
-		return errors.New("the bridge ended")
-	}
-	b.holder, b.hw = conn, hw
-	b.mu.Unlock()
 	if err := hw.WriteJSON(proto.TAttach, a); err != nil {
-		b.releaseHolder(conn)
+		_ = conn.Close()
 		return fmt.Errorf("attach to the holder: %w", err)
 	}
 	_ = conn.SetDeadline(time.Time{})
+	drain := b.drain
+	if drain <= 0 {
+		drain = bridgeDrain
+	}
+	hc := newBridgeHolder(conn, hw, drain)
+	b.mu.Lock()
+	if b.ended {
+		b.mu.Unlock()
+		hc.close()
+		return errors.New("the bridge ended")
+	}
+	b.holder, b.hw, b.holderQ = conn, hw, hc
+	b.mu.Unlock()
 	go b.readHolder(conn, hr)
 	return nil
 }
@@ -104,8 +109,12 @@ func (b *bridge) readHolder(conn net.Conn, r *bufio.Reader) {
 
 func (b *bridge) forward(f proto.Frame) {
 	b.mu.Lock()
-	hw := b.hw
+	hc, hw := b.holderQ, b.hw
 	b.mu.Unlock()
+	if hc != nil {
+		hc.send(f, b.done)
+		return
+	}
 	if hw != nil {
 		_ = hw.Write(f.Type, f.Payload)
 	}
@@ -114,22 +123,63 @@ func (b *bridge) forward(f proto.Frame) {
 // An old reader may finish after a replacement has attached and must
 // leave that replacement alone.
 func (b *bridge) releaseHolder(conn net.Conn) {
+	var hc *bridgeHolder
 	b.mu.Lock()
 	if b.holder == conn {
-		b.holder, b.hw = nil, nil
+		hc = b.holderQ
+		b.holder, b.hw, b.holderQ = nil, nil, nil
 	}
 	b.mu.Unlock()
-	if conn != nil {
+	if hc != nil {
+		hc.close()
+	} else if conn != nil {
 		_ = conn.Close()
 	}
 }
 
-func (b *bridge) closeHolder() {
+func (b *bridge) detachHolder() (net.Conn, *bridgeHolder) {
 	b.mu.Lock()
-	c := b.holder
-	b.holder, b.hw = nil, nil
+	c, hc := b.holder, b.holderQ
+	b.holder, b.hw, b.holderQ = nil, nil, nil
 	b.mu.Unlock()
-	if c != nil {
+	return c, hc
+}
+
+func (b *bridge) endHolder() {
+	c, hc := b.detachHolder()
+	if hc != nil {
+		hc.end()
+	} else if c != nil {
+		_ = c.Close()
+	}
+}
+
+func (b *bridge) finishHolder() {
+	c, hc := b.detachHolder()
+	if hc == nil {
+		if c != nil {
+			_ = c.Close()
+		}
+		return
+	}
+	hc.end()
+	drain := b.drain
+	if drain <= 0 {
+		drain = bridgeDrain
+	}
+	select {
+	case <-hc.drained:
+	case <-b.done:
+	case <-time.After(drain):
+		hc.close()
+	}
+}
+
+func (b *bridge) closeHolder() {
+	c, hc := b.detachHolder()
+	if hc != nil {
+		hc.close()
+	} else if c != nil {
 		_ = c.Close()
 	}
 }
