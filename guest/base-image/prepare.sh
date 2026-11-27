@@ -9,7 +9,7 @@ if [ "$(uname -s)" != Linux ] || [ ! -f /.dockerenv ] ||
 fi
 actual_arch=$(dpkg --print-architecture)
 if [ "$actual_arch" != "$DEFAULT_IMAGE_ARCH" ]; then
-    echo 'default-image: the root architecture differs from its selected build. Try: use a matching approved native runner.' >&2
+    echo 'default-image: the root architecture differs from its selected build. Try: build on a native machine of that architecture.' >&2
     exit 1
 fi
 rm -f /etc/apt/sources.list /etc/apt/sources.list.d/debian.sources
@@ -37,7 +37,10 @@ useradd --uid "$DEFAULT_IMAGE_UID" --gid "$DEFAULT_IMAGE_GID" --no-user-group \
 chage --lastday 0 "$DEFAULT_IMAGE_USER"
 dpkg-query -W -f='${Package}\t${Version}\t${Architecture}\n' "${packages[@]}" | LC_ALL=C sort >/out/packages.tsv
 apt-get clean
-rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/* /var/log/*
+# ldconfig's auxiliary cache records inode numbers and change times, so it
+# differs on every build. ldconfig rebuilds it when it needs it; mmdebstrap
+# removes it for the same reason.
+rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/* /var/log/* /var/cache/ldconfig/aux-cache
 rm -f /usr/sbin/policy-rc.d
 for name in /etc/machine-id /var/lib/dbus/machine-id; do
     if [ -f "$name" ]; then : >"$name"; fi

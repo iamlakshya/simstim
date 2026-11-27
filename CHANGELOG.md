@@ -4,6 +4,8 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ## [Unreleased]
 
+- Two builds of the default image now give the same bytes: the build removes ldconfig's auxiliary cache, which records inode numbers and change times. `guest/base-image/repro.sh` no longer needs a prepared module cache or an exact local Go: Go runs the toolchain that `go.mod` pins and checks the modules against `go.sum`.
+
 - The gVisor host patch now applies to its pinned upstream commit: it changes upstream's existing `runsc/cmd/sentry/sentrycmd/chroot.go` instead of creating it, and the build version suffix follows the new patch digest. The build compares only the execute bit that Git records, so a checkout's umask no longer fails it.
 
 - CI's required `test` job no longer waits for the native image builds, so a failed image build cannot skip the unit tests. The new `test-images` job runs the two complete release builds from the image pairs, and the `install` matrix follows it.

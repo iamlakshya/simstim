@@ -13,7 +13,7 @@ guest/base-image/build.sh arm64
 
 Use a matching native runner for each architecture. The release workflow does this with separate jobs. It adds no QEMU or host binfmt setup. Preparation may fetch the locked base and Debian packages. The conversion workload has no network, a read-only container root, dropped capabilities and a 1 GiB memory limit. Its output and all home and XDG paths are task-owned.
 
-The producer normalises exported file timestamps to the snapshot epoch. It replaces container-specific host and resolver files with the recipe's fixed bytes. It sorts the complete root through the existing OCI flattener, then writes one OCI layer, config and platform manifest. Their digests come from their actual bytes. A Docker image ID or tag is never an image pin.
+The producer normalises exported file timestamps to the snapshot epoch. It removes ldconfig's auxiliary cache (`/var/cache/ldconfig/aux-cache`), which records inode numbers and change times and so differs on every build; mmdebstrap removes it for the same reason. It replaces container-specific host and resolver files with the recipe's fixed bytes. It sorts the complete root through the existing OCI flattener, then writes one OCI layer, config and platform manifest. Their digests come from their actual bytes. A Docker image ID or tag is never an image pin.
 
 The same `image.Convert` code used for normal image imports creates ext4 with the verity tree. `image.Inspect` reads the actual output's root hash and data block count. The prepared metadata records these checks, its input pins, package observations and the exact recipe digest. Package licence files remain in the root. The signed Debian snapshot records the package and source references.
 
@@ -35,15 +35,18 @@ Unit fixtures exercise deterministic OCI and verity output and reject changed in
 
 The offline signature verifier lives in its own `tools/imageverify` module and builds with the same pinned Go 1.27.4 toolchain as the root module (`go.mod` / `GOTOOLCHAIN`). `scripts/build-image-verifier.sh` checks the active Go version against the pin and builds all four client platforms with `-mod=readonly`, `-tags=http2legacy` and `-trimpath`.
 
-On an approved native builder, `guest/base-image/repro.sh <arch>` makes two
-fresh preparation containers and separate empty Go build caches. Supply checks
-both actual output trees, their observed package versions and locked inputs,
-then compares the OCI manifest, config, layer and converted verity values.
-The script retains both builds and a `result.json` receipt. It requires the
-main module's pinned compiler and an already verified module cache; it does
-not publish an image. The receipt reports each whole root SHA separately and
-does not claim byte-identical dm-verity superblock identifiers. Running the
-small Go fixture tests alone does not satisfy this actual build comparison.
+On a native machine of either architecture, `guest/base-image/repro.sh <arch>`
+makes two fresh preparation containers and separate empty Go build caches.
+Supply checks both actual output trees, their observed package versions and
+locked inputs, then compares the OCI manifest, config, layer and converted
+verity values. The script retains both builds and a `result.json` receipt.
+Go runs the toolchain that `go.mod` pins, and `go mod download` checks every
+module against `go.sum` before both builds read that module cache offline. It
+needs Docker with a local Unix socket (Docker Desktop on a Mac works for
+arm64), and it does not publish an image. The receipt reports each whole
+root SHA separately and does not claim byte-identical dm-verity superblock
+identifiers. Running the small Go fixture tests alone does not satisfy this
+actual build comparison.
 
 The recipe explicitly includes OpenSSH's client for Git's SSH transport.
 `--no-install-recommends` does not make Git's recommended tools implicit build

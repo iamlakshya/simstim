@@ -3,6 +3,8 @@
 set -euo pipefail
 umask 077
 cd "$(dirname "$0")/../.."
+# Go runs the toolchain that go.mod pins, and fetches and checks it when the
+# local Go differs. Nothing here needs a specially prepared compiler.
 go_build_toolchain=$(sh scripts/go-build-tags.sh toolchain)
 export GOTOOLCHAIN="$go_build_toolchain"
 go_build_tags=$(sh scripts/go-build-tags.sh)
@@ -13,24 +15,19 @@ if [ "$#" -ne 1 ] || { [ "$1" != amd64 ] && [ "$1" != arm64 ]; }; then
 fi
 image_arch=$1
 case "$(uname -m):$image_arch" in x86_64:amd64|aarch64:arm64|arm64:arm64) ;; *)
-    echo 'default-image repro: a matching native runner is required. Try: use the approved runner for this architecture.' >&2
+    echo "default-image repro: this machine is not $image_arch, and the build uses no emulation. Try: run it on a native $image_arch machine." >&2
     exit 1 ;; esac
-if [ -z "${GOMODCACHE:-}" ] || [ ! -d "$GOMODCACHE" ]; then
-    echo 'default-image repro: no prepared module cache. Try: complete normal pinned module integrity preparation first.' >&2
-    exit 1
-fi
-case "$GOMODCACHE" in /*) ;; *)
-    echo 'default-image repro: module cache must be absolute. Try: use the approved prepared cache.' >&2
-    exit 1 ;; esac
-expected_go=$(sed -n 's/^toolchain //p' go.mod)
-case "$(GOTOOLCHAIN=local go version)" in "go version $expected_go "*) ;; *)
-    echo 'default-image repro: compiler differs from go.mod. Try: use the approved pinned main-module compiler.' >&2
-    exit 1 ;; esac
+# Both builds read one module cache, offline. go mod download fills it and
+# checks every module against go.sum and the checksum database.
+go mod download
+GOMODCACHE=$(go env GOMODCACHE)
+export GOMODCACHE
+go_version=$(go env GOVERSION)
 if [ -z "${DOCKER_HOST:-}" ]; then
     DOCKER_HOST=$(docker context inspect --format '{{.Endpoints.docker.Host}}')
 fi
 case "$DOCKER_HOST" in unix://*) export DOCKER_HOST ;; *)
-    echo 'default-image repro: a local Unix Docker endpoint is required. Try: use the approved local runner.' >&2
+    echo 'default-image repro: a local Unix Docker endpoint is required. Try: use a local Docker engine rather than a remote context.' >&2
     exit 1 ;; esac
 unset DOCKER_CONTEXT
 out_dir=${DEFAULT_IMAGE_REPRO_OUT_DIR:-build/default-image-repro-$image_arch}
@@ -41,10 +38,10 @@ fi
 mkdir -p "$(dirname "$out_dir")"
 mkdir "$out_dir"
 out_dir=$(cd "$out_dir" && pwd -P)
-printf '%s\n' "$(uname -s)" "$(uname -m)" "$expected_go" >"$out_dir/native-runner.txt"
+printf '%s\n' "$(uname -s)" "$(uname -m)" "$go_version" >"$out_dir/native-runner.txt"
 shasum -a 256 go.mod go.sum guest/supply.lock internal/image/default_image.toml \
     guest/base-image/build.sh guest/base-image/prepare.sh >"$out_dir/source-pins-before.txt"
-export GOTOOLCHAIN=local GOPROXY=off GOSUMDB=sum.golang.org GOFLAGS=-mod=readonly
+export GOPROXY=off GOFLAGS=-mod=readonly
 for run in 1 2; do
     state="$out_dir/run-$run"
     mkdir "$state"

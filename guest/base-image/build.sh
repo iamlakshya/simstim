@@ -25,7 +25,7 @@ if [ -z "${DOCKER_HOST:-}" ]; then
     DOCKER_HOST=$(docker context inspect --format '{{.Endpoints.docker.Host}}')
 fi
 case "$DOCKER_HOST" in unix://*) export DOCKER_HOST ;; *)
-    echo 'default-image: a local Unix Docker endpoint is required. Try: use the approved local build runner.' >&2
+    echo 'default-image: a local Unix Docker endpoint is required. Try: use a local Docker engine rather than a remote context.' >&2
     exit 1 ;; esac
 unset DOCKER_CONTEXT
 CGO_ENABLED=0 GOOS=linux GOARCH="$image_arch" go build -tags="$go_build_tags" -trimpath -o "$work/supply-linux" ./cmd/supply
@@ -51,10 +51,10 @@ created_id=$(docker create --platform "linux/$image_arch" --memory 1g --cpus 2 \
     --env "DEFAULT_IMAGE_SHELL=$(config shell)" --env "SOURCE_DATE_EPOCH=$epoch" \
     "$base_image" /bin/bash /run/default-image-input/prepare.sh)
 case "$created_id" in *[!0-9a-f]*|'')
-    echo 'default-image: Docker did not issue one native container ID. Try: inspect the approved runner.' >&2
+    echo 'default-image: Docker did not issue one native container ID. Try: check that the local Docker engine works (docker info).' >&2
     exit 1 ;; esac
 if [ "${#created_id}" -ne 64 ]; then
-    echo 'default-image: Docker returned an incomplete instance ID. Try: preserve the build and inspect the approved runner.' >&2
+    echo 'default-image: Docker returned an incomplete instance ID. Try: keep the build output and check the local Docker engine (docker info).' >&2
     exit 1
 fi
 container_id=$created_id
