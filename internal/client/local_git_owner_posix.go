@@ -12,7 +12,6 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
-	"slices"
 	"sync"
 	"syscall"
 	"time"
@@ -90,7 +89,7 @@ func startLocalGitOwner(request localGitRequest, input io.Reader, output, diagno
 	owner := &localGitOwner{control: controlWrite, done: make(chan struct{}), ready: make(chan error, 1),
 		uncertain: make(chan struct{}), stdout: &localGitSink{target: output}, stderr: &localGitSink{target: diagnostic}, code: -1}
 	command := exec.Command(executable, localGitAnchorMode)
-	command.Env = slices.Clone(request.HelperEnv)
+	command.Env = localGitHelperEnv(request.HelperEnv)
 	command.Dir = request.HelperDirectory
 	command.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	command.Stdin, command.Stdout, command.Stderr = input, owner.stdout, owner.stderr
