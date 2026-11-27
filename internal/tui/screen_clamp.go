@@ -15,8 +15,9 @@ import (
 )
 
 const (
-	screenChunkSize = 2048
-	maxModeParam    = 65535
+	screenChunkSize     = 2048
+	maxModeParam        = 65535
+	maxScreenWorkBudget = 200_000
 )
 
 // onScreenChunk runs before each write chunk after the first. Tests use it to
@@ -33,30 +34,60 @@ func ScreenLines(data []byte, cols, rows int) []string {
 
 // ScreenLinesContext renders data like ScreenLines, stopping early if ctx is
 // cancelled.
-func ScreenLinesContext(ctx context.Context, data []byte, cols, rows int) ([]string, error) {
-	shot, err := renderScreenContext(ctx, data, cols, rows)
+func ScreenLinesContext(ctx context.Context, data []byte, cols, rows int) (out []string, err error) {
+	cols, rows = normalizeScreenSize(cols, rows)
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if len(data) > PeekBytes {
+		data = data[len(data)-PeekBytes:]
+	}
+	defer func() {
+		if recover() != nil {
+			out, err = make([]string, rows), nil
+		}
+	}()
+	emu, err := emulateScreenContext(ctx, data, cols, rows)
 	if err != nil {
 		return nil, err
 	}
-	out := make([]string, len(shot.lines))
-	for y, line := range shot.lines {
-		last := len(line) - 1
-		for last >= 0 && (line[last].Content == "" || line[last].Content == " ") {
+	out = make([]string, rows)
+	touched := emu.Touched()
+	var b strings.Builder
+	for y := range rows {
+		if y&31 == 0 {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+		}
+		if y >= len(touched) || touched[y] == nil {
+			continue
+		}
+		last := cols - 1
+		for last >= 0 {
+			c := emu.CellAt(last, y)
+			if c != nil && c.Content != "" && c.Content != " " {
+				break
+			}
 			last--
 		}
 		if last < 0 {
 			continue
 		}
-		var b strings.Builder
+		b.Reset()
 		b.Grow(last + 1)
-		for _, c := range line[:last+1] {
-			if c.Content != "" {
+		for x := range last + 1 {
+			c := emu.CellAt(x, y)
+			switch {
+			case c == nil:
+				b.WriteByte(' ')
+			case c.Content != "":
 				b.WriteString(c.Content)
-			} else if c.Width != 0 {
+			case c.Width != 0:
 				b.WriteByte(' ')
 			}
 		}
-		s := api.CleanText(b.String(), max(len(line)*4, 4000))
+		s := api.CleanText(b.String(), max(cols*4, 4000))
 		out[y] = strings.TrimRight(s, " ")
 	}
 	if err := ctx.Err(); err != nil {
@@ -75,6 +106,27 @@ func normalizeScreenSize(cols, rows int) (int, int) {
 	return cols, rows
 }
 
+func emulateScreenContext(ctx context.Context, data []byte, cols, rows int) (*vt.Emulator, error) {
+	data, err := clampCSIBytes(ctx, data, cols, rows)
+	if err != nil {
+		return nil, err
+	}
+	emu := vt.NewEmulator(cols, rows)
+	// charmbracelet/x/vt v0.1.0 ignores SetScrollbackSize(0), keeping 10,000
+	// scrollback lines; 1 is the smallest accepted cap.
+	emu.SetScrollbackSize(1)
+	clampEmulatorCSI(ctx, emu, cols, rows)
+	if pw, ok := emu.InputPipe().(io.Closer); ok {
+		_ = pw.Close()
+	} else {
+		data = stripQueries(data)
+	}
+	if err := writeScreenChunks(ctx, emu, data); err != nil {
+		return nil, err
+	}
+	return emu, nil
+}
+
 // renderScreenContext runs bytes through a bounded terminal emulator of the
 // session's size, checking ctx between chunks.
 func renderScreenContext(ctx context.Context, data []byte, cols, rows int) (shot *screenShot, err error) {
@@ -90,19 +142,8 @@ func renderScreenContext(ctx context.Context, data []byte, cols, rows int) (shot
 			shot, err = &screenShot{lines: make([]uv.Line, rows), blank: true}, nil
 		}
 	}()
-	data, err = clampCSIBytes(ctx, data, cols, rows)
+	emu, err := emulateScreenContext(ctx, data, cols, rows)
 	if err != nil {
-		return nil, err
-	}
-	emu := vt.NewEmulator(cols, rows)
-	emu.SetScrollbackSize(0)
-	clampEmulatorCSI(ctx, emu, cols, rows)
-	if pw, ok := emu.InputPipe().(io.Closer); ok {
-		_ = pw.Close()
-	} else {
-		data = stripQueries(data)
-	}
-	if err := writeScreenChunks(ctx, emu, data); err != nil {
 		return nil, err
 	}
 	return snapshotEmulator(emu, cols, rows), nil
@@ -130,7 +171,7 @@ func snapshotEmulator(emu *vt.Emulator, cols, rows int) *screenShot {
 		for x := range cols {
 			if c := emu.CellAt(x, y); c != nil {
 				line[x] = *c
-				if !nonSpace && c.Content != "" && strings.TrimSpace(c.Content) != "" {
+				if !nonSpace && c.Content != "" && c.Content != " " && strings.TrimSpace(c.Content) != "" {
 					nonSpace = true
 				}
 			} else {
@@ -157,11 +198,8 @@ var boundedCSICmds = []int{
 func clampEmulatorCSI(ctx context.Context, emu *vt.Emulator, cols, rows int) {
 	maxDim := max(cols, rows)
 	maxRep := min(cols*(rows+1), 4096)
-	repBudget := max(cols*rows*2, 4096)
-	workBudget := repBudget
-	if cols*rows > 100000 {
-		workBudget = cols * rows
-	}
+	workBudget := min(max(cols*rows*2, 4096), maxScreenWorkBudget)
+	repBudget := workBudget
 
 	emu.RegisterCsiHandler('b', func(params ansi.Params) bool {
 		if ctx.Err() != nil || repBudget <= 0 || workBudget <= 0 {

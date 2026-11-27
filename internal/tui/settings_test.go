@@ -18,7 +18,16 @@ import (
 // keptSettings are settings that a session start can tell apart from the
 // defaults: inline mode, a cap of 4G, and the command of a secret.
 func keptSettingsFor(be *fakeBackend) client.Settings {
-	s := be.Settings()
+	var s client.Settings
+	s.UI.Motion = "off"
+	s.Attach.DetachKey = "ctrl+\\"
+	if be != nil {
+		be.mu.Lock()
+		if be.detachKey != "" {
+			s.Attach.DetachKey = be.detachKey
+		}
+		be.mu.Unlock()
+	}
 	s.Agents.Inline = true
 	s.Sessions.MemoryMax = "4G"
 	s.Secrets = map[string]client.SecretDefinition{"TOKEN": {Run: "op read op://dev/token"}}
