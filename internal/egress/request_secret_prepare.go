@@ -24,12 +24,6 @@ func prepareRequestSecrets(snapshot *requestSecretSnapshot, request *http.Reques
 	if failure := snapshot.scanRequestSecretTripwires(request, original, raw, canonical, protected, requestTripwireStrict); failure != nil {
 		return requestSecretPlan{}, failure
 	}
-	if _, ok := canonical.values["Proxy-Authorization"]; ok {
-		return requestSecretPlan{}, requestSecretRefusal(http.StatusForbidden, "secret_misuse")
-	}
-	if _, ok := raw.values["Proxy-Authorization"]; ok {
-		return requestSecretPlan{}, requestSecretRefusal(http.StatusForbidden, "secret_misuse")
-	}
 	if snapshot == nil {
 		return plan, nil
 	}
@@ -41,6 +35,12 @@ func prepareRequestSecrets(snapshot *requestSecretSnapshot, request *http.Reques
 	}
 	matches := make(map[string]int)
 	if len(active) > 0 {
+		if _, ok := canonical.values["Proxy-Authorization"]; ok {
+			return requestSecretPlan{}, requestSecretRefusal(http.StatusForbidden, "secret_misuse")
+		}
+		if _, ok := raw.values["Proxy-Authorization"]; ok {
+			return requestSecretPlan{}, requestSecretRefusal(http.StatusForbidden, "secret_misuse")
+		}
 		for key := range snapshot.credentialHeaders {
 			values, hasCanonical := canonical.values[key]
 			rawValues, hasRaw := raw.values[key]
