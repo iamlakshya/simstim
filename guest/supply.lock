@@ -4,8 +4,8 @@ version = 1
 
 [[pin]]
 name = "kernel"
-ref = "v6.18.63"
-commit = "1cdda838e8475edf89b73ff0cc952005dd0b1fa7"
+ref = "v6.18.65"
+commit = "4700e3adf3b24b39dd4929e9c6d62811ba3ccea8"
 watch = "osv"
 
 [[pin]]
@@ -30,10 +30,10 @@ commit = "eaf83bb718a559d324613d566eaf776b31a62340"
 watch = "github"
 
 [kernel]
-version = "6.18.63"
-released = 2026-11-10
-url = "https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.18.63.tar.xz"
-sha256 = "81764a545072d160748beff4d9de2e7d95aa9f16e8261110288f067a2cc61d71"
+version = "6.18.65"
+released = 2026-11-23
+url = "https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.18.65.tar.xz"
+sha256 = "c92606f956f09dc50b5a0e2af9e86763fce27ada1647de97f8d1ac8cfc95801d"
 
 [erofs_utils]
 version = "1.9.4"

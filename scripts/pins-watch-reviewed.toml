@@ -11,3 +11,59 @@
 # commit = "<40 hex>"                # the verdict holds for this commit only
 # verdict = "fixed"                  # "fixed" or "not-affected"
 # why = "The pin holds 44c4c8f5."
+
+[[verdict]]
+advisory = "CVE-2024-56803"
+pin = "ghostty"
+commit = "0fa3d577a5614150ff8e2c152de5fb9d5c6d2dec"
+verdict = "fixed"
+why = "Fixed in Ghostty v1.0.1 (3f7c3afaf947280bd2852626ff4599c02d9fb07e); pin vt-1.0.0 (0fa3d577) is 10,027 commits ahead. OSV resolved 1.0.1 to tag vt-1.0.1 in error."
+
+[[verdict]]
+advisory = "CVE-2026-98353"
+pin = "kernel"
+commit = "4700e3adf3b24b39dd4929e9c6d62811ba3ccea8"
+verdict = "fixed"
+why = "Fixed in Linux 6.18.58 (commit e32aa1d85126e6d5ef6efd594ced3f75178886ce, ancestor of v6.18.65), and CONFIG_INFINIBAND is unset in guest/kernel/config-amd64 and config-arm64."
+
+[[verdict]]
+advisory = "GHSA-3r3x-6hgg-2m38"
+pin = "cloud-hypervisor"
+commit = "74aeae19cb1ee2c44d33796b0e4e95e1a68e94dd"
+verdict = "fixed"
+why = "Advisory affects <= v54.0 and is patched in v53.1 and v54.1; the pin is identical to v54.1 (74aeae19)."
+
+[[verdict]]
+advisory = "GHSA-f47p-p25q-83rh"
+pin = "cloud-hypervisor"
+commit = "74aeae19cb1ee2c44d33796b0e4e95e1a68e94dd"
+verdict = "fixed"
+why = "Advisory affects v21.0 - v51.1 and is patched in v51.2 and v52.0; v54.1 (74aeae19) is ahead of v52.0 (1314ac88)."
+
+[[verdict]]
+advisory = "GHSA-jmr4-g2hv-mjj6"
+pin = "cloud-hypervisor"
+commit = "74aeae19cb1ee2c44d33796b0e4e95e1a68e94dd"
+verdict = "fixed"
+why = "Advisory affects v34.0 - v50.0 and is patched in v50.1 and v51.0; v54.1 (74aeae19) is ahead of v51.0 (00e106e5)."
+
+[[verdict]]
+advisory = "GHSA-g6mw-f26h-4jgp"
+pin = "cloud-hypervisor"
+commit = "74aeae19cb1ee2c44d33796b0e4e95e1a68e94dd"
+verdict = "fixed"
+why = "Advisory affects only v30.0 and v31.0 (patched in v30.1 and v31.1); v54.1 (74aeae19) is ahead of v32.0."
+
+[[verdict]]
+advisory = "GHSA-776c-mpj7-jm3r"
+pin = "firecracker"
+commit = "eaf83bb718a559d324613d566eaf776b31a62340"
+verdict = "fixed"
+why = "Advisory affects >=1.13.0, <= 1.14.3 and 1.15.0 (patched in 1.14.4 and 1.15.1); the pin is v1.18.0 (eaf83bb7)."
+
+[[verdict]]
+advisory = "GHSA-36j2-f825-qvgc"
+pin = "firecracker"
+commit = "eaf83bb718a559d324613d566eaf776b31a62340"
+verdict = "fixed"
+why = "Advisory affects < v1.13.1 and v1.14.0 (patched in v1.13.2 and v1.14.1); the pin is v1.18.0 (eaf83bb7)."

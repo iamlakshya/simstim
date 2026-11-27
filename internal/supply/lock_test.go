@@ -54,7 +54,7 @@ func TestLoadLockRefusesBadTablesAndPinMismatch(t *testing.T) {
 	}{
 		{"wrong version", "version = 1", "version = 2", "version 2 is not 1"},
 		{"unknown key", "version = 1", "version = 1\nextra = true", `unknown key "extra"`},
-		{"kernel pin disagrees", `ref = "v6.18.63"`, `ref = "v6.18.62"`, `[kernel] says version "6.18.63", and [[pin]] "kernel" says ref "v6.18.62"`},
+		{"kernel pin disagrees", `ref = "v6.18.65"`, `ref = "v6.18.64"`, `[kernel] says version "6.18.65", and [[pin]] "kernel" says ref "v6.18.64"`},
 		{"erofs pin disagrees", `ref = "v1.9.4"`, `ref = "v1.9.3"`, `[erofs_utils] says version "1.9.4", and [[pin]] "erofs-utils" says ref "v1.9.3"`},
 		{"vmm pin disagrees", `ref = "v54.1"`, `ref = "v54.0"`, `[[vmm]] cloud-hypervisor says version "54.1", and [[pin]] "cloud-hypervisor" says ref "v54.0"`},
 		{"missing kernel pin", `name = "kernel"`, `name = "other-kernel"`, `[kernel] has no [[pin]] named "kernel"`},
@@ -62,7 +62,7 @@ func TestLoadLockRefusesBadTablesAndPinMismatch(t *testing.T) {
 		{"unpinned builder", "@sha256:9c6e381421d0f48d1b8133e573f33c185ee16cbf505eda9c4a8a4791b25ea8a6", ":13", "[builder] image"},
 		{"bad moby commit", `commit = "70efc0e31da3a115fc87574d1b786fa2b867c346"`, `commit = "70efc0e"`, "[moby_check_config] commit"},
 		{"vmm zero size", "size = 7344872", "size = 0", "needs size > 0"},
-		{"kernel url mismatch", "linux-6.18.63.tar.xz", "linux-6.18.62.tar.xz", "does not end with /linux-6.18.63.tar.xz"},
+		{"kernel url mismatch", "linux-6.18.65.tar.xz", "linux-6.18.64.tar.xz", "does not end with /linux-6.18.65.tar.xz"},
 	}
 	for _, tc := range cases {
 		mut := strings.Replace(good, tc.old, tc.repl, 1)

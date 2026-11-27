@@ -58,7 +58,7 @@ func TestLockRejectsUnsafeRuntimePins(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, tc := range []struct{ name, old, replacement string }{
-		{"kernel outside the supported line", "6.18.63", "6.17.63"},
+		{"kernel outside the supported line", "6.18.65", "6.17.65"},
 		{"known vulnerable VMM", "54.1", "54.0"},
 		{"support ends before release", "2027-01-06", "2026-11-10"},
 	} {
@@ -82,7 +82,7 @@ func TestLockChecksKernelAgainstTheKnownBadList(t *testing.T) {
 	before := knownBad
 	t.Cleanup(func() { knownBad = before })
 	knownBad = append(KnownBad(), Advisory{ID: "test-kernel-advisory", Kind: AdvisoryKernel,
-		Name: "guest", Before: "6.18.64", Severity: "high", CVSS: 8})
+		Name: "guest", Before: "6.18.66", Severity: "high", CVSS: 8})
 	if _, err := LoadLock(b); err == nil || !strings.Contains(err.Error(), "test-kernel-advisory") {
 		t.Fatalf("LoadLock = %v, want the known kernel advisory", err)
 	}
