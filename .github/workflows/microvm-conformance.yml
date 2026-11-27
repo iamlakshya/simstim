@@ -217,11 +217,60 @@ jobs:
             echo "XDG_CONFIG_DIRS=$task_home/config-dirs"
             echo "XDG_DATA_DIRS=$task_home/data-dirs"
           } >> "$GITHUB_ENV"
-      - name: Run the actual macOS client, Linux guest and immutable evidence path
+      - name: Run the actual macOS client, Linux guest and immutable evidence path (bare-metal amd64)
+        if: matrix.marker == 'CONFORMANCE_BARE_METAL_AMD64_MARKER'
         env:
           E2E_HOST: ${{ matrix.host }}
           E2E_DISPOSABLE: "1"
-          E2E_DISPOSABLE_MARKER: ${{ secrets[matrix.marker] }}
+          E2E_DISPOSABLE_MARKER: ${{ secrets.CONFORMANCE_BARE_METAL_AMD64_MARKER }}
+          E2E_SUBSTRATE: ${{ matrix.substrate }}
+          E2E_REVISION: ${{ inputs.revision }}
+          E2E_HOST_ARCH: ${{ matrix.arch }}
+        run: |
+          case "$E2E_HOST_ARCH" in amd64|arm64) ;; *) echo 'Set the actual prepared host architecture; no guessed probe can run.' >&2; exit 1 ;; esac
+          scripts/time-to-agent.sh --host "$E2E_HOST" --client "$CONFORMANCE_CLIENT" \
+            --probe "build/conformance-probe-$E2E_HOST_ARCH" --wall microvm \
+            --link-bench "build/conformance-link-$E2E_HOST_ARCH" --supervisor-bench "build/conformance-supervisor-$E2E_HOST_ARCH" \
+            --substrate "$E2E_SUBSTRATE" --revision "$E2E_REVISION" \
+            --runs 20 --stop-first --shell --output "$RUNNER_TEMP/evidence-$E2E_SUBSTRATE-$E2E_HOST_ARCH"
+      - name: Run the actual macOS client, Linux guest and immutable evidence path (nested amd64)
+        if: matrix.marker == 'CONFORMANCE_NESTED_AMD64_MARKER'
+        env:
+          E2E_HOST: ${{ matrix.host }}
+          E2E_DISPOSABLE: "1"
+          E2E_DISPOSABLE_MARKER: ${{ secrets.CONFORMANCE_NESTED_AMD64_MARKER }}
+          E2E_SUBSTRATE: ${{ matrix.substrate }}
+          E2E_REVISION: ${{ inputs.revision }}
+          E2E_HOST_ARCH: ${{ matrix.arch }}
+        run: |
+          case "$E2E_HOST_ARCH" in amd64|arm64) ;; *) echo 'Set the actual prepared host architecture; no guessed probe can run.' >&2; exit 1 ;; esac
+          scripts/time-to-agent.sh --host "$E2E_HOST" --client "$CONFORMANCE_CLIENT" \
+            --probe "build/conformance-probe-$E2E_HOST_ARCH" --wall microvm \
+            --link-bench "build/conformance-link-$E2E_HOST_ARCH" --supervisor-bench "build/conformance-supervisor-$E2E_HOST_ARCH" \
+            --substrate "$E2E_SUBSTRATE" --revision "$E2E_REVISION" \
+            --runs 20 --stop-first --shell --output "$RUNNER_TEMP/evidence-$E2E_SUBSTRATE-$E2E_HOST_ARCH"
+      - name: Run the actual macOS client, Linux guest and immutable evidence path (bare-metal arm64)
+        if: matrix.marker == 'CONFORMANCE_BARE_METAL_ARM64_MARKER'
+        env:
+          E2E_HOST: ${{ matrix.host }}
+          E2E_DISPOSABLE: "1"
+          E2E_DISPOSABLE_MARKER: ${{ secrets.CONFORMANCE_BARE_METAL_ARM64_MARKER }}
+          E2E_SUBSTRATE: ${{ matrix.substrate }}
+          E2E_REVISION: ${{ inputs.revision }}
+          E2E_HOST_ARCH: ${{ matrix.arch }}
+        run: |
+          case "$E2E_HOST_ARCH" in amd64|arm64) ;; *) echo 'Set the actual prepared host architecture; no guessed probe can run.' >&2; exit 1 ;; esac
+          scripts/time-to-agent.sh --host "$E2E_HOST" --client "$CONFORMANCE_CLIENT" \
+            --probe "build/conformance-probe-$E2E_HOST_ARCH" --wall microvm \
+            --link-bench "build/conformance-link-$E2E_HOST_ARCH" --supervisor-bench "build/conformance-supervisor-$E2E_HOST_ARCH" \
+            --substrate "$E2E_SUBSTRATE" --revision "$E2E_REVISION" \
+            --runs 20 --stop-first --shell --output "$RUNNER_TEMP/evidence-$E2E_SUBSTRATE-$E2E_HOST_ARCH"
+      - name: Run the actual macOS client, Linux guest and immutable evidence path (nested arm64)
+        if: matrix.marker == 'CONFORMANCE_NESTED_ARM64_MARKER'
+        env:
+          E2E_HOST: ${{ matrix.host }}
+          E2E_DISPOSABLE: "1"
+          E2E_DISPOSABLE_MARKER: ${{ secrets.CONFORMANCE_NESTED_ARM64_MARKER }}
           E2E_SUBSTRATE: ${{ matrix.substrate }}
           E2E_REVISION: ${{ inputs.revision }}
           E2E_HOST_ARCH: ${{ matrix.arch }}
@@ -255,10 +304,12 @@ jobs:
           pattern: microvm-*-${{ inputs.revision }}
           path: evidence
       - name: Keep native assurance distinct from the macOS-to-Linux evidence
+        env:
+          REVISION: ${{ inputs.revision }}
         run: |
           module=$(sed -n 's/^module //p' go.mod)
           for arch in amd64 arm64; do
-            python3 scripts/check-conformance-go.py "evidence/microvm-native-$arch-${{ inputs.revision }}/native-go.jsonl" \
+            python3 scripts/check-conformance-go.py "evidence/microvm-native-$arch-$REVISION/native-go.jsonl" \
               --package "$module/internal/diag" --package "$module/internal/host" --package "$module/internal/supervisor" \
               --package "$module/internal/jail" --package "$module/internal/wall/process" \
               --package "$module/internal/wall/microvm" --package "$module/internal/guest"
