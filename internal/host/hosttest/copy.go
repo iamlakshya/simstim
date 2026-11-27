@@ -5,14 +5,11 @@ import (
 	"os"
 )
 
-// linkOrCopy makes dst the same file as src: a hard link when it can, so
-// that the copy is instant, or else a copy. Never a symbolic link: Linux
-// names a process's executable by the link's target.
-func linkOrCopy(src, dst string) error {
+// copyFile writes a standalone copy of src at dst. It never uses a symlink
+// (Linux names a process's executable by the link's target) and never hard-links
+// src (the host helper checks that its running executable has a single link).
+func copyFile(src, dst string) error {
 	_ = os.Remove(dst)
-	if os.Link(src, dst) == nil {
-		return nil
-	}
 	in, err := os.Open(src)
 	if err != nil {
 		return err

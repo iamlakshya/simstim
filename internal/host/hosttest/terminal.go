@@ -123,13 +123,13 @@ func tail(b []byte, n int) []byte {
 // text of each row, and whether it is on the alternate screen.
 func Screen(out []byte, cols, rows int) (lines []string, alt bool) {
 	e := vt.NewEmulator(cols, rows)
-	// The emulator writes replies to queries into a pipe: drain and drop them.
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		_, _ = io.Copy(io.Discard, e)
-	}()
-	defer func() { _ = e.Close(); <-done }()
+	// The emulator writes replies to queries into a pipe that nothing reads.
+	// Closing its write end up front avoids both blocking on writes and racing
+	// vt.Emulator.Read against Close on e.closed.
+	if pw, ok := e.InputPipe().(io.Closer); ok {
+		_ = pw.Close()
+	}
+	defer func() { _ = e.Close() }()
 	_, _ = e.Write(out)
 	var b strings.Builder
 	for y := range rows {

@@ -288,11 +288,11 @@ func (h *Host) Install(version, vt string) string {
 		h.t.Fatal(err)
 	}
 	dst := filepath.Join(dir, brand.HostBinary)
-	if err := linkOrCopy(exe, dst); err != nil {
+	if err := copyFile(exe, dst); err != nil {
 		h.t.Fatal(err)
 	}
 	if vt != "" {
-		if err := linkOrCopy(vt, filepath.Join(dir, brand.VTBinary)); err != nil {
+		if err := copyFile(vt, filepath.Join(dir, brand.VTBinary)); err != nil {
 			h.t.Fatal(err)
 		}
 	}

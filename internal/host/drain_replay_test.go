@@ -16,13 +16,17 @@ import (
 // client Source, native session operation, unit absence or boot authority.
 func drainReplayFixtureV1(t *testing.T) (*os.Root, *os.Root, *placementControl) {
 	t.Helper()
-	statePath, guardPath := t.TempDir(), t.TempDir()
-	state, err := cachefs.OpenPrivateRoot(statePath, false)
+	base, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	statePath, guardPath := filepath.Join(base, "state"), filepath.Join(base, "guard")
+	state, err := cachefs.OpenPrivateRoot(statePath, true)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = state.Close() })
-	guard, err := cachefs.OpenPrivateRoot(guardPath, false)
+	guard, err := cachefs.OpenPrivateRoot(guardPath, true)
 	if err != nil {
 		t.Fatal(err)
 	}

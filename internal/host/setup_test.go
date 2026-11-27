@@ -33,7 +33,11 @@ func setupRepo(t *testing.T) string {
 	// No systemd user manager can be reached from here, as in hosttest.New,
 	// so git never runs in the developer's own slice. The scope tests fake
 	// one.
-	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
+	rt, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("XDG_RUNTIME_DIR", rt)
 	t.Setenv("DBUS_SESSION_BUS_ADDRESS", "")
 	// A fake systemctl can take seconds to start on a busy machine.
 	old := gitScopeProbeTimeout
