@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"strings"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -108,8 +109,24 @@ func (m *Model) toast(kind toastKind, text string) tea.Cmd {
 // toastErr shows an error with its "Try:" line.
 func (m *Model) toastErr(err error) tea.Cmd {
 	msg, hint := errText(err)
-	m.toasts.push(m.now(), toastError, sentence(msg), hint)
+	m.toasts.push(m.now(), toastError, m.errSentence(msg), hint)
 	return m.after(toastErrorLife, toastTickMsg{})
+}
+
+// errSentence formats msg as a sentence without capitalising a leading host name.
+func (m *Model) errSentence(msg string) string {
+	s := strings.TrimSpace(msg)
+	if s == "" {
+		return s
+	}
+	first, _, _ := strings.Cut(s, " ")
+	if first != "" && m.hostByName(first) != nil {
+		if !strings.HasSuffix(s, ".") && !strings.HasSuffix(s, "?") && !strings.HasSuffix(s, ")") {
+			s += "."
+		}
+		return s
+	}
+	return sentence(s)
 }
 
 // toastNext shows a notice with the step to try next under it.

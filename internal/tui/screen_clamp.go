@@ -40,8 +40,16 @@ func ScreenLinesContext(ctx context.Context, data []byte, cols, rows int) ([]str
 	}
 	out := make([]string, len(shot.lines))
 	for y, line := range shot.lines {
+		last := len(line) - 1
+		for last >= 0 && (line[last].Content == "" || line[last].Content == " ") {
+			last--
+		}
+		if last < 0 {
+			continue
+		}
 		var b strings.Builder
-		for _, c := range line {
+		b.Grow(last + 1)
+		for _, c := range line[:last+1] {
 			if c.Content != "" {
 				b.WriteString(c.Content)
 			} else if c.Width != 0 {
@@ -115,18 +123,22 @@ func writeScreenChunks(ctx context.Context, emu *vt.Emulator, data []byte) error
 }
 
 func snapshotEmulator(emu *vt.Emulator, cols, rows int) *screenShot {
-	shot := &screenShot{blank: true}
+	shot := &screenShot{lines: make([]uv.Line, rows), blank: true}
 	for y := range rows {
 		line := make(uv.Line, cols)
+		nonSpace := false
 		for x := range cols {
 			if c := emu.CellAt(x, y); c != nil {
 				line[x] = *c
+				if !nonSpace && c.Content != "" && strings.TrimSpace(c.Content) != "" {
+					nonSpace = true
+				}
 			} else {
 				line[x] = uv.EmptyCell
 			}
 		}
-		shot.lines = append(shot.lines, line)
-		if strings.TrimSpace(line.String()) != "" {
+		shot.lines[y] = line
+		if nonSpace {
 			shot.bottom, shot.blank = y, false
 		}
 	}
@@ -147,6 +159,9 @@ func clampEmulatorCSI(ctx context.Context, emu *vt.Emulator, cols, rows int) {
 	maxRep := min(cols*(rows+1), 4096)
 	repBudget := max(cols*rows*2, 4096)
 	workBudget := repBudget
+	if cols*rows > 100000 {
+		workBudget = cols * rows
+	}
 
 	emu.RegisterCsiHandler('b', func(params ansi.Params) bool {
 		if ctx.Err() != nil || repBudget <= 0 || workBudget <= 0 {

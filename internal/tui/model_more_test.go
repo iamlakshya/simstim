@@ -136,7 +136,7 @@ func TestOfflineHostShowsTry(t *testing.T) {
 	if hs.m.modal != nil {
 		t.Fatal("a new-session dialog opened on an offline host")
 	}
-	hasToast(t, hs.m, "Not available: aws-gpu is offline.")
+	hasToast(t, hs.m, "aws-gpu is offline.")
 }
 
 func TestWizard(t *testing.T) {

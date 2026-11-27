@@ -55,6 +55,8 @@ func (b keymapBackend) Settings() client.Settings {
 	return s
 }
 
+func (b keymapBackend) ReadSettings() (client.Settings, string) { return b.Settings(), "" }
+
 func TestOldKeymapPreview(t *testing.T) {
 	defer func() { commands = registry() }()
 

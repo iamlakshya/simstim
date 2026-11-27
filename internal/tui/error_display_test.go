@@ -12,11 +12,14 @@ func TestHostErrorsAreCleanedAtHumanDisplayBoundaries(t *testing.T) {
 	raw := "host\x1b]52;c;value\x07\u009b\u202e\u200b\nnext"
 	for _, err := range []error{errors.New(raw), &client.UserError{Msg: raw, Hint: raw, Code: "x"}} {
 		msg, hint := errText(err)
-		if strings.ContainsAny(msg+hint, "\x1b\x07\u009b\u202e\u200b\n") {
+		if strings.ContainsAny(msg+hint, "\x1b\x07\u009b\u202e\u200b") {
 			t.Fatalf("unsafe errText: %q, %q", msg, hint)
 		}
 		hs := home(t, 100, 30)
 		_ = hs.m.toastErr(err)
+		if toasts := strings.Join(toastTexts(hs.m), " "); strings.ContainsAny(toasts, "\x1b\x07\u009b\u202e\u200b\n") {
+			t.Fatalf("unsafe single-line toast boundary: %q", toasts)
+		}
 		got := strings.Join(toastTexts(hs.m), " ") + strings.Join(errorLines(err, 80), " ")
 		w := &wizard{err: err, step: wzTest, host: client.Host{Name: "box"}}
 		got += w.view(hs.m)

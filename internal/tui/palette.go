@@ -164,6 +164,22 @@ func registry() []*command {
 		return needSession(m)
 	}
 	return append([]*command{
+		{noun: "session", verb: "new", short: "new session", cli: "new", keys: []binding{{"n", anywhere}}, run: (*Model).openQuickStart},
+		{noun: "session", verb: "new with the form", short: "new session, with the form", cli: "new", run: (*Model).openNewSession},
+		{noun: "session", verb: "attach", cli: "attach", keys: []binding{{"enter", onSessions}},
+			why: func(m *Model) string {
+				if m.screen == scrSessions && m.selected() == nil && sessionRows(m.rows()) == 0 {
+					return ""
+				}
+				return needAgent(m)
+			},
+			run: (*Model).attachSelected, instead: (*Model).enterEnded},
+		{noun: "session", verb: "peek", short: "peek at the screen", cli: "show --screen", keys: []binding{{"space", onSessions}}, why: needScreen, run: (*Model).openPreview},
+		{noun: "session", verb: "rename", cli: "rename", keys: []binding{{"r", onSessions}, {"f2", onSessions}}, why: needSession, run: (*Model).startRename},
+		{noun: "session", verb: "delete", cli: "rm", keys: []binding{{"d", onSessions}}, why: needSession, run: (*Model).confirmDelete},
+		{noun: "session", verb: "resume", cli: "resume", keys: []binding{{resumeKey, onSessions}}, why: needEnded, run: (*Model).resumeSelected},
+		{noun: "session", verb: "copy attach command", short: "copy attach command", launcherOnly: "it copies a command to the clipboard", keys: []binding{{"y", onSessions}}, why: needAgent, run: (*Model).copyAttach},
+		{noun: "session", verb: "next waiting", short: "next waiting session", launcherOnly: "it moves the selection", keys: []binding{{"w", anywhere}}, run: (*Model).nextWaiting},
 		{noun: "session", verb: "policy", cli: "policy ls --in", keys: []binding{{"p", onSessions}}, why: needSession, run: (*Model).openPolicy},
 		{noun: "session", verb: "policy log", cli: "policy log --in", why: needSession, run: (*Model).openPolicyLog},
 		{noun: "session", verb: "stop", cli: "stop", why: needSession, run: (*Model).stopSelected},
@@ -182,22 +198,6 @@ func registry() []*command {
 			}
 			return ""
 		}, run: (*Model).runPolicyLockdown},
-		{noun: "session", verb: "new", short: "new session", cli: "new", keys: []binding{{"n", anywhere}}, run: (*Model).openQuickStart},
-		{noun: "session", verb: "new with the form", short: "new session, with the form", cli: "new", run: (*Model).openNewSession},
-		{noun: "session", verb: "attach", cli: "attach", keys: []binding{{"enter", onSessions}},
-			why: func(m *Model) string {
-				if m.screen == scrSessions && m.selected() == nil && sessionRows(m.rows()) == 0 {
-					return ""
-				}
-				return needAgent(m)
-			},
-			run: (*Model).attachSelected, instead: (*Model).enterEnded},
-		{noun: "session", verb: "peek", short: "peek at the screen", cli: "show --screen", keys: []binding{{"space", onSessions}}, why: needScreen, run: (*Model).openPreview},
-		{noun: "session", verb: "rename", cli: "rename", keys: []binding{{"r", onSessions}, {"f2", onSessions}}, why: needSession, run: (*Model).startRename},
-		{noun: "session", verb: "delete", cli: "rm", keys: []binding{{"d", onSessions}}, why: needSession, run: (*Model).confirmDelete},
-		{noun: "session", verb: "resume", cli: "resume", keys: []binding{{resumeKey, onSessions}}, why: needEnded, run: (*Model).resumeSelected},
-		{noun: "session", verb: "copy attach command", short: "copy attach command", launcherOnly: "it copies a command to the clipboard", keys: []binding{{"y", onSessions}}, why: needAgent, run: (*Model).copyAttach},
-		{noun: "session", verb: "next waiting", short: "next waiting session", launcherOnly: "it moves the selection", keys: []binding{{"w", anywhere}}, run: (*Model).nextWaiting},
 
 		{noun: "host", verb: "open", short: "open host", cli: "ls", keys: []binding{{"enter", onHosts}},
 			why: func(m *Model) string {
