@@ -4,6 +4,8 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ## [Unreleased]
 
+- Fix supervisor, guest, sandbox and kernel test regressions across macOS and Linux, including guest-holder process-group shutdown, retained disk-resource cleanup on failed lease release, async bridge framing with directional peer-gone watches, SSH agent framing and policy persistence.
+
 - Fix CI hygiene checks: clear historical false positives in `.gitleaksignore` and replace key-like example and test literals, remove template injection and dynamic secret indexing in the microvm conformance workflow, bump the pinned guest kernel to `6.18.65` with reviewed pin-watch verdicts, upgrade `github.com/klauspost/compress` to `v1.20.5` for `GO-2026-6865`, and update pinned `govulncheck` to `v1.10.0` for Go 1.27 compatibility.
 
 - Fix Linux regressions in egress, TUI, bundle and host: reopen sealed popularity memfds read-only before stat checks, bound large TUI screen rendering and test baselines, isolate `hosttest` from the host systemd user manager, collect supervisor and guest holder logs in bundles, fix startup line error and EOF handling, bind host-owned runtime and image storage cleanly with synchronous creation receipts, avoid self-deadlocking cached image acquisition in sandbox prepare, allow all placement publication kinds, sanitise unwalled paste filenames, and project live unwalled debug expiry in `ls`.
