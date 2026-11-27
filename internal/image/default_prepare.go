@@ -191,7 +191,15 @@ func PrepareDefault(ctx context.Context, input *os.File, inputs DefaultInputsV1,
 	if err := canonical.Chmod(0o444); err != nil {
 		return prepared, err
 	}
-	if err := cachefs.RenameNoReplace(root, "layer.tar", "blobs/sha256/"+layerDigest[7:]); err != nil {
+	blobsDir, blobLeaf, err := defaultParent(root, "blobs/sha256/"+layerDigest[7:])
+	if err != nil {
+		return prepared, err
+	}
+	renameErr := cachefs.RenameBetweenNoReplace(root, "layer.tar", blobsDir, blobLeaf)
+	if renameErr == nil {
+		renameErr = syncRoot(blobsDir)
+	}
+	if err := errors.Join(renameErr, blobsDir.Close()); err != nil {
 		return prepared, err
 	}
 	if err := output.Chmod(0o444); err != nil {

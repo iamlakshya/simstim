@@ -61,6 +61,20 @@ func (s *Store) regular(name string, flags int, mode os.FileMode) (*os.File, err
 	return cachefs.OpenFile(root, leaf, flags, mode)
 }
 
+func (s *Store) renameNoReplace(from, to string) error {
+	fromRoot, fromLeaf, err := s.parent(from)
+	if err != nil {
+		return err
+	}
+	defer fromRoot.Close()
+	toRoot, toLeaf, err := s.parent(to)
+	if err != nil {
+		return err
+	}
+	defer toRoot.Close()
+	return cachefs.RenameBetweenNoReplace(fromRoot, fromLeaf, toRoot, toLeaf)
+}
+
 func validateBlobDescriptor(file *os.File) (os.FileInfo, error) {
 	st, err := file.Stat()
 	if err != nil {

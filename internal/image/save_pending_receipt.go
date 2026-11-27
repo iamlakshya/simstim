@@ -160,3 +160,15 @@ func pendingSaveName(name string) bool {
 func pendingSaveReceiptName(name, id string) bool {
 	return name == pendingSaveHead(id) || name == pendingSaveExpiry(id) || name == pendingSaveRetired(id) || name == pendingSaveExpiryRetired(id)
 }
+func pendingSaveFileID(name string) (string, bool) {
+	if !strings.HasSuffix(name, ".json") {
+		return "", false
+	}
+	base := strings.TrimSuffix(name, ".json")
+	for _, prefix := range []string{"pending-save-", "pending-expire-", ".pending-save-retired-", ".pending-expire-retired-"} {
+		if id, ok := strings.CutPrefix(base, prefix); ok && validPendingSaveID(id) {
+			return id, true
+		}
+	}
+	return "", false
+}

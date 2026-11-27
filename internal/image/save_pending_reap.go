@@ -6,8 +6,6 @@ import (
 	"os"
 	"reflect"
 	"time"
-
-	"github.com/iamlakshya/simstim/internal/cachefs"
 )
 
 // Reaping is opportunistic on the next original-domain store operation after
@@ -36,8 +34,12 @@ func (store *Store) reapSavedPending(ctx context.Context, stamp time.Time, all b
 		return report, err
 	}
 	seen := map[string]bool{}
+	reaped := map[string]bool{}
 	for _, name := range names {
 		if !pendingSaveName(name) {
+			continue
+		}
+		if id, ok := pendingSaveFileID(name); ok && reaped[id] {
 			continue
 		}
 		if err := ctx.Err(); err != nil {
@@ -78,6 +80,7 @@ func (store *Store) reapSavedPending(ctx context.Context, stamp time.Time, all b
 			report.Left = append(report.Left, PurgeLeft{pendingSaveStage(receipt.ID), "pending native resources changed; preserve them for inspection"})
 			continue
 		}
+		reaped[receipt.ID] = true
 		if err := store.retireSavePendingLease(receipt.ID); err != nil {
 			report.Left = append(report.Left, PurgeLeft{pendingSaveLease(receipt.ID), "pending data was retired but its original lease marker remains"})
 			continue
@@ -128,7 +131,7 @@ func (store *Store) reapSavePendingLocked(owner *os.Root, receipt savedPendingRe
 				return err
 			}
 		}
-		if err := cachefs.RenameNoReplace(store.root, stage, captured); err != nil {
+		if err := store.renameNoReplace(stage, captured); err != nil {
 			return err
 		}
 	}

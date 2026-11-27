@@ -7,8 +7,6 @@ import (
 	"sort"
 	"strings"
 	"time"
-
-	"github.com/iamlakshya/simstim/internal/cachefs"
 )
 
 // PurgeLeft reports a store-relative name that lacks current cleanup authority.
@@ -186,7 +184,7 @@ func (s *Store) purgeImageLocked(ctx context.Context, digest string, report *Pur
 		if s.captureHook != nil {
 			s.captureHook(true, s.root, source, quarantine)
 		}
-		if err := cachefs.RenameNoReplace(s.root, source, quarantine); err != nil {
+		if err := s.renameNoReplace(source, quarantine); err != nil {
 			return err
 		}
 		if s.captureHook != nil {
@@ -208,7 +206,7 @@ func (s *Store) purgeImageLocked(ctx context.Context, digest string, report *Pur
 	captured.Close()
 	checked, err := s.ownedDirectory(receipt, quarantine, begun)
 	if err != nil {
-		return errors.Join(err, cachefs.RenameNoReplace(s.root, quarantine, source))
+		return errors.Join(err, s.renameNoReplace(quarantine, source))
 	}
 	defer checked.Close()
 	names, err := directoryEntries(checked)

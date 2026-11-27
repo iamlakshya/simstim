@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"strings"
@@ -134,7 +135,7 @@ func witnessFile(root *os.Root, name string, file *os.File, mode os.FileMode, me
 }
 func metadataHash(file *os.File) (string, error) {
 	if _, err := file.Seek(0, 0); err != nil {
-		return "", err
+		return "", fmt.Errorf("rewind image metadata: %w", err)
 	}
 	hash := sha256.New()
 	n, err := io.Copy(hash, io.LimitReader(file, MaxManifest+1))
@@ -143,6 +144,9 @@ func metadataHash(file *os.File) (string, error) {
 	}
 	if n > MaxManifest {
 		return "", ownershipError("metadata exceeds its existing 4 MiB bound")
+	}
+	if _, err := file.Seek(0, 0); err != nil {
+		return "", fmt.Errorf("rewind image metadata: %w", err)
 	}
 	return hex.EncodeToString(hash.Sum(nil)), nil
 }

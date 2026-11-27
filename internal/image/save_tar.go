@@ -3,6 +3,7 @@ package image
 import (
 	"archive/tar"
 	"context"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -230,8 +231,41 @@ func ConvertSavedRoot(ctx context.Context, plan SavedRootPlan, input io.Reader, 
 	if err := output.Truncate(view.length); err != nil {
 		return SavedRootReport{}, err
 	}
+	if err := normaliseSavedVerityUUID(output); err != nil {
+		return SavedRootReport{}, err
+	}
 	if err := output.Sync(); err != nil {
 		return SavedRootReport{}, err
 	}
 	return result.report, nil
+}
+
+// normaliseSavedVerityUUID replaces hcsshim's random dm-verity superblock UUID
+// with a deterministic RFC 4122 identifier derived from the verified root hash
+// so identical saved roots keep one full-file digest across aliases.
+func normaliseSavedVerityUUID(output *os.File) error {
+	info, err := Inspect(output)
+	if err != nil {
+		return err
+	}
+	rootBytes, err := hex.DecodeString(info.RootHash)
+	if err != nil || len(rootBytes) < 16 {
+		return saveFailure("image_bad_layer", "converted saved root has an invalid verity root hash")
+	}
+	offset := info.DataBlocks * 4096
+	var signature [8]byte
+	if _, err := output.ReadAt(signature[:], offset); err != nil {
+		return fmt.Errorf("read saved verity superblock: %w", err)
+	}
+	if string(signature[:]) != "verity\x00\x00" {
+		return saveFailure("image_bad_layer", "converted saved root is missing its dm-verity superblock")
+	}
+	var uuid [16]byte
+	copy(uuid[:], rootBytes[:16])
+	uuid[6] = (uuid[6] & 0x0f) | 0x50
+	uuid[8] = (uuid[8] & 0x3f) | 0x80
+	if _, err := output.WriteAt(uuid[:], offset+16); err != nil {
+		return fmt.Errorf("write saved verity superblock uuid: %w", err)
+	}
+	return nil
 }

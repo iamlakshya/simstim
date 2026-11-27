@@ -155,12 +155,12 @@ func (s *Store) recoverPublication(ctx context.Context, receipt *imageOwnership)
 			return err
 		}
 		root.Close()
-		if err := cachefs.RenameNoReplace(s.root, receipt.Leaf, target); err != nil {
+		if err := s.renameNoReplace(receipt.Leaf, target); err != nil {
 			return err
 		}
 		captured, err := s.ownedDirectory(*receipt, target, false)
 		if err != nil {
-			return errors.Join(err, cachefs.RenameNoReplace(s.root, target, receipt.Leaf))
+			return errors.Join(err, s.renameNoReplace(target, receipt.Leaf))
 		}
 		captured.Close()
 		if err := s.syncDir("."); err != nil {
