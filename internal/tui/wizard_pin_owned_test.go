@@ -395,6 +395,17 @@ func (b *retryStageBackend) UpdateHostsContext(ctx context.Context, c client.Hos
 	return b.fakeBackend.UpdateHostsContext(ctx, c)
 }
 
+func (b *retryStageBackend) UpdateHostsForPrepare(ctx context.Context, c client.HostChange) (*wizardPrepareTarget, error, error) {
+	owner, err := b.pinOwner(ctx, c.Now.Name)
+	if err != nil {
+		return nil, nil, err
+	}
+	if owner != nil {
+		defer owner.abort()
+	}
+	return b.fakeBackend.UpdateHostsForPrepare(ctx, c)
+}
+
 func TestWizardSaveBackendKeepsCancellationAfterOwnerCheck(t *testing.T) {
 	for _, operation := range []string{"pin", "host"} {
 		t.Run(operation, func(t *testing.T) {

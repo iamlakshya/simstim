@@ -40,7 +40,15 @@ func (m *Model) startSessionWithSource(h *hostConn, r startReq) tea.Cmd {
 		} else if r.selected.currentAttempt().Request() != r.grants {
 			return startedMsg{startReq: r, err: changedNewSelection(), settingsRead: read}
 		}
-		args, err := client.PrepareNewSessionArgs(cctx, r.args, cols, rows)
+		var args client.NewArgs
+		var err error
+		if preparer, ok := be.(interface {
+			PrepareNewSessionArgs(context.Context, client.NewArgs, int, int) (client.NewArgs, error)
+		}); ok {
+			args, err = preparer.PrepareNewSessionArgs(cctx, r.args, cols, rows)
+		} else {
+			args, err = client.SessionArgs(r.args, cols, rows, settings)
+		}
 		if err != nil {
 			return startedMsg{startReq: r, err: err, settingsRead: read}
 		}

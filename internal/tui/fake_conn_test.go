@@ -102,10 +102,20 @@ func (c *fakeConn) NewSession(_ context.Context, a client.NewArgs) (*client.Sess
 	if name == "" {
 		name = "app"
 	}
-	s := client.Session{ID: fmt.Sprintf("n%03d", len(h.sessions)+1), Name: name, Agent: a.Agent, Cwd: a.Cwd,
+	s := client.Session{ID: fakeSessionID(len(h.sessions) + 1), Name: name, Agent: a.Agent, Cwd: a.Cwd,
 		State: api.StateStarting, Since: now, CreatedAt: now, Alive: true}
 	h.sessions = append(h.sessions, s)
 	return &s, nil
+}
+
+// fakeSessionID builds a deterministic base32 session ID accepted by api.ValidSessionID.
+func fakeSessionID(n int) string {
+	const digits = "234567abcdefghijklmnopqrstuvwxyz"
+	if n < 1 {
+		n = 1
+	}
+	v := n - 1
+	return fmt.Sprintf("n%c%c%c", digits[(v/1024)%len(digits)], digits[(v/32)%len(digits)], digits[v%len(digits)])
 }
 
 // Resume starts a session's agent again: it works once more, with nothing

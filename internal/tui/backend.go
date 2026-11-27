@@ -192,6 +192,10 @@ func (realBackend) RememberLast(host, id, name string)        { client.RememberL
 
 func (realBackend) ReadSettings() (client.Settings, string) { return client.ReadSettings() }
 
+func (realBackend) PrepareNewSessionArgs(ctx context.Context, a client.NewArgs, cols, rows int) (client.NewArgs, error) {
+	return client.PrepareNewSessionArgs(ctx, a, cols, rows)
+}
+
 func (realBackend) SetupAnswers(host string) client.SetupAnswers {
 	return client.LoadSetupAnswers(host)
 }

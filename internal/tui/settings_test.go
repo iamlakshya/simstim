@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -81,6 +82,11 @@ func TestActionsAfterABrokenEdit(t *testing.T) {
 		hs := endedLab(t, 80, 24)
 		h := hs.m.hostByName("gcp-dev")
 		h.host.Secrets = []string{"TOKEN"}
+		for i := range hs.be.hosts {
+			if hs.be.hosts[i].Name == "gcp-dev" {
+				hs.be.hosts[i].Secrets = []string{"TOKEN"}
+			}
+		}
 		for i := range h.sessions {
 			if h.sessions[i].ID == "g3" {
 				h.sessions[i].Secrets = []string{"TOKEN"}
@@ -103,7 +109,7 @@ func TestActionsAfterABrokenEdit(t *testing.T) {
 		breakAfter(hs)
 		hs.key("a")
 		hs.typeText("pi")
-		hs.key("enter", "enter", "enter", "enter")
+		hs.key("enter", "enter", "1", "enter", "enter")
 		w := hs.m.modal.(*wizard)
 		if w.step != wzRun || w.act.Kind != "login" {
 			t.Fatalf("step %v, act %+v, err %v", w.step, w.act, w.err)
@@ -142,9 +148,9 @@ func TestRealBackendSecretsUseCurrentAuthorisedSettings(t *testing.T) {
 		name, text string
 		valid      bool
 	}{
-		{"fresh", "[secrets]\nTOKEN = 'echo current-value'\n", true},
+		{"fresh", "[secrets]\nTOKEN = 'echo current-value'\n[secret_tiers]\nTOKEN = 'throwaway'\n", true},
 		{"broken", "[secrets]\nTOKEN = [\n", false},
-		{"unused invalid", "[secrets]\nTOKEN = 'echo current-value'\nUNUSED = {run = 'echo never-run', kind = 'unknown'}\n", false},
+		{"unused invalid", "[secrets]\nTOKEN = 'echo current-value'\n[secret_tiers]\nTOKEN = 'throwaway'\nUNUSED = {run = 'echo never-run', kind = 'unknown'}\n", false},
 	} {
 		t.Run(row.name, func(t *testing.T) {
 			if err := os.WriteFile(filepath.Join(client.ConfigDir(), "config.toml"), []byte(row.text), 0o600); err != nil {
@@ -172,6 +178,78 @@ func TestRealBackendSecretsUseCurrentAuthorisedSettings(t *testing.T) {
 				if _, err := os.Stat(marker); !os.IsNotExist(err) {
 					t.Fatalf("%s ran a stale presentation command: %v", operation, err)
 				}
+			}
+		})
+	}
+}
+
+type realPreparerBackend struct {
+	*fakeBackend
+}
+
+func (realPreparerBackend) PrepareNewSessionArgs(ctx context.Context, a client.NewArgs, cols, rows int) (client.NewArgs, error) {
+	return realBackend{}.PrepareNewSessionArgs(ctx, a, cols, rows)
+}
+
+func TestRealBackendStartDoesNotBypassPrepareNewSessionArgsOnBrokenSettings(t *testing.T) {
+	root := t.TempDir()
+	for _, key := range []string{"HOME", "USERPROFILE", "XDG_CONFIG_HOME", "XDG_STATE_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME", "XDG_RUNTIME_DIR", "XDG_CONFIG_DIRS", "XDG_DATA_DIRS"} {
+		t.Setenv(key, root)
+	}
+	if err := os.MkdirAll(client.ConfigDir(), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("TERM", "xterm-256color")
+
+	for _, row := range []struct {
+		name     string
+		text     string
+		wantCode string
+	}{
+		{
+			name:     "broken config fails closed",
+			text:     "[secrets]\nTOKEN = [\n",
+			wantCode: "bad_config",
+		},
+		{
+			name:     "repaired config still checks terminal env against secrets",
+			text:     "[secrets]\nTERM = 'echo secret'\n[secret_tiers]\nTERM = 'throwaway'\n",
+			wantCode: "git_environment_secret",
+		},
+	} {
+		t.Run(row.name, func(t *testing.T) {
+			if err := os.WriteFile(filepath.Join(client.ConfigDir(), "config.toml"), []byte(row.text), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			fb := newFakeBackend()
+			fb.hosts = []client.Host{{Name: "box", SSH: "box"}}
+			fb.state["box"] = &fakeHost{
+				checks: []client.AgentCheck{agentReady("claude", "Claude Code", api.LoginYes)},
+			}
+			setFile(fb, client.DefaultSettings(), brokenWarning)
+			hs := newHarness(t, fb, 80, 24)
+			hs.m.be = realPreparerBackend{fb}
+			hs.m.settings = keptSettingsFor(fb)
+			cmd := hs.m.startSessionWithSource(hs.m.hosts[0], startReq{
+				host: "box",
+				args: client.NewArgs{Agent: "claude", Cwd: "/app"},
+			})
+			msg, ok := cmd().(startedMsg)
+			if !ok {
+				t.Fatalf("unexpected message type: %T", msg)
+			}
+			if msg.warning != brokenWarning {
+				t.Fatalf("settingsRead warning = %q, want %q", msg.warning, brokenWarning)
+			}
+			var user *client.UserError
+			if !errors.As(msg.err, &user) || user.Code != row.wantCode {
+				t.Fatalf("err = %v, want user error code %q", msg.err, row.wantCode)
+			}
+			fb.mu.Lock()
+			started := len(fb.newArgs)
+			fb.mu.Unlock()
+			if started != 0 {
+				t.Fatalf("expected no session starts, got %d", started)
 			}
 		})
 	}

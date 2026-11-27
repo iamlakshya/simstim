@@ -97,6 +97,11 @@ func TestResumeSecretFetchKeepsActualHostSessionAndContext(t *testing.T) {
 	}
 	id := selected.ID
 	h.host.Secrets, selected.Secrets = []string{"TOKEN"}, []string{"TOKEN"}
+	for i := range hs.be.hosts {
+		if hs.be.hosts[i].Name == h.name() {
+			hs.be.hosts[i].Secrets = []string{"TOKEN"}
+		}
+	}
 	hs.be.secrets = map[string]api.Secret{"TOKEN": "fixture-value"}
 	backend := &grantContextBackend{Backend: hs.be}
 	connection := &grantContextConn{Conn: h.conn}

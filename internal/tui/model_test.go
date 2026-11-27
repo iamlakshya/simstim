@@ -152,14 +152,14 @@ func TestNewSessionAttaches(t *testing.T) {
 	if hs.m.prompt != nil {
 		t.Fatal("the prompt stayed open")
 	}
-	if len(hs.be.attached) != 1 || hs.be.attached[0].Session != "n005" {
+	if len(hs.be.attached) != 1 || hs.be.attached[0].Session != fakeSessionID(5) {
 		t.Fatalf("attached %+v", hs.be.attached)
 	}
 	o := hs.be.attached[0]
 	if o.State != hs.m.attach || !o.Interactive {
 		t.Fatalf("attach options %+v", o)
 	}
-	if hs.m.screen != scrSessions || hs.m.cur != "atlas-dev" || hs.m.sel.id != "n005" {
+	if hs.m.screen != scrSessions || hs.m.cur != "atlas-dev" || hs.m.sel.id != fakeSessionID(5) {
 		t.Fatal("after the detach the launcher is not on the session")
 	}
 	hasToast(t, hs.m, "Detached. api-fix keeps running on atlas-dev.")
@@ -217,7 +217,7 @@ func TestNewSessionDetached(t *testing.T) {
 		t.Fatal("ctrl+enter attached")
 	}
 	hasToast(t, hs.m, "Started app on atlas-dev.")
-	if hs.m.sel.id != "n005" || hs.m.screen != scrSessions {
+	if hs.m.sel.id != fakeSessionID(5) || hs.m.screen != scrSessions {
 		t.Fatalf("the new session is not selected: %v", hs.m.sel)
 	}
 }
