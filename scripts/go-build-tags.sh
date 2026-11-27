@@ -18,7 +18,7 @@ case "${1:-main}" in
             case "$(GOTOOLCHAIN=local go version)" in
                 "go version $pinned_go "*) printf '%s\n' local ;;
                 *)
-                    printf 'Error: the local compiler differs from the exact source pin.\nTry: select the verified Go1.27.4 SDK before using GOTOOLCHAIN=local.\n' >&2
+                    printf 'Error: the local Go compiler differs from go.mod (%s).\nTry: unset GOTOOLCHAIN (or set GOTOOLCHAIN=%s) so Go downloads the pinned toolchain, or install %s locally.\n' "$pinned_go" "$pinned_go" "$pinned_go" >&2
                     exit 1 ;;
             esac
         else
