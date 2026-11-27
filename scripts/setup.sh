@@ -13,7 +13,9 @@
 #   scripts/setup.sh --only node,typos   only these tools, and no build (CI)
 set -euo pipefail
 cd "$(dirname "$0")/.."
-go_build_toolchain=$(sh scripts/go-build-tags.sh toolchain)
+# Images such as the devcontainer may set GOTOOLCHAIN=local with an older
+# bootstrap Go. Build and test with the repository's exact pinned toolchain.
+go_build_toolchain=$(GOTOOLCHAIN="" sh scripts/go-build-tags.sh toolchain)
 export GOTOOLCHAIN="$go_build_toolchain"
 go_build_tags=$(sh scripts/go-build-tags.sh)
 export GO_BUILD_TAGS="$go_build_tags"
@@ -38,11 +40,6 @@ sha256() {
 command -v go >/dev/null 2>&1 || die "Go is not installed. Try: install Go from https://go.dev/dl, then run this again."
 command -v git >/dev/null 2>&1 || die "git is not installed."
 command -v ssh >/dev/null 2>&1 || die "OpenSSH is not installed; the tool and its tests need it."
-
-# Images may set GOTOOLCHAIN=local. Build and test with the repository's pin.
-toolchain=$(awk '$1 == "toolchain" { print $2; exit }' go.mod)
-[ -n "$toolchain" ] || die "go.mod has no toolchain pin. Try: restore its toolchain line."
-export GOTOOLCHAIN="$toolchain"
 
 tools=.tools
 mkdir -p "$tools/bin" "$tools/dl"
@@ -107,7 +104,7 @@ if ! go test -tags="$go_build_tags" -count=1 ./... >"$log" 2>&1; then
     say ""
     cat "$log" >&2
     rm -f "$log"
-    die "a test failed; the lines above say which. Run it again with go test -tags="$go_build_tags" -run <name> -v."
+    die "a test failed; the lines above say which. Run it again with go test -tags='$go_build_tags' -run <name> -v."
 fi
 rm -f "$log"
 say ""

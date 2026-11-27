@@ -37,6 +37,7 @@ class SetupTests(unittest.TestCase):
             root = Path(temporary)
             (root / "scripts").mkdir()
             shutil.copyfile(ROOT / "scripts/setup.sh", root / "scripts/setup.sh")
+            shutil.copyfile(ROOT / "scripts/go-build-tags.sh", root / "scripts/go-build-tags.sh")
             shutil.copyfile(ROOT / "go.mod", root / "go.mod")
             (root / "scripts/tools.lock").write_text("")
             tools = root / ".tools/bin"
@@ -65,7 +66,7 @@ class SetupTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         pin = next(line.split()[1] for line in (ROOT / "go.mod").read_text().splitlines()
                    if line.startswith("toolchain "))
-        self.assertEqual(calls, [pin + " version", pin + " test -count=1 ./..."])
+        self.assertEqual(calls, [pin + " version", pin + " test -tags=userns_cohort_v3,http2legacy -count=1 ./..."])
         self.assertIn("Ready.", result.stderr)
 
     def test_prints_the_complete_test_failure_before_cleanup(self):
