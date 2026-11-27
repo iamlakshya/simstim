@@ -7,6 +7,7 @@ The evidence behind the design, gathered between 14 October and 10 November 2026
 | [Amp UX and Orbs](amp-ux-and-orbs.md) | Amp's public docs, design history and Orbs, and what users say. Source of the UX patterns, from public material. |
 | [Amp's TUI, observed](amp-tui.md) | The real Amp CLI watched in a terminal, cell by cell, plus its official images: layout, palette in hex, glyphs, spacing, keys, empty and error states. The reference for the launcher. |
 | [Herdr](herdr.md) | The closest existing tool: architecture, fidelity limits, and what to borrow |
+| [Reuse](reuse.md) | Every feature area checked against maintained open-source projects: what to adopt, what to keep, what to defer, and the order of work |
 | [Host runtime](host-runtime.md) | zmx, libghostty-vt, the holder design, status detection, resume commands, the manifest |
 | [Connectivity and providers](connectivity-and-providers.md) | System SSH, multiplexing, bootstrap, provider recipes, reconnect, security |
 | [Client stack](client-stack.md) | Language and TUI framework, attach hand-off, input filter, clipboard, distribution |
