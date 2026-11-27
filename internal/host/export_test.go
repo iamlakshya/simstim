@@ -49,3 +49,12 @@ var (
 
 // UnitEnv is the variable that names a holder's unit.
 var UnitEnv = unitEnv
+
+// ResetPlacementForTest clears the process-level placement cache between
+// isolated test hosts that run the bridge in-process.
+func ResetPlacementForTest() {
+	placementProcesses.Lock()
+	placementProcesses.entry = nil
+	placementProcesses.byScope = map[string]*placement{}
+	placementProcesses.Unlock()
+}

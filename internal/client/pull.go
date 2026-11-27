@@ -55,12 +55,19 @@ func SessionRepoPolicy(ctx context.Context, h Host, dir string) (RepoInfo, error
 }
 
 func sessionRepoInfo(ctx context.Context, h Host, dir string, changes bool) (RepoInfo, error) {
-	s := &SSH{Host: h}
+	var tr Transport = &SSH{Host: h}
+	if h.Machine != nil {
+		var err error
+		tr, err = HostTransport(ctx, h, false)
+		if err != nil {
+			return RepoInfo{}, err
+		}
+	}
 	req, err := json.Marshal(api.RepoInfoArgs{Dir: dir, Changes: changes, Policy: !changes})
 	if err != nil {
 		return RepoInfo{}, fmt.Errorf("write the request for the repository: %w", err)
 	}
-	out, err := s.Run(ctx, RemoteHelper(HelperVersion())+" git-op "+api.GitOpRepoInfo, bytes.NewReader(req))
+	out, err := tr.Run(ctx, RemoteHelper(HelperVersion())+" git-op "+api.GitOpRepoInfo, bytes.NewReader(req))
 	if err != nil {
 		if ctx.Err() != nil {
 			return RepoInfo{}, ctx.Err()

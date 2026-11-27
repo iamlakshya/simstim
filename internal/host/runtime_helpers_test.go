@@ -97,9 +97,13 @@ func waitState(t *testing.T, id, state string) {
 // dial connects a client to this host, through the real bridge.
 func dial(t *testing.T, h *hosttest.Host) *client.Conn {
 	t.Helper()
+	h.Install(client.HelperVersion(), "")
 	ch, _ := h.ClientHost("box")
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
+	if err := client.SaveHosts(ctx, []client.Host{ch}); err != nil {
+		t.Fatal(err)
+	}
 	c, err := client.Dial(ctx, ch, false)
 	if err != nil {
 		t.Fatal(err)

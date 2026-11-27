@@ -39,17 +39,25 @@ func init() {
 	}
 }
 
-func localGitControls() (*os.File, *os.File, error) {
-	control, status := os.NewFile(3, "local-git-control"), os.NewFile(4, "local-git-status")
-	for _, file := range []*os.File{control, status} {
-		if file == nil {
-			return nil, nil, fmt.Errorf("the local Git private control is missing")
-		}
-		info, err := file.Stat()
-		if err != nil || info.Mode()&os.ModeNamedPipe == 0 {
+func localGitControls(nonblockControl bool) (*os.File, *os.File, error) {
+	for _, fd := range []int{3, 4} {
+		var st syscall.Stat_t
+		if err := syscall.Fstat(fd, &st); err != nil || st.Mode&syscall.S_IFMT != syscall.S_IFIFO {
 			return nil, nil, fmt.Errorf("the local Git control is not a private pipe")
 		}
-		syscall.CloseOnExec(int(file.Fd()))
+		syscall.CloseOnExec(fd)
+	}
+	if nonblockControl {
+		// Wrap FD 3 nonblocking so os.NewFile registers it with Go's netpoller;
+		// otherwise control.Close() cannot wake a blocked control.Read() while
+		// the parent still holds its write end open. Never call control.Fd().
+		if err := syscall.SetNonblock(3, true); err != nil {
+			return nil, nil, fmt.Errorf("set nonblocking local Git control: %w", err)
+		}
+	}
+	control, status := os.NewFile(3, "local-git-control"), os.NewFile(4, "local-git-status")
+	if control == nil || status == nil {
+		return nil, nil, fmt.Errorf("the local Git private control is missing")
 	}
 	return control, status, nil
 }
@@ -145,7 +153,7 @@ func (o *localGitOwner) join(status *os.File) {
 }
 
 func localGitAnchor() int {
-	control, status, err := localGitControls()
+	control, status, err := localGitControls(false)
 	if err != nil {
 		return 125
 	}
@@ -187,7 +195,7 @@ func localGitAnchor() int {
 }
 
 func localGitGuardian() int {
-	control, status, err := localGitControls()
+	control, status, err := localGitControls(true)
 	if err != nil {
 		return 125
 	}

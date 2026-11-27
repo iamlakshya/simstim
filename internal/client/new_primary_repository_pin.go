@@ -12,7 +12,7 @@ import (
 // The empty layer grants nothing; it retains the exact identity for a later
 // local repository edit and the existing immutable-source refresh path.
 func (p *newInputPreparation) retainPrimaryRepositorySourceV1(ctx context.Context) error {
-	if p == nil || p.closed || p.operation == nil || p.discovery == nil {
+	if p == nil || p.closed || p.operation == nil || (len(p.options.Seeds) != 0 && p.discovery == nil) {
 		return policySourceStateError()
 	}
 	request := grantRequestOf(ctx)

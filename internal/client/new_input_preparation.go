@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"reflect"
 	"slices"
-	"strconv"
 	"sync"
 
 	"github.com/iamlakshya/simstim/internal/api"
@@ -314,9 +313,22 @@ func (c *Conn) PrepareNewInputs(ctx context.Context, a NewArgs) (NewArgs, error)
 	if err != nil {
 		return a, err
 	}
-	copyMax, seedMax = min(copyMax, checkedCopy), min(seedMax, checkedSeed)
-	copyLimit, seedLimit := strconv.FormatInt(copyMax, 10), strconv.FormatInt(seedMax, 10)
-	values.CopyMax, values.SeedMax = &copyLimit, &seedLimit
+	if checkedCopy < copyMax {
+		copyMax = checkedCopy
+		values.CopyMax = nil
+		if checked.Sandbox.CopyMax != nil {
+			v := *checked.Sandbox.CopyMax
+			values.CopyMax = &v
+		}
+	}
+	if checkedSeed < seedMax {
+		seedMax = checkedSeed
+		values.SeedMax = nil
+		if checked.Sandbox.SeedMax != nil {
+			v := *checked.Sandbox.SeedMax
+			values.SeedMax = &v
+		}
+	}
 	environment, err := ResolveSessionEnvironment(ctx, settings, checked.Sandbox.Env, p.options.Environment)
 	if err != nil {
 		return a, err

@@ -8,14 +8,20 @@ import (
 
 	"github.com/iamlakshya/simstim/internal/api"
 	"github.com/iamlakshya/simstim/internal/client"
+	"github.com/iamlakshya/simstim/internal/host"
 	"github.com/iamlakshya/simstim/internal/host/hosttest"
 	"github.com/iamlakshya/simstim/internal/paths"
 )
 
 func TestUserDrainKeepsRunningSessionAndClearsExactMark(t *testing.T) {
 	h := hosttest.New(t)
+	host.ResetPlacementForTest()
+	t.Cleanup(host.ResetPlacementForTest)
+	if err := host.InitPlacement(); err != nil {
+		t.Fatal(err)
+	}
 	c := dial(t, h)
-	session, err := c.NewSession(t.Context(), client.NewArgs{Name: "before-drain", Argv: []string{"/bin/sh"}, Cwd: "~", Cols: 80, Rows: 24})
+	session, err := c.NewSession(t.Context(), client.NewArgs{Name: "before-drain", Argv: []string{"/bin/sh"}, Cwd: "~", Cols: 80, Rows: 24, Wall: "none", Downgrade: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -31,7 +37,7 @@ func TestUserDrainKeepsRunningSessionAndClearsExactMark(t *testing.T) {
 	if err := c.Call(t.Context(), "host.facts", struct{}{}, &facts); err != nil || !facts.DrainKnown || !facts.Drain {
 		t.Fatal("actual facts missed the setting", facts.DrainKnown, facts.Drain, err)
 	}
-	_, err = c.NewSession(t.Context(), client.NewArgs{Name: "while-drained", Argv: []string{"/bin/sh"}, Cwd: "~"})
+	_, err = c.NewSession(t.Context(), client.NewArgs{Name: "while-drained", Argv: []string{"/bin/sh"}, Cwd: "~", Wall: "none", Downgrade: true})
 	var refused *client.UserError
 	if err == nil || !errors.As(err, &refused) || refused.Code != "draining" {
 		t.Fatal("new admitted a drained host", err)
@@ -46,7 +52,7 @@ func TestUserDrainKeepsRunningSessionAndClearsExactMark(t *testing.T) {
 	if _, err := os.Lstat(leaf); !errors.Is(err, os.ErrNotExist) {
 		t.Fatal("drain clear retained the setting", err)
 	}
-	if _, err := c.NewSession(t.Context(), client.NewArgs{Name: "after-drain", Argv: []string{"/bin/sh"}, Cwd: "~"}); err != nil {
+	if _, err := c.NewSession(t.Context(), client.NewArgs{Name: "after-drain", Argv: []string{"/bin/sh"}, Cwd: "~", Wall: "none", Downgrade: true}); err != nil {
 		t.Fatal("cleared drain still blocked a new session", err)
 	}
 }
