@@ -159,9 +159,9 @@ func supervised(t *testing.T) (string, *fakeGuest, chan error) {
 		t.Fatal(err)
 	}
 	f := &fakeGuest{t: t, disk: fixtureDiskResourcesV1(t), holders: make(chan *link.Stream, 8), done: make(chan struct{})}
-	old := sandboxFor
-	sandboxFor = func(*host.Manifest) (sandbox, error) { return f, nil }
-	t.Cleanup(func() { sandboxFor = old })
+	old, oldFake := sandboxFor, testFakeSandbox
+	sandboxFor, testFakeSandbox = func(*host.Manifest) (sandbox, error) { return f, nil }, true
+	t.Cleanup(func() { sandboxFor, testFakeSandbox = old, oldFake })
 	ended, fin := make(chan error, 1), make(chan struct{})
 	go func() {
 		ended <- Run(id)

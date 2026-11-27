@@ -48,7 +48,7 @@ func eventController(t *testing.T, rules ...api.Rule) *eventFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := &Supervisor{id: "lease222", m: &host.Manifest{Schema: 1, ID: "lease222", Name: "lease", Cwd: dir, CreatedAt: time.Now(), Layers: cleaned, Policy: &pol}, log: slog.New(slog.DiscardHandler)}
+	s := &Supervisor{id: "lease222", firstSaved: true, m: &host.Manifest{Schema: 1, ID: "lease222", Name: "lease", Cwd: dir, CreatedAt: time.Now(), Layers: cleaned, Policy: &pol}, log: slog.New(slog.DiscardHandler)}
 	auditPath := filepath.Join(dir, "events.jsonl")
 	s.audit = openAudit(auditPath, s.log)
 	a, b := net.Pipe()

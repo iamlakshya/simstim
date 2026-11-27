@@ -26,9 +26,9 @@ func TestMissingFactoryDiskAuthorityRefusesBeforeSandboxStart(t *testing.T) {
 		t.Fatal(err)
 	}
 	var started atomic.Bool
-	old := sandboxFor
-	sandboxFor = func(*host.Manifest) (sandbox, error) { return &startSpy{started: &started}, nil }
-	t.Cleanup(func() { sandboxFor = old })
+	old, oldFake := sandboxFor, testFakeSandbox
+	sandboxFor, testFakeSandbox = func(*host.Manifest) (sandbox, error) { return &startSpy{started: &started}, nil }, true
+	t.Cleanup(func() { sandboxFor, testFakeSandbox = old, oldFake })
 	var failure *proto.Error
 	err := Run(id)
 	if !errors.As(err, &failure) || failure.Code != "disk_measure" || failure.Hint == "" || started.Load() {

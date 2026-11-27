@@ -93,7 +93,13 @@ func TestAGuestInitThatStaysEndsWithTheSandbox(t *testing.T) {
 		sent, drivers := gate(t, false)
 		ended := make(chan error, 1)
 		go func() { ended <- Run(id) }()
-		<-sent
+		select {
+		case <-sent:
+		case err := <-ended:
+			t.Fatalf("supervisor exited before start was sent: %v", err)
+		case <-time.After(endBound):
+			t.Fatalf("supervisor did not send start within %s", endBound)
+		}
 		if err := endedWithin(t, ended); err == nil {
 			t.Error("a boot past its deadline worked")
 		}

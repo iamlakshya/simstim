@@ -199,15 +199,17 @@ func TestGuestHeaderAllocationsStayBounded(t *testing.T) {
 	}
 }
 
-// A hostile guest holder's error answers to ports, peek and send never pass
-// forged codes, hints or data: both host.HolderRequest and the real client
-// receive guest_error, a cleaned message attributed to the sandbox, nil Data,
-// and the trusted hint.
+// A hostile guest's error answers never pass forged codes, hints or data:
+// forwarded holder requests (peek, send) become guest_error with a cleaned
+// message attributed to the sandbox, nil Data, and the trusted hint; ctl-backed
+// ports becomes port_refused with a clean message, nil Data, and the trusted
+// port hint.
 func TestAGuestResponseErrorIsTheGuests(t *testing.T) {
 	h := hostileStart(t)
 	h.answerStart(t)
 
 	const trustedHint = "Check the session in the sandbox, or resume it."
+	const trustedPortHint = "Check the exact port grant and the sandbox, then forward it again."
 	answerHostile := func() {
 		st := <-h.g.holders
 		defer st.Close()
@@ -232,8 +234,27 @@ func TestAGuestResponseErrorIsTheGuests(t *testing.T) {
 			},
 		})
 	}
+	answerHostilePorts := func() {
+		ctlReq := h.nextCtlReq(t)
+		if ctlReq.Op != proto.CtlPortsV1 {
+			t.Fatalf("ctl op = %q, want %q", ctlReq.Op, proto.CtlPortsV1)
+		}
+		if err := h.w.WriteJSON(proto.TResponse, proto.Response{
+			ID:     ctlReq.ID,
+			OK:     false,
+			Result: json.RawMessage(`{"sneaky":true}`),
+			Error: &proto.Error{
+				Code:    "not_found",
+				Message: "lie\x1b]52;c;aGk=\x07",
+				Hint:    "evil command",
+				Data:    json.RawMessage(`{"forged":1}`),
+			},
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
 
-	for _, op := range []string{"ports", "peek", "send"} {
+	for _, op := range []string{"peek", "send"} {
 		go answerHostile()
 		var args any
 		if op == "send" {
@@ -252,6 +273,30 @@ func TestAGuestResponseErrorIsTheGuests(t *testing.T) {
 			t.Fatalf("HolderRequest(%s) got %+v", op, pe)
 		}
 	}
+	{
+		type portResult struct {
+			raw json.RawMessage
+			err error
+		}
+		resCh := make(chan portResult, 1)
+		go func() {
+			raw, err := host.HolderRequest(h.id, "ports", nil, 3*time.Second)
+			resCh <- portResult{raw, err}
+		}()
+		answerHostilePorts()
+		res := <-resCh
+		if res.err == nil || res.raw != nil {
+			t.Fatalf("HolderRequest(ports) = %s, nil; want port_refused", res.raw)
+		}
+		var pe *proto.Error
+		if !errors.As(res.err, &pe) {
+			t.Fatalf("HolderRequest(ports) error = %T %v, want *proto.Error", res.err, res.err)
+		}
+		if pe.Code != "port_refused" || strings.Contains(pe.Message, "lie") ||
+			strings.ContainsAny(pe.Message, "\x1b\x07") || pe.Data != nil || pe.Hint != trustedPortHint {
+			t.Fatalf("HolderRequest(ports) got %+v", pe)
+		}
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -265,7 +310,6 @@ func TestAGuestResponseErrorIsTheGuests(t *testing.T) {
 		name string
 		run  func() error
 	}{
-		{"ports", func() error { _, err := conn.Ports(ctx, h.id); return err }},
 		{"peek", func() error { _, _, _, err := conn.Peek(ctx, h.id, 1024); return err }},
 		{"send", func() error { return conn.SendText(ctx, h.id, "hi", true) }},
 	}
@@ -279,6 +323,23 @@ func TestAGuestResponseErrorIsTheGuests(t *testing.T) {
 		if ue.Code != "guest_error" || !strings.HasPrefix(ue.Msg, "the sandbox says: ") ||
 			strings.ContainsAny(ue.Msg, "\x1b\x07") || ue.Data != nil || ue.Hint != trustedHint {
 			t.Fatalf("client %s got %+v", tc.name, ue)
+		}
+	}
+	{
+		errCh := make(chan error, 1)
+		go func() {
+			_, err := conn.Ports(ctx, h.id)
+			errCh <- err
+		}()
+		answerHostilePorts()
+		err := <-errCh
+		var ue *cl.UserError
+		if !errors.As(err, &ue) {
+			t.Fatalf("client ports error = %T %v, want *client.UserError", err, err)
+		}
+		if ue.Code != "port_refused" || strings.Contains(ue.Msg, "lie") ||
+			strings.ContainsAny(ue.Msg, "\x1b\x07") || ue.Data != nil || ue.Hint != trustedPortHint {
+			t.Fatalf("client ports got %+v", ue)
 		}
 	}
 }

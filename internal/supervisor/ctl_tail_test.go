@@ -68,8 +68,8 @@ func TestSystemStopDrainsTheControlReadersFinalClaim(t *testing.T) {
 	}
 	unlock.Do(s.evMu.Unlock)
 	m := lastRecord(t, h)
-	if m.Life.End == nil || m.Life.End.Kind != host.EndSystem || !m.Life.End.Claimed ||
-		!m.Status.Claimed || m.Status.ExitCode == nil || *m.Status.ExitCode != code || !m.Ended() {
-		t.Fatalf("system stop lost the final claim: life=%+v status=%+v guest=%+v", m.Life, m.Status, m.Guest)
+	if m.Life.End == nil || m.Life.End.Kind != host.EndSystem || m.Life.End.Claimed || m.Ended() ||
+		m.Guest == nil || m.Guest.ExitCode == nil || *m.Guest.ExitCode != code {
+		t.Fatalf("system stop lost the final claim or marked a system stop ended: life=%+v status=%+v guest=%+v", m.Life, m.Status, m.Guest)
 	}
 }

@@ -19,7 +19,7 @@ func TestSupervisedOnceFlowEndsItsExactGrantAndCanBeRegranted(t *testing.T) {
 	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = io.WriteString(w, "ok") }))
 	defer ts.Close()
 	const id = "onceend2"
-	_, proxyURL := startEgressSession(t, id, "shell", api.Policy{Preset: api.PresetLocked}, "", ts.Listener.Addr().String(), "")
+	_, proxyURL := startEgressSession(t, id, "shell", api.Policy{Preset: api.PresetLocked, Unknown: api.UnknownDeny}, "", ts.Listener.Addr().String(), "")
 	hc := proxyClient(t, proxyURL)
 	transport := hc.Transport.(*http.Transport)
 	transport.DisableKeepAlives = true
@@ -71,7 +71,7 @@ func TestSupervisedIdleTimedGrantEndsWithoutAFlow(t *testing.T) {
 	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = io.WriteString(w, "ok") }))
 	defer ts.Close()
 	const id = "idleend2"
-	_, _ = startEgressSession(t, id, "shell", api.Policy{Preset: api.PresetLocked}, "", ts.Listener.Addr().String(), "")
+	_, _ = startEgressSession(t, id, "shell", api.Policy{Preset: api.PresetLocked, Unknown: api.UnknownDeny}, "", ts.Listener.Addr().String(), "")
 	raw, err := host.HolderRequest(id, "policy.add", api.PolicyAddArgs{Allow: true, Target: "example.com", Until: time.Now().Add(300 * time.Millisecond)}, 5*time.Second)
 	if err != nil {
 		t.Fatal(err)

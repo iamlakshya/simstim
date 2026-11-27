@@ -123,7 +123,7 @@ func TestTheSupervisorAnswersFromTheTrustedManifest(t *testing.T) {
 	if _, err := host.HolderRequest(id, "rename", map[string]string{"name": "renamed"}, 3*time.Second); err != nil {
 		t.Fatal(err)
 	}
-	for op, code := range map[string]string{"hook": "forbidden", "secrets": "started", "debug.start": "unknown_op", "no-such-op": "unknown_op"} {
+	for op, code := range map[string]string{"hook": "forbidden", "secrets": "started", "debug.start": "bad_request", "debug.profile": "unknown_op", "no-such-op": "unknown_op"} {
 		_, err := host.HolderRequest(id, op, nil, 3*time.Second)
 		var pe *proto.Error
 		if !errors.As(err, &pe) || pe.Code != code || pe.Hint == "" {

@@ -46,7 +46,17 @@ func newDNSGuestSandbox(t *testing.T) *dnsGuestSandbox {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if real, err := filepath.EvalSymlinks(rootDir); err == nil {
+		rootDir = real
+	}
 	t.Cleanup(func() { _ = os.RemoveAll(rootDir) })
+	public, err := newTestPublicImageRoot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := installTestGuestImageRoots(rootDir, public); err != nil {
+		t.Fatal(err)
+	}
 
 	var lc net.ListenConfig
 	udpConn, err := lc.ListenPacket(context.Background(), "udp", "127.0.0.1:0")

@@ -23,7 +23,15 @@ func TestHeldActualProducerRetainsZeroWaiterQuestionAndPrivateDisplay(t *testing
 	value := "AuthoredExposure"
 	fixture := newUnknownAcceptedFixture(t, map[string]string{"EXPOSED": value})
 	wait, open := "5ms", "1m"
-	policy := api.Policy{Preset: api.PresetLocked, Unknown: api.UnknownAsk, LayerValues: api.LayerValues{Network: api.NetworkValues{Hold: &wait, AskOpen: &open}}}
+	policy, _, err := egress.MergeLayers([]api.Layer{{
+		Kind:        api.LayerSession,
+		Preset:      api.PresetLocked,
+		Unknown:     api.UnknownAsk,
+		LayerValues: api.LayerValues{Network: api.NetworkValues{Hold: &wait, AskOpen: &open}},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 	if err := fixture.c.request(ctx, egress.CtlPolicyUpdate, egress.PolicyUpdateArgs{Policy: policy}, nil); err != nil {

@@ -123,6 +123,8 @@ func TestAnInterruptedBootLeavesNoProcess(t *testing.T) {
 			sig := signals()
 			select {
 			case <-sent:
+			case err := <-ended:
+				t.Fatalf("supervisor exited before start: %v", err)
 			case <-time.After(10 * time.Second):
 				t.Fatal("no start")
 			}
@@ -150,10 +152,13 @@ func TestAnInterruptedBootLeavesNoProcess(t *testing.T) {
 // credit at once: the boot ends long before its deadline, and the guest
 // init is reaped.
 func TestAStopEndsAStartWriteThatWaits(t *testing.T) {
+	oldOpt := supervisorLinkOptions
+	supervisorLinkOptions = link.Options{Window: 4 << 10}
+	t.Cleanup(func() { supervisorLinkOptions = oldOpt })
 	signals := fakeSignals(t)
 	id, _ := plainSession(t)
 	m, _ := host.LoadManifest(id)
-	m.Env = append(m.Env, "BIG="+strings.Repeat("x", 3*link.DefaultWindow))
+	m.Env = append(m.Env, "BIG="+strings.Repeat("x", 3*(4<<10)))
 	if err := m.Save(); err != nil {
 		t.Fatal(err)
 	}
@@ -163,6 +168,8 @@ func TestAStopEndsAStartWriteThatWaits(t *testing.T) {
 	sig := signals()
 	select {
 	case <-sent:
+	case err := <-ended:
+		t.Fatalf("supervisor exited before start: %v", err)
 	case <-time.After(10 * time.Second):
 		t.Fatal("no start")
 	}

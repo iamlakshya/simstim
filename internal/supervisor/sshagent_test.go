@@ -101,7 +101,7 @@ func TestNamedSSHAgentRefusesAllMutatingProtocolOperations(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(owner.close)
-	client, raw := namedSSHClient(t, owner)
+	client, _ := namedSSHClient(t, owner)
 	_, private, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		t.Fatal(err)
@@ -116,6 +116,13 @@ func TestNamedSSHAgentRefusesAllMutatingProtocolOperations(t *testing.T) {
 	if client.Remove(listed[0]) == nil || client.RemoveAll() == nil || client.Lock([]byte("lock")) == nil || client.Unlock([]byte("lock")) == nil {
 		t.Fatal("a key mutation or lock succeeded")
 	}
+	raw, remote := net.Pipe()
+	deadline := time.Now().Add(5 * time.Second)
+	_ = raw.SetDeadline(deadline)
+	_ = remote.SetDeadline(deadline)
+	rawDone := make(chan struct{})
+	go func() { defer close(rawDone); _ = serveNamedSSHProtocol(&namedSSHConnection{owner: owner}, remote) }()
+	t.Cleanup(func() { _ = raw.Close(); _ = remote.Close(); <-rawDone })
 	for _, opcode := range []byte{1, 7, 8, 9, 10, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 255} {
 		if _, err := raw.Write([]byte{0, 0, 0, 1, opcode}); err != nil {
 			t.Fatal(err)

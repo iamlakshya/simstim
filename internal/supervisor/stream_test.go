@@ -249,6 +249,8 @@ func TestAGuestCloseIsNoStopForARealClient(t *testing.T) {
 	var st *link.Stream
 	select {
 	case st = <-h.g.holders:
+	case e := <-done:
+		t.Fatalf("attach ended before holder stream opened: %+v, %v", e.res, e.err)
 	case <-time.After(20 * time.Second):
 		t.Fatal("no holder stream")
 	}
@@ -289,12 +291,12 @@ func TestTheBootRecordComesOnceTheSocketListens(t *testing.T) {
 	if err := m.Save(); err != nil {
 		t.Fatal(err)
 	}
-	old := sandboxFor
-	sandboxFor = func(*host.Manifest) (sandbox, error) {
+	old, oldFake := sandboxFor, testFakeSandbox
+	sandboxFor, testFakeSandbox = func(*host.Manifest) (sandbox, error) {
 		time.Sleep(300 * time.Millisecond)
 		return g, nil
-	}
-	t.Cleanup(func() { sandboxFor = old })
+	}, true
+	t.Cleanup(func() { sandboxFor, testFakeSandbox = old, oldFake })
 	bad := make(chan string, 1)
 	stop := make(chan struct{})
 	go func() {

@@ -81,6 +81,16 @@ func (s *realEndedSandbox) Start(ctx context.Context) (net.Conn, error) {
 	if s.stopped || s.gate != nil {
 		return nil, net.ErrClosed
 	}
+	if err := os.MkdirAll(s.root, 0o700); err != nil {
+		return nil, err
+	}
+	public, err := newTestPublicImageRoot()
+	if err != nil {
+		return nil, err
+	}
+	if err := installTestGuestImageRoots(s.root, public); err != nil {
+		return nil, err
+	}
 	a, b := net.Pipe()
 	s.guest = b
 	s.gate = &realEndedGate{Conn: a, blocked: make(chan struct{}), released: make(chan struct{}), closed: make(chan struct{})}

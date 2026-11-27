@@ -41,7 +41,7 @@ func leaseFailureController(t *testing.T, rule api.Rule) *leaseFailureFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := &Supervisor{id: "failure2", m: &host.Manifest{Schema: 1, ID: "failure2", Name: "lease", Cwd: dir, CreatedAt: time.Now(), Armed: true, Layers: cleaned, Policy: &pol}, log: slog.New(slog.DiscardHandler)}
+	s := &Supervisor{id: "failure2", firstSaved: true, m: &host.Manifest{Schema: 1, ID: "failure2", Name: "lease", Cwd: dir, CreatedAt: time.Now(), Armed: true, Layers: cleaned, Policy: &pol}, log: slog.New(slog.DiscardHandler)}
 	f := &leaseFailureFixture{s: s, manifestPath: filepath.Join(dir, "manifest.json"), auditPath: filepath.Join(dir, "audit.jsonl")}
 	if err := s.m.SaveTo(f.manifestPath); err != nil {
 		t.Fatal(err)

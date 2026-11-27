@@ -86,12 +86,13 @@ func (f *hostile) Wait() error { <-f.done; return nil }
 
 // hostileRun is a supervisor whose guest is hostile.
 type hostileRun struct {
-	id    string
-	g     *hostile
-	ended chan error
-	ctl   *link.Stream
-	r     *bufio.Reader
-	w     *proto.Writer
+	id      string
+	g       *hostile
+	ended   chan error
+	ctl     *link.Stream
+	r       *bufio.Reader
+	w       *proto.Writer
+	ctlReqs chan proto.Request
 }
 
 // hostileStart starts a supervisor whose guest is hostile, for a session
@@ -111,9 +112,9 @@ func hostileStart(t *testing.T, env ...string) *hostileRun {
 		t.Fatal(err)
 	}
 	g := &hostile{disk: fixtureDiskResourcesV1(t), ctls: make(chan *link.Stream, 1), holders: make(chan *link.Stream, 64), done: make(chan struct{})}
-	old := sandboxFor
-	sandboxFor = func(*host.Manifest) (sandbox, error) { return g, nil }
-	t.Cleanup(func() { sandboxFor = old })
+	old, oldFake := sandboxFor, testFakeSandbox
+	sandboxFor, testFakeSandbox = func(*host.Manifest) (sandbox, error) { return g, nil }, true
+	t.Cleanup(func() { sandboxFor, testFakeSandbox = old, oldFake })
 	ended, fin := make(chan error, 1), make(chan struct{})
 	go func() {
 		ended <- Run(id)
@@ -131,10 +132,24 @@ func hostileStart(t *testing.T, env ...string) *hostileRun {
 	var st *link.Stream
 	select {
 	case st = <-g.ctls:
+	case err := <-ended:
+		t.Fatalf("supervisor exited before ctl stream: %v", err)
 	case <-time.After(10 * time.Second):
 		t.Fatal("no ctl stream")
 	}
-	return &hostileRun{id: id, g: g, ended: ended, ctl: st, r: bufio.NewReader(st), w: proto.NewWriter(st)}
+	return &hostileRun{id: id, g: g, ended: ended, ctl: st, r: bufio.NewReader(st), w: proto.NewWriter(st), ctlReqs: make(chan proto.Request, 16)}
+}
+
+// nextCtlReq returns the next non-stop ctl request received after answerStart.
+func (h *hostileRun) nextCtlReq(t *testing.T) proto.Request {
+	t.Helper()
+	select {
+	case req := <-h.ctlReqs:
+		return req
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for ctl request")
+		return proto.Request{}
+	}
 }
 
 // readReq reads the next request on the ctl stream.
@@ -174,10 +189,17 @@ func (h *hostileRun) answerStart(t *testing.T) {
 				return
 			}
 			var req proto.Request
-			if json.Unmarshal(f.Payload, &req) == nil && req.Op == proto.CtlStop {
+			if json.Unmarshal(f.Payload, &req) != nil {
+				continue
+			}
+			if req.Op == proto.CtlStop {
 				_ = h.w.WriteJSON(proto.TResponse, proto.Response{ID: req.ID, OK: true, Result: json.RawMessage(`{}`)})
 				_ = h.g.Kill()
 				return
+			}
+			select {
+			case h.ctlReqs <- req:
+			default:
 			}
 		}
 	}()
@@ -208,6 +230,9 @@ func testFolders(t *testing.T) string {
 	dir, err := os.MkdirTemp("/tmp", "sv")
 	if err != nil {
 		t.Fatal(err)
+	}
+	if real, err := filepath.EvalSymlinks(dir); err == nil {
+		dir = real
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(dir) })
 	for k, v := range map[string]string{"HOME": dir, "XDG_STATE_HOME": filepath.Join(dir, "state"),

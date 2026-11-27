@@ -209,16 +209,26 @@ func newBridgeHost(t *testing.T) (cl.Host, *bridgeTransport) {
 		tr.Drop()
 		bridgeMachines.Delete(id)
 	})
-	return cl.Host{Name: "box", Machine: &cl.Machine{Provider: provider, ID: id}}, tr
+	h := cl.Host{Name: "box", Machine: &cl.Machine{Provider: provider, ID: id}}
+	if err := cl.SaveHosts(context.Background(), []cl.Host{h}); err != nil {
+		t.Fatal(err)
+	}
+	return h, tr
 }
 
 // answerHolderAttach plays a wedged guest holder on the next holder stream:
 // it answers hello and attach, then stops reading input and writes no output.
-func answerHolderAttach(t *testing.T, h *hostileRun, live []byte) *link.Stream {
+func answerHolderAttach(t *testing.T, h *hostileRun, live []byte, early ...<-chan error) *link.Stream {
 	t.Helper()
+	var errCh <-chan error
+	if len(early) > 0 {
+		errCh = early[0]
+	}
 	var st *link.Stream
 	select {
 	case st = <-h.g.holders:
+	case err := <-errCh:
+		t.Fatalf("attach ended before holder stream opened: %v", err)
 	case <-time.After(15 * time.Second):
 		t.Fatal("no holder stream opened")
 	}
@@ -355,7 +365,7 @@ func TestAClientThatGoesBehindTheBridgeFreesItsStream(t *testing.T) {
 		if i == total-1 {
 			want = []byte("ATTACH-36-OK")
 		}
-		st := answerHolderAttach(t, h, want)
+		st := answerHolderAttach(t, h, want, attachDone)
 
 		var writerDone chan struct{}
 		if i == total-1 {

@@ -1,9 +1,16 @@
 package supervisor
 
 import (
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
 	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/json"
+	"encoding/pem"
 	"io"
+	"math/big"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -24,7 +31,37 @@ import (
 	"github.com/iamlakshya/simstim/internal/version"
 )
 
-func startEgressSession(t *testing.T, id, agentKind string, pol api.Policy, secretVal string, upstreamAddr, dumpOut string) (*Supervisor, string) {
+func newEgressOriginTLSServer(t *testing.T, h http.Handler, hosts ...string) (*httptest.Server, []byte) {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	tmpl := &x509.Certificate{
+		SerialNumber:          big.NewInt(1),
+		Subject:               pkix.Name{CommonName: hosts[0]},
+		DNSNames:              hosts,
+		NotBefore:             now.Add(-time.Hour),
+		NotAfter:              now.Add(24 * time.Hour),
+		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		BasicConstraintsValid: true,
+		IsCA:                  true,
+	}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := httptest.NewUnstartedServer(h)
+	ts.TLS = &tls.Config{
+		Certificates: []tls.Certificate{{Certificate: [][]byte{der}, PrivateKey: key}},
+	}
+	ts.StartTLS()
+	return ts, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
+}
+
+func startEgressSession(t *testing.T, id, agentKind string, pol api.Policy, secretVal string, upstreamAddr, dumpOut string, originCAPEM ...[]byte) (*Supervisor, string) {
 	t.Helper()
 	dir := testFolders(t)
 	proxyOut := filepath.Join(dir, "proxy.url")
@@ -35,6 +72,13 @@ func startEgressSession(t *testing.T, id, agentKind string, pol api.Policy, secr
 	testEgressEnv = []string{
 		"TEST_EGRESS_UPSTREAM=" + upstreamAddr,
 		"TEST_EGRESS_DUMPABLE_OUT=" + dumpOut,
+	}
+	if len(originCAPEM) > 0 && len(originCAPEM[0]) > 0 {
+		caPath := filepath.Join(dir, "origin-ca.pem")
+		if err := os.WriteFile(caPath, originCAPEM[0], 0o600); err != nil {
+			t.Fatal(err)
+		}
+		testEgressEnv = append(testEgressEnv, "TEST_EGRESS_ORIGIN_CA="+caPath)
 	}
 	t.Cleanup(func() {
 		testPlainProxy = oldProxy
@@ -68,7 +112,7 @@ func startEgressSession(t *testing.T, id, agentKind string, pol api.Policy, secr
 		Status:  host.Status{State: host.StateStarting, Since: t0},
 		Wall:    &host.WallRecord{Level: "none", Driver: driverPlain, Version: version.Version, At: t0},
 		Policy:  &pol,
-		Layers:  []api.Layer{{Kind: api.LayerSession, Preset: pol.Preset}},
+		Layers:  []api.Layer{{Kind: api.LayerSession, Preset: pol.Preset, Unknown: pol.Unknown}},
 		Secrets: secretNames,
 	}
 	if err := m.Save(); err != nil {
@@ -139,19 +183,19 @@ func proxyClient(t *testing.T, rawProxyURL string) *http.Client {
 }
 
 func TestSupervisedEgressLivePolicySecretScrubAndDumpable(t *testing.T) {
-	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	ts, originCA := newEgressOriginTLSServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok:" + r.Host))
-	}))
+	}), "registry.npmjs.org", "api.anthropic.com", "example.com")
 	defer ts.Close()
 
 	dumpOut := filepath.Join(t.TempDir(), "dumpable")
-	pol, _, err := egress.MergeLayers(nil)
+	pol, _, err := egress.MergeLayers([]api.Layer{{Kind: api.LayerSession, Unknown: api.UnknownDeny}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	secretVal := "fake-secret-for-tests-00000000"
-	sup, proxyURL := startEgressSession(t, "eglive23", "claude", pol, secretVal, ts.Listener.Addr().String(), dumpOut)
+	sup, proxyURL := startEgressSession(t, "eglive23", "claude", pol, secretVal, ts.Listener.Addr().String(), dumpOut, originCA)
 
 	m, err := host.LoadManifest("eglive23")
 	if err != nil || !m.Armed {
@@ -160,16 +204,24 @@ func TestSupervisedEgressLivePolicySecretScrubAndDumpable(t *testing.T) {
 
 	hc := proxyClient(t, proxyURL)
 
-	// 1. Balanced preset allows registry.npmjs.org and Claude's Egress host api.anthropic.com.
-	for _, h := range []string{"registry.npmjs.org", "api.anthropic.com"} {
-		resp, err := hc.Get("https://" + h + "/v1")
-		if err != nil {
-			t.Fatalf("GET https://%s/v1 failed: %v", h, err)
-		}
-		_ = resp.Body.Close()
-		if resp.StatusCode != http.StatusOK {
-			t.Fatalf("https://%s/v1 status = %d", h, resp.StatusCode)
-		}
+	// 1. Balanced preset allows registry.npmjs.org and Claude's Egress host api.anthropic.com
+	//    (with a valid Messages API request path under the model guard).
+	respPkg, err := hc.Get("https://registry.npmjs.org/v1")
+	if err != nil {
+		t.Fatalf("GET https://registry.npmjs.org/v1 failed: %v", err)
+	}
+	_ = respPkg.Body.Close()
+	if respPkg.StatusCode != http.StatusOK {
+		t.Fatalf("https://registry.npmjs.org/v1 status = %d", respPkg.StatusCode)
+	}
+	const modelReq = `{"model":"claude-sonnet-4-5","messages":[{"role":"user","content":"hi"}]}`
+	respModel, err := hc.Post("https://api.anthropic.com/v1/messages", "application/json", strings.NewReader(modelReq))
+	if err != nil {
+		t.Fatalf("POST https://api.anthropic.com/v1/messages failed: %v", err)
+	}
+	_ = respModel.Body.Close()
+	if respModel.StatusCode != http.StatusOK {
+		t.Fatalf("https://api.anthropic.com/v1/messages status = %d", respModel.StatusCode)
 	}
 
 	if runtime.GOOS == "linux" {
@@ -251,21 +303,22 @@ func TestSupervisedEgressLivePolicySecretScrubAndDumpable(t *testing.T) {
 }
 
 func TestEgressKilledFailsClosedAndStartsNoSecondProcess(t *testing.T) {
-	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	ts, originCA := newEgressOriginTLSServer(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
-	}))
+	}), "api.anthropic.com")
 	defer ts.Close()
 
-	pol, _, err := egress.MergeLayers(nil)
+	pol, _, err := egress.MergeLayers([]api.Layer{{Kind: api.LayerSession, Unknown: api.UnknownDeny}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	sup, proxyURL := startEgressSession(t, "egkill23", "claude", pol, "", ts.Listener.Addr().String(), "")
+	sup, proxyURL := startEgressSession(t, "egkill23", "claude", pol, "", ts.Listener.Addr().String(), "", originCA)
 	gotAlerts := alertsTo(t)
 	hc := proxyClient(t, proxyURL)
 
 	// Confirm egress works before killing it.
-	resp, err := hc.Get("https://api.anthropic.com/v1")
+	const modelReq = `{"model":"claude-sonnet-4-5","messages":[{"role":"user","content":"hi"}]}`
+	resp, err := hc.Post("https://api.anthropic.com/v1/messages", "application/json", strings.NewReader(modelReq))
 	if err != nil || resp.StatusCode != http.StatusOK {
 		t.Fatalf("before kill, api.anthropic.com = %v, %v", resp, err)
 	}
@@ -288,7 +341,7 @@ func TestEgressKilledFailsClosedAndStartsNoSecondProcess(t *testing.T) {
 	waitAlerts(t, gotAlerts, alerts.SandboxError)
 
 	// New flows fail closed immediately, and NO second egress process starts.
-	if resp2, err := hc.Get("https://api.anthropic.com/v1"); err == nil && resp2.StatusCode == http.StatusOK {
+	if resp2, err := hc.Post("https://api.anthropic.com/v1/messages", "application/json", strings.NewReader(modelReq)); err == nil && resp2.StatusCode == http.StatusOK {
 		_ = resp2.Body.Close()
 		t.Fatal("flow succeeded after egress was killed")
 	}

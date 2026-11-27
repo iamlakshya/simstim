@@ -4,13 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/iamlakshya/simstim/internal/alerts"
-	"github.com/iamlakshya/simstim/internal/brand"
-	"github.com/iamlakshya/simstim/internal/guest"
-	"github.com/iamlakshya/simstim/internal/host"
-	"github.com/iamlakshya/simstim/internal/paths"
-	"github.com/iamlakshya/simstim/internal/proc/proctest"
-	"github.com/iamlakshya/simstim/internal/version"
+	"net"
+	"net/netip"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -20,6 +15,15 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/iamlakshya/simstim/internal/alerts"
+	"github.com/iamlakshya/simstim/internal/brand"
+	"github.com/iamlakshya/simstim/internal/egress"
+	"github.com/iamlakshya/simstim/internal/guest"
+	"github.com/iamlakshya/simstim/internal/host"
+	"github.com/iamlakshya/simstim/internal/paths"
+	"github.com/iamlakshya/simstim/internal/proc/proctest"
+	"github.com/iamlakshya/simstim/internal/version"
 )
 
 // The tests of this binary start it again as a guest init and a holder,
@@ -39,6 +43,10 @@ func TestMain(m *testing.M) {
 				}
 				os.Exit(0)
 			}
+			if err := prepareTestGuestImageTrust(); err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				os.Exit(1)
+			}
 			hostileInit(os.Args[2:])
 			if err := guest.Run(); err != nil {
 				fmt.Fprintln(os.Stderr, err)
@@ -51,9 +59,59 @@ func TestMain(m *testing.M) {
 				os.Exit(1)
 			}
 			os.Exit(0)
+		case "egress":
+			if err := runTestEgress(os.Args[2]); err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				os.Exit(1)
+			}
+			os.Exit(0)
 		}
 	}
 	os.Exit(m.Run())
+}
+
+func runTestEgress(id string) error {
+	var opt egress.Options
+	if err := configureTestEgressRoots(&opt); err != nil {
+		return err
+	}
+	up := os.Getenv("TEST_EGRESS_UPSTREAM")
+	lookupLog := os.Getenv("TEST_EGRESS_LOOKUP_LOG")
+	if up != "" || lookupLog != "" {
+		var logMu sync.Mutex
+		opt.Dialer = &egress.Dialer{
+			Lookup: func(_ context.Context, host string) ([]netip.Addr, error) {
+				if lookupLog != "" {
+					logMu.Lock()
+					if f, err := os.OpenFile(lookupLog, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600); err == nil {
+						_, _ = f.WriteString(host + "\n")
+						_ = f.Close()
+					}
+					logMu.Unlock()
+				}
+				if host == "metadata.internal" {
+					return []netip.Addr{netip.MustParseAddr("169.254.169.254")}, nil
+				}
+				return []netip.Addr{netip.MustParseAddr("203.0.113.10")}, nil
+			},
+			DialTCP: func(ctx context.Context, addr netip.AddrPort) (net.Conn, error) {
+				var d net.Dialer
+				if up != "" {
+					return d.DialContext(ctx, "tcp", up)
+				}
+				return d.DialContext(ctx, "tcp", addr.String())
+			},
+		}
+	}
+	if out := os.Getenv("TEST_EGRESS_DUMPABLE_OUT"); out != "" {
+		opt.Now = func() time.Time {
+			if d, err := egress.Dumpable(); err == nil {
+				_ = os.WriteFile(out, []byte(strconv.Itoa(d)), 0o600)
+			}
+			return time.Now()
+		}
+	}
+	return egress.RunWithOptions(id, opt)
 }
 
 // The hostile guest inits that a test asks for with initArgs.

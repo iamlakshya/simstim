@@ -2,11 +2,13 @@ package supervisor
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
 	"github.com/iamlakshya/simstim/internal/api"
 	"github.com/iamlakshya/simstim/internal/egress"
+	"github.com/iamlakshya/simstim/internal/proto"
 )
 
 func TestFreshNextStartRetiresOldShapeAndAllowsNewLength(t *testing.T) {
@@ -47,7 +49,10 @@ func TestMissingNewBoundFormatAndUnauthorisedModeFlipRefuse(t *testing.T) {
 	retained, _ := validPublicMintFixture()
 	fresh.Intent = api.SecretDeliveryIntent{Version: api.SecretDeliveryIntentV1, Modes: map[string]api.SecretMode{"CREDENTIAL": api.SecretModeExposed}}
 	fresh.Values["CREDENTIAL"] = api.Secret("private-input-marker")
-	if _, err := boundStartupArgs(context.Background(), egress.InitArgs{}, retained, fresh, nil); err == nil || !strings.Contains(err.Error(), "new sandbox") || strings.Contains(err.Error(), "private-input-marker") {
-		t.Fatal("public mismatch authorised exposure or gave an inaccurate recovery hint")
+	_, err := boundStartupArgs(context.Background(), egress.InitArgs{}, retained, fresh, nil)
+	var pe *proto.Error
+	if !errors.As(err, &pe) || pe.Code != "secret_intent" || !strings.Contains(pe.Hint, "new sandbox") ||
+		strings.Contains(pe.Message, "private-input-marker") || strings.Contains(pe.Hint, "private-input-marker") {
+		t.Fatalf("public mismatch authorised exposure or gave an inaccurate recovery hint: %v", err)
 	}
 }
