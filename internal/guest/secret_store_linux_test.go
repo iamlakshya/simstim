@@ -18,7 +18,7 @@ import (
 
 func ownedStoreDirectories(t *testing.T) (string, []string) {
 	t.Helper()
-	if os.Geteuid() != 0 && (os.Geteuid() != AgentUID || os.Getegid() != AgentGID) {
+	if _, err := agentProcess(); err != nil {
 		t.Skip("the production owned runner requires root or the fixed agent account")
 	}
 	if _, err := os.Stat("/usr/bin/python3"); err != nil {

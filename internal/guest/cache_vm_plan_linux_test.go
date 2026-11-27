@@ -26,7 +26,7 @@ func TestVMKeptCachesUsePrivateSessionDiskPlanAndNoProgramMount(t *testing.T) {
 		}
 		mounts := map[string]string{}
 		for _, call := range *calls {
-			if strings.HasPrefix(call.target, filepath.Join(fs.root, "home/agent")+string(filepath.Separator)) {
+			if call.flags&unix.MS_REMOUNT == 0 && strings.HasPrefix(call.target, filepath.Join(fs.root, "home/agent")+string(filepath.Separator)) {
 				mounts[call.target] = call.source
 			}
 		}

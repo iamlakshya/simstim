@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"testing"
 
@@ -15,7 +16,18 @@ import (
 
 func unwalledGuestFixtureV1(t *testing.T) *Init {
 	t.Helper()
-	base := t.TempDir()
+	parent := ""
+	if runtime.GOOS != "windows" {
+		parent = "/tmp"
+	}
+	base, err := os.MkdirTemp(parent, "guest-unwalled-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if real, err := filepath.EvalSymlinks(base); err == nil {
+		base = real
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(base) })
 	root, err := os.OpenRoot(base)
 	if err != nil {
 		t.Fatal(err)
