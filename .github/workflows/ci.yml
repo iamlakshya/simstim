@@ -16,7 +16,7 @@ concurrency:
 
 jobs:
   test:
-    needs: [reproducible, gvisor-repro]
+    # Unit, race, coverage and offline script tests: no image artifacts.
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -120,6 +120,36 @@ jobs:
             echo "::error::docs/reference is stale. Run just docs and commit the result."
             exit 1
           fi
+
+  test-images:
+    # Two complete release builds from both native image pairs, then the
+    # snapshot that the install matrix checks.
+    needs: [reproducible, gvisor-repro]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.27.4'
+          cache: false
+      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
+        with:
+          version: 0.17.0
+          use-cache: false
+      - name: Build the host helpers and the shadow terminal (the client embeds them)
+        run: |
+          cmd/userns/build.sh
+          # Explicit feed preparation follows the actual C/cohort producer.
+          go run -tags="$(sh scripts/go-build-tags.sh)" ./cmd/feedgen --output internal/egress/rules/feed/snapshot.json
+          for arch in amd64 arm64; do
+            CGO_ENABLED=0 GOOS=linux GOARCH=$arch go build -tags="$(sh scripts/go-build-tags.sh)" -trimpath -o internal/client/helpers/host-linux-$arch ./cmd/host
+          done
+          (cd vt && zig build linux)
+          for arch in amd64 arm64; do cp vt/zig-out/linux/shadow-vt-$arch internal/client/helpers/vt-linux-$arch; done
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: default-repro-amd64
@@ -426,7 +456,7 @@ jobs:
           retention-days: 1
 
   install:
-    needs: test
+    needs: test-images
     # install.sh against a local, signed snapshot release: it must install a
     # good release and refuse changed checksums, signatures or archives.
     strategy:

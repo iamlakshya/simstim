@@ -78,14 +78,15 @@ the guest assets must match. The script retains its source-pin checks, logs
 and hash evidence. It never substitutes a report JSON, image tag or emulated
 preparation for either native artifact pair.
 
-CI uses the existing reproducibility job as the two-architecture native image
-matrix. The existing test job receives both checked pairs and runs the two
-complete release passes after its normal race, coverage and source checks.
-The matrix preserves both image pairs and their native/source evidence in
-artifacts; it performs no registry publication.
+In CI, the `reproducible` and `gvisor-repro` jobs are the two-architecture
+native image matrices. They keep both image pairs and their native and source
+evidence as artifacts, and publish nothing to a registry. The `test-images`
+job receives both checked pairs and runs the two complete release passes. The
+`test` job, with the race, coverage and source checks, does not wait for the
+images.
 
-The Linux test job then packages the actual cross-platform snapshot for the
-existing Linux and macOS install matrix. `INSTALL_SNAPSHOT_DIR` lends those
+`test-images` then packages the actual cross-platform snapshot for the
+existing Linux and macOS install matrix (the `install` job). `INSTALL_SNAPSHOT_DIR` lends those
 original snapshot archives to `scripts/test-install.sh`; its throwaway-key,
 signature, checksum, tamper and native install assertions still run on each
 platform. Without that input the script performs its original local snapshot

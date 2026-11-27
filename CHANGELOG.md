@@ -4,6 +4,8 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ## [Unreleased]
 
+- CI's required `test` job no longer waits for the native image builds, so a failed image build cannot skip the unit tests. The new `test-images` job runs the two complete release builds from the image pairs, and the `install` matrix follows it.
+
 - Fix launcher palette order, host-name casing in error toasts, quick-start folder cleanup on reopen, new-session backend settings and new-host wizard saves; fix `hosts.toml` lock waits and race-detector exit delays in local Git helpers; add missing CLI examples for `host default`, `policy` and `ssh-config`.
 
 - Keep offline compiler selection exact, preserve prepared-input refusal before tool access, and check complete build tags in the existing source-archive fixtures.
