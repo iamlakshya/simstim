@@ -79,15 +79,21 @@ func (r *testReader) seen(text string) bool {
 // readSplit feeds out to new readers, in two parts cut at many places and
 // in parts of one byte, and checks whether each would refuse a paste of
 // text: because it recorded the text, or because it lost track of a write.
+// Each part goes in as it is, and again with the attach's check for C1
+// controls, which must read the same.
 func readSplit(t *testing.T, name, out, text string, want bool) {
 	t.Helper()
 	check := func(how string, parts ...string) {
-		r := newTestReader()
+		r, checked := newTestReader(), newTestReader()
 		for _, p := range parts {
 			r.observe(t.Context(), []byte(p))
+			checked.observeChecked(t.Context(), []byte(p), c1Free([]byte(p)))
 		}
 		if got := r.seen(text) || r.orphaned(); got != want {
 			t.Errorf("%s, %s: refused = %v, want %v", name, how, got, want)
+		}
+		if got := checked.seen(text) || checked.orphaned(); got != want {
+			t.Errorf("%s, %s, checked: refused = %v, want %v", name, how, got, want)
 		}
 	}
 	for i := 0; i <= len(out); i += max(1, len(out)/61) {

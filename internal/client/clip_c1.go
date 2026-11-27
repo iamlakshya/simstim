@@ -65,6 +65,12 @@ func c1Index(b []byte) int {
 	return -1
 }
 
+// c1Free reports whether b holds no C1 control and no character that its
+// end cuts, so that xterm's reading takes b as it is. The attach checks
+// each part of the output once, for the paste guard and the notifications
+// both, rather than scan the same bytes twice.
+func c1Free(b []byte) bool { return c1Index(b) < 0 }
+
 // c1Translator turns each C1 control of xterm's reading into its 7-bit ESC
 // form, in a stream that arrives in parts.
 type c1Translator struct {
@@ -107,4 +113,14 @@ func (t *c1Translator) translate(b []byte) []byte {
 		i += j
 	}
 	return t.out
+}
+
+// translateChecked is translate for bytes that the caller has checked:
+// free says that c1Free(b) holds. With no character waiting, translate
+// would return b itself, so b goes on without a second scan.
+func (t *c1Translator) translateChecked(b []byte, free bool) []byte {
+	if free && len(t.pend) == 0 {
+		return b
+	}
+	return t.translate(b)
 }

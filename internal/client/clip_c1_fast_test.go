@@ -42,6 +42,14 @@ func assertC1EverySplit(t *testing.T, input, want []byte) {
 		if !bytes.Equal(got, want) || len(tr.pend) != 0 {
 			t.Fatalf("split %d of %x: got %x, pending %x; want %x", cut, input, got, tr.pend, want)
 		}
+		// The attach checks each part once, and the translator trusts it.
+		var checked c1Translator
+		a, b := input[:cut], input[cut:]
+		got = bytes.Clone(checked.translateChecked(a, c1Free(a)))
+		got = append(got, checked.translateChecked(b, c1Free(b))...)
+		if !bytes.Equal(got, want) || len(checked.pend) != 0 {
+			t.Fatalf("checked split %d of %x: got %x, pending %x; want %x", cut, input, got, checked.pend, want)
+		}
 	}
 }
 

@@ -40,17 +40,22 @@ func TestNotificationFastStateMatchesByteState(t *testing.T) {
 	streams = append(streams, all)
 	for i, stream := range streams {
 		for _, chunk := range []int{1, 2, 3, 7, len(stream)} {
-			var fast, slow outStream
+			var fast, checked, slow outStream
 			for start := 0; start < len(stream); start += chunk {
 				part := stream[start:min(len(stream), start+chunk)]
 				fast.feed(part)
+				checked.feedChecked(part, c1Free(part))
 				for _, c := range part {
 					slow.step(c)
 				}
 				if !sameNotifyState(&fast, &slow) {
 					t.Fatalf("stream%d chunk%d offset%d: fast=(%d,%d,%x) slow=(%d,%d,%x)", i, chunk, start, fast.raw, fast.xterm, fast.c1.pend, slow.raw, slow.xterm, slow.c1.pend)
 				}
+				if !sameNotifyState(&checked, &slow) {
+					t.Fatalf("stream%d chunk%d offset%d: checked=(%d,%d,%x) slow=(%d,%d,%x)", i, chunk, start, checked.raw, checked.xterm, checked.c1.pend, slow.raw, slow.xterm, slow.c1.pend)
+				}
 				checkNotifyBuffers(t, &fast)
+				checkNotifyBuffers(t, &checked)
 				checkNotifyBuffers(t, &slow)
 			}
 		}
@@ -60,12 +65,14 @@ func TestNotificationFastStateMatchesByteState(t *testing.T) {
 		for x := range vtStates {
 			for _, stream := range streams {
 				fast := outStream{raw: raw, xterm: x}
+				checked := outStream{raw: raw, xterm: x}
 				slow := outStream{raw: raw, xterm: x}
 				fast.feed(stream)
+				checked.feedChecked(stream, c1Free(stream))
 				for _, c := range stream {
 					slow.step(c)
 				}
-				if !sameNotifyState(&fast, &slow) {
+				if !sameNotifyState(&fast, &slow) || !sameNotifyState(&checked, &slow) {
 					t.Fatalf("initial(%d,%d), stream%x differs", raw, x, stream)
 				}
 			}

@@ -44,8 +44,16 @@ func (s *outStream) stepX(c byte) {
 }
 
 // feed advances a whole frame when no notification needs an exact boundary.
-func (s *outStream) feed(b []byte) {
+func (s *outStream) feed(b []byte) { s.feedChecked(b, false) }
+
+// feedChecked is feed for a frame that the caller may have checked: free
+// says that c1Free(b) holds, and false says nothing.
+func (s *outStream) feedChecked(b []byte, free bool) {
 	s.raw = notifyAdvance(&vtNext, s.raw, b)
+	if free && len(s.c1.pend) == 0 {
+		s.xterm = notifyAdvance(&vtNextX, s.xterm, b)
+		return
+	}
 	for len(b) > 0 {
 		if len(s.c1.pend) > 0 {
 			s.stepX(b[0])
@@ -94,11 +102,14 @@ func notifyAdvance(table vtTable, state uint8, b []byte) uint8 {
 }
 
 // writeOutput writes show byte-for-byte without modification, flushing any
-// deferred OSC 777 notifications at the first ground-state boundary.
+// deferred OSC 777 notifications at the first ground-state boundary. The
+// notifications and the paste guard share one check of the frame for C1
+// controls, the costliest of their scans, rather than make one each.
 func (a *attacher) writeOutput(ctx context.Context, show []byte) {
 	if len(a.pendingNotify) == 0 {
-		a.outStream.feed(show)
-		a.write(ctx, show)
+		free := c1Free(show)
+		a.outStream.feedChecked(show, free)
+		a.writeChecked(ctx, show, free)
 		a.writeHeld(ctx)
 		return
 	}

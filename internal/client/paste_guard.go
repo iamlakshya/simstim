@@ -115,12 +115,16 @@ func (g *pasteGuard) detach(ctx context.Context) {
 
 // observe reads bytes on their way to the terminal, with every reading,
 // and notes the writes in them before it returns.
-func (g *pasteGuard) observe(ctx context.Context, b []byte) {
+func (g *pasteGuard) observe(ctx context.Context, b []byte) { g.observeChecked(ctx, b, false) }
+
+// observeChecked is observe for bytes that the caller may have checked:
+// free says that c1Free(b) holds, and false says nothing.
+func (g *pasteGuard) observeChecked(ctx context.Context, b []byte, free bool) {
 	if g == nil {
 		return
 	}
 	for _, r := range g.readers {
-		r.observe(b)
+		r.observeChecked(b, free)
 	}
 	g.flush(ctx)
 }

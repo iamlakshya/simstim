@@ -76,9 +76,13 @@ func (r *clipReader) idle() bool {
 }
 
 // observe reads bytes on their way to the terminal.
-func (r *clipReader) observe(b []byte) {
+func (r *clipReader) observe(b []byte) { r.observeChecked(b, false) }
+
+// observeChecked is observe for bytes that the caller may have checked:
+// free says that c1Free(b) holds, and false says nothing.
+func (r *clipReader) observeChecked(b []byte, free bool) {
 	if r.xterm {
-		b = r.c1.translate(b)
+		b = r.c1.translateChecked(b, free)
 	}
 	next, next9D := -2, -2 // where the next "]" and 0x9D are: -2 not known, -1 none
 	if r.xterm {

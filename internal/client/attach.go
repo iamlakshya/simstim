@@ -200,9 +200,13 @@ func Attach(ctx context.Context, o AttachOptions) (AttachResult, error) {
 // write sends bytes to the terminal: the client's own, and the session's
 // title and modes that it sends again. The paste guard reads every byte that
 // the terminal gets, and only reads it.
-func (a *attacher) write(ctx context.Context, b []byte) {
+func (a *attacher) write(ctx context.Context, b []byte) { a.writeChecked(ctx, b, false) }
+
+// writeChecked is write for bytes that the caller may have checked: free
+// says that c1Free(b) holds, and false says nothing.
+func (a *attacher) writeChecked(ctx context.Context, b []byte, free bool) {
 	if len(b) > 0 {
-		a.guard.observe(ctx, b)
+		a.guard.observeChecked(ctx, b, free)
 		_, _ = a.o.Out.Write(b)
 	}
 }
