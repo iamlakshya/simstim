@@ -251,6 +251,15 @@ fi
 ''',
                 "wrapper": r'''out=$(mktemp)
 trap 'rm -f "$out"' EXIT
+if [ -n "${BENCH_RUN_FAIL_SIDE:-}" ] && [ -n "${BENCH_RUN_FAIL_PACKAGE:-}" ]; then
+    case "$0" in
+        */bin-"${BENCH_RUN_FAIL_SIDE}"/"${BENCH_RUN_FAIL_PACKAGE}".test)
+            printf 'goos: linux\ngoarch: amd64\npkg: example.invalid/%s\n--- FAIL: BenchmarkBroken\n    broken_test.go:12: fixture runtime failure on %s\nFAIL\n' \
+                "$BENCH_RUN_FAIL_PACKAGE" "$BENCH_RUN_FAIL_SIDE"
+            printf 'fixture benchmark stderr: %s %s\n' "$BENCH_RUN_FAIL_SIDE" "$BENCH_RUN_FAIL_PACKAGE" >&2
+            exit 1 ;;
+    esac
+fi
 "$BENCH_FIXTURE" "$@" -test.benchtime 1x >"$out"
 case "$0:${BENCH_SAMPLE_COLLISION:-}" in
     */bin-head/client.test:package)
@@ -420,6 +429,28 @@ cat "$out"
                                         for package in PACKAGES])
         self.assertIn("base benchmark binary for ./internal/ring is missing or cannot be executed",
                       run["result"].stderr)
+
+
+    @unittest.skipUnless(shutil.which("bash"), "the benchmark script needs Bash")
+    def test_benchmark_runtime_failure_reports_package_output_and_hint(self):
+        for side in ("base", "head"):
+            with self.subTest(side=side):
+                run = self.script_run(BENCH_RUN_FAIL_SIDE=side, BENCH_RUN_FAIL_PACKAGE="host")
+                self.assertNotEqual(run["result"].returncode, 0)
+                self.assertEqual(run["stats"], [])
+                self.assert_durable_status(run)
+                stderr = run["result"].stderr
+                self.assertIn(f"bench: {side} benchmark package ./internal/host failed (exit 1).", stderr)
+                self.assertIn("--- FAIL: BenchmarkBroken", stderr)
+                self.assertIn(f"fixture runtime failure on {side}", stderr)
+                self.assertIn(f"fixture benchmark stderr: {side} host", stderr)
+                self.assertIn("Try:", stderr)
+                self.assertIn("./internal/host", stderr)
+                self.assertIn(f"fail-{side}-host.stdout", run["evidence_files"])
+                self.assertIn(f"fail-{side}-host.stderr", run["evidence_files"])
+                self.assertIn(b"--- FAIL: BenchmarkBroken", run["evidence_files"][f"fail-{side}-host.stdout"])
+                self.assertIn(f"fixture benchmark stderr: {side} host".encode(),
+                              run["evidence_files"][f"fail-{side}-host.stderr"])
 
 
     @unittest.skipUnless(shutil.which("bash"), "the benchmark script needs Bash")

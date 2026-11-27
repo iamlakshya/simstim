@@ -221,11 +221,35 @@ check_binaries "$evidence/bin-base" base
 check_binaries "$evidence/bin-head" head
 
 run() { # run <bin dir> <out file> <tree> <benchmarks> <side>
-    local bin_dir=$1 output=$2 tree=$3 pattern=$4 side=$5 pkg bench_bin
+    local bin_dir=$1 output=$2 tree=$3 pattern=$4 side=$5 pkg bench_bin run_out run_err run_status fail_base
+    run_out="$work/run.stdout"
+    run_err="$work/run.stderr"
     for pkg in "${pkgs[@]}"; do
         bench_bin="$bin_dir/$(basename "$pkg").test"
         require_binary "$side" "$pkg" "$bench_bin"
-        (cd "$tree/$pkg" && "$bench_bin" -test.run '^$' -test.bench "$pattern" -test.benchmem -test.count 1 -test.benchtime 300ms) >>"$output"
+        run_status=0
+        (cd "$tree/$pkg" && "$bench_bin" -test.run '^$' -test.bench "$pattern" -test.benchmem -test.count 1 -test.benchtime 300ms) >"$run_out" 2>"$run_err" || run_status=$?
+        cat "$run_out" >>"$output"
+        if [ "$run_status" -ne 0 ]; then
+            fail_base="$evidence/fail-$side-$(basename "$pkg")"
+            cp "$run_out" "$fail_base.stdout"
+            cp "$run_err" "$fail_base.stderr"
+            echo
+            echo "bench: $side benchmark package $pkg failed (exit $run_status)." >&2
+            if [ -s "$run_out" ]; then
+                echo "bench: last lines of stdout:" >&2
+                tail -n 30 "$run_out" >&2
+            fi
+            if [ -s "$run_err" ]; then
+                echo "bench: last lines of stderr:" >&2
+                tail -n 30 "$run_err" >&2
+            fi
+            printf 'Try: run that package'\''s benchmarks directly with `go test -tags="%s" -run '\''^$'\'' -bench . %s`, fix the failure, then run this check again.\n' "$go_build_tags" "$pkg" >&2
+            return "$run_status"
+        fi
+        if [ -s "$run_err" ]; then
+            cat "$run_err" >&2
+        fi
     done
 }
 
