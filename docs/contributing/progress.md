@@ -19,9 +19,12 @@ States:
 
 ## Current focus
 
-- **Make the branch build and test cleanly.** The unfinished work from the integration stack is on the branch, and package by package its tests are being made to pass. Egress, image and supply, host, the launcher and the docs generator are done. The CLI, the client, the supervisor and the guest are in progress.
-- **Set up from a clean checkout.** Setup and the build use the Go toolchain that `go.mod` pins, with no private build steps.
-- **CI.** Lint, the Windows tests, the end-to-end tests against a Docker host, the attach benchmark and the image builds are being fixed, one job at a time.
+- **Make the branch build and test cleanly.** The unfinished work from the integration stack is on the branch, and package by package its tests are being made to pass on macOS and Linux.
+  - Done: egress, image and supply, host, the launcher and the docs generator, and the CLI.
+  - In progress: the client, the supervisor and guest, and the wall backends.
+- **CI runs the unit tests on Linux.** The image builds are reproducible on amd64 and arm64, and the release comparison works from a plain checkout. The secrets scan of the branch's whole history is clean. Lint and the Windows tests are still being fixed.
+- **Attach.** A slowdown in the attach output path is fixed: each frame is checked once, and parsed in place.
+- **Real hosts.** A Linux test runner and two Linux test hosts with nested virtualisation run the Linux-only tests and the host flows.
 - **Next.** The daily-use path, end to end, on a real Linux host and on a Mac as a host: add a host, start a session with Claude Code or Codex, attach and detach, move files, then stop and destroy.
 
 ## Every task
