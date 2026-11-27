@@ -131,8 +131,10 @@ func TestRepeatedAttachResumeHasOneCurrentTierReader(t *testing.T) {
 			}
 			go tierCommand(program.Init(), out)
 			synctest.Wait()
-			if n := active.Load(); n != 1 {
-				t.Fatalf("resume %d has %d current tier readers, want one", cycle, n)
+			// One tier question reader and one grant question reader share tierWait.
+			const wantReaders = 2
+			if n := active.Load(); n != wantReaders {
+				t.Fatalf("resume %d has %d current question readers, want %d", cycle, n, wantReaders)
 			}
 			answered := make(chan tierAnswer, 1)
 			go func() {
@@ -166,7 +168,7 @@ func TestRepeatedAttachResumeHasOneCurrentTierReader(t *testing.T) {
 					}
 				}
 			}
-			if m.modal != nil || active.Load() != 1 {
+			if m.modal != nil || active.Load() != wantReaders {
 				t.Fatalf("resume %d kept a sheet or duplicate reader: modal=%T readers=%d", cycle, m.modal, active.Load())
 			}
 		}

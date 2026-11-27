@@ -51,6 +51,9 @@ func (m *Model) openSearch() tea.Cmd {
 }
 
 func (m *Model) openQuickStart() tea.Cmd {
+	if m.prompt != nil {
+		m.prompt.stopFolders()
+	}
 	return m.resolveNewHost("", newHostQuick, nil, client.NewArgs{}, false)
 }
 

@@ -92,11 +92,8 @@ func TestTheLauncherForgetsAndCleansUnderOneLock(t *testing.T) {
 	var between error
 	old := afterLauncherForget
 	afterLauncherForget = func(name string) {
-		_, unlock, err := client.LockHost(context.Background(), name, "host create")
-		if err == nil {
-			unlock()
-		}
-		between = err
+		again := client.Host{Name: name, SSH: name}
+		between = client.UpdateHosts(context.Background(), client.HostChange{Kind: "host create", Now: &again})
 	}
 	t.Cleanup(func() { afterLauncherForget = old })
 	warn, err := realBackend{}.UpdateHosts(client.HostChange{Kind: "the launcher", Was: &box})

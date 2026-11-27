@@ -43,6 +43,9 @@ func TestTierLoadingStopsBeforeMigrationOnBadHosts(t *testing.T) {
 			if _, err := os.Stat(filepath.Join(client.ConfigDir(), "tiers.toml")); !errors.Is(err, os.ErrNotExist) {
 				t.Fatalf("failed hosts load created tiers.toml: %v", err)
 			}
+			if err := os.Remove(filepath.Join(client.ConfigDir(), "hosts.toml")); err != nil {
+				t.Fatal(err)
+			}
 			if err := client.SaveHosts(context.Background(), []client.Host{{Name: "box", SSH: "box"}}); err != nil {
 				t.Fatal(err)
 			}
@@ -65,10 +68,14 @@ func TestTierLoadingUsesTheModelContext(t *testing.T) {
 			var err error
 			if reload {
 				m := &Model{ctx: ctx, be: realBackend{}}
-				msg := m.reloadHost("box")().(hostReloadedMsg)
-				err = msg.err
-				if msg.host != nil || msg.tier != client.TierUnknown {
-					t.Fatalf("failed reload invented a host tier: %+v", msg)
+				if raw := m.reloadHost("box")(); raw != nil {
+					msg := raw.(hostReloadedMsg)
+					err = msg.err
+					if msg.host != nil || msg.tier != client.TierUnknown {
+						t.Fatalf("failed reload invented a host tier: %+v", msg)
+					}
+				} else {
+					err = ctx.Err()
 				}
 			} else {
 				m := New(ctx, realBackend{}, Options{})

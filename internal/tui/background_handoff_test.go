@@ -263,6 +263,7 @@ func handoffCommandCases() []handoffCommandCase {
 		}},
 		{"test host", "ping", func(m *Model, h *hostConn, _ *wizard) tea.Cmd { return m.testHost(h) }},
 		{"quick folders", "folders", func(m *Model, h *hostConn, _ *wizard) tea.Cmd {
+			m.modal = nil
 			m.prompt = &promptState{mode: promptNew, host: h.name(), in: newInput("~/src", "")}
 			return m.askFolders()
 		}},

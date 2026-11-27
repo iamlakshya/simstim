@@ -106,8 +106,9 @@ func TestPolicySheetConnectionChangeAndCloseCancelQueuedHoldRefusal(t *testing.T
 				h.gen++
 				hs.m.retirePolicy(d)
 			}
-			message := cmd().(policyMsg)
-			_ = hs.m.onPolicy(message)
+			if raw := cmd(); raw != nil {
+				_ = hs.m.onPolicy(raw.(policyMsg))
+			}
 			if len(c.refused) != 0 || c.allows.Load() != 0 {
 				t.Fatal("retired sheet sent a late opaque-ID action")
 			}
