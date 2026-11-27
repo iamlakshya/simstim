@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"time"
 
 	"github.com/iamlakshya/simstim/internal/cachefs"
@@ -71,25 +70,11 @@ func (s *Store) takeLease(ctx context.Context, name string, shared, create, once
 		return nil, ownershipError("lease path has no closed resource role")
 	}
 	f, err := s.regular(name, os.O_RDWR, 0o600)
+	heldExclusive := false
 	if errors.Is(err, os.ErrNotExist) && create && !s.existingOnly {
 		err = s.withPublication(ctx, func() error {
-			if err := s.permitLeaseCreation(ctx, name); err != nil {
-				return err
-			}
 			var openErr error
-			f, openErr = s.regular(name, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o600)
-			created := openErr == nil
-			if errors.Is(openErr, os.ErrExist) {
-				f, openErr = s.regular(name, os.O_RDWR, 0o600)
-			}
-			if openErr == nil && created && s.receipts {
-				if openErr = f.Sync(); openErr == nil {
-					openErr = s.syncDir(filepath.Dir(name))
-				}
-				if openErr == nil {
-					openErr = s.recordLease(name, f)
-				}
-			}
+			f, heldExclusive, openErr = s.createOrOpenLease(ctx, name)
 			return openErr
 		})
 	}
@@ -99,7 +84,106 @@ func (s *Store) takeLease(ctx context.Context, name string, shared, create, once
 		}
 		return nil, err
 	}
+	if heldExclusive && !shared {
+		if err := s.validateHeldLease(ctx, name, f, nil); err != nil {
+			f.Close()
+			return nil, err
+		}
+		return &Lease{f}, nil
+	}
 	return s.waitLease(ctx, name, f, shared, nil, once)
+}
+
+func (s *Store) createOrOpenLease(ctx context.Context, name string) (*os.File, bool, error) {
+	if f, err := s.regular(name, os.O_RDWR, 0o600); err == nil {
+		return f, false, nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return nil, false, err
+	}
+	if err := s.permitLeaseCreation(ctx, name); err != nil {
+		return nil, false, err
+	}
+	if !s.receipts {
+		f, err := s.regular(name, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o600)
+		if errors.Is(err, os.ErrExist) {
+			f, err = s.regular(name, os.O_RDWR, 0o600)
+		}
+		return f, false, err
+	}
+	parent, leaf, err := s.parent(name)
+	if err != nil {
+		return nil, false, err
+	}
+	defer parent.Close()
+	temp, err := randomLeaf(".lease-create-")
+	if err != nil {
+		return nil, false, err
+	}
+	f, err := cachefs.OpenFile(parent, temp, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return nil, false, err
+	}
+	ok, err := cachefs.TryLock(f, cachefs.Exclusive)
+	if err != nil || !ok {
+		_ = removeCreatedTemp(parent, temp, f)
+		_ = f.Close()
+		if err != nil {
+			return nil, false, err
+		}
+		return nil, false, errImageLeaseBusy
+	}
+	if err := f.Sync(); err != nil {
+		_ = removeCreatedTemp(parent, temp, f)
+		_ = f.Close()
+		return nil, false, fmt.Errorf("sync new image lease: %w", err)
+	}
+	if err := cachefs.RenameNoReplace(parent, temp, leaf); err != nil {
+		_ = removeCreatedTemp(parent, temp, f)
+		_ = f.Close()
+		if errors.Is(err, os.ErrExist) {
+			existing, openErr := cachefs.OpenFile(parent, leaf, os.O_RDWR, 0o600)
+			return existing, false, openErr
+		}
+		return nil, false, err
+	}
+	if err := syncRoot(parent); err != nil {
+		_ = f.Close()
+		return nil, false, err
+	}
+	if err := s.recordLease(name, f); err != nil {
+		_ = f.Close()
+		return nil, false, err
+	}
+	return f, true, nil
+}
+
+func removeCreatedTemp(parent *os.Root, temp string, f *os.File) error {
+	if _, err := cachefs.ValidateFile(parent, temp, f, 0o600); err != nil {
+		return err
+	}
+	if err := parent.Remove(temp); err != nil {
+		return fmt.Errorf("remove unused image lease temp: %w", err)
+	}
+	return nil
+}
+
+func (s *Store) validateHeldLease(ctx context.Context, name string, f *os.File, captured *leaseOwnership) error {
+	root, leaf, err := s.parent(name)
+	if err != nil {
+		return err
+	}
+	_, err = cachefs.ValidateFile(root, leaf, f, 0o600)
+	if err == nil && captured != nil {
+		err = captured.Parent.CheckRoot(root)
+		if err == nil {
+			err = captured.File.CheckFile(root, leaf, f, 0o600)
+		}
+	}
+	root.Close()
+	if err == nil && captured == nil {
+		err = s.checkLeaseOwner(ctx, name, f)
+	}
+	return err
 }
 
 func (s *Store) waitLease(ctx context.Context, name string, f *os.File, shared bool, captured *leaseOwnership, once bool) (*Lease, error) {
@@ -118,23 +202,7 @@ func (s *Store) waitLease(ctx context.Context, name string, f *os.File, shared b
 			return nil, err
 		}
 		if ok {
-			root, leaf, err := s.parent(name)
-			if err != nil {
-				f.Close()
-				return nil, err
-			}
-			_, err = cachefs.ValidateFile(root, leaf, f, 0o600)
-			if err == nil && captured != nil {
-				err = captured.Parent.CheckRoot(root)
-				if err == nil {
-					err = captured.File.CheckFile(root, leaf, f, 0o600)
-				}
-			}
-			root.Close()
-			if err == nil && captured == nil {
-				err = s.checkLeaseOwner(ctx, name, f)
-			}
-			if err != nil {
+			if err := s.validateHeldLease(ctx, name, f, captured); err != nil {
 				f.Close()
 				return nil, err
 			}

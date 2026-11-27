@@ -88,7 +88,7 @@ func UpdateLock(ctx context.Context, dir string, change func(*Lock) error) error
 	}
 	defer root.Close()
 	s := &Store{root: root}
-	lease, err := s.lock(ctx, "images.lock.lock", false)
+	lease, err := lockClientLock(ctx, root)
 	if err != nil {
 		return err
 	}
@@ -167,4 +167,37 @@ func readClientLock(s *Store) (Lock, error) {
 		return Lock{}, err
 	}
 	return lock, nil
+}
+
+func lockClientLock(ctx context.Context, root *os.Root) (*Lease, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	const name = "images.lock.lock"
+	f, err := cachefs.OpenFile(root, name, os.O_RDWR|os.O_CREATE, 0o600)
+	if err != nil {
+		return nil, err
+	}
+	for {
+		if err := ctx.Err(); err != nil {
+			f.Close()
+			return nil, err
+		}
+		ok, err := cachefs.TryLock(f, cachefs.Exclusive)
+		if err != nil {
+			f.Close()
+			return nil, err
+		}
+		if ok {
+			if _, err := cachefs.ValidateFile(root, name, f, 0o600); err != nil {
+				f.Close()
+				return nil, err
+			}
+			return &Lease{f}, nil
+		}
+		if err := waitImageLeaseRetry(ctx); err != nil {
+			f.Close()
+			return nil, err
+		}
+	}
 }
