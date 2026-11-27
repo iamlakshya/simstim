@@ -136,8 +136,6 @@ func TestLayersLocksWildcardsOnceAndExpiry(t *testing.T) {
 		},
 		{
 			Kind: api.LayerRepo,
-			// Repo locks are ignored per spec 8.2.
-			Lock: &api.Lock{Preset: api.PresetLocked, Deny: []string{"registry.npmjs.org"}},
 		},
 		{
 			Kind: api.LayerSession,
@@ -170,9 +168,20 @@ func TestLayersLocksWildcardsOnceAndExpiry(t *testing.T) {
 	if eng.Decide(Request{Host: "blocked.example.com", Port: 443, Now: t0}).Allow {
 		t.Error("allow beat deny in session layer")
 	}
-	// Repo lock was ignored.
+	// Balanced preset host remains allowed; a repo layer holding a lock is refused with layer_key.
 	if !eng.Decide(Request{Host: "registry.npmjs.org", Port: 443, Now: t0}).Allow {
-		t.Error("repo lock unexpectedly took effect")
+		t.Error("balanced preset host unexpectedly denied")
+	}
+	if _, _, err := MergeLayers([]api.Layer{{
+		Kind: api.LayerRepo,
+		Lock: &api.Lock{Preset: api.PresetLocked, Deny: []string{"registry.npmjs.org"}},
+	}}); err == nil {
+		t.Error("repo lock was accepted, want layer_key error")
+	} else {
+		var repoLockErr *proto.Error
+		if !errors.As(err, &repoLockErr) || repoLockErr.Code != "layer_key" || repoLockErr.Hint == "" {
+			t.Errorf("repo lock err = %v, want *proto.Error layer_key with Hint", err)
+		}
 	}
 	// Once rule allows the first connection and denies the second.
 	if !eng.Decide(Request{Host: "once.test", Port: 443, Now: t0}).Allow {

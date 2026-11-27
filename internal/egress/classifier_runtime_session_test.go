@@ -34,7 +34,10 @@ func TestClassifierSessionAllowWaitsForActualDurablePublication(t *testing.T) {
 	if outcome.Applied || outcome.Decision.Allow || !outcome.Pending || outcome.Decision.Rule != "classify:session-pending" || server.currentEngine().Decide(request).Allow {
 		t.Fatal("model session answer installed a memory-only grant or reported a model outage")
 	}
-	if !strings.Contains(output.String(), "classifier_session") || strings.Contains(output.String(), "judge_unavailable") {
+	server.ctlMu.Lock()
+	captured := output.String()
+	server.ctlMu.Unlock()
+	if !strings.Contains(captured, "classifier_session") || strings.Contains(captured, "judge_unavailable") {
 		t.Fatal("durable publication did not use its real opaque-hold event")
 	}
 }

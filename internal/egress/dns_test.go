@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/binary"
 	"encoding/json"
 	"errors"
@@ -448,6 +449,7 @@ func TestDNSPolicyProjectionLayersLocksPortsAndPaths(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	polOpen.Unknown = ""
 	env.call(t, CtlPolicyUpdate, PolicyUpdateArgs{Policy: polOpen})
 	msgOpen := unpackDNSReply(t, env.srv.AnswerDNS(context.Background(), buildSingleDNSQuery(t, 3, true, "example.com.", dnsmessage.TypeA, dnsmessage.ClassINET)))
 	if msgOpen.Header.RCode != dnsmessage.RCodeSuccess || len(msgOpen.Answers) != 1 {
@@ -461,8 +463,8 @@ func TestDNSPolicyProjectionLayersLocksPortsAndPaths(t *testing.T) {
 	} {
 		_, _, mErr := MergeLayers(bad)
 		var pe *proto.Error
-		if !errors.As(mErr, &pe) || pe.Code != "bad_request" || pe.Hint == "" {
-			t.Errorf("MergeLayers(bad unknown) = %v, want bad_request proto.Error with Hint", mErr)
+		if !errors.As(mErr, &pe) || pe.Code != "bad_value" || pe.Hint == "" {
+			t.Errorf("MergeLayers(bad unknown) = %v, want bad_value proto.Error with Hint", mErr)
 		}
 	}
 	if _, nErr := NewEngine("shell", api.Policy{Preset: api.PresetBalanced, Unknown: api.Unknown("invalid")}); nErr == nil {
@@ -784,6 +786,7 @@ func TestDNSAddressRefusalNumericPortGrantAndRebind(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	pol.Unknown = ""
 	env.call(t, CtlInit, InitArgs{SessionID: "abcd2345", DNS: DNSModeReal, Policy: pol})
 
 	for _, h := range []string{
@@ -827,10 +830,17 @@ func TestDNSAddressRefusalNumericPortGrantAndRebind(t *testing.T) {
 	}
 	_, _ = io.WriteString(stFlow, "CONNECT rebind.example.com:443 HTTP/1.1\r\nHost: rebind.example.com:443\r\n\r\n")
 	respFlow, err := http.ReadResponse(bufio.NewReader(stFlow), nil)
-	if err != nil || respFlow.StatusCode != http.StatusForbidden {
-		t.Fatalf("rebound CONNECT = %v, %v; want 403 Forbidden", respFlow, err)
+	if err != nil || respFlow.StatusCode != http.StatusOK {
+		t.Fatalf("rebound CONNECT preflight = %v, %v; want 200 Connection Established", respFlow, err)
 	}
 	_ = respFlow.Body.Close()
+	hello := captureClientHello(t, &tls.Config{ServerName: "rebind.example.com", InsecureSkipVerify: true})
+	if _, err := stFlow.Write(hello); err != nil {
+		t.Fatal(err)
+	}
+	if reply, _ := io.ReadAll(stFlow); len(reply) != 0 {
+		t.Fatalf("rebound TLS returned %x, want closed after address refusal", reply)
+	}
 	_ = stFlow.Close()
 	if dialAttempts.Load() != 0 {
 		t.Fatalf("rebound address reached DialTCP %d times, want 0", dialAttempts.Load())

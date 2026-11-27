@@ -160,11 +160,21 @@ func (e *testEnv) waitAudits(t *testing.T, want int) []AuditEntry {
 
 func TestServerBalanced403ECHSmugglingAndRevocation(t *testing.T) {
 	var upstreamHits atomic.Int32
-	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	originCA, err := newSessionAuthority(time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	originLeaf, err := originCA.certificate("registry.npmjs.org", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		upstreamHits.Add(1)
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok:" + r.URL.Path))
 	}))
+	ts.TLS = &tls.Config{MinVersion: tls.VersionTLS12, Certificates: []tls.Certificate{*originLeaf}, NextProtos: []string{"http/1.1"}}
+	ts.StartTLS()
 	defer ts.Close()
 	tsAddr := ts.Listener.Addr().String()
 
@@ -178,6 +188,9 @@ func TestServerBalanced403ECHSmugglingAndRevocation(t *testing.T) {
 		},
 	}
 	env := startTestServer(t, d)
+	originRoots := x509.NewCertPool()
+	originRoots.AddCert(originCA.cert)
+	env.srv.transport.TLSClientConfig.RootCAs = originRoots
 
 	// 1. Before CtlInit, opening a stream fails closed immediately.
 	ctx := context.Background()
@@ -197,6 +210,7 @@ func TestServerBalanced403ECHSmugglingAndRevocation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	pol.Unknown = api.UnknownDeny
 	env.call(t, CtlInit, InitArgs{
 		SessionID:  "abcd2345",
 		SessionRef: "work-box",
@@ -219,9 +233,14 @@ func TestServerBalanced403ECHSmugglingAndRevocation(t *testing.T) {
 	_ = resp1.Body.Close()
 	tlsConn := tls.Client(st1, &tls.Config{ServerName: "registry.npmjs.org", InsecureSkipVerify: true})
 	_, _ = io.WriteString(tlsConn, "GET /pkg HTTP/1.1\r\nHost: registry.npmjs.org\r\nConnection: close\r\n\r\n")
-	gotBody, err := io.ReadAll(tlsConn)
-	if err != nil || !strings.Contains(string(gotBody), "ok:/pkg") {
-		t.Fatalf("TLS response = %q, %v", gotBody, err)
+	tlsResp, err := http.ReadResponse(bufio.NewReader(tlsConn), nil)
+	if err != nil {
+		t.Fatalf("TLS response read failed: %v", err)
+	}
+	gotBody, err := io.ReadAll(tlsResp.Body)
+	_ = tlsResp.Body.Close()
+	if err != nil || tlsResp.StatusCode != http.StatusOK || string(gotBody) != "ok:/pkg" {
+		t.Fatalf("TLS response = status %d body %q, %v", tlsResp.StatusCode, gotBody, err)
 	}
 	_ = tlsConn.Close()
 
@@ -280,7 +299,7 @@ func TestServerBalanced403ECHSmugglingAndRevocation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, _ = io.WriteString(stHTTP, "GET http://example.com/tokens/npm_super_secret_val/use?x=1 HTTP/1.1\r\nHost: example.com\r\n\r\n")
+	_, _ = io.WriteString(stHTTP, "GET http://example.com/tokens/npm_super_secret_val/use?x=1 HTTP/1.1\r\nHost: example.com\r\nConnection: close\r\n\r\n")
 	_, _ = io.ReadAll(stHTTP)
 	_ = stHTTP.Close()
 

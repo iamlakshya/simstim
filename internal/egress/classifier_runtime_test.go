@@ -27,6 +27,7 @@ func classifierFixture(t *testing.T, timeout string, rate int) (*Server, *boundC
 	t.Helper()
 	fixture := newBoundControlFixture(t, true)
 	args := boundRegistryArgs(map[string]string{"KEY": "ABCD0000"})
+	args.Initial.Policy.Order = []api.LayerRef{{Kind: api.LayerAll}}
 	args.Initial.Policy.Unknown = api.UnknownClassify
 	args.Initial.Policy.Classifier = judgeSettings()
 	scope := "once"
@@ -254,7 +255,10 @@ func TestClassifierRuntimeUnavailableElectionEmitsAtMostOneAcceptedControlFrame(
 		server.runUnknownClassifier(t.Context(), Request{Host: host, Port: 443}, "explicit", host)
 	}
 	server.classifier.close()
-	reader := bufio.NewReader(bytes.NewReader(output.Bytes()))
+	server.ctlMu.Lock()
+	captured := append([]byte(nil), output.Bytes()...)
+	server.ctlMu.Unlock()
+	reader := bufio.NewReader(bytes.NewReader(captured))
 	unavailable := 0
 	for {
 		frame, err := proto.Read(reader)
@@ -277,7 +281,7 @@ func TestClassifierRuntimeUnavailableElectionEmitsAtMostOneAcceptedControlFrame(
 	if unavailable != 1 {
 		t.Fatal("unavailable notification was lost or duplicated")
 	}
-	if strings.Contains(output.String(), "ABCD0000") {
+	if strings.Contains(string(captured), "ABCD0000") {
 		t.Fatal("actual classifier audit frame retained a source credential")
 	}
 }

@@ -58,9 +58,17 @@ func newServiceMintHTTPFixture(t *testing.T, host string, bound bool, policy api
 
 func (f *serviceMintHTTPFixture) request(t *testing.T, method, host, path string) (*httptest.ResponseRecorder, AuditEntry) {
 	t.Helper()
-	req := httptest.NewRequest(method, "http://"+host+":443"+path, strings.NewReader(`{}`)).WithContext(t.Context())
+	hdr := StreamHeader{Via: "explicit", Host: host, Port: 443}
+	conn, peer := net.Pipe()
+	defer peer.Close()
+	ctx, finish, err := f.control.server.beginSecretCarrier(t.Context(), conn, hdr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer finish()
+	req := httptest.NewRequest(method, "http://"+host+":443"+path, strings.NewReader(`{}`)).WithContext(ctx)
 	w := httptest.NewRecorder()
-	audit := f.control.server.proxyHTTPRequest(w, req, StreamHeader{Via: "explicit", Host: host, Port: 443}, "http", nil)
+	audit := f.control.server.proxyHTTPRequest(w, req, hdr, "http", nil)
 	return w, audit.get()
 }
 

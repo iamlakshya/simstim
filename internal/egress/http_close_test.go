@@ -25,13 +25,23 @@ type delayedResponseConn struct {
 }
 
 func (c *delayedResponseConn) Write(p []byte) (int, error) {
-	if bytes.Contains(p, []byte("checked")) {
+	if idx := bytes.Index(p, []byte("checked")); idx >= 0 {
+		written := 0
+		if idx > 0 {
+			n, err := c.Conn.Write(p[:idx])
+			written += n
+			if err != nil {
+				return written, err
+			}
+		}
 		c.startOnce.Do(func() { close(c.started) })
 		select {
 		case <-c.release:
 		case <-c.closed:
-			return 0, net.ErrClosed
+			return written, net.ErrClosed
 		}
+		n, err := c.Conn.Write(p[idx:])
+		return written + n, err
 	}
 	return c.Conn.Write(p)
 }

@@ -193,7 +193,7 @@ func TestLegacyNamedLayersLeasesAndNonNetModesStayValid(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if policy.Rules[0].Until != until {
+	if !policy.Rules[0].Until.Equal(until) {
 		t.Fatal("legacy future lease was changed")
 	}
 	legacy := api.Policy{Preset: api.PresetLocked, Rules: []api.Rule{

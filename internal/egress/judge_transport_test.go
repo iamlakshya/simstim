@@ -18,11 +18,34 @@ func judgeSettings() api.ClassifierValues {
 	return api.ClassifierValues{Judge: &kind, Endpoint: &endpoint, Model: &model, Key: &key}
 }
 
+func judgeTrustedUse(settings api.ClassifierValues) api.TrustedSecretUseV1 {
+	return api.TrustedSecretUseV1{
+		Version:  1,
+		Use:      api.TrustedJudgeUseV1,
+		Mode:     api.SecretModeBound,
+		Bind:     api.SecretBind{Hosts: []string{"example.com:443"}, Header: "Authorization", Format: "Bearer {value}"},
+		Model:    *settings.Model,
+		Endpoint: *settings.Endpoint,
+	}
+}
+
 func judgeCapabilityFixture(t *testing.T) (*Server, *judgeModelCapability) {
 	t.Helper()
+	return judgeCapabilityFixtureWithClock(t, nil)
+}
+
+func judgeCapabilityFixtureWithClock(t *testing.T, clock func() time.Time) (*Server, *judgeModelCapability) {
+	t.Helper()
+	settings := judgeSettings()
 	args := boundRegistryArgs(map[string]string{"KEY": "ABCD0000"})
-	args.Initial.Policy.Classifier = judgeSettings()
-	server, _ := newBoundRegistryServer(t, args)
+	args.Initial.Policy.Order = []api.LayerRef{{Kind: api.LayerAll}}
+	args.Initial.Policy.Classifier = settings
+	args.TrustedUses = map[string]api.TrustedSecretUseV1{"KEY": judgeTrustedUse(settings)}
+	args.ProtectedTrustedSecretValues = map[string]api.Secret{"KEY": "ABCD0000"}
+	server := newBoundControlFixtureWithOptions(t, true, Options{Now: clock}).server
+	if _, err := server.initialiseBoundControl(memberJSON(t, args)); err != nil {
+		t.Fatal(err)
+	}
 	endpoint, checked, _, err := judgeEndpoint(*args.Initial.Policy.Classifier.Endpoint)
 	if err != nil {
 		t.Fatal(err)
@@ -173,8 +196,12 @@ func TestJudgeModelRefusesMissingOrChangedSourceBeforeOriginIO(t *testing.T) {
 		value := api.Secret("WXYZ1111")
 		if field == "host" {
 			// A fresh source uses a lowercase host-shaped credential cohort.
+			settings := judgeSettings()
 			args := boundRegistryArgs(map[string]string{"KEY": "abcd0000"})
-			args.Initial.Policy.Classifier = judgeSettings()
+			args.Initial.Policy.Order = []api.LayerRef{{Kind: api.LayerAll}}
+			args.Initial.Policy.Classifier = settings
+			args.TrustedUses = map[string]api.TrustedSecretUseV1{"KEY": judgeTrustedUse(settings)}
+			args.ProtectedTrustedSecretValues = map[string]api.Secret{"KEY": "abcd0000"}
 			server, _ = newBoundRegistryServer(t, args)
 			capability.server = server
 			ctx = judgeSourceContext(t, server)
@@ -192,9 +219,13 @@ func TestJudgeModelRefusesMissingOrChangedSourceBeforeOriginIO(t *testing.T) {
 }
 
 func TestJudgeModelUnrelatedCredentialArmCancelsAndJoinsBeforeReplacement(t *testing.T) {
+	settings := judgeSettings()
 	args := boundRegistryArgs(map[string]string{"KEY": "ABCD0000", "OTHER_KEY": "EFGH2222"})
 	args.Binds["OTHER_KEY"] = api.SecretBind{Hosts: []string{"other.example"}, Header: "Authorization", Format: "Bearer {value}"}
-	args.Initial.Policy.Classifier = judgeSettings()
+	args.Initial.Policy.Order = []api.LayerRef{{Kind: api.LayerAll}}
+	args.Initial.Policy.Classifier = settings
+	args.TrustedUses = map[string]api.TrustedSecretUseV1{"KEY": judgeTrustedUse(settings)}
+	args.ProtectedTrustedSecretValues = map[string]api.Secret{"KEY": "ABCD0000"}
 	server, _ := newBoundRegistryServer(t, args)
 	endpoint, checked, _, err := judgeEndpoint(*args.Initial.Policy.Classifier.Endpoint)
 	if err != nil {

@@ -57,6 +57,7 @@ func TestHTTPNumericExceptionUsesTheSameMethodAndPreservesOpaqueChecks(t *testin
 	get, post := []string{"GET"}, []string{"POST"}
 	engine, err := NewEngine("", api.Policy{Preset: api.PresetLocked, Rules: []api.Rule{
 		{Layer: api.LayerSession, Target: "api.example.com/safe", Allow: true, Methods: &post},
+		{Layer: api.LayerSession, Target: "both.example.com/safe", Allow: true},
 		{Layer: api.LayerSession, Target: "127.0.0.1", Allow: true, Methods: &get},
 	}})
 	if err != nil {
@@ -66,7 +67,7 @@ func TestHTTPNumericExceptionUsesTheSameMethodAndPreservesOpaqueChecks(t *testin
 	if engine.precheckResolvedAddr("api.example.com", address, 443) || engine.PrecheckAddr(address, 443, nil) {
 		t.Fatal("disjoint name/address methods or an opaque request gained a numeric exception")
 	}
-	request := Request{Host: "api.example.com", Port: 443, Method: "GET", Path: "/safe"}
+	request := Request{Host: "both.example.com", Port: 443, Method: "GET", Path: "/safe"}
 	if !engine.evaluateAddrRequest(address, 443, nil, evalPrecheck, &request) {
 		t.Fatal("matching inspected numeric method was refused")
 	}

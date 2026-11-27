@@ -193,6 +193,8 @@ func onceTestPolicy(t *testing.T, preset api.Preset, rules ...api.Rule) api.Poli
 	if err != nil {
 		t.Fatal(err)
 	}
+	pol.Unknown = ""
+	pol.Network.Unknown = nil
 	return pol
 }
 

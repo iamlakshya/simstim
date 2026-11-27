@@ -26,6 +26,7 @@ func TestWebSocketTerminalParksOnlyItsOriginalUnjoinedWriter(t *testing.T) {
 			if err != nil || refusal != nil || turn.beginPhysicalWebSocketRequestV1() != nil {
 				t.Fatal(err)
 			}
+			turn.ResponseV1(ModelUsageWebSocketV1)
 			model := &modelRequest{usage: turn}
 			if err := model.inspect([]byte(`{"type":"response.create","stream_id":"`+lane+`"}`), true); err != nil {
 				t.Fatal(err)

@@ -10,7 +10,7 @@ import (
 )
 
 func TestActualModelAndValidatedPushUseTheirOriginalBudgetExclusions(t *testing.T) {
-	policy := api.Policy{Preset: api.PresetLocked, LayerValues: api.LayerValues{Network: api.NetworkValues{UploadBudget: new("0M")}}}
+	policy := api.Policy{Preset: api.PresetLocked, Order: []api.LayerRef{{Kind: api.LayerSession}}, LayerValues: api.LayerValues{Network: api.NetworkValues{UploadBudget: new("0M")}}}
 	model := newModelHTTPFixture(t, "codex", policy, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(`{"usage":{"total_tokens":1}}`))
 	}))

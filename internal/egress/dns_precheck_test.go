@@ -218,7 +218,7 @@ func TestDNSSyntheticUnknownUsesTypedFallback(t *testing.T) {
 				srv := dnsPrecheckServer(t, pol, &Dialer{Lookup: resolver.lookup})
 				srv.dnsMode, srv.synth = DNSModeSynthetic, newSyntheticTable(MaxSyntheticNames)
 				want := dnsmessage.RCodeSuccess
-				if unknown == api.UnknownDeny && preset != api.PresetOpen {
+				if unknown == api.UnknownDeny {
 					want = dnsmessage.RCodeNameError
 				}
 				answerDNSPrecheck(t, srv, "unknown.example.com", want)

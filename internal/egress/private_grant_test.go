@@ -167,6 +167,7 @@ func TestClassifierLateOnceUsesPrivateCallbackWithoutSessionDurabilityShim(t *te
 	}
 	scope := "once"
 	policy := binding.source.metadata.Policy
+	policy.Order = []api.LayerRef{{Kind: api.LayerAll}}
 	policy.Classifier.MaxScope = &scope
 	if err := server.replaceControlPolicy(memberJSON(t, PolicyUpdateArgs{Policy: policy})); err != nil {
 		t.Fatal(err)

@@ -10,6 +10,7 @@ import (
 
 func TestModelOnceAppendKeepsTheOldWebSocketAndAdmitsOneNewFlow(t *testing.T) {
 	const message = `{"type":"response.create","tools":[{"type":"mcp"}],"input":[]}`
+	const ack = `{"type":"response.created"}`
 	first := api.Rule{Layer: api.LayerSession, Allow: true, Target: "api.openai.com", Tools: []string{"mcp"}, Once: true, GrantID: "old-flow"}
 	f := newModelHTTPFixture(t, "codex", api.Policy{Preset: api.PresetLocked, Rules: []api.Rule{first}}, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		conn, buffer, err := modelUpgradeOrigin(w, r)
@@ -22,7 +23,7 @@ func TestModelOnceAppendKeepsTheOldWebSocketAndAdmitsOneNewFlow(t *testing.T) {
 			if err != nil || string(body) != message {
 				return
 			}
-			if _, err := conn.Write(wsTestWire(1, true, false, []byte("ack"))); err != nil {
+			if _, err := conn.Write(wsTestWire(1, true, false, []byte(ack))); err != nil {
 				return
 			}
 		}
@@ -31,7 +32,7 @@ func TestModelOnceAppendKeepsTheOldWebSocketAndAdmitsOneNewFlow(t *testing.T) {
 	if _, err := old.Write(wsTestWire(1, true, true, []byte(message))); err != nil {
 		t.Fatal(err)
 	}
-	if reply, err := wsReadTestMessage(oldReader); err != nil || !bytes.Equal(reply, []byte("ack")) {
+	if reply, err := wsReadTestMessage(oldReader); err != nil || !bytes.Equal(reply, []byte(ack)) {
 		t.Fatal("initial capability flow was not admitted")
 	}
 	second := first
@@ -40,14 +41,14 @@ func TestModelOnceAppendKeepsTheOldWebSocketAndAdmitsOneNewFlow(t *testing.T) {
 	if _, err := old.Write(wsTestWire(1, true, true, []byte(message))); err != nil {
 		t.Fatal("append revoked the original WebSocket")
 	}
-	if reply, err := wsReadTestMessage(oldReader); err != nil || !bytes.Equal(reply, []byte("ack")) {
+	if reply, err := wsReadTestMessage(oldReader); err != nil || !bytes.Equal(reply, []byte(ack)) {
 		t.Fatal("original permit lost its exact old grant")
 	}
 	next, nextReader := openModelWebSocket(t, f)
 	if _, err := next.Write(wsTestWire(1, true, true, []byte(message))); err != nil {
 		t.Fatal(err)
 	}
-	if reply, err := wsReadTestMessage(nextReader); err != nil || !bytes.Equal(reply, []byte("ack")) {
+	if reply, err := wsReadTestMessage(nextReader); err != nil || !bytes.Equal(reply, []byte(ack)) {
 		t.Fatal("fresh independent once grant did not admit the next flow")
 	}
 	engine := f.env.srv.currentEngine()

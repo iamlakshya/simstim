@@ -205,6 +205,8 @@ func pathTestPolicy(t *testing.T, preset api.Preset, targets ...string) api.Poli
 	if err != nil {
 		t.Fatal(err)
 	}
+	pol.Unknown = ""
+	pol.Network.Unknown = nil
 	return pol
 }
 

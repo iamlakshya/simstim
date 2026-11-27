@@ -44,7 +44,11 @@ func TestOpaqueFlowsDoNotBypassPathDenies(t *testing.T) {
 		{"other port outside lock", "example.com", "shell", api.PresetOpen, lockedPathDeny("example.com:8443"), true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			layers := append([]api.Layer{{Kind: api.LayerAll, Preset: tc.preset}}, tc.layers...)
+			base := api.Layer{Kind: api.LayerAll, Preset: tc.preset}
+			if tc.preset == api.PresetOpen {
+				base.Unknown = api.UnknownAllow
+			}
+			layers := append([]api.Layer{base}, tc.layers...)
 			pol, _, err := MergeLayers(layers)
 			if err != nil {
 				t.Fatal(err)
@@ -125,14 +129,38 @@ func TestOpaqueFlowRevokedByAPathDeny(t *testing.T) {
 			next, nextReader := openOpaquePathFlow(t, env, via)
 			if via == "explicit" {
 				resp, err := http.ReadResponse(nextReader, nil)
-				if err != nil || resp.StatusCode != http.StatusForbidden {
-					t.Fatalf("CONNECT after a path deny = %v, %v", resp, err)
+				if err != nil || resp.StatusCode != http.StatusOK {
+					t.Fatalf("CONNECT for inspected path-lock flow = %v, %v", resp, err)
 				}
 				_ = resp.Body.Close()
-			} else if _, err := nextReader.ReadByte(); err != io.EOF {
-				t.Fatalf("transparent flow after a path deny returned %v, want EOF", err)
 			}
+			if _, err := io.WriteString(next, "ping\n\n"); err != nil {
+				t.Fatal(err)
+			}
+			resp, err := http.ReadResponse(nextReader, nil)
+			if err != nil || resp.StatusCode != http.StatusBadRequest {
+				t.Fatalf("opaque bytes after a path deny = %v, %v; want 400 Bad Request", resp, err)
+			}
+			_ = resp.Body.Close()
 			_ = next.Close()
+
+			denied, deniedReader := openOpaquePathFlow(t, env, via)
+			if via == "explicit" {
+				resp, err := http.ReadResponse(deniedReader, nil)
+				if err != nil || resp.StatusCode != http.StatusOK {
+					t.Fatalf("CONNECT for denied path check = %v, %v", resp, err)
+				}
+				_ = resp.Body.Close()
+			}
+			if _, err := io.WriteString(denied, "GET /admin/secret HTTP/1.1\r\nHost: example.com:8443\r\nConnection: close\r\n\r\n"); err != nil {
+				t.Fatal(err)
+			}
+			resp, err = http.ReadResponse(deniedReader, nil)
+			if err != nil || resp.StatusCode != http.StatusForbidden {
+				t.Fatalf("denied path after a path deny = %v, %v; want 403 Forbidden", resp, err)
+			}
+			_ = resp.Body.Close()
+			_ = denied.Close()
 			if dials.Load() != 1 {
 				t.Fatalf("upstream dials = %d, want only the initial allowed flow", dials.Load())
 			}

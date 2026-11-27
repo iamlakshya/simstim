@@ -41,11 +41,10 @@ func TestClassifierPopularityUsesOnlyConfiguredExactRankWitness(t *testing.T) {
 }
 
 func TestClassifierRDAPUsesAuthoritativeBootstrapCachesAndRefusesInventedOldAge(t *testing.T) {
-	server, _ := judgeCapabilityFixture(t)
+	now := time.Date(2026, 11, 20, 0, 0, 0, 0, time.UTC)
+	server, _ := judgeCapabilityFixtureWithClock(t, func() time.Time { return now })
 	server.classifier = newClassifierRuntime(server)
 	t.Cleanup(server.classifier.close)
-	now := time.Date(2026, 11, 20, 0, 0, 0, 0, time.UTC)
-	server.now = func() time.Time { return now }
 	calls := 0
 	server.classifier.facts.testFetch = func(_ context.Context, target string, _ int64) ([]byte, error) {
 		calls++

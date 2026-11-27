@@ -36,17 +36,18 @@ func TestConfiguredUnknownOverridesOnlyTypedUnmatchedOpenFallback(t *testing.T) 
 }
 
 func TestConfiguredUnknownUsesActualValidatedScalarPresence(t *testing.T) {
+	order := []api.LayerRef{{Kind: api.LayerAll}}
 	for _, action := range []string{"ask", "deny", "allow", "classify"} {
-		policy := api.Policy{Preset: api.PresetOpen, LayerValues: api.LayerValues{Network: api.NetworkValues{Unknown: &action}}}
+		policy := api.Policy{Preset: api.PresetOpen, Order: order, LayerValues: api.LayerValues{Network: api.NetworkValues{Unknown: &action}}}
 		engine, err := NewEngine("shell", policy)
 		if err != nil || engine.unknown != api.Unknown(action) || policy.Unknown != "" || *policy.Network.Unknown != action {
 			t.Fatal("structured presence was inferred, lost or mutated", err)
 		}
 	}
 	for _, policy := range []api.Policy{
-		{Preset: api.PresetOpen, Unknown: api.UnknownDeny, LayerValues: api.LayerValues{Network: api.NetworkValues{Unknown: new("allow")}}},
-		{Preset: api.PresetOpen, LayerValues: api.LayerValues{Network: api.NetworkValues{Unknown: new("")}}},
-		{Preset: api.PresetOpen, LayerValues: api.LayerValues{Network: api.NetworkValues{Unknown: new("future")}}},
+		{Preset: api.PresetOpen, Order: order, Unknown: api.UnknownDeny, LayerValues: api.LayerValues{Network: api.NetworkValues{Unknown: new("allow")}}},
+		{Preset: api.PresetOpen, Order: order, LayerValues: api.LayerValues{Network: api.NetworkValues{Unknown: new("")}}},
+		{Preset: api.PresetOpen, Order: order, LayerValues: api.LayerValues{Network: api.NetworkValues{Unknown: new("future")}}},
 	} {
 		if _, err := NewEngine("shell", policy); err == nil {
 			t.Fatal("conflicting or invalid present setting acquired fallback permission")
