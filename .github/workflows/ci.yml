@@ -346,7 +346,7 @@ jobs:
           version: v2.14.0
           args: --build-tags=${{ env.GO_BUILD_TAGS }}
       - name: Known vulnerabilities in the code we call
-        run: go run -tags="$(sh scripts/go-build-tags.sh)" golang.org/x/vuln/cmd/govulncheck@v1.1.4 -tags="$(sh scripts/go-build-tags.sh)" ./...
+        run: go run -tags="$(sh scripts/go-build-tags.sh)" golang.org/x/vuln/cmd/govulncheck@v1.10.0 -tags="$(sh scripts/go-build-tags.sh)" ./...
       - name: No dead code, tests included
         run: |
           out=$(go run -tags="$(sh scripts/go-build-tags.sh)" golang.org/x/tools/cmd/deadcode@v0.38.0 -tags="$(sh scripts/go-build-tags.sh)" -test ./...)

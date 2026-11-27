@@ -4,6 +4,8 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ## [Unreleased]
 
+- Fix CI hygiene checks: clear historical false positives in `.gitleaksignore` and replace key-like example and test literals, remove template injection and dynamic secret indexing in the microvm conformance workflow, bump the pinned guest kernel to `6.18.65` with reviewed pin-watch verdicts, upgrade `github.com/klauspost/compress` to `v1.20.5` for `GO-2026-6865`, and update pinned `govulncheck` to `v1.10.0` for Go 1.27 compatibility.
+
 - Wire the image command group, fix CLI help, completion, JSON/stderr framing, guided setup lock release, session ID lookup, host-side `git-upload-pack` config isolation, `ssh` option cache keying, baseline host-key refusal, host-save conflict checks, and Linux systemd ≥ 254 user-manager and `supervise` startup checks; regenerate CLI reference docs and update `internal/cli` tests for the isolated runtime.
 
 - `scripts/bench.sh` now reports failing benchmark packages with the last lines of their output, a `Try:` hint and saved failure logs in the evidence directory. The Linux live-holder benchmark `BenchmarkNoneKeyToPTY1000` now runs only when `BENCH_NONE_KEY_TO_PTY=1` is set.

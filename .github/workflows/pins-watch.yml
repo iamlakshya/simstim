@@ -73,7 +73,7 @@ jobs:
             cmd/userns/build.sh
           fi
       - name: Known vulnerabilities in the code we call
-        run: go run -tags="$(sh scripts/go-build-tags.sh)" golang.org/x/vuln/cmd/govulncheck@v1.1.4 -tags="$(sh scripts/go-build-tags.sh)" ./...
+        run: go run -tags="$(sh scripts/go-build-tags.sh)" golang.org/x/vuln/cmd/govulncheck@v1.10.0 -tags="$(sh scripts/go-build-tags.sh)" ./...
 
   issues:
     # The only job that may write, and only on the daily run. It checks the

@@ -169,7 +169,7 @@ bench base="origin/main":
 
 # Known vulnerabilities in the code we call, and code nothing reaches, tests included.
 vulncheck:
-    go run -tags='{{go_build_tags}}' golang.org/x/vuln/cmd/govulncheck@v1.1.4 -tags='{{go_build_tags}}' ./...
+    go run -tags='{{go_build_tags}}' golang.org/x/vuln/cmd/govulncheck@v1.10.0 -tags='{{go_build_tags}}' ./...
     out=$(go run -tags='{{go_build_tags}}' golang.org/x/tools/cmd/deadcode@v0.38.0 -tags='{{go_build_tags}}' -test ./...); [ -z "$out" ] || { echo "$out"; echo "Dead code: remove it, or use it."; exit 1; }
 
 # Lint the GitHub workflows and Dependabot config with zizmor (needs uv).
