@@ -157,7 +157,7 @@ func TestFlattenPAXNamesAndLinks(t *testing.T) {
 
 func TestFlattenPAXSparseLogicalDataAndCap(t *testing.T) {
 	input := flatPAXTar(t, map[string]string{
-		"GNU.sparse.major": "0", "GNU.sparse.minor": "1", "GNU.sparse.map": "4096,1", "GNU.sparse.size": "8192",
+		"GNU.sparse.major": "0", "GNU.sparse.minor": "1", "GNU.sparse.numblocks": "1", "GNU.sparse.map": "4096,1", "GNU.sparse.size": "8192",
 	}, &tar.Header{Name: "sparse", Typeflag: tar.TypeReg, Size: 1, Mode: 0o600, ModTime: time.Unix(0, 0), Format: tar.FormatPAX}, "X")
 	layers, readers := flatInputs(input)
 	var out bytes.Buffer

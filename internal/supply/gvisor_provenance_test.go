@@ -6,7 +6,8 @@ import (
 )
 
 func TestNativeBuildProvenanceNeedsCompleteGvisorDigestPairV1(t *testing.T) {
-	item := NewItem(KindGvisor, "runsc", "release-20261102.0-deadbeef", "amd64", []byte("native fixture"), "")
+	item := NewItem(KindGvisor, "runsc", "release-20261102.0-deadbeef", "amd64", []byte("native fixture"), ReleaseFolder("1.2.3")+"/runsc-amd64")
+	item.Released = "2026-11-02"
 	item.BuildInputsSHA256, item.SBOMSHA256 = strings.Repeat("a", 64), strings.Repeat("b", 64)
 	if err := item.validate(); err != nil {
 		t.Fatal(err)

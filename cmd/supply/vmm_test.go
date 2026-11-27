@@ -48,14 +48,14 @@ func TestVMMMirrorWriteAssetsCheck(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(m.Items) != 6 || !strings.HasPrefix(m.Runtime, "runtime-") {
+	if len(m.Items) != 8 || !strings.HasPrefix(m.Runtime, "runtime-") {
 		t.Fatalf("manifest = %+v", m)
 	}
 	var out bytes.Buffer
 	if err := run([]string{"assets", manifest}, &out); err != nil {
 		t.Fatal(err)
 	}
-	if len(strings.Fields(out.String())) != 7 || !strings.Contains(out.String(), "cloud-hypervisor-v54.1.tar.xz") {
+	if len(strings.Fields(out.String())) != 9 || !strings.Contains(out.String(), "cloud-hypervisor-v54.1.tar.xz") {
 		t.Fatalf("assets = %s", out.String())
 	}
 	downloads := upload(t, dir)

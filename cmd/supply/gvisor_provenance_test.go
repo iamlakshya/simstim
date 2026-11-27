@@ -143,7 +143,11 @@ func TestGvisorUploadedProvenanceBindsSignedDigestsAndGeneratedLockV1(t *testing
 	if err := checkGvisorUploadedProvenanceV1(manifest, assets); err != nil {
 		t.Fatal(err)
 	}
-	writeGvisorFixtureJSONV1(t, filepath.Join(assets, "gvisor-module-lock-arm64.json"), map[string]int{"lockFileVersion": 2})
+	lockAsset := filepath.Join(assets, "gvisor-module-lock-arm64.json")
+	if err := os.Chmod(lockAsset, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	writeGvisorFixtureJSONV1(t, lockAsset, map[string]int{"lockFileVersion": 2})
 	if err := checkGvisorUploadedProvenanceV1(manifest, assets); err == nil {
 		t.Fatal("another module lock passed signed input binding")
 	}

@@ -23,6 +23,7 @@ func helpersDir(t *testing.T) string {
 	for name, body := range map[string]string{
 		"host-linux-amd64": "HOST-AMD64", "host-linux-arm64": "HOST-ARM64",
 		"vt-linux-amd64": "VT-AMD64", "vt-linux-arm64": "VT-ARM64",
+		"userns-linux-amd64": "USERNS-AMD64", "userns-linux-arm64": "USERNS-ARM64",
 		"README.md": "not a helper",
 	} {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o600); err != nil {
@@ -87,7 +88,7 @@ func TestWriteAssetsCheck(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if m.Release != "0.6.0" || len(m.Items) != 4 {
+	if m.Release != "0.6.0" || len(m.Items) != 6 {
 		t.Fatalf("manifest = %+v", m)
 	}
 	if !reflect.DeepEqual(m.Advisories, resolvedAt("0.2.0")) || len(m.Advisories) == 0 {
@@ -97,12 +98,16 @@ func TestWriteAssetsCheck(t *testing.T) {
 	if !ok || it.URL != release+"/"+brand.Name+"-vt-linux-arm64" || it.Size != int64(len("VT-ARM64")) || it.Version != "0.6.0" {
 		t.Errorf("vt = %+v, %v", it, ok)
 	}
+	userns, ok := m.Find(supply.KindUserns, brand.UsernsBinary, "amd64")
+	if !ok || userns.URL != release+"/"+brand.Name+"-userns-linux-amd64" || userns.Size != int64(len("USERNS-AMD64")) || userns.Version != "0.6.0" {
+		t.Errorf("userns = %+v, %v", userns, ok)
+	}
 
 	out.Reset()
 	if err := run([]string{"assets", manifest}, &out); err != nil {
 		t.Fatal(err)
 	}
-	if got := strings.Fields(out.String()); len(got) != 4 || got[0] != brand.Name+"-host-linux-amd64" {
+	if got := strings.Fields(out.String()); len(got) != 6 || got[0] != brand.Name+"-host-linux-amd64" {
 		t.Errorf("assets = %q", got)
 	}
 
@@ -111,7 +116,7 @@ func TestWriteAssetsCheck(t *testing.T) {
 	if err := run([]string{"check", "-url", release + "/", "-dir", dl, manifest}, &out); err != nil {
 		t.Fatal(err)
 	}
-	if strings.Count(out.String(), "sha256 ok") != 4 {
+	if strings.Count(out.String(), "sha256 ok") != 6 {
 		t.Errorf("check printed %q", out.String())
 	}
 }

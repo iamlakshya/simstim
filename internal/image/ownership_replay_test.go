@@ -73,13 +73,23 @@ func TestOwnershipHeadCrashUsesCoherentProducerNativeWitnesses(t *testing.T) {
 		t.Fatal(err)
 	}
 	stopped := errors.New("publication stopped")
-	store, err := OpenWithPublicationGate(filepath.Join(dir, "images"), func(context.Context, func() error) error { return stopped })
+	converted := false
+	store, err := OpenWithPublicationGate(filepath.Join(dir, "images"), func(_ context.Context, publish func() error) error {
+		if !converted {
+			return publish()
+		}
+		return stopped
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer store.Close()
 	registry, request, _, _, _ := imageRegistryFixture(t)
-	if _, err := store.Prepare(t.Context(), request, registry, testConvert); !errors.Is(err, stopped) {
+	if _, err := store.Prepare(t.Context(), request, registry, func(ctx context.Context, layers []Layer, files []*os.File, out *os.File) error {
+		err := testConvert(ctx, layers, files, out)
+		converted = true
+		return err
+	}); !errors.Is(err, stopped) {
 		t.Fatal(err)
 	}
 	root, err := store.ownershipRoot()

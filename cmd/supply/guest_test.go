@@ -154,8 +154,8 @@ func TestWriteAssetsAndCheckWithBootPair(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if len(m.Items) != 8 {
-		t.Fatalf("items = %d, want 8", len(m.Items))
+	if len(m.Items) != 10 {
+		t.Fatalf("items = %d, want 10", len(m.Items))
 	}
 
 	k, ok := m.Find(supply.KindKernel, "guest", "amd64")
@@ -178,6 +178,8 @@ func TestWriteAssetsAndCheckWithBootPair(t *testing.T) {
 		brand.Name + "-host-linux-arm64",
 		brand.Name + "-vt-linux-amd64",
 		brand.Name + "-vt-linux-arm64",
+		brand.Name + "-userns-linux-amd64",
+		brand.Name + "-userns-linux-arm64",
 		"vmlinux-amd64",
 		"tools-amd64.erofs",
 		"Image-arm64",
