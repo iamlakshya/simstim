@@ -175,7 +175,7 @@ func (s *Supervisor) handleRequest(sessionID string, conn net.Conn, r *bufio.Rea
 			reply(nil, &proto.Error{Code: "not_found", Message: "session not in sandbox", Hint: "List sessions with ls."})
 			return true
 		}
-		m := *sess.m
+		m := snapshotManifest(sess.m)
 		s.mu.Unlock()
 		reply(m, nil)
 	case "rename":
@@ -195,12 +195,16 @@ func (s *Supervisor) handleRequest(sessionID string, conn net.Conn, r *bufio.Rea
 			return true
 		}
 		sess.m.Name = name
-		mCopy := *sess.m
+		var childCopy *host.Manifest
+		if sessionID != s.id {
+			cp := snapshotManifest(sess.m)
+			childCopy = &cp
+		}
 		s.mu.Unlock()
 		if sessionID == s.id {
-			_ = s.save(&mCopy, false)
+			_ = s.save(false)
 		} else {
-			_ = mCopy.Save()
+			_ = childCopy.Save()
 		}
 		s.audit.Record(AuditEntry{Event: "rename", Session: sessionID, Detail: api.CleanText(name, 100)})
 		reply(map[string]string{"name": name}, nil)

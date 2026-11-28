@@ -157,7 +157,7 @@ func startAgain(m *Manifest, a again) (argv []string, why string, err error) {
 	// knows too: wait for the start before saying it worked.
 	if mm := waitStarted(m.ID, 5*time.Second); mm != nil {
 		if mm.Status.State == StateErrored && mm.Run.AgentPID == 0 {
-			return argv, why, errors.New(mm.Status.Reason)
+			return argv, why, errors.New(startFailedMessage(mm, sessionLogPath(mm), 0))
 		}
 		if mm.Run.Unit == "" && m.Run.Unit != "" {
 			mm.Run.Unit = m.Run.Unit

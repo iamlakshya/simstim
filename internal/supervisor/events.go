@@ -12,6 +12,10 @@ import (
 	"github.com/iamlakshya/simstim/internal/proto"
 )
 
+// maxEarlyEvents caps guest ctl events queued before bootSandbox records the
+// trusted start fields, preventing an untrusted guest from growing memory.
+const maxEarlyEvents = 64
+
 func (s *Supervisor) tickLoop() {
 	defer s.wg.Done()
 	t := time.NewTicker(s.opt.TickInterval)
@@ -60,22 +64,18 @@ func (s *Supervisor) step() {
 	}
 	dirty := s.dirty
 	s.dirty = false
-	var snap host.Manifest
-	if dirty {
-		snap = *s.m
-	}
 	var childSnaps []*host.Manifest
 	for id, sess := range s.sessions {
 		if id == s.id || !sess.dirty {
 			continue
 		}
 		sess.dirty = false
-		cp := *sess.m
+		cp := snapshotManifest(sess.m)
 		childSnaps = append(childSnaps, &cp)
 	}
 	s.mu.Unlock()
 	if dirty {
-		if err := s.save(&snap, false); err != nil {
+		if err := s.save(false); err != nil {
 			s.log.Warn("manifest not saved", "err", err)
 		}
 	}
@@ -125,10 +125,32 @@ func (s *Supervisor) reconcileStatus(memRes host.MemTickResult) {
 func (s *Supervisor) applyGuestEvent(ev guest.Event) {
 	now := time.Now()
 	nowUTC := now.UTC()
-	var savePrimary *host.Manifest
-	var saveChild *host.Manifest
 
 	s.mu.Lock()
+	if s.starting {
+		if len(s.earlyEvents) < maxEarlyEvents {
+			s.earlyEvents = append(s.earlyEvents, ev)
+		}
+		s.mu.Unlock()
+		return
+	}
+	savePrimary, saveChild, foreign := s.applyGuestEventLocked(ev, now, nowUTC)
+	s.mu.Unlock()
+
+	if foreign && s.log != nil {
+		s.log.Warn("dropped ctl event for foreign session", "event", ev.Type, "session", ev.Session)
+		return
+	}
+	if savePrimary {
+		_ = s.save(false)
+	}
+	if saveChild != nil {
+		_ = saveChild.Save()
+	}
+}
+
+// applyGuestEventLocked applies one validated guest event. Caller holds s.mu.
+func (s *Supervisor) applyGuestEventLocked(ev guest.Event, now, nowUTC time.Time) (savePrimary bool, saveChild *host.Manifest, foreign bool) {
 	targetID := ev.Session
 	if targetID == "" {
 		targetID = s.id
@@ -138,11 +160,7 @@ func (s *Supervisor) applyGuestEvent(ev guest.Event) {
 		sess = &sandboxSession{id: s.id, m: s.m}
 	}
 	if sess == nil {
-		s.mu.Unlock()
-		if s.log != nil {
-			s.log.Warn("dropped ctl event for foreign session", "event", ev.Type, "session", ev.Session)
-		}
-		return
+		return false, nil, true
 	}
 	isPrimary := targetID == s.id
 	markDirty := func() {
@@ -165,11 +183,12 @@ func (s *Supervisor) applyGuestEvent(ev guest.Event) {
 			markDirty()
 		}
 	case "agent_id":
-		cp := s.applyAgentID(sess, ev, nowUTC)
-		if isPrimary {
-			savePrimary = cp
-		} else {
-			saveChild = cp
+		if s.applyAgentID(sess, ev, nowUTC) {
+			if isPrimary {
+				return true, nil, false
+			}
+			cp := snapshotManifest(sess.m)
+			return false, &cp, false
 		}
 	case "status":
 		s.applyGuestStatus(sess, ev, nowUTC)
@@ -180,33 +199,27 @@ func (s *Supervisor) applyGuestEvent(ev guest.Event) {
 	case "mem":
 		s.applyGuestMem(ev, nowUTC)
 	case "ended":
-		cp := s.applyGuestEnded(sess, ev, nowUTC)
-		if isPrimary {
-			savePrimary = cp
-		} else {
-			saveChild = cp
+		if s.applyGuestEnded(sess, ev, nowUTC) {
+			if isPrimary {
+				return true, nil, false
+			}
+			cp := snapshotManifest(sess.m)
+			return false, &cp, false
 		}
 	}
-	s.mu.Unlock()
-
-	if savePrimary != nil {
-		_ = s.save(savePrimary, false)
-	}
-	if saveChild != nil {
-		_ = saveChild.Save()
-	}
+	return false, nil, false
 }
 
 // applyAgentID checks and records an agent session ID reported by the guest.
 // Caller holds s.mu.
-func (s *Supervisor) applyAgentID(sess *sandboxSession, ev guest.Event, nowUTC time.Time) *host.Manifest {
+func (s *Supervisor) applyAgentID(sess *sandboxSession, ev guest.Event, nowUTC time.Time) bool {
 	agent, _ := agents.Find(sess.m.Agent.Kind)
 	if err := agent.CheckID(ev.AgentID); err != nil {
 		s.log.Warn("session ID from guest not kept", "session", sess.id, "reason", err.Error(), "kind", sess.m.Agent.Kind)
-		return nil
+		return false
 	}
 	if ev.AgentID == sess.m.Agent.AgentSessionID {
-		return nil
+		return false
 	}
 	sess.m.Agent.AgentSessionID = ev.AgentID
 	sess.m.Agent.IDSource = "hook"
@@ -216,8 +229,7 @@ func (s *Supervisor) applyAgentID(sess *sandboxSession, ev guest.Event, nowUTC t
 	} else {
 		sess.dirty = true
 	}
-	cp := *sess.m
-	return &cp
+	return true
 }
 
 // applyGuestStatus stores a guest status claim while the sandbox is alive.
@@ -310,9 +322,9 @@ func (s *Supervisor) applyGuestMem(ev guest.Event, nowUTC time.Time) {
 // guest claim while the sandbox process itself is still alive. Trusted end,
 // OOM reaping, and link_silent teardown happen only when the sandbox exits.
 // Caller holds s.mu.
-func (s *Supervisor) applyGuestEnded(sess *sandboxSession, ev guest.Event, nowUTC time.Time) *host.Manifest {
+func (s *Supervisor) applyGuestEnded(sess *sandboxSession, ev guest.Event, nowUTC time.Time) bool {
 	if s.ended || s.stopping || sess.ended {
-		return nil
+		return false
 	}
 	code := ev.ExitCode
 	state := host.StateExited
@@ -342,8 +354,7 @@ func (s *Supervisor) applyGuestEnded(sess *sandboxSession, ev guest.Event, nowUT
 		sess.dirty = false
 	}
 	s.audit.Record(AuditEntry{Event: "guest_end", Session: sess.id, ExitCode: &code, Signal: ev.Signal})
-	cp := *sess.m
-	return &cp
+	return true
 }
 
 func (s *Supervisor) initAlerts() {

@@ -198,10 +198,9 @@ func (s *Supervisor) handlePulled(w *proto.Writer, req proto.Request) {
 			added = append(added, c)
 		}
 	}
-	mCopy := *s.m
 	s.mu.Unlock()
 	if len(added) > 0 {
-		_ = s.save(&mCopy, false)
+		_ = s.save(false)
 		s.audit.Record(AuditEntry{
 			Event:   "pulled",
 			Session: s.id,

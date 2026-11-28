@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -159,7 +160,11 @@ func RunHolder(id string) error {
 		h.emitGuestStart(err)
 		h.mu.Lock()
 		code := 127
-		h.m.Status = Status{State: StateErrored, Since: time.Now().UTC(), ExitCode: &code, Reason: err.Error()}
+		reason := strings.TrimSpace(err.Error())
+		if reason == "" {
+			reason = "the agent did not start"
+		}
+		h.m.Status = Status{State: StateErrored, Since: time.Now().UTC(), ExitCode: &code, Reason: reason}
 		h.mu.Unlock()
 		_ = h.save(h.m, true)
 		h.closeSockets()

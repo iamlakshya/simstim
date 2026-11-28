@@ -139,9 +139,10 @@ func cleanPasteDir(dir string, age time.Duration) {
 	}
 }
 
-func (r *runner) readHolderEvents(sessionID string, evR *os.File, started chan<- host.GuestEvent) {
+func (r *runner) readHolderEvents(ctx context.Context, sessionID string, evR *os.File, started chan<- host.GuestEvent, startReplied <-chan struct{}) {
 	defer evR.Close()
 	sentStart := false
+	startOK := false
 	defer func() {
 		if !sentStart {
 			close(started)
@@ -159,8 +160,26 @@ func (r *runner) readHolderEvents(sessionID string, evR *os.File, started chan<-
 		}
 		if !sentStart && (ge.Type == "started" || ge.Type == "start_failed") {
 			sentStart = true
+			startOK = ge.Type == "started"
 			started <- ge
 			close(started)
+			if !startOK {
+				return
+			}
+			// Wait until handleCtlRequest registers the holder and writes the
+			// start TResponse so fast exits never race ahead of the reply.
+			if startReplied != nil {
+				select {
+				case <-startReplied:
+				case <-ctx.Done():
+					return
+				case <-r.stopCh:
+					return
+				}
+			}
+			continue
+		}
+		if !startOK {
 			continue
 		}
 		r.sendEvent(Event{

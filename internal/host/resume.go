@@ -114,7 +114,7 @@ func Resume(a api.ResumeArgs) (*ResumeResult, error) {
 	case errors.As(err, &refused) && refused.Code == dangerRefused:
 		return nil, refused // resumeArgv refused the command, with its own hint
 	case err != nil:
-		return nil, UserError("start_failed", err.Error(), "Check the session log with the host doctor.")
+		return nil, startFailedError(err)
 	}
 	if mm := waitStarted(id, time.Second); mm != nil {
 		m = mm
@@ -155,7 +155,8 @@ var stopWait = 5 * time.Second
 // unit every process that the agent left there. m is the session's
 // manifest, or nil when it cannot be read.
 func stopHolder(id string, m *Manifest) {
-	if alive(id) {
+	wasAlive := alive(id)
+	if wasAlive {
 		_, _ = HolderRequest(id, "kill", nil, 2*time.Second)
 		deadline := time.Now().Add(stopWait)
 		for alive(id) && time.Now().Before(deadline) {
@@ -171,8 +172,12 @@ func stopHolder(id string, m *Manifest) {
 	switch {
 	case m != nil && m.Run.Unit != "":
 		stopUnit(m.Run.Unit)
-	case m != nil && m.Run.HolderPID > 0 && alive(id):
-		killHolder(m.Run.HolderPID)
+	case m != nil && m.Run.HolderPID > 0 && m.Run.HolderPID != os.Getpid():
+		if alive(id) {
+			killHolder(m.Run.HolderPID)
+		} else if wasAlive {
+			waitGone(m.Run.HolderPID, stopWait)
+		}
 	}
 	os.Remove(paths.Socket(id))
 	os.Remove(paths.HookSocket(id))

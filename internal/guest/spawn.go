@@ -35,8 +35,10 @@ func (r *runner) handleMoreCtl(ctx context.Context, reply func(any, *proto.Error
 			reply(nil, &proto.Error{Code: "bad_request", Message: "invalid spawn request", Hint: "Update the host helper."})
 			return
 		}
-		res, perr := r.spawnHolder(ctx, a)
+		startReplied := make(chan struct{})
+		res, perr := r.spawnHolder(ctx, a, startReplied)
 		reply(res, perr)
+		close(startReplied)
 	case "kill_session":
 		var a KillSessionReq
 		if err := json.Unmarshal(req.Args, &a); err != nil || a.Session == "" {
@@ -61,7 +63,7 @@ func (r *runner) handleMoreCtl(ctx context.Context, reply func(any, *proto.Error
 	}
 }
 
-func (r *runner) spawnHolder(ctx context.Context, a SpawnReq) (*SpawnResp, *proto.Error) {
+func (r *runner) spawnHolder(ctx context.Context, a SpawnReq, startReplied <-chan struct{}) (*SpawnResp, *proto.Error) {
 	if a.Session == "" || len(a.Argv) == 0 {
 		return nil, &proto.Error{Code: "bad_request", Message: "spawn requires session and argv", Hint: "Update the host helper."}
 	}
@@ -86,7 +88,7 @@ func (r *runner) spawnHolder(ctx context.Context, a SpawnReq) (*SpawnResp, *prot
 		Notes:    a.Notes,
 		AgentID:  a.AgentID,
 		IDSource: a.IDSource,
-	})
+	}, startReplied)
 	if perr != nil {
 		return nil, perr
 	}

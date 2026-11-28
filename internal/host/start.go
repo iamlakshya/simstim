@@ -2,10 +2,13 @@ package host
 
 import (
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
 	"github.com/iamlakshya/simstim/internal/brand"
+	"github.com/iamlakshya/simstim/internal/paths"
+	"github.com/iamlakshya/simstim/internal/proto"
 )
 
 // startArgv wraps an agent's argv in a short sh script when something must
@@ -52,4 +55,73 @@ func waitStarted(id string, timeout time.Duration) *Manifest {
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
+}
+
+// startFailedMessage returns a non-empty explanation for a session that ended
+// in StateErrored before recording an AgentPID. It prefers the manifest's own
+// reason, then any ERROR line in logPath after from, then the exit code or
+// signal, and finally a plain fallback so start_failed never returns an empty
+// message.
+func startFailedMessage(m *Manifest, logPath string, from int64) string {
+	if m != nil {
+		if r := strings.TrimSpace(m.Status.Reason); r != "" {
+			return r
+		}
+	}
+	if logPath != "" {
+		if line := lastErrorLogLine(logPath, from); line != "" {
+			return "the session did not start: " + logText(line)
+		}
+	}
+	if m != nil {
+		if m.Status.Signal != "" {
+			return fmt.Sprintf("the session did not start (signal %s)", m.Status.Signal)
+		}
+		if m.Status.ExitCode != nil {
+			return fmt.Sprintf("the session did not start (exit code %d)", *m.Status.ExitCode)
+		}
+	}
+	return "the session did not start"
+}
+
+func startFailedError(err error) *proto.Error {
+	msg := ""
+	if err != nil {
+		msg = strings.TrimSpace(err.Error())
+	}
+	if msg == "" {
+		msg = "the session did not start"
+	}
+	return UserError("start_failed", msg, "Check the session log with the host doctor.")
+}
+
+func sessionLogPath(m *Manifest) string {
+	if m == nil {
+		return ""
+	}
+	if isWalled(m) {
+		return paths.SupervisorLog(m.ID)
+	}
+	return paths.HolderLog(m.ID)
+}
+
+func lastErrorLogLine(logPath string, from int64) string {
+	b, err := os.ReadFile(logPath)
+	if err != nil {
+		return ""
+	}
+	if from > 0 && int64(len(b)) >= from {
+		b = b[from:]
+	}
+	trimmed := strings.TrimSpace(string(b))
+	if trimmed == "" {
+		return ""
+	}
+	lines := strings.Split(trimmed, "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		if strings.Contains(lines[i], "level=ERROR") {
+			return lines[i]
+		}
+	}
+	return ""
 }

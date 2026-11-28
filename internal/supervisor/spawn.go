@@ -173,7 +173,7 @@ func (s *Supervisor) handleSpawn(w *proto.Writer, req proto.Request) {
 		return
 	}
 	s.sessions[cm.ID] = child
-	savedCopy := *child.m
+	savedCopy := snapshotManifest(child.m)
 	s.mu.Unlock()
 
 	if err := savedCopy.Save(); err != nil {
@@ -194,7 +194,6 @@ func (s *Supervisor) acceptChildLoop(child *sandboxSession) {
 		if !s.trackConn(conn) {
 			continue
 		}
-		s.wg.Add(1)
 		go func(c net.Conn) {
 			defer s.wg.Done()
 			defer s.untrackConn(c)
@@ -226,7 +225,7 @@ func (s *Supervisor) killChildSession(id string) {
 
 	s.mu.Lock()
 	child.m.Status = host.Status{State: host.StateExited, Since: time.Now().UTC(), Reason: "killed by request", Claimed: false}
-	cp := *child.m
+	cp := snapshotManifest(child.m)
 	s.mu.Unlock()
 	_ = cp.Save()
 	s.audit.Record(AuditEntry{Event: "kill", Session: id, Detail: "child session stopped"})
@@ -270,7 +269,7 @@ func (s *Supervisor) finalizeChildrenLocked(reason string, system bool) []*host.
 		default:
 			sess.m.Status.Claimed = false
 		}
-		cp := *sess.m
+		cp := snapshotManifest(sess.m)
 		out = append(out, &cp)
 	}
 	return out
@@ -305,7 +304,6 @@ func (s *Supervisor) recordExtraAgent(kind string) {
 	wallCopy.ExtraAgents = append(slices.Clone(s.m.Wall.ExtraAgents), kind)
 	s.m.Wall = &wallCopy
 	s.dirty = true
-	cp := *s.m
 	s.mu.Unlock()
-	_ = s.save(&cp, false)
+	_ = s.save(false)
 }

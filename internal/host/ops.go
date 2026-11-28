@@ -278,7 +278,7 @@ func startSession(m *Manifest, secrets map[string]api.Secret) (*SessionInfo, err
 	}
 	logSkippedCopies(id, m.Git)
 	if err := startSessionProc(m); err != nil {
-		return nil, UserError("start_failed", err.Error(), "Check the session log with the host doctor.")
+		return nil, startFailedError(err)
 	}
 	if err := deliverSecrets(id, secrets); err != nil {
 		_ = deleteSession(id, nil, &DeleteResult{})
@@ -288,7 +288,7 @@ func startSession(m *Manifest, secrets map[string]api.Secret) (*SessionInfo, err
 		if mm.Status.State == StateErrored && mm.Run.AgentPID == 0 {
 			// The holder answered on its socket, as it does before the agent
 			// starts, and then could not start the agent.
-			return nil, UserError("start_failed", mm.Status.Reason, "Check the session log with the host doctor.")
+			return nil, UserError("start_failed", startFailedMessage(mm, sessionLogPath(mm), 0), "Check the session log with the host doctor.")
 		}
 		if mm.Run.Unit == "" && m.Run.Unit != "" {
 			mm.Run.Unit = m.Run.Unit

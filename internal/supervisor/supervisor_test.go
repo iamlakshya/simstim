@@ -544,3 +544,250 @@ func TestGuestRepliesCleanedAndStalledUploadTimesOut(t *testing.T) {
 		t.Fatalf("stalled upload reply = %+v, want upload timeout error", resp2)
 	}
 }
+
+func TestEarlyGuestEndedBeforeStartResponseRecordsAgentPID(t *testing.T) {
+	hosttest.New(t)
+	id := host.NewID()
+	seedWalledManifest(t, id, "custom")
+	sb := newFakeSandbox(t)
+	_ = runSupervisorBG(t, id, sb, supervisor.Options{TickInterval: 50 * time.Millisecond})
+
+	sess := link.New(sb.guestConn, link.Guest, link.Options{})
+	t.Cleanup(func() { _ = sess.Close() })
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	ctl, err := sess.Accept(ctx)
+	if err != nil {
+		t.Fatalf("accept ctl: %v", err)
+	}
+	r := bufio.NewReader(ctl)
+	w := proto.NewWriter(ctl)
+	_ = ctl.SetReadDeadline(time.Now().Add(5 * time.Second))
+	f, err := proto.Read(r)
+	if err != nil || f.Type != proto.TRequest {
+		t.Fatalf("read start request: %v (%v)", f, err)
+	}
+	var req proto.Request
+	if err := json.Unmarshal(f.Payload, &req); err != nil || req.Op != "start" {
+		t.Fatalf("expected start op, got %+v (%v)", req, err)
+	}
+
+	// Send a fast non-zero ended event BEFORE replying to start. The supervisor
+	// must queue it rather than saving StateErrored with AgentPID == 0.
+	if err := w.WriteJSON(proto.TEvent, guest.Event{Type: "ended", Session: id, ExitCode: 3}); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(40 * time.Millisecond)
+	if mid, err := host.LoadManifest(id); err != nil {
+		t.Fatal(err)
+	} else if mid.Status.State != host.StateStarting || mid.Run.AgentPID != 0 {
+		t.Fatalf("early ended mutated manifest before start completed: state=%q pid=%d", mid.Status.State, mid.Run.AgentPID)
+	}
+
+	res, _ := json.Marshal(guest.StartResp{HolderPID: 100, AgentPID: 101, Cols: 80, Rows: 24})
+	if err := w.WriteJSON(proto.TResponse, proto.Response{ID: req.ID, OK: true, Result: res}); err != nil {
+		t.Fatal(err)
+	}
+	_ = ctl.SetReadDeadline(time.Time{})
+	go func() {
+		for {
+			f, err := proto.Read(r)
+			if err != nil {
+				return
+			}
+			if f.Type == proto.TRequest {
+				var stopReq proto.Request
+				if json.Unmarshal(f.Payload, &stopReq) == nil && stopReq.Op == "stop" {
+					_ = w.WriteJSON(proto.TResponse, proto.Response{ID: stopReq.ID, OK: true, Result: json.RawMessage(`{}`)})
+					return
+				}
+			}
+		}
+	}()
+
+	var m *host.Manifest
+	hosttest.WaitFor(t, 5*time.Second, "post-start manifest saved", func() bool {
+		lm, lerr := host.LoadManifest(id)
+		if lerr == nil && lm.Status.State != host.StateStarting {
+			m = lm
+			return true
+		}
+		return false
+	})
+	if m.Run.AgentPID != 101 || m.Run.HolderPID == 0 {
+		t.Fatalf("post-start PIDs missing: %+v", m.Run)
+	}
+	if m.Status.State != host.StateErrored || !m.Status.Claimed || m.Status.ExitCode == nil || *m.Status.ExitCode != 3 {
+		t.Fatalf("status = %+v, want claimed errored exit 3", m.Status)
+	}
+	// Session socket acceptLoop must already be serving as soon as the manifest publishes.
+	if _, err := host.HolderRequest(id, "info", nil, time.Second); err != nil {
+		t.Fatalf("info right after start manifest published: %v", err)
+	}
+	audit, err := os.ReadFile(paths.AuditLog(id))
+	if err != nil {
+		t.Fatal(err)
+	}
+	startIdx := bytes.Index(audit, []byte(`"event":"start"`))
+	endIdx := bytes.Index(audit, []byte(`"event":"guest_end"`))
+	if startIdx < 0 || endIdx < 0 || startIdx >= endIdx {
+		t.Fatalf("audit order wrong (start=%d guest_end=%d):\n%s", startIdx, endIdx, audit)
+	}
+}
+
+func TestBootSandboxEmptyGuestErrorWritesNonEmptyReason(t *testing.T) {
+	hosttest.New(t)
+	id := host.NewID()
+	seedWalledManifest(t, id, "custom")
+	sb := newFakeSandbox(t)
+	done := runSupervisorBG(t, id, sb, supervisor.Options{TickInterval: 50 * time.Millisecond})
+
+	sess := link.New(sb.guestConn, link.Guest, link.Options{})
+	t.Cleanup(func() { _ = sess.Close() })
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	ctl, err := sess.Accept(ctx)
+	if err != nil {
+		t.Fatalf("accept ctl: %v", err)
+	}
+	r := bufio.NewReader(ctl)
+	w := proto.NewWriter(ctl)
+	_ = ctl.SetReadDeadline(time.Now().Add(5 * time.Second))
+	f, err := proto.Read(r)
+	if err != nil || f.Type != proto.TRequest {
+		t.Fatalf("read start request: %v (%v)", f, err)
+	}
+	var req proto.Request
+	if err := json.Unmarshal(f.Payload, &req); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.WriteJSON(proto.TResponse, proto.Response{
+		ID:    req.ID,
+		OK:    false,
+		Error: &proto.Error{Code: "start_failed", Message: ""},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	select {
+	case err := <-done:
+		if err == nil || strings.TrimSpace(err.Error()) == "" {
+			t.Fatalf("RunWith = %v, want non-empty error", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("supervisor did not exit after failed start")
+	}
+	m, err := host.LoadManifest(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.Status.State != host.StateErrored || strings.TrimSpace(m.Status.Reason) == "" {
+		t.Fatalf("failed start manifest status = %+v, want StateErrored with non-empty Reason", m.Status)
+	}
+}
+
+func TestAcceptLoopShutdownNoWaitGroupRace(t *testing.T) {
+	hosttest.New(t)
+	for i := range 6 {
+		id := host.NewID()
+		seedWalledManifest(t, id, "custom")
+		sb := newFakeSandbox(t)
+		done := runSupervisorBG(t, id, sb, supervisor.Options{
+			TickInterval: 50 * time.Millisecond,
+			StopGrace:    200 * time.Millisecond,
+		})
+
+		sess := link.New(sb.guestConn, link.Guest, link.Options{})
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		ctl, err := sess.Accept(ctx)
+		cancel()
+		if err != nil {
+			_ = sess.Close()
+			t.Fatalf("iter %d: accept ctl: %v", i, err)
+		}
+		r := bufio.NewReader(ctl)
+		w := proto.NewWriter(ctl)
+		_ = ctl.SetReadDeadline(time.Now().Add(5 * time.Second))
+		f, err := proto.Read(r)
+		if err != nil || f.Type != proto.TRequest {
+			_ = sess.Close()
+			t.Fatalf("iter %d: read start request: %v (%v)", i, f, err)
+		}
+		var req proto.Request
+		if err := json.Unmarshal(f.Payload, &req); err != nil {
+			_ = sess.Close()
+			t.Fatalf("iter %d: decode start request: %v", i, err)
+		}
+		res, _ := json.Marshal(guest.StartResp{HolderPID: 100, AgentPID: 101, Cols: 80, Rows: 24})
+		if err := w.WriteJSON(proto.TResponse, proto.Response{ID: req.ID, OK: true, Result: res}); err != nil {
+			_ = sess.Close()
+			t.Fatalf("iter %d: write start reply: %v", i, err)
+		}
+		hosttest.WaitFor(t, 5*time.Second, "session socket ready", func() bool {
+			_, err := host.HolderRequest(id, "info", nil, 200*time.Millisecond)
+			return err == nil
+		})
+
+		stopHammer := make(chan struct{})
+		hammerDone := make(chan struct{})
+		go func() {
+			defer close(hammerDone)
+			for {
+				select {
+				case <-stopHammer:
+					return
+				default:
+					_, _ = host.HolderRequest(id, "info", nil, 100*time.Millisecond)
+				}
+			}
+		}()
+
+		// Alternate between finishStop ("kill") and finishSandboxExit while
+		// socket clients keep connecting concurrently.
+		if i%2 == 0 {
+			_ = ctl.SetReadDeadline(time.Now().Add(5 * time.Second))
+			stopReplied := make(chan struct{})
+			go func() {
+				defer close(stopReplied)
+				if sf, serr := proto.Read(r); serr == nil && sf.Type == proto.TRequest {
+					var sreq proto.Request
+					if json.Unmarshal(sf.Payload, &sreq) == nil && sreq.Op == "stop" {
+						_ = w.WriteJSON(proto.TResponse, proto.Response{ID: sreq.ID, OK: true, Result: json.RawMessage(`{}`)})
+						_ = sb.killWith(supervisor.Exit{Code: 0})
+					}
+				}
+			}()
+			if _, err := host.HolderRequest(id, "kill", nil, time.Second); err != nil {
+				_ = sess.Close()
+				close(stopHammer)
+				<-hammerDone
+				t.Fatalf("iter %d: kill request: %v", i, err)
+			}
+			defer func(s *link.Session, ch <-chan struct{}) {
+				_ = s.Close()
+				<-ch
+			}(sess, stopReplied)
+		} else {
+			_ = sess.Close()
+			_ = sb.killWith(supervisor.Exit{Code: 0})
+		}
+		select {
+		case err := <-done:
+			if err != nil {
+				close(stopHammer)
+				<-hammerDone
+				t.Fatalf("iter %d: RunWith = %v", i, err)
+			}
+		case <-time.After(5 * time.Second):
+			close(stopHammer)
+			<-hammerDone
+			t.Fatalf("iter %d: supervisor did not exit", i)
+		}
+		close(stopHammer)
+		select {
+		case <-hammerDone:
+		case <-time.After(2 * time.Second):
+			t.Fatalf("iter %d: hammer goroutine did not stop", i)
+		}
+	}
+}

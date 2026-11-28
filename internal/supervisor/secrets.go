@@ -7,12 +7,15 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"os"
+	"slices"
 	"syscall"
 	"time"
 
 	"github.com/iamlakshya/simstim/internal/api"
 	"github.com/iamlakshya/simstim/internal/guest"
 	"github.com/iamlakshya/simstim/internal/host"
+	"github.com/iamlakshya/simstim/internal/paths"
 	"github.com/iamlakshya/simstim/internal/proto"
 	"github.com/iamlakshya/simstim/internal/version"
 )
@@ -177,9 +180,6 @@ func (s *Supervisor) finishStop(reason string, system bool) {
 	}
 
 	s.closeAllPorts()
-	s.closeChildSockets()
-	s.closeSocket()
-	<-s.acceptDone
 	s.closeAllConns()
 	_ = s.link.Close()
 	s.wg.Wait()
@@ -197,22 +197,23 @@ func (s *Supervisor) finishStop(reason string, system bool) {
 	default:
 		s.m.Status.Claimed = false
 	}
-	mCopy := *s.m
 	childCopies := s.finalizeChildrenLocked(reason, system)
 	s.mu.Unlock()
-	_ = s.save(&mCopy, true)
+	_ = s.save(true)
 	for _, cc := range childCopies {
 		_ = cc.Save()
 	}
 	s.audit.Record(AuditEntry{Event: "kill", Session: s.id, Detail: reason})
+	// Close the session sockets last so callers polling alive(id) (such as
+	// resume or delete) wait until sb.Destroy and the final manifest saves finish.
+	s.closeChildSockets()
+	s.closeSocket()
+	<-s.acceptDone
 }
 
 func (s *Supervisor) finishSandboxExit(ex Exit) {
 	close(s.doneCh)
 	s.closeAllPorts()
-	s.closeChildSockets()
-	s.closeSocket()
-	<-s.acceptDone
 	s.closeAllConns()
 	_ = s.link.Close()
 	s.wg.Wait()
@@ -245,14 +246,16 @@ func (s *Supervisor) finishSandboxExit(ex Exit) {
 		s.alertEnded(code, ex.Signal, oom)
 		s.audit.Record(AuditEntry{Event: "link_error", Session: s.id, ExitCode: &code, Signal: ex.Signal, OOM: oom})
 	}
-	mCopy := *s.m
 	childCopies := s.finalizeChildrenLocked("the sandbox exited unexpectedly", false)
 	s.mu.Unlock()
 	s.closeAlerts()
-	_ = s.save(&mCopy, true)
+	_ = s.save(true)
 	for _, cc := range childCopies {
 		_ = cc.Save()
 	}
+	s.closeChildSockets()
+	s.closeSocket()
+	<-s.acceptDone
 }
 
 func (s *Supervisor) finishLinkClosed() {
@@ -262,12 +265,82 @@ func (s *Supervisor) finishLinkClosed() {
 	s.finishSandboxExit(s.sb.Wait())
 }
 
-func (s *Supervisor) save(m *host.Manifest, last bool) error {
+// finishStart records the trusted start metadata from StartResp, logs the
+// start audit event, and replays any guest ctl events that arrived before
+// start completed. All of this happens before the first post-start manifest is
+// written, so an early guest exit can never write StateErrored with AgentPID 0.
+func (s *Supervisor) finishStart(sr guest.StartResp) {
+	now := time.Now()
+	nowUTC := now.UTC()
+	s.mu.Lock()
+	s.m.RunHook = ""
+	if u := host.OwnUnit(s.id); u != "" {
+		s.m.Run.Unit = u
+	}
+	s.m.Run.HolderPID = os.Getpid()
+	s.m.Run.AgentPID = sr.AgentPID
+	s.m.Run.Socket = paths.Socket(s.id)
+	s.m.Run.BootID = host.BootID()
+	s.m.Run.StartedAt = nowUTC
+	if exe, err := os.Executable(); err == nil {
+		s.m.HolderBinary = exe
+	}
+	s.m.HostVersion = version.Version
+	if sr.Cols > 0 && sr.Rows > 0 {
+		s.m.Term.Cols, s.m.Term.Rows = sr.Cols, sr.Rows
+	}
+	if !s.ended {
+		s.m.Status = host.Status{State: host.StateWorking, Since: nowUTC, Source: "start"}
+	}
+	s.lastHB = now
+	s.starting = false
+	wallLvl, wallDrv := "", ""
+	if s.m.Wall != nil {
+		wallLvl, wallDrv = s.m.Wall.Level, s.m.Wall.Driver
+	}
+	s.audit.Record(AuditEntry{Event: "start", Session: s.id, Wall: wallLvl, Driver: wallDrv})
+	queued := s.earlyEvents
+	s.earlyEvents = nil
+	for _, ev := range queued {
+		s.applyGuestEventLocked(ev, now, nowUTC)
+	}
+	s.mu.Unlock()
+}
+
+// snapshotManifest returns a copy of m safe to marshal or save after releasing
+// s.mu. Callers must hold s.mu.
+func snapshotManifest(m *host.Manifest) host.Manifest {
+	cp := *m
+	if m.Usage != nil {
+		cp.Usage = m.Usage.Clone()
+	}
+	if m.Guest != nil {
+		g := *m.Guest
+		g.Ports = slices.Clone(g.Ports)
+		if g.Mem != nil {
+			mem := *g.Mem
+			g.Mem = &mem
+		}
+		cp.Guest = &g
+	}
+	cp.Agent.IDHistory = slices.Clone(m.Agent.IDHistory)
+	cp.GrantedPorts = slices.Clone(m.GrantedPorts)
+	cp.MissingSecrets = slices.Clone(m.MissingSecrets)
+	cp.Pulled = slices.Clone(m.Pulled)
+	return cp
+}
+
+// save snapshots the latest manifest under saveMu so concurrent writers never
+// overwrite newer state with a stale copy.
+func (s *Supervisor) save(last bool) error {
 	s.saveMu.Lock()
 	defer s.saveMu.Unlock()
 	if s.closed {
 		return nil
 	}
+	s.mu.Lock()
+	cp := snapshotManifest(s.m)
+	s.mu.Unlock()
 	s.closed = last
-	return m.Save()
+	return cp.Save()
 }

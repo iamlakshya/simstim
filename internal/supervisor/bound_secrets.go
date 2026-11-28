@@ -398,9 +398,8 @@ func (s *Supervisor) handleArm(w *proto.Writer, req proto.Request) {
 			s.m.MissingSecrets = slices.Clone(kept)
 		}
 	}
-	mCopy := *s.m
 	s.mu.Unlock()
-	_ = s.save(&mCopy, false)
+	_ = s.save(false)
 	s.audit.Record(AuditEntry{Event: "secrets_armed", Session: s.id, Detail: fmt.Sprintf("routes=%d", len(creds))})
 	reply(map[string]any{"armed": armed}, nil)
 }

@@ -137,9 +137,10 @@ func waitSocketLog(id, logPath string, from int64, timeout time.Duration) error 
 			c.Close()
 			return nil
 		}
-		// The holder or supervisor writes an errored status if startup failed.
-		if m, err := LoadManifest(id); err == nil && m.Status.State == StateErrored {
-			return errors.New(m.Status.Reason)
+		// The holder or supervisor writes an errored status with AgentPID == 0
+		// if startup failed before the agent started.
+		if m, err := LoadManifest(id); err == nil && m.Status.State == StateErrored && m.Run.AgentPID == 0 {
+			return errors.New(startFailedMessage(m, logPath, from))
 		}
 		time.Sleep(50 * time.Millisecond)
 	}

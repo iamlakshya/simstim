@@ -9,7 +9,6 @@ import (
 	"github.com/iamlakshya/simstim/internal/alerts"
 	"github.com/iamlakshya/simstim/internal/api"
 	"github.com/iamlakshya/simstim/internal/egress"
-	"github.com/iamlakshya/simstim/internal/host"
 	"github.com/iamlakshya/simstim/internal/proto"
 )
 
@@ -21,7 +20,7 @@ func (s *Supervisor) handleEgressUsageAndBudget(ev egress.AuditEvent) {
 	if ev.Usage == nil && ev.Rule != "model_budget" {
 		return
 	}
-	var saveSnap *host.Manifest
+	needSave := false
 	s.mu.Lock()
 	if ev.Usage != nil {
 		next := s.m.Usage.Clone()
@@ -46,8 +45,7 @@ func (s *Supervisor) handleEgressUsageAndBudget(ev egress.AuditEvent) {
 			next.Budget = s.m.Wall.ModelBudget
 		}
 		s.m.Usage = next
-		cp := *s.m
-		saveSnap = &cp
+		needSave = true
 	}
 	if ev.Rule == "model_budget" {
 		if ev.BudgetLimit > 0 {
@@ -66,8 +64,8 @@ func (s *Supervisor) handleEgressUsageAndBudget(ev egress.AuditEvent) {
 	}
 	s.mu.Unlock()
 
-	if saveSnap != nil {
-		if err := s.save(saveSnap, false); err != nil {
+	if needSave {
+		if err := s.save(false); err != nil {
 			s.log.Warn("manifest usage not saved", "err", err)
 		}
 	}
@@ -151,8 +149,7 @@ func (s *Supervisor) handlePolicyReload(w *proto.Writer, req proto.Request) {
 			s.budgetAlertLimit = 0
 		}
 	}
-	cp := *s.m
 	s.mu.Unlock()
-	_ = s.save(&cp, false)
+	_ = s.save(false)
 	_ = w.WriteJSON(proto.TResponse, proto.Response{ID: req.ID, OK: true})
 }

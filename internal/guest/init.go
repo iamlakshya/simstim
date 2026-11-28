@@ -313,8 +313,10 @@ func (r *runner) handleCtlRequest(ctx context.Context, w *proto.Writer, req prot
 			reply(nil, &proto.Error{Code: "bad_request", Message: "invalid start request", Hint: "Update the host helper."})
 			return
 		}
-		res, perr := r.startHolder(ctx, a)
+		startReplied := make(chan struct{})
+		res, perr := r.startHolder(ctx, a, startReplied)
 		reply(res, perr)
+		close(startReplied)
 	case "stop":
 		var a StopReq
 		_ = json.Unmarshal(req.Args, &a)
@@ -331,7 +333,7 @@ func (r *runner) handleCtlRequest(ctx context.Context, w *proto.Writer, req prot
 	}
 }
 
-func (r *runner) startHolder(ctx context.Context, a StartReq) (*StartResp, *proto.Error) {
+func (r *runner) startHolder(ctx context.Context, a StartReq, startReplied <-chan struct{}) (*StartResp, *proto.Error) {
 	if err := ctx.Err(); err != nil {
 		return nil, &proto.Error{Code: "start_failed", Message: err.Error(), Hint: "Try again."}
 	}
@@ -438,7 +440,7 @@ func (r *runner) startHolder(ctx context.Context, a StartReq) (*StartResp, *prot
 	}()
 
 	started := make(chan host.GuestEvent, 1)
-	go r.readHolderEvents(a.Session, evR, started)
+	go r.readHolderEvents(ctx, a.Session, evR, started, startReplied)
 
 	select {
 	case ev, ok := <-started:
@@ -446,7 +448,11 @@ func (r *runner) startHolder(ctx context.Context, a StartReq) (*StartResp, *prot
 			return nil, &proto.Error{Code: "start_failed", Message: "the guest holder exited before starting the agent", Hint: "Check the session logs."}
 		}
 		if ev.Type == "start_failed" {
-			return nil, &proto.Error{Code: "start_failed", Message: ev.Reason, Hint: "Check the session command and logs."}
+			msg := ev.Reason
+			if msg == "" {
+				msg = "the guest holder could not start the agent"
+			}
+			return nil, &proto.Error{Code: "start_failed", Message: msg, Hint: "Check the session command and logs."}
 		}
 		r.mu.Lock()
 		mh.agentPID = ev.AgentPID

@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -184,7 +185,11 @@ func (h *Holder) emitGuestStart(startErr error) {
 		return
 	}
 	if startErr != nil {
-		h.emitGuest(GuestEvent{Type: "start_failed", Reason: startErr.Error()})
+		reason := strings.TrimSpace(startErr.Error())
+		if reason == "" {
+			reason = "the agent did not start"
+		}
+		h.emitGuest(GuestEvent{Type: "start_failed", Reason: reason})
 		return
 	}
 	h.mu.Lock()

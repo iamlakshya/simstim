@@ -256,9 +256,8 @@ func (s *Supervisor) grantedPortsLocked() []int {
 func (s *Supervisor) saveGrantedPorts(ports []int) {
 	s.mu.Lock()
 	s.m.GrantedPorts = ports
-	cp := *s.m
 	s.mu.Unlock()
-	if err := s.save(&cp, false); err != nil {
+	if err := s.save(false); err != nil {
 		s.log.Warn("manifest not saved after port grant change", "err", err)
 	}
 }

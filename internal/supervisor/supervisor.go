@@ -87,6 +87,8 @@ type Supervisor struct {
 	m                *host.Manifest
 	sessions         map[string]*sandboxSession
 	mem              host.MemTracker
+	starting         bool
+	earlyEvents      []guest.Event
 	dirty            bool
 	ended            bool
 	stopping         bool
@@ -96,8 +98,9 @@ type Supervisor struct {
 	budgetAlerted    bool
 	budgetAlertLimit int64
 
-	saveMu sync.Mutex
-	closed bool
+	saveMu        sync.Mutex
+	closed        bool
+	closeSockOnce sync.Once
 
 	wg     sync.WaitGroup
 	connMu sync.Mutex
@@ -196,11 +199,13 @@ func RunWith(id string, sb Sandbox, opt Options) error {
 		s.log.Error("egress start failed", "err", err)
 		code := 127
 		reason := api.CleanText(err.Error(), maxDetailRunes)
+		if reason == "" {
+			reason = "egress proxy failed to start"
+		}
 		s.mu.Lock()
 		s.m.Status = host.Status{State: host.StateErrored, Since: time.Now().UTC(), ExitCode: &code, Reason: reason}
-		mCopy := *s.m
 		s.mu.Unlock()
-		_ = s.save(&mCopy, true)
+		_ = s.save(true)
 		return err
 	}
 	defer s.closeEgress()
@@ -208,24 +213,32 @@ func RunWith(id string, sb Sandbox, opt Options) error {
 	restored := host.WasRestored(m)
 	secretEnv, notes := s.secretsBeforeStart(restored)
 
-	if err := s.bootSandbox(secretEnv, notes, restored); err != nil {
+	if err := s.bootSandbox(secretEnv, notes); err != nil {
 		s.log.Error("sandbox start failed", "err", err)
 		code := 127
 		reason := api.CleanText(err.Error(), maxDetailRunes)
+		if reason == "" {
+			reason = "sandbox failed to start"
+		}
 		s.mu.Lock()
 		s.m.Status = host.Status{State: host.StateErrored, Since: time.Now().UTC(), ExitCode: &code, Reason: reason}
-		mCopy := *s.m
 		s.mu.Unlock()
-		_ = s.save(&mCopy, true)
+		_ = s.save(true)
 		_ = s.sb.Kill()
 		_ = s.sb.Destroy()
 		s.wg.Wait()
 		return err
 	}
 
+	// Start serving the session socket and ticks before publishing the started
+	// manifest so callers woken by waitStarted always reach a live acceptLoop.
 	go s.acceptLoop()
 	s.wg.Add(1)
 	go s.tickLoop()
+	if err := s.save(false); err != nil {
+		s.log.Warn("manifest not saved", "err", err)
+	}
+	s.notifyStarted(restored)
 
 	sbExit := make(chan Exit, 1)
 	go func() { sbExit <- s.sb.Wait() }()
@@ -266,19 +279,23 @@ func (s *Supervisor) listen() error {
 }
 
 func (s *Supervisor) closeSocket() {
-	if s.ln != nil {
-		_ = s.ln.Close()
-	}
-	_ = os.Remove(paths.Socket(s.id))
+	s.closeSockOnce.Do(func() {
+		if s.ln != nil {
+			_ = s.ln.Close()
+		}
+		_ = os.Remove(paths.Socket(s.id))
+	})
 }
 
-func (s *Supervisor) bootSandbox(secretEnv, notes []string, restored bool) error {
+func (s *Supervisor) bootSandbox(secretEnv, notes []string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
-	// Initialise unit memory tracking before starting ctlReadLoop so a fast
-	// exit event cannot race with MemTracker.Init.
+	// Initialise unit memory tracking and hold early guest ctl events before
+	// starting ctlReadLoop so a fast exit cannot race with MemTracker.Init or
+	// record StateErrored before StartResp supplies AgentPID.
 	s.mu.Lock()
+	s.starting = true
 	s.mem.Init(s.id)
 	s.mu.Unlock()
 
@@ -323,44 +340,12 @@ func (s *Supervisor) bootSandbox(secretEnv, notes []string, restored bool) error
 		return errors.New(ce.Message)
 	}
 	var sr guest.StartResp
-	_ = json.Unmarshal(resp.Result, &sr)
-
-	now := time.Now().UTC()
-	s.mu.Lock()
-	s.m.RunHook = ""
-	if u := host.OwnUnit(s.id); u != "" {
-		s.m.Run.Unit = u
+	if err := json.Unmarshal(resp.Result, &sr); err != nil || sr.AgentPID <= 0 {
+		s.closeAlerts()
+		_ = s.link.Close()
+		return errors.New("guest start reply did not include an agent PID")
 	}
-	s.m.Run.HolderPID = os.Getpid()
-	s.m.Run.AgentPID = sr.AgentPID
-	s.m.Run.Socket = paths.Socket(s.id)
-	s.m.Run.BootID = host.BootID()
-	s.m.Run.StartedAt = now
-	if exe, err := os.Executable(); err == nil {
-		s.m.HolderBinary = exe
-	}
-	s.m.HostVersion = version.Version
-	if sr.Cols > 0 && sr.Rows > 0 {
-		s.m.Term.Cols, s.m.Term.Rows = sr.Cols, sr.Rows
-	}
-	// Only set initial working status if an early guest status/ended claim has
-	// not already arrived before start returned.
-	if !s.ended && s.m.Guest == nil {
-		s.m.Status = host.Status{State: host.StateWorking, Since: now, Source: "start"}
-	}
-	s.lastHB = time.Now()
-	mCopy := *s.m
-	wallLvl, wallDrv := "", ""
-	if s.m.Wall != nil {
-		wallLvl, wallDrv = s.m.Wall.Level, s.m.Wall.Driver
-	}
-	s.mu.Unlock()
-
-	if err := s.save(&mCopy, false); err != nil {
-		s.log.Warn("manifest not saved", "err", err)
-	}
-	s.notifyStarted(restored)
-	s.audit.Record(AuditEntry{Event: "start", Session: s.id, Wall: wallLvl, Driver: wallDrv})
+	s.finishStart(sr)
 	return nil
 }
 
@@ -454,7 +439,6 @@ func (s *Supervisor) acceptLoop() {
 		if !s.trackConn(conn) {
 			continue
 		}
-		s.wg.Add(1)
 		go func(c net.Conn) {
 			defer s.wg.Done()
 			defer s.untrackConn(c)
@@ -471,6 +455,9 @@ func (s *Supervisor) trackConn(c net.Conn) bool {
 		return false
 	}
 	s.conns[c] = struct{}{}
+	// Add to wg under connMu so every Add strictly happens-before
+	// closeAllConns() (which sets conns=nil under connMu) and s.wg.Wait().
+	s.wg.Add(1)
 	s.connMu.Unlock()
 	return true
 }
