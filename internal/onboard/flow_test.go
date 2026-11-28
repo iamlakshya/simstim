@@ -170,8 +170,17 @@ func TestInstallAndLoginArgs(t *testing.T) {
 	if _, ok := LoginArgs(aider); ok {
 		t.Fatal("aider has no login command")
 	}
-	if got := LoginCommand("box", agy); got != brand.Name+" new box --agent antigravity" {
+	if got := LoginCommand("box", agy); got != brand.Name+" agents login antigravity box" {
 		t.Fatalf("login command = %q", got)
+	}
+	if got := LoginCommand("box", claude); got != brand.Name+" agents login claude box" {
+		t.Fatalf("claude login command = %q", got)
+	}
+	if got := LoginCommand("box", aider); got != "" {
+		t.Fatalf("aider login command = %q", got)
+	}
+	if got := InstallCommand("box", "claude"); got != brand.Name+" agents install claude box" {
+		t.Fatalf("install command = %q", got)
 	}
 }
 
@@ -180,11 +189,12 @@ func TestDescribe(t *testing.T) {
 		c          api.AgentCheck
 		mark, want string
 	}{
-		{api.AgentCheck{Kind: "gemini", Title: "Gemini CLI"}, "✕", "agents install gemini --host box"},
+		{api.AgentCheck{Kind: "gemini", Title: "Gemini CLI"}, "✕", "agents install gemini box"},
 		{api.AgentCheck{Kind: "opencode", Title: "opencode", Installed: true, Path: "/home/dev/.opencode/bin/opencode"}, "✕", `export PATH="/home/dev/.opencode/bin:$PATH"`},
+		{api.AgentCheck{Kind: "opencode", Title: "opencode", Installed: true, Path: "/home/dev/o'connor/$(id)/opencode"}, "✕", "printf '%s\\n'"},
 		{ready("claude", "Claude Code", api.LoginYes), "✓", ""},
-		{ready("codex", "Codex", api.LoginNo), "!", "new box -- codex login --device-auth"},
-		{ready("antigravity", "Antigravity CLI", api.LoginUnknown), "?", "if it asks you to log in"},
+		{ready("codex", "Codex", api.LoginNo), "!", "agents login codex box"},
+		{ready("antigravity", "Antigravity CLI", api.LoginUnknown), "?", "if it asks you to log in: " + brand.Name + " agents login antigravity box"},
 		{ready("aider", "Aider", api.LoginNo), "!", "--secret ANTHROPIC_API_KEY"},
 	}
 	for _, tc := range cases {

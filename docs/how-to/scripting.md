@@ -49,7 +49,7 @@ Opening the launcher, running `flip` with no session, or running `demo` also nee
 
 If the terminal's reader cannot restart after an editor, a shell or key creation, the launcher exits and restores the terminal. Its error says how to continue in a new terminal. Diagnostic key reads also end when cancellation claims success but the read stays blocked. A terminal check refuses a busy or failed reader before sending queries. The session picker gives a terminal recovery hint. Key creation and editor processes use the command context, so cancellation stops them. Failed key creation gives its command in the recovery hint. A check after an install uses SSH without prompts if an earlier terminal read remains blocked.
 
-`agents install` with input off starts the installer in a session, and does not attach to it. The command says how to attach and answer the installer's questions.
+`agents install` and `agents login` with input off start the session on the host and do not attach to it. Each command says how to attach by session ID.
 
 Esc, Ctrl+C, the end of input, or a signal at a question cancels. The command prints `Cancelled. Nothing changed.`, or what it did before the cancel, and exits with 130.
 
@@ -57,7 +57,7 @@ Esc, Ctrl+C, the end of input, or a signal at a question cancels. The command pr
 
 JSON keeps integer sizes exact, including values above 2 to the power of 53. Use an integer type when reading them.
 
-These commands take `--json`: `ls`, `show`, `new --detach`, `resume --detach`, `ports`, `doctor`, `host ls`, `host show`, `host test`, `host upgrade`, `host doctor`, `host restore`, `host status`, `host alerts`, `host alerts log`, `agents ls`, `config keymap` and `version`. `new` and `resume` need `--detach` with `--json`, because an attached session owns the terminal.
+These commands take `--json`: `ls`, `show`, `new --detach`, `resume --detach`, `ports`, `doctor`, `host ls`, `host show`, `host test`, `host upgrade`, `host doctor`, `host restore`, `host status`, `host alerts`, `host alerts log`, `agents ls`, `agents login`, `config check`, `config keymap` and `version`. `new` and `resume` need `--detach` with `--json`, because an attached session owns the terminal.
 
 <!-- test: help (needs a host) -->
 ```sh
@@ -110,6 +110,7 @@ The other commands print these shapes. Each object at the top also has `"v": 1`:
 | `host test` | `host`, `connect_ms` and `round_trip_ms` |
 | `host restore` | `host`, and `results`: each with `id`, `name`, `action` and `why` |
 | `host status` | `host`, `state`, `provider` and `id` for a host that `host create` made, or `host` and `output` with a provider script's output |
+| `agents login` | A session object whose `address` is always `host/id`, plus `started` (`true` when the command started the login, `false` when one was already running) |
 | `version` | `version`, `protocol` and `helper` |
 
 The `address` is what other commands take, so a script can start a session and type into it:

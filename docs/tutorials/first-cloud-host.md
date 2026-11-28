@@ -80,14 +80,14 @@ simstim host doctor my-server
 
 <!-- test: help (runs the vendor's installer) -->
 ```sh
-simstim agents install claude --host my-server
+simstim agents install claude my-server
 ```
 
-Answer the installer's questions in the session that opens. When it is done, the client says how to log in. For Claude Code, run its login in a session, and follow the link it prints:
+Answer the installer's questions in the session that opens. When it is done, the client says how to log in. For Claude Code, start its login in a session, and follow the link it prints:
 
-<!-- test: skip (it starts a login) -->
+<!-- test: help (it starts a login) -->
 ```sh
-simstim new my-server -- claude auth login
+simstim agents login claude my-server
 ```
 
 simstim never sees your login. [Install an agent](../how-to/install-agents.md) has the login for each agent.

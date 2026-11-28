@@ -288,6 +288,7 @@ var synonyms = map[string]map[string]string{
 		"install":  "agents install",
 		"update":   "host upgrade",
 		"upgrade":  "host upgrade",
+		"login":    "agents login",
 		"hosts":    "host ls",
 		"info":     "show",
 		"status":   "show",

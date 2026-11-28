@@ -359,16 +359,21 @@ func LoginArgs(a agents.Agent) (client.NewArgs, bool) {
 	return args, true
 }
 
-// LoginCommand is the command that starts an agent's own login in a new
-// session on host. An agent whose login is its first start starts as itself.
+// LoginCommand is the command that starts an agent's own login in a session
+// on host, as LoginArgs starts it: agents login
+// (docs/contributing/cli-spec.md 12.3). It is "" for an agent without a
+// login of its own.
 func LoginCommand(host string, a agents.Agent) string {
 	if a.Setup == nil || a.Setup.Login == "" {
 		return ""
 	}
-	if a.Setup.Login == a.Binaries[0] {
-		return fmt.Sprintf("%s new %s --agent %s", brand.Name, host, a.Kind)
-	}
-	return fmt.Sprintf("%s new %s -- %s", brand.Name, host, a.Setup.Login)
+	return fmt.Sprintf("%s agents login %s %s", brand.Name, a.Kind, host)
+}
+
+// InstallCommand is the command that installs an agent on host with its
+// vendor's installer.
+func InstallCommand(host, kind string) string {
+	return fmt.Sprintf("%s agents install %s %s", brand.Name, kind, host)
 }
 
 // Log is what a guided setup changed, in order, so that a stop at any step

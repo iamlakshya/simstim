@@ -6,7 +6,7 @@
   ── Log in to Codex? ───────────────────── step 6 of 6 ──
 
     ! Codex             installed, not logged in
-      → simstim new pi -- codex login --device-auth
+      → simstim agents login codex pi
 
     Codex is installed, but not logged in. It logs in
     its own way, in a session named login-codex on pi.

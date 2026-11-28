@@ -29,7 +29,7 @@ Hosts:
   host        Add, create, list, test and remove hosts
 
 Agents:
-  agents      List the agents, and install one on a host
+  agents      List the agents, install one on a host, and log in to it
 
 Images:
   image       List, pull and remove session images on a host

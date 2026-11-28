@@ -68,8 +68,9 @@ simstim attach my-vps/auth-fix      # go back to a session
 
 | Command | What it does |
 | --- | --- |
-| [`agents`](agents.md) | List the agents, and install one on a host |
+| [`agents`](agents.md) | List the agents, install one on a host, and log in to it |
 | [`agents install`](agents_install.md) | Install an agent on a host with its official installer |
+| [`agents login`](agents_login.md) | Start an agent's own login on a host, in a session you can answer |
 | [`agents ls`](agents_ls.md) | List the agents in the agent table, with how each one installs |
 
 ## Images

@@ -44,7 +44,7 @@ A restore or a resume also refuses a command that turns the agent's own approval
 
 ## Install and log in
 
-`simstim agents install <agent>` runs the install command in a session on the host. `host add` and `host doctor` check each first-class and supported agent, and any other installed one: is it installed, does a login shell find it, and is it logged in. You log in yourself, with the agent's own login in a session ([install agents](../how-to/install-agents.md)).
+`simstim agents install <agent> [<host>]` runs the install command in a session on the host, and `simstim agents login <agent> [<host>]` starts the agent's own login in a session. `host add` and `host doctor` check each first-class and supported agent, and any other installed one: is it installed, does a login shell find it, and is it logged in. You log in yourself, with the agent's own login in a session ([install agents](../how-to/install-agents.md)).
 
 | Agent | Install command | Log in with | Logged in when |
 | --- | --- | --- | --- |

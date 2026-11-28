@@ -117,7 +117,7 @@ func codeList(items []string) string {
 // installTable lists each agent's install command and how a host tells that
 // it is logged in.
 func installTable(b *strings.Builder) {
-	fmt.Fprintf(b, "\n## Install and log in\n\n`%s agents install <agent>` runs the install command in a session on the host. `host add` and `host doctor` check each first-class and supported agent, and any other installed one: is it installed, does a login shell find it, and is it logged in. You log in yourself, with the agent's own login in a session ([install agents](../how-to/install-agents.md)).\n\n", brand.Name)
+	fmt.Fprintf(b, "\n## Install and log in\n\n`%s agents install <agent> [<host>]` runs the install command in a session on the host, and `%s agents login <agent> [<host>]` starts the agent's own login in a session. `host add` and `host doctor` check each first-class and supported agent, and any other installed one: is it installed, does a login shell find it, and is it logged in. You log in yourself, with the agent's own login in a session ([install agents](../how-to/install-agents.md)).\n\n", brand.Name, brand.Name)
 	b.WriteString("| Agent | Install command | Log in with | Logged in when |\n| --- | --- | --- | --- |\n")
 	for _, a := range agents.Installable() {
 		s := a.Setup

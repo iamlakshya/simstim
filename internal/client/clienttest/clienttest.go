@@ -67,6 +67,10 @@ type Transport struct {
 	OnRequest func(op string)
 	// Fixes is what doctor.fix lists, and applies as done.
 	Fixes []api.Fix
+	// NewID, if set, is the session ID that "new" returns instead of "fake2".
+	NewID string
+	// NewIDs, if set, are popped in order for successive "new" requests.
+	NewIDs []string
 
 	mu       sync.Mutex
 	remotes  []string
@@ -105,6 +109,13 @@ func (t *Transport) SetAgents(a []api.AgentCheck) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.Agents = a
+}
+
+// SetSessions changes what ls returns.
+func (t *Transport) SetSessions(s []client.Session) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.Sessions = s
 }
 
 // Pings counts the pings the bridge received.
@@ -216,7 +227,9 @@ func (t *Transport) answer(req proto.Request) proto.Response {
 	}
 	switch req.Op {
 	case "ls":
-		sessions := t.Sessions
+		t.mu.Lock()
+		sessions := append([]client.Session(nil), t.Sessions...)
+		t.mu.Unlock()
 		if sessions == nil {
 			sessions = []client.Session{}
 		}
@@ -242,7 +255,17 @@ func (t *Transport) answer(req proto.Request) proto.Response {
 		// A session that runs nothing: the fake only says that it started.
 		var a api.NewArgs
 		_ = json.Unmarshal(req.Args, &a)
-		v = api.SessionInfo{ID: "fake2", Name: a.Name, Agent: a.Agent, State: api.StateStarting, Alive: true}
+		t.mu.Lock()
+		id := "fake2"
+		switch {
+		case len(t.NewIDs) > 0:
+			id = t.NewIDs[0]
+			t.NewIDs = t.NewIDs[1:]
+		case t.NewID != "":
+			id = t.NewID
+		}
+		t.mu.Unlock()
+		v = api.SessionInfo{ID: id, Name: a.Name, Agent: a.Agent, State: api.StateStarting, Alive: true}
 	default:
 		return proto.Response{ID: req.ID, Error: &proto.Error{Code: "unknown_op", Message: "unknown request " + req.Op}}
 	}

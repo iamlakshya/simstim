@@ -27,7 +27,7 @@ def run(c):
     envx.update(XDG_CONFIG_HOME=os.path.join(tmp, "config"), XDG_STATE_HOME=os.path.join(tmp, "state"))
     created = []
     try:
-        agent_checks(c)
+        agent_checks(c, envx, created)
         secret_checks(c, envx, token, created)
         setup_checks(c, envx, tmp, created)
         fix_checks(c)
@@ -55,7 +55,7 @@ def screen(c, envx, sid, want, timeout=30):
     return re.sub(rb"\x1b\[(\d*)C", lambda m: b" " * int(m.group(1) or 1), t.buf)
 
 
-def agent_checks(c):
+def agent_checks(c, envx, created):
     r = subprocess.run([c.cli, "host", "doctor", c.HOST, "--json"], capture_output=True, text=True, timeout=120)
     checks = {a["kind"]: a for a in json.loads(r.stdout).get("agent_checks") or []}
     claude = checks.get("claude", {})
@@ -63,9 +63,25 @@ def agent_checks(c):
          "agents: host doctor checks Claude Code (installed=%s, on PATH=%s, logged in=%s)" % (claude.get("installed"), claude.get("on_path"), claude.get("login")))
     if claude.get("installed"):
         # Harmless: an installed agent is reported, and no installer runs.
-        r = subprocess.run([c.cli, "agents", "install", "claude", "--host", c.HOST], stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=120)
+        r = subprocess.run([c.cli, "agents", "install", "claude", c.HOST], stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=120)
         c.ok(r.returncode == 0 and "is already installed on" in r.stderr and "install-claude" not in r.stdout + r.stderr,
              "agents: install of an installed agent says so and runs nothing")
+    if claude.get("installed") and claude.get("on_path"):
+        r = subprocess.run([c.cli, "agents", "login", "claude", c.HOST, "--json"], env=envx, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=120)
+        obj = json.loads(r.stdout) if r.returncode == 0 and r.stdout.strip() else {}
+        sid = obj.get("id") or ""
+        if obj.get("started") and sid:
+            created.append(sid)
+        c.ok(r.returncode == 0 and obj.get("v") == 1 and obj.get("address") == c.HOST + "/" + sid and obj.get("name") == "login-claude",
+             "agents: login --json starts login-claude with host/id address (%s)" % (r.stdout + r.stderr).strip())
+        if sid:
+            t = c.Term([c.cli, "agents", "login", "claude", c.HOST], env=envx)
+            attached = t.wait_for(rb"already runs in " + (c.HOST + "/" + sid).encode(), 30)
+            t.wait_for(rb"(claude\.ai|https://|Sign in|Log in|auth|Login|Enter|browser|Paste)", 20)
+            t.send(b"\x1c")
+            code = t.exit_code(30)
+            c.ok(attached and code == 0 and b"Claude Code" in t.buf,
+                 "agents: login attaches to running login-claude and detaches cleanly (exit %s)" % code)
 
 
 def secret_checks(c, envx, token, created):

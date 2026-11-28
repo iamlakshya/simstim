@@ -74,6 +74,10 @@ var oldForms = []oldForm{
 		Old: "host destroy", New: "host rm <host> --destroy", Kind: "command", Cmd: "host rm",
 		Version: "0.2.0", Code: "old_command",
 	},
+	{
+		Old: "--force", New: "--reinstall", Kind: "flag", Cmd: "agents install",
+		Version: "0.2.0", Code: "old_flag",
+	},
 }
 
 // The rows that the commands warn with. The release that removes the row
@@ -90,6 +94,8 @@ var (
 	// oldHostIdle and oldHostDestroy are the old names of host set idle=... and host rm --destroy.
 	oldHostIdle    = oldRow("host idle")
 	oldHostDestroy = oldRow("host destroy")
+	// oldInstallForce is the row of `agents install --force` (cli-spec 12.2).
+	oldInstallForce = oldRow("--force")
 )
 
 // oldRow is the row of the old form old.

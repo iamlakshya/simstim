@@ -124,6 +124,7 @@ func TestErrorsOfTheCommandLine(t *testing.T) {
 		{[]string{"agents", "instal", "claude"}, 2, []string{`agents has no command "instal"`, "Try: " + brand.Name + " agents install claude"}},
 		{[]string{"doctor", "termnal"}, 2, []string{`Did you mean "terminal"?`, "Try: " + brand.Name + " doctor terminal"}},
 		{[]string{"install", "claude"}, 2, []string{`Did you mean "agents install"?`, "Try: " + brand.Name + " agents install claude"}},
+		{[]string{"login", "claude"}, 2, []string{`Did you mean "agents login"?`, "Try: " + brand.Name + " agents login claude"}},
 		{[]string{"remove", "box/s"}, 2, []string{`Did you mean "rm"?`, "Try: " + brand.Name + " ls box\n"}},
 		{[]string{"atach", "x", "--debug"}, 2, []string{"Try: " + brand.Name + " ls\n"}},
 		{[]string{"atach", "box/abcd2345", "--debug"}, 2, []string{"Try: " + brand.Name + " attach box/abcd2345 --debug\n"}},
