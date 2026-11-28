@@ -47,7 +47,8 @@ func addDebugFlags(root *cobra.Command) {
 func warnBrokenConfig(cmd *cobra.Command, args []string) {
 	name := cmd.Name()
 	if name == cobra.ShellCompRequestCmd || name == cobra.ShellCompNoDescRequestCmd ||
-		name == "help" || name == "completion" || name == "doctor" {
+		name == "help" || name == "completion" || name == "doctor" ||
+		(cmd.Parent() != nil && cmd.Parent().Name() == "completion") {
 		return
 	}
 	if shortPath(cmd) == "config check" {
@@ -293,12 +294,6 @@ func debugProfileCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().DurationVar(&d, "for", diag.ProfileDefault, "cpu only: how long the profile runs, up to 5m")
-	cmd.ValidArgsFunction = func(_ *cobra.Command, args []string, _ string) ([]string, cobra.ShellCompDirective) {
-		if len(args) == 1 {
-			return []string{diag.ProfileCPU, diag.ProfileHeap, diag.ProfileGoroutine}, cobra.ShellCompDirectiveNoFileComp
-		}
-		return nil, cobra.ShellCompDirectiveNoFileComp
-	}
 	return cmd
 }
 

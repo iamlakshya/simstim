@@ -52,16 +52,10 @@ func cliPages(pages map[string][]byte) error {
 	return nil
 }
 
-// visible lists a command's subcommands that a user can run. It leaves out
-// Cobra's own completion command, which Root() adds so that it gets the
-// client's errors: its help is Cobra's, and the reference does not
-// document it yet (docs/contributing/cli-spec.md 14.5).
+// visible lists a command's subcommands that a user can run.
 func visible(c *cobra.Command) []*cobra.Command {
 	var out []*cobra.Command
 	for _, sub := range c.Commands() {
-		if !c.HasParent() && sub.Name() == "completion" {
-			continue
-		}
 		// Cobra counts its help command as not available, but the root
 		// help lists it, so the reference does too.
 		if sub.IsAvailableCommand() && !cli.IsTopic(sub) || !c.HasParent() && sub.Name() == "help" {
@@ -229,15 +223,58 @@ func shortPath(c *cobra.Command) string {
 
 // prose turns help text into Markdown paragraphs: lines of one paragraph
 // join, flags and commands in it become code, and characters Markdown would
-// read as markup are escaped.
+// read as markup are escaped. Indented command blocks become fenced code
+// blocks, and embedded Markdown headings normalize to level 2 without trailing
+// punctuation so generated pages satisfy Markdown lint.
 func prose(s string) string {
 	blocks := strings.Split(strings.TrimSpace(s), "\n\n")
 	paras := make([]string, 0, len(blocks))
 	for _, p := range blocks {
+		if strings.TrimSpace(p) == "" {
+			continue
+		}
+		if isIndentedBlock(p) {
+			paras = append(paras, "```sh\n"+dedent(p)+"\n```")
+			continue
+		}
+		if heading, ok := headingBlock(p); ok {
+			paras = append(paras, "## "+heading)
+			continue
+		}
 		lines := strings.Fields(strings.ReplaceAll(p, "\n", " "))
 		paras = append(paras, inline(strings.Join(lines, " ")))
 	}
 	return strings.Join(paras, "\n\n")
+}
+
+func isIndentedBlock(p string) bool {
+	hasLine := false
+	for _, l := range strings.Split(p, "\n") {
+		if strings.TrimSpace(l) == "" {
+			continue
+		}
+		hasLine = true
+		if l[0] != ' ' && l[0] != '\t' {
+			return false
+		}
+	}
+	return hasLine
+}
+
+func headingBlock(p string) (string, bool) {
+	if strings.Contains(p, "\n") {
+		return "", false
+	}
+	t := strings.TrimSpace(p)
+	if !strings.HasPrefix(t, "#") {
+		return "", false
+	}
+	text := strings.TrimSpace(strings.TrimLeft(t, "#"))
+	text = strings.TrimRight(text, ":.")
+	if text == "" {
+		return "", false
+	}
+	return text, true
 }
 
 // plainCell is text for a table cell as it is, with its HTML characters and

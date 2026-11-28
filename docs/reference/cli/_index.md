@@ -103,6 +103,11 @@ simstim attach my-vps/auth-fix      # go back to a session
 | [`ssh-config`](ssh-config.md) | Set up SSH for editors, scp, sftp and rsync into sessions |
 | [`demo`](demo.md) | Try the launcher with sample data (nothing connects anywhere) |
 | [`version`](version.md) | Print the version |
+| [`completion`](completion.md) | Generate the autocompletion script for the specified shell |
+| [`completion bash`](completion_bash.md) | Generate the autocompletion script for bash |
+| [`completion fish`](completion_fish.md) | Generate the autocompletion script for fish |
+| [`completion powershell`](completion_powershell.md) | Generate the autocompletion script for powershell |
+| [`completion zsh`](completion_zsh.md) | Generate the autocompletion script for zsh |
 | [`help`](help.md) | Show the help of a command or a topic |
 
 ## Help topics

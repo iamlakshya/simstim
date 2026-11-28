@@ -72,8 +72,7 @@ func TestEveryTopicHasAPage(t *testing.T) {
 }
 
 // The command index lists every command of each group of the root help,
-// help too, under that group, and each one has a page. completion waits
-// for C10 (docs/contributing/cli-spec.md 14.5).
+// help and completion too, under that group, and each one has a page.
 func TestIndexListsEveryGroupedCommand(t *testing.T) {
 	pages := map[string][]byte{}
 	if err := cliPages(pages); err != nil {
@@ -91,9 +90,6 @@ func TestIndexListsEveryGroupedCommand(t *testing.T) {
 			section = section[:end]
 		}
 		for _, name := range g.Commands {
-			if name == "completion" {
-				continue
-			}
 			if !strings.Contains(section, "| [`"+name+"`]("+name+".md) |") {
 				t.Errorf("the group %q of the index does not list %s:\n%s", g.Title, name, section)
 			}
@@ -101,5 +97,18 @@ func TestIndexListsEveryGroupedCommand(t *testing.T) {
 				t.Errorf("%s has no page", name)
 			}
 		}
+	}
+	for _, sh := range []string{"bash", "fish", "powershell", "zsh"} {
+		if _, ok := pages[filepath.Join("cli", "completion_"+sh+".md")]; !ok {
+			t.Errorf("completion %s has no page", sh)
+		}
+	}
+}
+
+func TestProseFormatsCodeAndHeadings(t *testing.T) {
+	in := "Intro line one\nline two.\n\n#### Linux:\n\n  " + brand.Name + " completion zsh > /tmp/x\n\nDone."
+	want := "Intro line one line two.\n\n## Linux\n\n```sh\n" + brand.Name + " completion zsh > /tmp/x\n```\n\nDone."
+	if got := prose(in); got != want {
+		t.Errorf("prose =\n%s\nwant:\n%s", got, want)
 	}
 }

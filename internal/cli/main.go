@@ -62,6 +62,7 @@ func Root() *cobra.Command {
 	root.InitDefaultHelpCmd()
 	root.InitDefaultCompletionCmd()
 	teach(root)
+	wireCompletions(root)
 	for _, c := range root.Commands() {
 		if c.Name() == "help" {
 			c.Args = helpArgs

@@ -1,0 +1,353 @@
+=== host positional (new) ===
+atlas	dev@atlas.example.com
+box	box-ssh
+lima	lima simstim-lima
+:4
+
+=== host positional prefix (new a) ===
+atlas	dev@atlas.example.com
+:4
+
+=== host positional (ls) ===
+atlas	dev@atlas.example.com
+box	box-ssh
+lima	lima simstim-lima
+:4
+
+=== host positional (host show) ===
+atlas	dev@atlas.example.com
+box	box-ssh
+lima	lima simstim-lima
+:4
+
+=== host positional with subcommands (host alerts) ===
+log	Show the host's last alert deliveries, and why any were not sent
+off	Turn alerts off on a host: remove its alerts file
+set	Choose where a host sends alerts, and which ones
+test	Send a test alert to every destination now, and say what each did
+atlas	dev@atlas.example.com
+box	box-ssh
+lima	lima simstim-lima
+:4
+
+=== host positional (image pull arg 1) ===
+atlas	dev@atlas.example.com
+box	box-ssh
+lima	lima simstim-lima
+:4
+
+=== host flag (ls --host) ===
+atlas	dev@atlas.example.com
+box	box-ssh
+lima	lima simstim-lima
+:4
+
+=== host flag (agents install --host) ===
+atlas	dev@atlas.example.com
+box	box-ssh
+lima	lima simstim-lima
+:4
+
+=== host flag (setup --host) ===
+atlas	dev@atlas.example.com
+box	box-ssh
+lima	lima simstim-lima
+:4
+
+=== session address (attach) ===
+atlas/api	codex, idle
+atlas/auth-fix	claude, working
+box/ijkl2345	claude, needs input, seen 5m ago
+box/mnop6789	codex, errored (exit code 1), seen 5m ago
+box/qrst2345	shell, idle, seen 5m ago
+box/uvwx2345	claude, working, seen 5m ago
+:4
+
+=== session address filtered by host (attach box/) ===
+box/ijkl2345	claude, needs input, seen 5m ago
+box/mnop6789	codex, errored (exit code 1), seen 5m ago
+box/qrst2345	shell, idle, seen 5m ago
+box/uvwx2345	claude, working, seen 5m ago
+:4
+
+=== session address (show) ===
+atlas/api	codex, idle
+atlas/auth-fix	claude, working
+box/ijkl2345	claude, needs input, seen 5m ago
+box/mnop6789	codex, errored (exit code 1), seen 5m ago
+box/qrst2345	shell, idle, seen 5m ago
+box/uvwx2345	claude, working, seen 5m ago
+:4
+
+=== session address (debug profile arg 0) ===
+atlas/api	codex, idle
+atlas/auth-fix	claude, working
+box/ijkl2345	claude, needs input, seen 5m ago
+box/mnop6789	codex, errored (exit code 1), seen 5m ago
+box/qrst2345	shell, idle, seen 5m ago
+box/uvwx2345	claude, working, seen 5m ago
+:4
+
+=== debug profile kind (arg 1) ===
+cpu	CPU profile
+heap	Heap memory profile
+goroutine	Goroutine stack profile
+:4
+
+=== host or session (debug bundle) ===
+atlas	dev@atlas.example.com
+box	box-ssh
+lima	lima simstim-lima
+atlas/api	codex, idle
+atlas/auth-fix	claude, working
+box/ijkl2345	claude, needs input, seen 5m ago
+box/mnop6789	codex, errored (exit code 1), seen 5m ago
+box/qrst2345	shell, idle, seen 5m ago
+box/uvwx2345	claude, working, seen 5m ago
+:4
+
+=== host or session filtered (debug bundle atlas/) ===
+atlas/api	codex, idle
+atlas/auth-fix	claude, working
+:4
+
+=== cp arg 0 remote or local ===
+atlas/api:	codex, idle
+atlas/auth-fix:	claude, working
+box/ijkl2345:	claude, needs input, seen 5m ago
+box/mnop6789:	codex, errored (exit code 1), seen 5m ago
+box/qrst2345:	shell, idle, seen 5m ago
+box/uvwx2345:	claude, working, seen 5m ago
+:2
+
+=== cp arg 1 after local source ===
+atlas/api:	codex, idle
+atlas/auth-fix:	claude, working
+box/ijkl2345:	claude, needs input, seen 5m ago
+box/mnop6789:	codex, errored (exit code 1), seen 5m ago
+box/qrst2345:	shell, idle, seen 5m ago
+box/uvwx2345:	claude, working, seen 5m ago
+:6
+
+=== cp arg 1 after remote source ===
+:0
+
+=== agent flag (new --agent) ===
+claude	Claude Code
+codex	Codex
+opencode	opencode
+antigravity	Antigravity CLI
+gemini	Gemini CLI
+amp	Amp
+cursor	Cursor CLI
+aider	Aider
+goose	Goose
+shell	Shell
+:4
+
+=== agents install arg 0 ===
+claude	Claude Code
+codex	Codex
+opencode	opencode
+antigravity	Antigravity CLI
+gemini	Gemini CLI
+amp	Amp
+cursor	Cursor CLI
+aider	Aider
+goose	Goose
+:4
+
+=== agents install arg 1 host ===
+atlas	dev@atlas.example.com
+box	box-ssh
+lima	lima simstim-lima
+:4
+
+=== agents login arg 0 ===
+claude	Claude Code
+codex	Codex
+opencode	opencode
+antigravity	Antigravity CLI
+gemini	Gemini CLI
+amp	Amp
+cursor	Cursor CLI
+goose	Goose
+:4
+
+=== setup --agents empty ===
+claude	Claude Code
+codex	Codex
+opencode	opencode
+antigravity	Antigravity CLI
+gemini	Gemini CLI
+amp	Amp
+cursor	Cursor CLI
+aider	Aider
+goose	Goose
+none	Install no agents
+:6
+
+=== setup --agents after comma ===
+claude,codex	Codex
+claude,opencode	opencode
+claude,antigravity	Antigravity CLI
+claude,gemini	Gemini CLI
+claude,amp	Amp
+claude,cursor	Cursor CLI
+claude,aider	Aider
+claude,goose	Goose
+:6
+
+=== host set keys ===
+floor=	Weakest sandbox level for new sessions
+idle=	Idle stop time for a created host
+label.	Host label (label.<key>=<value>)
+trusted=	Whether you control root on this host
+:6
+
+=== host set key prefix ===
+floor=	Weakest sandbox level for new sessions
+:6
+
+=== host set idle value ===
+idle=never	Never stop when idle
+:4
+
+=== host set floor value ===
+floor=none	No sandbox wall
+floor=process	Bubblewrap process wall
+floor=gvisor	gVisor runsc wall
+floor=microvm	Hardware-virtualised microVM wall
+:4
+
+=== host set trusted value ===
+trusted=true	You control root on this host
+trusted=false	Untrusted host (default)
+:4
+
+=== host set label value ===
+:4
+
+=== host rm --confirm ===
+atlas
+:4
+
+=== wall flag (new --wall) ===
+none	No sandbox wall
+process	Bubblewrap process wall
+gvisor	gVisor runsc wall
+:4
+
+=== floor flag (host add --floor) ===
+none	No sandbox wall
+process	Bubblewrap process wall
+gvisor	gVisor runsc wall
+microvm	Hardware-virtualised microVM wall
+:4
+
+=== autostart flag (host create --autostart) ===
+boot	Start the VM at boot
+login	Start the VM at login
+off	Do not start the VM automatically
+:4
+
+=== provider arg (host create) ===
+lima
+docker
+e2b
+:4
+
+=== provider flag (setup --create) ===
+lima
+docker
+e2b
+:4
+
+=== secret flag (new --secret) ===
+ANTHROPIC_API_KEY
+OPENAI_API_KEY
+:4
+
+=== expose flag (new --expose) ===
+ANTHROPIC_API_KEY
+OPENAI_API_KEY
+:4
+
+=== alert format flag ===
+json	Raw event JSON
+slack	Slack incoming webhook
+discord	Discord webhook
+:4
+
+=== alert events flag after comma ===
+failed,needs_input	Agent is waiting for input
+failed,turn_done	Agent finished a turn
+failed,exited	Agent exited
+failed,oom	Session hit its memory cap
+failed,memory	Session memory warning
+failed,started	Session started
+failed,restored	Session restored after restart
+:6
+
+=== alert test event flag ===
+test	Test alert
+needs_input	Agent is waiting for input
+turn_done	Agent finished a turn
+exited	Agent exited
+failed	Agent failed
+oom	Session hit its memory cap
+memory	Session memory warning
+started	Session started
+restored	Session restored after restart
+:4
+
+=== image pull ref (arg 0) ===
+default	Pinned official buildpack-deps:trixie-scm image
+:4
+
+=== debug flag categories ===
+attach
+net
+memory
+launcher
+runtime
+:6
+
+=== debug flag categories after comma ===
+net,attach
+net,memory
+net,launcher
+net,runtime
+:6
+
+=== debug start --only ===
+attach
+memory
+runtime
+:6
+
+=== completion shells ===
+bash	Generate the autocompletion script for bash
+fish	Generate the autocompletion script for fish
+powershell	Generate the autocompletion script for powershell
+zsh	Generate the autocompletion script for zsh
+:4
+
+=== host subcommands (no old names) ===
+add	Connect a host: check it, install the helper, prepare it
+alerts	Show where a host sends alerts, and the last deliveries
+create	Make a host with lima, docker or e2b, and connect it
+doctor	Check a host's setup, and with --fix fix what it can
+ls	List hosts
+rekey	Replace a host's pinned SSH host key
+restore	Start again the sessions that a host restart stopped
+rm	Forget a host, and optionally delete its created machine
+set	Change named settings of a host
+show	Show a host's settings, sandbox levels and status
+start	Start the host through its provider or provider script
+status	Ask the provider or provider script whether the host is running
+stop	Stop the host through its provider or provider script
+test	Check that a host answers, and how fast
+upgrade	Install or update this client's helper on a host
+:4
+
