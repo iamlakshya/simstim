@@ -19,6 +19,7 @@ require (
 	github.com/elazarl/goproxy v1.9.4
 	github.com/godbus/dbus/v5 v5.1.0
 	github.com/google/go-containerregistry v0.22.1
+	github.com/google/nftables v0.3.0
 	github.com/klauspost/compress v1.19.2
 	github.com/landlock-lsm/go-landlock v0.11.0
 	github.com/muesli/cancelreader v0.2.2
@@ -47,10 +48,13 @@ require (
 	github.com/docker/cli v29.7.2+incompatible // indirect
 	github.com/docker/docker-credential-helpers v0.9.3 // indirect
 	github.com/ebitengine/purego v0.10.1 // indirect
+	github.com/google/go-cmp v0.7.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/kr/fs v0.1.0 // indirect
 	github.com/lucasb-eyer/go-colorful v1.4.1 // indirect
 	github.com/mattn/go-runewidth v0.0.30 // indirect
+	github.com/mdlayher/netlink v1.7.3-0.20250113171957-fbb4dce95f42 // indirect
+	github.com/mdlayher/socket v0.5.1 // indirect
 	github.com/opencontainers/go-digest v1.0.0 // indirect
 	github.com/opencontainers/image-spec v1.1.1 // indirect
 	github.com/pkg/errors v0.9.1 // indirect

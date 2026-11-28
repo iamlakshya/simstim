@@ -88,20 +88,24 @@ type StopReq struct {
 
 // Event is one ctl TEvent sent from the guest init to the supervisor.
 type Event struct {
-	Type       string     `json:"type"`
-	Session    string     `json:"session,omitempty"`
-	State      string     `json:"state,omitempty"`
-	Source     string     `json:"source,omitempty"`
-	Reason     string     `json:"reason,omitempty"`
-	FullScreen bool       `json:"full_screen,omitempty"`
-	Kind       string     `json:"kind,omitempty"`
-	Detail     string     `json:"detail,omitempty"`
-	TurnNS     int64      `json:"turn_ns,omitempty"`
-	AgentID    string     `json:"id,omitempty"`
-	IDSource   string     `json:"id_source,omitempty"`
-	ExitCode   int        `json:"exit_code,omitempty"`
-	Signal     string     `json:"signal,omitempty"`
-	Ports      []api.Port `json:"ports,omitempty"`
-	Cols       int        `json:"cols,omitempty"`
-	Rows       int        `json:"rows,omitempty"`
+	Type         string     `json:"type"`
+	Session      string     `json:"session,omitempty"`
+	State        string     `json:"state,omitempty"`
+	Source       string     `json:"source,omitempty"`
+	Reason       string     `json:"reason,omitempty"`
+	FullScreen   bool       `json:"full_screen,omitempty"`
+	Kind         string     `json:"kind,omitempty"`
+	Detail       string     `json:"detail,omitempty"`
+	TurnNS       int64      `json:"turn_ns,omitempty"`
+	AgentID      string     `json:"id,omitempty"`
+	IDSource     string     `json:"id_source,omitempty"`
+	ExitCode     int        `json:"exit_code,omitempty"`
+	Signal       string     `json:"signal,omitempty"`
+	Ports        []api.Port `json:"ports,omitempty"`
+	Cols         int        `json:"cols,omitempty"`
+	Rows         int        `json:"rows,omitempty"`
+	MemUsed      int64      `json:"mem_used,omitempty"`
+	MemTotal     int64      `json:"mem_total,omitempty"`
+	MemAvailable int64      `json:"mem_available,omitempty"`
+	OOMKills     int64      `json:"oom_kills,omitempty"`
 }

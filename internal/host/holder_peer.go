@@ -137,9 +137,26 @@ func (h *Holder) serveLimited(c *hclient, f proto.Frame) bool {
 // launchHolder started for it.
 func (h *Holder) listen() error {
 	sock, hook := h.socketPath(), h.hookSocketPath()
-	for _, dir := range []string{filepath.Dir(filepath.Dir(sock)), filepath.Dir(sock), filepath.Dir(hook)} {
-		if err := paths.EnsurePrivateDir(dir); err != nil {
+	if h.guest != nil && h.guest.holderUID > 0 {
+		if err := paths.EnsurePrivateDir(filepath.Dir(sock)); err != nil {
 			return err
+		}
+		_ = os.Chown(filepath.Dir(sock), h.guest.holderUID, h.guest.holderGID)
+		if err := os.MkdirAll(filepath.Dir(hook), 0o750); err != nil {
+			return fmt.Errorf("create hook dir: %w", err)
+		}
+		hookGID := h.guest.hookGID
+		if hookGID <= 0 {
+			hookGID = h.guest.agentGID
+		}
+		_ = os.Chown(filepath.Dir(hook), h.guest.holderUID, hookGID)
+		//nolint:gosec // G302: hook dir requires 0750 (holder:agent) group traversal
+		_ = os.Chmod(filepath.Dir(hook), 0o750)
+	} else {
+		for _, dir := range []string{filepath.Dir(filepath.Dir(sock)), filepath.Dir(sock), filepath.Dir(hook)} {
+			if err := paths.EnsurePrivateDir(dir); err != nil {
+				return err
+			}
 		}
 	}
 	ln, err := listenPrivate(sock, "the session's socket")
@@ -149,6 +166,11 @@ func (h *Holder) listen() error {
 	hookLn, err := listenPrivate(hook, "the session's hook socket")
 	if err != nil {
 		ln.Close()
+		return err
+	}
+	if err := ensureHolderSocketPerms(sock, hook, h.guest); err != nil {
+		ln.Close()
+		hookLn.Close()
 		return err
 	}
 	h.ln, h.hookLn = ln, hookLn

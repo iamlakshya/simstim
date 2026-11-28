@@ -3,6 +3,7 @@
 package guest
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -36,7 +37,9 @@ func maybeRunMicroVM(args []string) (bool, error) {
 	if !handled {
 		return false, nil
 	}
-	return true, runMicroVMInit(selfTest)
+	cfg := parseMicroVMFlags(args)
+	cfg.SelfTest = selfTest
+	return true, runMicroVMInit(cfg)
 }
 
 func shouldRunMicroVM(pid int, arg0 string, args []string, linkIsSocket bool) (handled, selfTest bool) {
@@ -59,29 +62,77 @@ func isSocketFD(fd int) bool {
 	return err == nil
 }
 
-func runMicroVMInit(selfTest bool) error {
-	if err := mountBasePseudoFS(); err != nil {
+type vmMountState struct {
+	sessionMount string
+	stateMounts  []string
+	hasUserRoot  bool
+}
+
+func runMicroVMInit(cfg vmBootConfig) error {
+	if err := mountBasePseudoFS(cfg); err != nil {
 		vmLog("mount pseudo fs failed: %v", err)
-		powerOffIfPID1()
+		shutdownMicroVM(microVMShutdownConfig{})
 		return err
 	}
 
-	if selfTest {
+	if cfg.SelfTest {
 		return runSelfTest()
 	}
 
-	if err := setupMicroVMRoot(); err != nil {
+	mstate, err := setupMicroVMRoot(cfg)
+	if err != nil {
 		vmLog("setup root failed: %v", err)
-		powerOffIfPID1()
+		shutdownMicroVM(microVMShutdownConfig{SessionMount: mstate.sessionMount, StateMounts: mstate.stateMounts})
 		return err
 	}
-	_ = bringUpLoopback()
+
+	var dockerGID int
+	if mstate.hasUserRoot {
+		dockerGID, err = configureGuestEtc("/", cfg)
+		if err != nil {
+			vmLog("configure /etc failed: %v", err)
+			shutdownMicroVM(microVMShutdownConfig{SessionMount: mstate.sessionMount, StateMounts: mstate.stateMounts})
+			return err
+		}
+	}
 	_ = unix.Sethostname([]byte("sandbox"))
+
+	if err := setupMicroVMNetwork(DefaultTransparentPort, cfg.Docker); err != nil {
+		vmLog("setup network failed: %v", err)
+		if mstate.hasUserRoot {
+			shutdownMicroVM(microVMShutdownConfig{SessionMount: mstate.sessionMount, StateMounts: mstate.stateMounts})
+			return err
+		}
+		_ = bringUpLoopback()
+	}
+
+	agentCgroupDir, cgErr := configureGuestCgroups(defaultGuestCgroupRoot, "/proc/meminfo", os.Getpid())
+	if cgErr != nil {
+		vmLog("configure guest cgroups failed: %v", cgErr)
+	}
+
+	runDir := filepath.Join("/run", brand.Name)
+	_ = chownMicroVMDir(runDir, 0, 0, 0o755)
+	_ = chownMicroVMDir(filepath.Join(runDir, "hooks"), GuestHolderUID, GuestAgentGID, 0o750)
+	_ = chownMicroVMDir(filepath.Join(runDir, "paste"), GuestAgentUID, GuestAgentGID, 0o700)
+
+	var dockerMgr *dockerManager
+	if cfg.Docker && findDockerd() != "" {
+		dm, derr := startDockerActivator(context.Background(), dockerOptions{
+			DockerGID: dockerGID,
+			ProxyURL:  "http://127.0.0.1:3128",
+		})
+		if derr != nil {
+			vmLog("start docker activator failed: %v", derr)
+		} else {
+			dockerMgr = dm
+		}
+	}
 
 	ln, err := listenVsock(vmVsockPort)
 	if err != nil {
 		vmLog("listen vsock %d failed: %v", vmVsockPort, err)
-		powerOffIfPID1()
+		shutdownMicroVM(microVMShutdownConfig{Docker: dockerMgr, SessionMount: mstate.sessionMount, StateMounts: mstate.stateMounts})
 		return err
 	}
 	defer ln.Close()
@@ -117,11 +168,11 @@ func runMicroVMInit(selfTest bool) error {
 	close(accepted)
 	if err != nil {
 		vmLog("accept vsock failed: %v", err)
-		powerOffIfPID1()
+		shutdownMicroVM(microVMShutdownConfig{Docker: dockerMgr, SessionMount: mstate.sessionMount, StateMounts: mstate.stateMounts})
 		return err
 	}
 
-	// Forward power button press while RunConn is active via SIGTERM to PID 1.
+	// Forward power button press while RunConnWithOptions is active via SIGTERM.
 	doneRun := make(chan struct{})
 	go func() {
 		select {
@@ -131,10 +182,24 @@ func runMicroVMInit(selfTest bool) error {
 		}
 	}()
 
-	runDir := filepath.Join("/run", brand.Name)
-	err = RunConn(conn, runDir)
+	err = RunConnWithOptions(conn, runDir, RunOptions{
+		Proxy:           true,
+		DNS:             true,
+		Transparent:     true,
+		TransparentAddr: transparentListenAddr(cfg.Docker),
+		MicroVM:         true,
+		ReportMem:       true,
+		AgentCgroupDir:  agentCgroupDir,
+		Sudo:            cfg.Sudo,
+		Docker:          cfg.Docker,
+		DockerGID:       dockerGID,
+	})
 	close(doneRun)
-	powerOffIfPID1()
+	shutdownMicroVM(microVMShutdownConfig{
+		Docker:       dockerMgr,
+		SessionMount: mstate.sessionMount,
+		StateMounts:  mstate.stateMounts,
+	})
 	return err
 }
 
@@ -147,11 +212,11 @@ func runSelfTest() error {
 	} else {
 		vmLog("self-test failed: pid=%d dm0=%v", pid, hasDM0)
 	}
-	powerOffIfPID1()
+	shutdownMicroVM(microVMShutdownConfig{})
 	return nil
 }
 
-func mountBasePseudoFS() error {
+func mountBasePseudoFS(cfg vmBootConfig) error {
 	mounts := []struct {
 		src, target, fstype string
 		flags               uintptr
@@ -172,168 +237,20 @@ func mountBasePseudoFS() error {
 	if err := unix.Mount("devpts", "/dev/pts", "devpts", unix.MS_NOSUID|unix.MS_NOEXEC, "gid=5,mode=0620,ptmxmode=0666"); err != nil && !errors.Is(err, unix.EBUSY) {
 		return fmt.Errorf("mount devpts: %w", err)
 	}
-	return nil
-}
-
-func mkdirMount(dir string) error {
-	//nolint:gosec // G301: guest root mountpoint dirs require 0755 traversal by non-root agent uid
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return fmt.Errorf("mkdir %s: %w", dir, err)
+	_ = mkdirMount("/dev/shm")
+	_ = unix.Mount("tmpfs", "/dev/shm", "tmpfs", unix.MS_NOSUID|unix.MS_NODEV, "mode=1777")
+	_ = mkdirMount("/sys/fs/cgroup")
+	if err := unix.Mount("cgroup2", "/sys/fs/cgroup", "cgroup2", unix.MS_NOSUID|unix.MS_NOEXEC|unix.MS_NODEV, "nsdelegate,memory_recursiveprot"); err != nil && !errors.Is(err, unix.EBUSY) {
+		_ = unix.Mount("cgroup2", "/sys/fs/cgroup", "cgroup2", unix.MS_NOSUID|unix.MS_NOEXEC|unix.MS_NODEV, "")
+	}
+	// Only expose /dev/fuse when sandbox.sudo or --docker is enabled (question 57).
+	if !cfg.Sudo && !cfg.Docker {
+		_ = os.Remove("/dev/fuse")
 	}
 	return nil
 }
 
-func setupMicroVMRoot() error {
-	// Ensure private mount propagation so MS_MOVE and pivot_root never fail with EINVAL.
-	_ = unix.Mount("", "/", "", unix.MS_REC|unix.MS_PRIVATE, "")
-	if _, statErr := os.Stat("/dev/dm-1"); statErr != nil {
-		if os.IsNotExist(statErr) {
-			// No user rootfs disk (for example a minimal tools-only boot).
-			return nil
-		}
-		return fmt.Errorf("stat /dev/dm-1: %w", statErr)
-	}
-	if err := unix.Mount("/dev/dm-1", "/mnt/image", "ext4", unix.MS_RDONLY, ""); err != nil {
-		return fmt.Errorf("mount verified rootfs /dev/dm-1: %w", err)
-	}
-	for _, d := range []string{"/run/overlay/upper", "/run/overlay/work"} {
-		if err := mkdirMount(d); err != nil {
-			return err
-		}
-	}
-	ovOpts := "lowerdir=/mnt/image,upperdir=/run/overlay/upper,workdir=/run/overlay/work"
-	if err := unix.Mount("overlay", "/mnt/root", "overlay", 0, ovOpts); err != nil {
-		return fmt.Errorf("mount overlay root: %w", err)
-	}
-
-	// Expose the read-only dm-verity tools filesystem inside /run so holders
-	// can exec the helper binary without copying it into RAM.
-	toolsMount := filepath.Join("/run", brand.Name, "tools")
-	if err := mkdirMount(toolsMount); err != nil {
-		return err
-	}
-	if err := unix.Mount("/", toolsMount, "", unix.MS_BIND|unix.MS_RDONLY, ""); err != nil {
-		return fmt.Errorf("bind tools root: %w", err)
-	}
-	_ = unix.Mount("", toolsMount, "", unix.MS_BIND|unix.MS_REMOUNT|unix.MS_RDONLY, "")
-
-	serials := blockDisksBySerial()
-	if dev, ok := serials["agents"]; ok {
-		if err := mountAgentsDisk("/dev/"+dev, "/mnt/agents", "/mnt/root/opt/agents"); err != nil {
-			return err
-		}
-	}
-	if dev, ok := serials["session"]; ok {
-		if err := mountSessionDisk("/dev/"+dev, "/mnt/session", "/mnt/root/work"); err != nil {
-			return err
-		}
-	}
-
-	// Move mounted pseudo-filesystems into the new overlay root before pivot_root.
-	for _, dir := range []string{"dev", "proc", "sys", "run", "tmp"} {
-		dst := filepath.Join("/mnt/root", dir)
-		_ = mkdirMount(dst)
-		if err := unix.Mount("/"+dir, dst, "", unix.MS_MOVE, ""); err != nil {
-			return fmt.Errorf("move /%s into new root: %w", dir, err)
-		}
-	}
-
-	oldRoot := "/mnt/root/mnt/oldroot"
-	if err := mkdirMount(oldRoot); err != nil {
-		return err
-	}
-	if err := unix.PivotRoot("/mnt/root", oldRoot); err != nil {
-		return fmt.Errorf("pivot_root: %w", err)
-	}
-	if err := unix.Chdir("/"); err != nil {
-		return fmt.Errorf("chdir /: %w", err)
-	}
-	_ = unix.Unmount("/mnt/oldroot", unix.MNT_DETACH)
-	_ = os.Remove("/mnt/oldroot")
-
-	_ = os.Setenv(brand.Env("GUEST_HELPER"), filepath.Join("/run", brand.Name, "tools", "init"))
-	return nil
-}
-
-func mountAgentsDisk(devPath, stageDir, targetDir string) error {
-	flags := uintptr(unix.MS_RDONLY | unix.MS_NODEV | unix.MS_NOSUID)
-	if err := unix.Mount(devPath, stageDir, "erofs", flags, ""); err != nil {
-		if err2 := unix.Mount(devPath, stageDir, "ext4", flags, ""); err2 != nil {
-			return fmt.Errorf("mount agents disk %s: erofs=%w; ext4=%w", devPath, err, err2)
-		}
-	}
-	if err := mkdirMount(targetDir); err != nil {
-		return err
-	}
-	if err := unix.Mount(stageDir, targetDir, "", unix.MS_BIND|unix.MS_RDONLY, ""); err != nil {
-		return fmt.Errorf("bind agents disk to %s: %w", targetDir, err)
-	}
-	if err := unix.Mount("", targetDir, "", unix.MS_BIND|unix.MS_REMOUNT|unix.MS_RDONLY|unix.MS_NODEV|unix.MS_NOSUID, ""); err != nil {
-		return fmt.Errorf("remount agents disk ro: %w", err)
-	}
-	return nil
-}
-
-func mountSessionDisk(devPath, stageDir, workTarget string) error {
-	if err := unix.Mount(devPath, stageDir, "ext4", unix.MS_NODEV|unix.MS_NOSUID, ""); err != nil {
-		return fmt.Errorf("mount session disk %s: %w", devPath, err)
-	}
-	workSrc := filepath.Join(stageDir, "work")
-	if err := mkdirMount(workSrc); err != nil {
-		return err
-	}
-	_ = os.Chown(workSrc, 1000, 1000)
-	if err := mkdirMount(workTarget); err != nil {
-		return err
-	}
-	if err := unix.Mount(workSrc, workTarget, "", unix.MS_BIND, ""); err != nil {
-		return fmt.Errorf("bind session /work: %w", err)
-	}
-	return nil
-}
-
-func blockDisksBySerial() map[string]string {
-	out := map[string]string{}
-	entries, err := os.ReadDir("/sys/block")
-	if err != nil {
-		return out
-	}
-	for _, e := range entries {
-		name := e.Name()
-		if !strings.HasPrefix(name, "vd") {
-			continue
-		}
-		b, err := os.ReadFile(filepath.Join("/sys/block", name, "serial"))
-		if err != nil {
-			continue
-		}
-		serial := strings.TrimSpace(strings.TrimRight(string(b), "\x00"))
-		if serial != "" {
-			out[serial] = name
-		}
-	}
-	return out
-}
-
-func bringUpLoopback() error {
-	fd, err := unix.Socket(unix.AF_INET, unix.SOCK_DGRAM|unix.SOCK_CLOEXEC, 0)
-	if err != nil {
-		return fmt.Errorf("open loopback socket: %w", err)
-	}
-	defer unix.Close(fd)
-	ifr, err := unix.NewIfreq("lo")
-	if err != nil {
-		return fmt.Errorf("prepare lo ifreq: %w", err)
-	}
-	if err := unix.IoctlIfreq(fd, unix.SIOCGIFFLAGS, ifr); err != nil {
-		return fmt.Errorf("get lo flags: %w", err)
-	}
-	ifr.SetUint16(ifr.Uint16() | unix.IFF_UP | unix.IFF_RUNNING)
-	if err := unix.IoctlIfreq(fd, unix.SIOCSIFFLAGS, ifr); err != nil {
-		return fmt.Errorf("set lo up: %w", err)
-	}
-	return nil
-}
+func bringUpLoopback() error { return bringUpInterface("lo") }
 
 func vmLog(format string, args ...any) {
 	msg := fmt.Sprintf("wall-init: "+format+"\n", args...)
@@ -343,12 +260,4 @@ func vmLog(format string, args ...any) {
 		return
 	}
 	_, _ = io.WriteString(os.Stderr, msg)
-}
-
-func powerOffIfPID1() {
-	if os.Getpid() != 1 {
-		return
-	}
-	unix.Sync()
-	_ = unix.Reboot(unix.LINUX_REBOOT_CMD_POWER_OFF)
 }

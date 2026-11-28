@@ -18,9 +18,16 @@ import (
 // guest init, so secret values stay in memory only and are never written to
 // disk (decision 0032).
 type GuestStartConfig struct {
-	Manifest  Manifest `json:"manifest"`
-	SecretEnv []string `json:"secret_env,omitempty"`
-	Notes     []string `json:"notes,omitempty"`
+	Manifest    Manifest `json:"manifest"`
+	SecretEnv   []string `json:"secret_env,omitempty"`
+	Notes       []string `json:"notes,omitempty"`
+	AgentUID    int      `json:"agent_uid,omitempty"`
+	AgentGID    int      `json:"agent_gid,omitempty"`
+	AgentGroups []uint32 `json:"agent_groups,omitempty"`
+	HolderUID   int      `json:"holder_uid,omitempty"`
+	HolderGID   int      `json:"holder_gid,omitempty"`
+	HookGID     int      `json:"hook_gid,omitempty"`
+	AgentCgroup string   `json:"agent_cgroup,omitempty"`
 }
 
 // GuestEvent is one event written by a guest-mode holder on fd 3 for guest
@@ -54,6 +61,13 @@ type guestConfig struct {
 	logPath      string
 	secretEnv    []string
 	notes        []string
+	agentUID     int
+	agentGID     int
+	agentGroups  []uint32
+	holderUID    int
+	holderGID    int
+	hookGID      int
+	agentCgroup  string
 
 	evMu     sync.Mutex
 	events   *os.File
@@ -103,6 +117,13 @@ func loadHolderManifest(id string) (*guestConfig, *Manifest, error) {
 		}
 		g.secretEnv = cfg.SecretEnv
 		g.notes = cfg.Notes
+		g.agentUID = cfg.AgentUID
+		g.agentGID = cfg.AgentGID
+		g.agentGroups = cfg.AgentGroups
+		g.holderUID = cfg.HolderUID
+		g.holderGID = cfg.HolderGID
+		g.hookGID = cfg.HookGID
+		g.agentCgroup = cfg.AgentCgroup
 		m := cfg.Manifest
 		if m.ID == "" {
 			m.ID = id

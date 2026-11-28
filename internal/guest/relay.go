@@ -73,7 +73,12 @@ func (r *runner) servePut(st *link.Stream) {
 		return
 	}
 	dir := filepath.Join(r.runDir, "paste")
-	if err := paths.EnsurePrivateDir(dir); err != nil {
+	if r.opts.MicroVM {
+		if err := chownMicroVMDir(dir, GuestAgentUID, GuestAgentGID, 0o700); err != nil {
+			reply(PutResp{Error: &proto.Error{Code: "upload", Message: err.Error()}})
+			return
+		}
+	} else if err := paths.EnsurePrivateDir(dir); err != nil {
 		reply(PutResp{Error: &proto.Error{Code: "upload", Message: err.Error()}})
 		return
 	}
@@ -115,6 +120,9 @@ func (r *runner) servePut(st *link.Stream) {
 		return
 	}
 	_ = os.Chmod(final, 0o600)
+	if r.opts.MicroVM {
+		chownFileForAgent(final)
+	}
 	keep = true
 	reply(PutResp{Path: final, SHA256: sum})
 }

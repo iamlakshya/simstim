@@ -33,11 +33,14 @@ simstim new my-vps --agent claude --detach --json
 | `--cpus <int>` | cap the session's CPUs through systemd (default: sandbox.cpus in config.toml) |
 | `--detach` | start it without attaching |
 | `-C`, `--dir <string>` | the folder on the host (default: `~`) |
+| `--docker` | start the image's dockerd on first use inside a microvm (see sandbox.docker in config.toml) |
 | `--env <stringArray>` | set a non-secret environment variable: K=V, or K to read from this laptop (repeatable) |
 | `--env-file <stringArray>` | read non-secret K=V or K environment variables from a file on this laptop (repeatable) |
 | `--expose <strings>` | expose a secret from config.toml's [secrets] directly in a walled session's environment (repeatable, or comma-separated) |
+| `--image <string>` | microvm image reference or saved image name (default: sandbox.image in config.toml) |
 | `--inline` | start the agent in its inline mode, so your terminal keeps its scrollback (see agents.inline in config.toml) |
 | `--json` | print JSON for scripts, and ask nothing (see docs/how-to/scripting.md) |
+| `--keep-system` | keep microvm root filesystem changes across stops (default: reset) |
 | `--memory <size>` | cap the session's memory: auto, or a size such as 4G (default: sandbox.memory or sessions.memory_max in config.toml) |
 | `--memory-max <size>` | cap the session's memory: auto, or a size such as 4G (default: sessions.memory_max in config.toml) |
 | `--mkdir` | make the folder on the host if it does not exist, without asking |

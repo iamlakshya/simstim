@@ -59,46 +59,32 @@ func LoadSettingsChecked() (Settings, string) {
 		}
 		return d, fmt.Sprintf("config.toml names %q and %q for the same setting %s, so its settings are not used", a.First, a.Second, scope)
 	}
-	if s.UI.Motion == "" {
-		s.UI.Motion = d.UI.Motion
+	applySettingsDefaults(&s, d)
+	return s, ""
+}
+
+func applySettingsDefaults(s *Settings, d Settings) {
+	fill := func(dst *string, def string) {
+		if *dst == "" {
+			*dst = def
+		}
 	}
-	if s.Attach.DetachKey == "" {
-		s.Attach.DetachKey = d.Attach.DetachKey
-	}
-	if s.Attach.ImagePasteKey == "" {
-		s.Attach.ImagePasteKey = d.Attach.ImagePasteKey
-	}
-	if s.Attach.Scrollback == "" {
-		s.Attach.Scrollback = d.Attach.Scrollback
-	}
-	if s.Sessions.MemoryMax == "" {
-		s.Sessions.MemoryMax = d.Sessions.MemoryMax
-	}
-	if s.Sandbox.Paste == "" {
-		s.Sandbox.Paste = d.Sandbox.Paste
-	}
-	if s.Sandbox.PackageManagers == "" {
-		s.Sandbox.PackageManagers = d.Sandbox.PackageManagers
-	}
+	fill(&s.UI.Motion, d.UI.Motion)
+	fill(&s.Attach.DetachKey, d.Attach.DetachKey)
+	fill(&s.Attach.ImagePasteKey, d.Attach.ImagePasteKey)
+	fill(&s.Attach.Scrollback, d.Attach.Scrollback)
+	fill(&s.Sessions.MemoryMax, d.Sessions.MemoryMax)
+	fill(&s.Sandbox.Paste, d.Sandbox.Paste)
+	fill(&s.Sandbox.PackageManagers, d.Sandbox.PackageManagers)
 	if s.Sandbox.KeepCaches == nil {
 		s.Sandbox.KeepCaches = d.Sandbox.KeepCaches
 	}
-	if s.Sandbox.CopyMax == "" {
-		s.Sandbox.CopyMax = d.Sandbox.CopyMax
-	}
-	if s.Sandbox.SeedMax == "" {
-		s.Sandbox.SeedMax = d.Sandbox.SeedMax
-	}
-	if s.Network.MinReleaseAge == "" {
-		s.Network.MinReleaseAge = d.Network.MinReleaseAge
-	}
-	if s.Network.UploadBudget == "" {
-		s.Network.UploadBudget = d.Network.UploadBudget
-	}
-	if s.Images.Fetch == "" {
-		s.Images.Fetch = d.Images.Fetch
-	}
-	return s, ""
+	fill(&s.Sandbox.CopyMax, d.Sandbox.CopyMax)
+	fill(&s.Sandbox.SeedMax, d.Sandbox.SeedMax)
+	fill(&s.Sandbox.System, d.Sandbox.System)
+	fill(&s.Network.MinReleaseAge, d.Network.MinReleaseAge)
+	fill(&s.Network.UploadBudget, d.Network.UploadBudget)
+	fill(&s.Images.Fetch, d.Images.Fetch)
 }
 
 // UserError is an error with a suggested next step: the message, and the

@@ -135,17 +135,36 @@ type WallRecord struct {
 	ExposedSecrets []string `json:"exposed_secrets,omitempty"`
 	Runtime        string   `json:"runtime,omitempty"`
 	RuntimeFiles   []string `json:"runtime_files,omitempty"`
+	// System is the microvm root persistence mode ("reset" or "keep").
+	System string `json:"system,omitempty"`
+	// Sudo enables passwordless sudo for user agent inside a microvm sandbox.
+	Sudo bool `json:"sudo,omitempty"`
+	// Docker enables dockerd inside a microvm sandbox and adds agent to docker.
+	Docker bool `json:"docker,omitempty"`
+	// ImageRef records the user-requested OCI or saved image reference.
+	ImageRef string `json:"image_ref,omitempty"`
+}
+
+// GuestMemClaim holds the guest's untrusted view of memory inside the wall
+// (reported via ctl "mem" events, spec 10.3). Trusted host cgroup memory
+// tracking remains authoritative.
+type GuestMemClaim struct {
+	Used      int64 `json:"used,omitempty"`
+	Total     int64 `json:"total,omitempty"`
+	Available int64 `json:"available,omitempty"`
+	OOMKills  int64 `json:"oom_kills,omitempty"`
 }
 
 // GuestClaims holds the latest reports from the guest inside the wall.
 type GuestClaims struct {
-	State      string     `json:"state,omitempty"`
-	Source     string     `json:"source,omitempty"`
-	Reason     string     `json:"reason,omitempty"`
-	FullScreen bool       `json:"full_screen,omitempty"`
-	Since      time.Time  `json:"since,omitempty"`
-	Ports      []api.Port `json:"ports,omitempty"`
-	UpdatedAt  time.Time  `json:"updated_at,omitempty"`
+	State      string         `json:"state,omitempty"`
+	Source     string         `json:"source,omitempty"`
+	Reason     string         `json:"reason,omitempty"`
+	FullScreen bool           `json:"full_screen,omitempty"`
+	Since      time.Time      `json:"since,omitempty"`
+	Ports      []api.Port     `json:"ports,omitempty"`
+	Mem        *GuestMemClaim `json:"mem,omitempty"`
+	UpdatedAt  time.Time      `json:"updated_at,omitempty"`
 }
 
 // ManifestImage records the OCI image digest and dm-verity root hash used by a

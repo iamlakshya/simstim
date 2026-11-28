@@ -200,7 +200,7 @@ func runSSHExecPTY(cmd *exec.Cmd, cancel context.CancelFunc, reqID uint64, args 
 	var ptmx *os.File
 	start := func() error {
 		var serr error
-		ptmx, serr = pty.StartWithSize(cmd, &pty.Winsize{Cols: cols, Rows: rows})
+		ptmx, serr = startSSHExecPTY(cmd, &pty.Winsize{Cols: cols, Rows: rows})
 		if serr != nil {
 			return fmt.Errorf("start ssh-exec PTY: %w", serr)
 		}
@@ -305,7 +305,10 @@ func clampExecSize(cols, rows int) (uint16, uint16) {
 }
 
 func runSSHExecPipe(cmd *exec.Cmd, cancel context.CancelFunc, reqID uint64, rawIn io.Reader, r *bufio.Reader, w *proto.Writer, hooks ExecHooks) error {
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	if cmd.SysProcAttr == nil {
+		cmd.SysProcAttr = &syscall.SysProcAttr{}
+	}
+	cmd.SysProcAttr.Setpgid = true
 	stdin, stdout, stderr, err := openExecPipes(cmd, reqID, w)
 	if err != nil {
 		return err

@@ -138,6 +138,8 @@ func (s *Supervisor) applyGuestEvent(ev guest.Event) {
 		s.applyGuestAlert(ev)
 	case "ports":
 		s.applyGuestPorts(ev, nowUTC)
+	case "mem":
+		s.applyGuestMem(ev, nowUTC)
 	case "ended":
 		saveCopy = s.applyGuestEnded(ev, nowUTC)
 	}
@@ -226,6 +228,25 @@ func (s *Supervisor) applyGuestPorts(ev guest.Event, nowUTC time.Time) {
 		s.m.Guest = &host.GuestClaims{}
 	}
 	s.m.Guest.Ports = ev.Ports
+	s.m.Guest.UpdatedAt = nowUTC
+	s.dirty = true
+}
+
+// applyGuestMem records the guest's untrusted memory claim. Trusted host
+// cgroup memory limits and warnings remain authoritative. Caller holds s.mu.
+func (s *Supervisor) applyGuestMem(ev guest.Event, nowUTC time.Time) {
+	if s.ended {
+		return
+	}
+	if s.m.Guest == nil {
+		s.m.Guest = &host.GuestClaims{}
+	}
+	s.m.Guest.Mem = &host.GuestMemClaim{
+		Used:      ev.MemUsed,
+		Total:     ev.MemTotal,
+		Available: ev.MemAvailable,
+		OOMKills:  ev.OOMKills,
+	}
 	s.m.Guest.UpdatedAt = nowUTC
 	s.dirty = true
 }

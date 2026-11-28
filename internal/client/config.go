@@ -139,6 +139,21 @@ type Settings struct {
 		// SeedMax caps the size of each git bundle created by --seed (default
 		// "512M").
 		SeedMax string `toml:"seed_max"`
+		// Image names the OCI image reference or saved image for microvm
+		// sessions. `new --image` overrides it for one session.
+		Image string `toml:"image"`
+		// System says whether a microvm's root filesystem resets at each start
+		// ("reset", the default) or keeps its changes on the session disk
+		// ("keep"). `new --keep-system` sets "keep" for one session.
+		System string `toml:"system"`
+		// Sudo lets the user `agent` run sudo without a password inside a
+		// microvm sandbox. Refused on process and gvisor walls with sudo_wall.
+		Sudo bool `toml:"sudo"`
+		// Docker starts the image's dockerd on first use inside a microvm
+		// sandbox and adds `agent` to the docker group. `new --docker` turns
+		// it on for one session. Refused on process and gvisor walls with
+		// docker_wall.
+		Docker bool `toml:"docker"`
 	} `toml:"sandbox"`
 	// Network holds defaults for sandbox network policy.
 	Network struct {
@@ -189,6 +204,7 @@ func DefaultSettings() Settings {
 	s.Sandbox.KeepCaches = boolPtr(true)
 	s.Sandbox.CopyMax = "64M"
 	s.Sandbox.SeedMax = "512M"
+	s.Sandbox.System = api.DefaultSandboxSystem
 	s.Network.MinReleaseAge = api.DefaultMinReleaseAge
 	s.Network.UploadBudget = api.DefaultUploadBudget
 	s.Images.Fetch = api.ImagesFetchAuto

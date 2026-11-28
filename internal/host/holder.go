@@ -132,6 +132,7 @@ func RunHolder(id string) error {
 		return err
 	}
 	defer lf.Close()
+	chownFileForHolder(holderLogPath(id, g), g)
 	lines := diag.NewLines()
 	h := &Holder{
 		id:       id,
@@ -204,10 +205,16 @@ func (h *Holder) start() error {
 	cmd.Env = append(append([]string(nil), m.Env...), h.secretEnv...)
 	cmd.Dir = m.Cwd
 	cols, rows := h.startSize()
-	ptmx, err := pty.StartWithSize(cmd, &pty.Winsize{Cols: clampCols(cols), Rows: clampRows(rows)})
+	ptmx, err := startAgentPTY(cmd, &pty.Winsize{Cols: clampCols(cols), Rows: clampRows(rows)}, h.guest)
 	cmd.Env, h.secretEnv = nil, nil // the agent has its copy; the holder keeps none
 	if err != nil {
 		return fmt.Errorf("start %s in a terminal: %w", argv[0], err)
+	}
+	placeGuestAgentInCgroup(cmd.Process.Pid, h.guest)
+	if err := dropHolderPrivileges(h.guest); err != nil {
+		_ = ptmx.Close()
+		_ = cmd.Process.Kill()
+		return fmt.Errorf("drop holder privileges: %w", err)
 	}
 	h.ptmx = ptmx
 	h.fd = int(ptmx.Fd())

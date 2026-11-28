@@ -54,6 +54,9 @@ func (r *runner) serveExec(ctx context.Context, st *link.Stream) {
 	}
 	cmd.Dir = workDir
 	cmd.Env = env
+	if r.opts.MicroVM {
+		setAgentExecCredential(cmd, r.agentGroups())
+	}
 
 	hooks := host.ExecHooks{
 		Start: func(start func() error) error {
@@ -64,6 +67,9 @@ func (r *runner) serveExec(ctx context.Context, st *link.Stream) {
 			}
 			if cmd.Process != nil {
 				r.managed[cmd.Process.Pid] = struct{}{}
+				if r.opts.MicroVM {
+					placePIDInAgentCgroup(r.agentCgroupDir(), cmd.Process.Pid)
+				}
 			}
 			return nil
 		},

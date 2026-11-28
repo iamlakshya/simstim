@@ -72,6 +72,9 @@ func New(a NewArgs) (_ *SessionInfo, err error) {
 	if a.Wall != "" && a.Wall != "none" {
 		return newWalled(a)
 	}
+	if err := checkMicroVMOnlyOptions(a); err != nil {
+		return nil, err
+	}
 	argv, kind, agent, known, err := pickAgent(a)
 	if err != nil {
 		return nil, err

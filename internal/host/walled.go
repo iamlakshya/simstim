@@ -39,6 +39,10 @@ func fillWallInfo(info *SessionInfo, m *Manifest) {
 			Preset:          m.Wall.Preset,
 			PackageManagers: m.Wall.PackageManagers,
 			MinReleaseAge:   m.Wall.MinReleaseAge,
+			Image:           m.Wall.ImageRef,
+			System:          m.Wall.System,
+			Docker:          m.Wall.Docker,
+			Sudo:            m.Wall.Sudo,
 		}
 		if len(m.Wall.BoundSecrets) > 0 {
 			info.BoundSecrets = make([]string, 0, len(m.Wall.BoundSecrets))
@@ -83,6 +87,9 @@ func fillAgentManifest(m *Manifest, userArgv, argv []string, agent agents.Agent,
 // newWalled creates a session that runs under a supervisor and guest init.
 // Its environment comes from the fixed base of spec 4.2, never from LoginEnv.
 func newWalled(a NewArgs) (_ *SessionInfo, err error) {
+	if err := checkMicroVMOnlyOptions(a); err != nil {
+		return nil, err
+	}
 	switch a.Wall {
 	case "process":
 		return newProcessWalled(a)

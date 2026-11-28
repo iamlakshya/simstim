@@ -39,13 +39,32 @@ func endMessage(name, host, id string, e *proto.Ended) string {
 }
 
 // stateLabel is a session's state as ls prints it, with why its agent
-// ended: "errored (out of memory)", "errored (killed)".
+// ended: "errored (out of memory)", "errored (killed)". On microvm sessions
+// with sandbox.sudo or --docker enabled, the row also shows "root" / "docker"
+// (isolation spec 7.5, 17.10).
 func stateLabel(s client.Session) string {
 	st := strings.ReplaceAll(shown(s.State), "_", " ")
 	if why := endCause(s); why != "" {
-		return st + " (" + why + ")"
+		st += " (" + why + ")"
+	}
+	if tags := wallRowTags(s.Wall); tags != "" {
+		st += " [" + tags + "]"
 	}
 	return st
+}
+
+func wallRowTags(w *api.WallInfo) string {
+	if w == nil {
+		return ""
+	}
+	var tags []string
+	if w.Sudo {
+		tags = append(tags, "root")
+	}
+	if w.Docker {
+		tags = append(tags, "docker")
+	}
+	return strings.Join(tags, ", ")
 }
 
 // endCause is why a session's agent ended, or "" while it runs or when it

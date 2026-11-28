@@ -24,6 +24,20 @@ func validatePackageSettings(abbrev string, s client.Settings, ins *client.TOMLI
 			})
 		}
 	}
+	if v := s.Sandbox.System; v != "" {
+		if _, err := api.ParseSandboxSystem(v); err != nil {
+			pos := ins.Pos("sandbox", "system")
+			out = append(out, configFinding{
+				Path:        abbrev,
+				Line:        pos.Line,
+				Column:      pos.Column,
+				Severity:    "error",
+				Code:        "system_invalid",
+				Message:     strings.TrimSuffix(api.SandboxSystemMessage(v), "."),
+				Suggestions: suggestFromStrings(v, []string{api.SandboxSystemReset, api.SandboxSystemKeep}),
+			})
+		}
+	}
 	if v := s.Network.MinReleaseAge; v != "" {
 		if _, _, err := api.ParseMinReleaseAge(v); err != nil {
 			pos := ins.Pos("network", "min_release_age")

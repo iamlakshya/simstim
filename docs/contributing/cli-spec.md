@@ -336,7 +336,9 @@ The isolation spec owns the messages and the hints of its errors. This table own
 | `release_age_invalid`, `package_level_invalid` | 7.10 | `KindUsage` | 2 |
 | `feed_unavailable` | 7.11 | `KindFailed` | 1 |
 | `env_is_secret`, `copy_sensitive` | 17.2, 17.3 | `KindRefused` | 5 |
-| `sudo_wall` | 17.10 | `KindRefused` | 5 |
+| `sudo_wall`, `docker_wall`, `keep_system_wall` | 7.5, 9.1, 17.10 | `KindRefused` | 5 |
+| `docker_missing` | 7.5 | `KindFailed` | 1 |
+| `system_invalid` | 6.6, 9.1 | `KindUsage` | 2 |
 | `secret_not_here` | 18.2 | `KindRefused` | 5 |
 | `no_host` | 18.2 | `KindFailed` | 1 |
 | `invite_expired`, `invite_unknown` | 18.3 | `KindFailed` | 1 |

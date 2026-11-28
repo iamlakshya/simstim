@@ -58,6 +58,7 @@ var commands = map[string]func(args []string) error{
 	"holder":    runHolder,
 	"supervise": runSupervise,
 	"wall-init": runWallInit,
+	"wall-sftp": runWallSFTP,
 	"ls":        runLs,
 	"new":       runNew,
 	"stop":      runStop,
@@ -135,6 +136,14 @@ func runSupervise(args []string) error {
 
 func runWallInit(args []string) error {
 	return guest.RunArgs(args)
+}
+
+func runWallSFTP(args []string) error {
+	workDir := ""
+	if len(args) > 0 {
+		workDir = args[0]
+	}
+	return guest.RunSFTPServer(workDir, os.Stdin, os.Stdout)
 }
 
 func runEgress(args []string) error {

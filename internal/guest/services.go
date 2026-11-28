@@ -6,8 +6,9 @@ import (
 )
 
 type loopbackServices struct {
-	proxy *Proxy
-	dns   *DNSStub
+	proxy       *Proxy
+	dns         *DNSStub
+	transparent *TransparentProxy
 }
 
 func startLoopbackServices(ctx context.Context, r *runner, opts RunOptions, wg *sync.WaitGroup) (*loopbackServices, error) {
@@ -40,6 +41,26 @@ func startLoopbackServices(ctx context.Context, r *runner, opts RunOptions, wg *
 			dns.Serve(ctx)
 		}()
 	}
+	if opts.Transparent || opts.TransparentAddr != "" {
+		addr := opts.TransparentAddr
+		if addr == "" {
+			addr = transparentListenAddr(opts.Docker)
+		}
+		tp, err := ListenTransparent(ctx, r, addr)
+		if err != nil {
+			svc.close()
+			return nil, err
+		}
+		svc.transparent = tp
+		if opts.OnTransparentReady != nil {
+			opts.OnTransparentReady(tp.Addr())
+		}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			tp.Serve(ctx)
+		}()
+	}
 	return svc, nil
 }
 
@@ -52,5 +73,8 @@ func (s *loopbackServices) close() {
 	}
 	if s.dns != nil {
 		_ = s.dns.Close()
+	}
+	if s.transparent != nil {
+		_ = s.transparent.Close()
 	}
 }

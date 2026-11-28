@@ -29,8 +29,9 @@ func termSize() (int, int) {
 }
 
 type newOpts struct {
-	agent, dir, name, base, wallLevel                       string
+	agent, dir, name, base, wallLevel, image                string
 	detach, worktree, inline, setup, noSetup, mkdir, asJSON bool
+	keepSystem, docker                                      bool
 	usedOldDir, usedOldSetup, usedOldNoSetup                bool
 	secrets, expose                                         []string
 	p114                                                    newP114Opts
@@ -84,6 +85,9 @@ func newCmd() *cobra.Command {
 		addOldFlag(cmd, "no-setup-script", "no-setup", &o.usedOldNoSetup, oldNewNoSetup)
 	}
 	cmd.Flags().StringVar(&o.wallLevel, "wall", "", "sandbox wall level: none, process or gvisor")
+	cmd.Flags().StringVar(&o.image, "image", "", "microvm image reference or saved image name (default: sandbox.image in config.toml)")
+	cmd.Flags().BoolVar(&o.keepSystem, "keep-system", false, "keep microvm root filesystem changes across stops (default: reset)")
+	cmd.Flags().BoolVar(&o.docker, "docker", false, "start the image's dockerd on first use inside a microvm (see sandbox.docker in config.toml)")
 	addJSON(cmd, &o.asJSON)
 	return cmd
 }
@@ -178,6 +182,7 @@ func runNew(cmd *cobra.Command, args []string, o newOpts) error {
 		Agent: o.agent, Cwd: client.RemotePath(o.dir), MakeFolder: o.mkdir, Name: o.name,
 		Worktree: o.worktree, Base: o.base, Inline: o.inline,
 		Secrets: values, SecretBinds: secretBinds, ExposedSecrets: o.expose, Wall: wl,
+		Image: o.image, KeepSystem: o.keepSystem, Docker: o.docker,
 	}, cols, rows)
 	if dash := cmd.ArgsLenAtDash(); dash >= 0 {
 		a.Argv = args[dash:]

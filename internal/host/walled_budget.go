@@ -16,6 +16,9 @@ type walledSettings struct {
 }
 
 func checkWalledSettings(a NewArgs) (walledSettings, error) {
+	if err := checkMicroVMOnlyOptions(a); err != nil {
+		return walledSettings{}, err
+	}
 	pkgLevel, err := api.ParsePackageManagers(a.PackageManagers)
 	if err != nil {
 		return walledSettings{}, UserError("package_level_invalid", api.PackageLevelMessage(a.PackageManagers), api.PackageLevelHint)
@@ -37,6 +40,40 @@ func checkWalledSettings(a NewArgs) (walledSettings, error) {
 		modelBudget:  a.ModelBudget,
 		uploadBudget: canonUpload,
 	}, nil
+}
+
+// checkMicroVMOnlyOptions refuses microvm-only options (sandbox.sudo, --docker,
+// --keep-system, --image) on weaker walls or unwalled sessions (spec 7.5, 9.1,
+// 17.10, question 98).
+func checkMicroVMOnlyOptions(a NewArgs) error {
+	if a.Wall == "microvm" {
+		return nil
+	}
+	wallName := a.Wall
+	if wallName == "" {
+		wallName = "none"
+	}
+	if a.Sudo {
+		return UserError("sudo_wall",
+			"sandbox.sudo needs a microvm sandbox, and this session runs at "+wallName,
+			"Use a microvm sandbox, or turn sandbox.sudo off in config.toml.")
+	}
+	if a.Docker {
+		return UserError("docker_wall",
+			"--docker needs a microvm sandbox, and this session runs at "+wallName,
+			"Use a microvm sandbox, or omit --docker.")
+	}
+	if a.KeepSystem {
+		return UserError("keep_system_wall",
+			"--keep-system needs a microvm sandbox, and this session runs at "+wallName,
+			"Use a microvm sandbox, or omit --keep-system.")
+	}
+	if a.Image != "" {
+		return UserError("image_wall",
+			"--image needs a microvm sandbox, and this session runs at "+wallName,
+			"Use a microvm sandbox, or omit --image.")
+	}
+	return nil
 }
 
 // buildSessionPolicyTOML serialises the initial session network policy passed

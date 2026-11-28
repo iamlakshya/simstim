@@ -119,6 +119,20 @@ type NewArgs struct {
 	// Caches adds relative cache paths under /home/agent, or drops one from
 	// the built-in list with a leading "!" (spec 17.5).
 	Caches []string `json:"caches,omitempty"`
+	// Image names the OCI image reference or saved image for a microvm
+	// session (--image / sandbox.image, isolation spec 9.1).
+	Image string `json:"image,omitempty"`
+	// KeepSystem keeps microvm root filesystem changes on the session disk
+	// across stop and start (--keep-system / sandbox.system = "keep").
+	KeepSystem bool `json:"keep_system,omitempty"`
+	// Docker enables Docker inside a microvm sandbox (--docker /
+	// sandbox.docker, isolation spec 7.5). Refused on other walls with
+	// docker_wall.
+	Docker bool `json:"docker,omitempty"`
+	// Sudo enables passwordless sudo for user agent inside a microvm sandbox
+	// (sandbox.sudo, isolation spec 17.10). Refused on other walls with
+	// sudo_wall.
+	Sudo bool `json:"sudo,omitempty"`
 }
 
 // WallInfo is a session's wall, in its row.
@@ -131,6 +145,10 @@ type WallInfo struct {
 	Preset          string `json:"preset,omitempty"`
 	PackageManagers string `json:"package_managers,omitempty"`
 	MinReleaseAge   string `json:"min_release_age,omitempty"`
+	Image           string `json:"image,omitempty"`
+	System          string `json:"system,omitempty"`
+	Docker          bool   `json:"docker,omitempty"`
+	Sudo            bool   `json:"sudo,omitempty"`
 }
 
 // SessionInfo is one row of the session list.

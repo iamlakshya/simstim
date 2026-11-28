@@ -67,26 +67,40 @@ func RunArgs(args []string) error {
 	return RunConnWithOptions(conn, runDir, opts)
 }
 
-// RunOptions configures optional guest loopback services started by wall-init.
+// RunOptions configures optional guest loopback services and microvm mode
+// started by wall-init.
 type RunOptions struct {
-	Proxy      bool
-	ProxyAddrs []string
-	DNS        bool
-	DNSAddr    string
-	OnDNSReady func(udpAddr, tcpAddr net.Addr)
+	Proxy              bool
+	ProxyAddrs         []string
+	DNS                bool
+	DNSAddr            string
+	OnDNSReady         func(udpAddr, tcpAddr net.Addr)
+	Transparent        bool
+	TransparentAddr    string
+	OnTransparentReady func(net.Addr)
+	MicroVM            bool
+	ReportMem          bool
+	AgentCgroupDir     string
+	AgentsBinDir       string
+	Sudo               bool
+	Docker             bool
+	DockerGID          int
+	DockerdPaths       []string
 }
 
 type managedHolder struct {
-	id   string
-	sock string
-	cwd  string
-	env  []string
-	cmd  *exec.Cmd
-	done chan struct{}
+	id       string
+	sock     string
+	cwd      string
+	env      []string
+	agentPID int
+	cmd      *exec.Cmd
+	done     chan struct{}
 }
 
 type runner struct {
 	runDir string
+	opts   RunOptions
 	sess   *link.Session
 
 	mu           sync.Mutex
@@ -109,7 +123,12 @@ func RunConn(conn net.Conn, runDir string) error {
 // RunConnWithOptions runs guest init over conn with optional guest loopback
 // proxy forwarding over KindEgress link streams.
 func RunConnWithOptions(conn net.Conn, runDir string, opts RunOptions) error {
-	if err := paths.EnsurePrivateDir(runDir); err != nil {
+	if opts.MicroVM {
+		if err := chownMicroVMDir(runDir, 0, 0, 0o755); err != nil {
+			_ = conn.Close()
+			return err
+		}
+	} else if err := paths.EnsurePrivateDir(runDir); err != nil {
 		_ = conn.Close()
 		return err
 	}
@@ -117,6 +136,7 @@ func RunConnWithOptions(conn net.Conn, runDir string, opts RunOptions) error {
 	sess := link.New(conn, link.Guest, link.Options{})
 	r := &runner{
 		runDir:       runDir,
+		opts:         opts,
 		sess:         sess,
 		holders:      map[string]*managedHolder{},
 		managed:      map[int]struct{}{},
@@ -216,6 +236,9 @@ func (r *runner) serveCtl(ctx context.Context, st *link.Stream) {
 	hbDone := make(chan struct{})
 	go func() {
 		defer close(hbDone)
+		if r.opts.MicroVM || r.opts.ReportMem {
+			r.emitMemClaim()
+		}
 		interval := HeartbeatInterval
 		if interval <= 0 {
 			interval = 5 * time.Second
@@ -226,6 +249,9 @@ func (r *runner) serveCtl(ctx context.Context, st *link.Stream) {
 			select {
 			case <-t.C:
 				r.sendEvent(Event{Type: "heartbeat"})
+				if r.opts.MicroVM || r.opts.ReportMem {
+					r.emitMemClaim()
+				}
 			case <-ctx.Done():
 				return
 			case <-r.stopCh:
@@ -305,6 +331,13 @@ func (r *runner) startHolder(ctx context.Context, a StartReq) (*StartResp, *prot
 	if a.Session == "" {
 		return nil, &proto.Error{Code: "bad_request", Message: "missing session id", Hint: "Pass a session id in start."}
 	}
+	if r.opts.Docker && findDockerd(r.opts.DockerdPaths...) == "" {
+		return nil, &proto.Error{
+			Code:    "docker_missing",
+			Message: "this microvm image has no dockerd",
+			Hint:    "Pass --image with an image that includes Docker, or omit --docker.",
+		}
+	}
 	exe := os.Getenv(brand.Env("GUEST_HELPER"))
 	if exe == "" {
 		var err error
@@ -317,14 +350,10 @@ func (r *runner) startHolder(ctx context.Context, a StartReq) (*StartResp, *prot
 	first := len(r.holders) == 0
 	r.mu.Unlock()
 
-	sockName, hookName := "holder-"+a.Session+".sock", "hook-"+a.Session+".sock"
-	if first {
-		sockName, hookName = "holder.sock", "hook.sock"
+	sockPath, hookPath, manifestPath, logPath, err := r.holderPaths(a.Session, first)
+	if err != nil {
+		return nil, &proto.Error{Code: "start_failed", Message: err.Error(), Hint: "Check /run permissions inside the sandbox."}
 	}
-	sockPath := filepath.Join(r.runDir, sockName)
-	hookPath := filepath.Join(r.runDir, hookName)
-	manifestPath := filepath.Join(r.runDir, "manifest-"+a.Session+".json")
-	logPath := filepath.Join(r.runDir, "holder-"+a.Session+".log")
 
 	agentEnv, err := applyStartPackageSettings(a, a.Env)
 	if err != nil {
@@ -334,6 +363,10 @@ func (r *runner) startHolder(ctx context.Context, a StartReq) (*StartResp, *prot
 	agentEnv, err = applyStartGateway(a, agentEnv)
 	if err != nil {
 		return nil, &proto.Error{Code: "start_failed", Message: err.Error(), Hint: "Check the agent's model gateway configuration."}
+	}
+	if r.opts.MicroVM {
+		chownPathForAgent(envLookup(agentEnv, "HOME"))
+		agentEnv = ensureAgentsPath(agentEnv, r.agentsBinDir())
 	}
 	agentEnv = withEnvVar(agentEnv, brand.Env("HOOK_SOCK"), hookPath)
 	agentEnv = withEnvVar(agentEnv, brand.Env("SESSION"), a.Session)
@@ -349,11 +382,21 @@ func (r *runner) startHolder(ctx context.Context, a StartReq) (*StartResp, *prot
 		Term:    host.TermInfo{Term: a.Term, Cols: a.Cols, Rows: a.Rows},
 		RunHook: a.RunHook,
 	}
-	cfgBytes, err := json.Marshal(host.GuestStartConfig{
+	startCfg := host.GuestStartConfig{
 		Manifest:  m,
 		SecretEnv: a.Secrets,
 		Notes:     a.Notes,
-	})
+	}
+	if r.opts.MicroVM && os.Geteuid() == 0 {
+		startCfg.AgentUID = GuestAgentUID
+		startCfg.AgentGID = GuestAgentGID
+		startCfg.AgentGroups = r.agentGroups()
+		startCfg.HolderUID = GuestHolderUID
+		startCfg.HolderGID = GuestHolderGID
+		startCfg.HookGID = GuestAgentGID
+		startCfg.AgentCgroup = r.agentCgroupDir()
+	}
+	cfgBytes, err := json.Marshal(startCfg)
 	if err != nil {
 		return nil, &proto.Error{Code: "start_failed", Message: err.Error(), Hint: "Retry starting the session."}
 	}
@@ -409,6 +452,7 @@ func (r *runner) startHolder(ctx context.Context, a StartReq) (*StartResp, *prot
 			return nil, &proto.Error{Code: "start_failed", Message: ev.Reason, Hint: "Check the session command and logs."}
 		}
 		r.mu.Lock()
+		mh.agentPID = ev.AgentPID
 		r.holders[a.Session] = mh
 		r.mu.Unlock()
 		return &StartResp{HolderPID: ev.HolderPID, AgentPID: ev.AgentPID, Cols: ev.Cols, Rows: ev.Rows}, nil
@@ -418,54 +462,5 @@ func (r *runner) startHolder(ctx context.Context, a StartReq) (*StartResp, *prot
 	case <-time.After(10 * time.Second):
 		_ = cmd.Process.Kill()
 		return nil, &proto.Error{Code: "start_failed", Message: "the guest holder did not start in time", Hint: "Try again."}
-	}
-}
-
-func (r *runner) signalStop() {
-	r.stopOnce.Do(func() { close(r.stopCh) })
-}
-
-// beginShutdown claims shutdownOnce synchronously with grace and runs holder
-// termination asynchronously so callers can reply before holders finish exiting
-// without racing a later SIGTERM handler.
-func (r *runner) beginShutdown(grace time.Duration) {
-	r.shutdownOnce.Do(func() {
-		go func() {
-			defer close(r.shutdownDone)
-			r.stopHolders(grace)
-			r.signalStop()
-		}()
-	})
-}
-
-func (r *runner) shutdown(grace time.Duration) {
-	r.beginShutdown(grace)
-	<-r.shutdownDone
-}
-
-func (r *runner) stopHolders(grace time.Duration) {
-	r.mu.Lock()
-	list := make([]*managedHolder, 0, len(r.holders))
-	for _, mh := range r.holders {
-		list = append(list, mh)
-	}
-	r.mu.Unlock()
-
-	for _, mh := range list {
-		if mh.cmd != nil && mh.cmd.Process != nil {
-			_ = mh.cmd.Process.Signal(syscall.SIGTERM)
-		}
-	}
-	deadline := time.NewTimer(grace)
-	defer deadline.Stop()
-	for _, mh := range list {
-		select {
-		case <-mh.done:
-		case <-deadline.C:
-			if mh.cmd != nil && mh.cmd.Process != nil {
-				_ = mh.cmd.Process.Kill()
-			}
-			<-mh.done
-		}
 	}
 }

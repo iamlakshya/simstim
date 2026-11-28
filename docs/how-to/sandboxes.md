@@ -11,7 +11,7 @@ Each host supports one or more wall levels, from weakest to strongest:
 | `none` | No wall | Any Linux host that runs sessions today |
 | `process` | [bubblewrap](https://github.com/containers/bubblewrap) (`bwrap`), Landlock and seccomp | Linux 5.13 or later, `bwrap`, unprivileged user namespaces, Landlock ABI 1 or more, seccomp |
 | `gvisor` | Pinned upstream [gVisor](https://gvisor.dev/) `runsc` (systrap) | Linux 5.6 or later (`amd64` or `arm64`), pinned `runsc` runtime, unprivileged user namespaces |
-| `microvm` | Cloud Hypervisor on KVM (later phase) | Linux 6.8 or later, `/dev/kvm` open to your user, pinned runtime |
+| `microvm` | Cloud Hypervisor on KVM | Linux 6.8 or later, `/dev/kvm` open to your user, pinned runtime |
 
 ## Check what a host supports
 
@@ -245,4 +245,29 @@ Pass `--seed` more than once to clone several repositories into the same session
 ```sh
 simstim new my-vps --agent claude --seed ../api --seed ../web
 simstim pull my-vps/api --repo web
+```
+
+## Inside a microvm sandbox
+
+Inside a Cloud Hypervisor microvm, `wall-init` boots as PID 1 from the `dm-verity`-verified tools image and prepares the guest before accepting `internal/link` over `virtio-vsock`:
+
+- **Overlay root and session disk:** the verified root image mounts read-only under an overlay filesystem. By default (`sandbox.system = "reset"`), the overlay upper layer lives in RAM and resets on every start. Pass `--keep-system` (or set `sandbox.system = "keep"` in `config.toml`) to keep root filesystem changes on the session disk across stops. The session disk's `/work` folder and each agent's conversation `StateDirs` (such as `.claude/projects`, `.codex/sessions` and `.local/share/opencode`) stay across restarts, while `/home/agent` is always a fresh mode-0700 tmpfs on every start so files such as `~/.bashrc` do not persist.
+- **Separate `holder` and `agent` users:** the guest holder drops privileges to uid `900` (`holder`) with `NoNewPrivs=1` and `PR_SET_DUMPABLE=0`, while the agent, shells and SFTP run as uid `1000` (`agent`). Without `sandbox.sudo = true`, the agent cannot `ptrace` the holder or inspect its socket. Setting `sandbox.sudo = true` in `config.toml` grants passwordless `sudo` to `agent` inside a microvm (and marks the session row with `root`); weaker walls refuse it with `sudo_wall`.
+- **Transparent proxy and synthetic DNS:** `wall-init` creates a `dummy0` default route (falling back to a `veth` pair when the guest kernel omits the `dummy` driver), binds the explicit proxy on `127.0.0.1:3128`, the transparent proxy on `127.0.0.1:3129` (`SO_ORIGINAL_DST`), and the DNS stub on `127.0.0.53:53` (pointing `/etc/resolv.conf` at it). Guest `nftables` rules redirect all non-loopback IPv4 TCP to `127.0.0.1:3129` and reject UDP, ICMP and non-loopback IPv6. The host `egress` process answers DNS in `synthetic` mode (`198.18.0.0/15`) and maps redirected flows back to allowed hostnames.
+- **Docker inside a microvm:** pass `--docker` to `new` (or set `sandbox.docker = true` in `config.toml`) with an image that includes `dockerd` (selected via `--image` or `sandbox.image`). `wall-init` puts `agent` in the `docker` group and activates `dockerd` lazily on first connection to `/run/docker.sock`. The session row shows `docker`. Non-microvm walls refuse `--docker` with `docker_wall`, and images without `dockerd` fail start with `docker_missing`.
+- **Clean shutdown and memory claims:** on `stop`, `SIGTERM` or an ACPI power-button event from `ch-remote`, `wall-init` stops holders and `dockerd`, terminates remaining processes, flushes and unmounts the session disk, calls `sync(2)` and powers off with `reboot(2)`. Alongside heartbeats, `wall-init` sends periodic `mem` claims from guest `/proc/meminfo` while the host cgroup cap remains authoritative.
+
+Microvm options on `new` and in `config.toml`:
+
+<!-- test: help (needs a reachable host) -->
+```sh
+simstim new my-vps --image buildpack-deps:trixie-scm --keep-system --docker --detach
+```
+
+```toml
+[sandbox]
+image = "buildpack-deps:trixie-scm"
+system = "reset" # reset | keep
+sudo = false
+docker = false
 ```

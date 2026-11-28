@@ -65,10 +65,28 @@ func CheckUploadBudget(raw string) (bytes int64, canonical string, err error) {
 	return bytes, canonical, nil
 }
 
+// CheckSandboxSystem validates sandbox.system and returns a UserError with code
+// "system_invalid" when invalid (spec 6.6, 9.1).
+func CheckSandboxSystem(raw string) (string, error) {
+	sys, err := api.ParseSandboxSystem(raw)
+	if err != nil {
+		return "", &UserError{
+			Msg:  api.SandboxSystemMessage(raw),
+			Hint: api.SandboxSystemHint,
+			Code: "system_invalid",
+			Kind: KindUsage,
+		}
+	}
+	return sys, nil
+}
+
 // ValidatePackageSettings checks sandbox and network policy defaults in s,
 // returning a UserError on invalid values.
 func ValidatePackageSettings(s Settings) error {
 	if _, err := CheckPackageManagers(s.Sandbox.PackageManagers); err != nil {
+		return err
+	}
+	if _, err := CheckSandboxSystem(s.Sandbox.System); err != nil {
 		return err
 	}
 	if _, _, err := CheckMinReleaseAge(s.Network.MinReleaseAge); err != nil {
@@ -83,13 +101,14 @@ func ValidatePackageSettings(s Settings) error {
 	return nil
 }
 
-// withPackageSettings fills and validates a session's package manager and
-// network budget settings from config.toml when the session is walled or
-// explicitly specifies them.
+// withPackageSettings fills and validates a session's package manager, microvm
+// defaults and network budget settings from config.toml when the session is
+// walled or explicitly specifies them.
 func withPackageSettings(a NewArgs) (NewArgs, error) {
 	walled := a.Wall != "" && a.Wall != "none"
 	if !walled && a.PackageManagers == "" && a.MinReleaseAge == "" &&
-		a.ModelBudget == 0 && a.UploadBudget == "" && len(a.SandboxEnv) == 0 {
+		a.ModelBudget == 0 && a.UploadBudget == "" && len(a.SandboxEnv) == 0 &&
+		a.Image == "" && !a.KeepSystem && !a.Docker && !a.Sudo {
 		return a, nil
 	}
 	s := LoadSettings()
@@ -101,6 +120,23 @@ func withPackageSettings(a NewArgs) (NewArgs, error) {
 		return a, err
 	}
 	a.PackageManagers = lvl
+
+	sys, err := CheckSandboxSystem(s.Sandbox.System)
+	if err != nil {
+		return a, err
+	}
+	if !a.KeepSystem && sys == api.SandboxSystemKeep && a.Wall == "microvm" {
+		a.KeepSystem = true
+	}
+	if a.Image == "" && s.Sandbox.Image != "" && a.Wall == "microvm" {
+		a.Image = s.Sandbox.Image
+	}
+	if !a.Sudo && s.Sandbox.Sudo && walled {
+		a.Sudo = true
+	}
+	if !a.Docker && s.Sandbox.Docker && walled {
+		a.Docker = true
+	}
 
 	if a.MinReleaseAge == "" {
 		a.MinReleaseAge = s.Network.MinReleaseAge

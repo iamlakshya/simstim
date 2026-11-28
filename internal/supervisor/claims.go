@@ -119,7 +119,14 @@ func ParseEvent(raw []byte) (guest.Event, error) {
 		ev.Rows = min(ev.Rows, 2048)
 		return ev, nil
 
-	case "heartbeat", "activity", "refs", "mem":
+	case "mem":
+		ev.MemUsed = max(ev.MemUsed, 0)
+		ev.MemTotal = max(ev.MemTotal, 0)
+		ev.MemAvailable = max(ev.MemAvailable, 0)
+		ev.OOMKills = max(ev.OOMKills, 0)
+		return ev, nil
+
+	case "heartbeat", "activity", "refs":
 		return ev, nil
 
 	default:

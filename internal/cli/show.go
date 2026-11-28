@@ -145,6 +145,7 @@ func sessionDetails(s client.Session) []detail {
 	}
 	add("Missing secrets", strings.Join(s.MissingSecrets, ", "))
 	add("Secrets", strings.Join(s.Secrets, ", "))
+	add("Sandbox", showSandbox(s.Wall))
 	add("Usage", showUsage(s.Usage))
 	add("Models", showUsageModels(s.Usage))
 	if s.DebugUntil != nil {
@@ -212,6 +213,29 @@ func showSize(n int64) string {
 		return fmt.Sprintf("%.1f GiB", float64(n)/(1<<30))
 	}
 	return sizeText(n)
+}
+
+func showSandbox(w *api.WallInfo) string {
+	if w == nil || w.Level == "" {
+		return ""
+	}
+	var opts []string
+	if w.Sudo {
+		opts = append(opts, "root")
+	}
+	if w.Docker {
+		opts = append(opts, "docker")
+	}
+	if w.System == api.SandboxSystemKeep {
+		opts = append(opts, "keep-system")
+	}
+	if w.Image != "" {
+		opts = append(opts, "image "+w.Image)
+	}
+	if len(opts) == 0 {
+		return w.Level
+	}
+	return fmt.Sprintf("%s (%s)", w.Level, strings.Join(opts, ", "))
 }
 
 // stoppedHost is the error of show on a host that did not answer, for a

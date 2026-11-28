@@ -22,7 +22,7 @@ func (s *Supervisor) initEgress() error {
 		s.egress = s.opt.Egress
 		return nil
 	}
-	if s.opt.EgressStarter == nil && (s.opt.EgressExe == "" || s.m.Wall == nil || (s.m.Wall.Driver != "process" && s.m.Wall.Driver != "gvisor") || s.m.Wall.ShareNet) {
+	if s.opt.EgressStarter == nil && (s.opt.EgressExe == "" || s.m.Wall == nil || (s.m.Wall.Driver != "process" && s.m.Wall.Driver != "gvisor" && s.m.Wall.Driver != "chv") || s.m.Wall.ShareNet) {
 		return nil
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -38,14 +38,19 @@ func (s *Supervisor) initEgress() error {
 	}
 	agentKind := s.m.Agent.Kind
 	policyTOML := ""
+	dnsMode := egress.DNSMode("")
 	if s.m.Wall != nil {
 		policyTOML = s.m.Wall.PolicyTOML
+		if s.m.Wall.Driver == "chv" {
+			dnsMode = egress.DNSModeSynthetic
+		}
 	}
 	s.mu.Unlock()
 	args := egress.StartArgs{
 		Session:       sessionLabel,
 		Agent:         agentKind,
 		PolicyTOML:    policyTOML,
+		DNSMode:       dnsMode,
 		GatewayRoutes: s.gatewayRoutes(),
 		InitialUsage:  initUsage,
 	}

@@ -26,7 +26,7 @@ func (s *Supervisor) buildStartReq(secretEnv, notes []string) guest.StartReq {
 				userEnv = append(userEnv, k+"="+s.m.Wall.SandboxEnv[k])
 			}
 		}
-		if s.m.Wall.Driver == process.DriverName && !s.m.Wall.ShareNet {
+		if (s.m.Wall.Driver == process.DriverName || s.m.Wall.Driver == "chv") && !s.m.Wall.ShareNet {
 			proxyURL = process.GuestProxyURL
 			boundSecretEnv = s.agentBoundSecretEnv()
 			boundPlaceholders = s.boundPlaceholders(boundSecretEnv)

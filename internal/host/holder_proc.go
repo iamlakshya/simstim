@@ -25,6 +25,11 @@ func (h *Holder) stop(reason string, system bool) {
 	h.mu.Unlock()
 	if !exited && h.cmd != nil && h.cmd.Process != nil {
 		pid := h.cmd.Process.Pid
+		if h.guest != nil && h.guest.holderUID > 0 && h.ptmx != nil {
+			// When holder dropped to uid 900 after starting agent as uid 1000,
+			// closing the PTY master makes the kernel deliver SIGHUP across UIDs.
+			_ = h.ptmx.Close()
+		}
 		_ = syscall.Kill(-pid, syscall.SIGHUP)
 		deadline := time.Now().Add(3 * time.Second)
 		for time.Now().Before(deadline) {
@@ -204,8 +209,13 @@ func (h *Holder) startVT() {
 	}
 	path := filepath.Join(filepath.Dir(exe), brand.VTBinary)
 	if _, err := os.Stat(path); err != nil {
-		h.log.Info("no shadow terminal, new clients get the raw output", "path", path)
-		return
+		alt := filepath.Join(filepath.Dir(exe), "bin", brand.VTBinary)
+		if _, err2 := os.Stat(alt); err2 == nil {
+			path = alt
+		} else {
+			h.log.Info("no shadow terminal, new clients get the raw output", "path", path)
+			return
+		}
 	}
 	h.ptyOut = make(chan []byte, 256)
 	go func() {

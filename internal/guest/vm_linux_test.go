@@ -5,6 +5,9 @@ package guest
 import (
 	"encoding/binary"
 	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
 	"testing"
 
 	"golang.org/x/sys/unix"
@@ -137,5 +140,55 @@ func TestIsSocketFD(t *testing.T) {
 	defer pw.Close()
 	if isSocketFD(int(pr.Fd())) {
 		t.Errorf("isSocketFD(pipe) = true, want false")
+	}
+}
+
+func TestConfigureGuestCgroupsAndCap(t *testing.T) {
+	memMax, memHigh := computeAgentMemoryCap(512 << 20)
+	if memMax != (512-64)<<20 || memHigh >= memMax || memHigh <= 0 {
+		t.Fatalf("computeAgentMemoryCap(512MiB) = (%d, %d)", memMax, memHigh)
+	}
+	bigMax, bigHigh := computeAgentMemoryCap(4 << 30)
+	if bigMax != (4<<30)-(256<<20) || bigHigh >= bigMax {
+		t.Fatalf("computeAgentMemoryCap(4GiB) = (%d, %d)", bigMax, bigHigh)
+	}
+	if zMax, zHigh := computeAgentMemoryCap(64 << 20); zMax != 0 || zHigh != 0 {
+		t.Fatalf("computeAgentMemoryCap(64MiB) = (%d, %d), want (0, 0)", zMax, zHigh)
+	}
+
+	root := t.TempDir()
+	meminfo := filepath.Join(t.TempDir(), "meminfo")
+	if err := os.WriteFile(meminfo, []byte("MemTotal:        524288 kB\nMemAvailable:    400000 kB\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	agentDir, err := configureGuestCgroups(root, meminfo, 1)
+	if err != nil {
+		t.Fatalf("configureGuestCgroups: %v", err)
+	}
+	if agentDir != filepath.Join(root, "agent") {
+		t.Fatalf("agentDir = %q, want %q", agentDir, filepath.Join(root, "agent"))
+	}
+	sc, err := os.ReadFile(filepath.Join(root, "cgroup.subtree_control"))
+	if err != nil || strings.TrimSpace(string(sc)) != "+memory" {
+		t.Fatalf("subtree_control = %q, err=%v", sc, err)
+	}
+	initProcs, err := os.ReadFile(filepath.Join(root, "init", "cgroup.procs"))
+	if err != nil || strings.TrimSpace(string(initProcs)) != "1" {
+		t.Fatalf("init/cgroup.procs = %q, err=%v", initProcs, err)
+	}
+	maxRaw, err := os.ReadFile(filepath.Join(agentDir, "memory.max"))
+	if err != nil {
+		t.Fatalf("read memory.max: %v", err)
+	}
+	gotMax, err := strconv.ParseInt(strings.TrimSpace(string(maxRaw)), 10, 64)
+	if err != nil || gotMax != memMax {
+		t.Fatalf("memory.max = %q (%d), want %d", maxRaw, gotMax, memMax)
+	}
+	if err := os.WriteFile(filepath.Join(agentDir, "memory.events"), []byte("oom_kill 2\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	sample, ok := readGuestMem(meminfo, agentDir)
+	if !ok || sample.OOMKills != 2 {
+		t.Fatalf("readGuestMem(agentDir) = (%+v, %v), want OOMKills=2", sample, ok)
 	}
 }
