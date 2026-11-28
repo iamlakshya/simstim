@@ -235,10 +235,19 @@ func (b *fakeBackend) Memory() memory {
 
 // Remember writes the sessions, as the real one does: never the last
 // session.
-func (b *fakeBackend) Remember(mem memory) {
+func (b *fakeBackend) Remember(lists map[string]client.HostList) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	b.mem.Sessions = mem.Sessions
+	if b.mem.Sessions == nil {
+		b.mem.Sessions = map[string][]client.Session{}
+	}
+	if b.mem.Seen == nil {
+		b.mem.Seen = map[string]time.Time{}
+	}
+	for h, l := range lists {
+		b.mem.Sessions[h] = append([]client.Session(nil), l.Sessions...)
+		b.mem.Seen[h] = l.At
+	}
 	b.saves++
 }
 
@@ -377,12 +386,23 @@ func (c *fakeConn) Resume(_ context.Context, a client.ResumeArgs) (*client.Resum
 }
 
 func (c *fakeConn) Delete(_ context.Context, id string) (client.DeleteResult, error) {
+	return c.deleteNamed(id, nil)
+}
+
+func (c *fakeConn) DeleteNamed(_ context.Context, id, name string) (client.DeleteResult, error) {
+	return c.deleteNamed(id, &name)
+}
+
+func (c *fakeConn) deleteNamed(id string, want *string) (client.DeleteResult, error) {
 	c.be.record("delete %s %s", c.name, id)
 	c.be.mu.Lock()
 	defer c.be.mu.Unlock()
 	h := c.host()
 	for i, s := range h.sessions {
 		if s.ID == id {
+			if want != nil && s.Name != *want {
+				return client.DeleteResult{}, &client.UserError{Msg: "the session was renamed, so it was not deleted", Hint: "Refresh the list.", Code: "session_renamed"}
+			}
 			h.sessions = append(h.sessions[:i], h.sessions[i+1:]...)
 			res := client.DeleteResult{Deleted: true}
 			if s.Name == "api-tests" {

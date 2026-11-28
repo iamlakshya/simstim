@@ -39,3 +39,31 @@ func TestCapProbeRequiresSandboxFeature(t *testing.T) {
 		t.Fatalf("CapProbe without sandbox feature = %v, want wall_helper_old with hint", err)
 	}
 }
+
+// A name of the form of an ID, or too long, fails before any request, with
+// bad_name and exit code 2, as the helper refuses it too (cli-spec 9.2).
+func TestNamesThatNoRequestCarries(t *testing.T) {
+	c := &Conn{Host: Host{Name: "box"}}
+	for _, name := range []string{"abcd2345", " abcd2345", strings.Repeat("n", 65)} {
+		var ue *UserError
+		if _, err := c.NewSession(context.Background(), NewArgs{Name: name}); !errors.As(err, &ue) || ue.Code != "bad_name" || ue.Kind != KindUsage {
+			t.Errorf("new %.10q: %v", name, err)
+		}
+		if err := c.RenameSession(context.Background(), "abcd2345", name); !errors.As(err, &ue) || ue.Code != "bad_name" || ue.Hint == "" {
+			t.Errorf("rename to %.10q: %v", name, err)
+		}
+	}
+	if err := CheckSessionName("abcd-2345"); err != nil {
+		t.Errorf("a name with a dash: %v", err)
+	}
+}
+
+func TestEmptyRenameStopsBeforeRequest(t *testing.T) {
+	c := &Conn{Host: Host{Name: "box"}, err: errors.New("unexpected request")}
+	for _, name := range []string{"", " ", "\t\n"} {
+		var ue *UserError
+		if err := c.RenameSession(context.Background(), "abcd2345", name); !errors.As(err, &ue) || ue.Code != "bad_name" || ue.Kind != KindUsage || ue.Hint == "" {
+			t.Errorf("empty rename reached request path: %v", err)
+		}
+	}
+}

@@ -19,7 +19,7 @@ One static Go binary.
 | Part | Job |
 | --- | --- |
 | Screens | The launcher: the hosts, then one host's sessions, one list at a time, with search across hosts, a one-line quick start, and sheets (the palette, peek, forms, the add-host wizard) that rise over it. It remembers what it saw, to draw at once. It runs in the alternate screen and is built with Bubble Tea v2. While attached it draws nothing. See [UX](../contributing/ux-spec.md), [0009](../contributing/decisions/0009-light-launcher.md), [0011](../contributing/decisions/0011-instant-launcher.md) and [0012](../contributing/decisions/0012-own-look.md). |
-| CLI | `simstim host …`, `new`, `ls`, `attach`, `kill`, `doctor`, `completion`. `--json` on every list. |
+| CLI | `simstim host …`, `new`, `ls`, `show`, `attach`, `rm`, `doctor`, `completion`. `--json` on every list. |
 | SSH layer | Runs the system `ssh` with a generated config. Owns a private ControlMaster per host. Opens the bridge channel. Uploads files. |
 | Attach pump | Raw mode, an output pump with a passive mode tracker, the input filter, resize forwarding, the reset list on detach. |
 | Reconnect | Heartbeat, wake detection, backoff, and resume by byte offset. |
@@ -148,7 +148,7 @@ A walled session splits the helper into a trusted side outside the wall and an u
 
 ### 3.4 Detach
 
-Triggers: the detach key, closing the tab, `simstim kill` from elsewhere, or SIGTERM.
+Triggers: the detach key, closing the tab, `simstim rm` from elsewhere, or SIGTERM.
 
 1. The client closes its attach stream, but the holder keeps running.
 2. The client writes the ordered reset list in one write, and never sends RIS (`ESC c`), which wipes Ghostty's scrollback. The list:

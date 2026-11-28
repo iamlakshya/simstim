@@ -32,12 +32,12 @@ type Concept struct {
 // concepts are the words of help concepts, one entry each. An entry that is
 // wider than a terminal wraps under its meaning. A task that adds a word
 // that users meet adds its entry here, in the same change. C5 widens the
-// address once every verb takes -.
+// address as the session commands add their supported forms.
 var concepts = []Concept{
 	{"host", "The Linux machine, VM or container that runs sessions"},
 	{"helper", "The program on each host that runs its sessions"},
 	{"session", "A terminal on a host, which keeps running when you leave"},
-	{"address", "<host>/<session>. attach and flip take - for the last one"},
+	{"address", "<host>/<session>, a unique session name, or - for the last attached"},
 	{"agent", "A coding agent, such as Claude Code or Codex"},
 	{"image", "A read-only root file system for microvm sessions, pinned by digest"},
 	{"launcher", "The screen of hosts and sessions that " + brand.Name + " opens"},

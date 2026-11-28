@@ -1,7 +1,7 @@
 == new box --detach --json --name api --memory-max 256M -- sleep 60
 {
   "v": 1,
-  "address": "box/api",
+  "address": "box/<id>",
   "agent": "shell",
   "alive": true,
   "cols": 80,
@@ -50,6 +50,25 @@
   "id": "<id>",
   "ports": [],
   "session": "api"
+}
+== show box/api --json
+{
+  "v": 1,
+  "address": "box/<id>",
+  "agent": "shell",
+  "alive": true,
+  "cols": 80,
+  "created_at": "<created_at>",
+  "cwd": "<cwd>",
+  "host": "box",
+  "host_version": "<host_version>",
+  "id": "<id>",
+  "memory_max": "<memory_max>",
+  "name": "api",
+  "rows": 24,
+  "since": "<since>",
+  "source": "<source>",
+  "state": "<state>"
 }
 == doctor --json
 {

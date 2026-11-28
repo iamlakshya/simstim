@@ -1,6 +1,7 @@
 package host
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -60,15 +61,50 @@ func (h *Holder) stop(reason string, system bool) {
 	os.Exit(0)
 }
 
+// errEnding is the error of a rename while the holder makes its last save.
+var errEnding = errors.New("the session is ending")
+
+// rename saves the new session name under op.lock and saveMu before
+// updating h.m.Name in memory, so a delete confirmed under the old name
+// always sees the saved rename (cli-spec 9.5).
+func (h *Holder) rename(name string) error {
+	unlock, err := lockSessionWait(h.id, renameWait)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	h.saveMu.Lock()
+	defer h.saveMu.Unlock()
+	if h.closed {
+		return errEnding
+	}
+	h.mu.Lock()
+	cp := *h.m
+	h.mu.Unlock()
+	cp.Name = name
+	if err := cp.Save(); err != nil {
+		return err
+	}
+	h.mu.Lock()
+	h.m.Name = name
+	h.mu.Unlock()
+	return nil
+}
+
 // save writes m, a copy of the manifest, unless the holder has made its
 // last save. After that, Delete may remove the session's folder at any
-// moment, and a late save would bring it back.
+// moment, and a late save would bring it back. It refreshes m.Name from
+// h.m under saveMu so a tick snapshot taken before a rename never puts the
+// old name back on disk.
 func (h *Holder) save(m *Manifest, last bool) error {
 	h.saveMu.Lock()
 	defer h.saveMu.Unlock()
 	if h.closed {
 		return nil
 	}
+	h.mu.Lock()
+	m.Name = h.m.Name
+	h.mu.Unlock()
 	h.closed = last
 	if h.isGuest() {
 		// Never write the environment (which may include exposed secrets) to

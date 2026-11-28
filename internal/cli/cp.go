@@ -85,7 +85,7 @@ func cpCmd() *cobra.Command {
 }
 
 func runCP(cmd *cobra.Command, target string, fn func(context.Context, client.Host, *client.Session) error) error {
-	return withSession(cmd.Context(), target, func(ctx context.Context, h client.Host, conn *client.Conn, s *client.Session) error {
+	return withSession(cmd, target, func(ctx context.Context, h client.Host, conn *client.Conn, s *client.Session) error {
 		if !conn.HasFeature(api.FeatureSFTP) {
 			return &client.UserError{
 				Msg:  "the helper on " + h.Name + " is too old for SFTP file copy",

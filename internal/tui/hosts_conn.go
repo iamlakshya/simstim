@@ -109,7 +109,7 @@ func (m *Model) onSessions(msg sessionsMsg) tea.Cmd {
 	h.err = nil
 	cmd := m.alertNew(h, msg.list)
 	m.noteActivity(h, msg.list)
-	h.sessions, h.loaded = msg.list, true
+	h.sessions, h.loaded, h.seenAt = msg.list, true, m.now()
 	m.syncSel()
 	if m.want.host == h.name() {
 		m.want = sessKey{} // it is gone: the first live list did not have it

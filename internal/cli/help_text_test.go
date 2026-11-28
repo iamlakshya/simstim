@@ -172,7 +172,7 @@ func exampleParses(args []string) string {
 	if strings.Contains(c.Use, "<host>/<session>") {
 		args := c.Flags().Args()
 		hostChoice := strings.Contains(c.Use, "<host>|") || strings.Contains(c.Use, "|<host>")
-		if len(args) > 0 && args[0] != "-" && args[0] != "my-vps/auth-fix" && (!hostChoice || args[0] != "my-vps") {
+		if len(args) > 0 && args[0] != "-" && args[0] != "my-vps/auth-fix" && args[0] != "auth-fix" && (!hostChoice || args[0] != "my-vps") {
 			return "a session example must use my-vps/auth-fix"
 		}
 	}
@@ -339,8 +339,8 @@ func TestTopicProseIsShared(t *testing.T) {
 	}
 }
 
-// The address line of help concepts is true: the commands that it names
-// take -, and the others do not yet. C5 widens the line.
+// The address concept describes the forms all session commands share.
+// Each command resolves - by the last session's ID, before any host is dialled.
 func TestAddressConceptIsTrue(t *testing.T) {
 	hosttest.New(t)
 	var line string
@@ -349,17 +349,15 @@ func TestAddressConceptIsTrue(t *testing.T) {
 			line = c.Meaning
 		}
 	}
-	for _, name := range []string{"attach", "flip"} {
-		if !strings.Contains(line, name) {
-			t.Errorf("the address line does not name %s: %q", name, line)
-		}
-		if got, code := lineErr(t, name, "-"); code != 3 || !strings.Contains(got, "no session has been attached yet") {
-			t.Errorf("%s - exits with %d:\n%s", name, code, got)
+	for _, form := range []string{"<host>/<session>", "unique session name", "-", "last attached"} {
+		if !strings.Contains(line, form) {
+			t.Errorf("the address concept lost %q: %q", form, line)
 		}
 	}
-	for _, args := range [][]string{{"kill", "-"}, {"ports", "-"}, {"debug", "start", "-"}} {
-		if got, code := lineErr(t, args...); code != 2 || !strings.Contains(got, `"-" is not`) {
-			t.Errorf("%s takes -, so the address line of help concepts may name it: exit %d\n%s", strings.Join(args, " "), code, got)
+	for _, name := range []string{"attach", "flip", "show", "rm", "kill", "resume", "rename", "send", "ports", "forward", "pull", "debug start"} {
+		_, _, err := addressOf(t, append(strings.Fields(name), "-")...)
+		if got, code := reportOf(err); code != 3 || !strings.Contains(got, "no session has been attached yet") {
+			t.Errorf("%s - does not share the last-session resolver: exit %d\n%s", name, code, got)
 		}
 	}
 }

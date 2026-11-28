@@ -44,20 +44,6 @@ type NewArgs = api.NewArgs
 // SessionInfo is one row of the session list.
 type SessionInfo = api.SessionInfo
 
-// idAlphabet is the client's rule too (api.ValidSessionID).
-const idAlphabet = api.SessionIDAlphabet
-
-// NewID makes a short random session ID.
-func NewID() string {
-	var b [8]byte
-	_, _ = rand.Read(b[:])
-	out := make([]byte, 8)
-	for i := range b {
-		out[i] = idAlphabet[int(b[i])%len(idAlphabet)]
-	}
-	return string(out)
-}
-
 func newUUID() string {
 	var b [16]byte
 	_, _ = rand.Read(b[:])
@@ -80,11 +66,11 @@ func expandHome(p string) string {
 
 // New starts a session and returns its row.
 func New(a NewArgs) (_ *SessionInfo, err error) {
+	if err := checkNewArgs(a); err != nil {
+		return nil, err
+	}
 	if a.Wall != "" && a.Wall != "none" {
 		return newWalled(a)
-	}
-	if err := checkMemoryMax(a.MemoryMax); err != nil {
-		return nil, err
 	}
 	argv, kind, agent, known, err := pickAgent(a)
 	if err != nil {
@@ -103,7 +89,7 @@ func New(a NewArgs) (_ *SessionInfo, err error) {
 	if err != nil {
 		login = os.Environ()
 	}
-	id := NewID()
+	id := unusedID()
 	// Find the agent before anything is asked or made. A missing agent
 	// leaves nothing behind: no folder, no worktree and no branch.
 	inline := a.Inline && known && len(a.Argv) == 0 && agent.Inline.Has()
@@ -128,11 +114,7 @@ func New(a NewArgs) (_ *SessionInfo, err error) {
 	}
 	var gi *GitInfo
 	if a.Worktree {
-		n := a.Name
-		if strings.TrimSpace(n) == "" {
-			n = filepath.Base(cwd)
-		}
-		gi, err = makeWorktree(cwd, n, id, a.Base)
+		gi, err = makeWorktree(cwd, worktreeBaseName(a.Name, cwd), id, a.Base)
 		if err != nil {
 			return nil, err
 		}
@@ -142,9 +124,30 @@ func New(a NewArgs) (_ *SessionInfo, err error) {
 	if err != nil {
 		return nil, err
 	}
+	m := buildManifest(a, id, cwd, kind, argv, env, term, secrets, gi, sessHooks, agent, known, inline, hooks, sessionUUID)
+	return startSession(m, a.Secrets)
+}
+
+func checkNewArgs(a NewArgs) error {
+	if strings.TrimSpace(a.Name) != "" {
+		if err := checkName(a.Name); err != nil {
+			return err
+		}
+	}
+	return checkMemoryMax(a.MemoryMax)
+}
+
+func worktreeBaseName(name, cwd string) string {
+	if strings.TrimSpace(name) != "" {
+		return name
+	}
+	return filepath.Base(cwd)
+}
+
+func buildManifest(a NewArgs, id, cwd, kind string, argv, env []string, term string, secrets []string, gi *GitInfo, sessHooks sessionHooks, agent agents.Agent, known, inline bool, hooks []string, sessionUUID string) *Manifest {
 	name := strings.TrimSpace(a.Name)
 	if name == "" {
-		name = filepath.Base(cwd)
+		name = folderName(cwd)
 	}
 	asked := max(a.MemoryMax, 0)
 	now := time.Now().UTC()
@@ -163,7 +166,7 @@ func New(a NewArgs) (_ *SessionInfo, err error) {
 	m.SetupHook, m.ResumeHook, m.StopHook, m.SetupHash = sessHooks.setup, sessHooks.resume, sessHooks.stop, sessHooks.hash
 	m.RunHook = m.SetupHook
 	fillAgentManifest(m, a.Argv, argv, agent, known, inline, hooks, sessionUUID)
-	return startSession(m, a.Secrets)
+	return m
 }
 
 // pickAgent returns the command a new session runs and its kind, and the
@@ -265,7 +268,7 @@ func startSession(m *Manifest, secrets map[string]api.Secret) (*SessionInfo, err
 		return nil, UserError("start_failed", err.Error(), "Check the session log with the host doctor.")
 	}
 	if err := deliverSecrets(id, secrets); err != nil {
-		_ = deleteSession(id, &DeleteResult{})
+		_ = deleteSession(id, nil, &DeleteResult{})
 		return nil, secretsFailed(err)
 	}
 	if mm := waitStarted(id, 5*time.Second); mm != nil {
@@ -412,14 +415,25 @@ func Delete(id string) (DeleteResult, error) {
 	if err := CheckCaller(); err != nil {
 		return res, err
 	}
-	err := deleteSession(id, &res)
+	err := deleteSession(id, nil, &res)
+	return res, err
+}
+
+// DeleteNamed stops and removes session id only while its manifest name is
+// still expectedName, returning session_renamed if it changed (cli-spec 9.5).
+func DeleteNamed(id, expectedName string) (DeleteResult, error) {
+	var res DeleteResult
+	if err := CheckCaller(); err != nil {
+		return res, err
+	}
+	err := deleteSession(id, &expectedName, &res)
 	return res, err
 }
 
 // DeleteResult says what deleting a session did.
 type DeleteResult = api.DeleteResult
 
-func deleteSession(id string, res *DeleteResult) error {
+func deleteSession(id string, expectedName *string, res *DeleteResult) error {
 	if !validID(id) {
 		return UserError("not_found", "no session "+id, "List sessions to find its ID.")
 	}
@@ -432,7 +446,19 @@ func deleteSession(id string, res *DeleteResult) error {
 	}
 	// The folder goes, with the lock's file in it, while the lock holds.
 	defer unlock()
-	m, _ := LoadManifest(id)
+	m, loadErr := LoadManifest(id)
+	if expectedName != nil {
+		if loadErr != nil {
+			if errors.Is(loadErr, os.ErrNotExist) {
+				return UserError("not_found", "no session "+id, "List sessions to find its ID.")
+			}
+			return UserError("session_renamed", "cannot read session "+id+"'s name, so it was not deleted", "List sessions to check its name, then delete it again.")
+		}
+		if m.Name != *expectedName {
+			return UserError("session_renamed", fmt.Sprintf("session %s is now named %q, not %q, so it was not deleted", id, m.Name, *expectedName),
+				"List sessions to check its name, then delete it again.")
+		}
+	}
 	stopHolder(id, m)
 	if m != nil {
 		var kept *proto.Error
@@ -450,26 +476,3 @@ func deleteSession(id string, res *DeleteResult) error {
 	res.Deleted = true
 	return nil
 }
-
-// Rename changes a session's name.
-func Rename(id, name string) error {
-	name = strings.TrimSpace(name)
-	if name == "" {
-		return UserError("bad_name", "a name is needed", "")
-	}
-	if err := CheckCaller(); err != nil {
-		return err
-	}
-	if alive(id) {
-		_, err := HolderRequest(id, "rename", map[string]string{"name": name}, 2*time.Second)
-		return err
-	}
-	m, err := LoadManifest(id)
-	if err != nil {
-		return UserError("not_found", "no session "+id, "List sessions to find its ID.")
-	}
-	m.Name = name
-	return m.Save()
-}
-
-func validID(id string) bool { return api.ValidSessionID(id) }

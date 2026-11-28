@@ -2,6 +2,7 @@ package host
 
 import (
 	"encoding/json"
+	"errors"
 	"strings"
 
 	"github.com/iamlakshya/simstim/internal/proto"
@@ -40,14 +41,30 @@ func (h *Holder) request(c *hclient, req proto.Request) {
 			Name string `json:"name"`
 		}
 		if json.Unmarshal(req.Args, &args) != nil || strings.TrimSpace(args.Name) == "" {
-			reply(nil, &proto.Error{Code: "bad_request", Message: "a name is needed"})
+			reply(nil, &proto.Error{Code: "bad_request", Message: "a name is needed", Hint: "Pass a non-empty name for the session."})
 			return
 		}
-		h.mu.Lock()
-		h.m.Name = strings.TrimSpace(args.Name)
-		h.dirty = true
-		h.mu.Unlock()
-		reply(map[string]string{"name": args.Name}, nil)
+		name := strings.TrimSpace(args.Name)
+		if err := checkName(name); err != nil {
+			var perr *proto.Error
+			if errors.As(err, &perr) {
+				reply(nil, perr)
+				return
+			}
+			reply(nil, &proto.Error{Code: "bad_name", Message: err.Error()})
+			return
+		}
+		var perr *proto.Error
+		switch err := h.rename(name); {
+		case err == nil:
+			reply(map[string]string{"name": name}, nil)
+		case errors.Is(err, errEnding):
+			reply(nil, &proto.Error{Code: "exiting", Message: "the session is ending, so it was not renamed", Hint: "List the sessions to see it."})
+		case errors.As(err, &perr):
+			reply(nil, perr)
+		default:
+			reply(nil, &proto.Error{Code: "save", Message: "cannot save the new name: " + err.Error(), Hint: "Check the host's disk with the host doctor."})
+		}
 	case "ports":
 		h.mu.Lock()
 		unit, pid := h.m.Run.Unit != "", h.m.Run.AgentPID

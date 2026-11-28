@@ -377,6 +377,29 @@ func Reap(pid int, timeout time.Duration) error {
 	}
 }
 
+// OldName gives the session id the name name in its manifest, as a helper
+// before names were checked could: a name that new and rename now refuse,
+// such as one that looks like an ID. It stops the session's holder first,
+// so that no later save of the holder puts the old name back. The session
+// stays, with its agent ended.
+func OldName(t testing.TB, id, name string) {
+	t.Helper()
+	if pid := livePID(id); pid > 0 {
+		_, _ = host.HolderRequest(id, "kill", nil, 3*time.Second)
+		if err := Reap(pid, 10*time.Second); err != nil {
+			t.Fatal(err)
+		}
+	}
+	m, err := host.LoadManifest(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.Name = name
+	if err := m.Save(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // WaitFor polls cond until it is true, or fails the test after timeout.
 func WaitFor(t testing.TB, timeout time.Duration, what string, cond func() bool) {
 	t.Helper()

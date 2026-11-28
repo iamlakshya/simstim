@@ -2,6 +2,7 @@ package client
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"strings"
@@ -36,6 +37,17 @@ func SessionArgs(a NewArgs, cols, rows int, s Settings) NewArgs {
 	return a
 }
 
+// CheckSessionName refuses name, a name that the user gives a session,
+// when it looks like a session ID or is too long (api.CheckName), as the
+// helper does too: an address with an ID's form always means an ID
+// (cli-spec 9.2). The error has the code bad_name, and exit code 2.
+func CheckSessionName(name string) error {
+	if msg, hint, ok := api.CheckName(name); !ok {
+		return &UserError{Msg: msg, Hint: hint, Code: "bad_name", Kind: KindUsage}
+	}
+	return nil
+}
+
 // Sessions lists a host's sessions, as the host sent them, without a row
 // whose ID is not a session ID (ValidSessions).
 func (c *Conn) Sessions(ctx context.Context) ([]Session, error) {
@@ -47,6 +59,9 @@ func (c *Conn) Sessions(ctx context.Context) ([]Session, error) {
 // NewSession starts a session. Unless a names a memory cap, the session gets
 // the one in config.toml.
 func (c *Conn) NewSession(ctx context.Context, a NewArgs) (*Session, error) {
+	if err := CheckSessionName(a.Name); err != nil {
+		return nil, err
+	}
 	a, err := withMemoryMax(a)
 	if err != nil {
 		return nil, err
@@ -97,6 +112,53 @@ func (c *Conn) Delete(ctx context.Context, id string) (DeleteResult, error) {
 	return r, err
 }
 
+// DeleteNamed deletes the session id only while its name is still name,
+// the name that the user confirmed: the host refuses the delete with
+// session_renamed after a rename. The name is sent also when it is empty,
+// as for a session with no name, which a rename may give one. A helper
+// from before this ignores the name, and deletes.
+func (c *Conn) DeleteNamed(ctx context.Context, id, name string) (DeleteResult, error) {
+	var r DeleteResult
+	err := c.Call(ctx, "delete", map[string]string{"id": id, "name": name}, &r)
+	return r, err
+}
+
+// DeleteLines say what deleting the session s on host does, for the
+// question before it: what stops, and what stays. The launcher's delete
+// sheet and the rm command ask with the same lines. folder is the
+// session's folder as the user reads it, such as ~/src/app. The host's
+// words are cleaned of control and hidden characters.
+//
+// A folder stays, except a worktree that the session made: the host
+// removes it with its branch when it has no changes and no new commits.
+// The helper does not say which session made a worktree, so a folder in
+// the helper's worktrees gets a line that is true either way.
+func DeleteLines(s Session, host, folder string) []string {
+	oneLine := strings.NewReplacer("\r\n", " ", "\n", " ", "\t", " ")
+	agent := api.CleanText(oneLine.Replace(s.Agent), 200)
+	host = api.CleanText(oneLine.Replace(host), 200)
+	folder = api.CleanText(oneLine.Replace(folder), 1000)
+	stays := fmt.Sprintf("The folder %s stays.", folder)
+	if MaybeWorktree(s) {
+		stays = fmt.Sprintf("If the session made the worktree %s, it goes with its branch, unless it has changes or new commits.", folder)
+	}
+	if Ended(s) {
+		// Nothing runs that could lose work: say only what goes.
+		return []string{fmt.Sprintf("This removes the session from %s.", host), stays}
+	}
+	return []string{
+		fmt.Sprintf("This stops %s on %s and removes the session.", agent, host),
+		stays + " Unsaved work in the agent is lost.",
+	}
+}
+
+// MaybeWorktree reports whether the session s runs in the helper's folder
+// of worktrees on the host. The session may have made that worktree, or
+// may only have started in it.
+func MaybeWorktree(s Session) bool {
+	return strings.Contains(s.Cwd, "/"+brand.Name+"/worktrees/")
+}
+
 // Port is a TCP port a session listens on.
 type Port = api.Port
 
@@ -125,6 +187,13 @@ func (c *Conn) RevokePort(ctx context.Context, id string, port int) error {
 
 // RenameSession renames a session.
 func (c *Conn) RenameSession(ctx context.Context, id, name string) error {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return &UserError{Msg: "a name is needed", Hint: "Pass a non-empty name for the session.", Code: "bad_name", Kind: KindUsage}
+	}
+	if err := CheckSessionName(name); err != nil {
+		return err
+	}
 	return c.Call(ctx, "rename", map[string]string{"id": id, "name": name}, nil)
 }
 

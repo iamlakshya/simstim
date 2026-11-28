@@ -194,11 +194,11 @@ func TestSessionCommands(t *testing.T) {
 	if out := okSaid(t, "ports", "box/api"); out != "api on box listens on no TCP ports.\n" {
 		t.Errorf("ports = %q", out)
 	}
-	if out := okSaid(t, "kill", "box/api"); out != "Deleted api ("+id+") on box.\n" {
-		t.Errorf("kill = %q", out)
+	if out := okSaid(t, "rm", "box/api", "-y"); out != "Deleted api ("+id+") on box.\n" {
+		t.Errorf("rm -y = %q", out)
 	}
 	if out := ok(t, "ls"); out != "box  no sessions\n" {
-		t.Errorf("ls after kill = %q", out)
+		t.Errorf("ls after rm = %q", out)
 	}
 }
 
@@ -206,24 +206,30 @@ func TestSessionsAreFoundByIDOrUniqueName(t *testing.T) {
 	newTestHost(t)
 	newSession(t, "dup", "sleep", "60")
 	newSession(t, "dup", "sleep", "60")
-	failsWithHint(t, "2 sessions are named", "session ID", "kill", "box/dup")
-	fails(t, `no session "nope" on box`, "kill", "box/nope")
-	fails(t, "is not host/session", "kill", "box")
-	fails(t, `no host named "elsewhere"`, "kill", "elsewhere/x")
+	failsWithHint(t, "2 sessions are named \"dup\" on box: box/", "rm box/", "rm", "box/dup", "-y")
+	fails(t, `no session "nope" on box`, "rm", "box/nope", "-y")
+	// A bare word is a session, also when a host has that name.
+	fails(t, `no session named "box" on any host`, "rm", "box", "-y")
+	fails(t, "is not host/session", "rm", "box/", "-y")
+	fails(t, `no host named "elsewhere"`, "rm", "elsewhere/x", "-y")
 	fails(t, `no host named "elsewhere"`, "ls", "--host", "elsewhere")
-	fails(t, `no host named "elsewhere"`, "new", "elsewhere")
+	fails(t, `no host named "elsewhere"`, "new", "elsewhere", "--detach")
 }
 
 func TestAttachNeedsATerminal(t *testing.T) {
 	newTestHost(t)
 	id := newSession(t, "s", "sleep", "60")
-	fails(t, "attach needs a terminal", "attach", "box/"+id)
-	fails(t, "attach needs a terminal", "new", "box", "--", "sleep", "60")
-	fails(t, "no session has been attached yet", "attach", "-")
-	_, err := run(t, "attach", "-")
+	failsWithHint(t, "attach needs a terminal", brand.Name+" send box/"+id+" 'text'", "attach", "box/"+id)
+	fails(t, "new attaches, so it needs a terminal", "new", "box", "--", "sleep", "60")
+	// Without a terminal, attach stops before it looks: show says it.
+	fails(t, "no session has been attached yet", "show", "-")
+	_, err := run(t, "show", "-")
 	var ue *client.UserError
-	if want := "Attach to a session by its name, or run " + brand.Name + " and pick one."; !errors.As(err, &ue) || ue.Hint != want {
-		t.Errorf("attach - = %v, want the hint %q", err, want)
+	if want := brand.Name + " ls"; !errors.As(err, &ue) || ue.Hint != want || exitCode(ue.Kind) != 3 {
+		t.Errorf("show - = %v, want the hint %q and exit code 3", err, want)
+	}
+	if _, err := run(t, "attach", "box/"+id); !errors.As(err, &ue) || exitCode(ue.Kind) != 2 {
+		t.Errorf("attach without a terminal = %v, want exit code 2", err)
 	}
 	// A session whose holder is gone cannot be attached to: a resume brings
 	// it back first.
@@ -235,7 +241,12 @@ func TestAttachNeedsATerminal(t *testing.T) {
 	if err := hosttest.Reap(pid, 5*time.Second); err != nil {
 		t.Fatal(err)
 	}
-	failsWithHint(t, "the session lost on box ended (the session's holder stopped)", "resume box/"+lost, "attach", "box/lost")
+	_, done := inTerminal(t, "attach", "box/lost", "--no-input")
+	var b strings.Builder
+	code := printError(&b, wait(t, done), nil, false, false)
+	if code != 4 || !strings.Contains(b.String(), "Try: "+brand.Name+" attach box/"+lost+" --no-input --restart") {
+		t.Errorf("attach box/lost --no-input: exit %d\n%s", code, b.String())
+	}
 }
 
 func TestVersionAndConfig(t *testing.T) {

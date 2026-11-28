@@ -45,7 +45,7 @@ func TestStopCommandLifecycle(t *testing.T) {
 	}
 
 	// Without a terminal, attach fails without waking the stopped session.
-	failsWithHint(t, "attach needs a terminal", "not a pipe", "attach", "box/worker")
+	failsWithHint(t, "attach needs a terminal", "send ", "attach", "box/worker")
 	if s := sessionState(t, id); s != api.StateStopped {
 		t.Fatalf("non-terminal attach woke stopped session: state = %q", s)
 	}
@@ -105,7 +105,7 @@ func TestAttachWakesStoppedSession(t *testing.T) {
 func TestStopWithAnOldHelperAndMissingSession(t *testing.T) {
 	newTestHost(t)
 	id := newSession(t, "old", "sleep", "60")
-	failsWithHint(t, `no session "nosuch" on box`, "ls --host box", "stop", "box/nosuch")
+	failsWithHint(t, `no session "nosuch" on box`, "ls box", "stop", "box/nosuch")
 
 	old := host.Features
 	host.Features = slices.DeleteFunc(slices.Clone(old), func(f string) bool { return f == "stop" })

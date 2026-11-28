@@ -36,7 +36,7 @@ type Backend interface {
 	// Memory and Remember read and write the launcher's memory: Remember
 	// writes the sessions, and RememberLast the session last attached to.
 	Memory() memory
-	Remember(memory)
+	Remember(map[string]client.HostList)
 	RememberLast(host, id, name string)
 	// Secrets fetches the values of a host's own secrets for a new
 	// session. It never prompts.
@@ -62,6 +62,7 @@ type Conn interface {
 	NewSession(ctx context.Context, a client.NewArgs) (*client.Session, error)
 	Resume(ctx context.Context, a client.ResumeArgs) (*client.ResumeResult, error)
 	Delete(ctx context.Context, id string) (client.DeleteResult, error)
+	DeleteNamed(ctx context.Context, id, name string) (client.DeleteResult, error)
 	RenameSession(ctx context.Context, id, name string) error
 	Doctor(ctx context.Context) (client.HostInfo, error)
 	Peek(ctx context.Context, id string, n int) ([]byte, int, int, error)
@@ -110,12 +111,12 @@ func (realBackend) SaveHosts(ctx context.Context, h []client.Host) error {
 	}
 	return nil
 }
-func (realBackend) Settings() client.Settings               { return client.LoadSettings() }
-func (realBackend) LoadSettings() (client.Settings, string) { return client.LoadSettingsChecked() }
-func (realBackend) HelperVersion() string                   { return client.HelperVersion() }
-func (realBackend) Memory() memory                          { return loadMemory() }
-func (realBackend) Remember(mem memory)                     { _ = saveMemory(mem) }
-func (realBackend) RememberLast(host, id, name string)      { RememberLast(host, id, name) }
+func (realBackend) Settings() client.Settings                 { return client.LoadSettings() }
+func (realBackend) LoadSettings() (client.Settings, string)   { return client.LoadSettingsChecked() }
+func (realBackend) HelperVersion() string                     { return client.HelperVersion() }
+func (realBackend) Memory() memory                            { return loadMemory() }
+func (realBackend) Remember(lists map[string]client.HostList) { client.RememberLists(lists) }
+func (realBackend) RememberLast(host, id, name string)        { RememberLast(host, id, name) }
 
 func (realBackend) SetupAnswers(host string) client.SetupAnswers {
 	return client.LoadSetupAnswers(host)

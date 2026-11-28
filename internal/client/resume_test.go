@@ -50,7 +50,41 @@ func TestResumeSecrets(t *testing.T) {
 	if !errors.As(err, &ue) || strings.ContainsRune(ue.Msg+ue.Hint, 0x1b) || !strings.Contains(ue.Msg, `\x1b`) {
 		t.Fatalf("a name with escapes = %v", err)
 	}
-	if want := "Run " + brand.Name + " kill box/a1, then start a new session."; ue.Hint != want {
+	if want := "Delete the session with " + brand.Name + " rm box/a1, then start a new one."; ue.Hint != want {
 		t.Errorf("hint = %q, want %q", ue.Hint, want)
+	}
+
+	// Hostile session IDs, host names or session names never become a
+	// runnable command targeting another session after cleaning.
+	wantLs := brand.Name + " ls box (lists sessions to check the ID)"
+	for _, badID := range []string{"abcd\u202e2345", "ab\x1bc23", "ab cd", "ab/cd", "-flag", "", strings.Repeat("a", 65)} {
+		for _, secs := range [][]string{{"GITHUB_TOKEN"}, {"BAD;SECRET"}} {
+			bad := Session{ID: badID, Name: "app\x1bc\u202e", Secrets: secs}
+			_, err := ResumeSecrets(h, bad, nil)
+			if !errors.As(err, &ue) {
+				t.Fatalf("bad ID %q (%v): %v", badID, secs, err)
+			}
+			if strings.ContainsAny(ue.Msg+ue.Hint, "\x1b\u202e") {
+				t.Errorf("bad ID %q leaked control/bidi runes: msg=%q hint=%q", badID, ue.Msg, ue.Hint)
+			}
+			if strings.Contains(ue.Hint, "abcd2345") || ue.Hint != wantLs {
+				t.Errorf("bad ID %q (%v): hint = %q, want %q", badID, secs, ue.Hint, wantLs)
+			}
+		}
+	}
+
+	// An oversized missing-secrets hint falls back to ls instead of truncating.
+	var many []string
+	for i := range 250 {
+		many = append(many, "EXTRA_SECRET_TOKEN_"+strings.Repeat("X", 10)+string(rune('A'+i%26)))
+	}
+	_, err = ResumeSecrets(h, Session{ID: "abcd2345", Name: "app", Secrets: many}, nil)
+	if !errors.As(err, &ue) || ue.Hint != wantLs {
+		t.Errorf("oversized hint = %q, want %q (err=%v)", ue.Hint, wantLs, err)
+	}
+	// An invalid host name falls back to bare ls.
+	_, err = ResumeSecrets(Host{Name: "bad host\u202e"}, Session{ID: "abcd2345", Name: "app", Secrets: []string{"GITHUB_TOKEN"}}, nil)
+	if !errors.As(err, &ue) || ue.Hint != brand.Name+" ls (lists sessions to check the ID)" {
+		t.Errorf("invalid host hint = %q (err=%v)", ue.Hint, err)
 	}
 }

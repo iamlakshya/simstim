@@ -13,7 +13,7 @@ func TestSessionJSONPreservesFullIntegerPrecision(t *testing.T) {
 	for _, value := range []int64{1<<53 + 1, math.MaxInt64 - 1, math.MaxInt64} {
 		t.Run(strconv.FormatInt(value, 10), func(t *testing.T) {
 			session := client.Session{ID: "abcd2345", MemoryMax: value, MemoryCurrent: value - 1}
-			encoded, err := versioned(sessionObject("box", session, []client.Session{session}))
+			encoded, err := versioned(sessionObject("box", session))
 			if err != nil {
 				t.Fatal(err)
 			}

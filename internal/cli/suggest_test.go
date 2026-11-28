@@ -30,16 +30,25 @@ func TestSuggestions(t *testing.T) {
 		{[]string{"at"}, []string{"attach"}, brand.Name + " attach"},
 		{[]string{"ssh", "box"}, []string{"ssh-config"}, help("ssh-config")},
 		{[]string{"foo", "box"}, nil, help("")},
-		{[]string{"kil"}, []string{"kill"}, help("kill")},
+		// kill is an old name of rm: a word near it suggests rm.
+		{[]string{"kil"}, []string{"rm"}, brand.Name + " rm"},
 		{[]string{"LS"}, []string{"ls"}, brand.Name + " ls"},
 		{[]string{"Attach"}, []string{"attach"}, brand.Name + " attach"},
-		{[]string{"Attach", "box/s"}, []string{"attach"}, brand.Name + " attach box/s"},
+		// A session word that no lookup found is never repeated in a
+		// command: host/ID is, and any other gives the list of the host.
+		{[]string{"Attach", "box/s"}, []string{"attach"}, brand.Name + " ls box"},
+		{[]string{"Attach", "box/abcd2345"}, []string{"attach"}, brand.Name + " attach box/abcd2345"},
+		{[]string{"atach", "-"}, []string{"attach"}, brand.Name + " attach -"},
+		{[]string{"atach", "s"}, []string{"attach"}, brand.Name + " ls"},
 		{[]string{"x"}, nil, help("")},
-		{[]string{"de"}, []string{"demo", "kill", "debug"}, brand.Name + " demo"},
+		{[]string{"de"}, []string{"demo", "rm", "debug"}, brand.Name + " demo"},
 		{[]string{"xyz"}, nil, help("")},
 		{[]string{""}, nil, help("")},
-		{[]string{"atach", "box/s"}, []string{"attach"}, brand.Name + " attach box/s"},
-		{[]string{"delte", "box/s"}, []string{"kill"}, brand.Name + " kill box/s"},
+		{[]string{"atach", "box/s"}, []string{"attach"}, brand.Name + " ls box"},
+		{[]string{"delte", "box/s"}, []string{"rm"}, brand.Name + " ls box"},
+		{[]string{"delte", "box/abcd2345"}, []string{"rm"}, brand.Name + " rm box/abcd2345"},
+		{[]string{"inspect", "box/s"}, []string{"show"}, brand.Name + " ls box"},
+		{[]string{"fli", "box/s"}, []string{"attach"}, brand.Name + " ls box"},
 		{[]string{"d"}, nil, help("")},
 		{[]string{"help", "atach"}, []string{"attach"}, brand.Name + " help attach"},
 		{[]string{"help", "host", "ad"}, []string{"add"}, brand.Name + " help host add"},
@@ -72,10 +81,11 @@ func TestTheTryLineFixesTheWordWhereItIs(t *testing.T) {
 		args []string
 		try  string
 	}{
-		{[]string{"--debug-file", "atach", "atach", "box/s"}, brand.Name + " --debug-file atach attach box/s"},
+		{[]string{"--debug-file", "atach", "atach", "box/abcd2345"}, brand.Name + " --debug-file atach attach box/abcd2345"},
 		{[]string{"host", "--debug-file", "ad", "ad", "box"}, brand.Name + " host --debug-file ad add box"},
 		{[]string{"new", "box", "--name", "--detatch", "--detatch"}, brand.Name + " new box --name --detatch --detach"},
-		{[]string{"debug", "start", "box/s", "--onl=memory"}, brand.Name + " debug start box/s --only=memory"},
+		{[]string{"debug", "start", "box/abcd2345", "--onl=memory"}, brand.Name + " debug start box/abcd2345 --only=memory"},
+		{[]string{"debug", "start", "box/s", "--onl=memory"}, brand.Name + " ls box"},
 	} {
 		cmd, err := line(t, c.args...)
 		if r := describe(err, cmd); r.try != c.try {
@@ -106,24 +116,28 @@ func TestErrorsOfTheCommandLine(t *testing.T) {
 		code int
 		has  []string
 	}{
-		{[]string{"atach", "x"}, 2, []string{`Did you mean "attach"?`, "\nTry: " + brand.Name + " attach x\n"}},
+		{[]string{"atach", "x"}, 2, []string{`Did you mean "attach"?`, "\nTry: " + brand.Name + " ls\n"}},
 		{[]string{"attach"}, 2, []string{"attach needs a session, as <host>/<session>", "Usage:   " + brand.Name + " attach", "Example: " + brand.Name + " attach my-vps/auth-fix", "Try: " + brand.Name + " attach --help"}},
-		{[]string{"kill"}, 2, []string{"Example: " + brand.Name + " kill my-vps/auth-fix"}},
+		// kill, an old name, warns, and its missing session is rm's.
+		{[]string{"kill"}, 2, []string{"rm needs a session, as <host>/<session>", "Example: " + brand.Name + " rm my-vps/auth-fix", "Try: " + brand.Name + " rm --help"}},
 		{[]string{"host", "ad", "box"}, 2, []string{`host has no command "ad"`, `Did you mean "add"?`, "Try: " + brand.Name + " host add box"}},
 		{[]string{"agents", "instal", "claude"}, 2, []string{`agents has no command "instal"`, "Try: " + brand.Name + " agents install claude"}},
 		{[]string{"doctor", "termnal"}, 2, []string{`Did you mean "terminal"?`, "Try: " + brand.Name + " doctor terminal"}},
 		{[]string{"install", "claude"}, 2, []string{`Did you mean "agents install"?`, "Try: " + brand.Name + " agents install claude"}},
-		{[]string{"remove", "box/s"}, 2, []string{`Did you mean "rm"?`, "Try: " + brand.Name + " rm box/s"}},
-		{[]string{"atach", "x", "--debug"}, 2, []string{"Try: " + brand.Name + " attach x --debug"}},
+		{[]string{"remove", "box/s"}, 2, []string{`Did you mean "rm"?`, "Try: " + brand.Name + " ls box\n"}},
+		{[]string{"atach", "x", "--debug"}, 2, []string{"Try: " + brand.Name + " ls\n"}},
+		{[]string{"atach", "box/abcd2345", "--debug"}, 2, []string{"Try: " + brand.Name + " attach box/abcd2345 --debug\n"}},
 		{[]string{"atach", "x", "--json"}, 2, []string{"Try: " + brand.Name + " attach --help"}},
 		{[]string{"completion", "bsh"}, 2, []string{`completion has no command "bsh"`, `Did you mean one of these: "bash", "zsh"?`, "Try: " + brand.Name + " completion bash\n"}},
 		{[]string{"completion", "bash", "extra"}, 2, []string{"completion bash takes no words, and got 1 word"}},
 		{[]string{"new", "box", "--detatch"}, 2, []string{"new has no flag --detatch", `Did you mean "--detach"?`, "Try: " + brand.Name + " new box --detach"}},
 		{[]string{"new", "--dir"}, 2, []string{"--dir needs a value", "Try: " + brand.Name + " new --help"}},
 		{[]string{"rename", "a", "b", "c"}, 2, []string{"rename takes <host>/<session> <name>, and got 3 words"}},
-		{[]string{"attach", "boxe/auth-fix"}, 3, []string{`no host named "boxe"`, `Did you mean "box"?`, "Try: " + brand.Name + " attach box/auth-fix"}},
-		{[]string{"attach", "bx/auth-fix"}, 3, []string{`no host named "bx"`, "Try: " + brand.Name + " host add bx"}},
-		{[]string{"new", "bo", "--name", "bo"}, 3, []string{`Did you mean "box"?`, "Try: " + brand.Name + " new box --name bo"}},
+		// show, not attach: attach without a terminal stops at that first.
+		{[]string{"show", "boxe/auth-fix"}, 3, []string{`no host named "boxe"`, `Did you mean "box"?`, "Try: " + brand.Name + " ls box\n"}},
+		{[]string{"show", "boxe/abcd2345"}, 3, []string{`no host named "boxe"`, `Did you mean "box"?`, "Try: " + brand.Name + " show box/abcd2345\n"}},
+		{[]string{"show", "bx/auth-fix"}, 3, []string{`no host named "bx"`, "Try: " + brand.Name + " host add bx"}},
+		{[]string{"new", "bo", "--name", "bo", "--detach"}, 3, []string{`Did you mean "box"?`, "Try: " + brand.Name + " new box --name bo --detach"}},
 		{[]string{"new", "--dir", "bo/s", "bo", "--detach"}, 3, []string{`Did you mean "box"?`, "Try: " + brand.Name + " new --dir bo/s box --detach"}},
 		{[]string{"new", "bo", "--detach", "--", "bo"}, 3, []string{"Try: " + brand.Name + " new box --detach -- bo"}},
 		{[]string{"ls", "--host=boxe"}, 3, []string{"Try: " + brand.Name + " ls --host=box"}},
@@ -136,8 +150,8 @@ func TestErrorsOfTheCommandLine(t *testing.T) {
 		{[]string{"help", "host", "--", "-bogus"}, 2, []string{`host has no command "-bogus"`, "\nTry: " + brand.Name + " host --help\n"}},
 		{[]string{"setup", "--host", "box", "--agents", "cluade ,cluade", "--yes"}, 3, []string{`Did you mean "claude"?`, "Try: " + brand.Name + " setup --host box --agents 'claude ,cluade' --yes\n"}},
 		{[]string{"setup", "--host", "box", "--agents", " cluade ", "--yes"}, 3, []string{`Did you mean "claude"?`, "Try: " + brand.Name + " setup --host box --agents ' claude ' --yes\n"}},
-		{[]string{"attach", "missing;id/s"}, 3, []string{`no host named "missing;id"`, "\nTry: Name one of the hosts that " + brand.Name + " host ls lists.\n"}},
-		{[]string{"new", "my host"}, 3, []string{`no host named "my host"`, "\nTry: Name one of the hosts that " + brand.Name + " host ls lists.\n"}},
+		{[]string{"show", "missing;id/s"}, 3, []string{`no host named "missing;id"`, "\nTry: Name one of the hosts that " + brand.Name + " host ls lists.\n"}},
+		{[]string{"new", "my host", "--detach"}, 3, []string{`no host named "my host"`, "\nTry: Name one of the hosts that " + brand.Name + " host ls lists.\n"}},
 		{[]string{"ls", "--host=-x"}, 3, []string{`no host named "-x"`, "\nTry: Name one of the hosts that " + brand.Name + " host ls lists.\n"}},
 		{[]string{"setup", "--host", "dev@x;y", "--name", "box", "--yes"}, 1, []string{"there is already a host called box", "\nTry: " + brand.Name + " setup --host 'dev@x;y' --name <another-name>, or " + brand.Name + " setup --host box\n"}},
 		{[]string{"debug", "start", "box/s", "--only", "net"}, 2, []string{"\nTry: Name attach, memory or runtime, and record net and launcher on this computer with --debug.\n"}},
@@ -283,12 +297,13 @@ func TestEachHostCodeExitsThroughMain(t *testing.T) {
 	}
 }
 
-// A hint that repeats a word the user typed quotes it for the shell.
+// A hint names the session that the command found by host/ID, not by the
+// words that the user typed, which a shell would need quoted.
 func TestHintsQuoteWhatTheUserTyped(t *testing.T) {
 	newTestHost(t)
-	newSession(t, "a b", "sleep", "60")
+	id := newSession(t, "a b", "sleep", "60")
 	got, code := lineErr(t, "forward", "box/a b", "x;y")
-	if want := "\nTry: " + brand.Name + " forward 'box/a b' 3000\n"; code != 2 || !strings.Contains(got, want) {
+	if want := "\nTry: " + brand.Name + " forward box/" + id + " 3000\n"; code != 2 || !strings.Contains(got, want) {
 		t.Errorf("forward = %d:\n%s\nwant %q", code, got, want)
 	}
 }

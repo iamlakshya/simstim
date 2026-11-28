@@ -170,9 +170,18 @@ func (b *bridge) handle(req proto.Request) {
 	case "delete":
 		var a struct {
 			ID string `json:"id"`
+			// Name, when set, is the name the client expects ("" included):
+			// the host refuses the delete when the session was renamed.
+			Name *string `json:"name"`
 		}
 		_ = json.Unmarshal(req.Args, &a)
-		res, err := Delete(a.ID)
+		var res DeleteResult
+		var err error
+		if a.Name != nil {
+			res, err = DeleteNamed(a.ID, *a.Name)
+		} else {
+			res, err = Delete(a.ID)
+		}
 		b.reply(req.ID, res, err)
 	case "rename":
 		var a struct {

@@ -102,6 +102,7 @@ var hostKinds = map[string]Kind{
 	"secrets_failed":  KindFailed,
 	"secrets_missing": KindFailed,
 	"session_gone":    KindFailed,
+	"session_renamed": KindFailed,
 	"setup_trust":     KindNeedsAnswer,
 	"start_failed":    KindFailed,
 	"starting":        KindFailed,

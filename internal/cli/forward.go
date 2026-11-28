@@ -26,7 +26,7 @@ func portsCmd() *cobra.Command {
 		Example: "  " + brand.Name + " ports my-vps/auth-fix\n  " + brand.Name + " ports my-vps/auth-fix --json",
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return withSession(cmd.Context(), args[0], func(ctx context.Context, h client.Host, conn *client.Conn, s *client.Session) error {
+			return withSession(cmd, args[0], func(ctx context.Context, h client.Host, conn *client.Conn, s *client.Session) error {
 				ports, err := conn.Ports(ctx, s.ID)
 				if err != nil {
 					return err
@@ -38,7 +38,7 @@ func portsCmd() *cobra.Command {
 					return printJSON(map[string]any{"host": h.Name, "session": s.Name, "id": s.ID, "ports": ports})
 				}
 				if len(ports) == 0 {
-					say(cmd, "%s on %s listens on no TCP ports.\n", client.CleanLine(s.Name), h.Name)
+					say(cmd, "%s on %s listens on no TCP ports.\n", shown(nameOf(*s)), shown(h.Name))
 					return nil
 				}
 				printPorts(os.Stdout, ports)
@@ -74,7 +74,7 @@ func forwardCmd() *cobra.Command {
 		Args:    cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			var plan forwardPlan
-			err := withSession(cmd.Context(), args[0], func(ctx context.Context, hh client.Host, conn *client.Conn, s *client.Session) error {
+			err := withSession(cmd, args[0], func(ctx context.Context, hh client.Host, conn *client.Conn, s *client.Session) error {
 				var err error
 				plan, err = buildForwardPlan(cmd, ctx, conn, hh, s, args[0], args[1:])
 				return err
@@ -91,6 +91,12 @@ func forwardCmd() *cobra.Command {
 	}
 }
 
+// sessionPorts asks a host for the ports that the session id listens on.
+// Tests replace it.
+var sessionPorts = func(ctx context.Context, conn *client.Conn, id string) ([]client.Port, error) {
+	return conn.Ports(ctx, id)
+}
+
 func buildForwardPlan(cmd *cobra.Command, ctx context.Context, conn *client.Conn, h client.Host, s *client.Session, target string, want []string) (forwardPlan, error) {
 	if s.Wall != nil {
 		return walledForwardPlan(cmd, ctx, conn, h, s, target, want)
@@ -104,8 +110,8 @@ func buildForwardPlan(cmd *cobra.Command, ctx context.Context, conn *client.Conn
 
 // forwardPairs turns the ports asked for (all the session's ports when none
 // are) into pairs of a local and a remote port for an unwalled session.
-func forwardPairs(ctx context.Context, conn *client.Conn, h client.Host, s *client.Session, target string, want []string) ([]client.ForwardPair, error) {
-	ports, err := conn.Ports(ctx, s.ID)
+func forwardPairs(ctx context.Context, conn *client.Conn, h client.Host, s *client.Session, _ string, want []string) ([]client.ForwardPair, error) {
+	ports, err := sessionPorts(ctx, conn, s.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -123,7 +129,7 @@ func forwardPairs(ctx context.Context, conn *client.Conn, h client.Host, s *clie
 	}
 	pairs := make([]client.ForwardPair, 0, len(want))
 	for _, w := range want {
-		lp, rp, explicitLocal, err := parsePortPair(w, target)
+		lp, rp, explicitLocal, err := parsePortPair(w, h.Name, s)
 		if err != nil {
 			return nil, err
 		}
@@ -161,7 +167,7 @@ func walledForwardPlan(cmd *cobra.Command, ctx context.Context, conn *client.Con
 		explicit bool
 	}, 0, len(want))
 	for _, w := range want {
-		lp, rp, explicit, err := parsePortPair(w, target)
+		lp, rp, explicit, err := parsePortPair(w, h.Name, s)
 		if err != nil {
 			return forwardPlan{}, err
 		}
@@ -174,7 +180,7 @@ func walledForwardPlan(cmd *cobra.Command, ctx context.Context, conn *client.Con
 }
 
 func chooseWalledPorts(cmd *cobra.Command, ctx context.Context, conn *client.Conn, h client.Host, s *client.Session, target string) ([]string, error) {
-	ports, err := conn.Ports(ctx, s.ID)
+	ports, err := sessionPorts(ctx, conn, s.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -184,7 +190,7 @@ func chooseWalledPorts(cmd *cobra.Command, ctx context.Context, conn *client.Con
 	p := prompts(cmd)
 	if !p.on {
 		return nil, &client.UserError{
-			Msg:  fmt.Sprintf("forward needs a port for walled session %s on %s (%s), and input is off", client.CleanLine(s.Name), h.Name, summarizeClaimedPorts(ports)),
+			Msg:  fmt.Sprintf("forward needs a port for walled session %s on %s (%s), and input is off", shown(nameOf(*s)), shown(h.Name), summarizeClaimedPorts(ports)),
 			Hint: fmt.Sprintf("%s forward %s %d", brand.Name, shellWord(target), ports[0].Port),
 			Code: "needs_answer",
 			Kind: client.KindNeedsAnswer,
@@ -193,8 +199,8 @@ func chooseWalledPorts(cmd *cobra.Command, ctx context.Context, conn *client.Con
 	return askWalledPorts(p, h, s, target, ports)
 }
 
-func askWalledPorts(p *prompter, h client.Host, s *client.Session, target string, ports []client.Port) ([]string, error) {
-	fmt.Fprintf(p.out, "Ports in %s on %s:\n", client.CleanLine(s.Name), h.Name)
+func askWalledPorts(p *prompter, h client.Host, s *client.Session, _ string, ports []client.Port) ([]string, error) {
+	fmt.Fprintf(p.out, "Ports in %s on %s:\n", shown(nameOf(*s)), shown(h.Name))
 	for i, pt := range ports {
 		proc := client.CleanLine(pt.Process)
 		if proc == "" {
@@ -210,10 +216,10 @@ func askWalledPorts(p *prompter, h client.Host, s *client.Session, target string
 		fmt.Fprintln(p.out, "No ports forwarded.")
 		return nil, nil
 	}
-	return resolvePortSelection(ans, target, ports)
+	return resolvePortSelection(ans, h.Name, s, ports)
 }
 
-func resolvePortSelection(ans, target string, ports []client.Port) ([]string, error) {
+func resolvePortSelection(ans, host string, s *client.Session, ports []client.Port) ([]string, error) {
 	fields := strings.FieldsFunc(ans, func(r rune) bool { return r == ' ' || r == '\t' || r == ',' })
 	var out []string
 	for _, f := range fields {
@@ -223,7 +229,7 @@ func resolvePortSelection(ans, target string, ports []client.Port) ([]string, er
 				continue
 			}
 		}
-		if _, _, _, err := parsePortPair(f, target); err != nil {
+		if _, _, _, err := parsePortPair(f, host, s); err != nil {
 			return nil, err
 		}
 		out = append(out, f)
@@ -281,7 +287,7 @@ func revokeForwardGrants(ctx context.Context, h client.Host, sessionID string, p
 	}
 }
 
-func parsePortPair(w, target string) (lp, rp int, explicitLocal bool, err error) {
+func parsePortPair(w, host string, s *client.Session) (lp, rp int, explicitLocal bool, err error) {
 	l, r, ok := strings.Cut(w, ":")
 	if !ok {
 		r = l
@@ -289,19 +295,21 @@ func parsePortPair(w, target string) (lp, rp int, explicitLocal bool, err error)
 	lp, err1 := strconv.Atoi(l)
 	rp, err2 := strconv.Atoi(r)
 	if err1 != nil || err2 != nil || lp < 1 || lp > 65535 || rp < 1 || rp > 65535 {
-		return 0, 0, false, &client.UserError{
-			Msg:  fmt.Sprintf("%q is not a port or local:remote pair", w),
-			Hint: brand.Name + " forward " + shellWord(target) + " 3000",
-			Code: "bad_value",
-			Kind: client.KindUsage,
-		}
+		return 0, 0, false, notAPort(host, s, w)
 	}
 	return lp, rp, ok, nil
 }
 
+// notAPort is the error of w, a word of forward that is neither a port nor
+// a pair. Its Try: line forwards a port of the session s on host, by
+// host/ID.
+func notAPort(host string, s *client.Session, w string) error {
+	return &client.UserError{Msg: fmt.Sprintf("%q is not a port or local:remote pair", w), Hint: sessionCommand(host, s.ID, "forward", "3000"), Code: "bad_value", Kind: client.KindUsage}
+}
+
 func noPortsError(h client.Host, s *client.Session) error {
 	return &client.UserError{
-		Msg:  fmt.Sprintf("%s on %s listens on no TCP ports yet", client.CleanLine(s.Name), h.Name),
+		Msg:  fmt.Sprintf("%s on %s listens on no TCP ports yet", shown(nameOf(*s)), shown(h.Name)),
 		Hint: "Start the dev server in the session, or give the port.",
 		Code: "no_ports",
 	}

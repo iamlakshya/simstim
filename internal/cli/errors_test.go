@@ -108,8 +108,9 @@ func TestErrorsAreCleaned(t *testing.T) {
 		t.Errorf("printed %q", b.String())
 	}
 	hosttest.New(t)
+	// The word that cleaning changed is not repeated in a command.
 	got, _ := lineErr(t, "atach", "box/a\x1bcb")
-	if strings.Contains(got, "\x1b") || !strings.Contains(got, "Try: "+brand.Name+" attach box/acb\n") {
+	if strings.Contains(got, "\x1b") || !strings.Contains(got, "Try: "+brand.Name+" attach --help\n") {
 		t.Errorf("printed %q", got)
 	}
 }

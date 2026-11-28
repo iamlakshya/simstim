@@ -94,7 +94,7 @@ func (b *demoBackend) HelperVersion() string { return "0.1.0" }
 
 // The demo forgets: it starts the same way every time.
 func (b *demoBackend) Memory() memory                          { return memory{} }
-func (b *demoBackend) Remember(memory)                         {}
+func (b *demoBackend) Remember(map[string]client.HostList)     {}
 func (b *demoBackend) RememberLast(string, string, string)     {}
 func (b *demoBackend) SetupAnswers(string) client.SetupAnswers { return client.SetupAnswers{} }
 func (b *demoBackend) RememberSetup(ctx context.Context, _, _ string, _ bool, _ string) (*client.UserError, error) {
@@ -166,7 +166,7 @@ func (c *demoConn) NewSession(_ context.Context, a client.NewArgs) (*client.Sess
 		parts := strings.Split(strings.TrimRight(a.Cwd, "/"), "/")
 		name = parts[len(parts)-1]
 	}
-	s := client.Session{ID: "n" + time.Now().Format("150405"), Name: name, Agent: a.Agent, Cwd: a.Cwd, State: "working",
+	s := client.Session{ID: api.NewSessionID(), Name: name, Agent: a.Agent, Cwd: a.Cwd, State: "working",
 		CreatedAt: time.Now(), Since: time.Now(), Alive: true, Cols: a.Cols, Rows: a.Rows}
 	c.be.sessions[c.host] = append(c.be.sessions[c.host], s)
 	return &s, nil
@@ -189,11 +189,22 @@ func (c *demoConn) Resume(_ context.Context, a client.ResumeArgs) (*client.Resum
 }
 
 func (c *demoConn) Delete(_ context.Context, id string) (client.DeleteResult, error) {
+	return c.deleteNamed(id, nil)
+}
+
+func (c *demoConn) DeleteNamed(_ context.Context, id, name string) (client.DeleteResult, error) {
+	return c.deleteNamed(id, &name)
+}
+
+func (c *demoConn) deleteNamed(id string, want *string) (client.DeleteResult, error) {
 	c.be.mu.Lock()
 	defer c.be.mu.Unlock()
 	list := c.be.sessions[c.host]
 	for i, s := range list {
 		if s.ID == id {
+			if want != nil && s.Name != *want {
+				return client.DeleteResult{}, &client.UserError{Msg: "the session was renamed, so it was not deleted", Hint: "Refresh the list.", Code: "session_renamed"}
+			}
 			c.be.sessions[c.host] = append(list[:i:i], list[i+1:]...)
 			return client.DeleteResult{Deleted: true}, nil
 		}

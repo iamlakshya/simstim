@@ -71,6 +71,10 @@ func (m *Model) openSelectedHost() tea.Cmd {
 // startSession sends "new" to the host h, for the start r.
 func (m *Model) startSession(h *hostConn, r startReq) tea.Cmd {
 	r.host = h.name()
+	// A name that looks like an ID fails before any secret is fetched.
+	if err := client.CheckSessionName(r.args.Name); err != nil {
+		return func() tea.Msg { return startedMsg{startReq: r, err: err} }
+	}
 	if !h.online() {
 		err := offlineErr(h)
 		return func() tea.Msg { return startedMsg{startReq: r, err: err} }
@@ -189,14 +193,20 @@ func (m *Model) attachSelected() tea.Cmd {
 	return m.jack(h, s.ID, s.Name)
 }
 
+// copyAttach copies the command that attaches to the selected session. It
+// names the session by host/ID, never by its name, which can mean another
+// session (cli-spec 9.2). An address that a shell would not read back as it
+// is, as from a host that sends an odd ID, is not copied.
 func (m *Model) copyAttach() tea.Cmd {
 	h, s := m.selectedPair()
 	if s == nil {
 		return nil
 	}
-	// By the session's ID: a name is the host's text, and could be shell
-	// syntax when the command is pasted.
-	text := fmt.Sprintf("%s attach %s", brand.Name, client.CommandTarget(h.name(), s.ID))
+	addr := h.name() + "/" + s.ID
+	if client.ShellWord(addr) != addr {
+		return m.toastErr(&client.UserError{Msg: "the address of this session cannot go in a command", Hint: brand.Name + " ls", Code: "bad_address", Kind: client.KindUsage})
+	}
+	text := brand.Name + " attach " + addr
 	return tea.Batch(tea.SetClipboard(text), m.toast(toastSuccess, "Copied: "+text+"."))
 }
 
@@ -209,7 +219,9 @@ func (m *Model) confirmDelete() tea.Cmd {
 	return nil
 }
 
-// deleteSession runs after the confirm.
+// deleteSession runs after the confirm. s is the session as the question
+// showed it: the host deletes it only while its name is still s.Name, so a
+// session renamed since stays.
 func (m *Model) deleteSession(host string, s client.Session) tea.Cmd {
 	h := m.hostByName(host)
 	if h == nil {
@@ -222,8 +234,8 @@ func (m *Model) deleteSession(host string, s client.Session) tea.Cmd {
 	return m.bgCmd(func(ctx context.Context) tea.Msg {
 		cctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 		defer cancel()
-		res, err := c.Delete(cctx, id)
-		ok := fmt.Sprintf("Deleted %s on %s.", s.Name, host)
+		res, err := c.DeleteNamed(cctx, id, s.Name)
+		ok := fmt.Sprintf("Deleted %s on %s.", client.CleanLine(s.Name), client.CleanLine(host))
 		note, hint := client.WorktreeNote(host, res)
 		if note != "" {
 			ok += " " + sentence(note)

@@ -12,7 +12,7 @@ The words that simstim uses, and what each one means. `simstim help concepts` pr
 | host | The Linux machine, VM or container that runs sessions. |
 | helper | The program on each host that runs its sessions. |
 | session | A terminal on a host, which keeps running when you leave. |
-| address | &lt;host&gt;/&lt;session&gt;. attach and flip take - for the last one. |
+| address | &lt;host&gt;/&lt;session&gt;, a unique session name, or - for the last attached. |
 | agent | A coding agent, such as Claude Code or Codex. |
 | image | A read-only root file system for microvm sessions, pinned by digest. |
 | launcher | The screen of hosts and sessions that simstim opens. |

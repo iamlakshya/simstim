@@ -155,7 +155,11 @@ func sshProxyCmd() *cobra.Command {
 				cancel()
 				return err
 			}
-			s, err := resolve(cctx, conn, sessRef)
+			list, err := listSessions(cctx, conn)
+			var s *client.Session
+			if err == nil {
+				s, err = findIn(cmd, list, sessRef, h.Name)
+			}
 			hasSFTP := conn.HasFeature(api.FeatureSFTP)
 			hasExec := conn.HasFeature(api.FeatureSSHExec)
 			conn.Close()

@@ -62,12 +62,13 @@ func say(cmd *cobra.Command, format string, a ...any) {
 // command skipped, on stderr: one line, or with --json one JSON line, as a
 // warning with code.
 func note(cmd *cobra.Command, code, msg string) {
+	msg = shownNote(msg)
 	if cmd != nil && jsonOn(cmd) {
 		line, _ := json.Marshal(map[string]any{"v": jsonVersion, "warning": map[string]string{"code": code, "message": msg}})
 		fmt.Fprintf(os.Stderr, "%s\n", jsonSafe(line))
 		return
 	}
-	fmt.Fprintln(os.Stderr, client.CleanBlock(msg))
+	fmt.Fprintln(os.Stderr, msg)
 }
 
 // stderrFor is stderr for messages that a part of the client writes by
@@ -157,29 +158,14 @@ func withV(obj json.RawMessage) json.RawMessage {
 }
 
 // sessionObject is a session for scripts (cli-spec 7.1): its host, its
-// address, and every field that has a value. list is every session on the
-// host, so that the address uses the ID when two sessions share the name.
-func sessionObject(host string, s client.Session, list []client.Session) map[string]any {
+// address, and every field that has a value. The address is always
+// host/ID, never a name: a name can change, or come to mean another
+// session, between the list that it came from and the script's next step.
+func sessionObject(host string, s client.Session) map[string]any {
 	obj := valuesOf(s)
 	obj["host"] = host
-	obj["address"] = host + "/" + sessionRef(s, list)
+	obj["address"] = host + "/" + s.ID
 	return obj
-}
-
-// sessionRef is the session's part of its address: its name, or its ID
-// when another session on the host has that name or that ID. An address
-// finds a session by ID first, then by name, so the name must not stand
-// for another session.
-func sessionRef(s client.Session, list []client.Session) string {
-	for _, o := range list {
-		if o.ID != s.ID && (o.Name == s.Name || o.ID == s.Name) {
-			return s.ID
-		}
-	}
-	if s.Name == "" {
-		return s.ID
-	}
-	return s.Name
 }
 
 // valuesOf is v as a JSON object, without the keys that hold no value: an
@@ -318,6 +304,35 @@ func flagOn(cmd *cobra.Command, args []string, name string) bool {
 		}
 	}
 	return on
+}
+
+// beforeAttach is the check of new and resume before any lookup and any
+// remote work: --json needs --detach, and an attach needs a terminal
+// (cli-spec 9.3, rule 2). So a script without a terminal opens no
+// connection, and starts or resumes no session.
+func beforeAttach(cmd *cobra.Command, asJSON, detach bool) error {
+	switch {
+	case detach:
+		return nil
+	case asJSON:
+		return needsDetach(cmd)
+	}
+	return attachNeedsATerminal(cmd)
+}
+
+// attachNeedsATerminal is the error of new or resume without --detach when
+// stdin or stdout is not a terminal, or nil. Its Try: line puts --detach
+// before any "--".
+func attachNeedsATerminal(cmd *cobra.Command) error {
+	if isTerminal(os.Stdin) && isTerminal(os.Stdout) {
+		return nil
+	}
+	return &client.UserError{
+		Msg:  shortPath(cmd) + " attaches, so it needs a terminal",
+		Hint: prompts(cmd).withFlags("--detach"),
+		Code: "no_terminal",
+		Kind: client.KindUsage,
+	}
 }
 
 // needsDetach is the error of --json on new or resume without --detach.

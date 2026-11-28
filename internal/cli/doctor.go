@@ -92,7 +92,7 @@ func doctorCmd() *cobra.Command {
 func keyTester(ctx context.Context) error {
 	fd := int(os.Stdin.Fd())
 	if !term.IsTerminal(fd) {
-		return &client.UserError{Msg: "the key tester needs a terminal", Hint: "Run it from a terminal.", Code: "no_terminal"}
+		return &client.UserError{Msg: "the key tester needs a terminal", Hint: "Run it from a terminal.", Code: "no_terminal", Kind: client.KindUsage}
 	}
 	s := client.LoadSettings()
 	dk, err := keys.Parse(s.Attach.DetachKey)

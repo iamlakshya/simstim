@@ -29,15 +29,15 @@ simstim attach my-vps/auth-fix      # go back to a session
 | [`attach`](attach.md) | Attach to a session |
 | [`resume`](resume.md) | Start a session's agent again after it ended, and attach to it |
 | [`stop`](stop.md) | Stop a session and keep its state for resume or restore |
-| [`ls`](ls.md) | List sessions on every host |
-| [`kill`](kill.md) | Stop a session and remove it |
+| [`ls`](ls.md) | List sessions on every host, or on one |
+| [`show`](show.md) | Describe a session |
+| [`rm`](rm.md) | Delete a session, after a question |
 | [`rename`](rename.md) | Rename a session |
 | [`send`](send.md) | Type text into a session without attaching, then press Enter |
 | [`ports`](ports.md) | List the TCP ports a session's processes listen on |
 | [`forward`](forward.md) | Forward a session's ports to localhost: all, or those you name |
 | [`pull`](pull.md) | Bring a session's branch into the git repository you are in |
 | [`cp`](cp.md) | Copy files or folders into or out of a session over SFTP |
-| [`flip`](flip.md) | Switch sessions: pick from the sessions of every host, and attach |
 
 ## Hosts
 

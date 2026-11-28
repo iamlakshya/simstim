@@ -10,7 +10,7 @@ Stop a session and keep its state for resume or restore.
 simstim stop <host>/<session> [flags]
 ```
 
-Stops a session and its systemd user unit on the host, while keeping its folder, worktree and conversation so it can be resumed or restored later. Use kill to stop a session and remove its files.
+Stops a session and its systemd user unit on the host, while keeping its folder, worktree and conversation so it can be resumed or restored later. Use rm to stop a session and remove its files.
 
 ## Examples
 

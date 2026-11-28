@@ -35,6 +35,7 @@ type hostConn struct {
 	err       error
 	sessions  []client.Session
 	loaded    bool
+	seenAt    time.Time
 	rtts      rttWindow // the round trips of the last minute (rtt.go)
 	rtt       rttSpread // their spread, as the launcher shows it
 	info      *client.HostInfo

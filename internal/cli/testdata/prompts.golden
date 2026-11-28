@@ -33,3 +33,15 @@ Install it? [y/N]
 -> Cancelled. Nothing changed.
 == a typed name (answers "box\n")
 Type box to delete the machine, or press Enter to keep it: 
+== rm (answers "\n")
+Delete auth-fix on box?
+This stops claude on box and removes the session.
+The folder /home/dev/src/app stays. Unsaved work in the agent is lost.
+Delete it? [y/N] 
+== rm: an ended agent (answers "y\n")
+Delete auth-fix on box?
+This removes the session from box.
+The folder /home/dev/src/app stays.
+Delete it? [y/N] 
+== attach: an ended agent (answers "\n")
+Start claude again in auth-fix on box? [Y/n] 

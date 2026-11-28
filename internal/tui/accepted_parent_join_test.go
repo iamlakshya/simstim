@@ -36,9 +36,7 @@ func TestPickerDropsInvalidSessionIDsFromCacheAndRefresh(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	good := client.Session{ID: "a2", Name: "raw\u200bname"}
 	bad := client.Session{ID: "../invalid", Name: "unusable"}
-	if err := saveMemory(memory{Sessions: map[string][]client.Session{"box": {bad, good}}}); err != nil {
-		t.Fatal(err)
-	}
+	client.RememberSessions(map[string][]client.Session{"box": {bad, good}})
 	rows := CachedSessions([]string{"box"})
 	if len(rows) != 1 || !reflect.DeepEqual(rows[0].Session, good) {
 		t.Fatalf("the cached picker rows changed valid values or kept a bad ID: %+v", rows)

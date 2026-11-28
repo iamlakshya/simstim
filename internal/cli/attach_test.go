@@ -148,6 +148,7 @@ func TestAttachWhenNoHostAnswers(t *testing.T) {
 func TestListsWriteTheSessionCache(t *testing.T) {
 	newTestHost(t)
 	newSession(t, "kept", "sleep", "60")
+	writeCache(t, `{}`) // new wrote its session there
 	if rows := tui.CachedSessions([]string{"box"}); len(rows) != 0 {
 		t.Fatalf("the cache has %d rows before any list", len(rows))
 	}

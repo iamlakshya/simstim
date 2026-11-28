@@ -25,6 +25,7 @@ One task per page. New here? Start with [getting started](../tutorials/getting-s
 
 | Guide | Task |
 | --- | --- |
+| [Work with sessions](sessions.md) | Attach, describe and delete a session, and leave out its host when the name is unique |
 | [Worktrees](worktrees.md) | Give each task its own git worktree and branch |
 | [Setup hooks](setup-hooks.md) | Prepare each new session or worktree with the repository's own script |
 | [Bring work to your laptop](pull.md) | Fetch a session's branch as a verified git bundle into your own clone |

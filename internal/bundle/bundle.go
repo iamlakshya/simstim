@@ -99,27 +99,54 @@ const (
 // It returns what the bundle holds. Nothing is uploaded. When ctx ends
 // first, it leaves no file, and says that it stopped.
 func Write(ctx context.Context, o Options) (*Result, error) {
-	res, err := write(ctx, o)
+	b := &builder{o: o, vals: laptopValues(), res: &Result{}}
+	res, err := b.write(ctx)
 	if err != nil && ctx.Err() != nil {
 		return nil, &client.UserError{Msg: "the bundle stopped before it was complete, and left no file",
-			Hint: brand.Name + " debug bundle" + target(o) + " (to start it again)", Code: "cancelled", Kind: client.KindCancelled}
+			Hint: again(o, b.found), Code: "cancelled", Kind: client.KindCancelled}
 	}
 	return res, err
 }
 
-// target is the bundle's argument, for a hint.
-func target(o Options) string {
+// again is the hint that runs the bundle again. It names a session only by
+// the ID that the bundle found (docs/contributing/cli-spec.md 9.2). Before
+// the bundle found it, the typed word may mean another session, so the
+// hint lists the host's sessions instead.
+//
+// A host's name that could not go in a command lists the sessions of every
+// host instead, as the CLI's lsOf does.
+func again(o Options, found string) string {
 	switch {
 	case o.Host == nil:
-		return ""
-	case o.Session != "":
-		return " " + o.Host.Name + "/" + o.Session
+		return brand.Name + " debug bundle (to start it again)"
+	case !client.ValidHostName(o.Host.Name) && o.Session == "":
+		return brand.Name + " ls (to find the host, then start the bundle again with it)"
+	case !client.ValidHostName(o.Host.Name):
+		return brand.Name + " ls (to find the session's host and ID, then start the bundle again with them)"
+	case o.Session == "":
+		return brand.Name + " debug bundle " + o.Host.Name + " (to start it again)"
 	}
-	return " " + o.Host.Name
+	if addr := o.Host.Name + "/" + found; found != "" && client.ShellWord(addr) == addr {
+		if line := brand.Name + " debug bundle " + addr + " (to start it again)"; rendersWhole(line) {
+			return line
+		}
+	}
+	return brand.Name + " ls " + o.Host.Name + " (to find the session's ID, then start the bundle again with it)"
 }
 
-func write(ctx context.Context, o Options) (*Result, error) {
-	b := &builder{o: o, vals: laptopValues(), res: &Result{}}
+// rendersWhole reports whether an error's line shows line as it is: the
+// cleaning of control and hidden characters and the cut at 4000 runes
+// leave it whole. A cut line could name another session.
+func rendersWhole(line string) bool {
+	return !strings.ContainsAny(line, "\r\n\t") && api.CleanText(line, 4000) == line
+}
+
+// afterHostFacts runs after the bundle read the host's facts and found its
+// session. Tests stop the bundle there, or close its connection.
+var afterHostFacts = func() {}
+
+func (b *builder) write(ctx context.Context) (*Result, error) {
+	o := b.o
 	b.configValues(ctx)
 	if o.Host != nil {
 		conn, err := client.Dial(ctx, *o.Host, o.Interactive)
@@ -131,6 +158,7 @@ func write(ctx context.Context, o Options) (*Result, error) {
 		if err := b.hostFacts(ctx); err != nil {
 			return nil, err
 		}
+		afterHostFacts()
 	}
 	now := time.Now()
 	a, err := newArchive(o.Dir, now)
@@ -161,7 +189,9 @@ func write(ctx context.Context, o Options) (*Result, error) {
 
 // builder holds one bundle while it is written.
 type builder struct {
-	o      Options
+	o Options
+	// found is the ID of the session that the bundle found, for a hint.
+	found  string
 	vals   Values
 	res    *Result
 	conn   *client.Conn
@@ -263,7 +293,7 @@ func (b *builder) hostFiles(ctx context.Context) error {
 		}
 		if errors.Is(err, client.ErrClosed) {
 			return &client.UserError{Msg: "the connection to " + b.o.Host.Name + " closed while the bundle read its files",
-				Hint: brand.Name + " debug bundle" + target(b.o) + " (try again)", Code: "closed"}
+				Hint: again(b.o, b.found), Code: "closed"}
 		}
 		if err != nil {
 			b.res.Left = append(b.res.Left, Left{Name: printable(f.Path), Why: "the host could not send it: " + printable(err.Error())})
@@ -285,14 +315,16 @@ func (b *builder) hostFiles(ctx context.Context) error {
 // the client prints every text that a host sends.
 func printable(s string) string { return api.CleanText(s, 4096) }
 
-// pick finds a session by its ID, or by a name that only it has.
+// pick finds a session by its ID, or by a name that only it has. A word of
+// the form of an ID finds an ID alone, never a name (cli-spec 9.2).
 func pick(list []client.Session, ref, host string) (client.Session, error) {
+	idOnly := api.LooksLikeID(ref)
 	var byName []client.Session
 	for _, s := range list {
 		if s.ID == ref {
 			return s, nil
 		}
-		if s.Name == ref {
+		if s.Name == ref && !idOnly {
 			byName = append(byName, s)
 		}
 	}
@@ -300,7 +332,11 @@ func pick(list []client.Session, ref, host string) (client.Session, error) {
 	case 1:
 		return byName[0], nil
 	case 0:
-		return client.Session{}, &client.UserError{Msg: fmt.Sprintf("no session %q on %s", ref, host), Hint: brand.Name + " ls --host " + host, Code: "session_not_found", Kind: client.KindNotFound}
+		msg := fmt.Sprintf("no session %q on %s", ref, host)
+		if idOnly {
+			msg = fmt.Sprintf("no session has the ID %q on %s", ref, host)
+		}
+		return client.Session{}, &client.UserError{Msg: msg, Hint: brand.Name + " ls --host " + host, Code: "session_not_found", Kind: client.KindNotFound}
 	}
 	return client.Session{}, &client.UserError{Msg: fmt.Sprintf("%d sessions are named %q on %s", len(byName), ref, host),
 		Hint: "Use the session ID from `" + brand.Name + " ls`.", Code: "session_ambiguous", Kind: client.KindUsage}

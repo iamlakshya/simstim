@@ -7,20 +7,27 @@ title: "simstim attach"
 Attach to a session.
 
 ```text
-simstim attach [<host>/<session>|-]
+simstim attach [<host>/<session>|-] [flags]
 ```
 
 **Aliases:** `a`
 
-Shows the session in this terminal, as the agent draws it. The detach key, Ctrl+\\ unless config.toml names another, leaves it, and the session keeps running. A stopped session wakes on attach. The address - is the last session that you attached to. Without an address, you pick a session from a list.
+Attaches this terminal to a session. A stopped host that its provider script can start wakes first, and a stopped session wakes on attach. When the session's agent has ended, attach asks to start it again, as resume does. `--restart` answers yes. The host may be left out when no other host has a session of that name.
 
 ## Examples
 
 ```sh
 simstim attach my-vps/auth-fix
-simstim attach -   # the last session you attached to
-simstim attach     # pick one from a list
+simstim attach -          # the last session you attached to
+simstim attach auth-fix   # the host is found when the name is unique
+simstim attach            # pick one from a list
 ```
+
+## Flags
+
+| Flag | What it does |
+| --- | --- |
+| `--restart` | when the agent has ended, start it again without asking |
 
 ## Flags from the parent command
 
@@ -30,5 +37,13 @@ simstim attach     # pick one from a list
 | `--debug-file <file>` | write the client's debug records to this file. On its own, it turns on every category (SIMSTIM_DEBUG_FILE does the same) |
 | `--no-color` | print no colour (NO_COLOR does the same) |
 | `--no-input` | ask nothing: a question that needs an answer fails with exit code 4, and names the flag that answers it (SIMSTIM_NO_INPUT=1 does the same) |
+
+## Old names
+
+These still work, and print a warning on stderr, until their end.
+
+| Old | New | Works until |
+| --- | --- | --- |
+| flip | attach | v0.4.0 and 11 November 2027, whichever comes later |
 
 See [all commands](_index.md).

@@ -493,6 +493,26 @@ func TestGoldenPrompts(t *testing.T) {
 		_, err := p.typedName("Type box to delete the machine, or press Enter to keep it:", "box")
 		return err
 	})
+	running := client.Session{ID: "abcd2345", Name: "auth-fix", Agent: "claude", Cwd: "/home/dev/src/app", State: "working"}
+	show("rm", "\n", func(p *prompter) error {
+		ok, err := askDelete(p, "box", running)
+		if err == nil && ok {
+			return errors.New("Enter deleted")
+		}
+		return err
+	})
+	ended := client.Session{ID: "abcd2345", Name: "auth-fix", Agent: "claude", Cwd: "/home/dev/src/app", State: "exited", ExitCode: new(0)}
+	show("rm: an ended agent", "y\n", func(p *prompter) error {
+		_, err := askDelete(p, "box", ended)
+		return err
+	})
+	show("attach: an ended agent", "\n", func(p *prompter) error {
+		ok, err := askRestart(p, "box", ended)
+		if err == nil && !ok {
+			return errors.New("Enter did not start it again")
+		}
+		return err
+	})
 	got := strings.ReplaceAll(b.String(), brand.Name, "<name>")
 	golden := filepath.Join("testdata", "prompts.golden")
 	if *update {

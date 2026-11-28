@@ -118,7 +118,9 @@ func TestSessionCommandsCleanHostText(t *testing.T) {
 
 	id = newSession(t, name, "/bin/sh", "-c", "sleep 1; exit 2")
 	agentEnded(t, id)
-	_, err := run(t, "attach", "box/"+id)
+	check("show", ok(t, "show", "box/"+id))
+	_, done := inTerminal(t, "attach", "box/"+id, "--no-input")
+	err := wait(t, done)
 	var ue *client.UserError
 	if !errors.As(err, &ue) {
 		t.Fatalf("attach to an ended agent = %v", err)
@@ -253,20 +255,26 @@ func TestPrintedCommandsNameTheID(t *testing.T) {
 	if stop != "To stop: "+brand.Name+" debug stop box/"+id+"\n" {
 		t.Errorf("debug start = %q", stop)
 	}
-	_, err := run(t, "resume", "box/"+id, "--detach")
-	var ue *client.UserError
-	if !errors.As(err, &ue) || ue.Hint != brand.Name+" attach box/"+id {
-		t.Fatalf("resume of a running agent = %v", err)
+	showOut := ok(t, "show", "box/"+id)
+	attachLine := strings.TrimSpace(showOut[strings.LastIndex(showOut, "Attach"):])
+	if !strings.HasSuffix(attachLine, brand.Name+" attach box/"+id) {
+		t.Errorf("show Attach = %q", attachLine)
 	}
-	inert("resume's step", ue.Hint)
+	inert("show's Attach line", attachLine)
 
 	ended := newSession(t, name, "/bin/sh", "-c", "sleep 1; exit 2")
 	agentEnded(t, ended)
-	_, err = run(t, "attach", "box/"+ended)
-	if !errors.As(err, &ue) || !strings.HasPrefix(ue.Hint, brand.Name+" resume box/"+ended) {
+	_, done := inTerminal(t, "attach", "box/"+ended, "--no-input")
+	err := wait(t, done)
+	var ue *client.UserError
+	if !errors.As(err, &ue) || !strings.Contains(ue.Hint, brand.Name+" attach box/"+ended+" --no-input --restart") {
 		t.Fatalf("attach to an ended agent = %v", err)
 	}
 	inert("attach's step", ue.Hint)
+	if err := endedError(client.Host{Name: "box"}, client.Session{ID: ended, Name: name, State: api.StateErrored, ExitCode: new(2)}); !errors.As(err, &ue) || !strings.HasPrefix(ue.Hint, brand.Name+" resume box/"+ended) {
+		t.Fatalf("endedError = %v", err)
+	}
+	inert("endedError's step", ue.Hint)
 	if got := endMessage(name, "box", ended, &proto.Ended{ExitCode: 137, OOM: true}); !strings.Contains(got, "Try: "+brand.Name+" resume box/"+ended+" ") {
 		t.Errorf("the end message's step = %q", got)
 	}
