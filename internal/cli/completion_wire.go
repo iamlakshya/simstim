@@ -38,6 +38,11 @@ var (
 		{"login", "Start the VM at login"},
 		{"off", "Do not start the VM automatically"},
 	}
+	imagesItems = []compItem{
+		{api.ImagesFetchAuto, "Try host download first, fall back to laptop"},
+		{api.ImagesFetchHost, "Download runtime files on the host only"},
+		{api.ImagesFetchLaptop, "Download on the laptop and upload to the host"},
+	}
 	alertFormatItems = []compItem{
 		{"json", "Raw event JSON"},
 		{"slack", "Slack incoming webhook"},
@@ -207,6 +212,8 @@ func flagCompletionBindings() []flagCompletionBinding {
 		{path: []string{"setup"}, flag: "agents", fn: completeAgentsList},
 		{path: []string{"host", "add"}, flag: "floor", fn: completeFixed(floorItems)},
 		{path: []string{"host", "add"}, flag: "autostart", fn: completeFixed(autostartItems)},
+		{path: []string{"host", "add"}, flag: "images", fn: completeFixed(imagesItems)},
+		{path: []string{"host", "upgrade"}, flag: "images", fn: completeFixed(imagesItems)},
 		{path: []string{"host", "create"}, flag: "floor", fn: completeFixed(floorItems)},
 		{path: []string{"host", "create"}, flag: "autostart", fn: completeFixed(autostartItems)},
 		{path: []string{"host", "alerts", "set"}, flag: "format", fn: completeFixed(alertFormatItems)},

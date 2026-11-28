@@ -36,7 +36,7 @@ func hostCmd() *cobra.Command {
 }
 
 func hostAddCmd() *cobra.Command {
-	var sshConfig, providerScript, hostKey, floor string
+	var sshConfig, providerScript, hostKey, floor, imagesMode string
 	var label []string
 	var yes, wake, trusted bool
 	var loc localMacOpts
@@ -47,7 +47,8 @@ func hostAddCmd() *cobra.Command {
 			"from your SSH config, or user@host. It defaults to the name. --ssh-config adds an extra\n" +
 			"SSH config file, for example a repo's own. --host-key pins the host key with the given\n" +
 			"SHA256 fingerprint instead of asking OpenSSH. --trusted marks the host as trusted (you\n" +
-			"control root on it); hosts default to untrusted.\n\n" +
+			"control root on it); hosts default to untrusted. --images chooses how sandbox runtime\n" +
+			"files reach the host: auto (default), host or laptop.\n\n" +
 			"On a Mac, --local sets up this Mac as a host in a pinned Lima VM under your own account,\n" +
 			"started automatically with limactl autostart.",
 		Example: "  " + brand.Name + " host add my-vps\n" +
@@ -64,6 +65,14 @@ func hostAddCmd() *cobra.Command {
 				}
 				floor = lvl.String()
 			}
+			if imagesMode != "" {
+				parsed, err := api.ParseImagesFetch(imagesMode)
+				if err != nil {
+					return &client.UserError{Msg: fmt.Sprintf("--images: %v", err), Hint: "Pass auto, host or laptop.", Code: "bad_value", Kind: client.KindUsage}
+				}
+				imagesMode = parsed
+			}
+			loc.imagesMode = imagesMode
 			if loc.local {
 				if sshConfig != "" || hostKey != "" || providerScript != "" || wake {
 					return &client.UserError{
@@ -103,7 +112,7 @@ func hostAddCmd() *cobra.Command {
 			if !client.ValidHostName(h.Name) {
 				return &client.UserError{Msg: fmt.Sprintf("%q cannot name a host", h.Name), Hint: "Use letters, digits, dots, dashes and underscores.", Code: "bad_name", Kind: client.KindUsage}
 			}
-			return addHostWithKey(cmd.Context(), prompts(cmd), h, hostKey, yes, yes)
+			return addHostWithOptions(cmd.Context(), prompts(cmd), h, hostKey, imagesMode, yes, yes)
 		},
 	}
 	f := cmd.Flags()
@@ -114,6 +123,7 @@ func hostAddCmd() *cobra.Command {
 	f.StringVar(&providerScript, "provider-script", "", "a script that starts and stops the host (see examples/providers)")
 	f.BoolVar(&wake, "wake", false, "start the host through its provider script when it does not answer")
 	f.StringVar(&floor, "floor", "", "weakest sandbox level to pin: none, process, gvisor or microvm")
+	addImages(cmd, &imagesMode, "how runtime files reach the host: auto, host or laptop")
 	f.BoolVar(&trusted, "trusted", false, "mark the host as trusted (you control root on it)")
 	f.BoolVar(&loc.local, "local", false, "set up this Mac as a host in a pinned Lima VM")
 	addCPUs(cmd, &loc.cpus, 0, "--local: VM CPUs (default: under half of this Mac)")
@@ -141,23 +151,27 @@ func parseLabels(values []string) map[string]string {
 // replace its sessions and its checks.
 var hostAddGuide = func(*guide) {}
 
+// runtimeManifestFunc returns the client's release runtime manifest for host
+// add and host upgrade. Tests replace it to verify runtime delivery end to end.
+var runtimeManifestFunc = client.DefaultRuntimeManifest
+
 // addHost connects h and saves it. Its progress goes to stderr. Unless yes,
 // it asks p before it installs the helper, and with input on it offers the
 // agents that the host lacks, as setup does.
 func addHost(ctx context.Context, p *prompter, h client.Host, yes bool) error {
-	return addHostWithKey(ctx, p, h, "", yes, yes)
+	return addHostWithOptions(ctx, p, h, "", "", yes, yes)
 }
 
-func addHostWithKey(ctx context.Context, p *prompter, h client.Host, hostKey string, installYes, skipAgents bool) error {
+func addHostWithOptions(ctx context.Context, p *prompter, h client.Host, hostKey, imagesMode string, installYes, skipAgents bool) error {
 	consent := installConsent(ctx, p, h, installYes)
 	pinOpts := client.PinOptions{
 		HostKey:        hostKey,
 		AcceptFirstUse: installYes || (h.Machine != nil && h.Machine.Provider == "lima"),
 		Interactive:    p.on,
 	}
-	// connectHost records each change in p's log as it makes it, so a
+	// connectHostWithOptions records each change in p's log as it makes it, so a
 	// cancel at any point after it says so.
-	checks, err := connectHostWithPin(ctx, os.Stderr, p, h, pinOpts, consent, p.changes())
+	checks, err := connectHostWithOptions(ctx, os.Stderr, p, h, pinOpts, imagesMode, consent, p.changes())
 	if err != nil {
 		if isCancel(err) || ctx.Err() != nil {
 			return p.cancelOf(err)
@@ -240,6 +254,10 @@ func pinBeforeConnect(ctx context.Context, pr *prompter, h client.Host, opts cli
 // connectHostWithPin pins an SSH host's key, probes it, installs the helper
 // after consent says yes, prepares the host, and saves it.
 func connectHostWithPin(ctx context.Context, w io.Writer, pr *prompter, h client.Host, pinOpts client.PinOptions, consent func(q string) (bool, error), log *onboard.Log) ([]api.AgentCheck, error) {
+	return connectHostWithOptions(ctx, w, pr, h, pinOpts, "", consent, log)
+}
+
+func connectHostWithOptions(ctx context.Context, w io.Writer, pr *prompter, h client.Host, pinOpts client.PinOptions, imagesMode string, consent func(q string) (bool, error), log *onboard.Log) ([]api.AgentCheck, error) {
 	step := func(format string, a ...any) { fmt.Fprintf(w, "  "+format+"\n", a...) }
 	fmt.Fprintf(w, "Connecting to %s (%s)…\n", h.Name, h.Target())
 	start := time.Now()
@@ -326,7 +344,7 @@ func connectHostWithPin(ctx context.Context, w io.Writer, pr *prompter, h client
 		return nil, err
 	}
 	step("✓ %s, %d CPUs, %.1f GiB, %.1f GiB of it for sessions", client.CleanLine(d.Distro), d.CPUs, float64(d.MemTotal)/(1<<30), float64(d.MemoryMax)/(1<<30))
-	if err := pinHostFloor(dctx, w, conn, &h); err != nil {
+	if err := prepareHostSandboxes(ctx, dctx, w, pr, s, conn, &h, p.Arch, imagesMode, log); err != nil {
 		return nil, err
 	}
 	checks, _ := conn.AgentChecks(dctx)
@@ -337,6 +355,43 @@ func connectHostWithPin(ctx context.Context, w io.Writer, pr *prompter, h client
 	saved = true
 	log.Add("saved the host %s", h.Name)
 	return client.CleanAgentChecks(checks), nil
+}
+
+func firstRuntimeURL(items []api.RuntimeAsset) string {
+	if len(items) == 0 {
+		return ""
+	}
+	return items[0].URL
+}
+
+func prepareHostSandboxes(ctx, dctx context.Context, w io.Writer, pr *prompter, s client.Transport, conn *client.Conn, h *client.Host, arch, imagesMode string, log *onboard.Log) error {
+	manifest := runtimeManifestFunc()
+	runtimeItems := manifest.ItemsForArch(arch)
+	capProbe, err := pinHostFloorWithProbe(dctx, w, conn, h, firstRuntimeURL(runtimeItems))
+	if err != nil {
+		return err
+	}
+	if len(runtimeItems) == 0 || !conn.HasFeature("runtime") {
+		return nil
+	}
+	rctx, rcancel := context.WithTimeout(ctx, 10*time.Minute)
+	defer rcancel()
+	rtRes, err := client.EnsureRuntime(rctx, conn, client.EnsureRuntimeOptions{
+		Mode:        imagesMode,
+		Manifest:    manifest,
+		Arch:        arch,
+		Probe:       &capProbe,
+		Transport:   s,
+		Interactive: pr != nil && pr.on,
+		Out:         w,
+	})
+	if err != nil {
+		return err
+	}
+	if len(rtRes.Installed) > 0 {
+		log.Add("installed runtime files on %s", h.Name)
+	}
+	return nil
 }
 
 func hostLsCmd() *cobra.Command {

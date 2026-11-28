@@ -13,23 +13,23 @@ import (
 	"github.com/iamlakshya/simstim/internal/wall/process"
 )
 
-// pinHostFloor probes the host during host add / host create, prints the
-// Sandboxes block to w, and pins h.WallFloor to the strongest level that
+// pinHostFloorWithProbe probes the host during host add / host create, prints
+// the Sandboxes block to w, and pins h.WallFloor to the strongest level that
 // probes OK unless h.WallFloor already requested a lower level.
-func pinHostFloor(ctx context.Context, w io.Writer, conn *client.Conn, h *client.Host) error {
+func pinHostFloorWithProbe(ctx context.Context, w io.Writer, conn *client.Conn, h *client.Host, releaseURL string) (api.CapProbe, error) {
 	if !conn.HasFeature("sandbox") {
-		return nil
+		return api.CapProbe{}, nil
 	}
-	p, err := conn.CapProbe(ctx, "")
+	p, err := conn.CapProbe(ctx, releaseURL)
 	if err != nil {
-		return err
+		return api.CapProbe{}, err
 	}
 	nowName, _ := api.LevelsFor(p, api.RuntimeStatus{})
 	best, _ := wall.ParseLevel(nowName)
 	if h.WallFloor != "" {
 		want, perr := wall.ParseLevel(h.WallFloor)
 		if perr != nil {
-			return &client.UserError{
+			return api.CapProbe{}, &client.UserError{
 				Msg:  fmt.Sprintf("--floor: %v", perr),
 				Hint: "Pass none, process, gvisor or microvm.",
 				Code: "bad_value",
@@ -39,7 +39,7 @@ func pinHostFloor(ctx context.Context, w io.Writer, conn *client.Conn, h *client
 		if want > best {
 			fmt.Fprintln(w)
 			printSandboxesBlock(w, w, h.Name, p, "")
-			return &client.UserError{
+			return api.CapProbe{}, &client.UserError{
 				Msg:  fmt.Sprintf("%s can run up to %s, so --floor cannot be %s", h.Name, best, want),
 				Hint: fmt.Sprintf("Pass --floor %s, or omit --floor to pin %s.", best, best),
 				Code: "wall_floor",
@@ -52,7 +52,7 @@ func pinHostFloor(ctx context.Context, w io.Writer, conn *client.Conn, h *client
 	}
 	fmt.Fprintln(w)
 	printSandboxesBlock(w, w, h.Name, p, h.WallFloor)
-	return nil
+	return p, nil
 }
 
 // printSandboxesBlock prints the "Sandboxes on <host>" summary of isolation

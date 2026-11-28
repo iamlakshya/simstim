@@ -147,6 +147,22 @@ func RuntimeArtefactsDir() string { return filepath.Join(ArtefactsDir(), "runtim
 // temporary reflink test files (isolation spec 14.3).
 func ArtefactsIncomingDir() string { return filepath.Join(ArtefactsDir(), "incoming") }
 
+// ArtefactsSHA256Dir holds verified, content-addressed runtime files
+// (~/.local/share/<name>/artefacts/sha256, isolation spec 10.7 and 14.5).
+func ArtefactsSHA256Dir() string { return filepath.Join(ArtefactsDir(), "sha256") }
+
+// ArtefactFile returns the content-addressed path of one verified runtime file.
+func ArtefactFile(sha256Hex string) string { return filepath.Join(ArtefactsSHA256Dir(), sha256Hex) }
+
+// ArtefactsRuntimeDir holds installed runtime label records
+// (~/.local/share/<name>/artefacts/runtime/<label>.json, isolation spec 14.5).
+func ArtefactsRuntimeDir() string { return filepath.Join(ArtefactsDir(), "runtime") }
+
+// RuntimeLabelFile returns the manifest record path for one runtime label.
+func RuntimeLabelFile(label string) string {
+	return filepath.Join(ArtefactsRuntimeDir(), label+".json")
+}
+
 // WallProbes is the cached wall driver probe results file on a host
 // (isolation spec 5.1).
 func WallProbes() string { return filepath.Join(StateDir(), "walls.json") }

@@ -17,12 +17,13 @@ import (
 )
 
 type localMacOpts struct {
-	local     bool
-	cpus      int
-	memory    string
-	disk      string
-	autostart string
-	idleStop  string
+	local      bool
+	cpus       int
+	memory     string
+	disk       string
+	autostart  string
+	idleStop   string
+	imagesMode string
 }
 
 // Test hooks for `host add --local`.
@@ -127,7 +128,7 @@ func addLocalMacHost(cmd *cobra.Command, args []string, opts localMacOpts, label
 	h.Trusted = trusted
 	fmt.Fprintf(os.Stderr, "  ✓ created %s %s in %s\n\n", h.Machine.Provider, h.Machine.ID, time.Since(start).Round(time.Second))
 	// Setting up this Mac's VM counts as consent to install the helper inside it.
-	if err := addHostWithKey(ctx, prompts(cmd), h, "", true, yes); err != nil {
+	if err := addHostWithOptions(ctx, prompts(cmd), h, "", opts.imagesMode, true, yes); err != nil {
 		if isCancel(err) || ctx.Err() != nil {
 			return err
 		}

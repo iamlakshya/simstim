@@ -40,7 +40,7 @@ Usage:
   %[1]s restore [--all]     start again sessions a restart (or, with --all, a stop or crash) stopped
   %[1]s idle setup <30m|never>   power this VM off when idle (a user timer runs "idle check")
   %[1]s image <ls|pull|rm|agents> manage session images and the agents disk
-  %[1]s prune               remove the helper versions and unused images nothing uses any more
+  %[1]s prune               remove old helpers, unused images and old runtime files
   %[1]s version
 `
 
@@ -395,7 +395,11 @@ func runPrune([]string) error {
 	if imgErr != nil {
 		return imgErr
 	}
-	fmt.Printf("removed %d old helper versions and %d unused images\n", len(removed), len(removedImages))
+	removedRuntime, rtErr := host.PruneRuntime()
+	if rtErr != nil {
+		return rtErr
+	}
+	fmt.Printf("removed %d old helper versions, %d unused images and %d old runtime files\n", len(removed), len(removedImages), len(removedRuntime))
 	return nil
 }
 

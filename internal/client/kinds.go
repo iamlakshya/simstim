@@ -139,6 +139,8 @@ var hostKinds = map[string]Kind{
 	"host_unknown":          KindUsage,
 	"level_below":           KindFailed,
 	"runtime_missing":       KindFailed,
+	"runtime_fetch_failed":  KindFailed,
+	"runtime_too_big":       KindFailed,
 	"no_room":               KindFailed,
 	"draining":              KindRefused,
 	"policy_unreached":      KindFailed,

@@ -124,4 +124,21 @@ simstim host doctor my-server
 simstim host upgrade my-server
 ```
 
-`host show` prints the host's saved settings, trust flag, sandbox floor, live system details and each wall driver's probe without waking the host or installing a helper. `host doctor` lists what the host has and what is missing: systemd, linger, sandboxes, the agents and the helper. `host doctor --fix` offers to fix what it can ([troubleshoot](troubleshoot.md#let-the-doctor-fix-it)). `host upgrade` installs or reinstalls this client's matching helper without pruning helpers used by newer clients.
+`host show` prints the host's saved settings, trust flag, sandbox floor, live system details and each wall driver's probe without waking the host or installing a helper. `host doctor` lists what the host has and what is missing: systemd, linger, sandboxes, the agents and the helper. `host doctor --fix` offers to fix what it can ([troubleshoot](troubleshoot.md#let-the-doctor-fix-it)), including removing unused old runtime files (`old-runtime`). `host upgrade` installs or reinstalls this client's matching helper without pruning helpers used by newer clients, and installs any sandbox runtime files that the release names and the host lacks.
+
+## How sandbox runtime files reach a host
+
+When a release names sandbox runtime files (such as a VMM, a guest kernel, a tools image or `runsc`), `host add` and `host upgrade` install them into `~/.local/share/simstim/artefacts/sha256/` on the host and verify each file's size and SHA-256 against the digests in your client. No host ever copies files from another host.
+
+Set `[images] fetch` in `config.toml` ([configuration](../reference/config.md)), or pass `--images` on `host add` or `host upgrade`:
+
+- `auto` (the default): the host downloads directly over HTTPS when it can reach the release, and falls back once to copying from your laptop if the host download fails.
+- `host`: the host downloads directly over HTTPS only.
+- `laptop`: your laptop downloads each file into `~/.cache/simstim/runtime/sha256/`, checks its SHA-256, copies it to the host over the transport, and the host checks it again before keeping it.
+
+<!-- test: help (needs a saved host) -->
+```sh
+simstim host upgrade my-server --images laptop
+```
+
+`simstim-host prune` (and `host doctor --fix`) keeps runtime files named by the two newest runtime labels, files used by any non-deleted session, and files less than one hour old.

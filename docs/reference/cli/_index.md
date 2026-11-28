@@ -62,7 +62,7 @@ simstim attach my-vps/auth-fix      # go back to a session
 | [`host status`](host_status.md) | Ask the provider or provider script whether the host is running |
 | [`host stop`](host_stop.md) | Stop the host through its provider or provider script |
 | [`host test`](host_test.md) | Check that a host answers, and how fast |
-| [`host upgrade`](host_upgrade.md) | Install or update this client's helper on a host |
+| [`host upgrade`](host_upgrade.md) | Install or update this client's helper and runtime files on a host |
 
 ## Agents
 

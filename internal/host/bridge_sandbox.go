@@ -1,6 +1,7 @@
 package host
 
 import (
+	"context"
 	"encoding/json"
 	"time"
 
@@ -8,13 +9,14 @@ import (
 	"github.com/iamlakshya/simstim/internal/proto"
 )
 
-// sandboxFeatures are the bridge features for sandboxes (isolation spec 10.5).
-var sandboxFeatures = []string{"sandbox", "arm"}
+// sandboxFeatures are the bridge features for sandboxes and runtime delivery
+// (isolation spec 10.5 and 14.9.3).
+var sandboxFeatures = []string{"sandbox", "arm", "runtime"}
 
 func init() { Features = append(Features, sandboxFeatures...) }
 
-// handleSandbox serves sandbox bridge requests. It reports whether it knew
-// the request.
+// handleSandbox serves sandbox and runtime bridge requests. It reports whether
+// it knew the request.
 func (b *bridge) handleSandbox(req proto.Request) bool {
 	switch req.Op {
 	case "sandbox.probe":
@@ -47,6 +49,24 @@ func (b *bridge) handleSandbox(req proto.Request) bool {
 			return true
 		}
 		res, err := HolderRequest(a.ID, "arm", secretsMsg{Env: a.Secrets}, 5*time.Second)
+		b.reply(req.ID, res, err)
+	case "runtime.status":
+		b.reply(req.ID, RuntimeStatusReport(), nil)
+	case "runtime.fetch":
+		var a api.RuntimeFetchArgs
+		if err := json.Unmarshal(req.Args, &a); err != nil {
+			b.reply(req.ID, nil, UserError("bad_request", "the runtime.fetch request is not valid JSON", "Update the client."))
+			return true
+		}
+		res, err := FetchRuntime(context.Background(), a)
+		b.reply(req.ID, res, err)
+	case "runtime.install":
+		var a api.RuntimeInstallArgs
+		if err := json.Unmarshal(req.Args, &a); err != nil {
+			b.reply(req.ID, nil, UserError("bad_request", "the runtime.install request is not valid JSON", "Update the client."))
+			return true
+		}
+		res, err := InstallRuntime(a)
 		b.reply(req.ID, res, err)
 	default:
 		return false

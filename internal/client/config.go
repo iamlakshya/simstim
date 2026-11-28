@@ -129,6 +129,14 @@ type Settings struct {
 		// session to non-model hosts, such as "16M". "0" turns the cap off.
 		UploadBudget string `toml:"upload_budget"`
 	} `toml:"network"`
+	// Images holds how runtime files and images reach a host.
+	Images struct {
+		// Fetch sets how runtime files and images reach a host: "auto" (the
+		// host downloads from the release when reachable, falling back to a
+		// copy from this laptop), "host" (host downloads only) or "laptop"
+		// (always copied from this laptop).
+		Fetch string `toml:"fetch"`
+	} `toml:"images"`
 	// Keymap rebinds launcher commands by name ("session: delete"). A value is
 	// a key, a list of keys, or "" to unbind. `config keymap` lists the names.
 	Keymap map[string]any `toml:"keymap"`
@@ -157,6 +165,7 @@ func DefaultSettings() Settings {
 	s.Sandbox.KeepCaches = boolPtr(true)
 	s.Network.MinReleaseAge = api.DefaultMinReleaseAge
 	s.Network.UploadBudget = api.DefaultUploadBudget
+	s.Images.Fetch = api.ImagesFetchAuto
 	return s
 }
 

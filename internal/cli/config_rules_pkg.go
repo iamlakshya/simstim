@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/iamlakshya/simstim/internal/api"
@@ -57,6 +58,20 @@ func validatePackageSettings(abbrev string, s client.Settings, ins *client.TOMLI
 				Severity: "error",
 				Code:     "upload_budget_invalid",
 				Message:  strings.TrimSuffix(api.UploadBudgetMessage(v), "."),
+			})
+		}
+	}
+	if v := s.Images.Fetch; v != "" {
+		if _, err := api.ParseImagesFetch(v); err != nil {
+			pos := ins.Pos("images", "fetch")
+			out = append(out, configFinding{
+				Path:        abbrev,
+				Line:        pos.Line,
+				Column:      pos.Column,
+				Severity:    "error",
+				Code:        "bad_value",
+				Message:     fmt.Sprintf(`images.fetch must be "auto", "host" or "laptop", not %q`, v),
+				Suggestions: suggestFromStrings(v, []string{api.ImagesFetchAuto, api.ImagesFetchHost, api.ImagesFetchLaptop}),
 			})
 		}
 	}

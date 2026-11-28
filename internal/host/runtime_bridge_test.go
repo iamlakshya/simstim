@@ -333,3 +333,55 @@ func TestBridgeSandboxProbe(t *testing.T) {
 		t.Error("bad sandbox.probe request succeeded")
 	}
 }
+
+func TestBridgeRuntimeStatusAndInstall(t *testing.T) {
+	h := hosttest.New(t)
+	c := dial(t, h)
+	if !c.HasFeature("runtime") {
+		t.Fatalf("features %q, want runtime", c.Features)
+	}
+	ctx := context.Background()
+	st, err := c.RuntimeStatus(ctx)
+	if err != nil {
+		t.Fatalf("RuntimeStatus: %v", err)
+	}
+	if len(st.Runtimes) != 0 || len(st.Files) != 0 {
+		t.Fatalf("initial RuntimeStatus = %+v", st)
+	}
+
+	payload := []byte("bridge-runtime-vmm-bytes")
+	sum := sha256.Sum256(payload)
+	hexDigest := hex.EncodeToString(sum[:])
+	if err := paths.EnsurePrivateDir(paths.ArtefactsIncomingDir()); err != nil {
+		t.Fatal(err)
+	}
+	partName := hexDigest + ".bridge.part"
+	if err := os.WriteFile(filepath.Join(paths.ArtefactsIncomingDir(), partName), payload, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := c.RuntimeInstall(ctx, api.RuntimeInstallArgs{
+		Release: "0.9.0",
+		Runtime: "2026.11.0",
+		Items: []api.RuntimeInstallEntry{{
+			Asset: api.RuntimeAsset{Kind: "vmm", Name: "cloud-hypervisor", SHA256: hexDigest, Size: int64(len(payload))},
+			Part:  partName,
+		}},
+	})
+	if err != nil {
+		t.Fatalf("RuntimeInstall: %v", err)
+	}
+	if len(res.Installed) != 1 || res.Installed[0].SHA256 != hexDigest {
+		t.Fatalf("RuntimeInstall = %+v", res)
+	}
+	st2, err := c.RuntimeStatus(ctx)
+	if err != nil || len(st2.Runtimes) != 1 || st2.Runtimes[0] != "2026.11.0" || st2.Files[hexDigest] != int64(len(payload)) {
+		t.Fatalf("RuntimeStatus after install = %+v, err=%v", st2, err)
+	}
+	if err := c.Call(ctx, "runtime.fetch", "not-an-object", nil); err == nil {
+		t.Error("bad runtime.fetch request succeeded")
+	}
+	if err := c.Call(ctx, "runtime.install", "not-an-object", nil); err == nil {
+		t.Error("bad runtime.install request succeeded")
+	}
+}

@@ -122,6 +122,8 @@ type WallRecord struct {
 	BoundSecrets []api.SecretBind `json:"bound_secrets,omitempty"`
 	// ExposedSecrets names secrets explicitly allowed into the sandbox env.
 	ExposedSecrets []string `json:"exposed_secrets,omitempty"`
+	Runtime        string   `json:"runtime,omitempty"`
+	RuntimeFiles   []string `json:"runtime_files,omitempty"`
 }
 
 // GuestClaims holds the latest reports from the guest inside the wall.

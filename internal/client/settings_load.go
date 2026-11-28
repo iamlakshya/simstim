@@ -85,5 +85,8 @@ func LoadSettingsChecked() (Settings, string) {
 	if s.Network.UploadBudget == "" {
 		s.Network.UploadBudget = d.Network.UploadBudget
 	}
+	if s.Images.Fetch == "" {
+		s.Images.Fetch = d.Images.Fetch
+	}
 	return s, ""
 }

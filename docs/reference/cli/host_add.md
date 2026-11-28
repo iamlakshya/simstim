@@ -10,7 +10,7 @@ Connect a host: check it, install the helper, prepare it.
 simstim host add [<name>] [<ssh-target>] [flags]
 ```
 
-Connect a host, pin its SSH host key and install the helper. The ssh target is a Host from your SSH config, or user@host. It defaults to the name. `--ssh-config` adds an extra SSH config file, for example a repo's own. `--host-key` pins the host key with the given SHA256 fingerprint instead of asking OpenSSH. `--trusted` marks the host as trusted (you control root on it); hosts default to untrusted.
+Connect a host, pin its SSH host key and install the helper. The ssh target is a Host from your SSH config, or user@host. It defaults to the name. `--ssh-config` adds an extra SSH config file, for example a repo's own. `--host-key` pins the host key with the given SHA256 fingerprint instead of asking OpenSSH. `--trusted` marks the host as trusted (you control root on it); hosts default to untrusted. `--images` chooses how sandbox runtime files reach the host: auto (default), host or laptop.
 
 On a Mac, `--local` sets up this Mac as a host in a pinned Lima VM under your own account, started automatically with limactl autostart.
 
@@ -33,6 +33,7 @@ simstim host add --local
 | `--floor <string>` | weakest sandbox level to pin: none, process, gvisor or microvm |
 | `--host-key <string>` | pin the host key with this SHA256 fingerprint (SHA256:…) |
 | `--idle-stop <string>` | `--local`: idle power-off time, or never (default never) |
+| `--images <string>` | how runtime files reach the host: auto, host or laptop |
 | `--label <strings>` | labels, for example provider=gcp,region=eu |
 | `--local` | set up this Mac as a host in a pinned Lima VM |
 | `--memory <size>` | `--local`: VM memory size, such as 8G (default: under half of this Mac) |

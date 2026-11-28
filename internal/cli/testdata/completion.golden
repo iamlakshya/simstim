@@ -348,6 +348,6 @@ start	Start the host through its provider or provider script
 status	Ask the provider or provider script whether the host is running
 stop	Stop the host through its provider or provider script
 test	Check that a host answers, and how fast
-upgrade	Install or update this client's helper on a host
+upgrade	Install or update this client's helper and runtime files on a host
 :4
 
