@@ -15,8 +15,8 @@ When: **Day 1** tasks make the first working product (the daily-use path). **Lat
 
 | State | Tasks |
 | --- | --- |
-| Done | 33 |
-| To do | 66 |
+| Done | 34 |
+| To do | 65 |
 | **All** | **99** |
 
 ## Current focus
@@ -59,7 +59,7 @@ When: **Day 1** tasks make the first working product (the daily-use path). **Lat
 | P1.10 | 1 | Day 1 | To do | Pull through a bundle, with a review |
 | P1.11 | 1 | Day 1 | Done | Destroy, stop, restore and the phase's checks |
 | P1.16 | 1 | Day 1 | To do | Runs for many sessions |
-| P2.1 | 2 | Day 1 | To do | DNS policy |
+| P2.1 | 2 | Day 1 | Done | DNS policy |
 | P2.3 | 2 | Day 1 | To do | Bound secrets |
 | P2.4 | 2 | Day 1 | Done | The model API guard |
 | P2.13 | 2 | Day 1 | To do | SSH keys |
