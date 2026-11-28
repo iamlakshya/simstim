@@ -6,6 +6,7 @@
 package egress
 
 import (
+	"bytes"
 	"embed"
 	"errors"
 	"fmt"
@@ -15,7 +16,7 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/BurntSushi/toml"
+	"github.com/pelletier/go-toml/v2"
 
 	"github.com/iamlakshya/simstim/internal/agents"
 	"github.com/iamlakshya/simstim/internal/api"
@@ -133,16 +134,10 @@ type LockNetworkConfig struct {
 // ParsePolicy decodes a TOML session policy strictly, rejecting unknown keys.
 func ParsePolicy(data []byte) (Config, error) {
 	var cfg Config
-	md, err := toml.Decode(string(data), &cfg)
-	if err != nil {
-		return Config{}, fmt.Errorf("egress: parse policy TOML: %w. Try: check the TOML syntax in the session policy", err)
-	}
-	if und := md.Undecoded(); len(und) > 0 {
-		keys := make([]string, len(und))
-		for i, k := range und {
-			keys[i] = k.String()
-		}
-		return Config{}, fmt.Errorf("egress: unknown policy key %q. Try: remove it or check %s config check", strings.Join(keys, ", "), brand.Name)
+	dec := toml.NewDecoder(bytes.NewReader(data))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&cfg); err != nil {
+		return Config{}, formatPolicyTOMLError(err)
 	}
 	return cfg, nil
 }

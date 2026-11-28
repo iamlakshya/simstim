@@ -1,6 +1,7 @@
 package process
 
 import (
+	"bytes"
 	_ "embed"
 	"errors"
 	"fmt"
@@ -13,7 +14,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/BurntSushi/toml"
+	"github.com/pelletier/go-toml/v2"
 
 	"github.com/iamlakshya/simstim/internal/api"
 	"github.com/iamlakshya/simstim/internal/brand"
@@ -102,7 +103,9 @@ var (
 func EtcAllowlist() ([]string, error) {
 	etcOnce.Do(func() {
 		var f etcFile
-		if err := toml.Unmarshal(etcTOML, &f); err != nil {
+		dec := toml.NewDecoder(bytes.NewReader(etcTOML))
+		dec.DisallowUnknownFields()
+		if err := dec.Decode(&f); err != nil {
 			errEtcLoad = fmt.Errorf("parse etc.toml: %w", err)
 			return
 		}

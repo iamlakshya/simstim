@@ -1,6 +1,7 @@
 package agents
 
 import (
+	"bytes"
 	"embed"
 	"fmt"
 	"regexp"
@@ -10,7 +11,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/BurntSushi/toml"
+	"github.com/pelletier/go-toml/v2"
 )
 
 // Screen rules read an agent's visible screen to tell whether it is working or
@@ -84,7 +85,9 @@ func LoadRules() (map[string][]Rule, error) {
 				return
 			}
 			var f ruleFile
-			if _, err := toml.Decode(string(b), &f); err != nil {
+			dec := toml.NewDecoder(bytes.NewReader(b))
+			dec.DisallowUnknownFields()
+			if err := dec.Decode(&f); err != nil {
 				errRules = fmt.Errorf("%s: %w", e.Name(), err)
 				return
 			}

@@ -1,7 +1,9 @@
 package guest
 
 import (
+	"bytes"
 	"embed"
+	"errors"
 	"fmt"
 	"maps"
 	"os"
@@ -13,7 +15,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/BurntSushi/toml"
+	"github.com/pelletier/go-toml/v2"
 
 	"github.com/iamlakshya/simstim/internal/api"
 	"github.com/iamlakshya/simstim/internal/brand"
@@ -88,38 +90,64 @@ func loadPackageSettingsTable() (pkgSettingsTable, error) {
 			errLoadPkgTable = fmt.Errorf("guest: read pkgsettings.toml: %w", err)
 			return
 		}
-		var tbl pkgSettingsTable
-		md, err := toml.Decode(string(raw), &tbl)
+		tbl, err := decodePackageSettingsTable(raw)
 		if err != nil {
-			errLoadPkgTable = fmt.Errorf("guest: decode pkgsettings.toml: %w", err)
+			errLoadPkgTable = err
 			return
-		}
-		if und := md.Undecoded(); len(und) > 0 {
-			errLoadPkgTable = fmt.Errorf("guest: unknown keys in pkgsettings.toml: %v", und)
-			return
-		}
-		for _, pe := range tbl.ProxyEnv {
-			if pe.Key == "" || pe.Source == "" {
-				errLoadPkgTable = fmt.Errorf("guest: pkgsettings.toml proxy_env entry %q missing key or source", pe.Tool)
-				return
-			}
-		}
-		for _, tool := range tbl.Tools {
-			if tool.Name == "" || tool.Source == "" {
-				errLoadPkgTable = fmt.Errorf("guest: pkgsettings.toml tool entry %q missing name or source", tool.Name)
-				return
-			}
-			if tool.FilePath != "" {
-				clean := filepath.ToSlash(filepath.Clean(tool.FilePath))
-				if clean == "." || strings.HasPrefix(clean, "/") || clean == ".." || strings.HasPrefix(clean, "../") {
-					errLoadPkgTable = fmt.Errorf("guest: pkgsettings.toml invalid file_path %q", tool.FilePath)
-					return
-				}
-			}
 		}
 		loadedPkgTable = tbl
 	})
 	return loadedPkgTable, errLoadPkgTable
+}
+
+func decodePackageSettingsTable(raw []byte) (pkgSettingsTable, error) {
+	var tbl pkgSettingsTable
+	dec := toml.NewDecoder(bytes.NewReader(raw))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&tbl); err != nil {
+		return pkgSettingsTable{}, formatPkgSettingsError(err)
+	}
+	for _, pe := range tbl.ProxyEnv {
+		if pe.Key == "" || pe.Source == "" {
+			return pkgSettingsTable{}, fmt.Errorf("guest: pkgsettings.toml proxy_env entry %q missing key or source", pe.Tool)
+		}
+	}
+	for _, tool := range tbl.Tools {
+		if tool.Name == "" || tool.Source == "" {
+			return pkgSettingsTable{}, fmt.Errorf("guest: pkgsettings.toml tool entry %q missing name or source", tool.Name)
+		}
+		if tool.FilePath != "" {
+			clean := filepath.ToSlash(filepath.Clean(tool.FilePath))
+			if clean == "." || strings.HasPrefix(clean, "/") || clean == ".." || strings.HasPrefix(clean, "../") {
+				return pkgSettingsTable{}, fmt.Errorf("guest: pkgsettings.toml invalid file_path %q", tool.FilePath)
+			}
+		}
+	}
+	return tbl, nil
+}
+
+func formatPkgSettingsError(err error) error {
+	var sme *toml.StrictMissingError
+	if errors.As(err, &sme) {
+		keys := make([]string, 0, len(sme.Errors))
+		for _, e := range sme.Errors {
+			k := strings.Join(e.Key(), ".")
+			if line, col := e.Position(); line > 0 {
+				keys = append(keys, fmt.Sprintf("%s (line %d, column %d)", k, line, col))
+			} else {
+				keys = append(keys, k)
+			}
+		}
+		return fmt.Errorf("guest: unknown keys in pkgsettings.toml: %s", strings.Join(keys, ", "))
+	}
+	var de *toml.DecodeError
+	if errors.As(err, &de) {
+		msg := strings.TrimPrefix(de.Error(), "toml: ")
+		if line, col := de.Position(); line > 0 {
+			return fmt.Errorf("guest: decode pkgsettings.toml at line %d, column %d: %s", line, col, msg)
+		}
+	}
+	return fmt.Errorf("guest: decode pkgsettings.toml: %w", err)
 }
 
 func packageProxyEnv(proxyURL string) map[string]string {

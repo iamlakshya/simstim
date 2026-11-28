@@ -78,19 +78,57 @@ func TestDefaults(t *testing.T) {
 }
 
 func TestParseRejectsUnknownKeys(t *testing.T) {
-	for _, in := range []string{
-		"delai = \"5s\"\n",
-		"[[destination]]\ntype = \"ntfy\"\nurl = \"https://ntfy.sh/x\"\ntokn = \"tk_test\"\n",
-		"[other]\nx = 1\n",
+	for _, tc := range []struct {
+		in      string
+		wantKey string
+		wantPos string
+	}{
+		{"delai = \"5s\"\n", "delai", "line 1, column 1"},
+		{"[[destination]]\ntype = \"ntfy\"\nurl = \"https://ntfy.sh/x\"\ntokn = \"tk_test\"\n", "destination.tokn", "line 4, column 1"},
+		{"[other]\nx = 1\n", "other", "line 1, column 2"},
 	} {
-		_, err := Parse([]byte(in))
+		_, err := Parse([]byte(tc.in))
 		var e *Error
-		if !errors.As(err, &e) || !strings.Contains(e.Msg, "unknown key") || e.Hint == "" {
-			t.Errorf("Parse(%q) = %v, want an unknown key error with a hint", in, err)
+		if !errors.As(err, &e) || !strings.Contains(e.Msg, "unknown key") ||
+			!strings.Contains(e.Msg, tc.wantKey) || !strings.Contains(e.Msg, tc.wantPos) || e.Hint == "" {
+			t.Errorf("Parse(%q) = %v, want unknown key %q at %q with a hint", tc.in, err, tc.wantKey, tc.wantPos)
 		}
 	}
-	if _, err := Parse([]byte("delay = ")); err == nil {
-		t.Error("a syntax error was accepted")
+	_, err := Parse([]byte("events = [\"failed\"]\ndelay = \n"))
+	var e *Error
+	if !errors.As(err, &e) || !strings.Contains(e.Msg, "line 2") || e.Hint == "" {
+		t.Errorf("syntax error = %v, want line 2 and a hint", err)
+	}
+}
+
+func TestSaveRoundTripExplicitFalseBooleans(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "alerts.toml")
+	off := false
+	in := api.AlertsConfig{
+		Detail:          &off,
+		QuietWhenTyping: &off,
+		Destinations:    []api.AlertDestination{{Type: "command", Run: "true"}},
+	}
+	if err := Save(path, in); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	got, exists, err := Read(path)
+	if err != nil || !exists {
+		t.Fatalf("Read = (%+v, %v, %v)", got, exists, err)
+	}
+	if got.Detail == nil || *got.Detail != false {
+		t.Errorf("Detail = %v, want explicit false", got.Detail)
+	}
+	if got.QuietWhenTyping == nil || *got.QuietWhenTyping != false {
+		t.Errorf("QuietWhenTyping = %v, want explicit false", got.QuietWhenTyping)
+	}
+	s, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if s.QuietWhenTyping {
+		t.Error("Load dropped quiet_when_typing = false back to default true")
 	}
 }
 

@@ -112,6 +112,7 @@ func TestDangers(t *testing.T) {
 		{"codex", []string{"-c", `default_permissions=":danger-full-access"`}, `default_permissions=":danger-full-access"`},
 		{"codex", []string{"-c", `permissions.workspace.network.enabled=true`}, `permissions.workspace.network.enabled=true`},
 		{"codex", []string{"-c", `permissions={ fs = { write = ["/"] } }`}, `permissions={ fs = { write = ["/"] } }`},
+		{"codex", []string{"-c", `permissions={ workspace.network.enabled = true }`}, `permissions={ workspace.network.enabled = true }`},
 		{"codex", []string{"-c", `profile="work"`}, `profile="work"`},
 		{"codex", []string{"-c", `profile=work`}, `profile=work`},
 		{"codex", []string{"--config=profile=work"}, "--config=profile=work"},

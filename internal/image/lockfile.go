@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/BurntSushi/toml"
+	"github.com/pelletier/go-toml/v2"
 
 	"github.com/iamlakshya/simstim/internal/brand"
 )
@@ -57,7 +57,13 @@ func LoadLock(path string) (LockFile, error) {
 		return LockFile{}, fmt.Errorf("read images.lock: %w", err)
 	}
 	var lf LockFile
-	if _, err := toml.Decode(string(b), &lf); err != nil {
+	if err := toml.Unmarshal(b, &lf); err != nil {
+		var de *toml.DecodeError
+		if errors.As(err, &de) {
+			if line, col := de.Position(); line > 0 {
+				return LockFile{}, fmt.Errorf("decode images.lock at line %d, column %d: %s", line, col, strings.TrimPrefix(de.Error(), "toml: "))
+			}
+		}
 		return LockFile{}, fmt.Errorf("decode images.lock: %w", err)
 	}
 	if lf.Version == 0 {

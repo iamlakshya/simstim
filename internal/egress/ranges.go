@@ -1,6 +1,7 @@
 package egress
 
 import (
+	"bytes"
 	"fmt"
 	"net"
 	"net/netip"
@@ -8,7 +9,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/BurntSushi/toml"
+	"github.com/pelletier/go-toml/v2"
 )
 
 type refusedRange struct {
@@ -47,7 +48,9 @@ func builtinRanges() ([]refusedRange, error) {
 			return
 		}
 		var rf rangesFile
-		if _, err := toml.Decode(string(raw), &rf); err != nil {
+		dec := toml.NewDecoder(bytes.NewReader(raw))
+		dec.DisallowUnknownFields()
+		if err := dec.Decode(&rf); err != nil {
 			errLoadRanges = fmt.Errorf("egress: decode embedded ranges: %w", err)
 			return
 		}

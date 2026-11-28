@@ -370,6 +370,18 @@ func TestLockFilePinUpdateAndConcurrency(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("RecordPlatform first: %v", err)
 	}
+	lfCheck, err := LoadLock(path)
+	if err != nil {
+		t.Fatalf("LoadLock after RecordPlatform: %v", err)
+	}
+	entCheck, ok := lfCheck.Find("ghcr.io/acme/dev:1")
+	if !ok || entCheck.PinnedAt.IsZero() {
+		t.Fatalf("entry missing or zero PinnedAt: %+v", entCheck)
+	}
+	platCheck, ok := entCheck.Platform("amd64")
+	if !ok || platCheck.DataBlocks != 10 || platCheck.RootHash != strings.Repeat("1", 64) || platCheck.RootFrom != "box" {
+		t.Fatalf("platform round-trip mismatch: %+v", platCheck)
+	}
 	err = RecordPlatform(path, "ghcr.io/acme/dev:1", d1, LockPlatform{
 		Arch: "amd64", Digest: d1, RootHash: strings.Repeat("2", 64), DataBlocks: 10, RootFrom: "nuc",
 	})
@@ -404,6 +416,15 @@ func TestLockFilePinUpdateAndConcurrency(t *testing.T) {
 	}
 	if len(lf.Images) != 4 {
 		t.Fatalf("lock entries = %d, want 4", len(lf.Images))
+	}
+
+	// Malformed images.lock reports line and column position.
+	badPath := filepath.Join(t.TempDir(), "bad.lock")
+	if err := os.WriteFile(badPath, []byte("version = 1\nbroken = [toml\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadLock(badPath); err == nil || !strings.Contains(err.Error(), "line 2") {
+		t.Fatalf("LoadLock(bad) = %v, want error with line 2", err)
 	}
 }
 

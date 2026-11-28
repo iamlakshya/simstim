@@ -6,7 +6,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/BurntSushi/toml"
+	"github.com/pelletier/go-toml/v2"
 )
 
 // Span is a run of arguments in a command: N arguments from index I.
@@ -244,7 +244,7 @@ func jsonObject(s string) (map[string]any, bool) {
 func tomlValue(s string) any {
 	s = strings.TrimSpace(s)
 	var m map[string]any
-	if _, err := toml.Decode("_x_ = "+s, &m); err == nil {
+	if err := toml.Unmarshal([]byte("_x_ = "+s), &m); err == nil {
 		if v, ok := m["_x_"]; ok {
 			return v
 		}

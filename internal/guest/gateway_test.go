@@ -20,7 +20,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/BurntSushi/toml"
+	"github.com/pelletier/go-toml/v2"
 
 	"github.com/iamlakshya/simstim/internal/agents"
 	"github.com/iamlakshya/simstim/internal/api"
@@ -73,7 +73,7 @@ func TestGatewayEnvAndConfigForClaudeAndCodex(t *testing.T) {
 			SupportsWebSockets bool   `toml:"supports_websockets"`
 		} `toml:"model_providers"`
 	}
-	if _, err := toml.Decode(string(raw), &parsed); err != nil {
+	if err := toml.Unmarshal(raw, &parsed); err != nil {
 		t.Fatalf("decode codex config.toml: %v\n%s", err, raw)
 	}
 	prov := parsed.ModelProviders[parsed.ModelProvider]
@@ -257,7 +257,7 @@ func TestSubscriptionGatewayConfigAndPlaceholderAuthJSON(t *testing.T) {
 			SupportsWebSockets bool   `toml:"supports_websockets"`
 		} `toml:"model_providers"`
 	}
-	if _, err := toml.Decode(string(rawCfg), &parsed); err != nil {
+	if err := toml.Unmarshal(rawCfg, &parsed); err != nil {
 		t.Fatalf("decode config.toml: %v\n%s", err, rawCfg)
 	}
 	prov := parsed.ModelProviders[parsed.ModelProvider]

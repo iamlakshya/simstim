@@ -90,6 +90,17 @@ func TestBuildPackageSettingsGolden(t *testing.T) {
 	}
 }
 
+func TestDecodePackageSettingsTableRejectsUnknownKeysWithPosition(t *testing.T) {
+	_, err := decodePackageSettingsTable([]byte("[defaults]\nlevel = \"guarded\"\nbogus = 1\n"))
+	if err == nil || !strings.Contains(err.Error(), "defaults.bogus") || !strings.Contains(err.Error(), "line 3, column 1") {
+		t.Fatalf("decodePackageSettingsTable unknown key = %v, want defaults.bogus at line 3, column 1", err)
+	}
+	_, err = decodePackageSettingsTable([]byte("[defaults]\nlevel = [broken\n"))
+	if err == nil || !strings.Contains(err.Error(), "line 2") {
+		t.Fatalf("decodePackageSettingsTable bad TOML = %v, want line 2", err)
+	}
+}
+
 func TestApplyPackageSettingsFilesOverridesAndOff(t *testing.T) {
 	fixedNow := time.Date(2026, 11, 28, 12, 0, 0, 0, time.UTC)
 

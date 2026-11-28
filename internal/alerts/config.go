@@ -1,6 +1,8 @@
 package alerts
 
 import (
+	"bytes"
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
@@ -9,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/BurntSushi/toml"
+	"github.com/pelletier/go-toml/v2"
 
 	"github.com/iamlakshya/simstim/internal/api"
 	"github.com/iamlakshya/simstim/internal/brand"
@@ -74,16 +76,31 @@ func (s *Settings) takes(i int, kind string) bool {
 // never turns an alert off without a word.
 func Parse(data []byte) (api.AlertsConfig, error) {
 	var c api.AlertsConfig
-	md, err := toml.Decode(string(data), &c)
-	if err != nil {
-		return c, &Error{Msg: "alerts.toml: " + err.Error(), Hint: "Fix the file, or write it again with `" + brand.Name + " host alerts set`."}
-	}
-	if bad := md.Undecoded(); len(bad) > 0 {
-		keys := make([]string, len(bad))
-		for i, k := range bad {
-			keys[i] = k.String()
+	dec := toml.NewDecoder(bytes.NewReader(data))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&c); err != nil {
+		var sme *toml.StrictMissingError
+		if errors.As(err, &sme) {
+			keys := make([]string, 0, len(sme.Errors))
+			for _, e := range sme.Errors {
+				k := strings.Join(e.Key(), ".")
+				if line, col := e.Position(); line > 0 {
+					keys = append(keys, fmt.Sprintf("%s (line %d, column %d)", k, line, col))
+				} else {
+					keys = append(keys, k)
+				}
+			}
+			return c, &Error{Msg: "alerts.toml: unknown key " + strings.Join(keys, ", "), Hint: "Check the spelling; docs/how-to/alerts.md lists every key."}
 		}
-		return c, &Error{Msg: "alerts.toml: unknown key " + strings.Join(keys, ", "), Hint: "Check the spelling; docs/how-to/alerts.md lists every key."}
+		var de *toml.DecodeError
+		if errors.As(err, &de) {
+			msg := strings.TrimPrefix(de.Error(), "toml: ")
+			if line, col := de.Position(); line > 0 {
+				msg = fmt.Sprintf("line %d, column %d: %s", line, col, msg)
+			}
+			return c, &Error{Msg: "alerts.toml: " + msg, Hint: "Fix the file, or write it again with `" + brand.Name + " host alerts set`."}
+		}
+		return c, &Error{Msg: "alerts.toml: " + err.Error(), Hint: "Fix the file, or write it again with `" + brand.Name + " host alerts set`."}
 	}
 	return c, nil
 }

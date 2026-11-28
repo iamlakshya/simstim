@@ -16,7 +16,7 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/BurntSushi/toml"
+	"github.com/pelletier/go-toml/v2"
 
 	"github.com/iamlakshya/simstim/internal/brand"
 )
@@ -43,7 +43,9 @@ type flagsConfig struct {
 
 var loadedRules = func() []ruleGroup {
 	var cfg flagsConfig
-	if _, err := toml.Decode(flagsTOML, &cfg); err != nil {
+	dec := toml.NewDecoder(strings.NewReader(flagsTOML))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&cfg); err != nil {
 		panic("review: invalid flags.toml: " + err.Error())
 	}
 	cfg.Rules = append(cfg.Rules, ruleGroup{

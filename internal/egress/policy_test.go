@@ -77,11 +77,114 @@ network.deny = ["evil.example"]
 }
 
 func TestParsePolicyRejectsUnknownKeyAndBadTOML(t *testing.T) {
-	if _, err := ParsePolicy([]byte("not valid = [toml")); err == nil || !strings.Contains(err.Error(), "Try:") {
-		t.Errorf("bad TOML err = %v, want error with Try: hint", err)
+	if _, err := ParsePolicy([]byte("session = \"a/b\"\n\nnot valid = [toml\n")); err == nil ||
+		!strings.Contains(err.Error(), "Try:") || !strings.Contains(err.Error(), "line 3") {
+		t.Errorf("bad TOML err = %v, want error with line 3 and Try: hint", err)
 	}
-	if _, err := ParsePolicy([]byte("[network]\nunknown_key = true\n")); err == nil || !strings.Contains(err.Error(), "Try:") {
-		t.Errorf("unknown key err = %v, want error with Try: hint", err)
+	if _, err := ParsePolicy([]byte("[network]\nunknown_key = true\n")); err == nil ||
+		!strings.Contains(err.Error(), "Try:") ||
+		!strings.Contains(err.Error(), "network.unknown_key") ||
+		!strings.Contains(err.Error(), "line 2, column 1") {
+		t.Errorf("unknown key err = %v, want error with key, line 2 column 1, and Try: hint", err)
+	}
+	if _, err := ParsePolicy([]byte("[lock]\nnetwork.unknown = [\"evil.example\"]\n")); err == nil ||
+		!strings.Contains(err.Error(), "Try:") ||
+		!strings.Contains(err.Error(), "lock.network.unknown") ||
+		!strings.Contains(err.Error(), "line 2") {
+		t.Errorf("unknown dotted lock key err = %v, want error with lock.network.unknown, line 2, and Try: hint", err)
+	}
+	if _, err := ParsePolicy([]byte("[network]\nmodel_budget = \"not-an-int\"\n")); err == nil ||
+		!strings.Contains(err.Error(), "Try:") ||
+		!strings.Contains(err.Error(), "line 2") {
+		t.Errorf("wrong type err = %v, want error with line 2 and Try: hint", err)
+	}
+}
+
+func TestParsePolicyLockAndDottedKeyForms(t *testing.T) {
+	cases := []struct {
+		name      string
+		raw       string
+		wantLocks []string
+	}{
+		{
+			name: "lock deny",
+			raw: `
+[lock]
+deny = ["a.example"]
+`,
+			wantLocks: []string{"a.example"},
+		},
+		{
+			name: "lock dotted network.deny",
+			raw: `
+[lock]
+network.deny = ["b.example"]
+`,
+			wantLocks: []string{"b.example"},
+		},
+		{
+			name: "lock both deny and network.deny",
+			raw: `
+[lock]
+deny = ["a.example"]
+network.deny = ["b.example"]
+`,
+			wantLocks: []string{"a.example", "b.example"},
+		},
+		{
+			name: "lock.network subtable",
+			raw: `
+[lock.network]
+deny = ["c.example"]
+`,
+			wantLocks: []string{"c.example"},
+		},
+		{
+			name: "lock network inline table",
+			raw: `
+[lock]
+network = { deny = ["inline.example"] }
+`,
+			wantLocks: []string{"inline.example"},
+		},
+		{
+			name: "top-level dotted keys",
+			raw: `
+sandbox.preset = "open"
+lock.deny = ["d.example"]
+lock.network.deny = ["e.example"]
+network.model_tools.anthropic = ["web_search"]
+`,
+			wantLocks: []string{"d.example", "e.example"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg, err := ParsePolicy([]byte(tc.raw))
+			if err != nil {
+				t.Fatalf("ParsePolicy(%s): %v", tc.name, err)
+			}
+			if tc.name == "top-level dotted keys" {
+				if cfg.Sandbox.Preset != PresetOpen {
+					t.Errorf("preset = %q, want open", cfg.Sandbox.Preset)
+				}
+				if got := cfg.Network.ModelTools["anthropic"]; len(got) != 1 || got[0] != "web_search" {
+					t.Errorf("model_tools[anthropic] = %v, want [web_search]", got)
+				}
+			}
+			eng, err := NewEngine(cfg)
+			if err != nil {
+				t.Fatalf("NewEngine(%s): %v", tc.name, err)
+			}
+			for _, host := range tc.wantLocks {
+				if dec := eng.Decide(Request{Host: host, Port: 443}); dec.Action != ActionDeny || !strings.HasPrefix(dec.Rule, "lock:") {
+					t.Errorf("%s: %s = %+v, want lock deny", tc.name, host, dec)
+				}
+				if err := eng.Allow(host); err == nil {
+					t.Errorf("%s: live Allow(%s) succeeded despite lock", tc.name, host)
+				}
+			}
+		})
 	}
 }
 
