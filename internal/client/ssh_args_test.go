@@ -440,23 +440,28 @@ func TestRunCommandsTurnOffForwarding(t *testing.T) {
 		t.Fatalf("ConfigValues: %v", err)
 	}
 	s.ExitMaster(ctx)
+	s.StopMaster(ctx)
 	_, _ = s.CheckMaster(ctx)
 
 	runs := loggedArgs(t, logPath)
 	// The fake ssh runs only where the client shares connections, so
-	// ExitMaster runs too.
-	names := []string{"Start", "Run", "VerboseLog", "ConfigValues", "ExitMaster", "CheckMaster"}
+	// ExitMaster and StopMaster run too.
+	names := []string{"Start", "Run", "VerboseLog", "ConfigValues", "ExitMaster", "StopMaster", "CheckMaster"}
 	if len(runs) != len(names) {
 		t.Fatalf("ssh ran %d times, want %d: %q", len(runs), len(names), runs)
 	}
 	for i, name := range names {
 		args := runs[i]
 		switch name {
-		case "ExitMaster", "CheckMaster":
+		case "ExitMaster", "StopMaster", "CheckMaster":
 			// A control command opens no session, so it needs no
 			// ClearAllForwardings, and it has no "--".
 			if !hasRun(args, wantNoForwarding) || hasRun(args, wantNoPorts) {
 				t.Errorf("%s: %q, want %q and no %q", name, args, wantNoForwarding, wantNoPorts)
+			}
+			wantOp := map[string]string{"ExitMaster": "exit", "StopMaster": "stop", "CheckMaster": "check"}[name]
+			if !hasRun(args, []string{"-O", wantOp, "box"}) {
+				t.Errorf("%s: %q, want -O %s box", name, args, wantOp)
 			}
 		case "VerboseLog":
 			checkOptions(t, name, args, true)
@@ -496,11 +501,23 @@ func TestNoControlFolderMeansAConnectionOfItsOwn(t *testing.T) {
 		}
 	}
 	s.ExitMaster(ctx)
+	s.StopMaster(ctx)
 	if running, _ := s.CheckMaster(ctx); running {
 		t.Error("CheckMaster found a master")
 	}
 	if b, _ := os.ReadFile(logPath); len(b) > 0 {
-		t.Errorf("ExitMaster or CheckMaster ran ssh: %s", b)
+		t.Errorf("ExitMaster, StopMaster or CheckMaster ran ssh: %s", b)
+	}
+}
+
+func TestStopMasterSkipsEmptyTargetOrCancelledContext(t *testing.T) {
+	logPath := loggingSSH(t)
+	(&SSH{Host: Host{Name: "box"}}).StopMaster(context.Background())
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	(&SSH{Host: Host{Name: "box", SSH: "box"}}).StopMaster(cancelled)
+	if b, _ := os.ReadFile(logPath); len(b) > 0 {
+		t.Errorf("StopMaster ran ssh unexpectedly: %s", b)
 	}
 }
 

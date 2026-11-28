@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"maps"
 	"strings"
@@ -390,14 +391,17 @@ func parseHostSettings(h client.Host, pairs []string) (parsedHostSettings, error
 func checkFloorSupported(ctx context.Context, h client.Host, want wall.Level) error {
 	dctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	conn, err := client.Dial(dctx, h, true)
+	probe, err := probeHostForFloor(dctx, h)
 	if err != nil {
 		return err
 	}
-	defer conn.Close()
-	probe, err := conn.CapProbe(dctx, "")
-	if err != nil {
-		return err
+	if probe.KVM.StaleGroup() && h.SSH != "" {
+		stopSSHMaster(dctx, h)
+		if fresh, ferr := probeHostForFloor(dctx, h); ferr == nil {
+			probe = fresh
+		} else if errors.Is(ferr, context.Canceled) || errors.Is(ferr, context.DeadlineExceeded) {
+			return ferr
+		}
 	}
 	bestName, _ := api.LevelsFor(probe, api.RuntimeStatus{})
 	best, _ := wall.ParseLevel(bestName)
@@ -410,6 +414,15 @@ func checkFloorSupported(ctx context.Context, h client.Host, want wall.Level) er
 		}
 	}
 	return nil
+}
+
+func probeHostForFloor(ctx context.Context, h client.Host) (api.CapProbe, error) {
+	conn, err := client.Dial(ctx, h, true)
+	if err != nil {
+		return api.CapProbe{}, err
+	}
+	defer conn.Close()
+	return conn.CapProbe(ctx, "")
 }
 
 func unknownHostSetKey(hostName, key string) error {

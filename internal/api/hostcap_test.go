@@ -192,3 +192,44 @@ func TestLevelsFor(t *testing.T) {
 		})
 	}
 }
+
+func TestKVMStaleGroup(t *testing.T) {
+	cases := []struct {
+		name string
+		kvm  KVM
+		want bool
+	}{
+		{
+			name: "user in kvm group in /etc/group but missing in current process",
+			kvm:  KVM{Present: true, Usable: false, InGroup: true, InGroupNow: false, InGroupManager: true},
+			want: true,
+		},
+		{
+			name: "kvm already usable via ACL despite missing process group",
+			kvm:  KVM{Present: true, Usable: true, ACLUser: true, InGroup: true, InGroupNow: false},
+			want: false,
+		},
+		{
+			name: "user already has kvm group in current process",
+			kvm:  KVM{Present: true, Usable: false, InGroup: true, InGroupNow: true},
+			want: false,
+		},
+		{
+			name: "user not in kvm group yet",
+			kvm:  KVM{Present: true, Usable: false, InGroup: false, InGroupNow: false},
+			want: false,
+		},
+		{
+			name: "no /dev/kvm present",
+			kvm:  KVM{Present: false, Usable: false, InGroup: true, InGroupNow: false},
+			want: false,
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := c.kvm.StaleGroup(); got != c.want {
+				t.Errorf("StaleGroup(%+v) = %v, want %v", c.kvm, got, c.want)
+			}
+		})
+	}
+}

@@ -92,6 +92,7 @@ func hostDoctorCmd() *cobra.Command {
 			}
 			ctx, cancel := context.WithTimeout(cmd.Context(), 60*time.Second)
 			defer cancel()
+			stopSSHMaster(ctx, h)
 			conn, err := client.Dial(ctx, h, true)
 			if err != nil {
 				return err
@@ -129,6 +130,15 @@ func hostDoctorCmd() *cobra.Command {
 	addFix(cmd, &fix, "offer to fix the problems found, one by one")
 	addYes(cmd, &yes, "with --fix, apply every fix without asking")
 	return cmd
+}
+
+// stopSSHMaster retires any persisted SSH ControlMaster for h for new channels
+// while keeping active sessions open, so the next dial opens a fresh login
+// session and picks up updated group membership (such as joining kvm).
+func stopSSHMaster(ctx context.Context, h client.Host) {
+	if h.SSH != "" {
+		(&client.SSH{Host: h}).StopMaster(ctx)
+	}
 }
 
 func appendLocalMachineChecks(ctx context.Context, h client.Host, d *client.HostInfo) {

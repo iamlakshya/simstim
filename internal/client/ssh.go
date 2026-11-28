@@ -343,15 +343,27 @@ func (s *SSH) Run(ctx context.Context, remote string, stdin io.Reader) ([]byte, 
 // ExitMaster stops the ControlMaster for this host. Call it before reconnecting
 // after a network change, because a master on a dead TCP connection hangs new sessions.
 func (s *SSH) ExitMaster(ctx context.Context) {
-	if s.Host.SSH == "" || sharedDir() == "" {
+	s.controlMasterCmd(ctx, "exit")
+}
+
+// StopMaster tells the ControlMaster for this host to stop accepting new
+// multiplexed sessions while keeping any active sessions open. The next ssh
+// command opens a fresh login session (picking up updated group membership,
+// such as joining the kvm group) without disconnecting live attaches.
+func (s *SSH) StopMaster(ctx context.Context) {
+	s.controlMasterCmd(ctx, "stop")
+}
+
+func (s *SSH) controlMasterCmd(ctx context.Context, op string) {
+	if ctx.Err() != nil || s.Host.SSH == "" || sharedDir() == "" {
 		return // no master of ours: never stop one that the user's config names
 	}
 	args, err := s.baseArgs()
 	if err != nil {
 		return
 	}
-	args = append(args, "-O", "exit", s.Host.SSH)
-	// A master on a dead connection must not hang the reconnect for long.
+	args = append(args, "-O", op, s.Host.SSH)
+	// A master on a dead connection must not hang the caller for long.
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "ssh", args...)

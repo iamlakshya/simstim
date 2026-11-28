@@ -62,7 +62,7 @@ func printSandboxesBlock(rows, hints io.Writer, hostName string, p api.CapProbe,
 	p = client.CleanCapProbe(p)
 	fmt.Fprintf(rows, "Sandboxes on %s:\n", hostName)
 	printSystemSummaryLine(rows, p)
-	printKVMLines(rows, hints, p)
+	printKVMLines(rows, hints, hostName, p)
 	printMicroVMLine(rows, p)
 	printGVisorLine(rows, hints, p)
 	printProcessWallLines(rows, hints, p)
@@ -99,7 +99,7 @@ func printSystemSummaryLine(rows io.Writer, p api.CapProbe) {
 	}
 }
 
-func printKVMLines(rows, hints io.Writer, p api.CapProbe) {
+func printKVMLines(rows, hints io.Writer, hostName string, p api.CapProbe) {
 	if !p.KVM.Present {
 		detail := "no /dev/kvm"
 		if p.Virt != "" {
@@ -128,6 +128,15 @@ func printKVMLines(rows, hints io.Writer, p api.CapProbe) {
 		user := p.User
 		if user == "" {
 			user = "$USER"
+		}
+		if p.KVM.StaleGroup() {
+			fmt.Fprintf(rows, "  ✕ /dev/kvm not open in this SSH session (%s is in %s, but this session predates the change)\n", user, group)
+			if hostName != "" {
+				fmt.Fprintf(hints, "    Try: %s host test %s --reconnect\n", brand.Name, client.ShellQuote(hostName))
+			} else {
+				fmt.Fprintf(hints, "    Try: reconnect or restart your login session on the host\n")
+			}
+			return
 		}
 		fmt.Fprintf(rows, "  ✕ /dev/kvm not open to %s (%s root %s)\n", user, mode, group)
 		qGroup := client.ShellQuote(group)

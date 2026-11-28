@@ -25,6 +25,14 @@ type KVM struct {
 	InGroupManager bool   `json:"in_group_manager,omitempty"`
 }
 
+// StaleGroup reports whether /dev/kvm is present and the user already belongs
+// to its group in the host's user database, yet the probing process lacks that
+// supplementary group and cannot open /dev/kvm (for example, over a persisted
+// SSH ControlMaster opened before usermod -aG kvm).
+func (k KVM) StaleGroup() bool {
+	return k.Present && !k.Usable && k.InGroup && !k.InGroupNow
+}
+
 // Nitro is what the sandbox probe found out about /dev/nitro_enclaves.
 type Nitro struct {
 	Present bool             `json:"present"`

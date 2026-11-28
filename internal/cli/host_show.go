@@ -57,6 +57,25 @@ func fetchHostShow(ctx context.Context, h client.Host) (hostShowState, error) {
 	dctx, cancel := context.WithTimeout(client.WithoutInstall(client.WithoutWake(ctx)), 30*time.Second)
 	defer cancel()
 
+	st, err := fetchHostShowOnce(ctx, dctx, h)
+	if err != nil || st.sandbox == nil || !st.sandbox.KVM.StaleGroup() || h.SSH == "" {
+		return st, err
+	}
+	// The shared SSH ControlMaster predates a group change (for example,
+	// usermod -aG kvm). Retire it for new channels and probe once more on a
+	// fresh login session without interrupting active attaches.
+	stopSSHMaster(dctx, h)
+	fresh, ferr := fetchHostShowOnce(ctx, dctx, h)
+	if ferr != nil {
+		return fresh, ferr
+	}
+	if !fresh.reachable {
+		return st, nil
+	}
+	return fresh, nil
+}
+
+func fetchHostShowOnce(ctx, dctx context.Context, h client.Host) (hostShowState, error) {
 	var st hostShowState
 	conn, err := client.Dial(dctx, h, false)
 	if err != nil {

@@ -228,7 +228,7 @@ func TestPrintSandboxesBlockEdgeCases(t *testing.T) {
 			HasSetfacl: true,
 			KVM:        api.KVM{Present: true, Usable: false, Mode: "crw-rw----", Group: "kvm$(whoami)"},
 		}
-		printKVMLines(&rows, &hints, p)
+		printKVMLines(&rows, &hints, "lab", p)
 		got := hints.String()
 		want := "Try: sudo setfacl -m 'u:me;id:rw' /dev/kvm && sudo usermod -aG 'kvm$(whoami)' 'me;id'"
 		if !strings.Contains(got, want) {
@@ -243,11 +243,38 @@ func TestPrintSandboxesBlockEdgeCases(t *testing.T) {
 			HasSetfacl: true,
 			KVM:        api.KVM{Present: true, Usable: false, Mode: "crw-rw----", Group: "kvm"},
 		}
-		printKVMLines(&rows, &hints, p)
+		printKVMLines(&rows, &hints, "lab", p)
 		got := hints.String()
 		want := `Try: sudo setfacl -m u:"$USER":rw /dev/kvm && sudo usermod -aG kvm "$USER"`
 		if !strings.Contains(got, want) {
 			t.Errorf("hints = %q, want substring %q", got, want)
+		}
+	})
+
+	t.Run("stale KVM group membership points to reconnect instead of usermod", func(t *testing.T) {
+		var rows, hints bytes.Buffer
+		p := api.CapProbe{
+			OS:   "linux",
+			User: "admin",
+			KVM: api.KVM{
+				Present:        true,
+				Usable:         false,
+				Mode:           "crw-rw----",
+				Group:          "kvm",
+				InGroup:        true,
+				InGroupNow:     false,
+				InGroupManager: true,
+			},
+		}
+		printKVMLines(&rows, &hints, "ha", p)
+		if !strings.Contains(rows.String(), "✕ /dev/kvm not open in this SSH session (admin is in kvm, but this session predates the change)") {
+			t.Errorf("rows =\n%s", rows.String())
+		}
+		if !strings.Contains(hints.String(), "Try: "+brand.Name+" host test ha --reconnect") {
+			t.Errorf("hints =\n%s", hints.String())
+		}
+		if strings.Contains(hints.String(), "usermod") {
+			t.Errorf("stale-group hint should not re-suggest usermod:\n%s", hints.String())
 		}
 	})
 
@@ -459,6 +486,160 @@ func TestPrintHostSandboxSectionErrors(t *testing.T) {
 		}
 		if !strings.Contains(hints.String(), "Try:") {
 			t.Errorf("hints =\n%s", hints.String())
+		}
+	})
+}
+
+// A persisted SSH ControlMaster opened before `sudo usermod -aG kvm` keeps the
+// old supplementary groups in sshd-session until retired. Verify that host
+// doctor retires the master up front with `ssh -O stop` (keeping live sessions
+// open), and that host show and host set retire and retry automatically when
+// CapProbe reports stale kvm group membership.
+func TestHostSandboxRefreshesStaleSSHControlMaster(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the fake ssh is a POSIX shell script and Windows does not share SSH ControlMasters")
+	}
+	_, tr := withFake(t, nil)
+	// Keep XDG_CACHE_HOME short enough for client.ControlDir() on macOS and Linux.
+	cacheDir, err := os.MkdirTemp("/tmp", "stcm-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(cacheDir) })
+	t.Setenv("XDG_CACHE_HOME", cacheDir)
+	if client.ControlDir() == "" {
+		t.Fatalf("ControlDir is empty for cacheDir %q", cacheDir)
+	}
+
+	binDir := t.TempDir()
+	sshLog := filepath.Join(binDir, "ssh.log")
+	stoppedMarker := filepath.Join(binDir, "master-stopped")
+	script := "#!/bin/sh\n" +
+		`printf '%s\n' "$*" >> "` + sshLog + "\"\n" +
+		`case " $* " in *" -O stop box"*) : > "` + stoppedMarker + `"; exit 0;; *" -O "*) exit 0;; esac` + "\n" +
+		"exit 0\n"
+	if err := os.WriteFile(filepath.Join(binDir, "ssh"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("NO_COLOR", "1")
+
+	h := client.Host{
+		Name:    "box",
+		SSH:     "box",
+		Machine: &client.Machine{Provider: "fake", ID: "fake-box"},
+	}
+	if err := client.SaveHosts(context.Background(), []client.Host{h}); err != nil {
+		t.Fatal(err)
+	}
+
+	staleProbe := api.CapProbe{
+		OS: "linux", Arch: "amd64", Kernel: "6.12.118+deb13-cloud-amd64",
+		User: "admin",
+		KVM: api.KVM{
+			Present:        true,
+			Usable:         false,
+			Mode:           "crw-rw----",
+			Group:          "kvm",
+			InGroup:        true,
+			InGroupNow:     false,
+			InGroupManager: true,
+		},
+		Bwrap: true, BwrapVersion: "0.11.0", LandlockABI: 6, Seccomp: true, UserNS: true,
+		Walls: []api.WallProbe{
+			{Driver: "chv", Level: api.LevelMicroVM, OK: false, Reason: "/dev/kvm is not accessible to admin (open /dev/kvm: permission denied)"},
+			{Driver: "gvisor", Level: api.LevelGVisor, Version: "release-20261123.1", OK: true, Facts: map[string]string{"platform": "systrap", "runsc": "/opt/runsc"}},
+			{Driver: "process", Level: api.LevelProcess, Version: "0.11.0", OK: true},
+		},
+	}
+	freshProbe := staleProbe
+	freshProbe.KVM.Usable = true
+	freshProbe.KVM.InGroupNow = true
+	freshProbe.Walls = []api.WallProbe{
+		{Driver: "chv", Level: api.LevelMicroVM, Version: "55.0", OK: true},
+		{Driver: "gvisor", Level: api.LevelGVisor, Version: "release-20261123.1", OK: true, Facts: map[string]string{"platform": "systrap", "runsc": "/opt/runsc"}},
+		{Driver: "process", Level: api.LevelProcess, Version: "0.11.0", OK: true},
+	}
+
+	tr.Features = []string{"sandbox"}
+	tr.Answers = map[string]any{}
+	tr.OnRequest = func(op string) {
+		if op != "sandbox.probe" {
+			return
+		}
+		if _, err := os.Stat(stoppedMarker); err == nil {
+			tr.Answers["sandbox.probe"] = freshProbe
+		} else {
+			tr.Answers["sandbox.probe"] = staleProbe
+		}
+	}
+
+	t.Run("host doctor retires persisted SSH master before probing", func(t *testing.T) {
+		_ = os.Remove(stoppedMarker)
+		_ = os.Remove(sshLog)
+
+		out, hints, err := runApart(t, "host", "doctor", "box")
+		if err != nil {
+			t.Fatalf("host doctor: %v\nstdout:\n%s\nstderr:\n%s", err, out, hints)
+		}
+		if !strings.Contains(out, "✓ /dev/kvm present") || !strings.Contains(out, "✓ Cloud Hypervisor 55.0") || !strings.Contains(out, "Level now: microvm.") {
+			t.Errorf("host doctor did not report fresh microvm access:\nstdout:\n%s\nstderr:\n%s", out, hints)
+		}
+		if strings.Contains(out, "/dev/kvm not open") || strings.Contains(out, "Level now: gvisor") {
+			t.Errorf("host doctor reported stale KVM state:\n%s", out)
+		}
+		logBytes, err := os.ReadFile(sshLog)
+		if err != nil || !strings.Contains(string(logBytes), "-O stop box") {
+			t.Errorf("host doctor did not retire SSH master with -O stop box: err=%v log=%q", err, logBytes)
+		}
+		if strings.Contains(string(logBytes), "-O exit box") {
+			t.Errorf("host doctor should use -O stop, not -O exit (which drops active sessions): %q", logBytes)
+		}
+	})
+
+	t.Run("host show retries on a fresh SSH session only when KVM group is stale", func(t *testing.T) {
+		_ = os.Remove(stoppedMarker)
+		_ = os.Remove(sshLog)
+
+		out, hints, err := runApart(t, "host", "show", "box")
+		if err != nil {
+			t.Fatalf("host show: %v\nstdout:\n%s\nstderr:\n%s", err, out, hints)
+		}
+		if !strings.Contains(out, "✓ /dev/kvm present") || !strings.Contains(out, "✓ Cloud Hypervisor 55.0") || !strings.Contains(out, "Level now: microvm.") {
+			t.Errorf("host show did not recover after stale group probe:\nstdout:\n%s\nstderr:\n%s", out, hints)
+		}
+		if b, _ := os.ReadFile(sshLog); !strings.Contains(string(b), "-O stop box") {
+			t.Errorf("host show did not retire stale SSH master: %q", b)
+		}
+
+		// Once fresh, host show keeps reusing the ControlMaster without -O stop.
+		_ = os.Remove(sshLog)
+		out2, _, err := runApart(t, "host", "show", "box")
+		if err != nil {
+			t.Fatalf("second host show: %v", err)
+		}
+		if !strings.Contains(out2, "Level now: microvm.") {
+			t.Errorf("second host show output:\n%s", out2)
+		}
+		if b, _ := os.ReadFile(sshLog); strings.Contains(string(b), "-O stop") {
+			t.Errorf("fresh host show unexpectedly retired SSH master:\n%s", b)
+		}
+	})
+
+	t.Run("host set floor=microvm retries on a fresh SSH session when KVM group is stale", func(t *testing.T) {
+		_ = os.Remove(stoppedMarker)
+		_ = os.Remove(sshLog)
+
+		msg := okSaid(t, "host", "set", "box", "floor=microvm")
+		if !strings.Contains(msg, "box: floor none → microvm.") {
+			t.Errorf("host set floor=microvm = %q", msg)
+		}
+		saved, err := client.FindHost("box")
+		if err != nil || saved.WallFloor != "microvm" {
+			t.Fatalf("saved floor = %q, %v", saved.WallFloor, err)
+		}
+		if b, _ := os.ReadFile(sshLog); !strings.Contains(string(b), "-O stop box") {
+			t.Errorf("host set did not retire stale SSH master: %q", b)
 		}
 	})
 }

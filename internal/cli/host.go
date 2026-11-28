@@ -320,6 +320,7 @@ func connectHostWithOptions(ctx context.Context, w io.Writer, pr *prompter, h cl
 	}
 	dctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
+	stopSSHMaster(dctx, h)
 	conn, err := client.Dial(dctx, h, true)
 	if err != nil {
 		return nil, err
